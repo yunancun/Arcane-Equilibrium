@@ -32,18 +32,7 @@
       <h1>OpenClaw / Bybit Control Center</h1>
       <p>RC2 control console · runtime-aware GUI / 已接入 runtime-aware bridge</p>
     </div>
-    <!-- WP-F/D-07: Legacy Bearer Token panel — hidden because auth now uses HttpOnly cookie
-         via /api/v1/auth/check (APR01-MEDIUM-13). tokenInput / connectButton are no-ops.
-         Only the Logout button is kept functional; moved out of the hidden div below. -->
-    <div class="token-panel" style="display:none" aria-hidden="true">
-      <label for="tokenInput">Bearer Token</label>
-      <div class="token-row">
-        <input id="tokenInput" type="password" placeholder="Auto-filled from login" />
-        <button id="connectButton">连接 / Connect</button>
-      </div>
-      <div id="connectionStatus" class="status-chip neutral">未连接 / Disconnected</div>
-    </div>
-    <div class="token-panel">
+    <div style="display:flex;align-items:center;gap:8px">
       <button onclick="fetch('/api/v1/auth/logout',{method:'POST',credentials:'same-origin'}).finally(function(){localStorage.removeItem('oc_username');window.location.href='/login'})" style="background:transparent;border:1px solid #30363d;border-radius:4px;color:#8b949e;font-size:12px;padding:4px 10px;cursor:pointer">Logout</button>
     </div>
   </header>
@@ -260,6 +249,14 @@
     </section>
   </main>
 
+  <!-- Core utilities + render functions / 核心工具和渲染函數 -->
+  <script src="/static/common.js"></script>
   <script src="/static/app.js"></script>
+  <!-- FIX-08: Split from app.js for file size limit / 從 app.js 拆分以符合文件大小限制 -->
+  <script src="/static/app-gui.js"></script>
+  <script src="/static/app-actions.js"></script>
+  <script src="/static/app-learning.js"></script>
+  <script src="/static/app-review.js"></script>
+  <script src="/static/app-paper.js"></script>
 </body>
 </html>

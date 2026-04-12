@@ -243,8 +243,9 @@ async function strategyAction(name, action) {
 
 // ─── Data Loading ─────────────────────────────────────────────
 async function loadStrategies() {
-  const d = await ocApi('/api/v1/strategy/list');
-  if (!d || !d.data) return;
+  let d;
+  try { d = await ocApi('/api/v1/strategy/list'); } catch(e) { d = null; }
+  if (!d || !d.data) { ocSetHtml('strategy-grid', '<div class="oc-loading" style="color:var(--text-dim)">无法加载策略 / Failed to load strategies</div>'); return; }
   const strategies = d.data.strategies || [];
 
   // Update counters
@@ -298,8 +299,9 @@ async function loadStrategies() {
 }
 
 async function loadOrchestrator() {
-  const d = await ocApi('/api/v1/strategy/status');
-  if (!d || !d.data) return;
+  let d;
+  try { d = await ocApi('/api/v1/strategy/status'); } catch(e) { d = null; }
+  if (!d || !d.data) { ocSetHtml('orch-details', '<div class="oc-loading" style="color:var(--text-dim)">无法加载 / Load failed</div>'); return; }
   const orch = d.data;
 
   // Regime badge — comes from signal_engine signal history (Regime_Detector rule)
@@ -479,8 +481,9 @@ async function loadDeployed() {
 }
 
 async function loadIntents() {
-  const d = await ocApi('/api/v1/strategy/intents');
-  if (!d || !d.data) return;
+  let d;
+  try { d = await ocApi('/api/v1/strategy/intents'); } catch(e) { d = null; }
+  if (!d || !d.data) { ocSetHtml('intents-tbody', '<tr class="empty-row"><td colspan="8" style="color:var(--text-dim)">无法加载 / Load failed</td></tr>'); return; }
   const intents = d.data.intents || d.data || [];
   if (!intents.length) {
     ocSetHtml('intents-tbody', '<tr class="empty-row"><td colspan="8">暂无交易意图 / No intents</td></tr>');

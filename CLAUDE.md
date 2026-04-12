@@ -246,6 +246,12 @@ state_models ← state_compiler ← state_store ← main_legacy ← main.py
 | `STORE` | main_legacy.py（main.py 重建） | `base.STORE` |
 | `app` | main_legacy.py | `base.app` |
 | `limiter` | main_legacy.py | `base.limiter` |
+| `_pool` | db_pool.py | `from .db_pool import get_conn` |
+| `DEFAULT_LEASE_TTL_CONFIG` | lease_ttl_config.py | `from .lease_ttl_config import DEFAULT_LEASE_TTL_CONFIG` |
+| `_backtest_engine` | backtest_routes.py | 內部懶加載 `_get_backtest_engine()` |
+| `_scheduler` | evolution_auto_scheduler.py | 內部懶加載 `start_scheduler()` |
+| `_evolution_engine` | evolution_routes.py | 內部懶加載 `get_evolution_engine()` |
+| `_ledger` | experiment_routes.py | 內部懶加載 `get_experiment_ledger()` |
 
 新增 singleton 必須在此表登記。禁止子模塊創建未登記的全局可變狀態。
 

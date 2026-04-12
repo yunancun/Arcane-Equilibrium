@@ -1,4 +1,4 @@
-# Session 3.1 工程日誌 — P2 Rust 7 項修復（2026-04-12）
+# Session 3 工程日誌 — P2 Rust 7 項修復（2026-04-12）
 
 ## 概要 / Summary
 

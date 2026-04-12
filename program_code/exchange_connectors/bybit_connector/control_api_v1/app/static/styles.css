@@ -32,7 +32,6 @@ body { margin: 0; font-family: Inter, "Microsoft YaHei", sans-serif; background:
 .hero-card { border-color: #1e293b; }
 .card-header-row { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; margin-bottom: 14px; }
 .token-panel { min-width: 420px; display: grid; gap: 10px; }
-.token-row { display: flex; gap: 10px; }
 
 input, button { border-radius: 12px; border: 1px solid var(--border); background: #020617; color: var(--text); padding: 10px 12px; font-size: 14px; }
 input { flex: 1; }
@@ -191,7 +190,6 @@ pre { margin: 0; white-space: pre-wrap; word-break: break-word; background: #020
 @media (max-width: 980px) {
   .topbar { flex-direction: column; align-items: stretch; }
   .token-panel { min-width: 0; }
-  .token-row { flex-direction: column; }
   .summary-grid, .action-summary-grid, .mode-grid, .business-grid, .config-family-grid, .switch-grid { grid-template-columns: 1fr; }
   .glossary-wrap { flex-direction: column; }
   .pf-editor-grid { grid-template-columns: 1fr; }

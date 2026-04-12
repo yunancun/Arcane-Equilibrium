@@ -51,6 +51,14 @@ docs/
 │   ├── api_contract/                  ← API 合同 / 路由草案 / 审核报告
 │   └── api_stub/                      ← API 骨架代码
 │
+├── archive/                           ← 已归档/过期文档（DEPRECATED 文件、旧版摘要）
+│
+├── CCAgentWorkSpace/                  ← Agent 工作空间（profile/memory/workspace per agent）
+│
+├── execution_plan/                    ← 执行计划（Sprint/Wave 排期、里程碑规划）
+│
+├── rust_migration/                    ← Rust 迁移文档（迁移规划、进度追踪）
+│
 └── governance_dev/                    ← 治理开发全部文档
     ├── audits/                        ← ★ 审计报告（Round 1/2 审计 + 合规审计）
     ├── changelogs/                    ← T2.01–T2.23 模组变更日志

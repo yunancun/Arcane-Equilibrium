@@ -336,23 +336,23 @@ class PricingTable:
             model_id=MODEL_IDS[MODEL_HAIKU],
             input_per_mtok=0.80,
             output_per_mtok=4.00,
-            last_verified_date="2026-03-27",
+            last_verified_date="2026-04-12",
         ),
         MODEL_SONNET: ModelPricing(
             model_id=MODEL_IDS[MODEL_SONNET],
             input_per_mtok=3.00,
             output_per_mtok=15.00,
-            last_verified_date="2026-03-27",
+            last_verified_date="2026-04-12",
         ),
         MODEL_OPUS: ModelPricing(
             model_id=MODEL_IDS[MODEL_OPUS],
             input_per_mtok=15.00,
             output_per_mtok=75.00,
-            last_verified_date="2026-03-27",
+            last_verified_date="2026-04-12",
         ),
     })
     perplexity_per_search: float = 0.005
-    perplexity_last_verified_date: str = "2026-03-27"
+    perplexity_last_verified_date: str = "2026-04-12"
 
     def is_stale(self, current_date: str = "") -> bool:
         """Check if any pricing entry is older than 30 days / 检查定价是否超过 30 天未核实"""
