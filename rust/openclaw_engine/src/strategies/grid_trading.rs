@@ -93,6 +93,32 @@ impl StrategyParams for GridTradingParams {
                 agent_adjustable: true,
                 db_persisted: true,
             },
+            // ── G-SR-1 S3: Trend cooldown param ranges (A3) ──
+            // ── G-SR-1 S3：趨勢冷卻參數範圍（A3）──
+            ParamRange {
+                name: "adx_low_threshold".into(),
+                min: 5.0,
+                max: 40.0,
+                step: Some(1.0),
+                agent_adjustable: true,
+                db_persisted: true,
+            },
+            ParamRange {
+                name: "adx_high_threshold".into(),
+                min: 20.0,
+                max: 80.0,
+                step: Some(1.0),
+                agent_adjustable: true,
+                db_persisted: true,
+            },
+            ParamRange {
+                name: "max_cooldown_boost".into(),
+                min: 0.0,
+                max: 10.0,
+                step: Some(0.5),
+                agent_adjustable: true,
+                db_persisted: true,
+            },
         ]
     }
 
@@ -105,6 +131,13 @@ impl StrategyParams for GridTradingParams {
         }
         if self.grid_levels < 3 {
             return Err("grid_levels must be >= 3".into());
+        }
+        // G-SR-1 S3: Validate trend cooldown params / 驗證趨勢冷卻參數
+        if self.adx_low_threshold >= self.adx_high_threshold {
+            return Err("adx_low_threshold must be < adx_high_threshold".into());
+        }
+        if self.max_cooldown_boost < 0.0 || self.max_cooldown_boost > 10.0 {
+            return Err("max_cooldown_boost must be in [0, 10]".into());
         }
         Ok(())
     }
@@ -1192,5 +1225,111 @@ mod tests {
             })
             .is_ok());
         assert!((g.get_params().max_inventory - 10.0).abs() < 0.01);
+    }
+
+    // ── G-SR-1 S3+S4: param_ranges + validation tests ──
+
+    #[test]
+    fn test_grid_param_ranges_count() {
+        let ranges = GridTradingParams::param_ranges();
+        // 4 original + 3 trend cooldown = 7
+        assert_eq!(ranges.len(), 7, "expected 7 param ranges, got {}", ranges.len());
+    }
+
+    #[test]
+    fn test_grid_param_ranges_cooldown_names() {
+        let ranges = GridTradingParams::param_ranges();
+        let names: Vec<&str> = ranges.iter().map(|r| r.name.as_str()).collect();
+        for expected in &["adx_low_threshold", "adx_high_threshold", "max_cooldown_boost"] {
+            assert!(names.contains(expected), "missing param range: {expected}");
+        }
+    }
+
+    #[test]
+    fn test_grid_validate_default_ok() {
+        assert!(GridTradingParams::default().validate().is_ok());
+    }
+
+    #[test]
+    fn test_grid_validate_bad_adx_order() {
+        let mut p = GridTradingParams::default();
+        p.adx_low_threshold = 50.0;
+        p.adx_high_threshold = 20.0; // low > high
+        assert!(p.validate().is_err());
+    }
+
+    #[test]
+    fn test_grid_validate_equal_adx_thresholds() {
+        let mut p = GridTradingParams::default();
+        p.adx_low_threshold = 30.0;
+        p.adx_high_threshold = 30.0; // equal = invalid
+        assert!(p.validate().is_err());
+    }
+
+    #[test]
+    fn test_grid_validate_bad_cooldown_boost() {
+        let mut p = GridTradingParams::default();
+        p.max_cooldown_boost = 15.0; // > 10
+        assert!(p.validate().is_err());
+    }
+
+    #[test]
+    fn test_grid_validate_negative_cooldown_boost() {
+        let mut p = GridTradingParams::default();
+        p.max_cooldown_boost = -1.0;
+        assert!(p.validate().is_err());
+    }
+
+    // ── G-SR-1 S4: Trend cooldown unit tests (A3) ──
+
+    #[test]
+    fn test_trend_cooldown_no_indicators() {
+        let g = GridTrading::new(49000.0, 51000.0);
+        // None indicators → base cooldown (new() sets cooldown_ms=60_000)
+        assert_eq!(g.compute_trend_adjusted_cooldown(None), 60_000);
+    }
+
+    #[test]
+    fn test_trend_cooldown_low_adx_no_boost() {
+        use openclaw_core::indicators::{AdxResult, HurstResult, IndicatorSnapshot};
+        let snap = Box::leak(Box::new(IndicatorSnapshot {
+            adx: Some(AdxResult { adx: 15.0, plus_di: 0.0, minus_di: 0.0 }),
+            hurst: Some(HurstResult { hurst: 0.45, regime: "mean_reverting".into() }),
+            ..Default::default()
+        }));
+        let g = GridTrading::new(49000.0, 51000.0);
+        // ADX=15 < adx_low(20) → factor=0, Hurst=0.45 < 0.50 → factor=0
+        // trend_score=0, multiplier=1.0, cooldown=60_000
+        assert_eq!(g.compute_trend_adjusted_cooldown(Some(snap)), 60_000);
+    }
+
+    #[test]
+    fn test_trend_cooldown_high_adx_max_boost() {
+        use openclaw_core::indicators::{AdxResult, HurstResult, IndicatorSnapshot};
+        let snap = Box::leak(Box::new(IndicatorSnapshot {
+            adx: Some(AdxResult { adx: 60.0, plus_di: 0.0, minus_di: 0.0 }),
+            hurst: Some(HurstResult { hurst: 0.80, regime: "trending".into() }),
+            ..Default::default()
+        }));
+        let g = GridTrading::new(49000.0, 51000.0);
+        // ADX=60 > adx_high(50) → factor=1.0, Hurst=0.80 > 0.75 → factor=1.0
+        // trend_score=0.6*1+0.4*1=1.0, multiplier=1+5=6, cooldown=60_000*6=360_000
+        let cd = g.compute_trend_adjusted_cooldown(Some(snap));
+        assert_eq!(cd, 360_000, "expected 60_000*6 = 360_000, got {cd}");
+    }
+
+    #[test]
+    fn test_trend_cooldown_mid_adx_partial_boost() {
+        use openclaw_core::indicators::{AdxResult, HurstResult, IndicatorSnapshot};
+        let snap = Box::leak(Box::new(IndicatorSnapshot {
+            adx: Some(AdxResult { adx: 35.0, plus_di: 0.0, minus_di: 0.0 }),
+            hurst: Some(HurstResult { hurst: 0.625, regime: "uncertain".into() }),
+            ..Default::default()
+        }));
+        let g = GridTrading::new(49000.0, 51000.0);
+        // ADX=35: (35-20)/(50-20)=0.5, Hurst=0.625: (0.625-0.50)/0.25=0.5
+        // trend_score=0.6*0.5+0.4*0.5=0.5, multiplier=1+2.5=3.5, cooldown=60_000*3.5=210_000
+        let cd = g.compute_trend_adjusted_cooldown(Some(snap));
+        assert_eq!(cd, 210_000, "expected 60_000*3.5 = 210_000, got {cd}");
     }
 }

@@ -108,6 +108,88 @@ impl StrategyParams for MaCrossoverParams {
                 agent_adjustable: true,
                 db_persisted: true,
             },
+            // ── G-SR-1 S3: Confluence param ranges (R3-4: exempt from ±30% delta cap) ──
+            // ── G-SR-1 S3：匯流參數範圍（R3-4：豁免 ±30% delta 上限）──
+            ParamRange {
+                name: "weight_adx".into(),
+                min: 0.0,
+                max: 65.0,
+                step: Some(1.0),
+                agent_adjustable: true,
+                db_persisted: true,
+            },
+            ParamRange {
+                name: "weight_regime".into(),
+                min: 0.0,
+                max: 65.0,
+                step: Some(1.0),
+                agent_adjustable: true,
+                db_persisted: true,
+            },
+            ParamRange {
+                name: "weight_volume".into(),
+                min: 0.0,
+                max: 65.0,
+                step: Some(1.0),
+                agent_adjustable: true,
+                db_persisted: true,
+            },
+            ParamRange {
+                name: "weight_momentum".into(),
+                min: 0.0,
+                max: 65.0,
+                step: Some(1.0),
+                agent_adjustable: true,
+                db_persisted: true,
+            },
+            ParamRange {
+                name: "adx_floor".into(),
+                min: 0.0,
+                max: 30.0,
+                step: Some(1.0),
+                agent_adjustable: true,
+                db_persisted: true,
+            },
+            ParamRange {
+                name: "confluence_threshold_no_trade".into(),
+                min: 10.0,
+                max: 55.0,
+                step: Some(1.0),
+                agent_adjustable: true,
+                db_persisted: true,
+            },
+            ParamRange {
+                name: "confluence_threshold_light".into(),
+                min: 20.0,
+                max: 60.0,
+                step: Some(1.0),
+                agent_adjustable: true,
+                db_persisted: true,
+            },
+            ParamRange {
+                name: "confluence_threshold_full".into(),
+                min: 30.0,
+                max: 65.0,
+                step: Some(1.0),
+                agent_adjustable: true,
+                db_persisted: true,
+            },
+            ParamRange {
+                name: "min_persistence_ms".into(),
+                min: 0.0,
+                max: 300_000.0,
+                step: Some(10_000.0),
+                agent_adjustable: true,
+                db_persisted: true,
+            },
+            ParamRange {
+                name: "min_notional_usd".into(),
+                min: 1.0,
+                max: 100.0,
+                step: Some(1.0),
+                agent_adjustable: false,
+                db_persisted: true,
+            },
         ]
     }
 
@@ -123,6 +205,12 @@ impl StrategyParams for MaCrossoverParams {
         }
         // G-SR-1: Validate confluence weight sum = 65 / 驗證匯流權重總和 = 65
         self.build_confluence_config().validate()?;
+        // G-SR-1 S3: Threshold ordering / 閾值排序驗證
+        if self.confluence_threshold_no_trade >= self.confluence_threshold_light
+            || self.confluence_threshold_light >= self.confluence_threshold_full
+        {
+            return Err("confluence thresholds must be ordered: no_trade < light < full".into());
+        }
         if self.min_notional_usd < 1.0 {
             return Err("min_notional_usd must be >= 1.0".into());
         }
@@ -992,5 +1080,67 @@ mod tests {
         s.set_conf_scale(2.0);
         let intent = s.make_intent(&ctx, true, 0.9);
         assert!((intent.confidence - 1.0).abs() < 1e-10); // clamped
+    }
+
+    // ── G-SR-1 S3+S4: param_ranges + validation tests ──
+
+    #[test]
+    fn test_ma_param_ranges_count() {
+        let ranges = MaCrossoverParams::param_ranges();
+        // 5 original + 10 confluence = 15
+        assert_eq!(ranges.len(), 15, "expected 15 param ranges, got {}", ranges.len());
+    }
+
+    #[test]
+    fn test_ma_param_ranges_confluence_names() {
+        let ranges = MaCrossoverParams::param_ranges();
+        let names: Vec<&str> = ranges.iter().map(|r| r.name.as_str()).collect();
+        for expected in &[
+            "weight_adx", "weight_regime", "weight_volume", "weight_momentum",
+            "adx_floor", "confluence_threshold_no_trade", "confluence_threshold_light",
+            "confluence_threshold_full", "min_persistence_ms", "min_notional_usd",
+        ] {
+            assert!(names.contains(expected), "missing param range: {expected}");
+        }
+    }
+
+    #[test]
+    fn test_ma_param_ranges_agent_adjustable() {
+        let ranges = MaCrossoverParams::param_ranges();
+        // Weights should be agent_adjustable / 權重應可被 Agent 調整
+        for name in &["weight_adx", "weight_regime", "weight_volume", "weight_momentum"] {
+            let r = ranges.iter().find(|r| r.name == *name).unwrap();
+            assert!(r.agent_adjustable, "{name} should be agent_adjustable");
+        }
+        // min_notional_usd should NOT be agent_adjustable
+        let mn = ranges.iter().find(|r| r.name == "min_notional_usd").unwrap();
+        assert!(!mn.agent_adjustable, "min_notional_usd should not be agent_adjustable");
+    }
+
+    #[test]
+    fn test_ma_validate_default_ok() {
+        assert!(MaCrossoverParams::default().validate().is_ok());
+    }
+
+    #[test]
+    fn test_ma_validate_bad_weight_sum() {
+        let mut p = MaCrossoverParams::default();
+        p.weight_adx = 30.0; // sum = 70 ≠ 65
+        assert!(p.validate().is_err());
+    }
+
+    #[test]
+    fn test_ma_validate_bad_threshold_order() {
+        let mut p = MaCrossoverParams::default();
+        p.confluence_threshold_no_trade = 50.0;
+        p.confluence_threshold_light = 45.0; // light < no_trade
+        assert!(p.validate().is_err());
+    }
+
+    #[test]
+    fn test_ma_validate_bad_min_notional() {
+        let mut p = MaCrossoverParams::default();
+        p.min_notional_usd = 0.5; // < 1.0
+        assert!(p.validate().is_err());
     }
 }

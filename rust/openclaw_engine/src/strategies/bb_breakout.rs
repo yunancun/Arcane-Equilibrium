@@ -115,6 +115,96 @@ impl StrategyParams for BbBreakoutParams {
                 agent_adjustable: true,
                 db_persisted: true,
             },
+            // ── G-SR-1 S3: Confluence param ranges (R3-4: exempt from ±30% delta cap) ──
+            // ── G-SR-1 S3：匯流參數範圍（R3-4：豁免 ±30% delta 上限）──
+            ParamRange {
+                name: "weight_adx".into(),
+                min: 0.0,
+                max: 65.0,
+                step: Some(1.0),
+                agent_adjustable: true,
+                db_persisted: true,
+            },
+            ParamRange {
+                name: "weight_regime".into(),
+                min: 0.0,
+                max: 65.0,
+                step: Some(1.0),
+                agent_adjustable: true,
+                db_persisted: true,
+            },
+            ParamRange {
+                name: "weight_volume".into(),
+                min: 0.0,
+                max: 65.0,
+                step: Some(1.0),
+                agent_adjustable: true,
+                db_persisted: true,
+            },
+            ParamRange {
+                name: "weight_momentum".into(),
+                min: 0.0,
+                max: 65.0,
+                step: Some(1.0),
+                agent_adjustable: true,
+                db_persisted: true,
+            },
+            ParamRange {
+                name: "adx_floor".into(),
+                min: 0.0,
+                max: 30.0,
+                step: Some(1.0),
+                agent_adjustable: true,
+                db_persisted: true,
+            },
+            ParamRange {
+                name: "confluence_threshold_no_trade".into(),
+                min: 10.0,
+                max: 55.0,
+                step: Some(1.0),
+                agent_adjustable: true,
+                db_persisted: true,
+            },
+            ParamRange {
+                name: "confluence_threshold_light".into(),
+                min: 20.0,
+                max: 60.0,
+                step: Some(1.0),
+                agent_adjustable: true,
+                db_persisted: true,
+            },
+            ParamRange {
+                name: "confluence_threshold_full".into(),
+                min: 30.0,
+                max: 65.0,
+                step: Some(1.0),
+                agent_adjustable: true,
+                db_persisted: true,
+            },
+            ParamRange {
+                name: "confluence_as_gate".into(),
+                min: 0.0,
+                max: 1.0,
+                step: Some(1.0),
+                agent_adjustable: true,
+                db_persisted: true,
+            },
+            ParamRange {
+                name: "min_persistence_ms".into(),
+                min: 0.0,
+                max: 300_000.0,
+                step: Some(10_000.0),
+                agent_adjustable: true,
+                db_persisted: true,
+            },
+            ParamRange {
+                name: "min_notional_usd".into(),
+                min: 1.0,
+                max: 100.0,
+                step: Some(1.0),
+                agent_adjustable: false,
+                db_persisted: true,
+            },
         ]
     }
 
@@ -129,6 +219,12 @@ impl StrategyParams for BbBreakoutParams {
             return Err("trailing_stop_atr_mult must be >= 0.5".into());
         }
         self.build_confluence_config().validate()?;
+        // G-SR-1 S3: Threshold ordering / 閾值排序驗證
+        if self.confluence_threshold_no_trade >= self.confluence_threshold_light
+            || self.confluence_threshold_light >= self.confluence_threshold_full
+        {
+            return Err("confluence thresholds must be ordered: no_trade < light < full".into());
+        }
         if self.min_notional_usd < 1.0 {
             return Err("min_notional_usd must be >= 1.0".into());
         }
@@ -872,5 +968,54 @@ mod tests {
             other => panic!("expected Close(bw_squeeze), got {:?}", other),
         }
         assert!(s.positions.get("BTC").is_none());
+    }
+
+    // ── G-SR-1 S3+S4: param_ranges + validation tests ──
+
+    #[test]
+    fn test_bbb_param_ranges_count() {
+        let ranges = BbBreakoutParams::param_ranges();
+        // 5 original + 11 confluence (includes confluence_as_gate) = 16
+        assert_eq!(ranges.len(), 16, "expected 16 param ranges, got {}", ranges.len());
+    }
+
+    #[test]
+    fn test_bbb_param_ranges_has_confluence_as_gate() {
+        let ranges = BbBreakoutParams::param_ranges();
+        let names: Vec<&str> = ranges.iter().map(|r| r.name.as_str()).collect();
+        assert!(names.contains(&"confluence_as_gate"), "BBB must expose confluence_as_gate");
+    }
+
+    #[test]
+    fn test_bbb_param_ranges_confluence_names() {
+        let ranges = BbBreakoutParams::param_ranges();
+        let names: Vec<&str> = ranges.iter().map(|r| r.name.as_str()).collect();
+        for expected in &[
+            "weight_adx", "weight_regime", "weight_volume", "weight_momentum",
+            "adx_floor", "confluence_threshold_no_trade", "confluence_threshold_light",
+            "confluence_threshold_full", "confluence_as_gate", "min_persistence_ms",
+            "min_notional_usd",
+        ] {
+            assert!(names.contains(expected), "missing param range: {expected}");
+        }
+    }
+
+    #[test]
+    fn test_bbb_validate_default_ok() {
+        assert!(BbBreakoutParams::default().validate().is_ok());
+    }
+
+    #[test]
+    fn test_bbb_validate_bad_weight_sum() {
+        let mut p = BbBreakoutParams::default();
+        p.weight_adx = 0.0; // sum = 0+20+12+8 = 40 ≠ 65
+        assert!(p.validate().is_err());
+    }
+
+    #[test]
+    fn test_bbb_validate_bad_threshold_order() {
+        let mut p = BbBreakoutParams::default();
+        p.confluence_threshold_no_trade = 60.0; // > light (45)
+        assert!(p.validate().is_err());
     }
 }

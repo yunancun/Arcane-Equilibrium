@@ -545,4 +545,127 @@ mod tests {
     fn test_indicators_ready_neither() {
         assert!(!indicators_ready(None, None));
     }
+
+    // ── G-SR-1 S4: Edge-case tests ──
+
+    #[test]
+    fn test_score_inverted_adx_high_yields_low() {
+        // Reversion: high ADX (50) → adx_score = 1-(50/50) = 0.0
+        let cfg = reversion_config();
+        let score = compute_score(&cfg, true, Some(50.0), "mean_reverting", Some(1.2), Some(40.0), false);
+        let s = score.unwrap();
+        // 0.0*15 + 1.0*30 + 1.0*10 + 0.9*10 = 0+30+10+9 = 49
+        assert!(s > 45.0 && s < 52.0, "got {s}");
+    }
+
+    #[test]
+    fn test_score_inverted_adx_low_yields_high() {
+        // Reversion: low ADX (10) → adx_score = 1-(10/50) = 0.8
+        let cfg = reversion_config();
+        let score = compute_score(&cfg, true, Some(10.0), "mean_reverting", Some(1.2), Some(40.0), false);
+        let s = score.unwrap();
+        // 0.8*15 + 1.0*30 + 1.0*10 + 0.9*10 = 12+30+10+9 = 61
+        assert!(s > 58.0 && s < 64.0, "got {s}");
+    }
+
+    #[test]
+    fn test_score_short_momentum_rsi_30_50() {
+        // C-5 fix: short RSI 30-50 → 0.9 (not 20-45)
+        let cfg = trend_config();
+        let score = compute_score(&cfg, true, Some(25.0), "trending", Some(1.2), Some(35.0), false);
+        let s = score.unwrap();
+        // adx=1.0*25 + regime=1.0*20 + vol=1.0*12 + momentum(short, RSI=35 in [30,50])=0.9*8 = 64.2
+        assert!((s - 64.2).abs() < 0.1, "got {s}");
+    }
+
+    #[test]
+    fn test_score_short_momentum_rsi_25_not_in_range() {
+        // RSI=25 for short: not in [30,50], not in [40,60] → falls to 0.3
+        let cfg = trend_config();
+        let score = compute_score(&cfg, true, Some(25.0), "trending", Some(1.2), Some(25.0), false);
+        let s = score.unwrap();
+        // 1.0*25 + 1.0*20 + 1.0*12 + 0.3*8 = 59.4
+        assert!((s - 59.4).abs() < 0.1, "got {s}");
+    }
+
+    #[test]
+    fn test_score_volume_ratio_none_neutral() {
+        let cfg = trend_config();
+        // volume=None → 0.5
+        let score = compute_score(&cfg, true, Some(25.0), "trending", None, Some(65.0), true);
+        let s = score.unwrap();
+        // 1.0*25 + 1.0*20 + 0.5*12 + 0.9*8 = 25+20+6+7.2 = 58.2
+        assert!((s - 58.2).abs() < 0.1, "got {s}");
+    }
+
+    #[test]
+    fn test_score_volume_ratio_high_clamps() {
+        let cfg = trend_config();
+        // volume=5.0 → (5.0/1.2)=4.16 → clamp to 1.0
+        let score = compute_score(&cfg, true, Some(25.0), "trending", Some(5.0), Some(65.0), true);
+        let s = score.unwrap();
+        // Same as perfect: 1.0*25 + 1.0*20 + 1.0*12 + 0.9*8 = 64.2
+        assert!((s - 64.2).abs() < 0.1, "got {s}");
+    }
+
+    #[test]
+    fn test_qty_pct_at_exact_thresholds() {
+        let cfg = trend_config(); // no_trade=35, light=45, full=55
+        // Exactly at no_trade: should be 10%
+        assert!((score_to_qty_pct(Some(35.0), &cfg) - 0.10).abs() < 0.01);
+        // Exactly at light: should be 50%
+        assert!((score_to_qty_pct(Some(45.0), &cfg) - 0.50).abs() < 0.01);
+        // Exactly at full: should be 100%
+        assert!((score_to_qty_pct(Some(55.0), &cfg) - 1.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_qty_pct_soft_ramp_bottom() {
+        let cfg = trend_config(); // ramp_start = 35-5 = 30
+        // Score=29 → below ramp_start → 0%
+        assert!((score_to_qty_pct(Some(29.0), &cfg)).abs() < 1e-10);
+        // Score=30.01 → just above ramp_start → tiny %
+        let pct = score_to_qty_pct(Some(30.01), &cfg);
+        assert!(pct > 0.0 && pct < 0.01, "got {pct}");
+    }
+
+    #[test]
+    fn test_score_regime_uncertain() {
+        // "uncertain" regime → 0.6 regardless of invert_adx
+        let cfg = trend_config();
+        let s1 = compute_score(&cfg, true, Some(25.0), "uncertain", Some(1.2), Some(65.0), true).unwrap();
+        let cfg2 = reversion_config();
+        let s2 = compute_score(&cfg2, true, Some(10.0), "uncertain", Some(1.2), Some(40.0), false).unwrap();
+        // Both should use regime_score=0.6
+        // Trend: 1.0*25 + 0.6*20 + 1.0*12 + 0.9*8 = 25+12+12+7.2 = 56.2
+        assert!((s1 - 56.2).abs() < 0.1, "trend uncertain: got {s1}");
+        // Reversion: 0.8*15 + 0.6*30 + 1.0*10 + 0.9*10 = 12+18+10+9 = 49
+        assert!(s2 > 46.0 && s2 < 52.0, "reversion uncertain: got {s2}");
+    }
+
+    #[test]
+    fn test_persistence_clear_resets_tracking() {
+        let mut tracker = PersistenceTracker::new();
+        // Start tracking
+        assert!(!tracker.check("BTCUSDT", Some(true), 0, 120_000, false));
+        // Clear
+        tracker.clear("BTCUSDT");
+        // Re-check: timer should have reset
+        assert!(!tracker.check("BTCUSDT", Some(true), 60_000, 120_000, false));
+        // New timer: need 60_000+120_000 = 180_000
+        assert!(tracker.check("BTCUSDT", Some(true), 180_000, 120_000, false));
+    }
+
+    #[test]
+    fn test_validate_threshold_ordering_in_config() {
+        // ConfluenceConfig.validate() only checks weight sum, not thresholds.
+        // Threshold ordering is validated at strategy level (S3).
+        let mut cfg = trend_config();
+        cfg.threshold_no_trade = 50.0;
+        cfg.threshold_light = 40.0; // wrong order
+        // ConfluenceConfig.validate() should still pass (only checks weights)
+        assert!(cfg.validate().is_ok());
+        // But score_to_qty_pct with bad thresholds produces weird results
+        // (this is why strategy-level validation catches it first)
+    }
 }

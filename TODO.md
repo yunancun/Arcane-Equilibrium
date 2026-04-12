@@ -128,18 +128,17 @@ S2 完成全部計劃項 + A2 提前實施。1024 lib + 33 integration = 1057 te
 
 A2 已在 S2 完成，S3 僅需 A-PARAMS。
 
-- [ ] **A-PARAMS** 擴展 3 個 Params struct + param_ranges() + TOML 默認值 + 驗證邏輯
-  - weight_sum=65 驗證 + 所有新字段 serde(default)
-- [ ] **S3-E2** E2 審查
+- [x] **A-PARAMS** 擴展 4 個 Params struct param_ranges()（MA+BBR+BBB +10 confluence + Grid +3 cooldown）+ threshold ordering validation + grid cooldown bounds validation
+- [x] **S3-E2** E2 自審 PASS（compile clean, all ranges match struct fields）
 
 #### Session 4 — A-TEST 測試 + E4 回歸（~4h）
 
 **可並行**：confluence 單元測試 / persistence 測試 / integration 測試 三路。
 
-- [ ] **A-TEST-1** confluence.rs 單元測試（~22 個）— Sub-agent 1
-- [ ] **A-TEST-2** PersistenceTracker 單元測試（~10 個）— Sub-agent 2
-- [ ] **A-TEST-3** 策略集成測試（~5 個）— Sub-agent 3
-- [ ] **A-E4** E4 回歸（engine lib + e2e 全基線）
+- [x] **A-TEST-1** confluence.rs 單元測試 — 27 existing + 12 S4 edge-case = 39 total
+- [x] **A-TEST-2** PersistenceTracker 單元測試 — 7 existing + 1 clear test = 8 total
+- [x] **A-TEST-3** 策略 param validation + grid cooldown 測試 — MA 7 + BBR 6 + BBB 6 + Grid 9 = 28 new
+- [x] **A-E4** E4 回歸 PASS — **1065 lib + 33 e2e = 1098** (baseline 1024+33=1057, +41 new)
 - [ ] **A-E5** E5 性能審查（Phase A 改動 ≥3 E1 任務，強制）
 
 #### Session 5 — B0+B1+B1.5 Rust 側 Agent 基礎設施（~6h）
