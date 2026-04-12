@@ -4,6 +4,13 @@
 use super::*;
 use std::collections::VecDeque;
 
+// ── S-01: Confidence clamp helper — replaces inline .clamp(0.0, 1.0) across strategies ──
+// S-01：信心值鉗位工具 — 替代策略中分散的 .clamp(0.0, 1.0) 調用。
+#[inline]
+pub(crate) fn clamp_confidence(raw: f64) -> f64 {
+    raw.clamp(0.0, 1.0)
+}
+
 // ── S-02: Ring buffer push helper — replaces 9+ inline len>cap/pop_front patterns ──
 // S-02：環形緩衝推入工具 — 替代 9+ 處內聯 len>cap/pop_front 模式。
 #[inline]
@@ -39,6 +46,27 @@ pub(crate) fn make_fill_id(em: &str, symbol: &str, ts_ms: u64) -> String {
 #[inline]
 pub(crate) fn make_order_id(em: &str, symbol: &str, ts_ms: u64) -> String {
     format!("order-{}-{}-{}", em, symbol, ts_ms)
+}
+
+// ── S-03: Build a synthetic market OrderIntent — shared helper for close / audit intents ──
+// S-03：構建合成市價 OrderIntent — 供平倉/審計意圖共用，消除 on_tick 中的重複結構字面量。
+#[inline]
+pub(crate) fn build_intent(
+    symbol: &str,
+    is_long: bool,
+    qty: f64,
+    confidence: f64,
+    strategy: String,
+) -> crate::intent_processor::OrderIntent {
+    crate::intent_processor::OrderIntent {
+        symbol: symbol.to_string(),
+        is_long,
+        qty,
+        confidence,
+        strategy,
+        order_type: "market".into(),
+        limit_price: None,
+    }
 }
 
 // ── S-01: Extracted helpers — deduplicate Exchange vs Paper verdict/intent/display persistence ──
@@ -171,7 +199,7 @@ impl TickPipeline {
     /// Session 11: Feed trade & orderbook events into 1-minute aggregators.
     /// Flushes happen at minute boundaries → MarketDataMsg::TradeAgg1m / ObSnapshot.
     /// Session 11：將 trade/orderbook 事件餵入 1 分鐘聚合器，跨分鐘時 flush。
-    pub(super) fn process_aggregator_events(&mut self, event: &PriceEvent) {
+    pub(super) fn process_market_events(&mut self, event: &PriceEvent) {
         // FIX-31: Use typed event_kind, fall back to legacy metadata["type"].
         let kind = event.event_kind.as_ref();
         match kind {

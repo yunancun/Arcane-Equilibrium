@@ -7,9 +7,11 @@
 
 ## 一、總結 / Executive Summary
 
-資料庫 schema 設計為 **A 級** — 8 schema、35+ 表、完整索引、TimescaleDB 壓縮/保留策略、sync_commit 分層均已到位。ML 管線代碼基座 **完備但未端到端運行** — LightGBM/Optuna/CPCV/LinUCB/Thompson Sampling/Claude Teacher 全部有實現，但缺乏實際訓練數據積累和真實模型。**最大阻塞**：V001-V015 DDL 遷移文件標記為 "DRAFT — 尚未執行"（V006 除外，已執行），ML 管線的持久化路徑依賴這些表。2026-04-10 修復 session 已完成接線工作（FeatureCollector、Connection Pool、Parquet ETL），但 DDL 執行狀態仍不確定。
+資料庫 schema 設計為 **A 級** — 8 schema、35+ 表、完整索引、TimescaleDB 壓縮/保留策略、sync_commit 分層均已到位。ML 管線代碼基座 **完備且數據管線已端到端接通** — LightGBM/Optuna/CPCV/LinUCB/Thompson Sampling/Claude Teacher 全部有實現，數據寫入器（fills/signals/intents/verdicts/orders/order_state_changes）全部運行中，`outcome_backfiller.rs` 已在 main.rs 接入（每 5 分鐘回填 5 窗口回報），但缺乏實際訓練數據積累和真實模型。**最大阻塞**：所有策略 gross edge 為負（PNL-FIX-1/2），即使 ML 管線通暢也會學到錯誤信號。~~DDL 遷移不確定~~ → V001-V005 已於 2026-04-11 標記執行（FIX-35）。
 
-Database schema design is **A-tier** — 8 schemas, 35+ tables, complete indexing, TimescaleDB compression/retention, sync_commit tiering all in place. ML pipeline code base is **complete but not end-to-end operational** — LightGBM/Optuna/CPCV/LinUCB/Thompson Sampling/Claude Teacher all implemented, but lack actual training data accumulation and real models. **Biggest blocker**: V001-V015 DDL migration files marked "DRAFT — not yet executed" (except V006), and ML pipeline persistence paths depend on these tables. The 2026-04-10 remediation session completed wiring work but DDL execution status remains uncertain.
+Database schema design is **A-tier** — 8 schemas, 35+ tables, complete indexing, TimescaleDB compression/retention, sync_commit tiering all in place. ML pipeline code base is **complete with data pipelines end-to-end wired** — LightGBM/Optuna/CPCV/LinUCB/Thompson Sampling/Claude Teacher all implemented, all data writers (fills/signals/intents/verdicts/orders/order_state_changes) operational, `outcome_backfiller.rs` wired into main.rs (5-minute cycle, 5 return windows). Lacking actual training data accumulation and real models. **Biggest blocker**: all strategies have negative gross edge (PNL-FIX-1/2) — even a working ML pipeline would learn incorrect signals. ~~DDL execution uncertain~~ → V001-V005 marked executed on 2026-04-11 (FIX-35).
+
+> **2026-04-12 核實修正 / Verification correction**: 原報告 3 個 P0 中 2 個為虛假警報（DB-1 DDL DRAFT 誤判、ML-1 outcome backfiller 已存在）。P1 DB-2 orders writer 同為誤判。詳見 §六修正。
 
 ---
 
@@ -32,7 +34,7 @@ PostgreSQL Database: trading_ai
 └── public (legacy 11 + views 11) — Grafana 橋接 VIEW + _legacy 表
 ```
 
-**遷移文件**：V001-V015 共 15 個 SQL 遷移，覆蓋完整。
+**遷移文件**：V001-V015 共 15 個 SQL 遷移，覆蓋完整。V001-V005 已於 2026-04-11 執行（FIX-35 移除 DRAFT 標記）；V006 已執行。
 
 ### 2.2 索引評估 / Index Assessment — Grade: A
 
@@ -149,10 +151,10 @@ ALTER DATABASE trading_ai SET synchronous_commit = 'on';
 | `trading.decision_context_snapshots` | Rust `context_writer.rs` | ✅ 運行中 |
 | `market.*` (klines/tickers/etc) | Rust `market_writer.rs` | ✅ 運行中 |
 | `features.online_latest` | Rust `feature_writer.rs` | ✅ 2026-04-10 接通 |
-| `trading.decision_outcomes` | **無 writer** | ❌ **關鍵缺失** |
-| `trading.orders` / `order_state_changes` | **無 writer** | ❌ 中等缺失 |
+| `trading.decision_outcomes` | Rust `outcome_backfiller.rs` | ✅ **FIX-34 已實現** — 5 窗口 LATERAL JOIN + MFE/MAE，main.rs:575 已 spawn |
+| `trading.orders` / `order_state_changes` | Rust `event_consumer/mod.rs` → `trading_writer.rs` | ✅ **已接通** — `TradingMsg::Order` + `TradingMsg::OrderStateChange` 從 WS 確認端發送 |
 
-**最大問題**：`trading.decision_outcomes`（5 個回報窗口 1m/5m/1h/4h/24h + max favorable/adverse excursion）**無 backfill writer**。這是 `learning.scorer_training_features` VIEW 的核心 JOIN 目標 — 沒有 outcomes，ML 訓練 VIEW 的 `WHERE outcome_backfilled = TRUE` 永遠返回空集。
+> ~~**最大問題**：`trading.decision_outcomes` 無 backfill writer~~ **2026-04-12 核實修正**：`outcome_backfiller.rs`（150 行）已完整實現，每 5 分鐘掃描 `decision_context_snapshots` 中 `outcome_backfilled=FALSE` 且超過 25h 的行，通過 LATERAL JOIN `market.klines` 計算 1m/5m/1h/4h/24h 回報 + max_favorable/max_adverse，寫入 `trading.decision_outcomes`。`tasks.rs:496` spawn + `main.rs:575` 已接入運行。
 
 ### 3.3 模型服務基礎設施 / Model Serving Infrastructure — Grade: B
 
@@ -237,11 +239,11 @@ Rust 加載 → OnnxModelManager::load(onnx_path) → ArcSwap 熱交換
 |-------------|------|---------------|
 | **數據收集 / Data Collection** | ✅ | Rust engine 實時寫入 fills/signals/intents/context/market data。market_writer 7 類型批量刷新 |
 | **特徵工程 / Feature Engineering** | ✅ | 34-dim feature vector（16 指標），FeatureCollector → DB UPSERT。PSI/ADWIN 漂移檢測 |
-| **模型訓練管線 / Model Training Pipeline** | ⚠️ 部分 | LightGBM scorer + CPCV 驗證代碼完備。**阻塞**：decision_outcomes 無 backfill → scorer_training_features VIEW 空 |
+| **模型訓練管線 / Model Training Pipeline** | ⚠️ 部分 | LightGBM scorer + CPCV 驗證代碼完備。~~阻塞：decision_outcomes 無 backfill~~ outcome_backfiller 已接入（FIX-34）。**真正阻塞**：策略 gross 負 edge（ML-2） |
 | **模型評估 / Model Evaluation** | ⚠️ 部分 | CPCV 框架 + power estimation 已實現。Brier score / calibration error 表已建但無數據 |
 | **線上服務 / Online Serving** | ⚠️ 部分 | 3-tier Scorer（ONNX→rule→fixed）框架就緒。OnnxModelManager ArcSwap 熱交換設計好。無真實 ONNX 模型 |
 | **A/B 測試 / A/B Testing** | ⚠️ 部分 | DL-3 Foundation Model A/B runner（`dl3_ab_runner.py`）+ Go-No-Go 決策框架。LinUCB shadow compare 工具 |
-| **持續學習 / Continuous Learning** | ❌ | Thompson Sampling posteriors 更新代碼有但未自動化。Outcome backfill 不存在。EvolutionEngine 是離線工具非自動化循環 |
+| **持續學習 / Continuous Learning** | ❌ | Thompson Sampling posteriors 更新代碼有但未自動化。~~Outcome backfill 不存在~~ outcome_backfiller 已接入。EvolutionEngine 是離線工具非自動化循環 |
 
 ### 階段總評 / Overall ML Stage Rating
 
@@ -252,7 +254,7 @@ Rust 加載 → OnnxModelManager::load(onnx_path) → ArcSwap 熱交換
 ║  ✅ Stage 1: Data Collection        — OPERATIONAL          ║
 ║  ✅ Stage 2: Feature Engineering     — OPERATIONAL          ║
 ║  ⚠️ Stage 3: Model Training Pipeline — CODE COMPLETE,       ║
-║                                        DATA BLOCKED         ║
+║                    DATA PIPELINE WIRED, STRATEGY EDGE BLOCKED ║
 ║  ⚠️ Stage 4: Model Evaluation        — FRAMEWORK ONLY      ║
 ║  ⚠️ Stage 5: Online Serving          — DEGRADED (Tier 2/3) ║
 ║  ⚠️ Stage 6: A/B Testing            — TOOLING EXISTS       ║
@@ -294,12 +296,12 @@ IntentProcessor (signal → intent → risk → execute)
   └→ TradingMsg::RiskVerdict ─→ mpsc ─→ trading_writer ─→ trading.risk_verdicts
   └→ TradingMsg::PositionSnapshot ─→ mpsc ─→ trading_writer ─→ trading.position_snapshots
 
-  ❌ TradingMsg::Order → trading.orders       (writer code exists, OMS state machine gap)
-  ❌ TradingMsg::OrderStateChange → trading.order_state_changes (same)
+  ✅ TradingMsg::Order → trading.orders       (event_consumer/mod.rs:810 → trading_writer flush_orders)
+  ✅ TradingMsg::OrderStateChange → trading.order_state_changes (event_consumer/mod.rs:649,705,821 → trading_writer flush_order_state_changes)
 ```
 
-**關鍵問題**：
-- `trading.orders` 和 `order_state_changes` 有 writer code 但 OMS 生命週期管理未完成
+**~~關鍵問題~~** **2026-04-12 核實修正**：
+- ~~`trading.orders` 和 `order_state_changes` 有 writer code 但 OMS 生命週期管理未完成~~ → 兩者均已接通：`event_consumer/mod.rs` 在收到 Bybit WS 訂單確認後發送 `TradingMsg::Order`（:810）+ 多處 `TradingMsg::OrderStateChange`（:649, :705, :821），`trading_writer.rs` 的 `flush_orders`（:417）和 `flush_order_state_changes`（:460）批量寫入 DB，且包含在 `tokio::join!` 並行刷新中（:105-106）
 - `engine_mode` 欄位（V015）已加入所有寫入消息，三引擎數據正確隔離
 
 ### 5.3 特徵計算 → 存儲
@@ -312,7 +314,7 @@ tick_pipeline → IndicatorEngine → IndicatorSnapshot
   └→ DecisionContextMsg.indicators_snapshot (JSONB)
        └→ context_writer → trading.decision_context_snapshots
 
-  ❌ decision_outcomes backfill — 完全缺失
+  ✅ decision_outcomes backfill — outcome_backfiller.rs (FIX-34), main.rs:575 已 spawn
   ❌ features.history — 刻意不建（DB-RUN-4 決策：歷史走 context JSONB）
 ```
 
@@ -337,17 +339,17 @@ Reconciler 狀態：
 
 ### P0 — 阻塞 ML 訓練的關鍵問題
 
-| # | 問題 | 影響 | 建議修復 |
-|---|------|------|----------|
-| **DB-1** | V001-V004 DDL 標記 "DRAFT — 尚未執行" | ML 持久化全部阻塞 | **確認並執行所有 DDL**（V006 以外的遷移） |
-| **ML-1** | `trading.decision_outcomes` 無 backfill writer | `scorer_training_features` VIEW 永遠空集 | 實現 outcome backfill job（定時掃描 fills，計算 1m/5m/1h/4h/24h 回報窗口） |
-| **ML-2** | 所有策略 gross edge 為負（PNL-FIX-1/2） | 即使 ML 管線通暢，訓練出的模型也學到負 edge 信號 | **Phase 5 PAUSED 正確** — 先修策略再跑 ML |
+| # | 問題 | 影響 | 建議修復 | 核實狀態 |
+|---|------|------|----------|----------|
+| ~~**DB-1**~~ | ~~V001-V004 DDL 標記 "DRAFT — 尚未執行"~~ | ~~ML 持久化全部阻塞~~ | — | ❌ **誤判** — V001-V005 已於 2026-04-11 執行（FIX-35），SQL 文件頭部已改為 "已執行"。`sql/migrations/README.md` 過時未同步是誤導源（已修正） |
+| ~~**ML-1**~~ | ~~`trading.decision_outcomes` 無 backfill writer~~ | ~~`scorer_training_features` VIEW 永遠空集~~ | — | ❌ **誤判** — `outcome_backfiller.rs`（FIX-34, 150 行）完整實現：5 窗口 LATERAL JOIN + MFE/MAE + 5 分鐘定時；`tasks.rs:496` spawn + `main.rs:575` 已接入 |
+| **ML-2** | 所有策略 gross edge 為負（PNL-FIX-1/2） | 即使 ML 管線通暢，訓練出的模型也學到負 edge 信號 | **Phase 5 PAUSED 正確** — 先修策略再跑 ML | ✅ 正確，唯一真正的 P0 |
 
 ### P1 — 重要但不阻塞
 
-| # | 問題 | 影響 | 建議修復 |
-|---|------|------|----------|
-| **DB-2** | `trading.orders` / `order_state_changes` 無 writer | 訂單生命週期不可重建 | 接通 Rust OMS → trading_writer |
+| # | 問題 | 影響 | 建議修復 | 核實狀態 |
+|---|------|------|----------|----------|
+| ~~**DB-2**~~ | ~~`trading.orders` / `order_state_changes` 無 writer~~ | ~~訂單生命週期不可重建~~ | — | ❌ **誤判** — `event_consumer/mod.rs:810,649,705,821` 發送 Order/OrderStateChange → `trading_writer.rs:417,460` flush 寫入 DB |
 | **ML-3** | ONNX 導出/加載推遲 | Scorer 降級運行（Tier 2/3） | 待有正 edge 策略後實現 |
 | **ML-4** | Calibration 為 placeholder | 模型概率無校準 | 待模型訓練完成後實現 |
 | **DB-3** | Python ML scripts 用獨立 `psycopg2.connect()` | Batch job 正確但無超時重試 | 可接受，加超時即可 |
@@ -371,7 +373,7 @@ Reconciler 狀態：
 |------|------|----------|------|
 | `scorer_trainer.py` | LightGBM CPCV 訓練 | ~250 | ✅ 可運行 |
 | `cpcv_validator.py` | 4-fold CPCV + embargo | ~360 | ✅ 可運行 |
-| `optuna_optimizer.py` | TPE 超參數優化 | ~600 | ✅ 可運行 |
+| `optuna_optimizer.py` | TPE 超參數優化 | ~943 | ✅ 可運行 |
 | `thompson_sampling.py` | NIG Thompson Sampling | ~480 | ✅ 可運行 |
 | `james_stein_estimator.py` | JS 跨幣 partial pooling | ~200 | ✅ 可運行 |
 | `linucb_trainer.py` | LinUCB batch 重建 A/b | ~300 | ✅ 可運行 |
@@ -379,7 +381,7 @@ Reconciler 狀態：
 | `linucb_shadow_compare.py` | Shadow comparison | ~200 | ✅ 可運行 |
 | `parquet_etl.py` | DuckDB PG→Parquet ETL | ~150 | ✅ 可運行 |
 | `label_generator.py` | ATR-normalized PnL labels | ~150 | ✅ 可運行 |
-| `calibration.py` | Platt/isotonic 校準 | ~100 | ⚠️ Placeholder |
+| `calibration.py` | Platt/isotonic 校準 | ~81 | ⚠️ Placeholder |
 | `onnx_exporter.py` | LightGBM → ONNX | ~100 | ⚠️ Deferred |
 | `leakage_check.py` | Outcome leakage 防護 | ~100 | ✅ 可運行 |
 | `dl3_foundation.py` | TimesFM/Chronos 推理 | ~280 | ✅ 可運行 |
@@ -409,22 +411,22 @@ Reconciler 狀態：
 
 ## 八、結論 / Conclusion
 
-### 資料庫：設計優秀，執行待確認
+### 資料庫：設計優秀，基礎 DDL 已執行
 
-Schema 設計體現了深思熟慮的架構決策（TimescaleDB hypertable 分層、邏輯 FK 文檔化、壓縮/保留策略、sync_commit 分層）。索引覆蓋全面，無 N+1 風險。**唯一不確定**：V001-V004 DDL 是否已從 "DRAFT" 狀態執行到位。
+Schema 設計體現了深思熟慮的架構決策（TimescaleDB hypertable 分層、邏輯 FK 文檔化、壓縮/保留策略、sync_commit 分層）。索引覆蓋全面，無 N+1 風險。V001-V005 已於 2026-04-11 執行（FIX-35）。
 
-### ML：代碼完備率 ~90%，可運行率 ~30%
+### ML：代碼完備率 ~95%，可運行率 ~60%
 
-ML 管線代碼量約 8500+ 行（Python）+ 3000+ 行（Rust），覆蓋從 ETL 到模型服務的完整鏈路。但受以下阻塞：
+ML 管線代碼量約 8500+ 行（Python）+ 3000+ 行（Rust），覆蓋從 ETL 到模型服務的完整鏈路。數據管線已端到端接通（所有 writer + outcome_backfiller + feature_collector）。**唯一阻塞**：
 
-1. **DDL 執行不確定** → 持久化路徑可能不通
-2. **decision_outcomes backfill 缺失** → 訓練 VIEW 空集
-3. **所有策略 gross edge 為負** → 即使訓練也學到錯誤信號
+1. ~~DDL 執行不確定~~ → **已解決**（FIX-35, 2026-04-11）
+2. ~~decision_outcomes backfill 缺失~~ → **已解決**（FIX-34, outcome_backfiller.rs）
+3. **所有策略 gross edge 為負** → 即使訓練也學到錯誤信號 — **這是唯一真正的 P0 阻塞**
 
 **ML 到達 Stage 3（模型訓練）的前提**：
-1. 確認 DDL 全部執行
-2. 實現 decision_outcomes backfill
-3. 至少一個策略達到正 gross edge
+1. ~~確認 DDL 全部執行~~ ✅
+2. ~~實現 decision_outcomes backfill~~ ✅
+3. 至少一個策略達到正 gross edge ← **唯一阻塞項**
 
 **ML 到達 Stage 5（線上服務）的前提**：
 1. Stage 3 完成 + ONNX 導出可用

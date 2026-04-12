@@ -32,3 +32,5 @@ pub mod stop_manager;
 // S-04: Re-export now_ms() as crate-level utility — avoids 5+ private copies across openclaw_engine.
 // S-04：將 now_ms() 重導出為 crate 級工具 — 避免 openclaw_engine 中 5+ 個私有副本。
 pub use sm::now_ms;
+// P-05：將 is_stale() 重導出為 crate 級工具 — 替代 4+ 處內聯過期檢查。
+pub use sm::is_stale;

@@ -88,10 +88,7 @@ pub(super) fn spawn_order_dispatch(
             }
             // EXT-1: Register pending order BEFORE placing (for exchange mode)
             if req.is_primary {
-                let now_ms = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_millis() as u64;
+                let now_ms = openclaw_core::now_ms();
                 let _ = pending_reg_tx.send(PendingOrder {
                     order_link_id: req.order_link_id.clone(),
                     symbol: req.symbol.clone(),

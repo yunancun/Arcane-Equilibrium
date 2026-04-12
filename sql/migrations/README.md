@@ -14,11 +14,11 @@ V{NNN}__{description}.sql
 
 | File | Content | Status |
 |------|---------|--------|
-| `V001__create_schemas.sql` | CREATE 8 schemas (market, trading, agent, learning, features, observability, risk, news) | DRAFT |
-| `V002__market_tables.sql` | market.* tables (tickers, ob, trade_agg, klines, funding, OI, LSR, liq, regime, news) + hypertable | DRAFT |
-| `V003__trading_agent_tables.sql` | trading.* + agent.* tables | DRAFT |
-| `V004__learning_features_obs_risk_news_tables.sql` | learning.* + features.* + observability.* + risk.* tables | DRAFT |
-| `V005__indexes_views.sql` | All indexes + scorer_training_features VIEW + legacy rename + Grafana VIEW bridge | DRAFT |
+| `V001__create_schemas.sql` | CREATE 8 schemas (market, trading, agent, learning, features, observability, risk, news) | EXECUTED (2026-04-11, FIX-35) |
+| `V002__market_tables.sql` | market.* tables (tickers, ob, trade_agg, klines, funding, OI, LSR, liq, regime, news) + hypertable | EXECUTED (2026-04-11, FIX-35) |
+| `V003__trading_agent_tables.sql` | trading.* + agent.* tables | EXECUTED (2026-04-11, FIX-35) |
+| `V004__learning_features_obs_risk_news_tables.sql` | learning.* + features.* + observability.* + risk.* tables | EXECUTED (2026-04-11, FIX-35) |
+| `V005__indexes_views.sql` | All indexes + scorer_training_features VIEW + legacy rename + Grafana VIEW bridge | EXECUTED (2026-04-11, FIX-35) |
 
 ## 執行方式 / Execution
 

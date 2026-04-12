@@ -21,6 +21,13 @@ pub fn now_ms() -> u64 {
         .as_millis() as u64
 }
 
+/// Check if a timestamp is stale (older than max_age_ms from now).
+/// 檢查時間戳是否過期（距今超過 max_age_ms 毫秒）。
+#[inline]
+pub fn is_stale(ts_ms: u64, max_age_ms: u64) -> bool {
+    now_ms().saturating_sub(ts_ms) > max_age_ms
+}
+
 /// Transition record shared structure.
 /// 遷移記錄共用結構。
 #[derive(Debug, Clone, Serialize, Deserialize)]

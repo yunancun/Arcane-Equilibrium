@@ -2,7 +2,7 @@
 //! on_tick 管線處理 — 核心逐 tick 編排循環。
 
 use super::*;
-use super::on_tick_helpers::{push_capped, make_context_id, make_signal_id, make_fill_id, make_order_id, persist_verdict, persist_intent, push_display_intent};
+use super::on_tick_helpers::{push_capped, make_context_id, make_signal_id, make_fill_id, make_order_id, persist_verdict, persist_intent, push_display_intent, build_intent};
 
 impl TickPipeline {
     /// Process a single price event through the full pipeline.
@@ -98,7 +98,7 @@ impl TickPipeline {
 
         // Session 11: feed trade & orderbook events into 1-minute aggregators.
         // FIX-29: extracted to on_tick_helpers.rs.
-        self.process_aggregator_events(event);
+        self.process_market_events(event);
 
         // Step 0: Fast track check — emergency actions before normal processing
         // FIX-03+04: Real inputs for flash-crash and margin-crisis detection.
@@ -158,7 +158,7 @@ impl TickPipeline {
                                 // Bybit-side position matches local paper_state.
                                 // FIX-03b：Demo/Live 模式派發交易所訂單，避免本地狀態與交易所倉位脫節。
                                 let is_primary = self.pipeline_kind.is_exchange();
-                                self.dispatch_close_order(sym, *is_long, half_qty, event, is_primary);
+                                self.execute_position_close(sym, *is_long, half_qty, event, is_primary);
                             }
                         }
                     }
@@ -344,7 +344,7 @@ impl TickPipeline {
                 {
                     self.emit_close_fill(sym, il, q, px, event.ts_ms, pnl, &trigger.reason);
                     self.stats.total_stops += 1;
-                    self.dispatch_close_order(sym, il, q, event, false);
+                    self.execute_position_close(sym, il, q, event, false);
                 } else {
                     self.stats.total_stops += 1;
                 }
@@ -779,16 +779,15 @@ impl TickPipeline {
 
         for (symbol, reason) in &pending_strategy_closes {
             // P2 fix: synthetic intent for monitoring/audit (recent_intents ring buffer).
-            // P2 修復：合成 intent 供監控/審計（recent_intents 環形緩衝）。
-            let close_intent = crate::intent_processor::OrderIntent {
-                symbol: symbol.clone(),
-                is_long: false, // direction filled in below if position found
-                qty: 0.0,
-                confidence: 0.0,
-                strategy: format!("strategy_close:{reason}"),
-                order_type: "market".into(),
-                limit_price: None,
-            };
+            // S-03: use build_intent() helper — eliminates inline OrderIntent literal.
+            // P2 修復：合成 intent 供監控/審計；S-03：使用 build_intent 消除內聯字面量。
+            let close_intent = build_intent(
+                symbol,
+                false, // direction filled in below if position found
+                0.0,
+                0.0,
+                format!("strategy_close:{reason}"),
+            );
             if is_exchange_mode {
                 if self.pending_close_symbols.contains(symbol) {
                     warn!(symbol = %symbol, reason = %reason, "strategy close skipped: pending close exists / 策略平倉跳過：已有待處理平倉");
@@ -801,7 +800,7 @@ impl TickPipeline {
                     let qty = pos.qty;
                     info!(symbol = %symbol, is_long = %is_long, qty = %qty, reason = %reason,
                           "strategy close → exchange / 策略平倉 → 交易所");
-                    self.dispatch_close_order(symbol, is_long, qty, event, true);
+                    self.execute_position_close(symbol, is_long, qty, event, true);
                     push_display_intent(&mut self.recent_intents, event.ts_ms, &close_intent, None, format!("close_dispatched:{reason}"));
                     close_confirmed_symbols.push(symbol.clone());
                 } else {
@@ -845,7 +844,7 @@ impl TickPipeline {
                         }
                     }
                     // Shadow order: mirror close to Demo API / 影子訂單：鏡像平倉到 Demo API
-                    self.dispatch_close_order(symbol, is_long, qty, event, false);
+                    self.execute_position_close(symbol, is_long, qty, event, false);
                     push_display_intent(&mut self.recent_intents, event.ts_ms, &close_intent, None, format!("close_filled:{reason}"));
                     close_confirmed_symbols.push(symbol.clone());
                 } else {
@@ -945,7 +944,7 @@ impl TickPipeline {
                             continue;
                         }
                         warn!(symbol = %symbol, reason = %reason, "risk close → exchange / 風控平倉 → 交易所");
-                        self.dispatch_close_order(symbol, *is_long, *qty, event, true);
+                        self.execute_position_close(symbol, *is_long, *qty, event, true);
                     } else {
                         warn!(symbol = %symbol, reason = %reason, "risk close (paper) / 風控平倉（紙盤）");
                         if *pnl_pct < 0.0 {
@@ -965,7 +964,7 @@ impl TickPipeline {
                             self.intent_processor.record_trade(symbol, pnl);
                         }
                         self.stats.total_stops += 1;
-                        self.dispatch_close_order(symbol, *is_long, *qty, event, false);
+                        self.execute_position_close(symbol, *is_long, *qty, event, false);
                     }
                 }
                 RiskAction::HaltSession(reason) => {
@@ -998,7 +997,7 @@ impl TickPipeline {
                             self.emit_close_fill(sym, *il, *q, px, event.ts_ms, pnl, "halt_session");
                         }
                         self.stats.total_stops += 1;
-                        self.dispatch_close_order(sym, *il, *q, event, is_exchange_mode);
+                        self.execute_position_close(sym, *il, *q, event, is_exchange_mode);
                     }
                     break;
                 }
