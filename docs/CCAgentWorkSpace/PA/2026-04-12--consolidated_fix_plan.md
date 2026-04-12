@@ -21,66 +21,66 @@
 
 ### 綜合問題表
 
-| ID | 嚴重度 | 來源報告 | 問題描述 | 影響範圍 | 關鍵文件路徑 |
-|----|--------|----------|----------|----------|-------------|
-| **FIX-01** | BLOCKER | FA/AI-E/CC | H1-H5 AI 治理層全 stub，Rust 引擎未接入 AI Agent | 原則 #3/#11/#13 | `ai_service.py`, `strategy_wiring.py` |
-| **FIX-02** | MAJOR | FA/CC | Decision Lease Python 完整但 Rust 引擎未使用 | 原則 #3 部分失效 | `decision_lease_state_machine.py`, `router.rs` |
-| **FIX-03** | BLOCKER | FA/E3/E5/CC | FastTrack ReduceToHalf/PauseNewEntries 定義但未處理 | 風控閉環缺口 | `fast_track.rs:17-18`, `on_tick.rs:148-161` |
-| **FIX-04** | BLOCKER | FA/E3 | fast_track price_drop/margin_util 硬編 0.0 | 閃崩/保證金危機防線失效 | `on_tick.rs:156-159` |
-| **FIX-05** | P1 | QC | correlated_exposure_pct 永遠 0.0 | 組合級風險檢查失效 | `router.rs:179,420` |
-| **FIX-06** | P1 | QC | GridTrading grid_levels TOML 配置存儲但不應用 | dead param 違反規則 | `grid_trading.rs:114,434,504` |
-| **FIX-07** | P1 | QC | OU theta clamp 0.001 在非 OU 序列產生巨大間距 | 網格策略失效風險 | `grid_trading.rs` compute_ou_step |
-| **FIX-08** | MAJOR | FA/CC/E5/A3 | 文件大小違規（13+ 文件超 1200 行硬上限） | 代碼規範 §九 | 見子表 |
-| **FIX-09** | HIGH | E3 | ocEsc() 缺少單引號轉義 | XSS defense-in-depth 缺口 | `common.js:369-372` |
-| **FIX-10** | CRITICAL | E3 | IPC HMAC 認證為可選（Live 模式下應強制） | Live 安全風險 | `ipc_server/mod.rs:497` |
-| **FIX-11** | HIGH | E3 | Auth cookie secure=False | 中間人截取風險 | `legacy_routes.py:322` |
-| **FIX-12** | HIGH | E3 | CSP 使用 unsafe-inline | XSS 防護削弱 | `main_legacy.py:335-343` |
-| **FIX-13** | P0 | E4 | edge_estimates.rs 零測試（208 行 / 9 pub fn） | JSON 解析無驗證 | `edge_estimates.rs` |
-| **FIX-14** | P0 | E4 | REST API timeout fail-closed 行為無測試 | 硬邊界合規未驗證 | `bybit_rest_client.rs` |
-| **FIX-15** | P0 | E4 | 三管線並發寫入無集成測試 | 3E-ARCH 核心未驗證 | e2e tests |
-| **FIX-16** | P1 | E4 | startup.rs 零測試（856 行） | 啟動失敗無防護 | `startup.rs` |
-| **FIX-17** | P1 | E4 | Config hot-reload + tick 並發無測試 | ArcSwap 安全未驗證 | config/store.rs |
-| **FIX-18** | P1 | E4 | Price=0.0 tick 行為未測試 | 除零風險 | `on_tick.rs` |
-| **FIX-19** | P1 | BB | execution.fast 缺 execFee → WS 手續費為 0 | Mainnet PNL-FIX-2 同類 | `bybit_private_ws.rs:593-605` |
-| **FIX-20** | P1 | BB | pre_check_order() 使用真正下單端點 | 意外下單風險 | `platform_client.rs:362-370` |
-| **FIX-21** | MAJOR | FA | 3 個 Rust 孤立模組（1612 行）從未被引用 | 編譯/維護負擔 | `leverage_token_client.rs`, `spot_margin_client.rs`, `batch_order_manager.rs` |
-| **FIX-22** | MAJOR | FA | 4 個 MlSwitches config 欄位未運行時讀取 | 假功能違反規則 | `learning_config.rs:86-106` |
-| **FIX-23** | MAJOR | FA | FundingArb 策略完整 stub | 5 策略僅 4 活躍 | `funding_arb.rs:124-138` |
-| **FIX-24** | P2 | QC | RSI 閾值 30/70 硬編碼 | 不可配置化 | `bb_reversion.rs` |
-| **FIX-25** | P2 | QC | GridTrading FEE_PCT 硬編碼 vs 動態費率不一致 | 費用計算偏差 | `grid_trading.rs:127` |
-| **FIX-26** | P2 | QC | BbBreakout squeeze 狀態永不過期 | 虛假突破風險 | `bb_breakout.rs` |
-| **FIX-27** | P2 | QC | Kelly 負邊際仍開 1% 倉 | Phase 5 期間額外風險 | `kelly_sizer.rs` |
-| **FIX-28** | P2 | QC | Exchange 模式 leverage 永遠 1.0 | 未讀取 Bybit 實際槓桿 | `router.rs` |
-| **FIX-29** | P2 | E5 | on_tick() 單函數 1187 行 | 可維護性核心風險 | `on_tick.rs:11-1187` |
-| **FIX-30** | HIGH | E5 | on_tick() symbol.clone() 重複 9 次 | 熱路徑堆分配浪費 | `on_tick.rs` |
-| **FIX-31** | MEDIUM | E5 | PriceEvent metadata HashMap 每 tick 分配 | 高頻堆分配 | `price.rs:24`, `ws_client.rs:460` |
-| **FIX-32** | MEDIUM | E5 | risk_config().clone() 每 tick 深拷貝 | 不必要的深拷貝 | `on_tick.rs:998` |
-| **FIX-33** | MEDIUM | E5 | seen_exec_ids VecDeque 線性搜索 | O(500) 去重 | `event_consumer/mod.rs:580` |
-| **FIX-34** | P1 | MIT | decision_outcomes 無 backfill writer | ML 訓練 VIEW 永空 | DB schema |
-| **FIX-35** | P1 | MIT | V001-V004 DDL 執行狀態不確定 | ML 持久化可能阻塞 | DDL migrations |
-| **FIX-36** | MINOR | FA | delegation_framework.py 562 行未引用 | 孤立代碼 | `delegation_framework.py` |
-| **FIX-37** | MINOR | FA | PIPELINE_BRIDGE/STOP_MANAGER None 殘留 | 清理不完整 | `strategy_wiring.py:285-286` |
-| **FIX-38** | P2 | CC | 5+ 個未登記 Singleton | 違反 §九 登記規則 | CLAUDE.md §九 |
-| **FIX-39** | CRITICAL | A3 | Danger Zone 操作使用原生 confirm() | 危險操作確認不足 | `tab-risk.html:501` |
-| **FIX-40** | CRITICAL | A3 | 策略刪除使用原生 confirm() | 不可逆操作無二次確認 | `tab-strategy.html:223` |
-| **FIX-41** | MAJOR | A3 | index.html/app.js Bearer Token 面板殘留 | 死代碼 + DOM 浪費 | `app.js:2164`, `index.html:38-45` |
-| **FIX-42** | MAJOR | A3 | console.html 雙重導航 | UX 認知負擔 | `console.html` |
-| **FIX-43** | MAJOR | A3 | tab-trading.html 雙層 iframe 嵌套 | 性能 + 維護負擔 | `tab-trading.html` |
-| **FIX-44** | MAJOR | A3 | 大部分 tab 缺少載入失敗狀態 | 用戶無法區分載入中/失敗 | 多個 tab |
-| **FIX-45** | MAJOR | A3 | Live tab 30s 刷新偏慢 | 實盤監控延遲 | `tab-live.html` |
-| **FIX-46** | MAJOR | A3 | tab-risk.html 信息過載（1390 行） | UX 可用性差 | `tab-risk.html` |
-| **FIX-47** | P1 | TW | CLAUDE_REFERENCE.md 過時 6 天 | 參考索引不準確 | `CLAUDE_REFERENCE.md` |
-| **FIX-48** | P1 | TW | KNOWN_ISSUES.md 過時 7 天 | 問題追蹤不準確 | `KNOWN_ISSUES.md` |
-| **FIX-49** | P1 | TW | 5 個日期缺失 daily_summary | 違反強制同步規則 | worklogs/ |
-| **FIX-50** | P2 | TW | CLAUDE_CHANGELOG.md 2135 行超長 | 超 1200 行硬上限 | `CLAUDE_CHANGELOG.md` |
-| **FIX-51** | P2 | TW | 3 個 DEPRECATED 文件未移至 archive | 文件整理 | references/ |
-| **FIX-52** | P1 | R4 | SCRIPT_INDEX.md 覆蓋率 ~11% | 腳本索引嚴重落後 | `SCRIPT_INDEX.md` |
-| **FIX-53** | P2 | R4 | docs/README.md 缺 3 個子目錄索引 | 文檔發現性差 | `docs/README.md` |
-| **FIX-54** | P2 | R4 | CHANGELOG 缺 6 個功能 commit | 審計追蹤不完整 | `CLAUDE_CHANGELOG.md` |
-| **FIX-55** | P1 | BB | 3 個 API 路徑 MISMATCH（dead code） | 潛在端點錯誤 | `position_manager.rs`, `account_manager.rs` |
-| **FIX-56** | P2 | AI-E | Layer2 定價表 last_verified_date 過期 | GUI 顯示過期警告 | `layer2_types.py:334` |
-| **FIX-57** | P2 | AI-E | Python/Rust 雙軌 AI 預算無同步 | 預算感知不一致 | Layer2CostTracker + BudgetTracker |
-| **FIX-58** | MINOR | E3 | Unix socket 文件權限未設置 | 訪問控制偏寬 | `ipc_server/mod.rs:400` |
+| ID | 嚴重度 | 來源報告（Agent: 原始發現 ID [原始嚴重度]） | 問題描述 | 影響範圍 | 關鍵文件路徑 |
+|----|--------|----------------------------------------------|----------|----------|-------------|
+| **FIX-01** | BLOCKER | FA: #1 [BLOCKER] · AI-E: §2.4/§2.5 [Partial] · CC: 原則#11/#12/#15 [PARTIAL] | H1-H5 AI 治理層全 stub，Rust 引擎未接入 AI Agent | 原則 #3/#11/#13 | `ai_service.py`, `strategy_wiring.py` |
+| **FIX-02** | MAJOR | FA: #3 [MAJOR] · CC: 原則#3 [PASS with note] | Decision Lease Python 完整但 Rust 引擎未使用 | 原則 #3 部分失效 | `decision_lease_state_machine.py`, `router.rs` |
+| **FIX-03** | BLOCKER | FA: #2 [BLOCKER] · E3: SEC-A01 [LOW] · E5: D-01 [Medium] | FastTrack ReduceToHalf/PauseNewEntries 定義但未處理 | 風控閉環缺口 | `fast_track.rs:17-18`, `on_tick.rs:148-161` |
+| **FIX-04** | BLOCKER | FA: #2 [BLOCKER] · E3: SEC-A01 [LOW] | fast_track price_drop/margin_util 硬編 0.0 | 閃崩/保證金危機防線失效 | `on_tick.rs:156-159` |
+| **FIX-05** | P1 | QC: RG-1 [P1] | correlated_exposure_pct 永遠 0.0 | 組合級風險檢查失效 | `router.rs:179,420` |
+| **FIX-06** | P1 | QC: RG-3 [P1] + H5 [P1] | GridTrading grid_levels TOML 配置存儲但不應用 | dead param 違反規則 | `grid_trading.rs:114,434,504` |
+| **FIX-07** | P1 | QC: RG-4 [P1] | OU theta clamp 0.001 在非 OU 序列產生巨大間距 | 網格策略失效風險 | `grid_trading.rs` compute_ou_step |
+| **FIX-08** | MAJOR | FA: #9/#10/#11 [MAJOR] · CC: §2.1 [FAIL] · E5: R-01/R-05 [High] · A3: §2.3 [MAJOR] | 文件大小違規（13+ 文件超 1200 行硬上限） | 代碼規範 §九 | 見子表 |
+| **FIX-09** | HIGH | E3: SEC-E01 [HIGH] + SEC-B03 [MEDIUM] | ocEsc() 缺少單引號轉義 | XSS defense-in-depth 缺口 | `common.js:369-372` |
+| **FIX-10** | CRITICAL | E3: SEC-D01 [CRITICAL] | IPC HMAC 認證為可選（Live 模式下應強制） | Live 安全風險 | `ipc_server/mod.rs:497` |
+| **FIX-11** | HIGH | E3: SEC-D02 [HIGH] | Auth cookie secure=False | 中間人截取風險 | `legacy_routes.py:322` |
+| **FIX-12** | HIGH | E3: SEC-F01 [HIGH] | CSP 使用 unsafe-inline | XSS 防護削弱 | `main_legacy.py:335-343` |
+| **FIX-13** | P0 | E4: P0-#1 [P0-CRITICAL] | edge_estimates.rs 零測試（208 行 / 9 pub fn） | JSON 解析無驗證 | `edge_estimates.rs` |
+| **FIX-14** | P0 | E4: P0-#2 [P0-CRITICAL] | REST API timeout fail-closed 行為無測試 | 硬邊界合規未驗證 | `bybit_rest_client.rs` |
+| **FIX-15** | P0 | E4: P0-#3 [P0-CRITICAL] | 三管線並發寫入無集成測試 | 3E-ARCH 核心未驗證 | e2e tests |
+| **FIX-16** | P1 | E4: P1-#4 [P1-HIGH] | startup.rs 零測試（856 行） | 啟動失敗無防護 | `startup.rs` |
+| **FIX-17** | P1 | E4: P1-#9 [P1-HIGH] | Config hot-reload + tick 並發無測試 | ArcSwap 安全未驗證 | config/store.rs |
+| **FIX-18** | P1 | E4: §四.2 [P1-HIGH] | Price=0.0 tick 行為未測試 | 除零風險 | `on_tick.rs` |
+| **FIX-19** | P1 | BB: BB-A4 [P1] [PARSE-ERROR] | execution.fast 缺 execFee → WS 手續費為 0 | Mainnet PNL-FIX-2 同類 | `bybit_private_ws.rs:593-605` |
+| **FIX-20** | P1 | BB: BB-A5 [P1] [RISK] | pre_check_order() 使用真正下單端點 | 意外下單風險 | `platform_client.rs:362-370` |
+| **FIX-21** | MAJOR | FA: #7 [MAJOR] | 3 個 Rust 孤立模組（1612 行）從未被引用 | 編譯/維護負擔 | `leverage_token_client.rs`, `spot_margin_client.rs`, `batch_order_manager.rs` |
+| **FIX-22** | MAJOR | FA: #8 [MAJOR] + #6 [MAJOR] | 4 個 MlSwitches config 欄位未運行時讀取 | 假功能違反規則 | `learning_config.rs:86-106` |
+| **FIX-23** | MAJOR | FA: #4 [MAJOR] | FundingArb 策略完整 stub | 5 策略僅 4 活躍 | `funding_arb.rs:124-138` |
+| **FIX-24** | P2 | QC: H2 [P2] | RSI 閾值 30/70 硬編碼 | 不可配置化 | `bb_reversion.rs` |
+| **FIX-25** | P2 | QC: RG-5 [P2] + H6 [P2] | GridTrading FEE_PCT 硬編碼 vs 動態費率不一致 | 費用計算偏差 | `grid_trading.rs:127` |
+| **FIX-26** | P2 | QC: RG-6 [P2] | BbBreakout squeeze 狀態永不過期 | 虛假突破風險 | `bb_breakout.rs` |
+| **FIX-27** | P2 | QC: RG-7 [P2] | Kelly 負邊際仍開 1% 倉 | Phase 5 期間額外風險 | `kelly_sizer.rs` |
+| **FIX-28** | P2 | QC: RG-2 [P2] | Exchange 模式 leverage 永遠 1.0 | 未讀取 Bybit 實際槓桿 | `router.rs` |
+| **FIX-29** | P2 | E5: R-02 [High] | on_tick() 單函數 1187 行 | 可維護性核心風險 | `on_tick.rs:11-1187` |
+| **FIX-30** | HIGH | E5: P-01 [High] | on_tick() symbol.clone() 重複 9 次 | 熱路徑堆分配浪費 | `on_tick.rs` |
+| **FIX-31** | MEDIUM | E5: P-02 [High] | PriceEvent metadata HashMap 每 tick 分配 | 高頻堆分配 | `price.rs:24`, `ws_client.rs:460` |
+| **FIX-32** | MEDIUM | E5: P-04 [Medium] | risk_config().clone() 每 tick 深拷貝 | 不必要的深拷貝 | `on_tick.rs:998` |
+| **FIX-33** | MEDIUM | E5: P-05 [Medium] | seen_exec_ids VecDeque 線性搜索 | O(500) 去重 | `event_consumer/mod.rs:580` |
+| **FIX-34** | P1 | MIT: ML-1 [P0] | decision_outcomes 無 backfill writer | ML 訓練 VIEW 永空 | DB schema |
+| **FIX-35** | P1 | MIT: DB-1 [P0] | V001-V004 DDL 執行狀態不確定 | ML 持久化可能阻塞 | DDL migrations |
+| **FIX-36** | MINOR | FA: #15 [MINOR] | delegation_framework.py 562 行未引用 | 孤立代碼 | `delegation_framework.py` |
+| **FIX-37** | MINOR | FA: #14 [MINOR] | PIPELINE_BRIDGE/STOP_MANAGER None 殘留 | 清理不完整 | `strategy_wiring.py:285-286` |
+| **FIX-38** | P2 | CC: §2.5 [PARTIAL] | 5+ 個未登記 Singleton | 違反 §九 登記規則 | CLAUDE.md §九 |
+| **FIX-39** | CRITICAL | A3: §5.1 [CRITICAL] | Danger Zone 操作使用原生 confirm() | 危險操作確認不足 | `tab-risk.html:501` |
+| **FIX-40** | CRITICAL | A3: §5.1 [CRITICAL] | 策略刪除使用原生 confirm() | 不可逆操作無二次確認 | `tab-strategy.html:223` |
+| **FIX-41** | MAJOR | A3: §1.2 [MAJOR] | index.html/app.js Bearer Token 面板殘留 | 死代碼 + DOM 浪費 | `app.js:2164`, `index.html:38-45` |
+| **FIX-42** | MAJOR | A3: §2.1 [MAJOR] | console.html 雙重導航 | UX 認知負擔 | `console.html` |
+| **FIX-43** | MAJOR | A3: §2.1 [MAJOR] | tab-trading.html 雙層 iframe 嵌套 | 性能 + 維護負擔 | `tab-trading.html` |
+| **FIX-44** | MAJOR | A3: §2.2 [MAJOR] | 大部分 tab 缺少載入失敗狀態 | 用戶無法區分載入中/失敗 | 多個 tab |
+| **FIX-45** | MAJOR | A3: §2.2 [MAJOR] | Live tab 30s 刷新偏慢 | 實盤監控延遲 | `tab-live.html` |
+| **FIX-46** | MAJOR | A3: §2.3 [MAJOR] | tab-risk.html 信息過載（1390 行） | UX 可用性差 | `tab-risk.html` |
+| **FIX-47** | P1 | TW: §4.1 [STALE] | CLAUDE_REFERENCE.md 過時 6 天 | 參考索引不準確 | `CLAUDE_REFERENCE.md` |
+| **FIX-48** | P1 | TW: §4.1 [STALE] | KNOWN_ISSUES.md 過時 7 天 | 問題追蹤不準確 | `KNOWN_ISSUES.md` |
+| **FIX-49** | P1 | TW: §3.1 [MISSING] | 5 個日期缺失 daily_summary | 違反強制同步規則 | worklogs/ |
+| **FIX-50** | P2 | TW: §7.1 [超長文件] | CLAUDE_CHANGELOG.md 2135 行超長 | 超 1200 行硬上限 | `CLAUDE_CHANGELOG.md` |
+| **FIX-51** | P2 | TW: §2.1 [DUPLICATE] | 3 個 DEPRECATED 文件未移至 archive | 文件整理 | references/ |
+| **FIX-52** | P1 | R4: §四 P1-#5 [P1] | SCRIPT_INDEX.md 覆蓋率 ~11% | 腳本索引嚴重落後 | `SCRIPT_INDEX.md` |
+| **FIX-53** | P2 | R4: §一 P1-#1/#2/#3 [P1] | docs/README.md 缺 3 個子目錄索引 | 文檔發現性差 | `docs/README.md` |
+| **FIX-54** | P2 | R4: §三.2 P2-#10 [P2] | CHANGELOG 缺 6 個功能 commit | 審計追蹤不完整 | `CLAUDE_CHANGELOG.md` |
+| **FIX-55** | P1 | BB: BB-A1+A2+A3 [P1] [API-MISMATCH] | 3 個 API 路徑 MISMATCH（dead code） | 潛在端點錯誤 | `position_manager.rs`, `account_manager.rs` |
+| **FIX-56** | P2 | AI-E: §2.3.5 [注意] | Layer2 定價表 last_verified_date 過期 | GUI 顯示過期警告 | `layer2_types.py:334` |
+| **FIX-57** | P2 | AI-E: §6.2 #3 [風險提醒] | Python/Rust 雙軌 AI 預算無同步 | 預算感知不一致 | Layer2CostTracker + BudgetTracker |
+| **FIX-58** | MINOR | E3: SEC-F05 [LOW] | Unix socket 文件權限未設置 | 訪問控制偏寬 | `ipc_server/mod.rs:400` |
 
 ### FIX-08 文件大小違規子表
 
