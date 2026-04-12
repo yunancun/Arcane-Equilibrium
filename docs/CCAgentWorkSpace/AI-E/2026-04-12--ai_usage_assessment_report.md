@@ -38,7 +38,7 @@
 - **兩個實現**:
   - `OllamaProvider`（L118-168）：包裝 `OllamaClient`，代理所有調用
   - `LMStudioProvider`（L170-252）：OpenAI 兼容 API，`localhost:1234`
-- **評級理由**: ABC 清晰，兩個 provider 均可運行。但實際業務代碼大多直接用 `OllamaClient` 而非通過 `LocalLLMClient` 抽象層，抽象層的使用率偏低。
+- **評級理由**: ABC 清晰，兩個 provider 均可運行。但實際業務代碼大多直接用 `OllamaClient` 而非通過 `LocalLLMClient` 抽象層，使用率偏低。
 
 ### 2.2 OllamaClient（本地 LLM 推理）
 
@@ -65,15 +65,15 @@
 
 - **文件**: `/home/ncyu/BybitOpenClaw/srv/program_code/exchange_connectors/bybit_connector/control_api_v1/app/layer2_engine.py`
 - **L1 Triage**（L197-340）：
-  - **首選**: Claude Haiku（`claude-haiku-4-5-20251001`，L52）經 Anthropic SDK 調用
+  - **首選**: Claude Haiku（`claude-haiku-4-5-20251001`，定義於 `layer2_types.py:L52`）經 Anthropic SDK 調用
   - **回退**: `_l1_triage_local()`（L259-340）通過 Ollama/Qwen 本地推理
-  - 這是**真實的 Claude API 調用**（L218-228），不是 stub
+  - 這是**真實的 Claude API 調用**（L219-228），不是 stub
 - **L2 Agent Loop**（L344-558）：
   - 完整的 Claude messages API + tool_use 循環
   - 8 個工具定義（get_market_state, web_search, submit_recommendation 等）
   - 模型升級 triage（Sonnet → Opus，L562-605）
   - Shadow decision 提交到 paper trading（L609-678）
-- **Anthropic Client**（L699-731）：
+- **Anthropic Client**（L703-731）：
   - `_get_anthropic_client()` 讀取 `ANTHROPIC_API_KEY` 環境變量
   - **無 key 時返回 None**，L2 session 直接 fail-soft，不會崩潰
   - **真實 SDK 調用**：`import anthropic; anthropic.Anthropic(api_key=...)`（L718-719）
@@ -81,10 +81,10 @@
 #### 2.3.2 Layer2CostTracker
 
 - **文件**: `/home/ncyu/BybitOpenClaw/srv/program_code/exchange_connectors/bybit_connector/control_api_v1/app/layer2_cost_tracker.py`
-- **硬上限**: `$2.00/天`（L60，DOC-08 §4）
-- **自適應預算**: 7 日 ROI 驅動倍率（0.3x - 2.0x），5 個 tier（L66-72）
-- **PnL 歸因回填**: `backfill_pnl_attribution()`（L321-333）
-- **統一調用記錄**: `record_call()`（L490-553）支持 Ollama/Claude/Perplexity 全 provider
+- **硬上限**: `$2.00/天`（定義於 `layer2_types.py:L60`，DOC-08 §4）
+- **自適應預算**: 7 日 ROI 驅動倍率（0.3x - 2.0x），5 個 tier（`layer2_types.py:L66-72`）
+- **PnL 歸因回填**: `backfill_pnl_attribution()`（L363-375）
+- **統一調用記錄**: `record_call()`（L532+）支持 Ollama/Claude/Perplexity 全 provider
 - **持久化**: `runtime/layer2_cost_state.json`，原子寫入（tmp→replace）
 - **狀態**: ✅ Production — 完全可用
 
@@ -97,13 +97,13 @@
   2. `LocalLLMWebSearchProvider`（L385-445）：Ollama + web-pilot 腳本
   3. `LocalLLMSearchProvider`（L448-491）：純 Ollama 知識
   4. `WebPilotSearchProvider`（L494-541）：DuckDuckGo (`duckduckgo-search` 庫)
-- **SSRF 防護**: `_fetch_url()` 含 IP/域名黑名單（L809-826）
+- **SSRF 防護**: `_fetch_url()`（L800+）含 IP/域名黑名單（L808-826）
 - **狀態**: ✅ Production（工具代碼完整，但 Perplexity 需 API key）
 
 #### 2.3.4 Layer2 API 路由
 
 - **文件**: `/home/ncyu/BybitOpenClaw/srv/program_code/exchange_connectors/bybit_connector/control_api_v1/app/layer2_routes.py`
-- **10 條路由**（L57-435）：trigger / sessions / cost / pricing / adaptive / config / ollama/status
+- **11 條路由**（L57-435）：trigger / sessions / sessions/{id} / cost / cost/reset / cost/pricing (GET+POST) / cost/adaptive / config (GET+POST) / ollama/status
 - **GUI**: `tab-ai.html` 完整的 AI Engine 控制台（成本儀表板 + 觸發按鈕 + session 列表）
 - **狀態**: ✅ Production
 
@@ -111,7 +111,7 @@
 
 - **文件**: `/home/ncyu/BybitOpenClaw/srv/program_code/exchange_connectors/bybit_connector/control_api_v1/app/layer2_types.py`
 - **定價表**: Haiku $0.80/$4.00、Sonnet $3.00/$15.00、Opus $15.00/$75.00（L334-353）
-  - ⚠️ **注意**: `last_verified_date: "2026-03-27"`，已超 30 天，`is_stale()` 會返回 True
+  - ✅ `last_verified_date: "2026-04-12"`，未過期
 - **模型 ID**: 使用 `claude-haiku-4-5-20251001` / `claude-sonnet-4-6-20250326` / `claude-opus-4-6-20250326`（L51-55）
 - **狀態**: ✅ Production
 
@@ -121,13 +121,13 @@
 
 - **文件**: `/home/ncyu/BybitOpenClaw/srv/program_code/exchange_connectors/bybit_connector/control_api_v1/app/h1_thought_gate.py`
 - **功能**: AI 調用前確定性閘門 — 預算檢查 + 複雜度評分（閾值 0.3）+ 冷卻期（30s 同 symbol 去重）
-- **調用鏈**: `StrategistAgent._evaluate_intel()` → `H1ThoughtGate.check()` → 決定是否調用 Ollama
+- **調用鏈**: `StrategistAgent._handle_intel()`（L261）→ `H1ThoughtGate.check()`（L342）→ 決定是否調用 Ollama
 - **狀態**: ⚠️ Partial — 代碼完整且正確，但只在 Python multi-agent 框架中使用。**Rust tick pipeline 不經過 H1**。
 
 #### H3 ModelRouter
 
 - **文件**: `/home/ncyu/BybitOpenClaw/srv/program_code/exchange_connectors/bybit_connector/control_api_v1/app/model_router.py`
-- **路由邏輯**: complexity < 0.5 → l1_9b / 0.5-0.8 → l1_27b / ≥ 0.8 → l2（後台線程）
+- **路由邏輯**: 4 級路由 — complexity < 0.5 → l1_9b / 0.5-0.8 → l1_27b / ≥ 0.8 → 根據 context（confidence/cusum/vol/new_symbol）升級至 l1_5 或 l2（後台線程），無 context 向後兼容直接 l2
 - **L2 結果緩存**: TTL 1h / 容量 200 條
 - **預算閘控**: 可注入 budget_checker callback
 - **狀態**: ⚠️ Partial — 同上，僅在 Python Agent 框架中活躍。
@@ -152,7 +152,7 @@
 | StrategistAgent | `strategist_agent.py` | ⚠️ Partial | 調用 Ollama `judge_edge()` 評估信號邊際；Shadow 模式下不產出下游 intent |
 | GuardianAgent | `guardian_agent.py` | ⚠️ Partial | 5 項風控檢查（槓桿/回撤/相關性/Sharpe/方向衝突）；評估依賴 Qwen 3.5 |
 | AnalystAgent | `analyst_agent.py` | ⚠️ Partial | L1 層指標計算正常；L2 層 `analyze_patterns()` 需 Qwen 27B |
-| ExecutorAgent | `executor_agent.py:117` | ❌ Stub | 框架存在但 ARCH-RC1 後 Python 執行層已退場，Rust 引擎直接處理 |
+| ExecutorAgent | `executor_agent.py:117` | ⚠️ Partial | 508 行完整實現（GovernanceHub 集成 / Decision Lease / intent 去重 / 執行報告），但 ARCH-RC1 後實際交易走 Rust 引擎，Python 側為 Shadow/advisory |
 | Conductor | `multi_agent_framework.py:642` | ⚠️ Partial | 編排 5 Agent 的消息路由正常，但整體 Agent 系統處於 Shadow 模式 |
 
 **關鍵事實**: 5 Agent 系統的代碼框架完整（MessageBus / AgentRole / IntelObject / TradeIntent / RiskVerdict 全部定義），但在 ARCH-RC1 後 Python 交易執行層已退場（DEAD-PY-2），**所有實際交易決策走 Rust tick pipeline**。Python Agent 系統目前的角色是：
@@ -166,14 +166,14 @@
 
 - **文件**: `rust/openclaw_engine/src/ai_budget/`（mod.rs + tracker.rs + config_io.rs + pricing.rs + usage_io.rs）
 - **功能**: 月度 USD 預算強制（5 scope：local_total / platform_hard_cap / agent_teacher / agent_analyst / agent_reserve）
-- **三段降級**: SoftWarn $80 / HardLimit $95 / Killswitch $100
+- **三段降級**: SoftWarn 80% / HardLimit 95% / Killswitch 100%（均為 `local_total` 的比率，默認 $100 時分別為 $80/$95/$100）
 - **DB 表**: `learning.ai_budget_config` + `learning.ai_usage_log`（V010 遷移）
 - **IPC**: `get_ai_budget_status` / `update_ai_budget_config` 兩個 handler
 - **狀態**: ✅ Production — 代碼完整，DB schema 已部署，IPC 接線完成。定價表為硬編碼占位（4-17 子任務待換為 DB 表）。
 
 #### 2.6.2 Claude Teacher（Rust）
 
-- **文件**: `rust/openclaw_engine/src/claude_teacher/`（7 個子模塊）
+- **文件**: `rust/openclaw_engine/src/claude_teacher/`（9 個子模塊，含 applier_test_fixtures）
 - **完整管線**:
   - `client.rs`：`LlmClient` trait（L78）+ `AnthropicClient`（reqwest HTTP）+ `MockClient`
   - `parser.rs`：嚴格 fail-closed JSON 解析（`adjust_param` / `recommend_action` 等 directive 類型）
@@ -188,7 +188,7 @@
   - BudgetTracker.record_usage 失敗 → 中止（TeacherError::Budget）
   - 測試覆蓋 mock client / budget failure abort / parser rejection
 - **狀態**: ⚠️ Partial — 代碼完整且測試覆蓋良好，但：
-  - `teacher_loop_enabled` 默認 OFF（L123, learning_config.rs）
+  - `teacher_loop_enabled` 默認 OFF（L107, learning_config.rs）
   - 需 `ANTHROPIC_API_KEY` 才能發起真實 LLM 調用
   - Directive → 策略參數調整的完整鏈路需 operator IPC 啟用
 
@@ -209,7 +209,7 @@
 
 - **文件**: `rust/openclaw_engine/src/news/`（pipeline.rs + mod.rs + 其他子模塊）
 - **功能**: 3 providers（CryptoPanic + CoinTelegraph RSS + Google News RSS）→ 去重 → severity 評分 → DB 寫入 → 三路 fan-out（Guardian/Regime/Learning）
-- **排程**: `main.rs` 中 60s 定時觸發，受 `learning.switches.news_pipeline_enabled` 開關控制
+- **排程**: `main.rs` 中 60s 定時觸發，受 `LearningConfig.switches.news_pipeline_enabled`（Rust `MlSwitches` struct field）熱重載開關控制
 - **狀態**: ✅ Production — 完整接入生產管線，熱重載 gate 控制。
 
 ### 2.7 ML/DL 學習管線
@@ -246,7 +246,7 @@
 
 - **文件**: `/home/ncyu/BybitOpenClaw/srv/program_code/local_model_tools/evolution_engine.py`
 - **功能**: 策略參數網格搜索 + BacktestEngine 評估 + TruthSourceRegistry 注入
-- **安全**: `is_simulated=True` 強制（L37），原則 7 隔離（不碰 live/paper 配置）
+- **安全**: `is_simulated=True` 強制（docstring L36 + `__post_init__` L123），原則 7 隔離（不碰 live/paper 配置）
 - **狀態**: ⚠️ Partial — 代碼完整，但 Phase 5 暫停後，策略 gross edge 為負，優化無意義。
 
 #### 2.7.3 LearningTierGate（L1-L5 進化）
@@ -295,11 +295,11 @@
 
 | 組件 | 狀態 | 原因 |
 |------|------|------|
-| ExecutorAgent | ❌ Stub | Python 執行層已退場（DEAD-PY-2） |
+| ExecutorAgent | ⚠️ Partial | 代碼完整（508 行），但 ARCH-RC1 後實際交易走 Rust 引擎 |
 | DL3 Foundation/AB/GoNoGo | ❌ Stub | Phase 4+ 計劃，代碼僅框架 |
 | ONNX Export | ❌ Stub | ort 集成延後 |
 | Calibration (Platt/isotonic) | ❌ Stub | 占位符 |
-| Teacher Loop (Rust) | 默認 OFF | `teacher_loop_enabled: false`（learning_config.rs:96） |
+| Teacher Loop (Rust) | 默認 OFF | `teacher_loop_enabled: false`（learning_config.rs:107） |
 | L2-L5 Learning Tiers | 🔲 未達解鎖條件 | 需 500+ 觀察 / 2+ 週 / 正 ROI |
 | Strategist Agent (live) | Shadow 模式 | 不產出實際 intent |
 | AI Consultation (strategy) | 未接線 | strategy_wiring.py 提到但未實現端到端 |
@@ -324,7 +324,7 @@
 | H0 | 無差距 | 0 | -- |
 | H1 | 僅在 Python Agent 框架中使用 | 如果要在 Rust pipeline 中加入 AI 閘門，需在 `on_tick.rs` 添加 IPC 調用 H1 | P2 |
 | H2 | Python 和 Rust 雙軌均工作 | 打通兩側 budget 同步（目前各自獨立） | P2 |
-| H3 | 同 H1 | Rust pipeline 加入模型選擇邏輯 | P3 |
+| H3 | 同 H1（Python 側 4 級路由 l1_9b/l1_27b/l1_5/l2 已完整） | Rust pipeline 加入模型選擇邏輯 | P3 |
 | H4 | 完全可用 | 0 | -- |
 | H5 | 完全可用 | 0 | -- |
 
@@ -377,13 +377,13 @@
 
 ### 6.2 風險提醒
 
-1. **定價表過期**: Layer2Types 的 `last_verified_date` 為 2026-03-27，已超 30 天核實期限，GUI 會顯示過期警告
-2. **Python Agent 系統的定位模糊**: ARCH-RC1 後 Python 交易邏輯全退場，但 5 Agent 框架代碼仍在。需明確其角色是 advisory 還是計劃重構為 Rust
+1. ~~**定價表過期**~~: ✅ 已更新至 2026-04-12，`is_stale()` 不會觸發（原報告誤判）
+2. **Python Agent 系統的定位模糊**: ARCH-RC1 後 Python 交易邏輯全退場，但 5 Agent 框架代碼仍在（含 ExecutorAgent 508 行完整實現）。需明確其角色是 advisory 還是計劃重構為 Rust
 3. **雙軌 AI 預算獨立運行**: Python Layer2CostTracker 和 Rust BudgetTracker 各自追蹤，無同步機制，可能導致預算感知不一致
 
 ### 6.3 優先行動建議
 
-1. 更新 Layer2 定價表 `last_verified_date`（5 分鐘）
+1. ~~更新 Layer2 定價表~~ ✅ 已是 2026-04-12（原報告誤判）
 2. 等待策略重做（G-SR-1）完成後，再啟用 ML 訓練管線
 3. W22 G-1 AI Agent 啟動時，建議先聚焦 StrategistAgent 的 Ollama judge_edge 接線（已有代碼），而非從零搭建
 
