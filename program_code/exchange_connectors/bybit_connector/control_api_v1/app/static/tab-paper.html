@@ -68,6 +68,19 @@
     <div class="oc-metric"><div class="oc-metric-label" title="盈利交易占总交易的百分比。50%以上通常被视为良好。/ Percentage of profitable trades out of total. Above 50% is generally considered good.">胜率 / Win Rate</div><div class="oc-metric-val" id="p-winrate">--</div></div>
     <div class="oc-metric"><div class="oc-metric-label" title="从峰值到最低点的最大跌幅百分比，衡量最坏情况下的资金回撤。越小越好。/ Largest peak-to-trough decline in equity. Measures worst-case capital loss. Lower is better.">最大回撤 / Max Drawdown</div><div class="oc-metric-val" id="p-maxdd">--</div></div>
   </div>
+  <!-- PnL Trend Sparkline / 盈亏趋势迷你图（SUGGESTION §4.4） -->
+  <div style="margin-top:10px">
+    <div style="font-size:10px;color:var(--text-dim);margin-bottom:4px;display:flex;align-items:center;gap:6px">
+      <span>累计收益趋势 / Cumulative PnL Trend</span>
+      <span style="color:var(--text-dim);font-size:9px">（最近 50 笔成交 / last 50 fills）</span>
+    </div>
+    <svg id="pnl-sparkline" width="100%" height="48"
+      style="display:block;background:rgba(13,17,23,0.5);border-radius:6px;border:1px solid #21262d"
+      viewBox="0 0 400 48" preserveAspectRatio="none">
+      <polyline id="pnl-sparkline-line" points="" fill="none" stroke="var(--green)" stroke-width="1.5" stroke-linejoin="round"/>
+      <text x="4" y="42" fill="var(--text-dim)" font-size="8" id="pnl-sparkline-label">no data</text>
+    </svg>
+  </div>
 </div>
 
 <!-- Positions / 持仓 -->
@@ -229,7 +242,13 @@ async function cancelOrder(orderId) {
 // ─── Data Loading ─────────────────────────────────────────────
 async function loadSession() {
   const d = await ocApi('/api/v1/paper/session/status');
-  if (!d || !d.data) return;
+  if (!d || !d.data) {
+    // Show error in session badge so user knows engine is unreachable
+    // 在 session badge 显示错误，让用户知道引擎不可达
+    const badge = $('session-badge');
+    if (badge) { badge.textContent = '连接失败 / Connection failed'; badge.className = 'oc-chip oc-chip-bad'; }
+    return;
+  }
   const s = d.data.session;
   const state = s.session_state;
 
@@ -296,7 +315,7 @@ async function loadSession() {
 
 async function loadPositions() {
   const d = await ocApi('/api/v1/paper/positions');
-  if (!d || !d.data) return;
+  if (!d || !d.data) { ocSetHtml('positions-tbody', '<tr class="empty-row"><td colspan="10" style="color:var(--text-dim)">⚠ 连接失败 / Connection failed <button class="oc-btn" onclick="loadPositions()" style="padding:2px 8px;font-size:10px;margin-left:8px">↺ 重试</button></td></tr>'); return; }
   const raw = d.data.positions || d.data || {};
   const positions = Array.isArray(raw) ? raw : Object.values(raw);
   _cachedPositions = positions;
@@ -346,35 +365,62 @@ async function loadPositions() {
   ocSetHtml('positions-tbody', html);
 }
 
+// ── Paper close confirm modal / 模拟平仓确认对话框 ─────────────────────────
+let _paperCloseCallback = null;
+function openPaperCloseModal(title, body, onConfirm) {
+  document.getElementById('paper-confirm-title').textContent = title;
+  document.getElementById('paper-confirm-body').textContent = body;
+  _paperCloseCallback = onConfirm;
+  document.getElementById('paper-confirm-modal').style.display = 'flex';
+}
+function closePaperCloseModal() {
+  document.getElementById('paper-confirm-modal').style.display = 'none';
+  _paperCloseCallback = null;
+}
+function confirmPaperClose() {
+  closePaperCloseModal();
+  if (_paperCloseCallback) _paperCloseCallback();
+}
+
 async function closePosition(symbol) {
   // Close a single paper position via IPC close_position command.
   // 通過 IPC close_position 指令平掉單一持倉。
-  if (!confirm('确认平仓 ' + symbol + '？/ Confirm close ' + symbol + '?')) return;
-  const d = await ocPost('/api/v1/paper/positions/' + encodeURIComponent(symbol) + '/close', {});
-  if (d) {
-    ocToast(symbol + ' 平仓指令已发送 / close sent', 'success');
-    setTimeout(loadPositions, 1000);
-  } else {
-    ocToast(symbol + ' 平仓失败 / close failed', 'error');
-  }
+  openPaperCloseModal(
+    '确认平仓 / Confirm Close',
+    '确认平仓 ' + symbol + '？此操作会立即关闭该持仓。\nConfirm close ' + symbol + '?',
+    async function() {
+      const d = await ocPost('/api/v1/paper/positions/' + encodeURIComponent(symbol) + '/close', {});
+      if (d) {
+        ocToast(symbol + ' 平仓指令已发送 / close sent', 'success');
+        setTimeout(loadPositions, 1000);
+      } else {
+        ocToast(symbol + ' 平仓失败 / close failed', 'error');
+      }
+    }
+  );
 }
 
 async function closeAllPositions() {
   // Close all paper positions without stopping the session.
   // 平掉所有 Paper 持倉，不停止 session（引擎繼續運行）。
-  if (!confirm('确认平掉所有 Paper 持仓？/ Confirm close ALL Paper positions?')) return;
-  const d = await ocPost('/api/v1/paper/close-all-positions', {});
-  if (d) {
-    ocToast('全部平仓指令已发送 / close all sent', 'success');
-    setTimeout(loadAll, 1500);
-  } else {
-    ocToast('平仓失败 / close failed', 'error');
-  }
+  openPaperCloseModal(
+    '确认全部平仓 / Confirm Close ALL',
+    '确认平掉所有 Paper 持仓？此操作会立即关闭所有持仓，策略继续运行。\nConfirm close ALL Paper positions? Strategies continue running.',
+    async function() {
+      const d = await ocPost('/api/v1/paper/close-all-positions', {});
+      if (d) {
+        ocToast('全部平仓指令已发送 / close all sent', 'success');
+        setTimeout(loadAll, 1500);
+      } else {
+        ocToast('平仓失败 / close failed', 'error');
+      }
+    }
+  );
 }
 
 async function loadOrders() {
   const d = await ocApi('/api/v1/paper/orders');
-  if (!d || !d.data) return;
+  if (!d || !d.data) { ocSetHtml('orders-tbody', '<tr class="empty-row"><td colspan="9" style="color:var(--text-dim)">⚠ 连接失败 / Connection failed <button class="oc-btn" onclick="loadOrders()" style="padding:2px 8px;font-size:10px;margin-left:8px">↺ 重试</button></td></tr>'); return; }
   const orders = d.data.orders || d.data || [];
   const active = orders.filter(o => o.state === 'paper_order_working' || o.state === 'paper_order_partially_filled');
   if (!active.length) {
@@ -405,7 +451,7 @@ async function loadOrders() {
 
 async function loadFeed() {
   const d = await ocApi('/api/v1/paper/market-feed/status');
-  if (!d || !d.data) return;
+  if (!d || !d.data) { const fb = $('feed-badge'); if (fb) { fb.textContent = '连接失败 / Failed'; fb.className = 'oc-chip oc-chip-bad'; } return; }
   const f = d.data;
   const running = f.dispatcher_running || f.running || f.is_running || false;
   const badge = $('feed-badge');
@@ -433,7 +479,7 @@ async function loadFeed() {
 
 async function loadFills() {
   const d = await ocApi('/api/v1/paper/fills');
-  if (!d || !d.data) return;
+  if (!d || !d.data) { ocSetHtml('fills-tbody', '<tr class="empty-row"><td colspan="7" style="color:var(--text-dim)">⚠ 连接失败 / Connection failed <button class="oc-btn" onclick="loadFills()" style="padding:2px 8px;font-size:10px;margin-left:8px">↺ 重试</button></td></tr>'); return; }
   const fills = d.data.fills || d.data || [];
   if (!fills.length) {
     ocSetHtml('fills-tbody', '<tr class="empty-row"><td colspan="7">暂无成交</td></tr>');
@@ -457,6 +503,46 @@ async function loadFills() {
     html += '</tr>';
   });
   ocSetHtml('fills-tbody', html);
+
+  // Update PnL sparkline from fill PnL data / 从成交盈亏数据更新趋势迷你图
+  updatePnlSparkline(fills);
+}
+
+// ─── PnL Sparkline ────────────────────────────────────────────
+// Draws cumulative PnL trend as SVG polyline from fill data.
+// 从成交数据绘制累计盈亏趋势折线图（SVG polyline）。
+function updatePnlSparkline(fills) {
+  var lineEl = document.getElementById('pnl-sparkline-line');
+  var labelEl = document.getElementById('pnl-sparkline-label');
+  if (!lineEl || !fills || !fills.length) return;
+
+  // Build cumulative pnl series (most recent fills last)
+  // 构建累计盈亏序列（最新成交在右侧）
+  var sorted = fills.slice().reverse().slice(0, 50);
+  var cumulative = 0;
+  var series = sorted.map(function(f) {
+    cumulative += (f.realized_pnl || f.pnl || 0);
+    return cumulative;
+  });
+
+  if (series.length < 2) { labelEl.textContent = 'collecting data...'; return; }
+
+  var minV = Math.min.apply(null, series);
+  var maxV = Math.max.apply(null, series);
+  var range = maxV - minV || 1;
+  var W = 400, H = 48, pad = 4;
+
+  var points = series.map(function(v, i) {
+    var x = pad + (i / (series.length - 1)) * (W - pad * 2);
+    var y = H - pad - ((v - minV) / range) * (H - pad * 2);
+    return x.toFixed(1) + ',' + y.toFixed(1);
+  }).join(' ');
+
+  lineEl.setAttribute('points', points);
+  var last = series[series.length - 1];
+  lineEl.setAttribute('stroke', last >= 0 ? 'var(--green)' : 'var(--red)');
+  labelEl.textContent = (last >= 0 ? '+' : '') + last.toFixed(4) + ' USDT (' + series.length + ' fills)';
+  labelEl.setAttribute('fill', last >= 0 ? 'var(--green)' : 'var(--red)');
 }
 
 async function loadMetrics() {
@@ -512,7 +598,7 @@ async function loadMetrics() {
 
 async function loadShadow() {
   const d = await ocApi('/api/v1/paper/shadow/decisions');
-  if (!d || !d.data) return;
+  if (!d || !d.data) { ocSetHtml('shadow-tbody', '<tr class="empty-row"><td colspan="6" style="color:var(--text-dim)">⚠ 连接失败 / Load failed</td></tr>'); return; }
   const decisions = d.data.decisions || d.data || [];
   if (!decisions.length) {
     ocSetHtml('shadow-tbody', '<tr class="empty-row"><td colspan="6">暂无影子决策</td></tr>');
@@ -557,5 +643,22 @@ window.addEventListener('occurrencychange', loadAll);
   } catch (e) {}
 })();
 </script>
+
+<!-- Paper Close Confirm Modal / 模拟平仓确认弹窗 -->
+<div id="paper-confirm-modal" style="display:none;position:fixed;inset:0;z-index:1000;background:rgba(0,0,0,0.6);align-items:center;justify-content:center">
+  <div style="background:#161b22;border:1px solid #30363d;border-radius:12px;width:min(420px,90vw);box-shadow:0 20px 50px rgba(0,0,0,0.5)">
+    <div style="padding:16px 20px;border-bottom:1px solid #21262d;display:flex;justify-content:space-between;align-items:center">
+      <h3 id="paper-confirm-title" style="margin:0;font-size:14px;font-weight:600">确认操作</h3>
+      <button onclick="closePaperCloseModal()" style="background:none;border:none;color:#8b949e;font-size:18px;cursor:pointer">&#x2715;</button>
+    </div>
+    <div style="padding:16px 20px">
+      <div style="background:rgba(56,139,253,0.08);border:1px solid rgba(56,139,253,0.2);border-radius:8px;padding:10px 14px;font-size:13px;line-height:1.6;white-space:pre-line" id="paper-confirm-body"></div>
+    </div>
+    <div style="padding:12px 20px;border-top:1px solid #21262d;display:flex;gap:8px;justify-content:flex-end">
+      <button class="oc-btn" onclick="closePaperCloseModal()">取消 / Cancel</button>
+      <button class="oc-btn oc-btn-danger" onclick="confirmPaperClose()">确认平仓 / Confirm Close</button>
+    </div>
+  </div>
+</div>
 </body>
 </html>

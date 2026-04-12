@@ -10,13 +10,23 @@
 <body>
 <script>ocAuthCheck(); ocInjectBaseCSS();</script>
 
-<!-- ═══ Quick-nav: Danger Zone shortcut (AH-01) ═══ -->
-<!-- 危险操作区快捷入口 — 点击直接跳转到页面底部 Danger Zone -->
-<div style="display:flex;justify-content:flex-end;padding:4px 0 2px">
+<!-- ═══ Quick-nav bar: Monitor / Config sub-tabs + Danger Zone shortcut ═══ -->
+<!-- 子分页导航 — Monitor(只读监控) / Config(可编辑配置) + Danger Zone 快捷入口 -->
+<div style="display:flex;align-items:center;gap:8px;padding:4px 0 2px;flex-wrap:wrap">
+  <button id="rtab-monitor" class="oc-btn" style="background:rgba(56,139,253,0.15);border-color:var(--blue);color:var(--blue)" onclick="switchRiskTab('monitor')" title="只读监控：风险状态、治理等级、P0/P1/P2 配置查看 / Read-only: risk status, governor, P0/P1/P2 view">
+    &#x1F4CA; Monitor / 监控
+  </button>
+  <button id="rtab-config" class="oc-btn" style="opacity:0.55" onclick="switchRiskTab('config')" title="可编辑配置：止损、仓位、冷却、H0、AI 建议 / Editable: stop, sizing, cooldown, H0, AI">
+    &#x2699;&#xFE0F; Config / 配置
+  </button>
+  <span style="flex:1"></span>
   <a href="#danger-zone" style="font-size:12px;color:var(--red);text-decoration:none;display:inline-flex;align-items:center;gap:4px;padding:4px 10px;border:1px solid rgba(248,81,73,0.4);border-radius:6px;background:rgba(248,81,73,0.08)" title="跳转到危险操作区 / Jump to Danger Zone">
-    ⚠️ 危险操作 / Danger Zone ↓
+    &#x26A0;&#xFE0F; 危险操作 / Danger Zone &#x2193;
   </a>
 </div>
+
+<!-- Monitor Group: read-only status view / 只读监控分组 -->
+<div id="risk-monitor-group">
 
 <!-- ═══ Risk Status Hero ═══ -->
 <div class="oc-card">
@@ -120,8 +130,9 @@
       &#x1F3E6; Demo
     </button>
     <button class="oc-btn" id="etab-live" onclick="selectRiskEngine('live')"
-      style="opacity:0.55">
-      &#x1F534; Live (Real Money)
+      title="Live engine — Real Money / 实盘引擎 — 真实资金"
+      style="opacity:0.55;border-color:rgba(168,85,247,0.5);color:#a855f7">
+      &#x1F7E3; Live (Real Money)
     </button>
   </div>
   <div id="engine-risk-live-warn" style="display:none;padding:8px 12px;border-radius:6px;background:rgba(248,81,73,0.12);border:1px solid rgba(248,81,73,0.4);color:var(--red);font-size:12px;margin-bottom:8px">
@@ -177,6 +188,11 @@
   </div>
 </div>
 
+</div><!-- end risk-monitor-group -->
+
+<!-- Config Group: editable settings / 可编辑配置分组 (hidden by default) -->
+<div id="risk-config-group" style="display:none">
+
 <!-- ═══ Stop Manager (Editable) ═══ -->
 <div class="oc-card">
   <h3 style="display:flex;justify-content:space-between;align-items:center">&#x1F6D1; 止损设置 / Stop Manager Settings <span class="rc-engine-badge oc-chip" style="font-size:10px;margin-left:auto"></span></h3>
@@ -207,7 +223,7 @@
           <div style="display:flex;align-items:center;gap:6px"><input class="oc-input" id="in-time-stop" type="number" step="1" min="1" max="720" style="width:80px" /><span style="font-size:12px">小时</span></div>
         </div>
         <div style="display:flex;justify-content:space-between;align-items:center">
-          <div><div style="font-size:12px;font-weight:600;color:var(--blue)">ATR Multiplier / ATR 止损乘数</div><div style="font-size:10px;color:var(--text-dim)">基于 ATR 的动态止损距离。设为 0 则禁用 ATR 止损，使用固定百分比。值越大止损越远</div></div>
+          <div><div style="font-size:12px;font-weight:600;color:var(--blue)">ATR Multiplier / ATR 止损乘数 <abbr title="Average True Range 平均真实波幅" style="font-weight:400;font-size:10px;color:var(--text-dim)">(?)</abbr></div><div style="font-size:10px;color:var(--text-dim)">基于 ATR 的动态止损距离。设为 0 则禁用 ATR 止损，使用固定百分比。值越大止损越远。<br>例：BTCUSDT ATR=800 USDT 时，2.0x = 距开仓价 1600 USDT 止损；3.0x = 2400 USDT</div></div>
           <div style="display:flex;align-items:center;gap:6px"><input class="oc-input" id="in-atr-mult" type="number" step="0.5" min="0" max="10" style="width:80px" /><span style="font-size:12px">x</span></div>
         </div>
         <div style="display:flex;justify-content:space-between;align-items:center">
@@ -227,7 +243,7 @@
     </div>
 
     <div>
-      <div style="font-size:13px;font-weight:600;margin-bottom:8px">当前生效值 / Current Values</div>
+      <div style="font-size:13px;font-weight:600;margin-bottom:8px">原值 / Original <span style="font-weight:400;font-size:10px;color:var(--text-dim)">修改后高亮 / highlights on edit</span></div>
       <div class="oc-metrics" style="grid-template-columns:1fr 1fr">
         <div class="oc-metric"><div class="oc-metric-label">Hard Stop</div><div class="oc-metric-val red" id="s-hard" style="font-size:16px">--</div></div>
         <div class="oc-metric"><div class="oc-metric-label">Take Profit</div><div class="oc-metric-val green" id="s-tp" style="font-size:16px">--</div></div>
@@ -251,8 +267,8 @@
 
       <div style="display:flex;justify-content:space-between;align-items:center">
         <div>
-          <div style="font-size:12px;font-weight:600;color:var(--yellow)">P1 Per-Trade Risk / 单笔风险上限</div>
-          <div style="font-size:10px;color:var(--text-dim)">每笔交易投入的最大余额比例。越大允许单笔越重，越小则单笔更轻。</div>
+          <div style="font-size:12px;font-weight:600;color:var(--yellow)">Per-Trade Risk Budget / 单笔风险预算</div>
+          <div style="font-size:10px;color:var(--text-dim)">每笔交易投入的最大余额比例（可调软参数，非 P1 硬限制）。越大允许单笔越重，越小则单笔更轻。</div>
           <div style="font-size:10px;color:var(--text-dim)">关键影响：BTC/ETH 等高价资产需要至少 5-10% 才能产生最小手数</div>
         </div>
         <div style="display:flex;align-items:center;gap:6px"><input class="oc-input" id="in-p1-risk" type="number" step="0.5" min="0.5" max="100" style="width:80px" /><span style="font-size:12px">%</span></div>
@@ -306,7 +322,7 @@
     </div>
 
     <div>
-      <div style="font-size:13px;font-weight:600;margin-bottom:8px">当前生效值 / Current Values</div>
+      <div style="font-size:13px;font-weight:600;margin-bottom:8px">原值 / Original <span style="font-weight:400;font-size:10px;color:var(--text-dim)">修改后高亮 / highlights on edit</span></div>
       <div class="oc-metrics" style="grid-template-columns:1fr 1fr">
         <div class="oc-metric"><div class="oc-metric-label">P1 Risk/Trade</div><div class="oc-metric-val yellow" id="s-p1-risk" style="font-size:16px">--</div></div>
         <div class="oc-metric"><div class="oc-metric-label">Max Single Pos</div><div class="oc-metric-val" id="s-single-pos" style="font-size:16px">--</div></div>
@@ -349,7 +365,7 @@
     </div>
 
     <div>
-      <div style="font-size:13px;font-weight:600;margin-bottom:8px">当前生效值 / Current Values</div>
+      <div style="font-size:13px;font-weight:600;margin-bottom:8px">原值 / Original <span style="font-weight:400;font-size:10px;color:var(--text-dim)">修改后高亮 / highlights on edit</span></div>
       <div class="oc-metrics" style="grid-template-columns:1fr 1fr">
         <div class="oc-metric"><div class="oc-metric-label">Trigger Count</div><div class="oc-metric-val" id="s-cool-count" style="font-size:16px">--</div></div>
         <div class="oc-metric"><div class="oc-metric-label">Duration</div><div class="oc-metric-val" id="s-cool-min" style="font-size:16px">--</div></div>
@@ -436,8 +452,8 @@
       <div id="ai-advice-body" class="oc-pre" style="min-height:120px;font-size:12px;white-space:pre-wrap">
         点击左侧按钮向 AI 询问。AI 会根据当前持仓、市场状态、历史表现给出具体的止损建议。
       </div>
-      <div style="margin-top:6px;display:flex;gap:6px" id="ai-advice-actions">
-        <button class="oc-btn oc-btn-success" onclick="applyAIAdvice()" id="btn-apply-ai" style="display:none" disabled title="功能开发中 — AI 建议可供参考，请根据建议手动调整左侧数值后保存 / Feature under development — please apply AI advice manually">&#x2714; 采纳建议 / Apply（开发中）</button>
+      <div style="margin-top:6px;display:flex;gap:6px;font-size:11px;color:var(--text-dim)" id="ai-advice-actions">
+        &#x2139;&#xFE0F; AI 建议仅供参考，请根据建议手动调整左侧数值后保存。/ AI advice is for reference only — adjust values manually and save.
       </div>
     </div>
   </div>
@@ -503,6 +519,49 @@
   </div>
 </div>
 
+
+</div><!-- end risk-config-group -->
+
+<!-- Floating dirty-state bar — appears when any config input is modified / 有未保存修改时浮动提示 -->
+<div id="risk-dirty-bar" style="display:none;position:fixed;bottom:0;left:0;right:0;z-index:500;
+  background:rgba(210,153,34,0.96);color:#1a1a1a;padding:8px 16px;
+  align-items:center;gap:12px;font-size:13px;box-shadow:0 -2px 12px rgba(0,0,0,0.4)">
+  <span>&#x26A0;&#xFE0F; 有未保存的修改 / Unsaved changes — 找对应区域的「保存」按钮 / Find the Save button in each section</span>
+  <button onclick="document.getElementById('risk-dirty-bar').style.display='none'"
+    style="margin-left:auto;padding:3px 10px;background:rgba(0,0,0,0.2);border:none;border-radius:4px;cursor:pointer;color:inherit;font-size:12px">&#x2715;</button>
+</div>
+
+<script>
+// ── Monitor / Config sub-tab switcher / 子分页切换 ─────────────────────────
+function switchRiskTab(tab) {
+  const isMonitor = tab === 'monitor';
+  document.getElementById('risk-monitor-group').style.display = isMonitor ? '' : 'none';
+  document.getElementById('risk-config-group').style.display = isMonitor ? 'none' : '';
+  document.getElementById('rtab-monitor').style.opacity = isMonitor ? '1' : '0.55';
+  document.getElementById('rtab-config').style.opacity = isMonitor ? '0.55' : '1';
+  document.getElementById('rtab-monitor').style.background = isMonitor ? 'rgba(56,139,253,0.15)' : 'var(--bg)';
+  document.getElementById('rtab-config').style.background = isMonitor ? 'var(--bg)' : 'rgba(56,139,253,0.15)';
+  document.getElementById('rtab-monitor').style.borderColor = isMonitor ? 'var(--blue)' : 'var(--border)';
+  document.getElementById('rtab-config').style.borderColor = isMonitor ? 'var(--border)' : 'var(--blue)';
+  document.getElementById('rtab-monitor').style.color = isMonitor ? 'var(--blue)' : 'var(--text)';
+  document.getElementById('rtab-config').style.color = isMonitor ? 'var(--text)' : 'var(--blue)';
+}
+
+// ── Floating dirty-state bar — track input changes / 追踪输入修改 ──────────
+(function() {
+  const bar = document.getElementById('risk-dirty-bar');
+  function showBar() { bar.style.display = 'flex'; }
+  function hideBarDelayed() { setTimeout(function() { bar.style.display = 'none'; }, 1800); }
+  document.querySelectorAll('.oc-input, .oc-select, input[type="checkbox"]').forEach(function(el) {
+    el.addEventListener('input', showBar);
+    el.addEventListener('change', showBar);
+  });
+  // Hide bar ~1.8s after any save button is clicked
+  document.querySelectorAll('[onclick*="save"], [onclick*="Save"]').forEach(function(btn) {
+    btn.addEventListener('click', hideBarDelayed);
+  });
+})();
+</script>
 
 <script src="/static/risk-tab.js"></script>
 

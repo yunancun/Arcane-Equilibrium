@@ -37,6 +37,20 @@
     </div>
   </header>
 
+  <!-- Legacy notice: index.html is the old entry point, main console is /console -->
+  <!-- 遗留提示：index.html 是旧入口，主控制台已迁移到 /console -->
+  <div style="background:rgba(210,153,34,0.12);border:1px solid rgba(210,153,34,0.3);border-radius:8px;padding:10px 16px;margin:12px;display:flex;align-items:center;gap:10px;font-size:13px">
+    <span style="font-size:16px">⚠️</span>
+    <span style="color:#d29922;flex:1">
+      <strong>Legacy UI / 遗留界面</strong> — 主控制台已迁移到
+      <a href="/console" style="color:#388bfd;font-weight:600">/console</a>。
+      此页面保留供内部工具调用（data-action API）。
+    </span>
+    <a href="/console" style="background:rgba(56,139,253,0.15);border:1px solid rgba(56,139,253,0.3);border-radius:6px;padding:5px 14px;color:#388bfd;font-size:12px;font-weight:600;text-decoration:none;white-space:nowrap">
+      前往主控制台 →
+    </a>
+  </div>
+
   <main class="page-shell">
     <section class="card hero-card">
       <div class="card-header-row">

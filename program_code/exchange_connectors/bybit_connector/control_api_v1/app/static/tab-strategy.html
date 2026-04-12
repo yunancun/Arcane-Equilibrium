@@ -22,6 +22,23 @@
 
 <div id="explain-strategy"></div>
 
+<!-- ═══ Strategy Health Summary Bar ═══ -->
+<!-- 策略健康度汇总栏 — active/paused/stopped 分布（SUGGESTION §4.4） -->
+<div class="oc-card" style="padding:10px 16px;margin-bottom:10px">
+  <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+    <span style="font-size:12px;color:var(--text-dim);font-weight:600">策略分布 / Health:</span>
+    <span class="oc-chip oc-chip-good" id="sh-active-chip">Active 0</span>
+    <span class="oc-chip oc-chip-warn" id="sh-paused-chip">Paused 0</span>
+    <span class="oc-chip oc-chip-neutral" id="sh-stopped-chip">Stopped 0</span>
+    <!-- Mini distribution bar / 迷你分布条 -->
+    <div id="sh-bar" style="flex:1;min-width:80px;height:6px;border-radius:3px;background:#21262d;overflow:hidden;position:relative">
+      <div id="sh-bar-active" style="position:absolute;left:0;top:0;height:100%;background:var(--green);transition:width 0.3s"></div>
+      <div id="sh-bar-paused" style="position:absolute;top:0;height:100%;background:var(--yellow);transition:width 0.3s"></div>
+    </div>
+    <span id="sh-summary" style="font-size:11px;color:var(--text-dim)"></span>
+  </div>
+</div>
+
 <!-- ═══ Strategy Cards ═══ -->
 <div class="oc-card">
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
@@ -57,7 +74,7 @@
     <div id="explain-scanner"></div>
     <div class="oc-table-wrap">
       <table class="oc-table">
-        <thead><tr><th>Symbol</th><th>Type</th><th>Score</th><th>Reason</th></tr></thead>
+        <thead><tr><th>Symbol / 币种</th><th>Type / 类型</th><th>Score / 分数</th><th>Reason / 原因</th></tr></thead>
         <tbody id="scanner-tbody"><tr class="empty-row"><td colspan="4">Loading...</td></tr></tbody>
       </table>
     </div>
@@ -69,7 +86,7 @@
     <div id="deployed-meta" style="font-size:11px;color:var(--text-dim);margin-bottom:6px"></div>
     <div class="oc-table-wrap">
       <table class="oc-table">
-        <thead><tr><th>Symbol</th><th>Type</th><th>Strategies</th><th>State</th></tr></thead>
+        <thead><tr><th>Symbol / 币种</th><th>Type / 类型</th><th>Strategies / 策略数</th><th>State / 状态</th></tr></thead>
         <tbody id="deployed-tbody"><tr class="empty-row"><td colspan="4">Loading...</td></tr></tbody>
       </table>
     </div>
@@ -83,7 +100,7 @@
     <div id="explain-intents"></div>
     <div class="oc-table-wrap">
       <table class="oc-table">
-        <thead><tr><th>Time</th><th>Symbol</th><th>Side</th><th>Type</th><th>Qty</th><th>Conf</th><th>Source</th><th>Status</th></tr></thead>
+        <thead><tr><th>Time / 时间</th><th>Symbol / 币种</th><th>Side / 方向</th><th>Type / 类型</th><th>Qty / 数量</th><th>Conf / 置信</th><th>Source / 来源</th><th>Status / 状态</th></tr></thead>
         <tbody id="intents-tbody"><tr class="empty-row"><td colspan="8">Loading...</td></tr></tbody>
       </table>
     </div>
@@ -252,6 +269,21 @@ async function loadStrategies() {
   const active = strategies.filter(s => s.state === 'active').length;
   ocSetText('orch-active', active);
   ocSetText('orch-total', strategies.length);
+
+  // Update health summary bar / 更新策略健康度汇总栏
+  const paused = strategies.filter(s => s.state === 'paused').length;
+  const stopped = strategies.filter(s => s.state === 'stopped' || s.state === 'error').length;
+  const total = strategies.length || 1;
+  ocSetText('sh-active-chip', 'Active ' + active);
+  ocSetText('sh-paused-chip', 'Paused ' + paused);
+  ocSetText('sh-stopped-chip', 'Stopped ' + stopped);
+  const activePct = (active / total * 100).toFixed(0);
+  const pausedPct = (paused / total * 100).toFixed(0);
+  const barActive = document.getElementById('sh-bar-active');
+  const barPaused = document.getElementById('sh-bar-paused');
+  if (barActive) { barActive.style.width = activePct + '%'; }
+  if (barPaused) { barPaused.style.width = pausedPct + '%'; barPaused.style.left = activePct + '%'; }
+  ocSetText('sh-summary', active + '/' + total + ' running');
 
   if (!strategies.length) {
     ocSetHtml('strategy-grid', '<div class="oc-loading">没有注册的策略 / No registered strategies</div>');

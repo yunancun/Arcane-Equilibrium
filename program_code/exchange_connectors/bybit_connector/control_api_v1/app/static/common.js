@@ -574,6 +574,13 @@ function ocInjectBaseCSS() {
     .oc-grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; }
     @media (max-width: 700px) {
       .oc-grid-2, .oc-grid-3 { grid-template-columns: 1fr; }
+      body { padding: 8px; }
+      .oc-table td, .oc-table th { padding: 6px 7px; font-size: 11px; }
+      .oc-control-bar { gap: 6px; padding: 8px 10px; }
+      .oc-metrics { grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); }
+      .oc-card { padding: 12px; }
+      .oc-input, .oc-select { min-width: 0; width: 100%; }
+      .oc-strat-grid { grid-template-columns: 1fr; }
     }
 
     /* Separator */
@@ -633,6 +640,135 @@ function ocInjectBaseCSS() {
 
     /* Tooltip on metric labels — shows on hover */
     .oc-metric-label[title] { cursor: help; border-bottom: 1px dotted var(--text-dim); display: inline-block; }
+
+    /* live-metric: unified alias for tab-live.html metric cells (§6.1 CSS unification)
+       live-metric 是 oc-metric 的别名，用于实盘 tab。保持视觉一致，特殊修饰词在各 tab 自定义。
+       Note: mc/mc-val (console.html sidebar) is a separate narrower context — not unified. */
+    .live-metrics { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+    .live-metric { background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; }
+    .live-metric.span2 { grid-column: span 2; }
+    .live-metric-label { font-size: 11px; color: var(--text-dim); margin-bottom: 4px; font-weight: 500; }
+    .live-metric-val { font-size: 20px; font-weight: 700; }
+    .live-metric-val.large { font-size: 24px; }
+    .live-metric-val.pos { color: var(--green); }
+    .live-metric-val.neg { color: #f87171; }
+    .live-metric-val.neutral { color: var(--text); }
+    .live-metric-val.purple { color: #a855f7; }
+    .live-metric-sub { font-size: 10px; color: var(--text-dim); margin-top: 2px; }
+
+    /* Load-error state / 加载失败状态 — used by ocLoadError() */
+    .oc-load-error { color: var(--red); font-size: 12px; padding: 10px 0;
+      display: flex; align-items: center; gap: 8px; }
+    .oc-load-error button { padding: 2px 8px; font-size: 10px; }
+
+    /* Diff-highlight on risk form cells / 风控表单原值对比高亮 — used by §4.1 diff mode */
+    .oc-diff-changed { background: rgba(210,153,34,0.12) !important;
+      border-color: rgba(210,153,34,0.4) !important; }
+    .oc-diff-label { font-size: 9px; color: var(--yellow); margin-top: 3px; font-style: italic; }
+
+    /* Generic confirm modal (shared across tab iframes) / 通用确认弹窗（各 tab iframe 共用） */
+    .oc-confirm-overlay { display:none; position:fixed; inset:0; z-index:5000;
+      background:rgba(0,0,0,0.7); align-items:center; justify-content:center; }
+    .oc-confirm-overlay.show { display:flex; }
+    .oc-confirm-dialog { background:var(--card-bg,#161b22); border:1px solid rgba(248,81,73,0.4);
+      border-radius:12px; padding:24px; max-width:440px; width:90%; }
+    .oc-confirm-dialog h3 { color:#f85149; font-size:15px; margin-bottom:8px; }
+    .oc-confirm-dialog p { font-size:13px; color:#c9d1d9; white-space:pre-line; margin-bottom:16px; line-height:1.6; }
+    .oc-confirm-dialog .btn-row { display:flex; gap:8px; justify-content:flex-end; }
   `;
   document.head.appendChild(style);
+}
+
+// ─── Generic Confirm Modal ────────────────────────────────────────────────────
+// openConfirmModal: shared confirm dialog for tab iframes where app.js isn't loaded.
+// openConfirmModal: 在 app.js 未加载的 tab iframe 中提供通用确认弹窗。
+// When app.js loads in the parent context, its version overrides this one there.
+// 当 app.js 在父上下文加载时，会在该上下文覆盖此版本。
+
+// ─── Load Error Display Helper ────────────────────────────────────────────────
+/**
+ * Show a user-friendly load-failure state inside an element.
+ * 在元素内显示用户友好的加载失败状态（区别于无声 -- 占位）。
+ * @param {string} elementId - container element id to replace content
+ * @param {string} [retryFnName] - JS function name (string) to call on retry click, e.g. 'loadAll'
+ * @param {string} [msg] - optional custom message
+ */
+function ocLoadError(elementId, retryFnName, msg) {
+  var el = document.getElementById(elementId);
+  if (!el) return;
+  var retryBtn = retryFnName
+    ? ' <button class="oc-btn" style="padding:2px 8px;font-size:10px" onclick="' + retryFnName + '()">↺ 重试 / Retry</button>'
+    : '';
+  el.innerHTML = '<div class="oc-load-error">⚠ ' +
+    (msg || '连接失败，请检查引擎状态 / Connection failed — check engine') +
+    retryBtn + '</div>';
+}
+
+/** Per-action metadata for dangerous operations / 危险操作的确认文本元数据 */
+var _OC_CONFIRM_ACTIONS = {
+  "reset-cooldown": {
+    title: "重置冷卻期 / Reset Loss Cooldown",
+    body: "連續虧損冷卻期是風控保護機制，重置後系統將立即恢復開倉。\n請確認當前市況適合繼續交易，否則可能加速虧損。",
+    confirmLabel: "確認重置 / Confirm Reset"
+  },
+  "unhalt-session": {
+    title: "解除熔斷 / Unhalt Session",
+    body: "熔斷保護在回撤嚴重時觸發，解除後所有交易功能恢復。\n⚠ 請確認風險已消除，否則可能觸發更大回撤。",
+    confirmLabel: "確認解除 / Confirm Unhalt"
+  },
+  "delete-strategy": {
+    title: "刪除策略 / Delete Strategy",
+    body: "此操作無法撤銷，策略的所有參數與狀態將被永久刪除。\n策略刪除後立即生效，已開倉位不受影響但不再被該策略管理。",
+    confirmLabel: "確認刪除 / Confirm Delete"
+  }
+};
+
+/**
+ * Show a custom confirmation dialog and return Promise<boolean>.
+ * 显示自定义确认弹窗，返回 Promise<boolean>。
+ * @param {string} actionName - action key from _OC_CONFIRM_ACTIONS, or plain title text
+ * @returns {Promise<boolean>}
+ */
+function openConfirmModal(actionName) {
+  const meta = _OC_CONFIRM_ACTIONS[actionName] || {
+    title: actionName || '確認操作 / Confirm Action',
+    body: '此操作將立即執行，無法撤銷。\nThis action cannot be undone.',
+    confirmLabel: '確認 / Confirm'
+  };
+
+  // Lazily inject overlay element / 懶加載注入 overlay 元素
+  let overlay = document.getElementById('oc-generic-confirm-overlay');
+  if (!overlay) {
+    overlay = document.createElement('div');
+    overlay.id = 'oc-generic-confirm-overlay';
+    overlay.className = 'oc-confirm-overlay';
+    overlay.innerHTML =
+      '<div class="oc-confirm-dialog">' +
+        '<h3 id="oc-gc-title"></h3>' +
+        '<p id="oc-gc-body"></p>' +
+        '<div class="btn-row">' +
+          '<button id="oc-gc-cancel" class="oc-btn">取消 / Cancel</button>' +
+          '<button id="oc-gc-confirm" class="oc-btn oc-btn-danger">確認</button>' +
+        '</div>' +
+      '</div>';
+    document.body.appendChild(overlay);
+  }
+
+  document.getElementById('oc-gc-title').textContent = meta.title;
+  document.getElementById('oc-gc-body').textContent = meta.body;
+  var confirmBtn = document.getElementById('oc-gc-confirm');
+  confirmBtn.textContent = meta.confirmLabel || '確認 / Confirm';
+  overlay.classList.add('show');
+
+  return new Promise(function(resolve) {
+    function close(val) {
+      overlay.classList.remove('show');
+      // Remove handlers to prevent duplicate firing / 移除监听防止重复触发
+      document.getElementById('oc-gc-cancel').onclick = null;
+      confirmBtn.onclick = null;
+      resolve(val);
+    }
+    document.getElementById('oc-gc-cancel').onclick = function() { close(false); };
+    confirmBtn.onclick = function() { close(true); };
+  });
 }

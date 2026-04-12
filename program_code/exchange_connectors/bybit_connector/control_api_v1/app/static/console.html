@@ -73,14 +73,6 @@
     border: none; background: var(--bg); }
   .frame-wrap .placeholder { display: none; position: absolute; inset: 0; overflow-y: auto; }
 
-  /* ── Sidebar Nav Buttons ────────────────────────────────────── */
-  .nav-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; margin-top: 6px; }
-  .nav-btn { padding: 5px 6px; border-radius: 6px; border: 1px solid #21262d;
-    background: var(--bg); color: var(--text-dim); font-size: 10px; cursor: pointer;
-    text-align: center; transition: all 0.15s; }
-  .nav-btn:hover { border-color: var(--accent); color: var(--text); }
-  .nav-btn.nav-active { background: rgba(56,139,253,0.1); border-color: rgba(56,139,253,0.3); color: var(--accent); }
-
   /* Currency Toggle Badge */
   .oc-curr-badge { display: inline-block; padding: 2px 9px; border-radius: 999px;
     font-size: 11px; font-weight: 600; letter-spacing: 0.3px; cursor: pointer;
@@ -111,8 +103,20 @@
   <!-- ─── Sidebar ─── -->
   <div class="sidebar">
 
-    <!-- Switchable Live / Paper panel — click anywhere to toggle -->
-    <div id="side-panel-live" class="side-panel active" onclick="toggleSidePanel('live')">
+    <!-- Live / Paper panel switcher buttons / 实盘/模拟面板切换按钮 -->
+    <div style="display:flex;gap:4px;margin-bottom:8px">
+      <button id="spbtn-live" onclick="toggleSidePanel('live')"
+        style="flex:1;padding:4px 0;font-size:11px;font-weight:600;border-radius:6px;border:1px solid rgba(239,68,68,0.5);background:rgba(239,68,68,0.15);color:#ef4444;cursor:pointer">
+        🔴 Live
+      </button>
+      <button id="spbtn-paper" onclick="toggleSidePanel('paper')"
+        style="flex:1;padding:4px 0;font-size:11px;font-weight:600;border-radius:6px;border:1px solid var(--border);background:transparent;color:var(--text-dim);cursor:pointer">
+        🧪 Paper
+      </button>
+    </div>
+
+    <!-- Switchable Live / Paper panel -->
+    <div id="side-panel-live" class="side-panel active">
       <h2 style="margin:0 0 5px">&#x1F534; Live / 实盘</h2>
       <div class="mc" id="live-section" style="opacity:0.5">
         <div class="mc-label">System Mode</div>
@@ -125,13 +129,13 @@
         <div class="mc-sub" id="s-live-balance-detail"></div>
       </div>
       <div class="mc" id="live-pnl-section" style="opacity:0.5">
-        <div class="mc-label">Net PnL</div>
+        <div class="mc-label"><abbr title="Net Unrealized Profit & Loss / 未实现净损益">Net PnL</abbr></div>
         <div class="mc-val" id="s-live-pnl">--</div>
         <div class="mc-sub" id="s-live-pnl-detail"></div>
       </div>
     </div>
 
-    <div id="side-panel-paper" class="side-panel" onclick="toggleSidePanel('paper')" style="display:none">
+    <div id="side-panel-paper" class="side-panel" style="display:none">
       <h2 style="margin:0 0 5px">&#x1F4B0; Paper / 模拟</h2>
       <div class="mc">
         <div class="mc-label">Balance</div>
@@ -145,11 +149,6 @@
       </div>
     </div>
 
-    <!-- Indicator dots: shows which panel is active -->
-    <div style="display:flex;justify-content:center;gap:6px;margin:4px 0 2px">
-      <span id="dot-live" class="panel-dot panel-dot-active" title="Live"></span>
-      <span id="dot-paper" class="panel-dot" title="Paper"></span>
-    </div>
 
     <h2>AI Cost / AI 成本</h2>
     <div class="mc">
@@ -168,15 +167,6 @@
       <div class="mc-val" id="s-oc" style="font-size:14px">--</div>
     </div>
 
-    <h2>Currency / 计价货币</h2>
-    <div class="mc" style="display:flex;align-items:center;gap:6px">
-      <span style="font-size:11px;color:var(--text-dim)">Display</span>
-      <span class="oc-curr-badge" onclick="ocToggleCurrency()" title="Click to cycle USDT → USD → EUR / 点击切换计价货币">USDT</span>
-      <span style="font-size:10px;color:var(--text-dim)">click to cycle</span>
-    </div>
-
-    <h2>Navigation / 导航</h2>
-    <div class="nav-grid" id="nav-grid"></div>
     <div class="mc-sub" style="margin-top:6px;text-align:center">
       Auto-refresh 15s | <span id="s-token-status">--</span>
     </div>
@@ -234,9 +224,12 @@ const TABS = [
   { id: 'system',     label: '系统总览',  labelEn: 'Overview',  icon: '&#x1F4CA;', src: `/static/tab-system.html?v=${_v}` },
   // ── 交易核心 ─────────────────────────────────────────────────────
   { id: 'live',       label: '实盘交易',  labelEn: 'Live',      icon: '&#x1F534;', src: `/static/tab-live.html?v=${_v}` },
-  { id: 'trading',    label: '测试交易',  labelEn: 'Test',      icon: '&#x1F9EA;', src: `/static/tab-trading.html?v=${_v}` },
+  // FIX-43: split into direct Demo + Paper tabs (eliminate double-iframe nesting)
+  // FIX-43：拆為直接 Demo + Paper 標籤（消除雙層 iframe 嵌套）
+  { id: 'demo',       label: 'Demo引擎',  labelEn: 'Demo',      icon: '&#x1F3E6;', src: `/static/tab-demo.html?v=${_v}` },
+  { id: 'paper',      label: '模拟引擎',  labelEn: 'Paper',     icon: '&#x1F9EA;', src: `/static/tab-paper.html?v=${_v}` },
   // ── 市場與策略 ───────────────────────────────────────────────────
-  { id: 'charts',     label: 'K线图表',   labelEn: 'Charts',    icon: '&#x1F4C8;', src: '/trading' },
+  { id: 'charts',     label: 'K线图表',   labelEn: 'Charts',    icon: '&#x1F4C8;', src: '/trading?embed=1' },
   { id: 'strategy',   label: '策略中心',  labelEn: 'Strategy',  icon: '&#x2699;',  src: `/static/tab-strategy.html?v=${_v}` },
   // ── 風控與智能 ───────────────────────────────────────────────────
   { id: 'risk',       label: '风控止损',  labelEn: 'Risk',      icon: '&#x1F6E1;', src: `/static/tab-risk.html?v=${_v}` },
@@ -254,7 +247,6 @@ let currentTab = 'system';
 function buildTabs() {
   const bar = document.getElementById('tab-bar');
   const wrap = document.getElementById('frame-wrap');
-  const navGrid = document.getElementById('nav-grid');
 
   TABS.forEach((t, i) => {
     // Tab button
@@ -269,17 +261,12 @@ function buildTabs() {
     const frame = document.createElement('iframe');
     frame.id = 'f-' + t.id;
     frame.style.display = i === 0 ? 'block' : 'none';
-    frame.dataset.src = t.src + '?v=' + BUILD_TS;
-    if (i === 0) frame.src = t.src + '?v=' + BUILD_TS; // Load first tab immediately
+    // Use & if src already has query params (e.g. ?embed=1), otherwise use ?
+    // 若 src 已有查询参数则用 &，否则用 ?
+    const sep = t.src.includes('?') ? '&' : '?';
+    frame.dataset.src = t.src + sep + 'v=' + BUILD_TS;
+    if (i === 0) frame.src = t.src + sep + 'v=' + BUILD_TS; // Load first tab immediately
     wrap.appendChild(frame);
-
-    // Sidebar nav button
-    const navBtn = document.createElement('div');
-    navBtn.className = 'nav-btn' + (i === 0 ? ' nav-active' : '');
-    navBtn.dataset.tab = t.id;
-    navBtn.textContent = t.labelEn;
-    navBtn.onclick = () => switchTo(t.id);
-    navGrid.appendChild(navBtn);
   });
 }
 
@@ -288,9 +275,6 @@ function switchTo(tabId) {
   // Update tab bar
   document.querySelectorAll('.tab').forEach(t =>
     t.classList.toggle('active', t.dataset.tab === tabId));
-  // Update nav buttons
-  document.querySelectorAll('.nav-btn').forEach(b =>
-    b.classList.toggle('nav-active', b.dataset.tab === tabId));
   // Show/hide iframes (lazy load on first switch)
   TABS.forEach(t => {
     const frame = document.getElementById('f-' + t.id);
@@ -322,14 +306,27 @@ if (user) document.getElementById('user-label').textContent = user;
 document.getElementById('s-token-status').textContent = 'cookie-auth';
 
 // ─── Side Panel Toggle (Live ↔ Paper) ────────────────────────
+// Shows the clicked panel directly (not toggle to opposite)
+// 直接顯示被點擊的面板（不是切換到對面）
 let _sidePanel = 'live';
 function toggleSidePanel(clicked) {
-  // Switch to the OTHER panel
-  _sidePanel = (clicked === 'live') ? 'paper' : 'live';
+  _sidePanel = clicked;
   document.getElementById('side-panel-live').style.display = _sidePanel === 'live' ? '' : 'none';
   document.getElementById('side-panel-paper').style.display = _sidePanel === 'paper' ? '' : 'none';
-  document.getElementById('dot-live').className = 'panel-dot' + (_sidePanel === 'live' ? ' panel-dot-active' : '');
-  document.getElementById('dot-paper').className = 'panel-dot' + (_sidePanel === 'paper' ? ' panel-dot-active' : '');
+  // Update button active state / 更新按鈕激活狀態
+  const liveActive = _sidePanel === 'live';
+  const btnLive = document.getElementById('spbtn-live');
+  const btnPaper = document.getElementById('spbtn-paper');
+  if (btnLive) {
+    btnLive.style.background = liveActive ? 'rgba(239,68,68,0.15)' : 'transparent';
+    btnLive.style.borderColor = liveActive ? 'rgba(239,68,68,0.5)' : 'var(--border)';
+    btnLive.style.color = liveActive ? '#ef4444' : 'var(--text-dim)';
+  }
+  if (btnPaper) {
+    btnPaper.style.background = liveActive ? 'transparent' : 'rgba(56,139,253,0.12)';
+    btnPaper.style.borderColor = liveActive ? 'var(--border)' : 'rgba(56,139,253,0.3)';
+    btnPaper.style.color = liveActive ? 'var(--text-dim)' : 'var(--blue)';
+  }
 }
 
 // ─── Sidebar API helper (APR01-MEDIUM-13: cookie-based auth) ─
@@ -407,7 +404,7 @@ async function refreshSidebar() {
       pnlEl.textContent = unrealized !== 0 ? ocMoney(unrealized) : '--';
       pnlEl.className = 'mc-val' + (unrealized > 0 ? ' green' : unrealized < 0 ? ' red' : '');
       document.getElementById('s-live-pnl-detail').textContent =
-        unrealized !== 0 ? 'UPL: ' + unrealized.toFixed(2) : 'UPL: --';
+        unrealized !== 0 ? 'UPL (Unrealized PnL): ' + unrealized.toFixed(2) : 'UPL: --';
     } else {
       document.getElementById('s-live-balance').textContent = '--';
       document.getElementById('s-live-balance-detail').textContent = 'connecting...';

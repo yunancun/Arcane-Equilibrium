@@ -54,31 +54,9 @@ html, body {
 }
 .live-card-group.live-accent { border-color: rgba(168,85,247,0.3); }
 
-/* Metrics grid / 指標網格 */
-.live-metrics {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-  gap: 10px;
-}
-.live-metric {
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 8px; padding: 10px 12px;
-}
-.live-metric.span2 { grid-column: span 2; }
-.live-metric-label {
-  font-size: 11px; color: var(--text-dim);
-  margin-bottom: 4px; font-weight: 500;
-}
-.live-metric-val {
-  font-size: 20px; font-weight: 700;
-}
-.live-metric-val.large { font-size: 24px; }
-.live-metric-val.pos { color: var(--green); }
-.live-metric-val.neg { color: #f87171; }
-.live-metric-val.neutral { color: var(--text); }
-.live-metric-val.purple { color: #a855f7; }
-.live-metric-sub { font-size: 10px; color: var(--text-dim); margin-top: 2px; }
+/* Metrics grid / 指標網格 — defined in common.js ocInjectBaseCSS() (§6.1 unified)
+   live-metric* classes are now canonical in common.js; this comment marks the migration.
+   实盘 metric 样式已迁移至 common.js，此处仅保留 live-specific 样式覆盖。 */
 
 /* Positions / orders table / 倉位掛單表格 */
 .live-section-title {
@@ -206,6 +184,8 @@ html, body {
     <span style="flex:1"></span>
     <button class="oc-btn oc-btn-success" id="btn-live-start" onclick="liveStart()" style="font-weight:700">&#x25B6; 啟動 Live</button>
     <button class="oc-btn oc-btn-danger" id="btn-live-stop" onclick="openStopDialog()" disabled style="font-weight:700">&#x23F9; 停止 Live</button>
+    <!-- Separator before emergency stop to prevent accidental clicks / 分隔符防止误触紧急停止 -->
+    <span style="display:inline-block;width:1px;height:24px;background:var(--border);margin:0 8px;flex-shrink:0"></span>
     <button class="btn-emergency" id="btn-emergency-stop" onclick="openEmergencyDialog()">&#x1F6A8; 緊急停止</button>
   </div>
 

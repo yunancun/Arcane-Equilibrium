@@ -9,6 +9,13 @@
 <body>
 <script>ocAuthCheck(); ocInjectBaseCSS();</script>
 
+<!-- Restart countdown banner — shown after restart is scheduled / 重启倒计时横幅 -->
+<div id="restart-top-banner" style="display:none;position:sticky;top:0;z-index:400;background:rgba(248,81,73,0.92);color:#fff;
+  padding:8px 16px;display:none;align-items:center;gap:12px;font-size:13px;box-shadow:0 2px 8px rgba(0,0,0,0.4)">
+  <span id="restart-banner-text">&#x23F1; 服務器將在 <strong id="restart-banner-countdown">--</strong> 後重啟 / Server restarts in <strong id="restart-banner-countdown2">--</strong></span>
+  <span style="font-size:11px;color:rgba(255,255,255,0.7)">重啟期間監控中斷，無法執行止損</span>
+</div>
+
 <!-- ═══ Demo Control Plane ═══ -->
 <div class="oc-card">
   <h2>&#x1F3AE; Demo 控制面板 / Demo Control Plane</h2>
@@ -442,15 +449,25 @@ async function executeRestart() {
 
 function startRestartCountdown(restartAtMs) {
   const el = document.getElementById('restart-status');
+  const banner = document.getElementById('restart-top-banner');
+  const cd1 = document.getElementById('restart-banner-countdown');
+  const cd2 = document.getElementById('restart-banner-countdown2');
+  if (banner) banner.style.display = 'flex';  // show sticky banner / 显示顶部横幅
+
   const iv = setInterval(() => {
     const remaining = Math.max(0, Math.ceil((restartAtMs - Date.now()) / 1000));
     const m = Math.floor(remaining / 60), s = remaining % 60;
+    const label = m + 'm ' + s + 's';
     if (remaining <= 0) {
       clearInterval(iv);
       el.innerHTML = '<div class="oc-chip" style="color:var(--text-dim);font-size:12px">服務器重啟中...</div>';
+      if (banner) banner.style.display = 'none';
       return;
     }
-    el.innerHTML = '<div class="oc-chip oc-chip-good" style="font-size:12px">⏱ 重啟倒計時：' + m + 'm ' + s + 's</div>';
+    el.innerHTML = '<div class="oc-chip oc-chip-good" style="font-size:12px">&#x23F1; 重啟倒計時：' + label + '</div>';
+    // Update sticky banner / 更新顶部横幅
+    if (cd1) cd1.textContent = label;
+    if (cd2) cd2.textContent = label;
   }, 1000);
 }
 

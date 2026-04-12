@@ -376,7 +376,15 @@
   }
 
   refresh();
-  setInterval(refresh, 30000);  // 30s — see spec 4-00 §5 / 见 spec 4-00 §5
+  setInterval(refresh, 30000);  // 30s — overall traffic-light + all cards / 全局 30s
+
+  // Teacher card refreshes at a faster cadence (10s) due to live Claude feedback loop
+  // Teacher 卡片单独 10s 刷新（Claude 反馈循环更新频繁）
+  setInterval(function() {
+    if (typeof window.loadTeacherCard === 'function') {
+      try { window.loadTeacherCard(); } catch(e) { /* fail-soft */ }
+    }
+  }, 10000);
 })();
 </script>
 </body>

@@ -227,12 +227,71 @@ const _RISK_INPUT_IDS = [
 ];
 _RISK_INPUT_IDS.forEach(id => {
   const el = $(id);
-  if (el) el.addEventListener('input', () => { _riskFormDirty = true; });
+  if (el) el.addEventListener('input', () => { _riskFormDirty = true; _updateDiffHighlights(); });
 });
 // in-tp-enabled uses 'change' (checkbox), not 'input' — must be tracked separately.
 // in-tp-enabled 是 checkbox，用 change 事件，需單獨追蹤。
 const _tpEl = $('in-tp-enabled');
-if (_tpEl) _tpEl.addEventListener('change', () => { _riskFormDirty = true; });
+if (_tpEl) _tpEl.addEventListener('change', () => { _riskFormDirty = true; _updateDiffHighlights(); });
+
+// ─── §4.1 Diff mode: highlight right-panel display cells when inputs differ from loaded values ──
+// §4.1 對比模式：當輸入值與已載入值不同時，高亮右側顯示格並標示原始值
+const _DIFF_MAP = {
+  'in-hard-stop':      's-hard',
+  'in-take-profit':    's-tp',
+  'in-trailing':       's-trailing',
+  'in-time-stop':      's-time',
+  'in-atr-mult':       's-atr',
+  'in-drawdown':       's-drawdown',
+  'in-leverage':       's-leverage',
+  'in-daily-loss':     's-daily',
+  'in-p1-risk':        's-p1-risk',
+  'in-single-pos':     's-single-pos',
+  'in-total-exp':      's-total-exp',
+  'in-same-dir':       's-same-dir',
+  'in-cooldown-count': 's-cool-count',
+  'in-cooldown-min':   's-cool-min',
+};
+
+function _updateDiffHighlights() {
+  Object.entries(_DIFF_MAP).forEach(([inId, dispId]) => {
+    const inp = $(inId);
+    const disp = $(dispId);
+    if (!inp || !disp) return;
+    const orig = inp.dataset.original;
+    if (orig === undefined) return; // not yet loaded, skip
+    const changed = String(inp.value).trim() !== String(orig).trim();
+    disp.classList.toggle('oc-diff-changed', changed);
+    // Insert / remove "was: X" diff label inside the metric cell parent
+    // 在指標格父元素中插入/移除「was: X」差異標籤
+    const parent = disp.closest('.oc-metric') || disp.parentElement;
+    let lbl = parent ? parent.querySelector('.oc-diff-label') : null;
+    if (changed) {
+      if (!lbl) {
+        lbl = document.createElement('div');
+        lbl.className = 'oc-diff-label';
+        if (parent) parent.appendChild(lbl);
+      }
+      lbl.textContent = '← was: ' + orig;
+    } else if (lbl) {
+      lbl.remove();
+    }
+  });
+}
+
+// Reset diff highlights after successful save — call after _riskFormDirty = false
+// 保存成功後重置對比高亮 — 在 _riskFormDirty = false 之後呼叫
+function _resetDiffHighlights() {
+  Object.entries(_DIFF_MAP).forEach(([inId, dispId]) => {
+    const inp = $(inId);
+    const disp = $(dispId);
+    if (inp) { inp.dataset.original = String(inp.value); }
+    if (disp) { disp.classList.remove('oc-diff-changed'); }
+    const parent = disp ? (disp.closest('.oc-metric') || disp.parentElement) : null;
+    const lbl = parent ? parent.querySelector('.oc-diff-label') : null;
+    if (lbl) lbl.remove();
+  });
+}
 
 // _btnSaving — helper: disable btn and show loading text during async save
 // _btnSaving — 辅助函数：保存期间禁用按钮并显示"储存中..."
@@ -277,7 +336,7 @@ async function _doSaveStopSettings(btn) {
     if (d) {
       const engLabel = _selectedRiskEngine.toUpperCase();
       ocToast('[' + engLabel + '] 止损设置已保存 / Stop settings saved', 'success');
-      _riskFormDirty = false; loadAll();
+      _riskFormDirty = false; _resetDiffHighlights(); loadAll();
     } else ocToast('Save failed / 保存失败', 'error');
   } finally {
     _btnSaving(btn, false);
@@ -314,7 +373,7 @@ async function _doSavePositionSettings(btn) {
     if (d) {
       const engLabel = _selectedRiskEngine.toUpperCase();
       ocToast('[' + engLabel + '] 仓位设置已保存 / Position settings saved', 'success');
-      _riskFormDirty = false; loadAll();
+      _riskFormDirty = false; _resetDiffHighlights(); loadAll();
     } else ocToast('Save failed / 保存失败', 'error');
   } finally {
     _btnSaving(btn, false);
@@ -338,7 +397,7 @@ async function _doSaveCooldownSettings(btn) {
     if (d) {
       const engLabel = _selectedRiskEngine.toUpperCase();
       ocToast('[' + engLabel + '] 冷却设置已保存 / Cooldown settings saved', 'success');
-      _riskFormDirty = false; loadAll();
+      _riskFormDirty = false; _resetDiffHighlights(); loadAll();
     } else ocToast('Save failed / 保存失败', 'error');
   } finally {
     _btnSaving(btn, false);
@@ -467,7 +526,9 @@ async function loadRiskStatus() {
   } catch (e) { /* non-blocking */ }
 
   const d = await ocApi('/api/v1/paper/risk/status');
-  if (!d || !d.data) return;
+  // Show visible error in first risk metric cell if API is unreachable
+  // 若 API 不可達，在第一個風控指標格顯示錯誤（非靜默返回）
+  if (!d || !d.data) { ocSetText('r-pressure', '⚠'); ocSetText('r-drawdown', '⚠'); return; }
   const s = d.data;
 
   // Metrics
@@ -679,7 +740,12 @@ async function loadRiskConfig() {
   if (!_riskFormDirty) {
     function _setInput(id, val) {
       const el = $(id);
-      if (el) el.value = val;
+      if (el) {
+        el.value = val;
+        // §4.1 diff mode: store original value so input→display diff can be highlighted
+        // §4.1 對比模式：儲存原始值供輸入→顯示欄位差異高亮使用
+        el.dataset.original = String(val);
+      }
     }
     _setInput('in-hard-stop', gc.max_stop_loss_pct ?? 5);
     // Checkboxes are not text-editable — safe to always update
@@ -733,7 +799,9 @@ async function loadAIContext() {
 
 async function loadDynamicRisk() {
   const d = await ocApi('/api/v1/strategy/dynamic-risk/status');
-  if (!d || !d.data) return;
+  // On failure, show error in the status chip rather than silently leaving stale data
+  // 失敗時在狀態 chip 顯示錯誤，而非靜默保留舊數據
+  if (!d || !d.data) { const s = document.getElementById('dr-status'); if (s) { s.textContent = 'API 失败 / Failed'; s.className = 'oc-chip oc-chip-bad'; } return; }
   const dr = d.data;
   document.getElementById('dr-toggle').checked = dr.enabled;
   ocSetText('dr-current-risk', (dr.current_risk_pct || 0).toFixed(1));
