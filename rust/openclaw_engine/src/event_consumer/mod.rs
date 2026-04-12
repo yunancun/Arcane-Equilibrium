@@ -977,6 +977,10 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
                                 order_id_to_link.retain(|_, link| active_links.contains(link));
                             }
                             last_pending_check = Instant::now();
+                            // R-02: Cross-check pipeline pending_close_symbols against open positions.
+                            // Clears stale flags for symbols whose close fill was already processed.
+                            // R-02：與實際持倉交叉驗證，清理已成交但標記未清除的 pending-close 殘留。
+                            pipeline.reconcile_pending_exchange_orders();
                         }
 
                         // RRC-1-A2: Periodic H0Gate risk snapshot update (every status interval).
