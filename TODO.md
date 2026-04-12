@@ -209,7 +209,7 @@ WIRE-0/WIRE-1 + DL-1/DL-2 + JS-1 + 5-01~03 已全部 ✅。下面是原 backlog 
 
 ## 🧰 WP Backlog（W24+，低優先 · 維護性）
 
-詳細子項見 `docs/audits/2026-04-06_consolidated_remediation_report.md` §10。
+詳細子項見 `docs/audits/2026-04-06--consolidated_remediation_report.md` §10。
 
 ### WP-F GUI（P2 ~10 項）
 
@@ -314,9 +314,9 @@ WIRE-0/WIRE-1 + DL-1/DL-2 + JS-1 + 5-01~03 已全部 ✅。下面是原 backlog 
 - **Live GUI P0~P6 + DEAD-PY-1/2 + 1C-4 收尾**：`docs/archive/2026-04-10--completed_todo_live_gui_dead_py.md`
 - **Phase 5 P0 promotion + WIRE chain**：commits `5d7d673` → `0e848fa` → `638afa3` → `563d54a` → `5e760be`
 - **ARCH-RC1 Session 1A → 1C-4 WRAP**：`docs/worklogs/2026-04-08--arch_rc1_1c_history_archive.md` + `docs/archive/2026-04-08--main_docs_1c3_1c4_narrative.md`
-- **Phase 4 (4-00 ~ 4-21 + 4.1)**：`docs/audits/2026-04-07_phase4_final_signoff_audit.md`
-- **Session 11 之前**：`docs/worklogs/phase5_arch_rc1/2026-04-06--completed_todo_archive_l3_phases.md`
-- **Phase 0/1/2/3 + Rust migration**：`docs/worklogs/phase5_arch_rc1/2026-04-04--completed_todo_archive_phase0123_rust.md`
+- **Phase 4 (4-00 ~ 4-21 + 4.1)**：`docs/audits/2026-04-07--phase4_final_signoff_audit.md`
+- **Session 11 之前**：`docs/archive/2026-04-06--completed_todo_archive_l3_phases.md`
+- **Phase 0/1/2/3 + Rust migration**：`docs/archive/2026-04-04--completed_todo_archive_phase0123_rust.md`
 - **已知問題清單**：`docs/KNOWN_ISSUES.md`
 - **Bybit API 字典手冊**：`docs/references/2026-04-04--bybit_api_reference.md`
 

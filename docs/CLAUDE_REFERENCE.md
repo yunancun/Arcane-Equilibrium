@@ -97,18 +97,18 @@ helper_scripts/maintenance_scripts/bybit_connector/run_i10_canonical_decision_le
 | L3 R0-R2 整改（Session 10-13）| `docs/worklogs/phase5_arch_rc1/2026-04-06--session1*.md` |
 | ARCH-RC1 1A/1B/1C-1/1C-2 實現 | `docs/worklogs/phase5_arch_rc1/2026-04-07--session_arch_rc1_*.md` |
 
-### L3 全系統綜合審計（audits/2026-04-05_l3_comprehensive/）
+### L3 全系統綜合審計（audits/2026-04-05--l3_comprehensive/）
 
 12 份角色專項審計報告（2026-04-05 L3 審計輪次產出）。
 
 | 角色 | 文件 |
 |------|------|
-| A3 GUI | `docs/audits/2026-04-05_l3_comprehensive/audit_A3_gui_usability_report.md` |
-| E3 安全 | `docs/audits/2026-04-05_l3_comprehensive/audit_E3_security_report.md` |
-| E4 測試 | `docs/audits/2026-04-05_l3_comprehensive/audit_E4_test_coverage_report.md` |
-| R4 文檔索引 | `docs/audits/2026-04-05_l3_comprehensive/audit_R4_index_verification_report.md` |
-| TW 文檔盤點 | `docs/audits/2026-04-05_l3_comprehensive/audit_TW_document_inventory_report.md` |
-| （其餘 7 份） | `docs/audits/2026-04-05_l3_comprehensive/audit_{CC,AIE,BB,E5,FA,MIT,QC}_*.md` |
+| A3 GUI | `docs/audits/2026-04-05--l3_comprehensive/audit_A3_gui_usability_report.md` |
+| E3 安全 | `docs/audits/2026-04-05--l3_comprehensive/audit_E3_security_report.md` |
+| E4 測試 | `docs/audits/2026-04-05--l3_comprehensive/audit_E4_test_coverage_report.md` |
+| R4 文檔索引 | `docs/audits/2026-04-05--l3_comprehensive/audit_R4_index_verification_report.md` |
+| TW 文檔盤點 | `docs/audits/2026-04-05--l3_comprehensive/audit_TW_document_inventory_report.md` |
+| （其餘 7 份） | `docs/audits/2026-04-05--l3_comprehensive/audit_{CC,AIE,BB,E5,FA,MIT,QC}_*.md` |
 
 ### 治理開發（governance_dev/）
 

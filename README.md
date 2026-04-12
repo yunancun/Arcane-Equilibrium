@@ -84,7 +84,7 @@ Bybit API:    64 REST + 8 WS + 5 Private WS + 8 IPC
 
 **亮点**：ARCH-RC1 统一 Config 4 IPC 写入面 + 5 engines 热重载（端到端 e2e `4780b04`）· Python 风控/纸盘双退场 · Guardian = RiskConfig 纯派生视图 · 单一 Rust 引擎 · V014 audit · L3 12 路审计完成 · EXT-1 Exchange-as-Truth · 5 Agent · Rust tick <100μs · PyO3 39 方法 · Telegram+Webhook 双通道告警
 
-**详细完成度视角**：见 `docs/audits/2026-04-07_phase4_final_signoff_audit.md`（Phase 4 sign-off）+ `TODO.md`（forward plan）。早期 A-J 能力目标 + Batch 9B 缺口表已过期归档至 `docs/archive/2026-04-08--main_docs_1c3_1c4_narrative.md`。
+**详细完成度视角**：见 `docs/audits/2026-04-07--phase4_final_signoff_audit.md`（Phase 4 sign-off）+ `TODO.md`（forward plan）。早期 A-J 能力目标 + Batch 9B 缺口表已过期归档至 `docs/archive/2026-04-08--main_docs_1c3_1c4_narrative.md`。
 
 **开发路线图**
 
