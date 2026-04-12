@@ -219,7 +219,7 @@ pub struct GridTrading {
     conf_scale: f64,
     /// FIX-06: Configurable grid level count (was hardcoded DEFAULT_GRID_COUNT).
     /// FIX-06：可配置的網格層級數（原硬編碼 DEFAULT_GRID_COUNT）。
-    grid_count: usize,
+    pub(crate) grid_count: usize,
     /// FIX-25: One-way taker fee rate for OU spacing floor calculation.
     /// FIX-25：單邊 taker 手續費率，用於 OU 間距地板計算。
     fee_rate: f64,
@@ -229,6 +229,15 @@ pub struct GridTrading {
     /// M-2：每幣種拒絕退避截止時間（epoch ms）。`on_rejection` 中設定，
     /// `on_tick` 開頭遵守，避免持續性 guardian/cost_gate 拒絕造成緊湊迴圈。
     reject_cooldown_until_ms: HashMap<String, u64>,
+    /// QC-H7: Adaptive range ±% for initial/rebalance grid (default 0.10 = ±10%).
+    /// QC-H7：自適應範圍 ±%（默認 0.10 = ±10%）。
+    pub(crate) adaptive_range_pct: f64,
+    /// QC-H8: Reject backoff duration ms (default 30_000 = 30s).
+    /// QC-H8：拒絕退避時長 ms（默認 30_000 = 30 秒）。
+    pub(crate) reject_backoff_ms: u64,
+    /// QC-H9: OU model recalculation interval in ticks (default 50).
+    /// QC-H9：OU 模型重算間隔（tick 數，默認 50）。
+    pub(crate) ou_update_interval: usize,
 }
 
 /// Build grid levels with linear (arithmetic) spacing.
@@ -302,6 +311,9 @@ impl GridTrading {
             grid_count: DEFAULT_GRID_COUNT,
             fee_rate: DEFAULT_FEE_PCT,
             reject_cooldown_until_ms: HashMap::new(),
+            adaptive_range_pct: ADAPTIVE_RANGE_PCT,
+            reject_backoff_ms: REJECT_BACKOFF_MS,
+            ou_update_interval: 50,
         }
     }
 
@@ -335,6 +347,9 @@ impl GridTrading {
             grid_count: DEFAULT_GRID_COUNT,
             fee_rate: DEFAULT_FEE_PCT,
             reject_cooldown_until_ms: HashMap::new(),
+            adaptive_range_pct: ADAPTIVE_RANGE_PCT,
+            reject_backoff_ms: REJECT_BACKOFF_MS,
+            ou_update_interval: 50,
         }
     }
 
@@ -382,6 +397,9 @@ impl GridTrading {
             grid_count: DEFAULT_GRID_COUNT,
             fee_rate: DEFAULT_FEE_PCT,
             reject_cooldown_until_ms: HashMap::new(),
+            adaptive_range_pct: ADAPTIVE_RANGE_PCT,
+            reject_backoff_ms: REJECT_BACKOFF_MS,
+            ou_update_interval: 50,
         }
     }
 
@@ -456,14 +474,14 @@ impl GridTrading {
                 (lo.max(price * 0.01), hi)
             } else {
                 (
-                    price * (1.0 - ADAPTIVE_RANGE_PCT),
-                    price * (1.0 + ADAPTIVE_RANGE_PCT),
+                    price * (1.0 - self.adaptive_range_pct),
+                    price * (1.0 + self.adaptive_range_pct),
                 )
             }
         } else {
             (
-                price * (1.0 - ADAPTIVE_RANGE_PCT),
-                price * (1.0 + ADAPTIVE_RANGE_PCT),
+                price * (1.0 - self.adaptive_range_pct),
+                price * (1.0 + self.adaptive_range_pct),
             )
         };
 
@@ -666,7 +684,7 @@ impl Strategy for GridTrading {
         if let Some(&emit_ts) = self.last_trade_ms.get(sym) {
             if emit_ts > 0 {
                 self.reject_cooldown_until_ms
-                    .insert(sym.clone(), emit_ts + REJECT_BACKOFF_MS);
+                    .insert(sym.clone(), emit_ts + self.reject_backoff_ms);
             }
         }
 
@@ -703,8 +721,8 @@ impl Strategy for GridTrading {
             let (lower, upper) = match self.template_bounds {
                 Some((lo, hi)) => (lo, hi),
                 None => (
-                    ctx.price * (1.0 - ADAPTIVE_RANGE_PCT),
-                    ctx.price * (1.0 + ADAPTIVE_RANGE_PCT),
+                    ctx.price * (1.0 - self.adaptive_range_pct),
+                    ctx.price * (1.0 + self.adaptive_range_pct),
                 ),
             };
             self.grid_levels.insert(sym.clone(), build_levels(lower, upper, self.grid_count, &self.spacing_mode));
@@ -725,7 +743,8 @@ impl Strategy for GridTrading {
         // Periodically update per-symbol grid spacing via OU model
         // 定期通過 OU 模型更新該幣種網格間距
         let hist_len = self.price_history.get(sym).map(|h| h.len()).unwrap_or(0);
-        if hist_len > 0 && hist_len % 50 == 0 {
+        // QC-H9: ou_update_interval configurable (was hardcoded 50)
+        if hist_len > 0 && self.ou_update_interval > 0 && hist_len % self.ou_update_interval == 0 {
             self.update_ou_spacing(sym);
         }
 

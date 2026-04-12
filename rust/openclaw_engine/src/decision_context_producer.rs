@@ -138,7 +138,7 @@ pub(crate) fn emit_decision_context(
         read_news_context(news_snapshot, event.ts_ms as i64);
 
     let _ = tx.try_send(DecisionContextMsg {
-        context_id: format!("ctx-{}-{}-{}", engine_mode, event.symbol, event.ts_ms),
+        context_id: crate::tick_pipeline::on_tick_helpers::make_context_id(engine_mode, &event.symbol, event.ts_ms),
         ts_ms: event.ts_ms,
         decision_type: "signal_generated".into(),
         symbol: event.symbol.clone(),
@@ -209,6 +209,11 @@ mod tests {
             ask_price: 100.5,
             ts_ms,
             event_kind: None,
+            trade_side: None,
+            trade_qty: None,
+            bids5: None,
+            asks5: None,
+            adl_rank: None,
             metadata: Default::default(),
         }
     }

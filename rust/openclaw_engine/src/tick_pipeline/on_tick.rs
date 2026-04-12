@@ -2,6 +2,7 @@
 //! on_tick 管線處理 — 核心逐 tick 編排循環。
 
 use super::*;
+use super::on_tick_helpers::{push_capped, make_context_id, make_signal_id, make_fill_id, make_order_id, persist_verdict, persist_intent, push_display_intent};
 
 impl TickPipeline {
     /// Process a single price event through the full pipeline.
@@ -11,6 +12,9 @@ impl TickPipeline {
     pub fn on_tick(&mut self, event: &PriceEvent) -> Option<CanaryRecord> {
         // Start timing the tick processing / 開始計時 tick 處理
         let tick_start = Instant::now();
+        // P-01: local alias avoids 8× heap alloc per tick on hot path.
+        // P-01：本地別名避免熱路徑上每 tick 8 次堆分配。
+        let sym = &event.symbol;
 
         // ARCH-RC1 1C-2-B: hot-reload check — if RiskConfig store version has
         // bumped (IPC patch applied), refresh the intent_processor snapshot.
@@ -25,9 +29,9 @@ impl TickPipeline {
             self.boot_ts_ms = Some(event.ts_ms);
         }
         self.latest_prices
-            .insert(event.symbol.clone(), event.last_price);
+            .insert(sym.clone(), event.last_price);
         self.paper_state
-            .set_latest_price(&event.symbol, event.last_price);
+            .set_latest_price(sym, event.last_price);
         // RRC-1-B2: Reset daily start balance at UTC midnight for daily loss tracking.
         // RRC-1-B2：UTC 午夜重置每日起始餘額，用於日損追蹤。
         self.intent_processor
@@ -35,12 +39,12 @@ impl TickPipeline {
         // RRC-1-C1: Feed price to tracker for ATR computation + spike detection.
         // RRC-1-C1：餵入價格到追蹤器，用於 ATR 計算 + 尖峰偵測。
         self.price_tracker
-            .record(&event.symbol, event.last_price, event.ts_ms);
+            .record(sym, event.last_price, event.ts_ms);
         // Update per-symbol turnover for dynamic slippage (from ticker events)
         // 更新每交易對成交額用於動態滑點（來自 ticker 事件）
         if event.turnover_24h > 0.0 {
             self.paper_state
-                .set_latest_turnover(&event.symbol, event.turnover_24h);
+                .set_latest_turnover(sym, event.turnover_24h);
 
             // Phase 1 (F-2 fix): Emit TickerSnapshot to market writer for ticker events.
             // Phase 1（F-2 修復）：為 ticker 事件發送 TickerSnapshot 到市場寫入器。
@@ -52,7 +56,7 @@ impl TickPipeline {
                 };
                 let _ = tx.try_send(crate::database::MarketDataMsg::TickerSnapshot {
                     ts_ms: event.ts_ms,
-                    symbol: event.symbol.clone(),
+                    symbol: sym.clone(),
                     last_price: event.last_price,
                     mark_price: 0.0,  // not available in PriceEvent yet
                     index_price: 0.0, // not available in PriceEvent yet
@@ -71,19 +75,23 @@ impl TickPipeline {
         // Item 9 (M3 fix): ADL alert monitoring
         // 項目 9（M3 修復）：ADL 警報監控
         if event.event_kind.as_ref() == Some(&PriceEventKind::AdlNotice) {
-            if let Some(rank_str) = event.metadata.get("adl_rank") {
-                if let Ok(rank) = rank_str.parse::<u32>() {
-                    self.adl_alerts
-                        .push_back((event.ts_ms, event.symbol.clone(), rank));
-                    if self.adl_alerts.len() > 50 {
-                        self.adl_alerts.pop_front();
-                    }
-                    if rank >= 3 {
-                        info!(
-                            symbol = %event.symbol, rank = rank,
-                            "⚠ ADL rank HIGH — consider reducing position / ADL 排名高，考慮減倉"
-                        );
-                    }
+            // P-02: Read structured field first, fall back to legacy metadata.
+            // P-02：優先讀結構化欄位，回退到舊版 metadata。
+            let rank = event
+                .adl_rank
+                .or_else(|| {
+                    event
+                        .metadata
+                        .get("adl_rank")
+                        .and_then(|s| s.parse::<u32>().ok())
+                });
+            if let Some(rank) = rank {
+                push_capped(&mut self.adl_alerts, (event.ts_ms, sym.clone(), rank), 50);
+                if rank >= 3 {
+                    info!(
+                        symbol = %sym, rank = rank,
+                        "⚠ ADL rank HIGH — consider reducing position / ADL 排名高，考慮減倉"
+                    );
                 }
             }
         }
@@ -195,7 +203,7 @@ impl TickPipeline {
                 risk_level = ?self.governance.risk.level,
                 ts_ms = event.ts_ms,
                 positions = symbols.len(),
-                trigger_symbol = %event.symbol,
+                trigger_symbol = %sym,
                 trigger_price = event.last_price,
                 "FAST_TRACK CloseAll fired — closing all positions / 快速通道全平觸發"
             );
@@ -218,12 +226,12 @@ impl TickPipeline {
         }
 
         // Step 0.5: H0 Gate pre-check (shadow mode: observe only) / H0 門控前置檢查
-        self.h0_gate.update_price_ts(&event.symbol, event.ts_ms);
-        let h0_result = self.h0_gate.check(&event.symbol, "linear", event.ts_ms);
+        self.h0_gate.update_price_ts(sym, event.ts_ms);
+        let h0_result = self.h0_gate.check(sym, "linear", event.ts_ms);
         let h0_allowed = h0_result.allowed;
         if !h0_result.allowed {
             // Hard block: stops only / 硬阻斷：僅處理止損
-            warn!(symbol = %event.symbol, reason = %h0_result.reason,
+            warn!(symbol = %sym, reason = %h0_result.reason,
                 "H0 BLOCKED — stops only / H0 阻斷 — 僅止損");
             // PNL-FIX-1: triggers may fire on positions whose symbol ≠ event.symbol;
             // close each at its own symbol's latest price (see fast_track block).
@@ -240,14 +248,14 @@ impl TickPipeline {
             return self.maybe_canary_record(event, None, vec![], vec![], dur);
         }
         if !h0_result.reason.is_empty() {
-            debug!(symbol = %event.symbol, reason = %h0_result.reason,
+            debug!(symbol = %sym, reason = %h0_result.reason,
                 "H0 shadow would-block / H0 影子模式本應阻斷");
         }
 
         // Step 1: Kline aggregation — collect closed bars for DB write.
         // 步驟 1：K 線聚合 — 收集已關閉的 K 線用於 DB 寫入。
         let closed_bars = self.kline_manager.on_tick(
-            &event.symbol,
+            sym,
             event.last_price,
             event.ts_ms,
             event.volume_24h,
@@ -260,7 +268,7 @@ impl TickPipeline {
             for (timeframe, bar) in &closed_bars {
                 if tx
                     .try_send(crate::database::MarketDataMsg::KlineClose {
-                        symbol: event.symbol.clone(),
+                        symbol: sym.clone(),
                         timeframe: timeframe.clone(),
                         bar: bar.clone(),
                     })
@@ -279,17 +287,17 @@ impl TickPipeline {
             if timeframe != "1m" {
                 continue;
             }
-            let prev = self.last_close_price.insert(event.symbol.clone(), bar.close);
+            let prev = self.last_close_price.insert(sym.clone(), bar.close);
             let ret = match prev {
                 Some(prev_close) if prev_close > 0.0 => (bar.close - prev_close) / prev_close,
                 _ => 0.0,
             };
-            self.black_swan.record_bar(&event.symbol, ret, bar.volume);
-            let result = self.black_swan.check(&event.symbol, ret, bar.volume, event.ts_ms);
+            self.black_swan.record_bar(sym, ret, bar.volume);
+            let result = self.black_swan.check(sym, ret, bar.volume, event.ts_ms);
             use crate::database::black_swan_detector::BlackSwanSeverity;
             if !matches!(result.severity, BlackSwanSeverity::None) {
                 warn!(
-                    symbol = %event.symbol,
+                    symbol = %sym,
                     severity = ?result.severity,
                     votes = result.votes_for,
                     return_pct = format!("{:.4}%", ret * 100.0),
@@ -300,19 +308,19 @@ impl TickPipeline {
 
         // Step 2: Compute indicators (need enough 1m bars)
         // 步驟 2：計算指標（需要足夠的 1 分鐘 K 線）
-        let indicators = self.compute_indicators(&event.symbol);
+        let indicators = self.compute_indicators(sym);
 
         // Store latest indicators for IPC snapshot / 存儲最新指標供 IPC 快照使用
         if let Some(ref ind) = indicators {
             self.latest_indicators
-                .insert(event.symbol.clone(), ind.clone());
+                .insert(sym.clone(), ind.clone());
         }
 
         // Phase 1: Emit FeatureSnapshot to DB writer channel (non-blocking try_send).
         // Phase 1：發送 FeatureSnapshot 到 DB 寫入器通道（非阻塞 try_send）。
         if let (Some(ref tx), Some(ref ind)) = (&self.feature_tx, &indicators) {
             let snap = crate::feature_collector::FeatureSnapshot::new(
-                event.symbol.clone(),
+                sym.clone(),
                 event.ts_ms,
                 event.last_price,
                 event.volume_24h,
@@ -356,7 +364,7 @@ impl TickPipeline {
         // Step 3: Signal evaluation
         let signals = if in_boot_cooldown {
             debug!(
-                symbol = %event.symbol,
+                symbol = %sym,
                 elapsed_ms = event.ts_ms.saturating_sub(self.boot_ts_ms.unwrap_or(event.ts_ms)),
                 cooldown_ms = self.boot_cooldown_ms,
                 "PNL-3 boot cooldown — signals suppressed / 啟動冷卻期 — 信號已抑制"
@@ -365,7 +373,7 @@ impl TickPipeline {
         } else if let Some(ref ind) = indicators {
             let input = snapshot_to_input(ind);
             self.signal_engine
-                .evaluate(&event.symbol, "1m", &input, event.ts_ms)
+                .evaluate(sym, "1m", &input, event.ts_ms)
         } else {
             vec![]
         };
@@ -377,10 +385,7 @@ impl TickPipeline {
         let em = self.pipeline_kind.db_mode();
         let mut signals_persisted_this_tick = 0u32;
         for sig in &signals {
-            self.recent_signals.push_back(sig.clone());
-            if self.recent_signals.len() > 100 {
-                self.recent_signals.pop_front();
-            }
+            push_capped(&mut self.recent_signals, sig.clone(), 100);
 
             // DB-RUN-1: Throttle signal persistence — only write on state change
             // or heartbeat interval. Reduces 352 rows/s to ~per-symbol-per-strat
@@ -399,14 +404,14 @@ impl TickPipeline {
             if !self.pipeline_kind.is_exchange() {
                 if let Some(ref tx) = self.trading_tx {
                     let _ = tx.try_send(crate::database::TradingMsg::Signal {
-                        signal_id: format!("sig-{}-{}", sig.source, sig.ts_ms),
+                        signal_id: make_signal_id(&sig.source, sig.ts_ms),
                         ts_ms: sig.ts_ms,
                         symbol: sig.symbol.clone(),
                         strategy_name: sig.source.clone(),
                         timeframe: sig.timeframe.clone(),
                         signal_type: format!("{:?}", sig.direction),
                         strength: sig.confidence,
-                        context_id: format!("ctx-{}-{}-{}", em, sig.symbol, sig.ts_ms),
+                        context_id: make_context_id(em, &sig.symbol, sig.ts_ms),
                     });
                 }
             }
@@ -439,7 +444,7 @@ impl TickPipeline {
                     event,
                     &signals,
                     indicators.as_ref(),
-                    self.paper_state.get_position(&event.symbol),
+                    self.paper_state.get_position(sym),
                     self.paper_state.balance(),
                     self.paper_state.drawdown_pct(),
                     self.linucb.as_ref(),
@@ -452,7 +457,7 @@ impl TickPipeline {
         // Step 4+5: Per-strategy dispatch + intent processing with rejection/fill callbacks (RC-04/RC-05).
         // 步驟 4+5：逐策略分派 + 意圖處理，含拒絕/成交回調。
         let ctx = TickContext {
-            symbol: event.symbol.clone(),
+            symbol: sym.clone(),
             price: event.last_price,
             timestamp_ms: event.ts_ms,
             indicators: indicators.clone(),
@@ -545,46 +550,15 @@ impl TickPipeline {
                         self.pipeline_kind.governance_profile(),
                     );
 
-                    // Persist Guardian verdict (all verdicts including rejections) / 持久化 Guardian 裁定（含拒絕）
-                    if let (Some(ref tx), Some(ref vi)) = (&self.trading_tx, &gate.verdict_info) {
-                        let _ = tx.try_send(crate::database::TradingMsg::RiskVerdict {
-                            verdict_id: format!("vrd-{}-{}-{}", em, intent.symbol, event.ts_ms),
-                            ts_ms: event.ts_ms,
-                            intent_id: format!("intent-{}-{}-{}", em, intent.symbol, event.ts_ms),
-                            context_id: format!("ctx-{}-{}-{}", em, intent.symbol, event.ts_ms),
-                            symbol: intent.symbol.clone(),
-                            verdict: vi.verdict.clone(),
-                            risk_score: vi.risk_score,
-                            reasons: vi.reasons.clone(),
-                            modified_qty: vi.modified_qty,
-                            engine_mode: self.pipeline_kind.db_mode().to_string(),
-                        });
+                    // S-01: persist verdict via extracted helper
+                    if let Some(ref vi) = gate.verdict_info {
+                        persist_verdict(&self.trading_tx, em, &intent.symbol, event.ts_ms, vi, em);
                     }
 
                     if gate.approved {
                         self.stats.total_intents += 1;
-
-                        // Phase 3b fix: Emit Intent to trading_tx for PG persistence.
-                        // Phase 3b 修復：發送 Intent 到 trading_tx 以持久化到 PG。
-                        if let Some(ref tx) = self.trading_tx {
-                            let _ = tx.try_send(crate::database::TradingMsg::Intent {
-                                intent_id: format!("intent-{}-{}-{}", em, intent.symbol, event.ts_ms),
-                                ts_ms: event.ts_ms,
-                                signal_id: String::new(),
-                                context_id: format!("ctx-{}-{}-{}", em, intent.symbol, event.ts_ms),
-                                symbol: intent.symbol.clone(),
-                                side: if intent.is_long {
-                                    "Buy".into()
-                                } else {
-                                    "Sell".into()
-                                },
-                                qty: gate.approved_qty,
-                                price: event.last_price,
-                                order_type: intent.order_type.clone(),
-                                strategy_name: intent.strategy.clone(),
-                                engine_mode: self.pipeline_kind.db_mode().to_string(),
-                            });
-                        }
+                        // S-01: persist intent via extracted helper
+                        persist_intent(&self.trading_tx, em, event.ts_ms, intent, gate.approved_qty, event.last_price, em);
 
                         self.exchange_seq = self.exchange_seq.wrapping_add(1);
                         let order_link_id = format!("oc_{}_{}", event.ts_ms, self.exchange_seq);
@@ -606,20 +580,8 @@ impl TickPipeline {
                             continue;
                         }
 
-                        // M-2 (2026-04-11) audit fix: display the post-cap qty instead of
-                        // the strategy's raw pre-cap qty (e.g. grid_trading's 1e9 sentinel).
-                        // M-2 審計修復：顯示治理後 qty 而非策略原始 pre-cap qty
-                        // （例如 grid_trading 的 1e9 哨兵值）。
-                        let mut display_intent = intent.clone();
-                        display_intent.qty = final_qty;
-                        self.recent_intents.push_back(TimestampedIntent {
-                            timestamp_ms: event.ts_ms,
-                            intent: display_intent,
-                            result: format!("pending_exchange:{}", order_link_id),
-                        });
-                        if self.recent_intents.len() > 50 {
-                            self.recent_intents.pop_front();
-                        }
+                        // S-01+P-09: use helper to push display intent (M-2 post-cap qty)
+                        push_display_intent(&mut self.recent_intents, event.ts_ms, intent, Some(final_qty), format!("pending_exchange:{}", order_link_id));
 
                         // Dispatch to exchange / 派發到交易所
                         // I-08 雙軌止損：compute broker-side SL from stop config
@@ -650,24 +612,8 @@ impl TickPipeline {
                         }
                     } else if let Some(ref reason) = gate.rejected_reason {
                         strategy.on_rejection(intent, reason);
-                        // M-2: surface the post-Guardian capped qty if available so the
-                        // GUI doesn't show e.g. grid_trading's 1e9 raw sentinel.
-                        // M-2：可用時顯示 Guardian 治理後 qty，避免 GUI 顯示
-                        // grid_trading 的 1e9 原始哨兵。
-                        let mut display_intent = intent.clone();
-                        if let Some(vi) = gate.verdict_info.as_ref() {
-                            if let Some(mq) = vi.modified_qty {
-                                display_intent.qty = mq;
-                            }
-                        }
-                        self.recent_intents.push_back(TimestampedIntent {
-                            timestamp_ms: event.ts_ms,
-                            intent: display_intent,
-                            result: format!("rejected:{}", reason),
-                        });
-                        if self.recent_intents.len() > 50 {
-                            self.recent_intents.pop_front();
-                        }
+                        let mq = gate.verdict_info.as_ref().and_then(|vi| vi.modified_qty);
+                        push_display_intent(&mut self.recent_intents, event.ts_ms, intent, mq, format!("rejected:{}", reason));
                     }
                 } else {
                     // ═══ PAPER_ONLY MODE: simulate fill locally + optional shadow order ═══
@@ -680,62 +626,17 @@ impl TickPipeline {
                         self.pipeline_kind.governance_profile(),
                     );
 
-                    // Persist Guardian verdict (all verdicts including rejections) / 持久化 Guardian 裁定（含拒絕）
-                    if let (Some(ref tx), Some(ref vi)) = (&self.trading_tx, &result.verdict_info) {
-                        let _ = tx.try_send(crate::database::TradingMsg::RiskVerdict {
-                            verdict_id: format!("vrd-{}-{}-{}", em, intent.symbol, event.ts_ms),
-                            ts_ms: event.ts_ms,
-                            intent_id: format!("intent-{}-{}-{}", em, intent.symbol, event.ts_ms),
-                            context_id: format!("ctx-{}-{}-{}", em, intent.symbol, event.ts_ms),
-                            symbol: intent.symbol.clone(),
-                            verdict: vi.verdict.clone(),
-                            risk_score: vi.risk_score,
-                            reasons: vi.reasons.clone(),
-                            modified_qty: vi.modified_qty,
-                            engine_mode: self.pipeline_kind.db_mode().to_string(),
-                        });
+                    // S-01: persist verdict via extracted helper
+                    if let Some(ref vi) = result.verdict_info {
+                        persist_verdict(&self.trading_tx, em, &intent.symbol, event.ts_ms, vi, em);
                     }
 
                     if result.submitted {
                         self.stats.total_intents += 1;
-                        // M-2: surface post-Guardian capped qty so the GUI doesn't
-                        // show raw strategy sentinels (e.g. grid_trading 1e9).
-                        let mut display_intent = intent.clone();
-                        if let Some(ref vi) = result.verdict_info {
-                            if let Some(mq) = vi.modified_qty {
-                                display_intent.qty = mq;
-                            }
-                        }
-                        self.recent_intents.push_back(TimestampedIntent {
-                            timestamp_ms: event.ts_ms,
-                            intent: display_intent,
-                            result: "submitted".into(),
-                        });
-                        if self.recent_intents.len() > 50 {
-                            self.recent_intents.pop_front();
-                        }
-
-                        // Phase 3b fix: Emit Intent to trading_tx for PG persistence.
-                        // Phase 3b 修復：發送 Intent 到 trading_tx 以持久化到 PG。
-                        if let Some(ref tx) = self.trading_tx {
-                            let _ = tx.try_send(crate::database::TradingMsg::Intent {
-                                intent_id: format!("intent-{}-{}-{}", em, intent.symbol, event.ts_ms),
-                                ts_ms: event.ts_ms,
-                                signal_id: String::new(),
-                                context_id: format!("ctx-{}-{}-{}", em, intent.symbol, event.ts_ms),
-                                symbol: intent.symbol.clone(),
-                                side: if intent.is_long {
-                                    "Buy".into()
-                                } else {
-                                    "Sell".into()
-                                },
-                                qty: intent.qty,
-                                price: event.last_price,
-                                order_type: intent.order_type.clone(),
-                                strategy_name: intent.strategy.clone(),
-                                engine_mode: self.pipeline_kind.db_mode().to_string(),
-                            });
-                        }
+                        let mq = result.verdict_info.as_ref().and_then(|vi| vi.modified_qty);
+                        push_display_intent(&mut self.recent_intents, event.ts_ms, intent, mq, "submitted".into());
+                        // S-01: persist intent via extracted helper
+                        persist_intent(&self.trading_tx, em, event.ts_ms, intent, intent.qty, event.last_price, em);
 
                         if let Some(mut fill) = result.fill {
                             if let Some(ref icache) = self.instrument_cache {
@@ -775,7 +676,7 @@ impl TickPipeline {
                                 event.ts_ms,
                             );
                             self.stats.total_fills += 1;
-                            self.recent_fills.push_back(TimestampedFill {
+                            push_capped(&mut self.recent_fills, TimestampedFill {
                                 timestamp_ms: event.ts_ms,
                                 symbol: intent.symbol.clone(),
                                 is_long: intent.is_long,
@@ -783,16 +684,13 @@ impl TickPipeline {
                                 price: fill.fill_price,
                                 fee: fill.fee,
                                 strategy: intent.strategy.clone(),
-                            });
-                            if self.recent_fills.len() > 50 {
-                                self.recent_fills.pop_front();
-                            }
+                            }, 50);
 
                             if let Some(ref tx) = self.trading_tx {
                                 let _ = tx.try_send(crate::database::TradingMsg::Fill {
-                                    fill_id: format!("fill-{}-{}-{}", em, intent.symbol, event.ts_ms),
+                                    fill_id: make_fill_id(em, &intent.symbol, event.ts_ms),
                                     ts_ms: event.ts_ms,
-                                    order_id: format!("order-{}-{}-{}", em, intent.symbol, event.ts_ms),
+                                    order_id: make_order_id(em, &intent.symbol, event.ts_ms),
                                     symbol: intent.symbol.clone(),
                                     side: if intent.is_long {
                                         "Buy".into()
@@ -805,7 +703,7 @@ impl TickPipeline {
                                     fee_rate: self.intent_processor.fee_rate(&intent.symbol),
                                     realized_pnl,
                                     strategy_name: intent.strategy.clone(),
-                                    context_id: format!("ctx-{}-{}-{}", em, intent.symbol, event.ts_ms),
+                                    context_id: make_context_id(em, &intent.symbol, event.ts_ms),
                                     engine_mode: self.pipeline_kind.db_mode().to_string(),
                                 });
                             }
@@ -849,21 +747,8 @@ impl TickPipeline {
                         }
                     } else if let Some(ref reason) = result.rejected_reason {
                         strategy.on_rejection(intent, reason);
-                        // M-2: surface post-Guardian capped qty if available.
-                        let mut display_intent = intent.clone();
-                        if let Some(ref vi) = result.verdict_info {
-                            if let Some(mq) = vi.modified_qty {
-                                display_intent.qty = mq;
-                            }
-                        }
-                        self.recent_intents.push_back(TimestampedIntent {
-                            timestamp_ms: event.ts_ms,
-                            intent: display_intent,
-                            result: format!("rejected:{}", reason),
-                        });
-                        if self.recent_intents.len() > 50 {
-                            self.recent_intents.pop_front();
-                        }
+                        let mq = result.verdict_info.as_ref().and_then(|vi| vi.modified_qty);
+                        push_display_intent(&mut self.recent_intents, event.ts_ms, intent, mq, format!("rejected:{}", reason));
                     }
                 }
                 intents.push(intent.clone());
@@ -905,12 +790,7 @@ impl TickPipeline {
             if is_exchange_mode {
                 if self.pending_close_symbols.contains(symbol) {
                     warn!(symbol = %symbol, reason = %reason, "strategy close skipped: pending close exists / 策略平倉跳過：已有待處理平倉");
-                    self.recent_intents.push_back(TimestampedIntent {
-                        timestamp_ms: event.ts_ms,
-                        intent: close_intent,
-                        result: format!("close_skipped:pending_{reason}"),
-                    });
-                    if self.recent_intents.len() > 50 { self.recent_intents.pop_front(); }
+                    push_display_intent(&mut self.recent_intents, event.ts_ms, &close_intent, None, format!("close_skipped:pending_{reason}"));
                     close_skipped_symbols.push(symbol.clone());
                     continue;
                 }
@@ -920,21 +800,11 @@ impl TickPipeline {
                     info!(symbol = %symbol, is_long = %is_long, qty = %qty, reason = %reason,
                           "strategy close → exchange / 策略平倉 → 交易所");
                     self.dispatch_close_order(symbol, is_long, qty, event, true);
-                    self.recent_intents.push_back(TimestampedIntent {
-                        timestamp_ms: event.ts_ms,
-                        intent: close_intent,
-                        result: format!("close_dispatched:{reason}"),
-                    });
-                    if self.recent_intents.len() > 50 { self.recent_intents.pop_front(); }
+                    push_display_intent(&mut self.recent_intents, event.ts_ms, &close_intent, None, format!("close_dispatched:{reason}"));
                     close_confirmed_symbols.push(symbol.clone());
                 } else {
                     warn!(symbol = %symbol, reason = %reason, "strategy close skipped: no position found / 策略平倉跳過：未找到倉位");
-                    self.recent_intents.push_back(TimestampedIntent {
-                        timestamp_ms: event.ts_ms,
-                        intent: close_intent,
-                        result: format!("close_skipped:no_position_{reason}"),
-                    });
-                    if self.recent_intents.len() > 50 { self.recent_intents.pop_front(); }
+                    push_display_intent(&mut self.recent_intents, event.ts_ms, &close_intent, None, format!("close_skipped:no_position_{reason}"));
                     close_skipped_symbols.push(symbol.clone());
                 }
             } else {
@@ -955,7 +825,7 @@ impl TickPipeline {
                         self.intent_processor.record_trade(symbol, pnl);
                         // Push to recent_fills ring buffer / 推入最近成交環形緩衝
                         let fr = self.intent_processor.fee_rate(symbol);
-                        self.recent_fills.push_back(TimestampedFill {
+                        push_capped(&mut self.recent_fills, TimestampedFill {
                             timestamp_ms: event.ts_ms,
                             symbol: symbol.clone(),
                             is_long,
@@ -963,10 +833,7 @@ impl TickPipeline {
                             price: close_px,
                             fee: qty * close_px * fr,
                             strategy: format!("strategy_close:{reason}"),
-                        });
-                        if self.recent_fills.len() > 50 {
-                            self.recent_fills.pop_front();
-                        }
+                        }, 50);
                         // Track consecutive losses for risk evaluator
                         // 追蹤連續虧損供風控評估器使用
                         if pnl < 0.0 {
@@ -977,21 +844,11 @@ impl TickPipeline {
                     }
                     // Shadow order: mirror close to Demo API / 影子訂單：鏡像平倉到 Demo API
                     self.dispatch_close_order(symbol, is_long, qty, event, false);
-                    self.recent_intents.push_back(TimestampedIntent {
-                        timestamp_ms: event.ts_ms,
-                        intent: close_intent,
-                        result: format!("close_filled:{reason}"),
-                    });
-                    if self.recent_intents.len() > 50 { self.recent_intents.pop_front(); }
+                    push_display_intent(&mut self.recent_intents, event.ts_ms, &close_intent, None, format!("close_filled:{reason}"));
                     close_confirmed_symbols.push(symbol.clone());
                 } else {
                     warn!(symbol = %symbol, reason = %reason, "strategy close skipped: no position found / 策略平倉跳過：未找到倉位");
-                    self.recent_intents.push_back(TimestampedIntent {
-                        timestamp_ms: event.ts_ms,
-                        intent: close_intent,
-                        result: format!("close_skipped:no_position_{reason}"),
-                    });
-                    if self.recent_intents.len() > 50 { self.recent_intents.pop_front(); }
+                    push_display_intent(&mut self.recent_intents, event.ts_ms, &close_intent, None, format!("close_skipped:no_position_{reason}"));
                     close_skipped_symbols.push(symbol.clone());
                 }
             }

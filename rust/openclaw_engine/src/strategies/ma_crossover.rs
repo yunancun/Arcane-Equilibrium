@@ -122,6 +122,13 @@ pub struct MaCrossover {
     /// 較高時間框架 EMA 平滑 alpha。默認 0.003 = ~231 分鐘半衰期 ≈ 1 分鐘 tick 下約 4 小時。
     /// Agent 可調整此參數。Phase 1 將改用真實多時間框架 K 線替代。
     pub higher_tf_alpha: f64,
+    /// QC-H1: Entry confidence base (default 0.45). / 入場信心基礎值。
+    pub(crate) entry_conf_base: f64,
+    /// QC-H1: Entry regime bonus ±(default 0.15): trending +, mean_reverting −.
+    /// QC-H1：入場市場狀態加分 ±（默認 0.15）：趨勢 +，均值回歸 −。
+    pub(crate) entry_regime_bonus: f64,
+    /// QC-H1: Exit confidence base (default 0.5). / 出場信心基礎值。
+    pub(crate) exit_conf_base: f64,
     // RC-04: Per-symbol previous state for rejection rollback / 每幣種拒絕回滾用的先前狀態
     prev_position: HashMap<String, Option<bool>>,
     prev_last_trade_ms: HashMap<String, u64>,
@@ -143,6 +150,9 @@ impl MaCrossover {
             higher_tf_trend: HashMap::new(),
             higher_tf_sma: HashMap::new(),
             higher_tf_alpha: 0.003,
+            entry_conf_base: 0.45,
+            entry_regime_bonus: 0.15,
+            exit_conf_base: 0.5,
             prev_position: HashMap::new(),
             prev_last_trade_ms: HashMap::new(),
             conf_scale: 1.0,
@@ -231,12 +241,13 @@ impl MaCrossover {
     /// 動態信心：ADX 超額 + Hurst regime 契合度。
     /// trending regime + 高 ADX → 高 conf；mean_reverting regime → 懲罰。
     fn compute_entry_confidence(&self, adx: f64, regime: Option<&str>) -> f64 {
-        let base = 0.45;
+        // QC-H1: base, regime_bonus configurable (was hardcoded 0.45 / 0.15)
+        let base = self.entry_conf_base;
         // adx_threshold default 25 → bonus from 0 at threshold to +0.25 at adx=50
         let adx_bonus = ((adx - self.adx_threshold).max(0.0) / 100.0).min(0.25);
         let regime_bonus = match regime {
-            Some("trending") => 0.15,
-            Some("mean_reverting") => -0.15,
+            Some("trending") => self.entry_regime_bonus,
+            Some("mean_reverting") => -self.entry_regime_bonus,
             _ => 0.0,
         };
         (base + adx_bonus + regime_bonus).clamp(0.2, 0.9)
@@ -245,7 +256,8 @@ impl MaCrossover {
     /// Exit confidence: cross-back is a real signal but weaker than fresh entry.
     /// 出場信心：反向交叉是真信號但弱於新入場。
     fn compute_exit_confidence(&self, adx: f64) -> f64 {
-        let base = 0.5;
+        // QC-H1: base configurable (was hardcoded 0.5)
+        let base = self.exit_conf_base;
         let adx_bonus = ((adx - self.adx_threshold).max(0.0) / 100.0).min(0.2);
         (base + adx_bonus).clamp(0.4, 0.8)
     }
@@ -319,11 +331,18 @@ impl Strategy for MaCrossover {
             self.update_higher_tf(&ctx.symbol, sma_50);
         }
 
-        let fast = ind
-            .kama
-            .as_ref()
-            .map(|k| k.kama)
-            .unwrap_or_else(|| ind.sma_20.unwrap_or(0.0));
+        let fast = match ind.kama.as_ref() {
+            Some(k) => k.kama,
+            None => {
+                // QC-#2: Log KAMA fallback — strategy silently degrades to SMA vs SMA (never crosses).
+                // QC-#2：記錄 KAMA 退化 — 策略靜默退化為 SMA vs SMA（永不交叉）。
+                tracing::debug!(
+                    symbol = %ctx.symbol,
+                    "KAMA unavailable, falling back to SMA(20) / KAMA 不可用，退化為 SMA(20)"
+                );
+                ind.sma_20.unwrap_or(0.0)
+            }
+        };
         let slow = ind.sma_20.unwrap_or(0.0);
         if fast == 0.0 || slow == 0.0 {
             return vec![];

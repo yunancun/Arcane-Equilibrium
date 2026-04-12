@@ -460,6 +460,13 @@ impl IntentProcessor {
         (total_notional / balance * 100.0).min(999.0)
     }
 
+    /// RG-2: Compute actual account leverage from positions (total_notional / balance).
+    /// Replaces hardcoded 1.0 — leverage check now triggers correctly.
+    /// RG-2：從持倉計算實際帳戶槓桿（總名義值 / 餘額），替代硬編碼 1.0。
+    fn compute_leverage(paper_state: &PaperState) -> f64 {
+        Self::compute_exposure_pct(paper_state) / 100.0
+    }
+
     /// FIX-05: Compute correlated exposure — max(long_notional, short_notional) / balance.
     /// All crypto is highly correlated, so same-direction positions compound risk.
     /// FIX-05：計算相關曝險 — max(多頭名義值, 空頭名義值) / 餘額。

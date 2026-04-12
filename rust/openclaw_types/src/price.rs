@@ -45,8 +45,30 @@ pub struct PriceEvent {
     /// FIX-31：類型化事件種類（優先於 metadata["type"]）。
     #[serde(default)]
     pub event_kind: Option<PriceEventKind>,
-    /// Legacy metadata map — still populated for backward compat, but prefer `event_kind`.
-    /// 舊版 metadata — 為向後兼容仍填充，但應優先使用 `event_kind`。
+    // ── P-02: Structured payload fields — avoids HashMap alloc per tick ──
+    // P-02：結構化載荷欄位 — 避免每 tick HashMap 分配。
+    /// Trade side (for Trade events): "Buy" or "Sell".
+    /// 成交方向（Trade 事件）："Buy" 或 "Sell"。
+    #[serde(default)]
+    pub trade_side: Option<String>,
+    /// Trade quantity (for Trade events).
+    /// 成交數量（Trade 事件）。
+    #[serde(default)]
+    pub trade_qty: Option<f64>,
+    /// Top-5 bids (for Orderbook events): [(price, qty), ...].
+    /// 前 5 檔買盤（Orderbook 事件）。
+    #[serde(default)]
+    pub bids5: Option<Vec<(f64, f64)>>,
+    /// Top-5 asks (for Orderbook events): [(price, qty), ...].
+    /// 前 5 檔賣盤（Orderbook 事件）。
+    #[serde(default)]
+    pub asks5: Option<Vec<(f64, f64)>>,
+    /// ADL rank (for AdlNotice events).
+    /// ADL 排名（AdlNotice 事件）。
+    #[serde(default)]
+    pub adl_rank: Option<u32>,
+    /// Legacy metadata map — still populated for backward compat, but prefer structured fields.
+    /// 舊版 metadata — 為向後兼容仍填充，但應優先使用結構化欄位。
     #[serde(default)]
     pub metadata: HashMap<String, String>,
 }
@@ -62,6 +84,11 @@ impl PriceEvent {
             bid_price: 0.0,
             ask_price: 0.0,
             event_kind: None,
+            trade_side: None,
+            trade_qty: None,
+            bids5: None,
+            asks5: None,
+            adl_rank: None,
             metadata: HashMap::new(),
         }
     }

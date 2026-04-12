@@ -198,7 +198,20 @@ pub struct MaCrossoverParams {
     pub higher_tf_alpha: f64,
     #[serde(default = "default_conf_scale")]
     pub conf_scale: f64,
+    /// QC-H1: Entry confidence base / 入場信心基礎值
+    #[serde(default = "default_entry_conf_base_ma")]
+    pub entry_conf_base: f64,
+    /// QC-H1: Entry regime bonus ± / 入場市場狀態加分
+    #[serde(default = "default_entry_regime_bonus")]
+    pub entry_regime_bonus: f64,
+    /// QC-H1: Exit confidence base / 出場信心基礎值
+    #[serde(default = "default_exit_conf_base_ma")]
+    pub exit_conf_base: f64,
 }
+
+fn default_entry_conf_base_ma() -> f64 { 0.45 }
+fn default_entry_regime_bonus() -> f64 { 0.15 }
+fn default_exit_conf_base_ma() -> f64 { 0.5 }
 
 impl Default for MaCrossoverParams {
     fn default() -> Self {
@@ -209,6 +222,9 @@ impl Default for MaCrossoverParams {
             regime_filter_enabled: true,
             higher_tf_alpha: 0.003,
             conf_scale: 1.0,
+            entry_conf_base: 0.45,
+            entry_regime_bonus: 0.15,
+            exit_conf_base: 0.5,
         }
     }
 }
@@ -232,7 +248,29 @@ pub struct BbReversionParams {
     /// FIX-24: RSI overbought threshold (default 70) / RSI 超買閾值
     #[serde(default = "default_rsi_overbought")]
     pub rsi_overbought: f64,
+    /// QC-H3: Entry confidence base (default 0.6) / 入場信心基礎值
+    #[serde(default = "default_entry_conf_base_bbr")]
+    pub entry_conf_base: f64,
+    /// QC-H3: Exit confidence base (default 0.55) / 出場信心基礎值
+    #[serde(default = "default_exit_conf_base_bbr")]
+    pub exit_conf_base: f64,
+    /// QC-H3: Exit %B lower bound (default 0.2) / 出場 %B 下界
+    #[serde(default = "default_exit_pctb_lower")]
+    pub exit_pctb_lower: f64,
+    /// QC-H3: Exit %B upper bound (default 0.8) / 出場 %B 上界
+    #[serde(default = "default_exit_pctb_upper")]
+    pub exit_pctb_upper: f64,
+    /// QC-#7: Hurst regime boost for mean-reverting regime (default 0.1).
+    /// QC-#7：均���回歸市場狀態信心加成。
+    #[serde(default = "default_hurst_regime_boost")]
+    pub hurst_regime_boost: f64,
 }
+
+fn default_entry_conf_base_bbr() -> f64 { 0.6 }
+fn default_exit_conf_base_bbr() -> f64 { 0.55 }
+fn default_exit_pctb_lower() -> f64 { 0.2 }
+fn default_exit_pctb_upper() -> f64 { 0.8 }
+fn default_hurst_regime_boost() -> f64 { 0.1 }
 
 impl Default for BbReversionParams {
     fn default() -> Self {
@@ -244,6 +282,11 @@ impl Default for BbReversionParams {
             conf_scale: 1.0,
             rsi_oversold: 30.0,
             rsi_overbought: 70.0,
+            entry_conf_base: 0.6,
+            exit_conf_base: 0.55,
+            exit_pctb_lower: 0.2,
+            exit_pctb_upper: 0.8,
+            hurst_regime_boost: 0.1,
         }
     }
 }
@@ -268,7 +311,17 @@ pub struct BbBreakoutParams {
     /// FIX-26: Squeeze state expiry (ms). Default 30 min / 壓縮狀態有效期
     #[serde(default = "default_squeeze_expiry")]
     pub squeeze_expiry_ms: u64,
+    /// QC-H4: Entry confidence base (default 0.7) / 入場信心基礎值
+    #[serde(default = "default_entry_conf_base_bbb")]
+    pub entry_conf_base: f64,
+    /// QC-H4: Exit confidence base (default 0.5). Exit reasons add offsets.
+    /// QC-H4：出場信心基礎值。各出場原因加減偏移。
+    #[serde(default = "default_exit_conf_base_bbb")]
+    pub exit_conf_base: f64,
 }
+
+fn default_entry_conf_base_bbb() -> f64 { 0.7 }
+fn default_exit_conf_base_bbb() -> f64 { 0.5 }
 
 impl Default for BbBreakoutParams {
     fn default() -> Self {
@@ -281,6 +334,8 @@ impl Default for BbBreakoutParams {
             trailing_stop_atr_mult: 2.0,
             conf_scale: 1.0,
             squeeze_expiry_ms: 1_800_000,
+            entry_conf_base: 0.7,
+            exit_conf_base: 0.5,
         }
     }
 }
@@ -290,9 +345,8 @@ impl Default for BbBreakoutParams {
 pub struct GridTradingParams {
     #[serde(default = "default_true")]
     pub active: bool,
-    /// Grid count per symbol. NOTE: currently stored but not yet applied at
-    /// construction — GridTrading uses DEFAULT_GRID_COUNT (10) until Phase 3a.
-    /// 每幣種網格數量。注意：目前已存儲但構造時尚未應用。
+    /// Grid count per symbol. Wired to GridTrading.grid_count via factory (RG-3 fix).
+    /// 每幣種網格數量。通過工廠函數接線到 GridTrading.grid_count（RG-3 修復）。
     #[serde(default = "default_grid_levels")]
     pub grid_levels: usize,
     #[serde(default = "default_spacing_mode")]
@@ -303,7 +357,20 @@ pub struct GridTradingParams {
     pub max_out_of_range: u64,
     #[serde(default = "default_conf_scale")]
     pub conf_scale: f64,
+    /// QC-H7: Adaptive range ±% (default 0.10 = ±10%) / 自適應範圍
+    #[serde(default = "default_adaptive_range_pct")]
+    pub adaptive_range_pct: f64,
+    /// QC-H8: Reject backoff ms (default 30000) / 拒絕退避時長
+    #[serde(default = "default_reject_backoff_ms")]
+    pub reject_backoff_ms: u64,
+    /// QC-H9: OU model recalc interval in ticks (default 50) / OU 重算間隔
+    #[serde(default = "default_ou_update_interval")]
+    pub ou_update_interval: usize,
 }
+
+fn default_adaptive_range_pct() -> f64 { 0.10 }
+fn default_reject_backoff_ms() -> u64 { 30_000 }
+fn default_ou_update_interval() -> usize { 50 }
 
 impl Default for GridTradingParams {
     fn default() -> Self {
@@ -314,6 +381,9 @@ impl Default for GridTradingParams {
             health_check_interval: 200,
             max_out_of_range: 50,
             conf_scale: 1.0,
+            adaptive_range_pct: 0.10,
+            reject_backoff_ms: 30_000,
+            ou_update_interval: 50,
         }
     }
 }
@@ -329,13 +399,44 @@ pub struct FundingArbParams {
     pub active: bool,
     #[serde(default = "default_funding_cooldown")]
     pub cooldown_ms: u64,
+    /// QC-H10: Total round-trip cost in BPS (perp+spot+slippage). Default 34.
+    /// QC-H10：往返總成本（基點，永續+現貨+滑點）。默認 34。
+    #[serde(default = "default_fa_total_cost_bps")]
+    pub total_cost_bps: f64,
+    /// QC-H10: Expected funding periods for cost amortization. Default 3.
+    /// QC-H10：成本攤銷用的預期資金費率週期。默認 3。
+    #[serde(default = "default_fa_expected_periods")]
+    pub expected_periods: f64,
+    /// QC-H10: Minimum |funding_rate| to enter (default 5 bps = 0.0005).
+    /// QC-H10：入場最低 |資金費率|（默認 5 bps = 0.0005）。
+    #[serde(default = "default_fa_funding_threshold")]
+    pub funding_threshold: f64,
+    /// QC-H10: Max basis risk % to hold (default 0.5%).
+    /// QC-H10：最大基差風險百分比（默認 0.5%）。
+    #[serde(default = "default_fa_max_basis_pct")]
+    pub max_basis_pct: f64,
+    /// QC-H10: Max hold time in ms (default 72h).
+    /// QC-H10：最大持有時間（毫秒，默認 72 小時）。
+    #[serde(default = "default_fa_max_hold_ms")]
+    pub max_hold_ms: u64,
 }
+
+fn default_fa_total_cost_bps() -> f64 { 34.0 }
+fn default_fa_expected_periods() -> f64 { 3.0 }
+fn default_fa_funding_threshold() -> f64 { 0.0005 }
+fn default_fa_max_basis_pct() -> f64 { 0.5 }
+fn default_fa_max_hold_ms() -> u64 { 72 * 3_600_000 }
 
 impl Default for FundingArbParams {
     fn default() -> Self {
         Self {
             active: false,
             cooldown_ms: 3_600_000,
+            total_cost_bps: 34.0,
+            expected_periods: 3.0,
+            funding_threshold: 0.0005,
+            max_basis_pct: 0.5,
+            max_hold_ms: 72 * 3_600_000,
         }
     }
 }
@@ -447,6 +548,9 @@ impl StrategyFactory {
         mac.adx_threshold = p.ma_crossover.adx_threshold;
         mac.regime_filter_enabled = p.ma_crossover.regime_filter_enabled;
         mac.higher_tf_alpha = p.ma_crossover.higher_tf_alpha;
+        mac.entry_conf_base = p.ma_crossover.entry_conf_base;
+        mac.entry_regime_bonus = p.ma_crossover.entry_regime_bonus;
+        mac.exit_conf_base = p.ma_crossover.exit_conf_base;
         mac.set_conf_scale(p.ma_crossover.conf_scale);
         mac.set_active(p.ma_crossover.active);
         strategies.push(Box::new(mac));
@@ -458,6 +562,11 @@ impl StrategyFactory {
         bbr.limit_offset_bps = p.bb_reversion.limit_offset_bps;
         bbr.rsi_oversold = p.bb_reversion.rsi_oversold;
         bbr.rsi_overbought = p.bb_reversion.rsi_overbought;
+        bbr.entry_conf_base = p.bb_reversion.entry_conf_base;
+        bbr.exit_conf_base = p.bb_reversion.exit_conf_base;
+        bbr.exit_pctb_lower = p.bb_reversion.exit_pctb_lower;
+        bbr.exit_pctb_upper = p.bb_reversion.exit_pctb_upper;
+        bbr.hurst_regime_boost = p.bb_reversion.hurst_regime_boost;
         bbr.set_conf_scale(p.bb_reversion.conf_scale);
         bbr.set_active(p.bb_reversion.active);
         strategies.push(Box::new(bbr));
@@ -470,6 +579,8 @@ impl StrategyFactory {
         bbb.volume_threshold = p.bb_breakout.volume_threshold;
         bbb.trailing_stop_atr_mult = p.bb_breakout.trailing_stop_atr_mult;
         bbb.squeeze_expiry_ms = p.bb_breakout.squeeze_expiry_ms;
+        bbb.entry_conf_base = p.bb_breakout.entry_conf_base;
+        bbb.exit_conf_base = p.bb_breakout.exit_conf_base;
         bbb.set_conf_scale(p.bb_breakout.conf_scale);
         bbb.set_active(p.bb_breakout.active);
         strategies.push(Box::new(bbb));
@@ -482,6 +593,10 @@ impl StrategyFactory {
         let mut gt = grid_trading::GridTrading::new_adaptive_with_mode(spacing);
         gt.health_check_interval = p.grid_trading.health_check_interval as usize;
         gt.max_out_of_range = p.grid_trading.max_out_of_range as usize;
+        gt.grid_count = p.grid_trading.grid_levels; // RG-3: wire TOML grid_levels → runtime grid_count
+        gt.adaptive_range_pct = p.grid_trading.adaptive_range_pct;
+        gt.reject_backoff_ms = p.grid_trading.reject_backoff_ms;
+        gt.ou_update_interval = p.grid_trading.ou_update_interval;
         gt.set_conf_scale(p.grid_trading.conf_scale);
         gt.set_active(p.grid_trading.active);
         strategies.push(Box::new(gt));
@@ -490,6 +605,11 @@ impl StrategyFactory {
         // FIX-23：已註冊但預設停用 — 待 OC-5/R-06 數據接線
         let mut fa = funding_arb::FundingArb::new();
         fa.cooldown_ms = p.funding_arb.cooldown_ms;
+        fa.total_cost_bps = p.funding_arb.total_cost_bps;
+        fa.expected_periods = p.funding_arb.expected_periods;
+        fa.funding_threshold = p.funding_arb.funding_threshold;
+        fa.max_basis_pct = p.funding_arb.max_basis_pct;
+        fa.max_hold_ms = p.funding_arb.max_hold_ms;
         fa.set_active(p.funding_arb.active);
         strategies.push(Box::new(fa));
 

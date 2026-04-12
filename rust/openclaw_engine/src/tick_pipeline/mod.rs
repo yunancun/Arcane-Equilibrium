@@ -1018,7 +1018,7 @@ impl TickPipeline {
                 fee_rate: fr,
                 realized_pnl,
                 strategy_name: format!("risk_close:{reason}"),
-                context_id: format!("ctx-{em}-{}-{}", symbol, ts_ms),
+                context_id: on_tick_helpers::make_context_id(em, symbol, ts_ms),
                 engine_mode: em.to_string(),
             });
         }
@@ -1159,7 +1159,7 @@ impl TickPipeline {
 }
 
 mod on_tick;
-mod on_tick_helpers;
+pub(crate) mod on_tick_helpers;
 mod commands;
 #[cfg(test)]
 mod tests;
