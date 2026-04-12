@@ -40,62 +40,10 @@
 
 ---
 
-## 🔴 2026-04-12 全程序鏈審計（12 報告 · 58 發現 · 8 P0）
+## 🔴 2026-04-12 全程序鏈審計 ✅ P0/P1/P2 全部完成（2026-04-12 歸檔）
 
-來源：`2026-04-12--full_audit_fix_plan_pm_confirmed.md`（PM APPROVED）
-PA 原始報告：`docs/CCAgentWorkSpace/PA/2026-04-12--consolidated_fix_plan.md`
-
-### P0 — Live 阻塞（W22 Mon-Tue 必須完成）
-
-- [x] **FIX-10** ← E3: SEC-D01 [CRITICAL] — IPC HMAC 認證 Live 模式下應強制 ✅ main.rs panic guard
-- [x] **FIX-03** ← FA: #2 [BLOCKER] · E3: SEC-A01 [LOW] · E5: D-01 [Medium] — FastTrack ReduceToHalf/PauseNewEntries 已處理 ✅ on_tick.rs 半倉+暫停開倉
-- [x] **FIX-04** ← FA: #2 [BLOCKER] · E3: SEC-A01 [LOW] — fast_track 真實 price_drop_pct + margin_utilization_pct ✅ PriceHistoryTracker.max_drop_pct() + paper_state notional
-- [x] **FIX-19** ← BB: BB-A4 [P1] [PARSE-ERROR] — execution.fast execFee 缺失時用 taker_fee_rate 估算 ✅ event_consumer/mod.rs
-- [x] **FIX-13** ← E4: P0-#1 [P0-CRITICAL] — edge_estimates.rs +14 tests ✅ JSON 解析/空值/邊界/clamp
-- [x] **FIX-14** ← E4: P0-#2 [P0-CRITICAL] — REST fail-closed +7 tests ✅ NoCredentials/Transport/retCode/timeout
-- [x] **FIX-15** ← E4: P0-#3 [P0-CRITICAL] — 三管線並發寫入 +1 integration test ✅ 3 thread×50 writes 無損壞
-- [x] **FIX-09** ← E3: SEC-E01 [HIGH] + SEC-B03 [MEDIUM] — ocEsc() 加單引號 `&#39;` 轉義 ✅ common.js
-
-### P1 — 架構缺陷（W22 Wed 完成核心項）
-
-- [x] **FIX-05** ← QC: RG-1 [P1] — correlated_exposure_pct 永遠 0.0 ✅ compute_correlated_exposure_pct() 實現
-- [x] **FIX-06** ← QC: RG-3 [P1] + H5 [P1] — GridTrading grid_levels TOML→runtime ✅ grid_count 字段 + update_params 接線
-- [x] **FIX-07** ← QC: RG-4 [P1] — OU theta clamp → non-OU fallback None ✅ b≥0 return None
-- [x] **FIX-11** ← E3: SEC-D02 [HIGH] — Cookie secure auto-detect ✅ request.url.scheme=="https"
-- [x] **FIX-16** ← E4: P1-#4 — startup.rs +5 tests ✅ (semver驗證/env_valid+invalid/paper_balance_env_missing/toml_missing/load_unified_configs) FIX-16b: 2 trivial→meaningful
-- [x] **FIX-17** ← E4: P1-#9 — Config hot-reload 並發 +2 tests ✅ (torn state + version monotonic)
-- [x] **FIX-18** ← E4: ��四.2 — Price=0 +2 tests ✅ (no panic + no NaN with position)
-- [x] **FIX-20** ← BB: BB-A5 [P1] [RISK] — pre_check_order() 刪除 ✅ dead code 移除
-- [x] **FIX-22** ← FA: #8 [MAJOR] + #6 [MAJOR] — 4 個 MlSwitches 假欄位刪除 ✅ 僅保留 teacher_loop + news_pipeline
-- [x] **FIX-29** ← E5: R-02 [High] — on_tick() 1307→1186 行 ✅ 抽出 on_tick_helpers.rs
-- [x] **FIX-30** ← E5: P-01 [High] — symbol.clone() 審查 ✅ 多數為必要（owned struct），FIX-32 是真正 perf win
-- [x] **FIX-32** ← E5: P-04 [Medium] — risk_config() 改用借用 ✅ 去除每 tick 深拷貝
-- [x] **FIX-39** ← A3: §5.1 — Danger Zone → openConfirmModal() ✅ reset-cooldown + unhalt-session
-- [x] **FIX-40** ← A3: §5.1 — 策略刪除 → openConfirmModal("delete-strategy") ✅
-- [x] **FIX-47** ← TW: §4.1 — CLAUDE_REFERENCE.md 更新至 2026-04-12 ✅
-- [x] **FIX-48** ← TW: §4.1 — KNOWN_ISSUES.md 更新（ARCH-2→RESOLVED, RISK-3→RESOLVED）✅
-- [x] **FIX-52** ← R4: §四 P1-#5 — SCRIPT_INDEX.md 全面更新 ~11%→~90% ✅
-- [x] **FIX-55** ← BB: BB-A1+A2+A3 [P1] — 3 API paths verified correct ✅ dead code #[allow(dead_code)] 標註
-
-### P2 — Rust 7 項 ✅ 完成（commit `84f00eb`）
-
-- [x] **FIX-24** ← QC: RG-2 [P2] — bb_reversion RSI 閾值可配（30/70 → TOML params + agent adjustable）
-- [x] **FIX-25** ← QC: H1 [P2] — grid_trading fee_rate 字段取代硬編碼 FEE_PCT 常量
-- [x] **FIX-26** ← QC: H4 [P2] — bb_breakout squeeze bool→時間戳過期（30min expiry）
-- [x] **FIX-27** ← QC: H3 [P2] — kelly_sizer 負 edge 返回 0.0（拒絕）非 fallback qty
-- [x] **FIX-28** ← QC: H2 [P2] — intent_processor account_leverage 字段（paper=1x, exchange=actual）
-- [x] **FIX-31** ← E5: D-03 [Low] — PriceEventKind typed enum + 向後兼容 metadata 雙路徑
-- [x] **FIX-33** ← E5: P-03 [Medium] — event_consumer exec_id 去重 HashSet+VecDeque O(1)
-
-### P2/P3 — Session 3.3 追加修復
-
-- [x] **FIX-36** ← FA: #15 [MINOR] — delegation_framework.py 562 行孤立模組刪除
-- [x] **FIX-42** ← A3: §2.1 [MAJOR] — console.html 雙重導航移除（nav-grid 刪除，保留 tab-bar）
-- [x] **FIX-43** ← A3: §2.1 [MAJOR] — tab-trading.html 雙層 iframe 消除（拆為直接 Demo+Paper 頂層 tab）
-- [x] **FIX-49** ← TW: §3.1 [MISSING] — 3 個 daily_summary 補建（04-09/04-10/04-12）
-- **FIX-37** ← FA: #14 [MINOR] — PIPELINE_BRIDGE/STOP_MANAGER None：**by design**（DEAD-PY-2 後有意設 None + 註解 "soft-degraded mode"，strategy_read_routes 有 None check fallback）
-- **FIX-50** ← TW: §7.1 — CHANGELOG 超長：**自然解決**（當前 925 行 < 1200 限）
-- **FIX-58** ← E3: SEC-F05 — Unix socket chmod：**已完成**（0o600 owner-only 已設置）
+歸檔：`docs/archive/2026-04-12--completed_todo_full_program_audit.md`（P0 8/8 + P1 19/19 + P2 Rust 7/7 + P2/P3 Session 3.3 全修 + PNL-1~4 + QoL-4）。
+PM 確認報告：`docs/audits/2026-04-12--full_audit_fix_plan_pm_confirmed.md`
 
 ### 餘下 P2（大工程，W22+ 排期）
 
@@ -259,7 +207,7 @@ WIRE-0/WIRE-1 + DL-1/DL-2 + JS-1 + 5-01~03 已全部 ✅。下面是原 backlog 
 - [ ] **QoL-1** Engine 重啟後 `paper_state` 計數器歸零 — `total_realized_pnl` / `total_fees` / `trade_count` 為純記憶體變量，引擎啟動時應從 DB `trading.fills` 恢復累計值（現靠 Python metrics 端點 DB 降級繞過，但引擎內 snapshot 仍為 0）
 - [ ] **QoL-2** Demo AI cost 無追蹤 — `tab-demo.html` 硬編碼 `'N/A'`，後端無 per-engine AI 調用成本歸因機制（需 H1-H5 AI 治理層接通後才有意義，依賴 G-1）
 - [ ] **QoL-3** PyO3 `.so` 部署不統一 — `maturin develop` 默認裝到系統 venv（`~/.venv`），API server 用 `control_api_v1/.venv`，Rust struct 改動需手動 `maturin develop` 到正確 venv。應自動化或統一 venv
-- [x] **QoL-4** ~~Paper PnL 異常大（497,199 USDT，初始 10,000）~~ — **不是風控配置問題**。根因為 `on_tick.rs` 5 條 close 路徑（L168 fast_track / L196 H0-stops / L304 paused-stops / L907 strategy_close / L1053 risk_close）誤用 `event.last_price`（觸發 tick 的單一 symbol 價）對所有 symbol 平倉，跨 symbol 平倉時 PnL 被放大 1000-10000 倍。Smoking gun: 8 個 fast_track fills 全部 price=2301.205 套用到 8 個不同 symbol（FFUSDT 真實 ~$0.50 被以 $2301 平倉 → -$757K；DOGEUSDT 真實 ~$0.20 被以 $2301 平倉 → +$750K）。修復：commit `2a422fa` PNL-FIX-1，新增 `close_position_at_symbol_market()` helper 統一從 `paper_state.latest_price(sym)` 取對應 symbol 價，並 fallback 至 entry_price（零 PnL 平倉）。+2 regression tests。DB 已按 Option B 清理（zero realized_pnl + 標記 invalid 後綴）
+- [x] **QoL-4** ~~Paper PnL 異常大~~ ✅ commit `2a422fa` PNL-FIX-1（歸檔至 `docs/archive/2026-04-12--completed_todo_full_program_audit.md`）
 
 ---
 
@@ -267,21 +215,7 @@ WIRE-0/WIRE-1 + DL-1/DL-2 + JS-1 + 5-01~03 已全部 ✅。下面是原 backlog 
 
 來源：DB 清理後的乾淨基線揭露多個失真假設。
 
-- [x] **PNL-1** ✅ Phase 5 reframing 完成（同日，本 commit）— CLAUDE.md §三 Phase 5 段落重寫 + `project_phase5_promotion_edge_crisis.md` memory 重寫 + MEMORY.md 索引更新。Post-cleanup 真相寫入：所有活躍策略 gross edge **負數**（bb_reversion -0.46 / ma_crossover -2.64 / grid_trading -0.67 bps），Phase 5 cost_gate 工作暫停等策略重做
-- [x] **PNL-2** ✅ Fee underreporting 修復（同日，本 commit）— 根因確認：`emit_close_fill` 寫 `fee: 0.0`，註解謊稱「accrued separately」但 `paper_state.close_position()` 完全不收費。所有 5 條 close 路徑（fast_track / H0-stops / paused / strategy_close / risk_close）共 653 筆 fill 全部 fee=$0（vs opens 742 筆共 $648 真實費用 → 真實 round-trip 應為 ~$2483，**漏報 4×**）。修復：新增 `paper_state.charge_fee()` helper + `emit_close_fill` 計算 `qty * price * fee_rate` 並 (a) 扣餘額 (b) 寫 DB。+2 regression tests（charge_fee garbage rejection + close fee charge end-to-end）
-- [x] **PNL-3** ✅ Per-strategy edge breakdown 完成（同日，本 commit）— FIFO open-close pairing on 1395 paper fills（trading.fills.realized_pnl 已被 PNL-FIX-1 cleanup 修復）：
-
-  | 策略 | round trips | gross PnL | rt fee real | net | gross bps | net bps |
-  |---|---|---|---|---|---|---|
-  | bb_reversion | 62 | -$9.71 | $115 | -$125 | -0.46 | -5.96 |
-  | ma_crossover | 148 | -$119.88 | $250 | -$370 | -2.64 | -8.14 |
-  | grid_trading | 446 | -$248.80 | $2032 | -$2280 | -0.67 | -6.17 |
-  | bb_breakout | 0 | — | — | — | — | — |
-  | **總計** | 656 | **-$378** | **$2397** | **-$2775** | — | — |
-
-  **結論**：4 策略無任何 positive-edge 起點。bb_breakout 在乾淨基線從未平倉（疑：from never opened or held all positions until cleanup），需單獨驗證。**bb_breakout 需另開 TODO 確認是否完全 dead**
-
-- [x] **PNL-4** ✅ fast_track 觸發根因（同日，本 commit）— 代碼追蹤已盡可能：`evaluate_fast_track(level, 0.0, 0.0)` 中 `price_drop_pct` 與 `margin_utilization_pct` 為硬編 `0.0`（comments 寫 "computed externally" 但**從未真的 externally computed**），閃崩+保證金分支為**死碼**。唯一可觸發 CloseAll 的是 `risk_level ≥ CircuitBreaker`。**04-11 18:51 logs 已隨 22:39 引擎重啟丟失**，無法 log 追蹤誰把 risk level 升到 CB。**已加觀測**：`on_tick.rs` fast_track CloseAll 分支現會 `tracing::warn!` 記錄 risk_level / ts / position count / 觸發 tick 的 symbol+price，下次觸發必留痕跡。**留尾**：(a) 調查是否要 wire price_drop / margin_util 真實計算，或乾脆刪除死碼；(b) 確認 04-11 那次是 Reconciler 升級、operator manual SetTier、還是某個未知路徑（無 log 不可考）
+- [x] **PNL-1~4** ✅ 全部完成（歸檔至 `docs/archive/2026-04-12--completed_todo_full_program_audit.md`）
 
 ### 留尾追蹤項
 
