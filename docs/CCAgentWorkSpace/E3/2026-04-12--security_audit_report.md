@@ -546,4 +546,29 @@ logger.info("Validating Bybit API key for slot '%s' (actor: %s)", ...)
 
 ---
 
+## 9. 驗證與修復狀態更新 / Verification & Fix Status Update (2026-04-12)
+
+> 以下為 PM 逐條校驗後的狀態更新，反映報告出具後的修復進展。
+
+| 編號 | 報告狀態 | 當前狀態 | 修復記錄 |
+|------|---------|---------|---------|
+| SEC-A01 | LOW | ✅ **報告錯誤** — FIX-03+04 已修復，`evaluate_fast_track` 現傳入真實 `price_drop_pct` + `margin_utilization_pct` | commit `283ae33` |
+| SEC-D01 | CRITICAL | ✅ **已修復** — FIX-10: Live 啟動時 panic guard 強制 `OPENCLAW_IPC_SECRET` | commit `283ae33` |
+| SEC-E01 | HIGH | ✅ **已修復** — `ocEsc()` 已含 `.replace(/'/g, '&#39;')` | 先前修復 |
+| SEC-D02 | HIGH | ✅ **已修復** — FIX-11: `secure=request.url.scheme == "https"` 動態偵測 | commit `283ae33` |
+| SEC-D03 | HIGH | ✅ **已修復** — `static_auth_guard` 中間件，豁免 login 資源 | 本次修復 |
+| SEC-F01 | HIGH | ✅ **Accepted Risk** — 無提幣 API key → 資金外流不可能；Tailscale 內網 + 單人 Operator + Bybit 唯一數據源 → 無可利用 XSS 攻擊路徑；最壞損害 = 服務中斷 + 持倉被平（本金不動）。CSP nonce 投入與風險不匹配，歸檔不修。 | Operator 決策 |
+| SEC-B02 | MEDIUM | ✅ **已修復** — 日期格式驗證 + db_url 正則 + Path.resolve() 路徑清理 | 本次修復 |
+| SEC-B03 | MEDIUM | ✅ **已修復** — ocEsc() 單引號修復覆蓋此注入點 | 隨 SEC-E01 |
+| SEC-E02 | MEDIUM | ✅ **已修復** — 確認對話框 title 改用 `textContent` + Unicode 字符 | 本次修復 |
+| SEC-F02 | MEDIUM | ✅ 可接受 — 默認空 origins + SameSite=Strict | — |
+| SEC-F03 | MEDIUM | ✅ 可接受 — SameSite=Strict + Tailscale 已足夠 | — |
+| SEC-F04 | LOW | ✅ **已修復** — `err_msg` 截斷至 200 字符 | 本次修復 |
+| SEC-F05 | LOW | ✅ **已修復** — socket `chmod 0o600` 已在 `ipc_server/mod.rs:389-398` 實施 | 先前修復 |
+
+**修復後評級**：CRITICAL 0 / HIGH 0（SEC-F01 Accepted Risk）/ MEDIUM 0 / LOW 0 → **A**
+
+---
+
 *審計完成 / Audit complete. E3 Security Engineer, 2026-04-12.*
+*驗證更新 / Verification update: PM, 2026-04-12.*

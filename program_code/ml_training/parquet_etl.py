@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
@@ -38,6 +39,13 @@ def extract_training_data(
     if not db_url:
         return {"success": False, "error": "No database URL configured"}
 
+    # SEC-B02: Validate inputs to prevent injection via f-string SQL.
+    # SEC-B02：驗證輸入以防止 f-string SQL 注入。
+    # db_url must look like a postgres connection string (no embedded quotes/semicolons).
+    _SAFE_DB_URL = re.compile(r"^[a-zA-Z0-9+_./:@?&=%\-]+$")
+    if not _SAFE_DB_URL.match(db_url):
+        return {"success": False, "error": "Invalid database URL format (rejected by SEC-B02 guard)"}
+
     result = {"success": False, "output_dir": output_dir}
 
     try:
@@ -60,8 +68,17 @@ def extract_training_data(
         start_str = start_date.strftime("%Y-%m-%d")
         end_str = end_date.strftime("%Y-%m-%d")
 
+        # SEC-B02: Assert date strings are safe (YYYY-MM-DD only).
+        # SEC-B02：斷言日期字符串格式安全（僅 YYYY-MM-DD）。
+        _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+        assert _DATE_RE.match(start_str) and _DATE_RE.match(end_str), "date format violation"
+
+        # SEC-B02: Sanitize output_dir — reject path traversal / quotes.
+        # SEC-B02：清理輸出目錄 — 拒絕路徑遍歷 / 引號。
+        _clean_dir = str(Path(output_dir).resolve())
+
         # Extract decision contexts with features / 提取決策上下文 + 特徵
-        ctx_path = f"{output_dir}/decision_contexts_{start_str}_{end_str}.parquet"
+        ctx_path = f"{_clean_dir}/decision_contexts_{start_str}_{end_str}.parquet"
         ctx_query = f"""
             COPY (
                 SELECT * FROM pg.trading.decision_context_snapshots
@@ -73,7 +90,7 @@ def extract_training_data(
         ctx_count = conn.execute(f"SELECT count(*) FROM read_parquet('{ctx_path}')").fetchone()[0]
 
         # Extract fills / 提取成交
-        fills_path = f"{output_dir}/fills_{start_str}_{end_str}.parquet"
+        fills_path = f"{_clean_dir}/fills_{start_str}_{end_str}.parquet"
         fills_query = f"""
             COPY (
                 SELECT * FROM pg.trading.fills
@@ -85,7 +102,7 @@ def extract_training_data(
         fills_count = conn.execute(f"SELECT count(*) FROM read_parquet('{fills_path}')").fetchone()[0]
 
         # Extract features with temporal window — exclude stale entries / 提取特徵（帶時間窗口，排除過期條目）
-        features_path = f"{output_dir}/features_latest.parquet"
+        features_path = f"{_clean_dir}/features_latest.parquet"
         # Only include features updated within the ETL window to avoid stale data.
         # updated_ts_ms is epoch millis; convert start_date to epoch ms.
         # 只包含 ETL 窗口內更新的特徵，避免過期數據。

@@ -377,29 +377,31 @@ const MODE_CONFIRM = {
 
 // ─── Confirm Dialog ──────────────────────────────────────────
 const CONFIRM_MSGS = {
+  // SEC-E02: Titles use plain text (textContent) — Unicode chars instead of HTML entities.
+  // SEC-E02：標題使用純文本（textContent）— Unicode 字符取代 HTML 實體。
   paper: {
-    on: { title: '&#x25B6; 启动模拟交易 / Start Paper Trading',
+    on: { title: '\u25B6 启动模拟交易 / Start Paper Trading',
       body: '<strong>即将启动模拟交易系统。</strong><p>模拟交易使用虚拟资金（$100,000），不涉及任何真实资金。所有订单在本地引擎中模拟执行。</p><p>启动后，策略可以通过模拟引擎提交订单、管理持仓、追踪盈亏。</p>' },
-    off: { title: '&#x23F9; 停止模拟交易 / Stop Paper Trading',
-      body: '<strong>即将停止模拟交易系统。</strong><div class="warn-box">&#x26A0; 停止后，所有未平仓的模拟持仓将被冻结，不再更新市值。活跃的订单将被取消。当前会话的盈亏数据会被保留。</div>' },
+    off: { title: '\u23F9 停止模拟交易 / Stop Paper Trading',
+      body: '<strong>即将停止模拟交易系统。</strong><div class="warn-box">\u26A0 停止后，所有未平仓的模拟持仓将被冻结，不再更新市值。活跃的订单将被取消。当前会话的盈亏数据会被保留。</div>' },
   },
   feed: {
-    on: { title: '&#x1F4E1; 启动行情流 / Start Market Feed',
+    on: { title: '\uD83D\uDCE1 启动行情流 / Start Market Feed',
       body: '<strong>即将启动实时行情数据流。</strong><p>系统将通过 WebSocket 接收 Bybit 的实时价格数据，用于策略分析和 K 线图表。</p><p>启动后会产生少量网络流量（约 1-5 KB/s），不涉及任何交易操作。</p>' },
-    off: { title: '&#x23F9; 停止行情流 / Stop Market Feed',
-      body: '<strong>即将停止行情数据流。</strong><div class="warn-box">&#x26A0; 停止后，K 线图表将不再更新，策略将无法接收到新的价格数据。已有的策略分析将使用最后已知价格。</div>' },
+    off: { title: '\u23F9 停止行情流 / Stop Market Feed',
+      body: '<strong>即将停止行情数据流。</strong><div class="warn-box">\u26A0 停止后，K 线图表将不再更新，策略将无法接收到新的价格数据。已有的策略分析将使用最后已知价格。</div>' },
   },
   demo: {
-    on: { title: '&#x1F3E6; 启用 Bybit Demo / Enable Bybit Demo',
+    on: { title: '\uD83C\uDFE6 启用 Bybit Demo / Enable Bybit Demo',
       body: '<strong>即将启用 Bybit Demo 交易。</strong><p>Bybit Demo 是 Bybit 官方提供的沙盒环境，使用真实市场数据但虚拟资金。订单会发送到 Bybit 的测试服务器执行。</p><p>启用后，系统将以"双重执行"模式运行：每笔交易同时在本地模拟和 Bybit Demo 上执行。</p>' },
-    off: { title: '&#x23F9; 关闭 Bybit Demo / Disable Bybit Demo',
-      body: '<strong>即将关闭 Bybit Demo 交易。</strong><div class="warn-box">&#x26A0; 关闭后，不再向 Bybit Demo 发送订单。Bybit Demo 上的持仓不会自动平仓——你需要在 Bybit 网站手动处理。本地模拟不受影响。</div>' },
+    off: { title: '\u23F9 关闭 Bybit Demo / Disable Bybit Demo',
+      body: '<strong>即将关闭 Bybit Demo 交易。</strong><div class="warn-box">\u26A0 关闭后，不再向 Bybit Demo 发送订单。Bybit Demo 上的持仓不会自动平仓——你需要在 Bybit 网站手动处理。本地模拟不受影响。</div>' },
   },
   scanner: {
-    on: { title: '&#x1F50D; 启动自动扫描 / Start Auto Scanner',
+    on: { title: '\uD83D\uDD0D 启动自动扫描 / Start Auto Scanner',
       body: '<strong>即将启动市场扫描器。</strong><p>扫描器每 5 分钟分析 650+ 个 Bybit 交易对，自动发现交易机会并部署对应策略。</p><p>AI Agent 将根据评分结果自主决定启动哪些策略（上限 100 个），你可以通过策略中心的"Hard Stop"按钮手动关闭任何策略。</p>' },
-    off: { title: '&#x23F9; 停止自动扫描 / Stop Auto Scanner',
-      body: '<strong>即将停止市场扫描器。</strong><div class="warn-box">&#x26A0; 停止后，不再自动发现新的交易机会。已部署的策略将继续运行，但不会有新策略被自动创建。</div>' },
+    off: { title: '\u23F9 停止自动扫描 / Stop Auto Scanner',
+      body: '<strong>即将停止市场扫描器。</strong><div class="warn-box">\u26A0 停止后，不再自动发现新的交易机会。已部署的策略将继续运行，但不会有新策略被自动创建。</div>' },
   },
 };
 
@@ -412,7 +414,9 @@ function confirmAction(action) {
   else if (action === 'scanner') isOn = _scannerRunning;
 
   const msg = CONFIRM_MSGS[action][isOn ? 'off' : 'on'];
-  $('confirm-title').innerHTML = msg.title;
+  // SEC-E02: title uses textContent (no HTML parsing needed — pure text + Unicode).
+  // SEC-E02：標題用 textContent（純文本 + Unicode，不需 HTML 解析）。
+  $('confirm-title').textContent = msg.title;
   $('confirm-body').innerHTML = msg.body;
   $('confirm-overlay').classList.add('show');
 }
@@ -464,7 +468,7 @@ function confirmMode(mode) {
   const info = MODE_CONFIRM[mode];
   if (!info) return;
   _pendingMode = mode;
-  $('confirm-title').innerHTML = info.title;
+  $('confirm-title').textContent = info.title;  // SEC-E02
   $('confirm-body').innerHTML = info.body;
   $('confirm-overlay').classList.add('show');
 }
