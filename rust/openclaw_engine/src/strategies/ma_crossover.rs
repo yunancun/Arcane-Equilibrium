@@ -51,7 +51,7 @@ impl Default for MaCrossoverParams {
             default_qty: 1e9,
             regime_filter_enabled: true,
             higher_tf_alpha: 0.003,
-            min_persistence_ms: 120_000,
+            min_persistence_ms: 180_000,
             min_notional_usd: 10.0,
             weight_adx: cc.weight_adx,
             weight_regime: cc.weight_regime,
@@ -308,7 +308,7 @@ impl MaCrossover {
             conf_scale: 1.0,
             confluence_config: ConfluenceConfig::default(),
             persistence: PersistenceTracker::new(),
-            min_persistence_ms: 120_000,
+            min_persistence_ms: 180_000,
             min_notional_usd: 10.0,
         }
     }

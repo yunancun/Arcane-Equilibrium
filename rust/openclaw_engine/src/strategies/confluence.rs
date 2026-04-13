@@ -57,6 +57,7 @@ pub struct ConfluenceConfig {
 impl Default for ConfluenceConfig {
     /// Default: trend-following weights (MA crossover profile).
     /// 默認：趨勢跟蹤權重（MA crossover 配置）。
+    /// EDGE-P1-3: thresholds raised 35/45/55 → 45/52/58 to filter more noise.
     fn default() -> Self {
         Self {
             weight_adx: 25.0,
@@ -65,9 +66,9 @@ impl Default for ConfluenceConfig {
             weight_momentum: 8.0,
             adx_floor: 8.0,
             invert_adx: false,
-            threshold_no_trade: 35.0,
-            threshold_light: 45.0,
-            threshold_full: 55.0,
+            threshold_no_trade: 45.0,
+            threshold_light: 52.0,
+            threshold_full: 58.0,
             confluence_as_gate: true,
         }
     }
@@ -499,23 +500,23 @@ mod tests {
 
     #[test]
     fn test_qty_ramp_zone() {
-        let cfg = trend_config(); // threshold_no_trade=35
-        // score=32.5 → in ramp zone (30-35): 0.10 * (32.5-30)/5 = 0.10*0.5 = 0.05
-        assert!((score_to_qty_pct(Some(32.5), &cfg) - 0.05).abs() < 0.01);
+        let cfg = trend_config(); // EDGE-P1-3: threshold_no_trade=45, ramp zone=40-45
+        // score=42.5 → in ramp zone (40-45): 0.10 * (42.5-40)/5 = 0.10*0.5 = 0.05
+        assert!((score_to_qty_pct(Some(42.5), &cfg) - 0.05).abs() < 0.01);
     }
 
     #[test]
     fn test_qty_light_zone() {
-        let cfg = trend_config(); // 35→45: 10%→50%
-        // score=40 → 0.10 + 0.40*(40-35)/(45-35) = 0.10 + 0.20 = 0.30
-        assert!((score_to_qty_pct(Some(40.0), &cfg) - 0.30).abs() < 0.01);
+        let cfg = trend_config(); // EDGE-P1-3: 45→52: 10%→50%
+        // score=48.5 → 0.10 + 0.40*(48.5-45)/(52-45) = 0.10 + 0.40*0.5 = 0.30
+        assert!((score_to_qty_pct(Some(48.5), &cfg) - 0.30).abs() < 0.01);
     }
 
     #[test]
     fn test_qty_standard_zone() {
-        let cfg = trend_config(); // 45→55: 50%→100%
-        // score=50 → 0.50 + 0.50*(50-45)/(55-45) = 0.50 + 0.25 = 0.75
-        assert!((score_to_qty_pct(Some(50.0), &cfg) - 0.75).abs() < 0.01);
+        let cfg = trend_config(); // EDGE-P1-3: 52→58: 50%→100%
+        // score=55 → 0.50 + 0.50*(55-52)/(58-52) = 0.50 + 0.25 = 0.75
+        assert!((score_to_qty_pct(Some(55.0), &cfg) - 0.75).abs() < 0.01);
     }
 
     #[test]
@@ -610,22 +611,22 @@ mod tests {
 
     #[test]
     fn test_qty_pct_at_exact_thresholds() {
-        let cfg = trend_config(); // no_trade=35, light=45, full=55
+        let cfg = trend_config(); // EDGE-P1-3: no_trade=45, light=52, full=58
         // Exactly at no_trade: should be 10%
-        assert!((score_to_qty_pct(Some(35.0), &cfg) - 0.10).abs() < 0.01);
+        assert!((score_to_qty_pct(Some(45.0), &cfg) - 0.10).abs() < 0.01);
         // Exactly at light: should be 50%
-        assert!((score_to_qty_pct(Some(45.0), &cfg) - 0.50).abs() < 0.01);
+        assert!((score_to_qty_pct(Some(52.0), &cfg) - 0.50).abs() < 0.01);
         // Exactly at full: should be 100%
-        assert!((score_to_qty_pct(Some(55.0), &cfg) - 1.0).abs() < 0.01);
+        assert!((score_to_qty_pct(Some(58.0), &cfg) - 1.0).abs() < 0.01);
     }
 
     #[test]
     fn test_qty_pct_soft_ramp_bottom() {
-        let cfg = trend_config(); // ramp_start = 35-5 = 30
-        // Score=29 → below ramp_start → 0%
-        assert!((score_to_qty_pct(Some(29.0), &cfg)).abs() < 1e-10);
-        // Score=30.01 → just above ramp_start → tiny %
-        let pct = score_to_qty_pct(Some(30.01), &cfg);
+        let cfg = trend_config(); // EDGE-P1-3: ramp_start = 45-5 = 40
+        // Score=39 → below ramp_start → 0%
+        assert!((score_to_qty_pct(Some(39.0), &cfg)).abs() < 1e-10);
+        // Score=40.01 → just above ramp_start → tiny %
+        let pct = score_to_qty_pct(Some(40.01), &cfg);
         assert!(pct > 0.0 && pct < 0.01, "got {pct}");
     }
 
