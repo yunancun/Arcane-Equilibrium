@@ -135,17 +135,26 @@ def run_james_stein(
     days_back: int = 30,
     min_samples: int = 3,
     snapshot_path: Optional[str] = None,
+    engine_mode: str = "demo",
 ) -> dict[tuple[str, str], dict]:
     """
     Full pipeline: query fills → compute edge stats → JS shrinkage → write to PG + JSON.
-    完整管線：查詢成交 → 計算邊際統計 → JS 收縮 → 寫入 PG + JSON。
+    完整管線：查詢成交 → 計算邊際統計 → JS 收縮 �� 寫入 PG + JSON。
+
+    Args:
+        engine_mode: 'demo' (default, used by cost_gate for demo/live), 'paper' (for draft strategy
+                     evaluation only), or 'live'. Demo and paper edge are computed and stored
+                     separately to prevent paper exploration noise from polluting production estimates.
+                     'demo'（默認，cost_gate 使用）、'paper'（僅供草案策略評估）或 'live'。
+                     Demo 與 paper edge 分別計算存儲，防止 paper 探索噪音污染生產估計。
 
     Returns:
         Dict mapping (strategy_name, symbol) → {raw_bps, shrunk_bps, B_factor, n}.
     """
     from .realized_edge_stats import compute_edge_stats
 
-    stats = compute_edge_stats(days_back=days_back, min_samples=min_samples)
+    stats = compute_edge_stats(days_back=days_back, min_samples=min_samples,
+                               engine_mode=engine_mode)
 
     if not stats:
         logger.warning("No edge stats available — aborting JS estimation.")
@@ -233,16 +242,25 @@ def run_james_stein(
     _write_to_postgres(results)
 
     # ── Write JSON snapshot ──
+    # Mode-aware snapshot paths: demo → edge_estimates.json (production, read by cost_gate),
+    # paper → edge_estimates_paper.json (draft strategy evaluation only).
+    # 模式感知快照路徑：demo → edge_estimates.json（生產，cost_gate 讀取），
+    # paper → edge_estimates_paper.json���僅供草案策略評估）。
     if snapshot_path is None:
+        settings_dir = os.path.join(os.path.dirname(__file__), "..", "..", "settings")
+        if engine_mode == "paper":
+            filename = "edge_estimates_paper.json"
+        elif engine_mode == "live":
+            filename = "edge_estimates_live.json"
+        else:
+            # demo → production snapshot (cost_gate default)
+            filename = "edge_estimates.json"
         snapshot_path = os.environ.get(
             "OPENCLAW_EDGE_SNAPSHOT",
-            os.path.join(
-                os.path.dirname(__file__),
-                "..", "..", "settings", "edge_estimates.json",
-            ),
+            os.path.join(settings_dir, filename),
         )
-        # Resolves to srv/settings/edge_estimates.json
-        # 解析為 srv/settings/edge_estimates.json
+        # Demo: srv/settings/edge_estimates.json (backward-compatible, Rust reads this)
+        # Paper: srv/settings/edge_estimates_paper.json (isolated from production)
 
     _write_json_snapshot(results, snapshot_path)
 
@@ -387,7 +405,11 @@ def _parse_args() -> argparse.Namespace:
     )
     p.add_argument("--days", type=int, default=30, help="Days of history to query (default 30)")
     p.add_argument("--min-samples", type=int, default=3, help="Min round-trips per cell (default 3)")
-    p.add_argument("--out", type=str, default=None, help="JSON snapshot output path")
+    p.add_argument("--mode", type=str, default="demo", choices=["paper", "demo", "live"],
+                   help="Engine mode to query fills from (default: demo). "
+                        "Demo edge → edge_estimates.json (production). "
+                        "Paper edge → edge_estimates_paper.json (draft strategy only).")
+    p.add_argument("--out", type=str, default=None, help="JSON snapshot output path (overrides mode-based default)")
     p.add_argument("--verbose", action="store_true")
     return p.parse_args()
 
@@ -404,6 +426,7 @@ def main() -> None:
         days_back=args.days,
         min_samples=args.min_samples,
         snapshot_path=args.out,
+        engine_mode=args.mode,
     )
 
     if results:

@@ -174,6 +174,28 @@ impl EdgeEstimates {
         })
     }
 
+    /// Load mode-specific edge estimates: paper → edge_estimates_paper.json,
+    /// demo/live → edge_estimates.json (production). Paper edge is isolated to prevent
+    /// exploration noise from polluting demo/live cost_gate decisions.
+    /// 加載模式特定邊際估計：paper → edge_estimates_paper.json，
+    /// demo/live → edge_estimates.json（生產）。Paper edge 隔離以防探索噪音污染。
+    pub fn load_for_mode(base_dir: impl AsRef<Path>, mode: &str) -> Self {
+        let filename = match mode {
+            "paper" => "edge_estimates_paper.json",
+            _       => "edge_estimates.json",  // demo + live share production estimates
+        };
+        let path = base_dir.as_ref().join("settings").join(filename);
+
+        Self::load_from_file(&path).unwrap_or_else(|| {
+            tracing::info!(
+                mode,
+                path = %path.display(),
+                "edge estimates not found for mode — cold-start / 模式邊際估計未找到，冷啟動"
+            );
+            Self::empty()
+        })
+    }
+
     /// Look up shrunk edge bps for a (strategy, symbol) pair (convenience).
     /// Returns None if no estimate available (unknown pair or cold-start).
     /// 查找 (策略, 幣種) 對的收縮邊際 bps（便捷方法）。無估計時返回 None。
@@ -328,5 +350,27 @@ mod tests {
         let json = r#"{"strat::SYM": {"win_rate": 0.6, "n": 10}}"#;
         let e = EdgeEstimates::load_from_str(json).unwrap();
         assert_eq!(e.n_cells(), 0); // no shrunk_bps → not inserted
+    }
+
+    #[test]
+    fn test_load_for_mode_paper_uses_paper_filename() {
+        // Paper mode should look for edge_estimates_paper.json, not edge_estimates.json.
+        // With a non-existent base dir, both return empty (cold-start).
+        let e = EdgeEstimates::load_for_mode("/nonexistent_base", "paper");
+        assert!(!e.is_populated());
+    }
+
+    #[test]
+    fn test_load_for_mode_demo_uses_default_filename() {
+        // Demo mode should look for edge_estimates.json (production).
+        let e = EdgeEstimates::load_for_mode("/nonexistent_base", "demo");
+        assert!(!e.is_populated());
+    }
+
+    #[test]
+    fn test_load_for_mode_live_uses_default_filename() {
+        // Live mode shares production estimates with demo.
+        let e = EdgeEstimates::load_for_mode("/nonexistent_base", "live");
+        assert!(!e.is_populated());
     }
 }

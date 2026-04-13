@@ -55,9 +55,11 @@ impl IntentProcessor {
             }
             Some(cell) => {
                 // Negative JS estimate: exploration mode — allow to accumulate data.
-                // Circular dependency: blocking here = no new data = estimates never improve.
+                // Paper pipeline now reads its own edge_estimates_paper.json (isolated from
+                // demo/live), so paper exploration noise no longer degrades production estimates.
                 // 負 JS 估計：探索模式——允許以積累數據。
-                // 循環依賴：攔截 = 無新數據 = 估計永遠不改善。
+                // Paper 管線現在讀取獨立的 edge_estimates_paper.json，
+                // paper 探索噪音不再影響生產估計。
                 tracing::info!(strategy, symbol, estimated_edge_bps = cell.shrunk_bps,
                     win_rate = cell.win_rate, n_trades = cell.n_trades,
                     "cost_gate(JS): negative estimate — exploration mode / 負估計探索模式");
