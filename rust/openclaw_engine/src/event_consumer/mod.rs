@@ -198,23 +198,28 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
     // PH5-WIRE-1：從 settings/edge_estimates.json 加載 JS 收縮邊際估計。
     // 冷啟動（文件缺失）→ 空估計 → ATR×0.2 回退保持激活。
     {
+        // Load mode-specific edge estimates: paper → edge_estimates_paper.json (isolated),
+        // demo/live → edge_estimates.json (production). Paper exploration data must not
+        // pollute demo/live cost_gate decisions — this breaks the degenerative feedback loop
+        // where paper's noisy negative-edge fills drag down shrunk_bps for all modes.
+        // 加載模式特定邊際估計：paper 隔離，demo/live 用生產數據。
+        // Paper 探索數據不得污染 demo/live cost_gate 決策。
         let base = std::env::var("OPENCLAW_BASE_DIR")
             .map(std::path::PathBuf::from)
             .unwrap_or_else(|_| {
-                // Engine is launched from srv/ (restart_all.sh cd's there before exec).
-                // current_dir() == srv/ → srv/settings/edge_estimates.json is correct.
-                // 引擎從 srv/ 目錄啟動（restart_all.sh 在 exec 前 cd 到該目錄）。
                 std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
             });
-        let estimates = crate::edge_estimates::EdgeEstimates::load_from_env_or_default(&base);
+        let mode = pipeline_kind.db_mode();
+        let estimates = crate::edge_estimates::EdgeEstimates::load_for_mode(&base, mode);
         if estimates.is_populated() {
             info!(
+                mode,
                 n_cells = estimates.n_cells(),
                 grand_mean_bps = estimates.grand_mean_bps(),
                 "PH5-WIRE-1: JS edge estimates loaded / JS 邊際估計已加載"
             );
         } else {
-            info!("PH5-WIRE-1: no edge snapshot — cold-start ATR×0.2 fallback / 無快照，ATR 回退");
+            info!(mode, "PH5-WIRE-1: no edge snapshot — cold-start ATR×0.2 fallback / 無快照，ATR 回退");
         }
         pipeline.set_edge_estimates(estimates);
     }

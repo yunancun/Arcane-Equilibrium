@@ -106,10 +106,11 @@ SELECT
     f.price,
     f.fee,
     f.realized_pnl,
-    f.is_paper
+    f.is_paper,
+    f.engine_mode
 FROM trading.fills f
 WHERE f.ts >= %(since)s
-  AND f.is_paper = TRUE
+  AND f.engine_mode = %(engine_mode)s
 ORDER BY f.symbol, f.ts ASC
 """
 
@@ -212,29 +213,35 @@ def _pair_round_trips(fills: list[dict]) -> list[RoundTripRecord]:
 def compute_edge_stats(
     days_back: int = 30,
     min_samples: int = 3,
+    engine_mode: str = "demo",
 ) -> dict[tuple[str, str], EdgeStats]:
     """
-    Query paper fills and compute per-(strategy, symbol) realized edge stats.
-    查詢紙盤成交並計算每 (策略, 幣種) 的實現邊際統計。
+    Query fills for a specific engine_mode and compute per-(strategy, symbol) realized edge stats.
+    查詢指定 engine_mode 的成交並計算每 (策略, 幣種) 的實現邊際統計。
 
     Args:
         days_back: How many calendar days to look back. / 向前查詢的天數。
         min_samples: Minimum round-trips per cell for a valid estimate. / 有效估計的最小往返數。
+        engine_mode: 'demo', 'paper', or 'live'. Defaults to 'demo' to avoid paper data pollution.
+                     'demo'、'paper' 或 'live'。默認 'demo' 以避免 paper 數據污染。
 
     Returns:
         Dict mapping (strategy_name, symbol) → EdgeStats.
     """
+    if engine_mode not in ("paper", "demo", "live"):
+        raise ValueError(f"Invalid engine_mode: {engine_mode!r} (must be paper/demo/live)")
+
     conn = _get_db_conn()
     try:
         since = datetime.now(tz=timezone.utc) - timedelta(days=days_back)
         with conn.cursor() as cur:
-            cur.execute(_FILLS_QUERY, {"since": since})
+            cur.execute(_FILLS_QUERY, {"since": since, "engine_mode": engine_mode})
             cols = [d[0] for d in cur.description]
             fills = [dict(zip(cols, row)) for row in cur.fetchall()]
     finally:
         conn.close()
 
-    logger.info("Fetched %d fills since %s", len(fills), since.date())
+    logger.info("Fetched %d %s fills since %s", len(fills), engine_mode, since.date())
 
     # Pair into round-trips
     records = _pair_round_trips(fills)
@@ -308,6 +315,8 @@ def _parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Compute realized edge stats from paper fills.")
     p.add_argument("--days", type=int, default=30, help="Days of history to query (default 30)")
     p.add_argument("--min-samples", type=int, default=3, help="Min round-trips per cell (default 3)")
+    p.add_argument("--mode", type=str, default="demo", choices=["paper", "demo", "live"],
+                   help="Engine mode to query fills from (default: demo)")
     p.add_argument("--out", type=str, default=None, help="Write JSON summary to this path")
     p.add_argument("--verbose", action="store_true")
     return p.parse_args()
@@ -321,7 +330,8 @@ def main() -> None:
         format="%(asctime)s %(levelname)s %(name)s — %(message)s",
     )
 
-    stats = compute_edge_stats(days_back=args.days, min_samples=args.min_samples)
+    stats = compute_edge_stats(days_back=args.days, min_samples=args.min_samples,
+                               engine_mode=args.mode)
 
     summary = {
         f"{s}::{sym}": {
