@@ -3,6 +3,10 @@
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
 > 最後更新：2026-04-13
 
+### G-SR-1 Phase B Session 6 — B2+B3+B4 Agent 真實接線（2026-04-13）
+
+**B2 ai_service.py stub→real wiring** — `_handle_strategist()` 接入 Ollama param tuning（build prompt from metrics + current_params + param_ranges → JSON param recommendations，asyncio.to_thread 非阻塞）；`_handle_guardian()` 接入 Ollama event classification（risk_level low/medium/high/critical + assessment，informational only NOT trade blocking）；OllamaClient lazy singleton + fail-closed（unavailable→retain current params / input severity）。**B3 Rust IPC enhancement** — `evaluate_cycle()` 移動 `fetch_current_params()` 至 IPC 前，`current_params` + `param_ranges` 包含在 `strategist_evaluate` 負載，Python 可基於上下文做更好推薦。**B4 Guardian L1 MessageBus relay** — high/critical 事件通過 MessageBus 中繼給 Strategist（fail-open）；`create_ai_service_listener()` 注入 `MESSAGE_BUS` from strategy_wiring。ai_service.py +350 行（730→1080）；strategist_scheduler.rs +22 行（692→714）。B-E2 10/10 PASS · B-E4 1083+33=1116 Rust · 2852 Python · 0 fail · B-E5 PASS。
+
 ### G-SR-1 Signal Tightening Phase A Session 1+2（2026-04-13）
 
 **Phase A S1: A0 基礎模組提取** — `grid_helpers.rs` 純函數提取（build_linear_levels/build_geometric_levels/nearest_grid_idx/compute_ou_step/rebalance）+ `confluence.rs` 共享模組（PersistenceTracker + compute_score 4 分量 65 分制 + score_to_qty_pct 5 段平滑插值 + ConfluenceConfig 三配置 trend/reversion/breakout）。
