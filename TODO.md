@@ -1,7 +1,7 @@
 # OpenClaw TODO — 工作計劃清單
 
 最後更新：2026-04-13（G-SR-1 v2.5 FINAL · 5 輪 52 項修正 · 7 Session 實施計劃）
-測試基準線：**Rust engine lib 965 + bin 5 + core 366 + e2e 29 + promotion 32 = 1397 · Python program_code 2852 passed (5 skipped · 0 fail) · ml_training 135 passed (6 skipped)**
+測試基準線：**Rust engine lib 1083 + bin 5 + core 366 + e2e 29 + promotion 32 = 1515 · Python program_code 2852 passed (5 skipped · 0 fail) · ml_training 135 passed (6 skipped)**
 
 > compact 後從此文件恢復工作狀態。第一個 `[ ]` 即為下一步起點。
 > 歷史歸檔索引在文件末尾。詳細完成度視角見 README.md。
@@ -139,18 +139,16 @@ A2 已在 S2 完成，S3 僅需 A-PARAMS。
 - [x] **A-TEST-2** PersistenceTracker 單元測試 — 7 existing + 1 clear test = 8 total
 - [x] **A-TEST-3** 策略 param validation + grid cooldown 測試 — MA 7 + BBR 6 + BBB 6 + Grid 9 = 28 new
 - [x] **A-E4** E4 回歸 PASS — **1065 lib + 33 e2e = 1098** (baseline 1024+33=1057, +41 new)
-- [ ] **A-E5** E5 性能審查（Phase A 改動 ≥3 E1 任務，強制）
+- [x] **A-E5** E5 性能審查 PASS — `.to_string()` 熱路徑分配為 pre-existing 模式（非 Phase A 引入）；PersistenceTracker 無界增長建議 future 加 LRU cap。無阻塞項。
 
-#### Session 5 — B0+B1+B1.5 Rust 側 Agent 基礎設施（~6h）
+#### Session 5 — B0+B1+B1.5 Rust 側 Agent 基礎設施 ✅（2026-04-13）
 
-**可並行前半段**：B0（scheduler）和 B1（client）可同時開發；B1.5 依賴 B1。
+B0 ‖ B1 並行開發，B1.5 依賴 B1。1083 lib + 33 e2e = 1116 tests pass, 0 fail。
 
-- [ ] **B0** `strategist_scheduler.rs` — tokio 後台任務 + DB metrics 查詢（R4-6）+ 指數退避（R4-2）+ Mutex 策略引用（R5-2）
-  - Sub-agent 1：StrategistScheduler struct + run_forever + evaluate_cycle + validate_recommendation
-- [ ] **B1** `ai_client.rs` — AiServiceClient（100ms connect timeout + per-method TTL）
-  - Sub-agent 2：JSON-RPC over Unix socket + request_async + error handling
-- [ ] **B1.5** AIServiceListener 啟動接線（R4-3）— `app.on_event("startup")` + stale socket cleanup
-- [ ] **S5-E2** E2 審查
+- [x] **B0** `strategist_scheduler.rs` — tokio 後台任務 + DB metrics 查詢（R4-6, R5-3, R5-4）+ 指數退避（R4-2: 5m→30m→60m→4h）+ validate_recommendation（range + delta ±30% + weight_sum=65 + weight exempt）+ 10 tests
+- [x] **B1** `ai_service_client.rs` — AiServiceClient（100ms connect timeout + per-method TTL）+ newline JSON-RPC + fail-closed + 8 tests（含 mock server roundtrip）
+- [x] **B1.5** AIServiceListener 啟動接線（R4-3）— `app.on_event("startup")` + stale socket cleanup + shutdown hook + app.state 引用保持
+- [x] **S5-E2** E2 審查 PASS（10/10 checklist：bilingual / no hardcoded paths / fail-closed / file size / param validation / thread safety / cross-platform / JSON-RPC protocol / security / backoff）
 
 #### Session 6 — B2+B3+B4 Agent 真實接線 + 驗收（~6h）
 
