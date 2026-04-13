@@ -879,6 +879,7 @@ mod tests {
             indicators: None,
             signals: &[],
             h0_allowed: true,
+            funding_rate: None,
         }
     }
 

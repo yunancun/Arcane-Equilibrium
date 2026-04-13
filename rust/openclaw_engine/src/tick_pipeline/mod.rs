@@ -429,6 +429,9 @@ pub struct TickContext<'a> {
     pub indicators: Option<&'a IndicatorSnapshot>,
     pub signals: &'a [Signal],
     pub h0_allowed: bool,
+    /// EDGE-P1-2: Latest funding rate for this symbol (from Bybit tickers).
+    /// EDGE-P1-2：該幣種最新資金費率（來自 Bybit tickers）。
+    pub funding_rate: Option<f64>,
 }
 
 /// Tick statistics for monitoring.
@@ -608,6 +611,9 @@ pub struct TickPipeline {
     /// EDGE-P0-1：當前 Defensive+ 階段已半倉的交易對。
     /// 風控降至 Defensive 以下時重置。防止每 tick ReduceToHalf 造成幾何衰減。
     ft_reduced_symbols: std::collections::HashSet<String>,
+    /// EDGE-P1-2: Cached latest funding rate per symbol (from Ticker events).
+    /// EDGE-P1-2：每幣種最新資金費率緩存（來自 Ticker 事件）。
+    funding_rates: HashMap<String, f64>,
 }
 
 impl TickPipeline {
@@ -685,6 +691,7 @@ impl TickPipeline {
             // 3E-4: mode_states/active_modes removed (per-pipeline architecture)
             system_mode: SystemMode::default(),
             ft_reduced_symbols: std::collections::HashSet::new(),
+            funding_rates: HashMap::new(),
         }
     }
 

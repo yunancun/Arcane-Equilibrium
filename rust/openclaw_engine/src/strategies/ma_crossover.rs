@@ -694,6 +694,7 @@ mod tests {
             indicators: Some(ind),
             signals: &[],
             h0_allowed: true,
+            funding_rate: None,
         }
     }
 
@@ -731,6 +732,7 @@ mod tests {
             indicators: Some(ind),
             signals: &[],
             h0_allowed: true,
+            funding_rate: None,
         }
     }
 
@@ -758,6 +760,7 @@ mod tests {
             indicators: Some(ind),
             signals: &[],
             h0_allowed: true,
+            funding_rate: None,
         }
     }
 
@@ -1070,6 +1073,7 @@ mod tests {
             indicators: None,
             signals: &[],
             h0_allowed: true,
+            funding_rate: None,
         };
         let mut s = MaCrossover::new();
         s.min_persistence_ms = 0;  // disable persistence for unit tests

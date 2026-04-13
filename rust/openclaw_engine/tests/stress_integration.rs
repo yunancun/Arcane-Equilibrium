@@ -37,6 +37,7 @@ fn make_ctx(symbol: &'static str, price: f64, ts: u64, ind: Option<IndicatorSnap
         indicators,
         signals: NO_SIGNALS,
         h0_allowed: true,
+        funding_rate: None,
     }
 }
 

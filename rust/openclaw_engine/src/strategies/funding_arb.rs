@@ -247,6 +247,7 @@ mod tests {
             indicators: None,
             signals: &[],
             h0_allowed: true,
+            funding_rate: None,
         };
         assert!(s.on_tick(&ctx).is_empty());
     }

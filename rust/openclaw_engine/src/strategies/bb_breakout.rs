@@ -686,6 +686,7 @@ mod tests {
             indicators: Some(ind),
             signals: &[],
             h0_allowed: true,
+            funding_rate: None,
         }
     }
 
