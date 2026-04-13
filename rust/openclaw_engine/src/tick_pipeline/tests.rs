@@ -59,7 +59,7 @@ use super::*;
                 50_000.0, // price
                 123,     // ts_ms
                 0.0,     // realized_pnl
-                "sl_hit",
+                "risk_close:sl_hit",
             );
 
             let msg = rx
@@ -82,7 +82,7 @@ use super::*;
                         "{:?}: fill_id={} missing engine_mode", kind, fill_id
                     );
                     assert!(
-                        order_id.starts_with(&format!("risk_close_{}_", expected_em)),
+                        order_id.starts_with(&format!("close_{}_", expected_em)),
                         "{:?}: order_id={} missing engine_mode", kind, order_id
                     );
                     assert!(
@@ -492,7 +492,7 @@ use super::*;
     fn test_dbrun3_emit_close_fill_increments_stats() {
         let mut p = TickPipeline::new(&["BTCUSDT"]);
         let before = p.stats.total_fills;
-        p.emit_close_fill("BTCUSDT", true, 0.1, 51_000.0, 1_000, 100.0, "test");
+        p.emit_close_fill("BTCUSDT", true, 0.1, 51_000.0, 1_000, 100.0, "risk_close:test");
         assert_eq!(p.stats.total_fills, before + 1);
     }
 
@@ -1131,7 +1131,7 @@ use super::*;
             50_000.0,
             1_000,
             0.0,
-            "sl_hit",
+            "risk_close:sl_hit",
         );
 
         // (a) paper_state must show the fee charge.

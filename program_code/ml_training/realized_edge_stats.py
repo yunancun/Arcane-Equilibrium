@@ -129,10 +129,10 @@ def _pair_round_trips(fills: list[dict]) -> list[RoundTripRecord]:
     使用 FIFO 隊列為單個幣種配對入場和出場成交。
 
     Strategy: group fills by (symbol, strategy_name). Within each group,
-    exit fills (realized_pnl != 0 OR strategy_name starts with "risk_close")
-    are matched against open positions from entry fills.
-    策略：按 (symbol, strategy_name) 分組。出場成交（realized_pnl != 0 或 strategy_name 以 risk_close 開頭）
-    與入場成交的倉位配對。
+    exit fills (realized_pnl != 0 OR strategy_name starts with risk_close/
+    stop_trigger/strategy_close) are matched against open positions.
+    策略：按 (symbol, strategy_name) 分組。出場成交（realized_pnl != 0 或 strategy_name
+    以 risk_close/stop_trigger/strategy_close 開頭）與入場成交的倉位配對。
     """
     records: list[RoundTripRecord] = []
 
@@ -153,9 +153,16 @@ def _pair_round_trips(fills: list[dict]) -> list[RoundTripRecord]:
             strategy_name = fill["strategy_name"]
             ts = fill["ts"]
 
+            # EDGE-P2-1: close tags now use prefixed format:
+            #   risk_close:*  — risk evaluator / fast-track / halt
+            #   stop_trigger:* — StopManager hard/trailing/time stop
+            #   strategy_close:* — strategy-driven exit
+            # Legacy fills may still use old unprefixed names (stop_/time_stop).
             is_exit = (
                 realized_pnl != 0.0
                 or strategy_name.startswith("risk_close")
+                or strategy_name.startswith("stop_trigger")
+                or strategy_name.startswith("strategy_close")
                 or strategy_name.startswith("stop_")
                 or strategy_name.startswith("time_stop")
             )
