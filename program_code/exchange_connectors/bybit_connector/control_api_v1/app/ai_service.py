@@ -3,51 +3,19 @@ R01-7 — AIService: Python-side AI evaluation service for Rust engine IPC
 =========================================================================
 Governance refs: DOC-04 §G Multi-Agent, Rust Migration R-01
 
-MODULE_NOTE (中文):
-  AIService 是 Rust 遷移架構中 Python 側的 AI 評估服務。
-  當 Rust 引擎需要 AI 推理（L1/L2 模型）時，通過 IPC 發送 JSON-RPC 請求到此服務。
-  本服務接收請求、路由到對應的 Agent（Strategist/Analyst/Conductor/Scout/Guardian），
-  收集回應後返回結構化結果。
+MODULE_NOTE (EN/中):
+  Receives Rust engine JSON-RPC requests, dispatches to 5 Agent handlers
+  (Strategist/Analyst/Conductor/Scout/Guardian), returns structured responses.
+  接收 Rust 引擎 JSON-RPC 請求，分派到 5 個 Agent 處理器，返回結構化結果。
 
-  職責：
-  1. 接收 Rust 引擎的 JSON-RPC 請求（5 種方法）
-  2. 分派到對應 Agent 處理器
-  3. 每個處理器有獨立 TTL（strategist=15s, analyst=30s, conductor=10s, scout=10s, guardian=5s）
-  4. 統計調用次數、錯誤數、超時數
-  5. AIServiceListener 在 Unix socket 上監聽連線
+  Per-handler TTL: strategist=15s, analyst=30s, conductor=10s, scout=10s, guardian=5s.
+  Safety: fail-closed, error msgs truncated to 200 chars, no hardcoded paths.
+  安全：fail-closed，錯誤截斷 200 字符，路徑不硬編碼。
 
-  安全不變量：
-  - system_mode = demo_only 不變
-  - fail-closed：未知方法或異常時返回錯誤結構，不崩潰
-  - 錯誤訊息截斷至 200 字符（防止洩漏堆疊追蹤）
-  - 所有路徑使用環境變量，不硬編碼
-
-  遷移階段：
-  - R-02 接線完成（2026-04-13 G-SR-1 S6）：strategist_evaluate + guardian_check 已接入 Ollama
-  - R-06 階段待接入：analyst_evaluate / conductor_evaluate / scout_scan 仍為 stub
-
-MODULE_NOTE (English):
-  AIService is the Python-side AI evaluation service for the Rust migration architecture.
-  When the Rust engine needs AI inference (L1/L2 models), it sends JSON-RPC requests
-  via IPC to this service. This service receives requests, routes them to the appropriate
-  Agent (Strategist/Analyst/Conductor/Scout/Guardian), and returns structured responses.
-
-  Responsibilities:
-  1. Receive JSON-RPC requests from the Rust engine (5 methods)
-  2. Dispatch to the corresponding Agent handler
-  3. Each handler has an independent TTL (strategist=15s, analyst=30s, conductor=10s, scout=10s, guardian=5s)
-  4. Track call counts, error counts, timeout counts
-  5. AIServiceListener listens on a Unix socket for connections
-
-  Safety invariants:
-  - system_mode = demo_only (unchanged)
-  - fail-closed: unknown methods or exceptions return error structure, never crash
-  - Error messages truncated to 200 chars (prevent stack trace leakage)
-  - All paths use env vars, no hardcoded paths
-
-  Migration phase:
-  - R-02 wiring complete (2026-04-13 G-SR-1 S6): strategist_evaluate + guardian_check wired to Ollama
-  - R-06 pending: analyst_evaluate / conductor_evaluate / scout_scan still stubs
+  Migration / 遷移：
+  - R-02 (S6): strategist + guardian → Ollama L1
+  - C1-C2 (S7): analyst → AnalystAgent.analyze_trade(), scout → ScoutAgent intel/alerts
+  - R-06 remaining / 剩餘: conductor still stub (W23+)
 """
 
 from __future__ import annotations
@@ -170,16 +138,33 @@ class AIService:
         result = await service.dispatch("strategist_evaluate", {"intel": {...}})
 
     Migration note:
-        All handlers currently return stub responses. They will be wired to
-        real StrategistAgent/AnalystAgent/etc. in R-02 and R-06 phases.
+        R-02 (S6): strategist + guardian wired to Ollama L1.
+        C1-C2 (S7): analyst wired to AnalystAgent, scout wired to ScoutAgent.
+        R-06 remaining: conductor still stub.
     遷移備註：
-        所有處理器目前返回 stub 回應。將在 R-02 和 R-06 階段接入真實 Agent。
+        R-02（S6）：strategist + guardian 已接入 Ollama L1。
+        C1-C2（S7）：analyst 已接入 AnalystAgent，scout 已接入 ScoutAgent。
+        R-06 剩餘：conductor 仍為 stub。
     """
 
-    def __init__(self, *, message_bus: Any = None) -> None:
+    def __init__(
+        self,
+        *,
+        message_bus: Any = None,
+        analyst_agent: Any = None,
+        scout_agent: Any = None,
+    ) -> None:
         # Optional MessageBus for Guardian L1 relay (B4)
         # 可選的 MessageBus，用於 Guardian L1 事件中繼（B4）
         self._message_bus = message_bus
+
+        # Optional AnalystAgent for C1 trade attribution (R-06 stub wiring)
+        # 可選的 AnalystAgent，用於 C1 交易歸因（R-06 stub 接線）
+        self._analyst_agent = analyst_agent
+
+        # Optional ScoutAgent for C2 intelligence scan (R-06 stub wiring)
+        # 可選的 ScoutAgent，用於 C2 情報掃描（R-06 stub 接線）
+        self._scout_agent = scout_agent
 
         # Handler registry: method name -> async handler callable
         # 處理器註冊表：方法名 -> 異步處理器
@@ -479,32 +464,60 @@ class AIService:
 
     async def _handle_analyst(self, params: dict[str, Any]) -> dict[str, Any]:
         """
-        Forward to Analyst agent for deep trade analysis.
-        轉發到分析師 Agent 進行深度交易分析。
-        Params: trade_data, analysis_type, lookback_trades. Stub: empty analysis.
+        C1: Forward to AnalystAgent for trade attribution. Stub fallback.
+        C1：轉發到 AnalystAgent 進行交易歸因。不可用時回退到 stub。
         """
         self._stats["analyst_calls"] += 1
-
         trade_data = params.get("trade_data", {})
         analysis_type = params.get("analysis_type", "round_trip")
         symbol = trade_data.get("symbol", "unknown")
 
-        # TODO(R-06): Wire to real AnalystAgent.analyze()
-        # TODO(R-06): 接入真實 AnalystAgent.analyze()
-        logger.debug(
-            "Analyst stub: symbol=%s type=%s", symbol, analysis_type,
-        )
+        if self._analyst_agent is not None and analysis_type == "round_trip":
+            try:
+                from .analyst_agent import TradeRecord
+                import uuid
+                record = TradeRecord(
+                    trade_id=trade_data.get("trade_id", f"ipc_{uuid.uuid4().hex[:12]}"),
+                    symbol=symbol,
+                    strategy=trade_data.get("strategy", "unknown"),
+                    direction=trade_data.get("direction", ""),
+                    entry_price=float(trade_data.get("entry_price", 0.0)),
+                    exit_price=float(trade_data.get("exit_price", 0.0)),
+                    pnl=float(trade_data.get("pnl", 0.0)),
+                    hold_ms=int(trade_data.get("hold_ms", 0)),
+                    regime=trade_data.get("regime", "unknown"),
+                    timestamp_ms=int(trade_data.get("timestamp_ms", int(time.time() * 1000))),
+                    fees_paid=float(trade_data.get("fees_paid", 0.0)),
+                    param_snapshot=trade_data.get("param_snapshot", {}),
+                )
+                # analyze_trade() is synchronous (threading.Lock inside)
+                metrics = await asyncio.to_thread(self._analyst_agent.analyze_trade, record)
+                rankings = []
+                try:
+                    rankings = await asyncio.to_thread(self._analyst_agent.get_strategy_rankings)
+                except Exception:
+                    pass
 
+                logger.debug("Analyst C1: symbol=%s strategy=%s", symbol, record.strategy)
+                return {
+                    "status": "analyzed", "agent": "analyst", "symbol": symbol,
+                    "analysis_type": analysis_type,
+                    "observations": metrics.get("total_trades", 0),
+                    "winning_patterns": [], "losing_patterns": [],
+                    "regime_strategy_matrix": {}, "recommendations": [],
+                    "strategy_metrics": metrics,
+                    "strategy_rankings": rankings[:5],
+                    "source": "analyst_agent_l1",
+                }
+            except Exception as exc:
+                logger.warning("Analyst C1 failed, stub fallback: %s", str(exc)[:200])
+
+        logger.debug("Analyst stub: symbol=%s type=%s", symbol, analysis_type)
         return {
-            "status": "analyzed",
-            "agent": "analyst",
-            "symbol": symbol,
-            "analysis_type": analysis_type,
-            "observations": 0,
-            "winning_patterns": [],
-            "losing_patterns": [],
-            "regime_strategy_matrix": {},
-            "recommendations": [],
+            "status": "analyzed", "agent": "analyst", "symbol": symbol,
+            "analysis_type": analysis_type, "observations": 0,
+            "winning_patterns": [], "losing_patterns": [],
+            "regime_strategy_matrix": {}, "recommendations": [],
             "source": "ai_service_stub",
         }
 
@@ -535,30 +548,101 @@ class AIService:
 
     async def _handle_scout(self, params: dict[str, Any]) -> dict[str, Any]:
         """
-        Forward to Scout agent for market scanning.
-        轉發到偵查員 Agent 進行市場掃描。
-        Params: symbols, scan_type, filters. Stub: empty scan results.
+        C2: Forward to ScoutAgent for market intelligence.
+        C2：轉發到 ScoutAgent 進行市場情報收集。
+        Retrieves recent intel/alerts from agent's in-memory log. Stub fallback.
         """
         self._stats["scout_calls"] += 1
-
         symbols = params.get("symbols", [])
         scan_type = params.get("scan_type", "full")
+        limit = params.get("limit", 20)
 
-        # TODO(R-02): Wire to real ScoutAgent.scan()
-        # TODO(R-02): 接入真實 ScoutAgent.scan()
-        logger.debug(
-            "Scout stub: symbols=%d scan_type=%s", len(symbols), scan_type,
-        )
+        if self._scout_agent is not None:
+            try:
+                recent_intel = await asyncio.to_thread(
+                    self._scout_agent.get_recent_intel, limit
+                )
+                recent_alerts = await asyncio.to_thread(
+                    self._scout_agent.get_recent_alerts, 10
+                )
+                stats = await asyncio.to_thread(self._scout_agent.get_stats)
 
+                intel_dicts = self._serialize_intel_list(recent_intel)
+                alert_dicts = self._serialize_alert_list(recent_alerts)
+
+                # Filter by requested symbols / 按請求 symbols 過濾
+                if symbols:
+                    sym_set = set(symbols)
+                    intel_dicts = [
+                        i for i in intel_dicts
+                        if not i.get("symbols") or sym_set.intersection(i["symbols"])
+                    ]
+
+                logger.debug(
+                    "Scout C2: intel=%d alerts=%d scans=%d",
+                    len(intel_dicts), len(alert_dicts),
+                    stats.get("scans_completed", 0),
+                )
+                return {
+                    "status": "scanned", "agent": "scout",
+                    "scan_type": scan_type,
+                    "symbols_scanned": stats.get("scans_completed", 0),
+                    "intel_objects": intel_dicts,
+                    "event_alerts": alert_dicts,
+                    "source": "scout_agent_live",
+                }
+            except Exception as exc:
+                logger.warning("Scout C2 failed, stub fallback: %s", str(exc)[:200])
+
+        logger.debug("Scout stub: symbols=%d scan_type=%s", len(symbols), scan_type)
         return {
-            "status": "scanned",
-            "agent": "scout",
-            "scan_type": scan_type,
-            "symbols_scanned": 0,
-            "intel_objects": [],
-            "event_alerts": [],
+            "status": "scanned", "agent": "scout", "scan_type": scan_type,
+            "symbols_scanned": 0, "intel_objects": [], "event_alerts": [],
             "source": "ai_service_stub",
         }
+
+    @staticmethod
+    def _serialize_intel_list(intel_list: list) -> list[dict[str, Any]]:
+        """Serialize IntelObject dataclasses to JSON-safe dicts. 序列化情報對象。"""
+        result = []
+        for intel in intel_list:
+            try:
+                result.append({
+                    "source": intel.source,
+                    "content": intel.content[:500],
+                    "symbols": intel.symbols,
+                    "sentiment": (
+                        intel.sentiment.value if hasattr(intel.sentiment, "value")
+                        else str(intel.sentiment)
+                    ),
+                    "relevance_score": intel.relevance_score,
+                    "data_quality": (
+                        intel.data_quality.value if hasattr(intel.data_quality, "value")
+                        else str(intel.data_quality)
+                    ),
+                })
+            except Exception:
+                pass
+        return result
+
+    @staticmethod
+    def _serialize_alert_list(alert_list: list) -> list[dict[str, Any]]:
+        """Serialize EventAlert dataclasses to JSON-safe dicts. 序列化警報對象。"""
+        result = []
+        for alert in alert_list:
+            try:
+                result.append({
+                    "event_type": alert.event_type,
+                    "severity": (
+                        alert.severity.value if hasattr(alert.severity, "value")
+                        else str(alert.severity)
+                    ),
+                    "affected_symbols": alert.affected_symbols,
+                    "description": str(getattr(alert, "description", ""))[:300],
+                })
+            except Exception:
+                pass
+        return result
 
     async def _handle_guardian(self, params: dict[str, Any]) -> dict[str, Any]:
         """
@@ -1076,6 +1160,36 @@ def create_ai_service_listener(
     except Exception as bus_exc:
         logger.debug("MessageBus not available for AIService (non-fatal): %s", bus_exc)
 
-    service = AIService(message_bus=message_bus)
+    # C1: Inject AnalystAgent for trade attribution (fail-open)
+    # C1：注入 AnalystAgent 用於交易歸因（失敗開放）
+    analyst_agent = None
+    try:
+        from .strategy_wiring import ANALYST_AGENT
+        analyst_agent = ANALYST_AGENT
+        logger.info(
+            "AnalystAgent injected into AIService (C1 wiring) / "
+            "已注入 AnalystAgent（C1 接線）"
+        )
+    except Exception as analyst_exc:
+        logger.debug("AnalystAgent not available for AIService (non-fatal): %s", analyst_exc)
+
+    # C2: Inject ScoutAgent for intelligence scan (fail-open)
+    # C2：注入 ScoutAgent 用於情報掃描（失敗開放）
+    scout_agent = None
+    try:
+        from .strategy_wiring import SCOUT_AGENT
+        scout_agent = SCOUT_AGENT
+        logger.info(
+            "ScoutAgent injected into AIService (C2 wiring) / "
+            "已注入 ScoutAgent（C2 接線）"
+        )
+    except Exception as scout_exc:
+        logger.debug("ScoutAgent not available for AIService (non-fatal): %s", scout_exc)
+
+    service = AIService(
+        message_bus=message_bus,
+        analyst_agent=analyst_agent,
+        scout_agent=scout_agent,
+    )
     listener = AIServiceListener(service, socket_path=socket_path)
     return service, listener

@@ -1,7 +1,7 @@
 # OpenClaw TODO — 工作計劃清單
 
 最後更新：2026-04-13（G-SR-1 v2.5 FINAL · 5 輪 52 項修正 · 7 Session 實施計劃）
-測試基準線：**Rust engine lib 1083 + bin 5 + core 366 + e2e 29 + promotion 32 = 1515 · Python program_code 2852 passed (5 skipped · 0 fail) · ml_training 135 passed (6 skipped)**
+測試基準線：**Rust engine lib 1086 + bin 5 + core 366 + e2e 33 + promotion 32 = 1522 · Python program_code 2852 passed (5 skipped · 0 fail) · ml_training 135 passed (6 skipped)**
 
 > compact 後從此文件恢復工作狀態。第一個 `[ ]` 即為下一步起點。
 > 歷史歸檔索引在文件末尾。詳細完成度視角見 README.md。
@@ -31,8 +31,8 @@
 | W19 | 04-14~18 | G-3 IPC 認證 · G-5 Rate Limit · OC-3 / 6-RC-6 告警 | ✅ |
 | W20 | 04-21~25 | SEC E3 審查 · 6-01~03 漸進放權 | ✅ |
 | W21 | 04-28~05-02 | 6-04~13 Phase 6 驗收 · 3E-ARCH · Audit BLOCKERs | ✅ |
-| W22 | 05-05~09 | **G-SR-1 S1-S4** Phase A 信號源收緊（~18h）· LG-2/3 | ⬜ |
-| W23 | 05-12~16 | **G-SR-1 S5-S7** Phase B Agent 接線（~14h）· G-7 Teacher · G-10 Cal · LG-4/5 | ⬜ |
+| W22 | 05-05~09 | **G-SR-1 S1-S4** Phase A 信號源收緊（~18h）· LG-2/3 | ✅（提前完成 04-13） |
+| W23 | 05-12~16 | **G-SR-1 S5-S7** Phase B+C Agent 接線 + PM 驗收（~14h）· G-7 Teacher · G-10 Cal · LG-4/5 | ✅ G-SR-1（提前完成 04-13）· G-7/G-10/LG ⬜ |
 | W24+ | 05-19+ | G-SR-1-RESEARCH 策略研究 · R-06 全 5 agent · Phase 5 補強 · Backlog | ⬜ |
 
 **關鍵路徑**：`~~G-3 → OC-3 → 6-RC-6 → 6-01~13 → 3E-ARCH~~ ✅ → LG-1(05-01) → LG-2 → LG-4 → Live`
@@ -161,10 +161,20 @@ B2→B3→B4 順序鏈完成。1083 lib + 33 e2e = 1116 tests pass, 0 fail · 28
 - [x] **B-E4** E4 回歸 PASS — **1083 lib + 33 e2e = 1116** Rust · **2852** Python · 0 fail
 - [x] **B-E5** E5 性能審查 PASS — 無熱路徑迴歸；Ollama 調用 async-threaded；5min/pair 不構成瓶頸；MessageBus relay 有界
 
-#### Session 7 — Phase C stub + PM 驗收（~2h）
+#### Session 7 — Phase C stub + PM 驗收 ✅（2026-04-13）
 
-- [ ] **C1-C2** Analyst attribution + Scout intelligence stub 接線（Phase C 為 W23 R-06 依賴）
-- [ ] **G-SR-1-PM** PM 端到端驗收：Fragment signal 過濾率 / Grid 降頻效果 / Strategist 參數調整確認
+C1-C2 接線 + PM 端到端驗收。1086 lib + 33 e2e = 1119 tests pass, 0 fail · 2852 Python pass。
+
+- [x] **C1** `_handle_analyst()` 接入 AnalystAgent.analyze_trade() — 從 IPC trade_data 構建 TradeRecord → `asyncio.to_thread()` 調用 L1 分析 → 返回 strategy_metrics + strategy_rankings；agent 不可用時回退 stub
+- [x] **C2** `_handle_scout()` 接入 ScoutAgent.get_recent_intel()/get_recent_alerts() — 序列化 IntelObject/EventAlert 為 JSON-safe dicts → symbol 過濾 → 返回 scout stats；agent 不可用時回退 stub
+- [x] **C1-C2 injection** `create_ai_service_listener()` 注入 ANALYST_AGENT + SCOUT_AGENT from strategy_wiring（fail-open）
+- [x] **G-SR-1-PM** PM 端到端驗收 **全部 PASS**：
+  - ✅ Fragment signal 過濾：PersistenceTracker 正確接入 3 策略（check() 在 entry，clear() 在 close，Close 免檢）
+  - ✅ Grid 降頻：compute_trend_adjusted_cooldown() ADX 60%+Hurst 40% 混合，1x-6x 動態倍率，3 TOML 參數
+  - ✅ Confluence 評分：compute_score() 4 分量 65 分 + score_to_qty_pct() 平滑插值，3 策略 qty 調整
+  - ✅ Strategist 鏈路：DB metrics → fetch_current_params → IPC(+params+ranges) → Ollama → validate_recommendation(range+delta+weight)
+  - ✅ Guardian L1：Ollama 事件分類 → high/critical MessageBus 中繼 → informational only
+  - ✅ C1-C2：Analyst/Scout agent 注入 + 真實調用 + stub fallback
 
 **Sub-agent 並行策略總結**：
 | Session | 並行路數 | 方式 |
@@ -179,8 +189,8 @@ B2→B3→B4 順序鏈完成。1083 lib + 33 e2e = 1116 tests pass, 0 fail · 28
 
 ---
 
-- [ ] **G-1 / R-02** Strategist + Guardian 真實接線（= G-SR-1 Phase B，上方 S5-S6）
-  - 前置：G-3 IPC 認證 ✅ + G-SR-1 Phase A 完成
+- [x] **G-1 / R-02** Strategist + Guardian 真實接線（= G-SR-1 Phase B S5-S7 ✅）
+  - 完成：Strategist Ollama param tuning + Guardian L1 classification + C1 Analyst + C2 Scout
 - [ ] **G-SR-1-RESEARCH** 策略研究（Phase B 後）— Strategist Agent 分析 fills/PnL/regime，生成策略改進提案
   - 前置：G-SR-1 全部完成 + 足夠 fills 數據（LG-1 21d 後）
 - [ ] **G-1 / R-06** Analyst + Conductor + Scout 接線（完整 5 agent，W23）
