@@ -293,4 +293,4 @@ state_models ← state_compiler ← state_store ← main_legacy ← main.py
 
 ## 十一、一句話狀態
 
-> 截至 2026-04-13：tests engine lib **1091** + e2e **33** = **1124** Rust passed **0 fail** · Python **2852** passed · **G-SR-1 COMPLETE ✅** · **G-SR-1-RESEARCH P0+P1 ALL COMPLETE ✅**（EDGE-P0-1/P0-2/P1-1~P1-4 全部實施，含 P1-2 Funding Rate 信號源）· **Edge 數據隔離 ✅** · **Phase 5 PAUSED** · **Live_Ready ✅** · **下一步**：EDGE-P2-1 risk_check 出場審查 · LG-1 21d paper 到期（05-01）。
+> 截至 2026-04-13：tests engine lib **1091** + e2e **33** = **1124** Rust passed **0 fail** · Python **2852** passed · **G-SR-1 COMPLETE ✅** · **G-SR-1-RESEARCH P0+P1+P2-1 ALL COMPLETE ✅**（EDGE-P0-1/P0-2/P1-1~P1-4 + P2-1 close fill labeling 修復）· **Edge 數據隔離 ✅** · **Phase 5 PAUSED** · **Live_Ready ✅** · **下一步**：P2-2/P2-3（W24+）· LG-1 21d paper 到期（05-01）。

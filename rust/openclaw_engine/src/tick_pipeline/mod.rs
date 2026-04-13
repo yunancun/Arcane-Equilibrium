@@ -986,23 +986,25 @@ impl TickPipeline {
         Some((is_long, qty, close_price, pnl))
     }
 
-    /// DB-RUN-3 / PNL-FIX-2: Emit a TradingMsg::Fill row for a stop/risk-driven
-    /// close so trading.fills records the realized PnL **and** the real taker
-    /// fee. Strategy is "risk_close" since these closes are not signal-driven.
+    /// DB-RUN-3 / PNL-FIX-2: Emit a TradingMsg::Fill row for a close so
+    /// trading.fills records the realized PnL **and** the real taker fee.
     /// Counter on stats.total_fills.
     ///
-    /// PNL-FIX-2 (2026-04-12): the previous version wrote `fee: 0.0` and the
-    /// comment claimed close fees were accrued by paper_state "separately" —
-    /// but `paper_state.close_position()` charges no fee at all. So every
-    /// risk/strategy/fast_track close skipped its taker fee, under-reporting
-    /// real costs by ~4× on the 2026-04-12 cleanup baseline (742 opens
-    /// billed $648, but 653 closes billed $0; real round-trip fee should
-    /// have been ~$2483). Now we compute close_fee = qty × price × fee_rate,
-    /// charge it via paper_state.charge_fee(), AND write it to DB so
-    /// downstream cost analytics see the truth.
+    /// EDGE-P2-1: `close_tag` is written directly as `strategy_name` in the DB.
+    /// Callers MUST pass a prefixed tag to distinguish close sources:
+    ///   - `"risk_close:{reason}"` — risk evaluator / fast-track / halt-session
+    ///   - `"stop_trigger:{reason}"` — StopManager hard/trailing/time stop
+    ///   - `"strategy_close:{reason}"` — strategy-driven exit
+    /// This enables downstream analytics to separate risk-forced from
+    /// strategy-driven exits (previously ALL closes were `risk_close:*`).
     ///
-    /// DB-RUN-3 / PNL-FIX-2：為止損/風控平倉發送 Fill 訊息，使 trading.fills
-    /// 記錄已實現損益及真實 taker 費用。
+    /// EDGE-P2-1：`close_tag` 直接寫入 DB `strategy_name`。呼叫方必須傳入
+    /// 帶前綴標籤（risk_close / stop_trigger / strategy_close）以區分平倉來源。
+    ///
+    /// PNL-FIX-2 (2026-04-12): the previous version wrote `fee: 0.0` —
+    /// now we compute close_fee = qty × price × fee_rate, charge it via
+    /// paper_state.charge_fee(), AND write it to DB so downstream cost
+    /// analytics see the truth.
     fn emit_close_fill(
         &mut self,
         symbol: &str,
@@ -1011,7 +1013,7 @@ impl TickPipeline {
         price: f64,
         ts_ms: u64,
         realized_pnl: f64,
-        reason: &str,
+        close_tag: &str,
     ) {
         // PNL-FIX-2: compute close fee from per-symbol taker rate, charge it
         // to paper_state, and record it in the DB row. Charge always happens
@@ -1027,7 +1029,7 @@ impl TickPipeline {
             let _ = tx.try_send(crate::database::TradingMsg::Fill {
                 fill_id: format!("close-{em}-{}-{}", symbol, ts_ms),
                 ts_ms,
-                order_id: format!("risk_close_{em}_{}_{}", symbol, ts_ms),
+                order_id: format!("close_{em}_{}_{}", symbol, ts_ms),
                 symbol: symbol.to_string(),
                 side: close_side.into(),
                 qty,
@@ -1035,7 +1037,7 @@ impl TickPipeline {
                 fee: close_fee,
                 fee_rate: fr,
                 realized_pnl,
-                strategy_name: format!("risk_close:{reason}"),
+                strategy_name: close_tag.to_string(),
                 context_id: on_tick_helpers::make_context_id(em, symbol, ts_ms),
                 engine_mode: em.to_string(),
             });

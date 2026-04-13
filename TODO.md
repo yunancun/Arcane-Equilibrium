@@ -234,9 +234,12 @@ C1-C2 接線 + PM 端到端驗收。1086 lib + 33 e2e = 1119 tests pass, 0 fail 
 
 ### P2 — 架構層
 
-- [ ] **EDGE-P2-1** risk_check 出場頻率審查 — demo 327/435 risk_check fills 有 realized_pnl
-  - 大量持倉被風控強平而非策略自己出場，需審查 `position_risk_evaluator.rs` 動態止損邏輯
-  - 可能原因：止損設太緊 / 持倉時間超 holding_hours_max / daily_loss 觸發
+- [x] **EDGE-P2-1** risk_check 出場頻率審查 ✅ — close fill labeling bug 修復
+  - **根因**：`emit_close_fill()` 對所有平倉（含策略出場）都寫 `risk_close:{reason}`，
+    導致 327/435 看似都是風控強平，實際包含策略出場。Demo risk_config 閾值其實已寬鬆。
+  - **修復**：close_tag 直接寫入 DB `strategy_name`，三類標籤明確區分：
+    `strategy_close:*` / `risk_close:*` / `stop_trigger:*`
+  - **影響**：`realized_edge_stats.py` 更新 + `close_fill_analysis.sql` 診斷腳本
 
 - [ ] **EDGE-P2-2** OI + Liquidation 信號源 — 給 bb_breakout 加領先信號
   - Open Interest 急增 + 價格不動 → 即將爆發；Liquidation flow → 短期底部
@@ -253,7 +256,8 @@ C1-C2 接線 + PM 端到端驗收。1086 lib + 33 e2e = 1119 tests pass, 0 fail 
 
 ```
 ✅ EDGE-P0-1 ‖ P0-2 ‖ P1-1 ‖ P1-2 ‖ P1-3 ‖ P1-4 — P0+P1 全部完成（2026-04-13）
-  → EDGE-P2-1（risk_check 審查）→ P2-2 / P2-3（W24+）
+✅ EDGE-P2-1（close fill labeling 修復）— 2026-04-13
+  → P2-2 / P2-3（W24+）
 ```
 
 ---

@@ -3,6 +3,10 @@
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
 > 最後更新：2026-04-13
 
+### EDGE-P2-1 Close Fill Labeling Fix（2026-04-13）
+
+**Root cause**: `emit_close_fill()` unconditionally wrapped ALL close fills with `strategy_name: format!("risk_close:{reason}")` — including strategy-driven closes. This inflated the apparent risk-forced exit count (327/435 in demo), making it impossible to distinguish strategy exits from risk checks. **Fix**: `close_tag` parameter is now written directly as `strategy_name` — callers pass prefixed tags: `strategy_close:*` / `risk_close:*` / `stop_trigger:*`. order_id changed from `risk_close_{em}_…` to neutral `close_{em}_…`. `realized_edge_stats.py` updated to recognize all three prefixes. Diagnostic SQL script added: `helper_scripts/db/close_fill_analysis.sql`. 5 files changed. E4: 1091 lib + 33 e2e = 1124 Rust · 0 fail.
+
 ### G-SR-1 Session 7 — C1-C2 Agent 接線 + PM 端到端驗收 COMPLETE（2026-04-13）
 
 **C1 Analyst wiring** — `_handle_analyst()` 從 stub 升級為接入 AnalystAgent.analyze_trade()：IPC trade_data → TradeRecord 構建 → asyncio.to_thread() L1 分析 → 返回 strategy_metrics + strategy_rankings；agent 不可用時 stub fallback。**C2 Scout wiring** — `_handle_scout()` 接入 ScoutAgent.get_recent_intel()/get_recent_alerts()：IntelObject/EventAlert 序列化為 JSON-safe dicts + symbol 過濾；agent 不可用時 stub fallback。**Injection** — `create_ai_service_listener()` 新增注入 ANALYST_AGENT + SCOUT_AGENT from strategy_wiring（fail-open）。conductor_evaluate 仍為 stub（W23+ R-06）。MODULE_NOTE 精簡（bilingual 合併 -36 行）。ai_service.py 1080→1195 行（+115 net，MODULE_NOTE 精簡抵消新增）。**PM 驗收 6/6 PASS**：(1) PersistenceTracker 3 策略 check()/clear()/Close 免檢 (2) Grid 趨勢冷卻 ADX+Hurst 1x-6x (3) Confluence 4 分量 65 分 + qty 調整 (4) Strategist DB→IPC→Ollama→validate 全鏈路 (5) Guardian L1 分類+MessageBus 中繼 (6) C1-C2 注入+真實調用+fallback。**G-SR-1 計劃全部完成**（7 Sessions，Phase A+B+C）。E4: 1086 lib + 33 e2e = 1119 Rust · 2852 Python · 0 fail。

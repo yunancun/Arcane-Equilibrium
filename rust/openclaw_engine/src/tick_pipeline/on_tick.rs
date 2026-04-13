@@ -171,7 +171,7 @@ impl TickPipeline {
                         if let Some(close_price) = self.paper_state.latest_price(sym) {
                             if close_price > 0.0 {
                                 let pnl = self.paper_state.reduce_position(sym, half_qty, close_price);
-                                self.emit_close_fill(sym, *is_long, half_qty, close_price, event.ts_ms, pnl, "fast_track_reduce_half");
+                                self.emit_close_fill(sym, *is_long, half_qty, close_price, event.ts_ms, pnl, "risk_close:fast_track_reduce_half");
                                 // FIX-03b: dispatch exchange order for Demo/Live so
                                 // Bybit-side position matches local paper_state.
                                 // FIX-03b：Demo/Live 模式派發交易所訂單，避免本地狀態與交易所倉位脫節。
@@ -237,7 +237,7 @@ impl TickPipeline {
                 if let Some((il, q, px, pnl)) =
                     self.close_position_at_symbol_market(&sym, event.ts_ms)
                 {
-                    self.emit_close_fill(&sym, il, q, px, event.ts_ms, pnl, "fast_track");
+                    self.emit_close_fill(&sym, il, q, px, event.ts_ms, pnl, "risk_close:fast_track");
                 }
                 self.stats.total_stops += 1;
             }
@@ -261,7 +261,8 @@ impl TickPipeline {
                 if let Some((il, q, px, pnl)) =
                     self.close_position_at_symbol_market(sym, event.ts_ms)
                 {
-                    self.emit_close_fill(sym, il, q, px, event.ts_ms, pnl, &trigger.reason);
+                    let tag = format!("stop_trigger:{}", trigger.reason);
+                    self.emit_close_fill(sym, il, q, px, event.ts_ms, pnl, &tag);
                 }
                 self.stats.total_stops += 1;
             }
@@ -363,7 +364,8 @@ impl TickPipeline {
                 if let Some((il, q, px, pnl)) =
                     self.close_position_at_symbol_market(sym, event.ts_ms)
                 {
-                    self.emit_close_fill(sym, il, q, px, event.ts_ms, pnl, &trigger.reason);
+                    let tag = format!("stop_trigger:{}", trigger.reason);
+                    self.emit_close_fill(sym, il, q, px, event.ts_ms, pnl, &tag);
                     self.stats.total_stops += 1;
                     self.execute_position_close(sym, il, q, event, false);
                 } else {
@@ -850,7 +852,8 @@ impl TickPipeline {
                     if let Some((_il, _q, close_px, pnl)) =
                         self.close_position_at_symbol_market(symbol, event.ts_ms)
                     {
-                        self.emit_close_fill(symbol, is_long, qty, close_px, event.ts_ms, pnl, reason);
+                        let tag = format!("strategy_close:{reason}");
+                        self.emit_close_fill(symbol, is_long, qty, close_px, event.ts_ms, pnl, &tag);
                         // Update Kelly stats for future sizing / 更新 Kelly 統計供未來 sizing 使用
                         self.intent_processor.record_trade(symbol, pnl);
                         // Push to recent_fills ring buffer / 推入最近成交環形緩衝
@@ -987,7 +990,8 @@ impl TickPipeline {
                         if let Some((_il, _q, close_px, pnl)) =
                             self.close_position_at_symbol_market(symbol, event.ts_ms)
                         {
-                            self.emit_close_fill(symbol, *is_long, *qty, close_px, event.ts_ms, pnl, &reason);
+                            let tag = format!("risk_close:{reason}");
+                            self.emit_close_fill(symbol, *is_long, *qty, close_px, event.ts_ms, pnl, &tag);
                             // P1-2 fix: update Kelly stats for risk-close (pre-existing omission).
                             // P1-2 修復：風控平倉也更新 Kelly 統計（既有遺漏）。
                             self.intent_processor.record_trade(symbol, pnl);
@@ -1023,7 +1027,7 @@ impl TickPipeline {
                         if let Some(pnl) =
                             self.paper_state.close_position(sym, px, event.ts_ms)
                         {
-                            self.emit_close_fill(sym, *il, *q, px, event.ts_ms, pnl, "halt_session");
+                            self.emit_close_fill(sym, *il, *q, px, event.ts_ms, pnl, "risk_close:halt_session");
                         }
                         self.stats.total_stops += 1;
                         self.execute_position_close(sym, *il, *q, event, is_exchange_mode);
