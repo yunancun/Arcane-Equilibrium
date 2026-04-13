@@ -150,16 +150,16 @@ B0 ‖ B1 並行開發，B1.5 依賴 B1。1083 lib + 33 e2e = 1116 tests pass, 0
 - [x] **B1.5** AIServiceListener 啟動接線（R4-3）— `app.on_event("startup")` + stale socket cleanup + shutdown hook + app.state 引用保持
 - [x] **S5-E2** E2 審查 PASS（10/10 checklist：bilingual / no hardcoded paths / fail-closed / file size / param validation / thread safety / cross-platform / JSON-RPC protocol / security / backoff）
 
-#### Session 6 — B2+B3+B4 Agent 真實接線 + 驗收（~6h）
+#### Session 6 — B2+B3+B4 Agent 真實接線 + 驗收 ✅（2026-04-13）
 
-**順序為主**：B2→B3→B4 有依賴鏈。
+B2→B3→B4 順序鏈完成。1083 lib + 33 e2e = 1116 tests pass, 0 fail · 2852 Python pass。
 
-- [ ] **B2** ai_service.py stub→real wiring（strategist_evaluate + guardian_check）
-- [ ] **B3** Strategist 驗證層（range + delta ±30% + weight sum=65，weight params 免 delta cap）
-- [ ] **B4** Guardian L1 信息層（事件分類 via Ollama L1，MessageBus relay）
-- [ ] **B-E2** E2 審查
-- [ ] **B-E4** E4 回歸（全基線）
-- [ ] **B-E5** E5 性能審查（Phase B 完成，強制）
+- [x] **B2** `ai_service.py` stub→real wiring — `_handle_strategist()` 接入 Ollama param tuning（build prompt from metrics + current_params + param_ranges → JSON param recommendations）；`_handle_guardian()` 接入 Ollama event classification（risk_level + assessment，informational only，NOT trade blocking）；OllamaClient lazy singleton + `asyncio.to_thread()` 非阻塞
+- [x] **B3** Rust `evaluate_cycle()` 增強 — `fetch_current_params()` 移至 IPC 前，`current_params` + `param_ranges` 包含在 `strategist_evaluate` IPC 負載中，Python 側可基於上下文做更好推薦。S5 的 `validate_recommendation()` 不變
+- [x] **B4** Guardian L1 信息層 — Ollama 事件分類（risk_level: low/medium/high/critical + assessment）；high/critical 事件通過 MessageBus 中繼給 Strategist（fail-open）；`create_ai_service_listener()` 注入 `MESSAGE_BUS` from strategy_wiring
+- [x] **B-E2** E2 審查 PASS（10/10：bilingual / no hardcoded paths / fail-closed / file size 1080<1200 / cross-platform / security truncation / JSON-RPC compat / async threading / MessageBus lazy import / Rust compile clean）
+- [x] **B-E4** E4 回歸 PASS — **1083 lib + 33 e2e = 1116** Rust · **2852** Python · 0 fail
+- [x] **B-E5** E5 性能審查 PASS — 無熱路徑迴歸；Ollama 調用 async-threaded；5min/pair 不構成瓶頸；MessageBus relay 有界
 
 #### Session 7 — Phase C stub + PM 驗收（~2h）
 

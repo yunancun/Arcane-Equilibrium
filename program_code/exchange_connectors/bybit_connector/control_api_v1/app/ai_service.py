@@ -23,8 +23,8 @@ MODULE_NOTE (中文):
   - 所有路徑使用環境變量，不硬編碼
 
   遷移階段：
-  - 當前為 stub 實現（返回有效但保守的回應結構）
-  - R-02/R-06 階段將接入真實 Agent 邏輯
+  - R-02 接線完成（2026-04-13 G-SR-1 S6）：strategist_evaluate + guardian_check 已接入 Ollama
+  - R-06 階段待接入：analyst_evaluate / conductor_evaluate / scout_scan 仍為 stub
 
 MODULE_NOTE (English):
   AIService is the Python-side AI evaluation service for the Rust migration architecture.
@@ -46,8 +46,8 @@ MODULE_NOTE (English):
   - All paths use env vars, no hardcoded paths
 
   Migration phase:
-  - Currently stub implementations (return valid but conservative responses)
-  - Will be wired to real Agent logic in R-02/R-06
+  - R-02 wiring complete (2026-04-13 G-SR-1 S6): strategist_evaluate + guardian_check wired to Ollama
+  - R-06 pending: analyst_evaluate / conductor_evaluate / scout_scan still stubs
 """
 
 from __future__ import annotations
@@ -56,11 +56,36 @@ import asyncio
 import json
 import logging
 import os
+import re
 
 import time
 from typing import Any, Callable
 
 logger = logging.getLogger(__name__)
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Ollama client lazy singleton / Ollama 客戶端懶加載單例
+# ═══════════════════════════════════════════════════════════════════════════════
+
+_OLLAMA_CLIENT: Any = None  # OllamaClient | None
+_OLLAMA_INIT_ATTEMPTED: bool = False
+
+
+def _get_ollama_client() -> Any:
+    """Lazy-init OllamaClient singleton. Returns None if unavailable (fail-open).
+    懶加載 OllamaClient 單例。不可用時返回 None（失敗開放）。"""
+    global _OLLAMA_CLIENT, _OLLAMA_INIT_ATTEMPTED
+    if _OLLAMA_INIT_ATTEMPTED:
+        return _OLLAMA_CLIENT
+    _OLLAMA_INIT_ATTEMPTED = True
+    try:
+        from .ollama_client import OllamaClient
+        _OLLAMA_CLIENT = OllamaClient()
+        logger.info("OllamaClient initialized for AIService / AIService 的 OllamaClient 已初始化")
+    except Exception as exc:
+        logger.warning("OllamaClient init failed (AI handlers will use heuristics): %s", exc)
+        _OLLAMA_CLIENT = None
+    return _OLLAMA_CLIENT
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -83,6 +108,30 @@ _DEFAULT_SOCKET_NAME = "ai_service.sock"
 JSONRPC_VERSION = "2.0"                   # JSON-RPC protocol version
 MAX_LINE_BYTES = 16 * 1024 * 1024         # Max line size 16 MB / 最大行長度 16 MB
 ERROR_MSG_MAX_LEN = 200                   # Truncate errors (security) / 截斷錯誤訊息（安全）
+
+# ── Strategist system prompt for param tuning / 策略師參數調優系統 prompt ──
+_STRATEGIST_SYSTEM_PROMPT = (
+    "You are an algorithmic trading strategy tuner. "
+    "Given a strategy's recent performance metrics and adjustable parameters, "
+    "recommend parameter adjustments to improve performance.\n"
+    "Rules:\n"
+    "1. Respond with ONLY a JSON object of param_name: new_value pairs.\n"
+    "2. Only include params you want to change.\n"
+    "3. Keep changes conservative — each param within ±30% of its current value.\n"
+    "4. Weight params (weight_adx, weight_regime, weight_volume, weight_momentum) must sum to exactly 65.\n"
+    "5. All values must be within the min/max range provided.\n"
+    "6. If performance is acceptable or insufficient data, respond with {}.\n"
+    "7. No explanation, no commentary — pure JSON only."
+)
+
+# ── Guardian system prompt for event classification / 守衛事件分類系統 prompt ──
+_GUARDIAN_SYSTEM_PROMPT = (
+    "You are a crypto market risk classifier. "
+    "Given a market event, classify its risk level and provide a brief assessment.\n"
+    "Respond with ONLY a JSON object: "
+    "{\"risk_level\": \"low|medium|high|critical\", \"assessment\": \"brief reason\"}\n"
+    "Be conservative: when in doubt, classify higher risk."
+)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -127,7 +176,11 @@ class AIService:
         所有處理器目前返回 stub 回應。將在 R-02 和 R-06 階段接入真實 Agent。
     """
 
-    def __init__(self) -> None:
+    def __init__(self, *, message_bus: Any = None) -> None:
+        # Optional MessageBus for Guardian L1 relay (B4)
+        # 可選的 MessageBus，用於 Guardian L1 事件中繼（B4）
+        self._message_bus = message_bus
+
         # Handler registry: method name -> async handler callable
         # 處理器註冊表：方法名 -> 異步處理器
         self._handlers: dict[str, Callable[..., Any]] = {}
@@ -234,31 +287,195 @@ class AIService:
 
     async def _handle_strategist(self, params: dict[str, Any]) -> dict[str, Any]:
         """
-        Forward to Strategist agent for strategy evaluation.
-        轉發到策略師 Agent 進行策略評估。
-        Params: intel (IntelObject), model_tier, context. Stub: hold + confidence=0.
+        Strategist as Configurator: evaluate strategy×symbol metrics, recommend param adjustments.
+        策略師作為配置器：評估策略×symbol 指標，推薦參數調整。
+
+        Input from Rust StrategistScheduler (B0):
+          params.intel = {symbol, strategy, win_rate, avg_pnl, fill_count}
+          params.model_tier = "l1_9b"
+          params.current_params = {...}  (B3: current strategy params for context)
+          params.param_ranges = [...]    (B3: valid ranges for each param)
+
+        Returns: flat dict of param_name→value for Rust validate_recommendation().
+        Rust does range/delta/weight_sum validation — Python just recommends.
+        返回：param_name→value 的平面 dict，供 Rust validate_recommendation() 驗證。
+        Rust 做範圍/delta/weight_sum 驗證 — Python 只推薦。
+
+        Fail-closed: Ollama unavailable or error → return empty dict (retain current params).
+        失敗關閉：Ollama 不可用或出錯 → 返回空 dict（保留當前參數）。
         """
         self._stats["strategist_calls"] += 1
 
         intel = params.get("intel", {})
         symbol = intel.get("symbol", "unknown")
+        strategy = intel.get("strategy", "unknown")
+        win_rate = intel.get("win_rate", 0.0)
+        avg_pnl = intel.get("avg_pnl", 0.0)
+        fill_count = intel.get("fill_count", 0)
         model_tier = params.get("model_tier", "l1_9b")
 
-        # TODO(R-02): Wire to real StrategistAgent.evaluate()
-        # TODO(R-02): 接入真實 StrategistAgent.evaluate()
-        logger.debug("Strategist stub: symbol=%s tier=%s", symbol, model_tier)
+        # B3: current params and ranges from Rust (optional — absent before B3 enhancement)
+        # B3：來自 Rust 的當前參數和範圍（可選 — B3 增強前可能不存在）
+        current_params = params.get("current_params", {})
+        param_ranges = params.get("param_ranges", [])
 
-        return {
-            "status": "evaluated",
-            "agent": "strategist",
-            "symbol": symbol,
-            "action": "hold",
-            "confidence": 0.0,
-            "reasoning": "stub_response: no evaluation performed during migration phase",
-            "model_tier": model_tier,
-            "source": "ai_service_stub",
-            "signals_considered": 0,
-        }
+        ollama = await asyncio.to_thread(_get_ollama_client)
+
+        # If Ollama unavailable → empty recommendation (retain current params)
+        # Ollama 不可用 → 空推薦（保留當前參數）
+        if ollama is None or not await ollama.is_available_async():
+            logger.info(
+                "Strategist: Ollama unavailable, returning empty recommendation for %s/%s / "
+                "Ollama 不可用，返回空推薦",
+                strategy, symbol,
+            )
+            return {
+                "status": "evaluated",
+                "agent": "strategist",
+                "symbol": symbol,
+                "strategy": strategy,
+                "source": "heuristic_no_ollama",
+                "reasoning": "Ollama unavailable — retain current params",
+            }
+
+        # Build structured prompt for param tuning / 構建參數調優的結構化 prompt
+        prompt = self._build_strategist_prompt(
+            strategy, symbol, win_rate, avg_pnl, fill_count,
+            current_params, param_ranges,
+        )
+
+        try:
+            response = await asyncio.to_thread(
+                ollama.generate,
+                prompt,
+                system=_STRATEGIST_SYSTEM_PROMPT,
+                temperature=0.2,
+                max_tokens=512,
+                timeout=12,
+                think=False,
+            )
+
+            if not response.success:
+                logger.warning(
+                    "Strategist Ollama call failed: %s / 策略師 Ollama 調用失敗",
+                    getattr(response, "error", "unknown"),
+                )
+                return {
+                    "status": "evaluated",
+                    "agent": "strategist",
+                    "symbol": symbol,
+                    "strategy": strategy,
+                    "source": "ollama_error",
+                    "reasoning": "Ollama call failed — retain current params",
+                }
+
+            # Parse JSON param recommendations from Ollama response
+            # 從 Ollama 回應中解析 JSON 參數推薦
+            recommended = self._parse_strategist_response(response.text, strategy, symbol)
+            return recommended
+
+        except Exception as exc:
+            logger.error(
+                "Strategist evaluation error (fail-closed → empty): %s / 策略師評估錯誤: %s",
+                str(exc)[:ERROR_MSG_MAX_LEN], str(exc)[:ERROR_MSG_MAX_LEN],
+            )
+            self._stats["errors"] += 1
+            return {
+                "status": "evaluated",
+                "agent": "strategist",
+                "symbol": symbol,
+                "strategy": strategy,
+                "source": "error",
+                "reasoning": f"Exception: {str(exc)[:100]} — retain current params",
+            }
+
+    @staticmethod
+    def _build_strategist_prompt(
+        strategy: str,
+        symbol: str,
+        win_rate: float,
+        avg_pnl: float,
+        fill_count: int,
+        current_params: dict[str, Any],
+        param_ranges: list[dict[str, Any]],
+    ) -> str:
+        """Build prompt for Ollama strategy param tuning. / 構建 Ollama 策略參數調優 prompt。"""
+        # Format adjustable param ranges for the prompt
+        # 為 prompt 格式化可調參數範圍
+        adjustable = [
+            r for r in param_ranges
+            if r.get("agent_adjustable", False)
+        ]
+        range_lines = []
+        for r in adjustable:
+            cur_val = current_params.get(r["name"], "?")
+            range_lines.append(
+                f"  - {r['name']}: current={cur_val}, min={r.get('min', '?')}, max={r.get('max', '?')}"
+            )
+        ranges_text = "\n".join(range_lines) if range_lines else "  (no adjustable params available)"
+
+        return (
+            f"Strategy: {strategy}\n"
+            f"Symbol: {symbol}\n"
+            f"Performance (last 7 days):\n"
+            f"  - Win rate: {win_rate:.2%}\n"
+            f"  - Average PnL per fill: {avg_pnl:.6f}\n"
+            f"  - Fill count: {fill_count}\n"
+            f"\nAdjustable parameters and ranges:\n{ranges_text}\n"
+            f"\nRecommend parameter adjustments to improve this strategy's performance.\n"
+            f"Respond with ONLY a JSON object of param_name: new_value pairs.\n"
+            f"Only include params you want to change. Keep changes conservative (within ±30%).\n"
+            f"Weight params (weight_adx, weight_regime, weight_volume, weight_momentum) must sum to 65.\n"
+            f"If performance is acceptable or data is insufficient, respond with {{}}."
+        )
+
+    @staticmethod
+    def _parse_strategist_response(
+        text: str,
+        strategy: str,
+        symbol: str,
+    ) -> dict[str, Any]:
+        """Parse Ollama response into param recommendation dict. / 解析 Ollama 回應為參數推薦 dict。"""
+        text = text.strip()
+        # Strip markdown code fences if present / 移除 markdown 代碼圍欄
+        if text.startswith("```"):
+            text = text.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
+
+        try:
+            result = json.loads(text)
+        except json.JSONDecodeError:
+            # Try to extract JSON object from mixed text / 嘗試從混合文本中提取 JSON
+            match = re.search(r"\{[^{}]*\}", text)
+            if match:
+                try:
+                    result = json.loads(match.group())
+                except json.JSONDecodeError:
+                    result = {}
+            else:
+                result = {}
+
+        if not isinstance(result, dict):
+            logger.warning("Strategist response not a dict: %s", type(result).__name__)
+            result = {}
+
+        # Filter to only numeric values (param recommendations)
+        # 只保留數值類型（參數推薦）
+        filtered: dict[str, Any] = {}
+        for k, v in result.items():
+            if isinstance(v, (int, float)):
+                filtered[k] = float(v)
+            else:
+                logger.debug("Skipping non-numeric param recommendation: %s=%s", k, v)
+
+        # Add metadata for Rust-side logging / 添加元數據供 Rust 側日誌
+        filtered["status"] = "evaluated"
+        filtered["agent"] = "strategist"
+        filtered["symbol"] = symbol
+        filtered["strategy"] = strategy
+        filtered["source"] = "ollama_l1"
+        filtered["reasoning"] = f"AI-recommended params for {strategy}/{symbol}"
+
+        return filtered
 
     async def _handle_analyst(self, params: dict[str, Any]) -> dict[str, Any]:
         """
@@ -345,32 +562,154 @@ class AIService:
 
     async def _handle_guardian(self, params: dict[str, Any]) -> dict[str, Any]:
         """
-        Forward to Guardian agent for risk check.
-        轉發到守衛 Agent 進行風控檢查。
-        Params: intent, portfolio_state, check_type.
-        Stub: REJECTED (fail-closed per Principle #4/#6). / Stub: REJECTED（遵循原則 #4/#6）。
+        Guardian L1 information layer: classify market events via Ollama.
+        守衛 L1 信息層：通過 Ollama 分類市場事件。
+
+        IMPORTANT: This is INFORMATIONAL ONLY — does NOT block trades.
+        重要：這僅是信息層 — 不阻擋交易。
+        Trade blocking authority stays entirely in Rust Guardian (4-check deterministic).
+        交易阻擋權完全在 Rust Guardian（4 項確定性檢查）。
+
+        Input from Rust:
+          params.event = {event_type, severity, description, affected_symbols}
+          params.check_type = "event_classification" (B4: informational)
+
+        Returns: classification result with risk_level and assessment.
+        返回：包含 risk_level 和 assessment 的分類結果。
+
+        Fail-closed: Ollama unavailable → classify as severity from input (conservative).
+        失敗關閉：Ollama 不可用 → 使用輸入的 severity 分類（保守）。
         """
         self._stats["guardian_calls"] += 1
 
-        intent = params.get("intent", {})
-        check_type = params.get("check_type", "pre_trade")
-        symbol = intent.get("symbol", "unknown")
+        event = params.get("event", params.get("intent", {}))
+        check_type = params.get("check_type", "event_classification")
+        event_type = event.get("event_type", "unknown")
+        severity = event.get("severity", "medium")
+        description = event.get("description", "")
+        affected_symbols = event.get("affected_symbols", [])
+        symbol = event.get("symbol", affected_symbols[0] if affected_symbols else "unknown")
 
-        # TODO(R-02): Wire to real GuardianAgent.review()
-        # TODO(R-02): 接入真實 GuardianAgent.review()
-        logger.debug("Guardian stub: symbol=%s check=%s", symbol, check_type)
+        ollama = await asyncio.to_thread(_get_ollama_client)
+
+        # Default: use input severity as risk_level (fail-closed conservative)
+        # 默認：使用輸入 severity 作為 risk_level（失敗關閉保守）
+        risk_level = severity
+        assessment = f"Fallback classification from input severity: {severity}"
+        source = "heuristic"
+
+        if ollama is not None and await ollama.is_available_async():
+            try:
+                classify_text = (
+                    f"Event type: {event_type}\n"
+                    f"Severity reported: {severity}\n"
+                    f"Description: {description}\n"
+                    f"Affected symbols: {', '.join(affected_symbols) if affected_symbols else 'unknown'}"
+                )
+                response = await asyncio.to_thread(
+                    ollama.generate,
+                    classify_text,
+                    system=_GUARDIAN_SYSTEM_PROMPT,
+                    temperature=0.1,
+                    max_tokens=128,
+                    timeout=4,
+                    think=False,
+                )
+                if response.success:
+                    parsed = self._parse_guardian_response(response.text, severity)
+                    risk_level = parsed["risk_level"]
+                    assessment = parsed["assessment"]
+                    source = "ollama_l1"
+                else:
+                    logger.debug(
+                        "Guardian Ollama call unsuccessful, using fallback / "
+                        "守衛 Ollama 調用未成功，使用回退"
+                    )
+            except Exception as exc:
+                logger.warning(
+                    "Guardian classification error (fallback to severity): %s / "
+                    "守衛分類錯誤（回退到 severity）: %s",
+                    str(exc)[:100], str(exc)[:100],
+                )
+
+        logger.info(
+            "Guardian L1: event=%s risk=%s source=%s / 守衛 L1：event=%s risk=%s",
+            event_type, risk_level, source, event_type, risk_level,
+        )
+
+        # B4: Relay high/critical events to agents via MessageBus (informational)
+        # B4：通過 MessageBus 將高/嚴重事件中繼給其他 Agent（信息用途）
+        if risk_level in ("high", "critical") and self._message_bus is not None:
+            try:
+                from .multi_agent_framework import (
+                    AgentMessage,
+                    AgentRole,
+                    MessageType,
+                )
+                alert_msg = AgentMessage(
+                    sender=AgentRole.GUARDIAN,
+                    receiver=AgentRole.STRATEGIST,
+                    message_type=MessageType.EVENT_ALERT,
+                    priority=1,
+                    payload={
+                        "event_type": event_type,
+                        "severity": severity,
+                        "risk_level": risk_level,
+                        "assessment": assessment,
+                        "affected_symbols": affected_symbols,
+                        "source": "guardian_l1_ipc",
+                    },
+                )
+                self._message_bus.send(alert_msg)
+                logger.info(
+                    "Guardian L1: relayed %s event to Strategist via MessageBus / "
+                    "守衛 L1：已通過 MessageBus 將 %s 事件中繼給策略師",
+                    risk_level, risk_level,
+                )
+            except Exception as relay_exc:
+                # Fail-open: relay failure does not block classification response
+                # 失敗開放：中繼失敗不阻擋分類回應
+                logger.warning("Guardian MessageBus relay failed (fail-open): %s", relay_exc)
 
         return {
             "status": "checked",
             "agent": "guardian",
             "symbol": symbol,
             "check_type": check_type,
-            "verdict": "REJECTED",
-            "reason": "stub_guardian: fail-closed default during migration",
-            "risk_flags": [],
-            "modifications": {},
-            "source": "ai_service_stub",
+            "risk_level": risk_level,
+            "assessment": assessment,
+            "event_type": event_type,
+            "affected_symbols": affected_symbols,
+            "source": source,
+            # NOT a trade verdict — informational only
+            # 非交易裁決 — 僅信息用途
+            "is_informational": True,
         }
+
+    @staticmethod
+    def _parse_guardian_response(text: str, fallback_severity: str) -> dict[str, str]:
+        """Parse Ollama guardian classification response. / 解析 Ollama 守衛分類回應。"""
+        text = text.strip()
+        if text.startswith("```"):
+            text = text.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
+
+        valid_levels = ("low", "medium", "high", "critical")
+        try:
+            result = json.loads(text)
+            level = str(result.get("risk_level", fallback_severity)).lower()
+            if level not in valid_levels:
+                level = fallback_severity
+            return {
+                "risk_level": level,
+                "assessment": str(result.get("assessment", "AI classification"))[:200],
+            }
+        except (json.JSONDecodeError, AttributeError):
+            # Try single-word response (like classify() output)
+            # 嘗試單詞回應（類似 classify() 輸出）
+            word = text.strip().lower()
+            if word in valid_levels:
+                return {"risk_level": word, "assessment": f"Classified as {word}"}
+            return {"risk_level": fallback_severity, "assessment": f"Parse failed, fallback: {fallback_severity}"}
 
     # ─── Stats & introspection / 統計與自省 ───
 
@@ -708,6 +1047,9 @@ def create_ai_service_listener(
     Create an AIService + AIServiceListener pair ready to start.
     創建一對準備啟動的 AIService + AIServiceListener。
 
+    Attempts to inject MessageBus from strategy_wiring for Guardian L1 relay (B4).
+    嘗試從 strategy_wiring 注入 MessageBus 以供 Guardian L1 事件中繼（B4）。
+
     Usage::
 
         service, listener = create_ai_service_listener()
@@ -724,6 +1066,16 @@ def create_ai_service_listener(
         Tuple of (AIService, AIServiceListener).
         (AIService, AIServiceListener) 元組。
     """
-    service = AIService()
+    # B4: Inject MessageBus for Guardian event relay (fail-open)
+    # B4：注入 MessageBus 供 Guardian 事件中繼（失敗開放）
+    message_bus = None
+    try:
+        from .strategy_wiring import MESSAGE_BUS
+        message_bus = MESSAGE_BUS
+        logger.info("MessageBus injected into AIService for Guardian L1 relay / 已注入 MessageBus")
+    except Exception as bus_exc:
+        logger.debug("MessageBus not available for AIService (non-fatal): %s", bus_exc)
+
+    service = AIService(message_bus=message_bus)
     listener = AIServiceListener(service, socket_path=socket_path)
     return service, listener

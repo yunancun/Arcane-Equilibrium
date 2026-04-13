@@ -174,10 +174,32 @@ impl StrategistScheduler {
         // 2. 按偏差排名並選取 top-N 交易對
         let top_pairs = rank_by_deviation(&metrics);
 
-        // 3. For each pair, call Python strategist via IPC, validate, and apply
-        // 3. 對每個交易對，通過 IPC 調用 Python 策略師，驗證並應用
+        // 3. For each pair: fetch current params → IPC with context → validate → apply
+        // 3. 對每個交易對：獲取當前參數 → 帶上下文 IPC → 驗證 → 應用
         let mut applied = 0usize;
         for pair in top_pairs.iter().take(MAX_EVALS_PER_CYCLE) {
+            // 3a. Fetch current params + ranges BEFORE IPC (B3: context for Python AI)
+            // 3a. IPC 前獲取當前參數 + 範圍（B3：為 Python AI 提供上下文）
+            let (current_json, ranges_json) = match self
+                .fetch_current_params(&pair.strategy_name)
+                .await
+            {
+                Ok(v) => v,
+                Err(e) => {
+                    warn!(
+                        strategy = %pair.strategy_name,
+                        error = %e,
+                        "fetch_current_params failed, skipping pair / 獲取參數失敗，跳過"
+                    );
+                    continue;
+                }
+            };
+
+            // 3b. Serialize ranges for Python (B3: param_ranges in IPC payload)
+            // 3b. 為 Python 序列化範圍（B3：IPC 負載中的 param_ranges）
+            let ranges_value: Value = serde_json::to_value(&ranges_json)
+                .unwrap_or_else(|_| Value::Array(vec![]));
+
             let params = serde_json::json!({
                 "intel": {
                     "symbol": pair.symbol,
@@ -187,21 +209,21 @@ impl StrategistScheduler {
                     "fill_count": pair.fill_count,
                 },
                 "model_tier": "l1_9b",
+                "current_params": current_json,
+                "param_ranges": ranges_value,
             });
 
             let response = match self.ai_client.request("strategist_evaluate", params).await {
                 Some(r) => r,
                 None => {
                     // IPC failure — counted as cycle failure
+                    // IPC 失敗 — 計為週期失敗
                     return Err("AI service IPC failed for strategist_evaluate".into());
                 }
             };
 
-            // 4. Fetch current param ranges for validation context
-            // 4. 獲取當前參數範圍作為驗證上下文
-            let (current_json, ranges_json) =
-                self.fetch_current_params(&pair.strategy_name).await?;
-
+            // 4. Validate recommendation against ranges, delta, weight sum
+            // 4. 根據範圍、delta、權重總和驗證建議
             if validate_recommendation(&response, &current_json, &ranges_json) {
                 // 5. Apply via PipelineCommand
                 // 5. 通過 PipelineCommand 應用
