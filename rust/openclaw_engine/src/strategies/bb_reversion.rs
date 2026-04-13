@@ -60,7 +60,7 @@ impl Default for BbReversionParams {
             rsi_oversold: 30.0,
             rsi_overbought: 70.0,
             hurst_regime_boost: 0.1,
-            min_persistence_ms: 120_000,
+            min_persistence_ms: 180_000,
             min_notional_usd: 10.0,
             weight_adx: cc.weight_adx,
             weight_regime: cc.weight_regime,
@@ -322,7 +322,7 @@ impl BbReversion {
             conf_scale: 1.0,
             confluence_config: ConfluenceConfig::reversion(),
             persistence: PersistenceTracker::new(),
-            min_persistence_ms: 120_000,
+            min_persistence_ms: 180_000,
             min_notional_usd: 10.0,
         }
     }
@@ -578,6 +578,7 @@ mod tests {
     use openclaw_core::indicators::{AdxResult, BollingerResult, IndicatorSnapshot};
 
     fn ctx_bb(pct_b: f64, rsi: f64, ts: u64) -> TickContext<'static> {
+        use openclaw_core::indicators::HurstResult;
         let ind = Box::leak(Box::new(IndicatorSnapshot {
             bollinger: Some(BollingerResult {
                 upper: 51000.0,
@@ -590,6 +591,8 @@ mod tests {
             // ADX=15: low ADX = ranging market = ideal for mean-reversion.
             // ADX=15：低 ADX = 震盪市場 = 均值回歸理想環境。
             adx: Some(AdxResult { adx: 15.0, plus_di: 20.0, minus_di: 18.0 }),
+            // EDGE-P1-3: Hurst mean_reverting regime needed for score ≥ 45 threshold.
+            hurst: Some(HurstResult { hurst: 0.35, regime: "mean_reverting".into() }),
             ..Default::default()
         }));
         TickContext {

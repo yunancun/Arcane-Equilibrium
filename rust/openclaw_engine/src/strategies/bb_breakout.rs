@@ -56,7 +56,7 @@ impl Default for BbBreakoutParams {
             expansion_bw: DEFAULT_EXPANSION_BW,
             volume_threshold: DEFAULT_VOLUME_THRESHOLD,
             trailing_stop_atr_mult: 2.0,
-            squeeze_expiry_ms: 1_800_000,
+            squeeze_expiry_ms: 2_700_000, // EDGE-P1-4: 30min→45min
             min_persistence_ms: 60_000, // 1 min (triple gate already strict)
             min_notional_usd: 10.0,
             confluence_as_gate: false,
@@ -252,11 +252,11 @@ impl BbBreakoutParams {
 }
 
 /// Default bandwidth threshold to detect squeeze (壓縮帶寬閾值默認)
-const DEFAULT_SQUEEZE_BW: f64 = 0.02;
+const DEFAULT_SQUEEZE_BW: f64 = 0.03; // EDGE-P1-4: 0.02→0.03 (relax squeeze detection)
 /// Default bandwidth threshold to detect expansion (擴張帶寬閾值默認)
 const DEFAULT_EXPANSION_BW: f64 = 0.04;
 /// Default volume ratio threshold for breakout confirmation (成交量確認閾值默認)
-const DEFAULT_VOLUME_THRESHOLD: f64 = 1.5;
+const DEFAULT_VOLUME_THRESHOLD: f64 = 1.2; // EDGE-P1-4: 1.5→1.2 (lower volume bar)
 
 pub struct BbBreakout {
     active: bool,
@@ -315,7 +315,7 @@ impl BbBreakout {
             active: true,
             positions: HashMap::new(),
             squeeze_detected_ms: HashMap::new(),
-            squeeze_expiry_ms: 1_800_000, // 30 minutes
+            squeeze_expiry_ms: 2_700_000, // EDGE-P1-4: 45 minutes (was 30)
             last_trade_ms: HashMap::new(),
             cooldown_ms: 600_000,
             default_qty: 1e9,

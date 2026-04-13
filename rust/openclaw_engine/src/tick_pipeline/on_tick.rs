@@ -123,6 +123,21 @@ impl TickPipeline {
             price_drop_pct,
             margin_utilization_pct,
         );
+
+        // EDGE-P0-1: Reset one-shot guard when risk drops below Defensive.
+        // Once risk returns to Normal/Cautious/Reduced, positions can be halved
+        // again if a future Defensive episode occurs.
+        // EDGE-P0-1：風控降至 Defensive 以下時重置 one-shot 標記。
+        if self.governance.risk.level < openclaw_core::sm::risk_gov::RiskLevel::Defensive
+            && !self.ft_reduced_symbols.is_empty()
+        {
+            tracing::info!(
+                cleared = self.ft_reduced_symbols.len(),
+                "EDGE-P0-1: risk below Defensive — clearing ReduceToHalf one-shot flags / 清除半倉標記"
+            );
+            self.ft_reduced_symbols.clear();
+        }
+
         // FIX-03: Track whether fast_track blocks new entries for this tick.
         // ReduceToHalf and PauseNewEntries both suppress new opens.
         // FIX-03：追蹤 fast_track 是否暫停本 tick 的新開倉。
@@ -130,12 +145,15 @@ impl TickPipeline {
             || ft_action == crate::fast_track::FastTrackAction::ReduceToHalf;
 
         // FIX-03: Handle ReduceToHalf — close half qty of each position.
+        // EDGE-P0-1: One-shot guard — each position only halved once per Defensive episode.
         // FIX-03：處理 ReduceToHalf — 每個倉位平半倉。
+        // EDGE-P0-1：One-shot 保護 — 每個倉位在同一次 Defensive 階段只半倉一次。
         if ft_action == crate::fast_track::FastTrackAction::ReduceToHalf {
             let positions: Vec<(String, bool, f64)> = self
                 .paper_state
                 .positions()
                 .iter()
+                .filter(|p| !self.ft_reduced_symbols.contains(&p.symbol))
                 .map(|p| (p.symbol.clone(), p.is_long, p.qty))
                 .collect();
             if !positions.is_empty() {
@@ -145,7 +163,7 @@ impl TickPipeline {
                     positions = positions.len(),
                     price_drop_pct,
                     margin_utilization_pct,
-                    "FAST_TRACK ReduceToHalf — halving all positions / 快速通道半倉"
+                    "FAST_TRACK ReduceToHalf — halving positions (one-shot) / 快速通道半倉（一次性）"
                 );
                 for (sym, is_long, qty) in &positions {
                     let half_qty = qty / 2.0;
@@ -162,6 +180,9 @@ impl TickPipeline {
                             }
                         }
                     }
+                    // EDGE-P0-1: Mark symbol as already reduced in this episode.
+                    // EDGE-P0-1：標記此交易對在本次 Defensive 階段已完成半倉。
+                    self.ft_reduced_symbols.insert(sym.clone());
                 }
             }
             // Continue processing stops but skip new entries (ft_pause_new_entries = true)

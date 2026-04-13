@@ -186,7 +186,7 @@ C1-C2 接線 + PM 端到端驗收。1086 lib + 33 e2e = 1119 tests pass, 0 fail 
 
 - [x] **G-1 / R-02** Strategist + Guardian 真實接線（= G-SR-1 Phase B S5-S7 ✅）
   - 完成：Strategist Ollama param tuning + Guardian L1 classification + C1 Analyst + C2 Scout
-- [ ] **G-SR-1-RESEARCH** 策略研究 — 見下方「策略 Edge 修復」專節
+- [x] **G-SR-1-RESEARCH** 策略 Edge 修復 P0+P1 ✅ — P0-1/P0-2/P1-1/P1-3/P1-4 全部完成，P2 待排
 - [ ] **G-1 / R-06** Analyst + Conductor + Scout 接線（完整 5 agent，W23）
 - [ ] **G-2** FundingArb.on_tick() 資金費率 IPC 接線（依賴 OC-5 REST 輪詢，W22）
   - 現況：funding_arb.rs on_tick() 永遠返回 vec![]（TODO R-06 註解）
@@ -207,32 +207,18 @@ C1-C2 接線 + PM 端到端驗收。1086 lib + 33 e2e = 1119 tests pass, 0 fail 
 
 ### P0 — 止血（立即）
 
-- [ ] **EDGE-P0-1** fast_track ReduceToHalf one-shot guard — 同一持倉在同一次 Defensive 升級中只半倉一次
-  - 現況：`fast_track.rs:45-46` 只要 `risk_level >= Defensive` 每 tick 每持倉都觸發 ReduceToHalf
-  - `on_tick.rs:134-168` 執行 `qty/2` 幾何衰減，生成大量無意義 fill + fee
-  - 修復：per-position `HashMap<String, bool>` 標記 `already_reduced`，Defensive 解除時重置
-  - 預期效果：消滅 ~75% 無意義 fills + 對應 fee 損失（~$1.44/6h demo）
+- [x] **EDGE-P0-1** fast_track ReduceToHalf one-shot guard ✅
+  - `ft_reduced_symbols: HashSet<String>` in TickPipeline — per-symbol flag, reset when risk < Defensive
+  - `on_tick.rs` filter positions by `!ft_reduced_symbols.contains()`, mark after reduce
 
 ### P1 — 策略信號改善
 
-- [ ] **EDGE-P0-2** min_persistence_ms 120s → 180s — 乾淨數據驗證 3-5min 區間 gross +5.02 bps / 83.3% win rate，2-3min 反而為負 (-1.80 bps)
-  - 現況：MA/BBR `min_persistence_ms = 120_000`（2 分鐘），落在負 edge 區間
-  - Grid `cooldown_ms = 120_000` 基線 + 趨勢冷卻 1-6x，但 2-3min bucket 的 grid gross = -1.80 bps
-  - 修復：3 策略 `min_persistence_ms` 120000 → 180000；Grid `cooldown_ms` 120000 → 180000
-  - 數據依據（demo 隔離後 ~6h）：
+- [x] **EDGE-P0-2** min_persistence_ms 120s → 180s ✅
+  - MA/BBR `min_persistence_ms` 120000→180000; Grid `cooldown_ms` 120000→180000
+  - BBB stays at 60_000 (triple gate already strict)
 
-    | 持續時間 | RTs | Gross bps | Win Rate |
-    |---|---|---|---|
-    | < 60s fragment | 3 | -2.04 | 33% |
-    | 60-120s | 295 | +0.18 | 52% |
-    | **2-3 min（現行）** | 202 | **-1.80** | 66% |
-    | **3-5 min（目標）** | 108 | **+5.02** | **83%** |
-    | 5-10 min | 79 | -0.37 | 25% |
-
-- [ ] **EDGE-P1-1** Grid 趨勢硬停 — ADX > 30 或 Hurst regime = trending 時完全暫停 grid 新開倉
-  - 現況：`confluence.rs` compute_grid_confidence() 只降 qty，不阻止開倉；trending 市場裡 grid 單向積倉
-  - 修復：grid `on_tick()` 加 `if trending { return vec![]; }` 前置 gate
-  - 現有持倉走 trailing stop / risk_close 正常出場
+- [x] **EDGE-P1-1** Grid 趨勢硬停 ✅
+  - `grid_trading.rs on_tick()`: ADX > 30 || hurst regime == "trending" → return vec![]
 
 - [ ] **EDGE-P1-2** Funding Rate 信號源 — 給 bb_reversion 加非滯後 alpha
   - funding rate 極端正值 → 做空壓力 → 均值回歸機會；極端負值 → 做多壓力
@@ -240,13 +226,11 @@ C1-C2 接線 + PM 端到端驗收。1086 lib + 33 e2e = 1119 tests pass, 0 fail 
   - 整合：bb_reversion entry 條件從 `%B < 0 && RSI < oversold` 加權 funding rate 偏差分量
   - 參考 Bybit API：`docs/references/2026-04-04--bybit_api_reference.md`
 
-- [ ] **EDGE-P1-3** Confluence threshold 收緊 — `threshold_no_trade` 從 35 提升到 45（0-65 分制）
-  - 現況：35/65 = 54%，太多低質量交易通過
-  - 45/65 = 69%，過濾更多噪音信號
+- [x] **EDGE-P1-3** Confluence threshold 收緊 ✅
+  - 35/45/55 → 45/52/58 across ConfluenceConfig + all strategy param defaults + mod.rs TOML defaults
 
-- [ ] **EDGE-P1-4** bb_breakout 參數放寬 — 降低三重門檻避免近乎 dead（PNL-5 已記錄）
-  - `squeeze_bw` 0.02 → 0.03；`volume_threshold` 1.5 → 1.2；`squeeze_expiry_ms` 30min → 45min
-  - 前置：EDGE-P0-1 修好後觀察 breakout 觸發率
+- [x] **EDGE-P1-4** bb_breakout 參數放寬 ✅
+  - `squeeze_bw` 0.02→0.03; `volume_threshold` 1.5→1.2; `squeeze_expiry_ms` 30min→45min
 
 ### P2 — 架構層
 
@@ -268,11 +252,9 @@ C1-C2 接線 + PM 端到端驗收。1086 lib + 33 e2e = 1119 tests pass, 0 fail 
 ### 執行順序與依賴
 
 ```
-EDGE-P0-1（ReduceToHalf 止血）‖ EDGE-P0-2（persistence 120→180s）→ 觀察 1-2 天
-  → EDGE-P1-1（grid 硬停）‖ EDGE-P1-3（confluence 收緊）→ 觀察
-  → EDGE-P1-2（funding rate）→ 觀察
-  → EDGE-P2-1（risk_check 審查）
-  → EDGE-P2-2 / EDGE-P2-3（W24+）
+✅ EDGE-P0-1 ‖ P0-2 ‖ P1-1 ‖ P1-3 ‖ P1-4 — 全部完成（2026-04-13）
+  → 觀察 1-2 天 → EDGE-P1-2（funding rate）
+  → EDGE-P2-1（risk_check 審查）→ P2-2 / P2-3（W24+）
 ```
 
 ---

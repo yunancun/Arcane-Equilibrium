@@ -250,9 +250,9 @@ fn default_weight_regime_reversion() -> f64 { 30.0 }
 fn default_weight_volume_reversion() -> f64 { 10.0 }
 fn default_weight_momentum_reversion() -> f64 { 10.0 }
 fn default_adx_floor() -> f64 { 8.0 }
-fn default_threshold_no_trade() -> f64 { 35.0 }
-fn default_threshold_light() -> f64 { 45.0 }
-fn default_threshold_full() -> f64 { 55.0 }
+fn default_threshold_no_trade() -> f64 { 45.0 } // EDGE-P1-3: 35→45
+fn default_threshold_light() -> f64 { 52.0 }   // EDGE-P1-3: 45→52
+fn default_threshold_full() -> f64 { 58.0 }    // EDGE-P1-3: 55→58
 
 impl MaCrossoverParams {
     /// Build ConfluenceConfig from TOML params (trend profile).
@@ -292,9 +292,9 @@ impl Default for MaCrossoverParams {
             weight_volume: 12.0,
             weight_momentum: 8.0,
             adx_floor: 8.0,
-            confluence_threshold_no_trade: 35.0,
-            confluence_threshold_light: 45.0,
-            confluence_threshold_full: 55.0,
+            confluence_threshold_no_trade: 45.0,
+            confluence_threshold_light: 52.0,
+            confluence_threshold_full: 58.0,
         }
     }
 }
@@ -405,9 +405,9 @@ impl Default for BbReversionParams {
             weight_momentum: 10.0,
             adx_floor: 8.0,
             adx_inverted: true,
-            confluence_threshold_no_trade: 35.0,
-            confluence_threshold_light: 45.0,
-            confluence_threshold_full: 55.0,
+            confluence_threshold_no_trade: 45.0,
+            confluence_threshold_light: 52.0,
+            confluence_threshold_full: 58.0,
         }
     }
 }
@@ -509,9 +509,9 @@ impl Default for BbBreakoutParams {
             weight_momentum: 8.0,
             adx_floor: 8.0,
             confluence_as_gate: false,
-            confluence_threshold_no_trade: 35.0,
-            confluence_threshold_light: 45.0,
-            confluence_threshold_full: 55.0,
+            confluence_threshold_no_trade: 45.0,
+            confluence_threshold_light: 52.0,
+            confluence_threshold_full: 58.0,
         }
     }
 }

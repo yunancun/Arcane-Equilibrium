@@ -83,7 +83,9 @@ fn bb_snapshot(
         }),
         atr_5: None,
         stochastic: Some(StochResult { k: 50.0, d: 50.0 }),
-        hurst: None,
+        // EDGE-P1-3: trending regime produces good scores for trend-following strategies.
+        // bb_reversion tests override with mean_reverting locally.
+        hurst: Some(HurstResult { hurst: 0.70, regime: "trending".into() }),
         ewma_vol: None,
         donchian: None,
     }
@@ -311,13 +313,12 @@ fn stress_bb_reversion_extreme_oversold_bounce() {
     let mut strat = BbReversion::new();
     strat.min_persistence_ms = 0; // disable persistence for test
 
+    // EDGE-P1-3: bb_reversion needs mean_reverting regime for score ≥ 45.
+    // Override bb_snapshot's default trending hurst with mean_reverting.
+    let mut snap1 = bb_snapshot(-0.5, 0.06, 10.0, 2050.0, 2040.0, 30.0, 2.0);
+    snap1.hurst = Some(HurstResult { hurst: 0.35, regime: "mean_reverting".into() });
     // Extreme oversold: %B = -0.5, RSI = 10
-    let ctx1 = make_ctx(
-        "ETHUSDT",
-        2000.0,
-        0,
-        Some(bb_snapshot(-0.5, 0.06, 10.0, 2050.0, 2040.0, 30.0, 2.0)),
-    );
+    let ctx1 = make_ctx("ETHUSDT", 2000.0, 0, Some(snap1));
     let intents = strat.on_tick(&ctx1);
     assert_eq!(intents.len(), 1, "should enter long on extreme oversold");
     match &intents[0] {
@@ -326,12 +327,9 @@ fn stress_bb_reversion_extreme_oversold_bounce() {
     }
 
     // Bounce to mean — should exit
-    let ctx2 = make_ctx(
-        "ETHUSDT",
-        2050.0,
-        700_000,
-        Some(bb_snapshot(0.5, 0.04, 50.0, 2050.0, 2050.0, 25.0, 1.0)),
-    );
+    let mut snap2 = bb_snapshot(0.5, 0.04, 50.0, 2050.0, 2050.0, 25.0, 1.0);
+    snap2.hurst = Some(HurstResult { hurst: 0.35, regime: "mean_reverting".into() });
+    let ctx2 = make_ctx("ETHUSDT", 2050.0, 700_000, Some(snap2));
     let intents = strat.on_tick(&ctx2);
     assert_eq!(intents.len(), 1, "should exit at mean reversion");
 }

@@ -602,6 +602,12 @@ pub struct TickPipeline {
     /// Global system mode — synced from Python GUI. Gates trading at tick level.
     /// 全局系統模式 — 從 Python GUI 同步。在 tick 級別封鎖交易。
     system_mode: SystemMode,
+    /// EDGE-P0-1: Symbols already halved in the current Defensive+ episode.
+    /// Reset when risk drops below Defensive. Prevents geometric qty decay
+    /// from ReduceToHalf firing every tick.
+    /// EDGE-P0-1：當前 Defensive+ 階段已半倉的交易對。
+    /// 風控降至 Defensive 以下時重置。防止每 tick ReduceToHalf 造成幾何衰減。
+    ft_reduced_symbols: std::collections::HashSet<String>,
 }
 
 impl TickPipeline {
@@ -678,6 +684,7 @@ impl TickPipeline {
             risk_config_version_seen: 0,
             // 3E-4: mode_states/active_modes removed (per-pipeline architecture)
             system_mode: SystemMode::default(),
+            ft_reduced_symbols: std::collections::HashSet::new(),
         }
     }
 

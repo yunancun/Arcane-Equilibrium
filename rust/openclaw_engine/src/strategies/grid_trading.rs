@@ -44,7 +44,7 @@ pub struct GridTradingParams {
 impl Default for GridTradingParams {
     fn default() -> Self {
         Self {
-            cooldown_ms: 120_000,
+            cooldown_ms: 180_000, // EDGE-P0-2: 120s→180s (align with persistence improvement)
             qty_per_grid: DEFAULT_QTY_PER_GRID,
             max_inventory: 5.0,
             ou_lookback: 60,
@@ -738,6 +738,23 @@ impl Strategy for GridTrading {
         // QC-H9: ou_update_interval configurable (was hardcoded 50)
         if hist_len > 0 && self.ou_update_interval > 0 && hist_len % self.ou_update_interval == 0 {
             self.update_ou_spacing(sym);
+        }
+
+        // EDGE-P1-1: Trending hard stop — suppress new grid entries in strong trends.
+        // ADX > 30 or Hurst regime = "trending" → grid is structurally disadvantaged,
+        // return empty (existing positions exit via normal risk/stop path).
+        // EDGE-P1-1：趨勢硬停 — 強趨勢中暫停 grid 新開倉。
+        // ADX > 30 或 Hurst regime = "trending" → grid 結構性不利，返回空。
+        if let Some(ind) = ctx.indicators {
+            let adx_val = ind.adx.as_ref().map(|a| a.adx).unwrap_or(0.0);
+            let is_trending_regime = ind
+                .hurst
+                .as_ref()
+                .map(|h| h.regime.as_str() == "trending")
+                .unwrap_or(false);
+            if adx_val > 30.0 || is_trending_regime {
+                return vec![];
+            }
         }
 
         // M-2: Honor per-symbol rejection backoff before any cross detection.
