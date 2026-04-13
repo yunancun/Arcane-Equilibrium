@@ -107,6 +107,16 @@ impl DbPool {
         self.consecutive_failures.load(Ordering::Relaxed)
     }
 
+    /// Create a disconnected pool (no DB). Useful for tests that don't need DB.
+    /// 創建斷開的連接池（無 DB）。用於不需要 DB 的測試。
+    pub fn disconnected() -> Self {
+        Self {
+            pool: None,
+            consecutive_failures: AtomicU32::new(0),
+            max_failures: 10,
+        }
+    }
+
     /// Health check: execute SELECT 1.
     /// 健康檢查：執行 SELECT 1。
     pub async fn health_check(&self) -> bool {

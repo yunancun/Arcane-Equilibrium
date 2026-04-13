@@ -372,6 +372,45 @@ async def _startup_integrity_check() -> None:
             _oc3_exc, _oc3_exc,
         )
 
+    # ── B1.5: AIServiceListener startup (R4-3 fix) ─────────────────────
+    # Start AIServiceListener so Rust StrategistScheduler can connect.
+    # 啟動 AIServiceListener 以便 Rust StrategistScheduler 可以連接。
+    # fail-open: must not block startup. Listener runs as asyncio task.
+    # fail-open：不阻斷啟動。Listener 以 asyncio task 運行。
+    try:
+        import asyncio as _asyncio_ais  # noqa: PLC0415
+        from .ai_service import create_ai_service_listener  # noqa: PLC0415
+        _ai_service, _ai_listener = create_ai_service_listener()
+
+        async def _start_ai_listener() -> None:
+            """Start listener and keep reference alive. / 啟動監聽器並保持引用。"""
+            try:
+                await _ai_listener.start()
+            except Exception as _lis_exc:
+                base.logger.warning(
+                    "AIServiceListener.start() failed: %s / AI 服務監聽器啟動失敗：%s",
+                    _lis_exc, _lis_exc,
+                )
+
+        _asyncio_ais.create_task(
+            _start_ai_listener(),
+            name="ai-service-listener",
+        )
+        # Store reference on app state to prevent GC and enable shutdown.
+        # 存儲引用到 app state 以防 GC 並支持關閉。
+        app.state.ai_service_listener = _ai_listener  # type: ignore[attr-defined]
+        app.state.ai_service = _ai_service  # type: ignore[attr-defined]
+        base.logger.info(
+            "AIServiceListener scheduled (socket=%s) / AI 服務監聽器已排程",
+            _ai_listener.socket_path,
+        )
+    except Exception as _ais_exc:
+        base.logger.warning(
+            "AIServiceListener startup failed (fail-open): %s "
+            "/ AI 服務監聽器啟動失敗（不阻斷）：%s",
+            _ais_exc, _ais_exc,
+        )
+
     _elapsed_ms = (_time.monotonic() - _t0) * 1000
     base.logger.info(
         "Startup handler completed in %.1f ms (target < 100 ms) "
@@ -384,6 +423,22 @@ async def _startup_integrity_check() -> None:
             "Check for blocking await calls above. / 啟動 handler 耗時超過 500 ms，請檢查是否有阻塞 await",
             _elapsed_ms,
         )
+
+
+@app.on_event("shutdown")
+async def _shutdown_cleanup() -> None:
+    """Graceful shutdown: stop AIServiceListener if running.
+    優雅關閉：停止 AIServiceListener（如果在運行）。"""
+    listener = getattr(app.state, "ai_service_listener", None)
+    if listener is not None:
+        try:
+            await listener.stop()
+            base.logger.info("AIServiceListener stopped / AI 服務監聽器已停止")
+        except Exception as _stop_exc:
+            base.logger.warning(
+                "AIServiceListener stop failed: %s / AI 服務監聯器停止失敗：%s",
+                _stop_exc, _stop_exc,
+            )
 
 
 @app.get("/api/v1/system/startup-status", include_in_schema=False)

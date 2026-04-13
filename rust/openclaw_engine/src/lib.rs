@@ -10,6 +10,7 @@
 
 pub mod account_manager;
 pub mod ai_budget;
+pub mod ai_service_client;
 pub mod bybit_private_ws;
 pub mod bybit_rest_client;
 pub mod claude_teacher;
@@ -42,6 +43,7 @@ pub mod position_risk_evaluator;
 pub mod risk_checks;
 pub mod scanner;
 pub mod strategies;
+pub mod strategist_scheduler;
 pub mod tick_pipeline;
 pub mod ws_client;
 

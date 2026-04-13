@@ -575,6 +575,24 @@ async fn async_main(
     tasks::spawn_outcome_backfiller(&db_pool, &cancel);
 
     // ------------------------------------------------------------------
+    // B0/R3-1: StrategistScheduler — single tokio background task.
+    // Periodic param tuner: DB metrics → AI evaluate → validate → apply.
+    // B0/R3-1：策略師排程器 — 單個 tokio 後台任務。
+    // 定期參數調諧：DB 指標 → AI 評估 → 驗證 → 應用。
+    // ------------------------------------------------------------------
+    {
+        let ai_client = Arc::new(openclaw_engine::ai_service_client::AiServiceClient::new());
+        let scheduler = Arc::new(openclaw_engine::strategist_scheduler::StrategistScheduler::new(
+            ai_client,
+            paper_cmd_tx.clone(),
+            Arc::clone(&db_pool),
+            cancel.clone(),
+        ));
+        tokio::spawn(scheduler.run_forever());
+        info!("StrategistScheduler spawned (5-min cycle) / 策略師排程器已啟動");
+    }
+
+    // ------------------------------------------------------------------
     // 3E-ARCH: Three-pipeline fan-out + independent spawn
     // 3E-ARCH：三管線扇出 + 獨立 spawn
     // ------------------------------------------------------------------
