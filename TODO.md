@@ -1,6 +1,6 @@
 # OpenClaw TODO — 工作計劃清單
 
-最後更新：2026-04-13（G-SR-1 v2.5 FINAL · 5 輪 52 項修正 · 7 Session 實施計劃）
+最後更新：2026-04-13（EDGE 修復計劃入列 · G-SR-1 v2.5 FINAL · 5 輪 52 項修正 · 7 Session 實施計劃）
 測試基準線：**Rust engine lib 1086 + bin 5 + core 366 + e2e 33 + promotion 32 = 1522 · Python program_code 2852 passed (5 skipped · 0 fail) · ml_training 135 passed (6 skipped)**
 
 > compact 後從此文件恢復工作狀態。第一個 `[ ]` 即為下一步起點。
@@ -33,7 +33,8 @@
 | W21 | 04-28~05-02 | 6-04~13 Phase 6 驗收 · 3E-ARCH · Audit BLOCKERs | ✅ |
 | W22 | 05-05~09 | **G-SR-1 S1-S4** Phase A 信號源收緊（~18h）· LG-2/3 | ✅（提前完成 04-13） |
 | W23 | 05-12~16 | **G-SR-1 S5-S7** Phase B+C Agent 接線 + PM 驗收（~14h）· G-7 Teacher · G-10 Cal · LG-4/5 | ✅ G-SR-1（提前完成 04-13）· G-7/G-10/LG ⬜ |
-| W24+ | 05-19+ | G-SR-1-RESEARCH 策略研究 · R-06 全 5 agent · Phase 5 補強 · Backlog | ⬜ |
+| W24 | 05-19~23 | **EDGE-P0-1 止血** · EDGE-P1-1/P1-3 信號收緊 · EDGE-P1-2 Funding Rate | ⬜ |
+| W25+ | 05-26+ | EDGE-P2 架構層 · R-06 全 5 agent · Phase 5 補強 · Backlog | ⬜ |
 
 **關鍵路徑**：`~~G-3 → OC-3 → 6-RC-6 → 6-01~13 → 3E-ARCH~~ ✅ → LG-1(05-01) → LG-2 → LG-4 → Live`
 **最早 Live 日期**：W23 末（～2026-05-16）
@@ -55,22 +56,16 @@ PM 確認報告：`docs/audits/2026-04-12--full_audit_fix_plan_pm_confirmed.md`
 
 ## 🎯 當前焦點（W19 開始，按執行順序）
 
-### 1. 🟢 觀察期 — 等數據（無開發動作，只需維運）
+### 1. 🔴 策略 Edge 修復 — 最高優先（取代觀察期等待）
 
-Phase 5 cost_gate 改造已全部上線。現在唯一阻擋正式 Live 的是**時間**：乾淨 paper 數據累積。
+> **2026-04-13 診斷結論**：隔離後乾淨數據確認所有策略 gross edge ≈ 0，等再久也不會自然轉正。
+> 必須先修策略再累積數據。JS 重跑暫緩（跑了只會確認全部 cell 為負）。
+> 詳見下方「策略 Edge 修復」專節。
 
-- [ ] **PH5-VERIFY-1** 7d paper observation — 看 fills / realized pnl 分布是否改善
-  - **重新起算**：2026-04-10 DB fresh-start reset（71.3M 開發噪音清除），乾淨數據從今天開始
-- [ ] **JS 滾動重跑排程**（2026-04-10 = Day 1）
-  - 2026-04-11（Day 2）：`python3 -m program_code.ml_training.james_stein_estimator --days 2`
-  - 2026-04-12（Day 3）：`--days 3`
-  - 2026-04-17（Day 7）：`--days 7`
-  - 之後每週拉長窗口（14d → 30d）直到估計穩定
-  - 若某 cell 轉正 → 重啟引擎後 mode-aware gate 自動對該 pair 生效
-  - `settings/edge_estimates.json` 更新後需重啟引擎才生效（無 hot-reload）
-  - ↳ **G-6**（ML edge 重訓）：JS 重跑本身即為修復路徑，W19-W20 維運覆蓋
-  - ↳ **G-8**（cost_gate 可信度）：G-6 完成後 W21 評估是否需人工干預
-- [ ] **LG-1** Paper Trading 穩定運行 21 天（Live Gate 前置）— 最早 2026-05-01 完成
+- [ ] **PH5-VERIFY-1** ~~7d observation~~ → **改為 EDGE-P0-1 修好後重新觀察**
+- [ ] **JS 滾動重跑** — 暫緩，等 EDGE-P0-1 + P1 改善後再重跑
+  - ↳ **G-6** / **G-8** 同步暫緩
+- [ ] **LG-1** Paper Trading 穩定運行 21 天（Live Gate 前置）— 原 05-01 目標，視 EDGE 修復進度調整
 
 ---
 
@@ -191,8 +186,7 @@ C1-C2 接線 + PM 端到端驗收。1086 lib + 33 e2e = 1119 tests pass, 0 fail 
 
 - [x] **G-1 / R-02** Strategist + Guardian 真實接線（= G-SR-1 Phase B S5-S7 ✅）
   - 完成：Strategist Ollama param tuning + Guardian L1 classification + C1 Analyst + C2 Scout
-- [ ] **G-SR-1-RESEARCH** 策略研究（Phase B 後）— Strategist Agent 分析 fills/PnL/regime，生成策略改進提案
-  - 前置：G-SR-1 全部完成 + 足夠 fills 數據（LG-1 21d 後）
+- [ ] **G-SR-1-RESEARCH** 策略研究 — 見下方「策略 Edge 修復」專節
 - [ ] **G-1 / R-06** Analyst + Conductor + Scout 接線（完整 5 agent，W23）
 - [ ] **G-2** FundingArb.on_tick() 資金費率 IPC 接線（依賴 OC-5 REST 輪詢，W22）
   - 現況：funding_arb.rs on_tick() 永遠返回 vec![]（TODO R-06 註解）
@@ -202,6 +196,84 @@ C1-C2 接線 + PM 端到端驗收。1086 lib + 33 e2e = 1119 tests pass, 0 fail 
 - [ ] **G-10** Calibration.py 整合（calibrate_isotonic → run_training_pipeline.py，加入 ECE < 0.05 門檻，W23）
   - 現況：ml_training/calibration.py 骨架，apply_calibration 缺整合入口
   - 前置：fills 累積 + 2-11 actual training
+
+---
+
+## 🔧 策略 Edge 修復（G-SR-1-RESEARCH，2026-04-13 診斷）
+
+> **診斷背景**：隔離後 ~9h 乾淨數據確認 — demo gross edge +1.77 bps（被 fee 吞 → net -5.62），paper gross -1.35 bps（net -6.91）。
+> 所有 4 策略 gross edge ≈ 0 或為負，fee（5.5 bps/side = 11 bps RT）是主要虧損源。
+> fast_track ReduceToHalf 佔 demo 75% fills（2,685/3,567），每 tick 重複觸發幾何衰減。
+
+### P0 — 止血（立即）
+
+- [ ] **EDGE-P0-1** fast_track ReduceToHalf one-shot guard — 同一持倉在同一次 Defensive 升級中只半倉一次
+  - 現況：`fast_track.rs:45-46` 只要 `risk_level >= Defensive` 每 tick 每持倉都觸發 ReduceToHalf
+  - `on_tick.rs:134-168` 執行 `qty/2` 幾何衰減，生成大量無意義 fill + fee
+  - 修復：per-position `HashMap<String, bool>` 標記 `already_reduced`，Defensive 解除時重置
+  - 預期效果：消滅 ~75% 無意義 fills + 對應 fee 損失（~$1.44/6h demo）
+
+### P1 — 策略信號改善
+
+- [ ] **EDGE-P0-2** min_persistence_ms 120s → 180s — 乾淨數據驗證 3-5min 區間 gross +5.02 bps / 83.3% win rate，2-3min 反而為負 (-1.80 bps)
+  - 現況：MA/BBR `min_persistence_ms = 120_000`（2 分鐘），落在負 edge 區間
+  - Grid `cooldown_ms = 120_000` 基線 + 趨勢冷卻 1-6x，但 2-3min bucket 的 grid gross = -1.80 bps
+  - 修復：3 策略 `min_persistence_ms` 120000 → 180000；Grid `cooldown_ms` 120000 → 180000
+  - 數據依據（demo 隔離後 ~6h）：
+
+    | 持續時間 | RTs | Gross bps | Win Rate |
+    |---|---|---|---|
+    | < 60s fragment | 3 | -2.04 | 33% |
+    | 60-120s | 295 | +0.18 | 52% |
+    | **2-3 min（現行）** | 202 | **-1.80** | 66% |
+    | **3-5 min（目標）** | 108 | **+5.02** | **83%** |
+    | 5-10 min | 79 | -0.37 | 25% |
+
+- [ ] **EDGE-P1-1** Grid 趨勢硬停 — ADX > 30 或 Hurst regime = trending 時完全暫停 grid 新開倉
+  - 現況：`confluence.rs` compute_grid_confidence() 只降 qty，不阻止開倉；trending 市場裡 grid 單向積倉
+  - 修復：grid `on_tick()` 加 `if trending { return vec![]; }` 前置 gate
+  - 現有持倉走 trailing stop / risk_close 正常出場
+
+- [ ] **EDGE-P1-2** Funding Rate 信號源 — 給 bb_reversion 加非滯後 alpha
+  - funding rate 極端正值 → 做空壓力 → 均值回歸機會；極端負值 → 做多壓力
+  - 需要：接 Bybit WS `tickers` stream 的 fundingRate 字段（已有 market_data_client）
+  - 整合：bb_reversion entry 條件從 `%B < 0 && RSI < oversold` 加權 funding rate 偏差分量
+  - 參考 Bybit API：`docs/references/2026-04-04--bybit_api_reference.md`
+
+- [ ] **EDGE-P1-3** Confluence threshold 收緊 — `threshold_no_trade` 從 35 提升到 45（0-65 分制）
+  - 現況：35/65 = 54%，太多低質量交易通過
+  - 45/65 = 69%，過濾更多噪音信號
+
+- [ ] **EDGE-P1-4** bb_breakout 參數放寬 — 降低三重門檻避免近乎 dead（PNL-5 已記錄）
+  - `squeeze_bw` 0.02 → 0.03；`volume_threshold` 1.5 → 1.2；`squeeze_expiry_ms` 30min → 45min
+  - 前置：EDGE-P0-1 修好後觀察 breakout 觸發率
+
+### P2 — 架構層
+
+- [ ] **EDGE-P2-1** risk_check 出場頻率審查 — demo 327/435 risk_check fills 有 realized_pnl
+  - 大量持倉被風控強平而非策略自己出場，需審查 `position_risk_evaluator.rs` 動態止損邏輯
+  - 可能原因：止損設太緊 / 持倉時間超 holding_hours_max / daily_loss 觸發
+
+- [ ] **EDGE-P2-2** OI + Liquidation 信號源 — 給 bb_breakout 加領先信號
+  - Open Interest 急增 + 價格不動 → 即將爆發；Liquidation flow → 短期底部
+  - 需要：接 Bybit WS `tickers` OI 字段 + `liquidation` stream
+  - 工作量大，W24+ 排期
+
+- [ ] **EDGE-P2-3** Maker order 支持 — fee 從 5.5 bps/side → ~1 bps/side
+  - 策略發 post-only limit order 而非 market order
+  - 需改動 IntentProcessor + order_manager + exchange execution layer
+  - Round-trip fee 從 11 bps → 2 bps，根本性改變盈利方程式
+  - 工作量大，W24+ 排期
+
+### 執行順序與依賴
+
+```
+EDGE-P0-1（ReduceToHalf 止血）‖ EDGE-P0-2（persistence 120→180s）→ 觀察 1-2 天
+  → EDGE-P1-1（grid 硬停）‖ EDGE-P1-3（confluence 收緊）→ 觀察
+  → EDGE-P1-2（funding rate）→ 觀察
+  → EDGE-P2-1（risk_check 審查）
+  → EDGE-P2-2 / EDGE-P2-3（W24+）
+```
 
 ---
 
