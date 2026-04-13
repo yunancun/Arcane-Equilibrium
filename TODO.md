@@ -1,7 +1,7 @@
 # OpenClaw TODO — 工作計劃清單
 
 最後更新：2026-04-13（EDGE 修復計劃入列 · G-SR-1 v2.5 FINAL · 5 輪 52 項修正 · 7 Session 實施計劃）
-測試基準線：**Rust engine lib 1086 + bin 5 + core 366 + e2e 33 + promotion 32 = 1522 · Python program_code 2852 passed (5 skipped · 0 fail) · ml_training 135 passed (6 skipped)**
+測試基準線：**Rust engine lib 1091 + bin 5 + core 366 + e2e 33 + promotion 32 = 1527 · Python program_code 2852 passed (5 skipped · 0 fail) · ml_training 135 passed (6 skipped)**
 
 > compact 後從此文件恢復工作狀態。第一個 `[ ]` 即為下一步起點。
 > 歷史歸檔索引在文件末尾。詳細完成度視角見 README.md。
@@ -186,7 +186,7 @@ C1-C2 接線 + PM 端到端驗收。1086 lib + 33 e2e = 1119 tests pass, 0 fail 
 
 - [x] **G-1 / R-02** Strategist + Guardian 真實接線（= G-SR-1 Phase B S5-S7 ✅）
   - 完成：Strategist Ollama param tuning + Guardian L1 classification + C1 Analyst + C2 Scout
-- [x] **G-SR-1-RESEARCH** 策略 Edge 修復 P0+P1 ✅ — P0-1/P0-2/P1-1/P1-3/P1-4 全部完成，P2 待排
+- [x] **G-SR-1-RESEARCH** 策略 Edge 修復 P0+P1 全部完成 ✅ — P0-1/P0-2/P1-1~P1-4 全修，P2 待排
 - [ ] **G-1 / R-06** Analyst + Conductor + Scout 接線（完整 5 agent，W23）
 - [ ] **G-2** FundingArb.on_tick() 資金費率 IPC 接線（依賴 OC-5 REST 輪詢，W22）
   - 現況：funding_arb.rs on_tick() 永遠返回 vec![]（TODO R-06 註解）
@@ -220,11 +220,11 @@ C1-C2 接線 + PM 端到端驗收。1086 lib + 33 e2e = 1119 tests pass, 0 fail 
 - [x] **EDGE-P1-1** Grid 趨勢硬停 ✅
   - `grid_trading.rs on_tick()`: ADX > 30 || hurst regime == "trending" → return vec![]
 
-- [ ] **EDGE-P1-2** Funding Rate 信號源 — 給 bb_reversion 加非滯後 alpha
-  - funding rate 極端正值 → 做空壓力 → 均值回歸機會；極端負值 → 做多壓力
-  - 需要：接 Bybit WS `tickers` stream 的 fundingRate 字段（已有 market_data_client）
-  - 整合：bb_reversion entry 條件從 `%B < 0 && RSI < oversold` 加權 funding rate 偏差分量
-  - 參考 Bybit API：`docs/references/2026-04-04--bybit_api_reference.md`
+- [x] **EDGE-P1-2** Funding Rate 信號源 ✅
+  - PriceEvent + TickContext 加 `funding_rate: Option<f64>`；WS tickers 提取 + TickPipeline 緩存
+  - bb_reversion: 極端正費率+做空→加成 / 極端負費率+做多→加成（方向對齊才觸發）
+  - 可調參數：`funding_rate_threshold` (0.0005) / `funding_rate_boost` (0.08)
+  - +5 tests (aligned/misaligned/below-threshold/validation)
 
 - [x] **EDGE-P1-3** Confluence threshold 收緊 ✅
   - 35/45/55 → 45/52/58 across ConfluenceConfig + all strategy param defaults + mod.rs TOML defaults
@@ -252,8 +252,7 @@ C1-C2 接線 + PM 端到端驗收。1086 lib + 33 e2e = 1119 tests pass, 0 fail 
 ### 執行順序與依賴
 
 ```
-✅ EDGE-P0-1 ‖ P0-2 ‖ P1-1 ‖ P1-3 ‖ P1-4 — 全部完成（2026-04-13）
-  → 觀察 1-2 天 → EDGE-P1-2（funding rate）
+✅ EDGE-P0-1 ‖ P0-2 ‖ P1-1 ‖ P1-2 ‖ P1-3 ‖ P1-4 — P0+P1 全部完成（2026-04-13）
   → EDGE-P2-1（risk_check 審查）→ P2-2 / P2-3（W24+）
 ```
 

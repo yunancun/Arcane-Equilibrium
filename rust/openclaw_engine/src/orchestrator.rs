@@ -145,6 +145,7 @@ mod tests {
             indicators: None,
             signals: &[],
             h0_allowed: true,
+            funding_rate: None,
         };
         assert!(orch.dispatch_tick(&ctx).is_empty());
     }
@@ -172,6 +173,7 @@ mod tests {
             indicators: None,
             signals: &[],
             h0_allowed: true,
+            funding_rate: None,
         };
         assert_eq!(orch.dispatch_tick(&ctx).len(), 1);
     }
@@ -199,6 +201,7 @@ mod tests {
             indicators: None,
             signals: &[],
             h0_allowed: true,
+            funding_rate: None,
         };
         assert!(orch.dispatch_tick(&ctx).is_empty());
     }

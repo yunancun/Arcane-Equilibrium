@@ -67,6 +67,10 @@ pub struct PriceEvent {
     /// ADL 排名（AdlNotice 事件）。
     #[serde(default)]
     pub adl_rank: Option<u32>,
+    /// Current funding rate (for Ticker events, from Bybit tickers stream).
+    /// 當前資金費率（Ticker 事件，來自 Bybit tickers 流）。
+    #[serde(default)]
+    pub funding_rate: Option<f64>,
     /// Legacy metadata map — still populated for backward compat, but prefer structured fields.
     /// 舊版 metadata — 為向後兼容仍填充，但應優先使用結構化欄位。
     #[serde(default)]
@@ -89,6 +93,7 @@ impl PriceEvent {
             bids5: None,
             asks5: None,
             adl_rank: None,
+            funding_rate: None,
             metadata: HashMap::new(),
         }
     }

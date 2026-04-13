@@ -36,6 +36,12 @@ pub struct BbReversionParams {
     pub min_persistence_ms: u64,
     /// Minimum order notional (USD). / 最小訂單名義值（USD）。
     pub min_notional_usd: f64,
+    /// EDGE-P1-2: Minimum |funding_rate| to trigger directional boost (default 5 bps = 0.0005).
+    /// EDGE-P1-2：觸發方向性加成的最低 |funding_rate|（默認 5 bps = 0.0005）。
+    pub funding_rate_threshold: f64,
+    /// EDGE-P1-2: Confidence boost when funding rate is extreme + aligned with signal (default 0.08).
+    /// EDGE-P1-2：資金費率極端且與信號方向一致時的信心加成（默認 0.08）。
+    pub funding_rate_boost: f64,
     /// Confluence weights + thresholds (reversion profile, inverted ADX).
     /// 匯流權重 + 閾值（回歸配置，反轉 ADX）。
     pub weight_adx: f64,
@@ -60,6 +66,8 @@ impl Default for BbReversionParams {
             rsi_oversold: 30.0,
             rsi_overbought: 70.0,
             hurst_regime_boost: 0.1,
+            funding_rate_threshold: 0.0005,
+            funding_rate_boost: 0.08,
             min_persistence_ms: 180_000,
             min_notional_usd: 10.0,
             weight_adx: cc.weight_adx,
@@ -120,6 +128,23 @@ impl StrategyParams for BbReversionParams {
                 min: 0.0,
                 max: 0.3,
                 step: Some(0.05),
+                agent_adjustable: true,
+                db_persisted: true,
+            },
+            // ── EDGE-P1-2: Funding rate signal params ──
+            ParamRange {
+                name: "funding_rate_threshold".into(),
+                min: 0.0001,
+                max: 0.005,
+                step: Some(0.0001),
+                agent_adjustable: true,
+                db_persisted: true,
+            },
+            ParamRange {
+                name: "funding_rate_boost".into(),
+                min: 0.0,
+                max: 0.2,
+                step: Some(0.01),
                 agent_adjustable: true,
                 db_persisted: true,
             },
@@ -224,6 +249,12 @@ impl StrategyParams for BbReversionParams {
         if self.hurst_regime_boost < 0.0 || self.hurst_regime_boost > 0.3 {
             return Err("hurst_regime_boost must be in [0, 0.3]".into());
         }
+        if self.funding_rate_threshold < 0.0001 || self.funding_rate_threshold > 0.005 {
+            return Err("funding_rate_threshold must be in [0.0001, 0.005]".into());
+        }
+        if self.funding_rate_boost < 0.0 || self.funding_rate_boost > 0.2 {
+            return Err("funding_rate_boost must be in [0, 0.2]".into());
+        }
         // G-SR-1: Validate confluence weight sum = 65 / 驗證匯流權重總和 = 65
         self.build_confluence_config().validate()?;
         // G-SR-1 S3: Threshold ordering / 閾值排序驗證
@@ -288,6 +319,12 @@ pub struct BbReversion {
     /// QC-#7: Hurst regime boost for mean-reverting regime (default 0.1).
     /// QC-#7：均值回歸市場狀態信心加成。
     pub(crate) hurst_regime_boost: f64,
+    /// EDGE-P1-2: Minimum |funding_rate| to trigger directional boost.
+    /// EDGE-P1-2：觸發方向性加成的最低 |funding_rate|。
+    pub(crate) funding_rate_threshold: f64,
+    /// EDGE-P1-2: Confidence boost when extreme funding rate aligns with signal.
+    /// EDGE-P1-2：資金費率極端且方向一致時的信心加成。
+    pub(crate) funding_rate_boost: f64,
     // RC-04: Per-symbol previous state for rejection rollback / 每幣種拒絕回滾用的先前狀態
     prev_position: HashMap<String, Option<bool>>,
     prev_last_trade_ms: HashMap<String, u64>,
@@ -317,6 +354,8 @@ impl BbReversion {
             exit_pctb_lower: 0.2,
             exit_pctb_upper: 0.8,
             hurst_regime_boost: 0.1,
+            funding_rate_threshold: 0.0005,
+            funding_rate_boost: 0.08,
             prev_position: HashMap::new(),
             prev_last_trade_ms: HashMap::new(),
             conf_scale: 1.0,
@@ -346,6 +385,8 @@ impl BbReversion {
         self.rsi_oversold = params.rsi_oversold;
         self.rsi_overbought = params.rsi_overbought;
         self.hurst_regime_boost = params.hurst_regime_boost;
+        self.funding_rate_threshold = params.funding_rate_threshold;
+        self.funding_rate_boost = params.funding_rate_boost;
         // R4-7: Rebuild ConfluenceConfig from updated params.
         self.confluence_config = params.build_confluence_config();
         self.min_persistence_ms = params.min_persistence_ms;
@@ -364,6 +405,8 @@ impl BbReversion {
             rsi_oversold: self.rsi_oversold,
             rsi_overbought: self.rsi_overbought,
             hurst_regime_boost: self.hurst_regime_boost,
+            funding_rate_threshold: self.funding_rate_threshold,
+            funding_rate_boost: self.funding_rate_boost,
             min_persistence_ms: self.min_persistence_ms,
             min_notional_usd: self.min_notional_usd,
             weight_adx: self.confluence_config.weight_adx,
@@ -466,6 +509,27 @@ impl Strategy for BbReversion {
             _ => 0.0,
         };
 
+        // EDGE-P1-2: Funding rate directional boost — extreme funding rate signals
+        // overleveraged crowd, boosting mean reversion confidence when aligned.
+        // Positive funding (shorts pay longs) → market is overleveraged long → boost short entries.
+        // Negative funding (longs pay shorts) → market is overleveraged short → boost long entries.
+        // EDGE-P1-2：資金費率方向加成 — 極端費率表明市場單邊過度槓桿，
+        // 正費率 → 做多過度 → 加成做空回歸；負費率 → 做空過度 → 加成做多回歸。
+        let funding_boost: f64 = match ctx.funding_rate {
+            Some(fr) if fr.abs() >= self.funding_rate_threshold => self.funding_rate_boost,
+            _ => 0.0,
+        };
+        // Whether funding rate aligns with a given signal direction:
+        // fr > 0 aligns with short (is_long=false), fr < 0 aligns with long (is_long=true).
+        let funding_aligned = |is_long: bool| -> bool {
+            match ctx.funding_rate {
+                Some(fr) if fr.abs() >= self.funding_rate_threshold => {
+                    (fr > 0.0 && !is_long) || (fr < 0.0 && is_long)
+                }
+                _ => false,
+            }
+        };
+
         // RC-04: Snapshot per-symbol state before any mutation for rejection rollback.
         // RC-04：在任何變更前快照該幣種狀態，供拒絕回滾使用。
         self.prev_position.insert(ctx.symbol.to_string(), self.positions.get(ctx.symbol).copied());
@@ -515,9 +579,11 @@ impl Strategy for BbReversion {
                         return intents;
                     }
 
+                    // EDGE-P1-2: Add funding_boost when aligned with signal direction.
+                    let fr_boost = if funding_aligned(is_long) { funding_boost } else { 0.0 };
                     let conf_with_score = match score {
-                        Some(s) if s > 0.0 => s / 65.0,
-                        _ => (self.entry_conf_base + hurst_boost).min(1.0),
+                        Some(s) if s > 0.0 => (s / 65.0 + fr_boost).min(1.0),
+                        _ => (self.entry_conf_base + hurst_boost + fr_boost).min(1.0),
                     };
                     intents.push(StrategyAction::Open(self.make_entry_intent_with_qty(
                         ctx,
@@ -602,6 +668,7 @@ mod tests {
             indicators: Some(ind),
             signals: &[],
             h0_allowed: true,
+            funding_rate: None,
         }
     }
 
@@ -767,8 +834,8 @@ mod tests {
     #[test]
     fn test_bbr_param_ranges_count() {
         let ranges = BbReversionParams::param_ranges();
-        // 5 original + 10 confluence = 15
-        assert_eq!(ranges.len(), 15, "expected 15 param ranges, got {}", ranges.len());
+        // 5 original + 2 funding_rate + 10 confluence = 17
+        assert_eq!(ranges.len(), 17, "expected 17 param ranges, got {}", ranges.len());
     }
 
     #[test]
@@ -807,6 +874,175 @@ mod tests {
     fn test_bbr_validate_bad_min_notional() {
         let mut p = BbReversionParams::default();
         p.min_notional_usd = 0.0;
+        assert!(p.validate().is_err());
+    }
+
+    // ── EDGE-P1-2: Funding rate signal tests ──
+
+    /// Build a TickContext with funding rate for testing.
+    fn ctx_bb_with_funding(pct_b: f64, rsi: f64, ts: u64, funding_rate: Option<f64>) -> TickContext<'static> {
+        use openclaw_core::indicators::HurstResult;
+        let ind = Box::leak(Box::new(IndicatorSnapshot {
+            bollinger: Some(BollingerResult {
+                upper: 51000.0,
+                middle: 50000.0,
+                lower: 49000.0,
+                bandwidth: 0.04,
+                percent_b: pct_b,
+            }),
+            rsi_14: Some(rsi),
+            adx: Some(AdxResult { adx: 15.0, plus_di: 20.0, minus_di: 18.0 }),
+            hurst: Some(HurstResult { hurst: 0.35, regime: "mean_reverting".into() }),
+            ..Default::default()
+        }));
+        TickContext {
+            symbol: "BTC",
+            price: 50000.0,
+            timestamp_ms: ts,
+            indicators: Some(ind),
+            signals: &[],
+            h0_allowed: true,
+            funding_rate,
+        }
+    }
+
+    #[test]
+    fn test_funding_rate_boost_short_with_positive_funding() {
+        // Positive funding → overleveraged long → short reversion boost.
+        let mut s = BbReversion::new();
+        s.min_persistence_ms = 0;
+
+        // Short signal: %B > 1.0, RSI > 70 (overbought)
+        // With extreme positive funding rate → aligned with short → boost
+        let ctx_with = ctx_bb_with_funding(1.2, 75.0, 1000, Some(0.001));
+        let actions_with = s.on_tick(&ctx_with);
+        assert!(!actions_with.is_empty(), "should produce short entry with positive funding");
+        let conf_with = match &actions_with[0] {
+            StrategyAction::Open(intent) => intent.confidence,
+            _ => panic!("expected Open"),
+        };
+
+        // Same signal without funding rate
+        s.positions.clear();
+        s.last_trade_ms.clear();
+        s.persistence = PersistenceTracker::new();
+        let ctx_without = ctx_bb_with_funding(1.2, 75.0, 2000, None);
+        let actions_without = s.on_tick(&ctx_without);
+        assert!(!actions_without.is_empty());
+        let conf_without = match &actions_without[0] {
+            StrategyAction::Open(intent) => intent.confidence,
+            _ => panic!("expected Open"),
+        };
+
+        assert!(
+            conf_with > conf_without,
+            "funding boost should increase confidence: {conf_with} > {conf_without}"
+        );
+    }
+
+    #[test]
+    fn test_funding_rate_boost_long_with_negative_funding() {
+        // Negative funding → overleveraged short → long reversion boost.
+        let mut s = BbReversion::new();
+        s.min_persistence_ms = 0;
+
+        // Long signal: %B < 0.0, RSI < 30 (oversold)
+        let ctx_with = ctx_bb_with_funding(-0.1, 25.0, 1000, Some(-0.001));
+        let actions_with = s.on_tick(&ctx_with);
+        assert!(!actions_with.is_empty(), "should produce long entry with negative funding");
+        let conf_with = match &actions_with[0] {
+            StrategyAction::Open(intent) => intent.confidence,
+            _ => panic!("expected Open"),
+        };
+
+        s.positions.clear();
+        s.last_trade_ms.clear();
+        s.persistence = PersistenceTracker::new();
+        let ctx_without = ctx_bb_with_funding(-0.1, 25.0, 2000, None);
+        let actions_without = s.on_tick(&ctx_without);
+        assert!(!actions_without.is_empty());
+        let conf_without = match &actions_without[0] {
+            StrategyAction::Open(intent) => intent.confidence,
+            _ => panic!("expected Open"),
+        };
+
+        assert!(
+            conf_with > conf_without,
+            "funding boost should increase confidence: {conf_with} > {conf_without}"
+        );
+    }
+
+    #[test]
+    fn test_funding_rate_no_boost_when_misaligned() {
+        // Positive funding should NOT boost long entries (misaligned).
+        let mut s = BbReversion::new();
+        s.min_persistence_ms = 0;
+
+        // Long signal with positive funding (misaligned)
+        let ctx_misaligned = ctx_bb_with_funding(-0.1, 25.0, 1000, Some(0.001));
+        let actions_mis = s.on_tick(&ctx_misaligned);
+        assert!(!actions_mis.is_empty());
+        let conf_mis = match &actions_mis[0] {
+            StrategyAction::Open(intent) => intent.confidence,
+            _ => panic!("expected Open"),
+        };
+
+        s.positions.clear();
+        s.last_trade_ms.clear();
+        s.persistence = PersistenceTracker::new();
+        let ctx_none = ctx_bb_with_funding(-0.1, 25.0, 2000, None);
+        let actions_none = s.on_tick(&ctx_none);
+        assert!(!actions_none.is_empty());
+        let conf_none = match &actions_none[0] {
+            StrategyAction::Open(intent) => intent.confidence,
+            _ => panic!("expected Open"),
+        };
+
+        assert!(
+            (conf_mis - conf_none).abs() < 1e-10,
+            "misaligned funding should not boost: {conf_mis} == {conf_none}"
+        );
+    }
+
+    #[test]
+    fn test_funding_rate_below_threshold_no_boost() {
+        // Funding rate below threshold → no boost regardless of direction.
+        let mut s = BbReversion::new();
+        s.min_persistence_ms = 0;
+
+        let ctx_small = ctx_bb_with_funding(1.2, 75.0, 1000, Some(0.0001)); // below 0.0005 threshold
+        let actions_small = s.on_tick(&ctx_small);
+        assert!(!actions_small.is_empty());
+        let conf_small = match &actions_small[0] {
+            StrategyAction::Open(intent) => intent.confidence,
+            _ => panic!("expected Open"),
+        };
+
+        s.positions.clear();
+        s.last_trade_ms.clear();
+        s.persistence = PersistenceTracker::new();
+        let ctx_none = ctx_bb_with_funding(1.2, 75.0, 2000, None);
+        let actions_none = s.on_tick(&ctx_none);
+        assert!(!actions_none.is_empty());
+        let conf_none = match &actions_none[0] {
+            StrategyAction::Open(intent) => intent.confidence,
+            _ => panic!("expected Open"),
+        };
+
+        assert!(
+            (conf_small - conf_none).abs() < 1e-10,
+            "sub-threshold funding should not boost: {conf_small} == {conf_none}"
+        );
+    }
+
+    #[test]
+    fn test_funding_rate_validate_bounds() {
+        let mut p = BbReversionParams::default();
+        p.funding_rate_threshold = 0.00001; // below min 0.0001
+        assert!(p.validate().is_err());
+
+        let mut p = BbReversionParams::default();
+        p.funding_rate_boost = 0.3; // above max 0.2
         assert!(p.validate().is_err());
     }
 }

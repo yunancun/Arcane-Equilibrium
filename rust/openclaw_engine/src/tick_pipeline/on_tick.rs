@@ -479,6 +479,13 @@ impl TickPipeline {
         // 步驟 4+5：逐策略分派 + 意圖處理，含拒絕/成交回調。
         // P-08: Borrow instead of clone — lifetime scoped to this on_tick call.
         // P-08：借用取代克隆 — 生命週期限定在此 on_tick 調用中。
+        // EDGE-P1-2: Cache funding rate from Ticker events; pass latest to strategies.
+        // EDGE-P1-2：緩存 Ticker 事件的資金費率；傳遞最新值給策略。
+        if let Some(fr) = event.funding_rate {
+            self.funding_rates.insert(sym.to_string(), fr);
+        }
+        let funding_rate = self.funding_rates.get(sym).copied();
+
         let ctx = TickContext {
             symbol: sym,
             price: event.last_price,
@@ -486,6 +493,7 @@ impl TickPipeline {
             indicators: indicators.as_ref(),
             signals: &signals,
             h0_allowed, // RRC-1-A1: real H0 gate result from Step 0.5
+            funding_rate,
         };
 
         // NOTE: Current rejection rollback assumes each strategy emits at most 1 intent per tick.

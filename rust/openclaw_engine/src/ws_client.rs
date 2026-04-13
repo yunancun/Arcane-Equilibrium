@@ -630,11 +630,19 @@ fn parse_ticker_item(item: &serde_json::Value, topic: &str) -> Option<PriceEvent
         .and_then(|s| s.parse::<f64>().ok())
         .unwrap_or(0.0);
 
+    // EDGE-P1-2: Extract funding rate from tickers stream (Bybit linear perps).
+    // EDGE-P1-2：從 tickers 流提取資金費率（Bybit 線性永續）。
+    let funding_rate = item
+        .get("fundingRate")
+        .and_then(|v| v.as_str())
+        .and_then(|s| s.parse::<f64>().ok());
+
     let mut event = PriceEvent::new(symbol, last_price, ts);
     event.volume_24h = volume;
     event.turnover_24h = turnover;
     event.bid_price = bid;
     event.ask_price = ask;
+    event.funding_rate = funding_rate;
     event.event_kind = Some(PriceEventKind::Ticker);
     event.metadata.insert("type".into(), "ticker".into());
     Some(event)
