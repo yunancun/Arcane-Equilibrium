@@ -3,6 +3,10 @@
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
 > 最後更新：2026-04-13
 
+### G-SR-1 Session 7 — C1-C2 Agent 接線 + PM 端到端驗收 COMPLETE（2026-04-13）
+
+**C1 Analyst wiring** — `_handle_analyst()` 從 stub 升級為接入 AnalystAgent.analyze_trade()：IPC trade_data → TradeRecord 構建 → asyncio.to_thread() L1 分析 → 返回 strategy_metrics + strategy_rankings；agent 不可用時 stub fallback。**C2 Scout wiring** — `_handle_scout()` 接入 ScoutAgent.get_recent_intel()/get_recent_alerts()：IntelObject/EventAlert 序列化為 JSON-safe dicts + symbol 過濾；agent 不可用時 stub fallback。**Injection** — `create_ai_service_listener()` 新增注入 ANALYST_AGENT + SCOUT_AGENT from strategy_wiring（fail-open）。conductor_evaluate 仍為 stub（W23+ R-06）。MODULE_NOTE 精簡（bilingual 合併 -36 行）。ai_service.py 1080→1195 行（+115 net，MODULE_NOTE 精簡抵消新增）。**PM 驗收 6/6 PASS**：(1) PersistenceTracker 3 策略 check()/clear()/Close 免檢 (2) Grid 趨勢冷卻 ADX+Hurst 1x-6x (3) Confluence 4 分量 65 分 + qty 調整 (4) Strategist DB→IPC→Ollama→validate 全鏈路 (5) Guardian L1 分類+MessageBus 中繼 (6) C1-C2 注入+真實調用+fallback。**G-SR-1 計劃全部完成**（7 Sessions，Phase A+B+C）。E4: 1086 lib + 33 e2e = 1119 Rust · 2852 Python · 0 fail。
+
 ### G-SR-1 Phase B Session 6 — B2+B3+B4 Agent 真實接線（2026-04-13）
 
 **B2 ai_service.py stub→real wiring** — `_handle_strategist()` 接入 Ollama param tuning（build prompt from metrics + current_params + param_ranges → JSON param recommendations，asyncio.to_thread 非阻塞）；`_handle_guardian()` 接入 Ollama event classification（risk_level low/medium/high/critical + assessment，informational only NOT trade blocking）；OllamaClient lazy singleton + fail-closed（unavailable→retain current params / input severity）。**B3 Rust IPC enhancement** — `evaluate_cycle()` 移動 `fetch_current_params()` 至 IPC 前，`current_params` + `param_ranges` 包含在 `strategist_evaluate` 負載，Python 可基於上下文做更好推薦。**B4 Guardian L1 MessageBus relay** — high/critical 事件通過 MessageBus 中繼給 Strategist（fail-open）；`create_ai_service_listener()` 注入 `MESSAGE_BUS` from strategy_wiring。ai_service.py +350 行（730→1080）；strategist_scheduler.rs +22 行（692→714）。B-E2 10/10 PASS · B-E4 1083+33=1116 Rust · 2852 Python · 0 fail · B-E5 PASS。
