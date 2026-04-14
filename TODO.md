@@ -15,7 +15,7 @@
 | **1** | 🚀 **ENGINE-HEAL-DEPLOY** — operator 執行 `bash helper_scripts/restart_all.sh --rebuild` 替換 pre-fix binary（ENGINE-HEAL Fix 1/3/4 + FA-PHANTOM-1 fix + FUP-8 intents.details fix 一次到位） | 0.5 h | — | G-2 驗證重啟 · canary 實戰 · FUP-8 上線 |
 | **2** | 🧪 **G-2 FundingArb 驗證重啟** — deploy 後：manual entry 1 → paper_state 有倉 → IPC close → DB 出現 close fill with realized_pnl；再累積 ≥20 乾淨 fills 分析 edge | 2-3 d | Action #1 | Phase 5 歸因量化確認 · LG-1 觀察期起點 |
 | **3** | 🕰️ **LG-1 Paper Trading 21d（重新定位）** — EDGE-P0/P1 + FA-PHANTOM-1 + FUP-8 部署後啟動正式觀察期；不再綁定 05-01 | 3 w | Actions #1, #2 | Live Gate · LG-2/3 |
-| **4** | 🗳️ **FA-PHANTOM-1-FUP-7 operator 決策** — 90% margin crisis 閾值是保留為 cash-mode fail-safe（推薦 C，加註釋）/ 降至 50%（A）/ 刪除（B）。決策 brief 在 `docs/references/2026-04-14--fa_phantom_fup7_margin_threshold_decision.md` | 0.5 h | — | 關閉 FUP 系列 |
+| ~~4~~ | ~~FA-PHANTOM-1-FUP-7~~ ✅ 2026-04-15 operator 選 C，註釋已加到 `fast_track.rs:39-57`（見下方 FA-PHANTOM-1 留尾段） | — | — | — |
 | **5** | 📊 **Phase 5 策略 Edge 2w 重評** — 乾淨 paper 2w 後重算 per-strategy gross edge。若翻正 → Phase 5 cost_gate 工作重啟；若仍負 → 策略本身需重做（EDGE-P2/P3） | 2 w | Action #2 | Phase 5 restart / rebuild 決策 |
 
 ---
@@ -25,7 +25,7 @@
 | 週次 | 日期 | 主要焦點 | 狀態 |
 |------|------|---------|------|
 | W19-W21 | 04-14~05-02 | 基礎設施 / 安全 / Phase 6 / 3E-ARCH / Audit | ✅ 歸檔 |
-| W22 | 05-05~09 | **G-SR-1 + R-02/R-06-v2**（提前完成）· **FA-PHANTOM-1 + FUP-1~8**（除 FUP-7 operator 決策）· **ENGINE-HEAL deploy** · **G-2 驗證重啟** | 🟡 進行中 |
+| W22 | 05-05~09 | **G-SR-1 + R-02/R-06-v2**（提前完成）· **FA-PHANTOM-1 + FUP-1~8 全數結清** · **ENGINE-HEAL deploy** · **G-2 驗證重啟** | 🟡 進行中 |
 | W23 | 05-12~16 | **LG-1 觀察期**（if clean）· G-7 Teacher · G-10 Calibration · LG-2/3 | ⬜ |
 | W24 | 05-19~23 | **LG-4/5 Live Gate**（M/N 章）· SEC-21 · QoL-2 | ⬜ |
 | W25+ | 05-26+ | **EDGE-P3-1 Realized Edge Predictor** · Phase 5 補強或重做 · R-06 全 5 agent | ⬜ |
@@ -53,12 +53,11 @@
     2. 重新啟動驗證窗口（paper `funding_threshold=0.0001 / total_cost_bps=1.0` 臨時降，4h 累積後還原）
     3. 累積 ≥20 乾淨 fills 後分析 edge + 撰寫 audit note
 
-### FA-PHANTOM-1 留尾 — 等 operator 決策
+### FA-PHANTOM-1 留尾 — 已清
 
-- [ ] **FA-PHANTOM-1-FUP-7** 90% margin crisis 閾值可能實質死碼（E2 設計層）— **等 operator 決策**
-  - **論點**：post-fix 語意 true margin 90% = 近爆倉；配置 `leverage=100 × total_exposure=200%` → 理論 notional 最多 200%，true margin 最多 2% — **永不達 90%**
-  - **決策 brief**：`docs/references/2026-04-14--fa_phantom_fup7_margin_threshold_decision.md`（三選項量化 + 推薦 C：保留為 cash-mode fail-safe + 加註釋澄清語意）
-  - **推薦 C 執行**（operator 批准後）：加 ~10 行註釋到 `fast_track.rs:39-41` 說明「此 check 在當前 leverage>=2 + exposure<=200% 配置下不可達；保留為 cash-mode 最終 fail-safe」；不改代碼邏輯；不加 expects-to-fire 測試
+- [x] **FA-PHANTOM-1-FUP-7** operator 選 C（保留 90% 為 cash-mode fail-safe + 加註釋）— 2026-04-15 完成
+  - `fast_track.rs:39-57` 加了 ~19 行註釋說明：(a) 90% 是 Bybit MMR 物理常數不可 auto-scale；(b) margin_utilization_pct 本身 post FA-PHANTOM-1 fix 已是 leverage-aware；(c) 當前高槓桿配置下不觸發是刻意的 cash-mode 兜底；(d) 反 pattern 警告不要為「看起來死碼」去降閾值（會重開 FA-PHANTOM-1 類 false-positive）
+  - 純註釋改動，`cargo check` 通過，無新測試需求
 
 ### Phase 5 策略 Edge 觀察（Action #5）
 
