@@ -42,11 +42,20 @@ conf_scale = 1.0
 # OC-5: FundingArb — funding rate capture strategy.
 # Paper = exploration, activated for signal validation.
 # OC-5：FundingArb — 資金費率捕獲策略。紙盤啟用以驗證信號。
+#
+# G-2 VALIDATION WINDOW（2026-04-14 啟動）：
+#   funding_threshold 臨時 0.0005→0.0001（降 5 倍）
+#   total_cost_bps   臨時 34.0→1.0（讓 amortized_fee≈0.0000033 不再阻斷 edge gate）
+# 目的：calm market 下強制觸發幾筆 fills 驗證 OC-5 代碼路徑（entry/direction/exit/close_tag/PnL）
+# 污染範圍：edge_estimates_paper.json 會記錄低質量 fills，驗證後需恢復默認並清理
+# 恢復條件：≥20 funding_arb fills 累積後，兩個參數恢復 0.0005 / 34.0
+# G-2 VALIDATION WINDOW (2026-04-14): both funding_threshold AND total_cost_bps
+# lowered. edge_estimates_paper.json contamination; revert + cleanup required.
 [funding_arb]
 active = true
 cooldown_ms = 3600000
-total_cost_bps = 34.0
+total_cost_bps = 1.0
 expected_periods = 3.0
-funding_threshold = 0.0005
+funding_threshold = 0.0001
 max_basis_pct = 0.5
 max_hold_ms = 259200000

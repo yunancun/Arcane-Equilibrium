@@ -1,6 +1,6 @@
 # OpenClaw TODO — 工作計劃清單
 
-最後更新：2026-04-14（ORPHAN-ADOPT-1 Phase 1 完成 · clean_restart.sh 交付）
+最後更新：2026-04-14（ORPHAN-ADOPT-1 Phase 1 完成 · clean_restart.sh 交付 · G-2 paper validation window 啟動，threshold 污染中）
 測試基準線：**Rust engine lib 1136 + core 366 + e2e 33 = 1535 · Python program_code 2852 passed (5 skipped · 0 fail) · ml_training 135 passed (6 skipped)**
 
 > compact 後從此文件恢復工作狀態。第一個 `[ ]` 即為下一步起點。
@@ -197,6 +197,44 @@ C1-C2 接線 + PM 端到端驗收。1086 lib + 33 e2e = 1119 tests pass, 0 fail 
 - [ ] **G-2** FundingArb 策略驗證 + 參數調優（OC-5 已解鎖，W22）
   - OC-5 ✅：FundingArb on_tick() 完整實現（entry/exit/cooldown/basis/edge），index_price TickContext 全鏈路
   - 現況：策略邏輯完成，待 paper 實盤驗證 edge + 參數調優
+  - **⚠️ DATA CONTAMINATION WINDOW（2026-04-14 啟動）**：
+    - 診斷：calm market（BTC/ETH funding rates max 0.01% vs threshold 0.05%），默認參數 24-48h 預計零 fills
+    - 進一步發現（2026-04-14 17:30）：amortized_fee = total_cost_bps/10000/expected_periods = 34/10000/3 ≈ 11.33 bps，即使降 threshold 到 0.01% 仍被 edge gate 阻斷
+    - 臨時調整：`strategy_params_paper.toml` **兩個參數同時下調**（demo/live 未動）：
+      - `funding_threshold` 0.0005 → **0.0001**（降 5 倍）
+      - `total_cost_bps` 34.0 → **1.0**（amortized ≈ 0.0000033，edge gate 事實上 permissive）
+    - 目的：強制觸發 ≥20 fills 驗證 OC-5 代碼路徑端到端（entry/direction/exit_reason/close_tag/PnL）
+    - **污染範圍**：此窗口內 paper fills 進入 `edge_estimates_paper.json`，**非真實市場有效信號**，僅代碼驗證用途
+    - **恢復條件**：累積 ≥20 funding_arb fills 並分析完成後，兩參數恢復默認 0.0005 / 34.0
+    - **清理步驟**：恢復後，對此窗口 fills 打 `contaminated` 標記或從 edge estimator 剔除
+  - **📋 HANDOFF / 接手指南（誰來都能直接用）**：
+    - 驗證窗口起始時間：**2026-04-14 17:33:22 local**（engine restart with 雙參數下調）
+    - **Operator 你現在要做什麼**：**等**。首次自動 checkpoint 在 18:23 local（50 min 後）由 Claude cron 觸發，之後每 ~3h 一次直到 ≥20 fills。你可以關 session 離開；引擎獨立於 Claude 運行。
+    - **Claude session 會不會掛？** 會。cron 是 session-only，Claude 退出即失效。此時 operator 或新 session 接手：
+      1. 查當前狀態：
+         ```bash
+         pg_pass=$(grep POSTGRES_PASSWORD ~/BybitOpenClaw/secrets/environment_files/basic_system_services.env | cut -d= -f2-)
+         PGPASSWORD="$pg_pass" psql -h 127.0.0.1 -U trading_admin -d trading_ai -c "
+         SELECT engine_mode, COUNT(*) AS n, MIN(ts) AS first, MAX(ts) AS last
+         FROM trading.fills WHERE strategy_name='funding_arb' AND ts > '2026-04-14 17:33:00+02'
+         GROUP BY engine_mode;"
+         ```
+      2. 引擎健康：`python3 helper_scripts/canary/engine_watchdog.py --data-dir /tmp/openclaw --stale-threshold 45 --grace-period 120 --status`
+      3. 如果 fills < 20，繼續等 + 可選 `CronCreate` 新 checkpoint
+      4. 如果 fills ≥ 20，執行分析步驟（見下方「完成流程」）
+    - **完成流程（≥20 fills 後）**：
+      1. 跑 `python3 -m program_code.ml_training.realized_edge_stats --mode paper --days 2` → 篩 funding_arb entries
+      2. 分析 per-symbol gross/net edge、exit reason 分佈、avg hold time
+      3. 撰寫審計 note 到 `docs/audits/2026-04-14--g2_funding_arb_validation.md`
+      4. 恢復 paper TOML：`funding_threshold = 0.0005`, `total_cost_bps = 34.0`
+      5. 重啟引擎：`bash helper_scripts/restart_all.sh --engine-only`
+      6. 對污染窗口 fills 加 `contaminated` 標記（寫 SQL UPDATE 或從 edge_estimates_paper.json 剔除）
+      7. TODO.md 此項標 `[x]`，加完成 commit 號
+    - **當前狀態（2026-04-14 17:34）**：
+      - Paper TOML: `funding_threshold=0.0001, total_cost_bps=1.0`（污染中）
+      - Demo/live TOML: 未動（`funding_threshold=0.0005/0.001, total_cost_bps=34.0`）
+      - Engine PID 140040, restart at 17:33:22, 有效 entry 閾值 = 1 bp
+      - 污染窗口 fills 數: 0（剛啟動）
 - [ ] **G-7** ClaudeTeacher 正式啟用（SEC-04/06/13 E3 審查 PASS 後 flip enabled AtomicBool，學習閉環接通，W23）
   - 現況：consumer_loop.rs `enabled = false`（啟動時 fail-closed）+ learning_store "currently has no consumer"
   - 前置：E3 審查 PASS + G-3 IPC 認證 + 21d paper 穩定
