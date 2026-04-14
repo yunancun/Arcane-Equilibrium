@@ -185,7 +185,7 @@ async fn flush_intents(pool: &DbPool, buf: &mut Vec<TradingMsg>) {
     };
     for chunk in buf.chunks(INTENT_BATCH_MAX) {
         let mut qb: QueryBuilder<sqlx::Postgres> = QueryBuilder::new(
-            "INSERT INTO trading.intents (ts, intent_id, signal_id, context_id, symbol, side, qty, price, order_type, strategy_name, engine_mode) "
+            "INSERT INTO trading.intents (ts, intent_id, signal_id, context_id, symbol, side, qty, price, order_type, strategy_name, engine_mode, details) "
         );
         qb.push_values(chunk.iter(), |mut b, msg| {
             if let TradingMsg::Intent {
@@ -200,6 +200,7 @@ async fn flush_intents(pool: &DbPool, buf: &mut Vec<TradingMsg>) {
                 order_type,
                 strategy_name,
                 engine_mode,
+                details,
             } = msg
             {
                 b.push_bind(
@@ -215,6 +216,7 @@ async fn flush_intents(pool: &DbPool, buf: &mut Vec<TradingMsg>) {
                 b.push_bind(order_type.as_str());
                 b.push_bind(strategy_name.as_str());
                 b.push_bind(engine_mode.as_str());
+                b.push_bind(details.clone());
             }
         });
         qb.push(" ON CONFLICT (intent_id, ts) DO NOTHING");
@@ -581,6 +583,7 @@ mod tests {
                 order_type: "market".into(),
                 strategy_name: "ma".into(),
                 engine_mode: "paper".into(),
+                details: Some(serde_json::json!({"strategy": "ma", "confidence": 0.5})),
             },
             TradingMsg::Fill {
                 fill_id: "f1".into(),

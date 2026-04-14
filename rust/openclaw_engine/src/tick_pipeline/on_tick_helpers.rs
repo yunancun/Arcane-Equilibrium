@@ -112,6 +112,18 @@ pub(crate) fn persist_intent(
     engine_mode: &str,
 ) {
     if let Some(ref tx) = trading_tx {
+        // FUP-8: populate details so trading.intents.details stops being 100% NULL.
+        // Currently carries only what OrderIntent exposes (strategy + confidence);
+        // edge/funding_rate/basis/regime will be added once G-1 Strategist wires
+        // those fields into OrderIntent. Root principle #8「交易可解釋」requires
+        // at minimum the strategy identifier + confidence score to be persisted.
+        // FUP-8：填充 details 避免 trading.intents.details 100% NULL。
+        let details = serde_json::json!({
+            "strategy": intent.strategy,
+            "confidence": intent.confidence,
+            "submitted_qty": approved_qty,
+            "is_long": intent.is_long,
+        });
         let _ = tx.try_send(crate::database::TradingMsg::Intent {
             intent_id: make_intent_id(em, &intent.symbol, ts_ms),
             ts_ms,
@@ -124,6 +136,7 @@ pub(crate) fn persist_intent(
             order_type: intent.order_type.clone(),
             strategy_name: intent.strategy.clone(),
             engine_mode: engine_mode.to_string(),
+            details: Some(details),
         });
     }
 }

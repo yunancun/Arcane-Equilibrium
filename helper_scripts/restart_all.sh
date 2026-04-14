@@ -1,18 +1,22 @@
 #!/bin/bash
 # restart_all.sh — 重啟 Rust 引擎 + API server
-# MODULE_NOTE (CN): 一鍵重啟 Rust 引擎 + API server；可選 --rebuild 先跑 build_pyo3.sh 部署
-#   最新 PyO3 .so 到兩個 venv，再啟動服務。預設不重建（向後相容）。
+# MODULE_NOTE (CN): 一鍵重啟 Rust 引擎 + API server；可選 --rebuild 重建 PyO3 .so
+#   **以及** `rust/target/release/openclaw-engine` binary（2026-04-14 FA-PHANTOM-1
+#   部署事故後修正 — 原 --rebuild 只重 PyO3 wheel，不動 engine binary，導致
+#   部署 engine 修復時仍跑舊 binary）。
 # MODULE_NOTE (EN): One-shot restart of Rust engine + API server. Optional --rebuild
-#   first runs build_pyo3.sh to deploy fresh PyO3 .so into both venvs, then starts
-#   services. Default behavior (no flag) unchanged for backward compatibility.
+#   refreshes BOTH the PyO3 wheel (.so into both venvs) AND the openclaw-engine
+#   binary (2026-04-14 FA-PHANTOM-1 deploy incident fix — --rebuild previously
+#   only rebuilt the wheel, leaving the engine binary stale).
 #
 # Usage: bash helper_scripts/restart_all.sh [scope] [--rebuild]
 #   scope: --engine-only | --api-only | (none = both)
-#   --rebuild: run build_pyo3.sh before starting services (exits if build fails)
+#   --rebuild: rebuild PyO3 wheel + openclaw-engine binary before starting services
+#              (exits if either build fails)
 #
 # 使用範例：
 #   bash helper_scripts/restart_all.sh                     # 重啟引擎+API
-#   bash helper_scripts/restart_all.sh --rebuild           # 先 rebuild .so 再重啟
+#   bash helper_scripts/restart_all.sh --rebuild           # 先 rebuild 再重啟
 #   bash helper_scripts/restart_all.sh --api-only          # 只重啟 API
 #   bash helper_scripts/restart_all.sh --engine-only --rebuild  # 先 rebuild 再只重啟引擎
 
@@ -50,6 +54,22 @@ rebuild_pyo3() {
     echo ">>> Rebuilding PyO3 (.so) into all venvs..."
     if ! bash helper_scripts/build_pyo3.sh; then
         echo "ERROR: build_pyo3.sh failed — not starting services" >&2
+        exit 2
+    fi
+}
+
+rebuild_engine_binary() {
+    # Rebuild rust/target/release/openclaw-engine.
+    # 2026-04-14 FA-PHANTOM-1 deploy incident: --rebuild used to only refresh
+    # PyO3 wheel, so engine-code fixes required a separate manual
+    # `cargo build --release -p openclaw_engine` or they'd silently run the
+    # previous binary. Now bundled into --rebuild so operator intent
+    # "refresh everything" actually refreshes everything.
+    # 2026-04-14 FA-PHANTOM-1 部署事故：原 --rebuild 只刷 PyO3 wheel，
+    # 部署 engine 修復時仍跑舊 binary 而操作者無感。現併入 --rebuild。
+    echo ">>> Rebuilding openclaw-engine release binary..."
+    if ! cargo build --release -p openclaw_engine --manifest-path rust/Cargo.toml; then
+        echo "ERROR: cargo build openclaw_engine failed — not starting services" >&2
         exit 2
     fi
 }
@@ -173,7 +193,14 @@ wait_and_verify() {
 # ── Pre-flight rebuild (if requested) / 啟動前重建（如有請求） ──
 # Must run BEFORE any service start — rebuild failure aborts the whole restart.
 # 必須在啟動任何服務前執行——rebuild 失敗則整個 restart 中止。
+# Order: engine binary first (longer compile), then PyO3 wheel — if either
+# fails, exit before killing the running services.
+# 順序：先編 engine binary（較慢），再編 PyO3 wheel — 任一失敗則在 kill
+# 現行服務之前退出，避免「killed but nothing to start」的窗口。
 if [[ "$REBUILD" -eq 1 ]]; then
+    if [[ "$SCOPE" == "all" || "$SCOPE" == "--engine-only" ]]; then
+        rebuild_engine_binary
+    fi
     rebuild_pyo3
 fi
 
