@@ -289,6 +289,10 @@ pub enum TradingMsg {
         strategy_name: String,
         /// Engine mode: "paper", "demo", or "live" / 引擎模式
         engine_mode: String,
+        /// Strategy metadata snapshot — populates trading.intents.details
+        /// (FUP-8: satisfy root principle #8 "trades must be explainable").
+        /// 策略詮釋快照，寫入 trading.intents.details（根原則 #8 交易可解釋）。
+        details: Option<serde_json::Value>,
     },
     /// Fill result (paper/demo/live) / 成交結果（紙盤/演示/實盤）
     Fill {

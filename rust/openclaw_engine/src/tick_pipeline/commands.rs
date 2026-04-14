@@ -163,6 +163,14 @@ impl TickPipeline {
         if let Some(ref tx) = self.trading_tx {
             let em = self.pipeline_kind.db_mode();
             let context_id = make_context_id(em, symbol, now_ms);
+            // FUP-8: populate details (see on_tick_helpers::persist_intent).
+            let details = serde_json::json!({
+                "strategy": strategy,
+                "confidence": intent.confidence,
+                "submitted_qty": qty,
+                "is_long": is_long,
+                "source": "command",
+            });
             let _ = tx.try_send(crate::database::TradingMsg::Intent {
                 intent_id: make_intent_id(em, symbol, now_ms),
                 ts_ms: now_ms,
@@ -175,6 +183,7 @@ impl TickPipeline {
                 order_type: order_type.to_string(),
                 strategy_name: strategy.to_string(),
                 engine_mode: em.to_string(),
+                details: Some(details),
             });
             let _ = tx.try_send(crate::database::TradingMsg::Fill {
                 fill_id: make_fill_id(em, symbol, now_ms),
