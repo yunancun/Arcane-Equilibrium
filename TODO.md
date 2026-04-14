@@ -1,6 +1,6 @@
 # OpenClaw TODO — 工作計劃清單
 
-最後更新：2026-04-13（EDGE 修復計劃入列 · G-SR-1 v2.5 FINAL · 5 輪 52 項修正 · 7 Session 實施計劃）
+最後更新：2026-04-14（ORPHAN-ADOPT-1 入列 W22+ · clean_restart.sh 交付）
 測試基準線：**Rust engine lib 1091 + bin 5 + core 366 + e2e 33 + promotion 32 = 1527 · Python program_code 2852 passed (5 skipped · 0 fail) · ml_training 135 passed (6 skipped)**
 
 > compact 後從此文件恢復工作狀態。第一個 `[ ]` 即為下一步起點。
@@ -13,8 +13,8 @@
 歸檔：`docs/archive/2026-04-11--completed_todo_3e_arch.md`（S0-S13 + Fix Rounds A-G，9/9 角色重審 PASS）。
 
 **殘留非阻塞**（文件大小監控）：
-- [ ] **M-1** `rust/openclaw_engine/src/ipc_server/handlers.rs` 1195 行
-- [ ] **M-2** `rust/openclaw_engine/src/tick_pipeline/on_tick.rs` 1170 行
+- [x] **M-1** `handlers.rs` 1195→1055 行（d16ed08 split + E5/EDGE 瘦身，< 1200 ✅）
+- [x] **M-2** `on_tick.rs` 1170→1082 行（E5 TickContext + EDGE 瘦身，< 1200 ✅）
 
 ---
 
@@ -187,9 +187,16 @@ C1-C2 接線 + PM 端到端驗收。1086 lib + 33 e2e = 1119 tests pass, 0 fail 
 - [x] **G-1 / R-02** Strategist + Guardian 真實接線（= G-SR-1 Phase B S5-S7 ✅）
   - 完成：Strategist Ollama param tuning + Guardian L1 classification + C1 Analyst + C2 Scout
 - [x] **G-SR-1-RESEARCH** 策略 Edge 修復 P0+P1 全部完成 ✅ — P0-1/P0-2/P1-1~P1-4 全修，P2 待排
-- [ ] **G-1 / R-06** Analyst + Conductor + Scout 接線（完整 5 agent，W23）
-- [ ] **G-2** FundingArb.on_tick() 資金費率 IPC 接線（依賴 OC-5 REST 輪詢，W22）
-  - 現況：funding_arb.rs on_tick() 永遠返回 vec![]（TODO R-06 註解）
+- [x] **G-1 / R-06-v2** Agent 價值交付 ✅ — Analyst→DB→Strategist 反饋閉環 + Guardian 拒絕統計 + Executor IPC 橋接（shadow） + Conductor real
+  - 重新定義：原始 R-06 plumbing 為 0% value → R-06-v2 關閉學習回路
+  - Step 2: Analyst PatternInsight → learning.pattern_insights → Strategist prompt
+  - Step 3: Guardian rejection stats (trading.risk_verdicts JOIN intents) → Strategist prompt
+  - Step 1: ExecutorAgent _paper_engine=None → Rust IPC SubmitOrder（shadow_mode=True 默認）
+  - Step 4: Conductor stub→real（get_agent_health + degraded agent detection）
+  - 不做：Rust→Python fire-and-forget / Conductor health polling / Rust→scout_scan
+- [ ] **G-2** FundingArb 策略驗證 + 參數調優（OC-5 已解鎖，W22）
+  - OC-5 ✅：FundingArb on_tick() 完整實現（entry/exit/cooldown/basis/edge），index_price TickContext 全鏈路
+  - 現況：策略邏輯完成，待 paper 實盤驗證 edge + 參數調優
 - [ ] **G-7** ClaudeTeacher 正式啟用（SEC-04/06/13 E3 審查 PASS 後 flip enabled AtomicBool，學習閉環接通，W23）
   - 現況：consumer_loop.rs `enabled = false`（啟動時 fail-closed）+ learning_store "currently has no consumer"
   - 前置：E3 審查 PASS + G-3 IPC 認證 + 21d paper 穩定
@@ -307,16 +314,17 @@ WIRE-0/WIRE-1 + DL-1/DL-2 + JS-1 + 5-01~03 已全部 ✅。下面是原 backlog 
 
 ### WP-F GUI（P2 ~10 項）
 
-- [ ] WP-F/D-01 applyAIAdvice() 只 toast 無實效
-- [ ] WP-F/UX-06 Submit 無 loading 狀態
+- [x] WP-F/D-01 applyAIAdvice() → clipboard copy（2026-04-13）
+- [x] WP-F/UX-06 Submit loading 狀態：saveProviderKey + saveAIConfig（2026-04-13）
 - [ ] WP-F/UX-07~10 術語統一（Paper/Live/Session 各 Tab 標籤）
-- [ ] WP-F/AH-05 Apply 標籤誤導
+- [x] WP-F/AH-05 btn-apply-ai 元素補齊 + 標籤改「Copy Advice」（2026-04-13）
 - [ ] WP-F/O-xx / AH-08~11（詳見 §10.1）
 - [ ] `preferred_margin_mode` / `preferred_position_mode` GUI 入口
 
 ### WP-E4 測試覆蓋（13 項）
 
-- [ ] T-P2-5 rest_poller / T-P2-6 quality_writer / T-P2-9 PyO3 bridge tests / T-P2-10 panic-path / T-P2-11 並發
+- [x] T-P2-5 rest_poller（+9 tests）/ T-P2-6 quality_writer（+9 tests）（2026-04-13）
+- [ ] T-P2-9 PyO3 bridge tests / T-P2-10 panic-path / T-P2-11 並發
 - [ ] T-Q3/Q4/Q7/Q8 覆蓋品質
 - [ ] T-I1~I4 tarpaulin / CI 門禁 / 文檔
 - [ ] WP-E4/T-P1-1 殘餘 event_consumer 完整事件循環整合測試
@@ -324,11 +332,31 @@ WIRE-0/WIRE-1 + DL-1/DL-2 + JS-1 + 5-01~03 已全部 ✅。下面是原 backlog 
 ### WP-E5 大文件
 
 - [ ] tick_pipeline.rs 2117 行 — 留專屬 session
-- [ ] governance_hub.py 1927 行 — 拆分需獨立 sprint + E2+E4
+- [x] governance_hub.py 1052 行（已瘦身至 < 1200 ✅，原 1927 行）
 
 ### WP-I 文檔衛生
 
 - [ ] R4-NAME-1 / R4-MEM-1 / R4-REF-ST-1
+
+---
+
+## 🛡️ Phase 6 擴展 — Reconciler Orphan 主動處理（W22+，非阻塞）
+
+> 背景：當前 reconciler seed 完成後，對 orphan 倉「偵測但不動作」——只在 burst ≥5 drifts 連續 2 cycles → CircuitBreaker + CloseAll 才自動平倉。單一 orphan 會留在交易所自生自滅（無止損、funding 累積），直到 operator 手動干預。
+> 設計參考：`helper_scripts/clean_restart_flatten.py`（PyO3 reduce_only 平倉模板）+ `position_reconciler/escalation.rs`（既有升級階梯保留作最後防線）。
+
+- [ ] **ORPHAN-ADOPT-1** — 啟動 seed 完成後統一孤兒處理決策函數 `handle_orphan(pos) -> CloseOrAdopt`
+  - **Stage A 硬安全（任一命中 → Close）**：距離強平 < 5×ATR · 全局 drawdown/CB 已 tripped · 名義值 > `max_order_notional_usdt` · symbol 不在 scanner active universe
+  - **Stage B+C 軟評估（統一決策+執行）**：
+    - 查 edge_estimates（demo 用 production 池，paper 用 `_paper.json`）
+    - `shrunk_bps < 0` 且 unrealized PnL > 0 → 鎖利 Close
+    - 策略在該 symbol 當下有同向信號 → Adopt（原子執行三件事：注入 `position_map` + 綁 hard/trailing stop + 寫 audit `ORPHAN_ADOPTED`，任一失敗降級 Close）
+    - 其他曖昧情況 → 保守 Close（原則 #6「失敗默認收縮」）
+  - **執行路徑**：reduce_only market（參考 `clean_restart_flatten.py` 的 place_order 模式）
+  - **Audit**：統一 event `ORPHAN_HANDLED { action: Close|Adopt, reason: ... }`
+  - **保留既有升級**：Cautious/Defensive/CB+CloseAll 作為 handle_orphan 失敗時的兜底防線
+  - **測試**：startup seed race condition / Stage A 4 條分支 / Stage B edge lookup / Adopt 原子性（注入失敗降級 Close）/ 已接管倉位不觸發 re-entry
+  - **依賴**：無硬依賴，但建議在 G-1 R-02（Strategist agent）接線後實施，讓「strategies 有同向信號」判斷更有意義
 
 ---
 
@@ -338,7 +366,7 @@ WIRE-0/WIRE-1 + DL-1/DL-2 + JS-1 + 5-01~03 已全部 ✅。下面是原 backlog 
 - [ ] **ort crate** activation（首個 ONNX 模型訓練後）
 - [ ] **4-06** LinUCB live warm-start deployment（script 已交付，等首次 v1→v2 遷移）
 - [ ] **OC-4** MCP PostgreSQL 自然語言查詢
-- [ ] **OC-5** FundingArb REST 資金費率輪詢（W22，解鎖 G-2）
+- [x] **OC-5** FundingArb on_tick() 完整實現 + index_price TickContext ✅（2026-04-13，解鎖 G-2）
 
 ### Phase 4-Conditional（觸發後）
 
