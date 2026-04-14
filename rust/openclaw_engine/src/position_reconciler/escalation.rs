@@ -115,6 +115,11 @@ pub struct ReconcilerState {
     /// 第一次 burst → Defensive（非 CB），連續第二次 → CircuitBreaker。
     /// 防止單次瞬態 API 同步抖動（如 IPC close_all 後 Bybit REST 延遲）誤觸 CB。
     pub burst_drift_streak: u32,
+    /// ORPHAN-ADOPT-1 Phase 1: per-(symbol|side) last-dispatched orphan close
+    /// timestamp. Used by `orphan_handler::check_and_stamp_dedup()` to suppress
+    /// repeat reduce_only orders within `ORPHAN_CLOSE_DEDUP_MS`.
+    /// ORPHAN-ADOPT-1 Phase 1：每 (symbol|side) 上次分發孤兒平倉的時間戳。
+    pub pending_orphan_closes: HashMap<String, u64>,
 }
 
 impl ReconcilerState {
@@ -130,6 +135,7 @@ impl ReconcilerState {
             global_last_escalation_ms: 0,
             pre_escalation_level: None,
             burst_drift_streak: 0,
+            pending_orphan_closes: HashMap::new(),
         }
     }
 }
@@ -568,5 +574,6 @@ mod tests {
         assert_eq!(state.global_last_escalation_ms, 0);
         assert!(state.pre_escalation_level.is_none());
         assert_eq!(state.burst_drift_streak, 0);
+        assert!(state.pending_orphan_closes.is_empty());
     }
 }

@@ -445,6 +445,7 @@ pub(crate) fn spawn_position_reconciler(
     shared_instruments: &Option<Arc<openclaw_engine::instrument_info::InstrumentInfoCache>>,
     shared_risk_level: &Arc<std::sync::atomic::AtomicU8>,
     bybit_env: BybitEnvironment,
+    orphan_handler_config: Option<openclaw_engine::position_reconciler::OrphanHandlerConfig>,
 ) {
     use openclaw_engine::position_manager::PositionManager;
     use openclaw_engine::position_reconciler::run_position_reconciler;
@@ -483,6 +484,7 @@ pub(crate) fn spawn_position_reconciler(
         reconciler_instruments,
         get_risk_level,
         reconciler_label,
+        orphan_handler_config,
     ));
     info!("position_reconciler task spawned (Phase 6 auto-contraction) / 持倉對帳器任務已啟動（Phase 6 自動降級）");
 }
