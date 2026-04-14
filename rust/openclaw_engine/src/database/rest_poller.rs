@@ -242,4 +242,109 @@ mod tests {
         let daily = funding_rate_daily(-0.0002);
         assert!((daily - (-0.0006)).abs() < 1e-12);
     }
+
+    // ── Additional edge cases ──
+
+    /// EN: Very large buy_ratio / small sell_ratio → large ratio (no overflow/panic).
+    /// 中文: 極大 buy_ratio / 極小 sell_ratio → 大比率（無溢出/崩潰）。
+    #[test]
+    fn test_lsr_ratio_extreme_values() {
+        let ratio = compute_lsr_ratio(1e10, 1e-10);
+        assert!(ratio > 1e18);
+        assert!(ratio.is_finite());
+    }
+
+    /// EN: Both ratios zero → safe default 1.0 (sell=0 guard triggers).
+    /// 中文: 兩者均為零 → 安全預設 1.0（sell=0 守衛觸發）。
+    #[test]
+    fn test_lsr_ratio_both_zero() {
+        assert_eq!(compute_lsr_ratio(0.0, 0.0), 1.0);
+    }
+
+    /// EN: Typical funding rate 0.01% → daily 0.03%.
+    /// 中文: 典型資金費率 0.01% → 日化 0.03%。
+    #[test]
+    fn test_funding_rate_daily_typical() {
+        let daily = funding_rate_daily(0.0001);
+        assert!((daily - 0.0003).abs() < 1e-12);
+    }
+
+    /// EN: Large funding rate (extreme market) stays finite.
+    /// 中文: 極端行情下的大資金費率保持有限值。
+    #[test]
+    fn test_funding_rate_daily_large() {
+        let daily = funding_rate_daily(0.05); // 5% per interval = extreme
+        assert!((daily - 0.15).abs() < 1e-12);
+    }
+
+    /// EN: MarketDataMsg variants constructed correctly (channel contract).
+    /// 中文: MarketDataMsg 變體正確構建（通道契約）。
+    #[test]
+    fn test_market_data_msg_funding_rate_construction() {
+        let msg = MarketDataMsg::FundingRate {
+            ts_ms: 1700000000000,
+            symbol: "BTCUSDT".to_string(),
+            funding_rate: 0.0001,
+            funding_rate_daily: funding_rate_daily(0.0001),
+        };
+        match msg {
+            MarketDataMsg::FundingRate { ts_ms, symbol, funding_rate, funding_rate_daily: frd } => {
+                assert_eq!(ts_ms, 1700000000000);
+                assert_eq!(symbol, "BTCUSDT");
+                assert!((funding_rate - 0.0001).abs() < 1e-12);
+                assert!((frd - 0.0003).abs() < 1e-12);
+            }
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    /// EN: MarketDataMsg::OpenInterest variant construction.
+    /// 中文: MarketDataMsg::OpenInterest 變體構建。
+    #[test]
+    fn test_market_data_msg_open_interest_construction() {
+        let msg = MarketDataMsg::OpenInterest {
+            ts_ms: 1700000000000,
+            symbol: "ETHUSDT".to_string(),
+            open_interest: 150_000.0,
+            oi_value: 0.0,
+        };
+        match msg {
+            MarketDataMsg::OpenInterest { symbol, open_interest, .. } => {
+                assert_eq!(symbol, "ETHUSDT");
+                assert!((open_interest - 150_000.0).abs() < 1e-6);
+            }
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    /// EN: MarketDataMsg::LongShortRatio variant with compute_lsr_ratio.
+    /// 中文: MarketDataMsg::LongShortRatio 變體 + compute_lsr_ratio 計算。
+    #[test]
+    fn test_market_data_msg_lsr_construction() {
+        let buy = 0.55;
+        let sell = 0.45;
+        let msg = MarketDataMsg::LongShortRatio {
+            ts_ms: 1700000000000,
+            symbol: "SOLUSDT".to_string(),
+            buy_ratio: buy,
+            sell_ratio: sell,
+            ratio: compute_lsr_ratio(buy, sell),
+        };
+        match msg {
+            MarketDataMsg::LongShortRatio { ratio, .. } => {
+                assert!((ratio - (0.55 / 0.45)).abs() < 1e-9);
+            }
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    /// EN: Cancellation token can be pre-cancelled (tests graceful shutdown path).
+    /// 中文: 取消令牌可預先取消（測試優雅關閉路徑）。
+    #[test]
+    fn test_cancellation_token_contract() {
+        let cancel = CancellationToken::new();
+        assert!(!cancel.is_cancelled());
+        cancel.cancel();
+        assert!(cancel.is_cancelled());
+    }
 }
