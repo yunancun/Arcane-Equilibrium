@@ -12,6 +12,7 @@ mod tests;
 mod dispatch;
 mod governor_cooldown;
 pub mod handlers;
+mod paper_state_restore;
 mod setup;
 mod types;
 
@@ -87,6 +88,11 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
     // Build pipeline with kind-appropriate governance + balance (3E-2a)
     // 以 kind 對應的治理 + 餘額構建管線（3E-2a）
     let mut pipeline = TickPipeline::with_kind(SYMBOLS, initial_balance, pipeline_kind);
+
+    // QoL-1: Restore cumulative paper_state counters from trading.fills before
+    // the first tick; details + fail-soft log are in paper_state_restore.
+    // QoL-1：首個 tick 前從 trading.fills 還原累計指標；細節見 helper。
+    paper_state_restore::restore_paper_counters(&mut pipeline, pipeline_kind, audit_pool.as_ref()).await;
 
     // B-1 Phase 2: Seed paper_state with exchange positions captured at startup.
     // Without this, inactive symbols never get WS PositionUpdate → snapshot=0.
