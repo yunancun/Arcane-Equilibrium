@@ -257,7 +257,7 @@ C1-C2 接線 + PM 端到端驗收。1086 lib + 33 e2e = 1119 tests pass, 0 fail 
 
 ### 🔴 P0 — 阻塞部署
 
-- [ ] **FA-PHANTOM-1-FUP-1** 補真正的 on_tick 整合測試（E2+QC 一致指出為最大弱點）
+- [x] **FA-PHANTOM-1-FUP-1** 補真正的 on_tick 整合測試（E2+QC 一致指出為最大弱點）✅ commit 6c8b1a1 — 兩個 on_tick 整合測試（20x leverage no-CloseAll + cash-mode 1x closes-all）。bite-check 驗證：移除 /leverage 使 20x 測試從 pass→fail (positions 5→0)，cash-mode 仍正確。engine lib 1146 + core 372 + stress_integration 35
   - **現況**：`test_fa_phantom_1_regression_full_notional_no_action` 只呼叫 `evaluate_fast_track(Normal, 1.0, 5.0)` — 硬編碼 5.0。**若未來有人刪除 `/leverage` 除法，此測試仍會通過** — 無退化保護。
   - **所需**：`TickPipeline::on_tick()` 整合測試：建 pipeline + 注入 5 倉位（總 notional ≈ 100% balance）+ 設 leverage_max=20 → 驅動 1 tick → assert 無 CloseAll WARN + 倉位仍在 paper_state。
   - **位置**：新加 in `rust/openclaw_engine/tests/stress_integration.rs` 或 `fast_track_integration.rs`。
@@ -267,18 +267,18 @@ C1-C2 接線 + PM 端到端驗收。1086 lib + 33 e2e = 1119 tests pass, 0 fail 
   - **問題**：commit `7eef87f` 及 memory 寫 `leverage_max=20 / total_exposure_max_pct=100%` 是預設，但 FA 查實際運行配置：`leverage_max=100.0 / total_exposure_max_pct=200.0`。修復數學仍正確（100x 下 1% margin << 90%），但敘事算例錯誤。
   - **所需**：memory `project_fa_phantom_bug.md` 更新實際 config 值；未來 commit 引述配置前先查 `/tmp/openclaw/pipeline_snapshot_paper.json` 或 API。
 
-- [ ] **FA-PHANTOM-1-FUP-3** 引擎未運行（QC 發現比我聲明的更嚴重）
+- [x] **FA-PHANTOM-1-FUP-3** ~~引擎未運行~~ 誤警 — QC 用 `grep openclaw_engine`（underscore），實際 binary 是 `openclaw-engine`（dash）。PID 208182 從 19:01 就在跑 pre-fix binary；engine.log 最近 `FAST_TRACK CloseAll fired` 在 20:42 之後靜默 2h+（位置衰減後觸發條件不再滿足）。engine_results.jsonl 累積到 71GB 是獨立輪轉議題
   - **現況**：`ps aux | grep openclaw_engine` 無進程 — 不是「pre-fix binary 在跑」，是完全沒跑。
   - **所需**：先搞清楚為何沒運行（可能 ENGINE-HEAL watchdog 觸發熔斷？檢查 `/tmp/openclaw/canary_events.jsonl`）→ 修復後再部署。
 
-- [ ] **FA-PHANTOM-1-FUP-4** 10 個未提交文件會隨 `--rebuild` 綁一起部署
+- [x] **FA-PHANTOM-1-FUP-4** 10 個未提交文件會隨 `--rebuild` 綁一起部署 ✅ 大部分（~9 個）已在 session 期間提交到 51f6744 trailing-stop fix；session 內另行提交 c7815da (G-2 TOML revert) + 0ef5adf (snapshot refresh) + 6c8b1a1 (FUP-1 tests)。`git status` clean
   - **現況**（2026-04-14 22:41 `git status`）：`TODO.md`, `grafana_data_writer.py`, `paper_trading_routes.py`, `stop_manager.rs`, `event_consumer/handlers.rs`, `event_consumer/tests.rs`, `ipc_server/handlers.rs`, `paper_state.rs`, `tick_pipeline/mod.rs`, `settings/strategy_params_paper.toml`
   - **風險**：這些改動未經 E2/E4 審查就隨 fix 部署。
   - **所需**：逐一審查 → 分批 commit / review / 丟棄 → `git status` clean 後再 rebuild。
 
 ### 🟡 P1 — 數據完整性
 
-- [ ] **FA-PHANTOM-1-FUP-5** 污染清理 SQL 從未執行（QC 查 DB 0/177 marked）
+- [x] **FA-PHANTOM-1-FUP-5** 污染清理 SQL ✅ 執行。scope 擴大為 paper+demo（demo 也有 58 fast_track closes in window → bug 對稱擊中兩引擎）。窗口 2026-04-14 17:00-20:30+02 全部 769 fills (paper 468 + demo 301) 標記 `details.contaminated=true` + `details.contamination_reason='fa_phantom_1'`。edge_estimates.json 本身 3 bytes 空，無須重算
   - **現況**：`edge_estimates_paper.json` 根本不存在；`edge_estimates.json` 3 bytes 空；DB 無 `contaminated=true` 標記。
   - **所需 SQL**：
     ```sql
