@@ -1,0 +1,300 @@
+//! Feature vector v1 — 17 dimensions per spec §3.2.
+//! Feature 向量 v1 — 17 維，按規格 §3.2。
+//!
+//! MODULE_NOTE (EN): `FeatureVectorV1` is the canonical Copy struct fed into
+//!   the edge predictor. Per spec §3.2 it carries 17 features across Regime
+//!   (5), Basis/Microstructure (3), Strategy (3), Position (3), Time (3).
+//!   `all_in_range()` enforces invariant #12: any NaN/Inf/out-of-range value
+//!   trips fail-closed fallback to the shrinkage gate. `schema_hash()` and
+//!   `definition_hash()` are const-table values; Stage 2 (ML-MIT) computes
+//!   them and stores in model metadata for mismatch detection.
+//! MODULE_NOTE (中): `FeatureVectorV1` 是餵給預測器的 Copy 結構。依規格 §3.2 攜
+//!   17 個 features。`all_in_range()` 強制 invariant #12：任何 NaN/Inf/超界值
+//!   → fail-closed 回退到 shrinkage gate。hash 在 Stage 2 ML-MIT 寫入 model
+//!   metadata，供不匹配檢測。
+//!
+//! Spec: docs/references/2026-04-15--edge_predictor_spec.md v1.4 §3.2
+
+/// 17-dim feature vector for edge predictor inference.
+/// 17 維 feature 向量，供邊緣預測器推理。
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FeatureVectorV1 {
+    // ===== Regime (5) =====
+    /// ADX 1h — trend strength. Range [0, 100].
+    pub adx_1h: f32,
+    /// Bollinger Band width % (5m). Range [0, 50].
+    pub bb_width_pct: f32,
+    /// ATR as % of price (5m). Range [0, 20].
+    pub atr_pct: f32,
+    /// Funding rate (decimal, not bps). Range [-0.01, 0.01].
+    pub funding_rate: f32,
+    /// 1h realized vol % (stddev of 1m log returns × sqrt(60) × 100). Range [0, 20].
+    pub realized_vol_1h: f32,
+
+    // ===== Basis / Microstructure (3) =====
+    /// (index - last) / mid × 10000. Range [-500, 500].
+    pub basis_bps: f32,
+    /// Orderbook L5 imbalance (bid_vol - ask_vol) / (bid_vol + ask_vol). Range [-1, 1].
+    pub orderbook_imbalance_top5: f32,
+    /// (ask - bid) / mid × 10000. Range [0, 1000].
+    pub spread_bps: f32,
+
+    // ===== Strategy (3) =====
+    /// Confluence score (0-65 sum across 4 components). Range [0, 65].
+    pub confluence_score: f32,
+    /// Persistence elapsed milliseconds since signal onset. Range [0, 3_600_000].
+    pub persistence_elapsed_ms: f32,
+    /// Order side: +1 long, -1 short.
+    pub side: i8,
+
+    // ===== Position (3) =====
+    /// Intended notional / paper_balance as %. Range [0, 100].
+    pub notional_pct_of_bal: f32,
+    /// Total concurrent positions at decision time. Range [0, 100].
+    pub concurrent_positions: u8,
+    /// Positions in same direction (long-vs-short grouping). Range [0, 100].
+    pub same_direction_cnt: u8,
+
+    // ===== Time (3) =====
+    /// sin(2π × hour_utc / 24). Range [-1, 1].
+    pub tod_sin: f32,
+    /// cos(2π × hour_utc / 24). Range [-1, 1].
+    pub tod_cos: f32,
+    /// 1 iff now in last 15min of 8h Bybit funding settlement window.
+    pub is_funding_settlement_window: u8,
+}
+
+impl FeatureVectorV1 {
+    /// Number of features in this version (17). Used for ONNX tensor shape assertion.
+    /// 本版本 feature 總數（17），供 ONNX tensor shape 斷言。
+    pub const DIM: usize = 17;
+
+    /// Invariant #12 sanity — every field is finite and in declared range.
+    /// Returns false on any NaN / Inf / out-of-range. Caller fails closed on false.
+    /// 斷言每個欄位 finite 且在聲明 range 內。NaN/Inf/超界 → false → fail-closed。
+    pub fn all_in_range(&self) -> bool {
+        let f = self;
+        let checks = [
+            in_range(f.adx_1h, 0.0, 100.0),
+            in_range(f.bb_width_pct, 0.0, 50.0),
+            in_range(f.atr_pct, 0.0, 20.0),
+            in_range(f.funding_rate, -0.01, 0.01),
+            in_range(f.realized_vol_1h, 0.0, 20.0),
+            in_range(f.basis_bps, -500.0, 500.0),
+            in_range(f.orderbook_imbalance_top5, -1.0, 1.0),
+            in_range(f.spread_bps, 0.0, 1000.0),
+            in_range(f.confluence_score, 0.0, 65.0),
+            in_range(f.persistence_elapsed_ms, 0.0, 3_600_000.0),
+            (f.side == 1 || f.side == -1),
+            in_range(f.notional_pct_of_bal, 0.0, 100.0),
+            // u8 fields — only upper bound matters; underflow impossible.
+            f.concurrent_positions <= 100,
+            f.same_direction_cnt <= 100,
+            in_range(f.tod_sin, -1.0, 1.0),
+            in_range(f.tod_cos, -1.0, 1.0),
+            (f.is_funding_settlement_window == 0 || f.is_funding_settlement_window == 1),
+        ];
+        checks.iter().all(|&ok| ok)
+    }
+
+    /// Convert to flat `[f32; 17]` for ONNX tensor ingestion.
+    /// Order MUST match the schema hash canonical ordering (§3.3).
+    /// 扁平化為 `[f32; 17]` 供 ONNX tensor。順序必須與 schema hash 一致。
+    pub fn to_array(&self) -> [f32; Self::DIM] {
+        [
+            self.adx_1h,
+            self.bb_width_pct,
+            self.atr_pct,
+            self.funding_rate,
+            self.realized_vol_1h,
+            self.basis_bps,
+            self.orderbook_imbalance_top5,
+            self.spread_bps,
+            self.confluence_score,
+            self.persistence_elapsed_ms,
+            self.side as f32,
+            self.notional_pct_of_bal,
+            self.concurrent_positions as f32,
+            self.same_direction_cnt as f32,
+            self.tod_sin,
+            self.tod_cos,
+            self.is_funding_settlement_window as f32,
+        ]
+    }
+
+    /// Zero-default vector for tests / placeholders. `side = 1` (longs by default).
+    /// 測試/占位用零值，`side = 1`（默認 long）。
+    pub fn zeroed() -> Self {
+        Self {
+            adx_1h: 0.0,
+            bb_width_pct: 0.0,
+            atr_pct: 0.0,
+            funding_rate: 0.0,
+            realized_vol_1h: 0.0,
+            basis_bps: 0.0,
+            orderbook_imbalance_top5: 0.0,
+            spread_bps: 0.0,
+            confluence_score: 0.0,
+            persistence_elapsed_ms: 0.0,
+            side: 1,
+            notional_pct_of_bal: 0.0,
+            concurrent_positions: 0,
+            same_direction_cnt: 0,
+            tod_sin: 0.0,
+            tod_cos: 0.0,
+            is_funding_settlement_window: 0,
+        }
+    }
+}
+
+#[inline]
+fn in_range(v: f32, lo: f32, hi: f32) -> bool {
+    v.is_finite() && v >= lo && v <= hi
+}
+
+// ============================================================
+// Tests
+// ============================================================
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_dim_is_17() {
+        assert_eq!(FeatureVectorV1::DIM, 17);
+    }
+
+    #[test]
+    fn test_zeroed_passes_range_check() {
+        assert!(FeatureVectorV1::zeroed().all_in_range());
+    }
+
+    #[test]
+    fn test_nan_fails_range_check() {
+        let mut f = FeatureVectorV1::zeroed();
+        f.adx_1h = f32::NAN;
+        assert!(!f.all_in_range());
+    }
+
+    #[test]
+    fn test_infinity_fails_range_check() {
+        let mut f = FeatureVectorV1::zeroed();
+        f.atr_pct = f32::INFINITY;
+        assert!(!f.all_in_range());
+    }
+
+    #[test]
+    fn test_out_of_range_each_regime_field() {
+        let baseline = FeatureVectorV1::zeroed();
+        let mut f = baseline;
+        f.adx_1h = 200.0;
+        assert!(!f.all_in_range());
+        f = baseline;
+        f.bb_width_pct = 60.0;
+        assert!(!f.all_in_range());
+        f = baseline;
+        f.atr_pct = 25.0;
+        assert!(!f.all_in_range());
+        f = baseline;
+        f.funding_rate = 0.02;
+        assert!(!f.all_in_range());
+        f = baseline;
+        f.realized_vol_1h = 30.0;
+        assert!(!f.all_in_range());
+    }
+
+    #[test]
+    fn test_out_of_range_basis_microstructure() {
+        let baseline = FeatureVectorV1::zeroed();
+        let mut f = baseline;
+        f.basis_bps = 600.0;
+        assert!(!f.all_in_range());
+        f = baseline;
+        f.orderbook_imbalance_top5 = 1.5;
+        assert!(!f.all_in_range());
+        f = baseline;
+        f.spread_bps = 2000.0;
+        assert!(!f.all_in_range());
+    }
+
+    #[test]
+    fn test_side_must_be_plus_minus_one() {
+        let mut f = FeatureVectorV1::zeroed();
+        f.side = 0;
+        assert!(!f.all_in_range());
+        f.side = 2;
+        assert!(!f.all_in_range());
+        f.side = -1;
+        assert!(f.all_in_range());
+        f.side = 1;
+        assert!(f.all_in_range());
+    }
+
+    #[test]
+    fn test_u8_fields_upper_bound() {
+        let mut f = FeatureVectorV1::zeroed();
+        f.concurrent_positions = 101;
+        assert!(!f.all_in_range());
+        f = FeatureVectorV1::zeroed();
+        f.same_direction_cnt = 101;
+        assert!(!f.all_in_range());
+    }
+
+    #[test]
+    fn test_funding_window_flag_must_be_binary() {
+        let mut f = FeatureVectorV1::zeroed();
+        f.is_funding_settlement_window = 2;
+        assert!(!f.all_in_range());
+        f.is_funding_settlement_window = 0;
+        assert!(f.all_in_range());
+        f.is_funding_settlement_window = 1;
+        assert!(f.all_in_range());
+    }
+
+    #[test]
+    fn test_to_array_preserves_declared_order() {
+        let mut f = FeatureVectorV1::zeroed();
+        f.adx_1h = 1.0;
+        f.bb_width_pct = 2.0;
+        f.atr_pct = 3.0;
+        f.funding_rate = 0.004;
+        let arr = f.to_array();
+        assert_eq!(arr.len(), FeatureVectorV1::DIM);
+        assert_eq!(arr[0], 1.0);
+        assert_eq!(arr[1], 2.0);
+        assert_eq!(arr[2], 3.0);
+        assert!((arr[3] - 0.004).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_to_array_side_conversion() {
+        let mut f = FeatureVectorV1::zeroed();
+        f.side = -1;
+        let arr = f.to_array();
+        assert_eq!(arr[10], -1.0);
+    }
+
+    #[test]
+    fn test_typical_decision_vector_passes() {
+        let f = FeatureVectorV1 {
+            adx_1h: 25.0,
+            bb_width_pct: 3.5,
+            atr_pct: 1.2,
+            funding_rate: 0.0003,
+            realized_vol_1h: 1.8,
+            basis_bps: 4.5,
+            orderbook_imbalance_top5: 0.12,
+            spread_bps: 1.5,
+            confluence_score: 42.0,
+            persistence_elapsed_ms: 125_000.0,
+            side: 1,
+            notional_pct_of_bal: 3.0,
+            concurrent_positions: 4,
+            same_direction_cnt: 2,
+            tod_sin: 0.707,
+            tod_cos: 0.707,
+            is_funding_settlement_window: 0,
+        };
+        assert!(f.all_in_range());
+    }
+}

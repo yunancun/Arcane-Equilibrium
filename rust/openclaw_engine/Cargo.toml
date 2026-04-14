@@ -37,6 +37,26 @@ parking_lot = { workspace = true }
 [dev-dependencies]
 tempfile = "3"
 
+# ============================================================
+# EDGE-P3-1 Realized Edge Predictor — backend feature flags.
+# EDGE-P3-1 真實邊緣預測器 — 後端 feature flag。
+#
+# Spec §7.1 / F8: mutually exclusive — enabling both at once fails compile
+# with a compile_error! in edge_predictor/mod.rs to avoid +63MB binary bloat
+# and ambiguous runtime selection.
+#
+# Default build (no feature): null_backend only (always returns Err(NoModel),
+# triggers fallback to shrinkage). Safe to ship; no new deps pulled.
+#
+# Stage 2 (ML-MIT) adds the actual tract-onnx / ort dependencies when the
+# model artifact is ready. Until then, the tract_backend.rs / ort_backend.rs
+# files are feature-gated stubs.
+# ============================================================
+[features]
+default = []
+edge_predictor_tract = []
+edge_predictor_ort = []
+
 [[bin]]
 name = "openclaw-engine"
 path = "src/main.rs"
