@@ -75,7 +75,7 @@
       <div class="prov-models">模型：Claude Opus / Sonnet / Haiku</div>
       <div class="api-key-row">
         <input class="oc-input" id="key-anthropic" type="password" placeholder="sk-ant-..." />
-        <button class="oc-btn" style="padding:4px 8px;font-size:10px" onclick="saveProviderKey('anthropic')">保存</button>
+        <button class="oc-btn" style="padding:4px 8px;font-size:10px" onclick="saveProviderKey('anthropic',this)">保存</button>
       </div>
       <div style="font-size:10px;color:var(--text-dim);margin-top:4px">参考价格：Haiku $0.25/Sonnet $3/Opus $15 per 1M tokens</div>
     </div>
@@ -86,7 +86,7 @@
       <div class="prov-models">模型：GPT-4o / GPT-4o-mini / o1 / o3</div>
       <div class="api-key-row">
         <input class="oc-input" id="key-openai" type="password" placeholder="sk-..." />
-        <button class="oc-btn" style="padding:4px 8px;font-size:10px" onclick="saveProviderKey('openai')">保存</button>
+        <button class="oc-btn" style="padding:4px 8px;font-size:10px" onclick="saveProviderKey('openai',this)">保存</button>
       </div>
       <div style="font-size:10px;color:var(--text-dim);margin-top:4px">参考价格：GPT-4o-mini $0.15/GPT-4o $2.5/o1 $15 per 1M tokens</div>
     </div>
@@ -97,7 +97,7 @@
       <div class="prov-models">模型：DeepSeek-V3 / DeepSeek-R1</div>
       <div class="api-key-row">
         <input class="oc-input" id="key-deepseek" type="password" placeholder="sk-..." />
-        <button class="oc-btn" style="padding:4px 8px;font-size:10px" onclick="saveProviderKey('deepseek')">保存</button>
+        <button class="oc-btn" style="padding:4px 8px;font-size:10px" onclick="saveProviderKey('deepseek',this)">保存</button>
       </div>
       <div style="font-size:10px;color:var(--text-dim);margin-top:4px">参考价格：V3 $0.27/R1 $0.55 per 1M tokens（极低成本）</div>
     </div>
@@ -108,7 +108,7 @@
       <div class="prov-models">搜索增强型 AI，用于获取实时市场信息</div>
       <div class="api-key-row">
         <input class="oc-input" id="key-perplexity" type="password" placeholder="pplx-..." />
-        <button class="oc-btn" style="padding:4px 8px;font-size:10px" onclick="saveProviderKey('perplexity')">保存</button>
+        <button class="oc-btn" style="padding:4px 8px;font-size:10px" onclick="saveProviderKey('perplexity',this)">保存</button>
       </div>
       <div style="font-size:10px;color:var(--text-dim);margin-top:4px">参考价格：$5/1000 requests（含实时搜索）</div>
     </div>
@@ -119,7 +119,7 @@
       <div class="prov-models" id="ollama-models-line">Qwen 3.5 27B / 9B — 零 API 成本</div>
       <div class="api-key-row">
         <input class="oc-input" id="key-local" type="text" placeholder="http://127.0.0.1:11434" value="http://127.0.0.1:11434" />
-        <button class="oc-btn" style="padding:4px 8px;font-size:10px" onclick="saveProviderKey('local_llm')">保存</button>
+        <button class="oc-btn" style="padding:4px 8px;font-size:10px" onclick="saveProviderKey('local_llm',this)">保存</button>
         <button class="oc-btn" style="padding:4px 8px;font-size:10px;margin-left:4px" onclick="checkOllamaStatus()">检测</button>
       </div>
       <div id="ollama-status-detail" style="font-size:10px;color:var(--text-dim);margin-top:4px">零成本，需要本地 GPU。正在检测 Ollama 连通性...</div>
@@ -131,7 +131,7 @@
       <div class="prov-models">模型：Gemini 2.5 Pro / Flash</div>
       <div class="api-key-row">
         <input class="oc-input" id="key-google" type="password" placeholder="AI..." />
-        <button class="oc-btn" style="padding:4px 8px;font-size:10px" onclick="saveProviderKey('google')">保存</button>
+        <button class="oc-btn" style="padding:4px 8px;font-size:10px" onclick="saveProviderKey('google',this)">保存</button>
       </div>
       <div style="font-size:10px;color:var(--text-dim);margin-top:4px">参考价格：Flash $0.075/Pro $1.25 per 1M tokens</div>
     </div>
@@ -204,7 +204,7 @@
         <div><div style="font-size:12px;font-weight:600">最大迭代次数 / Max Iterations</div><div style="font-size:10px;color:var(--text-dim)">单次推理会话的最大思考轮数</div></div>
         <input class="oc-input" id="ai-max-iter" type="number" step="1" min="1" max="50" style="width:80px" />
       </div>
-      <button class="oc-btn oc-btn-primary" onclick="saveAIConfig()" style="margin-top:4px">&#x1F4BE; 保存设置 / Save Settings</button>
+      <button class="oc-btn oc-btn-primary" onclick="saveAIConfig(this)" style="margin-top:4px">&#x1F4BE; 保存设置 / Save Settings</button>
     </div>
 
     <div>
@@ -420,7 +420,7 @@ const KEY_FORMATS = {
   local_llm:  { prefix: 'http',     minLen: 8,  hint: '必须是 http:// 或 https:// URL' },
 };
 
-async function saveProviderKey(provider) {
+async function saveProviderKey(provider, btn) {
   const inputId = 'key-' + (provider === 'local_llm' ? 'local' : provider);
   const key = $(inputId).value.trim();
   if (!key) { ocToast('请输入 API Key / Please enter an API key', 'error'); return; }
@@ -436,23 +436,30 @@ async function saveProviderKey(provider) {
     }
   }
 
+  // UX-06: loading state / 保存中状态
+  let origText;
+  if (btn) { origText = btn.textContent; btn.disabled = true; btn.textContent = '保存中...'; }
+
   // Save via API (backend will write to secrets folder)
-  const d = await ocPost('/api/v1/paper/layer2/config', {
-    provider_keys: { [provider]: key },
-  });
-  if (d) {
-    ocToast(provider + ' API Key 已保存', 'success');
-    $(inputId).value = '';
-    $('prov-' + provider + '-badge').textContent = '已配置';
-    $('prov-' + provider + '-badge').className = 'oc-chip oc-chip-good';
-  } else {
-    // Fallback: try to save directly to secrets file via a dedicated endpoint or show instructions
-    ocToast('保存到后端失败，请手动添加到 ~/BybitOpenClaw/secrets/providers/' + provider + '.env', 'error');
+  try {
+    const d = await ocPost('/api/v1/paper/layer2/config', {
+      provider_keys: { [provider]: key },
+    });
+    if (d) {
+      ocToast(provider + ' API Key 已保存', 'success');
+      $(inputId).value = '';
+      $('prov-' + provider + '-badge').textContent = '已配置';
+      $('prov-' + provider + '-badge').className = 'oc-chip oc-chip-good';
+    } else {
+      ocToast('保存到后端失败，请手动添加到 ~/BybitOpenClaw/secrets/providers/' + provider + '.env', 'error');
+    }
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = origText; }
   }
 }
 
 // ─── Save AI Config ──────────────────────────────────────────
-async function saveAIConfig() {
+async function saveAIConfig(btn) {
   const body = {
     daily_hard_cap_usd: parseFloat($('ai-hard-cap').value) || 2,
     adaptive_base_daily_usd: parseFloat($('ai-base-daily').value) || 8,
@@ -465,9 +472,16 @@ async function saveAIConfig() {
     auto_submit_to_paper: $('ai-auto-submit').value === 'true',
     max_iterations: parseInt($('ai-max-iter').value) || 15,
   };
-  const d = await ocPost('/api/v1/paper/layer2/config', body);
-  if (d) { ocToast('AI 设置已保存', 'success'); loadAll(); }
-  else ocToast('保存失败', 'error');
+  // UX-06: loading state / 保存中状态
+  let origText;
+  if (btn) { origText = btn.textContent; btn.disabled = true; btn.textContent = '保存中... / Saving...'; }
+  try {
+    const d = await ocPost('/api/v1/paper/layer2/config', body);
+    if (d) { ocToast('AI 设置已保存', 'success'); loadAll(); }
+    else ocToast('保存失败', 'error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = origText; }
+  }
 }
 
 // ─── Data Loading ────────────────────────────────────────────

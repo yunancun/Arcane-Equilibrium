@@ -483,8 +483,19 @@ Explain your reasoning briefly. Answer in both Chinese and English.`;
   $('btn-ask-ai').textContent = '🤖 向 AI 询问止损建议 / Ask AI';
 }
 
+// D-01 fix: Copy AI advice to clipboard for reference while adjusting values.
+// D-01 修復：複製 AI 建議到剪貼板，方便調整數值時參考。
 function applyAIAdvice() {
-  ocToast('请根据 AI 建议手动调整左侧数值后保存 / Please manually adjust values based on AI advice', 'info');
+  const body = $('ai-advice-body');
+  const text = body ? body.textContent : '';
+  if (!text || !navigator.clipboard) {
+    ocToast('No advice to copy / 无建议可复制', 'info');
+    return;
+  }
+  navigator.clipboard.writeText(text).then(
+    () => ocToast('AI advice copied to clipboard / 建议已复制到剪贴板', 'success'),
+    () => ocToast('Copy failed — select text manually / 复制失败，请手动选取', 'info')
+  );
 }
 
 // ─── Actions ──────────────────────────────────────────────────

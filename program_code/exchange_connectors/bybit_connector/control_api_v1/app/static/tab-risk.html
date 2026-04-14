@@ -452,8 +452,9 @@
       <div id="ai-advice-body" class="oc-pre" style="min-height:120px;font-size:12px;white-space:pre-wrap">
         点击左侧按钮向 AI 询问。AI 会根据当前持仓、市场状态、历史表现给出具体的止损建议。
       </div>
-      <div style="margin-top:6px;display:flex;gap:6px;font-size:11px;color:var(--text-dim)" id="ai-advice-actions">
-        &#x2139;&#xFE0F; AI 建议仅供参考，请根据建议手动调整左侧数值后保存。/ AI advice is for reference only — adjust values manually and save.
+      <div style="margin-top:6px;display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text-dim)" id="ai-advice-actions">
+        <button class="oc-btn" style="display:none;padding:2px 8px;font-size:10px" id="btn-apply-ai" onclick="applyAIAdvice()">&#x1F4CB; Copy Advice / 复制建议</button>
+        <span>&#x2139;&#xFE0F; AI 建议仅供参考，请手动调整后保存。/ Advisory only — adjust values manually.</span>
       </div>
     </div>
   </div>
