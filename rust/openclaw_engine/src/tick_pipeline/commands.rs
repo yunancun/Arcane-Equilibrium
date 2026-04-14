@@ -129,6 +129,17 @@ impl TickPipeline {
         }
 
         let now_ms = openclaw_core::now_ms();
+        // EDGE-P3-1 R2: Capture open/close state + entry_context_id BEFORE apply_fill
+        // (apply_fill may consume the position on a close, erasing the id we need).
+        // was_open=true + realized==0 → fresh open; was_open=false + realized!=0 → close
+        // of opposite direction; was_open=false + realized==0 → accumulate same direction.
+        // EDGE-P3-1 R2：關倉前先捕獲 entry_context_id（apply_fill 平倉會清除 position）。
+        let was_open = self.paper_state.get_position(symbol).is_none();
+        let existing_entry_ctx = self
+            .paper_state
+            .get_entry_context_id(symbol)
+            .unwrap_or("")
+            .to_string();
         let realized_pnl = self.paper_state.apply_fill(
             symbol,
             is_long,
@@ -137,6 +148,27 @@ impl TickPipeline {
             fill.fee,
             now_ms,
         );
+
+        // EDGE-P3-1 R2: entry_context_id stamping for fresh opens — must reuse the
+        // SAME context_id value that will be written to the Fill row below (same
+        // em, symbol, now_ms → deterministic make_context_id).
+        // EDGE-P3-1 R2：僅新開倉打 entry_context_id；加倉不覆蓋。context_id 與下方 Fill 寫入相同。
+        if was_open && realized_pnl == 0.0 {
+            let em_pre = self.pipeline_kind.db_mode();
+            let ctx_pre = make_context_id(em_pre, symbol, now_ms);
+            self.paper_state.set_entry_context_id(symbol, &ctx_pre);
+        }
+
+        // EDGE-P3-1 R2: entry_context_id for the Fill row emission below.
+        // Close fill (realized_pnl != 0) carries the pre-close entry's id;
+        // open/accumulate fills leave it empty (JOIN is from decision_features →
+        // close fill's entry_context_id only).
+        // EDGE-P3-1 R2：平倉 Fill 才帶 entry_context_id；開倉/加倉留空。
+        let fill_entry_ctx = if realized_pnl != 0.0 {
+            existing_entry_ctx
+        } else {
+            String::new()
+        };
 
         self.stats.total_intents += 1;
         self.stats.total_fills += 1;
@@ -198,6 +230,7 @@ impl TickPipeline {
                 realized_pnl,
                 strategy_name: strategy.to_string(),
                 context_id,
+                entry_context_id: fill_entry_ctx,
                 engine_mode: em.to_string(),
             });
         }
@@ -317,9 +350,26 @@ impl TickPipeline {
         strategy: &str,
         order_link_id: &str,
     ) {
+        // EDGE-P3-1 R2: snapshot was_open + existing entry_context_id BEFORE apply_fill.
+        // Exchange-confirmed fills can be open/close/accumulate; thread id on close fills.
+        // EDGE-P3-1 R2：apply_fill 前先捕獲 was_open 與 existing entry_context_id。
+        let was_open = self.paper_state.get_position(symbol).is_none();
+        let existing_entry_ctx = self
+            .paper_state
+            .get_entry_context_id(symbol)
+            .unwrap_or("")
+            .to_string();
         let realized_pnl = self
             .paper_state
             .apply_fill(symbol, is_long, qty, fill_price, fee, ts_ms);
+        // EDGE-P3-1 R2: stamp entry_context_id on fresh exchange-confirmed opens.
+        // Uses the same deterministic make_context_id as the Fill row below.
+        // EDGE-P3-1 R2：僅交易所確認的開新倉打 entry_context_id。
+        if was_open && realized_pnl == 0.0 {
+            let em_pre = self.pipeline_kind.db_mode();
+            let ctx_pre = make_context_id(em_pre, symbol, ts_ms);
+            self.paper_state.set_entry_context_id(symbol, &ctx_pre);
+        }
         self.stats.total_fills += 1;
         // Update Kelly stats on exchange fill (previously missing — QC P2-2 fix).
         // Non-zero realized_pnl indicates a position close (open fills return 0.0).
@@ -344,6 +394,13 @@ impl TickPipeline {
         if let Some(ref tx) = self.trading_tx {
             let em = self.pipeline_kind.db_mode();
             let fr = self.intent_processor.fee_rate(symbol);
+            // EDGE-P3-1 R2: close fills carry the pre-close entry's id; opens stay empty.
+            // EDGE-P3-1 R2：平倉 fill 帶 entry_context_id；開倉/加倉留空。
+            let fill_entry_ctx = if realized_pnl != 0.0 {
+                existing_entry_ctx.clone()
+            } else {
+                String::new()
+            };
             let _ = tx.try_send(crate::database::TradingMsg::Fill {
                 fill_id: make_fill_id(em, symbol, ts_ms),
                 ts_ms,
@@ -357,6 +414,7 @@ impl TickPipeline {
                 realized_pnl,
                 strategy_name: strategy.to_string(),
                 context_id: make_context_id(em, symbol, ts_ms),
+                entry_context_id: fill_entry_ctx,
                 engine_mode: em.to_string(),
             });
         }

@@ -43,6 +43,7 @@ fn write_test_snapshot() -> (Arc<PathBuf>, tempfile::TempDir) {
                     entry_fee: 3.25,
                     entry_ts_ms: 1700000000000,
                     unrealized_pnl: 10.0,
+                    entry_context_id: String::new(),
                 },
                 api_pnl: None,
             }],

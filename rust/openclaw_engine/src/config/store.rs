@@ -15,6 +15,7 @@
 
 use arc_swap::ArcSwap;
 use serde::Serialize;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -241,6 +242,51 @@ fn write_toml_atomic<T: Serialize>(cfg: &T, path: &Path) -> Result<(), String> {
     std::fs::write(&tmp, toml_str.as_bytes())
         .map_err(|e| format!("write tmp failed: {e}"))?;
     std::fs::rename(&tmp, path).map_err(|e| format!("rename failed: {e}"))?;
+    Ok(())
+}
+
+/// EDGE-P3-1 U2: durable variant of `write_toml_atomic` used by the edge-predictor
+/// kill-switch (`DisableEdgePredictorAll`). Serialises `cfg`, fsyncs the tmp file
+/// contents, rename-swaps into place, then fsyncs the parent directory so the
+/// rename metadata itself survives a crash window (OS buffer unflushed).
+/// EDGE-P3-1 U2：供邊緣預測器一鍵關閉（`DisableEdgePredictorAll`）使用的落盤版本。
+/// 序列化後先 fsync 臨時檔內容，rename 換入後再 fsync 父目錄，確保 rename metadata
+/// 也落盤，避免在 OS buffer 未刷的 crash window 內「看似寫入卻實際丟失」。
+///
+/// Non-critical callers keep using `write_toml_atomic` to avoid the per-write
+/// fsync cost. CC #13 regression `test_disable_all_survives_sigkill` is the
+/// authoritative durability proof for this helper.
+/// 非關鍵呼叫者仍用 `write_toml_atomic` 以避免每次寫入的 fsync 代價。耐久性由
+/// CC #13 回歸測試 `test_disable_all_survives_sigkill` 權威驗證。
+pub(crate) fn write_toml_atomic_fsynced<T: Serialize>(
+    cfg: &T,
+    path: &Path,
+) -> Result<(), String> {
+    let toml_str =
+        toml::to_string(cfg).map_err(|e| format!("toml serialize failed: {e}"))?;
+    let tmp = path.with_extension("toml.tmp");
+    if let Some(parent) = path.parent() {
+        if !parent.as_os_str().is_empty() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| format!("mkdir parent failed: {e}"))?;
+        }
+    }
+    {
+        let mut f = std::fs::File::create(&tmp)
+            .map_err(|e| format!("create tmp failed: {e}"))?;
+        f.write_all(toml_str.as_bytes())
+            .map_err(|e| format!("write tmp failed: {e}"))?;
+        f.sync_all()
+            .map_err(|e| format!("fsync tmp failed: {e}"))?;
+    }
+    std::fs::rename(&tmp, path).map_err(|e| format!("rename failed: {e}"))?;
+    if let Some(parent) = path.parent() {
+        if !parent.as_os_str().is_empty() {
+            std::fs::File::open(parent)
+                .and_then(|f| f.sync_all())
+                .map_err(|e| format!("fsync parent dir failed: {e}"))?;
+        }
+    }
     Ok(())
 }
 
@@ -604,5 +650,81 @@ mod tests {
         // 3 writers × 100 = 300
         assert_eq!(store.version(), 300);
         assert_eq!(store.load().threshold, 300);
+    }
+
+    // EDGE-P3-1 U2 regression: fsynced helper must round-trip TOML and survive
+    // OS buffer semantics. Full SIGKILL durability is covered by CC #13
+    // integration (test_disable_all_survives_sigkill); this unit test only
+    // proves the happy-path write/read equivalence.
+    // EDGE-P3-1 U2 回歸：fsync 版 helper 必須完成 TOML 往返並通過 OS buffer 語義。
+    // 完整的 SIGKILL 耐久驗證由 CC #13 整合測試負責；本單元測試只證明正常路徑
+    // write/read 等價。
+    #[test]
+    fn test_write_toml_atomic_fsynced_roundtrip() {
+        use std::io::Read;
+
+        #[derive(Serialize)]
+        struct EdgePredictorSwitch {
+            use_edge_predictor: bool,
+            shadow_mode: bool,
+            note: String,
+        }
+
+        let tmp_dir = std::env::temp_dir().join(format!(
+            "edge_predictor_fsync_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&tmp_dir).unwrap();
+        let path = tmp_dir.join("kill_switch.toml");
+
+        let cfg = EdgePredictorSwitch {
+            use_edge_predictor: false,
+            shadow_mode: false,
+            note: "fsynced kill-switch test".into(),
+        };
+        write_toml_atomic_fsynced(&cfg, &path).unwrap();
+
+        let mut contents = String::new();
+        std::fs::File::open(&path)
+            .unwrap()
+            .read_to_string(&mut contents)
+            .unwrap();
+        assert!(contents.contains("use_edge_predictor = false"));
+        assert!(contents.contains("shadow_mode = false"));
+        assert!(contents.contains("fsynced kill-switch test"));
+
+        // Tmp companion must NOT linger after rename.
+        // rename 後 tmp 伴隨檔不應殘留。
+        let tmp_path = path.with_extension("toml.tmp");
+        assert!(!tmp_path.exists(), "tmp file should be consumed by rename");
+
+        std::fs::remove_dir_all(&tmp_dir).ok();
+    }
+
+    #[test]
+    fn test_write_toml_atomic_fsynced_creates_parent_dir() {
+        #[derive(Serialize)]
+        struct Stub {
+            x: i32,
+        }
+
+        let tmp_dir = std::env::temp_dir().join(format!(
+            "edge_predictor_fsync_parent_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let nested = tmp_dir.join("settings").join("engine");
+        let path = nested.join("live.toml");
+        assert!(!nested.exists(), "precondition: nested dir absent");
+
+        write_toml_atomic_fsynced(&Stub { x: 42 }, &path).unwrap();
+        assert!(path.exists(), "file should be created under auto-mkdir parent");
+
+        std::fs::remove_dir_all(&tmp_dir).ok();
     }
 }

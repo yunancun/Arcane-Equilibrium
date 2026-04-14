@@ -310,6 +310,12 @@ pub enum TradingMsg {
         realized_pnl: f64,
         strategy_name: String,
         context_id: String,
+        /// EDGE-P3-1 R2: context_id of the entry that opened this position.
+        /// Populated on close fills (pulled from PaperPosition.entry_context_id);
+        /// empty string on open fills. Persisted to trading.fills.entry_context_id
+        /// as the ML training JOIN key to learning.decision_features.
+        /// EDGE-P3-1 R2：開此倉 entry 的 context_id；平倉 fill 填入，開倉 fill 為空。
+        entry_context_id: String,
         /// Engine mode: "paper", "demo", or "live" / 引擎模式
         engine_mode: String,
     },

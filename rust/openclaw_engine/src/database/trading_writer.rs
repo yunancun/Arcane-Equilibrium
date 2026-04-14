@@ -112,7 +112,7 @@ async fn flush_all(
 /// signals = 8 columns → 65535/8 = 8191, use 5000 as safe limit.
 const SIGNAL_BATCH_MAX: usize = 5000;
 const INTENT_BATCH_MAX: usize = 5000; // 11 columns → 5957 max
-const FILL_BATCH_MAX: usize = 4000; // 14 columns → 4681 max
+const FILL_BATCH_MAX: usize = 4000; // 15 columns → 4369 max (+entry_context_id V017)
 const POSITION_BATCH_MAX: usize = 5000; // 9 columns → 7281 max
 const VERDICT_BATCH_MAX: usize = 4000; // 8 columns → 8191 max, use 4000 as safe limit
 const ORDER_BATCH_MAX: usize = 5000; // 10 columns → 6553 max
@@ -244,7 +244,7 @@ async fn flush_fills(pool: &DbPool, buf: &mut Vec<TradingMsg>) {
     };
     for chunk in buf.chunks(FILL_BATCH_MAX) {
         let mut qb: QueryBuilder<sqlx::Postgres> = QueryBuilder::new(
-            "INSERT INTO trading.fills (ts, fill_id, order_id, symbol, side, qty, price, fee, fee_rate, realized_pnl, is_paper, strategy_name, context_id, engine_mode) "
+            "INSERT INTO trading.fills (ts, fill_id, order_id, symbol, side, qty, price, fee, fee_rate, realized_pnl, is_paper, strategy_name, context_id, entry_context_id, engine_mode) "
         );
         qb.push_values(chunk.iter(), |mut b, msg| {
             if let TradingMsg::Fill {
@@ -260,6 +260,7 @@ async fn flush_fills(pool: &DbPool, buf: &mut Vec<TradingMsg>) {
                 realized_pnl,
                 strategy_name,
                 context_id,
+                entry_context_id,
                 engine_mode,
             } = msg
             {
@@ -280,6 +281,16 @@ async fn flush_fills(pool: &DbPool, buf: &mut Vec<TradingMsg>) {
                 b.push_bind(engine_mode != "live");
                 b.push_bind(strategy_name.as_str());
                 b.push_bind(context_id.as_str());
+                // EDGE-P3-1 R2: entry_context_id — NULL when empty (open fills,
+                // pre-V017 restored positions, orphan adopts). Close fills carry
+                // the opening entry's context_id for ML training JOIN.
+                // EDGE-P3-1 R2：entry_context_id — 空串寫 NULL（開倉、pre-V017 還原、
+                // orphan adopt）；平倉 fill 攜帶開倉 entry 的 context_id 供 ML JOIN。
+                if entry_context_id.is_empty() {
+                    b.push_bind(None::<String>);
+                } else {
+                    b.push_bind(Some(entry_context_id.as_str().to_string()));
+                }
                 b.push_bind(engine_mode.as_str());
             }
         });
@@ -526,6 +537,7 @@ mod tests {
             realized_pnl: 0.0,
             strategy_name: "ma".into(),
             context_id: "c1".into(),
+            entry_context_id: String::new(),
             engine_mode: "paper".into(),
         };
         assert!(matches!(fill, TradingMsg::Fill { .. }));
@@ -544,7 +556,7 @@ mod tests {
             "intents batch exceeds PG limit"
         );
         assert!(
-            FILL_BATCH_MAX * 14 <= 65535,
+            FILL_BATCH_MAX * 15 <= 65535,
             "fills batch exceeds PG limit"
         );
         assert!(
@@ -598,6 +610,7 @@ mod tests {
                 realized_pnl: 0.0,
                 strategy_name: "ma".into(),
                 context_id: "c1".into(),
+                entry_context_id: String::new(),
                 engine_mode: "paper".into(),
             },
             TradingMsg::PositionSnapshot {

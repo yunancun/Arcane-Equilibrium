@@ -989,6 +989,13 @@ impl TickPipeline {
     /// now we compute close_fee = qty × price × fee_rate, charge it via
     /// paper_state.charge_fee(), AND write it to DB so downstream cost
     /// analytics see the truth.
+    /// EDGE-P3-1 R2: `entry_context_id` is the context_id of the entry that opened
+    /// the position being closed. Pass empty string when unknown (pre-V017 restored
+    /// positions, orphan adopts, tests). Typical call sites capture it via
+    /// `self.paper_state.get_entry_context_id(symbol)` **before** invoking the
+    /// `close_position*` helper that removes the position, then pass it here.
+    /// EDGE-P3-1 R2：entry_context_id 為開此倉 entry 的 context_id。未知時空串。
+    /// 典型呼叫：先 `paper_state.get_entry_context_id(symbol)` 捕獲，再關倉，再傳入。
     fn emit_close_fill(
         &mut self,
         symbol: &str,
@@ -998,6 +1005,7 @@ impl TickPipeline {
         ts_ms: u64,
         realized_pnl: f64,
         close_tag: &str,
+        entry_context_id: &str,
     ) {
         // PNL-FIX-2: compute close fee from per-symbol taker rate, charge it
         // to paper_state, and record it in the DB row. Charge always happens
@@ -1023,6 +1031,7 @@ impl TickPipeline {
                 realized_pnl,
                 strategy_name: close_tag.to_string(),
                 context_id: on_tick_helpers::make_context_id(em, symbol, ts_ms),
+                entry_context_id: entry_context_id.to_string(),
                 engine_mode: em.to_string(),
             });
         }
