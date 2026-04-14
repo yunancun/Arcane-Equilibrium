@@ -1,7 +1,7 @@
 # OpenClaw TODO — 工作計劃清單
 
-最後更新：2026-04-14（ORPHAN-ADOPT-1 Phase 1 完成 · clean_restart.sh 交付 · G-2 paper validation window 啟動，threshold 污染中）
-測試基準線：**Rust engine lib 1136 + core 366 + e2e 33 = 1535 · Python program_code 2852 passed (5 skipped · 0 fail) · ml_training 135 passed (6 skipped)**
+最後更新：2026-04-14（**ENGINE-HEAL 4 Fix 完成** · ORPHAN-ADOPT-1 Phase 1 · QoL-1/3 · G-2 paper validation window 啟動）
+測試基準線：**Rust engine lib 1144 + core 366 + e2e 33 = 1543 · Python program_code 2852 passed (5 skipped · 0 fail) · ml_training 135 passed (6 skipped)**
 
 > compact 後從此文件恢復工作狀態。第一個 `[ ]` 即為下一步起點。
 > 歷史歸檔索引在文件末尾。詳細完成度視角見 README.md。
@@ -419,6 +419,9 @@ WIRE-0/WIRE-1 + DL-1/DL-2 + JS-1 + 5-01~03 已全部 ✅。下面是原 backlog 
 - [ ] **QoL-2** Demo AI cost 無追蹤 — `tab-demo.html` 硬編碼 `'N/A'`，後端無 per-engine AI 調用成本歸因機制（需 H1-H5 AI 治理層接通後才有意義，依賴 G-1）
 - [x] **QoL-3** ~~PyO3 `.so` 部署不統一~~ ✅ 2026-04-14 commits `c510388`+`dc2eec3`(merge) — `helper_scripts/build_pyo3.sh` 統一雙寫（`~/.venv` + `control_api_v1/.venv`）；`restart_all.sh --rebuild` 旗標集成；build → pip install --force-reinstall → size 比對驗證。
 - [x] **QoL-4** ~~Paper PnL 異常大~~ ✅ commit `2a422fa` PNL-FIX-1（歸檔至 `docs/archive/2026-04-12--completed_todo_full_program_audit.md`）
+- [x] **ENGINE-HEAL** ~~引擎靜默死亡無自癒~~ ✅ 2026-04-14（Fix 1/2/3/4 全部完成，pending deployment）— 2026-04-14 事故驅動（引擎死 18min 無重啟無死前日誌 · ws 死前 14+min 已斷但進程仍「存活」）。**Fix 1** `main.rs` L55-108 panic hook（`std::panic::set_hook` + `Backtrace::force_capture()` + flush）；**Fix 3** `run_pipeline_crash_only<F>()` 包 paper/demo/Live，panic → 廣播 `Crashed(kind)` + cancel 全局 → ordered shutdown → exit（**不 isolate**）；**Fix 4** WS tick stale 自救（30s 週期檢 `shared_last_tick_ms`，age > 120_000ms 且 last!=0 → `cancel.cancel()`，120s 閾值降誤報）；**Fix 2** watchdog 4 道保險（`fcntl.flock` 單例 + `engine_maintenance.flag` operator 意圖 + SIGTERM-first graceful kill + [60,120,300,600,3600]s 退避 + consecutive≥5 熔斷）+ `rotate_engine_log()` 保留 10 份 `/tmp/openclaw/engine_logs/`（原 `>` truncate 是事故放大器）。**驗證**：engine lib 1144 + core 366 + e2e 33 = **1543** 0 fail · watchdog 8/8 unit · `bash -n` clean。**部署**：operator `bash helper_scripts/restart_all.sh --rebuild` 一次性替換 pre-fix binary。**留尾**：真實 panic 注入 / 拉網線測 WS stale（canary 實戰，R07 Go/No-Go）· env 可覆蓋 stale threshold · per-tier / metric export 為 Phase 2。Worklog `docs/worklogs/2026-04-14--engine_self_healing.md` · KnownIssue `docs/known_issues/2026-04-14--ws_stale_detector.md`。
+- [ ] **ENGINE-HEAL-DEPLOY** operator 執行 `bash helper_scripts/restart_all.sh --rebuild` 部署 Fix 1/3/4 到運行 binary（當前仍為 pre-fix code）
+- [x] **ZOMBIE-API-SVC** ~~殭屍 `openclaw-trading-api.service` 1074+ restart 循環~~ ✅ 2026-04-14 — `systemctl --user disable --now openclaw-trading-api.service` 執行完畢，service 現為 `inactive (dead) / disabled`。根因：systemd 單元 enabled auto-restart + uvicorn 試綁 :8000（已被 `restart_all.sh` 手啟的 uvicorn workers 28040/28078/28079 持有）+ systemd cwd 錯致 `No module named 'program_code'`。API 服務不受影響（手啟 workers 持續 serving）。`openclaw-gateway.service` 單元健康運行中不受影響。需要時恢復 `systemctl --user enable --now openclaw-trading-api.service`（先解決 cwd + port 衝突）。
 
 ---
 

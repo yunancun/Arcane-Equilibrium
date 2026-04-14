@@ -19,10 +19,12 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import fcntl
 import json
 import logging
 import os
 import signal
+import subprocess
 import sys
 import time
 from dataclasses import dataclass, field
@@ -44,6 +46,27 @@ POLL_INTERVAL_SECONDS = 2.0     # Check frequency / 檢查頻率
 STRIKE_WINDOW_SECONDS = 3600.0  # 3-strike window (1 hour) / 三振窗口（1 小時）
 MAX_STRIKES = 3                 # Consecutive crashes before rollback / 回滾前最大連續崩潰數
 GRACE_PERIOD_SECONDS = 120.0    # Startup grace period — ignore stale snapshots during this window / 啟動寬限期 — 在此窗口內忽略過期快照
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Fix 2 (2026-04-14): auto-restart configuration / 自動重啟配置
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Exponential backoff table (seconds) keyed by consecutive_failures.
+# Extra failures beyond the table clamp to the last value.
+# 指數退避表（秒），依 consecutive_failures 索引。超出表長的失敗次數夾在最後一個值。
+RESTART_BACKOFF_SECONDS: list[float] = [60.0, 120.0, 300.0, 600.0, 3600.0]
+# Consecutive failures before circuit-breaking (stop trying + alert).
+# circuit-break 前最大連續失敗次數（超過則停止嘗試 + 升級告警）。
+MAX_CONSECUTIVE_FAILURES = 5
+# Restart command — invoked via subprocess with timeout.
+# 重啟命令 — 透過 subprocess 呼叫帶 timeout。
+RESTART_COMMAND = ["bash", "helper_scripts/restart_all.sh", "--engine-only"]
+RESTART_TIMEOUT_SECONDS = 120.0
+# File paths (under OPENCLAW_DATA_DIR) / 檔案路徑（於 OPENCLAW_DATA_DIR 下）
+MAINTENANCE_FLAG = "engine_maintenance.flag"
+WATCHDOG_LOCK_FILE = "watchdog.lock"
+WATCHDOG_STATE_FILE = "watchdog_state.json"
+CANARY_EVENTS_FILE = "canary_events.jsonl"
 
 
 @dataclass
@@ -85,7 +108,175 @@ def prune_old_strikes(state: WatchdogState, window: float) -> None:
     state.crash_timestamps = [ts for ts in state.crash_timestamps if ts > cutoff]
 
 
-def on_engine_crash(state: WatchdogState, snapshot_age: float) -> str:
+# ═══════════════════════════════════════════════════════════════════════════════
+# Fix 2 helpers (2026-04-14): auto-restart with circuit breaker / 自動重啟含熔斷
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+def _state_path(data_dir: str) -> Path:
+    return Path(data_dir) / WATCHDOG_STATE_FILE
+
+
+def load_state(data_dir: str) -> dict:
+    """Read persisted restart state. Missing/corrupt file → empty defaults."""
+    try:
+        with open(_state_path(data_dir), "r", encoding="utf-8") as f:
+            data = json.load(f)
+            if not isinstance(data, dict):
+                return {}
+            return data
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return {}
+
+
+def save_state(data_dir: str, state: dict) -> None:
+    """Atomically persist restart state via tmp+rename. Failure is logged, not raised."""
+    path = _state_path(data_dir)
+    tmp = path.with_suffix(".tmp")
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(state, f, indent=2)
+        os.replace(tmp, path)
+    except OSError as e:
+        logger.warning("Failed to save watchdog state: %s / 無法保存看門狗狀態：%s", e, e)
+
+
+def compute_backoff(consecutive_failures: int) -> float:
+    """Index into RESTART_BACKOFF_SECONDS; clamp to last entry for overflow."""
+    if consecutive_failures <= 0:
+        return RESTART_BACKOFF_SECONDS[0]
+    idx = min(consecutive_failures - 1, len(RESTART_BACKOFF_SECONDS) - 1)
+    return RESTART_BACKOFF_SECONDS[idx]
+
+
+def _append_canary_event(data_dir: str, event: dict) -> None:
+    """Best-effort append to canary_events.jsonl for external alerting."""
+    try:
+        path = Path(data_dir) / CANARY_EVENTS_FILE
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(event) + "\n")
+    except OSError as e:
+        logger.warning("Failed to append canary event: %s", e)
+
+
+def should_restart(data_dir: str, now: float) -> tuple[bool, str]:
+    """
+    Decide whether an auto-restart is allowed right now.
+    Returns (allowed, reason). Reason is human-readable for logs + canary events.
+    決定此刻是否允許自動重啟。
+    """
+    # Safeguard #2: maintenance flag → operator intent wins / 維護旗標 → 尊重 operator 意圖
+    flag_path = Path(data_dir) / MAINTENANCE_FLAG
+    if flag_path.exists():
+        return False, f"maintenance flag present at {flag_path}"
+
+    state = load_state(data_dir)
+    if state.get("circuit_broken", False):
+        return False, (
+            f"circuit broken after {state.get('consecutive_failures', 0)} consecutive failures "
+            "— manual intervention required"
+        )
+
+    next_allowed = float(state.get("next_allowed_restart_ts", 0.0))
+    if now < next_allowed:
+        remaining = next_allowed - now
+        return False, f"backoff window active, {remaining:.0f}s remaining"
+
+    return True, "ok"
+
+
+def trigger_restart(data_dir: str) -> bool:
+    """
+    Invoke RESTART_COMMAND with a timeout. Updates state regardless of outcome:
+    success → reset consecutive_failures; failure → increment + maybe circuit-break.
+    Returns True on success, False on any failure.
+    呼叫重啟命令並更新狀態。成功清零連續失敗次數；失敗遞增並可能熔斷。
+    """
+    state = load_state(data_dir)
+    consecutive = int(state.get("consecutive_failures", 0))
+    now = time.time()
+
+    logger.warning(
+        "Triggering auto-restart (attempt %d, timeout=%.0fs) / 觸發自動重啟（嘗試 %d，超時 %.0f秒）",
+        consecutive + 1, RESTART_TIMEOUT_SECONDS, consecutive + 1, RESTART_TIMEOUT_SECONDS,
+    )
+
+    success = False
+    failure_reason = ""
+    try:
+        # cwd must be repo root so restart_all.sh can resolve its own relative paths.
+        # cwd 必須為 repo 根以讓 restart_all.sh 解析相對路徑。
+        repo_root = Path(__file__).resolve().parents[2]
+        result = subprocess.run(
+            RESTART_COMMAND,
+            cwd=str(repo_root),
+            timeout=RESTART_TIMEOUT_SECONDS,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode == 0:
+            success = True
+        else:
+            failure_reason = f"exit={result.returncode} stderr={result.stderr[-500:]}"
+    except subprocess.TimeoutExpired:
+        failure_reason = f"restart command exceeded {RESTART_TIMEOUT_SECONDS}s timeout"
+    except (OSError, subprocess.SubprocessError) as e:
+        failure_reason = f"subprocess error: {e}"
+
+    if success:
+        state["consecutive_failures"] = 0
+        state["last_restart_success_ts"] = now
+        state["circuit_broken"] = False
+        state["next_allowed_restart_ts"] = 0.0
+        state["last_failure_reason"] = ""
+        save_state(data_dir, state)
+        logger.info("Auto-restart succeeded / 自動重啟成功")
+        _append_canary_event(data_dir, {
+            "ts": now, "event": "RESTART_SUCCESS",
+            "consecutive_failures_before": consecutive,
+        })
+        return True
+
+    # Failure path / 失敗路徑
+    consecutive += 1
+    state["consecutive_failures"] = consecutive
+    state["last_restart_failure_ts"] = now
+    state["last_failure_reason"] = failure_reason
+    backoff = compute_backoff(consecutive)
+    state["next_allowed_restart_ts"] = now + backoff
+
+    if consecutive >= MAX_CONSECUTIVE_FAILURES:
+        state["circuit_broken"] = True
+        logger.critical(
+            "CIRCUIT BROKEN — %d consecutive restart failures, manual intervention required "
+            "/ 熔斷觸發 — %d 次連續重啟失敗，需人工介入",
+            consecutive, consecutive,
+        )
+        _append_canary_event(data_dir, {
+            "ts": now, "event": "RESTART_CIRCUIT_BROKEN",
+            "consecutive_failures": consecutive, "reason": failure_reason,
+        })
+    else:
+        logger.error(
+            "Auto-restart failed (%d/%d): %s — next attempt allowed in %.0fs "
+            "/ 自動重啟失敗（%d/%d）：%s — 下次允許 %.0f 秒後",
+            consecutive, MAX_CONSECUTIVE_FAILURES, failure_reason, backoff,
+            consecutive, MAX_CONSECUTIVE_FAILURES, failure_reason, backoff,
+        )
+        _append_canary_event(data_dir, {
+            "ts": now, "event": "RESTART_FAILED",
+            "consecutive_failures": consecutive, "backoff_seconds": backoff,
+            "reason": failure_reason,
+        })
+
+    save_state(data_dir, state)
+    return False
+
+
+def on_engine_crash(state: WatchdogState, snapshot_age: float, data_dir: str = "") -> str:
     """
     Handle engine crash detection.
     處理引擎崩潰檢測。
@@ -104,6 +295,25 @@ def on_engine_crash(state: WatchdogState, snapshot_age: float) -> str:
         "/ 檢測到引擎崩潰 — 快照年齡=%.1f秒，總崩潰數=%d",
         snapshot_age, state.total_crashes, snapshot_age, state.total_crashes,
     )
+
+    # Fix 2 (2026-04-14): attempt auto-restart BEFORE strike logic. Rationale:
+    # a successful restart yields a fresh snapshot on the next poll, which
+    # naturally transitions us back via on_engine_recovery(). Strike counting
+    # remains as a secondary safety net for restart-storm scenarios.
+    # 修復 2：嘗試自動重啟先於 strike 判定。成功重啟後下次 poll 會看到新鮮快照，
+    # 自然走 on_engine_recovery() 復原；strike 計數作為重啟風暴的次級安全網。
+    if data_dir:
+        now = time.time()
+        allowed, reason = should_restart(data_dir, now)
+        if allowed:
+            trigger_restart(data_dir)
+        else:
+            logger.warning(
+                "Auto-restart skipped: %s / 跳過自動重啟：%s", reason, reason,
+            )
+            _append_canary_event(data_dir, {
+                "ts": now, "event": "RESTART_SKIPPED", "reason": reason,
+            })
 
     # Check 3-strike rule / 檢查三振規則
     prune_old_strikes(state, STRIKE_WINDOW_SECONDS)
@@ -213,7 +423,7 @@ def run_watchdog(
                     age, elapsed, grace_period,
                 )
             else:
-                action = on_engine_crash(state, age)
+                action = on_engine_crash(state, age, data_dir=str(data_path))
                 if action == "rollback":
                     logger.critical("Initiating runtime rollback... / 啟動運行時回滾...")
                     break
@@ -287,6 +497,23 @@ def main():
         status = get_watchdog_status(args.data_dir, args.stale_threshold)
         print(json.dumps(status, indent=2))
         sys.exit(0 if status["engine_alive"] else 1)
+
+    # Fix 2 (2026-04-14): single-instance enforcement via fcntl.flock.
+    # Two watchdogs racing to restart would double-kill and corrupt engine state.
+    # 修復 2：透過 fcntl.flock 強制單例。兩個看門狗競相重啟會雙殺並污染引擎狀態。
+    lock_path = Path(args.data_dir) / WATCHDOG_LOCK_FILE
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    lock_fd = open(lock_path, "w")
+    try:
+        fcntl.flock(lock_fd.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        logger.critical(
+            "Another watchdog already holds %s — exiting / 另一看門狗持有 %s — 退出",
+            lock_path, lock_path,
+        )
+        sys.exit(3)
+    lock_fd.write(f"{os.getpid()}\n")
+    lock_fd.flush()
 
     # Handle SIGTERM/SIGINT gracefully / 優雅處理 SIGTERM/SIGINT
     def _shutdown(sig, frame):

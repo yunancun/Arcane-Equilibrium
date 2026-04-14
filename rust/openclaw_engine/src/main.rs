@@ -34,6 +34,64 @@ use startup::*;
 // SYMBOLS moved to event_consumer.rs (Phase 1 Day 0-A extraction)
 // STATUS_INTERVAL_SECS moved to event_consumer.rs
 
+// ----------------------------------------------------------------------
+// Crash-only pipeline wrapper / crash-only 管線包裝器
+// ----------------------------------------------------------------------
+// EN: Wraps an async pipeline Future so that an unwind panic is caught,
+//   logged with panic payload, broadcast as EngineEvent::Crashed, and then
+//   cancels the engine CancellationToken. We explicitly DO NOT try to
+//   "isolate and keep running" the survivors because a panicked pipeline
+//   may have left shared state (positions, reconciler baselines, account
+//   snapshots) in an inconsistent state. Crash-only software: die cleanly,
+//   let the external watchdog restart from a known-good boot.
+//   Used by Paper + Demo pipelines running on the main tokio runtime.
+//   Live pipeline has its own sync catch_unwind layer on a dedicated OS
+//   thread (see L877+) and calls cancel.cancel() after the broadcast.
+// 中: 包裝 async 管線 Future，捕獲 unwind panic 後：記 log + 廣播
+//   EngineEvent::Crashed + 取消引擎 CancellationToken。我們**不**嘗試「隔離
+//   倖存者繼續跑」，因為 panic 管線可能使共享狀態（倉位、reconciler 基線、
+//   帳戶快照）進入不一致狀態。Crash-only software：乾淨死亡，讓外部 watchdog
+//   從已知良好啟動點重啟。Paper + Demo 管線（共用主 tokio runtime）使用此函
+//   數；Live 在獨立 OS 線程上有自己的 sync catch_unwind 層（見 L877+），也會
+//   在廣播後呼叫 cancel.cancel()。
+async fn run_pipeline_crash_only<F>(
+    kind: PipelineKind,
+    fut: F,
+    health: Arc<std::sync::atomic::AtomicU8>,
+    crash_tx: tokio::sync::broadcast::Sender<EngineEvent>,
+    cancel: CancellationToken,
+) where
+    F: std::future::Future<Output = ()>,
+{
+    use futures_util::FutureExt;
+    let result = std::panic::AssertUnwindSafe(fut).catch_unwind().await;
+    if let Err(panic_info) = result {
+        let msg = panic_info
+            .downcast_ref::<&str>()
+            .copied()
+            .or_else(|| panic_info.downcast_ref::<String>().map(|s| s.as_str()))
+            .unwrap_or("unknown panic payload");
+        tracing::error!(
+            target: "openclaw_engine::panic",
+            kind = ?kind,
+            panic = msg,
+            "pipeline PANICKED (crash-only) — broadcasting Crashed + cancelling engine / \
+             管線 panic（crash-only）— 廣播 Crashed + 取消引擎"
+        );
+        health.store(
+            PipelineHealth::Down as u8,
+            std::sync::atomic::Ordering::Relaxed,
+        );
+        let _ = crash_tx.send(EngineEvent::Crashed(kind));
+        // Crash-only trigger: cancel the entire engine so watchdog restarts
+        // from a clean state. A Down pipeline while others keep running is
+        // exactly the "zombie 18-min" failure mode we are fixing.
+        // Crash-only 觸發：取消整個引擎，讓 watchdog 從乾淨狀態重啟。一條管線
+        // Down 但其他繼續跑正是我們要修的「殭屍 18 分鐘」故障模式。
+        cancel.cancel();
+    }
+}
+
 fn main() {
     // ------------------------------------------------------------------
     // 0. Install rustls crypto provider / 安裝 rustls 加密提供者
@@ -53,6 +111,51 @@ fn main() {
         .with_target(true)
         .with_thread_ids(true)
         .init();
+
+    // ------------------------------------------------------------------
+    // 1a. Install panic hook / 安裝 panic 捕獲 hook
+    // ------------------------------------------------------------------
+    // EN: Captures any unwind panic and writes it to tracing with backtrace
+    //   before the process dies. Without this hook, tokio task panics die
+    //   silently — the 2026-04-14 incident (engine dead 18 min, no log trace)
+    //   was root-caused to this gap. Covers main thread + tokio task panics
+    //   that unwind to the runtime. Does NOT cover abort(), SIGKILL, or OOM.
+    // 中: 捕獲所有 unwind panic 並在進程死亡前寫入 tracing + backtrace。沒有此
+    //   hook，tokio task panic 會靜默死亡 — 2026-04-14 引擎死亡 18 分鐘無日誌
+    //   痕跡的根因就是這個缺口。覆蓋主執行緒 + unwind 到 runtime 的 tokio task
+    //   panic。不覆蓋 abort()、SIGKILL、OOM。
+    std::panic::set_hook(Box::new(|info| {
+        let backtrace = std::backtrace::Backtrace::force_capture();
+        let location = info
+            .location()
+            .map(|l| format!("{}:{}:{}", l.file(), l.line(), l.column()))
+            .unwrap_or_else(|| "<unknown>".to_string());
+        let payload = info
+            .payload()
+            .downcast_ref::<&str>()
+            .map(|s| s.to_string())
+            .or_else(|| info.payload().downcast_ref::<String>().cloned())
+            .unwrap_or_else(|| "<non-string panic payload>".to_string());
+        tracing::error!(
+            target: "openclaw_engine::panic",
+            thread = ?std::thread::current().id(),
+            thread_name = std::thread::current().name().unwrap_or("<unnamed>"),
+            location = %location,
+            payload = %payload,
+            backtrace = %backtrace,
+            "PANIC captured / panic 已捕獲",
+        );
+        // Force flush so the tracing write lands on disk before the process
+        // aborts or is restarted. tracing_subscriber uses stdout (redirected
+        // to engine.log by restart_all.sh), which is fully buffered when the
+        // target is a file.
+        // 強制 flush 確保 tracing 寫入在進程 abort 或被重啟前落盤。
+        // tracing_subscriber 使用 stdout（由 restart_all.sh 重定向至 engine.log），
+        // 目標為檔案時為全緩衝。
+        use std::io::Write;
+        let _ = std::io::stdout().flush();
+        let _ = std::io::stderr().flush();
+    }));
 
     print_banner();
 
@@ -769,8 +872,21 @@ async fn async_main(
         cross_engine_rx: Some(cross_engine_tx.subscribe()),
         pipeline_health: Some(Arc::clone(&paper_health)),
     };
-    let paper_handle = tokio::spawn(run_event_consumer(paper_deps));
-    info!("paper pipeline spawned / Paper 管線已啟動");
+    // Fix 3 (2026-04-14): wrap in crash-only layer so a paper task panic
+    // is logged + broadcast + triggers engine-wide cancel (watchdog restart).
+    // Previously naked tokio::spawn → task panic died silently, root cause
+    // of 2026-04-14 engine zombie incident.
+    // 修復 3：包進 crash-only 層，paper task panic 時記 log + 廣播 + 觸發
+    // 全引擎 cancel（交 watchdog 重啟）。此前裸 tokio::spawn 導致 task panic
+    // 靜默死亡，是 2026-04-14 引擎殭屍事故的根因。
+    let paper_handle = tokio::spawn(run_pipeline_crash_only(
+        PipelineKind::Paper,
+        run_event_consumer(paper_deps),
+        Arc::clone(&paper_health),
+        cross_engine_tx.clone(),
+        cancel.clone(),
+    ));
+    info!("paper pipeline spawned (crash-only) / Paper 管線已啟動（crash-only）");
 
     // ------------------------------------------------------------------
     // Spawn Demo pipeline (conditional — if demo API key exists)
@@ -819,8 +935,16 @@ async fn async_main(
             cross_engine_rx: Some(cross_engine_tx.subscribe()),
             pipeline_health: Some(Arc::clone(&demo_b.health)),
         };
-        let h = tokio::spawn(run_event_consumer(demo_deps));
-        info!("demo pipeline spawned / Demo 管線已啟動");
+        // Fix 3 (2026-04-14): same crash-only wrapper as paper.
+        // 修復 3：同 paper 的 crash-only 包裝。
+        let h = tokio::spawn(run_pipeline_crash_only(
+            PipelineKind::Demo,
+            run_event_consumer(demo_deps),
+            Arc::clone(&demo_b.health),
+            cross_engine_tx.clone(),
+            cancel.clone(),
+        ));
+        info!("demo pipeline spawned (crash-only) / Demo 管線已啟動（crash-only）");
         Some(h)
     } else {
         None
@@ -915,9 +1039,11 @@ async fn async_main(
                         .or_else(|| panic_info.downcast_ref::<String>().map(|s| s.as_str()))
                         .unwrap_or("unknown panic");
                     tracing::error!(
+                        target: "openclaw_engine::panic",
                         kind = "live",
                         panic = msg,
-                        "M-4: live pipeline PANICKED — broadcasting Crashed / Live 管線 panic — 廣播 Crashed"
+                        "live pipeline PANICKED (crash-only) — broadcasting Crashed + cancelling engine / \
+                         Live 管線 panic（crash-only）— 廣播 Crashed + 取消引擎"
                     );
                     live_health_ref.store(
                         PipelineHealth::Down as u8,
@@ -925,6 +1051,17 @@ async fn async_main(
                     );
                     let _ = live_crash_tx
                         .send(EngineEvent::Crashed(PipelineKind::Live));
+                    // Fix 3 (2026-04-14): Live now also triggers engine-wide
+                    // cancel to force crash-only semantics parity with
+                    // paper/demo. A Live panic previously left paper/demo
+                    // running — operator intent is all-or-nothing: if Live
+                    // cannot execute trades, we must not keep paper/demo
+                    // pretending to learn against stale state.
+                    // 修復 3：Live 也觸發全引擎 cancel 以與 paper/demo 的 crash-only
+                    // 語義對齊。Live panic 以前會讓 paper/demo 繼續跑 — operator
+                    // 意圖是全有或全無：Live 無法下單時 paper/demo 不應繼續在
+                    // 陳舊狀態上「假裝學習」。
+                    live_cancel.cancel();
                 }
             })
             .expect("failed to spawn live thread / 啟動 live 線程失敗");
@@ -944,6 +1081,82 @@ async fn async_main(
         ),
         "engine started / 引擎已啟動"
     );
+
+    // ------------------------------------------------------------------
+    // Fix 4 (2026-04-14): WS tick-stale watchdog
+    // 修復 4 (2026-04-14)：WS tick-stale watchdog
+    // ------------------------------------------------------------------
+    // EN: Independent background task that polls shared_last_tick_ms every
+    //   30s. If we have ever seen a tick (last_tick_ms != 0) AND no new tick
+    //   has arrived for >= 120s, we trigger an engine-wide cancel. A stale
+    //   tick stream strongly indicates either a WS disconnect or an
+    //   event_consumer zombie (the exact 2026-04-14 14-min silent zombie
+    //   pattern). Clean cancel → watchdog restart from a fresh boot with
+    //   re-subscribed WS is the safest recovery. Threshold 120s chosen over
+    //   60s to reduce false positives during quiet market hours; documented
+    //   in docs/known_issues/2026-04-14--ws_stale_detector.md. The task
+    //   itself runs on the main tokio runtime; Fix 1 panic hook covers it if
+    //   it ever panics.
+    // 中: 獨立背景任務每 30s 檢查 shared_last_tick_ms。若曾收過 tick（!=0）且
+    //   ≥120s 無新 tick → 觸發全引擎 cancel。Tick 流靜默強烈暗示 WS 斷連或
+    //   event_consumer 殭屍（即 2026-04-14 14 分鐘靜默殭屍事故模式）。乾淨
+    //   cancel → watchdog 從頭重啟重新訂閱 WS 是最安全的恢復。閾值選 120s
+    //   而非 60s 以減少市場清淡時段誤報，詳見
+    //   docs/known_issues/2026-04-14--ws_stale_detector.md。任務跑在主 tokio
+    //   runtime；Fix 1 panic hook 覆蓋其自身 panic。
+    {
+        const TICK_STALE_THRESHOLD_MS: u64 = 120_000;
+        const TICK_WATCHDOG_INTERVAL_SECS: u64 = 30;
+        let tick_ref = Arc::clone(&shared_last_tick_ms);
+        let cancel_ref = cancel.clone();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(
+                TICK_WATCHDOG_INTERVAL_SECS,
+            ));
+            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            // Consume the immediate-fire first tick so we don't trip during warmup.
+            // 消耗 interval 立即觸發的第一次 tick，避免暖機期誤觸。
+            interval.tick().await;
+            loop {
+                tokio::select! {
+                    _ = cancel_ref.cancelled() => {
+                        tracing::info!("tick-stale watchdog stopped (cancel) / tick-stale watchdog 已停止（cancel）");
+                        break;
+                    }
+                    _ = interval.tick() => {
+                        let last = tick_ref.load(std::sync::atomic::Ordering::Relaxed);
+                        if last == 0 {
+                            continue;
+                        }
+                        let now_ms = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .map(|d| d.as_millis() as u64)
+                            .unwrap_or(0);
+                        if now_ms > last && now_ms - last > TICK_STALE_THRESHOLD_MS {
+                            let stale_ms = now_ms - last;
+                            tracing::error!(
+                                target: "openclaw_engine::panic",
+                                stale_ms,
+                                threshold_ms = TICK_STALE_THRESHOLD_MS,
+                                "WS tick stale — triggering engine cancel (Fix 4) / \
+                                 WS tick 過期 — 觸發引擎 cancel (修復 4)"
+                            );
+                            use std::io::Write;
+                            let _ = std::io::stdout().flush();
+                            let _ = std::io::stderr().flush();
+                            cancel_ref.cancel();
+                            break;
+                        }
+                    }
+                }
+            }
+        });
+        info!(
+            stale_threshold_ms = TICK_STALE_THRESHOLD_MS,
+            check_interval_secs = TICK_WATCHDOG_INTERVAL_SECS,
+            "tick-stale watchdog spawned / tick-stale watchdog 已啟動"
+        );
+    }
 
     // ------------------------------------------------------------------
     // Signal handling / 信號處理

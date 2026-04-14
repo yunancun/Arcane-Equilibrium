@@ -1,7 +1,11 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-04-14（WP-F/UX-07~10 + QoL-1/3）
+> 最後更新：2026-04-14（ENGINE-HEAL Fix 1/2/3/4）
+
+### ENGINE-HEAL — 引擎自癒 4 Fix（2026-04-14）
+
+**背景**：2026-04-14 事故 — Rust 引擎靜默死亡 18 分鐘無自動重啟、無死前日誌、ws tick 死前 14+ 分鐘已斷但進程仍「存活」。**交付 4 道 fix**：**Fix 1 panic hook**（`main.rs` L55-108，`std::panic::set_hook` 捕 thread id/location/payload/backtrace + flush → tracing::error，覆蓋所有 tokio worker & std thread，結構化輸出）；**Fix 3 crash-only**（`run_pipeline_crash_only<F>()` 包 paper/demo spawn + Live thread catch_unwind 後補 `live_cancel.cancel()`，任一 panic → 廣播 `Crashed(kind)` + cancel 全局 → ordered shutdown → exit，**不嘗試 isolate 繼續**）；**Fix 4 WS tick stale 自救**（`main.rs` L1108-1155，30s 週期檢查 `shared_last_tick_ms`，age > 120_000ms 且 last!=0 → `cancel.cancel()`，業務層存活斷言防殭屍進程）；**Fix 2 watchdog 自動重啟 + 4 道保險**（`engine_watchdog.py` + `stop_all.sh` + `restart_all.sh`）：(1) `fcntl.flock(/tmp/openclaw/watchdog.lock, LOCK_EX|LOCK_NB)` 多實例防重入 (2) `/tmp/openclaw/engine_maintenance.flag` operator 意圖守則（stop_all.sh 建，restart_all.sh 清）(3) SIGTERM-first + 5s graceful + SIGKILL fallback 避免寫 paper_state.json 中途被殺留損毀 tmp (4) 指數退避 [60,120,300,600,3600]s + `MAX_CONSECUTIVE_FAILURES=5` 熔斷寫 `canary_events.jsonl`。**Bonus**：`rotate_engine_log()` mv 舊 engine.log 到 `/tmp/openclaw/engine_logs/engine-<epoch>.log` 保留 10 份 — Phase 0 發現 `restart_all.sh` 之前用 `>` truncate 是事故放大器，**沒它任何事故都會沒死因**。**決策**：D1 全部 crash-only 含 Live（isolate 會讓三引擎共享的 `RiskConfigStore` 污染帶病繼續交易）· D2 WS stale 120s（60s 誤報太多，worst case ~3min zombie 可接受）· D3 Phase 0 medium（30min 讀 journalctl + grep exit 路徑）。**驗證**：Rust lib 1144 + core 366 + e2e 33 = **1543** pass · 0 fail（與 pre-fix baseline 一致）· watchdog 8/8 unit checks · `bash -n` clean。**留尾**：運行中引擎仍 pre-fix binary（operator 需 `restart_all.sh --rebuild` 部署） · Task #8 殭屍 `openclaw-trading-api.service` 1074+ 次 restart 循環 · env 可覆蓋 stale threshold / per-tier threshold / metric export 為 Phase 2。Worklog：`docs/worklogs/2026-04-14--engine_self_healing.md` + KnownIssue：`docs/known_issues/2026-04-14--ws_stale_detector.md`。
 
 ### WP-F/UX-07~10 術語統一 + Live 雙態註解（2026-04-14 · commit 19a84da）
 
