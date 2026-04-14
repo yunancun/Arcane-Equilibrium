@@ -186,6 +186,7 @@ fn test_handle_update_risk_config_clamps_values() {
         PipelineCommand::UpdateRiskConfig {
             hard_stop_pct: Some(99.0),    // → 0.5
             trailing_stop_pct: None,
+            trailing_activation_pct: None,
             time_stop_hours: None,
             atr_multiplier: Some(Some(0.0)), // → 0.5
             take_profit_pct: None,
@@ -215,6 +216,92 @@ fn test_handle_update_risk_config_clamps_values() {
 }
 
 #[test]
+fn test_handle_update_risk_config_sets_trailing_activation_pct() {
+    // IPC round-trip: UpdateRiskConfig{trailing_activation_pct: Some(Some(3.0))}
+    // must land in paper_state.stop_config.trailing_activation_pct as Some(3.0).
+    // IPC 往返：trailing_activation_pct 應正確傳入 paper_state.stop_config。
+    use crate::tick_pipeline::PipelineCommand;
+    let mut pipeline = make_test_pipeline();
+    let mut writer = make_test_writer();
+    let mut pending = std::collections::HashMap::new();
+
+    assert!(
+        pipeline.paper_state.stop_config().trailing_activation_pct.is_none(),
+        "default StopConfig has no activation threshold (falls back to trail_pct)"
+    );
+
+    // NOTE: outer clamp in handlers.rs is 0.0..=0.5 (fraction-based, same family
+    // as hard/trailing stop — pre-existing latent bug tracked separately).
+    // Values below 0.5 round-trip unchanged, which is what we assert here.
+    // 注：handlers 外層 clamp 沿用 hard/trailing stop 的 0.0..=0.5 範圍（fraction 語意
+    // 的既有缺陷，已另案追蹤）；此處用 < 0.5 的值驗證往返不被截斷。
+    super::handlers::handle_paper_command(
+        PipelineCommand::UpdateRiskConfig {
+            hard_stop_pct: None,
+            trailing_stop_pct: Some(Some(0.2)),
+            trailing_activation_pct: Some(Some(0.3)),
+            time_stop_hours: None,
+            atr_multiplier: None,
+            take_profit_pct: None,
+            max_leverage: None,
+            max_drawdown_pct: None,
+            max_same_direction_positions: None,
+            p1_risk_pct: None,
+            h0_shadow_mode: None,
+            dynamic_stop_base_ratio: None,
+            dynamic_stop_cap_ratio: None,
+            trailing_min_rr_ratio: None,
+            cost_gate_min_confidence: None,
+            cost_gate_k_base: None,
+            cost_gate_k_medium: None,
+            cost_gate_k_small: None,
+            adx_trending_threshold: None,
+            boot_cooldown_ms: None,
+            signals_heartbeat_ms: None,
+        },
+        &mut pipeline,
+        &mut writer,
+        &mut pending,
+    );
+
+    let sc = pipeline.paper_state.stop_config();
+    assert_eq!(sc.trailing_stop_pct, Some(0.2));
+    assert_eq!(sc.trailing_activation_pct, Some(0.3));
+
+    // Explicit None-clear round-trip: Some(None) must wipe the field.
+    // 顯式清除：Some(None) 應將欄位重置為 None。
+    super::handlers::handle_paper_command(
+        PipelineCommand::UpdateRiskConfig {
+            hard_stop_pct: None,
+            trailing_stop_pct: None,
+            trailing_activation_pct: Some(None),
+            time_stop_hours: None,
+            atr_multiplier: None,
+            take_profit_pct: None,
+            max_leverage: None,
+            max_drawdown_pct: None,
+            max_same_direction_positions: None,
+            p1_risk_pct: None,
+            h0_shadow_mode: None,
+            dynamic_stop_base_ratio: None,
+            dynamic_stop_cap_ratio: None,
+            trailing_min_rr_ratio: None,
+            cost_gate_min_confidence: None,
+            cost_gate_k_base: None,
+            cost_gate_k_medium: None,
+            cost_gate_k_small: None,
+            adx_trending_threshold: None,
+            boot_cooldown_ms: None,
+            signals_heartbeat_ms: None,
+        },
+        &mut pipeline,
+        &mut writer,
+        &mut pending,
+    );
+    assert!(pipeline.paper_state.stop_config().trailing_activation_pct.is_none());
+}
+
+#[test]
 fn test_pnl7_handle_dynamic_stop_knobs_apply_and_reject() {
     use crate::tick_pipeline::PipelineCommand;
     let mut pipeline = make_test_pipeline();
@@ -226,6 +313,7 @@ fn test_pnl7_handle_dynamic_stop_knobs_apply_and_reject() {
         PipelineCommand::UpdateRiskConfig {
             hard_stop_pct: None,
             trailing_stop_pct: None,
+            trailing_activation_pct: None,
             time_stop_hours: None,
             atr_multiplier: None,
             take_profit_pct: None,
@@ -266,6 +354,7 @@ fn test_session12_handle_cost_gate_and_cooldown_via_ipc() {
         PipelineCommand::UpdateRiskConfig {
             hard_stop_pct: None,
             trailing_stop_pct: None,
+            trailing_activation_pct: None,
             time_stop_hours: None,
             atr_multiplier: None,
             take_profit_pct: None,

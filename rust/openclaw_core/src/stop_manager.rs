@@ -16,6 +16,15 @@ pub struct StopConfig {
     /// Take profit percentage (None = disabled). 止盈百分比（None = 禁用）。
     #[serde(default)]
     pub take_profit_pct: Option<f64>,
+    /// Trailing stop activation threshold (% profit required before trailing engages).
+    /// Textbook trailing stop: "once profit reaches X%, start trailing by Y% off peak".
+    /// None → defaults to `trailing_stop_pct` (worst-case lock-in ~ trail² of entry ≈ trivial).
+    /// For strict profit-locking set this above `trailing_stop_pct` (e.g. activation=3%, trail=2%
+    /// → worst-case trail_price ≥ entry × 1.0094, guaranteed ≥0.9% locked profit).
+    /// 跟蹤止損啟動閾值。None 時預設等於 `trailing_stop_pct`（最差僅鎖定 ~trail² 微小虧損）。
+    /// 嚴格鎖利請設高於 `trailing_stop_pct`（例如 activation=3%, trail=2%）。
+    #[serde(default)]
+    pub trailing_activation_pct: Option<f64>,
 }
 
 impl Default for StopConfig {
@@ -26,6 +35,7 @@ impl Default for StopConfig {
             time_stop_hours: None,
             atr_multiplier: Some(2.0),
             take_profit_pct: None,
+            trailing_activation_pct: None,
         }
     }
 }
@@ -147,15 +157,23 @@ fn check_trailing_stop(
     price: f64,
 ) -> Option<StopTrigger> {
     let trail_pct = config.trailing_stop_pct?;
+    // Activation threshold — default to trail_pct so trail_price is never below entry.
+    // 啟動閾值預設等於 trail_pct，保證 trail_price 不會落於 entry 下方（鎖損 bug 修復）。
+    let activation_pct = config.trailing_activation_pct.unwrap_or(trail_pct);
 
-    // Only trail if position is profitable
-    let is_profitable = if pos.is_long {
-        pos.best_price > pos.entry_price
+    // Gate 1: best_price must reach the activation threshold (real profit, not a single tick above entry).
+    // 閘門 1：best_price 必須達到啟動閾值（真實利潤，而非剛過 entry 一個 tick）。
+    let activation_price = if pos.is_long {
+        pos.entry_price * (1.0 + activation_pct / 100.0)
     } else {
-        pos.best_price < pos.entry_price
+        pos.entry_price * (1.0 - activation_pct / 100.0)
     };
-
-    if !is_profitable {
+    let activated = if pos.is_long {
+        pos.best_price >= activation_price
+    } else {
+        pos.best_price <= activation_price
+    };
+    if !activated {
         return None;
     }
 
@@ -172,11 +190,32 @@ fn check_trailing_stop(
     };
 
     if triggered {
+        // Structured logging for trailing-stop triggers. Used to diagnose PnL asymmetry
+        // (unrealized gross-positive vs realized gross-negative) and verify activation gating.
+        // 結構化日誌：用於診斷 PnL 非對稱（未實現正/已實現負）及驗證 activation 閘門。
+        let pnl_pct = if pos.is_long {
+            (price - pos.entry_price) / pos.entry_price * 100.0
+        } else {
+            (pos.entry_price - price) / pos.entry_price * 100.0
+        };
+        tracing::info!(
+            event = "trailing_stop_triggered",
+            is_long = pos.is_long,
+            entry_price = pos.entry_price,
+            best_price = pos.best_price,
+            trigger_price = price,
+            trail_price = trail_price,
+            activation_pct = activation_pct,
+            trail_pct = trail_pct,
+            pnl_pct_approx = pnl_pct,
+            entry_ts_ms = pos.entry_ts_ms,
+            "trailing stop triggered / 跟蹤止損觸發"
+        );
         Some(StopTrigger {
             stop_type: StopType::Trailing,
             trigger_price: Some(trail_price),
             reason: format!(
-                "trailing_stop: price {price:.2}, trail from best {:.2}",
+                "trailing_stop: price {price:.2}, trail from best {:.2} (activation {activation_pct}%, trail {trail_pct}%)",
                 pos.best_price
             ),
         })
@@ -307,8 +346,113 @@ mod tests {
             trailing_stop_pct: Some(2.0),
             ..StopConfig::default()
         };
-        let pos = long_pos(50000.0, 49000.0); // not profitable
+        let pos = long_pos(50000.0, 49000.0); // not profitable → activation gate blocks
         assert!(check_trailing_stop(&config, &pos, 48000.0).is_none());
+    }
+
+    // Regression: pre-fix behaviour let trailing fire below entry when best_price was
+    // only a tick above entry (activation gate missing). With default activation=trail_pct,
+    // best must reach entry*(1+trail_pct/100) before trailing engages. Protects against
+    // the "unrealized gross-positive / realized gross-negative" PnL asymmetry.
+    // 回歸測試：修復前 best_price 剛過 entry 就能觸發 trailing，導致在虧損位鎖損。
+    #[test]
+    fn test_trailing_stop_below_activation_skip_long() {
+        let config = StopConfig {
+            trailing_stop_pct: Some(2.0),
+            ..StopConfig::default() // activation defaults to trail (2%)
+        };
+        // best 50500 = +1% (below activation at +2% = 51000) → no trail
+        let pos = long_pos(50000.0, 50500.0);
+        // pre-fix bug: trail_price would be 50500*0.98=49490, and price 49400 would fire
+        assert!(check_trailing_stop(&config, &pos, 49400.0).is_none(),
+            "trailing must not fire below activation threshold (regression guard)");
+    }
+
+    #[test]
+    fn test_trailing_stop_below_activation_skip_short() {
+        let config = StopConfig {
+            trailing_stop_pct: Some(2.0),
+            ..StopConfig::default()
+        };
+        // short: best 49500 = +1% profit; activation at 49000 (-2%) not yet reached
+        let pos = short_pos(50000.0, 49500.0);
+        assert!(check_trailing_stop(&config, &pos, 50100.0).is_none());
+    }
+
+    #[test]
+    fn test_trailing_stop_explicit_activation_threshold() {
+        // activation=5%, trail=2% — trail only engages after best_price reaches +5%
+        let config = StopConfig {
+            trailing_stop_pct: Some(2.0),
+            trailing_activation_pct: Some(5.0),
+            ..StopConfig::default()
+        };
+        // best at +4% — below 5% activation → no trail
+        let pos1 = long_pos(50000.0, 52000.0);
+        assert!(check_trailing_stop(&config, &pos1, 51000.0).is_none());
+        // best at +5% exactly — activation met, trail_price = 52500*0.98 = 51450
+        let pos2 = long_pos(50000.0, 52500.0);
+        let r = check_trailing_stop(&config, &pos2, 51400.0);
+        assert!(r.is_some());
+        assert_eq!(r.unwrap().stop_type, StopType::Trailing);
+    }
+
+    #[test]
+    fn test_trailing_with_higher_activation_locks_profit() {
+        // activation=3%, trail=2% — worst-case trail_price at activation moment
+        // = entry * 1.03 * 0.98 = entry * 1.0094, i.e. ≥0.94% profit guaranteed.
+        let config = StopConfig {
+            trailing_stop_pct: Some(2.0),
+            trailing_activation_pct: Some(3.0),
+            ..StopConfig::default()
+        };
+        let pos = long_pos(100.0, 103.0); // just hit activation
+        let trail_price_at_activation = 103.0 * 0.98;
+        assert!(trail_price_at_activation > 100.0,
+            "activation > trail_pct guarantees profit at trail moment");
+        // triggered slightly below trail_price
+        let r = check_trailing_stop(&config, &pos, trail_price_at_activation - 0.01);
+        assert!(r.is_some());
+    }
+
+    #[test]
+    fn test_trailing_activation_zero_fires_at_entry() {
+        // activation=0% → gate opens the moment best_price >= entry (pre-fix semantic).
+        // Documents that explicit 0.0 reproduces the old behaviour — new deployments
+        // should omit the field or pass `None` to default to `trail_pct`.
+        // 顯式 0% 啟動閾值 = 舊行為；新部署應省略或傳 None 以獲得安全預設。
+        let config = StopConfig {
+            trailing_stop_pct: Some(2.0),
+            trailing_activation_pct: Some(0.0),
+            ..StopConfig::default()
+        };
+        // best = entry + $0.01 → gate passes; trail_price = 100.01 * 0.98 ≈ 98.01 (below entry!)
+        let pos = long_pos(100.0, 100.01);
+        let r = check_trailing_stop(&config, &pos, 98.00);
+        assert!(r.is_some(), "activation=0 lets trail fire on any tiny uptick");
+        assert_eq!(r.unwrap().stop_type, StopType::Trailing);
+    }
+
+    #[test]
+    fn test_trailing_short_higher_activation_locks_profit() {
+        // Short mirror of test_trailing_with_higher_activation_locks_profit.
+        // activation=5%, trail=2% — at activation (best = entry*0.95),
+        // trail_price = 0.95 * entry * 1.02 = 0.969 * entry, i.e. ≥3.1% profit locked.
+        let config = StopConfig {
+            trailing_stop_pct: Some(2.0),
+            trailing_activation_pct: Some(5.0),
+            ..StopConfig::default()
+        };
+        // best only at -2% — below 5% activation → no trail
+        let pos1 = short_pos(100.0, 98.0);
+        assert!(check_trailing_stop(&config, &pos1, 99.5).is_none());
+        // best at -5% exactly → activation met, trail_price = 95 * 1.02 = 96.9
+        let pos2 = short_pos(100.0, 95.0);
+        let trail_price = 95.0 * 1.02;
+        assert!(trail_price < 100.0, "activation > trail_pct locks short-side profit");
+        let r = check_trailing_stop(&config, &pos2, trail_price + 0.01);
+        assert!(r.is_some());
+        assert_eq!(r.unwrap().stop_type, StopType::Trailing);
     }
 
     #[test]

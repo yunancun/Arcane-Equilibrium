@@ -181,11 +181,21 @@ def compute_trade_metrics(
             tracker["entry_qty"] += qty
             tracker["fees"] += fee
 
-    # If no round-trips computed, fall back to PnL dict
+    # If no round-trips computed, fall back to PnL dict.
+    # Attribute still-open entry fees to unrealized, not realized — mirrors the
+    # fix in paper_trading_routes.py::net_realized_pnl so all fallback surfaces
+    # report the same net-realized figure.
+    # 若未重建出往返交易，退回 PnL 字典；仍開倉的 entry fee 歸未實現，避免虛減已實現。
     if not round_trip_pnls and pnl:
         realized = pnl.get("realized_pnl", 0.0)
         if realized != 0:
-            round_trip_pnls.append(realized - total_fees)
+            pos_iter = positions.values() if isinstance(positions, dict) else (positions or [])
+            open_entry_fees = sum(
+                float((p.get("entry_fee", 0.0) if isinstance(p, dict) else 0.0) or 0.0)
+                for p in pos_iter
+            )
+            closed_fees = max(0.0, total_fees - open_entry_fees)
+            round_trip_pnls.append(realized - closed_fees)
 
     wins = [p for p in round_trip_pnls if p > 0]
     losses = [p for p in round_trip_pnls if p < 0]

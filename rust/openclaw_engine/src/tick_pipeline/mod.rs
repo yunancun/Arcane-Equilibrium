@@ -247,6 +247,7 @@ pub enum PipelineCommand {
         // StopConfig fields / 止損配置
         hard_stop_pct: Option<f64>,
         trailing_stop_pct: Option<Option<f64>>, // Some(None)=disable, Some(Some(x))=set
+        trailing_activation_pct: Option<Option<f64>>, // Some(None)=default-to-trail, Some(Some(x))=explicit
         time_stop_hours: Option<Option<f64>>,
         atr_multiplier: Option<Option<f64>>,
         take_profit_pct: Option<Option<f64>>,

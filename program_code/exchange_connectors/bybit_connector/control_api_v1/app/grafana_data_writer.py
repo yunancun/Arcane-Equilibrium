@@ -201,7 +201,16 @@ class GrafanaDataWriter:
             trade_count = int(ps.get("trade_count", 0))
             positions = ps.get("positions", [])
             open_positions = len(positions) if isinstance(positions, list) else 0
-            net_pnl = realized_pnl - total_fees
+            # Attribute entry fees of still-open positions to unrealized, not realized.
+            # Matches the fix in paper_trading_routes.py::net_realized_pnl — prevents
+            # Grafana dashboards from diverging from GUI on the same metric.
+            # 修復：仍開倉的 entry fee 屬於未實現，不扣在已實現 net_pnl 上，避免 Grafana 與 GUI 分歧。
+            open_entry_fees = sum(
+                float((p.get("position", {}) or {}).get("entry_fee", 0.0) or 0.0)
+                for p in positions
+            ) if isinstance(positions, list) else 0.0
+            closed_fees = max(0.0, total_fees - open_entry_fees)
+            net_pnl = realized_pnl - closed_fees
 
             # Unrealized PnL from open positions / 未实现 PnL
             unrealized_pnl = sum(

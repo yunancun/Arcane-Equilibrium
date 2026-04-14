@@ -440,6 +440,7 @@ pub(super) async fn handle_update_risk_config(
     let hard_stop_pct = params.get("hard_stop_pct").and_then(|v| v.as_f64());
     let p1_risk_pct = params.get("p1_risk_pct").and_then(|v| v.as_f64());
     let trailing_stop_pct = parse_opt_opt_f64(params, "trailing_stop_pct");
+    let trailing_activation_pct = parse_opt_opt_f64(params, "trailing_activation_pct");
     let time_stop_hours = parse_opt_opt_f64(params, "time_stop_hours");
     let atr_multiplier = parse_opt_opt_f64(params, "atr_multiplier");
     let take_profit_pct = parse_opt_opt_f64(params, "take_profit_pct");
@@ -478,6 +479,7 @@ pub(super) async fn handle_update_risk_config(
     let has_any = hard_stop_pct.is_some()
         || p1_risk_pct.is_some()
         || trailing_stop_pct.is_some()
+        || trailing_activation_pct.is_some()
         || time_stop_hours.is_some()
         || atr_multiplier.is_some()
         || take_profit_pct.is_some()
@@ -506,6 +508,7 @@ pub(super) async fn handle_update_risk_config(
     let _ = tx.send(PipelineCommand::UpdateRiskConfig {
         hard_stop_pct,
         trailing_stop_pct,
+        trailing_activation_pct,
         time_stop_hours,
         atr_multiplier,
         take_profit_pct,
