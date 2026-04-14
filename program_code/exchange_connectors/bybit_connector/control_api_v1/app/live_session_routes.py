@@ -678,14 +678,18 @@ async def post_live_session_stop(
     # Close all live positions via IPC (engine handles exchange order cancellation in live mode)
     # 通過 IPC 平倉（live 模式下引擎同時處理交易所掛單取消）
     close_result: dict = {}
+    orphan_result: dict = {}
     if rust_online:
         try:
             close_result = await _ipc_command("close_all_positions", {"engine": "live"})
         except Exception as exc:
             errors.append(f"close_positions: {exc}")
             logger.error("IPC close_all_positions failed (live stop): %s", exc)
+        # Orphan sweep: close exchange positions not tracked in paper_state.
+        # 孤兒清掃：平掉交易所有但 paper_state 沒有的倉位。
+        orphan_result = await _sweep_live_orphan_positions(errors)
     else:
-        close_result = {"skipped": True, "reason": "engine_offline"}
+        close_result = orphan_result = {"skipped": True, "reason": "engine_offline"}
 
     logger.warning(
         "⚠ LIVE SESSION STOPPED — positions closed — errors=%s — actor=%s",
@@ -695,6 +699,7 @@ async def post_live_session_stop(
         "message": "Live session stopped — positions closed / 實盤 session 已停止 — 倉位已平",
         "source": "rust_engine",
         "close_result": close_result,
+        "orphan_sweep": orphan_result,
         "errors": errors if errors else None,
         "session": {"session_state": "stopped", "session_id": "rust_engine_live"},
     })
@@ -1051,6 +1056,59 @@ async def post_live_close_position(
     return _live_response({"symbol": sym, "closed": True, "source": "rust_engine", "ipc": result})
 
 
+async def _sweep_live_orphan_positions(errors: list[str]) -> dict:
+    """Close any exchange Live positions not tracked in paper_state (orphan sweep).
+
+    Mirrors _sweep_demo_orphan_positions in strategy_ai_routes but uses the live
+    API key slot.  IPC close_all only iterates paper_state — positions that exist
+    on the exchange but not in paper_state are silently skipped.  This sweep
+    queries the exchange and issues a close_position IPC for each open position.
+
+    IPC close_all 只遍歷 paper_state，交易所有但 paper_state 沒有的「孤兒倉位」
+    會被跳過。本函數通過 Live API key 查詢交易所持倉，逐一發 close_position IPC。
+    """
+    rc = _get_rust_client_safe()
+    if rc is None:
+        return {"skipped": True, "reason": "rust_client_unavailable"}
+
+    positions: list = []
+    try:
+        positions = rc.get_positions("linear") or []
+    except Exception as exc:
+        logger.warning("Live orphan sweep: get_positions failed: %s", exc)
+        errors.append(f"orphan_sweep_query: {exc}")
+        return {"skipped": True, "reason": str(exc)}
+
+    open_positions = [p for p in positions if float(p.get("size") or p.get("qty") or 0) > 0]
+    if not open_positions:
+        return {"swept": 0}
+
+    swept = 0
+    for p in open_positions:
+        sym = p.get("symbol", "")
+        size = float(p.get("size") or p.get("qty") or 0)
+        if not sym or size <= 0:
+            continue
+        ipc_params: dict = {
+            "symbol": sym,
+            "engine": "live",
+            "is_long": p.get("side") == "Buy",
+            "qty": size,
+        }
+        try:
+            await _ipc_command("close_position", ipc_params)
+            swept += 1
+            logger.warning(
+                "Live orphan sweep: close_position %s qty=%.4f is_long=%s",
+                sym, size, ipc_params["is_long"],
+            )
+        except Exception as exc:
+            logger.warning("Live orphan sweep: close_position %s failed: %s", sym, exc)
+            errors.append(f"orphan_{sym}: {exc}")
+
+    return {"swept": swept, "found": len(open_positions)}
+
+
 @live_router.post("/close-all-positions")
 async def post_live_close_all_positions(
     actor: Any = Depends(base.current_actor),
@@ -1066,11 +1124,17 @@ async def post_live_close_all_positions(
     Requires Operator role.
     """
     _require_operator(actor)
+    errors: list[str] = []
     try:
         result = await _ipc_command("close_all_positions", {"engine": "live"})
     except Exception as exc:
         logger.error("IPC close_all_positions failed: %s", exc)
-        raise HTTPException(status_code=500, detail=f"close_all_positions IPC failed: {exc}")
+        errors.append(f"ipc_close_all: {exc}")
+        result = {"error": str(exc)}
+    # Orphan sweep: close exchange positions not tracked in paper_state.
+    # IPC close_all only iterates paper_state — orphan positions are silently skipped.
+    # 孤兒清掃：IPC close_all 只遍歷 paper_state，交易所孤兒倉位會被跳過，此處補掃。
+    orphan_result = await _sweep_live_orphan_positions(errors)
     logger.warning(
         "⚠ close-all-positions (manual, session continues) — actor=%s",
         getattr(actor, "actor_id", "?"),
@@ -1079,6 +1143,8 @@ async def post_live_close_all_positions(
         "message": "All positions closed — session continues / 已平掉所有倉位，session 繼續運行",
         "source": "rust_engine",
         "close_result": result,
+        "orphan_sweep": orphan_result,
+        "errors": errors if errors else None,
     })
 
 
