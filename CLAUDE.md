@@ -105,7 +105,7 @@
 **留尾**（非阻塞）：W1 event_consumer 拆分。governance_routes.py 1172 行（已瘦身至 < 1200 ✅）。D-02 PriceEvent metadata HashMap 移除（待所有 producer 遷移至 structured fields）。
 
 **歷史細節**（不要重複載入）：
-- 1A→1C-4 commit 敘事 → `docs/worklogs/2026-04-08--arch_rc1_1c_history_archive.md`
+- 1A→1C-4 commit 敘事 → `docs/archive/2026-04-08--arch_rc1_1c_history_archive.md`
 - Phase 0-4 Sprint/Wave → `docs/archive/2026-04-07--claude_md_section3_history_phase0_4.md`
 - 逐 commit 行數 → `docs/CLAUDE_CHANGELOG.md`
 - 1C-3/1C-4 narrative → `docs/archive/2026-04-08--main_docs_1c3_1c4_narrative.md`
