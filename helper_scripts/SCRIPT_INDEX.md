@@ -10,6 +10,8 @@
 | 腳本 | 用途 |
 |------|------|
 | `restart_all.sh` | 一鍵重啟 Rust 引擎 + API server（`--engine-only` / `--api-only`） |
+| `clean_restart.sh` | 乾淨重啟：停引擎 → PyO3 flatten demo/live 倉位 → 歸檔 runtime + DB `_damaged_<ts>` 表 → 檢查 binary 新舊 → 重建/重啟 → watchdog 驗證。旗標：`--yes` / `--mark-damaged` / `--include-live` / `--skip-flatten` / `--skip-build-check` |
+| `clean_restart_flatten.py` | 交易所平倉助手（被 clean_restart.sh 調用；亦可獨立使用 `--env demo\|mainnet [--dry-run]`）。先 `refresh_instruments` 載入品種規格，再對每倉下 reduce_only 市價單 + 取消所有未成交單；5 輪 verify 循環掃殘尾 |
 | `start_paper_trading.sh` | API server 就緒後自動啟動 Paper Trading（systemd / cron @reboot） |
 | `cron_daily_report.sh` | 每日自動採集 Paper Trading 指標 + Telegram 推送（Cron UTC 0:00） |
 | `cron_observer_cycle.sh` | 每 5 分鐘執行 Observer 循環 + runtime snapshot 橋接 |
