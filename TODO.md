@@ -357,7 +357,7 @@ WIRE-0/WIRE-1 + DL-1/DL-2 + JS-1 + 5-01~03 已全部 ✅。下面是原 backlog 
 - [x] WP-F/UX-07~10 術語統一（Paper/Live/Session 各 Tab 標籤 + Live 雙態註解）✅ 2026-04-14 — 規範字典 `Paper 模拟 / Demo 演示 / Live 实盘`；console.html BUILD_TS bump `20260414.ux07-unify-v1`；15 文件（11 tab HTML + console + 2 js + index.html legacy）；Session 語境消歧（AI 推理 / 交易暂停 / 授权租约 Lease）；tab-live.html L178-188 Pass-4 雙態資訊區塊 + tab-settings.html L773 Live-Demo ⚠ 同 Live 待遇標示
 - [x] WP-F/AH-05 btn-apply-ai 元素補齊 + 標籤改「Copy Advice」（2026-04-13）
 - [ ] WP-F/O-xx / AH-08~11（詳見 §10.1）
-- [ ] `preferred_margin_mode` / `preferred_position_mode` GUI 入口
+- [x] `preferred_margin_mode` / `preferred_position_mode` GUI 入口 ✅ 2026-04-14 — tab-risk.html 新增 2 select inputs（isolated/cross, one_way/hedge）+ 2 display metrics (s-margin-mode/s-position-mode)；risk-tab.js 3 site 接線（_doSavePositionSettings payload + 顯示刷新 + 輸入框刷新）；console.html BUILD_TS `20260414.margin-position-mode-v1`。後端已有契約（RiskUpdatePayload + risk_view_client + Rust validate `isolated|cross` / `one_way|hedge`），零後端改動
 
 ### WP-E4 測試覆蓋（13 項）
 
