@@ -54,10 +54,67 @@ rebuild_pyo3() {
     fi
 }
 
+rotate_engine_log() {
+    # Fix 2 (2026-04-14): preserve engine.log on restart so post-mortem
+    # analysis of a crash is possible. The 2026-04-14 incident lost the
+    # death logs because restart_all.sh used `>` which truncated the file.
+    # Keep last 10 logs under /tmp/openclaw/engine_logs/.
+    # 修復 2：重啟時保留 engine.log 以便崩潰事後分析。2026-04-14 事故中死前
+    # 日誌全遺失，因為 restart_all.sh 用 `>` 截斷檔案。保留最近 10 份於
+    # /tmp/openclaw/engine_logs/。
+    local logs_dir="/tmp/openclaw/engine_logs"
+    mkdir -p "$logs_dir"
+    if [[ -f /tmp/openclaw/engine.log ]] && [[ -s /tmp/openclaw/engine.log ]]; then
+        local ts
+        ts=$(date +%s)
+        mv /tmp/openclaw/engine.log "$logs_dir/engine-${ts}.log"
+        echo ">>> Archived previous engine.log → $logs_dir/engine-${ts}.log"
+    fi
+    # Keep only 10 most recent archived logs.
+    # 只保留最新 10 份歸檔日誌。
+    local count
+    count=$(ls -1 "$logs_dir"/engine-*.log 2>/dev/null | wc -l)
+    if [[ "$count" -gt 10 ]]; then
+        ls -1t "$logs_dir"/engine-*.log | tail -n +11 | xargs rm -f 2>/dev/null || true
+    fi
+}
+
+graceful_stop_engine() {
+    # Fix 2 (2026-04-14): SIGTERM-first shutdown with 5s graceful window, then
+    # escalate to SIGKILL only if the process is still alive. pkill -f was too
+    # blunt — if the engine was in the middle of writing paper_state.json it
+    # would be killed mid-atomic-rename producing a corrupted tmp file that
+    # the watchdog then misreads as "engine dead" → spurious restart loop.
+    # 修復 2：SIGTERM 先行 + 5s 優雅窗口，仍存活才 SIGKILL。pkill -f 太粗暴 —
+    # 若引擎正在寫 paper_state.json 中途被 kill，會留下損毀的 tmp 檔，watchdog
+    # 誤讀為「引擎死亡」→ 虛假重啟循環。
+    if ! pgrep -f "openclaw-engine" > /dev/null 2>&1; then
+        echo ">>> (no running engine to stop)"
+        return 0
+    fi
+    echo ">>> Sending SIGTERM to engine (graceful shutdown)..."
+    pkill -TERM -f "openclaw-engine" 2>/dev/null || true
+    local waited=0
+    while [[ "$waited" -lt 10 ]]; do
+        if ! pgrep -f "openclaw-engine" > /dev/null 2>&1; then
+            echo ">>> Engine exited cleanly after ${waited}x500ms"
+            return 0
+        fi
+        sleep 0.5
+        waited=$((waited + 1))
+    done
+    echo "WARN: engine still alive after 5s SIGTERM → escalating to SIGKILL" >&2
+    pkill -KILL -f "openclaw-engine" 2>/dev/null || true
+    sleep 1
+}
+
 restart_engine() {
     echo ">>> Stopping Rust engine..."
-    pkill -f "openclaw-engine" 2>/dev/null || true
-    sleep 2
+    graceful_stop_engine
+    rotate_engine_log
+    # Clear maintenance flag on explicit restart — operator wants it running.
+    # 明確重啟時清除 maintenance flag — operator 意圖是讓引擎跑起來。
+    rm -f /tmp/openclaw/engine_maintenance.flag 2>/dev/null || true
     echo ">>> Starting Rust engine..."
     # Load PG password from secrets (cross-platform: no hardcoded credentials)
     local pg_pass
