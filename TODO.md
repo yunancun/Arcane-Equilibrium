@@ -415,9 +415,9 @@ WIRE-0/WIRE-1 + DL-1/DL-2 + JS-1 + 5-01~03 已全部 ✅。下面是原 backlog 
 
 來源：`docs/worklogs/2026-04-12--gui_metrics_db_fallback_and_display_fixes.md`
 
-- [ ] **QoL-1** Engine 重啟後 `paper_state` 計數器歸零 — `total_realized_pnl` / `total_fees` / `trade_count` 為純記憶體變量，引擎啟動時應從 DB `trading.fills` 恢復累計值（現靠 Python metrics 端點 DB 降級繞過，但引擎內 snapshot 仍為 0）
+- [x] **QoL-1** ~~Engine 重啟後 `paper_state` 計數器歸零~~ ✅ 2026-04-14 commits `22a0b36`+`ea25844`(merge) — `PaperState::restore_from_db()` + `event_consumer/paper_state_restore.rs` fail-soft glue，啟動時按 `engine_mode` 從 `trading.fills` 還原 `total_realized_pnl`/`total_fees`/`trade_count`。重啟驗證 PASS：demo=-3.49/29.11/254 · paper=-14.40/58.21/333 · live=0/0/0。
 - [ ] **QoL-2** Demo AI cost 無追蹤 — `tab-demo.html` 硬編碼 `'N/A'`，後端無 per-engine AI 調用成本歸因機制（需 H1-H5 AI 治理層接通後才有意義，依賴 G-1）
-- [ ] **QoL-3** PyO3 `.so` 部署不統一 — `maturin develop` 默認裝到系統 venv（`~/.venv`），API server 用 `control_api_v1/.venv`，Rust struct 改動需手動 `maturin develop` 到正確 venv。應自動化或統一 venv
+- [x] **QoL-3** ~~PyO3 `.so` 部署不統一~~ ✅ 2026-04-14 commits `c510388`+`dc2eec3`(merge) — `helper_scripts/build_pyo3.sh` 統一雙寫（`~/.venv` + `control_api_v1/.venv`）；`restart_all.sh --rebuild` 旗標集成；build → pip install --force-reinstall → size 比對驗證。
 - [x] **QoL-4** ~~Paper PnL 異常大~~ ✅ commit `2a422fa` PNL-FIX-1（歸檔至 `docs/archive/2026-04-12--completed_todo_full_program_audit.md`）
 
 ---

@@ -96,6 +96,8 @@
 
 **ORPHAN-ADOPT-1 Phase 1 ✅**（2026-04-14）— Reconciler 對 orphan 倉「偵測但不動作」的行為修復。新增 `position_reconciler/orphan_handler.rs`（~350 行 + 11 unit tests）：`handle_orphan(ctx) -> OrphanDecision` 純函數按 A1→A4→B1→default 順序評估（A1 距強平 < 10% / A2 已 CB / A3 名義 > `max_order_notional_usdt` / A4 不在 active universe / B1 五策略 shrunk_bps 全非正且 unrealised > 0）；所有 Phase 1 decision 走 `PipelineCommand::CloseSymbol` reduce_only，dispatch 失敗回退 drift 讓 Phase 6 升級階梯兜底。`ReconcilerState.pending_orphan_closes` HashMap + 2 分鐘 TTL dedup 防止 spam。`main.rs` `build_orphan_cfg(engine_key)` closure factory 按引擎綁 `PerEngineRiskStores` + `SymbolRegistry` + `EdgeEstimates` Arc。V014 audit event `orphan_handled`。Phase 2（Adopt 真實路徑）等 G-1 R-02 Strategist Agent。1136 engine lib + 366 core + 33 e2e = 1535 Rust pass。
 
+**QoL-1/QoL-3 ✅**（2026-04-14）— **QoL-1**（commits `22a0b36`+`ea25844`）：`PaperState::restore_from_db(pool, engine_mode)` + `apply_restored_counters()` helper；新增 `event_consumer/paper_state_restore.rs` fail-soft glue（None pool → info / SQL error → warn / 成功 → info with values）；按 `engine_mode` 三引擎隔離還原。重啟驗證 PASS：demo=-3.49/29.11/254 · paper=-14.40/58.21/333 · live=0/0/0。解決「GUI 累計 PnL 每次重啟歸零」。**QoL-3**（commits `c510388`+`dc2eec3`）：新增 `helper_scripts/build_pyo3.sh`（285 行）統一 PyO3 .so 雙寫（`~/.venv` + `control_api_v1/.venv`），`maturin build` → `pip install --force-reinstall` → size 比對驗證；`restart_all.sh` 新增 `--rebuild` 旗標。解決「Rust struct 改動需手動 `maturin develop` 到兩個 venv」。engine lib 1136→1144（+8）。
+
 **留尾**（非阻塞）：W1 event_consumer 拆分。governance_routes.py 1172 行（已瘦身至 < 1200 ✅）。D-02 PriceEvent metadata HashMap 移除（待所有 producer 遷移至 structured fields）。
 
 **歷史細節**（不要重複載入）：
@@ -297,4 +299,4 @@ state_models ← state_compiler ← state_store ← main_legacy ← main.py
 
 ## 十一、一句話狀態
 
-> 截至 2026-04-14：tests engine lib **1136** + core **366** + e2e **33** = **1535** Rust passed **0 fail** · Python **2852** passed · **ORPHAN-ADOPT-1 Phase 1 ✅** · **OC-5 FundingArb COMPLETE ✅** · **G-SR-1 COMPLETE ✅** · **Edge 數據隔離 ✅** · **Phase 5 PAUSED** · **Live_Ready ✅** · **下一步**：G-2 FundingArb 驗證 · LG-1 21d paper 到期（05-01）· Phase 2 Adopt 等 G-1 R-02 Strategist。
+> 截至 2026-04-14：tests engine lib **1144** + core **366** + e2e **33** = **1543** Rust passed **0 fail** · Python **2852** passed · **QoL-1/3 ✅** · **ORPHAN-ADOPT-1 Phase 1 ✅** · **OC-5 FundingArb COMPLETE ✅** · **G-SR-1 COMPLETE ✅** · **Edge 數據隔離 ✅** · **Phase 5 PAUSED** · **Live_Ready ✅** · **下一步**：G-2 FundingArb 驗證 · LG-1 21d paper 到期（05-01）· Phase 2 Adopt 等 G-1 R-02 Strategist。
