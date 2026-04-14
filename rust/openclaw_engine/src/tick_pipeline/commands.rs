@@ -196,10 +196,15 @@ impl TickPipeline {
             let em = self.pipeline_kind.db_mode();
             let context_id = make_context_id(em, symbol, now_ms);
             // FUP-8: populate details (see on_tick_helpers::persist_intent).
+            // Sentinel guard mirrors on_tick_helpers — IPC command path shouldn't
+            // normally carry 1e9 but stay consistent for downstream analysts.
+            // 哨兵旗標與 on_tick_helpers 對齊：IPC 路徑一般不會有 1e9，但為分析一致性保留。
+            let is_sentinel = qty >= 1e9;
             let details = serde_json::json!({
                 "strategy": strategy,
                 "confidence": intent.confidence,
-                "submitted_qty": qty,
+                "submitted_qty": if is_sentinel { serde_json::Value::Null } else { serde_json::json!(qty) },
+                "is_sentinel": is_sentinel,
                 "is_long": is_long,
                 "source": "command",
             });

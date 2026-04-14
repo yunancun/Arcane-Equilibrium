@@ -134,6 +134,8 @@
 - [ ] **FIX-02** Decision Lease Rust 接入（與 FIX-01 一起）
 - [ ] **FIX-12** CSP nonce 遷移（長期）
 - [ ] **FUP-8 Phase 2** OrderIntent 加 edge/funding_rate/basis/regime 欄位（與 G-1 Strategist 串線同步）
+  - **Paper sentinel 處理**：當前 paper 路徑 `on_tick.rs:721` persist 原始 `intent.qty=1e9` sentinel，沒經 Kelly/P1 sizing。2026-04-15 已加 sentinel 旗標（`details.is_sentinel=true` + `submitted_qty=null`）避免誤導分析，但**根治應該**：讓 paper 也走 sizing 後再 persist（與 Live/Demo 路徑對齊），或明確分離「意圖 qty」 vs 「提交 qty」欄位語意
+  - **Sentinel 的使用場景**：5 策略 `default_qty/DEFAULT_QTY_PER_GRID = 1e9`（`grid_trading.rs:172`, `funding_arb.rs:62`, `bb_*`.rs, `ma_crossover.rs`）作為「請幫我 size」信號 — 此設計本身不需改動
 
 ### Phase 5 補強（非阻塞）
 
