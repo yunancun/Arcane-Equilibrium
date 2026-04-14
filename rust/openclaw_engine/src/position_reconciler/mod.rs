@@ -44,11 +44,15 @@
 //!   CB/MR 恢復仍需 operator。
 
 pub mod escalation;
+pub mod orphan_handler;
 #[cfg(test)]
 mod tests;
 
 // Re-export escalation types so callers see them at `position_reconciler::*`.
 pub use escalation::*;
+pub use orphan_handler::{
+    OrphanContext, OrphanDecision, OrphanHandlerConfig, OrphanStage,
+};
 
 use crate::instrument_info::InstrumentInfoCache;
 use crate::order_manager::OrderCategory;
@@ -350,6 +354,7 @@ pub async fn run_position_reconciler(
     instrument_cache: Option<Arc<InstrumentInfoCache>>,
     get_risk_level: impl Fn() -> RiskLevel + Send + 'static,
     engine_label: String,
+    orphan_handler_config: Option<OrphanHandlerConfig>,
 ) {
     info!(
         engine = %engine_label,
@@ -393,11 +398,13 @@ pub async fn run_position_reconciler(
                 let now = now_ms_util();
                 let current_level = get_risk_level();
 
-                // -- Fetch current Bybit truth --
-                let fetch_result = fetch_current_view(&pos_mgr).await;
+                // -- Fetch current Bybit truth (raw PositionInfo for orphan handler) --
+                // -- 拉取 Bybit 真相（含 PositionInfo 原始資料供孤兒處理器使用）--
+                let raw_fetch = pos_mgr.get_positions(OrderCategory::Linear, None).await;
 
-                match fetch_result {
-                    None => {
+                match raw_fetch {
+                    Err(e) => {
+                        warn!(error = %e, "reconciler REST fetch failed (fail-open) / 對帳 REST 失敗（fail-open）");
                         // REST failed — fail-open for drift detection, but track failures.
                         rc_state.consecutive_rest_failures += 1;
                         // 6-RC-10: escalate on sustained REST failures (progressive)
@@ -410,8 +417,10 @@ pub async fn run_position_reconciler(
                             }
                         }
                     }
-                    Some(mut current) => {
+                    Ok(raw_positions) => {
                         rc_state.consecutive_rest_failures = 0;
+
+                        let mut current = build_view_map(&raw_positions);
 
                         // 6-RC-5: dust filter
                         if let Some(cache) = instrument_cache.as_ref() {
@@ -471,7 +480,23 @@ pub async fn run_position_reconciler(
                             }
                         }
 
-                        // -- Phase 6: evaluate and dispatch actions --
+                        // -- ORPHAN-ADOPT-1 Phase 1: intercept Orphan drifts --
+                        // -- ORPHAN-ADOPT-1 Phase 1：攔截孤兒漂移 --
+                        if let Some(ref oh_cfg) = orphan_handler_config {
+                            drifts = process_orphans(
+                                drifts,
+                                &raw_positions,
+                                oh_cfg,
+                                current_level,
+                                &cmd_tx,
+                                &audit_pool,
+                                &engine_label,
+                                &mut rc_state,
+                                now,
+                            );
+                        }
+
+                        // -- Phase 6: evaluate and dispatch actions (orphans already handled) --
                         let actions = evaluate_actions(
                             &mut rc_state, current_level, &drifts, now,
                         );
@@ -497,6 +522,97 @@ pub async fn run_position_reconciler(
             }
         }
     }
+}
+
+/// ORPHAN-ADOPT-1 Phase 1: route each `DriftVerdict::Orphan` through the
+/// unified handler and dispatch close commands. Returns the drift list with
+/// Orphan entries removed (so `evaluate_actions()` does not double-escalate).
+/// Non-orphan drifts (MajorDrift/SideFlip/Ghost) pass through unchanged — the
+/// existing Phase 6 escalation ladder remains the authoritative response for
+/// those, and also acts as the safety net for orphan-handler failures
+/// (CircuitBreaker + CloseAll is reached via burst-streak if many orphans
+/// appear simultaneously and closes are failing).
+/// ORPHAN-ADOPT-1 Phase 1：將每個 DriftVerdict::Orphan 走統一處理器並分發平倉
+/// 指令。返回已移除 Orphan 的 drift 列表，讓 evaluate_actions 不重複升級。
+/// 非孤兒 drift 穿過不動 — 既有 Phase 6 升級階梯仍是權威反應，也作為孤兒處理
+/// 失敗時的兜底（大量孤兒同時出現且平倉失敗時，連續 burst 會觸發 CB+CloseAll）。
+#[allow(clippy::too_many_arguments)]
+fn process_orphans(
+    drifts: Vec<(String, DriftVerdict)>,
+    raw_positions: &[PositionInfo],
+    oh_cfg: &OrphanHandlerConfig,
+    current_level: RiskLevel,
+    cmd_tx: &tokio::sync::mpsc::UnboundedSender<crate::tick_pipeline::PipelineCommand>,
+    audit_pool: &Option<sqlx::PgPool>,
+    engine_label: &str,
+    state: &mut ReconcilerState,
+    now_ms: u64,
+) -> Vec<(String, DriftVerdict)> {
+    // Snapshot shared handles once per cycle — avoid N reads for N orphans.
+    // 每週期快照一次共享資料 — 避免 N 孤兒 N 次讀取。
+    let active_symbols = oh_cfg.symbol_registry.snapshot();
+    let edge_estimates_snapshot = {
+        let guard = oh_cfg.edge_estimates.read();
+        guard.clone()
+    };
+    let max_notional = (oh_cfg.get_max_notional)();
+
+    let mut kept: Vec<(String, DriftVerdict)> = Vec::with_capacity(drifts.len());
+    for (key, verdict) in drifts {
+        if !matches!(verdict, DriftVerdict::Orphan) {
+            kept.push((key, verdict));
+            continue;
+        }
+        // Parse key "SYMBOL|SIDE" back into fields, then find PositionInfo.
+        // 從 key "SYMBOL|SIDE" 還原欄位，查找對應 PositionInfo。
+        let (sym, side) = match key.split_once('|') {
+            Some((s, d)) => (s, d),
+            None => {
+                warn!(key = %key, "orphan key malformed; preserving verdict / 孤兒 key 格式異常；保留 verdict");
+                kept.push((key, verdict));
+                continue;
+            }
+        };
+        let Some(pos) = raw_positions
+            .iter()
+            .find(|p| p.symbol == sym && p.side == side)
+        else {
+            // Position vanished between classify and now (rare race) — drop silently.
+            // 分類到此刻之間倉位消失（罕見 race）— 靜默跳過。
+            warn!(symbol = sym, side = side, "orphan PositionInfo not found; skipping handler / 找不到孤兒 PositionInfo，跳過處理");
+            continue;
+        };
+
+        // Dedup: suppress if we already dispatched within ORPHAN_CLOSE_DEDUP_MS.
+        // 去重：若窗口內已分發過則略過。
+        if !orphan_handler::check_and_stamp_dedup(state, &key, now_ms) {
+            info!(
+                symbol = sym, side = side,
+                "orphan close already dispatched recently; skipping / 孤兒平倉近期已分發；跳過"
+            );
+            continue;
+        }
+
+        let ctx = OrphanContext {
+            pos_info: pos,
+            current_level,
+            max_order_notional_usdt: max_notional,
+            active_symbols: &active_symbols,
+            edge_estimates: &edge_estimates_snapshot,
+        };
+        let decision = orphan_handler::handle_orphan(&ctx);
+        let sent = orphan_handler::dispatch_orphan_close(&decision, pos, cmd_tx);
+        if sent {
+            orphan_handler::spawn_orphan_audit(audit_pool, &decision, pos, engine_label);
+        } else {
+            // Dispatch failed — restore the Orphan drift so escalation ladder
+            // still sees it as evidence (may contribute to burst CB).
+            // 分發失敗 — 還原 Orphan drift，讓升級階梯仍能將其作為證據（可能貢獻 burst CB）。
+            state.pending_orphan_closes.remove(&key);
+            kept.push((key, verdict));
+        }
+    }
+    kept
 }
 
 /// Dispatch a `ReconcilerAction` by sending the corresponding `PipelineCommand`.

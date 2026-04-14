@@ -536,6 +536,22 @@ async fn async_main(
     // Phase 6 + D23: Per-exchange position reconciler.
     // Phase 6 + D23：每條交易所管線獨立持倉對帳器。
     // ------------------------------------------------------------------
+    // ORPHAN-ADOPT-1 Phase 1: build per-engine OrphanHandlerConfig. Each
+    // engine's reconciler gets its own closure reading max_order_notional_usdt
+    // from the matching per-engine RiskConfig store; scanner universe and
+    // edge estimates are shared (production pool).
+    // ORPHAN-ADOPT-1 Phase 1：為每引擎構建 OrphanHandlerConfig。
+    // 每個引擎的對帳器獲得獨立的 max_order_notional_usdt 閉包（讀自 per-engine
+    // RiskConfig store）；scanner universe 與 edge estimates 共享（生產池）。
+    let build_orphan_cfg = |engine_key: &str| {
+        let store = Arc::clone(risk_stores.select(engine_key));
+        openclaw_engine::position_reconciler::OrphanHandlerConfig {
+            symbol_registry: Arc::clone(&symbol_registry),
+            edge_estimates: Arc::clone(&scanner_edge_estimates),
+            get_max_notional: Arc::new(move || store.load().limits.max_order_notional_usdt),
+        }
+    };
+
     if let Some(ref live_b) = live_bindings {
         if let Some(ref tx) = live_cmd_tx {
             tasks::spawn_position_reconciler(
@@ -546,6 +562,7 @@ async fn async_main(
                 &shared_instruments,
                 &live_b.risk_level,
                 live_b.env,
+                Some(build_orphan_cfg("live")),
             );
             info!("position_reconciler spawned for Live / Live 持倉對帳器已啟動");
         }
@@ -560,6 +577,7 @@ async fn async_main(
                 &shared_instruments,
                 &demo_b.risk_level,
                 demo_b.env,
+                Some(build_orphan_cfg("demo")),
             );
             info!("position_reconciler spawned for Demo / Demo 持倉對帳器已啟動");
         }

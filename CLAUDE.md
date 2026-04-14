@@ -1,6 +1,6 @@
 # OpenClaw / Bybit AI Agent 交易系統
 # CLAUDE.md — 項目指令文件（核心規則 + 下一步指針）
-# 最後更新：2026-04-13
+# 最後更新：2026-04-14
 
 ---
 
@@ -56,6 +56,8 @@
 
 **G-SR-1 Signal Tightening COMPLETE ✅**（2026-04-13，7 Sessions）— Phase A 信號源收緊 + Phase B Agent 接線 + Phase C stub + PM 驗收。**Phase A**（S1-S4）：A0-a `grid_helpers.rs` 提取；A0-b `confluence.rs` 共享模組（PersistenceTracker + compute_score 4 分量 65 分制 + score_to_qty_pct 平滑插值）；A0-c 3 策略 TOML Params struct 加 confluence 字段 + factory 接線；A1 時間制持續性過濾器（MA/BBR=120s, BBB=60s）；A2 加權匯合評分；A3 Grid 趨勢冷卻（1x-6x）；S3 param_ranges 擴展 + validation；S4 +41 測試；A-E5 性能審查 PASS。**Phase B S5**：B0 `strategist_scheduler.rs`（tokio 5-min cycle + DB metrics + 指數退避 + validate_recommendation）；B1 `ai_service_client.rs`（100ms connect + per-method TTL + newline JSON-RPC）；B1.5 AIServiceListener 啟動接線。**Phase B S6**：B2 `ai_service.py` stub→real（`_handle_strategist` 接入 Ollama param tuning + `_handle_guardian` 接入 Ollama event classification）；B3 Rust `evaluate_cycle()` 增強（current_params + param_ranges 包含在 IPC 負載）；B4 Guardian L1 信息層（high/critical 事件 MessageBus 中繼 Strategist）。**Phase C S7**：C1 `_handle_analyst()` 接入 AnalystAgent.analyze_trade()；C2 `_handle_scout()` 接入 ScoutAgent intel/alerts；conductor_evaluate 仍為 stub（W23+ R-06）。**PM 驗收 6/6 PASS**：PersistenceTracker 3 策略 / Grid 趨勢冷卻 / Confluence 評分 / Strategist 全鏈路 / Guardian L1 / C1-C2 注入。1086 lib + 33 e2e = 1119 tests pass。計劃文件：`docs/references/2026-04-12--g_sr1_signal_tightening_plan_v2.5.md`。
 
+**OC-5 FundingArb Complete ✅**（2026-04-13）— FundingArb `on_tick()` 從 stub 升級為完整實現（~280 行）。數據管線：`index_price: Option<f64>` 加入 PriceEvent → WS tickers `indexPrice` 提取 → `TickPipeline.index_prices` HashMap 緩存 → `TickContext.index_price`。策略邏輯：entry（funding_threshold + edge 計算 + basis 風險 `|perp/index-1|` + H0/cooldown/position guards）→ direction（positive→short, negative→long）→ confidence scaling（capped 0.6）→ RC-04 rejection rollback。Exit on rate flip / basis breach / max hold。22 新測試。TOML: paper/demo `active=true`，live `active=false`。解鎖 G-2。
+
 **Phase 5 PAUSED — strategies broken, not fees + edge data isolation**（2026-04-12 reframe, 04-13 fix）— 兩個 PnL bug 揭露真相：(a) **PNL-FIX-1**（commit `2a422fa`）`on_tick.rs` 5 條 close 路徑誤用 `event.last_price` 跨 symbol 平倉，PnL 被放大 1000-10000×；(b) **PNL-FIX-2**（同日 follow-up）`emit_close_fill` 寫 `fee: 0.0`，所有 risk/strategy/fast_track 平倉根本不收費。乾淨基線後所有活躍策略 gross edge 為負，net 總損 -$2775。**疑似墮落循環（2026-04-13 發現）**：`realized_edge_stats.py` 原先只查 `is_paper=TRUE`（paper+demo 混合），Paper Exploration 模式放行大量負 edge 交易（518 筆 vs Demo 40 筆），這些交易的 fills 反過來成為 JS edge 估計的主要數據源 → shrunk_bps 全部坍塌到 -35.72 → B=1.0 完全池化 → 可能形成 paper 噪音自我強化的負反饋循環。**修復**：edge 數據按 `engine_mode` 隔離 — demo fills → `edge_estimates.json`（production，demo/live cost_gate 使用），paper fills → `edge_estimates_paper.json`（僅供 draft strategy 評估）；已清除被污染的 edge_estimates.json。Phase 5 暫停等策略重做。詳見 `memory/project_phase5_promotion_edge_crisis.md` + `memory/project_edge_data_isolation.md`。
 
 **Rust 市場掃描器 Phase A-D + QC/FA + P2 ✅**（2026-04-09）— ScannerRunner 完整接線 + D2/D3 動態 symbol + C-3 XRP + C-4 pinned cap + M-1 pending_close + adl_alerts + M-2 TOML + M-3 f_ma 閾值 1.5%→0.5% + M-5 edge_bonus +5→+2 + m-1 relay log + m-3 rest_poller Vec<String> + **IPC-SCAN-1 掃描器可觀測性**（get_active_symbols / get_scanner_status）。**系統目標達成度 ~100%**。835 lib tests pass。
@@ -92,7 +94,9 @@
 
 **E5 Performance Optimization ✅**（2026-04-12）— 23 項全部處理（20 fixed / 2 skipped / 1 deferred）。關鍵：`TickContext<'a>` 零拷貝策略接口 + `push_capped<T>()` 環形緩衝工具（13+ 重複消除）+ PriceEvent 5 typed fields + `tokio::join!` 7 表並行 flush + `ShadowOrderRequest`→`OrderDispatchRequest` 重命名 + `now_ms()`/`is_stale()` 工具函數。17 files, net -336 lines。934+366+27 = 1327 tests pass。
 
-**留尾**（非阻塞）：W1 event_consumer 拆分。governance_routes.py 1907 行超 1200 硬上限（pre-existing，需 refactor 拆分）。D-02 PriceEvent metadata HashMap 移除（待所有 producer 遷移至 structured fields）。
+**ORPHAN-ADOPT-1 Phase 1 ✅**（2026-04-14）— Reconciler 對 orphan 倉「偵測但不動作」的行為修復。新增 `position_reconciler/orphan_handler.rs`（~350 行 + 11 unit tests）：`handle_orphan(ctx) -> OrphanDecision` 純函數按 A1→A4→B1→default 順序評估（A1 距強平 < 10% / A2 已 CB / A3 名義 > `max_order_notional_usdt` / A4 不在 active universe / B1 五策略 shrunk_bps 全非正且 unrealised > 0）；所有 Phase 1 decision 走 `PipelineCommand::CloseSymbol` reduce_only，dispatch 失敗回退 drift 讓 Phase 6 升級階梯兜底。`ReconcilerState.pending_orphan_closes` HashMap + 2 分鐘 TTL dedup 防止 spam。`main.rs` `build_orphan_cfg(engine_key)` closure factory 按引擎綁 `PerEngineRiskStores` + `SymbolRegistry` + `EdgeEstimates` Arc。V014 audit event `orphan_handled`。Phase 2（Adopt 真實路徑）等 G-1 R-02 Strategist Agent。1136 engine lib + 366 core + 33 e2e = 1535 Rust pass。
+
+**留尾**（非阻塞）：W1 event_consumer 拆分。governance_routes.py 1172 行（已瘦身至 < 1200 ✅）。D-02 PriceEvent metadata HashMap 移除（待所有 producer 遷移至 structured fields）。
 
 **歷史細節**（不要重複載入）：
 - 1A→1C-4 commit 敘事 → `docs/worklogs/2026-04-08--arch_rc1_1c_history_archive.md`
@@ -293,4 +297,4 @@ state_models ← state_compiler ← state_store ← main_legacy ← main.py
 
 ## 十一、一句話狀態
 
-> 截至 2026-04-13：tests engine lib **1091** + e2e **33** = **1124** Rust passed **0 fail** · Python **2852** passed · **G-SR-1 COMPLETE ✅** · **G-SR-1-RESEARCH P0+P1+P2-1 ALL COMPLETE ✅**（EDGE-P0-1/P0-2/P1-1~P1-4 + P2-1 close fill labeling 修復）· **Edge 數據隔離 ✅** · **Phase 5 PAUSED** · **Live_Ready ✅** · **下一步**：P2-2/P2-3（W24+）· LG-1 21d paper 到期（05-01）。
+> 截至 2026-04-14：tests engine lib **1136** + core **366** + e2e **33** = **1535** Rust passed **0 fail** · Python **2852** passed · **ORPHAN-ADOPT-1 Phase 1 ✅** · **OC-5 FundingArb COMPLETE ✅** · **G-SR-1 COMPLETE ✅** · **Edge 數據隔離 ✅** · **Phase 5 PAUSED** · **Live_Ready ✅** · **下一步**：G-2 FundingArb 驗證 · LG-1 21d paper 到期（05-01）· Phase 2 Adopt 等 G-1 R-02 Strategist。

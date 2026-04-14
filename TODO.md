@@ -1,7 +1,7 @@
 # OpenClaw TODO — 工作計劃清單
 
-最後更新：2026-04-14（ORPHAN-ADOPT-1 入列 W22+ · clean_restart.sh 交付）
-測試基準線：**Rust engine lib 1091 + bin 5 + core 366 + e2e 33 + promotion 32 = 1527 · Python program_code 2852 passed (5 skipped · 0 fail) · ml_training 135 passed (6 skipped)**
+最後更新：2026-04-14（ORPHAN-ADOPT-1 Phase 1 完成 · clean_restart.sh 交付）
+測試基準線：**Rust engine lib 1136 + core 366 + e2e 33 = 1535 · Python program_code 2852 passed (5 skipped · 0 fail) · ml_training 135 passed (6 skipped)**
 
 > compact 後從此文件恢復工作狀態。第一個 `[ ]` 即為下一步起點。
 > 歷史歸檔索引在文件末尾。詳細完成度視角見 README.md。
@@ -345,18 +345,17 @@ WIRE-0/WIRE-1 + DL-1/DL-2 + JS-1 + 5-01~03 已全部 ✅。下面是原 backlog 
 > 背景：當前 reconciler seed 完成後，對 orphan 倉「偵測但不動作」——只在 burst ≥5 drifts 連續 2 cycles → CircuitBreaker + CloseAll 才自動平倉。單一 orphan 會留在交易所自生自滅（無止損、funding 累積），直到 operator 手動干預。
 > 設計參考：`helper_scripts/clean_restart_flatten.py`（PyO3 reduce_only 平倉模板）+ `position_reconciler/escalation.rs`（既有升級階梯保留作最後防線）。
 
-- [ ] **ORPHAN-ADOPT-1** — 啟動 seed 完成後統一孤兒處理決策函數 `handle_orphan(pos) -> CloseOrAdopt`
-  - **Stage A 硬安全（任一命中 → Close）**：距離強平 < 5×ATR · 全局 drawdown/CB 已 tripped · 名義值 > `max_order_notional_usdt` · symbol 不在 scanner active universe
-  - **Stage B+C 軟評估（統一決策+執行）**：
-    - 查 edge_estimates（demo 用 production 池，paper 用 `_paper.json`）
-    - `shrunk_bps < 0` 且 unrealized PnL > 0 → 鎖利 Close
-    - 策略在該 symbol 當下有同向信號 → Adopt（原子執行三件事：注入 `position_map` + 綁 hard/trailing stop + 寫 audit `ORPHAN_ADOPTED`，任一失敗降級 Close）
-    - 其他曖昧情況 → 保守 Close（原則 #6「失敗默認收縮」）
-  - **執行路徑**：reduce_only market（參考 `clean_restart_flatten.py` 的 place_order 模式）
-  - **Audit**：統一 event `ORPHAN_HANDLED { action: Close|Adopt, reason: ... }`
-  - **保留既有升級**：Cautious/Defensive/CB+CloseAll 作為 handle_orphan 失敗時的兜底防線
-  - **測試**：startup seed race condition / Stage A 4 條分支 / Stage B edge lookup / Adopt 原子性（注入失敗降級 Close）/ 已接管倉位不觸發 re-entry
-  - **依賴**：無硬依賴，但建議在 G-1 R-02（Strategist agent）接線後實施，讓「strategies 有同向信號」判斷更有意義
+- [x] **ORPHAN-ADOPT-1 Phase 1** — 啟動 seed 完成後統一孤兒處理決策函數 `handle_orphan(pos) -> Close`（Adopt 延後 Phase 2）
+  - **交付**：`position_reconciler/orphan_handler.rs`（~350 行 + 11 unit tests）+ `run_position_reconciler` process_orphans 接線 + dedup（`ReconcilerState.pending_orphan_closes` 2 min TTL）+ V014 audit `orphan_handled`。
+  - **Stage A 硬安全**：A1 距強平 < 10% · A2 已 CB · A3 名義 > `max_order_notional_usdt`（0=disabled）· A4 不在 active universe。
+  - **Stage B 軟評估**：B1 五策略 shrunk_bps 全非正 且 unrealised_pnl > 0 → SoftLockProfit；default: SoftConservative。
+  - **Stage C 降級**：Phase 1 所有 decision 都走 Close（`PipelineCommand::CloseSymbol` with `hint_is_long`/`hint_qty`）；dispatch 失敗 → 回退 drift 讓 Phase 6 升級階梯兜底。
+  - **測試基準**：58 reconciler tests pass（47 + 11 新）· 1136 lib + 366 core + 33 e2e = 1535 Rust pass。
+
+- [ ] **ORPHAN-ADOPT-1 Phase 2** — 真正 Adopt 路徑（等 G-1 R-02 Strategist Agent）
+  - 前置：W22 Strategist/Guardian AI agent 在線 + StopManager adopt 接口 + 合成 StrategyId 規約。
+  - 實作：Stage B2/B3 策略信號匹配 → 合成 `StrategyId`（如 `orphan_adopt_<symbol>`）→ 原子三件事（注入 `position_map` + 綁 hard/trailing stop + 寫 `ORPHAN_ADOPTED` audit）→ 任一失敗降級 Close。
+  - Phase 1 已預留 `OrphanDecision::Adopt` enum variant + `OrphanStage::SoftAdoptEligible` 分支，Phase 2 改 dispatch 即可。
 
 ---
 
