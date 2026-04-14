@@ -435,6 +435,11 @@ def get_session_status(
     peak = rust_state.get("peak_balance", 0)
     realized = rust_state.get("total_realized_pnl", 0)
     fees = rust_state.get("total_fees", 0)
+    # Attribute fees correctly: entry fees of still-open positions belong to unrealized,
+    # not realized. total_fees - open_entry_fees = fees locked-in via closed trades.
+    # 費用歸屬修復：仍開倉的 entry fee 屬於未實現，不應從 realized 中扣除。
+    open_entry_fees = sum(p.get("entry_fee", 0.0) or 0.0 for p in positions)
+    closed_fees = max(0.0, fees - open_entry_fees)
     # Translate Rust paused state: user-initiated Stop → "observing" (engine still running,
     # scanner still running, no new trades). Plain pause → "paused".
     # Rust paused 狀態翻譯：用戶主動 Stop → "observing"（引擎繼續運行、scanner 繼續、
@@ -466,7 +471,7 @@ def get_session_status(
             "total_fees_paid": fees,
             "total_ai_cost": 0,
             "net_paper_pnl": realized + total_unrealized - fees,
-            "net_realized_pnl": realized - fees,
+            "net_realized_pnl": realized - closed_fees,
             "closed_position_pnl": realized,
         },
         "order_count": 0,
@@ -621,6 +626,10 @@ def get_pnl(
     total_unrealized = sum(p.get("unrealized_pnl", 0) for p in positions)
     realized = rust_state.get("total_realized_pnl", 0)
     fees = rust_state.get("total_fees", 0)
+    # See status() for rationale — attribute open-position entry fees to unrealized.
+    # 見 status()：仍開倉的 entry fee 歸屬於未實現，不應扣在 realized 頭上。
+    open_entry_fees = sum(p.get("entry_fee", 0.0) or 0.0 for p in positions)
+    closed_fees = max(0.0, fees - open_entry_fees)
     return _paper_response({
         "source": "rust_engine",
         "realized_pnl": realized,
@@ -628,7 +637,7 @@ def get_pnl(
         "total_fees_paid": fees,
         "total_ai_cost": 0,
         "net_paper_pnl": realized + total_unrealized - fees,
-        "net_realized_pnl": realized - fees,
+        "net_realized_pnl": realized - closed_fees,
         "closed_position_pnl": realized,
         "trade_count": rust_state.get("trade_count", 0),
     })

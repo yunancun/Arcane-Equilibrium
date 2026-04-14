@@ -101,6 +101,19 @@ impl PaperState {
         });
     }
 
+    /// Set trailing stop activation threshold (None = default to trail_pct).
+    /// Textbook trailing stop: "activation%=profit required before trail engages".
+    /// 設定跟蹤止損啟動閾值（None 時預設等於 trailing_stop_pct）。
+    pub fn set_trailing_activation_pct(&mut self, pct: Option<f64>) {
+        self.stop_config.trailing_activation_pct = pct.and_then(|v| {
+            if v.is_finite() {
+                Some(v.clamp(0.0, 50.0))
+            } else {
+                None
+            }
+        });
+    }
+
     /// Set time stop hours (None = disabled). / 設定超時止損小時數。
     pub fn set_time_stop_hours(&mut self, hours: Option<f64>) {
         self.stop_config.time_stop_hours = hours.and_then(|v| {

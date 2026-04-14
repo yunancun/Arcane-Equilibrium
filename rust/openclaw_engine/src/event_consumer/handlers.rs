@@ -339,6 +339,7 @@ pub fn handle_paper_command(
         PipelineCommand::UpdateRiskConfig {
             hard_stop_pct,
             trailing_stop_pct,
+            trailing_activation_pct,
             time_stop_hours,
             atr_multiplier,
             take_profit_pct,
@@ -373,6 +374,13 @@ pub fn handle_paper_command(
                 let v = v.map(|x| x.clamp(0.0, 0.5));
                 pipeline.paper_state.set_trailing_stop_pct(v);
                 info!(trailing = ?v, "trailing stop updated / 跟蹤止損已更新");
+            }
+            if let Some(v) = trailing_activation_pct {
+                // Activation is an absolute % of entry price (same family as trail/hard stop).
+                // 啟動閾值與 trail/hard stop 同族：entry 的絕對百分比。
+                let v = v.map(|x| x.clamp(0.0, 0.5));
+                pipeline.paper_state.set_trailing_activation_pct(v);
+                info!(trailing_activation = ?v, "trailing activation threshold updated / 跟蹤啟動閾值已更新");
             }
             if let Some(v) = time_stop_hours {
                 let v = v.map(|x| x.clamp(0.0, 24.0 * 30.0));
