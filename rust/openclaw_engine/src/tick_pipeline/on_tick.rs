@@ -718,7 +718,13 @@ impl TickPipeline {
                         let mq = result.verdict_info.as_ref().and_then(|vi| vi.modified_qty);
                         push_display_intent(&mut self.recent_intents, event.ts_ms, intent, mq, "submitted".into());
                         // S-01: persist intent via extracted helper
-                        persist_intent(&self.trading_tx, em, event.ts_ms, intent, intent.qty, event.last_price, em);
+                        // FUP-8 Phase 2: pass result.approved_qty (post-Kelly/P1 sizing) so
+                        // paper's trading.intents.details.submitted_qty records the real sized
+                        // qty instead of the 1e9 sentinel that intent.qty carries. Mirrors the
+                        // exchange path at line ~643 which already passes gate.approved_qty.
+                        // FUP-8 Phase 2：傳 result.approved_qty（Kelly/P1 sizing 後）
+                        // 讓 paper 的 submitted_qty 記錄真實 sized qty，而非 intent.qty 攜帶的 1e9 sentinel。
+                        persist_intent(&self.trading_tx, em, event.ts_ms, intent, result.approved_qty, event.last_price, em);
 
                         if let Some(mut fill) = result.fill {
                             if let Some(ref icache) = self.instrument_cache {

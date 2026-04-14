@@ -46,6 +46,7 @@ impl IntentProcessor {
                         )),
                         fill: None,
                         verdict_info: None,
+                        approved_qty: 0.0,
                     });
                 }
                 tracing::debug!(strategy, symbol, shrunk_edge_bps = cell.shrunk_bps,

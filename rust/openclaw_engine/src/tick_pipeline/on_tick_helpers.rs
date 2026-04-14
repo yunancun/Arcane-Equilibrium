@@ -119,11 +119,14 @@ pub(crate) fn persist_intent(
         // at minimum the strategy identifier + confidence score to be persisted.
         // FUP-8：填充 details 避免 trading.intents.details 100% NULL。
         //
-        // Sentinel guard: paper path persists raw intent.qty (1e9 sentinel meaning
-        // "size me"), bypassing Kelly/P1 sizing that Live/Demo goes through. Writing
-        // 1e9 as submitted_qty would mislead analysts. Flag it explicitly so the
-        // detail stays honest about what the DB row represents.
-        // 哨兵旗標：paper 路徑直接 persist 未 size 的 1e9 sentinel；明確標示避免誤導分析。
+        // Sentinel guard (safety net post-Phase 2). As of FUP-8 Phase 2 both paper
+        // and exchange callers pass `approved_qty` = post-Kelly/P1 sized qty, so
+        // this check should never fire in the on_tick.rs normal flow. It remains
+        // because (a) the IPC command path in commands.rs still constructs its own
+        // call with raw qty, and (b) defense-in-depth for anyone adding a new call
+        // site that forgets sizing — an honest `null` + flag beats silent 1e9 in DB.
+        // 哨兵旗標（Phase 2 後的安全網）：on_tick 路徑兩側 caller 都已傳入 sized qty，
+        // 正常流程此檢查不會觸發；保留以防 IPC 路徑 & 未來新 caller 遺漏 sizing。
         let is_sentinel = approved_qty >= 1e9;
         let details = serde_json::json!({
             "strategy": intent.strategy,

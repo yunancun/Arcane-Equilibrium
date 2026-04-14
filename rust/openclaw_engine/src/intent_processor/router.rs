@@ -21,6 +21,7 @@ impl IntentProcessor {
                 rejected_reason: Some("governance_not_authorized".into()),
                 fill: None,
                 verdict_info: None,
+                approved_qty: 0.0,
             };
         }
 
@@ -38,6 +39,7 @@ impl IntentProcessor {
                     )),
                     fill: None,
                     verdict_info: None,
+                    approved_qty: 0.0,
                 };
             }
         }
@@ -97,6 +99,7 @@ impl IntentProcessor {
                     )),
                     fill: None,
                     verdict_info: vi.take(),
+                    approved_qty: 0.0,
                 };
             }
             Verdict::Modified => {
@@ -157,6 +160,7 @@ impl IntentProcessor {
                 )),
                 fill: None,
                 verdict_info: vi.take(),
+                approved_qty: 0.0,
             };
         }
 
@@ -188,6 +192,7 @@ impl IntentProcessor {
                     rejected_reason: Some(format!("risk_gate: {}", check_result.reason)),
                     fill: None,
                     verdict_info: vi.take(),
+                    approved_qty: 0.0,
                 };
             }
 
@@ -201,6 +206,7 @@ impl IntentProcessor {
                         rejected_reason: Some(reason),
                         fill: None,
                         verdict_info: vi.take(),
+                        approved_qty: 0.0,
                     };
                 }
             }
@@ -219,10 +225,11 @@ impl IntentProcessor {
                     )),
                     fill: None,
                     verdict_info: vi.take(),
+                    approved_qty: 0.0,
                 };
             }
             // SEC-11: ATR=0 → fail-closed (cold-start by PNL-3 boot cooldown; runtime ATR=0 = indicator failure).
-            // SEC-11：ATR=0 失敗關閉（冷啟動由 PNL-3 保護；運行時 ATR=0 = 指標故障）。
+            // SEC-11：ATR=0 失敗關閉（冷啟動由 PNL-3 保護；runtime ATR=0 = 指標故障）。
             if !(atr > 0.0) {
                 tracing::warn!(symbol = %intent.symbol,
                     "cost_gate fail-closed: ATR unavailable (SEC-11) / 成本門禁因 ATR 不可用拒絕");
@@ -231,6 +238,7 @@ impl IntentProcessor {
                     rejected_reason: Some("cost_gate: ATR unavailable (fail-closed, SEC-11)".into()),
                     fill: None,
                     verdict_info: vi.take(),
+                    approved_qty: 0.0,
                 };
             }
             let volume_24h = paper_state.latest_turnover(&intent.symbol).unwrap_or(0.0);
@@ -263,6 +271,7 @@ impl IntentProcessor {
             rejected_reason: None,
             fill: Some(fill),
             verdict_info: vi.take(),
+            approved_qty: final_qty,
         }
     }
 
