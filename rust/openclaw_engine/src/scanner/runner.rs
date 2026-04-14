@@ -36,13 +36,15 @@ use tokio_util::sync::CancellationToken;
 use tracing::{info, warn};
 
 /// Generates the list of WebSocket topics for a single symbol.
-/// Mirrors the topic list built in main.rs for consistency.
+/// Includes `tickers.{sym}` so scanner-added symbols receive fundingRate / indexPrice
+/// updates required by FundingArb (OC-5 / G-2).
 /// 生成單個交易對的 WebSocket 主題列表。
-/// 與 main.rs 中構建的主題列表保持一致。
+/// 包含 `tickers.{sym}` 以便掃描器添加的交易對接收 FundingArb 所需的資金費率/指數價格。
 fn topics_for_symbol(symbol: &str) -> Vec<String> {
     vec![
         format!("kline.1.{symbol}"),
         format!("publicTrade.{symbol}"),
+        format!("tickers.{symbol}"),
     ]
 }
 
@@ -264,14 +266,15 @@ impl ScannerRunner {
 mod tests {
     use super::*;
 
-    /// EN: topics_for_symbol generates kline.1 + publicTrade for each symbol.
-    /// 中文: topics_for_symbol 為每個交易對生成 kline.1 + publicTrade。
+    /// EN: topics_for_symbol generates kline.1 + publicTrade + tickers for each symbol.
+    /// 中文: topics_for_symbol 為每個交易對生成 kline.1 + publicTrade + tickers。
     #[test]
     fn test_topics_for_symbol_standard() {
         let topics = topics_for_symbol("BTCUSDT");
-        assert_eq!(topics.len(), 2);
+        assert_eq!(topics.len(), 3);
         assert_eq!(topics[0], "kline.1.BTCUSDT");
         assert_eq!(topics[1], "publicTrade.BTCUSDT");
+        assert_eq!(topics[2], "tickers.BTCUSDT");
     }
 
     /// EN: topics_for_symbol with different symbols produces unique topics.
