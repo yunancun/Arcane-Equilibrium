@@ -118,10 +118,18 @@ pub(crate) fn persist_intent(
         // those fields into OrderIntent. Root principle #8「交易可解釋」requires
         // at minimum the strategy identifier + confidence score to be persisted.
         // FUP-8：填充 details 避免 trading.intents.details 100% NULL。
+        //
+        // Sentinel guard: paper path persists raw intent.qty (1e9 sentinel meaning
+        // "size me"), bypassing Kelly/P1 sizing that Live/Demo goes through. Writing
+        // 1e9 as submitted_qty would mislead analysts. Flag it explicitly so the
+        // detail stays honest about what the DB row represents.
+        // 哨兵旗標：paper 路徑直接 persist 未 size 的 1e9 sentinel；明確標示避免誤導分析。
+        let is_sentinel = approved_qty >= 1e9;
         let details = serde_json::json!({
             "strategy": intent.strategy,
             "confidence": intent.confidence,
-            "submitted_qty": approved_qty,
+            "submitted_qty": if is_sentinel { serde_json::Value::Null } else { serde_json::json!(approved_qty) },
+            "is_sentinel": is_sentinel,
             "is_long": intent.is_long,
         });
         let _ = tx.try_send(crate::database::TradingMsg::Intent {
