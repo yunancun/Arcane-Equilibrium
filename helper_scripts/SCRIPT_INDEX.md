@@ -1,7 +1,7 @@
 # helper_scripts/ — 腳本索引 (Script Index)
 
 本目錄存放 OpenClaw 系統的維護、啟動、CI 輔助腳本。
-最後更新：2026-04-12（FIX-52 覆蓋率更新）
+最後更新：2026-04-14（QoL-3 新增 build_pyo3.sh + restart_all.sh `--rebuild`）
 
 ---
 
@@ -9,7 +9,8 @@
 
 | 腳本 | 用途 |
 |------|------|
-| `restart_all.sh` | 一鍵重啟 Rust 引擎 + API server（`--engine-only` / `--api-only`） |
+| `build_pyo3.sh` | **PyO3 (.so) 統一建構+部署**：`maturin build --release` 一次，`pip install --force-reinstall` 雙寫至 `~/.venv` 與 `control_api_v1/.venv`。旗標：`--release`（預設）/ `--debug` / `--venv <path>`（單一目標）/ `-n`/`--dry-run` / `--help`。退出碼：0 ok / 1 args / 2 build / 3 install / 4 verify。解決 Rust struct 改動後需手動 `maturin develop` 兩次的痛點。 |
+| `restart_all.sh` | 一鍵重啟 Rust 引擎 + API server。`--engine-only` / `--api-only` 限定範圍；`--rebuild` 在啟動服務前調用 `build_pyo3.sh` 重建 .so（rebuild 失敗則不啟動任何服務）。預設無 flag 行為不變。 |
 | `clean_restart.sh` | 乾淨重啟：停引擎 → PyO3 flatten demo/live 倉位 → 歸檔 runtime + DB `_damaged_<ts>` 表 → 檢查 binary 新舊 → 重建/重啟 → watchdog 驗證。旗標：`--yes` / `--mark-damaged` / `--include-live` / `--skip-flatten` / `--skip-build-check` |
 | `clean_restart_flatten.py` | 交易所平倉助手（被 clean_restart.sh 調用；亦可獨立使用 `--env demo\|mainnet [--dry-run]`）。先 `refresh_instruments` 載入品種規格，再對每倉下 reduce_only 市價單 + 取消所有未成交單；5 輪 verify 循環掃殘尾 |
 | `start_paper_trading.sh` | API server 就緒後自動啟動 Paper Trading（systemd / cron @reboot） |
