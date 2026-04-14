@@ -34,7 +34,7 @@
 | W22 | 05-05~09 | **G-SR-1 S1-S4** Phase A 信號源收緊（~18h）· LG-2/3 | ✅（提前完成 04-13） |
 | W23 | 05-12~16 | **G-SR-1 S5-S7** Phase B+C Agent 接線 + PM 驗收（~14h）· G-7 Teacher · G-10 Cal · LG-4/5 | ✅ G-SR-1（提前完成 04-13）· G-7/G-10/LG ⬜ |
 | W24 | 05-19~23 | **EDGE-P0-1 止血** · EDGE-P1-1/P1-3 信號收緊 · EDGE-P1-2 Funding Rate | ⬜ |
-| W25+ | 05-26+ | EDGE-P2 架構層 · R-06 全 5 agent · Phase 5 補強 · Backlog | ⬜ |
+| W25+ | 05-26+ | **EDGE-P3-1 Realized Edge Predictor** · EDGE-P2 架構層 · R-06 全 5 agent · Phase 5 補強 | ⬜ |
 
 **關鍵路徑**：`~~G-3 → OC-3 → 6-RC-6 → 6-01~13 → 3E-ARCH~~ ✅ → LG-1(05-01) → LG-2 → LG-4 → Live`
 **最早 Live 日期**：W23 末（～2026-05-16）
@@ -66,6 +66,7 @@ PM 確認報告：`docs/audits/2026-04-12--full_audit_fix_plan_pm_confirmed.md`
 - [ ] **JS 滾動重跑** — 暫緩，等 EDGE-P0-1 + P1 改善後再重跑
   - ↳ **G-6** / **G-8** 同步暫緩
 - [ ] **LG-1** Paper Trading 穩定運行 21 天（Live Gate 前置）— 原 05-01 目標，視 EDGE 修復進度調整
+- [ ] **EDGE-P3-1** 🧠 **Realized Edge Predictor**（LightGBM 取代 shrunk_bps）— compact 後 operator 發令啟動，詳見「策略 Edge 修復」§P3 分工（FA+PA+ML-MIT+AI-E+CC 平行）
 
 ---
 
@@ -393,12 +394,42 @@ C1-C2 接線 + PM 端到端驗收。1086 lib + 33 e2e = 1119 tests pass, 0 fail 
   - Round-trip fee 從 11 bps → 2 bps，根本性改變盈利方程式
   - 工作量大，W24+ 排期
 
+### P3 — ML 層（取代 JS shrinkage，解鎖 Phase 5 cost_gate）
+
+- [ ] **EDGE-P3-1** 🧠 **Realized Edge Predictor** — shrunk_bps 退役 · 單筆單子 ex-ante edge 預測
+  - **一句話**：`shrunk_bps` 是「策略**歷史平均**賺多少」（一個靜態數字）；此項改為「**這一筆**在現在市場條件下預期賺多少」（LightGBM 動態預測）。
+  - **Why**：當前所有策略 gross edge ≈ 0，shrunk_bps 塌到 -35.72 bps → cost_gate 形同虛設。LightGBM 管線（`run_training_pipeline.py`、`parquet_etl.py`）是空殼。LinUCB 只做 arm 選擇，不做 ex-ante edge 評估。三件事同一個洞：**沒有模型把「決策瞬間 features」映射到「實現 edge」**。
+  - **模型**：`P(realized_edge_bps | context)` quantile LGBM (q=0.1/0.5/0.9)，per-strategy 獨立訓練避免 Simpson paradox
+  - **Features（決策瞬間可得，禁止 look-ahead）**：
+    - Regime: `adx_1h`, `bb_width_pct`, `atr_pct`, `funding_rate`, `basis_bps`
+    - Strategy: `strategy_id`, `confluence_score`, `persistence_elapsed_ms`, `side`
+    - Position: `notional_pct_of_bal`, `concurrent_positions`, `same_direction_cnt`
+    - Cost: `spread_bps`, `expected_slippage_bps`
+  - **Label**：`realized_net_edge_bps = (exit-entry)/entry × side − closed_fees_bps`，close fill 時回填
+  - **接線**：替換 cost_gate 比較邏輯 → `predicted_median_edge − k×(median−q10) > cost` 才放行；`q10 > 0` 才加倉。LinUCB 不動（互補：bandit 選 arm，GBM 評 arm ex-ante edge）
+  - **分工（post-compact 平行展開）**：
+    - **FA** 功能規格 → `docs/references/2026-04-15--edge_predictor_spec.md`（gate 條件、rollback、shadow→active 準則）
+    - **PA** 架構 → feature store schema（PG `learning.decision_features`）+ `parquet_etl.py` 補實現 + train 觸發器 + 與 LinUCB 共存
+    - **ML-MIT** 模型 → quantile LGBM + CPCV + isotonic calibration + 離線 pinball loss / decile lift 報告（填 `scorer_trainer.py`）
+    - **AI-E** 接線 → PyO3 ONNX runtime → `cost_gate` + shadow mode flag + IPC 熱重載（新增 Rust `edge_predictor/` module）
+    - **CC** 審查 → label leakage / train-serve skew / shadow 期 fail-closed / regression tests
+  - **安全門檻（不可違背）**：
+    1. Shadow mode ≥ 14d，pinball loss 對比常數模型 >10% 才 promote active
+    2. Feature freeze time = entry 瞬間快照，禁止 look-ahead
+    3. Per-strategy 獨立模型
+    4. 推理失敗 fail-closed → 回退現有 shrinkage（不 block 交易）
+    5. 不觸 LinUCB（互補，降低 blast radius）
+  - **產出預期**：Phase 5 cost_gate 獲真實 ex-ante 信號 / LightGBM 管線實際運行（v0.4 敘述兌現 20%→60%）/ 策略 selection 雙軌（GBM 預測分佈 + LinUCB arm reward）
+  - **排期**：W25+；compact 後 operator 發令 → FA 開始起草 spec → 分工展開
+  - **狀態**：🟢 思路已定稿（2026-04-14 operator 確認），等待啟動
+
 ### 執行順序與依賴
 
 ```
 ✅ EDGE-P0-1 ‖ P0-2 ‖ P1-1 ‖ P1-2 ‖ P1-3 ‖ P1-4 — P0+P1 全部完成（2026-04-13）
 ✅ EDGE-P2-1（close fill labeling 修復）— 2026-04-13
   → P2-2 / P2-3（W24+）
+  → P3-1 Edge Predictor（W25+，post-compact 啟動）
 ```
 
 ---
