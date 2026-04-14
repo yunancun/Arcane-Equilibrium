@@ -186,8 +186,16 @@ impl TickPipeline {
                     if half_qty > 0.0 {
                         if let Some(close_price) = self.paper_state.latest_price(sym) {
                             if close_price > 0.0 {
+                                // EDGE-P3-1 R2: reduce_position keeps the position alive (partial close),
+                                // so entry_context_id remains on the residual. Capture here for the fill row.
+                                // EDGE-P3-1 R2：reduce_position 是部分平倉，剩餘倉位仍保留 entry_context_id。
+                                let ectx = self
+                                    .paper_state
+                                    .get_entry_context_id(sym)
+                                    .unwrap_or("")
+                                    .to_string();
                                 let pnl = self.paper_state.reduce_position(sym, half_qty, close_price);
-                                self.emit_close_fill(sym, *is_long, half_qty, close_price, event.ts_ms, pnl, "risk_close:fast_track_reduce_half");
+                                self.emit_close_fill(sym, *is_long, half_qty, close_price, event.ts_ms, pnl, "risk_close:fast_track_reduce_half", &ectx);
                                 // FIX-03b: dispatch exchange order for Demo/Live so
                                 // Bybit-side position matches local paper_state.
                                 // FIX-03b：Demo/Live 模式派發交易所訂單，避免本地狀態與交易所倉位脫節。
@@ -250,10 +258,18 @@ impl TickPipeline {
             // the 2026-04-12 anomaly).
             // PNL-FIX-1：每個倉位必須以該交易對自己的最新價平倉，禁止使用 event.last_price。
             for sym in symbols {
+                // EDGE-P3-1 R2: capture entry_context_id BEFORE close_position_at_symbol_market
+                // removes the position. Empty string when unknown → NULL in DB.
+                // EDGE-P3-1 R2：關倉前先捕獲 entry_context_id。
+                let ectx = self
+                    .paper_state
+                    .get_entry_context_id(&sym)
+                    .unwrap_or("")
+                    .to_string();
                 if let Some((il, q, px, pnl)) =
                     self.close_position_at_symbol_market(&sym, event.ts_ms)
                 {
-                    self.emit_close_fill(&sym, il, q, px, event.ts_ms, pnl, "risk_close:fast_track");
+                    self.emit_close_fill(&sym, il, q, px, event.ts_ms, pnl, "risk_close:fast_track", &ectx);
                 }
                 self.stats.total_stops += 1;
             }
@@ -274,11 +290,16 @@ impl TickPipeline {
             // close each at its own symbol's latest price (see fast_track block).
             // PNL-FIX-1：被觸發的倉位 symbol 可能 ≠ event.symbol，必須各自用自己的最新價平倉。
             for (sym, trigger) in &self.paper_state.check_stops(event.last_price, event.ts_ms) {
+                let ectx = self
+                    .paper_state
+                    .get_entry_context_id(sym)
+                    .unwrap_or("")
+                    .to_string();
                 if let Some((il, q, px, pnl)) =
                     self.close_position_at_symbol_market(sym, event.ts_ms)
                 {
                     let tag = format!("stop_trigger:{}", trigger.reason);
-                    self.emit_close_fill(sym, il, q, px, event.ts_ms, pnl, &tag);
+                    self.emit_close_fill(sym, il, q, px, event.ts_ms, pnl, &tag, &ectx);
                 }
                 self.stats.total_stops += 1;
             }
@@ -377,11 +398,16 @@ impl TickPipeline {
             // PNL-FIX-1: per-symbol close price (see fast_track block).
             for (sym, trigger) in &self.paper_state.check_stops(event.last_price, event.ts_ms) {
                 debug!(symbol = %sym, reason = %trigger.reason, "stop (paused)");
+                let ectx = self
+                    .paper_state
+                    .get_entry_context_id(sym)
+                    .unwrap_or("")
+                    .to_string();
                 if let Some((il, q, px, pnl)) =
                     self.close_position_at_symbol_market(sym, event.ts_ms)
                 {
                     let tag = format!("stop_trigger:{}", trigger.reason);
-                    self.emit_close_fill(sym, il, q, px, event.ts_ms, pnl, &tag);
+                    self.emit_close_fill(sym, il, q, px, event.ts_ms, pnl, &tag, &ectx);
                     self.stats.total_stops += 1;
                     self.execute_position_close(sym, il, q, event, false);
                 } else {
@@ -723,6 +749,17 @@ impl TickPipeline {
                                 continue;
                             }
                             strategy.on_fill(intent, &fill);
+                            // EDGE-P3-1 R2: detect whether this fill will open a fresh position
+                            // so we can thread the entry_context_id onto it after apply_fill.
+                            // apply_fill returns non-zero realized_pnl only on CLOSE; opening
+                            // or accumulating returns 0.0. For the "open" case we need to
+                            // distinguish from accumulate — if position did not exist before,
+                            // it's an open. EDGE-P3-1 R2：區分開倉 / 加倉 / 平倉，只在開新倉時
+                            // 打上 entry_context_id（加倉保留原 entry；平倉已被清）。
+                            let was_open = self
+                                .paper_state
+                                .get_position(&intent.symbol)
+                                .is_none();
                             let realized_pnl = self.paper_state.apply_fill(
                                 &intent.symbol,
                                 intent.is_long,
@@ -731,6 +768,14 @@ impl TickPipeline {
                                 fill.fee,
                                 event.ts_ms,
                             );
+                            // EDGE-P3-1 R2: stamp entry_context_id for fresh opens only.
+                            // Uses the same make_context_id signature used below for the
+                            // Fill row (same em, symbol, ts_ms → same context_id).
+                            // EDGE-P3-1 R2：僅開新倉時打 entry_context_id；加倉不覆蓋。
+                            if was_open && realized_pnl == 0.0 {
+                                let ctx = make_context_id(em, &intent.symbol, event.ts_ms);
+                                self.paper_state.set_entry_context_id(&intent.symbol, &ctx);
+                            }
                             self.stats.total_fills += 1;
                             push_capped(&mut self.recent_fills, TimestampedFill {
                                 timestamp_ms: event.ts_ms,
@@ -743,6 +788,12 @@ impl TickPipeline {
                             }, 50);
 
                             if let Some(ref tx) = self.trading_tx {
+                                // EDGE-P3-1 R2: this on_tick.rs path is the STRATEGY OPEN path
+                                // (reached via signal → intent → apply_fill). It produces open or
+                                // accumulate fills; close fills are emitted via emit_close_fill
+                                // on the risk/strategy/fast_track paths. Leave entry_context_id
+                                // empty here — the training JOIN reads it from close-fill rows.
+                                // EDGE-P3-1 R2：此處走策略開倉路徑，不產生平倉 fill；留空即可。
                                 let _ = tx.try_send(crate::database::TradingMsg::Fill {
                                     fill_id: make_fill_id(em, &intent.symbol, event.ts_ms),
                                     ts_ms: event.ts_ms,
@@ -760,6 +811,7 @@ impl TickPipeline {
                                     realized_pnl,
                                     strategy_name: intent.strategy.clone(),
                                     context_id: make_context_id(em, &intent.symbol, event.ts_ms),
+                                    entry_context_id: String::new(),
                                     engine_mode: self.pipeline_kind.db_mode().to_string(),
                                 });
                             }
@@ -866,6 +918,9 @@ impl TickPipeline {
                 if let Some(pos) = self.paper_state.get_position(symbol) {
                     let is_long = pos.is_long;
                     let qty = pos.qty;
+                    // EDGE-P3-1 R2: snapshot entry_context_id here (pos is &; read before close).
+                    // EDGE-P3-1 R2：先行快照 entry_context_id（pos 為借用引用，關倉前讀取）。
+                    let ectx = pos.entry_context_id.clone();
                     info!(symbol = %symbol, is_long = %is_long, qty = %qty, reason = %reason,
                           "strategy close (paper) / 策略平倉（紙盤）");
                     // PNL-FIX-1: close at this symbol's own latest price — strategies may
@@ -876,7 +931,7 @@ impl TickPipeline {
                         self.close_position_at_symbol_market(symbol, event.ts_ms)
                     {
                         let tag = format!("strategy_close:{reason}");
-                        self.emit_close_fill(symbol, is_long, qty, close_px, event.ts_ms, pnl, &tag);
+                        self.emit_close_fill(symbol, is_long, qty, close_px, event.ts_ms, pnl, &tag, &ectx);
                         // Update Kelly stats for future sizing / 更新 Kelly 統計供未來 sizing 使用
                         self.intent_processor.record_trade(symbol, pnl);
                         // Push to recent_fills ring buffer / 推入最近成交環形緩衝
@@ -1010,11 +1065,16 @@ impl TickPipeline {
                         // PNL-FIX-1: risk evaluator can act on cross-symbol positions —
                         // close at this symbol's own latest price, not event.last_price.
                         // PNL-FIX-1：風控評估器可作用於跨交易對倉位，必須以該交易對自己的最新價平倉。
+                        let ectx = self
+                            .paper_state
+                            .get_entry_context_id(symbol)
+                            .unwrap_or("")
+                            .to_string();
                         if let Some((_il, _q, close_px, pnl)) =
                             self.close_position_at_symbol_market(symbol, event.ts_ms)
                         {
                             let tag = format!("risk_close:{reason}");
-                            self.emit_close_fill(symbol, *is_long, *qty, close_px, event.ts_ms, pnl, &tag);
+                            self.emit_close_fill(symbol, *is_long, *qty, close_px, event.ts_ms, pnl, &tag, &ectx);
                             // P1-2 fix: update Kelly stats for risk-close (pre-existing omission).
                             // P1-2 修復：風控平倉也更新 Kelly 統計（既有遺漏）。
                             self.intent_processor.record_trade(symbol, pnl);
@@ -1047,10 +1107,15 @@ impl TickPipeline {
                             .get(sym)
                             .copied()
                             .unwrap_or(event.last_price);
+                        let ectx = self
+                            .paper_state
+                            .get_entry_context_id(sym)
+                            .unwrap_or("")
+                            .to_string();
                         if let Some(pnl) =
                             self.paper_state.close_position(sym, px, event.ts_ms)
                         {
-                            self.emit_close_fill(sym, *il, *q, px, event.ts_ms, pnl, "risk_close:halt_session");
+                            self.emit_close_fill(sym, *il, *q, px, event.ts_ms, pnl, "risk_close:halt_session", &ectx);
                         }
                         self.stats.total_stops += 1;
                         self.execute_position_close(sym, *il, *q, event, is_exchange_mode);

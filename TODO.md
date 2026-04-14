@@ -1,6 +1,6 @@
 # OpenClaw TODO — 工作計劃清單
 
-**最後更新：2026-04-14**（TODO 大清理 — 完成項全部歸檔到 `docs/archive/2026-04-14--completed_todo_w22_phantom_heal.md`）
+**最後更新：2026-04-15**（EDGE-P3-1 spec v1.0 → v1.3 四輪審查完成，GREEN — Stage 0 可開工；worklog: `docs/worklogs/2026-04-15--edge_predictor_spec_v1_to_v1_3.md`）
 **測試基準線**：Rust **engine lib 1146 + core 372 + e2e 33 + stress 35 = 1586** · Python **2852 passed (5 skipped · 0 fail)** · ml_training **135 passed (6 skipped)**
 
 > compact 後從此文件恢復工作狀態。第一個 `[ ]` 即為下一步起點。
@@ -101,20 +101,24 @@
 ### 🧠 EDGE-P3-1 Realized Edge Predictor（取代 JS shrinkage，解鎖 Phase 5 cost_gate）
 
 - [ ] **EDGE-P3-1** 🧠 **Realized Edge Predictor** — shrunk_bps 退役 · 單筆單子 ex-ante edge 預測
-  - **一句話**：`shrunk_bps` 是「策略**歷史平均**賺多少」（靜態）；此項改為「**這一筆**在現在市場條件下預期賺多少」（LightGBM 動態預測）
+  - **一句話**：`shrunk_bps` 是「策略**歷史平均**賺多少」（靜態）；此項改為「**這一筆**在現在市場條件下預期賺多少」（quantile LightGBM 動態預測）
   - **Why**：當前所有策略 gross edge ≈ 0，shrunk_bps 塌到 -35.72 bps → cost_gate 形同虛設。LightGBM 管線是空殼。LinUCB 只做 arm 選擇。三件事同一個洞：**沒有模型把「決策瞬間 features」映射到「實現 edge」**
-  - **模型**：`P(realized_edge_bps | context)` quantile LGBM (q=0.1/0.5/0.9)，per-strategy 獨立訓練避免 Simpson paradox
-  - **Features**（決策瞬間可得，禁止 look-ahead）：Regime（adx_1h, bb_width_pct, atr_pct, funding_rate, basis_bps）· Strategy（strategy_id, confluence_score, persistence_elapsed_ms, side）· Position（notional_pct_of_bal, concurrent_positions, same_direction_cnt）· Cost（spread_bps, expected_slippage_bps）
-  - **Label**：`realized_net_edge_bps = (exit-entry)/entry × side − closed_fees_bps`，close fill 時回填
+  - **模型**：`P(realized_edge_bps | context)` per-strategy quantile LGBM (q10/q50/q90) + CQR + monotone rearrangement
+  - **Features**（17 維，決策瞬間快照，禁 look-ahead）：Regime 5 · Microstructure 3 · Strategy 3 · Position 3 · Time 3
+  - **Label**：`realized_net_edge_bps = (exit-entry)/entry × side − closed_fees_bps`，close fill 時回填；grid VWAP merge / 其他 qty-weighted blend
   - **接線**：替換 cost_gate 比較邏輯 → `predicted_median_edge − k×(median−q10) > cost` 才放行；`q10 > 0` 才加倉
-  - **分工（operator 發令後 post-compact 平行展開）**：
-    - **FA** → `docs/references/2026-04-15--edge_predictor_spec.md`（gate 條件、rollback、shadow→active 準則）
-    - **PA** → feature store schema（PG `learning.decision_features`）+ `parquet_etl.py` 補實現 + train 觸發器 + 與 LinUCB 共存
-    - **ML-MIT** → quantile LGBM + CPCV + isotonic calibration + 離線 pinball loss / decile lift 報告
-    - **AI-E** → PyO3 ONNX runtime → `cost_gate` + shadow mode flag + IPC 熱重載（新增 Rust `edge_predictor/` module）
-    - **CC** → label leakage / train-serve skew / shadow 期 fail-closed / regression tests
-  - **安全門檻**（不可違背）：Shadow mode ≥ 14d，pinball loss 對比常數模型 >10% 才 promote active · Feature freeze time = entry 瞬間快照 · Per-strategy 獨立模型 · 推理失敗 fail-closed → 回退現有 shrinkage · 不觸 LinUCB
-  - **狀態**：🟢 思路已定稿（2026-04-14 operator 確認），等待啟動
+  - **規格演化**（2026-04-15 完成 4 輪審查）：v1.0 → v1.1（round-1 QC/QA）→ v1.2（round-2 F1-F10，816→1019 行）→ v1.3（round-3 U1-U4 + M1，1019→1101 行）→ round-4 **GREEN**
+  - **規格路徑**：`docs/references/2026-04-15--edge_predictor_spec.md`（1101 行 · CC 13 項 · T1-T23 命名測試）
+  - **Worklog**：`docs/worklogs/2026-04-15--edge_predictor_spec_v1_to_v1_3.md`（規格四輪演化完整記錄）
+  - **分工（Stage 0 可開工，#25 + #27 可並行）**：
+    - **FA** ✅ spec v1.3 GREEN（commit `9141e08`）
+    - **PA** (#25) → SQL migration（`learning.decision_features` + `learning.decision_shadow_fills` + index）+ `parquet_etl.py` 補實現 + train 觸發器
+    - **ML-MIT** (#26) → quantile LGBM + CQR + CPCV + isotonic calibration + 離線 pinball loss / decile lift（blocked by #25）
+    - **AI-E** (#27) → Rust `edge_predictor/` module + PyO3 ONNX runtime + `cost_gate` 接入 + shadow flag + IPC 熱重載 + `write_toml_atomic_fsynced` helper 升級（`store.rs:231-244` 現無 fsync）+ `PipelineCommand::EmitShadowFill` IPC
+    - **CC** (#28) → 13 項必查（v1.3 CC clist）+ T1-T23 regression（blocked by #27）
+  - **安全門檻**（不可違背）：Shadow ≥14d（#29）· pinball loss 對比常數模型 >10% 才 promote · Feature freeze time = entry 瞬間 · Per-strategy 獨立模型 · 推理失敗 fail-closed → 回退現有 shrinkage · 不觸 LinUCB · 兩階段提交防 half-enabled · macOS CI `aarch64-apple-darwin`（M1/M2/M3/M4 → M5 Ultra/Max 部署目標，見 memory `project_mac_deployment_target.md`）
+  - **Stage 0 收尾前 housekeeping**（Round-4 YELLOW-nit，非阻塞）：§7.1 加 ort macOS dylib bundling 提醒 · CC #13 加 strace Linux-only 註記
+  - **狀態**：🟢 spec GREEN · Stage 0 可開工（#25 PA + #27 AI-E 並行啟動）
 
 ### Phase 6 擴展
 
@@ -216,6 +220,7 @@
 - **已知問題清單**：`docs/KNOWN_ISSUES.md`
 - **Bybit API 字典手冊**：`docs/references/2026-04-04--bybit_api_reference.md`
 - **工程日誌（2026-04-14 ENGINE-HEAL）**：`docs/worklogs/2026-04-14--engine_self_healing.md`
+- **工程日誌（2026-04-15 EDGE-P3-1 規格四輪演化）**：`docs/worklogs/2026-04-15--edge_predictor_spec_v1_to_v1_3.md`
 
 ---
 

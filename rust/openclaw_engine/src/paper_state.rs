@@ -24,6 +24,14 @@ pub struct PaperPosition {
     pub entry_fee: f64,
     pub entry_ts_ms: u64,
     pub unrealized_pnl: f64,
+    /// EDGE-P3-1 R2: context_id of the entry that opened this position.
+    /// Threaded to trading.fills.entry_context_id on close for ML training JOIN.
+    /// Empty string when unknown (e.g., pre-V017 restored snapshots, orphan adopt).
+    /// EDGE-P3-1 R2：開此倉的 entry 對應 context_id。平倉時透傳到
+    /// trading.fills.entry_context_id，供 ML 訓練 JOIN。未知時為空串（如 pre-V017
+    /// 還原的快照、orphan adopt）。
+    #[serde(default)]
+    pub entry_context_id: String,
 }
 
 /// Paper trading state manager.
@@ -168,6 +176,35 @@ impl PaperState {
         self.positions.get(symbol)
     }
 
+    /// EDGE-P3-1 R2: set entry_context_id on an existing position.
+    /// Caller invokes after `apply_fill` opens a new position (realized_pnl == 0.0
+    /// AND position did not previously exist). No-op if position does not exist
+    /// or `context_id` is empty. Silently overwrites (caller is responsible for
+    /// only calling on fresh opens — accumulate fills must not overwrite the
+    /// original entry's id).
+    /// EDGE-P3-1 R2：在現有倉位上設定 entry_context_id。僅在 apply_fill 開新倉後
+    /// 呼叫（realized_pnl == 0.0 且此前無該倉位）。空串或無倉位時 no-op。
+    pub fn set_entry_context_id(&mut self, symbol: &str, context_id: &str) {
+        if context_id.is_empty() {
+            return;
+        }
+        if let Some(pos) = self.positions.get_mut(symbol) {
+            pos.entry_context_id = context_id.to_string();
+        }
+    }
+
+    /// EDGE-P3-1 R2: read entry_context_id from an existing position.
+    /// Returns `None` if position does not exist or entry_context_id is empty.
+    /// Called by `emit_close_fill` to thread the opening entry's context_id
+    /// into `trading.fills.entry_context_id` for ML training JOIN.
+    /// EDGE-P3-1 R2：讀取現有倉位的 entry_context_id。空或無倉位時返回 None。
+    pub fn get_entry_context_id(&self, symbol: &str) -> Option<&str> {
+        self.positions
+            .get(symbol)
+            .filter(|p| !p.entry_context_id.is_empty())
+            .map(|p| p.entry_context_id.as_str())
+    }
+
     pub fn drawdown_pct(&self) -> f64 {
         if self.forced_drawdown > 0.0 {
             return self.forced_drawdown;
@@ -275,6 +312,7 @@ impl PaperState {
                     entry_fee: 0.0, // exchange did not bill fees through us — leave 0
                     entry_ts_ms: ts_ms,
                     unrealized_pnl: 0.0,
+                    entry_context_id: String::new(),
                 },
             );
             inserted += 1;
@@ -342,6 +380,7 @@ impl PaperState {
                         entry_fee: 0.0,
                         entry_ts_ms: ts_ms,
                         unrealized_pnl: 0.0,
+                        entry_context_id: String::new(),
                     },
                 );
                 true
@@ -560,6 +599,7 @@ impl PaperState {
                 entry_fee: fee,
                 entry_ts_ms: ts_ms,
                 unrealized_pnl: 0.0,
+                entry_context_id: String::new(),
             },
         );
         0.0 // Opening position — no realized PnL / 開倉無已實現損益
@@ -1116,5 +1156,106 @@ mod tests {
         let eth = s.get_position("ETHUSDT").unwrap();
         assert!(!eth.is_long);
         assert!((eth.best_price - 3_050.0).abs() < 1e-9); // reset on flip
+    }
+
+    // ─── EDGE-P3-1 entry_context_id threading regressions ───────────────────
+    // EDGE-P3-1 entry_context_id 串接回歸測試
+
+    #[test]
+    fn test_entry_context_id_default_empty_on_open() {
+        // Fresh apply_fill opens position with empty entry_context_id until setter stamps it.
+        // 新開倉 entry_context_id 預設為空，直到 setter 標記。
+        let mut s = PaperState::new(10_000.0);
+        s.apply_fill("BTC", true, 0.1, 50_000.0, 1.0, 0);
+        assert_eq!(s.get_entry_context_id("BTC"), None);
+    }
+
+    #[test]
+    fn test_set_entry_context_id_on_fresh_open() {
+        // Setter stamps the id and getter reads it back.
+        // setter 寫入後 getter 能讀回。
+        let mut s = PaperState::new(10_000.0);
+        s.apply_fill("BTC", true, 0.1, 50_000.0, 1.0, 0);
+        s.set_entry_context_id("BTC", "ctx-abc-123");
+        assert_eq!(s.get_entry_context_id("BTC"), Some("ctx-abc-123"));
+    }
+
+    #[test]
+    fn test_set_entry_context_id_ignores_empty() {
+        // Empty strings are no-ops so accumulate fills can't wipe a stamped id.
+        // 空字串 setter 視為 no-op，累倉路徑不會擦掉既有 id。
+        let mut s = PaperState::new(10_000.0);
+        s.apply_fill("BTC", true, 0.1, 50_000.0, 1.0, 0);
+        s.set_entry_context_id("BTC", "ctx-orig");
+        s.set_entry_context_id("BTC", "");
+        assert_eq!(s.get_entry_context_id("BTC"), Some("ctx-orig"));
+    }
+
+    #[test]
+    fn test_entry_context_id_survives_accumulate() {
+        // Same-direction top-up must NOT reset entry_context_id — downstream labels hinge on first open.
+        // 同方向加倉不得重設 entry_context_id — 下游標籤以首次開倉為錨。
+        let mut s = PaperState::new(10_000.0);
+        s.apply_fill("BTC", true, 0.1, 50_000.0, 1.0, 0);
+        s.set_entry_context_id("BTC", "ctx-first-open");
+        s.apply_fill("BTC", true, 0.1, 52_000.0, 1.0, 1000);
+        assert_eq!(s.get_entry_context_id("BTC"), Some("ctx-first-open"));
+    }
+
+    #[test]
+    fn test_entry_context_id_cleared_after_close() {
+        // close_position removes the entry → getter returns None.
+        // close_position 移除條目 → getter 回傳 None。
+        let mut s = PaperState::new(10_000.0);
+        s.apply_fill("BTC", true, 0.1, 50_000.0, 1.0, 0);
+        s.set_entry_context_id("BTC", "ctx-before-close");
+        assert_eq!(s.get_entry_context_id("BTC"), Some("ctx-before-close"));
+        s.close_position("BTC", 51_000.0, 1000);
+        assert_eq!(s.get_entry_context_id("BTC"), None);
+    }
+
+    #[test]
+    fn test_entry_context_id_partial_close_preserves_id() {
+        // Partial close (opposite qty < position qty) retains the stamped id on the surviving leg.
+        // 部分平倉（反向 qty < 持倉 qty）保留倖存腿上的 id。
+        let mut s = PaperState::new(10_000.0);
+        s.apply_fill("BTC", true, 0.2, 50_000.0, 2.0, 0);
+        s.set_entry_context_id("BTC", "ctx-original");
+        s.apply_fill("BTC", false, 0.1, 51_000.0, 1.0, 1000); // half close
+        assert!(s.get_position("BTC").is_some());
+        assert_eq!(s.get_entry_context_id("BTC"), Some("ctx-original"));
+    }
+
+    #[test]
+    fn test_pre_v017_snapshot_deserializes_with_empty_entry_context_id() {
+        // Backward compat: snapshots written before V017 migration have no
+        // entry_context_id field. `#[serde(default)]` must fill it with "".
+        // 向後相容：V017 前寫入的快照沒有 entry_context_id 欄位，`#[serde(default)]`
+        // 應填為空字串。
+        let legacy_json = r#"{
+            "symbol": "BTC",
+            "is_long": true,
+            "qty": 0.1,
+            "entry_price": 50000.0,
+            "best_price": 50000.0,
+            "entry_fee": 1.0,
+            "entry_ts_ms": 0,
+            "unrealized_pnl": 0.0
+        }"#;
+        let pos: PaperPosition = serde_json::from_str(legacy_json)
+            .expect("legacy snapshot must deserialize with serde(default)");
+        assert_eq!(pos.entry_context_id, "");
+        assert_eq!(pos.symbol, "BTC");
+        assert!(pos.is_long);
+    }
+
+    #[test]
+    fn test_setter_on_missing_symbol_is_noop() {
+        // Setter on a symbol with no position is a silent no-op (fail-soft).
+        // 對無持倉的 symbol 呼叫 setter 為靜默 no-op（fail-soft）。
+        let mut s = PaperState::new(10_000.0);
+        s.set_entry_context_id("NOPE", "ctx-ghost");
+        assert_eq!(s.get_entry_context_id("NOPE"), None);
+        assert_eq!(s.position_count(), 0);
     }
 }

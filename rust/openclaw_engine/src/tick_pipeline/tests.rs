@@ -60,6 +60,7 @@ use super::*;
                 123,     // ts_ms
                 0.0,     // realized_pnl
                 "risk_close:sl_hit",
+                "",      // entry_context_id unused here (test focuses on engine_mode embed)
             );
 
             let msg = rx
@@ -92,6 +93,60 @@ use super::*;
                 }
                 other => panic!("{:?}: expected Fill, got {:?}", kind, other),
             }
+        }
+    }
+
+    /// EDGE-P3-1 R2 regression: emit_close_fill must thread the caller-supplied
+    /// entry_context_id into the Fill row so training can JOIN fills → decision
+    /// snapshots via the open-time context id. Empty string → NULL at DB layer.
+    /// EDGE-P3-1 R2 回歸：emit_close_fill 必須將 caller 傳入的 entry_context_id
+    /// 寫入 Fill，使訓練端可用開倉時的 context id JOIN fills↔決策快照；空字串在 DB 層為 NULL。
+    #[test]
+    fn test_emit_close_fill_threads_entry_context_id() {
+        let mut pipeline = TickPipeline::with_kind(&["BTCUSDT"], 1_000.0, PipelineKind::Paper);
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<crate::database::TradingMsg>(8);
+        pipeline.set_trading_channel(tx);
+
+        pipeline.emit_close_fill(
+            "BTCUSDT",
+            true,
+            0.1,
+            50_000.0,
+            999,
+            25.0,
+            "risk_close:test",
+            "ctx-entry-xyz-789",
+        );
+
+        let msg = rx.try_recv().expect("Fill must be enqueued");
+        match msg {
+            crate::database::TradingMsg::Fill { entry_context_id, .. } => {
+                assert_eq!(
+                    entry_context_id, "ctx-entry-xyz-789",
+                    "entry_context_id must thread verbatim from caller to Fill row"
+                );
+            }
+            other => panic!("expected Fill, got {:?}", other),
+        }
+    }
+
+    /// Empty entry_context_id (open fills, missing context) still produces a
+    /// valid Fill — DB writer treats empty as NULL to avoid label pollution.
+    /// 空 entry_context_id（開倉 Fill、或缺失）仍應產生有效 Fill — DB writer 將空視為 NULL 以免污染訓練標籤。
+    #[test]
+    fn test_emit_close_fill_accepts_empty_entry_context_id() {
+        let mut pipeline = TickPipeline::with_kind(&["BTCUSDT"], 1_000.0, PipelineKind::Paper);
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<crate::database::TradingMsg>(8);
+        pipeline.set_trading_channel(tx);
+
+        pipeline.emit_close_fill("BTCUSDT", false, 0.05, 3_000.0, 111, 0.0, "test", "");
+
+        let msg = rx.try_recv().expect("Fill must be enqueued");
+        match msg {
+            crate::database::TradingMsg::Fill { entry_context_id, .. } => {
+                assert_eq!(entry_context_id, "");
+            }
+            other => panic!("expected Fill, got {:?}", other),
         }
     }
 
@@ -492,7 +547,7 @@ use super::*;
     fn test_dbrun3_emit_close_fill_increments_stats() {
         let mut p = TickPipeline::new(&["BTCUSDT"]);
         let before = p.stats.total_fills;
-        p.emit_close_fill("BTCUSDT", true, 0.1, 51_000.0, 1_000, 100.0, "risk_close:test");
+        p.emit_close_fill("BTCUSDT", true, 0.1, 51_000.0, 1_000, 100.0, "risk_close:test", "");
         assert_eq!(p.stats.total_fills, before + 1);
     }
 
@@ -1132,6 +1187,7 @@ use super::*;
             1_000,
             0.0,
             "risk_close:sl_hit",
+            "",
         );
 
         // (a) paper_state must show the fee charge.
