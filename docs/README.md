@@ -282,41 +282,20 @@ YYYY-MM-DD--HHmm--功能描述.扩展名
 | `2026-04-07--session_phase4_1_complete.md` | Phase 4-1 完成日誌 |
 | `2026-04-07--session_phase4_complete.md` | Phase 4 全量完成日誌 |
 
-### worklogs/ — 頂層工作日志（2026-04-08+）
+### worklogs/ — 頂層工作日志（2026-04-08+，daily_summary 為當日權威）
 
 | 文件 | 内容 |
 |------|------|
-| `2026-04-10--signal_diamond_phase1_4_fix_round.md` | ★★★ Signal Diamond Phase 1-4 + Fix Round 完整工程記錄：V015 Migration + Rust DB Writers + ModeState + IPC mode-aware + state swap + AddMode/SwitchMode IPC · 850 tests |
-| `2026-04-10--ml_pipeline_remediation_complete.md` | ML Pipeline 整改完成日誌：Rust 學習寫入路徑 + per-mode 數據隔離驗收 |
-| `2026-04-09--rust_market_scanner_phase_a_d_complete.md` | ★★★ Rust 市場掃描器 Phase A-D 完整工程日誌：ScannerRunner 全接線 + D2/D3 動態 symbol + QC/FA + IPC-SCAN-1 |
-| `2026-04-09--strategy_action_enum_implementation.md` | StrategyAction Enum 完整實現日誌：策略出場死鎖修復 + QC/FA 審查 + 4 findings 全修（P1 grid drift, P2 exchange Kelly, P2 funding_arb, P2 集成測試）· 830 tests |
-| `2026-04-08--daily_summary.md` | ★★★★ 2026-04-08 日匯總：1C-3 / 1C-3-F / 1C-4 全量完成 |
-| `2026-04-08--arch_rc1_1c_history_archive.md` | ★ ARCH-RC1 1A→1C-4 commit 敘事歸檔（1C-3 分 E/F 兩期完整記錄） |
-| `2026-04-08--1c3d_main_body.md` | ARCH-RC1 1C-3-D 主體實現日誌 |
-| `2026-04-08--1c3e_fmini_handoff.md` | ARCH-RC1 1C-3-E → 1C-3-F 交接快照 |
-| `2026-04-08--session_gui_fake_success_wave1.md` | GUI fake-success 盤點 Wave 1 |
-| `2026-04-08--session_gui_fake_success_wave2_p1_wiring.md` | GUI fake-success Wave 2 + P1 wiring |
-| `2026-04-08--session_progress_1c3f.md` | 1C-3-F session 進度 |
-| `2026-04-08--session_progress_post_1c4_wrap.md` | 1C-4 wrap 後 session 進度 |
-| `2026-04-08--session_resume_notes.md` | Session 恢復筆記 |
-| `2026-04-09--rust_market_scanner_phase_a_d_complete.md` | ★★★ Rust 市場掃描器 Phase A-D 完整工程日誌：ScannerRunner 全接線 + D2/D3 動態 symbol + QC/FA + IPC-SCAN-1 |
-| `2026-04-09--strategy_action_enum_implementation.md` | StrategyAction Enum 完整實現日誌：策略出場死鎖修復 + QC/FA 審查 · 830 tests |
-| `2026-04-10--ml_pipeline_remediation_complete.md` | ML Pipeline 整改完成日誌：Rust 學習寫入路徑 + per-mode 數據隔離驗收 |
-| `2026-04-10--signal_diamond_phase1_4_fix_round.md` | ★★★ Signal Diamond Phase 1-4 + Fix Round：V015 Migration + Rust DB Writers + ModeState + IPC mode-aware · 850 tests |
-| `2026-04-10--daily_summary.md` | 2026-04-10 日匯總 |
+| `2026-04-08--daily_summary.md` | ★★★★ 2026-04-08 日匯總：ARCH-RC1 1C-3-D/1C-3-E F-mini/1C-3-F/1C-4 + GUI fake-success Wave 1-2 + P1 Per-Trade Risk wiring |
+| `2026-04-09--daily_summary.md` | ★★★★ 2026-04-09 日匯總：StrategyAction Enum（策略出場死鎖修復）+ Rust 市場掃描器 Phase A-D + QC/FA 全修 · 830 tests |
+| `2026-04-10--daily_summary.md` | ★★★★ 2026-04-10 日匯總：ML Pipeline Remediation + Signal Diamond Phase 1-4 + Fix Round + Live GUI P0-P6 + Phase 6 Reconciler 自動降級 + W19/W20 安全治理 · 850 tests |
 | `2026-04-11--daily_summary.md` | ★★★★ 2026-04-11 日匯總：3E-ARCH 三引擎並行 + Multi-Symbol + Fix Rounds Phase A-G |
-| `2026-04-12--daily_summary.md` | ★★★★ 2026-04-12 日匯總：全程序鏈審計 + E5 優化 + PNL-FIX + GUI 修復 |
-| `2026-04-12--gui_metrics_db_fallback_and_display_fixes.md` | GUI 指標 DB 降級 + 顯示修復 4 項 |
-| `2026-04-12--earned_trust_ladder_and_audit_trail_fix.md` | Earned-Trust TTL Ladder + Audit Trail 時間戳修復 |
-| `2026-04-12--session1_p0_full_program_audit_fixes.md` | 全程序鏈審計 P0 8/8 修復 |
-| `2026-04-12--session2_p1_full_program_audit_fixes.md` | 全程序鏈審計 P1 18/18 修復 |
-| `2026-04-12--session3_p2_rust_7_fixes.md` | 審計 P2 Rust 7 項修復 |
-| `2026-04-12--session3.1_p2_batch_ab_10_fixes.md` | 審計 P2 Batch A+B 10 項修復 |
-| `2026-04-12--session3.2_p2_final_5_fixes.md` | 審計 P2 最終 5 項修復 |
-| `2026-04-12--fix08_file_size_split_verification.md` | FIX-08 超限文件拆分驗證 |
-| `2026-04-12--session3.3_p3_cleanup_and_qc_params.md` | P3 清理 + QC 參數全修 |
-| `2026-04-12--a3_gui_audit_fix_session.md` | A3 GUI 可用性審計全修 |
-| `2026-04-12--bb_bybit_api_audit_final.md` | BB Bybit API 審計 7/7 P1 全修 |
+| `2026-04-12--daily_summary.md` | ★★★★ 2026-04-12 日匯總：全程序鏈審計 P0+P1+P2+P3 58 findings + A3 GUI 36 + BB Bybit API 10 + FIX-08 拆分 + Earned-Trust TTL Ladder + PNL-FIX-1/2 · 4250 tests |
+| `2026-04-13--daily_summary.md` | ★★★ 2026-04-13 日匯總：R-06-v2 Agent Value Delivery（Executor shadow IPC / Analyst→DB→Strategist feedback / Guardian rejection / Conductor real health）· 1124 Rust + 2852 Python |
+| `2026-04-14--engine_self_healing.md` | ENGINE-HEAL 4 Fix：panic hook + crash-only + WS stale self-cancel + watchdog 4 道保險（尚未合併至 daily_summary）|
+| `2026-04-14--qol_1_and_qol_3_delivery.md` | QoL-1（paper_state restore_from_db）+ QoL-3（PyO3 雙 venv 部署）交付（尚未合併至 daily_summary）|
+
+> 2026-04-14 worklog audit：所有舊碎片已合併至當日 `daily_summary.md` 並刪除；`2026-04-08--arch_rc1_1c_history_archive.md` 已移至 `docs/archive/`。
 
 ### worklogs/learning/ — L 章学习系统开发日志（2026-03-26）
 

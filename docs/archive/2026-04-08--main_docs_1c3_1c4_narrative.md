@@ -109,6 +109,6 @@ ARCH-RC1:     ✅ 1A → 1C-4 WRAP COMPLETE
 ## 5. 索引
 
 完整 commit hash + 行數變化：`docs/CLAUDE_CHANGELOG.md`
-完整 ARCH-RC1 1A → 1C-3-E F-mini 歷史：`docs/worklogs/2026-04-08--arch_rc1_1c_history_archive.md`
+完整 ARCH-RC1 1A → 1C-3-E F-mini 歷史：`docs/archive/2026-04-08--arch_rc1_1c_history_archive.md`
 Phase 4 sign-off：`docs/audits/2026-04-07_phase4_final_signoff_audit.md`
 Phase 0/1/2/3 + Rust migration：`docs/worklogs/2026-04-04--completed_todo_archive_phase0123_rust.md`
