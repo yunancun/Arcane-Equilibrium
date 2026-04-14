@@ -42,7 +42,7 @@
 
   <!-- Card 1: Authorization (SM-01) -->
   <div class="oc-card">
-    <h3>&#x1F511; Authorization / 授权 <abbr title="SM-01: 授权状态机。控制谁可以启动交易 session / Authorization state machine. Controls who can start trading sessions." style="font-size:10px;color:var(--text-dim);cursor:help">SM-01</abbr></h3>
+    <h3>&#x1F511; Authorization / 授权 <abbr title="SM-01: 授权状态机。控制谁可以获取授权租约 Lease 执行交易 / Authorization state machine. Controls who can acquire a Lease to execute trades." style="font-size:10px;color:var(--text-dim);cursor:help">SM-01</abbr></h3>
     <div class="subtitle">授权状态和范围</div>
 
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
@@ -180,8 +180,8 @@
 
 <!-- ═══ Paper → Live Gate / 升级门禁 ═══ -->
 <div class="oc-card" id="paper-live-gate-card">
-  <h3>&#x1F4CB; Paper &#x2192; Live Gate / 升级门禁</h3>
-  <div class="subtitle">升级实盘前的 11 项准入评估</div>
+  <h3>&#x1F4CB; Paper 模拟 &#x2192; Live 实盘 Gate / 升级门禁</h3>
+  <div class="subtitle">升级 Live 实盘前的 11 项准入评估</div>
 
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
     <div style="flex:1">
@@ -370,8 +370,8 @@
   <div class="oc-modal-content">
     <h3>&#x1F4CB; 申请授权 / Request Authorization</h3>
     <p style="font-size:12px;color:var(--text-dim);margin:8px 0 12px 0">
-      为实盘交易申请操作员授权。Paper Trading 会自动授权，无需此步骤。<br>
-      Request Operator authorization for live trading. Paper Trading is auto-authorized.
+      为 Live 实盘交易申请操作员授权。Paper 模拟会自动授权，无需此步骤。<br>
+      Request Operator authorization for Live trading. Paper is auto-authorized.
     </p>
     <div style="margin-bottom:12px">
       <label style="font-size:11px;color:var(--text-dim);display:block;margin-bottom:6px">TTL / 有效期</label>

@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>System Overview</title>
+<title>总览 Overview</title>
 <script src="/static/common.js"></script>
 <script src="/static/governance.js"></script>
 </head>
@@ -77,16 +77,16 @@
 
   <!-- Quick Actions / 快捷操作 -->
   <div class="quick-actions">
-    <!-- Paper: interactive toggle — session-state-aware / 模拟交易：可交互，感知 session 状态 -->
-    <button class="qa-btn" id="qa-paper" onclick="confirmAction('paper')" title="启动/停止 Paper Trading Session">
+    <!-- Paper: interactive toggle — session-state-aware / Paper 模拟：可交互，感知会话状态 -->
+    <button class="qa-btn" id="qa-paper" onclick="confirmAction('paper')" title="启动/停止 Paper 会话">
       <span class="qa-dot qa-dot-off" id="qa-paper-dot"></span>
-      <span id="qa-paper-label">模拟交易 Paper</span>
+      <span id="qa-paper-label">模拟 Paper</span>
     </button>
     <!-- Demo / Feed / Scanner: status indicators only, not interactive buttons -->
     <!-- Demo/Feed/Scanner：仅状态指示器，非可点击按钮 -->
-    <span class="qa-status-row" title="Bybit Demo 连接状态由 Rust 引擎管理，无法从 GUI 直接开关">
+    <span class="qa-status-row" title="Bybit Demo 演示连接状态由 Rust 引擎管理，无法从 GUI 直接开关">
       <span class="qa-dot qa-dot-off" id="qa-demo-dot"></span>
-      <span style="font-size:12px">Bybit Demo</span>
+      <span style="font-size:12px">Bybit Demo 演示</span>
       <span class="oc-chip oc-chip-neutral" id="qa-demo-chip" style="font-size:10px;padding:1px 7px">Rust管理</span>
     </span>
     <span class="qa-status-row" title="行情流由 Rust 引擎自动管理，无法从 GUI 开关">
@@ -118,9 +118,9 @@
     <span style="color:var(--border)">&#x2192;</span>
     <span title="观察市场，无交易 / Observe, no trading">&#x1F441;&#xFE0F; 观察</span>
     <span style="color:var(--border)">&#x2192;</span>
-    <span title="Paper Trading 引擎激活 / Paper engine active">&#x1F311; 影子</span>
+    <span title="Paper 模拟引擎激活 / Paper engine active">&#x1F311; 影子</span>
     <span style="color:var(--border)">&#x2192;</span>
-    <span title="Paper + Bybit Demo / Paper + Bybit Demo sandbox">&#x1F9EA; Demo</span>
+    <span title="Paper 模拟 + Bybit Demo 演示沙盒 / Paper + Bybit Demo sandbox">&#x1F9EA; Demo</span>
     <span style="color:var(--border)">&#x2192;</span>
     <span title="实盘交易（真实资金）/ Live trading — real money" style="color:#a855f7">&#x1F7E3; 实盘</span>
     <span style="margin-left:8px;font-size:10px">— 点击按钮切换模式，每次切换需二次确认 / Click a button below to switch modes</span>
@@ -143,13 +143,13 @@
       <div class="mode-btn-icon">🌑</div>
       <div class="mode-btn-name">影子模式</div>
       <div class="mode-btn-sub">shadow_only</div>
-      <div class="mode-btn-desc">Paper Trading 引擎激活，影子决策运行</div>
+      <div class="mode-btn-desc">Paper 模拟引擎激活，影子决策运行</div>
     </button>
     <button class="mode-btn" id="mbtn-demo_reserved"  onclick="confirmMode('demo_reserved')">
       <div class="mode-btn-icon">🧪</div>
       <div class="mode-btn-name">Demo 预留</div>
       <div class="mode-btn-sub">demo_reserved</div>
-      <div class="mode-btn-desc">Paper + Bybit Demo 沙盒双重执行</div>
+      <div class="mode-btn-desc">Paper 模拟 + Bybit Demo 演示沙盒双重执行</div>
     </button>
     <button class="mode-btn" id="mbtn-live_reserved"  onclick="confirmMode('live_reserved')" style="border-color:rgba(168,85,247,0.4)">
       <div class="mode-btn-icon">🟣</div>
@@ -161,8 +161,8 @@
 
   <div style="margin-top:12px;font-size:11px;color:var(--text-dim);line-height:1.7">
     <strong style="color:var(--text)">模式升级路径：</strong>
-    设计 → 观察（行情流启动）→ 影子（Paper引擎启动）→ Demo 预留（Bybit Demo 双执行）→ <strong style="color:#a855f7">实盘（真实资金）</strong><br>
-    <strong style="color:var(--text)">注意：</strong>各模式独立控制 — 切换模式不会停止已运行的 Paper / Demo / Live session，需在对应 Tab 手动控制。
+    设计 → 观察（行情流启动）→ 影子（Paper 模拟引擎启动）→ Demo 预留（Bybit Demo 演示双执行）→ <strong style="color:#a855f7">实盘（真实资金）</strong><br>
+    <strong style="color:var(--text)">注意：</strong>各模式独立控制 — 切换模式不会停止已运行的 Paper / Demo / Live 会话，需在对应 Tab 手动控制。
   </div>
 </div>
 
@@ -312,11 +312,11 @@ const MODE_CONFIRM = {
     body: `<strong>系统将进入完全静默状态。</strong>
 <ul style="margin:8px 0;padding-left:18px;line-height:2">
   <li>后台行情流：<strong>不会自动启动</strong>（重启服务后）</li>
-  <li>Paper Trading：不受影响（已启动的不会自动停止）</li>
-  <li>Bybit Demo：不受影响</li>
+  <li>Paper 模拟：不受影响（已启动的不会自动停止）</li>
+  <li>Bybit Demo 演示：不受影响</li>
   <li>扫描器：继续运行</li>
 </ul>
-<div class="warn-box">⚠ 降级模式不会自动停止已运行的服务，需手动在「测试交易」Tab 关闭。</div>
+<div class="warn-box">⚠ 降级模式不会自动停止已运行的服务，需手动在「Demo 演示」Tab 关闭。</div>
 <p style="margin-top:8px;font-size:12px;color:var(--text-dim)">适用场景：完全暂停系统，准备维护或配置修改。</p>`
   },
   observe_only: {
@@ -326,8 +326,8 @@ const MODE_CONFIRM = {
 <ul style="margin:8px 0;padding-left:18px;line-height:2">
   <li>后台行情流：<strong>服务重启后自动启动</strong>（BTCUSDT + ETHUSDT）</li>
   <li>K线 / 指标 / 观察值：持续积累，为 AI 分析建立数据基础</li>
-  <li>Paper Trading：<strong>不会自动开启</strong>（需在快捷按钮手动启动）</li>
-  <li>Bybit Demo：不激活，不发送任何订单</li>
+  <li>Paper 模拟：<strong>不会自动开启</strong>（需在快捷按钮手动启动）</li>
+  <li>Bybit Demo 演示：不激活，不发送任何订单</li>
   <li>执行路径：完全关闭，只读</li>
 </ul>
 <p style="margin-top:8px;font-size:12px;color:var(--text-dim)">适用场景：系统冷启动、数据预热、暂停交易但继续积累市场数据。</p>`
@@ -335,12 +335,12 @@ const MODE_CONFIRM = {
   shadow_only: {
     icon: '🌑', label: '影子模式',
     title: '🌑 切换到影子模式 / shadow_only',
-    body: `<strong>系统将激活 Paper Trading 执行引擎。</strong>
+    body: `<strong>系统将激活 Paper 模拟执行引擎。</strong>
 <ul style="margin:8px 0;padding-left:18px;line-height:2">
   <li>后台行情流：<strong>自动启动</strong></li>
-  <li>Paper Trading：<strong>需手动在快捷按钮启动会话</strong></li>
+  <li>Paper 模拟：<strong>需手动在快捷按钮启动会话</strong></li>
   <li>影子决策管线：激活（策略信号 → 风控 → 模拟执行）</li>
-  <li>Bybit Demo：<strong>不激活</strong>，只在本地模拟</li>
+  <li>Bybit Demo 演示：<strong>不激活</strong>，只在本地模拟</li>
   <li>学习系统：积累数据，自动晋升判断</li>
 </ul>
 <p style="margin-top:8px;font-size:12px;color:var(--text-dim)">适用场景：在完全隔离环境中测试策略，无任何外部订单。</p>`
@@ -348,15 +348,15 @@ const MODE_CONFIRM = {
   demo_reserved: {
     icon: '🧪', label: 'Demo 预留',
     title: '🧪 切换到 Demo 预留模式 / demo_reserved',
-    body: `<strong>系统将允许 Bybit Demo 沙盒执行。</strong>
+    body: `<strong>系统将允许 Bybit Demo 演示沙盒执行。</strong>
 <ul style="margin:8px 0;padding-left:18px;line-height:2">
   <li>后台行情流：<strong>自动启动</strong></li>
-  <li>Paper Trading：可启动（本地虚拟资金模拟）</li>
-  <li>Bybit Demo：<strong>双重执行</strong> — 订单同时在本地 Paper Engine 和 Bybit 官方 Demo 沙盒执行</li>
-  <li>Demo 激活：仍需通过 Arm → Enable 流程（在治理控制 Tab）</li>
-  <li>真实资金：<strong>无任何风险</strong>，Demo 账户使用虚拟资金</li>
+  <li>Paper 模拟：可启动（本地虚拟资金模拟）</li>
+  <li>Bybit Demo 演示：<strong>双重执行</strong> — 订单同时在本地 Paper 模拟引擎和 Bybit 官方 Demo 演示沙盒执行</li>
+  <li>Demo 演示激活：仍需通过 Arm → Enable 流程（在治理控制 Tab）</li>
+  <li>真实资金：<strong>无任何风险</strong>，Demo 演示账户使用虚拟资金</li>
 </ul>
-<div class="warn-box">⚠ Bybit Demo 账户余额不足时需在 Bybit 官网手动补充（无 API 接口）。</div>
+<div class="warn-box">⚠ Bybit Demo 演示账户余额不足时需在 Bybit 官网手动补充（无 API 接口）。</div>
 <p style="margin-top:8px;font-size:12px;color:var(--text-dim)">适用场景：完整测试交易链路（含 Bybit 订单撮合），验证策略在真实订单流中的表现。</p>`
   },
   live_reserved: {
@@ -380,10 +380,10 @@ const CONFIRM_MSGS = {
   // SEC-E02: Titles use plain text (textContent) — Unicode chars instead of HTML entities.
   // SEC-E02：標題使用純文本（textContent）— Unicode 字符取代 HTML 實體。
   paper: {
-    on: { title: '\u25B6 启动模拟交易 / Start Paper Trading',
-      body: '<strong>即将启动模拟交易系统。</strong><p>模拟交易使用虚拟资金（$100,000），不涉及任何真实资金。所有订单在本地引擎中模拟执行。</p><p>启动后，策略可以通过模拟引擎提交订单、管理持仓、追踪盈亏。</p>' },
-    off: { title: '\u23F9 停止模拟交易 / Stop Paper Trading',
-      body: '<strong>即将停止模拟交易系统。</strong><div class="warn-box">\u26A0 停止后，所有未平仓的模拟持仓将被冻结，不再更新市值。活跃的订单将被取消。当前会话的盈亏数据会被保留。</div>' },
+    on: { title: '\u25B6 启动 Paper 模拟 / Start Paper',
+      body: '<strong>即将启动 Paper 模拟系统。</strong><p>Paper 模拟使用虚拟资金（$100,000），不涉及任何真实资金。所有订单在本地引擎中模拟执行。</p><p>启动后，策略可以通过 Paper 模拟引擎提交订单、管理持仓、追踪盈亏。</p>' },
+    off: { title: '\u23F9 停止 Paper 模拟 / Stop Paper',
+      body: '<strong>即将停止 Paper 模拟系统。</strong><div class="warn-box">\u26A0 停止后，所有未平仓的模拟持仓将被冻结，不再更新市值。活跃的订单将被取消。当前会话的盈亏数据会被保留。</div>' },
   },
   feed: {
     on: { title: '\uD83D\uDCE1 启动行情流 / Start Market Feed',
@@ -392,10 +392,10 @@ const CONFIRM_MSGS = {
       body: '<strong>即将停止行情数据流。</strong><div class="warn-box">\u26A0 停止后，K 线图表将不再更新，策略将无法接收到新的价格数据。已有的策略分析将使用最后已知价格。</div>' },
   },
   demo: {
-    on: { title: '\uD83C\uDFE6 启用 Bybit Demo / Enable Bybit Demo',
-      body: '<strong>即将启用 Bybit Demo 交易。</strong><p>Bybit Demo 是 Bybit 官方提供的沙盒环境，使用真实市场数据但虚拟资金。订单会发送到 Bybit 的测试服务器执行。</p><p>启用后，系统将以"双重执行"模式运行：每笔交易同时在本地模拟和 Bybit Demo 上执行。</p>' },
-    off: { title: '\u23F9 关闭 Bybit Demo / Disable Bybit Demo',
-      body: '<strong>即将关闭 Bybit Demo 交易。</strong><div class="warn-box">\u26A0 关闭后，不再向 Bybit Demo 发送订单。Bybit Demo 上的持仓不会自动平仓——你需要在 Bybit 网站手动处理。本地模拟不受影响。</div>' },
+    on: { title: '\uD83C\uDFE6 启用 Bybit Demo 演示 / Enable Bybit Demo',
+      body: '<strong>即将启用 Bybit Demo 演示。</strong><p>Bybit Demo 演示是 Bybit 官方提供的沙盒环境，使用真实市场数据但虚拟资金。订单会发送到 Bybit 的演示服务器执行。</p><p>启用后，系统将以"双重执行"模式运行：每笔交易同时在本地 Paper 模拟和 Bybit Demo 演示上执行。</p>' },
+    off: { title: '\u23F9 关闭 Bybit Demo 演示 / Disable Bybit Demo',
+      body: '<strong>即将关闭 Bybit Demo 演示。</strong><div class="warn-box">\u26A0 关闭后，不再向 Bybit Demo 演示发送订单。Bybit Demo 演示上的持仓不会自动平仓——你需要在 Bybit 网站手动处理。本地 Paper 模拟不受影响。</div>' },
   },
   scanner: {
     on: { title: '\uD83D\uDD0D 启动自动扫描 / Start Auto Scanner',
@@ -446,12 +446,12 @@ async function executeConfirmed() {
     _paperActive = !_paperActive;
     $('qa-paper-dot').className = 'qa-dot ' + (_paperActive ? 'qa-dot-on' : 'qa-dot-off');
     // Update Paper button label to reflect current state / 更新按钮文字
-    if ($('qa-paper-label')) $('qa-paper-label').textContent = _paperActive ? '停止 Paper ⏹' : '模拟交易 Paper';
-    ocToast('Paper Trading ' + (_paperActive ? '已启动' : '已停止'), 'success');
+    if ($('qa-paper-label')) $('qa-paper-label').textContent = _paperActive ? '停止 Paper ⏹' : '模拟 Paper';
+    ocToast('Paper 模拟 ' + (_paperActive ? '已启动' : '已停止'), 'success');
   } else if (action === 'feed') {
     ocToast('行情流由 Rust 引擎管理（自动运行）', 'info');
   } else if (action === 'demo') {
-    ocToast('请前往 Bybit Demo 页面查看连接状态', 'info');
+    ocToast('请前往 Bybit Demo 演示页面查看连接状态', 'info');
   } else if (action === 'scanner') {
     ocToast('请前往策略中心查看扫描器状态', 'info');
   }
@@ -681,7 +681,7 @@ async function loadQuickStatus() {
     if (d && d.data) {
       _paperActive = d.data.session.session_state === 'active';
       $('qa-paper-dot').className = 'qa-dot ' + (_paperActive ? 'qa-dot-on' : 'qa-dot-off');
-      if ($('qa-paper-label')) $('qa-paper-label').textContent = _paperActive ? '停止 Paper ⏹' : '模拟交易 Paper';
+      if ($('qa-paper-label')) $('qa-paper-label').textContent = _paperActive ? '停止 Paper ⏹' : '模拟 Paper';
       if (d.data.state_revision) _stateRevision = d.data.state_revision;
     }
   } catch(e) {}

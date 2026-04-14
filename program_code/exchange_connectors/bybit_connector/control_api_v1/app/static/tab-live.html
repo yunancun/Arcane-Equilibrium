@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>实盘交易 / Live Trading</title>
+<title>Live 实盘 / Live Trading</title>
 <script src="/static/common.js"></script>
 </head>
 <body>
@@ -170,20 +170,36 @@ html, body {
   <div class="live-warn-bar">
     <span class="warn-icon">&#x1F7E3;</span>
     <div>
-      <strong style="color:#a855f7">實盤模式啟用 — 所有訂單使用真實資金 / LIVE MODE — Real funds at risk</strong><br>
-      <span style="font-size:12px;color:var(--text-dim)">此頁面操作直接影響 Bybit 實盤帳戶。請確保風控參數正確配置，謹慎操作。</span>
+      <strong style="color:#a855f7">Live 实盘模式啟用 — 所有訂單使用真實資金 / LIVE MODE — Real funds at risk</strong><br>
+      <span style="font-size:12px;color:var(--text-dim)">此頁面操作直接影響 Bybit Live 实盘 帳戶。請確保風控參數正確配置，謹慎操作。</span>
+    </div>
+  </div>
+
+  <!-- Pass-4 Live slot dual-state annotation / Live 槽位雙態說明 -->
+  <div class="live-warn-bar" style="background:rgba(168,85,247,0.05);border-color:rgba(168,85,247,0.25);align-items:flex-start">
+    <span class="warn-icon">&#x2139;&#xFE0F;</span>
+    <div style="line-height:1.6">
+      <div style="color:#a855f7;font-weight:600;margin-bottom:4px">Live 槽雙態說明 / Live Slot — Dual-State</div>
+      <div style="font-size:12px;color:var(--text)">
+        Live 槽可填入 Mainnet API 或 Live-Demo 虛擬 key（後者跑 Demo 服務器但走 Live 代碼路徑）。<br>
+        無論哪種填充，本 Tab 與風控均按 Live 最嚴標準：紫色主題 / 全局模式門禁 / 二次確認 / 完整風控棧。
+      </div>
+      <div style="font-size:11px;color:var(--text-dim);margin-top:4px">
+        The Live slot accepts either a Mainnet API key or a Live-Demo virtual key (Demo server, Live code path).
+        In both cases, this tab and all risk controls enforce the strictest Live standards.
+      </div>
     </div>
   </div>
 
   <!-- Control bar / 控制欄 -->
   <div class="live-control-bar">
-    <span class="bar-title">&#x1F7E3; Live Engine</span>
+    <span class="bar-title">&#x1F7E3; Live 实盘 Engine</span>
     <span id="live-engine-status" class="oc-chip oc-chip-neutral">--</span>
     <span id="live-contraction-badge" style="display:none"></span>
     <span id="live-engine-detail" style="font-size:12px;color:var(--text-dim)"></span>
     <span style="flex:1"></span>
-    <button class="oc-btn oc-btn-success" id="btn-live-start" onclick="liveStart()" style="font-weight:700">&#x25B6; 啟動 Live</button>
-    <button class="oc-btn oc-btn-danger" id="btn-live-stop" onclick="openStopDialog()" disabled style="font-weight:700">&#x23F9; 停止 Live</button>
+    <button class="oc-btn oc-btn-success" id="btn-live-start" onclick="liveStart()" style="font-weight:700">&#x25B6; 啟動 Live 实盘</button>
+    <button class="oc-btn oc-btn-danger" id="btn-live-stop" onclick="openStopDialog()" disabled style="font-weight:700">&#x23F9; 停止 Live 实盘</button>
     <!-- Separator before emergency stop to prevent accidental clicks / 分隔符防止误触紧急停止 -->
     <span style="display:inline-block;width:1px;height:24px;background:var(--border);margin:0 8px;flex-shrink:0"></span>
     <button class="btn-emergency" id="btn-emergency-stop" onclick="openEmergencyDialog()">&#x1F6A8; 緊急停止</button>
@@ -286,7 +302,7 @@ html, body {
   <div id="trust-renew-card" class="trust-renew-card" style="display:none">
     <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap">
       <div>
-        <div style="font-weight:700;font-size:14px;margin-bottom:4px">&#x1F511; Live Auth Renewal / 實盤授權續期</div>
+        <div style="font-weight:700;font-size:14px;margin-bottom:4px">&#x1F511; Live Auth Renewal / Live 实盘 授權續期</div>
         <div id="trust-rec-summary" style="font-size:12px;color:var(--text-dim)">Evaluating...</div>
       </div>
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
@@ -341,10 +357,10 @@ html, body {
 <!-- ── Stop Confirmation Dialog ───────────────────────────────── -->
 <div class="oc-dialog-overlay" id="dlg-live-stop">
   <div class="oc-dialog">
-    <h3>&#x23F9; 停止 Live 引擎</h3>
+    <h3>&#x23F9; 停止 Live 实盘 引擎</h3>
     <p>停止將執行以下操作：<br>
-      1. 取消所有實盤掛單<br>
-      2. 平掉所有實盤持倉（市價）<br>
+      1. 取消所有 Live 实盘 掛單<br>
+      2. 平掉所有 Live 实盘 持倉（市價）<br>
       3. 引擎進入觀察模式（observing），停止新訂單<br>
       <span style="color:#f87171;font-size:12px">⚠ 平倉操作使用真實資金，請確認市場流動性充足。</span>
     </p>
@@ -377,8 +393,8 @@ html, body {
 <!-- 關閉所有倉位對話框（session 繼續運行） -->
 <div class="oc-dialog-overlay" id="dlg-live-close-all">
   <div class="oc-dialog" style="border-color:rgba(168,85,247,0.5)">
-    <h3 style="color:#a855f7">&#x274C; 關閉所有實盤倉位</h3>
-    <p>此操作將通過 Bybit API 市價平掉所有實盤持倉並取消掛單。<br>
+    <h3 style="color:#a855f7">&#x274C; 關閉所有 Live 实盘 倉位</h3>
+    <p>此操作將通過 Bybit API 市價平掉所有 Live 实盘 持倉並取消掛單。<br>
       <strong>Session 不會停止</strong> — 引擎繼續運行，策略可繼續開新倉。<br>
       <span style="color:#f87171;font-size:12px">⚠ 市價成交，存在滑點風險。真實資金。</span>
     </p>
@@ -789,14 +805,14 @@ async function checkLiveEngineStatus() {
   const drawdownPct = contraction.drawdown_pct;
 
   const stateLabels = {
-    active: '實盤運行中', paused: '已暫停', stopped: '已停止',
+    active: 'Live 实盘 運行中', paused: '已暫停', stopped: '已停止',
     offline: '引擎離線', unknown: '--',
   };
   const isActive = sessionState === 'active';
   const isPausedOrStopped = sessionState === 'paused' || sessionState === 'stopped';
 
   if (isActive) {
-    badge.textContent = '實盤運行中 🟣';
+    badge.textContent = 'Live 实盘 運行中 🟣';
     badge.className = 'oc-chip oc-chip-live';
   } else if (isPausedOrStopped) {
     badge.textContent = stateLabels[sessionState] || sessionState;
@@ -854,7 +870,7 @@ async function doLiveStop() {
     if (errors && errors.length) {
       ocToast('已停止（部分錯誤: ' + errors.join('; ') + '）', 'warn');
     } else {
-      ocToast('實盤 session 已停止，倉位已平', 'success');
+      ocToast('Live 实盘 授权租约 已停止，倉位已平', 'success');
     }
     await refreshPage();
   }

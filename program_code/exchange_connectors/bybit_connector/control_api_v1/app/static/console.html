@@ -88,7 +88,7 @@
   <span class="logo">&#x1F99E;</span>
   <div class="dot" id="api-dot"></div>
   <h1>OpenClaw Trading Console</h1>
-  <span class="tag tag-blue">Paper Trading</span>
+  <span class="tag tag-blue">Paper 模拟</span>
   <span class="tag tag-green" id="mode-tag">shadow_only</span>
   <span class="spacer"></span>
   <span id="clock" style="font-size:11px;color:var(--text-dim)"></span>
@@ -213,7 +213,7 @@ localStorage.removeItem('oc_trading_token');
 
 // Cache-bust version — increment on each deploy to force iframe reload
 // 緩存破壞版本號 — 每次部署遞增以強制 iframe 重新載入
-const BUILD_TS = '20260410.live-ui-v2';
+const BUILD_TS = '20260414.ux07-unify-v1';
 
 // ─── Tab Definitions ──────────────────────────────────────────
 // src uses BUILD_TS for cache-busting — update BUILD_TS on each deploy
@@ -221,24 +221,24 @@ const BUILD_TS = '20260410.live-ui-v2';
 const _v = BUILD_TS;
 const TABS = [
   // ── 儀表板 ──────────────────────────────────────────────────────
-  { id: 'system',     label: '系统总览',  labelEn: 'Overview',  icon: '&#x1F4CA;', src: `/static/tab-system.html?v=${_v}` },
+  { id: 'system',     label: '总览 Overview',    labelEn: 'Overview',  icon: '&#x1F4CA;', src: `/static/tab-system.html?v=${_v}` },
   // ── 交易核心 ─────────────────────────────────────────────────────
-  { id: 'live',       label: '实盘交易',  labelEn: 'Live',      icon: '&#x1F534;', src: `/static/tab-live.html?v=${_v}` },
+  { id: 'live',       label: '实盘 Live',        labelEn: 'Live',      icon: '&#x1F534;', src: `/static/tab-live.html?v=${_v}` },
   // FIX-43: split into direct Demo + Paper tabs (eliminate double-iframe nesting)
   // FIX-43：拆為直接 Demo + Paper 標籤（消除雙層 iframe 嵌套）
-  { id: 'demo',       label: 'Demo引擎',  labelEn: 'Demo',      icon: '&#x1F3E6;', src: `/static/tab-demo.html?v=${_v}` },
-  { id: 'paper',      label: '模拟引擎',  labelEn: 'Paper',     icon: '&#x1F9EA;', src: `/static/tab-paper.html?v=${_v}` },
+  { id: 'demo',       label: '演示 Demo',        labelEn: 'Demo',      icon: '&#x1F3E6;', src: `/static/tab-demo.html?v=${_v}` },
+  { id: 'paper',      label: '模拟 Paper',       labelEn: 'Paper',     icon: '&#x1F9EA;', src: `/static/tab-paper.html?v=${_v}` },
   // ── 市場與策略 ───────────────────────────────────────────────────
-  { id: 'charts',     label: 'K线图表',   labelEn: 'Charts',    icon: '&#x1F4C8;', src: '/trading?embed=1' },
-  { id: 'strategy',   label: '策略中心',  labelEn: 'Strategy',  icon: '&#x2699;',  src: `/static/tab-strategy.html?v=${_v}` },
+  { id: 'charts',     label: '图表 Charts',      labelEn: 'Charts',    icon: '&#x1F4C8;', src: '/trading?embed=1' },
+  { id: 'strategy',   label: '策略 Strategy',    labelEn: 'Strategy',  icon: '&#x2699;',  src: `/static/tab-strategy.html?v=${_v}` },
   // ── 風控與智能 ───────────────────────────────────────────────────
-  { id: 'risk',       label: '风控止损',  labelEn: 'Risk',      icon: '&#x1F6E1;', src: `/static/tab-risk.html?v=${_v}` },
-  { id: 'ai',         label: 'AI 引擎',   labelEn: 'AI',        icon: '&#x1F916;', src: `/static/tab-ai.html?v=${_v}` },
-  { id: 'learning',   label: '学习系统',  labelEn: 'Learning',  icon: '&#x1F4D6;', src: `/static/tab-learning.html?v=${_v}` },
+  { id: 'risk',       label: '风控 Risk',        labelEn: 'Risk',      icon: '&#x1F6E1;', src: `/static/tab-risk.html?v=${_v}` },
+  { id: 'ai',         label: 'AI 智能',          labelEn: 'AI',        icon: '&#x1F916;', src: `/static/tab-ai.html?v=${_v}` },
+  { id: 'learning',   label: '学习 Learning',    labelEn: 'Learning',  icon: '&#x1F4D6;', src: `/static/tab-learning.html?v=${_v}` },
   // ── 治理與運維 ───────────────────────────────────────────────────
-  { id: 'governance', label: '治理控制',  labelEn: 'Governance',icon: '&#x2696;',  src: `/static/tab-governance.html?v=${_v}` },
-  { id: 'monitoring', label: '监控',      labelEn: 'Monitor',   icon: '&#x1F50D;', src: `/static/tab-monitoring.html?v=${_v}` },
-  { id: 'settings',   label: '设置',      labelEn: 'Settings',  icon: '&#x2699;',  src: `/static/tab-settings.html?v=${_v}` },
+  { id: 'governance', label: '治理 Governance',  labelEn: 'Governance',icon: '&#x2696;',  src: `/static/tab-governance.html?v=${_v}` },
+  { id: 'monitoring', label: '监控 Monitor',     labelEn: 'Monitor',   icon: '&#x1F50D;', src: `/static/tab-monitoring.html?v=${_v}` },
+  { id: 'settings',   label: '设置 Settings',    labelEn: 'Settings',  icon: '&#x2699;',  src: `/static/tab-settings.html?v=${_v}` },
 ];
 
 let currentTab = 'system';
