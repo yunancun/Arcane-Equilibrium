@@ -319,6 +319,24 @@
         <div style="display:flex;align-items:center;gap:6px"><input class="oc-input" id="in-same-dir" type="number" step="1" min="1" max="25" style="width:80px" /><span style="font-size:12px">个</span></div>
       </div>
 
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <div>
+          <div style="font-size:12px;font-weight:600">Preferred Margin Mode / 保证金模式</div>
+          <div style="font-size:10px;color:var(--text-dim)">Rust RiskConfig.limits.margin_mode。isolated = 单仓独立保证金 | cross = 全仓共享保证金</div>
+          <div style="font-size:10px;color:var(--text-dim)">isolated 爆仓只损单仓 | cross 资本效率高但爆仓牵连全帐户</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:6px"><select class="oc-input" id="in-margin-mode" style="width:130px"><option value="isolated">isolated</option><option value="cross">cross</option></select></div>
+      </div>
+
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <div>
+          <div style="font-size:12px;font-weight:600">Preferred Position Mode / 持仓模式</div>
+          <div style="font-size:10px;color:var(--text-dim)">Rust RiskConfig.limits.position_mode。one_way = 单向持仓 | hedge = 对冲双向持仓</div>
+          <div style="font-size:10px;color:var(--text-dim)">one_way 同币种仅单方向 | hedge 可同时做多做空（需对应策略）</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:6px"><select class="oc-input" id="in-position-mode" style="width:130px"><option value="one_way">one_way</option><option value="hedge">hedge</option></select></div>
+      </div>
+
     </div>
 
     <div>
@@ -330,6 +348,8 @@
         <div class="oc-metric"><div class="oc-metric-label">Correlated Exp</div><div class="oc-metric-val" id="s-corr-exp" style="font-size:16px">--</div></div>
         <div class="oc-metric"><div class="oc-metric-label">Same-Direction</div><div class="oc-metric-val" id="s-same-dir" style="font-size:16px">--</div></div>
         <div class="oc-metric"><div class="oc-metric-label">Allowed Cats</div><div class="oc-metric-val" id="s-allowed-cats" style="font-size:13px">--</div></div>
+        <div class="oc-metric"><div class="oc-metric-label">Margin Mode</div><div class="oc-metric-val" id="s-margin-mode" style="font-size:13px">--</div></div>
+        <div class="oc-metric"><div class="oc-metric-label">Position Mode</div><div class="oc-metric-val" id="s-position-mode" style="font-size:13px">--</div></div>
       </div>
       <button class="oc-btn oc-btn-primary" onclick="savePositionSettings(this)" style="margin-top:8px">&#x1F4BE; 保存仓位设置 / Save Position Settings</button>
     </div>

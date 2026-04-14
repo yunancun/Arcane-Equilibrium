@@ -368,6 +368,8 @@ async function _doSavePositionSettings(btn) {
       // Parse comma-separated string to array; null if empty (keep current Rust value)
       // 逗號分隔字串轉陣列；空白則傳 null（保持 Rust 現值）
       allowed_categories: catsRaw ? catsRaw.split(',').map(s => s.trim()).filter(Boolean) : null,
+      preferred_margin_mode: $('in-margin-mode').value || null,
+      preferred_position_mode: $('in-position-mode').value || null,
     };
     const d = await ocPost(_engineSaveUrl(), body);
     if (d) {
@@ -724,6 +726,8 @@ async function loadRiskConfig() {
   ocSetText('s-allowed-cats', Array.isArray(allowedCatsDisplay) && allowedCatsDisplay.length ? allowedCatsDisplay.join(', ') : '--');
   const sameDirVal = gc.max_same_direction_positions ?? rGuard.max_same_direction_positions ?? 3;
   ocSetText('s-same-dir', sameDirVal);
+  ocSetText('s-margin-mode', gc.preferred_margin_mode ?? 'isolated');
+  ocSetText('s-position-mode', gc.preferred_position_mode ?? 'one_way');
 
   // Cooldown display — fresh ConfigStore first, snapshot fallback
   const coolCount = gc.consecutive_loss_cooldown_count ?? rRisk.consecutive_loss_cooldown_count ?? 3;
@@ -779,6 +783,8 @@ async function loadRiskConfig() {
     _setInput('in-corr-exp', gc.max_correlated_exposure_pct ?? '');
     _setInput('in-allowed-cats', (gc.allowed_categories || []).join(', '));
     _setInput('in-same-dir', gc.max_same_direction_positions ?? 3);
+    _setInput('in-margin-mode', gc.preferred_margin_mode ?? 'isolated');
+    _setInput('in-position-mode', gc.preferred_position_mode ?? 'one_way');
     _setInput('in-cooldown-count', gc.consecutive_loss_cooldown_count ?? 3);
     _setInput('in-cooldown-min', gc.consecutive_loss_cooldown_minutes ?? 30);
   }
