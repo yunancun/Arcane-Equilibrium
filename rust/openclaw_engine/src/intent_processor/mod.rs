@@ -57,6 +57,14 @@ pub struct IntentResult {
     /// Guardian verdict for DB persistence; None if rejected before guardian check.
     /// Guardian 裁定供 DB 持久化；在 Guardian 前被拒時為 None。
     pub verdict_info: Option<VerdictInfo>,
+    /// FUP-8 Phase 2: qty after Kelly+P1 sizing; 0.0 on rejection.
+    /// Exposed so paper `persist_intent` can write the real sized qty into
+    /// trading.intents.details (was 1e9 sentinel before Phase 2). Matches the
+    /// pre-rounding `fill.fill_qty` on success.
+    /// FUP-8 Phase 2：Kelly+P1 sizing 後的數量；拒絕路徑為 0.0。
+    /// 暴露此欄位讓 paper `persist_intent` 寫入真實 sized qty（Phase 2 前為 1e9 sentinel）；
+    /// 成功路徑下等同 `fill.fill_qty` 取整前。
+    pub approved_qty: f64,
 }
 
 /// EXT-1: Result of gate-only processing for exchange mode.

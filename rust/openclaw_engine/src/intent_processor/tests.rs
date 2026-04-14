@@ -134,6 +134,57 @@ fn test_position_sizing_small_intent_unchanged() {
 }
 
 #[test]
+fn test_fup8_phase2_approved_qty_exposed_on_success() {
+    // FUP-8 Phase 2: paper path must expose the post-Kelly/P1 sized qty via
+    // IntentResult.approved_qty so persist_intent writes the real qty to
+    // trading.intents.details instead of the strategy's 1e9 sentinel.
+    // FUP-8 Phase 2：paper 路徑必須通過 approved_qty 暴露 sizing 後的 qty，
+    // 讓 persist_intent 寫入真實 qty 而非策略的 1e9 sentinel。
+    let proc = IntentProcessor::new();
+    let mut gov = GovernanceCore::new();
+    gov.grant_paper_authorization(None).unwrap();
+    let mut state = PaperState::new(10_000.0);
+    state.set_latest_price("BTC", 50_000.0);
+    // Mimic real strategy: submit 1e9 sentinel — processor must size it down.
+    let mut intent = make_intent("BTC", true);
+    intent.qty = 1e9;
+    let result = proc.process(&intent, &gov, &state, 2000.0, GovernanceProfile::Exploration);
+    assert!(result.submitted, "intent must pass gates");
+    // P1 cap at 2%: 10000 * 0.02 / 50000 = 0.004 BTC
+    assert!(
+        (result.approved_qty - 0.004).abs() < 1e-9,
+        "approved_qty should be P1-capped (0.004), got {}",
+        result.approved_qty
+    );
+    assert!(
+        result.approved_qty < 1.0,
+        "approved_qty must NOT carry 1e9 sentinel, got {}",
+        result.approved_qty
+    );
+    // Sanity: approved_qty matches the executed fill's qty.
+    let fill = result.fill.expect("success path must have fill");
+    assert!(
+        (result.approved_qty - fill.fill_qty).abs() < 1e-9,
+        "approved_qty ({}) must match fill.fill_qty ({})",
+        result.approved_qty,
+        fill.fill_qty
+    );
+}
+
+#[test]
+fn test_fup8_phase2_approved_qty_zero_on_rejection() {
+    // FUP-8 Phase 2: rejection paths carry approved_qty=0.0.
+    // FUP-8 Phase 2：拒絕路徑的 approved_qty 應為 0.0。
+    let proc = IntentProcessor::new();
+    let gov = GovernanceCore::new(); // not authorized → Gate 1 blocks
+    let mut state = PaperState::new(10_000.0);
+    state.set_latest_price("BTC", 50_000.0);
+    let result = proc.process(&make_intent("BTC", true), &gov, &state, 500.0, GovernanceProfile::Exploration);
+    assert!(!result.submitted);
+    assert_eq!(result.approved_qty, 0.0);
+}
+
+#[test]
 fn test_guardian_drawdown_rejection() {
     let proc = IntentProcessor::new();
     let mut gov = GovernanceCore::new();
