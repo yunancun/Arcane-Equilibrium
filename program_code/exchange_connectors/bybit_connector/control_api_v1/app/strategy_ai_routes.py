@@ -287,11 +287,19 @@ async def post_demo_close_all_positions(
     from .governance_routes import _require_operator_role
     from .paper_trading_routes import _ipc_command
     _require_operator_role(actor)
+    errors: list[str] = []
     try:
         result = await _ipc_command("close_all_positions", {"engine": "demo"})
     except Exception as exc:
         logger.error("IPC close_all_positions failed: %s", exc)
-        raise HTTPException(status_code=500, detail=f"IPC error: {exc}")
+        errors.append(f"ipc_close_all: {exc}")
+        result = {"error": str(exc)}
+    # Orphan sweep: close exchange positions not tracked in paper_state.
+    # IPC close_all only iterates paper_state — orphan positions (e.g. opened
+    # externally or after paper_state reset) are silently skipped.
+    # 孤兒清掃：IPC close_all 只遍歷 paper_state，交易所有但 paper_state
+    # 沒有的倉位會被跳過。此處補掃確保全部平掉。
+    orphan_result = await _sweep_demo_orphan_positions(errors)
     logger.warning(
         "close-all-positions (manual) — actor=%s", getattr(actor, "actor_id", "?"),
     )
@@ -299,6 +307,8 @@ async def post_demo_close_all_positions(
         "message": "All positions closed — session continues / 已平掉所有倉位，session 繼續運行",
         "source": "rust_engine",
         "close_result": result,
+        "orphan_sweep": orphan_result,
+        "errors": errors if errors else None,
     })
 
 
