@@ -115,8 +115,8 @@ class TestExecutorExecution(unittest.TestCase):
         stats = agent.get_stats()
         self.assertEqual(stats["executions_failed"], 1)
 
-    def test_no_engine_fails(self):
-        """No paper engine → fail-closed report."""
+    def test_no_engine_ipc_shadow(self):
+        """R-06-v2: No paper engine → IPC shadow bridge activates."""
         agent = ExecutorAgent()
         agent.start()
         report = agent.execute_order(
@@ -125,8 +125,9 @@ class TestExecutorExecution(unittest.TestCase):
             side="Buy",
             qty=0.01,
         )
-        self.assertFalse(report.success)
-        self.assertIn("No paper engine", report.error)
+        self.assertTrue(report.success)
+        self.assertEqual(report.error, "shadow_mode")
+        self.assertEqual(report.metadata.get("execution_path"), "ipc_shadow")
 
     def test_engine_exception_handled(self):
         """Engine exception produces failed report, doesn't crash."""

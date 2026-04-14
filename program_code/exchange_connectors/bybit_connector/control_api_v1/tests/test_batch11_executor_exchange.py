@@ -207,14 +207,17 @@ class TestExecutorAgentExecution(unittest.TestCase):
         self.assertFalse(report.success)
         self.assertIn("rejected", report.error.lower())
 
-    def test_07_no_paper_engine_fail_closed(self):
-        """Without paper engine, execution fails with clear error."""
+    def test_07_no_paper_engine_ipc_shadow(self):
+        """R-06-v2: Without paper engine, IPC bridge activates in shadow mode.
+        R-06-v2：無 paper engine 時，IPC 橋接以影子模式啟動。"""
         agent = self._make_agent(engine=None)
         report = agent.execute_order(
             intent_id="no_eng", symbol="BTCUSDT", side="Buy", qty=0.001,
         )
-        self.assertFalse(report.success)
-        self.assertIn("No paper engine", report.error)
+        # Shadow mode returns success=True with error="shadow_mode"
+        self.assertTrue(report.success)
+        self.assertEqual(report.error, "shadow_mode")
+        self.assertEqual(report.metadata.get("execution_path"), "ipc_shadow")
 
     def test_08_invalid_intent_rejected(self):
         """Intent with invalid fields (empty symbol, zero size) is rejected."""

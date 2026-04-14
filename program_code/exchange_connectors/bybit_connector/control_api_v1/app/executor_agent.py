@@ -368,20 +368,17 @@ class ExecutorAgent:
                 return report
 
         if not self._paper_engine:
-            report = ExecutionReport(
-                intent_id=intent_id,
-                symbol=symbol,
-                side=side,
-                requested_qty=qty,
-                expected_price=expected_price,
-                success=False,
-                error="No paper engine available",
+            # R-06-v2: IPC bridge — fallback to Rust engine SubmitOrder (shadow-only).
+            # R-06-v2：IPC 橋接 — 回退到 Rust 引擎 SubmitOrder（影子模式）。
+            # _paper_engine is None since DEAD-PY-2 deleted PaperTradingEngine.
+            # Path A (Agent pipeline) submits to Rust paper_state via IPC instead.
+            # Default shadow=True: log intent but don't submit, to avoid Path A/B conflicts.
+            # shadow=True 默認：僅記錄 intent 不提交，避免 Path A/B 倉位衝突。
+            return self._execute_via_ipc(
+                intent_id=intent_id, symbol=symbol, side=side, qty=qty,
+                order_type=order_type, price=price, expected_price=expected_price,
+                start_time=start_time, metadata=metadata,
             )
-            with self._lock:
-                self._stats["executions_failed"] += 1
-                self._stats["errors"] += 1
-            self._store_report(report)
-            return report
 
         try:
             result = self._paper_engine.submit_order(
@@ -468,6 +465,129 @@ class ExecutorAgent:
 
         self._store_report(report)
         return report
+
+    # ── R-06-v2: IPC Execution Bridge / IPC 執行橋接 ──
+
+    # Shadow mode: log intent but don't actually submit to Rust engine.
+    # Set to False to enable real IPC submission (Path A active trading).
+    # 影子模式：僅記錄 intent，不實際提交到 Rust 引擎。
+    # 設為 False 以啟用真實 IPC 提交（Path A 主動交易）。
+    _shadow_mode: bool = True
+
+    def _execute_via_ipc(
+        self,
+        *,
+        intent_id: str,
+        symbol: str,
+        side: str,
+        qty: float,
+        order_type: str,
+        price: Optional[float],
+        expected_price: float,
+        start_time: float,
+        metadata: Optional[Dict[str, Any]],
+    ) -> ExecutionReport:
+        """
+        Execute via Rust engine IPC SubmitOrder (R-06-v2 bridge).
+        通過 Rust 引擎 IPC SubmitOrder 執行（R-06-v2 橋接）。
+
+        When shadow_mode=True (default): logs the intent and returns a shadow report
+        without actually placing an order. This avoids Path A/B position conflicts.
+        shadow_mode=True（默認）時：記錄 intent 並返回影子報告，不實際下單。
+
+        When shadow_mode=False: sends SubmitOrder IPC to Rust engine, which routes
+        to paper_state. The order goes through the same governance + risk pipeline.
+        shadow_mode=False 時：發送 SubmitOrder IPC 到 Rust 引擎。
+
+        Fail-closed: IPC error → return failure report, never raises.
+        失敗關閉：IPC 錯誤 → 返回失敗報告，不向上拋出。
+        """
+        if self._shadow_mode:
+            # Shadow mode: log only, don't submit / 影子模式：僅記錄不提交
+            logger.info(
+                "Executor IPC shadow: intent=%s %s %s qty=%.6f / "
+                "執行器 IPC 影子：intent=%s %s %s qty=%.6f",
+                intent_id, side, symbol, qty, intent_id, side, symbol, qty,
+            )
+            report = ExecutionReport(
+                intent_id=intent_id, symbol=symbol, side=side,
+                requested_qty=qty, expected_price=expected_price,
+                success=True,  # shadow "success" — intent was captured
+                error="shadow_mode",
+                metadata={**(metadata or {}), "execution_path": "ipc_shadow"},
+            )
+            self._store_report(report)
+            return report
+
+        # Real IPC submission / 真實 IPC 提交
+        import asyncio
+        try:
+            from .paper_trading_routes import _ipc_command
+
+            ipc_params = {
+                "symbol": symbol,
+                "side": side,
+                "qty": qty,
+                "order_type": order_type,
+                "strategy": f"agent_executor:{intent_id[:12]}",
+            }
+            if price is not None:
+                ipc_params["limit_price"] = price
+
+            # Bridge sync→async: run IPC in a new event loop if needed
+            # 同步→異步橋接：必要時在新事件循環中運行 IPC
+            try:
+                loop = asyncio.get_running_loop()
+                # Already in async context — schedule coroutine
+                future = asyncio.run_coroutine_threadsafe(
+                    _ipc_command("submit_order", ipc_params), loop,
+                )
+                result = future.result(timeout=5.0)
+            except RuntimeError:
+                # No running loop — create one
+                result = asyncio.run(_ipc_command("submit_order", ipc_params))
+
+            fill_time_ms = (time.time() - start_time) * 1000
+            if isinstance(result, dict) and result.get("error"):
+                report = ExecutionReport(
+                    intent_id=intent_id, symbol=symbol, side=side,
+                    requested_qty=qty, expected_price=expected_price,
+                    fill_time_ms=round(fill_time_ms, 2), success=False,
+                    error=f"IPC rejected: {str(result.get('error', ''))[:100]}",
+                    metadata={**(metadata or {}), "execution_path": "ipc_real"},
+                )
+            else:
+                actual_price = float(result.get("price", expected_price)) if isinstance(result, dict) else expected_price
+                filled_qty = float(result.get("qty", qty)) if isinstance(result, dict) else qty
+                slippage_bps = abs(actual_price - expected_price) / max(expected_price, 1e-8) * 10_000 if expected_price > 0 else 0.0
+                report = ExecutionReport(
+                    intent_id=intent_id, symbol=symbol, side=side,
+                    requested_qty=qty, filled_qty=filled_qty,
+                    expected_price=expected_price, actual_price=actual_price,
+                    slippage_bps=round(slippage_bps, 2),
+                    fill_time_ms=round(fill_time_ms, 2), success=True,
+                    metadata={**(metadata or {}), "execution_path": "ipc_real"},
+                )
+                with self._lock:
+                    self._stats["executions_success"] += 1
+            self._store_report(report)
+            return report
+
+        except Exception as e:
+            fill_time_ms = (time.time() - start_time) * 1000
+            logger.error("Executor IPC bridge failed: %s / 執行器 IPC 橋接失敗", e)
+            report = ExecutionReport(
+                intent_id=intent_id, symbol=symbol, side=side,
+                requested_qty=qty, expected_price=expected_price,
+                fill_time_ms=round(fill_time_ms, 2), success=False,
+                error="IPC bridge failed — see server logs",
+                metadata={**(metadata or {}), "execution_path": "ipc_error"},
+            )
+            with self._lock:
+                self._stats["executions_failed"] += 1
+                self._stats["errors"] += 1
+            self._store_report(report)
+            return report
 
     # ── Report Storage / 报告存储 ──
 

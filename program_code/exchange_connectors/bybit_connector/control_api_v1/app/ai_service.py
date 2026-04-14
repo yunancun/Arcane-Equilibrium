@@ -137,14 +137,8 @@ class AIService:
         service = AIService()
         result = await service.dispatch("strategist_evaluate", {"intel": {...}})
 
-    Migration note:
-        R-02 (S6): strategist + guardian wired to Ollama L1.
-        C1-C2 (S7): analyst wired to AnalystAgent, scout wired to ScoutAgent.
-        R-06 remaining: conductor still stub.
-    遷移備註：
-        R-02（S6）：strategist + guardian 已接入 Ollama L1。
-        C1-C2（S7）：analyst 已接入 AnalystAgent，scout 已接入 ScoutAgent。
-        R-06 剩餘：conductor 仍為 stub。
+    Migration: R-02 strategist+guardian L1. C1-C2 analyst+scout. R-06-v2 conductor+feedback.
+    遷移：R-02 strategist+guardian。C1-C2 analyst+scout。R-06-v2 conductor+反饋閉環。
     """
 
     def __init__(
@@ -153,18 +147,12 @@ class AIService:
         message_bus: Any = None,
         analyst_agent: Any = None,
         scout_agent: Any = None,
+        conductor: Any = None,
     ) -> None:
-        # Optional MessageBus for Guardian L1 relay (B4)
-        # 可選的 MessageBus，用於 Guardian L1 事件中繼（B4）
-        self._message_bus = message_bus
-
-        # Optional AnalystAgent for C1 trade attribution (R-06 stub wiring)
-        # 可選的 AnalystAgent，用於 C1 交易歸因（R-06 stub 接線）
-        self._analyst_agent = analyst_agent
-
-        # Optional ScoutAgent for C2 intelligence scan (R-06 stub wiring)
-        # 可選的 ScoutAgent，用於 C2 情報掃描（R-06 stub 接線）
-        self._scout_agent = scout_agent
+        self._message_bus = message_bus      # Guardian L1 relay (B4)
+        self._analyst_agent = analyst_agent  # C1 trade attribution
+        self._scout_agent = scout_agent      # C2 intelligence scan
+        self._conductor = conductor          # R-06-v2 orchestration
 
         # Handler registry: method name -> async handler callable
         # 處理器註冊表：方法名 -> 異步處理器
@@ -328,6 +316,15 @@ class AIService:
             strategy, symbol, win_rate, avg_pnl, fill_count,
             current_params, param_ranges,
         )
+        # R-06-v2: enrich prompt with analyst insights + guardian rejection stats
+        # R-06-v2：用 Analyst 洞察 + Guardian 拒絕統計增強 prompt
+        try:
+            from .ai_service_feedback import get_feedback_section
+            fb = await asyncio.to_thread(get_feedback_section, strategy)
+            if fb:
+                prompt += "\n\n" + fb
+        except Exception:
+            pass  # fail-open / 失敗開放
 
         try:
             response = await asyncio.to_thread(
@@ -497,7 +494,13 @@ class AIService:
                     rankings = await asyncio.to_thread(self._analyst_agent.get_strategy_rankings)
                 except Exception:
                     pass
-
+                # R-06-v2: persist patterns to DB for Strategist feedback loop
+                # R-06-v2：寫入 DB 供 Strategist 反饋閉環
+                try:
+                    from .ai_service_feedback import persist_analyst_feedback
+                    await asyncio.to_thread(persist_analyst_feedback, record.strategy, symbol, metrics)
+                except Exception:
+                    pass  # fail-open / 失敗開放
                 logger.debug("Analyst C1: symbol=%s strategy=%s", symbol, record.strategy)
                 return {
                     "status": "analyzed", "agent": "analyst", "symbol": symbol,
@@ -523,26 +526,33 @@ class AIService:
 
     async def _handle_conductor(self, params: dict[str, Any]) -> dict[str, Any]:
         """
-        Forward to Conductor for orchestration decisions.
-        轉發到指揮者進行編排決策。
-        Params: decision_type, agents_state, pending_tasks. Stub: maintain_current.
+        R-06-v2: Forward to real Conductor for agent health + feedback loop status.
+        R-06-v2：轉發到真實 Conductor 獲取 Agent 健康 + 反饋閉環狀態。
         """
         self._stats["conductor_calls"] += 1
-
         decision_type = params.get("decision_type", "priority")
 
-        # TODO(R-06): Wire to real Conductor orchestration logic
-        # TODO(R-06): 接入真實 Conductor 編排邏輯
-        logger.debug("Conductor stub: decision_type=%s", decision_type)
+        if self._conductor is not None:
+            try:
+                health = await asyncio.to_thread(self._conductor.get_agent_health)
+                status = await asyncio.to_thread(self._conductor.get_status)
+                # Check for degraded agents / 檢查退化的 Agent
+                degraded = [k for k, v in health.items() if v.get("stale")]
+                action = "scale_down" if len(degraded) > 2 else "maintain_current"
+                return {
+                    "status": "decided", "agent": "conductor",
+                    "decision_type": decision_type, "action": action,
+                    "agent_health": health,
+                    "agents_running": status.get("agents_running", 0),
+                    "degraded_agents": degraded,
+                    "source": "conductor_real",
+                }
+            except Exception as exc:
+                logger.warning("Conductor evaluate failed, stub fallback: %s", str(exc)[:200])
 
         return {
-            "status": "decided",
-            "agent": "conductor",
-            "decision_type": decision_type,
-            "action": "maintain_current",
-            "priority_changes": [],
-            "resource_reallocation": {},
-            "conflict_resolutions": [],
+            "status": "decided", "agent": "conductor",
+            "decision_type": decision_type, "action": "maintain_current",
             "source": "ai_service_stub",
         }
 
@@ -811,27 +821,15 @@ class AIService:
         }
 
     def get_handler_methods(self) -> list[str]:
-        """
-        List registered handler method names.
-        列出已註冊的處理方法名稱。
-        """
+        """List registered handler method names. / 列出已註冊的處理方法名稱。"""
         return list(self._handlers.keys())
 
     def get_handler_ttls(self) -> dict[str, float]:
-        """
-        Return TTL configuration for each handler.
-        返回每個處理器的 TTL 配置。
-        """
+        """Return TTL configuration for each handler. / 返回每個處理器的 TTL 配置。"""
         return dict(HANDLER_TTLS)
 
     def reset_stats(self) -> None:
-        """
-        Reset all call statistics to zero.
-        重置所有調用統計為零。
-
-        Useful for testing or after a known configuration change.
-        用於測試或已知配置變更後。
-        """
+        """Reset all call statistics to zero. / 重置所有調用統計為零。"""
         for key in self._stats:
             self._stats[key] = 0
         self._last_dispatch_at = 0.0
@@ -1161,35 +1159,37 @@ def create_ai_service_listener(
         logger.debug("MessageBus not available for AIService (non-fatal): %s", bus_exc)
 
     # C1: Inject AnalystAgent for trade attribution (fail-open)
-    # C1：注入 AnalystAgent 用於交易歸因（失敗開放）
     analyst_agent = None
     try:
         from .strategy_wiring import ANALYST_AGENT
         analyst_agent = ANALYST_AGENT
-        logger.info(
-            "AnalystAgent injected into AIService (C1 wiring) / "
-            "已注入 AnalystAgent（C1 接線）"
-        )
+        logger.info("AnalystAgent injected (C1) / 已注入 AnalystAgent")
     except Exception as analyst_exc:
-        logger.debug("AnalystAgent not available for AIService (non-fatal): %s", analyst_exc)
+        logger.debug("AnalystAgent not available (non-fatal): %s", analyst_exc)
 
     # C2: Inject ScoutAgent for intelligence scan (fail-open)
-    # C2：注入 ScoutAgent 用於情報掃描（失敗開放）
     scout_agent = None
     try:
         from .strategy_wiring import SCOUT_AGENT
         scout_agent = SCOUT_AGENT
-        logger.info(
-            "ScoutAgent injected into AIService (C2 wiring) / "
-            "已注入 ScoutAgent（C2 接線）"
-        )
+        logger.info("ScoutAgent injected (C2) / 已注入 ScoutAgent")
     except Exception as scout_exc:
-        logger.debug("ScoutAgent not available for AIService (non-fatal): %s", scout_exc)
+        logger.debug("ScoutAgent not available (non-fatal): %s", scout_exc)
+
+    # R-06-v2: Inject Conductor for orchestration (fail-open)
+    conductor = None
+    try:
+        from .strategy_wiring import CONDUCTOR
+        conductor = CONDUCTOR
+        logger.info("Conductor injected (R-06-v2) / 已注入 Conductor")
+    except Exception as cond_exc:
+        logger.debug("Conductor not available (non-fatal): %s", cond_exc)
 
     service = AIService(
         message_bus=message_bus,
         analyst_agent=analyst_agent,
         scout_agent=scout_agent,
+        conductor=conductor,
     )
     listener = AIServiceListener(service, socket_path=socket_path)
     return service, listener
