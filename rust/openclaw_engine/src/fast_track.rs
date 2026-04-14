@@ -37,6 +37,21 @@ pub fn evaluate_fast_track(
     }
 
     // Margin crisis: >90% utilization
+    //
+    // 90% 是 Bybit 交易所強平接近度（MMR ≈ 100% 觸發強平），屬物理常數，
+    // **不可 auto-scale 到 leverage_max / total_exposure_max_pct**。
+    // margin_utilization_pct 本身已在 on_tick 計算時除以 leverage（post
+    // FA-PHANTOM-1 fix 2026-04-14），是 leverage-aware 的真·保證金使用率；
+    // 閾值保持絕對值才有「Guardian/risk envelope 被繞過 → 起碼別被交易所強平」
+    // 的獨立兜底意義。
+    //
+    // Under current config (leverage_max=100, total_exposure_max_pct=200):
+    //   max margin_util = 200% / 100 = 2% ≪ 90% → check never fires.
+    // This is INTENTIONAL — it's a cash/near-cash mode fail-safe (leverage ≤ 2),
+    // not a protection for the current high-leverage regime. Do NOT "fix" by
+    // lowering the threshold — that re-opens FA-PHANTOM-1 class false-positive
+    // CloseAll on legitimate stacking under position_size_max_pct=50%.
+    // 見 docs/references/2026-04-14--fa_phantom_fup7_margin_threshold_decision.md
     if margin_utilization_pct >= 90.0 {
         return FastTrackAction::CloseAll;
     }
