@@ -174,6 +174,82 @@ fn stress_fast_track_boundary_exactly_90pct_margin() {
     );
 }
 
+// FA-PHANTOM-1 end-to-end regression: prior to the 2026-04-14 fix in
+// `on_tick.rs`, margin_utilization_pct was computed as total_notional /
+// balance with no leverage divisor. Default leverage_max=20 +
+// position_size_max_pct=20 means five strategies each opening a 20%
+// notional position accumulate to 100% of balance — which the old formula
+// reported as 100% margin util, tripping the fast_track 90% threshold and
+// force-closing every position every tick. This caused the 22 phantom fills
+// observed during G-2 funding_arb validation. The unit test in fast_track.rs
+// only pins the threshold arithmetic; this test drives a real on_tick() so
+// that any future regression which deletes the `/leverage` divider, skips
+// `risk_config()`, or accidentally bypasses PaperState fails end-to-end.
+// FA-PHANTOM-1 端到端回歸：5 倉 × 100% notional × leverage=20 → 真實 margin 5%。
+// 透過實際 on_tick 驅動，抓住未來刪 /leverage 除法的回歸。
+#[test]
+fn stress_fa_phantom_1_regression_5_positions_100pct_notional_20x_leverage() {
+    let symbols = &["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "DOGEUSDT"];
+    let mut pipeline = TickPipeline::with_balance(symbols, 10_000.0);
+    pipeline.grant_paper_auth().unwrap();
+
+    assert!(
+        (pipeline.intent_processor.risk_config().limits.leverage_max - 20.0).abs() < 1e-9,
+        "test precondition: default leverage_max should be 20.0",
+    );
+
+    // Five positions at $2_000 notional each = $10_000 total = 100% of balance.
+    pipeline.paper_state.apply_fill("BTCUSDT", true, 0.04, 50_000.0, 0.0, 1000);
+    pipeline.paper_state.apply_fill("ETHUSDT", true, 1.0, 2_000.0, 0.0, 1000);
+    pipeline.paper_state.apply_fill("SOLUSDT", true, 20.0, 100.0, 0.0, 1000);
+    pipeline.paper_state.apply_fill("XRPUSDT", true, 2_000.0, 1.0, 0.0, 1000);
+    pipeline.paper_state.apply_fill("DOGEUSDT", false, 10_000.0, 0.2, 0.0, 1000);
+    assert_eq!(pipeline.paper_state.position_count(), 5);
+
+    // Drive a tick at the same entry price so price_drop_pct stays 0 and
+    // margin_utilization_pct is the sole fast_track input.
+    pipeline.on_tick(&make_event("BTCUSDT", 50_000.0, 2000));
+
+    // Post-fix: 100% notional / 20x leverage = 5% true margin → no CloseAll.
+    // Pre-fix: would have reported 100% margin util and dropped count to 0.
+    assert_eq!(
+        pipeline.paper_state.position_count(),
+        5,
+        "FA-PHANTOM-1 regression: fast_track must NOT CloseAll at 100% notional / 20x leverage (true margin = 5%)",
+    );
+}
+
+// Cash-mode companion: leverage=1 collapses the leverage-aware formula back
+// to notional/balance, so 100% notional IS a genuine margin crisis and
+// CloseAll must still fire. Guards against a "simplification" regression
+// that would force leverage to 1 in all cases and re-open FA-PHANTOM-1.
+// 現貨模式對照：leverage=1 時 100% notional 為真實 margin 危機，CloseAll 應觸發。
+#[test]
+fn stress_fa_phantom_1_cash_mode_100pct_notional_closes_all() {
+    let symbols = &["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "DOGEUSDT"];
+    let mut pipeline = TickPipeline::with_balance(symbols, 10_000.0);
+    pipeline.grant_paper_auth().unwrap();
+
+    let mut rc = pipeline.intent_processor.risk_config().clone();
+    rc.limits.leverage_max = 1.0;
+    pipeline.intent_processor.update_risk_config(rc);
+
+    pipeline.paper_state.apply_fill("BTCUSDT", true, 0.04, 50_000.0, 0.0, 1000);
+    pipeline.paper_state.apply_fill("ETHUSDT", true, 1.0, 2_000.0, 0.0, 1000);
+    pipeline.paper_state.apply_fill("SOLUSDT", true, 20.0, 100.0, 0.0, 1000);
+    pipeline.paper_state.apply_fill("XRPUSDT", true, 2_000.0, 1.0, 0.0, 1000);
+    pipeline.paper_state.apply_fill("DOGEUSDT", false, 10_000.0, 0.2, 0.0, 1000);
+    assert_eq!(pipeline.paper_state.position_count(), 5);
+
+    pipeline.on_tick(&make_event("BTCUSDT", 50_000.0, 2000));
+
+    assert_eq!(
+        pipeline.paper_state.position_count(),
+        0,
+        "cash mode (leverage=1): 100% notional is a real margin crisis — CloseAll must fire",
+    );
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // 2. Multi-Symbol Mixed Strategy Scenarios / 多幣種混合策略場景
 // ═══════════════════════════════════════════════════════════════════════════════
