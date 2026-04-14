@@ -1,6 +1,6 @@
 # OpenClaw TODO — 工作計劃清單
 
-最後更新：2026-04-14（**ENGINE-HEAL 4 Fix 完成** · ORPHAN-ADOPT-1 Phase 1 · QoL-1/3 · G-2 paper validation window 啟動）
+最後更新：2026-04-14（**ENGINE-HEAL 4 Fix** · ORPHAN-ADOPT-1 Phase 1 · QoL-1/3 · **G-2 驗證失敗 → FA-PHANTOM-1 阻塞者登記**）
 測試基準線：**Rust engine lib 1144 + core 366 + e2e 33 = 1543 · Python program_code 2852 passed (5 skipped · 0 fail) · ml_training 135 passed (6 skipped)**
 
 > compact 後從此文件恢復工作狀態。第一個 `[ ]` 即為下一步起點。
@@ -194,47 +194,143 @@ C1-C2 接線 + PM 端到端驗收。1086 lib + 33 e2e = 1119 tests pass, 0 fail 
   - Step 1: ExecutorAgent _paper_engine=None → Rust IPC SubmitOrder（shadow_mode=True 默認）
   - Step 4: Conductor stub→real（get_agent_health + degraded agent detection）
   - 不做：Rust→Python fire-and-forget / Conductor health polling / Rust→scout_scan
-- [ ] **G-2** FundingArb 策略驗證 + 參數調優（OC-5 已解鎖，W22）
+- [ ] **G-2** FundingArb 策略驗證 + 參數調優（**BLOCKED by PHANTOM-FILL bug**，W22）
   - OC-5 ✅：FundingArb on_tick() 完整實現（entry/exit/cooldown/basis/edge），index_price TickContext 全鏈路
-  - 現況：策略邏輯完成，待 paper 實盤驗證 edge + 參數調優
-  - **⚠️ DATA CONTAMINATION WINDOW（2026-04-14 啟動）**：
-    - 診斷：calm market（BTC/ETH funding rates max 0.01% vs threshold 0.05%），默認參數 24-48h 預計零 fills
-    - 進一步發現（2026-04-14 17:30）：amortized_fee = total_cost_bps/10000/expected_periods = 34/10000/3 ≈ 11.33 bps，即使降 threshold 到 0.01% 仍被 edge gate 阻斷
-    - 臨時調整：`strategy_params_paper.toml` **兩個參數同時下調**（demo/live 未動）：
-      - `funding_threshold` 0.0005 → **0.0001**（降 5 倍）
-      - `total_cost_bps` 34.0 → **1.0**（amortized ≈ 0.0000033，edge gate 事實上 permissive）
-    - 目的：強制觸發 ≥20 fills 驗證 OC-5 代碼路徑端到端（entry/direction/exit_reason/close_tag/PnL）
-    - **污染範圍**：此窗口內 paper fills 進入 `edge_estimates_paper.json`，**非真實市場有效信號**，僅代碼驗證用途
-    - **恢復條件**：累積 ≥20 funding_arb fills 並分析完成後，兩參數恢復默認 0.0005 / 34.0
-    - **清理步驟**：恢復後，對此窗口 fills 打 `contaminated` 標記或從 edge estimator 剔除
-  - **📋 HANDOFF / 接手指南（誰來都能直接用）**：
-    - 驗證窗口起始時間：**2026-04-14 17:33:22 local**（engine restart with 雙參數下調）
-    - **Operator 你現在要做什麼**：**等**。首次自動 checkpoint 在 18:23 local（50 min 後）由 Claude cron 觸發，之後每 ~3h 一次直到 ≥20 fills。你可以關 session 離開；引擎獨立於 Claude 運行。
-    - **Claude session 會不會掛？** 會。cron 是 session-only，Claude 退出即失效。此時 operator 或新 session 接手：
-      1. 查當前狀態：
-         ```bash
-         pg_pass=$(grep POSTGRES_PASSWORD ~/BybitOpenClaw/secrets/environment_files/basic_system_services.env | cut -d= -f2-)
-         PGPASSWORD="$pg_pass" psql -h 127.0.0.1 -U trading_admin -d trading_ai -c "
-         SELECT engine_mode, COUNT(*) AS n, MIN(ts) AS first, MAX(ts) AS last
-         FROM trading.fills WHERE strategy_name='funding_arb' AND ts > '2026-04-14 17:33:00+02'
-         GROUP BY engine_mode;"
-         ```
-      2. 引擎健康：`python3 helper_scripts/canary/engine_watchdog.py --data-dir /tmp/openclaw --stale-threshold 45 --grace-period 120 --status`
-      3. 如果 fills < 20，繼續等 + 可選 `CronCreate` 新 checkpoint
-      4. 如果 fills ≥ 20，執行分析步驟（見下方「完成流程」）
-    - **完成流程（≥20 fills 後）**：
-      1. 跑 `python3 -m program_code.ml_training.realized_edge_stats --mode paper --days 2` → 篩 funding_arb entries
-      2. 分析 per-symbol gross/net edge、exit reason 分佈、avg hold time
-      3. 撰寫審計 note 到 `docs/audits/2026-04-14--g2_funding_arb_validation.md`
-      4. 恢復 paper TOML：`funding_threshold = 0.0005`, `total_cost_bps = 34.0`
-      5. 重啟引擎：`bash helper_scripts/restart_all.sh --engine-only`
-      6. 對污染窗口 fills 加 `contaminated` 標記（寫 SQL UPDATE 或從 edge_estimates_paper.json 剔除）
-      7. TODO.md 此項標 `[x]`，加完成 commit 號
-    - **當前狀態（2026-04-14 17:34）**：
-      - Paper TOML: `funding_threshold=0.0001, total_cost_bps=1.0`（污染中）
-      - Demo/live TOML: 未動（`funding_threshold=0.0005/0.001, total_cost_bps=34.0`）
-      - Engine PID 140040, restart at 17:33:22, 有效 entry 閾值 = 1 bp
-      - 污染窗口 fills 數: 0（剛啟動）
+  - **🚨 2026-04-14 驗證失敗 — 發現 PHANTOM-FILL BUG**（下方 FA-PHANTOM-1 阻塞 G-2）
+  - **驗證窗口**：2026-04-14 17:33 ~ 21:55（污染 + auto-stop 觸發）
+    - 22 筆 paper funding_arb fills 進 DB（+4 demo）
+    - 4h 累積 ≥20 fills 觸發 auto-stop，paper TOML 已還原 `funding_threshold=0.0005 / total_cost_bps=34.0`（commit 待）
+  - **驗證結果（G-2 無效）**：
+    - 5 筆 force-close IPC 全部 `found=false` — 引擎 paper_state 無 funding_arb 倉位
+    - paper_state positions 僅 2 筆（ENJUSDT Sell + ZECUSDT Buy），非 funding_arb
+    - 所有 22 paper fills 皆為 **PHANTOM**（DB 有、引擎 in-memory 無）
+    - **OC-5 退場路徑未被驗證**（position 不存在、exit 不可能觸發）
+    - **entry 階段也無法信賴**（cooldown/position guard 靠 paper_state，bypass 現象已佐證）
+  - **污染清理（待 FA-PHANTOM-1 修復後執行）**：
+    - SQL：`UPDATE trading.fills SET details = jsonb_set(coalesce(details,'{}'::jsonb), '{contaminated}', 'true') WHERE strategy_name='funding_arb' AND engine_mode='paper' AND ts BETWEEN '2026-04-14 17:33:00+02' AND '2026-04-14 21:55:00+02'`
+    - `edge_estimates_paper.json` funding_arb 條目：修復後重算或人工剔除
+  - **恢復 G-2 流程**（phantom bug 修復後）：
+    1. 驗證修復：手動跑 funding_arb paper 1 個 entry → 查 paper_state positions 有出現 → IPC close → DB 出現 close fill with realized_pnl
+    2. 重新啟動驗證窗口（同樣降 threshold/cost_bps）
+    3. 累積 ≥20 fills 後分析 edge + 撰寫 audit note
+
+---
+
+- [ ] **🚨 FA-PHANTOM-1 ROOT CAUSE 定案（2026-04-14 22:30）** — `fast_track margin_utilization_pct` 忽略 leverage，全策略系統性被誤觸 CloseAll
+  - **Root Cause**：`rust/openclaw_engine/src/tick_pipeline/on_tick.rs` L108-120 計算 `margin_utilization_pct = total_notional / balance × 100`（**無 leverage 除法**）。`fast_track.rs` L40 閾值 90% 同時 `total_exposure_max_pct` 設計上限 100% — 閾值低於設計上限，必然觸發。
+  - **證據**：engine.log 17:01-20:19 共 22 次 WARN `FAST_TRACK CloseAll fired`，全部 `risk_level=Normal` + `positions=5/10`（排除 CB/閃崩）。DB fills 每 entry 約 $124 notional（paper_state balance $619.80，20% pos_size × 5 策略 = 100% 觸發）。每個 close 價 ≈ entry 價 ± 0.3% 確認非價格原因。
+  - **衝擊範圍**：**全策略**（ma_crossover / grid_trading / bb_breakout / bb_reversion / funding_arb）— FA-PHANTOM-1 只是最顯眼症狀。DB 驗證非 funding_arb 策略也有同樣 entry→risk_close:fast_track 對。
+  - **機制鏈**：
+    1. 5 策略 × `position_size_max_pct=20` → notional 堆到 100% balance
+    2. fast_track CloseAll（pseudo-margin 90% 閾值）
+    3. `paper_state.close_position` + `emit_close_fill(..., "risk_close:fast_track")` + `on_external_close(sym)`
+    4. 策略內部 `positions[sym]` 清空但 `last_trade_ms` cooldown 保留 → 等 cooldown 過再開
+    5. 每次引擎重啟 cooldown 歸零 → 解釋 DOT 22min 重入現象
+  - **FIX（推薦）**：`on_tick.rs` L108 改 leverage-aware：
+    ```rust
+    let leverage = self.risk_config.load().limits.leverage_max.max(1.0);
+    let margin_used = total_notional / leverage;
+    let margin_utilization_pct = (margin_used / balance * 100.0).min(999.0);
+    ```
+    Default leverage=20 → 5×$124 notional / 20 = $31 margin / $620 = 5% → 正常放行。符合 `total_exposure_max_pct=100%` + `leverage_max=20x` 設計語意。
+  - **測試影響**：
+    - `fast_track.rs::tests::test_margin_crisis_closes_all` L122-128 需配合改（語意從 notional→margin）
+    - 新增：`test_100pct_notional_20x_leverage_no_action` （5% margin_used → NoAction）
+    - E2e 壓測：確認 5 倉滿 100% notional 不再觸發 CloseAll
+  - **污染清理**（修復後）：
+    - SQL：`UPDATE trading.fills SET details = jsonb_set(coalesce(details,'{}'::jsonb), '{contaminated}', 'true') WHERE strategy_name_raw LIKE 'risk_close:fast_track%' AND engine_mode='paper' AND ts BETWEEN '2026-04-14 17:33:00+02' AND '2026-04-14 21:55:00+02'`
+    - 同時標記對應 entry fill（根據 symbol + strategy 配對）
+    - `edge_estimates_paper.json` 全策略條目重新計算或重置
+  - **Phase 5 重新定位**：此 bug 可能是 Phase 5 全策略 gross 負 edge 的**主因之一**（每倉被瞬平 → 每筆小虧 + fee）。修復 + 乾淨 paper 2 週後再評估策略重做範圍。
+  - **G-2 unblock**：此修復後 funding_arb 才能真正測 OC-5 退場路徑。
+  - **相關決策點**：
+    - 為何 fast_track 稱「margin_utilization」卻是 notional？查 git log L108-120 找原始 PR intent，可能是 PNL-6 FIX-03/04 當時混淆。
+    - 選 Option A（leverage-aware）vs Option B（閾值抬高）：A 符合設計語意，B 是 patch。
+  - **FIX 已 commit**：`7eef87f fix(fa-phantom-1): make fast_track margin_utilization leverage-aware`（2 files +43/-2，engine lib 1145/core 370/e2e 33 全 pass）
+
+---
+
+## 🔍 FA-PHANTOM-1 Fix 三方審查 Follow-Ups（E2+QC+FA，2026-04-14）
+
+> **審查結論**：fix 核心算術正確（FA 實測 3 事件 notional/balance 91-109% pre-fix → 1.0-1.9% post-fix），但測試/部署/污染清理/敘事都有問題。
+> **審查共識**：Verdict = PASS-with-concerns。**不要立即部署**，按下述順序解決後再 `restart_all.sh --rebuild`。
+
+### 🔴 P0 — 阻塞部署
+
+- [ ] **FA-PHANTOM-1-FUP-1** 補真正的 on_tick 整合測試（E2+QC 一致指出為最大弱點）
+  - **現況**：`test_fa_phantom_1_regression_full_notional_no_action` 只呼叫 `evaluate_fast_track(Normal, 1.0, 5.0)` — 硬編碼 5.0。**若未來有人刪除 `/leverage` 除法，此測試仍會通過** — 無退化保護。
+  - **所需**：`TickPipeline::on_tick()` 整合測試：建 pipeline + 注入 5 倉位（總 notional ≈ 100% balance）+ 設 leverage_max=20 → 驅動 1 tick → assert 無 CloseAll WARN + 倉位仍在 paper_state。
+  - **位置**：新加 in `rust/openclaw_engine/tests/stress_integration.rs` 或 `fast_track_integration.rs`。
+  - **額外**：補 `leverage_max=1.0` 退化測試（cash mode，退化為 pre-fix 公式，應該仍正確但需驗證）。
+
+- [ ] **FA-PHANTOM-1-FUP-2** Commit message 數字與實際 config 不符（三方獨立發現）
+  - **問題**：commit `7eef87f` 及 memory 寫 `leverage_max=20 / total_exposure_max_pct=100%` 是預設，但 FA 查實際運行配置：`leverage_max=100.0 / total_exposure_max_pct=200.0`。修復數學仍正確（100x 下 1% margin << 90%），但敘事算例錯誤。
+  - **所需**：memory `project_fa_phantom_bug.md` 更新實際 config 值；未來 commit 引述配置前先查 `/tmp/openclaw/pipeline_snapshot_paper.json` 或 API。
+
+- [ ] **FA-PHANTOM-1-FUP-3** 引擎未運行（QC 發現比我聲明的更嚴重）
+  - **現況**：`ps aux | grep openclaw_engine` 無進程 — 不是「pre-fix binary 在跑」，是完全沒跑。
+  - **所需**：先搞清楚為何沒運行（可能 ENGINE-HEAL watchdog 觸發熔斷？檢查 `/tmp/openclaw/canary_events.jsonl`）→ 修復後再部署。
+
+- [ ] **FA-PHANTOM-1-FUP-4** 10 個未提交文件會隨 `--rebuild` 綁一起部署
+  - **現況**（2026-04-14 22:41 `git status`）：`TODO.md`, `grafana_data_writer.py`, `paper_trading_routes.py`, `stop_manager.rs`, `event_consumer/handlers.rs`, `event_consumer/tests.rs`, `ipc_server/handlers.rs`, `paper_state.rs`, `tick_pipeline/mod.rs`, `settings/strategy_params_paper.toml`
+  - **風險**：這些改動未經 E2/E4 審查就隨 fix 部署。
+  - **所需**：逐一審查 → 分批 commit / review / 丟棄 → `git status` clean 後再 rebuild。
+
+### 🟡 P1 — 數據完整性
+
+- [ ] **FA-PHANTOM-1-FUP-5** 污染清理 SQL 從未執行（QC 查 DB 0/177 marked）
+  - **現況**：`edge_estimates_paper.json` 根本不存在；`edge_estimates.json` 3 bytes 空；DB 無 `contaminated=true` 標記。
+  - **所需 SQL**：
+    ```sql
+    UPDATE trading.fills
+    SET details = jsonb_set(coalesce(details,'{}'::jsonb), '{contaminated}', 'true')
+    WHERE engine_mode='paper'
+      AND ts BETWEEN '2026-04-14 17:00:00+02' AND '2026-04-14 20:30:00+02'
+      AND (strategy_name LIKE 'risk_close:fast_track%' OR strategy_name IN ('funding_arb','grid_trading','ma_crossover','bb_reversion','bb_breakout'));
+    ```
+  - 同時 flag 對應 entry fill（根據 ts window + strategy 配對）
+  - **之後**：重算 edge_estimates_paper.json（需先確認 isolation 實現），或接受 paper edge 從乾淨數據重新累積。
+
+### 🟡 P1 — 歸因與敘事校正
+
+- [ ] **FA-PHANTOM-1-FUP-6** Phase 5 歸因量化（QC 駁回「主因」主張）
+  - **QC 量化數據**（窗口 17:00-20:30 paper fills）：
+    - strategy_open=263 / fast_track_close=105 / strategy_close=94 / other_risk_close=63
+    - fast_track = 105/525 ≈ **20% 總 fills**，105/262 ≈ **40% 所有 closes**
+  - **結論**：**不是主因，是貢獻者**。剩 60% closes（cost-gate/正常 TP/SL/策略主動退出）的 edge 問題獨立存在。
+  - **所需**：更新 `project_phase5_promotion_edge_crisis.md` 敘事 — fast_track bug 修復後可能改善 20-40% close 樣本，但策略本身的 gross edge 仍需獨立審視。
+  - **Phase 5 恢復策略**：fix 部署 + 乾淨 paper 2 週後重算 edge → 若 gross edge 仍負 → 策略本身需重做（原計劃）；若 gross edge 翻正 → fix 比預期解決更多問題，Phase 5 工作重啟。
+
+### 🟢 P2 — 設計層疑慮與獨立 bug
+
+- [ ] **FA-PHANTOM-1-FUP-7** 90% margin crisis 閾值可能實質死碼（E2 設計層）
+  - **論點**：post-fix 語意 true margin 90% = 近爆倉；配置 `leverage=100 × total_exposure=200%` → 理論 notional 最多 200%，true margin 最多 2% — **永不達 90%**
+  - **所需決策**：
+    - 選項 A：降閾值至 50%（留真實爆倉邊緣保護）
+    - 選項 B：刪除此檢查，依賴 `total_exposure_max_pct` + `leverage_max` + orphan handler
+    - 選項 C：保留 90% 作為最終 fail-safe（只在極端配置下觸發）
+  - **需 operator 決策** — 當前狀態是 dead code masquerading as safety（E2 用語）。
+
+- [ ] **FA-PHANTOM-1-FUP-8** `intents.details` NULL 獨立 bug（FA 發現）
+  - **現況**：窗口內 grid_trading 176 / ma_crossover 91 / funding_arb 21 / bb_reversion 1 筆全部 100% NULL details — **非 funding_arb 專屬**。
+  - **影響**：策略入場理由無法重建（違反根原則 #8「交易可解釋」）
+  - **所需**：追查 intent writer — 看 `IntentProcessor.process()` 是否把 strategy-provided details（edge/rate/basis/confidence）寫入 `trading.intents.details`。
+  - **與 FA-PHANTOM-1 fix 無關**，獨立追蹤。
+
+### 📋 部署順序（operator 批准後）
+
+1. FUP-3 查引擎為何沒運行 → 確保基礎設施健康
+2. FUP-4 逐一處理 10 個未提交文件 → git clean
+3. FUP-1 補真整合測試 → 驗證新 test 會 fail（若移除 `/leverage`）→ 確認 test 有咬合力
+4. FUP-5 執行污染清理 SQL
+5. `bash helper_scripts/restart_all.sh --rebuild` 部署
+6. Canary 觀察 ≥1h：engine.log 不再出現 `FAST_TRACK CloseAll fired` 於 `risk_level=Normal`
+7. FUP-2/6 更新 memory 敘事
+8. FUP-7/8 獨立排期（非阻塞 G-2 恢復）
+9. G-2 FundingArb 驗證重啟（原 TODO.md L197）
+
+---
+
 - [ ] **G-7** ClaudeTeacher 正式啟用（SEC-04/06/13 E3 審查 PASS 後 flip enabled AtomicBool，學習閉環接通，W23）
   - 現況：consumer_loop.rs `enabled = false`（啟動時 fail-closed）+ learning_store "currently has no consumer"
   - 前置：E3 審查 PASS + G-3 IPC 認證 + 21d paper 穩定
