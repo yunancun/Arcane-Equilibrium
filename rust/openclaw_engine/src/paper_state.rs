@@ -354,6 +354,106 @@ impl PaperState {
         self.total_fees
     }
 
+    /// Read total cumulative realized PnL (only non-zero on close fills).
+    /// 讀取累計已實現損益（僅平倉成交貢獻）。
+    pub fn total_realized_pnl(&self) -> f64 {
+        self.total_realized_pnl
+    }
+
+    /// Read total round-trip count (= number of close fills applied).
+    /// 讀取完成的 round-trip 數（= 已套用的平倉成交數）。
+    pub fn trade_count(&self) -> u32 {
+        self.trade_count
+    }
+
+    /// QoL-1: Apply aggregated counters previously computed from `trading.fills`.
+    /// Pure helper (no DB I/O) so unit tests can exercise restore semantics without
+    /// depending on a live Postgres. Adjusts balance by `realized_pnl_sum - fees_sum`
+    /// so that `balance` reflects the same trajectory as if every historical fill had
+    /// been replayed through `apply_fill()`, and bumps `peak_balance` to match.
+    /// `trade_count` is saturating-cast to `u32`; negative values from a malformed
+    /// `COUNT(*)` cast are clamped to 0.
+    /// QoL-1：套用自 `trading.fills` 聚合得出的累計指標。
+    /// 純函數（無 DB I/O），方便單元測試驗證語義。同步調整 balance
+    /// （加上 realized_pnl_sum，扣除 fees_sum），讓餘額軌跡與逐筆重放
+    /// `apply_fill()` 等價，並更新 peak_balance。trade_count 飽和轉 u32，
+    /// 遇到異常負值夾到 0。
+    pub fn apply_restored_counters(
+        &mut self,
+        total_fees_sum: f64,
+        total_realized_pnl_sum: f64,
+        trade_count_i64: i64,
+    ) {
+        // Guard against NaN / non-finite DB rows — leave state untouched.
+        // 防護非有限 DB 回傳 — 保持狀態不變。
+        if !total_fees_sum.is_finite() || !total_realized_pnl_sum.is_finite() {
+            return;
+        }
+        self.total_fees = total_fees_sum.max(0.0);
+        self.total_realized_pnl = total_realized_pnl_sum;
+        self.trade_count = if trade_count_i64 < 0 {
+            0
+        } else if trade_count_i64 > u32::MAX as i64 {
+            u32::MAX
+        } else {
+            trade_count_i64 as u32
+        };
+        // Balance reflects initial_balance + realized_pnl - fees so the paper
+        // account shows the same equity curve as if every historical fill had
+        // been replayed through apply_fill(). peak_balance rises accordingly
+        // so drawdown_pct starts at 0 right after restore (we have no history
+        // of intra-run peaks to reconstruct).
+        // 餘額 = 初始 + 已實現 - 手續費，讓啟動後的權益曲線與逐筆重放
+        // apply_fill() 等價。peak_balance 同步抬升，避免剛還原就出現虛假回撤。
+        let restored_balance = self._initial_balance + self.total_realized_pnl - self.total_fees;
+        self.balance = restored_balance;
+        self.peak_balance = self.peak_balance.max(restored_balance);
+    }
+
+    /// QoL-1: Restore cumulative counters from `trading.fills` aggregated per
+    /// `engine_mode` (paper / demo / live). Each engine's counters are isolated
+    /// via the `engine_mode = $1` filter, matching the writer side.
+    ///
+    /// Aggregation contract (matches `apply_fill()` semantics):
+    ///   * `total_fees`         = SUM(fee)                     — every fill bills a fee
+    ///   * `total_realized_pnl` = SUM(realized_pnl)            — opens write 0, closes write non-zero
+    ///   * `trade_count`        = COUNT(*) WHERE realized_pnl <> 0 — round-trips only
+    ///
+    /// Fail-soft: DB errors propagate to the caller but state is NOT mutated,
+    /// so a cold-start restore failure leaves the engine with the same
+    /// zero-initialised counters it had before. Caller must log + continue.
+    ///
+    /// QoL-1：按 `engine_mode`（paper/demo/live）從 `trading.fills` 聚合恢復累計指標。
+    /// 三引擎並行時各自獨立，透過 `engine_mode = $1` 過濾。語義與 `apply_fill()` 對齊：
+    ///   * `total_fees` = SUM(fee) — 所有成交（含開倉/平倉）都收費
+    ///   * `total_realized_pnl` = SUM(realized_pnl) — 開倉 0、平倉非 0，直接求和等價
+    ///   * `trade_count` = COUNT(*) WHERE realized_pnl <> 0 — 僅 round-trip
+    /// Fail-soft：DB 錯誤向上拋但 `&mut self` 不修改，呼叫端紀錄 warning 後繼續啟動。
+    pub async fn restore_from_db(
+        &mut self,
+        pool: &sqlx::PgPool,
+        engine_mode: &str,
+    ) -> Result<(), sqlx::Error> {
+        // Cast to fixed-width float/int types to avoid sqlx type-negotiation
+        // surprises on real/numeric columns. COALESCE folds empty result-set to 0.
+        // 強制轉型 float8 / bigint 避免 real/numeric 推斷麻煩；COALESCE 讓空表結果為 0。
+        let row: (f64, f64, i64) = sqlx::query_as(
+            "SELECT \
+                 COALESCE(SUM(fee), 0)::float8          AS total_fees, \
+                 COALESCE(SUM(realized_pnl), 0)::float8 AS total_realized_pnl, \
+                 COALESCE(COUNT(*) FILTER (WHERE realized_pnl <> 0), 0)::bigint \
+                     AS trade_count \
+             FROM trading.fills \
+             WHERE engine_mode = $1",
+        )
+        .bind(engine_mode)
+        .fetch_one(pool)
+        .await?;
+
+        self.apply_restored_counters(row.0, row.1, row.2);
+        Ok(())
+    }
+
     /// PNL-FIX-2: Charge a standalone fee against the paper account.
     /// Used by `emit_close_fill` so risk/strategy/fast_track closes — which all
     /// route through the synchronous `close_position()` path (no fee param) —
@@ -820,6 +920,147 @@ mod tests {
         let eth = s.get_position("ETHUSDT").unwrap();
         assert!(!eth.is_long);
         assert!((eth.qty - 2.0).abs() < 1e-12);
+    }
+
+    // ---------------------------------------------------------------
+    // QoL-1: restore_from_db semantics
+    // QoL-1：restore_from_db 語義測試
+    // ---------------------------------------------------------------
+
+    /// Empty DB (all zeros) must leave counters at 0 and balance untouched.
+    /// 空表聚合結果為 0 — 計數器與餘額保持不變。
+    #[test]
+    fn test_restore_counters_empty_db_leaves_state_zero() {
+        let mut s = PaperState::new(10_000.0);
+        s.apply_restored_counters(0.0, 0.0, 0);
+        assert!((s.total_fees() - 0.0).abs() < 1e-12);
+        assert!((s.total_realized_pnl() - 0.0).abs() < 1e-12);
+        assert_eq!(s.trade_count(), 0);
+        // balance = initial + 0 - 0
+        assert!((s.balance() - 10_000.0).abs() < 1e-9);
+    }
+
+    /// Closes only: realized_pnl non-zero, trade_count = number of closes,
+    /// balance reflects pnl - fees.
+    /// 全為 close fill：realized_pnl 非零、trade_count = 平倉數，餘額 = pnl - fees。
+    #[test]
+    fn test_restore_counters_close_fills_aggregate_correctly() {
+        let mut s = PaperState::new(10_000.0);
+        // Simulate 3 round-trips: +$120, -$40, +$85 gross; fees $1.5+$1.2+$1.8 = $4.5.
+        // 模擬 3 個 round-trip：毛 PnL +$120, -$40, +$85；手續費共 $4.5。
+        s.apply_restored_counters(4.5, 120.0 - 40.0 + 85.0, 3);
+        assert!((s.total_fees() - 4.5).abs() < 1e-9);
+        assert!((s.total_realized_pnl() - 165.0).abs() < 1e-9);
+        assert_eq!(s.trade_count(), 3);
+        // balance = 10000 + 165 - 4.5 = 10160.5
+        assert!((s.balance() - 10_160.5).abs() < 1e-6);
+        // peak_balance must climb to match (not stay at 10_000 initial).
+        // peak_balance 必須跟著抬升。
+        assert!((s.peak_balance - 10_160.5).abs() < 1e-6);
+    }
+
+    /// Open-only fills: realized_pnl sum = 0 (opens write 0), trade_count = 0,
+    /// but fees still accumulate on every fill.
+    /// 全為 open fill：SUM(realized_pnl)=0、trade_count=0，手續費仍累計。
+    #[test]
+    fn test_restore_counters_open_only_fills_zero_trade_count() {
+        let mut s = PaperState::new(10_000.0);
+        // 5 opens × $1 fee each, no closes yet.
+        // 5 筆開倉 × $1 手續費，尚未平倉。
+        s.apply_restored_counters(5.0, 0.0, 0);
+        assert!((s.total_fees() - 5.0).abs() < 1e-9);
+        assert!((s.total_realized_pnl() - 0.0).abs() < 1e-12);
+        assert_eq!(s.trade_count(), 0);
+        // balance = 10_000 - 5.0
+        assert!((s.balance() - 9_995.0).abs() < 1e-9);
+    }
+
+    /// Net-negative realized PnL (losing streak) must drive balance below initial
+    /// but peak_balance stays at initial since restored balance < initial.
+    /// 累計虧損時餘額低於初始；peak_balance 保持初始值（不會被拉低）。
+    #[test]
+    fn test_restore_counters_net_negative_keeps_peak_at_initial() {
+        let mut s = PaperState::new(10_000.0);
+        s.apply_restored_counters(20.0, -500.0, 10);
+        assert!((s.total_fees() - 20.0).abs() < 1e-9);
+        assert!((s.total_realized_pnl() + 500.0).abs() < 1e-9);
+        assert_eq!(s.trade_count(), 10);
+        assert!((s.balance() - 9_480.0).abs() < 1e-6);
+        // peak stays at initial 10_000 (restored balance 9_480 < 10_000).
+        // peak 保留初始 10_000（還原後餘額 9_480 < 10_000）。
+        assert!((s.peak_balance - 10_000.0).abs() < 1e-9);
+    }
+
+    /// Non-finite aggregate values must be rejected — state stays unchanged.
+    /// 非有限聚合值應被拒絕，狀態保持不變。
+    #[test]
+    fn test_restore_counters_non_finite_rejected() {
+        let mut s = PaperState::new(10_000.0);
+        // Pre-load some baseline then try to clobber with NaN — should stay baseline.
+        // 先載入基線，再嘗試以 NaN 覆蓋 — 應保持基線。
+        s.apply_restored_counters(3.0, 50.0, 2);
+        let baseline_balance = s.balance();
+        s.apply_restored_counters(f64::NAN, 10.0, 5);
+        assert!((s.balance() - baseline_balance).abs() < 1e-12);
+        assert_eq!(s.trade_count(), 2);
+        s.apply_restored_counters(1.0, f64::INFINITY, 5);
+        assert!((s.balance() - baseline_balance).abs() < 1e-12);
+        assert_eq!(s.trade_count(), 2);
+    }
+
+    /// Negative trade_count (malformed row) clamps to 0.
+    /// 負 trade_count 夾到 0（防護異常回傳）。
+    #[test]
+    fn test_restore_counters_negative_trade_count_clamps_to_zero() {
+        let mut s = PaperState::new(10_000.0);
+        s.apply_restored_counters(1.0, 0.0, -42);
+        assert_eq!(s.trade_count(), 0);
+    }
+
+    /// Restoring twice replaces (does not accumulate) so multiple calls are idempotent
+    /// given the same aggregate input.
+    /// 重複呼叫應覆蓋而非累加，保證冪等。
+    #[test]
+    fn test_restore_counters_idempotent_same_input() {
+        let mut s = PaperState::new(10_000.0);
+        s.apply_restored_counters(4.5, 165.0, 3);
+        let first_balance = s.balance();
+        let first_trade_count = s.trade_count();
+        s.apply_restored_counters(4.5, 165.0, 3);
+        assert!((s.balance() - first_balance).abs() < 1e-12);
+        assert_eq!(s.trade_count(), first_trade_count);
+    }
+
+    /// Documents the three-engine isolation expectation: `restore_from_db` filters
+    /// on `engine_mode`, so calling it with "paper" must never pull in demo/live
+    /// rows. Pure-helper test covers the apply-side; the SQL WHERE clause is
+    /// asserted by reviewers since sqlx needs a live Postgres for a full round-trip.
+    /// 三引擎隔離：`restore_from_db` 以 `engine_mode` 過濾，呼叫 "paper" 絕不會
+    /// 帶回 demo/live 行。純函數測試驗證 apply 端；SQL WHERE 子句由 reviewer 驗證
+    /// （完整 round-trip 需要真實 Postgres）。
+    #[test]
+    fn test_restore_counters_three_engines_independent_values() {
+        // Each engine has its own PaperState + its own per-engine aggregate row.
+        // 每條引擎擁有獨立 PaperState 與對應聚合行。
+        let mut paper = PaperState::new(10_000.0);
+        let mut demo = PaperState::new(25_000.0);
+        let mut live = PaperState::new(5_000.0);
+
+        paper.apply_restored_counters(10.0, 300.0, 12);
+        demo.apply_restored_counters(2.0, -50.0, 4);
+        live.apply_restored_counters(0.0, 0.0, 0);
+
+        assert_eq!(paper.trade_count(), 12);
+        assert_eq!(demo.trade_count(), 4);
+        assert_eq!(live.trade_count(), 0);
+        assert!((paper.total_realized_pnl() - 300.0).abs() < 1e-9);
+        assert!((demo.total_realized_pnl() + 50.0).abs() < 1e-9);
+        assert!((live.total_realized_pnl() - 0.0).abs() < 1e-12);
+        // No cross-talk between engines — each carries its own initial balance forward.
+        // 引擎間無串擾，各自攜帶自己的初始餘額。
+        assert!((paper.balance() - (10_000.0 + 300.0 - 10.0)).abs() < 1e-6);
+        assert!((demo.balance() - (25_000.0 - 50.0 - 2.0)).abs() < 1e-6);
+        assert!((live.balance() - 5_000.0).abs() < 1e-9);
     }
 
     #[test]
