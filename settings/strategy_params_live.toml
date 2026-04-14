@@ -4,8 +4,8 @@
 # Live = conservative. Operator adjusts after promotion pipeline graduation.
 # 實盤 = 保守。策略經放權管線畢業後由 Operator 調整。
 #
-# FundingArb intentionally excluded (stub — no IPC data yet).
-# FundingArb 故意排除（stub — 尚無 IPC 資金費率數據）。
+# OC-5: FundingArb available but conservative for live.
+# OC-5：FundingArb 可用但 live 保守設定。
 
 [ma_crossover]
 active = true
@@ -38,3 +38,14 @@ spacing_mode = "linear"
 health_check_interval = 200
 max_out_of_range = 50
 conf_scale = 1.0
+
+# OC-5: FundingArb — inactive for live until paper/demo validated.
+# OC-5：FundingArb — live 暫不啟用，待紙盤/模擬盤驗證通過。
+[funding_arb]
+active = false
+cooldown_ms = 3600000
+total_cost_bps = 34.0
+expected_periods = 3.0
+funding_threshold = 0.001
+max_basis_pct = 0.3
+max_hold_ms = 259200000

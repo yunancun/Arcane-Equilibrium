@@ -38,3 +38,15 @@ spacing_mode = "linear"
 health_check_interval = 200
 max_out_of_range = 50
 conf_scale = 1.0
+
+# OC-5: FundingArb — funding rate capture strategy.
+# Paper = exploration, activated for signal validation.
+# OC-5：FundingArb — 資金費率捕獲策略。紙盤啟用以驗證信號。
+[funding_arb]
+active = true
+cooldown_ms = 3600000
+total_cost_bps = 34.0
+expected_periods = 3.0
+funding_threshold = 0.0005
+max_basis_pct = 0.5
+max_hold_ms = 259200000
