@@ -1,7 +1,15 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-04-14
+> 最後更新：2026-04-14（WP-F/UX-07~10 + QoL-1/3）
+
+### WP-F/UX-07~10 術語統一 + Live 雙態註解（2026-04-14 · commit 19a84da）
+
+**背景**：GUI 11 個 tab 對 Paper / Demo / Live / Session 有 4+5+6+5 個中文變體共用（纸上交易 / 模拟交易 / 模拟引擎 / 测试引擎 / Bybit Demo 执行引擎 / Demo 引擎 / 实盘交易 / Session Halted / Paper Trading Session / AI 推理会话 / 交易会话 …），tab bar label vs 內部 `<title>` 11 個中僅 1 個一致。**規範字典**：`Paper 模拟` / `Demo 演示` / `Live 实盘` 全域統一；Tab bar `中文 English` 雙語格式。**Session 語境消歧**：Paper Trading Session → Paper 会话；Demo Session Controls → Demo 会话控制；AI 推理会话 / Session History → AI 推理 / AI 推理历史；Session Halted → 交易暂停 Trading Halted；governance 交易会话 → 授权租约 Lease。**Pass-4 Live 槽雙態註解**（Phase 6 Live-Demo 虛擬 key 設計）：tab-live.html L178-188 新增雙語資訊區塊，明確「Live 槽可填入 Mainnet API 或 Live-Demo 虛擬 key（後者跑 Demo 服務器但走 Live 代碼路徑），兩者統一走 Live 最嚴標準（紫色主題 / Global Mode Gate / 二次確認 / 完整風控棧）」；tab-settings.html L773 Live-Demo key 卡片補 `⚠ Live-Demo 等同 Live 待遇` 行。**執行**：3 sub-agent 平行派發（Group A console+system+strategy+risk 4 檔 / B ai+governance+settings+live+governance-tab.js 5 檔 / C paper+demo+learning+monitoring+phase4+app.js+common.js 7 檔）+ 主會話 E2 補修 legacy `index.html`（`legacy_routes.py` 仍 serve）。console.html `BUILD_TS` `20260410.live-ui-v2` → `20260414.ux07-unify-v1` 強制 iframe 緩存刷新。**零後端改動**：所有 JSON API 鍵 / CSS class / 函數名 / endpoint / data-\* 屬性未觸碰，純展示層。16 文件 +160/-143 行。E2 grep sweep 確認無 user-visible 殘留舊詞（僅 JS/CSS 註釋保留）。
+
+### QoL-1 PaperState 重啟還原 + QoL-3 PyO3 統一部署（2026-04-14 · commits 22a0b36+ea25844 · c510388+dc2eec3）
+
+**QoL-1**：引擎重啟後 `paper_state.total_realized_pnl / total_fees / trade_count` 歸零導致 GUI 累計 PnL 卡片失真。**方案**：`PaperState::restore_from_db(pool, engine_mode)` 按 `engine_mode` 從 `trading.fills` 聚合（`COALESCE(SUM(fee),0)` / `COALESCE(SUM(realized_pnl),0)` / `COUNT(*) FILTER (WHERE realized_pnl <> 0)` — 只數 close leg 避免 open/close 雙記）；`apply_restored_counters()` 純函數 helper 重建 `balance = initial_balance + pnl_sum - fees_sum`。新增 `event_consumer/paper_state_restore.rs`（81 行）fail-soft glue（None pool → info / SQL err → warn / 成功 → info with values，引擎永遠能啟動）。三引擎按 `engine_mode` 隔離：demo=-3.49/29.11/254 · paper=-14.40/58.21/333 · live=0/0/0 重啟驗證 PASS。**QoL-3**：`maturin develop` 一次一個 venv 容易漏，每個 venv 觸發完整編譯。**方案**：`helper_scripts/build_pyo3.sh`（285 行）改用 `maturin build` 生 wheel → `pip install --force-reinstall --no-deps` 雙寫 `~/.venv` + `control_api_v1/.venv`。跨平台：`stat -c/-f` dual fallback / bash 4 guard / `mktemp -d -t`。Exit codes 0 ok / 1 args / 2 build / 3 install / 4 verify。`restart_all.sh` 新增 `--rebuild` 旗標（任意位置），build 失敗 exit 2 不啟動服務。**Scope 注意**：`--rebuild` 只重建 PyO3 `.so`，**不重建** `openclaw-engine` binary。**執行**：git worktree 隔離兩 E1 平行完成，QoL-3 先合（純腳本零運行風險）→ QoL-1（需 rebuild + restart）。E4：engine lib 1136 → **1144**（+8 來自 `apply_restored_counters` helper + fail-soft glue unit tests）·Rust 總計 1535 → **1543**。Worklog：`docs/worklogs/2026-04-14--qol_1_and_qol_3_delivery.md`。
 
 ### ORPHAN-ADOPT-1 Phase 1 — Reconciler 孤兒主動平倉（2026-04-14）
 
