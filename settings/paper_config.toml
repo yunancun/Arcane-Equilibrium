@@ -5,5 +5,7 @@
 # Priority: env OPENCLAW_PAPER_BALANCE > this file > hardcoded default (10000.0)
 # 優先級：環境變數 > 此文件 > 硬編碼默認值
 
-initial_balance_usdt = 10000.0
+# initial_balance_usdt — commented out to auto-sync from Demo API balance
+# 註解掉以自動同步 Demo API 餘額
+# initial_balance_usdt = 955.07
 taker_fee_rate = 0.00055

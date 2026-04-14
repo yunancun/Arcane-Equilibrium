@@ -59,7 +59,7 @@ impl TickPipeline {
                     symbol: sym.clone(),
                     last_price: event.last_price,
                     mark_price: 0.0,  // not available in PriceEvent yet
-                    index_price: 0.0, // not available in PriceEvent yet
+                    index_price: event.index_price.unwrap_or(0.0),
                     best_bid: event.bid_price,
                     best_ask: event.ask_price,
                     bid_size: 0.0, // not available in PriceEvent yet
@@ -486,7 +486,13 @@ impl TickPipeline {
         if let Some(fr) = event.funding_rate {
             self.funding_rates.insert(sym.to_string(), fr);
         }
+        // OC-5: Cache index price from Ticker events for FundingArb basis calculation.
+        // OC-5：緩存 Ticker 事件的指數價格，用於 FundingArb 基差計算。
+        if let Some(ip) = event.index_price {
+            self.index_prices.insert(sym.to_string(), ip);
+        }
         let funding_rate = self.funding_rates.get(sym).copied();
+        let index_price = self.index_prices.get(sym).copied();
 
         let ctx = TickContext {
             symbol: sym,
@@ -496,6 +502,7 @@ impl TickPipeline {
             signals: &signals,
             h0_allowed, // RRC-1-A1: real H0 gate result from Step 0.5
             funding_rate,
+            index_price,
         };
 
         // NOTE: Current rejection rollback assumes each strategy emits at most 1 intent per tick.

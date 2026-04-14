@@ -382,40 +382,22 @@ pub struct StopRequest {
     pub is_long: bool,
 }
 
-/// Order dispatch request from tick_pipeline to exchange API (EXT-1).
-/// 從 tick_pipeline 派發到交易所 API 的訂單派發請求。
-///
-/// R-04: Renamed from ShadowOrderRequest — used for both shadow and primary orders.
-/// R-04：從 ShadowOrderRequest 重命名 — 同時用於影子單和主訂單。
-///
-/// Used in both modes:
-/// - `paper_only`: shadow order (fire-and-forget after local fill, is_primary=false)
-/// - `exchange`: primary order (tracked, fill confirmed via WS, is_primary=true)
+/// Order dispatch request from tick_pipeline to exchange API (EXT-1, R-04).
+/// 從 tick_pipeline 到交易所的訂單派發請求。paper_only=shadow; exchange=primary。
 #[derive(Debug, Clone)]
 pub struct OrderDispatchRequest {
-    /// Trading symbol / 交易對
-    pub symbol: String,
-    /// Long direction / 多方向
-    pub is_long: bool,
-    /// Order quantity / 訂單數量
-    pub qty: f64,
-    /// Reference price / 參考價格
-    pub price: f64,
-    /// Strategy name / 策略名稱
-    pub strategy: String,
-    /// Timestamp (ms) when the intent was generated / 意圖生成時間戳（毫秒）
-    pub paper_fill_ts: u64,
-    /// true = closing position, use reduce_only / true = 平倉，使用 reduce_only
-    pub is_close: bool,
-    /// EXT-1: Client-assigned order link ID for tracking / 客戶端訂單連結 ID
-    pub order_link_id: String,
-    /// EXT-1: true = exchange mode primary order (track pending, await confirmation)
-    /// false = paper_only mode shadow order (fire-and-forget)
+    pub symbol: String,     // Trading symbol / 交易對
+    pub is_long: bool,      // Long direction / 多方向
+    pub qty: f64,              // Order quantity / 訂單數量
+    pub price: f64,             // Reference price / 參考價格
+    pub strategy: String,       // Strategy name / 策略名稱
+    pub paper_fill_ts: u64,     // Intent generation timestamp (ms) / 意圖生成時間戳
+    pub is_close: bool,         // true = closing position (reduce_only) / 平倉
+    pub order_link_id: String,  // EXT-1: Client order link ID / 客戶端連結 ID
+    /// EXT-1: true = exchange primary (track pending); false = paper shadow (fire-and-forget)
     pub is_primary: bool,
-    /// I-08 雙軌止損：broker-side stop loss price (None = engine rail only)
-    pub stop_loss: Option<f64>,
-    /// I-08 雙軌止損：broker-side take profit price
-    pub take_profit: Option<f64>,
+    pub stop_loss: Option<f64>,   // I-08: broker-side SL / 券商側止損
+    pub take_profit: Option<f64>, // I-08: broker-side TP / 券商側止盈
 }
 
 /// Tick context passed to strategies — borrows from on_tick scope to avoid cloning.
@@ -432,10 +414,12 @@ pub struct TickContext<'a> {
     /// EDGE-P1-2: Latest funding rate for this symbol (from Bybit tickers).
     /// EDGE-P1-2：該幣種最新資金費率（來自 Bybit tickers）。
     pub funding_rate: Option<f64>,
+    /// OC-5: Latest index price for basis calculation (from Bybit tickers).
+    /// OC-5：最新指數價格，用於基差計算（來自 Bybit tickers）。
+    pub index_price: Option<f64>,
 }
 
-/// Tick statistics for monitoring.
-/// Tick 統計。
+/// Tick statistics for monitoring / Tick 統計。
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct TickStats {
     pub total_ticks: u64,
@@ -445,13 +429,8 @@ pub struct TickStats {
     pub last_tick_ms: u64,
 }
 
-/// Core tick pipeline — owns all processing state.
-/// 核心 tick 管線 — 擁有所有處理狀態。
-///
-/// Phase 3 (Signal Diamond): per-mode state lives in `mode_states` HashMap.
-/// The fields below marked "primary mode alias" are migration shims that
-/// point to the primary (first) active mode. Once multi-mode on_tick is
-/// fully migrated, these will be removed.
+/// Core tick pipeline — owns all processing state / 核心 tick 管線 — 擁有所有處理狀態。
+/// Phase 3: per-pipeline independent instance (3E-4 removed multi-mode shims).
 /// Phase 3（Signal Diamond）：每模式狀態在 `mode_states` HashMap 中。
 /// 下方標記 "primary mode alias" 的欄位是遷移墊片，指向主要活躍模式。
 /// 多模式 on_tick 完整遷移後將移除。
@@ -614,6 +593,9 @@ pub struct TickPipeline {
     /// EDGE-P1-2: Cached latest funding rate per symbol (from Ticker events).
     /// EDGE-P1-2：每幣種最新資金費率緩存（來自 Ticker 事件）。
     funding_rates: HashMap<String, f64>,
+    /// OC-5: Cached latest index price per symbol (from Ticker events).
+    /// OC-5：每幣種最新指數價格緩存（來自 Ticker 事件）。
+    index_prices: HashMap<String, f64>,
 }
 
 impl TickPipeline {
@@ -692,6 +674,7 @@ impl TickPipeline {
             system_mode: SystemMode::default(),
             ft_reduced_symbols: std::collections::HashSet::new(),
             funding_rates: HashMap::new(),
+            index_prices: HashMap::new(),
         }
     }
 

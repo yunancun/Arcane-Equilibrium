@@ -581,12 +581,12 @@ impl Default for GridTradingParams {
 }
 
 /// FundingArb tunable parameters / FundingArb 可調參數
-/// FIX-23: Explicitly registered with active=false — pending OC-5/R-06 data wiring.
-/// FIX-23：顯式註冊且預設停用 — 待 OC-5/R-06 數據接線完成。
+/// OC-5: Funding rate capture via TickContext.funding_rate + index_price.
+/// OC-5：通過 TickContext.funding_rate + index_price 進行資金費率捕獲。
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct FundingArbParams {
-    /// Default false: strategy stub, no external funding rate in TickContext yet.
-    /// 預設 false：策略為 stub，TickContext 尚無外部資金費率數據。
+    /// Default false: set active=true in TOML when ready to trade.
+    /// 預設 false：在 TOML 中設定 active=true 以啟用交易。
     #[serde(default)]
     pub active: bool,
     #[serde(default = "default_funding_cooldown")]
@@ -809,8 +809,8 @@ impl StrategyFactory {
         gt.set_active(p.grid_trading.active);
         strategies.push(Box::new(gt));
 
-        // FundingArb (FIX-23: registered but inactive by default — pending OC-5/R-06)
-        // FIX-23：已註冊但預設停用 — 待 OC-5/R-06 數據接線
+        // FundingArb (OC-5: active when TOML sets active=true)
+        // OC-5：TOML 設定 active=true 時啟用
         let mut fa = funding_arb::FundingArb::new();
         fa.cooldown_ms = p.funding_arb.cooldown_ms;
         fa.total_cost_bps = p.funding_arb.total_cost_bps;
@@ -945,7 +945,7 @@ mod tests {
         let strategies = StrategyFactory::create_all();
         for s in &strategies {
             match s.name() {
-                // FIX-23: funding_arb inactive by default (pending OC-5/R-06)
+                // OC-5: funding_arb inactive by default (TOML controls activation)
                 "funding_arb" => assert!(!s.is_active(), "funding_arb should be inactive by default"),
                 _ => assert!(s.is_active(), "{} should be active by default", s.name()),
             }

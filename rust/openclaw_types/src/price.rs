@@ -71,6 +71,10 @@ pub struct PriceEvent {
     /// 當前資金費率（Ticker 事件，來自 Bybit tickers 流）。
     #[serde(default)]
     pub funding_rate: Option<f64>,
+    /// OC-5: Index price for basis calculation (from Bybit tickers stream).
+    /// OC-5：用於基差計算的指數價格（來自 Bybit tickers 流）。
+    #[serde(default)]
+    pub index_price: Option<f64>,
     /// Legacy metadata map — still populated for backward compat, but prefer structured fields.
     /// 舊版 metadata — 為向後兼容仍填充，但應優先使用結構化欄位。
     #[serde(default)]
@@ -94,6 +98,7 @@ impl PriceEvent {
             asks5: None,
             adl_rank: None,
             funding_rate: None,
+            index_price: None,
             metadata: HashMap::new(),
         }
     }

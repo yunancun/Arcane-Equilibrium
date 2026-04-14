@@ -669,6 +669,7 @@ mod tests {
             signals: &[],
             h0_allowed: true,
             funding_rate: None,
+            index_price: None,
         }
     }
 
@@ -903,6 +904,7 @@ mod tests {
             signals: &[],
             h0_allowed: true,
             funding_rate,
+            index_price: None,
         }
     }
 

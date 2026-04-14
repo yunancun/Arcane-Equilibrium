@@ -215,6 +215,7 @@ mod tests {
             asks5: None,
             adl_rank: None,
             funding_rate: None,
+            index_price: None,
             metadata: Default::default(),
         }
     }
