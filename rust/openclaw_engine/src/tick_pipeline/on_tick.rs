@@ -103,8 +103,17 @@ impl TickPipeline {
         // Step 0: Fast track check — emergency actions before normal processing
         // FIX-03+04: Real inputs for flash-crash and margin-crisis detection.
         // price_drop_pct: max peak-to-current drop across all symbols in window.
-        // margin_utilization_pct: total position notional / balance × 100.
+        // margin_utilization_pct: margin_used (= notional / leverage) / balance × 100.
+        // FA-PHANTOM-1 fix (2026-04-14): previously divided raw notional by balance,
+        // which ignored leverage. With default leverage_max=20 and
+        // total_exposure_max_pct=100, notional could legitimately reach 100% of
+        // balance while true margin usage was only 5%. The old formula fired
+        // CloseAll at 90% notional/balance — below the designed exposure cap —
+        // causing all strategies to be force-closed whenever positions stacked
+        // (root of the "22 phantom fills" G-2 validation failure).
         // FIX-03+04：閃崩和保證金危機偵測的真實輸入。
+        // FA-PHANTOM-1 修復：原公式未除 leverage，90% 閾值低於 total_exposure_max_pct=100%
+        // 設計上限，倉位堆滿時必觸發 CloseAll，全策略被系統性誤平。
         let price_drop_pct = self.price_tracker.max_drop_pct();
         let margin_utilization_pct = {
             let balance = self.paper_state.balance();
@@ -113,7 +122,14 @@ impl TickPipeline {
                     let px = self.latest_prices.get(&p.symbol).copied().unwrap_or(p.entry_price);
                     p.qty * px
                 }).sum();
-                (total_notional / balance * 100.0).min(999.0)
+                let leverage = self
+                    .intent_processor
+                    .risk_config()
+                    .limits
+                    .leverage_max
+                    .max(1.0);
+                let margin_used = total_notional / leverage;
+                (margin_used / balance * 100.0).min(999.0)
             } else {
                 0.0
             }
