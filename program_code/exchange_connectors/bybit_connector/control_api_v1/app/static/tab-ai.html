@@ -45,8 +45,8 @@
     <div class="oc-metric"><div class="oc-metric-label">今日总成本</div><div class="oc-metric-val blue" id="a-today">--</div></div>
     <div class="oc-metric"><div class="oc-metric-label">30 天累计</div><div class="oc-metric-val" id="a-total">--</div></div>
     <div class="oc-metric"><div class="oc-metric-label">日预算上限</div><div class="oc-metric-val" id="a-budget">--</div></div>
-    <div class="oc-metric"><div class="oc-metric-label">今日会话数</div><div class="oc-metric-val" id="a-sessions">--</div></div>
-    <div class="oc-metric"><div class="oc-metric-label">平均成本/会话</div><div class="oc-metric-val" id="a-avg">--</div></div>
+    <div class="oc-metric"><div class="oc-metric-label">今日推理次数</div><div class="oc-metric-val" id="a-sessions">--</div></div>
+    <div class="oc-metric"><div class="oc-metric-label">平均成本/推理</div><div class="oc-metric-val" id="a-avg">--</div></div>
     <div class="oc-metric"><div class="oc-metric-label">预算剩余</div><div class="oc-metric-val" id="a-remaining">--</div></div>
   </div>
 </div>
@@ -197,11 +197,11 @@
         <select class="oc-select" id="ai-allow-opus" style="width:100px"><option value="true">允许</option><option value="false">不允许</option></select>
       </div>
       <div style="display:flex;justify-content:space-between;align-items:center">
-        <div><div style="font-size:12px;font-weight:600">自动提交到模拟 / Auto Submit</div><div style="font-size:10px;color:var(--text-dim)">AI 建议是否自动提交为模拟订单</div></div>
+        <div><div style="font-size:12px;font-weight:600">自动提交到 Paper 模拟 / Auto Submit</div><div style="font-size:10px;color:var(--text-dim)">AI 建议是否自动提交为 Paper 模拟订单</div></div>
         <select class="oc-select" id="ai-auto-submit" style="width:100px"><option value="true">自动</option><option value="false">手动</option></select>
       </div>
       <div style="display:flex;justify-content:space-between;align-items:center">
-        <div><div style="font-size:12px;font-weight:600">最大迭代次数 / Max Iterations</div><div style="font-size:10px;color:var(--text-dim)">单次推理会话的最大思考轮数</div></div>
+        <div><div style="font-size:12px;font-weight:600">最大迭代次数 / Max Iterations</div><div style="font-size:10px;color:var(--text-dim)">单次 AI 推理的最大思考轮数</div></div>
         <input class="oc-input" id="ai-max-iter" type="number" step="1" min="1" max="50" style="width:80px" />
       </div>
       <button class="oc-btn oc-btn-primary" onclick="saveAIConfig(this)" style="margin-top:4px">&#x1F4BE; 保存设置 / Save Settings</button>
@@ -225,9 +225,9 @@
   </div>
 </div>
 
-<!-- ═══ Session History ═══ -->
+<!-- ═══ AI Inference History ═══ -->
 <div class="oc-card">
-  <h3>&#x1F4DC; 推理会话历史 / Session History</h3>
+  <h3>&#x1F4DC; AI 推理历史 / AI Inference History</h3>
   <div class="oc-table-wrap">
     <table class="oc-table">
       <thead><tr><th>ID</th><th>Time</th><th>Trigger</th><th>Symbol</th><th>Status</th><th>Cost</th><th>Result</th></tr></thead>
@@ -349,9 +349,9 @@
 <!-- ═══ Trigger Confirm Modal ═══ -->
 <div class="confirm-overlay" id="trigger-confirm">
   <div class="confirm-dialog">
-    <div class="confirm-header">&#x26A1; 触发 AI 推理会话 / Trigger L2 Session</div>
+    <div class="confirm-header">&#x26A1; 触发 AI 推理 / Trigger L2 Inference</div>
     <div class="confirm-body">
-      <strong>即将触发一次 AI 深度分析会话。</strong>
+      <strong>即将触发一次 AI 深度分析。</strong>
       <p>AI 会分析当前市场状况、持仓情况和历史表现，然后给出交易建议。</p>
       <div class="cost-est">
         <div style="font-weight:600;margin-bottom:4px">&#x1F4B0; 预估成本：</div>
@@ -390,7 +390,7 @@ $('explain-providers').innerHTML = ocExplain(
 
 $('explain-settings').innerHTML = ocExplain(
   '设置 AI 引擎的全局参数。日硬上限是所有供应商合计的每日成本上限。弹性预算允许 AI 根据表现自动调整使用量。',
-  '日硬上限是绝对不可超越的。弹性基准是正常情况下的日预算，乘以弹性倍数得到实际上下限。例如基准 $8、上限 2x、下限 0.3x → 实际预算在 $2.4-$16 之间浮动。Auto Submit 控制 AI 建议是否自动变成模拟订单。'
+  '日硬上限是绝对不可超越的。弹性基准是正常情况下的日预算，乘以弹性倍数得到实际上下限。例如基准 $8、上限 2x、下限 0.3x → 实际预算在 $2.4-$16 之间浮动。Auto Submit 控制 AI 建议是否自动变成 Paper 模拟订单。'
 );
 
 $('explain-pricing').innerHTML = ocExplain(
@@ -405,7 +405,7 @@ function closeTriggerConfirm() { $('trigger-confirm').classList.remove('show'); 
 async function doTriggerSession() {
   closeTriggerConfirm();
   const d = await ocPost('/api/v1/paper/layer2/trigger', { reason: 'manual_gui_trigger' });
-  if (d) { ocToast('AI 推理会话已触发', 'success'); loadSessions(); }
+  if (d) { ocToast('AI 推理已触发', 'success'); loadSessions(); }
   else ocToast('触发失败 / Trigger failed', 'error');
 }
 
@@ -547,7 +547,7 @@ async function loadSessions() {
   const d = await ocApi('/api/v1/paper/layer2/sessions?limit=20');
   if (!d || !d.data) { ocSetHtml('sessions-tbody', '<tr class="empty-row"><td colspan="7" style="color:var(--text-dim)">⚠ 连接失败 / Connection failed</td></tr>'); return; }
   const sessions = d.data.sessions || d.data || [];
-  if (!sessions.length) { ocSetHtml('sessions-tbody', '<tr class="empty-row"><td colspan="7">暂无推理会话</td></tr>'); return; }
+  if (!sessions.length) { ocSetHtml('sessions-tbody', '<tr class="empty-row"><td colspan="7">暂无 AI 推理记录</td></tr>'); return; }
   let html = '';
   sessions.slice(0, 20).forEach(s => {
     html += '<tr>';

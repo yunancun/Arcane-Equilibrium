@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>模拟引擎</title>
+<title>Paper 模拟</title>
 <script src="/static/common.js"></script>
 </head>
 <body>
@@ -20,9 +20,9 @@
   .feed-price .price { font-weight: 600; }
 </style>
 
-<!-- Session Control Bar / 会话控制栏 -->
+<!-- Paper Session Control Bar / Paper 会话控制栏 -->
 <div class="oc-control-bar">
-  <span style="font-weight:600">&#x1F4B0; 模拟引擎</span>
+  <span style="font-weight:600">&#x1F4B0; Paper 模拟</span>
   <span id="session-badge" class="oc-chip oc-chip-neutral">--</span>
   <span class="spacer" style="flex:1"></span>
   <label style="font-size:11px;color:var(--text-dim);display:flex;align-items:center;gap:4px" title="Paper 初始餘額（USDT）/ Paper Initial Balance (USDT)">
@@ -163,12 +163,12 @@
 <script>
 // ─── Explainers ───────────────────────────────────────────────
 $('explain-paper').innerHTML = ocExplain(
-  '模拟交易使用真实市场价格但不涉及真实资金。你可以测试策略、练习下单，所有操作都是安全的。绿色数字表示盈利，红色表示亏损。「净盈亏」是扣除手续费和 AI 成本后的净收益。',
-  '模拟引擎使用 Bybit 公共 WebSocket 的实时价格数据。市价单以当前 ticker 价格加上 0.01% 模拟滑点成交。限价单在市场价格穿越指定价格时成交。引擎跟踪三种盈亏：已实现（已平仓）、未实现（持仓按市值计算）、净值（已实现减去手续费和 AI 咨询成本）。'
+  'Paper 模拟使用真实市场价格但不涉及真实资金。你可以测试策略、练习下单，所有操作都是安全的。绿色数字表示盈利，红色表示亏损。「净盈亏」是扣除手续费和 AI 成本后的净收益。',
+  'Paper 模拟使用 Bybit 公共 WebSocket 的实时价格数据。市价单以当前 ticker 价格加上 0.01% 模拟滑点成交。限价单在市场价格穿越指定价格时成交。引擎跟踪三种盈亏：已实现（已平仓）、未实现（持仓按市值计算）、净值（已实现减去手续费和 AI 咨询成本）。'
 );
 
 $('explain-order').innerHTML = ocExplain(
-  '在这里提交模拟订单。选择交易对、方向、类型和数量即可。',
+  '在这里提交 Paper 模拟订单。选择交易对、方向、类型和数量即可。',
   '市价订单以当前市场价格立即成交。限价订单需指定价格，只有市场价格达到指定价格时才会成交。'
 );
 

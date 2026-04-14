@@ -197,7 +197,7 @@ $('explain-scanner').innerHTML = ocExplain(
 
 $('explain-intents').innerHTML = ocExplain(
   '交易意图是策略产生的下单指令。它们在被执行前会经过风控检查，确保不违反任何限制。',
-  'OrderIntent 是策略层到执行层的桥梁。每个 intent 包含：symbol、side、qty、confidence、strategy_source。intent 会经过 cost_gate（ATR% < cost/winrate×1.3 则拒绝）和 StopManager 风控检查后，转换为实际订单提交给 Paper Trading Engine 或 Bybit Demo。'
+  'OrderIntent 是策略层到执行层的桥梁。每个 intent 包含：symbol、side、qty、confidence、strategy_source。intent 会经过 cost_gate（ATR% < cost/winrate×1.3 则拒绝）和 StopManager 风控检查后，转换为实际订单提交给 Paper 模拟引擎或 Bybit Demo 演示。'
 );
 
 // ─── Create / Delete Strategy ─────────────────────────────────

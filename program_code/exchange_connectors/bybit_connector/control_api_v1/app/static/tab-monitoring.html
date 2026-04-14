@@ -96,7 +96,7 @@ $('explain-grafana').innerHTML = ocExplain(
 
 $('explain-pipeline').innerHTML = ocExplain(
   'Pipeline Bridge 是数据管线的核心组件，负责将实时市场数据分发给各个策略，并将策略的交易意图转换为实际订单。',
-  'Pipeline Bridge 接收 WebSocket tick 数据，执行 fan-out 分发给所有注册的策略。策略产生的 OrderIntent 经过风控检查后，通过 Bridge 转换为 Paper Trading Engine 或 Bybit Demo 的订单。Bridge 还负责 K 线聚合和成交量追踪。'
+  'Pipeline Bridge 接收 WebSocket tick 数据，执行 fan-out 分发给所有注册的策略。策略产生的 OrderIntent 经过风控检查后，通过 Bridge 转换为 Paper 模拟 或 Demo 演示 的订单。Bridge 还负责 K 线聚合和成交量追踪。'
 );
 
 $('explain-telegram').innerHTML = ocExplain(

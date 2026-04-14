@@ -19,7 +19,7 @@
 <!-- ═══ Demo Control Plane ═══ -->
 <div class="oc-card">
   <h2>&#x1F3AE; Demo 控制面板 / Demo Control Plane</h2>
-  <div class="subtitle">Demo 模式的启用、验证和管理</div>
+  <div class="subtitle">Demo 演示模式的启用、验证和管理</div>
 
   <div id="explain-demo-control"></div>
 
@@ -118,8 +118,8 @@
           <div class="confirm-label" style="color:#f87171">風險說明 / Risks</div>
           <div style="font-size:13px;line-height:1.6">
             • 重啟期間（約 10-30 秒）市場監控中斷，無法執行止損<br>
-            • 未平倉的 Paper 倉位在重啟後恢復，但可能錯過止損時機<br>
-            • Bybit Demo 倉位不受影響（由交易所端管理）<br>
+            • 未平倉的 Paper 模拟 倉位在重啟後恢復，但可能錯過止損時機<br>
+            • Bybit Demo 演示 倉位不受影響（由交易所端管理）<br>
             • 重啟後系統自動恢復策略和市場數據訂閱
           </div>
         </div>
@@ -150,7 +150,7 @@
         <div class="confirm-block">
           <div class="confirm-label">清倉規則 / Liquidation Rules</div>
           <div style="font-size:13px;line-height:1.6">
-            系統會立即平倉所有<strong>扣除手續費後仍為盈利</strong>的 Paper 倉位。<br>
+            系統會立即平倉所有<strong>扣除手續費後仍為盈利</strong>的 Paper 模拟 倉位。<br>
             虧損倉位<strong>不會</strong>被強制平倉，以避免鎖定損失。<br>
             The system will close all Paper positions where <strong>net PnL after fees &gt; 0</strong>.<br>
             Losing positions will <strong>not</strong> be closed.
@@ -413,7 +413,7 @@ function restartStep3(liquidate) {
   const delayLabel = _restartDelay >= 60 ? '1 小時' : _restartDelay + ' 分鐘';
   document.getElementById('restart-summary').innerHTML =
     '⏱ 重啟延遲：<strong>' + delayLabel + '</strong><br>' +
-    '🗂 清倉：<strong>' + (_restartLiquidate ? '是 — 關閉盈利 Paper 倉位' : '否 — 保留全部倉位') + '</strong>';
+    '🗂 清倉：<strong>' + (_restartLiquidate ? '是 — 關閉盈利 Paper 模拟 倉位' : '否 — 保留全部倉位') + '</strong>';
   document.getElementById('restart-step-2').style.display = 'none';
   document.getElementById('restart-step-3').style.display = '';
 }
@@ -573,7 +573,7 @@ async function loadControlPlane() {
 
   const modeEl = document.getElementById('qa-current-mode');
   if (modeEl) {
-    const modeLabels = { disabled: '禁用 Disabled', demo_reserved: 'Demo 預留', shadow_only: '影子模式', observe_only: '觀察模式', design_only: '僅設計' };
+    const modeLabels = { disabled: '禁用 Disabled', demo_reserved: 'Demo 演示 預留', shadow_only: '影子模式', observe_only: '觀察模式', design_only: '僅設計' };
     modeEl.textContent = modeLabels[mode] || mode || '--';
     modeEl.style.color = mode === 'demo_reserved' ? 'var(--green)' : 'var(--accent)';
   }
@@ -609,7 +609,7 @@ const PF_BYBIT_SUPPORT = {
   margin:       { demo: false, agentReady: false, note: '归属 Spot 品类（保证金模式）· 非独立品类' },
   perp_linear:  { demo: true,  agentReady: true,  note: '主要交易品类 · 扫描器+策略已就绪 · 可设 Demo' },
   perp_inverse: { demo: true,  agentReady: false, note: 'Bybit 支持 · PnL 公式待修正 · 扫描器待覆盖' },
-  options:      { demo: false, agentReady: false, note: '实盘支持 · Demo 不可用 · 策略未就绪' },
+  options:      { demo: false, agentReady: false, note: 'Live 实盘支持 · Demo 不可用 · 策略未就绪' },
 };
 
 async function loadProductFamilyConfig() {
@@ -618,7 +618,7 @@ async function loadProductFamilyConfig() {
   const families = d.data.families || d.data;
   if (typeof families !== 'object') return;
 
-  const modeLabels = { disabled:'禁用 / Disabled', observe_only:'观察 / Observe', shadow_only:'影子 / Shadow', demo_reserved:'Demo 模式', live_reserved:'实盘 / Live' };
+  const modeLabels = { disabled:'禁用 / Disabled', observe_only:'观察 / Observe', shadow_only:'影子 / Shadow', demo_reserved:'Demo 演示', live_reserved:'Live 实盘' };
   const capColors = { enabled:'var(--green)', disabled:'#f87171', observe_only:'var(--yellow)', shadow_only:'var(--accent)' };
 
   let html = '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px">';
@@ -728,9 +728,9 @@ async function loadAll() {
 
 // ─── API Key Management ───────────────────────────────────────
 const APIKEY_SLOTS = [
-  { id: 'demo',      label: 'Demo 引擎',      icon: '🎮', desc: 'Bybit Demo 帳號（api-demo.bybit.com）' },
-  { id: 'live_demo', label: 'Live-Demo 引擎',  icon: '🧪', desc: '用 Demo key 運行 Live 引擎（demo 驗證，寫入 live 路徑）', liveDemoNote: true },
-  { id: 'live',      label: 'Live 引擎',       icon: '🔴', desc: 'Bybit 實盤帳號（api.bybit.com）', warn: true },
+  { id: 'demo',      label: 'Demo 演示',        icon: '🎮', desc: 'Bybit Demo 帳號（api-demo.bybit.com）' },
+  { id: 'live_demo', label: 'Live-Demo 虛擬槽',  icon: '🧪', desc: '用 Demo key 運行 Live 实盘 代碼路徑（demo 驗證，寫入 live 路徑）', liveDemoNote: true },
+  { id: 'live',      label: 'Live 实盘',         icon: '🔴', desc: 'Bybit 實盤帳號（api.bybit.com）', warn: true },
 ];
 
 let _currentApikeySlot = '';
@@ -769,7 +769,8 @@ async function loadApiKeyStatus() {
       html += '<div style="font-size:11px;color:#f87171;margin-bottom:8px">⚠ 實盤 key 修改後立即生效，請謹慎操作。</div>';
     }
     if (slot.liveDemoNote) {
-      html += '<div style="font-size:11px;color:var(--yellow,#f0c040);margin-bottom:8px">💡 此槽位與 Live 引擎共享同一 key 存儲。寫入後 Live 引擎也會使用該 key。</div>';
+      html += '<div style="font-size:11px;color:var(--yellow,#f0c040);margin-bottom:8px">💡 此槽位與 Live 实盘 共享同一 key 存儲。寫入後 Live 实盘 也會使用該 key。</div>';
+      html += '<div style="font-size:11px;color:#a855f7;margin-bottom:8px;line-height:1.55">⚠ Live-Demo 等同 Live 待遇（Same treatment as Live）— 完整風控 / 紫色主題 / 二次確認 / Global Gate 全部生效</div>';
     }
     html += '<div style="display:flex;gap:8px;flex-wrap:wrap">';
     html += '<button class="oc-btn oc-btn-primary" style="font-size:12px" onclick="openApikeyDialog(\'' + slot.id + '\')">✏ 替換 Key</button>';

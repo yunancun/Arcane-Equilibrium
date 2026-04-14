@@ -93,7 +93,7 @@ const CRITICAL_ACTIONS = {
     consequence: "請確認當前市況適合繼續交易，否則可能加速虧損。"
   },
   "unhalt-session": {
-    title: "解除熔斷 / Unhalt Session",
+    title: "解除熔斷 / Resume Trading",
     subtitle: "Resume trading after circuit-breaker halt",
     risk: "熔斷保護在回撤嚴重時觸發。解除後所有交易功能恢復。",
     consequence: "請確認回撤已受控、市場條件改善後再操作。錯誤解除可能導致進一步虧損。"

@@ -3,15 +3,15 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Bybit Demo</title>
+<title>Demo 演示</title>
 <script src="/static/common.js"></script>
 </head>
 <body>
 <script>ocAuthCheck(); ocInjectBaseCSS();</script>
 
-<!-- Connector Status + Session Control / 连接状态 + 会话控制 -->
+<!-- Connector Status + Demo Session Control / 连接状态 + Demo 会话控制 -->
 <div class="oc-control-bar">
-  <span style="font-weight:600">&#x1F3E6; Bybit Demo 执行引擎</span>
+  <span style="font-weight:600">&#x1F3E6; Demo 演示</span>
   <span id="demo-badge" class="oc-chip oc-chip-neutral">检测中...</span>
   <span id="demo-session-badge" class="oc-chip oc-chip-neutral" style="margin-left:8px">--</span>
   <span style="flex:1"></span>
@@ -106,7 +106,7 @@
       <div id="explain-comparison"></div>
       <div class="oc-table-wrap">
         <table class="oc-table">
-          <thead><tr><th>指标</th><th>模拟引擎</th><th>Bybit Demo</th><th>匹配</th></tr></thead>
+          <thead><tr><th>指标</th><th>Paper 模拟</th><th>Demo 演示</th><th>匹配</th></tr></thead>
           <tbody id="comparison-tbody"><tr class="empty-row"><td colspan="4">加载中...</td></tr></tbody>
         </table>
       </div>
@@ -119,8 +119,8 @@
   <div class="oc-card">
     <div class="oc-not-configured">
       <div class="icon">&#x1F3E6;</div>
-      <h3>Bybit Demo 未连接 / Not Connected</h3>
-      <p>Bybit Demo 交易需要配置 API 密钥才能使用。请在环境配置中设置 Bybit Demo API 密钥。</p>
+      <h3>Demo 演示 未连接 / Not Connected</h3>
+      <p>Demo 演示 需要配置 API 密钥才能使用。请在环境配置中设置 Bybit Demo API 密钥。</p>
       <details class="oc-explain-deep" style="margin-top:16px;text-align:left">
         <summary style="color:var(--accent);cursor:pointer">如何配置</summary>
         <div class="oc-explain-content">
@@ -129,7 +129,7 @@
           <pre class="oc-pre" style="margin:8px 0">BYBIT_DEMO_API_KEY=your_key_here
 BYBIT_DEMO_API_SECRET=your_secret_here</pre>
           <p>3. 重启交易系统以加载新配置</p>
-          <p style="margin-top:8px;color:var(--text-dim)">Bybit Demo 使用真实市场数据但虚拟资金，订单在 Bybit 的沙盒服务器上执行。与本地模拟引擎的区别是：Demo 订单会经过 Bybit 的撮合引擎，更接近真实环境。</p>
+          <p style="margin-top:8px;color:var(--text-dim)">Demo 演示 使用真实市场数据但虚拟资金，订单在 Bybit 的沙盒服务器上执行。与本地 Paper 模拟的区别是：Demo 订单会经过 Bybit 的撮合引擎，更接近真实环境。</p>
         </div>
       </details>
     </div>
@@ -139,12 +139,12 @@ BYBIT_DEMO_API_SECRET=your_secret_here</pre>
 <script>
 // ─── Explainers ───────────────────────────────────────────────
 $('explain-demo').innerHTML = ocExplain(
-  'Bybit Demo 是 Bybit 交易所提供的沙盒环境，使用真实市场数据但虚拟资金。订单在 Bybit 的测试服务器上执行，更接近真实交易环境。',
-  '系统采用「双重执行」模式：每笔交易同时在本地模拟引擎和 Bybit Demo 上执行。这样可以对比两个引擎的结果差异，验证本地模拟的准确性。如果两边出现较大偏差，可能意味着本地模拟的假设需要调整。'
+  'Demo 演示 是 Bybit 交易所提供的沙盒环境，使用真实市场数据但虚拟资金。订单在 Bybit 的测试服务器上执行，更接近真实交易环境。',
+  '系统采用「双重执行」模式：每笔交易同时在本地 Paper 模拟 和 Demo 演示 上执行。这样可以对比两个引擎的结果差异，验证本地模拟的准确性。如果两边出现较大偏差，可能意味着本地模拟的假设需要调整。'
 );
 
 $('explain-comparison').innerHTML = ocExplain(
-  '对比本地模拟引擎和 Bybit Demo 的数据，帮助发现差异。两边一致说明本地模拟准确。',
+  '对比本地 Paper 模拟 和 Demo 演示 的数据，帮助发现差异。两边一致说明本地模拟准确。',
   '常见偏差来源：滑点模型差异（本地固定 0.01%，Demo 受真实订单簿影响）、成交时间差（本地即时，Demo 需要网络往返）、费率差异（本地使用配置费率，Demo 使用 Bybit 实际费率）。'
 );
 
@@ -637,7 +637,7 @@ async function demoSessionAction(action) {
   const labels = { start: '已启动', pause: '已暂停', resume: '已继续', stop: '已停止' };
   const d = await ocPost('/api/v1/strategy/demo/session/' + action, {});
   if (d) {
-    ocToast('Demo 引擎' + (labels[action] || action), 'success');
+    ocToast('Demo 演示' + (labels[action] || action), 'success');
     setTimeout(loadAll, action === 'start' ? 3000 : 1000);
   } else {
     ocToast('操作失败', 'error');

@@ -712,7 +712,7 @@ var _OC_CONFIRM_ACTIONS = {
     confirmLabel: "確認重置 / Confirm Reset"
   },
   "unhalt-session": {
-    title: "解除熔斷 / Unhalt Session",
+    title: "解除熔斷 / Resume Trading",
     body: "熔斷保護在回撤嚴重時觸發，解除後所有交易功能恢復。\n⚠ 請確認風險已消除，否則可能觸發更大回撤。",
     confirmLabel: "確認解除 / Confirm Unhalt"
   },

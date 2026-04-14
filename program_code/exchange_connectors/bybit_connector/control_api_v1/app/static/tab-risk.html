@@ -52,7 +52,7 @@
     <div class="oc-metric"><div class="oc-metric-label">Risk Pressure</div><div class="oc-metric-val" id="r-pressure">--</div><div class="oc-metric-sub">0-100%</div></div>
     <div class="oc-metric"><div class="oc-metric-label">Current Drawdown</div><div class="oc-metric-val" id="r-drawdown">--</div></div>
     <div class="oc-metric"><div class="oc-metric-label">Peak Balance</div><div class="oc-metric-val" id="r-peak">--</div></div>
-    <div class="oc-metric"><div class="oc-metric-label">Session Halted</div><div class="oc-metric-val" id="r-halted">--</div></div>
+    <div class="oc-metric"><div class="oc-metric-label">交易暂停 Trading Halted</div><div class="oc-metric-val" id="r-halted">--</div></div>
     <div class="oc-metric"><div class="oc-metric-label">Governor Tier</div><div class="oc-metric-val" id="r-cooldown">--</div></div>
     <div class="oc-metric"><div class="oc-metric-label">Max Symbol Losses</div><div class="oc-metric-val" id="r-losses">--</div></div>
   </div>
@@ -516,7 +516,7 @@
   <div id="explain-danger"></div>
   <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px">
     <button class="oc-btn oc-btn-danger" onclick="resetCooldown()">Reset Loss Cooldown</button>
-    <button class="oc-btn oc-btn-danger" onclick="unhaltSession()">Unhalt Session</button>
+    <button class="oc-btn oc-btn-danger" onclick="unhaltSession()">恢复交易 Resume Trading</button>
   </div>
 </div>
 
