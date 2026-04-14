@@ -121,9 +121,34 @@ mod tests {
 
     #[test]
     fn test_margin_crisis_closes_all() {
+        // Post FA-PHANTOM-1: margin_utilization_pct is now LEVERAGE-AWARE
+        // (margin_used / balance × 100), not raw notional / balance. A true
+        // 95% margin utilization — ie. margin_used is 95% of balance —
+        // remains a crisis and still fires CloseAll.
+        // FA-PHANTOM-1 修復後：margin_utilization_pct 已 leverage-aware
+        // （margin_used / balance × 100），非原始 notional / balance。95%
+        // 真實 margin 使用率仍為危機，CloseAll 照觸發。
         assert_eq!(
             evaluate_fast_track(RiskLevel::Cautious, 1.0, 95.0),
             FastTrackAction::CloseAll
+        );
+    }
+
+    #[test]
+    fn test_fa_phantom_1_regression_full_notional_no_action() {
+        // FA-PHANTOM-1 regression: a ledger filled to 100% notional exposure
+        // at the default 20x leverage cap should yield a true margin
+        // utilization of only 5% — fast_track MUST NOT fire CloseAll.
+        // Pre-fix, this scenario fired CloseAll every tick once positions
+        // stacked to ~100% notional/balance, force-closing all strategies
+        // (including funding_arb, whose G-2 paper validation was blocked
+        // by exactly this phantom-fill cycle).
+        // FA-PHANTOM-1 回歸測試：20x leverage 下 notional 達 100%（= margin 5%）
+        // fast_track 不得誤觸 CloseAll。
+        let true_margin_util_pct = 5.0; // = 100% notional / 20x leverage
+        assert_eq!(
+            evaluate_fast_track(RiskLevel::Normal, 1.0, true_margin_util_pct),
+            FastTrackAction::NoAction
         );
     }
 
