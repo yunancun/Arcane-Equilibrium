@@ -597,14 +597,11 @@ pub fn handle_paper_command(
             };
             let _ = response_tx.send(result);
         }
-        // EDGE-P3-1 Stage 0 · ε-greedy shadow-fill passthrough. The actual DB
-        // write happens on the Python side via a dedicated IPC channel; this
-        // handler just logs in Stage 0 so the variant is exhaustively matched.
-        // A3/A4 wire the producer in the cost gate; the Python consumer lands
-        // with the DecisionFeatureSnapshot IPC (later stage).
-        // EDGE-P3-1 Stage 0 · ε-greedy shadow-fill 轉發。實際 DB 寫入在 Python 端，
-        // 此 handler Stage 0 僅 log 以保 match exhaustive；A3/A4 接 producer，
-        // Python consumer 於 DecisionFeatureSnapshot IPC 一併接入。
+        // EDGE-P3-1 Stage 0 · ε-greedy shadow-fill passthrough. DB write is
+        // Step 7c (pending — same Option-B pattern as Step 7a). Today this
+        // handler only logs; the cost gate producer (A3/A4) is wired.
+        // EDGE-P3-1 Stage 0 · ε-greedy shadow-fill 轉發。DB 寫入屬 Step 7c（待做，
+        // 同 Step 7a 的 Option-B 模式）；目前僅 log，producer（A3/A4）已接。
         PipelineCommand::EmitShadowFill {
             context_id,
             strategy,
@@ -625,9 +622,62 @@ pub fn handle_paper_command(
                 q90 = prediction_q90,
                 cost_bps = cost_bps,
                 ts_ms = ts_ms,
-                "EdgePredictor shadow_fill queued (Stage 0 stub — Python consumer TBD) \
-                 / 預測器 shadow_fill 排隊（Stage 0 stub，Python 消費者待接）",
+                "EdgePredictor shadow_fill queued (Stage 0 stub — Step 7c will wire writer) \
+                 / 預測器 shadow_fill 排隊（Stage 0 stub，Step 7c 將接 writer）",
             );
+        }
+        // EDGE-P3-1 Step 7a · Passthrough IPC → decision_feature writer channel.
+        // External callers (Python backfill/replay tooling) inject training-
+        // store rows through the same Rust-direct writer the IntentProcessor
+        // producer uses. When the tx is not yet wired (bootstrap race or
+        // intentional disable) we log-skip — fail-soft, no panic.
+        // `try_send` keeps this off the hot path; Full/Closed drops count as
+        // best-effort losses, matching the writer's own backpressure policy.
+        // EDGE-P3-1 Step 7a · Passthrough IPC → decision_feature writer 通道。
+        // 外部呼叫方走與 IntentProcessor producer 相同的 Rust 直寫路徑。tx 未接線時
+        // log 跳過（fail-soft）；try_send 不阻塞熱路徑，Full/Closed drop 計為 best-effort。
+        PipelineCommand::DecisionFeatureSnapshot {
+            context_id,
+            ts_ms,
+            engine_mode,
+            strategy,
+            symbol,
+            side,
+            feature_schema_version,
+            feature_schema_hash,
+            feature_definition_hash,
+            features_jsonb,
+        } => {
+            match pipeline.decision_feature_tx() {
+                Some(tx) => {
+                    let msg = crate::database::DecisionFeatureMsg {
+                        context_id: context_id.clone(),
+                        ts_ms,
+                        engine_mode,
+                        strategy_name: strategy,
+                        symbol: symbol.clone(),
+                        side,
+                        feature_schema_version,
+                        feature_schema_hash,
+                        feature_definition_hash,
+                        features_jsonb,
+                    };
+                    if let Err(e) = tx.try_send(msg) {
+                        tracing::warn!(
+                            ctx_id = %context_id, symbol = %symbol, error = %e,
+                            "decision_feature IPC drop — writer channel full/closed \
+                             / 決策特徵 IPC 丟棄，writer 通道已滿/關閉"
+                        );
+                    }
+                }
+                None => {
+                    info!(
+                        ctx_id = %context_id, symbol = %symbol,
+                        "decision_feature IPC received but writer not wired (fail-soft skip) \
+                         / 決策特徵 IPC 收到但 writer 未接線（fail-soft 跳過）"
+                    );
+                }
+            }
         }
     }
 }
@@ -913,6 +963,110 @@ mod tests {
         for s in ["ma_crossover", "bb_reversion", "grid_trading"] {
             assert!(store.load_for(s).is_none(), "slot {} still loaded", s);
         }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // EDGE-P3-1 Step 7a: DecisionFeatureSnapshot passthrough tests.
+    // EDGE-P3-1 Step 7a：決策特徵快照 IPC 透傳測試。
+    // ═══════════════════════════════════════════════════════════════════
+
+    fn make_decision_feature_cmd(ctx_id: &str) -> PipelineCommand {
+        PipelineCommand::DecisionFeatureSnapshot {
+            context_id: ctx_id.into(),
+            ts_ms: 1_700_000_000_000,
+            engine_mode: "paper".into(),
+            strategy: "ma_crossover".into(),
+            symbol: "BTCUSDT".into(),
+            side: 1,
+            feature_schema_version: "v1".into(),
+            feature_schema_hash: "sha256:0011223344556677".into(),
+            feature_definition_hash: "sha256:0011223344556677".into(),
+            features_jsonb: r#"{"adx_1h":25.0,"side":1}"#.into(),
+        }
+    }
+
+    /// EN: DecisionFeatureSnapshot with no writer wired is a silent fail-soft
+    ///   skip — must not panic and leave the pipeline in a consistent state.
+    /// 中文: writer 未接線時 DecisionFeatureSnapshot 必須 fail-soft 跳過，不 panic。
+    #[test]
+    fn test_decision_feature_snapshot_no_tx_is_nop() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut pipeline = TickPipeline::new(&["BTCUSDT"]);
+        let mut writer = make_writer(dir.path());
+        let mut pending = HashMap::new();
+        // No decision_feature_tx wired — skip path.
+        assert!(pipeline.decision_feature_tx().is_none());
+        handle_paper_command(
+            make_decision_feature_cmd("ctx-nowire"),
+            &mut pipeline,
+            &mut writer,
+            &mut pending,
+        );
+        // Still no tx; still no panic.
+        assert!(pipeline.decision_feature_tx().is_none());
+    }
+
+    /// EN: IPC passthrough forwards the payload verbatim into the writer channel.
+    /// 中文: IPC 透傳原樣將載荷送入 writer 通道。
+    #[test]
+    fn test_decision_feature_snapshot_forwards_to_tx() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut pipeline = TickPipeline::new(&["BTCUSDT"]);
+        let mut writer = make_writer(dir.path());
+        let mut pending = HashMap::new();
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<crate::database::DecisionFeatureMsg>(16);
+        pipeline.set_decision_feature_tx(tx);
+
+        handle_paper_command(
+            make_decision_feature_cmd("ctx-fwd-1"),
+            &mut pipeline,
+            &mut writer,
+            &mut pending,
+        );
+        let msg = rx.try_recv().expect("writer should have received the forwarded msg");
+        assert_eq!(msg.context_id, "ctx-fwd-1");
+        assert_eq!(msg.strategy_name, "ma_crossover");
+        assert_eq!(msg.symbol, "BTCUSDT");
+        assert_eq!(msg.side, 1);
+        assert_eq!(msg.engine_mode, "paper");
+        assert_eq!(msg.feature_schema_version, "v1");
+        assert!(msg.features_jsonb.contains("adx_1h"));
+    }
+
+    /// EN: Full writer-channel produces a best-effort drop (warn), not a panic.
+    /// 中文: writer 通道滿時 best-effort drop（warn），不 panic。
+    #[test]
+    fn test_decision_feature_snapshot_full_channel_drops() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut pipeline = TickPipeline::new(&["BTCUSDT"]);
+        let mut writer = make_writer(dir.path());
+        let mut pending = HashMap::new();
+        let (tx, rx) = tokio::sync::mpsc::channel::<crate::database::DecisionFeatureMsg>(1);
+        // Keep rx alive so Closed isn't hit; fill the one slot.
+        let _held_rx = rx;
+        // First send fills the channel.
+        tx.try_send(crate::database::DecisionFeatureMsg {
+            context_id: "filler".into(),
+            ts_ms: 1,
+            engine_mode: "paper".into(),
+            strategy_name: "x".into(),
+            symbol: "Y".into(),
+            side: 1,
+            feature_schema_version: "v1".into(),
+            feature_schema_hash: "h".into(),
+            feature_definition_hash: "h".into(),
+            features_jsonb: "{}".into(),
+        })
+        .unwrap();
+        pipeline.set_decision_feature_tx(tx);
+
+        // Full channel must not panic — handler warns + drops.
+        handle_paper_command(
+            make_decision_feature_cmd("ctx-drop"),
+            &mut pipeline,
+            &mut writer,
+            &mut pending,
+        );
     }
 
     /// EN: EmitShadowFill is pure logging today — ensure it doesn't panic.

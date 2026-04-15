@@ -626,14 +626,16 @@ async fn async_main(
     // DB writer tasks (market, feature, trading, context, pollers, monitors)
     // ------------------------------------------------------------------
     let shared_last_tick_ms = Arc::new(std::sync::atomic::AtomicU64::new(0));
-    let (market_tx, feature_tx, trading_tx, context_tx) = tasks::spawn_db_writers(
-        &db_pool,
-        &config,
-        &cancel,
-        &symbol_registry,
-        &shared_client,
-        &shared_last_tick_ms,
-    ).await;
+    let (market_tx, feature_tx, trading_tx, context_tx, decision_feature_tx) =
+        tasks::spawn_db_writers(
+            &db_pool,
+            &config,
+            &cancel,
+            &symbol_registry,
+            &shared_client,
+            &shared_last_tick_ms,
+        )
+        .await;
 
     // ------------------------------------------------------------------
     // Phase 6 + D23: Per-exchange position reconciler.
@@ -911,6 +913,9 @@ async fn async_main(
         last_tick_ms: Some(Arc::clone(&shared_last_tick_ms)),
         trading_tx: trading_tx.clone(),
         context_tx: context_tx.clone(),
+        // EDGE-P3-1 Step 7a: wire training-store writer for paper engine.
+        // EDGE-P3-1 Step 7a：接入 paper 引擎訓練資料 writer。
+        decision_feature_tx: decision_feature_tx.clone(),
         exchange_event_rx: None,
         seed_positions: Vec::new(), // Paper has no exchange-side positions to seed
         account_manager: None,
@@ -978,6 +983,9 @@ async fn async_main(
             last_tick_ms: Some(Arc::clone(&shared_last_tick_ms)),
             trading_tx: trading_tx.clone(),
             context_tx: context_tx.clone(),
+            // EDGE-P3-1 Step 7a: wire training-store writer for demo engine.
+            // EDGE-P3-1 Step 7a：接入 demo 引擎訓練資料 writer。
+            decision_feature_tx: decision_feature_tx.clone(),
             exchange_event_rx: Some(demo_b.ws_bindings.exchange_event_rx),
             seed_positions: demo_seed_positions,
             account_manager: Some(demo_b.account_manager),
@@ -1044,6 +1052,9 @@ async fn async_main(
             last_tick_ms: Some(Arc::clone(&shared_last_tick_ms)),
             trading_tx: trading_tx.clone(),
             context_tx: context_tx.clone(),
+            // EDGE-P3-1 Step 7a: wire training-store writer for live engine.
+            // EDGE-P3-1 Step 7a：接入 live 引擎訓練資料 writer。
+            decision_feature_tx: decision_feature_tx.clone(),
             exchange_event_rx: Some(live_b.ws_bindings.exchange_event_rx),
             seed_positions: live_seed_positions,
             account_manager: Some(live_b.account_manager),

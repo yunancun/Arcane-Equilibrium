@@ -409,6 +409,30 @@ pub enum PipelineCommand {
         cost_bps: f64,
         ts_ms: u64,
     },
+    /// EDGE-P3-1 Step 7a · Passthrough IPC entry for feeding the
+    /// `learning.decision_features` training store. The main internal producer
+    /// is IntentProcessor (emits at every gate evaluation); this variant exists
+    /// so external callers (Python tooling, backfill scripts, replay harnesses)
+    /// can inject feature rows through the same Rust-direct writer without
+    /// bypassing the DB writer’s dedup + fail-closed policies.
+    /// Fire-and-forget — no `response_tx` (producer has no recovery path if
+    /// DB is down; writer task already JSONL-fallbacks on pool failures).
+    /// EDGE-P3-1 Step 7a · 訓練特徵 passthrough IPC。主要 producer 為 IntentProcessor；
+    /// 此變體供外部呼叫方（Python 工具、回填腳本、回放框架）透過相同 Rust 直寫路徑注入
+    /// 特徵行，不繞過 writer 去重與 fail-closed 機制。Fire-and-forget：DB 宕機時 producer
+    /// 無復原路徑，writer task 已處理 JSONL 回退。
+    DecisionFeatureSnapshot {
+        context_id: String,
+        ts_ms: u64,
+        engine_mode: String,
+        strategy: String,
+        symbol: String,
+        side: i8,
+        feature_schema_version: String,
+        feature_schema_hash: String,
+        feature_definition_hash: String,
+        features_jsonb: String,
+    },
 }
 
 /// Server-side stop request dispatched from tick_pipeline to Bybit API (Item 1).
@@ -643,6 +667,16 @@ pub struct TickPipeline {
     /// 由 intent processor cost gate 在 JS shrinkage 之前諮詢（A4 接線）。
     /// 通過 IPC 熱換 / 清空。
     edge_predictor_store: Option<Arc<crate::edge_predictor::EdgePredictorStore>>,
+    /// EDGE-P3-1 Step 7a: Cached sender for `DecisionFeatureMsg` writes, used by
+    /// the `DecisionFeatureSnapshot` IPC passthrough handler. Also propagated to
+    /// `IntentProcessor` at wire-up time so the internal producer uses the same
+    /// writer. `None` = emission disabled (fail-soft; no training collection but
+    /// trading unaffected).
+    /// EDGE-P3-1 Step 7a：供 `DecisionFeatureSnapshot` IPC passthrough 使用的 sender
+    /// 緩存；同時傳給 IntentProcessor 讓內部 producer 共用同一 writer。
+    /// None 時發射停用（fail-soft，不影響交易）。
+    decision_feature_tx:
+        Option<tokio::sync::mpsc::Sender<crate::database::DecisionFeatureMsg>>,
 }
 
 impl TickPipeline {
@@ -723,6 +757,7 @@ impl TickPipeline {
             funding_rates: HashMap::new(),
             index_prices: HashMap::new(),
             edge_predictor_store: None,
+            decision_feature_tx: None,
         }
     }
 
@@ -825,6 +860,35 @@ impl TickPipeline {
         tx: tokio::sync::mpsc::UnboundedSender<PipelineCommand>,
     ) {
         self.intent_processor.set_shadow_fill_tx(tx);
+    }
+
+    /// EDGE-P3-1 Step 7a: Wire the decision-feature DB channel. Single call
+    /// registers the tx for both the IntentProcessor (internal producer — one
+    /// row per gate eval) and the `DecisionFeatureSnapshot` IPC passthrough
+    /// handler. `None` leaves emission as no-op (fail-soft). Call exactly
+    /// once per pipeline during bootstrap.
+    /// EDGE-P3-1 Step 7a：把決策特徵 DB 通道同時接給 IntentProcessor（內部 producer）
+    /// 與 `DecisionFeatureSnapshot` IPC passthrough。未接線時為 no-op（fail-soft）。
+    /// 每個 pipeline 啟動時只呼叫一次。
+    pub fn set_decision_feature_tx(
+        &mut self,
+        tx: tokio::sync::mpsc::Sender<crate::database::DecisionFeatureMsg>,
+    ) {
+        debug_assert!(
+            self.decision_feature_tx.is_none(),
+            "decision_feature_tx injected twice — bootstrap should call this exactly once per pipeline"
+        );
+        self.intent_processor.set_decision_feature_tx(tx.clone());
+        self.decision_feature_tx = Some(tx);
+    }
+
+    /// EDGE-P3-1 Step 7a: Accessor for the `DecisionFeatureSnapshot` IPC
+    /// handler. Returns `None` until `set_decision_feature_tx` has been called.
+    /// EDGE-P3-1 Step 7a：IPC handler 用的 tx 取用器；未接線前返回 None。
+    pub fn decision_feature_tx(
+        &self,
+    ) -> Option<&tokio::sync::mpsc::Sender<crate::database::DecisionFeatureMsg>> {
+        self.decision_feature_tx.as_ref()
     }
 
     /// EDGE-P3-1 Stage 0: Accessor for command handlers that need to mutate

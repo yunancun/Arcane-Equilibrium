@@ -64,6 +64,55 @@ pub struct FeatureVectorV1 {
     pub is_funding_settlement_window: u8,
 }
 
+/// Canonical feature name order for v1 — MUST match `to_array()` index order.
+/// v1 特徵名稱規範順序 — 必須與 `to_array()` 索引順序一致。
+///
+/// Changing this list (rename/reorder/add/remove) invalidates
+/// `feature_schema_hash()` and breaks train/serve parity. Python mirror:
+/// `program_code/ml_training/parquet_etl.py::EDGE_P3_FEATURE_NAMES`.
+/// 變更此列表即改動 `feature_schema_hash()`，Python 端鏡像需同步。
+pub const FEATURE_NAMES_V1: &[&str; FeatureVectorV1::DIM] = &[
+    "adx_1h",
+    "bb_width_pct",
+    "atr_pct",
+    "funding_rate",
+    "realized_vol_1h",
+    "basis_bps",
+    "orderbook_imbalance_top5",
+    "spread_bps",
+    "confluence_score",
+    "persistence_elapsed_ms",
+    "side",
+    "notional_pct_of_bal",
+    "concurrent_positions",
+    "same_direction_cnt",
+    "tod_sin",
+    "tod_cos",
+    "is_funding_settlement_window",
+];
+
+/// Schema version tag stored alongside every `learning.decision_features` row.
+/// 存入 `learning.decision_features` 每列的 schema 版本標記。
+pub const FEATURE_SCHEMA_VERSION: &str = "v1";
+
+/// Stable identity for feature schema — sha256 over newline-joined names.
+/// Computed once and cached; safe to call on hot paths.
+/// 特徵 schema 穩定身分 — sha256 換行串接名稱。單次計算後快取，熱路徑可安全調用。
+pub fn feature_schema_hash() -> &'static str {
+    static HASH: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    HASH.get_or_init(|| {
+        crate::linucb::schema_hash::compute_feature_schema_hash(FEATURE_NAMES_V1)
+    })
+    .as_str()
+}
+
+/// Stage 0 alias for `feature_schema_hash()`. Stage 2 (ML-MIT) splits this
+/// when feature *definitions* (formulas, windows) drift while names stay.
+/// Stage 0 暫等於 schema_hash；Stage 2 ML-MIT 定義漂移時分叉。
+pub fn feature_definition_hash() -> &'static str {
+    feature_schema_hash()
+}
+
 impl FeatureVectorV1 {
     /// Number of features in this version (17). Used for ONNX tensor shape assertion.
     /// 本版本 feature 總數（17），供 ONNX tensor shape 斷言。
@@ -371,6 +420,45 @@ mod tests {
         let v: serde_json::Value = serde_json::from_str(&s).expect("valid JSON");
         assert!(v["adx_1h"].is_null());
         assert!(v["spread_bps"].is_null());
+    }
+
+    #[test]
+    fn test_feature_names_v1_length_matches_dim() {
+        assert_eq!(FEATURE_NAMES_V1.len(), FeatureVectorV1::DIM);
+    }
+
+    #[test]
+    fn test_feature_names_v1_head_and_tail_anchored() {
+        // Schema-hash frozen anchors; any accidental reorder trips this.
+        // schema_hash 凍結錨點；意外重排會在此斷言失敗。
+        assert_eq!(FEATURE_NAMES_V1[0], "adx_1h");
+        assert_eq!(FEATURE_NAMES_V1[10], "side");
+        assert_eq!(FEATURE_NAMES_V1[16], "is_funding_settlement_window");
+    }
+
+    #[test]
+    fn test_feature_schema_hash_is_deterministic_and_cached() {
+        let a = feature_schema_hash();
+        let b = feature_schema_hash();
+        assert_eq!(a, b);
+        assert!(a.starts_with("sha256:"));
+        assert_eq!(a.len(), "sha256:".len() + 16);
+    }
+
+    #[test]
+    fn test_feature_schema_hash_matches_direct_compute() {
+        let direct = crate::linucb::schema_hash::compute_feature_schema_hash(FEATURE_NAMES_V1);
+        assert_eq!(feature_schema_hash(), direct);
+    }
+
+    #[test]
+    fn test_feature_definition_hash_equals_schema_hash_in_stage_0() {
+        assert_eq!(feature_definition_hash(), feature_schema_hash());
+    }
+
+    #[test]
+    fn test_feature_schema_version_is_v1() {
+        assert_eq!(FEATURE_SCHEMA_VERSION, "v1");
     }
 
     #[test]

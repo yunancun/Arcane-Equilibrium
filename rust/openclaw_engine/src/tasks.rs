@@ -314,9 +314,9 @@ pub(crate) fn spawn_news_pipeline(
 /// quality monitor, drift detector) + feature version init.
 /// 啟動所有 DB 寫入器任務 + 特徵版本初始化。
 ///
-/// Returns the sender halves for (market, feature, trading, context) channels.
+/// Returns the sender halves for (market, feature, trading, context, decision_feature) channels.
 /// The caller uses these to wire into EventConsumerDeps.
-/// 返回 (market, feature, trading, context) 通道的發送端。
+/// 返回 (market, feature, trading, context, decision_feature) 通道的發送端。
 #[allow(clippy::type_complexity)]
 pub(crate) async fn spawn_db_writers(
     db_pool: &Arc<DbPool>,
@@ -330,9 +330,10 @@ pub(crate) async fn spawn_db_writers(
     Option<tokio::sync::mpsc::Sender<openclaw_engine::feature_collector::FeatureSnapshot>>,
     Option<tokio::sync::mpsc::Sender<openclaw_engine::database::TradingMsg>>,
     Option<tokio::sync::mpsc::Sender<openclaw_engine::database::DecisionContextMsg>>,
+    Option<tokio::sync::mpsc::Sender<openclaw_engine::database::DecisionFeatureMsg>>,
 ) {
     if !db_pool.is_available() {
-        return (None, None, None, None);
+        return (None, None, None, None, None);
     }
 
     // Market writer channel + task
@@ -377,6 +378,27 @@ pub(crate) async fn spawn_db_writers(
         tokio::spawn(openclaw_engine::database::context_writer::run_context_writer(
             context_rx, cw_pool, cw_config, cw_cancel,
         ));
+    }
+
+    // EDGE-P3-1 Step 7a: Decision feature writer channel + task.
+    // Sized same as context_tx (1024) — one row per gate evaluation matches
+    // the signal→intent cadence. IPC passthrough (`DecisionFeatureSnapshot`)
+    // and IntentProcessor both publish here.
+    // EDGE-P3-1 Step 7a：決策特徵 writer 通道 + 任務。容量與 context_tx 對齊（1024）；
+    // IPC passthrough 與 IntentProcessor 共用此通道。
+    let (decision_feature_tx, decision_feature_rx) = tokio::sync::mpsc::channel(1024);
+    {
+        let dfw_pool = Arc::clone(db_pool);
+        let dfw_config = Arc::clone(config);
+        let dfw_cancel = cancel.clone();
+        tokio::spawn(
+            openclaw_engine::database::decision_feature_writer::run_decision_feature_writer(
+                decision_feature_rx,
+                dfw_pool,
+                dfw_config,
+                dfw_cancel,
+            ),
+        );
     }
 
     // F-4 fix: Spawn REST pollers for funding/OI/LSR
@@ -432,6 +454,7 @@ pub(crate) async fn spawn_db_writers(
         Some(feature_tx),
         Some(trading_tx),
         Some(context_tx),
+        Some(decision_feature_tx),
     )
 }
 

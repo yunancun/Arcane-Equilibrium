@@ -52,6 +52,7 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
         last_tick_ms: shared_last_tick_ms,
         trading_tx,
         context_tx,
+        decision_feature_tx,
         exchange_event_rx,
         seed_positions,
         account_manager,
@@ -116,6 +117,17 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
     // 不接線 → shadow fill 走 fail-soft 丟棄分支，Stage 4 paper 探索資料全失。
     if let Some(tx) = pipeline_cmd_tx {
         pipeline.set_shadow_fill_tx(tx);
+    }
+
+    // EDGE-P3-1 Step 7a: Wire the decision-feature DB channel into IntentProcessor
+    // so every gate evaluation emits a training-store row. `None` leaves emission
+    // as no-op (fail-soft — trading unaffected, just no training collection). The
+    // handler for `PipelineCommand::DecisionFeatureSnapshot` also forwards into
+    // this same channel so external IPC callers land in the same writer.
+    // EDGE-P3-1 Step 7a：把決策特徵 DB 通道接入 IntentProcessor；None 時發射為
+    // no-op（fail-soft，不影響交易僅停訓練採集）。IPC passthrough 亦走同一通道。
+    if let Some(tx) = decision_feature_tx.clone() {
+        pipeline.set_decision_feature_tx(tx);
     }
 
     // QoL-1: Restore cumulative paper_state counters from trading.fills before

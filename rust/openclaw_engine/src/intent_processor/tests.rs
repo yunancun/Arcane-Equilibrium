@@ -1142,4 +1142,132 @@ mod predictor_wiring_tests {
         );
         assert!(r.approved, "Accept must bypass strict live JS gate; got {:?}", r.rejected_reason);
     }
+
+    // ========================================================
+    // EDGE-P3-1 Step 7a: DecisionFeatureSnapshot emission tests
+    // ========================================================
+    //
+    // Emission fires at the TOP of evaluate_predictor_gate, before any
+    // short-circuit, so Stage 0 training data flows while the gate stays
+    // on legacy shrinkage (use_edge_predictor=false). These tests cover:
+    //   (a) fires when predictor is disabled + features + ctx_id present;
+    //   (b) no emit on empty context_id;
+    //   (c) no emit on features=None;
+    //   (d) no emit on ts_ms=0 (DB-RUN-6 alignment with writer rejection).
+    //
+    // EDGE-P3-1 Step 7a：決策特徵快照發射測試 —
+    // gate 頂端發射、早於短路檢查，Stage 0 即採集訓練資料。
+
+    #[test]
+    fn test_decision_feature_snapshot_emitted_when_predictor_disabled() {
+        // use_edge_predictor=false (default Stage 0) + features + ctx_id →
+        // snapshot still emits; writer accumulates while gate stays on legacy.
+        // use_edge_predictor=false（Stage 0 預設）仍發射；writer 累積訓練資料。
+        let mut proc = IntentProcessor::new();
+        assert!(!proc.risk_config.edge_predictor.use_edge_predictor);
+        proc.set_pipeline_kind(PipelineKind::Paper);
+
+        let (tx, mut rx) =
+            tokio::sync::mpsc::channel::<crate::database::DecisionFeatureMsg>(8);
+        proc.set_decision_feature_tx(tx);
+
+        let gov = approved_governance();
+        let state = paper_state_with_price(30_000.0);
+        let features = FeatureVectorV1::zeroed();
+        let _ = proc.process_with_features(
+            &intent_btc(0.7), &gov, &state, 500.0,
+            GovernanceProfile::Exploration, Some(&features), Some("ctx-seed"),
+            1_700_000_000_000,
+        );
+
+        let msg = rx.try_recv().expect("snapshot must be emitted at gate top");
+        assert_eq!(msg.context_id, "ctx-seed");
+        assert_eq!(msg.ts_ms, 1_700_000_000_000);
+        assert_eq!(msg.engine_mode, "paper");
+        assert_eq!(msg.strategy_name, "test");
+        assert_eq!(msg.symbol, "BTCUSDT");
+        assert_eq!(msg.side, 1, "is_long=true → side=+1");
+        assert_eq!(
+            msg.feature_schema_version,
+            crate::edge_predictor::features::FEATURE_SCHEMA_VERSION
+        );
+        assert_eq!(
+            msg.feature_schema_hash,
+            crate::edge_predictor::features::feature_schema_hash()
+        );
+        assert_eq!(
+            msg.feature_definition_hash,
+            crate::edge_predictor::features::feature_definition_hash()
+        );
+        assert!(
+            msg.features_jsonb.starts_with('{') && msg.features_jsonb.ends_with('}'),
+            "features_jsonb must be valid JSON object, got {}",
+            msg.features_jsonb
+        );
+    }
+
+    #[test]
+    fn test_decision_feature_snapshot_no_emit_on_empty_context() {
+        // Empty context_id → caller has nothing to join on later; skip emission.
+        // context_id 為空 → 後續無 join key，直接跳過發射。
+        let mut proc = IntentProcessor::new();
+        proc.set_pipeline_kind(PipelineKind::Paper);
+
+        let (tx, mut rx) =
+            tokio::sync::mpsc::channel::<crate::database::DecisionFeatureMsg>(8);
+        proc.set_decision_feature_tx(tx);
+
+        let gov = approved_governance();
+        let state = paper_state_with_price(30_000.0);
+        let features = FeatureVectorV1::zeroed();
+        let _ = proc.process_with_features(
+            &intent_btc(0.7), &gov, &state, 500.0,
+            GovernanceProfile::Exploration, Some(&features), None, 1_700_000_000_000,
+        );
+        assert!(rx.try_recv().is_err(),
+            "empty context_id must not emit snapshot");
+    }
+
+    #[test]
+    fn test_decision_feature_snapshot_no_emit_on_none_features() {
+        // features=None → nothing to persist; no emission.
+        // features=None → 無可持久化資料，不發射。
+        let mut proc = IntentProcessor::new();
+        proc.set_pipeline_kind(PipelineKind::Paper);
+
+        let (tx, mut rx) =
+            tokio::sync::mpsc::channel::<crate::database::DecisionFeatureMsg>(8);
+        proc.set_decision_feature_tx(tx);
+
+        let gov = approved_governance();
+        let state = paper_state_with_price(30_000.0);
+        let _ = proc.process_with_features(
+            &intent_btc(0.7), &gov, &state, 500.0,
+            GovernanceProfile::Exploration, None, Some("ctx-nofeat"), 1_700_000_000_000,
+        );
+        assert!(rx.try_recv().is_err(),
+            "features=None must not emit snapshot");
+    }
+
+    #[test]
+    fn test_decision_feature_snapshot_no_emit_on_zero_timestamp() {
+        // ts_ms=0 → DB-RUN-6 writer would reject; skip at source.
+        // ts_ms=0 → writer 側 DB-RUN-6 會拒絕；源頭直接略過。
+        let mut proc = IntentProcessor::new();
+        proc.set_pipeline_kind(PipelineKind::Paper);
+
+        let (tx, mut rx) =
+            tokio::sync::mpsc::channel::<crate::database::DecisionFeatureMsg>(8);
+        proc.set_decision_feature_tx(tx);
+
+        let gov = approved_governance();
+        let state = paper_state_with_price(30_000.0);
+        let features = FeatureVectorV1::zeroed();
+        let _ = proc.process_with_features(
+            &intent_btc(0.7), &gov, &state, 500.0,
+            GovernanceProfile::Exploration, Some(&features), Some("ctx-zero-ts"), 0,
+        );
+        assert!(rx.try_recv().is_err(),
+            "ts_ms=0 must not emit snapshot (DB-RUN-6 alignment)");
+    }
 }

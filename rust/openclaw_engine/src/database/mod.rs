@@ -13,6 +13,7 @@
 pub mod aggregators;
 pub mod black_swan_detector;
 pub mod context_writer;
+pub mod decision_feature_writer;
 pub mod drift_detector;
 pub mod experiment_ledger_pg;
 pub mod fallback;
@@ -426,6 +427,44 @@ pub struct DecisionContextMsg {
     /// V003 existing: hours since last major news event.
     /// V003 既有：距上次重大新聞的小時數。
     pub hours_since_last_major_news: Option<f64>,
+}
+
+/// Decision feature snapshot → decision_feature_writer task (EDGE-P3-1 Step 7a).
+/// 決策特徵快照 → decision_feature_writer 任務。
+///
+/// Each message produces one row in `learning.decision_features` (PK=context_id).
+/// `label_net_edge_bps` starts NULL and is populated later by
+/// `edge_label_backfill.py` once the position closes. The training loop in
+/// `program_code/ml_training/parquet_etl.py::load_training_data()` only returns
+/// labelled rows, so partial inserts are safe.
+/// 每條訊息在 `learning.decision_features` 產生一列（PK=context_id）。
+/// `label_net_edge_bps` 初為 NULL，由 `edge_label_backfill.py` 於倉位結算後填入。
+#[derive(Debug)]
+pub struct DecisionFeatureMsg {
+    pub context_id: String,
+    pub ts_ms: u64,
+    /// "paper" | "demo" | "live" — isolates training per engine.
+    /// "paper" | "demo" | "live" — 按引擎隔離訓練集。
+    pub engine_mode: String,
+    pub strategy_name: String,
+    pub symbol: String,
+    /// +1 long / -1 short (short i8 maps to SQL SMALLINT).
+    /// +1 多 / -1 空 (i8 → SQL SMALLINT)。
+    pub side: i8,
+    /// Schema version tag ("v1"); matches `FEATURE_SCHEMA_VERSION`.
+    /// Schema 版本標記 ("v1")，與 `FEATURE_SCHEMA_VERSION` 同。
+    pub feature_schema_version: String,
+    /// sha256 of ordered feature-name list — detects train/serve skew.
+    /// 特徵名有序列表 sha256，偵測 train/serve 漂移。
+    pub feature_schema_hash: String,
+    /// Stage 0: alias for schema hash. Stage 2 (ML-MIT) splits when formula drifts.
+    /// Stage 0: 與 schema_hash 相同。Stage 2 ML-MIT 公式漂移時分叉。
+    pub feature_definition_hash: String,
+    /// Pre-serialized JSONB produced by `FeatureVectorV1::to_jsonb()`.
+    /// Kept as String to avoid re-parsing on the hot path; the writer passes
+    /// it through `sqlx::types::Json::<serde_json::Value>` once.
+    /// `FeatureVectorV1::to_jsonb()` 預序列化字串；writer 走一次 JSONB cast。
+    pub features_jsonb: String,
 }
 
 /// Sanitize a float for PG insertion: replace NaN/Inf with None.
