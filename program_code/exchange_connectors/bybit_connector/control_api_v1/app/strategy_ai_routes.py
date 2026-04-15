@@ -206,12 +206,18 @@ async def get_demo_orders(actor: base.AuthenticatedActor = Depends(base.current_
 
 def _normalize_execution(f: dict) -> dict:
     """Remap Rust ExecutionInfo snake_case fields to Bybit camelCase so the GUI
-    fallback chain (execQty || qty, execPrice || price, execFee || fee) finds them.
-    Rust 序列化為 snake_case（exec_qty/exec_price/exec_fee），GUI 期望 camelCase，
-    此函數將 Rust 格式轉換為 Bybit API 格式避免 qty/price 顯示 0。
+    fallback chain (execQty || qty, execPrice || price, execFee || fee, closedPnl) finds them.
+    Rust 序列化為 snake_case（exec_qty/exec_price/exec_fee/closed_pnl），GUI 期望 camelCase，
+    此函數將 Rust 格式轉換為 Bybit API 格式避免 qty/price 顯示 0、PnL 欄顯示 —。
     """
     if not isinstance(f, dict):
         return f
+    # closed_pnl is numeric (f64); use explicit None check — `or` falls through on 0.0
+    # which is the common open-leg value, would lose the zero signal to the GUI.
+    # closed_pnl 為 f64；0.0 是常見開倉腿值，不能用 `or` 否則開倉會落回 realized_pnl fallback。
+    cp = f.get("closedPnl")
+    if cp is None:
+        cp = f.get("closed_pnl")
     return {
         **f,
         "execQty":   f.get("execQty")   or f.get("exec_qty"),
@@ -219,6 +225,7 @@ def _normalize_execution(f: dict) -> dict:
         "execFee":   f.get("execFee")   or f.get("exec_fee"),
         "execTime":  f.get("execTime")  or f.get("exec_time"),
         "side":      f.get("side")      or ("Buy" if f.get("is_long") else "Sell"),
+        "closedPnl": cp,
     }
 
 

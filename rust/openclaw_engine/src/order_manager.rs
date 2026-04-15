@@ -255,6 +255,10 @@ pub struct ExecutionInfo {
     pub exec_type: String,
     /// Execution timestamp / 成交時間戳
     pub exec_time: String,
+    /// Realized PnL reported by Bybit on this fill. "0" for opens, non-zero
+    /// for closes (reduce_only). Required by GUI to colour the P&L column.
+    /// Bybit 在此筆成交回傳的已實現盈虧；開倉為 0，平倉（reduce_only）非 0。
+    pub closed_pnl: f64,
 }
 
 // ---------------------------------------------------------------------------
@@ -726,6 +730,7 @@ fn parse_execution_list(result: &serde_json::Value) -> BybitResult<Vec<Execution
             order_link_id: str_field(item, "orderLinkId"),
             exec_type: str_field(item, "execType"),
             exec_time: str_field(item, "execTime"),
+            closed_pnl: f64_field(item, "closedPnl"),
         });
     }
     Ok(execs)
@@ -946,7 +951,8 @@ mod tests {
                 "orderId": "ord-001",
                 "orderLinkId": "link-001",
                 "execType": "Trade",
-                "execTime": "1700000000000"
+                "execTime": "1700000000000",
+                "closedPnl": "12.5"
             }]
         });
         let execs = parse_execution_list(&result).unwrap();
@@ -956,6 +962,31 @@ mod tests {
         assert!((e.exec_price - 65000.0).abs() < 1e-10);
         assert!((e.exec_fee - 0.0358).abs() < 1e-10);
         assert_eq!(e.exec_type, "Trade");
+        assert!((e.closed_pnl - 12.5).abs() < 1e-10, "closedPnl must parse");
+    }
+
+    #[test]
+    fn test_parse_execution_missing_closed_pnl_is_zero() {
+        // Older fills / open legs may omit closedPnl — parser must not fail.
+        // 缺 closedPnl（開倉腿）時解析器不應失敗，回傳 0.0。
+        let result = serde_json::json!({
+            "list": [{
+                "execId": "exec-open",
+                "symbol": "BTCUSDT",
+                "side": "Buy",
+                "execPrice": "65000.0",
+                "execQty": "0.001",
+                "execValue": "65.0",
+                "execFee": "0.0358",
+                "feeCurrency": "USDT",
+                "orderId": "ord-open",
+                "orderLinkId": "",
+                "execType": "Trade",
+                "execTime": "1700000000000"
+            }]
+        });
+        let execs = parse_execution_list(&result).unwrap();
+        assert_eq!(execs[0].closed_pnl, 0.0);
     }
 
     #[test]
@@ -1142,10 +1173,12 @@ mod tests {
             order_link_id: "l1".to_string(),
             exec_type: "Trade".to_string(),
             exec_time: "1700000000000".to_string(),
+            closed_pnl: -5.25,
         };
         let json = serde_json::to_string(&exec).unwrap();
         let deser: ExecutionInfo = serde_json::from_str(&json).unwrap();
         assert_eq!(deser.exec_id, "e1");
         assert!((deser.exec_fee - 1.925).abs() < 1e-10);
+        assert!((deser.closed_pnl + 5.25).abs() < 1e-10);
     }
 }

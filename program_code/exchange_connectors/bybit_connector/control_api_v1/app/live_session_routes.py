@@ -972,7 +972,11 @@ async def get_live_fills(
     rc = _get_rust_client_safe()
     if rc is not None:
         try:
-            fills = rc.get_executions("linear", limit=50)
+            # Normalize Rust snake_case → Bybit camelCase (execQty / closedPnl / etc.)
+            # so the GUI's camelCase-first fallback chain resolves cleanly.
+            # 將 Rust snake_case 正規化為 Bybit camelCase，避免 GUI 欄位讀到 undefined。
+            from .strategy_ai_routes import _normalize_execution
+            fills = [_normalize_execution(f) for f in rc.get_executions("linear", limit=50)]
             return _live_response({"source": "rust_engine", "list": fills, "count": len(fills)})
         except Exception as e:
             logger.warning("Rust fills fetch failed for live endpoint: %s", e)
