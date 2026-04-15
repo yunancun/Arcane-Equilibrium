@@ -384,12 +384,35 @@ pub enum PipelineCommand {
         predictor: crate::edge_predictor::BoxedEdgePredictor,
         response_tx: tokio::sync::oneshot::Sender<Result<String, String>>,
     },
-    /// EDGE-P3-1 Stage 0 · Kill-switch: clear every loaded predictor on the
-    /// engine (all strategies → `Err(NoModel)`). Operator emergency response
-    /// when model degrades in production.
-    /// EDGE-P3-1 Stage 0 · Kill-switch：清空引擎上所有策略 predictor，立刻
-    /// fallback 至 shrinkage。Operator 模型故障應急。
+    /// EDGE-P3-1 Stage 0 · Kill-switch (Step 7e hardened): clear every loaded
+    /// predictor on this engine AND (when risk_store is wired) persist the
+    /// `use_edge_predictor=false` flag to disk so a crash/restart does not
+    /// silently re-enable. Two-phase commit: Stage 1 `write_toml_atomic_fsynced`
+    /// (disk first, fail-abort before any memory change) → Stage 2
+    /// `apply_patch` ArcSwap (near-infallible) → Stage 3 `clear_all` (in-memory
+    /// ONNX models). Fire-and-forget `observability.engine_events` audit row
+    /// (`event_type='predictor_disabled_all'`, JSONB payload carries
+    /// `operator_token_hash` + `reason` + `cleared_slots`).
+    ///
+    /// `operator_token`: U1 authz envelope — Python proxy layer authenticates
+    /// the session and passes a per-session token (UUID-v4-ish, `len >= 32`).
+    /// Rust-side only length-validates today; HMAC verification is a future hook.
+    /// `reason`: operator-provided free-text audit string (stored in JSONB
+    /// payload, never logged raw without the token-hash alongside).
+    ///
+    /// EDGE-P3-1 Stage 0 · Kill-switch（Step 7e 強化）：清空 predictor 並（當
+    /// risk_store 已接線時）落盤 use_edge_predictor=false 旗標，避免重啟重啟用。
+    /// 兩階段提交 Stage 1 fsync TOML → Stage 2 ArcSwap → Stage 3 clear_all；
+    /// audit 行 fire-and-forget 寫入 observability.engine_events。
+    /// operator_token：U1 授權 envelope（Python proxy 層填入 per-session UUID，
+    /// Rust 側 len>=32 檢查），reason：operator 填寫的 free-text 審計原因。
     DisableEdgePredictorAll {
+        /// U1 authz envelope — `len >= 32` required (UUID-v4-ish).
+        /// U1 授權 envelope — 要求 `len >= 32`（UUID-v4 樣式）。
+        operator_token: String,
+        /// Operator free-text audit reason (stored in engine_events payload JSONB).
+        /// operator 填寫的審計原因（存入 engine_events payload JSONB）。
+        reason: String,
         response_tx: tokio::sync::oneshot::Sender<Result<String, String>>,
     },
     /// EDGE-P3-1 Stage 0 · ε-greedy shadow-fill emission from the cost gate
@@ -899,6 +922,19 @@ impl TickPipeline {
         &self,
     ) -> Option<&std::sync::Arc<crate::edge_predictor::EdgePredictorStore>> {
         self.edge_predictor_store.as_ref()
+    }
+
+    /// EDGE-P3-1 Step 7e: Accessor for command handlers that need to mutate
+    /// the live `RiskConfig` (e.g. `DisableEdgePredictorAll` two-phase commit
+    /// flips `use_edge_predictor=false` on disk + ArcSwap before clearing the
+    /// in-memory predictor slots). Returns `None` when the pipeline is running
+    /// without a wired store — handler falls back to memory-only clear.
+    /// EDGE-P3-1 Step 7e：命令 handler 用的 RiskConfig 取用器；未接線時 handler
+    /// 退回 memory-only clear。
+    pub fn risk_store(
+        &self,
+    ) -> Option<&std::sync::Arc<crate::config::ConfigStore<crate::config::RiskConfig>>> {
+        self.risk_store.as_ref()
     }
 
     /// W-4: Plug in a shared NewsContextSnapshot (read-only on the live path).

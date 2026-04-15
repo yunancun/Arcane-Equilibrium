@@ -21,7 +21,7 @@ pub use types::{EventConsumerDeps, ExchangeEvent, PendingOrder, SYMBOLS};
 
 use crate::persistence::{AuditWriter, DualStateWriter, StateWriter};
 use crate::strategies::StrategyFactory;
-use crate::tick_pipeline::{PipelineKind, TickPipeline};
+use crate::tick_pipeline::{PipelineCommand, PipelineKind, TickPipeline};
 use governor_cooldown::load_governor_cooldown_from_audit;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -895,12 +895,35 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
                 if let Some(ref mut rx) = pipeline_cmd_rx { rx.recv().await } else { std::future::pending().await }
             } => {
                 if let Some(cmd) = cmd {
-                    handlers::handle_paper_command(
-                        cmd,
-                        &mut pipeline,
-                        &mut snapshot_writer,
-                        &mut pending_orders,
-                    );
+                    // EDGE-P3-1 Step 7e: intercept the kill-switch variant so the
+                    // production path runs the full two-phase commit + V014 audit.
+                    // All other variants still flow through handle_paper_command.
+                    // EDGE-P3-1 Step 7e：截獲 kill-switch 變體，跑完整兩階段 + V014 審計；
+                    // 其餘變體仍走 handle_paper_command。
+                    match cmd {
+                        PipelineCommand::DisableEdgePredictorAll {
+                            operator_token,
+                            reason,
+                            response_tx,
+                        } => {
+                            handlers::handle_disable_edge_predictor_all(
+                                operator_token,
+                                reason,
+                                response_tx,
+                                &mut pipeline,
+                                pipeline_kind.db_mode(),
+                                audit_pool.as_ref(),
+                            );
+                        }
+                        other => {
+                            handlers::handle_paper_command(
+                                other,
+                                &mut pipeline,
+                                &mut snapshot_writer,
+                                &mut pending_orders,
+                            );
+                        }
+                    }
                     // Phase 6: sync governor risk level to shared atomic for reconciler.
                     // Phase 6：同步 governor 風控級別到共享原子量供對帳器讀取。
                     let current_level = pipeline.governance.risk.snapshot_level();

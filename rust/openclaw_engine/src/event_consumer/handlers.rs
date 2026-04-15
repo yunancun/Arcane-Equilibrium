@@ -17,6 +17,64 @@ use crate::tick_pipeline::{PipelineCommand, TickPipeline};
 use std::collections::HashMap;
 use tracing::info;
 
+/// EDGE-P3-1 Step 7e · Shared kill-switch body. Extracted so both the
+/// production event_consumer/mod.rs interception path AND the in-process
+/// `handle_paper_command` direct-dispatch path (used by unit tests) execute
+/// the same logic without duplication.
+/// EDGE-P3-1 Step 7e：共用 kill-switch 實作。mod.rs 攔截路徑與 handle_paper_command
+/// 直分派路徑（單元測試用）共用同一份邏輯。
+fn disable_edge_predictor_all_impl(
+    operator_token: &str,
+    reason: &str,
+    response_tx: tokio::sync::oneshot::Sender<Result<String, String>>,
+    pipeline: &mut TickPipeline,
+) {
+    // FIXME(Step 7e): Full two-phase commit (TOML fsync → ArcSwap → clear_all)
+    // + observability.engine_events audit row not yet wired. Current handler
+    // matches pre-7e behaviour (in-memory clear only) plus a length-validated
+    // token check. See tick_pipeline/mod.rs docstring.
+    if operator_token.len() < 32 {
+        let _ = response_tx.send(Err(
+            "operator_token too short (need >=32 chars) / operator_token 過短".into(),
+        ));
+        return;
+    }
+    let result = match pipeline.edge_predictor_store() {
+        Some(store) => {
+            let n = store.clear_all();
+            info!(
+                cleared = n,
+                reason = %reason,
+                "EdgePredictor DisableAll / 已禁用所有預測器"
+            );
+            Ok(format!("cleared {} predictor slots", n))
+        }
+        None => Err(
+            "EdgePredictorStore not wired on this engine / 此引擎尚未注入 store".into(),
+        ),
+    };
+    let _ = response_tx.send(result);
+}
+
+/// EDGE-P3-1 Step 7e · Production entry point for the operator kill-switch,
+/// called from `event_consumer::mod.rs` after intercepting the variant. Accepts
+/// `db_mode` + `audit_pool` so the forthcoming two-phase commit + engine_events
+/// audit row have a home without another signature churn.
+/// EDGE-P3-1 Step 7e：mod.rs 攔截後的生產入口，預留 db_mode + audit_pool 以便
+/// 未來兩階段提交與 engine_events 審計行接入時無須再改簽名。
+pub fn handle_disable_edge_predictor_all(
+    operator_token: String,
+    reason: String,
+    response_tx: tokio::sync::oneshot::Sender<Result<String, String>>,
+    pipeline: &mut TickPipeline,
+    _db_mode: &'static str,
+    _audit_pool: Option<&sqlx::PgPool>,
+) {
+    // FIXME(Step 7e): _db_mode + _audit_pool will carry the audit writeback;
+    // today we delegate to the in-memory clear impl.
+    disable_edge_predictor_all_impl(&operator_token, &reason, response_tx, pipeline);
+}
+
 /// Apply one PipelineCommand variant to the pipeline. Returns nothing —
 /// command outcomes are reported via the optional response_tx oneshot inside
 /// each variant.
@@ -583,19 +641,17 @@ pub fn handle_paper_command(
         // so the cost gate immediately falls back to the JS shrinkage path.
         // EDGE-P3-1 Stage 0 · Operator kill-switch：清空所有已載入模型，cost gate
         // 立即回落 JS shrinkage。
-        PipelineCommand::DisableEdgePredictorAll { response_tx } => {
-            let result = match pipeline.edge_predictor_store() {
-                Some(store) => {
-                    let n = store.clear_all();
-                    info!(cleared = n,
-                        "EdgePredictor DisableAll / 已禁用所有預測器");
-                    Ok(format!("cleared {} predictor slots", n))
-                }
-                None => Err(
-                    "EdgePredictorStore not wired on this engine / 此引擎尚未注入 store".into(),
-                ),
-            };
-            let _ = response_tx.send(result);
+        PipelineCommand::DisableEdgePredictorAll {
+            operator_token,
+            reason,
+            response_tx,
+        } => {
+            // Production flow intercepts this variant in event_consumer/mod.rs and
+            // calls handle_disable_edge_predictor_all directly. This arm stays
+            // reachable only for unit-test direct dispatch; logic is shared.
+            // 生產路徑在 event_consumer/mod.rs 攔截此變體，直接呼叫
+            // handle_disable_edge_predictor_all；此分支僅供單元測試直接分派。
+            disable_edge_predictor_all_impl(&operator_token, &reason, response_tx, pipeline);
         }
         // EDGE-P3-1 Stage 0 · ε-greedy shadow-fill passthrough. DB write is
         // Step 7c (pending — same Option-B pattern as Step 7a). Today this
@@ -950,7 +1006,11 @@ mod tests {
 
         let (tx, rx) = tokio::sync::oneshot::channel();
         handle_paper_command(
-            PipelineCommand::DisableEdgePredictorAll { response_tx: tx },
+            PipelineCommand::DisableEdgePredictorAll {
+                operator_token: "test-token-12345678901234567890abcdef".into(),
+                reason: "unit test".into(),
+                response_tx: tx,
+            },
             &mut pipeline,
             &mut writer,
             &mut pending,

@@ -126,6 +126,15 @@ impl<T: Clone + Send + Sync + 'static> ConfigStore<T> {
         self.inner.load_full()
     }
 
+    /// EDGE-P3-1 Step 7e: persist path getter for callers that need to write
+    /// the TOML directly (kill-switch Stage 1 fsync). Returns `None` when
+    /// `with_toml_persist()` was not wired (e.g. test-constructed stores).
+    /// EDGE-P3-1 Step 7e：回寫路徑 getter，for 需直接寫 TOML 的呼叫方
+    /// （kill-switch Stage 1 fsync）。`with_toml_persist` 未接線時回 None。
+    pub fn persist_path(&self) -> Option<&Path> {
+        self.persist_path.as_deref()
+    }
+
     /// Current version number.
     /// 當前版本號。
     pub fn version(&self) -> u64 {
@@ -258,7 +267,7 @@ fn write_toml_atomic<T: Serialize>(cfg: &T, path: &Path) -> Result<(), String> {
 /// authoritative durability proof for this helper.
 /// 非關鍵呼叫者仍用 `write_toml_atomic` 以避免每次寫入的 fsync 代價。耐久性由
 /// CC #13 回歸測試 `test_disable_all_survives_sigkill` 權威驗證。
-pub(crate) fn write_toml_atomic_fsynced<T: Serialize>(
+pub fn write_toml_atomic_fsynced<T: Serialize>(
     cfg: &T,
     path: &Path,
 ) -> Result<(), String> {

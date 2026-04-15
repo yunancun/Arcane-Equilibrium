@@ -33,7 +33,7 @@ pub use risk_config::RiskConfig;
 // ScannerConfig lives in scanner::config; re-exported here for uniform access via config::ScannerConfig
 // ScannerConfig 定義在 scanner::config，此處重新導出以統一通過 config::ScannerConfig 訪問
 pub use crate::scanner::config::ScannerConfig;
-pub use store::{ConfigStore, PatchOutcome, PatchSource};
+pub use store::{ConfigStore, PatchOutcome, PatchSource, write_toml_atomic_fsynced};
 
 use arc_swap::ArcSwap;
 use serde::Deserialize;
