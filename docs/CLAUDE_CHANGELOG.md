@@ -1,7 +1,29 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-04-15（EDGE-P3-1 Step 7c shadow-fill writer）
+> 最後更新：2026-04-15（EDGE-P3-1 Step 7b ReloadEdgePredictor plumbing）
+
+### EDGE-P3-1 Step 7b — `ReloadEdgePredictor` plumbing-only（2026-04-15）
+
+**背景**：spec §7.3 Step 7 最後一條 IPC。Python ML-MIT pipeline 將來會把新訓練的 ONNX artifact 寫到磁碟後呼叫此 IPC 讓 Rust 熱換；但 ONNX loader 本體仍卡在 ML-MIT #26（tract/ort feature flag 空殼）。直接等 #26 會讓 IPC 協定長期懸空；直接全做又需要未完成的載入器。**決策**：落 plumbing-only — 協定/handler/validation/tests 全就位，loader 為存根（恆 Err 帶 `awaiting ML-MIT #26` 字樣），capability flag 誠實保持 `False`。#26 交付時換 loader body + 翻 flag + 加 Python route 即可，無協定改動。
+
+**交付**：
+- **`PipelineCommand::ReloadEdgePredictor`** variant（`tick_pipeline/mod.rs`）：`engine: String`（白名單 paper/demo/live，作 IPC 路由二次防禦）+ `strategy: String` + `path: PathBuf` + `response_tx: oneshot::Sender<Result<String, String>>`。注釋標記 plumbing-only 與 flag 翻轉時機。
+- **`edge_predictor::load_predictor_from_path`** 存根（`edge_predictor/mod.rs`）：`path.exists()` false → 立即 Err（讓路徑錯誤仍可測），存在則 Err `onnx_loader_not_wired: awaiting ML-MIT #26 first ONNX artifact`。注釋指明 #26 交付時的替換步驟。
+- **`handle_reload_edge_predictor`**（`event_consumer/handlers.rs`）：engine `.trim()` + 白名單 match（防 Python proxy 殘留換行）→ `pipeline.edge_predictor_store()` 存在性檢查（`None` 直接 Err 避免 loader 成功卻熱換進空引用）→ 呼叫 stub loader → 成功才 `store.swap(strategy, predictor)` + info log。拆為獨立函式以便單元測試免 oneshot 迴圈即可驗。
+- **Match arm** 於 `handle_paper_command` 加入 `PipelineCommand::ReloadEdgePredictor => handle_reload + oneshot 回應`。
+- **Capability flag 註解** `engine_capabilities_routes._EDGE_P3_IPC_SUPPORT.reload_edge_predictor`：值仍 `False`，註解改為「protocol wired; stays False until ML-MIT #26 replaces the stub loader with real tract/ort backend」。
+- **Python route 暫不加**：flag `False` 時無 client 會呼叫；避免寫完整路由卻只能代理 Err。#26 交付時 Python route + flag flip + 實作 loader 同一 PR 落地更清晰。
+
+**測試** (+4 於 `event_consumer::handlers::tests`)：
+- `test_reload_edge_predictor_rejects_unknown_engine` — `engine="mainnet"` → Err 含 `invalid engine`。
+- `test_reload_edge_predictor_requires_store` — 未 `set_edge_predictor_store` → Err 含 `EdgePredictorStore not wired`。
+- `test_reload_edge_predictor_stub_loader_errs` — 接線 store + `NamedTempFile` 確保路徑存在 → 走完整 loader → Err 含 `onnx_loader_not_wired` + `ML-MIT #26`；`store.loaded_count() == 0` 確認未熱換。
+- `test_reload_edge_predictor_trims_engine_name` — `engine="  paper\n"` → 白名單仍通過（trim 生效）→ err 走到 loader 路徑而非 invalid engine。
+
+**計量**：lib 1303→1307（+4），其餘集合不變。zero churn on Step 7a/7c/7d/7e/7f 路徑。
+
+**下一步解鎖**：Step 7 IPC 全套協定/實作就位。Stage 2+ 唯一剩下的阻塞仍是 ML-MIT #26 首 ONNX artifact — 屆時 stub loader body 換真、capability flag 翻 True、Python route 加（`POST /api/v1/risk/edge_predictor/reload`，沿用 `ReloadRiskConfig` 的 operator 授權）即完整端到端。
 
 ### EDGE-P3-1 Step 7c — `EmitShadowFill` → `learning.decision_shadow_fills` writer（2026-04-15）
 

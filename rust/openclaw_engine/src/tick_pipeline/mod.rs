@@ -415,6 +415,37 @@ pub enum PipelineCommand {
         reason: String,
         response_tx: tokio::sync::oneshot::Sender<Result<String, String>>,
     },
+    /// EDGE-P3-1 Step 7b (plumbing-only) · Reload a single strategy's predictor
+    /// from an on-disk artifact path. `engine` is carried for parity with the
+    /// IPC wire protocol — by the time this variant reaches a per-engine
+    /// handler the routing has already used it to pick the right
+    /// `pipeline_cmd_tx`, so the handler only range-checks it (paper/demo/live
+    /// whitelist) as a second-line defence against misrouting.
+    ///
+    /// Today the loader (`edge_predictor::load_predictor_from_path`) is a stub
+    /// that returns `Err("onnx_loader_not_wired: awaiting ML-MIT #26")` — so
+    /// the happy path still exists in protocol shape, but no handler can swap
+    /// a real predictor until #26 lands the first ONNX artifact. Capability
+    /// flag `reload_edge_predictor` stays `False` in `engine_capabilities`
+    /// until then.
+    ///
+    /// EDGE-P3-1 Step 7b（管線骨架）· 從磁碟熱重載單一策略的 predictor。
+    /// `engine` 為協定對稱攜帶（IPC 路由層已據此挑選 tx，handler 僅作白名單二次
+    /// 防禦）。當前 loader 為存根（返回 "onnx_loader_not_wired"），待 ML-MIT #26
+    /// 首 ONNX artifact 交付後啟用實作並翻 capability flag。
+    ReloadEdgePredictor {
+        /// Engine whitelist: "paper" | "demo" | "live". Defence-in-depth only —
+        /// primary routing is at the IPC dispatcher. Handler rejects mismatches.
+        /// 引擎白名單（paper/demo/live），handler 作對稱二次防禦。
+        engine: String,
+        /// Strategy key the new predictor is bound to (e.g. "ma_crossover").
+        /// 目標策略鍵。
+        strategy: String,
+        /// Filesystem path to the ONNX artifact.
+        /// ONNX artifact 的磁碟路徑。
+        path: std::path::PathBuf,
+        response_tx: tokio::sync::oneshot::Sender<Result<String, String>>,
+    },
     /// EDGE-P3-1 Stage 0 · ε-greedy shadow-fill emission from the cost gate
     /// (spec §7.3 step 7). Python consumer writes to
     /// `learning.decision_shadow_fills` with `close_tag='shadow_fill:epsilon_greedy'`.
