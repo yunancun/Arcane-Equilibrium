@@ -985,17 +985,6 @@ impl TickPipeline {
                         self.emit_close_fill(symbol, is_long, qty, close_px, event.ts_ms, pnl, &tag, &ectx);
                         // Update Kelly stats for future sizing / 更新 Kelly 統計供未來 sizing 使用
                         self.intent_processor.record_trade(symbol, pnl);
-                        // Push to recent_fills ring buffer / 推入最近成交環形緩衝
-                        let fr = self.intent_processor.fee_rate(symbol);
-                        push_capped(&mut self.recent_fills, TimestampedFill {
-                            timestamp_ms: event.ts_ms,
-                            symbol: symbol.clone(),
-                            is_long,
-                            qty,
-                            price: close_px,
-                            fee: qty * close_px * fr,
-                            strategy: format!("strategy_close:{reason}"),
-                        }, 50);
                         // Track consecutive losses for risk evaluator
                         // 追蹤連續虧損供風控評估器使用
                         if pnl < 0.0 {
