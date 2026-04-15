@@ -1,7 +1,25 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-04-15（EDGE-P3-1 Step 7b ReloadEdgePredictor plumbing）
+> 最後更新：2026-04-15（EDGE-P3-1 Phase B #4 RNG seeding + kind forwarding 修復）
+
+### EDGE-P3-1 Phase B #4 — RNG seeding + `with_kind` forwards kind to IntentProcessor（2026-04-15）
+
+**背景**：spec §7.3 F9 規定 paper/demo/live 各自以 `seed_for_engine(startup_nanos, kind) = startup_nanos ^ kind_discriminant` 初始化 ε-greedy 的 `SmallRng`。函式本身在 `edge_predictor/gate.rs` 早已實作 + 有單元測試，但 bootstrap 從未呼叫 — `IntentProcessor::new()` 預設 seed=0，三引擎的 ε-greedy 抽樣流完全相同（spec §7.3 F9 失效）。同時發現一個耦合的潛伏 bug：`TickPipeline::with_kind(kind)` 把 kind 寫到 `pipeline.pipeline_kind` 卻從未 forward 給 `pipeline.intent_processor.pipeline_kind` — gate 用的是 IntentProcessor 這份欄位，導致 demo/live 的 gate 全部誤認為 Paper，ε-greedy 在 demo/live 也會嘗試發 `EmitShadowFill`，靠 writer R5 + DB `CHECK (engine_mode='paper')` 才擋下。兩者都屬「設計已就位，bootstrap 缺一個 setter 呼叫」。
+
+**交付**：
+- **`TickPipeline::set_predictor_rng_seed(seed: u64)`**（`tick_pipeline/mod.rs`）：純 forwarding wrapper → `intent_processor.set_predictor_rng_seed`。與 `set_shadow_fill_tx` / `set_decision_feature_tx` 同一設計。
+- **`TickPipeline::with_kind(kind)`** 加一行 `p.intent_processor.set_pipeline_kind(kind)` — gate 的 `inputs.engine_kind` 這下才真正反映 engine；註解說明為何單一 setter call 同時修復兩個面向（persistence + gate）。
+- **`event_consumer/mod.rs`** bootstrap wire（與 7a/7c/store 注入同區塊）：`SystemTime::now()` nanos → `gate::seed_for_engine(nanos, pipeline_kind)` → `pipeline.set_predictor_rng_seed(seed)`。`unwrap_or(0)` 防止 1970 年代容器時鐘異常時 panic（kind discriminant XOR 仍使三引擎得到互異種子）。
+- **`IntentProcessor::pipeline_kind()`** 讀取 accessor（pub）+ `predictor_rng_lock_for_tests`（`#[cfg(test)]`）：讓回歸測試可驗證 with_kind forwarding 與 seed 獨立性，不把 private state 洩漏到 non-test API。
+
+**測試** (+2 於 `tick_pipeline::tests`)：
+- `test_with_kind_forwards_kind_to_intent_processor` — 三個 `with_kind` 的 pipeline 的 `intent_processor.pipeline_kind()` 必須分別為 Paper/Demo/Live；鎖定 forwarding 不會被未來重構靜默回歸。
+- `test_set_predictor_rng_seed_changes_draw_stream` — 兩 pipeline 分別以 `seed_for_engine(123_456_789, Paper)` 和 `seed_for_engine(123_456_789, Demo)` reseed，各抽 64 bit，向量必不相等 — 證明 RNG wiring 實際改變了 Mutex 內的 SmallRng 狀態。
+
+**計量**：lib 1307→1309（+2）；core 372 不變；e2e 35 不變。合計 **Rust 1716 passed / 0 failed**。
+
+**下一步解鎖**：Phase B 剩 #3（ONNX model loader，blocked by ML-MIT #26）。#4 完成後 spec §7.3 F9 完全符合，paper 的 exploration 每次冷啟動後種子隨 wallclock 而異（好的 diversity），demo/live 的 ε-greedy 則被 gate 層直接擋住（不再依賴 writer/DB 兜底）。
 
 ### EDGE-P3-1 Step 7b — `ReloadEdgePredictor` plumbing-only（2026-04-15）
 

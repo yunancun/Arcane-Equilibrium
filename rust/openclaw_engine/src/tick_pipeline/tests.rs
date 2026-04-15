@@ -1258,6 +1258,63 @@ use super::*;
         assert!(bal.is_finite(), "balance must be finite after zero-price tick, got {bal}");
     }
 
+    /// EDGE-P3-1 Phase B #4 regression: `with_kind` forwards the kind into the
+    /// IntentProcessor so the predictor gate's `inputs.engine_kind` actually
+    /// reflects paper/demo/live. Before the fix, `IntentProcessor::pipeline_kind`
+    /// stayed at the constructor default (Paper) for every engine, causing the
+    /// ε-greedy branch in `gate.rs` to fire on demo/live too (only the writer-
+    /// level R5 guard + DB CHECK stopped the leak). This test locks the
+    /// propagation so future refactors don't silently regress it.
+    /// EDGE-P3-1 Phase B #4 回歸：`with_kind` 必須把 kind 透傳給 IntentProcessor，
+    /// 否則 demo/live 的 gate 仍視為 Paper，ε-greedy 會在 demo/live 誤發。
+    #[test]
+    fn test_with_kind_forwards_kind_to_intent_processor() {
+        use crate::tick_pipeline::PipelineKind;
+        let p_paper = TickPipeline::with_kind(&["BTCUSDT"], 1_000.0, PipelineKind::Paper);
+        let p_demo = TickPipeline::with_kind(&["BTCUSDT"], 1_000.0, PipelineKind::Demo);
+        let p_live = TickPipeline::with_kind(&["BTCUSDT"], 1_000.0, PipelineKind::Live);
+        assert_eq!(p_paper.intent_processor.pipeline_kind(), PipelineKind::Paper);
+        assert_eq!(p_demo.intent_processor.pipeline_kind(), PipelineKind::Demo);
+        assert_eq!(p_live.intent_processor.pipeline_kind(), PipelineKind::Live);
+    }
+
+    /// EDGE-P3-1 Phase B #4: `set_predictor_rng_seed` reseeds the IntentProcessor
+    /// RNG. Locks the wiring by constructing two pipelines with different seeds
+    /// and asserting they disagree on at least one ε-greedy draw — the spec §7.3
+    /// contract is that the kind-discriminant XOR produces independent streams.
+    /// We use the fact that two different seeds of `SmallRng` produce different
+    /// `gen_bool(0.5)` sequences within a short prefix. No model needed because
+    /// this only probes the RNG plumbing, not the gate.
+    /// EDGE-P3-1 Phase B #4：`set_predictor_rng_seed` 必須真正重置 RNG。
+    #[test]
+    fn test_set_predictor_rng_seed_changes_draw_stream() {
+        use crate::edge_predictor::gate::seed_for_engine;
+        use crate::tick_pipeline::PipelineKind;
+        let seed_paper = seed_for_engine(12_345, PipelineKind::Paper);
+        let seed_demo = seed_for_engine(12_345, PipelineKind::Demo);
+        assert_ne!(
+            seed_paper, seed_demo,
+            "sanity: per-kind XOR must yield different seeds for the same startup"
+        );
+        let mut p1 = TickPipeline::with_kind(&["BTCUSDT"], 1_000.0, PipelineKind::Paper);
+        let mut p2 = TickPipeline::with_kind(&["BTCUSDT"], 1_000.0, PipelineKind::Paper);
+        p1.set_predictor_rng_seed(seed_paper);
+        p2.set_predictor_rng_seed(seed_demo);
+        // Drain 64 bool draws from each RNG; at least one index must disagree.
+        // 各抽 64 個 bool，至少一個位置需不同，證明兩條 RNG 流獨立。
+        use rand::Rng;
+        let draw_64 = |ip: &crate::intent_processor::IntentProcessor| -> Vec<bool> {
+            let mut rng = ip.predictor_rng_lock_for_tests();
+            (0..64).map(|_| rng.gen_bool(0.5)).collect()
+        };
+        let s1 = draw_64(&p1.intent_processor);
+        let s2 = draw_64(&p2.intent_processor);
+        assert_ne!(
+            s1, s2,
+            "different seeds must produce different draw streams within 64 bits"
+        );
+    }
+
     /// PNL-FIX-2: charge_fee() helper rejects non-positive / non-finite inputs
     /// so a malformed fee_rate cannot corrupt balance. Locks the safety guard.
     /// PNL-FIX-2：charge_fee 必須拒絕非正或非有限值，避免費率異常污染餘額。

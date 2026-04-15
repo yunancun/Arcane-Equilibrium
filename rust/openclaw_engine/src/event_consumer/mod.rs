@@ -142,6 +142,30 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
         pipeline.set_shadow_fill_db_tx(tx);
     }
 
+    // EDGE-P3-1 Phase B #4: Seed the IntentProcessor predictor RNG with a per-
+    // engine derivation of the current wallclock (spec §7.3 F9:
+    // `engine_startup_nanos ^ engine_kind_discriminant`). `seed_for_engine`
+    // already lives in the gate module; we just have to call it once at
+    // bootstrap. Without this wire-up every engine inherits the default seed
+    // 0 from `IntentProcessor::new` and the kind discriminant XOR is inert —
+    // paper's ε-greedy branch replays an identical draw sequence across
+    // restarts, and demo/live (harmless today thanks to the gate guard) would
+    // too once future fixtures reseed them. Wallclock-ns is deterministic for
+    // tests that mock time, non-crypto fast on the hot path, and never hits
+    // OsRng. `unwrap_or(0)` keeps the writer from panicking on the 1970-era
+    // clock shenanigans that only happen in malformed containers — the
+    // kind-discriminant XOR still gives three distinct streams.
+    // EDGE-P3-1 Phase B #4：以 §7.3 F9 規則 seed IntentProcessor 的 predictor
+    // RNG（啟動 nanos ^ 引擎 kind 判別）。`seed_for_engine` 已在 gate 模組，
+    // 此處只是每個 pipeline 啟動時呼叫一次；缺接線則三引擎共用 seed=0。
+    let startup_nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let predictor_seed =
+        crate::edge_predictor::gate::seed_for_engine(startup_nanos, pipeline_kind);
+    pipeline.set_predictor_rng_seed(predictor_seed);
+
     // QoL-1: Restore cumulative paper_state counters from trading.fills before
     // the first tick; details + fail-soft log are in paper_state_restore.
     // QoL-1：首個 tick 前從 trading.fills 還原累計指標；細節見 helper。
