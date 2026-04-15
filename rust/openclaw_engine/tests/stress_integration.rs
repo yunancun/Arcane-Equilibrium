@@ -123,53 +123,66 @@ fn stress_fast_track_flash_crash_closes_all_positions() {
     assert_eq!(pipeline.paper_state.position_count(), 5);
 
     // Simulate CircuitBreaker risk level triggering fast_track
-    let action = evaluate_fast_track(RiskLevel::CircuitBreaker, 0.0, 0.0);
+    let action = evaluate_fast_track(RiskLevel::CircuitBreaker, 0.0, 0.0, 0.0);
     assert_eq!(action, FastTrackAction::CloseAll);
 
-    // Simulate pipeline processing with CB level — manually force risk level
-    // The on_tick should close all when governance risk is at CB
-    // For now verify fast_track logic directly with extreme conditions
-    let action = evaluate_fast_track(RiskLevel::Normal, 8.0, 50.0); // 8% flash crash
+    // Post FA-PHANTOM-2: 8% drop on held at Normal with sigma<3 → NoAction
+    // (naturally-volatile symbol). With sigma≥3 it becomes ReduceToHalf at
+    // Normal; CloseAll only at Defensive+ or at ≥15% cliff.
+    // FA-PHANTOM-2 修復後：8% + Normal + sigma<3 → NoAction（小幣正常波動）。
+    let action = evaluate_fast_track(RiskLevel::Normal, 8.0, 2.5, 50.0);
+    assert_eq!(action, FastTrackAction::NoAction);
+    // 8% + sigma≥3 + Normal → ReduceToHalf
+    let action = evaluate_fast_track(RiskLevel::Normal, 8.0, 4.0, 50.0);
+    assert_eq!(action, FastTrackAction::ReduceToHalf);
+    // 15% drop triggers regardless — cliff-level flash crash
+    let action = evaluate_fast_track(RiskLevel::Normal, 15.0, 0.0, 50.0);
     assert_eq!(action, FastTrackAction::CloseAll);
 
-    let action = evaluate_fast_track(RiskLevel::Normal, 0.5, 95.0); // margin crisis
+    let action = evaluate_fast_track(RiskLevel::Normal, 0.5, 0.5, 95.0); // margin crisis
     assert_eq!(action, FastTrackAction::CloseAll);
 }
 
 #[test]
 fn stress_fast_track_defensive_reduces_exposure() {
-    let action = evaluate_fast_track(RiskLevel::Defensive, 2.0, 60.0);
+    let action = evaluate_fast_track(RiskLevel::Defensive, 2.0, 0.5, 60.0);
     assert_eq!(action, FastTrackAction::ReduceToHalf);
 }
 
 #[test]
 fn stress_fast_track_reduced_pauses_but_keeps_positions() {
-    let action = evaluate_fast_track(RiskLevel::Reduced, 1.0, 40.0);
+    let action = evaluate_fast_track(RiskLevel::Reduced, 1.0, 0.5, 40.0);
     assert_eq!(action, FastTrackAction::PauseNewEntries);
 }
 
 #[test]
-fn stress_fast_track_boundary_exactly_5pct_drop() {
-    // Exactly 5% should trigger CloseAll
+fn stress_fast_track_boundary_extreme_drop_cliff() {
+    // FA-PHANTOM-2: only ≥15% held-symbol drops auto-trigger CloseAll
+    // regardless of sigma/risk_level. Moderate drops now require sigma≥3
+    // (and even then downgrade to ReduceToHalf at <Defensive levels).
+    // FA-PHANTOM-2：只有 ≥15% 持倉跌幅才無條件 CloseAll。
     assert_eq!(
-        evaluate_fast_track(RiskLevel::Normal, 5.0, 0.0),
+        evaluate_fast_track(RiskLevel::Normal, 15.0, 0.0, 0.0),
         FastTrackAction::CloseAll
     );
-    // 4.99% should NOT trigger
     assert_eq!(
-        evaluate_fast_track(RiskLevel::Normal, 4.99, 0.0),
+        evaluate_fast_track(RiskLevel::Normal, 14.99, 0.0, 0.0),
         FastTrackAction::NoAction
+    );
+    assert_eq!(
+        evaluate_fast_track(RiskLevel::Normal, 14.99, 5.0, 0.0),
+        FastTrackAction::ReduceToHalf
     );
 }
 
 #[test]
 fn stress_fast_track_boundary_exactly_90pct_margin() {
     assert_eq!(
-        evaluate_fast_track(RiskLevel::Normal, 0.0, 90.0),
+        evaluate_fast_track(RiskLevel::Normal, 0.0, 0.0, 90.0),
         FastTrackAction::CloseAll
     );
     assert_eq!(
-        evaluate_fast_track(RiskLevel::Normal, 0.0, 89.99),
+        evaluate_fast_track(RiskLevel::Normal, 0.0, 0.0, 89.99),
         FastTrackAction::NoAction
     );
 }

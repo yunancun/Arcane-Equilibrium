@@ -1,7 +1,36 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-04-15（EDGE-P3-1 Phase B #4 RNG seeding + kind forwarding 修復）
+> 最後更新：2026-04-15（FA-PHANTOM-2 fix — fast_track held-symbol scoping + sigma gate）
+
+### FA-PHANTOM-2 — fast_track held-symbol scoping + sigma gate（2026-04-15）
+
+**發現過程**：G-2 FundingArb 監控 daemon PID 598572 運行 7 小時，progress 停在 0/20 fills。DB 查詢揭露 demo funding_arb 8 次開倉全部在 4-7 秒內被 `risk_close:fast_track` / `risk_check` / `ipc_close_symbol` 秒殺，0 次走到自然 `strategy_close` 出口。engine.log 抓到 `risk_level=Normal` 下 `FAST_TRACK CloseAll fired` 多次，`trigger_symbol=ENJUSDT`（小幣 $0.075 ~ $0.094）。排除 CircuitBreaker / margin_util (已 leverage-aware ≤2%) 後確認唯一觸發源是 `price_drop_pct >= 5.0`。
+
+**根因**：`openclaw_core/src/risk/price_tracker.rs::max_drop_pct()` 掃全部 25+ 觀察幣種 5min 窗口最壞跌幅。小幣 5min 內抖 5% 是常態噪音，所以 fast_track 持續誤觸 CloseAll，**全策略被系統性秒殺**，funding_arb 在 daemon 視角下永遠收不滿 20 個自然出口 fill。與 FA-PHANTOM-1 同類型 bug（fast_track false-positive CloseAll），但根因獨立。
+
+**交付**（3 處協調修改）：
+- **`PriceHistoryTracker::worst_drop_for_held(&[String]) -> Option<SymbolDropInfo>`** — 新方法僅掃持倉幣種，附帶 sigma = `|current - mean| / std_dev`（窗口內）。空集合或樣本不足返回 None。舊 `max_drop_pct()` 保留供非 fast_track consumer 使用。
+- **`evaluate_fast_track` 新簽名** `(risk_level, held_drop_pct, held_drop_sigma, margin_util)`，分級規則：
+  - `CircuitBreaker+` / `margin_util >= 90%` → CloseAll（舊行為，保留）
+  - `held_drop_pct >= 15%` → CloseAll（真閃崩兜底，sigma 可能不可用的邊緣情境）
+  - `held_drop_pct >= 5% AND sigma >= 3` AND `risk >= Defensive` → CloseAll
+  - `held_drop_pct >= 5% AND sigma >= 3` AND `risk < Defensive` → ReduceToHalf（關鍵：Normal 下不再 panic，只半倉）
+  - 其他按舊風控梯度（Defensive→ReduceToHalf, Reduced→PauseNewEntries）
+- **`tick_pipeline/on_tick.rs`** — 構造 `held_symbols` 清單 → `worst_drop_for_held` → 解包 `(drop_pct, sigma, symbol)` → 傳入 `evaluate_fast_track`。三個 tracing 日誌（CloseAll WARN / ReduceToHalf WARN / PauseNewEntries INFO）全部攜帶新欄位 `held_drop_pct`/`held_drop_sigma`/`held_drop_symbol` 便於日後取證。
+
+**測試** (+17 淨增)：
+- `price_tracker::tests` +8 — 空 held 返 None · unheld symbol drop 不觸發（legacy 仍會，分岔驗證）· held drop 正確浮現 · 樣本不足返 None · 多 held 取最大 · 穩定幣 0 跌返 None · 噪音小幣 sigma<3 · 穩定幣突崩 sigma≥3（19 穩定樣本避免 std_dev 被 outlier 自身撐高到 sigma=3.0 邊界）
+- `fast_track::tests` +9 — 新簽名全部 arity 更新；新增 FA-PHANTOM-2 regression（6%+sigma=1.5 → NoAction）+ held outlier Normal/Cautious → ReduceToHalf + Defensive → CloseAll + 5%/3σ 邊界 + 15% cliff + 無 drop 訊號 risk-level-only 退化
+- `stress_integration` 語義更新 — 舊 `test_flash_crash_closes_all`（8% Normal → CloseAll）改為測新語義的三條路徑，`boundary_exactly_5pct_drop` 重命名為 `boundary_extreme_drop_cliff` 驗 15% 硬線
+
+**計量**：engine lib 1309→1318（+9）；core 372→380（+8）；e2e 35 不變。合計 **Rust 1716 → 1733 passed / 0 failed**。
+
+**Spec 與決策記錄**：`docs/references/2026-04-15--fa_phantom_2_fix_spec.md`（含根因證據鏈、三條修復方向對應表、閾值選擇理由、測試列表、FA-PHANTOM-1 對照）。
+
+**部署**：`restart_all.sh --rebuild` 重建 engine binary；驗證指標為 `grep "FAST_TRACK CloseAll fired.*risk_level=Normal" /tmp/openclaw/engine.log` 應回空（除非真發生 ≥15% 或 5%+3σ 事件），G-2 daemon 接下來幾小時應開始累積 `n_fills`。
+
+---
 
 ### EDGE-P3-1 Phase B #4 — RNG seeding + `with_kind` forwards kind to IntentProcessor（2026-04-15）
 
