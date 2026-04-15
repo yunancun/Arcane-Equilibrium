@@ -1,7 +1,7 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-04-15（ORPHAN-ADOPT-1 Phase 2A + EDGE-P3-1 Step 7e skeleton）
+> 最後更新：2026-04-15（ORPHAN-ADOPT-1 Phase 2A + EDGE-P3-1 Step 7e）
 
 ### ORPHAN-ADOPT-1 Phase 2A — 確定性 Adopt 基礎設施（2026-04-15）
 
@@ -19,6 +19,36 @@
 **Deploy**：`bash helper_scripts/restart_all.sh --rebuild`。Adopt 路徑在 `edge_estimates.json` 未 populated OR 無 `KNOWN_STRATEGY` 在 orphan 幣種有正 edge 時仍然 inert（退回 Phase 1 close-only）。
 
 **Phase 2B（未來）**：G-1 R-02 Strategist 在線後，Adopt 規則從「正 shrunk edge」升級為「Strategist would_take(symbol, side)」；`KNOWN_STRATEGY_NAMES` + `EdgeEstimates` probe 降為 fast-path short-circuit，Strategist 為 slow-path 最終裁定。
+
+---
+
+### EDGE-P3-1 Step 7e — `DisableEdgePredictorAll` 完整兩階段 commit + V014 audit（2026-04-15）
+
+**背景**：commit `97777d5` 已落 Step 7e 骨架（介面 + getter + 標準入口函式，語義仍 pre-7e memory-only clear）。本 commit 填上完整兩階段邏輯 + V014 audit + 3 新測試，kill-switch 於 operator 下令後必須保證「即使引擎立刻崩潰，重啟仍讀到 `use_edge_predictor=false`」—disk-first fail-abort 語義。
+
+**交付**（`event_consumer/handlers.rs` +180 / -40，不觸骨架範圍外檔）：
+- **兩階段 commit 邏輯**（`disable_edge_predictor_all_impl`）：
+  - Stage 1 — 預算 next `RiskConfig`（`edge_predictor.use_edge_predictor = false`）+ `validate()` → `write_toml_atomic_fsynced(&next, persist_path)` disk-first；寫盤失敗立即 reject 且不觸及記憶體，避免「disk 舊 + 記憶體新」的半啟用殘局。
+  - Stage 2 — `ConfigStore::apply_patch(Operator, mutate, validate)` ArcSwap 把同一 mutation 套到 live config；Stage 2 失敗（只有 lock poison）時 disk 已是 authoritative 新副本，重啟自動對齊 + warn log 提示 operator。
+  - Stage 3 — `EdgePredictorStore::clear_all()` 清記憶體 slot，返回清空計數。
+  - Fallback — `risk_store` 未接線（測試或未來 stripped-down engine）降級為 memory-only clear，回 `cleared N slots (memory-only)` 讓 caller 區分兩路徑。
+- **V014 audit**（fire-and-forget `tokio::spawn`，僅 `audit_pool.is_some()` 時 enqueue）：`event_type='predictor_disabled_all'` / `source='operator'` / `config_name='risk_config'`，payload JSONB `{operator_token_hash(sha256hex), reason, cleared_slots, persisted, engine_mode, stage2_error}`；raw token 永不落盤。`tokio::spawn` 需要 runtime → 測試傳 `audit_pool=None` 跳過 spawn，單元測試無需 tokio。
+- **U1 authz**：`operator_token.len() < 32` 立即 reject（未來 HMAC 驗證 hook）；`hash_operator_token()` 用 `sha2::Sha256 + hex::encode` 產生審計專用 hash。
+- **3 新測試**（`handlers.rs` tests 模組）：
+  - `test_handle_disable_edge_predictor_all_rejects_short_token` — 9 字符 token → Err("too short")；slot 不觸動（reject 先於 `clear_all`）。
+  - `test_handle_disable_edge_predictor_all_memory_only_when_store_unwired` — `set_risk_store()` 不呼叫 → risk_store=None → memory-only clear 路徑；訊息含 "memory-only"。
+  - `test_handle_disable_edge_predictor_all_writes_toml_stage1` — 接線 `ConfigStore::new(RiskConfig { use_edge_predictor: true, ..default }).with_toml_persist(tempdir)` → call handler → 驗 TOML 檔內容含 `use_edge_predictor = false`、in-memory snapshot `use_edge_predictor == false`、pred_store slot 清空、回應訊息含 `persisted=false`。
+- **`handle_paper_command` DisableEdgePredictorAll arm**：延用共用 `disable_edge_predictor_all_impl`，以 `db_mode="paper"` + `audit_pool=None` 呼叫，保留 legacy test path + 避免單元測試需要 tokio runtime。
+
+**測試**：lib **1293→1296**（+3 Step 7e）· core 372 · e2e 35 · **total 1700→1703 pass / 0 fail**。
+
+**為何兩階段非純 apply_patch**：spec §8.8 F3b 要求 disk-first — `apply_patch` 內建 `maybe_persist` 是 fail-soft（寫盤失敗只 warn，ArcSwap 仍 commit），對 kill-switch 語義不夠嚴格（operator 意圖是「再也不讓它啟用」，寫盤失敗後必須中止而非吞錯）。因此 Stage 1 用直接的 `write_toml_atomic_fsynced` + fail-abort，Stage 2 才走 `apply_patch`（此時 disk 已有 authoritative 副本，ArcSwap 失敗也有磁碟 fallback）。
+
+**audit 設計**：token 永不落 raw。即便 Postgres 被入侵/洩漏，審計表只有 sha256 hash，無法 replay token；log 只寫 `token_len` + `reason` + `cleared_slots` + `engine_mode` 足以溯源 operator 意圖。
+
+**已知限制**：跨三引擎（paper/demo/live）原子 disable 未實現 — 若 operator 要全局 kill，需 Python 側 fan-out 三次 IPC 呼叫；任一引擎失敗由 Python 決定補救/回滾。Rust 側只保證單引擎 3-stage 原子。
+
+**下一步**：Step 7b `ReloadEdgePredictor{engine, strategy, path}` IPC + Python route · Step 7c `EmitShadowFill` Python consumer → `learning.decision_shadow_fills` · Step 7f `GET /api/v1/engine/capabilities`。三條獨立可推。
 
 ---
 
