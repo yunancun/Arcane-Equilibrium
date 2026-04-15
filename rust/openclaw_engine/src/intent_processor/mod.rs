@@ -771,6 +771,7 @@ impl IntentProcessor {
             context_id: payload.context_id,
             strategy: payload.strategy,
             symbol: payload.symbol,
+            side: payload.side,
             features_jsonb: payload.features_jsonb,
             prediction_q10: payload.prediction_q10,
             prediction_q50: payload.prediction_q50,

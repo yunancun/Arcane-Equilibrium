@@ -61,8 +61,8 @@ _EDGE_P3_IPC_SUPPORT: dict[str, bool] = {
     "disable_edge_predictor_all": True,
     # Step 7b — ReloadEdgePredictor{engine, strategy, path} IPC (pending)
     "reload_edge_predictor": False,
-    # Step 7c — EmitShadowFill Python consumer → learning.decision_shadow_fills
-    "emit_shadow_fill": False,
+    # Step 7c — EmitShadowFill → learning.decision_shadow_fills writer wired
+    "emit_shadow_fill": True,
     # v1.3 §12.3 item 7 U1 — SetEdgePredictorShadow{engine, operator_token}
     "set_edge_predictor_shadow": False,
 }

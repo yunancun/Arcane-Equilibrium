@@ -425,6 +425,13 @@ pub enum PipelineCommand {
         context_id: String,
         strategy: String,
         symbol: String,
+        /// +1 long / -1 short — pulled from FeatureVectorV1 and carried as a
+        /// typed field so the Step 7c writer can bind directly into the
+        /// `learning.decision_shadow_fills.side` SMALLINT column without
+        /// re-parsing the JSONB payload. Added in Step 7c (2026-04-15).
+        /// +1 多 / -1 空，取自 FeatureVectorV1；typed 攜帶避免 writer 再解析
+        /// JSONB，直接 bind SMALLINT（Step 7c 2026-04-15 加入）。
+        side: i8,
         features_jsonb: String,
         prediction_q10: f32,
         prediction_q50: f32,
@@ -716,6 +723,16 @@ pub struct TickPipeline {
     /// None 時發射停用（fail-soft，不影響交易）。
     decision_feature_tx:
         Option<tokio::sync::mpsc::Sender<crate::database::DecisionFeatureMsg>>,
+    /// EDGE-P3-1 Step 7c: Cached sender for `ShadowFillMsg` writes, used by
+    /// the `EmitShadowFill` IPC handler to forward ε-greedy paper exploration
+    /// fills into `learning.decision_shadow_fills`. Paper-only (the predictor
+    /// gate already guards `is_paper`); `None` = emission disabled (fail-soft;
+    /// no Stage-4 exploration collection but trading unaffected).
+    /// EDGE-P3-1 Step 7c：供 `EmitShadowFill` IPC handler 將 ε-greedy paper 探索
+    /// 轉寫 `learning.decision_shadow_fills` 的 sender。僅 paper（gate 已保證）。
+    /// None 時發射停用（fail-soft，不採集 Stage-4 探索但不影響交易）。
+    shadow_fill_db_tx:
+        Option<tokio::sync::mpsc::Sender<crate::database::ShadowFillMsg>>,
 }
 
 impl TickPipeline {
@@ -797,6 +814,7 @@ impl TickPipeline {
             index_prices: HashMap::new(),
             edge_predictor_store: None,
             decision_feature_tx: None,
+            shadow_fill_db_tx: None,
         }
     }
 
@@ -928,6 +946,32 @@ impl TickPipeline {
         &self,
     ) -> Option<&tokio::sync::mpsc::Sender<crate::database::DecisionFeatureMsg>> {
         self.decision_feature_tx.as_ref()
+    }
+
+    /// EDGE-P3-1 Step 7c: Wire the shadow-fill DB channel. Call exactly once
+    /// per pipeline during bootstrap. `None` leaves emission as fail-soft
+    /// no-op (predictor gate still runs; Stage-4 exploration rows just not
+    /// persisted).
+    /// EDGE-P3-1 Step 7c：接 shadow-fill DB 通道，每 pipeline 只呼叫一次。
+    /// 未接線時發射為 fail-soft no-op（gate 仍運作，僅 Stage-4 列不持久化）。
+    pub fn set_shadow_fill_db_tx(
+        &mut self,
+        tx: tokio::sync::mpsc::Sender<crate::database::ShadowFillMsg>,
+    ) {
+        debug_assert!(
+            self.shadow_fill_db_tx.is_none(),
+            "shadow_fill_db_tx injected twice — bootstrap should call this exactly once per pipeline"
+        );
+        self.shadow_fill_db_tx = Some(tx);
+    }
+
+    /// EDGE-P3-1 Step 7c: Accessor for the `EmitShadowFill` IPC handler.
+    /// Returns `None` until `set_shadow_fill_db_tx` has been called.
+    /// EDGE-P3-1 Step 7c：IPC handler 用的 tx 取用器；未接線前返回 None。
+    pub fn shadow_fill_db_tx(
+        &self,
+    ) -> Option<&tokio::sync::mpsc::Sender<crate::database::ShadowFillMsg>> {
+        self.shadow_fill_db_tx.as_ref()
     }
 
     /// EDGE-P3-1 Stage 0: Accessor for command handlers that need to mutate

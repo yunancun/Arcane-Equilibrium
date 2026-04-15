@@ -103,6 +103,12 @@ pub struct ShadowFillPayload {
     pub context_id: String,
     pub strategy: String,
     pub symbol: String,
+    /// +1 long / -1 short — pulled from `FeatureVectorV1::side`. Carried
+    /// as a typed field (not re-parsed from JSONB) so the writer can bind
+    /// directly into the SMALLINT column without JSON round-tripping.
+    /// +1 多 / -1 空，取自 `FeatureVectorV1::side`；typed 攜帶避免 writer
+    /// 從 JSONB 再解析，直接 bind SMALLINT 即可。
+    pub side: i8,
     pub features_jsonb: String,
     pub prediction_q10: f32,
     pub prediction_q50: f32,
@@ -210,6 +216,7 @@ pub fn edge_predictor_gate(
                 context_id: inputs.context_id.to_string(),
                 strategy: inputs.strategy.to_string(),
                 symbol: inputs.symbol.to_string(),
+                side: features.side,
                 features_jsonb: features_jsonb_for_shadow(),
                 prediction_q10: pred.q10,
                 prediction_q50: pred.q50,

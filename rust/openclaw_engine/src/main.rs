@@ -626,7 +626,7 @@ async fn async_main(
     // DB writer tasks (market, feature, trading, context, pollers, monitors)
     // ------------------------------------------------------------------
     let shared_last_tick_ms = Arc::new(std::sync::atomic::AtomicU64::new(0));
-    let (market_tx, feature_tx, trading_tx, context_tx, decision_feature_tx) =
+    let (market_tx, feature_tx, trading_tx, context_tx, decision_feature_tx, shadow_fill_tx) =
         tasks::spawn_db_writers(
             &db_pool,
             &config,
@@ -916,6 +916,10 @@ async fn async_main(
         // EDGE-P3-1 Step 7a: wire training-store writer for paper engine.
         // EDGE-P3-1 Step 7a：接入 paper 引擎訓練資料 writer。
         decision_feature_tx: decision_feature_tx.clone(),
+        // EDGE-P3-1 Step 7c: wire shadow-fill writer for paper engine
+        // (ε-greedy fills only ever originate here by gate guard).
+        // EDGE-P3-1 Step 7c：接 paper 引擎 shadow-fill writer（ε-greedy 僅此處）。
+        shadow_fill_tx: shadow_fill_tx.clone(),
         exchange_event_rx: None,
         seed_positions: Vec::new(), // Paper has no exchange-side positions to seed
         account_manager: None,
@@ -986,6 +990,10 @@ async fn async_main(
             // EDGE-P3-1 Step 7a: wire training-store writer for demo engine.
             // EDGE-P3-1 Step 7a：接入 demo 引擎訓練資料 writer。
             decision_feature_tx: decision_feature_tx.clone(),
+            // EDGE-P3-1 Step 7c: wire shadow-fill writer for defense-in-depth
+            // logging on demo (gate still guards against emission here).
+            // EDGE-P3-1 Step 7c：demo 亦接 shadow-fill writer 作深度防禦日誌。
+            shadow_fill_tx: shadow_fill_tx.clone(),
             exchange_event_rx: Some(demo_b.ws_bindings.exchange_event_rx),
             seed_positions: demo_seed_positions,
             account_manager: Some(demo_b.account_manager),
@@ -1055,6 +1063,10 @@ async fn async_main(
             // EDGE-P3-1 Step 7a: wire training-store writer for live engine.
             // EDGE-P3-1 Step 7a：接入 live 引擎訓練資料 writer。
             decision_feature_tx: decision_feature_tx.clone(),
+            // EDGE-P3-1 Step 7c: wire shadow-fill writer for defense-in-depth
+            // logging on live (gate still guards against emission here).
+            // EDGE-P3-1 Step 7c：live 亦接 shadow-fill writer 作深度防禦日誌。
+            shadow_fill_tx: shadow_fill_tx.clone(),
             exchange_event_rx: Some(live_b.ws_bindings.exchange_event_rx),
             seed_positions: live_seed_positions,
             account_manager: Some(live_b.account_manager),
