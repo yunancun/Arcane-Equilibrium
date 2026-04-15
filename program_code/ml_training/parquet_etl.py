@@ -11,6 +11,7 @@ MODULE_NOTE (中): 每日 ETL，從 PG 提取決策上下文 + 結果，
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import re
@@ -22,6 +23,34 @@ logger = logging.getLogger(__name__)
 
 # Default output directory / 默認輸出目錄
 DEFAULT_OUTPUT_DIR = "/tmp/openclaw/parquet"
+
+# EDGE-P3-1 Stage 1/2: canonical 17-feature order matching Rust FeatureVectorV1
+# (rust/openclaw_engine/src/edge_predictor/features.rs §3.2). The order must be
+# stable because Stage 2 training computes `feature_schema_hash` over this
+# sequence and the Rust predictor asserts the hash at inference time.
+# Mismatched order = silent train/serve skew. DO NOT reorder.
+# EDGE-P3-1 Stage 1/2：與 Rust FeatureVectorV1 一致的 17 特徵規範順序（§3.2）。
+# 順序穩定：Stage 2 訓練以此序列計算 feature_schema_hash，Rust 推理時驗證匹配。
+# 順序變更 = 靜默 train/serve skew。禁止重排。
+EDGE_P3_FEATURE_NAMES = (
+    "adx_1h",
+    "bb_width_pct",
+    "atr_pct",
+    "funding_rate",
+    "realized_vol_1h",
+    "basis_bps",
+    "orderbook_imbalance_top5",
+    "spread_bps",
+    "confluence_score",
+    "persistence_elapsed_ms",
+    "side",
+    "notional_pct_of_bal",
+    "concurrent_positions",
+    "same_direction_cnt",
+    "tod_sin",
+    "tod_cos",
+    "is_funding_settlement_window",
+)
 
 
 def extract_training_data(
@@ -285,3 +314,257 @@ def generate_training_labels(
     except Exception as e:
         logger.error("Label generation failed / 標籤生成失敗: %s", e)
         return {"n_samples": 0, "n_features": 0, "label_stats": {}, "error": str(e)}
+
+
+# ============================================================
+# EDGE-P3-1 Stage 1 / Stage 2 — decision_features feature store
+# EDGE-P3-1 第一/二階段 — 決策特徵儲存讀取
+# ============================================================
+#
+# `load_training_data()` is the ingestion entrypoint consumed by
+# `run_training_pipeline.run_pipeline()` (line 85). It reads the already-
+# labeled rows from `learning.decision_features` (populated by
+# `edge_label_backfill.py`), expands the `features_jsonb` column into the
+# canonical 17-column matrix, and hands (features, labels, timestamps,
+# feature_names) back to the CPCV trainer.
+#
+# `export_decision_features_parquet()` is the optional offline-dump helper
+# for operators who want to train off a PG snapshot (useful when PG is
+# under load or for reproducibility).
+#
+# Labels are filled by the separate `edge_label_backfill.py` job — this
+# module does NOT re-implement split-blend logic; it only consumes the
+# `label_net_edge_bps` column after backfill has run. Stale-label NULL
+# alerting lives in `edge_label_backfill.check_stale_labels()`; keep the
+# single source of truth there.
+# ============================================================
+
+def _get_pg_conn(dsn: Optional[str]):
+    """Open a psycopg2 connection using explicit DSN or env-var fallback.
+    Pattern mirrors edge_label_backfill._get_conn so stale-label alerting
+    and training-data loading share identical DB resolution rules.
+    以顯式 DSN 或環境變量為後備開啟 psycopg2 連線；與 edge_label_backfill 一致。"""
+    try:
+        import psycopg2  # type: ignore
+    except ImportError as e:
+        raise RuntimeError("psycopg2 not installed — activate venv first") from e
+
+    resolved = (
+        dsn
+        or os.environ.get("OPENCLAW_DATABASE_URL")
+        or os.environ.get("DSN")
+    )
+    if not resolved:
+        host = os.environ.get("POSTGRES_HOST", "127.0.0.1")
+        port = os.environ.get("POSTGRES_PORT", "5432")
+        user = os.environ.get("POSTGRES_USER", "openclaw")
+        password = os.environ.get("POSTGRES_PASSWORD", "")
+        db = os.environ.get("POSTGRES_DB", "openclaw")
+        resolved = f"postgresql://redacted@{host}:{port}/{db}"
+    return psycopg2.connect(resolved)
+
+
+# Canonical training query. `engine_mode` filter defaults to 'demo' because
+# spec §8.2 uses demo-fill-rate as the primary acceptance gate; operators can
+# widen to ('paper','demo') once Stage 4 paper-promote is active. Paper is
+# already separated at label-write time — shadow fills go to
+# learning.decision_shadow_fills (V017 CHECK), so this query's WHERE on
+# label_net_edge_bps IS NOT NULL naturally excludes them.
+# 標準訓練查詢；engine_mode 預設 'demo'（§8.2 驗收閾值），paper-promote 後可放寬。
+# Shadow fill 寫入分離表，NOT NULL 過濾自然排除 ε-greedy 探索污染訓練集。
+_LOAD_TRAINING_DATA_SQL = """
+SELECT
+    context_id,
+    extract(epoch FROM ts) * 1000.0 AS ts_ms,
+    features_jsonb,
+    label_net_edge_bps,
+    symbol,
+    strategy_name
+FROM learning.decision_features
+WHERE label_net_edge_bps IS NOT NULL
+  AND engine_mode = %(engine_mode)s
+  AND (%(strategy_name)s IS NULL OR strategy_name = %(strategy_name)s)
+  AND (%(symbol)s IS NULL OR symbol = %(symbol)s)
+  AND ts >= now() - (%(max_age_days)s || ' days')::interval
+ORDER BY ts ASC
+"""
+
+
+def load_training_data(
+    symbol: Optional[str] = None,
+    strategy_type: Optional[str] = None,
+    dsn: Optional[str] = None,
+    engine_mode: str = "demo",
+    max_age_days: int = 90,
+):
+    """Load labeled training rows from `learning.decision_features`.
+
+    Returns (features, labels, timestamps, feature_names) as numpy arrays /
+    tuple so `run_training_pipeline.run_pipeline()` can feed CPCV directly.
+
+    Missing / non-numeric JSONB fields fall through as 0.0 — row stays
+    because label quality is what gated inclusion. The schema hash mismatch
+    check happens at Rust inference time, not here; ETL's job is breadth,
+    not drop-on-skew.
+
+    Args:
+        symbol: Optional symbol filter (e.g. "BTCUSDT"). None → all symbols.
+        strategy_type: Optional strategy_name filter (e.g. "ma_crossover").
+            None → all strategies (multi-model training pulls one slice
+            per call). Named `strategy_type` to match the existing
+            `run_training_pipeline.PipelineConfig.strategy_type` field.
+        dsn: PG DSN override; falls back to env vars.
+        engine_mode: "paper" | "demo" | "live". Default "demo" per §8.2.
+        max_age_days: trailing-window size (90d default, covers 12 weeks
+            of fills — enough for LGBM quantile training per strategy).
+
+    從 learning.decision_features 載入已標籤訓練行；回傳 numpy 陣列
+    (features, labels, timestamps, feature_names)。JSONB 缺失 / 非數值欄位
+    填 0.0（schema hash 在 Rust 推理時驗證，此處不丟行）。
+
+    Raises:
+        RuntimeError: if numpy/psycopg2 missing.
+    """
+    try:
+        import numpy as np  # type: ignore
+    except ImportError as e:
+        raise RuntimeError("numpy not installed — pip install numpy") from e
+
+    conn = _get_pg_conn(dsn)
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                _LOAD_TRAINING_DATA_SQL,
+                {
+                    "engine_mode": engine_mode,
+                    "strategy_name": strategy_type,
+                    "symbol": symbol,
+                    "max_age_days": max_age_days,
+                },
+            )
+            rows = cur.fetchall()
+    finally:
+        conn.close()
+
+    feature_names = list(EDGE_P3_FEATURE_NAMES)
+    if not rows:
+        logger.info(
+            "load_training_data: 0 labeled rows (engine_mode=%s strategy=%s symbol=%s)",
+            engine_mode, strategy_type, symbol,
+        )
+        empty_f = np.empty((0, len(feature_names)), dtype=np.float32)
+        empty_y = np.empty((0,), dtype=np.float32)
+        empty_ts = np.empty((0,), dtype=np.int64)
+        return empty_f, empty_y, empty_ts, feature_names
+
+    features_mat = np.zeros((len(rows), len(feature_names)), dtype=np.float32)
+    labels_vec = np.zeros((len(rows),), dtype=np.float32)
+    ts_vec = np.zeros((len(rows),), dtype=np.int64)
+
+    for i, (_ctx_id, ts_ms, feat_json, label_bps, _sym, _strat) in enumerate(rows):
+        # psycopg2 returns JSONB as already-decoded dict; defensive parse for
+        # text-mode rollback or external dumps. 防禦性解析：JSONB → dict。
+        feat = feat_json if isinstance(feat_json, dict) else json.loads(feat_json)
+        for j, name in enumerate(feature_names):
+            val = feat.get(name, 0.0)
+            if val is None:
+                val = 0.0
+            try:
+                features_mat[i, j] = float(val)
+            except (TypeError, ValueError):
+                features_mat[i, j] = 0.0
+        labels_vec[i] = float(label_bps)
+        ts_vec[i] = int(ts_ms)
+
+    logger.info(
+        "load_training_data: %d rows × %d features (engine_mode=%s strategy=%s symbol=%s)",
+        len(rows), len(feature_names), engine_mode, strategy_type, symbol,
+    )
+    return features_mat, labels_vec, ts_vec, feature_names
+
+
+def export_decision_features_parquet(
+    pg_url: Optional[str] = None,
+    output_dir: str = DEFAULT_OUTPUT_DIR,
+    engine_mode: str = "demo",
+    days_back: int = 30,
+    labeled_only: bool = True,
+) -> dict:
+    """Dump `learning.decision_features` to Parquet for offline training.
+
+    Operator-triggered helper: stable snapshot for reproducible training runs
+    or PG-off-hours processing. Stage 2 trainer normally goes through
+    `load_training_data()`; this is the reproducibility escape hatch.
+
+    將 learning.decision_features 匯出為 Parquet 供離線訓練；操作員觸發的
+    可重現快照工具。Stage 2 訓練常走 load_training_data()，本函數是逃生艙。
+
+    Returns dict with success / row_count / output_path.
+    """
+    db_url = pg_url or os.environ.get("OPENCLAW_DATABASE_URL", "")
+    if not db_url:
+        return {"success": False, "error": "No database URL configured"}
+
+    _SAFE_DB_URL = re.compile(r"^[a-zA-Z0-9+_./:@?&=%\-]+$")
+    if not _SAFE_DB_URL.match(db_url):
+        return {"success": False, "error": "Invalid database URL format (rejected by SEC-B02 guard)"}
+
+    result: dict = {"success": False, "engine_mode": engine_mode}
+    try:
+        import duckdb  # type: ignore
+    except ImportError:
+        result["error"] = "duckdb not installed — pip install duckdb"
+        return result
+
+    try:
+        Path(output_dir).mkdir(parents=True, exist_ok=True)
+        _clean_dir = str(Path(output_dir).resolve())
+        end_date = datetime.utcnow()
+        start_date = end_date - timedelta(days=days_back)
+        start_str = start_date.strftime("%Y-%m-%d")
+        end_str = end_date.strftime("%Y-%m-%d")
+        _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+        assert _DATE_RE.match(start_str) and _DATE_RE.match(end_str), "date format violation"
+
+        # SEC-B02: engine_mode constrained to literal set; no injection surface.
+        if engine_mode not in ("paper", "demo", "live"):
+            return {"success": False, "error": f"invalid engine_mode: {engine_mode!r}"}
+
+        conn = duckdb.connect()
+        conn.execute("INSTALL postgres; LOAD postgres;")
+        conn.execute(f"ATTACH '{db_url}' AS pg (TYPE postgres, READ_ONLY);")
+
+        label_filter = "AND label_net_edge_bps IS NOT NULL" if labeled_only else ""
+        out_path = (
+            f"{_clean_dir}/decision_features_{engine_mode}_{start_str}_{end_str}.parquet"
+        )
+        query = f"""
+            COPY (
+                SELECT * FROM pg.learning.decision_features
+                WHERE engine_mode = '{engine_mode}'
+                  AND ts >= '{start_str}' AND ts < '{end_str}'
+                  {label_filter}
+                ORDER BY ts
+            ) TO '{out_path}' (FORMAT PARQUET, COMPRESSION ZSTD);
+        """
+        conn.execute(query)
+        row_count = conn.execute(
+            f"SELECT count(*) FROM read_parquet('{out_path}')"
+        ).fetchone()[0]
+        conn.close()
+
+        result.update({
+            "success": True,
+            "row_count": int(row_count),
+            "output_path": out_path,
+            "labeled_only": labeled_only,
+        })
+        logger.info(
+            "decision_features export: %d rows (engine=%s, %s labels only=%s) → %s",
+            row_count, engine_mode, f"{start_str}..{end_str}", labeled_only, out_path,
+        )
+    except Exception as e:  # noqa: BLE001
+        result["error"] = str(e)
+        logger.error("decision_features export failed: %s", e)
+
+    return result
