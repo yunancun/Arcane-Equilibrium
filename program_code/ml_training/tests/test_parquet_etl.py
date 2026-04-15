@@ -8,6 +8,7 @@ Self-contained — no PG or external services needed.
 
 from __future__ import annotations
 
+import json
 import tempfile
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -187,3 +188,139 @@ def test_generate_labels_empty_fills():
         assert result["n_samples"] == 0, f"Expected 0 samples for empty fills, got {result['n_samples']}"
         assert result["n_features"] == 0
         assert "error" not in result, f"Unexpected error: {result.get('error')}"
+
+
+# ── EDGE-P3-1 #63: load_training_data tests ───────────────────────────────
+# ETL consumes learning.decision_features after edge_label_backfill.py has
+# populated label_net_edge_bps. These tests don't hit PG — they exercise the
+# feature-name ordering invariant (must match Rust FeatureVectorV1) and the
+# empty-result numpy-shape guarantee (so CPCV trainer doesn't explode).
+# EDGE-P3-1 #63：load_training_data 測試；不連 PG，驗證 feature 順序與空結果 shape。
+
+def test_edge_p3_feature_names_match_rust_canonical_order():
+    """Feature order must be exactly 17 items matching Rust FeatureVectorV1.
+    feature 順序必須恰為 17 項，與 Rust FeatureVectorV1 一致。"""
+    from program_code.ml_training.parquet_etl import EDGE_P3_FEATURE_NAMES
+
+    assert len(EDGE_P3_FEATURE_NAMES) == 17, "spec §3.2 locks dim=17"
+    # Canonical checks — these names + positions are frozen by schema_hash.
+    # 以下名稱與位置被 schema_hash 凍結；變更即 train/serve skew。
+    assert EDGE_P3_FEATURE_NAMES[0] == "adx_1h"
+    assert EDGE_P3_FEATURE_NAMES[10] == "side"
+    assert EDGE_P3_FEATURE_NAMES[-1] == "is_funding_settlement_window"
+
+
+def test_load_training_data_rejects_without_psycopg2(monkeypatch):
+    """Clean RuntimeError when psycopg2 is missing; no silent numpy return.
+    缺 psycopg2 時拋 RuntimeError，不得靜默回空 numpy。"""
+    import program_code.ml_training.parquet_etl as mod
+
+    # Force psycopg2 ImportError path without touching global sys.modules state.
+    # 以 monkeypatch 強制 _get_pg_conn 內 import psycopg2 失敗；不污染 sys.modules。
+    original = mod._get_pg_conn
+
+    def _blocked(dsn):
+        raise RuntimeError("psycopg2 not installed — activate venv first")
+
+    monkeypatch.setattr(mod, "_get_pg_conn", _blocked)
+
+    with pytest.raises(RuntimeError, match="psycopg2"):
+        mod.load_training_data(symbol="BTCUSDT", strategy_type="ma_crossover")
+
+
+def test_load_training_data_empty_returns_canonical_shape(monkeypatch):
+    """Zero labeled rows → empty numpy arrays with correct dtypes + feature_names.
+    零標籤行 → 正確 dtype 的空 numpy 陣列 + feature_names 原樣返回。"""
+    np = pytest.importorskip("numpy")
+    import program_code.ml_training.parquet_etl as mod
+
+    class _FakeCursor:
+        def __enter__(self):
+            return self
+        def __exit__(self, *a):
+            return False
+        def execute(self, *_a, **_kw):
+            pass
+        def fetchall(self):
+            return []
+
+    class _FakeConn:
+        def cursor(self):
+            return _FakeCursor()
+        def close(self):
+            pass
+
+    monkeypatch.setattr(mod, "_get_pg_conn", lambda dsn: _FakeConn())
+
+    features, labels, timestamps, names = mod.load_training_data(
+        symbol="BTCUSDT", strategy_type="ma_crossover"
+    )
+    assert features.shape == (0, 17)
+    assert labels.shape == (0,)
+    assert timestamps.shape == (0,)
+    assert features.dtype == np.float32
+    assert labels.dtype == np.float32
+    assert timestamps.dtype == np.int64
+    assert names == list(mod.EDGE_P3_FEATURE_NAMES)
+
+
+def test_load_training_data_expands_jsonb(monkeypatch):
+    """JSONB features get unpacked into the canonical 17-col matrix;
+    missing / non-numeric entries coerce to 0.0 (row stays, label quality
+    is what gated inclusion). Tests both dict and JSON-string JSONB shapes.
+    JSONB 特徵展開為 17 列矩陣；缺/非數值欄位填 0.0，行保留；同時驗證
+    dict 與 JSON 字串兩種 JSONB 形式。"""
+    np = pytest.importorskip("numpy")
+    import program_code.ml_training.parquet_etl as mod
+
+    feat_dict_complete = {name: float(i + 1) for i, name in enumerate(mod.EDGE_P3_FEATURE_NAMES)}
+    feat_dict_partial = {
+        "adx_1h": 42.0,
+        "side": -1,
+        "nonsense_extra": "foo",    # ignored — not in canonical order
+        "atr_pct": None,            # coerced to 0.0 (null-safe)
+        "funding_rate": "notnum",   # coerced to 0.0 (ValueError → 0)
+    }
+    rows = [
+        ("ctx1", 1_700_000_000_000.0, feat_dict_complete, 12.5, "BTCUSDT", "ma_crossover"),
+        ("ctx2", 1_700_000_060_000.0, json.dumps(feat_dict_partial), -7.25, "BTCUSDT", "ma_crossover"),
+    ]
+
+    class _FakeCursor:
+        def __enter__(self):
+            return self
+        def __exit__(self, *a):
+            return False
+        def execute(self, *_a, **_kw):
+            pass
+        def fetchall(self):
+            return rows
+
+    class _FakeConn:
+        def cursor(self):
+            return _FakeCursor()
+        def close(self):
+            pass
+
+    monkeypatch.setattr(mod, "_get_pg_conn", lambda dsn: _FakeConn())
+
+    features, labels, timestamps, names = mod.load_training_data(
+        symbol="BTCUSDT", strategy_type="ma_crossover"
+    )
+
+    assert features.shape == (2, 17)
+    assert labels.tolist() == [12.5, -7.25]
+    assert timestamps.tolist() == [1_700_000_000_000, 1_700_000_060_000]
+    assert names == list(mod.EDGE_P3_FEATURE_NAMES)
+    # Row 0: complete dict → values 1..17 float32 casts
+    assert features[0, 0] == pytest.approx(1.0)
+    assert features[0, 10] == pytest.approx(11.0)  # "side" position
+    # Row 1: partial + coerced. adx_1h set, atr_pct None→0, funding_rate "notnum"→0
+    adx_idx = mod.EDGE_P3_FEATURE_NAMES.index("adx_1h")
+    atr_idx = mod.EDGE_P3_FEATURE_NAMES.index("atr_pct")
+    fund_idx = mod.EDGE_P3_FEATURE_NAMES.index("funding_rate")
+    side_idx = mod.EDGE_P3_FEATURE_NAMES.index("side")
+    assert features[1, adx_idx] == pytest.approx(42.0)
+    assert features[1, atr_idx] == pytest.approx(0.0)
+    assert features[1, fund_idx] == pytest.approx(0.0)
+    assert features[1, side_idx] == pytest.approx(-1.0)
