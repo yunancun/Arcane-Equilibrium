@@ -1,8 +1,9 @@
 # OpenClaw TODO — 工作計劃清單
 
-**最後更新：2026-04-15**（🚨 **引擎 04:03 自殺事故** — WS tick stale Fix 4 按設計 cancel，但 **watchdog daemon 從未部署** → 7h10m 空窗無人拉起，11:13 operator 手動重啟。新增 **ENGINE-HEAL-FUP-1/2/3**。**FIX-PHASE1 FUP-A/B 完成** — canary_writer warn 節流 1Hz + drop counter + 覆蓋 `TrySendError::Full` 分支單元測試。**E4-HYG-1 ✅** — `golden_extreme.rs` 漏 `trailing_activation_pct` 欄位補齊，`cargo test -p openclaw_core` 恢復 372 pass。）
+**最後更新：2026-04-15**（🚨 **引擎 04:03 自殺事故** — WS tick stale Fix 4 按設計 cancel，但 **watchdog daemon 從未部署** → 7h10m 空窗無人拉起，11:13 operator 手動重啟。新增 **ENGINE-HEAL-FUP-1/2/3**。**FIX-PHASE1 FUP-A/B 完成** — canary_writer warn 節流 1Hz + drop counter + 覆蓋 `TrySendError::Full` 分支單元測試。**E4-HYG-1 ✅** — `golden_extreme.rs` 漏 `trailing_activation_pct` 欄位補齊，`cargo test -p openclaw_core` 恢復 372 pass。**EDGE-P3-1 Phase B #1 ✅** — main.rs bootstrap 構造 `PerEnginePredictors` → 三引擎 Deps；E2 nits（debug_assert 雙注入 + Arc::clone 精簡）收尾；tract/ort backend 選型 audit 文檔化；commits `c9416d0` + `0fcf449` + `3dd845c`。）
 **測試基準線**：Rust **engine lib 1264 + core 372 + e2e 35 = 1671** · Python **2852 passed (5 skipped · 0 fail)** · ml_training **135 passed (6 skipped)**
 **EDGE-P3-1 Phase A/A6 COMPLETE** — gate 在 hot path 被諮詢 + MA/BBR/BBB 策略 confluence/persistence 經 OrderIntent 穿透至 feature_builder；產線預設 `use_edge_predictor=false` 零行為改變；commits `8c1f234` A1-A4 + `3753ede` A5 + `a23b268` A6
+**EDGE-P3-1 Phase B IN PROGRESS** — #1 bootstrap + #2 backend 選型 ✅；#3 model loader 等 Stage 2 artifact；Step 7 餘項 5 條（`DecisionFeatureSnapshot`/`ReloadEdgePredictor` IPC · Python consumers · `write_toml_atomic_fsynced` · 兩階段 commit · capabilities endpoint）可獨立前推
 
 > compact 後從此文件恢復工作狀態。第一個 `[ ]` 即為下一步起點。
 > 歷史歸檔索引在文件末尾。詳細完成度視角見 README.md。
@@ -161,12 +162,26 @@
     - **FA** ✅ spec v1.3 GREEN（commit `9141e08`）→ v1.4 reality-alignment（commit `1366054`）
     - **PA** (#25) → SQL migration V017 ✅（commit `1366054`：`learning.decision_features` + `learning.decision_shadow_fills` + `fills.entry_context_id` + index）· 待做：`parquet_etl.py` 補實現 + train 觸發器
     - **ML-MIT** (#26) → quantile LGBM + CQR + CPCV + isotonic calibration + 離線 pinball loss / decile lift（blocked by #25 ETL）
-    - **AI-E** (#27) → **Phase A COMPLETE** ✅（commits `8c1f234` A1-A4 + `3753ede` A5）：Rust `edge_predictor/` 模組骨架 + `gate.rs` pure function + `IntentProcessor` 整合 + `feature_builder.rs` 13/17 features + `to_jsonb` + `PipelineCommand::{SetEdgePredictorShadow, DisableEdgePredictorAll, EmitShadowFill}` IPC + `write_toml_atomic_fsynced` helper ✅
-    - **AI-E Phase B** (#27 後半) → A6 strategy-side features（confluence_score + persistence_elapsed_ms 從 5 策略穿透到 OrderIntent，與 FUP-8 Phase 3 OrderIntent schema 擴充合流）· tract/ort backend feature flag 選型 · Bootstrap-time model loader（Stage 2 ONNX 交付後）
-    - **CC** (#28) → 13 項必查（v1.3 CC clist）+ T1-T23 regression（blocked by #27 Phase B）
+    - **AI-E** (#27) → **Phase A COMPLETE** ✅（commits `8c1f234` A1-A4 + `3753ede` A5 + `a23b268` A6）：Rust `edge_predictor/` 模組骨架 + `gate.rs` pure function + `IntentProcessor` 整合 + `feature_builder.rs` 13/17 features + `to_jsonb` + `PipelineCommand::{SetEdgePredictorShadow, DisableEdgePredictorAll, EmitShadowFill}` IPC
+    - **AI-E Phase B** (#27 後半)：
+      - ✅ **#1 Bootstrap wire** — main.rs 構造 `PerEnginePredictors` → 三引擎 Deps + `set_edge_predictor_store` 同步 IntentProcessor + debug_assert 防雙注入（commits `c9416d0` + `0fcf449`）
+      - ✅ **#2 Backend 選型 audit** — spec §7.1 決策確認 tract-first / ort-fallback + Stage 2 precision-fail 切換 runbook（`docs/audits/2026-04-15--edge_predictor_backend_selection.md`，commit `3dd845c`）
+      - ⬜ **#3 Bootstrap-time model loader** — 掃 `settings/models/<engine>/<strategy>.onnx` 載入至 `EdgePredictorStore` 槽（blocked by ML-MIT Stage 2 首 ONNX export）
+      - ⬜ **#4 RNG seeding** — `seed_for_engine(PipelineKind) → StdRng`（僅 ε-greedy 運行時相關）
+      - ⬜ **#5 main.rs wire pipeline_cmd_tx → IntentProcessor** — 當前 `set_pipeline_command_tx` 定義但未 call → `EmitShadowFill` 全走 fail-soft 丟棄分支
+    - **AI-E Step 7 餘項**（IPC 全套，非 blocking，可獨立前推）：
+      - ⬜ **Step 7a** `DecisionFeatureSnapshot` IPC 變體 + Python consumer → `learning.decision_features`（當前 `handlers.rs:596` 有 "later stage" 占位注釋）
+      - ⬜ **Step 7b** `ReloadEdgePredictor{engine, strategy, path}` IPC + Python route（資料面，沿用 `ReloadRiskConfig` 授權）
+      - ⬜ **Step 7c** `EmitShadowFill` Python consumer → `learning.decision_shadow_fills`（DB CHECK `engine_mode='paper'`）
+      - ⬜ **Step 7d** `write_toml_atomic_fsynced()` helper 升級（U2，`config/store.rs:231-244`）+ `test_disable_all_survives_sigkill` 回歸
+      - ⬜ **Step 7e** `DisableEdgePredictorAll` 兩階段 commit（U4）+ V014 `observability.engine_events` audit row
+      - ⬜ **Step 7f** `GET /api/v1/engine/capabilities` endpoint
+    - **CC** (#28) → 13 項必查（v1.3 CC clist）+ T1-T22 regression（`edge_predictor_tests.rs` 0/22 已寫；blocked by Stage 2 artifact for T2/T7/T18）
   - **安全門檻**（不可違背）：Shadow ≥14d（#29）· pinball loss 對比常數模型 >10% 才 promote · Feature freeze time = entry 瞬間 · Per-strategy 獨立模型 · 推理失敗 fail-closed → 回退現有 shrinkage · 不觸 LinUCB · 兩階段提交防 half-enabled · macOS CI `aarch64-apple-darwin`（M1/M2/M3/M4 → M5 Ultra/Max 部署目標，見 memory `project_mac_deployment_target.md`）
-  - **Stage 0 收尾前 housekeeping**（Round-4 YELLOW-nit，非阻塞）：§7.1 加 ort macOS dylib bundling 提醒 · CC #13 加 strace Linux-only 註記
-  - **狀態**：🟢 Stage 0 **Phase A COMPLETE**（commits `1366054` FA/V017 + `8c1f234` A1-A4 + `3753ede` A5）· gate 在 hot path 被諮詢 · 產線預設 `use_edge_predictor=false` 零行為改變 · Phase B (#27 後半) + ML-MIT (#26) 可啟動
+  - **Stage 0 收尾前 housekeeping**（Round-4 YELLOW-nit，非阻塞）：§7.1 加 ort macOS dylib bundling 提醒 ✅（已入 audit）· CC #13 加 strace Linux-only 註記
+  - **狀態**：🟢 Stage 0 + Phase A COMPLETE · Phase B 2/5 完成（#1 bootstrap ✅ + #2 backend 選型 ✅）· Step 7 IPC 6 條餘項（7a~7f）可獨立前推 · Stage 2+ 全 blocked 於 PA `parquet_etl.py` 擴展 → ML-MIT 首 ONNX artifact
+  - **頭號瓶頸**：PA 的 `parquet_etl.py` feature-store 接入 + split-blend label job + 7d NULL alerter（unblock ML-MIT #26 → 訓出首個 ONNX → AI-E #3/#4 + Stage 3 Shadow mode）
+  - **次要瓶頸**：AI-E Step 7a-7f 進度為 0，但不 blocked — 可獨立拆分為 6 個獨立 session 工作項
 
 ### Phase 6 擴展
 
