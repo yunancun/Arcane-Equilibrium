@@ -284,6 +284,36 @@ impl Default for PerEnginePredictors {
     }
 }
 
+/// EDGE-P3-1 Step 7b: Load a predictor from an on-disk ONNX artifact. Today
+/// this is a stub — no backend is compiled in (both `edge_predictor_tract`
+/// and `edge_predictor_ort` feature flags are empty pending ML-MIT #26). The
+/// stub unconditionally returns `Err("onnx_loader_not_wired")` so the
+/// `ReloadEdgePredictor` IPC handler can exercise its happy and error paths
+/// without a real model file, and so `engine_capabilities.ipc_methods.
+/// reload_edge_predictor` can stay `False` honestly. When #26 lands, swap
+/// this body for the feature-flag-gated tract/ort loader and the flag flips
+/// `True` at the same time.
+/// EDGE-P3-1 Step 7b：從磁碟 ONNX artifact 載入 predictor 的存根。當前無後端
+/// 編入（tract/ort feature flag 皆空，待 ML-MIT #26）；存根回 Err，IPC handler
+/// 仍可跑通 happy/error 路徑，capability flag 誠實保持 False。#26 交付後換為
+/// feature-flag gated 的實作並同步翻 flag。
+pub fn load_predictor_from_path(
+    path: &std::path::Path,
+) -> Result<Arc<dyn EdgePredictor + Send + Sync>, String> {
+    if !path.exists() {
+        return Err(format!(
+            "onnx_loader_not_wired: path does not exist ({}) — awaiting ML-MIT #26 \
+             / 載入器未接線：路徑不存在，待 ML-MIT #26",
+            path.display()
+        ));
+    }
+    Err(format!(
+        "onnx_loader_not_wired: awaiting ML-MIT #26 first ONNX artifact \
+         (path={}) / 載入器未接線，待 ML-MIT #26 首個 ONNX artifact",
+        path.display()
+    ))
+}
+
 /// Helper — current unix epoch seconds (used by backends to compute age).
 /// 工具函數 — 當前 unix epoch 秒數（後端計算 age 用）。
 pub(crate) fn now_unix_seconds() -> u64 {

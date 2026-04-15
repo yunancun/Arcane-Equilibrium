@@ -59,7 +59,9 @@ _EDGE_P3_IPC_SUPPORT: dict[str, bool] = {
     "fsynced_toml_write": True,
     # Step 7e — DisableEdgePredictorAll two-phase commit + V014 audit
     "disable_edge_predictor_all": True,
-    # Step 7b — ReloadEdgePredictor{engine, strategy, path} IPC (pending)
+    # Step 7b — ReloadEdgePredictor IPC protocol wired (plumbing); capability
+    # flag stays False until ML-MIT #26 replaces the stub loader (returns
+    # Err("onnx_loader_not_wired") today) with the real tract/ort backend.
     "reload_edge_predictor": False,
     # Step 7c — EmitShadowFill → learning.decision_shadow_fills writer wired
     "emit_shadow_fill": True,

@@ -192,6 +192,62 @@ fn disable_edge_predictor_all_impl(
     let _ = response_tx.send(Ok(msg));
 }
 
+/// EDGE-P3-1 Step 7b · Plumbing-only reload handler. Validates the engine
+/// whitelist, calls the stub loader (which always Errs pending ML-MIT #26),
+/// and — only if the loader succeeds — swaps the returned predictor into the
+/// per-engine `EdgePredictorStore`. Split out of the match arm so unit tests
+/// can exercise the validation + stub behaviour without threading an entire
+/// `TickPipeline` through a oneshot-send harness.
+/// EDGE-P3-1 Step 7b · Plumbing 專用 handler：engine 白名單驗證 → 呼叫存根 loader
+/// → 成功才熱換。拆出函式以便單元測試免 oneshot 迴圈即可驗行為。
+pub(crate) fn handle_reload_edge_predictor(
+    engine: &str,
+    strategy: &str,
+    path: &std::path::Path,
+    pipeline: &mut TickPipeline,
+) -> Result<String, String> {
+    // Whitelist check — cheap + catches IPC-layer misrouting before we touch
+    // the filesystem. Trimmed string match so whitespace-padded strings don't
+    // pass silently (Python proxy could send stray \n when shelling out).
+    // 白名單檢查（trim 避 Python proxy 殘留換行）。
+    match engine.trim() {
+        "paper" | "demo" | "live" => {}
+        other => {
+            return Err(format!(
+                "invalid engine '{}' — must be paper|demo|live \
+                 / engine 需為 paper|demo|live",
+                other
+            ));
+        }
+    }
+
+    // Require a store before we even try to load — if bootstrap hasn't wired
+    // one, a successful load would swap into /dev/null.
+    // 未接線 store 則直接拒，避免 loader 成功卻熱換進空引用。
+    let store = pipeline.edge_predictor_store().ok_or_else(|| {
+        "EdgePredictorStore not wired on this engine — check main.rs \
+         set_edge_predictor_store() / 此引擎尚未注入 EdgePredictorStore"
+            .to_string()
+    })?;
+
+    // Stub loader today — unconditional Err until ML-MIT #26. We still go
+    // through the call so the error shape is exercised end-to-end.
+    // 今日存根：loader 恆返 Err，整條錯誤路徑仍被走過。
+    let predictor = crate::edge_predictor::load_predictor_from_path(path)?;
+    store.swap(strategy, predictor);
+
+    tracing::info!(
+        engine = %engine, strategy = %strategy, path = %path.display(),
+        "EdgePredictor reloaded from disk / 已從磁碟熱換預測器"
+    );
+    Ok(format!(
+        "reloaded predictor for {} on {} from {}",
+        strategy,
+        engine,
+        path.display()
+    ))
+}
+
 /// EDGE-P3-1 Step 7e · Production entry point for the operator kill-switch,
 /// called from `event_consumer::mod.rs` after intercepting the variant.
 /// EDGE-P3-1 Step 7e：mod.rs 攔截後的生產入口。
@@ -773,6 +829,25 @@ pub fn handle_paper_command(
                      set_edge_predictor_store() / 此引擎尚未注入 EdgePredictorStore".into(),
                 ),
             };
+            let _ = response_tx.send(result);
+        }
+        // EDGE-P3-1 Step 7b · Reload a predictor from an on-disk ONNX artifact.
+        // Plumbing-only today: `load_predictor_from_path` is a stub that returns
+        // Err("onnx_loader_not_wired") so the protocol shape is pinned but the
+        // store is never actually mutated until ML-MIT #26 ships a real loader.
+        // Defence-in-depth: validate `engine` against paper/demo/live whitelist
+        // (primary routing lives in the IPC dispatcher; any misroute to a wrong
+        // pipeline is a bug we'd rather see surface as an explicit Err here than
+        // silently swap a predictor on the wrong engine).
+        // EDGE-P3-1 Step 7b · 從磁碟熱重載 predictor；當前為 plumbing，loader 為存根。
+        // engine 作白名單二次防禦。
+        PipelineCommand::ReloadEdgePredictor {
+            engine,
+            strategy,
+            path,
+            response_tx,
+        } => {
+            let result = handle_reload_edge_predictor(&engine, &strategy, &path, pipeline);
             let _ = response_tx.send(result);
         }
         // EDGE-P3-1 Stage 0 · Operator kill-switch: clear every loaded model
@@ -1491,5 +1566,91 @@ mod tests {
         );
         // No writer wired → fail-soft log path; no panic.
         // 未接 writer → fail-soft log 分支，不 panic。
+    }
+
+    // ── Step 7b ReloadEdgePredictor plumbing tests ─────────────────────────
+    // ── Step 7b ReloadEdgePredictor 骨架測試 ───────────────────────────────
+
+    /// EN: Invalid engine name is rejected before touching the filesystem.
+    /// 中文: 非法 engine 名在碰磁碟前即拒。
+    #[test]
+    fn test_reload_edge_predictor_rejects_unknown_engine() {
+        let mut pipeline = TickPipeline::new(&["BTCUSDT"]);
+        let out = super::handle_reload_edge_predictor(
+            "mainnet",
+            "ma_crossover",
+            std::path::Path::new("/nonexistent"),
+            &mut pipeline,
+        );
+        assert!(out.is_err());
+        assert!(out.unwrap_err().contains("invalid engine"));
+    }
+
+    /// EN: Without a wired EdgePredictorStore, the handler errs before the
+    /// stub loader runs — prevents silent success with no hot-swap target.
+    /// 中文: 未注入 store 則在 loader 前即拒，避免熱換進空引用。
+    #[test]
+    fn test_reload_edge_predictor_requires_store() {
+        let mut pipeline = TickPipeline::new(&["BTCUSDT"]);
+        let out = super::handle_reload_edge_predictor(
+            "paper",
+            "ma_crossover",
+            std::path::Path::new("/nonexistent"),
+            &mut pipeline,
+        );
+        assert!(out.is_err());
+        assert!(out.unwrap_err().contains("EdgePredictorStore not wired"));
+    }
+
+    /// EN: With a store wired, the stub loader returns `onnx_loader_not_wired`
+    /// and the handler surfaces that error unchanged — the protocol shape is
+    /// pinned but no predictor actually swaps until ML-MIT #26 lands.
+    /// 中文: 接了 store 後 stub loader 回 onnx_loader_not_wired，handler 透傳錯誤；
+    /// 協定形狀已定，實際熱換等 ML-MIT #26。
+    #[test]
+    fn test_reload_edge_predictor_stub_loader_errs() {
+        let mut pipeline = TickPipeline::new(&["BTCUSDT"]);
+        let store = std::sync::Arc::new(crate::edge_predictor::EdgePredictorStore::new());
+        pipeline.set_edge_predictor_store(store.clone());
+        // Use a temp file that DOES exist so we pass the first branch and hit
+        // the permanent "awaiting ML-MIT #26" error — confirms we traverse the
+        // full loader path, not just the path-missing early-return.
+        // 用實存檔走完整 loader 路徑，命中 "awaiting ML-MIT #26" 錯誤。
+        let tmp = tempfile::NamedTempFile::new().expect("tempfile");
+        let out = super::handle_reload_edge_predictor(
+            "paper",
+            "ma_crossover",
+            tmp.path(),
+            &mut pipeline,
+        );
+        assert!(out.is_err());
+        let err = out.unwrap_err();
+        assert!(err.contains("onnx_loader_not_wired"), "got: {err}");
+        assert!(err.contains("ML-MIT #26"), "got: {err}");
+        // Confirm nothing got registered into the store.
+        // 確認 store 未被寫入。
+        assert_eq!(store.loaded_count(), 0);
+    }
+
+    /// EN: Engine whitelist trims whitespace so stray \n from a Python proxy
+    /// doesn't fall through to the unknown-engine branch.
+    /// 中文: engine 白名單 trim 空白，避 Python proxy 換行誤判。
+    #[test]
+    fn test_reload_edge_predictor_trims_engine_name() {
+        let mut pipeline = TickPipeline::new(&["BTCUSDT"]);
+        let store = std::sync::Arc::new(crate::edge_predictor::EdgePredictorStore::new());
+        pipeline.set_edge_predictor_store(store);
+        let tmp = tempfile::NamedTempFile::new().expect("tempfile");
+        let out = super::handle_reload_edge_predictor(
+            "  paper\n",
+            "ma_crossover",
+            tmp.path(),
+            &mut pipeline,
+        );
+        // Whitelist passes → loader stub → err with ML-MIT #26 (not "invalid engine").
+        // 白名單通過 → loader 存根 → 錯誤含 ML-MIT #26（非 invalid engine）。
+        let err = out.unwrap_err();
+        assert!(err.contains("ML-MIT #26"), "got: {err}");
+        assert!(!err.contains("invalid engine"), "trim failed: {err}");
     }
 }
