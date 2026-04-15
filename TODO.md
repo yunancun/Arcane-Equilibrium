@@ -13,11 +13,11 @@
 
 | # | 項目 | 預估 | 阻塞者 | 解鎖 |
 |---|------|------|-------|------|
-| **1** | 🚨 **ENGINE-HEAL-FUP-1 watchdog daemon 化** — 今日事故根因：Fix 2 的 Python watchdog 從未以 daemon 模式常駐（`restart_all.sh:187` 只用 `--status` 一次性），04:03 Fix 4 self-cancel 後 7h10m 無人拉起。需 systemd user unit 或 `restart_all.sh` nohup 常駐 + log rotation | 1-2 h | — | LG-1 可觀察、任何自救機制 |
+| ~~**1**~~ | ✅ **ENGINE-HEAL-FUP-1 watchdog daemon 化** — 2026-04-15 11:31 已 nohup 起 PID 592881，`/tmp/openclaw/watchdog.log` 開始落字。**留尾**：仍是手動 nohup（不會跨重啟存活）；正式 systemd user unit 或 `restart_all.sh` 整合留待 W22 收尾 | done | — | ✅ |
 | **2** | 🔍 **ENGINE-HEAL-FUP-2 live pipeline lagging 根因調查** — 04:15Z (02:00:33 UTC=04:00 CEST) 一秒內湧出 **8,445 條** `fan-out: live pipeline lagging, tick dropped` → 135s 後 Fix 4 認定 WS 陳舊自殺。live 消費者 stall / DB back-pressure / tokio worker 耗盡？是**觸發 Fix 4 的真正上游根因** | 1-2 d | — | LG-1 穩定性，否則 self-cancel 會重演 |
 | **3** | 🗑️ **ENGINE-HEAL-FUP-3 engine_results.jsonl rotation** — 檔案已長到 **111 GB** 且仍以每 2 分鐘 +35MB 速率增長（每 tick 寫 2-3KB canary schema JSON）。磁盤仍有 1.1T 可用未爆但不可持續；需加 rotation / sampling / 或 canary 關閉旗標 | 30 m - 1 h | — | 磁盤可持續性 |
-| **4** | 🧪 **G-2 FundingArb 驗證重啟** — manual entry 1 → paper_state 有倉 → IPC close → DB 出現 close fill with realized_pnl；再累積 ≥20 乾淨 fills 分析 edge | 2-3 d | #1 | Phase 5 歸因量化確認 · LG-1 觀察期起點 |
-| **5** | 🕰️ **LG-1 Paper Trading 21d** — EDGE-P0/P1 + FA-PHANTOM-1 + FUP-8 部署後啟動正式觀察期；不再綁定 05-01 | 3 w | #1, #2, #4 | Live Gate · LG-2/3 |
+| **4** | 🧪 **G-2 FundingArb 驗證** — Step 4.1 ✅ 路徑全鏈路驗證（strategy_exit + ipc_close 都帶 realized_pnl 入 DB）。Step 4.3 ⏳ **後台 daemon PID 598572 監控中**（`/tmp/openclaw/g2_monitor.{py,log,pid,progress.json}`），達 demo ≥20 strategy_exit fills 自動寫 `docs/audits/2026-04-15--g2_funding_arb_clean_edge.md`。**operator/Claude 接手先 `cat /tmp/openclaw/g2_monitor.progress.json`** | ~17h ETA | — | Phase 5 歸因量化確認 · LG-1 觀察期起點 |
+| **5** | 🕰️ **LG-1 Paper Trading 21d** — EDGE-P0/P1 + FA-PHANTOM-1 + FUP-8 部署後啟動正式觀察期；不再綁定 05-01 | 3 w | #2, #4 | Live Gate · LG-2/3 |
 | **6** | 📊 **Phase 5 策略 Edge 2w 重評** — 乾淨 paper 2w 後重算 per-strategy gross edge。若翻正 → Phase 5 cost_gate 工作重啟；若仍負 → 策略本身需重做（EDGE-P2/P3） | 2 w | #4 | Phase 5 restart / rebuild 決策 |
 
 ---
@@ -32,7 +32,7 @@
 | W24 | 05-19~23 | **LG-4/5 Live Gate**（M/N 章）· SEC-21 · QoL-2 | ⬜ |
 | W25+ | 05-26+ | **EDGE-P3-1 Realized Edge Predictor** · Phase 5 補強或重做 · R-06 全 5 agent | ⬜ |
 
-**關鍵路徑**：`FUP-1 watchdog daemon 化 → FUP-2 上游 stall 根因 → G-2 驗證 → LG-1 21d → LG-4/5 → Live`
+**關鍵路徑**：`~~FUP-1 watchdog daemon 化~~ ✅ → FUP-2 上游 stall 根因 → G-2 驗證 (daemon 監控中) → LG-1 21d → LG-4/5 → Live`
 **最早 Live 日期**：視 FUP-1/2 收尾速度 + LG-1 乾淨觀察期起點。樂觀估 **W24 末**（～2026-05-23），若 FUP-2 調查拖長則延 W25-26。
 
 ---

@@ -183,6 +183,7 @@ grep -c "ENGINE_CRASH" /tmp/openclaw/watchdog.log 2>/dev/null || echo "0 crashes
 
 ### 強制同步規則
 - **Sprint/Wave 完成**：更新 §三 + §十一 + `docs/CLAUDE_CHANGELOG.md` + README，與生產代碼同 commit
+- **§三 衛生規則（強制）**：§三 只記載「現況/活躍狀態」+「過去 ≤2 天的完成里程碑」。**任何完成里程碑當天 +2 日（以 `currentDate` 為準）必須在 commit 同次操作中歸檔到 `docs/archive/YYYY-MM-DD--claude_md_section3_*.md`** 並從 §三 刪除，僅在「已完成里程碑索引」表保留 1 行條目。違反 = §三 膨脹回 ~10K tokens、context 提早撞 compact。
 - **Commit 時**：摘要追加到 `docs/CLAUDE_CHANGELOG.md` 頂部，格式 `### 標題（YYYY-MM-DD · commit XXXXXXX）`
 - **Context ≥90%**：立即寫 `docs/worklogs/YYYY-MM-DD--session_progress_N.md`（已完成/進行中/未完成/決策/下一步）
 - **每日整合**：當天 worklog 碎片合併為 `YYYY-MM-DD--daily_summary.md`，刪碎片
@@ -267,4 +268,4 @@ state_models ← state_compiler ← state_store ← main_legacy ← main.py
 
 ## 十一、一句話狀態
 
-> 截至 2026-04-14：tests engine lib **1144** + core **366** + e2e **33** = **1543** Rust passed **0 fail** · Python **2852** passed · **ENGINE-HEAL 4 Fix ✅**（panic hook + crash-only + ws stale self-cancel + watchdog 4 道保險，operator 需 `restart_all.sh --rebuild` 部署）· **WP-F/UX-07~10 ✅** · **QoL-1/3 ✅** · **ORPHAN-ADOPT-1 Phase 1 ✅** · **OC-5 FundingArb COMPLETE ✅** · **G-SR-1 COMPLETE ✅** · **Edge 數據隔離 ✅** · **Phase 5 PAUSED** · **Live_Ready ✅** · **下一步**：ENGINE-HEAL 部署 + canary 實戰 · G-2 FundingArb 驗證（窗口中，≥20 fills 觸發分析）· LG-1 21d paper 到期（05-01）· Phase 2 Adopt 等 G-1 R-02 Strategist。
+> 截至 2026-04-15：tests engine lib **1257** + core **372** + e2e **35** = **1664** Rust passed **0 fail** · Python **2852** passed · **ENGINE-HEAL 4 Fix ✅** + 已部署（11:13 rebuild + restart）· **engine_watchdog daemon ✅** PID 592881 nohup 起（FUP-1 解除）· **G-2 FundingArb 監控 daemon ACTIVE** PID 598572，等 demo ≥20 fills 自動寫 `docs/audits/2026-04-15--g2_funding_arb_clean_edge.md`（接手先 `cat /tmp/openclaw/g2_monitor.progress.json`）· **EDGE-P3-1 Phase A/A5/A6 ✅**（隔壁 session 4 commits, 待 push origin）· **WP-F/UX-07~10 / QoL-1/3 / ORPHAN-ADOPT-1 P1 / OC-5 FundingArb / G-SR-1 / Edge 隔離 ✅** · **Phase 5 PAUSED** · **Live_Ready ✅** · **下一步**：G-2 daemon 完成（~17h ETA）→ audit → 升 R-02 · LG-1 21d · Phase 2 Adopt 等 G-1 R-02 Strategist · ENGINE-HEAL-FUP-2/3 排隊。
