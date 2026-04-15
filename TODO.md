@@ -14,8 +14,8 @@
 | # | 項目 | 預估 | 阻塞者 | 解鎖 |
 |---|------|------|-------|------|
 | ~~**1**~~ | ✅ **ENGINE-HEAL-FUP-1 watchdog daemon 化** — 2026-04-15 11:31 已 nohup 起 PID 592881，`/tmp/openclaw/watchdog.log` 開始落字。**留尾**：仍是手動 nohup（不會跨重啟存活）；正式 systemd user unit 或 `restart_all.sh` 整合留待 W22 收尾 | done | — | ✅ |
-| **2** | 🔍 **ENGINE-HEAL-FUP-2 live pipeline lagging 根因調查** — 04:15Z (02:00:33 UTC=04:00 CEST) 一秒內湧出 **8,445 條** `fan-out: live pipeline lagging, tick dropped` → 135s 後 Fix 4 認定 WS 陳舊自殺。live 消費者 stall / DB back-pressure / tokio worker 耗盡？是**觸發 Fix 4 的真正上游根因** | 1-2 d | — | LG-1 穩定性，否則 self-cancel 會重演 |
-| **3** | 🗑️ **ENGINE-HEAL-FUP-3 engine_results.jsonl rotation** — 檔案已長到 **111 GB** 且仍以每 2 分鐘 +35MB 速率增長（每 tick 寫 2-3KB canary schema JSON）。磁盤仍有 1.1T 可用未爆但不可持續；需加 rotation / sampling / 或 canary 關閉旗標 | 30 m - 1 h | — | 磁盤可持續性 |
+| ~~**2**~~ | ✅ **ENGINE-HEAL-FUP-2 根因調查完成** — 2026-04-15：實為 **2h 內 15+ 波段累積壓力**（非一秒 8,445 噴發），主因 = canary JSONL 同步寫盤在 live event loop 熱路徑上 + live channel 512 偏小。詳 `docs/worklogs/2026-04-15--engine_2000_stall_postmortem.md` | done | — | ✅ |
+| **3** | 🛠️ **ENGINE-HEAL-FIX-PHASE1** — 合併 FUP-2 修復（R1 canary 寫盤改 bounded mpsc → blocking 任務 / BufWriter；R2 live channel 512→1024 對稱化）**+** FUP-3（`OPENCLAW_DISABLE_CANARY_DUMP=1` 旗標 + size-based rotation）單 PR。驗收：24h 零 `live pipeline lagging`；canary dump ≤5GB/24h | 半-1 天 | — | LG-1 穩定性；避免 self-cancel 重演 |
 | **4** | 🧪 **G-2 FundingArb 驗證** — Step 4.1 ✅ 路徑全鏈路驗證（strategy_exit + ipc_close 都帶 realized_pnl 入 DB）。Step 4.3 ⏳ **後台 daemon PID 598572 監控中**（`/tmp/openclaw/g2_monitor.{py,log,pid,progress.json}`），達 demo ≥20 strategy_exit fills 自動寫 `docs/audits/2026-04-15--g2_funding_arb_clean_edge.md`。**operator/Claude 接手先 `cat /tmp/openclaw/g2_monitor.progress.json`** | ~17h ETA | — | Phase 5 歸因量化確認 · LG-1 觀察期起點 |
 | **5** | 🕰️ **LG-1 Paper Trading 21d** — EDGE-P0/P1 + FA-PHANTOM-1 + FUP-8 部署後啟動正式觀察期；不再綁定 05-01 | 3 w | #2, #4 | Live Gate · LG-2/3 |
 | **6** | 📊 **Phase 5 策略 Edge 2w 重評** — 乾淨 paper 2w 後重算 per-strategy gross edge。若翻正 → Phase 5 cost_gate 工作重啟；若仍負 → 策略本身需重做（EDGE-P2/P3） | 2 w | #4 | Phase 5 restart / rebuild 決策 |
@@ -32,8 +32,8 @@
 | W24 | 05-19~23 | **LG-4/5 Live Gate**（M/N 章）· SEC-21 · QoL-2 | ⬜ |
 | W25+ | 05-26+ | **EDGE-P3-1 Realized Edge Predictor** · Phase 5 補強或重做 · R-06 全 5 agent | ⬜ |
 
-**關鍵路徑**：`~~FUP-1 watchdog daemon 化~~ ✅ → FUP-2 上游 stall 根因 → G-2 驗證 (daemon 監控中) → LG-1 21d → LG-4/5 → Live`
-**最早 Live 日期**：視 FUP-1/2 收尾速度 + LG-1 乾淨觀察期起點。樂觀估 **W24 末**（～2026-05-23），若 FUP-2 調查拖長則延 W25-26。
+**關鍵路徑**：`~~FUP-1 watchdog daemon 化~~ ✅ → ~~FUP-2 根因調查~~ ✅ → FIX-PHASE1 合併 (R1+R2+FUP-3) → G-2 驗證 (daemon 監控中) → LG-1 21d → LG-4/5 → Live`
+**最早 Live 日期**：視 FIX-PHASE1 + LG-1 乾淨觀察期起點。樂觀估 **W24 末**（～2026-05-23）。
 
 ---
 
@@ -43,7 +43,7 @@
 
 **時間線**：
 - 2026-04-14 23:56:35 UTC 引擎啟動（PID 未存檔；rotated log `engine-1776244436.log`）
-- 2026-04-15 02:00:33 UTC（04:00:33 CEST）`fan-out: live pipeline lagging, tick dropped` **8,445 條** 一秒內噴發
+- 2026-04-15 00:04:55 UTC — 首波 `fan-out: live pipeline lagging, tick dropped`（3,474 條在該分鐘內）— 後續 ~2h 內 15+ 波段共 8,446 條（TODO 原敘述「02:00:33 一秒 8,445 條」為誤讀，實際 02:00 波段只 464 條）
 - 2026-04-15 02:03:05.327 UTC（04:03 CEST）`ERROR WS tick stale — triggering engine cancel (Fix 4) stale_ms=135201 threshold_ms=120000` → 優雅關閉（10 倉位市價平、event consumer 存盤 ticks=1,753,274 fills=382 balance=530.01）
 - 04:03 → 11:13 **空窗 7h10m**（watchdog daemon 不存在 → 無重啟）
 - 2026-04-15 09:13:56 UTC（11:13 CEST）operator 手動拉起 PID 577219（parent=init，非從 shell 啟動）
@@ -51,8 +51,8 @@
 **事實**：
 - ✅ Fix 4 WS tick stale self-cancel **按設計觸發**（stale_ms > threshold_ms）
 - ❌ Fix 2 Python watchdog **從未以 daemon 模式部署**：`restart_all.sh:187` 只跑 `engine_watchdog.py --status` 一次性檢查；`/tmp/openclaw/watchdog.log` 和 `canary_events.jsonl` 根本不存在；systemd 僅 `openclaw-gateway.service`；crontab 空
-- ⚠️ 觸發 Fix 4 的**真正上游根因未查**：live pipeline 消費者 stall / tokio worker 耗盡 / DB back-pressure 都可能
-- 🗑️ `/tmp/openclaw/engine_results.jsonl` 111 GB 並仍在增長（canary schema 每 tick 2-3KB）
+- ✅ **Fix 4 上游根因已查明**（2026-04-15 post-mortem）：live event loop 的 `event_rx.recv()` select arm 在每 tick 同步 `writeln!` 到 canary JSONL（raw `std::fs::File`，無 buffer），~280 ticks/sec × 2.5KB × canary 檔案已 100GB+ 的 FS 壓力週期性卡住 consumer；加上 live fan-out channel 512 偏小（paper/demo 1024）。115s consumer 拉不到新 tick → Fix 4 越過 120s 閾值
+- 🗑️ `/tmp/openclaw/engine_results.jsonl` 111 GB 並仍在增長（canary schema 每 tick 2-3KB）— FUP-3 同時解
 
 - [ ] **ENGINE-HEAL-FUP-1** 🚨 watchdog daemon 化（Action #1）
   - 方案 A：加 systemd user unit `openclaw-watchdog.service`（+ `Restart=always` + log 到 `/tmp/openclaw/watchdog.log`）
@@ -60,14 +60,19 @@
   - E2 必查：watchdog 本身也要有 `fcntl.flock` 單例 + 退避機制（已在 `engine_watchdog.py` 內，確認即可）
   - 驗證：kill -9 engine → watchdog 偵測到 → 寫 `watchdog.log` → 執行 `restart_all.sh --engine-only` → 引擎復活
 
-- [ ] **ENGINE-HEAL-FUP-2** 🔍 live pipeline lagging 根因（Action #2）
-  - 8,445 條 WARN 在 **同一秒** 噴發 → channel 瞬間塞爆 → 符合「消費端卡住超過 1-2s 的所有累積 ticks 一次丟光」
-  - 調查方向：
-    1. Live 消費者是否在等 `trading_writer` / `market_writer` flush？DB 慢查詢？
-    2. Live pipeline 獨立 OS thread（3E-ARCH D17）是否死鎖 / OOM / await 饑餓？
-    3. 當時是否有 IPC 寫入暴風（patch_risk_config / scanner update）？
-    4. `fan-out` 的 bounded channel 容量設多少？capacity 觸發與 WS tick stale 120s 閾值是否匹配？
-  - 產出：worklog `docs/worklogs/2026-04-15--engine_2000_stall_postmortem.md` + 修復方案（若找到）
+- [x] **ENGINE-HEAL-FUP-2** 🔍 live pipeline lagging 根因 — **調查完成 2026-04-15**
+  - **TODO 敘述更正**：**不是** 8,445 條一秒噴發，而是 **~2h 內 15+ 波段** 共 8,446 條（首波 00:04:55 UTC，共 3,474 條；末波 02:00 共 464 條）；Fix 4 是累積壓力最終讓 consumer 120s 拉不到 tick 觸發
+  - **根因**（詳 `docs/worklogs/2026-04-15--engine_2000_stall_postmortem.md`）：
+    1. **主因**：canary JSONL 在 `event_consumer/mod.rs:890-896` 以**無 buffer 的 `std::fs::File` + `writeln!`** 在 `event_rx.recv()` select arm 裡**同步寫盤**；live ~280 ticks/sec × 2.5KB JSON = ~700KB/sec 同步 syscall，配上 canary 檔案已長到 100GB+ 的 FS cache 壓力，consumer loop 週期性被 I/O 卡住
+    2. **加劇**：live fan-out channel **512** vs paper/demo **1024**（無設計理由）→ 飽和時間減半
+    3. **非因**：337 條 `fills flush failed`（V017 schema 未 apply）與 lagging 併發但不相關，`flush_fills` 於錯誤後 `buf.clear()` 不 back-pressure
+  - **修復計劃**（Phase 1 單 PR，R1+R2+FUP-3 一起）：
+    - **R1** canary 寫盤移出 event loop（bounded mpsc → 獨立 blocking 任務 / `BufWriter`；最大影響項）
+    - **R2** live channel 512 → 1024 對稱化（`main.rs:736`，1 行）
+    - **FUP-3** env flag `OPENCLAW_DISABLE_CANARY_DUMP=1` + size-based rotation
+    - 驗收：24h 零 `live pipeline lagging` WARN；canary dump ≤5GB/24h（或 0 if flag 開）
+    - R3/R4 延後到 R1+R2 入產後再看 telemetry 決定
+  - ✅ 產出 worklog
 
 - [ ] **ENGINE-HEAL-FUP-3** 🗑️ engine_results.jsonl rotation / 關閉（Action #3）
   - 現況：無 rotation，無上限，canary_comparator.py 才需要此 dump
