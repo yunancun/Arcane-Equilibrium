@@ -46,6 +46,7 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
         bybit_balance: shared_bybit_balance,
         api_pnl: shared_api_pnl,
         pipeline_cmd_rx,
+        pipeline_cmd_tx,
         market_data_tx,
         feature_tx,
         last_tick_ms: shared_last_tick_ms,
@@ -102,6 +103,18 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
     // 行為；Some 時 TickPipeline IPC 端與 IntentProcessor gate 端共享同一 Arc。
     if let Some(store) = edge_predictor_store {
         pipeline.set_edge_predictor_store(store);
+    }
+
+    // EDGE-P3-1 #62: Wire the PipelineCommand sender into IntentProcessor so the
+    // predictor gate's ε-greedy branch can publish `EmitShadowFill` IPC messages
+    // back through the same channel the event consumer dispatcher drains. With
+    // tx=None the gate hits a fail-soft drop branch and all shadow fills are
+    // silently lost — breaking Stage 4 paper-only exploration data collection.
+    // EDGE-P3-1 #62：把 PipelineCommand 發送端塞給 IntentProcessor，使 predictor
+    // gate 的 ε-greedy 分支能發出 `EmitShadowFill` 經事件消費者 dispatcher 回流。
+    // 不接線 → shadow fill 走 fail-soft 丟棄分支，Stage 4 paper 探索資料全失。
+    if let Some(tx) = pipeline_cmd_tx {
+        pipeline.set_shadow_fill_tx(tx);
     }
 
     // QoL-1: Restore cumulative paper_state counters from trading.fills before

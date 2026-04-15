@@ -878,6 +878,12 @@ async fn async_main(
         bybit_balance: None,
         api_pnl: None,
         pipeline_cmd_rx: Some(paper_cmd_rx),
+        // EDGE-P3-1 #62: clone paper_cmd_tx for IntentProcessor's EmitShadowFill
+        // dispatch. Paper is the only engine that can fire ε-greedy shadow
+        // fills (pipeline_kind guard inside IntentProcessor), so this is the
+        // one that matters; Demo/Live get their own sender for symmetry.
+        // EDGE-P3-1 #62：clone paper_cmd_tx 給 IntentProcessor 發 EmitShadowFill。
+        pipeline_cmd_tx: Some(paper_cmd_tx.clone()),
         market_data_tx: market_tx,
         feature_tx,
         last_tick_ms: Some(Arc::clone(&shared_last_tick_ms)),
@@ -942,6 +948,7 @@ async fn async_main(
             bybit_balance: Some(demo_b.ws_bindings.bybit_balance),
             api_pnl: Some(demo_b.ws_bindings.api_pnl),
             pipeline_cmd_rx: demo_cmd_rx,
+            pipeline_cmd_tx: demo_cmd_tx.as_ref().cloned(),
             // D19: Demo does not write market/feature DB (Paper handles that).
             market_data_tx: None,
             feature_tx: None,
@@ -1006,6 +1013,7 @@ async fn async_main(
             bybit_balance: Some(live_b.ws_bindings.bybit_balance),
             api_pnl: Some(live_b.ws_bindings.api_pnl),
             pipeline_cmd_rx: live_cmd_rx,
+            pipeline_cmd_tx: live_cmd_tx.as_ref().cloned(),
             // D19: Live does not write market/feature DB.
             market_data_tx: None,
             feature_tx: None,
