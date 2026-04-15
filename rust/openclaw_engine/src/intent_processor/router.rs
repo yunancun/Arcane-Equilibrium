@@ -4,15 +4,36 @@
 use super::*;
 
 impl IntentProcessor {
-    /// Process a single intent through the full governance pipeline.
-    /// 通過完整治理管線處理單個意圖。
+    /// Process a single intent through the full governance pipeline (no edge-predictor features).
+    /// Legacy entry-point retained for callers that do not yet compute FeatureVectorV1.
+    /// Delegates to `process_with_features(None, ...)`.
+    /// 通過完整治理管線處理單個意圖（舊 entry-point，無 ML features）。
     pub fn process(
         &self,
         intent: &OrderIntent,
         governance: &GovernanceCore,
         paper_state: &PaperState,
         atr: f64,
+        profile: GovernanceProfile,
+    ) -> IntentResult {
+        self.process_with_features(intent, governance, paper_state, atr, profile, None, None, 0)
+    }
+
+    /// EDGE-P3-1 A4: Extended `process()` carrying optional ML features + DCS
+    /// context_id + wall-clock ms. When `features=None` OR `cfg.use_edge_predictor=false`
+    /// OR no predictor store is wired, behaves identically to the legacy path.
+    /// EDGE-P3-1 A4：帶可選 ML features 與 DCS context_id 的 process()。
+    /// features=None / use_edge_predictor=false / 無 store 時行為等同舊路徑。
+    pub fn process_with_features(
+        &self,
+        intent: &OrderIntent,
+        governance: &GovernanceCore,
+        paper_state: &PaperState,
+        atr: f64,
         _profile: GovernanceProfile,
+        features: Option<&FeatureVectorV1>,
+        context_id: Option<&str>,
+        now_ms: u64,
     ) -> IntentResult {
         // Gate 1: Governance authorization check (fail-closed)
         if !governance.is_authorized() {
@@ -242,9 +263,32 @@ impl IntentProcessor {
                 };
             }
             let volume_24h = paper_state.latest_turnover(&intent.symbol).unwrap_or(0.0);
-            if let Some(r) = self.cost_gate_paper(&intent.strategy, &intent.symbol,
-                                                   atr, intent.confidence, final_qty, price, volume_24h) {
-                return IntentResult { verdict_info: vi.take(), ..r };
+
+            // ─── Gate 3a · EDGE-P3-1 A4: ML edge-predictor gate (spec §7.3) ───
+            // Runs ahead of JS shrinkage. No-op when features=None / predictor disabled.
+            // EDGE-P3-1 A4：ML 預測器 gate。features=None 或 predictor 禁用時為 no-op。
+            let cost_bps = 2.0 * (self.fee_rate(&intent.symbol) + lookup_slippage(volume_24h)) * 10_000.0;
+            let ctx_id = context_id.unwrap_or("");
+            match self.evaluate_predictor_gate(intent, paper_state, features, ctx_id, now_ms, cost_bps) {
+                PredictorAction::Reject(reason) => {
+                    return IntentResult {
+                        submitted: false,
+                        rejected_reason: Some(reason),
+                        fill: None,
+                        verdict_info: vi.take(),
+                        approved_qty: 0.0,
+                    };
+                }
+                PredictorAction::SkipLegacyGate => {
+                    // Predictor accepted; skip JS shrinkage fall-through.
+                    // Predictor 接受；跳過 JS shrinkage 回退檢查。
+                }
+                PredictorAction::UseLegacyGate => {
+                    if let Some(r) = self.cost_gate_paper(&intent.strategy, &intent.symbol,
+                                                           atr, intent.confidence, final_qty, price, volume_24h) {
+                        return IntentResult { verdict_info: vi.take(), ..r };
+                    }
+                }
             }
         }
 
@@ -275,9 +319,8 @@ impl IntentProcessor {
         }
     }
 
-    /// EXT-1: Process intent through governance gates only (no simulated execution).
-    /// Returns ExchangeGateResult with approved_qty for exchange-mode order dispatch.
-    /// EXT-1：僅通過治理門禁處理意圖（不模擬執行）。
+    /// EXT-1: Legacy gates-only entry. Delegates to `process_gates_only_with_features(None, ...)`.
+    /// EXT-1：舊 gates-only entry-point，delegate 到 with-features 版本（無 ML features）。
     pub fn process_gates_only(
         &self,
         intent: &OrderIntent,
@@ -285,6 +328,24 @@ impl IntentProcessor {
         paper_state: &PaperState,
         atr: f64,
         profile: GovernanceProfile,
+    ) -> ExchangeGateResult {
+        self.process_gates_only_with_features(
+            intent, governance, paper_state, atr, profile, None, None, 0,
+        )
+    }
+
+    /// EDGE-P3-1 A4: Extended `process_gates_only` carrying optional ML features.
+    /// EDGE-P3-1 A4：帶可選 ML features 的 process_gates_only。
+    pub fn process_gates_only_with_features(
+        &self,
+        intent: &OrderIntent,
+        governance: &GovernanceCore,
+        paper_state: &PaperState,
+        atr: f64,
+        profile: GovernanceProfile,
+        features: Option<&FeatureVectorV1>,
+        context_id: Option<&str>,
+        now_ms: u64,
     ) -> ExchangeGateResult {
         // Gate 1: Governance authorization
         if !governance.is_authorized() {
@@ -484,17 +545,38 @@ impl IntentProcessor {
             }
             let fee_rate = self.fee_rate(&intent.symbol);
             let volume_24h = paper_state.latest_turnover(&intent.symbol).unwrap_or(0.0);
-            // Profile-based cost gate selection (D3):
-            // Validation (Demo) → moderate: allows cold-start, blocks negative edge
-            // Production (Live) → strict: fail-closed without positive estimate
-            // 按 profile 選擇 cost gate：Validation 中等，Production 嚴格
-            let gate_result = match profile {
-                GovernanceProfile::Validation => self.cost_gate_moderate(&intent.strategy, &intent.symbol, fee_rate, volume_24h),
-                GovernanceProfile::Production => self.cost_gate_live(&intent.strategy, &intent.symbol, fee_rate, volume_24h),
-                GovernanceProfile::Exploration => None, // Paper doesn't call process_gates_only, but handle gracefully
-            };
-            if let Some(r) = gate_result {
-                return ExchangeGateResult { verdict_info: vi.take(), ..r };
+
+            // ─── Gate 3a · EDGE-P3-1 A4: ML edge-predictor gate (spec §7.3) ───
+            // No-op when features=None / predictor disabled. Shadow-mode always falls through.
+            // EDGE-P3-1 A4：ML 預測器 gate；features=None / predictor 禁用 / shadow 模式 → 回退。
+            let cost_bps = 2.0 * (fee_rate + lookup_slippage(volume_24h)) * 10_000.0;
+            let ctx_id = context_id.unwrap_or("");
+            match self.evaluate_predictor_gate(intent, paper_state, features, ctx_id, now_ms, cost_bps) {
+                PredictorAction::Reject(reason) => {
+                    return ExchangeGateResult {
+                        approved: false,
+                        rejected_reason: Some(reason),
+                        approved_qty: 0.0,
+                        verdict_info: vi.take(),
+                    };
+                }
+                PredictorAction::SkipLegacyGate => {
+                    // Predictor accepted; bypass JS shrinkage fall-through entirely.
+                }
+                PredictorAction::UseLegacyGate => {
+                    // Profile-based cost gate selection (D3):
+                    // Validation (Demo) → moderate: allows cold-start, blocks negative edge
+                    // Production (Live) → strict: fail-closed without positive estimate
+                    // 按 profile 選擇 cost gate：Validation 中等，Production 嚴格
+                    let gate_result = match profile {
+                        GovernanceProfile::Validation => self.cost_gate_moderate(&intent.strategy, &intent.symbol, fee_rate, volume_24h),
+                        GovernanceProfile::Production => self.cost_gate_live(&intent.strategy, &intent.symbol, fee_rate, volume_24h),
+                        GovernanceProfile::Exploration => None,
+                    };
+                    if let Some(r) = gate_result {
+                        return ExchangeGateResult { verdict_info: vi.take(), ..r };
+                    }
+                }
             }
         }
 

@@ -65,6 +65,8 @@ pub struct RiskConfig {
     #[serde(default)]
     pub cost_gate: CostGate,
     #[serde(default)]
+    pub edge_predictor: EdgePredictor,
+    #[serde(default)]
     pub dynamic_stop: DynamicStop,
     #[serde(default)]
     pub market_gate: MarketGate,
@@ -88,6 +90,7 @@ impl RiskConfig {
         self.cascade.validate()?;
         self.regime.validate()?;
         self.cost_gate.validate()?;
+        self.edge_predictor.validate()?;
         self.dynamic_stop.validate()?;
         self.market_gate.validate()?;
         self.anti_cluster.validate()?;
@@ -837,6 +840,138 @@ impl CostGate {
         }
         if self.k_base <= 0.0 || self.k_medium <= 0.0 || self.k_small <= 0.0 {
             return Err("risk.cost_gate k coefficients must all be > 0".into());
+        }
+        Ok(())
+    }
+}
+
+// ---------------------------------------------------------------------------
+// EdgePredictor (EDGE-P3-1) — per-strategy quantile LGBM gate config.
+// EdgePredictor (EDGE-P3-1) — per-strategy 分位 LGBM gate 配置。
+//
+// Spec: docs/references/2026-04-15--edge_predictor_spec.md v1.4 §7.3
+// Defaults keep the predictor OFF; shadow mode records predictions without
+// changing shrinkage-gate decisions. Flipping `use_edge_predictor=true` +
+// `shadow_mode=false` is the Stage 4 promote switch.
+// 默認完全關閉；shadow_mode 僅記錄預測不影響 shrinkage 決策。
+// use_edge_predictor=true + shadow_mode=false 為 Stage 4 promote 切換點。
+// ---------------------------------------------------------------------------
+
+/// First-level fallback strategy when predictor.predict() errors or model is
+/// stale. Spec v1.4 only defines `shrinkage`; `fail_closed` reserved for
+/// pessimistic-by-default modes. Terminal fallback (§7.4) is always per-engine
+/// and not configurable here.
+/// 預測器錯誤或模型過舊時的第一級回退。v1.4 只定義 shrinkage；fail_closed 預留。
+/// Terminal fallback（§7.4）按引擎固定，不在此配置。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EdgePredictorFallback {
+    /// Fall through to the existing JS shrinkage gate. Spec v1.4 default.
+    /// 回退到現有 JS shrinkage gate（v1.4 默認）。
+    Shrinkage,
+    /// Reject the intent on any predictor error (pessimistic).
+    /// 預測器錯誤即拒絕意圖（保守）。
+    FailClosed,
+}
+
+impl Default for EdgePredictorFallback {
+    fn default() -> Self {
+        Self::Shrinkage
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EdgePredictor {
+    /// Master switch. false → predictor never consulted; gate path unchanged.
+    /// 總開關。false → 完全不走 predictor，保持原 gate 邏輯。
+    #[serde(default = "default_edge_predictor_use")]
+    pub use_edge_predictor: bool,
+    /// Shadow mode: predict + record but let existing shrinkage gate decide.
+    /// Stage 3 uses this for 14d observation; Stage 4 flips to false.
+    /// Shadow 模式：預測 + 記錄但由 shrinkage gate 做決定。Stage 3 用 14d 觀察，
+    /// Stage 4 翻為 false。
+    #[serde(default = "default_edge_predictor_shadow")]
+    pub shadow_mode: bool,
+    /// Safety quantile k ∈ [0, 1]: safety_margin = q50 − k · (q50 − q10).
+    /// 0.0 → pure q50 median; 1.0 → q10 pessimistic lower bound.
+    /// 安全分位 k ∈ [0,1]：safety_margin = q50 − k·(q50 − q10)。
+    #[serde(default = "default_edge_predictor_quantile_k")]
+    pub quantile_safety_k: f64,
+    /// If true, reject add-to-existing-position when q10 < 0 even if margin passes.
+    /// 若 true，即便 margin 過關，q10 < 0 時仍拒絕加倉。
+    #[serde(default = "default_edge_predictor_require_q10_pos_adds")]
+    pub require_q10_positive_for_adds: bool,
+    /// First-level fallback when predictor.predict() errors.
+    /// 預測器錯誤時的第一級回退。
+    #[serde(default)]
+    pub fallback_on_error: EdgePredictorFallback,
+    /// ε-greedy exploration rate for paper engine only ∈ [0, 0.2].
+    /// Spec §7.3 C13: emit shadow_fill when safety_margin < cost_bps.
+    /// paper 引擎專用 ε-greedy 探索率 ∈ [0, 0.2]。
+    #[serde(default = "default_edge_predictor_exploration_rate")]
+    pub exploration_rate: f64,
+    /// How often ML-MIT pipeline should retrain (informational; not enforced in Rust).
+    /// ML-MIT 重訓週期（僅供參考，Rust 不強制）。
+    #[serde(default = "default_edge_predictor_retrain_cadence")]
+    pub retrain_cadence_seconds: u64,
+    /// Invariant #11: reject predictions from models older than this threshold.
+    /// 不變量 #11：超過此閾值的模型拒絕使用其預測。
+    #[serde(default = "default_edge_predictor_model_max_age")]
+    pub model_max_age_seconds: u64,
+}
+
+fn default_edge_predictor_use() -> bool {
+    false
+}
+fn default_edge_predictor_shadow() -> bool {
+    true
+}
+fn default_edge_predictor_quantile_k() -> f64 {
+    0.5
+}
+fn default_edge_predictor_require_q10_pos_adds() -> bool {
+    true
+}
+fn default_edge_predictor_exploration_rate() -> f64 {
+    0.05
+}
+fn default_edge_predictor_retrain_cadence() -> u64 {
+    604_800 // 1 week
+}
+fn default_edge_predictor_model_max_age() -> u64 {
+    1_209_600 // 2 weeks
+}
+
+impl Default for EdgePredictor {
+    fn default() -> Self {
+        Self {
+            use_edge_predictor: default_edge_predictor_use(),
+            shadow_mode: default_edge_predictor_shadow(),
+            quantile_safety_k: default_edge_predictor_quantile_k(),
+            require_q10_positive_for_adds: default_edge_predictor_require_q10_pos_adds(),
+            fallback_on_error: EdgePredictorFallback::default(),
+            exploration_rate: default_edge_predictor_exploration_rate(),
+            retrain_cadence_seconds: default_edge_predictor_retrain_cadence(),
+            model_max_age_seconds: default_edge_predictor_model_max_age(),
+        }
+    }
+}
+
+impl EdgePredictor {
+    fn validate(&self) -> Result<(), String> {
+        if !(0.0..=1.0).contains(&self.quantile_safety_k) {
+            return Err("risk.edge_predictor.quantile_safety_k must be in [0, 1]".into());
+        }
+        if !(0.0..=0.2).contains(&self.exploration_rate) {
+            return Err(
+                "risk.edge_predictor.exploration_rate must be in [0, 0.2]".into(),
+            );
+        }
+        if self.retrain_cadence_seconds == 0 {
+            return Err("risk.edge_predictor.retrain_cadence_seconds must be > 0".into());
+        }
+        if self.model_max_age_seconds == 0 {
+            return Err("risk.edge_predictor.model_max_age_seconds must be > 0".into());
         }
         Ok(())
     }

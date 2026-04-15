@@ -30,6 +30,7 @@ compile_error!(
 );
 
 pub mod features;
+pub mod gate;
 pub mod null_backend;
 pub mod rearrangement;
 
@@ -119,6 +120,34 @@ pub trait EdgePredictor: Send + Sync {
     fn model_id(&self) -> &str;
 }
 
+/// Debug-safe newtype around `Arc<dyn EdgePredictor>` so it can be shipped
+/// through `PipelineCommand` (which derives `Debug`). The wrapper's Debug
+/// impl prints model_id + schema_hash instead of the opaque trait object.
+/// Debug-safe 包裝 `Arc<dyn EdgePredictor>`，供 `PipelineCommand`（derive Debug）
+/// 使用。Debug 輸出 model_id 與 schema_hash 而非 opaque trait object。
+#[derive(Clone)]
+pub struct BoxedEdgePredictor(pub Arc<dyn EdgePredictor + Send + Sync>);
+
+impl BoxedEdgePredictor {
+    pub fn new(p: Arc<dyn EdgePredictor + Send + Sync>) -> Self {
+        Self(p)
+    }
+    pub fn into_arc(self) -> Arc<dyn EdgePredictor + Send + Sync> {
+        self.0
+    }
+}
+
+impl std::fmt::Debug for BoxedEdgePredictor {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BoxedEdgePredictor")
+            .field("model_id", &self.0.model_id())
+            .field("schema_hash", &self.0.schema_hash())
+            .field("definition_hash", &self.0.definition_hash())
+            .field("age_seconds", &self.0.age_seconds())
+            .finish()
+    }
+}
+
 /// Per-strategy predictor store with ArcSwap hot-reload (F9 guard discipline).
 /// 逐策略預測器容器，ArcSwap 熱重載（F9 guard discipline）。
 ///
@@ -187,6 +216,21 @@ impl EdgePredictorStore {
         if let Some(slot) = guard.get(strategy) {
             slot.store(Arc::new(None));
         }
+    }
+
+    /// Kill-switch: clear every registered strategy's predictor. Slots remain
+    /// registered (so `load_for` still returns None predictably); operator
+    /// intent is "stop using any model", not "forget which strategies exist".
+    /// Returns the number of slots cleared, useful for IPC response.
+    /// Kill-switch：清空每個已註冊策略的 predictor。槽位保留，僅清除 arc-swapped
+    /// 模型。返回清除數量供 IPC 回報。
+    pub fn clear_all(&self) -> usize {
+        let guard = self.inner.read();
+        let n = guard.len();
+        for slot in guard.values() {
+            slot.store(Arc::new(None));
+        }
+        n
     }
 
     /// Count of registered strategy slots (loaded or not).

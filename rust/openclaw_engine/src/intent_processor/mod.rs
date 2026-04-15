@@ -18,8 +18,21 @@ use openclaw_core::{
     guardian::{ExistingPosition, Guardian, PortfolioContext, TradeIntentCheck, Verdict},
 };
 use crate::config::RiskConfig;
+use crate::config::risk_config::EdgePredictorFallback;
+use crate::edge_predictor::{
+    features::FeatureVectorV1,
+    gate::{
+        edge_predictor_gate, FallbackReason, GateInputs, PredictorGateOutcome, ShadowFillPayload,
+    },
+    EdgePredictorStore,
+};
 use crate::risk_checks::check_order_allowed;
+use crate::tick_pipeline::{PipelineCommand, PipelineKind};
+use parking_lot::Mutex;
+use rand::{rngs::SmallRng, SeedableRng};
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
+use tokio::sync::mpsc::UnboundedSender;
 
 use crate::paper_state::PaperState;
 
@@ -171,6 +184,40 @@ pub struct IntentProcessor {
     /// FIX-28: Account leverage for risk checks. Paper=1.0, exchange=actual.
     /// FIX-28：帳戶槓桿用於風控檢查。Paper=1.0，交易所=實際值。
     account_leverage: f64,
+    /// EDGE-P3-1 A4: Per-engine ML edge predictor store (None → gate skipped,
+    /// falls through to legacy JS shrinkage gate). Wired by engine bootstrap
+    /// via `set_edge_predictor_store`.
+    /// EDGE-P3-1 A4：逐引擎 ML edge predictor store（None → 跳過 gate 回退 JS
+    /// shrinkage）。由引擎啟動時經 `set_edge_predictor_store` 注入。
+    edge_predictor_store: Option<Arc<EdgePredictorStore>>,
+    /// EDGE-P3-1 A4: Pipeline kind — only Paper engine runs ε-greedy branch.
+    /// EDGE-P3-1 A4：管線種類——僅 Paper 走 ε-greedy 分支。
+    pipeline_kind: PipelineKind,
+    /// EDGE-P3-1 A4: Deterministic SmallRng seeded per-engine (spec §7.3 F9).
+    /// Interior mutability because gate evaluation happens via `&self`.
+    /// EDGE-P3-1 A4：按引擎 seed 的 SmallRng（spec §7.3 F9）。
+    /// interior mutability 以支援 `&self` 呼叫 gate。
+    predictor_rng: Mutex<SmallRng>,
+    /// EDGE-P3-1 A4: Pipeline command channel for `EmitShadowFill` dispatch.
+    /// None → shadow fills dropped (fail-soft; predictor gate still runs).
+    /// EDGE-P3-1 A4：PipelineCommand 發送通道用於 `EmitShadowFill`。None 時丟棄
+    /// shadow fill（fail-soft；gate 仍運作）。
+    shadow_fill_tx: Option<UnboundedSender<PipelineCommand>>,
+}
+
+/// EDGE-P3-1 A4: Result of predictor-gate evaluation, translated to caller action.
+/// EDGE-P3-1 A4：predictor gate 評估結果，已翻譯為 caller 動作。
+#[derive(Debug, Clone)]
+pub(super) enum PredictorAction {
+    /// No-op — predictor disabled or no store; continue to legacy JS gate.
+    /// 無動作 — predictor 禁用或無 store；繼續走 JS gate。
+    UseLegacyGate,
+    /// Predictor accepted (shadow_mode=false); skip legacy JS gate, continue pipeline.
+    /// Predictor 接受（shadow_mode=false）；跳過 JS gate 繼續管線。
+    SkipLegacyGate,
+    /// Predictor rejected (hard reject OR ε-greedy fired OR fail-closed fallback).
+    /// Predictor 拒絕（硬拒絕 / ε-greedy / fail-closed 回退）。
+    Reject(String),
 }
 
 impl IntentProcessor {
@@ -190,6 +237,11 @@ impl IntentProcessor {
             edge_estimates: crate::edge_estimates::EdgeEstimates::empty(),
             global_exposure_usdt: None,
             account_leverage: 1.0,
+            edge_predictor_store: None,
+            pipeline_kind: PipelineKind::Paper,
+            // Tests get a fixed seed; production overrides via `set_predictor_rng_seed`.
+            predictor_rng: Mutex::new(SmallRng::seed_from_u64(0)),
+            shadow_fill_tx: None,
         }
     }
 
@@ -211,6 +263,10 @@ impl IntentProcessor {
             edge_estimates: crate::edge_estimates::EdgeEstimates::empty(),
             global_exposure_usdt: None,
             account_leverage: 1.0,
+            edge_predictor_store: None,
+            pipeline_kind: PipelineKind::Paper,
+            predictor_rng: Mutex::new(SmallRng::seed_from_u64(0)),
+            shadow_fill_tx: None,
         }
     }
 
@@ -520,6 +576,175 @@ impl IntentProcessor {
         am: std::sync::Arc<crate::account_manager::AccountManager>,
     ) {
         self.account_manager = Some(am);
+    }
+
+    /// EDGE-P3-1 A4: Wire the per-engine EdgePredictorStore. None → gate skipped.
+    /// EDGE-P3-1 A4：注入逐引擎 EdgePredictorStore。None → 跳過 gate。
+    pub fn set_edge_predictor_store(&mut self, store: Arc<EdgePredictorStore>) {
+        self.edge_predictor_store = Some(store);
+    }
+
+    /// EDGE-P3-1 A4: Set the pipeline kind (Paper uniquely runs ε-greedy branch).
+    /// EDGE-P3-1 A4：設定管線種類（僅 Paper 跑 ε-greedy 分支）。
+    pub fn set_pipeline_kind(&mut self, kind: PipelineKind) {
+        self.pipeline_kind = kind;
+    }
+
+    /// EDGE-P3-1 A4: Seed the predictor RNG (spec §7.3 F9 — `seed_for_engine(...)`).
+    /// EDGE-P3-1 A4：seed predictor RNG（spec §7.3 F9）。
+    pub fn set_predictor_rng_seed(&mut self, seed: u64) {
+        self.predictor_rng = Mutex::new(SmallRng::seed_from_u64(seed));
+    }
+
+    /// EDGE-P3-1 A4: Inject a PipelineCommand sender for `EmitShadowFill` dispatch.
+    /// EDGE-P3-1 A4：注入 PipelineCommand 發送通道用於 `EmitShadowFill`。
+    pub fn set_shadow_fill_tx(&mut self, tx: UnboundedSender<PipelineCommand>) {
+        self.shadow_fill_tx = Some(tx);
+    }
+
+    /// EDGE-P3-1 A4: Evaluate the predictor gate for an intent. Returns a
+    /// `PredictorAction` the caller uses to decide whether to skip/continue/reject.
+    /// Emits `EmitShadowFill` when gate returns ε-greedy ShadowFill and a tx is wired.
+    ///
+    /// Policy (spec §7.3 · §7.4):
+    /// - `!cfg.use_edge_predictor || store=None || features=None` → UseLegacyGate.
+    /// - `cfg.shadow_mode=true` → always UseLegacyGate (Stage 3 observation).
+    /// - Outcome=Accept → SkipLegacyGate (predictor decides).
+    /// - Outcome=Reject/RejectAdd → Reject.
+    /// - Outcome=ShadowFill → emit IPC, Reject("epsilon_greedy_exploration").
+    /// - Outcome=Fallback(reason) → Shrinkage config: UseLegacyGate;
+    ///   FailClosed config: Reject("predictor_fallback_fail_closed:<metric>").
+    ///
+    /// EDGE-P3-1 A4：評估預測器 gate 並翻譯為 caller 動作。
+    pub(super) fn evaluate_predictor_gate(
+        &self,
+        intent: &OrderIntent,
+        paper_state: &PaperState,
+        features: Option<&FeatureVectorV1>,
+        context_id: &str,
+        now_ms: u64,
+        cost_bps: f64,
+    ) -> PredictorAction {
+        let cfg = &self.risk_config.edge_predictor;
+        if !cfg.use_edge_predictor {
+            return PredictorAction::UseLegacyGate;
+        }
+        let store = match self.edge_predictor_store.as_ref() {
+            Some(s) => s,
+            None => return PredictorAction::UseLegacyGate,
+        };
+        let features = match features {
+            Some(f) => f,
+            None => return PredictorAction::UseLegacyGate,
+        };
+
+        // is_add: intent side matches existing position → would add to it. Used by
+        // `require_q10_positive_for_adds` (gate ignores when flag is off).
+        // is_add：意圖方向與現有持倉相同視為加倉。
+        let is_add = paper_state
+            .get_position(&intent.symbol)
+            .map(|p| p.is_long == intent.is_long)
+            .unwrap_or(false);
+
+        let inputs = GateInputs {
+            engine_kind: self.pipeline_kind,
+            strategy: &intent.strategy,
+            symbol: &intent.symbol,
+            context_id,
+            cost_bps,
+            is_add_to_existing: is_add,
+            now_ms,
+        };
+
+        let outcome = {
+            let mut rng = self.predictor_rng.lock();
+            edge_predictor_gate(
+                &inputs,
+                features,
+                store.as_ref(),
+                &mut *rng,
+                cfg,
+                // Empty JSONB today; A5 plumbs serialized features. Lazy closure
+                // means cost only paid on the ε-greedy branch.
+                // 今天回空 jsonb；A5 plumb 序列化 features。lazy closure 只在
+                // ε-greedy 分支付代價。
+                || "{}".to_string(),
+            )
+        };
+
+        if cfg.shadow_mode {
+            tracing::debug!(
+                strategy = %intent.strategy, symbol = %intent.symbol,
+                ?outcome, "edge_predictor: shadow_mode — observation, JS gate decides / shadow 模式觀察"
+            );
+            return PredictorAction::UseLegacyGate;
+        }
+
+        match outcome {
+            PredictorGateOutcome::Accept => PredictorAction::SkipLegacyGate,
+            PredictorGateOutcome::Reject(reason) => PredictorAction::Reject(reason),
+            PredictorGateOutcome::RejectAdd(reason) => PredictorAction::Reject(reason),
+            PredictorGateOutcome::ShadowFill(payload) => {
+                self.emit_shadow_fill(payload);
+                PredictorAction::Reject(
+                    "predictor_epsilon_greedy_exploration: paper shadow-fill dispatched".into(),
+                )
+            }
+            PredictorGateOutcome::Fallback(reason) => self.apply_fallback(reason),
+        }
+    }
+
+    /// EDGE-P3-1 A4: Emit an `EmitShadowFill` IPC command; drops fail-soft on
+    /// missing tx or closed channel.
+    /// EDGE-P3-1 A4：發送 `EmitShadowFill` IPC；tx 缺失/關閉則 fail-soft 丟棄。
+    fn emit_shadow_fill(&self, payload: ShadowFillPayload) {
+        let tx = match self.shadow_fill_tx.as_ref() {
+            Some(t) => t,
+            None => {
+                tracing::warn!(
+                    strategy = %payload.strategy, symbol = %payload.symbol,
+                    "edge_predictor: ShadowFill dropped — no tx wired / 無 tx 丟棄 shadow fill"
+                );
+                return;
+            }
+        };
+        let cmd = PipelineCommand::EmitShadowFill {
+            context_id: payload.context_id,
+            strategy: payload.strategy,
+            symbol: payload.symbol,
+            features_jsonb: payload.features_jsonb,
+            prediction_q10: payload.prediction_q10,
+            prediction_q50: payload.prediction_q50,
+            prediction_q90: payload.prediction_q90,
+            cost_bps: payload.cost_bps,
+            ts_ms: payload.ts_ms,
+        };
+        if let Err(e) = tx.send(cmd) {
+            tracing::warn!(err = %e,
+                "edge_predictor: EmitShadowFill send failed / 發送失敗");
+        }
+    }
+
+    /// EDGE-P3-1 A4 · spec §7.4: apply first-level Fallback policy.
+    /// Shrinkage → UseLegacyGate; FailClosed → Reject with metric-name suffix.
+    /// EDGE-P3-1 A4 · §7.4：第一級 Fallback 策略。
+    fn apply_fallback(&self, reason: FallbackReason) -> PredictorAction {
+        let metric = reason.metric_name();
+        match self.risk_config.edge_predictor.fallback_on_error {
+            EdgePredictorFallback::Shrinkage => {
+                tracing::info!(fallback_reason = metric,
+                    "edge_predictor: fallback → shrinkage gate / 回退 JS shrinkage");
+                PredictorAction::UseLegacyGate
+            }
+            EdgePredictorFallback::FailClosed => {
+                tracing::warn!(fallback_reason = metric,
+                    "edge_predictor: fail-closed rejection / fail-closed 拒絕");
+                PredictorAction::Reject(format!(
+                    "predictor_fallback_fail_closed:{}",
+                    metric
+                ))
+            }
+        }
     }
 
     /// Effective taker fee rate for a symbol. Resolution order:

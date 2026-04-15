@@ -33,6 +33,7 @@ async-trait = "0.1"
 feed-rs = "2"
 serde_yaml = "0.9"
 parking_lot = { workspace = true }
+rand = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3"
