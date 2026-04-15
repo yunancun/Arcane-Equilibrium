@@ -209,6 +209,12 @@ def _run_quantile_pipeline(
         n_features=len(feature_names),
         schema_version=config.schema_version,
         validate_samples=validate_samples,
+        feature_schema_hash=train_result.feature_schema_hash,
+        # Stage 0: definition hash aliases schema hash (spec §3.3). If/when
+        # definitions drift, trainer starts emitting a distinct value and this
+        # call site needs no change.
+        # Stage 0：definition hash 與 schema hash 同值；將來公式漂移時 trainer 自動分叉。
+        feature_definition_hash=train_result.feature_schema_hash,
     )
     result.onnx_artifacts = onnx_out
     result.stages_completed.append("onnx_export")

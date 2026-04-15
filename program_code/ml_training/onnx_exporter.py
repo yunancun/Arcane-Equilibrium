@@ -167,6 +167,42 @@ def _convert_booster_to_onnx(
     return convert_lightgbm(booster, initial_types=initial_type)
 
 
+# ONNX metadata_props keys — frozen train/serve contract (EDGE-P3-1 §7.2).
+# Rust tract_backend reads these to reject mismatched artifacts at load time.
+# Changing a key name requires synchronized Rust loader update.
+# ONNX metadata_props 鍵名契約凍結；Rust tract_backend 依此拒絕不匹配 artifact。
+_META_SCHEMA_VERSION   = "edge_p3_schema_version"
+_META_SCHEMA_HASH      = "edge_p3_feature_schema_hash"
+_META_DEFINITION_HASH  = "edge_p3_feature_definition_hash"
+_META_ENGINE_MODE      = "edge_p3_engine_mode"
+_META_STRATEGY_NAME    = "edge_p3_strategy_name"
+_META_QUANTILE         = "edge_p3_quantile"
+_META_TRAIN_DATE       = "edge_p3_train_date"
+_META_MODEL_ID         = "edge_p3_model_id"
+_META_N_FEATURES       = "edge_p3_n_features"
+
+
+def _stamp_onnx_metadata(onnx_model: Any, meta: Dict[str, str]) -> None:
+    """Attach metadata_props to an ONNX ModelProto in-place.
+
+    ONNX spec: `ModelProto.metadata_props` is a repeated list of
+    `StringStringEntryProto` with unique keys. Rust tract reads them via
+    `InferenceModel::metadata()`. Duplicate-key defense: clear existing keys
+    we own before re-appending, idempotent across re-exports.
+    ONNX metadata_props 為 repeated list；寫入前先清我方 key 再 append，確保冪等。
+    """
+    owned_keys = set(meta.keys())
+    keep = [p for p in onnx_model.metadata_props if p.key not in owned_keys]
+    del onnx_model.metadata_props[:]
+    onnx_model.metadata_props.extend(keep)
+    for key, value in meta.items():
+        if value is None:
+            continue
+        entry = onnx_model.metadata_props.add()
+        entry.key = str(key)
+        entry.value = str(value)
+
+
 def _validate_booster_vs_onnx(
     booster: Any,
     onnx_path: str,
@@ -214,6 +250,9 @@ def export_quantile_trio_to_onnx(
     train_date: Optional[str] = None,
     validate_samples: Optional[np.ndarray] = None,
     max_abs_err: float = 1e-3,
+    feature_schema_hash: Optional[str] = None,
+    feature_definition_hash: Optional[str] = None,
+    model_id_prefix: str = "edge_predictor",
 ) -> Dict[str, Any]:
     """Export q10/q50/q90 trio, one ONNX per quantile + `_current` symlink.
 
@@ -284,9 +323,27 @@ def export_quantile_trio_to_onnx(
 
         try:
             onnx_model = _convert_booster_to_onnx(booster, n_features)
+            # Stamp train/serve metadata — Rust tract loader rejects artifacts
+            # whose schema hash disagrees with FEATURE_NAMES_V1 compile-time
+            # hash (spec §7.2 · F9 guard). Per-file, not per-trio, so each
+            # quantile carries its own model_id for traceability.
+            # 為每個 per-quantile 檔寫入 schema 契約 metadata；Rust tract 以此拒絕不匹配。
+            model_id = f"{model_id_prefix}_{engine_mode}_{strategy_name}_{qname}_{schema_version}_{train_date}"
+            _stamp_onnx_metadata(onnx_model, {
+                _META_SCHEMA_VERSION:   schema_version,
+                _META_SCHEMA_HASH:      feature_schema_hash or "",
+                _META_DEFINITION_HASH:  feature_definition_hash or feature_schema_hash or "",
+                _META_ENGINE_MODE:      engine_mode,
+                _META_STRATEGY_NAME:    strategy_name,
+                _META_QUANTILE:         qname,
+                _META_TRAIN_DATE:       train_date,
+                _META_MODEL_ID:         model_id,
+                _META_N_FEATURES:       str(int(n_features)),
+            })
             with open(out_path, "wb") as f:
                 f.write(onnx_model.SerializeToString())
             entry["written"] = True
+            entry["model_id"] = model_id
         except Exception as e:  # noqa: BLE001
             entry["written"] = False
             entry["error"] = str(e)
