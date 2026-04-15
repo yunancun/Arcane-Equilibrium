@@ -1,7 +1,25 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-04-14（ENGINE-HEAL Fix 1/2/3/4）
+> 最後更新：2026-04-15（EDGE-P3-1 Step 7a）
+
+### EDGE-P3-1 Step 7a — DecisionFeatureSnapshot Rust-direct writer（2026-04-15 · commit d73addb）
+
+**背景**：EDGE-P3-1 Stage 0 需即刻採集 17 維訓練特徵至 `learning.decision_features`（V017 table），但 `use_edge_predictor=false` 仍是預設狀態 — 意味著 gate 走 legacy JS shrinkage 路徑，**不能**靠 predictor 已啟用路徑順帶寫。決策：**Option B**（Rust-direct writer + passthrough IPC 變體）— writer 直寫 DB 繞過 Python consumer（Step 7c 才走 Python），IPC 變體保留做日後 Python 端可選擇消費的跳板。
+
+**交付**（11 files +899/-21）：
+- **`edge_predictor/features.rs`**：凍結 `FEATURE_NAMES_V1: &[&str; 17]` + `FEATURE_SCHEMA_VERSION = "v1"`，`feature_schema_hash()` / `feature_definition_hash()` 以 `OnceLock` 緩存 sha256 首 16 hex（Stage 0 兩 hash 相同；Stage 2 ML-MIT 才分離）。6 unit tests（確定性 / 長度 / 非空 / version 常量 / getter 一致 / 名單完整）。
+- **`database/mod.rs` + `database/decision_feature_writer.rs`（新 250 行）**：`DecisionFeatureMsg` 10 欄 struct + `run_decision_feature_writer()` async 迴圈（mpsc drain → HashMap dedup by context_id → `flush_features()` 拒絕 `ts_ms=0`（DB-RUN-6 對齊）+ 一次 `serde_json::from_str` JSONB 校驗 + `INSERT INTO learning.decision_features ... ON CONFLICT (context_id) DO NOTHING`）。6 unit tests（dedup / epoch-0 拒絕 / 畸形 JSONB / 合法 parse / SMALLINT side 轉型 / SQL 欄位鎖）。
+- **`tick_pipeline/mod.rs`**：新增 `PipelineCommand::DecisionFeatureSnapshot { 10 fields }` 變體 + `TickPipeline.decision_feature_tx: Option<Sender<DecisionFeatureMsg>>` + `set_decision_feature_tx()` 同時傳 IntentProcessor（producer）+ 存本地供 handler 讀取（IPC passthrough），`debug_assert!` 防雙注入。
+- **`intent_processor/mod.rs`**：`emit_decision_feature_snapshot()` 於 `evaluate_predictor_gate()` **頂端**呼叫（**早於 `use_edge_predictor` 短路檢查**），僅 `features: Some + context_id: 非空` 時發射。`ts_ms=0` 源頭略過；`try_send` best-effort（full/closed → warn+drop）；tx 未接線 → 靜默 no-op。採集路徑不受 predictor 啟用/禁用狀態影響。
+- **`event_consumer/{types,mod,handlers}.rs`**：`EventConsumerDeps.decision_feature_tx` 欄位 + `run_event_consumer` destructure + wire-up 呼叫（`set_shadow_fill_tx` 後） + handler 匹配臂（讀 `pipeline.decision_feature_tx()` 構 msg → `try_send` → Full/Closed warn、no-tx info）。3 handler 穿透測試。
+- **`tasks.rs`**：`spawn_db_writers` 4→5 tuple，新增 `channel(1024)` + `run_decision_feature_writer` spawn。Pool 不可用時早 return 5-tuple of None。
+- **`main.rs`**：5-tuple destructure + paper/demo/live 三個 `EventConsumerDeps` 構造點注入 `decision_feature_tx.clone()`。
+- **`intent_processor/tests.rs`**：4 新發射測試（預測器禁用仍發射 / 空 context_id 不發射 / None features 不發射 / ts_ms=0 不發射）。
+
+**測試**：lib **1264→1285**（+21：6 hash + 6 writer + 3 handler + 4 emission + 2 零碎）· core 372 · e2e 35 · **total 1671→1692 pass / 0 fail**。
+
+**下一步**：Step 7b `ReloadEdgePredictor` IPC（Python route 沿用 `ReloadRiskConfig` 授權）· Step 7c `EmitShadowFill` Python consumer（Option B 對照處理，寫 `learning.decision_shadow_fills`，DB CHECK `engine_mode='paper'`）· Step 7d-7f（`write_toml_atomic_fsynced` / `DisableEdgePredictorAll` 兩階段 / `GET /capabilities`）。5 條餘項可獨立前推，不 blocked。真 unblock = ML-MIT #26 首 ONNX。
 
 ### ENGINE-HEAL — 引擎自癒 4 Fix（2026-04-14）
 
