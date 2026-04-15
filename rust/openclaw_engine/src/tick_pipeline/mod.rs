@@ -790,19 +790,22 @@ impl TickPipeline {
         self.linucb = Some(rt);
     }
 
-    /// EDGE-P3-1 Stage 0: Inject the per-engine `EdgePredictorStore` handle.
+    /// EDGE-P3-1 Phase B #1: Inject the per-engine `EdgePredictorStore` handle.
     /// Engine bootstrap in `main.rs` creates one store per PipelineKind
-    /// (paper/demo/live) and passes the Arc here. After wiring, `handle_paper_command`
-    /// honours `SetEdgePredictorShadow` / `DisableEdgePredictorAll`, and A4 will
-    /// thread the store into `IntentProcessor` for the §7.3 gate.
-    /// EDGE-P3-1 Stage 0：注入本引擎的 `EdgePredictorStore` handle。main.rs 為
-    /// 每 PipelineKind 建一個 store 並傳入。接線後 IPC 熱換生效，A4 再串入
-    /// IntentProcessor 的 §7.3 gate。
+    /// (paper/demo/live) and passes the Arc here. Single call wires both sides:
+    /// TickPipeline (for `handle_paper_command` IPC swap/clear) + IntentProcessor
+    /// (for the §7.3 gate load_for lookup). Without the propagation, the IPC
+    /// side would accept `SetEdgePredictorShadow` but the gate would still see
+    /// `store = None` and short-circuit to legacy shrinkage.
+    /// EDGE-P3-1 Phase B #1：注入本引擎的 `EdgePredictorStore` handle。
+    /// 單次調用把 Arc 同時塞給 TickPipeline（IPC 熱換用）與 IntentProcessor
+    /// （§7.3 gate load_for 讀取用）— 缺一會造成 IPC 收命令但 gate 仍走 legacy。
     pub fn set_edge_predictor_store(
         &mut self,
         store: std::sync::Arc<crate::edge_predictor::EdgePredictorStore>,
     ) {
-        self.edge_predictor_store = Some(store);
+        self.edge_predictor_store = Some(std::sync::Arc::clone(&store));
+        self.intent_processor.set_edge_predictor_store(store);
     }
 
     /// EDGE-P3-1 Stage 0: Accessor for command handlers that need to mutate

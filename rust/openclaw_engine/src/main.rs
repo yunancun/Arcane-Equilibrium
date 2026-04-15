@@ -731,6 +731,19 @@ async fn async_main(
     );
     let canary_handle = openclaw_engine::canary_writer::spawn(canary_data_path, cancel.clone());
 
+    // EDGE-P3-1 Phase B #1: Per-engine EdgePredictorStore. One container, three
+    // Arc<EdgePredictorStore> slots (paper/demo/live). Each pipeline receives
+    // exactly one slot so ML-MIT can IPC-swap a paper model without touching
+    // demo/live artifacts (§6.5 promotion chain). Construction is infallible
+    // and cheap (three ArcSwap<Option<_>> maps); cloning is Arc<...>::clone.
+    // The runtime cost is zero until `use_edge_predictor=true` AND a model is
+    // actually swapped in via `PipelineCommand::SetEdgePredictorShadow`.
+    // EDGE-P3-1 Phase B #1：逐引擎 EdgePredictorStore 容器（paper/demo/live 三槽）。
+    // 每條管線領一個 Arc 槽，ML-MIT 熱換 paper 模型不影響 demo/live。
+    let per_engine_predictors = std::sync::Arc::new(
+        openclaw_engine::edge_predictor::PerEnginePredictors::new(),
+    );
+
     // is_primary priority: Live > Demo > Paper
     let has_live = live_bindings.is_some();
     let has_demo = demo_bindings.is_some();
@@ -888,6 +901,7 @@ async fn async_main(
         cross_engine_rx: Some(cross_engine_tx.subscribe()),
         pipeline_health: Some(Arc::clone(&paper_health)),
         canary_handle: canary_handle.clone(),
+        edge_predictor_store: Some(Arc::clone(&per_engine_predictors.paper)),
     };
     // Fix 3 (2026-04-14): wrap in crash-only layer so a paper task panic
     // is logged + broadcast + triggers engine-wide cancel (watchdog restart).
@@ -952,6 +966,7 @@ async fn async_main(
             cross_engine_rx: Some(cross_engine_tx.subscribe()),
             pipeline_health: Some(Arc::clone(&demo_b.health)),
             canary_handle: canary_handle.clone(),
+            edge_predictor_store: Some(Arc::clone(&per_engine_predictors.demo)),
         };
         // Fix 3 (2026-04-14): same crash-only wrapper as paper.
         // 修復 3：同 paper 的 crash-only 包裝。
@@ -1015,6 +1030,7 @@ async fn async_main(
             cross_engine_rx: Some(cross_engine_tx.subscribe()),
             pipeline_health: Some(Arc::clone(&live_b.health)),
             canary_handle: canary_handle.clone(),
+            edge_predictor_store: Some(Arc::clone(&per_engine_predictors.live)),
         };
 
         // D17: Live runs on dedicated OS thread with catch_unwind for panic isolation.

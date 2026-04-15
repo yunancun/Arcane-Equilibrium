@@ -193,4 +193,14 @@ pub struct EventConsumerDeps {
     /// ENGINE-HEAL-FIX-PHASE1 R1：灰度寫入器控制代碼 — 非阻塞 try_send 將 JSONL
     /// 寫盤移出事件循環熱路徑。功能關閉時為 `disabled()` clone，producer 跳過記錄構建。
     pub canary_handle: crate::canary_writer::CanaryWriterHandle,
+    /// EDGE-P3-1 Phase B #1: Per-engine EdgePredictorStore handle. `None` keeps the
+    /// §7.3 gate `store = None` short-circuit path (→ legacy shrinkage), matching the
+    /// pre-wiring behaviour. Bootstrap in `main.rs` passes `Some(pep.<kind>.clone())`
+    /// so IPC `SetEdgePredictorShadow` hot-swaps and the gate `load_for()` see the
+    /// same Arc. Required for any EdgePredictor activation; `use_edge_predictor=false`
+    /// still gates actual consultation.
+    /// EDGE-P3-1 Phase B #1：逐引擎 EdgePredictorStore handle。None 時 §7.3 gate
+    /// 短路至 legacy shrinkage，符合接線前行為；bootstrap 傳
+    /// `Some(pep.<kind>.clone())`，IPC 熱換與 gate load_for 共享同一 Arc。
+    pub edge_predictor_store: Option<Arc<crate::edge_predictor::EdgePredictorStore>>,
 }
