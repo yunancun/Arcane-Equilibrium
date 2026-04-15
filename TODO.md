@@ -3,7 +3,7 @@
 **最後更新：2026-04-15**（🚨 **引擎 04:03 自殺事故** — WS tick stale Fix 4 按設計 cancel，但 **watchdog daemon 從未部署** → 7h10m 空窗無人拉起，11:13 operator 手動重啟。新增 **ENGINE-HEAL-FUP-1/2/3**。**FIX-PHASE1 FUP-A/B 完成** — canary_writer warn 節流 1Hz + drop counter + 覆蓋 `TrySendError::Full` 分支單元測試。**E4-HYG-1 ✅** — `golden_extreme.rs` 漏 `trailing_activation_pct` 欄位補齊，`cargo test -p openclaw_core` 恢復 372 pass。**ENGINE-HEAL-FUP-1 ✅ 正式結清** — watchdog 從 nohup PID 592881 升級為 systemd user unit `openclaw-watchdog.service`（Restart=always + log append + linger=yes 跨重啟存活），新 PID 678153 Main（PPID=1983 systemd --user）。**EDGE-P3-1 Phase B #1 ✅** — main.rs bootstrap 構造 `PerEnginePredictors` → 三引擎 Deps；E2 nits（debug_assert 雙注入 + Arc::clone 精簡）收尾；tract/ort backend 選型 audit 文檔化；commits `c9416d0` + `0fcf449` + `3dd845c`。）
 **測試基準線**：Rust **engine lib 1264 + core 372 + e2e 35 = 1671** · Python **2852 passed (5 skipped · 0 fail)** · ml_training **135 passed (6 skipped)**
 **EDGE-P3-1 Phase A/A6 COMPLETE** — gate 在 hot path 被諮詢 + MA/BBR/BBB 策略 confluence/persistence 經 OrderIntent 穿透至 feature_builder；產線預設 `use_edge_predictor=false` 零行為改變；commits `8c1f234` A1-A4 + `3753ede` A5 + `a23b268` A6
-**EDGE-P3-1 Phase B IN PROGRESS** — #1 bootstrap + #2 backend 選型 + #5 pipeline_cmd_tx wire ✅；PA #63 `load_training_data` + ETL Parquet export ✅（ML-MIT 可啟動）；#3 model loader 等 Stage 2 artifact；Step 7 餘項 6 條（`DecisionFeatureSnapshot`/`ReloadEdgePredictor` IPC · Python consumers · `write_toml_atomic_fsynced` · 兩階段 commit · capabilities endpoint）可獨立前推
+**EDGE-P3-1 Phase B IN PROGRESS** — #1 bootstrap + #2 backend 選型 + #5 pipeline_cmd_tx wire ✅；PA #63 `load_training_data` + ETL Parquet export ✅（ML-MIT 可啟動）；**Step 7a `DecisionFeatureSnapshot` Rust-direct writer ✅ (commit `d73addb`)**；#3 model loader 等 Stage 2 artifact；Step 7 餘項 5 條（7b-7f：`ReloadEdgePredictor` IPC · shadow-fill Python consumer · `write_toml_atomic_fsynced` · 兩階段 commit · capabilities endpoint）可獨立前推
 
 > compact 後從此文件恢復工作狀態。第一個 `[ ]` 即為下一步起點。
 > 歷史歸檔索引在文件末尾。詳細完成度視角見 README.md。
@@ -175,7 +175,7 @@
       - ⬜ **#4 RNG seeding** — `seed_for_engine(PipelineKind) → StdRng`（僅 ε-greedy 運行時相關）
       - ✅ **#5 main.rs wire pipeline_cmd_tx → IntentProcessor** — `EventConsumerDeps.pipeline_cmd_tx` 新欄位 + `TickPipeline::set_shadow_fill_tx` wrapper + 三引擎 (paper/demo/live) 注入 tx clone；IPC `EmitShadowFill` 脫離 fail-soft 丟棄分支，可真實下發 Python consumer（Step 7c 前置）
     - **AI-E Step 7 餘項**（IPC 全套，非 blocking，可獨立前推）：
-      - ⬜ **Step 7a** `DecisionFeatureSnapshot` IPC 變體 + Python consumer → `learning.decision_features`（當前 `handlers.rs:596` 有 "later stage" 占位注釋）
+      - ✅ **Step 7a** `DecisionFeatureSnapshot` — Option B (Rust-direct writer + passthrough IPC)（commit `d73addb`）：`FEATURE_NAMES_V1`+schema/definition hash OnceLock · `DecisionFeatureMsg` struct · `decision_feature_writer.rs` async drain+dedup+DB-RUN-6 reject+`ON CONFLICT DO NOTHING` · `PipelineCommand::DecisionFeatureSnapshot` · `TickPipeline::set_decision_feature_tx` 傳 IntentProcessor+handler · `emit_decision_feature_snapshot()` 於 `evaluate_predictor_gate` 頂端發射（先於 `use_edge_predictor` 短路，Stage 0 即採集） · `spawn_db_writers` 4→5 tuple · 3 `EventConsumerDeps` sites 注入 · lib 1264→1285（+21：6 hash 決定性/6 writer/3 handler 穿透/4 emission）
       - ⬜ **Step 7b** `ReloadEdgePredictor{engine, strategy, path}` IPC + Python route（資料面，沿用 `ReloadRiskConfig` 授權）
       - ⬜ **Step 7c** `EmitShadowFill` Python consumer → `learning.decision_shadow_fills`（DB CHECK `engine_mode='paper'`）
       - ⬜ **Step 7d** `write_toml_atomic_fsynced()` helper 升級（U2，`config/store.rs:231-244`）+ `test_disable_all_survives_sigkill` 回歸
@@ -184,9 +184,9 @@
     - **CC** (#28) → 13 項必查（v1.3 CC clist）+ T1-T22 regression（`edge_predictor_tests.rs` 0/22 已寫；blocked by Stage 2 artifact for T2/T7/T18）
   - **安全門檻**（不可違背）：Shadow ≥14d（#29）· pinball loss 對比常數模型 >10% 才 promote · Feature freeze time = entry 瞬間 · Per-strategy 獨立模型 · 推理失敗 fail-closed → 回退現有 shrinkage · 不觸 LinUCB · 兩階段提交防 half-enabled · macOS CI `aarch64-apple-darwin`（M1/M2/M3/M4 → M5 Ultra/Max 部署目標，見 memory `project_mac_deployment_target.md`）
   - **Stage 0 收尾前 housekeeping**（Round-4 YELLOW-nit，非阻塞）：§7.1 加 ort macOS dylib bundling 提醒 ✅（已入 audit）· CC #13 加 strace Linux-only 註記
-  - **狀態**：🟢 Stage 0 + Phase A COMPLETE · Phase B 3/5 完成（#1 bootstrap ✅ + #2 backend 選型 ✅ + #5 pipeline_cmd_tx wire ✅）· PA `parquet_etl.py` 擴展 ✅（#63 `load_training_data` + `EDGE_P3_FEATURE_NAMES` 凍結 + DuckDB export 逃生艙）· Step 7 IPC 6 條餘項（7a~7f）可獨立前推 · Stage 2+ 現唯一 blocker = ML-MIT 首 ONNX artifact 訓練
+  - **狀態**：🟢 Stage 0 + Phase A COMPLETE · Phase B 3/5 完成（#1 bootstrap ✅ + #2 backend 選型 ✅ + #5 pipeline_cmd_tx wire ✅）· PA `parquet_etl.py` 擴展 ✅（#63 `load_training_data` + `EDGE_P3_FEATURE_NAMES` 凍結 + DuckDB export 逃生艙）· **Step 7a `DecisionFeatureSnapshot` ✅ (commit `d73addb`)** · Step 7 IPC 餘 5 條（7b~7f）可獨立前推 · Stage 2+ 現唯一 blocker = ML-MIT 首 ONNX artifact 訓練
   - **頭號瓶頸**：ML-MIT #26 — 跑 quantile LGBM + CQR + CPCV + isotonic 產出首個 per-strategy ONNX（unblock AI-E #3 model loader + CC T2/T7/T18 + Stage 3 Shadow mode）
-  - **次要瓶頸**：AI-E Step 7a-7f 進度為 0，但不 blocked — 可獨立拆分為 6 個獨立 session 工作項
+  - **次要瓶頸**：AI-E Step 7b-7f 進度為 0，但不 blocked — 可獨立拆分為 5 個獨立 session 工作項
 
 ### Phase 6 擴展
 
