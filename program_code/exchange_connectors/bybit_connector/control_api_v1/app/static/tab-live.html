@@ -256,6 +256,20 @@ html, body {
         <div class="live-metric-val neutral" id="live-order-count">--</div>
       </div>
     </div>
+    <!-- PnL Trend Sparkline / 盈虧趨勢圖 -->
+    <div style="margin-top:10px">
+      <div style="font-size:10px;color:var(--text-dim);margin-bottom:4px;display:flex;align-items:center;gap:6px">
+        <span>累計收益趨勢 / Cumulative PnL Trend</span>
+        <span style="color:var(--text-dim);font-size:9px">（最近 50 筆 Live 成交 / last 50 Live fills）</span>
+      </div>
+      <svg id="live-pnl-sparkline" width="100%" height="120"
+        style="display:block;background:rgba(13,17,23,0.5);border-radius:6px;border:1px solid #21262d"
+        viewBox="0 0 400 120" preserveAspectRatio="none">
+        <line id="live-pnl-zero" x1="8" x2="392" y1="60" y2="60" stroke="#30363d" stroke-width="0.5" stroke-dasharray="3,3"/>
+        <polyline id="live-pnl-line" points="" fill="none" stroke="var(--green)" stroke-width="2" stroke-linejoin="round"/>
+        <text x="4" y="114" fill="var(--text-dim)" font-size="10" id="live-pnl-label">no data</text>
+      </svg>
+    </div>
   </div>
 
   <!-- Positions table / 持倉表格 -->
@@ -343,10 +357,10 @@ html, body {
     <table class="live-table" id="live-fills-table">
       <thead><tr>
         <th>時間 / Time</th><th>Symbol</th><th>Side</th>
-        <th>Qty</th><th>Price</th><th>Fee</th><th>Order ID</th>
+        <th>Qty</th><th>Price</th><th>Fee</th><th>盈亏 / PnL</th><th>Order ID</th>
       </tr></thead>
       <tbody id="live-fills-body">
-        <tr><td colspan="7" style="color:var(--text-dim);text-align:center;padding:16px">展開以加載 / Expand to load</td></tr>
+        <tr><td colspan="8" style="color:var(--text-dim);text-align:center;padding:16px">展開以加載 / Expand to load</td></tr>
       </tbody>
     </table>
   </div>
@@ -635,6 +649,11 @@ async function refreshPage() {
   checkLiveEngineStatus();
   loadLiveMetrics();
   loadTrustStatus();
+  // Always keep the PnL trend chart fresh (cheap Bybit API call; fills table
+  // itself is still lazy-rendered by the collapsible section's toggleFills()).
+  // 始終保持 PnL 趨勢圖即時（Bybit API 呼叫成本低；下方可折疊的成交表仍由
+  // toggleFills() 懶加載）。
+  loadFills();
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -975,19 +994,20 @@ function toggleFills() {
 async function loadFills() {
   const body = document.getElementById('live-fills-body');
   const badge = document.getElementById('fills-count-badge');
-  body.innerHTML = '<tr><td colspan="7" style="color:var(--text-dim);text-align:center;padding:16px">加載中...</td></tr>';
+  body.innerHTML = '<tr><td colspan="8" style="color:var(--text-dim);text-align:center;padding:16px">加載中...</td></tr>';
   try {
     const d = await ocApi('/api/v1/live/fills');
     const arr = (d && d.data && Array.isArray(d.data.list)) ? d.data.list : [];
     _fillsLoaded = true;
     if (badge) badge.textContent = arr.length ? arr.length + ' 筆' : '';
     if (arr.length === 0) {
-      body.innerHTML = '<tr><td colspan="7" style="color:var(--text-dim);text-align:center;padding:16px">暫無成交記錄 / No fills</td></tr>';
+      body.innerHTML = '<tr><td colspan="8" style="color:var(--text-dim);text-align:center;padding:16px">暫無成交記錄 / No fills</td></tr>';
+      ocPnlTrend('live-pnl-line', 'live-pnl-label', [], 'live-pnl-zero');
       return;
     }
     body.innerHTML = arr.map(f => {
-      // Bybit execution fields: execTime, symbol, side, execQty, execPrice, execFee, orderId
-      // Bybit 成交字段：execTime, symbol, side, execQty, execPrice, execFee, orderId
+      // Bybit execution fields: execTime, symbol, side, execQty, execPrice, execFee, orderId, closedPnl
+      // Bybit 成交字段：execTime, symbol, side, execQty, execPrice, execFee, orderId, closedPnl（平倉盈虧）
       const ts = f.execTime || f.exec_time || f.time || '--';
       const timeStr = ts !== '--' ? new Date(Number(ts)).toLocaleTimeString() : '--';
       const qty = f.execQty || f.exec_qty || f.qty || '--';
@@ -997,6 +1017,7 @@ async function loadFills() {
       const oid = f.orderId || f.order_id || '--';
       const side = f.side || '--';
       const sideCls = side === 'Buy' ? 'color:var(--green)' : side === 'Sell' ? 'color:#f87171' : '';
+      const pnlRaw = f.closedPnl != null ? f.closedPnl : f.realized_pnl;
       return `<tr>
         <td style="white-space:nowrap">${ocEsc(timeStr)}</td>
         <td><strong>${ocEsc(f.symbol || '--')}</strong></td>
@@ -1004,11 +1025,13 @@ async function loadFills() {
         <td>${ocEsc(String(qty))}</td>
         <td>${ocEsc(String(price))}</td>
         <td style="color:var(--text-dim)">${ocEsc(feeStr)}</td>
+        ${ocPnlCell(pnlRaw)}
         <td style="font-size:10px;color:var(--text-dim)">${ocEsc(String(oid)).slice(0, 12)}…</td>
       </tr>`;
     }).join('');
+    ocPnlTrend('live-pnl-line', 'live-pnl-label', arr, 'live-pnl-zero');
   } catch(e) {
-    body.innerHTML = '<tr><td colspan="7" style="color:var(--text-dim);text-align:center">無法加載成交記錄</td></tr>';
+    body.innerHTML = '<tr><td colspan="8" style="color:var(--text-dim);text-align:center">無法加載成交記錄</td></tr>';
   }
 }
 
