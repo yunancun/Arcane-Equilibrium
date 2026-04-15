@@ -68,6 +68,7 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
         cross_engine_tx,
         cross_engine_rx,
         pipeline_health,
+        canary_handle,
     } = deps;
     let mut pipeline_cmd_rx = pipeline_cmd_rx;
 
@@ -446,23 +447,15 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
     let mut snapshot_writer = DualStateWriter::new(primary_writer, compat_writer);
     let audit_writer = AuditWriter::new(&data_path.join(format!("{kind_tag}_audit.jsonl")));
 
-    // Canary mode: emit per-tick JSONL for comparison with Python shadow (R07-2)
-    // 灰度模式：每 tick 輸出 JSONL 用於與 Python 影子進程比較
-    let canary_mode = std::env::var("OPENCLAW_CANARY_MODE").unwrap_or_default() == "1";
-    pipeline.canary_mode = canary_mode;
-    let canary_writer = if canary_mode {
-        let canary_path = data_path.join("engine_results.jsonl");
-        info!(path = %canary_path.display(), "canary mode enabled / 灰度模式已啟用");
-        Some(
-            std::fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(&canary_path)
-                .expect("failed to open canary JSONL / 打開灰度 JSONL 失敗"),
-        )
-    } else {
-        None
-    };
+    // ENGINE-HEAL-FIX-PHASE1 R1: Canary write moved off this hot path. The shared
+    // CanaryWriterHandle (spawned once in main.rs) owns the BufWriter + flush timer
+    // + size rotation; we just `try_send(record)` here. `is_enabled()` reflects the
+    // env-flag decision made at spawn time — kept identical to the previous
+    // local env check so `pipeline.canary_mode` semantics are unchanged.
+    // ENGINE-HEAL-FIX-PHASE1 R1：灰度寫盤已移出本熱路徑。共享 CanaryWriterHandle
+    // （main.rs 啟動時 spawn 一次）擁有 BufWriter + flush 定時器 + 大小輪轉；
+    // 此處僅 `try_send(record)`。`is_enabled()` 反映 spawn 時決定的旗標狀態。
+    pipeline.canary_mode = canary_handle.is_enabled();
 
     // Initial snapshot for watchdog / 初始快照供 watchdog 使用
     {
@@ -885,15 +878,14 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
                         let prev_fills = pipeline.stats.total_fills;
                         let canary_record = pipeline.on_tick(&ev);
 
-                        // Write canary record if in canary mode (R07-2)
+                        // ENGINE-HEAL-FIX-PHASE1 R1: Hand the record to the dedicated
+                        // canary writer task — non-blocking. On channel-full the record
+                        // is dropped with a warn (handled inside try_send); the event
+                        // loop never blocks on file I/O.
+                        // ENGINE-HEAL-FIX-PHASE1 R1：交給專用灰度寫入任務（非阻塞）；
+                        // 通道滿則 warn 丟棄，事件循環絕不阻塞於檔案 I/O。
                         if let Some(record) = canary_record {
-                            if let Some(ref canary_file) = canary_writer {
-                                use std::io::Write;
-                                let mut f = canary_file;
-                                if let Ok(json) = serde_json::to_string(&record) {
-                                    let _ = writeln!(f, "{}", json);
-                                }
-                            }
+                            canary_handle.try_send(record);
                         }
 
                         // Audit new fills / 審計新成交
