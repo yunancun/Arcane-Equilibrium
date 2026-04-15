@@ -1,7 +1,7 @@
 # OpenClaw TODO — 工作計劃清單
 
-**最後更新：2026-04-15**（EDGE-P3-1 spec v1.0 → v1.3 四輪審查完成，GREEN — Stage 0 可開工；worklog: `docs/worklogs/2026-04-15--edge_predictor_spec_v1_to_v1_3.md`；ENGINE-HEAL + FUP-8 Phase 2 已 deploy 並 DB 驗證）
-**測試基準線**：Rust **engine lib 1198 + core 372 + e2e 33 + stress 35 = 1638** · Python **2852 passed (5 skipped · 0 fail)** · ml_training **135 passed (6 skipped)**
+**最後更新：2026-04-15**（🚨 **引擎 04:03 自殺事故** — WS tick stale Fix 4 按設計 cancel，但 **watchdog daemon 從未部署** → 7h10m 空窗無人拉起，11:13 operator 手動重啟。新增 **ENGINE-HEAL-FUP-1/2/3**。）
+**測試基準線**：Rust **engine lib 1249 + core 372 + e2e 35 = 1656** · Python **2852 passed (5 skipped · 0 fail)** · ml_training **135 passed (6 skipped)**
 
 > compact 後從此文件恢復工作狀態。第一個 `[ ]` 即為下一步起點。
 > 歷史歸檔索引在文件末尾。詳細完成度視角見 README.md。
@@ -12,11 +12,12 @@
 
 | # | 項目 | 預估 | 阻塞者 | 解鎖 |
 |---|------|------|-------|------|
-| ~~1~~ | ~~🚀 **ENGINE-HEAL-DEPLOY**~~ ✅ 2026-04-15 PID 403560 跑 binary mtime 01:55（含 ENGINE-HEAL Fix 1/3/4 + FA-PHANTOM-1 + FUP-8 Phase 1&2 全數到位）；DB 驗證 paper intents.details 非 NULL 且 `is_sentinel=false` + 真實 sized qty；canary 持續觀察中（≥1h 軟門檻不阻塞後續 action） | — | — | — |
-| **2** | 🧪 **G-2 FundingArb 驗證重啟** — deploy 後：manual entry 1 → paper_state 有倉 → IPC close → DB 出現 close fill with realized_pnl；再累積 ≥20 乾淨 fills 分析 edge | 2-3 d | ~~#1~~ ✅ | Phase 5 歸因量化確認 · LG-1 觀察期起點 |
-| **3** | 🕰️ **LG-1 Paper Trading 21d（重新定位）** — EDGE-P0/P1 + FA-PHANTOM-1 + FUP-8 部署後啟動正式觀察期；不再綁定 05-01 | 3 w | ~~#1~~ ✅, #2 | Live Gate · LG-2/3 |
-| ~~4~~ | ~~FA-PHANTOM-1-FUP-7~~ ✅ 2026-04-15 operator 選 C，註釋已加到 `fast_track.rs:39-57`（見下方 FA-PHANTOM-1 留尾段） | — | — | — |
-| **5** | 📊 **Phase 5 策略 Edge 2w 重評** — 乾淨 paper 2w 後重算 per-strategy gross edge。若翻正 → Phase 5 cost_gate 工作重啟；若仍負 → 策略本身需重做（EDGE-P2/P3） | 2 w | Action #2 | Phase 5 restart / rebuild 決策 |
+| **1** | 🚨 **ENGINE-HEAL-FUP-1 watchdog daemon 化** — 今日事故根因：Fix 2 的 Python watchdog 從未以 daemon 模式常駐（`restart_all.sh:187` 只用 `--status` 一次性），04:03 Fix 4 self-cancel 後 7h10m 無人拉起。需 systemd user unit 或 `restart_all.sh` nohup 常駐 + log rotation | 1-2 h | — | LG-1 可觀察、任何自救機制 |
+| **2** | 🔍 **ENGINE-HEAL-FUP-2 live pipeline lagging 根因調查** — 04:15Z (02:00:33 UTC=04:00 CEST) 一秒內湧出 **8,445 條** `fan-out: live pipeline lagging, tick dropped` → 135s 後 Fix 4 認定 WS 陳舊自殺。live 消費者 stall / DB back-pressure / tokio worker 耗盡？是**觸發 Fix 4 的真正上游根因** | 1-2 d | — | LG-1 穩定性，否則 self-cancel 會重演 |
+| **3** | 🗑️ **ENGINE-HEAL-FUP-3 engine_results.jsonl rotation** — 檔案已長到 **111 GB** 且仍以每 2 分鐘 +35MB 速率增長（每 tick 寫 2-3KB canary schema JSON）。磁盤仍有 1.1T 可用未爆但不可持續；需加 rotation / sampling / 或 canary 關閉旗標 | 30 m - 1 h | — | 磁盤可持續性 |
+| **4** | 🧪 **G-2 FundingArb 驗證重啟** — manual entry 1 → paper_state 有倉 → IPC close → DB 出現 close fill with realized_pnl；再累積 ≥20 乾淨 fills 分析 edge | 2-3 d | #1 | Phase 5 歸因量化確認 · LG-1 觀察期起點 |
+| **5** | 🕰️ **LG-1 Paper Trading 21d** — EDGE-P0/P1 + FA-PHANTOM-1 + FUP-8 部署後啟動正式觀察期；不再綁定 05-01 | 3 w | #1, #2, #4 | Live Gate · LG-2/3 |
+| **6** | 📊 **Phase 5 策略 Edge 2w 重評** — 乾淨 paper 2w 後重算 per-strategy gross edge。若翻正 → Phase 5 cost_gate 工作重啟；若仍負 → 策略本身需重做（EDGE-P2/P3） | 2 w | #4 | Phase 5 restart / rebuild 決策 |
 
 ---
 
@@ -30,20 +31,58 @@
 | W24 | 05-19~23 | **LG-4/5 Live Gate**（M/N 章）· SEC-21 · QoL-2 | ⬜ |
 | W25+ | 05-26+ | **EDGE-P3-1 Realized Edge Predictor** · Phase 5 補強或重做 · R-06 全 5 agent | ⬜ |
 
-**關鍵路徑**：`#1 DEPLOY → #2 G-2 → #3 LG-1 21d → LG-4/5 → Live`
-**最早 Live 日期**：視 LG-1 乾淨觀察期起點。樂觀估 **W24 末**（～2026-05-23），保守估 W25 末。
+**關鍵路徑**：`FUP-1 watchdog daemon 化 → FUP-2 上游 stall 根因 → G-2 驗證 → LG-1 21d → LG-4/5 → Live`
+**最早 Live 日期**：視 FUP-1/2 收尾速度 + LG-1 乾淨觀察期起點。樂觀估 **W24 末**（～2026-05-23），若 FUP-2 調查拖長則延 W25-26。
 
 ---
 
 ## 🟡 W22 活躍工作（當前週）
 
-### 部署窗口（Action #1）
+### 🚨 ENGINE-HEAL 事故 follow-up（2026-04-15 發現）
+
+**時間線**：
+- 2026-04-14 23:56:35 UTC 引擎啟動（PID 未存檔；rotated log `engine-1776244436.log`）
+- 2026-04-15 02:00:33 UTC（04:00:33 CEST）`fan-out: live pipeline lagging, tick dropped` **8,445 條** 一秒內噴發
+- 2026-04-15 02:03:05.327 UTC（04:03 CEST）`ERROR WS tick stale — triggering engine cancel (Fix 4) stale_ms=135201 threshold_ms=120000` → 優雅關閉（10 倉位市價平、event consumer 存盤 ticks=1,753,274 fills=382 balance=530.01）
+- 04:03 → 11:13 **空窗 7h10m**（watchdog daemon 不存在 → 無重啟）
+- 2026-04-15 09:13:56 UTC（11:13 CEST）operator 手動拉起 PID 577219（parent=init，非從 shell 啟動）
+
+**事實**：
+- ✅ Fix 4 WS tick stale self-cancel **按設計觸發**（stale_ms > threshold_ms）
+- ❌ Fix 2 Python watchdog **從未以 daemon 模式部署**：`restart_all.sh:187` 只跑 `engine_watchdog.py --status` 一次性檢查；`/tmp/openclaw/watchdog.log` 和 `canary_events.jsonl` 根本不存在；systemd 僅 `openclaw-gateway.service`；crontab 空
+- ⚠️ 觸發 Fix 4 的**真正上游根因未查**：live pipeline 消費者 stall / tokio worker 耗盡 / DB back-pressure 都可能
+- 🗑️ `/tmp/openclaw/engine_results.jsonl` 111 GB 並仍在增長（canary schema 每 tick 2-3KB）
+
+- [ ] **ENGINE-HEAL-FUP-1** 🚨 watchdog daemon 化（Action #1）
+  - 方案 A：加 systemd user unit `openclaw-watchdog.service`（+ `Restart=always` + log 到 `/tmp/openclaw/watchdog.log`）
+  - 方案 B：`restart_all.sh` 在 `wait_and_verify` 後加 `nohup python3 helper_scripts/canary/engine_watchdog.py --data-dir /tmp/openclaw --stale-threshold 45 --grace-period 120 --auto-restart &`（需加 `--auto-restart` daemon flag，若尚未實作則先實作）
+  - E2 必查：watchdog 本身也要有 `fcntl.flock` 單例 + 退避機制（已在 `engine_watchdog.py` 內，確認即可）
+  - 驗證：kill -9 engine → watchdog 偵測到 → 寫 `watchdog.log` → 執行 `restart_all.sh --engine-only` → 引擎復活
+
+- [ ] **ENGINE-HEAL-FUP-2** 🔍 live pipeline lagging 根因（Action #2）
+  - 8,445 條 WARN 在 **同一秒** 噴發 → channel 瞬間塞爆 → 符合「消費端卡住超過 1-2s 的所有累積 ticks 一次丟光」
+  - 調查方向：
+    1. Live 消費者是否在等 `trading_writer` / `market_writer` flush？DB 慢查詢？
+    2. Live pipeline 獨立 OS thread（3E-ARCH D17）是否死鎖 / OOM / await 饑餓？
+    3. 當時是否有 IPC 寫入暴風（patch_risk_config / scanner update）？
+    4. `fan-out` 的 bounded channel 容量設多少？capacity 觸發與 WS tick stale 120s 閾值是否匹配？
+  - 產出：worklog `docs/worklogs/2026-04-15--engine_2000_stall_postmortem.md` + 修復方案（若找到）
+
+- [ ] **ENGINE-HEAL-FUP-3** 🗑️ engine_results.jsonl rotation / 關閉（Action #3）
+  - 現況：無 rotation，無上限，canary_comparator.py 才需要此 dump
+  - 選項：
+    1. 加 size-based rotation（> 1GB 自動 rotate 到 `engine_results_logs/`，保留 N 個）
+    2. 加 sampling（每 100 ticks 才寫 1 條，對 canary 影響待評估）
+    3. 加 env flag `OPENCLAW_DISABLE_CANARY_DUMP=1` 完全關閉（灰度驗證過後的常態）
+  - R-07 Go/No-Go 已在「灰度驗證檢查」段持續監控 `engine_results.jsonl` 記錄數；若此項驗收已實質完成，選 3 最乾淨
+
+### 部署窗口（已完成，歸檔用）
 
 - [x] **ENGINE-HEAL-DEPLOY** ✅ 2026-04-15 — PID 403560 跑 binary mtime 01:55，含 ENGINE-HEAL Fix 1/3/4 + FA-PHANTOM-1 leverage-aware margin + FUP-8 Phase 1（sentinel flag `f6b07cd`）+ FUP-8 Phase 2（paper 走 sizing `2061310`）全數到位
   - DB 驗證：paper intents 10 筆最近 3 分鐘樣本，`submitted_qty` 真實 sized（0.47~31742），`is_sentinel=false`
-  - Canary 觀察：0 `FAST_TRACK CloseAll fired` / 0 panic / 0 crash 於持續運行中；≥1h 軟門檻待自然累積（不阻塞後續 action）
+  - 註：此 binary 已於 2026-04-15 02:03 Fix 4 self-cancel 下線，11:13 operator 手動重啟後 PID 577219 仍是同一 binary mtime 01:55（含 ENGINE-HEAL 全部修復）
 
-### G-2 FundingArb 驗證（Action #2，BLOCKED by #1）
+### G-2 FundingArb 驗證（Action #4，BLOCKED by FUP-1）
 
 - [ ] **G-2** FundingArb 策略驗證 + 參數調優
   - OC-5 ✅：FundingArb on_tick() 完整實現（entry/exit/cooldown/basis/edge），index_price TickContext 全鏈路
@@ -59,7 +98,7 @@
   - `fast_track.rs:39-57` 加了 ~19 行註釋說明：(a) 90% 是 Bybit MMR 物理常數不可 auto-scale；(b) margin_utilization_pct 本身 post FA-PHANTOM-1 fix 已是 leverage-aware；(c) 當前高槓桿配置下不觸發是刻意的 cash-mode 兜底；(d) 反 pattern 警告不要為「看起來死碼」去降閾值（會重開 FA-PHANTOM-1 類 false-positive）
   - 純註釋改動，`cargo check` 通過，無新測試需求
 
-### Phase 5 策略 Edge 觀察（Action #5）
+### Phase 5 策略 Edge 觀察（Action #6）
 
 - [ ] **PH5-VERIFY-1** 乾淨 paper 2w 重評 — EDGE-P0/P1 + FA-PHANTOM-1 fix 部署後 2 週數據，重新評估 gross edge
   - 若 gross edge 翻正 → Phase 5 cost_gate 工作重啟
@@ -110,15 +149,16 @@
   - **規格演化**（2026-04-15 完成 4 輪審查）：v1.0 → v1.1（round-1 QC/QA）→ v1.2（round-2 F1-F10，816→1019 行）→ v1.3（round-3 U1-U4 + M1，1019→1101 行）→ round-4 **GREEN**
   - **規格路徑**：`docs/references/2026-04-15--edge_predictor_spec.md`（1101 行 · CC 13 項 · T1-T23 命名測試）
   - **Worklog**：`docs/worklogs/2026-04-15--edge_predictor_spec_v1_to_v1_3.md`（規格四輪演化完整記錄）
-  - **分工（Stage 0 可開工，#25 + #27 可並行）**：
-    - **FA** ✅ spec v1.3 GREEN（commit `9141e08`）
-    - **PA** (#25) → SQL migration（`learning.decision_features` + `learning.decision_shadow_fills` + index）+ `parquet_etl.py` 補實現 + train 觸發器
-    - **ML-MIT** (#26) → quantile LGBM + CQR + CPCV + isotonic calibration + 離線 pinball loss / decile lift（blocked by #25）
-    - **AI-E** (#27) → Rust `edge_predictor/` module + PyO3 ONNX runtime + `cost_gate` 接入 + shadow flag + IPC 熱重載 + `write_toml_atomic_fsynced` helper 升級（`store.rs:231-244` 現無 fsync）+ `PipelineCommand::EmitShadowFill` IPC
-    - **CC** (#28) → 13 項必查（v1.3 CC clist）+ T1-T23 regression（blocked by #27）
+  - **分工（Stage 0 Phase A COMPLETE，Phase B + #25 可並行）**：
+    - **FA** ✅ spec v1.3 GREEN（commit `9141e08`）→ v1.4 reality-alignment（commit `1366054`）
+    - **PA** (#25) → SQL migration V017 ✅（commit `1366054`：`learning.decision_features` + `learning.decision_shadow_fills` + `fills.entry_context_id` + index）· 待做：`parquet_etl.py` 補實現 + train 觸發器
+    - **ML-MIT** (#26) → quantile LGBM + CQR + CPCV + isotonic calibration + 離線 pinball loss / decile lift（blocked by #25 ETL）
+    - **AI-E** (#27) → **Phase A COMPLETE** ✅（commits `8c1f234` A1-A4 + `3753ede` A5）：Rust `edge_predictor/` 模組骨架 + `gate.rs` pure function + `IntentProcessor` 整合 + `feature_builder.rs` 13/17 features + `to_jsonb` + `PipelineCommand::{SetEdgePredictorShadow, DisableEdgePredictorAll, EmitShadowFill}` IPC + `write_toml_atomic_fsynced` helper ✅
+    - **AI-E Phase B** (#27 後半) → A6 strategy-side features（confluence_score + persistence_elapsed_ms 從 5 策略穿透到 OrderIntent，與 FUP-8 Phase 3 OrderIntent schema 擴充合流）· tract/ort backend feature flag 選型 · Bootstrap-time model loader（Stage 2 ONNX 交付後）
+    - **CC** (#28) → 13 項必查（v1.3 CC clist）+ T1-T23 regression（blocked by #27 Phase B）
   - **安全門檻**（不可違背）：Shadow ≥14d（#29）· pinball loss 對比常數模型 >10% 才 promote · Feature freeze time = entry 瞬間 · Per-strategy 獨立模型 · 推理失敗 fail-closed → 回退現有 shrinkage · 不觸 LinUCB · 兩階段提交防 half-enabled · macOS CI `aarch64-apple-darwin`（M1/M2/M3/M4 → M5 Ultra/Max 部署目標，見 memory `project_mac_deployment_target.md`）
   - **Stage 0 收尾前 housekeeping**（Round-4 YELLOW-nit，非阻塞）：§7.1 加 ort macOS dylib bundling 提醒 · CC #13 加 strace Linux-only 註記
-  - **狀態**：🟢 spec GREEN · Stage 0 可開工（#25 PA + #27 AI-E 並行啟動）
+  - **狀態**：🟢 Stage 0 **Phase A COMPLETE**（commits `1366054` FA/V017 + `8c1f234` A1-A4 + `3753ede` A5）· gate 在 hot path 被諮詢 · 產線預設 `use_edge_predictor=false` 零行為改變 · Phase B (#27 後半) + ML-MIT (#26) 可啟動
 
 ### Phase 6 擴展
 
