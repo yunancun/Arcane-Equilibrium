@@ -33,6 +33,19 @@ pub struct PaperPosition {
     /// 還原的快照、orphan adopt）。
     #[serde(default)]
     pub entry_context_id: String,
+    /// ORPHAN-ADOPT-1 Phase 2A: strategy name that originated this position.
+    /// Strategy-driven fills write `intent.strategy` (e.g. "ma_crossover").
+    /// Exchange-origin inserts (import_positions, WS upsert) write "bybit_sync".
+    /// Adopted orphans write `ORPHAN_ADOPTED_STRATEGY` ("orphan_adopted").
+    /// Same-direction accumulates preserve the first writer (first-write-wins)
+    /// — rationale: original strategy owns the round-trip. Empty string only
+    /// on pre-Phase-2A deserialized snapshots.
+    /// ORPHAN-ADOPT-1 Phase 2A：倉位歸屬策略。策略驅動填單寫 intent.strategy；
+    /// 交易所來源填單寫 "bybit_sync"；adopt 的孤兒寫 ORPHAN_ADOPTED_STRATEGY。
+    /// 同向加倉保留首次寫入者（第一個持倉策略負責整個 round-trip）。
+    /// 空字串僅於 Phase 2A 之前的舊快照反序列化時出現。
+    #[serde(default)]
+    pub owner_strategy: String,
 }
 
 /// Paper trading state manager.
@@ -382,11 +395,68 @@ impl PaperState {
                     entry_ts_ms: ts_ms,
                     unrealized_pnl: 0.0,
                     entry_context_id: String::new(),
+                    owner_strategy: "bybit_sync".to_string(),
                 },
             );
             inserted += 1;
         }
         inserted
+    }
+
+    /// ORPHAN-ADOPT-1 Phase 2A: Adopt an exchange-reported orphan position into
+    /// PaperState so StopManager + evaluate_actions treat it as any other open
+    /// position. `owner_strategy` is set to the synthetic `ORPHAN_ADOPTED_STRATEGY`
+    /// ("orphan_adopted") so accumulate/close semantics still work but the B1/B2
+    /// edge probe skips it (it has no independent edge sample).
+    ///
+    /// Idempotent: if a same-direction (symbol, is_long) is already tracked —
+    /// which should be rare because the reconciler consults the side-car mirror
+    /// before classifying orphans — this is a no-op that returns false. A
+    /// direction flip is NOT handled here on purpose; `upsert_position_from_exchange`
+    /// owns flip semantics via the WS event stream.
+    ///
+    /// Returns true iff a new PaperPosition was actually inserted. `latest_prices`
+    /// is seeded with `entry_price` so StopManager has an immediate reference tick.
+    /// ORPHAN-ADOPT-1 Phase 2A：將交易所回報的孤兒倉位接管進 PaperState，
+    /// owner_strategy 設為合成策略 ORPHAN_ADOPTED_STRATEGY（"orphan_adopted"）。
+    /// 冪等：同向 (symbol, is_long) 已存在時為 no-op；方向翻轉由 ws upsert 負責。
+    pub fn adopt_orphan(
+        &mut self,
+        symbol: &str,
+        is_long: bool,
+        qty: f64,
+        entry_price: f64,
+        ts_ms: u64,
+    ) -> bool {
+        if qty <= 0.0 || !qty.is_finite() || entry_price <= 0.0 || !entry_price.is_finite() {
+            return false;
+        }
+        if let Some(existing) = self.positions.get(symbol) {
+            if existing.is_long == is_long {
+                return false;
+            }
+        }
+        self.latest_prices
+            .entry(symbol.to_string())
+            .or_insert(entry_price);
+        self.positions_insert(
+            symbol.to_string(),
+            PaperPosition {
+                symbol: symbol.to_string(),
+                is_long,
+                qty,
+                entry_price,
+                best_price: entry_price,
+                entry_fee: 0.0,
+                entry_ts_ms: ts_ms,
+                unrealized_pnl: 0.0,
+                entry_context_id: String::new(),
+                owner_strategy:
+                    crate::position_reconciler::orphan_handler::ORPHAN_ADOPTED_STRATEGY
+                        .to_string(),
+            },
+        );
+        true
     }
 
     /// B-1 Phase 2: Apply a runtime PositionUpdate from the exchange WS to paper_state.
@@ -455,6 +525,7 @@ impl PaperState {
                         entry_ts_ms: ts_ms,
                         unrealized_pnl: 0.0,
                         entry_context_id: String::new(),
+                        owner_strategy: "bybit_sync".to_string(),
                     },
                 );
                 true
@@ -609,6 +680,7 @@ impl PaperState {
         fill_price: f64,
         fee: f64,
         ts_ms: u64,
+        owner_strategy: &str,
     ) -> f64 {
         // Guard: reject zero-qty fills (prevents ghost positions)
         // 防護：拒絕零數量成交（防止幽靈持倉）
@@ -674,6 +746,7 @@ impl PaperState {
                 entry_ts_ms: ts_ms,
                 unrealized_pnl: 0.0,
                 entry_context_id: String::new(),
+                owner_strategy: owner_strategy.to_string(),
             },
         );
         0.0 // Opening position — no realized PnL / 開倉無已實現損益
@@ -903,7 +976,7 @@ mod tests {
     #[test]
     fn test_open_and_close_long() {
         let mut s = PaperState::new(10000.0);
-        s.apply_fill("BTC", true, 0.1, 50000.0, 2.75, 0);
+        s.apply_fill("BTC", true, 0.1, 50000.0, 2.75, 0, "test");
         assert_eq!(s.position_count(), 1);
 
         s.close_position("BTC", 51000.0, 1000);
@@ -915,7 +988,7 @@ mod tests {
     #[test]
     fn test_open_and_close_short() {
         let mut s = PaperState::new(10000.0);
-        s.apply_fill("BTC", false, 0.1, 50000.0, 2.75, 0);
+        s.apply_fill("BTC", false, 0.1, 50000.0, 2.75, 0, "test");
         s.close_position("BTC", 49000.0, 1000);
         // PnL: (50000-49000) * 0.1 = 100 - 2.75 fee
         assert!((s.balance() - 10097.25).abs() < 0.01);
@@ -924,7 +997,7 @@ mod tests {
     #[test]
     fn test_drawdown() {
         let mut s = PaperState::new(10000.0);
-        s.apply_fill("BTC", true, 0.1, 50000.0, 0.0, 0);
+        s.apply_fill("BTC", true, 0.1, 50000.0, 0.0, 0, "test");
         s.close_position("BTC", 45000.0, 1000);
         // Loss: (45000-50000) * 0.1 = -500
         assert!(s.drawdown_pct() > 0.0);
@@ -933,7 +1006,7 @@ mod tests {
     #[test]
     fn test_stop_check() {
         let mut s = PaperState::new(10000.0);
-        s.apply_fill("BTC", true, 0.1, 50000.0, 0.0, 0);
+        s.apply_fill("BTC", true, 0.1, 50000.0, 0.0, 0, "test");
         s.set_latest_price("BTC", 46000.0); // per-symbol price for stop check
         let triggers = s.check_stops(46000.0, 1000);
         assert_eq!(triggers.len(), 1); // hard stop at 5%
@@ -960,8 +1033,8 @@ mod tests {
         // Same-direction fills should accumulate qty with weighted avg entry.
         // 同方向成交應累加 qty 並加權平均入場價。
         let mut s = PaperState::new(10000.0);
-        s.apply_fill("BTC", true, 0.1, 50000.0, 1.0, 0); // buy 0.1 @ 50000
-        s.apply_fill("BTC", true, 0.1, 52000.0, 1.0, 1000); // buy 0.1 @ 52000
+        s.apply_fill("BTC", true, 0.1, 50000.0, 1.0, 0, "test"); // buy 0.1 @ 50000
+        s.apply_fill("BTC", true, 0.1, 52000.0, 1.0, 1000, "test"); // buy 0.1 @ 52000
         assert_eq!(s.position_count(), 1);
         let pos = s.get_position("BTC").unwrap();
         assert!((pos.qty - 0.2).abs() < 1e-10); // 0.1 + 0.1
@@ -973,9 +1046,9 @@ mod tests {
         // Verify same-direction fill doesn't replace position (old bug: insert overwrites).
         // 驗證同方向成交不會覆蓋持倉（舊 bug：insert 直接替換）。
         let mut s = PaperState::new(10000.0);
-        s.apply_fill("BTC", false, 0.05, 60000.0, 0.5, 0);
+        s.apply_fill("BTC", false, 0.05, 60000.0, 0.5, 0, "test");
         let initial_fee = s.get_position("BTC").unwrap().entry_fee;
-        s.apply_fill("BTC", false, 0.05, 61000.0, 0.5, 1000);
+        s.apply_fill("BTC", false, 0.05, 61000.0, 0.5, 1000, "test");
         let pos = s.get_position("BTC").unwrap();
         assert!((pos.qty - 0.10).abs() < 1e-10);
         assert!((pos.entry_price - 60500.0).abs() < 0.01);
@@ -987,8 +1060,8 @@ mod tests {
         // Opposite direction fill closes the position with PnL.
         // 反方向成交平倉並計算 PnL。
         let mut s = PaperState::new(10000.0);
-        s.apply_fill("BTC", true, 0.1, 50000.0, 0.0, 0);
-        s.apply_fill("BTC", false, 0.1, 51000.0, 0.0, 1000); // close
+        s.apply_fill("BTC", true, 0.1, 50000.0, 0.0, 0, "test");
+        s.apply_fill("BTC", false, 0.1, 51000.0, 0.0, 1000, "test"); // close
         assert_eq!(s.position_count(), 0);
         assert!((s.total_realized_pnl - 100.0).abs() < 0.01); // (51000-50000)*0.1
     }
@@ -998,8 +1071,8 @@ mod tests {
         // close_all_positions should close every open position at latest price.
         // close_all_positions 應以最新價格平掉所有持倉。
         let mut s = PaperState::new(10000.0);
-        s.apply_fill("BTC", true, 0.1, 50000.0, 0.0, 0);
-        s.apply_fill("ETH", false, 1.0, 3000.0, 0.0, 0);
+        s.apply_fill("BTC", true, 0.1, 50000.0, 0.0, 0, "test");
+        s.apply_fill("ETH", false, 1.0, 3000.0, 0.0, 0, "test");
         s.set_latest_price("BTC", 51000.0);
         s.set_latest_price("ETH", 2900.0);
         assert_eq!(s.position_count(), 2);
@@ -1015,7 +1088,7 @@ mod tests {
     fn test_get_position() {
         let mut s = PaperState::new(10000.0);
         assert!(s.get_position("BTC").is_none());
-        s.apply_fill("BTC", true, 0.1, 50000.0, 0.0, 0);
+        s.apply_fill("BTC", true, 0.1, 50000.0, 0.0, 0, "test");
         assert!(s.get_position("BTC").is_some());
         assert!(s.get_position("ETH").is_none());
     }
@@ -1027,7 +1100,7 @@ mod tests {
         let mut s = PaperState::new(10000.0);
         // Pre-existing position should be wiped by import_positions.
         // 既有持倉應被 import_positions 清掉。
-        s.apply_fill("STALE", true, 1.0, 10.0, 0.0, 0);
+        s.apply_fill("STALE", true, 1.0, 10.0, 0.0, 0, "test");
         let inserted = s.import_positions(vec![
             ("BTCUSDT".to_string(), true, 0.5, 50_000.0, 1_000),
             ("ETHUSDT".to_string(), false, 2.0, 3_000.0, 1_001),
@@ -1047,6 +1120,74 @@ mod tests {
         let eth = s.get_position("ETHUSDT").unwrap();
         assert!(!eth.is_long);
         assert!((eth.qty - 2.0).abs() < 1e-12);
+    }
+
+    // ---------------------------------------------------------------
+    // ORPHAN-ADOPT-1 Phase 2A: adopt_orphan semantics
+    // ORPHAN-ADOPT-1 Phase 2A：adopt_orphan 語義測試
+    // ---------------------------------------------------------------
+
+    /// adopt_orphan inserts a new position with owner_strategy = "orphan_adopted",
+    /// seeds latest_prices, and syncs the positions_mirror side-car.
+    /// adopt_orphan 插入 owner_strategy="orphan_adopted" 的新倉位，
+    /// 種入 latest_prices 並同步 positions_mirror。
+    #[test]
+    fn test_adopt_orphan_inserts_and_mirrors() {
+        let mut s = PaperState::new(10_000.0);
+        let mirror = s.positions_mirror();
+        assert!(mirror.read().is_empty());
+
+        let inserted = s.adopt_orphan("BTCUSDT", true, 0.1, 50_000.0, 1_700_000_000_000);
+        assert!(inserted);
+
+        let pos = s.get_position("BTCUSDT").expect("position must be present");
+        assert!(pos.is_long);
+        assert!((pos.qty - 0.1).abs() < 1e-12);
+        assert!((pos.entry_price - 50_000.0).abs() < 1e-9);
+        assert!((pos.best_price - 50_000.0).abs() < 1e-9);
+        assert_eq!(
+            pos.owner_strategy,
+            crate::position_reconciler::orphan_handler::ORPHAN_ADOPTED_STRATEGY
+        );
+        assert_eq!(s.latest_price("BTCUSDT"), Some(50_000.0));
+        assert_eq!(mirror.read().get("BTCUSDT"), Some(&true));
+    }
+
+    /// adopt_orphan is a no-op when the same-direction position is already
+    /// tracked (idempotent — mirror should already have suppressed the orphan).
+    /// adopt_orphan 對同向已存在的倉位為 no-op（冪等）。
+    #[test]
+    fn test_adopt_orphan_idempotent_same_direction() {
+        let mut s = PaperState::new(10_000.0);
+        s.apply_fill("BTCUSDT", true, 0.1, 50_000.0, 0.0, 1_000, "ma_crossover");
+        // Pre-adopt state: ma_crossover owns it.
+        // 預 adopt 狀態：ma_crossover 擁有。
+        assert_eq!(
+            s.get_position("BTCUSDT").unwrap().owner_strategy,
+            "ma_crossover"
+        );
+        let inserted =
+            s.adopt_orphan("BTCUSDT", true, 0.2, 51_000.0, 1_700_000_000_000);
+        assert!(!inserted, "same-direction adopt must be no-op");
+        // Original owner preserved — no strategy overwrite.
+        // 原 owner 保留，沒有被覆寫。
+        let pos = s.get_position("BTCUSDT").unwrap();
+        assert_eq!(pos.owner_strategy, "ma_crossover");
+        assert!((pos.qty - 0.1).abs() < 1e-12);
+    }
+
+    /// adopt_orphan rejects invalid qty / entry_price.
+    /// adopt_orphan 拒絕無效 qty / entry_price。
+    #[test]
+    fn test_adopt_orphan_rejects_invalid_inputs() {
+        let mut s = PaperState::new(10_000.0);
+        assert!(!s.adopt_orphan("X", true, 0.0, 100.0, 0));
+        assert!(!s.adopt_orphan("X", true, -1.0, 100.0, 0));
+        assert!(!s.adopt_orphan("X", true, f64::NAN, 100.0, 0));
+        assert!(!s.adopt_orphan("X", true, 1.0, 0.0, 0));
+        assert!(!s.adopt_orphan("X", true, 1.0, -5.0, 0));
+        assert!(!s.adopt_orphan("X", true, 1.0, f64::NAN, 0));
+        assert!(s.get_position("X").is_none());
     }
 
     // ---------------------------------------------------------------
@@ -1240,7 +1381,7 @@ mod tests {
         // Fresh apply_fill opens position with empty entry_context_id until setter stamps it.
         // 新開倉 entry_context_id 預設為空，直到 setter 標記。
         let mut s = PaperState::new(10_000.0);
-        s.apply_fill("BTC", true, 0.1, 50_000.0, 1.0, 0);
+        s.apply_fill("BTC", true, 0.1, 50_000.0, 1.0, 0, "test");
         assert_eq!(s.get_entry_context_id("BTC"), None);
     }
 
@@ -1249,7 +1390,7 @@ mod tests {
         // Setter stamps the id and getter reads it back.
         // setter 寫入後 getter 能讀回。
         let mut s = PaperState::new(10_000.0);
-        s.apply_fill("BTC", true, 0.1, 50_000.0, 1.0, 0);
+        s.apply_fill("BTC", true, 0.1, 50_000.0, 1.0, 0, "test");
         s.set_entry_context_id("BTC", "ctx-abc-123");
         assert_eq!(s.get_entry_context_id("BTC"), Some("ctx-abc-123"));
     }
@@ -1259,7 +1400,7 @@ mod tests {
         // Empty strings are no-ops so accumulate fills can't wipe a stamped id.
         // 空字串 setter 視為 no-op，累倉路徑不會擦掉既有 id。
         let mut s = PaperState::new(10_000.0);
-        s.apply_fill("BTC", true, 0.1, 50_000.0, 1.0, 0);
+        s.apply_fill("BTC", true, 0.1, 50_000.0, 1.0, 0, "test");
         s.set_entry_context_id("BTC", "ctx-orig");
         s.set_entry_context_id("BTC", "");
         assert_eq!(s.get_entry_context_id("BTC"), Some("ctx-orig"));
@@ -1270,9 +1411,9 @@ mod tests {
         // Same-direction top-up must NOT reset entry_context_id — downstream labels hinge on first open.
         // 同方向加倉不得重設 entry_context_id — 下游標籤以首次開倉為錨。
         let mut s = PaperState::new(10_000.0);
-        s.apply_fill("BTC", true, 0.1, 50_000.0, 1.0, 0);
+        s.apply_fill("BTC", true, 0.1, 50_000.0, 1.0, 0, "test");
         s.set_entry_context_id("BTC", "ctx-first-open");
-        s.apply_fill("BTC", true, 0.1, 52_000.0, 1.0, 1000);
+        s.apply_fill("BTC", true, 0.1, 52_000.0, 1.0, 1000, "test");
         assert_eq!(s.get_entry_context_id("BTC"), Some("ctx-first-open"));
     }
 
@@ -1281,7 +1422,7 @@ mod tests {
         // close_position removes the entry → getter returns None.
         // close_position 移除條目 → getter 回傳 None。
         let mut s = PaperState::new(10_000.0);
-        s.apply_fill("BTC", true, 0.1, 50_000.0, 1.0, 0);
+        s.apply_fill("BTC", true, 0.1, 50_000.0, 1.0, 0, "test");
         s.set_entry_context_id("BTC", "ctx-before-close");
         assert_eq!(s.get_entry_context_id("BTC"), Some("ctx-before-close"));
         s.close_position("BTC", 51_000.0, 1000);
@@ -1293,9 +1434,9 @@ mod tests {
         // Partial close (opposite qty < position qty) retains the stamped id on the surviving leg.
         // 部分平倉（反向 qty < 持倉 qty）保留倖存腿上的 id。
         let mut s = PaperState::new(10_000.0);
-        s.apply_fill("BTC", true, 0.2, 50_000.0, 2.0, 0);
+        s.apply_fill("BTC", true, 0.2, 50_000.0, 2.0, 0, "test");
         s.set_entry_context_id("BTC", "ctx-original");
-        s.apply_fill("BTC", false, 0.1, 51_000.0, 1.0, 1000); // half close
+        s.apply_fill("BTC", false, 0.1, 51_000.0, 1.0, 1000, "test"); // half close
         assert!(s.get_position("BTC").is_some());
         assert_eq!(s.get_entry_context_id("BTC"), Some("ctx-original"));
     }

@@ -632,7 +632,21 @@ fn process_orphans(
             edge_estimates: &edge_estimates_snapshot,
         };
         let decision = orphan_handler::handle_orphan(&ctx);
-        let sent = orphan_handler::dispatch_orphan_close(&decision, pos, cmd_tx);
+        // ORPHAN-ADOPT-1 Phase 2A: Close vs Adopt route through separate
+        // dispatchers. Adopt sends `AdoptOrphan` which injects the position
+        // into paper_state; subsequent reconcile cycles will see the mirror
+        // already owning the (symbol, is_long) and the FUP pre-classify
+        // suppression will drop further orphan verdicts for it.
+        // ORPHAN-ADOPT-1 Phase 2A：Close 與 Adopt 走不同派發路徑。Adopt 透過
+        // AdoptOrphan 注入 paper_state，後續對帳由 FUP 鏡像抑制避免重複接管。
+        let sent = match &decision {
+            orphan_handler::OrphanDecision::Close { .. } => {
+                orphan_handler::dispatch_orphan_close(&decision, pos, cmd_tx)
+            }
+            orphan_handler::OrphanDecision::Adopt { .. } => {
+                orphan_handler::dispatch_orphan_adopt(&decision, pos, cmd_tx)
+            }
+        };
         if sent {
             orphan_handler::spawn_orphan_audit(audit_pool, &decision, pos, engine_label);
         } else {

@@ -456,6 +456,22 @@ pub enum PipelineCommand {
         feature_definition_hash: String,
         features_jsonb: String,
     },
+    /// ORPHAN-ADOPT-1 Phase 2A · Adopt an exchange-reported orphan position.
+    /// Dispatched by position_reconciler after `handle_orphan()` returns
+    /// `OrphanDecision::Adopt` (Stage B2 AdoptPositiveEdge). Injects the
+    /// position into `paper_state` with `owner_strategy = "orphan_adopted"`;
+    /// StopManager + evaluate_actions then manage it like any other position.
+    /// Fire-and-forget — adoption outcome is logged; no recovery path if the
+    /// command channel is closed (pipeline already tearing down).
+    /// ORPHAN-ADOPT-1 Phase 2A · 接管交易所孤兒倉位。由 position_reconciler 在
+    /// handle_orphan 回傳 Adopt 決策後派發。Fire-and-forget。
+    AdoptOrphan {
+        symbol: String,
+        is_long: bool,
+        qty: f64,
+        entry_price: f64,
+        ts_ms: u64,
+    },
 }
 
 /// Server-side stop request dispatched from tick_pipeline to Bybit API (Item 1).

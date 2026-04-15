@@ -261,7 +261,7 @@ use super::*;
         // 直接建立紙盤多單持倉。
         pipeline
             .paper_state
-            .apply_fill("BTCUSDT", true, 0.1, 50_000.0, 0.0, 0);
+            .apply_fill("BTCUSDT", true, 0.1, 50_000.0, 0.0, 0, "test");
         // Pump exactly 1000 ticks. total_ticks becomes 1000 -> snapshot.
         // 打 1000 tick，total_ticks 達到 1000 觸發快照。
         for i in 0..1000 {
@@ -304,7 +304,7 @@ use super::*;
         let mut pipeline = TickPipeline::new(&["BTCUSDT"]);
         pipeline
             .paper_state
-            .apply_fill("BTCUSDT", false, 0.2, 50_000.0, 0.0, 0);
+            .apply_fill("BTCUSDT", false, 0.2, 50_000.0, 0.0, 0, "test");
         for i in 0..1000 {
             pipeline.on_tick(&make_event("BTCUSDT", 49_000.0, (i + 1) * 60_000));
         }
@@ -535,7 +535,7 @@ use super::*;
     fn test_dbrun3_close_position_returns_pnl() {
         let mut p = TickPipeline::new(&["BTCUSDT"]);
         // Open long at 50k, close at 51k → +0.1 * 1000 = +$100 realized
-        p.paper_state.apply_fill("BTCUSDT", true, 0.1, 50_000.0, 0.0, 0);
+        p.paper_state.apply_fill("BTCUSDT", true, 0.1, 50_000.0, 0.0, 0, "test");
         let pnl = p.paper_state.close_position("BTCUSDT", 51_000.0, 1_000);
         assert_eq!(pnl, Some(100.0));
         // Subsequent close on same symbol → None
@@ -861,7 +861,7 @@ use super::*;
         // Open a long position directly via paper_state
         pipeline
             .paper_state
-            .apply_fill("BTCUSDT", true, 0.1, 50_000.0, 5.5, 1000);
+            .apply_fill("BTCUSDT", true, 0.1, 50_000.0, 5.5, 1000, "test");
         assert_eq!(pipeline.paper_state.position_count(), 1);
         let balance_before = pipeline.paper_state.balance();
 
@@ -1083,10 +1083,10 @@ use super::*;
         );
         // Open four long positions at very different real-world price scales.
         // 在四個價格相差幾個數量級的交易對上各開一個多倉。
-        pipeline.paper_state.apply_fill("BTCUSDT", true, 0.01, 50_000.0, 0.0, 1_000);
-        pipeline.paper_state.apply_fill("ETHUSDT", true, 0.10, 3_000.0,  0.0, 1_000);
-        pipeline.paper_state.apply_fill("FFUSDT",  true, 100.0, 0.50,    0.0, 1_000);
-        pipeline.paper_state.apply_fill("DOGEUSDT", true, 1_000.0, 0.20, 0.0, 1_000);
+        pipeline.paper_state.apply_fill("BTCUSDT", true, 0.01, 50_000.0, 0.0, 1_000, "test");
+        pipeline.paper_state.apply_fill("ETHUSDT", true, 0.10, 3_000.0,  0.0, 1_000, "test");
+        pipeline.paper_state.apply_fill("FFUSDT",  true, 100.0, 0.50,    0.0, 1_000, "test");
+        pipeline.paper_state.apply_fill("DOGEUSDT", true, 1_000.0, 0.20, 0.0, 1_000, "test");
 
         // Set per-symbol latest prices — each at a small +1% gain over entry.
         // The triggering tick (in production) would carry only ONE of these prices,
@@ -1143,7 +1143,7 @@ use super::*;
         );
         // Open position WITHOUT setting latest_price.
         // 開倉但不設定 latest_price。
-        pipeline.paper_state.apply_fill("FFUSDT", true, 100.0, 0.50, 0.0, 1_000);
+        pipeline.paper_state.apply_fill("FFUSDT", true, 100.0, 0.50, 0.0, 1_000, "test");
         // apply_fill seeds latest_prices via its internal book-keeping; clear it
         // explicitly to simulate a position whose price has not been observed yet.
         // apply_fill 內部會種入 latest_price，這裡強制清掉模擬「未觀測過價格」的情境。
@@ -1249,7 +1249,7 @@ use super::*;
     fn test_zero_price_tick_with_position_no_nan() {
         let mut pipeline = TickPipeline::with_kind(&["BTCUSDT"], 10_000.0, PipelineKind::Paper);
         // Open a position via paper_state directly
-        pipeline.paper_state.apply_fill("BTCUSDT", true, 0.01, 50000.0, 2.75, 100_000);
+        pipeline.paper_state.apply_fill("BTCUSDT", true, 0.01, 50000.0, 2.75, 100_000, "test");
         // Feed zero-price tick
         let zero_event = make_event("BTCUSDT", 0.0, 200_000);
         let _result = pipeline.on_tick(&zero_event);
