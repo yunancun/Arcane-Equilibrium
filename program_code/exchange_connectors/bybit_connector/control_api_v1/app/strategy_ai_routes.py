@@ -154,6 +154,28 @@ async def get_demo_positions(actor: base.AuthenticatedActor = Depends(base.curre
         raise HTTPException(status_code=502, detail=f"Bybit positions fetch failed: {exc}")
 
 
+def _normalize_order(o: dict) -> dict:
+    """Remap Rust OrderInfo snake_case → Bybit camelCase so the GUI filter
+    (o.orderStatus / o.orderType / o.triggerPrice) finds them. Rust serializes
+    snake_case; GUI compares against camelCase keys — without this remap every
+    order gets filtered out of the "active" set.
+    Rust 序列化 snake_case（order_status/order_type/trigger_price），GUI 過濾器
+    用 camelCase 比對，未映射時所有訂單會被當作「非活躍」過濾掉。
+    """
+    if not isinstance(o, dict):
+        return o
+    return {
+        **o,
+        "orderId":       o.get("orderId")       or o.get("order_id"),
+        "orderLinkId":   o.get("orderLinkId")   or o.get("order_link_id"),
+        "orderStatus":   o.get("orderStatus")   or o.get("order_status"),
+        "orderType":     o.get("orderType")     or o.get("order_type"),
+        "triggerPrice":  o.get("triggerPrice")  or o.get("trigger_price"),
+        "createdTime":   o.get("createdTime")   or o.get("created_time"),
+        "updatedTime":   o.get("updatedTime")   or o.get("updated_time"),
+    }
+
+
 @phase2_router.get("/demo/orders")
 async def get_demo_orders(actor: base.AuthenticatedActor = Depends(base.current_actor)):
     """
@@ -164,13 +186,19 @@ async def get_demo_orders(actor: base.AuthenticatedActor = Depends(base.current_
     if rc is None:
         return _envelope({"enabled": False, "source": "rust_engine"})
     try:
-        orders = rc.get_active_orders("linear")
+        raw_orders = rc.get_active_orders("linear")
+        orders = [_normalize_order(o) for o in raw_orders]
+        conditional_count = sum(
+            1 for o in orders
+            if (o.get("orderStatus") or "").lower() == "untriggered"
+        )
+        regular_count = len(orders) - conditional_count
         return _envelope({
             "source": "rust_engine",
             "retCode": 0,
             "result": {"list": orders},
-            "regular_count": len(orders),
-            "conditional_count": 0,
+            "regular_count": regular_count,
+            "conditional_count": conditional_count,
         })
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Bybit orders fetch failed: {exc}")
