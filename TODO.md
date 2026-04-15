@@ -1,6 +1,6 @@
 # OpenClaw TODO — 工作計劃清單
 
-**最後更新：2026-04-15**（🚨 **引擎 04:03 自殺事故** — WS tick stale Fix 4 按設計 cancel，但 **watchdog daemon 從未部署** → 7h10m 空窗無人拉起，11:13 operator 手動重啟。新增 **ENGINE-HEAL-FUP-1/2/3**。**FIX-PHASE1 FUP-A/B 完成** — canary_writer warn 節流 1Hz + drop counter + 覆蓋 `TrySendError::Full` 分支單元測試。**E4-HYG-1 ✅** — `golden_extreme.rs` 漏 `trailing_activation_pct` 欄位補齊，`cargo test -p openclaw_core` 恢復 372 pass。**EDGE-P3-1 Phase B #1 ✅** — main.rs bootstrap 構造 `PerEnginePredictors` → 三引擎 Deps；E2 nits（debug_assert 雙注入 + Arc::clone 精簡）收尾；tract/ort backend 選型 audit 文檔化；commits `c9416d0` + `0fcf449` + `3dd845c`。）
+**最後更新：2026-04-15**（🚨 **引擎 04:03 自殺事故** — WS tick stale Fix 4 按設計 cancel，但 **watchdog daemon 從未部署** → 7h10m 空窗無人拉起，11:13 operator 手動重啟。新增 **ENGINE-HEAL-FUP-1/2/3**。**FIX-PHASE1 FUP-A/B 完成** — canary_writer warn 節流 1Hz + drop counter + 覆蓋 `TrySendError::Full` 分支單元測試。**E4-HYG-1 ✅** — `golden_extreme.rs` 漏 `trailing_activation_pct` 欄位補齊，`cargo test -p openclaw_core` 恢復 372 pass。**ENGINE-HEAL-FUP-1 ✅ 正式結清** — watchdog 從 nohup PID 592881 升級為 systemd user unit `openclaw-watchdog.service`（Restart=always + log append + linger=yes 跨重啟存活），新 PID 678153 Main（PPID=1983 systemd --user）。**EDGE-P3-1 Phase B #1 ✅** — main.rs bootstrap 構造 `PerEnginePredictors` → 三引擎 Deps；E2 nits（debug_assert 雙注入 + Arc::clone 精簡）收尾；tract/ort backend 選型 audit 文檔化；commits `c9416d0` + `0fcf449` + `3dd845c`。）
 **測試基準線**：Rust **engine lib 1264 + core 372 + e2e 35 = 1671** · Python **2852 passed (5 skipped · 0 fail)** · ml_training **135 passed (6 skipped)**
 **EDGE-P3-1 Phase A/A6 COMPLETE** — gate 在 hot path 被諮詢 + MA/BBR/BBB 策略 confluence/persistence 經 OrderIntent 穿透至 feature_builder；產線預設 `use_edge_predictor=false` 零行為改變；commits `8c1f234` A1-A4 + `3753ede` A5 + `a23b268` A6
 **EDGE-P3-1 Phase B IN PROGRESS** — #1 bootstrap + #2 backend 選型 ✅；#3 model loader 等 Stage 2 artifact；Step 7 餘項 5 條（`DecisionFeatureSnapshot`/`ReloadEdgePredictor` IPC · Python consumers · `write_toml_atomic_fsynced` · 兩階段 commit · capabilities endpoint）可獨立前推
@@ -14,7 +14,7 @@
 
 | # | 項目 | 預估 | 阻塞者 | 解鎖 |
 |---|------|------|-------|------|
-| ~~**1**~~ | ✅ **ENGINE-HEAL-FUP-1 watchdog daemon 化** — 2026-04-15 11:31 已 nohup 起 PID 592881，`/tmp/openclaw/watchdog.log` 開始落字。**留尾**：仍是手動 nohup（不會跨重啟存活）；正式 systemd user unit 或 `restart_all.sh` 整合留待 W22 收尾 | done | — | ✅ |
+| ~~**1**~~ | ✅ **ENGINE-HEAL-FUP-1 watchdog daemon 化** — 2026-04-15 11:31 先以 nohup PID 592881 啟動；**14:25 升級為 systemd user unit**（`~/.config/systemd/user/openclaw-watchdog.service`，Restart=always + `StandardOutput=append:/tmp/openclaw/watchdog.log` + linger=yes 跨重啟存活）。新 PID 678153 Main（PPID=1983 `systemd --user`），flock 正確轉交 | done | — | ✅ |
 | ~~**2**~~ | ✅ **ENGINE-HEAL-FUP-2 根因調查完成** — 2026-04-15：實為 **2h 內 15+ 波段累積壓力**（非一秒 8,445 噴發），主因 = canary JSONL 同步寫盤在 live event loop 熱路徑上 + live channel 512 偏小。詳 `docs/worklogs/2026-04-15--engine_2000_stall_postmortem.md` | done | — | ✅ |
 | ~~**3**~~ | ✅ **ENGINE-HEAL-FIX-PHASE1** — 合併 R1（canary 寫盤改 bounded mpsc → 專用 tokio 任務 / BufWriter / size rotation）+ R2（live channel 512→1024 對稱化）+ FUP-3（`OPENCLAW_DISABLE_CANARY_DUMP=1` 旗標 + 4 個 env 控制旋轉）單 commit。1262 + 372 + 35 = 1669 cargo tests 0 fail。E2 GREEN（2 nits 列為 FUP）。**留尾**：operator 需 `restart_all.sh --rebuild` 部署；24h 觀察 `live pipeline lagging` WARN 是否歸零 | done | — | ✅ |
 | ~~**3a**~~ | ✅ **FIX-PHASE1 FUP-A** — `canary_writer` handle 加 `total_dropped` + `last_warn_ms` Arc<AtomicU64>；Full 分支遞增計數器 + 1Hz CAS 節流 warn（避免 warn 自身在持續壓力下成為 log flood）。engine lib 1262→1264（+2） | done | — | ✅ |
@@ -57,11 +57,16 @@
 - ✅ **Fix 4 上游根因已查明**（2026-04-15 post-mortem）：live event loop 的 `event_rx.recv()` select arm 在每 tick 同步 `writeln!` 到 canary JSONL（raw `std::fs::File`，無 buffer），~280 ticks/sec × 2.5KB × canary 檔案已 100GB+ 的 FS 壓力週期性卡住 consumer；加上 live fan-out channel 512 偏小（paper/demo 1024）。115s consumer 拉不到新 tick → Fix 4 越過 120s 閾值
 - 🗑️ `/tmp/openclaw/engine_results.jsonl` 111 GB 並仍在增長（canary schema 每 tick 2-3KB）— FUP-3 同時解
 
-- [ ] **ENGINE-HEAL-FUP-1** 🚨 watchdog daemon 化（Action #1）
-  - 方案 A：加 systemd user unit `openclaw-watchdog.service`（+ `Restart=always` + log 到 `/tmp/openclaw/watchdog.log`）
-  - 方案 B：`restart_all.sh` 在 `wait_and_verify` 後加 `nohup python3 helper_scripts/canary/engine_watchdog.py --data-dir /tmp/openclaw --stale-threshold 45 --grace-period 120 --auto-restart &`（需加 `--auto-restart` daemon flag，若尚未實作則先實作）
-  - E2 必查：watchdog 本身也要有 `fcntl.flock` 單例 + 退避機制（已在 `engine_watchdog.py` 內，確認即可）
-  - 驗證：kill -9 engine → watchdog 偵測到 → 寫 `watchdog.log` → 執行 `restart_all.sh --engine-only` → 引擎復活
+- [x] **ENGINE-HEAL-FUP-1** ✅ 2026-04-15 14:25 — watchdog daemon 正式化為 systemd user unit（Action #1）
+  - **方案 A 採用**：`~/.config/systemd/user/openclaw-watchdog.service`
+    - `Type=simple` + `Restart=always` + `RestartSec=5` + `StartLimitBurst=5/60s`
+    - `StandardOutput=append:/tmp/openclaw/watchdog.log` + `StandardError=` 同檔
+    - `WorkingDirectory=/home/ncyu/BybitOpenClaw/srv`（auto-restart 用 `restart_all.sh --engine-only`，需 repo root）
+    - `KillSignal=SIGTERM` + `TimeoutStopSec=30` → watchdog 內建 SIGTERM handler 清 flock
+  - **跨重啟存活**：`loginctl show-user ncyu` 確認 `Linger=yes`，user systemd 在 boot 時自動啟動 watchdog
+  - **遷移**：SIGTERM PID 592881 釋放 flock → `daemon-reload + enable --now` → 新 PID 678153（PPID=1983 `systemd --user`，非 PPID=1 nohup 孤兒）
+  - **單例 + 退避機制確認**：`engine_watchdog.py:508` `fcntl.flock LOCK_EX|LOCK_NB`（重複啟動 exit 3）；`RESTART_BACKOFF_SECONDS = [60,120,300,600,3600]`；`MAX_CONSECUTIVE_FAILURES = 5` 後 circuit-break
+  - **未壓測 kill -9 engine**（會打斷 G-2 daemon + 當前活倉）；依 snapshot-based 健康判斷 + Fix 4 self-cancel 時 watchdog 能重啟的邏輯已在 `engine_watchdog.py` main loop 驗證過（commit `4e09c09` Fix 2 單元測試）
 
 - [x] **ENGINE-HEAL-FUP-2** 🔍 live pipeline lagging 根因 — **調查完成 2026-04-15**
   - **TODO 敘述更正**：**不是** 8,445 條一秒噴發，而是 **~2h 內 15+ 波段** 共 8,446 條（首波 00:04:55 UTC，共 3,474 條；末波 02:00 共 464 條）；Fix 4 是累積壓力最終讓 consumer 120s 拉不到 tick 觸發
@@ -91,7 +96,7 @@
   - DB 驗證：paper intents 10 筆最近 3 分鐘樣本，`submitted_qty` 真實 sized（0.47~31742），`is_sentinel=false`
   - 註：此 binary 已於 2026-04-15 02:03 Fix 4 self-cancel 下線，11:13 operator 手動重啟後 PID 577219 仍是同一 binary mtime 01:55（含 ENGINE-HEAL 全部修復）
 
-### G-2 FundingArb 驗證（Action #4，BLOCKED by FUP-1）
+### G-2 FundingArb 驗證（Action #4 — FUP-1 ✅ 已解除）
 
 - [ ] **G-2** FundingArb 策略驗證 + 參數調優
   - OC-5 ✅：FundingArb on_tick() 完整實現（entry/exit/cooldown/basis/edge），index_price TickContext 全鏈路
