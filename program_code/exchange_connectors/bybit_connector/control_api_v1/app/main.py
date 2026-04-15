@@ -189,6 +189,10 @@ app.include_router(live_router)
 from .live_trust_routes import live_trust_router  # noqa: E402
 app.include_router(live_trust_router)
 
+# ── Engine Capabilities Router / 引擎能力路由注册（EDGE-P3-1 Step 7f）──
+from .engine_capabilities_routes import engine_capabilities_router  # noqa: E402
+app.include_router(engine_capabilities_router)
+
 # ── Startup Integrity Check / 啟動完整性驗證 ────────────────────────────────
 # Verify that non-optional critical dependencies were successfully injected at
 # module initialisation time.  H0_GATE is allowed to be None in degraded /

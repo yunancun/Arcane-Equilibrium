@@ -1,7 +1,34 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-04-15（ORPHAN-ADOPT-1 Phase 2A + EDGE-P3-1 Step 7e）
+> 最後更新：2026-04-15（EDGE-P3-1 Step 7f capabilities endpoint）
+
+### EDGE-P3-1 Step 7f — `GET /api/v1/engine/capabilities` 探針端點（2026-04-15）
+
+**背景**：EDGE-P3-1 §12.3 item 7 的 backward-compat capabilities probe。spec 僅標 `(backward-compat)` 無詳細 schema — 解讀為「端點存在 + 預期 shape 即表示此 build 支援 EDGE-P3-1，舊 build 回 404 讓 client 優雅降級」。刻意保持薄，不重複 `/api/v1/paper/risk/config/engine/{engine}` 的完整 RiskConfig 快照。
+
+**交付**（`program_code/exchange_connectors/bybit_connector/control_api_v1/app/engine_capabilities_routes.py` 新檔 ~180 行 + `main.py` +4 行註冊 + `tests/test_engine_capabilities_routes.py` 新檔 ~180 行）：
+- **路由** `/api/v1/engine` prefix，`GET /capabilities`，`Depends(base.current_actor)`（viewer 即可，純讀取探針）。回傳三段：
+  - `feature_schema` — `FEATURE_NAMES_V1` 鏡像（`schema_version="v1"`、`dim=17`、`names`）從 `program_code/ml_training/parquet_etl.EDGE_P3_FEATURE_NAMES` 匯入，複用既有 DO-NOT-REORDER 契約避免新增鏡像副本。
+  - `ipc_methods` — 本 build 宣告哪些 Step 7 IPC 變體已接線的 bool 字典：`decision_feature_snapshot=True`（7a）· `fsynced_toml_write=True`（7d）· `disable_edge_predictor_all=True`（7e）· `reload_edge_predictor=False`（7b pending）· `emit_shadow_fill=False`（7c pending）· `set_edge_predictor_shadow=False`（v1.3 U1 pending）。唯一防漂移宣告 — 後續 PR 接線時必須同步翻旗。
+  - `engines` — per-engine (paper/demo/live) 窄 edge_predictor 視圖（`use_edge_predictor`、`shadow_mode`、`quantile_safety_k`、`require_q10_positive_for_adds`、`exploration_rate`、`fallback_on_error`），經 `get_risk_config` IPC 逐引擎取。
+- **Fail-closed 契約**：IPC 不可用（測試、cold boot、engine 崩）仍回 HTTP 200 + `degraded=true` + `reason` 字串（`ipc_unavailable` / `ipc_error:{ExcClass}` / `bad_payload_shape`），靜態部分（feature_schema / ipc_methods）永遠可用。絕不 5xx。模組級 `_IPC_CLIENT` 懶初始化單例（複用 `risk_routes._get_direct_ipc` 樣式）。
+- **Envelope** 符合既有慣例：`{"ok": true, "data": {...}, "is_simulated": false, "data_category": "engine_capabilities"}`。
+- **6 新 tests**（`test_engine_capabilities_routes.py`）：
+  - `test_capabilities_returns_200_without_ipc` — 無 IPC 仍回 200。
+  - `test_capabilities_degraded_when_ipc_down` — `degraded=true` + `reason="ipc_unavailable"` + 所有 engines 欄位 None。
+  - `test_capabilities_static_payload_present_when_degraded` — schema.names 17 + adx_1h/is_funding_settlement_window 端點 + ipc_methods 完整。
+  - `test_capabilities_happy_path_surfaces_engines` — 存根 IPC 回三引擎差異化值（paper use=true/demo=false/live=false + exploration_rate 分流）→ route 正確路由。
+  - `test_capabilities_envelope_shape` — ok/is_simulated/data_category + engines 三鍵完整。
+  - `test_capabilities_requires_auth` — 無 `dependency_overrides` → 401（`current_actor` 拒絕空 token）。
+
+**測試**：Python **2852→2875 pass / 0 fail / 5 skipped**（control_api_v1 子集 `2452 passed`，含新增 6）。Rust 測試未觸（Step 7f Python-only）。
+
+**為何未新增 Rust IPC**：刻意避免 scope creep。`get_risk_config` IPC（ARCH-RC1 1C-2-C / LIVE-P2-1）已是三引擎完整 RiskConfig 讀取管道；Step 7f 只需薄 wrapper 抽 edge_predictor 窄子集 + 疊靜態宣告。未來若 `ipc_methods` 宣告維護壓力變大，可升級為新 Rust `get_engine_capabilities` IPC 由引擎自報（source of truth 移至 Rust），但 Step 7f 完工時機械漂移風險低（`_EDGE_P3_IPC_SUPPORT` 常數字典每條都註記 commit 號 + spec 條款）。
+
+**下一步**：Step 7 餘 2 條（7b `ReloadEdgePredictor{engine, strategy, path}` IPC + Python route · 7c `EmitShadowFill` Python consumer → `learning.decision_shadow_fills`）。兩條獨立可推。
+
+---
 
 ### ORPHAN-ADOPT-1 Phase 2A — 確定性 Adopt 基礎設施（2026-04-15）
 
