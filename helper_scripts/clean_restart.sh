@@ -183,8 +183,10 @@ if [ -d "$DATA_DIR" ]; then
     for f in "$DATA_DIR"/pipeline_snapshot*.json; do
         [ -f "$f" ] && mv "$f" "$ARCHIVE_ROOT/snapshots/" 2>/dev/null || true
     done
-    # per-engine state files
-    for f in "$DATA_DIR"/paper_state.json "$DATA_DIR"/demo_state.json "$DATA_DIR"/live_state.json; do
+    # per-engine state files — paper_state.json 不歸檔（paper 為純虛擬、
+    # paper_state.json 是唯一權威；archive 掉會導致冷啟動以 demo wallet 當
+    # initial_balance，但 realized/fees 仍從 trading.fills 還原，產生虛假虧損）
+    for f in "$DATA_DIR"/demo_state.json "$DATA_DIR"/live_state.json; do
         [ -f "$f" ] && mv "$f" "$ARCHIVE_ROOT/state_files/" 2>/dev/null || true
     done
     # canary + audit

@@ -1,19 +1,33 @@
 # helper_scripts/ — 腳本索引 (Script Index)
 
 本目錄存放 OpenClaw 系統的維護、啟動、CI 輔助腳本。
-最後更新：2026-04-14（QoL-3 新增 build_pyo3.sh + restart_all.sh `--rebuild`）
+最後更新：2026-04-15（新增 fresh_start.sh DB 全清重啟 + clean_restart.sh paper_state 保留修正）
 
 ---
 
 ## 頂層腳本 (Top-Level Scripts)
 
+### 生命週期 (Lifecycle)
+
+| 腳本 | 用途 |
+|------|------|
+| `restart_all.sh` | **輕量重啟**：停+啟 Rust 引擎 + API server（不動數據）。旗標：`--engine-only` / `--api-only` 限定範圍；`--rebuild` 先重建 PyO3 .so + openclaw-engine binary 再啟動。 |
+| `stop_all.sh` | **優雅停止**：停引擎 + 建立 `engine_maintenance.flag`，讓 `engine_watchdog.py` 不自動重啟。`--engine-only` / `--api-only`。移除 flag: `rm /tmp/openclaw/engine_maintenance.flag` 或跑 `restart_all.sh`。 |
+| `clean_restart.sh` | **交易所層重啟**：停引擎 → PyO3 flatten demo/live 倉位 → 歸檔 runtime 文件（**不動 paper_state，不動 DB**）→ 檢查 binary 新舊 → 重建/重啟 → watchdog 驗證。輕度重置，保留歷史累計。旗標：`--yes` / `--mark-damaged`（歸檔 DB 交易表）/ `--include-live` / `--skip-flatten` / `--skip-build-check` |
+| `fresh_start.sh` | **完整 DB 重置重啟**（2026-04-15 新增）：在 clean_restart 基礎上額外清空所有 PnL / 手續費 / 勝率 / 經驗數據（透過 `fresh_start_reset.py`）讓引擎從零歷史冷啟動。**保留**：市場數據（klines/funding/OI/LSR/liquidations/regime/news）、model_registry、linucb_state_archive、features.versions、ai_budget_config。**摧毀**：fills/intents/orders/outcomes/signals/agent 活動/學習狀態。旗標：`--yes` / `--include-live` / `--skip-flatten` / `--skip-build-check` |
+| `start_paper_trading.sh` | API server 就緒後自動啟動 Paper Trading（systemd / cron @reboot） |
+
+### 建構 / 平倉 (Build & Flatten)
+
 | 腳本 | 用途 |
 |------|------|
 | `build_pyo3.sh` | **PyO3 (.so) 統一建構+部署**：`maturin build --release` 一次，`pip install --force-reinstall` 雙寫至 `~/.venv` 與 `control_api_v1/.venv`。旗標：`--release`（預設）/ `--debug` / `--venv <path>`（單一目標）/ `-n`/`--dry-run` / `--help`。退出碼：0 ok / 1 args / 2 build / 3 install / 4 verify。解決 Rust struct 改動後需手動 `maturin develop` 兩次的痛點。 |
-| `restart_all.sh` | 一鍵重啟 Rust 引擎 + API server。`--engine-only` / `--api-only` 限定範圍；`--rebuild` 在啟動服務前調用 `build_pyo3.sh` 重建 .so（rebuild 失敗則不啟動任何服務）。預設無 flag 行為不變。 |
-| `clean_restart.sh` | 乾淨重啟：停引擎 → PyO3 flatten demo/live 倉位 → 歸檔 runtime + DB `_damaged_<ts>` 表 → 檢查 binary 新舊 → 重建/重啟 → watchdog 驗證。旗標：`--yes` / `--mark-damaged` / `--include-live` / `--skip-flatten` / `--skip-build-check` |
-| `clean_restart_flatten.py` | 交易所平倉助手（被 clean_restart.sh 調用；亦可獨立使用 `--env demo\|mainnet [--dry-run]`）。先 `refresh_instruments` 載入品種規格，再對每倉下 reduce_only 市價單 + 取消所有未成交單；5 輪 verify 循環掃殘尾 |
-| `start_paper_trading.sh` | API server 就緒後自動啟動 Paper Trading（systemd / cron @reboot） |
+| `clean_restart_flatten.py` | 交易所平倉助手（被 clean_restart.sh / fresh_start.sh 調用；亦可獨立 `--env demo\|mainnet [--dry-run]`）。先 `refresh_instruments` 載入品種規格，再對每倉下 reduce_only 市價單 + 取消所有未成交單；5 輪 verify 循環掃殘尾 |
+
+### 定時任務 / CI (Cron & CI)
+
+| 腳本 | 用途 |
+|------|------|
 | `cron_daily_report.sh` | 每日自動採集 Paper Trading 指標 + Telegram 推送（Cron UTC 0:00） |
 | `cron_observer_cycle.sh` | 每 5 分鐘執行 Observer 循環 + runtime snapshot 橋接 |
 | `schema_diff.py` | CI 類型一致性：比對 Python shared_types vs Rust golden JSON schema |
@@ -23,7 +37,7 @@
 
 | 腳本 | 用途 |
 |------|------|
-| `db/fresh_start_reset.py` | 開發噪音清理：保留客觀市場數據，清除系統經驗數據。支援 `--report-only`（默認）/ `--dry-run` / `--execute --confirm "FRESH_START_YYYY_MM_DD"` |
+| `db/fresh_start_reset.py` | 開發噪音清理：保留客觀市場數據，清除系統經驗數據。支援 `--report-only`（默認）/ `--dry-run` / `--execute --confirm "FRESH_START_YYYY_MM_DD"`。通常透過 `fresh_start.sh` 調用（一併停引擎/歸檔/重啟），獨立使用需自行停引擎。 |
 
 ## canary/ — 灰度驗證 (Canary / Soak Test)
 

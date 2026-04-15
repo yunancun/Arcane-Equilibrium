@@ -31,7 +31,7 @@ AI Agent 自动交易系统 — 自主扫描 650+ 交易对，智能部署策略
 
 ---
 
-## 当前状态 (2026-04-11 W21 · **LIVE 阶段** · Demo API key 运行完整 Live 路径)
+## 当前状态 (2026-04-15 · **LIVE 阶段** · Demo API key 运行完整 Live 路径)
 
 ```
 系统模式:     LIVE ✅ — Demo API key 运行完整 Live 路径，所有功能按 Live 标准
@@ -158,10 +158,18 @@ srv/
 │   ├── openclaw_engine/           ← 12+ modules: tick pipeline/strategies/paper state/canary (116 tests)
 │   ├── openclaw_pyo3/             ← PyO3 cdylib bridge
 │   └── schemas/                   ← Golden JSON schema (10 types)
-├── helper_scripts/
-│   ├── start_paper_trading.sh     ← 一键启动
+├── helper_scripts/                ← ★ 详见 helper_scripts/SCRIPT_INDEX.md
+│   ├── restart_all.sh             ← 轻量重启（--rebuild 先编译）
+│   ├── stop_all.sh                ← 优雅停止 + maintenance flag
+│   ├── clean_restart.sh           ← 交易所平仓 + 重启（不动 DB / paper_state）
+│   ├── fresh_start.sh             ← ★ 完整 DB 重置重启（PnL/手续费/胜率清零）
+│   ├── clean_restart_flatten.py   ← 交易所平仓助手（demo / mainnet）
+│   ├── build_pyo3.sh              ← PyO3 .so 统一建构+部署（双 venv）
+│   ├── start_paper_trading.sh     ← Paper Trading 一键启动
 │   ├── cron_observer_cycle.sh     ← Observer 自动化
 │   ├── cron_daily_report.sh       ← 日报 → Telegram（UTC 0:00）
+│   ├── canary/                    ← 灰度验证 + watchdog
+│   ├── db/fresh_start_reset.py    ← DB 经验数据清理（保留市场/模型）
 │   └── maintenance_scripts/       ← 清理 / 检查脚本
 └── docs/
     ├── rust_migration/            ← 8 阶段执行文件（R-00~R-07）
@@ -301,12 +309,64 @@ max_retries             = 0                          # Bybit API timeout → fai
 # API 服务器（Linux: systemd，开机自启；macOS: launchd 可迁移）
 systemctl --user status openclaw-trading-api    # 端口 8000
 systemctl --user status openclaw-gateway        # OpenClaw + Tailscale HTTPS
+systemctl --user status openclaw-watchdog       # 引擎存活监控 + 自动重启
 
 # Grafana
 cd docker_projects/monitoring_services && docker compose up -d   # 端口 3000
 
 # 一键启动 Paper Trading
 bash helper_scripts/start_paper_trading.sh
+```
+
+---
+
+## 常用脚本 (Common Scripts)
+
+完整清单见 [`helper_scripts/SCRIPT_INDEX.md`](helper_scripts/SCRIPT_INDEX.md)。
+
+### 生命周期 (Lifecycle)
+
+| 脚本 | 用途 | 何时用 |
+|------|------|--------|
+| `restart_all.sh` | 停+启 Rust 引擎 + API（**不动数据**）。`--rebuild` 先编译 .so + engine binary。 | 日常：改代码后部署、unstick 卡住的进程 |
+| `stop_all.sh` | 优雅停止 + 建 `engine_maintenance.flag`（watchdog 不会自动拉起）。`rm flag` 或 `restart_all.sh` 恢复。 | 停机维护、手工 debug |
+| `clean_restart.sh` | 停 → 交易所平仓（demo 强制，`--include-live` 可选 mainnet）→ 归档 runtime → 编译检查 → 重启 → watchdog 验证。**保留 paper_state 与 DB**。 | 清空交易所持仓、解决 runtime snapshot 污染 |
+| `fresh_start.sh` ★ | `clean_restart` 全部动作 + **清空 DB 经验数据**（fills/intents/orders/outcomes/signals/agent/learning 状态）。**保留**：市场数据、已训练模型、LinUCB archive。 | 开发阶段结束、需要从零历史冷启动验证 |
+| `start_paper_trading.sh` | API 就绪后自动启 Paper Trading 会话（供 systemd/cron 调用）。 | 开机自动化（已接 systemd） |
+
+### 建构 (Build)
+
+| 脚本 | 用途 |
+|------|------|
+| `build_pyo3.sh` | `maturin build --release` + 双 venv (`~/.venv` + `control_api_v1/.venv`) 强制重装。旗标：`--release`（默认）/ `--debug` / `--venv <path>` / `--dry-run`。 |
+
+### 灰度 / 监控 (Canary & Monitor)
+
+| 脚本 | 用途 |
+|------|------|
+| `canary/engine_watchdog.py` | 引擎存活检查。`--status` 打 JSON（`engine_alive` + 各 pipeline age）；`--stale-threshold` 设过期秒数。已包装为 `openclaw-watchdog.service` user unit。 |
+| `canary/replay_runner.py` | 灰度回放：读 canary JSONL 与 Python 基线比对。 |
+
+### 数据库 (Database)
+
+| 脚本 | 用途 |
+|------|------|
+| `db/fresh_start_reset.py` | DB 经验数据清理核心。`--report-only`（默认）/`--dry-run`/`--execute --confirm "FRESH_START_YYYY_MM_DD"`。通常透过 `fresh_start.sh` 调用（会一并停引擎）。 |
+
+### 定时任务 (Cron)
+
+| 脚本 | 用途 |
+|------|------|
+| `cron_daily_report.sh` | 每日 UTC 0:00 采集 Paper 指标 + Telegram 推送。 |
+| `cron_observer_cycle.sh` | 每 5 分钟 Observer 循环 + runtime snapshot 桥接。 |
+
+### 快速对照：选哪个重启？
+
+```
+改了代码需部署              → restart_all.sh --rebuild
+只想清交易所持仓             → clean_restart.sh --yes
+开发告一段落要清 PnL/勝率    → fresh_start.sh --yes
+临时停机 debug              → stop_all.sh
 ```
 
 ---
