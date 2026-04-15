@@ -1,7 +1,7 @@
 # OpenClaw TODO — 工作計劃清單
 
-**最後更新：2026-04-15**（🚨 **引擎 04:03 自殺事故** — WS tick stale Fix 4 按設計 cancel，但 **watchdog daemon 從未部署** → 7h10m 空窗無人拉起，11:13 operator 手動重啟。新增 **ENGINE-HEAL-FUP-1/2/3**。）
-**測試基準線**：Rust **engine lib 1257 + core 372 + e2e 35 = 1664** · Python **2852 passed (5 skipped · 0 fail)** · ml_training **135 passed (6 skipped)**
+**最後更新：2026-04-15**（🚨 **引擎 04:03 自殺事故** — WS tick stale Fix 4 按設計 cancel，但 **watchdog daemon 從未部署** → 7h10m 空窗無人拉起，11:13 operator 手動重啟。新增 **ENGINE-HEAL-FUP-1/2/3**。**FIX-PHASE1 FUP-A/B 完成** — canary_writer warn 節流 1Hz + drop counter + 覆蓋 `TrySendError::Full` 分支單元測試。）
+**測試基準線**：Rust **engine lib 1264 + core 372 + e2e 35 = 1671** · Python **2852 passed (5 skipped · 0 fail)** · ml_training **135 passed (6 skipped)**
 **EDGE-P3-1 Phase A/A6 COMPLETE** — gate 在 hot path 被諮詢 + MA/BBR/BBB 策略 confluence/persistence 經 OrderIntent 穿透至 feature_builder；產線預設 `use_edge_predictor=false` 零行為改變；commits `8c1f234` A1-A4 + `3753ede` A5 + `a23b268` A6
 
 > compact 後從此文件恢復工作狀態。第一個 `[ ]` 即為下一步起點。
@@ -16,8 +16,8 @@
 | ~~**1**~~ | ✅ **ENGINE-HEAL-FUP-1 watchdog daemon 化** — 2026-04-15 11:31 已 nohup 起 PID 592881，`/tmp/openclaw/watchdog.log` 開始落字。**留尾**：仍是手動 nohup（不會跨重啟存活）；正式 systemd user unit 或 `restart_all.sh` 整合留待 W22 收尾 | done | — | ✅ |
 | ~~**2**~~ | ✅ **ENGINE-HEAL-FUP-2 根因調查完成** — 2026-04-15：實為 **2h 內 15+ 波段累積壓力**（非一秒 8,445 噴發），主因 = canary JSONL 同步寫盤在 live event loop 熱路徑上 + live channel 512 偏小。詳 `docs/worklogs/2026-04-15--engine_2000_stall_postmortem.md` | done | — | ✅ |
 | ~~**3**~~ | ✅ **ENGINE-HEAL-FIX-PHASE1** — 合併 R1（canary 寫盤改 bounded mpsc → 專用 tokio 任務 / BufWriter / size rotation）+ R2（live channel 512→1024 對稱化）+ FUP-3（`OPENCLAW_DISABLE_CANARY_DUMP=1` 旗標 + 4 個 env 控制旋轉）單 commit。1262 + 372 + 35 = 1669 cargo tests 0 fail。E2 GREEN（2 nits 列為 FUP）。**留尾**：operator 需 `restart_all.sh --rebuild` 部署；24h 觀察 `live pipeline lagging` WARN 是否歸零 | done | — | ✅ |
-| **3a** | 🟡 **FIX-PHASE1 FUP-A** — `canary_writer::try_send` 通道滿 warn 加 1Hz 取樣（避免 `warn!` 自身在持續壓力下成為 log flood）。E2 nit | 30 min | — | 觀測訊號乾淨度 |
-| **3b** | 🟡 **FIX-PHASE1 FUP-B** — 加 unit test 覆蓋 `mpsc::error::TrySendError::Full` 分支（填滿 4096 slot 驗證 warn + drop 路徑）。E2 nit | 30 min | — | 測試完整性 |
+| ~~**3a**~~ | ✅ **FIX-PHASE1 FUP-A** — `canary_writer` handle 加 `total_dropped` + `last_warn_ms` Arc<AtomicU64>；Full 分支遞增計數器 + 1Hz CAS 節流 warn（避免 warn 自身在持續壓力下成為 log flood）。engine lib 1262→1264（+2） | done | — | ✅ |
+| ~~**3b**~~ | ✅ **FIX-PHASE1 FUP-B** — `try_send_full_branch_drops_and_counts` + `warn_throttle_caps_at_one_hz` 單元測試；1-slot 通道驗證 Full 分支非阻塞 + 計數器單調 + clone 共享 Arc；節流窗口測試 | done | — | ✅ |
 | **4** | 🧪 **G-2 FundingArb 驗證** — Step 4.1 ✅ 路徑全鏈路驗證（strategy_exit + ipc_close 都帶 realized_pnl 入 DB）。Step 4.3 ⏳ **後台 daemon PID 598572 監控中**（`/tmp/openclaw/g2_monitor.{py,log,pid,progress.json}`），達 demo ≥20 strategy_exit fills 自動寫 `docs/audits/2026-04-15--g2_funding_arb_clean_edge.md`。**operator/Claude 接手先 `cat /tmp/openclaw/g2_monitor.progress.json`** | ~17h ETA | — | Phase 5 歸因量化確認 · LG-1 觀察期起點 |
 | **5** | 🕰️ **LG-1 Paper Trading 21d** — EDGE-P0/P1 + FA-PHANTOM-1 + FUP-8 部署後啟動正式觀察期；不再綁定 05-01 | 3 w | #2, #4 | Live Gate · LG-2/3 |
 | **6** | 📊 **Phase 5 策略 Edge 2w 重評** — 乾淨 paper 2w 後重算 per-strategy gross edge。若翻正 → Phase 5 cost_gate 工作重啟；若仍負 → 策略本身需重做（EDGE-P2/P3） | 2 w | #4 | Phase 5 restart / rebuild 決策 |
@@ -79,6 +79,10 @@
 - [x] **ENGINE-HEAL-FUP-3** ✅ engine_results.jsonl rotation / 關閉 — 折入 FIX-PHASE1 同 commit
   - `OPENCLAW_DISABLE_CANARY_DUMP=1` 覆寫 `OPENCLAW_CANARY_MODE` 完全關閉（灰度驗證過後常態）
   - `OPENCLAW_CANARY_ROTATE_MB`（預設 1024 = 1GB）+ `OPENCLAW_CANARY_MAX_ROTATED`（預設 3）→ 自動輪轉到 `engine_logs/engine_results-<UTC ts>.jsonl`，mtime 排序保留最新 N 個
+
+### 📎 E4 hygiene（2026-04-15 巡查發現）
+
+- [ ] **E4-HYG-1** `openclaw_core/tests/golden_extreme.rs:161` `StopConfig` 初始化漏 `trailing_activation_pct` 欄位 → `cargo test -p openclaw_core` 編譯失敗。欄位由 `51f6744 fix(pnl): trailing-stop activation gate` 引入，該測試未同步更新。修復：一行 `trailing_activation_pct: None,`（或 `Some(...)` 視測試語義）。**不阻塞 release 構建**（`cargo build --release` 通過），只阻塞 core 套件 `cargo test`。建議下次 E4 順手修
 
 ### 部署窗口（已完成，歸檔用）
 
