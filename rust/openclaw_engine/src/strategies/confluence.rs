@@ -187,6 +187,18 @@ impl PersistenceTracker {
     pub fn clear(&mut self, symbol: &str) {
         self.state.remove(symbol);
     }
+
+    /// EDGE-P3-1 A6: Milliseconds since first_signal_ts for `symbol`, or None
+    /// if no onset is tracked. Read-only; does not mutate state. Callers pass
+    /// this into OrderIntent.persistence_elapsed_ms so the edge predictor sees
+    /// the real signal age at decision time (post check() → transition is
+    /// already recorded, so value is ≥ min_persistence_ms on valid entries).
+    /// EDGE-P3-1 A6：讀取某幣種自首次信號起經過的毫秒數，未追蹤則 None。不改 state。
+    pub fn elapsed_ms(&self, symbol: &str, now_ms: u64) -> Option<u64> {
+        self.state
+            .get(symbol)
+            .map(|&(_dir, first_ts)| now_ms.saturating_sub(first_ts))
+    }
 }
 
 impl Default for PersistenceTracker {
@@ -422,6 +434,44 @@ mod tests {
         assert!(!tracker.check("ETHUSDT", Some(false), 120_000, 120_000, false));
         // ETH passes at 170s (50k+120k)
         assert!(tracker.check("ETHUSDT", Some(false), 170_000, 120_000, false));
+    }
+
+    // ── A6: elapsed_ms accessor tests ──
+
+    #[test]
+    fn test_elapsed_ms_none_before_any_signal() {
+        let tracker = PersistenceTracker::new();
+        assert_eq!(tracker.elapsed_ms("BTCUSDT", 100_000), None);
+    }
+
+    #[test]
+    fn test_elapsed_ms_reports_time_since_onset() {
+        let mut tracker = PersistenceTracker::new();
+        // Fresh long signal at t=1000 — onset recorded.
+        let _ = tracker.check("BTCUSDT", Some(true), 1_000, 120_000, false);
+        // 30s later, elapsed = 30_000 (signal continues same direction).
+        assert_eq!(tracker.elapsed_ms("BTCUSDT", 31_000), Some(30_000));
+        // 120s later, elapsed = 120_000 — matches persistence.check threshold.
+        assert_eq!(tracker.elapsed_ms("BTCUSDT", 121_000), Some(120_000));
+    }
+
+    #[test]
+    fn test_elapsed_ms_resets_on_direction_flip() {
+        let mut tracker = PersistenceTracker::new();
+        let _ = tracker.check("BTCUSDT", Some(true), 1_000, 120_000, false);
+        // Flip direction at t=50_000 — new onset recorded.
+        let _ = tracker.check("BTCUSDT", Some(false), 50_000, 120_000, false);
+        // elapsed is measured from the new onset, not the original.
+        assert_eq!(tracker.elapsed_ms("BTCUSDT", 60_000), Some(10_000));
+    }
+
+    #[test]
+    fn test_elapsed_ms_none_after_signal_disappears() {
+        let mut tracker = PersistenceTracker::new();
+        let _ = tracker.check("BTCUSDT", Some(true), 1_000, 120_000, false);
+        // Signal disappears → state removed → elapsed_ms returns None.
+        let _ = tracker.check("BTCUSDT", None, 30_000, 120_000, false);
+        assert_eq!(tracker.elapsed_ms("BTCUSDT", 60_000), None);
     }
 
     // ── compute_score tests ──

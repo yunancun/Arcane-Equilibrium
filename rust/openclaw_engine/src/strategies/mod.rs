@@ -901,6 +901,8 @@ mod tests {
             strategy: "stub".into(),
             order_type: "market".into(),
             limit_price: None,
+            confluence_score: None,
+            persistence_elapsed_ms: None,
         };
         s.on_rejection(&intent, "test reason");
         // No assertion — only checking no panic / 僅檢查不 panic

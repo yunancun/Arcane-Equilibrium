@@ -271,6 +271,11 @@ impl Strategy for FundingArb {
             strategy: self.name().into(),
             order_type: "market".into(),
             limit_price: None,
+            // FundingArb has no confluence scoring / persistence tracker; leave
+            // features unset so feature_builder fills 0.0 placeholders.
+            // FundingArb 無 confluence/persistence；feature_builder 會填 0。
+            confluence_score: None,
+            persistence_elapsed_ms: None,
         })]
     }
 }

@@ -533,6 +533,12 @@ impl Strategy for BbBreakout {
                         }
 
                         let raw_conf = (self.entry_conf_base + hurst_boost).min(1.0);
+                        // EDGE-P3-1 A6: plumb decision-time confluence + persistence
+                        // onto the intent for the predictor gate feature vector.
+                        // EDGE-P3-1 A6：把決策時的 confluence/persistence 寫入 intent。
+                        let confluence_score = score.map(|s| s as f32);
+                        let persistence_elapsed_ms =
+                            self.persistence.elapsed_ms(sym, ctx.timestamp_ms);
                         intents.push(StrategyAction::Open(OrderIntent {
                             symbol: ctx.symbol.to_string(),
                             is_long,
@@ -541,6 +547,8 @@ impl Strategy for BbBreakout {
                             strategy: self.name().into(),
                             order_type: "market".into(),
                             limit_price: None,
+                            confluence_score,
+                            persistence_elapsed_ms,
                         }));
                         self.positions.insert(sym.to_string(), is_long);
                         self.squeeze_detected_ms.remove(sym);

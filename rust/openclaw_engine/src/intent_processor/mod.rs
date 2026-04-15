@@ -38,6 +38,15 @@ use crate::paper_state::PaperState;
 
 /// A trade intent from a strategy.
 /// 來自策略的交易意圖。
+///
+/// EDGE-P3-1 A6: `confluence_score` / `persistence_elapsed_ms` are plumbed from
+/// strategies that compute them (MA/BBR/BBB) into `feature_builder::build_feature_vector`
+/// for the predictor gate. `None` means the strategy does not compute that feature
+/// (Grid, FundingArb) — builder fills with 0.0 and the zero-default stays benign
+/// behind `use_edge_predictor=false`. `#[serde(default)]` keeps cross-version IPC
+/// deserialization working if a producer omits these keys.
+/// EDGE-P3-1 A6：`confluence_score` / `persistence_elapsed_ms` 由 MA/BBR/BBB 策略
+/// 塞入，供 feature_builder 讀取；Grid/FundingArb 填 `None` 由 builder 補 0。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OrderIntent {
     pub symbol: String,
@@ -47,6 +56,15 @@ pub struct OrderIntent {
     pub strategy: String,
     pub order_type: String, // "market" or "limit"
     pub limit_price: Option<f64>,
+    /// Confluence score in [0, 65] at intent time; None when strategy has no
+    /// confluence scoring (Grid / FundingArb). Fed to feature slot #9.
+    #[serde(default)]
+    pub confluence_score: Option<f32>,
+    /// Milliseconds since signal onset (PersistenceTracker state), capped by
+    /// caller to feature range [0, 3_600_000]; None when strategy has no
+    /// persistence tracker. Fed to feature slot #10.
+    #[serde(default)]
+    pub persistence_elapsed_ms: Option<u64>,
 }
 
 /// Captured Guardian verdict for DB persistence (risk_verdicts table).

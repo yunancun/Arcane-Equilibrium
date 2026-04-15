@@ -175,6 +175,8 @@ mod tests {
                     order_type: "market".into(),
                     confidence: 0.5,
                     limit_price: None,
+                    confluence_score: None,
+                    persistence_elapsed_ms: None,
                 },
                 result: "ok".into(),
             });
