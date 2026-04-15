@@ -1,7 +1,8 @@
 # OpenClaw TODO — 工作計劃清單
 
 **最後更新：2026-04-15**（🚨 **引擎 04:03 自殺事故** — WS tick stale Fix 4 按設計 cancel，但 **watchdog daemon 從未部署** → 7h10m 空窗無人拉起，11:13 operator 手動重啟。新增 **ENGINE-HEAL-FUP-1/2/3**。）
-**測試基準線**：Rust **engine lib 1249 + core 372 + e2e 35 = 1656** · Python **2852 passed (5 skipped · 0 fail)** · ml_training **135 passed (6 skipped)**
+**測試基準線**：Rust **engine lib 1257 + core 372 + e2e 35 = 1664** · Python **2852 passed (5 skipped · 0 fail)** · ml_training **135 passed (6 skipped)**
+**EDGE-P3-1 Phase A/A6 COMPLETE** — gate 在 hot path 被諮詢 + MA/BBR/BBB 策略 confluence/persistence 經 OrderIntent 穿透至 feature_builder；產線預設 `use_edge_predictor=false` 零行為改變；commits `8c1f234` A1-A4 + `3753ede` A5 + `a23b268` A6
 
 > compact 後從此文件恢復工作狀態。第一個 `[ ]` 即為下一步起點。
 > 歷史歸檔索引在文件末尾。詳細完成度視角見 README.md。

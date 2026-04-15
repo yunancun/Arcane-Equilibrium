@@ -401,3 +401,147 @@ let gate = self.intent_processor.process_gates_only_with_features(
 - [x] Commits `8c1f234` + `3753ede` 落地，訊息含 A1-A5 裁定摘要
 
 **Phase A COMPLETE**。進入 Phase B（A6+ strategy-side features + FUP-8 schema 合流）等 #27 AI-E 後半工作展開。
+
+---
+
+# Phase A6 — Strategy-Side Feature Plumbing（2026-04-15 補）
+
+## A6.1 目標 / Scope
+
+Phase A5 在 `build_feature_vector()` 把 slot #9 `confluence_score` 和 slot #10 `persistence_elapsed_ms` 以 `0.0` 佔位 — feature 管線通了但**資料是假的**。A6 的任務：把這兩個值從各策略內部 state 真實穿透到 `OrderIntent`，再到 `feature_builder`，讓 Phase B gate 啟用後看到的是策略真正的決策時快照。
+
+**範圍定界**：
+- 3 有 confluence 的策略（MA / BBR / BBB）填真值
+- 2 無 confluence 的策略（Grid / FundingArb）顯式 `None`
+- 合成意圖（close 路徑、IPC 派發）顯式 `None`
+- 產線零行為改變（gate 仍 `use_edge_predictor=false`）
+
+## A6.2 OrderIntent schema 擴充
+
+**選項**：Option-field 加 `#[serde(default)]` vs 必填字段
+
+採用 Option + default 的理由：
+1. **跨版本 IPC 兼容** — Python/GUI 側若送舊格式 OrderIntent，新 Rust 反序列化仍成功（視為 None）
+2. **語意忠實** — Grid/FundingArb 沒有 confluence，用 `None` 表示「不適用」比 `0.0` 更誠實（0 是合法分數）
+3. **零前向污染** — 不強迫未來可能新增的策略種類都得有 confluence 概念
+
+```rust
+pub struct OrderIntent {
+    // ... 既有欄位 ...
+    #[serde(default)]
+    pub confluence_score: Option<f32>,
+    #[serde(default)]
+    pub persistence_elapsed_ms: Option<u64>,
+}
+```
+
+## A6.3 PersistenceTracker 只讀訪問器
+
+現有 `check()` 既做 state 更新又返回通過與否 — A6 需要**不改 state**讀取「信號開始後多久」。新增：
+
+```rust
+pub fn elapsed_ms(&self, symbol: &str, now_ms: u64) -> Option<u64> {
+    self.state.get(symbol).map(|&(_dir, first_ts)| now_ms.saturating_sub(first_ts))
+}
+```
+
+**呼叫時機**：策略的 entry 分支在 `check()` 回傳 true 後才呼叫 `elapsed_ms()` — 此時保證 `≥ min_persistence_ms`。放在 `check()` 後讀而非內化到 check 返回值是為了：
+- 不改動既有 check API 的所有呼叫點
+- 測試可以獨立斷言 `elapsed_ms()` 行為（不依賴 check 路徑）
+
+## A6.4 5 策略的 entry-site 填值策略
+
+| 策略 | confluence_score | persistence_elapsed_ms |
+|---|---|---|
+| MaCrossover | `score.map(\|s\| s as f32)` | `persistence.elapsed_ms(symbol, ts_ms)` |
+| BbReversion | 同上 | 同上 |
+| BbBreakout | 同上 | 同上 |
+| GridTrading | `None` | `None` |
+| FundingArb | `None` | `None` |
+
+Grid 是 price-level 機械式下單，無信號融合；FundingArb 是費率套利，沒有 persistence 概念（是 snapshot 決策）。顯式 `None` 而非 `Some(0.0)`，讓下游 feature builder 的 `unwrap_or(0.0)` 語意清晰：「無此概念」而非「分數為零」。
+
+## A6.5 Builder 防禦性 clamp
+
+策略理論上會產出合規範圍的值，但 A6 在 builder 再 clamp 一次：
+
+```rust
+let confluence_score = clamp_f32(intent.confluence_score.unwrap_or(0.0), 0.0, 65.0);
+let persistence_elapsed_ms = clamp_f32(
+    intent.persistence_elapsed_ms.unwrap_or(0) as f32, 0.0, 3_600_000.0,
+);
+```
+
+**理由**：
+- `all_in_range()` invariant #12 是 fail-closed sanity — 若哪天新策略計算 confluence 時 off-by-one 輸出 65.5，寧可 builder clamp 而不是 gate 跳起來
+- `clamp_f32` 成本：單一 `max(min(...))`，熱路徑可忽略
+- **雙保險**：builder clamp + gate `all_in_range` — 一條都不應該成為實戰中的救命防線，但兩條在位比一條穩
+
+## A6.6 21 處測試 fixture 批次更新
+
+OrderIntent 加字段，所有用 struct literal 建 fixture 的地方都會 E0063 失敗。站點清單：
+
+| 檔案 | 站點數 |
+|---|---:|
+| `intent_processor/tests.rs` | 13 |
+| `mode_state.rs` | 1 |
+| `orchestrator.rs` | 2 |
+| `strategies/mod.rs` | 1 |
+| `tests/stress_integration.rs` | 4 |
+| **合計** | **21** |
+
+手工 21 次 Edit 太脆；用 Python regex：`limit_price: <expr>,\n<indent>}` 前插入兩個 `None`。一次 run 完成 + build 即驗證。
+
+## A6.7 測試增量
+
+engine lib：**1249 → 1257（+8）**
+
+新增：
+- `feature_builder` +4：`test_confluence_none_means_zero` / `test_confluence_some_propagates_through` / `test_confluence_clamped_above_65` / `test_persistence_zero_is_valid`
+- `confluence::tests` +4：`elapsed_ms_none_before_signal` / `elapsed_ms_tracks_since_onset` / `elapsed_ms_resets_on_direction_flip` / `elapsed_ms_none_after_signal_disappears`
+
+core lib: 372（不變）· e2e: 35（不變）· 總和 **1664 pass / 0 fail**
+
+## A6.8 檔案清單 / Commit `a23b268` · 15 files · +273 / -16
+
+| File | Scope |
+|---|---|
+| `rust/openclaw_engine/src/intent_processor/mod.rs` | OrderIntent +2 Option fields (`#[serde(default)]`) |
+| `rust/openclaw_engine/src/strategies/confluence.rs` | `PersistenceTracker::elapsed_ms()` + 4 tests |
+| `rust/openclaw_engine/src/strategies/ma_crossover.rs` | `make_intent_with_qty` 擴 2 param，entry 填值 |
+| `rust/openclaw_engine/src/strategies/bb_reversion.rs` | `make_entry_intent_with_qty` 擴 2 param |
+| `rust/openclaw_engine/src/strategies/bb_breakout.rs` | inline literal 填 score + persistence |
+| `rust/openclaw_engine/src/strategies/grid_trading.rs` | 2 literal → `None, None` |
+| `rust/openclaw_engine/src/strategies/funding_arb.rs` | 1 Open literal → `None, None` |
+| `rust/openclaw_engine/src/tick_pipeline/on_tick_helpers.rs` | `build_intent()` → `None, None` |
+| `rust/openclaw_engine/src/tick_pipeline/commands.rs` | IPC OpenPosition → `None, None` |
+| `rust/openclaw_engine/src/edge_predictor/feature_builder.rs` | 讀 intent + clamp + 4 regression tests |
+| `rust/openclaw_engine/src/intent_processor/tests.rs` | 13 fixture 補欄位 |
+| `rust/openclaw_engine/src/mode_state.rs` | 1 fixture 補欄位 |
+| `rust/openclaw_engine/src/orchestrator.rs` | 2 fixture 補欄位 |
+| `rust/openclaw_engine/src/strategies/mod.rs` | 1 fixture 補欄位 |
+| `rust/openclaw_engine/tests/stress_integration.rs` | 4 fixture 補欄位 |
+
+## A6.9 Phase B 剩餘工作（精簡）
+
+A6 完成後，Phase B 只剩：
+
+1. **Backend 選擇** — `tract_backend` / `ort_backend` feature flag 擇一（F8 互斥 `compile_error!` 已在）；Stage 2 ML-MIT 交付 ONNX 後才能做實質驗證
+2. **Stage 2 模型載入** — Bootstrap 掃 `settings/models/{strategy}-v{N}.onnx` → `EdgePredictorStore::swap()`；schema v1.4 checksum 比對
+3. **CC 13 項必查 + T1-T23 regression**（#28）— 含 A5/A6 feature quality 驗證
+4. **Shadow mode 14d**（#29）→ paper promote 7d（#30）→ demo promote（#31）
+
+**原 Phase B 第 1 項（strategy-side features）已由 A6 吸收完畢**。
+
+## A6.10 驗收 / Sign-off
+
+- [x] OrderIntent 2 Option fields + `#[serde(default)]`
+- [x] `PersistenceTracker::elapsed_ms()` 無副作用訪問器 + 4 tests
+- [x] MA / BBR / BBB entry site 填真值；Grid / FundingArb + 合成意圖 None
+- [x] `feature_builder` 讀 intent + 雙保險 clamp + 4 regression tests
+- [x] 21 fixture 站點批次補欄位（scripted）
+- [x] engine lib 1249 → 1257 · 1664 pass / 0 fail
+- [x] 產線零行為改變（gate 仍 `use_edge_predictor=false`）
+- [x] Commit `a23b268` 落地，訊息含 A6 全部裁定
+
+**Phase A + A6 COMPLETE**。Phase B 只剩 backend 選擇 + 模型載入 + CC 審查 + shadow/paper/demo 升遷管道。
