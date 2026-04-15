@@ -547,6 +547,80 @@ pub fn handle_paper_command(
             }
             let _ = response_tx.send(result);
         }
+        // EDGE-P3-1 Stage 0 · Hot-swap a predictor for a single strategy.
+        // Fails fast if no EdgePredictorStore has been wired onto the pipeline
+        // yet — ML-MIT must not silently no-op on an uninitialised engine.
+        // EDGE-P3-1 Stage 0 · 熱換單一策略的 predictor；未注入 store 時立即失敗，
+        // 避免 ML-MIT 誤以為寫入了未初始化的引擎。
+        PipelineCommand::SetEdgePredictorShadow {
+            strategy,
+            predictor,
+            response_tx,
+        } => {
+            let result = match pipeline.edge_predictor_store() {
+                Some(store) => {
+                    store.swap(&strategy, predictor.into_arc());
+                    info!(strategy = %strategy,
+                        "EdgePredictor swapped / 已熱換預測器");
+                    Ok(format!("swapped predictor for {}", strategy))
+                }
+                None => Err(
+                    "EdgePredictorStore not wired on this engine — check main.rs \
+                     set_edge_predictor_store() / 此引擎尚未注入 EdgePredictorStore".into(),
+                ),
+            };
+            let _ = response_tx.send(result);
+        }
+        // EDGE-P3-1 Stage 0 · Operator kill-switch: clear every loaded model
+        // so the cost gate immediately falls back to the JS shrinkage path.
+        // EDGE-P3-1 Stage 0 · Operator kill-switch：清空所有已載入模型，cost gate
+        // 立即回落 JS shrinkage。
+        PipelineCommand::DisableEdgePredictorAll { response_tx } => {
+            let result = match pipeline.edge_predictor_store() {
+                Some(store) => {
+                    let n = store.clear_all();
+                    info!(cleared = n,
+                        "EdgePredictor DisableAll / 已禁用所有預測器");
+                    Ok(format!("cleared {} predictor slots", n))
+                }
+                None => Err(
+                    "EdgePredictorStore not wired on this engine / 此引擎尚未注入 store".into(),
+                ),
+            };
+            let _ = response_tx.send(result);
+        }
+        // EDGE-P3-1 Stage 0 · ε-greedy shadow-fill passthrough. The actual DB
+        // write happens on the Python side via a dedicated IPC channel; this
+        // handler just logs in Stage 0 so the variant is exhaustively matched.
+        // A3/A4 wire the producer in the cost gate; the Python consumer lands
+        // with the DecisionFeatureSnapshot IPC (later stage).
+        // EDGE-P3-1 Stage 0 · ε-greedy shadow-fill 轉發。實際 DB 寫入在 Python 端，
+        // 此 handler Stage 0 僅 log 以保 match exhaustive；A3/A4 接 producer，
+        // Python consumer 於 DecisionFeatureSnapshot IPC 一併接入。
+        PipelineCommand::EmitShadowFill {
+            context_id,
+            strategy,
+            symbol,
+            features_jsonb: _,
+            prediction_q10,
+            prediction_q50,
+            prediction_q90,
+            cost_bps,
+            ts_ms,
+        } => {
+            info!(
+                context_id = %context_id,
+                strategy = %strategy,
+                symbol = %symbol,
+                q10 = prediction_q10,
+                q50 = prediction_q50,
+                q90 = prediction_q90,
+                cost_bps = cost_bps,
+                ts_ms = ts_ms,
+                "EdgePredictor shadow_fill queued (Stage 0 stub — Python consumer TBD) \
+                 / 預測器 shadow_fill 排隊（Stage 0 stub，Python 消費者待接）",
+            );
+        }
     }
 }
 
@@ -726,5 +800,138 @@ mod tests {
         };
         assert_eq!(effective_json, "not-json");
         assert!(conf_scale_opt.is_none());
+    }
+
+    // ── EDGE-P3-1 Stage 0 handlers ─────────────────────────────────────
+
+    /// EN: SetEdgePredictorShadow returns Err when no store is wired.
+    /// Protects ML-MIT from silently no-oping on an uninitialised engine.
+    /// 中文: 未注入 store 時 SetEdgePredictorShadow 回 Err；避免 ML-MIT
+    /// 以為熱換成功但其實無人接收。
+    #[test]
+    fn test_set_edge_predictor_shadow_fails_without_store() {
+        use crate::edge_predictor::{BoxedEdgePredictor, null_backend::NullPredictor};
+
+        let dir = tempfile::tempdir().unwrap();
+        let mut pipeline = TickPipeline::new(&["BTCUSDT"]);
+        let mut writer = make_writer(dir.path());
+        let mut pending = HashMap::new();
+
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let predictor: std::sync::Arc<dyn crate::edge_predictor::EdgePredictor + Send + Sync> =
+            std::sync::Arc::new(NullPredictor::new());
+        handle_paper_command(
+            PipelineCommand::SetEdgePredictorShadow {
+                strategy: "ma_crossover".into(),
+                predictor: BoxedEdgePredictor::new(predictor),
+                response_tx: tx,
+            },
+            &mut pipeline,
+            &mut writer,
+            &mut pending,
+        );
+        let result = rx.blocking_recv().unwrap();
+        assert!(result.is_err(), "expected Err without wired store, got Ok");
+        let msg = result.unwrap_err();
+        assert!(msg.contains("not wired"), "err should mention not-wired: {}", msg);
+    }
+
+    /// EN: SetEdgePredictorShadow succeeds after store is wired; load_for
+    /// returns the swapped predictor.
+    /// 中文: 注入 store 後 SetEdgePredictorShadow 成功；load_for 返回剛熱換的 predictor。
+    #[test]
+    fn test_set_edge_predictor_shadow_succeeds_after_wire() {
+        use crate::edge_predictor::{
+            BoxedEdgePredictor, EdgePredictorStore, null_backend::NullPredictor,
+        };
+
+        let dir = tempfile::tempdir().unwrap();
+        let mut pipeline = TickPipeline::new(&["BTCUSDT"]);
+        let store = std::sync::Arc::new(EdgePredictorStore::new());
+        pipeline.set_edge_predictor_store(std::sync::Arc::clone(&store));
+        let mut writer = make_writer(dir.path());
+        let mut pending = HashMap::new();
+
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let predictor: std::sync::Arc<dyn crate::edge_predictor::EdgePredictor + Send + Sync> =
+            std::sync::Arc::new(NullPredictor::new());
+        handle_paper_command(
+            PipelineCommand::SetEdgePredictorShadow {
+                strategy: "ma_crossover".into(),
+                predictor: BoxedEdgePredictor::new(predictor),
+                response_tx: tx,
+            },
+            &mut pipeline,
+            &mut writer,
+            &mut pending,
+        );
+        let result = rx.blocking_recv().unwrap();
+        assert!(result.is_ok(), "expected Ok, got {:?}", result);
+        assert!(store.load_for("ma_crossover").is_some(),
+            "predictor should be loaded after swap");
+    }
+
+    /// EN: DisableEdgePredictorAll clears every registered slot.
+    /// 中文: DisableEdgePredictorAll 清空所有已註冊槽位。
+    #[test]
+    fn test_disable_edge_predictor_all_clears_slots() {
+        use crate::edge_predictor::{EdgePredictorStore, null_backend::NullPredictor};
+
+        let dir = tempfile::tempdir().unwrap();
+        let mut pipeline = TickPipeline::new(&["BTCUSDT"]);
+        let store = std::sync::Arc::new(EdgePredictorStore::new());
+        // Seed 3 strategies with live predictors / 預先載入 3 個策略。
+        for s in ["ma_crossover", "bb_reversion", "grid_trading"] {
+            let p: std::sync::Arc<dyn crate::edge_predictor::EdgePredictor + Send + Sync> =
+                std::sync::Arc::new(NullPredictor::new());
+            store.swap(s, p);
+        }
+        pipeline.set_edge_predictor_store(std::sync::Arc::clone(&store));
+        let mut writer = make_writer(dir.path());
+        let mut pending = HashMap::new();
+
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        handle_paper_command(
+            PipelineCommand::DisableEdgePredictorAll { response_tx: tx },
+            &mut pipeline,
+            &mut writer,
+            &mut pending,
+        );
+        let result = rx.blocking_recv().unwrap();
+        assert!(result.is_ok());
+        let msg = result.unwrap();
+        assert!(msg.contains("cleared 3"), "msg should report cleared count: {}", msg);
+        // All slots now return None on load_for / 所有槽位 load_for 返回 None。
+        for s in ["ma_crossover", "bb_reversion", "grid_trading"] {
+            assert!(store.load_for(s).is_none(), "slot {} still loaded", s);
+        }
+    }
+
+    /// EN: EmitShadowFill is pure logging today — ensure it doesn't panic.
+    /// 中文: EmitShadowFill 目前僅 log，確保不 panic（Stage 0 stub）。
+    #[test]
+    fn test_emit_shadow_fill_does_not_panic() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut pipeline = TickPipeline::new(&["BTCUSDT"]);
+        let mut writer = make_writer(dir.path());
+        let mut pending = HashMap::new();
+
+        handle_paper_command(
+            PipelineCommand::EmitShadowFill {
+                context_id: "ctx-1".into(),
+                strategy: "ma_crossover".into(),
+                symbol: "BTCUSDT".into(),
+                features_jsonb: "{}".into(),
+                prediction_q10: -1.0,
+                prediction_q50: 0.5,
+                prediction_q90: 2.0,
+                cost_bps: 5.5,
+                ts_ms: 1_700_000_000_000,
+            },
+            &mut pipeline,
+            &mut writer,
+            &mut pending,
+        );
+        // no assertion beyond no-panic; real Python consumer lands later.
     }
 }

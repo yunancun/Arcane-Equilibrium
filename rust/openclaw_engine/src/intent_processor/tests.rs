@@ -753,3 +753,367 @@ fn test_gates_only_duplicate_rejected() {
     assert!(!result.approved);
     assert!(result.rejected_reason.unwrap().contains("duplicate_position"));
 }
+
+// ============================================================
+// EDGE-P3-1 A4: Predictor-gate wiring tests
+// ============================================================
+//
+// These tests exercise `process_with_features()` / `process_gates_only_with_features()`
+// and the `evaluate_predictor_gate()` helper. They prove:
+//   1. features=None → predictor never consulted (no change in behavior).
+//   2. use_edge_predictor=false → predictor never consulted.
+//   3. shadow_mode=true → predictor runs but JS gate decides (observation).
+//   4. shadow_mode=false + Accept → JS gate bypassed.
+//   5. shadow_mode=false + Reject → hard reject.
+//   6. Fallback(Shrinkage) → fall through to JS gate.
+//   7. Fallback(FailClosed) → hard reject with metric-name suffix.
+//   8. ShadowFill (ε-greedy paper) → emits EmitShadowFill IPC.
+//
+// 下列測試覆寫 predictor gate 與 process_with_features 的接線；
+// 驗證 features=None / 禁用 / shadow / Accept / Reject / Fallback / ShadowFill。
+
+#[cfg(test)]
+mod predictor_wiring_tests {
+    use super::*;
+    use crate::config::risk_config::EdgePredictorFallback;
+    use crate::edge_predictor::{
+        features::FeatureVectorV1, EdgePredictor as EdgePredictorTrait, EdgePredictorStore,
+        PredictError, Prediction,
+    };
+    use crate::tick_pipeline::PipelineCommand;
+    use std::sync::Arc;
+
+    struct StubOkPredictor {
+        pred: Prediction,
+    }
+
+    impl EdgePredictorTrait for StubOkPredictor {
+        fn predict(&self, _f: &FeatureVectorV1) -> Result<Prediction, PredictError> {
+            Ok(self.pred)
+        }
+        fn age_seconds(&self) -> u64 {
+            0
+        }
+        fn schema_hash(&self) -> &str {
+            "stub-schema"
+        }
+        fn definition_hash(&self) -> &str {
+            "stub-def"
+        }
+        fn model_id(&self) -> &str {
+            "stub"
+        }
+    }
+
+    fn approved_governance() -> GovernanceCore {
+        let mut g = GovernanceCore::new();
+        g.grant_paper_authorization(None).unwrap();
+        g
+    }
+
+    fn paper_state_with_price(price: f64) -> PaperState {
+        let mut s = PaperState::new(10_000.0);
+        s.set_latest_price("BTCUSDT", price);
+        s.set_latest_turnover("BTCUSDT", 100_000_000.0);
+        s
+    }
+
+    fn intent_btc(confidence: f64) -> OrderIntent {
+        OrderIntent {
+            symbol: "BTCUSDT".into(),
+            is_long: true,
+            qty: 0.001,
+            confidence,
+            strategy: "test".into(),
+            order_type: "market".into(),
+            limit_price: None,
+        }
+    }
+
+    #[test]
+    fn test_process_with_features_none_behaves_identically_to_legacy() {
+        // features=None → predictor skipped regardless of store/config.
+        // features=None → 忽略 predictor，行為等同舊路徑。
+        let mut proc = IntentProcessor::new();
+        proc.risk_config.edge_predictor.use_edge_predictor = true;
+        proc.risk_config.edge_predictor.shadow_mode = false;
+        let store = Arc::new(EdgePredictorStore::new());
+        store.swap(
+            "test",
+            Arc::new(StubOkPredictor {
+                pred: Prediction { q10: 100.0, q50: 200.0, q90: 300.0 },
+            }),
+        );
+        proc.set_edge_predictor_store(store);
+        let gov = approved_governance();
+        let state = paper_state_with_price(30_000.0);
+        // Intent goes through legacy JS cost_gate_paper path — cold-start exploration mode
+        // means it passes to fill. Without features the predictor shouldn't short-circuit.
+        // features=None 時 predictor 不短路，走舊 JS gate（冷啟動探索放行）。
+        let r = proc.process_with_features(
+            &intent_btc(0.7), &gov, &state, 500.0,
+            GovernanceProfile::Exploration, None, None, 0,
+        );
+        assert!(r.submitted, "features=None must delegate to legacy path; got {:?}", r.rejected_reason);
+    }
+
+    #[test]
+    fn test_use_edge_predictor_false_skips_gate() {
+        // cfg.use_edge_predictor=false (default) → predictor never called.
+        // cfg.use_edge_predictor=false（預設）→ 不呼叫 predictor。
+        let mut proc = IntentProcessor::new();
+        assert!(!proc.risk_config.edge_predictor.use_edge_predictor);
+        let store = Arc::new(EdgePredictorStore::new());
+        proc.set_edge_predictor_store(store);
+        let gov = approved_governance();
+        let state = paper_state_with_price(30_000.0);
+        let features = FeatureVectorV1::zeroed();
+        let r = proc.process_with_features(
+            &intent_btc(0.7), &gov, &state, 500.0,
+            GovernanceProfile::Exploration, Some(&features), Some("ctx-1"), 1_700_000_000_000,
+        );
+        assert!(r.submitted, "use_edge_predictor=false must pass through; got {:?}", r.rejected_reason);
+    }
+
+    #[test]
+    fn test_shadow_mode_falls_through_to_legacy_even_on_reject_outcome() {
+        // shadow_mode=true + margin-insufficient predictor → gate would reject,
+        // but shadow_mode forces fall-through to JS gate (observation stage).
+        // shadow_mode=true 即使 margin 不足也回退 JS gate（觀察階段）。
+        let mut proc = IntentProcessor::new();
+        proc.risk_config.edge_predictor.use_edge_predictor = true;
+        proc.risk_config.edge_predictor.shadow_mode = true;
+        let store = Arc::new(EdgePredictorStore::new());
+        store.swap(
+            "test",
+            Arc::new(StubOkPredictor {
+                pred: Prediction { q10: -100.0, q50: -50.0, q90: -10.0 },
+            }),
+        );
+        proc.set_edge_predictor_store(store);
+        let gov = approved_governance();
+        let state = paper_state_with_price(30_000.0);
+        let features = FeatureVectorV1::zeroed();
+        let r = proc.process_with_features(
+            &intent_btc(0.7), &gov, &state, 500.0,
+            GovernanceProfile::Exploration, Some(&features), Some("ctx-1"), 0,
+        );
+        assert!(r.submitted,
+            "shadow_mode=true must fall through to legacy; got {:?}", r.rejected_reason);
+    }
+
+    #[test]
+    fn test_accept_bypasses_legacy_gate() {
+        // shadow_mode=false + predictor Accept → submitted (JS gate bypassed).
+        // Use a Prediction with large positive margin vs tiny cost.
+        // shadow_mode=false + Accept → submitted（跳過 JS gate）。
+        let mut proc = IntentProcessor::new();
+        proc.risk_config.edge_predictor.use_edge_predictor = true;
+        proc.risk_config.edge_predictor.shadow_mode = false;
+        let store = Arc::new(EdgePredictorStore::new());
+        store.swap(
+            "test",
+            Arc::new(StubOkPredictor {
+                pred: Prediction { q10: 100.0, q50: 200.0, q90: 300.0 },
+            }),
+        );
+        proc.set_edge_predictor_store(store);
+        let gov = approved_governance();
+        let state = paper_state_with_price(30_000.0);
+        let features = FeatureVectorV1::zeroed();
+        let r = proc.process_with_features(
+            &intent_btc(0.7), &gov, &state, 500.0,
+            GovernanceProfile::Exploration, Some(&features), Some("ctx-1"), 0,
+        );
+        assert!(r.submitted, "Accept must bypass JS gate and submit; got {:?}", r.rejected_reason);
+    }
+
+    #[test]
+    fn test_reject_short_circuits() {
+        // shadow_mode=false + margin-insufficient + exploration_rate=0 → Reject.
+        // shadow_mode=false + margin 不足 + exploration_rate=0 → 拒絕。
+        let mut proc = IntentProcessor::new();
+        proc.risk_config.edge_predictor.use_edge_predictor = true;
+        proc.risk_config.edge_predictor.shadow_mode = false;
+        proc.risk_config.edge_predictor.exploration_rate = 0.0;
+        let store = Arc::new(EdgePredictorStore::new());
+        store.swap(
+            "test",
+            Arc::new(StubOkPredictor {
+                pred: Prediction { q10: -100.0, q50: -50.0, q90: -10.0 },
+            }),
+        );
+        proc.set_edge_predictor_store(store);
+        let gov = approved_governance();
+        let state = paper_state_with_price(30_000.0);
+        let features = FeatureVectorV1::zeroed();
+        let r = proc.process_with_features(
+            &intent_btc(0.7), &gov, &state, 500.0,
+            GovernanceProfile::Exploration, Some(&features), Some("ctx-1"), 0,
+        );
+        assert!(!r.submitted);
+        let reason = r.rejected_reason.expect("reason set");
+        assert!(
+            reason.contains("predictor_cost_margin_insufficient"),
+            "expected margin-insufficient reason, got {reason}"
+        );
+    }
+
+    #[test]
+    fn test_fallback_shrinkage_uses_legacy_gate() {
+        // use_edge_predictor=true but no model swapped in → Fallback(NoModel) → Shrinkage → legacy.
+        // use_edge_predictor=true 但未 swap model → Fallback(NoModel) → Shrinkage → 走 JS gate。
+        let mut proc = IntentProcessor::new();
+        proc.risk_config.edge_predictor.use_edge_predictor = true;
+        proc.risk_config.edge_predictor.shadow_mode = false;
+        proc.risk_config.edge_predictor.fallback_on_error = EdgePredictorFallback::Shrinkage;
+        let store = Arc::new(EdgePredictorStore::new());
+        // No swap — gate returns Fallback(NoModel).
+        proc.set_edge_predictor_store(store);
+        let gov = approved_governance();
+        let state = paper_state_with_price(30_000.0);
+        let features = FeatureVectorV1::zeroed();
+        let r = proc.process_with_features(
+            &intent_btc(0.7), &gov, &state, 500.0,
+            GovernanceProfile::Exploration, Some(&features), Some("ctx-1"), 0,
+        );
+        // JS gate cold-start exploration passes the intent.
+        // JS gate 冷啟動探索模式放行。
+        assert!(r.submitted,
+            "Fallback(Shrinkage) must delegate to legacy gate; got {:?}", r.rejected_reason);
+    }
+
+    #[test]
+    fn test_fallback_fail_closed_rejects_with_metric_suffix() {
+        // fallback_on_error=FailClosed + no model → hard reject, reason ends with metric name.
+        // fallback_on_error=FailClosed + 無 model → 硬拒絕，reason 以 metric 名結尾。
+        let mut proc = IntentProcessor::new();
+        proc.risk_config.edge_predictor.use_edge_predictor = true;
+        proc.risk_config.edge_predictor.shadow_mode = false;
+        proc.risk_config.edge_predictor.fallback_on_error = EdgePredictorFallback::FailClosed;
+        let store = Arc::new(EdgePredictorStore::new());
+        proc.set_edge_predictor_store(store);
+        let gov = approved_governance();
+        let state = paper_state_with_price(30_000.0);
+        let features = FeatureVectorV1::zeroed();
+        let r = proc.process_with_features(
+            &intent_btc(0.7), &gov, &state, 500.0,
+            GovernanceProfile::Exploration, Some(&features), Some("ctx-1"), 0,
+        );
+        assert!(!r.submitted);
+        let reason = r.rejected_reason.expect("reason set");
+        assert!(
+            reason.starts_with("predictor_fallback_fail_closed:predict_no_model"),
+            "expected fail-closed suffix, got {reason}"
+        );
+    }
+
+    #[test]
+    fn test_shadow_fill_emits_ipc_on_epsilon_greedy() {
+        // exploration_rate=1.0 forces ε-greedy branch; verify EmitShadowFill arrives on channel.
+        // exploration_rate=1.0 強制走 ε-greedy；驗證 EmitShadowFill 到達通道。
+        let mut proc = IntentProcessor::new();
+        proc.risk_config.edge_predictor.use_edge_predictor = true;
+        proc.risk_config.edge_predictor.shadow_mode = false;
+        proc.risk_config.edge_predictor.exploration_rate = 1.0;
+        proc.set_pipeline_kind(PipelineKind::Paper);
+
+        let store = Arc::new(EdgePredictorStore::new());
+        store.swap(
+            "test",
+            Arc::new(StubOkPredictor {
+                pred: Prediction { q10: -100.0, q50: -50.0, q90: -10.0 },
+            }),
+        );
+        proc.set_edge_predictor_store(store);
+
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<PipelineCommand>();
+        proc.set_shadow_fill_tx(tx);
+
+        let gov = approved_governance();
+        let state = paper_state_with_price(30_000.0);
+        let features = FeatureVectorV1::zeroed();
+        let r = proc.process_with_features(
+            &intent_btc(0.7), &gov, &state, 500.0,
+            GovernanceProfile::Exploration, Some(&features), Some("ctx-eps"),
+            1_700_000_000_000,
+        );
+        assert!(!r.submitted);
+        assert!(r
+            .rejected_reason
+            .unwrap()
+            .contains("predictor_epsilon_greedy_exploration"));
+
+        let cmd = rx.try_recv().expect("ShadowFill IPC must be emitted");
+        match cmd {
+            PipelineCommand::EmitShadowFill {
+                context_id, strategy, symbol, prediction_q50, ts_ms, ..
+            } => {
+                assert_eq!(context_id, "ctx-eps");
+                assert_eq!(strategy, "test");
+                assert_eq!(symbol, "BTCUSDT");
+                assert!((prediction_q50 - (-50.0)).abs() < 1e-6);
+                assert_eq!(ts_ms, 1_700_000_000_000);
+            }
+            other => panic!("expected EmitShadowFill, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_non_paper_engine_never_emits_shadow_fill() {
+        // Demo engine even at exploration_rate=1.0 must reject without emitting shadow fill.
+        // Demo 引擎即使 exploration_rate=1.0 也必須拒絕且不發送 shadow fill。
+        let mut proc = IntentProcessor::new();
+        proc.risk_config.edge_predictor.use_edge_predictor = true;
+        proc.risk_config.edge_predictor.shadow_mode = false;
+        proc.risk_config.edge_predictor.exploration_rate = 1.0;
+        proc.set_pipeline_kind(PipelineKind::Demo);
+
+        let store = Arc::new(EdgePredictorStore::new());
+        store.swap(
+            "test",
+            Arc::new(StubOkPredictor {
+                pred: Prediction { q10: -100.0, q50: -50.0, q90: -10.0 },
+            }),
+        );
+        proc.set_edge_predictor_store(store);
+
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<PipelineCommand>();
+        proc.set_shadow_fill_tx(tx);
+
+        let gov = approved_governance();
+        let state = paper_state_with_price(30_000.0);
+        let features = FeatureVectorV1::zeroed();
+        let r = proc.process_with_features(
+            &intent_btc(0.7), &gov, &state, 500.0,
+            GovernanceProfile::Exploration, Some(&features), Some("ctx-demo"), 0,
+        );
+        assert!(!r.submitted);
+        assert!(rx.try_recv().is_err(), "Demo engine must not emit shadow fills");
+    }
+
+    #[test]
+    fn test_process_gates_only_with_features_accept_bypasses_legacy() {
+        // Exchange path: Accept → approved, legacy JS shrinkage bypassed.
+        // 交易所路徑：Accept → approved，跳過 JS shrinkage。
+        let mut proc = IntentProcessor::new();
+        proc.risk_config.edge_predictor.use_edge_predictor = true;
+        proc.risk_config.edge_predictor.shadow_mode = false;
+        let store = Arc::new(EdgePredictorStore::new());
+        store.swap(
+            "test",
+            Arc::new(StubOkPredictor {
+                pred: Prediction { q10: 100.0, q50: 200.0, q90: 300.0 },
+            }),
+        );
+        proc.set_edge_predictor_store(store);
+        let gov = approved_governance();
+        let state = paper_state_with_price(30_000.0);
+        let features = FeatureVectorV1::zeroed();
+        let r = proc.process_gates_only_with_features(
+            &intent_btc(0.7), &gov, &state, 500.0,
+            GovernanceProfile::Production, Some(&features), Some("ctx-exch"), 0,
+        );
+        assert!(r.approved, "Accept must bypass strict live JS gate; got {:?}", r.rejected_reason);
+    }
+}

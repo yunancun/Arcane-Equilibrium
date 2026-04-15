@@ -372,6 +372,43 @@ pub enum PipelineCommand {
         mode: String,
         response_tx: tokio::sync::oneshot::Sender<Result<String, String>>,
     },
+    /// EDGE-P3-1 Stage 0 · Swap in a new `EdgePredictor` for `strategy` on this
+    /// engine's `EdgePredictorStore`. Used by Python ML-MIT pipeline to hot-
+    /// reload the tract/ort model without restart. `predictor` is wrapped in
+    /// `BoxedEdgePredictor` so `PipelineCommand` can stay `Debug`.
+    /// EDGE-P3-1 Stage 0 · 熱換指定策略的 EdgePredictor 至本引擎的
+    /// `EdgePredictorStore`。ML-MIT 透過此命令無重啟重載 tract/ort 模型。
+    /// `predictor` 用 `BoxedEdgePredictor` 包裝以保持 `Debug`。
+    SetEdgePredictorShadow {
+        strategy: String,
+        predictor: crate::edge_predictor::BoxedEdgePredictor,
+        response_tx: tokio::sync::oneshot::Sender<Result<String, String>>,
+    },
+    /// EDGE-P3-1 Stage 0 · Kill-switch: clear every loaded predictor on the
+    /// engine (all strategies → `Err(NoModel)`). Operator emergency response
+    /// when model degrades in production.
+    /// EDGE-P3-1 Stage 0 · Kill-switch：清空引擎上所有策略 predictor，立刻
+    /// fallback 至 shrinkage。Operator 模型故障應急。
+    DisableEdgePredictorAll {
+        response_tx: tokio::sync::oneshot::Sender<Result<String, String>>,
+    },
+    /// EDGE-P3-1 Stage 0 · ε-greedy shadow-fill emission from the cost gate
+    /// (spec §7.3 step 7). Python consumer writes to
+    /// `learning.decision_shadow_fills` with `close_tag='shadow_fill:epsilon_greedy'`.
+    /// Label backfill permanently excludes these rows (§5.1 WHERE clause).
+    /// EDGE-P3-1 Stage 0 · 成本門 ε-greedy shadow-fill 發射。Python 消費者寫入
+    /// `learning.decision_shadow_fills`，label 回填永久排除。
+    EmitShadowFill {
+        context_id: String,
+        strategy: String,
+        symbol: String,
+        features_jsonb: String,
+        prediction_q10: f32,
+        prediction_q50: f32,
+        prediction_q90: f32,
+        cost_bps: f64,
+        ts_ms: u64,
+    },
 }
 
 /// Server-side stop request dispatched from tick_pipeline to Bybit API (Item 1).
@@ -597,6 +634,15 @@ pub struct TickPipeline {
     /// OC-5: Cached latest index price per symbol (from Ticker events).
     /// OC-5：每幣種最新指數價格緩存（來自 Ticker 事件）。
     index_prices: HashMap<String, f64>,
+    /// EDGE-P3-1 Stage 0: Per-strategy quantile predictor store for this engine.
+    /// None until the engine bootstrap registers one. When present, the
+    /// intent processor's cost gate consults it before falling through to the
+    /// JS shrinkage gate (wired in A4). Hot-swapped via
+    /// `PipelineCommand::SetEdgePredictorShadow` / `DisableEdgePredictorAll`.
+    /// EDGE-P3-1 Stage 0：本引擎的逐策略 quantile 預測器 store。引擎啟動註冊後
+    /// 由 intent processor cost gate 在 JS shrinkage 之前諮詢（A4 接線）。
+    /// 通過 IPC 熱換 / 清空。
+    edge_predictor_store: Option<Arc<crate::edge_predictor::EdgePredictorStore>>,
 }
 
 impl TickPipeline {
@@ -676,6 +722,7 @@ impl TickPipeline {
             ft_reduced_symbols: std::collections::HashSet::new(),
             funding_rates: HashMap::new(),
             index_prices: HashMap::new(),
+            edge_predictor_store: None,
         }
     }
 
@@ -741,6 +788,31 @@ impl TickPipeline {
         rt: std::sync::Arc<crate::linucb::LinUcbRuntime>,
     ) {
         self.linucb = Some(rt);
+    }
+
+    /// EDGE-P3-1 Stage 0: Inject the per-engine `EdgePredictorStore` handle.
+    /// Engine bootstrap in `main.rs` creates one store per PipelineKind
+    /// (paper/demo/live) and passes the Arc here. After wiring, `handle_paper_command`
+    /// honours `SetEdgePredictorShadow` / `DisableEdgePredictorAll`, and A4 will
+    /// thread the store into `IntentProcessor` for the §7.3 gate.
+    /// EDGE-P3-1 Stage 0：注入本引擎的 `EdgePredictorStore` handle。main.rs 為
+    /// 每 PipelineKind 建一個 store 並傳入。接線後 IPC 熱換生效，A4 再串入
+    /// IntentProcessor 的 §7.3 gate。
+    pub fn set_edge_predictor_store(
+        &mut self,
+        store: std::sync::Arc<crate::edge_predictor::EdgePredictorStore>,
+    ) {
+        self.edge_predictor_store = Some(store);
+    }
+
+    /// EDGE-P3-1 Stage 0: Accessor for command handlers that need to mutate
+    /// the store (swap / clear). Returns `None` until `set_edge_predictor_store`
+    /// is called.
+    /// EDGE-P3-1 Stage 0：命令 handler 用的 store 取用器；未注入前返回 None。
+    pub fn edge_predictor_store(
+        &self,
+    ) -> Option<&std::sync::Arc<crate::edge_predictor::EdgePredictorStore>> {
+        self.edge_predictor_store.as_ref()
     }
 
     /// W-4: Plug in a shared NewsContextSnapshot (read-only on the live path).

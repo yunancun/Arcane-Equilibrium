@@ -1193,6 +1193,7 @@ dependencies = [
  "openclaw_core",
  "openclaw_types",
  "parking_lot",
+ "rand 0.8.5",
  "reqwest",
  "rustls",
  "serde",
