@@ -1,7 +1,7 @@
 # OpenClaw TODO — 工作計劃清單
 
-**最後更新：2026-04-15**（EDGE-P3-1 spec v1.0 → v1.3 四輪審查完成，GREEN — Stage 0 可開工；worklog: `docs/worklogs/2026-04-15--edge_predictor_spec_v1_to_v1_3.md`）
-**測試基準線**：Rust **engine lib 1146 + core 372 + e2e 33 + stress 35 = 1586** · Python **2852 passed (5 skipped · 0 fail)** · ml_training **135 passed (6 skipped)**
+**最後更新：2026-04-15**（EDGE-P3-1 spec v1.0 → v1.3 四輪審查完成，GREEN — Stage 0 可開工；worklog: `docs/worklogs/2026-04-15--edge_predictor_spec_v1_to_v1_3.md`；ENGINE-HEAL + FUP-8 Phase 2 已 deploy 並 DB 驗證）
+**測試基準線**：Rust **engine lib 1198 + core 372 + e2e 33 + stress 35 = 1638** · Python **2852 passed (5 skipped · 0 fail)** · ml_training **135 passed (6 skipped)**
 
 > compact 後從此文件恢復工作狀態。第一個 `[ ]` 即為下一步起點。
 > 歷史歸檔索引在文件末尾。詳細完成度視角見 README.md。
@@ -12,9 +12,9 @@
 
 | # | 項目 | 預估 | 阻塞者 | 解鎖 |
 |---|------|------|-------|------|
-| **1** | 🚀 **ENGINE-HEAL-DEPLOY** — operator 執行 `bash helper_scripts/restart_all.sh --rebuild` 替換 pre-fix binary（ENGINE-HEAL Fix 1/3/4 + FA-PHANTOM-1 fix + FUP-8 intents.details fix 一次到位） | 0.5 h | — | G-2 驗證重啟 · canary 實戰 · FUP-8 上線 |
-| **2** | 🧪 **G-2 FundingArb 驗證重啟** — deploy 後：manual entry 1 → paper_state 有倉 → IPC close → DB 出現 close fill with realized_pnl；再累積 ≥20 乾淨 fills 分析 edge | 2-3 d | Action #1 | Phase 5 歸因量化確認 · LG-1 觀察期起點 |
-| **3** | 🕰️ **LG-1 Paper Trading 21d（重新定位）** — EDGE-P0/P1 + FA-PHANTOM-1 + FUP-8 部署後啟動正式觀察期；不再綁定 05-01 | 3 w | Actions #1, #2 | Live Gate · LG-2/3 |
+| ~~1~~ | ~~🚀 **ENGINE-HEAL-DEPLOY**~~ ✅ 2026-04-15 PID 403560 跑 binary mtime 01:55（含 ENGINE-HEAL Fix 1/3/4 + FA-PHANTOM-1 + FUP-8 Phase 1&2 全數到位）；DB 驗證 paper intents.details 非 NULL 且 `is_sentinel=false` + 真實 sized qty；canary 持續觀察中（≥1h 軟門檻不阻塞後續 action） | — | — | — |
+| **2** | 🧪 **G-2 FundingArb 驗證重啟** — deploy 後：manual entry 1 → paper_state 有倉 → IPC close → DB 出現 close fill with realized_pnl；再累積 ≥20 乾淨 fills 分析 edge | 2-3 d | ~~#1~~ ✅ | Phase 5 歸因量化確認 · LG-1 觀察期起點 |
+| **3** | 🕰️ **LG-1 Paper Trading 21d（重新定位）** — EDGE-P0/P1 + FA-PHANTOM-1 + FUP-8 部署後啟動正式觀察期；不再綁定 05-01 | 3 w | ~~#1~~ ✅, #2 | Live Gate · LG-2/3 |
 | ~~4~~ | ~~FA-PHANTOM-1-FUP-7~~ ✅ 2026-04-15 operator 選 C，註釋已加到 `fast_track.rs:39-57`（見下方 FA-PHANTOM-1 留尾段） | — | — | — |
 | **5** | 📊 **Phase 5 策略 Edge 2w 重評** — 乾淨 paper 2w 後重算 per-strategy gross edge。若翻正 → Phase 5 cost_gate 工作重啟；若仍負 → 策略本身需重做（EDGE-P2/P3） | 2 w | Action #2 | Phase 5 restart / rebuild 決策 |
 
@@ -39,9 +39,9 @@
 
 ### 部署窗口（Action #1）
 
-- [ ] **ENGINE-HEAL-DEPLOY** operator 執行 `bash helper_scripts/restart_all.sh --rebuild` 部署 pre-fix binary 至最新（含 ENGINE-HEAL Fix 1/3/4 + FA-PHANTOM-1 leverage-aware margin + FUP-8 intents.details persistence）
-  - Canary 觀察 ≥1h：engine.log 不再出現 `FAST_TRACK CloseAll fired` 於 `risk_level=Normal`；DB `trading.intents.details` 新 rows 非 NULL
-  - 失敗回退：`git revert <commits>` + `restart_all.sh --rebuild`
+- [x] **ENGINE-HEAL-DEPLOY** ✅ 2026-04-15 — PID 403560 跑 binary mtime 01:55，含 ENGINE-HEAL Fix 1/3/4 + FA-PHANTOM-1 leverage-aware margin + FUP-8 Phase 1（sentinel flag `f6b07cd`）+ FUP-8 Phase 2（paper 走 sizing `2061310`）全數到位
+  - DB 驗證：paper intents 10 筆最近 3 分鐘樣本，`submitted_qty` 真實 sized（0.47~31742），`is_sentinel=false`
+  - Canary 觀察：0 `FAST_TRACK CloseAll fired` / 0 panic / 0 crash 於持續運行中；≥1h 軟門檻待自然累積（不阻塞後續 action）
 
 ### G-2 FundingArb 驗證（Action #2，BLOCKED by #1）
 
