@@ -1,10 +1,8 @@
-# CLAUDE.md §三「當前系統狀態摘要」完整快照（2026-04-15 歸檔前）
-# CLAUDE.md Section 3 "Current System State" Full Snapshot (2026-04-15 pre-archive)
+# CLAUDE.md §三 里程碑歸檔 — 2026-04-09 至 2026-04-14
 
-> 來源：`CLAUDE.md` §三 全文，截至 2026-04-15 03:00 本地
-> 歸檔原因：§三 已累積 30+ 個 ✅ 已完成里程碑段落（~170 行），每 session 啟動時重複載入，佔用大量 context window。壓縮為短表後完整敘述遷移至此檔，per-commit 細節仍可追溯至 `docs/CLAUDE_CHANGELOG.md` 與各 worklog。
-> 歸檔日期：2026-04-15
-> 對應壓縮版：`CLAUDE.md` §三（2026-04-15 rev）
+**歸檔日期**：2026-04-15
+**原因**：CLAUDE.md §三 每次 session 自動全量載入，超過 2 天的完成里程碑純歷史，不應佔用 context。按 CLAUDE.md §七 §三 衛生規則（>2 天必歸檔）執行首次大批歸檔。
+**涵蓋**：2026-04-09 至 2026-04-14 共 22 條里程碑段落。
 
 ---
 
@@ -32,17 +30,9 @@ Phase A 信號源收緊 + Phase B Agent 接線 + Phase C stub + PM 驗收。**Ph
 
 FundingArb `on_tick()` 從 stub 升級為完整實現（~280 行）。數據管線：`index_price: Option<f64>` 加入 PriceEvent → WS tickers `indexPrice` 提取 → `TickPipeline.index_prices` HashMap 緩存 → `TickContext.index_price`。策略邏輯：entry（funding_threshold + edge 計算 + basis 風險 `|perp/index-1|` + H0/cooldown/position guards）→ direction（positive→short, negative→long）→ confidence scaling（capped 0.6）→ RC-04 rejection rollback。Exit on rate flip / basis breach / max hold。22 新測試。TOML: paper/demo `active=true`，live `active=false`。解鎖 G-2。
 
-## Phase 5 PAUSED — strategies broken, not fees + edge data isolation（2026-04-12 reframe, 04-13 fix）
-
-兩個 PnL bug 揭露真相：(a) **PNL-FIX-1**（commit `2a422fa`）`on_tick.rs` 5 條 close 路徑誤用 `event.last_price` 跨 symbol 平倉，PnL 被放大 1000-10000×；(b) **PNL-FIX-2**（同日 follow-up）`emit_close_fill` 寫 `fee: 0.0`，所有 risk/strategy/fast_track 平倉根本不收費。乾淨基線後所有活躍策略 gross edge 為負，net 總損 -$2775。**疑似墮落循環（2026-04-13 發現）**：`realized_edge_stats.py` 原先只查 `is_paper=TRUE`（paper+demo 混合），Paper Exploration 模式放行大量負 edge 交易（518 筆 vs Demo 40 筆），這些交易的 fills 反過來成為 JS edge 估計的主要數據源 → shrunk_bps 全部坍塌到 -35.72 → B=1.0 完全池化 → 可能形成 paper 噪音自我強化的負反饋循環。**修復**：edge 數據按 `engine_mode` 隔離 — demo fills → `edge_estimates.json`（production，demo/live cost_gate 使用），paper fills → `edge_estimates_paper.json`（僅供 draft strategy 評估）；已清除被污染的 edge_estimates.json。Phase 5 暫停等策略重做。
-
 ## Rust 市場掃描器 Phase A-D + QC/FA + P2 ✅（2026-04-09）
 
 ScannerRunner 完整接線 + D2/D3 動態 symbol + C-3 XRP + C-4 pinned cap + M-1 pending_close + adl_alerts + M-2 TOML + M-3 f_ma 閾值 1.5%→0.5% + M-5 edge_bonus +5→+2 + m-1 relay log + m-3 rest_poller Vec<String> + **IPC-SCAN-1 掃描器可觀測性**（get_active_symbols / get_scanner_status）。**系統目標達成度 ~100%**。835 lib tests pass。
-
-## Runtime Live_Ready 狀態 ✅
-
-所有前置阻隔已移除。**實際 Live 交易上線條件（唯一）**：`settings/secret_files/bybit/live/{api_key,api_secret}` 配置完畢（OPENCLAW_ALLOW_MAINNET env var 鎖已從 Rust 源碼移除）。execution_authority 在 live session start 時自動授予。**Live 縮倉監控 ✅**：session 啟動後每 5 分鐘輪詢 peak_balance/bybit_sync_balance；回撤 ≥5% → 警告；回撤 ≥15% → 自動撤銷 execution_authority + 平倉 + 凍結 GovernanceHub 授權。
 
 ## A2 NewsPipeline Scheduler ✅（2026-04-10）
 
@@ -114,36 +104,8 @@ Reconciler 對 orphan 倉「偵測但不動作」的行為修復。新增 `posit
 
 ## ENGINE-HEAL 4 Fix ✅（2026-04-14）
 
-2026-04-14 靜默死亡事故驅動（引擎死 18min 無重啟無死前日誌 · ws 死前 14+min 已斷但進程仍「存活」）。
-
-- **Fix 1** `main.rs` L55-108 panic hook（`std::panic::set_hook` 捕 thread id/location/payload/`Backtrace::force_capture()` + flush → `tracing::error!`，覆蓋所有 tokio worker & std thread）
-- **Fix 3** crash-only（`run_pipeline_crash_only<F>()` 包 paper/demo spawn + Live thread catch_unwind 後補 `live_cancel.cancel()`，任一 panic → `EngineEvent::Crashed(kind)` + 全局 cancel → ordered shutdown → exit，**不 isolate**，避免三引擎共享 `RiskConfigStore`/`SymbolRegistry`/`EdgeEstimates` 污染帶病繼續）
-- **Fix 4** WS tick stale 自救（L1108-1155，30s 週期檢 `shared_last_tick_ms: Arc<AtomicU64>`，age > **120_000ms** 且 last!=0 → `cancel.cancel()`，業務層存活斷言防殭屍）
-- **Fix 2** watchdog 自動重啟 4 道保險（`engine_watchdog.py` + `stop_all.sh` + `restart_all.sh`）：(1) `fcntl.flock` 單例 (2) `engine_maintenance.flag` operator 意圖守則 (3) SIGTERM-first + 5s graceful + SIGKILL fallback（原 `pkill -f` 會在 `paper_state.json` atomic rename 中途殺死留損毀 tmp → 虛假重啟循環）(4) 退避 [60,120,300,600,3600]s + 連續失敗 ≥5 熔斷寫 `canary_events.jsonl` 告警
-
-**Bonus**：`rotate_engine_log()` 保留 10 份 `/tmp/openclaw/engine_logs/engine-<epoch>.log` — 原 `>` truncate 是事故放大器（沒它任何事故都沒死因）。
-
-**決策**：D1 全部 crash-only 含 Live / D2 WS stale 120s（60s 誤報太多，worst case ~3min zombie 可接受）/ D3 Phase 0 medium。
-
-**驗證**：engine lib 1144 + core 366 + e2e 33 = **1543** 0 fail · watchdog 8/8 unit · shell `bash -n` clean。
-
-**留尾**：運行中引擎仍 pre-fix binary（operator 需 `restart_all.sh --rebuild` 部署）· Phase 2（env 覆蓋 stale threshold / per-tier / metric export）延後。詳見 `docs/worklogs/2026-04-14--engine_self_healing.md` + `docs/known_issues/2026-04-14--ws_stale_detector.md`。
+2026-04-14 靜默死亡事故驅動（引擎死 18min 無重啟無死前日誌 · ws 死前 14+min 已斷但進程仍「存活」）。**Fix 1** `main.rs` L55-108 panic hook（`std::panic::set_hook` 捕 thread id/location/payload/`Backtrace::force_capture()` + flush → `tracing::error!`，覆蓋所有 tokio worker & std thread）；**Fix 3** crash-only（`run_pipeline_crash_only<F>()` 包 paper/demo spawn + Live thread catch_unwind 後補 `live_cancel.cancel()`，任一 panic → `EngineEvent::Crashed(kind)` + 全局 cancel → ordered shutdown → exit，**不 isolate**，避免三引擎共享 `RiskConfigStore`/`SymbolRegistry`/`EdgeEstimates` 污染帶病繼續）；**Fix 4** WS tick stale 自救（L1108-1155，30s 週期檢 `shared_last_tick_ms: Arc<AtomicU64>`，age > **120_000ms** 且 last!=0 → `cancel.cancel()`，業務層存活斷言防殭屍）；**Fix 2** watchdog 自動重啟 4 道保險（`engine_watchdog.py` + `stop_all.sh` + `restart_all.sh`）：(1) `fcntl.flock` 單例 (2) `engine_maintenance.flag` operator 意圖守則 (3) SIGTERM-first + 5s graceful + SIGKILL fallback（原 `pkill -f` 會在 `paper_state.json` atomic rename 中途殺死留損毀 tmp → 虛假重啟循環）(4) 退避 [60,120,300,600,3600]s + 連續失敗 ≥5 熔斷寫 `canary_events.jsonl` 告警。**Bonus**：`rotate_engine_log()` 保留 10 份 `/tmp/openclaw/engine_logs/engine-<epoch>.log` — 原 `>` truncate 是事故放大器（沒它任何事故都沒死因）。**決策**：D1 全部 crash-only 含 Live / D2 WS stale 120s（60s 誤報太多，worst case ~3min zombie 可接受）/ D3 Phase 0 medium。**驗證**：engine lib 1144 + core 366 + e2e 33 = **1543** 0 fail · watchdog 8/8 unit · shell `bash -n` clean。**留尾**：運行中引擎仍 pre-fix binary（operator 需 `restart_all.sh --rebuild` 部署）· Phase 2（env 覆蓋 stale threshold / per-tier / metric export）延後。詳見 `docs/worklogs/2026-04-14--engine_self_healing.md` + `docs/known_issues/2026-04-14--ws_stale_detector.md`。
 
 ## WP-F/UX-07~10 ✅（2026-04-14，commit `19a84da`）
 
 GUI 術語全域統一 `Paper 模拟` / `Demo 演示` / `Live 实盘`；Tab bar `中文 English` 雙語格式；Session 5 語境消歧（AI 推理 / 交易暂停 / 授权租约 Lease）。**Pass-4 Live 槽雙態註解**：tab-live.html 新增雙語資訊區塊明確「Live 槽可填 Mainnet 或 Live-Demo 虛擬 key，兩者統一走 Live 最嚴標準（紫色主題 / Global Mode Gate / 二次確認 / 完整風控棧）」；tab-settings.html Live-Demo 卡片補 `⚠ 等同 Live 待遇` 標示。3 sub-agent 平行 + 主會話 E2 補 legacy `index.html`。16 文件 +160/-143 行。console.html BUILD_TS `20260414.ux07-unify-v1` 強制 iframe 刷新。**零後端改動**（JSON API 鍵 / CSS class / 函數名 / endpoint 未觸碰）。
-
----
-
-## 歸檔時的非阻塞留尾
-
-- W1 event_consumer 拆分
-- governance_routes.py 1172 行（已瘦身至 < 1200 ✅）
-- D-02 PriceEvent metadata HashMap 移除（待所有 producer 遷移至 structured fields）
-
-## 更早歷史細節指針（不要重複載入）
-
-- 1A→1C-4 commit 敘事 → `docs/archive/2026-04-08--arch_rc1_1c_history_archive.md`
-- Phase 0-4 Sprint/Wave → `docs/archive/2026-04-07--claude_md_section3_history_phase0_4.md`
-- 逐 commit 行數 → `docs/CLAUDE_CHANGELOG.md`
-- 1C-3/1C-4 narrative → `docs/archive/2026-04-08--main_docs_1c3_1c4_narrative.md`
