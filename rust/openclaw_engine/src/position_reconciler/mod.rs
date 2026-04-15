@@ -556,6 +556,17 @@ fn process_orphans(
         guard.clone()
     };
     let max_notional = (oh_cfg.get_max_notional)();
+    // ORPHAN-ADOPT-1 FUP: snapshot engine's own positions mirror once. Each
+    // Orphan verdict is cross-checked: if the engine already owns
+    // `(symbol, is_long)`, this is the engine's own fresh fill that the 30s
+    // baseline hasn't caught up to — NOT an external orphan. Suppress close.
+    // Empty mirror = check disabled (legacy behavior).
+    // ORPHAN-ADOPT-1 FUP：每週期快照引擎自身持倉鏡像，用於抑制「引擎自家剛開倉」
+    // 的假 Orphan。空鏡像 = 停用本檢查（舊行為）。
+    let engine_mirror_snapshot: HashMap<String, bool> = {
+        let guard = oh_cfg.engine_positions_mirror.read();
+        guard.clone()
+    };
 
     let mut kept: Vec<(String, DriftVerdict)> = Vec::with_capacity(drifts.len());
     for (key, verdict) in drifts {
@@ -582,6 +593,26 @@ fn process_orphans(
             warn!(symbol = sym, side = side, "orphan PositionInfo not found; skipping handler / 找不到孤兒 PositionInfo，跳過處理");
             continue;
         };
+
+        // ORPHAN-ADOPT-1 FUP: engine-owned suppression check. If PaperState
+        // mirror shows we already track `(symbol, is_long)` matching the
+        // Bybit side, this is a race between our own open fill and the next
+        // 30s baseline — NOT an external orphan. Drop the verdict so
+        // evaluate_actions does not escalate either.
+        // ORPHAN-ADOPT-1 FUP：引擎自持抑制。鏡像中已有 `(symbol, is_long)`
+        // 代表這是引擎剛開的倉，尚未被下一輪 baseline 收錄 — 非外部孤兒。
+        // 直接捨棄 verdict，讓 evaluate_actions 也不會升級。
+        let expected_is_long = side == "Buy";
+        if let Some(&tracked_is_long) = engine_mirror_snapshot.get(sym) {
+            if tracked_is_long == expected_is_long {
+                info!(
+                    symbol = sym,
+                    side = side,
+                    "orphan suppressed: engine already owns position (fresh-fill race) / 抑制孤兒：引擎已持倉（剛成交 race）"
+                );
+                continue;
+            }
+        }
 
         // Dedup: suppress if we already dispatched within ORPHAN_CLOSE_DEDUP_MS.
         // 去重：若窗口內已分發過則略過。

@@ -11,6 +11,7 @@
 use openclaw_core::stop_manager::{self, PositionState, StopConfig, StopTrigger};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::sync::Arc;
 
 /// A paper trading position.
 /// 紙盤交易持倉。
@@ -56,6 +57,19 @@ pub struct PaperState {
     /// API-reported unrealized PnL per symbol (from WS position updates).
     /// API 報告的每交易對未實現損益（來自 WS 持倉更新）。
     api_unrealized_pnl: HashMap<String, f64>,
+    /// ORPHAN-ADOPT-1 FUP: side-car mirror of `positions` exposing only
+    /// `(symbol → is_long)` so external observers (position_reconciler's
+    /// orphan handler) can cross-check whether the engine already owns a
+    /// candidate Orphan BEFORE dispatching a close. Updated on every insert /
+    /// remove / clear alongside `positions`. Production wires
+    /// `set_positions_mirror()` right after construction so the reconciler
+    /// shares the same handle.
+    /// ORPHAN-ADOPT-1 FUP：`positions` 的側車鏡像，僅暴露 `(symbol → is_long)`。
+    /// 對帳器孤兒處理器讀此鏡像，派發平倉前先確認引擎是否已持倉，
+    /// 避免把引擎剛開的新倉誤判為 Orphan。每次 insert / remove / clear
+    /// 都同步更新。生產路徑在 TickPipeline 構造後用 `set_positions_mirror()`
+    /// 換成與對帳器共享的 handle。
+    positions_mirror: Arc<parking_lot::RwLock<HashMap<String, bool>>>,
 }
 
 impl PaperState {
@@ -74,7 +88,62 @@ impl PaperState {
             forced_drawdown: 0.0,
             bybit_sync_balance: None,
             api_unrealized_pnl: HashMap::new(),
+            positions_mirror: Arc::new(parking_lot::RwLock::new(HashMap::new())),
         }
+    }
+
+    /// ORPHAN-ADOPT-1 FUP: clone the current positions_mirror Arc handle.
+    /// Reconciler uses the handle read-side to suppress false-positive Orphans.
+    /// ORPHAN-ADOPT-1 FUP：克隆當前 positions_mirror 的 Arc handle。
+    /// 對帳器以讀端抑制誤報的 Orphan。
+    pub fn positions_mirror(&self) -> Arc<parking_lot::RwLock<HashMap<String, bool>>> {
+        Arc::clone(&self.positions_mirror)
+    }
+
+    /// ORPHAN-ADOPT-1 FUP: replace the internal mirror handle with `mirror`,
+    /// rehydrating it from the current `positions` map so the reconciler sees
+    /// existing positions (e.g., after import_positions bootstrap). Must be
+    /// called after construction and before the reconciler runs its first
+    /// cycle. Idempotent in practice — subsequent `positions` mutations keep
+    /// the shared handle in sync via the private helpers.
+    /// ORPHAN-ADOPT-1 FUP：用 `mirror` 替換內部 handle 並從當前 `positions` 回填，
+    /// 讓對帳器能看到引擎既有持倉（如 import_positions 啟動後）。應在 TickPipeline
+    /// 構造後、對帳器首輪 cycle 前呼叫。後續 positions 變動由私有 helper 自動同步。
+    pub fn set_positions_mirror(
+        &mut self,
+        mirror: Arc<parking_lot::RwLock<HashMap<String, bool>>>,
+    ) {
+        {
+            let mut guard = mirror.write();
+            guard.clear();
+            for (sym, pos) in &self.positions {
+                guard.insert(sym.clone(), pos.is_long);
+            }
+        }
+        self.positions_mirror = mirror;
+    }
+
+    /// Private helper: insert a position AND mirror `(symbol → is_long)`.
+    /// 私有 helper：同時寫入 positions 與 positions_mirror。
+    fn positions_insert(&mut self, symbol: String, pos: PaperPosition) {
+        self.positions_mirror
+            .write()
+            .insert(symbol.clone(), pos.is_long);
+        self.positions.insert(symbol, pos);
+    }
+
+    /// Private helper: remove from both positions and mirror.
+    /// 私有 helper：同步從 positions 與 mirror 移除。
+    fn positions_remove(&mut self, symbol: &str) -> Option<PaperPosition> {
+        self.positions_mirror.write().remove(symbol);
+        self.positions.remove(symbol)
+    }
+
+    /// Private helper: clear both positions and mirror.
+    /// 私有 helper：清空 positions 與 mirror。
+    fn positions_clear(&mut self) {
+        self.positions_mirror.write().clear();
+        self.positions.clear();
     }
 
     pub fn balance(&self) -> f64 {
@@ -292,7 +361,7 @@ impl PaperState {
         &mut self,
         positions: Vec<(String, bool, f64, f64, u64)>,
     ) -> usize {
-        self.positions.clear();
+        self.positions_clear();
         let mut inserted = 0_usize;
         for (symbol, is_long, qty, entry_price, ts_ms) in positions {
             if qty <= 0.0 || !qty.is_finite() || !entry_price.is_finite() || entry_price <= 0.0 {
@@ -301,7 +370,7 @@ impl PaperState {
             self.latest_prices
                 .entry(symbol.clone())
                 .or_insert(entry_price);
-            self.positions.insert(
+            self.positions_insert(
                 symbol.clone(),
                 PaperPosition {
                     symbol,
@@ -342,7 +411,7 @@ impl PaperState {
             return false;
         }
         if size == 0.0 {
-            return self.positions.remove(symbol).is_some();
+            return self.positions_remove(symbol).is_some();
         }
         if !avg_price.is_finite() || avg_price <= 0.0 {
             return false;
@@ -366,10 +435,15 @@ impl PaperState {
                     pos.entry_ts_ms = ts_ms;
                     pos.entry_fee = 0.0;
                 }
+                // Mirror: keep `(symbol → is_long)` in sync (covers direction flip).
+                // 鏡像：同步 is_long（覆蓋方向翻轉）。
+                self.positions_mirror
+                    .write()
+                    .insert(symbol.to_string(), is_long);
                 true
             }
             None => {
-                self.positions.insert(
+                self.positions_insert(
                     symbol.to_string(),
                     PaperPosition {
                         symbol: symbol.to_string(),
@@ -564,9 +638,9 @@ impl PaperState {
                 if remaining > 1e-12 {
                     let mut updated = pos.clone();
                     updated.qty = remaining;
-                    self.positions.insert(symbol.to_string(), updated);
+                    self.positions_insert(symbol.to_string(), updated);
                 } else {
-                    self.positions.remove(symbol);
+                    self.positions_remove(symbol);
                 }
                 self.peak_balance = self.peak_balance.max(self.balance);
                 return pnl;
@@ -581,14 +655,14 @@ impl PaperState {
                 updated.qty = new_qty;
                 updated.entry_price = avg_entry;
                 updated.entry_fee += fee;
-                self.positions.insert(symbol.to_string(), updated);
+                self.positions_insert(symbol.to_string(), updated);
                 return 0.0;
             }
         }
 
         // Opening new position (no existing position for this symbol)
         // 開新倉（此交易對無現有持倉）
-        self.positions.insert(
+        self.positions_insert(
             symbol.to_string(),
             PaperPosition {
                 symbol: symbol.to_string(),
@@ -612,7 +686,7 @@ impl PaperState {
     /// 以市場價平倉，返回已實現損益（None=無持倉）。DB-RUN-3：呼叫端應依此 PnL
     /// 發送 TradingMsg::Fill，避免風控/止損平倉的 realized_pnl 落為 0。
     pub fn close_position(&mut self, symbol: &str, price: f64, _ts_ms: u64) -> Option<f64> {
-        if let Some(pos) = self.positions.remove(symbol) {
+        if let Some(pos) = self.positions_remove(symbol) {
             let pnl = if pos.is_long {
                 (price - pos.entry_price) * pos.qty
             } else {
@@ -645,7 +719,7 @@ impl PaperState {
             pos.qty -= actual_reduce;
             if pos.qty < 1e-12 {
                 // Fully closed / 全部平倉
-                self.positions.remove(symbol);
+                self.positions_remove(symbol);
                 self.trade_count += 1;
             }
             self.peak_balance = self.peak_balance.max(self.balance);

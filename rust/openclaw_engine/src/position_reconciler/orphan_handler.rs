@@ -43,6 +43,7 @@ use crate::position_manager::PositionInfo;
 use crate::scanner::registry::SymbolRegistry;
 use crate::tick_pipeline::PipelineCommand;
 use openclaw_core::sm::risk_gov::RiskLevel;
+use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::mpsc::UnboundedSender;
 use tracing::{info, warn};
@@ -137,6 +138,20 @@ pub struct OrphanHandlerConfig {
     /// Closure that returns the current `max_order_notional_usdt` for this engine.
     /// 回傳當前引擎 max_order_notional_usdt 的閉包。
     pub get_max_notional: Arc<dyn Fn() -> f64 + Send + Sync>,
+    /// ORPHAN-ADOPT-1 FUP: per-engine mirror of PaperState positions
+    /// (`symbol → is_long`). Read before classification to suppress the
+    /// reconciler's own fresh-fill false-positive Orphans: if the engine
+    /// already owns the candidate `(symbol, is_long)`, the position is NOT
+    /// an orphan — it is the engine's in-flight open/accumulate that the
+    /// 30 s baseline simply hasn't caught up to yet. Default handle (empty
+    /// map) disables the check — reconciler falls back to Phase 1 closure
+    /// semantics, matching pre-fix behavior.
+    /// ORPHAN-ADOPT-1 FUP：對應引擎的 PaperState 持倉鏡像（`symbol → is_long`）。
+    /// 分類前先讀鏡像抑制「引擎自家剛開倉」的假 Orphan：若鏡像已持有
+    /// `(symbol, is_long)`，代表那是引擎自己剛下的單，只是 30s baseline
+    /// 還沒追上，不是外部孤兒。預設空 handle 停用本檢查，行為回退到
+    /// Phase 1 的平倉語義。
+    pub engine_positions_mirror: Arc<parking_lot::RwLock<HashMap<String, bool>>>,
 }
 
 /// Pure decision function — no I/O, no channel sends.

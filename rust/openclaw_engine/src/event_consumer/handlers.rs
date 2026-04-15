@@ -60,7 +60,15 @@ pub fn handle_paper_command(
             snapshot_writer.force_write(&pipeline.snapshot());
         }
         PipelineCommand::Reset { new_balance } => {
+            // ORPHAN-ADOPT-1 FUP: preserve the shared positions_mirror handle
+            // across reset so the reconciler keeps observing the same Arc.
+            // set_positions_mirror clears + rehydrates the shared map from the
+            // (empty) positions of the freshly-constructed PaperState.
+            // ORPHAN-ADOPT-1 FUP：reset 保留共享 positions_mirror handle，
+            // 避免對帳器看到的 Arc 與引擎側分離。
+            let shared_mirror = pipeline.paper_state.positions_mirror();
             pipeline.paper_state = crate::paper_state::PaperState::new(new_balance);
+            pipeline.paper_state.set_positions_mirror(shared_mirror);
             pipeline.stats = crate::tick_pipeline::TickStats::default();
             pipeline.paper_paused = false;
             // F2+F3 fix: clear halt + loss counters on reset / 重置時清除暫停+虧損計數

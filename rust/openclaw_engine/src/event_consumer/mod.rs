@@ -71,6 +71,7 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
         pipeline_health,
         canary_handle,
         edge_predictor_store,
+        positions_mirror,
     } = deps;
     let mut pipeline_cmd_rx = pipeline_cmd_rx;
 
@@ -133,6 +134,19 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
             "B-1 Phase 2: paper_state seeded from exchange snapshot \
              / 已用交易所快照種入 paper_state"
         );
+    }
+
+    // ORPHAN-ADOPT-1 FUP: swap paper_state's positions_mirror to the shared
+    // handle constructed in main.rs. This handle is also held by the
+    // reconciler's `OrphanHandlerConfig.engine_positions_mirror`, so the
+    // reconciler's orphan suppression check reads the same state the
+    // engine writes. set_positions_mirror rehydrates the shared handle
+    // from whatever seed_positions injected, so nothing is lost.
+    // ORPHAN-ADOPT-1 FUP：把 paper_state 的 positions_mirror 換成 main.rs 建立
+    // 的共享 handle，與對帳器 OrphanHandlerConfig 共享，讓對帳器讀到引擎實時
+    // 持倉。set_positions_mirror 會從 seed_positions 回填共享 handle。
+    if let Some(mirror) = positions_mirror {
+        pipeline.paper_state.set_positions_mirror(mirror);
     }
 
     // D2/D3: Track known symbols for scanner universe diff.
