@@ -551,6 +551,47 @@ use super::*;
         assert_eq!(p.stats.total_fills, before + 1);
     }
 
+    /// Regression: emit_close_fill must mirror the fill into `recent_fills`
+    /// so the pipeline_snapshot view surfaces close fills to the GUI.
+    /// Previously it only incremented stats, causing snapshot `recent_fills`
+    /// to stay empty while DB accumulated closes every second.
+    /// 回歸：emit_close_fill 必須把平倉 fill 鏡像到 recent_fills，讓 GUI 快照能看見。
+    #[test]
+    fn test_emit_close_fill_pushes_to_recent_fills() {
+        let mut p = TickPipeline::new(&["BTCUSDT"]);
+        assert_eq!(p.recent_fills.len(), 0);
+        // Close a long position → fill side should be short (is_long = false).
+        // 平多倉 → fill 方向為空（is_long = false）。
+        p.emit_close_fill(
+            "BTCUSDT", true, 0.1, 51_000.0, 1_234, 100.0,
+            "stop_trigger:hard_stop", "",
+        );
+        assert_eq!(p.recent_fills.len(), 1);
+        let fill = &p.recent_fills[0];
+        assert_eq!(fill.symbol, "BTCUSDT");
+        assert_eq!(fill.is_long, false, "close of long position → short fill side");
+        assert_eq!(fill.qty, 0.1);
+        assert_eq!(fill.price, 51_000.0);
+        assert_eq!(fill.timestamp_ms, 1_234);
+        assert_eq!(fill.strategy, "stop_trigger:hard_stop");
+        // fee is the computed close fee (qty * price * fee_rate), not the raw 0.
+        // fee 是計算出的平倉費，而非原始 0。
+        assert!(fill.fee > 0.0, "close fee must be charged, not zero");
+    }
+
+    /// Close of a short position produces a long-side fill in recent_fills.
+    /// 平空倉 → fill 方向為多。
+    #[test]
+    fn test_emit_close_fill_inverts_is_long_for_short_close() {
+        let mut p = TickPipeline::new(&["BTCUSDT"]);
+        p.emit_close_fill(
+            "BTCUSDT", false, 0.05, 50_000.0, 2_000, -50.0,
+            "risk_close:fast_track", "",
+        );
+        assert_eq!(p.recent_fills.len(), 1);
+        assert_eq!(p.recent_fills[0].is_long, true, "close of short → long fill side");
+    }
+
     #[test]
     fn test_dbrun2_context_counter_starts_zero() {
         let p = TickPipeline::new(&["BTCUSDT"]);
