@@ -1,7 +1,26 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-04-15（EDGE-P3-1 Step 7f capabilities endpoint）
+> 最後更新：2026-04-15（EDGE-P3-1 Step 7c shadow-fill writer）
+
+### EDGE-P3-1 Step 7c — `EmitShadowFill` → `learning.decision_shadow_fills` writer（2026-04-15）
+
+**背景**：spec §7.3 Step 7 的 ε-greedy paper exploration 持久化 — 預測器對成本拒絕但探索翻硬幣通過，此時合成「shadow fill」僅供觀測學習，**永不**納入訓練 label 回填（`parquet_etl.py` §5.1 WHERE 以 `close_tag='shadow_fill:epsilon_greedy'` 排除）、永不進 live/demo 真實交易。目前僅 Stage-0 stub handler（log-only），本 step 填完 Rust-direct writer，對稱 Step 7a `DecisionFeatureSnapshot` 的 Option-B（IntentProcessor producer + IPC passthrough 共用同一 writer channel）。
+
+**交付**：
+- **Rust writer**（`database/shadow_fill_writer.rs` 新 ~230 行）：`run_shadow_fill_writer` async mpsc drain；`HashMap<context_id, ShadowFillMsg>` flush 前去重（ε-greedy 每 intent 至多一次，但 replay/passthrough 可重發同 id）；`batch_flush_interval_ms` 定時 flush；`flush_shadow_fills` 三道拒絕：DB-RUN-6 `ts_ms=0` epoch 洩漏 + R5 `engine_mode != "paper"` 第二道防線（gate 已保證 is_paper，writer 亦拒避 PG CHECK 失敗計入 pool 失敗閾值）+ malformed JSONB warn+skip；INSERT 11 欄位（context_id/ts/engine_mode/strategy_name/symbol/side/features_jsonb/predicted_q10/predicted_q50/predicted_q90/cost_bps_at_open），`synthetic_*` + `close_tag` **刻意** 不 bind 走 V017 DDL 預設（DDL 漂移時 writer 保持向下相容）。
+- **ShadowFillMsg**（`database/mod.rs`）：carrier struct 11 欄 + `#[derive(Debug)]`。
+- **side 欄位接線**：`PipelineCommand::EmitShadowFill` variant 加 `side: i8`，`ShadowFillPayload` 加 `pub side: i8`，`edge_predictor_gate` 建構時從 `features.side` 取值（`FeatureVectorV1` 既有欄位），`emit_shadow_fill` 透傳；DB 表既有 `side SMALLINT NOT NULL`，不透傳會 bind 階段報錯。
+- **TickPipeline 接線**（`tick_pipeline/mod.rs`）：`shadow_fill_db_tx: Option<Sender<ShadowFillMsg>>` 欄位 + `set_shadow_fill_db_tx`（`debug_assert!` 防雙注入）+ `shadow_fill_db_tx()` getter。
+- **Handler 轉實作**（`event_consumer/handlers.rs`）：`EmitShadowFill` 從 Stage-0 log-only stub 轉為 `try_send` off hot path，Full/Closed 丟棄+warn，engine_mode 由 `pipeline.pipeline_kind.db_mode()` 推導（gate 僅 paper 發，但仍計算交 writer R5 防線驗證）；`None` tx 走 fail-soft log 分支。
+- **spawn_db_writers** 5→6 tuple（`tasks.rs`）：capacity 1024，對齊 decision_feature。
+- **3 `EventConsumerDeps` sites** (`main.rs` paper/demo/live)：paper 為唯一合法 emission 來源（gate guard），demo/live 亦接線作深度防禦日誌（異常洩漏可見於 writer warn log 而非污染 PG）。
+- **event_consumer wire**（`mod.rs`）：destructure deps + `set_shadow_fill_db_tx` 注入（對稱 `decision_feature_tx` 模式）。
+- **Python capability flag**：`engine_capabilities_routes._EDGE_P3_IPC_SUPPORT.emit_shadow_fill: False → True`。
+
+**測試** (+7)：`test_dedup_keeps_latest`、`test_dbrun6_epoch_zero_detected`、`test_non_paper_engine_mode_rejected_in_carrier`、`test_malformed_jsonb_caught_before_sql`、`test_valid_jsonb_parses`、`test_side_fits_smallint`、`test_insert_sql_locked_columns`（`split_once("INSERT INTO") → split_once("VALUES")` 範圍鎖定，避開註解/docstring 誤報；驗 9 欄位齊全 + `close_tag` 不顯式 bind）。lib 1296→1303，engine-capabilities 6 tests 繼續通過，e2e 35 ok。
+
+**Stage 2+ blocker 狀態**：Step 7 IPC 已完成 5/6（7a/7c/7d/7e/7f）；餘 7b `ReloadEdgePredictor` 可獨立前推，其餘唯一 blocker 仍為 ML-MIT #26 首 ONNX artifact。
 
 ### EDGE-P3-1 Step 7f — `GET /api/v1/engine/capabilities` 探針端點（2026-04-15）
 

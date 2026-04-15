@@ -134,6 +134,16 @@ pub struct EventConsumerDeps {
     /// （fail-soft — 不採集訓練資料但不影響 live 交易）。Passthrough IPC 亦送入此通道。
     pub decision_feature_tx:
         Option<tokio::sync::mpsc::Sender<crate::database::DecisionFeatureMsg>>,
+    /// EDGE-P3-1 Step 7c: Channel for ε-greedy shadow-fill rows into
+    /// `learning.decision_shadow_fills`. Wired per-engine from `main.rs`; when
+    /// `None` the `EmitShadowFill` IPC handler's fail-soft log path fires (no
+    /// Stage-4 exploration persistence, but trading unaffected). Paper-only by
+    /// gate guard + DB CHECK — writer still runs on all engines for defense-in-
+    /// depth logging if a non-paper row ever leaks through.
+    /// EDGE-P3-1 Step 7c：ε-greedy shadow-fill 寫入通道。None 時走 fail-soft log。
+    /// gate + DB CHECK 限 paper；writer 在各引擎皆運行以防禦性記錄異常洩漏。
+    pub shadow_fill_tx:
+        Option<tokio::sync::mpsc::Sender<crate::database::ShadowFillMsg>>,
     /// EXT-1: Channel to receive exchange events (fills/order updates) from ExecutionListener.
     /// EXT-1：從執行監聽器接收交易所事件（成交/訂單更新）的通道。
     pub exchange_event_rx: Option<mpsc::UnboundedReceiver<ExchangeEvent>>,

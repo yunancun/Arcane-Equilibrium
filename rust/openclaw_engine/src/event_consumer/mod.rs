@@ -53,6 +53,7 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
         trading_tx,
         context_tx,
         decision_feature_tx,
+        shadow_fill_tx,
         exchange_event_rx,
         seed_positions,
         account_manager,
@@ -128,6 +129,17 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
     // no-op（fail-soft，不影響交易僅停訓練採集）。IPC passthrough 亦走同一通道。
     if let Some(tx) = decision_feature_tx.clone() {
         pipeline.set_decision_feature_tx(tx);
+    }
+
+    // EDGE-P3-1 Step 7c: Wire the shadow-fill DB channel into TickPipeline so
+    // the `EmitShadowFill` IPC handler can forward ε-greedy paper exploration
+    // rows into `learning.decision_shadow_fills`. `None` keeps the handler's
+    // fail-soft log branch. Gate + DB CHECK enforce paper-only; writer runs on
+    // all engines so a leak gets logged rather than poisoning PG.
+    // EDGE-P3-1 Step 7c：把 shadow-fill DB 通道接入 TickPipeline；None 時 handler
+    // 走 fail-soft log。gate + DB CHECK 強制 paper-only。
+    if let Some(tx) = shadow_fill_tx.clone() {
+        pipeline.set_shadow_fill_db_tx(tx);
     }
 
     // QoL-1: Restore cumulative paper_state counters from trading.fills before

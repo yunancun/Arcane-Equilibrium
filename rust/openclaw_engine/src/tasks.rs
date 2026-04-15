@@ -331,9 +331,10 @@ pub(crate) async fn spawn_db_writers(
     Option<tokio::sync::mpsc::Sender<openclaw_engine::database::TradingMsg>>,
     Option<tokio::sync::mpsc::Sender<openclaw_engine::database::DecisionContextMsg>>,
     Option<tokio::sync::mpsc::Sender<openclaw_engine::database::DecisionFeatureMsg>>,
+    Option<tokio::sync::mpsc::Sender<openclaw_engine::database::ShadowFillMsg>>,
 ) {
     if !db_pool.is_available() {
-        return (None, None, None, None, None);
+        return (None, None, None, None, None, None);
     }
 
     // Market writer channel + task
@@ -401,6 +402,27 @@ pub(crate) async fn spawn_db_writers(
         );
     }
 
+    // EDGE-P3-1 Step 7c: Shadow-fill writer channel + task. Sized at 1024 —
+    // ε-greedy fills are rarer than decision-feature rows (only ~5% of rejected
+    // intents by default), but sharing the cadence keeps backpressure behaviour
+    // symmetric. Paper-only by gate guard + DB CHECK.
+    // EDGE-P3-1 Step 7c：shadow-fill writer 通道 + 任務。容量 1024，與 decision
+    // feature 對齊。gate + DB CHECK 保證 paper-only。
+    let (shadow_fill_tx, shadow_fill_rx) = tokio::sync::mpsc::channel(1024);
+    {
+        let sf_pool = Arc::clone(db_pool);
+        let sf_config = Arc::clone(config);
+        let sf_cancel = cancel.clone();
+        tokio::spawn(
+            openclaw_engine::database::shadow_fill_writer::run_shadow_fill_writer(
+                shadow_fill_rx,
+                sf_pool,
+                sf_config,
+                sf_cancel,
+            ),
+        );
+    }
+
     // F-4 fix: Spawn REST pollers for funding/OI/LSR
     // F-4 修復：啟動 funding/OI/LSR REST 輪詢器
     if let Some(ref client) = shared_client {
@@ -455,6 +477,7 @@ pub(crate) async fn spawn_db_writers(
         Some(trading_tx),
         Some(context_tx),
         Some(decision_feature_tx),
+        Some(shadow_fill_tx),
     )
 }
 

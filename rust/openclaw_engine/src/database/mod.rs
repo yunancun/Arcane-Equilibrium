@@ -23,6 +23,7 @@ pub mod outcome_backfiller;
 pub mod pool;
 pub mod quality_writer;
 pub mod rest_poller;
+pub mod shadow_fill_writer;
 pub mod trading_writer;
 
 use openclaw_core::klines::KlineBar;
@@ -465,6 +466,42 @@ pub struct DecisionFeatureMsg {
     /// it through `sqlx::types::Json::<serde_json::Value>` once.
     /// `FeatureVectorV1::to_jsonb()` 預序列化字串；writer 走一次 JSONB cast。
     pub features_jsonb: String,
+}
+
+/// Shadow-fill snapshot → shadow_fill_writer task (EDGE-P3-1 Step 7c).
+/// ε-greedy paper exploration fill (§7.3 Step 7, F4+U3): predictor rejected on
+/// cost but the exploration coin flip passed, so a synthetic observation row
+/// lands in `learning.decision_shadow_fills`. These rows are permanently
+/// excluded from label backfill (see `parquet_etl.py` §5.1 WHERE clause) and
+/// DB-level CHECK keeps them paper-only.
+/// Shadow-fill 快照 → shadow_fill_writer（EDGE-P3-1 Step 7c）。
+/// ε-greedy paper 探索 fill：預測器拒絕但探索通過時，合成觀測列寫入
+/// `learning.decision_shadow_fills`；永久排除於 label 回填（§5.1 WHERE），
+/// DB CHECK 保證 paper-only。
+#[derive(Debug)]
+pub struct ShadowFillMsg {
+    pub context_id: String,
+    pub ts_ms: u64,
+    /// Always "paper" — enforced by V017 DDL CHECK. Writer logs+skips if
+    /// anything else leaks through (second-line defense).
+    /// 固定為 "paper"（V017 DDL CHECK 強制）；writer 亦檢測（第二道防線）。
+    pub engine_mode: String,
+    pub strategy_name: String,
+    pub symbol: String,
+    /// +1 long / -1 short (i8 → SQL SMALLINT).
+    /// +1 多 / -1 空 (i8 → SQL SMALLINT)。
+    pub side: i8,
+    /// Pre-serialized JSONB from `FeatureVectorV1::to_jsonb()`.
+    /// `FeatureVectorV1::to_jsonb()` 預序列化字串。
+    pub features_jsonb: String,
+    /// Quantile forecasts from the predictor at gate eval time.
+    /// gate 評估時預測器輸出的 quantile forecast。
+    pub predicted_q10: f32,
+    pub predicted_q50: f32,
+    pub predicted_q90: f32,
+    /// Round-trip cost in bps at open (fee + slippage).
+    /// 開倉時來回成本（費率 + 滑點），單位 bps。
+    pub cost_bps_at_open: f64,
 }
 
 /// Sanitize a float for PG insertion: replace NaN/Inf with None.

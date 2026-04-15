@@ -800,34 +800,58 @@ pub fn handle_paper_command(
                 None,
             );
         }
-        // EDGE-P3-1 Stage 0 · ε-greedy shadow-fill passthrough. DB write is
-        // Step 7c (pending — same Option-B pattern as Step 7a). Today this
-        // handler only logs; the cost gate producer (A3/A4) is wired.
-        // EDGE-P3-1 Stage 0 · ε-greedy shadow-fill 轉發。DB 寫入屬 Step 7c（待做，
-        // 同 Step 7a 的 Option-B 模式）；目前僅 log，producer（A3/A4）已接。
+        // EDGE-P3-1 Step 7c · ε-greedy shadow-fill passthrough → writer channel.
+        // Mirrors Step 7a pattern: `try_send` off the hot path, Full/Closed is a
+        // best-effort drop. `engine_mode` is derived from the pipeline kind —
+        // the predictor gate only emits on paper, but we still compute-and-send
+        // so the writer's R5 second-line-of-defense (`engine_mode == "paper"`
+        // CHECK) has the value to verify instead of guessing.
+        // EDGE-P3-1 Step 7c · ε-greedy shadow-fill 轉發至 writer 通道。沿用 Step 7a
+        // 模式：try_send 不阻塞熱路徑，Full/Closed best-effort 丟棄。engine_mode
+        // 由 pipeline_kind 推導 — gate 僅於 paper 發射，但仍帶值交 writer R5 防線驗證。
         PipelineCommand::EmitShadowFill {
             context_id,
             strategy,
             symbol,
-            features_jsonb: _,
+            side,
+            features_jsonb,
             prediction_q10,
             prediction_q50,
             prediction_q90,
             cost_bps,
             ts_ms,
         } => {
-            info!(
-                context_id = %context_id,
-                strategy = %strategy,
-                symbol = %symbol,
-                q10 = prediction_q10,
-                q50 = prediction_q50,
-                q90 = prediction_q90,
-                cost_bps = cost_bps,
-                ts_ms = ts_ms,
-                "EdgePredictor shadow_fill queued (Stage 0 stub — Step 7c will wire writer) \
-                 / 預測器 shadow_fill 排隊（Stage 0 stub，Step 7c 將接 writer）",
-            );
+            match pipeline.shadow_fill_db_tx() {
+                Some(tx) => {
+                    let msg = crate::database::ShadowFillMsg {
+                        context_id: context_id.clone(),
+                        ts_ms,
+                        engine_mode: pipeline.pipeline_kind.db_mode().to_string(),
+                        strategy_name: strategy,
+                        symbol: symbol.clone(),
+                        side,
+                        features_jsonb,
+                        predicted_q10: prediction_q10,
+                        predicted_q50: prediction_q50,
+                        predicted_q90: prediction_q90,
+                        cost_bps_at_open: cost_bps,
+                    };
+                    if let Err(e) = tx.try_send(msg) {
+                        tracing::warn!(
+                            ctx_id = %context_id, symbol = %symbol, error = %e,
+                            "shadow_fill IPC drop — writer channel full/closed \
+                             / shadow-fill IPC 丟棄，writer 通道已滿/關閉"
+                        );
+                    }
+                }
+                None => {
+                    info!(
+                        ctx_id = %context_id, symbol = %symbol,
+                        "shadow_fill IPC received but writer not wired (fail-soft skip) \
+                         / shadow-fill IPC 收到但 writer 未接線（fail-soft 跳過）"
+                    );
+                }
+            }
         }
         // EDGE-P3-1 Step 7a · Passthrough IPC → decision_feature writer channel.
         // External callers (Python backfill/replay tooling) inject training-
@@ -1439,8 +1463,8 @@ mod tests {
         );
     }
 
-    /// EN: EmitShadowFill is pure logging today — ensure it doesn't panic.
-    /// 中文: EmitShadowFill 目前僅 log，確保不 panic（Stage 0 stub）。
+    /// EN: EmitShadowFill without a wired writer → fail-soft log; must not panic.
+    /// 中文: EmitShadowFill 未接 writer 走 fail-soft log；不得 panic。
     #[test]
     fn test_emit_shadow_fill_does_not_panic() {
         let dir = tempfile::tempdir().unwrap();
@@ -1453,6 +1477,7 @@ mod tests {
                 context_id: "ctx-1".into(),
                 strategy: "ma_crossover".into(),
                 symbol: "BTCUSDT".into(),
+                side: 1,
                 features_jsonb: "{}".into(),
                 prediction_q10: -1.0,
                 prediction_q50: 0.5,
@@ -1464,6 +1489,7 @@ mod tests {
             &mut writer,
             &mut pending,
         );
-        // no assertion beyond no-panic; real Python consumer lands later.
+        // No writer wired → fail-soft log path; no panic.
+        // 未接 writer → fail-soft log 分支，不 panic。
     }
 }
