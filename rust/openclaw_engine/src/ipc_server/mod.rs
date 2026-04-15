@@ -657,6 +657,7 @@ async fn dispatch_request(
 
     match method {
         "ping" => handle_ping(id),
+        "get_build_capabilities" => handle_get_build_capabilities(id),
         "get_state" => handle_get_state(id, config, data_dir),
         "reload_config" => handle_reload_config(id, config),
         "get_paper_state" => {
@@ -939,6 +940,26 @@ fn handle_paper_cmd(
 /// 處理 ping → pong。
 fn handle_ping(id: serde_json::Value) -> JsonRpcResponse {
     JsonRpcResponse::success(id, serde_json::Value::String("pong".into()))
+}
+
+/// EDGE-P3-1 Step 7b: report compile-time build-feature flags to Python probes.
+/// Python's `engine_capabilities` endpoint needs the live flag value rather
+/// than a static declaration because the Rust engine and Python server are
+/// built separately — without this, a production engine compiled with ort
+/// would still show `reload_edge_predictor=false` at the probe layer.
+///
+/// EDGE-P3-1 Step 7b：回報 build-feature 旗標給 Python probe。Rust 引擎與
+/// Python 服務器分別 build，故 Python 必須用實時值而非靜態宣告；否則 ort
+/// build 也會在 probe 層顯示 `reload_edge_predictor=false`。
+fn handle_get_build_capabilities(id: serde_json::Value) -> JsonRpcResponse {
+    let edge_predictor_ort = cfg!(feature = "edge_predictor_ort");
+    JsonRpcResponse::success(
+        id,
+        serde_json::json!({
+            "edge_predictor_ort": edge_predictor_ort,
+            "reload_edge_predictor": edge_predictor_ort,
+        }),
+    )
 }
 
 /// Reload engine config (hot params only).

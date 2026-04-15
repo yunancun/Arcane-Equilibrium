@@ -181,12 +181,30 @@ def test_feature_schema_hash_stable_across_calls():
     h1 = _compute_feature_schema_hash(names, "v1")
     h2 = _compute_feature_schema_hash(names, "v1")
     assert h1 == h2
-    # Different version → different hash.
-    # 版本變更 → hash 變更。
-    assert _compute_feature_schema_hash(names, "v2") != h1
-    # Order matters.
-    # 順序敏感。
+    # Rust-parity format: `sha256:` + 16 hex chars (see quantile_trainer
+    # docstring; version is NOT mixed into the payload, mirroring Rust's
+    # names-only authority implementation).
+    # Rust 對齊格式：`sha256:` + 16 hex；版本不入 payload。
+    assert h1.startswith("sha256:")
+    assert len(h1) == len("sha256:") + 16
+    # Order matters (trailing \n after each name makes reordering visible).
+    # 順序敏感（每名後 \n 確保重排可見）。
     assert _compute_feature_schema_hash(["b", "a", "c"], "v1") != h1
+
+
+def test_feature_schema_hash_matches_rust_format_pinned():
+    """Byte-for-byte parity with Rust compute_feature_schema_hash.
+    Failing this test means tract_backend would reject every artifact
+    produced by this trainer at load time.
+    與 Rust 逐字節對齊 — 失敗即所有產出在 Rust 載入時被拒。"""
+    import hashlib as _h
+    names = ["price", "volume", "atr"]
+    digest = _h.sha256()
+    for n in names:
+        digest.update(n.encode("utf-8"))
+        digest.update(b"\n")
+    expected = "sha256:" + digest.hexdigest()[:16]
+    assert _compute_feature_schema_hash(names, "v1") == expected
 
 
 # ──────────────── tail holdout split ────────────────
@@ -271,9 +289,10 @@ def test_train_quantile_trio_end_to_end_synthetic():
     # Crossing rate low on well-behaved synthetic.
     # 乾淨合成資料的違反率應低。
     assert result.crossing_rate < 0.2
-    # schema hash present and deterministic.
-    # schema hash 存在且確定。
-    assert len(result.feature_schema_hash) == 64
+    # schema hash present and in Rust-parity format (`sha256:<16 hex>`).
+    # schema hash 存在且為 Rust 對齊格式。
+    assert result.feature_schema_hash.startswith("sha256:")
+    assert len(result.feature_schema_hash) == len("sha256:") + 16
     # q50 pinball skill should clear 0.10 threshold easily on this signal.
     # 強訊號資料 q50 pinball skill 輕鬆過 0.10。
     assert result.per_quantile_metrics["q50"].pinball_skill > 0.10

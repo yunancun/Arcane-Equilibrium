@@ -82,7 +82,7 @@ def _make_result(
         decile_lift_ci_lower=ci_lower,
         decile_lift_ci_upper=ci_upper,
         crossing_rate=crossing,
-        feature_schema_hash="0" * 64,
+        feature_schema_hash="sha256:" + "0" * 16,
         embargo_config=EmbargoConfig(n_folds=5, embargo_hours=24, holdout_tail_days=7.0),
     )
     return result

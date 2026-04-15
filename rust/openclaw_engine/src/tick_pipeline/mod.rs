@@ -374,10 +374,10 @@ pub enum PipelineCommand {
     },
     /// EDGE-P3-1 Stage 0 · Swap in a new `EdgePredictor` for `strategy` on this
     /// engine's `EdgePredictorStore`. Used by Python ML-MIT pipeline to hot-
-    /// reload the tract/ort model without restart. `predictor` is wrapped in
+    /// reload the ONNX model without restart. `predictor` is wrapped in
     /// `BoxedEdgePredictor` so `PipelineCommand` can stay `Debug`.
     /// EDGE-P3-1 Stage 0 · 熱換指定策略的 EdgePredictor 至本引擎的
-    /// `EdgePredictorStore`。ML-MIT 透過此命令無重啟重載 tract/ort 模型。
+    /// `EdgePredictorStore`。ML-MIT 透過此命令無重啟重載 ONNX 模型。
     /// `predictor` 用 `BoxedEdgePredictor` 包裝以保持 `Debug`。
     SetEdgePredictorShadow {
         strategy: String,

@@ -1602,20 +1602,25 @@ mod tests {
         assert!(out.unwrap_err().contains("EdgePredictorStore not wired"));
     }
 
-    /// EN: With a store wired, the stub loader returns `onnx_loader_not_wired`
-    /// and the handler surfaces that error unchanged — the protocol shape is
-    /// pinned but no predictor actually swaps until ML-MIT #26 lands.
-    /// 中文: 接了 store 後 stub loader 回 onnx_loader_not_wired，handler 透傳錯誤；
-    /// 協定形狀已定，實際熱換等 ML-MIT #26。
+    /// EN: With a store wired, the loader errors before a predictor can swap
+    /// — the protocol shape is pinned but no predictor is registered. Under
+    /// the default build the stub loader errs with `onnx_loader_not_wired`;
+    /// under `edge_predictor_ort` the real loader errs because the tempfile's
+    /// random name doesn't match the `..._q50_..._<date>.onnx` convention,
+    /// which proves the dispatch traverses the full loader path.
+    /// 中文: 接了 store 後 loader 回錯誤，store 未被寫入；default build 為 stub
+    /// `onnx_loader_not_wired`；ort build 則因檔名無 `_q50_` 標記而拒。
     #[test]
     fn test_reload_edge_predictor_stub_loader_errs() {
         let mut pipeline = TickPipeline::new(&["BTCUSDT"]);
         let store = std::sync::Arc::new(crate::edge_predictor::EdgePredictorStore::new());
         pipeline.set_edge_predictor_store(store.clone());
         // Use a temp file that DOES exist so we pass the first branch and hit
-        // the permanent "awaiting ML-MIT #26" error — confirms we traverse the
-        // full loader path, not just the path-missing early-return.
-        // 用實存檔走完整 loader 路徑，命中 "awaiting ML-MIT #26" 錯誤。
+        // the loader. Under the default build that's the permanent
+        // "awaiting ML-MIT #26" error; under the ort build the real loader
+        // refuses because the random tempfile name has no `_q50_` marker.
+        // 用實存檔走完整 loader 路徑。default build → "ML-MIT #26"；
+        // ort build → 檔名缺 `_q50_` 標記。
         let tmp = tempfile::NamedTempFile::new().expect("tempfile");
         let out = super::handle_reload_edge_predictor(
             "paper",
@@ -1623,18 +1628,27 @@ mod tests {
             tmp.path(),
             &mut pipeline,
         );
-        assert!(out.is_err());
-        let err = out.unwrap_err();
-        assert!(err.contains("onnx_loader_not_wired"), "got: {err}");
-        assert!(err.contains("ML-MIT #26"), "got: {err}");
-        // Confirm nothing got registered into the store.
-        // 確認 store 未被寫入。
+        let err = out.expect_err("loader must err on unconventional tempfile path");
+        #[cfg(not(feature = "edge_predictor_ort"))]
+        {
+            assert!(err.contains("onnx_loader_not_wired"), "got: {err}");
+            assert!(err.contains("edge_predictor_ort"), "got: {err}");
+        }
+        #[cfg(feature = "edge_predictor_ort")]
+        {
+            assert!(err.contains("_q50_"), "got: {err}");
+        }
+        // Confirm nothing got registered into the store — invariant across backends.
+        // 跨後端不變：store 未被寫入。
         assert_eq!(store.loaded_count(), 0);
     }
 
     /// EN: Engine whitelist trims whitespace so stray \n from a Python proxy
-    /// doesn't fall through to the unknown-engine branch.
-    /// 中文: engine 白名單 trim 空白，避 Python proxy 換行誤判。
+    /// doesn't fall through to the unknown-engine branch. The loader itself
+    /// errs after trimming (stub → "ML-MIT #26"; ort → "_q50_" marker),
+    /// which proves the whitelist stage accepted the trimmed name.
+    /// 中文: engine 白名單 trim 空白（避 Python proxy 換行誤判）；loader 在 trim
+    /// 後才出錯（stub → "ML-MIT #26"；ort → "_q50_" 標記）— 表白名單通過。
     #[test]
     fn test_reload_edge_predictor_trims_engine_name() {
         let mut pipeline = TickPipeline::new(&["BTCUSDT"]);
@@ -1647,10 +1661,11 @@ mod tests {
             tmp.path(),
             &mut pipeline,
         );
-        // Whitelist passes → loader stub → err with ML-MIT #26 (not "invalid engine").
-        // 白名單通過 → loader 存根 → 錯誤含 ML-MIT #26（非 invalid engine）。
-        let err = out.unwrap_err();
-        assert!(err.contains("ML-MIT #26"), "got: {err}");
+        let err = out.expect_err("loader path must be reached after whitelist trim");
         assert!(!err.contains("invalid engine"), "trim failed: {err}");
+        #[cfg(not(feature = "edge_predictor_ort"))]
+        assert!(err.contains("onnx_loader_not_wired"), "got: {err}");
+        #[cfg(feature = "edge_predictor_ort")]
+        assert!(err.contains("_q50_"), "got: {err}");
     }
 }
