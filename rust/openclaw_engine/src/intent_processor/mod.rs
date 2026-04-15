@@ -628,6 +628,27 @@ impl IntentProcessor {
         self.predictor_rng = Mutex::new(SmallRng::seed_from_u64(seed));
     }
 
+    /// EDGE-P3-1 A4: Read the current pipeline kind this processor was built
+    /// for (what `GateInputs.engine_kind` reports into the predictor gate).
+    /// Exposed for bootstrap regression tests that verify `TickPipeline::with_kind`
+    /// forwards the kind correctly — production callers should not need it.
+    /// EDGE-P3-1 A4：讀取目前 pipeline kind（gate 用於判斷是否走 ε-greedy 分支）。
+    pub fn pipeline_kind(&self) -> PipelineKind {
+        self.pipeline_kind
+    }
+
+    /// Test-only accessor: lock the predictor RNG so regression tests can draw
+    /// bits off two differently-seeded processors and verify the streams
+    /// diverge. Production callers consume the RNG exclusively through the
+    /// gate inside `evaluate_predictor_gate`.
+    /// 僅測試用：鎖預測器 RNG 供回歸測試比較兩條獨立 seed 的抽樣流。
+    #[cfg(test)]
+    pub fn predictor_rng_lock_for_tests(
+        &self,
+    ) -> parking_lot::MutexGuard<'_, SmallRng> {
+        self.predictor_rng.lock()
+    }
+
     /// EDGE-P3-1 A4: Inject a PipelineCommand sender for `EmitShadowFill` dispatch.
     /// EDGE-P3-1 A4：注入 PipelineCommand 發送通道用於 `EmitShadowFill`。
     pub fn set_shadow_fill_tx(&mut self, tx: UnboundedSender<PipelineCommand>) {

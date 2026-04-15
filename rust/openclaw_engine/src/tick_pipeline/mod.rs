@@ -861,6 +861,18 @@ impl TickPipeline {
         // 3E-ARCH 修復：把 kind 寫入 pipeline 字段，否則下游持久化 / IPC / 狀態報告
         // 都讀回 with_balance() 預設的 Paper，三引擎搶寫同一份 paper_state.json。
         p.pipeline_kind = kind;
+        // EDGE-P3-1 Phase B #4 coupled fix: forward `kind` into the IntentProcessor
+        // copy that the predictor gate reads via `inputs.engine_kind`. Without this,
+        // `IntentProcessor::pipeline_kind` stays at its constructor default (Paper)
+        // for demo/live pipelines — the ε-greedy branch at `gate.rs:213` then fires
+        // on demo/live too and only gets stopped by the writer-level R5 defense +
+        // DB CHECK. Forwarding here keeps the gate itself paper-only, matching
+        // spec §7.3 C13.
+        // EDGE-P3-1 Phase B #4 配套修復：把 `kind` 透傳給 IntentProcessor（gate 讀
+        // `inputs.engine_kind`）。未透傳則 demo/live 的 IntentProcessor 仍是 Paper，
+        // ε-greedy 會誤發 ShadowFill，由 R5 與 DB CHECK 兜底才擋下來；在 gate 層
+        // 直接擋住與 §7.3 C13 一致。
+        p.intent_processor.set_pipeline_kind(kind);
         p.governance = GovernanceCore::new_with_profile(kind.governance_profile());
         p
     }
@@ -1003,6 +1015,20 @@ impl TickPipeline {
         &self,
     ) -> Option<&tokio::sync::mpsc::Sender<crate::database::ShadowFillMsg>> {
         self.shadow_fill_db_tx.as_ref()
+    }
+
+    /// EDGE-P3-1 Phase B #4: Reseed the IntentProcessor predictor RNG.
+    /// Bootstrap should call this exactly once per pipeline with
+    /// `seed_for_engine(startup_nanos, kind)` so paper/demo/live each get a
+    /// distinct ε-greedy stream (spec §7.3 F9). Without this call every engine
+    /// runs with the constructor default `SmallRng::seed_from_u64(0)` — all
+    /// three engines produce identical exploration draws and the per-kind
+    /// discriminant XOR in `seed_for_engine` is inert.
+    /// EDGE-P3-1 Phase B #4：重置 IntentProcessor predictor RNG。
+    /// 啟動時以 `seed_for_engine(startup_nanos, kind)` 每個 pipeline 呼叫一次；
+    /// 不做則三引擎共用 seed=0，kind 互異失去意義。
+    pub fn set_predictor_rng_seed(&mut self, seed: u64) {
+        self.intent_processor.set_predictor_rng_seed(seed);
     }
 
     /// EDGE-P3-1 Stage 0: Accessor for command handlers that need to mutate
