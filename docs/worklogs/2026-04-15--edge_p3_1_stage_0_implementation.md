@@ -219,3 +219,185 @@ AI-E #27 round-3 U2 發現 `write_toml_atomic` 只 rename 不 fsync — 在 kill
 - [x] Commit `1366054` 落地，訊息含 R1-R5 裁定摘要 + co-landing 約束說明
 
 **Stage 0 實施 COMPLETE**。#25/#27 可並行啟動 Stage 1。
+
+---
+
+# Phase A — Predictor Gate Wiring（2026-04-15 post-compact）
+
+**Commits**：
+- `8c1f234 feat(edge-p3-1): wire edge_predictor gate into IntentProcessor (Phase A)` — A1-A4
+- `3753ede feat(edge-p3-1): plumb FeatureVectorV1 into on_tick gate (Phase A5)` — A5
+
+**測試基準線變更**：engine lib 1158 → **1249**（+91）· core lib 372（不變）· engine e2e 33+35 → **35**（合併；e2e 本次不變）· 0 fail
+- A4 landing：+77（EdgePredictor config TOML / PipelineCommand variants / gate.rs 邊界測試 / IntentProcessor rng seed + shadow policy dispatch）
+- A5 landing：+14（2 to_jsonb 回傳 + 11 feature_builder + 1 on_tick wiring assertion）
+
+**角色**：主會話 = PM+Conductor+AI-E 合一；無 sub-agent
+
+## 1. 目標 / Objective
+
+Stage 0 Phase A 的交付物：**讓 edge predictor gate 在產線真正被諮詢**。v1.4 spec §7.3 / §7.4 規範了 gate 的 ordering 與 IntentProcessor 整合點，但 A1-A4 落地完後 `features=None` 會讓新路徑短路回到舊 JS shrinkage — 需要 A5 把 `FeatureVectorV1` 從已有的 runtime context 組出來餵進去，gate 才算真正上線（即使 `use_edge_predictor=false` 預設不啟用，代碼路徑也必須先 reachable）。
+
+## 2. A1-A4 Wiring（Commit `8c1f234`）
+
+### A1 RiskConfig TOML
+- `EdgePredictor` struct 8 字段：`use_edge_predictor`（預設 false → 產線默認仍走 JS shrinkage）· `shadow_mode`（true=觀察模式，不實施拒絕）· `quantile_safety_k`（cost margin 乘數）· `require_q10_positive_for_adds`（加倉 guard）· `fallback_on_error`（enum: `ShrinkageGate / RejectAll`）· `exploration_rate`（ε-greedy，paper only）· `retrain_cadence_seconds` · `model_max_age_seconds`
+- `EdgePredictorFallback` enum，snake_case TOML serde
+
+### A2 PipelineCommand
+- 3 新 variants：
+  - `SetEdgePredictorShadow { strategy, shadow: bool }` — per-strategy shadow toggle
+  - `DisableEdgePredictorAll` — kill-switch，呼叫 `EdgePredictorStore::clear_all()`
+  - `EmitShadowFill { context_id, strategy, features_jsonb, ... }` — ε-greedy branch 寫 `learning.decision_shadow_fills`
+- `BoxedEdgePredictor` newtype 手寫 Debug impl（derive(Debug) on dyn trait 不可行）
+- `EdgePredictorStore::clear_all() -> usize` kill-switch 回報清除數量
+
+### A3 edge_predictor/gate.rs（新）
+- `edge_predictor_gate(...) -> PredictorGateOutcome` 純函數：按 §7.3 F2 **正確順序**：feature sanity（`all_in_range`）→ `load_for(strategy)` → staleness check（`age_seconds > model_max_age_seconds`）→ `predict()` → monotone rearrangement → cost margin（`q50 - k*(q50-q10) > cost`）→ ε-greedy（paper only）→ q10-add guard
+- Outcome enum：`Accept / Reject(reason) / RejectAdd(reason) / ShadowFill / Fallback(FallbackReason)`
+- `seed_for_engine(kind) -> u64` 確定性 per-engine SmallRng seed，避免三引擎共享同一 RNG 狀態
+- `FallbackReason` enum：`NoModel / SchemaHashMismatch / DefinitionHashMismatch / Stale / InferenceFailed / InvalidPrediction / FeatureInvalid`
+
+### A4 intent_processor/mod.rs
+- `IntentProcessor` 多帶 `Arc<EdgePredictorStore>` + `parking_lot::Mutex<SmallRng>`（interior mutability for `&self`）+ `PipelineKind` + `Option<Sender<PipelineCommand>>`（shadow-fill emit channel）
+- `process_with_features()` / `process_gates_only_with_features()` 新入口：保留舊 `process()` 簽名不變（29 call sites 不動）
+- `evaluate_predictor_gate()` 政策層：
+  - `use_edge_predictor=false` → None → fall-through JS gate
+  - `shadow_mode=true` → observe + metric，fall-through JS gate
+  - `Accept` → 短路通過，跳過 JS gate
+  - `Reject/RejectAdd` → 短路拒絕
+  - `ShadowFill` → 發 `EmitShadowFill` IPC + fall-through
+  - `Fallback` → 按 `fallback_on_error` 政策路由
+
+## 3. A5 Feature Plumbing（Commit `3753ede`）
+
+### 3.1 新檔：`edge_predictor/feature_builder.rs`（383 行）
+
+`build_feature_vector(intent, event, indicators, atr_value, paper_state) -> FeatureVectorV1`
+
+| Feature group | 取得源 | 備註 |
+|---|---|---|
+| Regime 5（adx_1h / bb_width_pct / atr_pct / funding_rate / realized_vol_1h） | `IndicatorSnapshot` · `PriceEvent.funding_rate` · `atr_value` 參數 | bandwidth 從 `(upper-lower)/mean` 轉 % |
+| Microstructure 3（basis_bps / orderbook_imbalance_top5 / spread_bps） | `PriceEvent.index_price / bid_price / ask_price / bids5 / asks5` | `bids5/asks5` 缺席時 `orderbook_imbalance_top5=0`（僅 Orderbook event 帶此值） |
+| Strategy 3（confluence_score / persistence_elapsed_ms / side） | **zeroed 佔位符**（A6+ 由策略層填）+ `intent.is_long ? +1.0 : -1.0` | side 現在已接 |
+| Position 3（notional_pct_of_bal / concurrent_positions / same_direction_cnt） | `PaperState.balance()` / `.positions()` | zero-balance 走 NaN-safe 分支 |
+| Time 3（tod_sin / tod_cos / is_funding_settlement_window） | `event.ts_ms` | Bybit 8h 窗口最後 15 min → flag=1 |
+
+**防禦性 clamp**：每個 f32 都走 `clamp_f32(v, lo, hi)`，caller 保證 `all_in_range` **不可能** 失敗 — upstream indicator drift 不會讓 gate feature sanity 直接 reject。
+
+**11 新 test** 覆蓋：full context / cold-start / extreme clamping / orderbook from bids5/asks5 / spread_bps / zero-balance NaN safety / side ±1 / ToD at midnight+noon / funding window flag（7:50 in / 7:30 out）/ same_direction_cnt from `import_positions` / atr_value override
+
+### 3.2 `FeatureVectorV1::to_jsonb()`
+
+手寫 JSONB serializer（避免 hot-path serde dep），17 key 全列：
+```rust
+#[inline]
+fn json_f32(v: f32) -> String {
+    if v.is_finite() { format!("{}", v) } else { "null".into() }
+}
+```
+NaN/Inf → `null` 讓下游 Postgres JSONB parser 不 fail。**2 新 test**：roundtrip via `serde_json::Value` 驗證 key 完整性 + NaN/Inf emit null 驗證。
+
+### 3.3 on_tick.rs 串接（兩個 call site）
+
+**Exchange branch（L627）**：
+```rust
+let features = crate::edge_predictor::feature_builder::build_feature_vector(
+    intent, event, indicators.as_ref(), atr_value, &self.paper_state,
+);
+let context_id = make_context_id(em, &intent.symbol, event.ts_ms);
+let gate = self.intent_processor.process_gates_only_with_features(
+    intent, &self.governance, &self.paper_state, atr_value,
+    self.pipeline_kind.governance_profile(),
+    Some(&features), Some(&context_id), event.ts_ms,
+);
+```
+
+**Paper branch（L703）** 對稱走 `process_with_features()`。
+
+### 3.4 intent_processor/mod.rs shadow-fill closure
+
+`evaluate_predictor_gate()` 內把佔位的 `|| "{}".to_string()` 換成 `|| features.to_jsonb()`。**惰性**：只有 ε-greedy branch 才付 JSONB 序列化成本。
+
+## 4. 測試結果 / Test Results
+
+| Suite | Pre-Phase-A | Post-A4 | Post-A5 | Δ |
+|---|---|---|---|---|
+| `openclaw_engine --lib` | 1158 | 1235 | **1249** | +91 |
+| `openclaw_core --lib` | 372 | 372 | 372 | 0 |
+| `openclaw_engine --tests`（e2e + stress） | 35 | 35 | 35 | 0 |
+| **總計** | 1565 | 1642 | **1656** | +91 |
+
+**cargo build**：乾淨（6 pre-existing warnings 不變）
+**cargo check**：PASS
+
+## 5. 關鍵設計決策 / Key Decisions
+
+| 決策 | 替代方案 | 為何選此 |
+|---|---|---|
+| **Additive API**（`process_with_features` 新入口，舊 `process` 不改簽名） | 改 `process()` 加 optional 參數 | 29 call site 成本過高；新/舊路徑並存直到遷移完成 |
+| **`use_edge_predictor=false` 預設** | 預設 true + `shadow_mode=true` | 部署時零行為改變；operator 需明確切開關才走新路徑 |
+| **Clamp-to-range in builder**（caller 保證 `all_in_range`） | builder 不 clamp，讓 gate sanity check 攔截 | `clamp_f32` 是廉價 `max(min(v, hi), lo)`；invariant #12 成為「事實上不可達」的雙保險 |
+| **Hand-rolled `to_jsonb()`**（無 serde） | `serde_json::to_string` | 17 key 固定 schema，手寫 format 比 serde 輕；lazy closure 只在 shadow branch 付代價 |
+| **NaN/Inf → `null`** 而非 `0.0` / 跳過 key | 寫 `NaN`（不合法 JSON） | Postgres JSONB parser 要合法 JSON；下游分析時 `WHERE feature IS NOT NULL` 自然排除 |
+| **`confluence_score` / `persistence_elapsed_ms` zeroed 佔位** | 從策略內部 state 爬取 | 這兩個 feature 只有策略層有 — 走 OrderIntent 加字段是 A6+ 工作（FUP-8 OrderIntent schema 擴充同步做）|
+| **Per-engine deterministic RNG seed**（`seed_for_engine`） | 共享 SmallRng | 三引擎共享 RNG 會讓 paper/demo/live 的 ε-greedy 相互干擾（雖然 live `exploration_rate=0` 不走分支），乾淨地隔離 |
+
+## 6. 後續 / Phase B Handoff
+
+**Phase A COMPLETE**。產線狀態：
+- ✅ Gate 在 hot path 被諮詢（每 intent 都建 features + 呼叫 `process_with_features`）
+- ✅ 預設 `use_edge_predictor=false` → fall-through JS shrinkage，**零行為改變**
+- ✅ Kill-switch IPC `DisableEdgePredictorAll` 可用
+- ✅ Shadow-fill JSONB payload 串通（等 Stage 2 模型載入時可直接寫 `learning.decision_shadow_fills`）
+
+**Phase B 範疇**（A6+，#27 AI-E 後半）：
+1. **Strategy-side feature plumbing**：`confluence_score` + `persistence_elapsed_ms` 從 5 策略（MA/BBR/BBB/Grid/FundingArb）穿透到 `OrderIntent`；FUP-8 Phase 3 的 OrderIntent schema 擴充（加 `edge/funding_rate/basis/regime`）同步合流做
+2. **Predictor 實例注入**：Stage 2（ML-MIT 交付 ONNX artifact）之後，Bootstrap 時掃 `settings/models/{strategy}-v{N}.onnx` → 填 `EdgePredictorStore::swap()`；需要 `tract_backend` / `ort_backend` feature flag 選一（F8 互斥 compile_error 已就位）
+3. **CC 13 項必查 + T1-T23 regression**（#28）：Phase A4/A5 已落的部分可開始 sub-set 驗證；完整 23 條等 backend + strategy features 完成
+
+**Blocked on**：
+- #27 後半（backend + strategy features）→ #28 CC 審查 → #29 Shadow 14d → #30 paper promote → #31 demo promote
+- FUP-8 Phase 3（OrderIntent schema 擴充）與 A6 合流
+
+## 7. 檔案清單 / Changed Files
+
+### Commit `8c1f234` · 19 files · +1956 / -18 lines
+
+| File | Scope |
+|---|---|
+| `rust/openclaw_engine/src/config/risk_config.rs` | `EdgePredictor` + `EdgePredictorFallback` TOML |
+| `rust/openclaw_engine/src/tick_pipeline/commands.rs` | 3 `PipelineCommand` variants |
+| `rust/openclaw_engine/src/tick_pipeline/mod.rs` | `edge_predictor_store: Option<Arc<EdgePredictorStore>>` field |
+| `rust/openclaw_engine/src/edge_predictor/mod.rs` | `BoxedEdgePredictor` newtype + `clear_all()` |
+| `rust/openclaw_engine/src/edge_predictor/gate.rs` | **新** pure gate function + seeds + outcomes |
+| `rust/openclaw_engine/src/intent_processor/mod.rs` | RNG + PipelineKind + shadow policy dispatch |
+| `rust/openclaw_engine/src/event_consumer/**` | 3 command handlers |
+| `rust/openclaw_engine/src/main.rs` | bootstrap wiring |
+| 其他 test/helper | struct literal 補欄位 |
+
+### Commit `3753ede` · 5 files · +518 / -7 lines
+
+| File | Scope |
+|---|---|
+| `rust/openclaw_engine/src/edge_predictor/feature_builder.rs` | **新** 383 行 + 11 tests |
+| `rust/openclaw_engine/src/edge_predictor/features.rs` | `to_jsonb()` + `json_f32()` + 2 tests |
+| `rust/openclaw_engine/src/edge_predictor/mod.rs` | `pub mod feature_builder` |
+| `rust/openclaw_engine/src/intent_processor/mod.rs` | shadow closure 換成 `features.to_jsonb()` |
+| `rust/openclaw_engine/src/tick_pipeline/on_tick.rs` | L627 + L703 call-site plumbing |
+
+## 8. 驗收 / Sign-off
+
+- [x] A1 TOML schema + default `use_edge_predictor=false`
+- [x] A2 3 `PipelineCommand` variants + handlers
+- [x] A3 pure `edge_predictor_gate()` 按 §7.3 F2 順序
+- [x] A4 `IntentProcessor` 多入口 + shadow policy dispatch（舊 `process()` 不改）
+- [x] A5 `build_feature_vector()` 13/17 features（confluence/persistence/orderbook 佔位）
+- [x] A5 `FeatureVectorV1::to_jsonb()` + NaN/Inf → null + 2 tests
+- [x] A5 `on_tick.rs` 兩個 call-site 串接
+- [x] 產線預設零行為改變（`use_edge_predictor=false` fall-through JS gate）
+- [x] `cargo build` 乾淨 / `cargo check` PASS
+- [x] 1249 lib + 372 core + 35 e2e = **1656** pass / **0 fail**
+- [x] Commits `8c1f234` + `3753ede` 落地，訊息含 A1-A5 裁定摘要
+
+**Phase A COMPLETE**。進入 Phase B（A6+ strategy-side features + FUP-8 schema 合流）等 #27 AI-E 後半工作展開。
