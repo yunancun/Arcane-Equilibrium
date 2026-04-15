@@ -1,7 +1,29 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-04-15（FA-PHANTOM-2 fix — fast_track held-symbol scoping + sigma gate）
+> 最後更新：2026-04-15（EDGE-P3-1 ML-MIT #26 Stage 2 quantile trainer + CQR + ONNX export）
+
+### EDGE-P3-1 ML-MIT #26 — Stage 2 Quantile LGBM + CQR + Per-strategy ONNX Export（2026-04-15 · commit `cdac922`）
+
+**目標**：Lane A 純 Python 訓練管線，與 FA-PHANTOM-2 Rust 修復並行安全（零檔案重疊）；交付 Phase B #3 ONNX loader + CC T2/T7/T18 所需的首個 per-strategy ONNX artifact 能力。
+
+**交付**（5 檔改、10 檔加，2645 insertions）：
+- `quantile_trainer.py`（新，~540 行）— q10/q50/q90 三獨立 pinball LGBM + CPCV purge + 策略特定 embargo（funding_arb 3-fold/72h/14d vs 其他 5-fold/24h/7d）+ 指數樣本權重 `w = exp(-days_ago/14)` + tail holdout split（總跨度 < holdout 窗時退回 min_fraction 比例切分）+ linear-QR floor baseline + 1000-bootstrap decile-lift 95% CI + 分位交叉率 + `feature_schema_hash = sha256(version || "|" || names.join("\n"))` 與 Rust FeatureVectorV1 契約一致
+- `calibration.py`（擴展）— CQR 單邊 marginal 校準 Romano 2019 + `(n+1)` 有限樣本修正 `q_level = ⌈α·(n+1)⌉/n`：`fit_cqr_offset` / `fit_cqr_trio` / `apply_cqr_to_quantile` / `evaluate_cqr_coverage` / `fit_isotonic_fallback`；舊 isotonic 路徑保留不動
+- `onnx_exporter.py`（擴展）— `export_quantile_trio_to_onnx()` 三檔匯出 + POSIX-atomic symlink swap（`tmp.symlink_to → os.replace`）+ per-file 精度 gate `max|LGB-ONNX| < 1e-3` on 1000 random vectors；檔名規範 `edge_predictor_{engine}_{strategy}_{quantile}_{schema}_{date}.onnx` + `_current` symlink 匹配 Rust loader 契約（spec §7.2）
+- `quantile_reports.py`（新，~345 行）— 5 硬性 gate（pinball skill > 0.10 / coverage error < 3pp / decile lift CI lower > 1.3 + point ≥ 1.5 / crossing < 1% / LGBM vs linear-QR skill diff ≥ +5pp）+ 樣本量桶（<200 / 200-499 / ≥500）→ should_ship / shadow_only / no_ship 裁決 + 1000 random vector train-serve skew harness；JSON 持久化
+- `run_training_pipeline.py`（重構）— `use_quantile_predictor=True` 分支路由 ETL → quantile_train → CQR → acceptance_report → per-quantile ONNX（verdict ≠ no_ship 才匯出）；legacy regression scorer 路徑零行為改變
+
+**測試**（+47，ml_training 135→182 passed）：
+- `test_quantile_trainer.py` — 23 tests（embargo 路由 funding_arb / default / 大小寫、權重衰減、pinball/coverage/crossing/decile lift、schema hash 穩定性 + version 差分、tail holdout 邊界 fallback、端到端 lgb-guarded）
+- `test_calibration_cqr.py` — 9 tests（CQR 有限樣本公式手動驗證、α 單調、coverage gap 5pp 內收斂、isotonic fallback 單調性）
+- `test_quantile_reports.py` — 11 tests（verdict 4 路由、gate 邊界 strict `>`、post-CQR coverage source、linear-QR unavailable 視為 pass、training failure 短路）
+- `test_onnx_exporter_quantile.py` — 4 tests（engine_mode / quantile 輸入驗證、end-to-end 精度、symlink swap idempotency）
+- 218 passed / 10 skipped（重依賴 lgb/onnxmltools/onnxruntime/sklearn 缺失時 `pytest.importorskip`）/ 0 regression
+
+**解鎖**：Phase B #3 ONNX loader（Rust 側等首個 artifact）· CC T2/T7/T18（train-serve skew + precision）· Stage 3 Shadow mode（#29）
+
+**Handover**：`docs/worklogs/2026-04-15--lane_a_ml_mit_26_trainer_handover.md`（pre-compact 14-section brief，記錄所有設計決策）
 
 ### FA-PHANTOM-2 — fast_track held-symbol scoping + sigma gate（2026-04-15）
 
