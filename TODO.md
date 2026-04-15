@@ -82,7 +82,7 @@
 
 ### 📎 E4 hygiene（2026-04-15 巡查發現）
 
-- [ ] **E4-HYG-1** `openclaw_core/tests/golden_extreme.rs:161` `StopConfig` 初始化漏 `trailing_activation_pct` 欄位 → `cargo test -p openclaw_core` 編譯失敗。欄位由 `51f6744 fix(pnl): trailing-stop activation gate` 引入，該測試未同步更新。修復：一行 `trailing_activation_pct: None,`（或 `Some(...)` 視測試語義）。**不阻塞 release 構建**（`cargo build --release` 通過），只阻塞 core 套件 `cargo test`。建議下次 E4 順手修
+- [x] **E4-HYG-1** ✅ 2026-04-15 — `openclaw_core/tests/golden_extreme.rs:161` 加 `trailing_activation_pct: None,`（保留原測試語義：`activation_pct` 默認 = `trail_pct` 2%，`test_trailing_and_time_stop_interaction` 時間停損斷言不變）。`cargo test -p openclaw_core` 恢復 372 pass 0 fail；engine lib 1264 無迴歸
 
 ### 部署窗口（已完成，歸檔用）
 
