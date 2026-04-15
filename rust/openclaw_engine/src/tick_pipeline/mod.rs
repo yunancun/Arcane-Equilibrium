@@ -812,6 +812,21 @@ impl TickPipeline {
         self.edge_predictor_store = Some(store);
     }
 
+    /// EDGE-P3-1 A4 + B wiring: inject the PipelineCommand sender used by the
+    /// IntentProcessor predictor gate to emit `EmitShadowFill` for ε-greedy
+    /// paper exploration (spec §7.3). Without this bootstrap call the gate's
+    /// `emit_shadow_fill` path hits the fail-soft `None` drop branch and all
+    /// shadow fills are silently discarded — breaking Stage 4 paper learning.
+    /// EDGE-P3-1 A4 + B 接線：注入 PipelineCommand 發送端供 IntentProcessor
+    /// predictor gate 在 ε-greedy paper 探索時發出 `EmitShadowFill`（spec §7.3）。
+    /// 缺此接線則 shadow fill 走 fail-soft 丟棄分支，Stage 4 paper 學習失效。
+    pub fn set_shadow_fill_tx(
+        &mut self,
+        tx: tokio::sync::mpsc::UnboundedSender<PipelineCommand>,
+    ) {
+        self.intent_processor.set_shadow_fill_tx(tx);
+    }
+
     /// EDGE-P3-1 Stage 0: Accessor for command handlers that need to mutate
     /// the store (swap / clear). Returns `None` until `set_edge_predictor_store`
     /// is called.

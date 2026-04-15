@@ -99,6 +99,17 @@ pub struct EventConsumerDeps {
     /// Paper session command receiver — IPC sends Pause/Resume/CloseAll/Reset.
     /// 紙盤 session 命令接收端 — IPC 發送 Pause/Resume/CloseAll/Reset。
     pub pipeline_cmd_rx: Option<mpsc::UnboundedReceiver<PipelineCommand>>,
+    /// EDGE-P3-1 A4: Pipeline command sender cloned for IntentProcessor's
+    /// `EmitShadowFill` dispatch (spec §7.3 ε-greedy paper exploration). Passing
+    /// this Some() closes the fail-soft drop branch; None keeps shadow fills
+    /// silently discarded. Paper is the only engine that needs this wired, but
+    /// Demo/Live can pass their own sender too — the ε-greedy branch is
+    /// `pipeline_kind != Paper` short-circuited inside IntentProcessor.
+    /// EDGE-P3-1 A4：給 IntentProcessor 用來發送 `EmitShadowFill` 的 PipelineCommand
+    /// 發送端（spec §7.3 ε-greedy paper 探索）；Some 時關閉 fail-soft 丟棄分支，
+    /// None 時 shadow fill 仍被靜默丟棄。僅 Paper 真正使用，但 Demo/Live 傳入
+    /// 無副作用（ε-greedy 分支在 IntentProcessor 內以 pipeline_kind 短路）。
+    pub pipeline_cmd_tx: Option<mpsc::UnboundedSender<PipelineCommand>>,
     /// Phase 1: Channel to dispatch market data to async PG writer.
     /// Phase 1：市場數據派發通道。
     pub market_data_tx: Option<tokio::sync::mpsc::Sender<crate::database::MarketDataMsg>>,
