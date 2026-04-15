@@ -122,6 +122,44 @@ impl FeatureVectorV1 {
         ]
     }
 
+    /// Serialize to a compact JSONB-compatible JSON string for
+    /// `PipelineCommand::EmitShadowFill` payloads. Field order matches the
+    /// declared struct order (stable, alphabetical is not required by Postgres
+    /// JSONB). Shadow-fill consumers join on `context_id`, so the keys are for
+    /// operator debugging, not query predicates.
+    /// 序列化為 `EmitShadowFill` 載荷用 JSON 字串；JSONB 欄位順序不需 alphabetical。
+    pub fn to_jsonb(&self) -> String {
+        format!(
+            concat!(
+                r#"{{"adx_1h":{adx},"bb_width_pct":{bw},"atr_pct":{atr},"#,
+                r#""funding_rate":{fr},"realized_vol_1h":{rv},"basis_bps":{bs},"#,
+                r#""orderbook_imbalance_top5":{ob},"spread_bps":{sp},"#,
+                r#""confluence_score":{cs},"persistence_elapsed_ms":{pe},"#,
+                r#""side":{sd},"notional_pct_of_bal":{np},"#,
+                r#""concurrent_positions":{cp},"same_direction_cnt":{sdc},"#,
+                r#""tod_sin":{ts},"tod_cos":{tc},"#,
+                r#""is_funding_settlement_window":{fw}}}"#,
+            ),
+            adx = json_f32(self.adx_1h),
+            bw = json_f32(self.bb_width_pct),
+            atr = json_f32(self.atr_pct),
+            fr = json_f32(self.funding_rate),
+            rv = json_f32(self.realized_vol_1h),
+            bs = json_f32(self.basis_bps),
+            ob = json_f32(self.orderbook_imbalance_top5),
+            sp = json_f32(self.spread_bps),
+            cs = json_f32(self.confluence_score),
+            pe = json_f32(self.persistence_elapsed_ms),
+            sd = self.side,
+            np = json_f32(self.notional_pct_of_bal),
+            cp = self.concurrent_positions,
+            sdc = self.same_direction_cnt,
+            ts = json_f32(self.tod_sin),
+            tc = json_f32(self.tod_cos),
+            fw = self.is_funding_settlement_window,
+        )
+    }
+
     /// Zero-default vector for tests / placeholders. `side = 1` (longs by default).
     /// 測試/占位用零值，`side = 1`（默認 long）。
     pub fn zeroed() -> Self {
@@ -150,6 +188,18 @@ impl FeatureVectorV1 {
 #[inline]
 fn in_range(v: f32, lo: f32, hi: f32) -> bool {
     v.is_finite() && v >= lo && v <= hi
+}
+
+/// JSON-safe f32 serializer — NaN/Inf become `null`, matching `serde_json` policy.
+/// Keeps `to_jsonb()` free of serde dependency while staying parse-safe downstream.
+/// JSON 安全 f32：NaN/Inf 寫 `null`，與 serde_json 一致。
+#[inline]
+fn json_f32(v: f32) -> String {
+    if v.is_finite() {
+        format!("{}", v)
+    } else {
+        "null".into()
+    }
 }
 
 // ============================================================
@@ -272,6 +322,55 @@ mod tests {
         f.side = -1;
         let arr = f.to_array();
         assert_eq!(arr[10], -1.0);
+    }
+
+    #[test]
+    fn test_to_jsonb_roundtrips_via_serde_json() {
+        // to_jsonb is hand-rolled; verify output is valid JSON and keys line up.
+        // to_jsonb 手寫實作，驗證為合法 JSON 且 key 齊全。
+        let f = FeatureVectorV1 {
+            adx_1h: 25.0,
+            bb_width_pct: 3.5,
+            atr_pct: 1.2,
+            funding_rate: 0.0003,
+            realized_vol_1h: 1.8,
+            basis_bps: 4.5,
+            orderbook_imbalance_top5: 0.12,
+            spread_bps: 1.5,
+            confluence_score: 42.0,
+            persistence_elapsed_ms: 125_000.0,
+            side: -1,
+            notional_pct_of_bal: 3.0,
+            concurrent_positions: 4,
+            same_direction_cnt: 2,
+            tod_sin: 0.707,
+            tod_cos: 0.707,
+            is_funding_settlement_window: 1,
+        };
+        let s = f.to_jsonb();
+        let v: serde_json::Value = serde_json::from_str(&s).expect("valid JSON");
+        assert_eq!(v["adx_1h"], 25.0);
+        assert_eq!(v["side"], -1);
+        assert_eq!(v["concurrent_positions"], 4);
+        assert_eq!(v["same_direction_cnt"], 2);
+        assert_eq!(v["is_funding_settlement_window"], 1);
+        assert_eq!(v["persistence_elapsed_ms"], 125_000.0);
+        // 17 distinct fields; no silent omission.
+        assert_eq!(v.as_object().unwrap().len(), 17);
+    }
+
+    #[test]
+    fn test_to_jsonb_emits_null_for_nan_infinity() {
+        // JSON has no NaN/Inf literals; emit null so downstream JSONB parsers
+        // see a valid document rather than fail.
+        // JSON 無 NaN/Inf 字面；寫 null 避免下游解析失敗。
+        let mut f = FeatureVectorV1::zeroed();
+        f.adx_1h = f32::NAN;
+        f.spread_bps = f32::INFINITY;
+        let s = f.to_jsonb();
+        let v: serde_json::Value = serde_json::from_str(&s).expect("valid JSON");
+        assert!(v["adx_1h"].is_null());
+        assert!(v["spread_bps"].is_null());
     }
 
     #[test]

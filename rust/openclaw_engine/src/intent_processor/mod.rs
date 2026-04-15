@@ -664,11 +664,10 @@ impl IntentProcessor {
                 store.as_ref(),
                 &mut *rng,
                 cfg,
-                // Empty JSONB today; A5 plumbs serialized features. Lazy closure
-                // means cost only paid on the ε-greedy branch.
-                // 今天回空 jsonb；A5 plumb 序列化 features。lazy closure 只在
-                // ε-greedy 分支付代價。
-                || "{}".to_string(),
+                // EDGE-P3-1 A5: serialize full 17-dim vector for shadow-fill
+                // JSONB payload. Lazy closure — cost only paid on ε-greedy branch.
+                // EDGE-P3-1 A5：lazy 序列化完整 17 維 feature；僅 ε-greedy 分支付代價。
+                || features.to_jsonb(),
             )
         };
 
