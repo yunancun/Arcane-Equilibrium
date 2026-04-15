@@ -624,12 +624,28 @@ impl TickPipeline {
                 if is_exchange_mode {
                     // ═══ EXCHANGE MODE: gates only, send order to exchange ═══
                     // ═══ 交易所模式：僅過門禁，發送訂單到交易所 ═══
-                    let gate = self.intent_processor.process_gates_only(
+                    // EDGE-P3-1 A5: build FeatureVectorV1 and pass into gates-only path.
+                    // Cost is cheap (17 fields from already-available context); gate is gated
+                    // by `cfg.use_edge_predictor=false` in Stage 0 so features are unused until
+                    // operator opts in.
+                    // EDGE-P3-1 A5：組裝 feature 向量；Stage 0 由 config 默認關閉 gate。
+                    let features = crate::edge_predictor::feature_builder::build_feature_vector(
+                        intent,
+                        event,
+                        indicators.as_ref(),
+                        atr_value,
+                        &self.paper_state,
+                    );
+                    let context_id = make_context_id(em, &intent.symbol, event.ts_ms);
+                    let gate = self.intent_processor.process_gates_only_with_features(
                         intent,
                         &self.governance,
                         &self.paper_state,
                         atr_value,
                         self.pipeline_kind.governance_profile(),
+                        Some(&features),
+                        Some(&context_id),
+                        event.ts_ms,
                     );
 
                     // S-01: persist verdict via extracted helper
@@ -700,12 +716,25 @@ impl TickPipeline {
                 } else {
                     // ═══ PAPER_ONLY MODE: simulate fill locally + optional shadow order ═══
                     // ═══ 紙盤模式：本地模擬成交 + 可選影子訂單 ═══
-                    let result = self.intent_processor.process(
+                    // EDGE-P3-1 A5: mirror the exchange branch — build features + context_id.
+                    // EDGE-P3-1 A5：與交易所分支對齊，組裝 features + context_id。
+                    let features = crate::edge_predictor::feature_builder::build_feature_vector(
+                        intent,
+                        event,
+                        indicators.as_ref(),
+                        atr_value,
+                        &self.paper_state,
+                    );
+                    let context_id = make_context_id(em, &intent.symbol, event.ts_ms);
+                    let result = self.intent_processor.process_with_features(
                         intent,
                         &self.governance,
                         &self.paper_state,
                         atr_value,
                         self.pipeline_kind.governance_profile(),
+                        Some(&features),
+                        Some(&context_id),
+                        event.ts_ms,
                     );
 
                     // S-01: persist verdict via extracted helper

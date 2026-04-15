@@ -29,6 +29,7 @@ compile_error!(
      runtime selection (spec §7.1 F8)"
 );
 
+pub mod feature_builder;
 pub mod features;
 pub mod gate;
 pub mod null_backend;
