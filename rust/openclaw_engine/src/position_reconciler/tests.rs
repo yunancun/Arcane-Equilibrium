@@ -1,5 +1,7 @@
 use super::*;
 use crate::position_manager::PositionInfo;
+use std::collections::HashMap;
+use std::sync::Arc;
 
 fn pv(symbol: &str, side: &str, qty: f64) -> PositionView {
     PositionView {
@@ -465,4 +467,128 @@ fn phase6_persistent_drift_bypasses_per_symbol_cooldown() {
     assert_eq!(a3.len(), 1);
     assert!(matches!(&a3[0], ReconcilerAction::Escalate { target: RiskLevel::Defensive, .. }),
         "persistent drift should reach Defensive despite per-symbol cooldown");
+}
+
+// ── ORPHAN-ADOPT-1 FUP: engine-owned suppression ───────────────────────────
+
+/// Build a minimal `OrphanHandlerConfig` with `BTCUSDT` in the active universe
+/// and a caller-supplied positions_mirror. Kept local to these two tests so the
+/// intent stays obvious.
+/// 構建最小 OrphanHandlerConfig，BTCUSDT 活躍、鏡像由呼叫方提供。
+fn build_orphan_cfg_for_test(
+    mirror: Arc<parking_lot::RwLock<HashMap<String, bool>>>,
+) -> OrphanHandlerConfig {
+    use crate::edge_estimates::EdgeEstimates;
+    use crate::scanner::registry::SymbolRegistry;
+    OrphanHandlerConfig {
+        symbol_registry: Arc::new(SymbolRegistry::new(
+            vec!["BTCUSDT".into()],
+            vec!["BTCUSDT".into()],
+        )),
+        edge_estimates: Arc::new(parking_lot::RwLock::new(EdgeEstimates::default())),
+        get_max_notional: Arc::new(|| 1_000_000.0),
+        engine_positions_mirror: mirror,
+    }
+}
+
+fn pi(symbol: &str, side: &str) -> PositionInfo {
+    PositionInfo {
+        symbol: symbol.into(),
+        side: side.into(),
+        size: 0.01,
+        avg_price: 50_000.0,
+        mark_price: 50_100.0,
+        unrealised_pnl: 0.0,
+        leverage: 1.0,
+        liq_price: 0.0,
+        take_profit: 0.0,
+        stop_loss: 0.0,
+        position_idx: 0,
+        trailing_stop: 0.0,
+        position_value: 501.0,
+        cum_realised_pnl: 0.0,
+        created_time: String::new(),
+        updated_time: String::new(),
+    }
+}
+
+#[test]
+fn orphan_suppressed_when_engine_owns_position() {
+    // ORPHAN-ADOPT-1 FUP: reconciler's 30s baseline lags fresh strategy fills.
+    // When the engine has just opened BTCUSDT long, the next REST snapshot
+    // still shows it as an Orphan against the pre-fill baseline. Suppression:
+    // if `(symbol, is_long)` is in the engine's mirror, drop the Orphan —
+    // no close dispatched, no dedup stamp, no evidence to evaluate_actions.
+    // 驗證：鏡像命中則 Orphan 直接捨棄，不平倉、不去重戳記、不升級。
+    let mirror = Arc::new(parking_lot::RwLock::new(HashMap::new()));
+    mirror.write().insert("BTCUSDT".into(), true);
+    let oh_cfg = build_orphan_cfg_for_test(Arc::clone(&mirror));
+
+    let raw_positions = vec![pi("BTCUSDT", "Buy")];
+    let drifts = vec![("BTCUSDT|Buy".into(), DriftVerdict::Orphan)];
+    let mut state = make_state();
+    let (tx, mut rx) =
+        tokio::sync::mpsc::unbounded_channel::<crate::tick_pipeline::PipelineCommand>();
+    let audit_pool: Option<sqlx::PgPool> = None;
+
+    let kept = process_orphans(
+        drifts,
+        &raw_positions,
+        &oh_cfg,
+        RiskLevel::Normal,
+        &tx,
+        &audit_pool,
+        "test",
+        &mut state,
+        1_000_000,
+    );
+
+    assert!(kept.is_empty(), "suppressed orphan must not be kept for evaluate_actions");
+    assert!(rx.try_recv().is_err(), "no PipelineCommand should be dispatched");
+    assert!(
+        state.pending_orphan_closes.is_empty(),
+        "suppression fires before dedup stamp — pending_orphan_closes must stay empty"
+    );
+}
+
+#[test]
+fn orphan_dispatched_when_engine_side_mismatches() {
+    // Sanity / inverse of the above: mirror holds BTCUSDT LONG, but Bybit
+    // reports a SHORT. Directions differ → this is NOT the engine's own
+    // fill, suppression must NOT fire, and the normal handler path runs
+    // (Stage C → SoftConservative close → CloseSymbol dispatched).
+    // 反向驗證：鏡像為多單、Bybit 為空單，不觸發抑制，走正常平倉路徑。
+    let mirror = Arc::new(parking_lot::RwLock::new(HashMap::new()));
+    mirror.write().insert("BTCUSDT".into(), true);
+    let oh_cfg = build_orphan_cfg_for_test(Arc::clone(&mirror));
+
+    let raw_positions = vec![pi("BTCUSDT", "Sell")];
+    let drifts = vec![("BTCUSDT|Sell".into(), DriftVerdict::Orphan)];
+    let mut state = make_state();
+    let (tx, mut rx) =
+        tokio::sync::mpsc::unbounded_channel::<crate::tick_pipeline::PipelineCommand>();
+    let audit_pool: Option<sqlx::PgPool> = None;
+
+    let _ = process_orphans(
+        drifts,
+        &raw_positions,
+        &oh_cfg,
+        RiskLevel::Normal,
+        &tx,
+        &audit_pool,
+        "test",
+        &mut state,
+        1_000_000,
+    );
+
+    let cmd = rx
+        .try_recv()
+        .expect("orphan must be dispatched when engine doesn't own the same direction");
+    match cmd {
+        crate::tick_pipeline::PipelineCommand::CloseSymbol { symbol, hint_is_long, .. } => {
+            assert_eq!(symbol, "BTCUSDT");
+            assert_eq!(hint_is_long, Some(false), "side=Sell → hint_is_long=false");
+        }
+        other => panic!("expected CloseSymbol, got {:?}", other),
+    }
 }

@@ -214,4 +214,20 @@ pub struct EventConsumerDeps {
     /// 短路至 legacy shrinkage，符合接線前行為；bootstrap 傳
     /// `Some(pep.<kind>.clone())`，IPC 熱換與 gate load_for 共享同一 Arc。
     pub edge_predictor_store: Option<Arc<crate::edge_predictor::EdgePredictorStore>>,
+    /// ORPHAN-ADOPT-1 FUP: per-engine `(symbol → is_long)` mirror of PaperState
+    /// positions. Constructed in `main.rs` before the reconciler spawn so the
+    /// reconciler's `OrphanHandlerConfig` and this pipeline's `PaperState`
+    /// share the same handle. `run_event_consumer` calls
+    /// `pipeline.paper_state.set_positions_mirror(mirror)` after TickPipeline
+    /// construction; subsequent position mutations keep it in sync and the
+    /// reconciler suppresses its own fresh-fill Orphan verdicts by reading it.
+    /// `None` disables the suppression (reconciler falls back to Phase 1
+    /// close semantics — matches pre-fix behavior).
+    /// ORPHAN-ADOPT-1 FUP：每引擎 PaperState `(symbol → is_long)` 鏡像。
+    /// main.rs 在 reconciler spawn 前建立，與對帳器的 OrphanHandlerConfig
+    /// 共享同一 handle。run_event_consumer 構造 TickPipeline 後呼叫
+    /// `paper_state.set_positions_mirror(mirror)`，對帳器讀鏡像抑制
+    /// 「自家剛開倉」的假 Orphan。None 時停用抑制（回退 Phase 1 行為）。
+    pub positions_mirror:
+        Option<Arc<parking_lot::RwLock<HashMap<String, bool>>>>,
 }

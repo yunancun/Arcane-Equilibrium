@@ -639,6 +639,22 @@ async fn async_main(
     // Phase 6 + D23: Per-exchange position reconciler.
     // Phase 6 + D23：每條交易所管線獨立持倉對帳器。
     // ------------------------------------------------------------------
+    // ORPHAN-ADOPT-1 FUP: per-engine positions mirror Arcs. Each holds the
+    // engine's current PaperState `(symbol → is_long)` view. Reconciler reads
+    // to suppress its own fresh-fill false-positive Orphans; engine pipeline
+    // writes through PaperState helpers. Built BEFORE reconciler spawn so the
+    // OrphanHandlerConfig and EventConsumerDeps share the same Arc.
+    // ORPHAN-ADOPT-1 FUP：為每引擎預先建立 `(symbol → is_long)` 鏡像。
+    // 對帳器讀端抑制假 Orphan，引擎端透過 PaperState helper 寫入。必須在
+    // reconciler spawn 之前建立，才能與 OrphanHandlerConfig / EventConsumerDeps
+    // 共享同一 Arc。
+    let paper_positions_mirror: Arc<parking_lot::RwLock<std::collections::HashMap<String, bool>>> =
+        Arc::new(parking_lot::RwLock::new(std::collections::HashMap::new()));
+    let demo_positions_mirror: Arc<parking_lot::RwLock<std::collections::HashMap<String, bool>>> =
+        Arc::new(parking_lot::RwLock::new(std::collections::HashMap::new()));
+    let live_positions_mirror: Arc<parking_lot::RwLock<std::collections::HashMap<String, bool>>> =
+        Arc::new(parking_lot::RwLock::new(std::collections::HashMap::new()));
+
     // ORPHAN-ADOPT-1 Phase 1: build per-engine OrphanHandlerConfig. Each
     // engine's reconciler gets its own closure reading max_order_notional_usdt
     // from the matching per-engine RiskConfig store; scanner universe and
@@ -648,10 +664,16 @@ async fn async_main(
     // RiskConfig store）；scanner universe 與 edge estimates 共享（生產池）。
     let build_orphan_cfg = |engine_key: &str| {
         let store = Arc::clone(risk_stores.select(engine_key));
+        let mirror = match engine_key {
+            "live" => Arc::clone(&live_positions_mirror),
+            "demo" => Arc::clone(&demo_positions_mirror),
+            _ => Arc::clone(&paper_positions_mirror),
+        };
         openclaw_engine::position_reconciler::OrphanHandlerConfig {
             symbol_registry: Arc::clone(&symbol_registry),
             edge_estimates: Arc::clone(&scanner_edge_estimates),
             get_max_notional: Arc::new(move || store.load().limits.max_order_notional_usdt),
+            engine_positions_mirror: mirror,
         }
     };
 
@@ -908,6 +930,7 @@ async fn async_main(
         pipeline_health: Some(Arc::clone(&paper_health)),
         canary_handle: canary_handle.clone(),
         edge_predictor_store: Some(Arc::clone(&per_engine_predictors.paper)),
+        positions_mirror: Some(Arc::clone(&paper_positions_mirror)),
     };
     // Fix 3 (2026-04-14): wrap in crash-only layer so a paper task panic
     // is logged + broadcast + triggers engine-wide cancel (watchdog restart).
@@ -974,6 +997,7 @@ async fn async_main(
             pipeline_health: Some(Arc::clone(&demo_b.health)),
             canary_handle: canary_handle.clone(),
             edge_predictor_store: Some(Arc::clone(&per_engine_predictors.demo)),
+            positions_mirror: Some(Arc::clone(&demo_positions_mirror)),
         };
         // Fix 3 (2026-04-14): same crash-only wrapper as paper.
         // 修復 3：同 paper 的 crash-only 包裝。
@@ -1039,6 +1063,7 @@ async fn async_main(
             pipeline_health: Some(Arc::clone(&live_b.health)),
             canary_handle: canary_handle.clone(),
             edge_predictor_store: Some(Arc::clone(&per_engine_predictors.live)),
+            positions_mirror: Some(Arc::clone(&live_positions_mirror)),
         };
 
         // D17: Live runs on dedicated OS thread with catch_unwind for panic isolation.
