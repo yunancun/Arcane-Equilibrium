@@ -102,19 +102,26 @@ impl TickPipeline {
 
         // Step 0: Fast track check — emergency actions before normal processing
         // FIX-03+04: Real inputs for flash-crash and margin-crisis detection.
-        // price_drop_pct: max peak-to-current drop across all symbols in window.
         // margin_utilization_pct: margin_used (= notional / leverage) / balance × 100.
-        // FA-PHANTOM-1 fix (2026-04-14): previously divided raw notional by balance,
-        // which ignored leverage. With default leverage_max=20 and
-        // total_exposure_max_pct=100, notional could legitimately reach 100% of
-        // balance while true margin usage was only 5%. The old formula fired
-        // CloseAll at 90% notional/balance — below the designed exposure cap —
-        // causing all strategies to be force-closed whenever positions stacked
-        // (root of the "22 phantom fills" G-2 validation failure).
-        // FIX-03+04：閃崩和保證金危機偵測的真實輸入。
-        // FA-PHANTOM-1 修復：原公式未除 leverage，90% 閾值低於 total_exposure_max_pct=100%
-        // 設計上限，倉位堆滿時必觸發 CloseAll，全策略被系統性誤平。
-        let price_drop_pct = self.price_tracker.max_drop_pct();
+        // FA-PHANTOM-1 fix (2026-04-14): margin now leverage-aware.
+        // FA-PHANTOM-2 fix (2026-04-15): drop input scoped to held symbols with
+        //   sigma signal, replacing the global cross-symbol scan that trivially
+        //   hit the 5% threshold on any microcap in the observation pool and
+        //   false-triggered CloseAll at Normal risk (blocked G-2 funding_arb
+        //   validation — 0/20 fills in 7h on 2026-04-15 prior to fix).
+        // FA-PHANTOM-2 修復：跌幅輸入改為「僅持倉幣種」+ sigma 信號，
+        //   取代舊的全觀察池掃描（小幣常態 5% 抖動即誤觸 CloseAll）。
+        let held_symbols: Vec<String> = self
+            .paper_state
+            .positions()
+            .iter()
+            .map(|p| p.symbol.clone())
+            .collect();
+        let (held_drop_pct, held_drop_sigma, held_drop_symbol) = self
+            .price_tracker
+            .worst_drop_for_held(&held_symbols)
+            .map(|info| (info.drop_pct, info.sigma, info.symbol))
+            .unwrap_or((0.0, 0.0, String::new()));
         let margin_utilization_pct = {
             let balance = self.paper_state.balance();
             if balance > 0.0 {
@@ -136,7 +143,8 @@ impl TickPipeline {
         };
         let ft_action = crate::fast_track::evaluate_fast_track(
             self.governance.risk.level,
-            price_drop_pct,
+            held_drop_pct,
+            held_drop_sigma,
             margin_utilization_pct,
         );
 
@@ -177,7 +185,9 @@ impl TickPipeline {
                     risk_level = ?self.governance.risk.level,
                     ts_ms = event.ts_ms,
                     positions = positions.len(),
-                    price_drop_pct,
+                    held_drop_pct,
+                    held_drop_sigma,
+                    held_drop_symbol = %held_drop_symbol,
                     margin_utilization_pct,
                     "FAST_TRACK ReduceToHalf — halving positions (one-shot) / 快速通道半倉（一次性）"
                 );
@@ -216,7 +226,8 @@ impl TickPipeline {
             tracing::info!(
                 risk_level = ?self.governance.risk.level,
                 ts_ms = event.ts_ms,
-                price_drop_pct,
+                held_drop_pct,
+                held_drop_sigma,
                 margin_utilization_pct,
                 "FAST_TRACK PauseNewEntries — stops only, no new positions / 快速通道暫停開倉"
             );
@@ -250,6 +261,10 @@ impl TickPipeline {
                 positions = symbols.len(),
                 trigger_symbol = %sym,
                 trigger_price = event.last_price,
+                held_drop_pct,
+                held_drop_sigma,
+                held_drop_symbol = %held_drop_symbol,
+                margin_utilization_pct,
                 "FAST_TRACK CloseAll fired — closing all positions / 快速通道全平觸發"
             );
             // PNL-FIX-1: must close each position at ITS OWN symbol's latest price,

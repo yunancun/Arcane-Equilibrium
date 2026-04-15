@@ -27,6 +27,21 @@ pub struct SpikeInfo {
     pub mean_price: f64,
 }
 
+/// Drop info for a single held symbol. `drop_pct` is peak-to-current fall
+/// (positive); `sigma` is the current price's deviation from the window mean
+/// measured in units of the window std-dev — separates true outlier events
+/// from normal microcap volatility.
+///
+/// 單一持倉幣種的跌幅資訊。drop_pct 為窗口內峰值到當前的跌幅百分比（正值）；
+/// sigma 為當前價格偏離窗口均值的標準差倍數 — 用以區分真正的離群事件與
+/// 小幣正常波動。
+#[derive(Debug, Clone)]
+pub struct SymbolDropInfo {
+    pub symbol: String,
+    pub drop_pct: f64,
+    pub sigma: f64,
+}
+
 /// Rolling price history tracker for per-symbol ATR and spike detection.
 /// 每幣種滾動價格歷史追蹤器，用於 ATR 計算和尖峰偵測。
 ///
@@ -197,6 +212,79 @@ impl PriceHistoryTracker {
         worst
     }
 
+    /// Compute the worst peak-to-current drop restricted to held symbols.
+    /// Returns `None` when the set is empty or none of the symbols have
+    /// enough samples to compute a meaningful drop.
+    ///
+    /// FA-PHANTOM-2 fix (2026-04-15): the legacy `max_drop_pct()` scans ALL
+    /// observed symbols (25+), so any microcap in the pool routinely firing
+    /// a 5% window move triggers fast_track CloseAll even when no position
+    /// is held in that symbol. Scoping to held symbols ties flash-crash
+    /// defense to real exposure. The accompanying `sigma` (deviation from
+    /// window mean in std-dev units) lets the caller gate on "is this an
+    /// outlier" rather than a raw percent threshold — a symbol that
+    /// normally swings 5% will have low sigma on a 5% move, while a stable
+    /// symbol's 5% move will score high.
+    ///
+    /// 僅針對持倉幣種計算最大跌幅。空集合或樣本不足時返回 None。
+    /// FA-PHANTOM-2 修復：舊 max_drop_pct() 掃全部觀察幣種，任一小幣抖 5%
+    /// 就誤觸 CloseAll；改為只看真實持倉的幣種才能把閃崩防禦綁回實際曝險。
+    /// 附加的 sigma 提供「是否離群事件」信號，讓 caller 能區分小幣正常波動
+    /// 與真正的異常下跌。
+    pub fn worst_drop_for_held(&self, held_symbols: &[String]) -> Option<SymbolDropInfo> {
+        if held_symbols.is_empty() {
+            return None;
+        }
+        let mut worst: Option<SymbolDropInfo> = None;
+        for sym in held_symbols {
+            let Some(deque) = self.history.get(sym) else { continue; };
+            if deque.len() < self.min_samples {
+                continue;
+            }
+            let prices: Vec<f64> = deque.iter().map(|(_, p)| *p).collect();
+            let mut peak = f64::MIN;
+            for &p in &prices {
+                if p > peak {
+                    peak = p;
+                }
+            }
+            if peak <= 0.0 {
+                continue;
+            }
+            let current = match prices.last() {
+                Some(&p) => p,
+                None => continue,
+            };
+            let drop_pct = (peak - current) / peak * 100.0;
+            if drop_pct <= 0.0 {
+                continue;
+            }
+            let n = prices.len() as f64;
+            let mean = prices.iter().sum::<f64>() / n;
+            if mean <= 0.0 {
+                continue;
+            }
+            let variance = prices.iter().map(|p| (p - mean).powi(2)).sum::<f64>() / n;
+            let std_dev = variance.sqrt();
+            let sigma = if std_dev < 1e-12 {
+                0.0
+            } else {
+                (current - mean).abs() / std_dev
+            };
+            let info = SymbolDropInfo {
+                symbol: sym.clone(),
+                drop_pct,
+                sigma,
+            };
+            match &worst {
+                None => worst = Some(info),
+                Some(w) if info.drop_pct > w.drop_pct => worst = Some(info),
+                _ => {}
+            }
+        }
+        worst
+    }
+
     /// Get the number of tracked symbols / 取得追蹤的幣種數量
     pub fn symbol_count(&self) -> usize {
         self.history.len()
@@ -314,5 +402,129 @@ mod tests {
         assert_eq!(t.symbol_count(), 2);
         assert_eq!(t.sample_count("BTCUSDT"), 5);
         assert_eq!(t.sample_count("ETHUSDT"), 5);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // FA-PHANTOM-2 regression tests — worst_drop_for_held
+    // ═══════════════════════════════════════════════════════════════════════
+
+    #[test]
+    fn test_worst_drop_empty_held_symbols() {
+        let t = make_tracker_with_data();
+        assert!(t.worst_drop_for_held(&[]).is_none(),
+            "empty held set must return None");
+    }
+
+    #[test]
+    fn test_worst_drop_unheld_symbol_ignored() {
+        // FA-PHANTOM-2: microcap drops hard, but we hold no position in it.
+        // Old max_drop_pct() would return a huge drop; new method returns None.
+        // FA-PHANTOM-2：小幣大跌但未持倉，新方法必須忽略。
+        let mut t = PriceHistoryTracker::with_params(300, 5);
+        // Crash from 1.00 → 0.80 (20% drop)
+        for i in 0..10 {
+            let price = if i < 5 { 1.00 } else { 0.80 };
+            t.record("MICROUSDT", price, i * 1000);
+        }
+        // We hold only BTCUSDT (not recorded, no history)
+        assert!(t.worst_drop_for_held(&["BTCUSDT".to_string()]).is_none(),
+            "drop on unheld symbol must not surface");
+        // And legacy global scanner does still see it — proves behavior diverged intentionally
+        assert!(t.max_drop_pct() > 15.0,
+            "legacy max_drop_pct still scans all symbols");
+    }
+
+    #[test]
+    fn test_worst_drop_held_symbol_surfaces() {
+        let mut t = PriceHistoryTracker::with_params(300, 5);
+        for i in 0..10 {
+            // Crash from 100 → 90 (10% drop)
+            let price = if i < 5 { 100.0 } else { 90.0 };
+            t.record("BTCUSDT", price, i * 1000);
+        }
+        let info = t.worst_drop_for_held(&["BTCUSDT".to_string()])
+            .expect("held symbol with drop must return info");
+        assert_eq!(info.symbol, "BTCUSDT");
+        assert!((info.drop_pct - 10.0).abs() < 0.01, "drop_pct={}", info.drop_pct);
+        // Sigma must be positive — current=90 is below the within-window mean
+        assert!(info.sigma > 0.0, "sigma should be positive, got {}", info.sigma);
+    }
+
+    #[test]
+    fn test_worst_drop_insufficient_samples() {
+        let mut t = PriceHistoryTracker::with_params(300, 10);
+        for i in 0..5 {
+            t.record("BTCUSDT", 100.0 - i as f64, i * 1000);
+        }
+        // Only 5 samples, min_samples=10 → None
+        assert!(t.worst_drop_for_held(&["BTCUSDT".to_string()]).is_none());
+    }
+
+    #[test]
+    fn test_worst_drop_picks_largest_across_held() {
+        let mut t = PriceHistoryTracker::with_params(300, 5);
+        for i in 0..10 {
+            // BTCUSDT: 3% drop
+            let btc = if i < 5 { 100.0 } else { 97.0 };
+            // ETHUSDT: 8% drop — this should win
+            let eth = if i < 5 { 3000.0 } else { 2760.0 };
+            t.record("BTCUSDT", btc, i * 1000);
+            t.record("ETHUSDT", eth, i * 1000);
+        }
+        let info = t.worst_drop_for_held(&[
+            "BTCUSDT".to_string(),
+            "ETHUSDT".to_string(),
+        ]).expect("held symbols with drops must return info");
+        assert_eq!(info.symbol, "ETHUSDT");
+        assert!(info.drop_pct > 7.5 && info.drop_pct < 8.5,
+            "expected ~8% drop, got {}", info.drop_pct);
+    }
+
+    #[test]
+    fn test_worst_drop_stable_symbol_zero() {
+        let mut t = PriceHistoryTracker::with_params(300, 5);
+        // Flat 100.00 price — no drop
+        for i in 0..10 {
+            t.record("USDCUSDT", 100.0, i * 1000);
+        }
+        // Flat price → peak == current → drop_pct == 0 → skipped (returns None)
+        assert!(t.worst_drop_for_held(&["USDCUSDT".to_string()]).is_none(),
+            "zero-drop held symbol must return None");
+    }
+
+    #[test]
+    fn test_worst_drop_sigma_low_for_noisy_symbol() {
+        // Microcap that naturally swings 5% — a 5% drop is NOT an outlier.
+        // 小幣本身 ±5% 震盪 — 5% 跌幅不應視為離群事件。
+        let mut t = PriceHistoryTracker::with_params(300, 5);
+        // Oscillate between 95 and 105 repeatedly, end at 95
+        let pattern = [100.0, 105.0, 95.0, 105.0, 95.0, 105.0, 95.0, 105.0, 95.0, 95.0];
+        for (i, &px) in pattern.iter().enumerate() {
+            t.record("MICROUSDT", px, i as u64 * 1000);
+        }
+        let info = t.worst_drop_for_held(&["MICROUSDT".to_string()]).expect("has drop");
+        // ~10% drop from peak 105 to 95
+        assert!(info.drop_pct > 8.0, "drop_pct={}", info.drop_pct);
+        // But sigma should be modest (< 3) because 95 is within normal swing range
+        assert!(info.sigma < 3.0,
+            "naturally-noisy symbol should have sigma < 3, got {}", info.sigma);
+    }
+
+    #[test]
+    fn test_worst_drop_sigma_high_for_stable_symbol() {
+        // Normally-stable symbol that suddenly tanks — should score high sigma.
+        // 平時穩定的幣種突然下跌 — sigma 應該很高。
+        // Use 19 stable samples so the outlier doesn't inflate std_dev enough
+        // to bring sigma below 3 (pure 10-sample cases land right at ~3.0
+        // due to the outlier dominating its own std-dev estimate).
+        let mut t = PriceHistoryTracker::with_params(300, 5);
+        for i in 0..19 {
+            t.record("STABLEUSDT", 100.0 + (i as f64) * 0.01, i * 1000);
+        }
+        t.record("STABLEUSDT", 92.0, 19_000);
+        let info = t.worst_drop_for_held(&["STABLEUSDT".to_string()]).expect("has drop");
+        assert!(info.drop_pct > 7.0, "drop_pct={}", info.drop_pct);
+        assert!(info.sigma >= 3.0,
+            "stable-then-crash should have sigma >= 3, got {}", info.sigma);
     }
 }
