@@ -804,8 +804,12 @@ impl TickPipeline {
         &mut self,
         store: std::sync::Arc<crate::edge_predictor::EdgePredictorStore>,
     ) {
-        self.edge_predictor_store = Some(std::sync::Arc::clone(&store));
-        self.intent_processor.set_edge_predictor_store(store);
+        debug_assert!(
+            self.edge_predictor_store.is_none(),
+            "EdgePredictorStore injected twice — bootstrap should call this exactly once per pipeline"
+        );
+        self.intent_processor.set_edge_predictor_store(store.clone());
+        self.edge_predictor_store = Some(store);
     }
 
     /// EDGE-P3-1 Stage 0: Accessor for command handlers that need to mutate
