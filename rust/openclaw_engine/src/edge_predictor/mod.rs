@@ -6,28 +6,17 @@
 //!   `PredictError`, `Prediction`, `EdgePredictorStore` (per-strategy ArcSwap
 //!   hot-reload per F9), and `PerEnginePredictors` (paper/demo/live isolation).
 //!   Default build uses `null_backend` (always Err(NoModel) → falls back to
-//!   shrinkage gate). Real backends (`tract_backend` / `ort_backend`) are
-//!   feature-gated (`edge_predictor_tract` / `edge_predictor_ort`, mutually
-//!   exclusive per F8) and ship empty stubs until Stage 2 (ML-MIT) lands the
-//!   model artifact.
+//!   shrinkage gate). Real backend `ort_backend` is feature-gated behind
+//!   `edge_predictor_ort`; chosen over tract because tract 0.21 lacks
+//!   `TreeEnsembleRegressor` (the ONNX op LightGBM's quantile export emits).
 //! MODULE_NOTE (中): 逐策略 quantile LGBM 邊緣預測器，替代 James-Stein `shrunk_bps`。
 //!   本骨架定義 `EdgePredictor` trait、錯誤型別、預測結果、`EdgePredictorStore`
 //!   （per-strategy ArcSwap 熱重載，F9 guard discipline）、`PerEnginePredictors`
 //!   （paper/demo/live 隔離）。預設 build 使用 `null_backend`（永遠 Err(NoModel)
-//!   → fallback 至 shrinkage gate）。真實後端經 feature flag 門控，Stage 2 ML-MIT
-//!   交付 ONNX 模型後啟用。
+//!   → fallback 至 shrinkage gate）；真實後端 `ort_backend` 經
+//!   `edge_predictor_ort` feature 門控。
 //!
 //! Spec: docs/references/2026-04-15--edge_predictor_spec.md v1.4 §7
-
-// F8 · Mutual-exclusion compile guard — guard against operator accidentally
-// enabling both backends (60MB+ binary bloat + ambiguous runtime selection).
-// F8 互斥編譯守則 — 防止 operator 同時啟用雙後端。
-#[cfg(all(feature = "edge_predictor_tract", feature = "edge_predictor_ort"))]
-compile_error!(
-    "edge_predictor_tract and edge_predictor_ort are mutually exclusive; \
-     pick exactly one backend to avoid +63MB binary bloat and ambiguous \
-     runtime selection (spec §7.1 F8)"
-);
 
 pub mod feature_builder;
 pub mod features;
@@ -35,10 +24,9 @@ pub mod gate;
 pub mod null_backend;
 pub mod rearrangement;
 
-// Stage 2 backends — empty stubs today, real impl when ML-MIT ships artifact.
-// Stage 2 後端 — 當前為空殼，ML-MIT 交付 artifact 時補實現。
-#[cfg(feature = "edge_predictor_tract")]
-pub mod tract_backend;
+// ort_backend pulls ONNX Runtime 1.24 via the `ort` crate; feature-gated so
+// the default build ships +0 deps.
+// ort_backend 經 feature gate 拉入 ONNX Runtime 1.24；預設 build 零依賴。
 #[cfg(feature = "edge_predictor_ort")]
 pub mod ort_backend;
 
@@ -284,34 +272,46 @@ impl Default for PerEnginePredictors {
     }
 }
 
-/// EDGE-P3-1 Step 7b: Load a predictor from an on-disk ONNX artifact. Today
-/// this is a stub — no backend is compiled in (both `edge_predictor_tract`
-/// and `edge_predictor_ort` feature flags are empty pending ML-MIT #26). The
-/// stub unconditionally returns `Err("onnx_loader_not_wired")` so the
-/// `ReloadEdgePredictor` IPC handler can exercise its happy and error paths
-/// without a real model file, and so `engine_capabilities.ipc_methods.
-/// reload_edge_predictor` can stay `False` honestly. When #26 lands, swap
-/// this body for the feature-flag-gated tract/ort loader and the flag flips
-/// `True` at the same time.
-/// EDGE-P3-1 Step 7b：從磁碟 ONNX artifact 載入 predictor 的存根。當前無後端
-/// 編入（tract/ort feature flag 皆空，待 ML-MIT #26）；存根回 Err，IPC handler
-/// 仍可跑通 happy/error 路徑，capability flag 誠實保持 False。#26 交付後換為
-/// feature-flag gated 的實作並同步翻 flag。
+/// EDGE-P3-1 Step 7b: Load a predictor trio from disk. The caller passes the
+/// q50 artifact path as anchor; q10/q90 sibling filenames are derived by
+/// substring-replacing `_q50_` with `_q10_`/`_q90_` inside `ort_backend`.
+/// Feature-gated so the default build stays +0 deps:
+///   * with `--features edge_predictor_ort`: delegates to `OnnxTrioPredictor`
+///     which schema-hash-validates the artifacts against `FEATURE_NAMES_V1`
+///     and wraps three `ort::Session`s behind the `EdgePredictor` trait.
+///   * without the feature: returns the historical `onnx_loader_not_wired`
+///     Err so `engine_capabilities.ipc_methods.reload_edge_predictor` can
+///     stay `false` on pure-default builds (no libonnxruntime bundled).
+///
+/// EDGE-P3-1 Step 7b：載入預測器三重。以 q50 為錨，由 ort_backend 推導
+/// q10/q90 兄弟檔。feature gated：開 `edge_predictor_ort` 走 ort 後端；
+/// 未開時維持歷史 Err 存根以保 capability 契約誠實。
 pub fn load_predictor_from_path(
     path: &std::path::Path,
 ) -> Result<Arc<dyn EdgePredictor + Send + Sync>, String> {
     if !path.exists() {
         return Err(format!(
-            "onnx_loader_not_wired: path does not exist ({}) — awaiting ML-MIT #26 \
-             / 載入器未接線：路徑不存在，待 ML-MIT #26",
+            "onnx artifact path does not exist ({}) \
+             / ONNX artifact 路徑不存在",
             path.display()
         ));
     }
-    Err(format!(
-        "onnx_loader_not_wired: awaiting ML-MIT #26 first ONNX artifact \
-         (path={}) / 載入器未接線，待 ML-MIT #26 首個 ONNX artifact",
-        path.display()
-    ))
+
+    #[cfg(feature = "edge_predictor_ort")]
+    {
+        let trio = ort_backend::OnnxTrioPredictor::load_from_q50_path(path)?;
+        return Ok(Arc::new(trio));
+    }
+
+    #[cfg(not(feature = "edge_predictor_ort"))]
+    {
+        let _ = path; // silence unused-binding warning on stub path
+        Err(format!(
+            "onnx_loader_not_wired: built without --features edge_predictor_ort \
+             (path={}) / 未啟用 edge_predictor_ort feature，載入器為存根",
+            path.display()
+        ))
+    }
 }
 
 /// Helper — current unix epoch seconds (used by backends to compute age).

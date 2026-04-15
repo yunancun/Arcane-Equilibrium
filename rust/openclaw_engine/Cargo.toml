@@ -35,28 +35,50 @@ serde_yaml = "0.9"
 parking_lot = { workspace = true }
 rand = { workspace = true }
 
+# EDGE-P3-1 ort backend — ONNX Runtime 1.24 Rust binding.
+# Required over tract-onnx: tract 0.21 implements TreeEnsembleClassifier but
+# NOT TreeEnsembleRegressor (ai.onnx.ml opset), which is the op LightGBM's
+# onnxmltools converter emits for quantile regression. Verified 2026-04-15:
+# zero matches for "TreeEnsembleRegressor" in tract 0.21.15 source tree.
+# ort is configured with download-binaries (auto-fetches libonnxruntime.{so,dylib}
+# for the target platform at build time) + copy-dylibs (bundles it next to the
+# binary) + ndarray (f32 array inputs) + tls-rustls (pure-Rust TLS — avoids
+# pulling openssl-sys which would require libssl-dev at build time and break
+# the Mac/Linux zero-system-dep story). We explicitly override ort's default
+# features to swap tls-native → tls-rustls; everything else in ort's default
+# (std/ndarray/tracing/download-binaries/copy-dylibs/api-24) is kept.
+# Optional — pulled only when `edge_predictor_ort` feature is on; default
+# build ships null_backend alone.
+# EDGE-P3-1 ort 後端 — ONNX Runtime 1.24 Rust binding。
+# 必須用 ort 因 tract 0.21 沒實作 TreeEnsembleRegressor（LightGBM 匯出必用 op）。
+# default features 覆寫 tls-native → tls-rustls 避開 libssl-dev 系統依賴。
+ort = { version = "=2.0.0-rc.12", optional = true, default-features = false, features = ["std", "ndarray", "tracing", "download-binaries", "copy-dylibs", "api-24", "tls-rustls"] }
+
 [dev-dependencies]
 tempfile = "3"
 
 # ============================================================
-# EDGE-P3-1 Realized Edge Predictor — backend feature flags.
+# EDGE-P3-1 Realized Edge Predictor — backend feature flag.
 # EDGE-P3-1 真實邊緣預測器 — 後端 feature flag。
 #
-# Spec §7.1 / F8: mutually exclusive — enabling both at once fails compile
-# with a compile_error! in edge_predictor/mod.rs to avoid +63MB binary bloat
-# and ambiguous runtime selection.
-#
 # Default build (no feature): null_backend only (always returns Err(NoModel),
-# triggers fallback to shrinkage). Safe to ship; no new deps pulled.
+# triggers fallback to shrinkage). Safe to ship; no ort dep pulled, no
+# libonnxruntime bundled.
 #
-# Stage 2 (ML-MIT) adds the actual tract-onnx / ort dependencies when the
-# model artifact is ready. Until then, the tract_backend.rs / ort_backend.rs
-# files are feature-gated stubs.
+# `edge_predictor_ort`: pulls the ort + ort-sys deps (+~20MB libonnxruntime
+# dylib for target platform via download-binaries), unlocks `ort_backend`
+# module + the `load_predictor_from_path` trio dispatcher, flips
+# `engine_capabilities.ipc_methods.reload_edge_predictor` to true.
 # ============================================================
 [features]
 default = []
-edge_predictor_tract = []
-edge_predictor_ort = []
+# Enabling `edge_predictor_ort` pulls the ort runtime + unlocks `ort_backend`
+# + the `load_predictor_from_path` trio dispatcher. Without this flag the stub
+# path is taken and `load_predictor_from_path` returns Err("onnx_loader_not_wired"),
+# preserving the capability contract (reload_edge_predictor=false).
+# 開啟 `edge_predictor_ort` 會拉入 ort 並啟用 trio loader；
+# 未開啟則走 stub 路徑，維持 capability 契約（reload_edge_predictor=false）。
+edge_predictor_ort = ["dep:ort"]
 
 [[bin]]
 name = "openclaw-engine"

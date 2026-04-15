@@ -76,6 +76,11 @@ def client_happy() -> TestClient:
     cap_module._IPC_CLIENT = None
 
     async def _fake_call(method: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
+        if method == "get_build_capabilities":
+            # Default to stub-loader build (ort feature OFF); overlay tests
+            # patch this directly when they need the ort-enabled variant.
+            # 預設為 stub loader（ort OFF）；需要 ort 開啟的測試自行 patch。
+            return {"edge_predictor_ort": False, "reload_edge_predictor": False}
         assert method == "get_risk_config"
         assert params is not None
         engine = params.get("engine")
@@ -170,6 +175,62 @@ def test_capabilities_envelope_shape(client_happy: TestClient) -> None:
     assert body["data_category"] == "engine_capabilities"
     for engine in _ENGINES:
         assert engine in body["data"]["engines"]
+
+
+def test_capabilities_overlays_build_flags_from_ipc() -> None:
+    """EDGE-P3-1 Step 7b: `reload_edge_predictor` must flip True when the
+    engine reports ort build-feature ON via `get_build_capabilities`. The
+    Python server can't know the Rust build config at its own startup, so
+    the static default stands in until the engine answers.
+    Step 7b：引擎回報 ort 開啟時，reload_edge_predictor 必須翻 True。"""
+    cap_module._IPC_CLIENT = None
+
+    async def _fake_call(method: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
+        if method == "get_build_capabilities":
+            return {"edge_predictor_ort": True, "reload_edge_predictor": True}
+        # get_risk_config — shape is irrelevant for this test; any dict works.
+        # get_risk_config — 本測試不關心形狀，任何 dict 均可。
+        return {"config": {"edge_predictor": {}}}
+
+    fake_ipc = AsyncMock()
+    fake_ipc.call = AsyncMock(side_effect=_fake_call)
+
+    app = FastAPI()
+    app.include_router(engine_capabilities_router)
+    app.dependency_overrides[current_actor] = _viewer_actor
+    with patch.object(cap_module, "_get_ipc", AsyncMock(return_value=fake_ipc)):
+        client = TestClient(app)
+        data = client.get("/api/v1/engine/capabilities").json()["data"]
+
+    assert data["ipc_methods"]["reload_edge_predictor"] is True
+    # Other static flags untouched by the overlay (engine didn't report them).
+    # 其他靜態旗標未被 overlay（引擎未回報）。
+    assert data["ipc_methods"]["decision_feature_snapshot"] is True
+    assert data["ipc_methods"]["set_edge_predictor_shadow"] is False
+
+
+def test_capabilities_build_flags_ignored_when_ipc_fails() -> None:
+    """EDGE-P3-1 Step 7b fail-soft: a build-capability IPC failure must NOT
+    corrupt the static defaults — the probe continues with the declared flags.
+    Step 7b fail-soft：build-capability IPC 失敗時靜態預設不變。"""
+    cap_module._IPC_CLIENT = None
+
+    async def _fake_call(method: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
+        if method == "get_build_capabilities":
+            raise RuntimeError("simulated IPC error")
+        return {"config": {"edge_predictor": {}}}
+
+    fake_ipc = AsyncMock()
+    fake_ipc.call = AsyncMock(side_effect=_fake_call)
+
+    app = FastAPI()
+    app.include_router(engine_capabilities_router)
+    app.dependency_overrides[current_actor] = _viewer_actor
+    with patch.object(cap_module, "_get_ipc", AsyncMock(return_value=fake_ipc)):
+        client = TestClient(app)
+        data = client.get("/api/v1/engine/capabilities").json()["data"]
+
+    assert data["ipc_methods"] == _EDGE_P3_IPC_SUPPORT
 
 
 def test_capabilities_requires_auth() -> None:

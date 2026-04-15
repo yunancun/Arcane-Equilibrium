@@ -1,8 +1,8 @@
 # OpenClaw TODO — 工作計劃清單
 
-**最後更新：2026-04-15**（大整理 — 2026-04-15 W22 ENGINE-HEAL + EDGE-P3-1 Phase A/B + Step 7 IPC 全套 + ML-MIT #26 Lane A + FA-PHANTOM-2 + GUI fills 鏈修復 全數結清，歸檔 → `docs/archive/2026-04-15--completed_todo_w22_engine_heal_edge_p3.md`。本檔只保留活躍 + 未完成項目，按優先級重新分級）
+**最後更新：2026-04-16**（EDGE-P3-1 Phase B #3 Rust ONNX loader ✅ — ort 2.0.0-rc.12 後端 + `get_build_capabilities` IPC + Python 動態 overlay；P1-1/P1-2 結清）
 
-**測試基準線**：Rust **engine lib 1318 + core 380 + e2e 35 = 1733** · Python **2875 passed (5 skipped · 0 fail)** · ml_training **182 passed (10 skipped)**
+**測試基準線**：Rust **engine lib 1328 (ort) / 1321 (default) + core 380 + ort integration 5 + e2e 35 = 1748 (ort) / 1741 (default)** · Python **2883 passed (5 skipped · 0 fail)** · ml_training **182 passed (10 skipped)**
 
 > compact 後從此文件恢復工作狀態。第一個 `[ ]` 即為下一步起點。
 > 條目分級：**P0 阻塞關鍵路徑** → **P1 當週活躍** → **P2 下週排期** → **P3 長期專項** → **P4 Backlog / Conditional**
@@ -63,20 +63,11 @@ git status && git log --oneline -5
 
 ## 🟡 P1 — W22 當週活躍
 
-### P1-1 · EDGE-P3-1 Phase B #3 ONNX loader（Rust 端）
-**狀態**：stub loader 在 `edge_predictor/load_predictor_from_path`，恆 `Err("onnx_loader_not_wired: awaiting ML-MIT #26")`
-**目的**：bootstrap-time 掃 `settings/models/<engine>/<strategy>.onnx` 載入至 `EdgePredictorStore` 槽
-**阻塞者**：首個真實 ONNX artifact（ML-MIT Lane A 已 ✅，需在真 `learning.decision_features` 資料跑管線產出首個 `.onnx`）
-**工作內容**：
-- tract-onnx 載入 + `InferenceModel::metadata()` 讀 `edge_p3_*` 9 keys（spec §3.3）
-- `feature_schema_hash` parity 檢查 fail-closed
-- 模型熱替換通過 `PipelineCommand::ReloadEdgePredictor`（Step 7b protocol 已落，等此項接 real impl）
-**解鎖**：Stage 2 Rust 側端到端；CC T2/T7/T18 回歸可跑
+### ~~P1-1 · EDGE-P3-1 Phase B #3 ONNX loader（Rust 端）~~ ✅ 2026-04-16
+**結果**：ort 2.0.0-rc.12 後端取代 tract-onnx 0.21（tract 缺 `TreeEnsembleRegressor` 無法跑 LightGBM 分位 export）；`ort_backend::OnnxTrioPredictor` 實現 9-key metadata 讀取 + schema_hash fail-closed + 三重 predictor 同一邏輯單元 + `enforce_monotone`。Cargo feature `edge_predictor_ort` + `download-binaries` + `tls-rustls`；default build 仍走 null stub。5 個整合測試（fixture ONNX trio）全綠。
 
-### P1-2 · EDGE-P3-1 Step 7b Python route + flag flip
-**狀態**：Rust plumbing 完（commit `72c028f`），Python client route 未寫，`engine_capabilities_routes._EDGE_P3_IPC_SUPPORT.reload_edge_predictor: False`
-**阻塞者**：P1-1（loader 沒實作前 flag flip 了會 expose 永久 err）
-**工作內容**：`control_api_v1/app/engine_ipc_reload_predictor_route.py` → 呼叫 `PipelineCommand::ReloadEdgePredictor`；capabilities flag 翻 True；+Python integration test
+### ~~P1-2 · EDGE-P3-1 Step 7b Python route + flag flip~~ ✅ 2026-04-16
+**結果**：Python static flag 無法靜態知道 Rust build feature，故新增 Rust IPC `get_build_capabilities` 回報 `cfg!(feature = "edge_predictor_ort")`；Python capabilities endpoint 於 probe 時動態 overlay — ort build 自動翻 True，default build 保持 False，無需 Python 重啟。2 個新 Python 測試驗證 overlay + fail-soft。
 
 ### P1-3 · EDGE-P3-1 Step 7c Python consumer
 **狀態**：Rust writer 完（commit `b469448`），`learning.decision_shadow_fills` 寫入正常，但 Python 端沒 consumer routes 用
@@ -86,7 +77,7 @@ git status && git log --oneline -5
 ### P1-4 · 在真 ETL 資料跑首個 ONNX export
 **狀態**：`learning.decision_features` 於 Step 7a 後開始採集；等足夠樣本（≥100k rows per strategy 推薦）
 **工作內容**：`run_training_pipeline.py --strategy <name>` → 產 `models/<engine>/<strategy>_vYYYYMMDD.onnx` + symlink
-**解鎖**：P1-1 + P1-2 + 整個 EDGE-P3-1 Stage 2 shadow mode
+**解鎖**：整個 EDGE-P3-1 Stage 2 shadow mode（P1-1/P1-2 已解鎖 ✅，等此產出首個 artifact 後執行 `ReloadEdgePredictor` IPC 載入）
 
 ---
 

@@ -59,9 +59,14 @@ _EDGE_P3_IPC_SUPPORT: dict[str, bool] = {
     "fsynced_toml_write": True,
     # Step 7e — DisableEdgePredictorAll two-phase commit + V014 audit
     "disable_edge_predictor_all": True,
-    # Step 7b — ReloadEdgePredictor IPC protocol wired (plumbing); capability
-    # flag stays False until ML-MIT #26 replaces the stub loader (returns
-    # Err("onnx_loader_not_wired") today) with the real tract/ort backend.
+    # Step 7b — ReloadEdgePredictor IPC protocol wired (plumbing). The
+    # default here is False (stub loader path); the live flag is overridden
+    # at probe time from the Rust engine's `get_build_capabilities` IPC,
+    # which reports `cfg!(feature = "edge_predictor_ort")` — so a production
+    # engine built with the ort backend surfaces True while a default-feature
+    # build keeps False without a server restart.
+    # Step 7b：預設 False（stub loader）；probe 時由 Rust `get_build_capabilities`
+    # IPC 回報實際 build-feature 旗標（ort 開啟 → True），故無需重啟 Python。
     "reload_edge_predictor": False,
     # Step 7c — EmitShadowFill → learning.decision_shadow_fills writer wired
     "emit_shadow_fill": True,
@@ -117,6 +122,28 @@ def _extract_edge_predictor(config: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(ep, dict):
         return {field: None for field in _EDGE_PREDICTOR_FIELDS}
     return {field: ep.get(field) for field in _EDGE_PREDICTOR_FIELDS}
+
+
+async def _query_build_capabilities(
+    ipc: EngineIPCClient | None,
+) -> dict[str, bool]:
+    """
+    Query Rust `get_build_capabilities` IPC once per request. The engine
+    reports `cfg!(feature = "edge_predictor_ort")` so Python's static flags
+    track the running binary. Returns {} on any failure (fail-soft — the
+    static defaults stand in, matching the pre-IPC behaviour).
+    查 Rust build-feature 旗標；失敗時回空 dict，保留靜態預設（fail-soft）。
+    """
+    if ipc is None:
+        return {}
+    try:
+        resp = await ipc.call("get_build_capabilities", params={})
+    except Exception as exc:
+        logger.warning("capabilities: get_build_capabilities failed: %s", exc)
+        return {}
+    if not isinstance(resp, dict):
+        return {}
+    return {k: bool(v) for k, v in resp.items() if isinstance(v, bool)}
 
 
 async def _query_engine_snapshot(
@@ -198,12 +225,23 @@ async def get_engine_capabilities(
         if reason is not None and first_reason is None:
             first_reason = reason
 
+    # EDGE-P3-1 Step 7b: overlay live build-feature flags from the engine onto
+    # the static declaration so `reload_edge_predictor` tracks the actual ort
+    # backend state. Only keys already present in the static map are overlaid
+    # (guards against a future engine reporting an unknown capability).
+    # Step 7b：以 Rust 實時 build-feature 旗標覆蓋靜態宣告；只覆寫已存在的 key。
+    ipc_methods = dict(_EDGE_P3_IPC_SUPPORT)
+    build_flags = await _query_build_capabilities(ipc)
+    for key, value in build_flags.items():
+        if key in ipc_methods:
+            ipc_methods[key] = value
+
     degraded = first_reason is not None
 
     data: dict[str, Any] = {
         "api_version": "v1",
         "feature_schema": _feature_schema(),
-        "ipc_methods": dict(_EDGE_P3_IPC_SUPPORT),
+        "ipc_methods": ipc_methods,
         "engines": engines,
         "degraded": degraded,
         "reason": first_reason,

@@ -357,14 +357,30 @@ def fit_floor_baseline(
 # ──────────────────────────────────────────────────────────────
 
 def _compute_feature_schema_hash(feature_names: List[str], schema_version: str) -> str:
-    """Stable sha256 over (version || '|' || name1 || '\\n' || name2 || ...).
+    """Stable `sha256:<16 hex>` pinned byte-for-byte to Rust authority.
 
-    Matches the Rust FeatureVectorV1 contract: both sides must agree on
-    (version, ordered names) before predict/serve accepts output.
-    與 Rust FeatureVectorV1 契約一致：雙方對 (version, ordered names) 同意才接受推理。
+    Mirrors `rust/openclaw_engine/src/linucb/schema_hash.rs::compute_feature_schema_hash`
+    exactly: payload is `name1\\n` || `name2\\n` || ... (trailing newline after
+    each name, no version prefix), output is `sha256:` + first 16 hex chars of
+    the digest. Rust is the train/serve authority — ONNX artifacts whose
+    `edge_p3_feature_schema_hash` metadata disagrees with Rust's compile-time
+    `FEATURE_NAMES_V1` hash are rejected at load by `tract_backend`. Emitting
+    any other format here guarantees every real model gets rejected.
+
+    `schema_version` is retained in the signature for future splits (spec may
+    one day fold version into the hash payload) but is not currently mixed in;
+    version drift surfaces via the separate `edge_p3_schema_version` ONNX
+    metadata key and via filename convention.
+
+    與 Rust 權威實作逐字節對齊：`name1\\n name2\\n ...` 無版本前綴；輸出 `sha256:前16hex`。
+    ONNX artifact 的 schema_hash 不匹配時 `tract_backend` 直接拒載；其他格式即永拒。
     """
-    payload = schema_version + "|" + "\n".join(feature_names)
-    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+    del schema_version  # intentionally unused — see docstring
+    hasher = hashlib.sha256()
+    for name in feature_names:
+        hasher.update(name.encode("utf-8"))
+        hasher.update(b"\n")
+    return "sha256:" + hasher.hexdigest()[:16]
 
 
 def _split_tail_holdout(

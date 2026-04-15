@@ -1,8 +1,8 @@
 //! Null backend — always returns `Err(NoModel)` to trigger fallback.
 //! Null 後端 — 永遠返回 `Err(NoModel)` 以觸發 fallback。
 //!
-//! MODULE_NOTE (EN): Default backend compiled when neither
-//!   `edge_predictor_tract` nor `edge_predictor_ort` feature is enabled.
+//! MODULE_NOTE (EN): Default backend compiled when the `edge_predictor_ort`
+//!   feature is not enabled.
 //!   Every `predict()` call returns `Err(PredictError::NoModel)`, which the
 //!   gate logic (§7.3) catches and falls back to the existing shrinkage gate.
 //!   Safe to ship to prod — behaves identically to "predictor disabled".
