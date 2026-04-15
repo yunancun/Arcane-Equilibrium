@@ -1347,6 +1347,22 @@ impl TickPipeline {
             });
         }
         self.stats.total_fills += 1;
+        // Mirror the close fill into the in-memory ring buffer so GUI snapshot
+        // readers see it. Without this, `recent_fills` only contained open fills
+        // and every risk_close / stop_trigger / strategy_close silently bypassed
+        // the buffer — DB had the data but the snapshot view was blind.
+        // `is_long` is the POSITION side; the closing order is the opposite.
+        // 鏡像平倉 fill 到環形緩衝供 GUI 快照讀取；否則 recent_fills 只有開倉 fill，
+        // 所有 risk_close / stop_trigger / strategy_close 都悄悄繞過緩衝。
+        on_tick_helpers::push_capped(&mut self.recent_fills, TimestampedFill {
+            timestamp_ms: ts_ms,
+            symbol: symbol.to_string(),
+            is_long: !is_long,
+            qty,
+            price,
+            fee: close_fee,
+            strategy: close_tag.to_string(),
+        }, 50);
     }
 
     /// DB-RUN-1: Decide whether to persist a freshly emitted signal.
