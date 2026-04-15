@@ -29,6 +29,9 @@ use crate::pipeline_types::CanaryRecord;
 use std::fs::{File, OpenOptions};
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
@@ -38,6 +41,7 @@ const BUF_WRITER_CAPACITY: usize = 64 * 1024;
 const FLUSH_INTERVAL_MS: u64 = 200;
 const DEFAULT_ROTATE_MB: u64 = 1024;
 const DEFAULT_MAX_ROTATED: usize = 3;
+const WARN_THROTTLE_MS: u64 = 1000;
 
 /// Clonable handle passed into every pipeline. When `is_enabled()` returns false,
 /// producers skip the record build step entirely (see `pipeline.canary_mode`).
@@ -46,13 +50,26 @@ const DEFAULT_MAX_ROTATED: usize = 3;
 #[derive(Clone)]
 pub struct CanaryWriterHandle {
     tx: Option<mpsc::Sender<CanaryRecord>>,
+    // Monotonic count of Full-branch drops — used by the throttled warn and
+    // by tests to verify the drop path. Shared across clones.
+    // Full 分支丟棄總數（單調遞增），供節流 warn 讀取與測試驗證；跨 clone 共享。
+    total_dropped: Arc<AtomicU64>,
+    // Epoch-ms timestamp of the last Full-branch warn. Used to cap warn rate at
+    // 1 Hz so the warn itself does not become a log flood under sustained pressure
+    // (ENGINE-HEAL-FIX-PHASE1 FUP-A). 0 = never warned.
+    // 最後 Full-branch warn 的 epoch-ms 時間戳；1Hz 上限避免持續壓力下 warn 本身變 log flood。
+    last_warn_ms: Arc<AtomicU64>,
 }
 
 impl CanaryWriterHandle {
     /// Handle with the feature off — producer no-op.
     /// 停用狀態 — producer 零成本。
     pub fn disabled() -> Self {
-        Self { tx: None }
+        Self {
+            tx: None,
+            total_dropped: Arc::new(AtomicU64::new(0)),
+            last_warn_ms: Arc::new(AtomicU64::new(0)),
+        }
     }
 
     /// Feature-on indicator. Event consumer uses this to set
@@ -62,18 +79,26 @@ impl CanaryWriterHandle {
         self.tx.is_some()
     }
 
-    /// Non-blocking send. On channel full → warn + drop (observability beats
-    /// blocking the tick consumer). On writer task exit → silent drop.
-    /// 非阻塞發送 — 滿則 warn 丟棄；寫入任務退出則靜默丟棄。
+    /// Non-blocking send. On channel full → increment drop counter + emit a
+    /// 1 Hz–throttled warn; on writer task exit → silent drop. Throttling keeps
+    /// the warn itself from becoming a log flood under sustained back-pressure
+    /// (ENGINE-HEAL-FIX-PHASE1 FUP-A). The drop counter is monotonic so operators
+    /// and tests can observe cumulative drops regardless of warn cadence.
+    /// 非阻塞發送 — 滿則遞增丟棄計數 + 發 1Hz 節流 warn；寫入任務退出則靜默丟棄。
+    /// 節流避免 warn 本身在持續回壓下成為 log flood；丟棄計數單調遞增方便觀測與測試。
     pub fn try_send(&self, record: CanaryRecord) {
         if let Some(ref tx) = self.tx {
             match tx.try_send(record) {
                 Ok(()) => {}
                 Err(mpsc::error::TrySendError::Full(_)) => {
-                    warn!(
-                        "canary_writer channel full — record dropped \
-                         / 灰度通道滿，記錄丟棄"
-                    );
+                    let total = self.total_dropped.fetch_add(1, Ordering::Relaxed) + 1;
+                    if self.should_emit_warn() {
+                        warn!(
+                            total_dropped = total,
+                            "canary_writer channel full — record dropped (warn 1Hz sampled) \
+                             / 灰度通道滿，記錄丟棄（warn 1Hz 取樣）"
+                        );
+                    }
                 }
                 Err(mpsc::error::TrySendError::Closed(_)) => {
                     // Writer task ended — nothing to recover.
@@ -81,6 +106,24 @@ impl CanaryWriterHandle {
                 }
             }
         }
+    }
+
+    /// Returns true at most once per `WARN_THROTTLE_MS` window across all handle
+    /// clones. CAS on `last_warn_ms` is the serialization point — the thread that
+    /// swaps the timestamp earns the right to log.
+    /// 每 `WARN_THROTTLE_MS` 窗口僅回傳一次 true；CAS `last_warn_ms` 為序列化點。
+    fn should_emit_warn(&self) -> bool {
+        let now_ms = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0);
+        let last = self.last_warn_ms.load(Ordering::Relaxed);
+        if now_ms.saturating_sub(last) < WARN_THROTTLE_MS {
+            return false;
+        }
+        self.last_warn_ms
+            .compare_exchange(last, now_ms, Ordering::Relaxed, Ordering::Relaxed)
+            .is_ok()
     }
 }
 
@@ -121,7 +164,11 @@ pub fn spawn(data_path: PathBuf, cancel: CancellationToken) -> CanaryWriterHandl
         "canary writer started / 灰度寫入器已啟動"
     );
     tokio::spawn(run_writer(rx, canary_path, rotate_mb, max_rotated, cancel));
-    CanaryWriterHandle { tx: Some(tx) }
+    CanaryWriterHandle {
+        tx: Some(tx),
+        total_dropped: Arc::new(AtomicU64::new(0)),
+        last_warn_ms: Arc::new(AtomicU64::new(0)),
+    }
 }
 
 async fn run_writer(
@@ -281,6 +328,59 @@ mod tests {
         let h = CanaryWriterHandle::disabled();
         assert!(!h.is_enabled());
         h.try_send(mk_record(1)); // must not panic, no channel
+    }
+
+    /// FUP-B: verify the `TrySendError::Full` branch drops the record without
+    /// blocking and increments `total_dropped` monotonically. Uses a 1-slot
+    /// channel so a single send saturates it.
+    /// FUP-B：驗證 Full 分支丟棄記錄不阻塞且 `total_dropped` 單調遞增；1-slot 通道一次即滿。
+    #[tokio::test]
+    async fn try_send_full_branch_drops_and_counts() {
+        let (tx, _rx) = mpsc::channel::<CanaryRecord>(1);
+        let handle = CanaryWriterHandle {
+            tx: Some(tx),
+            total_dropped: Arc::new(AtomicU64::new(0)),
+            last_warn_ms: Arc::new(AtomicU64::new(0)),
+        };
+        // First send fills the single slot.
+        handle.try_send(mk_record(1));
+        assert_eq!(handle.total_dropped.load(Ordering::Relaxed), 0);
+        // Subsequent sends must hit Full branch (channel saturated, receiver idle).
+        // These calls must not block or panic.
+        handle.try_send(mk_record(2));
+        handle.try_send(mk_record(3));
+        handle.try_send(mk_record(4));
+        assert_eq!(
+            handle.total_dropped.load(Ordering::Relaxed),
+            3,
+            "expected 3 Full-branch drops"
+        );
+        // Clones share the same counter (Arc semantics).
+        let clone = handle.clone();
+        clone.try_send(mk_record(5));
+        assert_eq!(
+            handle.total_dropped.load(Ordering::Relaxed),
+            4,
+            "clone must share drop counter"
+        );
+    }
+
+    /// FUP-A: verify the warn emission is gated at 1 Hz. We cannot capture
+    /// tracing output without a subscriber, so we probe the throttling predicate
+    /// (`should_emit_warn`) directly: first call returns true, an immediate
+    /// second call returns false.
+    /// FUP-A：驗證 warn 節流在 1Hz；直接探測 `should_emit_warn` — 首次 true，緊接第二次 false。
+    #[test]
+    fn warn_throttle_caps_at_one_hz() {
+        let handle = CanaryWriterHandle::disabled();
+        assert!(
+            handle.should_emit_warn(),
+            "first call with last_warn_ms=0 must emit"
+        );
+        assert!(
+            !handle.should_emit_warn(),
+            "second call within 1s must be throttled"
+        );
     }
 
     #[tokio::test]
