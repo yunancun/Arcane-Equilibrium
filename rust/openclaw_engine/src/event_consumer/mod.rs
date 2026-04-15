@@ -69,6 +69,7 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
         cross_engine_rx,
         pipeline_health,
         canary_handle,
+        edge_predictor_store,
     } = deps;
     let mut pipeline_cmd_rx = pipeline_cmd_rx;
 
@@ -89,6 +90,19 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
     // Build pipeline with kind-appropriate governance + balance (3E-2a)
     // 以 kind 對應的治理 + 餘額構建管線（3E-2a）
     let mut pipeline = TickPipeline::with_kind(SYMBOLS, initial_balance, pipeline_kind);
+
+    // EDGE-P3-1 Phase B #1: Inject per-engine EdgePredictorStore. None preserves
+    // the pre-wiring behaviour (intent_processor keeps `store = None`, gate
+    // short-circuits to legacy shrinkage). Some wires both the TickPipeline IPC
+    // side (SetEdgePredictorShadow / DisableEdgePredictorAll) and IntentProcessor
+    // gate-side lookups to the same Arc, so ML-MIT hot-swaps arrive at the gate
+    // without a restart. `use_edge_predictor=false` default still gates actual
+    // consultation — this only closes the bootstrap plumbing.
+    // EDGE-P3-1 Phase B #1：注入逐引擎 EdgePredictorStore。None 保持接線前
+    // 行為；Some 時 TickPipeline IPC 端與 IntentProcessor gate 端共享同一 Arc。
+    if let Some(store) = edge_predictor_store {
+        pipeline.set_edge_predictor_store(store);
+    }
 
     // QoL-1: Restore cumulative paper_state counters from trading.fills before
     // the first tick; details + fail-soft log are in paper_state_restore.
