@@ -396,6 +396,81 @@ function ocCategoryTag(category) {
     + 'margin-left:4px;vertical-align:middle;line-height:14px">' + ocEsc(cfg.label) + '</span>';
 }
 
+// Render a cumulative-PnL trend polyline into an existing SVG.
+// Accepts fills with any of: realized_pnl / closedPnl / pnl. Oldest fill on the
+// left, newest on the right; y-axis spans [min, max] but always includes 0 so
+// the zero-reference line visually splits wins from losses.
+// Pass zeroLineId to also place the dashed zero baseline at the right y.
+// 渲染累計盈虧走勢。字段兼容：realized_pnl / closedPnl / pnl。左舊右新；
+// y 軸總是包含 0，方便零線直觀分隔盈虧。zeroLineId 可選，傳入會自動調整
+// 虛線 y 座標。
+function ocPnlTrend(lineId, labelId, fills, zeroLineId) {
+  var lineEl = document.getElementById(lineId);
+  var labelEl = document.getElementById(labelId);
+  if (!lineEl) return;
+  if (!fills || !fills.length) {
+    lineEl.setAttribute('points', '');
+    if (labelEl) { labelEl.textContent = 'no data'; labelEl.setAttribute('fill', 'var(--text-dim)'); }
+    return;
+  }
+  var sorted = fills.slice().reverse().slice(0, 50);
+  var cumulative = 0;
+  var series = sorted.map(function(f) {
+    var v = f.realized_pnl != null ? f.realized_pnl
+          : (f.closedPnl != null ? f.closedPnl
+          : (f.pnl != null ? f.pnl : 0));
+    var n = parseFloat(v);
+    if (!isFinite(n)) n = 0;
+    cumulative += n;
+    return cumulative;
+  });
+  if (series.length < 2) {
+    lineEl.setAttribute('points', '');
+    if (labelEl) labelEl.textContent = 'collecting data...';
+    return;
+  }
+  var W = 400, H = 120, pad = 8;
+  var minV = Math.min(0, Math.min.apply(null, series));
+  var maxV = Math.max(0, Math.max.apply(null, series));
+  var range = (maxV - minV) || 1;
+  var yFor = function(v) { return H - pad - ((v - minV) / range) * (H - pad * 2); };
+  var points = series.map(function(v, i) {
+    var x = pad + (i / (series.length - 1)) * (W - pad * 2);
+    return x.toFixed(1) + ',' + yFor(v).toFixed(1);
+  }).join(' ');
+  lineEl.setAttribute('points', points);
+  var last = series[series.length - 1];
+  lineEl.setAttribute('stroke', last >= 0 ? 'var(--green)' : 'var(--red)');
+  if (zeroLineId) {
+    var zEl = document.getElementById(zeroLineId);
+    if (zEl) {
+      var zy = yFor(0).toFixed(1);
+      zEl.setAttribute('x1', pad);
+      zEl.setAttribute('x2', W - pad);
+      zEl.setAttribute('y1', zy);
+      zEl.setAttribute('y2', zy);
+    }
+  }
+  if (labelEl) {
+    labelEl.textContent = (last >= 0 ? '+' : '') + last.toFixed(4) + ' USDT (' + series.length + ' fills)';
+    labelEl.setAttribute('fill', last >= 0 ? 'var(--green)' : 'var(--red)');
+  }
+}
+
+// Render a colored PnL <td> cell. Opening fills (PnL≈0) show as dim dash;
+// closing fills show signed value tinted green (profit) or red (loss).
+// Accepts multiple field names: realized_pnl (Rust engine) / closedPnl (Bybit API).
+// 渲染盈亏单元格。开仓单 PnL≈0 显示灰色破折号；平仓单显示带符号的绿/红金额。
+function ocPnlCell(raw) {
+  const pnl = parseFloat(raw);
+  if (!isFinite(pnl) || Math.abs(pnl) < 0.0001) {
+    return '<td style="color:var(--text-dim)">—</td>';
+  }
+  const cls = pnl >= 0 ? 'green' : 'red';
+  const sign = pnl >= 0 ? '+' : '';
+  return '<td class="' + cls + '">' + sign + pnl.toFixed(4) + '</td>';
+}
+
 // ─── Auto Refresh ────────────────────────────────────────────────────────────
 let _ocRefreshTimer = null;
 let _ocRefreshFn = null;

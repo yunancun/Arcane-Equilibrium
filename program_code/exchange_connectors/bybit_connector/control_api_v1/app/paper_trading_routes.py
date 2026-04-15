@@ -598,16 +598,68 @@ def get_fills(
     limit: int = 50,
     actor: base.AuthenticatedActor = Depends(base.current_actor),
 ):
-    """Get fill history from Rust engine / 從 Rust 引擎獲取成交歷史"""
+    """Get fill history for the paper engine.
+    獲取 paper 引擎的成交歷史。
+
+    Source priority: PG `trading.fills` (authoritative, carries realized_pnl) →
+    Rust in-memory ring buffer fallback (50-deep, no realized_pnl).
+    數據源優先序：PG `trading.fills`（權威，帶 realized_pnl）→ Rust 環形緩衝備援
+    （50 筆上限，無 realized_pnl）。
+    """
+    capped_limit = min(limit, 200)
+    # Try PG first — DB row has realized_pnl per fill (Rust TimestampedFill does not).
+    # 優先讀 PG — DB 列帶逐筆 realized_pnl（Rust TimestampedFill 沒有此欄位）。
+    try:
+        from . import db_pool
+        conn = db_pool.get_conn()
+    except Exception:
+        conn = None
+    if conn is not None:
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT ts, symbol, side, qty, price, fee, realized_pnl, strategy_name "
+                "FROM trading.fills WHERE engine_mode = %s ORDER BY ts DESC LIMIT %s",
+                ("paper", capped_limit),
+            )
+            rows = cur.fetchall()
+            fills = []
+            for ts, symbol, side, qty, price, fee, realized_pnl, strategy in rows:
+                ts_ms = int(ts.timestamp() * 1000) if ts is not None else 0
+                sym = symbol or ""
+                # Category inference: USDT pair → linear; plain USD pair → inverse.
+                # 品類推斷：USDT 對 → linear；純 USD 對 → inverse。
+                category = "inverse" if sym.endswith("USD") and not sym.endswith("USDT") else "linear"
+                fills.append({
+                    "timestamp_ms": ts_ms,
+                    "symbol": sym,
+                    "side": side or "",
+                    "is_long": side == "Buy",
+                    "qty": float(qty) if qty is not None else 0.0,
+                    "price": float(price) if price is not None else 0.0,
+                    "fee": float(fee) if fee is not None else 0.0,
+                    "realized_pnl": float(realized_pnl) if realized_pnl is not None else 0.0,
+                    "strategy": strategy or "",
+                    "category": category,
+                })
+            return _paper_response({"fills": fills, "count": len(fills), "source": "pg_trading_fills"})
+        except Exception as e:
+            logger.warning("PG fills query failed, falling back to Rust snapshot: %s", e)
+        finally:
+            try:
+                db_pool.put_conn(conn)
+            except Exception:
+                pass
+
+    # Fallback: Rust in-memory buffer (no realized_pnl field available).
+    # 備援：Rust 記憶體緩衝（無 realized_pnl 欄位）。
     reader = get_rust_reader()
     if reader.is_engine_available("paper"):
         rust_fills = reader.get_recent_fills(mode="paper") or []
-        # Inject `side` field: Rust TimestampedFill has is_long bool, GUI expects side='Buy'/'Sell'
-        # 注入 side 欄位：Rust 用 is_long，GUI 期望 side='Buy'/'Sell'
         for f in rust_fills:
             if isinstance(f, dict) and "side" not in f:
                 f["side"] = "Buy" if f.get("is_long") else "Sell"
-        capped = rust_fills[:min(limit, 200)]
+        capped = rust_fills[:capped_limit]
         return _paper_response({"fills": capped, "count": len(capped), "source": "rust_engine"})
     return _paper_response({"fills": [], "count": 0, "source": "rust_engine"})
 

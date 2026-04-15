@@ -74,11 +74,12 @@
       <span>累计收益趋势 / Cumulative PnL Trend</span>
       <span style="color:var(--text-dim);font-size:9px">（最近 50 笔成交 / last 50 fills）</span>
     </div>
-    <svg id="pnl-sparkline" width="100%" height="48"
+    <svg id="pnl-sparkline" width="100%" height="120"
       style="display:block;background:rgba(13,17,23,0.5);border-radius:6px;border:1px solid #21262d"
-      viewBox="0 0 400 48" preserveAspectRatio="none">
-      <polyline id="pnl-sparkline-line" points="" fill="none" stroke="var(--green)" stroke-width="1.5" stroke-linejoin="round"/>
-      <text x="4" y="42" fill="var(--text-dim)" font-size="8" id="pnl-sparkline-label">no data</text>
+      viewBox="0 0 400 120" preserveAspectRatio="none">
+      <line id="pnl-sparkline-zero" x1="8" x2="392" y1="60" y2="60" stroke="#30363d" stroke-width="0.5" stroke-dasharray="3,3"/>
+      <polyline id="pnl-sparkline-line" points="" fill="none" stroke="var(--green)" stroke-width="2" stroke-linejoin="round"/>
+      <text x="4" y="114" fill="var(--text-dim)" font-size="10" id="pnl-sparkline-label">no data</text>
     </svg>
   </div>
 </div>
@@ -120,8 +121,8 @@
   <div class="oc-collapse-body">
     <div class="oc-table-wrap">
       <table class="oc-table">
-        <thead><tr><th>时间</th><th>交易对</th><th>品类</th><th>方向</th><th>数量</th><th>价格</th><th>手续费</th></tr></thead>
-        <tbody id="fills-tbody"><tr class="empty-row"><td colspan="7">加载中...</td></tr></tbody>
+        <thead><tr><th>时间</th><th>交易对</th><th>品类</th><th>方向</th><th>数量</th><th>价格</th><th>手续费</th><th>盈亏 / PnL</th></tr></thead>
+        <tbody id="fills-tbody"><tr class="empty-row"><td colspan="8">加载中...</td></tr></tbody>
       </table>
     </div>
     <div class="oc-metrics" style="margin-top:8px">
@@ -479,10 +480,10 @@ async function loadFeed() {
 
 async function loadFills() {
   const d = await ocApi('/api/v1/paper/fills');
-  if (!d || !d.data) { ocSetHtml('fills-tbody', '<tr class="empty-row"><td colspan="7" style="color:var(--text-dim)">⚠ 连接失败 / Connection failed <button class="oc-btn" onclick="loadFills()" style="padding:2px 8px;font-size:10px;margin-left:8px">↺ 重试</button></td></tr>'); return; }
+  if (!d || !d.data) { ocSetHtml('fills-tbody', '<tr class="empty-row"><td colspan="8" style="color:var(--text-dim)">⚠ 连接失败 / Connection failed <button class="oc-btn" onclick="loadFills()" style="padding:2px 8px;font-size:10px;margin-left:8px">↺ 重试</button></td></tr>'); return; }
   const fills = d.data.fills || d.data || [];
   if (!fills.length) {
-    ocSetHtml('fills-tbody', '<tr class="empty-row"><td colspan="7">暂无成交</td></tr>');
+    ocSetHtml('fills-tbody', '<tr class="empty-row"><td colspan="8">暂无成交</td></tr>');
     return;
   }
   let html = '';
@@ -500,49 +501,13 @@ async function loadFills() {
     html += '<td>' + ocNum(f.qty, 4) + '</td>';
     html += '<td>' + ocNum(f.price, 2) + '</td>';
     html += '<td>' + ocNum(f.fee || 0, 6) + '</td>';
+    html += ocPnlCell(f.realized_pnl);
     html += '</tr>';
   });
   ocSetHtml('fills-tbody', html);
 
-  // Update PnL sparkline from fill PnL data / 从成交盈亏数据更新趋势迷你图
-  updatePnlSparkline(fills);
-}
-
-// ─── PnL Sparkline ────────────────────────────────────────────
-// Draws cumulative PnL trend as SVG polyline from fill data.
-// 从成交数据绘制累计盈亏趋势折线图（SVG polyline）。
-function updatePnlSparkline(fills) {
-  var lineEl = document.getElementById('pnl-sparkline-line');
-  var labelEl = document.getElementById('pnl-sparkline-label');
-  if (!lineEl || !fills || !fills.length) return;
-
-  // Build cumulative pnl series (most recent fills last)
-  // 构建累计盈亏序列（最新成交在右侧）
-  var sorted = fills.slice().reverse().slice(0, 50);
-  var cumulative = 0;
-  var series = sorted.map(function(f) {
-    cumulative += (f.realized_pnl || f.pnl || 0);
-    return cumulative;
-  });
-
-  if (series.length < 2) { labelEl.textContent = 'collecting data...'; return; }
-
-  var minV = Math.min.apply(null, series);
-  var maxV = Math.max.apply(null, series);
-  var range = maxV - minV || 1;
-  var W = 400, H = 48, pad = 4;
-
-  var points = series.map(function(v, i) {
-    var x = pad + (i / (series.length - 1)) * (W - pad * 2);
-    var y = H - pad - ((v - minV) / range) * (H - pad * 2);
-    return x.toFixed(1) + ',' + y.toFixed(1);
-  }).join(' ');
-
-  lineEl.setAttribute('points', points);
-  var last = series[series.length - 1];
-  lineEl.setAttribute('stroke', last >= 0 ? 'var(--green)' : 'var(--red)');
-  labelEl.textContent = (last >= 0 ? '+' : '') + last.toFixed(4) + ' USDT (' + series.length + ' fills)';
-  labelEl.setAttribute('fill', last >= 0 ? 'var(--green)' : 'var(--red)');
+  // Update PnL trend chart from fill PnL data / 从成交盈亏数据更新趋势图
+  ocPnlTrend('pnl-sparkline-line', 'pnl-sparkline-label', fills, 'pnl-sparkline-zero');
 }
 
 async function loadMetrics() {
