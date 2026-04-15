@@ -1,7 +1,44 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-04-15（EDGE-P3-1 Step 7d）
+> 最後更新：2026-04-15（ORPHAN-ADOPT-1 Phase 2A + EDGE-P3-1 Step 7e skeleton）
+
+### ORPHAN-ADOPT-1 Phase 2A — 確定性 Adopt 基礎設施（2026-04-15）
+
+**背景**：Phase 1（2026-04-14 merged）+ FUP 側車 mirror 解決了「偵測到但不動」與「引擎自殺」的 bug，但所有真正的外來 orphan 都走 Stage C `SoftConservative` close-everything 降級路徑。Phase 2 原本等 G-1 R-02 AI Strategist（W22-W23）。Phase 2A 是非 agentic sub-option：用既有 `edge_estimates` 表當「某策略會下這個幣種」的確定性代理 — 任一 `KNOWN_STRATEGY` 在 orphan 幣種 shrunk_bps > 0 即 Adopt。edge 正負僅是 per-symbol 指標，方向（long/short）保留交易所回報的原樣，StopManager 管下行。
+
+**交付**：
+- **Schema** — `PaperPosition.owner_strategy: String` 必選欄位。strategy-driven fills 寫 `intent.strategy`；`import_positions` + `upsert_position_from_exchange` insert 路徑寫 `"bybit_sync"`；`adopt_orphan` 寫 `ORPHAN_ADOPTED_STRATEGY = "orphan_adopted"`；update 路徑保留既有 owner（ma_crossover 收到 WS 更新不會被改回 bybit_sync）。`apply_fill` 加第 7 個 positional 參數 `owner_strategy: &str`，同向累加 first-write-wins。`#[serde(default)]` 讓 pre-2A snapshot 文件可載入。
+- **Stage B2 Adopt 決策** — 新 `OrphanStage::AdoptPositiveEdge` + `OrphanDecision::Adopt { reason, stage, triggering_strategy }`。`handle_orphan()` B1/B2 分支：任一 known strategy 在 `pos.symbol` 有 `shrunk_bps > 0` → Adopt，記下第一命中（per `KNOWN_STRATEGY_NAMES` 順序）為 `triggering_strategy`；否則 `unrealised_pnl > 0` → SoftLockProfit close；否則 Stage C 落入 SoftConservative close（原則 #6 保守優先）。Stage A（liq / CB / notional / scanner universe）嚴格先於 B，安全檢查永不讓步 Adopt。
+- **注入路徑** — 新 `PaperState::adopt_orphan(symbol, is_long, qty, entry_price, ts_ms) -> bool`：冪等 · 輸入守衛 · 預填 `latest_prices`（StopManager 立即有 tick）· 用 `positions_insert` helper 寫入（FUP 側車 mirror 自動更新）· 寫 `owner_strategy = ORPHAN_ADOPTED_STRATEGY`。新 `PipelineCommand::AdoptOrphan` fire-and-forget + `event_consumer/handlers.rs` 分派 arm（插入後 force_write snapshot）。新 `dispatch_orphan_adopt(decision, pos, cmd_tx)`（用 `pos.avg_price` 作 adopt entry_price，StopManager 從此點管下行）；與 `dispatch_orphan_close` 都拒錯誤 variant（warn + `return false`）。`position_reconciler/mod.rs:635` 分派分叉依 decision variant。
+- **Audit 擴展** — V014 JSONB payload 加 `owner_strategy`（Adopt=`"orphan_adopted"`/Close=null）+ `triggering_strategy`（Adopt=命中策略名/Close=null），下游分析可 join 歸因。
+- **測試** — lib 1285→1293 (+8)：5 `orphan_handler.rs`（long Adopt/short Adopt/無正 edge 落 SoftConservative/first-positive-edge wins deterministic/Stage A 優先於 B2）+ 3 `paper_state.rs`（insert + mirror + idempotent 保留 owner + 輸入守衛）。
+
+**測試總數**：lib **1285→1293**（+8）· core 372 · e2e 35 · **total 1692→1700 pass / 0 fail**。
+
+**Deploy**：`bash helper_scripts/restart_all.sh --rebuild`。Adopt 路徑在 `edge_estimates.json` 未 populated OR 無 `KNOWN_STRATEGY` 在 orphan 幣種有正 edge 時仍然 inert（退回 Phase 1 close-only）。
+
+**Phase 2B（未來）**：G-1 R-02 Strategist 在線後，Adopt 規則從「正 shrunk edge」升級為「Strategist would_take(symbol, side)」；`KNOWN_STRATEGY_NAMES` + `EdgeEstimates` probe 降為 fast-path short-circuit，Strategist 為 slow-path 最終裁定。
+
+---
+
+### EDGE-P3-1 Step 7e skeleton — `DisableEdgePredictorAll` 骨架（2026-04-15 · commit `97777d5`）
+
+**背景**：Step 7d 交付 `write_toml_atomic_fsynced` 耐久性證明；本 commit 是 Step 7e 的**骨架**（非完整兩階段 commit + audit），為了讓 Phase 2A 能獨立以清潔 commit 落地，把 Step 7e 的 wire-up 拆出來先行。完整兩階段 commit + V014 audit row 仍 FIXME，留待下一 Step 7e commit 完成。
+
+**骨架交付**（5 files +156 / -28）：
+- **`tick_pipeline/mod.rs`**：`PipelineCommand::DisableEdgePredictorAll` 從 `{response_tx}` 擴為 `{operator_token, reason, response_tx}`；U1 授權 envelope（Python proxy 填 per-session UUID，Rust 側 `len>=32` 檢查，未來 HMAC 驗證 hook）；`reason` = operator 填 free-text 審計原因。新增 `TickPipeline::risk_store()` getter。docstring 展開 Stage 1 TOML fsync → Stage 2 ArcSwap → Stage 3 clear_all + V014 audit 語義。
+- **`config/store.rs` + `config/mod.rs`**：`ConfigStore::persist_path() -> Option<&Path>` getter；`write_toml_atomic_fsynced` 從 `pub(crate)` 升 `pub` 並於 `config` 模組重新導出。
+- **`event_consumer/handlers.rs`**：新 `pub fn handle_disable_edge_predictor_all(operator_token, reason, response_tx, pipeline, _db_mode, _audit_pool)` 標準入口 — **當前行為是 pre-7e memory-only clear + len>=32 token 檢查**（FIXME 標記完整兩階段 commit + audit writeback 未接線）。共用 `disable_edge_predictor_all_impl` 讓 `handle_paper_command` 單元測試路徑與生產 dispatcher 路徑共享同一份邏輯源。
+- **`event_consumer/mod.rs`**：dispatcher 在 pipeline_cmd_rx 分支 match 截獲 `DisableEdgePredictorAll` 變體 → `handle_disable_edge_predictor_all(..)` 完整簽名呼叫；其餘變體走 `handle_paper_command`。
+
+**為何拆骨架**：原始 combined WIP 含 Phase 2A adopt + Step 7e 完整兩階段 + 3 新測試。為讓 Phase 2A 能以清潔 commit review，先把 Step 7e 的介面擴展 + getter + handler 入口拆成骨架 commit，完整兩階段邏輯與測試留給下一 commit（FIXME 明確標記）。
+
+**測試**：lib test count 不變 baseline（`test_disable_edge_predictor_all_clears_slots` 更新加 `operator_token`+`reason` 欄位後仍通過 memory-only fallback）。
+
+**下一步**：Step 7e 完成 commit = 填 `_db_mode`/`_audit_pool` 的 FIXME：Stage 1 `write_toml_atomic_fsynced(risk_config, persist_path)` fail-abort → Stage 2 `ConfigStore::apply_patch(Operator, ...)` → Stage 3 `EdgePredictorStore::clear_all()` → V014 `predictor_disabled_all` audit row（token sha256 + reason + cleared_slots + engine_mode，fire-and-forget `tokio::spawn`）+ 3 新回歸測試（reject short token / memory-only fallback / Stage 1 TOML 落盤）。
+
+---
 
 ### EDGE-P3-1 Step 7d — `write_toml_atomic_fsynced` SIGKILL durability 回歸（2026-04-15）
 

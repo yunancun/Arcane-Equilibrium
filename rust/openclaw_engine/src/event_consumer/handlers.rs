@@ -14,65 +14,203 @@
 use super::types::PendingOrder;
 use crate::persistence::DualStateWriter;
 use crate::tick_pipeline::{PipelineCommand, TickPipeline};
+use sha2::{Digest, Sha256};
 use std::collections::HashMap;
-use tracing::info;
+use tracing::{info, warn};
+
+/// EDGE-P3-1 Step 7e · sha256-hex of a raw operator token. The raw token is
+/// never stored or logged; only the digest lands in the V014 audit payload.
+/// EDGE-P3-1 Step 7e：operator_token 的 sha256-hex；原始 token 不入日誌。
+fn hash_operator_token(token: &str) -> String {
+    let mut h = Sha256::new();
+    h.update(token.as_bytes());
+    hex::encode(h.finalize())
+}
 
 /// EDGE-P3-1 Step 7e · Shared kill-switch body. Extracted so both the
 /// production event_consumer/mod.rs interception path AND the in-process
 /// `handle_paper_command` direct-dispatch path (used by unit tests) execute
 /// the same logic without duplication.
-/// EDGE-P3-1 Step 7e：共用 kill-switch 實作。mod.rs 攔截路徑與 handle_paper_command
-/// 直分派路徑（單元測試用）共用同一份邏輯。
+///
+/// Two-phase commit when `risk_store` is wired:
+///   Stage 1 — build next RiskConfig with `edge_predictor.use_edge_predictor=false`
+///             and `write_toml_atomic_fsynced()` it to disk. Disk-first
+///             fail-abort: if the write errors we touch nothing in memory,
+///             so the kill-switch is NOT silently lost across a crash.
+///   Stage 2 — `ConfigStore::apply_patch()` swaps the new config in via
+///             ArcSwap and bumps the version. Near-infallible (only poisoned
+///             lock). Note: apply_patch will re-persist via the non-fsynced
+///             writer on Operator source — redundant but harmless (same bytes).
+///   Stage 3 — `EdgePredictorStore::clear_all()` empties the in-memory ONNX
+///             slots. Even without Stage 1+2, this alone stops gate lookups
+///             until next restart.
+///
+/// When `risk_store` is `None` the handler degrades to memory-only clear
+/// (Stage 3 alone) and tags the audit row `persisted=false`.
+///
+/// V014 audit row fires forget-and-continue via `tokio::spawn`; only emitted
+/// when `audit_pool.is_some()`, so unit tests can pass `None` without a
+/// tokio runtime.
+///
+/// EDGE-P3-1 Step 7e：共用 kill-switch 實作。risk_store 已接線時為兩階段提交
+/// （Stage 1 fsync TOML → Stage 2 ArcSwap → Stage 3 clear_all）；未接線時降
+/// 級為 memory-only clear（Stage 3）。V014 審計 tokio::spawn fire-and-forget。
 fn disable_edge_predictor_all_impl(
     operator_token: &str,
     reason: &str,
     response_tx: tokio::sync::oneshot::Sender<Result<String, String>>,
     pipeline: &mut TickPipeline,
+    db_mode: &'static str,
+    audit_pool: Option<&sqlx::PgPool>,
 ) {
-    // FIXME(Step 7e): Full two-phase commit (TOML fsync → ArcSwap → clear_all)
-    // + observability.engine_events audit row not yet wired. Current handler
-    // matches pre-7e behaviour (in-memory clear only) plus a length-validated
-    // token check. See tick_pipeline/mod.rs docstring.
+    // U1 authz: length-only check today; HMAC verification hook for later.
+    // U1 授權：今日僅長度檢查，HMAC 驗證預留。
     if operator_token.len() < 32 {
         let _ = response_tx.send(Err(
             "operator_token too short (need >=32 chars) / operator_token 過短".into(),
         ));
         return;
     }
-    let result = match pipeline.edge_predictor_store() {
-        Some(store) => {
-            let n = store.clear_all();
-            info!(
-                cleared = n,
-                reason = %reason,
-                "EdgePredictor DisableAll / 已禁用所有預測器"
-            );
-            Ok(format!("cleared {} predictor slots", n))
+
+    let store = match pipeline.edge_predictor_store() {
+        Some(s) => s.clone(),
+        None => {
+            let _ = response_tx.send(Err(
+                "EdgePredictorStore not wired on this engine / 此引擎尚未注入 store".into(),
+            ));
+            return;
         }
-        None => Err(
-            "EdgePredictorStore not wired on this engine / 此引擎尚未注入 store".into(),
-        ),
     };
-    let _ = response_tx.send(result);
+
+    // ── Stage 1 + 2: persist `use_edge_predictor=false`, then ArcSwap ──
+    // Only when risk_store is wired. Absent store → memory-only fallback.
+    // Stage 1：risk_store 已接線時先落盤，失敗立即中止且不觸及記憶體。
+    let (persisted, persisted_version, stage2_err) = match pipeline.risk_store() {
+        Some(risk_store) => {
+            let persist_path = risk_store.persist_path().map(|p| p.to_path_buf());
+            // Pre-compute the full next config so Stage 1 writes exactly what
+            // Stage 2 will swap in. apply_patch repeats the mutation on its own
+            // owned clone under the write lock for all-or-nothing semantics.
+            // 預先計算 next：Stage 1 寫入的位元組 = Stage 2 即將 swap 的快照。
+            let current = risk_store.load();
+            let mut next = (*current).clone();
+            next.edge_predictor.use_edge_predictor = false;
+            if let Err(e) = next.validate() {
+                let _ = response_tx.send(Err(format!(
+                    "Stage 0 validate failed / 新配置驗證失敗: {e}"
+                )));
+                return;
+            }
+            // Stage 1: fsynced TOML write (disk-first fail-abort).
+            if let Some(path) = persist_path.as_deref() {
+                if let Err(e) =
+                    crate::config::write_toml_atomic_fsynced(&next, path)
+                {
+                    let _ = response_tx.send(Err(format!(
+                        "Stage 1 fsync write failed / Stage 1 fsync 寫入失敗: {e}"
+                    )));
+                    return;
+                }
+            }
+            // Stage 2: ArcSwap apply_patch. Near-infallible (only lock poison).
+            match risk_store.apply_patch(
+                crate::config::PatchSource::Operator,
+                |cfg| {
+                    cfg.edge_predictor.use_edge_predictor = false;
+                },
+                |cfg| cfg.validate(),
+            ) {
+                Ok(outcome) => (persist_path.is_some(), Some(outcome.version), None),
+                Err(e) => {
+                    // Disk already has the new value — surface the mismatch
+                    // clearly; next successful patch will re-align memory.
+                    // 磁碟已是新值：清楚提示記憶體未同步，下次 patch 會自動對齊。
+                    warn!(
+                        error = %e,
+                        "Stage 2 ArcSwap failed after Stage 1 persisted / Stage 1 已落盤但 Stage 2 ArcSwap 失敗"
+                    );
+                    (persist_path.is_some(), None, Some(e))
+                }
+            }
+        }
+        None => (false, None, None),
+    };
+
+    // ── Stage 3: memory-only clear of loaded ONNX slots ──
+    let cleared = store.clear_all();
+    info!(
+        cleared,
+        persisted,
+        persisted_version,
+        reason = %reason,
+        "EdgePredictor DisableAll / 已禁用所有預測器"
+    );
+
+    // ── V014 audit row (fire-and-forget) ──
+    if let Some(pool) = audit_pool {
+        let pool = pool.clone();
+        let token_hash = hash_operator_token(operator_token);
+        let reason_owned = reason.to_string();
+        let stage2_err_owned = stage2_err.clone();
+        tokio::spawn(async move {
+            let ts_ms = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis() as i64)
+                .unwrap_or(0);
+            let payload = serde_json::json!({
+                "operator_token_hash": token_hash,
+                "reason": reason_owned,
+                "cleared_slots": cleared,
+                "persisted": persisted,
+                "engine_mode": db_mode,
+                "stage2_error": stage2_err_owned,
+            });
+            let res = sqlx::query(
+                "INSERT INTO observability.engine_events \
+                 (ts_ms, event_type, source, config_name, old_version, new_version, payload) \
+                 VALUES ($1, 'predictor_disabled_all', 'operator', 'risk_config', NULL, $2, $3)",
+            )
+            .bind(ts_ms)
+            .bind(persisted_version.map(|v| v as i64))
+            .bind(&payload)
+            .execute(&pool)
+            .await;
+            if let Err(e) = res {
+                warn!(error = %e, "V014 predictor_disabled_all audit insert failed / 審計寫入失敗");
+            }
+        });
+    }
+
+    let msg = if persisted {
+        format!(
+            "cleared {} predictor slots; use_edge_predictor persisted=false",
+            cleared
+        )
+    } else {
+        format!("cleared {} predictor slots (memory-only)", cleared)
+    };
+    let _ = response_tx.send(Ok(msg));
 }
 
 /// EDGE-P3-1 Step 7e · Production entry point for the operator kill-switch,
-/// called from `event_consumer::mod.rs` after intercepting the variant. Accepts
-/// `db_mode` + `audit_pool` so the forthcoming two-phase commit + engine_events
-/// audit row have a home without another signature churn.
-/// EDGE-P3-1 Step 7e：mod.rs 攔截後的生產入口，預留 db_mode + audit_pool 以便
-/// 未來兩階段提交與 engine_events 審計行接入時無須再改簽名。
+/// called from `event_consumer::mod.rs` after intercepting the variant.
+/// EDGE-P3-1 Step 7e：mod.rs 攔截後的生產入口。
 pub fn handle_disable_edge_predictor_all(
     operator_token: String,
     reason: String,
     response_tx: tokio::sync::oneshot::Sender<Result<String, String>>,
     pipeline: &mut TickPipeline,
-    _db_mode: &'static str,
-    _audit_pool: Option<&sqlx::PgPool>,
+    db_mode: &'static str,
+    audit_pool: Option<&sqlx::PgPool>,
 ) {
-    // FIXME(Step 7e): _db_mode + _audit_pool will carry the audit writeback;
-    // today we delegate to the in-memory clear impl.
-    disable_edge_predictor_all_impl(&operator_token, &reason, response_tx, pipeline);
+    disable_edge_predictor_all_impl(
+        &operator_token,
+        &reason,
+        response_tx,
+        pipeline,
+        db_mode,
+        audit_pool,
+    );
 }
 
 /// Apply one PipelineCommand variant to the pipeline. Returns nothing —
@@ -646,12 +784,21 @@ pub fn handle_paper_command(
             reason,
             response_tx,
         } => {
-            // Production flow intercepts this variant in event_consumer/mod.rs and
-            // calls handle_disable_edge_predictor_all directly. This arm stays
-            // reachable only for unit-test direct dispatch; logic is shared.
-            // 生產路徑在 event_consumer/mod.rs 攔截此變體，直接呼叫
-            // handle_disable_edge_predictor_all；此分支僅供單元測試直接分派。
-            disable_edge_predictor_all_impl(&operator_token, &reason, response_tx, pipeline);
+            // Production flow intercepts this variant in event_consumer/mod.rs
+            // and calls handle_disable_edge_predictor_all with the live
+            // db_mode + audit_pool so the V014 row is attributed correctly.
+            // This arm stays reachable only for unit-test direct dispatch: we
+            // tag the audit mode "paper" and pass no pool (tests skip audit).
+            // 生產路徑在 mod.rs 攔截並傳入真實 db_mode/audit_pool；此分支
+            // 僅供單元測試 — 標 "paper" 且不傳 pool（避免需要 tokio 執行時）。
+            disable_edge_predictor_all_impl(
+                &operator_token,
+                &reason,
+                response_tx,
+                pipeline,
+                "paper",
+                None,
+            );
         }
         // EDGE-P3-1 Stage 0 · ε-greedy shadow-fill passthrough. DB write is
         // Step 7c (pending — same Option-B pattern as Step 7a). Today this
@@ -733,6 +880,35 @@ pub fn handle_paper_command(
                          / 決策特徵 IPC 收到但 writer 未接線（fail-soft 跳過）"
                     );
                 }
+            }
+        }
+        // ORPHAN-ADOPT-1 Phase 2A · Adopt an exchange-reported orphan position
+        // into paper_state. `paper_state.adopt_orphan` is idempotent; false
+        // means the adoption was a no-op (same-direction position already
+        // present) — safe to treat as success from the reconciler's POV
+        // since the side-car mirror will now reflect the tracked position.
+        // ORPHAN-ADOPT-1 Phase 2A · 接管交易所孤兒倉位至 paper_state；
+        // adopt_orphan 冪等，false 表同向已存在 — 對 reconciler 視角視同成功。
+        PipelineCommand::AdoptOrphan {
+            symbol,
+            is_long,
+            qty,
+            entry_price,
+            ts_ms,
+        } => {
+            let inserted = pipeline
+                .paper_state
+                .adopt_orphan(&symbol, is_long, qty, entry_price, ts_ms);
+            info!(
+                symbol = symbol.as_str(),
+                is_long,
+                qty,
+                entry_price,
+                inserted,
+                "IPC adopt_orphan / IPC 孤兒接管"
+            );
+            if inserted {
+                snapshot_writer.force_write(&pipeline.snapshot());
             }
         }
     }
@@ -1023,6 +1199,140 @@ mod tests {
         for s in ["ma_crossover", "bb_reversion", "grid_trading"] {
             assert!(store.load_for(s).is_none(), "slot {} still loaded", s);
         }
+    }
+
+    /// EDGE-P3-1 Step 7e · EN: operator_token shorter than 32 chars must
+    ///   fail-closed with an explanatory error; no memory/disk side effects.
+    /// EDGE-P3-1 Step 7e · 中文：operator_token < 32 必須 fail-closed，
+    ///   無記憶體或磁碟副作用。
+    #[test]
+    fn test_handle_disable_edge_predictor_all_rejects_short_token() {
+        use crate::edge_predictor::{EdgePredictorStore, null_backend::NullPredictor};
+
+        let mut pipeline = TickPipeline::new(&["BTCUSDT"]);
+        let store = std::sync::Arc::new(EdgePredictorStore::new());
+        let p: std::sync::Arc<dyn crate::edge_predictor::EdgePredictor + Send + Sync> =
+            std::sync::Arc::new(NullPredictor::new());
+        store.swap("ma_crossover", p);
+        pipeline.set_edge_predictor_store(std::sync::Arc::clone(&store));
+
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        super::handle_disable_edge_predictor_all(
+            "too-short".into(),
+            "unit test short-token".into(),
+            tx,
+            &mut pipeline,
+            "paper",
+            None,
+        );
+        let result = rx.blocking_recv().unwrap();
+        assert!(result.is_err(), "short token must be rejected");
+        let err = result.unwrap_err();
+        assert!(err.contains("too short"), "err msg: {}", err);
+        // Slot untouched on reject / 拒絕時槽位不應被清。
+        assert!(store.load_for("ma_crossover").is_some());
+    }
+
+    /// EDGE-P3-1 Step 7e · EN: when risk_store is NOT wired the handler
+    ///   degrades to memory-only clear and reports "memory-only" in the
+    ///   success message. No disk write attempted.
+    /// EDGE-P3-1 Step 7e · 中文：risk_store 未接線時降級為 memory-only clear，
+    ///   回應訊息含 "memory-only"；不嘗試寫磁碟。
+    #[test]
+    fn test_handle_disable_edge_predictor_all_memory_only_when_store_unwired() {
+        use crate::edge_predictor::{EdgePredictorStore, null_backend::NullPredictor};
+
+        let mut pipeline = TickPipeline::new(&["BTCUSDT"]);
+        let store = std::sync::Arc::new(EdgePredictorStore::new());
+        let p: std::sync::Arc<dyn crate::edge_predictor::EdgePredictor + Send + Sync> =
+            std::sync::Arc::new(NullPredictor::new());
+        store.swap("ma_crossover", p);
+        pipeline.set_edge_predictor_store(std::sync::Arc::clone(&store));
+        // Deliberately NOT calling pipeline.set_risk_store(...) so risk_store()
+        // stays None → handler hits memory-only branch.
+
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        super::handle_disable_edge_predictor_all(
+            "test-token-12345678901234567890abcdef".into(),
+            "unit test memory-only".into(),
+            tx,
+            &mut pipeline,
+            "paper",
+            None,
+        );
+        let result = rx.blocking_recv().unwrap();
+        assert!(result.is_ok(), "got {:?}", result);
+        let msg = result.unwrap();
+        assert!(
+            msg.contains("memory-only"),
+            "msg should flag memory-only: {}",
+            msg
+        );
+        assert!(store.load_for("ma_crossover").is_none());
+    }
+
+    /// EDGE-P3-1 Step 7e · EN: with a wired risk_store backed by a real TOML
+    ///   persist path, Stage 1 must write `use_edge_predictor = false` to disk
+    ///   and Stage 2 must bump the in-memory flag to false (ArcSwap).
+    /// EDGE-P3-1 Step 7e · 中文：接線 risk_store + TOML 回寫路徑，Stage 1 必須
+    ///   把 use_edge_predictor = false 寫入磁碟；Stage 2 記憶體內旗標也必須翻 false。
+    #[test]
+    fn test_handle_disable_edge_predictor_all_writes_toml_stage1() {
+        use crate::config::{ConfigStore, RiskConfig};
+        use crate::edge_predictor::{EdgePredictorStore, null_backend::NullPredictor};
+
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("risk.toml");
+
+        // Start with use_edge_predictor=true so the test exercises an actual
+        // flip. RiskConfig::default() has use=false, so patch the default up.
+        // 以 true 起步，確保測試驗證真正的翻轉（預設為 false）。
+        let mut cfg = RiskConfig::default();
+        cfg.edge_predictor.use_edge_predictor = true;
+        cfg.validate().expect("baseline must validate");
+        let risk_store = std::sync::Arc::new(
+            ConfigStore::new(cfg).with_toml_persist(path.clone()),
+        );
+
+        let mut pipeline = TickPipeline::new(&["BTCUSDT"]);
+        pipeline.set_risk_store(std::sync::Arc::clone(&risk_store));
+        let pred_store = std::sync::Arc::new(EdgePredictorStore::new());
+        let p: std::sync::Arc<dyn crate::edge_predictor::EdgePredictor + Send + Sync> =
+            std::sync::Arc::new(NullPredictor::new());
+        pred_store.swap("ma_crossover", p);
+        pipeline.set_edge_predictor_store(std::sync::Arc::clone(&pred_store));
+
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        super::handle_disable_edge_predictor_all(
+            "test-token-12345678901234567890abcdef".into(),
+            "unit test stage1 toml".into(),
+            tx,
+            &mut pipeline,
+            "paper",
+            None, // no audit pool → test needs no tokio runtime
+        );
+        let result = rx.blocking_recv().unwrap();
+        assert!(result.is_ok(), "got {:?}", result);
+        let msg = result.unwrap();
+        assert!(msg.contains("persisted=false"), "msg: {}", msg);
+
+        // Stage 1 proof: disk contains the new flag.
+        let body = std::fs::read_to_string(&path).expect("toml file written");
+        assert!(
+            body.contains("use_edge_predictor = false"),
+            "TOML missing flipped flag:\n{}",
+            body
+        );
+
+        // Stage 2 proof: in-memory snapshot reflects the flip.
+        let in_mem = risk_store.load();
+        assert!(
+            !in_mem.edge_predictor.use_edge_predictor,
+            "ArcSwap still reads stale true"
+        );
+
+        // Stage 3 proof: predictor slots are cleared.
+        assert!(pred_store.load_for("ma_crossover").is_none());
     }
 
     // ═══════════════════════════════════════════════════════════════════

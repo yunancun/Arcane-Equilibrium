@@ -179,21 +179,29 @@
       - ⬜ **Step 7b** `ReloadEdgePredictor{engine, strategy, path}` IPC + Python route（資料面，沿用 `ReloadRiskConfig` 授權）
       - ⬜ **Step 7c** `EmitShadowFill` Python consumer → `learning.decision_shadow_fills`（DB CHECK `engine_mode='paper'`）
       - ✅ **Step 7d** `write_toml_atomic_fsynced()` helper + `test_write_toml_atomic_fsynced_survives_sigkill`（T23 CC #13）：helper 本體 pre-existing（`config/store.rs:261-291`，tmp fsync → rename → 父目錄 fsync），本 step 補齊耐久性證明 — `current_exe()` 自我 spawn + env-var 閘控 child 分支（寫 TOML + 觸發 marker → idle loop），parent 等 marker → `Child::kill()` (SIGKILL unix) → `wait()` → 讀檔驗 `use_edge_predictor=false`/`shadow_mode=false` 皆落盤 + 驗 `.toml.tmp` 伴隨檔 rename 後消失。`#[cfg(unix)]` 閘控（Windows 無 SIGKILL 語義，部署目標 linux+macOS 皆 unix）。lib 1285→1286（+1 T23）
-      - ⬜ **Step 7e** `DisableEdgePredictorAll` 兩階段 commit（U4）+ V014 `observability.engine_events` audit row
+      - 🟡 **Step 7e skeleton** `DisableEdgePredictorAll` 骨架 ✅ (commit `97777d5`) — `PipelineCommand::DisableEdgePredictorAll` 擴 `operator_token` (U1 len≥32) + `reason` 欄位；新增 `ConfigStore::persist_path()` getter + `TickPipeline::risk_store()` getter；`config::write_toml_atomic_fsynced` 重新導出；新 `handle_disable_edge_predictor_all(operator_token, reason, response_tx, pipeline, db_mode, audit_pool)` 標準入口（`event_consumer::run_event_consumer` 在 dispatcher 截獲該變體路由至新函式，其餘仍走 `handle_paper_command`）；共用 `disable_edge_predictor_all_impl` 讓 handle_paper_command 單元測試路徑與生產路徑同一份邏輯源。**當前語義仍為 pre-7e memory-only clear + token 長度檢查**，完整兩階段 commit（Stage 1 TOML fsync → Stage 2 ArcSwap → Stage 3 clear_all）+ V014 `predictor_disabled_all` audit row（`token_hash` sha256 + `reason` + `cleared_slots` + `engine_mode`，fire-and-forget `tokio::spawn`）+ 對應 3 新測試（T-reject token/T-memory-only/T-stage1 TOML 落盤）留 FIXME 於下一 commit 填完。
+      - ⬜ **Step 7e 完成** 兩階段 commit + V014 audit row + 3 新測試（FIXME 待補）
       - ⬜ **Step 7f** `GET /api/v1/engine/capabilities` endpoint
     - **CC** (#28) → 13 項必查（v1.3 CC clist）+ T1-T22 regression（`edge_predictor_tests.rs` 0/22 已寫；blocked by Stage 2 artifact for T2/T7/T18）
   - **安全門檻**（不可違背）：Shadow ≥14d（#29）· pinball loss 對比常數模型 >10% 才 promote · Feature freeze time = entry 瞬間 · Per-strategy 獨立模型 · 推理失敗 fail-closed → 回退現有 shrinkage · 不觸 LinUCB · 兩階段提交防 half-enabled · macOS CI `aarch64-apple-darwin`（M1/M2/M3/M4 → M5 Ultra/Max 部署目標，見 memory `project_mac_deployment_target.md`）
   - **Stage 0 收尾前 housekeeping**（Round-4 YELLOW-nit，非阻塞）：§7.1 加 ort macOS dylib bundling 提醒 ✅（已入 audit）· CC #13 加 strace Linux-only 註記
-  - **狀態**：🟢 Stage 0 + Phase A COMPLETE · Phase B 3/5 完成（#1 bootstrap ✅ + #2 backend 選型 ✅ + #5 pipeline_cmd_tx wire ✅）· PA `parquet_etl.py` 擴展 ✅（#63 `load_training_data` + `EDGE_P3_FEATURE_NAMES` 凍結 + DuckDB export 逃生艙）· **Step 7a `DecisionFeatureSnapshot` ✅ (commit `d73addb`)** · **Step 7d `write_toml_atomic_fsynced` T23 SIGKILL 回歸 ✅** · Step 7 IPC 餘 4 條（7b/7c/7e/7f）可獨立前推 · Stage 2+ 現唯一 blocker = ML-MIT 首 ONNX artifact 訓練
+  - **狀態**：🟢 Stage 0 + Phase A COMPLETE · Phase B 3/5 完成（#1 bootstrap ✅ + #2 backend 選型 ✅ + #5 pipeline_cmd_tx wire ✅）· PA `parquet_etl.py` 擴展 ✅（#63 `load_training_data` + `EDGE_P3_FEATURE_NAMES` 凍結 + DuckDB export 逃生艙）· **Step 7a `DecisionFeatureSnapshot` ✅ (commit `d73addb`)** · **Step 7d `write_toml_atomic_fsynced` T23 SIGKILL 回歸 ✅** · **Step 7e skeleton ✅ (commit `97777d5`)**（兩階段 commit 完成 + audit row 仍 FIXME）· Step 7 IPC 餘 4 條（7b/7c/7e-完成/7f）可獨立前推 · Stage 2+ 現唯一 blocker = ML-MIT 首 ONNX artifact 訓練
   - **頭號瓶頸**：ML-MIT #26 — 跑 quantile LGBM + CQR + CPCV + isotonic 產出首個 per-strategy ONNX（unblock AI-E #3 model loader + CC T2/T7/T18 + Stage 3 Shadow mode）
-  - **次要瓶頸**：AI-E Step 7b/7c/7e/7f 進度為 0，但不 blocked — 可獨立拆分為 4 個獨立 session 工作項
+  - **次要瓶頸**：AI-E Step 7b/7c/7e-完成/7f 進度為 0，但不 blocked — 可獨立拆分為 4 個獨立 session 工作項
 
 ### Phase 6 擴展
 
-- [ ] **ORPHAN-ADOPT-1 Phase 2** — 真正 Adopt 路徑
-  - 前置：Strategist/Guardian AI agent 在線 ✅ + StopManager adopt 接口 + 合成 StrategyId 規約
-  - 實作：Stage B2/B3 策略信號匹配 → 合成 `StrategyId` → 原子三件事（注入 `position_map` + 綁 hard/trailing stop + 寫 `ORPHAN_ADOPTED` audit）→ 任一失敗降級 Close
-  - Phase 1 已預留 `OrphanDecision::Adopt` enum variant + `OrphanStage::SoftAdoptEligible` 分支，Phase 2 改 dispatch 即可
+- [x] **ORPHAN-ADOPT-1 Phase 2A** — 確定性 Adopt 基礎設施（deterministic, non-agentic）✅
+  - `PaperPosition.owner_strategy` 必選欄位（`ma_crossover` / `bb_reversion` / … / `bybit_sync` / `orphan_adopted`）+ `apply_fill` 7-arg 簽名（first-write-wins 保留原所有者）
+  - `OrphanStage::AdoptPositiveEdge` + `OrphanDecision::Adopt { reason, stage, triggering_strategy }`：Stage B2 規則 = 任一 `KNOWN_STRATEGY` 在 orphan.symbol 上 `shrunk_bps > 0` 即 Adopt（第一命中 per `KNOWN_STRATEGY_NAMES` 順序，決定性）
+  - `PaperState::adopt_orphan(symbol, is_long, qty, entry_price, ts_ms) -> bool`（冪等 + 輸入守衛 + `latest_prices` 預設 + `positions_insert` 同步 FUP 側車 mirror）
+  - `PipelineCommand::AdoptOrphan` fire-and-forget + `event_consumer::handlers` 分派 + `dispatch_orphan_adopt`（`pos.avg_price` 作 StopManager 參考 entry_price）
+  - V014 audit payload 擴 `owner_strategy` + `triggering_strategy`（Adopt 寫 edge 命中策略名、Close 寫 null）
+  - 測試 +8：5 orphan_handler（long/short/無正 edge fall-through/deterministic first-wins/Stage A 優先）+ 3 paper_state（insert/idempotent/輸入守衛）
+  - lib 1285→1293 (+8)，total Rust 1692→1700
+- [ ] **ORPHAN-ADOPT-1 Phase 2B** — Strategist 判斷同向信號升級
+  - 前置：G-1 R-02 Strategist agent 在線（W22-W23）
+  - 把 B2 規則從「正 edge」升級為「Strategist 現時 would_take(symbol, side)」；`KNOWN_STRATEGY_NAMES` + `EdgeEstimates` probe 降為 fast-path，Strategist 為 slow-path 最終仲裁
 
 ### AI Agent 全 5 鏈路
 

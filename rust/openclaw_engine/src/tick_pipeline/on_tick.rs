@@ -802,6 +802,7 @@ impl TickPipeline {
                                 fill.fill_price,
                                 fill.fee,
                                 event.ts_ms,
+                                &intent.strategy,
                             );
                             // EDGE-P3-1 R2: stamp entry_context_id for fresh opens only.
                             // Uses the same make_context_id signature used below for the

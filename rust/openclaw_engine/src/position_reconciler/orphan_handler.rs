@@ -72,8 +72,20 @@ pub const KNOWN_STRATEGY_NAMES: &[&str] = &[
     "funding_arb",
 ];
 
-/// Stage that drove the decision (for audit). Phase 1 never emits Adopt.
-/// 決策來源階段（用於 audit）。Phase 1 永不輸出 Adopt。
+/// ORPHAN-ADOPT-1 Phase 2A: strategy label written to `PaperPosition.owner_strategy`
+/// for positions adopted from external orphan detection. Intentionally NOT in
+/// `KNOWN_STRATEGY_NAMES` — B1/B2 edge probes skip it, preventing self-reference
+/// on an already-adopted position (which has no independent edge estimate anyway).
+/// ORPHAN-ADOPT-1 Phase 2A：外部孤兒 adopt 後寫入 PaperPosition.owner_strategy 的
+/// 合成策略標籤。刻意不加入 KNOWN_STRATEGY_NAMES，避免 B1/B2 edge 掃描對已 adopt
+/// 倉位自我引用（它本身並沒有獨立 edge 樣本）。
+pub const ORPHAN_ADOPTED_STRATEGY: &str = "orphan_adopted";
+
+/// Stage that drove the decision (for audit). Phase 2A emits Adopt via `AdoptPositiveEdge`.
+/// `AdoptDeferredPhase2` retained as a dead-but-reserved taxonomy for back-compat with
+/// external analytics that previously consumed the Phase 1 audit events.
+/// 決策來源階段（用於 audit）。Phase 2A 透過 AdoptPositiveEdge 輸出 Adopt。
+/// AdoptDeferredPhase2 保留為 dead 變體以相容舊的 audit 分類。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OrphanStage {
     HardSafetyLiqClose,
@@ -83,6 +95,9 @@ pub enum OrphanStage {
     SoftLockProfit,
     SoftConservative,
     AdoptDeferredPhase2,
+    /// Phase 2A: at least one known strategy has positive shrunk edge on symbol.
+    /// Phase 2A：至少一個已知策略在此 symbol 有正 shrunk edge。
+    AdoptPositiveEdge,
 }
 
 impl OrphanStage {
@@ -95,6 +110,7 @@ impl OrphanStage {
             OrphanStage::SoftLockProfit => "soft_lock_profit",
             OrphanStage::SoftConservative => "soft_conservative",
             OrphanStage::AdoptDeferredPhase2 => "adopt_deferred_phase2",
+            OrphanStage::AdoptPositiveEdge => "adopt_positive_edge",
         }
     }
 }
@@ -106,10 +122,19 @@ pub enum OrphanDecision {
     /// Dispatch CloseSymbol to the tick_pipeline; target reduce_only market.
     /// 向 tick_pipeline 發送 CloseSymbol；目標 reduce_only 市價平倉。
     Close { reason: String, stage: OrphanStage },
-    /// Phase 2 only — reserved variant. Phase 1 never returns this.
-    /// Phase 2 才會使用的保留變體。Phase 1 不會返回。
-    #[allow(dead_code)]
-    Adopt { reason: String },
+    /// Phase 2A: dispatch AdoptOrphan to inject the exchange-reported position
+    /// into PaperState as `owner_strategy = "orphan_adopted"`. Stage guarantees
+    /// at least one known strategy has positive shrunk edge on the symbol;
+    /// `triggering_strategy` captures which one, so downstream analytics can
+    /// attribute adopted PnL back to the edge that authorised the adoption
+    /// without parsing `reason` text.
+    /// Phase 2A：分發 AdoptOrphan，注入 PaperState（owner_strategy="orphan_adopted"）。
+    /// triggering_strategy 紀錄觸發正邊際的策略名，供下游 PnL 歸因使用。
+    Adopt {
+        reason: String,
+        stage: OrphanStage,
+        triggering_strategy: String,
+    },
 }
 
 /// Per-cycle context for a single orphan decision.
@@ -209,20 +234,43 @@ pub fn handle_orphan(ctx: &OrphanContext) -> OrphanDecision {
         };
     }
 
-    // ── Stage B1: edge-based lock-profit close ────────────────────────────
-    // Phase 1 proxy for "no strategy wants this orphan": check if ANY known
-    // strategy has positive shrunk edge on this symbol. If NONE do AND we're
-    // currently in profit, lock it.
-    // Phase 1 代理：檢查是否任一已知策略在該幣種有正 shrunk 邊際。若全部無正邊際
-    // 且當前為正盈利 → 鎖利。
+    // ── Stage B: edge-based branch (Phase 2A)─────────────────────────────
+    // B2 (Phase 2A): if ANY known strategy has positive shrunk edge on this
+    //   symbol → Adopt. Edge is a per-symbol metric, NOT a directional
+    //   signal — exchange-reported side is preserved. Once injected into
+    //   PaperState, StopManager bounds downside (global StopConfig applies).
+    // B1 (legacy lock-profit): if no strategy has positive edge AND position
+    //   is currently in profit → close to lock unrealised PnL. Falls through
+    //   to Stage C only when unprofitable with no positive-edge strategy.
+    // B2（Phase 2A）：任一已知策略在此 symbol 有正 shrunk edge → Adopt。
+    //   邊際是 per-symbol 指標（非方向訊號），保留交易所回報方向；注入
+    //   PaperState 後由 StopManager 接管下行風險（全局 StopConfig 套用）。
+    // B1（既有鎖利）：全部無正邊際且當前正盈利 → 鎖利平倉。無正邊際且虧損
+    //   時才落到 Stage C 保守處理。
     if ctx.edge_estimates.is_populated() {
-        let any_positive = KNOWN_STRATEGY_NAMES.iter().any(|strat| {
+        let winning = KNOWN_STRATEGY_NAMES.iter().find(|strat| {
             ctx.edge_estimates
                 .get(strat, &pos.symbol)
                 .map(|bps| bps > 0.0)
                 .unwrap_or(false)
         });
-        if !any_positive && pos.unrealised_pnl > 0.0 {
+        if let Some(strat) = winning {
+            // Safe: predicate above already proved Some(bps) && bps > 0.0.
+            // 安全：上面謂詞已確認 Some(bps) && bps > 0.0。
+            let bps = ctx
+                .edge_estimates
+                .get(strat, &pos.symbol)
+                .unwrap_or(0.0);
+            return OrphanDecision::Adopt {
+                reason: format!(
+                    "positive-edge strategy {} on {} shrunk_bps={:.2}; adopting exchange position",
+                    strat, pos.symbol, bps
+                ),
+                stage: OrphanStage::AdoptPositiveEdge,
+                triggering_strategy: (*strat).to_string(),
+            };
+        }
+        if pos.unrealised_pnl > 0.0 {
             return OrphanDecision::Close {
                 reason: format!(
                     "no positive-edge strategy on {}; locking unrealised pnl={:.4}",
@@ -233,14 +281,13 @@ pub fn handle_orphan(ctx: &OrphanContext) -> OrphanDecision {
         }
     }
 
-    // ── Stage C: adopt deferred → conservative close (Phase 1 default) ────
-    // Real adopt requires synthetic StrategyId + paper_state injection +
-    // StopManager binding + Strategist agent (G-1 R-02). All absent in Phase 1.
-    // 真 Adopt 需 synthetic StrategyId + paper_state 注入 + StopManager 綁定 +
-    // Strategist agent (G-1 R-02)。Phase 1 全未具備 → 保守平倉。
+    // ── Stage C: conservative close (unprofitable / no edge data) ─────────
+    // No positive-edge strategy AND position not profitable (or edge table
+    // empty). 原則 #6 失敗默認收縮 → SoftConservative close.
+    // 無正邊際且未盈利（或 edge 表未填充）→ 原則 #6 失敗默認收縮 → 保守平倉。
     OrphanDecision::Close {
         reason: format!(
-            "ambiguous orphan {}|{} qty={} (Phase 2 adopt path deferred; conservative close per 原則 #6)",
+            "ambiguous orphan {}|{} qty={} (no positive-edge strategy & not in profit; conservative close per 原則 #6)",
             pos.symbol, pos.side, pos.size
         ),
         stage: OrphanStage::SoftConservative,
@@ -258,7 +305,20 @@ pub fn dispatch_orphan_close(
 ) -> bool {
     let (reason, stage_str) = match decision {
         OrphanDecision::Close { reason, stage } => (reason.clone(), stage.as_str()),
-        OrphanDecision::Adopt { reason } => (reason.clone(), "adopt_phase2"),
+        // Adopt decisions must go through `dispatch_orphan_adopt` (T4).
+        // Returning false here (not Err) lets the caller drop the verdict
+        // cleanly rather than re-closing the position by mistake.
+        // Adopt 決策必須走 dispatch_orphan_adopt（T4）。此處回 false（非 Err）
+        // 讓呼叫端乾淨捨棄 verdict，避免誤平倉。
+        OrphanDecision::Adopt { reason, stage, .. } => {
+            warn!(
+                symbol = %pos.symbol,
+                stage = stage.as_str(),
+                reason = %reason,
+                "dispatch_orphan_close invoked with Adopt decision — routing mismatch / dispatch_orphan_close 收到 Adopt 決策（路由錯誤）"
+            );
+            return false;
+        }
     };
     let hint_is_long = Some(pos.side == "Buy");
     let hint_qty = Some(pos.size);
@@ -290,6 +350,70 @@ pub fn dispatch_orphan_close(
     }
 }
 
+/// ORPHAN-ADOPT-1 Phase 2A: dispatch `PipelineCommand::AdoptOrphan` so the
+/// event_consumer injects the exchange-reported orphan into `paper_state`
+/// as `owner_strategy = "orphan_adopted"`. Caller must have already resolved
+/// the decision to `OrphanDecision::Adopt`; non-Adopt decisions return false
+/// without touching the channel.
+/// Uses `pos.avg_price` as the entry_price (Bybit's per-position average cost)
+/// — adopt must not fabricate a synthetic entry; StopManager uses this as the
+/// reference for trailing / hard-stop calculations.
+/// ORPHAN-ADOPT-1 Phase 2A：派發 PipelineCommand::AdoptOrphan，讓 event_consumer
+/// 將交易所孤兒注入 paper_state（owner_strategy="orphan_adopted"）。entry_price
+/// 取 pos.avg_price（Bybit 每倉平均成本）— 不得偽造合成進場價。
+pub fn dispatch_orphan_adopt(
+    decision: &OrphanDecision,
+    pos: &PositionInfo,
+    cmd_tx: &UnboundedSender<PipelineCommand>,
+) -> bool {
+    let (reason, stage_str) = match decision {
+        OrphanDecision::Adopt { reason, stage, .. } => (reason.clone(), stage.as_str()),
+        OrphanDecision::Close { reason, stage } => {
+            warn!(
+                symbol = %pos.symbol,
+                stage = stage.as_str(),
+                reason = %reason,
+                "dispatch_orphan_adopt invoked with Close decision — routing mismatch / dispatch_orphan_adopt 收到 Close 決策（路由錯誤）"
+            );
+            return false;
+        }
+    };
+    let is_long = pos.side == "Buy";
+    let ts_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0);
+    match cmd_tx.send(PipelineCommand::AdoptOrphan {
+        symbol: pos.symbol.clone(),
+        is_long,
+        qty: pos.size,
+        entry_price: pos.avg_price,
+        ts_ms,
+    }) {
+        Ok(_) => {
+            info!(
+                symbol = %pos.symbol,
+                side = %pos.side,
+                qty = pos.size,
+                entry = pos.avg_price,
+                stage = stage_str,
+                reason = %reason,
+                "orphan_handled adopt dispatched / 孤兒處理→接管已發送"
+            );
+            true
+        }
+        Err(e) => {
+            warn!(
+                error = %e,
+                symbol = %pos.symbol,
+                stage = stage_str,
+                "failed to dispatch orphan adopt / 孤兒接管發送失敗"
+            );
+            false
+        }
+    }
+}
+
 /// Fire-and-forget audit row for orphan_handled events.
 /// orphan_handled 事件的 V014 審計（fire-and-forget）。
 pub fn spawn_orphan_audit(
@@ -299,9 +423,25 @@ pub fn spawn_orphan_audit(
     engine_label: &str,
 ) {
     let Some(pool) = audit_pool.clone() else { return };
-    let (action_str, stage_str, reason) = match decision {
-        OrphanDecision::Close { reason, stage } => ("close", stage.as_str(), reason.clone()),
-        OrphanDecision::Adopt { reason } => ("adopt", "phase2", reason.clone()),
+    // ORPHAN-ADOPT-1 Phase 2A audit schema:
+    //   owner_strategy      — label written to PaperPosition.owner_strategy.
+    //                         Some("orphan_adopted") for Adopt, None for Close.
+    //   triggering_strategy — positive-edge strategy that authorised the Adopt
+    //                         (downstream PnL attribution). None for Close.
+    // ORPHAN-ADOPT-1 Phase 2A audit 欄位：
+    //   owner_strategy → PaperPosition.owner_strategy 標籤（Adopt 時為 "orphan_adopted"）
+    //   triggering_strategy → 授權 adopt 的正邊際策略（Close 為 null）
+    let (action_str, stage_str, reason, owner_strategy, triggering_strategy) = match decision {
+        OrphanDecision::Close { reason, stage } => {
+            ("close", stage.as_str(), reason.clone(), None, None)
+        }
+        OrphanDecision::Adopt { reason, stage, triggering_strategy } => (
+            "adopt",
+            stage.as_str(),
+            reason.clone(),
+            Some(ORPHAN_ADOPTED_STRATEGY),
+            Some(triggering_strategy.clone()),
+        ),
     };
     let payload = serde_json::json!({
         "action": action_str,
@@ -314,6 +454,8 @@ pub fn spawn_orphan_audit(
         "unrealised_pnl": pos.unrealised_pnl,
         "reason": reason,
         "engine": engine_label,
+        "owner_strategy": owner_strategy,
+        "triggering_strategy": triggering_strategy,
     });
     let engine_owned = engine_label.to_string();
     let ts_ms = std::time::SystemTime::now()
@@ -583,10 +725,17 @@ mod tests {
         }
     }
 
-    /// Stage B1: at least one positive edge → do NOT trigger lock-profit.
-    /// Stage B1：至少一個正邊際 → 不觸發鎖利。
+    // ════════════════════════════════════════════════════════════════════════
+    // ORPHAN-ADOPT-1 Phase 2A test matrix / Phase 2A 測試矩陣
+    // ════════════════════════════════════════════════════════════════════════
+
+    /// Phase 2A #1: Buy-side orphan + ma_crossover positive edge → Adopt.
+    /// Triggering strategy is captured; stage is `AdoptPositiveEdge`; direction
+    /// is inherited from the exchange-reported side (Buy → is_long would be true).
+    /// Phase 2A #1：Buy 孤兒 + 正邊際 → Adopt；保留交易所方向；
+    /// triggering_strategy 紀錄為 ma_crossover。
     #[test]
-    fn stage_b1_positive_edge_skips_lock_profit() {
+    fn stage_b2_positive_edge_adopts_long() {
         let pos = make_pos("BTCUSDT", "Buy", 0.01, 100.0, 80.0, 5.0);
         let json = r#"{
             "_meta": {"grand_mean_bps": 0.0},
@@ -602,11 +751,133 @@ mod tests {
             edge_estimates: &ee,
         };
         let decision = handle_orphan(&ctx);
-        // Falls through to SoftConservative (no adopt infrastructure yet).
-        // 穿過到 SoftConservative（尚無 adopt 基建）。
+        match decision {
+            OrphanDecision::Adopt { stage, triggering_strategy, .. } => {
+                assert_eq!(stage, OrphanStage::AdoptPositiveEdge);
+                assert_eq!(triggering_strategy, "ma_crossover");
+            }
+            other => panic!("expected Adopt(AdoptPositiveEdge), got {:?}", other),
+        }
+    }
+
+    /// Phase 2A #2: Sell-side orphan + positive edge → Adopt (same decision,
+    /// edge sign ≠ direction; edge is a per-symbol strategy metric).
+    /// Phase 2A #2：Sell 孤兒 + 正邊際 → Adopt（邊際是 per-symbol 指標，非方向訊號）。
+    #[test]
+    fn stage_b2_positive_edge_adopts_short() {
+        let pos = make_pos("BTCUSDT", "Sell", 0.01, 100.0, 120.0, 5.0);
+        let json = r#"{
+            "_meta": {"grand_mean_bps": 0.0},
+            "bb_reversion::BTCUSDT": {"shrunk_bps": 4.2, "n": 100}
+        }"#;
+        let ee = EdgeEstimates::load_from_str(json).unwrap();
+        let active: Vec<String> = vec!["BTCUSDT".into()];
+        let ctx = OrphanContext {
+            pos_info: &pos,
+            current_level: RiskLevel::Normal,
+            max_order_notional_usdt: 0.0,
+            active_symbols: &active,
+            edge_estimates: &ee,
+        };
+        let decision = handle_orphan(&ctx);
+        match decision {
+            OrphanDecision::Adopt { stage, triggering_strategy, .. } => {
+                assert_eq!(stage, OrphanStage::AdoptPositiveEdge);
+                assert_eq!(triggering_strategy, "bb_reversion");
+            }
+            other => panic!("expected Adopt(AdoptPositiveEdge), got {:?}", other),
+        }
+    }
+
+    /// Phase 2A #3: Multiple strategies populated but NONE with positive edge
+    /// AND position is losing → falls through to SoftConservative (not Adopt,
+    /// not lock-profit). Proves B2 is strictly-greater-than-zero gated.
+    /// Phase 2A #3：多策略都無正邊際且虧損 → 落到 SoftConservative
+    /// （非 Adopt 也非 lock-profit）。驗證 B2 嚴格 > 0。
+    #[test]
+    fn stage_b2_no_positive_edge_losing_falls_through() {
+        let pos = make_pos("BTCUSDT", "Buy", 0.01, 100.0, 80.0, -3.0);
+        let json = r#"{
+            "_meta": {"grand_mean_bps": 0.0},
+            "ma_crossover::BTCUSDT": {"shrunk_bps": -2.5, "n": 50},
+            "bb_reversion::BTCUSDT": {"shrunk_bps": 0.0, "n": 30}
+        }"#;
+        let ee = EdgeEstimates::load_from_str(json).unwrap();
+        let active: Vec<String> = vec!["BTCUSDT".into()];
+        let ctx = OrphanContext {
+            pos_info: &pos,
+            current_level: RiskLevel::Normal,
+            max_order_notional_usdt: 0.0,
+            active_symbols: &active,
+            edge_estimates: &ee,
+        };
+        let decision = handle_orphan(&ctx);
         match decision {
             OrphanDecision::Close { stage, .. } => assert_eq!(stage, OrphanStage::SoftConservative),
             other => panic!("expected SoftConservative, got {:?}", other),
+        }
+    }
+
+    /// Phase 2A #4: Multiple positive-edge strategies → first found (per
+    /// `KNOWN_STRATEGY_NAMES` order) wins. Guarantees deterministic
+    /// triggering_strategy selection so downstream attribution is stable.
+    /// Phase 2A #4：多策略皆正邊際 → 按 KNOWN_STRATEGY_NAMES 順序取第一個，
+    /// 確保 triggering_strategy 選擇具有決定性。
+    #[test]
+    fn stage_b2_first_positive_edge_wins() {
+        let pos = make_pos("BTCUSDT", "Buy", 0.01, 100.0, 80.0, 0.0);
+        let json = r#"{
+            "_meta": {"grand_mean_bps": 0.0},
+            "bb_reversion::BTCUSDT": {"shrunk_bps": 7.0, "n": 100},
+            "ma_crossover::BTCUSDT": {"shrunk_bps": 3.0, "n": 50},
+            "grid_trading::BTCUSDT": {"shrunk_bps": 5.0, "n": 40}
+        }"#;
+        let ee = EdgeEstimates::load_from_str(json).unwrap();
+        let active: Vec<String> = vec!["BTCUSDT".into()];
+        let ctx = OrphanContext {
+            pos_info: &pos,
+            current_level: RiskLevel::Normal,
+            max_order_notional_usdt: 0.0,
+            active_symbols: &active,
+            edge_estimates: &ee,
+        };
+        let decision = handle_orphan(&ctx);
+        match decision {
+            OrphanDecision::Adopt { triggering_strategy, .. } => {
+                // KNOWN_STRATEGY_NAMES = [ma_crossover, bb_reversion, bb_breakout,
+                // grid_trading, funding_arb]; `ma_crossover` wins even though
+                // `bb_reversion` has the larger edge.
+                assert_eq!(triggering_strategy, "ma_crossover");
+            }
+            other => panic!("expected Adopt, got {:?}", other),
+        }
+    }
+
+    /// Phase 2A #5: Stage A (liq distance) MUST fire even when B2 would adopt
+    /// — safety checks strictly precede adopt-path decisions.
+    /// Phase 2A #5：Stage A（liq 距離）即使 B2 本會 Adopt 也必須優先觸發。
+    #[test]
+    fn stage_a_precedence_over_b2_adopt() {
+        // liq within 5% of mark → A1 hits; positive edge would otherwise adopt.
+        // liq 距 mark 5% → A1 觸發；否則正邊際會 Adopt。
+        let pos = make_pos("BTCUSDT", "Buy", 0.01, 100.0, 95.0, 5.0);
+        let json = r#"{
+            "_meta": {"grand_mean_bps": 0.0},
+            "ma_crossover::BTCUSDT": {"shrunk_bps": 10.0, "n": 200}
+        }"#;
+        let ee = EdgeEstimates::load_from_str(json).unwrap();
+        let active: Vec<String> = vec!["BTCUSDT".into()];
+        let ctx = OrphanContext {
+            pos_info: &pos,
+            current_level: RiskLevel::Normal,
+            max_order_notional_usdt: 0.0,
+            active_symbols: &active,
+            edge_estimates: &ee,
+        };
+        let decision = handle_orphan(&ctx);
+        match decision {
+            OrphanDecision::Close { stage, .. } => assert_eq!(stage, OrphanStage::HardSafetyLiqClose),
+            other => panic!("expected HardSafetyLiqClose, got {:?}", other),
         }
     }
 

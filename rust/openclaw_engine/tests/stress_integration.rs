@@ -107,19 +107,19 @@ fn stress_fast_track_flash_crash_closes_all_positions() {
     // Open positions via direct apply_fill
     pipeline
         .paper_state
-        .apply_fill("BTCUSDT", true, 0.01, 65000.0, 3.575, 1000);
+        .apply_fill("BTCUSDT", true, 0.01, 65000.0, 3.575, 1000, "test");
     pipeline
         .paper_state
-        .apply_fill("ETHUSDT", true, 0.1, 2000.0, 0.11, 1000);
+        .apply_fill("ETHUSDT", true, 0.1, 2000.0, 0.11, 1000, "test");
     pipeline
         .paper_state
-        .apply_fill("SOLUSDT", true, 1.0, 150.0, 0.0825, 1000);
+        .apply_fill("SOLUSDT", true, 1.0, 150.0, 0.0825, 1000, "test");
     pipeline
         .paper_state
-        .apply_fill("XRPUSDT", true, 100.0, 0.60, 0.033, 1000);
+        .apply_fill("XRPUSDT", true, 100.0, 0.60, 0.033, 1000, "test");
     pipeline
         .paper_state
-        .apply_fill("DOGEUSDT", false, 1000.0, 0.15, 0.0825, 1000);
+        .apply_fill("DOGEUSDT", false, 1000.0, 0.15, 0.0825, 1000, "test");
     assert_eq!(pipeline.paper_state.position_count(), 5);
 
     // Simulate CircuitBreaker risk level triggering fast_track
@@ -199,11 +199,11 @@ fn stress_fa_phantom_1_regression_5_positions_100pct_notional_20x_leverage() {
     );
 
     // Five positions at $2_000 notional each = $10_000 total = 100% of balance.
-    pipeline.paper_state.apply_fill("BTCUSDT", true, 0.04, 50_000.0, 0.0, 1000);
-    pipeline.paper_state.apply_fill("ETHUSDT", true, 1.0, 2_000.0, 0.0, 1000);
-    pipeline.paper_state.apply_fill("SOLUSDT", true, 20.0, 100.0, 0.0, 1000);
-    pipeline.paper_state.apply_fill("XRPUSDT", true, 2_000.0, 1.0, 0.0, 1000);
-    pipeline.paper_state.apply_fill("DOGEUSDT", false, 10_000.0, 0.2, 0.0, 1000);
+    pipeline.paper_state.apply_fill("BTCUSDT", true, 0.04, 50_000.0, 0.0, 1000, "test");
+    pipeline.paper_state.apply_fill("ETHUSDT", true, 1.0, 2_000.0, 0.0, 1000, "test");
+    pipeline.paper_state.apply_fill("SOLUSDT", true, 20.0, 100.0, 0.0, 1000, "test");
+    pipeline.paper_state.apply_fill("XRPUSDT", true, 2_000.0, 1.0, 0.0, 1000, "test");
+    pipeline.paper_state.apply_fill("DOGEUSDT", false, 10_000.0, 0.2, 0.0, 1000, "test");
     assert_eq!(pipeline.paper_state.position_count(), 5);
 
     // Drive a tick at the same entry price so price_drop_pct stays 0 and
@@ -234,11 +234,11 @@ fn stress_fa_phantom_1_cash_mode_100pct_notional_closes_all() {
     rc.limits.leverage_max = 1.0;
     pipeline.intent_processor.update_risk_config(rc);
 
-    pipeline.paper_state.apply_fill("BTCUSDT", true, 0.04, 50_000.0, 0.0, 1000);
-    pipeline.paper_state.apply_fill("ETHUSDT", true, 1.0, 2_000.0, 0.0, 1000);
-    pipeline.paper_state.apply_fill("SOLUSDT", true, 20.0, 100.0, 0.0, 1000);
-    pipeline.paper_state.apply_fill("XRPUSDT", true, 2_000.0, 1.0, 0.0, 1000);
-    pipeline.paper_state.apply_fill("DOGEUSDT", false, 10_000.0, 0.2, 0.0, 1000);
+    pipeline.paper_state.apply_fill("BTCUSDT", true, 0.04, 50_000.0, 0.0, 1000, "test");
+    pipeline.paper_state.apply_fill("ETHUSDT", true, 1.0, 2_000.0, 0.0, 1000, "test");
+    pipeline.paper_state.apply_fill("SOLUSDT", true, 20.0, 100.0, 0.0, 1000, "test");
+    pipeline.paper_state.apply_fill("XRPUSDT", true, 2_000.0, 1.0, 0.0, 1000, "test");
+    pipeline.paper_state.apply_fill("DOGEUSDT", false, 10_000.0, 0.2, 0.0, 1000, "test");
     assert_eq!(pipeline.paper_state.position_count(), 5);
 
     pipeline.on_tick(&make_event("BTCUSDT", 50_000.0, 2000));
@@ -535,7 +535,7 @@ fn stress_guardian_rejects_direction_conflict() {
 
     let mut state = PaperState::new(10_000.0);
     state.set_latest_price("BTCUSDT", 67000.0);
-    state.apply_fill("BTCUSDT", true, 0.01, 67000.0, 0.0, 0); // existing long
+    state.apply_fill("BTCUSDT", true, 0.01, 67000.0, 0.0, 0, "test"); // existing long
 
     // Try to open short on same symbol
     let intent = OrderIntent {
@@ -561,9 +561,9 @@ fn stress_guardian_rejects_position_count_limit() {
 
     let mut state = PaperState::new(10_000.0);
     // Open 3 long positions (max_same_direction = 3)
-    state.apply_fill("ETHUSDT", true, 0.1, 2000.0, 0.0, 0);
-    state.apply_fill("SOLUSDT", true, 1.0, 150.0, 0.0, 0);
-    state.apply_fill("XRPUSDT", true, 100.0, 0.6, 0.0, 0);
+    state.apply_fill("ETHUSDT", true, 0.1, 2000.0, 0.0, 0, "test");
+    state.apply_fill("SOLUSDT", true, 1.0, 150.0, 0.0, 0, "test");
+    state.apply_fill("XRPUSDT", true, 100.0, 0.6, 0.0, 0, "test");
     state.set_latest_price("BTCUSDT", 67000.0);
 
     // Try to open 4th long
@@ -619,7 +619,7 @@ fn stress_governance_not_authorized_rejects_all() {
 #[test]
 fn stress_hard_stop_triggers_on_5pct_drop() {
     let mut state = PaperState::new(10_000.0);
-    state.apply_fill("BTCUSDT", true, 0.01, 67000.0, 0.0, 1000);
+    state.apply_fill("BTCUSDT", true, 0.01, 67000.0, 0.0, 1000, "test");
     state.set_latest_price("BTCUSDT", 63000.0); // ~6% drop
 
     let triggers = state.check_stops(63000.0, 100_000);
@@ -634,7 +634,7 @@ fn stress_hard_stop_triggers_on_5pct_drop() {
 #[test]
 fn stress_hard_stop_does_not_trigger_at_4pct() {
     let mut state = PaperState::new(10_000.0);
-    state.apply_fill("BTCUSDT", true, 0.01, 67000.0, 0.0, 1000);
+    state.apply_fill("BTCUSDT", true, 0.01, 67000.0, 0.0, 1000, "test");
     state.set_latest_price("BTCUSDT", 64500.0); // ~3.7% drop
 
     let triggers = state.check_stops(64500.0, 100_000);
@@ -644,7 +644,7 @@ fn stress_hard_stop_does_not_trigger_at_4pct() {
 #[test]
 fn stress_short_position_stop_on_price_rise() {
     let mut state = PaperState::new(10_000.0);
-    state.apply_fill("ETHUSDT", false, 0.1, 2000.0, 0.0, 1000); // short at 2000
+    state.apply_fill("ETHUSDT", false, 0.1, 2000.0, 0.0, 1000, "test"); // short at 2000
     state.set_latest_price("ETHUSDT", 2120.0); // 6% rise = loss for short
 
     let triggers = state.check_stops(2120.0, 100_000);
@@ -654,8 +654,8 @@ fn stress_short_position_stop_on_price_rise() {
 #[test]
 fn stress_multi_position_independent_stops() {
     let mut state = PaperState::new(10_000.0);
-    state.apply_fill("BTCUSDT", true, 0.01, 67000.0, 0.0, 1000);
-    state.apply_fill("ETHUSDT", true, 0.1, 2000.0, 0.0, 1000);
+    state.apply_fill("BTCUSDT", true, 0.01, 67000.0, 0.0, 1000, "test");
+    state.apply_fill("ETHUSDT", true, 0.1, 2000.0, 0.0, 1000, "test");
 
     // BTC crashes but ETH is fine
     state.set_latest_price("BTCUSDT", 62000.0); // ~7.5% drop
@@ -746,13 +746,13 @@ fn stress_pnl_long_profit_and_loss_sequences() {
     let mut state = PaperState::new(10_000.0);
 
     // Trade 1: Long BTC, profit
-    state.apply_fill("BTCUSDT", true, 0.01, 67000.0, 3.685, 1000);
+    state.apply_fill("BTCUSDT", true, 0.01, 67000.0, 3.685, 1000, "test");
     state.close_position("BTCUSDT", 68000.0, 2000);
     // PnL = (68000-67000) * 0.01 = 10.0, net = 10.0 - 3.685 fee
     assert!((state.balance() - (10_000.0 - 3.685 + 10.0)).abs() < 0.01);
 
     // Trade 2: Long ETH, loss
-    state.apply_fill("ETHUSDT", true, 0.1, 2000.0, 0.11, 3000);
+    state.apply_fill("ETHUSDT", true, 0.1, 2000.0, 0.11, 3000, "test");
     state.close_position("ETHUSDT", 1900.0, 4000);
     // PnL = (1900-2000) * 0.1 = -10.0
     let expected = 10_000.0 - 3.685 + 10.0 - 0.11 - 10.0;
@@ -769,14 +769,14 @@ fn stress_pnl_short_profit_and_loss() {
     let mut state = PaperState::new(10_000.0);
 
     // Short profit: sell high, buy low
-    state.apply_fill("BTCUSDT", false, 0.01, 68000.0, 3.74, 1000);
+    state.apply_fill("BTCUSDT", false, 0.01, 68000.0, 3.74, 1000, "test");
     state.close_position("BTCUSDT", 67000.0, 2000);
     // PnL = (68000-67000) * 0.01 = 10.0
     let expected = 10_000.0 - 3.74 + 10.0;
     assert!((state.balance() - expected).abs() < 0.01);
 
     // Short loss: sell low, price goes up
-    state.apply_fill("ETHUSDT", false, 0.1, 2000.0, 0.11, 3000);
+    state.apply_fill("ETHUSDT", false, 0.1, 2000.0, 0.11, 3000, "test");
     state.close_position("ETHUSDT", 2100.0, 4000);
     // PnL = (2000-2100) * 0.1 = -10.0
     let expected2 = expected - 0.11 - 10.0;
@@ -788,7 +788,7 @@ fn stress_pnl_zero_sum_round_trip() {
     // Buy and sell at same price — only fees should affect balance
     let mut state = PaperState::new(10_000.0);
     let fee = 0.1;
-    state.apply_fill("BTCUSDT", true, 0.01, 67000.0, fee, 1000);
+    state.apply_fill("BTCUSDT", true, 0.01, 67000.0, fee, 1000, "test");
     state.close_position("BTCUSDT", 67000.0, 2000);
     // PnL = 0, balance = 10000 - fee
     assert!((state.balance() - (10_000.0 - fee)).abs() < 0.001);
@@ -801,8 +801,8 @@ fn stress_pnl_zero_sum_round_trip() {
 #[test]
 fn stress_export_state_matches_runtime() {
     let mut state = PaperState::new(10_000.0);
-    state.apply_fill("BTCUSDT", true, 0.01, 67000.0, 3.685, 1000);
-    state.apply_fill("ETHUSDT", false, 0.1, 2000.0, 0.11, 2000);
+    state.apply_fill("BTCUSDT", true, 0.01, 67000.0, 3.685, 1000, "test");
+    state.apply_fill("ETHUSDT", false, 0.1, 2000.0, 0.11, 2000, "test");
 
     let snap = state.export_state();
     assert_eq!(snap.balance, state.balance());

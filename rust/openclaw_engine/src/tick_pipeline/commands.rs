@@ -152,6 +152,7 @@ impl TickPipeline {
             fill.fill_price,
             fill.fee,
             now_ms,
+            strategy,
         );
 
         // EDGE-P3-1 R2: entry_context_id stamping for fresh opens — must reuse the
@@ -371,7 +372,7 @@ impl TickPipeline {
             .to_string();
         let realized_pnl = self
             .paper_state
-            .apply_fill(symbol, is_long, qty, fill_price, fee, ts_ms);
+            .apply_fill(symbol, is_long, qty, fill_price, fee, ts_ms, strategy);
         // EDGE-P3-1 R2: stamp entry_context_id on fresh exchange-confirmed opens.
         // Uses the same deterministic make_context_id as the Fill row below.
         // EDGE-P3-1 R2：僅交易所確認的開新倉打 entry_context_id。
