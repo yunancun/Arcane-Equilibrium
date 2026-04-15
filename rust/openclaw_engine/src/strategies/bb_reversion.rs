@@ -422,6 +422,11 @@ impl BbReversion {
     }
 
     /// Build entry intent with explicit qty (confluence-scaled). / 使用顯式 qty 構建入場 intent。
+    ///
+    /// EDGE-P3-1 A6: last two params carry the decision-time confluence score
+    /// (raw [0, 65]) and persistence elapsed ms so the edge predictor gate in
+    /// IntentProcessor can read them from the intent instead of zero placeholders.
+    /// EDGE-P3-1 A6：最後兩參數為決策時的 confluence/persistence，供 predictor gate 使用。
     fn make_entry_intent_with_qty(
         &self,
         ctx: &TickContext<'_>,
@@ -430,6 +435,8 @@ impl BbReversion {
         bb_lower: f64,
         bb_upper: f64,
         qty: f64,
+        confluence_score: Option<f32>,
+        persistence_elapsed_ms: Option<u64>,
     ) -> OrderIntent {
         let (order_type, limit_price) = if self.use_limit {
             let price = if is_long {
@@ -450,6 +457,8 @@ impl BbReversion {
             strategy: self.name().into(),
             order_type,
             limit_price,
+            confluence_score,
+            persistence_elapsed_ms,
         }
     }
 }
@@ -585,6 +594,12 @@ impl Strategy for BbReversion {
                         Some(s) if s > 0.0 => (s / 65.0 + fr_boost).min(1.0),
                         _ => (self.entry_conf_base + hurst_boost + fr_boost).min(1.0),
                     };
+                    // EDGE-P3-1 A6: pass decision-time confluence + persistence
+                    // to the intent for the predictor gate.
+                    // EDGE-P3-1 A6：把決策時的 confluence/persistence 寫入 intent。
+                    let confluence_score = score.map(|s| s as f32);
+                    let persistence_elapsed_ms =
+                        self.persistence.elapsed_ms(ctx.symbol, ctx.timestamp_ms);
                     intents.push(StrategyAction::Open(self.make_entry_intent_with_qty(
                         ctx,
                         is_long,
@@ -592,6 +607,8 @@ impl Strategy for BbReversion {
                         bb.lower,
                         bb.upper,
                         qty,
+                        confluence_score,
+                        persistence_elapsed_ms,
                     )));
                     self.positions.insert(ctx.symbol.to_string(), is_long);
                     self.last_trade_ms.insert(ctx.symbol.to_string(), ctx.timestamp_ms);

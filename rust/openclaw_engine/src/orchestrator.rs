@@ -162,6 +162,8 @@ mod tests {
             strategy: "mock".into(),
             order_type: "market".into(),
             limit_price: None,
+            confluence_score: None,
+            persistence_elapsed_ms: None,
         };
         orch.register(Box::new(MockStrategy {
             active: true,
@@ -191,6 +193,8 @@ mod tests {
             strategy: "mock".into(),
             order_type: "market".into(),
             limit_price: None,
+            confluence_score: None,
+            persistence_elapsed_ms: None,
         };
         orch.register(Box::new(MockStrategy {
             active: false,

@@ -79,6 +79,11 @@ impl TickPipeline {
             strategy: strategy.to_string(),
             order_type: order_type.to_string(),
             limit_price,
+            // Command-dispatched intents (manual / IPC-triggered) have no
+            // strategy-side confluence or persistence state to pass through.
+            // 指令派發的 intent 無策略端 confluence/persistence。
+            confluence_score: None,
+            persistence_elapsed_ms: None,
         };
 
         let result = self

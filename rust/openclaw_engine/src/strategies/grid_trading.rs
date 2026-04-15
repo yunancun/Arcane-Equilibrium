@@ -808,6 +808,10 @@ impl Strategy for GridTrading {
                 strategy: self.name().into(),
                 order_type: "market".into(),
                 limit_price: None,
+                // Grid has no confluence/persistence; builder fills 0.0.
+                // Grid 無 confluence/persistence；builder 填 0。
+                confluence_score: None,
+                persistence_elapsed_ms: None,
             };
             if cur_inventory < 0.0 {
                 intents.push(StrategyAction::Close {
@@ -832,6 +836,10 @@ impl Strategy for GridTrading {
                 strategy: self.name().into(),
                 order_type: "market".into(),
                 limit_price: None,
+                // Grid has no confluence/persistence; builder fills 0.0.
+                // Grid 無 confluence/persistence；builder 填 0。
+                confluence_score: None,
+                persistence_elapsed_ms: None,
             };
             if cur_inventory > 0.0 {
                 intents.push(StrategyAction::Close {

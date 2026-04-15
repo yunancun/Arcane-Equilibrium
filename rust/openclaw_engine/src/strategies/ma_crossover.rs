@@ -354,17 +354,25 @@ impl MaCrossover {
     }
 
     fn make_intent(&self, ctx: &TickContext<'_>, is_long: bool, conf: f64) -> OrderIntent {
-        self.make_intent_with_qty(ctx, is_long, conf, self.default_qty)
+        self.make_intent_with_qty(ctx, is_long, conf, self.default_qty, None, None)
     }
 
     /// Build intent with explicit qty (used by confluence-scaled entries).
     /// 使用顯式 qty 構建 intent（用於匯流調整後的入場）。
+    ///
+    /// EDGE-P3-1 A6: `confluence_score` is the raw compute_score result [0, 65]
+    /// (None on cold-start fallback); `persistence_elapsed_ms` is ms since signal
+    /// onset. Exits pass None/None — features are decision-time only.
+    /// EDGE-P3-1 A6：confluence_score 為原始分數，persistence_elapsed_ms 為信號經時；
+    /// 出場路徑傳 None。
     fn make_intent_with_qty(
         &self,
         ctx: &TickContext<'_>,
         is_long: bool,
         conf: f64,
         qty: f64,
+        confluence_score: Option<f32>,
+        persistence_elapsed_ms: Option<u64>,
     ) -> OrderIntent {
         let scaled =
             crate::tick_pipeline::on_tick_helpers::clamp_confidence(conf * self.conf_scale);
@@ -376,6 +384,8 @@ impl MaCrossover {
             strategy: self.name().into(),
             order_type: "market".into(),
             limit_price: None,
+            confluence_score,
+            persistence_elapsed_ms,
         }
     }
 
@@ -603,11 +613,20 @@ impl Strategy for MaCrossover {
                     if !self.higher_tf_allows_entry(ctx.symbol, is_long) {
                         return vec![];
                     }
+                    // EDGE-P3-1 A6: snapshot confluence + persistence elapsed at
+                    // decision time so predictor sees the same numbers the gate
+                    // used. Clamp score to f32 for feature vector.
+                    // EDGE-P3-1 A6：抓取決策時的 confluence/persistence 供預測器。
+                    let confluence_score = score.map(|s| s as f32);
+                    let persistence_elapsed_ms =
+                        self.persistence.elapsed_ms(ctx.symbol, ctx.timestamp_ms);
                     intents.push(StrategyAction::Open(self.make_intent_with_qty(
                         ctx,
                         is_long,
                         conf_with_score,
                         qty,
+                        confluence_score,
+                        persistence_elapsed_ms,
                     )));
                     self.positions.insert(ctx.symbol.to_string(), is_long);
                     self.last_trade_ms

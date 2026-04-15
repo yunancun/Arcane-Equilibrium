@@ -516,6 +516,8 @@ fn stress_guardian_rejects_on_high_drawdown() {
         strategy: "test".into(),
         order_type: "market".into(),
         limit_price: None,
+        confluence_score: None,
+        persistence_elapsed_ms: None,
     };
     let result = proc.process(&intent, &gov, &state, 500.0, GovernanceProfile::Exploration);
     assert!(!result.submitted, "should reject on high drawdown");
@@ -544,6 +546,8 @@ fn stress_guardian_rejects_direction_conflict() {
         strategy: "test".into(),
         order_type: "market".into(),
         limit_price: None,
+        confluence_score: None,
+        persistence_elapsed_ms: None,
     };
     let result = proc.process(&intent, &gov, &state, 500.0, GovernanceProfile::Exploration);
     assert!(!result.submitted, "should reject direction conflict");
@@ -571,6 +575,8 @@ fn stress_guardian_rejects_position_count_limit() {
         strategy: "test".into(),
         order_type: "market".into(),
         limit_price: None,
+        confluence_score: None,
+        persistence_elapsed_ms: None,
     };
     let result = proc.process(&intent, &gov, &state, 500.0, GovernanceProfile::Exploration);
     assert!(
@@ -595,6 +601,8 @@ fn stress_governance_not_authorized_rejects_all() {
         strategy: "test".into(),
         order_type: "market".into(),
         limit_price: None,
+        confluence_score: None,
+        persistence_elapsed_ms: None,
     };
     let result = proc.process(&intent, &gov, &state, 500.0, GovernanceProfile::Exploration);
     assert!(!result.submitted);

@@ -1,18 +1,18 @@
-//! EDGE-P3-1 A5 — feature vector builder from runtime context.
-//! EDGE-P3-1 A5 — 從 runtime context 構建 feature vector。
+//! EDGE-P3-1 A5/A6 — feature vector builder from runtime context.
+//! EDGE-P3-1 A5/A6 — 從 runtime context 構建 feature vector。
 //!
 //! MODULE_NOTE (EN): Assembles a `FeatureVectorV1` from the data already on
 //!   hand during `on_tick` (PriceEvent / IndicatorSnapshot / PaperState /
-//!   OrderIntent). Fields not yet plumbed (confluence_score /
-//!   persistence_elapsed_ms) default to 0.0 — the predictor gate is still
-//!   guarded by `cfg.use_edge_predictor=false` in Stage 0 so these are
-//!   placeholders, not silent wrong data. All floats are clamp-to-range
-//!   before handoff so invariant #12 (`all_in_range`) cannot trip on drift
-//!   from upstream indicators.
-//! MODULE_NOTE (中): 從 on_tick 已有資料組裝 `FeatureVectorV1`。尚未接線的
-//!   欄位（confluence / persistence）以 0.0 占位；Stage 0 predictor gate 由
-//!   `use_edge_predictor=false` 守護，不會誤用。所有 f32 先 clamp 再交棒，
-//!   避免上游漂移觸發不變量 #12。
+//!   OrderIntent). `confluence_score` / `persistence_elapsed_ms` are read from
+//!   the intent (A6 plumbs them from MA/BBR/BBB); Grid/FundingArb leave them
+//!   `None` → builder falls back to 0.0 (benign under `use_edge_predictor=false`
+//!   and trained-against-0 for non-confluence strategies once Stage 2 lands).
+//!   All floats are clamp-to-range before handoff so invariant #12
+//!   (`all_in_range`) cannot trip on drift from upstream indicators.
+//! MODULE_NOTE (中): 從 on_tick 已有資料組裝 `FeatureVectorV1`。confluence 與
+//!   persistence 由 intent 攜帶（A6 已接線 MA/BBR/BBB）；Grid/FundingArb 未接線
+//!   時為 None → builder 填 0.0，Stage 0 由 use_edge_predictor=false 守門，
+//!   Stage 2 模型對這兩策略以 0 訓練。所有 f32 先 clamp 再交棒。
 //!
 //! Spec: docs/references/2026-04-15--edge_predictor_spec.md v1.4 §3.2
 
@@ -102,9 +102,14 @@ pub fn build_feature_vector(
         0.0
     };
 
-    // ── Strategy ── (confluence/persistence: A6+ plumbs from Orchestrator).
-    let confluence_score = 0.0;
-    let persistence_elapsed_ms = 0.0;
+    // ── Strategy ── (A6: plumbed via OrderIntent from MA/BBR/BBB; Grid + FundingArb = None → 0.0).
+    // A6：MA/BBR/BBB 由 intent 攜帶；Grid/FundingArb 為 None → fill 0.0。
+    let confluence_score = clamp_f32(intent.confluence_score.unwrap_or(0.0), 0.0, 65.0);
+    let persistence_elapsed_ms = clamp_f32(
+        intent.persistence_elapsed_ms.unwrap_or(0) as f32,
+        0.0,
+        3_600_000.0,
+    );
     let side: i8 = if intent.is_long { 1 } else { -1 };
 
     // ── Position ──
@@ -188,6 +193,27 @@ mod tests {
             strategy: "ma_crossover".into(),
             order_type: "market".into(),
             limit_price: None,
+            confluence_score: None,
+            persistence_elapsed_ms: None,
+        }
+    }
+
+    fn make_intent_with_features(
+        is_long: bool,
+        qty: f64,
+        confluence: Option<f32>,
+        persistence: Option<u64>,
+    ) -> OrderIntent {
+        OrderIntent {
+            symbol: "BTCUSDT".to_string(),
+            is_long,
+            qty,
+            confidence: 0.6,
+            strategy: "ma_crossover".into(),
+            order_type: "market".into(),
+            limit_price: None,
+            confluence_score: confluence,
+            persistence_elapsed_ms: persistence,
         }
     }
 
@@ -379,5 +405,60 @@ mod tests {
         // atr_value=5.0 → atr_pct = 5/100*100 = 5.0; IndicatorSnapshot.atr_14 ignored.
         let f = build_feature_vector(&intent, &event, Some(&ind), 5.0, &paper);
         assert!((f.atr_pct - 5.0).abs() < 1e-6);
+    }
+
+    // ── A6: Strategy-side plumbing tests ──
+
+    #[test]
+    fn test_confluence_none_means_zero() {
+        // Grid / FundingArb pass None → feature is 0.0 not some uninitialized junk.
+        // Grid/FundingArb 傳 None → feature = 0.0，非未初始化雜值。
+        let intent = make_intent_with_features(true, 0.001, None, None);
+        let event = make_event(1_700_000_000_000, 30_000.0);
+        let paper = paper_state_with_balance(10_000.0);
+        let f = build_feature_vector(&intent, &event, None, 0.0, &paper);
+        assert_eq!(f.confluence_score, 0.0);
+        assert_eq!(f.persistence_elapsed_ms, 0.0);
+    }
+
+    #[test]
+    fn test_confluence_some_propagates_through() {
+        // MA/BBR/BBB pass Some — feature reflects the strategy's own compute_score.
+        // MA/BBR/BBB 傳 Some — feature 對應策略自己算出的 compute_score。
+        let intent = make_intent_with_features(true, 0.001, Some(48.0), Some(180_000));
+        let event = make_event(1_700_000_000_000, 30_000.0);
+        let paper = paper_state_with_balance(10_000.0);
+        let f = build_feature_vector(&intent, &event, None, 0.0, &paper);
+        assert!((f.confluence_score - 48.0).abs() < 1e-6);
+        assert!((f.persistence_elapsed_ms - 180_000.0).abs() < 1e-6);
+        assert!(f.all_in_range());
+    }
+
+    #[test]
+    fn test_confluence_clamped_above_65() {
+        // If strategy ever emits a score above 65 (shouldn't happen but be
+        // defensive), builder clamps so invariant #12 does not fail closed.
+        // 策略若錯發 > 65，builder clamp 至 65 避免 invariant #12 fail-closed。
+        let intent = make_intent_with_features(true, 0.001, Some(80.0), Some(10_000_000));
+        let event = make_event(1_700_000_000_000, 30_000.0);
+        let paper = paper_state_with_balance(10_000.0);
+        let f = build_feature_vector(&intent, &event, None, 0.0, &paper);
+        assert_eq!(f.confluence_score, 65.0);
+        assert_eq!(f.persistence_elapsed_ms, 3_600_000.0);
+        assert!(f.all_in_range());
+    }
+
+    #[test]
+    fn test_persistence_zero_is_valid() {
+        // Freshly-onset signal (elapsed=0 right at check() transition) must pass
+        // range check: [0, 3_600_000] is inclusive at the low end.
+        // 剛剛轉換的信號（elapsed=0）須通過範圍檢查。
+        let intent = make_intent_with_features(true, 0.001, Some(0.0), Some(0));
+        let event = make_event(1_700_000_000_000, 30_000.0);
+        let paper = paper_state_with_balance(10_000.0);
+        let f = build_feature_vector(&intent, &event, None, 0.0, &paper);
+        assert_eq!(f.confluence_score, 0.0);
+        assert_eq!(f.persistence_elapsed_ms, 0.0);
+        assert!(f.all_in_range());
     }
 }
