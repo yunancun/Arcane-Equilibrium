@@ -15,7 +15,9 @@
 |---|------|------|-------|------|
 | ~~**1**~~ | ✅ **ENGINE-HEAL-FUP-1 watchdog daemon 化** — 2026-04-15 11:31 已 nohup 起 PID 592881，`/tmp/openclaw/watchdog.log` 開始落字。**留尾**：仍是手動 nohup（不會跨重啟存活）；正式 systemd user unit 或 `restart_all.sh` 整合留待 W22 收尾 | done | — | ✅ |
 | ~~**2**~~ | ✅ **ENGINE-HEAL-FUP-2 根因調查完成** — 2026-04-15：實為 **2h 內 15+ 波段累積壓力**（非一秒 8,445 噴發），主因 = canary JSONL 同步寫盤在 live event loop 熱路徑上 + live channel 512 偏小。詳 `docs/worklogs/2026-04-15--engine_2000_stall_postmortem.md` | done | — | ✅ |
-| **3** | 🛠️ **ENGINE-HEAL-FIX-PHASE1** — 合併 FUP-2 修復（R1 canary 寫盤改 bounded mpsc → blocking 任務 / BufWriter；R2 live channel 512→1024 對稱化）**+** FUP-3（`OPENCLAW_DISABLE_CANARY_DUMP=1` 旗標 + size-based rotation）單 PR。驗收：24h 零 `live pipeline lagging`；canary dump ≤5GB/24h | 半-1 天 | — | LG-1 穩定性；避免 self-cancel 重演 |
+| ~~**3**~~ | ✅ **ENGINE-HEAL-FIX-PHASE1** — 合併 R1（canary 寫盤改 bounded mpsc → 專用 tokio 任務 / BufWriter / size rotation）+ R2（live channel 512→1024 對稱化）+ FUP-3（`OPENCLAW_DISABLE_CANARY_DUMP=1` 旗標 + 4 個 env 控制旋轉）單 commit。1262 + 372 + 35 = 1669 cargo tests 0 fail。E2 GREEN（2 nits 列為 FUP）。**留尾**：operator 需 `restart_all.sh --rebuild` 部署；24h 觀察 `live pipeline lagging` WARN 是否歸零 | done | — | ✅ |
+| **3a** | 🟡 **FIX-PHASE1 FUP-A** — `canary_writer::try_send` 通道滿 warn 加 1Hz 取樣（避免 `warn!` 自身在持續壓力下成為 log flood）。E2 nit | 30 min | — | 觀測訊號乾淨度 |
+| **3b** | 🟡 **FIX-PHASE1 FUP-B** — 加 unit test 覆蓋 `mpsc::error::TrySendError::Full` 分支（填滿 4096 slot 驗證 warn + drop 路徑）。E2 nit | 30 min | — | 測試完整性 |
 | **4** | 🧪 **G-2 FundingArb 驗證** — Step 4.1 ✅ 路徑全鏈路驗證（strategy_exit + ipc_close 都帶 realized_pnl 入 DB）。Step 4.3 ⏳ **後台 daemon PID 598572 監控中**（`/tmp/openclaw/g2_monitor.{py,log,pid,progress.json}`），達 demo ≥20 strategy_exit fills 自動寫 `docs/audits/2026-04-15--g2_funding_arb_clean_edge.md`。**operator/Claude 接手先 `cat /tmp/openclaw/g2_monitor.progress.json`** | ~17h ETA | — | Phase 5 歸因量化確認 · LG-1 觀察期起點 |
 | **5** | 🕰️ **LG-1 Paper Trading 21d** — EDGE-P0/P1 + FA-PHANTOM-1 + FUP-8 部署後啟動正式觀察期；不再綁定 05-01 | 3 w | #2, #4 | Live Gate · LG-2/3 |
 | **6** | 📊 **Phase 5 策略 Edge 2w 重評** — 乾淨 paper 2w 後重算 per-strategy gross edge。若翻正 → Phase 5 cost_gate 工作重啟；若仍負 → 策略本身需重做（EDGE-P2/P3） | 2 w | #4 | Phase 5 restart / rebuild 決策 |
@@ -74,13 +76,9 @@
     - R3/R4 延後到 R1+R2 入產後再看 telemetry 決定
   - ✅ 產出 worklog
 
-- [ ] **ENGINE-HEAL-FUP-3** 🗑️ engine_results.jsonl rotation / 關閉（Action #3）
-  - 現況：無 rotation，無上限，canary_comparator.py 才需要此 dump
-  - 選項：
-    1. 加 size-based rotation（> 1GB 自動 rotate 到 `engine_results_logs/`，保留 N 個）
-    2. 加 sampling（每 100 ticks 才寫 1 條，對 canary 影響待評估）
-    3. 加 env flag `OPENCLAW_DISABLE_CANARY_DUMP=1` 完全關閉（灰度驗證過後的常態）
-  - R-07 Go/No-Go 已在「灰度驗證檢查」段持續監控 `engine_results.jsonl` 記錄數；若此項驗收已實質完成，選 3 最乾淨
+- [x] **ENGINE-HEAL-FUP-3** ✅ engine_results.jsonl rotation / 關閉 — 折入 FIX-PHASE1 同 commit
+  - `OPENCLAW_DISABLE_CANARY_DUMP=1` 覆寫 `OPENCLAW_CANARY_MODE` 完全關閉（灰度驗證過後常態）
+  - `OPENCLAW_CANARY_ROTATE_MB`（預設 1024 = 1GB）+ `OPENCLAW_CANARY_MAX_ROTATED`（預設 3）→ 自動輪轉到 `engine_logs/engine_results-<UTC ts>.jsonl`，mtime 排序保留最新 N 個
 
 ### 部署窗口（已完成，歸檔用）
 

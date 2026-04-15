@@ -187,4 +187,10 @@ pub struct EventConsumerDeps {
     /// BLOCKER-2 D6: Per-pipeline health atomic (written by this pipeline, read by others).
     /// BLOCKER-2 D6：管線健康原子量（本管線寫入，其他管線讀取）。
     pub pipeline_health: Option<Arc<std::sync::atomic::AtomicU8>>,
+    /// ENGINE-HEAL-FIX-PHASE1 R1: Canary writer handle — non-blocking try_send keeps
+    /// the JSONL dump off the event loop hot path. `disabled()` clone when the feature
+    /// is off, in which case `is_enabled()` is false and producers skip record build.
+    /// ENGINE-HEAL-FIX-PHASE1 R1：灰度寫入器控制代碼 — 非阻塞 try_send 將 JSONL
+    /// 寫盤移出事件循環熱路徑。功能關閉時為 `disabled()` clone，producer 跳過記錄構建。
+    pub canary_handle: crate::canary_writer::CanaryWriterHandle,
 }

@@ -719,21 +719,37 @@ async fn async_main(
     // ------------------------------------------------------------------
     use openclaw_engine::event_consumer::{run_event_consumer, EventConsumerDeps};
 
+    // ENGINE-HEAL-FIX-PHASE1 R1: Spawn the dedicated canary writer task once.
+    // Returns a clonable handle; each pipeline gets a clone. When the feature
+    // is off the handle is a cheap no-op (`is_enabled() == false`) so producers
+    // skip record build entirely. Reads OPENCLAW_CANARY_MODE / DISABLE_CANARY_DUMP
+    // / CANARY_ROTATE_MB / CANARY_MAX_ROTATED at spawn time.
+    // ENGINE-HEAL-FIX-PHASE1 R1：啟動單一專用灰度寫入任務，回傳 clonable handle，
+    // 每條管線 clone 一份。功能關閉時為廉價 no-op，producer 直接跳過記錄構建。
+    let canary_data_path = std::path::PathBuf::from(
+        std::env::var("OPENCLAW_DATA_DIR").unwrap_or_else(|_| "/tmp/openclaw".into()),
+    );
+    let canary_handle = openclaw_engine::canary_writer::spawn(canary_data_path, cancel.clone());
+
     // is_primary priority: Live > Demo > Paper
     let has_live = live_bindings.is_some();
     let has_demo = demo_bindings.is_some();
 
     // D10/D20: Bounded fan-out — one WS source, N pipeline receivers.
-    // Buffer sizes: Paper/Demo 1024 for headroom during burst ticks;
-    // Live 512 (smaller = fail-fast under lag — real-money pipeline should
-    // never accumulate a deep backlog; dropped ticks are logged at warn level).
+    // All pipelines use 1024 slots (~3.5s at 280 tps) for transient-burst headroom.
+    // "Fail-fast under lag" for Live is enforced by Fix 4's 120s WS-stale watchdog,
+    // not by under-sizing this channel — 512 vs 1024 made no difference during the
+    // 2026-04-15 02:03 self-cancel (both would have dropped under the ~2h cumulative
+    // stall), but 1024 absorbs short spikes (<1s) cleanly instead of dropping ~500
+    // extra ticks and feeding stale prices into strategies.
     // D10/D20：有界扇出 — 一個 WS 來源，N 個管線接收者。
-    // 緩衝區大小：Paper/Demo 1024 提供突發 tick 容量；
-    // Live 512（較小 = 延遲時快速失敗 — 實盤管線不應累積深度積壓，
-    // 丟棄的 tick 以 warn 級別記錄）。
+    // 所有管線統一 1024（~3.5s @ 280 tps）吸收短促突發。Live 的「延遲快速失敗」
+    // 由 Fix 4 的 120s WS-stale watchdog 執行，不靠此通道的欠配置；2026-04-15
+    // 事故證實 512 vs 1024 在長時間壓力下都會丟（那是 consumer 端的同步 I/O 卡住），
+    // 但 1024 在短尖峰下能乾淨吸收，避免策略消費到 ~500 個陳舊的 tick。
     let (paper_event_tx, paper_event_rx) = mpsc::channel::<Arc<PriceEvent>>(1024);
     let demo_event_channel = if has_demo { Some(mpsc::channel::<Arc<PriceEvent>>(1024)) } else { None };
-    let live_event_channel = if has_live { Some(mpsc::channel::<Arc<PriceEvent>>(512)) } else { None };
+    let live_event_channel = if has_live { Some(mpsc::channel::<Arc<PriceEvent>>(1024)) } else { None };
 
     // MAJOR-2: Ready barriers — tx goes to pipeline deps, rx goes to fan-out.
     let (paper_ready_tx, paper_ready_rx) = tokio::sync::oneshot::channel::<()>();
@@ -871,6 +887,7 @@ async fn async_main(
         cross_engine_tx: Some(cross_engine_tx.clone()),
         cross_engine_rx: Some(cross_engine_tx.subscribe()),
         pipeline_health: Some(Arc::clone(&paper_health)),
+        canary_handle: canary_handle.clone(),
     };
     // Fix 3 (2026-04-14): wrap in crash-only layer so a paper task panic
     // is logged + broadcast + triggers engine-wide cancel (watchdog restart).
@@ -934,6 +951,7 @@ async fn async_main(
             cross_engine_tx: Some(cross_engine_tx.clone()),
             cross_engine_rx: Some(cross_engine_tx.subscribe()),
             pipeline_health: Some(Arc::clone(&demo_b.health)),
+            canary_handle: canary_handle.clone(),
         };
         // Fix 3 (2026-04-14): same crash-only wrapper as paper.
         // 修復 3：同 paper 的 crash-only 包裝。
@@ -996,6 +1014,7 @@ async fn async_main(
             cross_engine_tx: Some(cross_engine_tx.clone()),
             cross_engine_rx: Some(cross_engine_tx.subscribe()),
             pipeline_health: Some(Arc::clone(&live_b.health)),
+            canary_handle: canary_handle.clone(),
         };
 
         // D17: Live runs on dedicated OS thread with catch_unwind for panic isolation.
