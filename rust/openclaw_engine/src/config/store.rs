@@ -727,4 +727,123 @@ mod tests {
 
         std::fs::remove_dir_all(&tmp_dir).ok();
     }
+
+    // EDGE-P3-1 U2 / CC #13 regression (spec T23):
+    //   `test_write_toml_atomic_fsynced_survives_sigkill`. Durability proof for
+    //   the kill-switch path — after the helper returns, the TOML must be on
+    //   disk even if the process is SIGKILLed immediately. The test uses
+    //   `current_exe()` self-spawn: the child branch (env-var gated) writes the
+    //   TOML + a completion marker + enters an idle loop; the parent waits for
+    //   the marker, sends SIGKILL, reaps, then reads the file and asserts the
+    //   kill-switch flags are intact. Gated `#[cfg(unix)]`: windows has no
+    //   SIGKILL semantics and the project's deployment targets (linux + macOS)
+    //   are both unix.
+    // EDGE-P3-1 U2 / CC #13 回歸（spec T23）：
+    //   `test_write_toml_atomic_fsynced_survives_sigkill`，kill-switch 路徑的
+    //   耐久性證明 — helper 返回後，即使進程被立刻 SIGKILL，TOML 也必須已落盤。
+    //   用 `current_exe()` 自我 spawn：child 分支（env var 閘控）寫 TOML + 完成
+    //   標記 + 進入 idle 迴圈；parent 等標記 → 送 SIGKILL → 回收 → 讀檔驗開關
+    //   旗標完整。`#[cfg(unix)]` 閘控：Windows 無 SIGKILL 語義，本專案部署目標
+    //   （linux + macOS）皆為 unix。
+    #[cfg(unix)]
+    #[test]
+    fn test_write_toml_atomic_fsynced_survives_sigkill() {
+        const CHILD_ENV: &str = "OPENCLAW_FSYNC_SIGKILL_CHILD";
+
+        #[derive(Serialize)]
+        struct KillSwitch {
+            use_edge_predictor: bool,
+            shadow_mode: bool,
+            note: String,
+        }
+
+        if let Ok(child_spec) = std::env::var(CHILD_ENV) {
+            let (path_str, marker_str) = child_spec
+                .split_once('|')
+                .expect("child spec malformed: expected PATH|MARKER");
+            let path = PathBuf::from(path_str);
+            let marker = PathBuf::from(marker_str);
+
+            let cfg = KillSwitch {
+                use_edge_predictor: false,
+                shadow_mode: false,
+                note: "sigkill regression".into(),
+            };
+            write_toml_atomic_fsynced(&cfg, &path)
+                .expect("child helper write must succeed");
+            std::fs::write(&marker, b"ok").expect("child marker write");
+            // Idle until parent SIGKILLs us. Sleep keeps CPU quiet.
+            // 等待 parent 的 SIGKILL。sleep 讓 CPU 靜止。
+            loop {
+                std::thread::sleep(std::time::Duration::from_millis(500));
+            }
+        }
+
+        let tmp_dir = std::env::temp_dir().join(format!(
+            "edge_predictor_sigkill_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&tmp_dir).unwrap();
+        let path = tmp_dir.join("kill_switch.toml");
+        let marker = tmp_dir.join("child_done.marker");
+
+        let child_spec = format!("{}|{}", path.display(), marker.display());
+        let exe = std::env::current_exe().expect("current_exe");
+
+        // libtest filter is substring-matched by default. The full test path
+        // (`config::store::tests::test_write_toml_atomic_fsynced_survives_sigkill`)
+        // is hard to keep in sync if the module moves, so we pass the suffix
+        // `survives_sigkill` which is unique across the crate.
+        // libtest filter 預設為 substring match。完整測試路徑模組一移就要改，
+        // 改傳 `survives_sigkill` 這個跨 crate 唯一的尾綴更穩。
+        let mut child = std::process::Command::new(&exe)
+            .args(["survives_sigkill", "--nocapture"])
+            .env(CHILD_ENV, &child_spec)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .expect("spawn child test binary");
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while !marker.exists() {
+            if std::time::Instant::now() > deadline {
+                let _ = child.kill();
+                let _ = child.wait();
+                std::fs::remove_dir_all(&tmp_dir).ok();
+                panic!("child never wrote marker within 10s — fsync path likely hung");
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+
+        // Child::kill() on unix maps to SIGKILL — exactly the spec T23 signal.
+        // Child::kill() 在 unix 上對應 SIGKILL — 正好是 spec T23 要求的信號。
+        child.kill().expect("SIGKILL child");
+        let _ = child.wait();
+
+        let contents = std::fs::read_to_string(&path)
+            .expect("TOML must be durable after SIGKILL — fsync did its job");
+        assert!(
+            contents.contains("use_edge_predictor = false"),
+            "post-SIGKILL TOML missing kill flag: {contents}"
+        );
+        assert!(
+            contents.contains("shadow_mode = false"),
+            "post-SIGKILL TOML missing shadow flag: {contents}"
+        );
+        assert!(
+            contents.contains("sigkill regression"),
+            "post-SIGKILL TOML missing note field: {contents}"
+        );
+
+        let tmp_path = path.with_extension("toml.tmp");
+        assert!(
+            !tmp_path.exists(),
+            "tmp companion leaked after rename — atomic step likely broken"
+        );
+
+        std::fs::remove_dir_all(&tmp_dir).ok();
+    }
 }

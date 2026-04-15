@@ -1,7 +1,25 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-04-15（EDGE-P3-1 Step 7a）
+> 最後更新：2026-04-15（EDGE-P3-1 Step 7d）
+
+### EDGE-P3-1 Step 7d — `write_toml_atomic_fsynced` SIGKILL durability 回歸（2026-04-15）
+
+**背景**：Step 7e kill-switch 兩階段 commit 要落盤 `use_edge_predictor=false` 的 TOML 狀態；若程序在 OS page-cache 未刷時崩潰/被殺，狀態會丟 → 半啟用殘局。`write_toml_atomic_fsynced()` helper（`config/store.rs:261-291`）於 Phase A 已實作（tmp fsync → rename → 父目錄 fsync），但耐久性只靠 roundtrip unit test 間接驗證。本 step 補齊 spec **T23 / CC #13** 要求的 SIGKILL 對抗測試 —「helper 返回後，進程立刻 SIGKILL，TOML 內容必須已落盤」。
+
+**交付**（1 file +130）：
+- **`config/store.rs` tests 模組尾端**：新增 `test_write_toml_atomic_fsynced_survives_sigkill`（`#[cfg(unix)]`）。
+  - **測試模式**：`current_exe()` 自我 spawn + env-var 閘控 child 分支（`OPENCLAW_FSYNC_SIGKILL_CHILD`）。Child = 寫 TOML（`use_edge_predictor=false` / `shadow_mode=false` / `note`）→ 寫 marker 檔標記 helper 已返回 → 進入 500ms-sleep idle loop 等死。Parent = 以 `Command::new(current_exe())` + `survives_sigkill` substring filter + `stdout/stderr = Stdio::null()` spawn self，poll marker（10s 超時 + 先殺後 panic 以避免 zombie），`Child::kill()`（unix 上對應 SIGKILL）+ `wait()` 回收，讀檔驗三個 assert（兩個 flag + note field）+ 驗 `.toml.tmp` 伴隨檔 rename 後消失。
+  - **為何 substring filter 不用 `--exact`**：`--exact` 要求完整模組路徑（`config::store::tests::test_...`）；模組一移就壞。用 `survives_sigkill` 這個跨 crate 唯一的尾綴 substring 更穩。
+  - **為何 `#[cfg(unix)]` 閘控**：Windows 無 SIGKILL 語義，部署目標 linux + macOS 皆 unix。
+
+**測試**：lib **1285→1286**（+1 T23）· core 372 · e2e 35 · **total 1692→1693 pass / 0 fail**。新測試單獨跑 ~50ms（child spawn + poll + SIGKILL + reap）。
+
+**未覆蓋**：T23 spec 附帶「CI 跑 `strace -e fsync` 驗證 syscall 觸發」屬 CI 層檢證，非 Rust 測試層責任（已記錄待 DevOps CI 加 job）。`test_disable_all_survives_sigkill` 整合測試（CC #13 整合級，涵蓋 `DisableEdgePredictorAll` 完整流程）屬 Step 7e 範圍（handler 目前僅 `clear_all()` 不寫 TOML；Step 7e 會接兩階段 commit + 用本 helper）。
+
+**下一步**：Step 7e `DisableEdgePredictorAll` 兩階段 commit（U4）+ V014 `observability.engine_events` audit row，會首次把本 helper 接到實際 kill-switch handler。
+
+---
 
 ### EDGE-P3-1 Step 7a — DecisionFeatureSnapshot Rust-direct writer（2026-04-15 · commit d73addb）
 
