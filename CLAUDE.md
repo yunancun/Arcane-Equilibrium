@@ -52,7 +52,7 @@
 
 **進行中/阻塞**：
 - **Phase 5 PAUSED**（2026-04-12 reframe）— PNL-FIX-1/2 清理後所有活躍策略 gross edge 為負（net -$2775）；cost_gate/DL/JS 機械已接線但需真實正 edge。**下一步**：策略重做（G-SR-1 / Strategist agent / 新信號邏輯）。詳見 `memory/project_phase5_promotion_edge_crisis.md`。
-- **ENGINE-HEAL 部署留尾**：Fix 1-4（panic hook / crash-only / WS stale self-cancel 120s / watchdog 4 道保險）已 merge，運行中引擎仍 pre-fix binary。operator 需 `restart_all.sh --rebuild` 部署。**FUP-1/2/3**（TODO.md 事故 follow-up）：watchdog daemon 化 / live pipeline lagging 上游根因 / `engine_results.jsonl` 111GB 滾動或關閉。
+- **ENGINE-HEAL 部署留尾**：Fix 1-4（panic hook / crash-only / WS stale self-cancel 120s / watchdog 4 道保險）已 merge，運行中引擎仍 pre-fix binary。operator 需 `restart_all.sh --rebuild` 部署。**FUP-1 ✅ systemd user unit 正式結清**（2026-04-15）。**FUP-2/3**（TODO.md 事故 follow-up）：live pipeline lagging 上游根因 ✅ + FIX-PHASE1 合併；`engine_results.jsonl` 111GB 滾動或關閉 ✅ 折入 FIX-PHASE1。
 - **非阻塞留尾**：W1 event_consumer 拆分；D-02 PriceEvent metadata HashMap 移除。
 
 **已完成里程碑索引**（完整敘述 + commit + 測試數保留於 `docs/archive/2026-04-15--claude_md_section3_snapshot.md`）：
@@ -268,4 +268,4 @@ state_models ← state_compiler ← state_store ← main_legacy ← main.py
 
 ## 十一、一句話狀態
 
-> 截至 2026-04-15：tests engine lib **1264** + core **372** + e2e **35** = **1671** Rust passed **0 fail** · Python **2852** passed · **ENGINE-HEAL 4 Fix ✅** + 已部署（11:13 rebuild + restart）· **engine_watchdog daemon ✅** PID 592881 nohup 起（FUP-1 解除）· **G-2 FundingArb 監控 daemon ACTIVE** PID 598572，等 demo ≥20 fills 自動寫 `docs/audits/2026-04-15--g2_funding_arb_clean_edge.md`（接手先 `cat /tmp/openclaw/g2_monitor.progress.json`）· **EDGE-P3-1 Phase A/A5/A6 ✅ + Phase B #1 ✅ + backend 選型 audit ✅**（commits `c9416d0` + `0fcf449` + `3dd845c`；Phase B 2/5；Step 7a-7f 獨立可推；Stage 2+ blocked on PA `parquet_etl.py`）· **WP-F/UX-07~10 / QoL-1/3 / ORPHAN-ADOPT-1 P1 / OC-5 FundingArb / G-SR-1 / Edge 隔離 ✅** · **Phase 5 PAUSED** · **Live_Ready ✅** · **下一步**：G-2 daemon 完成（~17h ETA）→ audit → 升 R-02 · LG-1 21d · Phase 2 Adopt 等 G-1 R-02 Strategist · ENGINE-HEAL-FUP-2/3 排隊 · EDGE-P3-1 Step 7a-7f 可並行。
+> 截至 2026-04-15：tests engine lib **1264** + core **372** + e2e **35** = **1671** Rust passed **0 fail** · Python **2852** passed · **ENGINE-HEAL 4 Fix ✅** + 已部署（11:13 rebuild + restart）· **engine_watchdog systemd user unit ✅** `openclaw-watchdog.service` Restart=always + linger=yes（FUP-1 正式結清，跨重啟存活）· **G-2 FundingArb 監控 daemon ACTIVE** PID 598572，等 demo ≥20 fills 自動寫 `docs/audits/2026-04-15--g2_funding_arb_clean_edge.md`（接手先 `cat /tmp/openclaw/g2_monitor.progress.json`）· **EDGE-P3-1 Phase A/A5/A6 ✅ + Phase B #1 ✅ + backend 選型 audit ✅**（commits `c9416d0` + `0fcf449` + `3dd845c`；Phase B 2/5；Step 7a-7f 獨立可推；Stage 2+ blocked on PA `parquet_etl.py`）· **WP-F/UX-07~10 / QoL-1/3 / ORPHAN-ADOPT-1 P1 / OC-5 FundingArb / G-SR-1 / Edge 隔離 ✅** · **Phase 5 PAUSED** · **Live_Ready ✅** · **下一步**：G-2 daemon 完成（~17h ETA）→ audit → 升 R-02 · LG-1 21d · Phase 2 Adopt 等 G-1 R-02 Strategist · EDGE-P3-1 Step 7a-7f 可並行。
