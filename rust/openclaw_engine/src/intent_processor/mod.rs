@@ -221,6 +221,18 @@ pub struct IntentProcessor {
     /// EDGE-P3-1 A4：PipelineCommand 發送通道用於 `EmitShadowFill`。None 時丟棄
     /// shadow fill（fail-soft；gate 仍運作）。
     shadow_fill_tx: Option<UnboundedSender<PipelineCommand>>,
+    /// EDGE-P3-1 Step 7a: Direct DB channel for decision feature snapshots.
+    /// Emitted at the top of `evaluate_predictor_gate` whenever a real
+    /// `FeatureVectorV1` + non-empty `context_id` is available, regardless of
+    /// whether the predictor is enabled — training data collection starts
+    /// immediately in Stage 0 while the gate still short-circuits to the
+    /// legacy shrinkage path.
+    /// None → emission no-op (fail-soft; trading unaffected).
+    /// EDGE-P3-1 Step 7a：決策特徵 DB 直寫通道。只要拿到真實 `FeatureVectorV1` +
+    /// 非空 context_id，於 `evaluate_predictor_gate` 頂端即發射，無論 predictor
+    /// 是否啟用 — Stage 0 即刻採集訓練資料；None 時發射為 no-op（fail-soft）。
+    decision_feature_tx:
+        Option<tokio::sync::mpsc::Sender<crate::database::DecisionFeatureMsg>>,
 }
 
 /// EDGE-P3-1 A4: Result of predictor-gate evaluation, translated to caller action.
@@ -260,6 +272,7 @@ impl IntentProcessor {
             // Tests get a fixed seed; production overrides via `set_predictor_rng_seed`.
             predictor_rng: Mutex::new(SmallRng::seed_from_u64(0)),
             shadow_fill_tx: None,
+            decision_feature_tx: None,
         }
     }
 
@@ -285,6 +298,7 @@ impl IntentProcessor {
             pipeline_kind: PipelineKind::Paper,
             predictor_rng: Mutex::new(SmallRng::seed_from_u64(0)),
             shadow_fill_tx: None,
+            decision_feature_tx: None,
         }
     }
 
@@ -620,6 +634,18 @@ impl IntentProcessor {
         self.shadow_fill_tx = Some(tx);
     }
 
+    /// EDGE-P3-1 Step 7a: Inject the `DecisionFeatureMsg` writer channel so
+    /// `evaluate_predictor_gate` can emit one training-store row per call.
+    /// None → emission no-op (fail-soft; trading unaffected).
+    /// EDGE-P3-1 Step 7a：注入 `DecisionFeatureMsg` writer 通道，供每次 gate 評估
+    /// 寫入一列訓練資料。None 時發射 no-op（fail-soft，不影響交易）。
+    pub fn set_decision_feature_tx(
+        &mut self,
+        tx: tokio::sync::mpsc::Sender<crate::database::DecisionFeatureMsg>,
+    ) {
+        self.decision_feature_tx = Some(tx);
+    }
+
     /// EDGE-P3-1 A4: Evaluate the predictor gate for an intent. Returns a
     /// `PredictorAction` the caller uses to decide whether to skip/continue/reject.
     /// Emits `EmitShadowFill` when gate returns ε-greedy ShadowFill and a tx is wired.
@@ -643,6 +669,22 @@ impl IntentProcessor {
         now_ms: u64,
         cost_bps: f64,
     ) -> PredictorAction {
+        // EDGE-P3-1 Step 7a: Emit a decision-feature training snapshot at the
+        // TOP of the gate — before the `use_edge_predictor` short-circuit — so
+        // that training data collection begins in Stage 0 while the predictor
+        // stays disabled and the gate short-circuits to legacy shrinkage.
+        // Only fires with a real FeatureVectorV1 + non-empty context_id; no-op
+        // otherwise. `edge_label_backfill.py` populates labels on close.
+        // EDGE-P3-1 Step 7a：在 `use_edge_predictor` 短路檢查之前於 gate 頂端
+        // 發射訓練特徵快照，使 Stage 0 即刻採集資料（此時 predictor 仍禁用且
+        // gate 走 legacy shrinkage）。僅在 features Some + context_id 非空時發射；
+        // close 時由 `edge_label_backfill.py` 回填 label。
+        if !context_id.is_empty() {
+            if let Some(feats) = features {
+                self.emit_decision_feature_snapshot(intent, feats, context_id, now_ms);
+            }
+        }
+
         let cfg = &self.risk_config.edge_predictor;
         if !cfg.use_edge_predictor {
             return PredictorAction::UseLegacyGate;
@@ -739,6 +781,64 @@ impl IntentProcessor {
         if let Err(e) = tx.send(cmd) {
             tracing::warn!(err = %e,
                 "edge_predictor: EmitShadowFill send failed / 發送失敗");
+        }
+    }
+
+    /// EDGE-P3-1 Step 7a: Push one `DecisionFeatureMsg` to the writer task.
+    /// Called from the top of `evaluate_predictor_gate`, before the
+    /// `use_edge_predictor` short-circuit, so training data is collected in
+    /// Stage 0 while the gate stays on the legacy shrinkage path. Uses
+    /// `try_send` to keep the intent loop off the DB backpressure path:
+    /// writer-channel full → best-effort drop + warn, matching the writer's
+    /// own resilience policy. Silent no-op when tx is not wired.
+    /// EDGE-P3-1 Step 7a：向 writer 任務推送一條 `DecisionFeatureMsg`。於
+    /// `evaluate_predictor_gate` 頂端呼叫 — 早於 `use_edge_predictor` 短路，
+    /// Stage 0 即採集訓練資料；`try_send` 避免意圖循環被 DB 背壓阻塞，
+    /// 通道滿 → best-effort drop + warn。tx 未接線時靜默 no-op。
+    fn emit_decision_feature_snapshot(
+        &self,
+        intent: &OrderIntent,
+        features: &FeatureVectorV1,
+        context_id: &str,
+        now_ms: u64,
+    ) {
+        let tx = match self.decision_feature_tx.as_ref() {
+            Some(t) => t,
+            None => return, // fail-soft no-op
+        };
+        // Skip obviously invalid timestamps to match DB-RUN-6 rejection policy
+        // at the writer side — avoids emitting rows the writer will drop anyway.
+        // 與 writer DB-RUN-6 對齊：無效時間戳不發射，節省通道容量。
+        if now_ms == 0 {
+            tracing::warn!(
+                ctx_id = %context_id, symbol = %intent.symbol,
+                "decision_feature snapshot skipped: now_ms=0 / 時間戳 0，跳過"
+            );
+            return;
+        }
+
+        let msg = crate::database::DecisionFeatureMsg {
+            context_id: context_id.to_string(),
+            ts_ms: now_ms,
+            engine_mode: self.pipeline_kind.db_mode().to_string(),
+            strategy_name: intent.strategy.clone(),
+            symbol: intent.symbol.clone(),
+            side: if intent.is_long { 1 } else { -1 },
+            feature_schema_version: crate::edge_predictor::features::FEATURE_SCHEMA_VERSION
+                .to_string(),
+            feature_schema_hash: crate::edge_predictor::features::feature_schema_hash()
+                .to_string(),
+            feature_definition_hash: crate::edge_predictor::features::feature_definition_hash()
+                .to_string(),
+            features_jsonb: features.to_jsonb(),
+        };
+
+        if let Err(e) = tx.try_send(msg) {
+            tracing::warn!(
+                ctx_id = %context_id, symbol = %intent.symbol, error = %e,
+                "decision_feature snapshot drop — writer channel full/closed \
+                 / 特徵快照丟棄，writer 通道已滿/關閉"
+            );
         }
     }
 

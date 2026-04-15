@@ -125,6 +125,15 @@ pub struct EventConsumerDeps {
     /// Phase 2a: Channel for decision context snapshots.
     /// Phase 2a：決策上下文快照通道。
     pub context_tx: Option<tokio::sync::mpsc::Sender<crate::database::DecisionContextMsg>>,
+    /// EDGE-P3-1 Step 7a: Channel for decision feature snapshots into
+    /// `learning.decision_features`. Wired per-engine from `main.rs`; when
+    /// `None` the IntentProcessor emission is no-op (fail-soft — no training
+    /// data is collected, but live trading is unaffected). Passthrough IPC
+    /// `PipelineCommand::DecisionFeatureSnapshot` also feeds this channel.
+    /// EDGE-P3-1 Step 7a：訓練特徵寫入通道。None 時 IntentProcessor 發射為 no-op
+    /// （fail-soft — 不採集訓練資料但不影響 live 交易）。Passthrough IPC 亦送入此通道。
+    pub decision_feature_tx:
+        Option<tokio::sync::mpsc::Sender<crate::database::DecisionFeatureMsg>>,
     /// EXT-1: Channel to receive exchange events (fills/order updates) from ExecutionListener.
     /// EXT-1：從執行監聽器接收交易所事件（成交/訂單更新）的通道。
     pub exchange_event_rx: Option<mpsc::UnboundedReceiver<ExchangeEvent>>,
