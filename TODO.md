@@ -1,8 +1,8 @@
 # OpenClaw TODO — 工作計劃清單
 
-**最後更新：2026-04-16**（PAPER-DISABLE-1 ✅ 預設關閉 paper 管線 + 負餘額守門 + P0-0 RECONCILER-BURST-FIX ✅ startup grace window + 6 新單元測試 + LG-1 語義改 demo 觀察 + P1-3 shadow_fills Python consumer ✅ 15 新測試）
+**最後更新：2026-04-16 晚**（G-2 daemon 重啟以 option D config · P0-0 RECONCILER-BURST-FIX ✅ 已部署驗證 + e2e regression · P0-5 PHANTOM-2-FUP ✅ A+C 方案實作 +5 新單測 · PAPER-DISABLE-1 ✅ 歸檔 · P1-3 shadow_fills Python consumer ✅ 歸檔）
 
-**測試基準線**：Rust **engine lib 1336 (ort) / 1330 (default) + core 380 + e2e 35 + reconciler_e2e 18 + ort integration 5** · Python **2898 passed (5 skipped · 0 fail)**（+15 shadow_fills） · ml_training **182 passed (10 skipped)**
+**測試基準線**：Rust **engine lib 1335 (default) / 1341 (ort) + core 380 + e2e 35 + reconciler_e2e 19 + ort integration 5** · Python **2898 passed (5 skipped · 0 fail)** · ml_training **182 passed (10 skipped)**
 
 > compact 後從此文件恢復工作狀態。第一個 `[ ]` 即為下一步起點。
 > 條目分級：**P0 阻塞關鍵路徑** → **P1 當週活躍** → **P2 下週排期** → **P3 長期專項** → **P4 Backlog / Conditional**
@@ -33,35 +33,15 @@ git status && git log --oneline -5
 
 ## 🔴 P0 — 阻塞關鍵路徑（先清才能推 Live Gate）
 
-### P0-0 · RECONCILER-BURST-FIX — 對帳器啟動期誤升級風控 ✅ 2026-04-16
-**狀態**：修復完成（待 `restart_all.sh --rebuild` 部署驗證）。方案 A startup grace window 5min 實作。
-**根因**（RCA 文件：`docs/references/2026-04-16--reconciler_burst_escalation_rca.md`）：
-- 引擎重啟後 warmup baseline 與本地 paper_state 未同步 → 首輪 tick 將 Ghost/Orphan 誤判為 live drift burst
-- 2026-04-15 事故：9 drifts（6 ghost + 2 orphan + 1 minor_drift）→ burst streak=1 升 Defensive → FAST_TRACK ReduceToHalf 全組合半倉 + `ft_pause_new_entries` 鎖新開倉 → 46min 才 Cautious→Normal 一路降級
-**修復**（方案 A startup grace window 5min）：
-- `escalation.rs`：新增 `STARTUP_GRACE_MS = 5 * 60 * 1000` + `ReconcilerState.startup_ms` 欄位
-- `evaluate_actions()` 入口：寬限期內早退返空 actions，**不累加** drift_streak / burst_drift_streak / clean_cycles（避免計數累積在寬限結束瞬間集中觸發）
-- `check_rest_failure_escalation()` 入口同樣 grace 檢查
-- `run_position_reconciler()` 啟動時 `rc_state.startup_ms = now_ms_util()`
-- 寬限期內 orphan_handler / V014 audit / baseline update 全部照常運作
-**回歸**：
-- 6 新 unit tests（escalation.rs）：burst suppression / persistent suppression / single suppression / post-grace normal escalation / REST failure suppression / boundary exclusive / zero startup_ms legacy behaviour
-- engine lib 1330 default + 18 reconciler_e2e + 35 stress_integration 全綠 / 0 fail
-**解鎖**：P0-1（G-2 FundingArb 驗證）+ P0-3（Phase 5 edge 2w 重評）關鍵路徑
-**部署驗收**（operator）：
-1. `bash helper_scripts/restart_all.sh --rebuild` 部署新 bin
-2. 前 5min：`tail -f /tmp/openclaw/engine.log | grep "startup grace"` 應看到 suppression 日誌（有 drift 時）
-3. 前 5min 內 governance 級別保持 `NORMAL`
-4. 乾淨環境：30min 內 governance 保持 NORMAL
-5. G-2 daemon 重新計時累積 ≥20 fills
+### P0-0 · RECONCILER-BURST-FIX ✅ 2026-04-16（已歸檔）
+已部署（engine PID 1340527, 21:08 local 啟動）+ 驗證 11+ min 0 auto-escalations。詳見歸檔 `docs/archive/2026-04-16--completed_todo_strategy_close_tag_edge_p3_dedup.md` §P0-0。
 
-### P0-1 · G-2 FundingArb 驗證 🟡 等重啟（P0-4 R1 已合入 2026-04-16，歸檔）
-**狀態**：daemon PID 598572 已終止；P0-4 R1 tag 透傳修復已合入（歸檔索引見文件末尾 2026-04-16 條目），engine 重建後 `strategy_name` 將正確分流。下一步是重寫 daemon SQL 口徑並重啟累積 ≥20 真策略退場 fill。
+### P0-1 · G-2 FundingArb 驗證 🟡 daemon restarted option D config
+**狀態**：daemon PID 1349961 已重啟，target 20→10 + 72h wall-clock deadline。baseline 2026-04-16 15:40:48 UTC 不變，progress 2/10，net −$0.46。P0-4 R1 已部署且驗證（DB 已出現 `strategy_close:grid_close_short`/`ma_reverse_cross` 等真實 tag）。
+**定位**（重要）：**非主路徑** — Phase 5 edge 評估用其他 6 策略 fills 即足夠、LG-1 非阻塞、Live gate 不等 G-2。G-2 只卡 funding_arb 單策略 R-02 promotion 決定。
 **診斷文件**：`docs/audits/2026-04-16--demo_zero_strategy_exit_audit.md` V2
-**阻塞者**：~~P0-4 STRATEGY-CLOSE-TAG-FIX~~ ✅ · ~~FA-PHANTOM-2~~ ✅ · ~~P0-0 RECONCILER-BURST-FIX~~ ✅（待部署）
-**驗收**：
-- `restart_all.sh --rebuild` 部署 R1 bin；SQL 驗證 `SELECT substring(strategy_name from 1 for 30), COUNT(*) FROM trading.fills WHERE engine_mode='demo' AND ts > '<rebuild_ts>' GROUP BY 1` 出現 `strategy_close:*` 與分離 `risk_close:*` 桶
-- 重寫 G-2 daemon SQL 口徑並重啟 → 累積 ≥20 真實策略退場 fill 寫 audit
+**結束條件**：達 10 fills 或超 72h（2026-04-19 19:35 UTC）→ 自動寫 audit `docs/audits/2026-04-16--g2_funding_arb_clean_edge.md`
+**進度檢視**：`cat /tmp/openclaw/g2_monitor.progress.json`（session 開頭三連的一部分）
 
 ### P0-2 · LG-1 Demo Trading 21d 觀察期 🕰️
 **狀態**：PAPER-DISABLE-1（2026-04-16）後改口徑為 demo 觀察；起點待 P0-0 部署後 48h 無事故
@@ -76,31 +56,33 @@ git status && git log --oneline -5
 **判斷**：
 - 若 gross edge 翻正 → Phase 5 cost_gate 工作重啟（現有 JS / cost_gate / DL 機械已接線）
 - 若 gross edge 仍負 → 策略本身需重做，轉向 EDGE-P3-1 接管（替換 shrunk_bps 為 per-trade 動態預測）或更激進的 EDGE-P2
-**阻塞者**：~~P0-0 RECONCILER-BURST-FIX~~ ✅（2026-04-16 修復完成，待部署驗證）。~~P0-1~~ 不必要 — G-2 只覆蓋 funding_arb 子集,Phase 5 整體 edge 用其他 6 策略 fills 已足夠。
-**預估**：P0-0 部署後 2 週
+**阻塞者**：~~P0-0 RECONCILER-BURST-FIX~~ ✅ 已部署。~~P0-1~~ 不必要 — G-2 只覆蓋 funding_arb 子集，Phase 5 整體 edge 用其他 6 策略 fills 已足夠。
+**預估**：乾淨 demo 開跑（2026-04-16 21:08 local 起）後 2 週
 
-### P0-5 · PHANTOM-2-FUP — ReduceToHalf one-shot guard 跨 tick 失效 🆕 2026-04-16
-**狀態**：RCA 完成（`docs/references/2026-04-16--phantom2_fup_reduce_to_half_cascade_rca.md`），未排期實作
-**症狀**：FA-PHANTOM-2 fix（commit `348a9c5`,`worst_drop_for_held` + sigma 閘）已部署生效（`grep CloseAll engine.log` = **0**），但 `ReduceToHalf` 路徑仍在同 1-2 秒內針對同一 symbol 連續觸發 ≥9 次。實證：
-- 引擎日誌 `18:03:41.602042 → .603320`（1.3s 內）9 次 `FAST_TRACK ReduceToHalf`，全是 ORDIUSDT 觸發（held_drop=6.0%/sigma=3.0,positions=2,risk_level=Cautious）
-- DB 1-min bucket 統計：16:29 一分鐘 130 fills / 18:03 一分鐘 147 fills（爆發模式）
-- R1 baseline 起 2.6h 內 `risk_close:fast_track_reduce_half` = 335 筆 vs `strategy_close:*` = 42 筆(8:1)
-**根因推斷**：`tick_pipeline/on_tick.rs:175-228` 的 `ft_reduced_symbols: HashSet<String>` 是 EDGE-P0-1 設計的 one-shot guard,但實際每 tick 進 ReduceToHalf 分支時對 positions 重新展開 → for-loop 對「未在 HashSet」的 sym emit fill。第 1 輪標記後第 2 輪本應整體跳過,但 9 次連發說明 guard 在 risk_level 過渡(Cautious↔Defensive↔Normal)或 ft 重新評估時被清掉了
-**修復方案候選**：
-- **A**：把 ft_reduced_symbols 升級為 `HashMap<String, ts_ms>`,加 cooldown(建議 ≥60s 同 governance defensive 窗口)
-- **B**:每 tick 進 ReduceToHalf 分支時整體 dedup — 若 `positions` 全在 ft_reduced_symbols 中則 early-return,別再 emit_close_fill 0-qty 雜訊
-- **C**:把 EDGE-P0-1 重新審計 — 確認 ft_reduced_symbols 在哪些代碼路徑會被 clear(governance.recover()? new tick?),補單元測試
-**Why not 立刻動手**：當前未壞 — 只是 reduce 同倉的逐次半倉,功能仍正確。Phase 5 PAUSED 狀態下噪音不造成新傷害。但會放大 DB IO 與引擎日誌 280MB 增長率(同 ENGINE-HEAL `engine_results.jsonl` 111GB 案例)。
-**阻塞者**:無(獨立,可在 P0-0 後或併行修)
-**解鎖**:G-2 daemon 累積速率 ↑(funding_arb 開倉後不再被 over-fast-track 殲滅)
-**驗收**:同條件下 1s 內同 symbol 只觸發 1 次 ReduceToHalf;risk_level 過渡不清空 ft_reduced_symbols(除 governance defensive episode 結束)
-**接手指南**:
-- 相關程式:`rust/openclaw_engine/src/tick_pipeline/on_tick.rs:175-228`(ft_reduced_symbols 邏輯)、`rust/openclaw_core/src/sm/risk_gov.rs`(risk_level 過渡)
-- 觀察手段:`grep "FAST_TRACK ReduceToHalf" /tmp/openclaw/engine.log | head -100` 看時間戳間隔
-- 相關 commit:`348a9c5`(PHANTOM-2)、tick_pipeline/tests.rs L171 已有單測 fixture 可擴展
-**預估**:0.5d spec + 0.5d 實作 + 0.5d 回歸
+### P0-5 · PHANTOM-2-FUP — ReduceToHalf one-shot guard 跨 tick 失效 ✅ 2026-04-16
+**狀態**：修復完成，engine lib 1335 passed / 0 failed（+5 新單測）。待 `restart_all.sh --rebuild` 部署。
+**方案**：**A+C 組合**（先 propose C-alone，QC 對抗性審查翻轉為 A+C — 因 `risk_gov.rs:617` 無自動降級路徑 + `position_risk_evaluator` 不認 sigma 離群，純 C 會讓 drawdown-driven Cautious 下已半倉 symbol 永久鎖定直到 operator 手動 de-escalate）
+- **A**：`ft_reduced_symbols: HashSet<String>` → `HashMap<String, i64>`（symbol → last reduce ts_ms）+ 60s cooldown 封毫秒連發
+- **C**：clear 條件 `< Defensive` → `== Normal`，僅完全回到 Normal 清空（快速 re-arm 新 episode）
+- 新常數 `FT_REDUCE_COOLDOWN_MS = 60_000` 於 `on_tick_helpers.rs:23`（const 不熱載 — 60s 配合 governance Defensive 窗，足夠保守）
+- 新 pure helper `ft_reduce_cooldown_expired()` 使 filter 可單測
+**改動檔案**：
+- `rust/openclaw_engine/src/tick_pipeline/mod.rs`（struct 欄位型別 + init）
+- `rust/openclaw_engine/src/tick_pipeline/on_tick.rs:151-237`（clear 條件 + filter + insert）
+- `rust/openclaw_engine/src/tick_pipeline/on_tick_helpers.rs`（+const + fn）
+- `rust/openclaw_engine/src/tick_pipeline/tests.rs`（+5 新單測）
+**新單測**：
+- `test_ft_reduce_cooldown_expired_no_prior_entry`：首次永遠放行
+- `test_ft_reduce_cooldown_blocks_within_window`：+0ms / +59999ms 一律擋（複現 1.3s/9 次 cascade）
+- `test_ft_reduce_cooldown_re_arms_after_window`：+60000ms 解鎖 + 跨 symbol 獨立
+- `test_ft_reduce_clear_only_on_normal`：Cautious/Reduced/Defensive 絕不清空
+- `test_ft_reduce_cooldown_map_stamps_once_per_window`：真實 TickPipeline + paper_state 整合
+**驗收（部署後觀察）**：
+- `grep "FAST_TRACK ReduceToHalf" /tmp/openclaw/engine.log` 同 symbol 連續事件時間戳間隔 ≥60s（不再毫秒連發）
+- `risk_close:fast_track_reduce_half` 24h 計數 < 50（vs 修復前 335/2.6h，預期降 >80%）
+**RCA**：`docs/references/2026-04-16--phantom2_fup_reduce_to_half_cascade_rca.md`（歷史記錄，已落實）
 
-**關鍵路徑**:`~~P0-0 reconciler burst fix~~ ✅ → ~~restart_all --rebuild 部署~~ ✅ → P0-3 Phase 5 edge 2w 評估 + P0-2 LG-1 21d demo → LG-4/5 → Live`(P0-1 G-2 並行驗證 funding_arb 子集,不在主路徑;P0-5 PHANTOM-2-FUP 不阻塞主路徑,可任意時點插入)
+**關鍵路徑**:`~~P0-0 reconciler burst fix~~ ✅ → ~~restart_all --rebuild 部署~~ ✅ → P0-3 Phase 5 edge 2w 評估 + P0-2 LG-1 21d demo → LG-4/5 → Live`(P0-1 G-2 並行驗證 funding_arb 子集,不在主路徑;~~P0-5 PHANTOM-2-FUP~~ ✅ 待 `--rebuild` 部署即生效)
 **最早 Live 日期**:樂觀估 **W24 末(～2026-05-23)**
 
 ---
@@ -109,20 +91,8 @@ git status && git log --oneline -5
 
 > P1-1 EDGE-P3-1 Phase B #3 ONNX loader ✅ 2026-04-16 · P1-2 Step 7b Python route + flag flip ✅ 2026-04-16 — 已歸檔（索引見文件末尾）。
 
-### P1-3 · EDGE-P3-1 Step 7c Python consumer ✅ 2026-04-16
-**狀態**：完成（待 API 服務重啟載入新路由）。三條讀取路由骨架 + 15 新單元測試。
-**交付**：
-- `app/shadow_fills_routes.py`：`GET /api/v1/edge/shadow_fills`（分頁列表）、`/summary`（per-strategy 聚合）、`/promotion_gate/{strategy}`（樣本數分級裁決）
-- `tests/test_shadow_fills_routes.py`：fake DB + fail-closed + 空資料 fallback + verdict 分支覆蓋；15 passed
-- `app/main.py`：路由註冊於 `engine_capabilities_router` 之後
-**Promotion gate 門檻**（spec §8.3 line 714）：
-- `n < 200` → `insufficient_samples`
-- `200 ≤ n < 500` + synthetic 覆蓋 → `ship_shadow_candidate`
-- `n ≥ 500` + synthetic 覆蓋 → `ship_prod_candidate`
-- `n ≥ 200` 但 synthetic 仍 NULL → `awaiting_synthetic_labels`
-**注意**：PAPER-DISABLE-1 後 paper 預設關，shadow fills 表目前為空。路由骨架已就緒，等 `OPENCLAW_ENABLE_PAPER=1` 啟用 paper + ONNX artifact 載入 + Stage 2+ synthetic-close writer 接線後自動開始回資料。離線指標（pinball skill / coverage error / decile lift）由 `run_training_pipeline.py` 裁決，不在此端點範圍。
-**驗收**：`python3 -m pytest program_code/exchange_connectors/bybit_connector/control_api_v1/tests/ -q` → 2469 passed / 1 skipped（+15 自本 PR）
-**部署**：需重啟 control_api_v1 服務載入新路由（`bash helper_scripts/restart_all.sh` 不含 --rebuild 即可）
+### P1-3 · EDGE-P3-1 Step 7c Python consumer ✅ 2026-04-16（已歸檔）
+三條讀取路由骨架 + 15 新單元測試。詳見歸檔 `docs/archive/2026-04-16--completed_todo_strategy_close_tag_edge_p3_dedup.md` §P1-3。
 
 ### P1-4 · 在真 ETL 資料跑首個 ONNX export
 **狀態**：`learning.decision_features` 於 Step 7a 後開始採集；等足夠樣本（≥100k rows per strategy 推薦）
@@ -198,27 +168,8 @@ git status && git log --oneline -5
 ### WP-I 文檔衛生
 - [ ] R4-NAME-1 / R4-MEM-1 / R4-REF-ST-1
 
-### 🧹 PAPER-DISABLE-1 · Paper 管線預設關閉 ✅ 2026-04-16
-**狀態**：完成（待 `restart_all.sh --rebuild` 部署驗證）
-**背景**：Paper 管線在 4-14~16 兩天 balance $783→-$292（137% drawdown），5055 fills / -$1076 net。Demo 同期 3295 fills / -$63 net。對比之下：
-- Paper 配置刻意寬鬆（`risk_config_paper.toml`："maximum exploration"）：position_size 50% vs demo 25%、leverage 100x vs 50x、daily_loss 30% vs 15%、h0_shadow_mode=true（H0 gate 不阻擋）、min_confidence 0.05 vs 0.10
-- Paper 走 `process_with_features`（`on_tick.rs:752`）合成 fill at `event.last_price` → 零延遲/零 partial/零 reject，成交率 ~100%
-- paper_state 無負餘額守門 → 穿倉後仍繼續刷 intent
-- 同策略 grid_close_short：paper 745 fills/-$218 vs demo 28 fills/-$0.06（27x fills, 3600x 虧損差）
-**決策**：Agent 階段未到（W22+ Strategist stub），paper 現只產噪音污染 DB + edge data。3E-ARCH 結構能力保留，僅 runtime spawn 被 env gate。
-**實作**：
-- `rust/openclaw_engine/src/main.rs`：`OPENCLAW_ENABLE_PAPER=1` 才 spawn paper pipeline；預設走 drain task 消費 `paper_event_rx` + `paper_cmd_rx`（避免 sender clone 累積）
-- `rust/openclaw_engine/src/tick_pipeline/mod.rs`：新增 `PipelineHealth::Disabled = 3` + `from_u8(3)` 處理
-- 禁用時寫入 `/tmp/openclaw/paper_state.json` + `pipeline_snapshot_paper.json` 含 `disabled: true` + `disabled_since_ms` 標記，讓 Python GUI / `ipc_state_reader.get_paper_state()` 感知狀態
-- `rust/openclaw_engine/src/intent_processor/router.rs`：新增 Gate 1.6 `insufficient_balance` 守門（balance ≤ 0 且無持倉時拒絕開新倉；反向平倉仍允許）
-- 測試：更新 `test_pnl1_rejects_qty_zero_process`（接受 `insufficient_balance:` 或 `qty_zero:` 前綴）+ `test_d6_pipeline_health_*` 新增 `Disabled=3` 斷言
-- 驗收基準：engine lib 1330 default / 1336 ort + core 380 + e2e 35 全綠
-**如何重新啟用**：`export OPENCLAW_ENABLE_PAPER=1` 後重啟引擎。GUI tab 仍會運作（Python 側 ENGINE=None stub 不變）。
-**後續觀察**：
-- restart 後驗證 paper_state.json `disabled=true` 被寫入，log 出現 `paper pipeline DISABLED`
-- DB `trading.fills WHERE engine_mode='paper'` 應停止累積
-- Python GUI paper tab 應顯示 DISABLED 或 last_known + disabled flag（若未在 Python 側加 UI flag 檢查，會顯示 balance=0 + 0 positions；留待後續 GUI 優化）
-**Why not delete outright**：3E-ARCH 是 4-11 剛完成的架構成果；env gate 保留未來 W22+ Agent 探索階段一鍵啟用能力。
+### 🧹 PAPER-DISABLE-1 · Paper 管線預設關閉 ✅ 2026-04-16（已歸檔）
+已部署（engine PID 1340527 後生效，`OPENCLAW_ENABLE_PAPER=1` 可重開）。詳見歸檔 `docs/archive/2026-04-16--completed_todo_strategy_close_tag_edge_p3_dedup.md` §PAPER-DISABLE-1。
 
 ### 🧹 IP-DEDUP-1 · IntentProcessor 同幣種重發去抖 🆕 2026-04-16
 **背景**：Problem 2 診斷（見 `project_engine_mode_tag_live_demo.md` + `project_phase5_promotion_edge_crisis.md`）揭露：cost_gate 拒絕後無 position → 策略每 tick 看到「沒倉位」狀態重發同向 intent（ORDIUSDT 14min 內 8439 筆）。每筆重發都觸發 `evaluate_predictor_gate` → emit DF snapshot → 放大 `learning.decision_features` 寫入量 + 無謂 cost_gate CPU。
@@ -265,7 +216,7 @@ git status && git log --oneline -5
 |------|------|---------|------|
 | W19-W21 | 04-14~05-02 | 基礎設施 / 安全 / Phase 6 / 3E-ARCH / Audit | ✅ 歸檔 |
 | W22 | 05-05~09 | **ENGINE-HEAL FUP-1/2/3 + FIX-PHASE1 · FA-PHANTOM-2 · EDGE-P3-1 Phase A/B + Step 7 · ML-MIT #26 Lane A · GUI fills 鏈** | ✅ 歸檔 |
-| W22 末 | 2026-04-15 | P0-1 G-2 驗證（daemon active）· P1-1~4 EDGE-P3-1 Stage 2 推進 | 🟡 進行中 |
+| W22 末 | 2026-04-16 | P0-4 R1 · P0-0 reconciler grace · PAPER-DISABLE-1 · G-2 daemon option D · DEDUP-PY-RUST · Phase B #3 ONNX loader | ✅ 歸檔 |
 | W23 | 05-12~16 | P0-2 LG-1 21d demo 觀察起點 · G-7 Teacher · G-10 Calibration · LG-2/3 | ⬜ |
 | W24 | 05-19~23 | LG-4/5 Live Gate · SEC-21 · QoL-2 | ⬜ |
 | W25+ | 05-26+ | EDGE-P3-1 產線化 · Phase 5 補強或重做 · G-1 R-06 全 5 agent | ⬜ |
