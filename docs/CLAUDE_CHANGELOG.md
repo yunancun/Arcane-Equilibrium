@@ -1,7 +1,42 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-04-16（P0-0 RECONCILER-BURST-FIX startup grace window）
+> 最後更新：2026-04-16 深夜（LIVE-GUARD-1 Rust 端 Mainnet 三重硬鎖回補）
+
+### LIVE-GUARD-1 — Rust 端 Mainnet 三重硬鎖回補（2026-04-16 深夜）
+
+**背景**：SEC-17（2026-04-10 commit 25b5d73）在 GUI API key live_demo slot 功能推動下移除了 `OPENCLAW_ALLOW_MAINNET=1` Rust 端 env guard，意圖把門控外移 Python（`live_reserved` mode + Operator role auth）。但 2026-04-16 audit 揭露該遷移未補替代 fail-safe：`bybit_rest_client.rs:394` 僅 `tracing::warn!` 不擋、憑證空只 `warn!` + 後續 401、憑證 chain `param → BYBIT_API_KEY env → slot file` 讓任何能設環境變數的進程繞過 secret slot。Rust 長跑 × Python 重啟脆弱的對稱性崩潰。CLAUDE.md §三 / §四 標為 P0-CRITICAL 阻塞真實 live 上線。
+
+**修復**（三重 Gate 加固，純 env 方案 — CLAUDE.md 建議選項之一）：
+- **Gate #1**：恢復 `OPENCLAW_ALLOW_MAINNET=1` env 檢查（exact "1"，拒絕 "0"/"true"/"yes"/"1 "/" 1"），缺即 `BybitApiError::Business`
+- **Gate #2**：`env=Mainnet` 時禁用 `BYBIT_API_KEY` / `BYBIT_API_SECRET` env var fallback，只允許 param → slot file（封閉 env 繞 slot 的攻擊面）。Demo/Testnet/LiveDemo 不受影響
+- **Gate #3**：`env=Mainnet` 時憑證空 → 構造時 `Err` fail-closed（不再 warn! + 簽名階段 401 污染重試循環）
+- `bybit_rest_client.rs:386-497` new() 重寫 + bilingual docstring
+
+**測試**（+7，engine lib 1335→1342 / 0 fail；E2 對抗性審查 5/5 APPROVED）：
+- `test_mainnet_blocked_without_allow_env` — 未設 env → Err（Gate #1）
+- `test_mainnet_blocked_with_wrong_allow_value` — "0"/"true"/"yes"/"1 "/" 1" 全拒絕
+- `test_mainnet_blocked_without_credentials` — allow=1 無 creds → Err（Gate #3）
+- `test_mainnet_ignores_env_var_credentials` — `BYBIT_API_KEY` env 有值、slot 無 → 仍 Err（Gate #2 核心）
+- `test_mainnet_accepts_explicit_param_creds` — allow=1 + param → OK（happy path）
+- `test_demo_env_var_creds_still_work` — 回歸守衛：Demo + env var 不壞
+- `test_testnet_no_guard_check` — 回歸守衛：Testnet 不需 allow env
+- env-sensitive 測試用 `static LIVE_GUARD_ENV_LOCK: Mutex<()>` 串行化 + `EnvSnapshot` RAII 還原
+
+**E2 對抗性審查**（5/5 APPROVED，Explore sub-agent）：
+1. BybitRestClient 結構字面量繞過 — ✅ 無缺口（12 個 struct literal 全在 `#[cfg(test)]`，非測試代碼零 literal）
+2. 調用方 Err 處理 — ✅ `startup.rs:432` return None 拒絕啟動、`openclaw_pyo3/client.rs:93` PyErr 傳回 Python 硬性失敗
+3. 其他 HTTP client 打 mainnet endpoint — ✅ 無獨立 client，MarketDataClient 基於 BybitRestClient
+4. WebSocket 獨立路徑 — ✅ BybitPrivateWs 接受預解析憑證無獨立讀取，public WS 無 Mainnet guard 需求
+5. 環境變量語意誤用 — ✅ repo grep 0 結果，無既存 `OPENCLAW_ALLOW_MAINNET` 設值會被語意變更破壞
+
+**架構影響**：真實 live 門控從 1 項 Rust-verifiable（secret slot 存在）升為 **3 項 Rust-verifiable**（Gate #1 env + Gate #2 cred source 限定 + Gate #3 fail-closed 構造）+ **2 項 Python-side**（live_reserved mode + Operator auth）= 共 5 項。任何單項失敗即拒絕構造 mainnet client。
+
+**部署**：下次 `restart_all.sh --rebuild` 附帶生效。當前 LiveDemo → Demo endpoint 零影響；真實 Mainnet 僅在 operator 顯式配置 `trading_mode=Live` + `OPENCLAW_ALLOW_MAINNET=1` + secret slot 憑證三項俱全時可用。
+
+**Commit**：<pending>
+
+---
 
 ### P0-0 RECONCILER-BURST-FIX — Startup Grace Window 抑制對帳器啟動期誤升級（2026-04-16）
 

@@ -1,8 +1,8 @@
 # OpenClaw TODO — 工作計劃清單
 
-**最後更新：2026-04-16 晚**（G-2 daemon 重啟以 option D config · P0-0 RECONCILER-BURST-FIX ✅ 已部署驗證 + e2e regression · P0-5 PHANTOM-2-FUP ✅ A+C 方案實作 +5 新單測 · PAPER-DISABLE-1 ✅ 歸檔 · P1-3 shadow_fills Python consumer ✅ 歸檔）
+**最後更新：2026-04-16 深夜**（LIVE-GUARD-1 ✅ Rust 端 Mainnet 三重硬鎖回補 +7 新單測 · G-2 daemon 重啟以 option D config · P0-0 RECONCILER-BURST-FIX ✅ 已部署驗證 + e2e regression · P0-5 PHANTOM-2-FUP ✅ A+C 方案實作 +5 新單測 · PAPER-DISABLE-1 ✅ 歸檔 · P1-3 shadow_fills Python consumer ✅ 歸檔）
 
-**測試基準線**：Rust **engine lib 1335 (default) / 1341 (ort) + core 380 + e2e 35 + reconciler_e2e 19 + ort integration 5** · Python **2898 passed (5 skipped · 0 fail)** · ml_training **182 passed (10 skipped)**
+**測試基準線**：Rust **engine lib 1342 (default) / 1348 (ort) + core 380 + e2e 35 + reconciler_e2e 19 + ort integration 5** · Python **2898 passed (5 skipped · 0 fail)** · ml_training **182 passed (10 skipped)**
 
 > compact 後從此文件恢復工作狀態。第一個 `[ ]` 即為下一步起點。
 > 條目分級：**P0 阻塞關鍵路徑** → **P1 當週活躍** → **P2 下週排期** → **P3 長期專項** → **P4 Backlog / Conditional**
@@ -82,6 +82,28 @@ git status && git log --oneline -5
 - `risk_close:fast_track_reduce_half` 24h 計數 < 50（vs 修復前 335/2.6h，預期降 >80%）
 **RCA**：`docs/references/2026-04-16--phantom2_fup_reduce_to_half_cascade_rca.md`（歷史記錄，已落實）
 
+### P0-8 · LIVE-GUARD-1 — Rust 端 Mainnet 三重硬鎖回補 ✅ 2026-04-16
+**狀態**：修復完成，engine lib 1342 passed / 0 failed（+7 新單測）。E2 對抗性審查 5/5 APPROVED。不需 rebuild 部署（Rust 側變更 — 需走 `restart_all.sh --rebuild`，但**生效條件是 env=Mainnet**，當前 LiveDemo 流量零影響）。
+**根因**：SEC-17（2026-04-10 commit 25b5d73）移除 `OPENCLAW_ALLOW_MAINNET=1` Rust guard 後未補替代 fail-safe；憑證來源同時從「slot 文件唯一」擴展為「env var > slot」雙路徑，導致任何能設環境變數的進程都能繞過 secret slot。門控完全外移 Python → Rust 長跑 × Python 重啟脆弱的對稱性崩潰。
+**方案**：**三重加固 Gate #1/#2/#3**（env 路徑，非 operator-signed file — CLAUDE.md §三建議選項；後者 HMAC+mtime freshness 屬 over-engineer）
+- **Gate #1**: `env=Mainnet` 需 `OPENCLAW_ALLOW_MAINNET=1`（exact "1"，拒絕 "0"/"true"/"yes"/"1 "），缺即 `BybitApiError::Business`
+- **Gate #2**: `env=Mainnet` 時禁用 `BYBIT_API_KEY`/`BYBIT_API_SECRET` env var fallback，只允許 param → slot file（封閉 env 繞 slot 的攻擊面）
+- **Gate #3**: `env=Mainnet` 時憑證空 → 構造時 `Err` fail-closed（之前只 `warn!` + client 建立 + 簽名階段 401，污染重試循環）
+- Demo/Testnet/LiveDemo 不受影響（向後兼容，當前 live pipeline 走 LiveDemo endpoint 零回歸）
+**改動檔案**：
+- `rust/openclaw_engine/src/bybit_rest_client.rs:386-497`（new() 重寫 + 三重 gate + bilingual docstring）
+- 同檔 tests mod +7 新單測（LIVE_GUARD_ENV_LOCK Mutex + EnvSnapshot RAII）
+**新單測**：
+- `test_mainnet_blocked_without_allow_env` — 未設 env → Err
+- `test_mainnet_blocked_with_wrong_allow_value` — "0"/"true"/"yes"/"1 "/" 1" 全拒絕
+- `test_mainnet_blocked_without_credentials` — allow=1 無 creds → Err
+- `test_mainnet_ignores_env_var_credentials` — BYBIT_API_KEY env 有值、slot 無 → 仍 Err（驗 Gate #2）
+- `test_mainnet_accepts_explicit_param_creds` — allow=1 + param 傳入 → OK
+- `test_demo_env_var_creds_still_work` — 回歸守衛：Demo + env var 不壞
+- `test_testnet_no_guard_check` — 回歸守衛：Testnet 不需 allow env
+**E2 審查結論**（5/5 APPROVED）：無 struct literal 繞過、startup.rs:432 + pyo3/client.rs:93 Err 硬傳播、無獨立 HTTP client 可打 mainnet、WS 靠 REST 憑證無獨立 guard 需求、repo grep 無既存 OPENCLAW_ALLOW_MAINNET 誤用值。
+**部署**：下次 `restart_all.sh --rebuild` 附帶生效。當前 LiveDemo→Demo endpoint 零影響；真實 Mainnet 僅在 operator 顯式配置 `trading_mode=Live` + secret slot + env var 三項俱全時可用（門控從 1 項 Rust-verifiable 升為 3 項）。
+
 ### P0-6 · INTENT-WRITE-GAP-1 — live/live_demo `trading.intents` 寫入 path 斷裂 🔴 NEW 2026-04-16
 **發現**：實現性審查（2026-04-16 夜，engine PID 1364222 uptime ~11min）DB 查詢顯示嚴重 data integrity 斷裂：
 - `trading.risk_verdicts` 24h 內 live Approved **976,097** + live_demo Approved **570,522**（且現在每秒 ~6.6 條持續寫入），每條 `intent_id` 欄位都有值（null_intent_id=0）
@@ -108,7 +130,7 @@ git status && git log --oneline -5
   2. 檢查 Approved verdict 後 submit 路徑（`intent_processor/router.rs` → OMSProxy）
 **阻塞**：Live gate
 
-**關鍵路徑**:`~~P0-0 reconciler burst fix~~ ✅ → ~~restart_all --rebuild 部署~~ ✅ → P0-6/P0-7 查清 intent/order 寫入斷點 → P0-3 Phase 5 edge 2w 評估 + P0-2 LG-1 21d demo → LG-4/5 → Live`(P0-1 G-2 並行驗證 funding_arb 子集,不在主路徑;~~P0-5 PHANTOM-2-FUP~~ ✅ 待 `--rebuild` 部署即生效)
+**關鍵路徑**:`~~P0-0 reconciler burst fix~~ ✅ → ~~restart_all --rebuild 部署~~ ✅ → P0-6/P0-7 查清 intent/order 寫入斷點 → P0-3 Phase 5 edge 2w 評估 + P0-2 LG-1 21d demo → LG-4/5 → Live`(P0-1 G-2 並行驗證 funding_arb 子集,不在主路徑;~~P0-5 PHANTOM-2-FUP~~ ✅ 待 `--rebuild` 部署即生效;~~P0-8 LIVE-GUARD-1~~ ✅ Rust 端 Mainnet 三重硬鎖回補,解除 CLAUDE.md §三 LIVE-GUARD-1 P0-CRITICAL 阻塞)
 **最早 Live 日期**:樂觀估 **W24 末(～2026-05-23)** — P0-6/P0-7 若揭露架構級 bug 可能延後
 
 ---

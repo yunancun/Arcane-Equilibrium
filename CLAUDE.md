@@ -51,8 +51,10 @@
 **權威原則**：Rust `openclaw_engine` = paper/demo/live 三引擎並行唯一引擎（ARCH-RC1 1C-4 + 3E-ARCH）。Rust ConfigStore 為所有交易/風控/學習/預算參數權威，4 IPC 寫入面 → tick-level hot-reload。**禁止 restart-to-apply**。Guardian = RiskConfig 純派生視圖。Python 無交易邏輯（DEAD-PY-2 清除 ~4500 行後；2026-04-16 audit：`legacy_routes.py + main_legacy.py` 共 1630 行邊界代碼仍殘留，已隔離不執行）。
 
 **進行中/阻塞**：
-- **LIVE-GUARD-1（P0-CRITICAL，2026-04-16 新增）**：SEC-17（2026-04-10 commit 25b5d73）移除 `OPENCLAW_ALLOW_MAINNET` Rust guard 後**未補替代 fail-safe**。`bybit_rest_client.rs:394` 對 Mainnet 僅 `tracing::warn!` 不擋；憑證空也只 `warn!` 不 return Error（client 被建立，簽名階段才 401）。門控完全外移 Python → 對稱性崩潰（Rust 長跑、Python 重啟脆弱、環境變數能繞過 secret slot）。**必須補 Rust 側輕量 fail-safe**：`env=Mainnet` + 憑證齊全時，要求額外 token/env（建議回退 `OPENCLAW_ALLOW_MAINNET=1` 或 operator-signed guard file），**禁止退回「信任 Python」的零摩擦**。在此補上前，live 上線風險等級 = HIGH。待 plan。
-- **INTENT-WRITE-GAP-1（P0-CRITICAL，2026-04-16 新增）**：`trading.risk_verdicts` 24h 內 live/live_demo Approved **154 萬條**（每條含 `intent_id`，且 live_demo 仍以 6.6/秒寫入中），但 `trading.intents` 對 live/live_demo 同期 **0 條**。兩張表寫入 path 斷裂；下游 learning/Phase 5/experiment_ledger 在 live/live_demo 上已瞎 24h+。疑為 DEDUP-PY-RUST Tier A 回歸。TODO §P0-6。
+- **STABILITY-1（P0-CRITICAL，2026-04-16 audit 新增）**：2026-04-16 當日 9 小時內引擎崩潰 **5 次**（11:11/11:13/11:14 UTC 三連爆 + 16:03/16:04 UTC 兩連爆 + Python fallback strike 1-2/3），當前 PID 1364222 於 20:16 UTC（22:16 local）重啟，CLAUDE.md §十一 「乾淨 demo 起點 21:08 local」為錯誤敘述（時間對不上 + 引擎根本不穩）。**P0-2 LG-1 21d 穩定期時鐘未啟動**——引擎連 11 分鐘都守不住，21 天 × 24h = 504h 是幻想。必須先查 crash root cause（需撈 watchdog.log + systemd journal + core dump），在此之前 P0-2/P0-3 評估窗口全數作廢。TODO §P0-9。
+- **LEARNING-PIPELINE-DORMANT-1（P1-HIGH，2026-04-16 audit 新增）**：學習管線不是空殼是**半殼**——`learning.decision_features` 已累積 **1.65M rows**（live 1.07M / live_demo 576k / demo 800），`trading.risk_verdicts` 已累積 1.54M 24h，但：(1) `settings/edge_estimates.json` = `{}` 3 bytes（從未被寫過）；(2) `experiment_ledger_snapshot.json` top-level 是 list 非 dict（結構異常）；(3) 21 個 learning schema 表（bayesian_posteriors/linucb_state/teacher_directives/james_stein_estimates/model_registry/promotion_pipeline/rl_transitions 等）存在但無訓練任務消費；(4) **EDGE-P3-1 Phase B #3 ONNX loader 宣稱部署但 0 artifact 產出**。真正 gap：數據累積層 ✅、canonical intent 審計表 ❌、下游訓練/edge 估計/Teacher 指令 ❌ 全 dormant。TODO §P1-7。
+- **LIVE-GUARD-1 ✅ 2026-04-16 深夜**：Rust 端 Mainnet 三重硬鎖回補（TODO §P0-8，E2 5/5 APPROVED，+7 新單測，engine lib 1342 passed）。Gate #1 `OPENCLAW_ALLOW_MAINNET=1` exact match · Gate #2 Mainnet 禁用 `BYBIT_API_KEY/SECRET` env var fallback（封閉 env 繞 slot 攻擊面）· Gate #3 憑證空時構造即 `Err`（不再 warn!+401）。Demo/Testnet/LiveDemo 零回歸。真實 live 門控從 1 項 Rust-verifiable 升為 **3 項**（見 §四表更新）。
+- **INTENT-WRITE-GAP-1（P0-CRITICAL，2026-04-16 refine）**：`trading.risk_verdicts` 24h 內 live/live_demo Approved **154 萬條**（每條含 `intent_id`），`learning.decision_features` 同期 live/live_demo **165 萬 rows**，但 `trading.intents` 對 live/live_demo 同期 **0 條**。→ 改釐清為「canonical `trading.intents` 斷鏈 vs Rust 側影子路徑寫入」：Rust 分析/風控 path 照跑、canonical intent 持久化被 DEDUP-PY-RUST Tier A stub 掉 Python 端後未補 Rust 接線。下游 Phase 5/experiment_ledger 讀 `trading.intents` 查不到；讀 `decision_features` 可以。TODO §P0-6。
 - **ORDER-SUBMIT-GAP-1（P0-CRITICAL，2026-04-16 新增）**：live_demo Approved verdict 持續但 `trading.fills` live/live_demo = 0。意味 Guardian 在跑、Approved verdict 寫入 DB，但 order submit path 被跳過（可能 OMSProxy 是 noop、或 trading_mode/live_reserved 未啟）。「Live_Ready」下真實下單能力 0%。TODO §P0-7。
 - **Phase 5 PAUSED**（2026-04-12 reframe）— PNL-FIX-1/2 清理後所有活躍策略 gross edge 為負（net -$2775）；cost_gate/DL/JS 機械已接線但需真實正 edge。**下一步**：乾淨 demo 2 週後 P0-3 重評，若仍負則轉 EDGE-P3-1/EDGE-P2 接管。詳見 `memory/project_phase5_promotion_edge_crisis.md`。
 - **P0-5 PHANTOM-2-FUP ✅**：A+C 方案實作完成（HashMap+60s cooldown + clear 條件只在 Normal 時觸發）+5 新單測，待 `restart_all.sh --rebuild` 部署。詳 TODO §P0-5。
@@ -85,28 +87,26 @@
 ## 四、硬邊界（永遠不能違背）
 
 ```python
-# ── Live_Ready 真實狀態（2026-04-16 audit 更新，取代 2026-04-10 舊版）──
+# ── Live_Ready 真實狀態（2026-04-16 深夜 LIVE-GUARD-1 ✅ 後更新）──
 # LIVE-P0/P1/P2 基礎設施代碼完整（SM-01/02/04 + Reconciler + 3E-ARCH）
 # 單測綠但 0 真實 live 流量（歷史 43k 條 "live" 實為 LiveDemo）。
-# 2026-04-16 audit 發現 CLAUDE.md 原敘述引用 OPENCLAW_ALLOW_MAINNET
-# 作為「Rust 側硬鎖」，但該 guard 於 2026-04-10 commit 25b5d73 (SEC-17)
-# 已移除且未補替代 fail-safe。以下為真實狀態：
 #
-# 當前真實 live 門控（Rust 端可驗證 = 1 項）：
+# 當前真實 live 門控（Rust 端可驗證 = 3 項 / 全部 = 5 項）：
 #   1. Python `live_reserved` global mode          （Python 狀態，重啟會丟）
 #   2. Python Operator 角色 auth                   （Python 側）
-#   3. secret slot 有 api_key + api_secret         （Rust 側唯一可驗證）
-#        來源優先級（bybit_rest_client.rs:403-421）：
-#          a. 顯式參數
-#          b. 環境變量 BYBIT_API_KEY / BYBIT_API_SECRET
-#          c. settings/secret_files/bybit/live/{api_key,api_secret}
-#        憑證缺失只 warn!，client 仍建立，簽名階段才 401
+#   3. OPENCLAW_ALLOW_MAINNET=1 env var            （Rust 側 Gate #1，exact "1"）
+#   4. secret slot 有 api_key + api_secret         （Rust 側 Gate #3，憑證空 → Err）
+#        來源優先級（bybit_rest_client.rs:386-497，LIVE-GUARD-1 後）：
+#          Mainnet:  a. 顯式參數 → b. slot file（env var 回退已封閉 = Gate #2）
+#          Demo/Testnet: a. 顯式參數 → b. env var → c. slot file（不變）
+#   5. Rust 端 BybitRestClient::new(Mainnet,...) 構造成功
+#        三重 Gate 任一失敗即 BybitApiError::Business，startup.rs:432 拒絕啟動
 #
-# ⚠️ 已知 CRITICAL 缺口（LIVE-GUARD-1，見 §三）：
-#   - bybit_rest_client.rs:394 對 Mainnet 僅 tracing::warn!，不擋
-#   - 純 Python 門控不對稱：Rust 長跑 × Python 重啟脆弱
-#   - 任何能設環境變數的進程都能繞過 secret slot 路徑
-#   - 必須補 Rust 側輕量 fail-safe（待 plan；在此前不可真實 live 上線）
+# ✅ LIVE-GUARD-1 修復（TODO §P0-8，2026-04-16 深夜）：
+#   - Gate #1: 恢復 OPENCLAW_ALLOW_MAINNET=1（SEC-17 回退）
+#   - Gate #2: Mainnet 禁用 BYBIT_API_KEY/SECRET env var fallback（封閉繞 slot 攻擊面）
+#   - Gate #3: 憑證空時構造 Err（不再 warn!+signing-stage 401）
+#   - 7 新單測 + E2 對抗性審查 5/5 APPROVED
 #
 # execution_authority：Rust 僅為 P0/P1 denylist 字串常量
 #                      （claude_teacher/applier.rs:226）非真實授權邏輯
@@ -114,15 +114,15 @@
 decision_lease_emitted  = False
 max_retries             = 0
 
-# 永不允許的硬錯誤（2026-04-16 audit 後修正）：
+# 永不允許的硬錯誤（2026-04-16 LIVE-GUARD-1 後修正）：
 # - 繞過 Operator 角色認證或 live_reserved global mode 直接啟動 live session
 # - 自動修改 engine trading_mode 為 live（需 operator 顯式配置）
 # - Bybit API timeout / retCode != 0 → fail-closed，不重試
 # - should_call_ai=true 但 invocation 沒發生
 # - 偽造 AI 調用或交易活動
-# - LIVE-GUARD-1 補回前，禁止在 Live engine 進程中配置真實 mainnet 憑證
-#   （環境變數或 secret slot 皆不可）；僅可用 LiveDemo endpoint
-# - （原「Live 模式下無 OPENCLAW_ALLOW_MAINNET=1」條目已於 SEC-17 後失效，刪除）
+# - Live 模式下無 OPENCLAW_ALLOW_MAINNET=1 env var（LIVE-GUARD-1 Gate #1，2026-04-16 回補）
+# - Mainnet 下試圖用 BYBIT_API_KEY/SECRET env var 作為唯一憑證來源
+#   （LIVE-GUARD-1 Gate #2 封閉，必須走 secret slot file）
 ```
 
 ---
@@ -272,15 +272,17 @@ state_models ← state_compiler ← state_store ← main_legacy ← main.py
 
 **當前焦點**：活躍任務與週次排期以 `TODO.md` 為準（P0/P1/P2/P3/P4 分層）。CLAUDE.md 不重複列週。
 
-**關鍵路徑（2026-04-16 夜 audit 刷新）**：
-`P0-0 ✅ → P0-4 R1 ✅ → 乾淨 demo 起點（2026-04-16 21:08 local）→ LIVE-GUARD-1 Rust fail-safe → P0-6 intent write gap → P0-7 order submit gap → P0-3 Phase 5 edge 2w 重評 + P0-2 LG-1 21d demo → LG-4/5 → Live`
+**關鍵路徑（2026-04-16 夜 audit 刷新 v2）**：
+`P0-0 ✅ → P0-4 R1 ✅ → ~~LIVE-GUARD-1 Rust fail-safe~~ ✅ → P0-9 STABILITY-1 引擎崩潰 RCA → 乾淨 demo 起點（時鐘需重新定義）→ P0-6 intent write gap → P0-7 order submit gap → P0-3 Phase 5 edge 2w 重評 + P0-2 LG-1 21d demo → P1-7 LEARNING-PIPELINE-DORMANT-1 → LG-4/5 → Live`
 - P0-1 G-2（funding_arb 子集驗證）與 P0-5 PHANTOM-2-FUP 均**不在主路徑**
+- P0-9 STABILITY-1 未收斂前，P0-2/P0-3 評估窗口全數作廢（引擎日均 ≥5 次崩潰）
 - P0-6/P0-7 若揭露架構級 DB write path 斷裂，Live 日期可能延後
-- **最早 Live 日期**：樂觀估 **W24 末（～2026-05-23）**
+- P1-7 LEARNING-PIPELINE-DORMANT-1 不阻 live 但阻 Phase 5 edge 收斂
+- **最早 Live 日期**：樂觀估回調至 **W25 末（～2026-05-30）**（原 W24 末）
 
 **路線圖**：Phase 0-5 ✅ · Live GUI ✅ · Phase 6 ✅ · **AI 治理層 (W22-W23) ⬜**（H1-H5 AI agent 目前全 stub，待 G-1 R-06 展開）。
 
-**Live 前置**：~~G-3 / G-5 / Phase 6~~ ✅ · demo ≥21d 穩定（P0-2，2026-04-16 21:08 才起點）· provider pricing 綁定（LG-3）· **LIVE-GUARD-1 Rust fail-safe 補回**（2026-04-16 audit 新增，見 §三） · API key 填入 ≠ 即可上線（原敘述已於 audit 後更正：Rust 側無 mainnet 硬鎖，門控全外移 Python，需補 fail-safe 才可真實 live）。
+**Live 前置**：~~G-3 / G-5 / Phase 6~~ ✅ · ~~LIVE-GUARD-1 Rust fail-safe 補回~~ ✅（2026-04-16 深夜，三重 Gate #1/#2/#3，見 §三/§四） · **P0-9 STABILITY-1 引擎崩潰收斂**（audit 後新增 hard-prereq，21d 時鐘先修引擎才重啟）· demo ≥21d 穩定（P0-2，時鐘需重新定義）· provider pricing 綁定（LG-3）· API key 填入 ≠ 即可上線（Rust 側 3 項硬鎖 + Python 側 2 項門控共 5 項，全綠才真實 live）。
 
 **關鍵文件指針**（按需 Read，不要全載入）：
 - Bybit API 字典/審計：`docs/references/2026-04-04--bybit_api_reference.md` · `docs/audits/2026-04-04--bybit_api_infra_audit.md`
@@ -290,4 +292,4 @@ state_models ← state_compiler ← state_store ← main_legacy ← main.py
 
 ## 十一、一句話狀態
 
-> 截至 2026-04-16：tests engine lib **1335 (default) / 1341 (ort)** + core **380** + e2e **35** + reconciler_e2e **19** Rust 全綠 **0 fail** · Python **2898** passed / 5 skipped · ml_training **182** passed / 10 skipped · **P0-4 R1 STRATEGY-CLOSE-TAG-FIX ✅ 部署**（`execute_position_close` trigger_tag 透傳，DB 已見 `strategy_close:grid_close_*` / `ma_reverse_cross` / 分離 `risk_close:fast_track_*`，583 筆 `risk_check` 遮蔽 bug 終結）· **P0-0 RECONCILER-BURST-FIX ✅ 部署**（startup grace window 5min + e2e regression test，engine PID 1340527 21:08 local 啟動後 0 auto-escalation）· **P0-5 PHANTOM-2-FUP ✅ 實作**（A+C HashMap 60s cooldown + clear only on Normal，+5 新單測；待 `--rebuild` 部署）· **PAPER-DISABLE-1 ✅**（paper 管線預設關 + 負餘額 Gate 1.6）· **DEDUP-PY-RUST Tier A ✅**（21 檔 ~6.5k 行 Python stub 化 + 59 contract tests）· **EDGE-P3-1 Phase B #3 ONNX loader ✅**（ort 2.0 backend + dynamic capability probe）+ **Step 7b/7c ✅** · **G-2 FundingArb daemon** PID 1349961 option D config（target 10 / deadline 72h）· **FA-PHANTOM-2 ✅ 部署**（`worst_drop_for_held` + sigma；grep CloseAll engine.log = 0）· **Phase 5 PAUSED** / **Live_Ready ⚠️**（2026-04-16 audit：Rust 側無 mainnet fail-safe，SEC-17 後缺口未補；純 live code path 0 流量；見 LIVE-GUARD-1）· **下一步**：LIVE-GUARD-1 補 Rust fail-safe → `restart_all.sh --rebuild` 部署 P0-5 → 乾淨 demo 2 週 → P0-3 edge 重評 · P0-2 LG-1 21d demo 起點 · P1-4 真 ETL 首個 ONNX artifact → Stage 2 shadow mode · Phase 2B Strategist 等 G-1 R-02。
+> 截至 2026-04-16 深夜：tests engine lib **1342 (default) / 1348 (ort)** + core **380** + e2e **35** + reconciler_e2e **19** Rust 全綠 **0 fail** · Python **2898** passed / 5 skipped · ml_training **182** passed / 10 skipped · **P0-4 R1 STRATEGY-CLOSE-TAG-FIX ✅ 部署**（`execute_position_close` trigger_tag 透傳，DB 已見 `strategy_close:grid_close_*` / `ma_reverse_cross` / 分離 `risk_close:fast_track_*`，583 筆 `risk_check` 遮蔽 bug 終結）· **P0-0 RECONCILER-BURST-FIX ✅ 部署**（startup grace window 5min + e2e regression test，engine PID 1340527 21:08 local 啟動後 0 auto-escalation）· **P0-5 PHANTOM-2-FUP ✅ 實作**（A+C HashMap 60s cooldown + clear only on Normal，+5 新單測；待 `--rebuild` 部署）· **PAPER-DISABLE-1 ✅**（paper 管線預設關 + 負餘額 Gate 1.6）· **DEDUP-PY-RUST Tier A ✅**（21 檔 ~6.5k 行 Python stub 化 + 59 contract tests）· **EDGE-P3-1 Phase B #3 ONNX loader ✅**（ort 2.0 backend + dynamic capability probe）+ **Step 7b/7c ✅** · **G-2 FundingArb daemon** PID 1349961 option D config（target 10 / deadline 72h）· **FA-PHANTOM-2 ✅ 部署**（`worst_drop_for_held` + sigma；grep CloseAll engine.log = 0）· **Phase 5 PAUSED** / **LIVE-GUARD-1 ✅**（2026-04-16 深夜三重 Gate 回補 +7 新單測） · **Live_Ready ⚠️**（Rust 側 3 項硬鎖 + Python 側 2 項已齊；但純 live code path 0 流量、P0-6/P0-7 canonical write 斷鏈未修、P0-8 引擎日均崩潰 ≥5 次）· **下一步**：**P0-9 STABILITY-1 引擎崩潰 RCA**（9h 內 5 crash，21d 時鐘未啟動）→ `restart_all.sh --rebuild` 部署 P0-5 → 乾淨 demo 2 週 → P0-3 edge 重評 · P0-2 LG-1 21d demo 起點 · P0-6 intent write canonical path 修復 · P0-7 order submit path 檢查 · **P1-7 LEARNING-PIPELINE-DORMANT-1**（1.65M decision_features 無消費，edge_estimates.json 從未寫過，ONNX 0 artifact）· P1-4 真 ETL 首個 ONNX artifact → Stage 2 shadow mode · Phase 2B Strategist 等 G-1 R-02。
