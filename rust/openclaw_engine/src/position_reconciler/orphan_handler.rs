@@ -10,7 +10,7 @@
 //!     A1. Liquidation distance too close: |mark - liq| / mark < 10%
 //!     A2. Global CircuitBreaker active (risk level ≥ CB)
 //!     A3. Notional > max_order_notional_usdt (when cap configured)
-//!     A4. Symbol not in scanner active universe
+//!     A4. REMOVED — scanner universe gating moved to tick_pipeline (SCANNER-GATE)
 //!
 //!   Stage B — soft eval (conservative close only, Phase 1):
 //!     B1. All known strategies have non-positive edge on symbol AND
@@ -222,17 +222,15 @@ pub fn handle_orphan(ctx: &OrphanContext) -> OrphanDecision {
         }
     }
 
-    // ── Stage A4: scanner universe membership ─────────────────────────────
-    // Empty slice = registry unavailable → skip check (fail-open).
-    // 空切片 = 註冊表未接入 → 跳過檢查（fail-open）。
-    if !ctx.active_symbols.is_empty()
-        && !ctx.active_symbols.iter().any(|s| s == &pos.symbol)
-    {
-        return OrphanDecision::Close {
-            reason: format!("symbol {} not in scanner active universe", pos.symbol),
-            stage: OrphanStage::HardSafetyNotInUniverse,
-        };
-    }
+    // ── Stage A4: REMOVED (SCANNER-GATE fix) ───────────────────────────────
+    // Scanner rotation ≠ orphan. Orphan = restart-leftover only. New opens are
+    // now gated at the tick_pipeline level (SymbolRegistry check before intent
+    // dispatch), so a position that the engine chose to open should never be
+    // force-closed just because the scanner rotated the symbol out. The enum
+    // variant `HardSafetyNotInUniverse` is kept for DB backward compat.
+    // 掃描器輪替 ≠ 孤兒。孤兒僅指重啟後遺留的舊倉位。新開倉已在 tick_pipeline
+    // 層由 SymbolRegistry 門控，引擎主動開的倉不應因掃描器輪替而被強平。
+    // enum 變體保留以相容歷史 DB 資料。
 
     // ── Stage B: edge-based branch (Phase 2A)─────────────────────────────
     // B2 (Phase 2A): if ANY known strategy has positive shrunk edge on this
@@ -383,12 +381,20 @@ pub fn dispatch_orphan_adopt(
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis() as u64)
         .unwrap_or(0);
+    let owner_strategy = match decision {
+        OrphanDecision::Adopt {
+            triggering_strategy,
+            ..
+        } => Some(triggering_strategy.clone()),
+        _ => None,
+    };
     match cmd_tx.send(PipelineCommand::AdoptOrphan {
         symbol: pos.symbol.clone(),
         is_long,
         qty: pos.size,
         entry_price: pos.avg_price,
         ts_ms,
+        owner_strategy,
     }) {
         Ok(_) => {
             info!(
@@ -657,10 +663,11 @@ mod tests {
         }
     }
 
-    /// Stage A4: symbol not in active universe → HardSafetyNotInUniverse.
-    /// Stage A4：不在活躍字集合 → 硬安全宇集外平倉。
+    /// Stage A4 REMOVED: symbol not in universe no longer triggers close.
+    /// Orphan = restart-leftover only; scanner rotation handled upstream.
+    /// Stage A4 已移除：非活躍交易對不再觸發平倉。孤兒僅指重啟遺留；掃描器輪替由上游處理。
     #[test]
-    fn stage_a4_not_in_universe_triggers() {
+    fn stage_a4_removed_not_in_universe_falls_through() {
         let pos = make_pos("SHIBUSDT", "Buy", 1_000_000.0, 0.00001, 0.0, 0.0);
         let ee = empty_estimates();
         let active: Vec<String> = vec!["BTCUSDT".into(), "ETHUSDT".into()];
@@ -673,15 +680,15 @@ mod tests {
         };
         let decision = handle_orphan(&ctx);
         match decision {
-            OrphanDecision::Close { stage, .. } => assert_eq!(stage, OrphanStage::HardSafetyNotInUniverse),
-            other => panic!("expected HardSafetyNotInUniverse, got {:?}", other),
+            OrphanDecision::Close { stage, .. } => assert_eq!(stage, OrphanStage::SoftConservative),
+            other => panic!("expected SoftConservative (A4 removed), got {:?}", other),
         }
     }
 
-    /// Stage A4: empty active_symbols slice → skip check (fail-open).
-    /// Stage A4：空活躍集合 → 跳過（fail-open）。
+    /// A4 removal: empty active_symbols still passes through to SoftConservative.
+    /// A4 移除：空活躍集合仍落到 SoftConservative。
     #[test]
-    fn stage_a4_empty_universe_skipped() {
+    fn stage_a4_empty_universe_still_passes() {
         let pos = make_pos("BTCUSDT", "Buy", 0.01, 100.0, 80.0, 0.0);
         let ee = empty_estimates();
         let active: Vec<String> = vec![];

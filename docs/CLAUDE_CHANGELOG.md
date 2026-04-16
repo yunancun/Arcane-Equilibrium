@@ -1,7 +1,19 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-04-16 深夜（P0-9 STABILITY-1 RCA — 停電基礎設施事件非 code bug）
+> 最後更新：2026-04-17（P0-10 SCANNER-GATE death loop fix）
+
+### P0-10 SCANNER-GATE — orphan_handler death loop fix（2026-04-17）
+
+**問題**：策略在 scanner 輪替出的 symbol 上反復開倉 → orphan_handler A4 強平 → 策略再開 → 無限死循環。BASEDUSDT 為首例但影響 20+ symbols（228 筆 `ipc_close_symbol` fills）。
+
+**修復（三部分）**：
+1. **SCANNER-GATE**：`tick_pipeline` 新增 `symbol_registry` + Open dispatch 前 `is_active()` 檢查
+2. **FUP-RACE**：`paper_state.proactive_mirror_insert()` — exchange 下單後立即寫 mirror 彌合 REST→WS 空窗
+3. **A4 移除**：orphan_handler Stage A4 邏輯刪除，orphan 定義改為純「重啟後遺留」
+
+**改動**：`tick_pipeline/mod.rs` · `on_tick.rs` · `paper_state.rs` · `orphan_handler.rs` · `event_consumer/mod.rs`
+**測試**：engine lib 1351 / core 380 / orphan_handler 17/17 全綠
 
 ### P0-9 STABILITY-1 — 2026-04-16 停電事件 RCA（非代碼 bug，21d 時鐘不重置）
 

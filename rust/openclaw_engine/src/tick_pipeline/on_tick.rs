@@ -655,6 +655,19 @@ impl TickPipeline {
                     );
                     continue;
                 }
+                // SCANNER-GATE: block new opens on symbols not in scanner active universe.
+                // Prevents death-loop where strategy opens → reconciler closes → repeat.
+                // 掃描器門控：非活躍交易對不開新倉，防止開→平→開死循環。
+                if let Some(ref reg) = self.symbol_registry {
+                    if !reg.is_active(&intent.symbol) {
+                        tracing::debug!(
+                            strategy = %strategy.name(),
+                            symbol = %intent.symbol,
+                            "SCANNER-GATE: new entry blocked — symbol not in scanner universe"
+                        );
+                        continue;
+                    }
+                }
                 if is_exchange_mode {
                     // ═══ EXCHANGE MODE: gates only, send order to exchange ═══
                     // ═══ 交易所模式：僅過門禁，發送訂單到交易所 ═══
@@ -753,6 +766,11 @@ impl TickPipeline {
                                 stop_loss: broker_sl,
                                 take_profit: None,
                             });
+                            // FUP-RACE: proactively mark mirror so reconciler
+                            // won't orphan-close this position before the WS
+                            // Fill arrives.
+                            self.paper_state
+                                .proactive_mirror_insert(&intent.symbol, intent.is_long);
                         }
                     } else if let Some(ref reason) = gate.rejected_reason {
                         strategy.on_rejection(intent, reason);

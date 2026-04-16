@@ -994,10 +994,16 @@ pub fn handle_paper_command(
             qty,
             entry_price,
             ts_ms,
+            owner_strategy,
         } => {
-            let inserted = pipeline
-                .paper_state
-                .adopt_orphan(&symbol, is_long, qty, entry_price, ts_ms);
+            let inserted = pipeline.paper_state.adopt_orphan(
+                &symbol,
+                is_long,
+                qty,
+                entry_price,
+                ts_ms,
+                owner_strategy.as_deref(),
+            );
             info!(
                 symbol = symbol.as_str(),
                 is_long,
