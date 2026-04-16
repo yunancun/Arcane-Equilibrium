@@ -14,7 +14,7 @@
 //!   `PaperState::restore_from_db`，本 helper 負責串接 audit pool 與日誌，
 //!   讓 mod.rs 只剩一行呼叫。
 
-use crate::tick_pipeline::{PipelineKind, TickPipeline};
+use crate::tick_pipeline::TickPipeline;
 use tracing::{info, warn};
 
 /// EN: Restore cumulative paper_state counters for the given pipeline from
@@ -41,15 +41,21 @@ use tracing::{info, warn};
 ///                             GUI「累計已實現 PnL / 手續費」沒歸零。
 pub(crate) async fn restore_paper_counters(
     pipeline: &mut TickPipeline,
-    pipeline_kind: PipelineKind,
     audit_pool: Option<&sqlx::PgPool>,
 ) {
-    let em = pipeline_kind.db_mode();
+    // Endpoint-aware tag: live + LiveDemo resolves to "live_demo" so we only
+    // restore rows that belong to this pipeline's endpoint (no mixing with
+    // real-mainnet "live" history).
+    // endpoint 感知標籤：Live + LiveDemo 解析為 "live_demo"，只還原真正屬於
+    // 本管線端點的 fills（不會撈到 mainnet "live" 歷史）。
+    let em = pipeline.effective_engine_mode();
+    let kind = pipeline.pipeline_kind;
     let pool = match audit_pool {
         Some(p) => p,
         None => {
             info!(
-                kind = %pipeline_kind,
+                kind = %kind,
+                engine_mode = em,
                 "QoL-1: no audit pool — paper_state counters start at zero (cold start) \
                  / 無審計 pool，累計指標從零開始（冷啟動）"
             );
@@ -59,7 +65,7 @@ pub(crate) async fn restore_paper_counters(
     match pipeline.paper_state.restore_from_db(pool, em).await {
         Ok(()) => {
             info!(
-                kind = %pipeline_kind,
+                kind = %kind,
                 engine_mode = em,
                 total_realized_pnl = pipeline.paper_state.total_realized_pnl(),
                 total_fees = pipeline.paper_state.total_fees(),
@@ -70,7 +76,7 @@ pub(crate) async fn restore_paper_counters(
         }
         Err(e) => {
             warn!(
-                kind = %pipeline_kind,
+                kind = %kind,
                 engine_mode = em,
                 error = %e,
                 "QoL-1: paper_state counter restore failed; starting with zero counters \

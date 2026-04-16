@@ -211,6 +211,13 @@ pub struct IntentProcessor {
     /// EDGE-P3-1 A4: Pipeline kind — only Paper engine runs ε-greedy branch.
     /// EDGE-P3-1 A4：管線種類——僅 Paper 走 ε-greedy 分支。
     pipeline_kind: PipelineKind,
+    /// Bybit endpoint this processor's pipeline is bound to. Used together with
+    /// `pipeline_kind` to resolve the DB engine_mode tag via
+    /// `mode_state::effective_engine_mode`. Set by
+    /// `TickPipeline::set_endpoint_env` at bootstrap.
+    /// Bybit 端點綁定，與 pipeline_kind 一併透過
+    /// `mode_state::effective_engine_mode` 解析 DB engine_mode 標籤。
+    endpoint_env: Option<crate::bybit_rest_client::BybitEnvironment>,
     /// EDGE-P3-1 A4: Deterministic SmallRng seeded per-engine (spec §7.3 F9).
     /// Interior mutability because gate evaluation happens via `&self`.
     /// EDGE-P3-1 A4：按引擎 seed 的 SmallRng（spec §7.3 F9）。
@@ -269,6 +276,7 @@ impl IntentProcessor {
             account_leverage: 1.0,
             edge_predictor_store: None,
             pipeline_kind: PipelineKind::Paper,
+            endpoint_env: None,
             // Tests get a fixed seed; production overrides via `set_predictor_rng_seed`.
             predictor_rng: Mutex::new(SmallRng::seed_from_u64(0)),
             shadow_fill_tx: None,
@@ -296,6 +304,7 @@ impl IntentProcessor {
             account_leverage: 1.0,
             edge_predictor_store: None,
             pipeline_kind: PipelineKind::Paper,
+            endpoint_env: None,
             predictor_rng: Mutex::new(SmallRng::seed_from_u64(0)),
             shadow_fill_tx: None,
             decision_feature_tx: None,
@@ -622,6 +631,22 @@ impl IntentProcessor {
         self.pipeline_kind = kind;
     }
 
+    /// Bind this processor to a concrete Bybit endpoint so DB writes
+    /// (decision_feature snapshots, shadow-fill rows) tag with the
+    /// endpoint-aware engine_mode. Called by `TickPipeline::set_endpoint_env`.
+    /// 綁定 Bybit 端點；DB 寫入使用 endpoint-aware engine_mode。
+    pub fn set_endpoint_env(&mut self, env: crate::bybit_rest_client::BybitEnvironment) {
+        self.endpoint_env = Some(env);
+    }
+
+    /// DB engine_mode tag for this processor (endpoint-aware). Mirrors
+    /// `TickPipeline::effective_engine_mode`.
+    /// 本處理器的 DB engine_mode 標籤（endpoint 感知）。
+    #[inline]
+    pub fn effective_engine_mode(&self) -> &'static str {
+        crate::mode_state::effective_engine_mode(self.pipeline_kind, self.endpoint_env)
+    }
+
     /// EDGE-P3-1 A4: Seed the predictor RNG (spec §7.3 F9 — `seed_for_engine(...)`).
     /// EDGE-P3-1 A4：seed predictor RNG（spec §7.3 F9）。
     pub fn set_predictor_rng_seed(&mut self, seed: u64) {
@@ -842,7 +867,7 @@ impl IntentProcessor {
         let msg = crate::database::DecisionFeatureMsg {
             context_id: context_id.to_string(),
             ts_ms: now_ms,
-            engine_mode: self.pipeline_kind.db_mode().to_string(),
+            engine_mode: self.effective_engine_mode().to_string(),
             strategy_name: intent.strategy.clone(),
             symbol: intent.symbol.clone(),
             side: if intent.is_long { 1 } else { -1 },

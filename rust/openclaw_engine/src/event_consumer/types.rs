@@ -7,7 +7,7 @@
 //!   PendingOrder 追蹤結構體、及模組常量（SYMBOLS、STATUS_INTERVAL_SECS）。
 
 use crate::bybit_private_ws::{ExecutionUpdate, OrderUpdate, PositionUpdate};
-use crate::bybit_rest_client::BybitRestClient;
+use crate::bybit_rest_client::{BybitEnvironment, BybitRestClient};
 use crate::config::ConfigManager;
 use crate::instrument_info::InstrumentInfoCache;
 use crate::tick_pipeline::{PipelineCommand, PipelineKind};
@@ -72,6 +72,16 @@ pub struct EventConsumerDeps {
     /// 3E-2a: Pipeline identity — determines governance profile, DB prefix, exchange binding.
     /// 管線身份 — 決定治理檔案、DB 前綴、交易所綁定。
     pub pipeline_kind: PipelineKind,
+    /// Endpoint-aware tag resolution. `None` for Paper (no exchange binding);
+    /// `Some(BybitEnvironment::Demo)` for Demo; for Live, `Some(live_bybit_environment())`
+    /// — which resolves to `Mainnet` (real money) / `Testnet` / `LiveDemo` (real demo
+    /// endpoint `api-demo.bybit.com`). The pipeline uses this to compute
+    /// `effective_engine_mode()` so DF / trading rows tag `live_demo` instead of
+    /// `live` when the Live pipeline is pointed at the demo endpoint.
+    /// Endpoint 感知的 engine_mode 標籤來源。Paper 為 None；Demo 為 Some(Demo)；
+    /// Live 為 Some(live_bybit_environment())，避免 Live+demo endpoint 被錯標成
+    /// `live`（實際並未送出真實資金單）。
+    pub endpoint_env: Option<BybitEnvironment>,
     pub event_rx: mpsc::Receiver<Arc<PriceEvent>>,
     pub config: Arc<ConfigManager>,
     pub cancel: CancellationToken,

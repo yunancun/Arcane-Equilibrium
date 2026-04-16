@@ -1,8 +1,8 @@
 # OpenClaw TODO — 工作計劃清單
 
-**最後更新：2026-04-16**（EDGE-P3-1 Phase B #3 Rust ONNX loader ✅ — ort 2.0.0-rc.12 後端 + `get_build_capabilities` IPC + Python 動態 overlay；P1-1/P1-2 結清）
+**最後更新：2026-04-16**（engine_mode endpoint-aware fix — Live+LiveDemo 寫 `live_demo` 不再誤標 `live`；IP-DEDUP-1 入 backlog）
 
-**測試基準線**：Rust **engine lib 1328 (ort) / 1321 (default) + core 380 + ort integration 5 + e2e 35 = 1748 (ort) / 1741 (default)** · Python **2883 passed (5 skipped · 0 fail)** · ml_training **182 passed (10 skipped)**
+**測試基準線**：Rust **engine lib 1329 (ort) / 1322 (default) + core 380 + ort integration 5 + e2e 35 = 1749 (ort) / 1742 (default)** · Python **2883 passed (5 skipped · 0 fail)** · ml_training **182 passed (10 skipped)**
 
 > compact 後從此文件恢復工作狀態。第一個 `[ ]` 即為下一步起點。
 > 條目分級：**P0 阻塞關鍵路徑** → **P1 當週活躍** → **P2 下週排期** → **P3 長期專項** → **P4 Backlog / Conditional**
@@ -33,13 +33,57 @@ git status && git log --oneline -5
 
 ## 🔴 P0 — 阻塞關鍵路徑（先清才能推 Live Gate）
 
-### P0-1 · G-2 FundingArb 驗證 ⏳
-**狀態**：後台 daemon PID 598572 監控中（`/tmp/openclaw/g2_monitor.{py,log,pid,progress.json}`）
-**目的**：累積 demo ≥20 strategy_exit fills 寫 audit `docs/audits/2026-04-15--g2_funding_arb_clean_edge.md` → Phase 5 歸因量化 + LG-1 觀察期起點
-**阻塞者**：~~FA-PHANTOM-2~~ ✅（commit `348a9c5`，2026-04-15）
-**驗收**：達 ≥20 fills 後 daemon 自動寫 audit；若 edge 負則觸發 P0-3 策略重做決策
-**接手指南**：先 `cat /tmp/openclaw/g2_monitor.progress.json`。若 daemon 掛了，重啟腳本在 `/tmp/openclaw/g2_monitor.py`
-**預估**：視 demo 流量，PHANTOM-2 修復部署後重新計時
+### P0-0 · RECONCILER-BURST-FIX — 對帳器啟動期誤升級風控 🆕 2026-04-16
+**狀態**：診斷完成，待 spec + PR
+**症狀**：引擎重啟後 46 分鐘內，reconciler 首輪對帳發現 Bybit demo 側殘留 orphan/ghost 倉位，單 tick 偵測 ≥6 drifts → `auto-escalation NORMAL→DEFENSIVE (burst)`（`position_reconciler.rs` + `event_consumer/handlers.rs`）→ FAST_TRACK ReduceToHalf 全組合半倉 + 觸發 `ft_pause_new_entries` 鎖住所有新開倉；governance `// Only escalate, never auto-de-escalate`（`risk_gov.rs:617`）→ Reduced 狀態卡死數小時，G-2 FundingArb 無法開新倉累積 fills。
+**證據**（2026-04-15 demo log）：
+- `18:55:13.747` — 9 drifts（6 ghost + 2 orphan + 1 minor_drift）→ `reason=6 simultaneous drifts (burst, streak=1)`
+- FAST_TRACK 日誌統計：`risk_level=Reduced` 168,205 次 vs `risk_level=Defensive` 1 次
+- G-2 monitor：12.5h 窗口內可開倉時間 ≈ 46min，FA 僅 3 筆 open，0 筆 strategy_exit
+**根因**：Reconciler 誤將 pre-restart legacy orphan（Bybit 側有、local paper_state 沒有）當即時 drift burst 處理，沒有區分「啟動期殘留」vs「運行期失聯」。
+**修復方案**（兩選一或並用）：
+- **A · warmup 期內忽略 burst**：reconciler 啟動後 N 分鐘（建議 5-10min）只 adopt/log，不觸發 auto-escalation；給 orphan adoption 先跑完
+- **B · orphan 自動 adopt 免升級**：burst 偵測時若 drift kind 全為 orphan → 走 ORPHAN-ADOPT-1 Phase 2A 路徑（positive-edge probe）而非升級風控；ghost 與 minor_drift 才視為真漂移
+- **C · governance 允許 warmup 期自動降級**：啟動後首個 N min `auto_demote` 一次 Defensive→Normal（需在 `risk_gov.rs` 加 `startup_grace_window` 邏輯，小心別破壞 fail-closed 原則）
+**阻塞者**：無
+**解鎖**：P0-1（G-2 FundingArb 驗證）真正開始計時
+**驗收**：乾淨 demo 環境（無 Bybit 殘留）重啟後 30min 內 governance 級別保持 Normal；同條件注入 5 orphan → reconciler adopt 不升級
+**接手指南**：
+- 診斷報告：`docs/references/2026-04-16--reconciler_burst_escalation_rca.md`（待寫）
+- 相關程式：`rust/openclaw_engine/src/position_reconciler.rs`、`event_consumer/handlers.rs`（reconciler_auto_escalation handler）、`rust/openclaw_core/src/sm/risk_gov.rs`
+- 類似 pattern：`orphan_adopt_1` Phase 2A 已處理正向 probe，可複用框架
+**預估**：spec 0.5d + 實作 1d + 回歸 0.5d
+
+### P0-1 · G-2 FundingArb 驗證 ❌ DAEMON KILLED 2026-04-16
+**狀態**：daemon PID 598572 已終止。深挖發現 demo 全引擎 0/504 筆 `strategy_close:*` fill 是**記錄 bug**而非策略邏輯 bug — exchange-dispatched close fill 的 `strategy_name` 被 `commands.rs:459` 硬編碼為 `"risk_check"` 吞掉（見 P0-4）。G-2 統計口徑在 R1 修復前**不可信**，恢復驗證需等 P0-4 修完。
+**診斷文件**：`docs/audits/2026-04-16--demo_zero_strategy_exit_audit.md` V2
+**阻塞者**：**P0-4 STRATEGY-CLOSE-TAG-FIX**（R1 修完才能重啟有意義的 G-2 驗證）· ~~FA-PHANTOM-2~~ ✅ · **P0-0 RECONCILER-BURST-FIX** 🆕
+**驗收**：P0-4 完成 + 重啟 daemon（需改 SQL 口徑以識別真實 exit tag）+ 累積 ≥20 真實策略退場 fill 寫 audit
+
+### P0-4 · STRATEGY-CLOSE-TAG-FIX — `execute_position_close` 吞掉策略退場 tag 🆕 2026-04-16
+**狀態**：診斷完成，QC 方案 R1 待實施（下個 session）
+**症狀**：Demo 引擎 29h 內 0 筆 `strategy_close:*` fill，初判為「所有策略無退場能力」，深挖後發現是記錄 bug：
+- `rust/openclaw_engine/src/tick_pipeline/commands.rs:459` 裡 `execute_position_close()` 把 `OrderDispatchRequest.strategy` **硬編碼**為 `"risk_check"`
+- `PipelineKind::Demo.is_exchange() == true`（`tick_pipeline/tests.rs:156`）→ 所有 exchange-dispatched close 都走此路徑
+- 策略主動退場（`on_tick.rs:960`）/ fast_track exchange-branch close / shadow mirror 三種觸發源的 fill tag 全部被攪成 `risk_check`
+- DB 驗證：583 筆 `strategy_name='risk_check'` fill 全部是 `oc_risk_*` prefix（primary dispatch），501 筆非零 PnL，sum_pnl=+$31.46 — 其中相當比例是真正的策略退場
+**修復方案（QC 推薦 R1）**：修改 `execute_position_close()` 簽名接受 `trigger_tag: &str` 參數，各 caller 傳真實 tag：
+- `on_tick.rs:960` strategy-close 分支：傳 `&format!("strategy_close:{reason}")`
+- fast_track exchange 分支（需定位具體 caller）：傳 `&format!("risk_close:{fast_track_reason}")`
+- shadow mirror（`on_tick.rs:997`, `is_primary=false` 路徑）：傳 `&format!("shadow_close:{reason}")`
+- 同步修 `apply_confirmed_fill`（`commands.rs:353`）+ confirm-fill tag 寫入路徑（`trading_writer.rs:247`）
+**工作量**：~4-6h（QC 估計）· 加 E1→E2→E4 完整鏈 + 回歸測試
+**驗收**：
+- 修復後重建引擎 + 重啟 → 觀察窗口內出現真實的 `strategy_close:*` 與 `risk_close:fast_track*` 分離 fills
+- 新 SQL 口徑下 `strategy_close:*` 筆數 > 0
+- **完成後還原**：`settings/strategy_params_demo.toml [funding_arb] active=true`（2026-04-16 基於錯誤結論的臨時停用）
+- 重寫 G-2 daemon SQL 口徑並重啟（P0-1 恢復）
+**阻塞者**：無
+**解鎖**：P0-1 恢復 · 全策略退場歸因可量化 · Phase 5 歸因有信賴的數據源
+**接手指南**：
+- QC 方案原文：本會話 2026-04-16 QC Plan agent 輸出（可從 git log 找本次改動）
+- 受影響文件：`rust/openclaw_engine/src/tick_pipeline/{commands.rs,on_tick.rs}`、`database/trading_writer.rs`、`event_consumer/mod.rs`
+- 驗證 SQL：`SELECT substring(strategy_name from 1 for 30), COUNT(*) FROM trading.fills WHERE engine_mode='demo' AND ts > '<rebuild_ts>' GROUP BY 1 ORDER BY 2 DESC`
 
 ### P0-2 · LG-1 Paper Trading 21d 觀察期 🕰️
 **狀態**：FA-PHANTOM-2 + FIX-PHASE1 部署後等乾淨窗口開始
@@ -125,6 +169,15 @@ git status && git log --oneline -5
 - [ ] **5-08~09** JS + Scorer 整合 + correlation_pairs
 - [ ] **5-10~13** E2 + E4 + QC + E5
 
+### DEDUP-PY-RUST · Python–Rust 重複計算代碼清理 ✅（2026-04-16）
+- [x] **Phase 1** Step 1-3 stub 化（indicators/ + indicator_engine + signal_generator/signal_engine）
+- [x] **Phase 2** Step 4-6 stub 化（kline_manager + market_scanner + position_sizer）
+- [x] **Phase 3** Step 7-10 stub 化（orchestrator + auto_deployer + backtest + strategies/base）
+- **實際效益**：Tier A 21 檔 ~8,506 行 → 1,982 行 stub（淨減 ~6,524 行）
+- **驗證**：FastAPI 217 routes 全載入；Bybit connector 2,454 tests passed / 1 skipped；local_model_tools/tests/ 整包 `collect_ignore_glob` 標記（需 Rust-fallback 契約測試重寫）
+- **計劃原文**：`docs/references/2026-04-16--python_rust_dedup_cleanup_plan.md`
+- **Follow-up**：(1) local_model_tools/tests/ 重寫為 stub-shape 契約測試；(2) 確認 ENGINE-HEAL 部署 + `restart_all.sh --rebuild` 後 route fallback 行為符合預期
+
 ### EDGE P2（架構層重工）
 - [ ] **EDGE-P2-2** OI + Liquidation 信號源 — 給 `bb_breakout` 加領先信號（Bybit WS `tickers` OI + `liquidation` stream）
 - [ ] **EDGE-P2-3** Maker order 支持 — fee 5.5 bps → ~1 bps/side（post-only limit；改 IntentProcessor + order_manager + exchange execution layer，根本性改變盈利方程式）
@@ -147,6 +200,32 @@ git status && git log --oneline -5
 
 ### WP-I 文檔衛生
 - [ ] R4-NAME-1 / R4-MEM-1 / R4-REF-ST-1
+
+### 🧹 IP-DEDUP-1 · IntentProcessor 同幣種重發去抖 🆕 2026-04-16
+**背景**：Problem 2 診斷（見 `project_engine_mode_tag_live_demo.md` + `project_phase5_promotion_edge_crisis.md`）揭露：cost_gate 拒絕後無 position → 策略每 tick 看到「沒倉位」狀態重發同向 intent（ORDIUSDT 14min 內 8439 筆）。每筆重發都觸發 `evaluate_predictor_gate` → emit DF snapshot → 放大 `learning.decision_features` 寫入量 + 無謂 cost_gate CPU。
+**症狀**：Live+LiveDemo 43k DF rows vs Demo 42 rows，98%+ 是殭屍重發（同 symbol+side+strategy 秒級重複）。
+**建議方案**：
+- IntentProcessor 加 `last_rejected_intent: HashMap<(symbol, is_long, strategy), (ts_ms, reason)>`
+- 同 key 在 N 秒（建議 60s，可配置）內重發 → 早退，不計 gate、不 emit DF、寫 `dedup_skipped` 計數器
+- 只去抖**被拒絕**的 intent；被批准的 intent 走正常路徑（避免吞掉真正想連續開倉的策略信號）
+- 配置項：`risk.intent_dedup.enabled=true` + `dedup_window_secs=60`
+**Why**：
+- 減 DF 寫入 ≥95%，ML 訓練資料訊噪比提升
+- 減 cost_gate CPU / DB IO（Phase 5 負 edge 期間重發主要成本來源）
+- 留 counter 讓 GUI 看到「被去抖的 intent 數」保持透明度
+- 不修復 Phase 5 edge crisis 本身（那是 G-SR-1 / Strategist agent 的工作），純優化
+**Why not 現在做**：Phase 5 策略重做（P0-3 判決後）可能讓負 edge 消失 → 重發率自然下降 → 本優化效益降低。先等 P0-3。
+**前置**：P0-3 Phase 5 Edge 2w 重評完成；若 edge 仍負且策略重做時程延長，則提前啟動。
+**工作量**：~1d（含 config 欄位、E1/E2/E4、counter GUI 接線）
+**驗收**：
+- 啟用後同幣種+方向+策略 60s 內重發被早退，`intent_dedup_skipped` counter 遞增
+- DF 每日行數 ≥95% 下降（特別是 Live+LiveDemo engine_mode）
+- 被去抖不影響**首筆**intent 的 gate 評估 + 仍寫 DF（保留探索樣本）
+- 同 symbol 但不同 side（反手）/不同策略 → 不觸發去抖
+**接手指南**：
+- 相關程式：`rust/openclaw_engine/src/intent_processor/mod.rs`（`evaluate_predictor_gate` 上游）
+- 類似機制：`governor_cooldown` 的 24h 冷卻（`mode_state.rs`）、`last_ai_call_time_ms`（cost gate）
+- Counter 可復用 `IntentProcessor::stats` 結構
 
 ### 前 phase 殘留
 - [ ] **2-11** actual training（等 fills 累積）

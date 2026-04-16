@@ -329,7 +329,7 @@ impl TickPipeline {
                     entry_price: pos.entry_price,
                     mark_price,
                     unrealized_pnl,
-                    engine_mode: self.pipeline_kind.db_mode().to_string(),
+                    engine_mode: self.effective_engine_mode().to_string(),
                 };
                 let _ = tx.try_send(msg);
             }

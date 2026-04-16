@@ -901,7 +901,7 @@ pub fn handle_paper_command(
                     let msg = crate::database::ShadowFillMsg {
                         context_id: context_id.clone(),
                         ts_ms,
-                        engine_mode: pipeline.pipeline_kind.db_mode().to_string(),
+                        engine_mode: pipeline.effective_engine_mode().to_string(),
                         strategy_name: strategy,
                         symbol: symbol.clone(),
                         side,

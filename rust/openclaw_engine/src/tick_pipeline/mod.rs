@@ -630,6 +630,13 @@ pub struct TickPipeline {
     /// 3E-4: Pipeline identity — immutable, set at construction (replaces TradingMode).
     /// 3E-4：管線身份 — 不可變，構造時設定（取代 TradingMode）。
     pub(crate) pipeline_kind: PipelineKind,
+    /// Bybit endpoint this pipeline is bound to. Determines the DB engine_mode
+    /// tag (via `effective_engine_mode`) so `Live + LiveDemo` rows are tagged
+    /// `"live_demo"` instead of colliding with real-mainnet `"live"`.
+    /// None until `set_endpoint_env()` is called (main.rs bootstrap or test).
+    /// Bybit 端點綁定，決定 DB engine_mode 標籤（via `effective_engine_mode`）。
+    /// None 代表尚未由 main.rs bootstrap / 測試設定。
+    pub(crate) endpoint_env: Option<crate::bybit_rest_client::BybitEnvironment>,
     /// EXT-1: Sequence counter for generating unique order_link_id.
     /// EXT-1：序列計數器，用於生成唯一 order_link_id。
     exchange_seq: u64,
@@ -807,6 +814,7 @@ impl TickPipeline {
             feature_tx_dropped: 0,
             paper_paused: false,
             pipeline_kind: PipelineKind::Paper,
+            endpoint_env: None,
             exchange_seq: 0,
             pending_close_symbols: std::collections::HashSet::new(),
             h0_gate: H0Gate::new(Some(openclaw_types::H0GateConfig {
@@ -875,6 +883,28 @@ impl TickPipeline {
         p.intent_processor.set_pipeline_kind(kind);
         p.governance = GovernanceCore::new_with_profile(kind.governance_profile());
         p
+    }
+
+    /// Bind this pipeline to a concrete Bybit endpoint so DB rows tag with the
+    /// endpoint-aware engine_mode (see `mode_state::effective_engine_mode`).
+    /// Also propagates to `IntentProcessor` so its internal DB writes (e.g.
+    /// decision_feature snapshots) use the same tag.
+    /// 將管線綁定到具體 Bybit 端點，DB 寫入使用 endpoint-aware engine_mode。
+    /// 同時透傳至 IntentProcessor 讓其 DB 寫入（如決策特徵快照）一致。
+    pub fn set_endpoint_env(&mut self, env: crate::bybit_rest_client::BybitEnvironment) {
+        self.endpoint_env = Some(env);
+        self.intent_processor.set_endpoint_env(env);
+    }
+
+    /// DB engine_mode tag for this pipeline (endpoint-aware). All DB-writing
+    /// code paths inside TickPipeline should route through this, NOT through
+    /// `self.pipeline_kind.db_mode()` directly — the latter loses the
+    /// endpoint distinction (Live + LiveDemo would collide with real
+    /// mainnet live).
+    /// 本管線的 DB engine_mode 標籤（endpoint 感知）。所有 DB 寫入路徑都應走這裡。
+    #[inline]
+    pub fn effective_engine_mode(&self) -> &'static str {
+        crate::mode_state::effective_engine_mode(self.pipeline_kind, self.endpoint_env)
     }
 
     /// Scanner C3: Add a symbol to the kline manager (idempotent).
@@ -1328,7 +1358,7 @@ impl TickPipeline {
         if let Some(ref tx) = self.trading_tx {
             // Fill side reflects the closing direction (opposite of position side).
             let close_side = if is_long { "Sell" } else { "Buy" };
-            let em = self.pipeline_kind.db_mode();
+            let em = self.effective_engine_mode();
             let _ = tx.try_send(crate::database::TradingMsg::Fill {
                 fill_id: format!("close-{em}-{}-{}", symbol, ts_ms),
                 ts_ms,
