@@ -1,8 +1,8 @@
 # OpenClaw TODO — 工作計劃清單
 
-**最後更新：2026-04-16**（P0-4 STRATEGY-CLOSE-TAG-FIX R1 完成 — `execute_position_close` 透傳 `trigger_tag`，全部 7 caller 傳真實因果 tag；funding_arb demo 還原 active=true）
+**最後更新：2026-04-16**（P0-0 RECONCILER-BURST-FIX ✅ startup grace window 修復 + 6 新單元測試）
 
-**測試基準線**：Rust **engine lib 1330 (ort) / 1323 (default) + core 380 + ort integration 5 + e2e 35 = 1750 (ort) / 1743 (default)** · Python **2883 passed (5 skipped · 0 fail)** · ml_training **182 passed (10 skipped)**
+**測試基準線**：Rust **engine lib 1336 (ort) / 1330 (default) + core 380 + e2e 35 + reconciler_e2e 18 + ort integration 5** · Python **2883 passed (5 skipped · 0 fail)** · ml_training **182 passed (10 skipped)**
 
 > compact 後從此文件恢復工作狀態。第一個 `[ ]` 即為下一步起點。
 > 條目分級：**P0 阻塞關鍵路徑** → **P1 當週活躍** → **P2 下週排期** → **P3 長期專項** → **P4 Backlog / Conditional**
@@ -33,45 +33,35 @@ git status && git log --oneline -5
 
 ## 🔴 P0 — 阻塞關鍵路徑（先清才能推 Live Gate）
 
-### P0-0 · RECONCILER-BURST-FIX — 對帳器啟動期誤升級風控 🆕 2026-04-16
-**狀態**：診斷完成，待 spec + PR
-**症狀**：引擎重啟後 46 分鐘內，reconciler 首輪對帳發現 Bybit demo 側殘留 orphan/ghost 倉位，單 tick 偵測 ≥6 drifts → `auto-escalation NORMAL→DEFENSIVE (burst)`（`position_reconciler.rs` + `event_consumer/handlers.rs`）→ FAST_TRACK ReduceToHalf 全組合半倉 + 觸發 `ft_pause_new_entries` 鎖住所有新開倉；governance `// Only escalate, never auto-de-escalate`（`risk_gov.rs:617`）→ Reduced 狀態卡死數小時，G-2 FundingArb 無法開新倉累積 fills。
-**證據**（2026-04-15 demo log）：
-- `18:55:13.747` — 9 drifts（6 ghost + 2 orphan + 1 minor_drift）→ `reason=6 simultaneous drifts (burst, streak=1)`
-- FAST_TRACK 日誌統計：`risk_level=Reduced` 168,205 次 vs `risk_level=Defensive` 1 次
-- G-2 monitor：12.5h 窗口內可開倉時間 ≈ 46min，FA 僅 3 筆 open，0 筆 strategy_exit
-**根因**：Reconciler 誤將 pre-restart legacy orphan（Bybit 側有、local paper_state 沒有）當即時 drift burst 處理，沒有區分「啟動期殘留」vs「運行期失聯」。
-**修復方案**（兩選一或並用）：
-- **A · warmup 期內忽略 burst**：reconciler 啟動後 N 分鐘（建議 5-10min）只 adopt/log，不觸發 auto-escalation；給 orphan adoption 先跑完
-- **B · orphan 自動 adopt 免升級**：burst 偵測時若 drift kind 全為 orphan → 走 ORPHAN-ADOPT-1 Phase 2A 路徑（positive-edge probe）而非升級風控；ghost 與 minor_drift 才視為真漂移
-- **C · governance 允許 warmup 期自動降級**：啟動後首個 N min `auto_demote` 一次 Defensive→Normal（需在 `risk_gov.rs` 加 `startup_grace_window` 邏輯，小心別破壞 fail-closed 原則）
-**阻塞者**：無
-**解鎖**：P0-1（G-2 FundingArb 驗證）真正開始計時
-**驗收**：乾淨 demo 環境（無 Bybit 殘留）重啟後 30min 內 governance 級別保持 Normal；同條件注入 5 orphan → reconciler adopt 不升級
-**接手指南**：
-- 診斷報告：`docs/references/2026-04-16--reconciler_burst_escalation_rca.md`（待寫）
-- 相關程式：`rust/openclaw_engine/src/position_reconciler.rs`、`event_consumer/handlers.rs`（reconciler_auto_escalation handler）、`rust/openclaw_core/src/sm/risk_gov.rs`
-- 類似 pattern：`orphan_adopt_1` Phase 2A 已處理正向 probe，可複用框架
-**預估**：spec 0.5d + 實作 1d + 回歸 0.5d
+### P0-0 · RECONCILER-BURST-FIX — 對帳器啟動期誤升級風控 ✅ 2026-04-16
+**狀態**：修復完成（待 `restart_all.sh --rebuild` 部署驗證）。方案 A startup grace window 5min 實作。
+**根因**（RCA 文件：`docs/references/2026-04-16--reconciler_burst_escalation_rca.md`）：
+- 引擎重啟後 warmup baseline 與本地 paper_state 未同步 → 首輪 tick 將 Ghost/Orphan 誤判為 live drift burst
+- 2026-04-15 事故：9 drifts（6 ghost + 2 orphan + 1 minor_drift）→ burst streak=1 升 Defensive → FAST_TRACK ReduceToHalf 全組合半倉 + `ft_pause_new_entries` 鎖新開倉 → 46min 才 Cautious→Normal 一路降級
+**修復**（方案 A startup grace window 5min）：
+- `escalation.rs`：新增 `STARTUP_GRACE_MS = 5 * 60 * 1000` + `ReconcilerState.startup_ms` 欄位
+- `evaluate_actions()` 入口：寬限期內早退返空 actions，**不累加** drift_streak / burst_drift_streak / clean_cycles（避免計數累積在寬限結束瞬間集中觸發）
+- `check_rest_failure_escalation()` 入口同樣 grace 檢查
+- `run_position_reconciler()` 啟動時 `rc_state.startup_ms = now_ms_util()`
+- 寬限期內 orphan_handler / V014 audit / baseline update 全部照常運作
+**回歸**：
+- 6 新 unit tests（escalation.rs）：burst suppression / persistent suppression / single suppression / post-grace normal escalation / REST failure suppression / boundary exclusive / zero startup_ms legacy behaviour
+- engine lib 1330 default + 18 reconciler_e2e + 35 stress_integration 全綠 / 0 fail
+**解鎖**：P0-1（G-2 FundingArb 驗證）+ P0-3（Phase 5 edge 2w 重評）關鍵路徑
+**部署驗收**（operator）：
+1. `bash helper_scripts/restart_all.sh --rebuild` 部署新 bin
+2. 前 5min：`tail -f /tmp/openclaw/engine.log | grep "startup grace"` 應看到 suppression 日誌（有 drift 時）
+3. 前 5min 內 governance 級別保持 `NORMAL`
+4. 乾淨環境：30min 內 governance 保持 NORMAL
+5. G-2 daemon 重新計時累積 ≥20 fills
 
-### P0-1 · G-2 FundingArb 驗證 🟡 等重啟（P0-4 R1 已完成 2026-04-16）
-**狀態**：daemon PID 598572 已終止；P0-4 R1 tag 透傳修復已合入（見 P0-4），engine 重建後 `strategy_name` 將正確分流。下一步是重寫 daemon SQL 口徑並重啟累積 ≥20 真策略退場 fill。
+### P0-1 · G-2 FundingArb 驗證 🟡 等重啟（P0-4 R1 已合入 2026-04-16，歸檔）
+**狀態**：daemon PID 598572 已終止；P0-4 R1 tag 透傳修復已合入（歸檔索引見文件末尾 2026-04-16 條目），engine 重建後 `strategy_name` 將正確分流。下一步是重寫 daemon SQL 口徑並重啟累積 ≥20 真策略退場 fill。
 **診斷文件**：`docs/audits/2026-04-16--demo_zero_strategy_exit_audit.md` V2
-**阻塞者**：~~P0-4 STRATEGY-CLOSE-TAG-FIX~~ ✅ · ~~FA-PHANTOM-2~~ ✅ · **P0-0 RECONCILER-BURST-FIX** 🆕
+**阻塞者**：~~P0-4 STRATEGY-CLOSE-TAG-FIX~~ ✅ · ~~FA-PHANTOM-2~~ ✅ · ~~P0-0 RECONCILER-BURST-FIX~~ ✅（待部署）
 **驗收**：
 - `restart_all.sh --rebuild` 部署 R1 bin；SQL 驗證 `SELECT substring(strategy_name from 1 for 30), COUNT(*) FROM trading.fills WHERE engine_mode='demo' AND ts > '<rebuild_ts>' GROUP BY 1` 出現 `strategy_close:*` 與分離 `risk_close:*` 桶
 - 重寫 G-2 daemon SQL 口徑並重啟 → 累積 ≥20 真實策略退場 fill 寫 audit
-
-### ~~P0-4 · STRATEGY-CLOSE-TAG-FIX — `execute_position_close` 吞掉策略退場 tag~~ ✅ 2026-04-16 (R1 merged)
-**結果**：`execute_position_close()` 新增 `trigger_tag: &str` 參數；commands.rs:459 硬編碼 `"risk_check"` 移除。全部 7 個 caller 傳真實因果 tag：
-- Strategy 主動退場（exchange + shadow）→ `strategy_close:{reason}`（on_tick.rs:969, 1007）
-- Risk close 評估器（exchange + shadow）→ `risk_close:{reason}`（on_tick.rs:1108, 1135）
-- Fast_track ReduceToHalf → `risk_close:fast_track_reduce_half`（on_tick.rs:213）
-- HaltSession 熔斷 → `risk_close:halt_session`（on_tick.rs:1173）
-- paper_paused stop trigger → `stop_trigger:{trigger.reason}`（on_tick.rs:434）
-**回歸測試**：`test_execute_position_close_propagates_trigger_tag`（tests.rs；5 組 is_primary × tag 案例） · engine lib 1322 → **1323** passed · core 380 / e2e 35 全綠。
-**後續部署**：operator `bash helper_scripts/restart_all.sh --rebuild` 部署新 bin；驗證 SQL：`SELECT substring(strategy_name from 1 for 30), COUNT(*) FROM trading.fills WHERE engine_mode='demo' AND ts > '<rebuild_ts>' GROUP BY 1`。
-**還原**：`settings/strategy_params_demo.toml [funding_arb] active=true` ✅ 已恢復。
 
 ### P0-2 · LG-1 Paper Trading 21d 觀察期 🕰️
 **狀態**：FA-PHANTOM-2 + FIX-PHASE1 部署後等乾淨窗口開始
@@ -85,21 +75,38 @@ git status && git log --oneline -5
 **判斷**：
 - 若 gross edge 翻正 → Phase 5 cost_gate 工作重啟（現有 JS / cost_gate / DL 機械已接線）
 - 若 gross edge 仍負 → 策略本身需重做，轉向 EDGE-P3-1 接管（替換 shrunk_bps 為 per-trade 動態預測）或更激進的 EDGE-P2
-**阻塞者**：**P0-0 RECONCILER-BURST-FIX**（每次重啟 burst 升級 Reduced 卡死，數小時無乾淨窗口）。~~P0-1~~ 不必要 — G-2 只覆蓋 funding_arb 子集，Phase 5 整體 edge 用其他 6 策略 fills 已足夠。
-**預估**：P0-0 落地後 2 週
+**阻塞者**：~~P0-0 RECONCILER-BURST-FIX~~ ✅（2026-04-16 修復完成，待部署驗證）。~~P0-1~~ 不必要 — G-2 只覆蓋 funding_arb 子集,Phase 5 整體 edge 用其他 6 策略 fills 已足夠。
+**預估**：P0-0 部署後 2 週
 
-**關鍵路徑**：`P0-0 reconciler burst fix → P0-3 Phase 5 edge 2w 評估 + P0-2 LG-1 21d → LG-4/5 → Live`（P0-1 G-2 並行驗證 funding_arb 子集，不在主路徑）
-**最早 Live 日期**：樂觀估 **W24 末（～2026-05-23）**
+### P0-5 · PHANTOM-2-FUP — ReduceToHalf one-shot guard 跨 tick 失效 🆕 2026-04-16
+**狀態**：診斷完成（CCAgent 認真核查 P0-4 R1 後續發現），未排期
+**症狀**：FA-PHANTOM-2 fix（commit `348a9c5`,`worst_drop_for_held` + sigma 閘）已部署生效（`grep CloseAll engine.log` = **0**），但 `ReduceToHalf` 路徑仍在同 1-2 秒內針對同一 symbol 連續觸發 ≥9 次。實證：
+- 引擎日誌 `18:03:41.602042 → .603320`（1.3s 內）9 次 `FAST_TRACK ReduceToHalf`，全是 ORDIUSDT 觸發（held_drop=6.0%/sigma=3.0,positions=2,risk_level=Cautious）
+- DB 1-min bucket 統計：16:29 一分鐘 130 fills / 18:03 一分鐘 147 fills（爆發模式）
+- R1 baseline 起 2.6h 內 `risk_close:fast_track_reduce_half` = 335 筆 vs `strategy_close:*` = 42 筆(8:1)
+**根因推斷**：`tick_pipeline/on_tick.rs:175-228` 的 `ft_reduced_symbols: HashSet<String>` 是 EDGE-P0-1 設計的 one-shot guard,但實際每 tick 進 ReduceToHalf 分支時對 positions 重新展開 → for-loop 對「未在 HashSet」的 sym emit fill。第 1 輪標記後第 2 輪本應整體跳過,但 9 次連發說明 guard 在 risk_level 過渡(Cautious↔Defensive↔Normal)或 ft 重新評估時被清掉了
+**修復方案候選**：
+- **A**：把 ft_reduced_symbols 升級為 `HashMap<String, ts_ms>`,加 cooldown(建議 ≥60s 同 governance defensive 窗口)
+- **B**:每 tick 進 ReduceToHalf 分支時整體 dedup — 若 `positions` 全在 ft_reduced_symbols 中則 early-return,別再 emit_close_fill 0-qty 雜訊
+- **C**:把 EDGE-P0-1 重新審計 — 確認 ft_reduced_symbols 在哪些代碼路徑會被 clear(governance.recover()? new tick?),補單元測試
+**Why not 立刻動手**：當前未壞 — 只是 reduce 同倉的逐次半倉,功能仍正確。Phase 5 PAUSED 狀態下噪音不造成新傷害。但會放大 DB IO 與引擎日誌 280MB 增長率(同 ENGINE-HEAL `engine_results.jsonl` 111GB 案例)。
+**阻塞者**:無(獨立,可在 P0-0 後或併行修)
+**解鎖**:G-2 daemon 累積速率 ↑(funding_arb 開倉後不再被 over-fast-track 殲滅)
+**驗收**:同條件下 1s 內同 symbol 只觸發 1 次 ReduceToHalf;risk_level 過渡不清空 ft_reduced_symbols(除 governance defensive episode 結束)
+**接手指南**:
+- 相關程式:`rust/openclaw_engine/src/tick_pipeline/on_tick.rs:175-228`(ft_reduced_symbols 邏輯)、`rust/openclaw_core/src/sm/risk_gov.rs`(risk_level 過渡)
+- 觀察手段:`grep "FAST_TRACK ReduceToHalf" /tmp/openclaw/engine.log | head -100` 看時間戳間隔
+- 相關 commit:`348a9c5`(PHANTOM-2)、tick_pipeline/tests.rs L171 已有單測 fixture 可擴展
+**預估**:0.5d spec + 0.5d 實作 + 0.5d 回歸
+
+**關鍵路徑**:`~~P0-0 reconciler burst fix~~ ✅ → restart_all --rebuild 部署 → P0-3 Phase 5 edge 2w 評估 + P0-2 LG-1 21d → LG-4/5 → Live`(P0-1 G-2 並行驗證 funding_arb 子集,不在主路徑;P0-5 PHANTOM-2-FUP 不阻塞主路徑,可任意時點插入)
+**最早 Live 日期**:樂觀估 **W24 末(～2026-05-23)**
 
 ---
 
 ## 🟡 P1 — W22 當週活躍
 
-### ~~P1-1 · EDGE-P3-1 Phase B #3 ONNX loader（Rust 端）~~ ✅ 2026-04-16
-**結果**：ort 2.0.0-rc.12 後端取代 tract-onnx 0.21（tract 缺 `TreeEnsembleRegressor` 無法跑 LightGBM 分位 export）；`ort_backend::OnnxTrioPredictor` 實現 9-key metadata 讀取 + schema_hash fail-closed + 三重 predictor 同一邏輯單元 + `enforce_monotone`。Cargo feature `edge_predictor_ort` + `download-binaries` + `tls-rustls`；default build 仍走 null stub。5 個整合測試（fixture ONNX trio）全綠。
-
-### ~~P1-2 · EDGE-P3-1 Step 7b Python route + flag flip~~ ✅ 2026-04-16
-**結果**：Python static flag 無法靜態知道 Rust build feature，故新增 Rust IPC `get_build_capabilities` 回報 `cfg!(feature = "edge_predictor_ort")`；Python capabilities endpoint 於 probe 時動態 overlay — ort build 自動翻 True，default build 保持 False，無需 Python 重啟。2 個新 Python 測試驗證 overlay + fail-soft。
+> P1-1 EDGE-P3-1 Phase B #3 ONNX loader ✅ 2026-04-16 · P1-2 Step 7b Python route + flag flip ✅ 2026-04-16 — 已歸檔（索引見文件末尾）。
 
 ### P1-3 · EDGE-P3-1 Step 7c Python consumer
 **狀態**：Rust writer 完（commit `b469448`），`learning.decision_shadow_fills` 寫入正常，但 Python 端沒 consumer routes 用
@@ -156,15 +163,6 @@ git status && git log --oneline -5
 - [ ] **5-04~07** DL-1 Symbol Embedding + DL-2 Regime LSTM Shadow
 - [ ] **5-08~09** JS + Scorer 整合 + correlation_pairs
 - [ ] **5-10~13** E2 + E4 + QC + E5
-
-### DEDUP-PY-RUST · Python–Rust 重複計算代碼清理 ✅（2026-04-16）
-- [x] **Phase 1** Step 1-3 stub 化（indicators/ + indicator_engine + signal_generator/signal_engine）
-- [x] **Phase 2** Step 4-6 stub 化（kline_manager + market_scanner + position_sizer）
-- [x] **Phase 3** Step 7-10 stub 化（orchestrator + auto_deployer + backtest + strategies/base）
-- **實際效益**：Tier A 21 檔 ~8,506 行 → 1,982 行 stub（淨減 ~6,524 行）
-- **驗證**：FastAPI 217 routes 全載入；Bybit connector 2,454 tests passed / 1 skipped；local_model_tools/tests/ 重寫為 `test_stub_contracts.py` 契約測試 **59 passed**
-- **計劃原文**：`docs/references/2026-04-16--python_rust_dedup_cleanup_plan.md`
-- **Follow-up**：~~(1) local_model_tools/tests/ 重寫為 stub-shape 契約測試~~ ✅；~~(2) 確認 ENGINE-HEAL 部署 + `restart_all.sh --rebuild` 後 route fallback 行為符合預期~~ ✅（2026-04-16 rebuild 後 10 個策略路由全數 HTTP 200：6 個 Rust-first 回 `source=rust_engine`/`rust_engine_primary`；4 個 Python-stub-only 回 documented 空/stub shape 無 500）
 
 ### EDGE P2（架構層重工）
 - [ ] **EDGE-P2-2** OI + Liquidation 信號源 — 給 `bb_breakout` 加領先信號（Bybit WS `tickers` OI + `liquidation` stream）
@@ -260,7 +258,8 @@ git status && git log --oneline -5
 
 ## 📚 已完成歸檔索引
 
-- **2026-04-15 W22 ENGINE-HEAL + EDGE-P3-1 + GUI Fills**：`docs/archive/2026-04-15--completed_todo_w22_engine_heal_edge_p3.md` ← **本次整理新增**
+- **2026-04-16 STRATEGY-CLOSE-TAG-FIX + EDGE-P3-1 Phase B #3 + DEDUP-PY-RUST**：`docs/archive/2026-04-16--completed_todo_strategy_close_tag_edge_p3_dedup.md` ← **本次整理新增**
+- **2026-04-15 W22 ENGINE-HEAL + EDGE-P3-1 + GUI Fills**：`docs/archive/2026-04-15--completed_todo_w22_engine_heal_edge_p3.md`
 - **2026-04-14 Phantom-Heal + Engine Self-Healing + EDGE**：`docs/archive/2026-04-14--completed_todo_w22_phantom_heal.md`
 - **2026-04-12 全程序鏈審計**：`docs/archive/2026-04-12--completed_todo_full_program_audit.md`
 - **W19 + W20 + Phase 6 + 3E-E2 Fix Rounds A-G**：`docs/archive/2026-04-11--completed_todo_w19_w20_phase6.md`
