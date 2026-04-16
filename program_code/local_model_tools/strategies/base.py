@@ -1,59 +1,16 @@
 """
-Strategy Base Class / 策略基类
+STUB: Strategy base class / 策略基类 stub.
 
-MODULE_NOTE (中文):
-  所有交易策略的抽象基类。定义统一的策略生命周期接口：
-  - on_signal(): 接收信号，决定是否行动
-  - on_tick(): 定时检查（用于 Grid、Funding Rate 等需要主动检查的策略）
-  - get_orders_to_submit(): 返回待提交的订单列表
-  - get_status(): 返回策略当前状态
-
-  策略不直接提交订单到 Paper Trading Engine。
-  策略生成 OrderIntent（订单意图），由 Strategy Orchestrator 统一管理、
-  风控检查后再提交。
-
-  策略状态：
-  - idle: 策略已注册但未启用
-  - active: 策略正在运行，监听信号和行情
-  - paused: 策略暂停（保留状态但不产生新订单意图）
-  - stopped: 策略已停止（可清理状态后移除）
-
-MODULE_NOTE (English):
-  Abstract base class for all trading strategies. Defines a unified strategy
-  lifecycle interface:
-  - on_signal(): receive signals, decide whether to act
-  - on_tick(): periodic check (for strategies needing proactive checks like Grid, Funding Rate)
-  - get_orders_to_submit(): return list of pending order intents
-  - get_status(): return current strategy state
-
-  Strategies do NOT submit orders directly to Paper Trading Engine.
-  Strategies generate OrderIntents, managed by Strategy Orchestrator,
-  risk-checked, then submitted.
-
-  Strategy states:
-  - idle: registered but not enabled
-  - active: running, listening to signals and market data
-  - paused: paused (retains state but no new order intents)
-  - stopped: stopped (can clean up and remove)
-
-Safety invariant / 安全不变量:
-  - 策略只产生 OrderIntent，不直接执行交易 / Strategies only generate OrderIntents
+MODULE_NOTE (EN): Strategy implementations live in Rust
+  `rust/openclaw_engine/src/strategies/`. The Python abstract base is
+  retained only for legacy type hints / imports. All behavior is no-op.
+MODULE_NOTE (中): 策略实现已迁移至 Rust `openclaw_engine::strategies`。
+  Python 抽象基类仅为兼容旧 import 与类型标注保留，行为全部无操作。
 """
-
 from __future__ import annotations
 
-import logging
-import threading
-import time
 from abc import ABC, abstractmethod
 from typing import Any
-
-logger = logging.getLogger(__name__)
-
-
-# =============================================================================
-# Strategy States / 策略状态
-# =============================================================================
 
 STRATEGY_IDLE = "idle"
 STRATEGY_ACTIVE = "active"
@@ -61,33 +18,17 @@ STRATEGY_PAUSED = "paused"
 STRATEGY_STOPPED = "stopped"
 
 
-# =============================================================================
-# OrderIntent — What a strategy wants to do / 策略想要执行的操作
-# =============================================================================
-
 class OrderIntent:
-    """
-    A strategy's intention to place an order.
-    策略下单意图。
-
-    This is NOT an actual order — it's a request that will go through
-    the Strategy Orchestrator → Risk Manager → Paper Trading Engine pipeline.
-    这不是实际订单 — 它是一个请求，将经过策略编排器 → 风控管理器 → Paper Trading Engine 的管线。
-
-    Attributes:
-      symbol       — trading pair / 交易对
-      side         — "Buy" or "Sell" / 买卖方向
-      order_type   — "market", "limit", "conditional" / 订单类型
-      qty          — order quantity / 数量
-      price        — limit price (None for market) / 限价（市价单为 None）
-      strategy_name — which strategy generated this / 生成此意图的策略
-      reason       — human-readable reason / 人类可读的理由
-      confidence   — signal confidence that triggered this / 触发的信号置信度
-      metadata     — extra data / 额外数据
-    """
     __slots__ = (
-        "symbol", "side", "order_type", "qty", "price",
-        "strategy_name", "reason", "confidence", "metadata",
+        "symbol",
+        "side",
+        "order_type",
+        "qty",
+        "price",
+        "strategy_name",
+        "reason",
+        "confidence",
+        "metadata",
         "_history_ref",
     )
 
@@ -95,7 +36,7 @@ class OrderIntent:
         self,
         symbol: str,
         side: str,
-        order_type: str = "limit",  # B6: default changed market→limit (maker fee ~0.02% vs taker ~0.055%)
+        order_type: str = "limit",
         qty: float = 0.0,
         price: float | None = None,
         strategy_name: str = "",
@@ -104,15 +45,15 @@ class OrderIntent:
         metadata: dict[str, Any] | None = None,
     ) -> None:
         self.symbol = symbol
-        self.side = side  # "Buy" or "Sell"
+        self.side = side
         self.order_type = order_type
         self.qty = qty
         self.price = price
         self.strategy_name = strategy_name
         self.reason = reason
         self.confidence = confidence
-        self.metadata = metadata or {}
-        self._history_ref = None  # Set by StrategyOrchestrator for status tracking / 由编排器设置用于状态追踪
+        self.metadata = dict(metadata) if metadata else {}
+        self._history_ref = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -123,187 +64,72 @@ class OrderIntent:
             "price": self.price,
             "strategy_name": self.strategy_name,
             "reason": self.reason,
-            "confidence": round(self.confidence, 4),
+            "confidence": self.confidence,
             "metadata": self.metadata,
         }
 
     def __repr__(self) -> str:
         return (
-            f"OrderIntent({self.symbol} {self.side} {self.order_type} "
-            f"qty={self.qty} price={self.price} src={self.strategy_name})"
+            f"<OrderIntent stub {self.symbol} {self.side} qty={self.qty} "
+            f"strat={self.strategy_name}>"
         )
 
 
-# =============================================================================
-# StrategyBase — Abstract Base / 策略抽象基类
-# =============================================================================
-
 class StrategyBase(ABC):
-    """
-    Abstract base class for all trading strategies.
-    所有交易策略的抽象基类。
-    """
-
     def __init__(self) -> None:
         self._state = STRATEGY_IDLE
+        self._registered_name = ""
         self._pending_intents: list[OrderIntent] = []
-        self._intent_lock = threading.RLock()  # RLock: reentrant, allows on_signal to hold lock while calling _emit_intent / 可重入锁
-        self._realized_pnl: float = 0.0
-        self._unrealized_pnl: float = 0.0
-        self._total_fees: float = 0.0
-        self._trade_history: list[dict[str, Any]] = []
-        self._max_trade_history: int = 200
-        # Numeric ID assigned by StrategyOrchestrator on registration / 由编排器在注册时分配的数字编号
-        self.strategy_id: int = 0
-        # Custom name override for auto-deployed multi-symbol strategies.
-        # When set, orchestrator uses this as the registration key instead of self.name.
-        # 自定义名称覆盖，用于自动部署的多品种策略。设置后，编排器用此名称作为注册键。
-        self._custom_name: str | None = None
-        # Default metadata merged into every emitted intent.
-        # Used by deployer to inject api_category ("linear"/"spot") at deploy time.
-        # 預設元數據，合併到每個發出的 intent 中。部署器用此注入 api_category。
-        self._default_metadata: dict[str, Any] = {}
 
     @property
     @abstractmethod
     def name(self) -> str:
-        """Strategy name / 策略名称"""
         ...
 
     @property
     def registered_name(self) -> str:
-        """
-        Name used for orchestrator registration key.
-        编排器注册键使用的名称。
-
-        Returns _custom_name if set (for auto-deployed multi-symbol strategies),
-        otherwise falls back to self.name.
-        若设置了 _custom_name（自动部署的多品种策略），返回自定义名称，否则返回 self.name。
-        """
-        return self._custom_name or self.name
+        return self._registered_name or self.name
 
     @property
     @abstractmethod
     def description(self) -> str:
-        """Strategy description (Chinese + English) / 策略描述"""
         ...
 
     @property
     def state(self) -> str:
-        """Current strategy state / 当前策略状态"""
         return self._state
 
     def activate(self) -> None:
-        """Activate the strategy (from idle or paused) / 激活策略（从 idle 或 paused）"""
-        if self._state == STRATEGY_STOPPED:
-            logger.warning(
-                "Cannot activate stopped strategy, re-register instead / "
-                "无法激活已停止的策略，请重新注册"
-            )
-            return
         self._state = STRATEGY_ACTIVE
 
     def pause(self) -> None:
-        """Pause the strategy (from active) / 暂停策略（从 active）"""
-        if self._state != STRATEGY_ACTIVE:
-            logger.warning(
-                "Cannot pause non-active strategy (state=%s) / "
-                "无法暂停非活跃策略（状态=%s）", self._state, self._state,
-            )
-            return
         self._state = STRATEGY_PAUSED
 
     def stop(self) -> None:
-        """Stop the strategy / 停止策略"""
         self._state = STRATEGY_STOPPED
-        with self._intent_lock:
-            self._pending_intents.clear()
 
     def on_signal(self, signal: Any) -> None:
-        """
-        Handle a trading signal / 处理交易信号
-
-        Override to implement signal-based strategy logic.
-        重写以实现基于信号的策略逻辑。
-
-        Args:
-          signal — Signal object from SignalEngine / 来自 SignalEngine 的信号对象
-        """
-        pass  # Default: do nothing / 默认：不做任何事
+        return None
 
     def on_tick(self, symbol: str, price: float, ts_ms: int) -> None:
-        """
-        Handle a price tick / 处理价格 tick
-
-        Override for strategies that need periodic checks (Grid, Funding Rate).
-        重写给需要定期检查的策略（Grid、Funding Rate）。
-
-        Args:
-          symbol — trading pair / 交易对
-          price  — current price / 当前价格
-          ts_ms  — timestamp in ms / 毫秒时间戳
-        """
-        pass  # Default: do nothing / 默认：不做任何事
+        return None
 
     def on_fill(self, fill: dict, is_open: bool) -> None:
-        """
-        Called when an order fill is confirmed for this strategy / 订单成交确认时调用
-
-        Override to sync internal position state with actual fills.
-        重写以将内部仓位状态与实际成交同步。
-
-        Args:
-          fill    — fill dict with keys: symbol, side, qty, price, strategy_name
-          is_open — True if this fill opened a new position, False if it closed one
-        """
-        pass  # Default: do nothing / 默认：不做任何事
+        return None
 
     def get_pending_intents(self) -> list[OrderIntent]:
-        """
-        Get and clear pending order intents / 获取并清空待处理的订单意图
-
-        Thread-safe: protected by _intent_lock.
-        线程安全：受 _intent_lock 保护。
-
-        Returns:
-          List of OrderIntents generated since last call / 上次调用后生成的 OrderIntent 列表
-        """
-        with self._intent_lock:
-            intents = list(self._pending_intents)
-            self._pending_intents.clear()
-        return intents
+        drained, self._pending_intents = self._pending_intents, []
+        return drained
 
     @property
     def pending_intent_count(self) -> int:
-        """Number of pending intents / 待处理意图数量"""
-        with self._intent_lock:
-            return len(self._pending_intents)
+        return len(self._pending_intents)
 
     def on_intent_rejected(self, intent: OrderIntent) -> None:
-        """
-        Called when an intent is rejected by pipeline gates (governance/H0/Guardian).
-        当 intent 被管线门控（治理/H0/Guardian）拒绝时调用。
-
-        Subclasses should override to roll back optimistic state updates (e.g. _current_position).
-        子类应重写此方法以回滚乐观状态更新（如 _current_position）。
-        """
-        pass  # Default: no-op. Subclasses override as needed.
+        return None
 
     def _emit_intent(self, intent: OrderIntent) -> None:
-        """
-        Internal: add an order intent to the pending queue / 内部：添加订单意图到待处理队列
-
-        Only emits if strategy is active. Thread-safe.
-        仅在策略激活状态时生效。线程安全。
-        """
-        if self._state == STRATEGY_ACTIVE:
-            # Merge default metadata (e.g. api_category) — intent-level values take precedence
-            # 合併預設元數據（如 api_category）— intent 級別的值優先
-            if self._default_metadata:
-                merged = {**self._default_metadata, **intent.metadata}
-                intent.metadata = merged
-            with self._intent_lock:
-                self._pending_intents.append(intent)
+        self._pending_intents.append(intent)
 
     def record_trade_result(
         self,
@@ -315,78 +141,27 @@ class StrategyBase(ABC):
         fee: float = 0.0,
         reason: str = "",
     ) -> None:
-        """
-        Record a completed trade result for PnL tracking.
-        记录已完成的交易结果用于 PnL 跟踪。
-        """
-        if side.lower() in ("buy", "long"):
-            pnl = (exit_price - entry_price) * qty - fee
-        else:
-            pnl = (entry_price - exit_price) * qty - fee
-
-        self._realized_pnl += pnl
-        self._total_fees += fee
-
-        record = {
-            "symbol": symbol,
-            "side": side,
-            "qty": qty,
-            "entry_price": entry_price,
-            "exit_price": exit_price,
-            "pnl": round(pnl, 4),
-            "fee": round(fee, 4),
-            "reason": reason,
-            "ts_ms": int(time.time() * 1000),
-        }
-        self._trade_history.append(record)
-        if len(self._trade_history) > self._max_trade_history:
-            self._trade_history = self._trade_history[-self._max_trade_history:]
+        return None
 
     def get_pnl_summary(self) -> dict[str, Any]:
-        """Get strategy PnL summary / 获取策略 PnL 摘要"""
-        wins = [t for t in self._trade_history if t["pnl"] > 0]
-        losses = [t for t in self._trade_history if t["pnl"] <= 0]
-        return {
-            "realized_pnl": round(self._realized_pnl, 4),
-            "total_fees": round(self._total_fees, 4),
-            "net_pnl": round(self._realized_pnl, 4),  # fees already deducted in record_trade_result
-            "trade_count": len(self._trade_history),
-            "win_count": len(wins),
-            "loss_count": len(losses),
-            "win_rate": round(len(wins) / len(self._trade_history), 4) if self._trade_history else 0.0,
-            "avg_win": round(sum(t["pnl"] for t in wins) / len(wins), 4) if wins else 0.0,
-            "avg_loss": round(sum(t["pnl"] for t in losses) / len(losses), 4) if losses else 0.0,
-        }
+        return {"stub": True, "net_pnl": 0.0, "trades": 0}
 
     def get_persistent_state(self) -> dict[str, Any]:
-        """
-        Get strategy state that should survive restarts.
-        获取需要在重启后保留的策略状态。
-
-        Override in subclasses to include strategy-specific state.
-        子类重写以包含策略特定状态。
-        """
-        return {
-            "name": self.registered_name,
-            "state": self._state,
-            "realized_pnl": self._realized_pnl,
-            "total_fees": self._total_fees,
-        }
+        return {}
 
     def restore_persistent_state(self, saved: dict[str, Any]) -> None:
-        """
-        Restore strategy state from a previous save.
-        从之前的保存中恢复策略状态。
-
-        Override in subclasses to restore strategy-specific state.
-        子类重写以恢复策略特定状态。
-        """
-        if saved.get("state") == STRATEGY_ACTIVE:
-            self._state = STRATEGY_ACTIVE
-        self._realized_pnl = saved.get("realized_pnl", 0.0)
-        self._total_fees = saved.get("total_fees", 0.0)
+        return None
 
     @abstractmethod
     def get_status(self) -> dict[str, Any]:
-        """Get strategy-specific status / 获取策略特定状态"""
         ...
+
+
+__all__ = [
+    "STRATEGY_IDLE",
+    "STRATEGY_ACTIVE",
+    "STRATEGY_PAUSED",
+    "STRATEGY_STOPPED",
+    "OrderIntent",
+    "StrategyBase",
+]
