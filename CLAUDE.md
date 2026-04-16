@@ -48,7 +48,7 @@
 
 **Runtime**：`Live_Ready` ⚠️（2026-04-16 audit 修正：原宣告不準確）— LIVE-P0/P1/P2 代碼完整、單測綠，但 **0 真實 live 流量**（歷史 43k 條 `engine_mode="live"` 實為 LiveDemo）。**真實 live 門控**：(1) Python `live_reserved` global mode、(2) Python Operator 角色 auth、(3) secret slot 有 `BYBIT_API_KEY/SECRET` 或 `settings/secret_files/bybit/live/{api_key,api_secret}`。`execution_authority` 在 Rust 僅為 P0/P1 denylist 字串常量（`claude_teacher/applier.rs:226`），非真實授權邏輯；「auto_granted_on_start」屬 Python 概念。Live 縮倉監控：5min 輪詢，≥5% 警告，≥15% 自動撤權+平倉+凍結 GovernanceHub（代碼已寫、e2e 測試綠，**從未真實觸發**）。
 
-**權威原則**：Rust `openclaw_engine` = paper/demo/live 三引擎並行唯一引擎（ARCH-RC1 1C-4 + 3E-ARCH）。Rust ConfigStore 為所有交易/風控/學習/預算參數權威，4 IPC 寫入面 → tick-level hot-reload。**禁止 restart-to-apply**。Guardian = RiskConfig 純派生視圖。Python 無交易邏輯（DEAD-PY-2 清除 ~4500 行後；2026-04-16 audit：`legacy_routes.py + main_legacy.py` 共 1630 行邊界代碼仍殘留，已隔離不執行）。
+**權威原則**：Rust `openclaw_engine` = paper/demo/live 三引擎並行唯一引擎（ARCH-RC1 1C-4 + 3E-ARCH）。Rust ConfigStore 為所有交易/風控/學習/預算參數權威，4 IPC 寫入面 → tick-level hot-reload。**禁止 restart-to-apply**。Guardian = RiskConfig 純派生視圖。Python 無交易邏輯（DEAD-PY-2 清除 ~4500 行後）。**2026-04-16 audit 更正**：`legacy_routes.py + main_legacy.py` 共 1630 行**仍是活躍主承載**（main_legacy.py:450-451 `register_legacy_routes(app)` 注冊 54 路由），覆蓋 auth/login/gui/console/`/api/v1/system/*`/`/api/v1/health/db`/`/api/v1/learning/*`——原「已隔離不執行」敘述錯誤，此層拆分未完成。
 
 **進行中/阻塞**：
 - **STABILITY-1（P0-CRITICAL，2026-04-16 audit 新增）**：2026-04-16 當日 9 小時內引擎崩潰 **5 次**（11:11/11:13/11:14 UTC 三連爆 + 16:03/16:04 UTC 兩連爆 + Python fallback strike 1-2/3），當前 PID 1364222 於 20:16 UTC（22:16 local）重啟，CLAUDE.md §十一 「乾淨 demo 起點 21:08 local」為錯誤敘述（時間對不上 + 引擎根本不穩）。**P0-2 LG-1 21d 穩定期時鐘未啟動**——引擎連 11 分鐘都守不住，21 天 × 24h = 504h 是幻想。必須先查 crash root cause（需撈 watchdog.log + systemd journal + core dump），在此之前 P0-2/P0-3 評估窗口全數作廢。TODO §P0-9。
@@ -135,7 +135,7 @@ max_retries             = 0
 [GovernanceHub]          SM-01 授權 + SM-04 風控 + SM-02 租約 + EX-04 對賬
 [H1-H5 AI 治理層]       thought_gate / budget / model_router / governor / cost_logging
 [I Decision Lease]       GovernanceHub.acquire_lease() / release_lease()
-[Control API v1]         FastAPI 183 路由
+[Control API v1]         FastAPI 209 /api/v1 + 11 non-api 路由（2026-04-16 audit 實測）
 [GUI + Learning]         11-Tab 控制台 + Learning Cockpit + Paper Trading Dashboard
 [Rust openclaw_engine]   paper / demo / live 三模式唯一引擎（1C-3-F 後）
                          tick pipeline + IntentProcessor + paper_state + governance + stop_manager
