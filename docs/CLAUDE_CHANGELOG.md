@@ -1,7 +1,43 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-04-16 深夜（LIVE-GUARD-1 Rust 端 Mainnet 三重硬鎖回補）
+> 最後更新：2026-04-16 深夜（P0-9 STABILITY-1 RCA — 停電基礎設施事件非 code bug）
+
+### P0-9 STABILITY-1 — 2026-04-16 停電事件 RCA（非代碼 bug，21d 時鐘不重置）
+
+**背景**：同日更早 audit 在 watchdog.log 發現 9h 內 5 次 engine crash（後深撈實為 **30 次**），誤判為「代碼穩定性 P0-CRITICAL 阻塞」並要求重置 P0-2 LG-1 21d demo 時鐘。Operator 在回顧中提出假設：**「2026-04-16 10:00-16:00 local 停電 ~6h 造成斷網」**，要求驗證。
+
+**RCA 證據鏈**（operator hypothesis 得證）：
+- **時區**：operator 筆電 CEST (UTC+2)，UTC→local 加 2h
+- **第一次 crash 10:45 local（08:45 UTC）** = 停電開始 45min 後（電池 + 路由器失電延遲）
+- **watchdog 完全靜默 13:16-18:03 local（11:16-16:03 UTC，4h 47min blackout）** = 筆電電池耗盡或硬關機
+- **post-gap 首條 `snapshot age=17313.5s`（4.81h 陳舊）** = 硬斷電復電鐵證
+- **engine log（engine-1776330656.log，09:10 UTC 啟動）** 所有錯誤簽名一致：
+  - `HTTP transport error: error sending request for url (https://api-demo.bybit.com/...)`
+  - `IO error: failed to lookup address information: Temporary failure in name resolution`（DNS 失敗）
+  - REST / WS private (`stream-demo.bybit.com/v5/private`) / WS public (`stream.bybit.com/v5/public/linear`) 全部連不上
+- **零 panic / 零 assertion / 零 rust backtrace** — 純屬網路層斷線時的 fail-closed 合理行為
+- 斷網恢復後（18:03 local 之後）網路仍不穩又滾了幾輪 crash，當前 PID 1364222 於 22:16 local 穩定啟動
+
+**判定**：
+- 30 次 crash = **單次基礎設施事件**（斷電斷網），非引擎代碼 bug
+- **P0-2 LG-1 21d demo 時鐘不重置**：基礎設施事件 ≠ 引擎不穩定，否則每次停電都重置永遠達不到 504h
+- **P0-3 Phase 5 edge 2w 重評**：crash 時段（10:45-18:03 local）fills 樣本自然為 0（引擎連不上 Bybit），不需特別排除
+- **最早 Live 日期**：從樂觀估 W25 末（~2026-05-30）回到 **W24 末（~2026-05-23）**
+
+**Nice-to-have（不阻塞，不急）**：
+- `engine_watchdog` 可加 network-loss detection：連續 N 次 DNS failure 分類為 `network_outage`，不計入 stability strike
+- 未來遇到類似事件自動區分基礎設施 vs 引擎 regression
+
+**文件更新**：
+- `TODO.md §P0-9` — 從 🔴 NEW P0-CRITICAL 改為 ✅ RCA 完成
+- `CLAUDE.md §三` — STABILITY-1 條目重寫為 RCA 結論
+- `CLAUDE.md §十` — 關鍵路徑劃掉 P0-9，Live 日期回到 W24 末
+- `CLAUDE.md §十一` — 一句話狀態加入 RCA 結論，移除「日均崩潰 ≥5 次」誤述
+
+**方法論教訓**：audit 發現的 crash 風暴在沒有 RCA 前不要輕易判定為 code-instability blocker；watchdog 記錄 + engine log 簽名（panic vs transport error）可快速鑑別 infra vs code root cause。
+
+---
 
 ### LIVE-GUARD-1 — Rust 端 Mainnet 三重硬鎖回補（2026-04-16 深夜）
 
