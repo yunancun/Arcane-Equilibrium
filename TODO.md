@@ -1,8 +1,8 @@
 # OpenClaw TODO — 工作計劃清單
 
-**最後更新：2026-04-16**（PAPER-DISABLE-1 ✅ 預設關閉 paper 管線 + 負餘額守門 + P0-0 RECONCILER-BURST-FIX ✅ startup grace window + 6 新單元測試）
+**最後更新：2026-04-16**（PAPER-DISABLE-1 ✅ 預設關閉 paper 管線 + 負餘額守門 + P0-0 RECONCILER-BURST-FIX ✅ startup grace window + 6 新單元測試 + LG-1 語義改 demo 觀察 + P1-3 shadow_fills Python consumer ✅ 15 新測試）
 
-**測試基準線**：Rust **engine lib 1336 (ort) / 1330 (default) + core 380 + e2e 35 + reconciler_e2e 18 + ort integration 5** · Python **2883 passed (5 skipped · 0 fail)** · ml_training **182 passed (10 skipped)**
+**測試基準線**：Rust **engine lib 1336 (ort) / 1330 (default) + core 380 + e2e 35 + reconciler_e2e 18 + ort integration 5** · Python **2898 passed (5 skipped · 0 fail)**（+15 shadow_fills） · ml_training **182 passed (10 skipped)**
 
 > compact 後從此文件恢復工作狀態。第一個 `[ ]` 即為下一步起點。
 > 條目分級：**P0 阻塞關鍵路徑** → **P1 當週活躍** → **P2 下週排期** → **P3 長期專項** → **P4 Backlog / Conditional**
@@ -63,12 +63,13 @@ git status && git log --oneline -5
 - `restart_all.sh --rebuild` 部署 R1 bin；SQL 驗證 `SELECT substring(strategy_name from 1 for 30), COUNT(*) FROM trading.fills WHERE engine_mode='demo' AND ts > '<rebuild_ts>' GROUP BY 1` 出現 `strategy_close:*` 與分離 `risk_close:*` 桶
 - 重寫 G-2 daemon SQL 口徑並重啟 → 累積 ≥20 真實策略退場 fill 寫 audit
 
-### P0-2 · LG-1 Paper Trading 21d 觀察期 🕰️
-**狀態**：FA-PHANTOM-2 + FIX-PHASE1 部署後等乾淨窗口開始
-**目的**：Live 前置條件；≥21d 穩定 paper 運行零事故
-**阻塞者**：P0-1（需先確認 funding_arb 邊際可用）
+### P0-2 · LG-1 Demo Trading 21d 觀察期 🕰️
+**狀態**：PAPER-DISABLE-1（2026-04-16）後改口徑為 demo 觀察；起點待 P0-0 部署後 48h 無事故
+**目的**：Live 前置條件；≥21d 穩定 demo 運行零事故（Bybit testnet 實際 API，驗證價值高於 paper 合成 fill）
+**阻塞者**：非必要阻塞 — LG-1 覆蓋全策略穩定度，不限 funding_arb；P0-1 為 funding_arb 子集並行
 **解鎖**：LG-2/3 shadow→blocking + provider pricing 正式化
 **預估**：3 週連續觀察
+**語義變更記錄**：原設計為「21d paper 零事故」。PAPER-DISABLE-1 後 paper 預設不 spawn（env gate `OPENCLAW_ENABLE_PAPER=1` 才啟用），LG-1 改以 demo 為觀察基準。若未來 Agent 階段（W22+ Strategist）重新啟用 paper 作探索環境，LG-1 可擴為「paper + demo 雙環境觀察」
 
 ### P0-3 · Phase 5 策略 Edge 2w 重評 📊
 **狀態**：待乾淨 demo 累積 2 週（歸因已通：P0-4 R1 ✅ 2026-04-16）
@@ -99,7 +100,7 @@ git status && git log --oneline -5
 - 相關 commit:`348a9c5`(PHANTOM-2)、tick_pipeline/tests.rs L171 已有單測 fixture 可擴展
 **預估**:0.5d spec + 0.5d 實作 + 0.5d 回歸
 
-**關鍵路徑**:`~~P0-0 reconciler burst fix~~ ✅ → restart_all --rebuild 部署 → P0-3 Phase 5 edge 2w 評估 + P0-2 LG-1 21d → LG-4/5 → Live`(P0-1 G-2 並行驗證 funding_arb 子集,不在主路徑;P0-5 PHANTOM-2-FUP 不阻塞主路徑,可任意時點插入)
+**關鍵路徑**:`~~P0-0 reconciler burst fix~~ ✅ → ~~restart_all --rebuild 部署~~ ✅ → P0-3 Phase 5 edge 2w 評估 + P0-2 LG-1 21d demo → LG-4/5 → Live`(P0-1 G-2 並行驗證 funding_arb 子集,不在主路徑;P0-5 PHANTOM-2-FUP 不阻塞主路徑,可任意時點插入)
 **最早 Live 日期**:樂觀估 **W24 末(～2026-05-23)**
 
 ---
@@ -108,10 +109,20 @@ git status && git log --oneline -5
 
 > P1-1 EDGE-P3-1 Phase B #3 ONNX loader ✅ 2026-04-16 · P1-2 Step 7b Python route + flag flip ✅ 2026-04-16 — 已歸檔（索引見文件末尾）。
 
-### P1-3 · EDGE-P3-1 Step 7c Python consumer
-**狀態**：Rust writer 完（commit `b469448`），`learning.decision_shadow_fills` 寫入正常，但 Python 端沒 consumer routes 用
-**工作內容**：shadow fills GUI 視圖 / 審計 / promotion gate 查詢路由（後 Phase B #3 接線後才真正有數據）
-**優先級**：P1 下半（#3 先於 7c，因 7c 是讀取端）
+### P1-3 · EDGE-P3-1 Step 7c Python consumer ✅ 2026-04-16
+**狀態**：完成（待 API 服務重啟載入新路由）。三條讀取路由骨架 + 15 新單元測試。
+**交付**：
+- `app/shadow_fills_routes.py`：`GET /api/v1/edge/shadow_fills`（分頁列表）、`/summary`（per-strategy 聚合）、`/promotion_gate/{strategy}`（樣本數分級裁決）
+- `tests/test_shadow_fills_routes.py`：fake DB + fail-closed + 空資料 fallback + verdict 分支覆蓋；15 passed
+- `app/main.py`：路由註冊於 `engine_capabilities_router` 之後
+**Promotion gate 門檻**（spec §8.3 line 714）：
+- `n < 200` → `insufficient_samples`
+- `200 ≤ n < 500` + synthetic 覆蓋 → `ship_shadow_candidate`
+- `n ≥ 500` + synthetic 覆蓋 → `ship_prod_candidate`
+- `n ≥ 200` 但 synthetic 仍 NULL → `awaiting_synthetic_labels`
+**注意**：PAPER-DISABLE-1 後 paper 預設關，shadow fills 表目前為空。路由骨架已就緒，等 `OPENCLAW_ENABLE_PAPER=1` 啟用 paper + ONNX artifact 載入 + Stage 2+ synthetic-close writer 接線後自動開始回資料。離線指標（pinball skill / coverage error / decile lift）由 `run_training_pipeline.py` 裁決，不在此端點範圍。
+**驗收**：`python3 -m pytest program_code/exchange_connectors/bybit_connector/control_api_v1/tests/ -q` → 2469 passed / 1 skipped（+15 自本 PR）
+**部署**：需重啟 control_api_v1 服務載入新路由（`bash helper_scripts/restart_all.sh` 不含 --rebuild 即可）
 
 ### P1-4 · 在真 ETL 資料跑首個 ONNX export
 **狀態**：`learning.decision_features` 於 Step 7a 後開始採集；等足夠樣本（≥100k rows per strategy 推薦）
@@ -255,7 +266,7 @@ git status && git log --oneline -5
 | W19-W21 | 04-14~05-02 | 基礎設施 / 安全 / Phase 6 / 3E-ARCH / Audit | ✅ 歸檔 |
 | W22 | 05-05~09 | **ENGINE-HEAL FUP-1/2/3 + FIX-PHASE1 · FA-PHANTOM-2 · EDGE-P3-1 Phase A/B + Step 7 · ML-MIT #26 Lane A · GUI fills 鏈** | ✅ 歸檔 |
 | W22 末 | 2026-04-15 | P0-1 G-2 驗證（daemon active）· P1-1~4 EDGE-P3-1 Stage 2 推進 | 🟡 進行中 |
-| W23 | 05-12~16 | P0-2 LG-1 21d 觀察起點 · G-7 Teacher · G-10 Calibration · LG-2/3 | ⬜ |
+| W23 | 05-12~16 | P0-2 LG-1 21d demo 觀察起點 · G-7 Teacher · G-10 Calibration · LG-2/3 | ⬜ |
 | W24 | 05-19~23 | LG-4/5 Live Gate · SEC-21 · QoL-2 | ⬜ |
 | W25+ | 05-26+ | EDGE-P3-1 產線化 · Phase 5 補強或重做 · G-1 R-06 全 5 agent | ⬜ |
 
