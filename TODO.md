@@ -79,7 +79,7 @@ git status && git log --oneline -5
 **預估**：P0-0 部署後 2 週
 
 ### P0-5 · PHANTOM-2-FUP — ReduceToHalf one-shot guard 跨 tick 失效 🆕 2026-04-16
-**狀態**：診斷完成（CCAgent 認真核查 P0-4 R1 後續發現），未排期
+**狀態**：RCA 完成（`docs/references/2026-04-16--phantom2_fup_reduce_to_half_cascade_rca.md`），未排期實作
 **症狀**：FA-PHANTOM-2 fix（commit `348a9c5`,`worst_drop_for_held` + sigma 閘）已部署生效（`grep CloseAll engine.log` = **0**），但 `ReduceToHalf` 路徑仍在同 1-2 秒內針對同一 symbol 連續觸發 ≥9 次。實證：
 - 引擎日誌 `18:03:41.602042 → .603320`（1.3s 內）9 次 `FAST_TRACK ReduceToHalf`，全是 ORDIUSDT 觸發（held_drop=6.0%/sigma=3.0,positions=2,risk_level=Cautious）
 - DB 1-min bucket 統計：16:29 一分鐘 130 fills / 18:03 一分鐘 147 fills（爆發模式）
