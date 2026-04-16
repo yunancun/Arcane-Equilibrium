@@ -594,7 +594,50 @@ def get_demo_session_status(
 
 @phase2_router.get("/demo/fills")
 async def get_demo_fills(actor: base.AuthenticatedActor = Depends(base.current_actor)):
-    """Get Bybit Demo recent executions via PyO3 BybitClient / 通過 PyO3 獲取 Demo 成交"""
+    """Get Demo fill history. DB primary (has realized_pnl) / Bybit API fallback.
+    獲取 Demo 成交歷史。DB 為主（帶 realized_pnl）/ Bybit API 備援。"""
+    # DB path — same pattern as paper fills; carries engine-calculated realized_pnl.
+    # DB 路徑 — 與 paper fills 相同模式；帶引擎計算的 realized_pnl。
+    try:
+        from . import db_pool
+        conn = db_pool.get_conn()
+    except Exception:
+        conn = None
+    if conn is not None:
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT ts, symbol, side, qty, price, fee, realized_pnl, strategy_name "
+                "FROM trading.fills WHERE engine_mode = %s ORDER BY ts DESC LIMIT %s",
+                ("demo", 50),
+            )
+            rows = cur.fetchall()
+            fills = []
+            for ts, symbol, side, qty, price, fee, rpnl, strategy in rows:
+                ts_ms = int(ts.timestamp() * 1000) if ts is not None else 0
+                sym = symbol or ""
+                cat = "inverse" if sym.endswith("USD") and not sym.endswith("USDT") else "linear"
+                fills.append({
+                    "exec_time": str(ts_ms),
+                    "symbol": sym,
+                    "side": side or "",
+                    "qty": float(qty) if qty is not None else 0.0,
+                    "price": float(price) if price is not None else 0.0,
+                    "fee": float(fee) if fee is not None else 0.0,
+                    "realized_pnl": float(rpnl) if rpnl is not None else 0.0,
+                    "strategy": strategy or "",
+                    "category": cat,
+                })
+            return _envelope({"list": fills, "count": len(fills), "source": "pg_trading_fills"})
+        except Exception as e:
+            logger.warning("PG demo fills query failed, falling back to Bybit API: %s", e)
+        finally:
+            try:
+                db_pool.put_conn(conn)
+            except Exception:
+                pass
+    # Fallback: Bybit API via PyO3 (closedPnl from exchange).
+    # 備援：通過 PyO3 調 Bybit API（closedPnl 來自交易所）。
     rc = _get_rust_client()
     if rc is None:
         return _envelope({"enabled": False, "source": "rust_engine"})

@@ -1400,6 +1400,7 @@ impl TickPipeline {
             qty,
             price,
             fee: close_fee,
+            realized_pnl,
             strategy: close_tag.to_string(),
         }, 50);
     }

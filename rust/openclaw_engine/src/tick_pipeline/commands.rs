@@ -191,6 +191,7 @@ impl TickPipeline {
             qty: fill.fill_qty,
             price: fill.fill_price,
             fee: fill.fee,
+            realized_pnl,
             strategy: strategy.to_string(),
         }, 50);
 
@@ -399,6 +400,7 @@ impl TickPipeline {
             qty,
             price: fill_price,
             fee,
+            realized_pnl,
             strategy: strategy.to_string(),
         }, 50);
 

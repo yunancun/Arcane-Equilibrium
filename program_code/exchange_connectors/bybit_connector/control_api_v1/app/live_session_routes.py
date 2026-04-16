@@ -966,22 +966,62 @@ async def get_live_fills(
 ) -> dict:
     """
     GET /api/v1/live/fills
-    Recent fills (executions) from Bybit account via PyO3 client.
-    最近成交記錄，通過 PyO3 client 從 Bybit 帳戶讀取。
+    DB primary (realized_pnl) → Bybit API fallback → engine snapshot fallback.
+    DB 為主（帶 realized_pnl）→ Bybit API 備援 → 引擎快照備援。
     """
+    # DB path — engine-calculated realized_pnl, same pattern as demo/paper.
+    # DB 路徑 — 引擎計算的 realized_pnl，與 demo/paper 相同模式。
+    try:
+        from . import db_pool
+        conn = db_pool.get_conn()
+    except Exception:
+        conn = None
+    if conn is not None:
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT ts, symbol, side, qty, price, fee, realized_pnl, strategy_name "
+                "FROM trading.fills WHERE engine_mode IN (%s, %s) ORDER BY ts DESC LIMIT %s",
+                ("live", "live_demo", 50),
+            )
+            rows = cur.fetchall()
+            if rows:
+                fills = []
+                for ts, symbol, side, qty, price, fee, rpnl, strategy in rows:
+                    ts_ms = int(ts.timestamp() * 1000) if ts is not None else 0
+                    sym = symbol or ""
+                    cat = "inverse" if sym.endswith("USD") and not sym.endswith("USDT") else "linear"
+                    fills.append({
+                        "execTime": str(ts_ms),
+                        "symbol": sym,
+                        "side": side or "",
+                        "execQty": float(qty) if qty is not None else 0.0,
+                        "execPrice": float(price) if price is not None else 0.0,
+                        "execFee": float(fee) if fee is not None else 0.0,
+                        "closedPnl": float(rpnl) if rpnl is not None else 0.0,
+                        "strategy": strategy or "",
+                        "category": cat,
+                    })
+                return _live_response({"list": fills, "count": len(fills), "source": "pg_trading_fills"})
+        except Exception as e:
+            logger.warning("PG live fills query failed, falling back to Bybit API: %s", e)
+        finally:
+            try:
+                db_pool.put_conn(conn)
+            except Exception:
+                pass
+    # Bybit API via PyO3 (closedPnl from exchange).
+    # Bybit API（closedPnl 來自交易所）。
     rc = _get_rust_client_safe()
     if rc is not None:
         try:
-            # Normalize Rust snake_case → Bybit camelCase (execQty / closedPnl / etc.)
-            # so the GUI's camelCase-first fallback chain resolves cleanly.
-            # 將 Rust snake_case 正規化為 Bybit camelCase，避免 GUI 欄位讀到 undefined。
             from .strategy_ai_routes import _normalize_execution
             fills = [_normalize_execution(f) for f in rc.get_executions("linear", limit=50)]
             return _live_response({"source": "rust_engine", "list": fills, "count": len(fills)})
         except Exception as e:
             logger.warning("Rust fills fetch failed for live endpoint: %s", e)
-    # Fallback: engine recent fills (3E-ARCH: read live engine snapshot)
-    # 降級：引擎最近成交（3E-ARCH：讀 live 引擎快照）
+    # Fallback: engine recent fills (3E-ARCH snapshot, now carries realized_pnl).
+    # 降級：引擎快照 recent_fills（現帶 realized_pnl）。
     rust = get_rust_reader()
     if rust.is_engine_available("live"):
         try:

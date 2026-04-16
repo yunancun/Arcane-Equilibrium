@@ -611,13 +611,13 @@ def get_fills(
     獲取 paper 引擎的成交歷史。
 
     Source priority: PG `trading.fills` (authoritative, carries realized_pnl) →
-    Rust in-memory ring buffer fallback (50-deep, no realized_pnl).
+    Rust in-memory ring buffer fallback (50-deep, now also carries realized_pnl).
     數據源優先序：PG `trading.fills`（權威，帶 realized_pnl）→ Rust 環形緩衝備援
-    （50 筆上限，無 realized_pnl）。
+    （50 筆上限，現亦帶 realized_pnl）。
     """
     capped_limit = min(limit, 200)
-    # Try PG first — DB row has realized_pnl per fill (Rust TimestampedFill does not).
-    # 優先讀 PG — DB 列帶逐筆 realized_pnl（Rust TimestampedFill 沒有此欄位）。
+    # Try PG first — DB row has realized_pnl per fill.
+    # 優先讀 PG — DB 列帶逐筆 realized_pnl。
     try:
         from . import db_pool
         conn = db_pool.get_conn()
@@ -660,8 +660,8 @@ def get_fills(
             except Exception:
                 pass
 
-    # Fallback: Rust in-memory buffer (no realized_pnl field available).
-    # 備援：Rust 記憶體緩衝（無 realized_pnl 欄位）。
+    # Fallback: Rust in-memory buffer (TimestampedFill now carries realized_pnl).
+    # 備援：Rust 記憶體緩衝（TimestampedFill 現帶 realized_pnl）。
     reader = get_rust_reader()
     if reader.is_engine_available("paper"):
         rust_fills = reader.get_recent_fills(mode="paper") or []

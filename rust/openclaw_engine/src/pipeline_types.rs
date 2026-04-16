@@ -82,6 +82,10 @@ pub struct TimestampedFill {
     pub price: f64,
     /// Fee charged / 手續費
     pub fee: f64,
+    /// Realized PnL for this fill (0.0 for opens, non-zero for closes).
+    /// 此筆成交的已實現盈虧（開倉為 0.0，平倉非零）。
+    #[serde(default)]
+    pub realized_pnl: f64,
     /// Strategy that generated this fill / 產生此成交的策略
     pub strategy: String,
 }
