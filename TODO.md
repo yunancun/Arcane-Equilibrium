@@ -164,7 +164,7 @@ git status && git log --oneline -5
 - **實際效益**：Tier A 21 檔 ~8,506 行 → 1,982 行 stub（淨減 ~6,524 行）
 - **驗證**：FastAPI 217 routes 全載入；Bybit connector 2,454 tests passed / 1 skipped；local_model_tools/tests/ 重寫為 `test_stub_contracts.py` 契約測試 **59 passed**
 - **計劃原文**：`docs/references/2026-04-16--python_rust_dedup_cleanup_plan.md`
-- **Follow-up**：~~(1) local_model_tools/tests/ 重寫為 stub-shape 契約測試~~ ✅；(2) 確認 ENGINE-HEAL 部署 + `restart_all.sh --rebuild` 後 route fallback 行為符合預期
+- **Follow-up**：~~(1) local_model_tools/tests/ 重寫為 stub-shape 契約測試~~ ✅；~~(2) 確認 ENGINE-HEAL 部署 + `restart_all.sh --rebuild` 後 route fallback 行為符合預期~~ ✅（2026-04-16 rebuild 後 10 個策略路由全數 HTTP 200：6 個 Rust-first 回 `source=rust_engine`/`rust_engine_primary`；4 個 Python-stub-only 回 documented 空/stub shape 無 500）
 
 ### EDGE P2（架構層重工）
 - [ ] **EDGE-P2-2** OI + Liquidation 信號源 — 給 `bb_breakout` 加領先信號（Bybit WS `tickers` OI + `liquidation` stream）

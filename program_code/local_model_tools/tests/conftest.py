@@ -18,9 +18,10 @@ _program_code_dir = os.path.dirname(_package_dir)    # program_code/
 if _program_code_dir not in sys.path:
     sys.path.insert(0, _program_code_dir)
 
-# DEDUP-PY-RUST (2026-04-16): all test targets here test Python compute paths
-# that have been stubbed to Rust. Collection-time ignore keeps pytest green.
-# DEDUP-PY-RUST（2026-04-16）：此目录测试的 Python 计算路径已 stub 化到 Rust，
-# 整包 collect_ignore_glob 保持 pytest 整洁。后续若需恢复，应重写为 Rust-fallback
-# 的契约测试（测 stub 返回空值 + Rust 在线时的契约）。
-collect_ignore_glob = ["test_*.py"]
+# DEDUP-PY-RUST (2026-04-16): behavioural Python tests were deleted after the
+# compute paths were stubbed to Rust. `test_stub_contracts.py` replaces them
+# with stub-shape contract tests (accepted ctor kwargs / __all__ surface /
+# documented empty return shapes). Do NOT add computation tests here — those
+# belong in Rust unit tests under `rust/openclaw_core` / `rust/openclaw_engine`.
+# DEDUP-PY-RUST（2026-04-16）：行为型测试已删除，改由 `test_stub_contracts.py`
+# 负责守护 stub 介面表面；计算行为由 Rust 单元测试覆盖。
