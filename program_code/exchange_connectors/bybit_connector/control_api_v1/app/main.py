@@ -193,6 +193,10 @@ app.include_router(live_trust_router)
 from .engine_capabilities_routes import engine_capabilities_router  # noqa: E402
 app.include_router(engine_capabilities_router)
 
+# ── Shadow-fill Consumer Router / Shadow-fill 消費者路由（EDGE-P3-1 Step 7c）──
+from .shadow_fills_routes import shadow_fills_router  # noqa: E402
+app.include_router(shadow_fills_router)
+
 # ── Startup Integrity Check / 啟動完整性驗證 ────────────────────────────────
 # Verify that non-optional critical dependencies were successfully injected at
 # module initialisation time.  H0_GATE is allowed to be None in degraded /
