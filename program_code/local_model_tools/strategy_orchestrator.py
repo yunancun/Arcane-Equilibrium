@@ -41,6 +41,7 @@ class StrategyOrchestrator:
         self._intent_history_capacity = intent_history_capacity
         self._strategies: dict[str, StrategyBase] = {}
         self._ai_engine: Any = None
+        self._ai_consultation_enabled = False
 
     def register_strategy(
         self, strategy: StrategyBase, name: str | None = None
