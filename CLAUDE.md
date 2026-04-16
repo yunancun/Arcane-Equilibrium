@@ -1,6 +1,6 @@
 # OpenClaw / Bybit AI Agent 交易系統
 # CLAUDE.md — 項目指令文件（核心規則 + 下一步指針）
-# 最後更新：2026-04-14
+# 最後更新：2026-04-16
 
 ---
 
@@ -51,9 +51,9 @@
 **權威原則**：Rust `openclaw_engine` = paper/demo/live 三引擎並行唯一引擎（ARCH-RC1 1C-4 + 3E-ARCH）。Rust ConfigStore 為所有交易/風控/學習/預算參數權威，4 IPC 寫入面 → tick-level hot-reload。**禁止 restart-to-apply**。Guardian = RiskConfig 純派生視圖。Python 無交易邏輯（DEAD-PY-2 清除 ~4500 行後）。
 
 **進行中/阻塞**：
-- **Phase 5 PAUSED**（2026-04-12 reframe）— PNL-FIX-1/2 清理後所有活躍策略 gross edge 為負（net -$2775）；cost_gate/DL/JS 機械已接線但需真實正 edge。**下一步**：策略重做（G-SR-1 / Strategist agent / 新信號邏輯）。詳見 `memory/project_phase5_promotion_edge_crisis.md`。
-- **ENGINE-HEAL 部署留尾**：Fix 1-4（panic hook / crash-only / WS stale self-cancel 120s / watchdog 4 道保險）已 merge，運行中引擎仍 pre-fix binary。operator 需 `restart_all.sh --rebuild` 部署。**FUP-1 ✅ systemd user unit 正式結清**（2026-04-15）。**FUP-2/3**（TODO.md 事故 follow-up）：live pipeline lagging 上游根因 ✅ + FIX-PHASE1 合併；`engine_results.jsonl` 111GB 滾動或關閉 ✅ 折入 FIX-PHASE1。
-- **非阻塞留尾**：W1 event_consumer 拆分；D-02 PriceEvent metadata HashMap 移除。
+- **Phase 5 PAUSED**（2026-04-12 reframe）— PNL-FIX-1/2 清理後所有活躍策略 gross edge 為負（net -$2775）；cost_gate/DL/JS 機械已接線但需真實正 edge。**下一步**：乾淨 demo 2 週後 P0-3 重評，若仍負則轉 EDGE-P3-1/EDGE-P2 接管。詳見 `memory/project_phase5_promotion_edge_crisis.md`。
+- **P0-5 PHANTOM-2-FUP ✅**：A+C 方案實作完成（HashMap+60s cooldown + clear 條件只在 Normal 時觸發）+5 新單測，待 `restart_all.sh --rebuild` 部署。詳 TODO §P0-5。
+- **非阻塞留尾**：W1 event_consumer 拆分；D-02 PriceEvent metadata HashMap 移除；IP-DEDUP-1（等 P0-3 判決）。
 
 **已完成里程碑索引**（完整敘述 + commit + 測試數保留於 `docs/archive/2026-04-15--claude_md_section3_snapshot.md`）：
 
@@ -66,6 +66,8 @@
 | 2026-04-12 | E5 Performance Optimization（23 項） ✅ |
 | 2026-04-13 | G-SR-1 Signal Tightening · OC-5 FundingArb · Edge 數據 engine_mode 隔離 ✅ |
 | 2026-04-14 | ORPHAN-ADOPT-1 Phase 1 · QoL-1/3 · ENGINE-HEAL 4 Fix · WP-F/UX-07~10 術語統一 ✅ |
+| 2026-04-15 | EDGE-P3-1 ML-MIT #26 Lane A · FA-PHANTOM-2 spec · ORPHAN-ADOPT-1 Phase 2A · engine_watchdog systemd unit ✅ |
+| 2026-04-16 | P0-4 R1 STRATEGY-CLOSE-TAG-FIX · P0-0 RECONCILER-BURST-FIX · P0-5 PHANTOM-2-FUP · PAPER-DISABLE-1 · DEDUP-PY-RUST Tier A · EDGE-P3-1 Phase B #3 + Step 7b/7c · G-2 daemon option D ✅ |
 
 **歷史細節指針**（不要重複載入）：
 - §三 2026-04-15 之前完整敘述 → `docs/archive/2026-04-15--claude_md_section3_snapshot.md`
@@ -245,27 +247,23 @@ state_models ← state_compiler ← state_store ← main_legacy ← main.py
 
 ## 十、下一步工作指針
 
-**當前焦點（2026-04-10 審計後更新）**：10 個架構 gap 全部入計劃（TODO.md Gap 索引）。
-- **W19（04-14~18）**：G-3 IPC 認證 + G-5 Rate Limiting + OC-3 多通道告警 + 6-RC-6 ✅
-- **W20（04-21~25）**：SEC-04/06/13 E3 審查 + G-9 HMAC 確認 + WP-CC(FS-1/BI-1/P9/SM-1) + 6-01~03 漸進放權 ✅
-- **W21（04-28~05-02）**：6-04~08 ✅ · 6-09~13 Phase 6 PM 驗收 ✅；LG-1 21d paper 到期（05-01）
-- **W22（05-05~09）**：G-1 R-02 AI Agent（Strategist/Guardian）+ G-2/OC-5 FundingArb + LG-2/3
-- **W23（05-12~16）**：G-1 R-06 全 5 agent + G-7 ClaudeTeacher + G-10 Calibration + LG-4/5 Live
+**當前焦點**：活躍任務與週次排期以 `TODO.md` 為準（P0/P1/P2/P3/P4 分層）。CLAUDE.md 不重複列週。
 
-**關鍵路徑**：`~~G-3 → OC-3 → 6-RC-6 → 6-01~13~~ ✅ → LG-1(05-01) → LG-2 → LG-4 → Live`
-**最早 Live 日期**：W23 末（～2026-05-16）
+**關鍵路徑（2026-04-16 刷新）**：
+`P0-0 ✅ → P0-4 R1 ✅ → 乾淨 demo 起點（2026-04-16 21:08 local）→ P0-3 Phase 5 edge 2w 重評 + P0-2 LG-1 21d demo → LG-4/5 → Live`
+- P0-1 G-2（funding_arb 子集驗證）與 P0-5 PHANTOM-2-FUP 均**不在主路徑**
+- **最早 Live 日期**：樂觀估 **W24 末（～2026-05-23）**
 
-**路線圖**：Phase 0-5 ✅ · Live GUI P0~P6 ✅ · **Phase 6 (W19-21) ✅** 自動降級 ✅ · 告警 ✅ · 漸進放權 ✅ · 壓測+驗收 ✅ · PM 端到端 ✅ · **AI 治理層 (W22-W23) ⬜**（H1-H5 AI agent 目前全 stub）。
+**路線圖**：Phase 0-5 ✅ · Live GUI ✅ · Phase 6 ✅ · **AI 治理層 (W22-W23) ⬜**（H1-H5 AI agent 目前全 stub，待 G-1 R-06 展開）。
 
-**Live 前置**：Paper trading ≥21d · ~~G-3 IPC 認證~~ ✅ · ~~G-5 Rate Limiting~~ ✅ · ~~Phase 6 驗收~~ ✅ · provider pricing 綁定。API key 填入即可上線（所有代碼阻隔已移除）。
+**Live 前置**：~~G-3 / G-5 / Phase 6~~ ✅ · demo ≥21d 穩定（P0-2）· provider pricing 綁定（LG-3）· API key 填入即可上線（代碼阻隔已移除）。
 
 **關鍵文件指針**（按需 Read，不要全載入）：
 - Bybit API 字典/審計：`docs/references/2026-04-04--bybit_api_reference.md` · `docs/audits/2026-04-04--bybit_api_infra_audit.md`
-- 融合方案/執行計劃/ML/DB/Rust：`docs/references/2026-04-04--*` · `docs/references/2026-04-03--*` · `docs/rust_migration/README.md`
 - 完整參考索引：`docs/CLAUDE_REFERENCE.md`
 
 ---
 
 ## 十一、一句話狀態
 
-> 截至 2026-04-15：tests engine lib **1318** + core **380** + e2e **35** = **1733** Rust passed **0 fail** · Python **2875** passed / 5 skipped · ml_training **182** passed / 10 skipped（Lane A +47）· **EDGE-P3-1 ML-MIT #26 Lane A ✅**（commit `cdac922`）— quantile LGBM 三分位訓練器 + CQR 單邊 marginal 校準（Romano 2019 + (n+1) 修正）+ per-quantile ONNX 匯出（atomic symlink + 1e-3 精度 gate）+ 5-gate 驗收報告（ship/shadow/no_ship 裁決）· **FA-PHANTOM-2 fix ✅ + 部署待命**（G-2 daemon 7h 0/20 fills 揭露 `max_drop_pct()` 全幣種掃描誤觸 CloseAll；修復為 `worst_drop_for_held` + sigma + 風控分級 / 15% 閃崩兜底。Spec `docs/references/2026-04-15--fa_phantom_2_fix_spec.md`）· **ENGINE-HEAL 4 Fix ✅** + 已部署 · **engine_watchdog systemd user unit ✅** 跨重啟存活 · **G-2 FundingArb 監控 daemon ACTIVE** PID 598572，PHANTOM-2 修復部署後重新計時 · **EDGE-P3-1 Phase A/A5/A6 ✅ + Phase B #1/#2/#4/#5 ✅ + PA #63 parquet_etl ✅ + Step 7a/7c/7d/7e/7f ✅ + Step 7b plumbing 🟡**；Phase B 僅剩 #3（ONNX loader，Lane A 已解鎖訓練能力，等真 ETL 資料跑出首個 artifact）· **ORPHAN-ADOPT-1 Phase 2A ✅** · **WP-F/UX-07~10 / QoL-1/3 / OC-5 FundingArb / G-SR-1 / Edge 隔離 ✅** · **Phase 5 PAUSED** · **Live_Ready ✅** · **下一步**：`restart_all.sh --rebuild` 部署 PHANTOM-2 → G-2 daemon 重新計數 → audit → 升 R-02 · LG-1 21d · 在真 `learning.decision_features` 跑 Lane A 管線產首個 ONNX → Phase B #3 loader + Step 7b flag flip/Python route · Phase 2B Strategist 等 G-1 R-02。
+> 截至 2026-04-16：tests engine lib **1335 (default) / 1341 (ort)** + core **380** + e2e **35** + reconciler_e2e **19** Rust 全綠 **0 fail** · Python **2898** passed / 5 skipped · ml_training **182** passed / 10 skipped · **P0-4 R1 STRATEGY-CLOSE-TAG-FIX ✅ 部署**（`execute_position_close` trigger_tag 透傳，DB 已見 `strategy_close:grid_close_*` / `ma_reverse_cross` / 分離 `risk_close:fast_track_*`，583 筆 `risk_check` 遮蔽 bug 終結）· **P0-0 RECONCILER-BURST-FIX ✅ 部署**（startup grace window 5min + e2e regression test，engine PID 1340527 21:08 local 啟動後 0 auto-escalation）· **P0-5 PHANTOM-2-FUP ✅ 實作**（A+C HashMap 60s cooldown + clear only on Normal，+5 新單測；待 `--rebuild` 部署）· **PAPER-DISABLE-1 ✅**（paper 管線預設關 + 負餘額 Gate 1.6）· **DEDUP-PY-RUST Tier A ✅**（21 檔 ~6.5k 行 Python stub 化 + 59 contract tests）· **EDGE-P3-1 Phase B #3 ONNX loader ✅**（ort 2.0 backend + dynamic capability probe）+ **Step 7b/7c ✅** · **G-2 FundingArb daemon** PID 1349961 option D config（target 10 / deadline 72h）· **FA-PHANTOM-2 ✅ 部署**（`worst_drop_for_held` + sigma；grep CloseAll engine.log = 0）· **Phase 5 PAUSED** / **Live_Ready ✅** · **下一步**：`restart_all.sh --rebuild` 部署 P0-5 → 乾淨 demo 2 週 → P0-3 edge 重評 · P0-2 LG-1 21d demo 起點 · P1-4 真 ETL 首個 ONNX artifact → Stage 2 shadow mode · Phase 2B Strategist 等 G-1 R-02。
