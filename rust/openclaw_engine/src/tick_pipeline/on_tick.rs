@@ -687,10 +687,22 @@ impl TickPipeline {
                         persist_verdict(&self.trading_tx, em, &intent.symbol, event.ts_ms, vi, em);
                     }
 
+                    // P0-6 DIAG: surface post-Guardian rejection reason (normally silent).
+                    // Remove after root-cause confirmed.
+                    if !gate.approved {
+                        if let Some(ref reason) = gate.rejected_reason {
+                            static DIAG_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+                            let c = DIAG_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                            if c < 50 || c % 10000 == 0 {
+                                tracing::warn!(
+                                    em, symbol = %intent.symbol, strategy = %intent.strategy,
+                                    "P0-6 DIAG exchange gate rejected: {reason}"
+                                );
+                            }
+                        }
+                    }
+
                     if gate.approved {
-                        self.stats.total_intents += 1;
-                        // S-01: persist intent via extracted helper
-                        persist_intent(&self.trading_tx, em, event.ts_ms, intent, gate.approved_qty, event.last_price, em);
 
                         self.exchange_seq = self.exchange_seq.wrapping_add(1);
                         let order_link_id = format!("oc_{}_{}", event.ts_ms, self.exchange_seq);
@@ -854,6 +866,7 @@ impl TickPipeline {
                                 qty: fill.fill_qty,
                                 price: fill.fill_price,
                                 fee: fill.fee,
+                                realized_pnl,
                                 strategy: intent.strategy.clone(),
                             }, 50);
 

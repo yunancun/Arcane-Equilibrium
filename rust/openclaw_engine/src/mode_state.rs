@@ -268,6 +268,7 @@ mod tests {
                 qty: 0.1,
                 price: 50000.0,
                 fee: 0.01,
+                realized_pnl: 0.0,
                 strategy: "test".into(),
             });
         }
