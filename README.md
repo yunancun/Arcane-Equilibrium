@@ -31,14 +31,14 @@ AI Agent 自动交易系统 — 自主扫描 650+ 交易对，智能部署策略
 
 ---
 
-## 当前状态 (2026-04-15 · **LIVE 阶段** · Demo API key 运行完整 Live 路径)
+## 当前状态 (2026-04-16 · **LIVE 阶段** · Demo API key 运行完整 Live 路径)
 
 ```
 系统模式:     LIVE ✅ — Demo API key 运行完整 Live 路径，所有功能按 Live 标准
 执行权限:     auto_granted_on_start（live session 启动后自动授予）
 真实 Live:    换入 mainnet API key 即可（零代码改动）
-测试:         Rust engine lib 879 · core 365 · e2e 18 · integration 11
-              Python control_api 2792 passed (0 fail · 0 regression)
+测试:         Rust engine lib 1335 (default) / 1341 (ort) · core 380 · e2e 35 · reconciler_e2e 19
+              Python control_api 2898 passed (0 fail · 0 regression) · ml_training 182 passed
 API 路由:     183 条（全部 Rust-first）
 代码:         ~62,000 行（Python ~40k + Rust ~22k）
 单一引擎:     Rust openclaw_engine = paper / demo / live 三模式唯一引擎
@@ -47,10 +47,13 @@ ARCH-RC1:     ✅ 1A → 1C-4 WRAP COMPLETE
               4 IPC 写入面（patch_{risk,learning,budget}_config + update_strategy_params）
               5 engines 热重载 · V014 fail-soft audit · ConfigStore 落盘 ✅
               Guardian = RiskConfig 纯派生视图
-Phase 5:      ✅ 功能交付完毕（cost_gate 重写）
-              DL-1/DL-2 realized edge 统计 + James-Stein shrinkage estimator
-              mode-aware cost_gate（paper exploration / live fail-closed / cold-start ATR×0.2）
-              PH5-VERIFY-1 7d 观察期进行中
+Phase 5:      ⏸ PAUSED（2026-04-12 reframe）— PNL-FIX-1/2 揭露活跃策略 gross edge 为负
+              cost_gate / DL / JS 机械已接线但需真实正 edge；等策略重做（G-SR-1 / Strategist）
+P0-4 R1:      ✅ STRATEGY-CLOSE-TAG-FIX (commit a5401ce 已部署)
+              execute_position_close trigger_tag propagation — strategy_close:{reason} 正确入库
+P0-0:         ✅ RECONCILER-BURST-FIX 已部署 — 启动 5min 宽限防幽灵持仓误判
+P0-5:         🟡 PHANTOM-2-FUP ReduceToHalf 级联修复（A+C 方案实作完成，待 --rebuild 部署）
+EDGE-P3-1:    🟡 ONNX loader Phase B #3 ✅（ort backend）+ Lane A CQR ✅；等真 ETL 资料跑首 artifact
 Live 准备:    ✅ P0 API key 管理 + tab-live 动态前置条件 + 仪表板框架
               ✅ P1 TradingMode::Live + slot-aware key 读取 + session routes
               ✅ P2 PerEngineRiskStores（paper/demo/live 独立风控）+ GUI per-engine tab
@@ -76,10 +79,10 @@ Layer 2:      L0 确定性 → L1 Ollama 9B/27B → L2 Claude API
 Bybit API:    64 REST + 8 WS + 5 Private WS + 8 IPC
 
 下一步（按顺序）:
-  1) W21：6-09~13 PM 端到端验收 + LG-1 21d 倒计时（05-01）
-  2) W22：G-1 AI Agent (Strategist/Guardian) + G-2/OC-5 FundingArb
-  3) W23：G-1 R-06 全 5 Agent + G-7 ClaudeTeacher + Live Gate
-  4) 真实 Live：换入 mainnet API key（最早 ~2026-05-16）
+  1) P0-5 部署：restart_all.sh --rebuild（ReduceToHalf 级联修复生效）
+  2) P0-3 Phase 5 策略重做：G-SR-1 信号收紧 / Strategist agent 展开（2~3w）
+  3) P0-2 LG-1 21d demo 观察期 + LG-2/3 压测
+  4) LG-4/5 Live Gate + 真实 Live：换入 mainnet API key（最早 ~2026-05-23 W24 末）
 ```
 
 **亮点**：ARCH-RC1 统一 Config 4 IPC 写入面 + 5 engines 热重载（端到端 e2e `4780b04`）· Python 风控/纸盘双退场 · Guardian = RiskConfig 纯派生视图 · 单一 Rust 引擎 · V014 audit · L3 12 路审计完成 · EXT-1 Exchange-as-Truth · 5 Agent · Rust tick <100μs · PyO3 39 方法 · Telegram+Webhook 双通道告警
@@ -105,11 +108,11 @@ Bybit API:    64 REST + 8 WS + 5 Private WS + 8 IPC
 | L3 Audit | 12路全系统审计 + PA 整改计划 | ✅ 63 issues |
 | 4 | Claude Teacher + LinUCB + 新闻 Agent + DL-3 | ✅ CODE-COMPLETE（4-00~4-21 + 4.1） |
 | ARCH-RC1 | 统一 Config + Python 风控核心退场 | ✅ 1A→1C-4 WRAP COMPLETE + A2 News scheduler |
-| **5** | **cost_gate 重写：DL-1/2 + James-Stein + mode-aware gate** | **✅ 功能交付（7d 观察期进行中）** |
+| **5** | **cost_gate 重写：DL-1/2 + James-Stein + mode-aware gate** | **⏸ PAUSED — PNL-FIX 揭露 gross edge 为负，等策略重做** |
 | **Live 准备** | **API key + TradingMode::Live + PerEngineRiskStores** | **✅ P0/P1/P2 全部完成** |
 | **安全** | **SEC-05 XSS + WP-F/AH-06 + G-3 IPC 认证 + G-5 Rate Limit + SEC-04/06/13** | **✅ W19+W20 完成** |
-| 6 | Reconciler 自动收缩（6-RC-1~10 ✅）+ 渐进放权（6-01~03 ✅）+ 验收 | 🟡 W21 验收中 |
-| Live | 21 天 paper + SEC-08/17/21 + Live Gate | ⬜ 观察期进行中 |
+| 6 | Reconciler 自动收缩（6-RC-1~10 ✅）+ 渐进放权（6-01~03 ✅）+ 验收（6-04~13 ✅） | ✅ 完成 |
+| Live | 21 天 demo + SEC-08/17/21 + Live Gate | ⬜ 等策略重做后启动 |
 
 **详细文件**：`docs/references/2026-04-04--execution_plan_v1.md`（执行计划 V1）
 
@@ -187,7 +190,7 @@ srv/
 | 核心状态机 | T2.01 授权状态机、T2.02 风控状态机、T2.03 决策租约、T2.04 对账引擎 | SM-01/SM-02/SM-04/EX-04 |
 | 扩展模组 | T2.05–T2.23（OMS、审计持久化、Scout Agent、组合风控、事件模型、感知数据面、学习门控等） | EX-01/EX-02/EX-05/EX-06/DOC-01/DOC-06 |
 
-**关键指标：** 4,220 测试通过（Py 3703 + Rs 517）· ~65,000 行代码（Py+Rs）· 100% 双语注释 · fail-closed 设计 · 线程安全（Py）/ 零锁 single-owner（Rs）
+**关键指标：** ~5,300 测试通过（Py 2898 + ml_training 182 + Rs engine lib 1335 + core 380 + e2e 35 + reconciler_e2e 19）· ~65,000 行代码（Py+Rs）· 100% 双语注释 · fail-closed 设计 · 线程安全（Py）/ 零锁 single-owner（Rs）
 
 **详细报告：** `docs/governance_dev/phase2_execution/`（执行总览 + PM 品质审核 + TW 注释审核 + 23 份变更日志）
 
