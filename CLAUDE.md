@@ -46,11 +46,12 @@
 
 ## 三、當前系統狀態摘要
 
-**Runtime**：`Live_Ready` ✅ — 所有前置阻隔已移除。Live 上線唯一條件：`settings/secret_files/bybit/live/{api_key,api_secret}` 配置 + `OPENCLAW_ALLOW_MAINNET=1`。execution_authority 在 live session start 自動授予。Live 縮倉監控：5min 輪詢，≥5% 警告，≥15% 自動撤權+平倉+凍結 GovernanceHub。
+**Runtime**：`Live_Ready` ⚠️（2026-04-16 audit 修正：原宣告不準確）— LIVE-P0/P1/P2 代碼完整、單測綠，但 **0 真實 live 流量**（歷史 43k 條 `engine_mode="live"` 實為 LiveDemo）。**真實 live 門控**：(1) Python `live_reserved` global mode、(2) Python Operator 角色 auth、(3) secret slot 有 `BYBIT_API_KEY/SECRET` 或 `settings/secret_files/bybit/live/{api_key,api_secret}`。`execution_authority` 在 Rust 僅為 P0/P1 denylist 字串常量（`claude_teacher/applier.rs:226`），非真實授權邏輯；「auto_granted_on_start」屬 Python 概念。Live 縮倉監控：5min 輪詢，≥5% 警告，≥15% 自動撤權+平倉+凍結 GovernanceHub（代碼已寫、e2e 測試綠，**從未真實觸發**）。
 
-**權威原則**：Rust `openclaw_engine` = paper/demo/live 三引擎並行唯一引擎（ARCH-RC1 1C-4 + 3E-ARCH）。Rust ConfigStore 為所有交易/風控/學習/預算參數權威，4 IPC 寫入面 → tick-level hot-reload。**禁止 restart-to-apply**。Guardian = RiskConfig 純派生視圖。Python 無交易邏輯（DEAD-PY-2 清除 ~4500 行後）。
+**權威原則**：Rust `openclaw_engine` = paper/demo/live 三引擎並行唯一引擎（ARCH-RC1 1C-4 + 3E-ARCH）。Rust ConfigStore 為所有交易/風控/學習/預算參數權威，4 IPC 寫入面 → tick-level hot-reload。**禁止 restart-to-apply**。Guardian = RiskConfig 純派生視圖。Python 無交易邏輯（DEAD-PY-2 清除 ~4500 行後；2026-04-16 audit：`legacy_routes.py + main_legacy.py` 共 1630 行邊界代碼仍殘留，已隔離不執行）。
 
 **進行中/阻塞**：
+- **LIVE-GUARD-1（P0-CRITICAL，2026-04-16 新增）**：SEC-17（2026-04-10 commit 25b5d73）移除 `OPENCLAW_ALLOW_MAINNET` Rust guard 後**未補替代 fail-safe**。`bybit_rest_client.rs:394` 對 Mainnet 僅 `tracing::warn!` 不擋；憑證空也只 `warn!` 不 return Error（client 被建立，簽名階段才 401）。門控完全外移 Python → 對稱性崩潰（Rust 長跑、Python 重啟脆弱、環境變數能繞過 secret slot）。**必須補 Rust 側輕量 fail-safe**：`env=Mainnet` + 憑證齊全時，要求額外 token/env（建議回退 `OPENCLAW_ALLOW_MAINNET=1` 或 operator-signed guard file），**禁止退回「信任 Python」的零摩擦**。在此補上前，live 上線風險等級 = HIGH。待 plan。
 - **Phase 5 PAUSED**（2026-04-12 reframe）— PNL-FIX-1/2 清理後所有活躍策略 gross edge 為負（net -$2775）；cost_gate/DL/JS 機械已接線但需真實正 edge。**下一步**：乾淨 demo 2 週後 P0-3 重評，若仍負則轉 EDGE-P3-1/EDGE-P2 接管。詳見 `memory/project_phase5_promotion_edge_crisis.md`。
 - **P0-5 PHANTOM-2-FUP ✅**：A+C 方案實作完成（HashMap+60s cooldown + clear 條件只在 Normal 時觸發）+5 新單測，待 `restart_all.sh --rebuild` 部署。詳 TODO §P0-5。
 - **非阻塞留尾**：W1 event_consumer 拆分；D-02 PriceEvent metadata HashMap 移除；IP-DEDUP-1（等 P0-3 判決）。
@@ -81,25 +82,44 @@
 ## 四、硬邊界（永遠不能違背）
 
 ```python
-# ── Live_Ready 狀態（2026-04-10 更新）─────────────────────────────
-# Live 基礎設施全部實施完畢（LIVE-P0/P1/P2 ✅ + Gov-P1 ✅）。
-# 系統行為：完全以 Live 模式運行，前置阻隔已移除。
-# 實際 Live 交易上線僅需 operator 提供以下兩個條件：
-#   1. OPENCLAW_ALLOW_MAINNET=1   （Rust Mainnet guard，Rust 側硬鎖）
-#   2. settings/secret_files/bybit/live/{api_key,api_secret} 配置完畢
-#      （trading_mode 引擎配置對應調整）
-
-execution_authority     = "auto_granted_on_start"  # live session start 時自動授予，stop 後重置
+# ── Live_Ready 真實狀態（2026-04-16 audit 更新，取代 2026-04-10 舊版）──
+# LIVE-P0/P1/P2 基礎設施代碼完整（SM-01/02/04 + Reconciler + 3E-ARCH）
+# 單測綠但 0 真實 live 流量（歷史 43k 條 "live" 實為 LiveDemo）。
+# 2026-04-16 audit 發現 CLAUDE.md 原敘述引用 OPENCLAW_ALLOW_MAINNET
+# 作為「Rust 側硬鎖」，但該 guard 於 2026-04-10 commit 25b5d73 (SEC-17)
+# 已移除且未補替代 fail-safe。以下為真實狀態：
+#
+# 當前真實 live 門控（Rust 端可驗證 = 1 項）：
+#   1. Python `live_reserved` global mode          （Python 狀態，重啟會丟）
+#   2. Python Operator 角色 auth                   （Python 側）
+#   3. secret slot 有 api_key + api_secret         （Rust 側唯一可驗證）
+#        來源優先級（bybit_rest_client.rs:403-421）：
+#          a. 顯式參數
+#          b. 環境變量 BYBIT_API_KEY / BYBIT_API_SECRET
+#          c. settings/secret_files/bybit/live/{api_key,api_secret}
+#        憑證缺失只 warn!，client 仍建立，簽名階段才 401
+#
+# ⚠️ 已知 CRITICAL 缺口（LIVE-GUARD-1，見 §三）：
+#   - bybit_rest_client.rs:394 對 Mainnet 僅 tracing::warn!，不擋
+#   - 純 Python 門控不對稱：Rust 長跑 × Python 重啟脆弱
+#   - 任何能設環境變數的進程都能繞過 secret slot 路徑
+#   - 必須補 Rust 側輕量 fail-safe（待 plan；在此前不可真實 live 上線）
+#
+# execution_authority：Rust 僅為 P0/P1 denylist 字串常量
+#                      （claude_teacher/applier.rs:226）非真實授權邏輯
+#                      「auto_granted_on_start」= Python 概念
 decision_lease_emitted  = False
 max_retries             = 0
 
-# 永不允許的硬錯誤（不因 Live_Ready 而放寬）：
+# 永不允許的硬錯誤（2026-04-16 audit 後修正）：
 # - 繞過 Operator 角色認證或 live_reserved global mode 直接啟動 live session
 # - 自動修改 engine trading_mode 為 live（需 operator 顯式配置）
 # - Bybit API timeout / retCode != 0 → fail-closed，不重試
 # - should_call_ai=true 但 invocation 沒發生
 # - 偽造 AI 調用或交易活動
-# - Live 模式下無 OPENCLAW_ALLOW_MAINNET=1
+# - LIVE-GUARD-1 補回前，禁止在 Live engine 進程中配置真實 mainnet 憑證
+#   （環境變數或 secret slot 皆不可）；僅可用 LiveDemo endpoint
+# - （原「Live 模式下無 OPENCLAW_ALLOW_MAINNET=1」條目已於 SEC-17 後失效，刪除）
 ```
 
 ---
@@ -256,7 +276,7 @@ state_models ← state_compiler ← state_store ← main_legacy ← main.py
 
 **路線圖**：Phase 0-5 ✅ · Live GUI ✅ · Phase 6 ✅ · **AI 治理層 (W22-W23) ⬜**（H1-H5 AI agent 目前全 stub，待 G-1 R-06 展開）。
 
-**Live 前置**：~~G-3 / G-5 / Phase 6~~ ✅ · demo ≥21d 穩定（P0-2）· provider pricing 綁定（LG-3）· API key 填入即可上線（代碼阻隔已移除）。
+**Live 前置**：~~G-3 / G-5 / Phase 6~~ ✅ · demo ≥21d 穩定（P0-2，2026-04-16 21:08 才起點）· provider pricing 綁定（LG-3）· **LIVE-GUARD-1 Rust fail-safe 補回**（2026-04-16 audit 新增，見 §三） · API key 填入 ≠ 即可上線（原敘述已於 audit 後更正：Rust 側無 mainnet 硬鎖，門控全外移 Python，需補 fail-safe 才可真實 live）。
 
 **關鍵文件指針**（按需 Read，不要全載入）：
 - Bybit API 字典/審計：`docs/references/2026-04-04--bybit_api_reference.md` · `docs/audits/2026-04-04--bybit_api_infra_audit.md`
@@ -266,4 +286,4 @@ state_models ← state_compiler ← state_store ← main_legacy ← main.py
 
 ## 十一、一句話狀態
 
-> 截至 2026-04-16：tests engine lib **1335 (default) / 1341 (ort)** + core **380** + e2e **35** + reconciler_e2e **19** Rust 全綠 **0 fail** · Python **2898** passed / 5 skipped · ml_training **182** passed / 10 skipped · **P0-4 R1 STRATEGY-CLOSE-TAG-FIX ✅ 部署**（`execute_position_close` trigger_tag 透傳，DB 已見 `strategy_close:grid_close_*` / `ma_reverse_cross` / 分離 `risk_close:fast_track_*`，583 筆 `risk_check` 遮蔽 bug 終結）· **P0-0 RECONCILER-BURST-FIX ✅ 部署**（startup grace window 5min + e2e regression test，engine PID 1340527 21:08 local 啟動後 0 auto-escalation）· **P0-5 PHANTOM-2-FUP ✅ 實作**（A+C HashMap 60s cooldown + clear only on Normal，+5 新單測；待 `--rebuild` 部署）· **PAPER-DISABLE-1 ✅**（paper 管線預設關 + 負餘額 Gate 1.6）· **DEDUP-PY-RUST Tier A ✅**（21 檔 ~6.5k 行 Python stub 化 + 59 contract tests）· **EDGE-P3-1 Phase B #3 ONNX loader ✅**（ort 2.0 backend + dynamic capability probe）+ **Step 7b/7c ✅** · **G-2 FundingArb daemon** PID 1349961 option D config（target 10 / deadline 72h）· **FA-PHANTOM-2 ✅ 部署**（`worst_drop_for_held` + sigma；grep CloseAll engine.log = 0）· **Phase 5 PAUSED** / **Live_Ready ✅** · **下一步**：`restart_all.sh --rebuild` 部署 P0-5 → 乾淨 demo 2 週 → P0-3 edge 重評 · P0-2 LG-1 21d demo 起點 · P1-4 真 ETL 首個 ONNX artifact → Stage 2 shadow mode · Phase 2B Strategist 等 G-1 R-02。
+> 截至 2026-04-16：tests engine lib **1335 (default) / 1341 (ort)** + core **380** + e2e **35** + reconciler_e2e **19** Rust 全綠 **0 fail** · Python **2898** passed / 5 skipped · ml_training **182** passed / 10 skipped · **P0-4 R1 STRATEGY-CLOSE-TAG-FIX ✅ 部署**（`execute_position_close` trigger_tag 透傳，DB 已見 `strategy_close:grid_close_*` / `ma_reverse_cross` / 分離 `risk_close:fast_track_*`，583 筆 `risk_check` 遮蔽 bug 終結）· **P0-0 RECONCILER-BURST-FIX ✅ 部署**（startup grace window 5min + e2e regression test，engine PID 1340527 21:08 local 啟動後 0 auto-escalation）· **P0-5 PHANTOM-2-FUP ✅ 實作**（A+C HashMap 60s cooldown + clear only on Normal，+5 新單測；待 `--rebuild` 部署）· **PAPER-DISABLE-1 ✅**（paper 管線預設關 + 負餘額 Gate 1.6）· **DEDUP-PY-RUST Tier A ✅**（21 檔 ~6.5k 行 Python stub 化 + 59 contract tests）· **EDGE-P3-1 Phase B #3 ONNX loader ✅**（ort 2.0 backend + dynamic capability probe）+ **Step 7b/7c ✅** · **G-2 FundingArb daemon** PID 1349961 option D config（target 10 / deadline 72h）· **FA-PHANTOM-2 ✅ 部署**（`worst_drop_for_held` + sigma；grep CloseAll engine.log = 0）· **Phase 5 PAUSED** / **Live_Ready ⚠️**（2026-04-16 audit：Rust 側無 mainnet fail-safe，SEC-17 後缺口未補；純 live code path 0 流量；見 LIVE-GUARD-1）· **下一步**：LIVE-GUARD-1 補 Rust fail-safe → `restart_all.sh --rebuild` 部署 P0-5 → 乾淨 demo 2 週 → P0-3 edge 重評 · P0-2 LG-1 21d demo 起點 · P1-4 真 ETL 首個 ONNX artifact → Stage 2 shadow mode · Phase 2B Strategist 等 G-1 R-02。
