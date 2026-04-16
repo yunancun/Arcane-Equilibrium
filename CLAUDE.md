@@ -52,8 +52,11 @@
 
 **進行中/阻塞**：
 - **LIVE-GUARD-1（P0-CRITICAL，2026-04-16 新增）**：SEC-17（2026-04-10 commit 25b5d73）移除 `OPENCLAW_ALLOW_MAINNET` Rust guard 後**未補替代 fail-safe**。`bybit_rest_client.rs:394` 對 Mainnet 僅 `tracing::warn!` 不擋；憑證空也只 `warn!` 不 return Error（client 被建立，簽名階段才 401）。門控完全外移 Python → 對稱性崩潰（Rust 長跑、Python 重啟脆弱、環境變數能繞過 secret slot）。**必須補 Rust 側輕量 fail-safe**：`env=Mainnet` + 憑證齊全時，要求額外 token/env（建議回退 `OPENCLAW_ALLOW_MAINNET=1` 或 operator-signed guard file），**禁止退回「信任 Python」的零摩擦**。在此補上前，live 上線風險等級 = HIGH。待 plan。
+- **INTENT-WRITE-GAP-1（P0-CRITICAL，2026-04-16 新增）**：`trading.risk_verdicts` 24h 內 live/live_demo Approved **154 萬條**（每條含 `intent_id`，且 live_demo 仍以 6.6/秒寫入中），但 `trading.intents` 對 live/live_demo 同期 **0 條**。兩張表寫入 path 斷裂；下游 learning/Phase 5/experiment_ledger 在 live/live_demo 上已瞎 24h+。疑為 DEDUP-PY-RUST Tier A 回歸。TODO §P0-6。
+- **ORDER-SUBMIT-GAP-1（P0-CRITICAL，2026-04-16 新增）**：live_demo Approved verdict 持續但 `trading.fills` live/live_demo = 0。意味 Guardian 在跑、Approved verdict 寫入 DB，但 order submit path 被跳過（可能 OMSProxy 是 noop、或 trading_mode/live_reserved 未啟）。「Live_Ready」下真實下單能力 0%。TODO §P0-7。
 - **Phase 5 PAUSED**（2026-04-12 reframe）— PNL-FIX-1/2 清理後所有活躍策略 gross edge 為負（net -$2775）；cost_gate/DL/JS 機械已接線但需真實正 edge。**下一步**：乾淨 demo 2 週後 P0-3 重評，若仍負則轉 EDGE-P3-1/EDGE-P2 接管。詳見 `memory/project_phase5_promotion_edge_crisis.md`。
 - **P0-5 PHANTOM-2-FUP ✅**：A+C 方案實作完成（HashMap+60s cooldown + clear 條件只在 Normal 時觸發）+5 新單測，待 `restart_all.sh --rebuild` 部署。詳 TODO §P0-5。
+- **P1 audit 衍生**：DEMO-REBOOT-PNL-RESET-1（重啟洗歷史 drawdown）、DEMO-BYBIT-SYNC-ORPHAN-1（6 個 bybit_sync 倉位策略動不了）— 詳 TODO §P1-5/P1-6。
 - **非阻塞留尾**：W1 event_consumer 拆分；D-02 PriceEvent metadata HashMap 移除；IP-DEDUP-1（等 P0-3 判決）。
 
 **已完成里程碑索引**（完整敘述 + commit + 測試數保留於 `docs/archive/2026-04-15--claude_md_section3_snapshot.md`）：
@@ -269,9 +272,10 @@ state_models ← state_compiler ← state_store ← main_legacy ← main.py
 
 **當前焦點**：活躍任務與週次排期以 `TODO.md` 為準（P0/P1/P2/P3/P4 分層）。CLAUDE.md 不重複列週。
 
-**關鍵路徑（2026-04-16 刷新）**：
-`P0-0 ✅ → P0-4 R1 ✅ → 乾淨 demo 起點（2026-04-16 21:08 local）→ P0-3 Phase 5 edge 2w 重評 + P0-2 LG-1 21d demo → LG-4/5 → Live`
+**關鍵路徑（2026-04-16 夜 audit 刷新）**：
+`P0-0 ✅ → P0-4 R1 ✅ → 乾淨 demo 起點（2026-04-16 21:08 local）→ LIVE-GUARD-1 Rust fail-safe → P0-6 intent write gap → P0-7 order submit gap → P0-3 Phase 5 edge 2w 重評 + P0-2 LG-1 21d demo → LG-4/5 → Live`
 - P0-1 G-2（funding_arb 子集驗證）與 P0-5 PHANTOM-2-FUP 均**不在主路徑**
+- P0-6/P0-7 若揭露架構級 DB write path 斷裂，Live 日期可能延後
 - **最早 Live 日期**：樂觀估 **W24 末（～2026-05-23）**
 
 **路線圖**：Phase 0-5 ✅ · Live GUI ✅ · Phase 6 ✅ · **AI 治理層 (W22-W23) ⬜**（H1-H5 AI agent 目前全 stub，待 G-1 R-06 展開）。
