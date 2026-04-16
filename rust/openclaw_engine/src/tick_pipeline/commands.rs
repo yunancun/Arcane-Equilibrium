@@ -93,7 +93,7 @@ impl TickPipeline {
         // Persist Guardian verdict (all verdicts including rejections) / 持久化 Guardian 裁定（含拒絕）
         if let (Some(ref tx), Some(ref vi)) = (&self.trading_tx, &result.verdict_info) {
             let now_ms_v = openclaw_core::now_ms();
-            let em_v = self.pipeline_kind.db_mode();
+            let em_v = self.effective_engine_mode();
             let _ = tx.try_send(crate::database::TradingMsg::RiskVerdict {
                 verdict_id: make_verdict_id(em_v, symbol, now_ms_v),
                 ts_ms: now_ms_v,
@@ -160,7 +160,7 @@ impl TickPipeline {
         // em, symbol, now_ms → deterministic make_context_id).
         // EDGE-P3-1 R2：僅新開倉打 entry_context_id；加倉不覆蓋。context_id 與下方 Fill 寫入相同。
         if was_open && realized_pnl == 0.0 {
-            let em_pre = self.pipeline_kind.db_mode();
+            let em_pre = self.effective_engine_mode();
             let ctx_pre = make_context_id(em_pre, symbol, now_ms);
             self.paper_state.set_entry_context_id(symbol, &ctx_pre);
         }
@@ -199,7 +199,7 @@ impl TickPipeline {
         // Persistence parity: emit Intent + Fill to PG writer when wired.
         // 持久化對等：trading_tx 已接時，發 Intent + Fill 到 PG writer。
         if let Some(ref tx) = self.trading_tx {
-            let em = self.pipeline_kind.db_mode();
+            let em = self.effective_engine_mode();
             let context_id = make_context_id(em, symbol, now_ms);
             // FUP-8: populate details (see on_tick_helpers::persist_intent).
             // Sentinel guard mirrors on_tick_helpers — IPC command path shouldn't
@@ -377,7 +377,7 @@ impl TickPipeline {
         // Uses the same deterministic make_context_id as the Fill row below.
         // EDGE-P3-1 R2：僅交易所確認的開新倉打 entry_context_id。
         if was_open && realized_pnl == 0.0 {
-            let em_pre = self.pipeline_kind.db_mode();
+            let em_pre = self.effective_engine_mode();
             let ctx_pre = make_context_id(em_pre, symbol, ts_ms);
             self.paper_state.set_entry_context_id(symbol, &ctx_pre);
         }
@@ -403,7 +403,7 @@ impl TickPipeline {
         }, 50);
 
         if let Some(ref tx) = self.trading_tx {
-            let em = self.pipeline_kind.db_mode();
+            let em = self.effective_engine_mode();
             let fr = self.intent_processor.fee_rate(symbol);
             // EDGE-P3-1 R2: close fills carry the pre-close entry's id; opens stay empty.
             // EDGE-P3-1 R2：平倉 fill 帶 entry_context_id；開倉/加倉留空。

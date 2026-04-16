@@ -889,6 +889,7 @@ async fn async_main(
     // ------------------------------------------------------------------
     let paper_deps = EventConsumerDeps {
         pipeline_kind: PipelineKind::Paper,
+        endpoint_env: None,
         event_rx: paper_event_rx,
         config: Arc::clone(&config),
         cancel: cancel.clone(),
@@ -968,6 +969,7 @@ async fn async_main(
         let demo_seed_positions = demo_b.seed_positions.clone();
         let demo_deps = EventConsumerDeps {
             pipeline_kind: PipelineKind::Demo,
+            endpoint_env: Some(BybitEnvironment::Demo),
             event_rx: demo_event_rx,
             config: Arc::clone(&config),
             cancel: cancel.clone(),
@@ -1041,6 +1043,7 @@ async fn async_main(
         let live_seed_positions = live_b.seed_positions.clone();
         let live_deps = EventConsumerDeps {
             pipeline_kind: PipelineKind::Live,
+            endpoint_env: Some(live_bybit_environment()),
             event_rx: live_event_rx,
             config: Arc::clone(&config),
             cancel: cancel.clone(),

@@ -11,6 +11,7 @@
 //!   PaperState、IntentProcessor、GovernanceCore、風控配置、連虧計數、
 //!   暫停標誌、近期意圖/成交。共享狀態留在 TickPipeline。
 
+use crate::bybit_rest_client::BybitEnvironment;
 use crate::config::{ConfigStore, RiskConfig};
 use crate::intent_processor::IntentProcessor;
 use crate::paper_state::{PaperState, PaperStateSnapshot};
@@ -20,6 +21,38 @@ use openclaw_core::governance_core::GovernanceCore;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
+
+/// Endpoint-aware DB engine_mode tag — reflects the *real* Bybit endpoint the
+/// pipeline is bound to, not just the PipelineKind abstraction.
+///
+/// Live + LiveDemo collapses to `"live_demo"` so the operator and downstream
+/// readers can tell "Live pipeline against demo endpoint" apart from "real
+/// mainnet live". Without this distinction the engine_mode tag flagged ~952k
+/// historical demo-endpoint rows as `"live"`, masking the fact that no live-net
+/// order had ever been placed. Keep `Live + Mainnet → "live"` untouched so the
+/// real-money semantic survives.
+///
+/// 端點感知的 engine_mode 標籤：反映管線真實綁定的 Bybit 端點，而不僅是
+/// PipelineKind 抽象。Live + LiveDemo 折疊為 `"live_demo"`，讓 operator 與
+/// 下游讀者能分辨「Live pipeline 連 demo」與「真正 mainnet live」。
+pub fn effective_engine_mode(
+    kind: PipelineKind,
+    env: Option<BybitEnvironment>,
+) -> &'static str {
+    match (kind, env) {
+        (PipelineKind::Paper, _) => "paper",
+        (PipelineKind::Demo, _) => "demo",
+        (PipelineKind::Live, Some(BybitEnvironment::Mainnet)) => "live",
+        (PipelineKind::Live, Some(BybitEnvironment::Testnet)) => "live_testnet",
+        // Live + LiveDemo, Live + Demo, and Live + None all resolve to
+        // live_demo — all three are demo-endpoint traffic under a Live
+        // PipelineKind (Production governance profile). `None` is defensive
+        // for pre-wire construction paths (tests, cold start).
+        // Live + LiveDemo/Demo/None：三者皆為 demo 端點的 Live 流量
+        // （Production governance profile）。None 為構造期防禦性 fallback。
+        (PipelineKind::Live, _) => "live_demo",
+    }
+}
 
 /// Per-mode trading state — one instance per active engine mode.
 /// 每模式交易狀態 — 每個活躍引擎模式一個實例。
@@ -159,6 +192,44 @@ mod tests {
         assert_eq!(ModeState::new(PipelineKind::Paper, 0.0).db_mode(), "paper");
         assert_eq!(ModeState::new(PipelineKind::Demo, 0.0).db_mode(), "demo");
         assert_eq!(ModeState::new(PipelineKind::Live, 0.0).db_mode(), "live");
+    }
+
+    #[test]
+    fn test_effective_engine_mode_tagging() {
+        // Paper / Demo ignore endpoint / Paper / Demo 不受端點影響
+        assert_eq!(effective_engine_mode(PipelineKind::Paper, None), "paper");
+        assert_eq!(
+            effective_engine_mode(PipelineKind::Paper, Some(BybitEnvironment::Mainnet)),
+            "paper"
+        );
+        assert_eq!(effective_engine_mode(PipelineKind::Demo, None), "demo");
+        assert_eq!(
+            effective_engine_mode(PipelineKind::Demo, Some(BybitEnvironment::Demo)),
+            "demo"
+        );
+        // Live + Mainnet = real money — keep "live" untouched
+        // Live + Mainnet = 真錢 — "live" 語義保留
+        assert_eq!(
+            effective_engine_mode(PipelineKind::Live, Some(BybitEnvironment::Mainnet)),
+            "live"
+        );
+        // Live + LiveDemo/Demo/None = demo-endpoint Live pipeline = live_demo
+        // Live + LiveDemo/Demo/None = demo 端點的 Live 管線 = live_demo
+        assert_eq!(
+            effective_engine_mode(PipelineKind::Live, Some(BybitEnvironment::LiveDemo)),
+            "live_demo"
+        );
+        assert_eq!(
+            effective_engine_mode(PipelineKind::Live, Some(BybitEnvironment::Demo)),
+            "live_demo"
+        );
+        assert_eq!(effective_engine_mode(PipelineKind::Live, None), "live_demo");
+        // Live + Testnet = live_testnet (defensive; not currently wired)
+        // Live + Testnet = live_testnet（防禦性，目前未使用）
+        assert_eq!(
+            effective_engine_mode(PipelineKind::Live, Some(BybitEnvironment::Testnet)),
+            "live_testnet"
+        );
     }
 
     #[test]

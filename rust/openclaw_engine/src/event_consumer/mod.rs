@@ -34,6 +34,7 @@ use tracing::{error, info, warn};
 pub async fn run_event_consumer(deps: EventConsumerDeps) {
     let EventConsumerDeps {
         pipeline_kind,
+        endpoint_env,
         mut event_rx,
         config,
         cancel,
@@ -94,6 +95,15 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
     // Build pipeline with kind-appropriate governance + balance (3E-2a)
     // 以 kind 對應的治理 + 餘額構建管線（3E-2a）
     let mut pipeline = TickPipeline::with_kind(SYMBOLS, initial_balance, pipeline_kind);
+
+    // Endpoint-aware engine_mode tag: wires live_bybit_environment() into the
+    // pipeline so DF / trading rows stamp `live_demo` when Live is pointed at
+    // api-demo.bybit.com instead of the misleading `live`. Paper passes None.
+    // Endpoint 感知的 engine_mode 標籤：把 live_bybit_environment() 穿給管線，
+    // Live+demo endpoint 的資料列標 `live_demo` 而非誤導性的 `live`。Paper 傳 None。
+    if let Some(env) = endpoint_env {
+        pipeline.set_endpoint_env(env);
+    }
 
     // EDGE-P3-1 Phase B #1: Inject per-engine EdgePredictorStore. None preserves
     // the pre-wiring behaviour (intent_processor keeps `store = None`, gate
@@ -169,7 +179,7 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
     // QoL-1: Restore cumulative paper_state counters from trading.fills before
     // the first tick; details + fail-soft log are in paper_state_restore.
     // QoL-1：首個 tick 前從 trading.fills 還原累計指標；細節見 helper。
-    paper_state_restore::restore_paper_counters(&mut pipeline, pipeline_kind, audit_pool.as_ref()).await;
+    paper_state_restore::restore_paper_counters(&mut pipeline, audit_pool.as_ref()).await;
 
     // B-1 Phase 2: Seed paper_state with exchange positions captured at startup.
     // Without this, inactive symbols never get WS PositionUpdate → snapshot=0.
@@ -737,7 +747,7 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
                                 // Emit order state change: Working → Filled / PartiallyFilled.
                                 // 發出訂單狀態轉換：Working → Filled / PartiallyFilled。
                                 if let Some(ref tx) = order_tx {
-                                    let em = pipeline.pipeline_kind.db_mode().to_string();
+                                    let em = pipeline.effective_engine_mode().to_string();
                                     let to_status = if fully_filled { "Filled" } else { "PartiallyFilled" };
                                     let _ = tx.try_send(crate::database::TradingMsg::OrderStateChange {
                                         order_id: po.order_link_id.clone(),
@@ -794,7 +804,7 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
                                         // Emit order state change: Working → Cancelled/Rejected.
                                         // 發出訂單狀態轉換：Working → Cancelled/Rejected。
                                         if let Some(ref tx) = order_tx {
-                                            let em = pipeline.pipeline_kind.db_mode().to_string();
+                                            let em = pipeline.effective_engine_mode().to_string();
                                             let _ = tx.try_send(crate::database::TradingMsg::OrderStateChange {
                                                 order_id: po.order_link_id.clone(),
                                                 ts_ms: openclaw_core::now_ms(),
@@ -899,7 +909,7 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
                     // Emit Order row when exchange confirms Working state.
                     // 訂單進入 Working 狀態時寫入 trading.orders。
                     if let Some(ref tx) = order_tx {
-                        let em = pipeline.pipeline_kind.db_mode().to_string();
+                        let em = pipeline.effective_engine_mode().to_string();
                         let _ = tx.try_send(crate::database::TradingMsg::Order {
                             order_id: po.order_link_id.clone(),
                             ts_ms: po.sent_ts_ms,
@@ -942,12 +952,13 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
                             reason,
                             response_tx,
                         } => {
+                            let em_for_audit = pipeline.effective_engine_mode();
                             handlers::handle_disable_edge_predictor_all(
                                 operator_token,
                                 reason,
                                 response_tx,
                                 &mut pipeline,
-                                pipeline_kind.db_mode(),
+                                em_for_audit,
                                 audit_pool.as_ref(),
                             );
                         }

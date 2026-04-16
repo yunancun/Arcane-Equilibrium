@@ -461,8 +461,9 @@ impl TickPipeline {
         // Store recent signals for IPC snapshot (ring buffer, max 100)
         // 存儲最近信號供 IPC 快照使用（環形緩衝，最大 100）
         // Engine mode tag for DB record IDs — prevents cross-pipeline collisions.
-        // 引擎模式標記用於 DB 記錄 ID — 防止跨管線 ID 碰撞。
-        let em = self.pipeline_kind.db_mode();
+        // Endpoint-aware: Live + LiveDemo → "live_demo", not "live".
+        // 引擎模式標記用於 DB 記錄 ID — 防止跨管線 ID 碰撞。endpoint 感知。
+        let em = self.effective_engine_mode();
         let mut signals_persisted_this_tick = 0u32;
         for sig in &signals {
             push_capped(&mut self.recent_signals, sig.clone(), 100);
@@ -529,7 +530,7 @@ impl TickPipeline {
                     self.paper_state.drawdown_pct(),
                     self.linucb.as_ref(),
                     self.news_snapshot.as_ref(),
-                    self.pipeline_kind.db_mode(),
+                    self.effective_engine_mode(),
                 );
             }
         }
@@ -863,7 +864,7 @@ impl TickPipeline {
                                     strategy_name: intent.strategy.clone(),
                                     context_id: make_context_id(em, &intent.symbol, event.ts_ms),
                                     entry_context_id: String::new(),
-                                    engine_mode: self.pipeline_kind.db_mode().to_string(),
+                                    engine_mode: em.to_string(),
                                 });
                             }
 
