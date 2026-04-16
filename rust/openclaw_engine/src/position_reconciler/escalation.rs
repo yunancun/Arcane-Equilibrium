@@ -54,6 +54,23 @@ pub const RECOVERY_WALL_CAUTIOUS_TO_NORMAL_MS: u64 = 15 * 60 * 1000;  // 15 min
 pub const RECOVERY_WALL_REDUCED_TO_CAUTIOUS_MS: u64 = 10 * 60 * 1000; // 10 min
 pub const RECOVERY_WALL_DEFENSIVE_TO_REDUCED_MS: u64 = 10 * 60 * 1000; // 10 min
 
+/// P0-0 RECONCILER-BURST-FIX: startup grace window during which reconciler
+/// auto-escalation is suppressed. Baseline drifts observed during engine
+/// warmup (legacy Bybit orphans, stale paper_state ghosts from snapshot
+/// reload) are cleaned by `orphan_handler` / baseline reseeding, not treated
+/// as live drift bursts. The window is long enough (~10 reconcile cycles at
+/// 30s interval) for orphan adoption to run to completion and for paper_state
+/// to converge to Bybit truth, but short enough not to overlap with the
+/// `PER_SYMBOL_COOLDOWN_MS` (30min) or `RECOVERY_WALL_CAUTIOUS_TO_NORMAL_MS`
+/// (15min) time scales.
+/// P0-0：啟動寬限期，期間 reconciler 自動升級被抑制。Warmup 期間看到的
+/// baseline drift（legacy Bybit orphan、snapshot 重載的 stale paper_state
+/// ghost）由 orphan_handler / baseline 重播種處理，不視為 live drift burst。
+/// 選 5min 因為 30s 輪詢 → 約 10 個完整週期，足夠 orphan adoption 跑完、
+/// paper_state 收斂到 Bybit 真相，但小於 per-symbol cooldown（30min）與
+/// Cautious→Normal recovery wall（15min）時間尺度。
+pub const STARTUP_GRACE_MS: u64 = 5 * 60 * 1000; // 5 minutes
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // Phase 6: ReconcilerState / 對帳器狀態
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -120,6 +137,15 @@ pub struct ReconcilerState {
     /// repeat reduce_only orders within `ORPHAN_CLOSE_DEDUP_MS`.
     /// ORPHAN-ADOPT-1 Phase 1：每 (symbol|side) 上次分發孤兒平倉的時間戳。
     pub pending_orphan_closes: HashMap<String, u64>,
+    /// P0-0 RECONCILER-BURST-FIX: timestamp (ms) when the reconciler task
+    /// started. 0 = not yet stamped (backward-compatible: `ReconcilerState::new()`
+    /// leaves this at 0, so callers that have not opted in still see legacy
+    /// behaviour). Used by `evaluate_actions()` and `check_rest_failure_escalation()`
+    /// to suppress auto-escalation during the `STARTUP_GRACE_MS` window.
+    /// P0-0：對帳器任務啟動時間戳。0 = 未標記（向後兼容）。
+    /// 用於 evaluate_actions 與 check_rest_failure_escalation 在
+    /// STARTUP_GRACE_MS 寬限期內抑制自動升級。
+    pub startup_ms: u64,
 }
 
 impl ReconcilerState {
@@ -136,6 +162,7 @@ impl ReconcilerState {
             pre_escalation_level: None,
             burst_drift_streak: 0,
             pending_orphan_closes: HashMap::new(),
+            startup_ms: 0,
         }
     }
 }
@@ -149,6 +176,46 @@ pub fn evaluate_actions(
     drifts: &[(String, DriftVerdict)],
     now_ms: u64,
 ) -> Vec<ReconcilerAction> {
+    // -- P0-0 RECONCILER-BURST-FIX: startup grace window --
+    // Within `STARTUP_GRACE_MS` of reconciler start, suppress all
+    // auto-escalation (burst / persistent / single / recovery dispatch).
+    // `orphan_handler` runs upstream of this function and is not affected.
+    // Baseline update (mod.rs loop tail) also runs independently and converges
+    // `rc_state.baseline` to Bybit truth during the grace period so the post-
+    // grace first cycle starts from a clean slate.
+    // State counters (drift_streak / burst_drift_streak / clean_cycles) are
+    // NOT updated either — pent-up counters would otherwise trigger instantly
+    // on grace expiry.
+    // ---- 啟動寬限期：STARTUP_GRACE_MS 內抑制所有自動升級/降級，並且不累加
+    // 計數器（避免寬限期結束瞬間集中觸發）。orphan_handler 與 baseline 更新
+    // 在此函數之外正常運作。
+    if state.startup_ms > 0
+        && now_ms.saturating_sub(state.startup_ms) < STARTUP_GRACE_MS
+    {
+        let actionable_count = drifts
+            .iter()
+            .filter(|(_, v)| {
+                matches!(
+                    v,
+                    DriftVerdict::MajorDrift
+                        | DriftVerdict::SideFlip
+                        | DriftVerdict::Orphan
+                        | DriftVerdict::Ghost
+                )
+            })
+            .count();
+        if actionable_count > 0 {
+            let grace_remaining_ms =
+                STARTUP_GRACE_MS.saturating_sub(now_ms.saturating_sub(state.startup_ms));
+            tracing::info!(
+                count = actionable_count,
+                grace_remaining_ms = grace_remaining_ms,
+                "reconciler escalation suppressed during startup grace (P0-0) / 啟動寬限期抑制自動升級"
+            );
+        }
+        return Vec::new();
+    }
+
     let mut actions = Vec::new();
 
     // -- Collect action-triggering drifts (MinorDrift excluded) --
@@ -337,6 +404,19 @@ pub fn check_rest_failure_escalation(
     current_level: RiskLevel,
     now_ms: u64,
 ) -> Option<ReconcilerAction> {
+    // P0-0 RECONCILER-BURST-FIX: honour startup grace window — do not
+    // escalate on transient REST failures while the engine is still warming
+    // up. `consecutive_rest_failures` continues to accumulate so that if the
+    // condition persists past the grace window, the normal tiered escalation
+    // fires immediately.
+    // P0-0：啟動寬限期內不因 REST 失敗升級。consecutive_rest_failures 計數
+    // 仍會累加，寬限期結束後若仍失敗立即觸發正常 tier 升級。
+    if state.startup_ms > 0
+        && now_ms.saturating_sub(state.startup_ms) < STARTUP_GRACE_MS
+    {
+        return None;
+    }
+
     let failures = state.consecutive_rest_failures;
     // Determine target tier based on failure count (highest matching wins).
     // 根據失敗次數決定目標級別（取最高匹配）。
@@ -407,6 +487,7 @@ mod tests {
         assert_eq!(REST_FAILURE_TIER1_COUNT, 10);
         assert_eq!(REST_FAILURE_TIER2_COUNT, 30);
         assert_eq!(REST_FAILURE_TIER3_COUNT, 60);
+        assert_eq!(STARTUP_GRACE_MS, 5 * 60 * 1000);
     }
 
     // ── evaluate_actions: escalation ──
@@ -575,5 +656,130 @@ mod tests {
         assert!(state.pre_escalation_level.is_none());
         assert_eq!(state.burst_drift_streak, 0);
         assert!(state.pending_orphan_closes.is_empty());
+        assert_eq!(state.startup_ms, 0);
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    // P0-0 RECONCILER-BURST-FIX: startup grace window tests
+    // P0-0：啟動寬限期測試
+    // ══════════════════════════════════════════════════════════════════════
+
+    /// EN: Within the startup grace window, a 5-drift burst does NOT escalate
+    /// and does NOT update burst_drift_streak / drift_streak / clean_cycles.
+    /// 中文: 啟動寬限期內 5-drift burst 不升級、也不累加任何計數器。
+    #[test]
+    fn test_startup_grace_suppresses_burst_escalation() {
+        let mut state = ReconcilerState::new();
+        state.startup_ms = 1_000_000;
+        let drifts = make_drifts(5, DriftVerdict::Ghost);
+        // 1 minute into grace window (grace is 5 min)
+        let now = state.startup_ms + 60 * 1000;
+        let actions = evaluate_actions(&mut state, RiskLevel::Normal, &drifts, now);
+        assert!(actions.is_empty(), "no actions during grace window");
+        assert_eq!(state.burst_drift_streak, 0, "burst streak not updated");
+        assert!(state.drift_streak.is_empty(), "drift streak not updated");
+        assert_eq!(state.clean_cycles_since_last_drift, 0);
+    }
+
+    /// EN: Within grace, persistent drift across multiple cycles does not
+    /// accumulate streak (would otherwise trigger Defensive at streak >= 3).
+    /// 中文: 寬限期內持續漂移不累加 streak（否則 streak≥3 會升到 Defensive）。
+    #[test]
+    fn test_startup_grace_suppresses_persistent_drift() {
+        let mut state = ReconcilerState::new();
+        state.startup_ms = 1_000_000;
+        let drifts = vec![("BTCUSDT|Buy".into(), DriftVerdict::MajorDrift)];
+        // 3 cycles all inside grace (30s + 60s + 90s after startup)
+        for offset in [30_000u64, 60_000, 90_000] {
+            let now = state.startup_ms + offset;
+            let actions = evaluate_actions(&mut state, RiskLevel::Normal, &drifts, now);
+            assert!(actions.is_empty(), "no action at offset {}ms", offset);
+        }
+        assert!(state.drift_streak.is_empty(), "streak not accumulated");
+    }
+
+    /// EN: Within grace, a single drift does not escalate to Cautious.
+    /// 中文: 寬限期內單個 drift 不升到 Cautious。
+    #[test]
+    fn test_startup_grace_suppresses_single_drift() {
+        let mut state = ReconcilerState::new();
+        state.startup_ms = 1_000_000;
+        let drifts = vec![("BTCUSDT|Buy".into(), DriftVerdict::Orphan)];
+        let now = state.startup_ms + 4 * 60 * 1000; // 4 min in
+        let actions = evaluate_actions(&mut state, RiskLevel::Normal, &drifts, now);
+        assert!(actions.is_empty());
+    }
+
+    /// EN: After the grace window expires, a fresh burst escalates normally.
+    /// Counters start clean (no pent-up accumulation from grace period).
+    /// 中文: 寬限期過後新的 burst 正常升級。計數器從零開始（寬限期不累積）。
+    #[test]
+    fn test_after_grace_burst_escalates_normally() {
+        let mut state = ReconcilerState::new();
+        state.startup_ms = 1_000_000;
+        let startup_ms = state.startup_ms;
+        let drifts = make_drifts(5, DriftVerdict::MajorDrift);
+        // Cycle inside grace — suppressed
+        let _ = evaluate_actions(
+            &mut state,
+            RiskLevel::Normal,
+            &drifts,
+            startup_ms + 60 * 1000,
+        );
+        assert_eq!(state.burst_drift_streak, 0);
+        // Cycle just past grace expiry — should escalate to Defensive (first burst)
+        let now = startup_ms + STARTUP_GRACE_MS + 1;
+        let actions = evaluate_actions(&mut state, RiskLevel::Normal, &drifts, now);
+        assert_eq!(state.burst_drift_streak, 1);
+        assert!(actions.iter().any(|a| matches!(
+            a,
+            ReconcilerAction::Escalate { target, .. } if *target == RiskLevel::Defensive
+        )));
+        assert!(
+            !actions.iter().any(|a| matches!(a, ReconcilerAction::CloseAll { .. })),
+            "first post-grace burst should not trip CB"
+        );
+    }
+
+    /// EN: Within grace, REST failure tiers do not escalate.
+    /// 中文: 寬限期內 REST 失敗 tier 不升級。
+    #[test]
+    fn test_startup_grace_suppresses_rest_failures() {
+        let mut state = ReconcilerState::new();
+        state.startup_ms = 1_000_000;
+        state.consecutive_rest_failures = REST_FAILURE_TIER3_COUNT;
+        let now = state.startup_ms + 2 * 60 * 1000;
+        let action = check_rest_failure_escalation(&mut state, RiskLevel::Normal, now);
+        assert!(action.is_none(), "REST escalation suppressed during grace");
+    }
+
+    /// EN: Legacy callers that do not stamp startup_ms (leave it at 0) keep
+    /// pre-P0-0 behaviour — grace is NOT active, burst escalates immediately.
+    /// 中文: 舊調用方未標記 startup_ms (留 0) 保持 P0-0 前行為，寬限期不生效。
+    #[test]
+    fn test_startup_ms_zero_preserves_legacy_behaviour() {
+        let mut state = ReconcilerState::new();
+        assert_eq!(state.startup_ms, 0);
+        let drifts = make_drifts(5, DriftVerdict::Ghost);
+        let actions = evaluate_actions(&mut state, RiskLevel::Normal, &drifts, 1_000_000);
+        assert!(!actions.is_empty(), "legacy callers still get escalation");
+        assert_eq!(state.burst_drift_streak, 1);
+    }
+
+    /// EN: Exactly at STARTUP_GRACE_MS boundary → grace EXPIRED (`<` not `<=`).
+    /// 中文: now_ms - startup_ms == STARTUP_GRACE_MS 邊界時寬限期已結束。
+    #[test]
+    fn test_startup_grace_boundary_exclusive() {
+        let mut state = ReconcilerState::new();
+        state.startup_ms = 1_000_000;
+        let drifts = make_drifts(5, DriftVerdict::Ghost);
+        // Exactly at STARTUP_GRACE_MS → grace has ended → burst escalates
+        let now = state.startup_ms + STARTUP_GRACE_MS;
+        let actions = evaluate_actions(&mut state, RiskLevel::Normal, &drifts, now);
+        assert!(!actions.is_empty());
+        assert!(actions.iter().any(|a| matches!(
+            a,
+            ReconcilerAction::Escalate { target, .. } if *target == RiskLevel::Defensive
+        )));
     }
 }

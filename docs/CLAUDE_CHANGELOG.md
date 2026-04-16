@@ -1,7 +1,34 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-04-15（EDGE-P3-1 ML-MIT #26 Stage 2 quantile trainer + CQR + ONNX export）
+> 最後更新：2026-04-16（P0-0 RECONCILER-BURST-FIX startup grace window）
+
+### P0-0 RECONCILER-BURST-FIX — Startup Grace Window 抑制對帳器啟動期誤升級（2026-04-16）
+
+**背景**：2026-04-15 demo 引擎重啟後 46 分鐘卡在 Reduced 風控狀態無法開新倉。RCA 揭露 reconciler 首輪對帳 baseline 與本地 paper_state 未同步 → 殘留 Bybit 持倉被誤判為 live drift burst（6 Ghost + 2 Orphan）→ `BURST_DRIFT_COUNT=5` 門檻觸發 Defensive 升級 → FAST_TRACK `ReduceToHalf` 全組合半倉 + `ft_pause_new_entries` 鎖新開倉。阻塞 P0-1 G-2 驗證與 P0-3 Phase 5 edge 重評關鍵路徑。
+
+**修復**（方案 A startup grace window 5min）：
+- `escalation.rs`：新增 `STARTUP_GRACE_MS = 5 * 60 * 1000` 常量 + `ReconcilerState.startup_ms: u64` 欄位（預設 0 保留向後兼容）
+- `evaluate_actions()` 入口：寬限期內早退返空 actions，**不累加** drift_streak / burst_drift_streak / clean_cycles，避免計數累積在寬限結束瞬間集中觸發
+- `check_rest_failure_escalation()` 入口同樣 grace 檢查
+- `run_position_reconciler()` 啟動時 `rc_state.startup_ms = now_ms_util()`
+- 寬限期內 orphan_handler / V014 audit / baseline update 全部照常運作（只抑制升級決策分發）
+
+**測試**（+6，engine lib escalation::tests 13→19）：
+- `test_startup_grace_suppresses_burst_escalation` — 寬限期內 5-drift burst 不升級、計數器不累加
+- `test_startup_grace_suppresses_persistent_drift` — 寬限期內 3 cycles 持續 drift 不累加 streak
+- `test_startup_grace_suppresses_single_drift` — 寬限期內單 drift 不升 Cautious
+- `test_after_grace_burst_escalates_normally` — 寬限期過後首個 burst 正常升 Defensive（streak=1）
+- `test_startup_grace_suppresses_rest_failures` — 寬限期內 REST failure tier3 不升級
+- `test_startup_ms_zero_preserves_legacy_behaviour` — 舊調用方（startup_ms=0）保留 P0-0 前行為
+- `test_startup_grace_boundary_exclusive` — `now - startup == STARTUP_GRACE_MS` 邊界已離開寬限期
+- 全回歸：engine lib 1330 default + 18 reconciler_e2e + 35 stress_integration passed / 0 fail
+
+**RCA 文件**：`docs/references/2026-04-16--reconciler_burst_escalation_rca.md`（症狀/根因/三方案比較/實作清單/驗收）
+
+**解鎖**：P0-1 G-2 FundingArb 驗證（部署後 daemon 重新計時）+ P0-3 Phase 5 edge 2w 重評（乾淨窗口累積）
+
+**Operator 部署驗收**：`restart_all.sh --rebuild` → 前 5min 觀察 `startup grace` suppression 日誌 → 前 5min governance 保持 NORMAL → 乾淨環境 30min 內 NORMAL 穩定
 
 ### EDGE-P3-1 ML-MIT #26 — Stage 2 Quantile LGBM + CQR + Per-strategy ONNX Export（2026-04-15 · commit `cdac922`）
 

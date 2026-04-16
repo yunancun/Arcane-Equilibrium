@@ -363,6 +363,11 @@ pub async fn run_position_reconciler(
         "position_reconciler started (Phase 6 auto-contraction) / 持倉對帳器啟動（Phase 6 自動降級）"
     );
     let mut rc_state = ReconcilerState::new();
+    // P0-0 RECONCILER-BURST-FIX: stamp startup time so `evaluate_actions()` /
+    // `check_rest_failure_escalation()` can suppress auto-contraction during
+    // the `STARTUP_GRACE_MS` warmup window.
+    // P0-0：標記啟動時間，讓升級判定函式在 STARTUP_GRACE_MS 寬限期內抑制自動降級。
+    rc_state.startup_ms = now_ms_util();
     let mut tick = tokio::time::interval(Duration::from_secs(RECONCILE_INTERVAL_SECS));
     tick.tick().await; // skip immediate first tick
 
