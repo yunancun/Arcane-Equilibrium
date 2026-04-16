@@ -372,40 +372,76 @@ impl BybitRestClient {
     /// Create a new REST client.
     /// 創建新的 REST 客戶端。
     ///
-    /// Reads API credentials from (in priority order):
-    ///   1. Explicit parameters (if non-empty)
-    ///   2. Environment variables: BYBIT_API_KEY, BYBIT_API_SECRET
-    ///   3. Secret files: `{OPENCLAW_SECRETS_DIR}/{slot}/api_key`
-    ///      or `~/BybitOpenClaw/secrets/secret_files/bybit/{slot}/api_key`
-    ///      where slot = "demo" for Demo/Testnet, "live" for Mainnet (LIVE-P1-1)
+    /// ## Credential loading
     ///
-    /// 讀取 API 憑證優先級：
-    ///   1. 顯式參數（非空時）
-    ///   2. 環境變量：BYBIT_API_KEY, BYBIT_API_SECRET
-    ///   3. Secret 文件：slot 由環境自動派生（Demo/Testnet→"demo"，Mainnet→"live"）
+    /// Demo / Testnet (priority order):
+    ///   1. Explicit parameters (if non-empty)
+    ///   2. Environment variables: `BYBIT_API_KEY`, `BYBIT_API_SECRET`
+    ///   3. Secret files at `{OPENCLAW_SECRETS_DIR}/{slot}/{name}` (slot = "demo")
+    ///
+    /// Mainnet (LIVE-GUARD-1, restored 2026-04-16 after SEC-17 audit):
+    ///   1. Explicit parameters (if non-empty)
+    ///   2. Secret files at `{OPENCLAW_SECRETS_DIR}/live/{name}` — **env var bypass disabled**
+    ///
+    /// ## Mainnet fail-safes (LIVE-GUARD-1)
+    ///
+    /// When `env == BybitEnvironment::Mainnet`, construction fails closed on:
+    ///   - Missing `OPENCLAW_ALLOW_MAINNET=1` env var (restored SEC-5 guard)
+    ///   - Empty credentials after slot-file load (no more silent `warn!` + 401 later)
+    ///   - Any `BYBIT_API_KEY` / `BYBIT_API_SECRET` env var set — ignored (closed bypass)
+    ///
+    /// ## 憑證讀取
+    ///
+    /// Demo / Testnet：param → env var → slot file
+    /// Mainnet：param → slot file only（env var 繞過已封閉）
+    ///
+    /// ## Mainnet 硬鎖（LIVE-GUARD-1，2026-04-16 SEC-17 audit 後回補）
+    ///   - 缺 `OPENCLAW_ALLOW_MAINNET=1` 環境變量 → Err
+    ///   - Slot 憑證為空 → Err（不再 warn!+401）
+    ///   - env var 憑證完全忽略（防繞過）
     pub fn new(
         env: BybitEnvironment,
         api_key: Option<String>,
         api_secret: Option<String>,
     ) -> BybitResult<Self> {
-        // Mainnet warning — real money at risk; guard removed (operator gates are: live_reserved
-        // global mode + Operator role + valid live API key in secret slot).
-        // 主網警告 — 真金白銀；鎖已移除（門控：live_reserved global mode + Operator 角色 + live slot 有效 API key）。
-        if matches!(env, BybitEnvironment::Mainnet) {
+        let is_mainnet = matches!(env, BybitEnvironment::Mainnet);
+
+        // LIVE-GUARD-1 gate #1: explicit operator opt-in via env var.
+        // Rust-side fail-safe (Python-only gates are asymmetric: Rust long-runs,
+        // Python restarts can drop live_reserved / Operator role silently).
+        // LIVE-GUARD-1 門 #1：operator 顯式 opt-in。
+        // Rust 端硬鎖（純 Python 門控不對稱：Rust 長跑 × Python 重啟 live_reserved 會丟）。
+        if is_mainnet {
+            if std::env::var("OPENCLAW_ALLOW_MAINNET").unwrap_or_default() != "1" {
+                return Err(BybitApiError::Business {
+                    ret_code: -1,
+                    ret_msg: "Mainnet blocked: set OPENCLAW_ALLOW_MAINNET=1 to enable / 主網被阻止：需設置 OPENCLAW_ALLOW_MAINNET=1"
+                        .into(),
+                    response: serde_json::json!({"blocked": true, "guard": "OPENCLAW_ALLOW_MAINNET"}),
+                });
+            }
             tracing::warn!(
                 "⚠ MAINNET mode enabled — real money at risk / 主網模式已啟用 — 真金白銀"
             );
         }
+
         // Derive secret slot from environment: Demo/Testnet → "demo", Mainnet → "live"
         // 從環境派生 secret 槽位：Demo/Testnet → "demo"，Mainnet → "live"
         let slot = env.secret_slot();
 
+        // LIVE-GUARD-1 gate #2: on Mainnet skip env-var credential fallback.
+        // Closes the "any process with env access bypasses secret slot" attack.
+        // LIVE-GUARD-1 門 #2：Mainnet 禁用 env var 憑證回退（封閉「能設 env 即繞 slot」攻擊）。
         let api_key = api_key
             .filter(|s| !s.is_empty())
             .or_else(|| {
-                std::env::var("BYBIT_API_KEY")
-                    .ok()
-                    .filter(|s| !s.is_empty())
+                if is_mainnet {
+                    None
+                } else {
+                    std::env::var("BYBIT_API_KEY")
+                        .ok()
+                        .filter(|s| !s.is_empty())
+                }
             })
             .or_else(|| read_secret_file(slot, "api_key"))
             .unwrap_or_default();
@@ -413,14 +449,29 @@ impl BybitRestClient {
         let api_secret = api_secret
             .filter(|s| !s.is_empty())
             .or_else(|| {
-                std::env::var("BYBIT_API_SECRET")
-                    .ok()
-                    .filter(|s| !s.is_empty())
+                if is_mainnet {
+                    None
+                } else {
+                    std::env::var("BYBIT_API_SECRET")
+                        .ok()
+                        .filter(|s| !s.is_empty())
+                }
             })
             .or_else(|| read_secret_file(slot, "api_secret"))
             .unwrap_or_default();
 
+        // LIVE-GUARD-1 gate #3: Mainnet fail-closed on empty credentials
+        // (was silent warn! → later 401 at signing; now clean Err at construction).
+        // LIVE-GUARD-1 門 #3：Mainnet 憑證空 → 構造時 Err（不再事後 401）。
         if api_key.is_empty() || api_secret.is_empty() {
+            if is_mainnet {
+                return Err(BybitApiError::Business {
+                    ret_code: -1,
+                    ret_msg: "Mainnet blocked: credentials missing from secret slot / 主網被阻止：secret 槽位缺憑證"
+                        .into(),
+                    response: serde_json::json!({"blocked": true, "guard": "mainnet_credentials"}),
+                });
+            }
             warn!("Bybit API credentials not found — client will reject requests / Bybit API 憑證未找到");
         }
 
@@ -1238,5 +1289,242 @@ mod tests {
             "timeout should fire within 2s, took {:?}",
             elapsed
         );
+    }
+
+    // -------------------------------------------------------------------
+    // LIVE-GUARD-1 tests — Mainnet fail-safes restored 2026-04-16.
+    // LIVE-GUARD-1 測試 — 2026-04-16 回補 Mainnet 硬鎖。
+    //
+    // These tests mutate process-global env vars, so they serialize on
+    // a shared Mutex and snapshot/restore every touched var.
+    // 這些測試修改全局 env var，通過共享 Mutex 串行化，並 snapshot/restore。
+    // -------------------------------------------------------------------
+
+    /// Serialize env-sensitive tests. Acquire at test start.
+    /// 序列化 env-敏感測試。測試開頭獲取。
+    static LIVE_GUARD_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    /// Snapshot-and-restore helper for env vars touched by a test.
+    /// Keeps originals, overwrites with given values, restores on Drop.
+    /// Env var snapshot/restore 輔助：保留原值、執行測試後還原。
+    struct EnvSnapshot {
+        saved: Vec<(String, Option<String>)>,
+    }
+
+    impl EnvSnapshot {
+        fn new(vars: &[&str]) -> Self {
+            let saved = vars
+                .iter()
+                .map(|k| (k.to_string(), std::env::var(k).ok()))
+                .collect();
+            Self { saved }
+        }
+
+        fn set(&self, key: &str, val: &str) {
+            std::env::set_var(key, val);
+        }
+
+        fn unset(&self, key: &str) {
+            std::env::remove_var(key);
+        }
+    }
+
+    impl Drop for EnvSnapshot {
+        fn drop(&mut self) {
+            for (k, v) in &self.saved {
+                match v {
+                    Some(val) => std::env::set_var(k, val),
+                    None => std::env::remove_var(k),
+                }
+            }
+        }
+    }
+
+    /// Point OPENCLAW_SECRETS_DIR at an empty tempdir so slot read always misses.
+    /// Caller keeps the TempDir alive for test lifetime.
+    /// 指向空 tempdir 使 slot read 必定失敗；caller 持有 TempDir 生命週期。
+    fn empty_secrets_dir() -> tempfile::TempDir {
+        tempfile::tempdir().expect("create empty tempdir for secrets")
+    }
+
+    /// Gate #1: unset OPENCLAW_ALLOW_MAINNET → construction must fail closed.
+    /// 門 #1：未設 OPENCLAW_ALLOW_MAINNET → 構造必須 Err。
+    #[test]
+    fn test_mainnet_blocked_without_allow_env() {
+        let _lock = LIVE_GUARD_ENV_LOCK.lock().unwrap();
+        let snap = EnvSnapshot::new(&[
+            "OPENCLAW_ALLOW_MAINNET",
+            "BYBIT_API_KEY",
+            "BYBIT_API_SECRET",
+            "OPENCLAW_SECRETS_DIR",
+        ]);
+        snap.unset("OPENCLAW_ALLOW_MAINNET");
+
+        let result = BybitRestClient::new(BybitEnvironment::Mainnet, None, None);
+        match result {
+            Err(BybitApiError::Business { ret_msg, .. }) => {
+                assert!(ret_msg.contains("OPENCLAW_ALLOW_MAINNET"));
+            }
+            Err(other) => panic!("expected Business error, got {:?}", other),
+            Ok(_) => panic!("Mainnet without allow env must Err"),
+        }
+    }
+
+    /// Gate #1: wrong values ("0", "true", "yes") rejected — only exact "1".
+    /// 門 #1：錯誤值（"0"/"true"/"yes"）拒絕，只接受 "1"。
+    #[test]
+    fn test_mainnet_blocked_with_wrong_allow_value() {
+        let _lock = LIVE_GUARD_ENV_LOCK.lock().unwrap();
+        let snap = EnvSnapshot::new(&[
+            "OPENCLAW_ALLOW_MAINNET",
+            "BYBIT_API_KEY",
+            "BYBIT_API_SECRET",
+            "OPENCLAW_SECRETS_DIR",
+        ]);
+
+        for val in &["0", "true", "yes", "1 ", " 1"] {
+            snap.set("OPENCLAW_ALLOW_MAINNET", val);
+            let result = BybitRestClient::new(BybitEnvironment::Mainnet, None, None);
+            assert!(
+                result.is_err(),
+                "OPENCLAW_ALLOW_MAINNET={:?} must be rejected",
+                val
+            );
+        }
+    }
+
+    /// Gate #3: allow=1 but no credentials available → Err (not silent warn).
+    /// 門 #3：allow=1 但無任何憑證 → Err（不再 warn!）。
+    #[test]
+    fn test_mainnet_blocked_without_credentials() {
+        let _lock = LIVE_GUARD_ENV_LOCK.lock().unwrap();
+        let snap = EnvSnapshot::new(&[
+            "OPENCLAW_ALLOW_MAINNET",
+            "BYBIT_API_KEY",
+            "BYBIT_API_SECRET",
+            "OPENCLAW_SECRETS_DIR",
+        ]);
+        let td = empty_secrets_dir();
+        snap.set("OPENCLAW_ALLOW_MAINNET", "1");
+        snap.unset("BYBIT_API_KEY");
+        snap.unset("BYBIT_API_SECRET");
+        snap.set("OPENCLAW_SECRETS_DIR", td.path().to_str().unwrap());
+
+        let result = BybitRestClient::new(BybitEnvironment::Mainnet, None, None);
+        match result {
+            Err(BybitApiError::Business { ret_msg, .. }) => {
+                assert!(
+                    ret_msg.contains("credentials") || ret_msg.contains("憑證"),
+                    "expected credential-related msg, got: {}",
+                    ret_msg
+                );
+            }
+            Err(other) => panic!("expected Business error, got {:?}", other),
+            Ok(_) => panic!("Mainnet without creds must Err"),
+        }
+    }
+
+    /// Gate #2: BYBIT_API_KEY env set but no slot file → still Err
+    /// (proves env var bypass closed on Mainnet).
+    /// 門 #2：env var 有值、slot 無 → 仍 Err（驗證 Mainnet 繞過被封閉）。
+    #[test]
+    fn test_mainnet_ignores_env_var_credentials() {
+        let _lock = LIVE_GUARD_ENV_LOCK.lock().unwrap();
+        let snap = EnvSnapshot::new(&[
+            "OPENCLAW_ALLOW_MAINNET",
+            "BYBIT_API_KEY",
+            "BYBIT_API_SECRET",
+            "OPENCLAW_SECRETS_DIR",
+        ]);
+        let td = empty_secrets_dir();
+        snap.set("OPENCLAW_ALLOW_MAINNET", "1");
+        snap.set("BYBIT_API_KEY", "env_key_should_be_ignored");
+        snap.set("BYBIT_API_SECRET", "env_secret_should_be_ignored");
+        snap.set("OPENCLAW_SECRETS_DIR", td.path().to_str().unwrap());
+
+        let result = BybitRestClient::new(BybitEnvironment::Mainnet, None, None);
+        match result {
+            Err(BybitApiError::Business { ret_msg, .. }) => {
+                assert!(
+                    ret_msg.contains("credentials") || ret_msg.contains("憑證"),
+                    "env var should be ignored, slot-miss msg expected, got: {}",
+                    ret_msg
+                );
+            }
+            Err(other) => panic!("expected Business error, got {:?}", other),
+            Ok(_) => panic!("env var creds must not unlock Mainnet"),
+        }
+    }
+
+    /// Gate #1+#2 pass: explicit param creds with allow=1 → client built.
+    /// 門 #1+#2 通過：顯式 param 憑證 + allow=1 → 構造成功。
+    #[test]
+    fn test_mainnet_accepts_explicit_param_creds() {
+        let _lock = LIVE_GUARD_ENV_LOCK.lock().unwrap();
+        let snap = EnvSnapshot::new(&[
+            "OPENCLAW_ALLOW_MAINNET",
+            "BYBIT_API_KEY",
+            "BYBIT_API_SECRET",
+            "OPENCLAW_SECRETS_DIR",
+        ]);
+        let td = empty_secrets_dir();
+        snap.set("OPENCLAW_ALLOW_MAINNET", "1");
+        snap.unset("BYBIT_API_KEY");
+        snap.unset("BYBIT_API_SECRET");
+        snap.set("OPENCLAW_SECRETS_DIR", td.path().to_str().unwrap());
+
+        let result = BybitRestClient::new(
+            BybitEnvironment::Mainnet,
+            Some("param_key".to_string()),
+            Some("param_secret".to_string()),
+        );
+        let client = result.expect("explicit params + allow=1 must succeed");
+        assert!(client.has_credentials());
+        assert_eq!(client.credentials(), ("param_key", "param_secret"));
+    }
+
+    /// Regression guard: Demo env + BYBIT_API_KEY env var → still works.
+    /// 回歸守衛：Demo 環境 env var 憑證仍可用。
+    #[test]
+    fn test_demo_env_var_creds_still_work() {
+        let _lock = LIVE_GUARD_ENV_LOCK.lock().unwrap();
+        let snap = EnvSnapshot::new(&[
+            "OPENCLAW_ALLOW_MAINNET",
+            "BYBIT_API_KEY",
+            "BYBIT_API_SECRET",
+            "OPENCLAW_SECRETS_DIR",
+        ]);
+        let td = empty_secrets_dir();
+        snap.unset("OPENCLAW_ALLOW_MAINNET");
+        snap.set("BYBIT_API_KEY", "demo_env_key");
+        snap.set("BYBIT_API_SECRET", "demo_env_secret");
+        snap.set("OPENCLAW_SECRETS_DIR", td.path().to_str().unwrap());
+
+        let result = BybitRestClient::new(BybitEnvironment::Demo, None, None);
+        let client = result.expect("Demo must accept env var creds");
+        assert!(client.has_credentials());
+        assert_eq!(client.credentials(), ("demo_env_key", "demo_env_secret"));
+    }
+
+    /// Regression guard: Testnet bypasses Mainnet guard entirely.
+    /// 回歸守衛：Testnet 完全繞過 Mainnet guard。
+    #[test]
+    fn test_testnet_no_guard_check() {
+        let _lock = LIVE_GUARD_ENV_LOCK.lock().unwrap();
+        let snap = EnvSnapshot::new(&[
+            "OPENCLAW_ALLOW_MAINNET",
+            "BYBIT_API_KEY",
+            "BYBIT_API_SECRET",
+            "OPENCLAW_SECRETS_DIR",
+        ]);
+        let td = empty_secrets_dir();
+        snap.unset("OPENCLAW_ALLOW_MAINNET");
+        snap.set("BYBIT_API_KEY", "testnet_key");
+        snap.set("BYBIT_API_SECRET", "testnet_secret");
+        snap.set("OPENCLAW_SECRETS_DIR", td.path().to_str().unwrap());
+
+        let result = BybitRestClient::new(BybitEnvironment::Testnet, None, None);
+        let client = result.expect("Testnet must not require OPENCLAW_ALLOW_MAINNET");
+        assert!(client.has_credentials());
     }
 }
