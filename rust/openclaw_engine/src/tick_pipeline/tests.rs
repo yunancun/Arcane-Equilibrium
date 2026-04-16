@@ -1058,6 +1058,7 @@ use super::*;
         assert_eq!(PipelineHealth::from_u8(0), PipelineHealth::Running);
         assert_eq!(PipelineHealth::from_u8(1), PipelineHealth::Paused);
         assert_eq!(PipelineHealth::from_u8(2), PipelineHealth::Down);
+        assert_eq!(PipelineHealth::from_u8(3), PipelineHealth::Disabled);
         assert_eq!(PipelineHealth::from_u8(255), PipelineHealth::Down); // unknown → Down
     }
 
@@ -1068,6 +1069,7 @@ use super::*;
         assert_eq!(PipelineHealth::Running as u8, 0);
         assert_eq!(PipelineHealth::Paused as u8, 1);
         assert_eq!(PipelineHealth::Down as u8, 2);
+        assert_eq!(PipelineHealth::Disabled as u8, 3);
     }
 
     #[tokio::test]

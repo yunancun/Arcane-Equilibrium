@@ -65,6 +65,30 @@ impl IntentProcessor {
             }
         }
 
+        // Gate 1.6: Negative-balance guard — reject brand-new opens when balance
+        // has been wiped. Opposite-direction close/reduce (existing position
+        // present) still flows to apply_fill so positions can be unwound.
+        // Primary target is paper's synthetic-fill bust scenario (balance can
+        // go negative without exchange margin enforcement); demo/live rarely
+        // reach this because the exchange margin check rejects upstream.
+        // Gate 1.6：負餘額守門 — 資金歸零後拒絕開新倉；已有反向倉位仍允許平倉/減倉。
+        // 主要處理 paper 合成成交無真實保證金檢查導致的穿倉刷單；demo/live 幾乎不觸發
+        // （交易所保證金檢查會在更早階段拒絕）。
+        if paper_state.balance() <= 0.0
+            && paper_state.get_position(&intent.symbol).is_none()
+        {
+            return IntentResult {
+                submitted: false,
+                rejected_reason: Some(format!(
+                    "insufficient_balance: {:.2}",
+                    paper_state.balance()
+                )),
+                fill: None,
+                verdict_info: None,
+                approved_qty: 0.0,
+            };
+        }
+
         // Gate 2: Guardian 4-check
         let positions: Vec<ExistingPosition> = paper_state
             .positions()

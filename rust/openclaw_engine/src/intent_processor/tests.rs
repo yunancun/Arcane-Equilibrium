@@ -455,18 +455,24 @@ fn test_cost_gate_high_volume_reduces_slippage() {
 
 #[test]
 fn test_pnl1_rejects_qty_zero_process() {
-    // PNL-1: When P1 sizing produces final_qty=0 (e.g. balance=0), reject.
-    // PNL-1：P1 sizing 產生 final_qty=0 時拒絕（餘額=0 等情況）
+    // PNL-1: zero balance must reject. Gate 1.6 (insufficient_balance) fires
+    // first on the paper path now — both it and the downstream qty_zero guard
+    // represent the same outcome (no funds → no open). Either prefix passes.
+    // PNL-1：零餘額必被拒。paper 路徑由 Gate 1.6（insufficient_balance）優先觸發；
+    // 下游 qty_zero 守衛作為第二道保險，兩者語意等價（無資金 → 禁止開倉）。
     let proc = IntentProcessor::new();
     let mut gov = GovernanceCore::new();
     gov.grant_paper_authorization(None).unwrap();
-    let mut state = PaperState::new(0.0); // zero balance → p1_max_qty=0
+    let mut state = PaperState::new(0.0); // zero balance
     state.set_latest_price("BTC", 50_000.0);
     let intent = make_intent("BTC", true);
     let result = proc.process(&intent, &gov, &state, 500.0, GovernanceProfile::Exploration);
     assert!(!result.submitted);
     let reason = result.rejected_reason.unwrap();
-    assert!(reason.starts_with("qty_zero:"), "got: {}", reason);
+    assert!(
+        reason.starts_with("insufficient_balance:") || reason.starts_with("qty_zero:"),
+        "got: {}", reason,
+    );
 }
 
 #[test]

@@ -1,6 +1,6 @@
 # OpenClaw TODO — 工作計劃清單
 
-**最後更新：2026-04-16**（P0-0 RECONCILER-BURST-FIX ✅ startup grace window 修復 + 6 新單元測試）
+**最後更新：2026-04-16**（PAPER-DISABLE-1 ✅ 預設關閉 paper 管線 + 負餘額守門 + P0-0 RECONCILER-BURST-FIX ✅ startup grace window + 6 新單元測試）
 
 **測試基準線**：Rust **engine lib 1336 (ort) / 1330 (default) + core 380 + e2e 35 + reconciler_e2e 18 + ort integration 5** · Python **2883 passed (5 skipped · 0 fail)** · ml_training **182 passed (10 skipped)**
 
@@ -186,6 +186,28 @@ git status && git log --oneline -5
 
 ### WP-I 文檔衛生
 - [ ] R4-NAME-1 / R4-MEM-1 / R4-REF-ST-1
+
+### 🧹 PAPER-DISABLE-1 · Paper 管線預設關閉 ✅ 2026-04-16
+**狀態**：完成（待 `restart_all.sh --rebuild` 部署驗證）
+**背景**：Paper 管線在 4-14~16 兩天 balance $783→-$292（137% drawdown），5055 fills / -$1076 net。Demo 同期 3295 fills / -$63 net。對比之下：
+- Paper 配置刻意寬鬆（`risk_config_paper.toml`："maximum exploration"）：position_size 50% vs demo 25%、leverage 100x vs 50x、daily_loss 30% vs 15%、h0_shadow_mode=true（H0 gate 不阻擋）、min_confidence 0.05 vs 0.10
+- Paper 走 `process_with_features`（`on_tick.rs:752`）合成 fill at `event.last_price` → 零延遲/零 partial/零 reject，成交率 ~100%
+- paper_state 無負餘額守門 → 穿倉後仍繼續刷 intent
+- 同策略 grid_close_short：paper 745 fills/-$218 vs demo 28 fills/-$0.06（27x fills, 3600x 虧損差）
+**決策**：Agent 階段未到（W22+ Strategist stub），paper 現只產噪音污染 DB + edge data。3E-ARCH 結構能力保留，僅 runtime spawn 被 env gate。
+**實作**：
+- `rust/openclaw_engine/src/main.rs`：`OPENCLAW_ENABLE_PAPER=1` 才 spawn paper pipeline；預設走 drain task 消費 `paper_event_rx` + `paper_cmd_rx`（避免 sender clone 累積）
+- `rust/openclaw_engine/src/tick_pipeline/mod.rs`：新增 `PipelineHealth::Disabled = 3` + `from_u8(3)` 處理
+- 禁用時寫入 `/tmp/openclaw/paper_state.json` + `pipeline_snapshot_paper.json` 含 `disabled: true` + `disabled_since_ms` 標記，讓 Python GUI / `ipc_state_reader.get_paper_state()` 感知狀態
+- `rust/openclaw_engine/src/intent_processor/router.rs`：新增 Gate 1.6 `insufficient_balance` 守門（balance ≤ 0 且無持倉時拒絕開新倉；反向平倉仍允許）
+- 測試：更新 `test_pnl1_rejects_qty_zero_process`（接受 `insufficient_balance:` 或 `qty_zero:` 前綴）+ `test_d6_pipeline_health_*` 新增 `Disabled=3` 斷言
+- 驗收基準：engine lib 1330 default / 1336 ort + core 380 + e2e 35 全綠
+**如何重新啟用**：`export OPENCLAW_ENABLE_PAPER=1` 後重啟引擎。GUI tab 仍會運作（Python 側 ENGINE=None stub 不變）。
+**後續觀察**：
+- restart 後驗證 paper_state.json `disabled=true` 被寫入，log 出現 `paper pipeline DISABLED`
+- DB `trading.fills WHERE engine_mode='paper'` 應停止累積
+- Python GUI paper tab 應顯示 DISABLED 或 last_known + disabled flag（若未在 Python 側加 UI flag 檢查，會顯示 balance=0 + 0 positions；留待後續 GUI 優化）
+**Why not delete outright**：3E-ARCH 是 4-11 剛完成的架構成果；env gate 保留未來 W22+ Agent 探索階段一鍵啟用能力。
 
 ### 🧹 IP-DEDUP-1 · IntentProcessor 同幣種重發去抖 🆕 2026-04-16
 **背景**：Problem 2 診斷（見 `project_engine_mode_tag_live_demo.md` + `project_phase5_promotion_edge_crisis.md`）揭露：cost_gate 拒絕後無 position → 策略每 tick 看到「沒倉位」狀態重發同向 intent（ORDIUSDT 14min 內 8439 筆）。每筆重發都觸發 `evaluate_predictor_gate` → emit DF snapshot → 放大 `learning.decision_features` 寫入量 + 無謂 cost_gate CPU。

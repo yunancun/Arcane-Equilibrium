@@ -884,79 +884,185 @@ async fn async_main(
     }
 
     // ------------------------------------------------------------------
-    // Spawn Paper pipeline (always starts)
-    // 啟動 Paper 管線（始終啟動）
+    // Spawn Paper pipeline (opt-in via OPENCLAW_ENABLE_PAPER=1)
+    // Default DISABLED: paper emits ~2.5k noise fills/day polluting DB +
+    // edge data. Re-enable only during Agent maximum-exploration windows
+    // (W22+ Strategist). 3E-ARCH structural capability is preserved —
+    // only the runtime spawn is gated.
+    // 啟動 Paper 管線（opt-in：OPENCLAW_ENABLE_PAPER=1）
+    // 預設禁用 — paper 每天產 ~2.5k 垃圾 fill 污染 DB + edge 數據；
+    // 僅在 Agent 最大探索階段（W22+ Strategist）再啟用。3E-ARCH 結構能力保留，
+    // 僅 runtime spawn 被 gate 住。
     // ------------------------------------------------------------------
-    let paper_deps = EventConsumerDeps {
-        pipeline_kind: PipelineKind::Paper,
-        endpoint_env: None,
-        event_rx: paper_event_rx,
-        config: Arc::clone(&config),
-        cancel: cancel.clone(),
-        initial_balance: paper_balance,
-        paper_initial_balance: None,
-        taker_fee_rate: live_bindings.as_ref().and_then(|b| b.taker_fee)
-            .or_else(|| demo_bindings.as_ref().and_then(|b| b.taker_fee)),
-        instruments: shared_instruments.clone(),
-        bootstrap_client: shared_client.clone(), // Paper uses shared REST for kline bootstrap
-        shared_client: None,
-        bybit_balance: None,
-        api_pnl: None,
-        pipeline_cmd_rx: Some(paper_cmd_rx),
-        // EDGE-P3-1 #62: clone paper_cmd_tx for IntentProcessor's EmitShadowFill
-        // dispatch. Paper is the only engine that can fire ε-greedy shadow
-        // fills (pipeline_kind guard inside IntentProcessor), so this is the
-        // one that matters; Demo/Live get their own sender for symmetry.
-        // EDGE-P3-1 #62：clone paper_cmd_tx 給 IntentProcessor 發 EmitShadowFill。
-        pipeline_cmd_tx: Some(paper_cmd_tx.clone()),
-        market_data_tx: market_tx,
-        feature_tx,
-        last_tick_ms: Some(Arc::clone(&shared_last_tick_ms)),
-        trading_tx: trading_tx.clone(),
-        context_tx: context_tx.clone(),
-        // EDGE-P3-1 Step 7a: wire training-store writer for paper engine.
-        // EDGE-P3-1 Step 7a：接入 paper 引擎訓練資料 writer。
-        decision_feature_tx: decision_feature_tx.clone(),
-        // EDGE-P3-1 Step 7c: wire shadow-fill writer for paper engine
-        // (ε-greedy fills only ever originate here by gate guard).
-        // EDGE-P3-1 Step 7c：接 paper 引擎 shadow-fill writer（ε-greedy 僅此處）。
-        shadow_fill_tx: shadow_fill_tx.clone(),
-        exchange_event_rx: None,
-        seed_positions: Vec::new(), // Paper has no exchange-side positions to seed
-        account_manager: None,
-        linucb_runtime: Some(Arc::clone(&shared_linucb_runtime)),
-        news_snapshot: Some(Arc::clone(&shared_news_snapshot)),
-        risk_store: Some(Arc::clone(&risk_stores.paper)),
-        budget_store: Some(Arc::clone(&budget_store)),
-        audit_pool: db_pool.get().cloned(),
-        symbol_registry: Some(Arc::clone(&symbol_registry)),
-        scanner_store: Some(Arc::clone(&scanner_store)),
-        shared_risk_level: Some(Arc::clone(&paper_risk_level)),
-        is_primary: !has_live && !has_demo,
-        ready_tx: Some(paper_ready_tx),
-        global_exposure_usdt: None,
-        cross_engine_tx: Some(cross_engine_tx.clone()),
-        cross_engine_rx: Some(cross_engine_tx.subscribe()),
-        pipeline_health: Some(Arc::clone(&paper_health)),
-        canary_handle: canary_handle.clone(),
-        edge_predictor_store: Some(Arc::clone(&per_engine_predictors.paper)),
-        positions_mirror: Some(Arc::clone(&paper_positions_mirror)),
+    let paper_enabled = std::env::var("OPENCLAW_ENABLE_PAPER")
+        .map(|v| v.trim() == "1")
+        .unwrap_or(false);
+
+    let paper_handle = if !paper_enabled {
+        info!(
+            "paper pipeline DISABLED (default; set OPENCLAW_ENABLE_PAPER=1 to enable) / \
+             Paper 管線已禁用（預設；設 OPENCLAW_ENABLE_PAPER=1 啟用）"
+        );
+        // Mark health as Disabled so GUI / IPC surfaces DISABLED rather than stale Running.
+        // 健康狀態標記為 Disabled，GUI / IPC 顯示禁用而非陳舊的 Running。
+        paper_health.store(
+            PipelineHealth::Disabled as u8,
+            std::sync::atomic::Ordering::Relaxed,
+        );
+        // Signal fan-out barrier so demo/live proceed without waiting for paper ready.
+        // 通知扇出屏障 paper 已就緒（禁用也算就緒），demo/live 不必等待。
+        let _ = paper_ready_tx.send(());
+
+        // Write one-shot DISABLED markers so Python GUI / ipc_state_reader surface
+        // the state correctly instead of reporting stale last-known balance:
+        //   * paper_state.json — raw PaperState shape with disabled=true
+        //   * pipeline_snapshot_paper.json — wraps paper_state, what GUI actually reads
+        // 寫入 DISABLED 標記讓 Python GUI / ipc_state_reader 顯示正確狀態（避免陳舊餘額）：
+        //   * paper_state.json — raw PaperState 形狀，附 disabled=true
+        //   * pipeline_snapshot_paper.json — 包 paper_state，GUI 實際讀的檔
+        {
+            let data_dir = std::env::var("OPENCLAW_DATA_DIR")
+                .unwrap_or_else(|_| "/tmp/openclaw".to_string());
+            let ts_ms = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis() as u64)
+                .unwrap_or(0);
+            let paper_state_marker = serde_json::json!({
+                "disabled": true,
+                "disabled_reason": "OPENCLAW_ENABLE_PAPER != 1",
+                "disabled_since_ms": ts_ms,
+                "balance": 0.0,
+                "initial_balance": paper_balance,
+                "peak_balance": paper_balance,
+                "total_realized_pnl": 0.0,
+                "total_fees": 0.0,
+                "trade_count": 0,
+                "positions": [],
+            });
+            let snapshot_marker = serde_json::json!({
+                "schema_version": 1,
+                "written_at_ms": ts_ms,
+                "trading_mode": "paper",
+                "paper_paused": true,
+                "paper_state": paper_state_marker,
+                "disabled": true,
+                "disabled_reason": "OPENCLAW_ENABLE_PAPER != 1",
+                "positions": [],
+                "recent_fills": [],
+                "recent_intents": [],
+            });
+            if let Err(e) = std::fs::create_dir_all(&data_dir) {
+                warn!(dir = %data_dir, error = %e, "failed to create data dir for paper disabled marker / 建立資料目錄失敗");
+            }
+            let write_marker = |filename: &str, value: &serde_json::Value| {
+                let path = std::path::PathBuf::from(&data_dir).join(filename);
+                match serde_json::to_string_pretty(value) {
+                    Ok(json) => {
+                        if let Err(e) = std::fs::write(&path, json) {
+                            warn!(path = ?path, error = %e, "failed to write paper disabled marker / 寫入 paper 禁用標記失敗");
+                        }
+                    }
+                    Err(e) => warn!(file = %filename, error = %e, "failed to serialize paper disabled marker / 序列化禁用標記失敗"),
+                }
+            };
+            write_marker("paper_state.json", &paper_state_marker);
+            write_marker("pipeline_snapshot_paper.json", &snapshot_marker);
+        }
+
+        // Spawn minimal drain task: consume paper_event_rx + paper_cmd_rx so sender
+        // clones held by scanner / phase4 / IPC don't back up an unbounded channel.
+        // 啟動最小 drain 任務：消費事件與指令通道，避免 scanner / phase4 / IPC 的
+        // sender clone 在無人消費時累積（paper_cmd 為 unbounded，更需 drain）。
+        let drain_cancel = cancel.clone();
+        tokio::spawn(async move {
+            let mut event_rx = paper_event_rx;
+            let mut cmd_rx = paper_cmd_rx;
+            loop {
+                tokio::select! {
+                    _ = drain_cancel.cancelled() => break,
+                    evt = event_rx.recv() => {
+                        if evt.is_none() { break; }
+                    }
+                    cmd = cmd_rx.recv() => {
+                        if cmd.is_none() { break; }
+                    }
+                }
+            }
+            tracing::info!("paper drain task stopped / Paper drain 任務已停止");
+        })
+    } else {
+        let paper_deps = EventConsumerDeps {
+            pipeline_kind: PipelineKind::Paper,
+            endpoint_env: None,
+            event_rx: paper_event_rx,
+            config: Arc::clone(&config),
+            cancel: cancel.clone(),
+            initial_balance: paper_balance,
+            paper_initial_balance: None,
+            taker_fee_rate: live_bindings.as_ref().and_then(|b| b.taker_fee)
+                .or_else(|| demo_bindings.as_ref().and_then(|b| b.taker_fee)),
+            instruments: shared_instruments.clone(),
+            bootstrap_client: shared_client.clone(), // Paper uses shared REST for kline bootstrap
+            shared_client: None,
+            bybit_balance: None,
+            api_pnl: None,
+            pipeline_cmd_rx: Some(paper_cmd_rx),
+            // EDGE-P3-1 #62: clone paper_cmd_tx for IntentProcessor's EmitShadowFill
+            // dispatch. Paper is the only engine that can fire ε-greedy shadow
+            // fills (pipeline_kind guard inside IntentProcessor), so this is the
+            // one that matters; Demo/Live get their own sender for symmetry.
+            // EDGE-P3-1 #62：clone paper_cmd_tx 給 IntentProcessor 發 EmitShadowFill。
+            pipeline_cmd_tx: Some(paper_cmd_tx.clone()),
+            market_data_tx: market_tx,
+            feature_tx,
+            last_tick_ms: Some(Arc::clone(&shared_last_tick_ms)),
+            trading_tx: trading_tx.clone(),
+            context_tx: context_tx.clone(),
+            // EDGE-P3-1 Step 7a: wire training-store writer for paper engine.
+            // EDGE-P3-1 Step 7a：接入 paper 引擎訓練資料 writer。
+            decision_feature_tx: decision_feature_tx.clone(),
+            // EDGE-P3-1 Step 7c: wire shadow-fill writer for paper engine
+            // (ε-greedy fills only ever originate here by gate guard).
+            // EDGE-P3-1 Step 7c：接 paper 引擎 shadow-fill writer（ε-greedy 僅此處）。
+            shadow_fill_tx: shadow_fill_tx.clone(),
+            exchange_event_rx: None,
+            seed_positions: Vec::new(), // Paper has no exchange-side positions to seed
+            account_manager: None,
+            linucb_runtime: Some(Arc::clone(&shared_linucb_runtime)),
+            news_snapshot: Some(Arc::clone(&shared_news_snapshot)),
+            risk_store: Some(Arc::clone(&risk_stores.paper)),
+            budget_store: Some(Arc::clone(&budget_store)),
+            audit_pool: db_pool.get().cloned(),
+            symbol_registry: Some(Arc::clone(&symbol_registry)),
+            scanner_store: Some(Arc::clone(&scanner_store)),
+            shared_risk_level: Some(Arc::clone(&paper_risk_level)),
+            is_primary: !has_live && !has_demo,
+            ready_tx: Some(paper_ready_tx),
+            global_exposure_usdt: None,
+            cross_engine_tx: Some(cross_engine_tx.clone()),
+            cross_engine_rx: Some(cross_engine_tx.subscribe()),
+            pipeline_health: Some(Arc::clone(&paper_health)),
+            canary_handle: canary_handle.clone(),
+            edge_predictor_store: Some(Arc::clone(&per_engine_predictors.paper)),
+            positions_mirror: Some(Arc::clone(&paper_positions_mirror)),
+        };
+        // Fix 3 (2026-04-14): wrap in crash-only layer so a paper task panic
+        // is logged + broadcast + triggers engine-wide cancel (watchdog restart).
+        // Previously naked tokio::spawn → task panic died silently, root cause
+        // of 2026-04-14 engine zombie incident.
+        // 修復 3：包進 crash-only 層，paper task panic 時記 log + 廣播 + 觸發
+        // 全引擎 cancel（交 watchdog 重啟）。此前裸 tokio::spawn 導致 task panic
+        // 靜默死亡，是 2026-04-14 引擎殭屍事故的根因。
+        let h = tokio::spawn(run_pipeline_crash_only(
+            PipelineKind::Paper,
+            run_event_consumer(paper_deps),
+            Arc::clone(&paper_health),
+            cross_engine_tx.clone(),
+            cancel.clone(),
+        ));
+        info!("paper pipeline spawned (crash-only) / Paper 管線已啟動（crash-only）");
+        h
     };
-    // Fix 3 (2026-04-14): wrap in crash-only layer so a paper task panic
-    // is logged + broadcast + triggers engine-wide cancel (watchdog restart).
-    // Previously naked tokio::spawn → task panic died silently, root cause
-    // of 2026-04-14 engine zombie incident.
-    // 修復 3：包進 crash-only 層，paper task panic 時記 log + 廣播 + 觸發
-    // 全引擎 cancel（交 watchdog 重啟）。此前裸 tokio::spawn 導致 task panic
-    // 靜默死亡，是 2026-04-14 引擎殭屍事故的根因。
-    let paper_handle = tokio::spawn(run_pipeline_crash_only(
-        PipelineKind::Paper,
-        run_event_consumer(paper_deps),
-        Arc::clone(&paper_health),
-        cross_engine_tx.clone(),
-        cancel.clone(),
-    ));
-    info!("paper pipeline spawned (crash-only) / Paper 管線已啟動（crash-only）");
 
     // ------------------------------------------------------------------
     // Spawn Demo pipeline (conditional — if demo API key exists)

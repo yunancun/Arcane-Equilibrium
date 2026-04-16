@@ -167,6 +167,9 @@ pub enum PipelineHealth {
     Paused = 1,
     /// Pipeline has crashed or been shut down / 管線已崩潰或關閉
     Down = 2,
+    /// Pipeline is intentionally disabled (e.g. paper off by default).
+    /// 管線刻意禁用（例如 paper 預設關閉）。
+    Disabled = 3,
 }
 
 impl PipelineHealth {
@@ -174,6 +177,8 @@ impl PipelineHealth {
         match v {
             0 => Self::Running,
             1 => Self::Paused,
+            2 => Self::Down,
+            3 => Self::Disabled,
             _ => Self::Down,
         }
     }
