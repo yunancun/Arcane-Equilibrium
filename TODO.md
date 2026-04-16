@@ -82,8 +82,34 @@ git status && git log --oneline -5
 - `risk_close:fast_track_reduce_half` 24h 計數 < 50（vs 修復前 335/2.6h，預期降 >80%）
 **RCA**：`docs/references/2026-04-16--phantom2_fup_reduce_to_half_cascade_rca.md`（歷史記錄，已落實）
 
-**關鍵路徑**:`~~P0-0 reconciler burst fix~~ ✅ → ~~restart_all --rebuild 部署~~ ✅ → P0-3 Phase 5 edge 2w 評估 + P0-2 LG-1 21d demo → LG-4/5 → Live`(P0-1 G-2 並行驗證 funding_arb 子集,不在主路徑;~~P0-5 PHANTOM-2-FUP~~ ✅ 待 `--rebuild` 部署即生效)
-**最早 Live 日期**:樂觀估 **W24 末(～2026-05-23)**
+### P0-6 · INTENT-WRITE-GAP-1 — live/live_demo `trading.intents` 寫入 path 斷裂 🔴 NEW 2026-04-16
+**發現**：實現性審查（2026-04-16 夜，engine PID 1364222 uptime ~11min）DB 查詢顯示嚴重 data integrity 斷裂：
+- `trading.risk_verdicts` 24h 內 live Approved **976,097** + live_demo Approved **570,522**（且現在每秒 ~6.6 條持續寫入），每條 `intent_id` 欄位都有值（null_intent_id=0）
+- `trading.intents` 24h 內 live=0 + live_demo=0（demo 仍正常寫 713 條）
+**暗示**：兩張表寫入 path 在 live/live_demo 不一致，risk_verdict 寫成功但對應的 intent 記錄沒進 DB。可能根因（待驗證）：
+  - DEDUP-PY-RUST Tier A（2026-04-16 合併，21 檔 ~6.5k 行 Python stub 化）之一打斷了 intents persistence path
+  - 或 live/live_demo 的 intent write 走 Python 側但該 path 被 stub 拿掉，而 risk_verdict write 仍在 Rust 側獨立運作
+**影響**：所有基於 `trading.intents` 的下游審計/分析（learning、Phase 5 edge 歸因、experiment ledger）在 live/live_demo 上已瞎 24h+
+**下一步**：grep `INSERT INTO trading.intents` + DEDUP-PY-RUST 合併 diff → 定位斷點
+**阻塞**：Live gate（沒有可信的 intent audit trail 就不能 live）
+
+### P0-7 · ORDER-SUBMIT-GAP-1 — live/live_demo Approved verdict 沒觸發真實下單 🔴 NEW 2026-04-16
+**發現**：同上審查：
+- live_demo 最近 1 分鐘內 5+ Approved verdicts（details: `{"risk_score": 0.0, "modified_qty": null}`）
+- `trading.fills` 24h 內 live=0 + live_demo=0
+- engine.log in-memory `fills=0 intents=0` 本輪 uptime 全程
+**暗示**：Approved verdict 寫入 DB 後，後續 order submit path 在 live/live_demo 被跳過。可能根因：
+  - `trading_mode` 沒切到 live（仍是 demo default）
+  - `live_reserved` global mode 未啟用，OMS proxy 為空實作
+  - 或 Rust 側 order submit 需要 `execution_authority=granted`（Python 側狀態）但未真正授予
+**影響**：「Live_Ready」下真實下單能力 0%；570k Approved 純空轉。Guardian 在跑，下單在空轉。
+**下一步**：
+  1. 查 engine session 啟動時的 trading_mode 日誌 + OMSProxy 實作（是 real Bybit client 還是 noop）
+  2. 檢查 Approved verdict 後 submit 路徑（`intent_processor/router.rs` → OMSProxy）
+**阻塞**：Live gate
+
+**關鍵路徑**:`~~P0-0 reconciler burst fix~~ ✅ → ~~restart_all --rebuild 部署~~ ✅ → P0-6/P0-7 查清 intent/order 寫入斷點 → P0-3 Phase 5 edge 2w 評估 + P0-2 LG-1 21d demo → LG-4/5 → Live`(P0-1 G-2 並行驗證 funding_arb 子集,不在主路徑;~~P0-5 PHANTOM-2-FUP~~ ✅ 待 `--rebuild` 部署即生效)
+**最早 Live 日期**:樂觀估 **W24 末(～2026-05-23)** — P0-6/P0-7 若揭露架構級 bug 可能延後
 
 ---
 
@@ -98,6 +124,23 @@ git status && git log --oneline -5
 **狀態**：`learning.decision_features` 於 Step 7a 後開始採集；等足夠樣本（≥100k rows per strategy 推薦）
 **工作內容**：`run_training_pipeline.py --strategy <name>` → 產 `models/<engine>/<strategy>_vYYYYMMDD.onnx` + symlink
 **解鎖**：整個 EDGE-P3-1 Stage 2 shadow mode（P1-1/P1-2 已解鎖 ✅，等此產出首個 artifact 後執行 `ReloadEdgePredictor` IPC 載入）
+
+### P1-5 · DEMO-REBOOT-PNL-RESET-1 — 重啟清洗歷史 drawdown audit 🟡 NEW 2026-04-16
+**發現**：實現性審查發現 `/tmp/openclaw/demo_state.json` 本輪重啟後 `initial_balance == peak_balance == current_balance (747.56)`、`total_realized_pnl=72.68`；但 `trading.risk_verdicts` 24h 內仍有 **91,798** 條 `drawdown_breach: 92.2% > 25.0%`（最後 2026-04-16 10:57 UTC+2 = 08:57 UTC）證明**本輪之前 demo 帳戶曾達 92% drawdown，觸發 9 萬+ 次 P0 硬邊界 reject**。
+**問題**：本輪啟動時 state file 被重 seed 為 current balance，歷史 drawdown 在 engine in-memory 視角被清掉。是設計還是 bug？
+- 若設計：審計上 drawdown 監控跨 session 斷鏈（只有 DB 能還原）
+- 若 bug：應從 bybit_sync 或 session store 正確恢復 peak_balance 以維持累積 drawdown 視角
+**下一步**：查 `event_consumer/paper_state_restore.rs` + `demo_state.json` 寫入路徑
+**影響**：Phase 5 edge 重評期（P0-3）drawdown 真實軌跡可能被遮蔽；21d demo 穩定性判斷基準被影響
+
+### P1-6 · DEMO-BYBIT-SYNC-ORPHAN-1 — bybit_sync 倉位策略動不了 🟡 NEW 2026-04-16
+**發現**：`demo_state.json.positions` 6 個全部 `owner_strategy="bybit_sync"`（DOTUSDT / NEARUSDT / BLESSUSDT / ENAUSDT / AAVEUSDT / BTCUSDT）
+**問題**：這些倉位是從 Bybit demo account 同步下載（之前 session 遺留），**不是本輪策略開的**。ORPHAN-ADOPT-1 Phase 1/2A 完成後，bybit_sync orphan 應該能被策略 adopt 並 close — 但實測 1h43min demo 沒新 intent 意味著這 6 個仍被孤立。
+**下一步**：
+  1. 查 orphan adoption 日誌 `grep ORPHAN /tmp/openclaw/engine.log`
+  2. 確認 Phase 2A 的 adopt logic 是否會處理 bybit_sync 來源（相對於 external operator 來源）
+  3. 若不會：ORPHAN-ADOPT-1 Phase 2B 或獨立 P1 補 bybit_sync 路徑
+**影響**：21d demo 觀察期內這些倉位若 drawdown，策略層無法反應（只能靠 Guardian ReduceToHalf / fast_track close）
 
 ---
 
