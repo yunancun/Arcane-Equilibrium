@@ -563,23 +563,73 @@ pub(crate) async fn build_exchange_pipeline(
         }
     };
 
-    // Fetch initial balance / 獲取初始餘額
+    // BALANCE-REAL-1: Fetch initial balance with retry + hard-fail.
+    // 3 attempts, exponential backoff 500ms / 1s / 2s. On final failure the
+    // entire exchange pipeline refuses to start (build_exchange_pipeline
+    // returns None) — demo/live MUST run on a real Bybit balance, never on a
+    // hardcoded 10000 fallback. Paper is unaffected (paper_balance_from_*).
+    // GUI consumes the missing pipeline as "N/A / 未連接".
+    //
+    // BALANCE-REAL-1：抓初始餘額帶 retry + 硬性失敗。
+    // 3 次嘗試，指數退避 500ms / 1s / 2s。三次全失敗則整條交易所管線拒絕
+    // 啟動（build_exchange_pipeline 返回 None）— demo/live 必須跑真實 Bybit
+    // 餘額，絕不允許硬編碼 10000 fallback。Paper 不受影響。
+    // GUI 把缺失的管線顯示為「N/A / 未連接」。
+    const REST_BALANCE_RETRY_ATTEMPTS: u32 = 3;
+    const REST_BALANCE_BACKOFF_MS: [u64; 3] = [500, 1000, 2000];
     let initial_balance = {
-        let bal_acct = AccountManager::new();
-        match bal_acct.refresh_balance(&*client_arc).await {
-            Ok(_) => {
-                let bal = bal_acct.usdt_wallet_balance();
-                if bal > 0.0 {
-                    info!(kind = %kind, balance = format!("{:.2}", bal), "exchange balance fetched / 交易所餘額已獲取");
-                    bal
-                } else {
-                    warn!(kind = %kind, "exchange balance is 0 / 交易所餘額為 0");
-                    10_000.0
+        let mut last_err: Option<String> = None;
+        let mut got_balance: Option<f64> = None;
+        for attempt in 1..=REST_BALANCE_RETRY_ATTEMPTS {
+            match acct.refresh_balance(&*client_arc).await {
+                Ok(_) => {
+                    let bal = acct.usdt_wallet_balance();
+                    if bal > 0.0 {
+                        info!(
+                            kind = %kind,
+                            attempt,
+                            balance = format!("{:.2}", bal),
+                            "exchange balance fetched / 交易所餘額已獲取"
+                        );
+                        got_balance = Some(bal);
+                        break;
+                    } else {
+                        last_err = Some("wallet returned 0 / 錢包返回 0".into());
+                        warn!(
+                            kind = %kind,
+                            attempt,
+                            "exchange balance is 0 / 交易所餘額為 0"
+                        );
+                    }
+                }
+                Err(e) => {
+                    last_err = Some(e.to_string());
+                    warn!(
+                        kind = %kind,
+                        attempt,
+                        error = %e,
+                        "exchange balance fetch attempt failed / 交易所餘額抓取嘗試失敗"
+                    );
                 }
             }
-            Err(e) => {
-                warn!(kind = %kind, error = %e, "balance fetch failed, using default / 餘額獲取失敗，使用默認值");
-                10_000.0
+            if attempt < REST_BALANCE_RETRY_ATTEMPTS {
+                let backoff = REST_BALANCE_BACKOFF_MS[(attempt - 1) as usize];
+                tokio::time::sleep(std::time::Duration::from_millis(backoff)).await;
+            }
+        }
+        match got_balance {
+            Some(b) => b,
+            None => {
+                error!(
+                    kind = %kind,
+                    attempts = REST_BALANCE_RETRY_ATTEMPTS,
+                    last_error = ?last_err,
+                    "REST wallet-balance failed after all retries — pipeline REFUSES to start. \
+                     No 10000 fallback. Operator: check network / API key / Bybit endpoint. \
+                     / REST 餘額抓取多次失敗 — 該管線拒絕啟動。\
+                     不再使用 10000 默認值。請檢查網路/API key/Bybit 端點。"
+                );
+                return None;
             }
         }
     };
@@ -589,7 +639,68 @@ pub(crate) async fn build_exchange_pipeline(
         BybitEnvironment::Demo | BybitEnvironment::Testnet => "demo",
         BybitEnvironment::Mainnet | BybitEnvironment::LiveDemo => "live",
     };
-    let ws_bindings = spawn_private_ws_supervisor(api_key, api_secret, env, label, cancel);
+    let ws_bindings = spawn_private_ws_supervisor(api_key, api_secret, env, label, cancel.clone());
+
+    // BALANCE-REAL-1: Seed reconcile Arc with the REST-fetched value so the
+    // event_consumer reconcile path triggers from the very first tick — we do
+    // not wait for the WS wallet topic (idle demo accounts may never push).
+    // BALANCE-REAL-1：用 REST 抓到的值初始化對賬 Arc，event_consumer 對賬路徑
+    // 從首個 tick 起即生效，不依賴 WS wallet topic 主動推送
+    // （閒置 demo 帳戶可能永遠不推）。
+    *ws_bindings.bybit_balance.write() = Some(initial_balance);
+
+    // BALANCE-REAL-1: Spawn periodic REST balance refresh (5min).
+    // Defends against silent WS — keeps `bybit_balance` Arc fresh so
+    // event_consumer reconcile_balance_from_exchange always sees a recent
+    // exchange-side number, not stale local-simulated drift.
+    // BALANCE-REAL-1：啟動定期 REST 餘額對賬（5 分鐘）。
+    // 防 WS 靜默 — 保持 `bybit_balance` Arc 新鮮，
+    // event_consumer reconcile_balance_from_exchange 始終看到最新交易所側值。
+    {
+        let refresh_acct = Arc::clone(&acct);
+        let refresh_client = Arc::clone(&client_arc);
+        let refresh_arc = Arc::clone(&ws_bindings.bybit_balance);
+        let refresh_cancel = cancel.clone();
+        let refresh_kind = kind;
+        tokio::spawn(async move {
+            let mut interval =
+                tokio::time::interval(std::time::Duration::from_secs(300));
+            interval.tick().await; // skip first immediate tick
+            loop {
+                tokio::select! {
+                    _ = refresh_cancel.cancelled() => {
+                        debug!(kind = %refresh_kind, "periodic balance refresh task cancelled / 定期餘額對賬任務取消");
+                        break;
+                    }
+                    _ = interval.tick() => {
+                        match refresh_acct.refresh_balance(&*refresh_client).await {
+                            Ok(_) => {
+                                let bal = refresh_acct.usdt_wallet_balance();
+                                if bal > 0.0 {
+                                    *refresh_arc.write() = Some(bal);
+                                    debug!(
+                                        kind = %refresh_kind,
+                                        balance = format!("{:.2}", bal),
+                                        "periodic REST balance refresh / 定期 REST 餘額對賬"
+                                    );
+                                } else {
+                                    warn!(
+                                        kind = %refresh_kind,
+                                        "periodic REST balance returned 0 — keeping previous value / 定期 REST 餘額返回 0，保留舊值"
+                                    );
+                                }
+                            }
+                            Err(e) => warn!(
+                                kind = %refresh_kind,
+                                error = %e,
+                                "periodic REST balance refresh failed / 定期 REST 餘額對賬失敗"
+                            ),
+                        }
+                    }
+                }
+            }
+        });
+    }
 
     let risk_level = Arc::new(std::sync::atomic::AtomicU8::new(
         openclaw_core::sm::risk_gov::RiskLevel::Normal.value(),

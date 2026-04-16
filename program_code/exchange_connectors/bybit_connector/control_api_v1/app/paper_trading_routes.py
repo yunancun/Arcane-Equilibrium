@@ -480,8 +480,17 @@ def get_session_status(
         "state_revision": 0,
         # P3: Demo balance from Rust WS sync (no API call — avoids blocking)
         # Demo 餘額從 Rust WS 同步讀取（不打 API — 避免阻塞）
+        # BALANCE-REAL-1: explicit pipeline_status so paper-tab demo card can
+        # render N/A + 未連接 instead of stale 0 / hardcoded 10000.
+        # BALANCE-REAL-1：顯式 pipeline_status，讓 paper 頁的 demo 子卡片
+        # 在斷線時顯示 N/A + 未連接，而非殘留 0 或硬編碼 10000。
         "demo": {
-            "available": True,
+            "available": rust.is_engine_available("demo"),
+            "pipeline_status": "connected" if rust.is_engine_available("demo") else "disconnected",
+            "pipeline_reason": (
+                None if rust.is_engine_available("demo")
+                else "Bybit Demo wallet REST 未連接（引擎啟動時抓取失敗）/ wallet REST disconnected"
+            ),
             "source": "rust_ws_sync",
             "sync_balance": rust_state.get("bybit_sync_balance"),
         },
