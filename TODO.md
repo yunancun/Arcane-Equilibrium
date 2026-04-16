@@ -1,6 +1,6 @@
 # OpenClaw TODO — 工作計劃清單
 
-**最後更新：2026-04-16 深夜**（LIVE-GUARD-1 ✅ Rust 端 Mainnet 三重硬鎖回補 +7 新單測 · G-2 daemon 重啟以 option D config · P0-0 RECONCILER-BURST-FIX ✅ 已部署驗證 + e2e regression · P0-5 PHANTOM-2-FUP ✅ A+C 方案實作 +5 新單測 · PAPER-DISABLE-1 ✅ 歸檔 · P1-3 shadow_fills Python consumer ✅ 歸檔）
+**最後更新：2026-04-16 深夜 audit 續**（**P0-9 STABILITY-1** 🔴 NEW 9h 5 crash 21d 時鐘未啟動 · **P1-7 LEARNING-PIPELINE-DORMANT-1** 🟡 NEW 半殼學習管線 · LIVE-GUARD-1 ✅ Rust 端 Mainnet 三重硬鎖回補 +7 新單測 · G-2 daemon 重啟以 option D config · P0-0 RECONCILER-BURST-FIX ✅ 已部署驗證 + e2e regression · P0-5 PHANTOM-2-FUP ✅ A+C 方案實作 +5 新單測 · PAPER-DISABLE-1 ✅ 歸檔 · P1-3 shadow_fills Python consumer ✅ 歸檔）
 
 **測試基準線**：Rust **engine lib 1342 (default) / 1348 (ort) + core 380 + e2e 35 + reconciler_e2e 19 + ort integration 5** · Python **2898 passed (5 skipped · 0 fail)** · ml_training **182 passed (10 skipped)**
 
@@ -130,8 +130,30 @@ git status && git log --oneline -5
   2. 檢查 Approved verdict 後 submit 路徑（`intent_processor/router.rs` → OMSProxy）
 **阻塞**：Live gate
 
-**關鍵路徑**:`~~P0-0 reconciler burst fix~~ ✅ → ~~restart_all --rebuild 部署~~ ✅ → P0-6/P0-7 查清 intent/order 寫入斷點 → P0-3 Phase 5 edge 2w 評估 + P0-2 LG-1 21d demo → LG-4/5 → Live`(P0-1 G-2 並行驗證 funding_arb 子集,不在主路徑;~~P0-5 PHANTOM-2-FUP~~ ✅ 待 `--rebuild` 部署即生效;~~P0-8 LIVE-GUARD-1~~ ✅ Rust 端 Mainnet 三重硬鎖回補,解除 CLAUDE.md §三 LIVE-GUARD-1 P0-CRITICAL 阻塞)
-**最早 Live 日期**:樂觀估 **W24 末(～2026-05-23)** — P0-6/P0-7 若揭露架構級 bug 可能延後
+### P0-9 · STABILITY-1 — 引擎 9h 內 5 次崩潰，21d 穩定期時鐘未啟動 🔴 NEW 2026-04-16 audit
+**發現**：2026-04-16 實現性審查發現 watchdog.log 當日崩潰模式驚人：
+- **11:11:30 UTC** PID 1309127 lost heartbeat → Python fallback strike 1/3
+- **11:13:52 UTC** PID 1310044 lost heartbeat → strike 2/3（2min 後再炸）
+- **11:14:xx UTC** 第 3 次崩潰
+- **16:03 / 16:04 UTC** 又 2 次連爆（snapshot age 17313.5s = 4.8h stale 才被發現）
+- **20:16 UTC** 當前 PID 1364222 啟動（22:16 local）
+- 即 **9 小時 5 次 crash**（間隔最短 2 分鐘），平均存活 **~1.8 小時**
+**問題**：CLAUDE.md §十一 敘述的「乾淨 demo 起點 2026-04-16 21:08 local」錯誤：
+- 時間點對不上真實 restart（20:16 UTC = 22:16 local，非 21:08）
+- 引擎根本不穩，連 11 分鐘都守不住，21 天 × 24h = 504h 是幻想
+- P0-2 LG-1 21d 觀察期時鐘**未啟動**（前提是穩定 1hr+，當前 p50 uptime 1.8hr 且已 crash 5 次）
+- P0-3 Phase 5 edge 2w 重評同理作廢（crash 會污染 fills 樣本）
+**下一步**：
+  1. 撈 watchdog.log 完整 strike 歷史 + systemd journal crash 原因
+  2. 檢查是否存在 core dump（`coredumpctl list openclaw-engine`）
+  3. 分析 11:11-11:14 三連爆是否同因（單一 regression 還是累積）
+  4. 分析 16:03-16:04 次叢是否同因（或是新觸發）
+  5. 定位 root cause → fix → 重啟 → 24h 穩定觀察 → 才能重新定義 21d demo 時鐘起點
+**阻塞**：P0-2 LG-1 21d demo 觀察期 hard-prereq（Live 前置）；P0-3 Phase 5 edge 2w 重評
+**影響**：Live 最早日期從 W24 末推至 **W25 末（～2026-05-30）**
+
+**關鍵路徑**:`~~P0-0 reconciler burst fix~~ ✅ → ~~restart_all --rebuild 部署~~ ✅ → **P0-9 STABILITY-1 引擎崩潰 RCA** → P0-6/P0-7 查清 intent/order 寫入斷點 → P0-3 Phase 5 edge 2w 評估 + P0-2 LG-1 21d demo → **P1-7 LEARNING-PIPELINE-DORMANT-1** → LG-4/5 → Live`(P0-1 G-2 並行驗證 funding_arb 子集,不在主路徑;~~P0-5 PHANTOM-2-FUP~~ ✅ 待 `--rebuild` 部署即生效;~~P0-8 LIVE-GUARD-1~~ ✅ Rust 端 Mainnet 三重硬鎖回補,解除 CLAUDE.md §三 LIVE-GUARD-1 P0-CRITICAL 阻塞)
+**最早 Live 日期**:樂觀估回調至 **W25 末(～2026-05-30)** — P0-9 STABILITY-1 未收斂前 P0-2/P0-3 時鐘全數作廢
 
 ---
 
@@ -164,9 +186,25 @@ git status && git log --oneline -5
   3. 若不會：ORPHAN-ADOPT-1 Phase 2B 或獨立 P1 補 bybit_sync 路徑
 **影響**：21d demo 觀察期內這些倉位若 drawdown，策略層無法反應（只能靠 Guardian ReduceToHalf / fast_track close）
 
----
-
-## 🟢 P2 — W23-W24 下週排期
+### P1-7 · LEARNING-PIPELINE-DORMANT-1 — 半殼學習管線（數據累積 ✅、訓練/edge/Teacher ❌ 全 dormant）🟡 NEW 2026-04-16 audit
+**發現**：2026-04-16 audit 原本假設學習管線空殼，深挖後發現真相比想像複雜——是「**半殼**」：
+- **數據累積層 ✅**：`learning.decision_features` 1,650,330 rows（live 1,073,468 + live_demo 576,062 + demo 800）；`trading.risk_verdicts` 24h 1.54M rows
+- **edge 估計層 ❌**：`settings/edge_estimates.json` = `{}` 3 bytes，從未被寫過
+- **experiment_ledger 異常**：`experiment_ledger_snapshot.json` top-level 是 `list` 非 `dict`（結構與 Python 期望不符）
+- **21 個 learning schema 表**存在但無消費者：`bayesian_posteriors / linucb_state / linucb_state_archive / linucb_migrations / teacher_directives / directive_executions / james_stein_estimates / model_registry / promotion_pipeline / rl_transitions / scorer_training_features / symbol_clusters / pattern_insights / cpcv_results / ai_budget_config / ai_usage_log / decision_features / decision_shadow_fills / foundation_model_features / ml_parameter_suggestions / promotion_pipeline`
+- **EDGE-P3-1 Phase B #3 ONNX loader** 宣稱 ✅ 部署（2026-04-16）但 **0 artifact 產出**；ort 2.0 backend + capability probe 載入端就緒、訓練端空轉
+**真正的 gap**：
+  - 沒有訓練 job consume `decision_features` → 不產 ONNX
+  - 沒有 edge 估計 job consume `risk_verdicts + fills` → 不寫 `edge_estimates.json`
+  - Teacher directive pipeline（G-7 at W23）未啟 → `teacher_directives` 空
+  - LinUCB / JS estimator / Bayesian posterior updater 等全休眠
+**下一步**：
+  1. 定位 EDGE-P3-1 Step 7a ETL（應該寫 `decision_features` 的組件）→ 已在跑 ✅
+  2. 找 run_training_pipeline.py（P1-4）→ 跑首個 ONNX artifact
+  3. 啟用 JS edge estimator（G-6，原排 P0-2 後）
+  4. G-10 Calibration + G-7 Teacher（W23）
+**阻塞**：不阻 Live（Live 用 demo fills 做 edge 估計路徑另案），但阻 Phase 5 edge 收斂 + Stage 2 shadow mode 起步
+**與 P1-4 關係**：P1-4「跑首個 ONNX」是本項子任務；本項是框架性 audit finding（數據到訓練到載入三段，只有載入端就緒）
 
 ### AI 治理層補強
 - [ ] **G-7** ClaudeTeacher 正式啟用（W23）
@@ -186,6 +224,15 @@ git status && git log --oneline -5
 
 ### QoL
 - [ ] **QoL-2** Demo AI cost 無追蹤 — `tab-demo.html` 硬編碼 `'N/A'`，後端無 per-engine AI 調用成本歸因（依賴 G-1 H1-H5 接通）
+
+### Audit 衍生架構對稱性債
+- [ ] **LEARNING-COCKPIT-NO-IPC-1** 🟢 NEW 2026-04-16 audit — Learning Cockpit 走 Python state_store 而非 Rust IPC snapshot
+  - **發現**：`tab-learning.html` 8 個端點（`/api/v1/learning/{overview,hypotheses,feed,experiments,net-pnl,review,review-queue,auto/*}`）全部在 `legacy_routes.py:645-840+` 由 `_base.get_latest_snapshot()["learning_state"]` 驅動，**無一處 `ipc_state_reader.get_rust_reader()` 調用**
+  - **對比**：paper/live/risk/strategy_read/reconciliation 路由已全部走 Rust IPC snapshot（`ipc_state_reader`）；只有 learning 還是 Python state_compiler 派生
+  - **非 bug，是設計債**：learning_state 本質是 `experiment_ledger + learning_records` 等 Python-owned 資產的派生視圖（Rust 不擁有這些資產，僅透過 DB 寫 decision_features/risk_verdicts 等原始事件）
+  - **與 P1-7 疊加**：Learning Cockpit 顯示的 learning_state 是「Python state_compiler 讀 experiment_ledger_snapshot.json + 學習 DB」的結果；P1-7 確認學習管線下游 dormant → Cockpit 顯示的是**半殼數據**（DB 有 1.65M decision_features，GUI 端見不到 edge estimates / ONNX artifacts / Teacher 指令）
+  - **修復方向**（等 G-7/G-10 整合後再議）：要麼把 learning_state 產出移入 Rust（跟 3E-ARCH 對稱），要麼正式承認 Python 擁有 learning 平面（與「Rust 為唯一寫入權威」原則劃清邊界，明記 `learning.*` schema 由 Python 寫）
+  - **不阻 Live**（學習平面與 Live 平面隔離，原則 #7）
 
 ---
 
