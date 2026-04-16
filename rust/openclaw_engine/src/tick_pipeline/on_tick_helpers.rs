@@ -2,7 +2,41 @@
 //! FIX-29：on_tick 抽出的輔助方法 — 讓 on_tick.rs 保持在 §九 1200 行硬上限以下。
 
 use super::*;
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
+
+// ── P0-5: ReduceToHalf one-shot cooldown — decouples the guard from governance state ──
+// P0-5: ReduceToHalf 一次性保護的冷卻窗 — 將 guard 與 governance 狀態解耦。
+//
+// FA-PHANTOM-2 fix (commit 348a9c5) opened a `held_drop≥5% && sigma≥3` path that
+// fires `ReduceToHalf` at `risk_level < Defensive`. EDGE-P0-1's original clear
+// condition (`< Defensive`) then wiped the guard every tick during persistent
+// Cautious, yielding 9 ReduceToHalf emissions in 1.3s on ORDIUSDT (2026-04-16
+// 18:03:41, see docs/references/2026-04-16--phantom2_fup_reduce_to_half_cascade_rca.md).
+// A 60 s cooldown matches the governance Defensive hold window and guarantees
+// a per-symbol burst is bounded, without depending on a Cautious→Normal return
+// (which `evaluate_risk_context` never automates — risk_gov.rs:617 "Only escalate").
+//
+// FA-PHANTOM-2 修復開放了 risk<Defensive 下的 ReduceToHalf 路徑；原本
+// EDGE-P0-1 在 `< Defensive` 時清空 guard → Cautious 持續時每 tick 清一次 →
+// 1.3 秒內同 symbol 連發 9 次 ReduceToHalf。60 秒冷卻窗配合 C 方案（僅
+// Normal 才清）封住毫秒連發同時保留自然 episode 邊界。
+pub(crate) const FT_REDUCE_COOLDOWN_MS: i64 = 60_000;
+
+/// P0-5: Check whether a symbol is eligible for a fresh ReduceToHalf emit.
+/// Returns `true` when the symbol has never been halved OR the cooldown has
+/// elapsed since the last halving (wall-clock via `event.ts_ms`).
+/// P0-5：判斷該 symbol 是否可再次觸發 ReduceToHalf（未曾半倉或冷卻已過）。
+#[inline]
+pub(crate) fn ft_reduce_cooldown_expired(
+    ft_reduced_symbols: &HashMap<String, i64>,
+    symbol: &str,
+    now_ts_ms: i64,
+) -> bool {
+    match ft_reduced_symbols.get(symbol) {
+        None => true,
+        Some(&last_ts) => now_ts_ms.saturating_sub(last_ts) >= FT_REDUCE_COOLDOWN_MS,
+    }
+}
 
 // ── S-01: Confidence clamp helper — replaces inline .clamp(0.0, 1.0) across strategies ──
 // S-01：信心值鉗位工具 — 替代策略中分散的 .clamp(0.0, 1.0) 調用。
