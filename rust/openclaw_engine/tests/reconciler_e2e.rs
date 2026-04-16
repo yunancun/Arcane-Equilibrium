@@ -29,7 +29,7 @@ use openclaw_engine::position_reconciler::{
     ReconcilerState, PERSISTENT_DRIFT_CYCLES, RECOVERY_CYCLES_CAUTIOUS_TO_NORMAL,
     RECOVERY_WALL_CAUTIOUS_TO_NORMAL_MS,
     GLOBAL_COOLDOWN_MS, REST_FAILURE_TIER1_COUNT, REST_FAILURE_TIER2_COUNT,
-    REST_FAILURE_TIER3_COUNT,
+    REST_FAILURE_TIER3_COUNT, STARTUP_GRACE_MS,
 };
 use openclaw_engine::tick_pipeline::{PipelineCommand, TickPipeline};
 use openclaw_engine::event_consumer::PendingOrder;
@@ -831,5 +831,113 @@ fn stress_evaluate_actions_performance() {
         elapsed.as_millis() < 100,
         "1000 evaluate_actions calls took {}ms (limit: 100ms)",
         elapsed.as_millis()
+    );
+}
+
+/// P0-0 RECONCILER-BURST-FIX end-to-end:
+/// Simulate the 2026-04-15 incident — engine restart, warmup baseline vs stale
+/// paper_state produces an "orphan storm" on first real tick (6 Ghost + 4 Orphan,
+/// well beyond BURST_DRIFT_COUNT=5). Without the grace fix this escalates to
+/// Defensive + CircuitBreaker. With the fix the reconciler stays silent for the
+/// grace window, then after the window clean ticks keep governance at Normal.
+///
+/// P0-0 RECONCILER-BURST-FIX 端到端：復現 2026-04-15 事故 — 引擎重啟後首個真正
+/// tick 觀察到 warmup baseline vs stale paper_state 帶來的「orphan storm」
+/// (6 Ghost + 4 Orphan，遠超 BURST_DRIFT_COUNT=5)。無 grace 修復會升 Defensive +
+/// CircuitBreaker；有 grace 修復則寬限期內 reconciler 靜默，窗口後 clean tick
+/// 繼續讓治理保持 Normal。
+#[test]
+fn e2e_startup_grace_window_ignores_orphan_storm() {
+    let mut state = ReconcilerState::new();
+    let startup = 1_700_000_000_000u64;
+    state.startup_ms = startup;
+
+    // Orphan storm: 6 Ghost + 4 Orphan = 10 actionable drifts, far exceeds
+    // BURST_DRIFT_COUNT=5.
+    // Orphan 風暴：6 Ghost + 4 Orphan = 10 個 actionable drift，遠超 BURST_DRIFT_COUNT=5。
+    let mut drifts: Vec<(String, DriftVerdict)> = (0..6)
+        .map(|i| (format!("GHOST{i}USDT|Buy"), DriftVerdict::Ghost))
+        .collect();
+    drifts.extend(
+        (0..4).map(|i| (format!("ORPH{i}USDT|Sell"), DriftVerdict::Orphan)),
+    );
+
+    // ── Inside grace window: storm must be suppressed, state must not advance.
+    // ── 寬限期內：storm 必須被抑制，state 不可推進。
+    for cycle in 0..10u64 {
+        let now = startup + cycle * 30_000; // 0s..270s (< 5min)
+        let actions = evaluate_actions(&mut state, RiskLevel::Normal, &drifts, now);
+        assert!(
+            actions.is_empty(),
+            "cycle {cycle}: grace window must suppress all actions, got {:?}",
+            actions
+        );
+    }
+    assert!(state.drift_streak.is_empty(), "drift_streak must not advance during grace");
+    assert_eq!(state.burst_drift_streak, 0, "burst_drift_streak must not advance during grace");
+    assert_eq!(
+        state.clean_cycles_since_last_drift, 0,
+        "clean_cycles must not advance during grace"
+    );
+
+    // ── Boundary: within `STARTUP_GRACE_MS` still suppressed; just after,
+    //    clean drifts (all MinorDrift) produce no escalation either, and the
+    //    state transitions from "grace" → "post-grace normal operation".
+    // ── 邊界：仍在 STARTUP_GRACE_MS 內被抑制；剛過寬限期後，clean drift (全 MinorDrift)
+    //    也不會升級，state 從「寬限期」→「正常運作」平滑過渡。
+    let within = startup + STARTUP_GRACE_MS - 1;
+    let actions = evaluate_actions(&mut state, RiskLevel::Normal, &drifts, within);
+    assert!(actions.is_empty(), "last-ms-in-grace must still suppress");
+
+    // After the window, incident-style orphan storm would escalate; but a
+    // realistic post-grace state has only MinorDrift (baseline reseed already
+    // absorbed the residuals), so no escalation.
+    // 寬限期結束後，事故式 orphan storm 會升級；但正常情境下寬限期結束時，baseline
+    // reseed 已吸收殘留，只剩 MinorDrift，因此不升級。
+    let post = startup + STARTUP_GRACE_MS + 30_000;
+    let clean_minor: Vec<(String, DriftVerdict)> =
+        vec![("BTCUSDT|Buy".into(), DriftVerdict::MinorDrift)];
+    let actions = evaluate_actions(&mut state, RiskLevel::Normal, &clean_minor, post);
+    assert!(
+        actions.is_empty(),
+        "post-grace MinorDrift must not escalate, got {:?}",
+        actions
+    );
+
+    // ── REST failure escalation path must also be suppressed during grace.
+    // ── REST failure 升級路徑也必須在寬限期內被抑制。
+    let mut state2 = ReconcilerState::new();
+    state2.startup_ms = startup;
+    state2.consecutive_rest_failures = REST_FAILURE_TIER1_COUNT;
+    let decision = check_rest_failure_escalation(
+        &mut state2,
+        RiskLevel::Normal,
+        startup + 60_000,
+    );
+    assert!(
+        decision.is_none(),
+        "REST tier-1 inside grace must not escalate, got {:?}",
+        decision
+    );
+
+    // ── Legacy caller without startup_ms stamp keeps pre-P0-0 behaviour:
+    //    orphan storm does escalate.
+    // ── 舊調用方未設 startup_ms 保留 P0-0 前行為：orphan storm 照常升級。
+    let mut legacy = ReconcilerState::new();
+    assert_eq!(legacy.startup_ms, 0);
+    let actions = evaluate_actions(
+        &mut legacy,
+        RiskLevel::Normal,
+        &drifts,
+        startup + 60_000,
+    );
+    assert!(
+        !actions.is_empty(),
+        "legacy caller (startup_ms=0) must preserve pre-fix escalation"
+    );
+    assert!(
+        actions.iter().any(|a| matches!(a, ReconcilerAction::Escalate { .. })
+            || matches!(a, ReconcilerAction::CloseAll { .. })),
+        "legacy caller must still raise an Escalate / CloseAll action"
     );
 }
