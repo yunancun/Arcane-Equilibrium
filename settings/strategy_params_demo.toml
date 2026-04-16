@@ -40,7 +40,7 @@ conf_scale = 1.0
 # Demo = validation before live, same params as paper.
 # OC-5：FundingArb — 資金費率捕獲策略。模擬盤驗證，參數同紙盤。
 [funding_arb]
-active = false
+active = true
 cooldown_ms = 3600000
 total_cost_bps = 34.0
 expected_periods = 3.0

@@ -157,6 +157,57 @@ use super::*;
         }
     }
 
+    /// P0-4 R1 regression: execute_position_close must propagate `trigger_tag` to
+    /// OrderDispatchRequest.strategy. Previously hardcoded "risk_check", which
+    /// collapsed strategy exits + fast_track closes + shadow mirrors into a single
+    /// bucket in trading.fills.strategy_name and broke attribution (see audit
+    /// docs/audits/2026-04-16--demo_zero_strategy_exit_audit.md).
+    /// P0-4 R1 回歸：execute_position_close 必須把 trigger_tag 穿透到
+    /// OrderDispatchRequest.strategy，不能再硬編碼 "risk_check" 吞掉歸因。
+    #[test]
+    fn test_execute_position_close_propagates_trigger_tag() {
+        let cases: &[(bool, &str)] = &[
+            (true,  "strategy_close:funding_arb_exit"),
+            (true,  "risk_close:fast_track_reduce_half"),
+            (true,  "risk_close:halt_session"),
+            (false, "strategy_close:ma_crossover_flip"),
+            (false, "risk_close:cost_edge_ratio"),
+        ];
+        for (is_primary, tag) in cases {
+            let mut pipeline =
+                TickPipeline::with_kind(&["BTCUSDT"], 1_000.0, PipelineKind::Demo);
+            let (tx, mut rx) =
+                tokio::sync::mpsc::unbounded_channel::<OrderDispatchRequest>();
+            pipeline.set_shadow_channel(tx);
+
+            let event = make_event("BTCUSDT", 50_000.0, 1_700_000_000_000);
+            pipeline.execute_position_close(
+                "BTCUSDT",
+                true, // is_long — closing a long position
+                0.1,
+                &event,
+                *is_primary,
+                tag,
+            );
+
+            let req = rx.try_recv().expect("OrderDispatchRequest must be sent");
+            assert_eq!(
+                req.strategy, *tag,
+                "strategy must carry trigger_tag verbatim (is_primary={}, tag={})",
+                is_primary, tag
+            );
+            assert!(req.is_close, "close dispatch must set is_close=true");
+            assert_eq!(req.is_primary, *is_primary);
+            let expected_prefix = if *is_primary { "oc_risk_" } else { "sh_risk_" };
+            assert!(
+                req.order_link_id.starts_with(expected_prefix),
+                "order_link_id={} expected prefix {}",
+                req.order_link_id,
+                expected_prefix
+            );
+        }
+    }
+
     #[test]
     fn test_pipeline_kind_is_exchange() {
         assert!(!PipelineKind::Paper.is_exchange());
