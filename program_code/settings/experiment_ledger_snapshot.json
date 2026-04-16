@@ -542,5 +542,39 @@
     "claim_id": null,
     "concluded_at_ms": null,
     "notes": ""
+  },
+  {
+    "hypothesis_id": "5f1481ae6372",
+    "description": "[auto-seed] test persistence pattern",
+    "strategy_name": "ma_crossover",
+    "regime": "trending",
+    "proposed_by": "truth_registry_autoseed",
+    "proposed_at_ms": 1776365097564,
+    "expires_at_ms": 1776969897564,
+    "status": "PENDING",
+    "min_observations": 20,
+    "supporting_count": 0,
+    "refuting_count": 0,
+    "confidence": 0.0,
+    "claim_id": null,
+    "concluded_at_ms": null,
+    "notes": ""
+  },
+  {
+    "hypothesis_id": "00fe823b0327",
+    "description": "[auto-seed] test persistence pattern",
+    "strategy_name": "ma_crossover",
+    "regime": "trending",
+    "proposed_by": "truth_registry_autoseed",
+    "proposed_at_ms": 1776365097564,
+    "expires_at_ms": 1776969897564,
+    "status": "PENDING",
+    "min_observations": 20,
+    "supporting_count": 0,
+    "refuting_count": 0,
+    "confidence": 0.0,
+    "claim_id": null,
+    "concluded_at_ms": null,
+    "notes": ""
   }
 ]
