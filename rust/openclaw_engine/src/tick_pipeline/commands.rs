@@ -439,7 +439,12 @@ impl TickPipeline {
 
     /// RRC-1-C2 / R-03: Execute a position close — dispatches to shadow/exchange channel
     /// and marks the symbol as pending-close to prevent duplicate dispatches.
+    /// `trigger_tag` flows through OrderDispatchRequest.strategy → PendingOrder.strategy →
+    /// apply_confirmed_fill → trading.fills.strategy_name, so callers must pass the causal
+    /// tag (e.g. "strategy_close:funding_arb_exit", "risk_close:fast_track"). P0-4 R1:
+    /// previously hardcoded "risk_check" which collapsed three distinct trigger sources.
     /// RRC-1-C2 / R-03：執行平倉 — 派發到影子/交易所通道，並標記 pending 防止重複派發。
+    /// `trigger_tag` 穿透至 trading.fills.strategy_name — caller 必須傳真實因果 tag。
     pub(super) fn execute_position_close(
         &mut self,
         symbol: &str,
@@ -447,6 +452,7 @@ impl TickPipeline {
         qty: f64,
         event: &PriceEvent,
         is_primary: bool,
+        trigger_tag: &str,
     ) {
         if let Some(ref tx) = self.order_dispatch_tx {
             self.exchange_seq = self.exchange_seq.wrapping_add(1);
@@ -456,7 +462,7 @@ impl TickPipeline {
                 is_long: !is_long,
                 qty,
                 price: event.last_price,
-                strategy: "risk_check".into(),
+                strategy: trigger_tag.to_string(),
                 paper_fill_ts: event.ts_ms,
                 is_close: true,
                 order_link_id: format!("{}_{}_{}", prefix, event.ts_ms, self.exchange_seq),

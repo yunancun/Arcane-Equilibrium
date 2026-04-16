@@ -1,8 +1,8 @@
 # OpenClaw TODO — 工作計劃清單
 
-**最後更新：2026-04-16**（engine_mode endpoint-aware fix — Live+LiveDemo 寫 `live_demo` 不再誤標 `live`；IP-DEDUP-1 入 backlog）
+**最後更新：2026-04-16**（P0-4 STRATEGY-CLOSE-TAG-FIX R1 完成 — `execute_position_close` 透傳 `trigger_tag`，全部 7 caller 傳真實因果 tag；funding_arb demo 還原 active=true）
 
-**測試基準線**：Rust **engine lib 1329 (ort) / 1322 (default) + core 380 + ort integration 5 + e2e 35 = 1749 (ort) / 1742 (default)** · Python **2883 passed (5 skipped · 0 fail)** · ml_training **182 passed (10 skipped)**
+**測試基準線**：Rust **engine lib 1330 (ort) / 1323 (default) + core 380 + ort integration 5 + e2e 35 = 1750 (ort) / 1743 (default)** · Python **2883 passed (5 skipped · 0 fail)** · ml_training **182 passed (10 skipped)**
 
 > compact 後從此文件恢復工作狀態。第一個 `[ ]` 即為下一步起點。
 > 條目分級：**P0 阻塞關鍵路徑** → **P1 當週活躍** → **P2 下週排期** → **P3 長期專項** → **P4 Backlog / Conditional**
@@ -54,36 +54,24 @@ git status && git log --oneline -5
 - 類似 pattern：`orphan_adopt_1` Phase 2A 已處理正向 probe，可複用框架
 **預估**：spec 0.5d + 實作 1d + 回歸 0.5d
 
-### P0-1 · G-2 FundingArb 驗證 ❌ DAEMON KILLED 2026-04-16
-**狀態**：daemon PID 598572 已終止。深挖發現 demo 全引擎 0/504 筆 `strategy_close:*` fill 是**記錄 bug**而非策略邏輯 bug — exchange-dispatched close fill 的 `strategy_name` 被 `commands.rs:459` 硬編碼為 `"risk_check"` 吞掉（見 P0-4）。G-2 統計口徑在 R1 修復前**不可信**，恢復驗證需等 P0-4 修完。
+### P0-1 · G-2 FundingArb 驗證 🟡 等重啟（P0-4 R1 已完成 2026-04-16）
+**狀態**：daemon PID 598572 已終止；P0-4 R1 tag 透傳修復已合入（見 P0-4），engine 重建後 `strategy_name` 將正確分流。下一步是重寫 daemon SQL 口徑並重啟累積 ≥20 真策略退場 fill。
 **診斷文件**：`docs/audits/2026-04-16--demo_zero_strategy_exit_audit.md` V2
-**阻塞者**：**P0-4 STRATEGY-CLOSE-TAG-FIX**（R1 修完才能重啟有意義的 G-2 驗證）· ~~FA-PHANTOM-2~~ ✅ · **P0-0 RECONCILER-BURST-FIX** 🆕
-**驗收**：P0-4 完成 + 重啟 daemon（需改 SQL 口徑以識別真實 exit tag）+ 累積 ≥20 真實策略退場 fill 寫 audit
-
-### P0-4 · STRATEGY-CLOSE-TAG-FIX — `execute_position_close` 吞掉策略退場 tag 🆕 2026-04-16
-**狀態**：診斷完成，QC 方案 R1 待實施（下個 session）
-**症狀**：Demo 引擎 29h 內 0 筆 `strategy_close:*` fill，初判為「所有策略無退場能力」，深挖後發現是記錄 bug：
-- `rust/openclaw_engine/src/tick_pipeline/commands.rs:459` 裡 `execute_position_close()` 把 `OrderDispatchRequest.strategy` **硬編碼**為 `"risk_check"`
-- `PipelineKind::Demo.is_exchange() == true`（`tick_pipeline/tests.rs:156`）→ 所有 exchange-dispatched close 都走此路徑
-- 策略主動退場（`on_tick.rs:960`）/ fast_track exchange-branch close / shadow mirror 三種觸發源的 fill tag 全部被攪成 `risk_check`
-- DB 驗證：583 筆 `strategy_name='risk_check'` fill 全部是 `oc_risk_*` prefix（primary dispatch），501 筆非零 PnL，sum_pnl=+$31.46 — 其中相當比例是真正的策略退場
-**修復方案（QC 推薦 R1）**：修改 `execute_position_close()` 簽名接受 `trigger_tag: &str` 參數，各 caller 傳真實 tag：
-- `on_tick.rs:960` strategy-close 分支：傳 `&format!("strategy_close:{reason}")`
-- fast_track exchange 分支（需定位具體 caller）：傳 `&format!("risk_close:{fast_track_reason}")`
-- shadow mirror（`on_tick.rs:997`, `is_primary=false` 路徑）：傳 `&format!("shadow_close:{reason}")`
-- 同步修 `apply_confirmed_fill`（`commands.rs:353`）+ confirm-fill tag 寫入路徑（`trading_writer.rs:247`）
-**工作量**：~4-6h（QC 估計）· 加 E1→E2→E4 完整鏈 + 回歸測試
+**阻塞者**：~~P0-4 STRATEGY-CLOSE-TAG-FIX~~ ✅ · ~~FA-PHANTOM-2~~ ✅ · **P0-0 RECONCILER-BURST-FIX** 🆕
 **驗收**：
-- 修復後重建引擎 + 重啟 → 觀察窗口內出現真實的 `strategy_close:*` 與 `risk_close:fast_track*` 分離 fills
-- 新 SQL 口徑下 `strategy_close:*` 筆數 > 0
-- **完成後還原**：`settings/strategy_params_demo.toml [funding_arb] active=true`（2026-04-16 基於錯誤結論的臨時停用）
-- 重寫 G-2 daemon SQL 口徑並重啟（P0-1 恢復）
-**阻塞者**：無
-**解鎖**：P0-1 恢復 · 全策略退場歸因可量化 · Phase 5 歸因有信賴的數據源
-**接手指南**：
-- QC 方案原文：本會話 2026-04-16 QC Plan agent 輸出（可從 git log 找本次改動）
-- 受影響文件：`rust/openclaw_engine/src/tick_pipeline/{commands.rs,on_tick.rs}`、`database/trading_writer.rs`、`event_consumer/mod.rs`
-- 驗證 SQL：`SELECT substring(strategy_name from 1 for 30), COUNT(*) FROM trading.fills WHERE engine_mode='demo' AND ts > '<rebuild_ts>' GROUP BY 1 ORDER BY 2 DESC`
+- `restart_all.sh --rebuild` 部署 R1 bin；SQL 驗證 `SELECT substring(strategy_name from 1 for 30), COUNT(*) FROM trading.fills WHERE engine_mode='demo' AND ts > '<rebuild_ts>' GROUP BY 1` 出現 `strategy_close:*` 與分離 `risk_close:*` 桶
+- 重寫 G-2 daemon SQL 口徑並重啟 → 累積 ≥20 真實策略退場 fill 寫 audit
+
+### ~~P0-4 · STRATEGY-CLOSE-TAG-FIX — `execute_position_close` 吞掉策略退場 tag~~ ✅ 2026-04-16 (R1 merged)
+**結果**：`execute_position_close()` 新增 `trigger_tag: &str` 參數；commands.rs:459 硬編碼 `"risk_check"` 移除。全部 7 個 caller 傳真實因果 tag：
+- Strategy 主動退場（exchange + shadow）→ `strategy_close:{reason}`（on_tick.rs:969, 1007）
+- Risk close 評估器（exchange + shadow）→ `risk_close:{reason}`（on_tick.rs:1108, 1135）
+- Fast_track ReduceToHalf → `risk_close:fast_track_reduce_half`（on_tick.rs:213）
+- HaltSession 熔斷 → `risk_close:halt_session`（on_tick.rs:1173）
+- paper_paused stop trigger → `stop_trigger:{trigger.reason}`（on_tick.rs:434）
+**回歸測試**：`test_execute_position_close_propagates_trigger_tag`（tests.rs；5 組 is_primary × tag 案例） · engine lib 1322 → **1323** passed · core 380 / e2e 35 全綠。
+**後續部署**：operator `bash helper_scripts/restart_all.sh --rebuild` 部署新 bin；驗證 SQL：`SELECT substring(strategy_name from 1 for 30), COUNT(*) FROM trading.fills WHERE engine_mode='demo' AND ts > '<rebuild_ts>' GROUP BY 1`。
+**還原**：`settings/strategy_params_demo.toml [funding_arb] active=true` ✅ 已恢復。
 
 ### P0-2 · LG-1 Paper Trading 21d 觀察期 🕰️
 **狀態**：FA-PHANTOM-2 + FIX-PHASE1 部署後等乾淨窗口開始
@@ -174,9 +162,9 @@ git status && git log --oneline -5
 - [x] **Phase 2** Step 4-6 stub 化（kline_manager + market_scanner + position_sizer）
 - [x] **Phase 3** Step 7-10 stub 化（orchestrator + auto_deployer + backtest + strategies/base）
 - **實際效益**：Tier A 21 檔 ~8,506 行 → 1,982 行 stub（淨減 ~6,524 行）
-- **驗證**：FastAPI 217 routes 全載入；Bybit connector 2,454 tests passed / 1 skipped；local_model_tools/tests/ 整包 `collect_ignore_glob` 標記（需 Rust-fallback 契約測試重寫）
+- **驗證**：FastAPI 217 routes 全載入；Bybit connector 2,454 tests passed / 1 skipped；local_model_tools/tests/ 重寫為 `test_stub_contracts.py` 契約測試 **59 passed**
 - **計劃原文**：`docs/references/2026-04-16--python_rust_dedup_cleanup_plan.md`
-- **Follow-up**：(1) local_model_tools/tests/ 重寫為 stub-shape 契約測試；(2) 確認 ENGINE-HEAL 部署 + `restart_all.sh --rebuild` 後 route fallback 行為符合預期
+- **Follow-up**：~~(1) local_model_tools/tests/ 重寫為 stub-shape 契約測試~~ ✅；(2) 確認 ENGINE-HEAL 部署 + `restart_all.sh --rebuild` 後 route fallback 行為符合預期
 
 ### EDGE P2（架構層重工）
 - [ ] **EDGE-P2-2** OI + Liquidation 信號源 — 給 `bb_breakout` 加領先信號（Bybit WS `tickers` OI + `liquidation` stream）

@@ -210,7 +210,14 @@ impl TickPipeline {
                                 // Bybit-side position matches local paper_state.
                                 // FIX-03b：Demo/Live 模式派發交易所訂單，避免本地狀態與交易所倉位脫節。
                                 let is_primary = self.pipeline_kind.is_exchange();
-                                self.execute_position_close(sym, *is_long, half_qty, event, is_primary);
+                                self.execute_position_close(
+                                    sym,
+                                    *is_long,
+                                    half_qty,
+                                    event,
+                                    is_primary,
+                                    "risk_close:fast_track_reduce_half",
+                                );
                             }
                         }
                     }
@@ -424,7 +431,7 @@ impl TickPipeline {
                     let tag = format!("stop_trigger:{}", trigger.reason);
                     self.emit_close_fill(sym, il, q, px, event.ts_ms, pnl, &tag, &ectx);
                     self.stats.total_stops += 1;
-                    self.execute_position_close(sym, il, q, event, false);
+                    self.execute_position_close(sym, il, q, event, false, &tag);
                 } else {
                     self.stats.total_stops += 1;
                 }
@@ -958,7 +965,8 @@ impl TickPipeline {
                     let qty = pos.qty;
                     info!(symbol = %symbol, is_long = %is_long, qty = %qty, reason = %reason,
                           "strategy close → exchange / 策略平倉 → 交易所");
-                    self.execute_position_close(symbol, is_long, qty, event, true);
+                    let tag = format!("strategy_close:{reason}");
+                    self.execute_position_close(symbol, is_long, qty, event, true, &tag);
                     push_display_intent(&mut self.recent_intents, event.ts_ms, &close_intent, None, format!("close_dispatched:{reason}"));
                     close_confirmed_symbols.push(symbol.clone());
                 } else {
@@ -995,7 +1003,8 @@ impl TickPipeline {
                         }
                     }
                     // Shadow order: mirror close to Demo API / 影子訂單：鏡像平倉到 Demo API
-                    self.execute_position_close(symbol, is_long, qty, event, false);
+                    let tag = format!("strategy_close:{reason}");
+                    self.execute_position_close(symbol, is_long, qty, event, false, &tag);
                     push_display_intent(&mut self.recent_intents, event.ts_ms, &close_intent, None, format!("close_filled:{reason}"));
                     close_confirmed_symbols.push(symbol.clone());
                 } else {
@@ -1095,7 +1104,8 @@ impl TickPipeline {
                             continue;
                         }
                         warn!(symbol = %symbol, reason = %reason, "risk close → exchange / 風控平倉 → 交易所");
-                        self.execute_position_close(symbol, *is_long, *qty, event, true);
+                        let tag = format!("risk_close:{reason}");
+                        self.execute_position_close(symbol, *is_long, *qty, event, true, &tag);
                     } else {
                         warn!(symbol = %symbol, reason = %reason, "risk close (paper) / 風控平倉（紙盤）");
                         if *pnl_pct < 0.0 {
@@ -1121,7 +1131,8 @@ impl TickPipeline {
                             self.intent_processor.record_trade(symbol, pnl);
                         }
                         self.stats.total_stops += 1;
-                        self.execute_position_close(symbol, *is_long, *qty, event, false);
+                        let tag = format!("risk_close:{reason}");
+                        self.execute_position_close(symbol, *is_long, *qty, event, false, &tag);
                     }
                 }
                 RiskAction::HaltSession(reason) => {
@@ -1159,7 +1170,14 @@ impl TickPipeline {
                             self.emit_close_fill(sym, *il, *q, px, event.ts_ms, pnl, "risk_close:halt_session", &ectx);
                         }
                         self.stats.total_stops += 1;
-                        self.execute_position_close(sym, *il, *q, event, is_exchange_mode);
+                        self.execute_position_close(
+                            sym,
+                            *il,
+                            *q,
+                            event,
+                            is_exchange_mode,
+                            "risk_close:halt_session",
+                        );
                     }
                     break;
                 }
