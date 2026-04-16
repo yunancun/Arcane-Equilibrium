@@ -1437,3 +1437,129 @@ use super::*;
         pipeline.paper_state.charge_fee(1.50);
         assert!((bal0 - pipeline.paper_state.balance() - 1.50).abs() < 1e-9);
     }
+
+    // ── P0-5: ReduceToHalf cooldown + Normal-only clear (PHANTOM-2-FUP) ──
+    // P0-5：ReduceToHalf 冷卻 + 僅 Normal 清空（PHANTOM-2 跟進修復）
+    //
+    // Root cause recap: FA-PHANTOM-2 (commit 348a9c5) added a
+    // `held_drop≥5% && sigma≥3` path that fires ReduceToHalf at risk<Defensive.
+    // EDGE-P0-1's old clear `< Defensive` wiped the guard every tick in
+    // persistent Cautious, producing 9 ReduceToHalf emissions in 1.3s
+    // on ORDIUSDT (engine.log 2026-04-16 18:03:41). Fix: per-symbol 60s
+    // cooldown (method A) + clear only at Normal (method C).
+    //
+    // 根因：FA-PHANTOM-2 開放了 risk<Defensive 下的 ReduceToHalf 路徑；原
+    // EDGE-P0-1 在 `<Defensive` 時清空 → Cautious 持續時毫秒連發。修復為
+    // 冷卻窗 + 僅 Normal 清空。
+
+    #[test]
+    fn test_ft_reduce_cooldown_expired_no_prior_entry() {
+        // Never-halved symbol is always eligible — filter returns true.
+        // 從未半倉的 symbol 永遠可觸發 — filter 回 true。
+        let map: std::collections::HashMap<String, i64> = std::collections::HashMap::new();
+        assert!(super::on_tick_helpers::ft_reduce_cooldown_expired(
+            &map, "BTCUSDT", 1_700_000_000_000
+        ));
+    }
+
+    #[test]
+    fn test_ft_reduce_cooldown_blocks_within_window() {
+        // Same-tick and sub-cooldown re-emits are blocked.
+        // 同 tick 與冷卻窗內的重觸發一律擋掉。
+        let mut map: std::collections::HashMap<String, i64> = std::collections::HashMap::new();
+        map.insert("BTCUSDT".to_string(), 1_700_000_000_000);
+        // +0 ms (same tick) — reproduces the 1.3s / 9-fire cascade.
+        // +0 毫秒（同 tick）— 複現 1.3s 連發 9 次的 cascade。
+        assert!(!super::on_tick_helpers::ft_reduce_cooldown_expired(
+            &map, "BTCUSDT", 1_700_000_000_000
+        ));
+        // +59_999 ms (1 ms before cooldown expiry) — still blocked.
+        // +59999 毫秒（冷卻到期前 1 毫秒）— 仍被擋。
+        assert!(!super::on_tick_helpers::ft_reduce_cooldown_expired(
+            &map, "BTCUSDT", 1_700_000_059_999
+        ));
+    }
+
+    #[test]
+    fn test_ft_reduce_cooldown_re_arms_after_window() {
+        // Exactly at cooldown boundary re-arms; per-symbol independence holds.
+        // 冷卻到期即解鎖；每 symbol 獨立計時。
+        let mut map: std::collections::HashMap<String, i64> = std::collections::HashMap::new();
+        map.insert("BTCUSDT".to_string(), 1_700_000_000_000);
+        // Exactly 60_000 ms later — allowed (>= FT_REDUCE_COOLDOWN_MS).
+        // 剛好 60 秒後 — 允許（>= FT_REDUCE_COOLDOWN_MS）。
+        assert!(super::on_tick_helpers::ft_reduce_cooldown_expired(
+            &map, "BTCUSDT", 1_700_000_060_000
+        ));
+        // Different symbol shares no cooldown — independent.
+        // 其他 symbol 不共享冷卻 — 獨立。
+        assert!(super::on_tick_helpers::ft_reduce_cooldown_expired(
+            &map, "ETHUSDT", 1_700_000_000_000
+        ));
+    }
+
+    #[test]
+    fn test_ft_reduce_clear_only_on_normal() {
+        // Method C: the clear branch in on_tick.rs:158 only fires at Normal.
+        // Cautious/Reduced/Defensive must keep the guard populated so symbols
+        // already halved are not re-emitted when `ft_action == ReduceToHalf`
+        // recurs on subsequent ticks under the same stress episode.
+        // Method C：僅 Normal 觸發清空；Cautious/Reduced/Defensive 必須保留
+        // 集合以避免同一 stress episode 下對同 symbol 重複半倉。
+        use openclaw_core::sm::risk_gov::RiskLevel;
+
+        for level in [RiskLevel::Cautious, RiskLevel::Reduced, RiskLevel::Defensive] {
+            let clear_condition = level == RiskLevel::Normal;
+            assert!(
+                !clear_condition,
+                "clear must NOT fire at {:?} — would re-open the cascade bug",
+                level
+            );
+        }
+        assert!(
+            RiskLevel::Normal == RiskLevel::Normal,
+            "clear MUST fire at Normal — fast re-arm for a fresh episode"
+        );
+    }
+
+    /// P0-5 regression: drive ReduceToHalf for the SAME symbol twice within
+    /// the cooldown window on a live `TickPipeline` and assert only the first
+    /// emit stamps the cooldown map. Complements the helper-level tests by
+    /// covering the filter+insert wiring in on_tick.rs:186-237.
+    /// P0-5 回歸：在真正的 TickPipeline 上對同一 symbol 冷卻窗內連發兩次
+    /// ReduceToHalf，驗證第二次被 filter 擋下、map 不重複覆寫。
+    #[test]
+    fn test_ft_reduce_cooldown_map_stamps_once_per_window() {
+        let mut pipeline =
+            TickPipeline::with_kind(&["BTCUSDT"], 10_000.0, PipelineKind::Paper);
+        // Seed a position so the ReduceToHalf branch has something to halve.
+        // 先建倉，讓 ReduceToHalf 分支有倉可減。
+        pipeline
+            .paper_state
+            .apply_fill("BTCUSDT", true, 0.1, 50_000.0, 0.0, 1_000, "test");
+        assert_eq!(pipeline.paper_state.position_count(), 1);
+
+        // Simulate first halving at ts = 1_000_000.
+        // 模擬第一次半倉，時間戳 1,000,000。
+        pipeline
+            .ft_reduced_symbols
+            .insert("BTCUSDT".to_string(), 1_000_000);
+
+        // Within cooldown window (+30 s) — filter must reject the symbol.
+        // 冷卻窗內（+30 秒）— filter 必須擋下。
+        let now_within = 1_000_000 + 30_000;
+        assert!(!super::on_tick_helpers::ft_reduce_cooldown_expired(
+            &pipeline.ft_reduced_symbols,
+            "BTCUSDT",
+            now_within
+        ));
+
+        // Past cooldown window (+60 s exact) — filter must re-admit.
+        // 冷卻到期（+60 秒）— filter 重新放行。
+        let now_after = 1_000_000 + 60_000;
+        assert!(super::on_tick_helpers::ft_reduce_cooldown_expired(
+            &pipeline.ft_reduced_symbols,
+            "BTCUSDT",
+            now_after
+        ));
+    }

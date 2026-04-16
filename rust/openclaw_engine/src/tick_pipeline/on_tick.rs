@@ -2,7 +2,7 @@
 //! on_tick 管線處理 — 核心逐 tick 編排循環。
 
 use super::*;
-use super::on_tick_helpers::{push_capped, make_context_id, make_signal_id, make_fill_id, make_order_id, persist_verdict, persist_intent, push_display_intent, build_intent};
+use super::on_tick_helpers::{push_capped, make_context_id, make_signal_id, make_fill_id, make_order_id, persist_verdict, persist_intent, push_display_intent, build_intent, ft_reduce_cooldown_expired};
 
 impl TickPipeline {
     /// Process a single price event through the full pipeline.
@@ -148,16 +148,21 @@ impl TickPipeline {
             margin_utilization_pct,
         );
 
-        // EDGE-P0-1: Reset one-shot guard when risk drops below Defensive.
-        // Once risk returns to Normal/Cautious/Reduced, positions can be halved
-        // again if a future Defensive episode occurs.
-        // EDGE-P0-1：風控降至 Defensive 以下時重置 one-shot 標記。
-        if self.governance.risk.level < openclaw_core::sm::risk_gov::RiskLevel::Defensive
+        // EDGE-P0-1 + P0-5: Clear guard only when risk fully recovers to Normal.
+        // The prior `< Defensive` condition wiped the guard every tick in
+        // persistent Cautious — FA-PHANTOM-2's 5%+3σ held-drop path fires
+        // ReduceToHalf at Cautious, so the clear+re-emit loop produced 9
+        // fires in 1.3 s on 2026-04-16. Per-symbol burst is still bounded by
+        // the 60 s cooldown inside `ft_reduce_cooldown_expired`; this clear
+        // is the fast re-arm for a genuine new episode after full recovery.
+        // EDGE-P0-1 + P0-5：僅當風控完全回到 Normal 才清空 guard，避免
+        // Cautious 下每 tick 清一次。毫秒連發由 60 s 冷卻窗另行封住。
+        if self.governance.risk.level == openclaw_core::sm::risk_gov::RiskLevel::Normal
             && !self.ft_reduced_symbols.is_empty()
         {
             tracing::info!(
                 cleared = self.ft_reduced_symbols.len(),
-                "EDGE-P0-1: risk below Defensive — clearing ReduceToHalf one-shot flags / 清除半倉標記"
+                "EDGE-P0-1: risk returned to Normal — clearing ReduceToHalf cooldown map / 風控回歸 Normal 清空半倉冷卻表"
             );
             self.ft_reduced_symbols.clear();
         }
@@ -173,11 +178,16 @@ impl TickPipeline {
         // FIX-03：處理 ReduceToHalf — 每個倉位平半倉。
         // EDGE-P0-1：One-shot 保護 — 每個倉位在同一次 Defensive 階段只半倉一次。
         if ft_action == crate::fast_track::FastTrackAction::ReduceToHalf {
+            // P0-5: cast once per tick for the filter + insert.
+            // P0-5：每 tick 轉型一次供 filter 與 insert 共用。
+            let now_ts_ms: i64 = event.ts_ms as i64;
             let positions: Vec<(String, bool, f64)> = self
                 .paper_state
                 .positions()
                 .iter()
-                .filter(|p| !self.ft_reduced_symbols.contains(&p.symbol))
+                .filter(|p| {
+                    ft_reduce_cooldown_expired(&self.ft_reduced_symbols, &p.symbol, now_ts_ms)
+                })
                 .map(|p| (p.symbol.clone(), p.is_long, p.qty))
                 .collect();
             if !positions.is_empty() {
@@ -221,9 +231,10 @@ impl TickPipeline {
                             }
                         }
                     }
-                    // EDGE-P0-1: Mark symbol as already reduced in this episode.
-                    // EDGE-P0-1：標記此交易對在本次 Defensive 階段已完成半倉。
-                    self.ft_reduced_symbols.insert(sym.clone());
+                    // EDGE-P0-1 + P0-5: Stamp last-reduce ts so the cooldown
+                    // gate can expire this symbol after FT_REDUCE_COOLDOWN_MS.
+                    // EDGE-P0-1 + P0-5：記錄半倉時間戳，冷卻窗到期後可再次半倉。
+                    self.ft_reduced_symbols.insert(sym.clone(), now_ts_ms);
                 }
             }
             // Continue processing stops but skip new entries (ft_pause_new_entries = true)
