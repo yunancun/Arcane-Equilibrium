@@ -315,6 +315,36 @@ git status && git log --oneline -5
 - 類似機制：`governor_cooldown` 的 24h 冷卻（`mode_state.rs`）、`last_ai_call_time_ms`（cost gate）
 - Counter 可復用 `IntentProcessor::stats` 結構
 
+### 🧹 WATCHDOG-DNS-CLASSIFY-1 · Watchdog 區分 DNS/網路斷線 vs 引擎崩潰 🆕 2026-04-16 audit
+**背景**：P0-9 STABILITY-1 RCA 揭露：2026-04-16 當日 30 次 `ENGINE_CRASH` 全部為 operator 筆電 10:00-16:00 local **停電斷網**期間的 REST/WS 連線失敗（`Temporary failure in name resolution` + HTTP transport error），**非引擎 bug**。但 watchdog 無從區分「引擎真的 panic」與「外部網路斷線導致 fail-closed」，兩者都計入 `ENGINE_CRASH` strike，並觸發 Python fallback。
+**症狀**：
+- 停電 45min 後（engine 資源耗盡或 router 失電）第一次 strike
+- 13:16-18:03 watchdog 完全靜默（硬斷電）
+- 復電後 post-gap snapshot age=17313.5s (4.81h) → fresh strike
+- engine.log 零 panic / 零 assertion / 零 rust backtrace — 明顯是外部事件
+**建議方案**：
+- `engine_watchdog.py` 加 crash log 分類：
+  - 讀 engine.log 最後 N 行（N=20）
+  - 若連續 ≥5 條 `Temporary failure in name resolution` / `HTTP transport error` / `connection refused` → 分類 `network_outage`，**不計** stability strike，不觸發 Python fallback
+  - 若有 `panic` / `assertion failed` / `rust backtrace` → 分類 `engine_crash`，正常 strike
+  - 其他（timeout / unknown）→ `unknown`，記警告但寬鬆計分
+- 新增 counter：`network_outage_events` / `true_crash_events` 分別統計
+- `/tmp/openclaw/watchdog.log` 格式擴充：`event=ENGINE_CRASH type=network_outage|engine_crash|unknown`
+**Why**：
+- P0-2 LG-1 21d demo 穩定期期間若再停電/斷網，不應誤判為引擎不穩而重置時鐘
+- 未來任何基礎設施事件（ISP 故障、DNS 污染、NAS 掉線）都會重現本次誤判
+- 不改 fail-closed 語義 — 引擎仍然 shutdown，只是 watchdog 不當「真 crash」處理
+**Why not P0/P1**：
+- 已確認 2026-04-16 事件非 code bug，不阻 21d 時鐘
+- 操作上：operator 已知此類事件發生時需要人工覆核，watchdog 分類只是減輕覆核負擔
+- 發生頻率低（家用斷電年均 ≤3 次）
+**前置**：無
+**工作量**：~2h（純 Python，不動 Rust；watchdog 即時可測）
+**驗收**：
+- 模擬連續 10 次 DNS failure 日誌 → watchdog 歸類 `network_outage`，strike 不遞增
+- 注入 `panic!` 測試 → watchdog 歸類 `engine_crash`，strike 正常遞增
+- `/tmp/openclaw/watchdog.log` 可見 type 欄位
+
 ### 前 phase 殘留
 - [ ] **2-11** actual training（等 fills 累積）
 - [ ] **ort crate** activation（首個 ONNX 模型訓練後 — 現由 P1-4 推進）
