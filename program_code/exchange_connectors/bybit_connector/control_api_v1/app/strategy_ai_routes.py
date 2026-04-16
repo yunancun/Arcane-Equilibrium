@@ -111,6 +111,30 @@ async def get_demo_balance(actor: base.AuthenticatedActor = Depends(base.current
     通過 PyO3 獲取 Demo 餘額；同時暴露引擎側 session 基線（initial_balance / peak_balance），
     供 GUI 顯示「本次 session 初始 / 峰值」，引擎進程重啟時重置，pause/resume 期間保持不變。
     """
+    # BALANCE-REAL-1: Demo pipeline now refuses to start when Bybit wallet REST
+    # fails at startup (no fallback 10000). Detect that case and surface an
+    # explicit "disconnected" status so the GUI shows "N/A / 未連接" instead of
+    # leftover stale snapshot or hardcoded defaults.
+    # BALANCE-REAL-1：demo 管線啟動時 REST 失敗即拒絕啟動（不再 fallback 10000）。
+    # 此處顯式偵測並返回 disconnected 狀態，GUI 應顯示「N/A / 未連接」而非
+    # 殘留快照或硬編碼默認值。
+    from .paper_trading_routes import get_rust_reader  # noqa: PLC0415
+    reader = get_rust_reader()
+    demo_pipeline_up = reader.is_engine_available("demo")
+    if not demo_pipeline_up:
+        return _envelope({
+            "source": "rust_engine",
+            "enabled": False,
+            "pipeline_status": "disconnected",
+            "pipeline_reason": "Bybit Demo wallet REST 未連接（引擎啟動時抓取失敗）/ "
+                               "Bybit Demo wallet REST disconnected (REST fetch failed at engine startup)",
+            "balance_display": "N/A",
+            "balance": None,
+            "engine_initial_balance": None,
+            "engine_peak_balance": None,
+            "engine_current_balance": None,
+        })
+
     rc = _get_rust_client()
     if rc is None:
         return _envelope({"enabled": False, "source": "rust_engine"})
@@ -123,8 +147,7 @@ async def get_demo_balance(actor: base.AuthenticatedActor = Depends(base.current
     # 從 Rust 快照拉取本 session 的基線（paper_state 子字段）。
     session_baseline: dict[str, Any] = {}
     try:
-        from .paper_trading_routes import get_rust_reader  # noqa: PLC0415
-        demo_state = get_rust_reader().get_paper_state(engine="demo") or {}
+        demo_state = reader.get_paper_state(engine="demo") or {}
         if demo_state:
             session_baseline = {
                 "engine_initial_balance": demo_state.get("initial_balance"),
@@ -138,7 +161,12 @@ async def get_demo_balance(actor: base.AuthenticatedActor = Depends(base.current
         # 快照讀取是 best-effort — wallet 數據才是主要 payload。
         pass
 
-    return _envelope({"source": "rust_engine", **wallet, **session_baseline})
+    return _envelope({
+        "source": "rust_engine",
+        "pipeline_status": "connected",
+        **wallet,
+        **session_baseline,
+    })
 
 
 @phase2_router.get("/demo/positions")
@@ -545,6 +573,15 @@ def get_demo_session_status(
     rust = get_rust_reader()
     if not rust.is_available():
         return _envelope({"session": {"session_state": "offline"}})
+    # BALANCE-REAL-1: Distinguish "Rust process up but demo pipeline refused
+    # to start" (REST wallet failed) from a normal paused state. UI shows N/A.
+    # BALANCE-REAL-1：區分「Rust 進程在跑但 demo 管線拒絕啟動」（REST 失敗）
+    # 與普通 paused — 前者 GUI 顯示 N/A + 未連接。
+    if not rust.is_engine_available("demo"):
+        return _envelope({"session": {
+            "session_state": "disconnected",
+            "session_halt_reason": "Bybit Demo wallet REST 未連接 / wallet REST disconnected",
+        }})
     if _DEMO_USER_STOPPED:
         return _envelope({"session": {"session_state": "stopped"}})
     # Read demo engine's paper_paused flag from its own snapshot.
