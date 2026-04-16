@@ -81,14 +81,14 @@ git status && git log --oneline -5
 **預估**：3 週連續觀察
 
 ### P0-3 · Phase 5 策略 Edge 2w 重評 📊
-**狀態**：待乾淨 paper 累積 2 週
+**狀態**：待乾淨 demo 累積 2 週（歸因已通：P0-4 R1 ✅ 2026-04-16）
 **判斷**：
 - 若 gross edge 翻正 → Phase 5 cost_gate 工作重啟（現有 JS / cost_gate / DL 機械已接線）
 - 若 gross edge 仍負 → 策略本身需重做，轉向 EDGE-P3-1 接管（替換 shrunk_bps 為 per-trade 動態預測）或更激進的 EDGE-P2
-**阻塞者**：P0-1（乾淨數據源）
-**預估**：P0-1 落地後 2 週
+**阻塞者**：**P0-0 RECONCILER-BURST-FIX**（每次重啟 burst 升級 Reduced 卡死，數小時無乾淨窗口）。~~P0-1~~ 不必要 — G-2 只覆蓋 funding_arb 子集，Phase 5 整體 edge 用其他 6 策略 fills 已足夠。
+**預估**：P0-0 落地後 2 週
 
-**關鍵路徑**：`P0-1 G-2 驗證 → P0-2 LG-1 21d → LG-4/5 → Live`
+**關鍵路徑**：`P0-0 reconciler burst fix → P0-3 Phase 5 edge 2w 評估 + P0-2 LG-1 21d → LG-4/5 → Live`（P0-1 G-2 並行驗證 funding_arb 子集，不在主路徑）
 **最早 Live 日期**：樂觀估 **W24 末（～2026-05-23）**
 
 ---
