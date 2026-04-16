@@ -126,6 +126,8 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
     // EDGE-P3-1 #62：把 PipelineCommand 發送端塞給 IntentProcessor，使 predictor
     // gate 的 ε-greedy 分支能發出 `EmitShadowFill` 經事件消費者 dispatcher 回流。
     // 不接線 → shadow fill 走 fail-soft 丟棄分支，Stage 4 paper 探索資料全失。
+    // P0-6: clone before move — triage needs the sender for CloseSymbol dispatch.
+    let triage_cmd_tx = pipeline_cmd_tx.clone();
     if let Some(tx) = pipeline_cmd_tx {
         pipeline.set_shadow_fill_tx(tx);
     }
@@ -205,6 +207,62 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
     // 持倉。set_positions_mirror 會從 seed_positions 回填共享 handle。
     if let Some(mirror) = positions_mirror {
         pipeline.paper_state.set_positions_mirror(mirror);
+    }
+
+    // SCANNER-GATE: wire SymbolRegistry into pipeline so new opens are gated
+    // to scanner-active symbols only (prevents open→orphan-close death loop).
+    // SCANNER-GATE：接入 SymbolRegistry，新開倉僅限掃描器活躍交易對。
+    if let Some(ref reg) = symbol_registry {
+        pipeline.set_symbol_registry(Arc::clone(reg));
+    }
+
+    // ── P0-6 FIX: Triage bybit_sync positions ─────────────────────────────
+    // After import + mirror wire-up, classify every `owner_strategy="bybit_sync"`
+    // position: symbol in scanner active universe → adopt under a real strategy
+    // (StopManager + strategy close signals manage lifecycle); NOT in universe →
+    // evict from paper_state and dispatch CloseSymbol so the reconciler closes it
+    // on Bybit. Breaks the FUP-suppression deadlock that prevented orphan handler
+    // from ever running on startup-synced positions.
+    // P0-6 修復：啟動 bybit_sync 持倉分流。在 scanner 活躍集合內 → 指派策略接管；
+    // 不在集合內 → 從 paper_state 移除並派發 CloseSymbol。打破 FUP 抑制死鎖。
+    if pipeline_kind.is_exchange() {
+        let active_symbols = match symbol_registry {
+            Some(ref reg) => reg.snapshot(),
+            None => SYMBOLS.iter().map(|s| s.to_string()).collect(),
+        };
+        let triage = pipeline.paper_state.triage_bybit_sync(
+            &active_symbols,
+            crate::position_reconciler::orphan_handler::KNOWN_STRATEGY_NAMES,
+        );
+        for (sym, strategy) in &triage.adopted {
+            info!(
+                kind = %pipeline_kind, symbol = %sym, strategy = %strategy,
+                "P0-6 triage: bybit_sync position adopted by strategy \
+                 / P0-6 分流：bybit_sync 持倉被策略接管"
+            );
+        }
+        for (sym, is_long, qty) in &triage.evicted {
+            warn!(
+                kind = %pipeline_kind, symbol = %sym, is_long, qty,
+                "P0-6 triage: bybit_sync position evicted (not in universe), \
+                 dispatching close / P0-6 分流：bybit_sync 持倉被驅逐（不在活躍集合），派發平倉"
+            );
+            if let Some(ref tx) = triage_cmd_tx {
+                let _ = tx.send(crate::tick_pipeline::PipelineCommand::CloseSymbol {
+                    symbol: sym.clone(),
+                    hint_is_long: Some(*is_long),
+                    hint_qty: Some(*qty),
+                });
+            }
+        }
+        if !triage.adopted.is_empty() || !triage.evicted.is_empty() {
+            info!(
+                kind = %pipeline_kind,
+                adopted = triage.adopted.len(),
+                evicted = triage.evicted.len(),
+                "P0-6 triage complete / P0-6 分流完成"
+            );
+        }
     }
 
     // D2/D3: Track known symbols for scanner universe diff.

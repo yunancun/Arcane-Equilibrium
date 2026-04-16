@@ -502,18 +502,22 @@ pub enum PipelineCommand {
     /// ORPHAN-ADOPT-1 Phase 2A · Adopt an exchange-reported orphan position.
     /// Dispatched by position_reconciler after `handle_orphan()` returns
     /// `OrphanDecision::Adopt` (Stage B2 AdoptPositiveEdge). Injects the
-    /// position into `paper_state` with `owner_strategy = "orphan_adopted"`;
-    /// StopManager + evaluate_actions then manage it like any other position.
+    /// position into `paper_state`; `owner_strategy` defaults to
+    /// `ORPHAN_ADOPTED_STRATEGY` when None, or the triggering strategy name
+    /// when Some (P0-6: real strategy attribution for adopted orphans).
     /// Fire-and-forget — adoption outcome is logged; no recovery path if the
     /// command channel is closed (pipeline already tearing down).
-    /// ORPHAN-ADOPT-1 Phase 2A · 接管交易所孤兒倉位。由 position_reconciler 在
-    /// handle_orphan 回傳 Adopt 決策後派發。Fire-and-forget。
+    /// ORPHAN-ADOPT-1 Phase 2A · 接管交易所孤兒倉位。owner_strategy 為 None 時
+    /// 用 "orphan_adopted"，Some 時歸屬真實策略（P0-6 改進）。Fire-and-forget。
     AdoptOrphan {
         symbol: String,
         is_long: bool,
         qty: f64,
         entry_price: f64,
         ts_ms: u64,
+        /// P0-6: real strategy name for PnL attribution. None → "orphan_adopted".
+        /// P0-6：真實策略名用於 PnL 歸因。None → "orphan_adopted"。
+        owner_strategy: Option<String>,
     },
 }
 
@@ -780,6 +784,11 @@ pub struct TickPipeline {
     /// None 時發射停用（fail-soft，不採集 Stage-4 探索但不影響交易）。
     shadow_fill_db_tx:
         Option<tokio::sync::mpsc::Sender<crate::database::ShadowFillMsg>>,
+    /// Scanner symbol registry — gates new opens to scanner-active symbols only.
+    /// None = gate disabled (all symbols allowed, e.g. tests / standalone).
+    /// 掃描器交易對注冊表 — 新開倉僅限掃描器活躍交易對。
+    /// None = 門控停用（允許所有交易對，如測試/獨立運行）。
+    symbol_registry: Option<Arc<crate::scanner::registry::SymbolRegistry>>,
 }
 
 impl TickPipeline {
@@ -863,6 +872,7 @@ impl TickPipeline {
             edge_predictor_store: None,
             decision_feature_tx: None,
             shadow_fill_db_tx: None,
+            symbol_registry: None,
         }
     }
 
@@ -903,6 +913,13 @@ impl TickPipeline {
     pub fn set_endpoint_env(&mut self, env: crate::bybit_rest_client::BybitEnvironment) {
         self.endpoint_env = Some(env);
         self.intent_processor.set_endpoint_env(env);
+    }
+
+    /// Wire the shared scanner SymbolRegistry so new opens are gated to
+    /// scanner-active symbols only. Must be called after construction.
+    /// 接入掃描器 SymbolRegistry，新開倉僅限掃描器活躍交易對。
+    pub fn set_symbol_registry(&mut self, reg: Arc<crate::scanner::registry::SymbolRegistry>) {
+        self.symbol_registry = Some(reg);
     }
 
     /// DB engine_mode tag for this pipeline (endpoint-aware). All DB-writing

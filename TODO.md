@@ -1,8 +1,8 @@
 # OpenClaw TODO — 工作計劃清單
 
-**最後更新：2026-04-16 深夜 audit 續**（**P0-9 STABILITY-1 ✅ RCA 完成** — 30 次 crash 為當日 10:00-16:00 local 停電斷網基礎設施事件，非 code bug，21d 時鐘不重置 · **P1-7 LEARNING-PIPELINE-DORMANT-1** 🟡 NEW 半殼學習管線 · LIVE-GUARD-1 ✅ Rust 端 Mainnet 三重硬鎖回補 +7 新單測 · G-2 daemon 重啟以 option D config · P0-0 RECONCILER-BURST-FIX ✅ 已部署驗證 + e2e regression · P0-5 PHANTOM-2-FUP ✅ A+C 方案實作 +5 新單測 · PAPER-DISABLE-1 ✅ 歸檔 · P1-3 shadow_fills Python consumer ✅ 歸檔）
+**最後更新：2026-04-17**（**P0-6 INTENT-WRITE-GAP-1 RCA DONE** — 非 write path 斷裂，是 gate cascade 100% 拒絕：Live_Demo=cost_gate cold-start fail-closed + Demo=correlated exposure ~70%>=65% · **P0-7 REFRAMED** 為 P0-6 子問題 · P0-9 STABILITY-1 ✅ · P1-7 LEARNING-PIPELINE-DORMANT-1 🟡 · LIVE-GUARD-1 ✅）
 
-**測試基準線**：Rust **engine lib 1342 (default) / 1348 (ort) + core 380 + e2e 35 + reconciler_e2e 19 + ort integration 5** · Python **2898 passed (5 skipped · 0 fail)** · ml_training **182 passed (10 skipped)**
+**測試基準線**：Rust **engine lib 1351 (default) / 1348 (ort) + core 380 + e2e 35 + reconciler_e2e 19 + ort integration 5** · Python **2898 passed (5 skipped · 0 fail)** · ml_training **182 passed (10 skipped)**
 
 > compact 後從此文件恢復工作狀態。第一個 `[ ]` 即為下一步起點。
 > 條目分級：**P0 阻塞關鍵路徑** → **P1 當週活躍** → **P2 下週排期** → **P3 長期專項** → **P4 Backlog / Conditional**
@@ -104,31 +104,51 @@ git status && git log --oneline -5
 **E2 審查結論**（5/5 APPROVED）：無 struct literal 繞過、startup.rs:432 + pyo3/client.rs:93 Err 硬傳播、無獨立 HTTP client 可打 mainnet、WS 靠 REST 憑證無獨立 guard 需求、repo grep 無既存 OPENCLAW_ALLOW_MAINNET 誤用值。
 **部署**：下次 `restart_all.sh --rebuild` 附帶生效。當前 LiveDemo→Demo endpoint 零影響；真實 Mainnet 僅在 operator 顯式配置 `trading_mode=Live` + secret slot + env var 三項俱全時可用（門控從 1 項 Rust-verifiable 升為 3 項）。
 
-### P0-6 · INTENT-WRITE-GAP-1 — live/live_demo `trading.intents` 寫入 path 斷裂 🔴 NEW 2026-04-16
-**發現**：實現性審查（2026-04-16 夜，engine PID 1364222 uptime ~11min）DB 查詢顯示嚴重 data integrity 斷裂：
-- `trading.risk_verdicts` 24h 內 live Approved **976,097** + live_demo Approved **570,522**（且現在每秒 ~6.6 條持續寫入），每條 `intent_id` 欄位都有值（null_intent_id=0）
-- `trading.intents` 24h 內 live=0 + live_demo=0（demo 仍正常寫 713 條）
-**暗示**：兩張表寫入 path 在 live/live_demo 不一致，risk_verdict 寫成功但對應的 intent 記錄沒進 DB。可能根因（待驗證）：
-  - DEDUP-PY-RUST Tier A（2026-04-16 合併，21 檔 ~6.5k 行 Python stub 化）之一打斷了 intents persistence path
-  - 或 live/live_demo 的 intent write 走 Python 側但該 path 被 stub 拿掉，而 risk_verdict write 仍在 Rust 側獨立運作
-**影響**：所有基於 `trading.intents` 的下游審計/分析（learning、Phase 5 edge 歸因、experiment ledger）在 live/live_demo 上已瞎 24h+
-**下一步**：grep `INSERT INTO trading.intents` + DEDUP-PY-RUST 合併 diff → 定位斷點
-**阻塞**：Live gate（沒有可信的 intent audit trail 就不能 live）
+### P0-6 · INTENT-WRITE-GAP-1 — live/live_demo `trading.intents` = 0 根因已確認 🟡 RCA DONE 2026-04-17
+**原描述**：`trading.risk_verdicts` 大量 Approved 但 `trading.intents` live/live_demo/demo = 0。
+**根因**（2026-04-17 確認，非 DEDUP-PY-RUST write path 斷裂）：**Rust gate cascade 在 Guardian 之後、intent 持久化之前拒絕 100% intents**。代碼路徑正確（`persist_intent` 只在 `gate.approved=true` 時觸發），問題是 **沒有任何 intent 最終被 approved**。
 
-### P0-7 · ORDER-SUBMIT-GAP-1 — live/live_demo Approved verdict 沒觸發真實下單 🔴 NEW 2026-04-16
-**發現**：同上審查：
-- live_demo 最近 1 分鐘內 5+ Approved verdicts（details: `{"risk_score": 0.0, "modified_qty": null}`）
-- `trading.fills` 24h 內 live=0 + live_demo=0
-- engine.log in-memory `fills=0 intents=0` 本輪 uptime 全程
-**暗示**：Approved verdict 寫入 DB 後，後續 order submit path 在 live/live_demo 被跳過。可能根因：
-  - `trading_mode` 沒切到 live（仍是 demo default）
-  - `live_reserved` global mode 未啟用，OMS proxy 為空實作
-  - 或 Rust 側 order submit 需要 `execution_authority=granted`（Python 側狀態）但未真正授予
-**影響**：「Live_Ready」下真實下單能力 0%；570k Approved 純空轉。Guardian 在跑，下單在空轉。
+| 管線 | 阻擋 Gate | 根因 | 診斷證據 |
+|---|---|---|---|
+| **Live_Demo** | Gate 3 `cost_gate_live` | `edge_estimates.json = {}` → `get_cell()=None` → cold-start fail-closed（根原則 #5） | 630k decision_features = intents 通過所有 pre-cost-gate 檢查；engine.log: `cost_gate(JS-live): no edge estimate — fail-closed` |
+| **Demo** | Gate 2.7 `check_order_allowed` | Bybit demo 帳戶 seeded positions → correlated exposure ~70% >= limit 65% | 0 decision_features = intents 在 evaluate_predictor_gate 之前被擋；engine.log: `risk_gate: correlated exposure 69-70% >= limit 65%` |
+| **Demo** (次要) | Gate 2 Guardian | Seeded positions 觸發 `direction_conflict: opposite position exists` | 17.8k Rejected verdicts（`openclaw_core/guardian.rs:122`） |
+
+**死循環結構**（與 P0-7 交織）：
+- Live_Demo：`cost_gate_live` fail-closed → 0 fills → 0 edge data → `edge_estimates.json` 永遠是 `{}` → `cost_gate_live` 永遠 fail-closed
+- Demo：correlated exposure 超限 → 0 new opens → 0 fills → positions 不關（P0-7 order submit gap）→ exposure 不降 → 永遠超限
+
+**診斷方法**：`on_tick.rs` 添加 P0-6 DIAG `tracing::warn!` 在 `!gate.approved` 時輸出 `rejected_reason`（rate-limited: 前 50 條 + 每 10000 條一次）。此前 `rejected_reason` 被計算但從未 persist/log — 設計盲區。
+
+**下一步**（修復方案 TBD）：
+- [ ] **Live_Demo 死循環打破**：方案 A — 用 LiveDemo→Validation profile mapping（`cost_gate_moderate` cold-start 允許）；方案 B — bootstrap edge 估計（需學習管線 P1-7）
+- [ ] **Demo 死循環打破**：方案 A — 清理 orphan positions（手動或自動）；方案 B — 臨時調高 `correlated_exposure_max_pct`；方案 C — 修 P0-7 使 Close actions 生效
+- [ ] **永久修復**：`rejected_reason` 應 persist 到 DB（新欄位或復用 `reason`），而非只在 struct 裡丟棄
+- [ ] 移除 `on_tick.rs` P0-6 DIAG 代碼（根因確認後）
+
+**注意**：`correlated_exposure_max_pct` config TOML = 60.0 但 runtime 為 65.0（GUI hot-reload 修改過）
+
+**阻塞**：Live gate（需真實 fill data → edge 估計 → cost gate 通過；P0-7 共同阻塞）
+
+### P0-7 · ORDER-SUBMIT-GAP-1 — live/live_demo Approved verdict 沒觸發真實下單 🟡 REFRAMED 2026-04-17
+**原描述**：570k Approved verdicts + 0 fills = order submit path 被跳過。
+**P0-6 RCA 後更正**：**不存在獨立的 order-submit gap**。0 fills 的根因是 P0-6 gate cascade 拒絕 100% intents，`gate.approved` 從未為 true，所以 `on_tick.rs:690-733` 的 order dispatch 代碼從未被進入。order submit path 本身（OrderDispatchRequest → exchange REST）未壞，但從未被觸發。
+**與 P0-6 死循環**：Demo positions 不關 → correlated exposure 超限 → 0 new opens 是因為 **Demo pipeline 無法自行 close 這些 seeded positions**。Close 動作走 StrategyAction::Close 分支（on_tick.rs），理論上不受 open gate cascade 限制，但需要策略主動 emit Close。如果 seeded positions 不屬於任何活躍策略（orphan positions），不會有策略 emit Close → 死循環。
 **下一步**：
-  1. 查 engine session 啟動時的 trading_mode 日誌 + OMSProxy 實作（是 real Bybit client 還是 noop）
-  2. 檢查 Approved verdict 後 submit 路徑（`intent_processor/router.rs` → OMSProxy）
-**阻塞**：Live gate
+  - [ ] 確認 seeded positions 是否為 orphan（不屬於活躍策略）→ 若是，方案 = 手動清理或引擎 startup orphan reconciler
+  - [ ] P0-6 修復後（Live_Demo cost gate / Demo correlated exposure）此 issue 自動消失
+**阻塞**：Live gate（已與 P0-6 合併為同一阻塞點）
+
+### P0-10 · SCANNER-GATE — orphan_handler death loop fix ✅ 2026-04-17
+**原問題**：策略開倉 → scanner 輪替移除 symbol → orphan_handler A4 強平 → 策略再開 → 死循環。BASEDUSDT 等 20+ 個 symbol 受影響（228 筆 `ipc_close_symbol` fills）。
+**根因**：A4 `HardSafetyNotInUniverse` 把「掃描器輪替掉的持倉」當作 orphan 強平，但引擎會在下一 tick 重新開倉 → 無限循環。同時 REST→WS 時間差（FUP race condition）使引擎自家剛下的單也被誤判為 orphan。
+**修復（三部分）**：
+1. **SCANNER-GATE**：tick_pipeline 新增 `symbol_registry` 字段 + `set_symbol_registry()` setter，在 `on_tick.rs` strategy Open dispatch 前檢查 `reg.is_active(symbol)`，非活躍 symbol 阻止開新倉
+2. **FUP-RACE**：`paper_state.rs` 新增 `proactive_mirror_insert()`，exchange OrderDispatchRequest 發送後立即寫 mirror，彌合 REST→WS 空窗
+3. **A4 移除**：`orphan_handler.rs` Stage A4 代碼移除（enum 變體保留 DB backward compat），orphan 定義改為純「重啟後遺留」，不含 scanner 輪替
+**改動檔案**：`tick_pipeline/mod.rs`（+field +setter +init）· `on_tick.rs`（+scanner gate + proactive mirror）· `paper_state.rs`（+proactive_mirror_insert）· `orphan_handler.rs`（-A4 +updated tests +doc）· `event_consumer/mod.rs`（+registry wiring）
+**測試**：engine lib 1351 passed / 0 failed（含 17 orphan_handler 測試全綠）· core 380 passed
+**部署**：待 `restart_all.sh --rebuild`
 
 ### P0-9 · STABILITY-1 — 2026-04-16 停電事件 RCA 完成 ✅（非代碼 bug，單次基礎設施事件）
 **原敘述**：當日 9h 引擎 5 次崩潰被誤判為「代碼穩定性 P0-CRITICAL 阻塞 + 21d 時鐘必須重置」。

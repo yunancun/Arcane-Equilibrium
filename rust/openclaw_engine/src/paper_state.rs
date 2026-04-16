@@ -48,6 +48,18 @@ pub struct PaperPosition {
     pub owner_strategy: String,
 }
 
+/// P0-6 FIX: Result of startup bybit_sync position triage.
+/// P0-6 修復：啟動 bybit_sync 持倉分流結果。
+#[derive(Debug, Clone, Default)]
+pub struct TriageOutcome {
+    /// (symbol, assigned_strategy) — positions kept in paper_state under a real strategy.
+    /// 被策略接管的持倉（保留在 paper_state）。
+    pub adopted: Vec<(String, String)>,
+    /// (symbol, is_long, qty) — positions removed from paper_state, need close dispatch.
+    /// 從 paper_state 移除的持倉，需派發平倉。
+    pub evicted: Vec<(String, bool, f64)>,
+}
+
 /// Paper trading state manager.
 /// 紙盤交易狀態管理器。
 pub struct PaperState {
@@ -157,6 +169,20 @@ impl PaperState {
     fn positions_clear(&mut self) {
         self.positions_mirror.write().clear();
         self.positions.clear();
+    }
+
+    /// Proactively insert (symbol, is_long) into the positions mirror WITHOUT
+    /// touching the real `positions` map. Bridges the race window between
+    /// OrderDispatchRequest send and WS Fill arrival: the reconciler reads the
+    /// mirror and won't classify the pending open as an orphan.
+    /// Cleared naturally when the Fill arrives (positions_insert overwrites)
+    /// or when a CloseSymbol removes it.
+    /// 主動寫入 mirror 但不動 positions，彌合下單→成交回報之間的空窗：
+    /// 對帳器讀到 mirror 後不會誤判為 orphan。
+    pub fn proactive_mirror_insert(&self, symbol: &str, is_long: bool) {
+        self.positions_mirror
+            .write()
+            .insert(symbol.to_string(), is_long);
     }
 
     pub fn balance(&self) -> f64 {
@@ -403,11 +429,60 @@ impl PaperState {
         inserted
     }
 
+    /// P0-6 FIX: Triage bybit_sync positions after startup import.
+    /// Positions whose symbol is in `active_symbols` are adopted under the first
+    /// matching strategy name. Positions NOT in the active universe are evicted
+    /// (removed from paper_state + mirror) and returned for close dispatch.
+    /// Must be called AFTER `import_positions()` + `set_positions_mirror()`.
+    /// P0-6 修復：啟動後對 bybit_sync 持倉分流。在活躍集合內 → 指派策略接管；
+    /// 不在集合內 → 從 paper_state 移除，回傳供平倉派發。
+    pub fn triage_bybit_sync(
+        &mut self,
+        active_symbols: &[String],
+        strategy_names: &[&str],
+    ) -> TriageOutcome {
+        let mut outcome = TriageOutcome {
+            adopted: Vec::new(),
+            evicted: Vec::new(),
+        };
+
+        let bybit_sync_symbols: Vec<String> = self
+            .positions
+            .values()
+            .filter(|p| p.owner_strategy == "bybit_sync")
+            .map(|p| p.symbol.clone())
+            .collect();
+
+        if bybit_sync_symbols.is_empty() {
+            return outcome;
+        }
+
+        for symbol in bybit_sync_symbols {
+            let in_universe = active_symbols.iter().any(|s| s == &symbol);
+            if in_universe && !strategy_names.is_empty() {
+                let strategy = strategy_names[0];
+                if let Some(pos) = self.positions.get_mut(&symbol) {
+                    pos.owner_strategy = strategy.to_string();
+                    outcome
+                        .adopted
+                        .push((symbol, strategy.to_string()));
+                }
+            } else {
+                if let Some(pos) = self.positions_remove(&symbol) {
+                    outcome
+                        .evicted
+                        .push((pos.symbol.clone(), pos.is_long, pos.qty));
+                }
+            }
+        }
+        outcome
+    }
+
     /// ORPHAN-ADOPT-1 Phase 2A: Adopt an exchange-reported orphan position into
     /// PaperState so StopManager + evaluate_actions treat it as any other open
-    /// position. `owner_strategy` is set to the synthetic `ORPHAN_ADOPTED_STRATEGY`
-    /// ("orphan_adopted") so accumulate/close semantics still work but the B1/B2
-    /// edge probe skips it (it has no independent edge sample).
+    /// position. When `owner` is `None`, falls back to `ORPHAN_ADOPTED_STRATEGY`;
+    /// when `Some(name)`, the position is attributed to a real strategy (P0-6:
+    /// lets the triggering strategy own lifecycle + PnL attribution).
     ///
     /// Idempotent: if a same-direction (symbol, is_long) is already tracked —
     /// which should be rare because the reconciler consults the side-car mirror
@@ -417,8 +492,9 @@ impl PaperState {
     ///
     /// Returns true iff a new PaperPosition was actually inserted. `latest_prices`
     /// is seeded with `entry_price` so StopManager has an immediate reference tick.
-    /// ORPHAN-ADOPT-1 Phase 2A：將交易所回報的孤兒倉位接管進 PaperState，
-    /// owner_strategy 設為合成策略 ORPHAN_ADOPTED_STRATEGY（"orphan_adopted"）。
+    /// ORPHAN-ADOPT-1 Phase 2A：將交易所回報的孤兒倉位接管進 PaperState。
+    /// owner 為 None 時用 ORPHAN_ADOPTED_STRATEGY，Some 時歸屬真實策略
+    /// （P0-6：讓觸發策略負責生命週期 + PnL 歸因）。
     /// 冪等：同向 (symbol, is_long) 已存在時為 no-op；方向翻轉由 ws upsert 負責。
     pub fn adopt_orphan(
         &mut self,
@@ -427,6 +503,7 @@ impl PaperState {
         qty: f64,
         entry_price: f64,
         ts_ms: u64,
+        owner: Option<&str>,
     ) -> bool {
         if qty <= 0.0 || !qty.is_finite() || entry_price <= 0.0 || !entry_price.is_finite() {
             return false;
@@ -436,6 +513,9 @@ impl PaperState {
                 return false;
             }
         }
+        let owner_strategy = owner
+            .unwrap_or(crate::position_reconciler::orphan_handler::ORPHAN_ADOPTED_STRATEGY)
+            .to_string();
         self.latest_prices
             .entry(symbol.to_string())
             .or_insert(entry_price);
@@ -451,9 +531,7 @@ impl PaperState {
                 entry_ts_ms: ts_ms,
                 unrealized_pnl: 0.0,
                 entry_context_id: String::new(),
-                owner_strategy:
-                    crate::position_reconciler::orphan_handler::ORPHAN_ADOPTED_STRATEGY
-                        .to_string(),
+                owner_strategy,
             },
         );
         true
@@ -1137,7 +1215,7 @@ mod tests {
         let mirror = s.positions_mirror();
         assert!(mirror.read().is_empty());
 
-        let inserted = s.adopt_orphan("BTCUSDT", true, 0.1, 50_000.0, 1_700_000_000_000);
+        let inserted = s.adopt_orphan("BTCUSDT", true, 0.1, 50_000.0, 1_700_000_000_000, None);
         assert!(inserted);
 
         let pos = s.get_position("BTCUSDT").expect("position must be present");
@@ -1167,7 +1245,7 @@ mod tests {
             "ma_crossover"
         );
         let inserted =
-            s.adopt_orphan("BTCUSDT", true, 0.2, 51_000.0, 1_700_000_000_000);
+            s.adopt_orphan("BTCUSDT", true, 0.2, 51_000.0, 1_700_000_000_000, None);
         assert!(!inserted, "same-direction adopt must be no-op");
         // Original owner preserved — no strategy overwrite.
         // 原 owner 保留，沒有被覆寫。
@@ -1181,12 +1259,12 @@ mod tests {
     #[test]
     fn test_adopt_orphan_rejects_invalid_inputs() {
         let mut s = PaperState::new(10_000.0);
-        assert!(!s.adopt_orphan("X", true, 0.0, 100.0, 0));
-        assert!(!s.adopt_orphan("X", true, -1.0, 100.0, 0));
-        assert!(!s.adopt_orphan("X", true, f64::NAN, 100.0, 0));
-        assert!(!s.adopt_orphan("X", true, 1.0, 0.0, 0));
-        assert!(!s.adopt_orphan("X", true, 1.0, -5.0, 0));
-        assert!(!s.adopt_orphan("X", true, 1.0, f64::NAN, 0));
+        assert!(!s.adopt_orphan("X", true, 0.0, 100.0, 0, None));
+        assert!(!s.adopt_orphan("X", true, -1.0, 100.0, 0, None));
+        assert!(!s.adopt_orphan("X", true, f64::NAN, 100.0, 0, None));
+        assert!(!s.adopt_orphan("X", true, 1.0, 0.0, 0, None));
+        assert!(!s.adopt_orphan("X", true, 1.0, -5.0, 0, None));
+        assert!(!s.adopt_orphan("X", true, 1.0, f64::NAN, 0, None));
         assert!(s.get_position("X").is_none());
     }
 
@@ -1472,5 +1550,147 @@ mod tests {
         s.set_entry_context_id("NOPE", "ctx-ghost");
         assert_eq!(s.get_entry_context_id("NOPE"), None);
         assert_eq!(s.position_count(), 0);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // P0-6 triage_bybit_sync tests / P0-6 分流測試
+    // ═══════════════════════════════════════════════════════════════════════
+
+    fn seed_bybit_sync(s: &mut PaperState, positions: &[(&str, bool, f64, f64)]) {
+        let tuples: Vec<(String, bool, f64, f64, u64)> = positions
+            .iter()
+            .map(|(sym, long, qty, px)| (sym.to_string(), *long, *qty, *px, 1000))
+            .collect();
+        s.import_positions(tuples);
+    }
+
+    #[test]
+    fn triage_adopts_in_universe_positions() {
+        let mut s = PaperState::new(10_000.0);
+        seed_bybit_sync(&mut s, &[
+            ("BTCUSDT", true, 0.01, 50000.0),
+            ("ETHUSDT", false, 0.5, 3000.0),
+        ]);
+        assert_eq!(s.position_count(), 2);
+
+        let active = vec!["BTCUSDT".into(), "ETHUSDT".into(), "SOLUSDT".into()];
+        let strategies = &["ma_crossover", "bb_reversion"];
+        let result = s.triage_bybit_sync(&active, strategies);
+
+        assert_eq!(result.adopted.len(), 2);
+        assert_eq!(result.evicted.len(), 0);
+        assert_eq!(s.position_count(), 2);
+
+        let btc = s.get_position("BTCUSDT").unwrap();
+        assert_eq!(btc.owner_strategy, "ma_crossover");
+        let eth = s.get_position("ETHUSDT").unwrap();
+        assert_eq!(eth.owner_strategy, "ma_crossover");
+    }
+
+    #[test]
+    fn triage_evicts_not_in_universe_positions() {
+        let mut s = PaperState::new(10_000.0);
+        seed_bybit_sync(&mut s, &[
+            ("BTCUSDT", true, 0.01, 50000.0),
+            ("SHIBUSDT", true, 1000000.0, 0.00001),
+        ]);
+        assert_eq!(s.position_count(), 2);
+
+        let active = vec!["BTCUSDT".into()];
+        let strategies = &["ma_crossover"];
+        let result = s.triage_bybit_sync(&active, strategies);
+
+        assert_eq!(result.adopted.len(), 1);
+        assert_eq!(result.evicted.len(), 1);
+        assert_eq!(s.position_count(), 1);
+
+        assert_eq!(result.evicted[0].0, "SHIBUSDT");
+        assert!(result.evicted[0].1); // is_long
+        assert!((result.evicted[0].2 - 1000000.0).abs() < 0.1);
+    }
+
+    #[test]
+    fn triage_no_strategies_evicts_all() {
+        let mut s = PaperState::new(10_000.0);
+        seed_bybit_sync(&mut s, &[("BTCUSDT", true, 0.01, 50000.0)]);
+
+        let active = vec!["BTCUSDT".into()];
+        let empty: &[&str] = &[];
+        let result = s.triage_bybit_sync(&active, empty);
+
+        assert_eq!(result.adopted.len(), 0);
+        assert_eq!(result.evicted.len(), 1);
+        assert_eq!(s.position_count(), 0);
+    }
+
+    #[test]
+    fn triage_skips_non_bybit_sync_positions() {
+        let mut s = PaperState::new(10_000.0);
+        s.apply_fill("BTCUSDT", true, 0.01, 50000.0, 0.0, 0, "ma_crossover");
+
+        let active = vec!["BTCUSDT".into()];
+        let strategies = &["ma_crossover"];
+        let result = s.triage_bybit_sync(&active, strategies);
+
+        assert_eq!(result.adopted.len(), 0);
+        assert_eq!(result.evicted.len(), 0);
+        assert_eq!(s.position_count(), 1);
+    }
+
+    #[test]
+    fn triage_empty_positions_is_noop() {
+        let mut s = PaperState::new(10_000.0);
+        let active = vec!["BTCUSDT".into()];
+        let strategies = &["ma_crossover"];
+        let result = s.triage_bybit_sync(&active, strategies);
+
+        assert_eq!(result.adopted.len(), 0);
+        assert_eq!(result.evicted.len(), 0);
+    }
+
+    #[test]
+    fn triage_evicted_removed_from_mirror() {
+        let mut s = PaperState::new(10_000.0);
+        seed_bybit_sync(&mut s, &[("SHIBUSDT", true, 100.0, 0.001)]);
+        assert!(s.positions_mirror.read().contains_key("SHIBUSDT"));
+
+        let active: Vec<String> = vec![];
+        let strategies = &["ma_crossover"];
+        let _ = s.triage_bybit_sync(&active, strategies);
+
+        assert!(!s.positions_mirror.read().contains_key("SHIBUSDT"));
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // P0-6 adopt_orphan owner_strategy tests / P0-6 adopt_orphan 歸屬測試
+    // ═══════════════════════════════════════════════════════════════════════
+
+    #[test]
+    fn adopt_orphan_default_owner() {
+        let mut s = PaperState::new(10_000.0);
+        let inserted = s.adopt_orphan("BTCUSDT", true, 0.01, 50000.0, 1000, None);
+        assert!(inserted);
+        let pos = s.get_position("BTCUSDT").unwrap();
+        assert_eq!(pos.owner_strategy, "orphan_adopted");
+    }
+
+    #[test]
+    fn adopt_orphan_custom_owner() {
+        let mut s = PaperState::new(10_000.0);
+        let inserted =
+            s.adopt_orphan("BTCUSDT", true, 0.01, 50000.0, 1000, Some("ma_crossover"));
+        assert!(inserted);
+        let pos = s.get_position("BTCUSDT").unwrap();
+        assert_eq!(pos.owner_strategy, "ma_crossover");
+    }
+
+    #[test]
+    fn adopt_orphan_idempotent_same_direction() {
+        let mut s = PaperState::new(10_000.0);
+        assert!(s.adopt_orphan("BTCUSDT", true, 0.01, 50000.0, 1000, None));
+        assert!(!s.adopt_orphan("BTCUSDT", true, 0.02, 51000.0, 2000, Some("bb_reversion")));
+        let pos = s.get_position("BTCUSDT").unwrap();
+        assert_eq!(pos.owner_strategy, "orphan_adopted");
+        assert!((pos.qty - 0.01).abs() < 1e-10);
     }
 }
