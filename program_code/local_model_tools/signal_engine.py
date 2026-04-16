@@ -53,11 +53,17 @@ class SignalEngine:
         return {}
 
     def get_signal_summary(self, symbol: str) -> dict[str, Any]:
+        # consensus_direction preserves legacy route contract; fallback path has
+        # no signals so we always report "neutral".
+        # 保留舊路由契約鍵名 consensus_direction；stub 無信號恆回 neutral。
         return {
             "symbol": symbol,
             "stub": True,
             "source": "rust_engine_primary",
             "signals": [],
+            "consensus_direction": "neutral",
+            "long_score": 0.0,
+            "short_score": 0.0,
         }
 
     def get_stats(self) -> dict[str, Any]:
