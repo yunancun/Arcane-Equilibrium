@@ -1,6 +1,6 @@
 # OpenClaw TODO — 工作計劃清單
 
-**最後更新：2026-04-16 深夜 audit 續**（**P0-9 STABILITY-1** 🔴 NEW 9h 5 crash 21d 時鐘未啟動 · **P1-7 LEARNING-PIPELINE-DORMANT-1** 🟡 NEW 半殼學習管線 · LIVE-GUARD-1 ✅ Rust 端 Mainnet 三重硬鎖回補 +7 新單測 · G-2 daemon 重啟以 option D config · P0-0 RECONCILER-BURST-FIX ✅ 已部署驗證 + e2e regression · P0-5 PHANTOM-2-FUP ✅ A+C 方案實作 +5 新單測 · PAPER-DISABLE-1 ✅ 歸檔 · P1-3 shadow_fills Python consumer ✅ 歸檔）
+**最後更新：2026-04-16 深夜 audit 續**（**P0-9 STABILITY-1 ✅ RCA 完成** — 30 次 crash 為當日 10:00-16:00 local 停電斷網基礎設施事件，非 code bug，21d 時鐘不重置 · **P1-7 LEARNING-PIPELINE-DORMANT-1** 🟡 NEW 半殼學習管線 · LIVE-GUARD-1 ✅ Rust 端 Mainnet 三重硬鎖回補 +7 新單測 · G-2 daemon 重啟以 option D config · P0-0 RECONCILER-BURST-FIX ✅ 已部署驗證 + e2e regression · P0-5 PHANTOM-2-FUP ✅ A+C 方案實作 +5 新單測 · PAPER-DISABLE-1 ✅ 歸檔 · P1-3 shadow_fills Python consumer ✅ 歸檔）
 
 **測試基準線**：Rust **engine lib 1342 (default) / 1348 (ort) + core 380 + e2e 35 + reconciler_e2e 19 + ort integration 5** · Python **2898 passed (5 skipped · 0 fail)** · ml_training **182 passed (10 skipped)**
 
@@ -130,30 +130,36 @@ git status && git log --oneline -5
   2. 檢查 Approved verdict 後 submit 路徑（`intent_processor/router.rs` → OMSProxy）
 **阻塞**：Live gate
 
-### P0-9 · STABILITY-1 — 引擎 9h 內 5 次崩潰，21d 穩定期時鐘未啟動 🔴 NEW 2026-04-16 audit
-**發現**：2026-04-16 實現性審查發現 watchdog.log 當日崩潰模式驚人：
-- **11:11:30 UTC** PID 1309127 lost heartbeat → Python fallback strike 1/3
-- **11:13:52 UTC** PID 1310044 lost heartbeat → strike 2/3（2min 後再炸）
-- **11:14:xx UTC** 第 3 次崩潰
-- **16:03 / 16:04 UTC** 又 2 次連爆（snapshot age 17313.5s = 4.8h stale 才被發現）
-- **20:16 UTC** 當前 PID 1364222 啟動（22:16 local）
-- 即 **9 小時 5 次 crash**（間隔最短 2 分鐘），平均存活 **~1.8 小時**
-**問題**：CLAUDE.md §十一 敘述的「乾淨 demo 起點 2026-04-16 21:08 local」錯誤：
-- 時間點對不上真實 restart（20:16 UTC = 22:16 local，非 21:08）
-- 引擎根本不穩，連 11 分鐘都守不住，21 天 × 24h = 504h 是幻想
-- P0-2 LG-1 21d 觀察期時鐘**未啟動**（前提是穩定 1hr+，當前 p50 uptime 1.8hr 且已 crash 5 次）
-- P0-3 Phase 5 edge 2w 重評同理作廢（crash 會污染 fills 樣本）
-**下一步**：
-  1. 撈 watchdog.log 完整 strike 歷史 + systemd journal crash 原因
-  2. 檢查是否存在 core dump（`coredumpctl list openclaw-engine`）
-  3. 分析 11:11-11:14 三連爆是否同因（單一 regression 還是累積）
-  4. 分析 16:03-16:04 次叢是否同因（或是新觸發）
-  5. 定位 root cause → fix → 重啟 → 24h 穩定觀察 → 才能重新定義 21d demo 時鐘起點
-**阻塞**：P0-2 LG-1 21d demo 觀察期 hard-prereq（Live 前置）；P0-3 Phase 5 edge 2w 重評
-**影響**：Live 最早日期從 W24 末推至 **W25 末（～2026-05-30）**
+### P0-9 · STABILITY-1 — 2026-04-16 停電事件 RCA 完成 ✅（非代碼 bug，單次基礎設施事件）
+**原敘述**：當日 9h 引擎 5 次崩潰被誤判為「代碼穩定性 P0-CRITICAL 阻塞 + 21d 時鐘必須重置」。
+**RCA 結論（2026-04-16 深夜，operator 確認）**：**全部 30 次 crash（深入撈後實為 30 非 5）均為單次斷電造成的網路基礎設施事件，非引擎代碼 bug。** 21d demo 時鐘**不重置**。
 
-**關鍵路徑**:`~~P0-0 reconciler burst fix~~ ✅ → ~~restart_all --rebuild 部署~~ ✅ → **P0-9 STABILITY-1 引擎崩潰 RCA** → P0-6/P0-7 查清 intent/order 寫入斷點 → P0-3 Phase 5 edge 2w 評估 + P0-2 LG-1 21d demo → **P1-7 LEARNING-PIPELINE-DORMANT-1** → LG-4/5 → Live`(P0-1 G-2 並行驗證 funding_arb 子集,不在主路徑;~~P0-5 PHANTOM-2-FUP~~ ✅ 待 `--rebuild` 部署即生效;~~P0-8 LIVE-GUARD-1~~ ✅ Rust 端 Mainnet 三重硬鎖回補,解除 CLAUDE.md §三 LIVE-GUARD-1 P0-CRITICAL 阻塞)
-**最早 Live 日期**:樂觀估回調至 **W25 末(～2026-05-30)** — P0-9 STABILITY-1 未收斂前 P0-2/P0-3 時鐘全數作廢
+**證據鏈**：
+- 時區：operator 筆電 CEST (UTC+2) — UTC→local 加 2h
+- operator 報告：**2026-04-16 10:00-16:00 local 停電 ~6h**，造成斷網
+- **第一次 crash 10:45 local**（08:45 UTC）= 停電後 45min（電池 + 路由器失電）
+- **watchdog 完全靜默 13:16-18:03 local**（4h 47min blackout）= 筆電電池耗盡或硬關機期間
+- **post-gap 首條** `snapshot age=17313.5s`（4.81h 陳舊）= 硬斷電復電鐵證
+- **engine log（engine-1776330656.log 09:10 UTC 啟動）**所有錯誤簽名一致：
+  - `HTTP transport error: error sending request for url (https://api-demo.bybit.com/...)`
+  - `IO error: failed to lookup address information: Temporary failure in name resolution`（DNS 失敗）
+  - REST / WS private / WS public 全部連不上 Bybit
+- 非代碼 bug 的證據：**零 panic、零 assertion、零 rust backtrace**；全部為 DNS/transport error 合理 fail-closed 行為
+- 斷網恢復後（18:03 local 之後）網路還不穩又滾了幾輪，再之後當前 PID 1364222 於 22:16 local 穩定啟動
+
+**對觀察期時鐘的判定**：
+- **P0-2 LG-1 21d demo 時鐘不重置**：基礎設施事件 ≠ 引擎不穩定。若每次停電都重置時鐘，21d 永遠達不到
+- **P0-3 Phase 5 edge 2w 重評**：crash 時段（10:45-18:03 local）fills 樣本應排除（自然也沒有 fills，因為引擎連不上 Bybit）
+
+**Nice-to-have（不阻塞）**：
+- `engine_watchdog` 可加 network-loss detection（DNS failure 連續 N 次分類為 `network_outage`，不計入 stability strike）
+- 不急，等有空再做
+
+**阻塞**：無（已解除，非 Live 前置）
+**歸檔**：本 audit 結論取代 §三「9h 5 crash / 21d 時鐘未啟動」敘述，CLAUDE.md §三 + §十 + §十一 同步更新
+
+**關鍵路徑**:`~~P0-0 reconciler burst fix~~ ✅ → ~~restart_all --rebuild 部署~~ ✅ → ~~P0-9 STABILITY-1 引擎崩潰 RCA~~ ✅（停電 infra 事件，非 code bug）→ P0-6/P0-7 查清 intent/order 寫入斷點 → P0-3 Phase 5 edge 2w 評估 + P0-2 LG-1 21d demo → **P1-7 LEARNING-PIPELINE-DORMANT-1** → LG-4/5 → Live`(P0-1 G-2 並行驗證 funding_arb 子集,不在主路徑;~~P0-5 PHANTOM-2-FUP~~ ✅ 待 `--rebuild` 部署即生效;~~P0-8 LIVE-GUARD-1~~ ✅ Rust 端 Mainnet 三重硬鎖回補,解除 CLAUDE.md §三 LIVE-GUARD-1 P0-CRITICAL 阻塞)
+**最早 Live 日期**:回到 **W24 末（～2026-05-23）** — P0-9 停電事件 RCA 後不延後
 
 ---
 
