@@ -941,6 +941,18 @@ impl TickPipeline {
         crate::mode_state::effective_engine_mode(self.pipeline_kind, self.endpoint_env)
     }
 
+    /// Endpoint-aware GovernanceProfile for per-intent cost-gate selection
+    /// (P0-6 方案 A). Intent-processing paths must call this instead of
+    /// `self.pipeline_kind.governance_profile()` — the latter ignores the
+    /// bound endpoint and forces Production cost gate for LiveDemo,
+    /// producing the cold-start deadlock (P0-6 RCA 2026-04-17).
+    /// 本管線的 cost-gate GovernanceProfile（endpoint 感知）。
+    /// Intent 處理路徑必須走這裡，避免 LiveDemo 被強制走 Production。
+    #[inline]
+    pub fn effective_governance_profile(&self) -> openclaw_core::governance_core::GovernanceProfile {
+        crate::mode_state::effective_governance_profile(self.pipeline_kind, self.endpoint_env)
+    }
+
     /// Scanner C3: Add a symbol to the kline manager (idempotent).
     /// Per-symbol HashMaps (latest_prices, latest_indicators, consecutive_losses)
     /// self-populate on first tick — no explicit initialisation needed.

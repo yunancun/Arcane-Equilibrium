@@ -65,9 +65,18 @@ git status && git log --oneline -5
 ### P0-8 · LIVE-GUARD-1 ✅ 2026-04-16（已歸檔）
 已部署。詳見歸檔 `docs/archive/2026-04-17--completed_todo_p0_scanner_phantom_live_guard.md` §P0-8。
 
-### P0-6 · INTENT-WRITE-GAP-1 — live/live_demo `trading.intents` = 0 根因已確認 🟡 RCA DONE 2026-04-17
+### P0-6 · INTENT-WRITE-GAP-1 — live/live_demo `trading.intents` = 0 🟢 方案 A 部署 2026-04-17 夜
 **原描述**：`trading.risk_verdicts` 大量 Approved 但 `trading.intents` live/live_demo/demo = 0。
 **根因**（2026-04-17 確認，非 DEDUP-PY-RUST write path 斷裂）：**Rust gate cascade 在 Guardian 之後、intent 持久化之前拒絕 100% intents**。代碼路徑正確（`persist_intent` 只在 `gate.approved=true` 時觸發），問題是 **沒有任何 intent 最終被 approved**。
+
+**✅ 方案 A 部署 2026-04-17 夜**（LiveDemo → Validation cost-gate mapping）：
+- 新增 `mode_state::effective_governance_profile(kind, env)` 自由函式，endpoint-aware 映射：
+  - Paper → Exploration · Demo → Validation · Live+Mainnet → Production · Live+LiveDemo/Testnet/Demo/None → **Validation**
+- `TickPipeline::effective_governance_profile()` 方法 + `on_tick.rs` 兩處 callsite（exchange + paper）從 `self.pipeline_kind.governance_profile()` 改走新函式
+- Scope：**僅** per-intent cost-gate tier selection；`GovernanceCore::new_with_profile()` 構造時 profile 不動，Live 管線的 Auth/Lease 語義不變（Python Operator auth 仍必須）
+- Tests：engine lib 1415 (+2 new) / core 380 / reconciler_e2e 19 / stress 35 / micro_profit_fix 7 / phase4 3 / rrc1_audit 4 — 全綠 0 fail
+- Build+Deploy：`bash helper_scripts/restart_all.sh --engine-only --rebuild`，PID 1827304 於 22:21 local 起（binary mtime 2026-04-17 22:20）
+- 初步觀察（~1min post-deploy）：`cost_gate(JS-live): no edge estimate — fail-closed` = **0**（之前 85+/hr），`cost_gate(demo-cold-start): no JS estimate — allowing for data accumulation` = 3（Validation moderate gate 正確放行）
 
 | 管線 | 阻擋 Gate | 根因 | 診斷證據 |
 |---|---|---|---|
@@ -81,15 +90,16 @@ git status && git log --oneline -5
 
 **診斷方法**：`on_tick.rs` 添加 P0-6 DIAG `tracing::warn!` 在 `!gate.approved` 時輸出 `rejected_reason`（rate-limited: 前 50 條 + 每 10000 條一次）。此前 `rejected_reason` 被計算但從未 persist/log — 設計盲區。
 
-**下一步**（修復方案 TBD）：
-- [ ] **Live_Demo 死循環打破**：方案 A — 用 LiveDemo→Validation profile mapping（`cost_gate_moderate` cold-start 允許）；方案 B — bootstrap edge 估計（需學習管線 P1-7）
-- [ ] **Demo 死循環打破**：方案 A — 清理 orphan positions（手動或自動）；方案 B — 臨時調高 `correlated_exposure_max_pct`；方案 C — 修 P0-7 使 Close actions 生效
+**下一步**：
+- [x] **Live_Demo 死循環打破**：方案 A — LiveDemo→Validation profile mapping（`cost_gate_moderate` cold-start 允許）✅ 2026-04-17 夜部署
+- [ ] **Live_Demo 觀察**：24-48h 驗證 `decision_features` live_demo rows 持續增長 + 首批 `trading.intents` live_demo rows 出現 + `settings/edge_estimates.json` 開始被寫入
+- [ ] **Demo 死循環打破**：P1-8 FUP `retriage_synthetic_owner` 已 tick-level 執行（Agent 自主），等一週觀察是否消化 6 個 bybit_sync orphan；若不消化再轉方案 B 臨時調 `correlated_exposure_max_pct` 或方案 C 修 P0-7 Close path
 - [ ] **永久修復**：`rejected_reason` 應 persist 到 DB（新欄位或復用 `reason`），而非只在 struct 裡丟棄
-- [ ] 移除 `on_tick.rs` P0-6 DIAG 代碼（根因確認後）
+- [ ] 移除 `on_tick.rs` P0-6 DIAG 代碼（觀察 24-48h 確認 cost_gate(JS-live) 不再出現後再清）
 
 **注意**：`correlated_exposure_max_pct` config TOML = 60.0 但 runtime 為 65.0（GUI hot-reload 修改過）
 
-**阻塞**：Live gate（需真實 fill data → edge 估計 → cost gate 通過；P0-7 共同阻塞）
+**阻塞**：Live gate（需真實 fill data → edge 估計 → cost gate 通過；P0-7 共同阻塞。方案 A 部署後 Live_Demo 死循環已解，但 Live+Mainnet 仍靠 edge 累積 → P1-7 LEARNING-PIPELINE-DORMANT-1 共同阻塞真 live）
 
 ### P0-7 · ORDER-SUBMIT-GAP-1 — live/live_demo Approved verdict 沒觸發真實下單 🟡 REFRAMED 2026-04-17
 **原描述**：570k Approved verdicts + 0 fills = order submit path 被跳過。
