@@ -1,6 +1,6 @@
 # OpenClaw TODO — 工作計劃清單
 
-**最後更新：2026-04-17**（**P0-6 INTENT-WRITE-GAP-1 RCA DONE** — 非 write path 斷裂，是 gate cascade 100% 拒絕：Live_Demo=cost_gate cold-start fail-closed + Demo=correlated exposure ~70%>=65% · **P0-7 REFRAMED** 為 P0-6 子問題 · P0-9 STABILITY-1 ✅ · P1-7 LEARNING-PIPELINE-DORMANT-1 🟡 · LIVE-GUARD-1 ✅）
+**最後更新：2026-04-17 夜**（**P0 歸檔整理**：P0-5 / P0-8 / P0-9 / P0-10 四條完整內容移至 `docs/archive/2026-04-17--completed_todo_p0_scanner_phantom_live_guard.md`，TODO 內僅保留 2 行 stub · **P0-6 INTENT-WRITE-GAP-1 RCA DONE** · **P0-7 REFRAMED** 為 P0-6 子問題 · P1-7 LEARNING-PIPELINE-DORMANT-1 🟡）
 
 **測試基準線**：Rust **engine lib 1351 (default) / 1348 (ort) + core 380 + e2e 35 + reconciler_e2e 19 + ort integration 5** · Python **2898 passed (5 skipped · 0 fail)** · ml_training **182 passed (10 skipped)**
 
@@ -59,50 +59,11 @@ git status && git log --oneline -5
 **阻塞者**：~~P0-0 RECONCILER-BURST-FIX~~ ✅ 已部署。~~P0-1~~ 不必要 — G-2 只覆蓋 funding_arb 子集，Phase 5 整體 edge 用其他 6 策略 fills 已足夠。
 **預估**：乾淨 demo 開跑（2026-04-16 21:08 local 起）後 2 週
 
-### P0-5 · PHANTOM-2-FUP — ReduceToHalf one-shot guard 跨 tick 失效 ✅ 2026-04-16
-**狀態**：修復完成，engine lib 1335 passed / 0 failed（+5 新單測）。待 `restart_all.sh --rebuild` 部署。
-**方案**：**A+C 組合**（先 propose C-alone，QC 對抗性審查翻轉為 A+C — 因 `risk_gov.rs:617` 無自動降級路徑 + `position_risk_evaluator` 不認 sigma 離群，純 C 會讓 drawdown-driven Cautious 下已半倉 symbol 永久鎖定直到 operator 手動 de-escalate）
-- **A**：`ft_reduced_symbols: HashSet<String>` → `HashMap<String, i64>`（symbol → last reduce ts_ms）+ 60s cooldown 封毫秒連發
-- **C**：clear 條件 `< Defensive` → `== Normal`，僅完全回到 Normal 清空（快速 re-arm 新 episode）
-- 新常數 `FT_REDUCE_COOLDOWN_MS = 60_000` 於 `on_tick_helpers.rs:23`（const 不熱載 — 60s 配合 governance Defensive 窗，足夠保守）
-- 新 pure helper `ft_reduce_cooldown_expired()` 使 filter 可單測
-**改動檔案**：
-- `rust/openclaw_engine/src/tick_pipeline/mod.rs`（struct 欄位型別 + init）
-- `rust/openclaw_engine/src/tick_pipeline/on_tick.rs:151-237`（clear 條件 + filter + insert）
-- `rust/openclaw_engine/src/tick_pipeline/on_tick_helpers.rs`（+const + fn）
-- `rust/openclaw_engine/src/tick_pipeline/tests.rs`（+5 新單測）
-**新單測**：
-- `test_ft_reduce_cooldown_expired_no_prior_entry`：首次永遠放行
-- `test_ft_reduce_cooldown_blocks_within_window`：+0ms / +59999ms 一律擋（複現 1.3s/9 次 cascade）
-- `test_ft_reduce_cooldown_re_arms_after_window`：+60000ms 解鎖 + 跨 symbol 獨立
-- `test_ft_reduce_clear_only_on_normal`：Cautious/Reduced/Defensive 絕不清空
-- `test_ft_reduce_cooldown_map_stamps_once_per_window`：真實 TickPipeline + paper_state 整合
-**驗收（部署後觀察）**：
-- `grep "FAST_TRACK ReduceToHalf" /tmp/openclaw/engine.log` 同 symbol 連續事件時間戳間隔 ≥60s（不再毫秒連發）
-- `risk_close:fast_track_reduce_half` 24h 計數 < 50（vs 修復前 335/2.6h，預期降 >80%）
-**RCA**：`docs/references/2026-04-16--phantom2_fup_reduce_to_half_cascade_rca.md`（歷史記錄，已落實）
+### P0-5 · PHANTOM-2-FUP ✅ 2026-04-16（已歸檔）
+已部署（PID 1771173 於 2026-04-17 20:55 起跑，binary mtime 同刻）。詳見歸檔 `docs/archive/2026-04-17--completed_todo_p0_scanner_phantom_live_guard.md` §P0-5。
 
-### P0-8 · LIVE-GUARD-1 — Rust 端 Mainnet 三重硬鎖回補 ✅ 2026-04-16
-**狀態**：修復完成，engine lib 1342 passed / 0 failed（+7 新單測）。E2 對抗性審查 5/5 APPROVED。不需 rebuild 部署（Rust 側變更 — 需走 `restart_all.sh --rebuild`，但**生效條件是 env=Mainnet**，當前 LiveDemo 流量零影響）。
-**根因**：SEC-17（2026-04-10 commit 25b5d73）移除 `OPENCLAW_ALLOW_MAINNET=1` Rust guard 後未補替代 fail-safe；憑證來源同時從「slot 文件唯一」擴展為「env var > slot」雙路徑，導致任何能設環境變數的進程都能繞過 secret slot。門控完全外移 Python → Rust 長跑 × Python 重啟脆弱的對稱性崩潰。
-**方案**：**三重加固 Gate #1/#2/#3**（env 路徑，非 operator-signed file — CLAUDE.md §三建議選項；後者 HMAC+mtime freshness 屬 over-engineer）
-- **Gate #1**: `env=Mainnet` 需 `OPENCLAW_ALLOW_MAINNET=1`（exact "1"，拒絕 "0"/"true"/"yes"/"1 "），缺即 `BybitApiError::Business`
-- **Gate #2**: `env=Mainnet` 時禁用 `BYBIT_API_KEY`/`BYBIT_API_SECRET` env var fallback，只允許 param → slot file（封閉 env 繞 slot 的攻擊面）
-- **Gate #3**: `env=Mainnet` 時憑證空 → 構造時 `Err` fail-closed（之前只 `warn!` + client 建立 + 簽名階段 401，污染重試循環）
-- Demo/Testnet/LiveDemo 不受影響（向後兼容，當前 live pipeline 走 LiveDemo endpoint 零回歸）
-**改動檔案**：
-- `rust/openclaw_engine/src/bybit_rest_client.rs:386-497`（new() 重寫 + 三重 gate + bilingual docstring）
-- 同檔 tests mod +7 新單測（LIVE_GUARD_ENV_LOCK Mutex + EnvSnapshot RAII）
-**新單測**：
-- `test_mainnet_blocked_without_allow_env` — 未設 env → Err
-- `test_mainnet_blocked_with_wrong_allow_value` — "0"/"true"/"yes"/"1 "/" 1" 全拒絕
-- `test_mainnet_blocked_without_credentials` — allow=1 無 creds → Err
-- `test_mainnet_ignores_env_var_credentials` — BYBIT_API_KEY env 有值、slot 無 → 仍 Err（驗 Gate #2）
-- `test_mainnet_accepts_explicit_param_creds` — allow=1 + param 傳入 → OK
-- `test_demo_env_var_creds_still_work` — 回歸守衛：Demo + env var 不壞
-- `test_testnet_no_guard_check` — 回歸守衛：Testnet 不需 allow env
-**E2 審查結論**（5/5 APPROVED）：無 struct literal 繞過、startup.rs:432 + pyo3/client.rs:93 Err 硬傳播、無獨立 HTTP client 可打 mainnet、WS 靠 REST 憑證無獨立 guard 需求、repo grep 無既存 OPENCLAW_ALLOW_MAINNET 誤用值。
-**部署**：下次 `restart_all.sh --rebuild` 附帶生效。當前 LiveDemo→Demo endpoint 零影響；真實 Mainnet 僅在 operator 顯式配置 `trading_mode=Live` + secret slot + env var 三項俱全時可用（門控從 1 項 Rust-verifiable 升為 3 項）。
+### P0-8 · LIVE-GUARD-1 ✅ 2026-04-16（已歸檔）
+已部署。詳見歸檔 `docs/archive/2026-04-17--completed_todo_p0_scanner_phantom_live_guard.md` §P0-8。
 
 ### P0-6 · INTENT-WRITE-GAP-1 — live/live_demo `trading.intents` = 0 根因已確認 🟡 RCA DONE 2026-04-17
 **原描述**：`trading.risk_verdicts` 大量 Approved 但 `trading.intents` live/live_demo/demo = 0。
@@ -139,44 +100,11 @@ git status && git log --oneline -5
   - [ ] P0-6 修復後（Live_Demo cost gate / Demo correlated exposure）此 issue 自動消失
 **阻塞**：Live gate（已與 P0-6 合併為同一阻塞點）
 
-### P0-10 · SCANNER-GATE — orphan_handler death loop fix ✅ 2026-04-17
-**原問題**：策略開倉 → scanner 輪替移除 symbol → orphan_handler A4 強平 → 策略再開 → 死循環。BASEDUSDT 等 20+ 個 symbol 受影響（228 筆 `ipc_close_symbol` fills）。
-**根因**：A4 `HardSafetyNotInUniverse` 把「掃描器輪替掉的持倉」當作 orphan 強平，但引擎會在下一 tick 重新開倉 → 無限循環。同時 REST→WS 時間差（FUP race condition）使引擎自家剛下的單也被誤判為 orphan。
-**修復（三部分）**：
-1. **SCANNER-GATE**：tick_pipeline 新增 `symbol_registry` 字段 + `set_symbol_registry()` setter，在 `on_tick.rs` strategy Open dispatch 前檢查 `reg.is_active(symbol)`，非活躍 symbol 阻止開新倉
-2. **FUP-RACE**：`paper_state.rs` 新增 `proactive_mirror_insert()`，exchange OrderDispatchRequest 發送後立即寫 mirror，彌合 REST→WS 空窗
-3. **A4 移除**：`orphan_handler.rs` Stage A4 代碼移除（enum 變體保留 DB backward compat），orphan 定義改為純「重啟後遺留」，不含 scanner 輪替
-**改動檔案**：`tick_pipeline/mod.rs`（+field +setter +init）· `on_tick.rs`（+scanner gate + proactive mirror）· `paper_state.rs`（+proactive_mirror_insert）· `orphan_handler.rs`（-A4 +updated tests +doc）· `event_consumer/mod.rs`（+registry wiring）
-**測試**：engine lib 1351 passed / 0 failed（含 17 orphan_handler 測試全綠）· core 380 passed
-**部署**：待 `restart_all.sh --rebuild`
+### P0-10 · SCANNER-GATE ✅ 2026-04-17（已歸檔）
+已部署（PID 1771173, binary mtime 2026-04-17 20:55 local）。詳見歸檔 `docs/archive/2026-04-17--completed_todo_p0_scanner_phantom_live_guard.md` §P0-10。
 
-### P0-9 · STABILITY-1 — 2026-04-16 停電事件 RCA 完成 ✅（非代碼 bug，單次基礎設施事件）
-**原敘述**：當日 9h 引擎 5 次崩潰被誤判為「代碼穩定性 P0-CRITICAL 阻塞 + 21d 時鐘必須重置」。
-**RCA 結論（2026-04-16 深夜，operator 確認）**：**全部 30 次 crash（深入撈後實為 30 非 5）均為單次斷電造成的網路基礎設施事件，非引擎代碼 bug。** 21d demo 時鐘**不重置**。
-
-**證據鏈**：
-- 時區：operator 筆電 CEST (UTC+2) — UTC→local 加 2h
-- operator 報告：**2026-04-16 10:00-16:00 local 停電 ~6h**，造成斷網
-- **第一次 crash 10:45 local**（08:45 UTC）= 停電後 45min（電池 + 路由器失電）
-- **watchdog 完全靜默 13:16-18:03 local**（4h 47min blackout）= 筆電電池耗盡或硬關機期間
-- **post-gap 首條** `snapshot age=17313.5s`（4.81h 陳舊）= 硬斷電復電鐵證
-- **engine log（engine-1776330656.log 09:10 UTC 啟動）**所有錯誤簽名一致：
-  - `HTTP transport error: error sending request for url (https://api-demo.bybit.com/...)`
-  - `IO error: failed to lookup address information: Temporary failure in name resolution`（DNS 失敗）
-  - REST / WS private / WS public 全部連不上 Bybit
-- 非代碼 bug 的證據：**零 panic、零 assertion、零 rust backtrace**；全部為 DNS/transport error 合理 fail-closed 行為
-- 斷網恢復後（18:03 local 之後）網路還不穩又滾了幾輪，再之後當前 PID 1364222 於 22:16 local 穩定啟動
-
-**對觀察期時鐘的判定**：
-- **P0-2 LG-1 21d demo 時鐘不重置**：基礎設施事件 ≠ 引擎不穩定。若每次停電都重置時鐘，21d 永遠達不到
-- **P0-3 Phase 5 edge 2w 重評**：crash 時段（10:45-18:03 local）fills 樣本應排除（自然也沒有 fills，因為引擎連不上 Bybit）
-
-**Nice-to-have（不阻塞）**：
-- `engine_watchdog` 可加 network-loss detection（DNS failure 連續 N 次分類為 `network_outage`，不計入 stability strike）
-- 不急，等有空再做
-
-**阻塞**：無（已解除，非 Live 前置）
-**歸檔**：本 audit 結論取代 §三「9h 5 crash / 21d 時鐘未啟動」敘述，CLAUDE.md §三 + §十 + §十一 同步更新
+### P0-9 · STABILITY-1 ✅ 2026-04-16（已歸檔）
+RCA 完成：30 次 crash 全為單次停電 infra 事件，非 code bug；21d 時鐘不重置。詳見歸檔 `docs/archive/2026-04-17--completed_todo_p0_scanner_phantom_live_guard.md` §P0-9。
 
 **關鍵路徑**:`~~P0-0 reconciler burst fix~~ ✅ → ~~restart_all --rebuild 部署~~ ✅ → ~~P0-9 STABILITY-1 引擎崩潰 RCA~~ ✅（停電 infra 事件，非 code bug）→ P0-6/P0-7 查清 intent/order 寫入斷點 → P0-3 Phase 5 edge 2w 評估 + P0-2 LG-1 21d demo → **P1-7 LEARNING-PIPELINE-DORMANT-1** → LG-4/5 → Live`(P0-1 G-2 並行驗證 funding_arb 子集,不在主路徑;~~P0-5 PHANTOM-2-FUP~~ ✅ 待 `--rebuild` 部署即生效;~~P0-8 LIVE-GUARD-1~~ ✅ Rust 端 Mainnet 三重硬鎖回補,解除 CLAUDE.md §三 LIVE-GUARD-1 P0-CRITICAL 阻塞)
 **最早 Live 日期**:回到 **W24 末（～2026-05-23）** — P0-9 停電事件 RCA 後不延後
@@ -232,7 +160,7 @@ git status && git log --oneline -5
 **阻塞**：不阻 Live（Live 用 demo fills 做 edge 估計路徑另案），但阻 Phase 5 edge 收斂 + Stage 2 shadow mode 起步
 **與 P1-4 關係**：P1-4「跑首個 ONNX」是本項子任務；本項是框架性 audit finding（數據到訓練到載入三段，只有載入端就緒）
 
-### P1-8 · DUST-EVICTION-GAP-1 — P0-6 triage evict dust 倉位無法平倉（engine/exchange silent drift）🟡 NEW 2026-04-17
+### P1-8 · DUST-EVICTION-GAP-1 — P0-6 triage evict dust 倉位無法平倉（engine/exchange silent drift）🟢 E1/E4 DONE 2026-04-17
 **發現**：2026-04-17 ADAPTIVE-EXIT-FASTTRACK 部署（commit 待補）後驗證重啟 orphan 接管，抓到 P0-6 triage 對 dust 倉位處理 gap：
 - 重啟 capture 7 個 demo bybit_sync 持倉；triage 分流 `adopted=1` (ETHUSDT→ma_crossover) `evicted=5`
 - 5 個 evict 全部經 `ipc_close_symbol` 派發，但只有 **AVAXUSDT / CLUSDT** 真正進 `trading.fills`
@@ -252,7 +180,7 @@ git status && git log --oneline -5
 
 **影響範圍**：demo/live 共通；live 下累積 dust 會造成 ledger ↔ exchange 對賬偏差，違反 §憲法 #9「交易所災難保護位置對稱」前提。
 
-**不阻 Live**：啟真 live 前 operator 需先 Bybit GUI 手動清 dust（本票屬結構性修）。P1 優先級。
+**不阻 Live**：FUP（2026-04-17）引入 tick-level `retriage_synthetic_owner` 後，dust 倉位由 Agent 自主復活/清理，無需 operator 介入或 Bybit GUI 手動清 dust（§原則 #11）。P1 優先級保留，僅剩 P2 QoL GUI 曝光。
 
 **關聯**：
 - P0-10 SCANNER-GATE（scanner 輪替退集合 → owner 倉位需 evict，dust 在此路徑特別易產生）
@@ -260,10 +188,35 @@ git status && git log --oneline -5
 - 原始 `tick_pipeline::commands` ipc_close_symbol orphan hint 路徑（18:55:57Z 5 次 INFO log 可印證）
 
 **下一步**：
-  1. E1 pick-up：確認 `event_consumer.rs` P0-6 triage evict callsite + `dispatch.rs` min_notional gate 行號
-  2. 方案 1 實作（evict 前 notional 預檢，< min_notional 直接 mark `orphan_frozen`，加 metric counter）
-  3. E2 審 + E4 寫單測（3 種 dust 配置 + 1 種 normal 配置）
-  4. 部署後觀察：`/api/v1/system/orphan_frozen` GUI 曝光（或先 log-only 一週）
+  1. ~~E1 pick-up：確認 `event_consumer.rs` P0-6 triage evict callsite + `dispatch.rs` min_notional gate 行號~~ ✅
+  2. ~~方案 1 實作（evict 前 notional 預檢，< min_notional 直接 mark `orphan_frozen`）~~ ✅ 2026-04-17
+  3. ~~E4 寫單測（3 dust + 1 normal）~~ ✅ 2026-04-17 `paper_state.rs` 新增 5 個 DUST-EVICTION 測試（dust_frozen / normal evict / None fallback / 邊界 `==` / 三分支 mixed）
+  4. 部署後觀察：先 log-only 一週，後續 GUI 曝光歸入 P2 QoL
+
+**實施結果**（2026-04-17）：
+- `position_reconciler/orphan_handler.rs` +`DUST_FROZEN_STRATEGY = "orphan_frozen"` 常量（刻意不入 `KNOWN_STRATEGY_NAMES`）
+- `paper_state.rs` `TriageOutcome` +`dust_frozen: Vec<(symbol, is_long, qty, est_notional, min_notional)>`；`triage_bybit_sync` 加 `dust_check: impl Fn(&str, f64) -> Option<(f64, f64)>` 參數
+- `event_consumer/mod.rs` triage 調用前建 `ref_prices` HashMap（latest_price → entry_price 備援），dust_check 回傳 `(qty * ref_price, spec.min_notional)`；新 warn! log `DUST-EVICTION-GAP-1:` + `P0-6 triage complete` 加 `dust_frozen` 計數
+- 邊界對齊：est_notional `< min_notional` 嚴格小於（與 `dispatch.rs:76` 一致）
+- engine lib 測試：**1391 passed / 0 failed**（triage 模組 11 passed = 6 legacy + 5 新增）
+
+**FUP（2026-04-17，覆蓋全 synthetic labels 自主接管）**：
+- **問題**：初版只在啟動時 triage `bybit_sync` → live session 期間 `orphan_frozen` / `orphan_adopted` / `bybit_sync` 三 synthetic labels 無路徑自動升級回真策略；違反 §原則 #11。
+- **設計**（Opt A tick-level opportunistic）：
+  - `paper_state.rs` 新增 `SYNTHETIC_OWNER_LABELS = ["bybit_sync", "orphan_adopted", "orphan_frozen"]`
+  - `RetriageOutcome` enum（`NoOp` / `FrozenAsDust` / `Promoted` / `NeedsEviction`）+ `retriage_synthetic_owner(symbol, price, in_universe, target_strategy, min_notional)` 方法
+  - `tick_pipeline` 新增 `retriage_last_evict_ms: HashMap<String, u64>` + `retriage_synthetic_owner_for_symbol()`；`on_tick.rs` 在 `set_latest_price` 後掛 hook
+  - Fast path：非 synthetic label 單次 HashMap lookup + string compare return
+  - Promoted 時清 dedup entry；NeedsEviction 走 `ORPHAN_CLOSE_DEDUP_MS=2min` dedup 後 `ipc_close_symbol` 派發
+- **行為矩陣**：
+  | 條件 | 結果 |
+  |---|---|
+  | 非 synthetic owner | NoOp（fast path） |
+  | qty=0 / price≤0 | NoOp |
+  | `est_notional < min_notional` | FrozenAsDust（首次 demote 時 was_downgraded=true warn） |
+  | `in_universe && notional OK` | Promoted → `KNOWN_STRATEGY_NAMES[0]` |
+  | `!in_universe && notional OK` | NeedsEviction → 2min dedup `ipc_close_symbol` |
+- **engine lib 測試**：**1413 passed / 0 failed**（retriage 模組 10 新增 = noop_real / noop_no_pos / freeze_dust / idempotent_frozen / promote_frozen_recovery / promote_bybit_sync / promote_orphan_adopted / needs_eviction_oob / zero_price_noop / no_min_notional_skip）
 
 ### AI 治理層補強
 - [ ] **G-7** ClaudeTeacher 正式啟用（W23）
@@ -438,13 +391,14 @@ git status && git log --oneline -5
 | G-8 | cost_gate 可信度低 | EDGE-P3-1 後 | ⬜ |
 | G-9 | HMAC dead import | W20 | ✅ |
 | G-10 | Calibration.py 骨架 | W23 | ⬜ |
-| G-11 | P0-6 triage evict dust 倉位無法平倉（silent drift）→ P1-8 DUST-EVICTION-GAP-1 | W23（log-only 先） | 🟡 NEW 2026-04-17 |
+| G-11 | P0-6 triage evict dust 倉位無法平倉（silent drift）→ P1-8 DUST-EVICTION-GAP-1 | W23（log-only 先） | 🟢 E1/E4 DONE 2026-04-17 |
 
 ---
 
 ## 📚 已完成歸檔索引
 
-- **2026-04-16 STRATEGY-CLOSE-TAG-FIX + EDGE-P3-1 Phase B #3 + DEDUP-PY-RUST**：`docs/archive/2026-04-16--completed_todo_strategy_close_tag_edge_p3_dedup.md` ← **本次整理新增**
+- **2026-04-17 SCANNER-GATE + PHANTOM-2-FUP + LIVE-GUARD-1 + STABILITY-1 RCA**：`docs/archive/2026-04-17--completed_todo_p0_scanner_phantom_live_guard.md` ← **本次整理新增**
+- **2026-04-16 STRATEGY-CLOSE-TAG-FIX + EDGE-P3-1 Phase B #3 + DEDUP-PY-RUST**：`docs/archive/2026-04-16--completed_todo_strategy_close_tag_edge_p3_dedup.md`
 - **2026-04-15 W22 ENGINE-HEAL + EDGE-P3-1 + GUI Fills**：`docs/archive/2026-04-15--completed_todo_w22_engine_heal_edge_p3.md`
 - **2026-04-14 Phantom-Heal + Engine Self-Healing + EDGE**：`docs/archive/2026-04-14--completed_todo_w22_phantom_heal.md`
 - **2026-04-12 全程序鏈審計**：`docs/archive/2026-04-12--completed_todo_full_program_audit.md`
