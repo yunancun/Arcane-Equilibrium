@@ -1456,7 +1456,8 @@ use super::*;
     fn test_ft_reduce_cooldown_expired_no_prior_entry() {
         // Never-halved symbol is always eligible — filter returns true.
         // 從未半倉的 symbol 永遠可觸發 — filter 回 true。
-        let map: std::collections::HashMap<String, i64> = std::collections::HashMap::new();
+        let map: std::collections::HashMap<String, super::on_tick_helpers::FtReduceStamp> =
+            std::collections::HashMap::new();
         assert!(super::on_tick_helpers::ft_reduce_cooldown_expired(
             &map, "BTCUSDT", 1_700_000_000_000
         ));
@@ -1466,8 +1467,11 @@ use super::*;
     fn test_ft_reduce_cooldown_blocks_within_window() {
         // Same-tick and sub-cooldown re-emits are blocked.
         // 同 tick 與冷卻窗內的重觸發一律擋掉。
-        let mut map: std::collections::HashMap<String, i64> = std::collections::HashMap::new();
-        map.insert("BTCUSDT".to_string(), 1_700_000_000_000);
+        let mut map: std::collections::HashMap<String, super::on_tick_helpers::FtReduceStamp> =
+            std::collections::HashMap::new();
+        // Stamp with base cooldown (60_000 ms) so the legacy semantics hold.
+        // 以基準冷卻（60 秒）建檔，保留舊行為。
+        map.insert("BTCUSDT".to_string(), (1_700_000_000_000, 60_000));
         // +0 ms (same tick) — reproduces the 1.3s / 9-fire cascade.
         // +0 毫秒（同 tick）— 複現 1.3s 連發 9 次的 cascade。
         assert!(!super::on_tick_helpers::ft_reduce_cooldown_expired(
@@ -1484,8 +1488,9 @@ use super::*;
     fn test_ft_reduce_cooldown_re_arms_after_window() {
         // Exactly at cooldown boundary re-arms; per-symbol independence holds.
         // 冷卻到期即解鎖；每 symbol 獨立計時。
-        let mut map: std::collections::HashMap<String, i64> = std::collections::HashMap::new();
-        map.insert("BTCUSDT".to_string(), 1_700_000_000_000);
+        let mut map: std::collections::HashMap<String, super::on_tick_helpers::FtReduceStamp> =
+            std::collections::HashMap::new();
+        map.insert("BTCUSDT".to_string(), (1_700_000_000_000, 60_000));
         // Exactly 60_000 ms later — allowed (>= FT_REDUCE_COOLDOWN_MS).
         // 剛好 60 秒後 — 允許（>= FT_REDUCE_COOLDOWN_MS）。
         assert!(super::on_tick_helpers::ft_reduce_cooldown_expired(
@@ -1539,11 +1544,11 @@ use super::*;
             .apply_fill("BTCUSDT", true, 0.1, 50_000.0, 0.0, 1_000, "test");
         assert_eq!(pipeline.paper_state.position_count(), 1);
 
-        // Simulate first halving at ts = 1_000_000.
-        // 模擬第一次半倉，時間戳 1,000,000。
+        // Simulate first halving at ts = 1_000_000 with base 60s cooldown.
+        // 模擬第一次半倉，時間戳 1,000,000，基準 60 秒冷卻。
         pipeline
             .ft_reduced_symbols
-            .insert("BTCUSDT".to_string(), 1_000_000);
+            .insert("BTCUSDT".to_string(), (1_000_000, 60_000));
 
         // Within cooldown window (+30 s) — filter must reject the symbol.
         // 冷卻窗內（+30 秒）— filter 必須擋下。
@@ -1561,5 +1566,91 @@ use super::*;
             &pipeline.ft_reduced_symbols,
             "BTCUSDT",
             now_after
+        ));
+    }
+
+    // ── B2: sigma_scaled_reduce_cooldown_ms — pure function tests ──
+    // B2：sigma_scaled_reduce_cooldown_ms 純函數測試
+    //
+    // Formula: base (60_000) × max(1, sigma/3), capped at FT_REDUCE_COOLDOWN_MAX_MS.
+    // Trigger threshold is sigma≥3 (fast_track.rs:89) — at exactly 3σ the
+    // cooldown equals base; each additional sigma scales linearly.
+    // 公式：base × max(1, sigma/3)，上限 600_000。3σ = 1×，每多 1σ 線性放大。
+
+    #[test]
+    fn test_b2_sigma_scaled_at_trigger_threshold() {
+        // sigma = 3.0 (minimum trigger) → cooldown = base.
+        // sigma = 3.0（觸發下限）→ 冷卻 = 基準。
+        assert_eq!(
+            super::on_tick_helpers::sigma_scaled_reduce_cooldown_ms(3.0),
+            super::on_tick_helpers::FT_REDUCE_COOLDOWN_MS
+        );
+    }
+
+    #[test]
+    fn test_b2_sigma_scaled_linear_above_threshold() {
+        // sigma = 6 → 2× base; sigma = 9 → 3× base.
+        // sigma = 6 → 2×；sigma = 9 → 3×。
+        assert_eq!(
+            super::on_tick_helpers::sigma_scaled_reduce_cooldown_ms(6.0),
+            super::on_tick_helpers::FT_REDUCE_COOLDOWN_MS * 2
+        );
+        assert_eq!(
+            super::on_tick_helpers::sigma_scaled_reduce_cooldown_ms(9.0),
+            super::on_tick_helpers::FT_REDUCE_COOLDOWN_MS * 3
+        );
+    }
+
+    #[test]
+    fn test_b2_sigma_scaled_clamps_at_max() {
+        // sigma = 30 → 10× base = 600_000 (at cap). sigma = 50 → still 600_000.
+        // sigma = 30 → 10×（上限）；sigma = 50 → 仍上限。
+        assert_eq!(
+            super::on_tick_helpers::sigma_scaled_reduce_cooldown_ms(30.0),
+            super::on_tick_helpers::FT_REDUCE_COOLDOWN_MAX_MS
+        );
+        assert_eq!(
+            super::on_tick_helpers::sigma_scaled_reduce_cooldown_ms(50.0),
+            super::on_tick_helpers::FT_REDUCE_COOLDOWN_MAX_MS
+        );
+    }
+
+    #[test]
+    fn test_b2_sigma_scaled_floors_at_base() {
+        // Below-threshold sigma (defensive caller) must not shrink the guard
+        // below base — floor at FT_REDUCE_COOLDOWN_MS.
+        // 低於 3σ 的防禦性入口不可縮短冷卻 — 以 base 為下限。
+        assert_eq!(
+            super::on_tick_helpers::sigma_scaled_reduce_cooldown_ms(1.0),
+            super::on_tick_helpers::FT_REDUCE_COOLDOWN_MS
+        );
+        assert_eq!(
+            super::on_tick_helpers::sigma_scaled_reduce_cooldown_ms(0.0),
+            super::on_tick_helpers::FT_REDUCE_COOLDOWN_MS
+        );
+    }
+
+    #[test]
+    fn test_b2_cooldown_expiry_uses_stamped_window_not_base() {
+        // Regression: the 6σ halving event stamped 120 s into the map must
+        // BLOCK a retry at +90 s (would pass against base 60 s) and ADMIT one
+        // at +120 s exactly. Locks the B2 wiring in ft_reduce_cooldown_expired.
+        // 回歸：6σ 事件寫入 120 s 冷卻 → +90 s 擋、+120 s 放行（基準 60 s 會誤放 +90 s）。
+        let mut map: std::collections::HashMap<String, super::on_tick_helpers::FtReduceStamp> =
+            std::collections::HashMap::new();
+        let stamped = super::on_tick_helpers::sigma_scaled_reduce_cooldown_ms(6.0);
+        assert_eq!(stamped, 120_000);
+        map.insert("MICRO".to_string(), (1_000_000, stamped));
+        // +90 s — inside the sigma-scaled window, must block.
+        assert!(!super::on_tick_helpers::ft_reduce_cooldown_expired(
+            &map, "MICRO", 1_000_000 + 90_000
+        ));
+        // +119_999 — still inside the stamped window.
+        assert!(!super::on_tick_helpers::ft_reduce_cooldown_expired(
+            &map, "MICRO", 1_000_000 + 119_999
+        ));
+        // +120_000 — exact expiry.
+        assert!(super::on_tick_helpers::ft_reduce_cooldown_expired(
+            &map, "MICRO", 1_000_000 + 120_000
         ));
     }

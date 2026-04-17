@@ -2,7 +2,7 @@
 //! on_tick 管線處理 — 核心逐 tick 編排循環。
 
 use super::*;
-use super::on_tick_helpers::{push_capped, make_context_id, make_signal_id, make_fill_id, make_order_id, persist_verdict, persist_intent, push_display_intent, build_intent, ft_reduce_cooldown_expired};
+use super::on_tick_helpers::{push_capped, make_context_id, make_signal_id, make_fill_id, make_order_id, persist_verdict, persist_intent, push_display_intent, build_intent, ft_reduce_cooldown_expired, sigma_scaled_reduce_cooldown_ms, FT_REDUCE_COOLDOWN_MS};
 
 impl TickPipeline {
     /// Process a single price event through the full pipeline.
@@ -181,10 +181,38 @@ impl TickPipeline {
             // P0-5: cast once per tick for the filter + insert.
             // P0-5：每 tick 轉型一次供 filter 與 insert 共用。
             let now_ts_ms: i64 = event.ts_ms as i64;
+
+            // B1: Classify the trigger. A 5%+3σ held-drop at Normal/Cautious
+            // is a *symbol-specific* outlier event — scope the reduction to
+            // just that symbol. Systemic triggers (Defensive+ without drop,
+            // margin, ≥15% fall-through) still reduce every position.
+            // B1：分類觸發源。5%+3σ+<Defensive 為單 symbol 異常事件，限定
+            //     該 symbol 減半；系統性觸發維持全倉減半。
+            let drop_scoped = crate::fast_track::is_drop_scoped_reduce(
+                self.governance.risk.level,
+                held_drop_pct,
+                held_drop_sigma,
+            );
+
+            // B2: Compute the cooldown that will be stamped for this reduce
+            // event. Drop-triggered reductions scale with sigma; systemic
+            // reductions keep the base window.
+            // B2：本次半倉事件寫入冷卻表的有效 ms。drop 觸發按 sigma 縮放，
+            //     系統性觸發用基準窗口。
+            let effective_cooldown_ms = if drop_scoped {
+                sigma_scaled_reduce_cooldown_ms(held_drop_sigma)
+            } else {
+                FT_REDUCE_COOLDOWN_MS
+            };
+
             let positions: Vec<(String, bool, f64)> = self
                 .paper_state
                 .positions()
                 .iter()
+                .filter(|p| {
+                    // B1: drop-scoped reduce only halves the triggering symbol.
+                    !drop_scoped || p.symbol == held_drop_symbol
+                })
                 .filter(|p| {
                     ft_reduce_cooldown_expired(&self.ft_reduced_symbols, &p.symbol, now_ts_ms)
                 })
@@ -199,6 +227,8 @@ impl TickPipeline {
                     held_drop_sigma,
                     held_drop_symbol = %held_drop_symbol,
                     margin_utilization_pct,
+                    drop_scoped,
+                    effective_cooldown_ms,
                     "FAST_TRACK ReduceToHalf — halving positions (one-shot) / 快速通道半倉（一次性）"
                 );
                 for (sym, is_long, qty) in &positions {
@@ -231,10 +261,13 @@ impl TickPipeline {
                             }
                         }
                     }
-                    // EDGE-P0-1 + P0-5: Stamp last-reduce ts so the cooldown
-                    // gate can expire this symbol after FT_REDUCE_COOLDOWN_MS.
-                    // EDGE-P0-1 + P0-5：記錄半倉時間戳，冷卻窗到期後可再次半倉。
-                    self.ft_reduced_symbols.insert(sym.clone(), now_ts_ms);
+                    // EDGE-P0-1 + P0-5 + B2: Stamp (last-reduce ts, effective cooldown)
+                    // so `ft_reduce_cooldown_expired` uses the sigma-scaled window
+                    // captured at the moment of halving.
+                    // EDGE-P0-1 + P0-5 + B2：寫入（半倉時間戳, 有效冷卻 ms），
+                    // 冷卻依觸發 sigma 鎖定。
+                    self.ft_reduced_symbols
+                        .insert(sym.clone(), (now_ts_ms, effective_cooldown_ms));
                 }
             }
             // Continue processing stops but skip new entries (ft_pause_new_entries = true)
