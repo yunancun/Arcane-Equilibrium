@@ -32,6 +32,7 @@
     <h3>&#x1F4B0; 账户余额 / Account Balance</h3>
     <div class="oc-metrics" id="balance-grid">
       <div class="oc-metric"><div class="oc-metric-label">初始余额 / Initial Balance</div><div class="oc-metric-val" id="d-initial">--</div></div>
+      <div class="oc-metric"><div class="oc-metric-label" title="钱包余额 + 未实现盈亏，当前账户的真实总价值。/ Wallet balance + unrealized PnL, the current real-time total value of the account.">总净值 / Total Equity</div><div class="oc-metric-val" id="d-equity">--</div></div>
       <div class="oc-metric"><div class="oc-metric-label">可用余额 / Available Balance</div><div class="oc-metric-val" id="d-available">--</div></div>
       <div class="oc-metric"><div class="oc-metric-label">已用保证金 / Margin Used</div><div class="oc-metric-val" id="d-margin">--</div></div>
       <div class="oc-metric"><div class="oc-metric-label">峰值余额 / Peak Balance</div><div class="oc-metric-val" id="d-peak">--</div></div>
@@ -193,9 +194,14 @@ async function loadDemoStatus() {
     $('demo-content').style.display = '';
     $('demo-offline').style.display = 'none';
     renderBalance(balD.data);
+    // Fills must load first: positions/orders tables derive the symbol→strategy
+    // map from _demoFillsCache (paper pipeline can be disabled, so paper
+    // positions are an unreliable source for strategy attribution).
+    // fills 必須先載入：持倉/訂單表的 symbol→策略名 依賴 _demoFillsCache（paper 管線可關，
+    // 不能作為策略歸屬的可靠來源）。
+    await loadDemoFills();
     loadPositions();
     loadDemoOrders();
-    await loadDemoFills();
     loadDemoMetrics(balD.data);
     loadComparison();
     return;
@@ -241,6 +247,10 @@ function renderBalance(raw) {
     ? engineInitial
     : (equity - realized - unrealized);
   ocSetText('d-initial', ocBalance(initialApprox, 2));
+
+  // Total equity (wallet + unrealized) — engine/exchange authoritative
+  // 總淨值（錢包餘額 + 未實現盈虧）— 以引擎/交易所為權威
+  ocSetText('d-equity', ocBalance(equity, 2));
 
   // Available balance
   ocSetText('d-available', ocBalance(available, 2));
@@ -314,9 +324,27 @@ function renderBalance(raw) {
   }
 }
 
-// Paper strategy map: symbol → strategy_name (cross-referenced for Demo display)
-// Paper 策略映射：symbol → strategy_name（用于 Demo 表格显示）
-let _paperStratMap = {};
+// Demo strategy map: symbol → strategy_name, derived from _demoFillsCache
+// (most recent fill per symbol carries the owning strategy). Paper pipeline
+// can be disabled, so paper positions are not a reliable source.
+// Demo 策略映射：symbol → strategy_name，從 _demoFillsCache 推導
+// （每個 symbol 最新一筆 fill 的 strategy_name 即當前擁有該倉位的策略）。
+// paper 管線可關，paper 持倉不可靠。
+let _demoStratMap = {};
+function _buildDemoStratMap(fills) {
+  const m = {};
+  if (!Array.isArray(fills)) return m;
+  // Fills endpoint returns most-recent-first (ORDER BY ts DESC), so the first
+  // occurrence per symbol is the latest strategy attribution.
+  // fills 端點按 ts DESC 排，首見 symbol 即最新策略歸屬。
+  for (const f of fills) {
+    const sym = f && f.symbol;
+    if (!sym || m[sym]) continue;
+    const s = f.strategy || f.strategy_name;
+    if (s) m[sym] = s;
+  }
+  return m;
+}
 
 async function loadPositions() {
   const d = await ocApi('/api/v1/strategy/demo/positions');
@@ -335,17 +363,9 @@ async function loadPositions() {
     ocSetHtml('demo-positions', '<tr class="empty-row"><td colspan="11">暂无持仓</td></tr>');
     return;
   }
-  // Cross-reference with Paper positions to get strategy_name / 交叉参考 Paper 持仓获取策略名
-  let paperStratMap = {};
-  try {
-    const pd = await ocApi('/api/v1/paper/positions');
-    if (pd && pd.data) {
-      const pp = pd.data.positions || pd.data || {};
-      const ppList = Array.isArray(pp) ? pp : Object.values(pp);
-      ppList.forEach(p => { if (p.symbol && p.strategy_name) paperStratMap[p.symbol] = p.strategy_name; });
-    }
-  } catch(e) {}
-  _paperStratMap = paperStratMap;
+  // Derive symbol→strategy from the demo fills cache (latest fill per symbol).
+  // 從 demo fills 快取推導 symbol→策略（每個 symbol 取最新一筆 fill 的 strategy_name）。
+  _demoStratMap = _buildDemoStratMap(_demoFillsCache);
   let html = '';
   positions.forEach(p => {
     const pnl = parseFloat(p.unrealisedPnl || p.unrealised_pnl || p.unrealized_pnl || 0);
@@ -353,7 +373,7 @@ async function loadPositions() {
     // Bybit API: category from symbol suffix heuristic (USDT=linear, USD=inverse, else spot)
     const sym = p.symbol || '';
     const cat = p.category || (sym.endsWith('USD') && !sym.endsWith('USDT') ? 'inverse' : 'linear');
-    const strat = paperStratMap[sym] || '--';
+    const strat = _demoStratMap[sym] || '--';
     html += '<tr>';
     html += '<td><strong>' + ocEsc(p.symbol) + '</strong></td>';
     html += '<td style="font-size:11px">' + ocEsc(strat) + '</td>';
@@ -374,6 +394,11 @@ async function loadPositions() {
 async function loadDemoOrders() {
   const d = await ocApi('/api/v1/strategy/demo/orders');
   if (!d || !d.data) return;
+  // Refresh strategy map (defensive — loadPositions may not have run yet).
+  // 防禦性刷新策略映射（loadPositions 可能尚未執行）。
+  if (Object.keys(_demoStratMap).length === 0) {
+    _demoStratMap = _buildDemoStratMap(_demoFillsCache);
+  }
   let orders = [];
   if (d.data.result && d.data.result.list) {
     orders = d.data.result.list;
@@ -411,7 +436,7 @@ async function loadDemoOrders() {
     const triggerPrice = parseFloat(o.triggerPrice || 0);
     const sym = o.symbol || '';
     const cat = o.category || (sym.endsWith('USD') && !sym.endsWith('USDT') ? 'inverse' : 'linear');
-    const strat = _paperStratMap[sym] || '--';
+    const strat = _demoStratMap[sym] || '--';
     html += '<tr>';
     html += '<td>' + ocEsc(o.symbol) + '</td>';
     html += '<td style="font-size:11px">' + ocEsc(strat) + '</td>';
