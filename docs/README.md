@@ -422,16 +422,16 @@ YYYY-MM-DD--HHmm--功能描述.扩展名
 | 文件 | 内容 |
 |------|------|
 | **state_dictionary/** | |
-| `状态字典_数据字典_v1_最终版.md` | 状态字典 / 数据字典 V1 最终版（1149 行） |
-| `状态字典_v1_rc2_伴随补丁.md` | 状态字典 V1 RC2 伴随补丁 |
+| `2026-03-25--状态字典_数据字典_v1_最终版.md` | 状态字典 / 数据字典 V1 最终版（1149 行） |
+| `2026-03-25--状态字典_v1_rc2_伴随补丁.md` | 状态字典 V1 RC2 伴随补丁 |
 | **api_contract/** | |
-| `control_api_v1_最终定稿.md` | Control API V1 最终定稿（1008 行） |
-| `control_api_v1_rc2_最终候选版.md` | Control API V1 RC2 最终候选版 |
-| `control_api_v1_rc2_审核报告.md` | Control API V1 RC2 审核报告 |
-| `fastapi_openapi_v1_rc2_路由草案.md` | FastAPI / OpenAPI V1 RC2 路由草案 |
-| `后端实现清单_v1_rc2.md` | 后端实现清单 V1 RC2 |
+| `2026-03-25--control_api_v1_最终定稿.md` | Control API V1 最终定稿（1008 行） |
+| `2026-03-25--control_api_v1_rc2_最终候选版.md` | Control API V1 RC2 最终候选版 |
+| `2026-03-25--control_api_v1_rc2_审核报告.md` | Control API V1 RC2 审核报告 |
+| `2026-03-25--fastapi_openapi_v1_rc2_路由草案.md` | FastAPI / OpenAPI V1 RC2 路由草案 |
+| `2026-03-25--后端实现清单_v1_rc2.md` | 后端实现清单 V1 RC2 |
 | **api_stub/** | |
-| `control_api_v1_rc2_fastapi_stub.py` | FastAPI 骨架代码（553 行） |
+| `2026-03-25--control_api_v1_rc2_fastapi_stub.py` | FastAPI 骨架代码（553 行） |
 | **根目录** | |
 | `2026-03-25--capability_and_permission_switch_plan_v1.md` | 能力与权限开关规划 V1（md） |
 | `2026-03-25--capability_and_permission_switch_plan_v1.pdf` | 能力与权限开关规划 V1（pdf） |
