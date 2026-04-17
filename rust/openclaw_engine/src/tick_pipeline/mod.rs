@@ -789,6 +789,13 @@ pub struct TickPipeline {
     /// 掃描器交易對注冊表 — 新開倉僅限掃描器活躍交易對。
     /// None = 門控停用（允許所有交易對，如測試/獨立運行）。
     symbol_registry: Option<Arc<crate::scanner::registry::SymbolRegistry>>,
+    /// DUST-EVICTION-GAP-1 / P1-8 FUP (2026-04-17): per-symbol last `NeedsEviction`
+    /// dispatch timestamp (ms since epoch). Used to rate-limit `ipc_close_symbol`
+    /// retries on symbols whose retriage keeps asking for a close but the exchange
+    /// has yet to settle the fill. Matches `ORPHAN_CLOSE_DEDUP_MS` cadence (2 min).
+    /// DUST-EVICTION-GAP-1 / P1-8 FUP：每 symbol 最後一次重分流派 CloseSymbol 的
+    /// 時間戳，用於速率限制（與 ORPHAN_CLOSE_DEDUP_MS 2 min 一致）。
+    retriage_last_evict_ms: HashMap<String, u64>,
 }
 
 impl TickPipeline {
@@ -873,6 +880,7 @@ impl TickPipeline {
             decision_feature_tx: None,
             shadow_fill_db_tx: None,
             symbol_registry: None,
+            retriage_last_evict_ms: HashMap::new(),
         }
     }
 
@@ -1566,6 +1574,119 @@ impl TickPipeline {
 
     // 3E-4: Multi-mode infrastructure REMOVED — each pipeline is independent.
     // 3E-4：多模式基礎設施已移除 — 每管線獨立運行。
+
+    /// DUST-EVICTION-GAP-1 / P1-8 FUP (2026-04-17): per-tick hook called from `on_tick`.
+    /// Reads instrument_cache + symbol_registry snapshot for this symbol, delegates the
+    /// actual decision to `paper_state.retriage_synthetic_owner`, then (for
+    /// `NeedsEviction`) dispatches `ipc_close_symbol` with 2-minute dedup.
+    /// DUST-EVICTION-GAP-1 / P1-8 FUP：on_tick 的 per-tick hook。讀 instrument_cache +
+    /// symbol_registry 快照，委派給 paper_state，NeedsEviction 走 ipc_close_symbol 並 2min 去重。
+    pub(crate) fn retriage_synthetic_owner_for_symbol(
+        &mut self,
+        symbol: &str,
+        tick_price: f64,
+        ts_ms: u64,
+    ) {
+        // Symbol-registry gate: treat None (registry not wired) as "universe unknown" —
+        // we can't safely promote a position to a strategy that may not evaluate this
+        // symbol, so in that case behave as "not in universe" (pushes into eviction path
+        // only when notional is OK). Most production paths have the registry wired; tests
+        // using `with_balance` and no registry naturally exercise this fallback.
+        // symbol_registry 未接時視為「universe 未知」→ 不升級；僅在名義值足夠時考慮驅逐。
+        let in_universe = match self.symbol_registry.as_ref() {
+            Some(reg) => reg.is_active(symbol),
+            None => false,
+        };
+
+        // Look up min_notional from instrument cache. None → caller treats as "no dust gate".
+        // 從 instrument cache 取 min_notional。None → 無 dust 門檻。
+        let min_notional = self
+            .instrument_cache
+            .as_ref()
+            .and_then(|ic| ic.get(symbol).map(|spec| spec.min_notional))
+            .filter(|v| *v > 0.0);
+
+        // Target strategy for promotion — KNOWN_STRATEGY_NAMES[0] (same rule as startup
+        // triage adoption). Keeps behaviour consistent between boot-time and tick-time.
+        // 升級目標策略 — 與啟動 triage 同規則取 KNOWN_STRATEGY_NAMES[0]。
+        let target_strategy = crate::position_reconciler::orphan_handler::KNOWN_STRATEGY_NAMES
+            .first()
+            .copied()
+            .unwrap_or("");
+
+        let outcome = self.paper_state.retriage_synthetic_owner(
+            symbol,
+            tick_price,
+            in_universe,
+            target_strategy,
+            min_notional,
+        );
+
+        match outcome {
+            crate::paper_state::RetriageOutcome::NoOp => {}
+            crate::paper_state::RetriageOutcome::FrozenAsDust {
+                est_notional,
+                min_notional: minn,
+                was_downgraded,
+            } => {
+                // Only log on first downgrade — subsequent ticks on the same frozen
+                // symbol would spam otherwise.
+                // 僅在首次降級時記錄，避免重複 tick 轟炸日誌。
+                if was_downgraded {
+                    warn!(
+                        symbol,
+                        est_notional,
+                        min_notional = minn,
+                        "DUST-EVICTION-GAP-1 retriage: position frozen as dust (notional \
+                         below exchange minimum) / 重分流：持倉降級為 dust"
+                    );
+                }
+            }
+            crate::paper_state::RetriageOutcome::Promoted { from, to, est_notional } => {
+                info!(
+                    symbol,
+                    from = %from,
+                    to = %to,
+                    est_notional,
+                    "DUST-EVICTION-GAP-1 retriage: synthetic owner promoted to real strategy \
+                     / 重分流：synthetic 擁有者升級為實策略"
+                );
+                // Also clear any lingering dedup entry so a subsequent re-freeze + evict
+                // flip isn't rate-limited by a stale timestamp.
+                // 升級後清除 dedup 時間戳，避免後續 re-freeze+evict 被舊戳節流。
+                self.retriage_last_evict_ms.remove(symbol);
+            }
+            crate::paper_state::RetriageOutcome::NeedsEviction {
+                is_long,
+                qty,
+                est_notional,
+            } => {
+                // 2-minute dedup — matches ORPHAN_CLOSE_DEDUP_MS cadence in orphan_handler.
+                // 2 分鐘去重，與 orphan_handler 的 ORPHAN_CLOSE_DEDUP_MS 一致。
+                const RETRIAGE_EVICT_DEDUP_MS: u64 =
+                    crate::position_reconciler::orphan_handler::ORPHAN_CLOSE_DEDUP_MS;
+                let last = self
+                    .retriage_last_evict_ms
+                    .get(symbol)
+                    .copied()
+                    .unwrap_or(0);
+                if ts_ms.saturating_sub(last) < RETRIAGE_EVICT_DEDUP_MS {
+                    return;
+                }
+                warn!(
+                    symbol,
+                    is_long,
+                    qty,
+                    est_notional,
+                    "DUST-EVICTION-GAP-1 retriage: synthetic-owner position not in universe, \
+                     dispatching close / 重分流：synthetic 持倉不在 universe，派平倉"
+                );
+                self.retriage_last_evict_ms
+                    .insert(symbol.to_string(), ts_ms);
+                self.ipc_close_symbol(symbol, Some(is_long), Some(qty));
+            }
+        }
+    }
 }
 
 mod on_tick;
