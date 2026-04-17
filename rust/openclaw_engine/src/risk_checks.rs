@@ -121,8 +121,15 @@ pub enum RiskAction {
 /// Tick-level risk check for a single position. See priority order in MODULE_NOTE.
 /// Tick 級持倉風控檢查。優先級：hard stop → dyn stop → TP → trailing → time → cost_edge → drawdown → consec loss → daily loss。
 ///
-/// `cost_edge_max_ratio` is sourced from BudgetConfig.attention_tax.cost_edge_max_ratio
-/// (cross-Config read per ARCH-RC1 contract). Pass 1.0 to effectively disable the check.
+/// `cost_edge_max_ratio` and `min_profit_to_close_pct` are sourced from
+/// BudgetConfig.attention_tax (cross-Config read per ARCH-RC1 contract). The
+/// gate fires only when the live pnl_pct is simultaneously above
+/// `min_profit_to_close_pct` (floor) and the cost_ratio is above
+/// `cost_edge_max_ratio` (ceiling) — a narrow "lock-in" band.
+/// MICRO-PROFIT-FIX-1 (2026-04-17): floor added to avoid firing on break-even
+/// dust where exit fees would eat the rounding-error profit.
+/// MICRO-PROFIT-FIX-1：新增 floor min_profit_to_close_pct，避免 breakeven dust 被
+/// exit fee 吃光。
 #[allow(clippy::too_many_arguments)]
 pub fn check_position_on_tick(
     pnl_pct: f64,
@@ -137,6 +144,7 @@ pub fn check_position_on_tick(
     daily_loss_pct: f64,
     session_drawdown_pct: f64,
     cost_edge_max_ratio: f64,
+    min_profit_to_close_pct: f64,
     config: &RiskConfig,
 ) -> RiskAction {
     let rm = regime_multipliers(regime);
@@ -204,11 +212,20 @@ pub fn check_position_on_tick(
         ));
     }
 
-    // 6. Cost edge ratio — cross-Config read from BudgetConfig
-    if cost_ratio >= cost_edge_max_ratio && pnl_pct > 0.0 {
+    // 6. Cost edge ratio — cross-Config read from BudgetConfig.
+    // MICRO-PROFIT-FIX-1: narrow active band [min_profit_to_close_pct, ceiling
+    // implied by cost_edge_max_ratio]. The gate only fires when BOTH the ratio
+    // is above its ceiling AND the live pnl_pct is above the floor, so tiny
+    // break-even profits are no longer closed into a loss by exit fees.
+    // MICRO-PROFIT-FIX-1：窄帶 [min_profit_to_close_pct, 1 / ratio ceiling 對應值]，
+    // ratio 與 pnl_pct 同時達標才觸發，避免 breakeven dust 被 exit fee 吃光。
+    if cost_ratio >= cost_edge_max_ratio
+        && pnl_pct >= min_profit_to_close_pct
+        && pnl_pct > 0.0
+    {
         return RiskAction::ClosePosition(format!(
-            "COST EDGE: ratio {:.2} >= {:.2}, pnl {:.2}% (suggest close while profitable)",
-            cost_ratio, cost_edge_max_ratio, pnl_pct
+            "COST EDGE: ratio {:.2} >= {:.2}, pnl {:.2}% >= min_profit {:.2}% (suggest close while profitable)",
+            cost_ratio, cost_edge_max_ratio, pnl_pct, min_profit_to_close_pct
         ));
     }
 
@@ -244,8 +261,13 @@ pub fn check_position_on_tick(
 mod tests {
     use super::*;
 
-    /// Default BudgetConfig.attention_tax.cost_edge_max_ratio is 0.8.
-    const COST_EDGE_DEFAULT: f64 = 0.8;
+    /// MICRO-PROFIT-FIX-1 (2026-04-17): default lowered to 0.2. Tests that
+    /// exercise the COST EDGE gate pick pnl / ratio that satisfy both
+    /// `cost_ratio >= COST_EDGE_DEFAULT` and `pnl_pct >= MIN_PROFIT_DEFAULT`.
+    /// MICRO-PROFIT-FIX-1：default 降到 0.2；cost-edge 相關測試需 ratio 與 pnl 雙條件達標。
+    const COST_EDGE_DEFAULT: f64 = 0.2;
+    /// MICRO-PROFIT-FIX-1: default min_profit_to_close_pct (%).
+    const MIN_PROFIT_DEFAULT: f64 = 0.3;
 
     fn default_config() -> RiskConfig {
         RiskConfig::default()
@@ -323,7 +345,7 @@ mod tests {
     ) -> RiskAction {
         check_position_on_tick(
             pnl, peak, hold, cost, regime, atr, "BTCUSDT", 1000,
-            consec, daily, dd, COST_EDGE_DEFAULT, cfg,
+            consec, daily, dd, COST_EDGE_DEFAULT, MIN_PROFIT_DEFAULT, cfg,
         )
     }
 
@@ -396,9 +418,15 @@ mod tests {
 
     #[test]
     fn test_tick_cost_edge_ratio() {
+        // MICRO-PROFIT-FIX-1: band pnl ∈ [0.3, 0.55]%, ratio ≥ 0.2 → fires.
+        // pnl=0.4% (≥ 0.3% floor), cost_ratio=0.25 (≥ 0.2 ceiling) → triggers.
+        // MICRO-PROFIT-FIX-1：窄帶內同時滿足 ratio 與 pnl 雙條件。
         let cfg = default_config();
-        let action = call_tick(0.5, 0.5, 1.0, 0.85, "trending", Some(1.0), 0, 0.0, 0.0, &cfg);
-        assert!(matches!(action, RiskAction::ClosePosition(ref r) if r.contains("COST EDGE")));
+        let action = call_tick(0.4, 0.4, 1.0, 0.25, "trending", Some(1.0), 0, 0.0, 0.0, &cfg);
+        assert!(
+            matches!(action, RiskAction::ClosePosition(ref r) if r.contains("COST EDGE")),
+            "expected COST EDGE close, got {:?}", action
+        );
     }
 
     #[test]
@@ -408,6 +436,33 @@ mod tests {
         assert!(
             !matches!(action, RiskAction::ClosePosition(ref r) if r.contains("COST EDGE")),
             "cost edge should not trigger when not profitable"
+        );
+    }
+
+    #[test]
+    fn test_tick_cost_edge_below_min_profit_does_not_fire() {
+        // MICRO-PROFIT-FIX-1: dust-profit (pnl < min_profit_to_close_pct floor)
+        // must NOT trigger the gate, even when cost_ratio is far above ceiling.
+        // MICRO-PROFIT-FIX-1：pnl < floor 時即使 ratio 很高也不得觸發（dust 不砍）。
+        let cfg = default_config();
+        // pnl = 0.1% (< 0.3 floor), ratio = 2.0 (>> 0.2) — old code would fire, new code must Hold.
+        let action = call_tick(0.1, 0.1, 1.0, 2.0, "trending", Some(1.0), 0, 0.0, 0.0, &cfg);
+        assert!(
+            !matches!(action, RiskAction::ClosePosition(ref r) if r.contains("COST EDGE")),
+            "cost edge must NOT fire below min_profit floor, got {:?}", action
+        );
+    }
+
+    #[test]
+    fn test_tick_cost_edge_above_min_profit_below_ratio_holds() {
+        // MICRO-PROFIT-FIX-1: pnl above floor but cost_ratio below ceiling → Hold.
+        // MICRO-PROFIT-FIX-1：pnl 達 floor 但 ratio 未達 ceiling 時不觸發。
+        let cfg = default_config();
+        // pnl = 1.0% (> 0.3 floor), ratio = 0.11 (< 0.2 ceiling) → must NOT fire.
+        let action = call_tick(1.0, 1.0, 1.0, 0.11, "trending", Some(1.0), 0, 0.0, 0.0, &cfg);
+        assert!(
+            !matches!(action, RiskAction::ClosePosition(ref r) if r.contains("COST EDGE")),
+            "cost edge must NOT fire when cost_ratio < ceiling, got {:?}", action
         );
     }
 
@@ -437,8 +492,11 @@ mod tests {
 
     #[test]
     fn test_tick_hold_all_ok() {
+        // MICRO-PROFIT-FIX-1: cost_ratio=0.1 stays below the new 0.2 ceiling so
+        // Hold is the correct outcome. Previous 0.3 would now trigger COST EDGE.
+        // MICRO-PROFIT-FIX-1：cost_ratio 須 < 0.2 才 Hold；原 0.3 在新 default 下會觸發。
         let cfg = default_config();
-        let action = call_tick(0.5, 0.8, 2.0, 0.3, "trending", Some(1.0), 0, 1.0, 5.0, &cfg);
+        let action = call_tick(0.5, 0.8, 2.0, 0.1, "trending", Some(1.0), 0, 1.0, 5.0, &cfg);
         assert!(matches!(action, RiskAction::Hold));
     }
 

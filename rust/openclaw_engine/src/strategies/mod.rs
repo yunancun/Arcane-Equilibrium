@@ -611,6 +611,10 @@ pub struct FundingArbParams {
     /// QC-H10：最大持有時間（毫秒，默認 72 小時）。
     #[serde(default = "default_fa_max_hold_ms")]
     pub max_hold_ms: u64,
+    /// Entry basis = max_basis_pct * entry_basis_ratio; hysteresis buffer (default 0.8).
+    /// 入場基差 = max_basis_pct * entry_basis_ratio；遲滯緩衝（默認 0.8）。
+    #[serde(default = "default_fa_entry_basis_ratio")]
+    pub entry_basis_ratio: f64,
 }
 
 fn default_fa_total_cost_bps() -> f64 { 34.0 }
@@ -618,6 +622,7 @@ fn default_fa_expected_periods() -> f64 { 3.0 }
 fn default_fa_funding_threshold() -> f64 { 0.0005 }
 fn default_fa_max_basis_pct() -> f64 { 0.5 }
 fn default_fa_max_hold_ms() -> u64 { 72 * 3_600_000 }
+fn default_fa_entry_basis_ratio() -> f64 { 0.8 }
 
 impl Default for FundingArbParams {
     fn default() -> Self {
@@ -629,6 +634,7 @@ impl Default for FundingArbParams {
             funding_threshold: 0.0005,
             max_basis_pct: 0.5,
             max_hold_ms: 72 * 3_600_000,
+            entry_basis_ratio: 0.8,
         }
     }
 }
@@ -818,6 +824,7 @@ impl StrategyFactory {
         fa.funding_threshold = p.funding_arb.funding_threshold;
         fa.max_basis_pct = p.funding_arb.max_basis_pct;
         fa.max_hold_ms = p.funding_arb.max_hold_ms;
+        fa.entry_basis_ratio = p.funding_arb.entry_basis_ratio;
         fa.set_active(p.funding_arb.active);
         strategies.push(Box::new(fa));
 
