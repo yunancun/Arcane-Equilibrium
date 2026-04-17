@@ -83,13 +83,22 @@ fn compute_cost_ratio(pnl_pct: f64, fee_rate: f64) -> f64 {
 
 /// Evaluate a single position row, returning the action the dispatch loop
 /// should take. Pure function — no I/O, no mutation, no logging.
+///
+/// MICRO-PROFIT-FIX-1 (2026-04-17): `min_profit_to_close_pct` threads the new
+/// BudgetConfig.attention_tax.min_profit_to_close_pct floor all the way down to
+/// `check_position_on_tick` so the COST EDGE gate only fires inside the narrow
+/// lock-in band [min_profit, ratio-ceiling].
 /// 評估單一 position row，回傳派發迴圈該執行的 action。純函數。
+/// MICRO-PROFIT-FIX-1：新增 min_profit_to_close_pct，穿透到 check_position_on_tick
+/// 實現窄帶觸發語義。
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn evaluate_position(
     row: &PositionRow,
     daily_loss: f64,
     session_drawdown: f64,
     now_ts_ms: u64,
     cost_edge_max_ratio: f64,
+    min_profit_to_close_pct: f64,
     config: &RiskConfig,
 ) -> PositionDecision {
     let pnl = pnl_pct(row.current_price, row.entry_price, row.is_long);
@@ -109,6 +118,7 @@ pub(crate) fn evaluate_position(
         daily_loss,
         session_drawdown,
         cost_edge_max_ratio,
+        min_profit_to_close_pct,
         config,
     );
     PositionDecision {
@@ -123,16 +133,28 @@ pub(crate) fn evaluate_position(
 
 /// Evaluate a batch of position rows in order, returning one decision per row.
 /// 依序評估一批 position row，每行回傳一個決策。
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn evaluate_positions(
     rows: &[PositionRow],
     daily_loss: f64,
     session_drawdown: f64,
     now_ts_ms: u64,
     cost_edge_max_ratio: f64,
+    min_profit_to_close_pct: f64,
     config: &RiskConfig,
 ) -> Vec<PositionDecision> {
     rows.iter()
-        .map(|r| evaluate_position(r, daily_loss, session_drawdown, now_ts_ms, cost_edge_max_ratio, config))
+        .map(|r| {
+            evaluate_position(
+                r,
+                daily_loss,
+                session_drawdown,
+                now_ts_ms,
+                cost_edge_max_ratio,
+                min_profit_to_close_pct,
+                config,
+            )
+        })
         .collect()
 }
 
@@ -206,7 +228,8 @@ mod tests {
     fn test_evaluate_position_smoke() {
         let row = mk_row("BTCUSDT", 105.0, 100.0);
         let cfg = RiskConfig::default();
-        let decision = evaluate_position(&row, 0.0, 0.0, 1_000_000, 0.8, &cfg);
+        // MICRO-PROFIT-FIX-1: passes new min_profit_to_close_pct arg (0.3 default).
+        let decision = evaluate_position(&row, 0.0, 0.0, 1_000_000, 0.8, 0.3, &cfg);
         assert_eq!(decision.symbol, "BTCUSDT");
         assert_eq!(decision.is_long, true);
         assert!((decision.pnl_pct - 5.0).abs() < 1e-9);
@@ -219,7 +242,7 @@ mod tests {
     fn test_evaluate_position_hard_stop_close() {
         let row = mk_row("BTCUSDT", 50.0, 100.0); // -50% pnl
         let cfg = RiskConfig::default();
-        let decision = evaluate_position(&row, 0.0, 0.0, 1_000_000, 0.8, &cfg);
+        let decision = evaluate_position(&row, 0.0, 0.0, 1_000_000, 0.8, 0.3, &cfg);
         assert!(matches!(decision.action, RiskAction::ClosePosition(_)));
     }
 
@@ -228,7 +251,7 @@ mod tests {
     #[test]
     fn test_evaluate_positions_empty() {
         let cfg = RiskConfig::default();
-        let out = evaluate_positions(&[], 0.0, 0.0, 0, 0.8, &cfg);
+        let out = evaluate_positions(&[], 0.0, 0.0, 0, 0.8, 0.3, &cfg);
         assert!(out.is_empty());
     }
 
@@ -242,10 +265,44 @@ mod tests {
             mk_row("CCC", 100.0, 100.0),
         ];
         let cfg = RiskConfig::default();
-        let out = evaluate_positions(&rows, 0.0, 0.0, 1_000_000, 0.8, &cfg);
+        let out = evaluate_positions(&rows, 0.0, 0.0, 1_000_000, 0.8, 0.3, &cfg);
         assert_eq!(out.len(), 3);
         assert_eq!(out[0].symbol, "AAA");
         assert_eq!(out[1].symbol, "BBB");
         assert_eq!(out[2].symbol, "CCC");
+    }
+
+    /// MICRO-PROFIT-FIX-1: dust-profit + huge cost_ratio must NOT close.
+    /// MICRO-PROFIT-FIX-1：dust 利潤 + 極大 cost_ratio 不得平倉。
+    #[test]
+    fn test_evaluate_position_dust_profit_below_min_holds() {
+        // entry=100, current=100.001 → pnl ≈ 0.001% (≪ 0.3% floor).
+        // fee=0.0006 → cost_ratio = 200*0.0006/0.001 ≈ 120 (≫ 0.2 ceiling).
+        // Old gate: fires. New gate: floor blocks it → Hold.
+        let row = mk_row("BTCUSDT", 100.001, 100.0);
+        let cfg = RiskConfig::default();
+        let decision = evaluate_position(&row, 0.0, 0.0, 1_000_000, 0.2, 0.3, &cfg);
+        assert!(
+            !matches!(decision.action, RiskAction::ClosePosition(ref r) if r.contains("COST EDGE")),
+            "dust profit below floor must not fire COST EDGE, got {:?}",
+            decision.action
+        );
+    }
+
+    /// MICRO-PROFIT-FIX-1: profit inside narrow band [min_profit, ceiling-implied] closes.
+    /// MICRO-PROFIT-FIX-1：位於窄帶內時 COST EDGE 觸發。
+    #[test]
+    fn test_evaluate_position_in_band_closes() {
+        // entry=100, current=100.4 → pnl = 0.4% (> 0.3 floor).
+        // fee=0.0006 → cost_ratio = 200*0.0006/0.4 = 0.30 (> 0.2 ceiling).
+        // Both conditions satisfied → COST EDGE close.
+        let row = mk_row("BTCUSDT", 100.4, 100.0);
+        let cfg = RiskConfig::default();
+        let decision = evaluate_position(&row, 0.0, 0.0, 1_000_000, 0.2, 0.3, &cfg);
+        assert!(
+            matches!(decision.action, RiskAction::ClosePosition(ref r) if r.contains("COST EDGE")),
+            "expected COST EDGE close inside band, got {:?}",
+            decision.action
+        );
     }
 }

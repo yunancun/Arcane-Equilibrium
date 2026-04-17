@@ -230,9 +230,28 @@ pub(crate) fn load_unified_configs() -> Result<
     let learning: LearningConfig =
         load_toml_or_default(&learning_path, |c: &LearningConfig| c.validate())
             .map_err(|e| format!("learning config: {}", e))?;
-    let budget: BudgetConfig =
-        load_toml_or_default(&budget_path, |c: &BudgetConfig| c.validate())
+    // MICRO-PROFIT-FIX-1 (2026-04-17): BudgetConfig gets a two-step load —
+    // parse without validation, run sanitize_legacy_budget_config to clamp
+    // out-of-range `cost_edge_max_ratio` (legacy snapshots may hold up to 100.0
+    // while the new ceiling is 10.0), then validate. Ensures the engine does
+    // not fail-closed on historical state after the range shrink.
+    // MICRO-PROFIT-FIX-1：BudgetConfig 兩段載入——先不驗證地 parse，跑 sanitize
+    // 遷移把舊 snapshot 超範圍的 cost_edge_max_ratio（可能是 100.0）clamp 回
+    // default，再 validate。避免範圍縮窄後引擎因歷史值 fail-close 起不來。
+    let mut budget: BudgetConfig =
+        load_toml_or_default(&budget_path, |_c: &BudgetConfig| Ok(()))
             .map_err(|e| format!("budget config: {}", e))?;
+    let rewritten =
+        openclaw_engine::config::legacy_migration::sanitize_legacy_budget_config(&mut budget);
+    if !rewritten.is_empty() {
+        info!(
+            fields = ?rewritten,
+            "MICRO-PROFIT-FIX-1 BudgetConfig legacy fields clamped / 已清洗超範圍欄位"
+        );
+    }
+    budget
+        .validate()
+        .map_err(|e| format!("budget config (post-sanitize): {}", e))?;
 
     info!(
         paper_version = risk_paper.meta.version,

@@ -227,6 +227,14 @@ pub struct AttentionTax {
     /// 超過此 cost-edge 比率，gate 觸發平倉建議。
     #[serde(default = "default_cost_edge_max_ratio")]
     pub cost_edge_max_ratio: f64,
+
+    /// Floor on live pnl_pct (in %) before the cost-edge gate can fire.
+    /// Together with cost_edge_max_ratio forms a narrow "lock-in" band so the
+    /// gate does not close dust-profit positions at break-even (MICRO-PROFIT-FIX-1).
+    /// 觸發 cost-edge gate 所需的最低浮盈百分比。與 cost_edge_max_ratio 組成窄帶，
+    /// 避免在損益平衡區平掉 dust 倉位。
+    #[serde(default = "default_min_profit_to_close_pct")]
+    pub min_profit_to_close_pct: f64,
 }
 
 fn default_true() -> bool {
@@ -257,18 +265,29 @@ fn default_grade_d_threshold() -> f64 {
     0.8
 }
 fn default_cost_edge_max_ratio() -> f64 {
-    // CFG-COST-EDGE-1 reverted: empirical observation (engine.log diag) showed
-    // gate fires correctly — closes happen with cost_ratio 2.5–20+, meaning the
-    // strategy's edge truly is below break-even after fees. Raising default to
-    // 2.0 didn't save trades (cost_ratio still > 2 in all observed cases) and
-    // masked the real issue (low strategy edge / low confidence entries).
-    // Default 0.8 stays — fix the strategies, not the gate.
-    // CFG-COST-EDGE-1 回退：實證（engine.log 診斷）顯示 gate 觸發是正確的 ——
-    // 平倉時 cost_ratio 為 2.5–20+，意味策略邊緣本就低於 fees 損益平衡。
-    // 抬到 2.0 救不到任何單（觀察到的 cost_ratio 全部仍 > 2），反而掩蓋
-    // 真正問題（策略 edge 不足 / 入場 confidence 偏低）。Default 維持 0.8。
-    // 修策略，不修 gate。Range 仍維持 [0, 5] 以利後續實驗。
-    0.8
+    // MICRO-PROFIT-FIX-1 (2026-04-17): default lowered from 0.8 → 0.2, paired
+    // with min_profit_to_close_pct = 0.3 to form a narrow lock-in band.
+    // Bybit taker fee round-trip ≈ 0.11%; ratio = 0.11/pnl_pct ≥ 0.2 maps to
+    // pnl_pct ≤ 0.55%. Combined with floor 0.3%, the gate only fires when
+    // live pnl_pct ∈ [0.3%, 0.55%] (taker) — "profit is shrinking but still
+    // catchable" window. Prior default 0.8 produced ratio threshold that only
+    // triggered at pnl_pct ≤ 0.14% (break-even dust). Range now [0, 10]; any
+    // persisted value > 10 is migrated back to this default by
+    // legacy_migration::sanitize_legacy_budget_config().
+    // MICRO-PROFIT-FIX-1：default 從 0.8 降到 0.2，配合 min_profit_to_close_pct
+    // = 0.3 組成「利潤縮但可抓」窄帶：pnl_pct ∈ [0.3%, 0.55%] 才觸發平倉。
+    // 原 default 0.8 只在 pnl_pct ≤ 0.14%（breakeven dust）觸發，被 exit fee 吃光。
+    // Range 縮到 [0, 10]；persisted > 10 的舊值由 legacy_migration 遷回此 default。
+    0.2
+}
+fn default_min_profit_to_close_pct() -> f64 {
+    // MICRO-PROFIT-FIX-1: floor (in %) — live pnl_pct must be ≥ this before the
+    // cost-edge gate can fire. 0.3% ≈ 2.7× Bybit taker exit fee (0.055% / side),
+    // so the locked-in profit meaningfully survives exit fees. Together with
+    // cost_edge_max_ratio forms the narrow active band.
+    // MICRO-PROFIT-FIX-1：cost-edge gate 觸發的 pnl_pct 下限（%）。0.3% ≈ 2.7×
+    // Bybit taker exit fee（0.055%/邊），鎖定利潤扣 exit fee 後仍有意義。
+    0.3
 }
 
 impl Default for AttentionTax {
@@ -284,6 +303,7 @@ impl Default for AttentionTax {
             grade_c_threshold: default_grade_c_threshold(),
             grade_d_threshold: default_grade_d_threshold(),
             cost_edge_max_ratio: default_cost_edge_max_ratio(),
+            min_profit_to_close_pct: default_min_profit_to_close_pct(),
         }
     }
 }
@@ -332,16 +352,22 @@ impl AttentionTax {
                 "budget.attention_tax grade thresholds must be strictly increasing (A < B < C < D)".into()
             );
         }
-        // PH5-EXPLORE: range relaxed from [0, 5] → [0, 100] so operators can
-        // fully disable the gate during exploration / data-collection phases.
-        // Rationale: in Phase 5 exploration mode, cost_ratio is observed at 9–18
-        // (tiny profits from grid/bb entries), so [0, 5] was insufficient.
-        // Set to 100.0 to bypass check during exploration; revisit after Phase 5.
-        // PH5-EXPLORE：範圍從 [0, 5] 放寬到 [0, 100]，讓 operator 在探索期
-        // 完全關閉此 gate。探索期 cost_ratio 觀察值為 9–18（grid/bb 微小盈利），
-        // [0, 5] 不足。設為 100.0 跳過檢查；Phase 5 觀察期後重評。
-        if !(0.0..=100.0).contains(&self.cost_edge_max_ratio) {
-            return Err("budget.attention_tax.cost_edge_max_ratio must be in [0, 100]".into());
+        // MICRO-PROFIT-FIX-1 (2026-04-17): range tightened from [0, 100] → [0, 10].
+        // Previous [0, 100] allowed "threshold = 100" (observed in the field),
+        // which collapsed the gate to pnl_pct ≤ 0.0011% (break-even dust).
+        // New band semantics (ratio ≤ 10 AND pnl_pct ≥ min_profit_to_close_pct)
+        // make values > 10 meaningless. Legacy persisted values > 10 are
+        // clamped to the new default by legacy_migration::sanitize_legacy_budget_config().
+        // MICRO-PROFIT-FIX-1：範圍從 [0, 100] 縮到 [0, 10]。舊 [0, 100] 容許的 100
+        // 把 gate 塌到 pnl ≤ 0.0011%（breakeven dust）。新窄帶語義下 > 10 無意義。
+        // 舊 persisted 值 > 10 由 legacy_migration 遷回 default。
+        if !(0.0..=10.0).contains(&self.cost_edge_max_ratio) {
+            return Err("budget.attention_tax.cost_edge_max_ratio must be in [0, 10]".into());
+        }
+        if !(0.0..=5.0).contains(&self.min_profit_to_close_pct) {
+            return Err(
+                "budget.attention_tax.min_profit_to_close_pct must be in [0, 5] (%)".into(),
+            );
         }
         Ok(())
     }
@@ -421,18 +447,60 @@ mod tests {
 
     #[test]
     fn test_cost_edge_max_ratio_out_of_range_rejected() {
+        // MICRO-PROFIT-FIX-1: range shrunk to [0, 10]; 10.5 must be rejected.
+        // MICRO-PROFIT-FIX-1：範圍縮到 [0, 10]；10.5 必須被拒絕。
         let mut cfg = BudgetConfig::default();
-        cfg.attention_tax.cost_edge_max_ratio = 101.0;
+        cfg.attention_tax.cost_edge_max_ratio = 10.5;
         assert!(cfg.validate().is_err());
     }
 
     #[test]
-    fn test_cost_edge_max_ratio_100_accepted() {
-        // PH5-EXPLORE: 100.0 is valid (exploration mode bypass).
-        // PH5-EXPLORE：100.0 合法（探索期繞過 gate）。
+    fn test_cost_edge_max_ratio_range_shrunk_rejects_above_10() {
+        // MICRO-PROFIT-FIX-1: 11.0 / 100.0 (historical value) must now be rejected.
+        // MICRO-PROFIT-FIX-1：11.0 / 100.0（歷史值）必須被拒絕。
         let mut cfg = BudgetConfig::default();
+        cfg.attention_tax.cost_edge_max_ratio = 11.0;
+        assert!(cfg.validate().is_err());
         cfg.attention_tax.cost_edge_max_ratio = 100.0;
+        assert!(cfg.validate().is_err());
+    }
+
+    #[test]
+    fn test_cost_edge_max_ratio_boundary_10_accepted() {
+        // Exact ceiling 10.0 is valid (inclusive).
+        // 邊界值 10.0 合法（含）。
+        let mut cfg = BudgetConfig::default();
+        cfg.attention_tax.cost_edge_max_ratio = 10.0;
         assert!(cfg.validate().is_ok());
+    }
+
+    #[test]
+    fn test_min_profit_to_close_pct_default_0_3() {
+        // Default must be 0.3% (Bybit taker-aware lock-in floor).
+        // 預設 0.3%（考量 Bybit taker exit fee 的 lock-in 下限）。
+        let at = AttentionTax::default();
+        assert!((at.min_profit_to_close_pct - 0.3).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_min_profit_to_close_pct_out_of_range_rejected() {
+        let mut cfg = BudgetConfig::default();
+        cfg.attention_tax.min_profit_to_close_pct = -0.1;
+        assert!(cfg.validate().is_err());
+        cfg.attention_tax.min_profit_to_close_pct = 5.1;
+        assert!(cfg.validate().is_err());
+    }
+
+    #[test]
+    fn test_min_profit_to_close_pct_serialization_roundtrip() {
+        let mut cfg = BudgetConfig::default();
+        cfg.attention_tax.min_profit_to_close_pct = 0.45;
+        let json = serde_json::to_string(&cfg).unwrap();
+        let de: BudgetConfig = serde_json::from_str(&json).unwrap();
+        assert!((de.attention_tax.min_profit_to_close_pct - 0.45).abs() < f64::EPSILON);
+        let toml_str = toml::to_string(&cfg).unwrap();
+        let de2: BudgetConfig = toml::from_str(&toml_str).unwrap();
+        assert!((de2.attention_tax.min_profit_to_close_pct - 0.45).abs() < f64::EPSILON);
     }
 
     #[test]
@@ -456,7 +524,10 @@ mod tests {
         let toml_str = toml::to_string(&cfg).unwrap();
         let de: BudgetConfig = toml::from_str(&toml_str).unwrap();
         assert!(de.validate().is_ok());
-        assert_eq!(de.attention_tax.cost_edge_max_ratio, 0.8);
+        // MICRO-PROFIT-FIX-1: default lowered 0.8 → 0.2.
+        // MICRO-PROFIT-FIX-1：default 從 0.8 降到 0.2。
+        assert!((de.attention_tax.cost_edge_max_ratio - 0.2).abs() < f64::EPSILON);
+        assert!((de.attention_tax.min_profit_to_close_pct - 0.3).abs() < f64::EPSILON);
     }
 
     #[test]
@@ -484,7 +555,9 @@ daily_usd_max = 50.0
         assert_eq!(cfg.caps.daily_usd_max, 50.0);
         // attention_tax defaults preserved / attention_tax 預設值保留
         assert!(cfg.attention_tax.enabled);
-        assert_eq!(cfg.attention_tax.cost_edge_max_ratio, 0.8);
+        // MICRO-PROFIT-FIX-1: default lowered 0.8 → 0.2.
+        assert!((cfg.attention_tax.cost_edge_max_ratio - 0.2).abs() < f64::EPSILON);
+        assert!((cfg.attention_tax.min_profit_to_close_pct - 0.3).abs() < f64::EPSILON);
         assert!(cfg.validate().is_ok());
     }
 }

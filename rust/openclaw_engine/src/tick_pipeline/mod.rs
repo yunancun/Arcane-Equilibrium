@@ -1268,15 +1268,28 @@ impl TickPipeline {
     }
 
     /// ARCH-RC1 1C-2-B: Read the live `cost_edge_max_ratio` for the tick-level
-    /// cost-edge check. Falls back to 0.8 when BudgetConfig store is not
-    /// wired (1C-1 / unit-test paths).
-    /// ARCH-RC1 1C-2-B：熱路徑讀取 live cost_edge_max_ratio；store 未接線時
-    /// 回退 0.8（1C-1 / 單測路徑）。
+    /// cost-edge check. Falls back to the production default (MICRO-PROFIT-FIX-1
+    /// 0.2) when BudgetConfig store is not wired (1C-1 / unit-test paths).
+    /// ARCH-RC1 1C-2-B：熱路徑讀取 live cost_edge_max_ratio；store 未接線時回退
+    /// 當前 default（MICRO-PROFIT-FIX-1 後為 0.2）。
     #[inline]
     fn current_cost_edge_max_ratio(&self) -> f64 {
         match self.budget_store.as_ref() {
             Some(store) => store.load().attention_tax.cost_edge_max_ratio,
-            None => 0.8,
+            None => 0.2,
+        }
+    }
+
+    /// MICRO-PROFIT-FIX-1 (2026-04-17): Read the live `min_profit_to_close_pct`
+    /// floor for the COST EDGE gate's narrow lock-in band. Falls back to the
+    /// production default (0.3%) when BudgetConfig store is not wired
+    /// (1C-1 / unit-test paths).
+    /// MICRO-PROFIT-FIX-1：熱路徑讀取 live min_profit_to_close_pct；未接線時回退 0.3。
+    #[inline]
+    fn current_min_profit_to_close_pct(&self) -> f64 {
+        match self.budget_store.as_ref() {
+            Some(store) => store.load().attention_tax.min_profit_to_close_pct,
+            None => 0.3,
         }
     }
 

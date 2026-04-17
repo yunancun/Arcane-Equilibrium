@@ -205,7 +205,23 @@ impl TickPipeline {
                 FT_REDUCE_COOLDOWN_MS
             };
 
-            let positions: Vec<(String, bool, f64)> = self
+            // MICRO-PROFIT-FIX-1 (Scheme A, 2026-04-17): read current floor ratio from
+            // RiskConfig (hot-reloadable). 0.0 disables the floor for back-compat tests.
+            // Worklog §3.3: default 0.25 — skip halving positions whose current notional
+            // is already ≤ 25% of the entry notional, killing the 4-6× halving spiral
+            // observed in demo (989 fast_track_reduce_half dust fills / 48h).
+            // MICRO-PROFIT-FIX-1（方案 A）：從 RiskConfig 熱讀 ft_min_notional_ratio_of_entry
+            // （預設 0.25）；當前名義值已 ≤ 25% 入場名義值則跳過半倉，封住 4-6 次螺旋。
+            let ft_min_notional_ratio = self
+                .intent_processor
+                .risk_config()
+                .limits
+                .ft_min_notional_ratio_of_entry;
+
+            // Materialize per-position data up front so the notional-floor filter below
+            // can freely read self.latest_prices without a concurrent self.paper_state borrow.
+            // 先物化每倉資料，後續 filter 可自由讀 latest_prices。
+            let mut position_candidates: Vec<(String, bool, f64, f64)> = self
                 .paper_state
                 .positions()
                 .iter()
@@ -216,7 +232,47 @@ impl TickPipeline {
                 .filter(|p| {
                     ft_reduce_cooldown_expired(&self.ft_reduced_symbols, &p.symbol, now_ts_ms)
                 })
-                .map(|p| (p.symbol.clone(), p.is_long, p.qty))
+                .map(|p| (p.symbol.clone(), p.is_long, p.qty, p.entry_notional))
+                .collect();
+
+            // MICRO-PROFIT-FIX-1: drop candidates already below the notional floor.
+            // Skipped when ratio is 0.0 (disabled) or entry_notional is 0.0 (legacy
+            // snapshot not yet migrated — fail-open so operator positions still halve).
+            // MICRO-PROFIT-FIX-1：剔除已低於底線的倉位；比率 0 或舊快照未遷移時 fail-open。
+            if ft_min_notional_ratio > 0.0 {
+                position_candidates.retain(|(sym, _, qty, entry_notional)| {
+                    if *entry_notional <= 0.0 {
+                        return true;
+                    }
+                    let last_price = self
+                        .latest_prices
+                        .get(sym)
+                        .copied()
+                        .unwrap_or(0.0);
+                    if last_price <= 0.0 {
+                        return true;
+                    }
+                    let current_notional = qty * last_price;
+                    let floor_notional = ft_min_notional_ratio * entry_notional;
+                    let keep = current_notional >= floor_notional;
+                    if !keep {
+                        tracing::info!(
+                            symbol = %sym,
+                            current_notional,
+                            floor_notional,
+                            entry_notional = *entry_notional,
+                            ratio = ft_min_notional_ratio,
+                            "MICRO-PROFIT-FIX-1: skip ReduceToHalf — notional below floor \
+                             / 已低於名義值底線，跳過半倉"
+                        );
+                    }
+                    keep
+                });
+            }
+
+            let positions: Vec<(String, bool, f64)> = position_candidates
+                .into_iter()
+                .map(|(sym, is_long, qty, _)| (sym, is_long, qty))
                 .collect();
             if !positions.is_empty() {
                 tracing::warn!(
@@ -1151,15 +1207,20 @@ impl TickPipeline {
             })
             .collect();
         // ARCH-RC1 1C-2-B: live read from BudgetConfig store (falls back to
-        // 0.8 in tests where store is not wired).
-        // ARCH-RC1 1C-2-B：從 BudgetConfig store 即時讀取；未接線時回退 0.8。
+        // defaults in tests where store is not wired).
+        // MICRO-PROFIT-FIX-1 (2026-04-17): add matching live read for
+        // min_profit_to_close_pct so the narrow lock-in band is applied on every tick.
+        // ARCH-RC1 1C-2-B：即時從 BudgetConfig store 讀取；未接線時回退 default。
+        // MICRO-PROFIT-FIX-1：同步讀取 min_profit_to_close_pct，實現窄帶觸發。
         let cost_edge_max_ratio = self.current_cost_edge_max_ratio();
+        let min_profit_to_close_pct = self.current_min_profit_to_close_pct();
         let decisions = crate::position_risk_evaluator::evaluate_positions(
             &position_rows,
             daily_loss,
             session_drawdown,
             event.ts_ms,
             cost_edge_max_ratio,
+            min_profit_to_close_pct,
             &risk_config,
         );
 

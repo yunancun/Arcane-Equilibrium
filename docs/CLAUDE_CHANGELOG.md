@@ -1,7 +1,42 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-04-17（P0-10 SCANNER-GATE death loop fix）
+> 最後更新：2026-04-17（MICRO-PROFIT-FIX-1 narrow band + ft notional floor）
+
+### MICRO-PROFIT-FIX-1 — 窄帶 cost-edge + fast_track 名義底線（2026-04-17）
+
+**問題**（48h demo 觀察）：
+- 989 筆 `fast_track_reduce_half` dust fills — 同倉位被半倉 4-6 次壓到 dust
+- 162 筆 COST EDGE 平倉全落 pnl_pct ≈ 0（隨便有盈利就平），形成「微利死循環」
+
+**根因**：
+- Fix A gap：fast_track ReduceToHalf 無名義底線，同 symbol 可無限半倉
+- Fix B gap：`cost_edge_max_ratio` 預設 0.8 等效未設，任何 `pnl > 0` + 高 cost_ratio 就觸發
+
+**修復（兩個獨立根因，一次部署）**：
+1. **Scheme A — 相對名義底線**：新增 `RiskConfig.limits.ft_min_notional_ratio_of_entry = 0.25`，fast_track 過濾掉 `current_qty × price < 0.25 × entry_notional` 的倉位；`PaperPosition.entry_notional` 採 option 2 累加語義（首開 = qty × entry_price，同向加倉累加，減倉不動）
+2. **Config Option ② — 窄帶鎖定**：`cost_edge_max_ratio` 預設 0.8 → 0.2，validate 範圍 [0, 100] → [0, 10]；新增 `min_profit_to_close_pct = 0.3`；觸發條件改為 `cost_ratio ≥ max_ratio AND pnl_pct ≥ min_profit`，形成 pnl_pct ∈ [0.3%, 0.55%] 鎖利窄帶（Bybit taker 基準）
+
+**改動（12 檔）**：
+- Rust config：`budget_config.rs` · `legacy_migration.rs` · `risk_config.rs` · `risk_config_tests.rs` · `startup.rs`
+- Rust 核心：`risk_checks.rs`（`check_position_on_tick` +1 param）· `position_risk_evaluator.rs`（+1 param 全路徑）· `tick_pipeline/mod.rs`（`current_min_profit_to_close_pct()`）· `tick_pipeline/on_tick.rs`（fast_track 名義底線 filter + 窄帶 threading）· `paper_state.rs`（`entry_notional` 欄位 + 5 建構點 + accumulate + migrate helper + 4 新單測）· `ipc_server/tests.rs`（field fix）
+- 設定：`settings/risk_control_rules/budget_config.toml`（`cost_edge_max_ratio = 0.2` + `min_profit_to_close_pct = 0.3`）
+- 測試：`tests/micro_profit_fix_integration.rs`（7 新整合測試）
+
+**熱重載保證**：3 參數全部經 ConfigStore/ArcSwap 熱讀，TOML 僅 cold-start default。舊快照 `cost_edge_max_ratio = 100.0` 由 `sanitize_legacy_budget_config` 原地 clamp 成 0.2（warn! 日誌 + validate 通過），`startup.rs` 改為「parse-no-validate → sanitize → validate」順序。
+
+**測試**：
+- engine lib 1413 (default) / 1420 (edge_predictor_ort) 全綠（+62 / +72 vs 1351/1348 baseline，含 P1-8 合流的測試）
+- core 380 · phase4_integration 3 · reconciler_e2e 19 · stress_integration 35 · rrc1_audit_tests 4
+- `micro_profit_fix_integration.rs` 7/7 passed（新增）
+- `paper_state::tests::test_entry_notional_*` 4/4 passed（新增）
+
+**E2 審查**：APPROVED_WITH_NITS（3 個非阻塞 nits：`migrate_legacy_entry_notional` 未接入 startup（defence-in-depth hook）；`export_state` 使用 struct update 語法透傳 entry_notional；legacy fail-open 路徑無專測）。
+
+**預期效應（24-48h 觀察指標）**：
+- `fast_track_reduce_half` 日均 fills 從 ~500/24h 降到個位數
+- COST EDGE 觸發頻率下降，觸發時 pnl_pct 分佈進入 [0.3%, 0.55%] 鎖利窄帶
+- 同 symbol 同日最大半倉次數 ≤ 2
 
 ### P0-10 SCANNER-GATE — orphan_handler death loop fix（2026-04-17）
 

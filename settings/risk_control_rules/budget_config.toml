@@ -22,6 +22,14 @@ grade_a_threshold = 0.2
 grade_b_threshold = 0.4
 grade_c_threshold = 0.6
 grade_d_threshold = 0.8
-cost_edge_max_ratio = 100.0
+# MICRO-PROFIT-FIX-1 (2026-04-17): narrow lock-in band replaces the old
+# 100.0 effectively-disabled ceiling. Trigger now fires only when
+# cost_ratio ≥ cost_edge_max_ratio AND pnl_pct ≥ min_profit_to_close_pct,
+# creating a target pnl_pct band of [0.3%, 0.55%] for Bybit taker fees.
+# MICRO-PROFIT-FIX-1：以窄帶鎖定取代原 100.0 實質停用門檻。
+# 觸發條件：cost_ratio ≥ cost_edge_max_ratio 且 pnl_pct ≥ min_profit_to_close_pct，
+# 目標 pnl 帶 [0.3%, 0.55%]（以 Bybit taker 費率為準）。
+cost_edge_max_ratio = 0.2
+min_profit_to_close_pct = 0.3
 
 [experimental.flags]

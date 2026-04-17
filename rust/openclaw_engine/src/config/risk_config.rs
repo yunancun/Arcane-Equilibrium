@@ -210,6 +210,18 @@ pub struct GlobalLimits {
     /// 上限：max_qty = balance × pct / price。經 patch_risk_config 熱重載；先前寫死。
     #[serde(default = "default_per_trade_risk_pct")]
     pub per_trade_risk_pct: f64,
+
+    /// MICRO-PROFIT-FIX-1 (2026-04-17): fast_track ReduceToHalf skips positions
+    /// whose current notional has fallen below this fraction of the entry
+    /// notional (current_qty × latest_price < ratio × entry_notional). Default
+    /// 0.25 = "halve twice then stop" — prevents the dust-grinding loop where
+    /// the same position is halved 4–6 times down to ~$1 remaining. Range
+    /// [0.0, 1.0]; 0.0 disables the filter (pre-fix behaviour).
+    /// MICRO-PROFIT-FIX-1：fast_track ReduceToHalf 跳過名目已降至此比例以下的倉位。
+    /// Default 0.25 = 「halve 兩次後停手」，避免同一倉位被反復 halve 到 dust 化。
+    /// 0.0 = 關閉過濾（還原修前行為）。
+    #[serde(default = "default_ft_min_notional_ratio_of_entry")]
+    pub ft_min_notional_ratio_of_entry: f64,
 }
 
 fn default_stop_loss_max_pct() -> f64 {
@@ -266,6 +278,13 @@ fn default_guardian_modification_leverage_cap() -> f64 {
 fn default_per_trade_risk_pct() -> f64 {
     0.02
 }
+fn default_ft_min_notional_ratio_of_entry() -> f64 {
+    // MICRO-PROFIT-FIX-1: 0.25 maps to "two halvings then stop" — a 4th halve
+    // would take the position to 12.5% and be blocked. Lower values allow more
+    // halvings; 0.0 disables the filter. See worklog 2026-04-17 §3.1.
+    // MICRO-PROFIT-FIX-1：0.25 = 「halve 兩次後停手」（再 halve 會降到 12.5% 被擋）。
+    0.25
+}
 
 impl Default for GlobalLimits {
     fn default() -> Self {
@@ -293,6 +312,7 @@ impl Default for GlobalLimits {
             guardian_modification_size_factor: default_guardian_modification_size_factor(),
             guardian_modification_leverage_cap: default_guardian_modification_leverage_cap(),
             per_trade_risk_pct: default_per_trade_risk_pct(),
+            ft_min_notional_ratio_of_entry: default_ft_min_notional_ratio_of_entry(),
         }
     }
 }
@@ -348,6 +368,13 @@ impl GlobalLimits {
         if !(0.0001..=0.20).contains(&self.per_trade_risk_pct) {
             return Err(
                 "risk.limits.per_trade_risk_pct must be in [0.0001, 0.20] (0.01–20%)".into(),
+            );
+        }
+        // MICRO-PROFIT-FIX-1: ft_min_notional_ratio_of_entry ∈ [0, 1]; 0 disables the filter.
+        // MICRO-PROFIT-FIX-1：ft_min_notional_ratio_of_entry ∈ [0, 1]，0 = 關閉。
+        if !(0.0..=1.0).contains(&self.ft_min_notional_ratio_of_entry) {
+            return Err(
+                "risk.limits.ft_min_notional_ratio_of_entry must be in [0, 1]".into(),
             );
         }
         Ok(())

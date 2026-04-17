@@ -372,3 +372,53 @@ fn test_edge_predictor_roundtrip_preserves_values() {
         original.model_max_age_seconds
     );
 }
+
+// ---------------------------------------------------------------------------
+// MICRO-PROFIT-FIX-1 (2026-04-17): ft_min_notional_ratio_of_entry
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_ft_min_notional_ratio_default_0_25() {
+    // Default must be 0.25 ("halve twice then stop") per worklog §3.1.
+    // Default 必須為 0.25（halve 兩次後停手）。
+    let l = GlobalLimits::default();
+    assert!((l.ft_min_notional_ratio_of_entry - 0.25).abs() < f64::EPSILON);
+}
+
+#[test]
+fn test_ft_min_notional_ratio_out_of_range_rejected() {
+    // Range is [0, 1]; negatives and > 1 must be rejected.
+    // 範圍 [0, 1]；負值與 > 1 必須被拒絕。
+    let mut cfg = RiskConfig::default();
+    cfg.limits.ft_min_notional_ratio_of_entry = -0.01;
+    assert!(cfg.validate().is_err());
+    cfg.limits.ft_min_notional_ratio_of_entry = 1.01;
+    assert!(cfg.validate().is_err());
+}
+
+#[test]
+fn test_ft_min_notional_ratio_boundaries_accepted() {
+    // 0.0 (disables filter) and 1.0 (most restrictive) are both inclusive-valid.
+    // 0.0（關閉過濾）與 1.0（最嚴）皆在合法範圍內。
+    let mut cfg = RiskConfig::default();
+    cfg.limits.ft_min_notional_ratio_of_entry = 0.0;
+    assert!(cfg.validate().is_ok());
+    cfg.limits.ft_min_notional_ratio_of_entry = 1.0;
+    assert!(cfg.validate().is_ok());
+}
+
+#[test]
+fn test_ft_min_notional_ratio_serialization_roundtrip() {
+    let mut cfg = RiskConfig::default();
+    cfg.limits.ft_min_notional_ratio_of_entry = 0.4;
+    let json = serde_json::to_string(&cfg).unwrap();
+    let de: RiskConfig = serde_json::from_str(&json).unwrap();
+    assert!(
+        (de.limits.ft_min_notional_ratio_of_entry - 0.4).abs() < f64::EPSILON
+    );
+    let toml_str = toml::to_string(&cfg).unwrap();
+    let de2: RiskConfig = toml::from_str(&toml_str).unwrap();
+    assert!(
+        (de2.limits.ft_min_notional_ratio_of_entry - 0.4).abs() < f64::EPSILON
+    );
+}

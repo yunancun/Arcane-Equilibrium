@@ -24,6 +24,7 @@ const DEFAULT_EXPECTED_PERIODS: f64 = 3.0; // 8h funding periods
 const DEFAULT_FUNDING_THRESHOLD: f64 = 0.0005; // 5 bps
 const DEFAULT_MAX_BASIS_PCT: f64 = 0.5;
 const DEFAULT_MAX_HOLD_MS: u64 = 72 * 3_600_000;
+const DEFAULT_ENTRY_BASIS_RATIO: f64 = 0.8;
 
 pub struct FundingArb {
     active: bool,
@@ -40,6 +41,9 @@ pub struct FundingArb {
     pub(crate) funding_threshold: f64,
     pub(crate) max_basis_pct: f64,
     pub(crate) max_hold_ms: u64,
+    // Entry basis = max_basis_pct * entry_basis_ratio; hysteresis prevents instant exit.
+    // 入場基差 = max_basis_pct * entry_basis_ratio；遲滯防止瞬間出場。
+    pub(crate) entry_basis_ratio: f64,
     // RC-04: Per-symbol previous state for rejection rollback / 每幣種拒絕回滾用的先前狀態
     prev_positions: HashMap<String, Option<FundingPosition>>,
     prev_last_trade_ms: HashMap<String, u64>,
@@ -65,6 +69,7 @@ impl FundingArb {
             funding_threshold: DEFAULT_FUNDING_THRESHOLD,
             max_basis_pct: DEFAULT_MAX_BASIS_PCT,
             max_hold_ms: DEFAULT_MAX_HOLD_MS,
+            entry_basis_ratio: DEFAULT_ENTRY_BASIS_RATIO,
             prev_positions: HashMap::new(),
             prev_last_trade_ms: HashMap::new(),
         }
@@ -102,10 +107,9 @@ impl FundingArb {
             return true;
         }
 
-        // Rate too small — QC-H10: uses struct fields
-        // 費率太小 — 不足以覆蓋成本
-        let exit_threshold = self.total_cost_bps / 10_000.0 / 2.0;
-        if funding_rate.abs() < exit_threshold {
+        // Edge no longer positive — consistent with entry logic.
+        // Edge 不再為正 — 與入場邏輯一致。
+        if self.compute_edge(funding_rate) <= 0.0 {
             return true;
         }
 
@@ -231,8 +235,9 @@ impl Strategy for FundingArb {
             return vec![];
         }
 
-        // Basis must be within tolerance at entry / 入場時基差必須在容忍範圍內
-        if basis_pct > self.max_basis_pct {
+        // Entry basis tighter than exit — hysteresis prevents instant exit.
+        // 入場基差比出場更嚴格 — 遲滯防止瞬間出場。
+        if basis_pct > self.max_basis_pct * self.entry_basis_ratio {
             return vec![];
         }
 
@@ -389,7 +394,7 @@ mod tests {
     fn test_no_exit_normal() {
         let mut s = FundingArb::new();
         insert_position(&mut s, "BTC", true, 0, 0.005);
-        // Rate 0.005 (50 bps) > exit_threshold 0.0017 → no exit
+        // Rate 0.005 → edge = 0.005 - 0.001133 = 0.00387 > 0 → no exit
         assert!(!s.should_exit("BTC", 0.005, 0.1, 1000));
     }
 
@@ -505,7 +510,7 @@ mod tests {
     fn test_on_tick_basis_too_wide_blocks_entry() {
         let mut s = FundingArb::new();
         s.set_active(true);
-        // index=49750 → basis = |50000/49750 - 1| * 100 = ~0.503% > 0.5%
+        // index=49750 → basis ≈ 0.503% > entry limit 0.4% → blocked
         let ctx = make_ctx("BTC", 50000.0, 100_000, Some(0.005), Some(49750.0));
         assert!(s.on_tick(&ctx).is_empty(), "wide basis → no entry");
     }
@@ -574,5 +579,50 @@ mod tests {
         insert_position(&mut s, "BTC", true, 0, 0.005);
         s.on_external_close("BTC");
         assert!(!s.positions.contains_key("BTC"));
+    }
+
+    // ═════════════════════════════════════════════════════════════════════
+    // Hysteresis: entry/exit basis gap / 遲滯：進出場基差間距
+    // ═════════════════════════════════════════════════════════════════════
+
+    #[test]
+    fn test_basis_hysteresis_blocks_entry_allows_hold() {
+        let mut s = FundingArb::new();
+        s.set_active(true);
+        // basis ≈ 0.45%: above entry limit (0.4%) but below exit limit (0.5%)
+        // index = perp / (1 + basis/100) → 50000 / 1.0045 ≈ 49776
+        let ctx = make_ctx("BTC", 50000.0, 100_000, Some(0.005), Some(49776.0));
+        assert!(s.on_tick(&ctx).is_empty(), "0.45% basis blocks entry (> 0.4%)");
+
+        // But if already holding, 0.45% does NOT trigger exit
+        insert_position(&mut s, "BTC", true, 0, 0.005);
+        assert!(!s.should_exit("BTC", 0.005, 0.45, 1000), "0.45% basis allows hold (< 0.5%)");
+    }
+
+    #[test]
+    fn test_entry_allowed_under_tight_basis() {
+        let mut s = FundingArb::new();
+        s.set_active(true);
+        // basis ≈ 0.3%: below entry limit (0.4%)
+        // index = 50000 / 1.003 ≈ 49850
+        let ctx = make_ctx("BTC", 50000.0, 100_000, Some(0.005), Some(49850.0));
+        assert_eq!(s.on_tick(&ctx).len(), 1, "0.3% basis allows entry (< 0.4%)");
+    }
+
+    #[test]
+    fn test_exit_edge_zero_consistent_with_entry() {
+        let mut s = FundingArb::new();
+        // amortized_fee = 34/10000/3 ≈ 0.001133
+        // rate = 0.0011 → edge = 0.0011 - 0.001133 < 0 → should exit
+        insert_position(&mut s, "BTC", true, 0, 0.005);
+        assert!(s.should_exit("BTC", 0.0011, 0.1, 1000), "edge <= 0 → exit");
+    }
+
+    #[test]
+    fn test_no_exit_edge_positive() {
+        let mut s = FundingArb::new();
+        // rate = 0.002 → edge = 0.002 - 0.001133 ≈ 0.000867 > 0 → no exit
+        insert_position(&mut s, "BTC", true, 0, 0.005);
+        assert!(!s.should_exit("BTC", 0.002, 0.1, 1000), "edge > 0 → hold");
     }
 }

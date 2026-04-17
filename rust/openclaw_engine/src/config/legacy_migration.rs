@@ -23,6 +23,7 @@
 //!     operator 透過 `patch_budget_config` 重新套用。
 
 use super::RiskConfig;
+use super::budget_config::BudgetConfig;
 use super::io::save_toml;
 use std::path::{Path, PathBuf};
 use tracing::{info, warn};
@@ -176,6 +177,40 @@ pub fn migrate_legacy_risk_json_if_needed(dir: &Path) -> Result<MigrationOutcome
     Ok(MigrationOutcome::Migrated(toml_path))
 }
 
+// ---------------------------------------------------------------------------
+// MICRO-PROFIT-FIX-1 (2026-04-17): in-memory BudgetConfig sanitisation for
+// persisted snapshots whose `cost_edge_max_ratio` predates the range shrink
+// from [0, 100] → [0, 10]. Runs after TOML parse, before validate — any value
+// beyond the new ceiling is clamped to the default (0.2) with a warn! so the
+// engine starts instead of fail-closing on legacy state.
+//
+// MICRO-PROFIT-FIX-1：對歷史 snapshot 的 BudgetConfig 做一次性記憶體清洗 ——
+// 在 TOML parse 之後、validate 之前執行，把超範圍（> 10）的 cost_edge_max_ratio
+// clamp 回 default（0.2）並 warn，避免舊 state 讓引擎 fail-close 起不來。
+// ---------------------------------------------------------------------------
+
+/// Clamp out-of-range legacy BudgetConfig values back into the current spec.
+/// Returns the list of fields that were rewritten (empty = no-op).
+/// 把超範圍的舊 BudgetConfig 值 clamp 回當前 spec。回傳被改寫的欄位清單。
+pub fn sanitize_legacy_budget_config(cfg: &mut BudgetConfig) -> Vec<String> {
+    let mut rewritten: Vec<String> = Vec::new();
+    // MICRO-PROFIT-FIX-1: old snapshots may hold cost_edge_max_ratio up to 100.0.
+    // Clamp any value > 10.0 (new ceiling) back to the fresh default.
+    // MICRO-PROFIT-FIX-1：舊 snapshot 可能持有 100.0 的 cost_edge_max_ratio；> 10 者 clamp 回 default。
+    if cfg.attention_tax.cost_edge_max_ratio > 10.0 {
+        let old = cfg.attention_tax.cost_edge_max_ratio;
+        let new_default = BudgetConfig::default().attention_tax.cost_edge_max_ratio;
+        warn!(
+            old = old,
+            new = new_default,
+            "MICRO-PROFIT-FIX-1 legacy cost_edge_max_ratio {old:.2} > 10.0 clamped to default {new_default:.2} / 舊 cost_edge_max_ratio 超範圍，已遷回 default"
+        );
+        cfg.attention_tax.cost_edge_max_ratio = new_default;
+        rewritten.push("attention_tax.cost_edge_max_ratio".to_string());
+    }
+    rewritten
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -257,5 +292,34 @@ mod tests {
         )
         .unwrap();
         assert!((rc.limits.leverage_max - 15.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_legacy_high_cost_edge_max_ratio_migrated_to_default() {
+        // MICRO-PROFIT-FIX-1: persisted snapshot may hold 100.0; sanitizer must
+        // rewrite to default (0.2) and report the field, so subsequent validate()
+        // succeeds.
+        // MICRO-PROFIT-FIX-1：舊 persisted 100.0 必須被 sanitizer 遷回 default(0.2)，
+        // 讓後續 validate 通過。
+        let mut cfg = BudgetConfig::default();
+        cfg.attention_tax.cost_edge_max_ratio = 100.0;
+        // Pre-condition: raw legacy value would fail validation.
+        assert!(cfg.validate().is_err());
+        let rewritten = sanitize_legacy_budget_config(&mut cfg);
+        assert_eq!(rewritten, vec!["attention_tax.cost_edge_max_ratio"]);
+        assert!((cfg.attention_tax.cost_edge_max_ratio - 0.2).abs() < f64::EPSILON);
+        // Post-sanitize: validate must pass.
+        assert!(cfg.validate().is_ok());
+    }
+
+    #[test]
+    fn test_sanitize_noop_when_in_range() {
+        // MICRO-PROFIT-FIX-1: in-range value must NOT be rewritten.
+        // MICRO-PROFIT-FIX-1：範圍內的值不得被改寫。
+        let mut cfg = BudgetConfig::default();
+        cfg.attention_tax.cost_edge_max_ratio = 0.5;
+        let rewritten = sanitize_legacy_budget_config(&mut cfg);
+        assert!(rewritten.is_empty());
+        assert!((cfg.attention_tax.cost_edge_max_ratio - 0.5).abs() < f64::EPSILON);
     }
 }

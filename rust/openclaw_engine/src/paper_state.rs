@@ -46,6 +46,18 @@ pub struct PaperPosition {
     /// 空字串僅於 Phase 2A 之前的舊快照反序列化時出現。
     #[serde(default)]
     pub owner_strategy: String,
+    /// MICRO-PROFIT-FIX-1 (2026-04-17): cumulative entry notional — set on
+    /// first open (`qty * entry_price`) and **accumulated** on same-direction
+    /// fills (`entry_notional += fill_qty * fill_price`). NOT decremented on
+    /// reductions, so it represents the peak accumulated entry notional and
+    /// gives `fast_track` a stable baseline for the
+    /// `ft_min_notional_ratio_of_entry` filter. Legacy snapshots lacking this
+    /// field deserialise to `0.0` via `#[serde(default)]`; `PaperState::new`
+    /// migrates them in-place to `qty * entry_price` on startup.
+    /// MICRO-PROFIT-FIX-1：累積入場名目。首開 = qty × entry_price；同向加倉累加；
+    /// 減倉不改。舊快照缺該欄位時反序列為 0.0，由 PaperState::new 啟動時補齊。
+    #[serde(default)]
+    pub entry_notional: f64,
 }
 
 /// P0-6 FIX: Result of startup bybit_sync position triage.
@@ -183,6 +195,29 @@ impl PaperState {
         self.positions_mirror
             .write()
             .insert(symbol.to_string(), is_long);
+    }
+
+    /// MICRO-PROFIT-FIX-1 startup migration: walk `positions` and for any entry
+    /// whose `entry_notional == 0.0` (i.e. rehydrated from a pre-fix snapshot
+    /// via `#[serde(default)]`), backfill it to `qty * entry_price`. Returns
+    /// the number of positions touched. Idempotent: safe to call multiple
+    /// times. Current startup flow has no paper_state-snapshot rehydration
+    /// path (positions arrive via `import_positions` from Bybit REST which
+    /// already seeds entry_notional), but this exists as defence-in-depth for
+    /// any future JSON/IPC restore that does plain `serde_json::from_*`.
+    /// MICRO-PROFIT-FIX-1 啟動遷移：掃 positions 把 entry_notional == 0.0
+    /// （舊快照反序列後以 serde default 填 0）的條目補成 qty × entry_price。
+    /// 冪等、可多次呼叫；當前啟動路徑無紙盤快照復原，本方法為未來 JSON/IPC
+    /// restore 路徑預留的防禦性遷移。
+    pub fn migrate_legacy_entry_notional(&mut self) -> usize {
+        let mut migrated = 0_usize;
+        for pos in self.positions.values_mut() {
+            if pos.entry_notional <= 0.0 && pos.qty > 0.0 && pos.entry_price > 0.0 {
+                pos.entry_notional = pos.qty * pos.entry_price;
+                migrated += 1;
+            }
+        }
+        migrated
     }
 
     pub fn balance(&self) -> f64 {
@@ -422,6 +457,7 @@ impl PaperState {
                     unrealized_pnl: 0.0,
                     entry_context_id: String::new(),
                     owner_strategy: "bybit_sync".to_string(),
+                    entry_notional: qty * entry_price,
                 },
             );
             inserted += 1;
@@ -532,6 +568,7 @@ impl PaperState {
                 unrealized_pnl: 0.0,
                 entry_context_id: String::new(),
                 owner_strategy,
+                entry_notional: qty * entry_price,
             },
         );
         true
@@ -582,6 +619,9 @@ impl PaperState {
                     pos.best_price = avg_price;
                     pos.entry_ts_ms = ts_ms;
                     pos.entry_fee = 0.0;
+                    // MICRO-PROFIT-FIX-1: direction flip = brand-new position, reset entry_notional.
+                    // MICRO-PROFIT-FIX-1：方向翻轉視為新倉，重設 entry_notional。
+                    pos.entry_notional = size * avg_price;
                 }
                 // Mirror: keep `(symbol → is_long)` in sync (covers direction flip).
                 // 鏡像：同步 is_long（覆蓋方向翻轉）。
@@ -604,6 +644,7 @@ impl PaperState {
                         unrealized_pnl: 0.0,
                         entry_context_id: String::new(),
                         owner_strategy: "bybit_sync".to_string(),
+                        entry_notional: size * avg_price,
                     },
                 );
                 true
@@ -805,6 +846,13 @@ impl PaperState {
                 updated.qty = new_qty;
                 updated.entry_price = avg_entry;
                 updated.entry_fee += fee;
+                // MICRO-PROFIT-FIX-1 (option 2, accumulate): same-direction adds
+                // grow entry_notional by this fill's notional. Reductions leave
+                // it alone, so ft_min_notional_ratio_of_entry compares against
+                // the peak accumulated entry — not a shrinking baseline.
+                // MICRO-PROFIT-FIX-1（選項 2，累加）：同向加倉累加 entry_notional。
+                // 減倉不動，讓 ft_min_notional_ratio_of_entry 以累積峰值為基準。
+                updated.entry_notional += qty * fill_price;
                 self.positions_insert(symbol.to_string(), updated);
                 return 0.0;
             }
@@ -825,6 +873,7 @@ impl PaperState {
                 unrealized_pnl: 0.0,
                 entry_context_id: String::new(),
                 owner_strategy: owner_strategy.to_string(),
+                entry_notional: qty * fill_price,
             },
         );
         0.0 // Opening position — no realized PnL / 開倉無已實現損益
@@ -1692,5 +1741,83 @@ mod tests {
         let pos = s.get_position("BTCUSDT").unwrap();
         assert_eq!(pos.owner_strategy, "orphan_adopted");
         assert!((pos.qty - 0.01).abs() < 1e-10);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // MICRO-PROFIT-FIX-1: PaperPosition.entry_notional semantics
+    // MICRO-PROFIT-FIX-1：PaperPosition.entry_notional 語義測試
+    // ═══════════════════════════════════════════════════════════════════════
+
+    #[test]
+    fn test_entry_notional_set_on_open() {
+        // 開新倉時 entry_notional = qty × fill_price。
+        let mut s = PaperState::new(10_000.0);
+        s.apply_fill("BTC", true, 0.1, 50_000.0, 1.0, 0, "test");
+        let pos = s.get_position("BTC").unwrap();
+        assert!(
+            (pos.entry_notional - 5_000.0).abs() < 1e-6,
+            "entry_notional should be 0.1 * 50000 = 5000, got {}",
+            pos.entry_notional
+        );
+    }
+
+    #[test]
+    fn test_entry_notional_accumulates_on_same_direction_fill() {
+        // 同向加倉：entry_notional += fill_qty × fill_price（option 2 累加語義）。
+        let mut s = PaperState::new(10_000.0);
+        s.apply_fill("BTC", true, 0.1, 50_000.0, 1.0, 0, "test"); // +5000
+        s.apply_fill("BTC", true, 0.1, 52_000.0, 1.0, 1000, "test"); // +5200
+        let pos = s.get_position("BTC").unwrap();
+        let expected = 0.1 * 50_000.0 + 0.1 * 52_000.0;
+        assert!(
+            (pos.entry_notional - expected).abs() < 1e-6,
+            "entry_notional should accumulate to {}, got {}",
+            expected,
+            pos.entry_notional
+        );
+    }
+
+    #[test]
+    fn test_entry_notional_unchanged_on_reduce() {
+        // reduce_position 不改 entry_notional，保留 halve 基準。
+        let mut s = PaperState::new(10_000.0);
+        s.apply_fill("BTC", true, 0.2, 50_000.0, 1.0, 0, "test"); // entry_notional = 10000
+        s.set_latest_price("BTC", 51_000.0);
+        let _ = s.reduce_position("BTC", 0.1, 51_000.0); // halve to 0.1
+        let pos = s.get_position("BTC").unwrap();
+        assert!(
+            (pos.qty - 0.1).abs() < 1e-10,
+            "qty should reduce to 0.1, got {}",
+            pos.qty
+        );
+        assert!(
+            (pos.entry_notional - 10_000.0).abs() < 1e-6,
+            "entry_notional should stay at 10000 (peak baseline), got {}",
+            pos.entry_notional
+        );
+    }
+
+    #[test]
+    fn test_entry_notional_migration_fills_zero_with_qty_times_price() {
+        // 遷移：既存 positions 中 entry_notional == 0.0 會補成 qty × entry_price。
+        // 用 import_positions 種倉，然後手動清零（模擬舊快照 serde default）。
+        let mut s = PaperState::new(10_000.0);
+        s.import_positions(vec![
+            ("BTC".to_string(), true, 0.1, 50_000.0, 0),
+            ("ETH".to_string(), false, 1.0, 3_000.0, 0),
+        ]);
+        // 假裝是從舊 snapshot 反序列化：手動把 entry_notional 清零。
+        // Simulate legacy snapshot rehydration by zeroing entry_notional.
+        for pos in s.positions.values_mut() {
+            pos.entry_notional = 0.0;
+        }
+        let migrated = s.migrate_legacy_entry_notional();
+        assert_eq!(migrated, 2);
+        let btc = s.get_position("BTC").unwrap();
+        let eth = s.get_position("ETH").unwrap();
+        assert!((btc.entry_notional - 5_000.0).abs() < 1e-6);
+        assert!((eth.entry_notional - 3_000.0).abs() < 1e-6);
+        // 冪等：再跑一次 migrated == 0。
+        assert_eq!(s.migrate_legacy_entry_notional(), 0);
     }
 }
