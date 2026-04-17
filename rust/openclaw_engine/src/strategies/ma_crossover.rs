@@ -40,6 +40,11 @@ pub struct MaCrossoverParams {
     pub confluence_threshold_no_trade: f64,
     pub confluence_threshold_light: f64,
     pub confluence_threshold_full: f64,
+    /// A2: Trend-adaptive cooldown multiplier cap. effective_cooldown_ms =
+    /// cooldown_ms × (1 + trend_score × max_cooldown_boost). Default 3.0 →
+    /// cooldown scales 1x→4x in strong trends (ADX≥2.5×adx_threshold + Hurst≥0.75).
+    /// A2：趨勢自適應冷卻倍率上限。strong trend 下冷卻 1x→4x（預設 3.0）。
+    pub max_cooldown_boost: f64,
 }
 
 impl Default for MaCrossoverParams {
@@ -61,6 +66,7 @@ impl Default for MaCrossoverParams {
             confluence_threshold_no_trade: cc.threshold_no_trade,
             confluence_threshold_light: cc.threshold_light,
             confluence_threshold_full: cc.threshold_full,
+            max_cooldown_boost: 3.0,
         }
     }
 }
@@ -190,6 +196,16 @@ impl StrategyParams for MaCrossoverParams {
                 agent_adjustable: false,
                 db_persisted: true,
             },
+            // A2: Trend-adaptive cooldown boost (ported from grid_trading A3).
+            // A2：趨勢自適應冷卻加成（移植自 grid_trading A3）。
+            ParamRange {
+                name: "max_cooldown_boost".into(),
+                min: 0.0,
+                max: 10.0,
+                step: Some(0.5),
+                agent_adjustable: true,
+                db_persisted: true,
+            },
         ]
     }
 
@@ -213,6 +229,11 @@ impl StrategyParams for MaCrossoverParams {
         }
         if self.min_notional_usd < 1.0 {
             return Err("min_notional_usd must be >= 1.0".into());
+        }
+        // A2: Cooldown boost must be non-negative and bounded.
+        // A2：冷卻加成必須非負且有上限。
+        if self.max_cooldown_boost < 0.0 || self.max_cooldown_boost > 10.0 {
+            return Err("max_cooldown_boost must be in [0, 10]".into());
         }
         Ok(())
     }
@@ -285,6 +306,20 @@ pub struct MaCrossover {
     pub min_persistence_ms: u64,
     /// Minimum order notional (USD). / 最小訂單名義值。
     pub min_notional_usd: f64,
+    // ── A1: Exit-side persistence tracker (separate from entry) ──
+    // ── A1：出場側持續性追蹤器（與入場獨立）──
+    /// A1: Reverse-crossover persistence tracker scaled by KAMA efficiency ratio.
+    /// Choppy market (ER→0) demands near-entry-level confirmation; trending (ER→1)
+    /// lets reversal exit fire almost immediately.
+    /// A1：反向交叉持續性追蹤器，由 KAMA 效率比縮放。盤整（ER→0）要求接近入場級別確認；
+    /// 趨勢（ER→1）允許幾乎即時出場。
+    exit_persistence: PersistenceTracker,
+    // ── A2: Trend-adaptive cooldown multiplier cap ──
+    // ── A2：趨勢自適應冷卻倍率上限 ──
+    /// Max cooldown boost for trend-adaptive cooldown. See
+    /// `compute_trend_adjusted_cooldown()`. Default 3.0.
+    /// 趨勢自適應冷卻的最大加成倍率。
+    pub(crate) max_cooldown_boost: f64,
 }
 
 impl MaCrossover {
@@ -310,6 +345,8 @@ impl MaCrossover {
             persistence: PersistenceTracker::new(),
             min_persistence_ms: 180_000,
             min_notional_usd: 10.0,
+            exit_persistence: PersistenceTracker::new(),
+            max_cooldown_boost: 3.0,
         }
     }
 
@@ -327,6 +364,7 @@ impl MaCrossover {
         self.confluence_config = params.build_confluence_config();
         self.min_persistence_ms = params.min_persistence_ms;
         self.min_notional_usd = params.min_notional_usd;
+        self.max_cooldown_boost = params.max_cooldown_boost;
         info!(strategy = "ma_crossover", "params updated / 參數已更新");
         Ok(())
     }
@@ -350,6 +388,7 @@ impl MaCrossover {
             confluence_threshold_no_trade: self.confluence_config.threshold_no_trade,
             confluence_threshold_light: self.confluence_config.threshold_light,
             confluence_threshold_full: self.confluence_config.threshold_full,
+            max_cooldown_boost: self.max_cooldown_boost,
         }
     }
 
@@ -452,6 +491,61 @@ impl MaCrossover {
         (base + adx_bonus).clamp(0.4, 0.8)
     }
 
+    /// A2: Trend-adaptive cooldown — in trending markets, extend cooldown to
+    /// avoid re-entering too quickly after a close only to get whipsawed by the
+    /// very trend that drove the reverse cross. Formula mirrors
+    /// `grid_trading::compute_trend_adjusted_cooldown` but derives the ADX
+    /// upper bound from the single `adx_threshold` parameter instead of
+    /// carrying a separate `adx_high_threshold`.
+    ///
+    /// Upper bound = `adx_threshold × 2.5` (matches grid_trading's 20→50
+    /// default). Hurst bound = 0.50→0.75. 60/40 ADX/Hurst blend.
+    /// multiplier = 1 + trend_score × max_cooldown_boost, clamped via
+    /// input bounds.
+    ///
+    /// A2：趨勢自適應冷卻。趨勢市場下延長冷卻，避免剛平又被同趨勢打回。
+    /// 公式與 grid_trading A3 一致，但 ADX 上界由 `adx_threshold × 2.5` 推導。
+    fn compute_trend_adjusted_cooldown(
+        &self,
+        snap: Option<&openclaw_core::indicators::IndicatorSnapshot>,
+    ) -> u64 {
+        let Some(ind) = snap else {
+            return self.cooldown_ms;
+        };
+
+        let adx_val = ind.adx.as_ref().map(|a| a.adx).unwrap_or(0.0);
+        let hurst_val = ind.hurst.as_ref().map(|h| h.hurst).unwrap_or(0.5);
+
+        // ADX factor: adx_threshold → adx_threshold*2.5 maps to 0 → 1.
+        // `adx_threshold * 1.5` is the width (upper − lower) of that range.
+        // ADX 因子：adx_threshold 到 adx_threshold*2.5 線性映射為 0 到 1。
+        let adx_range = self.adx_threshold * 1.5;
+        let adx_factor = if adx_range > 0.0 {
+            ((adx_val - self.adx_threshold) / adx_range).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+
+        // Hurst factor: 0.50 → 0.75 maps to 0 → 1.
+        // Hurst 因子：0.50 到 0.75 映射為 0 到 1。
+        let hurst_factor = ((hurst_val - 0.50) / 0.25).clamp(0.0, 1.0);
+
+        // 60/40 blend — ADX reacts faster than Hurst. / 60/40 混合：ADX 反應快於 Hurst。
+        let trend_score = 0.6 * adx_factor + 0.4 * hurst_factor;
+
+        let multiplier = 1.0 + (trend_score * self.max_cooldown_boost);
+        (self.cooldown_ms as f64 * multiplier) as u64
+    }
+
+    /// A1: ER-scaled exit persistence window (ms).
+    /// ER→1 (clean trend) → window→0 → reverse cross exits immediately.
+    /// ER→0 (choppy) → window→min_persistence_ms → near-entry-level confirmation.
+    /// A1：KAMA 效率比驅動的出場持續性窗口（ms）。
+    fn compute_exit_persistence_ms(&self, efficiency_ratio: f64) -> u64 {
+        let er = efficiency_ratio.clamp(0.0, 1.0);
+        (self.min_persistence_ms as f64 * (1.0 - er)).max(0.0) as u64
+    }
+
     /// RC-02: Check if higher-TF trend aligns with the proposed entry direction.
     /// RC-02: 檢查較高時間框架趨勢是否與擬入場方向一致。
     fn higher_tf_allows_entry(&self, symbol: &str, is_long: bool) -> bool {
@@ -497,6 +591,7 @@ impl Strategy for MaCrossover {
     fn on_external_close(&mut self, symbol: &str) {
         self.positions.remove(symbol);
         self.persistence.clear(symbol);
+        self.exit_persistence.clear(symbol);
     }
 
     fn on_tick(&mut self, ctx: &TickContext<'_>) -> Vec<StrategyAction> {
@@ -505,7 +600,11 @@ impl Strategy for MaCrossover {
             None => return vec![],
         };
         let last_ms = self.last_trade_ms.get(ctx.symbol).copied().unwrap_or(0);
-        if last_ms > 0 && ctx.timestamp_ms < last_ms + self.cooldown_ms {
+        // A2: trend-adaptive cooldown — extends cooldown in strong-trend markets
+        // to prevent re-entering into a continuing trend that just closed us out.
+        // A2：趨勢自適應冷卻 — 趨勢強時延長冷卻，避免剛平又被同趨勢打回。
+        let effective_cooldown = self.compute_trend_adjusted_cooldown(ctx.indicators);
+        if last_ms > 0 && ctx.timestamp_ms < last_ms + effective_cooldown {
             return vec![];
         }
 
@@ -638,23 +737,47 @@ impl Strategy for MaCrossover {
                 // KAMA crosses back through SMA20 = trend reversal (Kaufman).
                 // Exit urgency > entry selectivity: no ADX/regime/higher-TF filter on exit.
                 // 出場路徑 — KAMA 回穿 SMA20 = 趨勢反轉。出場不套用入場過濾器。
-                let exit_conf = self.compute_exit_confidence(adx);
-                if is_long && fast < slow {
-                    intents.push(StrategyAction::Close {
-                        symbol: ctx.symbol.to_string(),
-                        confidence: exit_conf,
-                        reason: "ma_reverse_cross".into(),
-                    });
-                    self.positions.remove(ctx.symbol);
-                    self.last_trade_ms.insert(ctx.symbol.to_string(), ctx.timestamp_ms);
+                //
+                // A1: instead of firing Close on the first reverse tick, require
+                // the reverse signal to persist for `min_persistence_ms × (1 − ER)`.
+                // Choppy markets (ER→0) demand confirmation; clean trends (ER→1)
+                // exit nearly instantly. Hard stop / trailing / fast_track paths
+                // operate independently and remain unaffected.
+                // A1：反向交叉不再單 tick 出場，以 KAMA ER 縮放的持續性窗口過濾假反轉。
+                let reverse_signal: Option<bool> = if is_long && fast < slow {
+                    Some(false) // bearish reverse for long position
                 } else if !is_long && fast > slow {
+                    Some(true) // bullish reverse for short position
+                } else {
+                    None // aligned with position, no reverse signal
+                };
+
+                // ER-scaled exit persistence window. KAMA-less snapshots fall
+                // back to ER=0.5 (mid) rather than 0 to avoid pinning exit at
+                // the entry-level threshold on cold starts.
+                // ER 縮放的出場持續性窗口；無 KAMA 時退回 ER=0.5。
+                let er = ind.kama.as_ref().map(|k| k.efficiency_ratio).unwrap_or(0.5);
+                let exit_persistence_ms = self.compute_exit_persistence_ms(er);
+
+                let persisted = self.exit_persistence.check(
+                    ctx.symbol,
+                    reverse_signal,
+                    ctx.timestamp_ms,
+                    exit_persistence_ms,
+                    false, // not a close-exempt path — we WANT persistence
+                );
+
+                if persisted && reverse_signal.is_some() {
+                    let exit_conf = self.compute_exit_confidence(adx);
                     intents.push(StrategyAction::Close {
                         symbol: ctx.symbol.to_string(),
                         confidence: exit_conf,
                         reason: "ma_reverse_cross".into(),
                     });
                     self.positions.remove(ctx.symbol);
-                    self.last_trade_ms.insert(ctx.symbol.to_string(), ctx.timestamp_ms);
+                    self.last_trade_ms
+                        .insert(ctx.symbol.to_string(), ctx.timestamp_ms);
+                    self.exit_persistence.clear(ctx.symbol);
                 }
             }
         }
@@ -1114,8 +1237,8 @@ mod tests {
     #[test]
     fn test_ma_param_ranges_count() {
         let ranges = MaCrossoverParams::param_ranges();
-        // 5 original + 10 confluence = 15
-        assert_eq!(ranges.len(), 15, "expected 15 param ranges, got {}", ranges.len());
+        // 5 original + 10 confluence + 1 A2 (max_cooldown_boost) = 16
+        assert_eq!(ranges.len(), 16, "expected 16 param ranges, got {}", ranges.len());
     }
 
     #[test]
@@ -1169,5 +1292,260 @@ mod tests {
         let mut p = MaCrossoverParams::default();
         p.min_notional_usd = 0.5; // < 1.0
         assert!(p.validate().is_err());
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // A1: ER-scaled exit persistence tests
+    // A1：KAMA 效率比縮放的出場持續性測試
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /// Helper: build TickContext with an explicit KAMA efficiency ratio.
+    /// 輔助函數：用顯式 KAMA 效率比構建 TickContext。
+    fn ctx_with_er(sma: f64, kama: f64, adx: f64, ts: u64, er: f64) -> TickContext<'static> {
+        let ind = Box::leak(Box::new(IndicatorSnapshot {
+            sma_20: Some(sma),
+            kama: Some(KamaResult { kama, efficiency_ratio: er }),
+            adx: Some(AdxResult { adx, plus_di: 25.0, minus_di: 15.0 }),
+            ..Default::default()
+        }));
+        TickContext {
+            symbol: "BTC",
+            price: 50_000.0,
+            timestamp_ms: ts,
+            indicators: Some(ind),
+            signals: &[],
+            h0_allowed: true,
+            funding_rate: None,
+            index_price: None,
+        }
+    }
+
+    #[test]
+    fn test_a1_exit_persistence_formula() {
+        // Raw formula check: window = min_persistence_ms × (1 − ER).
+        // 公式驗證：window = min_persistence_ms × (1 − ER)。
+        let mut s = MaCrossover::new();
+        s.min_persistence_ms = 200_000;
+        assert_eq!(s.compute_exit_persistence_ms(0.0), 200_000);
+        assert_eq!(s.compute_exit_persistence_ms(1.0), 0);
+        assert_eq!(s.compute_exit_persistence_ms(0.5), 100_000);
+        // Clamp: ER outside [0,1] must not produce negative / overflow windows.
+        // 邊界：ER 超出 [0,1] 不可產生負值或溢出窗口。
+        assert_eq!(s.compute_exit_persistence_ms(-0.5), 200_000);
+        assert_eq!(s.compute_exit_persistence_ms(1.5), 0);
+    }
+
+    #[test]
+    fn test_a1_trending_er_exits_immediately() {
+        // Clean trend (ER=1.0) → window collapses to 0 → exit fires on the
+        // first reverse-cross tick, matching pre-A1 behavior in trending regimes.
+        // 乾淨趨勢（ER=1.0）→ 窗口為 0 → 首個反向交叉 tick 即出場。
+        let mut s = MaCrossover::new();
+        s.min_persistence_ms = 180_000;
+        // Entry with ER=0 to pass persistence=0 exit semantics cleanly; bypass
+        // entry-side persistence by setting min to 0 only for the entry tick.
+        // 入場側 persistence 設 0 以免與 A1 出場路徑糾纏。
+        s.min_persistence_ms = 0;
+        let opened = s.on_tick(&ctx_with_er(100.0, 101.0, 25.0, 0, 1.0));
+        assert_eq!(opened.len(), 1, "long entry should fire");
+        // Re-enable persistence before exit — A1 window uses it scaled by ER.
+        // 重新啟用 persistence，讓 A1 公式生效。
+        s.min_persistence_ms = 180_000;
+        // ER=1.0 → window=0 → even 1 ms later the reverse exit fires.
+        let exit = s.on_tick(&ctx_with_er(101.0, 100.0, 25.0, 500_000, 1.0));
+        assert_eq!(exit.len(), 1, "trending ER must exit on first reverse tick");
+        match &exit[0] {
+            StrategyAction::Close { reason, .. } => assert_eq!(reason, "ma_reverse_cross"),
+            other => panic!("expected Close, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_a1_choppy_er_delays_exit_until_window_elapses() {
+        // Choppy market (ER=0.0) → full min_persistence_ms window demanded.
+        // First reverse tick records onset but does NOT emit Close; only after
+        // ≥ window elapses does the persisted reverse fire.
+        // 盤整（ER=0.0）→ 全 min_persistence_ms 窗口；首個反向 tick 僅記錄。
+        let mut s = MaCrossover::new();
+        s.min_persistence_ms = 0;
+        // Open long cleanly first.
+        let _ = s.on_tick(&ctx_with_er(100.0, 101.0, 25.0, 0, 0.5));
+        s.min_persistence_ms = 180_000;
+
+        // t=500_000: first reverse tick in choppy regime — must NOT exit yet.
+        // t=500_000：盤整下首個反向 tick — 尚不可出場。
+        let first = s.on_tick(&ctx_with_er(101.0, 100.0, 25.0, 500_000, 0.0));
+        assert!(
+            first.is_empty(),
+            "choppy regime must defer exit until window elapses"
+        );
+        // Still inside the window (only 100 s passed of 180 s).
+        // 仍在窗口內（僅過 100 秒，需 180 秒）。
+        let mid = s.on_tick(&ctx_with_er(101.0, 100.0, 25.0, 600_000, 0.0));
+        assert!(mid.is_empty(), "still inside choppy persistence window");
+        // t=680_001: 180_001 ms after the onset → persistence passes, Close emits.
+        // t=680_001：距首次反向 180_001 毫秒 → 持續性通過，出場。
+        let exit = s.on_tick(&ctx_with_er(101.0, 100.0, 25.0, 680_001, 0.0));
+        assert_eq!(exit.len(), 1, "choppy exit must fire once window elapsed");
+        match &exit[0] {
+            StrategyAction::Close { reason, .. } => assert_eq!(reason, "ma_reverse_cross"),
+            other => panic!("expected Close, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_a1_reverse_flicker_resets_exit_persistence() {
+        // A flicker back to position-aligned (no reverse signal) between two
+        // reverse ticks must reset the onset — classic PersistenceTracker
+        // semantics. Otherwise a 10-min-old flicker would let the very next
+        // reverse tick exit instantly in a choppy regime.
+        // A1 + PersistenceTracker：中間一個對齊 tick 清空 onset。
+        let mut s = MaCrossover::new();
+        s.min_persistence_ms = 0;
+        let _ = s.on_tick(&ctx_with_er(100.0, 101.0, 25.0, 0, 0.5));
+        s.min_persistence_ms = 180_000;
+
+        // t=100_000: reverse tick starts timer.
+        assert!(s.on_tick(&ctx_with_er(101.0, 100.0, 25.0, 100_000, 0.0)).is_empty());
+        // t=120_000: aligned tick (fast>slow, same as current long) → resets timer.
+        // 對齊 tick → 重設計時。
+        assert!(s.on_tick(&ctx_with_er(100.0, 101.0, 25.0, 120_000, 0.0)).is_empty());
+        // t=200_000: reverse again — 80 s elapsed since new onset, not 100 s
+        // since flicker start → must NOT exit.
+        // 再次反向，距新 onset 80 秒 < 180 秒 → 不可出場。
+        assert!(s.on_tick(&ctx_with_er(101.0, 100.0, 25.0, 200_000, 0.0)).is_empty());
+    }
+
+    #[test]
+    fn test_a1_external_close_clears_exit_persistence() {
+        // After external close (risk-stop / hard-stop / ft_scoped_reduce),
+        // on_external_close must wipe the exit_persistence onset, else a
+        // stale onset from the now-closed position would let the *next*
+        // entry exit prematurely on its first reverse-looking tick.
+        // 外部平倉後，exit_persistence 必須一併清空。
+        let mut s = MaCrossover::new();
+        s.min_persistence_ms = 0;
+        let _ = s.on_tick(&ctx_with_er(100.0, 101.0, 25.0, 0, 0.5));
+        s.min_persistence_ms = 180_000;
+        // Record an exit_persistence onset via a reverse tick.
+        assert!(s.on_tick(&ctx_with_er(101.0, 100.0, 25.0, 100_000, 0.0)).is_empty());
+
+        // External close wipes everything for this symbol.
+        s.on_external_close("BTC");
+        // Verify via public API: a fresh long entry must succeed (positions clear)
+        // and then a choppy reverse tick must NOT exit (exit_persistence clear).
+        // 驗證：新倉可開，之後的反向 tick 不會立即觸發 A1（onset 已清）。
+        s.min_persistence_ms = 0;
+        let reopen = s.on_tick(&ctx_with_er(100.0, 101.0, 25.0, 1_000_000, 0.5));
+        assert_eq!(reopen.len(), 1, "should re-enter after external close");
+        s.min_persistence_ms = 180_000;
+        assert!(
+            s.on_tick(&ctx_with_er(101.0, 100.0, 25.0, 1_100_000, 0.0)).is_empty(),
+            "exit_persistence must start from zero after on_external_close"
+        );
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // A2: Trend-adaptive cooldown tests
+    // A2：趨勢自適應冷卻測試
+    // ═══════════════════════════════════════════════════════════════════════
+
+    fn indicator_with(adx: Option<f64>, hurst: Option<f64>) -> IndicatorSnapshot {
+        IndicatorSnapshot {
+            adx: adx.map(|a| AdxResult { adx: a, plus_di: 25.0, minus_di: 15.0 }),
+            hurst: hurst.map(|h| HurstResult { hurst: h, regime: "trending".into() }),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn test_a2_cooldown_no_indicators_returns_base() {
+        // Missing IndicatorSnapshot → conservative fallback to base cooldown.
+        // 無指標 → 退回基準冷卻。
+        let s = MaCrossover::new();
+        assert_eq!(s.compute_trend_adjusted_cooldown(None), s.cooldown_ms);
+    }
+
+    #[test]
+    fn test_a2_cooldown_at_threshold_no_boost() {
+        // ADX exactly at adx_threshold + Hurst = 0.50 → both factors = 0 →
+        // multiplier = 1.0 → cooldown unchanged.
+        // ADX 剛好在門檻 + Hurst=0.5 → 因子為 0 → 乘數 1.0 → 冷卻不變。
+        let s = MaCrossover::new();
+        let snap = indicator_with(Some(s.adx_threshold), Some(0.50));
+        assert_eq!(
+            s.compute_trend_adjusted_cooldown(Some(&snap)),
+            s.cooldown_ms,
+            "adx at threshold + hurst 0.5 should return base cooldown"
+        );
+    }
+
+    #[test]
+    fn test_a2_cooldown_strong_trend_4x_at_cap() {
+        // ADX = adx_threshold × 2.5 + Hurst = 0.75 → both factors = 1.0 →
+        // trend_score = 1.0 → multiplier = 1 + 1×3 = 4 → cooldown × 4.
+        // 強趨勢上界 → multiplier = 4 → 冷卻 × 4。
+        let s = MaCrossover::new();
+        let snap = indicator_with(Some(s.adx_threshold * 2.5), Some(0.75));
+        let got = s.compute_trend_adjusted_cooldown(Some(&snap));
+        assert_eq!(got, s.cooldown_ms * 4, "strong trend must 4× cooldown");
+    }
+
+    #[test]
+    fn test_a2_cooldown_beyond_upper_bound_clamps() {
+        // ADX above 2.5× threshold and Hurst above 0.75 clamp at trend_score=1.
+        // 上界之上再往上也不會加倍 — clamp 在 1.0。
+        let s = MaCrossover::new();
+        let snap = indicator_with(Some(s.adx_threshold * 5.0), Some(0.95));
+        assert_eq!(s.compute_trend_adjusted_cooldown(Some(&snap)), s.cooldown_ms * 4);
+    }
+
+    #[test]
+    fn test_a2_cooldown_mixed_adx_only_partial_boost() {
+        // Pure ADX factor = 0.5 (midpoint) + Hurst = 0.50 → trend_score = 0.3 →
+        // multiplier = 1 + 0.3×3 = 1.9. Use adx_threshold=20, so midpoint is
+        // 20 + 0.5 × (30) = 35 (since range = 30).
+        // 純 ADX 半途 + Hurst 平 → score = 0.3 → multiplier 1.9。
+        let s = MaCrossover::new();
+        // adx_threshold=20, range=30 → ADX=35 gives factor=0.5.
+        let snap = indicator_with(Some(35.0), Some(0.50));
+        let expected = (s.cooldown_ms as f64 * (1.0 + 0.3 * 3.0)) as u64;
+        assert_eq!(s.compute_trend_adjusted_cooldown(Some(&snap)), expected);
+    }
+
+    #[test]
+    fn test_a2_cooldown_missing_adx_uses_zero() {
+        // Missing ADX treated as 0 → factor clamps to 0 → base × (1 + 0.4×hurst_factor×3).
+        // With Hurst=0.75 → hurst_factor=1 → multiplier=2.2.
+        // 無 ADX 視為 0 → 僅 Hurst 貢獻。
+        let s = MaCrossover::new();
+        let snap = indicator_with(None, Some(0.75));
+        let expected = (s.cooldown_ms as f64 * (1.0 + 0.4 * 3.0)) as u64;
+        assert_eq!(s.compute_trend_adjusted_cooldown(Some(&snap)), expected);
+    }
+
+    #[test]
+    fn test_a2_cooldown_respects_max_cooldown_boost_param() {
+        // max_cooldown_boost = 0 disables A2 entirely → cooldown always base.
+        // max_cooldown_boost=0 → A2 被禁用 → 永遠基準。
+        let mut s = MaCrossover::new();
+        s.max_cooldown_boost = 0.0;
+        let snap = indicator_with(Some(s.adx_threshold * 3.0), Some(0.90));
+        assert_eq!(s.compute_trend_adjusted_cooldown(Some(&snap)), s.cooldown_ms);
+    }
+
+    #[test]
+    fn test_a2_validate_max_cooldown_boost_bounds() {
+        // Validation: max_cooldown_boost ∈ [0, 10].
+        // 驗證：max_cooldown_boost 範圍 [0, 10]。
+        let mut p = MaCrossoverParams::default();
+        p.max_cooldown_boost = -0.1;
+        assert!(p.validate().is_err());
+        p.max_cooldown_boost = 10.1;
+        assert!(p.validate().is_err());
+        p.max_cooldown_boost = 0.0;
+        assert!(p.validate().is_ok());
+        p.max_cooldown_boost = 10.0;
+        assert!(p.validate().is_ok());
     }
 }

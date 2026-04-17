@@ -114,6 +114,33 @@ pub struct FastTrackResult {
     pub reason: String,
 }
 
+/// B1: Returns `true` iff a `ReduceToHalf` action was driven by the 5%+3σ
+/// held-drop branch at `risk_level < Defensive`. In that case the reduction
+/// should be scoped to the single triggering symbol (the `held_drop_symbol`
+/// `on_tick` tracks alongside the drop info), rather than halving every open
+/// position across the portfolio.
+///
+/// Systemic triggers (risk ≥ Defensive, margin crisis, ≥15% drop) remain
+/// portfolio-wide — symbol-scoping is a false-positive mitigation, not a
+/// weakening of the systemic defense ladder.
+///
+/// B1：判斷某次 ReduceToHalf 是否由「5%+3σ 持倉跌幅 + risk < Defensive」
+/// 驅動。僅此情境採用 symbol 限定，系統性觸發仍執行全倉減半。
+#[inline]
+pub fn is_drop_scoped_reduce(
+    risk_level: RiskLevel,
+    held_drop_pct: f64,
+    held_drop_sigma: f64,
+) -> bool {
+    held_drop_pct >= 5.0
+        && held_drop_sigma >= 3.0
+        && risk_level < RiskLevel::Defensive
+        // Extreme drops (≥15%) CloseAll at any sigma — never reach ReduceToHalf.
+        // Guard mirrored here to keep the classifier independent of call order.
+        // 15% 以上 CloseAll，不會落入 ReduceToHalf，classifier 獨立守住邊界。
+        && held_drop_pct < 15.0
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // Tests / 測試
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -316,5 +343,65 @@ mod tests {
             evaluate_fast_track(RiskLevel::Defensive, 0.0, 0.0, 30.0),
             FastTrackAction::ReduceToHalf
         );
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // B1: is_drop_scoped_reduce classifier tests
+    // B1：is_drop_scoped_reduce 分類器測試
+    // ═══════════════════════════════════════════════════════════════════════
+
+    #[test]
+    fn test_b1_scoped_reduce_normal_outlier_true() {
+        // Normal + 5%+3σ held drop → scoped reduce (halve only triggering symbol).
+        // Normal + 5%+3σ 持倉跌幅 → 僅限縮觸發幣種。
+        assert!(is_drop_scoped_reduce(RiskLevel::Normal, 8.0, 4.0));
+        assert!(is_drop_scoped_reduce(RiskLevel::Normal, 5.0, 3.0));
+    }
+
+    #[test]
+    fn test_b1_scoped_reduce_cautious_outlier_true() {
+        // Cautious still below Defensive → scoped reduce.
+        // Cautious 仍低於 Defensive → scoped reduce。
+        assert!(is_drop_scoped_reduce(RiskLevel::Cautious, 8.0, 4.0));
+    }
+
+    #[test]
+    fn test_b1_scoped_reduce_reduced_outlier_true() {
+        // Reduced still below Defensive → scoped reduce.
+        // Reduced 仍低於 Defensive → scoped reduce。
+        assert!(is_drop_scoped_reduce(RiskLevel::Reduced, 8.0, 4.0));
+    }
+
+    #[test]
+    fn test_b1_scoped_reduce_defensive_or_above_false() {
+        // ≥ Defensive escalates to portfolio-wide CloseAll — NOT scoped reduce.
+        // ≥ Defensive 升級到全倉 CloseAll — 非 scoped。
+        assert!(!is_drop_scoped_reduce(RiskLevel::Defensive, 8.0, 4.0));
+        assert!(!is_drop_scoped_reduce(RiskLevel::CircuitBreaker, 8.0, 4.0));
+        assert!(!is_drop_scoped_reduce(RiskLevel::ManualReview, 8.0, 4.0));
+    }
+
+    #[test]
+    fn test_b1_scoped_reduce_extreme_drop_false() {
+        // ≥15% drop fires CloseAll regardless of sigma — NEVER reaches scoped reduce.
+        // ≥15% 必全平，不走 scoped reduce 分支。
+        assert!(!is_drop_scoped_reduce(RiskLevel::Normal, 15.0, 4.0));
+        assert!(!is_drop_scoped_reduce(RiskLevel::Normal, 20.0, 3.5));
+    }
+
+    #[test]
+    fn test_b1_scoped_reduce_below_5pct_false() {
+        // Sub-5% drop or sub-3σ → neither enters the 5%+3σ branch.
+        // <5% 或 <3σ → 根本未進入此分支。
+        assert!(!is_drop_scoped_reduce(RiskLevel::Normal, 4.99, 4.0));
+        assert!(!is_drop_scoped_reduce(RiskLevel::Normal, 8.0, 2.99));
+        assert!(!is_drop_scoped_reduce(RiskLevel::Normal, 0.0, 0.0));
+    }
+
+    #[test]
+    fn test_b1_classifier_boundary_14_99_pct() {
+        // 14.99% + 3σ at Normal → still within the scoped-reduce corridor.
+        // 14.99% + 3σ Normal → 仍在 scoped reduce 區間。
+        assert!(is_drop_scoped_reduce(RiskLevel::Normal, 14.99, 3.0));
     }
 }

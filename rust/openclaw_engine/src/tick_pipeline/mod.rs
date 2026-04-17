@@ -739,16 +739,16 @@ pub struct TickPipeline {
     /// Global system mode — synced from Python GUI. Gates trading at tick level.
     /// 全局系統模式 — 從 Python GUI 同步。在 tick 級別封鎖交易。
     system_mode: SystemMode,
-    /// EDGE-P0-1 + P0-5: Map of symbol → last ReduceToHalf `event.ts_ms` (as i64).
-    /// Guards against repeat half-qty emits on the same symbol within
-    /// `FT_REDUCE_COOLDOWN_MS` (see on_tick_helpers). Also fully cleared
-    /// when risk returns to Normal so a new episode can re-arm immediately.
+    /// EDGE-P0-1 + P0-5 + B2: Map of symbol → (last ReduceToHalf `event.ts_ms`, effective cooldown ms).
+    /// Guards against repeat half-qty emits on the same symbol within the
+    /// per-event cooldown (base 60s, scaled up by trigger sigma via
+    /// `sigma_scaled_reduce_cooldown_ms` — see on_tick_helpers). Also fully
+    /// cleared when risk returns to Normal so a new episode can re-arm.
     /// Replaces the pre-P0-5 HashSet, which was nullified every tick in
     /// persistent Cautious under the FA-PHANTOM-2 5%+3σ path.
-    /// EDGE-P0-1 + P0-5：symbol → 上次半倉的 `event.ts_ms`（i64）。
-    /// 在 60 秒冷卻窗內阻止對同 symbol 重複發射半倉；risk 回到 Normal
-    /// 立刻整體清空以允許新 episode 重置。
-    ft_reduced_symbols: std::collections::HashMap<String, i64>,
+    /// EDGE-P0-1 + P0-5 + B2：symbol → (上次半倉時間戳, 當時有效冷卻 ms)。
+    /// 冷卻按觸發 sigma 縮放，risk 回 Normal 時整表清空。
+    ft_reduced_symbols: std::collections::HashMap<String, on_tick_helpers::FtReduceStamp>,
     /// EDGE-P1-2: Cached latest funding rate per symbol (from Ticker events).
     /// EDGE-P1-2：每幣種最新資金費率緩存（來自 Ticker 事件）。
     funding_rates: HashMap<String, f64>,

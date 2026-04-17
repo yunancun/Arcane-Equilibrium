@@ -22,20 +22,53 @@ use std::collections::{HashMap, VecDeque};
 // Normal 才清）封住毫秒連發同時保留自然 episode 邊界。
 pub(crate) const FT_REDUCE_COOLDOWN_MS: i64 = 60_000;
 
-/// P0-5: Check whether a symbol is eligible for a fresh ReduceToHalf emit.
-/// Returns `true` when the symbol has never been halved OR the cooldown has
-/// elapsed since the last halving (wall-clock via `event.ts_ms`).
-/// P0-5：判斷該 symbol 是否可再次觸發 ReduceToHalf（未曾半倉或冷卻已過）。
+/// B2: Upper bound for sigma-scaled cooldown — prevents a freak sigma (e.g.
+/// 50σ on a stable coin with near-zero std_dev) from locking a symbol out
+/// indefinitely. 600s = 10× base, same ratio ceiling grid_trading tolerates
+/// on its own trend multiplier. Not a tuning surface — pure safety clamp.
+/// B2：sigma 縮放冷卻上限，防止極端 sigma 把 symbol 永久鎖死。
+pub(crate) const FT_REDUCE_COOLDOWN_MAX_MS: i64 = 600_000;
+
+/// P0-5 + B2: Stamp recorded when a symbol is halved. Carries both the
+/// timestamp and the effective cooldown that was active at the time, so a
+/// later expiry check uses the severity snapshot from the halving event
+/// rather than recomputing against current indicators (the trigger sigma
+/// may have decayed by then).
+/// P0-5 + B2：每次半倉記錄 (時間戳, 有效冷卻 ms)。冷卻依觸發時的 sigma 鎖定。
+pub(crate) type FtReduceStamp = (i64, i64);
+
+/// P0-5 + B2: Check whether a symbol is eligible for a fresh ReduceToHalf
+/// emit. Returns `true` when the symbol has never been halved OR the
+/// *event-specific* cooldown stamped at halving has elapsed.
+/// P0-5 + B2：判斷該 symbol 是否可再次觸發 ReduceToHalf（未曾半倉或冷卻已過）。
 #[inline]
 pub(crate) fn ft_reduce_cooldown_expired(
-    ft_reduced_symbols: &HashMap<String, i64>,
+    ft_reduced_symbols: &HashMap<String, FtReduceStamp>,
     symbol: &str,
     now_ts_ms: i64,
 ) -> bool {
     match ft_reduced_symbols.get(symbol) {
         None => true,
-        Some(&last_ts) => now_ts_ms.saturating_sub(last_ts) >= FT_REDUCE_COOLDOWN_MS,
+        Some(&(last_ts, cooldown_ms)) => now_ts_ms.saturating_sub(last_ts) >= cooldown_ms,
     }
+}
+
+/// B2: Sigma-proportional cooldown for ReduceToHalf. Severity at the moment
+/// of halving determines the recovery window: `base × (sigma / 3.0)`, clamped
+/// to `[base, FT_REDUCE_COOLDOWN_MAX_MS]`. The divisor `3.0` is not a new
+/// constant — it is the fast_track trigger threshold itself
+/// (`held_drop_sigma ≥ 3.0`, see fast_track.rs:89).
+///
+/// At sigma = 3.0 (just triggered) the cooldown equals the base 60s; at
+/// sigma = 6.0 it doubles to 120s; extreme sigma ≥ 30 saturates at 600s.
+/// Below sigma = 3.0 the caller should not be invoking this path, but as a
+/// defense we floor at the base to avoid shrinking the guard window.
+/// B2：半倉冷卻按觸發 sigma 成比例縮放，下限為基準，上限為 600s。
+#[inline]
+pub(crate) fn sigma_scaled_reduce_cooldown_ms(held_drop_sigma: f64) -> i64 {
+    let ratio = (held_drop_sigma / 3.0).max(1.0);
+    let scaled = (FT_REDUCE_COOLDOWN_MS as f64 * ratio) as i64;
+    scaled.min(FT_REDUCE_COOLDOWN_MAX_MS)
 }
 
 // ── S-01: Confidence clamp helper — replaces inline .clamp(0.0, 1.0) across strategies ──
