@@ -232,6 +232,39 @@ git status && git log --oneline -5
 **阻塞**：不阻 Live（Live 用 demo fills 做 edge 估計路徑另案），但阻 Phase 5 edge 收斂 + Stage 2 shadow mode 起步
 **與 P1-4 關係**：P1-4「跑首個 ONNX」是本項子任務；本項是框架性 audit finding（數據到訓練到載入三段，只有載入端就緒）
 
+### P1-8 · DUST-EVICTION-GAP-1 — P0-6 triage evict dust 倉位無法平倉（engine/exchange silent drift）🟡 NEW 2026-04-17
+**發現**：2026-04-17 ADAPTIVE-EXIT-FASTTRACK 部署（commit 待補）後驗證重啟 orphan 接管，抓到 P0-6 triage 對 dust 倉位處理 gap：
+- 重啟 capture 7 個 demo bybit_sync 持倉；triage 分流 `adopted=1` (ETHUSDT→ma_crossover) `evicted=5`
+- 5 個 evict 全部經 `ipc_close_symbol` 派發，但只有 **AVAXUSDT / CLUSDT** 真正進 `trading.fills`
+- 另 3 個被 `event_consumer::dispatch` min_notional gate 擋下（`min_notional=$5.0`）：
+  - PNUTUSDT: 3.0 × 0.06644 = $0.20
+  - IPUSDT: 1.4 × 0.6007 = $0.84
+  - AAVEUSDT: 0.02 × 117.15 = $2.34
+- 證據 `/tmp/openclaw/engine.log 2026-04-17T18:55:57Z`：`order dispatch skipped: notional below exchange minimum`
+- **silent drift**：3 個 dust 已從 `demo_state.json` 移除（engine 視為 evicted），但交易所仍持有；reconciler 後續會以 fresh-fill race 抑制 → 長期分歧無人察覺
+
+**根因**：`event_consumer` P0-6 triage evict 路徑 fire-and-forget 假設 `ipc_close_symbol` 必然落地；`dispatch.rs` min_notional gate 是設計上的 fail-closed（Bybit retCode=170124 一類拒單防護），但對 dust 倉位無 fallback 分支；triage 本身不讀回 close 結果就把 engine 狀態清掉。
+
+**候選修復**：
+1. **最小動（推薦）**：evict 前預估 `est_notional = qty × ref_price`，小於 `min_notional` 改標 `orphan_frozen` 並保留在 engine state，不派 close、列入 operator 日報
+2. **中動**：triage evict 改 two-phase（派 close → 等 reconciler 確認 fill → 才清 engine 狀態），close 失敗則標 frozen
+3. **激進（不建議）**：實作內部對沖撮合 dust 清算路徑（與單一寫入口 §憲法 #1 衝突，需 Guardian 批）
+
+**影響範圍**：demo/live 共通；live 下累積 dust 會造成 ledger ↔ exchange 對賬偏差，違反 §憲法 #9「交易所災難保護位置對稱」前提。
+
+**不阻 Live**：啟真 live 前 operator 需先 Bybit GUI 手動清 dust（本票屬結構性修）。P1 優先級。
+
+**關聯**：
+- P0-10 SCANNER-GATE（scanner 輪替退集合 → owner 倉位需 evict，dust 在此路徑特別易產生）
+- ORPHAN-ADOPT-1 Phase 2A / P0-6 triage 設計
+- 原始 `tick_pipeline::commands` ipc_close_symbol orphan hint 路徑（18:55:57Z 5 次 INFO log 可印證）
+
+**下一步**：
+  1. E1 pick-up：確認 `event_consumer.rs` P0-6 triage evict callsite + `dispatch.rs` min_notional gate 行號
+  2. 方案 1 實作（evict 前 notional 預檢，< min_notional 直接 mark `orphan_frozen`，加 metric counter）
+  3. E2 審 + E4 寫單測（3 種 dust 配置 + 1 種 normal 配置）
+  4. 部署後觀察：`/api/v1/system/orphan_frozen` GUI 曝光（或先 log-only 一週）
+
 ### AI 治理層補強
 - [ ] **G-7** ClaudeTeacher 正式啟用（W23）
   - 現況：`consumer_loop.rs` `enabled = false`；learning_store "no consumer"
@@ -391,7 +424,7 @@ git status && git log --oneline -5
 
 ---
 
-## 🔍 Gap 排期索引（2026-04-10 審計，10 項全錄）
+## 🔍 Gap 排期索引（2026-04-10 審計 10 項 + 2026-04-17 補 1 項）
 
 | Gap | 描述 | 排期週 | 狀態 |
 |-----|------|--------|------|
@@ -405,6 +438,7 @@ git status && git log --oneline -5
 | G-8 | cost_gate 可信度低 | EDGE-P3-1 後 | ⬜ |
 | G-9 | HMAC dead import | W20 | ✅ |
 | G-10 | Calibration.py 骨架 | W23 | ⬜ |
+| G-11 | P0-6 triage evict dust 倉位無法平倉（silent drift）→ P1-8 DUST-EVICTION-GAP-1 | W23（log-only 先） | 🟡 NEW 2026-04-17 |
 
 ---
 
