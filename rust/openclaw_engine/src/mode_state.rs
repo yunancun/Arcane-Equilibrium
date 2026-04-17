@@ -17,7 +17,7 @@ use crate::intent_processor::IntentProcessor;
 use crate::paper_state::{PaperState, PaperStateSnapshot};
 use crate::pipeline_types::{TimestampedFill, TimestampedIntent};
 use crate::tick_pipeline::PipelineKind;
-use openclaw_core::governance_core::GovernanceCore;
+use openclaw_core::governance_core::{GovernanceCore, GovernanceProfile};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
@@ -46,11 +46,58 @@ pub fn effective_engine_mode(
         (PipelineKind::Live, Some(BybitEnvironment::Testnet)) => "live_testnet",
         // Live + LiveDemo, Live + Demo, and Live + None all resolve to
         // live_demo — all three are demo-endpoint traffic under a Live
-        // PipelineKind (Production governance profile). `None` is defensive
-        // for pre-wire construction paths (tests, cold start).
-        // Live + LiveDemo/Demo/None：三者皆為 demo 端點的 Live 流量
-        // （Production governance profile）。None 為構造期防禦性 fallback。
+        // PipelineKind. `None` is defensive for pre-wire construction paths
+        // (tests, cold start). Cost-gate profile for these is Validation
+        // (not Production) — see `effective_governance_profile`.
+        // Live + LiveDemo/Demo/None：三者皆為 demo 端點的 Live 流量。
+        // None 為構造期防禦性 fallback。Cost-gate profile 採 Validation，
+        // 見 `effective_governance_profile`。
         (PipelineKind::Live, _) => "live_demo",
+    }
+}
+
+/// Endpoint-aware GovernanceProfile for **per-intent cost-gate selection**.
+///
+/// P0-6 方案 A (2026-04-17): the cost gate must distinguish "Live pipeline
+/// against demo endpoint" (LiveDemo — play money, exploratory) from "real
+/// mainnet Live" (production — fail-closed without positive edge estimate).
+/// Without this split, LiveDemo hit `cost_gate(JS-live): no edge estimate —
+/// fail-closed (cold-start)` on every intent, producing 0 fills → 0 edge
+/// data → permanent cold-start deadlock (P0-6 RCA 2026-04-17).
+///
+/// Mapping:
+///   * `Paper`                     → `Exploration`
+///   * `Demo`                      → `Validation`
+///   * `Live + Mainnet`            → `Production` (real money, strict)
+///   * `Live + Testnet`            → `Validation` (not real money)
+///   * `Live + LiveDemo/Demo/None` → `Validation` (demo endpoint, cold-start allowed)
+///
+/// **Scope**: only used by `IntentProcessor::process_*` for cost-gate tier
+/// selection. Does NOT override the construction-time profile passed to
+/// `GovernanceCore::new_with_profile()` — Auth/Lease semantics for the Live
+/// pipeline remain unchanged (Python Operator auth still required for
+/// real-live traffic).
+///
+/// P0-6 方案 A：cost gate 必須區分「Live 管線連 demo 端點（LiveDemo，
+/// 假錢探索）」與「真 mainnet Live（真錢，無正向估計即 fail-closed）」。
+/// 未區分前 LiveDemo 每筆 intent 都撞 cold-start fail-closed → 永久死循環。
+/// 僅用於 IntentProcessor cost gate 分層；GovernanceCore 構造時的 profile
+/// 保持原樣（Live 管線仍需 Python Operator 授權）。
+pub fn effective_governance_profile(
+    kind: PipelineKind,
+    env: Option<BybitEnvironment>,
+) -> GovernanceProfile {
+    match (kind, env) {
+        (PipelineKind::Paper, _) => GovernanceProfile::Exploration,
+        (PipelineKind::Demo, _) => GovernanceProfile::Validation,
+        (PipelineKind::Live, Some(BybitEnvironment::Mainnet)) => GovernanceProfile::Production,
+        // Live + non-Mainnet = demo-endpoint traffic; treat as Validation so
+        // the moderate cost gate (cold-start allowed) runs instead of the
+        // strict live gate. Matches `effective_engine_mode` == "live_demo"
+        // / "live_testnet". `None` is defensive for pre-wire paths.
+        // Live + 非 Mainnet = demo 端點流量；套 Validation 啟用 cold-start
+        // 允許的 moderate cost gate。對齊 engine_mode 標籤 "live_demo"。
+        (PipelineKind::Live, _) => GovernanceProfile::Validation,
     }
 }
 
@@ -230,6 +277,98 @@ mod tests {
             effective_engine_mode(PipelineKind::Live, Some(BybitEnvironment::Testnet)),
             "live_testnet"
         );
+    }
+
+    #[test]
+    fn test_effective_governance_profile_p0_6_mapping() {
+        // Paper / Demo — trivial mapping / 簡單映射
+        assert_eq!(
+            effective_governance_profile(PipelineKind::Paper, None),
+            GovernanceProfile::Exploration
+        );
+        assert_eq!(
+            effective_governance_profile(PipelineKind::Paper, Some(BybitEnvironment::Mainnet)),
+            GovernanceProfile::Exploration
+        );
+        assert_eq!(
+            effective_governance_profile(PipelineKind::Demo, None),
+            GovernanceProfile::Validation
+        );
+        assert_eq!(
+            effective_governance_profile(PipelineKind::Demo, Some(BybitEnvironment::Demo)),
+            GovernanceProfile::Validation
+        );
+
+        // Live + Mainnet = real money = strict Production cost gate.
+        // Live + Mainnet = 真錢 = 嚴格 Production cost gate。
+        assert_eq!(
+            effective_governance_profile(PipelineKind::Live, Some(BybitEnvironment::Mainnet)),
+            GovernanceProfile::Production
+        );
+
+        // P0-6 crux: Live + LiveDemo/Demo/Testnet/None must collapse to
+        // Validation so `cost_gate_moderate` runs (cold-start allowed).
+        // Production would invoke `cost_gate_live` which fail-closes on the
+        // cold-start path when `edge_estimates.json` is empty.
+        // P0-6 關鍵：Live + LiveDemo 等必須折疊到 Validation，讓
+        // `cost_gate_moderate` 執行（允許 cold-start）。
+        assert_eq!(
+            effective_governance_profile(PipelineKind::Live, Some(BybitEnvironment::LiveDemo)),
+            GovernanceProfile::Validation,
+            "LiveDemo must map to Validation (P0-6 cold-start deadlock fix)"
+        );
+        assert_eq!(
+            effective_governance_profile(PipelineKind::Live, Some(BybitEnvironment::Demo)),
+            GovernanceProfile::Validation
+        );
+        assert_eq!(
+            effective_governance_profile(PipelineKind::Live, Some(BybitEnvironment::Testnet)),
+            GovernanceProfile::Validation
+        );
+        assert_eq!(
+            effective_governance_profile(PipelineKind::Live, None),
+            GovernanceProfile::Validation,
+            "None endpoint (pre-wire) must default to Validation, not Production"
+        );
+    }
+
+    #[test]
+    fn test_effective_governance_profile_parity_with_engine_mode() {
+        // Any (kind, env) tagged "live" must map to Production; any tagged
+        // other than "live" must NOT map to Production. Prevents future
+        // drift between the engine-mode string and the cost-gate profile.
+        // 任何 engine_mode="live" 的組合必須是 Production；否則不得是
+        // Production。防止 tag 與 cost gate profile 漂移。
+        for kind in [PipelineKind::Paper, PipelineKind::Demo, PipelineKind::Live] {
+            for env in [
+                None,
+                Some(BybitEnvironment::Mainnet),
+                Some(BybitEnvironment::Demo),
+                Some(BybitEnvironment::LiveDemo),
+                Some(BybitEnvironment::Testnet),
+            ] {
+                let mode = effective_engine_mode(kind, env);
+                let profile = effective_governance_profile(kind, env);
+                if mode == "live" {
+                    assert_eq!(
+                        profile,
+                        GovernanceProfile::Production,
+                        "engine_mode=live must map to Production for (kind={:?}, env={:?})",
+                        kind,
+                        env
+                    );
+                } else {
+                    assert_ne!(
+                        profile,
+                        GovernanceProfile::Production,
+                        "engine_mode={} must NOT map to Production for (kind={:?}, env={:?})",
+                        mode,
+                        kind,
+                        env
+                    );
+                }
+            }
+        }
     }
 
     #[test]

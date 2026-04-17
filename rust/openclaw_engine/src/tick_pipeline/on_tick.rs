@@ -786,12 +786,23 @@ impl TickPipeline {
                         &self.paper_state,
                     );
                     let context_id = make_context_id(em, &intent.symbol, event.ts_ms);
+                    // P0-6 方案 A: endpoint-aware profile — LiveDemo must get
+                    // Validation (moderate cost gate, cold-start allowed); only
+                    // Live + Mainnet keeps Production (strict fail-closed).
+                    // Inlined to avoid borrow conflict with orchestrator mutable
+                    // iterator above (pipeline_kind/endpoint_env are Copy).
+                    // P0-6 方案 A：endpoint 感知 profile — LiveDemo 走 Validation。
+                    // 直接呼叫自由函式以避免與上方 orchestrator 可變迭代借用衝突。
+                    let profile = crate::mode_state::effective_governance_profile(
+                        self.pipeline_kind,
+                        self.endpoint_env,
+                    );
                     let gate = self.intent_processor.process_gates_only_with_features(
                         intent,
                         &self.governance,
                         &self.paper_state,
                         atr_value,
-                        self.pipeline_kind.governance_profile(),
+                        profile,
                         Some(&features),
                         Some(&context_id),
                         event.ts_ms,
@@ -892,12 +903,21 @@ impl TickPipeline {
                         &self.paper_state,
                     );
                     let context_id = make_context_id(em, &intent.symbol, event.ts_ms);
+                    // P0-6 方案 A: endpoint-aware profile (mirror of exchange
+                    // branch). LiveDemo → Validation; Live + Mainnet → Production.
+                    // Inlined free-fn call sidesteps orchestrator mutable borrow.
+                    // P0-6 方案 A：endpoint 感知（與交易所分支對齊）。
+                    // 直接走自由函式以避免借用衝突。
+                    let profile = crate::mode_state::effective_governance_profile(
+                        self.pipeline_kind,
+                        self.endpoint_env,
+                    );
                     let result = self.intent_processor.process_with_features(
                         intent,
                         &self.governance,
                         &self.paper_state,
                         atr_value,
-                        self.pipeline_kind.governance_profile(),
+                        profile,
                         Some(&features),
                         Some(&context_id),
                         event.ts_ms,
