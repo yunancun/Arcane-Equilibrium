@@ -60,6 +60,58 @@ pub struct PaperPosition {
     pub entry_notional: f64,
 }
 
+/// DUST-EVICTION-GAP-1 / P1-8 FUP (2026-04-17): labels treated as "not owned by any real
+/// strategy". Any position wearing one of these needs opportunistic re-triage on subsequent
+/// ticks so conditions that prevented promotion at startup (notional below min, symbol
+/// outside scanner universe) can unlock naturally without requiring restart or operator
+/// action. `KNOWN_STRATEGY_NAMES` intentionally excludes these three so B1/B2 edge probes
+/// don't self-reference; keep both lists in sync when adding new synthetic labels.
+/// DUST-EVICTION-GAP-1 / P1-8 FUP：視為「無實策略擁有」的標籤。掛此標籤的持倉每 tick
+/// 走機會性重分流，讓啟動時阻擋升級的條件（名義值過低 / 不在 scanner universe）自然
+/// 解除，不需 operator 介入或重啟。與 KNOWN_STRATEGY_NAMES 互斥對稱。
+pub const SYNTHETIC_OWNER_LABELS: &[&str] = &[
+    "bybit_sync",
+    crate::position_reconciler::orphan_handler::ORPHAN_ADOPTED_STRATEGY,
+    crate::position_reconciler::orphan_handler::DUST_FROZEN_STRATEGY,
+];
+
+/// DUST-EVICTION-GAP-1 / P1-8 FUP (2026-04-17): outcome of a single per-tick re-triage call
+/// for a position with a synthetic owner label. The caller (`tick_pipeline::on_tick`) uses
+/// this to drive logging + (for `NeedsEviction`) `ipc_close_symbol` dispatch.
+/// DUST-EVICTION-GAP-1 / P1-8 FUP：單次 tick-level synthetic-owner 重分流結果。
+#[derive(Debug, Clone, PartialEq)]
+pub enum RetriageOutcome {
+    /// No synthetic position for this symbol, or already owned by a real strategy,
+    /// or position not found. Fast path (the vast majority of tick calls).
+    /// 無 synthetic 倉位 / 已被實策略擁有 / 無倉 — 熱路徑（絕大多數 tick 走此分支）。
+    NoOp,
+    /// `est_notional < min_notional` → label set (or kept) as `DUST_FROZEN_STRATEGY`.
+    /// `was_downgraded = true` iff this tick actually flipped the label (for log dedup).
+    /// `est_notional < min_notional` → 標籤設為（或保持）orphan_frozen。
+    /// `was_downgraded=true` 表示本 tick 真正切換，用於日誌去重。
+    FrozenAsDust {
+        est_notional: f64,
+        min_notional: f64,
+        was_downgraded: bool,
+    },
+    /// Synthetic label → real strategy name (symbol in universe, notional OK).
+    /// Caller should log the transition once.
+    /// Synthetic 標籤 → 實策略（在 universe + 名義值足夠）。呼叫方需記一次轉換日誌。
+    Promoted {
+        from: String,
+        to: String,
+        est_notional: f64,
+    },
+    /// Symbol not in universe + notional OK → caller should dispatch CloseSymbol.
+    /// Caller is responsible for time-based dedup to avoid spam on repeated retries.
+    /// 不在 universe + 名義值足夠 → 呼叫方派 CloseSymbol，並負責時間去重。
+    NeedsEviction {
+        is_long: bool,
+        qty: f64,
+        est_notional: f64,
+    },
+}
+
 /// P0-6 FIX: Result of startup bybit_sync position triage.
 /// P0-6 修復：啟動 bybit_sync 持倉分流結果。
 #[derive(Debug, Clone, Default)]
@@ -70,6 +122,14 @@ pub struct TriageOutcome {
     /// (symbol, is_long, qty) — positions removed from paper_state, need close dispatch.
     /// 從 paper_state 移除的持倉，需派發平倉。
     pub evicted: Vec<(String, bool, f64)>,
+    /// DUST-EVICTION-GAP-1 / P1-8 (2026-04-17): (symbol, is_long, qty, est_notional, min_notional)
+    /// — eviction candidates whose `qty * ref_price` is below the exchange min notional.
+    /// Retained in paper_state with `owner_strategy = DUST_FROZEN_STRATEGY` so the
+    /// position mirror still reflects exchange reality; NO close is dispatched (would be
+    /// rejected anyway). Operator must clear on Bybit GUI before going truly live.
+    /// DUST-EVICTION-GAP-1 / P1-8：被驅逐候選但名義值低於交易所最小值的持倉；保留於
+    /// paper_state 並標記 DUST_FROZEN_STRATEGY，不派平倉；需 operator 手動清理。
+    pub dust_frozen: Vec<(String, bool, f64, f64, f64)>,
 }
 
 /// Paper trading state manager.
@@ -467,20 +527,34 @@ impl PaperState {
 
     /// P0-6 FIX: Triage bybit_sync positions after startup import.
     /// Positions whose symbol is in `active_symbols` are adopted under the first
-    /// matching strategy name. Positions NOT in the active universe are evicted
-    /// (removed from paper_state + mirror) and returned for close dispatch.
-    /// Must be called AFTER `import_positions()` + `set_positions_mirror()`.
+    /// matching strategy name. Positions NOT in the active universe would be evicted
+    /// (removed from paper_state + mirror) and returned for close dispatch — UNLESS
+    /// `dust_check(symbol, qty)` returns `Some((est_notional, min_notional))` where
+    /// `est_notional < min_notional`, in which case the position is retained with
+    /// `owner_strategy = DUST_FROZEN_STRATEGY` and NO close is dispatched (see
+    /// DUST-EVICTION-GAP-1 / P1-8, 2026-04-17). Must be called AFTER `import_positions()`
+    /// + `set_positions_mirror()`.
+    ///
+    /// `dust_check` contract:
+    ///   - Return `None` → caller has no instrument info / no ref price → evict normally
+    ///   - Return `Some((est_notional, min_notional))` where `est_notional >= min_notional`
+    ///     → evict normally (close will succeed)
+    ///   - Return `Some((est_notional, min_notional))` where `est_notional < min_notional`
+    ///     → freeze as dust (close would be rejected by exchange anyway)
+    ///
     /// P0-6 修復：啟動後對 bybit_sync 持倉分流。在活躍集合內 → 指派策略接管；
-    /// 不在集合內 → 從 paper_state 移除，回傳供平倉派發。
-    pub fn triage_bybit_sync(
+    /// 不在集合內 → 正常驅逐並派平倉，除非 dust_check 判定 est_notional < min_notional
+    /// （DUST-EVICTION-GAP-1 / P1-8）則保留並標記 DUST_FROZEN_STRATEGY、不派平倉。
+    pub fn triage_bybit_sync<F>(
         &mut self,
         active_symbols: &[String],
         strategy_names: &[&str],
-    ) -> TriageOutcome {
-        let mut outcome = TriageOutcome {
-            adopted: Vec::new(),
-            evicted: Vec::new(),
-        };
+        dust_check: F,
+    ) -> TriageOutcome
+    where
+        F: Fn(&str, f64) -> Option<(f64, f64)>,
+    {
+        let mut outcome = TriageOutcome::default();
 
         let bybit_sync_symbols: Vec<String> = self
             .positions
@@ -503,15 +577,130 @@ impl PaperState {
                         .adopted
                         .push((symbol, strategy.to_string()));
                 }
-            } else {
-                if let Some(pos) = self.positions_remove(&symbol) {
-                    outcome
-                        .evicted
-                        .push((pos.symbol.clone(), pos.is_long, pos.qty));
+                continue;
+            }
+
+            // Eviction path — first check whether dispatch would be rejected by
+            // the exchange's min-notional gate. If so, freeze in place instead of
+            // silently dropping from paper_state.
+            // 驅逐路徑 — 先檢查 dispatch 是否會被交易所 min-notional 擋下。會被擋
+            // 則就地凍結，不無聲從 paper_state 移除。
+            let (is_long, qty) = match self.positions.get(&symbol) {
+                Some(p) => (p.is_long, p.qty),
+                None => continue,
+            };
+            if let Some((est_notional, min_notional)) = dust_check(&symbol, qty) {
+                if est_notional < min_notional {
+                    if let Some(pos) = self.positions.get_mut(&symbol) {
+                        pos.owner_strategy =
+                            crate::position_reconciler::orphan_handler::DUST_FROZEN_STRATEGY
+                                .to_string();
+                    }
+                    outcome.dust_frozen.push((
+                        symbol,
+                        is_long,
+                        qty,
+                        est_notional,
+                        min_notional,
+                    ));
+                    continue;
                 }
+            }
+            if let Some(pos) = self.positions_remove(&symbol) {
+                outcome
+                    .evicted
+                    .push((pos.symbol.clone(), pos.is_long, pos.qty));
             }
         }
         outcome
+    }
+
+    /// DUST-EVICTION-GAP-1 / P1-8 FUP (2026-04-17): per-tick opportunistic re-triage for a
+    /// single symbol carrying a `SYNTHETIC_OWNER_LABELS` owner. Runs the exact same decision
+    /// tree as startup `triage_bybit_sync` but at tick cadence, so conditions that blocked
+    /// promotion/eviction at boot (notional below min, symbol outside scanner universe) can
+    /// unlock naturally when price moves or scanner rotates — no restart or operator action
+    /// required (§原則 #11 Agent 最大自主權).
+    ///
+    /// Covers all three synthetic labels in one pass:
+    ///   - `bybit_sync`     — startup triage missed (race / registry not ready yet)
+    ///   - `orphan_adopted` — Phase 2A adopted without positive edge; upgrade when conditions allow
+    ///   - `orphan_frozen`  — P1-8 dust; upgrade when notional rises above min
+    ///
+    /// Positions owned by a real strategy (any name NOT in `SYNTHETIC_OWNER_LABELS`) are
+    /// deliberately NOT touched — strategy lifecycle (SL/TP/close signals) stays authoritative.
+    ///
+    /// `min_notional = None` is treated as "no dust gate" (e.g., instrument cache empty in
+    /// tests): dust-freeze branch is skipped; promotion/eviction still apply based on universe.
+    ///
+    /// DUST-EVICTION-GAP-1 / P1-8 FUP：單 symbol tick-level 機會性重分流。與啟動 triage
+    /// 同一決策樹，但於 tick 節奏執行；啟動時阻擋升級的條件（名義值低 / 不在 universe）
+    /// 自然解除時不需重啟或 operator 介入（§原則 #11）。
+    /// 覆蓋三種 synthetic labels（bybit_sync / orphan_adopted / orphan_frozen）。
+    /// 實策略擁有的倉位刻意不動，由策略自行管理生命週期。
+    pub fn retriage_synthetic_owner(
+        &mut self,
+        symbol: &str,
+        tick_price: f64,
+        in_universe: bool,
+        target_strategy: &str,
+        min_notional: Option<f64>,
+    ) -> RetriageOutcome {
+        if tick_price <= 0.0 || !tick_price.is_finite() {
+            return RetriageOutcome::NoOp;
+        }
+        let (is_long, qty, current_label) = match self.positions.get(symbol) {
+            Some(p) => (p.is_long, p.qty, p.owner_strategy.clone()),
+            None => return RetriageOutcome::NoOp,
+        };
+        if !SYNTHETIC_OWNER_LABELS.iter().any(|l| *l == current_label) {
+            return RetriageOutcome::NoOp;
+        }
+        if qty <= 0.0 {
+            return RetriageOutcome::NoOp;
+        }
+
+        let est_notional = qty * tick_price;
+
+        // Dust branch — only when caller supplied a min_notional and we fall below it.
+        // Dust 分支 — 僅當呼叫方提供 min_notional 且名義值低於門檻。
+        if let Some(minn) = min_notional {
+            if minn > 0.0 && est_notional < minn {
+                let was_downgraded = current_label
+                    != crate::position_reconciler::orphan_handler::DUST_FROZEN_STRATEGY;
+                if was_downgraded {
+                    if let Some(pos) = self.positions.get_mut(symbol) {
+                        pos.owner_strategy =
+                            crate::position_reconciler::orphan_handler::DUST_FROZEN_STRATEGY
+                                .to_string();
+                    }
+                }
+                return RetriageOutcome::FrozenAsDust {
+                    est_notional,
+                    min_notional: minn,
+                    was_downgraded,
+                };
+            }
+        }
+
+        // Promote / evict branch — notional OK.
+        // 升級 / 驅逐分支 — 名義值足夠。
+        if in_universe && !target_strategy.is_empty() {
+            if let Some(pos) = self.positions.get_mut(symbol) {
+                pos.owner_strategy = target_strategy.to_string();
+            }
+            RetriageOutcome::Promoted {
+                from: current_label,
+                to: target_strategy.to_string(),
+                est_notional,
+            }
+        } else {
+            RetriageOutcome::NeedsEviction {
+                is_long,
+                qty,
+                est_notional,
+            }
+        }
     }
 
     /// ORPHAN-ADOPT-1 Phase 2A: Adopt an exchange-reported orphan position into
@@ -1624,7 +1813,7 @@ mod tests {
 
         let active = vec!["BTCUSDT".into(), "ETHUSDT".into(), "SOLUSDT".into()];
         let strategies = &["ma_crossover", "bb_reversion"];
-        let result = s.triage_bybit_sync(&active, strategies);
+        let result = s.triage_bybit_sync(&active, strategies, |_, _| None);
 
         assert_eq!(result.adopted.len(), 2);
         assert_eq!(result.evicted.len(), 0);
@@ -1647,7 +1836,7 @@ mod tests {
 
         let active = vec!["BTCUSDT".into()];
         let strategies = &["ma_crossover"];
-        let result = s.triage_bybit_sync(&active, strategies);
+        let result = s.triage_bybit_sync(&active, strategies, |_, _| None);
 
         assert_eq!(result.adopted.len(), 1);
         assert_eq!(result.evicted.len(), 1);
@@ -1665,7 +1854,7 @@ mod tests {
 
         let active = vec!["BTCUSDT".into()];
         let empty: &[&str] = &[];
-        let result = s.triage_bybit_sync(&active, empty);
+        let result = s.triage_bybit_sync(&active, empty, |_, _| None);
 
         assert_eq!(result.adopted.len(), 0);
         assert_eq!(result.evicted.len(), 1);
@@ -1679,7 +1868,7 @@ mod tests {
 
         let active = vec!["BTCUSDT".into()];
         let strategies = &["ma_crossover"];
-        let result = s.triage_bybit_sync(&active, strategies);
+        let result = s.triage_bybit_sync(&active, strategies, |_, _| None);
 
         assert_eq!(result.adopted.len(), 0);
         assert_eq!(result.evicted.len(), 0);
@@ -1691,7 +1880,7 @@ mod tests {
         let mut s = PaperState::new(10_000.0);
         let active = vec!["BTCUSDT".into()];
         let strategies = &["ma_crossover"];
-        let result = s.triage_bybit_sync(&active, strategies);
+        let result = s.triage_bybit_sync(&active, strategies, |_, _| None);
 
         assert_eq!(result.adopted.len(), 0);
         assert_eq!(result.evicted.len(), 0);
@@ -1705,9 +1894,330 @@ mod tests {
 
         let active: Vec<String> = vec![];
         let strategies = &["ma_crossover"];
-        let _ = s.triage_bybit_sync(&active, strategies);
+        let _ = s.triage_bybit_sync(&active, strategies, |_, _| None);
 
         assert!(!s.positions_mirror.read().contains_key("SHIBUSDT"));
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // DUST-EVICTION-GAP-1 / P1-8 tests (2026-04-17)
+    // DUST-EVICTION-GAP-1 / P1-8 測試：evict 候選但名義值低於 min_notional 時凍結
+    // ═══════════════════════════════════════════════════════════════════════
+
+    #[test]
+    fn triage_dust_candidate_is_frozen_not_evicted() {
+        // PNUTUSDT 3.0 × $0.06644 = $0.199 < min_notional=$5 → freeze, NO evict.
+        // 覆蓋 P0-6 18:55:57Z 現場的 bug：dust 倉位被 engine 清掉但交易所仍持有。
+        let mut s = PaperState::new(10_000.0);
+        seed_bybit_sync(&mut s, &[("PNUTUSDT", true, 3.0, 0.06644)]);
+
+        let active: Vec<String> = vec![]; // not in universe → eviction candidate
+        let strategies = &["ma_crossover"];
+        let result = s.triage_bybit_sync(&active, strategies, |sym, qty| {
+            if sym == "PNUTUSDT" {
+                Some((qty * 0.06644, 5.0))
+            } else {
+                None
+            }
+        });
+
+        assert_eq!(result.adopted.len(), 0);
+        assert_eq!(result.evicted.len(), 0);
+        assert_eq!(result.dust_frozen.len(), 1);
+
+        // Position retained, owner_strategy flipped to orphan_frozen.
+        // 倉位保留，owner_strategy 改為 orphan_frozen。
+        assert_eq!(s.position_count(), 1);
+        let pos = s.get_position("PNUTUSDT").expect("dust position retained");
+        assert_eq!(pos.owner_strategy, "orphan_frozen");
+        // Mirror still has the symbol — engine/exchange stay in sync.
+        // Mirror 仍包含 symbol — engine/exchange 保持同步。
+        assert!(s.positions_mirror.read().contains_key("PNUTUSDT"));
+
+        let (sym, is_long, qty, est, minn) = &result.dust_frozen[0];
+        assert_eq!(sym, "PNUTUSDT");
+        assert!(*is_long);
+        assert!((*qty - 3.0).abs() < 1e-9);
+        assert!((*est - 0.19932).abs() < 1e-4);
+        assert!((*minn - 5.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn triage_normal_evict_when_notional_above_min() {
+        // SHIBUSDT 100 × $0.001 = $0.1 BUT dust_check returns ($20, $5) → evict path.
+        // Even though real SHIB qty=100 × $0.001 looks tiny, if caller reports
+        // est_notional ≥ min_notional, we MUST evict normally (close will succeed).
+        // 若 caller 回報 est_notional ≥ min_notional 則走正常驅逐，不凍結。
+        let mut s = PaperState::new(10_000.0);
+        seed_bybit_sync(&mut s, &[("SHIBUSDT", true, 100.0, 0.001)]);
+
+        let active: Vec<String> = vec![];
+        let strategies = &["ma_crossover"];
+        let result = s.triage_bybit_sync(&active, strategies, |_, _| Some((20.0, 5.0)));
+
+        assert_eq!(result.evicted.len(), 1);
+        assert_eq!(result.dust_frozen.len(), 0);
+        assert_eq!(s.position_count(), 0);
+    }
+
+    #[test]
+    fn triage_evict_when_dust_check_returns_none() {
+        // dust_check=None (no instrument spec / no ref price) → evict as before.
+        // Preserves legacy behaviour when instrument_cache is empty (tests / headless).
+        // dust_check=None 時沿用舊行為正常驅逐（instrument_cache 空時相容路徑）。
+        let mut s = PaperState::new(10_000.0);
+        seed_bybit_sync(&mut s, &[("XXXUSDT", false, 0.5, 100.0)]);
+
+        let active: Vec<String> = vec![];
+        let strategies = &["ma_crossover"];
+        let result = s.triage_bybit_sync(&active, strategies, |_, _| None);
+
+        assert_eq!(result.evicted.len(), 1);
+        assert_eq!(result.dust_frozen.len(), 0);
+        assert_eq!(s.position_count(), 0);
+    }
+
+    #[test]
+    fn triage_equal_to_min_notional_evicts_not_freezes() {
+        // est_notional == min_notional is NOT dust (dispatch uses `<` strict).
+        // Keep the boundary identical to event_consumer/dispatch.rs:76 `est_notional < min_notional`.
+        // 邊界與 dispatch.rs 嚴格小於對齊，等值時正常驅逐。
+        let mut s = PaperState::new(10_000.0);
+        seed_bybit_sync(&mut s, &[("EDGEUSDT", true, 1.0, 5.0)]);
+
+        let active: Vec<String> = vec![];
+        let strategies = &["ma_crossover"];
+        let result = s.triage_bybit_sync(&active, strategies, |_, qty| {
+            Some((qty * 5.0, 5.0))
+        });
+
+        assert_eq!(result.evicted.len(), 1);
+        assert_eq!(result.dust_frozen.len(), 0);
+        assert_eq!(s.position_count(), 0);
+    }
+
+    #[test]
+    fn triage_mixed_adopt_evict_dust_in_one_pass() {
+        // 綜合場景：三個 bybit_sync 倉位，一個 adopt、一個正常 evict、一個 dust freeze。
+        let mut s = PaperState::new(10_000.0);
+        seed_bybit_sync(&mut s, &[
+            ("BTCUSDT", true, 0.01, 50000.0),       // in universe → adopt
+            ("SHIBUSDT", true, 100.0, 0.001),        // not in universe, normal evict
+            ("PNUTUSDT", false, 3.0, 0.06644),       // not in universe, dust freeze
+        ]);
+
+        let active: Vec<String> = vec!["BTCUSDT".into()];
+        let strategies = &["ma_crossover"];
+        let result = s.triage_bybit_sync(&active, strategies, |sym, qty| {
+            match sym {
+                "SHIBUSDT" => Some((qty * 0.001 * 1000.0, 5.0)), // 100.0 > 5.0 → evict
+                "PNUTUSDT" => Some((qty * 0.06644, 5.0)),        // 0.199 < 5.0 → freeze
+                _ => None,
+            }
+        });
+
+        assert_eq!(result.adopted.len(), 1);
+        assert_eq!(result.evicted.len(), 1);
+        assert_eq!(result.dust_frozen.len(), 1);
+        assert_eq!(s.position_count(), 2); // BTC adopted + PNUT frozen
+        assert_eq!(s.get_position("BTCUSDT").unwrap().owner_strategy, "ma_crossover");
+        assert_eq!(s.get_position("PNUTUSDT").unwrap().owner_strategy, "orphan_frozen");
+        assert!(s.get_position("SHIBUSDT").is_none());
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // DUST-EVICTION-GAP-1 / P1-8 FUP retriage_synthetic_owner tests (2026-04-17)
+    // ═══════════════════════════════════════════════════════════════════════
+
+    #[test]
+    fn retriage_noop_for_real_strategy_owner() {
+        // Real strategy label → always NoOp; strategy manages its own lifecycle.
+        // 實策略標籤 → 恆 NoOp；策略自行管理生命週期。
+        let mut s = PaperState::new(10_000.0);
+        s.apply_fill("BTCUSDT", true, 0.01, 50000.0, 0.0, 0, "ma_crossover");
+
+        let outcome = s.retriage_synthetic_owner(
+            "BTCUSDT",
+            10.0, // deliberate dust-level price — should NOT demote real strategy
+            true,
+            "ma_crossover",
+            Some(5.0),
+        );
+        assert_eq!(outcome, RetriageOutcome::NoOp);
+        assert_eq!(s.get_position("BTCUSDT").unwrap().owner_strategy, "ma_crossover");
+    }
+
+    #[test]
+    fn retriage_noop_when_symbol_has_no_position() {
+        let mut s = PaperState::new(10_000.0);
+        let outcome = s.retriage_synthetic_owner("NONEUSDT", 1.0, true, "ma_crossover", Some(5.0));
+        assert_eq!(outcome, RetriageOutcome::NoOp);
+    }
+
+    #[test]
+    fn retriage_dust_freezes_bybit_sync_position() {
+        // bybit_sync + in universe + notional < min → label flipped to orphan_frozen,
+        // was_downgraded=true, no promotion, no eviction.
+        // bybit_sync + notional 低於 min → 降級為 orphan_frozen。
+        let mut s = PaperState::new(10_000.0);
+        seed_bybit_sync(&mut s, &[("PNUTUSDT", true, 3.0, 0.06644)]);
+
+        let outcome = s.retriage_synthetic_owner(
+            "PNUTUSDT", 0.06644, true, "ma_crossover", Some(5.0),
+        );
+        match outcome {
+            RetriageOutcome::FrozenAsDust { was_downgraded, min_notional, .. } => {
+                assert!(was_downgraded);
+                assert!((min_notional - 5.0).abs() < 1e-9);
+            }
+            other => panic!("expected FrozenAsDust, got {:?}", other),
+        }
+        assert_eq!(s.get_position("PNUTUSDT").unwrap().owner_strategy, "orphan_frozen");
+    }
+
+    #[test]
+    fn retriage_dust_stays_frozen_is_idempotent() {
+        // orphan_frozen still dust → was_downgraded=false (no state change, no log).
+        // orphan_frozen 仍是 dust → was_downgraded=false（無狀態變化、無日誌）。
+        let mut s = PaperState::new(10_000.0);
+        seed_bybit_sync(&mut s, &[("PNUTUSDT", true, 3.0, 0.06644)]);
+        // Drop into dust first.
+        let _ = s.retriage_synthetic_owner("PNUTUSDT", 0.06644, true, "ma_crossover", Some(5.0));
+        assert_eq!(s.get_position("PNUTUSDT").unwrap().owner_strategy, "orphan_frozen");
+
+        // Second call — already frozen, should be idempotent no-op log-wise.
+        // 第二次呼叫 — 已凍結，應為 idempotent、不重複發日誌。
+        let outcome = s.retriage_synthetic_owner("PNUTUSDT", 0.06644, true, "ma_crossover", Some(5.0));
+        match outcome {
+            RetriageOutcome::FrozenAsDust { was_downgraded, .. } => {
+                assert!(!was_downgraded);
+            }
+            other => panic!("expected idempotent FrozenAsDust, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn retriage_promotes_orphan_frozen_when_price_recovers() {
+        // orphan_frozen + price rises so notional ≥ min + in universe → Promoted.
+        // 核心修復：Live session 不需重啟即自動接管。
+        let mut s = PaperState::new(10_000.0);
+        // Seed as bybit_sync then manually demote to orphan_frozen (simulate startup triage output).
+        seed_bybit_sync(&mut s, &[("PNUTUSDT", true, 100.0, 0.06644)]);
+        let _ = s.retriage_synthetic_owner("PNUTUSDT", 0.04, true, "ma_crossover", Some(5.0));
+        assert_eq!(s.get_position("PNUTUSDT").unwrap().owner_strategy, "orphan_frozen");
+
+        // Price recovers — 100 × 0.08 = 8 > 5 min. In universe → promote.
+        // 價格回升 → 8 > 5 → 升級。
+        let outcome = s.retriage_synthetic_owner("PNUTUSDT", 0.08, true, "ma_crossover", Some(5.0));
+        match outcome {
+            RetriageOutcome::Promoted { from, to, est_notional } => {
+                assert_eq!(from, "orphan_frozen");
+                assert_eq!(to, "ma_crossover");
+                assert!((est_notional - 8.0).abs() < 1e-9);
+            }
+            other => panic!("expected Promoted, got {:?}", other),
+        }
+        assert_eq!(s.get_position("PNUTUSDT").unwrap().owner_strategy, "ma_crossover");
+    }
+
+    #[test]
+    fn retriage_promotes_bybit_sync_directly_when_in_universe() {
+        // Simulates the case where startup triage never ran (race / registry not ready yet)
+        // and a bybit_sync-labelled position persists. Tick arrives with in_universe=true
+        // and notional OK → immediate promotion without going through orphan_frozen first.
+        // 模擬啟動 triage 未跑的情況；tick 到達即升級，不必先凍結。
+        let mut s = PaperState::new(10_000.0);
+        seed_bybit_sync(&mut s, &[("ETHUSDT", false, 0.5, 3000.0)]);
+
+        let outcome = s.retriage_synthetic_owner("ETHUSDT", 3000.0, true, "ma_crossover", Some(5.0));
+        match outcome {
+            RetriageOutcome::Promoted { from, to, .. } => {
+                assert_eq!(from, "bybit_sync");
+                assert_eq!(to, "ma_crossover");
+            }
+            other => panic!("expected Promoted, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn retriage_promotes_orphan_adopted_when_in_universe() {
+        // orphan_adopted (Phase 2A fallback when no strategy had positive edge) should
+        // also auto-upgrade when conditions allow, not stay stuck forever.
+        // orphan_adopted 也應在條件滿足時自動升級。
+        let mut s = PaperState::new(10_000.0);
+        assert!(s.adopt_orphan("BTCUSDT", true, 0.01, 50000.0, 1000, None));
+        assert_eq!(s.get_position("BTCUSDT").unwrap().owner_strategy, "orphan_adopted");
+
+        let outcome = s.retriage_synthetic_owner("BTCUSDT", 50000.0, true, "ma_crossover", Some(5.0));
+        match outcome {
+            RetriageOutcome::Promoted { from, to, .. } => {
+                assert_eq!(from, "orphan_adopted");
+                assert_eq!(to, "ma_crossover");
+            }
+            other => panic!("expected Promoted, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn retriage_needs_eviction_when_not_in_universe_and_notional_ok() {
+        // synthetic + NOT in universe + notional OK → NeedsEviction (caller dispatches).
+        // Label is NOT changed — keeps state deterministic until close settles.
+        // synthetic + 不在 universe + 名義值足夠 → NeedsEviction（呼叫方派平倉）。
+        let mut s = PaperState::new(10_000.0);
+        seed_bybit_sync(&mut s, &[("OLDUSDT", true, 5.0, 10.0)]);
+
+        let outcome = s.retriage_synthetic_owner("OLDUSDT", 10.0, false, "ma_crossover", Some(5.0));
+        match outcome {
+            RetriageOutcome::NeedsEviction { is_long, qty, est_notional } => {
+                assert!(is_long);
+                assert!((qty - 5.0).abs() < 1e-9);
+                assert!((est_notional - 50.0).abs() < 1e-9);
+            }
+            other => panic!("expected NeedsEviction, got {:?}", other),
+        }
+        // Position kept as-is until caller dispatches close + exchange settles.
+        // 呼叫方派 close + 交易所結算前，倉位保留現狀。
+        assert_eq!(s.get_position("OLDUSDT").unwrap().owner_strategy, "bybit_sync");
+    }
+
+    #[test]
+    fn retriage_zero_or_invalid_price_is_noop() {
+        // Guard against startup/race window ticks with price=0 or NaN.
+        // 防範啟動競態窗口的 price=0 / NaN tick。
+        let mut s = PaperState::new(10_000.0);
+        seed_bybit_sync(&mut s, &[("BTCUSDT", true, 0.01, 50000.0)]);
+
+        assert_eq!(
+            s.retriage_synthetic_owner("BTCUSDT", 0.0, true, "ma_crossover", Some(5.0)),
+            RetriageOutcome::NoOp
+        );
+        assert_eq!(
+            s.retriage_synthetic_owner("BTCUSDT", f64::NAN, true, "ma_crossover", Some(5.0)),
+            RetriageOutcome::NoOp
+        );
+        assert_eq!(
+            s.retriage_synthetic_owner("BTCUSDT", -1.0, true, "ma_crossover", Some(5.0)),
+            RetriageOutcome::NoOp
+        );
+        assert_eq!(s.get_position("BTCUSDT").unwrap().owner_strategy, "bybit_sync");
+    }
+
+    #[test]
+    fn retriage_no_min_notional_skips_dust_gate() {
+        // min_notional=None (instrument cache empty / test harness) → dust gate skipped;
+        // promotion/eviction branch still applies.
+        // min_notional=None → 跳 dust 門；升級/驅逐仍生效。
+        let mut s = PaperState::new(10_000.0);
+        seed_bybit_sync(&mut s, &[("PNUTUSDT", true, 3.0, 0.06644)]);
+
+        let outcome = s.retriage_synthetic_owner("PNUTUSDT", 0.06644, true, "ma_crossover", None);
+        match outcome {
+            RetriageOutcome::Promoted { from, to, .. } => {
+                assert_eq!(from, "bybit_sync");
+                assert_eq!(to, "ma_crossover");
+            }
+            other => panic!("expected Promoted (no dust gate), got {:?}", other),
+        }
     }
 
     // ═══════════════════════════════════════════════════════════════════════

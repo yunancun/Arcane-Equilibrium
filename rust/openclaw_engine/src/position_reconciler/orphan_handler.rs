@@ -81,6 +81,25 @@ pub const KNOWN_STRATEGY_NAMES: &[&str] = &[
 /// 倉位自我引用（它本身並沒有獨立 edge 樣本）。
 pub const ORPHAN_ADOPTED_STRATEGY: &str = "orphan_adopted";
 
+/// DUST-EVICTION-GAP-1 / P1-8 (2026-04-17): label written to `PaperPosition.owner_strategy`
+/// when a bybit_sync eviction candidate has `qty * ref_price < spec.min_notional`. The
+/// position is retained in paper_state (NOT removed + NOT close-dispatched) because the
+/// exchange would reject any close with retCode=170124. Kept out of KNOWN_STRATEGY_NAMES so
+/// no strategy opens follow-on entries on them. Listed in `SYNTHETIC_OWNER_LABELS`, so every
+/// subsequent tick runs `retriage_synthetic_owner` — the moment price moves above
+/// `min_notional` AND symbol is in the scanner universe, ownership auto-flips to the first
+/// KNOWN_STRATEGY_NAMES entry; if it's not in the universe when that happens, a CloseSymbol
+/// is auto-dispatched. No restart and no operator action required (§原則 #11).
+/// Silent drift guard: engine state continues to know the position exists — the reconciler's
+/// position mirror matches exchange, preventing the "engine thinks flat, exchange has dust"
+/// divergence that would violate §憲法 #9.
+/// DUST-EVICTION-GAP-1 / P1-8：bybit_sync 驅逐候選倉位名義值低於交易所最小值時的合成
+/// 策略標籤。保留在 paper_state（不移除、不派平倉），因交易所會以 retCode=170124 拒單。
+/// 刻意不入 KNOWN_STRATEGY_NAMES，但列於 SYNTHETIC_OWNER_LABELS，每 tick 走
+/// retriage_synthetic_owner：價格回升到 ≥ min_notional 且在 scanner universe 即自動升級；
+/// 不在 universe 則自動派 CloseSymbol。不需 operator 介入或重啟（§原則 #11）。
+pub const DUST_FROZEN_STRATEGY: &str = "orphan_frozen";
+
 /// Stage that drove the decision (for audit). Phase 2A emits Adopt via `AdoptPositiveEdge`.
 /// `AdoptDeferredPhase2` retained as a dead-but-reserved taxonomy for back-compat with
 /// external analytics that previously consumed the Phase 1 audit events.

@@ -223,17 +223,64 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
     // evict from paper_state and dispatch CloseSymbol so the reconciler closes it
     // on Bybit. Breaks the FUP-suppression deadlock that prevented orphan handler
     // from ever running on startup-synced positions.
+    //
+    // DUST-EVICTION-GAP-1 / P1-8 (2026-04-17): eviction candidates whose estimated
+    // notional (qty × ref_price) falls below the exchange `min_notional` are NOT
+    // evicted and NOT close-dispatched — they would be rejected by dispatch's
+    // pre-flight check (event_consumer/dispatch.rs:73-87) and by Bybit's server
+    // (retCode=170124). Instead they are frozen in place with owner_strategy =
+    // DUST_FROZEN_STRATEGY so engine state stays aligned with exchange state
+    // (prevents the silent engine/exchange drift observed at 18:55:57Z on 04-17
+    // for PNUT/IP/AAVE). Operator must clear on Bybit GUI before truly live.
+    //
     // P0-6 修復：啟動 bybit_sync 持倉分流。在 scanner 活躍集合內 → 指派策略接管；
-    // 不在集合內 → 從 paper_state 移除並派發 CloseSymbol。打破 FUP 抑制死鎖。
+    // 不在集合內 → 正常驅逐並派 CloseSymbol。
+    // DUST-EVICTION-GAP-1：驅逐候選若名義值低於 min_notional 則凍結保留（避免
+    // 引擎狀態與交易所無聲偏差）。
     if pipeline_kind.is_exchange() {
         let active_symbols = match symbol_registry {
             Some(ref reg) => reg.snapshot(),
             None => SYMBOLS.iter().map(|s| s.to_string()).collect(),
         };
+
+        // Snapshot reference prices for bybit_sync positions BEFORE the mutable
+        // triage call (borrow checker). Fall back to entry_price if latest_prices
+        // has no tick yet (startup bootstrap race window).
+        // 快照 bybit_sync 持倉的參考價（借用檢查器要求），latest_prices 未有 tick
+        // 時用 entry_price 備援（啟動引導競態窗口）。
+        let ref_prices: HashMap<String, f64> = pipeline
+            .paper_state
+            .positions()
+            .iter()
+            .filter(|p| p.owner_strategy == "bybit_sync")
+            .map(|p| {
+                let px = pipeline
+                    .paper_state
+                    .latest_price(&p.symbol)
+                    .filter(|v| *v > 0.0)
+                    .unwrap_or(p.entry_price);
+                (p.symbol.clone(), px)
+            })
+            .collect();
+
+        let icache_for_triage = shared_instruments.as_ref().map(Arc::clone);
         let triage = pipeline.paper_state.triage_bybit_sync(
             &active_symbols,
             crate::position_reconciler::orphan_handler::KNOWN_STRATEGY_NAMES,
+            |symbol, qty| {
+                let ic = icache_for_triage.as_ref()?;
+                let spec = ic.get(symbol)?;
+                if spec.min_notional <= 0.0 {
+                    return None;
+                }
+                let px = *ref_prices.get(symbol)?;
+                if px <= 0.0 {
+                    return None;
+                }
+                Some((qty * px, spec.min_notional))
+            },
         );
+
         for (sym, strategy) in &triage.adopted {
             info!(
                 kind = %pipeline_kind, symbol = %sym, strategy = %strategy,
@@ -255,11 +302,29 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
                 });
             }
         }
-        if !triage.adopted.is_empty() || !triage.evicted.is_empty() {
+        for (sym, is_long, qty, est_notional, min_notional) in &triage.dust_frozen {
+            warn!(
+                kind = %pipeline_kind,
+                symbol = %sym,
+                is_long,
+                qty,
+                est_notional,
+                min_notional,
+                "DUST-EVICTION-GAP-1: bybit_sync position frozen (notional below exchange \
+                 minimum, close would be rejected) — operator must clear manually on Bybit GUI \
+                 / DUST-EVICTION-GAP-1：持倉凍結（名義值低於交易所最小值，派平倉將被拒）— \
+                 operator 需在 Bybit GUI 手動清理"
+            );
+        }
+        if !triage.adopted.is_empty()
+            || !triage.evicted.is_empty()
+            || !triage.dust_frozen.is_empty()
+        {
             info!(
                 kind = %pipeline_kind,
                 adopted = triage.adopted.len(),
                 evicted = triage.evicted.len(),
+                dust_frozen = triage.dust_frozen.len(),
                 "P0-6 triage complete / P0-6 分流完成"
             );
         }

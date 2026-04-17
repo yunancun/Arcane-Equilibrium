@@ -32,6 +32,19 @@ impl TickPipeline {
             .insert(sym.clone(), event.last_price);
         self.paper_state
             .set_latest_price(sym, event.last_price);
+
+        // DUST-EVICTION-GAP-1 / P1-8 FUP (2026-04-17): opportunistic per-tick re-triage for
+        // positions wearing a synthetic owner label (bybit_sync / orphan_adopted /
+        // orphan_frozen). Lets Agent autonomously recover from startup-time conditions
+        // that blocked ownership promotion (notional below min, symbol not in universe)
+        // without requiring restart or operator action (§原則 #11 Agent 最大自主權).
+        // Fast path: non-synthetic labels short-circuit in `retriage_synthetic_owner` with
+        // a single hashmap lookup + label compare — zero per-tick cost in the common case.
+        // DUST-EVICTION-GAP-1 / P1-8 FUP：synthetic owner（bybit_sync / orphan_adopted /
+        // orphan_frozen）持倉每 tick 機會性重分流，讓 Agent 自主恢復啟動時阻擋升級的條件
+        // （§原則 #11）。熱路徑短路：非 synthetic 為 O(1) 無成本。
+        self.retriage_synthetic_owner_for_symbol(sym, event.last_price, event.ts_ms);
+
         // RRC-1-B2: Reset daily start balance at UTC midnight for daily loss tracking.
         // RRC-1-B2：UTC 午夜重置每日起始餘額，用於日損追蹤。
         self.intent_processor
