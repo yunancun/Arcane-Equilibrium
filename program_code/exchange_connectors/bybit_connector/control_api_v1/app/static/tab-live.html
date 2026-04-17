@@ -280,11 +280,11 @@ html, body {
   <div style="overflow-x:auto">
     <table class="live-table" id="live-positions-table">
       <thead><tr>
-        <th>Symbol</th><th>Side</th><th>Size</th>
+        <th>Symbol</th><th>策略 / Strategy</th><th>Side</th><th>Size</th>
         <th>Leverage</th><th>Entry</th><th>Mark</th><th>PnL</th><th>Liq.</th><th>操作</th>
       </tr></thead>
       <tbody id="live-positions-body">
-        <tr><td colspan="9" style="color:var(--text-dim);text-align:center;padding:20px">加載中...</td></tr>
+        <tr><td colspan="10" style="color:var(--text-dim);text-align:center;padding:20px">加載中...</td></tr>
       </tbody>
     </table>
   </div>
@@ -294,11 +294,11 @@ html, body {
   <div style="overflow-x:auto">
     <table class="live-table" id="live-orders-table">
       <thead><tr>
-        <th>Symbol</th><th>Side</th><th>Qty</th>
+        <th>Symbol</th><th>策略 / Strategy</th><th>Side</th><th>Qty</th>
         <th>Price</th><th>Type</th><th>Status</th>
       </tr></thead>
       <tbody id="live-orders-body">
-        <tr><td colspan="6" style="color:var(--text-dim);text-align:center;padding:20px">加載中...</td></tr>
+        <tr><td colspan="7" style="color:var(--text-dim);text-align:center;padding:20px">加載中...</td></tr>
       </tbody>
     </table>
   </div>
@@ -659,15 +659,41 @@ async function refreshPage() {
 // ═══════════════════════════════════════════════════════════════
 // Dashboard data / 儀表板數據
 // ═══════════════════════════════════════════════════════════════
+// Live strategy map: symbol → strategy_name, derived from latest fill per symbol.
+// Live 策略映射：symbol → strategy_name，取每個 symbol 最新一筆 fill 推導。
+let _liveStratMap = {};
+function _buildLiveStratMap(fills) {
+  const m = {};
+  if (!Array.isArray(fills)) return m;
+  for (const f of fills) {
+    const sym = f && f.symbol;
+    if (!sym || m[sym]) continue;
+    const s = f.strategy || f.strategy_name;
+    if (s) m[sym] = s;
+  }
+  return m;
+}
+
 async function loadDashboardData() {
-  // Load balance, positions, orders in parallel via live endpoints
-  // 並行加載餘額、倉位、掛單（使用實盤端點）
-  const [balRes, posRes, ordRes] = await Promise.allSettled([
+  // Load balance, positions, orders, fills in parallel. Fills are needed for
+  // the symbol→strategy map used by Positions and Orders tables (strategy_name
+  // is not on Bybit's position/order responses — it only lives on engine fills).
+  // The fills section below is still lazy-rendered, but the cache/map is populated
+  // now so the tables above can show strategy attribution.
+  // 並行加載餘額、倉位、掛單、成交。fills 端點提供 symbol→策略 映射（Bybit 持倉/掛單
+  // 回應不含 strategy_name，僅引擎 fills 帶）。下方 fills 區段仍懶渲染，但快取/映射在此
+  // 就緒，上方表格得以顯示策略歸屬。
+  const [balRes, posRes, ordRes, fillsRes] = await Promise.allSettled([
     ocApi('/api/v1/live/balance'),
     ocApi('/api/v1/live/positions'),
     ocApi('/api/v1/live/orders'),
+    ocApi('/api/v1/live/fills'),
   ]);
-  // Fills are loaded lazily (only when section is expanded) — see loadFills()
+  try {
+    const fd = fillsRes.status === 'fulfilled' && fillsRes.value && fillsRes.value.data;
+    const fArr = (fd && Array.isArray(fd.list)) ? fd.list : [];
+    _liveStratMap = _buildLiveStratMap(fArr);
+  } catch (_) { _liveStratMap = {}; }
 
   // Balance — from /api/v1/live/balance (PyO3 Rust client → real exchange data)
   // 餘額 — 來自實盤端點（PyO3 Rust client → 真實交易所帳戶資料）
@@ -724,7 +750,7 @@ async function loadDashboardData() {
     let realizedPnl = 0;
     // Try to compute realized from positions cumRealisedPnl sum
     if (arr.length === 0) {
-      posBody.innerHTML = '<tr><td colspan="9" style="color:var(--text-dim);text-align:center;padding:16px">無持倉 / No positions</td></tr>';
+      posBody.innerHTML = '<tr><td colspan="10" style="color:var(--text-dim);text-align:center;padding:16px">無持倉 / No positions</td></tr>';
     } else {
       posBody.innerHTML = arr.map(p => {
         // Bybit flat format (camelCase) + snake_case fallback
@@ -738,9 +764,12 @@ async function loadDashboardData() {
         const leverage = p.leverage || p.lev || '--';
         const cumPnl = parseFloat(p.cumRealisedPnl || p.cum_realised_pnl || 0);
         realizedPnl += cumPnl;
-        const sym = ocEsc(p.symbol || '');
+        const symRaw = p.symbol || '';
+        const sym = ocEsc(symRaw);
+        const strat = _liveStratMap[symRaw] || '--';
         return `<tr>
           <td><strong>${sym}</strong></td>
+          <td style="font-size:11px">${ocEsc(strat)}</td>
           <td>${ocEsc(p.side || '--')}</td>
           <td>${ocEsc(String(size))}</td>
           <td>${ocEsc(String(leverage))}x</td>
@@ -764,7 +793,7 @@ async function loadDashboardData() {
       }
     }
   } catch (_) {
-    posBody.innerHTML = '<tr><td colspan="9" style="color:var(--text-dim);text-align:center">無法加載持倉數據</td></tr>';
+    posBody.innerHTML = '<tr><td colspan="10" style="color:var(--text-dim);text-align:center">無法加載持倉數據</td></tr>';
   }
 
   // Orders — from /api/v1/live/orders (pending-close + stop orders from engine state)
@@ -775,7 +804,7 @@ async function loadDashboardData() {
     const ordArr = (ordData && Array.isArray(ordData.list)) ? ordData.list : [];
     document.getElementById('live-order-count').textContent = ordArr.length;
     if (ordArr.length === 0) {
-      ordBody.innerHTML = '<tr><td colspan="6" style="color:var(--text-dim);text-align:center;padding:16px">無掛單 / No open orders</td></tr>';
+      ordBody.innerHTML = '<tr><td colspan="7" style="color:var(--text-dim);text-align:center;padding:16px">無掛單 / No open orders</td></tr>';
     } else {
       ordBody.innerHTML = ordArr.map(o => {
         // Bybit order format: orderId, symbol, side, qty, price, orderStatus, orderType
@@ -787,8 +816,11 @@ async function loadDashboardData() {
         const price = rawPrice > 0 ? rawPrice : '--';
         const orderType = o.order_type || o.orderType || o.stopOrderType || (o.pending_close ? '平倉' : 'stop');
         const status = o.order_status || o.orderStatus || (o.pending_close ? 'PendingClose' : '--');
+        const symRaw = o.symbol || '';
+        const strat = _liveStratMap[symRaw] || '--';
         return `<tr>
-          <td>${ocEsc(o.symbol || '--')}</td>
+          <td>${ocEsc(symRaw || '--')}</td>
+          <td style="font-size:11px">${ocEsc(strat)}</td>
           <td>${ocEsc(o.side || '--')}</td>
           <td>${ocEsc(String(qty))}</td>
           <td>${ocEsc(String(price))}</td>
@@ -798,7 +830,7 @@ async function loadDashboardData() {
       }).join('');
     }
   } catch (_) {
-    ordBody.innerHTML = '<tr><td colspan="6" style="color:var(--text-dim);text-align:center">無法加載掛單數據</td></tr>';
+    ordBody.innerHTML = '<tr><td colspan="7" style="color:var(--text-dim);text-align:center">無法加載掛單數據</td></tr>';
     document.getElementById('live-order-count').textContent = '--';
   }
 }
