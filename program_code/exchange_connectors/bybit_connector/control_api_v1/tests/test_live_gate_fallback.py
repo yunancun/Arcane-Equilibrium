@@ -28,7 +28,8 @@ _CHANNEL_ERR = (
 )
 
 
-def _make_fake_rc(positions=None, place_order_result=None, round_qty_result=None):
+def _make_fake_rc(positions=None, place_order_result=None, round_qty_result=None,
+                  instrument_count=42):
     """Build a mock BybitClient exposing the methods the fallback path calls."""
     rc = MagicMock()
     rc.get_positions = MagicMock(return_value=positions or [])
@@ -38,6 +39,11 @@ def _make_fake_rc(positions=None, place_order_result=None, round_qty_result=None
     rc.round_qty = MagicMock(
         side_effect=(lambda sym, q: round_qty_result if round_qty_result is not None else q)
     )
+    # Default: instrument cache already warm so tests that don't care about
+    # refresh_instruments behaviour aren't forced to stub it.
+    # 預設：合約規格緩存已熱；不關心 refresh 行為的測試不需 stub。
+    rc.instrument_count = MagicMock(return_value=instrument_count)
+    rc.refresh_instruments = MagicMock(return_value=instrument_count)
     return rc
 
 
@@ -95,8 +101,45 @@ def test_rest_close_survives_round_qty_failure():
     rc = MagicMock()
     rc.round_qty = MagicMock(side_effect=RuntimeError("instrument cache cold"))
     rc.place_order = MagicMock(return_value={"order_id": "x"})
+    rc.instrument_count = MagicMock(return_value=42)  # warm
+    rc.refresh_instruments = MagicMock(return_value=42)
     out = lsr._rest_close_position_reduce_only(rc, "BTCUSDT", 0.05, is_long=True)
     assert out["qty"] == 0.05  # raw qty preserved
+    assert rc.place_order.called
+
+
+def test_rest_close_warms_empty_instrument_cache():
+    """
+    Cold BybitClient (instrument_count=0) must refresh_instruments before
+    round_qty — else round_qty returns None and Bybit rejects raw qty.
+    冷啟動 BybitClient 的合約規格緩存為空，round_qty 會回 None 導致 Bybit
+    retCode=10001；降級路徑必須先 refresh_instruments 熱緩存。
+    """
+    rc = _make_fake_rc(round_qty_result=0.048, instrument_count=0)
+    lsr._rest_close_position_reduce_only(rc, "BTCUSDT", 0.0501, is_long=True)
+    rc.refresh_instruments.assert_called_once_with("linear")
+    # round_qty is called AFTER refresh so the cache is populated by that point.
+    rc.round_qty.assert_called_once_with("BTCUSDT", 0.0501)
+
+
+def test_rest_close_skips_refresh_when_cache_warm():
+    """When instrument_count>0, skip the REST call — avoids rate-limit churn."""
+    rc = _make_fake_rc(instrument_count=123)
+    lsr._rest_close_position_reduce_only(rc, "BTCUSDT", 0.05, is_long=True)
+    rc.refresh_instruments.assert_not_called()
+
+
+def test_rest_close_tolerates_refresh_failure():
+    """
+    refresh_instruments failure must NOT block a close — downgrade to raw qty
+    path via round_qty failure handling.
+    刷新合約規格失敗不能擋平倉 — 繼續沿用 round_qty 失敗路徑送 raw qty。
+    """
+    rc = _make_fake_rc(instrument_count=0)
+    rc.refresh_instruments = MagicMock(side_effect=RuntimeError("network down"))
+    rc.round_qty = MagicMock(side_effect=RuntimeError("still cold"))
+    out = lsr._rest_close_position_reduce_only(rc, "BTCUSDT", 0.05, is_long=True)
+    assert out["qty"] == 0.05  # raw qty forwarded
     assert rc.place_order.called
 
 
