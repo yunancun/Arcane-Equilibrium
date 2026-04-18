@@ -47,15 +47,48 @@ git status && git log --oneline -5
 > 物理層最優 + ML 持續優化雙軌退場。Track P = 7 維度啟發式（可解釋下界）；Track L = per-strategy ML exit policy（同特徵集監督學習上界）；Combine Layer = 系統永遠 ≥ Track P。
 > **設計日誌**（完整論證/架構/QA 守衛/風險退路 §十 7 項）：`docs/worklogs/2026-04-18--dual_track_exit_design.md`
 
-### Step 0 · W23 Day 1-3 可行性 Sprint（4 不確定全綠才推 Phase 1）
+### Step 0 · W23 Day 1-3 可行性 Sprint ✅（2026-04-18，2/4 綠 + 1/4 黃 + 1/4 紅 → Phase 1 拆 1a/1b）
 
-- [ ] **不確定 1**：`python -m program_code.ml_training.james_stein_estimator` 跑通 + 寫入 `settings/edge_estimates.json` non-empty → 機制 ✅ 但 grand_mean −2214 bps 不可 bind（P1-14）
-- [ ] **不確定 2**：`decision_features` schema 對齊 7 維度（`est_net_bps / peak_pnl_pct / atr_pct / giveback_atr_norm / time_since_peak_ms / price_roc_short / entry_age_secs`）→ 至少 5/7 直接 derive
-- [ ] **不確定 3**：per-strategy 樣本 ≥10k（至少 2 策略；`SELECT strategy, COUNT(*) FROM learning.decision_features WHERE engine_mode IN ('demo','live_demo') GROUP BY strategy`）→ fills RT 遠低閘口，Track L 範圍限縮（P1-13）
-- [ ] **不確定 4**：tick-level price history 可重放 7d → 否則改「事後歸因 audit」（peak-to-exit 軌跡分析，非逐 tick replay）
-- [ ] Sprint 產出：`docs/worklogs/2026-04-18-N--dual_track_exit_feasibility.md`（N=1/2/3）
+- [x] **不確定 1 ✅ 綠（機制）**：estimator CLI 跑通 104 cells / demo grand_mean −2214 bps（**P1-15 查明為 28 phantom cells 污染，b0df1b3 修復**；live_demo 7d 乾淨值 −14.97 bps ≈ fee-neutral）；**不可 bind**（P1-14 bind blocker 獨立）
+- [x] **不確定 2 🔴 紅**：`decision_features` 是 entry-time snapshot，7 維對齊僅 **1/7 直接**（`atr_pct`）+ 1/7 部分（`persistence_elapsed_ms ≈ entry_age_secs`）；`trading.decision_outcomes.max_favorable/max_adverse` 113k 全 NULL（dead column）；需新建 `learning.exit_features` + Rust exit handler 寫入
+- [x] **不確定 3 ✅ 綠**：ma_crossover live_demo **2.23M** / grid_trading live_demo **16.5k**；小樣本（bb_breakout 0 / funding_arb 60 / bb_reversion 609 / grid demo 1.7k / ma_crossover demo 693）強制 P-only
+- [x] **不確定 4 🟡 黃**：無 tick 表；kline 1-min 粒度；**且 `market.klines` 自 2026-04-16 21:08 停寫**（停電後管線未恢復，新增 `MARKET-KLINES-STALE-1`）→ fallback #6 事後歸因 audit
+- [x] Sprint 產出：`docs/worklogs/2026-04-18-1--dual_track_exit_feasibility.md`
 
-### Phase 1 · W23 Day 4-7 — Track P 實作 + P1-7 解阻塞 A/B/C 並行
+**Step 0 判決**：**NO-GO 原計畫全量 Phase 1**。改拆 Phase 1a（可立即）/ Phase 1b（7 維需累積）。Phase 2 shadow 原 W24 → **實際延後到 W25**。
+
+### 🔴 Step 0 衍生新 TODO 項（Phase 1 前置）
+
+- [ ] **MARKET-KLINES-STALE-1**（P1-CRITICAL · 2026-04-18 RCA ✅）：**Root cause = PAPER-DISABLE-1 架構遺漏**（非停電事件）。`main.rs:1038` Paper pipeline `market_data_tx: Some(market_tx)`，但 `main.rs:1115` Demo 和 `main.rs:1191` Live 都 `market_data_tx: None`（D19 註釋：`Paper handles that`）。`on_tick.rs:491` `if let Some(ref tx)` None check 跳過 → `MarketDataMsg::KlineClose` 零發出 → `market_writer` task 起來（engine.log `market_writer started`）但 channel 永遠空。Paper 自 PAPER-DISABLE-1（2026-04-16 21:08 最後一次 tick）預設不 spawn 後，DB kline 寫入完全斷。**修復方案**（2-line）：`main.rs:1038` 改 `Some(market_tx.clone())`，`main.rs:1115` 和 1191 都改 `Some(market_tx.clone())`。`market.klines` PK `(symbol, timeframe, ts)` + `ON CONFLICT DO NOTHING`（`market_writer.rs:180`）已 dedup，多 producer 安全。**Phase 1 ATR 前置 / 也是 Phase 1 部署前必修**。
+- [ ] **EXIT-FEATURES-TABLE-1**（P1-HIGH · 2026-04-18 設計草稿 ✅）：`docs/worklogs/2026-04-18-2--exit_features_table_design.md`。Schema DDL + `LearningMsg::ExitFeature` variant + `exit_feature_writer.rs`（mirror decision_feature_writer）+ `paper_state.rs` 加 `max_favorable_pnl_pct / peak_reached_ts_ms` tracking + `price_tracker.compute_roc()` + 三 pipeline 都 clone tx（明確不重蹈 MARKET-KLINES-STALE-1 的 D19 覆轍）。預估 ~960 行 / ~14h。不沿用 `decision_outcomes`（dead column + schema 用途不符）。**Phase 1b 前置**；schema DDL + writer 骨架可 Phase 1a 做。
+- [ ] **DECISION-OUTCOMES-DEAD-1**（P2）：`trading.decision_outcomes` 113k 條 `max_favorable/max_adverse` 全 NULL，寫入管線斷；可沿用此表取代 exit_features 或確認徹底 dead；RCA 決定方向。
+
+### Phase 1a · W23 Day 4-7（Step 0 後立即啟動，不阻於 7 維）
+
+**軌道 2 P1-7 解阻塞（完全不阻塞，優先推進）**：
+- [ ] **A** Rust 接 `trading.intents` 持久化（定位 DEDUP-PY-RUST Tier A stub 點 + 補 Rust 寫入 + 單測）
+- [ ] **B** `james_stein_estimator` scheduler 啟用（每小時 cron + IPC hot-trigger）→ 僅寫檔，不 bind Rust cost_gate 直到 P1-10 修復 + grand_mean > −50 bps 且 ≥2 策略 shrunk_bps>0（P1-14；fee-drag 範圍可接受，catastrophic-negative 才禁 bind）
+- [ ] **C** `run_training_pipeline.py` 首跑 grid_trading（用 decision_features 17 維做 entry-decision 模型，不等 exit_features）→ 產 `models/demo/grid_trading_entry_policy_v20260425.onnx`
+
+**軌道 1 Track P 物理層骨架（MARKET-KLINES-STALE-1 修完後）**：
+- [ ] `peak_reached_ts_ms` 欄位加到 `PaperPosition`（含 legacy migration）
+- [ ] `price_tracker` 加 `compute_roc(symbol, lookback_ms)`
+- [ ] 7 維度規則 in `risk_checks.rs`（Priority 6 替換現有 COST EDGE，重命名 `PHYS-LOCK`）+ ConfigStore hot-reload — 7 維缺失先以保守預設值骨架
+- [ ] Combine Layer 骨架（Track L 缺失時 P-only）
+- [ ] E2 + E4：counterfactual 粗粒度 audit（用 fills + 1-min kline 還原 peak-to-exit，非逐 tick）+ ≥18 單測
+- [ ] E5：rebuild + 灰度部署（保守閾值，24h 無 fee 惡化才收緊）
+
+**Phase 1a 完成標準**：P1-7 A/B/C 部署 + `edge_estimates.json` 每小時自動刷新 + `trading.intents` live/live_demo 開始有 rows + 第一個 ONNX artifact + Track P 骨架灰度 ≥48h `exit_source=Physical` 正常
+
+### Phase 1b · W24（exit_features 累積）
+
+- [ ] `learning.exit_features` 表建立 + Rust exit handler 寫入
+- [ ] 累積 ≥1 週 exit_features 資料（W24 全週）
+- [ ] 7 維度規則 bind 真實閾值（取代 Phase 1a 骨架預設）
+
+**Phase 1b 完成標準**：≥2 策略 exit_features 累積 ≥1000 rows + 7 維閾值可由資料 calibrate
+
+### Phase 2 · W25（原 W24，延後 1 週）— Track L shadow + P1-10 並行
 
 **軌道 1 Track P 物理層**：
 - [ ] `peak_reached_ts_ms` 欄位加到 `PaperPosition`（含 legacy migration）
@@ -65,15 +98,6 @@ git status && git log --oneline -5
 - [ ] E2 + E4：counterfactual replay audit（demo 7d）+ ≥18 單測（spike-wick 不誤觸 / 長期 winner 不誤砍 / 波動率歸一化邊界 / hot-reload / 早期寬容 / ML 缺席退化）
 - [ ] E5：rebuild + 灰度部署（保守閾值，24h 無 fee 惡化才收緊）
 
-**軌道 2 P1-7 解阻塞**：
-- [ ] **A** Rust 接 `trading.intents` 持久化（定位 DEDUP-PY-RUST Tier A stub 點 + 補 Rust 寫入 + 單測）
-- [ ] **B** `james_stein_estimator` scheduler 啟用（每小時 cron + IPC hot-trigger）→ 僅寫檔，不 bind Rust cost_gate 直到 P1-10 修復 + grand_mean 翻正（P1-14）
-- [ ] **C** `run_training_pipeline.py` 首跑 grid_trading → 產 `models/demo/grid_trading_exit_policy_v20260425.onnx`
-
-**Phase 1 完成標準**：Track P 灰度 ≥48h `exit_source=Physical` 正常 + `edge_estimates.json` 每小時刷新 + 第一個 ONNX artifact + `trading.intents` live/live_demo 開始有 rows
-
-### Phase 2 · W24 — Track L shadow + P1-10 並行
-
 - [ ] Combine Layer 啟用 `ml_override_high=2.0`（不可達），只寫 `learning.decision_shadow_fills`
 - [ ] 每日對比 P vs L 一致性（target ≥60%）→ 校準 `ml_confirm_threshold / ml_override_high / ml_veto_low`
 - [ ] 每筆 `trading.fills` 寫入 `exit_source` 欄位（Physical / Hybrid-shadow / ML-shadow）
@@ -81,14 +105,14 @@ git status && git log --oneline -5
 
 **完成標準**：shadow 一致性 ≥60% + P1-10 fee 佔比 <50% + 不對稱倍數 ≤1.5×
 
-### Phase 3 · W25-W26 — Track L 灰度開啟
+### Phase 3 · W26-W27（原 W25-W26，連帶延後）— Track L 灰度開啟
 
 - [ ] `ml_override_high` 0.95 → 0.85 → 0.75（每階 1-2 週，需 Hybrid net edge 顯著 > P-only, p<0.1, n≥200 才下調）
 - [ ] Hold-out control 5-10% 永跑 P-only（feedback bias 對照）
 
 **完成標準**：`ml_override_high=0.75` 穩定 ≥1 週 + 累積 net edge 正向
 
-### Phase 4 · W27+ — 持續優化常態
+### Phase 4 · W28+（原 W27+，連帶延後）— 持續優化常態
 
 - [ ] 週 retraining cron + model registry + canary deployment
 - [ ] 月 CPCV 驗證 + drift 檢測
@@ -108,9 +132,9 @@ git status && git log --oneline -5
 | TODO | 關係 | 分工 |
 |---|---|---|
 | **P1-9 原案** | 完全取代 | Supersedes，原 P1-9 已從 active 移除 |
-| **P1-4 首個 ONNX export** | 併入 Phase 1 Prereq C | 從此只在本章節推進 |
-| **P1-7 A+B+C** | 併入 Phase 1 軌道 2 | P1-7 殘留 D Teacher / LinUCB / Bayesian / RL |
-| **P1-10 STRATEGY-ASYMMETRY-1** | W24 並行，比 ML 重要 5× | P1-10 獨立追蹤工作項 |
+| **P1-4 首個 ONNX export** | 併入 Phase 1a 軌道 2 C | 從此只在本章節推進 |
+| **P1-7 A+B+C** | 併入 Phase 1a 軌道 2 | P1-7 殘留 D Teacher / LinUCB / Bayesian / RL |
+| **P1-10 STRATEGY-ASYMMETRY-1** | Phase 2 · W25 並行，比 ML 重要 5× | P1-10 獨立追蹤工作項 |
 | **P0-3 Phase 5 edge 重評** | 推遲到 P1-10 + Track P 都上線後 | P0-3 timing 依本章節進度 |
 | **G-7 Teacher** | Phase 4 整合 | G-7 W23 正常排，不阻前 3 Phase |
 | **G-6 ML edge 噪音** | P1-7 B 解阻塞後自然解 | 等 B 完成 |
@@ -147,7 +171,7 @@ git status && git log --oneline -5
 
 ### P1-7 · LEARNING-PIPELINE-DORMANT-1 — 半殼學習管線
 - **數據累積層 ✅**：`learning.decision_features` 1.65M rows · `risk_verdicts` 24h 1.54M
-- **edge_estimates.json writer/reader 鏈 ✅（手動）**：2026-04-18 20:24 首次寫入 29 KB / 104 cells / `grand_mean=-2214 bps`；Rust startup 加載進 cost_gate。**缺 scheduler + hot-reload**（詳 §P1-14 bind blocker）
+- **edge_estimates.json writer/reader 鏈 ✅（手動）**：2026-04-18 20:24 首次寫入 29 KB / 104 cells / demo `grand_mean=-2214 bps`（**P1-15 查明受 28 phantom cells 污染，b0df1b3 修復**；live_demo 7d 乾淨 baseline −14.97 bps ≈ fee-neutral）；Rust startup 加載進 cost_gate。**缺 scheduler + hot-reload**（詳 §P1-14 bind blocker）
 - **下游消費仍 dormant ❌**：`experiment_ledger_snapshot.json` 結構異常 · 21 個 learning schema 表存在無 consumer · ONNX 0 artifact
 - **A/B/C 已併入 DUAL-TRACK Phase 1**（不再此處追蹤）
 - **此處殘留**：D Teacher（G-7 W23）/ LinUCB / Bayesian posterior / RL transitions 全休眠
@@ -190,21 +214,50 @@ git status && git log --oneline -5
 - **下一步**：(1) 正式更新 DUAL-TRACK Phase 1 軌道 2 C 範圍聲明限 grid_trading (2) 每週 per-strategy 樣本 audit 判斷加入時點
 - **關聯**：DUAL-TRACK Step 0 不確定 3 / Phase 1 軌道 2 C · QA 守衛 #1 · 風險退路 #5
 
-### P1-14 · EDGE-ESTIMATE-BIND-BLOCKED-1 — JS estimator snapshot 結構性負 edge 無法 bind cost_gate
-- **現象**：Step 0 不確定 1 驗證 `settings/edge_estimates.json` 首次寫入成功（104 cells · grand_mean −2214 bps ≈ −22.14%/RT）
-- **問題**：該 snapshot hot-reload 進 Rust `cost_gate_live`/`cost_gate_moderate` 會 100% fail-closed，回退 P0-6 方案 A 解鎖前的死循環
-- **根因**：grand_mean 深負結構原因 = P1-10（grid fee 74% + ma_crossover 2.54× R:R 不對稱），非 estimator 機制缺陷
-- **下一步**：(1) DUAL-TRACK Phase 1 軌道 2 B 僅啟 scheduler 寫檔 + PG UPSERT，**不綁定** Rust cost_gate 讀取 (2) P1-10 修復落地後重跑 estimator 看 grand_mean 是否翻正 (3) grand_mean>0 且 ≥2 策略 shrunk_bps>0 才開 binding
+### P1-14 · EDGE-ESTIMATE-BIND-BLOCKED-1 — JS estimator snapshot edge 不足以 bind cost_gate
+- **現象**：Step 0 不確定 1 驗證 `settings/edge_estimates.json` 首次寫入成功（104 cells · demo `grand_mean −2214 bps`）。**更正（2026-04-18 b0df1b3 P1-15 修復後）**：原 −2214 bps 受 28 phantom cells（18 `ipc_close_symbol::*` + 10 `risk_check::*`）污染，非可信 reading；live_demo 7d 乾淨 baseline `grand_mean −14.97 bps` ≈ fee-neutral，落在典型 fee-drag 範圍
+- **問題**：當前 snapshot 未達 bind threshold（需 ≥2 策略 shrunk_bps>0 且 grand_mean > −50 bps），hot-reload 進 Rust cost_gate 仍會抑制過多 intent
+- **根因**：cells 層級 edge 仍偏負/不穩定的結構原因 = P1-10（grid fee 74% + ma_crossover 2.54× R:R 不對稱），非 estimator 機制缺陷；污染部分已由 P1-15 消除
+- **下一步**：(1) DUAL-TRACK Phase 1 軌道 2 B 僅啟 scheduler 寫檔 + PG UPSERT，**不綁定** Rust cost_gate 讀取 (2) P1-10 修復落地後重跑 estimator 觀察 grand_mean 走勢 (3) 條件啟動 bind：grand_mean > −50 bps 且 ≥2 策略 shrunk_bps>0（fee-drag 範圍可接受，catastrophic-negative 才禁 bind）
 - **阻塞**：不阻 Live；阻 DUAL-TRACK Phase 1 軌道 2 B 完成判定 + Phase 5 cost_gate 重啟
 - **關聯**：P1-10 STRATEGY-ASYMMETRY-1（必要前置）· DUAL-TRACK Phase 1 軌道 2 B · P0-3 Phase 5 edge 重評
 
-### P1-15 · LEARNING-SCHEMA-QUALITY-1 — strategy_name 污染 + estimator live_demo mode 缺口
-- **現象 1**：`trading.fills.strategy_name` 存完整 close reason 字串（e.g. `risk_close:COST EDGE: ratio 128.69 >= 100.00, pnl 0.00% ...`）— 每個獨特 ratio 值變獨立 bucket → JS estimator group-by 產生 ~80/104 假格子
-- **現象 2**：`james_stein_estimator.py:238` 只接受 `paper/demo/live` mode，`live_demo` 2.23M LiveDemo 樣本無法納入估計
-- **寫入路徑**：`rust/openclaw_engine/src/database/trading_writer.rs:310` `push_bind(strategy_name.as_str())` — 上游 close fill 把 close reason 整串塞進 `strategy_name`
-- **下一步**：(1) Rust close fill 路徑 `strategy_name` 填原 entry strategy（grid_trading / ma_crossover），close reason 改寫 `context_id` 或新增 `close_reason_tag` 欄位 (2) estimator 加 `live_demo` mode 接受 + 1 單測 (3) PG 歷史 rows migration script 回填
-- **阻塞**：P1-14 bind 前置可信度 · Phase 5 edge 聚合 · DUAL-TRACK Phase 1 軌道 2 B + Track L per-strategy ML 訓練
-- **關聯**：P1-14（同流程）· P1-10（並行修結構）· DUAL-TRACK Phase 1 軌道 2 B/C
+### P1-15 ✅ LEARNING-SCHEMA-QUALITY-1 — ipc_close_symbol 前綴缺失 + estimator live_demo 不接受（commit b0df1b3）
+- **背景更正（2026-04-18 實地查核）**：初審誤判 strategy_name cardinality 爆炸，經查 `realized_edge_stats._pair_round_trips`（`program_code/ml_training/realized_edge_stats.py:196`）在配對時用 **entry** fill 的 strategy_name，close fill 字串只參與 `is_exit` prefix 判斷（line 161-168 `startswith`），COST EDGE 動態字串**不會**產生分桶。
+- **104 cells 實際組成**：grid_trading 33 · ma_crossover 31 · funding_arb 12 · **ipc_close_symbol 18（現役 bug）** · **risk_check 10（歷史遺留，fix landed 2026-04-16 P0-4 R1，30d 窗口自然消化）**；實際異常僅 28 cells，非初報 ~80。
+- **Gap 1（現役）**：`rust/openclaw_engine/src/tick_pipeline/commands.rs:668` `strategy: "ipc_close_symbol".into()` 未依 EDGE-P2-1 規範加 `risk_close:` / `strategy_close:` 前綴 → ML pipeline `is_exit` 檢查（line 161-168）未命中 → 被誤歸類為 entry fill → 產生 18 個幻影 strategy cells。
+- **Gap 2（estimator）**：`program_code/ml_training/realized_edge_stats.py:238` validator `if engine_mode not in ("paper","demo","live")` 拒絕 `live_demo` → 2.23M LiveDemo 樣本無法進入估計。
+- **下一步**：(1) Rust `commands.rs:668` → `"strategy_close:ipc_eviction"` 或 `"risk_close:ipc_close_symbol"`（後者更保留可追溯性），+1 Rust 單測驗證 `is_exit` 判定 (2) Python `realized_edge_stats.py:238` allowlist 加 `live_demo` + 可選 `IN ('live','live_demo')` 查詢模式（符合 user memory），+1 Python 單測 (3) 重跑 estimator 驗證 `ipc_close_symbol::*` 消失、新增 `live_demo` 快照
+- **Scope**：~3 hours，2 檔變更 + 2 單測，**無 schema 改動、無 PG migration、無 `close_reason_tag` 新欄位**
+- **不涉及**：`grand_mean_bps=-2213.98`（_meta 內）結構性負 edge 屬 P1-10 範圍，非 schema 問題；B=0.888 heavy shrinkage 把所有 cells 拉向 grand_mean 是 P1-14 bind 阻塞的真正根因
+- **阻塞**：不阻 Live；輕阻 P1-14 bind 前置可信度（清掉 18 個 phantom cells 讓 snapshot 可讀性改善）
+- **關聯**：P1-10 STRATEGY-ASYMMETRY-1（真正 edge 翻正前置）· P1-14 EDGE-ESTIMATE-BIND-BLOCKED-1 · DUAL-TRACK Phase 1 軌道 2 B
+- **實測結果（2026-04-18 post-commit）**：E1 修復後跑 live_demo 7d 產出 28 乾淨 cells / `grand_mean_bps = -14.97`；但發現 **grand_mean 真實元兇非 phantom cells**——2 個尾端 outlier（`grid_trading::DOTUSDT raw=-152k bps` / `LINKUSDT raw=-67k bps`）佔 raw weighted grand_mean 主要權重，B=0.888 heavy shrinkage 再將所有 cells 拉向毒值。P1-15 清掉 28 phantom 對 grand_mean 僅移動 -2438→-2473 bps；真實解毒需 P1-16 + P1-17（見下）。
+
+### P1-16 · HALT-SESSION-CROSS-SYMBOL-PRICE-CORRUPTION-1 — halt_session 寫錯 symbol 的價格到 fill（RCA L1）
+- **根因（RCA 2026-04-18 L1 confirmed）**：Rust halt_session force-close 路徑把 **ETHUSDT 的價格 $2357.94 蓋到其他 symbol 的 fill 記錄**（DOT/HIGH/IP/AAVEUSDT 同時間戳 `2026-04-18 19:09:56.302`，fill_ids `close-demo-{SYMBOL}-1776532196302`）。下游 pairer 忠實處理毒 fill：halt exit `qty=0.1` vs live FIFO entry `qty=51.7` → `matched_qty=0.1`，`entry_notional = 1.3384 × 0.1 = $0.13`，`−$235.66 / $0.13 × 10000 = −17,617,373 bps`（與觀察到的 DOTUSDT 極值精確重現）。
+- **具體證據**：`trading.fills` 查到 5 筆 `risk_close:halt_session` 同價 $2357.94 跨 4 symbol，realized_pnl 範圍 -$67~-$3300（獨立 order_id，非單行 typo）；disabled Winsorize 重跑 `grid_trading::DOTUSDT` 最壞 round-trip net_bps=**−17,617,373** with notional_usd=**$0.13**；`ma_crossover::AAVEUSDT` n=45 mean=−4467 bps worst=−200,296 bps 同模式。
+- **影響**：單 cell raw_bps 極端 → JS grand_mean 被拖到 -2214 bps → B=0.888 把所有 cells shrunk 到 ~-1976 bps → 整個 snapshot 失去判別力（P1-17 Winsorize 後降到 -78 bps，但這是防禦性掩蓋，不是修根因）。
+- **下一步（雙管）**：
+  - **(1) 上游修（主）**：定位 Rust halt_session close-emit path 的 shared price cache / last-known-price 查詢 bug——force-liquidation 時以錯 symbol key 取 price。候選位置：`tick_pipeline::commands`、`strategy_close.rs`、`order_build` 或 halt_session 觸發路徑；需沿 `close-demo-{SYMBOL}-{ts}` order_id 命名模式反查。
+  - **(2) 下游防禦**：`_pair_round_trips` 加 (a) 價格合理性 gate：`|ln(exit_price / entry_price)| > 0.5` 直接 skip fill（50% 跳動不可能 intraday）；(b) 分母保護：`entry_notional = max(entry_price × entry_qty_total, entry_price × matched_qty)`（用整筆 entry notional 而非切片部分）；保留 ±5000 bps Winsorize 作 belt-and-braces。
+  - **(3) 新單測**：halt_session cross-symbol price、micro-denominator、price-jump gate 三場景。
+- **不涉及**：`_pair_round_trips` is_exit prefix 檢測正常（line 223-230）；pairer 本身邏輯無誤，只是忠實處理毒 fill。
+- **Scope 估計**：~1-2 day（Rust 根因定位 + 下游 pairer 加 gate + 單測）；阻塞 P1-14 bind 真正解除（P1-17 只是 safety net）
+- **阻塞**：P1-14 bind 前置（與 P1-17 互補）· Phase 5 edge 聚合可信度 · E5 goodput（halt_session 寫錯價格影響 audit 可追溯性）
+- **關聯**：P1-14 EDGE-ESTIMATE-BIND-BLOCKED-1 · P1-17 JS-ESTIMATOR-WINSORIZATION-1 · RCA report `task a260701044e092991`
+
+### P1-17 ✅ JS-ESTIMATOR-WINSORIZATION-1 — outlier clamp 落地（commit 待填）
+- **背景**：`program_code/ml_training/realized_edge_stats._pair_round_trips` 無 Winsorization，任何 raw_bps 無上限傳播到 JS shrinkage 的 grand_mean 計算。B=0.888 heavy shrinkage 把整個 snapshot 拉向毒值。
+- **實作**：(1) 模組常數 `_WINSORIZE_BPS = 5000.0`（E1 自動提升 — `risk_config_demo.toml stop_loss_max_pct=25%` 下原建議 ±1000 bps 會截掉合法大額止損）+ 雙語注釋 (2) `_winsorize_bps()` helper + 模組級 clamp counter（`get_winsorize_clamp_count()` / `_reset_winsorize_counter()` API）(3) `_pair_round_trips` RoundTripRecord 構造時對 `gross_pnl_bps`/`net_pnl_bps` 套用，clamp 觸發 WARNING log (4) 新測試檔 `tests/test_winsorize.py` 8 cases：`constant_is_5000_bps` / `normal_passes_through` / `extreme_negative_clamps` / `extreme_positive_clamps` / `boundary_negative` / `boundary_positive` / `zero_passes_through` / `gross_inside_net_outside`
+- **實測結果**：
+  - demo 30d（archived to `demo_archive_20260418`）: grand_mean **-2213.98 → -78.38 bps**，19 clamps fired（1 個數量級改善進入 fee-drag 範圍）
+  - live_demo 7d: grand_mean 保持 **-14.97 bps**，0 clamps（預期，7d 無 outlier）
+  - 順帶暴露 P1-16：E1 跑時發現 `grid_trading::HIGHUSDT gross=-49,479,767 bps`（不可能值）及 LINKUSDT 幾何級數 -6,778 → -1,734,596 bps → B RCA 確認為 halt_session cross-symbol price corruption
+- **驗證**：`ml_training/tests/` 全套 217 passed / 2 skipped / 0 failed
+- **下一步**：P1-14 bind 門檻判定（grand_mean > −50 bps 且 ≥2 策略 shrunk_bps>0）現 demo 仍未達但 live_demo 接近；等新 21d demo 累積（P0-2 清算後）重跑
+- **阻塞解除**：P1-14 bind 前置的「極端 outlier 污染」分支已關閉（safety net 啟用）；P1-16 halt_session cross-symbol price corruption 仍為根源阻塞，需獨立修復
+- **關聯**：P1-14 · P1-16（互補 — Winsorization 是 safety net，P1-16 從源頭排除錯誤 fill）· DUAL-TRACK Phase 1 軌道 2 B
 
 ---
 
@@ -294,10 +347,11 @@ git status && git log --oneline -5
 |---|---|---|---|
 | W19-W22 | 04-14~05-09 | 基礎設施 / 安全 / Phase 6 / 3E-ARCH / Audit / FUP 全收 | ✅ 歸檔 |
 | W22 末 | 04-16~18 | P0-4/0/5/8/9/10/11/12 + DEDUP-PY-RUST + MICRO-PROFIT-FIX-1 + DUST-EVICTION + G-2 NEGATIVE 結案 + P0-6 永久修復 + DYNAMIC-RISK-1 | ✅ 歸檔 |
-| W23 | 05-12~16 | **DUAL-TRACK Step 0 + Phase 1**（Track P + P1-7 A/B/C）· P0-2 LG-1 起算 · G-7 · G-10 · LG-2/3 | ⬜ |
-| W24 | 05-19~23 | **DUAL-TRACK Phase 2**（Track L shadow）· **P1-10 並行** · LG-4/5 · SEC-21 · QoL-2 | ⬜ |
-| W25-W26 | 05-26~06-06 | **DUAL-TRACK Phase 3**（Track L 灰度）· EDGE-P3-1 產線化 · Phase 5 補強或重做（P0-3 判決後） | ⬜ |
-| W27+ | 06-09+ | **DUAL-TRACK Phase 4**（retraining/Teacher/Embedding/Regime LSTM）· G-1 R-06 全 5 agent | ⬜ |
+| W23 | 05-12~16 | **DUAL-TRACK Step 0 ✅**（2/4 綠 + 1/4 黃 + 1/4 紅 → Phase 1 拆 1a/1b）· **Phase 1a**（P1-7 A/B/C + Track P 骨架 + MARKET-KLINES-STALE-1）· P0-2 LG-1 起算 · G-7 · G-10 · LG-2/3 | 🟡 進行中 |
+| W24 | 05-19~23 | **DUAL-TRACK Phase 1b**（exit_features 累積 + 7 維 bind 真實閾值）· LG-4/5 · SEC-21 · QoL-2 | ⬜ |
+| W25 | 05-26~30 | **DUAL-TRACK Phase 2**（Track L shadow，原 W24 延後）· **P1-10 並行** | ⬜ |
+| W26-W27 | 06-02~13 | **DUAL-TRACK Phase 3**（Track L 灰度）· EDGE-P3-1 產線化 · Phase 5 補強或重做（P0-3 判決後） | ⬜ |
+| W28+ | 06-16+ | **DUAL-TRACK Phase 4**（retraining/Teacher/Embedding/Regime LSTM）· G-1 R-06 全 5 agent | ⬜ |
 
 **最早 Live**：W24 末（~2026-05-23）— 若 Step 0 任一紅需重整設計，可能延後 1-2 週
 

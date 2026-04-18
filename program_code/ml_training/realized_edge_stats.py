@@ -26,6 +26,68 @@ from typing import Optional
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
+# Winsorization constants / Winsorization 常量
+# ---------------------------------------------------------------------------
+
+# P1-17 (2026-04-18 Edge Crisis RCA). Per-round-trip PnL outliers (e.g. -152,015 bps
+# on grid_trading::DOTUSDT) were poisoning James-Stein shrinkage via a toxic
+# grand_mean (~-4530 bps raw → -2214 bps committed), then B=0.888 shrinkage pulled
+# every cell toward that value. Root cause is likely halt_session mis-crediting
+# (separate P1-16 pairing ticket) and/or micro-notional round-trips amplifying
+# fee drag. Winsorize any single round-trip's gross/net bps to ±5000 bps (±50%)
+# at the record level. Justification: across risk_config_{demo,live,paper}.toml
+# the max stop_loss_max_pct is demo=25%; 2× that = 50% = 5000 bps comfortably
+# covers legitimate stop-outs + slippage while clipping obvious pairing-bug
+# or data-quality outliers (which observed at 6000-150000 bps magnitudes).
+# P1-17（2026-04-18 Edge 危機 RCA）。單筆往返 PnL 的離群值（例如
+# grid_trading::DOTUSDT 上 -152,015 bps）正在透過毒性 grand_mean（原始 ~-4530 bps →
+# 寫入 -2214 bps）污染 James-Stein 收縮，然後 B=0.888 將每個格子拉向該值。
+# 根因可能為 halt_session 誤配對（另立 P1-16 配對票）和/或微名義往返放大手續費拖累。
+# 在記錄級別將任一往返的 gross/net bps 限幅至 ±5000 bps（±50%）。
+# 理由：risk_config_{demo,live,paper}.toml 中最大 stop_loss_max_pct 為 demo=25%；
+# 其 2 倍 = 50% = 5000 bps 足以容納合法止損 + 滑價，同時裁掉明顯的配對 bug
+# 或資料品質離群值（觀測到的量級為 6000-150000 bps）。
+_WINSORIZE_BPS = 5000.0
+
+# Module-level counter; incremented each time clamp fires, for E4-grade auditing.
+# 模組級計數器；每次限幅觸發時遞增，用於 E4 級別審計。
+_winsorize_clamp_count: int = 0
+
+
+def _reset_winsorize_counter() -> None:
+    """Reset the clamp counter (test helper). / 重置限幅計數器（測試輔助）。"""
+    global _winsorize_clamp_count
+    _winsorize_clamp_count = 0
+
+
+def get_winsorize_clamp_count() -> int:
+    """Return the current clamp-fire count. / 返回當前限幅觸發次數。"""
+    return _winsorize_clamp_count
+
+
+def _winsorize_bps(value: float, field_name: str, strategy: str, symbol: str) -> float:
+    """
+    Clamp a bps value to [-_WINSORIZE_BPS, +_WINSORIZE_BPS]; log + count on fire.
+    將 bps 值限幅至 [-_WINSORIZE_BPS, +_WINSORIZE_BPS]；觸發時記錄 + 計數。
+    """
+    global _winsorize_clamp_count
+    if value > _WINSORIZE_BPS:
+        logger.info(
+            "WINSORIZE clamp (%s, %s) %s: %.2f bps → %.2f bps",
+            strategy, symbol, field_name, value, _WINSORIZE_BPS,
+        )
+        _winsorize_clamp_count += 1
+        return _WINSORIZE_BPS
+    if value < -_WINSORIZE_BPS:
+        logger.info(
+            "WINSORIZE clamp (%s, %s) %s: %.2f bps → %.2f bps",
+            strategy, symbol, field_name, value, -_WINSORIZE_BPS,
+        )
+        _winsorize_clamp_count += 1
+        return -_WINSORIZE_BPS
+    return value
+
+# ---------------------------------------------------------------------------
 # Database connection / 數據庫連接
 # ---------------------------------------------------------------------------
 
@@ -192,16 +254,33 @@ def _pair_round_trips(fills: list[dict]) -> list[RoundTripRecord]:
                     exit_fee_usd = fee * (matched_qty / qty) if qty > 0 else 0.0
 
                     if entry_notional > 0:
+                        gross_bps_raw = _bps(gross_pnl_usd, entry_notional)
+                        net_bps_raw = _bps(
+                            gross_pnl_usd - entry_fee_usd - exit_fee_usd,
+                            entry_notional,
+                        )
+                        # P1-17: Winsorize signed PnL at record level to contain
+                        # outlier round-trips (e.g. halt_session pairing bug).
+                        # Fees are intentionally NOT winsorized — they're bounded
+                        # by fee_rate × notional and carry no outlier risk.
+                        # P1-17：在記錄級別對有符號 PnL 限幅以控制離群往返
+                        #（例如 halt_session 配對 bug）。手續費刻意不限幅——
+                        # 其由 fee_rate × notional 有界，無離群風險。
+                        gross_bps = _winsorize_bps(
+                            gross_bps_raw, "gross_pnl_bps",
+                            entry["strategy_name"], symbol,
+                        )
+                        net_bps = _winsorize_bps(
+                            net_bps_raw, "net_pnl_bps",
+                            entry["strategy_name"], symbol,
+                        )
                         rec = RoundTripRecord(
                             strategy_name=entry["strategy_name"],
                             symbol=symbol,
-                            gross_pnl_bps=_bps(gross_pnl_usd, entry_notional),
+                            gross_pnl_bps=gross_bps,
                             entry_fee_bps=_bps(entry_fee_usd, entry_notional),
                             exit_fee_bps=_bps(exit_fee_usd, entry_notional),
-                            net_pnl_bps=_bps(
-                                gross_pnl_usd - entry_fee_usd - exit_fee_usd,
-                                entry_notional,
-                            ),
+                            net_pnl_bps=net_bps,
                             entry_ts=entry["ts"],
                             exit_ts=ts,
                             notional_usd=entry_notional,
