@@ -2,10 +2,12 @@
 
 **最後更新**：2026-04-19 01:30 local
 **Engine**：PID 2390582 · binary mtime 2026-04-18 23:54 → 含 P0-6 永久修復 + P1-7 A INTENT-WRITE-GAP-1（exchange 分支 persist_intent）+ P1-17 JS Winsorize + LIVE-GATE-BINDING-1 + DYNAMIC-RISK-1 + IPC-SCAN-1c
-**待部署**：commits `bd45e90` FILL-CONTEXT-LINKAGE-1（P1-7 C 0 標籤根因，訊號時刻 context_id 端到端傳遞）+ `c7171b2` EXIT-FEATURES-TABLE-1 Phase 1b FUP（process_external_fill + ipc_close_symbol paper 分支）+ E5-P1 Wave 1（6 commit）+ E5-P2 Wave 2（2 commit）→ **下次 `restart_all.sh --rebuild` 一併生效**
-**Python uvicorn**：自 04-16 未重啟 → **下次重啟即生效 P0-12 LIVE-GATE-FALLBACK-1**
-  - 重啟後驗證：(1) GUI Close All Positions response 應含 `rest_fallback:true, errors:null` (2) engine.log 出現 `LIVE-GATE-FALLBACK-1: IPC close_all_positions channel unavailable ... (REST fallback — live pipeline not authorized)` (3) `python3 -c "from openclaw_core import BybitClient; print([(p['symbol'], p.get('size')) for p in BybitClient(environment='live_demo').get_positions('linear') if float(p.get('size') or 0) > 0])"` 應為空
-**測試基準線**：Rust engine lib **1567** / core 380 / e2e 35 / reconciler_e2e 19 · Python **2898** passed / ml_training 182 passed
+**待部署**：
+  - **Rust rebuild**：`65acde6` MARKET-KLINES-STALE-1 fix + EXIT-FEATURES-TABLE-1 skeleton + DUAL-TRACK-EXIT-1 Step 0 · `6ea643e` EXIT-FEATURES Phase 1b producer wiring · `bd45e90` FILL-CONTEXT-LINKAGE-1（P1-7 C 0 標籤根因，訊號時刻 context_id 端到端傳遞）· `c7171b2` EXIT-FEATURES-TABLE-1 Phase 1b FUP（process_external_fill + ipc_close_symbol paper 分支）· `fd480ba` E5-FN-2 ai_budget request_id dedup · E5-P1 Wave 1（6 commit）· E5-P2 Wave 2（2 commit）
+  - **Rust 部署硬約束**：`fd480ba` 要求先手動 apply `sql/migrations/V018__ai_usage_log_request_id_unique.sql`（migration 冪等），**再** `bash helper_scripts/restart_all.sh --rebuild`；順序反了則 `ON CONFLICT` target 不存在 constraint 全 INSERT 報錯。
+  - **Python uvicorn**：自 04-16 未重啟 → **下次重啟即生效 P0-12 LIVE-GATE-FALLBACK-1 + `19f3d85` E5-FN-3 agent_audit_bridge AnalystAgent pilot**
+    - 重啟後驗證：(1) GUI Close All Positions response 應含 `rest_fallback:true, errors:null` (2) engine.log 出現 `LIVE-GATE-FALLBACK-1: IPC close_all_positions channel unavailable ... (REST fallback — live pipeline not authorized)` (3) `python3 -c "from openclaw_core import BybitClient; print([(p['symbol'], p.get('size')) for p in BybitClient(environment='live_demo').get_positions('linear') if float(p.get('size') or 0) > 0])"` 應為空 (4) AnalystAgent `analyze_trade` 後 `change_audit_log` 有 `who="AnalystAgent"` row（E5-FN-3 pilot）
+**測試基準線**：Rust engine lib **1572** / core 380 / e2e 35 / reconciler_e2e 19 · Python **2898** passed / ml_training 182 passed
 
 > 本文件僅列「待辦/進行中」。已完成 → 文末歸檔索引。詳細設計 → `docs/worklogs/`。
 > Compact 後從此文件恢復；第一個 `[ ]` = 起點。CLAUDE.md §三 = 當前狀態快照。
