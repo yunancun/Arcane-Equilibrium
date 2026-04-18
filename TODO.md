@@ -198,6 +198,14 @@ git status && git log --oneline -5
 - **阻塞**：不阻 Live；阻 DUAL-TRACK Phase 1 軌道 2 B 完成判定 + Phase 5 cost_gate 重啟
 - **關聯**：P1-10 STRATEGY-ASYMMETRY-1（必要前置）· DUAL-TRACK Phase 1 軌道 2 B · P0-3 Phase 5 edge 重評
 
+### P1-15 · LEARNING-SCHEMA-QUALITY-1 — strategy_name 污染 + estimator live_demo mode 缺口
+- **現象 1**：`trading.fills.strategy_name` 存完整 close reason 字串（e.g. `risk_close:COST EDGE: ratio 128.69 >= 100.00, pnl 0.00% ...`）— 每個獨特 ratio 值變獨立 bucket → JS estimator group-by 產生 ~80/104 假格子
+- **現象 2**：`james_stein_estimator.py:238` 只接受 `paper/demo/live` mode，`live_demo` 2.23M LiveDemo 樣本無法納入估計
+- **寫入路徑**：`rust/openclaw_engine/src/database/trading_writer.rs:310` `push_bind(strategy_name.as_str())` — 上游 close fill 把 close reason 整串塞進 `strategy_name`
+- **下一步**：(1) Rust close fill 路徑 `strategy_name` 填原 entry strategy（grid_trading / ma_crossover），close reason 改寫 `context_id` 或新增 `close_reason_tag` 欄位 (2) estimator 加 `live_demo` mode 接受 + 1 單測 (3) PG 歷史 rows migration script 回填
+- **阻塞**：P1-14 bind 前置可信度 · Phase 5 edge 聚合 · DUAL-TRACK Phase 1 軌道 2 B + Track L per-strategy ML 訓練
+- **關聯**：P1-14（同流程）· P1-10（並行修結構）· DUAL-TRACK Phase 1 軌道 2 B/C
+
 ---
 
 ## 🟢 P2 — 下週 / Live Gate / QoL
