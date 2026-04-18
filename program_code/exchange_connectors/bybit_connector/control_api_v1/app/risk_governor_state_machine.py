@@ -4,35 +4,30 @@ Risk Governor State Machine — 6-Level Risk Governance Implementation
 
 MODULE_NOTE (中文):
   本模块实现 EX-01 §7 / GAP-C3 要求的 6 级正式风控状态机：
-  - NORMAL: 正常运营，所有功能可用
-  - CAUTIOUS: 谨慎模式，缩减仓位规模，提高警觉
-  - REDUCED: 收缩模式，仅允许减仓和保护性操作
-  - DEFENSIVE: 防守模式，主动平仓高风险头寸
-  - CIRCUIT_BREAKER: 熔断模式，所有交易暂停，紧急止损生效
-  - MANUAL_REVIEW: 人工审核模式，系统等待操作员介入
-
-  核心安全不变量：
+  - NORMAL / CAUTIOUS / REDUCED / DEFENSIVE / CIRCUIT_BREAKER / MANUAL_REVIEW
   - 升级（更严格）可以自动触发
-  - 降级（更宽松）通常需要审批
+  - 降级（更宽松）通常需要审批 + 最短驻留时间
   - 熔断和人工审核状态的退出必须有操作员确认
   - 每次状态迁移生成 risk_governor_transition 审计对象
-  - 与现有 RiskManager 的 risk_pressure 和 check_positions_on_tick 集成
+
+  本文件在 E5-P0-1 重构后，引擎骨架（守卫 1-5 / 审计记录 / 审计回调 / CAL 写入）
+  被抽到 state_machine_base.py；本文件保留：
+    - RiskLevel IntEnum + 行为约束表 (LEVEL_CONSTRAINTS)
+    - 升级阈值 (EscalationThresholds) + 自动评估 (evaluate_risk_context)
+    - 最短驻留时间守卫（通过 _extra_validate 钩子覆盖）
+    - 单对象存储（不使用 MultiObjectStoreMixin；自持有 GovernorState）
+    - 单对象 dict 格式的 export_state/import_state
 
 MODULE_NOTE (English):
-  Implements the 6-level Risk Governor State Machine per EX-01 §7 / GAP-C3:
-  - NORMAL: Full operations, all features available
-  - CAUTIOUS: Reduced sizing, heightened alertness
-  - REDUCED: Reduce-only mode, protective actions only
-  - DEFENSIVE: Active de-risking of high-risk positions
-  - CIRCUIT_BREAKER: All trading halted, emergency stops active
-  - MANUAL_REVIEW: System awaits operator intervention
+  Implements the 6-level Risk Governor State Machine per EX-01 §7 / GAP-C3.
+  After the E5-P0-1 refactor, the engine skeleton (5 guards, audit record
+  construction, audit callback plumbing, ChangeAuditLog) is inherited from
+  `state_machine_base.StateMachineBase`. This file keeps RiskLevel,
+  LEVEL_CONSTRAINTS, EscalationThresholds, auto-evaluation, and the
+  min-hold-time guard (implemented via the `_extra_validate` hook).
 
-  Core safety invariants:
-  - Escalation (stricter) can be automatic
-  - De-escalation (looser) generally requires approval
-  - Circuit breaker and manual review exit requires operator confirmation
-  - Each transition emits a risk_governor_transition audit object
-  - Integrates with existing RiskManager risk_pressure and check_positions_on_tick
+  This SM does NOT use MultiObjectStoreMixin — it holds a single
+  GovernorState, not a dict of objects keyed by id.
 
 Safety invariant:
   - Escalation can happen automatically, de-escalation requires governance
@@ -44,14 +39,13 @@ Safety invariant:
 from __future__ import annotations
 
 import copy
-import hashlib
 import logging
-import threading
 import time
-import uuid
 from dataclasses import dataclass, field
 from enum import Enum, IntEnum
-from typing import Any, Callable
+from typing import Any, Callable, ClassVar
+
+from .state_machine_base import StateMachineBase
 
 logger = logging.getLogger(__name__)
 
@@ -367,44 +361,6 @@ class GovernorState:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# Transition Record / 迁移记录
-# ═══════════════════════════════════════════════════════════════════════════════
-
-def _build_risk_transition_record(
-    state: GovernorState,
-    to_level: RiskLevel,
-    event: RiskEvent,
-    initiator: RiskInitiator,
-    reason_codes: list[str] | None = None,
-    approved_by: str | None = None,
-    metrics_snapshot: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    """Build risk_governor_transition audit object / 构建风控迁移审计对象"""
-    now_ms = int(time.time() * 1000)
-    tid = f"rgt:{uuid.uuid4().hex[:12]}"
-    return {
-        "transition_id": tid,
-        "previous_level": state.level.name,
-        "next_level": to_level.name,
-        "trigger_event": event.value,
-        "trigger_event_id": f"revt:{uuid.uuid4().hex[:8]}",
-        "initiated_by": initiator.value,
-        "reason_codes": reason_codes or [],
-        "direction": "escalation" if to_level > state.level else "de_escalation" if to_level < state.level else "lateral",
-        "approval_required": RISK_TRANSITION_RULES.get(
-            (state.level, to_level), RiskTransitionRule(state.level, to_level, "lateral", False, frozenset())
-        ).requires_approval,
-        "approved_by": approved_by,
-        "effective_at_ms": now_ms,
-        "level_held_ms": now_ms - state.level_entered_at_ms,
-        "metrics_snapshot": metrics_snapshot or {},
-        "audit_event_ref": f"raud:{hashlib.sha256(tid.encode()).hexdigest()[:16]}",
-        "version_before": state.version,
-        "version_after": state.version + 1,
-    }
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
 # Risk Governor Error / 风控总督异常
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -417,32 +373,72 @@ class RiskGovernorError(Exception):
 # Risk Governor State Machine / 风控总督状态机
 # ═══════════════════════════════════════════════════════════════════════════════
 
-class RiskGovernorStateMachine:
+class RiskGovernorStateMachine(StateMachineBase[RiskLevel]):
     """
     6-Level Risk Governor with automatic escalation and governed de-escalation.
     6 级风控总督，自动升级 + 受治理降级。
 
     Thread-safe. Integrates with RiskManager risk_pressure for auto-escalation.
     线程安全。与 RiskManager risk_pressure 集成进行自动升级。
+
+    Inherits from StateMachineBase only (no MultiObjectStoreMixin), because
+    it holds a single GovernorState rather than a dict of objects.
+    仅继承 StateMachineBase（不使用 MultiObjectStoreMixin），因为它持有单个
+    GovernorState 而非以 id 为键的对象字典。
+
+    Overrides:
+      - `_extra_validate()` to enforce min-hold-time on de-escalation (SM-04 特有)
+      - `_label()` to use RiskLevel.name (IntEnum; tests expect e.g. "NORMAL")
     """
+
+    # ── Subclass config for StateMachineBase ──
+    TRANSITION_ID_PREFIX: ClassVar[str] = "rgt"
+    EVENT_ID_PREFIX: ClassVar[str] = "revt"
+    AUDIT_REF_PREFIX: ClassVar[str] = "raud"
+    ERROR_CLS: ClassVar[type[Exception]] = RiskGovernorError
+    CHANGE_LABEL: ClassVar[str] = "RiskGovernor"
+    # No TERMINAL_STATES for RiskGov (all levels can flow out in principle),
+    # leave as base default (empty frozenset).
+    FORBIDDEN_TRANSITIONS: ClassVar[frozenset] = frozenset()
+    TRANSITION_RULES: ClassVar[dict] = RISK_TRANSITION_RULES
 
     def __init__(
         self,
         thresholds: EscalationThresholds | None = None,
         audit_callback: Callable[[dict[str, Any]], None] | None = None,
     ) -> None:
-        self._lock = threading.Lock()
+        super().__init__(audit_callback=audit_callback)
         self._state = GovernorState()
         self._thresholds = thresholds or EscalationThresholds()
-        self._audit_callback = audit_callback
-        self._change_audit_log = None  # T5.02: Optional ChangeAuditLog for WHO/WHEN/APPROVAL tracking
 
-    # ── T5.02: Change Audit Log Injection / 變更審計日誌注入 ──
+    @staticmethod
+    def _label(state: Any) -> str:
+        """
+        RiskLevel uses IntEnum; tests match error msgs by .name (e.g. "NORMAL").
+        Override base implementation which prefers .value.
+        风控等级是 IntEnum；错误消息与测试使用 .name（如 "NORMAL"）。
+        """
+        if hasattr(state, "name"):
+            return str(state.name)
+        return str(state)
 
-    def set_change_audit_log(self, cal: Any) -> None:
-        """Inject ChangeAuditLog for WHO/WHEN/APPROVAL tracking / 注入變更審計日誌"""
-        with self._lock:
-            self._change_audit_log = cal
+    def _extra_validate(self, *, from_state: RiskLevel, to_state: RiskLevel,
+                         rule: Any) -> None:
+        """
+        SM-04-specific: enforce min-hold-time on de-escalation.
+        SM-04 特有守卫：降级前最短驻留时间。
+        """
+        if getattr(rule, "direction", "") == "de_escalation":
+            now_ms = int(time.time() * 1000)
+            held_ms = now_ms - self._state.level_entered_at_ms
+            min_hold_ms = int(self._thresholds.min_hold_time_seconds * 1000)
+            if held_ms < min_hold_ms:
+                remaining_s = (min_hold_ms - held_ms) / 1000
+                raise RiskGovernorError(
+                    f"Must hold at {from_state.name} for at least "
+                    f"{self._thresholds.min_hold_time_seconds}s before de-escalation. "
+                    f"Remaining: {remaining_s:.0f}s / 降级前需保持最低时间"
+                )
 
     # ── Properties ──
 
@@ -472,62 +468,66 @@ class RiskGovernorStateMachine:
         Execute a risk level transition.
         执行风控等级迁移。
 
-        Validates:
-        1. Transition is in the valid transition table
-        2. Initiator is allowed
-        3. If approval required, approved_by must be provided
-        4. For de-escalation, min hold time must be met
+        Validates (via StateMachineBase._validate_transition):
+          1. Transition is in the valid transition table
+          2. Initiator is allowed
+          3. If approval required, approved_by must be provided
+          4. For de-escalation, min hold time must be met (via _extra_validate)
         """
         with self._lock:
             from_level = self._state.level
 
-            # Same level = no-op
+            # Same level = no-op (early return preserves original semantics)
+            # 相同等级 = 无操作（早期返回保留原语义）
             if from_level == to_level:
                 return copy.deepcopy(self._state)
 
-            # Check valid transition
-            rule = RISK_TRANSITION_RULES.get((from_level, to_level))
-            if rule is None:
-                raise RiskGovernorError(
-                    f"Invalid transition: {from_level.name} → {to_level.name} "
-                    f"(not in transition table) / 非法迁移"
-                )
+            # Guards 1-5 + _extra_validate (min-hold-time)
+            # (Guard 1 "terminal" is a no-op because TERMINAL_STATES is empty.)
+            rule = self._validate_transition(
+                from_state=from_level,
+                to_state=to_level,
+                initiator=initiator,
+                approved_by=approved_by,
+                spec_section="SM-04",
+            )
 
-            # Check initiator
-            if initiator not in rule.allowed_initiators:
-                raise RiskGovernorError(
-                    f"Initiator {initiator.value} not allowed for "
-                    f"{from_level.name} → {to_level.name}. "
-                    f"Allowed: {[i.value for i in rule.allowed_initiators]} / 发起者不被允许"
-                )
-
-            # Check approval for de-escalation
-            if rule.requires_approval and not approved_by:
-                raise RiskGovernorError(
-                    f"Transition {from_level.name} → {to_level.name} requires "
-                    f"explicit approval (approved_by must be provided) / 需要审批"
-                )
-
-            # Check min hold time for de-escalation
-            if rule.direction == "de_escalation":
-                now_ms = int(time.time() * 1000)
-                held_ms = now_ms - self._state.level_entered_at_ms
-                min_hold_ms = int(self._thresholds.min_hold_time_seconds * 1000)
-                if held_ms < min_hold_ms:
-                    remaining_s = (min_hold_ms - held_ms) / 1000
-                    raise RiskGovernorError(
-                        f"Must hold at {from_level.name} for at least "
-                        f"{self._thresholds.min_hold_time_seconds}s before de-escalation. "
-                        f"Remaining: {remaining_s:.0f}s / 降级前需保持最低时间"
-                    )
-
-            # Build audit record
-            record = _build_risk_transition_record(
-                self._state, to_level, event, initiator,
+            # Build audit record with SM-04-specific extras
+            # （direction / level_held_ms / metrics_snapshot 是 SM-04 特有字段）
+            now_ms = int(time.time() * 1000)
+            extra: dict[str, Any] = {
+                "direction": (
+                    "escalation" if to_level > from_level
+                    else "de_escalation" if to_level < from_level
+                    else "lateral"
+                ),
+                "level_held_ms": now_ms - self._state.level_entered_at_ms,
+                "metrics_snapshot": metrics_snapshot or {},
+            }
+            # RiskGov audit uses previous_level/next_level/trigger_event/reason_codes
+            # keys instead of the generic ones. We build via base then rename.
+            # 风控审计用的字段名与通用字段不同：这里构建后再重命名。
+            record = self._build_transition_record(
+                from_state=from_level,
+                to_state=to_level,
+                object_id=None,
+                object_id_key=None,
+                event_value=event.value,
+                initiator_value=initiator.value,
+                version_before=self._state.version,
                 reason_codes=reason_codes,
                 approved_by=approved_by,
-                metrics_snapshot=metrics_snapshot,
+                previous_status_value=from_level.name,
+                next_status_value=to_level.name,
+                extra=extra,
             )
+            # Rename generic keys → SM-04 canonical keys (preserve original
+            # audit record schema byte-compatibility).
+            # 通用键 → SM-04 规范键（保持原审计记录结构字节兼容）
+            record["previous_level"] = record.pop("previous_status")
+            record["next_level"] = record.pop("next_status")
+            record["trigger_event"] = record.pop("trigger_event_type")
+            record["reason_codes"] = record.pop("transition_reason_codes")
 
             # Execute transition
             self._state.level = to_level
@@ -543,20 +543,15 @@ class RiskGovernorStateMachine:
             else:
                 self._state.consecutive_escalations = 0
 
-            # T5.02: Record state change to ChangeAuditLog if available
-            if self._change_audit_log:
-                try:
-                    from .change_audit_log import ChangeType  # noqa: E402
-                    self._change_audit_log.record_change(
-                        change_type=ChangeType.STATE_CHANGE,
-                        who=str(approved_by or initiator.value),
-                        what=f"RiskGovernor: {from_level.name} → {to_level.name}",
-                        reason=reason or "",
-                        old_value=from_level.name,
-                        new_value=to_level.name,
-                    )
-                except Exception as e:
-                    logger.error("Failed to record change audit: %s", e)
+            # T5.02: ChangeAuditLog (no auto_approve branch)
+            self._record_change_audit(
+                from_label=from_level.name,
+                to_label=to_level.name,
+                initiator_value=initiator.value,
+                approved_by=approved_by,
+                reason=reason,
+                auto_approve=None,
+            )
 
             result = copy.deepcopy(self._state)
 
@@ -847,12 +842,3 @@ class RiskGovernorStateMachine:
             self._state.last_reason = data.get("last_reason", "")
             self._state.transitions = data.get("transitions", [])
             self._state.version = data.get("version", 1)
-
-    # ── Internal / 内部 ──
-
-    def _emit_audit(self, record: dict[str, Any]) -> None:
-        if self._audit_callback:
-            try:
-                self._audit_callback(record)
-            except Exception:
-                logger.exception("Risk governor audit callback error / 审计回调异常")

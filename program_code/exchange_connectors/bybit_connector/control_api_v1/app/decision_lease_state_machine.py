@@ -12,15 +12,13 @@ MODULE_NOTE (中文):
   - 过期守护（基于 expires_at 自动触发 EXPIRED）
   - Lease 不是订单、不是风险批准、不是执行状态
 
+  本文件在 E5-P0-1 重构后，引擎骨架被抽到 state_machine_base.py。
+  保留 SM-02 特有的状态/事件/迁移表/对象/便捷方法。
+
 MODULE_NOTE (English):
-  Implements the full Decision Lease State Machine per SM-02 governance spec:
-  - 9 formal states: DRAFT, REGISTERED, ACTIVE, BRIDGED, FROZEN, REVOKED, EXPIRED, REJECTED, CONSUMED
-  - 20+ valid transitions (with guard conditions)
-  - Explicitly forbidden transitions (terminal backflow, skip registration, skip active)
-  - Auto vs manual-approval distinction
-  - Each transition emits a lease_transition audit object (SM-02 §11)
-  - Expiry guardian (auto-triggers EXPIRED based on expires_at)
-  - Lease is NOT an order, NOT a risk approval, NOT an execution state
+  Implements the full Decision Lease State Machine per SM-02 governance spec.
+  After the E5-P0-1 refactor, the engine skeleton has been extracted to
+  `state_machine_base.py`; this file keeps everything SM-02 specific.
 
 Safety invariant:
   - Terminal states (REVOKED, EXPIRED, REJECTED, CONSUMED) are irreversible
@@ -33,15 +31,14 @@ Safety invariant:
 from __future__ import annotations
 
 import copy
-import hashlib
-import json
 import logging
-import threading
 import time
 import uuid
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Callable
+from typing import Any, Callable, ClassVar
+
+from .state_machine_base import MultiObjectStoreMixin, StateMachineBase
 
 logger = logging.getLogger(__name__)
 
@@ -343,41 +340,6 @@ class DecisionLeaseObject:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# Transition Record / 迁移记录 (SM-02 §11)
-# ═══════════════════════════════════════════════════════════════════════════════
-
-def _build_lease_transition_record(
-    lease: DecisionLeaseObject,
-    to_state: LeaseState,
-    event: LeaseEvent,
-    initiator: LeaseInitiator,
-    reason_codes: list[str] | None = None,
-    approved_by: str | None = None,
-) -> dict[str, Any]:
-    now_ms = int(time.time() * 1000)
-    tid = f"ltx:{uuid.uuid4().hex[:12]}"
-    return {
-        "transition_id": tid,
-        "lease_id": lease.lease_id,
-        "previous_status": lease.state.value,
-        "next_status": to_state.value,
-        "trigger_event_type": event.value,
-        "trigger_event_id": f"levt:{uuid.uuid4().hex[:8]}",
-        "initiated_by": initiator.value,
-        "transition_reason_codes": reason_codes or [],
-        "approval_required": LEASE_TRANSITION_RULES.get(
-            (lease.state, to_state),
-            LeaseTransitionRule(lease.state, to_state, False, frozenset())
-        ).requires_approval,
-        "approved_by": approved_by,
-        "effective_at_ms": now_ms,
-        "audit_event_ref": f"laud:{hashlib.sha256(tid.encode()).hexdigest()[:16]}",
-        "version_before": lease.version,
-        "version_after": lease.version + 1,
-    }
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
 # Errors / 异常
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -389,27 +351,43 @@ class LeaseError(Exception):
 # Decision Lease State Machine / 决策租约状态机
 # ═══════════════════════════════════════════════════════════════════════════════
 
-class DecisionLeaseStateMachine:
+class DecisionLeaseStateMachine(MultiObjectStoreMixin, StateMachineBase[LeaseState]):
     """
     Core state machine for Decision Lease lifecycle management.
     决策租约生命周期管理核心状态机。
 
     Thread-safe. All mutations go through transition().
     线程安全。所有变更通过 transition() 执行。
+
+    Inherits:
+      - StateMachineBase[LeaseState]: guards / audit record / CAL / _emit_audit
+      - MultiObjectStoreMixin: get / get_all / get_status_summary / check_expiry
     """
 
+    # ── Subclass config for StateMachineBase ──
+    TRANSITION_ID_PREFIX: ClassVar[str] = "ltx"
+    EVENT_ID_PREFIX: ClassVar[str] = "levt"
+    AUDIT_REF_PREFIX: ClassVar[str] = "laud"
+    ERROR_CLS: ClassVar[type[Exception]] = LeaseError
+    CHANGE_LABEL: ClassVar[str] = "DecisionLease"
+    TERMINAL_STATES: ClassVar[frozenset] = TERMINAL_STATES
+    FORBIDDEN_TRANSITIONS: ClassVar[frozenset] = FORBIDDEN_TRANSITIONS
+    TRANSITION_RULES: ClassVar[dict] = LEASE_TRANSITION_RULES
+
+    # ── Subclass config for MultiObjectStoreMixin ──
+    _OBJECT_ID_ATTR: ClassVar[str] = "lease_id"
+    _OBJECT_STATE_ATTR: ClassVar[str] = "state"
+    _EXPIRY_CHECK_ATTR: ClassVar[str] = "is_expired_by_time"
+    _EXPIRY_STATE: ClassVar[Any] = LeaseState.EXPIRED
+    _EXPIRY_EVENT_VALUE: ClassVar[Any] = LeaseEvent.EXPIRED_BY_TIME
+    _EXPIRY_INITIATOR_VALUE: ClassVar[Any] = LeaseInitiator.EXPIRY_GUARDIAN
+    _EXPIRY_REASON_CODES: ClassVar[list[str]] = ["time_expiry"]
+
     def __init__(self, audit_callback: Callable[[dict[str, Any]], None] | None = None) -> None:
-        self._lock = threading.Lock()
+        super().__init__(audit_callback=audit_callback)
         self._leases: dict[str, DecisionLeaseObject] = {}
-        self._audit_callback = audit_callback
-        self._change_audit_log = None  # T5.02: Optional ChangeAuditLog for WHO/WHEN/APPROVAL tracking
-
-    # ── T5.02: Change Audit Log Injection / 變更審計日誌注入 ──
-
-    def set_change_audit_log(self, cal: Any) -> None:
-        """Inject ChangeAuditLog for WHO/WHEN/APPROVAL tracking / 注入變更審計日誌"""
-        with self._lock:
-            self._change_audit_log = cal
+        # Alias for MultiObjectStoreMixin
+        self._objects = self._leases
 
     # ── Create / 创建 ──
 
@@ -431,11 +409,18 @@ class DecisionLeaseStateMachine:
             valid_from_ms=valid_from_ms,
             expires_at_ms=expires_at_ms,
         )
-        record = _build_lease_transition_record(
-            lease, LeaseState.DRAFT, LeaseEvent.DRAFT_CREATED,
-            LeaseInitiator.I_CONTROL_PLANE, reason_codes=["initial_draft"],
+        record = self._build_transition_record(
+            from_state=LeaseState.DRAFT,
+            to_state=LeaseState.DRAFT,
+            object_id=lease.lease_id,
+            object_id_key="lease_id",
+            event_value=LeaseEvent.DRAFT_CREATED.value,
+            initiator_value=LeaseInitiator.I_CONTROL_PLANE.value,
+            version_before=lease.version,
+            reason_codes=["initial_draft"],
+            previous_status_value="NONE",
+            next_status_value=LeaseState.DRAFT.value,
         )
-        record["previous_status"] = "NONE"
         lease.transitions.append(record)
 
         with self._lock:
@@ -465,46 +450,26 @@ class DecisionLeaseStateMachine:
 
             from_state = lease.state
 
-            # Guard 1: Terminal states
-            if from_state in TERMINAL_STATES:
-                raise LeaseError(
-                    f"Cannot transition from terminal state {from_state.value} / "
-                    f"不可从终态 {from_state.value} 迁出"
-                )
+            # Guards 1-5 (hook unused)
+            self._validate_transition(
+                from_state=from_state,
+                to_state=to_state,
+                initiator=initiator,
+                approved_by=approved_by,
+                spec_section="SM-02 §8",
+            )
 
-            # Guard 2: Forbidden
-            if (from_state, to_state) in FORBIDDEN_TRANSITIONS:
-                raise LeaseError(
-                    f"Forbidden transition: {from_state.value} → {to_state.value} "
-                    f"(SM-02 §8) / 禁止迁移"
-                )
-
-            # Guard 3: Valid table
-            rule = LEASE_TRANSITION_RULES.get((from_state, to_state))
-            if rule is None:
-                raise LeaseError(
-                    f"Invalid transition: {from_state.value} → {to_state.value} "
-                    f"(not in transition table) / 非法迁移"
-                )
-
-            # Guard 4: Initiator
-            if initiator not in rule.allowed_initiators:
-                raise LeaseError(
-                    f"Initiator {initiator.value} not allowed for "
-                    f"{from_state.value} → {to_state.value} / 发起者不被允许"
-                )
-
-            # Guard 5: Approval
-            if rule.requires_approval and not approved_by:
-                raise LeaseError(
-                    f"Transition {from_state.value} → {to_state.value} requires "
-                    f"approval / 需要审批"
-                )
-
-            # Execute
-            record = _build_lease_transition_record(
-                lease, to_state, event, initiator,
-                reason_codes=reason_codes, approved_by=approved_by,
+            # Build audit record
+            record = self._build_transition_record(
+                from_state=from_state,
+                to_state=to_state,
+                object_id=lease.lease_id,
+                object_id_key="lease_id",
+                event_value=event.value,
+                initiator_value=initiator.value,
+                version_before=lease.version,
+                reason_codes=reason_codes,
+                approved_by=approved_by,
             )
 
             lease.state = to_state
@@ -528,20 +493,16 @@ class DecisionLeaseStateMachine:
             elif to_state == LeaseState.REJECTED:
                 lease.rejection_reason = reason
 
-            # T5.02: Record state change to ChangeAuditLog if available
-            if self._change_audit_log:
-                try:
-                    from .change_audit_log import ChangeType  # noqa: E402
-                    self._change_audit_log.record_change(
-                        change_type=ChangeType.STATE_CHANGE,
-                        who=str(approved_by or initiator.value),
-                        what=f"DecisionLease: {from_state.value} → {to_state.value}",
-                        reason=reason or "",
-                        old_value=from_state.value,
-                        new_value=to_state.value,
-                    )
-                except Exception as e:
-                    logger.error("Failed to record change audit: %s", e)
+            # T5.02: ChangeAuditLog (no auto_approve branch — SM-02 doesn't use it)
+            # T5.02：ChangeAuditLog 写入（SM-02 不使用 auto_approve 分支）
+            self._record_change_audit(
+                from_label=from_state.value,
+                to_label=to_state.value,
+                initiator_value=initiator.value,
+                approved_by=approved_by,
+                reason=reason,
+                auto_approve=None,
+            )
 
             result = copy.deepcopy(lease)
 
@@ -646,36 +607,7 @@ class DecisionLeaseStateMachine:
             reason=reason, reason_codes=["unfrozen_to_active"],
         )
 
-    # ── Expiry Guardian / 过期守护 (SM-02 §12) ──
-
-    def check_expiry(self) -> list[str]:
-        expired_ids: list[str] = []
-        with self._lock:
-            candidates = [
-                (lid, lease) for lid, lease in self._leases.items()
-                if lease.state not in TERMINAL_STATES and lease.is_expired_by_time
-            ]
-
-        for lid, lease in candidates:
-            try:
-                self.transition(
-                    lid, LeaseState.EXPIRED,
-                    event=LeaseEvent.EXPIRED_BY_TIME,
-                    initiator=LeaseInitiator.EXPIRY_GUARDIAN,
-                    reason_codes=["time_expiry"],
-                )
-                expired_ids.append(lid)
-            except LeaseError as e:
-                logger.warning("Lease expiry failed for %s: %s", lid, e)
-
-        return expired_ids
-
-    # ── Query / 查询 ──
-
-    def get(self, lease_id: str) -> DecisionLeaseObject | None:
-        with self._lock:
-            lease = self._leases.get(lease_id)
-            return copy.deepcopy(lease) if lease else None
+    # ── Query / 查询 (Lease-specific) ──
 
     def get_live(self) -> list[DecisionLeaseObject]:
         with self._lock:
@@ -684,17 +616,6 @@ class DecisionLeaseStateMachine:
     def get_bridgeable(self) -> list[DecisionLeaseObject]:
         with self._lock:
             return [copy.deepcopy(l) for l in self._leases.values() if l.is_bridgeable]
-
-    def get_all(self) -> list[DecisionLeaseObject]:
-        with self._lock:
-            return [copy.deepcopy(l) for l in self._leases.values()]
-
-    def get_status_summary(self) -> dict[str, int]:
-        with self._lock:
-            summary: dict[str, int] = {}
-            for l in self._leases.values():
-                summary[l.state.value] = summary.get(l.state.value, 0) + 1
-            return summary
 
     # ── Persistence / 持久化 ──
 
@@ -729,12 +650,3 @@ class DecisionLeaseStateMachine:
                 except Exception as e:
                     logger.warning("Failed to import lease: %s", e)
         return count
-
-    # ── Internal ──
-
-    def _emit_audit(self, record: dict[str, Any]) -> None:
-        if self._audit_callback:
-            try:
-                self._audit_callback(record)
-            except Exception:
-                logger.exception("Lease audit callback error")
