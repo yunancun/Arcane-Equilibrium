@@ -373,7 +373,12 @@ async function loadPositions() {
     // Bybit API: category from symbol suffix heuristic (USDT=linear, USD=inverse, else spot)
     const sym = p.symbol || '';
     const cat = p.category || (sym.endsWith('USD') && !sym.endsWith('USDT') ? 'inverse' : 'linear');
-    const strat = _demoStratMap[sym] || '--';
+    // Prefer authoritative owner_strategy injected by backend from Rust paper_state
+    // (bybit_sync / orphan_adopted / orphan_frozen / DUST_FROZEN / strategy names).
+    // Fallback to fills-derived map (may miss low-turnover strategies).
+    // 優先讀後端從 Rust paper_state 注入的 owner_strategy（權威歸屬）。
+    // 降級到 fills 反推映射（低週轉策略可能漏）。
+    const strat = p.owner_strategy || _demoStratMap[sym] || '--';
     html += '<tr>';
     html += '<td><strong>' + ocEsc(p.symbol) + '</strong></td>';
     html += '<td style="font-size:11px">' + ocEsc(strat) + '</td>';
