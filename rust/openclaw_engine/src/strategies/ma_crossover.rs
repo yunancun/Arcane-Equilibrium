@@ -8,6 +8,7 @@
 
 use std::collections::HashMap;
 
+use super::common::{ConfidenceBuilder, PerSymbolState, TrendCooldown};
 use super::confluence::{self, ConfluenceConfig, PersistenceTracker};
 use super::{ParamRange, Strategy, StrategyAction, StrategyParams};
 use crate::intent_processor::OrderIntent;
@@ -261,11 +262,20 @@ impl MaCrossoverParams {
 pub struct MaCrossover {
     active: bool,
     /// Per-symbol position tracking: symbol → is_long direction.
-    /// 每幣種獨立持倉追蹤：symbol → 多空方向。
-    positions: HashMap<String, bool>,
+    /// E1-P0-2: Migrated from `HashMap<String, bool>` to `PerSymbolState<bool>`.
+    /// 每幣種獨立持倉追蹤：symbol → 多空方向（E1-P0-2：改用 `PerSymbolState<bool>`）。
+    positions: PerSymbolState<bool>,
     /// Per-symbol last trade timestamp for cooldown.
-    /// 每幣種最後交易時間戳（用於冷卻）。
-    last_trade_ms: HashMap<String, u64>,
+    /// E1-P0-2: Migrated from `HashMap<String, u64>` to `TrendCooldown`.
+    /// The trend-adaptive cooldown multiplier still lives in
+    /// `compute_trend_adjusted_cooldown` (ma_crossover-specific); each tick we
+    /// push the effective duration into the shared `TrendCooldown` via
+    /// `set_duration()` before calling `is_cooled_down()` — preserves the
+    /// original `ts < last_ms + effective` semantics exactly (including the
+    /// `last_ms == 0 → unseen → cooled` sentinel via the HashMap-absent branch).
+    /// E1-P0-2：改用 TrendCooldown；趨勢自適應倍率仍留在 `compute_trend_adjusted_cooldown`，
+    /// 每個 tick 先 `set_duration()` 再查 `is_cooled_down()`，原語意完全保留。
+    cooldown: TrendCooldown,
     pub(crate) cooldown_ms: u64,
     pub(crate) adx_threshold: f64,
     default_qty: f64,
@@ -291,6 +301,9 @@ pub struct MaCrossover {
     /// QC-H1: Exit confidence base (default 0.5). / 出場信心基礎值。
     pub(crate) exit_conf_base: f64,
     // RC-04: Per-symbol previous state for rejection rollback / 每幣種拒絕回滾用的先前狀態
+    // prev_last_trade_ms keeps the "0 = unseen" sentinel semantics so RC-04
+    // rollback can restore the "never traded" state via `TrendCooldown::clear`.
+    // prev_last_trade_ms 沿用「0 = 未見」哨兵，RC-04 透過 TrendCooldown::clear 回復「未交易」狀態。
     prev_position: HashMap<String, Option<bool>>,
     prev_last_trade_ms: HashMap<String, u64>,
     /// CONF-D: Multiplier applied to emitted intent.confidence (default 1.0, range [0,2]).
@@ -326,8 +339,8 @@ impl MaCrossover {
     pub fn new() -> Self {
         Self {
             active: true,
-            positions: HashMap::new(),
-            last_trade_ms: HashMap::new(),
+            positions: PerSymbolState::new(),
+            cooldown: TrendCooldown::new(300_000),
             cooldown_ms: 300_000,
             adx_threshold: 20.0,
             default_qty: 1e9,
@@ -355,6 +368,12 @@ impl MaCrossover {
     pub fn update_params(&mut self, params: MaCrossoverParams) -> Result<(), String> {
         params.validate()?;
         self.cooldown_ms = params.cooldown_ms;
+        // E1-P0-2: Keep TrendCooldown's base duration in sync. The per-tick
+        // `set_duration(effective)` call will overwrite this with the trend-
+        // adjusted value, but holding the base in the struct preserves the
+        // old invariant where `cooldown_ms` is the authoritative baseline.
+        // E1-P0-2：TrendCooldown 基礎值同步；每 tick 仍會用有效值覆蓋。
+        self.cooldown.set_duration(params.cooldown_ms);
         self.adx_threshold = params.adx_threshold;
         self.default_qty = params.default_qty;
         self.regime_filter_enabled = params.regime_filter_enabled;
@@ -470,17 +489,15 @@ impl MaCrossover {
     /// Dynamic confidence: ADX excess + Hurst regime fit.
     /// 動態信心：ADX 超額 + Hurst regime 契合度。
     /// trending regime + 高 ADX → 高 conf；mean_reverting regime → 懲罰。
+    ///
+    /// E1-P0-2: Delegates to `ConfidenceBuilder`. Bit-exact equivalence with
+    /// the pre-extraction formula is covered by
+    /// `ConfidenceBuilder::tests::test_bit_exact_matches_pre_extraction_trending`
+    /// (same base / adx_threshold / regime_bonus / 100.0 / 0.25 / 0.2 / 0.9).
+    /// E1-P0-2：委派給 `ConfidenceBuilder`，位元精確對齊已於共享模組單測驗證。
     fn compute_entry_confidence(&self, adx: f64, regime: Option<&str>) -> f64 {
-        // QC-H1: base, regime_bonus configurable (was hardcoded 0.45 / 0.15)
-        let base = self.entry_conf_base;
-        // adx_threshold default 25 → bonus from 0 at threshold to +0.25 at adx=50
-        let adx_bonus = ((adx - self.adx_threshold).max(0.0) / 100.0).min(0.25);
-        let regime_bonus = match regime {
-            Some("trending") => self.entry_regime_bonus,
-            Some("mean_reverting") => -self.entry_regime_bonus,
-            _ => 0.0,
-        };
-        (base + adx_bonus + regime_bonus).clamp(0.2, 0.9)
+        ConfidenceBuilder::new(self.entry_conf_base, self.adx_threshold, self.entry_regime_bonus)
+            .compute(adx, regime)
     }
 
     /// Exit confidence: cross-back is a real signal but weaker than fresh entry.
@@ -588,9 +605,11 @@ impl Strategy for MaCrossover {
         }
         if let Some(&ts) = self.prev_last_trade_ms.get(sym) {
             if ts == 0 {
-                self.last_trade_ms.remove(sym);
+                // Sentinel 0 → unseen prior to mutation; restore by clearing.
+                // 哨兵 0 → 變更前為未見；清除以還原。
+                self.cooldown.clear(sym);
             } else {
-                self.last_trade_ms.insert(sym.clone(), ts);
+                self.cooldown.record_signal(sym, ts);
             }
         }
     }
@@ -608,12 +627,18 @@ impl Strategy for MaCrossover {
             Some(i) => i,
             None => return vec![],
         };
-        let last_ms = self.last_trade_ms.get(ctx.symbol).copied().unwrap_or(0);
+        // Snapshot pre-mutation last_ms for RC-04 (sentinel 0 when unseen, as before).
+        // 為 RC-04 快照變更前的 last_ms（未見時沿用哨兵 0）。
+        let last_ms = self.cooldown.last_ms(ctx.symbol).unwrap_or(0);
         // A2: trend-adaptive cooldown — extends cooldown in strong-trend markets
         // to prevent re-entering into a continuing trend that just closed us out.
-        // A2：趨勢自適應冷卻 — 趨勢強時延長冷卻，避免剛平又被同趨勢打回。
+        // E1-P0-2: Delegated to shared `TrendCooldown`; we push the effective
+        // duration in each tick so semantics match `ts < last_ms + effective`
+        // exactly (unseen symbol still → cooled via TrendCooldown's None branch).
+        // A2：趨勢自適應冷卻；E1-P0-2 委派給 TrendCooldown，語意完全一致。
         let effective_cooldown = self.compute_trend_adjusted_cooldown(ctx.indicators);
-        if last_ms > 0 && ctx.timestamp_ms < last_ms + effective_cooldown {
+        self.cooldown.set_duration(effective_cooldown);
+        if !self.cooldown.is_cooled_down(ctx.symbol, ctx.timestamp_ms) {
             return vec![];
         }
 
@@ -741,8 +766,7 @@ impl Strategy for MaCrossover {
                         persistence_elapsed_ms,
                     )));
                     self.positions.insert(ctx.symbol.to_string(), is_long);
-                    self.last_trade_ms
-                        .insert(ctx.symbol.to_string(), ctx.timestamp_ms);
+                    self.cooldown.record_signal(ctx.symbol, ctx.timestamp_ms);
                 }
             }
             Some(is_long) => {
@@ -788,8 +812,7 @@ impl Strategy for MaCrossover {
                         reason: "ma_reverse_cross".into(),
                     });
                     self.positions.remove(ctx.symbol);
-                    self.last_trade_ms
-                        .insert(ctx.symbol.to_string(), ctx.timestamp_ms);
+                    self.cooldown.record_signal(ctx.symbol, ctx.timestamp_ms);
                     self.exit_persistence.clear(ctx.symbol);
                 }
             }

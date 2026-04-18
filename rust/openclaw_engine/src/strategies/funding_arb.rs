@@ -16,6 +16,7 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 use tracing::info;
 
+use super::common::{PerSymbolState, TrendCooldown};
 use super::{ParamRange, Strategy, StrategyAction, StrategyParams};
 use crate::intent_processor::OrderIntent;
 use crate::tick_pipeline::TickContext;
@@ -32,9 +33,16 @@ const DEFAULT_ENTRY_BASIS_RATIO: f64 = 0.8;
 pub struct FundingArb {
     active: bool,
     /// #17: Per-symbol position tracking (was single Option<FundingPosition>).
+    /// E1-P0-2: Migrated from `HashMap<String, FundingPosition>` to
+    /// `PerSymbolState<FundingPosition>` (semantic-preserving wrapper).
     /// #17：每幣種持倉追蹤（原為單一 Option<FundingPosition>）。
-    positions: HashMap<String, FundingPosition>,
-    last_trade_ms: HashMap<String, u64>,
+    /// E1-P0-2：改用 `PerSymbolState<FundingPosition>` 包裝器（語意不變）。
+    positions: PerSymbolState<FundingPosition>,
+    /// E1-P0-2: Per-symbol last-signal time. Migrated from `HashMap<String, u64>`
+    /// to `TrendCooldown`. Semantics preserved: unseen symbol is "cooled",
+    /// `saturating_sub` guards backward clock skew.
+    /// E1-P0-2：逐幣種最後信號時間，改用 `TrendCooldown`，語意完全相同。
+    cooldown: TrendCooldown,
     pub cooldown_ms: u64,
     default_qty: f64,
     // QC-H10: Parameterized constants (was module-level consts).
@@ -63,8 +71,8 @@ impl FundingArb {
     pub fn new() -> Self {
         Self {
             active: false,
-            positions: HashMap::new(),
-            last_trade_ms: HashMap::new(),
+            positions: PerSymbolState::new(),
+            cooldown: TrendCooldown::new(3_600_000),
             cooldown_ms: 3_600_000, // 1h cooldown
             default_qty: 1e9,       // sentinel → IntentProcessor applies risk sizing
             total_cost_bps: DEFAULT_TOTAL_COST_BPS,
@@ -130,14 +138,15 @@ impl FundingArb {
     }
 
     /// RC-04: Snapshot current state before mutation for rejection rollback.
+    /// Preserves the pre-extraction "unseen → 0" sentinel convention by mapping
+    /// `TrendCooldown::last_ms(sym) == None` to 0.
     /// RC-04：突變前快照當前狀態，用於拒絕回滾。
+    /// 將 TrendCooldown 未記錄的 symbol 映射為 0，保留原先「未見 → 0」的哨兵慣例。
     fn snapshot_prev(&mut self, sym: &str) {
         self.prev_positions
             .insert(sym.to_string(), self.positions.get(sym).cloned());
-        self.prev_last_trade_ms.insert(
-            sym.to_string(),
-            self.last_trade_ms.get(sym).copied().unwrap_or(0),
-        );
+        self.prev_last_trade_ms
+            .insert(sym.to_string(), self.cooldown.last_ms(sym).unwrap_or(0));
     }
 
     // ── Phase 3a: Runtime parameter tuning (AGT-1) / 運行時參數調參 ──
@@ -152,6 +161,11 @@ impl FundingArb {
         params.validate()?;
         self.active = params.active;
         self.cooldown_ms = params.cooldown_ms;
+        // E1-P0-2: Hot-reload TrendCooldown's duration in lockstep with
+        // cooldown_ms so future `is_cooled_down` calls honor the new value
+        // without clearing existing per-symbol timestamps.
+        // E1-P0-2：熱更新 TrendCooldown 時長，不清空既有時戳。
+        self.cooldown.set_duration(params.cooldown_ms);
         self.total_cost_bps = params.total_cost_bps;
         self.expected_periods = params.expected_periods;
         self.funding_threshold = params.funding_threshold;
@@ -342,9 +356,12 @@ impl Strategy for FundingArb {
         }
         if let Some(&ts) = self.prev_last_trade_ms.get(sym) {
             if ts == 0 {
-                self.last_trade_ms.remove(sym);
+                // Sentinel 0 → symbol had no prior record; clear cooldown entry
+                // to restore "unseen" state (matches pre-extraction HashMap.remove).
+                // 哨兵 0 → 原本無紀錄；清掉 cooldown 條目回到「未見」狀態。
+                self.cooldown.clear(sym);
             } else {
-                self.last_trade_ms.insert(sym.clone(), ts);
+                self.cooldown.record_signal(sym, ts);
             }
         }
     }
@@ -377,7 +394,7 @@ impl Strategy for FundingArb {
                 self.snapshot_prev(sym);
 
                 self.positions.remove(sym);
-                self.last_trade_ms.insert(sym.to_string(), now_ms);
+                self.cooldown.record_signal(sym, now_ms);
 
                 return vec![StrategyAction::Close {
                     symbol: sym.to_string(),
@@ -400,11 +417,10 @@ impl Strategy for FundingArb {
             return vec![];
         }
 
-        // Cooldown / 冷卻期
-        if let Some(&last_ms) = self.last_trade_ms.get(sym) {
-            if now_ms.saturating_sub(last_ms) < self.cooldown_ms {
-                return vec![];
-            }
+        // Cooldown / 冷卻期 (E1-P0-2: delegated to TrendCooldown, semantics preserved)
+        // 冷卻期（E1-P0-2：委派給 TrendCooldown，語意不變）
+        if !self.cooldown.is_cooled_down(sym, now_ms) {
+            return vec![];
         }
 
         // Funding rate must exceed threshold / 資金費率必須超過閾值
@@ -449,7 +465,7 @@ impl Strategy for FundingArb {
                 entry_funding_rate: funding_rate,
             },
         );
-        self.last_trade_ms.insert(sym.to_string(), now_ms);
+        self.cooldown.record_signal(sym, now_ms);
 
         vec![StrategyAction::Open(OrderIntent {
             symbol: sym.to_string(),
