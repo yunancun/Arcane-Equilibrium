@@ -18,8 +18,15 @@
 
 from __future__ import annotations
 
+import hashlib
+import hmac
+import json
 import logging
+import os
+import stat
+import tempfile
 import time
+from pathlib import Path
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -35,6 +42,206 @@ from .earned_trust_engine import (
 )
 
 logger = logging.getLogger(__name__)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# LIVE-GATE-BINDING-1: signed authorization file for Rust engine
+# LIVE-GATE-BINDING-1：給 Rust 引擎消費的簽名授權檔
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# Rust refuses to spawn the Live pipeline unless this file exists, parses,
+# verifies HMAC, is not expired, and whitelists the current bybit_endpoint.
+# The canonical payload layout MUST match
+# `rust/openclaw_engine/src/live_authorization.rs::canonical_payload`:
+#   version|tier|issued_at_ms|expires_at_ms|operator_id|env_allowed_sorted_csv
+#
+# LiveDemo is held to the same bar as Mainnet by design — the point of
+# LiveDemo is to exercise the Live gate before real money. (See memory
+# `feedback_live_no_degradation_by_endpoint.md`.)
+
+_AUTHORIZATION_SCHEMA_VERSION = 1
+_AUTHORIZATION_FILENAME = "authorization.json"
+_ENV_LIVE_DEMO = "live_demo"
+_ENV_MAINNET = "mainnet"
+
+# Canonical tier-name mapping used on the wire. Must stay stable — Rust logs
+# this string for audit. Matches `TrustTier.name` (e.g. TrustTier.T0_ENTRY.name).
+_TIER_WIRE_NAME = {
+    TrustTier.T0_ENTRY: "T0_ENTRY",
+    TrustTier.T1_PROVISIONAL: "T1_PROVISIONAL",
+    TrustTier.T2_ESTABLISHED: "T2_ESTABLISHED",
+    TrustTier.T3_TRUSTED: "T3_TRUSTED",
+}
+
+
+def _live_secret_slot_dir() -> Path:
+    """
+    Resolve the on-disk `.../secret_files/bybit/live/` directory using the
+    same precedence as Rust `read_secret_file` and Python settings_routes.
+
+    Cross-platform: uses HOME / USERPROFILE via Path.home(); never hardcodes.
+    """
+    base_env = os.environ.get("OPENCLAW_SECRETS_DIR")
+    if base_env:
+        return Path(base_env) / "live"
+    return Path.home() / "BybitOpenClaw" / "secrets" / "secret_files" / "bybit" / "live"
+
+
+def _current_bybit_endpoint_label() -> str:
+    """
+    Read `bybit_endpoint` secret file and translate to the wire label used in
+    `env_allowed`. Defaults to mainnet on any missing/unknown value, matching
+    Rust's `live_bybit_environment()` fail-safe.
+    """
+    try:
+        path = _live_secret_slot_dir() / "bybit_endpoint"
+        content = path.read_text(encoding="utf-8").strip().lower()
+    except (FileNotFoundError, PermissionError, OSError):
+        content = ""
+    if content == "demo":
+        return _ENV_LIVE_DEMO
+    # "mainnet" or empty or unknown → mainnet (fail-safe: never silently downgrade to demo)
+    return _ENV_MAINNET
+
+
+def _canonical_authorization_payload(
+    version: int,
+    tier: str,
+    issued_at_ms: int,
+    expires_at_ms: int,
+    operator_id: str,
+    env_allowed: list[str],
+) -> str:
+    """
+    Build the bytes that get HMAC-signed. MUST match Rust canonical_payload
+    exactly (pipe-separated, env_allowed sorted+deduped ASCII-ascending).
+    """
+    envs_sorted = sorted(set(env_allowed))
+    return f"{version}|{tier}|{issued_at_ms}|{expires_at_ms}|{operator_id}|{','.join(envs_sorted)}"
+
+
+def _sign_authorization_payload(payload: str, ipc_secret: str) -> str:
+    """HMAC-SHA256 → hex-lowercase. Matches Rust `compute_signature`."""
+    mac = hmac.new(ipc_secret.encode("utf-8"), payload.encode("utf-8"), hashlib.sha256)
+    return mac.hexdigest()
+
+
+def _atomic_write_json(path: Path, data: dict[str, Any]) -> None:
+    """
+    Write `data` to `path` atomically (tmpfile + rename) with chmod 600.
+    Prevents Rust from reading a partially-written file.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        os.chmod(path.parent, stat.S_IRWXU)
+    except OSError:
+        pass  # best-effort on exotic filesystems
+
+    fd, tmp_path = tempfile.mkstemp(
+        prefix=".authorization.",
+        suffix=".tmp",
+        dir=str(path.parent),
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(data, f, sort_keys=True, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        os.chmod(tmp_path, stat.S_IRUSR | stat.S_IWUSR)
+        os.replace(tmp_path, path)  # atomic on POSIX + Windows
+    except Exception:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
+
+
+def _write_signed_live_authorization(
+    operator_id: str,
+    tier: int,
+    expires_at_ms: int,
+) -> dict[str, Any]:
+    """
+    Sign and persist the Earned-Trust authorization record that the Rust
+    engine's LIVE-GATE-BINDING-1 reads.
+
+    Raises RuntimeError if `OPENCLAW_IPC_SECRET` is unset — Rust will also
+    refuse to verify without it, so failing here surfaces the config error
+    at approval time instead of at engine restart.
+
+    對 Rust 引擎 LIVE-GATE-BINDING-1 簽名寫入贏得信任授權記錄。
+    """
+    ipc_secret = os.environ.get("OPENCLAW_IPC_SECRET", "").strip()
+    if not ipc_secret:
+        raise RuntimeError(
+            "OPENCLAW_IPC_SECRET is not set — cannot sign live authorization. "
+            "Set it in the control-api environment before approving live auth. / "
+            "OPENCLAW_IPC_SECRET 未設定，無法簽署 live 授權"
+        )
+
+    tier_enum = TrustTier(tier)
+    tier_name = _TIER_WIRE_NAME[tier_enum]
+    issued_at_ms = int(time.time() * 1000)
+    env_allowed = [_current_bybit_endpoint_label()]
+
+    payload = _canonical_authorization_payload(
+        version=_AUTHORIZATION_SCHEMA_VERSION,
+        tier=tier_name,
+        issued_at_ms=issued_at_ms,
+        expires_at_ms=expires_at_ms,
+        operator_id=operator_id,
+        env_allowed=env_allowed,
+    )
+    sig = _sign_authorization_payload(payload, ipc_secret)
+
+    record = {
+        "version": _AUTHORIZATION_SCHEMA_VERSION,
+        "tier": tier_name,
+        "issued_at_ms": issued_at_ms,
+        "expires_at_ms": expires_at_ms,
+        "operator_id": operator_id,
+        "env_allowed": env_allowed,
+        "sig": sig,
+    }
+
+    path = _live_secret_slot_dir() / _AUTHORIZATION_FILENAME
+    _atomic_write_json(path, record)
+    logger.warning(
+        "LIVE-GATE-BINDING-1: signed live authorization written path=%s tier=%s "
+        "env_allowed=%s expires_at_ms=%d operator=%s / 已寫入簽名 live 授權",
+        path,
+        tier_name,
+        env_allowed,
+        expires_at_ms,
+        operator_id,
+    )
+    return record
+
+
+def _delete_live_authorization_file() -> bool:
+    """
+    Remove the authorization file so Rust refuses to (re)spawn Live. Called
+    during revoke flows and whenever the old authorization is superseded.
+    Returns True if a file was deleted.
+    """
+    path = _live_secret_slot_dir() / _AUTHORIZATION_FILENAME
+    try:
+        path.unlink()
+        logger.warning(
+            "LIVE-GATE-BINDING-1: live authorization file removed path=%s / "
+            "已刪除 live 授權檔案",
+            path,
+        )
+        return True
+    except FileNotFoundError:
+        return False
+    except OSError as exc:
+        logger.error(
+            "LIVE-GATE-BINDING-1: failed to remove live authorization file %s: %s",
+            path,
+            exc,
+        )
+        return False
 
 
 def _get_hub():
@@ -220,7 +427,10 @@ def _create_live_auth(actor_id: str, tier: int) -> tuple[str, int]:
 def _revoke_existing_live_auths(actor_id: str) -> None:
     """
     Revoke all currently ACTIVE live-scoped authorizations before creating new one.
-    在創建新授權前撤銷所有當前有效的 live 授權。
+    Also deletes the signed LIVE-GATE-BINDING-1 authorization.json so Rust
+    refuses to keep the Live pipeline running past this revoke point.
+    在創建新授權前撤銷所有當前有效的 live 授權，並刪除簽名檔案讓 Rust 拒絕
+    繼續運行 Live 管線。
     """
     try:
         hub = _get_hub()
@@ -238,6 +448,12 @@ def _revoke_existing_live_auths(actor_id: str) -> None:
                 )
     except Exception as exc:
         logger.warning("Failed to revoke existing live auths: %s", exc)
+    # Always attempt to clear the signed authorization file even if SM-01
+    # revoke path errored — Rust's gate is the last line of defence and must
+    # not keep running on a stale on-disk record.
+    # 即使 SM-01 revoke 失敗也要嘗試刪除簽名檔案 — Rust gate 是最後防線，
+    # 不能留著陳舊 on-disk 記錄繼續跑。
+    _delete_live_authorization_file()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -394,6 +610,26 @@ def post_live_renew(
     # Notify trust engine / 通知信任引擎
     engine.on_auth_renewed(new_tier=final_tier, new_expires_ts_ms=expires_at_ms)
 
+    # LIVE-GATE-BINDING-1: sign + persist authorization.json so the Rust engine
+    # will (re-)spawn Live. Revoke already deleted any prior record. Failure
+    # here = fatal to the renew path because Rust will refuse Live without it.
+    # 簽名寫入 authorization.json，Rust 引擎才會 (re-)spawn Live。此步驟失敗 =
+    # 視同 renew 失敗，否則 operator 誤以為批准成功但 Rust 其實拒啟。
+    try:
+        _write_signed_live_authorization(
+            operator_id=actor_id,
+            tier=final_tier,
+            expires_at_ms=expires_at_ms,
+        )
+    except Exception as exc:
+        logger.error(
+            "live_trust_routes: failed to write signed authorization: %s", exc
+        )
+        raise HTTPException(
+            status_code=500,
+            detail=f"Signed authorization write failed: {exc}",
+        )
+
     # Re-grant execution authority in live_session_routes / 重新授予 execution_authority
     try:
         from .live_session_routes import _grant_execution_authority_internal
@@ -462,6 +698,24 @@ def post_live_renew_review(
             "notes": body.review_notes[:200],
         })
     engine.on_auth_renewed(new_tier=final_tier, new_expires_ts_ms=expires_at_ms)
+
+    # LIVE-GATE-BINDING-1: sign + persist authorization.json (same reasoning
+    # as the /renew endpoint — Rust engine refuses Live without it).
+    try:
+        _write_signed_live_authorization(
+            operator_id=actor_id,
+            tier=final_tier,
+            expires_at_ms=expires_at_ms,
+        )
+    except Exception as exc:
+        logger.error(
+            "live_trust_routes (renew-review): failed to write signed authorization: %s",
+            exc,
+        )
+        raise HTTPException(
+            status_code=500,
+            detail=f"Signed authorization write failed: {exc}",
+        )
 
     try:
         from .live_session_routes import _grant_execution_authority_internal

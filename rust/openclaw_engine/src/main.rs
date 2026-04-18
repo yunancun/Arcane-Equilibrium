@@ -12,15 +12,15 @@ mod startup;
 mod tasks;
 
 use openclaw_engine::account_manager::AccountManager;
-use openclaw_engine::bybit_rest_client::{live_bybit_environment, BybitEnvironment, BybitRestClient};
-use openclaw_engine::config::{
-    load_toml_or_default, ConfigManager, ConfigStore,
+use openclaw_engine::bybit_rest_client::{
+    live_bybit_environment, BybitEnvironment, BybitRestClient,
 };
+use openclaw_engine::config::{load_toml_or_default, ConfigManager, ConfigStore};
 use openclaw_engine::ipc_server::{IpcServer, PerEngineRiskStores};
 use openclaw_engine::market_data_client::MarketDataClient;
-use openclaw_engine::scanner::ScannerConfig;
 use openclaw_engine::scanner::registry::SymbolRegistry;
 use openclaw_engine::scanner::runner::ScannerRunner;
+use openclaw_engine::scanner::ScannerConfig;
 use openclaw_engine::tick_pipeline::{EngineEvent, PipelineHealth, PipelineKind};
 use openclaw_engine::ws_client::WsClient;
 use openclaw_types::PriceEvent;
@@ -261,7 +261,8 @@ async fn async_main(
         let base = std::env::var("OPENCLAW_BASE_DIR")
             .map(std::path::PathBuf::from)
             .unwrap_or_else(|_| std::path::PathBuf::from("."));
-        let estimates = openclaw_engine::edge_estimates::EdgeEstimates::load_from_env_or_default(&base);
+        let estimates =
+            openclaw_engine::edge_estimates::EdgeEstimates::load_from_env_or_default(&base);
         Arc::new(parking_lot::RwLock::new(estimates))
     };
 
@@ -307,13 +308,15 @@ async fn async_main(
         live_bybit_environment(),
         cancel.clone(),
         &cfg_snapshot_pipelines,
-    ).await;
+    )
+    .await;
     let demo_bindings = build_exchange_pipeline(
         PipelineKind::Demo,
         BybitEnvironment::Demo,
         cancel.clone(),
         &cfg_snapshot_pipelines,
-    ).await;
+    )
+    .await;
     drop(cfg_snapshot_pipelines);
 
     // Log pipeline availability / 記錄管線可用性
@@ -362,23 +365,18 @@ async fn async_main(
 
     let phase4_consumer_cmd_tx = paper_cmd_tx.clone();
 
-    let mut ipc_server = IpcServer::new(
-        Arc::clone(&config),
-        cancel.clone(),
-        ipc_data_dir,
-        {
-            use openclaw_engine::ipc_server::EngineCommandChannels;
-            let mut channels = EngineCommandChannels::default();
-            channels.paper = Some(paper_cmd_tx.clone());
-            if let Some(ref tx) = demo_cmd_tx {
-                channels.demo = Some(tx.clone());
-            }
-            if let Some(ref tx) = live_cmd_tx {
-                channels.live = Some(tx.clone());
-            }
-            channels
-        },
-    );
+    let mut ipc_server = IpcServer::new(Arc::clone(&config), cancel.clone(), ipc_data_dir, {
+        use openclaw_engine::ipc_server::EngineCommandChannels;
+        let mut channels = EngineCommandChannels::default();
+        channels.paper = Some(paper_cmd_tx.clone());
+        if let Some(ref tx) = demo_cmd_tx {
+            channels.demo = Some(tx.clone());
+        }
+        if let Some(ref tx) = live_cmd_tx {
+            channels.live = Some(tx.clone());
+        }
+        channels
+    });
     ipc_server.set_config_stores(
         risk_stores.clone(),
         Arc::clone(&learning_store),
@@ -407,7 +405,11 @@ async fn async_main(
     let shared_account_manager: Option<Arc<AccountManager>> = live_bindings
         .as_ref()
         .map(|b| Arc::clone(&b.account_manager))
-        .or_else(|| demo_bindings.as_ref().map(|b| Arc::clone(&b.account_manager)));
+        .or_else(|| {
+            demo_bindings
+                .as_ref()
+                .map(|b| Arc::clone(&b.account_manager))
+        });
 
     let mut shared_instruments: Option<Arc<openclaw_engine::instrument_info::InstrumentInfoCache>> =
         None;
@@ -510,13 +512,21 @@ async fn async_main(
                 let topics: Vec<String> = if supervisor_attempt == 0 {
                     initial_topics.clone()
                 } else if extended_ws {
-                    registry_for_supervisor.snapshot().into_iter().flat_map(|sym| {
-                        openclaw_engine::multi_interval_ws::full_subscription_list(&sym)
-                    }).collect()
+                    registry_for_supervisor
+                        .snapshot()
+                        .into_iter()
+                        .flat_map(|sym| {
+                            openclaw_engine::multi_interval_ws::full_subscription_list(&sym)
+                        })
+                        .collect()
                 } else {
-                    registry_for_supervisor.snapshot().into_iter().flat_map(|sym| {
-                        vec![format!("kline.1.{sym}"), format!("publicTrade.{sym}")]
-                    }).collect()
+                    registry_for_supervisor
+                        .snapshot()
+                        .into_iter()
+                        .flat_map(|sym| {
+                            vec![format!("kline.1.{sym}"), format!("publicTrade.{sym}")]
+                        })
+                        .collect()
                 };
 
                 let mut ws_client =
@@ -570,21 +580,16 @@ async fn async_main(
     // ------------------------------------------------------------------
     // Phase 4: LinUCB runtime + news context snapshot + governance wrappers
     // ------------------------------------------------------------------
-    let shared_linucb_runtime = Arc::new(
-        openclaw_engine::linucb::LinUcbRuntime::cold_start_v1_15(),
-    );
+    let shared_linucb_runtime =
+        Arc::new(openclaw_engine::linucb::LinUcbRuntime::cold_start_v1_15());
     info!(
         active_version = shared_linucb_runtime.arm_space_version(),
         feature_schema_hash = shared_linucb_runtime.feature_schema_hash(),
         "LinUcbRuntime cold-started / LinUCB runtime 冷啟動"
     );
 
-    let shared_news_snapshot = Arc::new(
-        openclaw_engine::news::NewsContextSnapshot::new(),
-    );
-    info!(
-        "NewsContextSnapshot constructed (default severity 0.0) / 新聞 context 快照已建立"
-    );
+    let shared_news_snapshot = Arc::new(openclaw_engine::news::NewsContextSnapshot::new());
+    info!("NewsContextSnapshot constructed (default severity 0.0) / 新聞 context 快照已建立");
 
     let governance_wrapper = Arc::new(
         openclaw_engine::claude_teacher::GovernanceCoreWrapper::with_defaults(vec![
@@ -596,12 +601,10 @@ async fn async_main(
         ]),
     );
     let shared_halted_handle = governance_wrapper.halted_handle();
-    let guardian_impl = Arc::new(
-        openclaw_engine::news::GuardianHaltCheckImpl::new(Arc::clone(&shared_halted_handle)),
-    );
-    info!(
-        "Phase 4 governance+guardian wrappers constructed / W-1/W-2 wrappers 已構造"
-    );
+    let guardian_impl = Arc::new(openclaw_engine::news::GuardianHaltCheckImpl::new(
+        Arc::clone(&shared_halted_handle),
+    ));
+    info!("Phase 4 governance+guardian wrappers constructed / W-1/W-2 wrappers 已構造");
 
     // Phase 4.1: Spawn TeacherConsumerLoop (DEFAULT-OFF)
     tasks::spawn_teacher_consumer_loop(
@@ -610,7 +613,8 @@ async fn async_main(
         teacher_loop_slot,
         phase4_consumer_cmd_tx,
         &governance_wrapper,
-    ).await;
+    )
+    .await;
     let _phase4_governance_wrapper = governance_wrapper;
 
     // A2: NewsPipeline 60s scheduler
@@ -710,7 +714,9 @@ async fn async_main(
         }
     }
     if live_bindings.is_none() && demo_bindings.is_none() {
-        info!("position_reconciler skipped (no exchange pipelines) / 持倉對帳器跳過（無交易所管線）");
+        info!(
+            "position_reconciler skipped (no exchange pipelines) / 持倉對帳器跳過（無交易所管線）"
+        );
     }
 
     // ------------------------------------------------------------------
@@ -727,12 +733,14 @@ async fn async_main(
     // ------------------------------------------------------------------
     {
         let ai_client = Arc::new(openclaw_engine::ai_service_client::AiServiceClient::new());
-        let scheduler = Arc::new(openclaw_engine::strategist_scheduler::StrategistScheduler::new(
-            ai_client,
-            paper_cmd_tx.clone(),
-            Arc::clone(&db_pool),
-            cancel.clone(),
-        ));
+        let scheduler = Arc::new(
+            openclaw_engine::strategist_scheduler::StrategistScheduler::new(
+                ai_client,
+                paper_cmd_tx.clone(),
+                Arc::clone(&db_pool),
+                cancel.clone(),
+            ),
+        );
         tokio::spawn(scheduler.run_forever());
         info!("StrategistScheduler spawned (5-min cycle) / 策略師排程器已啟動");
     }
@@ -764,9 +772,8 @@ async fn async_main(
     // actually swapped in via `PipelineCommand::SetEdgePredictorShadow`.
     // EDGE-P3-1 Phase B #1：逐引擎 EdgePredictorStore 容器（paper/demo/live 三槽）。
     // 每條管線領一個 Arc 槽，ML-MIT 熱換 paper 模型不影響 demo/live。
-    let per_engine_predictors = std::sync::Arc::new(
-        openclaw_engine::edge_predictor::PerEnginePredictors::new(),
-    );
+    let per_engine_predictors =
+        std::sync::Arc::new(openclaw_engine::edge_predictor::PerEnginePredictors::new());
 
     // is_primary priority: Live > Demo > Paper
     let has_live = live_bindings.is_some();
@@ -785,8 +792,16 @@ async fn async_main(
     // 事故證實 512 vs 1024 在長時間壓力下都會丟（那是 consumer 端的同步 I/O 卡住），
     // 但 1024 在短尖峰下能乾淨吸收，避免策略消費到 ~500 個陳舊的 tick。
     let (paper_event_tx, paper_event_rx) = mpsc::channel::<Arc<PriceEvent>>(1024);
-    let demo_event_channel = if has_demo { Some(mpsc::channel::<Arc<PriceEvent>>(1024)) } else { None };
-    let live_event_channel = if has_live { Some(mpsc::channel::<Arc<PriceEvent>>(1024)) } else { None };
+    let demo_event_channel = if has_demo {
+        Some(mpsc::channel::<Arc<PriceEvent>>(1024))
+    } else {
+        None
+    };
+    let live_event_channel = if has_live {
+        Some(mpsc::channel::<Arc<PriceEvent>>(1024))
+    } else {
+        None
+    };
 
     // MAJOR-2: Ready barriers — tx goes to pipeline deps, rx goes to fan-out.
     let (paper_ready_tx, paper_ready_rx) = tokio::sync::oneshot::channel::<()>();
@@ -810,7 +825,9 @@ async fn async_main(
     let (cross_engine_tx, _) = tokio::sync::broadcast::channel::<EngineEvent>(16);
 
     // Paper pipeline health atomic.
-    let paper_health = Arc::new(std::sync::atomic::AtomicU8::new(PipelineHealth::Running as u8));
+    let paper_health = Arc::new(std::sync::atomic::AtomicU8::new(
+        PipelineHealth::Running as u8,
+    ));
     let paper_risk_level = Arc::new(std::sync::atomic::AtomicU8::new(
         openclaw_core::sm::risk_gov::RiskLevel::Normal.value(),
     ));
@@ -832,7 +849,8 @@ async fn async_main(
                 if let Some(rx) = live_ready_rx {
                     let _ = rx.await;
                 }
-            }).await;
+            })
+            .await;
 
             if barrier_result.is_err() {
                 tracing::error!(
@@ -921,8 +939,8 @@ async fn async_main(
         //   * paper_state.json — raw PaperState 形狀，附 disabled=true
         //   * pipeline_snapshot_paper.json — 包 paper_state，GUI 實際讀的檔
         {
-            let data_dir = std::env::var("OPENCLAW_DATA_DIR")
-                .unwrap_or_else(|_| "/tmp/openclaw".to_string());
+            let data_dir =
+                std::env::var("OPENCLAW_DATA_DIR").unwrap_or_else(|_| "/tmp/openclaw".to_string());
             let ts_ms = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|d| d.as_millis() as u64)
@@ -962,7 +980,9 @@ async fn async_main(
                             warn!(path = ?path, error = %e, "failed to write paper disabled marker / 寫入 paper 禁用標記失敗");
                         }
                     }
-                    Err(e) => warn!(file = %filename, error = %e, "failed to serialize paper disabled marker / 序列化禁用標記失敗"),
+                    Err(e) => {
+                        warn!(file = %filename, error = %e, "failed to serialize paper disabled marker / 序列化禁用標記失敗")
+                    }
                 }
             };
             write_marker("paper_state.json", &paper_state_marker);
@@ -999,7 +1019,9 @@ async fn async_main(
             cancel: cancel.clone(),
             initial_balance: paper_balance,
             paper_initial_balance: None,
-            taker_fee_rate: live_bindings.as_ref().and_then(|b| b.taker_fee)
+            taker_fee_rate: live_bindings
+                .as_ref()
+                .and_then(|b| b.taker_fee)
                 .or_else(|| demo_bindings.as_ref().and_then(|b| b.taker_fee)),
             instruments: shared_instruments.clone(),
             bootstrap_client: shared_client.clone(), // Paper uses shared REST for kline bootstrap
@@ -1142,7 +1164,9 @@ async fn async_main(
     // Spawn Live pipeline (conditional — D17: dedicated OS thread + catch_unwind)
     // 啟動 Live 管線（條件性 — D17：獨立 OS 線程 + catch_unwind）
     // ------------------------------------------------------------------
-    let live_thread_handle: Option<std::thread::JoinHandle<()>> = if let Some(live_b) = live_bindings {
+    let live_thread_handle: Option<std::thread::JoinHandle<()>> = if let Some(live_b) =
+        live_bindings
+    {
         let (_, live_event_rx) = live_event_channel.expect("live channel must exist");
         // B-1 Phase 2: capture seed_positions before move into deps below.
         // B-1 Phase 2：在 live_b 被 move 進 deps 之前先取出 seed_positions。
@@ -1281,6 +1305,78 @@ async fn async_main(
         ),
         "engine started / 引擎已啟動"
     );
+
+    // ------------------------------------------------------------------
+    // LIVE-GATE-BINDING-1 (2026-04-18): periodic re-verify ticker.
+    // 定期重驗 Earned-Trust 授權（每 5 min）。
+    // ------------------------------------------------------------------
+    // EN: Live pipeline spawn-time gate is necessary but not sufficient — an
+    //   operator must also be able to revoke or let-expire a Live session
+    //   mid-flight. This task re-reads authorization.json every 300s and
+    //   cancels the engine if the record is now invalid (expired / missing /
+    //   tampered / env revoked). We cancel the WHOLE engine (not just Live)
+    //   because Fix 3 (2026-04-14) established the crash-only parity rule:
+    //   if Live cannot trade, demo/paper must not keep pretending to learn
+    //   against stale state.
+    // 中: Spawn 時 gate 必要但不充分 — operator 須能中途 revoke 或等過期。
+    //   本任務每 300s 重讀 authorization.json，若記錄失效（過期/遺失/竄改/
+    //   env revoke）則取消整個引擎。沿用 Fix 3 的 crash-only 對齊規則：
+    //   Live 不能交易，paper/demo 也不應在陳舊狀態上假裝學習。
+    if has_live {
+        use openclaw_engine::bybit_rest_client::live_bybit_environment;
+        use openclaw_engine::live_authorization::{auth_error_kind, load_and_verify};
+        const AUTH_REVERIFY_INTERVAL_SECS: u64 = 300;
+        let auth_cancel = cancel.clone();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(
+                AUTH_REVERIFY_INTERVAL_SECS,
+            ));
+            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            // Consume immediate first tick — spawn-time gate already verified.
+            interval.tick().await;
+            loop {
+                tokio::select! {
+                    _ = auth_cancel.cancelled() => {
+                        tracing::info!(
+                            "live authorization re-verify ticker stopped (cancel) \
+                             / live 授權重驗 ticker 已停止"
+                        );
+                        break;
+                    }
+                    _ = interval.tick() => {
+                        let env = live_bybit_environment();
+                        match load_and_verify(env) {
+                            Ok(auth) => {
+                                tracing::debug!(
+                                    tier = %auth.tier,
+                                    operator_id = %auth.operator_id,
+                                    expires_at_ms = auth.expires_at_ms,
+                                    "live authorization re-verify OK / 授權重驗通過"
+                                );
+                            }
+                            Err(e) => {
+                                tracing::error!(
+                                    env = ?env,
+                                    error_kind = auth_error_kind(&e),
+                                    error = %e,
+                                    "LIVE AUTHORIZATION INVALIDATED MID-SESSION — \
+                                     cancelling engine (crash-only parity). \
+                                     Operator: renew via /api/v1/live/auth/renew \
+                                     then restart. / Live 授權中途失效 — 取消引擎。"
+                                );
+                                auth_cancel.cancel();
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        });
+        info!(
+            interval_secs = AUTH_REVERIFY_INTERVAL_SECS,
+            "live authorization re-verify ticker spawned / live 授權重驗 ticker 已啟動"
+        );
+    }
 
     // ------------------------------------------------------------------
     // Fix 4 (2026-04-14): WS tick-stale watchdog

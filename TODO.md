@@ -117,7 +117,38 @@ v2 n=13 partial 提前結案，net −$2.90 / −36.76 bps / 0 勝率、13/13 ex
 ### P0-9 · STABILITY-1 ✅ 2026-04-16（已歸檔）
 RCA 完成：30 次 crash 全為單次停電 infra 事件，非 code bug；21d 時鐘不重置。詳見歸檔 `docs/archive/2026-04-17--completed_todo_p0_scanner_phantom_live_guard.md` §P0-9。
 
-**關鍵路徑**:`~~P0-0 reconciler burst fix~~ ✅ → ~~restart_all --rebuild 部署~~ ✅ → ~~P0-9 STABILITY-1 引擎崩潰 RCA~~ ✅（停電 infra 事件，非 code bug）→ P0-6/P0-7 查清 intent/order 寫入斷點 → P0-3 Phase 5 edge 2w 評估 + P0-2 LG-1 21d demo → **P1-7 LEARNING-PIPELINE-DORMANT-1** → LG-4/5 → Live`(P0-1 G-2 並行驗證 funding_arb 子集,不在主路徑;~~P0-5 PHANTOM-2-FUP~~ ✅ 待 `--rebuild` 部署即生效;~~P0-8 LIVE-GUARD-1~~ ✅ Rust 端 Mainnet 三重硬鎖回補,解除 CLAUDE.md §三 LIVE-GUARD-1 P0-CRITICAL 阻塞)
+### P0-11 · LIVE-GATE-BINDING-1 — Python Earned-Trust ↔ Rust 授權綁定 ✅ 2026-04-18
+**根因**：LIVE-GUARD-1 補完三重 Mainnet 硬鎖後，**LiveDemo 路徑仍可在 Operator 未 renew / approve 的情況下由 Rust 自拉**。Python 側 Earned-Trust / TTL / SM-01 對 Rust `build_exchange_pipeline()` 無任何執行性約束 — Rust 只認 slot 憑證。Operator 明確指示：LiveDemo 雖跑 `api-demo.bybit.com`，**不可因 endpoint 差異降級任何 live-level 門控**，否則 LiveDemo 就失去「驗證 Live 可靠」的價值。
+
+**修復**：在 Python ↔ Rust 之間架 HMAC-SHA256 signed `authorization.json` 契約：
+- **Rust 新模組** `rust/openclaw_engine/src/live_authorization.rs`：canonical payload（`version|tier|issued|expires|op|env_sorted_csv`）+ `verify_in_memory()` + `load_and_verify()` + `auth_error_kind()` telemetry label
+- **Rust 啟動驗簽** `startup.rs::build_exchange_pipeline` — Live pipeline 在讀 Bybit client 前先 `load_and_verify(env)`；失敗即 `return None`（不 spawn）
+- **Rust mid-session re-verify** `main.rs` — 引擎 started 後 spawn 5 min interval 任務，失效即 `cancel_token.cancel()` 優雅停機
+- **Python 寫入** `live_trust_routes.py` — `_canonical_authorization_payload()` + `_sign_authorization_payload()` + `_atomic_write_json()`（tmpfile + 0o600 + `os.replace`）+ `_write_signed_live_authorization()` hook 到 `POST /api/v1/live/auth/renew` 與 `/renew/review` 成功路徑；失敗 `HTTPException(500)` 不謊報
+- **Python 撤銷** `_delete_live_authorization_file()` 掛在 `_revoke_existing_live_auths()` 結尾 — Rust 下個 5 min re-verify 即 fail-closed shutdown
+- **Fail-safe**：`OPENCLAW_IPC_SECRET` 不存在 → Python raise（絕不 silent 寫未簽檔）；`bybit_endpoint` 檔案缺失 → `env_allowed=["mainnet"]`（不偷偷放水 live_demo）
+
+**測試**：
+- Rust `cargo test -p openclaw_engine --lib live_authorization` **15/15** — canonical sort/dedup / 合法 live_demo+mainnet / EnvNotAllowed / Expired（`==` 邊界拒）/ 竄改 tier/env/expiry / 錯 secret / UnsupportedVersion（驗簽前擋）/ UnsupportedEnv(Demo/Testnet) / load_and_verify env override / auth_error_kind label 穩定
+- Rust engine lib 全量 **1452 passed / 0 failed**
+- Python `tests/test_live_authorization_signing.py` **10/10** — canonical byte-for-byte / sort+dedup / 手算 HMAC / 端到端寫檔 0o600 / 缺 IPC_SECRET raise + 不寫檔 / mainnet vs demo env_allowed / 缺 endpoint → mainnet / delete 冪等 / 模擬 crash 不留半成品 / TrustTier 全覆蓋
+
+**效果**：真實 Live 門控 Rust 可驗證 **3→4 項**（見 CLAUDE.md §四 Gate #5），全部 5 項：
+1. Python `live_reserved` global mode（Python）
+2. Operator 角色 auth（Python）
+3. `OPENCLAW_ALLOW_MAINNET=1`（Rust，LIVE-GUARD-1，僅 Mainnet）
+4. secret slot 憑證非空（Rust，LIVE-GUARD-1）
+5. **`authorization.json` 簽名有效+未過期+env 匹配（Rust，LIVE-GATE-BINDING-1，LiveDemo+Mainnet 等同）**
+
+**部署**：`helper_scripts/restart_all.sh --rebuild`（Rust binary 變更）→ Operator 於 GUI renew/approve → Live pipeline 下次重啟或 config reload 才通過驗簽。
+
+**工程日誌**：`docs/worklogs/2026-04-18--live_gate_binding_1_implementation.md`
+
+**已知限制**：
+- Revoke 生效最壞 5 min 延遲（Mainnet 上線前可降到 60s，改 `main.rs::AUTH_REVERIFY_INTERVAL_SECS`）
+- LiveDemo 與 Mainnet 共用 `live/` slot（operator 切換 `bybit_endpoint` 檔時若 authorization.json 的 env_allowed 不匹配 → `EnvNotAllowed` 拒 spawn，符合 fail-safe）
+
+**關鍵路徑**:`~~P0-0 reconciler burst fix~~ ✅ → ~~restart_all --rebuild 部署~~ ✅ → ~~P0-9 STABILITY-1 引擎崩潰 RCA~~ ✅（停電 infra 事件，非 code bug）→ ~~P0-11 LIVE-GATE-BINDING-1~~ ✅（2026-04-18，Python↔Rust 授權綁定）→ P0-6/P0-7 查清 intent/order 寫入斷點 → P0-3 Phase 5 edge 2w 評估 + P0-2 LG-1 21d demo → **P1-7 LEARNING-PIPELINE-DORMANT-1** → LG-4/5 → Live`(P0-1 G-2 並行驗證 funding_arb 子集,不在主路徑;~~P0-5 PHANTOM-2-FUP~~ ✅ 待 `--rebuild` 部署即生效;~~P0-8 LIVE-GUARD-1~~ ✅ Rust 端 Mainnet 三重硬鎖回補)
 **最早 Live 日期**:回到 **W24 末（～2026-05-23）** — P0-9 停電事件 RCA 後不延後
 
 ---
