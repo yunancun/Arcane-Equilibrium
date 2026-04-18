@@ -486,6 +486,28 @@ pub struct BbBreakoutParams {
     /// QC-H4：出場信心基礎值。各出場原因加減偏移。
     #[serde(default = "default_exit_conf_base_bbb")]
     pub exit_conf_base: f64,
+    // ── E5-P2-4: Hurst boost + per-reason exit confidence offsets (config-driven) ──
+    // ── E5-P2-4：Hurst 加成 + 各出場原因的信心偏移（改由 config 控制） ──
+    /// Hurst trending regime entry confidence boost (default 0.1).
+    /// Hurst 趨勢狀態入場信心加成（默認 0.1）。
+    #[serde(default = "default_bbb_hurst_regime_boost")]
+    pub hurst_regime_boost: f64,
+    /// Exit confidence bonus when trailing stop triggers (default 0.2).
+    /// 追蹤止損觸發時的出場信心加成（默認 0.2）。
+    #[serde(default = "default_bbb_exit_bonus_trailing_stop")]
+    pub exit_bonus_trailing_stop: f64,
+    /// Exit confidence bonus when Hurst regime shifts (default 0.1).
+    /// Hurst regime 轉向時的出場信心加成（默認 0.1）。
+    #[serde(default = "default_bbb_exit_bonus_regime_shift")]
+    pub exit_bonus_regime_shift: f64,
+    /// Exit confidence bonus when %B reverts to middle band (default 0.05).
+    /// %B 回到中軌時的出場信心加成（默認 0.05）。
+    #[serde(default = "default_bbb_exit_bonus_pctb_revert")]
+    pub exit_bonus_pctb_revert: f64,
+    /// Exit confidence penalty (magnitude) when BW re-squeezes (default 0.05).
+    /// 帶寬再壓縮時的出場信心扣減幅度（默認 0.05）。
+    #[serde(default = "default_bbb_exit_penalty_bw_squeeze")]
+    pub exit_penalty_bw_squeeze: f64,
     // ── G-SR-1 A0-c: Confluence TOML fields (breakout profile) ──
     #[serde(default = "default_min_persistence_ms_breakout")]
     pub min_persistence_ms: u64,
@@ -520,6 +542,24 @@ fn default_exit_conf_base_bbb() -> f64 {
     0.5
 }
 
+// E5-P2-4: BB Breakout config-driven confidence offsets (extracted from code magic numbers).
+// E5-P2-4：BB Breakout config 驅動的信心偏移（從 code 裡的魔術數字提升為 config）。
+fn default_bbb_hurst_regime_boost() -> f64 {
+    0.1
+}
+fn default_bbb_exit_bonus_trailing_stop() -> f64 {
+    0.2
+}
+fn default_bbb_exit_bonus_regime_shift() -> f64 {
+    0.1
+}
+fn default_bbb_exit_bonus_pctb_revert() -> f64 {
+    0.05
+}
+fn default_bbb_exit_penalty_bw_squeeze() -> f64 {
+    0.05
+}
+
 impl BbBreakoutParams {
     /// Build ConfluenceConfig from TOML params (breakout profile: qty modifier, not gate).
     /// 從 TOML 參數構建 ConfluenceConfig（突破配置：倉位修正器，非門檻）。
@@ -552,6 +592,13 @@ impl Default for BbBreakoutParams {
             squeeze_expiry_ms: 1_800_000,
             entry_conf_base: 0.7,
             exit_conf_base: 0.5,
+            // E5-P2-4: defaults match pre-extraction hard-coded values.
+            // E5-P2-4：默認值與原先硬編碼數值一致。
+            hurst_regime_boost: 0.1,
+            exit_bonus_trailing_stop: 0.2,
+            exit_bonus_regime_shift: 0.1,
+            exit_bonus_pctb_revert: 0.05,
+            exit_penalty_bw_squeeze: 0.05,
             min_persistence_ms: 60_000,
             min_notional_usd: 10.0,
             weight_adx: 25.0,
@@ -572,6 +619,15 @@ impl Default for BbBreakoutParams {
 pub struct GridTradingParams {
     #[serde(default = "default_true")]
     pub active: bool,
+    /// E5-P2-4: Per-symbol cooldown between grid triggers (ms). Default 60_000 (= 60s).
+    /// Previously unreachable from TOML — runtime value locked to the
+    /// `new_adaptive_with_mode` constructor literal. Now config-driven and
+    /// hot-reloadable via the factory.
+    /// E5-P2-4：每 symbol 網格觸發冷卻（ms，默認 60_000 = 60 秒）。
+    /// 原本無法由 TOML 觸及（運行時鎖死在 `new_adaptive_with_mode` constructor literal），
+    /// 現改由 config 控制並透過工廠支援熱重載。
+    #[serde(default = "default_grid_cooldown_ms")]
+    pub cooldown_ms: u64,
     /// Grid count per symbol. Wired to GridTrading.grid_count via factory (RG-3 fix).
     /// 每幣種網格數量。通過工廠函數接線到 GridTrading.grid_count（RG-3 修復）。
     #[serde(default = "default_grid_levels")]
@@ -628,6 +684,9 @@ impl Default for GridTradingParams {
     fn default() -> Self {
         Self {
             active: true,
+            // E5-P2-4: matches new_adaptive_with_mode constructor literal.
+            // E5-P2-4：與 new_adaptive_with_mode constructor literal 一致。
+            cooldown_ms: 60_000,
             grid_levels: 10,
             spacing_mode: "linear".into(),
             health_check_interval: 200,
@@ -772,6 +831,13 @@ fn default_health_check_interval() -> u64 {
 fn default_max_out_of_range() -> u64 {
     50
 }
+// E5-P2-4: GridTrading cooldown_ms default — matches `new_adaptive_with_mode`
+// constructor literal to preserve bit-exact behaviour when TOML omits the field.
+// E5-P2-4：GridTrading cooldown_ms 默認值與 `new_adaptive_with_mode` constructor
+// literal 一致，確保 TOML 未指定時行為 bit-exact。
+fn default_grid_cooldown_ms() -> u64 {
+    60_000
+}
 
 /// Resolve settings directory: `OPENCLAW_BASE_DIR/settings` or `./settings`.
 /// 解析設定目錄：`OPENCLAW_BASE_DIR/settings` 或 `./settings`。
@@ -901,6 +967,13 @@ impl StrategyFactory {
         bbb.squeeze_expiry_ms = p.bb_breakout.squeeze_expiry_ms;
         bbb.entry_conf_base = p.bb_breakout.entry_conf_base;
         bbb.exit_conf_base = p.bb_breakout.exit_conf_base;
+        // E5-P2-4: wire new config-driven confidence offsets from TOML.
+        // E5-P2-4：從 TOML 接線新增的 config 驅動信心偏移參數。
+        bbb.hurst_regime_boost = p.bb_breakout.hurst_regime_boost;
+        bbb.exit_bonus_trailing_stop = p.bb_breakout.exit_bonus_trailing_stop;
+        bbb.exit_bonus_regime_shift = p.bb_breakout.exit_bonus_regime_shift;
+        bbb.exit_bonus_pctb_revert = p.bb_breakout.exit_bonus_pctb_revert;
+        bbb.exit_penalty_bw_squeeze = p.bb_breakout.exit_penalty_bw_squeeze;
         // G-SR-1 A0-c: Wire confluence params from TOML.
         bbb.min_persistence_ms = p.bb_breakout.min_persistence_ms;
         bbb.min_notional_usd = p.bb_breakout.min_notional_usd;
@@ -915,6 +988,9 @@ impl StrategyFactory {
             _ => grid_helpers::GridSpacingMode::Linear,
         };
         let mut gt = grid_trading::GridTrading::new_adaptive_with_mode(spacing);
+        // E5-P2-4: grid cooldown_ms now reachable from TOML (was unreachable before).
+        // E5-P2-4：grid cooldown_ms 現可由 TOML 控制（原本 unreachable）。
+        gt.cooldown_ms = p.grid_trading.cooldown_ms;
         gt.health_check_interval = p.grid_trading.health_check_interval as usize;
         gt.max_out_of_range = p.grid_trading.max_out_of_range as usize;
         gt.grid_count = p.grid_trading.grid_levels; // RG-3: wire TOML grid_levels → runtime grid_count
@@ -1218,5 +1294,149 @@ grid_levels = 20
             .find(|s| s.name() == "ma_crossover")
             .unwrap();
         assert!((mac.conf_scale() - 0.5).abs() < 1e-10);
+    }
+
+    // ── E5-P2-4: TOML default defaults must match pre-extraction hard-coded values ──
+    // ── E5-P2-4：TOML Default 需與原 hard-coded 值一致（bit-exact） ──
+
+    #[test]
+    fn test_e5_p2_4_bbb_toml_defaults_bit_exact() {
+        // `strategies::BbBreakoutParams::default()` feeds factory → runtime when
+        // TOML omits the fields. Must be byte-identical to previous hard-coded
+        // literals so deployment without TOML changes is a no-op.
+        // `strategies::BbBreakoutParams::default()` 是 TOML 缺欄位時的回退來源，
+        // 需與原硬編碼數值位元相等，以保證不改 TOML 部署時行為零差異。
+        let p = BbBreakoutParams::default();
+        assert!(
+            (p.hurst_regime_boost - 0.1).abs() < f64::EPSILON,
+            "TOML default hurst_regime_boost must be 0.1"
+        );
+        assert!(
+            (p.exit_bonus_trailing_stop - 0.2).abs() < f64::EPSILON,
+            "TOML default exit_bonus_trailing_stop must be 0.2"
+        );
+        assert!(
+            (p.exit_bonus_regime_shift - 0.1).abs() < f64::EPSILON,
+            "TOML default exit_bonus_regime_shift must be 0.1"
+        );
+        assert!(
+            (p.exit_bonus_pctb_revert - 0.05).abs() < f64::EPSILON,
+            "TOML default exit_bonus_pctb_revert must be 0.05"
+        );
+        assert!(
+            (p.exit_penalty_bw_squeeze - 0.05).abs() < f64::EPSILON,
+            "TOML default exit_penalty_bw_squeeze must be 0.05"
+        );
+    }
+
+    #[test]
+    fn test_e5_p2_4_bbb_toml_omitted_fields_fall_back_to_defaults() {
+        // Writing a minimal TOML (only confluence bits) must leave the new
+        // config-driven offsets at their hard-coded defaults.
+        // 只寫入最小 TOML 時，新增的 config 欄位需回退到預設（bit-exact）。
+        let td = tempfile::tempdir().unwrap();
+        let toml_content = r#"
+[bb_breakout]
+squeeze_bw = 0.03
+"#;
+        std::fs::write(
+            td.path().join("strategy_params_paper.toml"),
+            toml_content,
+        )
+        .unwrap();
+        let cfg = load_strategy_params_from(PipelineKind::Paper, td.path());
+        assert!((cfg.bb_breakout.squeeze_bw - 0.03).abs() < f64::EPSILON);
+        assert!(
+            (cfg.bb_breakout.hurst_regime_boost - 0.1).abs() < f64::EPSILON,
+            "omitted TOML → default 0.1"
+        );
+        assert!(
+            (cfg.bb_breakout.exit_bonus_trailing_stop - 0.2).abs() < f64::EPSILON,
+            "omitted TOML → default 0.2"
+        );
+    }
+
+    #[test]
+    fn test_e5_p2_4_factory_wires_bbb_new_fields() {
+        // Non-default TOML values must reach the live BbBreakout runtime via factory.
+        // TOML 指定的非預設值需經工廠傳遞到運行時 BbBreakout。
+        let mut p = StrategyParamsConfig::default();
+        p.bb_breakout.hurst_regime_boost = 0.22;
+        p.bb_breakout.exit_bonus_trailing_stop = 0.33;
+        p.bb_breakout.exit_bonus_regime_shift = 0.11;
+        p.bb_breakout.exit_bonus_pctb_revert = 0.09;
+        p.bb_breakout.exit_penalty_bw_squeeze = 0.06;
+        let strategies = StrategyFactory::create_with_params(&p);
+        let bbb_any = strategies
+            .iter()
+            .find(|s| s.name() == "bb_breakout")
+            .expect("bb_breakout strategy created");
+        // Re-serialize via get_params_json for a type-erased runtime assertion.
+        // 由於 trait object 無法 downcast，改用 get_params_json 做型別無關驗證。
+        let json = bbb_any.get_params_json();
+        assert!(
+            json.contains("\"hurst_regime_boost\":0.22"),
+            "factory must wire hurst_regime_boost=0.22 into runtime, got {json}"
+        );
+        assert!(
+            json.contains("\"exit_bonus_trailing_stop\":0.33"),
+            "factory must wire exit_bonus_trailing_stop=0.33 into runtime, got {json}"
+        );
+        assert!(
+            json.contains("\"exit_bonus_regime_shift\":0.11"),
+            "factory must wire exit_bonus_regime_shift=0.11 into runtime, got {json}"
+        );
+        assert!(
+            json.contains("\"exit_bonus_pctb_revert\":0.09"),
+            "factory must wire exit_bonus_pctb_revert=0.09 into runtime, got {json}"
+        );
+        assert!(
+            json.contains("\"exit_penalty_bw_squeeze\":0.06"),
+            "factory must wire exit_penalty_bw_squeeze=0.06 into runtime, got {json}"
+        );
+    }
+
+    #[test]
+    fn test_e5_p2_4_grid_cooldown_toml_default_bit_exact() {
+        // Default must match the `new_adaptive_with_mode` constructor literal
+        // (60_000 ms) so the factory — now wiring cooldown_ms from TOML — does
+        // not change behaviour for any existing deployment that omits the field.
+        // 默認值需與 `new_adaptive_with_mode` constructor literal（60_000 ms）一致，
+        // 使工廠新增的 TOML wiring 在未設 cooldown_ms 的部署下行為不變。
+        let p = GridTradingParams::default();
+        assert_eq!(
+            p.cooldown_ms, 60_000,
+            "grid_trading.cooldown_ms TOML default must equal constructor literal 60_000"
+        );
+    }
+
+    #[test]
+    fn test_e5_p2_4_grid_cooldown_factory_wires_value() {
+        // Factory must propagate TOML cooldown_ms to the runtime grid strategy.
+        // Previously this field was unreachable from TOML; now covered.
+        // 工廠需將 TOML cooldown_ms 傳遞到 grid 策略運行時；原本 TOML 無法觸及，現已補齊。
+        let mut p = StrategyParamsConfig::default();
+        p.grid_trading.cooldown_ms = 123_456;
+        let strategies = StrategyFactory::create_with_params(&p);
+        let gt_any = strategies
+            .iter()
+            .find(|s| s.name() == "grid_trading")
+            .expect("grid_trading strategy created");
+        let json = gt_any.get_params_json();
+        assert!(
+            json.contains("\"cooldown_ms\":123456"),
+            "factory must wire cooldown_ms=123456 into runtime grid strategy, got {json}"
+        );
+    }
+
+    #[test]
+    fn test_e5_p2_4_grid_cooldown_toml_roundtrip() {
+        // TOML round-trip must preserve the new cooldown_ms value.
+        // TOML 序列化往返需保留新的 cooldown_ms 值。
+        let mut cfg = StrategyParamsConfig::default();
+        cfg.grid_trading.cooldown_ms = 90_000;
+        let toml_str = toml::to_string(&cfg).expect("serialize to TOML");
+        let de: StrategyParamsConfig = toml::from_str(&toml_str).expect("deserialize from TOML");
+        assert_eq!(de.grid_trading.cooldown_ms, 90_000);
     }
 }
