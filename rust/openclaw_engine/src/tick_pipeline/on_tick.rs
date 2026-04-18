@@ -21,6 +21,16 @@ impl TickPipeline {
         // ARCH-RC1 1C-2-B：熱重載檢查 — RiskConfig store 版本有變即同步。
         self.sync_risk_config_if_changed();
 
+        // DYNAMIC-RISK-1: throttled Sharpe-aware sizer tick. Internally rate-limited
+        // by `update_interval_ms` and `min_trades`, so safe to call on every tick.
+        // When it publishes a new pct, push into IntentProcessor. Disabled in TOML
+        // → short-circuits inside `maybe_update` (returns None), effectively free.
+        // DYNAMIC-RISK-1：節流化 Sharpe 調整器，內部限頻安全逐 tick 呼叫。
+        // 停用時 `maybe_update` 直接 None，近乎零成本。
+        if let Some(new_pct) = self.dynamic_risk_sizer.maybe_update(event.ts_ms) {
+            self.intent_processor.set_p1_risk_pct(new_pct);
+        }
+
         self.stats.total_ticks += 1;
         self.stats.last_tick_ms = event.ts_ms;
         // PNL-3: Stamp boot timestamp on first tick (used for cooldown gate below).
@@ -813,21 +823,6 @@ impl TickPipeline {
                         persist_verdict(&self.trading_tx, em, &intent.symbol, event.ts_ms, vi, em);
                     }
 
-                    // P0-6 DIAG: surface post-Guardian rejection reason (normally silent).
-                    // Remove after root-cause confirmed.
-                    if !gate.approved {
-                        if let Some(ref reason) = gate.rejected_reason {
-                            static DIAG_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-                            let c = DIAG_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                            if c < 50 || c % 10000 == 0 {
-                                tracing::warn!(
-                                    em, symbol = %intent.symbol, strategy = %intent.strategy,
-                                    "P0-6 DIAG exchange gate rejected: {reason}"
-                                );
-                            }
-                        }
-                    }
-
                     if gate.approved {
 
                         self.exchange_seq = self.exchange_seq.wrapping_add(1);
@@ -997,6 +992,11 @@ impl TickPipeline {
                             if was_open && realized_pnl == 0.0 {
                                 let ctx = make_context_id(em, &intent.symbol, event.ts_ms);
                                 self.paper_state.set_entry_context_id(&intent.symbol, &ctx);
+                            }
+                            // DYNAMIC-RISK-1: non-zero realized_pnl is a close — feed sizer.
+                            // DYNAMIC-RISK-1：realized_pnl 非零代表平倉，餵入動態風險調整器。
+                            if realized_pnl != 0.0 {
+                                self.dynamic_risk_sizer.record_closed_trade(realized_pnl);
                             }
                             self.stats.total_fills += 1;
                             push_capped(&mut self.recent_fills, TimestampedFill {
@@ -1336,6 +1336,9 @@ impl TickPipeline {
                         if let Some(pnl) =
                             self.paper_state.close_position(sym, px, event.ts_ms)
                         {
+                            // DYNAMIC-RISK-1: halt-session close is still a realized PnL event.
+                            // DYNAMIC-RISK-1：HaltSession 平倉仍算實現 PnL 事件。
+                            self.dynamic_risk_sizer.record_closed_trade(pnl);
                             self.emit_close_fill(sym, *il, *q, px, event.ts_ms, pnl, "risk_close:halt_session", &ectx);
                         }
                         self.stats.total_stops += 1;
