@@ -197,6 +197,10 @@ app.include_router(engine_capabilities_router)
 from .shadow_fills_routes import shadow_fills_router  # noqa: E402
 app.include_router(shadow_fills_router)
 
+# ── Edge Estimator Scheduler Router / JS 邊際估計器排程器路由（P1-7 B）──
+from .edge_estimator_routes import router as edge_estimator_router  # noqa: E402
+app.include_router(edge_estimator_router)
+
 # ── Startup Integrity Check / 啟動完整性驗證 ────────────────────────────────
 # Verify that non-optional critical dependencies were successfully injected at
 # module initialisation time.  H0_GATE is allowed to be None in degraded /
@@ -358,6 +362,23 @@ async def _startup_integrity_check() -> None:
         base.logger.warning(
             "EvolutionScheduler startup failed (fail-open): %s / 進化排程器啟動失敗（不阻斷）：%s",
             _sched_exc, _sched_exc,
+        )
+
+    # ── P1-7 B: James-Stein edge estimator hourly scheduler (fail-open) ─────
+    # 啟動 JS 邊際估計器排程器（每小時，fail-open）
+    # Activates LEARNING-PIPELINE-DORMANT-1 writer chain. File-only — does NOT
+    # bind cost_gate; engine still reads edge_estimates.json once at startup.
+    # 啟用 LEARNING-PIPELINE-DORMANT-1 writer 鏈，僅寫檔不 bind cost_gate。
+    try:
+        from .edge_estimator_scheduler import start_scheduler as _start_edge_scheduler  # noqa: PLC0415
+        _start_edge_scheduler()
+        base.logger.info(
+            "EdgeEstimatorScheduler started / JS 邊際估計器排程器已啟動"
+        )
+    except Exception as _edge_sched_exc:
+        base.logger.warning(
+            "EdgeEstimatorScheduler startup failed (fail-open): %s / JS 排程器啟動失敗（不阻斷）：%s",
+            _edge_sched_exc, _edge_sched_exc,
         )
 
     # ── OC-3 / 6-RC-6: Reconciler governor-tier alert monitor ────────────────

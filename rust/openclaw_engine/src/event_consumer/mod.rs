@@ -85,17 +85,16 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
     } = deps;
     let mut pipeline_cmd_rx = pipeline_cmd_rx;
 
-    // D19 safety assertion: only Paper pipeline writes market/feature DB.
-    // Exchange pipelines (Demo/Live) must receive None to prevent duplicate writes.
-    // D19 安全斷言：僅 Paper 管線寫入市場/特徵 DB。
-    // 交易所管線（Demo/Live）必須收到 None 以防止重複寫入。
-    if pipeline_kind.is_exchange() {
-        assert!(
-            market_data_tx.is_none() && feature_tx.is_none(),
-            "D19 violation: exchange pipeline ({:?}) must not write market/feature DB",
-            pipeline_kind,
-        );
-    }
+    // MARKET-KLINES-STALE-1 (2026-04-18): the original D19 invariant
+    // ("only Paper writes market/feature DB") was invalidated by PAPER-DISABLE-1
+    // — Paper now defaults off, leaving market.klines stale for ~2 days. All
+    // three pipelines now share `market_tx` (multi-producer safe via
+    // market_writer.rs ON CONFLICT dedup). `feature_tx` wiring is a main.rs
+    // decision per pipeline kind; no runtime guard needed.
+    // MARKET-KLINES-STALE-1（2026-04-18）：原 D19 的「僅 Paper 寫 market/feature
+    // DB」不變式已被 PAPER-DISABLE-1 推翻（Paper 預設關閉導致 market.klines 停寫
+    // ~2 天）。三引擎共享 market_tx（market_writer.rs ON CONFLICT 去重，多 producer
+    // 安全）。feature_tx 的接線由 main.rs 按 pipeline kind 決定，無須 runtime 守衛。
 
     let cfg_snapshot = config.get();
 
