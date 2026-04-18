@@ -876,6 +876,30 @@ impl TickPipeline {
                                     format!("pending_exchange:{}", order_link_id),
                                 );
 
+                                // P1-7 A INTENT-WRITE-GAP-1 fix (2026-04-18):
+                                // Mirror Paper's persist_intent call (line ~986). Exchange branch
+                                // previously persisted the verdict (line ~837) but never persisted
+                                // the intent itself, causing trading.intents.live/live_demo = 0
+                                // for 7d while 4.9M Approved verdicts accumulated. Root cause was
+                                // architectural: process_gates_only_with_features() returns
+                                // ExchangeGateResult (no `submitted` field), so the result.submitted
+                                // guard at the paper branch was structurally unreachable here.
+                                // Use final_qty (post-rounding) to match the actual qty being
+                                // dispatched, paralleling Paper's use of result.approved_qty.
+                                // P1-7 A INTENT-WRITE-GAP-1 修復（2026-04-18）：
+                                // 對齊 Paper 分支的 persist_intent；exchange 分支原僅寫 verdict 不寫 intent，
+                                // 導致 7d 內 trading.intents 對 live/live_demo 持續為 0。
+                                self.stats.total_intents += 1;
+                                persist_intent(
+                                    &self.trading_tx,
+                                    em,
+                                    event.ts_ms,
+                                    intent,
+                                    final_qty,
+                                    event.last_price,
+                                    em,
+                                );
+
                                 // Dispatch to exchange / 派發到交易所
                                 // I-08 雙軌止損：compute broker-side SL from stop config
                                 let sl_pct = self.paper_state.stop_config_pct();
