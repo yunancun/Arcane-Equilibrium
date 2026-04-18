@@ -55,13 +55,16 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
         context_tx,
         decision_feature_tx,
         shadow_fill_tx,
-        // EXIT-FEATURES-TABLE-1: producer site lands in Phase 1a 軌道 1
-        // (paper_state close path). For now the writer is spawned and the
-        // channel wired to all three pipelines, but nothing emits — marked
-        // unused to avoid warn-as-error until the hook lands.
-        // EXIT-FEATURES-TABLE-1：producer 由 Phase 1a 軌道 1 接線，writer 與通道
-        // 先佈建好；未接 producer 前標 _unused 避免警告當錯誤。
-        exit_feature_tx: _exit_feature_tx,
+        // EXIT-FEATURES-TABLE-1 Phase 1b (2026-04-18): producer wiring landed.
+        // `emit_close_fill` builds a 7-dim ExitFeatureRow and try_send's here.
+        // All three engines share the same writer tx (multi-producer safe —
+        // PK=(context_id, ts) collisions never occur across engines because
+        // engine_mode is part of the logical grouping and timestamps collide
+        // only within a single engine's tick).
+        // EXIT-FEATURES-TABLE-1 Phase 1b（2026-04-18）：producer 接線已上線。
+        // `emit_close_fill` 建 7 維 ExitFeatureRow 並 try_send 入此通道。
+        // 三引擎共用同一 writer（多 producer 安全）。
+        exit_feature_tx,
         exchange_event_rx,
         seed_positions,
         account_manager,
@@ -158,6 +161,15 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
     // 走 fail-soft log。gate + DB CHECK 強制 paper-only。
     if let Some(tx) = shadow_fill_tx.clone() {
         pipeline.set_shadow_fill_db_tx(tx);
+    }
+
+    // EXIT-FEATURES-TABLE-1: Wire the exit-feature DB channel so every
+    // PaperState close path emits one row into `learning.exit_features`.
+    // `None` leaves emission as fail-soft no-op.
+    // EXIT-FEATURES-TABLE-1：接入 exit-feature DB 通道，PaperState 每次平倉
+    // 產生一列寫入 `learning.exit_features`。未接線為 fail-soft no-op。
+    if let Some(tx) = exit_feature_tx.clone() {
+        pipeline.set_exit_feature_tx(tx);
     }
 
     // EDGE-P3-1 Phase B #4: Seed the IntentProcessor predictor RNG with a per-

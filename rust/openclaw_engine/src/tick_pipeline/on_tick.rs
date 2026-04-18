@@ -328,6 +328,11 @@ impl TickPipeline {
                                     .get_entry_context_id(sym)
                                     .unwrap_or("")
                                     .to_string();
+                                // EXIT-FEATURES-TABLE-1: snapshot BEFORE close/reduce
+                                // so the Track P row reflects pre-exit state. by-value.
+                                // EXIT-FEATURES-TABLE-1：先取快照再平倉，Track P 標籤
+                                // 反映出場前狀態（by-value，partial close 亦安全）。
+                                let snap = self.paper_state.position_exit_snapshot(sym);
                                 let pnl =
                                     self.paper_state.reduce_position(sym, half_qty, close_price);
                                 self.emit_close_fill(
@@ -339,6 +344,7 @@ impl TickPipeline {
                                     pnl,
                                     "risk_close:fast_track_reduce_half",
                                     &ectx,
+                                    snap.as_ref(),
                                 );
                                 // FIX-03b: dispatch exchange order for Demo/Live so
                                 // Bybit-side position matches local paper_state.
@@ -426,6 +432,10 @@ impl TickPipeline {
                     .get_entry_context_id(&sym)
                     .unwrap_or("")
                     .to_string();
+                // EXIT-FEATURES-TABLE-1: snapshot BEFORE close_position_at_symbol_market
+                // (full close → position removed after).
+                // EXIT-FEATURES-TABLE-1：先取快照再平倉（full close 後倉位已移除）。
+                let snap = self.paper_state.position_exit_snapshot(&sym);
                 if let Some((il, q, px, pnl)) =
                     self.close_position_at_symbol_market(&sym, event.ts_ms)
                 {
@@ -438,6 +448,7 @@ impl TickPipeline {
                         pnl,
                         "risk_close:fast_track",
                         &ectx,
+                        snap.as_ref(),
                     );
                 }
                 self.stats.total_stops += 1;
@@ -464,11 +475,24 @@ impl TickPipeline {
                     .get_entry_context_id(sym)
                     .unwrap_or("")
                     .to_string();
+                // EXIT-FEATURES-TABLE-1: snapshot BEFORE close (full close path).
+                // EXIT-FEATURES-TABLE-1：先取快照再平倉（full close 後倉位已移除）。
+                let snap = self.paper_state.position_exit_snapshot(sym);
                 if let Some((il, q, px, pnl)) =
                     self.close_position_at_symbol_market(sym, event.ts_ms)
                 {
                     let tag = format!("stop_trigger:{}", trigger.reason);
-                    self.emit_close_fill(sym, il, q, px, event.ts_ms, pnl, &tag, &ectx);
+                    self.emit_close_fill(
+                        sym,
+                        il,
+                        q,
+                        px,
+                        event.ts_ms,
+                        pnl,
+                        &tag,
+                        &ectx,
+                        snap.as_ref(),
+                    );
                 }
                 self.stats.total_stops += 1;
             }
@@ -567,11 +591,24 @@ impl TickPipeline {
                     .get_entry_context_id(sym)
                     .unwrap_or("")
                     .to_string();
+                // EXIT-FEATURES-TABLE-1: snapshot BEFORE close (full close path).
+                // EXIT-FEATURES-TABLE-1：先取快照再平倉（full close 後倉位已移除）。
+                let snap = self.paper_state.position_exit_snapshot(sym);
                 if let Some((il, q, px, pnl)) =
                     self.close_position_at_symbol_market(sym, event.ts_ms)
                 {
                     let tag = format!("stop_trigger:{}", trigger.reason);
-                    self.emit_close_fill(sym, il, q, px, event.ts_ms, pnl, &tag, &ectx);
+                    self.emit_close_fill(
+                        sym,
+                        il,
+                        q,
+                        px,
+                        event.ts_ms,
+                        pnl,
+                        &tag,
+                        &ectx,
+                        snap.as_ref(),
+                    );
                     self.stats.total_stops += 1;
                     self.execute_position_close(sym, il, q, event, false, &tag);
                 } else {
@@ -1271,6 +1308,10 @@ impl TickPipeline {
                     let ectx = pos.entry_context_id.clone();
                     info!(symbol = %symbol, is_long = %is_long, qty = %qty, reason = %reason,
                           "strategy close (paper) / 策略平倉（紙盤）");
+                    // EXIT-FEATURES-TABLE-1: snapshot BEFORE close so Track P
+                    // features reflect pre-exit state.
+                    // EXIT-FEATURES-TABLE-1：先取快照再平倉，Track P 反映出場前狀態。
+                    let snap = self.paper_state.position_exit_snapshot(symbol);
                     // PNL-FIX-1: close at this symbol's own latest price — strategies may
                     // close cross-symbol positions (after multi-symbol position tracking),
                     // so event.last_price (current tick) is wrong when symbol ≠ event.symbol.
@@ -1288,6 +1329,7 @@ impl TickPipeline {
                             pnl,
                             &tag,
                             &ectx,
+                            snap.as_ref(),
                         );
                         // Update Kelly stats for future sizing / 更新 Kelly 統計供未來 sizing 使用
                         self.intent_processor.record_trade(symbol, pnl);
@@ -1348,7 +1390,12 @@ impl TickPipeline {
         // is identical to the inline form.
         // P2 重構（2026-04-07）：逐倉計算抽出至 position_risk_evaluator；
         // 派發迴圈仍負責所有副作用，行為與原始碼一致。
-        self.paper_state.update_best_prices();
+        // EXIT-FEATURES-TABLE-1: pass wall-clock ts so `peak_reached_ts_ms`
+        // advances whenever max_favorable_pnl_pct records a new high. Legacy
+        // `update_best_prices()` (ts=0) leaves peak timestamps stuck.
+        // EXIT-FEATURES-TABLE-1：傳入 tick 時戳，讓 peak_reached_ts_ms 在新高
+        // 時同步推進；舊 update_best_prices() 等同 ts=0，peak 戳不動。
+        self.paper_state.update_best_prices_at(event.ts_ms as i64);
         let session_drawdown = self.paper_state.drawdown_pct();
         let daily_loss = self
             .intent_processor
@@ -1435,6 +1482,9 @@ impl TickPipeline {
                             .get_entry_context_id(symbol)
                             .unwrap_or("")
                             .to_string();
+                        // EXIT-FEATURES-TABLE-1: snapshot BEFORE close.
+                        // EXIT-FEATURES-TABLE-1：先取快照再平倉。
+                        let snap = self.paper_state.position_exit_snapshot(symbol);
                         if let Some((_il, _q, close_px, pnl)) =
                             self.close_position_at_symbol_market(symbol, event.ts_ms)
                         {
@@ -1448,6 +1498,7 @@ impl TickPipeline {
                                 pnl,
                                 &tag,
                                 &ectx,
+                                snap.as_ref(),
                             );
                             // P1-2 fix: update Kelly stats for risk-close (pre-existing omission).
                             // P1-2 修復：風控平倉也更新 Kelly 統計（既有遺漏）。
@@ -1493,6 +1544,9 @@ impl TickPipeline {
                             .get_entry_context_id(sym)
                             .unwrap_or("")
                             .to_string();
+                        // EXIT-FEATURES-TABLE-1: snapshot BEFORE close.
+                        // EXIT-FEATURES-TABLE-1：先取快照再平倉。
+                        let snap = self.paper_state.position_exit_snapshot(sym);
                         if let Some((_il, _q, close_px, pnl)) =
                             self.close_position_at_symbol_market(sym, event.ts_ms)
                         {
@@ -1505,6 +1559,7 @@ impl TickPipeline {
                                 pnl,
                                 "risk_close:halt_session",
                                 &ectx,
+                                snap.as_ref(),
                             );
                         }
                         self.stats.total_stops += 1;

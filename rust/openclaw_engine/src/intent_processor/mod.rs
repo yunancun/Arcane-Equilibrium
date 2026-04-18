@@ -396,6 +396,18 @@ impl IntentProcessor {
         }
     }
 
+    /// EXIT-FEATURES-TABLE-1: Read-only accessor for the currently loaded
+    /// shrunk-edge table. Used by `emit_close_fill` to stamp the `est_net_bps`
+    /// feature onto `learning.exit_features` — the same table the cost_gate
+    /// reads for pre-open gating, kept as a single source of truth so train-
+    /// time labels and runtime gates never drift.
+    /// EXIT-FEATURES-TABLE-1：當前 JS 收縮邊際表的唯讀取用器；emit_close_fill
+    /// 以此填 `learning.exit_features.est_net_bps`，與 cost_gate 開倉前讀的
+    /// 同一張表為單一來源，確保訓練標籤與執行時 gate 永不漂移。
+    pub fn edge_estimates(&self) -> &crate::edge_estimates::EdgeEstimates {
+        &self.edge_estimates
+    }
+
     /// PH5-WIRE-1: Inject / refresh JS shrunk edge estimates.
     /// Called at startup and optionally via IPC reload trigger.
     /// PH5-WIRE-1：注入/刷新 JS 收縮邊際估計。啟動時調用，可通過 IPC 觸發刷新。

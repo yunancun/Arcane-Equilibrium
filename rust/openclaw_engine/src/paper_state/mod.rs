@@ -60,7 +60,7 @@ pub mod fill_engine;
 pub mod owner_attribution;
 pub mod snapshots;
 
-pub use containers::PaperPosition;
+pub use containers::{PaperPosition, PositionExitSnapshot};
 pub use dust_gate::TriageOutcome;
 pub use owner_attribution::{RetriageOutcome, SYNTHETIC_OWNER_LABELS};
 pub use snapshots::{PaperStateSnapshot, PositionSnapshot};

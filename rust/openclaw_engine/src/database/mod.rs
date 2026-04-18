@@ -16,6 +16,7 @@ pub mod black_swan_detector;
 pub mod context_writer;
 pub mod decision_feature_writer;
 pub mod drift_detector;
+pub mod exit_feature_schema;
 pub mod exit_feature_writer;
 pub mod experiment_ledger_pg;
 pub mod fallback;

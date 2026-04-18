@@ -214,6 +214,8 @@ impl PaperState {
                 entry_context_id: String::new(),
                 owner_strategy,
                 entry_notional: qty * entry_price,
+                max_favorable_pnl_pct: 0.0,
+                peak_reached_ts_ms: ts_ms as i64,
             },
         );
         true
