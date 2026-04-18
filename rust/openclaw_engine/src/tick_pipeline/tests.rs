@@ -168,6 +168,92 @@ fn test_emit_close_fill_accepts_empty_entry_context_id() {
     }
 }
 
+/// FILL-CONTEXT-LINKAGE-1 regression (2026-04-19): apply_confirmed_fill must
+/// stamp `paper_state.entry_context_id` with the signal-time id threaded
+/// through OrderDispatchRequest → PendingOrder — NOT regenerate it with WS
+/// exec_ts. Before this fix, `signal_context_id` was recomputed inside
+/// apply_confirmed_fill via `make_context_id(em, symbol, ts_ms)` where
+/// `ts_ms` was the WS exec timestamp (100-500ms drift vs `event.ts_ms`),
+/// producing a different context_id string than the one written to
+/// `learning.decision_features.context_id`. Result: `trading.fills.entry_context_id`
+/// JOIN to `learning.decision_features.context_id` yielded 0 overlap over
+/// 3.36M rows. Locking the signal-time path ensures P1-7 C ML training label
+/// backfill actually matches.
+/// FILL-CONTEXT-LINKAGE-1 回歸（2026-04-19）：apply_confirmed_fill 必須把
+/// OrderDispatchRequest → PendingOrder 傳來的訊號時刻 id 寫入 paper_state，
+/// 不再用 WS exec_ts 重算。修前 3.36M rows 的 decision_features 與 3514
+/// fills 的 entry_context_id 0 overlap，此測試鎖定訊號時刻 id 寫入路徑。
+#[test]
+fn apply_confirmed_fill_preserves_signal_context_id() {
+    let mut pipeline = TickPipeline::with_kind(&["BTCUSDT"], 1_000.0, PipelineKind::Demo);
+
+    // Seed a latest price so any resolver that wants one is happy.
+    // 注入一個最新價，防止任何需要最新價的路徑卡住。
+    let _ = pipeline.on_tick(&make_event("BTCUSDT", 100.0, 1_000));
+
+    // Apply an open-side confirmed fill with a deliberately earlier
+    // signal-time id (ts=1000) and a LATER exec ts_ms (ts=2000). If the
+    // fix holds, paper_state.entry_context_id ends in "-1000" (signal),
+    // not "-2000" (exec). A pre-fix pipeline would stamp "-2000".
+    // 開倉模擬：訊號 id 指向 ts=1000，但 exec ts=2000；修後應保留 -1000。
+    let signal_id = "ctx-demo-BTCUSDT-1000";
+    pipeline.apply_confirmed_fill(
+        "BTCUSDT",
+        true,   // is_long
+        1.0,    // qty
+        100.0,  // fill_price
+        0.1,    // fee
+        2_000,  // exec ts_ms (later than signal ts=1000)
+        "grid", // strategy
+        signal_id,
+        "oc_test_1",
+    );
+
+    // paper_state must show the signal-time id verbatim — not the exec-time
+    // recompute "ctx-demo-BTCUSDT-2000" that the pre-fix code produced.
+    // paper_state 必須顯示訊號時刻 id，而非修前用 exec_ts 重算的字串。
+    let stamped = pipeline.paper_state.get_entry_context_id("BTCUSDT");
+    assert_eq!(
+        stamped,
+        Some(signal_id),
+        "entry_context_id must be the signal-time id threaded through \
+         OrderDispatchRequest → PendingOrder, not recomputed from exec_ts"
+    );
+
+    // Sanity: the stale exec-time id MUST NOT appear on this symbol — a
+    // regression would produce "ctx-demo-BTCUSDT-2000" (the rebuild bug).
+    // 防呆：exec-time id 絕不應出現，否則回歸。
+    assert_ne!(
+        stamped,
+        Some("ctx-demo-BTCUSDT-2000"),
+        "regression: apply_confirmed_fill recomputed context_id from WS exec_ts"
+    );
+}
+
+/// FILL-CONTEXT-LINKAGE-1 fallback: when the signal-time id is empty (orphan
+/// close, legacy pre-fix shadow channel), apply_confirmed_fill must fall back
+/// to the exec-time recompute so callers that can't provide the id still
+/// write a non-empty entry_context_id. Mirrors pre-fix behaviour for orphans.
+/// FILL-CONTEXT-LINKAGE-1 fallback：呼叫方傳空字串時退回 exec-time 重算，
+/// 維持舊孤兒/shadow 行為不回歸。
+#[test]
+fn apply_confirmed_fill_falls_back_when_signal_id_empty() {
+    let mut pipeline = TickPipeline::with_kind(&["BTCUSDT"], 1_000.0, PipelineKind::Demo);
+    let _ = pipeline.on_tick(&make_event("BTCUSDT", 100.0, 1_000));
+
+    pipeline.apply_confirmed_fill(
+        "BTCUSDT", true, 1.0, 100.0, 0.1, 2_000, "grid", "", "oc_test_2",
+    );
+
+    // Fallback path recomputes with em="demo", symbol="BTCUSDT", ts_ms=2000.
+    // Exec-time recompute 應寫出 ctx-demo-BTCUSDT-2000（fallback 正確）。
+    let stamped = pipeline
+        .paper_state
+        .get_entry_context_id("BTCUSDT")
+        .map(|s| s.to_string());
+    assert_eq!(stamped.as_deref(), Some("ctx-demo-BTCUSDT-2000"));
+}
+
 /// P0-4 R1 regression: execute_position_close must propagate `trigger_tag` to
 /// OrderDispatchRequest.strategy. Previously hardcoded "risk_check", which
 /// collapsed strategy exits + fast_track closes + shadow mirrors into a single
@@ -515,6 +601,10 @@ fn test_dual_rail_shadow_order_has_sl_fields() {
         is_primary: true,
         stop_loss: Some(49000.0),
         take_profit: Some(52000.0),
+        // FILL-CONTEXT-LINKAGE-1: empty id preserves pre-fix behaviour
+        // (apply_confirmed_fill falls back to exec-time recompute).
+        // FILL-CONTEXT-LINKAGE-1：空字串保持修前行為（apply_confirmed_fill 退回 exec 重算）。
+        context_id: String::new(),
     };
     assert_eq!(req.stop_loss, Some(49000.0));
     assert_eq!(req.take_profit, Some(52000.0));
@@ -555,6 +645,9 @@ fn test_dual_rail_close_orders_no_broker_sl() {
         is_primary: true,
         stop_loss: None,
         take_profit: None,
+        // FILL-CONTEXT-LINKAGE-1: empty id preserves pre-fix behaviour.
+        // FILL-CONTEXT-LINKAGE-1：空字串保持修前行為。
+        context_id: String::new(),
     };
     assert!(req.stop_loss.is_none());
     assert!(req.is_close);
@@ -575,6 +668,9 @@ fn test_dual_rail_paper_shadow_skips_broker_sl() {
         is_primary: false,
         stop_loss: None,
         take_profit: None,
+        // FILL-CONTEXT-LINKAGE-1: empty id preserves pre-fix behaviour.
+        // FILL-CONTEXT-LINKAGE-1：空字串保持修前行為。
+        context_id: String::new(),
     };
     assert!(!req.is_primary);
     assert!(req.stop_loss.is_none());

@@ -370,6 +370,19 @@ impl TickPipeline {
     /// EXT-1: Apply a confirmed fill from the exchange to paper_state.
     /// Called by event_consumer when exchange confirms a fill for a pending order.
     /// EXT-1：將交易所確認的成交應用到 paper_state。
+    ///
+    /// FILL-CONTEXT-LINKAGE-1 (2026-04-19): `signal_context_id` carries the
+    /// signal-time id (built with `event.ts_ms`) all the way from on_tick.rs
+    /// through OrderDispatchRequest → PendingOrder. Using it here keeps
+    /// `trading.fills.entry_context_id` in lockstep with
+    /// `learning.decision_features.context_id` so the P1-7 C backfill JOIN
+    /// actually matches. Empty string → fall back to exec-time recompute
+    /// (preserves legacy behaviour for callers that don't have the id, e.g.
+    /// orphan close or shadow channel).
+    /// FILL-CONTEXT-LINKAGE-1 (2026-04-19)：`signal_context_id` 從 on_tick.rs
+    /// 透過 OrderDispatchRequest → PendingOrder 端到端傳入，取代原本用 WS
+    /// exec_ts 重算（100-500ms 漂移導致 JOIN 0 overlap）。空字串時 fallback
+    /// 至原有 exec-time 重算以保留 orphan/shadow 舊行為。
     pub fn apply_confirmed_fill(
         &mut self,
         symbol: &str,
@@ -379,6 +392,7 @@ impl TickPipeline {
         fee: f64,
         ts_ms: u64,
         strategy: &str,
+        signal_context_id: &str,
         order_link_id: &str,
     ) {
         // EDGE-P3-1 R2: snapshot was_open + existing entry_context_id BEFORE apply_fill.
@@ -393,12 +407,20 @@ impl TickPipeline {
         let realized_pnl = self
             .paper_state
             .apply_fill(symbol, is_long, qty, fill_price, fee, ts_ms, strategy);
-        // EDGE-P3-1 R2: stamp entry_context_id on fresh exchange-confirmed opens.
-        // Uses the same deterministic make_context_id as the Fill row below.
-        // EDGE-P3-1 R2：僅交易所確認的開新倉打 entry_context_id。
+        // FILL-CONTEXT-LINKAGE-1: use the signal-time id carried through
+        // OrderDispatchRequest → PendingOrder rather than recomputing with
+        // WS exec_ts (drifts 100-500ms from event.ts_ms → 0 JOIN overlap).
+        // Fallback to exec-time id only when caller didn't thread the id
+        // (e.g. shadow-channel close on an orphan position).
+        // FILL-CONTEXT-LINKAGE-1：使用訊號時刻 context_id，不再用 WS exec_ts。
+        // 僅在呼叫方未傳時退回 exec-time 重算以保留舊行為。
         if was_open && realized_pnl == 0.0 {
-            let em_pre = self.effective_engine_mode();
-            let ctx_pre = make_context_id(em_pre, symbol, ts_ms);
+            let ctx_pre = if !signal_context_id.is_empty() {
+                signal_context_id.to_string()
+            } else {
+                let em_pre = self.effective_engine_mode();
+                make_context_id(em_pre, symbol, ts_ms)
+            };
             self.paper_state.set_entry_context_id(symbol, &ctx_pre);
         }
         self.stats.total_fills += 1;
@@ -440,6 +462,17 @@ impl TickPipeline {
             } else {
                 String::new()
             };
+            // FILL-CONTEXT-LINKAGE-1: prefer signal-time id on OPEN fills so
+            // the Fill row's own context_id (not entry_context_id) also
+            // matches `learning.decision_features.context_id`. Closes compute
+            // a new exec-time id (fill is a new row, not an entry proxy).
+            // FILL-CONTEXT-LINKAGE-1：開倉 fill 用訊號時刻 id（JOIN decision_features）；
+            // 平倉 fill 為新列，用 exec 時間戳另行生成，保留舊行為。
+            let fill_ctx_id = if realized_pnl == 0.0 && !signal_context_id.is_empty() {
+                signal_context_id.to_string()
+            } else {
+                make_context_id(em, symbol, ts_ms)
+            };
             let _ = tx.try_send(crate::database::TradingMsg::Fill {
                 fill_id: make_fill_id(em, symbol, ts_ms),
                 ts_ms,
@@ -452,7 +485,7 @@ impl TickPipeline {
                 fee_rate: fr,
                 realized_pnl,
                 strategy_name: strategy.to_string(),
-                context_id: make_context_id(em, symbol, ts_ms),
+                context_id: fill_ctx_id,
                 entry_context_id: fill_entry_ctx,
                 engine_mode: em.to_string(),
             });
@@ -485,6 +518,18 @@ impl TickPipeline {
         if let Some(ref tx) = self.order_dispatch_tx {
             self.exchange_seq = self.exchange_seq.wrapping_add(1);
             let prefix = if is_primary { "oc_risk" } else { "sh_risk" };
+            // FILL-CONTEXT-LINKAGE-1: carry the open position's entry id
+            // on the close dispatch so the close fill's entry_context_id
+            // (written via existing_entry_ctx in apply_confirmed_fill) stays
+            // bit-identical to what was stamped at entry time. Empty when
+            // paper_state has no entry id (legacy pre-stamp positions).
+            // FILL-CONTEXT-LINKAGE-1：平倉派發攜帶當前持倉 entry id，
+            // 平倉 fill 的 entry_context_id 與當初開倉 id 一致。
+            let entry_ctx = self
+                .paper_state
+                .get_entry_context_id(symbol)
+                .unwrap_or("")
+                .to_string();
             let _ = tx.send(OrderDispatchRequest {
                 symbol: symbol.to_string(),
                 is_long: !is_long,
@@ -497,6 +542,7 @@ impl TickPipeline {
                 is_primary,
                 stop_loss: None,
                 take_profit: None,
+                context_id: entry_ctx,
             });
             if is_primary {
                 self.pending_close_symbols.insert(symbol.to_string());
@@ -561,6 +607,13 @@ impl TickPipeline {
                 if let Some(ref tx) = self.order_dispatch_tx {
                     self.exchange_seq = self.exchange_seq.wrapping_add(1);
                     let order_link_id = format!("oc_ipc_close_{}_{}", ts_ms, self.exchange_seq);
+                    // FILL-CONTEXT-LINKAGE-1: carry entry id on close dispatch.
+                    // FILL-CONTEXT-LINKAGE-1：平倉派發帶當前持倉 entry id。
+                    let entry_ctx = self
+                        .paper_state
+                        .get_entry_context_id(&symbol)
+                        .unwrap_or("")
+                        .to_string();
                     let _ = tx.send(OrderDispatchRequest {
                         symbol: symbol.clone(),
                         is_long: !is_long, // opposite side to close / 相反方向平倉
@@ -573,6 +626,7 @@ impl TickPipeline {
                         is_primary: true, // exchange mode: primary order / 交易所模式主訂單
                         stop_loss: None,
                         take_profit: None,
+                        context_id: entry_ctx,
                     });
                     self.pending_close_symbols.insert(symbol);
                 }
@@ -660,6 +714,18 @@ impl TickPipeline {
             if let Some(ref tx) = self.order_dispatch_tx {
                 self.exchange_seq = self.exchange_seq.wrapping_add(1);
                 let order_link_id = format!("oc_ipc_close_{}_{}", ts_ms, self.exchange_seq);
+                // FILL-CONTEXT-LINKAGE-1: carry entry id when paper_state
+                // knows the open position; orphan closes (hint-only path)
+                // pass empty, which fails back to exec-time recompute in
+                // apply_confirmed_fill — matches pre-fix behaviour for
+                // orphans that never had a signal-time id to begin with.
+                // FILL-CONTEXT-LINKAGE-1：paper_state 有倉時帶 entry id；
+                // 孤兒倉（只有 hint）傳空字串，退回 exec-time 重算（與修前行為一致）。
+                let entry_ctx = self
+                    .paper_state
+                    .get_entry_context_id(symbol)
+                    .unwrap_or("")
+                    .to_string();
                 let _ = tx.send(OrderDispatchRequest {
                     symbol: symbol.to_string(),
                     is_long: !is_long, // opposite side to close / 相反方向平倉
@@ -672,6 +738,7 @@ impl TickPipeline {
                     is_primary: true,
                     stop_loss: None,
                     take_profit: None,
+                    context_id: entry_ctx,
                 });
                 self.pending_close_symbols.insert(symbol.to_string());
                 true
