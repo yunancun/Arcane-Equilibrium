@@ -150,7 +150,12 @@ impl ClaudeTeacher {
         // 2) BudgetTracker — fail-closed: any error aborts before DB write.
         //    BudgetTracker — fail-closed：任何錯誤都在 DB 寫入前中止。
         if let Some(budget) = &self.budget {
-            let request_id = format!("teacher-{}", now_ms());
+            // E5-FN-2: canonical `{scope}-{ts_ms}-{rand_hex8}` request_id so the
+            // V018 partial UNIQUE index on ai_usage_log.request_id can dedup
+            // retries of the same LLM call (guards against double-billing).
+            // E5-FN-2：標準 `{scope}-{ts_ms}-{rand_hex8}` 格式；配合 V018 索引，
+            // 同一次 LLM 調用的重試會被去重，避免雙計。
+            let request_id = BudgetTracker::make_request_id(SCOPE_AGENT_TEACHER);
             match budget
                 .record_usage(
                     SCOPE_AGENT_TEACHER,
