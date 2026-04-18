@@ -1,7 +1,71 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-04-19（E5-P2 Refactor Wave 2 — 2 delivered / 3 evidence-based CANCEL / 2 defer）
+> 最後更新：2026-04-19（FILL-CONTEXT-LINKAGE-1 + EXIT-FEATURES-TABLE-1 Phase 1b FUP）
+
+### FILL-CONTEXT-LINKAGE-1 — 訊號時刻 context_id 端到端傳遞（2026-04-19 · commit bd45e90）
+
+**問題**：P1-7 C ML 訓練無標籤可用。`learning.decision_features`（3.36M rows）與 `trading.fills.entry_context_id`（3514 rows）JOIN **0 overlap**，`edge_label_backfill.py` 找不到可標籤的 fills。
+
+**RCA**（B 路徑 — operator 拒絕 dry-run / archive，要求架構級修復）：
+- `decision_features.context_id` 由 `decision_context_producer.rs:144` 在 **訊號時刻** 用 `make_context_id(em, &event.symbol, event.ts_ms)` 寫入。
+- `trading.fills.entry_context_id` 由 `tick_pipeline/commands.rs:apply_confirmed_fill` 在 **WS exec time** 用 `make_context_id(em, symbol, ts_ms)` 寫入，`ts_ms = exec_ts`（漂移 100-500ms）。
+- 同 formula 不同 `ts_ms` → 不同字串 → 永遠 JOIN 失敗。
+- Bug 僅影響 exchange branch；paper branch（`on_tick.rs:1140`）兩端都用 `event.ts_ms` 已對齊。
+
+**修復**（端到端傳遞訊號時刻 id）：
+- `OrderDispatchRequest.context_id: String`（`tick_pipeline/mod.rs:551`）新欄位
+- `PendingOrder.context_id: String`（`event_consumer/types.rs:50`）新欄位
+- `apply_confirmed_fill(..., signal_context_id: &str, ..., order_link_id: &str)` 新參數
+  - 兩個原本用 `make_context_id(em, symbol, ts_ms)` 重算的點（line 401 `set_entry_context_id` + line 455 `TradingMsg::Fill.context_id`）改用 `signal_context_id`，empty 時 fallback exec-time 重算（保留 orphan/shadow 舊行為）。
+- 3 close-dispatch sites（`execute_position_close` / `ipc_close_all` / `ipc_close_symbol` exchange 分支）帶 `paper_state.get_entry_context_id(symbol).unwrap_or("").to_string()` 確保 close fill 的 entry_context_id 與當初開倉 stamp bit-identical。
+- `event_consumer/dispatch.rs` 鏡射 `req.context_id` → `PendingOrder.context_id`；`event_consumer/mod.rs:883` 傳 `&po.context_id` 到 `apply_confirmed_fill`。
+
+**Tests**：
+- `apply_confirmed_fill_preserves_signal_context_id`：seed `event.ts_ms=1000`，呼叫 `apply_confirmed_fill(...,ts_ms=2000, signal_context_id="ctx-demo-BTCUSDT-1000",...)`，斷言 `paper_state.get_entry_context_id("BTCUSDT") == Some("ctx-demo-BTCUSDT-1000")`（訊號時刻 id），且 `!= Some("ctx-demo-BTCUSDT-2000")`（pre-fix exec-time 字串絕不出現）。
+- `apply_confirmed_fill_falls_back_when_signal_id_empty`：傳空字串時退回 exec-time 重算 `ctx-demo-BTCUSDT-2000`。
+
+**Workflow**：sub-agent 寫碼 → trust-but-verify diff inspect → 識別出 EXIT-FEATURES Phase 1b FUP scope creep → operator 選 B 路徑 hunk-split → Python script 自動 partition unified diff（per-hunk old-line-number classification）→ 兩 commit 獨立 cargo test 綠 → 兩 commit 落地。
+
+**測試**：engine lib 1560→**1564 passed / 0 failed**（+2 regression tests）。
+**部署**：待 `restart_all.sh --rebuild`；解鎖 P1-7 C 訓練（待累積 ≥7d 新流量讓 JOIN-able rows 形成）。
+
+**檔案**（9 changed, +226/−6）：
+- `tick_pipeline/mod.rs`（OrderDispatchRequest 欄位）
+- `tick_pipeline/commands.rs`（apply_confirmed_fill 簽章+body + 3 close-dispatch sites）
+- `tick_pipeline/on_tick.rs`（exchange open + paper shadow 注入 context_id）
+- `tick_pipeline/tests.rs`（2 regression + 3 既有 OrderDispatchRequest literal 補欄位）
+- `event_consumer/{types,dispatch,mod,tests,handlers/tests}.rs`（PendingOrder 欄位 + 3 test sites）
+
+---
+
+### EXIT-FEATURES-TABLE-1 Phase 1b FUP — 2 個漏接 close paths 補完（2026-04-19 · commit c7171b2）
+
+**問題**：Phase 1b producer wiring（commit `6ea643e`）完成 `emit_close_fill` 主路徑，但留 5 個 `test_exit_feature_row_*` WIP 測試失敗 — 揭露 2 個 close-fill paths bypass 了 `learning.exit_features` 寫入：
+1. `process_external_fill`（commands.rs:~150）— IPC 外部 fill 報告（orphan handler / exchange reconciler）
+2. `ipc_close_symbol` paper 分支（commands.rs:~700）— operator `/close_symbol` API + dust eviction + orphan_handler→Paper 模式
+
+Track P 標籤覆蓋因此不完整；ML 訓練會見到從這兩個 route 的 closes 沒有 exit_features rows。
+
+**修復**：
+- 抽出 `try_emit_exit_feature_row(&self, ...)` `pub(crate)` helper（`tick_pipeline/mod.rs`）— 從 `emit_close_fill` inline body 提取，identical fail-soft 語義（snap=None 或 exit_feature_tx 未接 → 靜默 no-op）。
+- `process_external_fill`：`apply_fill` mutate state 前先捕獲 `position_exit_snapshot`；on close（`realized_pnl != 0`）emit 一列；策略名 verbatim 傳遞（`parse_exit_tag` 對未知 prefix → ExternalFill category）。
+- `ipc_close_symbol` paper 分支：`close_position_at_market` 前先捕獲 snap + entry_context_id + 預關 qty/price；on success emit `strategy_close:ipc_close_symbol` tag with `exit_source=Risk` / `exit_trigger_rule=ipc_close_symbol`。
+
+**Tests**（+3）：
+- `test_ipc_close_symbol_paper_emits_exit_feature_row`：full wiring end-to-end 驗證 IPC paper close emit 一列含正確 context_id + strategy_name + exit_source。
+- `test_try_emit_exit_feature_row_helper_direct_call`：helper 直接呼叫 + 自訂 close_tag 經 `parse_exit_tag` 正確分類為 ExternalFill。
+- `test_try_emit_exit_feature_row_fail_soft`：snap=None 或 tx 未接 → no-op 不 panic 不 emit。
+
+**Workflow**：發現過程 = sub-agent 為達成「all green」自動補完了 Phase 1b FUP（scope creep beyond FILL-CONTEXT-LINKAGE-1）；operator 選 B 路徑 hunk-split → 兩個 ticket 獨立 commit / bisect-friendly。
+
+**測試**：engine lib 1564→**1567 passed**（pre-existing 5 個 WIP `test_exit_feature_row_*` 全綠化）。
+**檔案**（3 changed, +206/−10）：
+- `tick_pipeline/mod.rs`（try_emit_exit_feature_row 抽出）
+- `tick_pipeline/commands.rs`（2 paths 接線）
+- `tick_pipeline/tests.rs`（+3 tests）
+
+---
 
 ### E5-P2 Refactor Wave 2 — 2 delivered / 3 evidence-based CANCEL / 2 defer（2026-04-19 · commits 11dedbf / 822f799）
 
