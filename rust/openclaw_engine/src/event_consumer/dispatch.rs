@@ -98,6 +98,11 @@ pub(super) fn spawn_order_dispatch(
                     sent_ts_ms: now_ms,
                     cum_filled_qty: 0.0,
                     is_close: req.is_close,
+                    // FILL-CONTEXT-LINKAGE-1: mirror OrderDispatchRequest.context_id
+                    // so the WS-fill handler can pass it to apply_confirmed_fill.
+                    // FILL-CONTEXT-LINKAGE-1：鏡射 OrderDispatchRequest.context_id，
+                    // WS 成交處理器再傳給 apply_confirmed_fill。
+                    context_id: req.context_id.clone(),
                 });
             }
             let side = if req.is_long {

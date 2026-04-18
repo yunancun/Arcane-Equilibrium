@@ -962,6 +962,14 @@ impl TickPipeline {
                                         is_primary: true,
                                         stop_loss: broker_sl,
                                         take_profit: None,
+                                        // FILL-CONTEXT-LINKAGE-1: carry signal-time id
+                                        // so trading.fills.entry_context_id will match
+                                        // learning.decision_features.context_id on the
+                                        // eventual WS fill (see apply_confirmed_fill).
+                                        // FILL-CONTEXT-LINKAGE-1：帶入訊號時刻 id，
+                                        // 讓日後 WS 成交寫入的 entry_context_id
+                                        // 與 decision_features 對齊可 JOIN。
+                                        context_id: context_id.clone(),
                                     });
                                     // FUP-RACE: proactively mark mirror so reconciler
                                     // won't orphan-close this position before the WS
@@ -1205,6 +1213,14 @@ impl TickPipeline {
                                             is_primary: false,
                                             stop_loss: None,
                                             take_profit: None,
+                                            // FILL-CONTEXT-LINKAGE-1: shadow orders are
+                                            // fire-and-forget (no PendingOrder registered),
+                                            // but pass the paper signal-time id for
+                                            // consistency in case shadow path is ever
+                                            // promoted to tracked.
+                                            // FILL-CONTEXT-LINKAGE-1：shadow 為 fire-and-forget
+                                            // 不註冊 PendingOrder；仍帶入 paper 訊號 id 以備未來追蹤。
+                                            context_id: context_id.clone(),
                                         });
                                     }
                                 }

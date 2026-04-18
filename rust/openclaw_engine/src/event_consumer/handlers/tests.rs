@@ -83,6 +83,9 @@ fn test_reset_clears_all_state() {
             sent_ts_ms: 1000,
             cum_filled_qty: 0.0,
             is_close: false,
+            // FILL-CONTEXT-LINKAGE-1: empty id preserves pre-fix behaviour.
+            // FILL-CONTEXT-LINKAGE-1：空字串保持修前行為。
+            context_id: String::new(),
         },
     );
     handle_paper_command(

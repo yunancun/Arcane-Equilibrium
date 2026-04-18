@@ -880,6 +880,14 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
                         if let Some(key) = matched_key {
                             if let Some(po) = pending_orders.get_mut(&key) {
                                 po.cum_filled_qty += exec_qty;
+                                // FILL-CONTEXT-LINKAGE-1: thread signal-time context_id
+                                // from PendingOrder into apply_confirmed_fill so
+                                // trading.fills.entry_context_id matches
+                                // learning.decision_features.context_id.
+                                // FILL-CONTEXT-LINKAGE-1：將 PendingOrder 帶的
+                                // 訊號時刻 context_id 傳入 apply_confirmed_fill，
+                                // 使 trading.fills.entry_context_id 與
+                                // learning.decision_features.context_id 對齊。
                                 pipeline.apply_confirmed_fill(
                                     &exec.symbol,
                                     po.is_long,
@@ -888,6 +896,7 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
                                     exec_fee,
                                     exec_ts,
                                     &po.strategy,
+                                    &po.context_id,
                                     &po.order_link_id,
                                 );
                                 snapshot_writer.force_write(&pipeline.snapshot());

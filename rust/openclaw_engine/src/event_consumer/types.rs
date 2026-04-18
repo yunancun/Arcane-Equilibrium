@@ -64,6 +64,13 @@ pub struct PendingOrder {
     pub cum_filled_qty: f64,
     /// Whether this is a close order / 是否為平倉訂單
     pub is_close: bool,
+    /// FILL-CONTEXT-LINKAGE-1 (2026-04-19): mirrors OrderDispatchRequest.context_id.
+    /// Passed to apply_confirmed_fill on fill so trading.fills.entry_context_id
+    /// matches learning.decision_features.context_id (signal-time id, not WS exec_ts).
+    /// FILL-CONTEXT-LINKAGE-1 (2026-04-19)：鏡射 OrderDispatchRequest.context_id，
+    /// 成交時傳入 apply_confirmed_fill，使 trading.fills.entry_context_id 與
+    /// learning.decision_features.context_id 對齊（訊號時刻 id，非 WS exec_ts）。
+    pub context_id: String,
 }
 
 /// Dependencies bundle for the event consumer (W1 fix: avoids 9+ parameter function).

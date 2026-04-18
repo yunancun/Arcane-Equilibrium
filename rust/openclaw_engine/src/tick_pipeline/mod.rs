@@ -561,6 +561,17 @@ pub struct OrderDispatchRequest {
     pub is_primary: bool,
     pub stop_loss: Option<f64>,   // I-08: broker-side SL / 券商側止損
     pub take_profit: Option<f64>, // I-08: broker-side TP / 券商側止盈
+    /// FILL-CONTEXT-LINKAGE-1 (2026-04-19): signal-time context_id carried
+    /// end-to-end so exchange-confirmed fills write the matching
+    /// `trading.fills.entry_context_id` that JOINs to
+    /// `learning.decision_features.context_id`. Open orders carry the
+    /// fresh entry's id; close orders carry the live position's entry id
+    /// (callers that don't know the id, e.g. orphan close, pass empty).
+    /// FILL-CONTEXT-LINKAGE-1 (2026-04-19)：訊號時刻的 context_id 端到端傳遞，
+    /// 確保交易所確認成交寫入的 trading.fills.entry_context_id 與
+    /// learning.decision_features.context_id 可 JOIN。開單攜帶新建倉 id；
+    /// 平倉攜帶當前持倉 entry id；呼叫方不知時傳空字串。
+    pub context_id: String,
 }
 
 /// Tick context passed to strategies — borrows from on_tick scope to avoid cloning.
