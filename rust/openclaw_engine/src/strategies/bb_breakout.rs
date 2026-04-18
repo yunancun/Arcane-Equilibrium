@@ -8,6 +8,7 @@
 
 use std::collections::HashMap;
 
+use super::common::{PerSymbolState, TrendCooldown};
 use super::confluence::{self, ConfluenceConfig, PersistenceTracker};
 use super::{ParamRange, Strategy, StrategyAction, StrategyParams};
 use crate::intent_processor::OrderIntent;
@@ -258,26 +259,41 @@ const DEFAULT_EXPANSION_BW: f64 = 0.04;
 /// Default volume ratio threshold for breakout confirmation (成交量確認閾值默認)
 const DEFAULT_VOLUME_THRESHOLD: f64 = 1.2; // EDGE-P1-4: 1.5→1.2 (lower volume bar)
 
+/// Per-symbol dynamic state for `BbBreakout`. All fields are independently
+/// optional: absence of a squeeze, an entry-price, or a trailing-stop each have
+/// distinct meanings from "no position". `Default` → all `None`, matching the
+/// behaviour of the previous 4 parallel `HashMap`s.
+/// `BbBreakout` 的逐 symbol 動態狀態；4 個欄位各自獨立可選，等價於原先 4 個平行
+/// HashMap 的語意。`Default` = 全 `None`，對應「從未見過該 symbol」。
+#[derive(Debug, Clone, Default)]
+pub(crate) struct BbBreakoutPerSymbolState {
+    /// Current position direction if open: `Some(true)` = long, `Some(false)` = short.
+    /// 當前方向：Some(true)=多, Some(false)=空, None=空倉。
+    pub position: Option<bool>,
+    /// First timestamp squeeze was detected (FIX-26 expiry window anchor).
+    /// FIX-26：首次偵測壓縮的時間戳（作為 squeeze_expiry_ms 的錨點）。
+    pub squeeze_detected_ms: Option<u64>,
+    /// Entry price at position open (for PnL/trail math).
+    /// 開倉價（供 PnL/追蹤止損計算）。
+    pub entry_price: Option<f64>,
+    /// Current ATR trailing stop level.
+    /// 當前 ATR 追蹤止損價位。
+    pub trailing_stop: Option<f64>,
+}
+
 pub struct BbBreakout {
     active: bool,
-    /// Per-symbol position tracking: symbol → is_long direction.
-    /// 每幣種獨立持倉追蹤：symbol → 多空方向。
-    positions: HashMap<String, bool>,
-    /// Per-symbol squeeze state tracking: symbol → timestamp (ms) when squeeze was first detected.
-    /// FIX-26: Now stores detection time so squeeze expires after `squeeze_expiry_ms`.
-    /// 每幣種壓縮狀態追蹤：symbol → 首次偵測壓縮的時間戳（ms）。
-    squeeze_detected_ms: HashMap<String, u64>,
+    /// Per-symbol state (position/squeeze/entry_price/trailing_stop).
+    /// 逐 symbol 狀態（持倉/壓縮/進場價/追蹤止損），以 PerSymbolState 統一容器承載。
+    pub(crate) symbols: PerSymbolState<BbBreakoutPerSymbolState>,
     /// FIX-26: Max duration (ms) a squeeze remains valid. Default 30 min.
     /// FIX-26：壓縮狀態最長有效期（ms）。默認 30 分鐘。
     pub squeeze_expiry_ms: u64,
-    /// Per-symbol last trade timestamp for cooldown.
-    /// 每幣種最後交易時間戳（用於冷卻）。
-    last_trade_ms: HashMap<String, u64>,
+    /// Per-symbol cooldown tracking (was `last_trade_ms: HashMap<String, u64>`).
+    /// 逐 symbol 冷卻追蹤（取代原 last_trade_ms HashMap）。
+    pub(crate) cooldown: TrendCooldown,
     pub(crate) cooldown_ms: u64,
     default_qty: f64,
-    // V2: Per-symbol ATR trailing stop fields / 每幣種 ATR 追蹤止損欄位
-    entry_price: HashMap<String, f64>,
-    trailing_stop: HashMap<String, f64>,
     /// ATR multiplier for trailing stop distance. Agent-adjustable (Phase 3a).
     /// ATR 追蹤止損距離乘數。Agent 可調（Phase 3a）。
     pub trailing_stop_atr_mult: f64,
@@ -295,10 +311,11 @@ pub struct BbBreakout {
     /// Minimum volume ratio for breakout entry / 突破入場最低成交量倍率
     pub volume_threshold: f64,
     // RC-04: Per-symbol previous state for rejection rollback / 每幣種拒絕回滾用的先前狀態
-    prev_position: HashMap<String, Option<bool>>,
-    prev_squeeze_detected_ms: HashMap<String, Option<u64>>,
-    prev_entry_price: HashMap<String, Option<f64>>,
-    prev_trailing_stop: HashMap<String, Option<f64>>,
+    //
+    // Snapshot of the *entire* `BbBreakoutPerSymbolState` for the symbol at
+    // tick entry; restored on rejection. `None` = symbol was unseen at snapshot.
+    // 於 tick 進入時快照整個逐 symbol 狀態；拒絕時還原。None = 快照時該 symbol 不存在。
+    prev_state: HashMap<String, Option<BbBreakoutPerSymbolState>>,
     prev_last_trade_ms: HashMap<String, u64>,
     /// CONF-D: Multiplier applied to emitted intent.confidence (default 1.0, range [0,2]).
     conf_scale: f64,
@@ -313,24 +330,18 @@ impl BbBreakout {
     pub fn new() -> Self {
         Self {
             active: true,
-            positions: HashMap::new(),
-            squeeze_detected_ms: HashMap::new(),
+            symbols: PerSymbolState::new(),
             squeeze_expiry_ms: 2_700_000, // EDGE-P1-4: 45 minutes (was 30)
-            last_trade_ms: HashMap::new(),
+            cooldown: TrendCooldown::new(600_000),
             cooldown_ms: 600_000,
             default_qty: 1e9,
-            entry_price: HashMap::new(),
-            trailing_stop: HashMap::new(),
             trailing_stop_atr_mult: 2.0,
             squeeze_bw: DEFAULT_SQUEEZE_BW,
             expansion_bw: DEFAULT_EXPANSION_BW,
             volume_threshold: DEFAULT_VOLUME_THRESHOLD,
             entry_conf_base: 0.7,
             exit_conf_base: 0.5,
-            prev_position: HashMap::new(),
-            prev_squeeze_detected_ms: HashMap::new(),
-            prev_entry_price: HashMap::new(),
-            prev_trailing_stop: HashMap::new(),
+            prev_state: HashMap::new(),
             prev_last_trade_ms: HashMap::new(),
             conf_scale: 1.0,
             confluence_config: ConfluenceConfig::breakout(),
@@ -343,6 +354,9 @@ impl BbBreakout {
     pub fn update_params(&mut self, params: BbBreakoutParams) -> Result<(), String> {
         params.validate()?;
         self.cooldown_ms = params.cooldown_ms;
+        // Keep TrendCooldown duration in sync with param (hot-reloadable).
+        // 保持 TrendCooldown 時長與參數同步（支援熱重載）。
+        self.cooldown.set_duration(params.cooldown_ms);
         self.default_qty = params.default_qty;
         self.squeeze_bw = params.squeeze_bw;
         self.expansion_bw = params.expansion_bw;
@@ -378,6 +392,40 @@ impl BbBreakout {
             confluence_threshold_full: self.confluence_config.threshold_full,
         }
     }
+
+    // ── Per-symbol accessors (test-facing; also handy for observability) ──
+    // 逐 symbol 存取器（供測試使用，外部觀察亦可調用）。
+
+    /// Current position direction for `symbol` (None if flat or unseen).
+    /// 該 symbol 當前持倉方向，平倉或未見則為 None。
+    #[inline]
+    pub fn position_of(&self, symbol: &str) -> Option<bool> {
+        self.symbols.get(symbol).and_then(|s| s.position)
+    }
+
+    /// Recorded entry price for `symbol` (None if flat or unseen).
+    /// 該 symbol 最近一次開倉價，平倉或未見則為 None。
+    #[inline]
+    pub fn entry_price_of(&self, symbol: &str) -> Option<f64> {
+        self.symbols.get(symbol).and_then(|s| s.entry_price)
+    }
+
+    /// Current ATR trailing stop for `symbol` (None if flat / not yet set).
+    /// 該 symbol 當前 ATR 追蹤止損價，平倉或尚未設定則為 None。
+    #[inline]
+    pub fn trailing_stop_of(&self, symbol: &str) -> Option<f64> {
+        self.symbols.get(symbol).and_then(|s| s.trailing_stop)
+    }
+
+    /// True if `symbol` has a recorded squeeze-detection timestamp.
+    /// 該 symbol 是否登記了壓縮起始時間戳。
+    #[inline]
+    pub fn has_squeeze(&self, symbol: &str) -> bool {
+        self.symbols
+            .get(symbol)
+            .map(|s| s.squeeze_detected_ms.is_some())
+            .unwrap_or(false)
+    }
 }
 
 impl Strategy for BbBreakout {
@@ -392,63 +440,39 @@ impl Strategy for BbBreakout {
     }
 
     /// Reset per-symbol position state on external close (risk-stop).
-    /// 外部平倉（風控止損）時重設該幣種的內部狀態。
+    /// Preserves `squeeze_detected_ms` (squeeze can continue across close).
+    /// 外部平倉（風控止損）時重設該幣種內部狀態；`squeeze_detected_ms` 保留
+    /// （壓縮狀態可跨越平倉延續）。
     fn on_external_close(&mut self, symbol: &str) {
-        self.positions.remove(symbol);
-        self.entry_price.remove(symbol);
-        self.trailing_stop.remove(symbol);
+        if let Some(st) = self.symbols.get_mut(symbol) {
+            st.position = None;
+            st.entry_price = None;
+            st.trailing_stop = None;
+        }
         self.persistence.clear(symbol);
     }
 
-    /// RC-04: Revert per-symbol position, entry_price, trailing_stop, squeeze_detected_ms on rejection.
-    /// RC-04：拒絕時回滾該幣種的 position、entry_price、trailing_stop、squeeze_detected_ms。
+    /// RC-04: Revert per-symbol state on rejection. Snapshot is the full
+    /// `BbBreakoutPerSymbolState` (or `None` if the symbol was unseen); restoring
+    /// it exactly reproduces the pre-tick per-symbol state.
+    /// RC-04：拒絕時還原該幣種整包逐 symbol 狀態快照（快照時若未見過 symbol 則為 None）。
     fn on_rejection(&mut self, intent: &OrderIntent, _reason: &str) {
         let sym = &intent.symbol;
-        if let Some(prev) = self.prev_position.get(sym) {
+        if let Some(prev) = self.prev_state.get(sym) {
             match prev {
-                Some(b) => {
-                    self.positions.insert(sym.to_string(), *b);
+                Some(prev_st) => {
+                    self.symbols.insert(sym.to_string(), prev_st.clone());
                 }
                 None => {
-                    self.positions.remove(sym);
-                }
-            }
-        }
-        if let Some(prev) = self.prev_squeeze_detected_ms.get(sym) {
-            match prev {
-                Some(ts) => {
-                    self.squeeze_detected_ms.insert(sym.to_string(), *ts);
-                }
-                None => {
-                    self.squeeze_detected_ms.remove(sym);
-                }
-            }
-        }
-        if let Some(prev) = self.prev_entry_price.get(sym) {
-            match prev {
-                Some(p) => {
-                    self.entry_price.insert(sym.to_string(), *p);
-                }
-                None => {
-                    self.entry_price.remove(sym);
-                }
-            }
-        }
-        if let Some(prev) = self.prev_trailing_stop.get(sym) {
-            match prev {
-                Some(s) => {
-                    self.trailing_stop.insert(sym.to_string(), *s);
-                }
-                None => {
-                    self.trailing_stop.remove(sym);
+                    self.symbols.remove(sym);
                 }
             }
         }
         if let Some(&ts) = self.prev_last_trade_ms.get(sym) {
             if ts == 0 {
-                self.last_trade_ms.remove(sym);
+                self.cooldown.clear(sym);
             } else {
-                self.last_trade_ms.insert(sym.to_string(), ts);
+                self.cooldown.record_signal(sym, ts);
             }
         }
     }
@@ -465,37 +489,36 @@ impl Strategy for BbBreakout {
         let vol_ratio = ind.volume_ratio.unwrap_or(1.0);
 
         // RC-04: Snapshot per-symbol state before any mutation for rejection rollback.
-        // RC-04：在任何變更前快照該幣種狀態，供拒絕回滾使用。
+        // Whole-struct snapshot = exact pre-tick state (or None if unseen).
+        // RC-04：於任何變更前快照該 symbol 整包狀態（None = 本 tick 之前未見）。
         let sym = ctx.symbol;
-        self.prev_position
-            .insert(sym.to_string(), self.positions.get(sym).copied());
-        self.prev_squeeze_detected_ms
-            .insert(sym.to_string(), self.squeeze_detected_ms.get(sym).copied());
-        self.prev_entry_price
-            .insert(sym.to_string(), self.entry_price.get(sym).copied());
-        self.prev_trailing_stop
-            .insert(sym.to_string(), self.trailing_stop.get(sym).copied());
-        let last_ms = self.last_trade_ms.get(sym).copied().unwrap_or(0);
+        self.prev_state
+            .insert(sym.to_string(), self.symbols.get(sym).cloned());
+        let last_ms = self.cooldown.last_ms(sym).unwrap_or(0);
         self.prev_last_trade_ms.insert(sym.to_string(), last_ms);
 
         if bb.bandwidth < self.squeeze_bw {
             // FIX-26: Only record first detection time; don't reset on continued squeeze.
-            self.squeeze_detected_ms
-                .entry(sym.to_string())
-                .or_insert(ctx.timestamp_ms);
+            // FIX-26：只記錄首次偵測，持續壓縮不重置。
+            let st = self.symbols.get_or_init(sym);
+            if st.squeeze_detected_ms.is_none() {
+                st.squeeze_detected_ms = Some(ctx.timestamp_ms);
+            }
         }
-        if last_ms > 0 && ctx.timestamp_ms < last_ms + self.cooldown_ms {
+        if !self.cooldown.is_cooled_down(sym, ctx.timestamp_ms) {
             return vec![];
         }
 
         let mut intents = Vec::new();
-        match self.positions.get(sym).copied() {
+        let current_position = self.symbols.get(sym).and_then(|s| s.position);
+        match current_position {
             None => {
                 // FIX-26: Check squeeze exists AND hasn't expired.
                 let in_squeeze = self
-                    .squeeze_detected_ms
+                    .symbols
                     .get(sym)
-                    .map(|&ts| ctx.timestamp_ms < ts + self.squeeze_expiry_ms)
+                    .and_then(|s| s.squeeze_detected_ms)
+                    .map(|ts| ctx.timestamp_ms < ts + self.squeeze_expiry_ms)
                     .unwrap_or(false);
                 if in_squeeze
                     && bb.bandwidth > self.expansion_bw
@@ -583,11 +606,15 @@ impl Strategy for BbBreakout {
                             confluence_score,
                             persistence_elapsed_ms,
                         }));
-                        self.positions.insert(sym.to_string(), is_long);
-                        self.squeeze_detected_ms.remove(sym);
-                        self.last_trade_ms.insert(sym.to_string(), ctx.timestamp_ms);
+                        // Commit per-symbol state in a single get_or_init call
+                        // to avoid four separate HashMap lookups.
+                        // 單次 get_or_init 寫入所有欄位，避免多次查找。
+                        let st = self.symbols.get_or_init(sym);
+                        st.position = Some(is_long);
+                        st.squeeze_detected_ms = None;
+                        self.cooldown.record_signal(sym, ctx.timestamp_ms);
                         // V2: Record entry price and initialize trailing stop per-symbol
-                        self.entry_price.insert(sym.to_string(), ctx.price);
+                        st.entry_price = Some(ctx.price);
                         if let Some(atr_res) = &ind.atr_14 {
                             let dist = atr_res.atr * self.trailing_stop_atr_mult;
                             let stop = if is_long {
@@ -595,7 +622,7 @@ impl Strategy for BbBreakout {
                             } else {
                                 ctx.price + dist
                             };
-                            self.trailing_stop.insert(sym.to_string(), stop);
+                            st.trailing_stop = Some(stop);
                         }
                     }
                 }
@@ -609,22 +636,26 @@ impl Strategy for BbBreakout {
                 // V2：ATR 追蹤止損 — Chandelier 出場，峰值 2×ATR。
                 if let Some(atr_res) = &ind.atr_14 {
                     let stop_distance = atr_res.atr * self.trailing_stop_atr_mult;
-                    let cur_stop = self.trailing_stop.get(sym).copied();
+                    // Note: ratchet-only update (long = monotonically increasing stop,
+                    // short = monotonically decreasing stop); preserved bit-exact.
+                    // 備註：止損單向棘輪（多頭只升、空頭只降），保持 bit-exact 行為。
+                    let st = self.symbols.get_or_init(sym);
+                    let cur_stop = st.trailing_stop;
                     if is_long {
                         let new_stop = ctx.price - stop_distance;
                         if cur_stop.is_none() || new_stop > cur_stop.unwrap() {
-                            self.trailing_stop.insert(sym.to_string(), new_stop);
+                            st.trailing_stop = Some(new_stop);
                         }
-                        if ctx.price <= self.trailing_stop.get(sym).copied().unwrap_or(0.0) {
+                        if ctx.price <= st.trailing_stop.unwrap_or(0.0) {
                             exit_reason = Some("trailing_stop");
                             exit_confidence = self.exit_conf_base + 0.2;
                         }
                     } else {
                         let new_stop = ctx.price + stop_distance;
                         if cur_stop.is_none() || new_stop < cur_stop.unwrap() {
-                            self.trailing_stop.insert(sym.to_string(), new_stop);
+                            st.trailing_stop = Some(new_stop);
                         }
-                        if ctx.price >= self.trailing_stop.get(sym).copied().unwrap_or(f64::MAX) {
+                        if ctx.price >= st.trailing_stop.unwrap_or(f64::MAX) {
                             exit_reason = Some("trailing_stop");
                             exit_confidence = self.exit_conf_base + 0.2;
                         }
@@ -663,11 +694,15 @@ impl Strategy for BbBreakout {
                         ),
                         reason: reason.into(),
                     });
-                    self.positions.remove(sym);
-                    self.last_trade_ms.insert(sym.to_string(), ctx.timestamp_ms);
-                    // V2: Reset per-symbol trailing stop state on exit / 出場時重置該幣種追蹤止損狀態
-                    self.entry_price.remove(sym);
-                    self.trailing_stop.remove(sym);
+                    // V2: Reset per-symbol trailing stop state on exit; squeeze
+                    // tracking is preserved (same semantics as pre-refactor).
+                    // V2：出場時重置 position/entry_price/trailing_stop，squeeze 追蹤保留。
+                    if let Some(st) = self.symbols.get_mut(sym) {
+                        st.position = None;
+                        st.entry_price = None;
+                        st.trailing_stop = None;
+                    }
+                    self.cooldown.record_signal(sym, ctx.timestamp_ms);
                 }
             }
         }
@@ -765,8 +800,8 @@ mod tests {
         s.min_persistence_ms = 0; // disable persistence for unit tests
         s.on_tick(&ctx(0.01, 0.5, 1.0, 0)); // squeeze
         s.on_tick(&ctx(0.05, 1.1, 2.0, 700_000)); // breakout long
-        assert_eq!(s.entry_price.get("BTC"), Some(&50000.0));
-        assert!(s.trailing_stop.get("BTC").is_none()); // no ATR data, no trailing stop yet
+        assert_eq!(s.entry_price_of("BTC"), Some(50000.0));
+        assert!(s.trailing_stop_of("BTC").is_none()); // no ATR data, no trailing stop yet
     }
 
     #[test]
@@ -785,15 +820,15 @@ mod tests {
         // Enter long
         s.on_tick(&ctx(0.01, 0.5, 1.0, 0)); // squeeze
         s.on_tick(&ctx_ext(0.05, 1.1, 2.0, 700_000, 50000.0, atr(), None)); // breakout
-        assert_eq!(s.positions.get("BTC"), Some(&true));
+        assert_eq!(s.position_of("BTC"), Some(true));
         // trailing_stop = 50000 - 500*2 = 49000
-        assert_eq!(s.trailing_stop.get("BTC"), Some(&49000.0));
+        assert_eq!(s.trailing_stop_of("BTC"), Some(49000.0));
 
         // Price rises -> trailing stop ratchets up, no exit
         // 價格上漲 -> 追蹤止損上移，不出場
         let i = s.on_tick(&ctx_ext(0.05, 1.2, 2.0, 1_400_000, 52000.0, atr(), None));
         assert!(i.is_empty()); // still in trend
-        assert_eq!(s.trailing_stop.get("BTC"), Some(&51000.0)); // 52000 - 1000
+        assert_eq!(s.trailing_stop_of("BTC"), Some(51000.0)); // 52000 - 1000
 
         // Price drops to trailing stop -> exit
         // 價格跌至追蹤止損 -> 出場
@@ -808,9 +843,9 @@ mod tests {
             }
             other => panic!("expected Close, got {:?}", other),
         }
-        assert!(s.positions.get("BTC").is_none());
-        assert!(s.entry_price.get("BTC").is_none());
-        assert!(s.trailing_stop.get("BTC").is_none());
+        assert!(s.position_of("BTC").is_none());
+        assert!(s.entry_price_of("BTC").is_none());
+        assert!(s.trailing_stop_of("BTC").is_none());
     }
 
     #[test]
@@ -829,14 +864,14 @@ mod tests {
         // Enter short
         s.on_tick(&ctx(0.01, 0.5, 1.0, 0)); // squeeze
         s.on_tick(&ctx_ext(0.05, -0.1, 2.0, 700_000, 50000.0, atr(), None)); // breakout short
-        assert_eq!(s.positions.get("BTC"), Some(&false));
+        assert_eq!(s.position_of("BTC"), Some(false));
         // trailing_stop = 50000 + 500*2 = 51000
-        assert_eq!(s.trailing_stop.get("BTC"), Some(&51000.0));
+        assert_eq!(s.trailing_stop_of("BTC"), Some(51000.0));
 
         // Price drops -> trailing stop ratchets down
         let i = s.on_tick(&ctx_ext(0.05, -0.2, 2.0, 1_400_000, 48000.0, atr(), None));
         assert!(i.is_empty());
-        assert_eq!(s.trailing_stop.get("BTC"), Some(&49000.0)); // 48000 + 1000
+        assert_eq!(s.trailing_stop_of("BTC"), Some(49000.0)); // 48000 + 1000
 
         // Price rises to trailing stop -> exit
         let i = s.on_tick(&ctx_ext(0.05, 0.1, 2.0, 2_100_000, 49000.0, atr(), None));
@@ -875,7 +910,7 @@ mod tests {
             }
             other => panic!("expected Open, got {:?}", other),
         }
-        assert_eq!(s.positions.get("BTC"), Some(&true));
+        assert_eq!(s.position_of("BTC"), Some(true));
 
         // Regime shifts to mean_reverting -> exit
         let i = s.on_tick(&ctx_ext(
@@ -897,7 +932,7 @@ mod tests {
             }
             other => panic!("expected Close, got {:?}", other),
         }
-        assert!(s.positions.get("BTC").is_none());
+        assert!(s.position_of("BTC").is_none());
     }
 
     #[test]
@@ -933,7 +968,7 @@ mod tests {
 
         // bw=0.025 triggers squeeze with custom threshold (< 0.03)
         s.on_tick(&ctx(0.025, 0.5, 1.0, 0));
-        assert!(s.squeeze_detected_ms.contains_key("BTC"));
+        assert!(s.has_squeeze("BTC"));
 
         // bw=0.05 is expansion for default (> 0.04) but NOT for custom (< 0.06)
         let i = s.on_tick(&ctx(0.05, 1.1, 2.0, 700_000));
@@ -981,7 +1016,7 @@ mod tests {
                                   // Enter long (no ATR, no Hurst — only pctb/bw exits active)
         s.on_tick(&ctx(0.01, 0.5, 1.0, 0)); // squeeze
         s.on_tick(&ctx(0.05, 1.1, 2.0, 700_000)); // breakout long
-        assert_eq!(s.positions.get("BTC"), Some(&true));
+        assert_eq!(s.position_of("BTC"), Some(true));
 
         // %B reverts to 0.5 (mid-band) → should trigger pctb_revert exit
         let i = s.on_tick(&ctx(0.05, 0.5, 2.0, 1_400_000));
@@ -996,7 +1031,7 @@ mod tests {
             }
             other => panic!("expected Close(pctb_revert), got {:?}", other),
         }
-        assert!(s.positions.get("BTC").is_none());
+        assert!(s.position_of("BTC").is_none());
     }
 
     #[test]
@@ -1008,7 +1043,7 @@ mod tests {
                                   // Enter long
         s.on_tick(&ctx(0.01, 0.5, 1.0, 0)); // squeeze
         s.on_tick(&ctx(0.05, 1.1, 2.0, 700_000)); // breakout long
-        assert_eq!(s.positions.get("BTC"), Some(&true));
+        assert_eq!(s.position_of("BTC"), Some(true));
 
         // %B still extreme (1.1, outside [0.2,0.8]) but bandwidth collapsed below squeeze_bw (0.02)
         // → pctb_revert doesn't trigger, but bw_squeeze does
@@ -1024,7 +1059,7 @@ mod tests {
             }
             other => panic!("expected Close(bw_squeeze), got {:?}", other),
         }
-        assert!(s.positions.get("BTC").is_none());
+        assert!(s.position_of("BTC").is_none());
     }
 
     // ── G-SR-1 S3+S4: param_ranges + validation tests ──

@@ -8,6 +8,7 @@
 
 use std::collections::HashMap;
 
+use super::common::{PerSymbolState, TrendCooldown};
 use super::confluence::{self, ConfluenceConfig, PersistenceTracker};
 use super::{ParamRange, Strategy, StrategyAction, StrategyParams};
 use crate::intent_processor::OrderIntent;
@@ -292,11 +293,15 @@ impl BbReversionParams {
 pub struct BbReversion {
     active: bool,
     /// Per-symbol position tracking: symbol → is_long direction.
-    /// 每幣種獨立持倉追蹤：symbol → 多空方向。
-    positions: HashMap<String, bool>,
+    /// E1-P0-2: Migrated from `HashMap<String, bool>` to `PerSymbolState<bool>`.
+    /// 每幣種獨立持倉追蹤：symbol → 多空方向（E1-P0-2 包裝）。
+    positions: PerSymbolState<bool>,
     /// Per-symbol last trade timestamp for cooldown.
-    /// 每幣種最後交易時間戳（用於冷卻）。
-    last_trade_ms: HashMap<String, u64>,
+    /// E1-P0-2: Migrated from `HashMap<String, u64>` to `TrendCooldown`. The
+    /// original check `last_ms > 0 && ts < last_ms + cooldown_ms` maps exactly
+    /// to `TrendCooldown::is_cooled_down` (unseen-symbol → None → cooled).
+    /// 每幣種最後交易時間戳（E1-P0-2：改用 TrendCooldown，語意完全保留）。
+    cooldown: TrendCooldown,
     pub(crate) cooldown_ms: u64,
     default_qty: f64,
     // RC-07: Limit order support — Agent can switch from market to limit entries
@@ -341,8 +346,8 @@ impl BbReversion {
     pub fn new() -> Self {
         Self {
             active: true,
-            positions: HashMap::new(),
-            last_trade_ms: HashMap::new(),
+            positions: PerSymbolState::new(),
+            cooldown: TrendCooldown::new(600_000),
             cooldown_ms: 600_000,
             default_qty: 1e9,
             use_limit: false,
@@ -370,6 +375,9 @@ impl BbReversion {
     pub fn update_params(&mut self, params: BbReversionParams) -> Result<(), String> {
         params.validate()?;
         self.cooldown_ms = params.cooldown_ms;
+        // E1-P0-2: Keep TrendCooldown duration in sync with hot-reloaded param.
+        // E1-P0-2：熱更新時同步 TrendCooldown 時長。
+        self.cooldown.set_duration(params.cooldown_ms);
         self.default_qty = params.default_qty;
         // GAP-9: paper engine cannot honor limit orders (no order-book sim).
         // Force market mode regardless of incoming param to keep PnL faithful.
@@ -491,9 +499,11 @@ impl Strategy for BbReversion {
         }
         if let Some(&ts) = self.prev_last_trade_ms.get(sym) {
             if ts == 0 {
-                self.last_trade_ms.remove(sym);
+                // Sentinel 0 → unseen prior to mutation; clear to restore.
+                // 哨兵 0 → 變更前未見；清除以還原。
+                self.cooldown.clear(sym);
             } else {
-                self.last_trade_ms.insert(sym.clone(), ts);
+                self.cooldown.record_signal(sym, ts);
             }
         }
     }
@@ -508,8 +518,13 @@ impl Strategy for BbReversion {
             Some(i) => i,
             None => return vec![],
         };
-        let last_ms = self.last_trade_ms.get(ctx.symbol).copied().unwrap_or(0);
-        if last_ms > 0 && ctx.timestamp_ms < last_ms + self.cooldown_ms {
+        // Snapshot pre-mutation last_ms for RC-04 (sentinel 0 when unseen).
+        // 為 RC-04 快照變更前的 last_ms（未見時為 0 哨兵）。
+        let last_ms = self.cooldown.last_ms(ctx.symbol).unwrap_or(0);
+        // E1-P0-2: Cooldown check delegated to shared TrendCooldown. Unseen
+        // symbol's None branch maps to the old `last_ms == 0` "cooled" case.
+        // E1-P0-2：冷卻檢查委派給 TrendCooldown；未見的 None 分支對應原本 last_ms==0 的「已冷卻」。
+        if !self.cooldown.is_cooled_down(ctx.symbol, ctx.timestamp_ms) {
             return vec![];
         }
 
@@ -631,8 +646,7 @@ impl Strategy for BbReversion {
                         persistence_elapsed_ms,
                     )));
                     self.positions.insert(ctx.symbol.to_string(), is_long);
-                    self.last_trade_ms
-                        .insert(ctx.symbol.to_string(), ctx.timestamp_ms);
+                    self.cooldown.record_signal(ctx.symbol, ctx.timestamp_ms);
                 }
             }
             Some(_is_long) => {
@@ -648,8 +662,7 @@ impl Strategy for BbReversion {
                         reason: "bb_mean_revert".into(),
                     });
                     self.positions.remove(ctx.symbol);
-                    self.last_trade_ms
-                        .insert(ctx.symbol.to_string(), ctx.timestamp_ms);
+                    self.cooldown.record_signal(ctx.symbol, ctx.timestamp_ms);
                 }
             }
         }
@@ -999,7 +1012,7 @@ mod tests {
 
         // Same signal without funding rate
         s.positions.clear();
-        s.last_trade_ms.clear();
+        s.cooldown = TrendCooldown::new(600_000);
         s.persistence = PersistenceTracker::new();
         let ctx_without = ctx_bb_with_funding(1.2, 75.0, 2000, None);
         let actions_without = s.on_tick(&ctx_without);
@@ -1034,7 +1047,7 @@ mod tests {
         };
 
         s.positions.clear();
-        s.last_trade_ms.clear();
+        s.cooldown = TrendCooldown::new(600_000);
         s.persistence = PersistenceTracker::new();
         let ctx_without = ctx_bb_with_funding(-0.1, 25.0, 2000, None);
         let actions_without = s.on_tick(&ctx_without);
@@ -1066,7 +1079,7 @@ mod tests {
         };
 
         s.positions.clear();
-        s.last_trade_ms.clear();
+        s.cooldown = TrendCooldown::new(600_000);
         s.persistence = PersistenceTracker::new();
         let ctx_none = ctx_bb_with_funding(-0.1, 25.0, 2000, None);
         let actions_none = s.on_tick(&ctx_none);
@@ -1097,7 +1110,7 @@ mod tests {
         };
 
         s.positions.clear();
-        s.last_trade_ms.clear();
+        s.cooldown = TrendCooldown::new(600_000);
         s.persistence = PersistenceTracker::new();
         let ctx_none = ctx_bb_with_funding(1.2, 75.0, 2000, None);
         let actions_none = s.on_tick(&ctx_none);

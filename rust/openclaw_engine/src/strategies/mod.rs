@@ -10,6 +10,7 @@
 
 pub mod bb_breakout;
 pub mod bb_reversion;
+pub mod common;
 pub mod confluence;
 pub mod funding_arb;
 pub mod grid_helpers;
