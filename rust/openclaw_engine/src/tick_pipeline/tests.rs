@@ -215,6 +215,45 @@ fn test_execute_position_close_propagates_trigger_tag() {
     }
 }
 
+/// P1-15 regression: `ipc_close_symbol` must tag OrderDispatchRequest.strategy
+/// with a `risk_close:` prefix so the ML edge-stats pipeline's `is_exit`
+/// detector (program_code/ml_training/realized_edge_stats.py) classifies the
+/// resulting close fill as an exit, not an entry. Previously emitted the bare
+/// string "ipc_close_symbol", producing phantom round-trip cells in the JS
+/// estimator snapshot.
+/// P1-15 回歸：`ipc_close_symbol` 派發的 OrderDispatchRequest.strategy 必須
+/// 帶 `risk_close:` 前綴，ML edge-stats 才會判為 exit fill 而非 entry，
+/// 避免 JS estimator snapshot 出現幻影 round-trip cells。
+#[test]
+fn test_ipc_close_symbol_dispatch_strategy_has_risk_close_prefix() {
+    let mut pipeline = TickPipeline::with_kind(&["BTCUSDT"], 1_000.0, PipelineKind::Demo);
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<OrderDispatchRequest>();
+    pipeline.set_shadow_channel(tx);
+
+    // Seed a latest price so the orphan-hint close path has a non-zero mark.
+    // 注入最新價格，孤兒 hint 平倉路徑才有非零 mark price。
+    let _ = pipeline.on_tick(&make_event("BTCUSDT", 50_000.0, 1_700_000_000_000));
+
+    // paper_state has no position for BTCUSDT — rely on caller hints to
+    // trigger the orphan-close dispatch branch (commands.rs line ~660).
+    // paper_state 無倉，靠 hints 走孤兒平倉分支。
+    let fired = pipeline.ipc_close_symbol("BTCUSDT", Some(true), Some(0.1));
+    assert!(fired, "ipc_close_symbol must dispatch when hints are provided");
+
+    let req = rx.try_recv().expect("OrderDispatchRequest must be sent");
+    assert!(
+        req.strategy.starts_with("risk_close:"),
+        "strategy must start with 'risk_close:' for ML is_exit detector, got {}",
+        req.strategy
+    );
+    assert!(
+        req.strategy.ends_with("ipc_close_symbol"),
+        "strategy must preserve 'ipc_close_symbol' suffix for dispatch traceability, got {}",
+        req.strategy
+    );
+    assert!(req.is_close, "ipc_close_symbol dispatch must set is_close=true");
+}
+
 #[test]
 fn test_pipeline_kind_is_exchange() {
     assert!(!PipelineKind::Paper.is_exchange());

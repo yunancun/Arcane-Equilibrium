@@ -235,8 +235,8 @@ def compute_edge_stats(
     Returns:
         Dict mapping (strategy_name, symbol) → EdgeStats.
     """
-    if engine_mode not in ("paper", "demo", "live"):
-        raise ValueError(f"Invalid engine_mode: {engine_mode!r} (must be paper/demo/live)")
+    if engine_mode not in ("paper", "demo", "live", "live_demo"):
+        raise ValueError(f"Invalid engine_mode: {engine_mode!r} (must be paper/demo/live/live_demo)")
 
     conn = _get_db_conn()
     try:

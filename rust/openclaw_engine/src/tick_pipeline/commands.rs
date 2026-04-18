@@ -665,7 +665,7 @@ impl TickPipeline {
                     is_long: !is_long, // opposite side to close / 相反方向平倉
                     qty,
                     price,
-                    strategy: "ipc_close_symbol".into(),
+                    strategy: "risk_close:ipc_close_symbol".into(),
                     paper_fill_ts: ts_ms,
                     is_close: true,
                     order_link_id,
