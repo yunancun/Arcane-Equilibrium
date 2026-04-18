@@ -278,6 +278,7 @@ git status && git log --oneline -5
 - [ ] **QoL-2** Demo AI cost 追蹤（`tab-demo.html` 硬編碼 'N/A'，依賴 G-1 H1-H5）
 - [ ] **DUST-EVICTION GUI 曝光**（P1-8 FUP）：log-only 觀察滿一週後（起算 2026-04-17）→ GUI 曝光 `dust_frozen` / `orphan_frozen` 倉位給 operator 日報；`paper_state.rs` 已有 `TriageOutcome.dust_frozen` 計數器
 - [ ] **LEARNING-COCKPIT-NO-IPC-1** Learning 8 端點走 Python state_store 非 Rust IPC（設計債，等 G-7/G-10 後再議；不阻 Live，原則 #7 學習平面與 Live 隔離）
+- [ ] **DYNAMIC-RISK-STATUS-TEST-SIG-1** — `test_phase2_strategy_routes_coverage.py::TestDynamicRiskRoutes` 2 測試直接 `await get_dynamic_risk_status(engine="foo")`，跳過 FastAPI 依賴解析，`engine` 仍是 `Query` object → `.lower()` AttributeError @ `strategy_read_routes.py:260`。修復方案：(a) 測試改用 `TestClient(app).get("/api/v1/dynamic-risk/status?engine=...")` 走 HTTP；或 (b) 函數首行加 `engine = engine.default if hasattr(engine, "default") else engine`。嚴重度：測試 only（prod HTTP 路徑正常），**不阻 Live**。引入來源 commit `81a3807` DYNAMIC-RISK-1（2026-04-18 20:06），E5-P0 整合 Phase D 發現並獨立開 ticket。
 
 ---
 
