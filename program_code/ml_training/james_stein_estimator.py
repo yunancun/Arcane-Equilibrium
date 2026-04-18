@@ -252,6 +252,8 @@ def run_james_stein(
             filename = "edge_estimates_paper.json"
         elif engine_mode == "live":
             filename = "edge_estimates_live.json"
+        elif engine_mode == "live_demo":
+            filename = "edge_estimates_live_demo.json"
         else:
             # demo → production snapshot (cost_gate default)
             filename = "edge_estimates.json"
@@ -405,10 +407,11 @@ def _parse_args() -> argparse.Namespace:
     )
     p.add_argument("--days", type=int, default=30, help="Days of history to query (default 30)")
     p.add_argument("--min-samples", type=int, default=3, help="Min round-trips per cell (default 3)")
-    p.add_argument("--mode", type=str, default="demo", choices=["paper", "demo", "live"],
+    p.add_argument("--mode", type=str, default="demo", choices=["paper", "demo", "live", "live_demo"],
                    help="Engine mode to query fills from (default: demo). "
                         "Demo edge → edge_estimates.json (production). "
-                        "Paper edge → edge_estimates_paper.json (draft strategy only).")
+                        "Paper edge → edge_estimates_paper.json (draft strategy only). "
+                        "Live_demo edge → edge_estimates_live_demo.json (LiveDemo fills only).")
     p.add_argument("--out", type=str, default=None, help="JSON snapshot output path (overrides mode-based default)")
     p.add_argument("--verbose", action="store_true")
     return p.parse_args()
