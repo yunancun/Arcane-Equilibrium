@@ -34,7 +34,7 @@ pub mod live_authorization;
 pub mod market_data_client;
 pub mod ml;
 pub mod mode_state;
-pub mod multi_interval_ws;
+pub mod multi_interval_topics;
 pub mod news;
 pub mod orchestrator;
 pub mod order_manager;
