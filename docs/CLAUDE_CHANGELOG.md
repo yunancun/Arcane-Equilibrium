@@ -1,7 +1,88 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-04-19（FILL-CONTEXT-LINKAGE-1 + EXIT-FEATURES-TABLE-1 Phase 1b FUP）
+> 最後更新：2026-04-19（doc archive：E5-FN-3 agent_audit_bridge + AnalystAgent pilot / E5-FN-2 ai_budget request_id dedup / MARKET-KLINES-STALE-1 / EXIT-FEATURES-TABLE-1 Phase 1b producer wiring / DUAL-TRACK-EXIT-1 Step 0 skeleton）
+
+### E5-FN-3 — `agent_audit_bridge.py` + AnalystAgent pilot wiring（2026-04-19 · commit 19f3d85）
+
+Audit `docs/audits/2026-04-18--e5_full_codebase_audit.md` §七.7.3 聲稱 5-Agent 系統（Scout/Strategist/Guardian/Analyst/Executor）**無一寫入 `change_audit_log`** — 違反 Root Principle #8「交易可解釋」。RCA 驗證：
+
+- Scout 類 ctor 硬編碼 `audit_callback=None`（`multi_agent_framework.py:410`）→ 0 `_audit()` calls
+- Strategist 有 7 `_audit()` call-sites，Guardian 4，Analyst 6，Executor 2 → 共 **19** 個 call-sites
+- `strategy_wiring.py` 4 agent 建構時**均未傳 `audit_callback=...`** → `BaseAgent._audit_callback=None` → 19 calls 全部 silently no-op
+- 治理層 `governance_hub` 寫入 `change_audit_log` 覆蓋的是 state machines（authorization / risk_governor / decision_lease / reconciliation），**不覆蓋 agent 決策點**
+
+**實施**：
+- 新 `agent_audit_bridge.py`（+280 行，stateless 工廠）：
+  - `make_agent_audit_callback(gov_hub, role_name) -> Callable[[str, Any], None]`
+  - 分類策略：`*_received` → `STATE_CHANGE`，其他 decision-ish → `PARAMETER_CHANGE`（未知 event_type 落 `PARAMETER_CHANGE` 保守默認）
+  - Fail-open 3 層守護（gov_hub=None → debug / `_change_audit_log` 缺席 → debug / `record_change` 拋異常 → warning）
+  - `_change_audit_log` 每次 call lazy-read → 支援 late binding（test 覆蓋）
+- **AnalystAgent pilot** on `strategy_wiring.py` Batch 9 (`:268`) + Batch 10 (`:342`)：
+  - 模組級 `_GOV_HUB_FOR_ANALYST` + `_ANALYST_AUDIT_CB = make_agent_audit_callback(_GOV_HUB_FOR_ANALYST, "AnalystAgent")`
+  - 兩 call site 均傳 `audit_callback=_ANALYST_AUDIT_CB`
+  - Scout 維持 `audit_callback=None` 硬編碼（需 code change，屬 follow-up）
+- CLAUDE.md §九 登記 `_ANALYST_AUDIT_CB` + `_GOV_HUB_FOR_ANALYST` + 註記 `agent_audit_bridge` 為無狀態工廠
+
+**APPROVE_PARTIAL 延後（TODO §E5-FN-3-FUP）**：
+- Strategist wire at `strategy_wiring.py:172`（7 calls exist）
+- Guardian wire at `:215`（4 calls exist）
+- Executor wire at `:345`（2 calls exist）
+- Scout 需 code change：`multi_agent_framework.py:400` ctor 接受 `audit_callback=` kwarg + 新增 `_audit()` calls at `produce_intel()` / `produce_event_alert()` + wire at `:114`
+
+**測試（+12 in `tests/test_agent_audit_bridge.py`）**：分類（兩桶）· 多事件持久化 · fail-open（gov_hub=None / audit_log=None / record_change raises / late binding）· role_name propagation · AnalystAgent 整合（PARAMETER_CHANGE + STATE_CHANGE 路徑）。
+
+**E2 審查**：APPROVE_WITH_NITS（5 非阻塞 nits — log spam throttle / 未知 event_type 測試 / thread-safety doc / TODO.md 條目 / 文字輕微 drift）。
+
+**回歸**：pytest **2820 passed** / 2 pre-existing DYNAMIC-RISK fail / 14 skipped（1567 → **2820**，+12 from FN-3 + 其他 Phase D-E 外盤）。
+
+---
+
+### DUAL-TRACK-EXIT-1 Step 0 + MARKET-KLINES-STALE-1 fix + EXIT-FEATURES-TABLE-1 skeleton（2026-04-18 · commit 65acde6）
+
+**Step 0 可行性 Sprint 結果**（2/4 綠 + 1/4 黃 + 1/4 紅）→ Phase 1 拆 1a/1b：
+- 不確定 1 ✅ estimator CLI 跑通 104 cells（機制綠，bind blocker 獨立）
+- 不確定 2 🔴 `decision_features` entry-time snapshot，7 維對齊僅 1/7 直接（`atr_pct`）→ 需新建 `learning.exit_features` + Rust exit handler
+- 不確定 3 ✅ ma_crossover live_demo 2.23M / grid_trading live_demo 16.5k；小樣本策略強制 P-only
+- 不確定 4 🟡 無 tick 表；kline 1-min 粒度；`market.klines` 自 2026-04-16 21:08 停寫 → fallback #6 事後歸因 audit
+
+**MARKET-KLINES-STALE-1 修復**（root cause = PAPER-DISABLE-1 架構遺漏，非停電事件）：
+- `main.rs` 三引擎 `market_data_tx` 全改 `Some(market_tx.clone())`（原 D19 設計僅 Paper 寫入，PAPER-DISABLE-1 後 paper 預設不 spawn 即 DB kline 寫入完全斷）
+- `market_writer.rs:180` `ON CONFLICT DO NOTHING` dedup 多 producer 安全（PK `(symbol, timeframe, ts)`）
+- Phase 1 ATR 前置 / Phase 1 部署前必修
+
+**EXIT-FEATURES-TABLE-1 骨架**（Phase 1b 前置）：
+- `sql/migrations/V999__exit_features.sql`：DDL + 3 索引 + TimescaleDB hypertable，PK `(context_id, ts)`
+- `database/exit_feature_writer.rs`：mirror `decision_feature_writer` pattern，+5 單測
+- `database/mod.rs`：`ExitFeatureRow` struct（7 維 Track P + exit meta + provenance）
+- `tasks.rs::spawn_db_writers` 7→8 tuple，新增 exit_feature writer task
+- `event_consumer/types.rs::EventConsumerDeps.exit_feature_tx` 通道
+- `event_consumer/mod.rs` destructure with `_exit_feature_tx`（producer 由 Phase 1a 軌道 1 接線）
+- `main.rs` 三引擎皆 clone `exit_feature_tx`（避免重蹈 D19 單引擎覆轍）
+
+**Validation**：`cargo check` PASS 0 errors, 0 new warnings。
+**Worklogs**：`docs/worklogs/2026-04-18-1--dual_track_exit_feasibility.md` · `docs/worklogs/2026-04-18-2--exit_features_table_design.md`。
+
+---
+
+### EXIT-FEATURES-TABLE-1 Phase 1b producer wiring — `emit_close_fill` 主路徑（2026-04-19 · commit 6ea643e）
+
+**問題**：65acde6 完成 table/writer/channel 骨架但 producer 未接線 → 零 rows 寫入 `learning.exit_features`。
+
+**修復**（`emit_close_fill` 主路徑接線）：
+- `paper_state` 新增 `PositionExitSnapshot`（value-typed 結構），在 close 前捕獲關倉前狀態（open_price / pnl / size / entry_context_id 等），避免 mutate state 後取值失真。
+- `PriceHistoryTracker::compute_roc(lookback_ms)` 新增 per-symbol 短窗 ROC。
+- `tick_pipeline/mod.rs::build_exit_feature_row` 構造 7 維 Track P 維度（est_net_bps / peak_pnl_pct / atr_pct / giveback_atr_norm / time_since_peak_ms / price_roc_short / entry_age_secs）+ exit meta（strategy_name / close_tag / exit_source / exit_trigger_rule）+ provenance（context_id / engine_mode / feature_schema_hash）。
+- `compute_feature_schema_hash()` 加 `OnceLock` 緩存（per-process 一次性計算）。
+- `emit_close_fill` path：捕獲 snap → 構造 row → `try_send` 到 `exit_feature_tx`（fail-soft：channel 未接或 slot 滿時靜默 no-op）。
+- `parse_exit_tag` 自由函式：`{risk_close|stop_trigger|strategy_close}:<reason>` → canonical `(exit_source, exit_trigger_rule)`。
+
+**Tests**（+15 新測試）：7 維構造正確性 / parse_exit_tag 全分支 / fail-soft 語義 / feature_schema_hash 穩定 / ROC 缺資料退回 0 / snap 捕獲時序正確性。**Pre-existing 5 個 `test_exit_feature_row_*` WIP 仍 fail**（2 個漏接 close paths，由後續 `c7171b2` FUP 修復）。
+
+**覆蓋**：`emit_close_fill`（strategy close 主路徑，paper/demo/live 三引擎共用）。
+**未覆蓋**（→ c7171b2 FUP）：`process_external_fill`（IPC 外部 fill 報告）· `ipc_close_symbol` paper 分支（operator /close_symbol API + dust eviction + orphan_handler→Paper）。
+
+---
 
 ### FILL-CONTEXT-LINKAGE-1 — 訊號時刻 context_id 端到端傳遞（2026-04-19 · commit bd45e90）
 
@@ -64,6 +145,35 @@ Track P 標籤覆蓋因此不完整；ML 訓練會見到從這兩個 route 的 c
 - `tick_pipeline/mod.rs`（try_emit_exit_feature_row 抽出）
 - `tick_pipeline/commands.rs`（2 paths 接線）
 - `tick_pipeline/tests.rs`（+3 tests）
+
+---
+
+### E5-FN-2 — `ai_budget` request_id dedup 防雙重計費（2026-04-19 · commit fd480ba）
+
+**問題**（Audit §七 7.2 · R6/P2 · financial integrity）：`learning.ai_usage_log` PK `(time, scope, request_id)` 用 `time=NOW()`，transient DB partial-failure 後 retry 會拿到新的 `NOW()`，PK 無法 dedup → 同一次 AI call 可能計費兩次，silently 超支月預算，違背憲法原則 #13（cost-edge awareness）。
+
+**三段式修復**：
+1. **V018 migration**：`learning.ai_usage_log` 新增 partial UNIQUE index on `request_id`（`WHERE request_id <> ''`），legacy V010 `''` 預設保持有效，新 rows dedup；operator 手動 apply，engine binary forward-compatible；idempotent `IF NOT EXISTS`。
+2. **`usage_io::insert_usage`**：`ON CONFLICT (request_id) WHERE request_id <> '' DO NOTHING` + `RETURNING 1`，caller 無需第二次 round-trip 即可區分 first-insert vs dedupped retry；返回 `bool`。
+3. **`tracker::record_usage`**：`insert_usage` 返回 `Ok(false)` 時跳過 in-memory MTD cache increment（避免 scope 雙重扣費）；新增 `BudgetTracker::make_request_id(scope)` helper 鑄造 canonical id `{scope}-{ts_ms}-{rand_hex8}`（decimal ms + 8-char lowercase hex 防 intra-ms 碰撞）。
+
+**Callers 更新**：
+- `claude_teacher/mod.rs`：替換 `format!("teacher-{}", now_ms())`（同 ms 會碰撞）為 canonical helper。
+- `ipc_server/handlers/budget.rs::handle_record_ai_usage`：Python caller 省略 request_id 時鑄造新 canonical id，取代硬編碼 `"py-sync"`（否則 V018 index 下 **每個** Layer-2 sync 都會碰撞而 silently drop 成本 rows）。
+
+**Tests**（+5 in `ai_budget::tracker`）：
+- `E5-FN-2-A`：`make_request_id` 格式合規（3 segments / 8-char lower hex / realistic ts_ms / 正確 scope prefix）
+- `E5-FN-2-B`：1000 back-to-back mints 全部 distinct（birthday-collision-safe）
+- `E5-FN-2-C`：first-insert path byte-identical to pre-fix cold-start 行為
+- `E5-FN-2-D`：cold-start cache 在 3 個 distinct request_ids 下仍然累加
+- `E5-FN-2-E`：Layer-2 default mint 唯一（no `py-sync` literal regression）
+
+**測試**：engine lib 1567→**1572 passed**（+5 E5-FN-2）· `ai_budget` module 25→30 all green · `claude_teacher` 61 passed（caller 無 regression）· Python `ai_budget_routes` 7 passed（API proxy 未動）。
+
+**部署 order（operator 注意）**：
+1. 先 apply migration：`psql $DATABASE_URL -f sql/migrations/V018__ai_usage_log_request_id_unique.sql`
+2. 再重建 engine：`bash helper_scripts/restart_all.sh --rebuild`
+   順序重要：binary 早於 index 上線則 `ON CONFLICT` 會 target 不存在的 constraint 而 INSERT 全部報錯。migration 冪等，重跑無害。
 
 ---
 
