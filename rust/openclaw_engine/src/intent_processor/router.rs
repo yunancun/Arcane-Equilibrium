@@ -37,19 +37,21 @@ impl IntentProcessor {
     ) -> IntentResult {
         // Gate 1: Governance authorization check (fail-closed)
         if !governance.is_authorized() {
-            return IntentResult::rejected("governance_not_authorized".to_string());
+            return IntentResult::rejected(RejectionCode::GovernanceNotAuthorized.format());
         }
 
         // Gate 1.5: Reject same-direction duplicate (prevent fee drain)
         // 拒絕同方向重複開倉（防止手續費消耗）
         if let Some(existing) = paper_state.get_position(&intent.symbol) {
             if existing.is_long == intent.is_long {
-                return IntentResult::rejected(format!(
-                    "duplicate_position: {} already {} {}",
-                    intent.symbol,
-                    if existing.is_long { "LONG" } else { "SHORT" },
-                    existing.qty,
-                ));
+                return IntentResult::rejected(
+                    RejectionCode::DuplicatePosition {
+                        symbol: intent.symbol.clone(),
+                        existing_is_long: existing.is_long,
+                        existing_qty: existing.qty,
+                    }
+                    .format(),
+                );
             }
         }
 
@@ -63,10 +65,12 @@ impl IntentProcessor {
         // 主要處理 paper 合成成交無真實保證金檢查導致的穿倉刷單；demo/live 幾乎不觸發
         // （交易所保證金檢查會在更早階段拒絕）。
         if paper_state.balance() <= 0.0 && paper_state.get_position(&intent.symbol).is_none() {
-            return IntentResult::rejected(format!(
-                "insufficient_balance: {:.2}",
-                paper_state.balance()
-            ));
+            return IntentResult::rejected(
+                RejectionCode::InsufficientBalance {
+                    balance: paper_state.balance(),
+                }
+                .format(),
+            );
         }
 
         // Gate 2: Guardian 4-check
@@ -118,10 +122,9 @@ impl IntentProcessor {
             Verdict::Rejected => {
                 return IntentResult {
                     submitted: false,
-                    rejected_reason: Some(format!(
-                        "guardian_rejected: {:?}",
-                        guardian_result.reasons
-                    )),
+                    rejected_reason: Some(
+                        RejectionCode::from_guardian_review(&guardian_result).format(),
+                    ),
                     fill: None,
                     verdict_info: vi.take(),
                     approved_qty: 0.0,
@@ -177,10 +180,16 @@ impl IntentProcessor {
         // ─── PNL-1: Reject qty=0 ghost positions ───
         // 拒絕 qty=0 幽靈倉（小餘額被取整為 0 時必須阻止開倉）
         if !(final_qty > 0.0) {
-            return IntentResult::rejected(format!(
-                "qty_zero: final_qty={:.8} (kelly={:.8}, p1_cap={:.8}, balance=${:.2}, price=${:.2})",
-                final_qty, kelly_qty, p1_max_qty, balance, price,
-            ));
+            return IntentResult::rejected(
+                RejectionCode::QtyZero {
+                    final_qty,
+                    kelly_qty,
+                    p1_max_qty,
+                    balance,
+                    price,
+                }
+                .format(),
+            );
         }
 
         // ─── Gate 2.7: Order admission risk check (RRC-1-B1) ───
@@ -206,7 +215,12 @@ impl IntentProcessor {
                 &self.risk_config,
             );
             if !check_result.allowed {
-                return IntentResult::rejected(format!("risk_gate: {}", check_result.reason));
+                return IntentResult::rejected(
+                    RejectionCode::RiskGate {
+                        reason: check_result.reason,
+                    }
+                    .format(),
+                );
             }
 
             // BLOCKER-3 D15: Cross-engine global notional cap check.
@@ -224,19 +238,20 @@ impl IntentProcessor {
         {
             let min_confidence = self.risk_config.cost_gate.min_confidence;
             if intent.confidence < min_confidence {
-                return IntentResult::rejected(format!(
-                    "cost_gate: confidence {:.2} < min {:.2}",
-                    intent.confidence, min_confidence,
-                ));
+                return IntentResult::rejected(
+                    RejectionCode::CostGateConfidence {
+                        confidence: intent.confidence,
+                        min_confidence,
+                    }
+                    .format(),
+                );
             }
             // SEC-11: ATR=0 → fail-closed (cold-start by PNL-3 boot cooldown; runtime ATR=0 = indicator failure).
             // SEC-11：ATR=0 失敗關閉（冷啟動由 PNL-3 保護；runtime ATR=0 = 指標故障）。
             if !(atr > 0.0) {
                 tracing::warn!(symbol = %intent.symbol,
                     "cost_gate fail-closed: ATR unavailable (SEC-11) / 成本門禁因 ATR 不可用拒絕");
-                return IntentResult::rejected(
-                    "cost_gate: ATR unavailable (fail-closed, SEC-11)".to_string(),
-                );
+                return IntentResult::rejected(RejectionCode::CostGateAtrUnavailable.format());
             }
             let volume_24h = paper_state.latest_turnover(&intent.symbol).unwrap_or(0.0);
 
@@ -343,17 +358,19 @@ impl IntentProcessor {
     ) -> ExchangeGateResult {
         // Gate 1: Governance authorization
         if !governance.is_authorized() {
-            return ExchangeGateResult::rejected("governance_not_authorized".into());
+            return ExchangeGateResult::rejected(RejectionCode::GovernanceNotAuthorized.format());
         }
         // Gate 1.5: Reject same-direction duplicate
         if let Some(existing) = paper_state.get_position(&intent.symbol) {
             if existing.is_long == intent.is_long {
-                return ExchangeGateResult::rejected(format!(
-                    "duplicate_position: {} already {} {}",
-                    intent.symbol,
-                    if existing.is_long { "LONG" } else { "SHORT" },
-                    existing.qty,
-                ));
+                return ExchangeGateResult::rejected(
+                    RejectionCode::DuplicatePosition {
+                        symbol: intent.symbol.clone(),
+                        existing_is_long: existing.is_long,
+                        existing_qty: existing.qty,
+                    }
+                    .format(),
+                );
             }
         }
         // Gate 2: Guardian 4-check
@@ -401,7 +418,9 @@ impl IntentProcessor {
         if let Verdict::Rejected = guardian_result.verdict {
             return ExchangeGateResult {
                 approved: false,
-                rejected_reason: Some(format!("guardian_rejected: {:?}", guardian_result.reasons)),
+                rejected_reason: Some(
+                    RejectionCode::from_guardian_review(&guardian_result).format(),
+                ),
                 approved_qty: 0.0,
                 verdict_info: vi.take(),
             };
@@ -444,10 +463,16 @@ impl IntentProcessor {
         // ─── PNL-1: Reject qty=0 ghost positions ───
         // 拒絕 qty=0 幽靈倉（小餘額被取整為 0 時必須阻止開倉）
         if !(final_qty > 0.0) {
-            return ExchangeGateResult::rejected(format!(
-                "qty_zero: final_qty={:.8} (kelly={:.8}, p1_cap={:.8}, balance=${:.2}, price=${:.2})",
-                final_qty, kelly_qty, p1_max_qty, balance, price,
-            ));
+            return ExchangeGateResult::rejected(
+                RejectionCode::QtyZero {
+                    final_qty,
+                    kelly_qty,
+                    p1_max_qty,
+                    balance,
+                    price,
+                }
+                .format(),
+            );
         }
 
         // ─── Gate 2.7: Order admission risk check (RRC-1-B1) ───
@@ -473,7 +498,12 @@ impl IntentProcessor {
                 &self.risk_config,
             );
             if !check_result.allowed {
-                return ExchangeGateResult::rejected(format!("risk_gate: {}", check_result.reason));
+                return ExchangeGateResult::rejected(
+                    RejectionCode::RiskGate {
+                        reason: check_result.reason,
+                    }
+                    .format(),
+                );
             }
 
             // BLOCKER-3 D15: Cross-engine global notional cap check.
@@ -491,18 +521,19 @@ impl IntentProcessor {
         {
             let min_confidence = self.risk_config.cost_gate.min_confidence;
             if intent.confidence < min_confidence {
-                return ExchangeGateResult::rejected(format!(
-                    "cost_gate: confidence {:.2} < min {:.2}",
-                    intent.confidence, min_confidence,
-                ));
+                return ExchangeGateResult::rejected(
+                    RejectionCode::CostGateConfidence {
+                        confidence: intent.confidence,
+                        min_confidence,
+                    }
+                    .format(),
+                );
             }
             // SEC-11: ATR=0 → fail-closed.
             if !(atr > 0.0) {
                 tracing::warn!(symbol = %intent.symbol,
                     "cost_gate fail-closed: ATR unavailable (SEC-11) / 成本門禁因 ATR 不可用拒絕");
-                return ExchangeGateResult::rejected(
-                    "cost_gate: ATR unavailable (fail-closed, SEC-11)".to_string(),
-                );
+                return ExchangeGateResult::rejected(RejectionCode::CostGateAtrUnavailable.format());
             }
             let fee_rate = self.fee_rate(&intent.symbol);
             let volume_24h = paper_state.latest_turnover(&intent.symbol).unwrap_or(0.0);
