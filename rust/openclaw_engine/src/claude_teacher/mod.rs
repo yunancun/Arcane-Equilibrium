@@ -150,7 +150,13 @@ impl ClaudeTeacher {
         // 2) BudgetTracker — fail-closed: any error aborts before DB write.
         //    BudgetTracker — fail-closed：任何錯誤都在 DB 寫入前中止。
         if let Some(budget) = &self.budget {
-            let request_id = format!("teacher-{}", now_ms());
+            // E5-FN-2 Plan N: mint deterministic (request_id, event_time_ms) once;
+            // a retry at this site would reuse the tuple so the hypertable PK
+            // collapses the duplicate row instead of double-billing.
+            // E5-FN-2 Plan N：鑄造確定性 (request_id, event_time_ms) 一次；
+            // 本點重試會沿用 tuple，hypertable PK 折疊重複列而非雙重計費。
+            let (request_id, event_time_ms) =
+                crate::ai_budget::make_request_id("teacher");
             match budget
                 .record_usage(
                     SCOPE_AGENT_TEACHER,
@@ -160,6 +166,7 @@ impl ClaudeTeacher {
                     resp.tokens_out,
                     "directive_generation",
                     &request_id,
+                    event_time_ms,
                 )
                 .await
             {

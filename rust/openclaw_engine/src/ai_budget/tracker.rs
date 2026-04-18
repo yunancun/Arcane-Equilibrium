@@ -328,9 +328,20 @@ impl BudgetTracker {
     /// (or unknown model pricing) — caller MUST refuse to forward the LLM call.
     /// On success, returns the computed USD cost and updates the in-memory cache.
     ///
+    /// E5-FN-2 Plan N: callers provide a deterministic `(event_time_ms, request_id)`
+    /// tuple (via [`make_request_id`]). A retry with the same tuple collapses at
+    /// the hypertable PK `(time, scope, request_id)` and returns without bumping
+    /// the MTD cache — preventing double-billing without any schema change.
+    ///
     /// 記錄一次 LLM 用量事件。**Fail-closed**：DB 寫入失敗（或模型定價未知）
     /// 時返回 Err — caller 必須拒絕該次 LLM 調用。成功時返回計算出的美元成本
     /// 並更新內存快取。
+    ///
+    /// E5-FN-2 Plan N：caller 透過 [`make_request_id`] 傳入確定性
+    /// `(event_time_ms, request_id)` tuple。同 tuple 重試會在 hypertable PK
+    /// `(time, scope, request_id)` 合併，回傳時不累進 MTD 快取 — 零 schema
+    /// 改動即達成防重複計費。
+    #[allow(clippy::too_many_arguments)]
     pub async fn record_usage(
         &self,
         scope: &str,
@@ -340,16 +351,20 @@ impl BudgetTracker {
         tokens_out: u32,
         purpose: &str,
         request_id: &str,
+        event_time_ms: i64,
     ) -> Result<f64, String> {
         // 1) Pricing — fail-closed on unknown / inactive model (4-17 PricingTable).
         //    定價 — 未知或 inactive 模型 fail-closed（4-17 PricingTable）。
         let cost_usd = self.compute_cost_usd(model, tokens_in, tokens_out)?;
 
         // 2) DB write — fail-closed: any error propagates to caller.
+        //    Returns `inserted=true` on fresh row, `false` on PK conflict (dedup).
         //    DB 寫入 — fail-closed：任何錯誤上拋給 caller。
-        if self.pool.is_available() {
+        //    `inserted=true` 為新列，`false` 代表 PK 衝突（去重）。
+        let inserted = if self.pool.is_available() {
             usage_io::insert_usage(
                 &self.pool,
+                event_time_ms,
                 scope,
                 provider,
                 model,
@@ -359,22 +374,31 @@ impl BudgetTracker {
                 purpose,
                 request_id,
             )
-            .await?;
-        }
+            .await?
+        } else {
+            // Cold-start / tests: no DB → always treat as fresh insert so cache
+            // reflects the spend as before.
+            // 冷啟動/測試：無 DB → 視為新插入，快取照常累計。
+            true
+        };
 
-        // 3) Update in-memory MTD cache (after successful DB write).
-        //    更新內存 MTD 快取（DB 寫入成功後）。
-        {
+        // 3) Update in-memory MTD cache only on fresh insert; skip on dedup so
+        //    the retry doesn't double-bill the operator.
+        //    僅在新插入時累進內存 MTD 快取；去重路徑跳過，避免重試雙重計費。
+        if inserted {
             let mut guard = self.usage_cache.write().await;
             *guard.mtd_usd.entry(scope.to_string()).or_insert(0.0) += cost_usd;
-            // Also accumulate into local_total so degrade_level reflects the spend.
-            // 同時累進 local_total，使 degrade_level 反映開銷。
             if scope != SCOPE_LOCAL_TOTAL {
                 *guard
                     .mtd_usd
                     .entry(SCOPE_LOCAL_TOTAL.to_string())
                     .or_insert(0.0) += cost_usd;
             }
+        } else {
+            debug!(
+                scope,
+                request_id, "record_usage: duplicate (PK dedup) — cache not bumped"
+            );
         }
 
         Ok(cost_usd)
@@ -472,6 +496,35 @@ impl BudgetTracker {
 use openclaw_core::now_ms;
 
 // ---------------------------------------------------------------------------
+// E5-FN-2 Plan N: deterministic (request_id, event_time_ms) minting.
+// E5-FN-2 Plan N：確定性 (request_id, event_time_ms) 鑄造。
+// ---------------------------------------------------------------------------
+
+/// Mint a request_id + event_time_ms tuple for [`BudgetTracker::record_usage`].
+///
+/// Format: `{scope}-{ts_ms}-{rand_hex8}`. Both values must be **captured once**
+/// and reused verbatim across any retries so the hypertable PK
+/// `(time, scope, request_id)` collapses duplicates. Re-minting on retry
+/// defeats the dedup (fresh tuple → fresh PK → double-bill).
+///
+/// 為 [`BudgetTracker::record_usage`] 鑄造 request_id + event_time_ms tuple。
+///
+/// 格式：`{scope}-{ts_ms}-{rand_hex8}`。兩個值都必須**捕獲一次**並原樣
+/// 傳回重試，hypertable PK `(time, scope, request_id)` 才能折疊重複。
+/// 重試時重鑄 tuple 會破壞去重（新 tuple → 新 PK → 雙重計費）。
+pub fn make_request_id(scope: &str) -> (String, i64) {
+    use rand::RngCore;
+    let ts_ms = now_ms() as i64;
+    let mut bytes = [0u8; 4];
+    rand::thread_rng().fill_bytes(&mut bytes);
+    let rand_hex = format!(
+        "{:02x}{:02x}{:02x}{:02x}",
+        bytes[0], bytes[1], bytes[2], bytes[3]
+    );
+    (format!("{scope}-{ts_ms}-{rand_hex}"), ts_ms)
+}
+
+// ---------------------------------------------------------------------------
 // Tests / 測試
 // ---------------------------------------------------------------------------
 
@@ -540,6 +593,7 @@ mod tests {
                 500,
                 "directive_generation",
                 "req-1",
+                1_700_000_000_000,
             )
             .await
             .expect("record_usage should succeed");
@@ -712,5 +766,105 @@ mod tests {
         assert_eq!(DegradeLevel::SoftWarn.as_str(), "soft_warn");
         assert_eq!(DegradeLevel::HardLimit.as_str(), "hard_limit");
         assert_eq!(DegradeLevel::Killswitch.as_str(), "killswitch");
+    }
+
+    // --- E5-FN-2 Plan N tests / E5-FN-2 Plan N 測試 ---
+
+    // Plan N-1: make_request_id format — `{scope}-{ts_ms}-{hex8}`.
+    // Plan N-1：make_request_id 格式。
+    #[test]
+    fn test_make_request_id_format() {
+        let (rid, ts) = make_request_id("teacher");
+        let parts: Vec<&str> = rid.splitn(3, '-').collect();
+        assert_eq!(parts.len(), 3, "request_id must have 3 hyphen-delimited parts: {rid}");
+        assert_eq!(parts[0], "teacher");
+        assert_eq!(parts[1].parse::<i64>().unwrap(), ts, "ts in id must match returned ts");
+        assert_eq!(parts[2].len(), 8, "hex suffix must be 8 chars: {rid}");
+        assert!(
+            parts[2].chars().all(|c| c.is_ascii_hexdigit()),
+            "hex suffix must be all hex: {rid}"
+        );
+        assert!(ts > 1_700_000_000_000, "ts_ms must look like a real epoch ms");
+    }
+
+    // Plan N-2: two mints within the same ms get distinct request_ids thanks to
+    // the random hex suffix (no PK collision on fast retries).
+    // Plan N-2：同 ms 內兩次鑄造必得不同 request_id（隨機 hex 後綴，快速重試
+    // 不會 PK 碰撞）。
+    #[test]
+    fn test_make_request_id_unique_within_same_ms() {
+        let (rid_a, _) = make_request_id("layer2");
+        let (rid_b, _) = make_request_id("layer2");
+        assert_ne!(rid_a, rid_b, "two fresh mints must differ");
+    }
+
+    // Plan N-3: record_usage accepts event_time_ms and the cache still bumps
+    // on the first call (cold-start / no-pool path treats every call as fresh).
+    // Plan N-3：record_usage 接受 event_time_ms，首次調用快取照常累進
+    // （冷啟動/無 pool 路徑視每次為新插入）。
+    #[tokio::test]
+    async fn test_record_usage_cold_start_still_increments_cache() {
+        let pool = empty_pool().await;
+        let tracker = BudgetTracker::new_for_test(pool, BudgetConfig::defaults());
+        let (rid, ts) = make_request_id(SCOPE_AGENT_TEACHER);
+        let cost = tracker
+            .record_usage(
+                SCOPE_AGENT_TEACHER,
+                "anthropic",
+                "claude-sonnet-4-5",
+                100,
+                50,
+                "unit_test",
+                &rid,
+                ts,
+            )
+            .await
+            .expect("record_usage OK");
+        assert!(cost > 0.0);
+        let used = tracker
+            .usage_cache
+            .read()
+            .await
+            .mtd_usd
+            .get(SCOPE_AGENT_TEACHER)
+            .copied()
+            .unwrap_or(0.0);
+        assert!((used - cost).abs() < 1e-9);
+    }
+
+    // Plan N-4: distinct (rid, ts) tuples accumulate as separate rows
+    // (cold-start path ⇒ always "inserted=true").
+    // Plan N-4：不同 (rid, ts) tuple 分別累進（冷啟動路徑 ⇒ 皆 inserted=true）。
+    #[tokio::test]
+    async fn test_record_usage_distinct_tuples_accumulate() {
+        let pool = empty_pool().await;
+        let tracker = BudgetTracker::new_for_test(pool, BudgetConfig::defaults());
+        for _ in 0..3 {
+            let (rid, ts) = make_request_id(SCOPE_AGENT_TEACHER);
+            tracker
+                .record_usage(
+                    SCOPE_AGENT_TEACHER,
+                    "anthropic",
+                    "claude-sonnet-4-5",
+                    100,
+                    50,
+                    "unit_test",
+                    &rid,
+                    ts,
+                )
+                .await
+                .expect("record_usage OK");
+        }
+        let used = tracker
+            .usage_cache
+            .read()
+            .await
+            .mtd_usd
+            .get(SCOPE_AGENT_TEACHER)
+            .copied()
+            .unwrap_or(0.0);
+        // 3 fresh inserts × $0.00425 per call (100in×3/1e6 + 50out×15/1e6)
+        let per_call = 100.0 * 3.0 / 1e6 + 50.0 * 15.0 / 1e6;
+        assert!((used - per_call * 3.0).abs() < 1e-9, "used={used}");
     }
 }

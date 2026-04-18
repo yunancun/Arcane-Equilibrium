@@ -163,10 +163,28 @@ pub(in crate::ipc_server) async fn handle_record_ai_usage(
         .get("purpose")
         .and_then(|v| v.as_str())
         .unwrap_or("layer2_external");
-    let request_id = params
+
+    // E5-FN-2 Plan N: Python callers SHOULD pass a deterministic
+    // `(request_id, event_time_ms)` tuple so Layer 2 retries collapse at the
+    // hypertable PK. Backward-compat: if either is missing, mint a fresh one
+    // locally (same as pre-Plan N — the caller simply loses dedup coverage for
+    // its own retries). A literal `"py-sync"` default would collide across all
+    // Python callers under the PK, so we always mint when omitted.
+    // E5-FN-2 Plan N：Python caller 應傳入確定性
+    // `(request_id, event_time_ms)` tuple，Layer 2 重試才能在 hypertable PK
+    // 合併。向後相容：任一缺失即本地鑄造（等同 Plan N 前；caller 自行失去
+    // 重試去重）。固定 `"py-sync"` 會讓所有 Python caller 在 PK 上碰撞，
+    // 故缺失時一律重新鑄造。
+    let supplied_request_id = params
         .get("request_id")
         .and_then(|v| v.as_str())
-        .unwrap_or("py-sync");
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string());
+    let supplied_event_time_ms = params.get("event_time_ms").and_then(|v| v.as_i64());
+    let (request_id, event_time_ms) = match (supplied_request_id, supplied_event_time_ms) {
+        (Some(rid), Some(ts)) => (rid, ts),
+        _ => crate::ai_budget::make_request_id(scope),
+    };
 
     let guard = slot.read().await;
     let tracker = match guard.as_ref() {
@@ -183,13 +201,26 @@ pub(in crate::ipc_server) async fn handle_record_ai_usage(
 
     match tracker
         .record_usage(
-            scope, provider, model, tokens_in, tokens_out, purpose, request_id,
+            scope,
+            provider,
+            model,
+            tokens_in,
+            tokens_out,
+            purpose,
+            &request_id,
+            event_time_ms,
         )
         .await
     {
-        Ok(cost_usd) => {
-            JsonRpcResponse::success(id, serde_json::json!({ "ok": true, "cost_usd": cost_usd }))
-        }
+        Ok(cost_usd) => JsonRpcResponse::success(
+            id,
+            serde_json::json!({
+                "ok": true,
+                "cost_usd": cost_usd,
+                "request_id": request_id,
+                "event_time_ms": event_time_ms,
+            }),
+        ),
         Err(e) => JsonRpcResponse::error(id, ERR_INTERNAL, format!("record_usage failed: {e}")),
     }
 }
