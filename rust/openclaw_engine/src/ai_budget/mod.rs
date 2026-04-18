@@ -26,4 +26,4 @@ pub mod pricing;
 pub mod tracker;
 pub mod usage_io;
 
-pub use tracker::{BudgetConfig, BudgetTracker, DegradeLevel};
+pub use tracker::{make_request_id, BudgetConfig, BudgetTracker, DegradeLevel};
