@@ -630,16 +630,23 @@ async fn async_main(
     // DB writer tasks (market, feature, trading, context, pollers, monitors)
     // ------------------------------------------------------------------
     let shared_last_tick_ms = Arc::new(std::sync::atomic::AtomicU64::new(0));
-    let (market_tx, feature_tx, trading_tx, context_tx, decision_feature_tx, shadow_fill_tx) =
-        tasks::spawn_db_writers(
-            &db_pool,
-            &config,
-            &cancel,
-            &symbol_registry,
-            &shared_client,
-            &shared_last_tick_ms,
-        )
-        .await;
+    let (
+        market_tx,
+        feature_tx,
+        trading_tx,
+        context_tx,
+        decision_feature_tx,
+        shadow_fill_tx,
+        exit_feature_tx,
+    ) = tasks::spawn_db_writers(
+        &db_pool,
+        &config,
+        &cancel,
+        &symbol_registry,
+        &shared_client,
+        &shared_last_tick_ms,
+    )
+    .await;
 
     // ------------------------------------------------------------------
     // Phase 6 + D23: Per-exchange position reconciler.
@@ -1035,7 +1042,14 @@ async fn async_main(
             // one that matters; Demo/Live get their own sender for symmetry.
             // EDGE-P3-1 #62：clone paper_cmd_tx 給 IntentProcessor 發 EmitShadowFill。
             pipeline_cmd_tx: Some(paper_cmd_tx.clone()),
-            market_data_tx: market_tx,
+            // MARKET-KLINES-STALE-1 (2026-04-18): all pipelines clone market_tx.
+            // Paper-only design (原 D19) caused kline DB write stall after
+            // PAPER-DISABLE-1 defaulted paper off. market_writer.rs:180
+            // ON CONFLICT dedup makes multi-producer safe.
+            // MARKET-KLINES-STALE-1（2026-04-18）：所有 pipeline 共享 market_tx。
+            // 原 D19 僅 Paper 寫入的設計在 PAPER-DISABLE-1 預設關 paper 後導致
+            // kline DB 停寫；market_writer.rs:180 ON CONFLICT 去重，多 producer 安全。
+            market_data_tx: market_tx.clone(),
             feature_tx,
             last_tick_ms: Some(Arc::clone(&shared_last_tick_ms)),
             trading_tx: trading_tx.clone(),
@@ -1047,6 +1061,12 @@ async fn async_main(
             // (ε-greedy fills only ever originate here by gate guard).
             // EDGE-P3-1 Step 7c：接 paper 引擎 shadow-fill writer（ε-greedy 僅此處）。
             shadow_fill_tx: shadow_fill_tx.clone(),
+            // EXIT-FEATURES-TABLE-1: Paper engine wires exit_feature writer.
+            // Must match demo/live (avoid MARKET-KLINES-STALE-1 D19 trap —
+            // any single-engine wiring would drop exit labels on that engine).
+            // EXIT-FEATURES-TABLE-1：Paper 接入退場特徵 writer。三引擎必須對齊，
+            // 避免 MARKET-KLINES-STALE-1 D19 單引擎接線導致的寫入丟失覆轍。
+            exit_feature_tx: exit_feature_tx.clone(),
             exchange_event_rx: None,
             seed_positions: Vec::new(), // Paper has no exchange-side positions to seed
             account_manager: None,
@@ -1111,8 +1131,14 @@ async fn async_main(
             api_pnl: Some(demo_b.ws_bindings.api_pnl),
             pipeline_cmd_rx: demo_cmd_rx,
             pipeline_cmd_tx: demo_cmd_tx.as_ref().cloned(),
-            // D19: Demo does not write market/feature DB (Paper handles that).
-            market_data_tx: None,
+            // MARKET-KLINES-STALE-1 (2026-04-18): all pipelines clone market_tx.
+            // Paper-only design (原 D19) caused kline DB write stall after
+            // PAPER-DISABLE-1 defaulted paper off. market_writer.rs:180
+            // ON CONFLICT dedup makes multi-producer safe.
+            // MARKET-KLINES-STALE-1（2026-04-18）：所有 pipeline 共享 market_tx。
+            // 原 D19 僅 Paper 寫入的設計在 PAPER-DISABLE-1 預設關 paper 後導致
+            // kline DB 停寫；market_writer.rs:180 ON CONFLICT 去重，多 producer 安全。
+            market_data_tx: market_tx.clone(),
             feature_tx: None,
             last_tick_ms: Some(Arc::clone(&shared_last_tick_ms)),
             trading_tx: trading_tx.clone(),
@@ -1124,6 +1150,9 @@ async fn async_main(
             // logging on demo (gate still guards against emission here).
             // EDGE-P3-1 Step 7c：demo 亦接 shadow-fill writer 作深度防禦日誌。
             shadow_fill_tx: shadow_fill_tx.clone(),
+            // EXIT-FEATURES-TABLE-1: Demo wires exit_feature writer (see Paper note).
+            // EXIT-FEATURES-TABLE-1：Demo 接入退場特徵 writer（見 Paper 說明）。
+            exit_feature_tx: exit_feature_tx.clone(),
             exchange_event_rx: Some(demo_b.ws_bindings.exchange_event_rx),
             seed_positions: demo_seed_positions,
             account_manager: Some(demo_b.account_manager),
@@ -1187,8 +1216,14 @@ async fn async_main(
             api_pnl: Some(live_b.ws_bindings.api_pnl),
             pipeline_cmd_rx: live_cmd_rx,
             pipeline_cmd_tx: live_cmd_tx.as_ref().cloned(),
-            // D19: Live does not write market/feature DB.
-            market_data_tx: None,
+            // MARKET-KLINES-STALE-1 (2026-04-18): all pipelines clone market_tx.
+            // Paper-only design (原 D19) caused kline DB write stall after
+            // PAPER-DISABLE-1 defaulted paper off. market_writer.rs:180
+            // ON CONFLICT dedup makes multi-producer safe.
+            // MARKET-KLINES-STALE-1（2026-04-18）：所有 pipeline 共享 market_tx。
+            // 原 D19 僅 Paper 寫入的設計在 PAPER-DISABLE-1 預設關 paper 後導致
+            // kline DB 停寫；market_writer.rs:180 ON CONFLICT 去重，多 producer 安全。
+            market_data_tx: market_tx.clone(),
             feature_tx: None,
             last_tick_ms: Some(Arc::clone(&shared_last_tick_ms)),
             trading_tx: trading_tx.clone(),
@@ -1200,6 +1235,9 @@ async fn async_main(
             // logging on live (gate still guards against emission here).
             // EDGE-P3-1 Step 7c：live 亦接 shadow-fill writer 作深度防禦日誌。
             shadow_fill_tx: shadow_fill_tx.clone(),
+            // EXIT-FEATURES-TABLE-1: Live wires exit_feature writer (see Paper note).
+            // EXIT-FEATURES-TABLE-1：Live 接入退場特徵 writer（見 Paper 說明）。
+            exit_feature_tx: exit_feature_tx.clone(),
             exchange_event_rx: Some(live_b.ws_bindings.exchange_event_rx),
             seed_positions: live_seed_positions,
             account_manager: Some(live_b.account_manager),
