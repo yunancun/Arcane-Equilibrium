@@ -190,16 +190,11 @@ async def update_ai_budget_config_route(payload: BudgetConfigUpdate) -> dict[str
             detail=f"engine unreachable: {type(exc).__name__}",
         ) from exc
 
-    # Lazy import error types so test envs without ipc_client can still import.
-    # 延遲匯入錯誤類型，方便不裝 IPC 的測試環境。
-    try:
-        from .ipc_client import (  # noqa: PLC0415
-            EngineDisconnectedError,
-            EngineTimeoutError,
-        )
-    except Exception:  # pragma: no cover
-        EngineDisconnectedError = ConnectionError  # type: ignore[assignment]
-        EngineTimeoutError = TimeoutError  # type: ignore[assignment]
+    # E5-P1-5: centralised IPC exception → HTTPException mapping.
+    # The helper preserves the legacy (504 timeout / 503 disconnected / 503 other)
+    # status codes and detail strings byte-for-byte.
+    # E5-P1-5：集中化 IPC 例外→HTTPException 映射；保留舊路徑的狀態碼與 detail 字串。
+    from .ipc_error_handler import raise_http_for_ipc_error  # noqa: PLC0415
 
     try:
         result = await client.update_ai_budget_config(
@@ -207,21 +202,8 @@ async def update_ai_budget_config_route(payload: BudgetConfigUpdate) -> dict[str
             monthly_usd=payload.monthly_usd,
             updated_by=payload.updated_by,
         )
-    except EngineTimeoutError as exc:
-        logger.warning("ai_budget: ipc timeout: %s", exc)
-        raise HTTPException(status_code=504, detail="engine timeout") from exc
-    except EngineDisconnectedError as exc:
-        logger.warning("ai_budget: ipc disconnected: %s", exc)
-        raise HTTPException(
-            status_code=503,
-            detail=f"engine unreachable: {exc}",
-        ) from exc
-    except Exception as exc:  # noqa: BLE001
-        logger.error("ai_budget: ipc call failed: %s", exc)
-        raise HTTPException(
-            status_code=503,
-            detail=f"engine error: {type(exc).__name__}: {exc}",
-        ) from exc
+    except Exception as exc:  # noqa: BLE001 — reclassified via helper
+        raise_http_for_ipc_error(exc, context="ai_budget", log=logger)
 
     # Rust may return a structured error in result dict — surface as 400.
     # Rust 可能在 result 中回結構化錯誤 — 轉成 400。

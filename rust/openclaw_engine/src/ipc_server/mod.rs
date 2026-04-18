@@ -13,6 +13,12 @@
 
 mod handlers;
 mod handlers_config;
+// E5-P1-5: JSON-RPC params extraction & validation helpers (orphan §九).
+//         Exposed as a sibling module so existing handlers.rs can adopt
+//         incrementally without requiring a coordinated migration PR.
+// E5-P1-5：JSON-RPC 參數提取與驗證輔助（§九 孤兒抽取）。
+//         以兄弟模組暴露，讓現有 handlers.rs 可遞進採用，無需一次性大遷移。
+pub(crate) mod param_extractor;
 #[cfg(test)]
 mod tests;
 
