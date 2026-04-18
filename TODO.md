@@ -49,9 +49,9 @@ git status && git log --oneline -5
 
 ### Step 0 · W23 Day 1-3 可行性 Sprint（4 不確定全綠才推 Phase 1）
 
-- [ ] **不確定 1**：`python -m program_code.ml_training.james_stein_estimator` 跑通 + 寫入 `settings/edge_estimates.json` non-empty
+- [ ] **不確定 1**：`python -m program_code.ml_training.james_stein_estimator` 跑通 + 寫入 `settings/edge_estimates.json` non-empty → 機制 ✅ 但 grand_mean −2214 bps 不可 bind（P1-14）
 - [ ] **不確定 2**：`decision_features` schema 對齊 7 維度（`est_net_bps / peak_pnl_pct / atr_pct / giveback_atr_norm / time_since_peak_ms / price_roc_short / entry_age_secs`）→ 至少 5/7 直接 derive
-- [ ] **不確定 3**：per-strategy 樣本 ≥10k（至少 2 策略；`SELECT strategy, COUNT(*) FROM learning.decision_features WHERE engine_mode IN ('demo','live_demo') GROUP BY strategy`）
+- [ ] **不確定 3**：per-strategy 樣本 ≥10k（至少 2 策略；`SELECT strategy, COUNT(*) FROM learning.decision_features WHERE engine_mode IN ('demo','live_demo') GROUP BY strategy`）→ fills RT 遠低閘口，Track L 範圍限縮（P1-13）
 - [ ] **不確定 4**：tick-level price history 可重放 7d → 否則改「事後歸因 audit」（peak-to-exit 軌跡分析，非逐 tick replay）
 - [ ] Sprint 產出：`docs/worklogs/2026-04-18-N--dual_track_exit_feasibility.md`（N=1/2/3）
 
@@ -67,7 +67,7 @@ git status && git log --oneline -5
 
 **軌道 2 P1-7 解阻塞**：
 - [ ] **A** Rust 接 `trading.intents` 持久化（定位 DEDUP-PY-RUST Tier A stub 點 + 補 Rust 寫入 + 單測）
-- [ ] **B** `james_stein_estimator` scheduler 啟用（每小時 cron + IPC hot-trigger）
+- [ ] **B** `james_stein_estimator` scheduler 啟用（每小時 cron + IPC hot-trigger）→ 僅寫檔，不 bind Rust cost_gate 直到 P1-10 修復 + grand_mean 翻正（P1-14）
 - [ ] **C** `run_training_pipeline.py` 首跑 grid_trading → 產 `models/demo/grid_trading_exit_policy_v20260425.onnx`
 
 **Phase 1 完成標準**：Track P 灰度 ≥48h `exit_source=Physical` 正常 + `edge_estimates.json` 每小時刷新 + 第一個 ONNX artifact + `trading.intents` live/live_demo 開始有 rows
@@ -147,7 +147,8 @@ git status && git log --oneline -5
 
 ### P1-7 · LEARNING-PIPELINE-DORMANT-1 — 半殼學習管線
 - **數據累積層 ✅**：`learning.decision_features` 1.65M rows · `risk_verdicts` 24h 1.54M
-- **下游消費全 dormant ❌**：`edge_estimates.json={}` · `experiment_ledger_snapshot.json` 結構異常 · 21 個 learning schema 表存在無 consumer · ONNX 0 artifact
+- **edge_estimates.json writer/reader 鏈 ✅（手動）**：2026-04-18 20:24 首次寫入 29 KB / 104 cells / `grand_mean=-2214 bps`；Rust startup 加載進 cost_gate。**缺 scheduler + hot-reload**（詳 §P1-14 bind blocker）
+- **下游消費仍 dormant ❌**：`experiment_ledger_snapshot.json` 結構異常 · 21 個 learning schema 表存在無 consumer · ONNX 0 artifact
 - **A/B/C 已併入 DUAL-TRACK Phase 1**（不再此處追蹤）
 - **此處殘留**：D Teacher（G-7 W23）/ LinUCB / Bayesian posterior / RL transitions 全休眠
 - **阻 Phase 5 edge 收斂**，不阻 Live
@@ -176,6 +177,26 @@ git status && git log --oneline -5
 - **可能阻擋**：confluence / `check_order_allowed` / cooldown 10min / dispatch min_notional / risk_close 秒殺
 - **下一步**：(1) 找出 66 筆 intent_id/context_id join `risk_verdicts` + engine.log trace (2) 統計阻擋分佈 (3) 對症處理
 - **備註**：P0-6 永久修復後 `rejected_reason` 已 persist 到 `risk_verdicts.reasons` → trace 高效化
+
+### P1-13 · SAMPLE-FLOOR-GAP-1 — per-strategy round-trip 樣本低於 ML 訓練閘口
+
+| engine | grid_trading | ma_crossover | funding_arb | bb_reversion | bb_breakout |
+|---|---:|---:|---:|---:|---:|
+| demo+live_demo fills | 2,492 | 762 | 77 | 2 | 0 |
+| 估計 RT | ~1,200 | ~380 | ~38 | 1 | 0 |
+
+- **現象**：Step 0 不確定 3 audit — `trading.fills` 配對 RT 遠低於 QA 守衛「≥1000/策略」；僅 grid_trading 勉強過閘
+- **影響**：DUAL-TRACK Phase 1 Track L 範圍限 grid_trading 單策略 PoC；ma_crossover/bb_*/funding_arb 延後，累積期間 Track P only
+- **下一步**：(1) 正式更新 DUAL-TRACK Phase 1 軌道 2 C 範圍聲明限 grid_trading (2) 每週 per-strategy 樣本 audit 判斷加入時點
+- **關聯**：DUAL-TRACK Step 0 不確定 3 / Phase 1 軌道 2 C · QA 守衛 #1 · 風險退路 #5
+
+### P1-14 · EDGE-ESTIMATE-BIND-BLOCKED-1 — JS estimator snapshot 結構性負 edge 無法 bind cost_gate
+- **現象**：Step 0 不確定 1 驗證 `settings/edge_estimates.json` 首次寫入成功（104 cells · grand_mean −2214 bps ≈ −22.14%/RT）
+- **問題**：該 snapshot hot-reload 進 Rust `cost_gate_live`/`cost_gate_moderate` 會 100% fail-closed，回退 P0-6 方案 A 解鎖前的死循環
+- **根因**：grand_mean 深負結構原因 = P1-10（grid fee 74% + ma_crossover 2.54× R:R 不對稱），非 estimator 機制缺陷
+- **下一步**：(1) DUAL-TRACK Phase 1 軌道 2 B 僅啟 scheduler 寫檔 + PG UPSERT，**不綁定** Rust cost_gate 讀取 (2) P1-10 修復落地後重跑 estimator 看 grand_mean 是否翻正 (3) grand_mean>0 且 ≥2 策略 shrunk_bps>0 才開 binding
+- **阻塞**：不阻 Live；阻 DUAL-TRACK Phase 1 軌道 2 B 完成判定 + Phase 5 cost_gate 重啟
+- **關聯**：P1-10 STRATEGY-ASYMMETRY-1（必要前置）· DUAL-TRACK Phase 1 軌道 2 B · P0-3 Phase 5 edge 重評
 
 ---
 
