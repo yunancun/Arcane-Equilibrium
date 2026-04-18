@@ -236,10 +236,17 @@ function renderBalance(raw) {
   const engineInitial = parseFloat(b.engine_initial_balance);
   const enginePeak = parseFloat(b.engine_peak_balance);
   const engineRealized = parseFloat(b.engine_realized_pnl);
+  const engineFees = parseFloat(b.engine_total_fees);
   // Session-relative realized PnL: prefer engine value (delta from session start),
   // fall back to 0 if engine state not yet populated.
+  // PnL displays use net-of-fees identity: equity - initial = (realized - fees) + unrealized.
+  // "Realized" column therefore reports realized - fees (cumulative cash delta of closes + all fees paid).
   // Session 內已實現盈虧：優先使用引擎側值，引擎尚未就緒時退化為 0。
-  const realized = Number.isFinite(engineRealized) ? engineRealized : 0;
+  // PnL 口徑採用「淨利恆等式」：equity - initial = (realized - fees) + unrealized。
+  // 「已實現」欄位 = realized - fees（平倉現金差 + 所有已付手續費）。
+  const realizedGross = Number.isFinite(engineRealized) ? engineRealized : 0;
+  const fees = Number.isFinite(engineFees) ? engineFees : 0;
+  const realized = realizedGross - fees;
 
   // Initial balance: engine-authoritative; fallback to derived only if missing.
   // 初始餘額：以引擎為準；快照尚未生成時退化為推算值。
@@ -524,16 +531,23 @@ async function loadComparison() {
     demoB = demo.result.list[0];
   }
   // Use engine snapshot for session-relative realized PnL and initial equity.
+  // Net-of-fees identity: displayed realized = realized_gross - fees so
+  // realized + unrealized sums to equity - initial (true net PnL).
   // 用引擎快照取得 session 內已實現盈虧與初始 equity。
+  // 淨利恆等式：顯示的「已實現」= realized_gross - fees，讓「已實現 + 未實現」= equity - initial。
   const demoEngineRealized = parseFloat(demo.engine_realized_pnl);
-  const demoRealized = Number.isFinite(demoEngineRealized) ? demoEngineRealized : 0;
+  const demoEngineFees = parseFloat(demo.engine_total_fees);
+  const demoRealizedGross = Number.isFinite(demoEngineRealized) ? demoEngineRealized : 0;
+  const demoFees = Number.isFinite(demoEngineFees) ? demoEngineFees : 0;
+  const demoRealized = demoRealizedGross - demoFees;
   const demoEngineInitial = parseFloat(demo.engine_initial_balance);
   const demoInitial = Number.isFinite(demoEngineInitial) && demoEngineInitial > 0 ? demoEngineInitial : 0;
+  const demoUnrealized = parseFloat(demoB.totalPerpUPL || 0);
   const rows = [
     ['已实现盈亏', ocMoney(paperPnl.realized_pnl || 0), ocMoney(demoRealized)],
-    ['未实现盈亏', ocMoney(paperPnl.unrealized_pnl || 0), ocMoney(parseFloat(demoB.totalPerpUPL || 0))],
-    ['净盈亏', ocMoney(paperPnl.net_paper_pnl || 0), ocMoney(demoRealized + parseFloat(demoB.totalPerpUPL || 0))],
-    ['当前余额', ocBalance(demoInitial + demoRealized + parseFloat(demoB.totalPerpUPL || 0), 2), ocBalance(parseFloat(demoB.totalEquity || 0), 2)],
+    ['未实现盈亏', ocMoney(paperPnl.unrealized_pnl || 0), ocMoney(demoUnrealized)],
+    ['净盈亏', ocMoney(paperPnl.net_paper_pnl || 0), ocMoney(demoRealized + demoUnrealized)],
+    ['当前余额', ocBalance(demoInitial + demoRealized + demoUnrealized, 2), ocBalance(parseFloat(demoB.totalEquity || 0), 2)],
     ['可用余额', '--', ocBalance(parseFloat(demoB.totalAvailableBalance || demoB.availableBalance || 0), 2)],
   ];
 
