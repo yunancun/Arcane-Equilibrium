@@ -51,8 +51,10 @@ import uuid
 import warnings
 from typing import Any, Callable, Dict, List, Optional
 
+from .base_agent import BaseAgent
 from .h1_thought_gate import H1ThoughtGate
 from .h4_validator import validate_ai_output
+from .llm_call_wrapper import call_ollama_judge_edge, ollama_is_available
 from .model_router import ModelRouter
 from .multi_agent_framework import (
     AgentMessage,
@@ -80,7 +82,7 @@ logger = logging.getLogger(__name__)
 # StrategistAgent / 策略師代理
 # ═══════════════════════════════════════════════════════════════════════════════
 
-class StrategistAgent:
+class StrategistAgent(BaseAgent):
     """EX-06 §4 — AI-enhanced strategy evaluation agent.
 
     Consumes IntelObject from Scout, evaluates signal quality via Qwen 3.5
@@ -105,6 +107,10 @@ class StrategistAgent:
     - h4_validator.validate_ai_output：H4 AI 輸出結構驗證
     """
 
+    # E5-P1-4: class-level role so BaseAgent sees correct value pre-__init__.
+    # E5-P1-4：類級 role，讓 BaseAgent 在 __init__ 前看到正確值。
+    role = AgentRole.STRATEGIST
+
     # C4: Regime-aware strategy selection preference multipliers.
     # C4: Regime 感知策略選擇偏好倍率。
     # Backward-compatible class attribute — actual cap lives in H1ThoughtGate
@@ -128,16 +134,20 @@ class StrategistAgent:
         audit_callback: Optional[Callable] = None,
         cost_tracker: Optional[Any] = None,
     ):
+        super().__init__(
+            role=AgentRole.STRATEGIST,
+            message_bus=message_bus,
+            audit_callback=audit_callback,
+            cost_tracker=cost_tracker,
+        )
         self.config = config or StrategistConfig()
-        self.bus = message_bus
         self._ollama = ollama_client
-        self._audit_callback = audit_callback
-        self.state = AgentState.INITIALIZING
-        self._lock = threading.Lock()
 
-        # cost_tracker: injected externally; None = no budget tracking
-        # cost_tracker：外部注入；None 表示不做預算追蹤（fail-open）
-        self.cost_tracker = cost_tracker
+        # cost_tracker already set by BaseAgent.__init__ (self.cost_tracker).
+        # cost_tracker 已由 BaseAgent.__init__ 設置（self.cost_tracker）。
+        # Kept as a local alias for backwards compatibility with any test that
+        # reads .cost_tracker directly (None = no budget tracking / fail-open).
+        # 保留為別名以向後兼容直接讀 .cost_tracker 的測試（None = 不追蹤）。
 
         # Delegate: H1 ThoughtGate — pre-AI deterministic gate
         # 委託：H1 思考閘門 — AI 調用前的確定性判斷
@@ -220,20 +230,19 @@ class StrategistAgent:
         self._last_knowledge_update: Optional[Any] = None
 
     # ── Lifecycle / 生命週期 ──
+    # pause() inherited from BaseAgent. start/stop override to preserve the
+    # original info log string (Strategist's start log includes shadow flag).
+    # pause() 繼承自 BaseAgent；start/stop 覆蓋保留原有 info log（含 shadow 標誌）。
 
     def start(self) -> None:
         """Start the agent / 啟動代理"""
-        self.state = AgentState.RUNNING
+        super().start()
         logger.info("StrategistAgent started (shadow=%s) / 策略師代理已啟動 (shadow=%s)",
                      self.config.shadow, self.config.shadow)
 
-    def pause(self) -> None:
-        """Pause the agent / 暫停代理"""
-        self.state = AgentState.PAUSED
-
     def stop(self) -> None:
         """Stop the agent / 停止代理"""
-        self.state = AgentState.STOPPED
+        super().stop()
         logger.info("StrategistAgent stopped / 策略師代理已停止")
 
     # ── Message Handler / 消息處理 ──
@@ -883,7 +892,9 @@ class StrategistAgent:
         2. If unavailable/error → fallback to local heuristic
         3. Never return has_edge=True without evaluation (fail-closed)
         """
-        if self._ollama and self._ollama.is_available():
+        # E5-P1-4: Ollama availability check routed via llm_call_wrapper.
+        # E5-P1-4：Ollama 可用性檢查統一走 llm_call_wrapper。
+        if ollama_is_available(self._ollama):
             try:
                 return self._ai_evaluate(intel)
             except Exception as e:
@@ -906,7 +917,10 @@ class StrategistAgent:
         # V2：使用含認知/蒙特卡洛欄位的結構化 JSON prompt
         context = self._build_prompt_context(intel)
 
-        response = self._ollama.judge_edge(context)
+        # E5-P1-4: routed via llm_call_wrapper.call_ollama_judge_edge
+        # (thin pass-through — identical call semantics, preserves fail-closed).
+        # E5-P1-4：通過 llm_call_wrapper.call_ollama_judge_edge（語義完全等同）。
+        response = call_ollama_judge_edge(self._ollama, context)
         latency_ms = (time.time() - start) * 1000
 
         with self._lock:
@@ -1125,14 +1139,8 @@ class StrategistAgent:
             return (self.config.min_confidence, 1.0)
 
     # ── Audit / 審計 ──
-
-    def _audit(self, event_type: str, data: Any) -> None:
-        """Write audit record / 寫入審計記錄"""
-        if self._audit_callback:
-            try:
-                self._audit_callback(f"strategist_{event_type}", data)
-            except Exception as e:
-                logger.debug("Audit callback error: %s", e)
+    # _audit() inherited from BaseAgent (prefixes event with role.value = "strategist").
+    # _audit() 繼承自 BaseAgent（前綴為 role.value = "strategist"）。
 
     # ── Status / 狀態 ──
 

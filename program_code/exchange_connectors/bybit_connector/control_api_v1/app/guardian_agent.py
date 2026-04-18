@@ -41,6 +41,8 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
 
+from .base_agent import BaseAgent
+from .llm_call_wrapper import call_ollama_classify, ollama_is_available
 from .multi_agent_framework import (
     AgentMessage,
     AgentRole,
@@ -82,7 +84,7 @@ class GuardianConfig:
 # GuardianAgent / 守卫代理
 # ═══════════════════════════════════════════════════════════════════════════════
 
-class GuardianAgent:
+class GuardianAgent(BaseAgent):
     """EX-06 §5 — Risk review agent that approves/rejects/modifies every TradeIntent.
 
     Guardian's verdict ALWAYS overrides Strategist (EX-06 §9).
@@ -90,7 +92,12 @@ class GuardianAgent:
 
     Guardian 的裁决始终优先于 Strategist（EX-06 §9）。
     fail-closed：任何错误 → REJECTED。
+
+    Inherits BaseAgent for shared lifecycle + audit + cost-tracking skeleton (E5-P1-4).
+    繼承 BaseAgent 共享生命週期 + 審計 + 成本追蹤骨架（E5-P1-4）。
     """
+
+    role = AgentRole.GUARDIAN
 
     def __init__(
         self,
@@ -102,14 +109,16 @@ class GuardianAgent:
         governance_hub: Optional[Any] = None,
         audit_callback: Optional[Callable] = None,
     ):
+        super().__init__(
+            role=AgentRole.GUARDIAN,
+            message_bus=message_bus,
+            audit_callback=audit_callback,
+            cost_tracker=None,  # Guardian does not track LLM costs directly.
+        )
         self.config = config or GuardianConfig()
-        self.bus = message_bus
         self._risk_manager = risk_manager
         self._ollama = ollama_client
         self._governance_hub = governance_hub
-        self._audit_callback = audit_callback
-        self.state = AgentState.INITIALIZING
-        self._lock = threading.Lock()
 
         # Active positions tracking (injected from PipelineBridge state)
         # 活跃仓位追踪（从 PipelineBridge 状态注入）
@@ -137,16 +146,16 @@ class GuardianAgent:
         self._max_verdict_log = 200
 
     # ── Lifecycle / 生命周期 ──
+    # pause() inherited from BaseAgent (bare). start/stop override to preserve
+    # the legacy "Agent started/stopped" info log string.
+    # pause() 繼承自 BaseAgent；start/stop 覆蓋以保留原有的 info log。
 
     def start(self) -> None:
-        self.state = AgentState.RUNNING
+        super().start()
         logger.info("GuardianAgent started / 守卫代理已启动")
 
-    def pause(self) -> None:
-        self.state = AgentState.PAUSED
-
     def stop(self) -> None:
-        self.state = AgentState.STOPPED
+        super().stop()
         logger.info("GuardianAgent stopped / 守卫代理已停止")
 
     # ── Message Handler / 消息处理 ──
@@ -488,10 +497,13 @@ class GuardianAgent:
         risk_level = "medium"  # default
 
         # Try AI classification if available / 尝试 AI 分类
-        if self._ollama and self._ollama.is_available():
+        # E5-P1-4: routed via llm_call_wrapper (unified L1 Ollama invocation).
+        # E5-P1-4：通過 llm_call_wrapper 統一 L1 Ollama 調用。
+        if ollama_is_available(self._ollama):
             try:
                 desc = payload.get("description", event_type)
-                resp = self._ollama.classify(
+                resp = call_ollama_classify(
+                    self._ollama,
                     f"Event: {event_type}. Severity: {severity}. Description: {desc}",
                     ["low", "medium", "high", "critical"],
                 )
@@ -555,13 +567,8 @@ class GuardianAgent:
             self._strategy_metrics.update(metrics)
 
     # ── Audit / 审计 ──
-
-    def _audit(self, event_type: str, data: Any) -> None:
-        if self._audit_callback:
-            try:
-                self._audit_callback(f"guardian_{event_type}", data)
-            except Exception as e:
-                logger.debug("Audit callback error: %s", e)
+    # _audit() inherited from BaseAgent (prefixes event with role.value = "guardian").
+    # _audit() 繼承自 BaseAgent（前綴為 role.value = "guardian"）。
 
     # ── Status / 状态 ──
 
