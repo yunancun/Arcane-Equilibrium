@@ -226,7 +226,9 @@ pub struct GridTrading {
     /// Per-symbol last trade timestamp for cooldown.
     /// 每幣種最後交易時間戳（用於冷卻）。
     last_trade_ms: HashMap<String, u64>,
-    cooldown_ms: u64,
+    /// E5-P2-4: Now factory-wired from TOML `strategy_params_*.toml::grid_trading.cooldown_ms`.
+    /// E5-P2-4：現透過工廠自 TOML（`grid_trading.cooldown_ms`）接線。
+    pub(crate) cooldown_ms: u64,
     qty_per_grid: f64,
     // OU parameters / OU 參數 — per-symbol price history
     price_history: HashMap<String, Vec<f64>>,

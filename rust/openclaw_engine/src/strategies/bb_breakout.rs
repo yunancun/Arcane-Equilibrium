@@ -45,6 +45,24 @@ pub struct BbBreakoutParams {
     pub confluence_threshold_no_trade: f64,
     pub confluence_threshold_light: f64,
     pub confluence_threshold_full: f64,
+    // ── E5-P2-4: Previously hard-coded magic numbers lifted to config ──
+    // ── E5-P2-4：原本 hard-coded 的魔術數字提升為 config 參數 ──
+    /// Hurst trending regime entry confidence boost (default 0.1).
+    /// Adds to entry confidence when Hurst regime == "trending".
+    /// Hurst 趨勢狀態入場信心加成（默認 0.1）。當 Hurst regime == "trending" 時加到入場信心。
+    pub hurst_regime_boost: f64,
+    /// Exit confidence bonus for trailing stop hit (default 0.2).
+    /// 追蹤止損觸發時的出場信心加成（默認 0.2）。
+    pub exit_bonus_trailing_stop: f64,
+    /// Exit confidence bonus for Hurst regime shift exit (default 0.1).
+    /// Hurst regime 轉向出場時的信心加成（默認 0.1）。
+    pub exit_bonus_regime_shift: f64,
+    /// Exit confidence bonus for %B revert-to-middle exit (default 0.05).
+    /// %B 回中軌出場時的信心加成（默認 0.05）。
+    pub exit_bonus_pctb_revert: f64,
+    /// Exit confidence penalty (magnitude, subtracted) for BW squeeze exit (default 0.05).
+    /// BW 帶寬再壓縮出場時的信心扣減幅度（默認 0.05，實際套用時為減法）。
+    pub exit_penalty_bw_squeeze: f64,
 }
 
 impl Default for BbBreakoutParams {
@@ -69,6 +87,13 @@ impl Default for BbBreakoutParams {
             confluence_threshold_no_trade: cc.threshold_no_trade,
             confluence_threshold_light: cc.threshold_light,
             confluence_threshold_full: cc.threshold_full,
+            // E5-P2-4: preserve exact pre-extraction values (bit-exact behaviour)
+            // E5-P2-4：保留原始 hard-coded 值（維持 bit-exact 行為）
+            hurst_regime_boost: 0.1,
+            exit_bonus_trailing_stop: 0.2,
+            exit_bonus_regime_shift: 0.1,
+            exit_bonus_pctb_revert: 0.05,
+            exit_penalty_bw_squeeze: 0.05,
         }
     }
 }
@@ -324,6 +349,18 @@ pub struct BbBreakout {
     persistence: PersistenceTracker,
     pub min_persistence_ms: u64,
     pub min_notional_usd: f64,
+    // ── E5-P2-4: Config-driven exit confidence offsets + Hurst boost ──
+    // ── E5-P2-4：config 驅動的出場信心偏移 + Hurst 加成 ──
+    /// Hurst trending regime entry confidence boost. / Hurst 趨勢入場信心加成。
+    pub(crate) hurst_regime_boost: f64,
+    /// Trailing-stop exit confidence bonus. / 追蹤止損出場信心加成。
+    pub(crate) exit_bonus_trailing_stop: f64,
+    /// Regime-shift exit confidence bonus. / Regime 轉向出場信心加成。
+    pub(crate) exit_bonus_regime_shift: f64,
+    /// %B revert exit confidence bonus. / %B 回中軌出場信心加成。
+    pub(crate) exit_bonus_pctb_revert: f64,
+    /// BW squeeze exit confidence penalty (magnitude). / BW 再壓縮出場信心扣減幅度。
+    pub(crate) exit_penalty_bw_squeeze: f64,
 }
 
 impl BbBreakout {
@@ -348,6 +385,13 @@ impl BbBreakout {
             persistence: PersistenceTracker::new(),
             min_persistence_ms: 60_000, // 1 min (triple gate already strict)
             min_notional_usd: 10.0,
+            // E5-P2-4: preserve exact pre-extraction values (bit-exact behaviour)
+            // E5-P2-4：保留原始值以確保行為 bit-exact
+            hurst_regime_boost: 0.1,
+            exit_bonus_trailing_stop: 0.2,
+            exit_bonus_regime_shift: 0.1,
+            exit_bonus_pctb_revert: 0.05,
+            exit_penalty_bw_squeeze: 0.05,
         }
     }
 
@@ -366,6 +410,13 @@ impl BbBreakout {
         self.confluence_config = params.build_confluence_config();
         self.min_persistence_ms = params.min_persistence_ms;
         self.min_notional_usd = params.min_notional_usd;
+        // E5-P2-4: hot-reload config-driven confidence offsets.
+        // E5-P2-4：熱重載 config 驅動的信心偏移參數。
+        self.hurst_regime_boost = params.hurst_regime_boost;
+        self.exit_bonus_trailing_stop = params.exit_bonus_trailing_stop;
+        self.exit_bonus_regime_shift = params.exit_bonus_regime_shift;
+        self.exit_bonus_pctb_revert = params.exit_bonus_pctb_revert;
+        self.exit_penalty_bw_squeeze = params.exit_penalty_bw_squeeze;
         info!(strategy = "bb_breakout", "params updated / 參數已更新");
         Ok(())
     }
@@ -390,6 +441,13 @@ impl BbBreakout {
             confluence_threshold_no_trade: self.confluence_config.threshold_no_trade,
             confluence_threshold_light: self.confluence_config.threshold_light,
             confluence_threshold_full: self.confluence_config.threshold_full,
+            // E5-P2-4: expose new fields for Agent `get_params_json` round-trip.
+            // E5-P2-4：新增欄位供 Agent `get_params_json` 往返使用。
+            hurst_regime_boost: self.hurst_regime_boost,
+            exit_bonus_trailing_stop: self.exit_bonus_trailing_stop,
+            exit_bonus_regime_shift: self.exit_bonus_regime_shift,
+            exit_bonus_pctb_revert: self.exit_bonus_pctb_revert,
+            exit_penalty_bw_squeeze: self.exit_penalty_bw_squeeze,
         }
     }
 
@@ -554,8 +612,10 @@ impl Strategy for BbBreakout {
 
                         // A4: Hurst regime boost — trending regime boosts breakout confidence
                         // A4：Hurst 趋势状态 — 趋势型市场提升突破信心
+                        // E5-P2-4: magnitude now config-driven (was hard-coded 0.1).
+                        // E5-P2-4：加成幅度改由 config 控制（原 hard-coded 0.1）。
                         let hurst_boost: f64 = match &ind.hurst {
-                            Some(h) if h.regime == "trending" => 0.1,
+                            Some(h) if h.regime == "trending" => self.hurst_regime_boost,
                             _ => 0.0,
                         };
 
@@ -641,6 +701,8 @@ impl Strategy for BbBreakout {
                     // 備註：止損單向棘輪（多頭只升、空頭只降），保持 bit-exact 行為。
                     let st = self.symbols.get_or_init(sym);
                     let cur_stop = st.trailing_stop;
+                    // E5-P2-4: trailing-stop bonus now config-driven (was 0.2).
+                    // E5-P2-4：追蹤止損加成改由 config 控制（原 0.2）。
                     if is_long {
                         let new_stop = ctx.price - stop_distance;
                         if cur_stop.is_none() || new_stop > cur_stop.unwrap() {
@@ -648,7 +710,7 @@ impl Strategy for BbBreakout {
                         }
                         if ctx.price <= st.trailing_stop.unwrap_or(0.0) {
                             exit_reason = Some("trailing_stop");
-                            exit_confidence = self.exit_conf_base + 0.2;
+                            exit_confidence = self.exit_conf_base + self.exit_bonus_trailing_stop;
                         }
                     } else {
                         let new_stop = ctx.price + stop_distance;
@@ -657,32 +719,37 @@ impl Strategy for BbBreakout {
                         }
                         if ctx.price >= st.trailing_stop.unwrap_or(f64::MAX) {
                             exit_reason = Some("trailing_stop");
-                            exit_confidence = self.exit_conf_base + 0.2;
+                            exit_confidence = self.exit_conf_base + self.exit_bonus_trailing_stop;
                         }
                     }
                 }
 
                 // V2: Regime exit — Hurst drops from trending to mean_reverting/random_walk.
                 // V2：Regime 出場 — Hurst 從趨勢轉為均值回歸/隨機漫步。
+                // E5-P2-4: regime_shift bonus now config-driven (was 0.1).
+                // E5-P2-4：regime 轉向加成改由 config 控制（原 0.1）。
                 if exit_reason.is_none() {
                     if let Some(h) = &ind.hurst {
                         if h.regime == "mean_reverting" || h.regime == "random_walk" {
                             exit_reason = Some("regime_shift");
-                            exit_confidence = self.exit_conf_base + 0.1;
+                            exit_confidence = self.exit_conf_base + self.exit_bonus_regime_shift;
                         }
                     }
                 }
 
                 // %B revert to mid: failed breakout — price returned to BB middle.
                 // %B 回中軌：突破失敗 — 價格回到 BB 中間。
+                // E5-P2-4: pctb_revert bonus / bw_squeeze penalty now config-driven
+                // (was 0.05 / -0.05 hard-coded).
+                // E5-P2-4：%B 回中軌加成與帶寬再壓縮扣減改由 config 控制（原 0.05 / -0.05）。
                 if exit_reason.is_none() {
                     if bb.percent_b >= 0.2 && bb.percent_b <= 0.8 {
                         exit_reason = Some("pctb_revert");
-                        exit_confidence = self.exit_conf_base + 0.05;
+                        exit_confidence = self.exit_conf_base + self.exit_bonus_pctb_revert;
                     } else if bb.bandwidth < self.squeeze_bw {
                         // BW squeeze: volatility collapsed / 帶寬壓縮：波動塌陷
                         exit_reason = Some("bw_squeeze");
-                        exit_confidence = self.exit_conf_base - 0.05;
+                        exit_confidence = self.exit_conf_base - self.exit_penalty_bw_squeeze;
                     }
                 }
 
@@ -1124,5 +1191,75 @@ mod tests {
         let mut p = BbBreakoutParams::default();
         p.confluence_threshold_no_trade = 60.0; // > light (45)
         assert!(p.validate().is_err());
+    }
+
+    // ── E5-P2-4: bit-exact defaults for newly config-driven magic numbers ──
+    // ── E5-P2-4：新增 config 欄位的預設值需與原 hard-coded 一致（bit-exact） ──
+
+    #[test]
+    fn test_e5_p2_4_bbb_params_defaults_match_prior_hardcoded() {
+        // Defaults must equal the literals previously embedded in the strategy body
+        // so downstream numerical outputs are byte-identical when TOML omits them.
+        // 默認值需等於原先硬編碼的字面量，以保證 TOML 未覆寫時輸出位元相等。
+        let p = BbBreakoutParams::default();
+        assert!(
+            (p.hurst_regime_boost - 0.1).abs() < f64::EPSILON,
+            "hurst_regime_boost default must be 0.1 (bit-exact)"
+        );
+        assert!(
+            (p.exit_bonus_trailing_stop - 0.2).abs() < f64::EPSILON,
+            "exit_bonus_trailing_stop default must be 0.2 (bit-exact)"
+        );
+        assert!(
+            (p.exit_bonus_regime_shift - 0.1).abs() < f64::EPSILON,
+            "exit_bonus_regime_shift default must be 0.1 (bit-exact)"
+        );
+        assert!(
+            (p.exit_bonus_pctb_revert - 0.05).abs() < f64::EPSILON,
+            "exit_bonus_pctb_revert default must be 0.05 (bit-exact)"
+        );
+        assert!(
+            (p.exit_penalty_bw_squeeze - 0.05).abs() < f64::EPSILON,
+            "exit_penalty_bw_squeeze default must be 0.05 (bit-exact)"
+        );
+    }
+
+    #[test]
+    fn test_e5_p2_4_runtime_new_matches_params_default() {
+        // BbBreakout::new() must seed the runtime fields with the same literals
+        // as BbBreakoutParams::default() — enforces a single source of truth.
+        // BbBreakout::new() 初始化值需與 BbBreakoutParams::default() 同源（單一事實來源）。
+        let s = BbBreakout::new();
+        let d = BbBreakoutParams::default();
+        assert!((s.hurst_regime_boost - d.hurst_regime_boost).abs() < f64::EPSILON);
+        assert!((s.exit_bonus_trailing_stop - d.exit_bonus_trailing_stop).abs() < f64::EPSILON);
+        assert!((s.exit_bonus_regime_shift - d.exit_bonus_regime_shift).abs() < f64::EPSILON);
+        assert!((s.exit_bonus_pctb_revert - d.exit_bonus_pctb_revert).abs() < f64::EPSILON);
+        assert!((s.exit_penalty_bw_squeeze - d.exit_penalty_bw_squeeze).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_e5_p2_4_update_params_hot_reloads_offsets() {
+        // update_params must propagate new field values to the live runtime
+        // (hot-reload contract — ConfigStore / ArcSwap compatibility).
+        // update_params 需將新欄位熱重載到運行時（與 ConfigStore/ArcSwap 契約一致）。
+        let mut s = BbBreakout::new();
+        let mut p = BbBreakoutParams::default();
+        p.hurst_regime_boost = 0.17;
+        p.exit_bonus_trailing_stop = 0.25;
+        p.exit_bonus_regime_shift = 0.12;
+        p.exit_bonus_pctb_revert = 0.07;
+        p.exit_penalty_bw_squeeze = 0.08;
+        s.update_params(p.clone()).expect("valid params");
+        assert!((s.hurst_regime_boost - 0.17).abs() < f64::EPSILON);
+        assert!((s.exit_bonus_trailing_stop - 0.25).abs() < f64::EPSILON);
+        assert!((s.exit_bonus_regime_shift - 0.12).abs() < f64::EPSILON);
+        assert!((s.exit_bonus_pctb_revert - 0.07).abs() < f64::EPSILON);
+        assert!((s.exit_penalty_bw_squeeze - 0.08).abs() < f64::EPSILON);
+        // Round-trip get_params must expose the freshly hot-reloaded values.
+        // get_params 需回吐熱重載後的新值。
+        let back = s.get_params();
+        assert!((back.hurst_regime_boost - 0.17).abs() < f64::EPSILON);
+        assert!((back.exit_bonus_trailing_stop - 0.25).abs() < f64::EPSILON);
     }
 }
