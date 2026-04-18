@@ -342,11 +342,21 @@ class TestPipelineAndScannerRoutes:
             _ipc._READER = _orig
         assert result["data"]["available"] is False
 
-    @patch(f"{_MOD_READ}.MARKET_SCANNER", None)
-    def test_scanner_unavailable(self):
+    def test_scanner_ipc_unavailable_returns_empty(self):
+        """IPC-SCAN-1c: Python MARKET_SCANNER stub removed; endpoint now forwards to
+        Rust IPC `get_scanner_status`. When IPC fails, fail-soft to empty list.
+        IPC-SCAN-1c：Python stub 已移除，路由透過 IPC 讀 Rust；IPC 失敗時降級為空列。"""
         from app.phase2_strategy_routes import get_scanner_opportunities
-        result = _run(get_scanner_opportunities(actor=_FakeActor()))
-        assert result["data"]["available"] is False
+
+        class _BrokenClient:
+            async def connect(self): raise RuntimeError("ipc down")
+            async def call(self, *a, **kw): pass
+            async def disconnect(self): pass
+
+        with patch("app.ipc_client.EngineIPCClient", _BrokenClient):
+            result = _run(get_scanner_opportunities(actor=_FakeActor()))
+        assert result["data"]["opportunities"] == []
+        assert result["data"]["source"] == "unavailable"
 
 
 class TestTelegramStatusRoute:

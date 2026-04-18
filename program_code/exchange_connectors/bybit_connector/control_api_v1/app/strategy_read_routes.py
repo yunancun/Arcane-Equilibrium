@@ -373,16 +373,91 @@ async def get_pipeline_stats(actor: base.AuthenticatedActor = Depends(base.curre
 
 @phase2_router.get("/scanner/opportunities")
 async def get_scanner_opportunities(actor: base.AuthenticatedActor = Depends(base.current_actor)):
-    """Get latest market scan opportunities / 获取最新市场扫描机会"""
-    if MARKET_SCANNER is None:
-        return _envelope({"available": False})
+    """Get latest market scan opportunities from Rust scanner via IPC.
+
+    IPC-SCAN-1c: Python MarketScanner is a stub (local_model_tools/market_scanner.py);
+    authoritative data lives in rust/openclaw_engine/src/scanner/. This route mirrors
+    the `/scanner/deployed` pattern (line 432) and reads `last_scan.top_candidates`
+    from IPC `get_scanner_status`, mapping Rust fields to GUI-expected fields.
+
+    IPC-SCAN-1c：Python MarketScanner 僅為 stub，權威掃描資料在 Rust scanner。
+    此路由透過 IPC get_scanner_status 讀取 last_scan.top_candidates，
+    並將 Rust 欄位映射為 GUI 所需欄位（symbol / strategy_type / score / reason）。
+    """
     try:
+        from .ipc_client import EngineIPCClient  # noqa: PLC0415
+        client = EngineIPCClient()
+        try:
+            await client.connect()
+            result = await client.call("get_scanner_status", params={}, timeout=3.0)
+        finally:
+            await client.disconnect()
+
+        status = result.get("status", "unknown")
+        if status != "ok":
+            return _envelope({
+                "opportunities": [],
+                "stats": {"status": status},
+                "source": "rust_scanner",
+            })
+
+        last_scan = result.get("last_scan") or {}
+        candidates = last_scan.get("top_candidates") or []
+
+        opportunities = []
+        for c in candidates:
+            if not isinstance(c, dict):
+                continue
+            # Compose human-readable reason from sector + edge info.
+            # Narrow try wrapper so a single bad candidate loses its reason
+            # rather than poisoning the whole batch via the outer except.
+            # 由 sector 與 edge 資訊組合人類可讀的原因字串；
+            # 窄 try 包一層，單一壞 candidate 只掉 reason，不會毒殺整批。
+            sector = c.get("sector") or ""
+            edge_bonus = c.get("edge_bonus")
+            edge_n = c.get("edge_n")
+            parts: list[str] = []
+            if sector:
+                parts.append(str(sector))
+            # edge_n truthy guard: n=0 means "no samples yet" per handlers.rs:1070 —
+            # skipping is intentional; switch to `is not None` if semantics change.
+            # edge_n truthy 守衛：n=0 表「尚無樣本」（見 handlers.rs:1070），故意跳過。
+            if edge_bonus is not None and edge_n:
+                try:
+                    parts.append(f"edge={float(edge_bonus):+.2f} (n={int(edge_n)})")
+                except (TypeError, ValueError):
+                    pass
+            reason = " · ".join(parts) if parts else "--"
+
+            opportunities.append({
+                "symbol": c.get("symbol"),
+                "strategy_type": c.get("best_strategy"),
+                "score": c.get("final_score"),
+                "reason": reason,
+            })
+
+        stats = {
+            "scan_ts_ms": last_scan.get("scan_ts_ms"),
+            "duration_ms": last_scan.get("duration_ms"),
+            "added": last_scan.get("added"),
+            "removed": last_scan.get("removed"),
+            "rejected_count": last_scan.get("rejected_count"),
+            "active_count": result.get("active_count"),
+        }
         return _envelope({
-            "opportunities": MARKET_SCANNER.get_latest_opportunities(),
-            "stats": MARKET_SCANNER.get_stats(),
+            "opportunities": opportunities,
+            "stats": stats,
+            "source": "rust_scanner",
         })
-    except Exception:
-        raise HTTPException(status_code=500, detail="Internal error")
+    except Exception as e:
+        # IPC unavailable — degrade to empty opportunities list, preserve envelope.
+        # IPC 不可用，降級為空機會列表，保留 envelope 結構。
+        logger.warning("scanner/opportunities IPC failed: %s", e)
+        return _envelope({
+            "opportunities": [],
+            "stats": {},
+            "source": "unavailable",
+        })
 
 
 @phase2_router.get("/scanner/deployed")
