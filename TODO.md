@@ -279,6 +279,12 @@ git status && git log --oneline -5
 - [ ] **DUST-EVICTION GUI 曝光**（P1-8 FUP）：log-only 觀察滿一週後（起算 2026-04-17）→ GUI 曝光 `dust_frozen` / `orphan_frozen` 倉位給 operator 日報；`paper_state.rs` 已有 `TriageOutcome.dust_frozen` 計數器
 - [ ] **LEARNING-COCKPIT-NO-IPC-1** Learning 8 端點走 Python state_store 非 Rust IPC（設計債，等 G-7/G-10 後再議；不阻 Live，原則 #7 學習平面與 Live 隔離）
 - [ ] **DYNAMIC-RISK-STATUS-TEST-SIG-1** — `test_phase2_strategy_routes_coverage.py::TestDynamicRiskRoutes` 2 測試直接 `await get_dynamic_risk_status(engine="foo")`，跳過 FastAPI 依賴解析，`engine` 仍是 `Query` object → `.lower()` AttributeError @ `strategy_read_routes.py:260`。修復方案：(a) 測試改用 `TestClient(app).get("/api/v1/dynamic-risk/status?engine=...")` 走 HTTP；或 (b) 函數首行加 `engine = engine.default if hasattr(engine, "default") else engine`。嚴重度：測試 only（prod HTTP 路徑正常），**不阻 Live**。引入來源 commit `81a3807` DYNAMIC-RISK-1（2026-04-18 20:06），E5-P0 整合 Phase D 發現並獨立開 ticket。
+- [ ] **E5-P1-5-FUP** — P1-5 JSON-RPC `param_extractor.rs` 目前帶 `#![allow(dead_code)]` 等 handlers.rs 消費。需開工項：掃 `ipc_server/handlers/*.rs` 把內嵌 `as_str()/as_f64()/as_u64()/unwrap_or(default)` 手寫解包替換成 `param_extractor::require_*` / `optional_*`，至少兩個 handler file 當示範，確認 param_extractor.rs 死碼警示可解。E2 nit 追蹤（a4101cb63edc44e93 / af8076b578356a939）。
+- [ ] **E5-P1-4-FUP** — `llm_call_wrapper.call_ollama_timed` dead-on-arrival，考慮：(a) 接 StrategistAgent `_evaluate_edge` 手寫 latency 計時（strategist_agent.py 約 918 行）；(b) 若永遠不接，下 commit 刪除 helper。E2 nit（a4101cb63edc44e93）。
+- [ ] **E5-P1-8-FUP** — `rejection_coding.rs` 第二 `impl RejectionCode` block（`from_guardian_review` 工廠）可折疊到主 impl；分類 helpers（`is_cost_gate_reject` / `family`）帶 `#[allow(dead_code)]` 等 consumer 接線後移除 allow。E2 nit（a9ccde4552860c973）。
+- [ ] **E5-P1-CANCEL-P1-6** — `h0_gate.py` vs `paper_live_gate.py` pipeline 抽象經 sub-agent 實測 0 真實共用，cancel。未來出現第三個類似 gate 時再重開評估（見 2026-04-19 CHANGELOG Wave 1 章節）。
+- [ ] **E5-P1-CANCEL-P1-7** — `PipelineCommand` dispatch-match 已在 prior pass 從 `tick_pipeline/` 遷至 `event_consumer/handlers/`（由 P1-3 進一步 by-domain 拆完），原任務前提過時 cancel。真正候選：`tick_pipeline/commands.rs` 836 LOC helper impl 切 `commands/orders.rs` / `commands/governor.rs` / `commands/close.rs` 等 topical submodules（新排 E5-P2-X 非本 E5-P1-7）。
+- [ ] **E5-P1-2-DEFERRED** — `rust/openclaw_engine/src/main.rs` bootstrap 拆分依 E5 audit 建議「觀察穩定性再拆」（P0-9 停電 RCA 後唯一未重組模塊）暫不派；operator 可在 Live 對後覆蓋。
 
 ---
 

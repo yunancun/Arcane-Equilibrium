@@ -1,7 +1,67 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-04-18（E5-P0 Refactor Wave — 5 P0 並行 sub-agent 寫碼 + 5× E2 並行審查）
+> 最後更新：2026-04-19（E5-P1 Refactor Wave 1 — 6 delivered / 2 evidence-based cancel / 6/6 E2 APPROVE）
+
+### E5-P1 Refactor Wave 1 — 6 delivered / 2 evidence-based cancel（2026-04-19 · commits ba8cd2c / 76cd793 / d6f7572 / b0dc6b6 / c220375 / 1b72f90）
+
+**workflow**：PA 派發 8 × general-purpose sub-agent（`isolation: "worktree"`，`run_in_background: true`）→ 6 delivered + 2 evidence-based cancel → Phase C 6× 並行 E2 code-review → 全 APPROVE / APPROVE-WITH-NITS（zero REJECT）→ Phase D 全量回歸（Rust 1533 / Python 2511）→ Phase E 收口（本 commit）。
+
+**Delivered（6）**：
+
+- **P1-1 paper_state 拆** — `ba8cd2c` / worktree `agent-a65a32da`。2380-line monolith → 8 submodules（`mod.rs` 154 · `containers.rs` 60 · `accessor.rs` 339 · `owner_attribution.rs` 221 · `fill_engine.rs` 475 · `snapshots.rs` 86 · `dust_gate.rs` 129 · `tests.rs` 1187），production 全在 800 warn 線下；+3 bit-exact f64 oracle tests（`close_pnl` · `entry_notional_accumulate` · `weighted_avg_entry`）以 `f64::to_bits()` 對齊。所有外部呼叫者通過 `mod.rs` `pub use` re-export 保留；`pub(super)` 限制兄弟 module 範圍。MICRO-PROFIT-FIX-1 `entry_notional` 累加 + P0-6 `dust_frozen` + P1-8 FUP `<` dust boundary + ORPHAN-ADOPT-1 `positions_mirror` side-car 全部 invariant 保留。E2 APPROVE（1 cosmetic commit-msg nit）。
+- **P1-3 handlers by-domain 拆** — `76cd793` / worktree `agent-a7e5b11b`。`event_consumer/handlers.rs` 1722 → 5 production files（`lifecycle` / `strategy_params` / `risk` / `edge_predictor` / `mod.rs`）+ `tests.rs`；`ipc_server/handlers.rs` 1169 → 7 production files（`misc` / `budget` / `teacher` / `strategy` / `risk` / `dynamic_risk` / `governance`）+ `mod.rs`。26 `PipelineCommand` arms + 22 IPC method-strings 完全 1:1 保留；`pub(super)` / `pub(in crate::ipc_server)` 精準 scope，無 `pub` 廣化。E2 APPROVE（zero nit）。
+- **P1-4 BaseAgent + llm_call_wrapper** — `b0dc6b6`。5 agents（Scout / Strategist / Guardian / Analyst / Executor）共用 ~80 行 surface 抽到 `base_agent.py`（`start/pause/stop`、`_audit()` 角色前綴via `self.role.value`、`_record_llm_call()`、`get_stats()`）+ `llm_call_wrapper.py`（`ollama_is_available` + 4 call helpers）。Audit 事件前綴 byte-identical；Ollama kwargs（`temperature=0.3`、`max_tokens=1024`、`think=True`）保留；fail-closed heuristic fallback 路徑不變；循環 import 通過函數內 lazy `import` 化解；零新 singleton。E2 APPROVE（dead-on-arrival `call_ollama_timed` helper 待 follow-up 接線）。
+- **P1-5 JSON-RPC cross-layer helpers** — `c220375`。4 orphan helper modules：`ipc_error_handler.py`（199 LOC，HTTP 504/503 分類 + `raise_http_for_ipc_error`）· `ipc_dispatch.py`（242 LOC，`one_shot_ipc_call` + `get_or_connect_shared_client` lazy slot singleton）· `param_extractor.rs`（345 LOC，9 `require_*`/`optional_*` helpers + 15 unit tests，`#![allow(dead_code)]` 等 handlers 遷移跨 wave 避衝突）· `supervised_spawn.rs`（214 LOC，`spawn_cancellable_interval` + `on_cancel_msg` `&'static str` 選項保留 legacy cancel 訊息）。4 proof-of-adoption migrations：`ai_budget_routes` 30 行 try/except → 1 call · `live_session_routes._ipc_command` 保留 `"503: IPC command '<m>' failed: ..."` byte-identical · `tasks::spawn_fee_rate_tasks` + `spawn_instrument_refresh`。E2 APPROVE-WITH-NITS（cancel-log 多 `task=<name>` structured field；CLAUDE §九 singleton 表補 `_SHARED_IPC_SLOTS`；`param_extractor` → handlers 遷移 follow-up TODO）。
+- **P1-8 rejection_coding** — `d6f7572` / worktree `agent-ab2a7cfd`。`intent_processor/rejection_coding.rs` 549 LOC；15 `RejectionCode` variants 枚舉所有 intent 拒絕訊息（`GovernanceNotAuthorized` / `DuplicatePosition` / `InsufficientBalance` / `GuardianRejected` + `from_guardian_review` 保留 `{:?}` Debug fmt over `Vec<String>` / `QtyZero` 含 `$` sigil / `RiskGate` upstream passthrough / `GlobalNotionalCap` / 7× `CostGateJs*` incl 中英文混排 + em-dash `—` byte-identical）；18 call sites 遷移（router.rs 11 / gates.rs 6 / mod.rs 1 @ 387）；+16 literal-match 單測非 tautological。`.contains("cost_gate")` / `.starts_with("qty_zero:")` 歷史斷言無需調整。E2 APPROVE（第二 `impl` block + `#[allow(dead_code)]` 分類 helpers 待 consumer 接線後移除）。
+- **P1-9 + P2-5 governance_hub Mixin 拆 + @deprecated** — `1b72f90`。策略 = Mixin via multiple inheritance（companion to existing `GovernanceHubStatusCascadeMixin` FIX-08）。MRO `[GovernanceHub, StatusCascadeMixin, EventHandlersMixin, object]`；新 `governance_hub_event_handlers.py` 237 LOC 容納 5 handlers（`_make_audit_callback` / `_make_incident_callback` / `_wire_callbacks` / `_invalidate_auth_cache` / `_check_de_escalation_gate`）。P2-5 併入：5 methods `typing_extensions.deprecated`（中英雙語 warning message，runtime 路徑 byte-identical）：`check_learning_tier_capability` / `is_enabled` / `get_risk_level` / `check_risk_and_act` / `trigger_risk_upgrade`（`guardian_agent.py:534` 仍呼叫此末項，DeprecationWarning 期中產生 +8 warnings）。`governance_hub.py` 1052→1005 LOC；singleton identity 保留；所有 `getattr(hub, "_invalidate_auth_cache")` 外部呼叫（`live_trust_routes.py:421`、`live_session_governance.py:114,165`）依 MRO 解析不變。E2 APPROVE（commit-msg 行號 off-by-12 + 1 `noqa: F841` 註釋性 lint）。
+
+**Evidence-based cancel（2）** — sub-agents 按 `feedback_pushback.md` 推回錯前提：
+
+- **P1-6 gate_pipeline — CANCEL**：`h0_gate.py` vs `paper_live_gate.py` 實測 **0 行真實重複** —— H0 = `<1ms` SLA fail-fast 熱路徑 5 連鎖 checks；PaperLive = batch 模式 11 criteria + operator-approval FSM + JSON export。`GateCheckResult` 與 `H0GateCheckResult` 結構共用 0。套任何 pipeline 抽象既威脅 H0 延遲又威脅 paper_live audit-byte 合約；加 indirection 換 0 dedup。建議 cancel，僅當未來出現第三個類似 gate 再重開。
+- **P1-7 command_dispatch — CANCEL**：任務前提過時 —— `PipelineCommand` dispatch-match **已在 prior pass** 從 `tick_pipeline/mod.rs` 遷至 `event_consumer/handlers.rs:274-1041`（`handle_paper_command`，767 行），而 `event_consumer/` 本在本任務 DO-NOT-TOUCH list 上。`tick_pipeline/commands.rs` 實際是 13 helper methods 的 `impl TickPipeline` block，不是 dispatch。surface 一個新候選任務「切 `commands.rs` 836 LOC 成 `commands/orders.rs` / `commands/governor.rs` / `commands/close.rs`」——獨立工項，非本任務。
+
+**Sub-agent refuse pattern 第三次驗證**：2026-04-07 觀察的 write-after-read refuse 在 2026-04-18 E5-P0 Phase A probes + 2026-04-18 DUAL-TRACK 雙寫 + 2026-04-19 E5-P1 Wave 1（8 次並行 + 2 次 Wave 2 pending）中穩定不復現。6/8 寫碼成功，2/8 是 evidence-based refusal（非 prompt-injection-refuse），pattern 完全可預測可派發。
+
+**測試基準線**：Rust engine lib 1498 → **1533 passed / 0 failed**（+35 new：P1-1 +3 · P1-5 +17 · P1-8 +16 - 1 shift）；Python pytest 全量 **2511 passed / 2 pre-existing DYNAMIC-RISK-STATUS-TEST-SIG-1 fail / 1 skipped / 407 warnings**（+8 DeprecationWarnings 預期）；zero new regression。
+
+**整合路徑**：3 items（P1-4 b0dc6b6 · P1-5 c220375 · P1-9 1b72f90）由 sub-agent 直接在 main tree commit（外部 worktree 因 Python cross-module 跨層改動範圍廣，worktree 複製成本高於 main tree 提交）；其餘 3 items（P1-1 cd0deb9 · P1-3 6f5b9bb · P1-8 a9a7f67）留在 worktree → 主 session stash WIP → 3 次 cherry-pick `cd0deb9 6f5b9bb a9a7f67` 全 clean auto-merge 無衝突（僅 `database/mod.rs` ordering 良好預測）→ Rust `cargo check --lib` 0 new warning → `cargo test --lib` 1533 passed 0 fail → pytest 2511 passed → 部署 `restart_all.sh --rebuild`。
+
+**nits rolled into Phase E（本 commit）**：
+- CLAUDE.md §九 singleton table 補 `_SHARED_IPC_SLOTS` / `_SHARED_SLOT_LOCK` → ipc_dispatch.py（E5-P1-5 E2 nit）
+- CHANGELOG 本段原始 claim「cancel-log byte-for-byte」實際新增 `task=<name>` structured field；message text 保留但可觀測性增強（E5-P1-5 E2 nit，已在上段修正表述）
+- param_extractor.rs `#![allow(dead_code)]` → 待 handlers.rs 遷移消費，follow-up TODO 待另行排
+- P1-4 `call_ollama_timed` helper dead-on-arrival 待接線（E5-P1-4 E2 nit）
+- P1-8 第二 `impl RejectionCode` block 可折疊 + `#[allow(dead_code)]` 分類 helpers 待 consumer 接線後移除（E5-P1-8 E2 nit）
+
+**後續**：Wave 2（7 P2 items，P2-5 已併入 P1-9）待本 commit 整合部署後並行派發。E5-P1-2 `main.rs` bootstrap 拆分依 audit 建議「觀察穩定性再拆」暫不派，operator 可顯式覆蓋。
+
+---
+
+### P1-16 HALT-SESSION CROSS-SYMBOL PRICE CORRUPTION — 雙軌修復（2026-04-18 · commit fef688e）
+
+**問題**：Rust halt_session force-close 路徑將 triggering tick 的 symbol 價格跨 symbol 汙染到所有其他 symbol 的 close fill。pairer 用被汙染的 exit_price 計算 bps，疊加 partial-match 微分母放大，產生 `-17,617,373 bps` 極端值。demo `edge_estimates.json` `grand_mean=-2214 bps` 真正元兇。下游 P1-15 清 phantom cells + P1-17 Winsorize ±5000 bps 只是 safety net，未修根因。
+
+**上游修復（主）** — `rust/openclaw_engine/src/tick_pipeline/on_tick.rs:1461-1516`
+- `RiskAction::HaltSession(reason)` 分支由手寫 `self.latest_prices.get(sym).copied().unwrap_or(event.last_price)` + `close_position` + 手動 `dynamic_risk_sizer.record_closed_trade` 改為呼叫既有安全 helper `close_position_at_symbol_market`（與 `ClosePosition` 分支 line 1438-1454 同 pattern）
+- helper 內部優先取 per-symbol `latest_prices`，缺失時 fallback 到 `entry_price`（不是 triggering tick）；`record_closed_trade` 由 helper 條件性呼叫（跳過 zero-PnL 合成值避免 Sharpe 污染）
+- 新單測 `test_halt_session_uses_per_symbol_price_not_triggering_tick`：3 symbol（BTC/ETH/DOGE）apply_fills at 50_000/3_000/0.20，NAN'd ETH/DOGE 的 `latest_prices`，charged $2500 → drawdown 25% > 15% halt 閾值，tick BTCUSDT @ 50_500。斷言 BTC close=50_500、ETH close=3_000（fallback 非 50_500）、DOGE close=0.20。
+
+**下游防禦（備）** — `program_code/ml_training/realized_edge_stats.py` `_pair_round_trips`
+- Gate (a) price-jump skip：`|ln(exit/entry)| > 0.5` → log + counter + skip。斷絕任何 P1-16-like cross-symbol 汙染穿透到 bps 統計。
+- Gate (b) 分母保護：entry dict 新增 `qty_total`，計算 `entry_notional_full = entry_price * qty_total`，`denom_bps = max(entry_notional_full, match_notional)` 用於 `_bps()` 呼叫（含 entry_fee_bps / exit_fee_bps）。防 partial-match 微分母放大。`notional_usd` 欄位仍用 `match_notional` 保留透明度。
+- 新常數 `_PRICE_JUMP_LN_LIMIT = 0.5`、全域計數器 `_price_jump_skip_count`、helper `_is_price_jump_pair`、`_reset_price_jump_counter()`、`get_price_jump_skip_count()`。
+- 5 新單測：`test_price_jump_constant_is_half` / `test_price_jump_helper_flags_extreme_ratio` / `test_price_jump_skips_p116_style_cross_symbol_pair`（DOT $7.80→$2357.94 即 P1-16 指紋）/ `test_price_jump_allows_legitimate_large_move`（60%，|ln|=0.470<0.5 穿透到 Winsorize）/ `test_denominator_protection_uses_full_entry_notional_on_partial_match`（10/100 qty partial → -500 bps 非 -5000）。`test_extreme_positive_roundtrip_clamps_to_ceiling` / `test_boundary_exactly_negative_limit_passes_through` 的 exit price 由 110000/5000 調整為 14000/8500 以避開 price-jump gate 直達 Winsorize 邊界。
+
+**實證**：archived demo 6616 條 `engine_mode='demo_archive_20260418'` fills → 5129 round-trips → **27 skips / 0 clamps / mean -9.02 bps（vs 修前 -2214 bps，245× cleaner）**。
+
+**測試基準線**：engine lib 1497 → **1498 passed**（+1）；`ml_training/tests/test_winsorize.py` **238 passed**（+5）。
+
+**部署**：`restart_all.sh --rebuild` 進行中。
+
+**後續**：P1-17 Winsorize ±5000 bps 由「主線矯正」回退為「safety net」；live_demo 7d 乾淨 baseline `grand_mean=-14.97 bps` 作為首個真實 edge 觀測；demo 重啟後累積 1–2w 乾淨 fills → P0-3 edge 重評。
+
+---
 
 ### E5-P0 Refactor Wave — 5 P0 並行合流（2026-04-18 · commits 6798ce1…c9c3ad8）
 
