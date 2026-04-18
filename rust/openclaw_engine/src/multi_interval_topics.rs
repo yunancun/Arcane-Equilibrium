@@ -1,15 +1,24 @@
-//! Multi-interval public WebSocket subscription builder.
-//! 多時間框架公開 WebSocket 訂閱構建器。
+//! Multi-interval public WebSocket topic string builder (pure).
+//! 多時間框架公開 WebSocket 訂閱主題字串構建器（純函數）。
 //!
-//! MODULE_NOTE (EN): Extends the public WsClient by generating subscription lists
-//!   for multiple kline intervals (1m, 5m, 15m, 60m), tickers, and L2 orderbook.
-//!   Provides a convenience function to configure a WsClient with all desired topics
-//!   for a given set of symbols.
-//! MODULE_NOTE (中): 擴展公開 WsClient，為多個 K 線時間框架（1m、5m、15m、60m）、
-//!   行情和 L2 訂單簿生成訂閱列表。提供便利函數，用所有所需主題
-//!   為一組交易對配置 WsClient。
-
-use crate::ws_client::WsClient;
+//! MODULE_NOTE (EN): Pure topic-string construction for Bybit V5 public WS
+//!   subscriptions across multiple kline intervals (1m, 5m, 15m, 60m), ticker,
+//!   L2 orderbook and public trades. Deliberately has NO dependency on
+//!   `WsClient` or any side-effectful type — the caller applies the returned
+//!   topic strings to whatever WS client they hold. Behaviour contract is
+//!   covered by the unit tests below; any deviation in the produced strings
+//!   is a breaking change to the live subscription set.
+//! MODULE_NOTE (中): 為 Bybit V5 公開 WS 訂閱純粹地構建主題字串 —
+//!   涵蓋多個 K 線間隔（1m、5m、15m、60m）、ticker、L2 訂單簿與公開交易。
+//!   刻意不依賴 `WsClient` 或任何帶副作用的型別，呼叫端自行把字串套用到
+//!   其持有的 WS 客戶端。行為契約由下方單元測試守護；任何產生字串上的
+//!   偏差都等同於 live 訂閱集合的破壞性變更。
+//!
+//! Renamed 2026-04-19 from `multi_interval_ws.rs` (E5-P2-3). The rename
+//! reflects the pure-topic responsibility — the previous name implied this
+//! module owned WS transport, which it never did.
+//! 2026-04-19（E5-P2-3）自 `multi_interval_ws.rs` 更名。新檔名反映「純主題
+//! 構建」職責 — 舊名暗示本模組擁有 WS 傳輸，但實際從未如此。
 
 // ---------------------------------------------------------------------------
 // Subscription intervals / 訂閱時間框架
@@ -73,7 +82,7 @@ pub enum TopicType {
 }
 
 // ---------------------------------------------------------------------------
-// Subscription builder / 訂閱構建器
+// Pure topic builders / 純主題構建器
 // ---------------------------------------------------------------------------
 
 /// Build a list of kline subscription topics for a symbol across all given intervals.
@@ -146,17 +155,23 @@ pub fn multi_symbol_subscriptions(symbols: &[&str]) -> Vec<String> {
         .collect()
 }
 
-/// Configure a WsClient with multi-interval subscriptions for the given symbols.
-/// 為給定交易對配置具有多時間框架訂閱的 WsClient。
-///
-/// Adds all default topics (klines, ticker, orderbook, publicTrade) for each symbol.
-/// 為每個交易對添加所有默認主題。
-pub fn configure_multi_interval(ws: &mut WsClient, symbols: &[&str]) {
-    let topics = multi_symbol_subscriptions(symbols);
-    for topic in topics {
-        ws.subscribe(topic);
-    }
-}
+// ---------------------------------------------------------------------------
+// Removed 2026-04-19 (E5-P2-3): `configure_multi_interval(ws, symbols)` used
+// to mutate a `WsClient` in place. It had zero live callers across the
+// Rust+Python workspace (main.rs drives subscriptions directly via
+// `full_subscription_list`). Dropping it is what makes this module a pure
+// topic builder — fulfilling the audit intent (docs/audits/2026-04-18 §五
+// P2 "pure-function extraction"). Callers wanting the one-shot wrapper
+// should call `multi_symbol_subscriptions` and iterate `ws.subscribe(..)`
+// themselves (3 lines, keeps this module free of WsClient coupling).
+// ---------------------------------------------------------------------------
+// 2026-04-19（E5-P2-3）刪除 `configure_multi_interval(ws, symbols)`：
+// 該函數原會就地改動 `WsClient`，但整個 Rust+Python 工作區零 live 呼叫
+// （main.rs 直接用 `full_subscription_list` 驅動訂閱）。移除後本模組完全
+// 擺脫 `WsClient` 耦合，成為純主題字串構建器，呼應 audit 的 "pure-function
+// extraction" 意圖。若需一鍵包裝，請呼叫 `multi_symbol_subscriptions` 再
+// 自行 `ws.subscribe(..)`（3 行即可，不需把 WsClient 耦合回本模組）。
+// ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
 // Tests / 測試
@@ -254,5 +269,47 @@ mod tests {
         assert!(topics.contains(&"tickers.BTCUSDT".to_string()));
         assert!(topics.contains(&"orderbook.50.BTCUSDT".to_string()));
         assert!(topics.contains(&"publicTrade.BTCUSDT".to_string()));
+    }
+
+    /// E5-P2-3 added: topic ordering is kline-intervals-first then
+    /// ticker/orderbook/publicTrade; this is a behaviour contract because
+    /// the WS subscribe frame sends them in order, which affects first-ack
+    /// latency in live monitoring. Do not reorder without updating docs.
+    /// E5-P2-3 新增：主題順序為先 kline（依 intervals 輸入順序）、再
+    /// ticker / orderbook / publicTrade。此順序為行為契約，WS 訂閱幀會
+    /// 依序送出，影響 live 監控首個 ack 的延遲觀測；改動必須同步文檔。
+    #[test]
+    fn test_full_subscription_list_ordering_contract() {
+        let topics = full_subscription_list_with_intervals(
+            "BTCUSDT",
+            &[KlineInterval::Min5, KlineInterval::Min1],
+        );
+        assert_eq!(
+            topics,
+            vec![
+                "kline.5.BTCUSDT".to_string(),
+                "kline.1.BTCUSDT".to_string(),
+                "tickers.BTCUSDT".to_string(),
+                "orderbook.50.BTCUSDT".to_string(),
+                "publicTrade.BTCUSDT".to_string(),
+            ]
+        );
+    }
+
+    /// E5-P2-3 added: multi-symbol ordering groups all topics of symbol[0]
+    /// before symbol[1] — important for WS subscribe-batch ordering so that
+    /// a first symbol's stream is up before the next is queued.
+    /// E5-P2-3 新增：多交易對下，符號 0 的所有主題排在符號 1 之前 —
+    /// 用於確保 WS 批次訂閱時第一個交易對的流先建立，再排隊下一個。
+    #[test]
+    fn test_multi_symbol_subscriptions_grouping_contract() {
+        let topics = multi_symbol_subscriptions(&["BTCUSDT", "ETHUSDT"]);
+        // First 7 entries must all be BTCUSDT topics, next 7 must all be ETHUSDT.
+        for t in &topics[0..7] {
+            assert!(t.ends_with("BTCUSDT"), "expected BTCUSDT prefix group, got {t}");
+        }
+        for t in &topics[7..14] {
+            assert!(t.ends_with("ETHUSDT"), "expected ETHUSDT prefix group, got {t}");
+        }
     }
 }

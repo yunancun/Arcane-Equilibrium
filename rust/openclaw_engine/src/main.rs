@@ -476,7 +476,7 @@ async fn async_main(
     let ws_subscriptions: Vec<String> = if cfg_snapshot.enable_extended_ws {
         let mut topics = Vec::new();
         for sym in symbol_registry.snapshot() {
-            for topic in openclaw_engine::multi_interval_ws::full_subscription_list(&sym) {
+            for topic in openclaw_engine::multi_interval_topics::full_subscription_list(&sym) {
                 topics.push(topic);
             }
         }
@@ -516,7 +516,7 @@ async fn async_main(
                         .snapshot()
                         .into_iter()
                         .flat_map(|sym| {
-                            openclaw_engine::multi_interval_ws::full_subscription_list(&sym)
+                            openclaw_engine::multi_interval_topics::full_subscription_list(&sym)
                         })
                         .collect()
                 } else {
