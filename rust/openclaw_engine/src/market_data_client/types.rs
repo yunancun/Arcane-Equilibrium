@@ -149,19 +149,6 @@ pub struct InsuranceRecord {
     pub value: f64,
 }
 
-/// ADL (Auto-Deleveraging) alert for a position.
-/// 自動減倉警報。
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct AdlAlert {
-    /// Symbol / 交易對
-    pub symbol: String,
-    /// Position side / 持倉方向
-    pub side: String,
-    /// ADL rank indicator (1-5, higher = more likely to be deleveraged)
-    /// ADL 排名指標（1-5，越高越可能被減倉）
-    pub adl_rank_indicator: i32,
-}
-
 /// Single recent trade.
 /// 單筆近期成交。
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -192,18 +179,6 @@ pub struct VolatilityRecord {
     pub value: String,
     /// Timestamp / 時間戳
     pub time: String,
-}
-
-/// Futures delivery price record.
-/// 期貨交割價格記錄。
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct DeliveryPrice {
-    /// Symbol / 交易對
-    pub symbol: String,
-    /// Delivery price / 交割價格
-    pub delivery_price: f64,
-    /// Delivery timestamp / 交割時間戳
-    pub delivery_time: String,
 }
 
 /// Price limit (max buy / min sell) for a symbol.
