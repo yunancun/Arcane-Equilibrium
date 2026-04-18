@@ -280,20 +280,28 @@ async function loadSession() {
   }
   ocSetText('p-bal-initial', ocBalance(_initBal, 2));
 
-  // PnL
+  // PnL — net-of-fees identity: all displayed values are net.
+  //   Net PnL     = net_paper_pnl (= realized - fees + unrealized, backend-computed)
+  //   Realized    = realized_gross - total_fees_paid (cumulative cash delta of closes + all fees)
+  //   Unrealized  = unrealized_pnl (mark-to-market on open positions)
+  //   displayed_realized + displayed_unrealized = equity - initial ✓
+  // PnL — 採淨利恆等式：所有欄位均為淨利口徑。
   const pnl = d.data.pnl;
   _cachedPnlAiCost = pnl.total_ai_cost || 0;
+  const realizedGross = pnl.realized_pnl || 0;
+  const fees = pnl.total_fees_paid || 0;
+  const realizedNet = realizedGross - fees;
+  const unrealized = pnl.unrealized_pnl || 0;
   const net = pnl.net_paper_pnl || 0;
+
   const elNet = $('p-net');
   elNet.textContent = ocMoney(net);
   elNet.className = 'oc-metric-val ' + ocPnlClass(net);
 
-  const realized = pnl.realized_pnl || 0;
   const elRealized = $('p-realized');
-  elRealized.textContent = ocMoney(realized);
-  elRealized.className = 'oc-metric-val ' + ocPnlClass(realized);
+  elRealized.textContent = ocMoney(realizedNet);
+  elRealized.className = 'oc-metric-val ' + ocPnlClass(realizedNet);
 
-  const unrealized = pnl.unrealized_pnl || 0;
   const elUnrealized = $('p-unrealized');
   elUnrealized.textContent = ocMoney(unrealized);
   elUnrealized.className = 'oc-metric-val ' + ocPnlClass(unrealized);
@@ -305,9 +313,10 @@ async function loadSession() {
   elFillsReturn.textContent = ocMoney(net);
   elFillsReturn.className = 'oc-metric-val ' + ocPnlClass(net);
 
-  // Available balance = initial + realized + unrealized - margin (estimated)
+  // Available balance estimate uses net identity: initial + realized_net + unrealized.
+  // 可用餘額估算採淨利恆等式，與 equity 對齊。
   if (!$('p-bal-available').dataset.fromMetrics) {
-    const estBal = _initBal + (pnl.realized_pnl || 0) + (pnl.unrealized_pnl || 0);
+    const estBal = _initBal + realizedNet + unrealized;
     ocSetText('p-bal-available', ocBalance(estBal, 2));
   }
 

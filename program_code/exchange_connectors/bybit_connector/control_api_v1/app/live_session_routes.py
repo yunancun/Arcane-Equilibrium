@@ -889,11 +889,32 @@ async def get_live_balance(
     主路徑：Rust PyO3 client 獲取真實 Bybit 帳戶餘額（demo 或 live key 均可）。
     降級：引擎內部餘額 + bybit_sync_balance。
     """
+    # Attach per-engine session baseline (initial/peak/realized/fees) from
+    # Rust paper_state so the GUI can display net-of-fees PnL identity
+    # (equity - initial = realized - fees + unrealized). Best-effort: snapshot
+    # failure does not block wallet payload.
+    # 掛載 Rust paper_state 的本 session 基線（初始/峰值/已實現/手續費），
+    # 讓 GUI 以 "淨利口徑" 呈現 PnL（equity - initial = realized - fees + unrealized）。
+    # best-effort：快照失敗不影響 wallet payload。
+    session_baseline: dict[str, Any] = {}
+    try:
+        live_state = get_rust_reader().get_paper_state(engine="live") or {}
+        if live_state:
+            session_baseline = {
+                "engine_initial_balance": live_state.get("initial_balance"),
+                "engine_peak_balance": live_state.get("peak_balance"),
+                "engine_current_balance": live_state.get("balance"),
+                "engine_realized_pnl": live_state.get("total_realized_pnl"),
+                "engine_total_fees": live_state.get("total_fees"),
+            }
+    except Exception:
+        pass
+
     rc = _get_rust_client_safe()
     if rc is not None:
         try:
             wallet = rc.refresh_balance()
-            return _live_response({"source": "rust_engine", **wallet})
+            return _live_response({"source": "rust_engine", **wallet, **session_baseline})
         except Exception as e:
             logger.warning("Rust balance fetch failed for live endpoint: %s", e)
     # Fallback: engine internal state / 降級：引擎內部狀態
@@ -908,6 +929,7 @@ async def get_live_balance(
         "bybit_sync_balance": sync_bal,
         "engine_balance": state.get("balance"),
         "source": "bybit_sync" if sync_bal is not None else "engine_internal",
+        **session_baseline,
     })
 
 
