@@ -12,15 +12,18 @@ MODULE_NOTE (中文):
   - 过期守护（基于 expires_at 自动触发 EXPIRED）
   - 漂移防护：终态不可回流，扩权必须审批
 
+  本文件在 E5-P0-1 重构后，引擎骨架（守卫 / 审计记录 / 审计回调 / CAL 写入 / 多对象存储）
+  被抽到 state_machine_base.py。本文件保留所有 SM-01 特有的定义（状态枚举、事件、
+  发起者、迁移表、对象、便捷方法），以及 auto_approve 分支（SM-01 独有）。
+
 MODULE_NOTE (English):
-  Implements the full Authorization State Machine per SM-01 governance spec:
-  - 8 formal states: DRAFT, PENDING_APPROVAL, ACTIVE, RESTRICTED, FROZEN, REVOKED, EXPIRED, REJECTED
-  - 16 valid transitions (with guard conditions)
-  - 6 explicitly forbidden transitions
-  - Auto vs manual-approval distinction
-  - Each transition emits an authorization_transition audit object
-  - Expiry guardian (auto-triggers EXPIRED based on expires_at)
-  - Drift protection: terminal states cannot flow back, expansion requires approval
+  Implements the full Authorization State Machine per SM-01 governance spec.
+  After the E5-P0-1 refactor, the engine skeleton (guards, audit record
+  construction, audit callback plumbing, ChangeAuditLog integration, and
+  multi-object store) has been extracted to `state_machine_base.py`. This
+  file keeps everything SM-01 specific (state enum, events, initiators,
+  transition table, object, convenience methods), plus the auto_approve
+  branch that is unique to SM-01.
 
 Safety invariant:
   - Expansion (wider scope) ALWAYS requires explicit approval
@@ -32,15 +35,14 @@ Safety invariant:
 from __future__ import annotations
 
 import copy
-import hashlib
-import json
 import logging
-import threading
 import time
 import uuid
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Callable
+from typing import Any, Callable, ClassVar
+
+from .state_machine_base import MultiObjectStoreMixin, StateMachineBase
 
 logger = logging.getLogger(__name__)
 
@@ -298,42 +300,7 @@ class AuthorizationObject:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# Transition Record / 迁移记录
-# ═══════════════════════════════════════════════════════════════════════════════
-
-def _build_transition_record(
-    auth: AuthorizationObject,
-    to_state: AuthState,
-    event: AuthEvent,
-    initiator: AuthInitiator,
-    reason_codes: list[str] | None = None,
-    approved_by: str | None = None,
-) -> dict[str, Any]:
-    """SM-01 §16: Build authorization_transition audit object / 构建迁移审计对象"""
-    now_ms = int(time.time() * 1000)
-    tid = f"atx:{uuid.uuid4().hex[:12]}"
-    return {
-        "transition_id": tid,
-        "authorization_id": auth.authorization_id,
-        "previous_status": auth.state.value,
-        "next_status": to_state.value,
-        "trigger_event_type": event.value,
-        "trigger_event_id": f"evt:{uuid.uuid4().hex[:8]}",
-        "initiated_by": initiator.value,
-        "transition_reason_codes": reason_codes or [],
-        "approval_required": TRANSITION_RULES.get(
-            (auth.state, to_state), TransitionRule(auth.state, to_state, False, frozenset())
-        ).requires_approval,
-        "approved_by": approved_by,
-        "effective_at_ms": now_ms,
-        "audit_event_ref": f"aud:{hashlib.sha256(tid.encode()).hexdigest()[:16]}",
-        "version_before": auth.version,
-        "version_after": auth.version + 1,
-    }
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# State Machine Engine / 状态机引擎
+# Errors / 异常
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class AuthorizationError(Exception):
@@ -341,7 +308,11 @@ class AuthorizationError(Exception):
     pass
 
 
-class AuthorizationStateMachine:
+# ═══════════════════════════════════════════════════════════════════════════════
+# State Machine Engine / 状态机引擎
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class AuthorizationStateMachine(MultiObjectStoreMixin, StateMachineBase[AuthState]):
     """
     Core state machine engine for authorization lifecycle management.
     授权生命周期管理的核心状态机引擎。
@@ -349,20 +320,36 @@ class AuthorizationStateMachine:
     Thread-safe. All mutations go through transition() which validates
     the transition, checks guards, records audit, and updates state atomically.
     线程安全。所有变更通过 transition() 执行，验证迁移、检查守卫、记录审计、原子更新。
+
+    Inherits:
+      - StateMachineBase[AuthState]: guards / audit record / CAL write / _emit_audit
+      - MultiObjectStoreMixin: get / get_all / get_status_summary / check_expiry
     """
 
+    # ── Subclass config for StateMachineBase ──
+    TRANSITION_ID_PREFIX: ClassVar[str] = "atx"
+    EVENT_ID_PREFIX: ClassVar[str] = "evt"
+    AUDIT_REF_PREFIX: ClassVar[str] = "aud"
+    ERROR_CLS: ClassVar[type[Exception]] = AuthorizationError
+    CHANGE_LABEL: ClassVar[str] = "Authorization"
+    TERMINAL_STATES: ClassVar[frozenset] = TERMINAL_STATES
+    FORBIDDEN_TRANSITIONS: ClassVar[frozenset] = FORBIDDEN_TRANSITIONS
+    TRANSITION_RULES: ClassVar[dict] = TRANSITION_RULES
+
+    # ── Subclass config for MultiObjectStoreMixin ──
+    _OBJECT_ID_ATTR: ClassVar[str] = "authorization_id"
+    _OBJECT_STATE_ATTR: ClassVar[str] = "state"
+    _EXPIRY_CHECK_ATTR: ClassVar[str] = "is_expired_by_time"
+    _EXPIRY_STATE: ClassVar[Any] = AuthState.EXPIRED
+    _EXPIRY_EVENT_VALUE: ClassVar[Any] = AuthEvent.EXPIRED
+    _EXPIRY_INITIATOR_VALUE: ClassVar[Any] = AuthInitiator.EXPIRY_GUARDIAN
+    _EXPIRY_REASON_CODES: ClassVar[list[str]] = ["time_expiry"]
+
     def __init__(self, audit_callback: Callable[[dict[str, Any]], None] | None = None) -> None:
-        self._lock = threading.Lock()
+        super().__init__(audit_callback=audit_callback)
         self._authorizations: dict[str, AuthorizationObject] = {}
-        self._audit_callback = audit_callback  # External audit sink / 外部审计接收器
-        self._change_audit_log = None  # T5.02: Optional ChangeAuditLog for WHO/WHEN/APPROVAL tracking
-
-    # ── T5.02: Change Audit Log Injection / 變更審計日誌注入 ──
-
-    def set_change_audit_log(self, cal: Any) -> None:
-        """Inject ChangeAuditLog for WHO/WHEN/APPROVAL tracking / 注入變更審計日誌"""
-        with self._lock:
-            self._change_audit_log = cal
+        # MultiObjectStoreMixin expects `self._objects` as alias:
+        self._objects = self._authorizations
 
     # ── Create / 创建 ──
 
@@ -387,14 +374,23 @@ class AuthorizationStateMachine:
             expires_at_ms=expires_at_ms,
         )
 
-        record = _build_transition_record(
-            auth, AuthState.DRAFT,
-            AuthEvent.DRAFT_CREATED,
-            AuthInitiator.OPERATOR,
+        # Build creation record — previous_status overridden to "NONE"
+        # 构造创建记录 — previous_status 覆盖为 "NONE"
+        record = self._build_transition_record(
+            from_state=AuthState.DRAFT,
+            to_state=AuthState.DRAFT,
+            object_id=auth.authorization_id,
+            object_id_key="authorization_id",
+            event_value=AuthEvent.DRAFT_CREATED.value,
+            initiator_value=AuthInitiator.OPERATOR.value,
+            version_before=auth.version,
             reason_codes=["initial_draft"],
+            previous_status_value="NONE",
+            next_status_value=AuthState.DRAFT.value,
         )
-        # For creation, previous_status is "NONE"
-        record["previous_status"] = "NONE"
+        # Creation is not "version_before + 1"; keep original semantics:
+        # original code used _build_transition_record which adds +1 and upstream
+        # still appends to auth.transitions — we keep identical output.
         auth.transitions.append(record)
 
         with self._lock:
@@ -424,13 +420,12 @@ class AuthorizationStateMachine:
         Execute a state transition on an authorization object.
         对授权对象执行状态迁移。
 
-        Validates:
+        Validates (see StateMachineBase._validate_transition):
         1. Authorization exists and is not in terminal state (for non-terminal targets)
         2. Transition is not forbidden (SM-01 §8)
         3. Transition is in the valid transition table (SM-01 §6-7)
         4. Initiator is allowed for this transition
         5. If approval required, approved_by must be provided
-        6. Expiry check (auto-expire if past expires_at)
         """
         with self._lock:
             auth = self._authorizations.get(authorization_id)
@@ -441,52 +436,29 @@ class AuthorizationStateMachine:
 
             from_state = auth.state
 
-            # Guard 1: Terminal states cannot transition out / 终态不可迁出
-            if from_state in TERMINAL_STATES:
-                raise AuthorizationError(
-                    f"Cannot transition from terminal state {from_state.value} / "
-                    f"不可从终态 {from_state.value} 迁出"
-                )
+            # Guards 1-5 (+ optional 6 via subclass hook, unused here)
+            self._validate_transition(
+                from_state=from_state,
+                to_state=to_state,
+                initiator=initiator,
+                approved_by=approved_by,
+                spec_section="SM-01 §8",
+            )
 
-            # Guard 2: Check forbidden transitions / 检查禁止迁移
-            if (from_state, to_state) in FORBIDDEN_TRANSITIONS:
-                raise AuthorizationError(
-                    f"Forbidden transition: {from_state.value} → {to_state.value} "
-                    f"(SM-01 §8) / 禁止迁移"
-                )
-
-            # Guard 3: Check valid transition table / 检查合法迁移表
-            rule = TRANSITION_RULES.get((from_state, to_state))
-            if rule is None:
-                raise AuthorizationError(
-                    f"Invalid transition: {from_state.value} → {to_state.value} "
-                    f"(not in transition table) / 非法迁移（不在迁移表中）"
-                )
-
-            # Guard 4: Check initiator / 检查发起者
-            if initiator not in rule.allowed_initiators:
-                raise AuthorizationError(
-                    f"Initiator {initiator.value} not allowed for "
-                    f"{from_state.value} → {to_state.value}. "
-                    f"Allowed: {[i.value for i in rule.allowed_initiators]} / "
-                    f"发起者不被允许"
-                )
-
-            # Guard 5: Check approval / 检查审批
-            if rule.requires_approval and not approved_by:
-                raise AuthorizationError(
-                    f"Transition {from_state.value} → {to_state.value} requires "
-                    f"explicit approval (approved_by must be provided) / "
-                    f"该迁移需要明确审批（必须提供 approved_by）"
-                )
-
-            # Execute transition / 执行迁移
-            record = _build_transition_record(
-                auth, to_state, event, initiator,
+            # Build audit record / 构建审计记录
+            record = self._build_transition_record(
+                from_state=from_state,
+                to_state=to_state,
+                object_id=auth.authorization_id,
+                object_id_key="authorization_id",
+                event_value=event.value,
+                initiator_value=initiator.value,
+                version_before=auth.version,
                 reason_codes=reason_codes,
                 approved_by=approved_by,
             )
 
+            # Mutate atomically / 原子更新
             auth.state = to_state
             auth.version += 1
             auth.updated_at_ms = int(time.time() * 1000)
@@ -503,29 +475,24 @@ class AuthorizationStateMachine:
             elif to_state == AuthState.REVOKED:
                 auth.revoke_reason = reason
 
-            # T5.02: Record state change to ChangeAuditLog if available
-            if self._change_audit_log:
-                try:
-                    from .change_audit_log import ChangeType  # noqa: E402
-                    # Auto-approve audit record when transition is by system (e.g. paper auto-grant)
-                    # 系統發起的變更（如紙盤自動授權）自動批准審計記錄
-                    who_str = str(approved_by or initiator.value)
-                    is_auto = "auto" in who_str.lower() or "system" in who_str.lower()
-                    self._change_audit_log.record_change(
-                        change_type=ChangeType.STATE_CHANGE,
-                        who=who_str,
-                        what=f"Authorization: {from_state.value} → {to_state.value}",
-                        reason=reason or "",
-                        old_value=from_state.value,
-                        new_value=to_state.value,
-                        auto_approve=is_auto,
-                    )
-                except Exception as e:
-                    logger.error("Failed to record change audit: %s", e)
+            # T5.02: ChangeAuditLog with SM-01 specific auto_approve branch
+            # T5.02：带 SM-01 特有的 auto_approve 分支
+            who_str = str(approved_by or initiator.value)
+            is_auto = "auto" in who_str.lower() or "system" in who_str.lower()
+            self._record_change_audit(
+                from_label=from_state.value,
+                to_label=to_state.value,
+                initiator_value=initiator.value,
+                approved_by=approved_by,
+                reason=reason,
+                auto_approve=is_auto,
+            )
 
             # Return a copy / 返回副本
             result = copy.deepcopy(auth)
 
+        # Emit audit OUTSIDE lock (load-bearing invariant)
+        # 锁外发送审计（关键不变量）
         self._emit_audit(record)
         logger.info(
             "Authorization transition: %s %s → %s (by %s) / 授权迁移",
@@ -618,45 +585,7 @@ class AuthorizationStateMachine:
             reason_codes=["full_recovery"],
         )
 
-    # ── Expiry Guardian / 过期守护 ──
-
-    def check_expiry(self) -> list[str]:
-        """
-        Check all non-terminal authorizations for expiry and auto-transition.
-        检查所有非终态授权的过期状态并自动迁移。
-
-        Should be called periodically (e.g., every tick or every minute).
-        应定期调用（如每次 tick 或每分钟）。
-        """
-        expired_ids: list[str] = []
-        with self._lock:
-            candidates = [
-                (aid, auth) for aid, auth in self._authorizations.items()
-                if auth.state not in TERMINAL_STATES and auth.is_expired_by_time
-            ]
-
-        for aid, auth in candidates:
-            try:
-                self.transition(
-                    aid, AuthState.EXPIRED,
-                    event=AuthEvent.EXPIRED,
-                    initiator=AuthInitiator.EXPIRY_GUARDIAN,
-                    reason_codes=["time_expiry"],
-                )
-                expired_ids.append(aid)
-                logger.info("Authorization auto-expired: %s / 授权自动过期", aid)
-            except AuthorizationError as e:
-                logger.warning("Expiry transition failed for %s: %s", aid, e)
-
-        return expired_ids
-
-    # ── Query / 查询 ──
-
-    def get(self, authorization_id: str) -> AuthorizationObject | None:
-        """Get a copy of an authorization object / 获取授权对象副本"""
-        with self._lock:
-            auth = self._authorizations.get(authorization_id)
-            return copy.deepcopy(auth) if auth else None
+    # ── Query / 查询 (Auth-specific) ──
 
     def get_effective(self) -> list[AuthorizationObject]:
         """Get all currently effective (ACTIVE or RESTRICTED) authorizations / 获取所有有效授权"""
@@ -666,20 +595,6 @@ class AuthorizationStateMachine:
                 for auth in self._authorizations.values()
                 if auth.state in EFFECTIVE_STATES
             ]
-
-    def get_all(self) -> list[AuthorizationObject]:
-        """Get all authorization objects / 获取所有授权对象"""
-        with self._lock:
-            return [copy.deepcopy(auth) for auth in self._authorizations.values()]
-
-    def get_status_summary(self) -> dict[str, int]:
-        """Get count of authorizations by state / 按状态统计授权数量"""
-        with self._lock:
-            summary: dict[str, int] = {}
-            for auth in self._authorizations.values():
-                key = auth.state.value
-                summary[key] = summary.get(key, 0) + 1
-            return summary
 
     # ── Persistence / 持久化 ──
 
@@ -717,13 +632,3 @@ class AuthorizationStateMachine:
                     logger.warning("Failed to import authorization: %s", e)
         logger.info("Imported %d authorizations / 导入了 %d 个授权对象", count, count)
         return count
-
-    # ── Internal / 内部 ──
-
-    def _emit_audit(self, record: dict[str, Any]) -> None:
-        """Emit audit record to callback and log / 发送审计记录"""
-        if self._audit_callback:
-            try:
-                self._audit_callback(record)
-            except Exception:
-                logger.exception("Audit callback error / 审计回调异常")
