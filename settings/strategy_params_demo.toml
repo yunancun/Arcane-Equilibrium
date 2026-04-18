@@ -39,8 +39,14 @@ conf_scale = 1.0
 # OC-5: FundingArb — funding rate capture strategy.
 # Demo = validation before live, same params as paper.
 # OC-5：FundingArb — 資金費率捕獲策略。模擬盤驗證，參數同紙盤。
+#
+# DISABLED 2026-04-18: G-2 v2 NEGATIVE EDGE verdict (n=13, 0/13 wins, -36.76 bps).
+# Pending R-02 Strategist reevaluation of funding_threshold / max_basis_pct /
+# total_cost_bps. Audit: docs/audits/2026-04-17--g2_funding_arb_clean_edge_v2.md
+# 停用 2026-04-18：G-2 v2 判決 NEGATIVE EDGE（n=13，0/13 勝率，-36.76 bps）。
+# 待 R-02 Strategist 重評入場/退場/成本三參數配對後再啟。
 [funding_arb]
-active = true
+active = false
 cooldown_ms = 3600000
 total_cost_bps = 34.0
 expected_periods = 3.0

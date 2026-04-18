@@ -13,7 +13,10 @@
 
 use std::collections::HashMap;
 
-use super::{Strategy, StrategyAction};
+use serde::{Deserialize, Serialize};
+use tracing::info;
+
+use super::{ParamRange, Strategy, StrategyAction, StrategyParams};
 use crate::intent_processor::OrderIntent;
 use crate::tick_pipeline::TickContext;
 
@@ -137,6 +140,180 @@ impl FundingArb {
             sym.to_string(),
             self.last_trade_ms.get(sym).copied().unwrap_or(0),
         );
+    }
+
+    // ── Phase 3a: Runtime parameter tuning (AGT-1) / 運行時參數調參 ──
+
+    /// Apply a validated param bundle to the live strategy instance.
+    /// Unlike peer strategies, this path also honors `active` so IPC can pause
+    /// the strategy without an engine restart (G-2 v2 NEGATIVE EDGE 2026-04-18).
+    /// 將已驗證的參數包套用到運行中的策略實例。
+    /// 與其他策略不同，此路徑同時處理 `active` 欄位，讓 IPC 能在不重啟引擎的
+    /// 情況下暫停該策略（G-2 v2 判決 NEGATIVE EDGE 2026-04-18）。
+    pub fn update_params(&mut self, params: FundingArbUpdateParams) -> Result<(), String> {
+        params.validate()?;
+        self.active = params.active;
+        self.cooldown_ms = params.cooldown_ms;
+        self.total_cost_bps = params.total_cost_bps;
+        self.expected_periods = params.expected_periods;
+        self.funding_threshold = params.funding_threshold;
+        self.max_basis_pct = params.max_basis_pct;
+        self.max_hold_ms = params.max_hold_ms;
+        self.entry_basis_ratio = params.entry_basis_ratio;
+        info!(
+            strategy = "funding_arb",
+            active = self.active,
+            "params updated via IPC / 參數已通過 IPC 更新"
+        );
+        Ok(())
+    }
+
+    /// Snapshot the current tunable state as a params bundle.
+    /// 將當前可調狀態快照為參數包。
+    pub fn get_params(&self) -> FundingArbUpdateParams {
+        FundingArbUpdateParams {
+            active: self.active,
+            cooldown_ms: self.cooldown_ms,
+            total_cost_bps: self.total_cost_bps,
+            expected_periods: self.expected_periods,
+            funding_threshold: self.funding_threshold,
+            max_basis_pct: self.max_basis_pct,
+            max_hold_ms: self.max_hold_ms,
+            entry_basis_ratio: self.entry_basis_ratio,
+        }
+    }
+}
+
+/// Tunable parameters for FundingArb, exposed via `update_strategy_params` IPC.
+/// Intentionally includes `active` so operator/Strategist can pause the strategy
+/// without an engine restart — funding_arb peer strategies (ma_crossover,
+/// bb_reversion, …) keep `active` out of their update_params payloads because
+/// TOML is the source of truth there. For FundingArb the asymmetry is deliberate
+/// and documented in `update_params`. Distinct from `crate::strategies::
+/// FundingArbParams`, which is the TOML-load schema owned by `StrategyParamsConfig`.
+/// FundingArb 可通過 `update_strategy_params` IPC 調整的參數。
+/// 有意包含 `active`，讓 operator/Strategist 可在不重啟引擎的情況下暫停該策略 —
+/// 其他策略（ma_crossover、bb_reversion、…）不含 `active`，因為 TOML 是權威。
+/// 此處 funding_arb 的不對稱是刻意的，並記錄在 `update_params`。
+/// 與 `crate::strategies::FundingArbParams`（TOML 載入 schema）為兩個獨立結構。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct FundingArbUpdateParams {
+    pub active: bool,
+    pub cooldown_ms: u64,
+    pub total_cost_bps: f64,
+    pub expected_periods: f64,
+    pub funding_threshold: f64,
+    pub max_basis_pct: f64,
+    pub max_hold_ms: u64,
+    pub entry_basis_ratio: f64,
+}
+
+impl Default for FundingArbUpdateParams {
+    fn default() -> Self {
+        Self {
+            active: false,
+            cooldown_ms: 3_600_000,
+            total_cost_bps: DEFAULT_TOTAL_COST_BPS,
+            expected_periods: DEFAULT_EXPECTED_PERIODS,
+            funding_threshold: DEFAULT_FUNDING_THRESHOLD,
+            max_basis_pct: DEFAULT_MAX_BASIS_PCT,
+            max_hold_ms: DEFAULT_MAX_HOLD_MS,
+            entry_basis_ratio: DEFAULT_ENTRY_BASIS_RATIO,
+        }
+    }
+}
+
+impl StrategyParams for FundingArbUpdateParams {
+    fn param_ranges() -> Vec<ParamRange> {
+        // `active` deliberately omitted: it's a binary gate, not a tunable,
+        // so it's not exposed to Optuna/Strategist search spaces.
+        // `active` 故意省略：它是二元閘門而非可調參數，不進入自動調參搜索空間。
+        vec![
+            ParamRange {
+                name: "cooldown_ms".into(),
+                min: 60_000.0,
+                max: 24.0 * 3_600_000.0,
+                step: Some(60_000.0),
+                agent_adjustable: true,
+                db_persisted: true,
+            },
+            ParamRange {
+                name: "total_cost_bps".into(),
+                min: 1.0,
+                max: 200.0,
+                step: Some(1.0),
+                agent_adjustable: true,
+                db_persisted: true,
+            },
+            ParamRange {
+                name: "expected_periods".into(),
+                min: 0.5,
+                max: 30.0,
+                step: Some(0.5),
+                agent_adjustable: true,
+                db_persisted: true,
+            },
+            ParamRange {
+                name: "funding_threshold".into(),
+                min: 0.0001,
+                max: 0.01,
+                step: Some(0.0001),
+                agent_adjustable: true,
+                db_persisted: true,
+            },
+            ParamRange {
+                name: "max_basis_pct".into(),
+                min: 0.05,
+                max: 2.0,
+                step: Some(0.05),
+                agent_adjustable: true,
+                db_persisted: true,
+            },
+            ParamRange {
+                name: "max_hold_ms".into(),
+                min: 60_000.0,
+                max: 30.0 * 24.0 * 3_600_000.0,
+                step: Some(3_600_000.0),
+                agent_adjustable: true,
+                db_persisted: true,
+            },
+            ParamRange {
+                name: "entry_basis_ratio".into(),
+                min: 0.0,
+                max: 1.0,
+                step: Some(0.05),
+                agent_adjustable: true,
+                db_persisted: true,
+            },
+        ]
+    }
+
+    fn validate(&self) -> Result<(), String> {
+        if self.cooldown_ms < 60_000 || self.cooldown_ms > 24 * 3_600_000 {
+            return Err("cooldown_ms must be in [60s, 24h]".into());
+        }
+        if !(1.0..=200.0).contains(&self.total_cost_bps) {
+            return Err("total_cost_bps must be in [1, 200]".into());
+        }
+        // expected_periods must stay strictly positive; compute_edge divides by it.
+        // expected_periods 必須嚴格為正；compute_edge 用它做除數。
+        if !(0.5..=30.0).contains(&self.expected_periods) {
+            return Err("expected_periods must be in [0.5, 30]".into());
+        }
+        if !(0.0001..=0.01).contains(&self.funding_threshold) {
+            return Err("funding_threshold must be in [0.0001, 0.01]".into());
+        }
+        if !(0.05..=2.0).contains(&self.max_basis_pct) {
+            return Err("max_basis_pct must be in [0.05, 2.0]".into());
+        }
+        if self.max_hold_ms < 60_000 || self.max_hold_ms > 30 * 24 * 3_600_000 {
+            return Err("max_hold_ms must be in [60s, 30d]".into());
+        }
+        if !(0.0..=1.0).contains(&self.entry_basis_ratio) {
+            return Err("entry_basis_ratio must be in [0, 1]".into());
+        }
+        Ok(())
     }
 }
 
@@ -282,6 +459,19 @@ impl Strategy for FundingArb {
             confluence_score: None,
             persistence_elapsed_ms: None,
         })]
+    }
+
+    fn update_params_json(&mut self, json: &str) -> Result<(), String> {
+        let params: FundingArbUpdateParams = serde_json::from_str(json).map_err(|e| e.to_string())?;
+        self.update_params(params)
+    }
+
+    fn get_params_json(&self) -> String {
+        serde_json::to_string(&self.get_params()).unwrap_or_default()
+    }
+
+    fn param_ranges_json(&self) -> String {
+        serde_json::to_string(&FundingArbUpdateParams::param_ranges()).unwrap_or_default()
     }
 }
 
@@ -624,5 +814,117 @@ mod tests {
         // rate = 0.002 → edge = 0.002 - 0.001133 ≈ 0.000867 > 0 → no exit
         insert_position(&mut s, "BTC", true, 0, 0.005);
         assert!(!s.should_exit("BTC", 0.002, 0.1, 1000), "edge > 0 → hold");
+    }
+
+    // ═════════════════════════════════════════════════════════════════════
+    // AGT-1 IPC tunable param surface / 可調參數 IPC 接口
+    // ═════════════════════════════════════════════════════════════════════
+
+    #[test]
+    fn test_update_params_json_toggles_active() {
+        let mut s = FundingArb::new();
+        s.set_active(true);
+        assert!(s.is_active());
+        let payload = serde_json::to_string(&FundingArbUpdateParams {
+            active: false,
+            ..FundingArbUpdateParams::default()
+        })
+        .unwrap();
+        s.update_params_json(&payload).expect("valid payload");
+        assert!(!s.is_active(), "active=false should disarm the strategy");
+    }
+
+    #[test]
+    fn test_update_params_json_roundtrip_preserves_values() {
+        let mut s = FundingArb::new();
+        let custom = FundingArbUpdateParams {
+            active: true,
+            cooldown_ms: 7_200_000,
+            total_cost_bps: 42.0,
+            expected_periods: 4.0,
+            funding_threshold: 0.0008,
+            max_basis_pct: 0.4,
+            max_hold_ms: 48 * 3_600_000,
+            entry_basis_ratio: 0.65,
+        };
+        s.update_params_json(&serde_json::to_string(&custom).unwrap())
+            .expect("valid payload");
+        let echoed: FundingArbUpdateParams =
+            serde_json::from_str(&s.get_params_json()).unwrap();
+        assert!(echoed.active);
+        assert_eq!(echoed.cooldown_ms, 7_200_000);
+        assert!((echoed.total_cost_bps - 42.0).abs() < f64::EPSILON);
+        assert!((echoed.expected_periods - 4.0).abs() < f64::EPSILON);
+        assert!((echoed.funding_threshold - 0.0008).abs() < f64::EPSILON);
+        assert!((echoed.max_basis_pct - 0.4).abs() < f64::EPSILON);
+        assert_eq!(echoed.max_hold_ms, 48 * 3_600_000);
+        assert!((echoed.entry_basis_ratio - 0.65).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_update_params_validates_out_of_range() {
+        let mut s = FundingArb::new();
+        // cooldown_ms below 60s floor
+        let bad = FundingArbUpdateParams {
+            cooldown_ms: 1_000,
+            ..FundingArbUpdateParams::default()
+        };
+        let err = s
+            .update_params_json(&serde_json::to_string(&bad).unwrap())
+            .unwrap_err();
+        assert!(err.contains("cooldown_ms"), "err should flag cooldown_ms: {err}");
+
+        // expected_periods below 0.5 floor — protects compute_edge divisor
+        let bad2 = FundingArbUpdateParams {
+            expected_periods: 0.1,
+            ..FundingArbUpdateParams::default()
+        };
+        let err2 = s
+            .update_params_json(&serde_json::to_string(&bad2).unwrap())
+            .unwrap_err();
+        assert!(err2.contains("expected_periods"), "err should flag expected_periods: {err2}");
+    }
+
+    #[test]
+    fn test_inactive_blocks_entry_after_ipc_toggle() {
+        let mut s = FundingArb::new();
+        s.set_active(true);
+        // Entry payload would normally open a position; toggle active=false first
+        s.update_params_json(
+            &serde_json::to_string(&FundingArbUpdateParams {
+                active: false,
+                ..FundingArbUpdateParams::default()
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        // Sanity: strategy is now inactive
+        assert!(!s.is_active());
+        // Note: tick-level active check lives in orchestrator (not on_tick itself),
+        // so we assert the flag rather than re-running the pipeline here. The
+        // integration path is covered by ipc_server tests.
+        // 注意：tick 層的 active 檢查在 orchestrator，不在 on_tick，因此這裡驗證 flag。
+    }
+
+    #[test]
+    fn test_param_ranges_json_well_formed() {
+        let s = FundingArb::new();
+        let ranges: Vec<ParamRange> =
+            serde_json::from_str(&s.param_ranges_json()).expect("valid JSON");
+        let names: std::collections::HashSet<_> =
+            ranges.iter().map(|r| r.name.as_str()).collect();
+        for required in [
+            "cooldown_ms",
+            "total_cost_bps",
+            "expected_periods",
+            "funding_threshold",
+            "max_basis_pct",
+            "max_hold_ms",
+            "entry_basis_ratio",
+        ] {
+            assert!(names.contains(required), "missing param range: {required}");
+        }
+        // `active` intentionally omitted from agent-tunable search space.
+        assert!(!names.contains("active"), "active should not be a tunable");
     }
 }
