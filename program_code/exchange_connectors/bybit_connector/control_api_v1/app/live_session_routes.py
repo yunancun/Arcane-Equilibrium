@@ -1183,6 +1183,20 @@ def _rest_close_position_reduce_only(
     """
     # Bybit: long → Sell to close; short → Buy to close.
     side = "Sell" if is_long else "Buy"
+    # Fresh BybitClient starts with an empty InstrumentInfoCache — round_qty
+    # returns None → raw qty → Bybit rejects with retCode=10001. Warm the
+    # cache once per client before the first rounding attempt.
+    # 新建的 BybitClient 合約緩存是空的，round_qty 回 None → 送 raw qty →
+    # Bybit 用 retCode=10001 拒單。首次取整前先把緩存熱起來。
+    try:
+        if hasattr(rc, "instrument_count") and rc.instrument_count() == 0:
+            rc.refresh_instruments("linear")
+    except Exception as ri_exc:
+        logger.warning(
+            "LIVE-GATE-FALLBACK-1: refresh_instruments failed for %s — "
+            "proceeding with raw qty / 刷新合約規格失敗，改送 raw qty: %s",
+            symbol, ri_exc,
+        )
     # Align qty to instrument step size — else Bybit returns retCode=10001.
     # 對齊 instrument step size，否則 Bybit 返回 retCode=10001。
     qty_aligned = qty
