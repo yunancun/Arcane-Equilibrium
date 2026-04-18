@@ -1570,18 +1570,41 @@ impl TickPipeline {
             50,
         );
 
-        // EXIT-FEATURES-TABLE-1: emit one row to `learning.exit_features` per
-        // close. Requires both a captured pre-close snapshot (caller's
-        // responsibility — position is already removed by the time we run) and
-        // a wired tx. With either missing we degrade to fail-soft no-op —
-        // trading is unaffected, only Track P label collection for this close
-        // is skipped.
-        // EXIT-FEATURES-TABLE-1：每筆平倉寫一列到 learning.exit_features。需要
-        // caller 傳入的 pre-close 快照 + 已接線的 tx；缺一 → fail-soft no-op。
+        self.try_emit_exit_feature_row(symbol, qty, price, ts_ms, realized_pnl,
+                                       close_fee, fr, close_tag, exit_snapshot,
+                                       entry_context_id);
+    }
+
+    /// EXIT-FEATURES-TABLE-1: emit one row to `learning.exit_features` per
+    /// close. Requires both a captured pre-close snapshot (caller's
+    /// responsibility — position is already removed by the time we run) and
+    /// a wired tx. With either missing we degrade to fail-soft no-op —
+    /// trading is unaffected, only Track P label collection for this close
+    /// is skipped. Split out so non-`emit_close_fill` close paths
+    /// (`ipc_close_symbol` paper branch, `process_external_fill`) can emit
+    /// exit features without going through full Fill-persistence logic that
+    /// those paths already handle themselves.
+    /// EXIT-FEATURES-TABLE-1：獨立 helper，支援非 emit_close_fill 路徑
+    /// （ipc_close_symbol paper 分支、process_external_fill 外部 fill 回報）
+    /// 的 exit feature 發送。缺 snap 或 tx → fail-soft no-op。
+    pub(crate) fn try_emit_exit_feature_row(
+        &self,
+        symbol: &str,
+        qty: f64,
+        price: f64,
+        ts_ms: u64,
+        realized_pnl: f64,
+        close_fee: f64,
+        fee_rate: f64,
+        close_tag: &str,
+        exit_snapshot: Option<&crate::paper_state::PositionExitSnapshot>,
+        entry_context_id: &str,
+    ) {
+        let em = self.effective_engine_mode();
         if let (Some(snap), Some(tx)) = (exit_snapshot, self.exit_feature_tx.as_ref()) {
             let row =
                 self.build_exit_feature_row(symbol, qty, price, ts_ms, realized_pnl,
-                                            close_fee, fr, close_tag, snap, em,
+                                            close_fee, fee_rate, close_tag, snap, em,
                                             entry_context_id);
             // try_send: never block the close path. Overflow → row dropped,
             // writer logs the channel pressure via its own metric.

@@ -2642,3 +2642,107 @@ fn test_parse_exit_tag_taxonomy() {
         ("custom_tag".into(), "some_reason".into())
     );
 }
+
+/// EXIT-FEATURES-TABLE-1 E2 P1 fix: `ipc_close_symbol` paper branch must
+/// emit an `ExitFeatureRow` after closing — previously bypassed entirely.
+/// Verifies the full wiring end-to-end for IPC-driven paper closes
+/// (dust eviction, operator `/close_symbol` API, orphan_handler → Paper).
+/// EXIT-FEATURES-TABLE-1 E2 P1：ipc_close_symbol paper 分支必須發 exit feature。
+#[test]
+fn test_ipc_close_symbol_paper_emits_exit_feature_row() {
+    let mut p = TickPipeline::with_kind(&["BTCUSDT"], 10_000.0, PipelineKind::Paper);
+    p.intent_processor.set_fee_rate(0.0006);
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<crate::database::ExitFeatureRow>(8);
+    p.set_exit_feature_tx(tx);
+
+    // Seed latest price so close_position_at_market uses a real mark.
+    // 注入最新價，close_position_at_market 才有真實 mark price。
+    p.paper_state.set_latest_price("BTCUSDT", 51_000.0);
+    p.paper_state
+        .apply_fill("BTCUSDT", true, 0.1, 50_000.0, 0.0, 1_000, "ma_crossover");
+    p.paper_state
+        .set_entry_context_id("BTCUSDT", "ctx-ipc-close-test");
+
+    // Paper branch: ipc_close_symbol with no hints (hints only matter for
+    // exchange branch). Pipeline kind is Paper, no order_dispatch_tx wired,
+    // system_mode default → falls to paper branch.
+    // paper 分支：無 hints；系統模式預設 → 走 paper 分支。
+    let fired = p.ipc_close_symbol("BTCUSDT", None, None);
+    assert!(fired, "ipc_close_symbol paper branch must return true on close");
+
+    let row = rx.try_recv().expect("ExitFeatureRow must be emitted");
+    assert_eq!(row.context_id, "ctx-ipc-close-test");
+    assert_eq!(row.symbol, "BTCUSDT");
+    assert_eq!(row.strategy_name, "ma_crossover");
+    assert_eq!(row.side, 1);
+    assert_eq!(row.exit_source.as_deref(), Some("Risk"));
+    assert_eq!(row.exit_trigger_rule.as_deref(), Some("ipc_close_symbol"));
+    // realized_net_bps present (entry_notional>0, fee_rate>0); exact value
+    // tolerant of fee math — just assert fee deducted from gross.
+    // realized_net_bps 需扣除 round-trip fee，不做精確斷言。
+    let net = row.realized_net_bps.expect("realized_net_bps must be Some");
+    assert!(net < 200.0, "net bps should be reduced by ~12 bps round-trip fee, got {}", net);
+}
+
+/// EXIT-FEATURES-TABLE-1 E2 P1 fix: `try_emit_exit_feature_row` helper —
+/// the narrow factor-out used by non-`emit_close_fill` close paths
+/// (`ipc_close_symbol` paper branch, external-fill paths that emit their
+/// own TradingMsg::Fill). Validates the helper emits one row with the
+/// caller-supplied context_id + close_tag mapped through `parse_exit_tag`.
+/// EXIT-FEATURES-TABLE-1 E2 P1：try_emit_exit_feature_row helper 獨立測試，
+/// 驗證外部呼叫路徑（不走 emit_close_fill 的關倉路徑）能正確發送。
+#[test]
+fn test_try_emit_exit_feature_row_helper_direct_call() {
+    let mut p = TickPipeline::with_kind(&["BTCUSDT"], 10_000.0, PipelineKind::Paper);
+    p.intent_processor.set_fee_rate(0.0006);
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<crate::database::ExitFeatureRow>(8);
+    p.set_exit_feature_tx(tx);
+
+    // Construct a snapshot the same way non-emit_close_fill paths would:
+    // open a position, snapshot before close, then call the helper directly.
+    // 按外部路徑方式：開倉 → 關倉前 snapshot → 直接呼叫 helper。
+    p.paper_state
+        .apply_fill("BTCUSDT", true, 0.1, 50_000.0, 30.0, 1_000, "ext_op");
+    let snap = p.paper_state.position_exit_snapshot("BTCUSDT");
+    assert!(snap.is_some(), "snapshot must exist for open position");
+
+    p.try_emit_exit_feature_row(
+        "BTCUSDT", 0.1, 51_000.0, 2_000, 100.0,
+        30.6, 0.0006, "custom_external:exchange_report",
+        snap.as_ref(), "ctx-helper-test",
+    );
+    let row = rx.try_recv().expect("helper must emit ExitFeatureRow");
+    assert_eq!(row.context_id, "ctx-helper-test");
+    assert_eq!(row.strategy_name, "ext_op");
+    // Unknown prefix → parse_exit_tag passes through verbatim.
+    // 未知前綴 → parse_exit_tag 原樣保留。
+    assert_eq!(row.exit_source.as_deref(), Some("custom_external"));
+    assert_eq!(row.exit_trigger_rule.as_deref(), Some("exchange_report"));
+}
+
+/// EXIT-FEATURES-TABLE-1 E2 P1 fix: helper fails soft when snapshot is None
+/// (no position) or tx is not wired — mirrors emit_close_fill fail-soft.
+/// EXIT-FEATURES-TABLE-1 E2 P1：helper 缺 snap 或 tx → fail-soft no-op。
+#[test]
+fn test_try_emit_exit_feature_row_fail_soft() {
+    let mut p = TickPipeline::with_kind(&["BTCUSDT"], 10_000.0, PipelineKind::Paper);
+
+    // No tx wired + no snapshot → silent no-op, no panic.
+    // 未接 tx + 無 snap → 靜默 no-op，不 panic。
+    p.try_emit_exit_feature_row(
+        "BTCUSDT", 0.1, 51_000.0, 2_000, 100.0,
+        0.0, 0.0, "strategy_close:test",
+        None, "ctx-fail-soft",
+    );
+
+    // tx wired but snap None → still no-op, no row emitted.
+    // 接 tx 但 snap=None → 仍 no-op，無列寫入。
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<crate::database::ExitFeatureRow>(4);
+    p.set_exit_feature_tx(tx);
+    p.try_emit_exit_feature_row(
+        "BTCUSDT", 0.1, 51_000.0, 2_000, 100.0,
+        0.0, 0.0, "strategy_close:test",
+        None, "ctx-fail-soft",
+    );
+    assert!(rx.try_recv().is_err(), "no row should be emitted when snap is None");
+}
