@@ -912,7 +912,7 @@ Client 創建：`LeverageTokenClient::new(client: Arc<BybitRestClient>)`
 
 ## 2. WebSocket
 
-### 2.1 Public WS — `ws_client.rs` + `multi_interval_ws.rs`
+### 2.1 Public WS — `ws_client.rs` + `multi_interval_topics.rs`
 
 連接 URL: `wss://stream{-demo|-testnet|}.bybit.com/v5/public/{category}`
 自動重連：指數退避（base 3s, max 60s）。心跳 Ping 每 20 秒。
@@ -937,11 +937,12 @@ Client 創建：`LeverageTokenClient::new(client: Arc<BybitRestClient>)`
 > 這會導致**同一連接上所有其他訂閱停止接收數據**（零 tick），但連接和心跳保持正常。極難排查。
 > 修復：commit `29fc1ef`，從訂閱列表移除 liquidation/price-limit/adl-notice。
 
-Topic 生成函數（`multi_interval_ws.rs`）：
+Topic 生成函數（`multi_interval_topics.rs` — 2026-04-19 E5-P2-3 rename）：
 - `kline_topics(symbol, intervals)`, `ticker_topic(symbol)`, `orderbook_topic(symbol)`
 - `public_trade_topic(symbol)`
+- `full_subscription_list(symbols)` / `multi_symbol_subscriptions(symbols)` — 多交易對訂閱字串產生（純函數，無 WsClient 耦合）
 - ~~`liquidation_topic()`, `price_limit_topic()`, `adl_notice_topic()`~~ — **已刪除（2026-04-06）**：dead code 連同 `MarketDataMsg::Liquidation` + `flush_liquidations` writer + `extended_subscription_list` 一起清除。`market.liquidations` 表保留為 reserved-for-future。
-- `configure_multi_interval(ws, symbols)` — 一鍵為多交易對配置全部訂閱
+- ~~`configure_multi_interval(ws, symbols)`~~ — **已刪除（2026-04-19 E5-P2-3）**：零 live caller，`main.rs` 直接用 `full_subscription_list` 驅動。
 
 ---
 

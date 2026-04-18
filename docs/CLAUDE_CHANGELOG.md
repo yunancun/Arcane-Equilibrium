@@ -1,7 +1,40 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-04-19（E5-P1 Refactor Wave 1 — 6 delivered / 2 evidence-based cancel / 6/6 E2 APPROVE）
+> 最後更新：2026-04-19（E5-P2 Refactor Wave 2 — 2 delivered / 3 evidence-based CANCEL / 2 defer）
+
+### E5-P2 Refactor Wave 2 — 2 delivered / 3 evidence-based CANCEL / 2 defer（2026-04-19 · commits 11dedbf / 822f799）
+
+**workflow**：PA 派發 5 × general-purpose sub-agent（`isolation: "worktree"`，`run_in_background: true`）→ 2 delivered + 3 evidence-based CANCEL → Phase C 2× 並行 E2 code-review → 2/2 APPROVE_WITH_NITS（零 REJECT，所有 nit 非阻塞）→ Phase D 全量回歸（Rust engine lib 1560 passed / 2 pre-existing EXIT-FEATURES-TABLE-1 WIP fail，非 E5-P2 regression）→ Phase E 收口。
+
+**defer**（`tick_pipeline/mod.rs` EXIT-FEATURES-TABLE-1 pre-existing WIP +45 行衝突）：
+- **P2-1** PipelineCommand enum reorg — 與 P2-6 共爭 tick_pipeline/mod.rs
+- **P2-6** fill_context_builder.rs 抽取 — 同上
+
+**delivered**：
+
+- **P2-3 rename multi_interval_ws → multi_interval_topics**（`11dedbf`）— 3 files changed（rename + 2 import sites）；移除零 caller `configure_multi_interval(ws, symbols)`（斷 WsClient 耦合，完成 pure-function 抽取意圖）；+2 新 contract tests（`test_full_subscription_list_ordering_contract` 釘 kline-first 5-element 順序 + `test_multi_symbol_subscriptions_grouping_contract` 釘 per-symbol grouping）；MODULE_NOTE 中英重寫宣告「pure topic builder, no WsClient」；docs/references/2026-04-04--bybit_api_reference.md §2.1 同步更新（E2 nit 處理）。
+
+- **P2-4 strategies magic numbers → config**（`822f799`）— 3 files changed（+366 / -7）；7 literals 遷移：`bb_breakout` `hurst_regime_boost=0.1` / `exit_bonus_trailing_stop=0.2`（shared 2 sites） / `exit_bonus_regime_shift=0.1` / `exit_bonus_pctb_revert=0.05` / `exit_penalty_bw_squeeze=-0.05`；`grid_trading` `cooldown_ms=60_000` 連帶封死 TOML 不可達 latent gap（`pub(crate)` 提權 + `create_with_params` factory wire + `#[serde(default)]` 熱重載 back-compat）；+9 bit-exact default unit tests（literal→literal 逐欄比對）；sentinel `default_qty=1e9` + architectural invariant `confluence max=65` 明確排除。
+
+**CANCEL（evidence-based，per `feedback_pushback.md` 與 E5 審查鏈精神）**：
+
+- **P2-2 onnx_inference consolidate**：優化前提（`model.inputs[0].name.clone()` per-inference 配置）已由 EDGE-P3-1 Phase B Step 7b 滿足 — `edge_predictor/ort_backend.rs:177-189` 載入時一次 clone `input_name: String`，inference 用 `.as_str()` 零分配；`ml/model_manager.rs` 仍是 stub（line 108 `TODO: Replace with ort::Session::run()`）無第二個 ort session 可合併；7 integration tests 在 `tests/edge_predictor_ort_backend.rs` 依 `edge_predictor::ort_backend::OnnxTrioPredictor` 路徑 — 純搬遷成本 > 0，效益 0。
+
+- **P2-7 claude_teacher/directive_handler 抽取**：applier.rs 560 LOC production / 1068 含 tests（FIX-08 commit 50d7a4b 已把 fixtures 拆到 `applier_test_fixtures.rs`）；parsing 早在 `parser.rs` 分離；`P0_P1_DENYLIST_FIELDS` + `find_denylisted_field` helper + 4 `apply_*` methods 1-to-1 耦合；MODULE_NOTE 明確「this module is the **only** path that turns a parsed `Directive` into a side-effect」為 R6 CRITICAL 單一入口 invariant；分拆要求 `pub(super)` 洩漏內部卻無外部消費者受益。
+
+- **P2-8 Python learning_batch_writer**：`control_api_v1/app/` 全樹**唯 1** `INSERT INTO learning.*` 在 `ai_service_feedback.py:105` → 單點無法「consolidate」；`ml_training/*.py` 11 個 writer 各寫 distinct schema（weekly_review_log/cpcv_results/james_stein_estimates/linucb 3 變體/foundation_model_features/dl3_ab_decisions/bayesian_posteriors/ml_parameter_suggestions/pattern_insights）共享 row shape 為零，去重退化到 `cur.executemany(sql, rows)`；跨進程連線慣用語各有原因（cron `_get_db_conn()` / CLI `dsn: str` / FastAPI `db_pool.get_conn()`）統一會強拖 pool 狀態進 cron scripts；真實批寫入重複已由 E5-P0-4 `database/batch_insert.rs` Rust 側解決（b66a8aa）；audit §五 未列此項，僅 §九 blueprint 前瞻提及。
+
+**Follow-up**：
+- **E5-P2-4b**（P2）：`strategies/bb_breakout.rs` 1265 / `strategies/grid_trading.rs` 1434 / `strategies/mod.rs` 1442 均超 §九 1200 硬上限（非 Wave 2 新增，pre-existing tech debt），分檔拆解獨立排期。
+- **P2-2/P2-7/P2-8**：audit §九 blueprint 對應行建議下修或刪除（證據已封存於本條目）。
+- **P2-1/P2-6**：EXIT-FEATURES-TABLE-1 WIP 落地後重新評估。
+
+**Nits（非阻塞）**：
+- P2-3：`docs/references/2026-04-04--bybit_api_reference.md:915,940,944` 舊檔名 + 已刪 `configure_multi_interval` 引用 — Phase E 同時修正。
+- P2-4：commit message 宣稱 "f64::to_bits" 實則 `(a - b).abs() < f64::EPSILON`（literal→literal 等效但措辭略強）；E5-P2-4 JSON substring match `"\"hurst_regime_boost\":0.22"` 對 serde 未來 formatting 變化脆弱（不阻塞）。
+
+---
 
 ### E5-P1 Refactor Wave 1 — 6 delivered / 2 evidence-based cancel（2026-04-19 · commits ba8cd2c / 76cd793 / d6f7572 / b0dc6b6 / c220375 / 1b72f90）
 
