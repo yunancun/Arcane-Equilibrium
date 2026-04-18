@@ -331,14 +331,6 @@ impl BudgetTracker {
     /// 記錄一次 LLM 用量事件。**Fail-closed**：DB 寫入失敗（或模型定價未知）
     /// 時返回 Err — caller 必須拒絕該次 LLM 調用。成功時返回計算出的美元成本
     /// 並更新內存快取。
-    ///
-    /// E5-FN-2 (audit §七 7.2): when `insert_usage` dedupes a row by
-    /// `request_id` (duplicate INSERT skipped by V018 partial UNIQUE index),
-    /// the in-memory cost accumulator is **also** skipped so that retried
-    /// writes do not double-bill the scope or drive `local_total` past the
-    /// killswitch from the same LLM call.
-    /// E5-FN-2（audit §七 7.2）：若 DB 端以 request_id 去重跳過了 INSERT，
-    /// 內存累加同步跳過，避免重試把同一次 LLM 調用雙計。
     pub async fn record_usage(
         &self,
         scope: &str,
@@ -354,18 +346,8 @@ impl BudgetTracker {
         let cost_usd = self.compute_cost_usd(model, tokens_in, tokens_out)?;
 
         // 2) DB write — fail-closed: any error propagates to caller.
-        //    `inserted=true`  → brand-new row, bill the scope.
-        //    `inserted=false` → duplicate request_id deduped by V018 index,
-        //                       skip the cache increment to avoid double-count.
-        //    When `pool` is unavailable (tests / cold start), behave as if the
-        //    write succeeded so the in-memory cache still accumulates — this
-        //    preserves the pre-E5-FN-2 contract for offline scenarios.
-        //
-        // DB 寫入 — fail-closed：除去重外任何錯誤上拋。
-        //   inserted=true  → 新行，累加 scope 計數。
-        //   inserted=false → request_id 被 V018 索引去重，**不**累加快取。
-        //   pool 不可用（測試 / 冷啟動）視為成功以保留原合約。
-        let inserted = if self.pool.is_available() {
+        //    DB 寫入 — fail-closed：任何錯誤上拋給 caller。
+        if self.pool.is_available() {
             usage_io::insert_usage(
                 &self.pool,
                 scope,
@@ -377,14 +359,12 @@ impl BudgetTracker {
                 purpose,
                 request_id,
             )
-            .await?
-        } else {
-            true
-        };
+            .await?;
+        }
 
-        // 3) Update in-memory MTD cache (after successful, non-dedupped DB write).
-        //    更新內存 MTD 快取（DB 寫入成功且非去重時）。
-        if inserted {
+        // 3) Update in-memory MTD cache (after successful DB write).
+        //    更新內存 MTD 快取（DB 寫入成功後）。
+        {
             let mut guard = self.usage_cache.write().await;
             *guard.mtd_usd.entry(scope.to_string()).or_insert(0.0) += cost_usd;
             // Also accumulate into local_total so degrade_level reflects the spend.
@@ -398,27 +378,6 @@ impl BudgetTracker {
         }
 
         Ok(cost_usd)
-    }
-
-    /// Build a canonical request_id for BudgetTracker.record_usage (E5-FN-2).
-    /// 為 BudgetTracker.record_usage 構造標準 request_id（E5-FN-2）。
-    ///
-    /// Format: `{scope}-{ts_ms}-{rand_hex8}` (e.g., `agent_teacher-1713474000123-a1b2c3d4`).
-    /// - `scope`    — budget scope for debuggability / 便於除錯的 scope 標籤
-    /// - `ts_ms`    — wall-clock ms for ordering / 牆鐘毫秒（排序用）
-    /// - `rand_hex8`— 8 hex chars for intra-ms uniqueness / 同一毫秒內去撞
-    ///
-    /// Callers that need to **retry** a known-in-flight LLM call MUST pass the
-    /// same request_id through both attempts so the V018 partial UNIQUE index
-    /// can dedup the second write. Use this helper to mint the request_id once
-    /// at the top of the call site, stash it, and pass it to every retry.
-    /// 想重試時**必須**沿用同一 request_id；在 call site 頂端呼叫本 helper 一次、
-    /// 暫存後於每次重試傳入，讓 V018 索引去重第二次寫入。
-    pub fn make_request_id(scope: &str) -> String {
-        use rand::Rng;
-        let ts_ms = now_ms();
-        let rand_suffix: u32 = rand::thread_rng().gen();
-        format!("{scope}-{ts_ms}-{rand_suffix:08x}")
     }
 
     /// Remaining USD for a scope this month (limit − MTD usage; clamped at 0).
@@ -753,168 +712,5 @@ mod tests {
         assert_eq!(DegradeLevel::SoftWarn.as_str(), "soft_warn");
         assert_eq!(DegradeLevel::HardLimit.as_str(), "hard_limit");
         assert_eq!(DegradeLevel::Killswitch.as_str(), "killswitch");
-    }
-
-    // ---------------------------------------------------------------------
-    // E5-FN-2 (audit §七 7.2) — request_id dedup tests
-    // E5-FN-2（audit §七 7.2）— request_id 去重測試
-    // ---------------------------------------------------------------------
-
-    // Test E5-FN-2-A: make_request_id format compliance.
-    //   Format: {scope}-{ts_ms}-{rand_hex8}
-    //   - starts with the supplied scope
-    //   - middle segment is a decimal ms timestamp (>= 1_700_000_000_000 in 2026)
-    //   - suffix is 8 lowercase hex chars
-    // 測試 E5-FN-2-A：make_request_id 格式正確性。
-    #[test]
-    fn test_make_request_id_format() {
-        let rid = BudgetTracker::make_request_id(SCOPE_AGENT_TEACHER);
-        let parts: Vec<&str> = rid.rsplitn(3, '-').collect();
-        // rsplitn returns in reverse order: [hex, ts, scope-prefix]
-        assert_eq!(parts.len(), 3, "request_id must have 3 hyphen-separated parts, got {rid}");
-        let suffix = parts[0];
-        let ts_str = parts[1];
-        let scope_prefix = parts[2];
-        assert_eq!(suffix.len(), 8, "rand hex suffix must be 8 chars, got '{suffix}' in {rid}");
-        assert!(
-            suffix.chars().all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()),
-            "hex suffix must be lowercase hex, got '{suffix}'",
-        );
-        let ts_ms: u64 = ts_str.parse().expect("ts_ms must parse as u64");
-        assert!(
-            ts_ms > 1_700_000_000_000,
-            "ts_ms looks bogus ({ts_ms}) — clock skew or wrong segment",
-        );
-        assert_eq!(
-            scope_prefix, SCOPE_AGENT_TEACHER,
-            "scope prefix should be {SCOPE_AGENT_TEACHER}, got '{scope_prefix}'",
-        );
-    }
-
-    // Test E5-FN-2-B: make_request_id collision resistance within the same ms.
-    //   Mint 1_000 request_ids back-to-back and confirm they're all distinct.
-    //   With an 8-hex random suffix (2^32 space) birthday collisions at n=1000
-    //   are ~1.2e-4; we pick 1000 for a deterministically stable test.
-    // 測試 E5-FN-2-B：同一毫秒內 1000 次呼叫全部不撞。
-    #[test]
-    fn test_make_request_id_unique_within_same_ms() {
-        use std::collections::HashSet;
-        let n = 1_000;
-        let mut seen: HashSet<String> = HashSet::with_capacity(n);
-        for _ in 0..n {
-            let rid = BudgetTracker::make_request_id(SCOPE_AGENT_TEACHER);
-            assert!(
-                seen.insert(rid.clone()),
-                "duplicate request_id {rid} after {} mints — collision risk",
-                seen.len(),
-            );
-        }
-        assert_eq!(seen.len(), n);
-    }
-
-    // Test E5-FN-2-C: first-insert path is byte-identical to pre-fix behaviour.
-    //   With `empty_pool()` the DB write is skipped (pool.is_available() == false)
-    //   and record_usage treats the call as a successful first insert → cache is
-    //   incremented exactly once. This guards the "zero behaviour change for
-    //   first-insert path" invariant required by the task.
-    // 測試 E5-FN-2-C：首次寫入路徑與修復前行為 byte-identical（pool 不可用時
-    // 視為成功，cache 增量一次）。
-    #[tokio::test]
-    async fn test_record_usage_first_insert_unchanged() {
-        let pool = empty_pool().await;
-        let tracker = BudgetTracker::new_for_test(pool, BudgetConfig::defaults());
-        let cost = tracker
-            .record_usage(
-                SCOPE_AGENT_TEACHER,
-                "anthropic",
-                "claude-sonnet-4-5",
-                1_000,
-                500,
-                "directive_generation",
-                "e5fn2-first-call",
-            )
-            .await
-            .expect("record_usage should succeed");
-        assert!(cost > 0.0);
-        // Cache should reflect exactly one charge.
-        let teacher_used = tracker
-            .usage_cache
-            .read()
-            .await
-            .mtd_usd
-            .get(SCOPE_AGENT_TEACHER)
-            .copied()
-            .unwrap_or(0.0);
-        assert!(
-            (teacher_used - cost).abs() < 1e-9,
-            "expected cache == cost ({cost}), got {teacher_used}",
-        );
-    }
-
-    // Test E5-FN-2-D: insert_usage returns `Ok(true)` semantics preserved when
-    //   the pool is unavailable — this exercises the record_usage branch that
-    //   synthesises `inserted = true` for cold-start / test mode so the cache
-    //   accumulator still runs (no regression to offline behaviour).
-    // 測試 E5-FN-2-D：pool 不可用時 record_usage 仍會增量，避免離線場景退化。
-    #[tokio::test]
-    async fn test_record_usage_cold_start_still_increments_cache() {
-        let pool = empty_pool().await;
-        let tracker = BudgetTracker::new_for_test(pool, BudgetConfig::defaults());
-        // Three calls — different request_ids — should all accumulate.
-        // 三次呼叫、不同 request_id，應全部累加。
-        for i in 0..3 {
-            tracker
-                .record_usage(
-                    SCOPE_AGENT_ANALYST,
-                    "anthropic",
-                    "claude-sonnet-4-5",
-                    100,
-                    50,
-                    "cold_start_test",
-                    &format!("e5fn2-cold-{i}"),
-                )
-                .await
-                .expect("record_usage should succeed");
-        }
-        let analyst_used = tracker
-            .usage_cache
-            .read()
-            .await
-            .mtd_usd
-            .get(SCOPE_AGENT_ANALYST)
-            .copied()
-            .unwrap_or(0.0);
-        // Each call: 100 * 3/1e6 + 50 * 15/1e6 = 0.0003 + 0.00075 = 0.00105.
-        // 每次呼叫成本 0.00105 USD；×3 應累加到 0.00315。
-        let expected = 3.0 * 0.00105;
-        assert!(
-            (analyst_used - expected).abs() < 1e-9,
-            "expected {expected}, got {analyst_used}",
-        );
-    }
-
-    // Test E5-FN-2-E: the legacy literal "py-sync" default is no longer used
-    //   inside the IPC handler, so two distinct Layer2 calls that both OMIT
-    //   request_id must mint distinct request_ids (not a literal "py-sync"
-    //   collision that the V018 index would dedup into silent loss).
-    //   We exercise the same minting path the IPC handler uses.
-    // 測試 E5-FN-2-E：IPC handler 對缺失 request_id 的處理必須每次鑄造唯一值，
-    // 不再用字面量 "py-sync" 互撞（否則 V018 索引會把第二筆起全部吃掉）。
-    #[test]
-    fn test_layer2_default_request_id_is_unique_not_literal() {
-        let rid_a = BudgetTracker::make_request_id(SCOPE_AGENT_RESERVE);
-        let rid_b = BudgetTracker::make_request_id(SCOPE_AGENT_RESERVE);
-        assert_ne!(rid_a, rid_b, "two mints must be distinct");
-        assert!(
-            !rid_a.contains("py-sync") && !rid_b.contains("py-sync"),
-            "must not contain the old literal 'py-sync' sentinel",
-        );
-        // Both must parse as `{scope}-{ts_ms}-{rand_hex8}`.
-        for rid in [&rid_a, &rid_b] {
-            assert!(
-                rid.starts_with(&format!("{SCOPE_AGENT_RESERVE}-")),
-                "rid {rid} should start with scope prefix",
-            );
-        }
     }
 }

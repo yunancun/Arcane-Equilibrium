@@ -163,25 +163,10 @@ pub(in crate::ipc_server) async fn handle_record_ai_usage(
         .get("purpose")
         .and_then(|v| v.as_str())
         .unwrap_or("layer2_external");
-    // E5-FN-2: if the Python caller omits `request_id`, mint a canonical
-    // `{scope}-{ts_ms}-{rand_hex8}` one locally so the V018 partial UNIQUE
-    // index still provides dedup. Previously this path used the literal
-    // `"py-sync"` for every call, which would have caused **every** Python
-    // layer-2 sync to collide under the new index — the opposite of what we
-    // want. If the caller DOES supply a request_id we honour it verbatim so
-    // intentional retries can dedup against the first attempt.
-    // E5-FN-2：若 Python 未帶 request_id，本地鑄造 `{scope}-{ts_ms}-{rand_hex8}`
-    // 以利 V018 索引去重。原本寫死 `"py-sync"` 會讓所有 py-sync 互撞（結果
-    // 變成只能寫入第一筆，之後全被 ON CONFLICT 掉）。caller 若明確給了
-    // request_id 則原樣沿用，方便其做幂等重試。
-    let request_id_owned: String;
-    let request_id = match params.get("request_id").and_then(|v| v.as_str()) {
-        Some(s) if !s.is_empty() => s,
-        _ => {
-            request_id_owned = crate::ai_budget::BudgetTracker::make_request_id(scope);
-            request_id_owned.as_str()
-        }
-    };
+    let request_id = params
+        .get("request_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("py-sync");
 
     let guard = slot.read().await;
     let tracker = match guard.as_ref() {
