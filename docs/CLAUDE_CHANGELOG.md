@@ -1,7 +1,37 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-04-17（MICRO-PROFIT-FIX-1 narrow band + ft notional floor）
+> 最後更新：2026-04-18（E5-P0 Refactor Wave — 5 P0 並行 sub-agent 寫碼 + 5× E2 並行審查）
+
+### E5-P0 Refactor Wave — 5 P0 並行合流（2026-04-18 · commits 6798ce1…c9c3ad8）
+
+**工作流**：PA → FA（5× Explore sub-agent 並行研究，~5 min）→ E1（5× general-purpose sub-agent isolated worktree 並行寫碼，~60 min）→ E2（5× sub-agent 並行 code review，~5 min）→ E4（cargo test + pytest 並行）→ PM 收口。
+
+**sub-agent refuse pattern 解除**：2026-04-07 觀察的 8+ 次 refuse pattern 於 2026-04-18 E5 Phase A 夾帶 2 個 write-capability probe 驗證通過（FA-1 Rust / FA-3 Python 均 `probe written: YES`），Phase B 改從主會話 inline 串行升級為 5× sub-agent 並行寫碼（isolated worktree），並於 Phase C 5× sub-agent 並行審查雙重確認。
+
+**5 P0 commit**：
+- **P0-3 `common/ws_backoff` + `common/bybit_signer`**（6798ce1）— dedup WS 重連 backoff（`ws_client`+`bybit_private_ws`）與 HMAC-SHA256 簽名（`bybit_rest_client`+`bybit_private_ws`）。保留 `saturating_pow` 語義 + 可注入時間 + lowercase hex + `BybitResult<String>` REST 簽名回傳。+12 單測。
+- **P0-4 `database/batch_insert`**（b66a8aa）— 統一 7 writer chunked multi-row INSERT + PG 65535 bind-parameter ceiling 公式 `chunk_rows = (65535 / cols).min(10_000).max(1)` + `exec_single_insert` 單行/fail-soft 包裝。**順帶修 market_writer ticker 4000-row latent bug**（13 cols × 5000 rows = 65000 params 離 PG 硬上限僅 500，加 1 個 schema 欄位即 runtime EB）。+9 單測。
+- **P0-1 `state_machine_base` + `MultiObjectStoreMixin`**（d205f03）— 3 state machine 共用抽取（DecisionSM / LeaseSM / ReconcilerSM）。transition_id prefix 保持 byte-exact（atx/ltx/rgt + evt/levt/revt + aud/laud/raud）；observer 回調保留 outside-lock 模式；`IntEnum`/`StrEnum` 並存；RiskGov `_extra_validate()` hook。187/187 SM tests 零變更。
+- **P0-2 `strategies/common/` 三模塊**（6777b85）— `PerSymbolState<S>` HashMap wrapper + `TrendCooldown` saturating_sub 冷卻 + `ConfidenceBuilder` ADX+regime 信心公式。**bit-exact f64 preservation** via `f64::to_bits()` oracle test（confidence 公式零漂移）；bb_breakout RC-04 rollback 由快照/恢復強化為原子 struct snapshot。+4 策略文件遷移（+87 行，均 <1200 硬上限）；confluence.rs 未觸。
+- **P0-5 `legacy_routes.py` 5 拆 + `auth_routes_common.py`**（c9c3ad8）— 1179 行拆為 auth/gui/system/learning/control 5 個域文件 + 共用 auth helper。**0 module-level singleton capture**（main.py L125-132 monkey-patch 的 8 個符號全部經 `_base = main_legacy` 命名空間 request-time 解析）；**54 路由 diff empty**；`_login_fail_lock` 3 函數原子性保留；`hmac.compare_digest` 常數時間驗證保留；HttpOnly+Secure+SameSite cookie flags 一致；`envelope_response` 集中化（0 hand-wrapped ResponseEnvelope）。
+
+**Phase C 審查結果（5/5 APPROVE）**：
+- P0-3: 12/12（HMAC byte-exact，saturating_pow 保留）
+- P0-4: 12/12（PG 公式正確，順帶 latent bug fix）
+- P0-1: 14/14（observer outside-lock，transition_id byte-exact）
+- P0-2: 13/13 APPROVE_WITH_NITS（唯一 nit: 檔案略增 +87 行均 <1200 硬上限）
+- P0-5: 16/16（monkey-patch 鏈零破壞，54 路由 diff empty）
+
+**Phase D 回歸**：
+- cargo test --lib：**1497 passed / 0 failed**（baseline 1452 + P0-3 +12 + P0-4 +9 + P0-2 +24 ≈ 45 新單測）
+- pytest：**2511 passed / 2 pre-existing fail**（commit 81a3807 DYNAMIC-RISK-1 引入的 `TestDynamicRiskRoutes::test_status_*`，E5-P0 stash 驗證同樣 2 fail；獨立開 ticket `DYNAMIC-RISK-STATUS-TEST-SIG-1`，非阻塞 Live）
+
+**Integration path A**：main WIP stash `-u` → 5 cherry-pick 風險遞增序（P0-3 → 4 → 1 → 2 → 5）全 clean auto-merge（僅 P0-4 database/mod.rs 與前值 65acde6 exit_feature_writer mod 宣告 auto-merge 成功，零手動解衝突）→ stash pop 還原 WIP → Phase D 回歸 → PM 收口。
+
+**部署**：`bash helper_scripts/restart_all.sh --rebuild`（含 Rust engine binary + PyO3 + Python 全端重啟）。
+
+---
 
 ### MICRO-PROFIT-FIX-1 — 窄帶 cost-edge + fast_track 名義底線（2026-04-17）
 
