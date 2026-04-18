@@ -155,3 +155,59 @@ ps -o pid,etime,cmd -p $(pgrep -f openclaw-engine) | head -5
 grep -c "ENGINE_CRASH" /tmp/openclaw/watchdog.log
 grep -iE "panic|assertion failed|rust backtrace" /tmp/openclaw/engine.log | tail -5
 ```
+
+---
+
+## P0-7 · ORDER-SUBMIT-GAP-1 ✅ ARCHIVED 2026-04-18
+
+### 原描述
+live/live_demo 24h 內 570k Approved verdicts 對應 0 fills → 假設 order submit path 被跳過（OMSProxy noop / trading_mode 未啟）。Live_Ready 下真實下單能力 0%。
+
+### RCA 結論（P0-6 解鎖後更正）
+**不存在獨立的 order-submit gap**。0 fills 的根因是 P0-6 cost-gate cascade 拒絕 100% intents — `gate.approved` 從未為 true → `on_tick.rs:690-733` 的 order dispatch 代碼從未被進入。`OrderDispatchRequest → exchange REST` 路徑本身未壞，只是從未被觸發。
+
+### 方案 A 部署後驗證（2026-04-18）
+
+P0-6 方案 A（LiveDemo → Validation cost-gate profile mapping，commit e6aa467 · 2026-04-17 夜部署）生效後：
+
+| 指標 | 預期 | 實測 | 備註 |
+|---|---|---|---|
+| 24h live_demo fills | > 0 | **1073 筆** | 與 decision_features 一致 |
+| `cost_gate(JS-live): no edge estimate` log 次數 | ~0 | **0/hr**（原 85+/hr） | `edge_estimates.json` 仍 `{}`，但 Validation moderate gate 允許 cold-start |
+| `order dispatched` ↔ `WS fill` 1:1 | 必須 | **114:114**（engine.log 19:09-20:06 local，~57 min 窗口） | 100% 落地 |
+| 活躍策略 owner_strategy | ≥ 2 | **grid_trading / ma_crossover / orphan_frozen** | live_state.json 7 positions |
+
+### 遺留與 P0-6 最終修復關係
+
+- **Live_Demo 死循環**：已完全解除（cost_gate + order submit 雙綠）
+- **Demo 死循環**：未解（`correlated_exposure 69-70% ≥ 65% limit`），但根因是 `bybit_sync` seeded positions 無活躍策略 emit Close，與 order submit path 無關。由 P1-8 FUP `retriage_synthetic_owner` tick-level 自主接管路徑負責消化（§P1-8，觀察中）
+- **P0-6 永久修復 commit 293a808**：synthetic `VerdictInfo::rejected` 讓前置 gate 拒絕理由寫入 `risk_verdicts.reasons` — 只影響審計可觀察性，不改變 order submit path
+
+### 歸檔決策
+
+P0-7 原本的獨立 hypothesis（order submit code 壞）已證偽。殘留的「Demo 死循環」本質上是 orphan eviction/adoption 問題，歸屬 P1-8 DUST-EVICTION-GAP-1 + P1-6 DEMO-BYBIT-SYNC-ORPHAN-1，不需要 P0 獨立條目。
+
+**判定**：P0-7 `[ ]` → `[x] ARCHIVED 2026-04-18`。後續 Demo 死循環觀察留在 §P0-6「Demo 死循環打破」條目下。
+
+### 驗證方法（future session 可重跑）
+
+```bash
+# 1. order dispatch ↔ WS fill 1:1
+grep -c "order dispatched" /tmp/openclaw/engine.log
+grep -c "WS fill /" /tmp/openclaw/engine.log
+
+# 2. 最新 live_state.json 的 owner_strategy 分布
+jq '[.positions[].owner_strategy] | group_by(.) | map({key: .[0], count: length})' /tmp/openclaw/live_state.json
+
+# 3. DB 24h live_demo fills（operator 登 PG）
+# SELECT engine_mode, owner_strategy, COUNT(*)
+# FROM trading.fills
+# WHERE ts > NOW() - INTERVAL '24 hours'
+#   AND engine_mode IN ('live','live_demo')
+# GROUP BY engine_mode, owner_strategy
+# ORDER BY COUNT(*) DESC;
+```
+
+### 相關 commit
+- `e6aa467` fix(engine): P0-6 方案 A — LiveDemo → Validation cost-gate profile（2026-04-17 夜）
+- `293a808` fix(engine): P0-6 永久修復 — synthetic VerdictInfo（2026-04-18，尚待 `--rebuild` 部署，不影響 P0-7 判定）
