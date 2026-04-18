@@ -163,23 +163,34 @@ _live_monitor_task: asyncio.Task | None = None
 async def _ipc_command(method: str, params: dict | None = None) -> dict[str, Any]:
     """
     Send IPC command to Rust engine; raise HTTPException on failure.
-    Mirrors paper_trading_routes._ipc_command: connect → call → disconnect (finally).
     向 Rust 引擎發送 IPC 命令；失敗時拋出 HTTPException。
-    模仿 paper_trading_routes 模式：connect → call → finally disconnect。
+
+    E5-P1-5: delegates the connect→call→disconnect mechanics to shared
+    ``ipc_dispatch.one_shot_ipc_call`` but keeps the legacy 503 / ``"IPC
+    command '<method>' failed: <exc>"`` envelope byte-for-byte so
+    ``test_live_gate_fallback`` (which asserts the exact detail string)
+    remains green. We opt the helper out of HTTP-reclassification with
+    ``wrap_errors_as_http=False`` and re-raise the legacy shape locally.
+    E5-P1-5：連線→呼叫→斷線委派給共享 helper，但 byte-for-byte 保留舊 503/
+    ``"IPC command '<method>' failed: <exc>"`` 回應格式，避免破壞
+    ``test_live_gate_fallback`` 對 detail 字串的精確斷言。
     """
-    from .ipc_client import EngineIPCClient
-    client = EngineIPCClient()
+    from .ipc_dispatch import one_shot_ipc_call  # noqa: PLC0415
+
     try:
-        await client.connect()
-        result = await client.call(method, params=params or {}, timeout=5.0)
-        return result if isinstance(result, dict) else {"result": result}
-    except Exception as exc:
+        return await one_shot_ipc_call(
+            method,
+            params,
+            timeout=5.0,
+            wrap_errors_as_http=False,
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:  # noqa: BLE001 — preserve legacy envelope
         raise HTTPException(
             status_code=503,
             detail=f"IPC command '{method}' failed: {exc}",
         ) from exc
-    finally:
-        await client.disconnect()
 
 
 def _get_rust_client_safe():

@@ -3,6 +3,12 @@
 //! 後台任務啟動 — DB 寫入器、費率刷新、品種規格刷新、
 //! 新聞管線、Teacher consumer loop、持倉對帳器。
 
+// E5-P1-5: generic tick-loop spawner extracted from the ~4 duplicated
+//         tokio::spawn/interval/select! blocks in this file (orphan §九).
+// E5-P1-5：本檔案 4+ 個重複 tokio::spawn/interval/select! 區塊抽出的通用 tick-loop spawner（§九 孤兒抽取）。
+mod supervised_spawn;
+use supervised_spawn::spawn_cancellable_interval;
+
 use openclaw_engine::account_manager::AccountManager;
 use openclaw_engine::bybit_rest_client::{BybitEnvironment, BybitRestClient};
 use openclaw_engine::config::{ConfigManager, ConfigStore, LearningConfig};
@@ -23,36 +29,33 @@ pub(crate) fn spawn_fee_rate_tasks(
 ) {
     // Periodic refresh: re-fetch fee rates every 6h to track VIP-tier changes.
     // 每 6 小時刷新費率，追蹤 VIP 變動；接 cancel token 優雅退出。
+    // E5-P1-5 adoption: use shared spawn_cancellable_interval helper; cancel
+    //                   log message preserved byte-for-byte.
+    // E5-P1-5 採用：使用共享的 spawn_cancellable_interval；cancel log 完全保留。
     {
         let acct_refresh = Arc::clone(acct);
         let client_refresh = Arc::clone(client);
-        let cancel_refresh = cancel.clone();
-        tokio::spawn(async move {
-            let mut tick = tokio::time::interval(std::time::Duration::from_secs(6 * 3600));
-            tick.tick().await; // skip first immediate tick
-            loop {
-                tokio::select! {
-                    _ = cancel_refresh.cancelled() => {
-                        info!("fee_rate refresh task stopping (cancel) / 費率刷新任務停止");
-                        break;
-                    }
-                    _ = tick.tick() => {
-                        match acct_refresh
-                            .refresh_fee_rates(&*client_refresh, "linear")
-                            .await
-                        {
-                            Ok(count) => info!(
-                                symbols = count,
-                                "fee rates refreshed (6h) / 費率已刷新"
-                            ),
-                            Err(e) => {
-                                warn!(error = %e, "fee rate refresh failed / 費率刷新失敗")
-                            }
+        let _ = spawn_cancellable_interval(
+            "fee_rate_refresh",
+            std::time::Duration::from_secs(6 * 3600),
+            Some("fee_rate refresh task stopping (cancel) / 費率刷新任務停止"),
+            cancel.clone(),
+            move || {
+                let acct = Arc::clone(&acct_refresh);
+                let client = Arc::clone(&client_refresh);
+                async move {
+                    match acct.refresh_fee_rates(&*client, "linear").await {
+                        Ok(count) => info!(
+                            symbols = count,
+                            "fee rates refreshed (6h) / 費率已刷新"
+                        ),
+                        Err(e) => {
+                            warn!(error = %e, "fee rate refresh failed / 費率刷新失敗")
                         }
                     }
                 }
-            }
-        });
+            },
+        );
     }
 
     // Staleness monitor: alarm if fee rates haven't refreshed in >12h
@@ -89,6 +92,13 @@ pub(crate) fn spawn_fee_rate_tasks(
 
 /// Spawn periodic instrument info refresh (every 4 hours).
 /// R-05：定期刷新合約信息（每 4 小時）。
+///
+/// E5-P1-5 adoption: uses shared ``spawn_cancellable_interval``. Legacy
+///                   behaviour kept byte-for-byte: silent cancel (no log line
+///                   on shutdown) matches the prior ``_ = cancel.cancelled()
+///                   => break`` arm.
+/// E5-P1-5 採用：使用共享的 ``spawn_cancellable_interval``。舊行為完全保留：
+///                cancel 時靜默退出（不 log），對應舊 ``break`` 分支。
 pub(crate) fn spawn_instrument_refresh(
     icache: &Arc<openclaw_engine::instrument_info::InstrumentInfoCache>,
     client: &Arc<BybitRestClient>,
@@ -96,22 +106,22 @@ pub(crate) fn spawn_instrument_refresh(
 ) {
     let refresh_cache = Arc::clone(icache);
     let refresh_client = Arc::clone(client);
-    let refresh_cancel = cancel.clone();
-    tokio::spawn(async move {
-        let mut interval = tokio::time::interval(std::time::Duration::from_secs(4 * 3600));
-        interval.tick().await; // skip immediate first tick
-        loop {
-            tokio::select! {
-                _ = refresh_cancel.cancelled() => break,
-                _ = interval.tick() => {
-                    match refresh_cache.refresh(&*refresh_client, "linear").await {
-                        Ok(n) => info!(symbols = n, "instrument info refreshed / 品種規格已刷新"),
-                        Err(e) => warn!(error = %e, "instrument refresh failed / 品種刷新失敗"),
-                    }
+    let _ = spawn_cancellable_interval(
+        "instrument_refresh",
+        std::time::Duration::from_secs(4 * 3600),
+        None,
+        cancel.clone(),
+        move || {
+            let cache = Arc::clone(&refresh_cache);
+            let client = Arc::clone(&refresh_client);
+            async move {
+                match cache.refresh(&*client, "linear").await {
+                    Ok(n) => info!(symbols = n, "instrument info refreshed / 品種規格已刷新"),
+                    Err(e) => warn!(error = %e, "instrument refresh failed / 品種刷新失敗"),
                 }
             }
-        }
-    });
+        },
+    );
 }
 
 /// Initialize BudgetTracker + audit pool and inject into IPC server slots.
