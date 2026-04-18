@@ -309,9 +309,11 @@ pub(crate) fn spawn_news_pipeline(
 /// quality monitor, drift detector) + feature version init.
 /// 啟動所有 DB 寫入器任務 + 特徵版本初始化。
 ///
-/// Returns the sender halves for (market, feature, trading, context, decision_feature) channels.
+/// Returns the sender halves for (market, feature, trading, context,
+/// decision_feature, shadow_fill, exit_feature) channels.
 /// The caller uses these to wire into EventConsumerDeps.
-/// 返回 (market, feature, trading, context, decision_feature) 通道的發送端。
+/// 返回 (market, feature, trading, context, decision_feature, shadow_fill,
+/// exit_feature) 通道的發送端。
 #[allow(clippy::type_complexity)]
 pub(crate) async fn spawn_db_writers(
     db_pool: &Arc<DbPool>,
@@ -327,9 +329,10 @@ pub(crate) async fn spawn_db_writers(
     Option<tokio::sync::mpsc::Sender<openclaw_engine::database::DecisionContextMsg>>,
     Option<tokio::sync::mpsc::Sender<openclaw_engine::database::DecisionFeatureMsg>>,
     Option<tokio::sync::mpsc::Sender<openclaw_engine::database::ShadowFillMsg>>,
+    Option<tokio::sync::mpsc::Sender<openclaw_engine::database::ExitFeatureRow>>,
 ) {
     if !db_pool.is_available() {
-        return (None, None, None, None, None, None);
+        return (None, None, None, None, None, None, None);
     }
 
     // Market writer channel + task
@@ -424,6 +427,27 @@ pub(crate) async fn spawn_db_writers(
         );
     }
 
+    // EXIT-FEATURES-TABLE-1: Exit feature writer channel + task. Sized 1024 —
+    // one row per position exit (rare relative to decision features), matches
+    // realistic exit cadence across all engines. Paper/Demo/Live all share this
+    // writer (paper_state close path emits regardless of pipeline kind).
+    // EXIT-FEATURES-TABLE-1：退場特徵 writer 通道 + 任務。容量 1024；
+    // Paper/Demo/Live 三引擎的 paper_state close path 皆寫入。
+    let (exit_feature_tx, exit_feature_rx) = tokio::sync::mpsc::channel(1024);
+    {
+        let ef_pool = Arc::clone(db_pool);
+        let ef_config = Arc::clone(config);
+        let ef_cancel = cancel.clone();
+        tokio::spawn(
+            openclaw_engine::database::exit_feature_writer::run_exit_feature_writer(
+                exit_feature_rx,
+                ef_pool,
+                ef_config,
+                ef_cancel,
+            ),
+        );
+    }
+
     // F-4 fix: Spawn REST pollers for funding/OI/LSR
     // F-4 修復：啟動 funding/OI/LSR REST 輪詢器
     if let Some(ref client) = shared_client {
@@ -483,6 +507,7 @@ pub(crate) async fn spawn_db_writers(
         Some(context_tx),
         Some(decision_feature_tx),
         Some(shadow_fill_tx),
+        Some(exit_feature_tx),
     )
 }
 

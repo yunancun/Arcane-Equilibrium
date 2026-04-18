@@ -55,6 +55,13 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
         context_tx,
         decision_feature_tx,
         shadow_fill_tx,
+        // EXIT-FEATURES-TABLE-1: producer site lands in Phase 1a 軌道 1
+        // (paper_state close path). For now the writer is spawned and the
+        // channel wired to all three pipelines, but nothing emits — marked
+        // unused to avoid warn-as-error until the hook lands.
+        // EXIT-FEATURES-TABLE-1：producer 由 Phase 1a 軌道 1 接線，writer 與通道
+        // 先佈建好；未接 producer 前標 _unused 避免警告當錯誤。
+        exit_feature_tx: _exit_feature_tx,
         exchange_event_rx,
         seed_positions,
         account_manager,

@@ -15,6 +15,7 @@ pub mod black_swan_detector;
 pub mod context_writer;
 pub mod decision_feature_writer;
 pub mod drift_detector;
+pub mod exit_feature_writer;
 pub mod experiment_ledger_pg;
 pub mod fallback;
 pub mod feature_writer;
@@ -502,6 +503,69 @@ pub struct ShadowFillMsg {
     /// Round-trip cost in bps at open (fee + slippage).
     /// 開倉時來回成本（費率 + 滑點），單位 bps。
     pub cost_bps_at_open: f64,
+}
+
+/// Exit feature row → exit_feature_writer task (EXIT-FEATURES-TABLE-1).
+/// DUAL-TRACK-EXIT-1 Track P/L feature label written on every position exit.
+/// 退場特徵列 → exit_feature_writer 任務。每筆退場寫入一列。
+///
+/// Each message produces one row in `learning.exit_features` (PK=(context_id, ts)).
+/// `context_id` is the entry context_id — pairs with `learning.decision_features`
+/// (PK=context_id) for ML training joins (entry snapshot ↔ exit trajectory).
+/// 每條訊息在 `learning.exit_features` 產生一列（PK=(context_id, ts)）。
+/// context_id 為開倉時的 context_id，與 `learning.decision_features` 配對，
+/// 供 ML 訓練以 JOIN 合併 entry snapshot 與 exit trajectory。
+///
+/// Spec: docs/worklogs/2026-04-18-2--exit_features_table_design.md
+#[derive(Debug, Clone)]
+pub struct ExitFeatureRow {
+    /// Aligned with entry-time decision_features.context_id.
+    /// 與開倉 decision_features.context_id 對齊。
+    pub context_id: String,
+    /// Exit timestamp (ms since epoch) / 退場時刻（毫秒）
+    pub ts_ms: i64,
+    /// "paper" | "demo" | "live_demo" | "live" / 引擎模式
+    pub engine_mode: String,
+    pub strategy_name: String,
+    pub symbol: String,
+    /// +1 long / -1 short (i16 maps to SQL SMALLINT).
+    /// +1 多 / -1 空。
+    pub side: i16,
+
+    // ── 7-dim Track P features / 7 維 Track P 特徵 ─────────────
+    /// Estimated net edge at exit (bps) — from JS edge_estimates + cost_gate.
+    /// 退場時估計 net edge (bps)。
+    pub est_net_bps: Option<f32>,
+    /// Max favorable pnl since entry (%). Tracked tick-by-tick on PaperPosition.
+    /// 自開倉以來 max favorable pnl 百分比。
+    pub peak_pnl_pct: Option<f32>,
+    /// ATR / price at exit / 當時 ATR/price
+    pub atr_pct: Option<f32>,
+    /// (peak - current) / ATR — normalized giveback / 歸一化回吐幅度
+    pub giveback_atr_norm: Option<f32>,
+    /// Ms since peak was reached / 自 peak 達到以來的毫秒數
+    pub time_since_peak_ms: Option<i64>,
+    /// Short-window price rate-of-change (default 300 ms) / 短窗 ROC
+    pub price_roc_short: Option<f32>,
+    /// Seconds since entry fill / 自 entry 以來的秒數
+    pub entry_age_secs: Option<f32>,
+
+    // ── Exit meta / 退場元數據 ────────────────────────────────
+    /// 'Physical' | 'Hybrid' | 'ML-shadow' | 'TimeStop' | 'HardStop' ...
+    pub exit_source: Option<String>,
+    /// Specific trigger rule name (e.g. 'PHYS-LOCK', 'COST-EDGE').
+    /// 具體觸發規則名。
+    pub exit_trigger_rule: Option<String>,
+    /// Ex-post realized net bps (label vs est_net_bps prediction).
+    /// 實際成交 net bps，作為 est_net_bps 的 ex-post label。
+    pub realized_net_bps: Option<f32>,
+
+    // ── Provenance / 來源可追溯 ────────────────────────────────
+    /// Schema version tag ("v1.0") / Schema 版本標記
+    pub feature_schema_version: String,
+    /// Hash of the ordered feature-name list — detects schema drift.
+    /// 欄位結構 hash，偵測 schema 漂移。
+    pub feature_schema_hash: String,
 }
 
 /// Sanitize a float for PG insertion: replace NaN/Inf with None.

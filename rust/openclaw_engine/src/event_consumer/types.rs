@@ -152,6 +152,18 @@ pub struct EventConsumerDeps {
     /// EDGE-P3-1 Step 7c：ε-greedy shadow-fill 寫入通道。None 時走 fail-soft log。
     /// gate + DB CHECK 限 paper；writer 在各引擎皆運行以防禦性記錄異常洩漏。
     pub shadow_fill_tx: Option<tokio::sync::mpsc::Sender<crate::database::ShadowFillMsg>>,
+    /// EXIT-FEATURES-TABLE-1: Channel for DUAL-TRACK-EXIT-1 Track P/L exit
+    /// feature rows into `learning.exit_features`. Wired per-engine from
+    /// `main.rs` — ALL THREE pipelines (Paper/Demo/Live) must clone this tx so
+    /// the paper_state close path persists exit features regardless of engine
+    /// kind. `None` disables emission (fail-soft — trading unaffected, no
+    /// exit label collection). Producer site lands in Phase 1a 軌道 1
+    /// (paper_state.rs close_position hook).
+    /// EXIT-FEATURES-TABLE-1：退場特徵寫入通道。三引擎（Paper/Demo/Live）皆需 clone —
+    /// paper_state close path 無論引擎類型都寫出退場特徵。None 時發射 no-op
+    /// （fail-soft，不影響交易僅停退場 label 採集）。
+    /// 避免重蹈 MARKET-KLINES-STALE-1 的 D19 覆轍（不可僅接某一 pipeline）。
+    pub exit_feature_tx: Option<tokio::sync::mpsc::Sender<crate::database::ExitFeatureRow>>,
     /// EXT-1: Channel to receive exchange events (fills/order updates) from ExecutionListener.
     /// EXT-1：從執行監聽器接收交易所事件（成交/訂單更新）的通道。
     pub exchange_event_rx: Option<mpsc::UnboundedReceiver<ExchangeEvent>>,
