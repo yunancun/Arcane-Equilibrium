@@ -36,15 +36,16 @@ impl IntentProcessor {
                 let wr = cell.win_rate.clamp(0.3, 1.0);
                 let threshold_bps = fee_bps / wr * 1.3;
                 if cell.shrunk_bps < threshold_bps {
-                    return Some(IntentResult::rejected(format!(
-                        "cost_gate(JS): edge={:.2}bps < threshold={:.2}bps \
-                         (fee={:.2}bps, wr={:.2}, slip={:.1}bps)",
-                        cell.shrunk_bps,
-                        threshold_bps,
-                        fee_bps,
-                        cell.win_rate,
-                        slippage * 10_000.0,
-                    )));
+                    return Some(IntentResult::rejected(
+                        RejectionCode::CostGateJsPaper {
+                            edge_bps: cell.shrunk_bps,
+                            threshold_bps,
+                            fee_bps,
+                            win_rate: cell.win_rate,
+                            slippage_bps: slippage * 10_000.0,
+                        }
+                        .format(),
+                    ));
                 }
                 tracing::debug!(
                     strategy,
@@ -106,21 +107,27 @@ impl IntentProcessor {
                 let wr = cell.win_rate.clamp(0.3, 1.0);
                 let threshold_bps = fee_bps / wr * 1.3;
                 if cell.shrunk_bps < threshold_bps {
-                    return Some(ExchangeGateResult::rejected(format!(
-                        "cost_gate(JS-demo): edge={:.2}bps < threshold={:.2}bps \
-                         (fee={:.2}bps, wr={:.2})",
-                        cell.shrunk_bps, threshold_bps, fee_bps, cell.win_rate,
-                    )));
+                    return Some(ExchangeGateResult::rejected(
+                        RejectionCode::CostGateJsDemoThreshold {
+                            edge_bps: cell.shrunk_bps,
+                            threshold_bps,
+                            fee_bps,
+                            win_rate: cell.win_rate,
+                        }
+                        .format(),
+                    ));
                 }
                 None // pass
             }
             Some(cell) => {
                 // Negative JS estimate: block (unlike paper exploration which allows)
                 // 負 JS 估計：阻擋（不同於 paper 探索模式允許）
-                Some(ExchangeGateResult::rejected(format!(
-                    "cost_gate(JS-demo): estimated={:.2}bps < 0 — blocked / 負估計阻擋",
-                    cell.shrunk_bps,
-                )))
+                Some(ExchangeGateResult::rejected(
+                    RejectionCode::CostGateJsDemoNegative {
+                        estimated_bps: cell.shrunk_bps,
+                    }
+                    .format(),
+                ))
             }
             None => {
                 // Cold start: allow with warning (unlike live which blocks)
@@ -156,21 +163,26 @@ impl IntentProcessor {
                 let wr = cell.win_rate.clamp(0.3, 1.0);
                 let threshold_bps = fee_bps / wr * 1.3;
                 if cell.shrunk_bps < threshold_bps {
-                    return Some(ExchangeGateResult::rejected(format!(
-                        "cost_gate(JS-live): edge={:.2}bps < threshold={:.2}bps \
-                         (fee={:.2}bps, wr={:.2})",
-                        cell.shrunk_bps, threshold_bps, fee_bps, cell.win_rate,
-                    )));
+                    return Some(ExchangeGateResult::rejected(
+                        RejectionCode::CostGateJsLiveThreshold {
+                            edge_bps: cell.shrunk_bps,
+                            threshold_bps,
+                            fee_bps,
+                            win_rate: cell.win_rate,
+                        }
+                        .format(),
+                    ));
                 }
                 None // pass
             }
-            Some(cell) => Some(ExchangeGateResult::rejected(format!(
-                "cost_gate(JS-live): estimated={:.2}bps < 0 — fail-closed / 負估計失敗關閉",
-                cell.shrunk_bps,
-            ))),
+            Some(cell) => Some(ExchangeGateResult::rejected(
+                RejectionCode::CostGateJsLiveNegative {
+                    estimated_bps: cell.shrunk_bps,
+                }
+                .format(),
+            )),
             None => Some(ExchangeGateResult::rejected(
-                "cost_gate(JS-live): no edge estimate — fail-closed (cold-start) / 無估計失敗關閉"
-                    .to_string(),
+                RejectionCode::CostGateJsLiveColdStart.format(),
             )),
         }
     }

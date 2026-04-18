@@ -8,9 +8,12 @@
 //!   CostGate EV 過濾 → Kelly 倉位 → OMS。持有 RiskConfig 快照用於逐 tick 限制。
 
 mod gates;
+mod rejection_coding;
 mod router;
 #[cfg(test)]
 mod tests;
+
+use rejection_coding::RejectionCode;
 
 use crate::config::risk_config::EdgePredictorFallback;
 use crate::config::RiskConfig;
@@ -380,10 +383,14 @@ impl IntentProcessor {
         let current_usdt = current_cents as f64 / 100.0;
         let projected = current_usdt + order_notional_usdt;
         if projected > cap {
-            Some(format!(
-                "global_notional_cap: projected {:.2} USDT > cap {:.2} USDT (current {:.2})",
-                projected, cap, current_usdt
-            ))
+            Some(
+                RejectionCode::GlobalNotionalCap {
+                    projected,
+                    cap,
+                    current: current_usdt,
+                }
+                .format(),
+            )
         } else {
             None
         }
