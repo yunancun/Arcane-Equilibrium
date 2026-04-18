@@ -130,6 +130,41 @@ class EdgeEstimatorScheduler:
             self._run_cycle(reason="scheduled")
             time.sleep(self._interval_s)
 
+    @staticmethod
+    def _ensure_pg_env_from_database_url() -> None:
+        """
+        james_stein_estimator._get_db_conn() reads PG_HOST/PG_PORT/PG_DB/PG_USER/PG_PASSWORD
+        env vars. The API server is launched with OPENCLAW_DATABASE_URL only (restart_all.sh
+        convention). Bridge the two so the in-process scheduler inherits credentials without
+        widening the launch contract.
+
+        JS 估計器讀 PG_* 環境變量；API server 只設 OPENCLAW_DATABASE_URL。在排程器內就地
+        橋接，避免擴張啟動契約。已存在的 PG_* 不覆蓋（顯式優先）。
+        """
+        url = os.environ.get("OPENCLAW_DATABASE_URL")
+        if not url:
+            return
+        try:
+            from urllib.parse import urlparse  # noqa: PLC0415
+
+            parsed = urlparse(url)
+        except Exception:
+            return
+        if parsed.scheme not in ("postgres", "postgresql"):
+            return
+        # Only set what is missing — explicit env var wins.
+        # 只補缺失的；顯式設定優先。
+        env_map = {
+            "PG_HOST": parsed.hostname or "",
+            "PG_PORT": str(parsed.port) if parsed.port else "",
+            "PG_DB": (parsed.path or "").lstrip("/"),
+            "PG_USER": parsed.username or "",
+            "PG_PASSWORD": parsed.password or "",
+        }
+        for k, v in env_map.items():
+            if v and not os.environ.get(k):
+                os.environ[k] = v
+
     def _run_cycle(self, reason: str) -> dict[str, dict]:
         results: dict[str, dict] = {}
         for mode in self._modes:
@@ -170,6 +205,7 @@ class EdgeEstimatorScheduler:
         # 既有慣例（5-level traversal 已將 program_code 加入 sys.path）。
         from ml_training.james_stein_estimator import run_james_stein  # noqa: PLC0415
 
+        self._ensure_pg_env_from_database_url()
         results = run_james_stein(
             days_back=self._days_back,
             engine_mode=mode,
