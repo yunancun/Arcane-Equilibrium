@@ -373,7 +373,10 @@ class ScoutConfig:
     relevance_threshold: float = 0.3
 
 
-class ScoutAgent:
+from .base_agent import BaseAgent
+
+
+class ScoutAgent(BaseAgent):
     """EX-06 §3 — system's "eyes and ears".
 
     Responsibilities:
@@ -387,32 +390,34 @@ class ScoutAgent:
     - Generate trade signals (only provides intel, Strategist decides)
     - Modify risk parameters (only notifies Guardian of major events)
     - Directly call exchange API for trading
+
+    Inherits BaseAgent for shared lifecycle + audit skeleton (E5-P1-4).
+    繼承 BaseAgent 以共享生命週期 + 審計骨架（E5-P1-4）。
     """
+
+    role = AgentRole.SCOUT  # Class-level role; BaseAgent exposes via self.role.value
 
     def __init__(
         self,
         config: Optional[ScoutConfig] = None,
         message_bus: Optional[MessageBus] = None,
     ):
+        # Preserve legacy positional signature; BaseAgent takes kwargs.
+        # 保留舊式位置參數簽名；BaseAgent 走 kwargs。
+        super().__init__(
+            role=AgentRole.SCOUT,
+            message_bus=message_bus,
+            audit_callback=None,
+            cost_tracker=None,
+        )
         self.config = config or ScoutConfig()
-        self.bus = message_bus
-        self.role = AgentRole.SCOUT  # Required by scout_routes.py get_status()
-        self.state = AgentState.INITIALIZING
-        self._lock = threading.Lock()
         self._intel_log: List[IntelObject] = []
         self._alert_log: List[EventAlert] = []
         self._stats = {"intel_produced": 0, "alerts_produced": 0, "scans_completed": 0}
 
-    # ── lifecycle ──
-
-    def start(self) -> None:
-        self.state = AgentState.RUNNING
-
-    def pause(self) -> None:
-        self.state = AgentState.PAUSED
-
-    def stop(self) -> None:
-        self.state = AgentState.STOPPED
+    # Lifecycle inherited from BaseAgent (bare start/pause/stop, no logging —
+    # matches pre-E5-P1-4 Scout behavior exactly).
+    # 生命週期方法繼承自 BaseAgent（無 log，與 E5-P1-4 前的 Scout 行為完全一致）。
 
     # ── core capabilities ──
 

@@ -44,6 +44,8 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
 
+from .base_agent import BaseAgent
+from .llm_call_wrapper import call_ollama_generate, ollama_is_available
 from .multi_agent_framework import (
     AgentMessage,
     AgentRole,
@@ -157,7 +159,7 @@ class AnalystConfig:
 # AnalystAgent / 分析师代理
 # ═══════════════════════════════════════════════════════════════════════════════
 
-class AnalystAgent:
+class AnalystAgent(BaseAgent):
     """EX-06 §7 — Trade analysis, learning metrics, and pattern discovery agent.
 
     L1: Statistical analysis (always running)
@@ -165,7 +167,12 @@ class AnalystAgent:
 
     L1：统计分析（始终运行）
     L2：AI 模式发现（在足够观察后触发）
+
+    Inherits BaseAgent for shared lifecycle + audit skeleton (E5-P1-4).
+    繼承 BaseAgent 共享生命週期 + 審計骨架（E5-P1-4）。
     """
+
+    role = AgentRole.ANALYST
 
     def __init__(
         self,
@@ -177,6 +184,12 @@ class AnalystAgent:
         audit_callback: Optional[Callable] = None,
         min_observations_for_ai: Optional[int] = None,
     ):
+        super().__init__(
+            role=AgentRole.ANALYST,
+            message_bus=message_bus,
+            audit_callback=audit_callback,
+            cost_tracker=None,  # Analyst's Ollama usage is untracked (legacy behavior).
+        )
         self.config = config or AnalystConfig()
         # Configurable observation threshold for L2 AI analysis trigger.
         # Only overrides config.l2_min_observations when explicitly provided.
@@ -184,12 +197,8 @@ class AnalystAgent:
         if min_observations_for_ai is not None:
             self.config.l2_min_observations = min_observations_for_ai
         self._min_observations_for_ai: int = self.config.l2_min_observations
-        self.bus = message_bus
         self._ollama = ollama_client
         self._learning_tier_gate = learning_tier_gate
-        self._audit_callback = audit_callback
-        self.state = AgentState.INITIALIZING
-        self._lock = threading.Lock()
 
         # Trade records / 交易记录
         self._records: List[TradeRecord] = []
@@ -225,16 +234,15 @@ class AnalystAgent:
         }
 
     # ── Lifecycle / 生命周期 ──
+    # pause() inherited from BaseAgent. start/stop override to preserve info log.
+    # pause() 繼承自 BaseAgent；start/stop 覆蓋以保留 info log。
 
     def start(self) -> None:
-        self.state = AgentState.RUNNING
+        super().start()
         logger.info("AnalystAgent started / 分析师代理已启动")
 
-    def pause(self) -> None:
-        self.state = AgentState.PAUSED
-
     def stop(self) -> None:
-        self.state = AgentState.STOPPED
+        super().stop()
         logger.info("AnalystAgent stopped / 分析师代理已停止")
 
     # ── Message Handler / 消息处理 ──
@@ -650,7 +658,9 @@ class AnalystAgent:
             self._stats["l2_analyses"] += 1
 
         # Try AI analysis first / 先尝试 AI 分析
-        if self._ollama and self._ollama.is_available():
+        # E5-P1-4: Ollama availability check routed via llm_call_wrapper.
+        # E5-P1-4：Ollama 可用性檢查統一走 llm_call_wrapper。
+        if ollama_is_available(self._ollama):
             try:
                 insight = self._ai_pattern_analysis()
                 if insight:
@@ -684,7 +694,11 @@ class AnalystAgent:
             '"regime_strategy_matrix": {"regime": {"strategy": win_rate}}}'
         )
 
-        response = self._ollama.generate(summary, system=system, temperature=0.3, max_tokens=1024, think=True)
+        # E5-P1-4: routed via llm_call_wrapper.call_ollama_generate (identical defaults).
+        # E5-P1-4：通過 llm_call_wrapper.call_ollama_generate（默認參數完全一致）。
+        response = call_ollama_generate(
+            self._ollama, summary, system=system, temperature=0.3, max_tokens=1024, think=True,
+        )
 
         if not response.success:
             return None
@@ -796,13 +810,8 @@ class AnalystAgent:
         return insight
 
     # ── Audit / 审计 ──
-
-    def _audit(self, event_type: str, data: Any) -> None:
-        if self._audit_callback:
-            try:
-                self._audit_callback(f"analyst_{event_type}", data)
-            except Exception as e:
-                logger.debug("Audit callback error: %s", e)
+    # _audit() inherited from BaseAgent (prefixes event with role.value = "analyst").
+    # _audit() 繼承自 BaseAgent（前綴為 role.value = "analyst"）。
 
     # ── Status / 状态 ──
 

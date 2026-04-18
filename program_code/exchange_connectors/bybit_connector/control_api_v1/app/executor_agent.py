@@ -42,6 +42,7 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
 
+from .base_agent import BaseAgent
 from .multi_agent_framework import (
     AgentMessage,
     AgentRole,
@@ -114,14 +115,19 @@ class ExecutorConfig:
 # ExecutorAgent / 执行者代理
 # ═══════════════════════════════════════════════════════════════════════════════
 
-class ExecutorAgent:
+class ExecutorAgent(BaseAgent):
     """EX-06 §6 — Order execution wrapper with quality feedback.
 
     Only executes Guardian-approved intents. Provides execution quality metrics
     (slippage, fill time) back to the system.
 
     仅执行 Guardian 批准的 intent。提供执行质量指标反馈。
+
+    Inherits BaseAgent for shared lifecycle + audit skeleton (E5-P1-4).
+    繼承 BaseAgent 共享生命週期 + 審計骨架（E5-P1-4）。
     """
+
+    role = AgentRole.EXECUTOR
 
     def __init__(
         self,
@@ -141,15 +147,17 @@ class ExecutorAgent:
         governance_hub：若提供，執行訂單前會先調用 acquire_lease()。
                         這強制落實根原則 3：AI 輸出不等於即時命令。
         """
+        super().__init__(
+            role=AgentRole.EXECUTOR,
+            message_bus=message_bus,
+            audit_callback=audit_callback,
+            cost_tracker=None,  # Executor does not invoke LLMs.
+        )
         self.config = config or ExecutorConfig()
-        self.bus = message_bus
         self._paper_engine = paper_engine
-        self._audit_callback = audit_callback
         # GovernanceHub for Decision Lease — principle 3 enforcement
         # GovernanceHub 用於 Decision Lease 申請，落實根原則 3
         self._governance_hub = governance_hub
-        self.state = AgentState.INITIALIZING
-        self._lock = threading.Lock()
 
         # Conditional order callback (Batch 11: exchange stop-loss orders)
         # 条件单回调（Batch 11：交易所止损单）
@@ -177,16 +185,15 @@ class ExecutorAgent:
         }
 
     # ── Lifecycle / 生命周期 ──
+    # pause() inherited from BaseAgent. start/stop override to preserve info log.
+    # pause() 繼承自 BaseAgent；start/stop 覆蓋以保留 info log。
 
     def start(self) -> None:
-        self.state = AgentState.RUNNING
+        super().start()
         logger.info("ExecutorAgent started / 执行者代理已启动")
 
-    def pause(self) -> None:
-        self.state = AgentState.PAUSED
-
     def stop(self) -> None:
-        self.state = AgentState.STOPPED
+        super().stop()
         logger.info("ExecutorAgent stopped / 执行者代理已停止")
 
     # ── Injection / 注入 ──
@@ -600,13 +607,8 @@ class ExecutorAgent:
         self._audit("execution_report", report.to_dict())
 
     # ── Audit / 审计 ──
-
-    def _audit(self, event_type: str, data: Any) -> None:
-        if self._audit_callback:
-            try:
-                self._audit_callback(f"executor_{event_type}", data)
-            except Exception as e:
-                logger.debug("Audit callback error: %s", e)
+    # _audit() inherited from BaseAgent (prefixes event with role.value = "executor").
+    # _audit() 繼承自 BaseAgent（前綴為 role.value = "executor"）。
 
     # ── Status / 状态 ──
 
