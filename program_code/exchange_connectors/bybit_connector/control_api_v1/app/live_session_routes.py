@@ -902,6 +902,8 @@ async def get_live_positions(
     if rc is not None:
         try:
             positions = rc.get_positions("linear")
+            from .strategy_ai_routes import _attach_owner_strategy  # noqa: PLC0415
+            positions = _attach_owner_strategy(positions, engine="live")
             return _live_response({
                 "source": "rust_engine",
                 "positions": positions,
@@ -911,6 +913,8 @@ async def get_live_positions(
         except Exception as e:
             logger.warning("Rust positions fetch failed for live endpoint: %s", e)
     # Fallback: engine internal state / 降級：引擎內部狀態
+    # paper_state positions already carry owner_strategy natively; no enrichment needed.
+    # paper_state 倉位原生帶 owner_strategy，無需額外 enrichment。
     try:
         state = await _ipc_command("get_paper_state", {"engine": "live"})
     except HTTPException:

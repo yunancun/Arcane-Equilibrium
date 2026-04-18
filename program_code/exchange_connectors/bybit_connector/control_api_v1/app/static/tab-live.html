@@ -766,7 +766,12 @@ async function loadDashboardData() {
         realizedPnl += cumPnl;
         const symRaw = p.symbol || '';
         const sym = ocEsc(symRaw);
-        const strat = _liveStratMap[symRaw] || '--';
+        // Prefer authoritative owner_strategy injected by backend from Rust paper_state
+        // (bybit_sync / orphan_adopted / orphan_frozen / DUST_FROZEN / strategy names).
+        // Fallback to fills-derived map (may miss low-turnover strategies).
+        // 優先讀後端從 Rust paper_state 注入的 owner_strategy（權威歸屬）。
+        // 降級到 fills 反推映射（低週轉策略可能漏）。
+        const strat = p.owner_strategy || _liveStratMap[symRaw] || '--';
         return `<tr>
           <td><strong>${sym}</strong></td>
           <td style="font-size:11px">${ocEsc(strat)}</td>

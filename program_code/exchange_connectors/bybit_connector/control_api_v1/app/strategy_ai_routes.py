@@ -169,6 +169,69 @@ async def get_demo_balance(actor: base.AuthenticatedActor = Depends(base.current
     })
 
 
+def _engine_owner_strategy_map(engine: str) -> dict[str, str]:
+    """Build symbol → owner_strategy map from the engine's paper_state snapshot.
+    Authoritative attribution lives in Rust paper_state.PaperPosition.owner_strategy
+    (bybit_sync / orphan_adopted / orphan_frozen / DUST_FROZEN / strategy names).
+    Returns {} on missing / stale snapshot — caller falls back to fills-derived map.
+
+    從引擎 paper_state 快照建 symbol→owner_strategy 映射。權威歸屬源自 Rust
+    paper_state.PaperPosition.owner_strategy（bybit_sync / orphan_adopted /
+    orphan_frozen / DUST_FROZEN / 策略名）。快照缺失或過期時返回空 dict，
+    呼叫端回退到 fills 反推映射。
+    """
+    try:
+        from .paper_trading_routes import get_rust_reader  # noqa: PLC0415
+        reader = get_rust_reader()
+        # Gate on freshness — get_paper_state itself does not check 60s threshold,
+        # so a stale snapshot could attach an obsolete owner_strategy after an
+        # orphan-adopt handoff or close-and-reopen. Fall through to fills map when stale.
+        # 守門新鮮度 — get_paper_state 本身不查 60s 閾值；快照過期時返回空，降級到 fills 映射。
+        if not reader.is_engine_available(engine):
+            return {}
+        state = reader.get_paper_state(engine=engine)
+    except Exception:
+        return {}
+    if not state:
+        return {}
+    positions = state.get("positions") or []
+    mapping: dict[str, str] = {}
+    if isinstance(positions, list):
+        for p in positions:
+            sym = p.get("symbol") if isinstance(p, dict) else None
+            owner = p.get("owner_strategy") if isinstance(p, dict) else None
+            if sym and owner:
+                mapping[sym] = owner
+    elif isinstance(positions, dict):
+        for sym, p in positions.items():
+            owner = p.get("owner_strategy") if isinstance(p, dict) else None
+            if sym and owner:
+                mapping[sym] = owner
+    return mapping
+
+
+def _attach_owner_strategy(positions: list, engine: str) -> list:
+    """Enrich each Bybit position dict with `owner_strategy` from engine paper_state.
+    No-op when position is not a dict or not found in the map (leaves as-is so the
+    GUI's fills-derived fallback still runs).
+    用引擎 paper_state 的 owner_strategy 豐富每筆 Bybit 倉位 dict。非 dict 或映射未命中時跳過
+    （保留 GUI fills 反推降級路徑）。
+    """
+    if not isinstance(positions, list) or not positions:
+        return positions
+    owner_map = _engine_owner_strategy_map(engine)
+    if not owner_map:
+        return positions
+    for p in positions:
+        if not isinstance(p, dict):
+            continue
+        sym = p.get("symbol")
+        owner = owner_map.get(sym) if sym else None
+        if owner:
+            p["owner_strategy"] = owner
+    return positions
+
+
 @phase2_router.get("/demo/positions")
 async def get_demo_positions(actor: base.AuthenticatedActor = Depends(base.current_actor)):
     """Get Bybit Demo open positions via PyO3 BybitClient / 通過 PyO3 獲取 Demo 持倉"""
@@ -177,6 +240,7 @@ async def get_demo_positions(actor: base.AuthenticatedActor = Depends(base.curre
         return _envelope({"enabled": False, "source": "rust_engine"})
     try:
         positions = rc.get_positions("linear")
+        positions = _attach_owner_strategy(positions, engine="demo")
         return _envelope({"source": "rust_engine", "list": positions, "count": len(positions)})
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Bybit positions fetch failed: {exc}")
