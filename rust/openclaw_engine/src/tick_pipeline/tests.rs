@@ -1936,3 +1936,60 @@ fn test_b2_cooldown_expiry_uses_stamped_window_not_base() {
         1_000_000 + 120_000
     ));
 }
+
+/// P1-7 A INTENT-WRITE-GAP-1 regression (2026-04-18). Direct contract test for
+/// `persist_intent` helper invoked from on_tick.rs:893 (exchange branch fix
+/// landed in the same commit). Pre-fix the exchange branch only persisted
+/// verdicts (line 837), leaving `trading.intents` empty for live/live_demo
+/// despite millions of Approved verdicts. The helper itself was never broken;
+/// the bug was a missing call site. This test guards the message shape the
+/// new caller depends on so a future refactor of TradingMsg::Intent doesn't
+/// silently break the audit lane again.
+/// P1-7 A INTENT-WRITE-GAP-1 回歸：on_tick.rs:893（exchange 分支修復）依賴的
+/// persist_intent 輔助方法的契約測試 — 守住 TradingMsg::Intent 訊息形狀
+/// 不被未來重構靜默破壞。
+#[test]
+fn test_persist_intent_helper_emits_trading_msg_intent_with_engine_mode() {
+    use crate::intent_processor::OrderIntent;
+    let intent = OrderIntent {
+        symbol: "ETHUSDT".into(),
+        is_long: false,
+        qty: 1.0e9, // sentinel — final_qty / approved_qty is what gets persisted
+        confidence: 0.83,
+        strategy: "ma_crossover".into(),
+        order_type: "market".into(),
+        limit_price: None,
+        confluence_score: None,
+        persistence_elapsed_ms: None,
+    };
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<crate::database::TradingMsg>(8);
+
+    super::on_tick_helpers::persist_intent(
+        &Some(tx),
+        "live_demo",
+        1_700_000_000_123,
+        &intent,
+        0.045, // post-rounding final_qty (NOT the 1e9 sentinel)
+        2_500.0,
+        "live_demo",
+    );
+
+    let msg = rx.try_recv().expect("Intent must be enqueued");
+    match msg {
+        crate::database::TradingMsg::Intent {
+            engine_mode,
+            symbol,
+            side,
+            qty,
+            strategy_name,
+            ..
+        } => {
+            assert_eq!(engine_mode, "live_demo");
+            assert_eq!(symbol, "ETHUSDT");
+            assert_eq!(side, "Sell");
+            assert!((qty - 0.045).abs() < 1e-12, "qty must be sized final_qty, not 1e9 sentinel");
+            assert_eq!(strategy_name, "ma_crossover");
+        }
+        other => panic!("expected TradingMsg::Intent, got {:?}", other),
+    }
+}
