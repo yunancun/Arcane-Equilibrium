@@ -16,13 +16,14 @@
 //!
 //! Spec: docs/references/2026-04-15--edge_predictor_spec.md v1.4 §3.3 + V017 migration.
 
+use super::batch_insert::exec_single_insert;
 use super::pool::DbPool;
 use super::DecisionFeatureMsg;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, info, warn};
+use tracing::{info, warn};
 
 /// Run the decision feature writer task.
 /// 運行決策特徵寫入器任務。
@@ -70,16 +71,13 @@ pub async fn run_decision_feature_writer(
     info!("decision_feature_writer stopped / 決策特徵寫入器已停止");
 }
 
-/// INSERT decision feature snapshots to PG.
-/// 插入決策特徵快照到 PG。
+/// INSERT decision feature snapshots to PG via unified `exec_single_insert` helper.
+/// 通過統一 `exec_single_insert` 輔助函式插入決策特徵快照到 PG。
 async fn flush_features(pool: &DbPool, pending: &mut HashMap<String, DecisionFeatureMsg>) {
-    let pg = match pool.get() {
-        Some(p) => p,
-        None => {
-            pending.clear();
-            return;
-        }
-    };
+    if !pool.is_available() {
+        pending.clear();
+        return;
+    }
 
     for (_, feat) in pending.drain() {
         // DB-RUN-6: reject epoch-0 writes — same policy as context_writer.
@@ -114,7 +112,7 @@ async fn flush_features(pool: &DbPool, pending: &mut HashMap<String, DecisionFea
         // label_* columns are intentionally omitted: they default to NULL/FALSE
         // per V017 DDL and are populated later by edge_label_backfill.py.
         // label_* 欄位故意省略：V017 DDL 預設 NULL/FALSE，稍後由 edge_label_backfill.py 回填。
-        let result = sqlx::query(
+        let query = sqlx::query(
             "INSERT INTO learning.decision_features \
              (context_id, ts, engine_mode, strategy_name, symbol, side, \
               feature_schema_version, feature_schema_hash, feature_definition_hash, \
@@ -122,35 +120,18 @@ async fn flush_features(pool: &DbPool, pending: &mut HashMap<String, DecisionFea
              VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) \
              ON CONFLICT (context_id) DO NOTHING",
         )
-        .bind(&feat.context_id)
+        .bind(feat.context_id.clone())
         .bind(ts)
-        .bind(&feat.engine_mode)
-        .bind(&feat.strategy_name)
-        .bind(&feat.symbol)
+        .bind(feat.engine_mode.clone())
+        .bind(feat.strategy_name.clone())
+        .bind(feat.symbol.clone())
         .bind(feat.side as i16) // SMALLINT
-        .bind(&feat.feature_schema_version)
-        .bind(&feat.feature_schema_hash)
-        .bind(&feat.feature_definition_hash)
-        .bind(&features_value)
-        .execute(pg)
-        .await;
+        .bind(feat.feature_schema_version.clone())
+        .bind(feat.feature_schema_hash.clone())
+        .bind(feat.feature_definition_hash.clone())
+        .bind(features_value);
 
-        match result {
-            Ok(_) => {
-                pool.record_success();
-                debug!(
-                    ctx_id = %feat.context_id, strategy = %feat.strategy_name, symbol = %feat.symbol,
-                    "decision feature written / 決策特徵已寫入"
-                );
-            }
-            Err(e) => {
-                let _ = pool.record_failure();
-                warn!(
-                    ctx_id = %feat.context_id, error = %e,
-                    "decision feature write failed / 決策特徵寫入失敗"
-                );
-            }
-        }
+        let _ = exec_single_insert(pool, "learning.decision_features", query).await;
     }
 }
 

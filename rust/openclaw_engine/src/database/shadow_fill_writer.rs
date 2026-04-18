@@ -26,13 +26,14 @@
 //!
 //! Spec: docs/references/2026-04-15--edge_predictor_spec.md v1.4 §7.3 / V017 migration.
 
+use super::batch_insert::exec_single_insert;
 use super::pool::DbPool;
 use super::ShadowFillMsg;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, info, warn};
+use tracing::{info, warn};
 
 /// Run the shadow-fill writer task.
 /// 運行 shadow-fill 寫入器任務。
@@ -89,13 +90,10 @@ pub async fn run_shadow_fill_writer(
 /// 寫入 shadow-fill 列；非 paper 在 writer 內亦被拒絕（warn + skip），
 /// 是 DB CHECK 之外的第二道防線。
 async fn flush_shadow_fills(pool: &DbPool, pending: &mut HashMap<String, ShadowFillMsg>) {
-    let pg = match pool.get() {
-        Some(p) => p,
-        None => {
-            pending.clear();
-            return;
-        }
-    };
+    if !pool.is_available() {
+        pending.clear();
+        return;
+    }
 
     for (_, sf) in pending.drain() {
         // DB-RUN-6: reject epoch-0 writes — same policy as decision_feature_writer.
@@ -143,43 +141,26 @@ async fn flush_shadow_fills(pool: &DbPool, pending: &mut HashMap<String, ShadowF
         // synthetic_* columns left NULL — a later close-time pass fills them.
         // close_tag uses the V017 DDL default ('shadow_fill:epsilon_greedy').
         // synthetic_* 列留 NULL；close_tag 走 V017 預設值。
-        let result = sqlx::query(
+        let query = sqlx::query(
             "INSERT INTO learning.decision_shadow_fills \
              (context_id, ts, engine_mode, strategy_name, symbol, side, \
               features_jsonb, predicted_q10, predicted_q50, predicted_q90, \
               cost_bps_at_open) \
              VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)",
         )
-        .bind(&sf.context_id)
+        .bind(sf.context_id.clone())
         .bind(ts)
-        .bind(&sf.engine_mode)
-        .bind(&sf.strategy_name)
-        .bind(&sf.symbol)
+        .bind(sf.engine_mode.clone())
+        .bind(sf.strategy_name.clone())
+        .bind(sf.symbol.clone())
         .bind(sf.side as i16) // SMALLINT
-        .bind(&features_value)
+        .bind(features_value)
         .bind(sf.predicted_q10 as f64)
         .bind(sf.predicted_q50 as f64)
         .bind(sf.predicted_q90 as f64)
-        .bind(sf.cost_bps_at_open)
-        .execute(pg)
-        .await;
+        .bind(sf.cost_bps_at_open);
 
-        match result {
-            Ok(_) => {
-                pool.record_success();
-                debug!(
-                    ctx_id = %sf.context_id, strategy = %sf.strategy_name, symbol = %sf.symbol,
-                    "shadow_fill written / shadow-fill 已寫入"
-                );
-            }
-            Err(e) => {
-                let _ = pool.record_failure();
-                warn!(
-                    ctx_id = %sf.context_id, error = %e,
-                    "shadow_fill write failed / shadow-fill 寫入失敗"
-                );
-            }
-        }
+        let _ = exec_single_insert(pool, "learning.decision_shadow_fills", query).await;
     }
 }
 

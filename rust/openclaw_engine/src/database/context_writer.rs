@@ -7,13 +7,14 @@
 //! MODULE_NOTE (中): DecisionContextMsg 通道的異步消費者。每條消息代表決策時刻的完整
 //!   市場狀態快照。寫入 PG 作為核心 ML 訓練數據源。按 context_id 去重。
 
+use super::batch_insert::exec_single_insert;
 use super::pool::DbPool;
 use super::DecisionContextMsg;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, info, warn};
+use tracing::{info, warn};
 
 /// Run the decision context writer task.
 /// 運行決策上下文寫入器任務。
@@ -60,16 +61,18 @@ pub async fn run_context_writer(
     info!("context_writer stopped / 決策上下文寫入器已停止");
 }
 
-/// INSERT decision context snapshots to PG.
-/// 插入決策上下文快照到 PG。
+/// INSERT decision context snapshots to PG via `exec_single_insert`.
+/// Per-row semantics (epoch-0 reject, JSONB bind, V015 engine_mode) remain in
+/// this writer — the helper only owns connection acquisition, fail-soft counter,
+/// and uniform log tagging.
+/// 透過 `exec_single_insert` 將決策上下文逐行寫入 PG。每行的語意（拒絕 epoch-0、
+/// JSONB bind、V015 engine_mode）仍留在本 writer；helper 只負責連線取得、失敗
+/// 軟計數、統一 log 標籤。
 async fn flush_contexts(pool: &DbPool, pending: &mut HashMap<String, DecisionContextMsg>) {
-    let pg = match pool.get() {
-        Some(p) => p,
-        None => {
-            pending.clear();
-            return;
-        }
-    };
+    if !pool.is_available() {
+        pending.clear();
+        return;
+    }
 
     for (_, ctx) in pending.drain() {
         // DB-RUN-6: Reject epoch-0 (ts_ms == 0) writes — they're a symptom of
@@ -94,7 +97,7 @@ async fn flush_contexts(pool: &DbPool, pending: &mut HashMap<String, DecisionCon
         // linucb_arm_id / linucb_confidence_bound）與 V003 新聞欄位
         // （news_severity / hours_since_last_major_news）。尚未接線的 producer
         // 傳 None → 寫入 SQL NULL（fail-closed 安全）。
-        let result = sqlx::query(
+        let query = sqlx::query(
             "INSERT INTO trading.decision_context_snapshots \
              (ts, ts_ms, context_id, decision_type, symbol, strategy_name, \
               last_price, spread_bps, regime_5m, \
@@ -111,28 +114,28 @@ async fn flush_contexts(pool: &DbPool, pending: &mut HashMap<String, DecisionCon
         )
         .bind(ts)
         .bind(ctx.ts_ms as i64)
-        .bind(&ctx.context_id)
-        .bind(&ctx.decision_type)
-        .bind(&ctx.symbol)
-        .bind(&ctx.strategy_name)
+        .bind(ctx.context_id.clone())
+        .bind(ctx.decision_type.clone())
+        .bind(ctx.symbol.clone())
+        .bind(ctx.strategy_name.clone())
         .bind(super::sanitize_f64(ctx.last_price).map(|v| v as f32))
         .bind(super::sanitize_f64(ctx.spread_bps).map(|v| v as f32))
-        .bind(&ctx.regime_5m)
+        .bind(ctx.regime_5m.clone())
         .bind(super::sanitize_f64(ctx.ind_5m_adx).map(|v| v as f32))
         .bind(super::sanitize_f64(ctx.ind_5m_rsi).map(|v| v as f32))
         .bind(super::sanitize_f64(ctx.ind_5m_atr_14_pct).map(|v| v as f32))
-        .bind(&ctx.position_side)
+        .bind(ctx.position_side.clone())
         .bind(super::sanitize_f64(ctx.position_qty).map(|v| v as f32))
         .bind(super::sanitize_f64(ctx.total_equity).map(|v| v as f32))
         .bind(super::sanitize_f64(ctx.drawdown_pct).map(|v| v as f32))
-        .bind(&ctx.indicators_snapshot)
-        .bind(&ctx.position_detail)
-        .bind(&ctx.decision_payload)
+        .bind(ctx.indicators_snapshot.clone())
+        .bind(ctx.position_detail.clone())
+        .bind(ctx.decision_payload.clone())
         .bind(false) // outcome_backfilled = false initially
         // Phase 4 / V009 + V003 news columns (None → SQL NULL).
         // Phase 4 / V009 + V003 新聞欄位（None → SQL NULL）。
         .bind(ctx.claude_directive_id)
-        .bind(ctx.linucb_arm_id.as_deref())
+        .bind(ctx.linucb_arm_id.clone())
         .bind(ctx.linucb_confidence_bound.and_then(super::sanitize_f64))
         .bind(
             ctx.news_severity
@@ -143,20 +146,9 @@ async fn flush_contexts(pool: &DbPool, pending: &mut HashMap<String, DecisionCon
                 .and_then(super::sanitize_f64),
         )
         // V015: engine_mode / 引擎模式
-        .bind(ctx.engine_mode.as_str())
-        .execute(pg)
-        .await;
+        .bind(ctx.engine_mode.clone());
 
-        match result {
-            Ok(_) => {
-                pool.record_success();
-                debug!(ctx_id = %ctx.context_id, "context snapshot written / 上下文快照已寫入");
-            }
-            Err(e) => {
-                let _ = pool.record_failure();
-                warn!(ctx_id = %ctx.context_id, error = %e, "context write failed / 上下文寫入失敗");
-            }
-        }
+        let _ = exec_single_insert(pool, "trading.decision_context_snapshots", query).await;
     }
 }
 
