@@ -1,7 +1,7 @@
 # OpenClaw TODO — 工作清單
 
 **最後更新**：2026-04-18 22:30 local
-**Engine**：PID 2217378 · binary mtime 20:13 → 含 P0-6 永久修復 + LIVE-GATE-BINDING-1 + DYNAMIC-RISK-1 + IPC-SCAN-1c
+**Engine**：PID 2390582 · binary mtime 2026-04-18 23:54 → 含 P0-6 永久修復 + P1-7 A INTENT-WRITE-GAP-1（exchange 分支 persist_intent）+ P1-17 JS Winsorize + LIVE-GATE-BINDING-1 + DYNAMIC-RISK-1 + IPC-SCAN-1c
 **Python uvicorn**：自 04-16 未重啟 → **下次重啟即生效 P0-12 LIVE-GATE-FALLBACK-1**
   - 重啟後驗證：(1) GUI Close All Positions response 應含 `rest_fallback:true, errors:null` (2) engine.log 出現 `LIVE-GATE-FALLBACK-1: IPC close_all_positions channel unavailable ... (REST fallback — live pipeline not authorized)` (3) `python3 -c "from openclaw_core import BybitClient; print([(p['symbol'], p.get('size')) for p in BybitClient(environment='live_demo').get_positions('linear') if float(p.get('size') or 0) > 0])"` 應為空
 **測試基準線**：Rust engine lib **1454** / core 380 / e2e 35 / reconciler_e2e 19 · Python **2898** passed / ml_training 182 passed
@@ -66,7 +66,7 @@ git status && git log --oneline -5
 ### Phase 1a · W23 Day 4-7（Step 0 後立即啟動，不阻於 7 維）
 
 **軌道 2 P1-7 解阻塞（完全不阻塞，優先推進）**：
-- [x] **A ✅ 2026-04-18 commit 2a36a3f**：Rust 接 `trading.intents` 持久化。RCA：DEDUP-PY-RUST 後 exchange 分支結構性缺 `persist_intent` 呼叫（Paper 走 `process_with_features` → `IntentResult{submitted}`，Demo/Live 走 `process_gates_only_with_features` → `ExchangeGateResult` 不含 submitted；on_tick.rs:986 `if result.submitted` guard 對 exchange 分支結構不可達）；`persist_verdict` 在 837 unconditional 而 `persist_intent` 完全沒呼叫 → 7d × 三窗口 `trading.intents` live/live_demo = 0 vs Approved verdicts 4.9M。修復：on_tick.rs:879-902 在 exchange 分支 `if gate.approved` 內補上 `persist_intent(em, ts_ms, intent, final_qty, last_price, em)` + `stats.total_intents += 1`。+1 單測 + cargo test 1498/0。**部署待**（restart_all.sh --rebuild）。
+- [x] **A ✅ 2026-04-18 commit 2a36a3f · 2026-04-19 部署+實測驗證**：Rust 接 `trading.intents` 持久化。RCA：DEDUP-PY-RUST 後 exchange 分支結構性缺 `persist_intent` 呼叫（Paper 走 `process_with_features` → `IntentResult{submitted}`，Demo/Live 走 `process_gates_only_with_features` → `ExchangeGateResult` 不含 submitted；on_tick.rs:986 `if result.submitted` guard 對 exchange 分支結構不可達）；`persist_verdict` 在 837 unconditional 而 `persist_intent` 完全沒呼叫 → 7d × 三窗口 `trading.intents` live/live_demo = 0 vs Approved verdicts 4.9M。修復：on_tick.rs:879-902 在 exchange 分支 `if gate.approved` 內補上 `persist_intent(em, ts_ms, intent, final_qty, last_price, em)` + `stats.total_intents += 1`。+1 單測 + cargo test 1498/0。**驗收**：binary mtime 2026-04-18 23:54 含 fix；engine PID 2390582 啟動 ~31 min 內 demo 側 **29 intents / 32 Approved verdicts = 90.6% ratio** ✅（DB 查核 2026-04-19 00:27 local）；29 intents 與 engine 內部 `total_intents=29` 完全吻合 → fix 走到預期 code path。live_demo 驗證 **pending**（operator 修 T0 bypass bug 後 pipeline 已關，需重啟並簽新 `authorization.json` 才能觀察首個 Approved→intent 形成；非 P0-6 本身問題）。
 - [x] **B ✅ 2026-04-19 commit 23b14ef**：`edge_estimator_scheduler.py` daemon thread 每小時跑 demo + live_demo 模式 JS estimator 寫入 `settings/edge_estimates*.json`；`edge_estimator_routes.py` 提供 `POST /api/v1/edge-estimator/trigger` (Operator-only) + `GET /api/v1/edge-estimator/status`；main.py startup hook fail-open。**手動觸發驗證**：live_demo n_cells=28 grand_mean **−8.46 bps**（自 −14.97 改善）；demo n_cells=0（P1-15 phantom 清空 + 死循環未產真 edge）。**僅寫檔，未 bind cost_gate**（待 P1-16 修 + grand_mean>−50 bps + ≥2 策略 shrunk_bps>0）。同 commit 含 D19 assertion 移除（event_consumer/mod.rs:92 防 PAPER-DISABLE-1+MARKET-KLINES-STALE-1 後 panic）。
 - [ ] **C** `run_training_pipeline.py` 首跑 grid_trading（用 decision_features 17 維做 entry-decision 模型，不等 exit_features）→ 產 `models/demo/grid_trading_entry_policy_v20260425.onnx`
 
@@ -161,7 +161,7 @@ git status && git log --oneline -5
 
 ### P1-6 · DEMO-BYBIT-SYNC-ORPHAN-1 — bybit_sync 倉位策略動不了 + Demo 死循環殘留
 - **現象**：6 個 owner_strategy=bybit_sync（DOTUSDT/NEARUSDT/BLESSUSDT/ENAUSDT/AAVEUSDT/BTCUSDT）非本輪策略開
-- **死循環機制**（P0-6 Live_Demo 已解但 Demo 殘留）：correlated exposure 70% > limit 65% → 0 new opens → 0 fills → seeded positions 無活躍策略 emit Close → exposure 不降 → 永遠超限。`risk_gate: correlated exposure 69-70% >= limit 65%` engine.log 證據；Guardian 17.8k Rejected verdicts `direction_conflict`
+- **死循環機制**（Demo 殘留；Live_Demo 因 T0 bypass 關閉後暫不適用）：correlated exposure 70% > limit 65% → 0 new opens → 0 fills → seeded positions 無活躍策略 emit Close → exposure 不降 → 永遠超限。`risk_gate: correlated exposure 69-70% >= limit 65%` engine.log 證據；Guardian 17.8k Rejected verdicts `direction_conflict`
 - **狀態**：P1-8 FUP `retriage_synthetic_owner` tick-level 已自主接管中，觀察一週（起算 2026-04-17）
 - **若不消化**（一週後仍卡）後備方案：
   - 方案 A：查 `grep ORPHAN /tmp/openclaw/engine.log` + ORPHAN-ADOPT-1 Phase 2A adopt logic 是否處理 bybit_sync 來源
@@ -285,6 +285,12 @@ git status && git log --oneline -5
 - [ ] **E5-P1-CANCEL-P1-6** — `h0_gate.py` vs `paper_live_gate.py` pipeline 抽象經 sub-agent 實測 0 真實共用，cancel。未來出現第三個類似 gate 時再重開評估（見 2026-04-19 CHANGELOG Wave 1 章節）。
 - [ ] **E5-P1-CANCEL-P1-7** — `PipelineCommand` dispatch-match 已在 prior pass 從 `tick_pipeline/` 遷至 `event_consumer/handlers/`（由 P1-3 進一步 by-domain 拆完），原任務前提過時 cancel。真正候選：`tick_pipeline/commands.rs` 836 LOC helper impl 切 `commands/orders.rs` / `commands/governor.rs` / `commands/close.rs` 等 topical submodules（新排 E5-P2-X 非本 E5-P1-7）。
 - [ ] **E5-P1-2-DEFERRED** — `rust/openclaw_engine/src/main.rs` bootstrap 拆分依 E5 audit 建議「觀察穩定性再拆」（P0-9 停電 RCA 後唯一未重組模塊）暫不派；operator 可在 Live 對後覆蓋。
+- [ ] **E5-P2-4b** — 3 檔超 §九 1200 LOC 硬上限（`strategies/bb_breakout.rs` 1265 / `strategies/grid_trading.rs` 1434 / `strategies/mod.rs` 1442），pre-existing tech debt（非 E5-P2-4 新增）；分檔切：bb_breakout 核心邏輯 vs 進出場工具 vs helpers；grid_trading 網格佈局 vs 持倉管理；strategies/mod.rs registry/factory 拆 `strategies/registry.rs`。(2026-04-19 E5-P2-4 E2 nit 追蹤 a79a2607845253fdb)
+- [ ] **E5-P2-2-CLOSED**（資訊）— onnx_inference consolidate 優化前提已由 EDGE-P3-1 Phase B Step 7b `OrtPredictor.input_name: String` load-time cache 滿足；`ml/model_manager.rs` 仍是 stub，待 ort 真接線後若出現第二個 session 再評；audit §九 blueprint 對應行建議下修或刪除。(2026-04-19 Wave 2 CANCEL evidence)
+- [ ] **E5-P2-6-DEFERRED** — `tick_pipeline/fill_context_builder.rs` 抽取暫延，等 EXIT-FEATURES-TABLE-1 operator WIP 落地後重新評估衝突面。(2026-04-19 defer evidence)
+- [ ] **E5-P2-1-DEFERRED** — PipelineCommand enum reorg 暫延，與 P2-6 共爭 tick_pipeline/mod.rs；同等待 EXIT-FEATURES-TABLE-1 落地。
+- [ ] **E5-P2-7-CLOSED**（資訊）— claude_teacher/directive_handler 抽取 cancel：R6 cohesion invariant + FIX-08 fixtures 已拆 + denylist/helpers/apply_* 1-to-1 耦合無外部消費者；未來新增第 5 種 directive 或跨 directive 共享 veto 邏輯時重開。
+- [ ] **E5-P2-8-CLOSED**（資訊）— Python learning_batch_writer cancel：control_api 唯 1 個 `INSERT INTO learning.*`，ml_training 11 writer 各寫 distinct schema 無共用 row shape，真實批寫重複已由 E5-P0-4 Rust `batch_insert.rs` 處理。
 
 ---
 
