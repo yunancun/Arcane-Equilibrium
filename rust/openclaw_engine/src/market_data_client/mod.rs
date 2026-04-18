@@ -17,9 +17,9 @@ mod parsers;
 pub mod types;
 
 pub use types::{
-    AdlAlert, DeliveryPrice, FundingRecord, InsuranceRecord, KlineBar, LongShortRecord,
-    OpenInterestRecord, OrderbookSnapshot, PriceLimit, RecentTrade, RiskLimitTier, ServerTime,
-    TickerInfo, VolatilityRecord,
+    FundingRecord, InsuranceRecord, KlineBar, LongShortRecord, OpenInterestRecord,
+    OrderbookSnapshot, PriceLimit, RecentTrade, RiskLimitTier, ServerTime, TickerInfo,
+    VolatilityRecord,
 };
 
 use crate::bybit_rest_client::{BybitRestClient, BybitResult};
@@ -116,76 +116,6 @@ impl MarketDataClient {
         let resp = self
             .client
             .get_checked("/v5/market/kline", &param_refs)
-            .await?;
-        parse_kline_list(&resp.result)
-    }
-
-    /// Get mark price klines — needed for funding arb (mark vs last price divergence).
-    /// 獲取標記價格 K 線 — 用於資金費率套利（標記價格 vs 最新價格偏離）。
-    ///
-    /// GET /v5/market/mark-price-kline
-    pub async fn get_mark_price_klines(
-        &self,
-        category: &str,
-        symbol: &str,
-        interval: &str,
-        start: Option<u64>,
-        end: Option<u64>,
-        limit: Option<u32>,
-    ) -> BybitResult<Vec<KlineBar>> {
-        debug!(
-            symbol = symbol,
-            "fetching mark price klines / 獲取標記價格 K 線"
-        );
-        let mut params: Vec<(&str, String)> = vec![
-            ("category", category.to_string()),
-            ("symbol", symbol.to_string()),
-            ("interval", interval.to_string()),
-        ];
-        if let Some(s) = start {
-            params.push(("start", s.to_string()));
-        }
-        if let Some(e) = end {
-            params.push(("end", e.to_string()));
-        }
-        if let Some(l) = limit {
-            params.push(("limit", l.to_string()));
-        }
-        let param_refs: Vec<(&str, &str)> = params.iter().map(|(k, v)| (*k, v.as_str())).collect();
-        let resp = self
-            .client
-            .get_checked("/v5/market/mark-price-kline", &param_refs)
-            .await?;
-        parse_kline_list(&resp.result)
-    }
-
-    /// Get premium index klines — for funding rate prediction.
-    /// 獲取溢價指數 K 線 — 用於資金費率預測。
-    ///
-    /// GET /v5/market/premium-index-price-kline
-    pub async fn get_premium_index_klines(
-        &self,
-        category: &str,
-        symbol: &str,
-        interval: &str,
-        limit: Option<u32>,
-    ) -> BybitResult<Vec<KlineBar>> {
-        debug!(
-            symbol = symbol,
-            "fetching premium index klines / 獲取溢價指數 K 線"
-        );
-        let mut params: Vec<(&str, String)> = vec![
-            ("category", category.to_string()),
-            ("symbol", symbol.to_string()),
-            ("interval", interval.to_string()),
-        ];
-        if let Some(l) = limit {
-            params.push(("limit", l.to_string()));
-        }
-        let param_refs: Vec<(&str, &str)> = params.iter().map(|(k, v)| (*k, v.as_str())).collect();
-        let resp = self
-            .client
-            .get_checked("/v5/market/premium-index-price-kline", &param_refs)
             .await?;
         parse_kline_list(&resp.result)
     }
@@ -464,60 +394,6 @@ impl MarketDataClient {
     }
 
     // -----------------------------------------------------------------------
-    // ADL alert / 自動減倉警報
-    // -----------------------------------------------------------------------
-
-    /// Get ADL ranking alerts — early warning of auto-deleveraging risk.
-    /// 獲取 ADL 排名警報 — 自動減倉風險預警。
-    ///
-    /// GET /v5/market/adl-alert
-    ///
-    /// FIX-58/BB-A7: This public REST endpoint may not exist in Bybit V5.
-    /// ADL info is typically obtained via private WS `position` topic's
-    /// `adlRankIndicator` field. Retained as stub — will silently fail
-    /// (into_result handles retCode != 0). Not called anywhere.
-    /// FIX-58/BB-A7：此公開 REST 端點在 Bybit V5 中可能不存在。
-    /// ADL 資訊通常透過私有 WS `position` topic 的 `adlRankIndicator` 取得。
-    /// 保留為 stub — 靜默失敗（into_result 處理 retCode != 0）。全 codebase 無調用。
-    #[allow(dead_code)]
-    pub async fn get_adl_alert(
-        &self,
-        category: &str,
-        symbol: Option<&str>,
-    ) -> BybitResult<Vec<AdlAlert>> {
-        debug!(category = category, "fetching ADL alerts / 獲取 ADL 警報");
-        let mut params: Vec<(&str, &str)> = vec![("category", category)];
-        if let Some(sym) = symbol {
-            params.push(("symbol", sym));
-        }
-        let resp = self
-            .client
-            .get_checked("/v5/market/adl-alert", &params)
-            .await?;
-        let list = resp
-            .result
-            .get("list")
-            .and_then(|v| v.as_array())
-            .cloned()
-            .unwrap_or_default();
-        let mut alerts = Vec::with_capacity(list.len());
-        for item in &list {
-            alerts.push(AdlAlert {
-                symbol: parse_str(item, "symbol"),
-                side: parse_str(item, "side"),
-                adl_rank_indicator: item
-                    .get("adlRankIndicator")
-                    .and_then(|v| {
-                        v.as_i64()
-                            .or_else(|| v.as_str().and_then(|s| s.parse().ok()))
-                    })
-                    .unwrap_or(0) as i32,
-            });
-        }
-        Ok(alerts)
-    }
-
-    // -----------------------------------------------------------------------
     // Recent trades / 近期成交
     // -----------------------------------------------------------------------
 
@@ -606,97 +482,6 @@ impl MarketDataClient {
             });
         }
         Ok(records)
-    }
-
-    // -----------------------------------------------------------------------
-    // Delivery price / 交割價格
-    // -----------------------------------------------------------------------
-
-    /// Get futures delivery prices — for settlement analysis.
-    /// 獲取期貨交割價格 — 用於結算分析。
-    ///
-    /// GET /v5/market/delivery-price
-    pub async fn get_delivery_price(
-        &self,
-        category: &str,
-        symbol: Option<&str>,
-        limit: Option<u32>,
-    ) -> BybitResult<Vec<DeliveryPrice>> {
-        debug!(
-            category = category,
-            "fetching delivery prices / 獲取交割價格"
-        );
-        let mut params: Vec<(&str, String)> = vec![("category", category.to_string())];
-        if let Some(s) = symbol {
-            params.push(("symbol", s.to_string()));
-        }
-        if let Some(l) = limit {
-            params.push(("limit", l.to_string()));
-        }
-        let param_refs: Vec<(&str, &str)> = params.iter().map(|(k, v)| (*k, v.as_str())).collect();
-        let resp = self
-            .client
-            .get_checked("/v5/market/delivery-price", &param_refs)
-            .await?;
-        let list = resp
-            .result
-            .get("list")
-            .and_then(|v| v.as_array())
-            .cloned()
-            .unwrap_or_default();
-        let mut records = Vec::with_capacity(list.len());
-        for item in &list {
-            records.push(DeliveryPrice {
-                symbol: parse_str(item, "symbol"),
-                delivery_price: parse_str_f64(item, "deliveryPrice"),
-                delivery_time: parse_str(item, "deliveryTime"),
-            });
-        }
-        Ok(records)
-    }
-
-    // -----------------------------------------------------------------------
-    // Index price kline / 指數價格 K 線
-    // -----------------------------------------------------------------------
-
-    /// Get index price klines — index tracking for basis analysis.
-    /// 獲取指數價格 K 線 — 用於基差分析的指數追蹤。
-    ///
-    /// GET /v5/market/index-price-kline
-    pub async fn get_index_price_klines(
-        &self,
-        category: &str,
-        symbol: &str,
-        interval: &str,
-        start: Option<u64>,
-        end: Option<u64>,
-        limit: Option<u32>,
-    ) -> BybitResult<Vec<KlineBar>> {
-        debug!(
-            symbol = symbol,
-            interval = interval,
-            "fetching index price klines / 獲取指數價格 K 線"
-        );
-        let mut params: Vec<(&str, String)> = vec![
-            ("category", category.to_string()),
-            ("symbol", symbol.to_string()),
-            ("interval", interval.to_string()),
-        ];
-        if let Some(s) = start {
-            params.push(("start", s.to_string()));
-        }
-        if let Some(e) = end {
-            params.push(("end", e.to_string()));
-        }
-        if let Some(l) = limit {
-            params.push(("limit", l.to_string()));
-        }
-        let param_refs: Vec<(&str, &str)> = params.iter().map(|(k, v)| (*k, v.as_str())).collect();
-        let resp = self
-            .client
-            .get_checked("/v5/market/index-price-kline", &param_refs)
-            .await?;
-        parse_kline_list(&resp.result)
     }
 
     // -----------------------------------------------------------------------
