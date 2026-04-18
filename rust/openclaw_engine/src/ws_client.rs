@@ -8,6 +8,7 @@
 //!   將消息解析為 PriceEvent 並推送到 mpsc 通道。
 //!   指數退避重連，可配置基礎延遲。
 
+use crate::common::ws_backoff::BackoffConfig;
 use crate::config::ConfigManager;
 use futures_util::{SinkExt, StreamExt};
 use openclaw_types::{PriceEvent, PriceEventKind};
@@ -83,10 +84,16 @@ pub struct WsClient {
     topic_change_rx: Option<mpsc::UnboundedReceiver<WsTopicChange>>,
 }
 
-/// Maximum reconnect delay (ms) / 最大重連延遲
-const MAX_RECONNECT_DELAY_MS: u64 = 60_000;
-/// Backoff multiplier / 退避倍數
-const BACKOFF_FACTOR: u64 = 2;
+/// Shared reconnect backoff policy (public-WS profile).
+/// 公共 WS 共用的重連退避策略。
+///
+/// EN: Holds max-ms + multiplier + jitter pct. `base_ms` is intentionally NOT
+///     frozen here — it is read from `cfg.reconnect_delay_ms` on every loop
+///     iteration (FA-1 risk #1) and passed to `next_delay_with_base()`.
+/// 中文: 封裝 max-ms + multiplier + jitter pct。`base_ms` 刻意不凍結於此 —
+///     它在每次迴圈從 `cfg.reconnect_delay_ms` 讀取（FA-1 風險 #1）
+///     並傳入 `next_delay_with_base()`。
+const BACKOFF_POLICY: BackoffConfig = BackoffConfig::ws_public_default(0);
 /// Max topics per subscribe call (Bybit limit = 10)
 /// 每次 subscribe 調用最大主題數（Bybit 限制 = 10）
 const SUBSCRIBE_BATCH_SIZE: usize = 10;
@@ -159,11 +166,12 @@ impl WsClient {
                 Err(_elapsed) => {
                     warn!(url = url, "WS connect timed out (15s) / WS 連接超時（15s）");
                     log_state(WsState::Reconnecting, attempt);
-                    let delay = std::cmp::min(
-                        base_delay.saturating_mul(BACKOFF_FACTOR.saturating_pow(attempt)),
-                        MAX_RECONNECT_DELAY_MS,
-                    );
-                    tokio::time::sleep(Duration::from_millis(delay)).await;
+                    // FA-1 risk #2: connect-timeout path increments `attempt` AFTER
+                    // sleeping (opposite order from main-exit path). Preserved here.
+                    // FA-1 風險 #2：連接超時路徑於睡眠後才遞增 `attempt`
+                    //（與主迴圈出口路徑順序相反）。此處保留原行為。
+                    let delay = BACKOFF_POLICY.next_delay_with_base(base_delay, attempt);
+                    tokio::time::sleep(delay).await;
                     attempt = attempt.saturating_add(1);
                     continue;
                 }
@@ -311,11 +319,13 @@ impl WsClient {
             }
 
             // Exponential backoff / 指數退避
+            // FA-1 risk #2: main-exit path increments `attempt` BEFORE computing
+            // the delay (opposite order from connect-timeout path). Preserved.
+            // FA-1 風險 #2：主出口路徑於計算延遲前即遞增 `attempt`
+            //（與連接超時路徑順序相反）。此處保留原行為。
             attempt = attempt.saturating_add(1);
-            let delay_ms = std::cmp::min(
-                base_delay.saturating_mul(BACKOFF_FACTOR.saturating_pow(attempt)),
-                MAX_RECONNECT_DELAY_MS,
-            );
+            let delay = BACKOFF_POLICY.next_delay_with_base(base_delay, attempt);
+            let delay_ms = delay.as_millis() as u64;
             info!(
                 delay_ms = delay_ms,
                 attempt = attempt,
@@ -327,7 +337,7 @@ impl WsClient {
                     log_state(WsState::Disconnected, 0);
                     return;
                 }
-                _ = tokio::time::sleep(Duration::from_millis(delay_ms)) => {}
+                _ = tokio::time::sleep(delay) => {}
             }
         }
 
@@ -950,20 +960,22 @@ mod tests {
     fn test_backoff_calculation() {
         let base: u64 = 3000;
         // attempt 1: 3000 * 2^1 = 6000
-        let delay1 = std::cmp::min(base * BACKOFF_FACTOR.pow(1), MAX_RECONNECT_DELAY_MS);
-        assert_eq!(delay1, 6000);
+        let delay1 = BACKOFF_POLICY.next_delay_with_base(base, 1);
+        assert_eq!(delay1, Duration::from_millis(6000));
         // attempt 5: 3000 * 2^5 = 96000 → capped at 60000
-        let delay5 = std::cmp::min(base * BACKOFF_FACTOR.pow(5), MAX_RECONNECT_DELAY_MS);
-        assert_eq!(delay5, MAX_RECONNECT_DELAY_MS);
+        let delay5 = BACKOFF_POLICY.next_delay_with_base(base, 5);
+        assert_eq!(delay5, Duration::from_millis(BACKOFF_POLICY.max_ms));
     }
 
-    /// EN: Subscribe batch size matches Bybit per-call limit (10).
-    /// 中文: 訂閱批次大小符合 Bybit 每次調用限制（10）。
+    /// EN: Subscribe batch size matches Bybit per-call limit (10);
+    ///     BACKOFF_POLICY carries the same numeric constants as pre-extraction.
+    /// 中文: 訂閱批次大小符合 Bybit 每次調用限制（10）；
+    ///     BACKOFF_POLICY 承載與提取前相同的數值常量。
     #[test]
     fn test_subscribe_batch_size_constant() {
         assert_eq!(SUBSCRIBE_BATCH_SIZE, 10);
-        assert_eq!(MAX_RECONNECT_DELAY_MS, 60_000);
-        assert_eq!(BACKOFF_FACTOR, 2);
+        assert_eq!(BACKOFF_POLICY.max_ms, 60_000);
+        assert_eq!(BACKOFF_POLICY.multiplier, 2);
     }
 
     /// EN: Backoff progression — monotonically increasing until cap.
@@ -971,24 +983,21 @@ mod tests {
     #[test]
     fn test_backoff_monotonic_progression() {
         let base: u64 = 3000;
-        let mut prev = 0u64;
+        let mut prev = Duration::from_millis(0);
         for attempt in 1..=10u32 {
-            let delay = std::cmp::min(
-                base.saturating_mul(BACKOFF_FACTOR.saturating_pow(attempt)),
-                MAX_RECONNECT_DELAY_MS,
-            );
+            let delay = BACKOFF_POLICY.next_delay_with_base(base, attempt);
             assert!(
                 delay >= prev,
                 "delay should be monotonically non-decreasing"
             );
             assert!(
-                delay <= MAX_RECONNECT_DELAY_MS,
+                delay <= Duration::from_millis(BACKOFF_POLICY.max_ms),
                 "delay should never exceed max"
             );
             prev = delay;
         }
         // After enough attempts, should be capped at max
-        assert_eq!(prev, MAX_RECONNECT_DELAY_MS);
+        assert_eq!(prev, Duration::from_millis(BACKOFF_POLICY.max_ms));
     }
 
     /// EN: extract_symbol handles multi-segment topics (kline.interval.SYMBOL).

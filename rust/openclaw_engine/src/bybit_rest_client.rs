@@ -11,9 +11,8 @@
 //!   支持 GET（查詢字串簽名）和 POST（JSON body 簽名）。
 //!   從回應頭讀取限流狀態。可配置 mainnet / testnet / demo 基礎 URL。
 
-use hmac::{Hmac, Mac};
+use crate::common::bybit_signer::sign_rest_v5;
 use reqwest::Client;
-use sha2::Sha256;
 use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use thiserror::Error;
@@ -523,17 +522,25 @@ impl BybitRestClient {
     ///
     /// sign_str = timestamp + api_key + recv_window + params
     /// signature = hex(hmac_sha256(api_secret, sign_str))
+    ///
+    /// EN: Delegates to `common::bybit_signer::sign_rest_v5` (E1-P0-3). The
+    ///     shared primitive returns `String` unconditionally because HMAC-SHA256
+    ///     accepts keys of any length (SHA-256 re-hashes overlong keys
+    ///     internally). The `BybitResult<String>` return type is retained so
+    ///     that existing `?` call sites continue to compile, matching FA-1 risk
+    ///     #4 (call-site error wrapping preserved).
+    /// 中文: 委派至 `common::bybit_signer::sign_rest_v5`（E1-P0-3）。共享原語
+    ///     無條件回傳 `String`，因 HMAC-SHA256 接受任意長度金鑰（SHA-256 內部
+    ///     會對過長金鑰再雜湊）。保留 `BybitResult<String>` 回傳型別以使既有
+    ///     呼叫端的 `?` 仍可編譯，符合 FA-1 風險 #4（呼叫端錯誤包裝保留）。
     fn sign(&self, timestamp: &str, params: &str) -> BybitResult<String> {
-        let sign_str = format!(
-            "{}{}{}{}",
-            timestamp, self.api_key, self.recv_window, params
-        );
-
-        let mut mac = Hmac::<Sha256>::new_from_slice(self.api_secret.as_bytes())
-            .map_err(|e| BybitApiError::SigningError(e.to_string()))?;
-        mac.update(sign_str.as_bytes());
-        let result = mac.finalize();
-        Ok(hex::encode(result.into_bytes()))
+        Ok(sign_rest_v5(
+            &self.api_secret,
+            timestamp,
+            &self.api_key,
+            &self.recv_window,
+            params,
+        ))
     }
 
     /// Get current timestamp in milliseconds.
@@ -832,15 +839,16 @@ mod tests {
         let params = "category=linear&symbol=BTCUSDT";
 
         // sign_str = "1700000000000TESTKEY1235000category=linear&symbol=BTCUSDT"
-        let sign_str = format!(
-            "{}{}{}{}",
-            timestamp, client.api_key, client.recv_window, params
+        // EN: Use the shared primitive to build the expected value — this
+        //     proves both sides collapse onto the same algorithm and also
+        //     verifies byte-identical output vs the legacy inline formula
+        //     (same input → same 64-char lowercase hex).
+        // 中文: 以共享原語計算預期值 — 既證明兩側採同一演算法，
+        //     亦驗證與原內嵌公式的字節級一致性（同輸入 → 同 64 字元小寫 hex）。
+        let expected = crate::common::bybit_signer::hmac_sha256_hex(
+            "TESTSECRET456",
+            &format!("{}{}{}{}", timestamp, client.api_key, client.recv_window, params),
         );
-
-        // Compute expected HMAC manually / 手動計算預期 HMAC
-        let mut mac = Hmac::<Sha256>::new_from_slice(b"TESTSECRET456").unwrap();
-        mac.update(sign_str.as_bytes());
-        let expected = hex::encode(mac.finalize().into_bytes());
 
         let actual = client.sign(timestamp, params).unwrap();
         assert_eq!(actual, expected);

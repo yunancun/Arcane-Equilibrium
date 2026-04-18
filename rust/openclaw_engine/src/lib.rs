@@ -15,6 +15,7 @@ pub mod bybit_private_ws;
 pub mod bybit_rest_client;
 pub mod canary_writer;
 pub mod claude_teacher;
+pub mod common;
 pub mod config;
 pub mod database;
 pub mod decision_context_producer;
