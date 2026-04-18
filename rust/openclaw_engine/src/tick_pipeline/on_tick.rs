@@ -1477,25 +1477,30 @@ impl TickPipeline {
                         if is_exchange_mode && self.pending_close_symbols.contains(sym) {
                             continue;
                         }
-                        let px = self
-                            .latest_prices
-                            .get(sym)
-                            .copied()
-                            .unwrap_or(event.last_price);
+                        // P1-16 fix: use the per-symbol helper (paper_state.latest_price →
+                        // entry_price fallback) instead of `event.last_price`, which carries
+                        // the triggering tick's symbol price and would stamp that single
+                        // price across every other symbol's halt close fill — the root cause
+                        // behind `learning.decision_features` getting `-17M bps` realized
+                        // edge rows when ETHUSDT triggered halt.
+                        // P1-16 修復：改用 per-symbol helper（paper_state.latest_price →
+                        // entry_price fallback）取代 `event.last_price`。後者攜帶觸發 tick
+                        // 的那個交易對的價，會把這一個價蓋到 halt 時每個其他交易對的平倉
+                        // fill，正是 ETHUSDT 觸發 halt 時 learning.decision_features 出現
+                        // `-17M bps` realized edge 列的根因。
                         let ectx = self
                             .paper_state
                             .get_entry_context_id(sym)
                             .unwrap_or("")
                             .to_string();
-                        if let Some(pnl) = self.paper_state.close_position(sym, px, event.ts_ms) {
-                            // DYNAMIC-RISK-1: halt-session close is still a realized PnL event.
-                            // DYNAMIC-RISK-1：HaltSession 平倉仍算實現 PnL 事件。
-                            self.dynamic_risk_sizer.record_closed_trade(pnl);
+                        if let Some((_il, _q, close_px, pnl)) =
+                            self.close_position_at_symbol_market(sym, event.ts_ms)
+                        {
                             self.emit_close_fill(
                                 sym,
                                 *il,
                                 *q,
-                                px,
+                                close_px,
                                 event.ts_ms,
                                 pnl,
                                 "risk_close:halt_session",

@@ -65,6 +65,52 @@ def get_winsorize_clamp_count() -> int:
     return _winsorize_clamp_count
 
 
+# ---------------------------------------------------------------------------
+# P1-16 defensive gates / P1-16 防禦閘門
+# ---------------------------------------------------------------------------
+
+# Threshold on |ln(exit_price / entry_price)|. Exceeding this means the pair
+# crosses a >65% round-trip price move — physically implausible for a single
+# position close inside 24h crypto (stop_loss caps at 25% even on the loosest
+# demo profile). The P1-16 incident saw ETHUSDT $2357.94 smeared onto
+# DOT/HIGH/IP/AAVEUSDT at their entry scales of $0.0013–$7.8, giving
+# |ln(ratio)| ≈ 5.7–12.8 → we skip these pairs outright so they never reach
+# James-Stein shrinkage even if the Winsorizer misses them.
+# 價格跳變閘門門檻：|ln(exit/entry)| 超過 0.5 代表往返價差 >65%，
+# 單次平倉物理上不可能（最寬 demo profile 的 stop_loss 也只 25%）。
+# P1-16 事件中 ETHUSDT $2357.94 被蓋到 DOT/HIGH/IP/AAVEUSDT 的 $0.0013–$7.8
+# entry，|ln(ratio)| ≈ 5.7–12.8 → 此閘門會直接丟棄這些 pair，即使 Winsorize 漏網。
+_PRICE_JUMP_LN_LIMIT = 0.5
+
+_price_jump_skip_count: int = 0
+
+
+def _reset_price_jump_counter() -> None:
+    """Reset the price-jump skip counter (test helper). / 重置跳價略過計數器（測試輔助）。"""
+    global _price_jump_skip_count
+    _price_jump_skip_count = 0
+
+
+def get_price_jump_skip_count() -> int:
+    """Return the current price-jump skip count. / 返回當前跳價略過次數。"""
+    return _price_jump_skip_count
+
+
+def _is_price_jump_pair(entry_price: float, exit_price: float) -> bool:
+    """
+    Return True if the entry→exit price ratio is so extreme that the pair is
+    almost certainly the product of a shared-price corruption bug upstream
+    (P1-16) rather than a real market move.
+    若 entry→exit 比率極端到幾乎確定是上游共享價 bug（P1-16）而非真實行情，
+    返回 True。
+    """
+    if entry_price <= 0.0 or exit_price <= 0.0:
+        return False
+    if not (math.isfinite(entry_price) and math.isfinite(exit_price)):
+        return False
+    return abs(math.log(exit_price / entry_price)) > _PRICE_JUMP_LN_LIMIT
+
+
 def _winsorize_bps(value: float, field_name: str, strategy: str, symbol: str) -> float:
     """
     Clamp a bps value to [-_WINSORIZE_BPS, +_WINSORIZE_BPS]; log + count on fire.
@@ -196,6 +242,7 @@ def _pair_round_trips(fills: list[dict]) -> list[RoundTripRecord]:
     策略：按 (symbol, strategy_name) 分組。出場成交（realized_pnl != 0 或 strategy_name
     以 risk_close/stop_trigger/strategy_close 開頭）與入場成交的倉位配對。
     """
+    global _price_jump_skip_count
     records: list[RoundTripRecord] = []
 
     # Group by symbol
@@ -230,9 +277,13 @@ def _pair_round_trips(fills: list[dict]) -> list[RoundTripRecord]:
             )
 
             if not is_exit:
-                # Entry fill — push to queue
+                # Entry fill — push to queue. `qty_total` preserves the original
+                # fill size so partial matches can defend against micro-denominator
+                # amplification (P1-16). `qty_remaining` is decremented by matches.
+                # 入場成交入列。qty_total 保留原始大小供部分配對防止微分母放大（P1-16）。
                 open_entries.append({
                     "strategy_name": strategy_name,
+                    "qty_total": qty,
                     "qty_remaining": qty,
                     "entry_price": price,
                     "entry_fee": fee,
@@ -247,6 +298,17 @@ def _pair_round_trips(fills: list[dict]) -> list[RoundTripRecord]:
                     fraction = matched_qty / entry["qty_remaining"] if entry["qty_remaining"] > 0 else 0
 
                     entry_notional = entry["entry_price"] * matched_qty
+                    # P1-16 defensive gate (b): use max(full entry notional, match
+                    # notional) as the bps denominator. For partial matches this
+                    # floors the denominator at the full entry, preventing tiny
+                    # matched_qty × entry_price from turning an apportioned PnL
+                    # into absurd bps (the $0.13 denominator vs $235 loss that
+                    # produced -17,617,373 bps in the original incident).
+                    # P1-16 防禦 (b)：bps 分母取 max(整筆 entry notional, 本次配對 notional)。
+                    # 部分配對時把分母托底至整筆 entry，避免微小 matched_qty × entry_price
+                    # 把分攤 PnL 放大成荒謬 bps（$0.13 分母 vs $235 虧損 = -17M bps）。
+                    entry_notional_full = entry["entry_price"] * entry["qty_total"]
+                    denom_bps = max(entry_notional_full, entry_notional)
                     # Gross PnL for this matched portion (price difference)
                     # Note: realized_pnl from DB is for the whole exit fill, so we apportion
                     gross_pnl_usd = realized_pnl * (matched_qty / qty) if qty > 0 else 0.0
@@ -254,38 +316,60 @@ def _pair_round_trips(fills: list[dict]) -> list[RoundTripRecord]:
                     exit_fee_usd = fee * (matched_qty / qty) if qty > 0 else 0.0
 
                     if entry_notional > 0:
-                        gross_bps_raw = _bps(gross_pnl_usd, entry_notional)
-                        net_bps_raw = _bps(
-                            gross_pnl_usd - entry_fee_usd - exit_fee_usd,
-                            entry_notional,
-                        )
-                        # P1-17: Winsorize signed PnL at record level to contain
-                        # outlier round-trips (e.g. halt_session pairing bug).
-                        # Fees are intentionally NOT winsorized — they're bounded
-                        # by fee_rate × notional and carry no outlier risk.
-                        # P1-17：在記錄級別對有符號 PnL 限幅以控制離群往返
-                        #（例如 halt_session 配對 bug）。手續費刻意不限幅——
-                        # 其由 fee_rate × notional 有界，無離群風險。
-                        gross_bps = _winsorize_bps(
-                            gross_bps_raw, "gross_pnl_bps",
-                            entry["strategy_name"], symbol,
-                        )
-                        net_bps = _winsorize_bps(
-                            net_bps_raw, "net_pnl_bps",
-                            entry["strategy_name"], symbol,
-                        )
-                        rec = RoundTripRecord(
-                            strategy_name=entry["strategy_name"],
-                            symbol=symbol,
-                            gross_pnl_bps=gross_bps,
-                            entry_fee_bps=_bps(entry_fee_usd, entry_notional),
-                            exit_fee_bps=_bps(exit_fee_usd, entry_notional),
-                            net_pnl_bps=net_bps,
-                            entry_ts=entry["ts"],
-                            exit_ts=ts,
-                            notional_usd=entry_notional,
-                        )
-                        records.append(rec)
+                        # P1-16 defensive gate (a): skip pairs whose entry→exit
+                        # price ratio is physically implausible (|ln| > 0.5, i.e.
+                        # >65% round-trip). These are almost certainly the product
+                        # of shared-price corruption (halt_session etc.) and must
+                        # not poison James-Stein shrinkage — Winsorize caps
+                        # magnitude but still lets the sign and sample count
+                        # through. Skipping eliminates both.
+                        # P1-16 防禦 (a)：略過物理上不可能的 entry→exit 比率（|ln|>0.5
+                        # 即 >65% 往返）。這幾乎鐵定是共享價污染（halt_session 等），
+                        # 不能污染 JS 收縮——Winsorize 只裁量級卻仍讓符號與樣本計數
+                        # 流入，直接 skip 可同時斷絕兩者。
+                        if _is_price_jump_pair(entry["entry_price"], price):
+                            _price_jump_skip_count += 1
+                            logger.info(
+                                "PRICE-JUMP skip (%s, %s): entry=%.6f exit=%.6f "
+                                "|ln(ratio)|=%.3f > %.2f (likely shared-price corruption)",
+                                entry["strategy_name"], symbol,
+                                entry["entry_price"], price,
+                                abs(math.log(price / entry["entry_price"])),
+                                _PRICE_JUMP_LN_LIMIT,
+                            )
+                        else:
+                            gross_bps_raw = _bps(gross_pnl_usd, denom_bps)
+                            net_bps_raw = _bps(
+                                gross_pnl_usd - entry_fee_usd - exit_fee_usd,
+                                denom_bps,
+                            )
+                            # P1-17: Winsorize signed PnL at record level to contain
+                            # outlier round-trips (e.g. halt_session pairing bug).
+                            # Fees are intentionally NOT winsorized — they're bounded
+                            # by fee_rate × notional and carry no outlier risk.
+                            # P1-17：在記錄級別對有符號 PnL 限幅以控制離群往返
+                            #（例如 halt_session 配對 bug）。手續費刻意不限幅——
+                            # 其由 fee_rate × notional 有界，無離群風險。
+                            gross_bps = _winsorize_bps(
+                                gross_bps_raw, "gross_pnl_bps",
+                                entry["strategy_name"], symbol,
+                            )
+                            net_bps = _winsorize_bps(
+                                net_bps_raw, "net_pnl_bps",
+                                entry["strategy_name"], symbol,
+                            )
+                            rec = RoundTripRecord(
+                                strategy_name=entry["strategy_name"],
+                                symbol=symbol,
+                                gross_pnl_bps=gross_bps,
+                                entry_fee_bps=_bps(entry_fee_usd, denom_bps),
+                                exit_fee_bps=_bps(exit_fee_usd, denom_bps),
+                                net_pnl_bps=net_bps,
+                                entry_ts=entry["ts"],
+                                exit_ts=ts,
+                                notional_usd=entry_notional,
+                            )
+                            records.append(rec)
 
                     entry["qty_remaining"] -= matched_qty
                     exit_qty_remaining -= matched_qty

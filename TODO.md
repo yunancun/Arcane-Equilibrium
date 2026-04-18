@@ -234,18 +234,18 @@ git status && git log --oneline -5
 - **關聯**：P1-10 STRATEGY-ASYMMETRY-1（真正 edge 翻正前置）· P1-14 EDGE-ESTIMATE-BIND-BLOCKED-1 · DUAL-TRACK Phase 1 軌道 2 B
 - **實測結果（2026-04-18 post-commit）**：E1 修復後跑 live_demo 7d 產出 28 乾淨 cells / `grand_mean_bps = -14.97`；但發現 **grand_mean 真實元兇非 phantom cells**——2 個尾端 outlier（`grid_trading::DOTUSDT raw=-152k bps` / `LINKUSDT raw=-67k bps`）佔 raw weighted grand_mean 主要權重，B=0.888 heavy shrinkage 再將所有 cells 拉向毒值。P1-15 清掉 28 phantom 對 grand_mean 僅移動 -2438→-2473 bps；真實解毒需 P1-16 + P1-17（見下）。
 
-### P1-16 · HALT-SESSION-CROSS-SYMBOL-PRICE-CORRUPTION-1 — halt_session 寫錯 symbol 的價格到 fill（RCA L1）
-- **根因（RCA 2026-04-18 L1 confirmed）**：Rust halt_session force-close 路徑把 **ETHUSDT 的價格 $2357.94 蓋到其他 symbol 的 fill 記錄**（DOT/HIGH/IP/AAVEUSDT 同時間戳 `2026-04-18 19:09:56.302`，fill_ids `close-demo-{SYMBOL}-1776532196302`）。下游 pairer 忠實處理毒 fill：halt exit `qty=0.1` vs live FIFO entry `qty=51.7` → `matched_qty=0.1`，`entry_notional = 1.3384 × 0.1 = $0.13`，`−$235.66 / $0.13 × 10000 = −17,617,373 bps`（與觀察到的 DOTUSDT 極值精確重現）。
-- **具體證據**：`trading.fills` 查到 5 筆 `risk_close:halt_session` 同價 $2357.94 跨 4 symbol，realized_pnl 範圍 -$67~-$3300（獨立 order_id，非單行 typo）；disabled Winsorize 重跑 `grid_trading::DOTUSDT` 最壞 round-trip net_bps=**−17,617,373** with notional_usd=**$0.13**；`ma_crossover::AAVEUSDT` n=45 mean=−4467 bps worst=−200,296 bps 同模式。
-- **影響**：單 cell raw_bps 極端 → JS grand_mean 被拖到 -2214 bps → B=0.888 把所有 cells shrunk 到 ~-1976 bps → 整個 snapshot 失去判別力（P1-17 Winsorize 後降到 -78 bps，但這是防禦性掩蓋，不是修根因）。
-- **下一步（雙管）**：
-  - **(1) 上游修（主）**：定位 Rust halt_session close-emit path 的 shared price cache / last-known-price 查詢 bug——force-liquidation 時以錯 symbol key 取 price。候選位置：`tick_pipeline::commands`、`strategy_close.rs`、`order_build` 或 halt_session 觸發路徑；需沿 `close-demo-{SYMBOL}-{ts}` order_id 命名模式反查。
-  - **(2) 下游防禦**：`_pair_round_trips` 加 (a) 價格合理性 gate：`|ln(exit_price / entry_price)| > 0.5` 直接 skip fill（50% 跳動不可能 intraday）；(b) 分母保護：`entry_notional = max(entry_price × entry_qty_total, entry_price × matched_qty)`（用整筆 entry notional 而非切片部分）；保留 ±5000 bps Winsorize 作 belt-and-braces。
-  - **(3) 新單測**：halt_session cross-symbol price、micro-denominator、price-jump gate 三場景。
-- **不涉及**：`_pair_round_trips` is_exit prefix 檢測正常（line 223-230）；pairer 本身邏輯無誤，只是忠實處理毒 fill。
-- **Scope 估計**：~1-2 day（Rust 根因定位 + 下游 pairer 加 gate + 單測）；阻塞 P1-14 bind 真正解除（P1-17 只是 safety net）
-- **阻塞**：P1-14 bind 前置（與 P1-17 互補）· Phase 5 edge 聚合可信度 · E5 goodput（halt_session 寫錯價格影響 audit 可追溯性）
-- **關聯**：P1-14 EDGE-ESTIMATE-BIND-BLOCKED-1 · P1-17 JS-ESTIMATOR-WINSORIZATION-1 · RCA report `task a260701044e092991`
+### P1-16 ✅ HALT-SESSION-CROSS-SYMBOL-PRICE-CORRUPTION-1 — Rust 上游 + Python 下游雙管修復（commit 待填）
+- **根因（RCA 2026-04-18 L1 confirmed）**：Rust halt_session force-close 路徑把 **ETHUSDT 的價格 $2357.94 蓋到其他 symbol 的 fill 記錄**（DOT/HIGH/IP/AAVEUSDT 同時間戳 `2026-04-18 19:09:56.302`，fill_ids `close-demo-{SYMBOL}-1776532196302`）。位置：`tick_pipeline/on_tick.rs:1480-1484` `.unwrap_or(event.last_price)` fallback——觸發 tick 的 symbol price 在 all_pos 迴圈中被蓋到所有缺 `latest_prices` 條目的其他 symbol。下游 pairer 忠實處理毒 fill：halt exit `qty=0.1` vs live FIFO entry `qty=51.7` → `matched_qty=0.1`，`entry_notional = 1.3384 × 0.1 = $0.13`，`−$235.66 / $0.13 × 10000 = −17,617,373 bps`。
+- **修復（雙管並行）**：
+  - **(1) 上游（Rust · 根因）**：`on_tick.rs` HaltSession arm 改用既有 `close_position_at_symbol_market` helper（與 ClosePosition 分支同款安全 pattern：per-symbol `paper_state.latest_price` → entry-price fallback）；移除 `.unwrap_or(event.last_price)` 洩漏點。+1 regression test `test_halt_session_uses_per_symbol_price_not_triggering_tick`（多 symbol halt 驗證 BTC 用自己 tick、ETH/DOGE 在無 latest 時 fallback 到 entry）。
+  - **(2) 下游（Python · safety net）**：`realized_edge_stats._pair_round_trips` 加 (a) price-jump gate：`|ln(exit/entry)| > 0.5` 直接 skip + 計數器 `_price_jump_skip_count`；(b) 分母托底：入隊時記 `qty_total`，bps 分母取 `max(full_entry_notional, match_notional)` 防止 partial match 微分母放大。保留 ±5000 bps Winsorize 作第三線。+5 新單測 + 2 既有 Winsorize boundary 測試重定位到 gate band 內。
+- **實測結果**：
+  - **archived demo corpus 6616 fills / 5129 round-trips**：**27 price-jump skips**（P1-16 指紋）/ **0 winsorize clamps** / `mean_net_pnl_bps = -9.02`（vs 修前 grand_mean=-2214，**245× 乾淨**）/ range `[-901, +1327]` bps 自然分布。
+  - **live_demo 7d**：0 skips / 0 clamps / grand_mean `-8.46` bps — gate 不誤傷合法資料。
+- **驗證**：engine lib **1499 passed / 0 failed**（+1 P1-16 upstream）· ml_training **238 passed / 13 skipped**（+5 gate tests）
+- **待辦**：`--rebuild` 部署 Rust 修復活化上游，Python 下游 commit 後已即時生效（純 pairer 純函數）
+- **阻塞解除**：P1-14 bind「極端 outlier 污染」分支徹底關閉（從根因 + safety net 雙重保險）；Phase 5 edge 聚合可信度回復；E5 goodput 恢復 audit 可追溯性
+- **關聯**：P1-14 EDGE-ESTIMATE-BIND-BLOCKED-1 · P1-17 JS-ESTIMATOR-WINSORIZATION-1（保留為第三線） · RCA report `task a260701044e092991`
 
 ### P1-17 ✅ JS-ESTIMATOR-WINSORIZATION-1 — outlier clamp 落地（commit 待填）
 - **背景**：`program_code/ml_training/realized_edge_stats._pair_round_trips` 無 Winsorization，任何 raw_bps 無上限傳播到 JS shrinkage 的 grand_mean 計算。B=0.888 heavy shrinkage 把整個 snapshot 拉向毒值。
