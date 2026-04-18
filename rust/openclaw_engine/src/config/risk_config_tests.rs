@@ -325,7 +325,10 @@ fn test_edge_predictor_toml_fallback_snake_case() {
 fallback_on_error = "fail_closed"
 "#;
     let cfg: RiskConfig = toml::from_str(toml_str).unwrap();
-    assert_eq!(cfg.edge_predictor.fallback_on_error, EdgePredictorFallback::FailClosed);
+    assert_eq!(
+        cfg.edge_predictor.fallback_on_error,
+        EdgePredictorFallback::FailClosed
+    );
 }
 
 #[test]
@@ -413,12 +416,8 @@ fn test_ft_min_notional_ratio_serialization_roundtrip() {
     cfg.limits.ft_min_notional_ratio_of_entry = 0.4;
     let json = serde_json::to_string(&cfg).unwrap();
     let de: RiskConfig = serde_json::from_str(&json).unwrap();
-    assert!(
-        (de.limits.ft_min_notional_ratio_of_entry - 0.4).abs() < f64::EPSILON
-    );
+    assert!((de.limits.ft_min_notional_ratio_of_entry - 0.4).abs() < f64::EPSILON);
     let toml_str = toml::to_string(&cfg).unwrap();
     let de2: RiskConfig = toml::from_str(&toml_str).unwrap();
-    assert!(
-        (de2.limits.ft_min_notional_ratio_of_entry - 0.4).abs() < f64::EPSILON
-    );
+    assert!((de2.limits.ft_min_notional_ratio_of_entry - 0.4).abs() < f64::EPSILON);
 }

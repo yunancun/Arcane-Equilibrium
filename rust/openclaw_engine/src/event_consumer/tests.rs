@@ -184,16 +184,16 @@ fn test_handle_update_risk_config_clamps_values() {
     // Push out-of-range values; clamp should bring them inside.
     super::handlers::handle_paper_command(
         PipelineCommand::UpdateRiskConfig {
-            hard_stop_pct: Some(99.0),    // → 0.5
+            hard_stop_pct: Some(99.0), // → 0.5
             trailing_stop_pct: None,
             trailing_activation_pct: None,
             time_stop_hours: None,
             atr_multiplier: Some(Some(0.0)), // → 0.5
             take_profit_pct: None,
-            max_leverage: Some(999.0),    // → 100
+            max_leverage: Some(999.0), // → 100
             max_drawdown_pct: None,
             max_same_direction_positions: None,
-            p1_risk_pct: Some(99.0),      // → 0.10
+            p1_risk_pct: Some(99.0), // → 0.10
             h0_shadow_mode: Some(true),
             dynamic_stop_base_ratio: None,
             dynamic_stop_cap_ratio: None,
@@ -226,7 +226,11 @@ fn test_handle_update_risk_config_sets_trailing_activation_pct() {
     let mut pending = std::collections::HashMap::new();
 
     assert!(
-        pipeline.paper_state.stop_config().trailing_activation_pct.is_none(),
+        pipeline
+            .paper_state
+            .stop_config()
+            .trailing_activation_pct
+            .is_none(),
         "default StopConfig has no activation threshold (falls back to trail_pct)"
     );
 
@@ -298,7 +302,11 @@ fn test_handle_update_risk_config_sets_trailing_activation_pct() {
         &mut writer,
         &mut pending,
     );
-    assert!(pipeline.paper_state.stop_config().trailing_activation_pct.is_none());
+    assert!(pipeline
+        .paper_state
+        .stop_config()
+        .trailing_activation_pct
+        .is_none());
 }
 
 #[test]
@@ -322,9 +330,9 @@ fn test_pnl7_handle_dynamic_stop_knobs_apply_and_reject() {
             max_same_direction_positions: None,
             p1_risk_pct: None,
             h0_shadow_mode: None,
-            dynamic_stop_base_ratio: Some(0.4),       // valid
-            dynamic_stop_cap_ratio: Some(5.0),        // invalid (> 1.0)
-            trailing_min_rr_ratio: Some(0.75),        // valid
+            dynamic_stop_base_ratio: Some(0.4), // valid
+            dynamic_stop_cap_ratio: Some(5.0),  // invalid (> 1.0)
+            trailing_min_rr_ratio: Some(0.75),  // valid
             cost_gate_min_confidence: None,
             cost_gate_k_base: None,
             cost_gate_k_medium: None,
@@ -339,7 +347,10 @@ fn test_pnl7_handle_dynamic_stop_knobs_apply_and_reject() {
     );
     let rc = pipeline.intent_processor.risk_config();
     assert!((rc.dynamic_stop.base_ratio - 0.4).abs() < 1e-9);
-    assert!((rc.dynamic_stop.cap_ratio - 0.8).abs() < 1e-9, "invalid cap rejected, default kept");
+    assert!(
+        (rc.dynamic_stop.cap_ratio - 0.8).abs() < 1e-9,
+        "invalid cap rejected, default kept"
+    );
     assert!((rc.dynamic_stop.trailing_min_rr - 0.75).abs() < 1e-9);
 }
 
@@ -439,7 +450,11 @@ fn escalate_to_tier(
             .escalate_to(step, "test_setup", RiskEvent::OperatorEscalation)
             .expect("test escalation");
     }
-    assert_eq!(p.governance.risk.snapshot_level(), target, "setup reached target");
+    assert_eq!(
+        p.governance.risk.snapshot_level(),
+        target,
+        "setup reached target"
+    );
 }
 
 fn run_looser(
@@ -499,7 +514,10 @@ fn test_m1_looser_bad_reason_code_rejected() {
     let r = run_looser(&mut p, &mut w, "Normal", "because_i_said_so", "");
     assert!(r.is_err(), "bad reason must be rejected");
     let e = r.unwrap_err();
-    assert!(e.contains("invalid reason_code"), "error mentions reason_code: {e}");
+    assert!(
+        e.contains("invalid reason_code"),
+        "error mentions reason_code: {e}"
+    );
     // State unchanged + cooldown NOT armed on rejection.
     assert_eq!(p.governance.risk.snapshot_level(), RiskLevel::Cautious);
     assert_eq!(p.last_governor_de_escalation_ms(), None);
@@ -520,7 +538,10 @@ fn test_m1_looser_cb_locked_out_via_ipc() {
     assert!(r.is_err(), "CB unlock must be rejected");
     let e = r.unwrap_err();
     assert!(e.contains("cannot be unlocked"), "error mentions lock: {e}");
-    assert_eq!(p.governance.risk.snapshot_level(), RiskLevel::CircuitBreaker);
+    assert_eq!(
+        p.governance.risk.snapshot_level(),
+        RiskLevel::CircuitBreaker
+    );
 }
 
 #[test]
@@ -548,7 +569,10 @@ fn test_m1_looser_multi_step_rejected() {
     let r = run_looser(&mut p, &mut w, "Normal", "false_positive", "");
     assert!(r.is_err());
     let e = r.unwrap_err();
-    assert!(e.contains("exactly one tier below"), "error mentions step: {e}");
+    assert!(
+        e.contains("exactly one tier below"),
+        "error mentions step: {e}"
+    );
     assert_eq!(p.governance.risk.snapshot_level(), RiskLevel::Defensive);
 }
 
@@ -589,7 +613,10 @@ fn test_m1_looser_happy_path_arms_cooldown() {
     let r = run_looser(&mut p, &mut w, "Normal", "false_positive", "post-review ok");
     assert!(r.is_ok(), "happy path must succeed: {r:?}");
     assert_eq!(p.governance.risk.snapshot_level(), RiskLevel::Normal);
-    assert!(p.last_governor_de_escalation_ms().is_some(), "cooldown armed");
+    assert!(
+        p.last_governor_de_escalation_ms().is_some(),
+        "cooldown armed"
+    );
     // Second immediate call must now hit the cooldown guard.
     // 第二次立刻呼叫應撞到冷卻守衛。
     escalate_to_tier(&mut p, RiskLevel::Cautious);
@@ -701,7 +728,10 @@ fn test_f_submit_order_happy_path() {
     assert!(result.is_ok(), "submit failed: {result:?}");
     let envelope: serde_json::Value =
         serde_json::from_str(&result.unwrap()).expect("envelope is json");
-    assert!(envelope["order_id"].as_str().unwrap().starts_with("ext-BTCUSDT-"));
+    assert!(envelope["order_id"]
+        .as_str()
+        .unwrap()
+        .starts_with("ext-BTCUSDT-"));
     assert!(envelope["fill_qty"].as_f64().unwrap() > 0.0);
     assert!(envelope["fill_price"].as_f64().unwrap() > 0.0);
     // Side-effects: position opened + stats incremented.
@@ -857,7 +887,10 @@ fn test_phase6_reconciler_de_escalate_cb_blocked() {
 
     let r = run_reconciler_de_escalate(&mut p, &mut w, "Defensive", "test recovery attempt");
     assert!(r.is_err(), "CB de-escalation must be blocked");
-    assert_eq!(p.governance.risk.snapshot_level(), RiskLevel::CircuitBreaker);
+    assert_eq!(
+        p.governance.risk.snapshot_level(),
+        RiskLevel::CircuitBreaker
+    );
 }
 
 #[test]
@@ -894,10 +927,17 @@ fn test_d6_cross_engine_crash_escalates_to_cautious() {
 
     // Simulate crash cascade handler logic from mod.rs
     let crashed_kind = crate::tick_pipeline::PipelineKind::Demo;
-    let duration_s = if crashed_kind == crate::tick_pipeline::PipelineKind::Paper { 60 } else { 120 };
+    let duration_s = if crashed_kind == crate::tick_pipeline::PipelineKind::Paper {
+        60
+    } else {
+        120
+    };
     let _ = p.governance.risk.reconciler_escalate_to(
         RiskLevel::Cautious,
-        &format!("cross_engine_cascade: {} crashed, hold {}s", crashed_kind, duration_s),
+        &format!(
+            "cross_engine_cascade: {} crashed, hold {}s",
+            crashed_kind, duration_s
+        ),
     );
     assert_eq!(p.governance.risk.snapshot_level(), RiskLevel::Cautious);
 }
@@ -923,9 +963,16 @@ fn test_d6_paper_crash_60s_message() {
     // Paper crash → 60s duration in reason.
     // Paper 崩潰 → 理由中包含 60s 時長。
     let crashed_kind = crate::tick_pipeline::PipelineKind::Paper;
-    let duration_s = if crashed_kind == crate::tick_pipeline::PipelineKind::Paper { 60 } else { 120 };
+    let duration_s = if crashed_kind == crate::tick_pipeline::PipelineKind::Paper {
+        60
+    } else {
+        120
+    };
     assert_eq!(duration_s, 60);
-    let msg = format!("cross_engine_cascade: {} crashed, hold {}s", crashed_kind, duration_s);
+    let msg = format!(
+        "cross_engine_cascade: {} crashed, hold {}s",
+        crashed_kind, duration_s
+    );
     assert!(msg.contains("60s"));
     assert!(msg.contains("paper"));
 }
@@ -934,10 +981,20 @@ fn test_d6_paper_crash_60s_message() {
 fn test_d6_non_paper_crash_120s_message() {
     // Demo/Live crash → 120s duration in reason.
     // Demo/Live 崩潰 → 理由中包含 120s 時長。
-    for kind in &[crate::tick_pipeline::PipelineKind::Demo, crate::tick_pipeline::PipelineKind::Live] {
-        let duration_s = if *kind == crate::tick_pipeline::PipelineKind::Paper { 60 } else { 120 };
+    for kind in &[
+        crate::tick_pipeline::PipelineKind::Demo,
+        crate::tick_pipeline::PipelineKind::Live,
+    ] {
+        let duration_s = if *kind == crate::tick_pipeline::PipelineKind::Paper {
+            60
+        } else {
+            120
+        };
         assert_eq!(duration_s, 120);
-        let msg = format!("cross_engine_cascade: {} crashed, hold {}s", kind, duration_s);
+        let msg = format!(
+            "cross_engine_cascade: {} crashed, hold {}s",
+            kind, duration_s
+        );
         assert!(msg.contains("120s"));
     }
 }
@@ -949,13 +1006,16 @@ fn test_d6_cascade_already_at_cautious_is_noop() {
     use openclaw_core::sm::risk_gov::RiskLevel;
     let mut p = make_test_pipeline();
     p.governance.risk.thresholds.min_hold_time_ms = 0;
-    let _ = p.governance.risk.reconciler_escalate_to(RiskLevel::Cautious, "pre-existing");
+    let _ = p
+        .governance
+        .risk
+        .reconciler_escalate_to(RiskLevel::Cautious, "pre-existing");
     assert_eq!(p.governance.risk.snapshot_level(), RiskLevel::Cautious);
 
-    let _ = p.governance.risk.reconciler_escalate_to(
-        RiskLevel::Cautious,
-        "cross_engine_cascade: demo crashed",
-    );
+    let _ = p
+        .governance
+        .risk
+        .reconciler_escalate_to(RiskLevel::Cautious, "cross_engine_cascade: demo crashed");
     assert_eq!(p.governance.risk.snapshot_level(), RiskLevel::Cautious);
 }
 
@@ -968,9 +1028,9 @@ fn test_d6_cascade_from_higher_level_is_noop() {
     p.governance.risk.thresholds.min_hold_time_ms = 0;
     escalate_to_tier(&mut p, RiskLevel::Defensive);
 
-    let _ = p.governance.risk.reconciler_escalate_to(
-        RiskLevel::Cautious,
-        "cross_engine_cascade: paper crashed",
-    );
+    let _ = p
+        .governance
+        .risk
+        .reconciler_escalate_to(RiskLevel::Cautious, "cross_engine_cascade: paper crashed");
     assert_eq!(p.governance.risk.snapshot_level(), RiskLevel::Defensive);
 }

@@ -56,10 +56,9 @@ impl StateWriter {
                 #[cfg(unix)]
                 {
                     use std::os::unix::fs::PermissionsExt;
-                    if let Err(e) = std::fs::set_permissions(
-                        &tmp_path,
-                        std::fs::Permissions::from_mode(0o600),
-                    ) {
+                    if let Err(e) =
+                        std::fs::set_permissions(&tmp_path, std::fs::Permissions::from_mode(0o600))
+                    {
                         tracing::warn!(
                             path = %tmp_path.display(),
                             error = %e,
@@ -319,28 +318,39 @@ mod tests {
         std::fs::create_dir_all(&dir).ok();
 
         let kinds = ["paper", "demo", "live"];
-        let paths: Vec<PathBuf> = kinds.iter().map(|k| dir.join(format!("pipeline_snapshot_{}.json", k))).collect();
-        for p in &paths { let _ = std::fs::remove_file(p); }
+        let paths: Vec<PathBuf> = kinds
+            .iter()
+            .map(|k| dir.join(format!("pipeline_snapshot_{}.json", k)))
+            .collect();
+        for p in &paths {
+            let _ = std::fs::remove_file(p);
+        }
 
         // Spawn 3 threads, each writing 50 snapshots to its own file
         // 各啟動 3 個線程，每個寫 50 次快照到各自文件
-        let handles: Vec<_> = kinds.iter().enumerate().map(|(i, kind)| {
-            let path = paths[i].clone();
-            let kind = kind.to_string();
-            std::thread::spawn(move || {
-                let mut w = StateWriter::new(&path, 0); // 0ms debounce for stress
-                for tick in 0..50 {
-                    let data = json!({
-                        "pipeline_kind": kind,
-                        "tick": tick,
-                        "balance": 10000.0 + tick as f64,
-                    });
-                    w.force_write(&data);
-                }
+        let handles: Vec<_> = kinds
+            .iter()
+            .enumerate()
+            .map(|(i, kind)| {
+                let path = paths[i].clone();
+                let kind = kind.to_string();
+                std::thread::spawn(move || {
+                    let mut w = StateWriter::new(&path, 0); // 0ms debounce for stress
+                    for tick in 0..50 {
+                        let data = json!({
+                            "pipeline_kind": kind,
+                            "tick": tick,
+                            "balance": 10000.0 + tick as f64,
+                        });
+                        w.force_write(&data);
+                    }
+                })
             })
-        }).collect();
+            .collect();
 
-        for h in handles { h.join().expect("thread panicked"); }
+        for h in handles {
+            h.join().expect("thread panicked");
+        }
 
         // Verify each file contains the correct pipeline_kind and last tick
         // 驗證每個文件包含正確的 pipeline_kind 和最後的 tick
@@ -349,14 +359,27 @@ mod tests {
                 .unwrap_or_else(|_| panic!("{} snapshot missing", kind));
             let parsed: serde_json::Value = serde_json::from_str(&content)
                 .unwrap_or_else(|_| panic!("{} snapshot corrupted", kind));
-            assert_eq!(parsed["pipeline_kind"], *kind, "{} has wrong pipeline_kind", kind);
+            assert_eq!(
+                parsed["pipeline_kind"], *kind,
+                "{} has wrong pipeline_kind",
+                kind
+            );
             assert_eq!(parsed["tick"], 49, "{} didn't reach last tick", kind);
             // Verify no cross-contamination
-            assert!(!content.contains(if *kind == "paper" { "\"demo\"" } else { "\"paper\"" }),
-                "cross-contamination in {} snapshot", kind);
+            assert!(
+                !content.contains(if *kind == "paper" {
+                    "\"demo\""
+                } else {
+                    "\"paper\""
+                }),
+                "cross-contamination in {} snapshot",
+                kind
+            );
         }
 
         // Cleanup
-        for p in &paths { std::fs::remove_file(p).ok(); }
+        for p in &paths {
+            std::fs::remove_file(p).ok();
+        }
     }
 }

@@ -396,11 +396,7 @@ impl BudgetTracker {
         let cfg = self.config_cache.read().await;
         let usage = self.usage_cache.read().await;
         let limit = cfg.limit(SCOPE_LOCAL_TOTAL);
-        let used = usage
-            .mtd_usd
-            .get(SCOPE_LOCAL_TOTAL)
-            .copied()
-            .unwrap_or(0.0);
+        let used = usage.mtd_usd.get(SCOPE_LOCAL_TOTAL).copied().unwrap_or(0.0);
         DegradeLevel::from_usage(used, limit)
     }
 
@@ -419,11 +415,7 @@ impl BudgetTracker {
         if limit <= 0.0 {
             return Ok(f64::INFINITY);
         }
-        let used = usage
-            .mtd_usd
-            .get(SCOPE_LOCAL_TOTAL)
-            .copied()
-            .unwrap_or(0.0);
+        let used = usage.mtd_usd.get(SCOPE_LOCAL_TOTAL).copied().unwrap_or(0.0);
         Ok(used / limit)
     }
 
@@ -440,13 +432,12 @@ impl BudgetTracker {
             let used = usage.mtd_usd.get(*scope).copied().unwrap_or(0.0);
             config_obj.insert((*scope).to_string(), serde_json::json!(limit));
             usage_obj.insert((*scope).to_string(), serde_json::json!(used));
-            remaining_obj.insert((*scope).to_string(), serde_json::json!((limit - used).max(0.0)));
+            remaining_obj.insert(
+                (*scope).to_string(),
+                serde_json::json!((limit - used).max(0.0)),
+            );
         }
-        let local_used = usage
-            .mtd_usd
-            .get(SCOPE_LOCAL_TOTAL)
-            .copied()
-            .unwrap_or(0.0);
+        let local_used = usage.mtd_usd.get(SCOPE_LOCAL_TOTAL).copied().unwrap_or(0.0);
         let local_limit = cfg.limit(SCOPE_LOCAL_TOTAL);
         let level = DegradeLevel::from_usage(local_used, local_limit);
         serde_json::json!({
@@ -605,11 +596,15 @@ mod tests {
     async fn test_get_remaining_subtracts_mtd_usage() {
         let pool = empty_pool().await;
         let tracker = BudgetTracker::new_for_test(pool, BudgetConfig::defaults());
-        tracker.inject_usage_for_test(SCOPE_AGENT_TEACHER, 12.5).await;
+        tracker
+            .inject_usage_for_test(SCOPE_AGENT_TEACHER, 12.5)
+            .await;
         let rem = tracker.get_remaining(SCOPE_AGENT_TEACHER).await.unwrap();
         assert!((rem - (60.0 - 12.5)).abs() < 1e-9);
         // Over-spend clamps at 0.
-        tracker.inject_usage_for_test(SCOPE_AGENT_TEACHER, 1000.0).await;
+        tracker
+            .inject_usage_for_test(SCOPE_AGENT_TEACHER, 1000.0)
+            .await;
         let rem2 = tracker.get_remaining(SCOPE_AGENT_TEACHER).await.unwrap();
         assert_eq!(rem2, 0.0);
     }
@@ -620,7 +615,9 @@ mod tests {
     async fn test_degrade_none_below_80() {
         let pool = empty_pool().await;
         let tracker = BudgetTracker::new_for_test(pool, cfg_with_local(100.0));
-        tracker.inject_usage_for_test(SCOPE_LOCAL_TOTAL, 79.99).await;
+        tracker
+            .inject_usage_for_test(SCOPE_LOCAL_TOTAL, 79.99)
+            .await;
         assert_eq!(tracker.degrade_level().await, DegradeLevel::None);
     }
 
@@ -631,7 +628,9 @@ mod tests {
         tracker.inject_usage_for_test(SCOPE_LOCAL_TOTAL, 80.0).await;
         assert_eq!(tracker.degrade_level().await, DegradeLevel::SoftWarn);
         // And anywhere up to (but not including) 95.
-        tracker.inject_usage_for_test(SCOPE_LOCAL_TOTAL, 14.99).await;
+        tracker
+            .inject_usage_for_test(SCOPE_LOCAL_TOTAL, 14.99)
+            .await;
         assert_eq!(tracker.degrade_level().await, DegradeLevel::SoftWarn);
     }
 
@@ -647,7 +646,9 @@ mod tests {
     async fn test_degrade_killswitch_at_100() {
         let pool = empty_pool().await;
         let tracker = BudgetTracker::new_for_test(pool, cfg_with_local(100.0));
-        tracker.inject_usage_for_test(SCOPE_LOCAL_TOTAL, 100.0).await;
+        tracker
+            .inject_usage_for_test(SCOPE_LOCAL_TOTAL, 100.0)
+            .await;
         assert_eq!(tracker.degrade_level().await, DegradeLevel::Killswitch);
         // Zero/negative limit also triggers killswitch (fail-closed).
         let tracker2 = BudgetTracker::new_for_test(empty_pool().await, cfg_with_local(0.0));

@@ -19,12 +19,14 @@ open_positions_max = 10
 min_order_notional_usdt = 5.0
 max_order_notional_usdt = 0.0
 min_balance_usdt = 50.0
+global_notional_cap_usdt = 0.0
 allowed_categories = ["linear", "spot", "inverse"]
 margin_mode = "isolated"
 position_mode = "one_way"
 guardian_modification_size_factor = 0.4
 guardian_modification_leverage_cap = 1.5
 per_trade_risk_pct = 0.05
+ft_min_notional_ratio_of_entry = 0.25
 
 [overrides]
 
@@ -92,6 +94,16 @@ k_medium = 2.2
 k_small = 3.5
 adx_trending = 28.0
 
+[edge_predictor]
+use_edge_predictor = false
+shadow_mode = true
+quantile_safety_k = 0.5
+require_q10_positive_for_adds = true
+fallback_on_error = "shrinkage"
+exploration_rate = 0.05
+retrain_cadence_seconds = 604800
+model_max_age_seconds = 1209600
+
 [dynamic_stop]
 base_ratio = 0.5
 cap_ratio = 0.75
@@ -122,5 +134,22 @@ window_minutes = 90
 boot_cooldown_ms = 90000
 signals_heartbeat_ms = 30000
 h0_shadow_mode = false
+
+# DYNAMIC-RISK-1: Sharpe-aware dynamic per-trade risk. Live uses tighter
+# defaults than demo: ±0.25% step, 0.5%..3% clamp, Sharpe band [0.5, 1.5],
+# longer window (500 trades) and 10-min update interval so the live pct
+# drifts only on strong evidence.
+# DYNAMIC-RISK-1：live 較 demo 更緊：更小步、更窄夾限、更高 Sharpe 門檻，
+# 更長窗口，僅在強證據下才緩慢漂移。
+[dynamic_sizing]
+enabled = true
+min_trades = 100
+step_pct = 0.0025
+min_pct = 0.005
+max_pct = 0.03
+sharpe_high = 1.5
+sharpe_low = 0.5
+update_interval_ms = 600000
+window_size = 500
 
 [experimental.flags]

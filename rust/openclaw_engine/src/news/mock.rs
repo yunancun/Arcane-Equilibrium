@@ -97,7 +97,9 @@ impl NewsProvider for MockProvider {
 
 #[cfg(test)]
 mod tests {
-    use super::super::cryptopanic::{CryptoPanicProvider, MAX_DAILY_REQUESTS, MIN_POLL_INTERVAL_MS};
+    use super::super::cryptopanic::{
+        CryptoPanicProvider, MAX_DAILY_REQUESTS, MIN_POLL_INTERVAL_MS,
+    };
     use super::super::provider::NewsProvider;
     use super::super::rss::RssProvider;
     use super::super::types::{ProviderError, RawNewsItem};
@@ -132,7 +134,9 @@ mod tests {
         let items = p.fetch().await.expect("fetch ok");
         assert_eq!(items.len(), 5);
         assert!(items.iter().any(|i| i.headline.contains("Bitcoin halving")));
-        assert!(items.iter().any(|i| i.headline.contains("SEC investigation")));
+        assert!(items
+            .iter()
+            .any(|i| i.headline.contains("SEC investigation")));
     }
 
     // ---------- cryptopanic ----------
@@ -182,7 +186,10 @@ mod tests {
         // EN: After 28 minutes + 1s — allowed.
         // 中文: 28 分鐘 +1s 後 — 允許。
         let t2 = t0 + MIN_POLL_INTERVAL_MS + 1_000;
-        assert!(p.check_and_record(t2).is_ok(), "after interval should succeed");
+        assert!(
+            p.check_and_record(t2).is_ok(),
+            "after interval should succeed"
+        );
         assert_eq!(p.quota_remaining(), Some(MAX_DAILY_REQUESTS - 2));
     }
 

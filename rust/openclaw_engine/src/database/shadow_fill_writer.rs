@@ -253,7 +253,10 @@ mod tests {
     #[test]
     fn test_side_fits_smallint() {
         let sf_long = make_sf("ctx-long");
-        let sf_short = ShadowFillMsg { side: -1, ..make_sf("ctx-short") };
+        let sf_short = ShadowFillMsg {
+            side: -1,
+            ..make_sf("ctx-short")
+        };
         assert_eq!(sf_long.side as i16, 1);
         assert_eq!(sf_short.side as i16, -1);
     }

@@ -448,7 +448,8 @@ impl BbReversion {
         } else {
             ("market".to_string(), None)
         };
-        let scaled = crate::tick_pipeline::on_tick_helpers::clamp_confidence(conf * self.conf_scale);
+        let scaled =
+            crate::tick_pipeline::on_tick_helpers::clamp_confidence(conf * self.conf_scale);
         OrderIntent {
             symbol: ctx.symbol.to_string(),
             is_long,
@@ -480,12 +481,20 @@ impl Strategy for BbReversion {
         let sym = &intent.symbol;
         if let Some(prev) = self.prev_position.get(sym) {
             match prev {
-                Some(b) => { self.positions.insert(sym.clone(), *b); }
-                None => { self.positions.remove(sym); }
+                Some(b) => {
+                    self.positions.insert(sym.clone(), *b);
+                }
+                None => {
+                    self.positions.remove(sym);
+                }
             }
         }
         if let Some(&ts) = self.prev_last_trade_ms.get(sym) {
-            if ts == 0 { self.last_trade_ms.remove(sym); } else { self.last_trade_ms.insert(sym.clone(), ts); }
+            if ts == 0 {
+                self.last_trade_ms.remove(sym);
+            } else {
+                self.last_trade_ms.insert(sym.clone(), ts);
+            }
         }
     }
 
@@ -541,8 +550,12 @@ impl Strategy for BbReversion {
 
         // RC-04: Snapshot per-symbol state before any mutation for rejection rollback.
         // RC-04：在任何變更前快照該幣種狀態，供拒絕回滾使用。
-        self.prev_position.insert(ctx.symbol.to_string(), self.positions.get(ctx.symbol).copied());
-        self.prev_last_trade_ms.insert(ctx.symbol.to_string(), last_ms);
+        self.prev_position.insert(
+            ctx.symbol.to_string(),
+            self.positions.get(ctx.symbol).copied(),
+        );
+        self.prev_last_trade_ms
+            .insert(ctx.symbol.to_string(), last_ms);
 
         let mut intents = Vec::new();
         match self.positions.get(ctx.symbol).copied() {
@@ -574,7 +587,10 @@ impl Strategy for BbReversion {
                         &self.confluence_config,
                         true, // signal already confirmed
                         ind.adx.as_ref().map(|a| a.adx),
-                        ind.hurst.as_ref().map(|h| h.regime.as_str()).unwrap_or("uncertain"),
+                        ind.hurst
+                            .as_ref()
+                            .map(|h| h.regime.as_str())
+                            .unwrap_or("uncertain"),
                         ind.volume_ratio,
                         ind.rsi_14,
                         is_long,
@@ -589,7 +605,11 @@ impl Strategy for BbReversion {
                     }
 
                     // EDGE-P1-2: Add funding_boost when aligned with signal direction.
-                    let fr_boost = if funding_aligned(is_long) { funding_boost } else { 0.0 };
+                    let fr_boost = if funding_aligned(is_long) {
+                        funding_boost
+                    } else {
+                        0.0
+                    };
                     let conf_with_score = match score {
                         Some(s) if s > 0.0 => (s / 65.0 + fr_boost).min(1.0),
                         _ => (self.entry_conf_base + hurst_boost + fr_boost).min(1.0),
@@ -611,7 +631,8 @@ impl Strategy for BbReversion {
                         persistence_elapsed_ms,
                     )));
                     self.positions.insert(ctx.symbol.to_string(), is_long);
-                    self.last_trade_ms.insert(ctx.symbol.to_string(), ctx.timestamp_ms);
+                    self.last_trade_ms
+                        .insert(ctx.symbol.to_string(), ctx.timestamp_ms);
                 }
             }
             Some(_is_long) => {
@@ -627,7 +648,8 @@ impl Strategy for BbReversion {
                         reason: "bb_mean_revert".into(),
                     });
                     self.positions.remove(ctx.symbol);
-                    self.last_trade_ms.insert(ctx.symbol.to_string(), ctx.timestamp_ms);
+                    self.last_trade_ms
+                        .insert(ctx.symbol.to_string(), ctx.timestamp_ms);
                 }
             }
         }
@@ -673,9 +695,16 @@ mod tests {
             rsi_14: Some(rsi),
             // ADX=15: low ADX = ranging market = ideal for mean-reversion.
             // ADX=15：低 ADX = 震盪市場 = 均值回歸理想環境。
-            adx: Some(AdxResult { adx: 15.0, plus_di: 20.0, minus_di: 18.0 }),
+            adx: Some(AdxResult {
+                adx: 15.0,
+                plus_di: 20.0,
+                minus_di: 18.0,
+            }),
             // EDGE-P1-3: Hurst mean_reverting regime needed for score ≥ 45 threshold.
-            hurst: Some(HurstResult { hurst: 0.35, regime: "mean_reverting".into() }),
+            hurst: Some(HurstResult {
+                hurst: 0.35,
+                regime: "mean_reverting".into(),
+            }),
             ..Default::default()
         }));
         TickContext {
@@ -693,7 +722,7 @@ mod tests {
     #[test]
     fn test_long_oversold() {
         let mut s = BbReversion::new();
-        s.min_persistence_ms = 0;  // disable persistence for unit tests
+        s.min_persistence_ms = 0; // disable persistence for unit tests
         let i = s.on_tick(&ctx_bb(-0.1, 25.0, 0));
         assert_eq!(i.len(), 1);
         match &i[0] {
@@ -705,7 +734,7 @@ mod tests {
     #[test]
     fn test_exit_mean() {
         let mut s = BbReversion::new();
-        s.min_persistence_ms = 0;  // disable persistence for unit tests
+        s.min_persistence_ms = 0; // disable persistence for unit tests
         s.on_tick(&ctx_bb(-0.1, 25.0, 0));
         let i = s.on_tick(&ctx_bb(0.5, 50.0, 700_000));
         assert_eq!(i.len(), 1);
@@ -722,7 +751,7 @@ mod tests {
         // RC-07: use_limit=true, oversold entry produces limit order with correct price
         // RC-07：use_limit=true，超賣入場產生正確限價的限價單
         let mut s = BbReversion::new();
-        s.min_persistence_ms = 0;  // disable persistence for unit tests
+        s.min_persistence_ms = 0; // disable persistence for unit tests
         s.use_limit = true;
         s.limit_offset_bps = 10.0; // 10 bps = 0.1%
         let i = s.on_tick(&ctx_bb(-0.1, 25.0, 0));
@@ -748,7 +777,7 @@ mod tests {
         // RC-07: use_limit=true, overbought entry produces limit order
         // RC-07：use_limit=true，超買入場產生限價單
         let mut s = BbReversion::new();
-        s.min_persistence_ms = 0;  // disable persistence for unit tests
+        s.min_persistence_ms = 0; // disable persistence for unit tests
         s.use_limit = true;
         s.limit_offset_bps = 10.0;
         let i = s.on_tick(&ctx_bb(1.1, 75.0, 0));
@@ -774,7 +803,7 @@ mod tests {
         // RC-07: use_limit=false (default), entries produce market orders
         // RC-07：use_limit=false（默認），入場產生市價單
         let mut s = BbReversion::new();
-        s.min_persistence_ms = 0;  // disable persistence for unit tests
+        s.min_persistence_ms = 0; // disable persistence for unit tests
         assert!(!s.use_limit); // verify default is false / 確認默認為 false
         let i = s.on_tick(&ctx_bb(-0.1, 25.0, 0));
         assert_eq!(i.len(), 1);
@@ -794,7 +823,7 @@ mod tests {
         // it's a Close action that the pipeline handles directly.
         // 使用 StrategyAction::Close 後，出場不再是 OrderIntent。
         let mut s = BbReversion::new();
-        s.min_persistence_ms = 0;  // disable persistence for unit tests
+        s.min_persistence_ms = 0; // disable persistence for unit tests
         s.use_limit = true;
         // Enter long with limit order / 限價入場做多
         let i = s.on_tick(&ctx_bb(-0.1, 25.0, 0));
@@ -833,7 +862,7 @@ mod tests {
     #[test]
     fn test_bb_rev_update_roundtrip() {
         let mut s = BbReversion::new();
-        s.min_persistence_ms = 0;  // disable persistence for unit tests
+        s.min_persistence_ms = 0; // disable persistence for unit tests
         let p = BbReversionParams {
             use_limit: true, // GAP-9: should be coerced to false
             limit_offset_bps: 20.0,
@@ -853,7 +882,12 @@ mod tests {
     fn test_bbr_param_ranges_count() {
         let ranges = BbReversionParams::param_ranges();
         // 5 original + 2 funding_rate + 10 confluence = 17
-        assert_eq!(ranges.len(), 17, "expected 17 param ranges, got {}", ranges.len());
+        assert_eq!(
+            ranges.len(),
+            17,
+            "expected 17 param ranges, got {}",
+            ranges.len()
+        );
     }
 
     #[test]
@@ -861,9 +895,16 @@ mod tests {
         let ranges = BbReversionParams::param_ranges();
         let names: Vec<&str> = ranges.iter().map(|r| r.name.as_str()).collect();
         for expected in &[
-            "weight_adx", "weight_regime", "weight_volume", "weight_momentum",
-            "adx_floor", "confluence_threshold_no_trade", "confluence_threshold_light",
-            "confluence_threshold_full", "min_persistence_ms", "min_notional_usd",
+            "weight_adx",
+            "weight_regime",
+            "weight_volume",
+            "weight_momentum",
+            "adx_floor",
+            "confluence_threshold_no_trade",
+            "confluence_threshold_light",
+            "confluence_threshold_full",
+            "min_persistence_ms",
+            "min_notional_usd",
         ] {
             assert!(names.contains(expected), "missing param range: {expected}");
         }
@@ -898,7 +939,12 @@ mod tests {
     // ── EDGE-P1-2: Funding rate signal tests ──
 
     /// Build a TickContext with funding rate for testing.
-    fn ctx_bb_with_funding(pct_b: f64, rsi: f64, ts: u64, funding_rate: Option<f64>) -> TickContext<'static> {
+    fn ctx_bb_with_funding(
+        pct_b: f64,
+        rsi: f64,
+        ts: u64,
+        funding_rate: Option<f64>,
+    ) -> TickContext<'static> {
         use openclaw_core::indicators::HurstResult;
         let ind = Box::leak(Box::new(IndicatorSnapshot {
             bollinger: Some(BollingerResult {
@@ -909,8 +955,15 @@ mod tests {
                 percent_b: pct_b,
             }),
             rsi_14: Some(rsi),
-            adx: Some(AdxResult { adx: 15.0, plus_di: 20.0, minus_di: 18.0 }),
-            hurst: Some(HurstResult { hurst: 0.35, regime: "mean_reverting".into() }),
+            adx: Some(AdxResult {
+                adx: 15.0,
+                plus_di: 20.0,
+                minus_di: 18.0,
+            }),
+            hurst: Some(HurstResult {
+                hurst: 0.35,
+                regime: "mean_reverting".into(),
+            }),
             ..Default::default()
         }));
         TickContext {
@@ -935,7 +988,10 @@ mod tests {
         // With extreme positive funding rate → aligned with short → boost
         let ctx_with = ctx_bb_with_funding(1.2, 75.0, 1000, Some(0.001));
         let actions_with = s.on_tick(&ctx_with);
-        assert!(!actions_with.is_empty(), "should produce short entry with positive funding");
+        assert!(
+            !actions_with.is_empty(),
+            "should produce short entry with positive funding"
+        );
         let conf_with = match &actions_with[0] {
             StrategyAction::Open(intent) => intent.confidence,
             _ => panic!("expected Open"),
@@ -968,7 +1024,10 @@ mod tests {
         // Long signal: %B < 0.0, RSI < 30 (oversold)
         let ctx_with = ctx_bb_with_funding(-0.1, 25.0, 1000, Some(-0.001));
         let actions_with = s.on_tick(&ctx_with);
-        assert!(!actions_with.is_empty(), "should produce long entry with negative funding");
+        assert!(
+            !actions_with.is_empty(),
+            "should produce long entry with negative funding"
+        );
         let conf_with = match &actions_with[0] {
             StrategyAction::Open(intent) => intent.confidence,
             _ => panic!("expected Open"),

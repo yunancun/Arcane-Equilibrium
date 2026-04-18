@@ -19,8 +19,8 @@
 
 use rand::{rngs::SmallRng, Rng};
 
-use super::{EdgePredictorStore, FeatureVectorV1, PredictError};
 use super::rearrangement::enforce_monotone;
+use super::{EdgePredictorStore, FeatureVectorV1, PredictError};
 use crate::config::risk_config::EdgePredictor as EdgePredictorCfg;
 use crate::tick_pipeline::PipelineKind;
 
@@ -301,7 +301,11 @@ mod tests {
         let cfg = Cfg::default();
         let out = edge_predictor_gate(
             &make_inputs(PipelineKind::Paper, "ma_crossover", 5.0, false),
-            &f, &store, &mut rng, &cfg, || "{}".into(),
+            &f,
+            &store,
+            &mut rng,
+            &cfg,
+            || "{}".into(),
         );
         assert!(matches!(
             out,
@@ -317,7 +321,11 @@ mod tests {
         let cfg = Cfg::default();
         let out = edge_predictor_gate(
             &make_inputs(PipelineKind::Paper, "ma_crossover", 5.0, false),
-            &make_features(), &store, &mut rng, &cfg, || "{}".into(),
+            &make_features(),
+            &store,
+            &mut rng,
+            &cfg,
+            || "{}".into(),
         );
         assert!(matches!(
             out,
@@ -336,7 +344,11 @@ mod tests {
         let cfg = Cfg::default();
         let out = edge_predictor_gate(
             &make_inputs(PipelineKind::Paper, "ma_crossover", 5.0, false),
-            &make_features(), &store, &mut rng, &cfg, || "{}".into(),
+            &make_features(),
+            &store,
+            &mut rng,
+            &cfg,
+            || "{}".into(),
         );
         assert!(matches!(
             out,
@@ -371,25 +383,31 @@ mod tests {
     }
 
     fn stubbed(store: &EdgePredictorStore, strategy: &str, pred: Prediction, age_secs: u64) {
-        store.swap(
-            strategy,
-            Arc::new(StubPredictor { pred, age_secs }),
-        );
+        store.swap(strategy, Arc::new(StubPredictor { pred, age_secs }));
     }
 
     #[test]
     fn test_fallback_stale_model() {
         let store = EdgePredictorStore::new();
         stubbed(
-            &store, "ma_crossover",
-            Prediction { q10: 1.0, q50: 5.0, q90: 10.0 },
+            &store,
+            "ma_crossover",
+            Prediction {
+                q10: 1.0,
+                q50: 5.0,
+                q90: 10.0,
+            },
             Cfg::default().model_max_age_seconds + 1,
         );
         let mut rng = SmallRng::seed_from_u64(0);
         let cfg = Cfg::default();
         let out = edge_predictor_gate(
             &make_inputs(PipelineKind::Paper, "ma_crossover", 2.0, false),
-            &make_features(), &store, &mut rng, &cfg, || "{}".into(),
+            &make_features(),
+            &store,
+            &mut rng,
+            &cfg,
+            || "{}".into(),
         );
         assert!(matches!(
             out,
@@ -402,13 +420,25 @@ mod tests {
         // q50=10, q10=2 → safety=10-0.5*(10-2)=6 > cost=3 → Accept.
         // q50=10, q10=2 → safety=6 > cost=3 → 放行。
         let store = EdgePredictorStore::new();
-        stubbed(&store, "ma_crossover",
-            Prediction { q10: 2.0, q50: 10.0, q90: 15.0 }, 0);
+        stubbed(
+            &store,
+            "ma_crossover",
+            Prediction {
+                q10: 2.0,
+                q50: 10.0,
+                q90: 15.0,
+            },
+            0,
+        );
         let mut rng = SmallRng::seed_from_u64(0);
         let cfg = Cfg::default();
         let out = edge_predictor_gate(
             &make_inputs(PipelineKind::Paper, "ma_crossover", 3.0, false),
-            &make_features(), &store, &mut rng, &cfg, || "{}".into(),
+            &make_features(),
+            &store,
+            &mut rng,
+            &cfg,
+            || "{}".into(),
         );
         assert!(matches!(out, PredictorGateOutcome::Accept));
     }
@@ -418,14 +448,26 @@ mod tests {
         // exploration_rate=0.2 (max), but engine=Demo → must be Reject, not ShadowFill.
         // Demo/live 不走探索分支，即使 exploration_rate 拉滿也必須拒絕。
         let store = EdgePredictorStore::new();
-        stubbed(&store, "ma_crossover",
-            Prediction { q10: -5.0, q50: -1.0, q90: 2.0 }, 0);
+        stubbed(
+            &store,
+            "ma_crossover",
+            Prediction {
+                q10: -5.0,
+                q50: -1.0,
+                q90: 2.0,
+            },
+            0,
+        );
         let mut rng = SmallRng::seed_from_u64(0);
         let mut cfg = Cfg::default();
         cfg.exploration_rate = 0.2;
         let out = edge_predictor_gate(
             &make_inputs(PipelineKind::Demo, "ma_crossover", 10.0, false),
-            &make_features(), &store, &mut rng, &cfg, || "{}".into(),
+            &make_features(),
+            &store,
+            &mut rng,
+            &cfg,
+            || "{}".into(),
         );
         assert!(matches!(out, PredictorGateOutcome::Reject(_)));
     }
@@ -436,14 +478,25 @@ mod tests {
         // force the branch without relying on RNG internals.
         // 用 exploration_rate=1.0 強制進入探索分支，繞開 RNG 細節。
         let store = EdgePredictorStore::new();
-        stubbed(&store, "ma_crossover",
-            Prediction { q10: -5.0, q50: -1.0, q90: 2.0 }, 0);
+        stubbed(
+            &store,
+            "ma_crossover",
+            Prediction {
+                q10: -5.0,
+                q50: -1.0,
+                q90: 2.0,
+            },
+            0,
+        );
         let mut rng = SmallRng::seed_from_u64(42);
         let mut cfg = Cfg::default();
         cfg.exploration_rate = 1.0;
         let out = edge_predictor_gate(
             &make_inputs(PipelineKind::Paper, "ma_crossover", 10.0, false),
-            &make_features(), &store, &mut rng, &cfg,
+            &make_features(),
+            &store,
+            &mut rng,
+            &cfg,
             || r#"{"ok":true}"#.into(),
         );
         match out {
@@ -462,14 +515,26 @@ mod tests {
     #[test]
     fn test_paper_reject_when_exploration_rate_zero() {
         let store = EdgePredictorStore::new();
-        stubbed(&store, "ma_crossover",
-            Prediction { q10: -5.0, q50: -1.0, q90: 2.0 }, 0);
+        stubbed(
+            &store,
+            "ma_crossover",
+            Prediction {
+                q10: -5.0,
+                q50: -1.0,
+                q90: 2.0,
+            },
+            0,
+        );
         let mut rng = SmallRng::seed_from_u64(7);
         let mut cfg = Cfg::default();
         cfg.exploration_rate = 0.0;
         let out = edge_predictor_gate(
             &make_inputs(PipelineKind::Paper, "ma_crossover", 10.0, false),
-            &make_features(), &store, &mut rng, &cfg, || "{}".into(),
+            &make_features(),
+            &store,
+            &mut rng,
+            &cfg,
+            || "{}".into(),
         );
         assert!(matches!(out, PredictorGateOutcome::Reject(_)));
     }
@@ -479,13 +544,30 @@ mod tests {
         // Margin passes (cost tiny), but q10 < 0 + is_add + require_q10_positive_for_adds → RejectAdd.
         // margin 過關但 q10 負且為加倉且 require_q10_positive_for_adds → 拒絕加倉。
         let store = EdgePredictorStore::new();
-        stubbed(&store, "ma_crossover",
-            Prediction { q10: -0.5, q50: 5.0, q90: 10.0 }, 0);
+        stubbed(
+            &store,
+            "ma_crossover",
+            Prediction {
+                q10: -0.5,
+                q50: 5.0,
+                q90: 10.0,
+            },
+            0,
+        );
         let mut rng = SmallRng::seed_from_u64(0);
         let cfg = Cfg::default();
         let out = edge_predictor_gate(
-            &make_inputs(PipelineKind::Paper, "ma_crossover", 0.1, /*is_add=*/ true),
-            &make_features(), &store, &mut rng, &cfg, || "{}".into(),
+            &make_inputs(
+                PipelineKind::Paper,
+                "ma_crossover",
+                0.1,
+                /*is_add=*/ true,
+            ),
+            &make_features(),
+            &store,
+            &mut rng,
+            &cfg,
+            || "{}".into(),
         );
         assert!(matches!(out, PredictorGateOutcome::RejectAdd(_)));
     }
@@ -495,13 +577,30 @@ mod tests {
         // Same fixture but is_add=false → the q10-positive check shouldn't fire.
         // 相同 fixture 但 is_add=false → q10-非負檢查不應觸發。
         let store = EdgePredictorStore::new();
-        stubbed(&store, "ma_crossover",
-            Prediction { q10: -0.5, q50: 5.0, q90: 10.0 }, 0);
+        stubbed(
+            &store,
+            "ma_crossover",
+            Prediction {
+                q10: -0.5,
+                q50: 5.0,
+                q90: 10.0,
+            },
+            0,
+        );
         let mut rng = SmallRng::seed_from_u64(0);
         let cfg = Cfg::default();
         let out = edge_predictor_gate(
-            &make_inputs(PipelineKind::Paper, "ma_crossover", 0.1, /*is_add=*/ false),
-            &make_features(), &store, &mut rng, &cfg, || "{}".into(),
+            &make_inputs(
+                PipelineKind::Paper,
+                "ma_crossover",
+                0.1,
+                /*is_add=*/ false,
+            ),
+            &make_features(),
+            &store,
+            &mut rng,
+            &cfg,
+            || "{}".into(),
         );
         assert!(matches!(out, PredictorGateOutcome::Accept));
     }
@@ -510,14 +609,26 @@ mod tests {
     fn test_accept_on_negative_q10_when_require_flag_off() {
         // is_add=true but require_q10_positive_for_adds=false → Accept.
         let store = EdgePredictorStore::new();
-        stubbed(&store, "ma_crossover",
-            Prediction { q10: -0.5, q50: 5.0, q90: 10.0 }, 0);
+        stubbed(
+            &store,
+            "ma_crossover",
+            Prediction {
+                q10: -0.5,
+                q50: 5.0,
+                q90: 10.0,
+            },
+            0,
+        );
         let mut rng = SmallRng::seed_from_u64(0);
         let mut cfg = Cfg::default();
         cfg.require_q10_positive_for_adds = false;
         let out = edge_predictor_gate(
             &make_inputs(PipelineKind::Paper, "ma_crossover", 0.1, true),
-            &make_features(), &store, &mut rng, &cfg, || "{}".into(),
+            &make_features(),
+            &store,
+            &mut rng,
+            &cfg,
+            || "{}".into(),
         );
         assert!(matches!(out, PredictorGateOutcome::Accept));
     }
@@ -526,14 +637,24 @@ mod tests {
     fn test_fallback_reason_metric_names_stable() {
         // Metric names land in §10.1 — any accidental rename will be caught here.
         // 對應 §10.1 metric 名稱，誤改名會在此失敗。
-        assert_eq!(FallbackReason::FeatureOutOfRange.metric_name(),
-            "feature_out_of_range");
+        assert_eq!(
+            FallbackReason::FeatureOutOfRange.metric_name(),
+            "feature_out_of_range"
+        );
         assert_eq!(FallbackReason::NoModel.metric_name(), "predict_no_model");
-        assert_eq!(FallbackReason::SchemaMismatch.metric_name(), "predict_schema_error");
+        assert_eq!(
+            FallbackReason::SchemaMismatch.metric_name(),
+            "predict_schema_error"
+        );
         assert_eq!(FallbackReason::ModelStale.metric_name(), "model_stale");
-        assert_eq!(FallbackReason::InferenceError.metric_name(), "predict_errors");
-        assert_eq!(FallbackReason::QuantileCrossingFatal.metric_name(),
-            "quantile_crossing_fatal");
+        assert_eq!(
+            FallbackReason::InferenceError.metric_name(),
+            "predict_errors"
+        );
+        assert_eq!(
+            FallbackReason::QuantileCrossingFatal.metric_name(),
+            "quantile_crossing_fatal"
+        );
     }
 
     #[test]
@@ -562,6 +683,9 @@ mod tests {
     #[test]
     fn test_fallback_config_enum_default() {
         // Sanity: RiskConfig default uses Shrinkage fallback (spec v1.4).
-        assert_eq!(Cfg::default().fallback_on_error, EdgePredictorFallback::Shrinkage);
+        assert_eq!(
+            Cfg::default().fallback_on_error,
+            EdgePredictorFallback::Shrinkage
+        );
     }
 }

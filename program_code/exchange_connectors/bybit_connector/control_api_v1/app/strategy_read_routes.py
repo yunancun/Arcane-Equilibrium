@@ -244,17 +244,49 @@ async def list_strategies(
 
 
 @phase2_router.get("/dynamic-risk/status")
-async def get_dynamic_risk_status(actor: base.AuthenticatedActor = Depends(base.current_actor)):
+async def get_dynamic_risk_status(
+    engine: str = Query("demo", description="paper|demo|live"),
+    actor: base.AuthenticatedActor = Depends(base.current_actor),
+):
     """
-    Get dynamic risk adjustment status (Sharpe-based).
-    获取动态风控调整状态（基于 Sharpe）。
+    Get dynamic risk adjustment status (Sharpe-based) per engine.
+    获取动态风控调整状态（基于 Sharpe，按引擎）。
+
+    DYNAMIC-RISK-1: forwards to Rust IPC `get_dynamic_risk_status`. Python
+    AUTO_DEPLOYER remains a stub; Rust is authoritative. Falls back to the stub
+    shape on IPC failure so the GUI still renders a sane card.
+    DYNAMIC-RISK-1：轉發到 Rust IPC；IPC 失敗時回 stub 形狀，GUI 不破版。
     """
-    if AUTO_DEPLOYER is None:
-        return _envelope({"enabled": False, "active": False, "available": False})
+    engine = (engine or "demo").lower()
+    if engine not in ("paper", "demo", "live"):
+        raise HTTPException(status_code=400, detail="engine must be paper|demo|live")
+    # Lazy-import to avoid circular import at module load.
+    # 懶匯入避免載入時循環依賴。
     try:
-        return _envelope(AUTO_DEPLOYER.get_dynamic_risk_status())
-    except Exception:
-        raise HTTPException(status_code=500, detail="Internal error")
+        from .strategy_write_routes import _get_strategy_ipc
+        client = await _get_strategy_ipc()
+        resp = await client.call(
+            "get_dynamic_risk_status",
+            params={"engine": engine},
+        )
+        if isinstance(resp, dict):
+            out = dict(resp)
+            out["engine"] = engine
+            out["available"] = True
+            return _envelope(out)
+    except Exception as e:
+        logger.warning("get_dynamic_risk_status IPC error engine=%s: %s", engine, e)
+    # Fallback — sizer not reachable (engine down, pre-boot, or Python-only tests).
+    # 回退 — 引擎不可達時回 stub 形狀。
+    if AUTO_DEPLOYER is None:
+        return _envelope({
+            "engine": engine,
+            "enabled": False,
+            "available": False,
+        })
+    stub = AUTO_DEPLOYER.get_dynamic_risk_status()
+    stub.update({"engine": engine, "available": False})
+    return _envelope(stub)
 
 
 @phase2_router.get("/{name}/status")

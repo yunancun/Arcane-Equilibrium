@@ -140,9 +140,7 @@ impl BudgetCaps {
             && self.monthly_usd_max > 0.0
             && self.daily_usd_max > self.monthly_usd_max
         {
-            return Err(
-                "budget.caps.daily_usd_max must not exceed monthly_usd_max".into(),
-            );
+            return Err("budget.caps.daily_usd_max must not exceed monthly_usd_max".into());
         }
         if !(0.0..=1.0).contains(&self.alert_threshold_pct) {
             return Err("budget.caps.alert_threshold_pct must be in [0, 1]".into());
@@ -349,7 +347,8 @@ impl AttentionTax {
         }
         if !(grades[0] < grades[1] && grades[1] < grades[2] && grades[2] < grades[3]) {
             return Err(
-                "budget.attention_tax grade thresholds must be strictly increasing (A < B < C < D)".into()
+                "budget.attention_tax grade thresholds must be strictly increasing (A < B < C < D)"
+                    .into(),
             );
         }
         // MICRO-PROFIT-FIX-1 (2026-04-17): range tightened from [0, 100] → [0, 10].
@@ -534,9 +533,7 @@ mod tests {
     fn test_json_round_trip_with_overrides() {
         let mut cfg = BudgetConfig::default();
         cfg.caps.daily_usd_max = 50.0;
-        cfg.caps
-            .per_scope_caps
-            .insert("teacher".into(), 30.0);
+        cfg.caps.per_scope_caps.insert("teacher".into(), 30.0);
         cfg.attention_tax.cost_edge_max_ratio = 0.7;
         let json = serde_json::to_string(&cfg).unwrap();
         let de: BudgetConfig = serde_json::from_str(&json).unwrap();

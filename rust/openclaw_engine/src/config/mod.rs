@@ -33,7 +33,7 @@ pub use risk_config::RiskConfig;
 // ScannerConfig lives in scanner::config; re-exported here for uniform access via config::ScannerConfig
 // ScannerConfig 定義在 scanner::config，此處重新導出以統一通過 config::ScannerConfig 訪問
 pub use crate::scanner::config::ScannerConfig;
-pub use store::{ConfigStore, PatchOutcome, PatchSource, write_toml_atomic_fsynced};
+pub use store::{write_toml_atomic_fsynced, ConfigStore, PatchOutcome, PatchSource};
 
 use arc_swap::ArcSwap;
 use serde::Deserialize;
@@ -154,10 +154,8 @@ pub struct EngineBootstrap {
     /// 資料庫配置段。
     #[serde(default)]
     pub database: crate::database::DatabaseConfig,
-
     // 3E-10.2: trading_mode field DELETED — pipelines use PipelineKind at construction.
     // 3E-10.2：trading_mode 字段已刪除 — 管線在構造時使用 PipelineKind。
-
 }
 
 // ---------------------------------------------------------------------------

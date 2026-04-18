@@ -52,11 +52,7 @@ pub fn build_feature_vector(
     } else {
         0.0
     };
-    let funding_rate = clamp_f32(
-        event.funding_rate.unwrap_or(0.0) as f32,
-        -0.01,
-        0.01,
-    );
+    let funding_rate = clamp_f32(event.funding_rate.unwrap_or(0.0) as f32, -0.01, 0.01);
     // ewma_vol is decimal stddev → %; keep conservative clamp to the declared
     // [0, 20]% range even though EWMA can spike higher on crises.
     // ewma_vol 為小數 stddev → %；保守 clamp 至聲明範圍。
@@ -143,8 +139,11 @@ pub fn build_feature_vector(
     // Bybit 結算於 UTC 00/08/16；最後 15 分鐘打旗。
     let minute_of_day = (ms_of_day / 60_000.0) as u64;
     let minute_in_8h_window = minute_of_day % (8 * 60);
-    let is_funding_settlement_window =
-        if (8 * 60 - 15..8 * 60).contains(&minute_in_8h_window) { 1 } else { 0 };
+    let is_funding_settlement_window = if (8 * 60 - 15..8 * 60).contains(&minute_in_8h_window) {
+        1
+    } else {
+        0
+    };
 
     FeatureVectorV1 {
         adx_1h,
@@ -228,13 +227,26 @@ mod tests {
 
     fn full_indicators() -> IndicatorSnapshot {
         let mut s = IndicatorSnapshot::default();
-        s.adx = Some(AdxResult { adx: 30.0, plus_di: 25.0, minus_di: 18.0 });
-        s.bollinger = Some(BollingerResult {
-            upper: 101.0, middle: 100.0, lower: 99.0,
-            bandwidth: 0.02, percent_b: 0.5,
+        s.adx = Some(AdxResult {
+            adx: 30.0,
+            plus_di: 25.0,
+            minus_di: 18.0,
         });
-        s.atr_14 = Some(AtrResult { atr: 1.2, atr_percent: 1.2 });
-        s.ewma_vol = Some(EwmaVolResult { ewma_vol: 0.015, vol_regime: "normal".into() });
+        s.bollinger = Some(BollingerResult {
+            upper: 101.0,
+            middle: 100.0,
+            lower: 99.0,
+            bandwidth: 0.02,
+            percent_b: 0.5,
+        });
+        s.atr_14 = Some(AtrResult {
+            atr: 1.2,
+            atr_percent: 1.2,
+        });
+        s.ewma_vol = Some(EwmaVolResult {
+            ewma_vol: 0.015,
+            vol_regime: "normal".into(),
+        });
         s
     }
 
@@ -273,9 +285,17 @@ mod tests {
         // Pathological upstream values — gate must still see in-range features.
         // 上游極端值 — gate 必須仍收到 in-range features。
         let mut ind = IndicatorSnapshot::default();
-        ind.adx = Some(AdxResult { adx: 500.0, plus_di: 0.0, minus_di: 0.0 }); // > 100
+        ind.adx = Some(AdxResult {
+            adx: 500.0,
+            plus_di: 0.0,
+            minus_di: 0.0,
+        }); // > 100
         ind.bollinger = Some(BollingerResult {
-            upper: 0.0, middle: 1.0, lower: 0.0, bandwidth: 2.5, percent_b: 0.5,
+            upper: 0.0,
+            middle: 1.0,
+            lower: 0.0,
+            bandwidth: 2.5,
+            percent_b: 0.5,
         }); // 250% width
         let intent = make_intent(true, 0.001);
         let mut event = make_event(1_700_000_000_000, 30_000.0);
@@ -398,7 +418,10 @@ mod tests {
         // atr_value arg wins; allows callers to pick atr_5 / atr_14 / conservative.
         // atr_value 參數優先；caller 可挑 atr_5 / atr_14 / conservative。
         let mut ind = IndicatorSnapshot::default();
-        ind.atr_14 = Some(AtrResult { atr: 999.0, atr_percent: 9.99 });
+        ind.atr_14 = Some(AtrResult {
+            atr: 999.0,
+            atr_percent: 9.99,
+        });
         let intent = make_intent(true, 0.001);
         let event = make_event(1_700_000_000_000, 100.0);
         let paper = paper_state_with_balance(10_000.0);

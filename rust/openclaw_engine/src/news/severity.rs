@@ -67,10 +67,8 @@ impl SeverityConfig {
             ("rss_google", 0.65),
             ("mock", 1.0),
         ];
-        let source_weights: HashMap<String, f64> = src_pairs
-            .iter()
-            .map(|(k, v)| (k.to_string(), *v))
-            .collect();
+        let source_weights: HashMap<String, f64> =
+            src_pairs.iter().map(|(k, v)| (k.to_string(), *v)).collect();
 
         Self {
             keyword_weights,
@@ -184,7 +182,12 @@ mod tests {
         let gn = item("ETF news today", "neutral body", "google_news_crypto");
         let s_cp = score_severity(&cp, &cfg);
         let s_gn = score_severity(&gn, &cfg);
-        assert!(s_cp > s_gn, "cryptopanic ({}) should beat google_news ({})", s_cp, s_gn);
+        assert!(
+            s_cp > s_gn,
+            "cryptopanic ({}) should beat google_news ({})",
+            s_cp,
+            s_gn
+        );
         // EN: Ratio should reflect 0.65 / 1.0.
         // 中文: 比值應反映 0.65 / 1.0。
         assert!((s_gn / s_cp - 0.65).abs() < 1e-9);

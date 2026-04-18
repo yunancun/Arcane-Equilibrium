@@ -234,25 +234,61 @@ pub struct MaCrossoverParams {
     pub confluence_threshold_full: f64,
 }
 
-fn default_entry_conf_base_ma() -> f64 { 0.45 }
-fn default_entry_regime_bonus() -> f64 { 0.15 }
-fn default_exit_conf_base_ma() -> f64 { 0.5 }
+fn default_entry_conf_base_ma() -> f64 {
+    0.45
+}
+fn default_entry_regime_bonus() -> f64 {
+    0.15
+}
+fn default_exit_conf_base_ma() -> f64 {
+    0.5
+}
 // G-SR-1 confluence defaults (shared) / 匯流默認值
-fn default_min_persistence_ms() -> u64 { 120_000 }
-fn default_min_persistence_ms_breakout() -> u64 { 60_000 }
-fn default_min_notional_usd() -> f64 { 10.0 }
-fn default_weight_adx_trend() -> f64 { 25.0 }
-fn default_weight_regime_trend() -> f64 { 20.0 }
-fn default_weight_volume_trend() -> f64 { 12.0 }
-fn default_weight_momentum_trend() -> f64 { 8.0 }
-fn default_weight_adx_reversion() -> f64 { 15.0 }
-fn default_weight_regime_reversion() -> f64 { 30.0 }
-fn default_weight_volume_reversion() -> f64 { 10.0 }
-fn default_weight_momentum_reversion() -> f64 { 10.0 }
-fn default_adx_floor() -> f64 { 8.0 }
-fn default_threshold_no_trade() -> f64 { 45.0 } // EDGE-P1-3: 35→45
-fn default_threshold_light() -> f64 { 52.0 }   // EDGE-P1-3: 45→52
-fn default_threshold_full() -> f64 { 58.0 }    // EDGE-P1-3: 55→58
+fn default_min_persistence_ms() -> u64 {
+    120_000
+}
+fn default_min_persistence_ms_breakout() -> u64 {
+    60_000
+}
+fn default_min_notional_usd() -> f64 {
+    10.0
+}
+fn default_weight_adx_trend() -> f64 {
+    25.0
+}
+fn default_weight_regime_trend() -> f64 {
+    20.0
+}
+fn default_weight_volume_trend() -> f64 {
+    12.0
+}
+fn default_weight_momentum_trend() -> f64 {
+    8.0
+}
+fn default_weight_adx_reversion() -> f64 {
+    15.0
+}
+fn default_weight_regime_reversion() -> f64 {
+    30.0
+}
+fn default_weight_volume_reversion() -> f64 {
+    10.0
+}
+fn default_weight_momentum_reversion() -> f64 {
+    10.0
+}
+fn default_adx_floor() -> f64 {
+    8.0
+}
+fn default_threshold_no_trade() -> f64 {
+    45.0
+} // EDGE-P1-3: 35→45
+fn default_threshold_light() -> f64 {
+    52.0
+} // EDGE-P1-3: 45→52
+fn default_threshold_full() -> f64 {
+    58.0
+} // EDGE-P1-3: 55→58
 
 impl MaCrossoverParams {
     /// Build ConfluenceConfig from TOML params (trend profile).
@@ -359,11 +395,21 @@ pub struct BbReversionParams {
     pub confluence_threshold_full: f64,
 }
 
-fn default_entry_conf_base_bbr() -> f64 { 0.6 }
-fn default_exit_conf_base_bbr() -> f64 { 0.55 }
-fn default_exit_pctb_lower() -> f64 { 0.2 }
-fn default_exit_pctb_upper() -> f64 { 0.8 }
-fn default_hurst_regime_boost() -> f64 { 0.1 }
+fn default_entry_conf_base_bbr() -> f64 {
+    0.6
+}
+fn default_exit_conf_base_bbr() -> f64 {
+    0.55
+}
+fn default_exit_pctb_lower() -> f64 {
+    0.2
+}
+fn default_exit_pctb_upper() -> f64 {
+    0.8
+}
+fn default_hurst_regime_boost() -> f64 {
+    0.1
+}
 
 impl BbReversionParams {
     pub fn build_confluence_config(&self) -> confluence::ConfluenceConfig {
@@ -466,8 +512,12 @@ pub struct BbBreakoutParams {
     pub confluence_threshold_full: f64,
 }
 
-fn default_entry_conf_base_bbb() -> f64 { 0.7 }
-fn default_exit_conf_base_bbb() -> f64 { 0.5 }
+fn default_entry_conf_base_bbb() -> f64 {
+    0.7
+}
+fn default_exit_conf_base_bbb() -> f64 {
+    0.5
+}
 
 impl BbBreakoutParams {
     /// Build ConfluenceConfig from TOML params (breakout profile: qty modifier, not gate).
@@ -554,12 +604,24 @@ pub struct GridTradingParams {
     pub max_cooldown_boost: f64,
 }
 
-fn default_adaptive_range_pct() -> f64 { 0.10 }
-fn default_reject_backoff_ms() -> u64 { 30_000 }
-fn default_ou_update_interval() -> usize { 50 }
-fn default_adx_low_threshold() -> f64 { 20.0 }
-fn default_adx_high_threshold() -> f64 { 50.0 }
-fn default_max_cooldown_boost() -> f64 { 5.0 }
+fn default_adaptive_range_pct() -> f64 {
+    0.10
+}
+fn default_reject_backoff_ms() -> u64 {
+    30_000
+}
+fn default_ou_update_interval() -> usize {
+    50
+}
+fn default_adx_low_threshold() -> f64 {
+    20.0
+}
+fn default_adx_high_threshold() -> f64 {
+    50.0
+}
+fn default_max_cooldown_boost() -> f64 {
+    5.0
+}
 
 impl Default for GridTradingParams {
     fn default() -> Self {
@@ -617,12 +679,24 @@ pub struct FundingArbParams {
     pub entry_basis_ratio: f64,
 }
 
-fn default_fa_total_cost_bps() -> f64 { 34.0 }
-fn default_fa_expected_periods() -> f64 { 3.0 }
-fn default_fa_funding_threshold() -> f64 { 0.0005 }
-fn default_fa_max_basis_pct() -> f64 { 0.5 }
-fn default_fa_max_hold_ms() -> u64 { 72 * 3_600_000 }
-fn default_fa_entry_basis_ratio() -> f64 { 0.8 }
+fn default_fa_total_cost_bps() -> f64 {
+    34.0
+}
+fn default_fa_expected_periods() -> f64 {
+    3.0
+}
+fn default_fa_funding_threshold() -> f64 {
+    0.0005
+}
+fn default_fa_max_basis_pct() -> f64 {
+    0.5
+}
+fn default_fa_max_hold_ms() -> u64 {
+    72 * 3_600_000
+}
+fn default_fa_entry_basis_ratio() -> f64 {
+    0.8
+}
 
 impl Default for FundingArbParams {
     fn default() -> Self {
@@ -640,25 +714,63 @@ impl Default for FundingArbParams {
 }
 
 // Serde default helpers / Serde 默認值輔助函數
-fn default_true() -> bool { true }
-fn default_ma_cooldown() -> u64 { 300_000 }
-fn default_bb_cooldown() -> u64 { 600_000 }
-fn default_adx() -> f64 { 20.0 }
-fn default_higher_tf_alpha() -> f64 { 0.003 }
-fn default_conf_scale() -> f64 { 1.0 }
-fn default_squeeze_bw() -> f64 { 0.02 }
-fn default_expansion_bw() -> f64 { 0.04 }
-fn default_volume_threshold() -> f64 { 1.5 }
-fn default_trailing_atr() -> f64 { 2.0 }
-fn default_squeeze_expiry() -> u64 { 1_800_000 }
-fn default_limit_offset() -> f64 { 10.0 }
-fn default_rsi_oversold() -> f64 { 30.0 }
-fn default_rsi_overbought() -> f64 { 70.0 }
-fn default_funding_cooldown() -> u64 { 3_600_000 }
-fn default_grid_levels() -> usize { 10 }
-fn default_spacing_mode() -> String { "linear".into() }
-fn default_health_check_interval() -> u64 { 200 }
-fn default_max_out_of_range() -> u64 { 50 }
+fn default_true() -> bool {
+    true
+}
+fn default_ma_cooldown() -> u64 {
+    300_000
+}
+fn default_bb_cooldown() -> u64 {
+    600_000
+}
+fn default_adx() -> f64 {
+    20.0
+}
+fn default_higher_tf_alpha() -> f64 {
+    0.003
+}
+fn default_conf_scale() -> f64 {
+    1.0
+}
+fn default_squeeze_bw() -> f64 {
+    0.02
+}
+fn default_expansion_bw() -> f64 {
+    0.04
+}
+fn default_volume_threshold() -> f64 {
+    1.5
+}
+fn default_trailing_atr() -> f64 {
+    2.0
+}
+fn default_squeeze_expiry() -> u64 {
+    1_800_000
+}
+fn default_limit_offset() -> f64 {
+    10.0
+}
+fn default_rsi_oversold() -> f64 {
+    30.0
+}
+fn default_rsi_overbought() -> f64 {
+    70.0
+}
+fn default_funding_cooldown() -> u64 {
+    3_600_000
+}
+fn default_grid_levels() -> usize {
+    10
+}
+fn default_spacing_mode() -> String {
+    "linear".into()
+}
+fn default_health_check_interval() -> u64 {
+    200
+}
+fn default_max_out_of_range() -> u64 {
+    50
+}
 
 /// Resolve settings directory: `OPENCLAW_BASE_DIR/settings` or `./settings`.
 /// 解析設定目錄：`OPENCLAW_BASE_DIR/settings` 或 `./settings`。
@@ -940,7 +1052,11 @@ mod tests {
     #[test]
     fn test_strategy_factory_creates_five_strategies() {
         let strategies = StrategyFactory::create_all();
-        assert_eq!(strategies.len(), 5, "factory should produce exactly 5 strategies");
+        assert_eq!(
+            strategies.len(),
+            5,
+            "factory should produce exactly 5 strategies"
+        );
         let names: Vec<&str> = strategies.iter().map(|s| s.name()).collect();
         assert!(names.contains(&"ma_crossover"), "missing ma_crossover");
         assert!(names.contains(&"bb_reversion"), "missing bb_reversion");
@@ -955,7 +1071,9 @@ mod tests {
         for s in &strategies {
             match s.name() {
                 // OC-5: funding_arb inactive by default (TOML controls activation)
-                "funding_arb" => assert!(!s.is_active(), "funding_arb should be inactive by default"),
+                "funding_arb" => {
+                    assert!(!s.is_active(), "funding_arb should be inactive by default")
+                }
                 _ => assert!(s.is_active(), "{} should be active by default", s.name()),
             }
         }
@@ -1094,7 +1212,10 @@ grid_levels = 20
         let mut p = StrategyParamsConfig::default();
         p.ma_crossover.conf_scale = 0.5;
         let strategies = StrategyFactory::create_with_params(&p);
-        let mac = strategies.iter().find(|s| s.name() == "ma_crossover").unwrap();
+        let mac = strategies
+            .iter()
+            .find(|s| s.name() == "ma_crossover")
+            .unwrap();
         assert!((mac.conf_scale() - 0.5).abs() < 1e-10);
     }
 }

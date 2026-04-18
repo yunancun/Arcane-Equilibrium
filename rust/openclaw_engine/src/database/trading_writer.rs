@@ -97,13 +97,41 @@ async fn flush_all(
     state_changes: &mut Vec<TradingMsg>,
 ) {
     tokio::join!(
-        async { if !signals.is_empty() { flush_signals(pool, signals).await; } },
-        async { if !intents.is_empty() { flush_intents(pool, intents).await; } },
-        async { if !fills.is_empty() { flush_fills(pool, fills).await; } },
-        async { if !positions.is_empty() { flush_positions(pool, positions).await; } },
-        async { if !verdicts.is_empty() { flush_verdicts(pool, verdicts).await; } },
-        async { if !orders.is_empty() { flush_orders(pool, orders).await; } },
-        async { if !state_changes.is_empty() { flush_order_state_changes(pool, state_changes).await; } },
+        async {
+            if !signals.is_empty() {
+                flush_signals(pool, signals).await;
+            }
+        },
+        async {
+            if !intents.is_empty() {
+                flush_intents(pool, intents).await;
+            }
+        },
+        async {
+            if !fills.is_empty() {
+                flush_fills(pool, fills).await;
+            }
+        },
+        async {
+            if !positions.is_empty() {
+                flush_positions(pool, positions).await;
+            }
+        },
+        async {
+            if !verdicts.is_empty() {
+                flush_verdicts(pool, verdicts).await;
+            }
+        },
+        async {
+            if !orders.is_empty() {
+                flush_orders(pool, orders).await;
+            }
+        },
+        async {
+            if !state_changes.is_empty() {
+                flush_order_state_changes(pool, state_changes).await;
+            }
+        },
     );
 }
 
@@ -430,19 +458,30 @@ async fn flush_verdicts(pool: &DbPool, buf: &mut Vec<TradingMsg>) {
 async fn flush_orders(pool: &DbPool, buf: &mut Vec<TradingMsg>) {
     let pg = match pool.get() {
         Some(p) => p,
-        None => { buf.clear(); return; }
+        None => {
+            buf.clear();
+            return;
+        }
     };
     for chunk in buf.chunks(ORDER_BATCH_MAX) {
         let mut qb: QueryBuilder<sqlx::Postgres> = QueryBuilder::new(
             "INSERT INTO trading.orders \
              (ts, order_id, symbol, side, order_type, qty, strategy_name, \
-              category, is_paper, status, engine_mode) "
+              category, is_paper, status, engine_mode) ",
         );
         qb.push_values(chunk.iter(), |mut b, msg| {
             if let TradingMsg::Order {
-                order_id, ts_ms, symbol, side, order_type, qty,
-                strategy_name, is_close: _, engine_mode,
-            } = msg {
+                order_id,
+                ts_ms,
+                symbol,
+                side,
+                order_type,
+                qty,
+                strategy_name,
+                is_close: _,
+                engine_mode,
+            } = msg
+            {
                 b.push_bind(
                     chrono::DateTime::from_timestamp_millis(*ts_ms as i64).unwrap_or_default(),
                 );
@@ -453,7 +492,7 @@ async fn flush_orders(pool: &DbPool, buf: &mut Vec<TradingMsg>) {
                 b.push_bind(sanitize_f64_or_zero(*qty) as f32);
                 b.push_bind(strategy_name.as_str());
                 b.push_bind("linear"); // Bybit USDT perp default / USDT 永續默認
-                // DEPRECATED is_paper derived from engine_mode (Grafana compat)
+                                       // DEPRECATED is_paper derived from engine_mode (Grafana compat)
                 b.push_bind(engine_mode != "live");
                 b.push_bind("Working"); // order enters this table when exchange confirms
                 b.push_bind(engine_mode.as_str());
@@ -461,8 +500,14 @@ async fn flush_orders(pool: &DbPool, buf: &mut Vec<TradingMsg>) {
         });
         qb.push(" ON CONFLICT (order_id, ts) DO NOTHING");
         match qb.build().execute(pg).await {
-            Ok(r) => { pool.record_success(); debug!(rows = r.rows_affected(), "orders flushed"); }
-            Err(e) => { let _ = pool.record_failure(); warn!(error = %e, "orders flush failed"); }
+            Ok(r) => {
+                pool.record_success();
+                debug!(rows = r.rows_affected(), "orders flushed");
+            }
+            Err(e) => {
+                let _ = pool.record_failure();
+                warn!(error = %e, "orders flush failed");
+            }
         }
     }
     buf.clear();
@@ -473,18 +518,28 @@ async fn flush_orders(pool: &DbPool, buf: &mut Vec<TradingMsg>) {
 async fn flush_order_state_changes(pool: &DbPool, buf: &mut Vec<TradingMsg>) {
     let pg = match pool.get() {
         Some(p) => p,
-        None => { buf.clear(); return; }
+        None => {
+            buf.clear();
+            return;
+        }
     };
     for chunk in buf.chunks(STATE_CHANGE_BATCH_MAX) {
         let mut qb: QueryBuilder<sqlx::Postgres> = QueryBuilder::new(
             "INSERT INTO trading.order_state_changes \
-             (ts, order_id, from_status, to_status, filled_qty, avg_price, reason, engine_mode) "
+             (ts, order_id, from_status, to_status, filled_qty, avg_price, reason, engine_mode) ",
         );
         qb.push_values(chunk.iter(), |mut b, msg| {
             if let TradingMsg::OrderStateChange {
-                order_id, ts_ms, from_status, to_status,
-                filled_qty, avg_price, reason, engine_mode,
-            } = msg {
+                order_id,
+                ts_ms,
+                from_status,
+                to_status,
+                filled_qty,
+                avg_price,
+                reason,
+                engine_mode,
+            } = msg
+            {
                 b.push_bind(
                     chrono::DateTime::from_timestamp_millis(*ts_ms as i64).unwrap_or_default(),
                 );
@@ -499,8 +554,14 @@ async fn flush_order_state_changes(pool: &DbPool, buf: &mut Vec<TradingMsg>) {
         });
         qb.push(" ON CONFLICT (order_id, ts, to_status) DO NOTHING");
         match qb.build().execute(pg).await {
-            Ok(r) => { pool.record_success(); debug!(rows = r.rows_affected(), "order_state_changes flushed"); }
-            Err(e) => { let _ = pool.record_failure(); warn!(error = %e, "order_state_changes flush failed"); }
+            Ok(r) => {
+                pool.record_success();
+                debug!(rows = r.rows_affected(), "order_state_changes flushed");
+            }
+            Err(e) => {
+                let _ = pool.record_failure();
+                warn!(error = %e, "order_state_changes flush failed");
+            }
         }
     }
     buf.clear();
@@ -555,10 +616,7 @@ mod tests {
             INTENT_BATCH_MAX * 11 <= 65535,
             "intents batch exceeds PG limit"
         );
-        assert!(
-            FILL_BATCH_MAX * 15 <= 65535,
-            "fills batch exceeds PG limit"
-        );
+        assert!(FILL_BATCH_MAX * 15 <= 65535, "fills batch exceeds PG limit");
         assert!(
             POSITION_BATCH_MAX * 9 <= 65535,
             "positions batch exceeds PG limit"

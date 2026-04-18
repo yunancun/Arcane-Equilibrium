@@ -29,8 +29,8 @@ pub use mock::MockProvider;
 pub use pipeline::{NewsPipeline, ProcessedNewsItem};
 pub use provider::NewsProvider;
 pub use router::{
-    GuardianHaltCheck, LearningContextSink, NewsRouter, RegimeNewsBuffer,
-    GUARDIAN_HALT_THRESHOLD, REGIME_FRESH_AGE_HOURS,
+    GuardianHaltCheck, LearningContextSink, NewsRouter, RegimeNewsBuffer, GUARDIAN_HALT_THRESHOLD,
+    REGIME_FRESH_AGE_HOURS,
 };
 pub use rss::RssProvider;
 pub use severity::{score_severity, SeverityConfig};

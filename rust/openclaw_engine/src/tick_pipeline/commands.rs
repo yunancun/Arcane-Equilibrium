@@ -3,11 +3,12 @@
 //! 管線命令處理 — 外部訂單提交、風控狀態、成交處理、
 //! 平倉操作、快照、系統模式。
 
+use super::on_tick_helpers::{
+    make_context_id, make_fill_id, make_intent_id, make_verdict_id, push_capped,
+};
 use super::*;
-use super::on_tick_helpers::{push_capped, make_context_id, make_intent_id, make_verdict_id, make_fill_id};
 
 impl TickPipeline {
-
     /// ARCH-RC1 1C-3-B: Build Rust-native risk runtime status snapshot.
     ///
     /// Intentionally exposes the real state machine rather than synthesising
@@ -86,9 +87,13 @@ impl TickPipeline {
             persistence_elapsed_ms: None,
         };
 
-        let result = self
-            .intent_processor
-            .process(&intent, &self.governance, &self.paper_state, atr_value, GovernanceProfile::Exploration);
+        let result = self.intent_processor.process(
+            &intent,
+            &self.governance,
+            &self.paper_state,
+            atr_value,
+            GovernanceProfile::Exploration,
+        );
 
         // Persist Guardian verdict (all verdicts including rejections) / 持久化 Guardian 裁定（含拒絕）
         if let (Some(ref tx), Some(ref vi)) = (&self.trading_tx, &result.verdict_info) {
@@ -113,7 +118,9 @@ impl TickPipeline {
                 .rejected_reason
                 .unwrap_or_else(|| "rejected_unknown".into()));
         }
-        let mut fill = result.fill.ok_or_else(|| "submitted_but_no_fill".to_string())?;
+        let mut fill = result
+            .fill
+            .ok_or_else(|| "submitted_but_no_fill".to_string())?;
 
         // Instrument-aware rounding (mirrors on_tick paper path).
         // 合約精度取整（與 on_tick 紙盤分支一致）。
@@ -155,6 +162,12 @@ impl TickPipeline {
             strategy,
         );
 
+        // DYNAMIC-RISK-1: non-zero realized_pnl ⇒ close fill — feed the sizer.
+        // DYNAMIC-RISK-1：realized_pnl != 0 代表平倉，餵入動態風險調整器。
+        if realized_pnl != 0.0 {
+            self.dynamic_risk_sizer.record_closed_trade(realized_pnl);
+        }
+
         // EDGE-P3-1 R2: entry_context_id stamping for fresh opens — must reuse the
         // SAME context_id value that will be written to the Fill row below (same
         // em, symbol, now_ms → deterministic make_context_id).
@@ -179,21 +192,29 @@ impl TickPipeline {
         self.stats.total_intents += 1;
         self.stats.total_fills += 1;
 
-        push_capped(&mut self.recent_intents, TimestampedIntent {
-            timestamp_ms: now_ms,
-            intent: intent.clone(),
-            result: "submitted".into(),
-        }, 50);
-        push_capped(&mut self.recent_fills, TimestampedFill {
-            timestamp_ms: now_ms,
-            symbol: symbol.to_string(),
-            is_long,
-            qty: fill.fill_qty,
-            price: fill.fill_price,
-            fee: fill.fee,
-            realized_pnl,
-            strategy: strategy.to_string(),
-        }, 50);
+        push_capped(
+            &mut self.recent_intents,
+            TimestampedIntent {
+                timestamp_ms: now_ms,
+                intent: intent.clone(),
+                result: "submitted".into(),
+            },
+            50,
+        );
+        push_capped(
+            &mut self.recent_fills,
+            TimestampedFill {
+                timestamp_ms: now_ms,
+                symbol: symbol.to_string(),
+                is_long,
+                qty: fill.fill_qty,
+                price: fill.fill_price,
+                fee: fill.fee,
+                realized_pnl,
+                strategy: strategy.to_string(),
+            },
+            50,
+        );
 
         let order_id = format!("ext-{symbol}-{now_ms}");
 
@@ -346,8 +367,6 @@ impl TickPipeline {
         self.context_throttled
     }
 
-
-
     /// EXT-1: Apply a confirmed fill from the exchange to paper_state.
     /// Called by event_consumer when exchange confirms a fill for a pending order.
     /// EXT-1：將交易所確認的成交應用到 paper_state。
@@ -389,20 +408,27 @@ impl TickPipeline {
         // 非零 realized_pnl 表示平倉成交（開倉成交返回 0.0）。
         if realized_pnl.abs() > f64::EPSILON {
             self.intent_processor.record_trade(symbol, realized_pnl);
+            // DYNAMIC-RISK-1: realized close on exchange-confirmed fill.
+            // DYNAMIC-RISK-1：交易所確認的平倉成交，餵入動態風險調整器。
+            self.dynamic_risk_sizer.record_closed_trade(realized_pnl);
         }
         // Clear pending_close flag if this was a close fill / 如果是平倉成交，清除待處理平倉標記
         self.pending_close_symbols.remove(symbol);
 
-        push_capped(&mut self.recent_fills, TimestampedFill {
-            timestamp_ms: ts_ms,
-            symbol: symbol.to_string(),
-            is_long,
-            qty,
-            price: fill_price,
-            fee,
-            realized_pnl,
-            strategy: strategy.to_string(),
-        }, 50);
+        push_capped(
+            &mut self.recent_fills,
+            TimestampedFill {
+                timestamp_ms: ts_ms,
+                symbol: symbol.to_string(),
+                is_long,
+                qty,
+                price: fill_price,
+                fee,
+                realized_pnl,
+                strategy: strategy.to_string(),
+            },
+            50,
+        );
 
         if let Some(ref tx) = self.trading_tx {
             let em = self.effective_engine_mode();
@@ -497,7 +523,8 @@ impl TickPipeline {
             .map(|p| p.symbol.clone())
             .collect();
         let before = self.pending_close_symbols.len();
-        self.pending_close_symbols.retain(|s| open_symbols.contains(s));
+        self.pending_close_symbols
+            .retain(|s| open_symbols.contains(s));
         let removed = before - self.pending_close_symbols.len();
         if removed > 0 {
             tracing::debug!(removed, "reconcile_pending_exchange_orders: cleared stale pending-close flags / 清理過期 pending-close 標記");
@@ -533,8 +560,7 @@ impl TickPipeline {
             for (symbol, is_long, qty, price) in positions {
                 if let Some(ref tx) = self.order_dispatch_tx {
                     self.exchange_seq = self.exchange_seq.wrapping_add(1);
-                    let order_link_id =
-                        format!("oc_ipc_close_{}_{}", ts_ms, self.exchange_seq);
+                    let order_link_id = format!("oc_ipc_close_{}_{}", ts_ms, self.exchange_seq);
                     let _ = tx.send(OrderDispatchRequest {
                         symbol: symbol.clone(),
                         is_long: !is_long, // opposite side to close / 相反方向平倉
@@ -554,8 +580,15 @@ impl TickPipeline {
             count
         } else {
             // Paper mode: clear paper_state directly (no exchange orders).
-            // 紙盤模式：直接清除 paper_state（無交易所訂單）。
-            self.paper_state.close_all_positions()
+            // Forward every realized PnL to the sizer (DYNAMIC-RISK-1 BUG-1 fix).
+            // 紙盤模式：直接清除 paper_state，並把每筆實現 PnL 餵給 sizer。
+            let results = self.paper_state.close_all_positions();
+            for (_, pnl) in &results {
+                if *pnl != 0.0 {
+                    self.dynamic_risk_sizer.record_closed_trade(*pnl);
+                }
+            }
+            results.len()
         }
     }
 
@@ -648,13 +681,18 @@ impl TickPipeline {
         } else {
             // Paper mode: immediate close via paper_state.
             // 紙盤模式：通過 paper_state 立即平倉。
-            self.paper_state.close_position_at_market(symbol).is_some()
+            match self.paper_state.close_position_at_market(symbol) {
+                Some(pnl) => {
+                    self.dynamic_risk_sizer.record_closed_trade(pnl);
+                    true
+                }
+                None => false,
+            }
         }
     }
 
     /// Build a canary record if canary_mode is enabled (R07-2).
     /// 灰度模式啟用時構建灰度記錄。
-
 
     pub fn grant_paper_auth(&mut self) -> Result<(), String> {
         self.governance
@@ -772,9 +810,7 @@ impl TickPipeline {
         }
         self.system_mode = new_mode;
         info!(old = %old_mode, new = %new_mode, "system_mode updated / 系統模式已更新");
-        Ok(format!(
-            "{{\"old\":\"{old_mode}\",\"new\":\"{new_mode}\"}}"
-        ))
+        Ok(format!("{{\"old\":\"{old_mode}\",\"new\":\"{new_mode}\"}}"))
     }
 
     /// Read-only access to latest prices map (R06-A).

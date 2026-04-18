@@ -19,7 +19,11 @@ use tracing::warn;
 /// 中文: 純決策函數 — 給定 V014 存的 ts 與當前時間，判斷冷卻是否仍生效。
 ///       抽成獨立函數以便不依賴 PG fixture 做單測。冷卻仍活躍回 Some，
 ///       過期或時鐘倒退（stored_ts > now）回 None（避免錯誤地永久 pin 未來冷卻）。
-pub(crate) fn cooldown_ts_if_active(stored_ts_ms: i64, now_ms: u64, cooldown_ms: u64) -> Option<u64> {
+pub(crate) fn cooldown_ts_if_active(
+    stored_ts_ms: i64,
+    now_ms: u64,
+    cooldown_ms: u64,
+) -> Option<u64> {
     if stored_ts_ms < 0 {
         return None;
     }
@@ -61,11 +65,9 @@ pub(crate) async fn load_governor_cooldown_from_audit(
     .fetch_optional(pool)
     .await;
     match row {
-        Ok(Some((ts,))) => cooldown_ts_if_active(
-            ts,
-            now_ms,
-            TickPipeline::GOVERNOR_DE_ESCALATION_COOLDOWN_MS,
-        ),
+        Ok(Some((ts,))) => {
+            cooldown_ts_if_active(ts, now_ms, TickPipeline::GOVERNOR_DE_ESCALATION_COOLDOWN_MS)
+        }
         Ok(None) => None,
         Err(e) => {
             warn!(error = %e, "ARCH-RC1 1C-4 B1: V014 governor cooldown query failed (fail-soft) / V014 governor 冷卻查詢失敗（fail-soft）");
@@ -85,7 +87,10 @@ mod cooldown_tests {
         // 1h ago — well inside the 24h window.
         let now = 1_000_000_000_000u64;
         let stored = (now - 3_600_000) as i64;
-        assert_eq!(cooldown_ts_if_active(stored, now, COOLDOWN_MS), Some(stored as u64));
+        assert_eq!(
+            cooldown_ts_if_active(stored, now, COOLDOWN_MS),
+            Some(stored as u64)
+        );
     }
 
     #[test]

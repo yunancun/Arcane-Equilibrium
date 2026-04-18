@@ -24,16 +24,15 @@
 //!  S3. 20 rapid handler escalate/de-escalate rounds — no deadlock
 //!  S4. 1000 evaluate_actions calls performance < 100ms
 
+use openclaw_core::sm::risk_gov::RiskLevel;
+use openclaw_engine::event_consumer::PendingOrder;
 use openclaw_engine::position_reconciler::{
-    evaluate_actions, check_rest_failure_escalation, DriftVerdict, ReconcilerAction,
-    ReconcilerState, PERSISTENT_DRIFT_CYCLES, RECOVERY_CYCLES_CAUTIOUS_TO_NORMAL,
-    RECOVERY_WALL_CAUTIOUS_TO_NORMAL_MS,
-    GLOBAL_COOLDOWN_MS, REST_FAILURE_TIER1_COUNT, REST_FAILURE_TIER2_COUNT,
-    REST_FAILURE_TIER3_COUNT, STARTUP_GRACE_MS,
+    check_rest_failure_escalation, evaluate_actions, DriftVerdict, ReconcilerAction,
+    ReconcilerState, GLOBAL_COOLDOWN_MS, PERSISTENT_DRIFT_CYCLES,
+    RECOVERY_CYCLES_CAUTIOUS_TO_NORMAL, RECOVERY_WALL_CAUTIOUS_TO_NORMAL_MS,
+    REST_FAILURE_TIER1_COUNT, REST_FAILURE_TIER2_COUNT, REST_FAILURE_TIER3_COUNT, STARTUP_GRACE_MS,
 };
 use openclaw_engine::tick_pipeline::{PipelineCommand, TickPipeline};
-use openclaw_engine::event_consumer::PendingOrder;
-use openclaw_core::sm::risk_gov::RiskLevel;
 use std::collections::HashMap;
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -142,7 +141,9 @@ fn e2e_major_drift_escalates_to_cautious() {
     // Phase 1: evaluate_actions produces Escalate → Cautious
     let actions = evaluate_actions(&mut state, RiskLevel::Normal, &drifts, t0);
     assert_eq!(actions.len(), 1);
-    assert!(matches!(&actions[0], ReconcilerAction::Escalate { target, .. } if *target == RiskLevel::Cautious));
+    assert!(
+        matches!(&actions[0], ReconcilerAction::Escalate { target, .. } if *target == RiskLevel::Cautious)
+    );
 
     // Phase 2: Drive through handler — governor level actually changes
     let mut p = make_pipeline();
@@ -230,7 +231,10 @@ fn e2e_burst_triggers_circuit_breaker_and_close_all() {
     let has_defensive = actions1.iter().any(|a| {
         matches!(a, ReconcilerAction::Escalate { target, .. } if *target == RiskLevel::Defensive)
     });
-    assert!(has_defensive, "first burst cycle must escalate to Defensive, not CB");
+    assert!(
+        has_defensive,
+        "first burst cycle must escalate to Defensive, not CB"
+    );
     assert_eq!(state.burst_drift_streak, 1);
 
     // Second consecutive burst cycle (far-future ts to bypass cooldown): must reach CB
@@ -238,19 +242,35 @@ fn e2e_burst_triggers_circuit_breaker_and_close_all() {
     let has_cb = actions2.iter().any(|a| {
         matches!(a, ReconcilerAction::Escalate { target, .. } if *target == RiskLevel::CircuitBreaker)
     });
-    let has_close_all = actions2.iter().any(|a| matches!(a, ReconcilerAction::CloseAll { .. }));
+    let has_close_all = actions2
+        .iter()
+        .any(|a| matches!(a, ReconcilerAction::CloseAll { .. }));
 
-    assert!(has_cb, "second consecutive burst cycle must trigger CircuitBreaker escalation");
-    assert!(has_close_all, "second consecutive burst cycle must trigger CloseAll");
+    assert!(
+        has_cb,
+        "second consecutive burst cycle must trigger CircuitBreaker escalation"
+    );
+    assert!(
+        has_close_all,
+        "second consecutive burst cycle must trigger CloseAll"
+    );
 
     // Drive CB through handler
     let mut p = make_pipeline();
     let mut w = make_writer();
     p.governance.risk.thresholds.min_hold_time_ms = 0;
 
-    let r = drive_escalate(&mut p, &mut w, "CircuitBreaker", "5 simultaneous drifts (burst, streak=2)");
+    let r = drive_escalate(
+        &mut p,
+        &mut w,
+        "CircuitBreaker",
+        "5 simultaneous drifts (burst, streak=2)",
+    );
     assert!(r.is_ok());
-    assert_eq!(p.governance.risk.snapshot_level(), RiskLevel::CircuitBreaker);
+    assert_eq!(
+        p.governance.risk.snapshot_level(),
+        RiskLevel::CircuitBreaker
+    );
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -289,12 +309,20 @@ fn e2e_recovery_cautious_to_normal() {
         evaluate_actions(&mut state, RiskLevel::Cautious, &empty_drifts, t);
     }
     // Final evaluation at sufficient wall-clock time
-    let actions = evaluate_actions(&mut state, RiskLevel::Cautious, &empty_drifts, recovery_time);
+    let actions = evaluate_actions(
+        &mut state,
+        RiskLevel::Cautious,
+        &empty_drifts,
+        recovery_time,
+    );
 
     let has_recovery = actions.iter().any(|a| {
         matches!(a, ReconcilerAction::DeEscalate { target, .. } if *target == RiskLevel::Normal)
     });
-    assert!(has_recovery, "should recover to Normal after 30 cycles + 15min");
+    assert!(
+        has_recovery,
+        "should recover to Normal after 30 cycles + 15min"
+    );
 
     // Drive recovery through handler
     let r = drive_de_escalate(&mut p, &mut w, "Normal", "auto-recovery test");
@@ -328,14 +356,14 @@ fn e2e_cb_de_escalation_blocked() {
     state.pre_escalation_level = Some(RiskLevel::Normal);
     state.clean_cycles_since_last_drift = 999;
     state.last_drift_seen_ms = 0;
-    let actions = evaluate_actions(
-        &mut state,
-        RiskLevel::CircuitBreaker,
-        &[],
-        100_000_000,
+    let actions = evaluate_actions(&mut state, RiskLevel::CircuitBreaker, &[], 100_000_000);
+    let has_de_escalate = actions
+        .iter()
+        .any(|a| matches!(a, ReconcilerAction::DeEscalate { .. }));
+    assert!(
+        !has_de_escalate,
+        "evaluate_actions must never propose CB de-escalation"
     );
-    let has_de_escalate = actions.iter().any(|a| matches!(a, ReconcilerAction::DeEscalate { .. }));
-    assert!(!has_de_escalate, "evaluate_actions must never propose CB de-escalation");
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -352,7 +380,10 @@ fn e2e_rest_failure_streak_escalates() {
     state.consecutive_rest_failures = REST_FAILURE_TIER1_COUNT;
 
     let action = check_rest_failure_escalation(&mut state, RiskLevel::Normal, t0);
-    assert!(action.is_some(), "10 REST failures should produce escalation");
+    assert!(
+        action.is_some(),
+        "10 REST failures should produce escalation"
+    );
     let action = action.unwrap();
     assert!(matches!(
         action,
@@ -482,8 +513,13 @@ fn e2e_per_symbol_cooldown_blocks_repeat() {
     // Same symbol, same drift, within 30min cooldown → no action
     // (Already at Cautious, target would be Cautious, target <= current → skip)
     let actions2 = evaluate_actions(&mut state, RiskLevel::Cautious, &drifts, t0 + 60_000);
-    let has_escalate = actions2.iter().any(|a| matches!(a, ReconcilerAction::Escalate { .. }));
-    assert!(!has_escalate, "per-symbol cooldown should prevent repeat escalation to same tier");
+    let has_escalate = actions2
+        .iter()
+        .any(|a| matches!(a, ReconcilerAction::Escalate { .. }));
+    assert!(
+        !has_escalate,
+        "per-symbol cooldown should prevent repeat escalation to same tier"
+    );
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -510,14 +546,25 @@ fn e2e_global_cooldown_limits_rapid_fire() {
     let has_defensive = actions2.iter().any(|a| {
         matches!(a, ReconcilerAction::Escalate { target, .. } if *target == RiskLevel::Defensive)
     });
-    assert!(!has_defensive, "global cooldown should block escalation within 5min");
+    assert!(
+        !has_defensive,
+        "global cooldown should block escalation within 5min"
+    );
 
     // After global cooldown passes → should fire
-    let actions3 = evaluate_actions(&mut state, RiskLevel::Cautious, &drifts2, t0 + GLOBAL_COOLDOWN_MS + 1);
+    let actions3 = evaluate_actions(
+        &mut state,
+        RiskLevel::Cautious,
+        &drifts2,
+        t0 + GLOBAL_COOLDOWN_MS + 1,
+    );
     let has_defensive3 = actions3.iter().any(|a| {
         matches!(a, ReconcilerAction::Escalate { target, .. } if *target == RiskLevel::Defensive)
     });
-    assert!(has_defensive3, "should escalate after global cooldown expires");
+    assert!(
+        has_defensive3,
+        "should escalate after global cooldown expires"
+    );
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -558,38 +605,59 @@ fn e2e_full_recovery_defensive_to_normal() {
     for _ in 0..max_cycles {
         t += 30_000;
         let actions = evaluate_actions(&mut state, RiskLevel::Defensive, &empty, t);
-        if let Some(a) = actions.iter().find(|a| matches!(a, ReconcilerAction::DeEscalate { .. })) {
-            assert!(matches!(a, ReconcilerAction::DeEscalate { target, .. } if *target == RiskLevel::Reduced));
+        if let Some(a) = actions
+            .iter()
+            .find(|a| matches!(a, ReconcilerAction::DeEscalate { .. }))
+        {
+            assert!(
+                matches!(a, ReconcilerAction::DeEscalate { target, .. } if *target == RiskLevel::Reduced)
+            );
             found = true;
             break;
         }
     }
     assert!(found, "Defensive → Reduced recovery must fire");
     drive_de_escalate(&mut pipeline, &mut writer, "Reduced", "recovery").unwrap();
-    assert_eq!(pipeline.governance.risk.snapshot_level(), RiskLevel::Reduced);
+    assert_eq!(
+        pipeline.governance.risk.snapshot_level(),
+        RiskLevel::Reduced
+    );
 
     // Phase 2: Reduced → Cautious (20 cycles + 10 min)
     found = false;
     for _ in 0..max_cycles {
         t += 30_000;
         let actions = evaluate_actions(&mut state, RiskLevel::Reduced, &empty, t);
-        if let Some(a) = actions.iter().find(|a| matches!(a, ReconcilerAction::DeEscalate { .. })) {
-            assert!(matches!(a, ReconcilerAction::DeEscalate { target, .. } if *target == RiskLevel::Cautious));
+        if let Some(a) = actions
+            .iter()
+            .find(|a| matches!(a, ReconcilerAction::DeEscalate { .. }))
+        {
+            assert!(
+                matches!(a, ReconcilerAction::DeEscalate { target, .. } if *target == RiskLevel::Cautious)
+            );
             found = true;
             break;
         }
     }
     assert!(found, "Reduced → Cautious recovery must fire");
     drive_de_escalate(&mut pipeline, &mut writer, "Cautious", "recovery").unwrap();
-    assert_eq!(pipeline.governance.risk.snapshot_level(), RiskLevel::Cautious);
+    assert_eq!(
+        pipeline.governance.risk.snapshot_level(),
+        RiskLevel::Cautious
+    );
 
     // Phase 3: Cautious → Normal (30 cycles + 15 min)
     found = false;
     for _ in 0..max_cycles {
         t += 30_000;
         let actions = evaluate_actions(&mut state, RiskLevel::Cautious, &empty, t);
-        if let Some(a) = actions.iter().find(|a| matches!(a, ReconcilerAction::DeEscalate { .. })) {
-            assert!(matches!(a, ReconcilerAction::DeEscalate { target, .. } if *target == RiskLevel::Normal));
+        if let Some(a) = actions
+            .iter()
+            .find(|a| matches!(a, ReconcilerAction::DeEscalate { .. }))
+        {
+            assert!(
+                matches!(a, ReconcilerAction::DeEscalate { target, .. } if *target == RiskLevel::Normal)
+            );
             found = true;
             break;
         }
@@ -613,21 +681,36 @@ fn e2e_rest_failure_progressive_tiers() {
     // Tier 1: 10 failures → Cautious
     state.consecutive_rest_failures = REST_FAILURE_TIER1_COUNT;
     let a1 = check_rest_failure_escalation(&mut state, RiskLevel::Normal, t0);
-    assert!(matches!(a1, Some(ReconcilerAction::Escalate { target, .. }) if target == RiskLevel::Cautious));
+    assert!(
+        matches!(a1, Some(ReconcilerAction::Escalate { target, .. }) if target == RiskLevel::Cautious)
+    );
 
     // Tier 2: 30 failures → Reduced (from Cautious)
     state.consecutive_rest_failures = REST_FAILURE_TIER2_COUNT;
-    let a2 = check_rest_failure_escalation(&mut state, RiskLevel::Cautious, t0 + GLOBAL_COOLDOWN_MS + 1);
-    assert!(matches!(a2, Some(ReconcilerAction::Escalate { target, .. }) if target == RiskLevel::Reduced));
+    let a2 =
+        check_rest_failure_escalation(&mut state, RiskLevel::Cautious, t0 + GLOBAL_COOLDOWN_MS + 1);
+    assert!(
+        matches!(a2, Some(ReconcilerAction::Escalate { target, .. }) if target == RiskLevel::Reduced)
+    );
 
     // Tier 3: 60 failures → Defensive (from Reduced)
     state.consecutive_rest_failures = REST_FAILURE_TIER3_COUNT;
-    let a3 = check_rest_failure_escalation(&mut state, RiskLevel::Reduced, t0 + 2 * (GLOBAL_COOLDOWN_MS + 1));
-    assert!(matches!(a3, Some(ReconcilerAction::Escalate { target, .. }) if target == RiskLevel::Defensive));
+    let a3 = check_rest_failure_escalation(
+        &mut state,
+        RiskLevel::Reduced,
+        t0 + 2 * (GLOBAL_COOLDOWN_MS + 1),
+    );
+    assert!(
+        matches!(a3, Some(ReconcilerAction::Escalate { target, .. }) if target == RiskLevel::Defensive)
+    );
 
     // Already at target → no action
     state.consecutive_rest_failures = REST_FAILURE_TIER3_COUNT;
-    let a4 = check_rest_failure_escalation(&mut state, RiskLevel::Defensive, t0 + 3 * (GLOBAL_COOLDOWN_MS + 1));
+    let a4 = check_rest_failure_escalation(
+        &mut state,
+        RiskLevel::Defensive,
+        t0 + 3 * (GLOBAL_COOLDOWN_MS + 1),
+    );
     assert!(a4.is_none(), "should not escalate when already at target");
 }
 
@@ -653,12 +736,7 @@ fn e2e_floor_rule_prevents_over_recovery() {
     let mut recovery_found = false;
     for c in 0..25 {
         let t = t0 + 1 + (c as u64) * 30_000;
-        let actions = evaluate_actions(
-            &mut state,
-            RiskLevel::Reduced,
-            &empty,
-            t,
-        );
+        let actions = evaluate_actions(&mut state, RiskLevel::Reduced, &empty, t);
         if actions.iter().any(|a| {
             matches!(a, ReconcilerAction::DeEscalate { target, .. } if *target == RiskLevel::Cautious)
         }) {
@@ -767,16 +845,27 @@ fn stress_50_symbols_simultaneous_drift() {
     let has_defensive = actions1.iter().any(|a| {
         matches!(a, ReconcilerAction::Escalate { target, .. } if *target == RiskLevel::Defensive)
     });
-    assert!(has_defensive, "50 symbols first burst cycle must escalate to Defensive");
+    assert!(
+        has_defensive,
+        "50 symbols first burst cycle must escalate to Defensive"
+    );
 
     // Second consecutive burst cycle → CB + CloseAll
     let actions2 = evaluate_actions(&mut state, RiskLevel::Defensive, &drifts, 999_999_999);
     let has_cb = actions2.iter().any(|a| {
         matches!(a, ReconcilerAction::Escalate { target, .. } if *target == RiskLevel::CircuitBreaker)
     });
-    let has_close_all = actions2.iter().any(|a| matches!(a, ReconcilerAction::CloseAll { .. }));
-    assert!(has_cb, "50 symbols must trigger CB on second consecutive burst");
-    assert!(has_close_all, "50 symbols must trigger CloseAll on second consecutive burst");
+    let has_close_all = actions2
+        .iter()
+        .any(|a| matches!(a, ReconcilerAction::CloseAll { .. }));
+    assert!(
+        has_cb,
+        "50 symbols must trigger CB on second consecutive burst"
+    );
+    assert!(
+        has_close_all,
+        "50 symbols must trigger CloseAll on second consecutive burst"
+    );
 
     // State should have 50 drift streaks tracked
     assert_eq!(state.drift_streak.len(), 50);
@@ -794,7 +883,10 @@ fn stress_rapid_handler_escalate_deescalate() {
     for _ in 0..20 {
         let r = drive_escalate(&mut pipeline, &mut writer, "Cautious", "stress test drift");
         assert!(r.is_ok(), "escalate failed: {r:?}");
-        assert_eq!(pipeline.governance.risk.snapshot_level(), RiskLevel::Cautious);
+        assert_eq!(
+            pipeline.governance.risk.snapshot_level(),
+            RiskLevel::Cautious
+        );
 
         let r = drive_de_escalate(&mut pipeline, &mut writer, "Normal", "stress test recovery");
         assert!(r.is_ok(), "de-escalate failed: {r:?}");
@@ -858,9 +950,7 @@ fn e2e_startup_grace_window_ignores_orphan_storm() {
     let mut drifts: Vec<(String, DriftVerdict)> = (0..6)
         .map(|i| (format!("GHOST{i}USDT|Buy"), DriftVerdict::Ghost))
         .collect();
-    drifts.extend(
-        (0..4).map(|i| (format!("ORPH{i}USDT|Sell"), DriftVerdict::Orphan)),
-    );
+    drifts.extend((0..4).map(|i| (format!("ORPH{i}USDT|Sell"), DriftVerdict::Orphan)));
 
     // ── Inside grace window: storm must be suppressed, state must not advance.
     // ── 寬限期內：storm 必須被抑制，state 不可推進。
@@ -873,8 +963,14 @@ fn e2e_startup_grace_window_ignores_orphan_storm() {
             actions
         );
     }
-    assert!(state.drift_streak.is_empty(), "drift_streak must not advance during grace");
-    assert_eq!(state.burst_drift_streak, 0, "burst_drift_streak must not advance during grace");
+    assert!(
+        state.drift_streak.is_empty(),
+        "drift_streak must not advance during grace"
+    );
+    assert_eq!(
+        state.burst_drift_streak, 0,
+        "burst_drift_streak must not advance during grace"
+    );
     assert_eq!(
         state.clean_cycles_since_last_drift, 0,
         "clean_cycles must not advance during grace"
@@ -909,11 +1005,7 @@ fn e2e_startup_grace_window_ignores_orphan_storm() {
     let mut state2 = ReconcilerState::new();
     state2.startup_ms = startup;
     state2.consecutive_rest_failures = REST_FAILURE_TIER1_COUNT;
-    let decision = check_rest_failure_escalation(
-        &mut state2,
-        RiskLevel::Normal,
-        startup + 60_000,
-    );
+    let decision = check_rest_failure_escalation(&mut state2, RiskLevel::Normal, startup + 60_000);
     assert!(
         decision.is_none(),
         "REST tier-1 inside grace must not escalate, got {:?}",
@@ -925,19 +1017,16 @@ fn e2e_startup_grace_window_ignores_orphan_storm() {
     // ── 舊調用方未設 startup_ms 保留 P0-0 前行為：orphan storm 照常升級。
     let mut legacy = ReconcilerState::new();
     assert_eq!(legacy.startup_ms, 0);
-    let actions = evaluate_actions(
-        &mut legacy,
-        RiskLevel::Normal,
-        &drifts,
-        startup + 60_000,
-    );
+    let actions = evaluate_actions(&mut legacy, RiskLevel::Normal, &drifts, startup + 60_000);
     assert!(
         !actions.is_empty(),
         "legacy caller (startup_ms=0) must preserve pre-fix escalation"
     );
     assert!(
-        actions.iter().any(|a| matches!(a, ReconcilerAction::Escalate { .. })
-            || matches!(a, ReconcilerAction::CloseAll { .. })),
+        actions
+            .iter()
+            .any(|a| matches!(a, ReconcilerAction::Escalate { .. })
+                || matches!(a, ReconcilerAction::CloseAll { .. })),
         "legacy caller must still raise an Escalate / CloseAll action"
     );
 }

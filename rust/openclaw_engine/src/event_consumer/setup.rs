@@ -32,7 +32,10 @@ pub(super) fn wire_pipeline(
     // Item 2: dynamic fee rate / 動態費率
     if let Some(rate) = taker_fee_rate {
         pipeline.set_fee_rate(rate);
-        info!(taker_rate = format!("{:.5}", rate), "pipeline using API fee rate / 管線使用 API 費率");
+        info!(
+            taker_rate = format!("{:.5}", rate),
+            "pipeline using API fee rate / 管線使用 API 費率"
+        );
     }
 
     // ARCH-RC1 1C-1: All risk seed values come from RiskConfig::default().
@@ -65,7 +68,9 @@ pub(super) fn wire_pipeline(
         modification_leverage_cap: default_risk.limits.guardian_modification_leverage_cap,
     };
     pipeline.intent_processor.update_guardian_config(gc);
-    pipeline.intent_processor.update_risk_config(default_risk.clone());
+    pipeline
+        .intent_processor
+        .update_risk_config(default_risk.clone());
 
     info!(
         hard_stop = format!("{:.1}%", default_risk.limits.stop_loss_max_pct),

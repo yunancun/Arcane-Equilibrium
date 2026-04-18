@@ -125,7 +125,10 @@ pub async fn run_backfill_cycle(pool: &DbPool) -> Result<u64, String> {
 
 /// Spawn the periodic outcome backfill task.
 /// 啟動定期結果回填任務。
-pub async fn run_backfill_loop(pool: std::sync::Arc<DbPool>, cancel: tokio_util::sync::CancellationToken) {
+pub async fn run_backfill_loop(
+    pool: std::sync::Arc<DbPool>,
+    cancel: tokio_util::sync::CancellationToken,
+) {
     let mut interval = tokio::time::interval(std::time::Duration::from_secs(300)); // 5 min
     interval.tick().await; // skip immediate tick
 

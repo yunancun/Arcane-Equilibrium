@@ -38,10 +38,10 @@ where
         })?;
         return Ok(default);
     }
-    let content = std::fs::read_to_string(path)
-        .map_err(|e| format!("read {}: {}", path.display(), e))?;
-    let config: T = toml::from_str(&content)
-        .map_err(|e| format!("parse {}: {}", path.display(), e))?;
+    let content =
+        std::fs::read_to_string(path).map_err(|e| format!("read {}: {}", path.display(), e))?;
+    let config: T =
+        toml::from_str(&content).map_err(|e| format!("parse {}: {}", path.display(), e))?;
     validate(&config).map_err(|e| format!("validate {}: {}", path.display(), e))?;
     Ok(config)
 }
@@ -52,15 +52,13 @@ where
 /// 將 Config 序列化為 TOML 並儘量原子寫入（同目錄寫 temp → rename）。
 /// 父目錄不存在時自動建立。
 pub fn save_toml<T: Serialize>(path: &Path, value: &T) -> Result<(), String> {
-    let content = toml::to_string_pretty(value)
-        .map_err(|e| format!("serialize toml: {}", e))?;
+    let content = toml::to_string_pretty(value).map_err(|e| format!("serialize toml: {}", e))?;
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)
             .map_err(|e| format!("mkdir {}: {}", parent.display(), e))?;
     }
     let tmp = path.with_extension("toml.tmp");
-    std::fs::write(&tmp, content)
-        .map_err(|e| format!("write {}: {}", tmp.display(), e))?;
+    std::fs::write(&tmp, content).map_err(|e| format!("write {}: {}", tmp.display(), e))?;
     std::fs::rename(&tmp, path)
         .map_err(|e| format!("rename {} -> {}: {}", tmp.display(), path.display(), e))?;
     Ok(())
@@ -83,7 +81,10 @@ mod tests {
     }
     impl Default for Dummy {
         fn default() -> Self {
-            Self { val: default_val(), name: String::new() }
+            Self {
+                val: default_val(),
+                name: String::new(),
+            }
         }
     }
 
@@ -148,7 +149,10 @@ mod tests {
         let dir = std::env::temp_dir().join("oc_io_test_roundtrip");
         let _ = std::fs::create_dir_all(&dir);
         let path = dir.join("rt.toml");
-        let original = Dummy { val: 7, name: "rt".into() };
+        let original = Dummy {
+            val: 7,
+            name: "rt".into(),
+        };
         save_toml(&path, &original).unwrap();
         let loaded: Dummy = load_toml_or_default(&path, always_ok).unwrap();
         assert_eq!(loaded, original);
@@ -163,7 +167,10 @@ mod tests {
             .join("deep");
         let _ = std::fs::remove_dir_all(std::env::temp_dir().join("oc_io_test_mkdir"));
         let path = dir.join("deep.toml");
-        let val = Dummy { val: 3, name: "x".into() };
+        let val = Dummy {
+            val: 3,
+            name: "x".into(),
+        };
         save_toml(&path, &val).unwrap();
         assert!(path.exists());
     }

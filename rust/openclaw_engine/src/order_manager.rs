@@ -570,16 +570,17 @@ impl OrderManager {
     /// M-1 審計修復：缺少品種規格時 fail-closed，而非繞過取整/驗證。先前缺失規格
     /// 會將原始 qty/price 直接送往 Bybit，導致 `retCode=10001 Qty invalid` 拒絕。
     fn validate_and_round(&self, req: &CreateOrderRequest) -> BybitResult<(f64, Option<f64>)> {
-        let spec = self.instruments.get(&req.symbol).ok_or_else(|| {
-            BybitApiError::Business {
+        let spec = self
+            .instruments
+            .get(&req.symbol)
+            .ok_or_else(|| BybitApiError::Business {
                 ret_code: -1,
                 ret_msg: format!(
                     "instrument spec missing for {} — fail-closed / 缺少品種規格 {} — 拒絕下單",
                     req.symbol, req.symbol
                 ),
                 response: serde_json::json!(null),
-            }
-        })?;
+            })?;
 
         let qty = spec.round_qty(req.qty);
 

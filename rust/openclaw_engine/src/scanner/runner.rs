@@ -157,10 +157,7 @@ impl ScannerRunner {
 
             // ── Step 4: Correlation filter / 相關性過濾 ──
             let pinned = config.universe.pinned_symbols.clone();
-            let max_dynamic = config
-                .universe
-                .max_symbols
-                .saturating_sub(pinned.len());
+            let max_dynamic = config.universe.max_symbols.saturating_sub(pinned.len());
 
             let filtered = apply_correlation_filter(
                 candidates.clone(),
@@ -303,7 +300,8 @@ mod tests {
                     crate::bybit_rest_client::BybitEnvironment::Demo,
                     None,
                     None,
-                ).expect("demo client"),
+                )
+                .expect("demo client"),
             ))),
             edge_estimates: Arc::new(parking_lot::RwLock::new(EdgeEstimates::empty())),
             scanner_config: Arc::new(crate::config::ConfigStore::new(ScannerConfig::default())),

@@ -288,7 +288,12 @@ mod tests {
             funding_rate_daily: funding_rate_daily(0.0001),
         };
         match msg {
-            MarketDataMsg::FundingRate { ts_ms, symbol, funding_rate, funding_rate_daily: frd } => {
+            MarketDataMsg::FundingRate {
+                ts_ms,
+                symbol,
+                funding_rate,
+                funding_rate_daily: frd,
+            } => {
                 assert_eq!(ts_ms, 1700000000000);
                 assert_eq!(symbol, "BTCUSDT");
                 assert!((funding_rate - 0.0001).abs() < 1e-12);
@@ -309,7 +314,11 @@ mod tests {
             oi_value: 0.0,
         };
         match msg {
-            MarketDataMsg::OpenInterest { symbol, open_interest, .. } => {
+            MarketDataMsg::OpenInterest {
+                symbol,
+                open_interest,
+                ..
+            } => {
                 assert_eq!(symbol, "ETHUSDT");
                 assert!((open_interest - 150_000.0).abs() < 1e-6);
             }

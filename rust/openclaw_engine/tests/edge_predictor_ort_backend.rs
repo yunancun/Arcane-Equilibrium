@@ -95,7 +95,9 @@ fn test_load_trio_from_q50_fixture_succeeds() {
 fn test_predict_returns_monotone_finite_trio() {
     let predictor = load_predictor_from_path(&q50_fixture_path()).unwrap();
     let features = sample_features();
-    let p = predictor.predict(&features).expect("inference should succeed");
+    let p = predictor
+        .predict(&features)
+        .expect("inference should succeed");
     assert!(p.q10.is_finite() && p.q50.is_finite() && p.q90.is_finite());
     assert!(p.q10 <= p.q50, "q10={} > q50={}", p.q10, p.q50);
     assert!(p.q50 <= p.q90, "q50={} > q90={}", p.q50, p.q90);

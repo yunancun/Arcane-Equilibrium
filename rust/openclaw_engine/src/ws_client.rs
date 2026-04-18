@@ -977,8 +977,14 @@ mod tests {
                 base.saturating_mul(BACKOFF_FACTOR.saturating_pow(attempt)),
                 MAX_RECONNECT_DELAY_MS,
             );
-            assert!(delay >= prev, "delay should be monotonically non-decreasing");
-            assert!(delay <= MAX_RECONNECT_DELAY_MS, "delay should never exceed max");
+            assert!(
+                delay >= prev,
+                "delay should be monotonically non-decreasing"
+            );
+            assert!(
+                delay <= MAX_RECONNECT_DELAY_MS,
+                "delay should never exceed max"
+            );
             prev = delay;
         }
         // After enough attempts, should be capped at max
@@ -990,11 +996,20 @@ mod tests {
     #[test]
     fn test_extract_symbol_multi_segment() {
         // 3-segment: kline.1.BTCUSDT → BTCUSDT
-        assert_eq!(extract_symbol_from_topic("kline.1.BTCUSDT"), Some("BTCUSDT".into()));
+        assert_eq!(
+            extract_symbol_from_topic("kline.1.BTCUSDT"),
+            Some("BTCUSDT".into())
+        );
         // 2-segment: tickers.ETHUSDT → ETHUSDT
-        assert_eq!(extract_symbol_from_topic("tickers.ETHUSDT"), Some("ETHUSDT".into()));
+        assert_eq!(
+            extract_symbol_from_topic("tickers.ETHUSDT"),
+            Some("ETHUSDT".into())
+        );
         // 3-segment orderbook: orderbook.50.XRPUSDT → XRPUSDT
-        assert_eq!(extract_symbol_from_topic("orderbook.50.XRPUSDT"), Some("XRPUSDT".into()));
+        assert_eq!(
+            extract_symbol_from_topic("orderbook.50.XRPUSDT"),
+            Some("XRPUSDT".into())
+        );
         // Edge: trailing dot → empty segment → None
         assert_eq!(extract_symbol_from_topic("kline.1."), None);
         // Single segment (no dot) → just the string itself

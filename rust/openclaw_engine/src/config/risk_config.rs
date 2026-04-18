@@ -78,6 +78,11 @@ pub struct RiskConfig {
     pub runtime: RuntimeKnobs,
     #[serde(default)]
     pub experimental: Experimental,
+    /// DYNAMIC-RISK-1: Sharpe-aware dynamic `per_trade_risk_pct` sizer.
+    /// Hot-reloadable; disabled by default. See `dynamic_risk_sizer.rs`.
+    /// DYNAMIC-RISK-1：Sharpe 動態 `per_trade_risk_pct` 調整器，可熱重載，預設停用。
+    #[serde(default)]
+    pub dynamic_sizing: crate::dynamic_risk_sizer::DynamicRiskSizerConfig,
 }
 
 impl RiskConfig {
@@ -96,6 +101,7 @@ impl RiskConfig {
         self.anti_cluster.validate()?;
         self.correlation.validate()?;
         self.runtime.validate()?;
+        self.dynamic_sizing.validate()?;
 
         // Cross-sub-struct invariant: partial_tp levels must not exceed take_profit_max_pct.
         // 跨 sub-struct 不變量：partial_tp 各層不得超過 take_profit_max_pct。
@@ -356,14 +362,10 @@ impl GlobalLimits {
         }
         // E-Merge-4 Guardian modification knobs / E-Merge-4 Guardian 修正參數
         if !(0.0..=1.0).contains(&self.guardian_modification_size_factor) {
-            return Err(
-                "risk.limits.guardian_modification_size_factor must be in [0, 1]".into(),
-            );
+            return Err("risk.limits.guardian_modification_size_factor must be in [0, 1]".into());
         }
         if self.guardian_modification_leverage_cap < 1.0 {
-            return Err(
-                "risk.limits.guardian_modification_leverage_cap must be >= 1".into(),
-            );
+            return Err("risk.limits.guardian_modification_leverage_cap must be >= 1".into());
         }
         if !(0.0001..=0.20).contains(&self.per_trade_risk_pct) {
             return Err(
@@ -373,9 +375,7 @@ impl GlobalLimits {
         // MICRO-PROFIT-FIX-1: ft_min_notional_ratio_of_entry ∈ [0, 1]; 0 disables the filter.
         // MICRO-PROFIT-FIX-1：ft_min_notional_ratio_of_entry ∈ [0, 1]，0 = 關閉。
         if !(0.0..=1.0).contains(&self.ft_min_notional_ratio_of_entry) {
-            return Err(
-                "risk.limits.ft_min_notional_ratio_of_entry must be in [0, 1]".into(),
-            );
+            return Err("risk.limits.ft_min_notional_ratio_of_entry must be in [0, 1]".into());
         }
         Ok(())
     }
@@ -699,9 +699,7 @@ impl CascadeThresholds {
             && self.pressure_reduced < self.pressure_defensive
             && self.pressure_defensive < self.pressure_circuit)
         {
-            return Err(
-                "risk.cascade pressure tiers must be strictly increasing".into(),
-            );
+            return Err("risk.cascade pressure tiers must be strictly increasing".into());
         }
         Ok(())
     }
@@ -804,10 +802,7 @@ impl RegimeMultipliers {
             ("unknown", &self.unknown),
         ] {
             if b.stop <= 0.0 || b.tp <= 0.0 || b.time <= 0.0 {
-                return Err(format!(
-                    "risk.regime.{} multipliers must all be > 0",
-                    name
-                ));
+                return Err(format!("risk.regime.{} multipliers must all be > 0", name));
             }
         }
         Ok(())
@@ -990,9 +985,7 @@ impl EdgePredictor {
             return Err("risk.edge_predictor.quantile_safety_k must be in [0, 1]".into());
         }
         if !(0.0..=0.2).contains(&self.exploration_rate) {
-            return Err(
-                "risk.edge_predictor.exploration_rate must be in [0, 0.2]".into(),
-            );
+            return Err("risk.edge_predictor.exploration_rate must be in [0, 0.2]".into());
         }
         if self.retrain_cadence_seconds == 0 {
             return Err("risk.edge_predictor.retrain_cadence_seconds must be > 0".into());

@@ -152,11 +152,7 @@ pub fn compute_ucb(state: &ArmState, x: &[f64], alpha: f64, dim: usize) -> f64 {
 
 /// Pick the arm with maximum UCB. None if arms is empty.
 /// 選 UCB 最大的 arm。空時返回 None。
-pub fn select_arm<'a>(
-    arms: &'a [ArmState],
-    x: &[f64],
-    cfg: &LinUcbConfig,
-) -> Option<&'a ArmState> {
+pub fn select_arm<'a>(arms: &'a [ArmState], x: &[f64], cfg: &LinUcbConfig) -> Option<&'a ArmState> {
     if arms.is_empty() {
         return None;
     }

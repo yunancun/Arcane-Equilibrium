@@ -247,7 +247,8 @@ mod tests {
 
     #[test]
     fn test_validate_row_schema_hash_match_ok() {
-        let res = validate_row_schema_hash("a", "sha256:deadbeefdeadbeef", "sha256:deadbeefdeadbeef");
+        let res =
+            validate_row_schema_hash("a", "sha256:deadbeefdeadbeef", "sha256:deadbeefdeadbeef");
         assert!(res.is_ok());
     }
 

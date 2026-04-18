@@ -177,7 +177,10 @@ impl SymbolRegistry {
 
             // Remove eligible symbol / 移除符合條件的交易對
             let cooldown_until = now_ms + cooldown_ms;
-            churn.entry(sym.clone()).or_default().removal_cooldown_until_ms = cooldown_until;
+            churn
+                .entry(sym.clone())
+                .or_default()
+                .removal_cooldown_until_ms = cooldown_until;
             churn.entry(sym.clone()).or_default().cycles_held = 0;
             removed.push(sym.clone());
             false
@@ -220,7 +223,10 @@ impl SymbolRegistry {
             }
 
             added.push(candidate.symbol.clone());
-            churn.entry(candidate.symbol.clone()).or_default().cycles_held = 0;
+            churn
+                .entry(candidate.symbol.clone())
+                .or_default()
+                .cycles_held = 0;
             new_dynamic.push(candidate.symbol.clone());
         }
 
@@ -320,10 +326,8 @@ mod tests {
     #[test]
     fn test_anti_churn_min_hold_cycles() {
         let pinned = vec!["BTCUSDT".to_string()];
-        let registry = SymbolRegistry::new(
-            vec!["BTCUSDT".to_string(), "SOLUSDT".to_string()],
-            pinned,
-        );
+        let registry =
+            SymbolRegistry::new(vec!["BTCUSDT".to_string(), "SOLUSDT".to_string()], pinned);
 
         let mut config = default_anti_churn();
         config.min_hold_cycles = 2; // must survive 2 cycles
@@ -337,17 +341,21 @@ mod tests {
             &HashSet::new(),
             23,
         );
-        assert!(removed.is_empty(), "should not remove before min_hold_cycles");
-        assert!(registry.is_active("SOLUSDT"), "SOLUSDT should still be active");
+        assert!(
+            removed.is_empty(),
+            "should not remove before min_hold_cycles"
+        );
+        assert!(
+            registry.is_active("SOLUSDT"),
+            "SOLUSDT should still be active"
+        );
     }
 
     #[test]
     fn test_anti_churn_challenger_threshold() {
         let pinned = vec!["BTCUSDT".to_string()];
-        let registry = SymbolRegistry::new(
-            vec!["BTCUSDT".to_string(), "SOLUSDT".to_string()],
-            pinned,
-        );
+        let registry =
+            SymbolRegistry::new(vec!["BTCUSDT".to_string(), "SOLUSDT".to_string()], pinned);
 
         let mut config = default_anti_churn();
         config.min_hold_cycles = 0; // disable hold requirement
@@ -373,10 +381,8 @@ mod tests {
     #[test]
     fn test_anti_churn_cooldown_reentry() {
         let pinned = vec!["BTCUSDT".to_string()];
-        let registry = SymbolRegistry::new(
-            vec!["BTCUSDT".to_string(), "SOLUSDT".to_string()],
-            pinned,
-        );
+        let registry =
+            SymbolRegistry::new(vec!["BTCUSDT".to_string(), "SOLUSDT".to_string()], pinned);
 
         let mut config = default_anti_churn();
         config.min_hold_cycles = 0; // allow immediate removal
@@ -440,10 +446,8 @@ mod tests {
     #[test]
     fn test_open_position_defers_removal() {
         let pinned = vec!["BTCUSDT".to_string()];
-        let registry = SymbolRegistry::new(
-            vec!["BTCUSDT".to_string(), "SOLUSDT".to_string()],
-            pinned,
-        );
+        let registry =
+            SymbolRegistry::new(vec!["BTCUSDT".to_string(), "SOLUSDT".to_string()], pinned);
 
         let mut config = default_anti_churn();
         config.min_hold_cycles = 0; // allow immediate removal
@@ -453,13 +457,7 @@ mod tests {
 
         // SOLUSDT not in candidates, but has open position → should not be removed
         // SOLUSDT 不在候選中，但有開放持倉 → 不應被移除
-        let (_, removed) = registry.apply_scan_result(
-            &[],
-            1000,
-            &config,
-            &open_positions,
-            23,
-        );
+        let (_, removed) = registry.apply_scan_result(&[], 1000, &config, &open_positions, 23);
 
         assert!(
             !removed.contains(&"SOLUSDT".to_string()),

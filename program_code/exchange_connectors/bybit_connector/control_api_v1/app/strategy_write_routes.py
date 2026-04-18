@@ -58,20 +58,45 @@ async def _sync_strategy_active(name: str, active: bool) -> None:
 @phase2_router.post("/dynamic-risk/toggle")
 async def toggle_dynamic_risk(request: Request, actor: base.AuthenticatedActor = Depends(base.current_actor)):
     """
-    Set dynamic risk adjustment on/off. Body: {"enabled": true/false}
-    设置动态风控调整开关。
+    Set dynamic risk adjustment on/off per engine. Body:
+      {"enabled": true/false, "engine": "paper"|"demo"|"live"}
+    设置动态风控调整开关（按引擎）。
+    DYNAMIC-RISK-1: forwards to Rust IPC `set_dynamic_risk_enabled`; the Python
+    AUTO_DEPLOYER is a stub so the authoritative toggle lives in the Rust pipeline.
+    DYNAMIC-RISK-1：轉發到 Rust IPC；Python AUTO_DEPLOYER 為 stub，Rust 為權威。
     """
-    if AUTO_DEPLOYER is None:
-        raise HTTPException(status_code=404, detail="Auto deployer not available")
     try:
         body = await request.json()
-        enabled = bool(body.get("enabled", False))
-        AUTO_DEPLOYER.set_dynamic_risk_enabled(enabled)
-        return _envelope({"enabled": enabled, "message": "Dynamic risk " + ("enabled" if enabled else "disabled")})
+    except Exception:
+        body = {}
+    enabled = bool(body.get("enabled", False))
+    engine = str(body.get("engine", "demo")).lower()
+    if engine not in ("paper", "demo", "live"):
+        raise HTTPException(status_code=400, detail="engine must be paper|demo|live")
+    try:
+        client = await _get_strategy_ipc()
+        resp = await client.call(
+            "set_dynamic_risk_enabled",
+            params={"enabled": enabled, "engine": engine},
+        )
+        # Best-effort stub mirror so `get_dynamic_risk_status` cached reads stay consistent.
+        # 兼容用：同步更新 Python stub 的旗標，讓 stub fallback 路徑也看到最新狀態。
+        if AUTO_DEPLOYER is not None:
+            try:
+                AUTO_DEPLOYER.set_dynamic_risk_enabled(enabled)
+            except Exception:
+                pass
+        return _envelope({
+            "enabled": enabled,
+            "engine": engine,
+            "ipc_response": resp,
+            "message": f"Dynamic risk {'enabled' if enabled else 'disabled'} on {engine}",
+        })
     except HTTPException:
         raise
-    except Exception:
-        raise HTTPException(status_code=500, detail="Internal error")
+    except Exception as e:
+        logger.warning("toggle_dynamic_risk IPC error engine=%s enabled=%s: %s", engine, enabled, e)
+        raise HTTPException(status_code=500, detail=f"IPC error: {e}")
 
 
 # TODO(R-IPC): Migrate to Rust command channel when available / 待 Rust 命令通道可用後遷移

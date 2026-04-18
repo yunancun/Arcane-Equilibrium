@@ -11,6 +11,7 @@
 //!   持有所有子系統（KlineManager、IndicatorEngine、SignalEngine、Orchestrator、
 //!   IntentProcessor、PaperState、StopManager、Governance）。
 
+use crate::risk_checks::RiskAction;
 use openclaw_core::{
     governance_core::{GovernanceCore, GovernanceProfile},
     h0_gate::H0Gate,
@@ -19,7 +20,6 @@ use openclaw_core::{
     risk::PriceHistoryTracker,
     signals::{IndicatorInput, Signal, SignalEngine},
 };
-use crate::risk_checks::RiskAction;
 use openclaw_types::{PriceEvent, PriceEventKind};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
@@ -334,7 +334,7 @@ pub enum PipelineCommand {
     /// shadow_decision_builder 在 paper_trading_engine.py 退場後改走此 RPC。
     SubmitOrder {
         symbol: String,
-        side: String,   // "Buy" / "Sell"
+        side: String, // "Buy" / "Sell"
         qty: f64,
         order_type: String, // "market" or "limit"
         limit_price: Option<f64>,
@@ -519,6 +519,21 @@ pub enum PipelineCommand {
         /// P0-6：真實策略名用於 PnL 歸因。None → "orphan_adopted"。
         owner_strategy: Option<String>,
     },
+    /// DYNAMIC-RISK-1: Get the per-engine sizer status snapshot as JSON.
+    /// Returns the `SizerStatus` struct serialized; includes current_pct,
+    /// base_pct, last_sharpe, trades_in_window, last_direction.
+    /// DYNAMIC-RISK-1：取得本引擎動態風險調整器狀態（JSON SizerStatus）。
+    GetDynamicRiskStatus {
+        response_tx: tokio::sync::oneshot::Sender<Result<String, String>>,
+    },
+    /// DYNAMIC-RISK-1: Toggle the sizer at runtime. TOML `[dynamic_sizing]` is
+    /// still authoritative at next hot-reload — this is a transient operator
+    /// override useful for incident response (flip off if sizer misbehaves).
+    /// DYNAMIC-RISK-1：運行時切換啟用，僅過渡用；TOML 熱重載會覆蓋。
+    SetDynamicRiskEnabled {
+        enabled: bool,
+        response_tx: tokio::sync::oneshot::Sender<Result<String, String>>,
+    },
 }
 
 /// Server-side stop request dispatched from tick_pipeline to Bybit API (Item 1).
@@ -534,14 +549,14 @@ pub struct StopRequest {
 /// 從 tick_pipeline 到交易所的訂單派發請求。paper_only=shadow; exchange=primary。
 #[derive(Debug, Clone)]
 pub struct OrderDispatchRequest {
-    pub symbol: String,     // Trading symbol / 交易對
-    pub is_long: bool,      // Long direction / 多方向
+    pub symbol: String,        // Trading symbol / 交易對
+    pub is_long: bool,         // Long direction / 多方向
     pub qty: f64,              // Order quantity / 訂單數量
-    pub price: f64,             // Reference price / 參考價格
-    pub strategy: String,       // Strategy name / 策略名稱
-    pub paper_fill_ts: u64,     // Intent generation timestamp (ms) / 意圖生成時間戳
-    pub is_close: bool,         // true = closing position (reduce_only) / 平倉
-    pub order_link_id: String,  // EXT-1: Client order link ID / 客戶端連結 ID
+    pub price: f64,            // Reference price / 參考價格
+    pub strategy: String,      // Strategy name / 策略名稱
+    pub paper_fill_ts: u64,    // Intent generation timestamp (ms) / 意圖生成時間戳
+    pub is_close: bool,        // true = closing position (reduce_only) / 平倉
+    pub order_link_id: String, // EXT-1: Client order link ID / 客戶端連結 ID
     /// EXT-1: true = exchange primary (track pending); false = paper shadow (fire-and-forget)
     pub is_primary: bool,
     pub stop_loss: Option<f64>,   // I-08: broker-side SL / 券商側止損
@@ -687,7 +702,8 @@ pub struct TickPipeline {
     /// DB-RUN-1: Last persisted signal per (symbol, strategy) — direction + ts_ms.
     /// Used to dedupe by state-change and rate-limit by heartbeat.
     /// DB-RUN-1：每 (symbol, strategy) 最近持久化的信號 — 用於狀態變更去重 + 心跳節流。
-    last_persisted_signal: HashMap<(String, String), (openclaw_core::signals::SignalDirection, u64)>,
+    last_persisted_signal:
+        HashMap<(String, String), (openclaw_core::signals::SignalDirection, u64)>,
     /// DB-RUN-1: Heartbeat interval — re-emit unchanged signals at most this often.
     /// Default 60_000ms (1/min). 0 disables (legacy per-tick behavior).
     /// DB-RUN-1：心跳間隔，未變化信號最多每此間隔重發一次。0=關閉節流。
@@ -772,8 +788,7 @@ pub struct TickPipeline {
     /// EDGE-P3-1 Step 7a：供 `DecisionFeatureSnapshot` IPC passthrough 使用的 sender
     /// 緩存；同時傳給 IntentProcessor 讓內部 producer 共用同一 writer。
     /// None 時發射停用（fail-soft，不影響交易）。
-    decision_feature_tx:
-        Option<tokio::sync::mpsc::Sender<crate::database::DecisionFeatureMsg>>,
+    decision_feature_tx: Option<tokio::sync::mpsc::Sender<crate::database::DecisionFeatureMsg>>,
     /// EDGE-P3-1 Step 7c: Cached sender for `ShadowFillMsg` writes, used by
     /// the `EmitShadowFill` IPC handler to forward ε-greedy paper exploration
     /// fills into `learning.decision_shadow_fills`. Paper-only (the predictor
@@ -782,8 +797,7 @@ pub struct TickPipeline {
     /// EDGE-P3-1 Step 7c：供 `EmitShadowFill` IPC handler 將 ε-greedy paper 探索
     /// 轉寫 `learning.decision_shadow_fills` 的 sender。僅 paper（gate 已保證）。
     /// None 時發射停用（fail-soft，不採集 Stage-4 探索但不影響交易）。
-    shadow_fill_db_tx:
-        Option<tokio::sync::mpsc::Sender<crate::database::ShadowFillMsg>>,
+    shadow_fill_db_tx: Option<tokio::sync::mpsc::Sender<crate::database::ShadowFillMsg>>,
     /// Scanner symbol registry — gates new opens to scanner-active symbols only.
     /// None = gate disabled (all symbols allowed, e.g. tests / standalone).
     /// 掃描器交易對注冊表 — 新開倉僅限掃描器活躍交易對。
@@ -796,6 +810,12 @@ pub struct TickPipeline {
     /// DUST-EVICTION-GAP-1 / P1-8 FUP：每 symbol 最後一次重分流派 CloseSymbol 的
     /// 時間戳，用於速率限制（與 ORPHAN_CLOSE_DEDUP_MS 2 min 一致）。
     retriage_last_evict_ms: HashMap<String, u64>,
+    /// DYNAMIC-RISK-1: Per-engine Sharpe-aware sizer. Adjusts
+    /// `IntentProcessor::p1_risk_pct` up/down after realized PnL closes.
+    /// Disabled by default; enabled via `[risk.dynamic_sizing]` TOML block.
+    /// DYNAMIC-RISK-1：引擎私有的 Sharpe 調整器，平倉後上調/下調
+    /// `IntentProcessor::p1_risk_pct`。預設停用，`[risk.dynamic_sizing]` 啟用。
+    pub dynamic_risk_sizer: crate::dynamic_risk_sizer::DynamicRiskSizer,
 }
 
 impl TickPipeline {
@@ -881,6 +901,12 @@ impl TickPipeline {
             shadow_fill_db_tx: None,
             symbol_registry: None,
             retriage_last_evict_ms: HashMap::new(),
+            // DYNAMIC-RISK-1: anchored on IntentProcessor's default p1_risk_pct (3%).
+            // DYNAMIC-RISK-1：以 IntentProcessor 預設 p1_risk_pct (3%) 為錨。
+            dynamic_risk_sizer: crate::dynamic_risk_sizer::DynamicRiskSizer::new(
+                0.03,
+                crate::dynamic_risk_sizer::DynamicRiskSizerConfig::default(),
+            ),
         }
     }
 
@@ -949,7 +975,9 @@ impl TickPipeline {
     /// 本管線的 cost-gate GovernanceProfile（endpoint 感知）。
     /// Intent 處理路徑必須走這裡，避免 LiveDemo 被強制走 Production。
     #[inline]
-    pub fn effective_governance_profile(&self) -> openclaw_core::governance_core::GovernanceProfile {
+    pub fn effective_governance_profile(
+        &self,
+    ) -> openclaw_core::governance_core::GovernanceProfile {
         crate::mode_state::effective_governance_profile(self.pipeline_kind, self.endpoint_env)
     }
 
@@ -969,7 +997,8 @@ impl TickPipeline {
         self.latest_prices.remove(symbol);
         self.latest_indicators.remove(symbol);
         self.consecutive_losses.remove(symbol);
-        self.last_persisted_signal.retain(|(sym, _), _| sym != symbol);
+        self.last_persisted_signal
+            .retain(|(sym, _), _| sym != symbol);
         self.last_close_price.remove(symbol);
         // M-1 fix: clear pending_close lock so re-entry of same symbol doesn't
         // inherit a stale close-pending flag from the previous tenure.
@@ -994,10 +1023,7 @@ impl TickPipeline {
 
     /// W-3: Plug in a LinUCB runtime (read-only on the live path; metadata only).
     /// W-3：注入 LinUCB 運行時（live 路徑唯讀；僅 metadata）。
-    pub fn set_linucb_runtime(
-        &mut self,
-        rt: std::sync::Arc<crate::linucb::LinUcbRuntime>,
-    ) {
+    pub fn set_linucb_runtime(&mut self, rt: std::sync::Arc<crate::linucb::LinUcbRuntime>) {
         self.linucb = Some(rt);
     }
 
@@ -1019,7 +1045,8 @@ impl TickPipeline {
             self.edge_predictor_store.is_none(),
             "EdgePredictorStore injected twice — bootstrap should call this exactly once per pipeline"
         );
-        self.intent_processor.set_edge_predictor_store(store.clone());
+        self.intent_processor
+            .set_edge_predictor_store(store.clone());
         self.edge_predictor_store = Some(store);
     }
 
@@ -1031,10 +1058,7 @@ impl TickPipeline {
     /// EDGE-P3-1 A4 + B 接線：注入 PipelineCommand 發送端供 IntentProcessor
     /// predictor gate 在 ε-greedy paper 探索時發出 `EmitShadowFill`（spec §7.3）。
     /// 缺此接線則 shadow fill 走 fail-soft 丟棄分支，Stage 4 paper 學習失效。
-    pub fn set_shadow_fill_tx(
-        &mut self,
-        tx: tokio::sync::mpsc::UnboundedSender<PipelineCommand>,
-    ) {
+    pub fn set_shadow_fill_tx(&mut self, tx: tokio::sync::mpsc::UnboundedSender<PipelineCommand>) {
         self.intent_processor.set_shadow_fill_tx(tx);
     }
 
@@ -1132,10 +1156,7 @@ impl TickPipeline {
 
     /// W-4: Plug in a shared NewsContextSnapshot (read-only on the live path).
     /// W-4：注入共享 NewsContextSnapshot（live 路徑唯讀）。
-    pub fn set_news_snapshot(
-        &mut self,
-        snap: std::sync::Arc<crate::news::NewsContextSnapshot>,
-    ) {
+    pub fn set_news_snapshot(&mut self, snap: std::sync::Arc<crate::news::NewsContextSnapshot>) {
         self.news_snapshot = Some(snap);
     }
 
@@ -1173,6 +1194,22 @@ impl TickPipeline {
         // 1. Update intent_processor's owned RiskConfig (used for cost_gate k_*,
         //    dynamic_stop tunables, and check_order_allowed via risk_config()).
         self.intent_processor.update_risk_config(snap.clone());
+
+        // DYNAMIC-RISK-1: rebuild sizer from the fresh `dynamic_sizing` block
+        // and re-anchor on `per_trade_risk_pct`. Config changes are operator-
+        // originated (TOML hot-reload) — current_pct resets to base so drift
+        // never accumulates across operator intents.
+        // DYNAMIC-RISK-1：從新 dynamic_sizing 區塊重建，並以 per_trade_risk_pct
+        // 重錨；config 變動皆 operator 觸發，current 回 base 避免跨 operator 意圖累積漂移。
+        self.dynamic_risk_sizer = crate::dynamic_risk_sizer::DynamicRiskSizer::new(
+            snap.limits.per_trade_risk_pct,
+            snap.dynamic_sizing.clone(),
+        );
+        // Apply the base immediately so IntentProcessor reflects TOML intent until
+        // the sizer earns enough data to deviate.
+        // 立即把 base 推入 IntentProcessor，讓其反映 TOML 意圖，之後調整器累積足夠資料才偏移。
+        self.intent_processor
+            .set_p1_risk_pct(snap.limits.per_trade_risk_pct);
 
         // 2. Construct a fresh GuardianConfig fully derived from RiskConfig
         //    (no RMW). Every field below has a 1:1 source in `snap`.
@@ -1234,24 +1271,23 @@ impl TickPipeline {
         //    ARCH-RC1 1C-2-F E-Merge-3：把 RiskGovernorSm 的閾值從
         //    RiskConfig.cascade 熱重載進來；原本它只讀自己的硬編碼 default。
         let c = &snap.cascade;
-        self.governance.risk.thresholds =
-            openclaw_core::sm::risk_gov::EscalationThresholds {
-                drawdown_cautious_pct: c.drawdown_cautious_pct,
-                drawdown_reduced_pct: c.drawdown_reduced_pct,
-                drawdown_defensive_pct: c.drawdown_defensive_pct,
-                drawdown_circuit_breaker_pct: c.drawdown_circuit_pct,
-                daily_loss_cautious_pct: c.daily_loss_cautious_pct,
-                daily_loss_reduced_pct: c.daily_loss_reduced_pct,
-                daily_loss_circuit_breaker_pct: c.daily_loss_circuit_pct,
-                consecutive_loss_cautious: c.consec_loss_cautious,
-                consecutive_loss_reduced: c.consec_loss_reduced,
-                consecutive_loss_circuit_breaker: c.consec_loss_circuit,
-                pressure_cautious: c.pressure_cautious,
-                pressure_reduced: c.pressure_reduced,
-                pressure_defensive: c.pressure_defensive,
-                pressure_circuit_breaker: c.pressure_circuit,
-                min_hold_time_ms: c.min_hold_ms,
-            };
+        self.governance.risk.thresholds = openclaw_core::sm::risk_gov::EscalationThresholds {
+            drawdown_cautious_pct: c.drawdown_cautious_pct,
+            drawdown_reduced_pct: c.drawdown_reduced_pct,
+            drawdown_defensive_pct: c.drawdown_defensive_pct,
+            drawdown_circuit_breaker_pct: c.drawdown_circuit_pct,
+            daily_loss_cautious_pct: c.daily_loss_cautious_pct,
+            daily_loss_reduced_pct: c.daily_loss_reduced_pct,
+            daily_loss_circuit_breaker_pct: c.daily_loss_circuit_pct,
+            consecutive_loss_cautious: c.consec_loss_cautious,
+            consecutive_loss_reduced: c.consec_loss_reduced,
+            consecutive_loss_circuit_breaker: c.consec_loss_circuit,
+            pressure_cautious: c.pressure_cautious,
+            pressure_reduced: c.pressure_reduced,
+            pressure_defensive: c.pressure_defensive,
+            pressure_circuit_breaker: c.pressure_circuit,
+            min_hold_time_ms: c.min_hold_ms,
+        };
     }
 
     /// ARCH-RC1 1C-2-B: Inject the live BudgetConfig ConfigStore handle for
@@ -1367,6 +1403,15 @@ impl TickPipeline {
             }
         };
         let pnl = self.paper_state.close_position(sym, close_price, ts_ms)?;
+        // DYNAMIC-RISK-1: feed realized PnL into the per-engine sizer.
+        // Skip the zero-pnl fallback branch (close_price == entry_price when
+        // no latest price is known) so synthetic break-even values don't
+        // pollute the Sharpe window. DYNAMIC-RISK-1 BUG-10 fix.
+        // DYNAMIC-RISK-1：把實現 PnL 餵入 sizer；跳過 entry-price fallback
+        // 產生的假零值，避免污染 Sharpe 視窗。
+        if pnl != 0.0 {
+            self.dynamic_risk_sizer.record_closed_trade(pnl);
+        }
         Some((is_long, qty, close_price, pnl))
     }
 
@@ -1443,16 +1488,20 @@ impl TickPipeline {
         // `is_long` is the POSITION side; the closing order is the opposite.
         // 鏡像平倉 fill 到環形緩衝供 GUI 快照讀取；否則 recent_fills 只有開倉 fill，
         // 所有 risk_close / stop_trigger / strategy_close 都悄悄繞過緩衝。
-        on_tick_helpers::push_capped(&mut self.recent_fills, TimestampedFill {
-            timestamp_ms: ts_ms,
-            symbol: symbol.to_string(),
-            is_long: !is_long,
-            qty,
-            price,
-            fee: close_fee,
-            realized_pnl,
-            strategy: close_tag.to_string(),
-        }, 50);
+        on_tick_helpers::push_capped(
+            &mut self.recent_fills,
+            TimestampedFill {
+                timestamp_ms: ts_ms,
+                symbol: symbol.to_string(),
+                is_long: !is_long,
+                qty,
+                price,
+                fee: close_fee,
+                realized_pnl,
+                strategy: close_tag.to_string(),
+            },
+            50,
+        );
     }
 
     /// DB-RUN-1: Decide whether to persist a freshly emitted signal.
@@ -1583,7 +1632,6 @@ impl TickPipeline {
     // set_mode_risk_store / mode_snapshot all removed.
     // 3E-4：多模式基礎設施已移除 — 每管線獨立運行。
 
-
     // 3E-4: Multi-mode infrastructure REMOVED — each pipeline is independent.
     // 3E-4：多模式基礎設施已移除 — 每管線獨立運行。
 
@@ -1654,7 +1702,11 @@ impl TickPipeline {
                     );
                 }
             }
-            crate::paper_state::RetriageOutcome::Promoted { from, to, est_notional } => {
+            crate::paper_state::RetriageOutcome::Promoted {
+                from,
+                to,
+                est_notional,
+            } => {
                 info!(
                     symbol,
                     from = %from,
@@ -1701,12 +1753,11 @@ impl TickPipeline {
     }
 }
 
+mod commands;
 mod on_tick;
 pub(crate) mod on_tick_helpers;
-mod commands;
 #[cfg(test)]
 mod tests;
-
 
 /// Convert IndicatorSnapshot to flat IndicatorInput for signal rules.
 /// 將 IndicatorSnapshot 轉換為扁平 IndicatorInput 用於信號規則。
@@ -1733,4 +1784,3 @@ pub use crate::pipeline_types::{
     CanaryRecord, PipelineSnapshot, PipelineStatus, StrategyInfo, TimestampedFill,
     TimestampedIntent,
 };
-

@@ -220,7 +220,10 @@ pub fn handle_orphan(ctx: &OrphanContext) -> OrphanDecision {
     // ── Stage A2: global CircuitBreaker ───────────────────────────────────
     if ctx.current_level >= RiskLevel::CircuitBreaker {
         return OrphanDecision::Close {
-            reason: format!("global risk level={:?} (≥ CircuitBreaker)", ctx.current_level),
+            reason: format!(
+                "global risk level={:?} (≥ CircuitBreaker)",
+                ctx.current_level
+            ),
             stage: OrphanStage::HardSafetyCircuitBreaker,
         };
     }
@@ -274,10 +277,7 @@ pub fn handle_orphan(ctx: &OrphanContext) -> OrphanDecision {
         if let Some(strat) = winning {
             // Safe: predicate above already proved Some(bps) && bps > 0.0.
             // 安全：上面謂詞已確認 Some(bps) && bps > 0.0。
-            let bps = ctx
-                .edge_estimates
-                .get(strat, &pos.symbol)
-                .unwrap_or(0.0);
+            let bps = ctx.edge_estimates.get(strat, &pos.symbol).unwrap_or(0.0);
             return OrphanDecision::Adopt {
                 reason: format!(
                     "positive-edge strategy {} on {} shrunk_bps={:.2}; adopting exchange position",
@@ -447,7 +447,9 @@ pub fn spawn_orphan_audit(
     pos: &PositionInfo,
     engine_label: &str,
 ) {
-    let Some(pool) = audit_pool.clone() else { return };
+    let Some(pool) = audit_pool.clone() else {
+        return;
+    };
     // ORPHAN-ADOPT-1 Phase 2A audit schema:
     //   owner_strategy      — label written to PaperPosition.owner_strategy.
     //                         Some("orphan_adopted") for Adopt, None for Close.
@@ -460,7 +462,11 @@ pub fn spawn_orphan_audit(
         OrphanDecision::Close { reason, stage } => {
             ("close", stage.as_str(), reason.clone(), None, None)
         }
-        OrphanDecision::Adopt { reason, stage, triggering_strategy } => (
+        OrphanDecision::Adopt {
+            reason,
+            stage,
+            triggering_strategy,
+        } => (
             "adopt",
             stage.as_str(),
             reason.clone(),
@@ -514,11 +520,7 @@ pub fn spawn_orphan_audit(
 /// if a recent close was already dispatched.
 /// 若此 (symbol|side) 在最近 ORPHAN_CLOSE_DEDUP_MS 內未分發過平倉，
 /// 返回 true 並戳記去重表。否則返回 false（跳過）。
-pub fn check_and_stamp_dedup(
-    state: &mut ReconcilerState,
-    key: &str,
-    now_ms: u64,
-) -> bool {
+pub fn check_and_stamp_dedup(state: &mut ReconcilerState, key: &str, now_ms: u64) -> bool {
     // Garbage-collect expired entries opportunistically (cheap even at 100s of keys).
     // 順便清理過期記錄（即使幾百個 key 也很輕）。
     state
@@ -590,7 +592,9 @@ mod tests {
         };
         let decision = handle_orphan(&ctx);
         match decision {
-            OrphanDecision::Close { stage, .. } => assert_eq!(stage, OrphanStage::HardSafetyLiqClose),
+            OrphanDecision::Close { stage, .. } => {
+                assert_eq!(stage, OrphanStage::HardSafetyLiqClose)
+            }
             other => panic!("expected HardSafetyLiqClose, got {:?}", other),
         }
     }
@@ -634,7 +638,9 @@ mod tests {
         };
         let decision = handle_orphan(&ctx);
         match decision {
-            OrphanDecision::Close { stage, .. } => assert_eq!(stage, OrphanStage::HardSafetyCircuitBreaker),
+            OrphanDecision::Close { stage, .. } => {
+                assert_eq!(stage, OrphanStage::HardSafetyCircuitBreaker)
+            }
             other => panic!("expected HardSafetyCircuitBreaker, got {:?}", other),
         }
     }
@@ -656,7 +662,9 @@ mod tests {
         };
         let decision = handle_orphan(&ctx);
         match decision {
-            OrphanDecision::Close { stage, .. } => assert_eq!(stage, OrphanStage::HardSafetyNotionalCap),
+            OrphanDecision::Close { stage, .. } => {
+                assert_eq!(stage, OrphanStage::HardSafetyNotionalCap)
+            }
             other => panic!("expected HardSafetyNotionalCap, got {:?}", other),
         }
     }
@@ -778,7 +786,11 @@ mod tests {
         };
         let decision = handle_orphan(&ctx);
         match decision {
-            OrphanDecision::Adopt { stage, triggering_strategy, .. } => {
+            OrphanDecision::Adopt {
+                stage,
+                triggering_strategy,
+                ..
+            } => {
                 assert_eq!(stage, OrphanStage::AdoptPositiveEdge);
                 assert_eq!(triggering_strategy, "ma_crossover");
             }
@@ -807,7 +819,11 @@ mod tests {
         };
         let decision = handle_orphan(&ctx);
         match decision {
-            OrphanDecision::Adopt { stage, triggering_strategy, .. } => {
+            OrphanDecision::Adopt {
+                stage,
+                triggering_strategy,
+                ..
+            } => {
                 assert_eq!(stage, OrphanStage::AdoptPositiveEdge);
                 assert_eq!(triggering_strategy, "bb_reversion");
             }
@@ -869,7 +885,10 @@ mod tests {
         };
         let decision = handle_orphan(&ctx);
         match decision {
-            OrphanDecision::Adopt { triggering_strategy, .. } => {
+            OrphanDecision::Adopt {
+                triggering_strategy,
+                ..
+            } => {
                 // KNOWN_STRATEGY_NAMES = [ma_crossover, bb_reversion, bb_breakout,
                 // grid_trading, funding_arb]; `ma_crossover` wins even though
                 // `bb_reversion` has the larger edge.
@@ -902,7 +921,9 @@ mod tests {
         };
         let decision = handle_orphan(&ctx);
         match decision {
-            OrphanDecision::Close { stage, .. } => assert_eq!(stage, OrphanStage::HardSafetyLiqClose),
+            OrphanDecision::Close { stage, .. } => {
+                assert_eq!(stage, OrphanStage::HardSafetyLiqClose)
+            }
             other => panic!("expected HardSafetyLiqClose, got {:?}", other),
         }
     }
@@ -944,7 +965,9 @@ mod tests {
         };
         let decision = handle_orphan(&ctx);
         match decision {
-            OrphanDecision::Close { stage, .. } => assert_eq!(stage, OrphanStage::HardSafetyLiqClose),
+            OrphanDecision::Close { stage, .. } => {
+                assert_eq!(stage, OrphanStage::HardSafetyLiqClose)
+            }
             other => panic!("expected HardSafetyLiqClose, got {:?}", other),
         }
     }
@@ -960,9 +983,17 @@ mod tests {
         // Immediate retry — blocked.
         assert!(!check_and_stamp_dedup(&mut state, key, t0 + 1_000));
         // Still within window.
-        assert!(!check_and_stamp_dedup(&mut state, key, t0 + ORPHAN_CLOSE_DEDUP_MS - 1));
+        assert!(!check_and_stamp_dedup(
+            &mut state,
+            key,
+            t0 + ORPHAN_CLOSE_DEDUP_MS - 1
+        ));
         // After window — allowed again.
-        assert!(check_and_stamp_dedup(&mut state, key, t0 + ORPHAN_CLOSE_DEDUP_MS + 1));
+        assert!(check_and_stamp_dedup(
+            &mut state,
+            key,
+            t0 + ORPHAN_CLOSE_DEDUP_MS + 1
+        ));
     }
 
     /// Dedup keys are independent across symbols.

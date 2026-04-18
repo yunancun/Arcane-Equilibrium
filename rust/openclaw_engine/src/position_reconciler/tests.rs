@@ -127,7 +127,10 @@ fn phase6_single_major_drift_escalates_to_cautious() {
     assert_eq!(actions.len(), 1);
     assert!(matches!(
         &actions[0],
-        ReconcilerAction::Escalate { target: RiskLevel::Cautious, .. }
+        ReconcilerAction::Escalate {
+            target: RiskLevel::Cautious,
+            ..
+        }
     ));
 }
 
@@ -139,7 +142,10 @@ fn phase6_single_ghost_escalates_to_cautious() {
     assert_eq!(actions.len(), 1);
     assert!(matches!(
         &actions[0],
-        ReconcilerAction::Escalate { target: RiskLevel::Cautious, .. }
+        ReconcilerAction::Escalate {
+            target: RiskLevel::Cautious,
+            ..
+        }
     ));
 }
 
@@ -151,7 +157,10 @@ fn phase6_single_orphan_escalates_to_cautious() {
     assert_eq!(actions.len(), 1);
     assert!(matches!(
         &actions[0],
-        ReconcilerAction::Escalate { target: RiskLevel::Cautious, .. }
+        ReconcilerAction::Escalate {
+            target: RiskLevel::Cautious,
+            ..
+        }
     ));
 }
 
@@ -178,9 +187,15 @@ fn phase6_persistent_drift_3_cycles_to_defensive() {
     let mut state = make_state();
     let drifts = vec![("BTCUSDT|Buy".into(), DriftVerdict::MajorDrift)];
     let t0 = 100_000_000u64; // large enough base to avoid cooldown from epoch
-    // Cycle 1: escalate to Cautious
+                             // Cycle 1: escalate to Cautious
     let a1 = evaluate_actions(&mut state, RiskLevel::Normal, &drifts, t0);
-    assert!(matches!(&a1[0], ReconcilerAction::Escalate { target: RiskLevel::Cautious, .. }));
+    assert!(matches!(
+        &a1[0],
+        ReconcilerAction::Escalate {
+            target: RiskLevel::Cautious,
+            ..
+        }
+    ));
     // Cycle 2: streak=2 < 3, Cautious→Cautious is no-op
     let a2 = evaluate_actions(&mut state, RiskLevel::Cautious, &drifts, t0 + 30_000);
     assert!(a2.is_empty());
@@ -194,7 +209,13 @@ fn phase6_persistent_drift_3_cycles_to_defensive() {
         t0 + GLOBAL_COOLDOWN_MS + 1,
     );
     assert_eq!(a3.len(), 1);
-    assert!(matches!(&a3[0], ReconcilerAction::Escalate { target: RiskLevel::Defensive, .. }));
+    assert!(matches!(
+        &a3[0],
+        ReconcilerAction::Escalate {
+            target: RiskLevel::Defensive,
+            ..
+        }
+    ));
 }
 
 /// FIX-B: First burst cycle → Defensive (not CB). Prevents single API-sync hiccup from
@@ -212,11 +233,22 @@ fn phase6_burst_5_drifts_first_cycle_to_defensive_not_cb() {
     ];
     // First cycle with 5 simultaneous drifts → Defensive (not CB)
     let actions = evaluate_actions(&mut state, RiskLevel::Normal, &drifts, 1_000_000);
-    assert_eq!(actions.len(), 1, "first burst cycle must produce exactly 1 action (Escalate to Defensive)");
-    assert!(matches!(
-        &actions[0],
-        ReconcilerAction::Escalate { target: RiskLevel::Defensive, .. }
-    ), "first burst must escalate to Defensive, got: {:?}", &actions[0]);
+    assert_eq!(
+        actions.len(),
+        1,
+        "first burst cycle must produce exactly 1 action (Escalate to Defensive)"
+    );
+    assert!(
+        matches!(
+            &actions[0],
+            ReconcilerAction::Escalate {
+                target: RiskLevel::Defensive,
+                ..
+            }
+        ),
+        "first burst must escalate to Defensive, got: {:?}",
+        &actions[0]
+    );
     assert_eq!(state.burst_drift_streak, 1);
 }
 
@@ -234,14 +266,26 @@ fn phase6_burst_5_drifts_two_consecutive_cycles_to_circuit_breaker_and_close_all
     ];
     // First cycle: Normal → Defensive (streak=1). Use far-future ts to bypass cooldowns.
     let actions1 = evaluate_actions(&mut state, RiskLevel::Normal, &drifts, 1_000_000);
-    assert!(matches!(&actions1[0], ReconcilerAction::Escalate { target: RiskLevel::Defensive, .. }));
+    assert!(matches!(
+        &actions1[0],
+        ReconcilerAction::Escalate {
+            target: RiskLevel::Defensive,
+            ..
+        }
+    ));
     // Second consecutive cycle: Defensive → CircuitBreaker + CloseAll (streak=2)
     let actions2 = evaluate_actions(&mut state, RiskLevel::Defensive, &drifts, 999_999_999);
     assert_eq!(actions2.len(), 2);
-    assert!(matches!(
-        &actions2[0],
-        ReconcilerAction::Escalate { target: RiskLevel::CircuitBreaker, .. }
-    ), "second consecutive burst must escalate to CB");
+    assert!(
+        matches!(
+            &actions2[0],
+            ReconcilerAction::Escalate {
+                target: RiskLevel::CircuitBreaker,
+                ..
+            }
+        ),
+        "second consecutive burst must escalate to CB"
+    );
     assert!(matches!(&actions2[1], ReconcilerAction::CloseAll { .. }));
     assert_eq!(state.burst_drift_streak, 2);
 }
@@ -264,7 +308,12 @@ fn phase6_per_symbol_cooldown_blocks_repeat() {
     assert_eq!(a1.len(), 1);
     // Second attempt within 30min cooldown — blocked (target Cautious == current Cautious anyway)
     // But even if we reset to Normal, the per-symbol cooldown should block
-    let a2 = evaluate_actions(&mut state, RiskLevel::Normal, &drifts, 1_000_000 + GLOBAL_COOLDOWN_MS + 1);
+    let a2 = evaluate_actions(
+        &mut state,
+        RiskLevel::Normal,
+        &drifts,
+        1_000_000 + GLOBAL_COOLDOWN_MS + 1,
+    );
     // per-symbol cooldown of 30min not met
     assert!(a2.is_empty());
 }
@@ -295,7 +344,10 @@ fn phase6_recovery_cautious_to_normal() {
     assert_eq!(actions.len(), 1);
     assert!(matches!(
         &actions[0],
-        ReconcilerAction::DeEscalate { target: RiskLevel::Normal, .. }
+        ReconcilerAction::DeEscalate {
+            target: RiskLevel::Normal,
+            ..
+        }
     ));
     // Floor should be cleared since we reached it
     assert!(state.pre_escalation_level.is_none());
@@ -327,7 +379,10 @@ fn phase6_recovery_floor_prevents_over_recovery() {
     assert_eq!(actions.len(), 1);
     assert!(matches!(
         &actions[0],
-        ReconcilerAction::DeEscalate { target: RiskLevel::Cautious, .. }
+        ReconcilerAction::DeEscalate {
+            target: RiskLevel::Cautious,
+            ..
+        }
     ));
     // Floor cleared — we've reached it
     assert!(state.pre_escalation_level.is_none());
@@ -353,7 +408,10 @@ fn phase6_rest_failure_tier1_escalation() {
     assert!(action.is_some());
     assert!(matches!(
         action.unwrap(),
-        ReconcilerAction::Escalate { target: RiskLevel::Cautious, .. }
+        ReconcilerAction::Escalate {
+            target: RiskLevel::Cautious,
+            ..
+        }
     ));
 }
 
@@ -365,7 +423,10 @@ fn phase6_rest_failure_tier2_escalation() {
     assert!(action.is_some());
     assert!(matches!(
         action.unwrap(),
-        ReconcilerAction::Escalate { target: RiskLevel::Reduced, .. }
+        ReconcilerAction::Escalate {
+            target: RiskLevel::Reduced,
+            ..
+        }
     ));
 }
 
@@ -377,7 +438,10 @@ fn phase6_rest_failure_tier3_escalation() {
     assert!(action.is_some());
     assert!(matches!(
         action.unwrap(),
-        ReconcilerAction::Escalate { target: RiskLevel::Defensive, .. }
+        ReconcilerAction::Escalate {
+            target: RiskLevel::Defensive,
+            ..
+        }
     ));
 }
 
@@ -415,7 +479,10 @@ fn phase6_side_flip_escalates_to_cautious() {
     assert_eq!(actions.len(), 1);
     assert!(matches!(
         &actions[0],
-        ReconcilerAction::Escalate { target: RiskLevel::Cautious, .. }
+        ReconcilerAction::Escalate {
+            target: RiskLevel::Cautious,
+            ..
+        }
     ));
 }
 
@@ -438,9 +505,11 @@ fn phase6_staleness_reseed_triggers_after_long_rest_outage() {
     // Current time is 15 minutes later (> STALENESS_THRESHOLD_MS = 10min)
     let now = t_prev + 15 * 60 * 1000;
     let prev_fetch = state.last_successful_fetch_ms;
-    let stale = prev_fetch > 0
-        && now.saturating_sub(prev_fetch) > STALENESS_THRESHOLD_MS;
-    assert!(stale, "baseline should be detected as stale after 15min gap");
+    let stale = prev_fetch > 0 && now.saturating_sub(prev_fetch) > STALENESS_THRESHOLD_MS;
+    assert!(
+        stale,
+        "baseline should be detected as stale after 15min gap"
+    );
     // After updating, the new value prevents future false staleness
     state.last_successful_fetch_ms = now;
     let stale2 = now.saturating_sub(state.last_successful_fetch_ms) > STALENESS_THRESHOLD_MS;
@@ -462,11 +531,22 @@ fn phase6_persistent_drift_bypasses_per_symbol_cooldown() {
     // Cycle 3: streak=3 → Defensive. Only 5min+1ms after cycle 1.
     // This is far less than PER_SYMBOL_COOLDOWN_MS (30min), proving bypass.
     let t3 = t0 + GLOBAL_COOLDOWN_MS + 1;
-    assert!(t3 - t0 < PER_SYMBOL_COOLDOWN_MS, "must be within per-symbol cooldown window");
+    assert!(
+        t3 - t0 < PER_SYMBOL_COOLDOWN_MS,
+        "must be within per-symbol cooldown window"
+    );
     let a3 = evaluate_actions(&mut state, RiskLevel::Cautious, &drifts, t3);
     assert_eq!(a3.len(), 1);
-    assert!(matches!(&a3[0], ReconcilerAction::Escalate { target: RiskLevel::Defensive, .. }),
-        "persistent drift should reach Defensive despite per-symbol cooldown");
+    assert!(
+        matches!(
+            &a3[0],
+            ReconcilerAction::Escalate {
+                target: RiskLevel::Defensive,
+                ..
+            }
+        ),
+        "persistent drift should reach Defensive despite per-symbol cooldown"
+    );
 }
 
 // ── ORPHAN-ADOPT-1 FUP: engine-owned suppression ───────────────────────────
@@ -543,8 +623,14 @@ fn orphan_suppressed_when_engine_owns_position() {
         1_000_000,
     );
 
-    assert!(kept.is_empty(), "suppressed orphan must not be kept for evaluate_actions");
-    assert!(rx.try_recv().is_err(), "no PipelineCommand should be dispatched");
+    assert!(
+        kept.is_empty(),
+        "suppressed orphan must not be kept for evaluate_actions"
+    );
+    assert!(
+        rx.try_recv().is_err(),
+        "no PipelineCommand should be dispatched"
+    );
     assert!(
         state.pending_orphan_closes.is_empty(),
         "suppression fires before dedup stamp — pending_orphan_closes must stay empty"
@@ -585,7 +671,11 @@ fn orphan_dispatched_when_engine_side_mismatches() {
         .try_recv()
         .expect("orphan must be dispatched when engine doesn't own the same direction");
     match cmd {
-        crate::tick_pipeline::PipelineCommand::CloseSymbol { symbol, hint_is_long, .. } => {
+        crate::tick_pipeline::PipelineCommand::CloseSymbol {
+            symbol,
+            hint_is_long,
+            ..
+        } => {
             assert_eq!(symbol, "BTCUSDT");
             assert_eq!(hint_is_long, Some(false), "side=Sell → hint_is_long=false");
         }

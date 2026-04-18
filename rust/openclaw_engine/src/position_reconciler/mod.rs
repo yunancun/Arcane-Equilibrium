@@ -50,9 +50,7 @@ mod tests;
 
 // Re-export escalation types so callers see them at `position_reconciler::*`.
 pub use escalation::*;
-pub use orphan_handler::{
-    OrphanContext, OrphanDecision, OrphanHandlerConfig, OrphanStage,
-};
+pub use orphan_handler::{OrphanContext, OrphanDecision, OrphanHandlerConfig, OrphanStage};
 
 use crate::instrument_info::InstrumentInfoCache;
 use crate::order_manager::OrderCategory;
@@ -269,9 +267,7 @@ fn spawn_reconcile_audit(
 /// Fetch the current Bybit truth view. Returns `None` on REST error (fail-open;
 /// caller preserves old baseline). Used by both warmup seeding and the cycle loop.
 /// 抓取 Bybit 真相視圖。REST 失敗返回 None（fail-open）。warmup 與 cycle loop 共用。
-async fn fetch_current_view(
-    pos_mgr: &PositionManager,
-) -> Option<HashMap<String, PositionView>> {
+async fn fetch_current_view(pos_mgr: &PositionManager) -> Option<HashMap<String, PositionView>> {
     match pos_mgr.get_positions(OrderCategory::Linear, None).await {
         Ok(p) => Some(build_view_map(&p)),
         Err(e) => {
@@ -324,7 +320,15 @@ pub async fn reconcile_once(
             current_qty = ?current_qty,
             "reconcile drift detected (audit-only) / 對帳發現漂移（純審計）"
         );
-        spawn_reconcile_audit(audit_pool, &verdict, &sym, &side, baseline_qty, current_qty, engine_label);
+        spawn_reconcile_audit(
+            audit_pool,
+            &verdict,
+            &sym,
+            &side,
+            baseline_qty,
+            current_qty,
+            engine_label,
+        );
     }
 
     Some(current)
@@ -623,7 +627,8 @@ fn process_orphans(
         // 去重：若窗口內已分發過則略過。
         if !orphan_handler::check_and_stamp_dedup(state, &key, now_ms) {
             info!(
-                symbol = sym, side = side,
+                symbol = sym,
+                side = side,
                 "orphan close already dispatched recently; skipping / 孤兒平倉近期已分發；跳過"
             );
             continue;
@@ -680,7 +685,13 @@ fn dispatch_action(
         ReconcilerAction::Escalate { target, reason } => {
             let (resp_tx, resp_rx) = tokio::sync::oneshot::channel();
             let event_type = "reconciler_auto_escalate";
-            spawn_action_audit(audit_pool, event_type, &target.as_str(), reason, engine_label);
+            spawn_action_audit(
+                audit_pool,
+                event_type,
+                &target.as_str(),
+                reason,
+                engine_label,
+            );
             if let Err(e) = cmd_tx.send(PipelineCommand::ReconcilerEscalate {
                 target_tier: target.as_str().to_string(),
                 reason: reason.clone(),
@@ -694,8 +705,12 @@ fn dispatch_action(
             tokio::spawn(async move {
                 match resp_rx.await {
                     Ok(Ok(_)) => {}
-                    Ok(Err(e)) => warn!(error = %e, "ReconcilerEscalate handler rejected / 升級被 handler 拒絕"),
-                    Err(_) => warn!("ReconcilerEscalate response channel dropped / 升級回應通道丟失"),
+                    Ok(Err(e)) => {
+                        warn!(error = %e, "ReconcilerEscalate handler rejected / 升級被 handler 拒絕")
+                    }
+                    Err(_) => {
+                        warn!("ReconcilerEscalate response channel dropped / 升級回應通道丟失")
+                    }
                 }
             });
             true
@@ -703,7 +718,13 @@ fn dispatch_action(
         ReconcilerAction::DeEscalate { target, reason } => {
             let (resp_tx, resp_rx) = tokio::sync::oneshot::channel();
             let event_type = "reconciler_auto_recover";
-            spawn_action_audit(audit_pool, event_type, &target.as_str(), reason, engine_label);
+            spawn_action_audit(
+                audit_pool,
+                event_type,
+                &target.as_str(),
+                reason,
+                engine_label,
+            );
             if let Err(e) = cmd_tx.send(PipelineCommand::ReconcilerDeEscalate {
                 target_tier: target.as_str().to_string(),
                 reason: reason.clone(),
@@ -716,15 +737,25 @@ fn dispatch_action(
             tokio::spawn(async move {
                 match resp_rx.await {
                     Ok(Ok(_)) => {}
-                    Ok(Err(e)) => warn!(error = %e, "ReconcilerDeEscalate handler rejected / 恢復被 handler 拒絕"),
-                    Err(_) => warn!("ReconcilerDeEscalate response channel dropped / 恢復回應通道丟失"),
+                    Ok(Err(e)) => {
+                        warn!(error = %e, "ReconcilerDeEscalate handler rejected / 恢復被 handler 拒絕")
+                    }
+                    Err(_) => {
+                        warn!("ReconcilerDeEscalate response channel dropped / 恢復回應通道丟失")
+                    }
                 }
             });
             true
         }
         ReconcilerAction::CloseAll { reason } => {
             let event_type = "reconciler_close_all";
-            spawn_action_audit(audit_pool, event_type, "CIRCUIT_BREAKER", reason, engine_label);
+            spawn_action_audit(
+                audit_pool,
+                event_type,
+                "CIRCUIT_BREAKER",
+                reason,
+                engine_label,
+            );
             if let Err(e) = cmd_tx.send(PipelineCommand::CloseAll) {
                 warn!(error = %e, "failed to send CloseAll command / 發送全平倉命令失敗");
                 return false;
@@ -744,7 +775,9 @@ fn spawn_action_audit(
     reason: &str,
     engine_label: &str,
 ) {
-    let Some(pool) = audit_pool.clone() else { return };
+    let Some(pool) = audit_pool.clone() else {
+        return;
+    };
     let payload = serde_json::json!({
         "target_tier": target_tier,
         "reason": reason,
