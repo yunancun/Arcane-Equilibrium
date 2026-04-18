@@ -177,6 +177,35 @@ Track P 標籤覆蓋因此不完整；ML 訓練會見到從這兩個 route 的 c
 
 ---
 
+### E5-FN-3 — `agent_audit_bridge` + AnalystAgent pilot wiring（2026-04-19 · commit 19f3d85）
+
+**RCA**（驗證 Audit §七.7.3 聲稱）：5-Agent 系統（Scout / Strategist / Guardian / Analyst / Executor）共 4 agent 有 19 個 `self._audit(event_type, data)` call-sites（Scout 為 0），但 `strategy_wiring.py` 建構每一個 agent 都 **未傳 `audit_callback=`** → `BaseAgent._audit_callback=None` → 19 次呼叫全部 silently no-op。直接 grep 確認 5 個 agent 檔 **零** `change_audit_log` 寫入 — 違反 Root Principle #8「交易可解釋」。`governance_hub` 等提供的審計來自 state machines（authorization / risk_governor / decision_lease / reconciliation），**非** agent decision points。
+
+**設計**：新 `agent_audit_bridge.py` 模組匯出 `make_agent_audit_callback(gov_hub, role_name) -> Callable[[str, Any], None]`：
+- Signature 與 `BaseAgent._audit` 完全一致，**零 agent 程式碼修改**。
+- Events 分類：decisions（verdict / edge_evaluation / intent_produced / trade_analyzed）→ `PARAMETER_CHANGE`；`*_received` / `directive_received` → `STATE_CHANGE`。
+- 每次呼叫 lazy-read `gov_hub._change_audit_log`（支援 late binding）。
+- 3 層 fail-open：`gov_hub=None` / `audit_log=None` / `record_change` 拋錯 → 靜默 drop（debug/warning log），絕不 propagate 回 agent 主路徑。
+- `auto_approve=True`（agent 決策屬自動）、`who=role_name`、`affected_components=[role_name]`。
+
+**Pilot**：`strategy_wiring.py` Batch 9 + Batch 10 兩個 AnalystAgent 建構現在傳 `audit_callback=_ANALYST_AUDIT_CB`，由 `GOV_HUB` 經橋樑建。遵循 Batch 12 已建立的 `_paper_live_gate_audit_cb` 同樣 pattern。
+
+**Tests**（+12 all green）：factory contract / event 分類 / 多事件持久化 / fail-open 4 分支 / Pilot 整合（AnalystAgent `analyze_trade` → +1 audit row `who="AnalystAgent"` + `PARAMETER_CHANGE` + `AUTO_APPROVED`）/ Pilot 整合（`EXECUTION_REPORT` receipt → `STATE_CHANGE` row）。
+
+**§九 singleton 登記**：`_ANALYST_AUDIT_CB` / `_GOV_HUB_FOR_ANALYST` 登入 `strategy_wiring.py`；`agent_audit_bridge` 本身無狀態工廠，不持 singleton。
+
+**APPROVE_PARTIAL follow-up → TODO `E5-FN-3-FUP`**（4 agent 待 wire）：
+- `StrategistAgent` (`strategy_wiring.py:172`) — 7 個 existing `_audit` calls，只需注入 callback
+- `GuardianAgent` (`strategy_wiring.py:215`)
+- `ExecutorAgent` (`strategy_wiring.py:345`)
+- `ScoutAgent` (`strategy_wiring.py:114` + `multi_agent_framework.py:410`) — 需新增 `_audit` calls at `produce_intel()` / `produce_event_alert()`（Scout 目前 0 audit calls）。
+
+**Regression**：`control_api_v1` suite **2451 passed** / 2 pre-existing DYNAMIC-RISK fail / 1 skipped；其中 `test_batch9_perception_analyst_integration` / `test_change_audit_log` / `test_governance_hub` / `test_analyst_agent_unit` / `test_integration_phase2` 全綠。
+
+**Refs**：CLAUDE.md §二 Root Principle #8 · DOC-06 §5 · EX-06 §1。
+
+---
+
 ### E5-P2 Refactor Wave 2 — 2 delivered / 3 evidence-based CANCEL / 2 defer（2026-04-19 · commits 11dedbf / 822f799）
 
 **workflow**：PA 派發 5 × general-purpose sub-agent（`isolation: "worktree"`，`run_in_background: true`）→ 2 delivered + 3 evidence-based CANCEL → Phase C 2× 並行 E2 code-review → 2/2 APPROVE_WITH_NITS（零 REJECT，所有 nit 非阻塞）→ Phase D 全量回歸（Rust engine lib 1560 passed / 2 pre-existing EXIT-FEATURES-TABLE-1 WIP fail，非 E5-P2 regression）→ Phase E 收口。
