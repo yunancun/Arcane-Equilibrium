@@ -26,8 +26,10 @@ fn test_intent_processor_linucb_select_called_after_gates_pass() {
         .select_arm_after_gates("trending", "ma_crossover", &ctx)
         .expect("arm exists");
     assert_eq!(sel.arm_id, "trending__ma_crossover");
-    assert_eq!(ip.last_arm_selection().map(|s| s.arm_id.clone()),
-               Some("trending__ma_crossover".to_string()));
+    assert_eq!(
+        ip.last_arm_selection().map(|s| s.arm_id.clone()),
+        Some("trending__ma_crossover".to_string())
+    );
 }
 
 fn make_intent(symbol: &str, is_long: bool) -> OrderIntent {
@@ -49,7 +51,13 @@ fn test_rejected_no_auth() {
     let proc = IntentProcessor::new();
     let gov = GovernanceCore::new(); // no auth
     let state = PaperState::new(10_000.0);
-    let result = proc.process(&make_intent("BTC", true), &gov, &state, 500.0, GovernanceProfile::Exploration);
+    let result = proc.process(
+        &make_intent("BTC", true),
+        &gov,
+        &state,
+        500.0,
+        GovernanceProfile::Exploration,
+    );
     assert!(!result.submitted);
     assert!(result.rejected_reason.unwrap().contains("governance"));
 }
@@ -63,7 +71,13 @@ fn test_approved_with_auth() {
     state.set_latest_price("BTC", 50000.0);
     // PH5-WIRE-0: ATR=2000 so EV=2000×0.7×0.004×0.2=$1.12 >> k×fee=1.5×$0.22=$0.33
     // (ATR raised from 500 to clear the 0.2 cold-start dampening factor)
-    let result = proc.process(&make_intent("BTC", true), &gov, &state, 2000.0, GovernanceProfile::Exploration);
+    let result = proc.process(
+        &make_intent("BTC", true),
+        &gov,
+        &state,
+        2000.0,
+        GovernanceProfile::Exploration,
+    );
     assert!(result.submitted);
     assert!(result.fill.is_some());
 }
@@ -80,7 +94,13 @@ fn test_position_sizing_caps_qty() {
     let mut state = PaperState::new(10_000.0);
     state.set_latest_price("BTC", 50_000.0);
     let intent = make_intent("BTC", true); // qty=0.01
-    let result = proc.process(&intent, &gov, &state, 2000.0, GovernanceProfile::Exploration);
+    let result = proc.process(
+        &intent,
+        &gov,
+        &state,
+        2000.0,
+        GovernanceProfile::Exploration,
+    );
     assert!(result.submitted);
     let fill = result.fill.unwrap();
     // fill.fill_qty should be 0.004 (= 10000 * 0.02 / 50000), not 0.01
@@ -103,7 +123,13 @@ fn test_position_sizing_tiny_balance() {
     let mut state = PaperState::new(100.0); // tiny balance
     state.set_latest_price("BTC", 50_000.0);
     let intent = make_intent("BTC", true); // qty=0.01
-    let result = proc.process(&intent, &gov, &state, 2000.0, GovernanceProfile::Exploration);
+    let result = proc.process(
+        &intent,
+        &gov,
+        &state,
+        2000.0,
+        GovernanceProfile::Exploration,
+    );
     assert!(result.submitted);
     let fill = result.fill.unwrap();
     // P1 calc: 100 * 0.02 / 50000 = 0.00004 — used directly, no MIN_QTY floor.
@@ -150,7 +176,13 @@ fn test_fup8_phase2_approved_qty_exposed_on_success() {
     // Mimic real strategy: submit 1e9 sentinel — processor must size it down.
     let mut intent = make_intent("BTC", true);
     intent.qty = 1e9;
-    let result = proc.process(&intent, &gov, &state, 2000.0, GovernanceProfile::Exploration);
+    let result = proc.process(
+        &intent,
+        &gov,
+        &state,
+        2000.0,
+        GovernanceProfile::Exploration,
+    );
     assert!(result.submitted, "intent must pass gates");
     // P1 cap at 2%: 10000 * 0.02 / 50000 = 0.004 BTC
     assert!(
@@ -181,7 +213,13 @@ fn test_fup8_phase2_approved_qty_zero_on_rejection() {
     let gov = GovernanceCore::new(); // not authorized → Gate 1 blocks
     let mut state = PaperState::new(10_000.0);
     state.set_latest_price("BTC", 50_000.0);
-    let result = proc.process(&make_intent("BTC", true), &gov, &state, 500.0, GovernanceProfile::Exploration);
+    let result = proc.process(
+        &make_intent("BTC", true),
+        &gov,
+        &state,
+        500.0,
+        GovernanceProfile::Exploration,
+    );
     assert!(!result.submitted);
     assert_eq!(result.approved_qty, 0.0);
 }
@@ -195,7 +233,13 @@ fn test_guardian_drawdown_rejection() {
     state.set_latest_price("BTC", 50000.0);
     // Simulate high drawdown
     state.force_drawdown(20.0);
-    let result = proc.process(&make_intent("BTC", true), &gov, &state, 500.0, GovernanceProfile::Exploration);
+    let result = proc.process(
+        &make_intent("BTC", true),
+        &gov,
+        &state,
+        500.0,
+        GovernanceProfile::Exploration,
+    );
     assert!(!result.submitted);
 }
 
@@ -251,7 +295,10 @@ fn test_cost_gate_cold_start_exploration_mode() {
     // ATR=20 (very compressed for BTC) — previously rejected by ATR cold-start gate,
     // now allowed in paper exploration mode to accumulate data.
     let result = proc.process(&intent, &gov, &state, 20.0, GovernanceProfile::Exploration);
-    assert!(result.submitted, "cold-start paper should allow through for data accumulation");
+    assert!(
+        result.submitted,
+        "cold-start paper should allow through for data accumulation"
+    );
 }
 
 #[test]
@@ -277,10 +324,7 @@ fn test_sec11_cost_gate_fail_closed_on_zero_atr() {
     // ATR=0 (indicator unavailable) — would have been waved through pre-SEC-11
     let result = proc.process(&intent, &gov, &state, 0.0, GovernanceProfile::Exploration);
     assert!(!result.submitted, "ATR=0 must fail-closed");
-    assert!(result
-        .rejected_reason
-        .unwrap()
-        .contains("ATR unavailable"));
+    assert!(result.rejected_reason.unwrap().contains("ATR unavailable"));
 
     // Same on the exchange-mode path
     let gate = proc.process_gates_only(&intent, &gov, &state, 0.0, GovernanceProfile::Production);
@@ -309,7 +353,8 @@ fn test_process_gates_only_cost_gate_rejects_low_ev() {
         persistence_elapsed_ms: None,
     };
     // ATR=20 compressed → EV << fee → reject
-    let result = proc.process_gates_only(&intent, &gov, &state, 20.0, GovernanceProfile::Production);
+    let result =
+        proc.process_gates_only(&intent, &gov, &state, 20.0, GovernanceProfile::Production);
     assert!(!result.approved);
     assert!(result.rejected_reason.unwrap().contains("cost_gate"));
 }
@@ -375,7 +420,10 @@ fn test_cost_gate_cold_start_allows_low_volatility_paper() {
         persistence_elapsed_ms: None,
     };
     let result = proc.process(&intent, &gov, &state, 0.1, GovernanceProfile::Exploration);
-    assert!(result.submitted, "cold-start paper should allow low-volatility for data accumulation");
+    assert!(
+        result.submitted,
+        "cold-start paper should allow low-volatility for data accumulation"
+    );
 }
 
 #[test]
@@ -383,10 +431,10 @@ fn test_slippage_tier_lookup() {
     // Verify slippage tiers match Python cost_gate.py SLIPPAGE_TIERS.
     // 驗證滑點分級與 Python cost_gate.py 一致。
     assert_eq!(lookup_slippage(2_000_000_000.0), 0.0001); // >$1B: 1 bps
-    assert_eq!(lookup_slippage(500_000_000.0), 0.0002);   // >$100M: 2 bps
-    assert_eq!(lookup_slippage(50_000_000.0), 0.0005);    // >$10M: 5 bps
-    assert_eq!(lookup_slippage(5_000_000.0), 0.0015);     // >$1M: 15 bps
-    assert_eq!(lookup_slippage(100_000.0), 0.0030);       // <$1M: 30 bps
+    assert_eq!(lookup_slippage(500_000_000.0), 0.0002); // >$100M: 2 bps
+    assert_eq!(lookup_slippage(50_000_000.0), 0.0005); // >$10M: 5 bps
+    assert_eq!(lookup_slippage(5_000_000.0), 0.0015); // >$1M: 15 bps
+    assert_eq!(lookup_slippage(100_000.0), 0.0030); // <$1M: 30 bps
     assert_eq!(lookup_slippage(0.0), DEFAULT_SLIPPAGE_RATE);
     assert_eq!(lookup_slippage(-1.0), DEFAULT_SLIPPAGE_RATE);
 }
@@ -420,7 +468,10 @@ fn test_cost_gate_js_win_rate_weighting() {
         persistence_elapsed_ms: None,
     };
     let result = proc.process(&intent, &gov, &state, 500.0, GovernanceProfile::Exploration);
-    assert!(!result.submitted, "Low win_rate should tighten JS gate threshold");
+    assert!(
+        !result.submitted,
+        "Low win_rate should tighten JS gate threshold"
+    );
     assert!(result.rejected_reason.unwrap().contains("cost_gate(JS)"));
 }
 
@@ -450,7 +501,11 @@ fn test_cost_gate_high_volume_reduces_slippage() {
     // min_move = 0.13 / 0.5 × 1.3 = 0.338%
     // 0.4478% > 0.338% → passes
     let result = proc.process(&intent, &gov, &state, 300.0, GovernanceProfile::Exploration);
-    assert!(result.submitted, "BTC with high volume should pass: {:?}", result.rejected_reason);
+    assert!(
+        result.submitted,
+        "BTC with high volume should pass: {:?}",
+        result.rejected_reason
+    );
 }
 
 #[test]
@@ -471,7 +526,8 @@ fn test_pnl1_rejects_qty_zero_process() {
     let reason = result.rejected_reason.unwrap();
     assert!(
         reason.starts_with("insufficient_balance:") || reason.starts_with("qty_zero:"),
-        "got: {}", reason,
+        "got: {}",
+        reason,
     );
 }
 
@@ -485,7 +541,8 @@ fn test_pnl1_rejects_qty_zero_gates_only() {
     let mut state = PaperState::new(0.0);
     state.set_latest_price("BTC", 50_000.0);
     let intent = make_intent("BTC", true);
-    let result = proc.process_gates_only(&intent, &gov, &state, 500.0, GovernanceProfile::Production);
+    let result =
+        proc.process_gates_only(&intent, &gov, &state, 500.0, GovernanceProfile::Production);
     assert!(!result.approved);
     assert_eq!(result.approved_qty, 0.0);
     assert!(result.rejected_reason.unwrap().starts_with("qty_zero:"));
@@ -496,19 +553,28 @@ fn test_pnl1_rejects_qty_zero_gates_only() {
 #[test]
 fn test_governance_core_new_with_profile_exploration_auto_grants() {
     let gov = GovernanceCore::new_with_profile(GovernanceProfile::Exploration);
-    assert!(gov.is_authorized(), "Exploration profile should auto-grant auth");
+    assert!(
+        gov.is_authorized(),
+        "Exploration profile should auto-grant auth"
+    );
 }
 
 #[test]
 fn test_governance_core_new_with_profile_validation_auto_grants() {
     let gov = GovernanceCore::new_with_profile(GovernanceProfile::Validation);
-    assert!(gov.is_authorized(), "Validation profile should auto-grant auth");
+    assert!(
+        gov.is_authorized(),
+        "Validation profile should auto-grant auth"
+    );
 }
 
 #[test]
 fn test_governance_core_new_with_profile_production_fail_closed() {
     let gov = GovernanceCore::new_with_profile(GovernanceProfile::Production);
-    assert!(!gov.is_authorized(), "Production profile should NOT auto-grant auth");
+    assert!(
+        !gov.is_authorized(),
+        "Production profile should NOT auto-grant auth"
+    );
 }
 
 #[test]
@@ -529,7 +595,10 @@ fn test_cost_gate_moderate_negative_edge_blocks() {
     let estimates = crate::edge_estimates::EdgeEstimates::load_from_str(json).unwrap();
     proc.set_edge_estimates(estimates);
     let result = proc.cost_gate_moderate("ma_crossover", "BTCUSDT", 0.00055, 1_000_000_000.0);
-    assert!(result.is_some(), "negative edge should be blocked in moderate mode");
+    assert!(
+        result.is_some(),
+        "negative edge should be blocked in moderate mode"
+    );
     assert!(result.unwrap().rejected_reason.unwrap().contains("demo"));
 }
 
@@ -538,7 +607,10 @@ fn test_cost_gate_moderate_cold_start_allows() {
     let proc = IntentProcessor::new();
     // No edge estimates set = cold start
     let result = proc.cost_gate_moderate("ma_crossover", "BTCUSDT", 0.00055, 1_000_000_000.0);
-    assert!(result.is_none(), "cold start should be allowed in moderate mode (data accumulation)");
+    assert!(
+        result.is_none(),
+        "cold start should be allowed in moderate mode (data accumulation)"
+    );
 }
 
 #[test]
@@ -549,7 +621,10 @@ fn test_process_with_exploration_profile() {
     state.set_latest_price("BTC", 50_000.0);
     let intent = make_intent("BTC", true);
     let result = proc.process(&intent, &gov, &state, 500.0, GovernanceProfile::Exploration);
-    assert!(result.submitted, "Exploration profile should process successfully");
+    assert!(
+        result.submitted,
+        "Exploration profile should process successfully"
+    );
 }
 
 #[test]
@@ -559,9 +634,13 @@ fn test_process_gates_with_production_no_auth_rejects() {
     let mut state = PaperState::new(10_000.0);
     state.set_latest_price("BTC", 50_000.0);
     let intent = make_intent("BTC", true);
-    let result = proc.process_gates_only(&intent, &gov, &state, 500.0, GovernanceProfile::Production);
+    let result =
+        proc.process_gates_only(&intent, &gov, &state, 500.0, GovernanceProfile::Production);
     assert!(!result.approved, "Production without auth should reject");
-    assert!(result.rejected_reason.unwrap().contains("governance_not_authorized"));
+    assert!(result
+        .rejected_reason
+        .unwrap()
+        .contains("governance_not_authorized"));
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -600,7 +679,10 @@ fn test_d15_global_cap_blocks_over_limit() {
     assert!(result.is_some());
     let reason = result.unwrap();
     assert!(reason.contains("global_notional_cap"), "reason: {reason}");
-    assert!(reason.contains("10100.00"), "should show projected: {reason}");
+    assert!(
+        reason.contains("10100.00"),
+        "should show projected: {reason}"
+    );
 }
 
 #[test]
@@ -647,9 +729,18 @@ fn test_d15_paper_path_cap_blocks_intent() {
     let mut state = PaperState::new(10_000.0);
     state.set_latest_price("BTC", 50_000.0);
     let intent = make_intent("BTC", true); // qty=0.01 → notional=~200 USDT (after P1 sizing)
-    let result = proc.process(&intent, &gov, &state, 2000.0, GovernanceProfile::Exploration);
+    let result = proc.process(
+        &intent,
+        &gov,
+        &state,
+        2000.0,
+        GovernanceProfile::Exploration,
+    );
     assert!(!result.submitted, "cap should block");
-    assert!(result.rejected_reason.unwrap().contains("global_notional_cap"));
+    assert!(result
+        .rejected_reason
+        .unwrap()
+        .contains("global_notional_cap"));
 }
 
 #[test]
@@ -664,11 +755,16 @@ fn test_d15_exchange_path_cap_blocks_intent() {
     let mut state = PaperState::new(10_000.0);
     state.set_latest_price("BTC", 50_000.0);
     let intent = make_intent("BTC", true);
-    let _result = proc.process_gates_only(&intent, &gov, &state, 2000.0, GovernanceProfile::Production);
+    let _result =
+        proc.process_gates_only(&intent, &gov, &state, 2000.0, GovernanceProfile::Production);
     // Production needs auth, so it'll reject on governance first. Use Exploration.
-    let result = proc.process_gates_only(&intent, &gov, &state, 2000.0, GovernanceProfile::Validation);
+    let result =
+        proc.process_gates_only(&intent, &gov, &state, 2000.0, GovernanceProfile::Validation);
     assert!(!result.approved, "cap should block exchange path");
-    assert!(result.rejected_reason.unwrap().contains("global_notional_cap"));
+    assert!(result
+        .rejected_reason
+        .unwrap()
+        .contains("global_notional_cap"));
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -687,9 +783,18 @@ fn test_duplicate_position_same_direction_rejected() {
     // Manually open a long BTC position in paper_state
     state.import_positions(vec![("BTC".into(), true, 0.001, 50_000.0, 0)]);
     // Try to open another long BTC → rejected
-    let result = proc.process(&make_intent("BTC", true), &gov, &state, 2000.0, GovernanceProfile::Exploration);
+    let result = proc.process(
+        &make_intent("BTC", true),
+        &gov,
+        &state,
+        2000.0,
+        GovernanceProfile::Exploration,
+    );
     assert!(!result.submitted);
-    assert!(result.rejected_reason.unwrap().contains("duplicate_position"));
+    assert!(result
+        .rejected_reason
+        .unwrap()
+        .contains("duplicate_position"));
 }
 
 /// EN: Opposite-direction intent on existing position is allowed (closes existing).
@@ -713,11 +818,19 @@ fn test_opposite_direction_on_existing_position_allowed() {
         confluence_score: None,
         persistence_elapsed_ms: None,
     };
-    let result = proc.process(&intent, &gov, &state, 2000.0, GovernanceProfile::Exploration);
+    let result = proc.process(
+        &intent,
+        &gov,
+        &state,
+        2000.0,
+        GovernanceProfile::Exploration,
+    );
     // May be rejected by other gates (guardian drawdown, etc.), but NOT by duplicate check
     if let Some(reason) = &result.rejected_reason {
-        assert!(!reason.contains("duplicate_position"),
-            "opposite direction should not be rejected as duplicate, got: {reason}");
+        assert!(
+            !reason.contains("duplicate_position"),
+            "opposite direction should not be rejected as duplicate, got: {reason}"
+        );
     }
 }
 
@@ -730,7 +843,13 @@ fn test_negative_atr_fails_closed() {
     let mut state = PaperState::new(10_000.0);
     state.set_latest_price("BTC", 50_000.0);
     let intent = make_intent("BTC", true);
-    let result = proc.process(&intent, &gov, &state, -100.0, GovernanceProfile::Exploration);
+    let result = proc.process(
+        &intent,
+        &gov,
+        &state,
+        -100.0,
+        GovernanceProfile::Exploration,
+    );
     assert!(!result.submitted, "negative ATR must fail-closed");
     assert!(result.rejected_reason.unwrap().contains("ATR unavailable"));
 }
@@ -755,7 +874,11 @@ fn test_gates_only_validation_profile_passes() {
         persistence_elapsed_ms: None,
     };
     let result = proc.process_gates_only(&intent, &gov, &state, 5.0, GovernanceProfile::Validation);
-    assert!(result.approved, "Validation profile should pass: {:?}", result.rejected_reason);
+    assert!(
+        result.approved,
+        "Validation profile should pass: {:?}",
+        result.rejected_reason
+    );
     assert!(result.approved_qty > 0.0);
 }
 
@@ -779,9 +902,75 @@ fn test_gates_only_duplicate_rejected() {
         confluence_score: None,
         persistence_elapsed_ms: None,
     };
-    let result = proc.process_gates_only(&intent, &gov, &state, 50.0, GovernanceProfile::Validation);
+    let result =
+        proc.process_gates_only(&intent, &gov, &state, 50.0, GovernanceProfile::Validation);
     assert!(!result.approved);
-    assert!(result.rejected_reason.unwrap().contains("duplicate_position"));
+    assert!(result
+        .rejected_reason
+        .unwrap()
+        .contains("duplicate_position"));
+}
+
+/// P0-6 permanent fix: pre-Guardian rejection on paper path must carry a
+/// synthetic Rejected `VerdictInfo` so `persist_verdict` writes the real reason
+/// into `trading.risk_verdicts` (was `verdict_info: None` → silently skipped).
+/// P0-6 永久修復：Paper 管線的前置 gate 拒絕必須帶 synthetic Rejected VerdictInfo，
+/// 使 `persist_verdict` 能寫入真實拒絕理由（原本 None → 寫入被跳過）。
+#[test]
+fn test_p06_pre_guardian_reject_paper_carries_synthetic_verdict_info() {
+    let proc = IntentProcessor::new();
+    let gov = GovernanceCore::new(); // no auth → governance_not_authorized
+    let state = PaperState::new(10_000.0);
+    let result = proc.process(
+        &make_intent("BTC", true),
+        &gov,
+        &state,
+        500.0,
+        GovernanceProfile::Exploration,
+    );
+    assert!(!result.submitted);
+    let reason = result.rejected_reason.as_ref().expect("rejection reason");
+    let vi = result
+        .verdict_info
+        .as_ref()
+        .expect("P0-6: synthetic VerdictInfo must be present on pre-Guardian rejection");
+    assert_eq!(vi.verdict, "Rejected");
+    assert_eq!(vi.reasons.len(), 1);
+    assert_eq!(&vi.reasons[0], reason);
+    assert!(vi.modified_qty.is_none());
+}
+
+/// P0-6 permanent fix: same invariant on the exchange (gates-only) path.
+/// P0-6 永久修復：Exchange 管線（gates-only）同樣必須帶 synthetic VerdictInfo。
+#[test]
+fn test_p06_pre_guardian_reject_exchange_carries_synthetic_verdict_info() {
+    let proc = IntentProcessor::new();
+    let gov = GovernanceCore::new_with_profile(GovernanceProfile::Validation);
+    let mut state = PaperState::new(10_000.0);
+    state.set_latest_price("ETH", 3000.0);
+    state.import_positions(vec![("ETH".into(), false, 0.1, 3000.0, 0)]);
+    let intent = OrderIntent {
+        symbol: "ETH".into(),
+        is_long: false,
+        qty: 0.05,
+        confidence: 0.7,
+        strategy: "test".into(),
+        order_type: "market".into(),
+        limit_price: None,
+        confluence_score: None,
+        persistence_elapsed_ms: None,
+    };
+    let result =
+        proc.process_gates_only(&intent, &gov, &state, 50.0, GovernanceProfile::Validation);
+    assert!(!result.approved);
+    let reason = result.rejected_reason.as_ref().expect("rejection reason");
+    let vi = result
+        .verdict_info
+        .as_ref()
+        .expect("P0-6: synthetic VerdictInfo must be present on pre-Guardian rejection");
+    assert_eq!(vi.verdict, "Rejected");
+    assert_eq!(vi.reasons.len(), 1);
+    assert_eq!(&vi.reasons[0], reason);
 }
 
 // ============================================================
@@ -873,7 +1062,11 @@ mod predictor_wiring_tests {
         store.swap(
             "test",
             Arc::new(StubOkPredictor {
-                pred: Prediction { q10: 100.0, q50: 200.0, q90: 300.0 },
+                pred: Prediction {
+                    q10: 100.0,
+                    q50: 200.0,
+                    q90: 300.0,
+                },
             }),
         );
         proc.set_edge_predictor_store(store);
@@ -883,10 +1076,20 @@ mod predictor_wiring_tests {
         // means it passes to fill. Without features the predictor shouldn't short-circuit.
         // features=None 時 predictor 不短路，走舊 JS gate（冷啟動探索放行）。
         let r = proc.process_with_features(
-            &intent_btc(0.7), &gov, &state, 500.0,
-            GovernanceProfile::Exploration, None, None, 0,
+            &intent_btc(0.7),
+            &gov,
+            &state,
+            500.0,
+            GovernanceProfile::Exploration,
+            None,
+            None,
+            0,
         );
-        assert!(r.submitted, "features=None must delegate to legacy path; got {:?}", r.rejected_reason);
+        assert!(
+            r.submitted,
+            "features=None must delegate to legacy path; got {:?}",
+            r.rejected_reason
+        );
     }
 
     #[test]
@@ -901,10 +1104,20 @@ mod predictor_wiring_tests {
         let state = paper_state_with_price(30_000.0);
         let features = FeatureVectorV1::zeroed();
         let r = proc.process_with_features(
-            &intent_btc(0.7), &gov, &state, 500.0,
-            GovernanceProfile::Exploration, Some(&features), Some("ctx-1"), 1_700_000_000_000,
+            &intent_btc(0.7),
+            &gov,
+            &state,
+            500.0,
+            GovernanceProfile::Exploration,
+            Some(&features),
+            Some("ctx-1"),
+            1_700_000_000_000,
         );
-        assert!(r.submitted, "use_edge_predictor=false must pass through; got {:?}", r.rejected_reason);
+        assert!(
+            r.submitted,
+            "use_edge_predictor=false must pass through; got {:?}",
+            r.rejected_reason
+        );
     }
 
     #[test]
@@ -919,7 +1132,11 @@ mod predictor_wiring_tests {
         store.swap(
             "test",
             Arc::new(StubOkPredictor {
-                pred: Prediction { q10: -100.0, q50: -50.0, q90: -10.0 },
+                pred: Prediction {
+                    q10: -100.0,
+                    q50: -50.0,
+                    q90: -10.0,
+                },
             }),
         );
         proc.set_edge_predictor_store(store);
@@ -927,11 +1144,20 @@ mod predictor_wiring_tests {
         let state = paper_state_with_price(30_000.0);
         let features = FeatureVectorV1::zeroed();
         let r = proc.process_with_features(
-            &intent_btc(0.7), &gov, &state, 500.0,
-            GovernanceProfile::Exploration, Some(&features), Some("ctx-1"), 0,
+            &intent_btc(0.7),
+            &gov,
+            &state,
+            500.0,
+            GovernanceProfile::Exploration,
+            Some(&features),
+            Some("ctx-1"),
+            0,
         );
-        assert!(r.submitted,
-            "shadow_mode=true must fall through to legacy; got {:?}", r.rejected_reason);
+        assert!(
+            r.submitted,
+            "shadow_mode=true must fall through to legacy; got {:?}",
+            r.rejected_reason
+        );
     }
 
     #[test]
@@ -946,7 +1172,11 @@ mod predictor_wiring_tests {
         store.swap(
             "test",
             Arc::new(StubOkPredictor {
-                pred: Prediction { q10: 100.0, q50: 200.0, q90: 300.0 },
+                pred: Prediction {
+                    q10: 100.0,
+                    q50: 200.0,
+                    q90: 300.0,
+                },
             }),
         );
         proc.set_edge_predictor_store(store);
@@ -954,10 +1184,20 @@ mod predictor_wiring_tests {
         let state = paper_state_with_price(30_000.0);
         let features = FeatureVectorV1::zeroed();
         let r = proc.process_with_features(
-            &intent_btc(0.7), &gov, &state, 500.0,
-            GovernanceProfile::Exploration, Some(&features), Some("ctx-1"), 0,
+            &intent_btc(0.7),
+            &gov,
+            &state,
+            500.0,
+            GovernanceProfile::Exploration,
+            Some(&features),
+            Some("ctx-1"),
+            0,
         );
-        assert!(r.submitted, "Accept must bypass JS gate and submit; got {:?}", r.rejected_reason);
+        assert!(
+            r.submitted,
+            "Accept must bypass JS gate and submit; got {:?}",
+            r.rejected_reason
+        );
     }
 
     #[test]
@@ -972,7 +1212,11 @@ mod predictor_wiring_tests {
         store.swap(
             "test",
             Arc::new(StubOkPredictor {
-                pred: Prediction { q10: -100.0, q50: -50.0, q90: -10.0 },
+                pred: Prediction {
+                    q10: -100.0,
+                    q50: -50.0,
+                    q90: -10.0,
+                },
             }),
         );
         proc.set_edge_predictor_store(store);
@@ -980,8 +1224,14 @@ mod predictor_wiring_tests {
         let state = paper_state_with_price(30_000.0);
         let features = FeatureVectorV1::zeroed();
         let r = proc.process_with_features(
-            &intent_btc(0.7), &gov, &state, 500.0,
-            GovernanceProfile::Exploration, Some(&features), Some("ctx-1"), 0,
+            &intent_btc(0.7),
+            &gov,
+            &state,
+            500.0,
+            GovernanceProfile::Exploration,
+            Some(&features),
+            Some("ctx-1"),
+            0,
         );
         assert!(!r.submitted);
         let reason = r.rejected_reason.expect("reason set");
@@ -1006,13 +1256,22 @@ mod predictor_wiring_tests {
         let state = paper_state_with_price(30_000.0);
         let features = FeatureVectorV1::zeroed();
         let r = proc.process_with_features(
-            &intent_btc(0.7), &gov, &state, 500.0,
-            GovernanceProfile::Exploration, Some(&features), Some("ctx-1"), 0,
+            &intent_btc(0.7),
+            &gov,
+            &state,
+            500.0,
+            GovernanceProfile::Exploration,
+            Some(&features),
+            Some("ctx-1"),
+            0,
         );
         // JS gate cold-start exploration passes the intent.
         // JS gate 冷啟動探索模式放行。
-        assert!(r.submitted,
-            "Fallback(Shrinkage) must delegate to legacy gate; got {:?}", r.rejected_reason);
+        assert!(
+            r.submitted,
+            "Fallback(Shrinkage) must delegate to legacy gate; got {:?}",
+            r.rejected_reason
+        );
     }
 
     #[test]
@@ -1029,8 +1288,14 @@ mod predictor_wiring_tests {
         let state = paper_state_with_price(30_000.0);
         let features = FeatureVectorV1::zeroed();
         let r = proc.process_with_features(
-            &intent_btc(0.7), &gov, &state, 500.0,
-            GovernanceProfile::Exploration, Some(&features), Some("ctx-1"), 0,
+            &intent_btc(0.7),
+            &gov,
+            &state,
+            500.0,
+            GovernanceProfile::Exploration,
+            Some(&features),
+            Some("ctx-1"),
+            0,
         );
         assert!(!r.submitted);
         let reason = r.rejected_reason.expect("reason set");
@@ -1054,7 +1319,11 @@ mod predictor_wiring_tests {
         store.swap(
             "test",
             Arc::new(StubOkPredictor {
-                pred: Prediction { q10: -100.0, q50: -50.0, q90: -10.0 },
+                pred: Prediction {
+                    q10: -100.0,
+                    q50: -50.0,
+                    q90: -10.0,
+                },
             }),
         );
         proc.set_edge_predictor_store(store);
@@ -1066,8 +1335,13 @@ mod predictor_wiring_tests {
         let state = paper_state_with_price(30_000.0);
         let features = FeatureVectorV1::zeroed();
         let r = proc.process_with_features(
-            &intent_btc(0.7), &gov, &state, 500.0,
-            GovernanceProfile::Exploration, Some(&features), Some("ctx-eps"),
+            &intent_btc(0.7),
+            &gov,
+            &state,
+            500.0,
+            GovernanceProfile::Exploration,
+            Some(&features),
+            Some("ctx-eps"),
             1_700_000_000_000,
         );
         assert!(!r.submitted);
@@ -1079,7 +1353,12 @@ mod predictor_wiring_tests {
         let cmd = rx.try_recv().expect("ShadowFill IPC must be emitted");
         match cmd {
             PipelineCommand::EmitShadowFill {
-                context_id, strategy, symbol, prediction_q50, ts_ms, ..
+                context_id,
+                strategy,
+                symbol,
+                prediction_q50,
+                ts_ms,
+                ..
             } => {
                 assert_eq!(context_id, "ctx-eps");
                 assert_eq!(strategy, "test");
@@ -1105,7 +1384,11 @@ mod predictor_wiring_tests {
         store.swap(
             "test",
             Arc::new(StubOkPredictor {
-                pred: Prediction { q10: -100.0, q50: -50.0, q90: -10.0 },
+                pred: Prediction {
+                    q10: -100.0,
+                    q50: -50.0,
+                    q90: -10.0,
+                },
             }),
         );
         proc.set_edge_predictor_store(store);
@@ -1117,11 +1400,20 @@ mod predictor_wiring_tests {
         let state = paper_state_with_price(30_000.0);
         let features = FeatureVectorV1::zeroed();
         let r = proc.process_with_features(
-            &intent_btc(0.7), &gov, &state, 500.0,
-            GovernanceProfile::Exploration, Some(&features), Some("ctx-demo"), 0,
+            &intent_btc(0.7),
+            &gov,
+            &state,
+            500.0,
+            GovernanceProfile::Exploration,
+            Some(&features),
+            Some("ctx-demo"),
+            0,
         );
         assert!(!r.submitted);
-        assert!(rx.try_recv().is_err(), "Demo engine must not emit shadow fills");
+        assert!(
+            rx.try_recv().is_err(),
+            "Demo engine must not emit shadow fills"
+        );
     }
 
     #[test]
@@ -1135,7 +1427,11 @@ mod predictor_wiring_tests {
         store.swap(
             "test",
             Arc::new(StubOkPredictor {
-                pred: Prediction { q10: 100.0, q50: 200.0, q90: 300.0 },
+                pred: Prediction {
+                    q10: 100.0,
+                    q50: 200.0,
+                    q90: 300.0,
+                },
             }),
         );
         proc.set_edge_predictor_store(store);
@@ -1143,10 +1439,20 @@ mod predictor_wiring_tests {
         let state = paper_state_with_price(30_000.0);
         let features = FeatureVectorV1::zeroed();
         let r = proc.process_gates_only_with_features(
-            &intent_btc(0.7), &gov, &state, 500.0,
-            GovernanceProfile::Production, Some(&features), Some("ctx-exch"), 0,
+            &intent_btc(0.7),
+            &gov,
+            &state,
+            500.0,
+            GovernanceProfile::Production,
+            Some(&features),
+            Some("ctx-exch"),
+            0,
         );
-        assert!(r.approved, "Accept must bypass strict live JS gate; got {:?}", r.rejected_reason);
+        assert!(
+            r.approved,
+            "Accept must bypass strict live JS gate; got {:?}",
+            r.rejected_reason
+        );
     }
 
     // ========================================================
@@ -1173,16 +1479,20 @@ mod predictor_wiring_tests {
         assert!(!proc.risk_config.edge_predictor.use_edge_predictor);
         proc.set_pipeline_kind(PipelineKind::Paper);
 
-        let (tx, mut rx) =
-            tokio::sync::mpsc::channel::<crate::database::DecisionFeatureMsg>(8);
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<crate::database::DecisionFeatureMsg>(8);
         proc.set_decision_feature_tx(tx);
 
         let gov = approved_governance();
         let state = paper_state_with_price(30_000.0);
         let features = FeatureVectorV1::zeroed();
         let _ = proc.process_with_features(
-            &intent_btc(0.7), &gov, &state, 500.0,
-            GovernanceProfile::Exploration, Some(&features), Some("ctx-seed"),
+            &intent_btc(0.7),
+            &gov,
+            &state,
+            500.0,
+            GovernanceProfile::Exploration,
+            Some(&features),
+            Some("ctx-seed"),
             1_700_000_000_000,
         );
 
@@ -1219,19 +1529,26 @@ mod predictor_wiring_tests {
         let mut proc = IntentProcessor::new();
         proc.set_pipeline_kind(PipelineKind::Paper);
 
-        let (tx, mut rx) =
-            tokio::sync::mpsc::channel::<crate::database::DecisionFeatureMsg>(8);
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<crate::database::DecisionFeatureMsg>(8);
         proc.set_decision_feature_tx(tx);
 
         let gov = approved_governance();
         let state = paper_state_with_price(30_000.0);
         let features = FeatureVectorV1::zeroed();
         let _ = proc.process_with_features(
-            &intent_btc(0.7), &gov, &state, 500.0,
-            GovernanceProfile::Exploration, Some(&features), None, 1_700_000_000_000,
+            &intent_btc(0.7),
+            &gov,
+            &state,
+            500.0,
+            GovernanceProfile::Exploration,
+            Some(&features),
+            None,
+            1_700_000_000_000,
         );
-        assert!(rx.try_recv().is_err(),
-            "empty context_id must not emit snapshot");
+        assert!(
+            rx.try_recv().is_err(),
+            "empty context_id must not emit snapshot"
+        );
     }
 
     #[test]
@@ -1241,18 +1558,25 @@ mod predictor_wiring_tests {
         let mut proc = IntentProcessor::new();
         proc.set_pipeline_kind(PipelineKind::Paper);
 
-        let (tx, mut rx) =
-            tokio::sync::mpsc::channel::<crate::database::DecisionFeatureMsg>(8);
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<crate::database::DecisionFeatureMsg>(8);
         proc.set_decision_feature_tx(tx);
 
         let gov = approved_governance();
         let state = paper_state_with_price(30_000.0);
         let _ = proc.process_with_features(
-            &intent_btc(0.7), &gov, &state, 500.0,
-            GovernanceProfile::Exploration, None, Some("ctx-nofeat"), 1_700_000_000_000,
+            &intent_btc(0.7),
+            &gov,
+            &state,
+            500.0,
+            GovernanceProfile::Exploration,
+            None,
+            Some("ctx-nofeat"),
+            1_700_000_000_000,
         );
-        assert!(rx.try_recv().is_err(),
-            "features=None must not emit snapshot");
+        assert!(
+            rx.try_recv().is_err(),
+            "features=None must not emit snapshot"
+        );
     }
 
     #[test]
@@ -1262,18 +1586,25 @@ mod predictor_wiring_tests {
         let mut proc = IntentProcessor::new();
         proc.set_pipeline_kind(PipelineKind::Paper);
 
-        let (tx, mut rx) =
-            tokio::sync::mpsc::channel::<crate::database::DecisionFeatureMsg>(8);
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<crate::database::DecisionFeatureMsg>(8);
         proc.set_decision_feature_tx(tx);
 
         let gov = approved_governance();
         let state = paper_state_with_price(30_000.0);
         let features = FeatureVectorV1::zeroed();
         let _ = proc.process_with_features(
-            &intent_btc(0.7), &gov, &state, 500.0,
-            GovernanceProfile::Exploration, Some(&features), Some("ctx-zero-ts"), 0,
+            &intent_btc(0.7),
+            &gov,
+            &state,
+            500.0,
+            GovernanceProfile::Exploration,
+            Some(&features),
+            Some("ctx-zero-ts"),
+            0,
         );
-        assert!(rx.try_recv().is_err(),
-            "ts_ms=0 must not emit snapshot (DB-RUN-6 alignment)");
+        assert!(
+            rx.try_recv().is_err(),
+            "ts_ms=0 must not emit snapshot (DB-RUN-6 alignment)"
+        );
     }
 }
