@@ -152,6 +152,13 @@ impl TickPipeline {
             .get_entry_context_id(symbol)
             .unwrap_or("")
             .to_string();
+        // EXIT-FEATURES-TABLE-1 (E2 P1 fix): also capture PositionExitSnapshot so
+        // we can emit an ExitFeatureRow if this external fill turns out to be
+        // a close (realized_pnl != 0). apply_fill mutates/removes the position
+        // on close, so we must snapshot pre-fill. None when no position existed.
+        // EXIT-FEATURES-TABLE-1 E2 P1：apply_fill 前捕獲 snapshot；外部 fill
+        // 若為平倉（realized_pnl != 0）才發送 ExitFeatureRow。
+        let pre_fill_snapshot = self.paper_state.position_exit_snapshot(symbol);
         let realized_pnl = self.paper_state.apply_fill(
             symbol,
             is_long,
@@ -263,9 +270,37 @@ impl TickPipeline {
                 realized_pnl,
                 strategy_name: strategy.to_string(),
                 context_id,
-                entry_context_id: fill_entry_ctx,
+                entry_context_id: fill_entry_ctx.clone(),
                 engine_mode: em.to_string(),
             });
+        }
+
+        // EXIT-FEATURES-TABLE-1 (E2 P1 fix): if this external fill was a close
+        // (realized_pnl != 0), emit a Track P feature row too. Uses the pre-fill
+        // snapshot captured above; fails soft when no snapshot (shouldn't happen
+        // on a real close) or tx unwired.
+        // EXIT-FEATURES-TABLE-1 E2 P1：外部平倉 fill 同步寫 exit_features，
+        // 與內部 emit_close_fill 路徑保持 Track P 標籤覆蓋對等。
+        if realized_pnl != 0.0 {
+            self.try_emit_exit_feature_row(
+                symbol,
+                fill.fill_qty,
+                fill.fill_price,
+                now_ms,
+                realized_pnl,
+                fill.fee,
+                self.intent_processor.fee_rate(symbol),
+                // Preserve caller's strategy label for taxonomy — unlike
+                // internal close paths this is driven by exchange reports, so
+                // there is no canonical prefix. parse_exit_tag will fall
+                // through to (strategy, "") pair which downstream treats as
+                // ExternalFill category.
+                // 外部 fill 無固定 prefix，策略名原樣傳；parse_exit_tag 退回
+                // (strategy, "") 由下游歸類為 ExternalFill。
+                strategy,
+                pre_fill_snapshot.as_ref(),
+                &fill_entry_ctx,
+            );
         }
 
         Ok(serde_json::json!({
@@ -748,9 +783,43 @@ impl TickPipeline {
         } else {
             // Paper mode: immediate close via paper_state.
             // 紙盤模式：通過 paper_state 立即平倉。
+            // EXIT-FEATURES-TABLE-1 (E2 P1 fix): capture snapshot + entry_context_id
+            // + resolved close price + qty BEFORE paper_state mutates. The close is
+            // at market — mirror close_position_at_market's price-resolution so the
+            // emitted exit feature row carries the same price that was actually
+            // used for PnL. No fill-emit here: paper ipc_close historically doesn't
+            // write TradingMsg::Fill (scope-tight fix — only add exit features).
+            // EXIT-FEATURES-TABLE-1 E2 P1：關倉前捕獲快照/entry_context_id/價格/qty，
+            // 僅補 exit feature 發送，不動 Fill 寫入路徑（維持本 patch 範圍）。
+            let snap = self.paper_state.position_exit_snapshot(symbol);
+            let entry_ctx = self
+                .paper_state
+                .get_entry_context_id(symbol)
+                .unwrap_or("")
+                .to_string();
+            let (close_qty, close_price) = self
+                .paper_state
+                .get_position(symbol)
+                .map(|p| {
+                    let px = self
+                        .paper_state
+                        .latest_price(symbol)
+                        .unwrap_or(p.entry_price);
+                    (p.qty, px)
+                })
+                .unwrap_or((0.0, 0.0));
             match self.paper_state.close_position_at_market(symbol) {
                 Some(pnl) => {
                     self.dynamic_risk_sizer.record_closed_trade(pnl);
+                    if close_qty > 0.0 {
+                        let fr = self.intent_processor.fee_rate(symbol);
+                        let close_fee = close_qty * close_price * fr;
+                        self.try_emit_exit_feature_row(
+                            symbol, close_qty, close_price, ts_ms, pnl,
+                            close_fee, fr, "risk_close:ipc_close_symbol",
+                            snap.as_ref(), &entry_ctx,
+                        );
+                    }
                     true
                 }
                 None => false,
