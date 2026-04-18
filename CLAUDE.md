@@ -76,6 +76,7 @@
 | 2026-04-15 | EDGE-P3-1 ML-MIT #26 Lane A · FA-PHANTOM-2 spec · ORPHAN-ADOPT-1 Phase 2A · engine_watchdog systemd unit ✅ |
 | 2026-04-16 | P0-4 R1 STRATEGY-CLOSE-TAG-FIX · P0-0 RECONCILER-BURST-FIX · P0-5 PHANTOM-2-FUP · PAPER-DISABLE-1 · DEDUP-PY-RUST Tier A · EDGE-P3-1 Phase B #3 + Step 7b/7c · G-2 daemon option D ✅ |
 | 2026-04-17 | P0-10 SCANNER-GATE death loop fix（orphan A4 移除 + scanner universe gate + FUP race fix）· P1-8 DUST-EVICTION-GAP-1 E1/E4（dust_check 預檢 + orphan_frozen 凍結分支）· P1-8 FUP tick-level `retriage_synthetic_owner` 覆蓋全 synthetic labels 自主接管 · **MICRO-PROFIT-FIX-1**（fast_track 25% entry_notional 底線 + COST EDGE 窄帶 [0.3%, 0.55%]；12 檔修改，+11 單測/+7 整合測試，hot-reloadable via ConfigStore）✅ |
+| 2026-04-18 | **LIVE-GATE-BINDING-1** ✅（HMAC-SHA256 signed `authorization.json` Python↔Rust 綁定契約；Rust 新 `live_authorization.rs` 模組 + `build_exchange_pipeline` 啟動驗簽 + `main.rs` 每 5 min re-verify；Python `_write_signed_live_authorization()` / `_delete_live_authorization_file()` hook 到 renew/approve/revoke 路由；canonical payload byte-for-byte 雙端對齊；Rust 15 新單測 / Python 10 新單測；真實 live 門控 Rust 可驗證從 3 項升為 **4 項**；LiveDemo 不因 api-demo endpoint 降級任何 live-level 檢查；詳見 `docs/worklogs/2026-04-18--live_gate_binding_1_implementation.md`） |
 
 **歷史細節指針**（不要重複載入）：
 - §三 2026-04-15 之前完整敘述 → `docs/archive/2026-04-15--claude_md_section3_snapshot.md`
@@ -89,25 +90,36 @@
 ## 四、硬邊界（永遠不能違背）
 
 ```python
-# ── Live_Ready 真實狀態（2026-04-16 深夜 LIVE-GUARD-1 ✅ 後更新）──
+# ── Live_Ready 真實狀態（2026-04-18 LIVE-GATE-BINDING-1 ✅ 後更新）──
 # LIVE-P0/P1/P2 基礎設施代碼完整（SM-01/02/04 + Reconciler + 3E-ARCH）
 # 單測綠但 0 真實 live 流量（歷史 43k 條 "live" 實為 LiveDemo）。
 #
-# 當前真實 live 門控（Rust 端可驗證 = 3 項 / 全部 = 5 項）：
+# 當前真實 live 門控（Rust 端可驗證 = 4 項 / 全部 = 5 項）：
 #   1. Python `live_reserved` global mode          （Python 狀態，重啟會丟）
 #   2. Python Operator 角色 auth                   （Python 側）
-#   3. OPENCLAW_ALLOW_MAINNET=1 env var            （Rust 側 Gate #1，exact "1"）
-#   4. secret slot 有 api_key + api_secret         （Rust 側 Gate #3，憑證空 → Err）
-#        來源優先級（bybit_rest_client.rs:386-497，LIVE-GUARD-1 後）：
-#          Mainnet:  a. 顯式參數 → b. slot file（env var 回退已封閉 = Gate #2）
-#          Demo/Testnet: a. 顯式參數 → b. env var → c. slot file（不變）
-#   5. Rust 端 BybitRestClient::new(Mainnet,...) 構造成功
-#        三重 Gate 任一失敗即 BybitApiError::Business，startup.rs:432 拒絕啟動
+#   3. OPENCLAW_ALLOW_MAINNET=1 env var            （Rust 側，LIVE-GUARD-1，僅 Mainnet）
+#   4. secret slot 有 api_key + api_secret         （Rust 側，LIVE-GUARD-1，憑證空 → Err）
+#        來源優先級（bybit_rest_client.rs:386-497）：
+#          Mainnet:  a. 顯式參數 → b. slot file（env var 回退已封閉）
+#          Demo/Testnet: a. 顯式參數 → b. env var → c. slot file
+#   5. authorization.json 簽名+未過期+env_allowed 匹配  （Rust 側，LIVE-GATE-BINDING-1，新）
+#        路徑：$OPENCLAW_SECRETS_DIR/live/authorization.json
+#        驗證：canonical_payload HMAC-SHA256（key=OPENCLAW_IPC_SECRET）
+#        檢查點：build_exchange_pipeline 啟動 + main.rs 每 5 min re-verify
+#        失效 → engine 優雅 shutdown（cancel_token）
+#        涵蓋 LiveDemo + Mainnet（LiveDemo 不因 api-demo endpoint 降級）
 #
-# ✅ LIVE-GUARD-1 修復（TODO §P0-8，2026-04-16 深夜）：
-#   - Gate #1: 恢復 OPENCLAW_ALLOW_MAINNET=1（SEC-17 回退）
-#   - Gate #2: Mainnet 禁用 BYBIT_API_KEY/SECRET env var fallback（封閉繞 slot 攻擊面）
-#   - Gate #3: 憑證空時構造 Err（不再 warn!+signing-stage 401）
+# ✅ LIVE-GATE-BINDING-1（TODO §P0-11，2026-04-18）：
+#   - Python EarnedTrust renew/approve 路由寫出 signed authorization.json（0o600 + atomic rename）
+#   - Revoke 路徑刪 authorization.json → Rust 下個 5 min re-verify 即 shutdown
+#   - canonical payload byte-for-byte Python↔Rust 雙端對齊（sort+dedup envs）
+#   - Rust 15 新單測 / Python 10 新單測 / engine lib 1452 passed
+#   - 閉合「Operator 未 renew 即 Live 自拉」旁通漏洞
+#
+# ✅ LIVE-GUARD-1（TODO §P0-8，2026-04-16 深夜）：
+#   - Gate #3: 恢復 OPENCLAW_ALLOW_MAINNET=1（SEC-17 回退）
+#   - Gate #4a: Mainnet 禁用 BYBIT_API_KEY/SECRET env var fallback（封閉繞 slot 攻擊面）
+#   - Gate #4b: 憑證空時構造 Err（不再 warn!+signing-stage 401）
 #   - 7 新單測 + E2 對抗性審查 5/5 APPROVED
 #
 # execution_authority：Rust 僅為 P0/P1 denylist 字串常量
@@ -116,15 +128,18 @@
 decision_lease_emitted  = False
 max_retries             = 0
 
-# 永不允許的硬錯誤（2026-04-16 LIVE-GUARD-1 後修正）：
+# 永不允許的硬錯誤（2026-04-18 LIVE-GATE-BINDING-1 後修正）：
 # - 繞過 Operator 角色認證或 live_reserved global mode 直接啟動 live session
 # - 自動修改 engine trading_mode 為 live（需 operator 顯式配置）
 # - Bybit API timeout / retCode != 0 → fail-closed，不重試
 # - should_call_ai=true 但 invocation 沒發生
 # - 偽造 AI 調用或交易活動
-# - Live 模式下無 OPENCLAW_ALLOW_MAINNET=1 env var（LIVE-GUARD-1 Gate #1，2026-04-16 回補）
-# - Mainnet 下試圖用 BYBIT_API_KEY/SECRET env var 作為唯一憑證來源
-#   （LIVE-GUARD-1 Gate #2 封閉，必須走 secret slot file）
+# - Mainnet 下無 OPENCLAW_ALLOW_MAINNET=1 env var（LIVE-GUARD-1）
+# - Mainnet 下試圖用 BYBIT_API_KEY/SECRET env var 作為唯一憑證來源（LIVE-GUARD-1）
+# - Live（含 LiveDemo）下沒有有效 authorization.json 即 spawn pipeline（LIVE-GATE-BINDING-1）
+#   LiveDemo 不因使用 api-demo endpoint 而降級任何 live-level 門控
+# - 不經 _write_signed_live_authorization() 手動寫 authorization.json
+#   必經 Python renew/approve 路由簽章寫入
 ```
 
 ---
@@ -283,7 +298,7 @@ state_models ← state_compiler ← state_store ← main_legacy ← main.py
 
 **路線圖**：Phase 0-5 ✅ · Live GUI ✅ · Phase 6 ✅ · **AI 治理層 (W22-W23) ⬜**（H1-H5 AI agent 目前全 stub，待 G-1 R-06 展開）。
 
-**Live 前置**：~~G-3 / G-5 / Phase 6~~ ✅ · ~~LIVE-GUARD-1 Rust fail-safe 補回~~ ✅（2026-04-16 深夜，三重 Gate #1/#2/#3，見 §三/§四） · ~~P0-9 STABILITY-1~~ ✅（停電基礎設施事件 RCA 完成，非 code bug，不重置 21d 時鐘） · demo ≥21d 穩定（P0-2，當前 PID 1364222 於 22:16 local 啟動，時鐘從此起算）· provider pricing 綁定（LG-3）· API key 填入 ≠ 即可上線（Rust 側 3 項硬鎖 + Python 側 2 項門控共 5 項，全綠才真實 live）。
+**Live 前置**：~~G-3 / G-5 / Phase 6~~ ✅ · ~~LIVE-GUARD-1 Rust fail-safe 補回~~ ✅（2026-04-16 深夜，三重 Mainnet 硬鎖，見 §三/§四） · ~~LIVE-GATE-BINDING-1 Python↔Rust 簽名授權綁定~~ ✅（2026-04-18，HMAC `authorization.json` + 5 min re-verify，見 §四 Gate #5） · ~~P0-9 STABILITY-1~~ ✅（停電基礎設施事件 RCA 完成，非 code bug，不重置 21d 時鐘） · demo ≥21d 穩定（P0-2，當前 PID 1364222 於 22:16 local 啟動，時鐘從此起算）· provider pricing 綁定（LG-3）· API key 填入 ≠ 即可上線（Rust 側 4 項可驗證硬鎖 + Python 側 2 項門控共 5 項，全綠才真實 live）。
 
 **關鍵文件指針**（按需 Read，不要全載入）：
 - Bybit API 字典/審計：`docs/references/2026-04-04--bybit_api_reference.md` · `docs/audits/2026-04-04--bybit_api_infra_audit.md`
@@ -293,4 +308,4 @@ state_models ← state_compiler ← state_store ← main_legacy ← main.py
 
 ## 十一、一句話狀態
 
-> 截至 2026-04-17：tests engine lib **1413 (default) / 1420 (ort)** + core **380** + e2e **35** + reconciler_e2e **19** + micro_profit_fix_integration **7** Rust 全綠 **0 fail** · Python **2898** passed / 5 skipped · ml_training **182** passed / 10 skipped · **MICRO-PROFIT-FIX-1 ✅**（fast_track `ft_min_notional_ratio_of_entry=0.25` 底線 + COST EDGE 窄帶 `cost_edge_max_ratio=0.2` + `min_profit_to_close_pct=0.3`，pnl_pct 目標帶 [0.3%, 0.55%]；`PaperPosition.entry_notional` accumulate 語義 + legacy migrate；12 檔修改，+4 paper_state 單測 + 7 整合測試；hot-reloadable via ConfigStore；E2 APPROVED_WITH_NITS）· **P1-8 DUST-EVICTION-GAP-1 E1/E4 ✅**（`DUST_FROZEN_STRATEGY` 常量 + `TriageOutcome.dust_frozen` 分支 + `dust_check` 預檢閉包；+5 triage 測試）· **P1-8 FUP tick-level `retriage_synthetic_owner` ✅**（`SYNTHETIC_OWNER_LABELS` = bybit_sync/orphan_adopted/orphan_frozen；`RetriageOutcome` 四分支 + `tick_pipeline` `retriage_last_evict_ms` dedup；Agent 自主接管，無需重啟或 operator 介入；+10 retriage 測試）· **P0-10 SCANNER-GATE ✅ 部署** · **P0-5 PHANTOM-2-FUP ✅ 部署** · **P0-4 R1 ✅** · **P0-0 ✅** · **P0-9 STABILITY-1 ✅ RCA** · **LIVE-GUARD-1 ✅** · **Phase 5 PAUSED** · **Live_Ready ⚠️** · **下一步**：MICRO-PROFIT-FIX-1 部署 + 24-48h 觀察（fast_track dust fills ↓、COST EDGE 頻率 ↓、pnl_pct 落入 [0.3%, 0.55%] 帶）· P1-8 部署觀察一週 · P0-2 LG-1 21d demo 觀察 → P0-3 edge 重評 · P0-6 intent write / Demo 死循環打破 · **P1-7 LEARNING-PIPELINE-DORMANT-1** · P1-4 真 ETL 首個 ONNX artifact → Stage 2 shadow mode · Phase 2B Strategist 等 G-1 R-02。
+> 截至 2026-04-18：tests engine lib **1452 (default)** + core **380** + e2e **35** + reconciler_e2e **19** + micro_profit_fix_integration **7** Rust 全綠 **0 fail** · Python `test_live_authorization_signing` **10/10 passed** · **LIVE-GATE-BINDING-1 ✅**（HMAC-SHA256 signed `authorization.json` Python↔Rust 綁定；Rust 新 `live_authorization.rs` +15 單測 + `build_exchange_pipeline` 啟動驗簽 + `main.rs` 5 min re-verify；Python `_write/_delete_live_authorization` hook 到 renew/approve/revoke；canonical payload byte-for-byte 雙端對齊；閉合「Operator 未 renew 即 Live 自拉」P0-CRITICAL 旁通漏洞；LiveDemo 不因 api-demo 降級；Rust 可驗證門控 3→**4 項**）· **MICRO-PROFIT-FIX-1 ✅**（fast_track `ft_min_notional_ratio_of_entry=0.25` 底線 + COST EDGE 窄帶 `cost_edge_max_ratio=0.2` + `min_profit_to_close_pct=0.3`，pnl_pct 目標帶 [0.3%, 0.55%]；E2 APPROVED_WITH_NITS）· **P1-8 DUST-EVICTION-GAP-1 E1/E4 ✅** · **P1-8 FUP tick-level `retriage_synthetic_owner` ✅** · **P0-10 SCANNER-GATE ✅ 部署** · **P0-5 PHANTOM-2-FUP ✅ 部署** · **P0-4 R1 ✅** · **P0-0 ✅** · **P0-9 STABILITY-1 ✅ RCA** · **LIVE-GUARD-1 ✅** · **Phase 5 PAUSED** · **Live_Ready ⚠️** · **下一步**：LIVE-GATE-BINDING-1 部署（`restart_all.sh --rebuild`）+ 1 週觀察 · P0-2 LG-1 21d demo 觀察 → P0-3 edge 重評 · P0-6 intent write / Demo 死循環打破 · **P1-7 LEARNING-PIPELINE-DORMANT-1** · P1-4 真 ETL 首個 ONNX artifact → Stage 2 shadow mode · Phase 2B Strategist 等 G-1 R-02。

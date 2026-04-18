@@ -1120,7 +1120,9 @@ mod tests {
             recv_window: "5000".to_string(),
             rate_limit: RateLimitState::default(),
         };
-        let result = client.get("/v5/position/list", &[("category", "linear")]).await;
+        let result = client
+            .get("/v5/position/list", &[("category", "linear")])
+            .await;
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), BybitApiError::NoCredentials));
     }
@@ -1155,7 +1157,9 @@ mod tests {
             recv_window: "5000".to_string(),
             rate_limit: RateLimitState::default(),
         };
-        let result = client.get("/v5/position/list", &[("category", "linear")]).await;
+        let result = client
+            .get("/v5/position/list", &[("category", "linear")])
+            .await;
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), BybitApiError::Transport(_)));
     }
@@ -1172,7 +1176,9 @@ mod tests {
         };
         let err = resp.into_result().unwrap_err();
         match err {
-            BybitApiError::Business { ret_code, ret_msg, .. } => {
+            BybitApiError::Business {
+                ret_code, ret_msg, ..
+            } => {
                 assert_eq!(ret_code, 10001);
                 assert!(ret_msg.contains("parameter error"));
             }
@@ -1194,7 +1200,9 @@ mod tests {
         };
         let r1 = client.get_checked("/v5/position/list", &[]).await;
         assert!(matches!(r1.unwrap_err(), BybitApiError::NoCredentials));
-        let r2 = client.post_checked("/v5/order/create", &serde_json::json!({})).await;
+        let r2 = client
+            .post_checked("/v5/order/create", &serde_json::json!({}))
+            .await;
         assert!(matches!(r2.unwrap_err(), BybitApiError::NoCredentials));
     }
 

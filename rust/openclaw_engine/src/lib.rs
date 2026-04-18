@@ -28,6 +28,7 @@ pub mod instrument_info;
 pub mod intent_processor;
 pub mod ipc_server;
 pub mod linucb;
+pub mod live_authorization;
 pub mod market_data_client;
 pub mod ml;
 pub mod mode_state;

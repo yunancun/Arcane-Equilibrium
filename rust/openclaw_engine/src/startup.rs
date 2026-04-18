@@ -46,7 +46,11 @@ pub(crate) fn paper_balance_from_toml() -> Option<f64> {
     let contents = std::fs::read_to_string(&path).ok()?;
     let table: toml::Table = toml::from_str(&contents).ok()?;
     let val = table.get("initial_balance_usdt")?.as_float()?;
-    if val > 0.0 { Some(val) } else { None }
+    if val > 0.0 {
+        Some(val)
+    } else {
+        None
+    }
 }
 
 /// Resolve paper initial balance with unified priority (MAJOR-4):
@@ -180,7 +184,11 @@ pub(crate) fn load_unified_configs() -> Result<
             // Legacy fallback: if risk_config_paper.toml absent, use risk_config.toml.
             // 舊版回退：若 risk_config_paper.toml 不存在，使用 risk_config.toml。
             let paper = base.join("risk_config_paper.toml");
-            if paper.exists() { paper } else { base.join("risk_config.toml") }
+            if paper.exists() {
+                paper
+            } else {
+                base.join("risk_config.toml")
+            }
         });
     let risk_path_demo = std::env::var("OPENCLAW_RISK_CONFIG_DEMO")
         .map(PathBuf::from)
@@ -238,9 +246,8 @@ pub(crate) fn load_unified_configs() -> Result<
     // MICRO-PROFIT-FIX-1：BudgetConfig 兩段載入——先不驗證地 parse，跑 sanitize
     // 遷移把舊 snapshot 超範圍的 cost_edge_max_ratio（可能是 100.0）clamp 回
     // default，再 validate。避免範圍縮窄後引擎因歷史值 fail-close 起不來。
-    let mut budget: BudgetConfig =
-        load_toml_or_default(&budget_path, |_c: &BudgetConfig| Ok(()))
-            .map_err(|e| format!("budget config: {}", e))?;
+    let mut budget: BudgetConfig = load_toml_or_default(&budget_path, |_c: &BudgetConfig| Ok(()))
+        .map_err(|e| format!("budget config: {}", e))?;
     let rewritten =
         openclaw_engine::config::legacy_migration::sanitize_legacy_budget_config(&mut budget);
     if !rewritten.is_empty() {
@@ -448,6 +455,44 @@ pub(crate) async fn build_exchange_pipeline(
     cancel: CancellationToken,
     cfg_snapshot: &openclaw_engine::config::EngineBootstrap,
 ) -> Option<ExchangePipelineBindings> {
+    // LIVE-GATE-BINDING-1 (2026-04-18): Enforce the signed Earned-Trust
+    // authorization for the Live pipeline. Python writes a HMAC-signed
+    // `authorization.json` on every renew/approve; Rust refuses to spawn
+    // Live without a valid, unexpired, env-matching record. LiveDemo is
+    // held to the same bar as Mainnet by design — the whole point of
+    // LiveDemo is to exercise the Live gate code paths before real money.
+    // LIVE-GATE-BINDING-1：Live 管線強制簽名授權。Python 在每次 renew/approve
+    // 後 HMAC 簽名寫入 authorization.json；Rust 驗簽/未過期/env 匹配才啟動。
+    // LiveDemo 與 Mainnet 同標準 — LiveDemo 的目的就是提前壓測 Live gate。
+    if kind == PipelineKind::Live {
+        use openclaw_engine::live_authorization::{auth_error_kind, load_and_verify};
+        match load_and_verify(env) {
+            Ok(auth) => {
+                info!(
+                    kind = %kind,
+                    env = ?env,
+                    tier = %auth.tier,
+                    operator_id = %auth.operator_id,
+                    expires_at_ms = auth.expires_at_ms,
+                    env_allowed = ?auth.env_allowed,
+                    "live authorization verified / live 授權已驗證"
+                );
+            }
+            Err(e) => {
+                warn!(
+                    kind = %kind,
+                    env = ?env,
+                    error_kind = auth_error_kind(&e),
+                    error = %e,
+                    "LIVE PIPELINE REFUSED TO START — signed authorization check failed. \
+                     Operator: approve via POST /api/v1/live/auth/renew (or renew-review). \
+                     / Live 管線拒絕啟動 — 簽名授權檢查失敗。請經 /auth/renew 批准。"
+                );
+                return None;
+            }
+        }
+    }
+
     let rest_client = match BybitRestClient::new(env, None, None) {
         Ok(c) if c.has_credentials() => c,
         Ok(_) => {
@@ -482,8 +527,12 @@ pub(crate) async fn build_exchange_pipeline(
         use openclaw_engine::platform_client::PlatformClient;
         let platform = PlatformClient::new(Arc::clone(&client_arc));
         match platform.set_dcp(cfg_snapshot.dcp_time_window).await {
-            Ok(()) => info!(kind = %kind, window = cfg_snapshot.dcp_time_window, "DCP enabled / DCP 已啟用"),
-            Err(e) => warn!(kind = %kind, error = %e, "DCP setup failed (non-fatal) / DCP 設定失敗"),
+            Ok(()) => {
+                info!(kind = %kind, window = cfg_snapshot.dcp_time_window, "DCP enabled / DCP 已啟用")
+            }
+            Err(e) => {
+                warn!(kind = %kind, error = %e, "DCP setup failed (non-fatal) / DCP 設定失敗")
+            }
         }
     }
 
@@ -682,8 +731,7 @@ pub(crate) async fn build_exchange_pipeline(
         let refresh_cancel = cancel.clone();
         let refresh_kind = kind;
         tokio::spawn(async move {
-            let mut interval =
-                tokio::time::interval(std::time::Duration::from_secs(300));
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(300));
             interval.tick().await; // skip first immediate tick
             loop {
                 tokio::select! {
@@ -917,7 +965,10 @@ pub(crate) fn spawn_private_ws_supervisor(
         }
     });
 
-    info!(engine = label, "Private WS + ExecutionListener started / 私有 WS + 執行監聽器已啟動");
+    info!(
+        engine = label,
+        "Private WS + ExecutionListener started / 私有 WS + 執行監聽器已啟動"
+    );
     PrivateWsBindings {
         bybit_balance,
         api_pnl,
@@ -995,7 +1046,10 @@ mod tests {
     #[test]
     fn test_version_is_valid_semver() {
         let parts: Vec<&str> = VERSION.split('.').collect();
-        assert!(parts.len() >= 2, "VERSION must have at least major.minor: {VERSION}");
+        assert!(
+            parts.len() >= 2,
+            "VERSION must have at least major.minor: {VERSION}"
+        );
         for (i, part) in parts.iter().take(3).enumerate() {
             // Strip any pre-release suffix from the last part (e.g., "3-rc1")
             let numeric = part.split('-').next().unwrap();
@@ -1072,7 +1126,11 @@ mod tests {
         let prev = std::env::var("OPENCLAW_RISK_CONFIG_DIR").ok();
         std::env::set_var("OPENCLAW_RISK_CONFIG_DIR", "/tmp/openclaw_nodir_test");
         let result = load_unified_configs();
-        assert!(result.is_ok(), "load_unified_configs must succeed with defaults: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "load_unified_configs must succeed with defaults: {:?}",
+            result.err()
+        );
         let (risk_stores, learning_store, budget_store) = result.unwrap();
         // All stores should have version 0 (initial load)
         assert!(risk_stores.paper.version() <= 1);
