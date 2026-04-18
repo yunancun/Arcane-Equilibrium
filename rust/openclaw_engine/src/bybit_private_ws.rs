@@ -11,9 +11,9 @@
 //!   指數退避重連，遵循 ws_client.rs 相同模式。
 
 use crate::bybit_rest_client::BybitEnvironment;
+use crate::common::bybit_signer::sign_ws_auth;
+use crate::common::ws_backoff::BackoffConfig;
 use futures_util::{SinkExt, StreamExt};
-use hmac::{Hmac, Mac};
-use sha2::Sha256;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite::Message;
@@ -24,12 +24,16 @@ use tracing::{debug, error, info, warn};
 // Constants / 常量
 // ---------------------------------------------------------------------------
 
-/// Maximum reconnect delay (ms) / 最大重連延遲
-const MAX_RECONNECT_DELAY_MS: u64 = 60_000;
-/// Base reconnect delay (ms) / 基礎重連延遲
-const BASE_RECONNECT_DELAY_MS: u64 = 3_000;
-/// Backoff multiplier / 退避倍數
-const BACKOFF_FACTOR: u64 = 2;
+/// Shared reconnect backoff policy (private-WS profile: 3s base / 60s cap / x2).
+/// 私有 WS 共用的重連退避策略（3s base / 60s cap / x2）。
+///
+/// EN: Extracted to `common::ws_backoff::BackoffConfig::ws_private_default()`.
+///     Numeric behaviour is byte-identical to the old
+///     `BASE_RECONNECT_DELAY_MS * BACKOFF_FACTOR^attempt`, clamped by max.
+/// 中文: 提取至 `common::ws_backoff::BackoffConfig::ws_private_default()`，
+///     數值行為與舊式 `BASE_RECONNECT_DELAY_MS * BACKOFF_FACTOR^attempt`
+///     搭配上限截斷字節一致。
+const BACKOFF_POLICY: BackoffConfig = BackoffConfig::ws_private_default();
 /// Ping interval (ms) — Bybit requires every 20s / Ping 間隔（Bybit 要求 20 秒）
 const PING_INTERVAL_MS: u64 = 20_000;
 /// Auth expires offset (ms) / 認證過期偏移
@@ -425,10 +429,8 @@ impl BybitPrivateWs {
 
             // Exponential backoff / 指數退避
             attempt = attempt.saturating_add(1);
-            let delay_ms = std::cmp::min(
-                BASE_RECONNECT_DELAY_MS.saturating_mul(BACKOFF_FACTOR.saturating_pow(attempt)),
-                MAX_RECONNECT_DELAY_MS,
-            );
+            let delay = BACKOFF_POLICY.next_delay(attempt);
+            let delay_ms = delay.as_millis() as u64;
             info!(
                 delay_ms = delay_ms,
                 attempt = attempt,
@@ -440,7 +442,7 @@ impl BybitPrivateWs {
                     info!("Private WS cancelled during backoff / 私有 WS 在退避期間被取消");
                     return;
                 }
-                _ = tokio::time::sleep(Duration::from_millis(delay_ms)) => {}
+                _ = tokio::time::sleep(delay) => {}
             }
         }
     }
@@ -456,11 +458,18 @@ impl BybitPrivateWs {
 
     /// Generate auth message with explicit timestamp (for testing).
     /// 使用指定時間戳生成認證消息（用於測試）。
+    ///
+    /// EN: FA-1 risk #5 — injectable time source preserved (`now_ms` parameter)
+    ///     to keep `test_auth_signature_deterministic` viable. Signing delegates
+    ///     to `common::bybit_signer::sign_ws_auth` (byte-identical to the prior
+    ///     inline `hmac_sha256_hex(secret, "GET/realtime" + expires)` body).
+    /// 中文: FA-1 風險 #5 — 保留可注入時間源（`now_ms` 參數）以維持
+    ///     `test_auth_signature_deterministic` 可執行。簽名委派至
+    ///     `common::bybit_signer::sign_ws_auth`（與原內嵌
+    ///     `hmac_sha256_hex(secret, "GET/realtime" + expires)` 字節一致）。
     fn generate_auth_message_with_time(&self, now_ms: u64) -> String {
         let expires = now_ms + AUTH_EXPIRES_OFFSET_MS;
-        let sign_payload = format!("GET/realtime{}", expires);
-
-        let signature = hmac_sha256_hex(&self.api_secret, &sign_payload);
+        let signature = sign_ws_auth(&self.api_secret, expires);
 
         serde_json::json!({
             "op": "auth",
@@ -615,15 +624,11 @@ fn parse_private_message(text: &str) -> Option<PrivateWsEvent> {
 // ---------------------------------------------------------------------------
 // Helpers / 輔助函數
 // ---------------------------------------------------------------------------
-
-/// Compute HMAC-SHA256 and return hex string.
-/// 計算 HMAC-SHA256 並返回十六進制字串。
-fn hmac_sha256_hex(secret: &str, payload: &str) -> String {
-    let mut mac =
-        Hmac::<Sha256>::new_from_slice(secret.as_bytes()).expect("HMAC can take key of any size");
-    mac.update(payload.as_bytes());
-    hex::encode(mac.finalize().into_bytes())
-}
+//
+// EN: `hmac_sha256_hex` moved to `common::bybit_signer` (E1-P0-3). Imported at
+//     the top of this file and shared with bybit_rest_client's REST V5 signer.
+// 中文: `hmac_sha256_hex` 遷移至 `common::bybit_signer`（E1-P0-3），於本檔頂部
+//     引入並與 bybit_rest_client 的 REST V5 簽名器共用。
 
 /// Get current time in milliseconds since UNIX epoch.
 /// 取得自 UNIX 紀元以來的毫秒級當前時間。
@@ -641,6 +646,13 @@ fn current_time_ms() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    // Test-only dependency on the shared HMAC primitive — used for manual
+    // expected-value recomputation inside several tests. Kept here to avoid
+    // polluting the production import list (non-test code reaches HMAC only
+    // through `sign_ws_auth`).
+    // 測試專用 — 僅於多個測試內手動重算預期值使用；維持於此避免污染生產
+    // import 列表（非測試代碼僅透過 `sign_ws_auth` 取用 HMAC）。
+    use crate::common::bybit_signer::hmac_sha256_hex;
 
     /// Test auth message has correct JSON structure.
     /// 測試認證消息具有正確的 JSON 結構。
