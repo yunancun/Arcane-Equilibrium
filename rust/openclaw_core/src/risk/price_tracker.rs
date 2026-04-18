@@ -294,6 +294,58 @@ impl PriceHistoryTracker {
     pub fn sample_count(&self, symbol: &str) -> usize {
         self.history.get(symbol).map_or(0, |d| d.len())
     }
+
+    /// Compute short-window rate-of-change for Track P exit features.
+    /// 計算 Track P 退出特徵所需的短窗 ROC。
+    ///
+    /// Returns `(latest - prior) / prior` as f32 (fractional, not bps/%),
+    /// where `prior` is the first sample whose ts_ms ≥ (latest_ts − lookback_ms).
+    /// Returns `None` when the symbol has no samples, the buffer contains only
+    /// the latest observation, or no sample satisfies the lookback window.
+    ///
+    /// Design: EXIT-FEATURES-TABLE-1 needs sub-second price_roc_short (default
+    /// 300 ms) as a momentum feature for the exit policy learner. Sharing the
+    /// already-fed per-tick history here avoids duplicating the sample feed
+    /// and keeps a single source of truth for price-tracking state.
+    ///
+    /// 設計：EXIT-FEATURES-TABLE-1 需要亞秒級 price_roc_short（預設 300 ms）
+    /// 作為退出策略學習器的動量特徵。共用既有的每 tick history 可免於重複樣本饋入，
+    /// 並維持價格追蹤狀態的單一來源。
+    pub fn compute_roc(&self, symbol: &str, lookback_ms: u64) -> Option<f32> {
+        let deque = self.history.get(symbol)?;
+        if deque.len() < 2 {
+            return None;
+        }
+        let &(latest_ts, latest_price) = deque.back()?;
+        if !latest_price.is_finite() || latest_price <= 0.0 {
+            return None;
+        }
+        if lookback_ms == 0 {
+            return None;
+        }
+        let cutoff = latest_ts.saturating_sub(lookback_ms);
+        // First sample whose ts_ms ≥ cutoff. Linear scan is fine at expected
+        // N ≤ a few hundred (60 Hz × 300 s window).
+        // 線性掃描 ts_ms ≥ cutoff 的第一筆樣本；N ≤ 幾百筆足夠。
+        let prior = deque.iter().find(|&&(ts, _)| ts >= cutoff)?;
+        // If the first sample at/after cutoff IS the latest, there is no usable
+        // historical anchor within the window — report None rather than a
+        // trivial 0.0 which would mask thin-history symbols.
+        // 若找到的就是最新那筆，表示 lookback 窗內無有效歷史錨，回 None
+        // 而非 0.0（避免掩蓋歷史稀疏的 symbol）。
+        if prior.0 == latest_ts {
+            return None;
+        }
+        let prior_price = prior.1;
+        if !prior_price.is_finite() || prior_price <= 0.0 {
+            return None;
+        }
+        let roc = (latest_price - prior_price) / prior_price;
+        if !roc.is_finite() {
+            return None;
+        }
+        Some(roc as f32)
+    }
 }
 
 impl Default for PriceHistoryTracker {
@@ -526,5 +578,92 @@ mod tests {
         assert!(info.drop_pct > 7.0, "drop_pct={}", info.drop_pct);
         assert!(info.sigma >= 3.0,
             "stable-then-crash should have sigma >= 3, got {}", info.sigma);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // EXIT-FEATURES-TABLE-1 — compute_roc short-window ROC
+    // ═══════════════════════════════════════════════════════════════════════
+
+    #[test]
+    fn test_compute_roc_empty_returns_none() {
+        let t = PriceHistoryTracker::new();
+        assert_eq!(t.compute_roc("BTCUSDT", 300), None);
+    }
+
+    #[test]
+    fn test_compute_roc_single_sample_returns_none() {
+        let mut t = PriceHistoryTracker::new();
+        t.record("BTCUSDT", 100.0, 1_000);
+        assert_eq!(t.compute_roc("BTCUSDT", 300), None,
+            "single sample → no prior anchor → None");
+    }
+
+    #[test]
+    fn test_compute_roc_two_sample_positive() {
+        let mut t = PriceHistoryTracker::new();
+        t.record("BTCUSDT", 100.0, 1_000);
+        t.record("BTCUSDT", 100.5, 1_300);
+        // (100.5 - 100.0) / 100.0 = 0.005
+        let roc = t.compute_roc("BTCUSDT", 500).expect("roc present");
+        assert!((roc - 0.005).abs() < 1e-6, "got {roc}");
+    }
+
+    #[test]
+    fn test_compute_roc_two_sample_negative() {
+        let mut t = PriceHistoryTracker::new();
+        t.record("ETHUSDT", 2_000.0, 1_000);
+        t.record("ETHUSDT", 1_990.0, 1_200);
+        let roc = t.compute_roc("ETHUSDT", 500).unwrap();
+        assert!((roc - (-0.005)).abs() < 1e-6, "got {roc}");
+    }
+
+    #[test]
+    fn test_compute_roc_lookback_exceeds_history_uses_oldest() {
+        let mut t = PriceHistoryTracker::new();
+        t.record("BTCUSDT", 100.0, 1_000);
+        t.record("BTCUSDT", 105.0, 2_000);
+        // 10 s lookback >> history (1 s) → anchor = oldest sample ($100)
+        let roc = t.compute_roc("BTCUSDT", 10_000).unwrap();
+        assert!((roc - 0.05).abs() < 1e-6, "got {roc}");
+    }
+
+    #[test]
+    fn test_compute_roc_zero_lookback_returns_none() {
+        let mut t = PriceHistoryTracker::new();
+        t.record("BTCUSDT", 100.0, 1_000);
+        t.record("BTCUSDT", 100.5, 1_300);
+        // lookback=0 is degenerate — no meaningful historical anchor.
+        assert_eq!(t.compute_roc("BTCUSDT", 0), None);
+    }
+
+    #[test]
+    fn test_compute_roc_unknown_symbol_returns_none() {
+        let mut t = PriceHistoryTracker::new();
+        t.record("BTCUSDT", 100.0, 1_000);
+        t.record("BTCUSDT", 100.5, 1_300);
+        assert_eq!(t.compute_roc("ETHUSDT", 300), None);
+    }
+
+    #[test]
+    fn test_compute_roc_short_lookback_no_anchor_returns_none() {
+        let mut t = PriceHistoryTracker::new();
+        t.record("BTCUSDT", 100.0, 1_000);
+        t.record("BTCUSDT", 100.5, 5_000);
+        // lookback=100ms, cutoff=4900; only ts=5000 satisfies, but that IS latest
+        // → no usable anchor → None (not 0.0)
+        assert_eq!(t.compute_roc("BTCUSDT", 100), None);
+    }
+
+    #[test]
+    fn test_compute_roc_multi_symbol_isolated() {
+        let mut t = PriceHistoryTracker::new();
+        t.record("BTCUSDT", 100.0, 1_000);
+        t.record("BTCUSDT", 101.0, 1_200);
+        t.record("ETHUSDT", 2_000.0, 1_000);
+        t.record("ETHUSDT", 1_980.0, 1_200);
+        let btc = t.compute_roc("BTCUSDT", 500).unwrap();
+        let eth = t.compute_roc("ETHUSDT", 500).unwrap();
+        assert!((btc - 0.01).abs() < 1e-6, "btc={btc}");
+        assert!((eth - (-0.01)).abs() < 1e-6, "eth={eth}");
     }
 }

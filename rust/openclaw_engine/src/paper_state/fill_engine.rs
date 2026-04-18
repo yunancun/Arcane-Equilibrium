@@ -65,6 +65,8 @@ impl PaperState {
                     entry_context_id: String::new(),
                     owner_strategy: "bybit_sync".to_string(),
                     entry_notional: qty * entry_price,
+                    max_favorable_pnl_pct: 0.0,
+                    peak_reached_ts_ms: ts_ms as i64,
                 },
             );
             inserted += 1;
@@ -143,6 +145,8 @@ impl PaperState {
                         entry_context_id: String::new(),
                         owner_strategy: "bybit_sync".to_string(),
                         entry_notional: size * avg_price,
+                        max_favorable_pnl_pct: 0.0,
+                        peak_reached_ts_ms: ts_ms as i64,
                     },
                 );
                 true
@@ -325,6 +329,8 @@ impl PaperState {
                 entry_context_id: String::new(),
                 owner_strategy: owner_strategy.to_string(),
                 entry_notional: qty * fill_price,
+                max_favorable_pnl_pct: 0.0,
+                peak_reached_ts_ms: ts_ms as i64,
             },
         );
         0.0 // Opening position — no realized PnL / 開倉無已實現損益
@@ -431,7 +437,26 @@ impl PaperState {
     /// 使用每個交易對的最新價格檢查所有持倉的止損。
     /// RRC-1-C1: Update best_price for all positions (trailing stop tracking).
     /// RRC-1-C1：更新所有持倉的最佳價格（跟蹤止損追蹤）。
+    /// EXIT-FEATURES-TABLE-1: also refresh `max_favorable_pnl_pct` +
+    /// `peak_reached_ts_ms` under the same loop — both fields are derived
+    /// from (current mark price, entry price, side), so piggybacking here
+    /// costs nothing and guarantees peak tracking stays in lock-step with
+    /// trailing-stop best_price updates (invoked once per tick by on_tick).
+    /// EXIT-FEATURES-TABLE-1：同一迴圈內同步刷新 max_favorable_pnl_pct 與
+    /// peak_reached_ts_ms；兩者皆由 (mark, entry, side) 決定，搭車更新無成本，
+    /// 並確保峰值追蹤與 best_price 同步（on_tick 每 tick 呼叫一次）。
     pub fn update_best_prices(&mut self) {
+        self.update_best_prices_at(0);
+    }
+
+    /// EXIT-FEATURES-TABLE-1: variant that stamps `peak_reached_ts_ms` with
+    /// the tick's wall-clock ms. `ts_ms=0` preserves legacy callers' behaviour
+    /// (the stamp only advances when a new favorable high is recorded, so a
+    /// 0 input when no high is set is a no-op anyway). Prefer `_at(ts)` from
+    /// `on_tick` so exit_features.time_since_peak_ms is accurate.
+    /// EXIT-FEATURES-TABLE-1：傳入 tick 時戳的版本。`ts_ms=0` 保留舊呼叫語義
+    /// （只有創新高才蓋時戳，無新高時 0 等於 no-op）。on_tick 應傳真實 ts。
+    pub fn update_best_prices_at(&mut self, ts_ms: i64) {
         let latest = self.latest_prices.clone();
         for (symbol, pos) in &mut self.positions {
             if let Some(&sym_price) = latest.get(symbol.as_str()) {
@@ -443,6 +468,11 @@ impl PaperState {
                 };
                 stop_manager::update_best_price(&mut ps, sym_price);
                 pos.best_price = ps.best_price;
+                // EXIT-FEATURES-TABLE-1: refresh max favorable peak inline.
+                // No-op if a real ts_ms isn't provided (legacy callers).
+                if ts_ms > 0 {
+                    pos.refresh_max_favorable(sym_price, ts_ms);
+                }
             }
         }
     }

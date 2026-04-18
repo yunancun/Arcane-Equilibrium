@@ -46,6 +46,8 @@ fn write_test_snapshot() -> (Arc<PathBuf>, tempfile::TempDir) {
                     entry_context_id: String::new(),
                     owner_strategy: "test".into(),
                     entry_notional: 650.0,
+                    max_favorable_pnl_pct: 0.0,
+                    peak_reached_ts_ms: 1700000000000,
                 },
                 api_pnl: None,
             }],

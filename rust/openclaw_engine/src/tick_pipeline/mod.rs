@@ -798,6 +798,14 @@ pub struct TickPipeline {
     /// 轉寫 `learning.decision_shadow_fills` 的 sender。僅 paper（gate 已保證）。
     /// None 時發射停用（fail-soft，不採集 Stage-4 探索但不影響交易）。
     shadow_fill_db_tx: Option<tokio::sync::mpsc::Sender<crate::database::ShadowFillMsg>>,
+    /// EXIT-FEATURES-TABLE-1: Cached sender for `ExitFeatureRow` writes. The
+    /// `emit_close_fill` path builds one row per position exit and try_send's
+    /// here. `None` = emission disabled (fail-soft; trading unaffected, just
+    /// no Track P label collection). Wired per-engine from `main.rs`.
+    /// EXIT-FEATURES-TABLE-1：`ExitFeatureRow` 發送端；`emit_close_fill` 於每筆
+    /// 平倉組一列並 try_send 入此通道。None = 停用（fail-soft，不影響交易）。
+    /// 由 `main.rs` 逐引擎接線。
+    exit_feature_tx: Option<tokio::sync::mpsc::Sender<crate::database::ExitFeatureRow>>,
     /// Scanner symbol registry — gates new opens to scanner-active symbols only.
     /// None = gate disabled (all symbols allowed, e.g. tests / standalone).
     /// 掃描器交易對注冊表 — 新開倉僅限掃描器活躍交易對。
@@ -899,6 +907,7 @@ impl TickPipeline {
             edge_predictor_store: None,
             decision_feature_tx: None,
             shadow_fill_db_tx: None,
+            exit_feature_tx: None,
             symbol_registry: None,
             retriage_last_evict_ms: HashMap::new(),
             // DYNAMIC-RISK-1: anchored on IntentProcessor's default p1_risk_pct (3%).
@@ -1115,6 +1124,52 @@ impl TickPipeline {
         &self,
     ) -> Option<&tokio::sync::mpsc::Sender<crate::database::ShadowFillMsg>> {
         self.shadow_fill_db_tx.as_ref()
+    }
+
+    /// EXIT-FEATURES-TABLE-1: Wire the exit-feature DB channel. Call exactly
+    /// once per pipeline during bootstrap (main.rs passes the same writer tx
+    /// to all three engines — multi-producer is safe). `None` leaves emission
+    /// as fail-soft no-op (trading unaffected, just no Track P label collection).
+    /// EXIT-FEATURES-TABLE-1：接 exit-feature DB 通道；每 pipeline 啟動時呼叫一次。
+    /// 未接線時 emit_close_fill 走 fail-soft no-op。
+    pub fn set_exit_feature_tx(
+        &mut self,
+        tx: tokio::sync::mpsc::Sender<crate::database::ExitFeatureRow>,
+    ) {
+        debug_assert!(
+            self.exit_feature_tx.is_none(),
+            "exit_feature_tx injected twice — bootstrap should call this exactly once per pipeline"
+        );
+        self.exit_feature_tx = Some(tx);
+    }
+
+    /// EXIT-FEATURES-TABLE-1: Accessor for the `emit_close_fill` producer
+    /// path. Returns `None` until `set_exit_feature_tx` has been called.
+    /// EXIT-FEATURES-TABLE-1：emit_close_fill 產生器的 tx 取用器；未接線前回 None。
+    pub fn exit_feature_tx(
+        &self,
+    ) -> Option<&tokio::sync::mpsc::Sender<crate::database::ExitFeatureRow>> {
+        self.exit_feature_tx.as_ref()
+    }
+
+    /// EXIT-FEATURES-TABLE-1: Read-only accessor to the pre-existing
+    /// `price_tracker` used both by fast_track and the exit-feature ROC
+    /// computation. Exposed so `emit_close_fill` can compute `price_roc_short`
+    /// without duplicating the per-tick sample feed already wired in `on_tick`.
+    /// EXIT-FEATURES-TABLE-1：價格追蹤器的唯讀取用器；emit_close_fill 用來計算
+    /// price_roc_short，避免重複 per-tick 樣本饋入。
+    pub fn price_tracker(&self) -> &PriceHistoryTracker {
+        &self.price_tracker
+    }
+
+    /// EXIT-FEATURES-TABLE-1 (tests only): mutable handle so unit tests can
+    /// seed price samples for ROC / ATR / giveback assertions without
+    /// spinning a full on_tick loop. Not used in production paths.
+    /// EXIT-FEATURES-TABLE-1（僅測試）：測試用可變 handle，用來預填價格樣本
+    /// 做 ROC/ATR/giveback 斷言，無需走完整 on_tick。非生產路徑。
+    #[cfg(test)]
+    pub(crate) fn price_tracker_mut(&mut self) -> &mut PriceHistoryTracker {
+        &mut self.price_tracker
     }
 
     /// EDGE-P3-1 Phase B #4: Reseed the IntentProcessor predictor RNG.
@@ -1451,6 +1506,7 @@ impl TickPipeline {
         realized_pnl: f64,
         close_tag: &str,
         entry_context_id: &str,
+        exit_snapshot: Option<&crate::paper_state::PositionExitSnapshot>,
     ) {
         // PNL-FIX-2: compute close fee from per-symbol taker rate, charge it
         // to paper_state, and record it in the DB row. Charge always happens
@@ -1459,10 +1515,10 @@ impl TickPipeline {
         let fr = self.intent_processor.fee_rate(symbol);
         let close_fee = qty * price * fr;
         self.paper_state.charge_fee(close_fee);
+        let em = self.effective_engine_mode();
         if let Some(ref tx) = self.trading_tx {
             // Fill side reflects the closing direction (opposite of position side).
             let close_side = if is_long { "Sell" } else { "Buy" };
-            let em = self.effective_engine_mode();
             let _ = tx.try_send(crate::database::TradingMsg::Fill {
                 fill_id: format!("close-{em}-{}-{}", symbol, ts_ms),
                 ts_ms,
@@ -1502,6 +1558,205 @@ impl TickPipeline {
             },
             50,
         );
+
+        // EXIT-FEATURES-TABLE-1: emit one row to `learning.exit_features` per
+        // close. Requires both a captured pre-close snapshot (caller's
+        // responsibility — position is already removed by the time we run) and
+        // a wired tx. With either missing we degrade to fail-soft no-op —
+        // trading is unaffected, only Track P label collection for this close
+        // is skipped.
+        // EXIT-FEATURES-TABLE-1：每筆平倉寫一列到 learning.exit_features。需要
+        // caller 傳入的 pre-close 快照 + 已接線的 tx；缺一 → fail-soft no-op。
+        if let (Some(snap), Some(tx)) = (exit_snapshot, self.exit_feature_tx.as_ref()) {
+            let row =
+                self.build_exit_feature_row(symbol, qty, price, ts_ms, realized_pnl,
+                                            close_fee, fr, close_tag, snap, em,
+                                            entry_context_id);
+            // try_send: never block the close path. Overflow → row dropped,
+            // writer logs the channel pressure via its own metric.
+            // try_send：永不阻塞 close 路徑；溢出 → 丟列，由 writer 自行計量。
+            let _ = tx.try_send(row);
+        }
+    }
+
+    /// EXIT-FEATURES-TABLE-1: assemble one `ExitFeatureRow` from the captured
+    /// position snapshot + current tick context. Pure data-shaping — no IO,
+    /// no mutation beyond what `emit_close_fill` already did before calling
+    /// this. Split out of `emit_close_fill` so the 7-dim math has its own test
+    /// surface and the signature stays readable.
+    ///
+    /// Derivation summary:
+    ///   est_net_bps       = edge_estimates[(owner_strategy, symbol)].shrunk_bps  (None on miss)
+    ///   peak_pnl_pct      = snapshot.max_favorable_pnl_pct                       (always Some; 0.0 pre-first-tick)
+    ///   atr_pct           = price_tracker.compute_atr_pct(symbol)                (None until ≥ min samples)
+    ///   giveback_atr_norm = (peak_pct - current_pct) / atr_pct                   (None when atr_pct None/≤0)
+    ///   time_since_peak_ms= ts_ms (i64) − peak_reached_ts_ms                     (clamped ≥ 0)
+    ///   price_roc_short   = price_tracker.compute_roc(symbol, 300 ms)            (None until ≥ 2 samples in window)
+    ///   entry_age_secs    = (ts_ms − entry_ts_ms) / 1000                         (None if ts_ms < entry_ts_ms)
+    ///
+    /// realized_net_bps = (realized_pnl / entry_notional_for_portion) × 10000
+    ///                  − round_trip_fee_bps (2 × fee_rate × 10000).
+    /// entry_notional_for_portion uses the portion's entry notional
+    /// (`qty * entry_price`) rather than the position's aggregate accumulated
+    /// `entry_notional` so partial closes report bps of the portion actually
+    /// exiting.
+    ///
+    /// EXIT-FEATURES-TABLE-1：純資料整形，無 IO、無副作用；從 emit_close_fill
+    /// 拆出以便 7 維衍生獨立測試、並保持原簽名可讀。realized_net_bps 以本段
+    /// 平倉部位對應的入場 notional 計算（非聚合 entry_notional），partial close
+    /// 才不會誤放大。
+    fn build_exit_feature_row(
+        &self,
+        symbol: &str,
+        qty: f64,
+        close_price: f64,
+        ts_ms: u64,
+        realized_pnl: f64,
+        close_fee: f64,
+        fee_rate: f64,
+        close_tag: &str,
+        snap: &crate::paper_state::PositionExitSnapshot,
+        engine_mode: &str,
+        caller_entry_context_id: &str,
+    ) -> crate::database::ExitFeatureRow {
+        let ts_ms_i64 = ts_ms as i64;
+        // est_net_bps — shrunk JS edge for (entry strategy, symbol). Cell miss
+        // keeps it None rather than folding in grand_mean_bps: the label
+        // preserves "we had no cell" as a distinct signal downstream.
+        let est_net_bps = self
+            .intent_processor
+            .edge_estimates()
+            .get_cell(&snap.owner_strategy, symbol)
+            .map(|c| c.shrunk_bps as f32);
+
+        // peak_pnl_pct — already maintained tick-by-tick on PaperPosition.
+        let peak_pnl_pct = Some(snap.max_favorable_pnl_pct);
+
+        // atr_pct — reuses PriceHistoryTracker; None until ≥ min_samples.
+        let atr_pct = self
+            .price_tracker
+            .compute_atr_pct(symbol)
+            .map(|v| v as f32);
+
+        // current_pnl_pct at exit (side-signed, in %). Used to derive the
+        // normalized giveback. If entry_price was zero we'd have returned early
+        // from the close path, but guard anyway so division is defensive.
+        let current_pnl_pct = if snap.entry_price > 0.0 && snap.entry_price.is_finite() {
+            let side = if snap.is_long { 1.0f64 } else { -1.0f64 };
+            ((close_price - snap.entry_price) / snap.entry_price) * 100.0 * side
+        } else {
+            0.0
+        };
+
+        // giveback_atr_norm = (peak_pct − current_pct) / atr_pct. The divisor
+        // is in "percent" too (atr_pct is already a percentage), so the ratio
+        // is unitless. None when ATR is unavailable OR peak lies below current
+        // (position exiting into a fresh high — giveback is undefined).
+        let giveback_atr_norm = match atr_pct {
+            Some(atr) if atr > 0.0 => {
+                let peak_f64 = snap.max_favorable_pnl_pct as f64;
+                let gb = peak_f64 - current_pnl_pct;
+                if gb < 0.0 {
+                    // Closing at/above peak — ok, but giveback is 0 not negative.
+                    Some(0.0f32)
+                } else {
+                    Some((gb / atr as f64) as f32)
+                }
+            }
+            _ => None,
+        };
+
+        // time_since_peak_ms: monotone ≥ 0. Legacy snapshots with
+        // `peak_reached_ts_ms == 0` surface a large value until the first
+        // favorable-tick refresh runs; `max(0)` prevents negative output.
+        let time_since_peak_ms = if snap.peak_reached_ts_ms > 0 {
+            Some((ts_ms_i64 - snap.peak_reached_ts_ms).max(0))
+        } else {
+            None
+        };
+
+        // 300 ms ROC — short-window momentum feature for Track P policy. None
+        // until the price buffer has two samples spanning the window.
+        let price_roc_short = self.price_tracker.compute_roc(symbol, 300);
+
+        // entry_age_secs: guard against clock skew / restored snapshots whose
+        // entry_ts_ms lies in the future of `ts_ms`.
+        let entry_age_secs = if ts_ms >= snap.entry_ts_ms {
+            Some(((ts_ms - snap.entry_ts_ms) as f32) / 1000.0)
+        } else {
+            None
+        };
+
+        // exit_source / exit_trigger_rule derivation. close_tag format from
+        // call sites is "<prefix>:<reason>" where prefix ∈ {risk_close,
+        // stop_trigger, strategy_close}. Map to canonical categories mirroring
+        // the DUAL-TRACK-EXIT-1 taxonomy ("Physical" / "TimeStop" / "HardStop"
+        // etc.). Unknown prefixes fall through verbatim so labels never lie.
+        let (exit_source, exit_trigger_rule) = parse_exit_tag(close_tag);
+
+        // realized_net_bps: gross bps on the portion closed, minus round-trip
+        // taker fees (entry + exit at same rate). `qty * entry_price` is the
+        // portion's entry notional — matches how pairer reasons and avoids
+        // proration gymnastics with the aggregate `entry_notional` for partial
+        // closes.
+        let entry_notional_portion = qty * snap.entry_price;
+        let realized_net_bps = if entry_notional_portion > 0.0
+            && entry_notional_portion.is_finite()
+        {
+            let gross_bps = (realized_pnl / entry_notional_portion) * 10_000.0;
+            // Entry fee was already charged at open; close fee was charged in
+            // emit_close_fill. Both are taker-rate × notional. Express in bps
+            // of the entry notional for internal consistency with the edge
+            // conventions (cost_gate reasons in bps of entry notional).
+            let close_fee_bps = (close_fee / entry_notional_portion) * 10_000.0;
+            // Entry fee is aggregate on the position; prorate by qty share.
+            let entry_fee_prorated =
+                if snap.qty_at_snapshot > 0.0 && snap.qty_at_snapshot.is_finite() {
+                    snap.entry_fee * (qty / snap.qty_at_snapshot)
+                } else {
+                    // Defensive fallback: synthesize from fee_rate.
+                    entry_notional_portion * fee_rate
+                };
+            let entry_fee_bps = (entry_fee_prorated / entry_notional_portion) * 10_000.0;
+            Some((gross_bps - close_fee_bps - entry_fee_bps) as f32)
+        } else {
+            None
+        };
+
+        crate::database::ExitFeatureRow {
+            // Precedence: caller-supplied entry_context_id (authoritative, set
+            // at intent-emit time) > snapshot-stored entry_context_id (captured
+            // at position open, may be empty for restored/orphan-adopted
+            // positions) > synthetic `ctx-<mode>-<sym>-<ts>` fallback (PK must
+            // be non-null). The synthetic branch mirrors decision_features.
+            // 優先序：caller 傳入 > 快照內 > 合成 fallback。
+            context_id: if !caller_entry_context_id.is_empty() {
+                caller_entry_context_id.to_string()
+            } else if !snap.entry_context_id.is_empty() {
+                snap.entry_context_id.clone()
+            } else {
+                on_tick_helpers::make_context_id(engine_mode, symbol, ts_ms)
+            },
+            ts_ms: ts_ms_i64,
+            engine_mode: engine_mode.to_string(),
+            strategy_name: snap.owner_strategy.clone(),
+            symbol: symbol.to_string(),
+            side: if snap.is_long { 1 } else { -1 },
+            est_net_bps,
+            peak_pnl_pct,
+            atr_pct,
+            giveback_atr_norm,
+            time_since_peak_ms,
+            price_roc_short,
+            entry_age_secs,
+            exit_source: Some(exit_source),
+            exit_trigger_rule: Some(exit_trigger_rule),
+            realized_net_bps,
+            feature_schema_version:
+                crate::database::exit_feature_schema::EXIT_FEATURE_SCHEMA_VERSION.to_string(),
+            feature_schema_hash:
+                crate::database::exit_feature_schema::exit_feature_schema_hash().to_string(),
+        }
     }
 
     /// DB-RUN-1: Decide whether to persist a freshly emitted signal.
@@ -1758,6 +2013,61 @@ mod on_tick;
 pub(crate) mod on_tick_helpers;
 #[cfg(test)]
 mod tests;
+
+/// EXIT-FEATURES-TABLE-1: classify a `close_tag` into
+/// `(exit_source, exit_trigger_rule)` for the `ExitFeatureRow` label.
+/// `close_tag` follows the `"<prefix>:<reason>"` convention used by every
+/// close call site (prefix ∈ {risk_close, stop_trigger, strategy_close}).
+/// Unknown prefixes fall through verbatim so the label never lies about
+/// provenance. Split out of `build_exit_feature_row` so the taxonomy has its
+/// own unit-test surface.
+///
+/// Mapping:
+///   "risk_close:halt_session*"      → ("HaltSession",  reason)
+///   "risk_close:fast_track*"        → ("FastTrack",    reason)
+///   "risk_close:*"                  → ("Risk",         reason)
+///   "stop_trigger:hard*"            → ("HardStop",     reason)
+///   "stop_trigger:trailing*"        → ("TrailingStop", reason)
+///   "stop_trigger:time*"            → ("TimeStop",     reason)
+///   "stop_trigger:*"                → ("Stop",         reason)
+///   "strategy_close:*"              → ("Strategy",     reason)
+///   tag without ':'                 → (whole_tag,      "")
+///
+/// EXIT-FEATURES-TABLE-1：將 close_tag 解析為 (exit_source, exit_trigger_rule)；
+/// "<prefix>:<reason>" 格式；未知前綴原樣回退，避免標籤撒謊。
+pub(crate) fn parse_exit_tag(close_tag: &str) -> (String, String) {
+    let (prefix, reason) = match close_tag.split_once(':') {
+        Some((p, r)) => (p, r),
+        None => return (close_tag.to_string(), String::new()),
+    };
+
+    let source = match prefix {
+        "risk_close" => {
+            if reason.starts_with("halt_session") {
+                "HaltSession"
+            } else if reason.starts_with("fast_track") {
+                "FastTrack"
+            } else {
+                "Risk"
+            }
+        }
+        "stop_trigger" => {
+            if reason.starts_with("hard") {
+                "HardStop"
+            } else if reason.starts_with("trailing") {
+                "TrailingStop"
+            } else if reason.starts_with("time") {
+                "TimeStop"
+            } else {
+                "Stop"
+            }
+        }
+        "strategy_close" => "Strategy",
+        other => other,
+    };
+
+    (source.to_string(), reason.to_string())
+}
 
 /// Convert IndicatorSnapshot to flat IndicatorInput for signal rules.
 /// 將 IndicatorSnapshot 轉換為扁平 IndicatorInput 用於信號規則。

@@ -220,6 +220,23 @@ impl PaperState {
             .map(|p| p.entry_context_id.as_str())
     }
 
+    /// EXIT-FEATURES-TABLE-1: capture a stable snapshot of the exit-relevant
+    /// fields of a position **before** close / reduce mutations run. Returns
+    /// `None` when no position exists for the symbol. The snapshot is value-
+    /// typed (no lifetime on `self`) so the caller can hold it across a
+    /// subsequent `&mut self` close call.
+    /// EXIT-FEATURES-TABLE-1：在 close / reduce 之前捕獲倉位退場相關欄位的穩定
+    /// 快照；無倉位時回 None。快照為純值型別（不綁 self 生命週期），可跨
+    /// 後續 `&mut self` close 呼叫持有。
+    pub fn position_exit_snapshot(
+        &self,
+        symbol: &str,
+    ) -> Option<super::containers::PositionExitSnapshot> {
+        self.positions
+            .get(symbol)
+            .map(super::containers::PositionExitSnapshot::from_position)
+    }
+
     pub fn drawdown_pct(&self) -> f64 {
         if self.forced_drawdown > 0.0 {
             return self.forced_drawdown;
