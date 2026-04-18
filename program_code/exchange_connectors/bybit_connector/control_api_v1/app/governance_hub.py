@@ -51,29 +51,41 @@ Safety invariant:
 #     - get_status, get_governance_events
 #     - All set_*() dependency injection methods
 #
-#   DEPRECATED (RC-11, no callers):
+#   DEPRECATED (RC-11, now @deprecated-decorated — P2-5):
 #     - check_learning_tier_capability, is_enabled, get_risk_level
 #     - check_risk_and_act, trigger_risk_upgrade
+#   Note: trigger_risk_upgrade is still called by guardian_agent.py:522 —
+#   DeprecationWarning will fire; runtime semantics unchanged.
 #
 #   DO NOT DELETE — 12+ importers depend on this module.
 #   Future: 18/29 governance_routes endpoints can become IPC relay to Rust.
+#
+# FILE SIZE SPLIT (E5-P1-9, 2026-04-18):
+#   Status + cross-SM cascades: governance_hub_cascades.py
+#     → GovernanceHubStatusCascadeMixin (get_status, events, _on_*)
+#   Callback factories + wiring: governance_hub_event_handlers.py
+#     → GovernanceHubEventHandlersMixin (_make_*_callback, _wire_callbacks,
+#       _invalidate_auth_cache, _check_de_escalation_gate)
+#   Core GovernanceHub class stays here with SM-01/02/04 authoritative API.
 
 from __future__ import annotations
 
-import json
 import logging
-import os
 import threading
 import time
-import uuid
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any, Optional
+
+from typing_extensions import deprecated  # E5-P1-9 / P2-5: mark RC-11 dead methods
 
 from .change_audit_log import ChangeAuditLog, ChangeType, ChangeApprovalStatus
 from .governance_hub_cascades import (  # FIX-08: types + mixin extracted for file size
     GovernanceHubStatusCascadeMixin,
     GovernanceMode,
     GovernanceStatus,
+)
+from .governance_hub_event_handlers import (  # E5-P1-9: callback factories + wiring extracted
+    GovernanceHubEventHandlersMixin,
 )
 from .recovery_approval_gate import RecoveryApprovalGate
 from .governance_events import risk_event, recon_event, auth_event, lease_event
@@ -89,7 +101,7 @@ logger = logging.getLogger(__name__)
 # Governance Hub / 治理集线器
 # ═══════════════════════════════════════════════════════════════════════════════
 
-class GovernanceHub(GovernanceHubStatusCascadeMixin):
+class GovernanceHub(GovernanceHubStatusCascadeMixin, GovernanceHubEventHandlersMixin):
     """
     Central governance hub integrating all 4 state machines.
     中央治理集线器整合所有 4 个状态机。
@@ -203,6 +215,14 @@ class GovernanceHub(GovernanceHubStatusCascadeMixin):
             self._learning_tier_gate = gate
             logger.info("LearningTierGate set on GovernanceHub")
 
+    # P2-5: @deprecated decorator emits DeprecationWarning on every call.
+    # Runtime behaviour is byte-identical. / 僅發 DeprecationWarning，行為不變。
+    @deprecated(
+        "check_learning_tier_capability() is deprecated (RC-11); "
+        "Rust GovernanceCore handles capability checks. "
+        "check_learning_tier_capability() 已棄用（RC-11）；"
+        "Rust GovernanceCore 處理能力檢查。"
+    )
     def check_learning_tier_capability(self, capability: str) -> bool:
         """
         DEPRECATED (RC-11): No callers found. Rust GovernanceCore handles capability checks.
@@ -259,6 +279,12 @@ class GovernanceHub(GovernanceHubStatusCascadeMixin):
         except Exception as e:
             return {"available": True, "error": str(e)}
 
+    # P2-5: @deprecated — use is_globally_enabled() instead.
+    # P2-5：@deprecated，請改用 is_globally_enabled()。
+    @deprecated(
+        "is_enabled() is deprecated (RC-11); use is_globally_enabled() instead. "
+        "is_enabled() 已棄用（RC-11），請改用 is_globally_enabled()。"
+    )
     def is_enabled(self) -> bool:
         """
         DEPRECATED (RC-11): No external callers found. Use is_globally_enabled() instead.
@@ -346,115 +372,12 @@ class GovernanceHub(GovernanceHubStatusCascadeMixin):
             self._enabled = False
             raise
 
-    def _make_audit_callback(self, sm_name: str) -> Callable[[dict[str, Any]], None]:
-        """
-        Factory for audit callbacks that persist to files / 审计回调工厂
-
-        Optimized: I/O happens outside any lock; only lock is acquired for error tracking.
-        """
-        def callback(event: dict[str, Any]) -> None:
-            try:
-                audit_file = self._audit_dir / f"{sm_name}_audit.jsonl"
-                event_with_meta = {
-                    "timestamp_ms": now_ms(),
-                    "sm_name": sm_name,
-                    **event,
-                }
-                with open(audit_file, "a") as f:
-                    f.write(json.dumps(event_with_meta) + "\n")
-                # SECURITY FIX #3: Set restrictive file permissions (0o600 = owner read-write only)
-                os.chmod(audit_file, 0o600)
-            except Exception as e:
-                if logger.isEnabledFor(logging.DEBUG):
-                    logger.debug("Audit callback error for %s: %s", sm_name, e)
-                with self._lock:
-                    self._callback_errors += 1
-
-        return callback
-
-    def _make_incident_callback(self) -> Callable[[str, dict[str, Any]], None]:
-        """
-        Factory for reconciliation incident callbacks.
-        Routes reconciliation incidents to appropriate cross-SM handlers.
-        """
-        def callback(action: str, report: dict[str, Any]) -> None:
-            try:
-                severity = report.get("overall_result", "").upper()
-                # Treat reconciliation failures as incidents
-                if action in ["reconciliation_mismatch", "reconciliation_failure"]:
-                    # Map overall_result to severity for callback
-                    if severity in ["CRITICAL", "FATAL"]:
-                        self._on_reconciliation_mismatch(severity, report)
-                    elif severity == "WARNING":
-                        # Minor mismatch - log but don't escalate
-                        if logger.isEnabledFor(logging.DEBUG):
-                            logger.debug("Reconciliation warning: %s", report.get('result'))
-
-
-            except Exception as e:
-                if logger.isEnabledFor(logging.DEBUG):
-                    logger.debug("Incident callback error for action %s: %s", action, e)
-                with self._lock:
-                    self._callback_errors += 1
-
-        return callback
-
-    def _wire_callbacks(self) -> None:
-        """Wire cross-SM callbacks / 连接跨 SM 回调"""
-        try:
-            # Risk escalation → restrict/freeze auth
-            if hasattr(self._risk_governor_sm, "_on_level_change"):
-                original_callback = self._risk_governor_sm._on_level_change
-                self._risk_governor_sm._on_level_change = lambda old, new: self._on_risk_escalation(old, new)
-            logger.debug("Wired risk escalation callback")
-        except Exception as e:
-            logger.warning("Failed to wire risk escalation callback: %s", e)
-
-        # Note: Reconciliation engine incident_callback is already set during initialization
-        # in _ensure_initialized() to avoid race conditions
-
-    def _invalidate_auth_cache(self) -> None:
-        """Invalidate authorization cache on state changes / 在状态更改时使缓存无效"""
-        self._cached_auth_state = None
-        # Record authorization cache invalidation
-        if self._change_audit_log:
-            try:
-                self._change_audit_log.record_change(
-                    change_type=ChangeType.STATE_CHANGE,
-                    who="GovernanceHub",
-                    what="Authorization cache invalidated",
-                    reason="State machine transition detected",
-                    auto_approve=True,
-                )
-            except Exception as e:
-                logger.debug("ChangeAuditLog record failed (non-fatal): %s", e)
-
-    def _check_de_escalation_gate(self, from_state: str, to_state: str, reason: str) -> bool:
-        """
-        Check if de-escalation is permitted via RecoveryApprovalGate.
-        检查去升级是否通过 RecoveryApprovalGate 批准。
-
-        De-escalation requires approval unless disabled.
-
-        Args:
-            from_state: Current state (more restrictive)
-            to_state: Target state (less restrictive)
-            reason: Reason for de-escalation
-
-        Returns:
-            True if de-escalation is permitted; False otherwise
-        """
-        if not self._recovery_gate:
-            # No gate installed, allow by default
-            return True
-
-        # Check if pending approvals exist for this transition
-        pending = self._recovery_gate.get_pending_requests()
-        for req in pending:
-            if req.get("from_state") == from_state and req.get("to_state") == to_state:
-                return False  # De-escalation pending approval
-
-        return True
+    # _make_audit_callback, _make_incident_callback, _wire_callbacks,
+    # _invalidate_auth_cache, _check_de_escalation_gate: see
+    # GovernanceHubEventHandlersMixin in governance_hub_event_handlers.py
+    # (E5-P1-9 file size split). Methods remain reachable via MRO.
+    # 回調工廠/wiring/快取失效/降級 gate 檢查：見 governance_hub_event_handlers.py
+    # 的 GovernanceHubEventHandlersMixin（E5-P1-9 拆分），MRO 保留可達性。
 
     def is_authorized(self) -> bool:
         """
@@ -512,6 +435,13 @@ class GovernanceHub(GovernanceHubStatusCascadeMixin):
                 logger.debug("Error acquiring lock in is_authorized: %s", e)
             return False  # Fail closed
 
+    # P2-5: @deprecated — use get_status()["risk"] instead.
+    # P2-5：@deprecated，請改用 get_status()["risk"]。
+    @deprecated(
+        "get_risk_level() is deprecated (RC-11); use get_status()[\"risk\"] instead "
+        "(Rust GovernanceCore provides risk level via IPC get_risk_check). "
+        "get_risk_level() 已棄用（RC-11），請改用 get_status()[\"risk\"]（Rust GovernanceCore 通過 IPC 提供）。"
+    )
     def get_risk_level(self) -> Optional[int]:
         """
         DEPRECATED (RC-11): No external callers. Rust GovernanceCore provides risk level
@@ -535,6 +465,14 @@ class GovernanceHub(GovernanceHubStatusCascadeMixin):
             logger.error("Error in get_risk_level: %s", e)
             return None
 
+    # P2-5: @deprecated — Rust GovernanceCore handles risk cascade on every tick.
+    # P2-5：@deprecated — Rust GovernanceCore 每 tick 執行風控級聯，Python 已為死碼。
+    @deprecated(
+        "check_risk_and_act() is deprecated (RC-11); Rust GovernanceCore handles "
+        "risk cascade via evaluate_and_cascade() on every tick. "
+        "check_risk_and_act() 已棄用（RC-11）；Rust GovernanceCore 於每 tick 通過 "
+        "evaluate_and_cascade() 處理風控級聯。"
+    )
     def check_risk_and_act(self, metrics: dict[str, Any]) -> Optional[int]:
         """
         DEPRECATED (RC-11): No callers found. Rust GovernanceCore handles risk cascade
@@ -563,6 +501,17 @@ class GovernanceHub(GovernanceHubStatusCascadeMixin):
             logger.error("Error in check_risk_and_act: %s", e)
             return None
 
+    # P2-5: @deprecated — Rust GovernanceCore cascade handles risk escalation.
+    # NOTE: guardian_agent.py:522 still calls this; DeprecationWarning will fire.
+    # Runtime path unchanged — follow-up work should migrate the caller.
+    # P2-5：@deprecated — Rust GovernanceCore 級聯處理風控升級。
+    # 注意：guardian_agent.py:522 仍在呼叫，DeprecationWarning 會觸發；行為不變，後續需遷移呼叫方。
+    @deprecated(
+        "trigger_risk_upgrade() is deprecated (RC-11); Rust GovernanceCore cascade "
+        "handles risk escalation (risk -> auth restrict -> auth freeze -> lease revoke). "
+        "trigger_risk_upgrade() 已棄用（RC-11）；Rust GovernanceCore 級聯處理風控升級"
+        "（risk → auth restrict → auth freeze → lease revoke）。"
+    )
     def trigger_risk_upgrade(self, event_record: dict[str, Any]) -> None:
         """
         DEPRECATED (RC-11): No callers found. Risk escalation is handled by Rust GovernanceCore
@@ -1048,5 +997,9 @@ class GovernanceHub(GovernanceHubStatusCascadeMixin):
 
     # get_status, events, cascades, incident handlers: see GovernanceHubStatusCascadeMixin
     # in governance_hub_cascades.py (FIX-08 file size split).
+    # Callback factories (_make_audit_callback / _make_incident_callback),
+    # cross-SM wiring (_wire_callbacks), cache invalidation (_invalidate_auth_cache),
+    # and _check_de_escalation_gate: see GovernanceHubEventHandlersMixin in
+    # governance_hub_event_handlers.py (E5-P1-9 file size split).
 
 __all__ = ["GovernanceHub", "GovernanceStatus", "GovernanceMode"]
