@@ -1,7 +1,47 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-04-19（doc archive：E5-FN-3 agent_audit_bridge + AnalystAgent pilot / E5-FN-2 ai_budget request_id dedup / MARKET-KLINES-STALE-1 / EXIT-FEATURES-TABLE-1 Phase 1b producer wiring / DUAL-TRACK-EXIT-1 Step 0 skeleton）
+> 最後更新：2026-04-19（E5-FN-2 Plan N 重設計，revert fd480ba + 取代 V018 / E5-FN-3 agent_audit_bridge / MARKET-KLINES-STALE-1 / EXIT-FEATURES-TABLE-1 Phase 1b producer wiring / DUAL-TRACK-EXIT-1 Step 0 skeleton）
+
+### E5-FN-2 Plan N — ai_budget request_id dedup via existing hypertable PK（2026-04-19 · revert `87b7653` + commit `f0f11c0`）
+
+**觸發**：原 `fd480ba`（FN-2 三段式修復）依賴 `V018__ai_usage_log_request_id_unique.sql` partial UNIQUE `WHERE request_id <> ''`。部署時 empirical 失敗：
+```
+ERROR: cannot create a unique index without the column "time" (used in partitioning)
+```
+TimescaleDB 2.26.1 hypertable 強制 UNIQUE index 必須含 partitioning column — V018 設計根本上無法 apply。
+
+**RCA key insight**：`learning.ai_usage_log` 既有 PK `(time, scope, request_id)` 就是一個滿足 hypertable 約束的 UNIQUE constraint。只要 caller 傳入**確定性**的 `(time, request_id)` tuple（而非 `NOW()` 每次新值），既有 PK 直接做 `ON CONFLICT` dedup — 零新 schema、零 migration、零新 index。
+
+**實施 Plan N**：
+1. **Revert `fd480ba`** → `87b7653`（5 files, -386 insertions；V018 SQL 刪除）
+2. **`ai_budget::make_request_id(scope: &str) -> (String, i64)`**：回 `(id, ts_ms)` tuple（格式 `{scope}-{ts_ms}-{hex8}`）— caller 重試必須傳同 tuple
+3. **`usage_io::insert_usage`**：新 `event_time_ms: i64` 參數 → bind `$1::timestamptz`；SQL `INSERT ... ON CONFLICT (time, scope, request_id) DO NOTHING RETURNING 1`；回 `Result<bool, String>`（`false`=dedup）
+4. **`tracker::record_usage`**：新 `event_time_ms: i64` 參數；`if inserted` 才累進 MTD cache，dedup 不雙重計費
+5. **`claude_teacher/mod.rs:152`**：改用 `crate::ai_budget::make_request_id("teacher")` tuple 一次鑄造後傳回 record_usage
+6. **IPC `handle_record_ai_usage`**：收 Python params 傳入 `(request_id, event_time_ms)` 或任一缺失時本地 `make_request_id(scope)` 鑄造；response 回 echo `request_id`/`event_time_ms` 方便 Python 持久化做未來重試。封閉 `fd480ba` 原本會引入的 `"py-sync"` literal PK 碰撞（V018 下所有 Python caller 共用同 id → 月初後每條被 dedup 掉）
+
+**對比 fd480ba**：
+- fd480ba: partial UNIQUE `WHERE request_id <> ''`（保留 V010 legacy `DEFAULT ''` rows）+ `ON CONFLICT (request_id) WHERE ... DO NOTHING` → 部署阻斷（hypertable 約束）
+- Plan N: 既有 PK `(time, scope, request_id)` + 確定性 `event_time_ms` tuple → 部署無阻
+
+**測試**（+4 in `ai_budget::tracker::tests`）：
+- `test_make_request_id_format` — 三段 hyphen 結構 + 8 hex 後綴
+- `test_make_request_id_unique_within_same_ms` — 隨機 hex 碰撞機率 ~1/2^32
+- `test_record_usage_cold_start_still_increments_cache` — 無 DB 路徑視為新插入，cache 照常累進
+- `test_record_usage_distinct_tuples_accumulate` — 3 次 distinct tuple 全部計入
+
+**回歸**：engine lib 1567 → **1571 passed / 0 failed**（+4 Plan N）。
+Python 端未變（IPC 參數為 optional，無 param 缺失時仍能本地鑄造）。
+
+**部署硬約束**：~~V018 migration~~ 取消。直接 `bash helper_scripts/restart_all.sh --rebuild`。
+
+**E2 self-review**：
+- LiveDemo 不降級 — live-level 門控不受影響（FN-2 只觸及 learning schema，不涉及 authorization/risk/exec path）
+- fail-closed 合約保留：DB write error 仍上拋 caller，caller 必須拒 LLM 調用
+- Root Principle #13「AI cost 感知」守護：dedup 不雙重扣費 → cost_edge_ratio 不被 retry 噪音污染
+
+---
 
 ### E5-FN-3 — `agent_audit_bridge.py` + AnalystAgent pilot wiring（2026-04-19 · commit 19f3d85）
 
