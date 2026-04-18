@@ -299,7 +299,50 @@ git status && git log --oneline -5
 - [ ] **E5-FN-1-CANCEL**（資訊）— audit §七.7.1「live_authorization.verify 同步但 main.rs 首次 re-verify 在 5 min 後，中間有窗口」聲稱不成立：`startup.rs:467-494` `build_exchange_pipeline` 在 pipeline 構造前已同步 `load_and_verify(env)`，失敗即 `return None` 拒絕 spawn；5 min ticker 只是 mid-session revoke detector。0 lines changed。(2026-04-19 E5-FN-1 evidence-based CANCEL)
 - [ ] **E5-FN-2-DEPLOY** 🚨 **部署硬約束**：`sql/migrations/V018__ai_usage_log_request_id_unique.sql` 必須在下次 `restart_all.sh --rebuild` 前手動 `psql` 套用。Binary 已發（commit `fd480ba`）依賴 partial UNIQUE 索引存在才能 `ON CONFLICT (request_id) WHERE request_id <> '' DO NOTHING`。V018 缺席時 INSERT 會 error out（不會 silently 繞過）→ engine 立即可見失敗。Operator 套用命令：`psql $OPENCLAW_DB_URL -f sql/migrations/V018__ai_usage_log_request_id_unique.sql`（idempotent，`IF NOT EXISTS`）。
 - [ ] **E5-FN-2-FUP** — E2 3 項 nit：(a) Hypertable + partial UNIQUE 互動需部署時驗（`\d+ learning.ai_usage_log` 看 index 成功創建；recent TimescaleDB 放寬但 version-dependent）；(b) `test_make_request_id_unique_within_same_ms` 1000 iter 理論上 ~1/8500 flake 機率 — 未來若 CI 偶發誤報，可換 seeded RNG 或提升到 16-hex；(c) 部署順序文檔散在 commit msg + V018 SQL header 兩處框架略有差異，下次歸檔時收攏。(2026-04-19 E5-FN-2 E2 APPROVE_WITH_NITS)
-- [ ] **E5-FN-3-FUP** — AnalystAgent pilot 已接；另 4 agent 延後 wire：(a) **Strategist** at `strategy_wiring.py:172`（7 `_audit()` calls 在 `strategist_agent.py:85`）；(b) **Guardian** at `:215`（4 calls 在 `guardian_agent.py:87`）；(c) **Executor** at `:345`（2 calls 在 `executor_agent.py:118`）；(d) **Scout** 需 code change — `multi_agent_framework.py:400` ctor 接受 `audit_callback=` kwarg + 新增 `_audit()` calls at `produce_intel()` / `produce_event_alert()` + wire at `:114`。模式參照 `_ANALYST_AUDIT_CB` 做法（stateless 工廠產 closure）；每個新 `_*_AUDIT_CB` 須登記進 CLAUDE.md §九。E2 其餘 nit：(e) fail-open warning 未限流（`record_change` 失敗每 tick WARNING）考慮降 `debug` 或節流；(f) 無未知 event_type 落默認 `PARAMETER_CHANGE` 分支的 test；(g) `ChangeAuditLog.record_change` 跨 thread 安全性未在 bridge 文檔化（agents 跨 thread 跑，fail-open 已防 crash）。(2026-04-19 E5-FN-3 E2 APPROVE_WITH_NITS)
+
+### E5-FN-3-FUP · 4-Agent audit_callback wiring（pattern-extend AnalystAgent pilot）
+
+- **起源**：E5-FN-3 commit `19f3d85`（2026-04-19）只接了 AnalystAgent pilot；另 4 agent 留給 follow-up
+- **動因**：違反 Root Principle #8「交易可解釋」— Scout/Strategist/Guardian/Executor 決策點共 **13** 個 `_audit()` call-site 目前 silently no-op
+- **前置閱讀（後續 session 接手）**：
+  - Commit `19f3d85` 的 `git show` — 完整 RCA + 實施模式
+  - `docs/CLAUDE_CHANGELOG.md` §「E5-FN-3 — agent_audit_bridge + AnalystAgent pilot wiring」
+  - `docs/audits/2026-04-18--e5_full_codebase_audit.md` §七.7.3
+  - `program_code/exchange_connectors/bybit_connector/control_api_v1/app/agent_audit_bridge.py`（stateless 工廠 — 不需改動，只需調用）
+  - `program_code/exchange_connectors/bybit_connector/control_api_v1/app/strategy_wiring.py:249,339`（AnalystAgent pilot 兩 call site，template 參考）
+  - `CLAUDE.md §九`（singleton 登記表，每新增 `_*_AUDIT_CB` 必須登記）
+  - CLAUDE.md §二 Root Principle #8
+
+- **實施模式**（每 agent 照 Analyst pilot 抄）：
+  ```python
+  # strategy_wiring.py 模組級（接近 _ANALYST_AUDIT_CB 處）：
+  _GOV_HUB_FOR_<AGENT> = _governance_hub_resolver()
+  _<AGENT>_AUDIT_CB   = make_agent_audit_callback(_GOV_HUB_FOR_<AGENT>, "<Agent>Agent")
+  # ctor call-site：
+  <Agent>Agent(..., audit_callback=_<AGENT>_AUDIT_CB)
+  ```
+  每新增 singleton **同 commit 登記 CLAUDE.md §九**（與 `_ANALYST_AUDIT_CB` 同列格式）。
+
+- **4 sub-tasks**（ID-order 建議）：
+  - [ ] **FUP-a Strategist**：wire at `program_code/.../app/strategy_wiring.py:172`；7 `_audit()` calls 在 `strategist_agent.py:85`；純 ctor kwarg 傳遞，零 code change
+  - [ ] **FUP-b Guardian**：wire at `strategy_wiring.py:215`；4 calls 在 `guardian_agent.py:87`；同純 kwarg 傳遞
+  - [ ] **FUP-c Executor**：wire at `strategy_wiring.py:345`；2 calls 在 `executor_agent.py:118`；同純 kwarg 傳遞
+  - [ ] **FUP-d Scout** 🔧（**需 code change**，留最後）：`program_code/.../multi_agent_framework.py:410` ctor 目前硬編碼 `audit_callback=None`，需改為接受 kwarg；另需在 `ScoutAgent.produce_intel()` / `produce_event_alert()` 新增 `self._audit(...)` call-site（當前 0 calls）；最後 wire at `strategy_wiring.py:114`
+
+- **測試模板**：參照 `program_code/.../tests/test_agent_audit_bridge.py`（12 tests）；每新 agent wiring 加 1 integration test 驗 `audit_callback` 被 ctor 收下 + 至少 1 path 觸發 `record_change`
+
+- **E2 APPROVE_WITH_NITS 非阻塞遺留**：
+  - [ ] **NIT-1 log throttle**：`agent_audit_bridge.py` fail-open warning 未限流（`record_change` 失敗時每 tick 1 條 WARNING）→ DB 死時會刷屏；考慮降 `debug` 或每 N 秒節流
+  - [ ] **NIT-2 test 覆蓋缺口**：未知 event_type 落保守默認 `PARAMETER_CHANGE` 分支無 test；加一條 one-liner 鎖定契約
+  - [ ] **NIT-3 thread-safety 文檔**：`ChangeAuditLog.record_change` 跨 thread 安全性未在 bridge 文檔化；agents 跨 thread 跑，fail-open 已防 crash，但語義應註明
+
+- **驗收**：全 5 agent（Scout/Strategist/Guardian/Analyst/Executor）wire 完成後，`change_audit_log` 表應看到 `who IN ('ScoutAgent','StrategistAgent','GuardianAgent','AnalystAgent','ExecutorAgent')` 全部出現；搭配 Analyst pilot 觀察週（uvicorn 重啟後）做對比
+
+---
+
+- [ ] **E5-FN-1-CANCEL**（資訊）— audit §七.7.1「live_authorization.verify 同步但 main.rs 首次 re-verify 在 5 min 後，中間有窗口」聲稱不成立：`startup.rs:467-494` `build_exchange_pipeline` 在 pipeline 構造前已同步 `load_and_verify(env)`，失敗即 `return None` 拒絕 spawn；5 min ticker 只是 mid-session revoke detector。0 lines changed。(2026-04-19 E5-FN-1 evidence-based CANCEL)
+- [ ] **E5-FN-2-DEPLOY** 🚨 **部署硬約束**：`sql/migrations/V018__ai_usage_log_request_id_unique.sql` 必須在下次 `restart_all.sh --rebuild` 前手動 `psql` 套用。Binary 已發（commit `fd480ba`）依賴 partial UNIQUE 索引存在才能 `ON CONFLICT (request_id) WHERE request_id <> '' DO NOTHING`。V018 缺席時 INSERT 會 error out（不會 silently 繞過）→ engine 立即可見失敗。Operator 套用命令：`psql $OPENCLAW_DB_URL -f sql/migrations/V018__ai_usage_log_request_id_unique.sql`（idempotent，`IF NOT EXISTS`）。
+- [ ] **E5-FN-2-FUP** — E2 3 項 nit：(a) Hypertable + partial UNIQUE 互動需部署時驗（`\d+ learning.ai_usage_log` 看 index 成功創建；recent TimescaleDB 放寬但 version-dependent）；(b) `test_make_request_id_unique_within_same_ms` 1000 iter 理論上 ~1/8500 flake 機率 — 未來若 CI 偶發誤報，可換 seeded RNG 或提升到 16-hex；(c) 部署順序文檔散在 commit msg + V018 SQL header 兩處框架略有差異，下次歸檔時收攏。(2026-04-19 E5-FN-2 E2 APPROVE_WITH_NITS)
 
 ---
 
