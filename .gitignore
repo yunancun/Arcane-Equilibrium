@@ -30,6 +30,13 @@ cache/
 *.bak_before_*
 *.bak_last_*
 
+# Runtime state written by schedulers / experiments — not source of truth
+# 運行時狀態（scheduler 自動寫入），非權威來源
+settings/edge_estimates.json
+settings/edge_estimates_live_demo.json
+program_code/settings/experiment_ledger_snapshot.json
+program_code/settings/truth_registry_snapshot.json
+
 # -----------------------------
 # Python / Python 相关
 # -----------------------------
