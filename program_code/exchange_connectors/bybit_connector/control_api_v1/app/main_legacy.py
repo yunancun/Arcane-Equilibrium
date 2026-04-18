@@ -444,8 +444,25 @@ def envelope_response(
 
 
 
-# ── Wave D: Register legacy route handlers ──────────────────────────────────
-# 路由處理器已移至 legacy_routes.py，在此註冊到 app。
-# Route handlers moved to legacy_routes.py, registered here on app.
-from .legacy_routes import register_legacy_routes  # noqa: E402
-register_legacy_routes(app)
+# ── E5-P0-5: Register legacy route handlers (5 domain files) ────────────────
+# 路由處理器已從 legacy_routes.py 拆分為 5 個領域檔案，在此依序註冊。
+# Route handlers split from legacy_routes.py into 5 domain files, registered in order.
+#
+# Files + responsibility / 檔案與職責：
+#   auth_legacy_routes.py    — 3 auth routes (login/logout/check)
+#   gui_legacy_routes.py     — 5 GUI / HTML routes (/login, /, /gui, /console, /trading)
+#   system_legacy_routes.py  — 12 system / health read routes
+#   learning_legacy_routes.py — 19 learning / PnL routes
+#   control_legacy_routes.py — 15 control / operator-write routes
+# Total: 54 routes (matches legacy_routes.py pre-refactor count).
+from .auth_legacy_routes import register_auth_legacy_routes  # noqa: E402
+from .gui_legacy_routes import register_gui_legacy_routes  # noqa: E402
+from .system_legacy_routes import register_system_legacy_routes  # noqa: E402
+from .learning_legacy_routes import register_learning_legacy_routes  # noqa: E402
+from .control_legacy_routes import register_control_legacy_routes  # noqa: E402
+
+register_auth_legacy_routes(app)
+register_gui_legacy_routes(app)
+register_system_legacy_routes(app)
+register_learning_legacy_routes(app)
+register_control_legacy_routes(app)
