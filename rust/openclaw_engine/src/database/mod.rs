@@ -11,6 +11,7 @@
 //!   Pool 初始化可選 — 無 PG 時引擎正常運行（優雅降級）。
 
 pub mod aggregators;
+pub mod batch_insert;
 pub mod black_swan_detector;
 pub mod context_writer;
 pub mod decision_feature_writer;
