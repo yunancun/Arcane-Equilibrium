@@ -22,9 +22,9 @@ pub const STALENESS_THRESHOLD_MS: u64 = 600_000; // 10 minutes
 
 /// Consecutive REST failures before escalation tiers (6-RC-10 progressive).
 /// 連續 REST 失敗漸進升級閾值。
-pub const REST_FAILURE_TIER1_COUNT: u32 = 10;  // → Cautious  (5 min without verification)
-pub const REST_FAILURE_TIER2_COUNT: u32 = 30;  // → Reduced   (15 min)
-pub const REST_FAILURE_TIER3_COUNT: u32 = 60;  // → Defensive (30 min)
+pub const REST_FAILURE_TIER1_COUNT: u32 = 10; // → Cautious  (5 min without verification)
+pub const REST_FAILURE_TIER2_COUNT: u32 = 30; // → Reduced   (15 min)
+pub const REST_FAILURE_TIER3_COUNT: u32 = 60; // → Defensive (30 min)
 
 /// Persistent drift threshold — cycles of continuous drift before Defensive.
 /// 持續漂移閾值 — 連續多少週期漂移後升至 Defensive。
@@ -44,13 +44,13 @@ pub const GLOBAL_COOLDOWN_MS: u64 = 5 * 60 * 1000;
 
 /// Recovery: clean cycles required per tier transition.
 /// 恢復：每級轉換需要的乾淨週期數。
-pub const RECOVERY_CYCLES_CAUTIOUS_TO_NORMAL: u32 = 30;   // 15 min
-pub const RECOVERY_CYCLES_REDUCED_TO_CAUTIOUS: u32 = 20;  // 10 min
-pub const RECOVERY_CYCLES_DEFENSIVE_TO_REDUCED: u32 = 20;  // 10 min
+pub const RECOVERY_CYCLES_CAUTIOUS_TO_NORMAL: u32 = 30; // 15 min
+pub const RECOVERY_CYCLES_REDUCED_TO_CAUTIOUS: u32 = 20; // 10 min
+pub const RECOVERY_CYCLES_DEFENSIVE_TO_REDUCED: u32 = 20; // 10 min
 
 /// Recovery: minimum wall-clock time (ms) since last drift per tier transition.
 /// 恢復：每級轉換自最後漂移起的最小牆鐘時間。
-pub const RECOVERY_WALL_CAUTIOUS_TO_NORMAL_MS: u64 = 15 * 60 * 1000;  // 15 min
+pub const RECOVERY_WALL_CAUTIOUS_TO_NORMAL_MS: u64 = 15 * 60 * 1000; // 15 min
 pub const RECOVERY_WALL_REDUCED_TO_CAUTIOUS_MS: u64 = 10 * 60 * 1000; // 10 min
 pub const RECOVERY_WALL_DEFENSIVE_TO_REDUCED_MS: u64 = 10 * 60 * 1000; // 10 min
 
@@ -189,9 +189,7 @@ pub fn evaluate_actions(
     // ---- 啟動寬限期：STARTUP_GRACE_MS 內抑制所有自動升級/降級，並且不累加
     // 計數器（避免寬限期結束瞬間集中觸發）。orphan_handler 與 baseline 更新
     // 在此函數之外正常運作。
-    if state.startup_ms > 0
-        && now_ms.saturating_sub(state.startup_ms) < STARTUP_GRACE_MS
-    {
+    if state.startup_ms > 0 && now_ms.saturating_sub(state.startup_ms) < STARTUP_GRACE_MS {
         let actionable_count = drifts
             .iter()
             .filter(|(_, v)| {
@@ -222,12 +220,21 @@ pub fn evaluate_actions(
     // -- 收集觸發動作的漂移（排除 MinorDrift）--
     let actionable: Vec<&(String, DriftVerdict)> = drifts
         .iter()
-        .filter(|(_, v)| matches!(v, DriftVerdict::MajorDrift | DriftVerdict::SideFlip | DriftVerdict::Orphan | DriftVerdict::Ghost))
+        .filter(|(_, v)| {
+            matches!(
+                v,
+                DriftVerdict::MajorDrift
+                    | DriftVerdict::SideFlip
+                    | DriftVerdict::Orphan
+                    | DriftVerdict::Ghost
+            )
+        })
         .collect();
 
     // -- Update drift streaks --
     // -- 更新漂移連續計數 --
-    let drift_keys: std::collections::HashSet<&String> = actionable.iter().map(|(k, _)| k).collect();
+    let drift_keys: std::collections::HashSet<&String> =
+        actionable.iter().map(|(k, _)| k).collect();
     // Increment streaks for drifting slots
     for key in &drift_keys {
         *state.drift_streak.entry((*key).clone()).or_insert(0) += 1;
@@ -326,7 +333,10 @@ pub fn evaluate_actions(
                 // IPC 命令確認後設置，避免為被拒絕的升級記錄 floor。
 
                 let reason = if actionable_count >= BURST_DRIFT_COUNT {
-                    format!("{actionable_count} simultaneous drifts (burst, streak={})", state.burst_drift_streak)
+                    format!(
+                        "{actionable_count} simultaneous drifts (burst, streak={})",
+                        state.burst_drift_streak
+                    )
                 } else if max_streak >= PERSISTENT_DRIFT_CYCLES {
                     format!("persistent drift {max_streak} cycles")
                 } else {
@@ -411,9 +421,7 @@ pub fn check_rest_failure_escalation(
     // fires immediately.
     // P0-0：啟動寬限期內不因 REST 失敗升級。consecutive_rest_failures 計數
     // 仍會累加，寬限期結束後若仍失敗立即觸發正常 tier 升級。
-    if state.startup_ms > 0
-        && now_ms.saturating_sub(state.startup_ms) < STARTUP_GRACE_MS
-    {
+    if state.startup_ms > 0 && now_ms.saturating_sub(state.startup_ms) < STARTUP_GRACE_MS {
         return None;
     }
 
@@ -434,8 +442,7 @@ pub fn check_rest_failure_escalation(
         return None; // already at or above target / 已在目標級別或更高
     }
 
-    let global_ok =
-        now_ms.saturating_sub(state.global_last_escalation_ms) >= GLOBAL_COOLDOWN_MS;
+    let global_ok = now_ms.saturating_sub(state.global_last_escalation_ms) >= GLOBAL_COOLDOWN_MS;
     if global_ok {
         // pre_escalation_level set by caller after IPC confirmation.
         state.global_last_escalation_ms = now_ms;
@@ -455,9 +462,18 @@ pub fn check_rest_failure_escalation(
 /// 返回從指定級別恢復所需的（乾淨週期數, 牆鐘毫秒數）。
 pub(crate) fn recovery_params(level: RiskLevel) -> (u32, u64) {
     match level {
-        RiskLevel::Cautious => (RECOVERY_CYCLES_CAUTIOUS_TO_NORMAL, RECOVERY_WALL_CAUTIOUS_TO_NORMAL_MS),
-        RiskLevel::Reduced => (RECOVERY_CYCLES_REDUCED_TO_CAUTIOUS, RECOVERY_WALL_REDUCED_TO_CAUTIOUS_MS),
-        RiskLevel::Defensive => (RECOVERY_CYCLES_DEFENSIVE_TO_REDUCED, RECOVERY_WALL_DEFENSIVE_TO_REDUCED_MS),
+        RiskLevel::Cautious => (
+            RECOVERY_CYCLES_CAUTIOUS_TO_NORMAL,
+            RECOVERY_WALL_CAUTIOUS_TO_NORMAL_MS,
+        ),
+        RiskLevel::Reduced => (
+            RECOVERY_CYCLES_REDUCED_TO_CAUTIOUS,
+            RECOVERY_WALL_REDUCED_TO_CAUTIOUS_MS,
+        ),
+        RiskLevel::Defensive => (
+            RECOVERY_CYCLES_DEFENSIVE_TO_REDUCED,
+            RECOVERY_WALL_DEFENSIVE_TO_REDUCED_MS,
+        ),
         _ => (u32::MAX, u64::MAX), // CB/MR — never auto-recover
     }
 }
@@ -516,9 +532,19 @@ mod tests {
         let now = 1_000_000u64;
         let _ = evaluate_actions(&mut state, RiskLevel::Normal, &drifts, now);
         // After first: streak=1, escalated to Cautious, global cooldown set
-        let _ = evaluate_actions(&mut state, RiskLevel::Cautious, &drifts, now + GLOBAL_COOLDOWN_MS);
+        let _ = evaluate_actions(
+            &mut state,
+            RiskLevel::Cautious,
+            &drifts,
+            now + GLOBAL_COOLDOWN_MS,
+        );
         // After second: streak=2, still Cautious (not yet 3)
-        let actions = evaluate_actions(&mut state, RiskLevel::Cautious, &drifts, now + 2 * GLOBAL_COOLDOWN_MS);
+        let actions = evaluate_actions(
+            &mut state,
+            RiskLevel::Cautious,
+            &drifts,
+            now + 2 * GLOBAL_COOLDOWN_MS,
+        );
         // After third: streak=3 → Defensive
         assert!(actions.iter().any(|a| matches!(a, ReconcilerAction::Escalate { target, .. } if *target == RiskLevel::Defensive)));
     }
@@ -533,7 +559,9 @@ mod tests {
         assert_eq!(state.burst_drift_streak, 1);
         // Should escalate to Defensive, not CB
         assert!(actions.iter().any(|a| matches!(a, ReconcilerAction::Escalate { target, .. } if *target == RiskLevel::Defensive)));
-        assert!(!actions.iter().any(|a| matches!(a, ReconcilerAction::CloseAll { .. })));
+        assert!(!actions
+            .iter()
+            .any(|a| matches!(a, ReconcilerAction::CloseAll { .. })));
     }
 
     /// EN: Second consecutive burst → CircuitBreaker + CloseAll.
@@ -550,7 +578,9 @@ mod tests {
         let actions = evaluate_actions(&mut state, RiskLevel::Defensive, &drifts, now + 1000);
         assert_eq!(state.burst_drift_streak, 2);
         assert!(actions.iter().any(|a| matches!(a, ReconcilerAction::Escalate { target, .. } if *target == RiskLevel::CircuitBreaker)));
-        assert!(actions.iter().any(|a| matches!(a, ReconcilerAction::CloseAll { .. })));
+        assert!(actions
+            .iter()
+            .any(|a| matches!(a, ReconcilerAction::CloseAll { .. })));
     }
 
     // ── evaluate_actions: recovery ──
@@ -635,7 +665,10 @@ mod tests {
         assert_eq!(recovery_params(RiskLevel::Reduced), (20, 10 * 60 * 1000));
         assert_eq!(recovery_params(RiskLevel::Defensive), (20, 10 * 60 * 1000));
         // CB/MR never auto-recover
-        assert_eq!(recovery_params(RiskLevel::CircuitBreaker), (u32::MAX, u64::MAX));
+        assert_eq!(
+            recovery_params(RiskLevel::CircuitBreaker),
+            (u32::MAX, u64::MAX)
+        );
     }
 
     // ── ReconcilerState::new ──
@@ -736,7 +769,9 @@ mod tests {
             ReconcilerAction::Escalate { target, .. } if *target == RiskLevel::Defensive
         )));
         assert!(
-            !actions.iter().any(|a| matches!(a, ReconcilerAction::CloseAll { .. })),
+            !actions
+                .iter()
+                .any(|a| matches!(a, ReconcilerAction::CloseAll { .. })),
             "first post-grace burst should not trip CB"
         );
     }

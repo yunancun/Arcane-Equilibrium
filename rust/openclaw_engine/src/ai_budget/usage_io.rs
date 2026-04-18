@@ -46,7 +46,8 @@ pub async fn insert_usage(
     .await
     .map_err(|e| format!("ai_usage_log insert failed: {e}"))?;
     debug!(
-        scope, provider, model, tokens_in, tokens_out, cost_usd, "ai_usage_log row inserted"
+        scope,
+        provider, model, tokens_in, tokens_out, cost_usd, "ai_usage_log row inserted"
     );
     Ok(())
 }

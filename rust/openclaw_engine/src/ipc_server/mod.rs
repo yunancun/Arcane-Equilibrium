@@ -27,9 +27,9 @@ use crate::config::{
     BudgetConfig, ConfigManager, ConfigStore, LearningConfig, PatchSource, RiskConfig,
 };
 use crate::tick_pipeline::PipelineSnapshot;
-use std::sync::atomic::{AtomicBool, Ordering};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixListener;
@@ -142,7 +142,10 @@ impl EngineCommandChannels {
     /// Select the command sender for the given engine name.
     /// Falls back to paper for unknown names (fail-safe).
     /// 按引擎名選擇命令發送端。未知名稱回退到 paper（安全默認）。
-    pub fn select(&self, engine: &str) -> &Option<tokio::sync::mpsc::UnboundedSender<PipelineCommand>> {
+    pub fn select(
+        &self,
+        engine: &str,
+    ) -> &Option<tokio::sync::mpsc::UnboundedSender<PipelineCommand>> {
         match engine {
             "demo" => &self.demo,
             "live" => &self.live,
@@ -513,7 +516,8 @@ async fn handle_connection(
             Ok(v) => v,
             Err(_) => {
                 let err = br#"{"jsonrpc":"2.0","error":{"code":-32600,"message":"first message must be __auth JSON"},"id":null}"#;
-                let mut bytes = err.to_vec(); bytes.push(b'\n');
+                let mut bytes = err.to_vec();
+                bytes.push(b'\n');
                 let _ = writer.write_all(&bytes).await;
                 warn!(peer = %peer, "auth: invalid JSON / 認證：JSON 格式錯誤");
                 return;
@@ -521,7 +525,8 @@ async fn handle_connection(
         };
         if auth_req.get("method").and_then(|m| m.as_str()) != Some("__auth") {
             let err = br#"{"jsonrpc":"2.0","error":{"code":-32600,"message":"first message must be __auth"},"id":null}"#;
-            let mut bytes = err.to_vec(); bytes.push(b'\n');
+            let mut bytes = err.to_vec();
+            bytes.push(b'\n');
             let _ = writer.write_all(&bytes).await;
             warn!(peer = %peer, "auth: first message is not __auth / 首條消息非 __auth");
             return;
@@ -541,7 +546,8 @@ async fn handle_connection(
             .as_secs() as i64;
         if (now - ts).abs() > 30 {
             let err = br#"{"jsonrpc":"2.0","error":{"code":-32600,"message":"auth token expired (timestamp skew > 30s)"},"id":null}"#;
-            let mut bytes = err.to_vec(); bytes.push(b'\n');
+            let mut bytes = err.to_vec();
+            bytes.push(b'\n');
             let _ = writer.write_all(&bytes).await;
             warn!(peer = %peer, ts, now, "auth: token expired / 認證令牌已過期");
             return;
@@ -549,13 +555,17 @@ async fn handle_connection(
         // HMAC-SHA256 constant-time verification / HMAC-SHA256 常數時間驗證
         if !verify_ipc_token(&secret, ts, token) {
             let err = br#"{"jsonrpc":"2.0","error":{"code":-32600,"message":"auth failed: invalid token"},"id":null}"#;
-            let mut bytes = err.to_vec(); bytes.push(b'\n');
+            let mut bytes = err.to_vec();
+            bytes.push(b'\n');
             let _ = writer.write_all(&bytes).await;
             warn!(peer = %peer, "auth: HMAC verification failed / HMAC 驗證失敗");
             return;
         }
         // Auth success — send confirmation / 認證成功，發送確認
-        let auth_id = auth_req.get("id").cloned().unwrap_or(serde_json::Value::Null);
+        let auth_id = auth_req
+            .get("id")
+            .cloned()
+            .unwrap_or(serde_json::Value::Null);
         let ok = serde_json::json!({"jsonrpc":"2.0","result":{"authenticated":true},"id":auth_id});
         let mut ok_bytes = serde_json::to_vec(&ok).unwrap_or_default();
         ok_bytes.push(b'\n');
@@ -645,7 +655,9 @@ async fn dispatch_request(
     // method + target engine for post-hoc forensics.
     // MAJOR-5：每引擎 IPC 審計日誌 — 記錄 method + 目標引擎以供事後取證。
     {
-        let target_engine = req.params.get("engine")
+        let target_engine = req
+            .params
+            .get("engine")
             .and_then(|v| v.as_str())
             .unwrap_or("(default)");
         tracing::info!(
@@ -664,7 +676,9 @@ async fn dispatch_request(
             // Phase 4: optional `engine` param routes to per-mode snapshot.
             // Default "paper" for backward compatibility.
             // Phase 4：可選 `engine` 參數路由到每模式快照，默認 "paper" 向後兼容。
-            let engine = req.params.get("engine")
+            let engine = req
+                .params
+                .get("engine")
                 .and_then(|v| v.as_str())
                 .unwrap_or("paper")
                 .to_string();
@@ -691,7 +705,9 @@ async fn dispatch_request(
         "get_mode_snapshot" => {
             // Phase 4: Full ModeStateSnapshot for a specific engine mode.
             // Phase 4：特定引擎模式的完整 ModeStateSnapshot。
-            let engine = req.params.get("engine")
+            let engine = req
+                .params
+                .get("engine")
                 .and_then(|v| v.as_str())
                 .unwrap_or("paper")
                 .to_string();
@@ -742,7 +758,11 @@ async fn dispatch_request(
                 .unwrap_or("")
                 .to_string();
             if symbol.is_empty() {
-                return JsonRpcResponse::error(id, ERR_INVALID_REQUEST, "missing required param: symbol");
+                return JsonRpcResponse::error(
+                    id,
+                    ERR_INVALID_REQUEST,
+                    "missing required param: symbol",
+                );
             }
             // Optional hints: caller (Python GUI route) supplies exchange-side position info
             // so Rust can close orphan positions not tracked in paper_state.
@@ -754,7 +774,11 @@ async fn dispatch_request(
             handle_paper_cmd(
                 id,
                 tx,
-                PipelineCommand::CloseSymbol { symbol, hint_is_long, hint_qty },
+                PipelineCommand::CloseSymbol {
+                    symbol,
+                    hint_is_long,
+                    hint_qty,
+                },
                 "close_position_sent",
             )
         }
@@ -800,6 +824,16 @@ async fn dispatch_request(
             let tx = extract_engine_tx(&req.params, cmd_channels);
             handle_clear_consecutive_losses(id, tx).await
         }
+        // DYNAMIC-RISK-1: Per-engine Sharpe-aware sizer status + toggle.
+        // DYNAMIC-RISK-1：按引擎動態風險調整器狀態與切換。
+        "get_dynamic_risk_status" => {
+            let tx = extract_engine_tx(&req.params, cmd_channels);
+            handle_get_dynamic_risk_status(id, tx).await
+        }
+        "set_dynamic_risk_enabled" => {
+            let tx = extract_engine_tx(&req.params, cmd_channels);
+            handle_set_dynamic_risk_enabled(id, tx, &req.params).await
+        }
         // ARCH-RC1 1C-3-B-2: governor manual override (operator escalation/de-escalation)
         "force_governor_tier_tighter" => {
             let tx = extract_engine_tx(&req.params, cmd_channels);
@@ -831,9 +865,7 @@ async fn dispatch_request(
             handle_update_ai_budget_config(id, &req.params, budget_slot).await
         }
         // FIX-57: External AI usage recording (Python Layer2 → Rust sync)
-        "record_ai_usage" => {
-            handle_record_ai_usage(id, &req.params, budget_slot).await
-        }
+        "record_ai_usage" => handle_record_ai_usage(id, &req.params, budget_slot).await,
         // Phase 4.1: Teacher consumer loop control / Teacher consumer loop 控制
         "set_teacher_loop_enabled" => {
             handle_set_teacher_loop_enabled(id, &req.params, teacher_slot).await
@@ -847,7 +879,11 @@ async fn dispatch_request(
         // Route to the corresponding PerEngineRiskStores slot.
         // get_risk_config / patch_risk_config 接受可選的 `engine` 參數路由到對應 store。
         "get_risk_config" => {
-            let engine = req.params.get("engine").and_then(|v| v.as_str()).unwrap_or("paper");
+            let engine = req
+                .params
+                .get("engine")
+                .and_then(|v| v.as_str())
+                .unwrap_or("paper");
             let store: Option<Arc<ConfigStore<RiskConfig>>> =
                 risk_stores.as_ref().map(|s| Arc::clone(s.select(engine)));
             handle_get_config(id, &store, &format!("risk/{engine}"))
@@ -855,7 +891,11 @@ async fn dispatch_request(
         "get_learning_config" => handle_get_config(id, learning_store, "learning"),
         "get_budget_config" => handle_get_config(id, budget_store, "budget"),
         "patch_risk_config" => {
-            let engine = req.params.get("engine").and_then(|v| v.as_str()).unwrap_or("paper");
+            let engine = req
+                .params
+                .get("engine")
+                .and_then(|v| v.as_str())
+                .unwrap_or("paper");
             let store: Option<Arc<ConfigStore<RiskConfig>>> =
                 risk_stores.as_ref().map(|s| Arc::clone(s.select(engine)));
             handle_patch_config(

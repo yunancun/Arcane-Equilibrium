@@ -102,7 +102,20 @@ async fn test_dispatch_ping() {
     let config = make_test_config();
     let dd = make_test_data_dir();
     let req = r#"{"jsonrpc": "2.0", "method": "ping", "params": {}, "id": 1}"#;
-    let resp = dispatch_request(req, &config, &dd, &EngineCommandChannels::default(), &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None, &None).await;
+    let resp = dispatch_request(
+        req,
+        &config,
+        &dd,
+        &EngineCommandChannels::default(),
+        &empty_budget_slot(),
+        &empty_teacher_slot(),
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    )
+    .await;
     assert!(resp.error.is_none());
     assert_eq!(
         resp.result.unwrap(),
@@ -116,14 +129,30 @@ async fn test_dispatch_get_state() {
     let config = make_test_config();
     let dd = make_test_data_dir();
     let req = r#"{"jsonrpc": "2.0", "method": "get_state", "params": {}, "id": 2}"#;
-    let resp = dispatch_request(req, &config, &dd, &EngineCommandChannels::default(), &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None, &None).await;
+    let resp = dispatch_request(
+        req,
+        &config,
+        &dd,
+        &EngineCommandChannels::default(),
+        &empty_budget_slot(),
+        &empty_teacher_slot(),
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    )
+    .await;
     assert!(resp.error.is_none());
     let result = resp.result.unwrap();
     assert_eq!(result["status"], "running");
     // system_mode is read from pipeline_snapshot.json; falls back to "live_reserved" when
     // no snapshot exists (test environment). Assert it's a non-empty string.
     // system_mode 從 pipeline_snapshot.json 讀取；測試環境無快照時回退 "live_reserved"。
-    assert!(result["system_mode"].as_str().map(|s| !s.is_empty()).unwrap_or(false));
+    assert!(result["system_mode"]
+        .as_str()
+        .map(|s| !s.is_empty())
+        .unwrap_or(false));
 }
 
 #[tokio::test]
@@ -131,7 +160,20 @@ async fn test_dispatch_method_not_found() {
     let config = make_test_config();
     let dd = make_test_data_dir();
     let req = r#"{"jsonrpc": "2.0", "method": "nonexistent", "params": {}, "id": 3}"#;
-    let resp = dispatch_request(req, &config, &dd, &EngineCommandChannels::default(), &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None, &None).await;
+    let resp = dispatch_request(
+        req,
+        &config,
+        &dd,
+        &EngineCommandChannels::default(),
+        &empty_budget_slot(),
+        &empty_teacher_slot(),
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    )
+    .await;
     assert!(resp.error.is_some());
     assert_eq!(resp.error.unwrap().code, ERR_METHOD_NOT_FOUND);
 }
@@ -141,7 +183,20 @@ async fn test_dispatch_invalid_json() {
     let config = make_test_config();
     let dd = make_test_data_dir();
     let req = "not valid json";
-    let resp = dispatch_request(req, &config, &dd, &EngineCommandChannels::default(), &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None, &None).await;
+    let resp = dispatch_request(
+        req,
+        &config,
+        &dd,
+        &EngineCommandChannels::default(),
+        &empty_budget_slot(),
+        &empty_teacher_slot(),
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    )
+    .await;
     assert!(resp.error.is_some());
     assert_eq!(resp.error.unwrap().code, ERR_INVALID_REQUEST);
 }
@@ -151,7 +206,20 @@ async fn test_dispatch_missing_version() {
     let config = make_test_config();
     let dd = make_test_data_dir();
     let req = r#"{"method": "ping", "params": {}, "id": 4}"#;
-    let resp = dispatch_request(req, &config, &dd, &EngineCommandChannels::default(), &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None, &None).await;
+    let resp = dispatch_request(
+        req,
+        &config,
+        &dd,
+        &EngineCommandChannels::default(),
+        &empty_budget_slot(),
+        &empty_teacher_slot(),
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    )
+    .await;
     assert!(resp.error.is_some());
     assert_eq!(resp.error.unwrap().code, ERR_INVALID_REQUEST);
 }
@@ -161,7 +229,20 @@ async fn test_dispatch_missing_method() {
     let config = make_test_config();
     let dd = make_test_data_dir();
     let req = r#"{"jsonrpc": "2.0", "params": {}, "id": 5}"#;
-    let resp = dispatch_request(req, &config, &dd, &EngineCommandChannels::default(), &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None, &None).await;
+    let resp = dispatch_request(
+        req,
+        &config,
+        &dd,
+        &EngineCommandChannels::default(),
+        &empty_budget_slot(),
+        &empty_teacher_slot(),
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    )
+    .await;
     assert!(resp.error.is_some());
     assert_eq!(resp.error.unwrap().code, ERR_INVALID_REQUEST);
 }
@@ -171,7 +252,20 @@ async fn test_dispatch_reload_config() {
     let config = make_test_config();
     let dd = make_test_data_dir();
     let req = r#"{"jsonrpc": "2.0", "method": "reload_config", "params": {}, "id": 8}"#;
-    let resp = dispatch_request(req, &config, &dd, &EngineCommandChannels::default(), &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None, &None).await;
+    let resp = dispatch_request(
+        req,
+        &config,
+        &dd,
+        &EngineCommandChannels::default(),
+        &empty_budget_slot(),
+        &empty_teacher_slot(),
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    )
+    .await;
     assert!(resp.error.is_none());
     let result = resp.result.unwrap();
     assert_eq!(result["reloaded"], true);
@@ -203,7 +297,20 @@ async fn test_get_paper_state_no_file() {
     let config = make_test_config();
     let dd = make_test_data_dir(); // nonexistent dir
     let req = r#"{"jsonrpc": "2.0", "method": "get_paper_state", "params": {}, "id": 20}"#;
-    let resp = dispatch_request(req, &config, &dd, &EngineCommandChannels::default(), &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None, &None).await;
+    let resp = dispatch_request(
+        req,
+        &config,
+        &dd,
+        &EngineCommandChannels::default(),
+        &empty_budget_slot(),
+        &empty_teacher_slot(),
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    )
+    .await;
     assert!(
         resp.error.is_some(),
         "should error when snapshot file missing"
@@ -215,7 +322,20 @@ async fn test_get_paper_state_with_snapshot() {
     let config = make_test_config();
     let (dd, _dir) = write_test_snapshot();
     let req = r#"{"jsonrpc": "2.0", "method": "get_paper_state", "params": {}, "id": 21}"#;
-    let resp = dispatch_request(req, &config, &dd, &EngineCommandChannels::default(), &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None, &None).await;
+    let resp = dispatch_request(
+        req,
+        &config,
+        &dd,
+        &EngineCommandChannels::default(),
+        &empty_budget_slot(),
+        &empty_teacher_slot(),
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    )
+    .await;
     assert!(resp.error.is_none(), "error: {:?}", resp.error);
     let result = resp.result.unwrap();
     assert_eq!(result["balance"], 9500.0);
@@ -228,7 +348,20 @@ async fn test_get_latest_prices_with_snapshot() {
     let config = make_test_config();
     let (dd, _dir) = write_test_snapshot();
     let req = r#"{"jsonrpc": "2.0", "method": "get_latest_prices", "params": {}, "id": 22}"#;
-    let resp = dispatch_request(req, &config, &dd, &EngineCommandChannels::default(), &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None, &None).await;
+    let resp = dispatch_request(
+        req,
+        &config,
+        &dd,
+        &EngineCommandChannels::default(),
+        &empty_budget_slot(),
+        &empty_teacher_slot(),
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    )
+    .await;
     assert!(resp.error.is_none(), "error: {:?}", resp.error);
     let result = resp.result.unwrap();
     assert_eq!(result["BTCUSDT"], 66000.0);
@@ -240,7 +373,20 @@ async fn test_get_tick_stats_with_snapshot() {
     let config = make_test_config();
     let (dd, _dir) = write_test_snapshot();
     let req = r#"{"jsonrpc": "2.0", "method": "get_tick_stats", "params": {}, "id": 23}"#;
-    let resp = dispatch_request(req, &config, &dd, &EngineCommandChannels::default(), &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None, &None).await;
+    let resp = dispatch_request(
+        req,
+        &config,
+        &dd,
+        &EngineCommandChannels::default(),
+        &empty_budget_slot(),
+        &empty_teacher_slot(),
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    )
+    .await;
     assert!(resp.error.is_none(), "error: {:?}", resp.error);
     let result = resp.result.unwrap();
     assert_eq!(result["total_ticks"], 5000);
@@ -342,7 +488,23 @@ async fn test_rc1_get_risk_runtime_status_via_ipc() {
     let dd = make_test_data_dir();
     let tx = setup_risk_runtime_channel(0);
     let req = r#"{"jsonrpc":"2.0","method":"get_risk_runtime_status","params":{},"id":40}"#;
-    let resp = dispatch_request(req, &config, &dd, &EngineCommandChannels { paper: Some(tx), ..Default::default() }, &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None, &None).await;
+    let resp = dispatch_request(
+        req,
+        &config,
+        &dd,
+        &EngineCommandChannels {
+            paper: Some(tx),
+            ..Default::default()
+        },
+        &empty_budget_slot(),
+        &empty_teacher_slot(),
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    )
+    .await;
     assert!(resp.error.is_none(), "error: {:?}", resp.error);
     let result = resp.result.unwrap();
     assert_eq!(result["governor_tier"].as_str().unwrap(), "Normal");
@@ -356,7 +518,23 @@ async fn test_rc1_clear_consecutive_losses_via_ipc() {
     let dd = make_test_data_dir();
     let tx = setup_risk_runtime_channel(3);
     let req = r#"{"jsonrpc":"2.0","method":"clear_consecutive_losses","params":{},"id":41}"#;
-    let resp = dispatch_request(req, &config, &dd, &EngineCommandChannels { paper: Some(tx), ..Default::default() }, &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None, &None).await;
+    let resp = dispatch_request(
+        req,
+        &config,
+        &dd,
+        &EngineCommandChannels {
+            paper: Some(tx),
+            ..Default::default()
+        },
+        &empty_budget_slot(),
+        &empty_teacher_slot(),
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    )
+    .await;
     assert!(resp.error.is_none(), "error: {:?}", resp.error);
     let result = resp.result.unwrap();
     assert_eq!(result["result"].as_str().unwrap(), "cleared 3 symbol(s)");
@@ -374,7 +552,9 @@ fn setup_governor_override_channel(
         while let Some(cmd) = rx.recv().await {
             match cmd {
                 PipelineCommand::ForceGovernorTighter {
-                    target_tier, reason, response_tx,
+                    target_tier,
+                    reason,
+                    response_tx,
                 } => {
                     let result = if accept_tighter {
                         Ok(format!(
@@ -386,7 +566,10 @@ fn setup_governor_override_channel(
                     let _ = response_tx.send(result);
                 }
                 PipelineCommand::ForceGovernorLooser {
-                    target_tier, reason_code, response_tx, ..
+                    target_tier,
+                    reason_code,
+                    response_tx,
+                    ..
                 } => {
                     let result = if accept_looser {
                         Ok(format!(
@@ -410,7 +593,23 @@ async fn test_rc1b2_force_governor_tighter_via_ipc() {
     let dd = make_test_data_dir();
     let tx = setup_governor_override_channel(true, false);
     let req = r#"{"jsonrpc":"2.0","method":"force_governor_tier_tighter","params":{"target_tier":"CAUTIOUS","reason":"manual probe"},"id":50}"#;
-    let resp = dispatch_request(req, &config, &dd, &EngineCommandChannels { paper: Some(tx), ..Default::default() }, &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None, &None).await;
+    let resp = dispatch_request(
+        req,
+        &config,
+        &dd,
+        &EngineCommandChannels {
+            paper: Some(tx),
+            ..Default::default()
+        },
+        &empty_budget_slot(),
+        &empty_teacher_slot(),
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    )
+    .await;
     assert!(resp.error.is_none(), "error: {:?}", resp.error);
     let result = resp.result.unwrap();
     assert_eq!(result["to"].as_str().unwrap(), "CAUTIOUS");
@@ -422,7 +621,23 @@ async fn test_rc1b2_force_governor_tighter_missing_reason() {
     let dd = make_test_data_dir();
     let tx = setup_governor_override_channel(true, false);
     let req = r#"{"jsonrpc":"2.0","method":"force_governor_tier_tighter","params":{"target_tier":"CAUTIOUS"},"id":51}"#;
-    let resp = dispatch_request(req, &config, &dd, &EngineCommandChannels { paper: Some(tx), ..Default::default() }, &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None, &None).await;
+    let resp = dispatch_request(
+        req,
+        &config,
+        &dd,
+        &EngineCommandChannels {
+            paper: Some(tx),
+            ..Default::default()
+        },
+        &empty_budget_slot(),
+        &empty_teacher_slot(),
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    )
+    .await;
     assert!(resp.error.is_some());
 }
 
@@ -432,10 +647,30 @@ async fn test_rc1b2_force_governor_looser_cooldown_rejection() {
     let dd = make_test_data_dir();
     let tx = setup_governor_override_channel(false, false);
     let req = r#"{"jsonrpc":"2.0","method":"force_governor_tier_looser","params":{"target_tier":"NORMAL","reason_code":"false_positive","notes":"test"},"id":52}"#;
-    let resp = dispatch_request(req, &config, &dd, &EngineCommandChannels { paper: Some(tx), ..Default::default() }, &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None, &None).await;
+    let resp = dispatch_request(
+        req,
+        &config,
+        &dd,
+        &EngineCommandChannels {
+            paper: Some(tx),
+            ..Default::default()
+        },
+        &empty_budget_slot(),
+        &empty_teacher_slot(),
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    )
+    .await;
     assert!(resp.error.is_some());
     let err_msg = resp.error.unwrap().message;
-    assert!(err_msg.contains("cooldown"), "expected cooldown error, got: {}", err_msg);
+    assert!(
+        err_msg.contains("cooldown"),
+        "expected cooldown error, got: {}",
+        err_msg
+    );
 }
 
 #[tokio::test]
@@ -444,7 +679,23 @@ async fn test_rc1b2_force_governor_looser_success() {
     let dd = make_test_data_dir();
     let tx = setup_governor_override_channel(false, true);
     let req = r#"{"jsonrpc":"2.0","method":"force_governor_tier_looser","params":{"target_tier":"NORMAL","reason_code":"false_positive","notes":""},"id":53}"#;
-    let resp = dispatch_request(req, &config, &dd, &EngineCommandChannels { paper: Some(tx), ..Default::default() }, &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None, &None).await;
+    let resp = dispatch_request(
+        req,
+        &config,
+        &dd,
+        &EngineCommandChannels {
+            paper: Some(tx),
+            ..Default::default()
+        },
+        &empty_budget_slot(),
+        &empty_teacher_slot(),
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    )
+    .await;
     assert!(resp.error.is_none(), "error: {:?}", resp.error);
     let result = resp.result.unwrap();
     assert_eq!(result["reason_code"].as_str().unwrap(), "false_positive");
@@ -456,7 +707,20 @@ async fn test_rc1_get_risk_runtime_status_no_channel() {
     let config = make_test_config();
     let dd = make_test_data_dir();
     let req = r#"{"jsonrpc":"2.0","method":"get_risk_runtime_status","params":{},"id":42}"#;
-    let resp = dispatch_request(req, &config, &dd, &EngineCommandChannels::default(), &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None, &None).await;
+    let resp = dispatch_request(
+        req,
+        &config,
+        &dd,
+        &EngineCommandChannels::default(),
+        &empty_budget_slot(),
+        &empty_teacher_slot(),
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    )
+    .await;
     assert!(resp.error.is_some());
 }
 
@@ -466,7 +730,23 @@ async fn test_get_param_ranges_via_ipc() {
     let dd = make_test_data_dir();
     let tx = setup_strategy_param_channel();
     let req = r#"{"jsonrpc": "2.0", "method": "get_param_ranges", "params": {"strategy_name": "ma_crossover"}, "id": 30}"#;
-    let resp = dispatch_request(req, &config, &dd, &EngineCommandChannels { paper: Some(tx), ..Default::default() }, &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None, &None).await;
+    let resp = dispatch_request(
+        req,
+        &config,
+        &dd,
+        &EngineCommandChannels {
+            paper: Some(tx),
+            ..Default::default()
+        },
+        &empty_budget_slot(),
+        &empty_teacher_slot(),
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    )
+    .await;
     assert!(resp.error.is_none(), "error: {:?}", resp.error);
     let result = resp.result.unwrap();
     let ranges_str = result["result"].as_str().unwrap();
@@ -480,7 +760,23 @@ async fn test_get_strategy_params_via_ipc() {
     let dd = make_test_data_dir();
     let tx = setup_strategy_param_channel();
     let req = r#"{"jsonrpc": "2.0", "method": "get_strategy_params", "params": {"strategy_name": "ma_crossover"}, "id": 31}"#;
-    let resp = dispatch_request(req, &config, &dd, &EngineCommandChannels { paper: Some(tx), ..Default::default() }, &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None, &None).await;
+    let resp = dispatch_request(
+        req,
+        &config,
+        &dd,
+        &EngineCommandChannels {
+            paper: Some(tx),
+            ..Default::default()
+        },
+        &empty_budget_slot(),
+        &empty_teacher_slot(),
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    )
+    .await;
     assert!(resp.error.is_none(), "error: {:?}", resp.error);
     let result = resp.result.unwrap();
     let params_str = result["result"].as_str().unwrap();
@@ -497,7 +793,23 @@ async fn test_update_strategy_params_via_ipc() {
     let dd = make_test_data_dir();
     let tx = setup_strategy_param_channel();
     let req = r#"{"jsonrpc": "2.0", "method": "update_strategy_params", "params": {"strategy_name": "ma_crossover", "params_json": "{\"cooldown_ms\":600000,\"adx_threshold\":30.0,\"default_qty\":0.02,\"regime_filter_enabled\":true,\"higher_tf_alpha\":0.08}"}, "id": 32}"#;
-    let resp = dispatch_request(req, &config, &dd, &EngineCommandChannels { paper: Some(tx), ..Default::default() }, &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None, &None).await;
+    let resp = dispatch_request(
+        req,
+        &config,
+        &dd,
+        &EngineCommandChannels {
+            paper: Some(tx),
+            ..Default::default()
+        },
+        &empty_budget_slot(),
+        &empty_teacher_slot(),
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    )
+    .await;
     assert!(resp.error.is_none(), "error: {:?}", resp.error);
 }
 
@@ -507,7 +819,23 @@ async fn test_update_strategy_params_nonexistent() {
     let dd = make_test_data_dir();
     let tx = setup_strategy_param_channel();
     let req = r#"{"jsonrpc": "2.0", "method": "update_strategy_params", "params": {"strategy_name": "nonexistent_strategy", "params_json": "{}"}, "id": 33}"#;
-    let resp = dispatch_request(req, &config, &dd, &EngineCommandChannels { paper: Some(tx), ..Default::default() }, &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None, &None).await;
+    let resp = dispatch_request(
+        req,
+        &config,
+        &dd,
+        &EngineCommandChannels {
+            paper: Some(tx),
+            ..Default::default()
+        },
+        &empty_budget_slot(),
+        &empty_teacher_slot(),
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    )
+    .await;
     assert!(
         resp.error.is_some(),
         "should error for nonexistent strategy"
@@ -520,7 +848,23 @@ async fn test_update_strategy_params_missing_params() {
     let dd = make_test_data_dir();
     let tx = setup_strategy_param_channel();
     let req = r#"{"jsonrpc": "2.0", "method": "update_strategy_params", "params": {"strategy_name": "ma_crossover"}, "id": 34}"#;
-    let resp = dispatch_request(req, &config, &dd, &EngineCommandChannels { paper: Some(tx), ..Default::default() }, &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None, &None).await;
+    let resp = dispatch_request(
+        req,
+        &config,
+        &dd,
+        &EngineCommandChannels {
+            paper: Some(tx),
+            ..Default::default()
+        },
+        &empty_budget_slot(),
+        &empty_teacher_slot(),
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    )
+    .await;
     assert!(
         resp.error.is_some(),
         "should error when params_json missing"
@@ -535,9 +879,21 @@ async fn test_update_strategy_params_missing_params() {
 async fn test_get_phase4_status_returns_grey_initial() {
     let config = make_test_config();
     let dd = make_test_data_dir();
-    let req =
-        r#"{"jsonrpc": "2.0", "method": "get_phase4_status", "params": {}, "id": 4000}"#;
-    let resp = dispatch_request(req, &config, &dd, &EngineCommandChannels::default(), &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None, &None).await;
+    let req = r#"{"jsonrpc": "2.0", "method": "get_phase4_status", "params": {}, "id": 4000}"#;
+    let resp = dispatch_request(
+        req,
+        &config,
+        &dd,
+        &EngineCommandChannels::default(),
+        &empty_budget_slot(),
+        &empty_teacher_slot(),
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    )
+    .await;
     assert!(resp.error.is_none(), "phase4 status must succeed");
     let r = resp.result.unwrap();
     assert_eq!(r["teacher"], "grey");
@@ -552,9 +908,21 @@ async fn test_get_phase4_status_returns_grey_initial() {
 async fn test_get_phase4_status_response_schema() {
     let config = make_test_config();
     let dd = make_test_data_dir();
-    let req =
-        r#"{"jsonrpc": "2.0", "method": "get_phase4_status", "params": {}, "id": 4001}"#;
-    let resp = dispatch_request(req, &config, &dd, &EngineCommandChannels::default(), &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None, &None).await;
+    let req = r#"{"jsonrpc": "2.0", "method": "get_phase4_status", "params": {}, "id": 4001}"#;
+    let resp = dispatch_request(
+        req,
+        &config,
+        &dd,
+        &EngineCommandChannels::default(),
+        &empty_budget_slot(),
+        &empty_teacher_slot(),
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    )
+    .await;
     assert!(resp.error.is_none());
     let r = resp.result.unwrap();
     for key in ["teacher", "linucb", "news", "dl3", "last_update_ms"] {
@@ -577,9 +945,21 @@ async fn test_get_phase4_status_response_schema() {
 async fn test_dispatch_phase4_status() {
     let config = make_test_config();
     let dd = make_test_data_dir();
-    let req =
-        r#"{"jsonrpc": "2.0", "method": "get_phase4_status", "params": {}, "id": 4002}"#;
-    let resp = dispatch_request(req, &config, &dd, &EngineCommandChannels::default(), &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None, &None).await;
+    let req = r#"{"jsonrpc": "2.0", "method": "get_phase4_status", "params": {}, "id": 4002}"#;
+    let resp = dispatch_request(
+        req,
+        &config,
+        &dd,
+        &EngineCommandChannels::default(),
+        &empty_budget_slot(),
+        &empty_teacher_slot(),
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    )
+    .await;
     assert_eq!(resp.id, serde_json::json!(4002));
     assert!(resp.error.is_none());
     assert!(resp.result.is_some());
@@ -743,8 +1123,7 @@ async fn test_rc1_patch_learning_and_budget_configs_round_trip() {
     )
     .await;
     assert!(resp.error.is_none(), "patch_learning_config: {resp:?}");
-    let get_req =
-        r#"{"jsonrpc":"2.0","method":"get_learning_config","params":{},"id":9006}"#;
+    let get_req = r#"{"jsonrpc":"2.0","method":"get_learning_config","params":{},"id":9006}"#;
     let resp = dispatch_request(
         get_req,
         &config,
@@ -817,21 +1196,41 @@ async fn test_p2_patch_risk_config_engine_routing() {
     // Patch live engine only.
     let req = r#"{"jsonrpc":"2.0","method":"patch_risk_config","params":{"engine":"live","source":"operator","patch":{"limits":{"leverage_max":5.0}}},"id":9020}"#;
     let resp = dispatch_request(
-        req, &config, &dd, &EngineCommandChannels::default(),
-        &empty_budget_slot(), &empty_teacher_slot(),
-        &rs, &ls, &bs, &None, &None,
-    ).await;
+        req,
+        &config,
+        &dd,
+        &EngineCommandChannels::default(),
+        &empty_budget_slot(),
+        &empty_teacher_slot(),
+        &rs,
+        &ls,
+        &bs,
+        &None,
+        &None,
+    )
+    .await;
     assert!(resp.error.is_none(), "expected success: {resp:?}");
     let r = resp.result.unwrap();
     assert_eq!(r["ok"], true);
     assert_eq!(r["version"], 1);
     // live store mutated.
     let live_snap = rs.as_ref().unwrap().live.load();
-    assert!((live_snap.limits.leverage_max - 5.0).abs() < f64::EPSILON, "live store not updated");
+    assert!(
+        (live_snap.limits.leverage_max - 5.0).abs() < f64::EPSILON,
+        "live store not updated"
+    );
     // paper store untouched.
-    assert_eq!(rs.as_ref().unwrap().paper.version(), 0, "paper store should be untouched");
+    assert_eq!(
+        rs.as_ref().unwrap().paper.version(),
+        0,
+        "paper store should be untouched"
+    );
     // demo store untouched.
-    assert_eq!(rs.as_ref().unwrap().demo.version(), 0, "demo store should be untouched");
+    assert_eq!(
+        rs.as_ref().unwrap().demo.version(),
+        0,
+        "demo store should be untouched"
+    );
 }
 
 /// LIVE-P2-1: get_risk_config with engine="demo" returns demo store snapshot.
@@ -843,16 +1242,56 @@ async fn test_p2_get_risk_config_engine_selection() {
     let (rs, ls, bs) = rc1_stores();
     // Pre-patch demo store so it has a distinct version.
     let patch_req = r#"{"jsonrpc":"2.0","method":"patch_risk_config","params":{"engine":"demo","patch":{"limits":{"open_positions_max":7}}},"id":9021}"#;
-    dispatch_request(patch_req, &config, &dd, &EngineCommandChannels::default(), &empty_budget_slot(), &empty_teacher_slot(), &rs, &ls, &bs, &None, &None).await;
+    dispatch_request(
+        patch_req,
+        &config,
+        &dd,
+        &EngineCommandChannels::default(),
+        &empty_budget_slot(),
+        &empty_teacher_slot(),
+        &rs,
+        &ls,
+        &bs,
+        &None,
+        &None,
+    )
+    .await;
     // Now GET demo config — should show version=1.
-    let get_req = r#"{"jsonrpc":"2.0","method":"get_risk_config","params":{"engine":"demo"},"id":9022}"#;
-    let resp = dispatch_request(get_req, &config, &dd, &EngineCommandChannels::default(), &empty_budget_slot(), &empty_teacher_slot(), &rs, &ls, &bs, &None, &None).await;
+    let get_req =
+        r#"{"jsonrpc":"2.0","method":"get_risk_config","params":{"engine":"demo"},"id":9022}"#;
+    let resp = dispatch_request(
+        get_req,
+        &config,
+        &dd,
+        &EngineCommandChannels::default(),
+        &empty_budget_slot(),
+        &empty_teacher_slot(),
+        &rs,
+        &ls,
+        &bs,
+        &None,
+        &None,
+    )
+    .await;
     assert!(resp.error.is_none(), "expected success: {resp:?}");
     let r = resp.result.unwrap();
     assert_eq!(r["version"], 1, "demo store should be at version 1");
     // Paper store should still be at version 0.
     let paper_req = r#"{"jsonrpc":"2.0","method":"get_risk_config","params":{},"id":9023}"#;
-    let resp2 = dispatch_request(paper_req, &config, &dd, &EngineCommandChannels::default(), &empty_budget_slot(), &empty_teacher_slot(), &rs, &ls, &bs, &None, &None).await;
+    let resp2 = dispatch_request(
+        paper_req,
+        &config,
+        &dd,
+        &EngineCommandChannels::default(),
+        &empty_budget_slot(),
+        &empty_teacher_slot(),
+        &rs,
+        &ls,
+        &bs,
+        &None,
+        &None,
+    )
+    .await;
     let r2 = resp2.result.unwrap();
     assert_eq!(r2["version"], 0, "paper store should be at version 0");
 }
@@ -884,8 +1323,7 @@ async fn test_handle_update_ai_budget_config_uninitialized() {
         "monthly_usd": 60.0,
         "updated_by": "operator"
     });
-    let resp =
-        handle_update_ai_budget_config(serde_json::json!(4151), &params, &slot).await;
+    let resp = handle_update_ai_budget_config(serde_json::json!(4151), &params, &slot).await;
     assert!(resp.error.is_some(), "must fail-closed when uninitialized");
     assert_eq!(resp.error.unwrap().code, ERR_INTERNAL);
 }
@@ -916,7 +1354,9 @@ async fn test_handle_update_ai_budget_config_invalid_params() {
 // Phase 4.1：Teacher consumer loop IPC 測試
 // ---------------------------------------------------------------------
 
-fn populated_teacher_slot(initial_enabled: bool) -> (TeacherLoopSlot, Arc<AtomicBool>, Arc<ConsumerLoopStatus>) {
+fn populated_teacher_slot(
+    initial_enabled: bool,
+) -> (TeacherLoopSlot, Arc<AtomicBool>, Arc<ConsumerLoopStatus>) {
     let enabled = Arc::new(AtomicBool::new(initial_enabled));
     let status = Arc::new(ConsumerLoopStatus::default());
     let slot: TeacherLoopSlot = Arc::new(RwLock::new(Some(TeacherLoopHandles {
@@ -943,8 +1383,7 @@ async fn test_teacher_loop_status_uninitialized_fail_soft() {
 async fn test_teacher_loop_set_enabled_flips_atomic() {
     let (slot, enabled, _status) = populated_teacher_slot(false);
     let params = serde_json::json!({"enabled": true});
-    let resp =
-        handle_set_teacher_loop_enabled(serde_json::json!(2), &params, &slot).await;
+    let resp = handle_set_teacher_loop_enabled(serde_json::json!(2), &params, &slot).await;
     assert!(resp.error.is_none());
     assert_eq!(resp.result.expect("ok")["enabled"], true);
     assert!(enabled.load(Ordering::Relaxed));
@@ -961,8 +1400,7 @@ async fn test_teacher_loop_set_enabled_flips_atomic() {
 async fn test_teacher_loop_set_enabled_invalid_params() {
     let (slot, _, _) = populated_teacher_slot(false);
     let params = serde_json::json!({"enabled": "yes"});
-    let resp =
-        handle_set_teacher_loop_enabled(serde_json::json!(4), &params, &slot).await;
+    let resp = handle_set_teacher_loop_enabled(serde_json::json!(4), &params, &slot).await;
     assert_eq!(resp.error.expect("err").code, ERR_INVALID_REQUEST);
 }
 
@@ -994,8 +1432,7 @@ async fn test_teacher_loop_get_status_populated() {
 async fn test_teacher_loop_set_enabled_uninitialized_fail_soft() {
     let slot = empty_teacher_slot();
     let params = serde_json::json!({"enabled": true});
-    let resp =
-        handle_set_teacher_loop_enabled(serde_json::json!(6), &params, &slot).await;
+    let resp = handle_set_teacher_loop_enabled(serde_json::json!(6), &params, &slot).await;
     assert!(resp.error.is_none());
     assert_eq!(resp.result.expect("ok")["status"], "uninitialized");
 }
@@ -1005,7 +1442,11 @@ async fn test_teacher_loop_set_enabled_uninitialized_fail_soft() {
 fn make_scanner_registry() -> Arc<crate::scanner::registry::SymbolRegistry> {
     let pinned = vec!["BTCUSDT".to_string(), "ETHUSDT".to_string()];
     Arc::new(crate::scanner::registry::SymbolRegistry::new(
-        vec!["BTCUSDT".to_string(), "ETHUSDT".to_string(), "SOLUSDT".to_string()],
+        vec![
+            "BTCUSDT".to_string(),
+            "ETHUSDT".to_string(),
+            "SOLUSDT".to_string(),
+        ],
         pinned,
     ))
 }

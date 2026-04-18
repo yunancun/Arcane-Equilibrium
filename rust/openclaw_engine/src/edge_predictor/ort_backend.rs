@@ -293,15 +293,12 @@ impl OnnxTrioPredictor {
 }
 
 fn derive_sibling_path(base: &Path, from: &str, to: &str) -> Result<PathBuf, String> {
-    let name = base
-        .file_name()
-        .and_then(|s| s.to_str())
-        .ok_or_else(|| {
-            format!(
-                "path {} has no utf-8 file_name / 路徑無 utf-8 檔名",
-                base.display()
-            )
-        })?;
+    let name = base.file_name().and_then(|s| s.to_str()).ok_or_else(|| {
+        format!(
+            "path {} has no utf-8 file_name / 路徑無 utf-8 檔名",
+            base.display()
+        )
+    })?;
     if !name.contains(from) {
         return Err(format!(
             "filename '{}' missing marker '{}' — can't derive sibling trio paths \
@@ -470,9 +467,36 @@ mod tests {
 
     #[test]
     fn test_verify_trio_aligned_rejects_schema_drift() {
-        let mut q50 = make_meta("v1", "hashA", "hashA", "demo", "ma", "q50", "2026-04-15", "mid");
-        let q10 = make_meta("v1", "hashA", "hashA", "demo", "ma", "q10", "2026-04-15", "low");
-        let q90 = make_meta("v1", "hashA", "hashA", "demo", "ma", "q90", "2026-04-15", "hi");
+        let mut q50 = make_meta(
+            "v1",
+            "hashA",
+            "hashA",
+            "demo",
+            "ma",
+            "q50",
+            "2026-04-15",
+            "mid",
+        );
+        let q10 = make_meta(
+            "v1",
+            "hashA",
+            "hashA",
+            "demo",
+            "ma",
+            "q10",
+            "2026-04-15",
+            "low",
+        );
+        let q90 = make_meta(
+            "v1",
+            "hashA",
+            "hashA",
+            "demo",
+            "ma",
+            "q90",
+            "2026-04-15",
+            "hi",
+        );
         q50.schema_hash = "hashB".into();
         let err = verify_trio_aligned(&q10, &q50, &q90).unwrap_err();
         assert!(err.contains("schema_hash"), "actual err: {}", err);
@@ -499,7 +523,11 @@ mod tests {
     fn test_parse_train_date_unix_roundtrip() {
         let ts = parse_train_date_unix("2026-04-15");
         // 2026-04-15 00:00 UTC ~= 1776470400.
-        assert!(ts > 1_700_000_000, "expected sensible unix seconds, got {}", ts);
+        assert!(
+            ts > 1_700_000_000,
+            "expected sensible unix seconds, got {}",
+            ts
+        );
     }
 
     #[test]

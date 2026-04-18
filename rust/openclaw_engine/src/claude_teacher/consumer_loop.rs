@@ -230,9 +230,7 @@ impl TeacherConsumerLoop {
     /// directive、視需要觸發 outcome sweep。public 是為了單元測試 —
     /// 生產程式碼透過 `spawn` 間接呼叫。
     pub async fn run_one_cycle(&self) {
-        self.status
-            .cycles_attempted
-            .fetch_add(1, Ordering::Relaxed);
+        self.status.cycles_attempted.fetch_add(1, Ordering::Relaxed);
 
         if !self.enabled.load(Ordering::Relaxed) {
             debug!("teacher consumer loop disabled — cycle skipped / loop 停用，cycle 跳過");
@@ -361,9 +359,15 @@ mod tests {
     /// Mock 治理：永不 halt、日虧 0、認得測試 scope。
     struct OkGovernance;
     impl GovernanceCheck for OkGovernance {
-        fn current_daily_loss_pct(&self) -> f64 { 0.0 }
-        fn session_halted(&self) -> bool { false }
-        fn unpause_daily_loss_threshold(&self) -> f64 { 0.05 }
+        fn current_daily_loss_pct(&self) -> f64 {
+            0.0
+        }
+        fn session_halted(&self) -> bool {
+            false
+        }
+        fn unpause_daily_loss_threshold(&self) -> f64 {
+            0.05
+        }
         fn known_strategies(&self) -> Vec<String> {
             vec!["ma_crossover".to_string(), "bb_reversion".to_string()]
         }
@@ -399,9 +403,15 @@ mod tests {
     /// halt 治理：veto 所有 adjust_param。
     struct HaltedGovernance;
     impl GovernanceCheck for HaltedGovernance {
-        fn current_daily_loss_pct(&self) -> f64 { 0.0 }
-        fn session_halted(&self) -> bool { true }
-        fn unpause_daily_loss_threshold(&self) -> f64 { 0.05 }
+        fn current_daily_loss_pct(&self) -> f64 {
+            0.0
+        }
+        fn session_halted(&self) -> bool {
+            true
+        }
+        fn unpause_daily_loss_threshold(&self) -> f64 {
+            0.05
+        }
         fn known_strategies(&self) -> Vec<String> {
             vec!["ma_crossover".to_string()]
         }

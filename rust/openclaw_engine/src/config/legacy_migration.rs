@@ -22,9 +22,9 @@
 //!   - `max_cost_edge_ratio` 跨 Config（屬 BudgetConfig），log 出來讓
 //!     operator 透過 `patch_budget_config` 重新套用。
 
-use super::RiskConfig;
 use super::budget_config::BudgetConfig;
 use super::io::save_toml;
+use super::RiskConfig;
 use std::path::{Path, PathBuf};
 use tracing::{info, warn};
 
@@ -88,7 +88,10 @@ pub fn migrate_legacy_risk_json_if_needed(dir: &Path) -> Result<MigrationOutcome
             rc.limits.total_exposure_max_pct = v;
             mapped_fields.push("limits.total_exposure_max_pct");
         }
-        if let Some(v) = g.get("max_correlated_exposure_pct").and_then(|v| v.as_f64()) {
+        if let Some(v) = g
+            .get("max_correlated_exposure_pct")
+            .and_then(|v| v.as_f64())
+        {
             rc.limits.correlated_exposure_max_pct = v;
             mapped_fields.push("limits.correlated_exposure_max_pct");
         }
@@ -287,10 +290,9 @@ mod tests {
         write_json(td.path(), r#"{"global_config":{"max_leverage": 15.0}}"#);
         let out = migrate_legacy_risk_json_if_needed(td.path()).unwrap();
         assert!(matches!(out, MigrationOutcome::Migrated(_)));
-        let rc: RiskConfig = toml::from_str(
-            &std::fs::read_to_string(td.path().join("risk_config.toml")).unwrap(),
-        )
-        .unwrap();
+        let rc: RiskConfig =
+            toml::from_str(&std::fs::read_to_string(td.path().join("risk_config.toml")).unwrap())
+                .unwrap();
         assert!((rc.limits.leverage_max - 15.0).abs() < f64::EPSILON);
     }
 

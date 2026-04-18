@@ -145,9 +145,7 @@ impl std::fmt::Debug for BoxedEdgePredictor {
 /// safe — old Arc continues serving in-flight calls until they complete.
 /// F9 模式：read lock → clone → drop → ArcSwap 無鎖讀。推理中熱換安全。
 pub struct EdgePredictorStore {
-    inner: RwLock<
-        HashMap<String, Arc<ArcSwap<Option<Arc<dyn EdgePredictor + Send + Sync>>>>>,
-    >,
+    inner: RwLock<HashMap<String, Arc<ArcSwap<Option<Arc<dyn EdgePredictor + Send + Sync>>>>>>,
 }
 
 impl EdgePredictorStore {
@@ -163,10 +161,7 @@ impl EdgePredictorStore {
     /// writers during inference.
     ///
     /// 按 F9 discipline 讀取當前預測器，read guard 只拿到 clone Arc 即釋放。
-    pub fn load_for(
-        &self,
-        strategy: &str,
-    ) -> Option<Arc<dyn EdgePredictor + Send + Sync>> {
+    pub fn load_for(&self, strategy: &str) -> Option<Arc<dyn EdgePredictor + Send + Sync>> {
         let arc_swap = {
             let guard = self.inner.read();
             guard.get(strategy).cloned()?
@@ -186,11 +181,7 @@ impl EdgePredictorStore {
 
     /// Swap in a new predictor for `strategy` — lock-free for concurrent readers.
     /// 為策略熱換新預測器 — 對讀者無鎖。
-    pub fn swap(
-        &self,
-        strategy: &str,
-        predictor: Arc<dyn EdgePredictor + Send + Sync>,
-    ) {
+    pub fn swap(&self, strategy: &str, predictor: Arc<dyn EdgePredictor + Send + Sync>) {
         self.register(strategy);
         let guard = self.inner.read();
         if let Some(slot) = guard.get(strategy) {
@@ -232,10 +223,7 @@ impl EdgePredictorStore {
     /// 當前實際載入預測器的槽數量。
     pub fn loaded_count(&self) -> usize {
         let guard = self.inner.read();
-        guard
-            .values()
-            .filter(|slot| slot.load().is_some())
-            .count()
+        guard.values().filter(|slot| slot.load().is_some()).count()
     }
 }
 
@@ -333,19 +321,31 @@ mod tests {
 
     #[test]
     fn test_prediction_is_valid_monotone() {
-        let p = Prediction { q10: -10.0, q50: 5.0, q90: 20.0 };
+        let p = Prediction {
+            q10: -10.0,
+            q50: 5.0,
+            q90: 20.0,
+        };
         assert!(p.is_valid());
     }
 
     #[test]
     fn test_prediction_invalid_crossing_quantiles() {
-        let p = Prediction { q10: 20.0, q50: 5.0, q90: 30.0 };
+        let p = Prediction {
+            q10: 20.0,
+            q50: 5.0,
+            q90: 30.0,
+        };
         assert!(!p.is_valid());
     }
 
     #[test]
     fn test_prediction_invalid_nan() {
-        let p = Prediction { q10: 0.0, q50: f32::NAN, q90: 10.0 };
+        let p = Prediction {
+            q10: 0.0,
+            q50: f32::NAN,
+            q90: 10.0,
+        };
         assert!(!p.is_valid());
     }
 
@@ -408,7 +408,8 @@ mod tests {
     #[test]
     fn test_per_engine_swap_isolation() {
         let pep = PerEnginePredictors::new();
-        pep.paper.swap("ma_crossover", Arc::new(NullPredictor::new()));
+        pep.paper
+            .swap("ma_crossover", Arc::new(NullPredictor::new()));
         assert_eq!(pep.paper.loaded_count(), 1);
         assert_eq!(pep.demo.loaded_count(), 0);
         assert_eq!(pep.live.loaded_count(), 0);

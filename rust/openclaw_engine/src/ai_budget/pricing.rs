@@ -59,7 +59,10 @@ impl PricingTable {
                     ));
                 }
                 if pricing.input_per_mtok < 0.0 || pricing.output_per_mtok < 0.0 {
-                    return Err(format!("pricing yaml: negative rate for model {}", model_name));
+                    return Err(format!(
+                        "pricing yaml: negative rate for model {}",
+                        model_name
+                    ));
                 }
                 map.insert(model_name, pricing);
             }

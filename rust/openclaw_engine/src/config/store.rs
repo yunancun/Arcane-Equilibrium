@@ -239,17 +239,14 @@ where
 /// Free helper: serialise `cfg` to TOML and atomic-rename into `path`.
 /// 自由函式：把 `cfg` 序列化為 TOML 並原子 rename 到 `path`。
 fn write_toml_atomic<T: Serialize>(cfg: &T, path: &Path) -> Result<(), String> {
-    let toml_str =
-        toml::to_string(cfg).map_err(|e| format!("toml serialize failed: {e}"))?;
+    let toml_str = toml::to_string(cfg).map_err(|e| format!("toml serialize failed: {e}"))?;
     let tmp = path.with_extension("toml.tmp");
     if let Some(parent) = path.parent() {
         if !parent.as_os_str().is_empty() {
-            std::fs::create_dir_all(parent)
-                .map_err(|e| format!("mkdir parent failed: {e}"))?;
+            std::fs::create_dir_all(parent).map_err(|e| format!("mkdir parent failed: {e}"))?;
         }
     }
-    std::fs::write(&tmp, toml_str.as_bytes())
-        .map_err(|e| format!("write tmp failed: {e}"))?;
+    std::fs::write(&tmp, toml_str.as_bytes()).map_err(|e| format!("write tmp failed: {e}"))?;
     std::fs::rename(&tmp, path).map_err(|e| format!("rename failed: {e}"))?;
     Ok(())
 }
@@ -267,26 +264,19 @@ fn write_toml_atomic<T: Serialize>(cfg: &T, path: &Path) -> Result<(), String> {
 /// authoritative durability proof for this helper.
 /// 非關鍵呼叫者仍用 `write_toml_atomic` 以避免每次寫入的 fsync 代價。耐久性由
 /// CC #13 回歸測試 `test_disable_all_survives_sigkill` 權威驗證。
-pub fn write_toml_atomic_fsynced<T: Serialize>(
-    cfg: &T,
-    path: &Path,
-) -> Result<(), String> {
-    let toml_str =
-        toml::to_string(cfg).map_err(|e| format!("toml serialize failed: {e}"))?;
+pub fn write_toml_atomic_fsynced<T: Serialize>(cfg: &T, path: &Path) -> Result<(), String> {
+    let toml_str = toml::to_string(cfg).map_err(|e| format!("toml serialize failed: {e}"))?;
     let tmp = path.with_extension("toml.tmp");
     if let Some(parent) = path.parent() {
         if !parent.as_os_str().is_empty() {
-            std::fs::create_dir_all(parent)
-                .map_err(|e| format!("mkdir parent failed: {e}"))?;
+            std::fs::create_dir_all(parent).map_err(|e| format!("mkdir parent failed: {e}"))?;
         }
     }
     {
-        let mut f = std::fs::File::create(&tmp)
-            .map_err(|e| format!("create tmp failed: {e}"))?;
+        let mut f = std::fs::File::create(&tmp).map_err(|e| format!("create tmp failed: {e}"))?;
         f.write_all(toml_str.as_bytes())
             .map_err(|e| format!("write tmp failed: {e}"))?;
-        f.sync_all()
-            .map_err(|e| format!("fsync tmp failed: {e}"))?;
+        f.sync_all().map_err(|e| format!("fsync tmp failed: {e}"))?;
     }
     std::fs::rename(&tmp, path).map_err(|e| format!("rename failed: {e}"))?;
     if let Some(parent) = path.parent() {
@@ -339,11 +329,7 @@ mod tests {
             name: "a".into(),
         });
         let outcome = store
-            .apply_patch(
-                PatchSource::Operator,
-                |c| c.threshold = 10,
-                no_validation,
-            )
+            .apply_patch(PatchSource::Operator, |c| c.threshold = 10, no_validation)
             .unwrap();
         assert_eq!(outcome.version, 1);
         assert_eq!(outcome.source, PatchSource::Operator);
@@ -427,12 +413,8 @@ mod tests {
         for _ in 0..10 {
             let s = Arc::clone(&store);
             handles.push(thread::spawn(move || {
-                s.apply_patch(
-                    PatchSource::Agent,
-                    |c| c.threshold += 1,
-                    no_validation,
-                )
-                .unwrap();
+                s.apply_patch(PatchSource::Agent, |c| c.threshold += 1, no_validation)
+                    .unwrap();
             }));
         }
         for h in handles {
@@ -455,10 +437,7 @@ mod tests {
 
     #[test]
     fn test_with_toml_persist_writes_on_operator_patch() {
-        let dir = std::env::temp_dir().join(format!(
-            "oc_cfgstore_persist_{}",
-            std::process::id()
-        ));
+        let dir = std::env::temp_dir().join(format!("oc_cfgstore_persist_{}", std::process::id()));
         std::fs::create_dir_all(&dir).ok();
         let path = dir.join("toy.toml");
         let _ = std::fs::remove_file(&path);
@@ -495,10 +474,8 @@ mod tests {
 
     #[test]
     fn test_with_toml_persist_skips_startup_and_migration() {
-        let dir = std::env::temp_dir().join(format!(
-            "oc_cfgstore_persist_skip_{}",
-            std::process::id()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("oc_cfgstore_persist_skip_{}", std::process::id()));
         std::fs::create_dir_all(&dir).ok();
         let path = dir.join("toy_skip.toml");
         let _ = std::fs::remove_file(&path);
@@ -732,7 +709,10 @@ mod tests {
         assert!(!nested.exists(), "precondition: nested dir absent");
 
         write_toml_atomic_fsynced(&Stub { x: 42 }, &path).unwrap();
-        assert!(path.exists(), "file should be created under auto-mkdir parent");
+        assert!(
+            path.exists(),
+            "file should be created under auto-mkdir parent"
+        );
 
         std::fs::remove_dir_all(&tmp_dir).ok();
     }
@@ -778,8 +758,7 @@ mod tests {
                 shadow_mode: false,
                 note: "sigkill regression".into(),
             };
-            write_toml_atomic_fsynced(&cfg, &path)
-                .expect("child helper write must succeed");
+            write_toml_atomic_fsynced(&cfg, &path).expect("child helper write must succeed");
             std::fs::write(&marker, b"ok").expect("child marker write");
             // Idle until parent SIGKILLs us. Sleep keeps CPU quiet.
             // 等待 parent 的 SIGKILL。sleep 讓 CPU 靜止。

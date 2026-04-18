@@ -35,10 +35,7 @@ use std::sync::Arc;
 /// 端點感知的 engine_mode 標籤：反映管線真實綁定的 Bybit 端點，而不僅是
 /// PipelineKind 抽象。Live + LiveDemo 折疊為 `"live_demo"`，讓 operator 與
 /// 下游讀者能分辨「Live pipeline 連 demo」與「真正 mainnet live」。
-pub fn effective_engine_mode(
-    kind: PipelineKind,
-    env: Option<BybitEnvironment>,
-) -> &'static str {
+pub fn effective_engine_mode(kind: PipelineKind, env: Option<BybitEnvironment>) -> &'static str {
     match (kind, env) {
         (PipelineKind::Paper, _) => "paper",
         (PipelineKind::Demo, _) => "demo",

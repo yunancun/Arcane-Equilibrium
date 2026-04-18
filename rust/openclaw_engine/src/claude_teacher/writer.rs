@@ -66,9 +66,7 @@ pub async fn persist_directive(
     // hypothesis_id 是與 ledger 共享的確定性關聯鍵。
     let hypothesis_id = format!(
         "teacher-{}-{}-{}",
-        directive_type_str,
-        directive.scope,
-        directive.expiry
+        directive_type_str, directive.scope, directive.expiry
     );
 
     let content = serde_json::json!({
@@ -116,7 +114,10 @@ pub async fn persist_directive(
         .unwrap_or(0);
     let h = Hypothesis {
         hypothesis_id: hypothesis_id.clone(),
-        description: format!("claude_teacher directive {directive_type_str} for {}", directive.scope),
+        description: format!(
+            "claude_teacher directive {directive_type_str} for {}",
+            directive.scope
+        ),
         strategy_name: directive.scope.clone(),
         regime: "all".into(),
         proposed_by: "claude_teacher".into(),
@@ -134,7 +135,10 @@ pub async fn persist_directive(
     };
     let ok = create_hypothesis(pool, &h).await;
     if !ok {
-        warn!(directive_id, "experiment_ledger audit row write failed (best-effort) / 審計行寫入失敗（盡力）");
+        warn!(
+            directive_id,
+            "experiment_ledger audit row write failed (best-effort) / 審計行寫入失敗（盡力）"
+        );
     }
 
     debug!(directive_id, hypothesis_id = %hypothesis_id, "teacher directive persisted / directive 已持久化");
@@ -169,9 +173,7 @@ pub async fn record_execution(
     };
 
     let (action_taken, success, result_json) = match outcome {
-        ApplyOutcome::Applied {
-            action_summary, ..
-        } => (
+        ApplyOutcome::Applied { action_summary, .. } => (
             "applied",
             true,
             serde_json::json!({

@@ -226,7 +226,8 @@ mod tests {
     fn test_reset_daily_quota() {
         let p = CryptoPanicProvider::new(Some("k".into()));
         // Manually set quota near limit
-        p.quota_used_today.store(MAX_DAILY_REQUESTS, Ordering::Relaxed);
+        p.quota_used_today
+            .store(MAX_DAILY_REQUESTS, Ordering::Relaxed);
         // Should fail
         assert!(p.check_and_record(999_999_999).is_err());
         // Reset

@@ -28,15 +28,13 @@ pub mod parser;
 pub mod strategy_ipc_impl;
 pub mod writer;
 
-pub use applier::{
-    ApplyOutcome, DirectiveApplier, GovernanceCheck, IpcFuture, StrategyIpcSink,
-};
+pub use applier::{ApplyOutcome, DirectiveApplier, GovernanceCheck, IpcFuture, StrategyIpcSink};
 pub use client::{AnthropicClient, LlmClient, LlmClientError, LlmResponse, MockClient};
 pub use consumer_loop::{ConsumerLoopConfig, ConsumerLoopStatus, TeacherConsumerLoop};
 pub use governance_impl::GovernanceCoreWrapper;
 pub use outcome_tracker::{sharpe_from_returns, OutcomeTracker, OutcomeWindow, PendingExecution};
-pub use strategy_ipc_impl::PipelineCommandSink;
 pub use parser::{parse_directive, Directive, DirectiveType, ParserError};
+pub use strategy_ipc_impl::PipelineCommandSink;
 pub use writer::{persist_directive, record_execution, WriterError};
 
 use crate::ai_budget::tracker::{BudgetTracker, SCOPE_AGENT_TEACHER};
@@ -141,10 +139,7 @@ impl ClaudeTeacher {
     /// 已解析的 `Directive` 和剛 insert 的 `directive_id`。
     /// `TeacherConsumerLoop` 呼叫本方法後立即把回傳的 directive 餵給
     /// `DirectiveApplier::apply`（後者寫 `directive_executions` 審計行）。
-    pub async fn fetch_parse_persist(
-        &self,
-        scope: &str,
-    ) -> Result<(Directive, i64), TeacherError> {
+    pub async fn fetch_parse_persist(&self, scope: &str) -> Result<(Directive, i64), TeacherError> {
         // 1) LLM call / LLM 呼叫
         let resp = self
             .client
@@ -261,7 +256,8 @@ mod tests {
         ));
         let mock: Arc<dyn LlmClient + Send + Sync> =
             Arc::new(MockClient::new(valid_directive_json(), 200, 80));
-        let teacher = ClaudeTeacher::new(mock, Some(Arc::clone(&budget)), pool, "claude-sonnet-4-5");
+        let teacher =
+            ClaudeTeacher::new(mock, Some(Arc::clone(&budget)), pool, "claude-sonnet-4-5");
         let result = teacher.fetch_and_persist_directive("ma_crossover").await;
         // With empty pool, persist returns Ok(0) (silent skip — see writer.rs).
         assert!(result.is_ok(), "pipeline should succeed: {result:?}");

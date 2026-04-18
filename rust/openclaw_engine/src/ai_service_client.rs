@@ -135,7 +135,8 @@ impl AiServiceClient {
             }
             Err(_) => {
                 warn!(
-                    method, id,
+                    method,
+                    id,
                     ttl_secs = ttl.as_secs(),
                     "AI service handler timeout (fail-closed) / AI 服務 handler 超時"
                 );
@@ -290,9 +291,7 @@ mod tests {
         let client = AiServiceClient::new();
         assert_eq!(client.next_id.load(Ordering::Relaxed), 1);
         // Request will fail (no socket) but ID should still increment
-        let _ = client
-            .request("test", serde_json::json!({}))
-            .await;
+        let _ = client.request("test", serde_json::json!({})).await;
         assert_eq!(client.next_id.load(Ordering::Relaxed), 2);
     }
 
@@ -301,10 +300,7 @@ mod tests {
         use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
         use tokio::net::UnixListener;
 
-        let dir = std::env::temp_dir().join(format!(
-            "oc_test_ai_client_{}",
-            std::process::id()
-        ));
+        let dir = std::env::temp_dir().join(format!("oc_test_ai_client_{}", std::process::id()));
         let _ = std::fs::create_dir_all(&dir);
         let sock_path = dir.join("test_ai.sock");
         let _ = std::fs::remove_file(&sock_path);

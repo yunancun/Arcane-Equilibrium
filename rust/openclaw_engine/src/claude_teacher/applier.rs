@@ -68,10 +68,7 @@ pub enum ApplyOutcome {
     /// GovernanceCore rejected based on current system state
     /// (e.g. daily loss over threshold, session halted).
     /// GovernanceCore 基於當前系統狀態拒絕（例如日虧超標、session halt）。
-    VetoedByGovernance {
-        directive_id: i64,
-        reason: String,
-    },
+    VetoedByGovernance { directive_id: i64, reason: String },
     /// Directive tried to modify a P0/P1 hard-boundary field or violated a
     /// structural boundary rule ("pause all strategies", "boost factor > 2.0").
     /// directive 嘗試修改 P0/P1 硬邊界欄位或違反結構規則
@@ -85,16 +82,10 @@ pub enum ApplyOutcome {
     /// (unknown strategy name, missing required params).
     /// directive 結構合法（parser 通過）但語義無效
     /// （未知策略名、缺必要 params 等）。
-    InvalidDirective {
-        directive_id: i64,
-        error: String,
-    },
+    InvalidDirective { directive_id: i64, error: String },
     /// IPC dispatch itself failed (channel closed, strategy not found, etc.).
     /// IPC 派發本身失敗（channel 關閉、策略找不到等）。
-    IpcError {
-        directive_id: i64,
-        error: String,
-    },
+    IpcError { directive_id: i64, error: String },
 }
 
 impl ApplyOutcome {
@@ -159,8 +150,7 @@ pub trait GovernanceCheck: Send + Sync {
 
 /// IPC sink boxed-future type alias. Returns Ok(summary) or Err(msg).
 /// IPC sink 的 boxed-future 類型別名。回傳 Ok(summary) 或 Err(msg)。
-pub type IpcFuture<'a> =
-    Pin<Box<dyn Future<Output = Result<String, String>> + Send + 'a>>;
+pub type IpcFuture<'a> = Pin<Box<dyn Future<Output = Result<String, String>> + Send + 'a>>;
 
 /// Strategy IPC sink — the **only** channel through which the applier
 /// mutates engine state. Production impl wraps `PipelineCommand` sender.
@@ -192,11 +182,7 @@ pub trait StrategyIpcSink: Send + Sync {
     /// `PipelineCommand::SetStrategyActive`).
     /// 切換策略 active 旗標（對應
     /// `PipelineCommand::SetStrategyActive`）。
-    fn set_strategy_active<'a>(
-        &'a self,
-        strategy_name: &'a str,
-        active: bool,
-    ) -> IpcFuture<'a>;
+    fn set_strategy_active<'a>(&'a self, strategy_name: &'a str, active: bool) -> IpcFuture<'a>;
 }
 
 // ---------------------------------------------------------------------------
@@ -281,19 +267,13 @@ impl DirectiveApplier {
     /// **every** outcome (Applied, Vetoed, Invalid, IpcError).
     /// 套用單一 directive。保證對 **每一種** outcome（Applied / Vetoed /
     /// Invalid / IpcError）都嘗試寫入審計行。
-    pub async fn apply(
-        &self,
-        directive: Directive,
-        directive_id: i64,
-    ) -> ApplyOutcome {
+    pub async fn apply(&self, directive: Directive, directive_id: i64) -> ApplyOutcome {
         let outcome = self.apply_inner(&directive, directive_id).await;
         // Fire-and-log audit write. We never swallow the outcome if audit
         // write fails — the outcome is the authoritative signal to callers.
         // 觸發並 log 審計寫入。審計失敗絕不吞掉 outcome — outcome 永遠
         // 是回傳給呼叫方的權威訊號。
-        if let Err(e) =
-            super::writer::record_execution(&self.pool, directive_id, &outcome).await
-        {
+        if let Err(e) = super::writer::record_execution(&self.pool, directive_id, &outcome).await {
             warn!(
                 directive_id,
                 error = ?e,
@@ -307,39 +287,23 @@ impl DirectiveApplier {
     /// `(directive, governance, ipc_sink)`; does not touch PG.
     /// 內層 apply 邏輯 — 跑閘然後派發。對 `(directive, governance, ipc_sink)`
     /// 是純函數；不碰 PG。
-    async fn apply_inner(
-        &self,
-        directive: &Directive,
-        directive_id: i64,
-    ) -> ApplyOutcome {
+    async fn apply_inner(&self, directive: &Directive, directive_id: i64) -> ApplyOutcome {
         match directive.directive_type {
-            DirectiveType::AdjustParam => {
-                self.apply_adjust_param(directive, directive_id).await
-            }
+            DirectiveType::AdjustParam => self.apply_adjust_param(directive, directive_id).await,
             DirectiveType::PauseStrategy => {
                 self.apply_pause_strategy(directive, directive_id).await
             }
-            DirectiveType::BoostArm => {
-                self.apply_boost_arm(directive, directive_id).await
-            }
-            DirectiveType::Unpause => {
-                self.apply_unpause(directive, directive_id).await
-            }
+            DirectiveType::BoostArm => self.apply_boost_arm(directive, directive_id).await,
+            DirectiveType::Unpause => self.apply_unpause(directive, directive_id).await,
         }
     }
 
     // -------------------- adjust_param --------------------
 
-    async fn apply_adjust_param(
-        &self,
-        directive: &Directive,
-        directive_id: i64,
-    ) -> ApplyOutcome {
+    async fn apply_adjust_param(&self, directive: &Directive, directive_id: i64) -> ApplyOutcome {
         // Gate 1: P0/P1 hard-boundary denylist.
         // 閘 1：P0/P1 硬邊界黑名單。
-        if let Some(offending) =
-            find_denylisted_field(&directive.params, P0_P1_DENYLIST_FIELDS)
-        {
+        if let Some(offending) = find_denylisted_field(&directive.params, P0_P1_DENYLIST_FIELDS) {
             return ApplyOutcome::VetoedByHardBoundary {
                 directive_id,
                 boundary: offending.clone(),
@@ -404,7 +368,10 @@ impl DirectiveApplier {
                 },
             },
             None => {
-                debug!(directive_id, "ipc_sink=None, dry-run applied / dry-run 套用");
+                debug!(
+                    directive_id,
+                    "ipc_sink=None, dry-run applied / dry-run 套用"
+                );
                 ApplyOutcome::Applied {
                     directive_id,
                     action_summary: format!("DRY-RUN {summary}"),
@@ -415,11 +382,7 @@ impl DirectiveApplier {
 
     // -------------------- pause_strategy --------------------
 
-    async fn apply_pause_strategy(
-        &self,
-        directive: &Directive,
-        directive_id: i64,
-    ) -> ApplyOutcome {
+    async fn apply_pause_strategy(&self, directive: &Directive, directive_id: i64) -> ApplyOutcome {
         // Structural hard boundary: "pause all strategies" is a kill-switch.
         // LLM must not be able to one-shot disable the whole engine.
         //
@@ -436,7 +399,10 @@ impl DirectiveApplier {
         // 四個 canonical token。新增通配 token 時：在這裡加 **lowercase** 形式
         // 並在 E3 R6 closure block 加對應 regression test。
         let scope_lc = directive.scope.to_lowercase();
-        if matches!(scope_lc.as_str(), "*" | "all" | "all_strategies" | "everything") {
+        if matches!(
+            scope_lc.as_str(),
+            "*" | "all" | "all_strategies" | "everything"
+        ) {
             return ApplyOutcome::VetoedByHardBoundary {
                 directive_id,
                 boundary: "pause_all_strategies".into(),
@@ -476,11 +442,7 @@ impl DirectiveApplier {
 
     // -------------------- boost_arm (stub — full wiring in 4-06) --------------------
 
-    async fn apply_boost_arm(
-        &self,
-        directive: &Directive,
-        directive_id: i64,
-    ) -> ApplyOutcome {
+    async fn apply_boost_arm(&self, directive: &Directive, directive_id: i64) -> ApplyOutcome {
         // Read boost factor from params.boost (default 1.0).
         // 從 params.boost 讀取 boost factor（預設 1.0）。
         let boost = directive
@@ -524,11 +486,7 @@ impl DirectiveApplier {
 
     // -------------------- unpause --------------------
 
-    async fn apply_unpause(
-        &self,
-        directive: &Directive,
-        directive_id: i64,
-    ) -> ApplyOutcome {
+    async fn apply_unpause(&self, directive: &Directive, directive_id: i64) -> ApplyOutcome {
         // Governance gate: do not unpause while daily loss exceeds threshold
         // or while session is halted. This prevents Teacher from forcing the
         // engine back online during a drawdown spiral.
@@ -539,9 +497,7 @@ impl DirectiveApplier {
         if loss >= threshold {
             return ApplyOutcome::VetoedByGovernance {
                 directive_id,
-                reason: format!(
-                    "daily_loss_pct {loss:.4} >= unpause threshold {threshold:.4}"
-                ),
+                reason: format!("daily_loss_pct {loss:.4} >= unpause threshold {threshold:.4}"),
             };
         }
         if self.governance.session_halted() {
@@ -590,10 +546,7 @@ impl DirectiveApplier {
 /// any denylisted key. Returns the offending key if found.
 /// 走訪 JSON value 一層（directive 的 params 不會巢狀）尋找任何黑名單 key。
 /// 若找到則回傳該違規 key。
-fn find_denylisted_field(
-    params: &serde_json::Value,
-    denylist: &[&str],
-) -> Option<String> {
+fn find_denylisted_field(params: &serde_json::Value, denylist: &[&str]) -> Option<String> {
     let obj = params.as_object()?;
     for key in obj.keys() {
         let k_lc = key.to_lowercase();
@@ -614,8 +567,8 @@ mod applier_test_fixtures;
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::applier_test_fixtures::*;
+    use super::*;
     use serde_json::json;
     use std::sync::atomic::Ordering;
 
@@ -628,8 +581,7 @@ mod tests {
     #[tokio::test]
     async fn test_apply_adjust_param_safe_field_succeeds() {
         let sink = Arc::new(MockSink::default());
-        let (applier, _gov, sink) =
-            make_applier(MockGov::default_healthy(), Some(sink)).await;
+        let (applier, _gov, sink) = make_applier(MockGov::default_healthy(), Some(sink)).await;
         let d = directive(
             DirectiveType::AdjustParam,
             "ma_crossover",
@@ -651,8 +603,7 @@ mod tests {
     #[tokio::test]
     async fn test_apply_pause_single_strategy_succeeds() {
         let sink = Arc::new(MockSink::default());
-        let (applier, _gov, sink) =
-            make_applier(MockGov::default_healthy(), Some(sink)).await;
+        let (applier, _gov, sink) = make_applier(MockGov::default_healthy(), Some(sink)).await;
         let d = directive(DirectiveType::PauseStrategy, "ma_crossover", json!({}));
         let outcome = applier.apply(d, 102).await;
         assert!(matches!(outcome, ApplyOutcome::Applied { .. }));
@@ -684,8 +635,7 @@ mod tests {
     // 測試 4：boost factor 在上限內的 boost_arm 成功（stub）。
     #[tokio::test]
     async fn test_apply_boost_arm_within_factor_limit() {
-        let (applier, _gov, _sink) =
-            make_applier(MockGov::default_healthy(), None).await;
+        let (applier, _gov, _sink) = make_applier(MockGov::default_healthy(), None).await;
         let d = directive(
             DirectiveType::BoostArm,
             "arm_ma_trending",
@@ -707,8 +657,7 @@ mod tests {
     #[tokio::test]
     async fn test_apply_adjust_param_max_position_size_vetoed() {
         let sink = Arc::new(MockSink::default());
-        let (applier, _gov, sink) =
-            make_applier(MockGov::default_healthy(), Some(sink)).await;
+        let (applier, _gov, sink) = make_applier(MockGov::default_healthy(), Some(sink)).await;
         let d = directive(
             DirectiveType::AdjustParam,
             "ma_crossover",
@@ -731,26 +680,21 @@ mod tests {
     // 測試 6：adjust_param 禁止修改 hard_loss_pct。
     #[tokio::test]
     async fn test_apply_adjust_param_hard_loss_pct_vetoed() {
-        let (applier, _gov, _sink) =
-            make_applier(MockGov::default_healthy(), None).await;
+        let (applier, _gov, _sink) = make_applier(MockGov::default_healthy(), None).await;
         let d = directive(
             DirectiveType::AdjustParam,
             "ma_crossover",
             json!({"hard_loss_pct": 0.5}),
         );
         let outcome = applier.apply(d, 202).await;
-        assert!(matches!(
-            outcome,
-            ApplyOutcome::VetoedByHardBoundary { .. }
-        ));
+        assert!(matches!(outcome, ApplyOutcome::VetoedByHardBoundary { .. }));
     }
 
     // Test 7: adjust_param cannot modify max_total_exposure_pct.
     // 測試 7：adjust_param 禁止修改 max_total_exposure_pct。
     #[tokio::test]
     async fn test_apply_adjust_param_max_total_exposure_vetoed() {
-        let (applier, _gov, _sink) =
-            make_applier(MockGov::default_healthy(), None).await;
+        let (applier, _gov, _sink) = make_applier(MockGov::default_healthy(), None).await;
         let d = directive(
             DirectiveType::AdjustParam,
             "ma_crossover",
@@ -770,8 +714,7 @@ mod tests {
     #[tokio::test]
     async fn test_apply_pause_all_strategies_vetoed() {
         let sink = Arc::new(MockSink::default());
-        let (applier, _gov, sink) =
-            make_applier(MockGov::default_healthy(), Some(sink)).await;
+        let (applier, _gov, sink) = make_applier(MockGov::default_healthy(), Some(sink)).await;
         for scope in ["*", "all", "all_strategies", "everything"] {
             let d = directive(DirectiveType::PauseStrategy, scope, json!({}));
             let outcome = applier.apply(d, 204).await;
@@ -801,18 +744,14 @@ mod tests {
         let (applier, _gov, _sink) = make_applier(gov, None).await;
         let d = directive(DirectiveType::Unpause, "ma_crossover", json!({}));
         let outcome = applier.apply(d, 205).await;
-        assert!(matches!(
-            outcome,
-            ApplyOutcome::VetoedByGovernance { .. }
-        ));
+        assert!(matches!(outcome, ApplyOutcome::VetoedByGovernance { .. }));
     }
 
     // Test 10: boost_arm with factor > 2.0 rejected.
     // 測試 10：boost factor > 2.0 被拒絕。
     #[tokio::test]
     async fn test_apply_boost_arm_factor_too_high_vetoed() {
-        let (applier, _gov, _sink) =
-            make_applier(MockGov::default_healthy(), None).await;
+        let (applier, _gov, _sink) = make_applier(MockGov::default_healthy(), None).await;
         let d = directive(
             DirectiveType::BoostArm,
             "arm_ma_trending",
@@ -831,13 +770,8 @@ mod tests {
     // 測試 11：未知策略 scope 被視為 InvalidDirective。
     #[tokio::test]
     async fn test_apply_unknown_strategy_invalid_directive() {
-        let (applier, _gov, _sink) =
-            make_applier(MockGov::default_healthy(), None).await;
-        let d = directive(
-            DirectiveType::PauseStrategy,
-            "no_such_strategy",
-            json!({}),
-        );
+        let (applier, _gov, _sink) = make_applier(MockGov::default_healthy(), None).await;
+        let d = directive(DirectiveType::PauseStrategy, "no_such_strategy", json!({}));
         let outcome = applier.apply(d, 207).await;
         assert!(matches!(outcome, ApplyOutcome::InvalidDirective { .. }));
     }
@@ -857,10 +791,7 @@ mod tests {
             json!({"min_confidence": 0.4}),
         );
         let outcome = applier.apply(d, 208).await;
-        assert!(matches!(
-            outcome,
-            ApplyOutcome::VetoedByGovernance { .. }
-        ));
+        assert!(matches!(outcome, ApplyOutcome::VetoedByGovernance { .. }));
     }
 
     // Test 13: outcome audit row write attempted for BOTH accept and reject.
@@ -872,8 +803,7 @@ mod tests {
     //         record_execution 在任何 variant 下都不 panic。
     #[tokio::test]
     async fn test_apply_directive_writes_execution_audit_row() {
-        let (applier, _gov, _sink) =
-            make_applier(MockGov::default_healthy(), None).await;
+        let (applier, _gov, _sink) = make_applier(MockGov::default_healthy(), None).await;
         // Applied path
         let d1 = directive(
             DirectiveType::AdjustParam,
@@ -918,8 +848,7 @@ mod tests {
     #[tokio::test]
     async fn test_apply_adjust_param_does_not_call_python_rm() {
         let sink = Arc::new(MockSink::default());
-        let (applier, _gov, sink) =
-            make_applier(MockGov::default_healthy(), Some(sink)).await;
+        let (applier, _gov, sink) = make_applier(MockGov::default_healthy(), Some(sink)).await;
         let d = directive(
             DirectiveType::AdjustParam,
             "ma_crossover",
@@ -960,8 +889,7 @@ mod tests {
         assert!(!target.exists(), "precondition: file must not pre-exist");
 
         let sink = Arc::new(MockSink::default());
-        let (applier, _gov, _sink) =
-            make_applier(MockGov::default_healthy(), Some(sink)).await;
+        let (applier, _gov, _sink) = make_applier(MockGov::default_healthy(), Some(sink)).await;
         // Apply a legal adjust_param.
         let d = directive(
             DirectiveType::AdjustParam,

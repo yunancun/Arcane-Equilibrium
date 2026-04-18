@@ -28,8 +28,7 @@ pub(crate) fn spawn_fee_rate_tasks(
         let client_refresh = Arc::clone(client);
         let cancel_refresh = cancel.clone();
         tokio::spawn(async move {
-            let mut tick =
-                tokio::time::interval(std::time::Duration::from_secs(6 * 3600));
+            let mut tick = tokio::time::interval(std::time::Duration::from_secs(6 * 3600));
             tick.tick().await; // skip first immediate tick
             loop {
                 tokio::select! {
@@ -62,8 +61,7 @@ pub(crate) fn spawn_fee_rate_tasks(
         let acct_mon = Arc::clone(acct);
         let cancel_mon = cancel.clone();
         tokio::spawn(async move {
-            let mut tick =
-                tokio::time::interval(std::time::Duration::from_secs(15 * 60));
+            let mut tick = tokio::time::interval(std::time::Duration::from_secs(15 * 60));
             tick.tick().await;
             loop {
                 tokio::select! {
@@ -141,7 +139,9 @@ pub(crate) async fn init_budget_and_audit(
             }
         }
     } else {
-        warn!("db_pool unavailable, BudgetTracker not started / db_pool 不可用，BudgetTracker 未啟動");
+        warn!(
+            "db_pool unavailable, BudgetTracker not started / db_pool 不可用，BudgetTracker 未啟動"
+        );
     }
 }
 
@@ -166,15 +166,13 @@ pub(crate) async fn spawn_teacher_consumer_loop(
     };
 
     use openclaw_engine::claude_teacher::{
-        AnthropicClient, ClaudeTeacher, ConsumerLoopConfig, DirectiveApplier,
-        GovernanceCheck, LlmClient, OutcomeTracker, PipelineCommandSink,
-        StrategyIpcSink, TeacherConsumerLoop,
+        AnthropicClient, ClaudeTeacher, ConsumerLoopConfig, DirectiveApplier, GovernanceCheck,
+        LlmClient, OutcomeTracker, PipelineCommandSink, StrategyIpcSink, TeacherConsumerLoop,
     };
     use std::sync::atomic::AtomicBool;
 
     let model = "claude-sonnet-4-5";
-    let llm_client: Arc<dyn LlmClient + Send + Sync> =
-        Arc::new(AnthropicClient::new(model));
+    let llm_client: Arc<dyn LlmClient + Send + Sync> = Arc::new(AnthropicClient::new(model));
     let teacher = Arc::new(ClaudeTeacher::new(
         llm_client,
         Some(Arc::clone(&budget)),
@@ -183,8 +181,7 @@ pub(crate) async fn spawn_teacher_consumer_loop(
     ));
     let governance_for_applier: Arc<dyn GovernanceCheck> =
         Arc::clone(governance_wrapper) as Arc<dyn GovernanceCheck>;
-    let ipc_sink: Arc<dyn StrategyIpcSink> =
-        Arc::new(PipelineCommandSink::new(pipeline_cmd_tx));
+    let ipc_sink: Arc<dyn StrategyIpcSink> = Arc::new(PipelineCommandSink::new(pipeline_cmd_tx));
     let applier = Arc::new(DirectiveApplier::new(
         governance_for_applier,
         Some(ipc_sink),
@@ -228,8 +225,8 @@ pub(crate) fn spawn_news_pipeline(
     guardian_impl: Arc<openclaw_engine::news::GuardianHaltCheckImpl>,
 ) {
     use openclaw_engine::news::{
-        CryptoPanicProvider, GuardianHaltCheck, LearningContextSink,
-        LearningContextSinkImpl, NewsPipeline, NewsRouter, RssProvider,
+        CryptoPanicProvider, GuardianHaltCheck, LearningContextSink, LearningContextSinkImpl,
+        NewsPipeline, NewsRouter, RssProvider,
     };
     use tokio::sync::RwLock;
 
@@ -244,9 +241,9 @@ pub(crate) fn spawn_news_pipeline(
 
     // Build 4-09 triple-route NewsRouter (Guardian + Regime + Learning).
     // 建構 4-09 三路 NewsRouter（Guardian + Regime + Learning）。
-    let learning_sink = Arc::new(LearningContextSinkImpl::new(
-        Arc::clone(shared_news_snapshot),
-    ));
+    let learning_sink = Arc::new(LearningContextSinkImpl::new(Arc::clone(
+        shared_news_snapshot,
+    )));
     let regime_buffer = Arc::new(RwLock::new(
         openclaw_engine::news::RegimeNewsBuffer::default(),
     ));
@@ -258,9 +255,7 @@ pub(crate) fn spawn_news_pipeline(
 
     // Build pipeline with router attached.
     // 建構帶 router 的 pipeline。
-    let pipeline = Arc::new(
-        NewsPipeline::new(providers, Arc::clone(db_pool)).with_router(router),
-    );
+    let pipeline = Arc::new(NewsPipeline::new(providers, Arc::clone(db_pool)).with_router(router));
 
     let news_learning_store = Arc::clone(learning_store);
     let news_cancel = cancel.clone();
@@ -354,9 +349,11 @@ pub(crate) async fn spawn_db_writers(
         let fw_pool = Arc::clone(db_pool);
         let fw_config = Arc::clone(config);
         let fw_cancel = cancel.clone();
-        tokio::spawn(openclaw_engine::database::feature_writer::run_feature_writer(
-            feature_rx, fw_pool, fw_config, fw_cancel,
-        ));
+        tokio::spawn(
+            openclaw_engine::database::feature_writer::run_feature_writer(
+                feature_rx, fw_pool, fw_config, fw_cancel,
+            ),
+        );
     }
 
     // Trading lifecycle writer channel + task
@@ -365,9 +362,11 @@ pub(crate) async fn spawn_db_writers(
         let tw_pool = Arc::clone(db_pool);
         let tw_config = Arc::clone(config);
         let tw_cancel = cancel.clone();
-        tokio::spawn(openclaw_engine::database::trading_writer::run_trading_writer(
-            trading_rx, tw_pool, tw_config, tw_cancel,
-        ));
+        tokio::spawn(
+            openclaw_engine::database::trading_writer::run_trading_writer(
+                trading_rx, tw_pool, tw_config, tw_cancel,
+            ),
+        );
     }
 
     // Decision context writer channel + task
@@ -376,9 +375,11 @@ pub(crate) async fn spawn_db_writers(
         let cw_pool = Arc::clone(db_pool);
         let cw_config = Arc::clone(config);
         let cw_cancel = cancel.clone();
-        tokio::spawn(openclaw_engine::database::context_writer::run_context_writer(
-            context_rx, cw_pool, cw_config, cw_cancel,
-        ));
+        tokio::spawn(
+            openclaw_engine::database::context_writer::run_context_writer(
+                context_rx, cw_pool, cw_config, cw_cancel,
+            ),
+        );
     }
 
     // EDGE-P3-1 Step 7a: Decision feature writer channel + task.
@@ -442,9 +443,11 @@ pub(crate) async fn spawn_db_writers(
         let qm_tick = Arc::clone(shared_last_tick_ms);
         let qm_symbols: Vec<String> = symbol_registry.snapshot();
         let qm_cancel = cancel.clone();
-        tokio::spawn(openclaw_engine::database::quality_writer::run_quality_monitor(
-            qm_pool, qm_tick, qm_symbols, qm_cancel,
-        ));
+        tokio::spawn(
+            openclaw_engine::database::quality_writer::run_quality_monitor(
+                qm_pool, qm_tick, qm_symbols, qm_cancel,
+            ),
+        );
     }
 
     // G3 1-13/14: Spawn drift detector (PSI + ADWIN)
@@ -453,9 +456,11 @@ pub(crate) async fn spawn_db_writers(
         let dd_pool = Arc::clone(db_pool);
         let dd_config = Arc::clone(config);
         let dd_cancel = cancel.clone();
-        tokio::spawn(openclaw_engine::database::drift_detector::run_drift_detector(
-            dd_pool, dd_config, dd_cancel,
-        ));
+        tokio::spawn(
+            openclaw_engine::database::drift_detector::run_drift_detector(
+                dd_pool, dd_config, dd_cancel,
+            ),
+        );
     }
 
     // G3 1-16: Feature version init — insert v1.0 row on startup if PG available
@@ -541,15 +546,10 @@ pub(crate) fn spawn_position_reconciler(
 /// FIX-34：啟動定期決策結果回填任務。
 /// 從 market.klines 計算 1m/5m/1h/4h/24h 回報窗口，寫入 trading.decision_outcomes。
 /// 每 5 分鐘運行。
-pub(crate) fn spawn_outcome_backfiller(
-    db_pool: &Arc<DbPool>,
-    cancel: &CancellationToken,
-) {
+pub(crate) fn spawn_outcome_backfiller(db_pool: &Arc<DbPool>, cancel: &CancellationToken) {
     let pool = Arc::clone(db_pool);
     let cancel = cancel.clone();
-    tokio::spawn(openclaw_engine::database::outcome_backfiller::run_backfill_loop(
-        pool, cancel,
-    ));
+    tokio::spawn(openclaw_engine::database::outcome_backfiller::run_backfill_loop(pool, cancel));
     info!("outcome backfill task spawned (FIX-34, 5min interval) / 結果回填任務已啟動");
 }
 

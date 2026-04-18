@@ -39,9 +39,15 @@ fn micro_profit_fix_validate_rejects_legacy_cost_edge_range() {
         "validate must reject 100.0 after MICRO-PROFIT-FIX-1 range shrink"
     );
     cfg.attention_tax.cost_edge_max_ratio = 10.5;
-    assert!(cfg.validate().is_err(), "validate must reject 10.5 (above 10 ceiling)");
+    assert!(
+        cfg.validate().is_err(),
+        "validate must reject 10.5 (above 10 ceiling)"
+    );
     cfg.attention_tax.cost_edge_max_ratio = 10.0;
-    assert!(cfg.validate().is_ok(), "validate must accept the 10.0 boundary");
+    assert!(
+        cfg.validate().is_ok(),
+        "validate must accept the 10.0 boundary"
+    );
 }
 
 // ── §4.9 #3: min_profit_to_close_pct range ─────────────────────────────────
@@ -49,9 +55,15 @@ fn micro_profit_fix_validate_rejects_legacy_cost_edge_range() {
 fn micro_profit_fix_min_profit_range_enforced() {
     let mut cfg = BudgetConfig::default();
     cfg.attention_tax.min_profit_to_close_pct = -0.01;
-    assert!(cfg.validate().is_err(), "validate must reject negative min_profit");
+    assert!(
+        cfg.validate().is_err(),
+        "validate must reject negative min_profit"
+    );
     cfg.attention_tax.min_profit_to_close_pct = 5.01;
-    assert!(cfg.validate().is_err(), "validate must reject min_profit above 5.0 ceiling");
+    assert!(
+        cfg.validate().is_err(),
+        "validate must reject min_profit above 5.0 ceiling"
+    );
     cfg.attention_tax.min_profit_to_close_pct = 5.0;
     assert!(cfg.validate().is_ok(), "validate must accept 5.0 boundary");
 }
@@ -101,7 +113,9 @@ fn micro_profit_fix_entry_notional_accumulates_and_persists_through_reduce() {
     // 半倉後 entry_notional 保持峰值，作為後續底線判斷基準。
     s.set_latest_price("BTC", 54_000.0);
     let _ = s.reduce_position("BTC", 0.15, 54_000.0);
-    let pos = s.get_position("BTC").expect("position still open after halve");
+    let pos = s
+        .get_position("BTC")
+        .expect("position still open after halve");
     assert!(
         (pos.qty - 0.15).abs() < 1e-10,
         "qty halved to 0.15, got {}",
@@ -127,7 +141,9 @@ fn micro_profit_fix_ft_notional_floor_predicate() {
     // 把 qty 壓到 0.08（原始 20%），當前名義值 4_000。
     let _ = s.reduce_position("BTC", 0.32, 50_000.0);
 
-    let pos = s.get_position("BTC").expect("position persists under reduce");
+    let pos = s
+        .get_position("BTC")
+        .expect("position persists under reduce");
     assert!((pos.entry_notional - 20_000.0).abs() < 1e-6);
 
     let ratio = RiskConfig::default().limits.ft_min_notional_ratio_of_entry;

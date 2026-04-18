@@ -745,4 +745,3 @@ impl MarketDataClient {
 
 #[cfg(test)]
 mod tests;
-

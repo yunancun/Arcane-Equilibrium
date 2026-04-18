@@ -129,22 +129,34 @@ mod tests {
 
     #[test]
     fn test_strategy_estimate_key_ma() {
-        assert_eq!(StrategyCategory::MaCrossover.as_estimate_key(), "ma_crossover");
+        assert_eq!(
+            StrategyCategory::MaCrossover.as_estimate_key(),
+            "ma_crossover"
+        );
     }
 
     #[test]
     fn test_strategy_estimate_key_grid() {
-        assert_eq!(StrategyCategory::GridTrading.as_estimate_key(), "grid_trading");
+        assert_eq!(
+            StrategyCategory::GridTrading.as_estimate_key(),
+            "grid_trading"
+        );
     }
 
     #[test]
     fn test_strategy_estimate_key_bbrv() {
-        assert_eq!(StrategyCategory::BbReversion.as_estimate_key(), "bb_reversion");
+        assert_eq!(
+            StrategyCategory::BbReversion.as_estimate_key(),
+            "bb_reversion"
+        );
     }
 
     #[test]
     fn test_strategy_estimate_key_bkout() {
-        assert_eq!(StrategyCategory::BbBreakout.as_estimate_key(), "bb_breakout");
+        assert_eq!(
+            StrategyCategory::BbBreakout.as_estimate_key(),
+            "bb_breakout"
+        );
     }
 
     #[test]

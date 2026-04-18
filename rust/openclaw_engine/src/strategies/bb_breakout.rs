@@ -57,7 +57,7 @@ impl Default for BbBreakoutParams {
             volume_threshold: DEFAULT_VOLUME_THRESHOLD,
             trailing_stop_atr_mult: 2.0,
             squeeze_expiry_ms: 2_700_000, // EDGE-P1-4: 30min→45min
-            min_persistence_ms: 60_000, // 1 min (triple gate already strict)
+            min_persistence_ms: 60_000,   // 1 min (triple gate already strict)
             min_notional_usd: 10.0,
             confluence_as_gate: false,
             weight_adx: cc.weight_adx,
@@ -406,30 +406,50 @@ impl Strategy for BbBreakout {
         let sym = &intent.symbol;
         if let Some(prev) = self.prev_position.get(sym) {
             match prev {
-                Some(b) => { self.positions.insert(sym.to_string(), *b); }
-                None => { self.positions.remove(sym); }
+                Some(b) => {
+                    self.positions.insert(sym.to_string(), *b);
+                }
+                None => {
+                    self.positions.remove(sym);
+                }
             }
         }
         if let Some(prev) = self.prev_squeeze_detected_ms.get(sym) {
             match prev {
-                Some(ts) => { self.squeeze_detected_ms.insert(sym.to_string(), *ts); }
-                None => { self.squeeze_detected_ms.remove(sym); }
+                Some(ts) => {
+                    self.squeeze_detected_ms.insert(sym.to_string(), *ts);
+                }
+                None => {
+                    self.squeeze_detected_ms.remove(sym);
+                }
             }
         }
         if let Some(prev) = self.prev_entry_price.get(sym) {
             match prev {
-                Some(p) => { self.entry_price.insert(sym.to_string(), *p); }
-                None => { self.entry_price.remove(sym); }
+                Some(p) => {
+                    self.entry_price.insert(sym.to_string(), *p);
+                }
+                None => {
+                    self.entry_price.remove(sym);
+                }
             }
         }
         if let Some(prev) = self.prev_trailing_stop.get(sym) {
             match prev {
-                Some(s) => { self.trailing_stop.insert(sym.to_string(), *s); }
-                None => { self.trailing_stop.remove(sym); }
+                Some(s) => {
+                    self.trailing_stop.insert(sym.to_string(), *s);
+                }
+                None => {
+                    self.trailing_stop.remove(sym);
+                }
             }
         }
         if let Some(&ts) = self.prev_last_trade_ms.get(sym) {
-            if ts == 0 { self.last_trade_ms.remove(sym); } else { self.last_trade_ms.insert(sym.to_string(), ts); }
+            if ts == 0 {
+                self.last_trade_ms.remove(sym);
+            } else {
+                self.last_trade_ms.insert(sym.to_string(), ts);
+            }
         }
     }
 
@@ -447,16 +467,22 @@ impl Strategy for BbBreakout {
         // RC-04: Snapshot per-symbol state before any mutation for rejection rollback.
         // RC-04：在任何變更前快照該幣種狀態，供拒絕回滾使用。
         let sym = ctx.symbol;
-        self.prev_position.insert(sym.to_string(), self.positions.get(sym).copied());
-        self.prev_squeeze_detected_ms.insert(sym.to_string(), self.squeeze_detected_ms.get(sym).copied());
-        self.prev_entry_price.insert(sym.to_string(), self.entry_price.get(sym).copied());
-        self.prev_trailing_stop.insert(sym.to_string(), self.trailing_stop.get(sym).copied());
+        self.prev_position
+            .insert(sym.to_string(), self.positions.get(sym).copied());
+        self.prev_squeeze_detected_ms
+            .insert(sym.to_string(), self.squeeze_detected_ms.get(sym).copied());
+        self.prev_entry_price
+            .insert(sym.to_string(), self.entry_price.get(sym).copied());
+        self.prev_trailing_stop
+            .insert(sym.to_string(), self.trailing_stop.get(sym).copied());
         let last_ms = self.last_trade_ms.get(sym).copied().unwrap_or(0);
         self.prev_last_trade_ms.insert(sym.to_string(), last_ms);
 
         if bb.bandwidth < self.squeeze_bw {
             // FIX-26: Only record first detection time; don't reset on continued squeeze.
-            self.squeeze_detected_ms.entry(sym.to_string()).or_insert(ctx.timestamp_ms);
+            self.squeeze_detected_ms
+                .entry(sym.to_string())
+                .or_insert(ctx.timestamp_ms);
         }
         if last_ms > 0 && ctx.timestamp_ms < last_ms + self.cooldown_ms {
             return vec![];
@@ -466,7 +492,9 @@ impl Strategy for BbBreakout {
         match self.positions.get(sym).copied() {
             None => {
                 // FIX-26: Check squeeze exists AND hasn't expired.
-                let in_squeeze = self.squeeze_detected_ms.get(sym)
+                let in_squeeze = self
+                    .squeeze_detected_ms
+                    .get(sym)
                     .map(|&ts| ctx.timestamp_ms < ts + self.squeeze_expiry_ms)
                     .unwrap_or(false);
                 if in_squeeze
@@ -514,7 +542,10 @@ impl Strategy for BbBreakout {
                             &self.confluence_config,
                             true,
                             ind.adx.as_ref().map(|a| a.adx),
-                            ind.hurst.as_ref().map(|h| h.regime.as_str()).unwrap_or("uncertain"),
+                            ind.hurst
+                                .as_ref()
+                                .map(|h| h.regime.as_str())
+                                .unwrap_or("uncertain"),
                             ind.volume_ratio,
                             ind.rsi_14,
                             is_long,
@@ -543,7 +574,9 @@ impl Strategy for BbBreakout {
                             symbol: ctx.symbol.to_string(),
                             is_long,
                             qty,
-                            confidence: crate::tick_pipeline::on_tick_helpers::clamp_confidence(raw_conf * self.conf_scale),
+                            confidence: crate::tick_pipeline::on_tick_helpers::clamp_confidence(
+                                raw_conf * self.conf_scale,
+                            ),
                             strategy: self.name().into(),
                             order_type: "market".into(),
                             limit_price: None,
@@ -557,7 +590,11 @@ impl Strategy for BbBreakout {
                         self.entry_price.insert(sym.to_string(), ctx.price);
                         if let Some(atr_res) = &ind.atr_14 {
                             let dist = atr_res.atr * self.trailing_stop_atr_mult;
-                            let stop = if is_long { ctx.price - dist } else { ctx.price + dist };
+                            let stop = if is_long {
+                                ctx.price - dist
+                            } else {
+                                ctx.price + dist
+                            };
                             self.trailing_stop.insert(sym.to_string(), stop);
                         }
                     }
@@ -621,7 +658,9 @@ impl Strategy for BbBreakout {
                 if let Some(reason) = exit_reason {
                     intents.push(StrategyAction::Close {
                         symbol: ctx.symbol.to_string(),
-                        confidence: crate::tick_pipeline::on_tick_helpers::clamp_confidence(exit_confidence * self.conf_scale),
+                        confidence: crate::tick_pipeline::on_tick_helpers::clamp_confidence(
+                            exit_confidence * self.conf_scale,
+                        ),
                         reason: reason.into(),
                     });
                     self.positions.remove(sym);
@@ -702,7 +741,7 @@ mod tests {
     #[test]
     fn test_squeeze_then_breakout() {
         let mut s = BbBreakout::new();
-        s.min_persistence_ms = 0;  // disable persistence for unit tests
+        s.min_persistence_ms = 0; // disable persistence for unit tests
         s.on_tick(&ctx(0.01, 0.5, 1.0, 0));
         let i = s.on_tick(&ctx(0.05, 1.1, 2.0, 700_000));
         assert_eq!(i.len(), 1);
@@ -715,7 +754,7 @@ mod tests {
     #[test]
     fn test_no_breakout_without_squeeze() {
         let mut s = BbBreakout::new();
-        s.min_persistence_ms = 0;  // disable persistence for unit tests
+        s.min_persistence_ms = 0; // disable persistence for unit tests
         assert!(s.on_tick(&ctx(0.05, 1.1, 2.0, 0)).is_empty());
     }
 
@@ -723,7 +762,7 @@ mod tests {
     fn test_entry_price_recorded() {
         // After entry, entry_price should be set / 入場後 entry_price 應被設置
         let mut s = BbBreakout::new();
-        s.min_persistence_ms = 0;  // disable persistence for unit tests
+        s.min_persistence_ms = 0; // disable persistence for unit tests
         s.on_tick(&ctx(0.01, 0.5, 1.0, 0)); // squeeze
         s.on_tick(&ctx(0.05, 1.1, 2.0, 700_000)); // breakout long
         assert_eq!(s.entry_price.get("BTC"), Some(&50000.0));
@@ -735,7 +774,7 @@ mod tests {
         // Long position: price drops below trailing stop -> exit
         // 做多倉位：價格跌破追蹤止損 -> 出場
         let mut s = BbBreakout::new();
-        s.min_persistence_ms = 0;  // disable persistence for unit tests
+        s.min_persistence_ms = 0; // disable persistence for unit tests
         let atr = || {
             Some(AtrResult {
                 atr: 500.0,
@@ -761,7 +800,9 @@ mod tests {
         let i = s.on_tick(&ctx_ext(0.05, 0.9, 2.0, 2_100_000, 51000.0, atr(), None));
         assert_eq!(i.len(), 1);
         match &i[0] {
-            StrategyAction::Close { reason, confidence, .. } => {
+            StrategyAction::Close {
+                reason, confidence, ..
+            } => {
                 assert_eq!(reason, "trailing_stop");
                 assert!((*confidence - 0.7).abs() < 1e-9);
             }
@@ -777,7 +818,7 @@ mod tests {
         // Short position: price rises above trailing stop -> exit
         // 做空倉位：價格漲破追蹤止損 -> 出場
         let mut s = BbBreakout::new();
-        s.min_persistence_ms = 0;  // disable persistence for unit tests
+        s.min_persistence_ms = 0; // disable persistence for unit tests
         let atr = || {
             Some(AtrResult {
                 atr: 500.0,
@@ -810,7 +851,7 @@ mod tests {
     fn test_regime_exit() {
         // Exit when regime changes to mean_reverting / 當 regime 變為均值回歸時出場
         let mut s = BbBreakout::new();
-        s.min_persistence_ms = 0;  // disable persistence for unit tests
+        s.min_persistence_ms = 0; // disable persistence for unit tests
         let trending = || {
             Some(HurstResult {
                 hurst: 0.7,
@@ -848,7 +889,9 @@ mod tests {
         ));
         assert_eq!(i.len(), 1);
         match &i[0] {
-            StrategyAction::Close { reason, confidence, .. } => {
+            StrategyAction::Close {
+                reason, confidence, ..
+            } => {
                 assert_eq!(reason, "regime_shift");
                 assert!((*confidence - 0.6).abs() < 1e-9);
             }
@@ -862,7 +905,7 @@ mod tests {
         // RC-03: Custom volume threshold — higher threshold blocks low-volume breakouts
         // RC-03：自訂成交量閾值 — 較高閾值阻擋低量突破
         let mut s = BbBreakout::new();
-        s.min_persistence_ms = 0;  // disable persistence for unit tests
+        s.min_persistence_ms = 0; // disable persistence for unit tests
         s.volume_threshold = 3.0; // require 3x volume instead of default 1.5x
         s.on_tick(&ctx(0.01, 0.5, 1.0, 0)); // squeeze
                                             // vol=2.0 passes default (1.5) but fails custom (3.0)
@@ -884,7 +927,7 @@ mod tests {
         // RC-03: Custom squeeze/expansion bandwidth thresholds
         // RC-03：自訂壓縮/擴張帶寬閾值
         let mut s = BbBreakout::new();
-        s.min_persistence_ms = 0;  // disable persistence for unit tests
+        s.min_persistence_ms = 0; // disable persistence for unit tests
         s.squeeze_bw = 0.03; // wider squeeze detection / 更寬的壓縮偵測
         s.expansion_bw = 0.06; // require stronger expansion / 要求更強擴張
 
@@ -919,7 +962,7 @@ mod tests {
     #[test]
     fn test_bb_brk_update() {
         let mut s = BbBreakout::new();
-        s.min_persistence_ms = 0;  // disable persistence for unit tests
+        s.min_persistence_ms = 0; // disable persistence for unit tests
         assert!(s
             .update_params(BbBreakoutParams {
                 trailing_stop_atr_mult: 3.0,
@@ -934,8 +977,8 @@ mod tests {
         // Failed breakout: %B returns to mid-band [0.2, 0.8] → exit with pctb_revert
         // 突破失敗：%B 回到中間帶 [0.2, 0.8] → 以 pctb_revert 出場
         let mut s = BbBreakout::new();
-        s.min_persistence_ms = 0;  // disable persistence for unit tests
-        // Enter long (no ATR, no Hurst — only pctb/bw exits active)
+        s.min_persistence_ms = 0; // disable persistence for unit tests
+                                  // Enter long (no ATR, no Hurst — only pctb/bw exits active)
         s.on_tick(&ctx(0.01, 0.5, 1.0, 0)); // squeeze
         s.on_tick(&ctx(0.05, 1.1, 2.0, 700_000)); // breakout long
         assert_eq!(s.positions.get("BTC"), Some(&true));
@@ -944,7 +987,9 @@ mod tests {
         let i = s.on_tick(&ctx(0.05, 0.5, 2.0, 1_400_000));
         assert_eq!(i.len(), 1);
         match &i[0] {
-            StrategyAction::Close { reason, confidence, .. } => {
+            StrategyAction::Close {
+                reason, confidence, ..
+            } => {
                 assert_eq!(reason, "pctb_revert");
                 // 0.55 * conf_scale(1.0) = 0.55
                 assert!((*confidence - 0.55).abs() < 1e-9);
@@ -959,8 +1004,8 @@ mod tests {
         // Volatility collapse: bandwidth drops below squeeze_bw while %B still extreme → bw_squeeze
         // 波動塌陷：帶寬低於壓縮閾值且 %B 仍在極端 → bw_squeeze
         let mut s = BbBreakout::new();
-        s.min_persistence_ms = 0;  // disable persistence for unit tests
-        // Enter long
+        s.min_persistence_ms = 0; // disable persistence for unit tests
+                                  // Enter long
         s.on_tick(&ctx(0.01, 0.5, 1.0, 0)); // squeeze
         s.on_tick(&ctx(0.05, 1.1, 2.0, 700_000)); // breakout long
         assert_eq!(s.positions.get("BTC"), Some(&true));
@@ -970,7 +1015,9 @@ mod tests {
         let i = s.on_tick(&ctx(0.015, 1.1, 2.0, 1_400_000));
         assert_eq!(i.len(), 1);
         match &i[0] {
-            StrategyAction::Close { reason, confidence, .. } => {
+            StrategyAction::Close {
+                reason, confidence, ..
+            } => {
                 assert_eq!(reason, "bw_squeeze");
                 // 0.45 * conf_scale(1.0) = 0.45
                 assert!((*confidence - 0.45).abs() < 1e-9);
@@ -986,14 +1033,22 @@ mod tests {
     fn test_bbb_param_ranges_count() {
         let ranges = BbBreakoutParams::param_ranges();
         // 5 original + 11 confluence (includes confluence_as_gate) = 16
-        assert_eq!(ranges.len(), 16, "expected 16 param ranges, got {}", ranges.len());
+        assert_eq!(
+            ranges.len(),
+            16,
+            "expected 16 param ranges, got {}",
+            ranges.len()
+        );
     }
 
     #[test]
     fn test_bbb_param_ranges_has_confluence_as_gate() {
         let ranges = BbBreakoutParams::param_ranges();
         let names: Vec<&str> = ranges.iter().map(|r| r.name.as_str()).collect();
-        assert!(names.contains(&"confluence_as_gate"), "BBB must expose confluence_as_gate");
+        assert!(
+            names.contains(&"confluence_as_gate"),
+            "BBB must expose confluence_as_gate"
+        );
     }
 
     #[test]
@@ -1001,9 +1056,16 @@ mod tests {
         let ranges = BbBreakoutParams::param_ranges();
         let names: Vec<&str> = ranges.iter().map(|r| r.name.as_str()).collect();
         for expected in &[
-            "weight_adx", "weight_regime", "weight_volume", "weight_momentum",
-            "adx_floor", "confluence_threshold_no_trade", "confluence_threshold_light",
-            "confluence_threshold_full", "confluence_as_gate", "min_persistence_ms",
+            "weight_adx",
+            "weight_regime",
+            "weight_volume",
+            "weight_momentum",
+            "adx_floor",
+            "confluence_threshold_no_trade",
+            "confluence_threshold_light",
+            "confluence_threshold_full",
+            "confluence_as_gate",
+            "min_persistence_ms",
             "min_notional_usd",
         ] {
             assert!(names.contains(expected), "missing param range: {expected}");

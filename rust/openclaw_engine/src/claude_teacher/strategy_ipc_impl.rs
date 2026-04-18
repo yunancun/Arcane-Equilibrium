@@ -84,11 +84,7 @@ impl StrategyIpcSink for PipelineCommandSink {
         })
     }
 
-    fn set_strategy_active<'a>(
-        &'a self,
-        strategy_name: &'a str,
-        active: bool,
-    ) -> IpcFuture<'a> {
+    fn set_strategy_active<'a>(&'a self, strategy_name: &'a str, active: bool) -> IpcFuture<'a> {
         let strategy = strategy_name.to_string();
         let sender = self.sender.clone();
         let timeout = Duration::from_millis(self.timeout_ms);

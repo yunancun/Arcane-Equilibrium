@@ -71,9 +71,13 @@ fn select_linucb_arm(
         .map(|h| h.regime.clone())
         .unwrap_or_else(|| "random_walk".to_string());
     let ctx = LinUcbRuntime::build_context_features(
-        indicators.and_then(|i| i.atr_14.as_ref()).map(|a| a.atr_percent),
+        indicators
+            .and_then(|i| i.atr_14.as_ref())
+            .map(|a| a.atr_percent),
         indicators.and_then(|i| i.rsi_14),
-        indicators.and_then(|i| i.bollinger.as_ref()).map(|b| b.bandwidth),
+        indicators
+            .and_then(|i| i.bollinger.as_ref())
+            .map(|b| b.bandwidth),
         indicators.and_then(|i| i.hurst.as_ref()).map(|h| h.hurst),
         indicators.and_then(|i| i.adx.as_ref()).map(|a| a.adx),
         None, // vol_ratio not available in IndicatorSnapshot
@@ -138,7 +142,11 @@ pub(crate) fn emit_decision_context(
         read_news_context(news_snapshot, event.ts_ms as i64);
 
     let _ = tx.try_send(DecisionContextMsg {
-        context_id: crate::tick_pipeline::on_tick_helpers::make_context_id(engine_mode, &event.symbol, event.ts_ms),
+        context_id: crate::tick_pipeline::on_tick_helpers::make_context_id(
+            engine_mode,
+            &event.symbol,
+            event.ts_ms,
+        ),
         ts_ms: event.ts_ms,
         decision_type: "signal_generated".into(),
         symbol: event.symbol.clone(),
@@ -247,7 +255,10 @@ mod tests {
     fn test_read_news_context_empty_snapshot() {
         let snap = Arc::new(NewsContextSnapshot::new());
         let (sev, _hours) = read_news_context(Some(&snap), 1_000);
-        assert!(sev.is_none(), "fresh snapshot has 0.0 severity → filtered to None");
+        assert!(
+            sev.is_none(),
+            "fresh snapshot has 0.0 severity → filtered to None"
+        );
     }
 
     /// `select_linucb_arm` with unmapped signal rule → (None, None).

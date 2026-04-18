@@ -103,9 +103,7 @@ fn disable_edge_predictor_all_impl(
             }
             // Stage 1: fsynced TOML write (disk-first fail-abort).
             if let Some(path) = persist_path.as_deref() {
-                if let Err(e) =
-                    crate::config::write_toml_atomic_fsynced(&next, path)
-                {
+                if let Err(e) = crate::config::write_toml_atomic_fsynced(&next, path) {
                     let _ = response_tx.send(Err(format!(
                         "Stage 1 fsync write failed / Stage 1 fsync 寫入失敗: {e}"
                     )));
@@ -301,14 +299,21 @@ pub fn handle_paper_command(
             info!(count, "IPC close_all_positions / IPC 全部平倉");
             snapshot_writer.force_write(&pipeline.snapshot());
         }
-        PipelineCommand::CloseSymbol { symbol, hint_is_long, hint_qty } => {
+        PipelineCommand::CloseSymbol {
+            symbol,
+            hint_is_long,
+            hint_qty,
+        } => {
             // Exchange mode (Demo/Live): dispatch reduce_only market order via shadow channel.
             // Paper mode: close_position_at_market directly.
             // hint_is_long/hint_qty allow closing orphan exchange positions not in paper_state.
             // 交易所模式：發 reduce_only 市價單；紙盤模式：直接平倉。
             // hint 參數允許平掉 paper_state 沒有追蹤的交易所孤兒倉位。
             let found = pipeline.ipc_close_symbol(&symbol, hint_is_long, hint_qty);
-            info!(symbol = symbol.as_str(), found, "IPC close_position / IPC 單倉平倉");
+            info!(
+                symbol = symbol.as_str(),
+                found, "IPC close_position / IPC 單倉平倉"
+            );
             snapshot_writer.force_write(&pipeline.snapshot());
         }
         PipelineCommand::Reset { new_balance } => {
@@ -346,16 +351,15 @@ pub fn handle_paper_command(
             // the strategy's typed update_params_json. If only conf_scale was sent,
             // skip the typed update entirely (empty object).
             // CONF-D：預處理 — 抽出 conf_scale 套用後再轉發剩餘 JSON。
-            let (effective_json, conf_scale_opt): (String, Option<f64>) = match
-                serde_json::from_str::<serde_json::Value>(&params_json)
-            {
-                Ok(serde_json::Value::Object(mut map)) => {
-                    let cs = map.remove("conf_scale").and_then(|v| v.as_f64());
-                    let stripped = serde_json::Value::Object(map);
-                    (stripped.to_string(), cs)
-                }
-                _ => (params_json.clone(), None),
-            };
+            let (effective_json, conf_scale_opt): (String, Option<f64>) =
+                match serde_json::from_str::<serde_json::Value>(&params_json) {
+                    Ok(serde_json::Value::Object(mut map)) => {
+                        let cs = map.remove("conf_scale").and_then(|v| v.as_f64());
+                        let stripped = serde_json::Value::Object(map);
+                        (stripped.to_string(), cs)
+                    }
+                    _ => (params_json.clone(), None),
+                };
 
             let result = match pipeline.orchestrator.find_strategy_mut(&strategy_name) {
                 Some(strategy) => {
@@ -679,6 +683,12 @@ pub fn handle_paper_command(
             if let Some(v) = p1_risk_pct {
                 let v = v.clamp(0.0, 0.10);
                 pipeline.intent_processor.set_p1_risk_pct(v);
+                // DYNAMIC-RISK-1 BUG-3: rebase sizer so the next maybe_update
+                // does not revert operator intent. Without this, the sizer's
+                // stale current_pct would publish the old cap on the next tick.
+                // DYNAMIC-RISK-1 BUG-3：重錨 sizer，避免下次 maybe_update 用舊值
+                // 覆蓋 operator 剛下達的指令。
+                pipeline.dynamic_risk_sizer.rebase(v);
                 info!(
                     p1_risk_pct = format!("{:.2}%", v * 100.0),
                     "P1 risk cap updated / P1 上限已更新"
@@ -826,7 +836,8 @@ pub fn handle_paper_command(
                 }
                 None => Err(
                     "EdgePredictorStore not wired on this engine — check main.rs \
-                     set_edge_predictor_store() / 此引擎尚未注入 EdgePredictorStore".into(),
+                     set_edge_predictor_store() / 此引擎尚未注入 EdgePredictorStore"
+                        .into(),
                 ),
             };
             let _ = response_tx.send(result);
@@ -895,39 +906,37 @@ pub fn handle_paper_command(
             prediction_q90,
             cost_bps,
             ts_ms,
-        } => {
-            match pipeline.shadow_fill_db_tx() {
-                Some(tx) => {
-                    let msg = crate::database::ShadowFillMsg {
-                        context_id: context_id.clone(),
-                        ts_ms,
-                        engine_mode: pipeline.effective_engine_mode().to_string(),
-                        strategy_name: strategy,
-                        symbol: symbol.clone(),
-                        side,
-                        features_jsonb,
-                        predicted_q10: prediction_q10,
-                        predicted_q50: prediction_q50,
-                        predicted_q90: prediction_q90,
-                        cost_bps_at_open: cost_bps,
-                    };
-                    if let Err(e) = tx.try_send(msg) {
-                        tracing::warn!(
-                            ctx_id = %context_id, symbol = %symbol, error = %e,
-                            "shadow_fill IPC drop — writer channel full/closed \
-                             / shadow-fill IPC 丟棄，writer 通道已滿/關閉"
-                        );
-                    }
-                }
-                None => {
-                    info!(
-                        ctx_id = %context_id, symbol = %symbol,
-                        "shadow_fill IPC received but writer not wired (fail-soft skip) \
-                         / shadow-fill IPC 收到但 writer 未接線（fail-soft 跳過）"
+        } => match pipeline.shadow_fill_db_tx() {
+            Some(tx) => {
+                let msg = crate::database::ShadowFillMsg {
+                    context_id: context_id.clone(),
+                    ts_ms,
+                    engine_mode: pipeline.effective_engine_mode().to_string(),
+                    strategy_name: strategy,
+                    symbol: symbol.clone(),
+                    side,
+                    features_jsonb,
+                    predicted_q10: prediction_q10,
+                    predicted_q50: prediction_q50,
+                    predicted_q90: prediction_q90,
+                    cost_bps_at_open: cost_bps,
+                };
+                if let Err(e) = tx.try_send(msg) {
+                    tracing::warn!(
+                        ctx_id = %context_id, symbol = %symbol, error = %e,
+                        "shadow_fill IPC drop — writer channel full/closed \
+                         / shadow-fill IPC 丟棄，writer 通道已滿/關閉"
                     );
                 }
             }
-        }
+            None => {
+                info!(
+                    ctx_id = %context_id, symbol = %symbol,
+                    "shadow_fill IPC received but writer not wired (fail-soft skip) \
+                     / shadow-fill IPC 收到但 writer 未接線（fail-soft 跳過）"
+                );
+            }
+        },
         // EDGE-P3-1 Step 7a · Passthrough IPC → decision_feature writer channel.
         // External callers (Python backfill/replay tooling) inject training-
         // store rows through the same Rust-direct writer the IntentProcessor
@@ -949,38 +958,36 @@ pub fn handle_paper_command(
             feature_schema_hash,
             feature_definition_hash,
             features_jsonb,
-        } => {
-            match pipeline.decision_feature_tx() {
-                Some(tx) => {
-                    let msg = crate::database::DecisionFeatureMsg {
-                        context_id: context_id.clone(),
-                        ts_ms,
-                        engine_mode,
-                        strategy_name: strategy,
-                        symbol: symbol.clone(),
-                        side,
-                        feature_schema_version,
-                        feature_schema_hash,
-                        feature_definition_hash,
-                        features_jsonb,
-                    };
-                    if let Err(e) = tx.try_send(msg) {
-                        tracing::warn!(
-                            ctx_id = %context_id, symbol = %symbol, error = %e,
-                            "decision_feature IPC drop — writer channel full/closed \
-                             / 決策特徵 IPC 丟棄，writer 通道已滿/關閉"
-                        );
-                    }
-                }
-                None => {
-                    info!(
-                        ctx_id = %context_id, symbol = %symbol,
-                        "decision_feature IPC received but writer not wired (fail-soft skip) \
-                         / 決策特徵 IPC 收到但 writer 未接線（fail-soft 跳過）"
+        } => match pipeline.decision_feature_tx() {
+            Some(tx) => {
+                let msg = crate::database::DecisionFeatureMsg {
+                    context_id: context_id.clone(),
+                    ts_ms,
+                    engine_mode,
+                    strategy_name: strategy,
+                    symbol: symbol.clone(),
+                    side,
+                    feature_schema_version,
+                    feature_schema_hash,
+                    feature_definition_hash,
+                    features_jsonb,
+                };
+                if let Err(e) = tx.try_send(msg) {
+                    tracing::warn!(
+                        ctx_id = %context_id, symbol = %symbol, error = %e,
+                        "decision_feature IPC drop — writer channel full/closed \
+                         / 決策特徵 IPC 丟棄，writer 通道已滿/關閉"
                     );
                 }
             }
-        }
+            None => {
+                info!(
+                    ctx_id = %context_id, symbol = %symbol,
+                    "decision_feature IPC received but writer not wired (fail-soft skip) \
+                     / 決策特徵 IPC 收到但 writer 未接線（fail-soft 跳過）"
+                );
+            }
+        },
         // ORPHAN-ADOPT-1 Phase 2A · Adopt an exchange-reported orphan position
         // into paper_state. `paper_state.adopt_orphan` is idempotent; false
         // means the adoption was a no-op (same-direction position already
@@ -1006,15 +1013,29 @@ pub fn handle_paper_command(
             );
             info!(
                 symbol = symbol.as_str(),
-                is_long,
-                qty,
-                entry_price,
-                inserted,
-                "IPC adopt_orphan / IPC 孤兒接管"
+                is_long, qty, entry_price, inserted, "IPC adopt_orphan / IPC 孤兒接管"
             );
             if inserted {
                 snapshot_writer.force_write(&pipeline.snapshot());
             }
+        }
+        // ── DYNAMIC-RISK-1: Sharpe-aware sizer status + toggle ──
+        PipelineCommand::GetDynamicRiskStatus { response_tx } => {
+            let status = pipeline.dynamic_risk_sizer.status();
+            let result =
+                serde_json::to_string(&status).map_err(|e| format!("serialize sizer status: {e}"));
+            let _ = response_tx.send(result);
+        }
+        PipelineCommand::SetDynamicRiskEnabled {
+            enabled,
+            response_tx,
+        } => {
+            pipeline.dynamic_risk_sizer.set_enabled(enabled);
+            info!(
+                enabled,
+                "IPC dynamic_risk_sizer toggled / IPC 動態風險調整器切換"
+            );
+            let _ = response_tx.send(Ok(format!("dynamic_risk_sizer enabled={enabled}")));
         }
     }
 }
@@ -1044,7 +1065,12 @@ mod tests {
         let mut writer = make_writer(dir.path());
         let mut pending = HashMap::new();
         assert!(!pipeline.paper_paused);
-        handle_paper_command(PipelineCommand::Pause, &mut pipeline, &mut writer, &mut pending);
+        handle_paper_command(
+            PipelineCommand::Pause,
+            &mut pipeline,
+            &mut writer,
+            &mut pending,
+        );
         assert!(pipeline.paper_paused);
     }
 
@@ -1058,7 +1084,12 @@ mod tests {
         pipeline.session_halted = true;
         let mut writer = make_writer(dir.path());
         let mut pending = HashMap::new();
-        handle_paper_command(PipelineCommand::Resume, &mut pipeline, &mut writer, &mut pending);
+        handle_paper_command(
+            PipelineCommand::Resume,
+            &mut pipeline,
+            &mut writer,
+            &mut pending,
+        );
         assert!(!pipeline.paper_paused);
         assert!(!pipeline.session_halted);
     }
@@ -1073,19 +1104,26 @@ mod tests {
         pipeline.session_halted = true;
         let mut writer = make_writer(dir.path());
         let mut pending = HashMap::new();
-        pending.insert("order1".to_string(), PendingOrder {
-            order_link_id: "order1".into(),
-            symbol: "BTCUSDT".into(),
-            is_long: true,
-            qty: 0.01,
-            strategy: "test".into(),
-            sent_ts_ms: 1000,
-            cum_filled_qty: 0.0,
-            is_close: false,
-        });
+        pending.insert(
+            "order1".to_string(),
+            PendingOrder {
+                order_link_id: "order1".into(),
+                symbol: "BTCUSDT".into(),
+                is_long: true,
+                qty: 0.01,
+                strategy: "test".into(),
+                sent_ts_ms: 1000,
+                cum_filled_qty: 0.0,
+                is_close: false,
+            },
+        );
         handle_paper_command(
-            PipelineCommand::Reset { new_balance: 5000.0 },
-            &mut pipeline, &mut writer, &mut pending,
+            PipelineCommand::Reset {
+                new_balance: 5000.0,
+            },
+            &mut pipeline,
+            &mut writer,
+            &mut pending,
         );
         assert!(!pipeline.paper_paused);
         assert!(!pipeline.session_halted);
@@ -1108,7 +1146,9 @@ mod tests {
         let (tx, rx) = tokio::sync::oneshot::channel();
         handle_paper_command(
             PipelineCommand::ClearConsecutiveLosses { response_tx: tx },
-            &mut pipeline, &mut writer, &mut pending,
+            &mut pipeline,
+            &mut writer,
+            &mut pending,
         );
         assert!(pipeline.consecutive_losses.is_empty());
         let resp = rx.blocking_recv().unwrap();
@@ -1128,7 +1168,9 @@ mod tests {
         let (tx, rx) = tokio::sync::oneshot::channel();
         handle_paper_command(
             PipelineCommand::GetOpenPositionSymbols { response_tx: tx },
-            &mut pipeline, &mut writer, &mut pending,
+            &mut pipeline,
+            &mut writer,
+            &mut pending,
         );
         let symbols = rx.blocking_recv().unwrap();
         assert!(symbols.is_empty());
@@ -1142,16 +1184,15 @@ mod tests {
     fn test_conf_scale_extraction_logic() {
         // Test the JSON parsing logic directly (same as handler lines 89-98)
         let params_json = r#"{"conf_scale": 1.5}"#;
-        let (effective_json, conf_scale_opt): (String, Option<f64>) = match
-            serde_json::from_str::<serde_json::Value>(params_json)
-        {
-            Ok(serde_json::Value::Object(mut map)) => {
-                let cs = map.remove("conf_scale").and_then(|v| v.as_f64());
-                let stripped = serde_json::Value::Object(map);
-                (stripped.to_string(), cs)
-            }
-            _ => (params_json.to_string(), None),
-        };
+        let (effective_json, conf_scale_opt): (String, Option<f64>) =
+            match serde_json::from_str::<serde_json::Value>(params_json) {
+                Ok(serde_json::Value::Object(mut map)) => {
+                    let cs = map.remove("conf_scale").and_then(|v| v.as_f64());
+                    let stripped = serde_json::Value::Object(map);
+                    (stripped.to_string(), cs)
+                }
+                _ => (params_json.to_string(), None),
+            };
         assert_eq!(effective_json, "{}");
         assert_eq!(conf_scale_opt, Some(1.5));
     }
@@ -1161,16 +1202,15 @@ mod tests {
     #[test]
     fn test_conf_scale_mixed_with_other_params() {
         let params_json = r#"{"conf_scale": 2.0, "fast_period": 10}"#;
-        let (effective_json, conf_scale_opt): (String, Option<f64>) = match
-            serde_json::from_str::<serde_json::Value>(params_json)
-        {
-            Ok(serde_json::Value::Object(mut map)) => {
-                let cs = map.remove("conf_scale").and_then(|v| v.as_f64());
-                let stripped = serde_json::Value::Object(map);
-                (stripped.to_string(), cs)
-            }
-            _ => (params_json.to_string(), None),
-        };
+        let (effective_json, conf_scale_opt): (String, Option<f64>) =
+            match serde_json::from_str::<serde_json::Value>(params_json) {
+                Ok(serde_json::Value::Object(mut map)) => {
+                    let cs = map.remove("conf_scale").and_then(|v| v.as_f64());
+                    let stripped = serde_json::Value::Object(map);
+                    (stripped.to_string(), cs)
+                }
+                _ => (params_json.to_string(), None),
+            };
         assert_eq!(conf_scale_opt, Some(2.0));
         let parsed: serde_json::Value = serde_json::from_str(&effective_json).unwrap();
         assert_eq!(parsed["fast_period"], 10);
@@ -1183,16 +1223,15 @@ mod tests {
     #[test]
     fn test_conf_scale_invalid_json_fallback() {
         let params_json = "not-json";
-        let (effective_json, conf_scale_opt): (String, Option<f64>) = match
-            serde_json::from_str::<serde_json::Value>(params_json)
-        {
-            Ok(serde_json::Value::Object(mut map)) => {
-                let cs = map.remove("conf_scale").and_then(|v| v.as_f64());
-                let stripped = serde_json::Value::Object(map);
-                (stripped.to_string(), cs)
-            }
-            _ => (params_json.to_string(), None),
-        };
+        let (effective_json, conf_scale_opt): (String, Option<f64>) =
+            match serde_json::from_str::<serde_json::Value>(params_json) {
+                Ok(serde_json::Value::Object(mut map)) => {
+                    let cs = map.remove("conf_scale").and_then(|v| v.as_f64());
+                    let stripped = serde_json::Value::Object(map);
+                    (stripped.to_string(), cs)
+                }
+                _ => (params_json.to_string(), None),
+            };
         assert_eq!(effective_json, "not-json");
         assert!(conf_scale_opt.is_none());
     }
@@ -1205,7 +1244,7 @@ mod tests {
     /// 以為熱換成功但其實無人接收。
     #[test]
     fn test_set_edge_predictor_shadow_fails_without_store() {
-        use crate::edge_predictor::{BoxedEdgePredictor, null_backend::NullPredictor};
+        use crate::edge_predictor::{null_backend::NullPredictor, BoxedEdgePredictor};
 
         let dir = tempfile::tempdir().unwrap();
         let mut pipeline = TickPipeline::new(&["BTCUSDT"]);
@@ -1228,7 +1267,11 @@ mod tests {
         let result = rx.blocking_recv().unwrap();
         assert!(result.is_err(), "expected Err without wired store, got Ok");
         let msg = result.unwrap_err();
-        assert!(msg.contains("not wired"), "err should mention not-wired: {}", msg);
+        assert!(
+            msg.contains("not wired"),
+            "err should mention not-wired: {}",
+            msg
+        );
     }
 
     /// EN: SetEdgePredictorShadow succeeds after store is wired; load_for
@@ -1237,7 +1280,7 @@ mod tests {
     #[test]
     fn test_set_edge_predictor_shadow_succeeds_after_wire() {
         use crate::edge_predictor::{
-            BoxedEdgePredictor, EdgePredictorStore, null_backend::NullPredictor,
+            null_backend::NullPredictor, BoxedEdgePredictor, EdgePredictorStore,
         };
 
         let dir = tempfile::tempdir().unwrap();
@@ -1262,15 +1305,17 @@ mod tests {
         );
         let result = rx.blocking_recv().unwrap();
         assert!(result.is_ok(), "expected Ok, got {:?}", result);
-        assert!(store.load_for("ma_crossover").is_some(),
-            "predictor should be loaded after swap");
+        assert!(
+            store.load_for("ma_crossover").is_some(),
+            "predictor should be loaded after swap"
+        );
     }
 
     /// EN: DisableEdgePredictorAll clears every registered slot.
     /// 中文: DisableEdgePredictorAll 清空所有已註冊槽位。
     #[test]
     fn test_disable_edge_predictor_all_clears_slots() {
-        use crate::edge_predictor::{EdgePredictorStore, null_backend::NullPredictor};
+        use crate::edge_predictor::{null_backend::NullPredictor, EdgePredictorStore};
 
         let dir = tempfile::tempdir().unwrap();
         let mut pipeline = TickPipeline::new(&["BTCUSDT"]);
@@ -1299,7 +1344,11 @@ mod tests {
         let result = rx.blocking_recv().unwrap();
         assert!(result.is_ok());
         let msg = result.unwrap();
-        assert!(msg.contains("cleared 3"), "msg should report cleared count: {}", msg);
+        assert!(
+            msg.contains("cleared 3"),
+            "msg should report cleared count: {}",
+            msg
+        );
         // All slots now return None on load_for / 所有槽位 load_for 返回 None。
         for s in ["ma_crossover", "bb_reversion", "grid_trading"] {
             assert!(store.load_for(s).is_none(), "slot {} still loaded", s);
@@ -1312,7 +1361,7 @@ mod tests {
     ///   無記憶體或磁碟副作用。
     #[test]
     fn test_handle_disable_edge_predictor_all_rejects_short_token() {
-        use crate::edge_predictor::{EdgePredictorStore, null_backend::NullPredictor};
+        use crate::edge_predictor::{null_backend::NullPredictor, EdgePredictorStore};
 
         let mut pipeline = TickPipeline::new(&["BTCUSDT"]);
         let store = std::sync::Arc::new(EdgePredictorStore::new());
@@ -1345,7 +1394,7 @@ mod tests {
     ///   回應訊息含 "memory-only"；不嘗試寫磁碟。
     #[test]
     fn test_handle_disable_edge_predictor_all_memory_only_when_store_unwired() {
-        use crate::edge_predictor::{EdgePredictorStore, null_backend::NullPredictor};
+        use crate::edge_predictor::{null_backend::NullPredictor, EdgePredictorStore};
 
         let mut pipeline = TickPipeline::new(&["BTCUSDT"]);
         let store = std::sync::Arc::new(EdgePredictorStore::new());
@@ -1384,7 +1433,7 @@ mod tests {
     #[test]
     fn test_handle_disable_edge_predictor_all_writes_toml_stage1() {
         use crate::config::{ConfigStore, RiskConfig};
-        use crate::edge_predictor::{EdgePredictorStore, null_backend::NullPredictor};
+        use crate::edge_predictor::{null_backend::NullPredictor, EdgePredictorStore};
 
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("risk.toml");
@@ -1395,9 +1444,7 @@ mod tests {
         let mut cfg = RiskConfig::default();
         cfg.edge_predictor.use_edge_predictor = true;
         cfg.validate().expect("baseline must validate");
-        let risk_store = std::sync::Arc::new(
-            ConfigStore::new(cfg).with_toml_persist(path.clone()),
-        );
+        let risk_store = std::sync::Arc::new(ConfigStore::new(cfg).with_toml_persist(path.clone()));
 
         let mut pipeline = TickPipeline::new(&["BTCUSDT"]);
         pipeline.set_risk_store(std::sync::Arc::clone(&risk_store));
@@ -1498,7 +1545,9 @@ mod tests {
             &mut writer,
             &mut pending,
         );
-        let msg = rx.try_recv().expect("writer should have received the forwarded msg");
+        let msg = rx
+            .try_recv()
+            .expect("writer should have received the forwarded msg");
         assert_eq!(msg.context_id, "ctx-fwd-1");
         assert_eq!(msg.strategy_name, "ma_crossover");
         assert_eq!(msg.symbol, "BTCUSDT");
@@ -1628,12 +1677,8 @@ mod tests {
         // 用實存檔走完整 loader 路徑。default build → "ML-MIT #26"；
         // ort build → 檔名缺 `_q50_` 標記。
         let tmp = tempfile::NamedTempFile::new().expect("tempfile");
-        let out = super::handle_reload_edge_predictor(
-            "paper",
-            "ma_crossover",
-            tmp.path(),
-            &mut pipeline,
-        );
+        let out =
+            super::handle_reload_edge_predictor("paper", "ma_crossover", tmp.path(), &mut pipeline);
         let err = out.expect_err("loader must err on unconventional tempfile path");
         #[cfg(not(feature = "edge_predictor_ort"))]
         {

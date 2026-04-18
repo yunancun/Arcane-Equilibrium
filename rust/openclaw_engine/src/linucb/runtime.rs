@@ -72,7 +72,11 @@ impl LinUcbRuntime {
         };
         let mut arms = Vec::with_capacity(15);
         for arm_id in v1_15_arm_ids() {
-            arms.push(ArmState::cold_start(arm_id, config.context_dim, config.lambda));
+            arms.push(ArmState::cold_start(
+                arm_id,
+                config.context_dim,
+                config.lambda,
+            ));
         }
         let feature_schema_hash = compute_feature_schema_hash(FEATURE_NAMES_V1);
         Arc::new(Self {
@@ -216,7 +220,9 @@ mod tests {
     fn test_select_for_intent_unknown_arm_returns_none() {
         let rt = LinUcbRuntime::cold_start_v1_15();
         let ctx = vec![0.5; CONTEXT_DIM_V1];
-        assert!(rt.select_for_intent("nonexistent", "strategy", &ctx).is_none());
+        assert!(rt
+            .select_for_intent("nonexistent", "strategy", &ctx)
+            .is_none());
         // Wrong dim → None / 維度錯誤
         assert!(rt
             .select_for_intent("trending", "ma_crossover", &[0.1, 0.2])
@@ -265,7 +271,7 @@ mod tests {
         assert!((v[3] - 0.5).abs() < 1e-9); // hurst
         assert!((v[4] - 0.25).abs() < 1e-9); // adx 25/100
         assert!((v[5] - 1.0).abs() < 1e-9); // vol_ratio
-        // time-of-day at ts=0 → sin(0)=0, cos(0)=1
+                                            // time-of-day at ts=0 → sin(0)=0, cos(0)=1
         assert!(v[6].abs() < 1e-9);
         assert!((v[7] - 1.0).abs() < 1e-9);
     }

@@ -142,8 +142,7 @@ pub struct EventConsumerDeps {
     /// `PipelineCommand::DecisionFeatureSnapshot` also feeds this channel.
     /// EDGE-P3-1 Step 7a：訓練特徵寫入通道。None 時 IntentProcessor 發射為 no-op
     /// （fail-soft — 不採集訓練資料但不影響 live 交易）。Passthrough IPC 亦送入此通道。
-    pub decision_feature_tx:
-        Option<tokio::sync::mpsc::Sender<crate::database::DecisionFeatureMsg>>,
+    pub decision_feature_tx: Option<tokio::sync::mpsc::Sender<crate::database::DecisionFeatureMsg>>,
     /// EDGE-P3-1 Step 7c: Channel for ε-greedy shadow-fill rows into
     /// `learning.decision_shadow_fills`. Wired per-engine from `main.rs`; when
     /// `None` the `EmitShadowFill` IPC handler's fail-soft log path fires (no
@@ -152,8 +151,7 @@ pub struct EventConsumerDeps {
     /// depth logging if a non-paper row ever leaks through.
     /// EDGE-P3-1 Step 7c：ε-greedy shadow-fill 寫入通道。None 時走 fail-soft log。
     /// gate + DB CHECK 限 paper；writer 在各引擎皆運行以防禦性記錄異常洩漏。
-    pub shadow_fill_tx:
-        Option<tokio::sync::mpsc::Sender<crate::database::ShadowFillMsg>>,
+    pub shadow_fill_tx: Option<tokio::sync::mpsc::Sender<crate::database::ShadowFillMsg>>,
     /// EXT-1: Channel to receive exchange events (fills/order updates) from ExecutionListener.
     /// EXT-1：從執行監聽器接收交易所事件（成交/訂單更新）的通道。
     pub exchange_event_rx: Option<mpsc::UnboundedReceiver<ExchangeEvent>>,
@@ -177,13 +175,11 @@ pub struct EventConsumerDeps {
     /// When Some, TickPipeline syncs intent_processor.risk_config on each tick
     /// if the store version bumps (IPC patch applied).
     /// ARCH-RC1 1C-2-B：live RiskConfig store 控制代碼（可熱重載）。
-    pub risk_store:
-        Option<Arc<crate::config::ConfigStore<crate::config::RiskConfig>>>,
+    pub risk_store: Option<Arc<crate::config::ConfigStore<crate::config::RiskConfig>>>,
     /// ARCH-RC1 1C-2-B: live BudgetConfig store handle — hot-path reads
     /// attention_tax.cost_edge_max_ratio per tick for the cost-edge check.
     /// ARCH-RC1 1C-2-B：live BudgetConfig store 控制代碼。
-    pub budget_store:
-        Option<Arc<crate::config::ConfigStore<crate::config::BudgetConfig>>>,
+    pub budget_store: Option<Arc<crate::config::ConfigStore<crate::config::BudgetConfig>>>,
     /// Scanner D1: Active symbol registry — read-only ref so event consumer can
     /// call pipeline.add_symbol/remove_symbol when scanner updates the universe.
     /// 掃描器 D1：活躍交易對注冊表 — 唯讀引用，供 event consumer 在掃描器更新
@@ -191,8 +187,7 @@ pub struct EventConsumerDeps {
     pub symbol_registry: Option<Arc<crate::scanner::registry::SymbolRegistry>>,
     /// Scanner D1: ScannerConfig store for reading scheduling params at startup.
     /// 掃描器 D1：ScannerConfig store，供啟動時讀取調度參數。
-    pub scanner_store:
-        Option<Arc<crate::config::ConfigStore<crate::scanner::ScannerConfig>>>,
+    pub scanner_store: Option<Arc<crate::config::ConfigStore<crate::scanner::ScannerConfig>>>,
     /// ARCH-RC1 1C-4 B1: V014 audit pool — used at startup to restore the
     /// governor de-escalation cooldown timestamp (24h window) so a restart
     /// during an active cooldown does not silently reset the guard.
@@ -223,7 +218,8 @@ pub struct EventConsumerDeps {
     pub cross_engine_tx: Option<tokio::sync::broadcast::Sender<crate::tick_pipeline::EngineEvent>>,
     /// BLOCKER-2 D6: Cross-engine event receiver — react to peer crash/CB events.
     /// BLOCKER-2 D6：跨引擎事件接收端 — 對對等管線崩潰/熔斷事件作出反應。
-    pub cross_engine_rx: Option<tokio::sync::broadcast::Receiver<crate::tick_pipeline::EngineEvent>>,
+    pub cross_engine_rx:
+        Option<tokio::sync::broadcast::Receiver<crate::tick_pipeline::EngineEvent>>,
     /// BLOCKER-2 D6: Per-pipeline health atomic (written by this pipeline, read by others).
     /// BLOCKER-2 D6：管線健康原子量（本管線寫入，其他管線讀取）。
     pub pipeline_health: Option<Arc<std::sync::atomic::AtomicU8>>,
@@ -257,6 +253,5 @@ pub struct EventConsumerDeps {
     /// 共享同一 handle。run_event_consumer 構造 TickPipeline 後呼叫
     /// `paper_state.set_positions_mirror(mirror)`，對帳器讀鏡像抑制
     /// 「自家剛開倉」的假 Orphan。None 時停用抑制（回退 Phase 1 行為）。
-    pub positions_mirror:
-        Option<Arc<parking_lot::RwLock<HashMap<String, bool>>>>,
+    pub positions_mirror: Option<Arc<parking_lot::RwLock<HashMap<String, bool>>>>,
 }

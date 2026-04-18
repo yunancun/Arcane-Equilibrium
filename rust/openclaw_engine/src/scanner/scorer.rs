@@ -212,16 +212,17 @@ pub fn compute_fitness(mc: &MarketConditions) -> FitnessScores {
         (f_bbrv(mc), StrategyCategory::BbReversion),
         (f_bkout(mc), StrategyCategory::BbBreakout),
     ];
-    let (raw, best) = scores
-        .iter()
-        .copied()
-        .fold((0.0_f64, StrategyCategory::MaCrossover), |acc, (s, cat)| {
-            if s > acc.0 {
-                (s, cat)
-            } else {
-                acc
-            }
-        });
+    let (raw, best) =
+        scores
+            .iter()
+            .copied()
+            .fold((0.0_f64, StrategyCategory::MaCrossover), |acc, (s, cat)| {
+                if s > acc.0 {
+                    (s, cat)
+                } else {
+                    acc
+                }
+            });
     FitnessScores {
         f_ma: scores[0].0,
         f_grid: scores[1].0,
@@ -347,9 +348,7 @@ pub fn apply_correlation_filter(
         *strategy_count += 1;
 
         // Per-sector cap / 每板塊上限
-        let sector_count = sector_counts
-            .entry(candidate.sector.clone())
-            .or_insert(0);
+        let sector_count = sector_counts.entry(candidate.sector.clone()).or_insert(0);
         if *sector_count >= config.max_per_sector {
             continue;
         }
@@ -386,7 +385,11 @@ pub fn score_ticker(
     // Bybit's price24hPcnt is a ratio; mc.dir_pct is already in %, so we need
     // the raw pct (with sign) for beta proxy
     let symbol_change_pct = ticker.price_change_24h_pct * 100.0;
-    let bp = beta_proxy(symbol_change_pct, btc_change_pct, hard_filter_config.btc_min_move_pct);
+    let bp = beta_proxy(
+        symbol_change_pct,
+        btc_change_pct,
+        hard_filter_config.btc_min_move_pct,
+    );
 
     Some(ScoredSymbol {
         symbol: ticker.symbol.clone(),
@@ -455,7 +458,15 @@ mod tests {
     #[test]
     fn test_hard_filter_pass() {
         let t = make_ticker(
-            "SOLUSDT", 100.0, 99.99, 100.01, 60_000_000.0, 110.0, 90.0, 0.0001, 0.05,
+            "SOLUSDT",
+            100.0,
+            99.99,
+            100.01,
+            60_000_000.0,
+            110.0,
+            90.0,
+            0.0001,
+            0.05,
         );
         assert!(apply_hard_filters(&t, &default_hard_filters()).is_some());
     }
@@ -463,7 +474,15 @@ mod tests {
     #[test]
     fn test_hard_filter_turnover_fail() {
         let t = make_ticker(
-            "SOLUSDT", 100.0, 99.99, 100.01, 10_000_000.0, 110.0, 90.0, 0.0001, 0.05,
+            "SOLUSDT",
+            100.0,
+            99.99,
+            100.01,
+            10_000_000.0,
+            110.0,
+            90.0,
+            0.0001,
+            0.05,
         );
         assert!(apply_hard_filters(&t, &default_hard_filters()).is_none());
     }
@@ -472,7 +491,15 @@ mod tests {
     fn test_hard_filter_spread_fail() {
         // ask - bid = 1.0, mid = 100.5, spread_bps = 1.0/100.5*10000 ≈ 99.5 bps >> 8
         let t = make_ticker(
-            "SOLUSDT", 100.0, 100.0, 101.0, 60_000_000.0, 110.0, 90.0, 0.0001, 0.05,
+            "SOLUSDT",
+            100.0,
+            100.0,
+            101.0,
+            60_000_000.0,
+            110.0,
+            90.0,
+            0.0001,
+            0.05,
         );
         assert!(apply_hard_filters(&t, &default_hard_filters()).is_none());
     }
@@ -480,7 +507,15 @@ mod tests {
     #[test]
     fn test_hard_filter_stablecoin_fail() {
         let t = make_ticker(
-            "USDCUSDT", 1.0, 0.9999, 1.0001, 60_000_000.0, 1.001, 0.999, 0.0, 0.0,
+            "USDCUSDT",
+            1.0,
+            0.9999,
+            1.0001,
+            60_000_000.0,
+            1.001,
+            0.999,
+            0.0,
+            0.0,
         );
         assert!(apply_hard_filters(&t, &default_hard_filters()).is_none());
     }
@@ -488,7 +523,15 @@ mod tests {
     #[test]
     fn test_hard_filter_non_usdt_fail() {
         let t = make_ticker(
-            "BTCETH", 50.0, 49.9, 50.1, 60_000_000.0, 55.0, 45.0, 0.0001, 0.02,
+            "BTCETH",
+            50.0,
+            49.9,
+            50.1,
+            60_000_000.0,
+            55.0,
+            45.0,
+            0.0001,
+            0.02,
         );
         assert!(apply_hard_filters(&t, &default_hard_filters()).is_none());
     }
@@ -498,7 +541,15 @@ mod tests {
         let mut cfg = default_hard_filters();
         cfg.min_price_usdt = 0.01;
         let t = make_ticker(
-            "XYZUSDT", 0.001, 0.00099, 0.00101, 60_000_000.0, 0.0011, 0.0009, 0.0001, 0.05,
+            "XYZUSDT",
+            0.001,
+            0.00099,
+            0.00101,
+            60_000_000.0,
+            0.0011,
+            0.0009,
+            0.0001,
+            0.05,
         );
         assert!(apply_hard_filters(&t, &cfg).is_none());
     }
@@ -643,7 +694,15 @@ mod tests {
     #[test]
     fn test_de_formula_clean_trend() {
         let ticker = make_ticker(
-            "SOLUSDT", 100.0, 99.99, 100.01, 60_000_000.0, 108.0, 100.0, 0.0001, 0.08,
+            "SOLUSDT",
+            100.0,
+            99.99,
+            100.01,
+            60_000_000.0,
+            108.0,
+            100.0,
+            0.0001,
+            0.08,
         );
         let mc = compute_market_conditions(&ticker);
         // dir_pct = 8.0, range_pct = 8.0, DE should be 1.0
@@ -653,7 +712,15 @@ mod tests {
     #[test]
     fn test_de_formula_pure_chop() {
         let ticker = make_ticker(
-            "SOLUSDT", 100.0, 99.99, 100.01, 60_000_000.0, 110.0, 90.0, 0.0001, 0.0,
+            "SOLUSDT",
+            100.0,
+            99.99,
+            100.01,
+            60_000_000.0,
+            110.0,
+            90.0,
+            0.0001,
+            0.0,
         );
         let mc = compute_market_conditions(&ticker);
         assert_eq!(mc.de, 0.0, "zero net move → DE = 0");
@@ -744,7 +811,11 @@ mod tests {
             .collect();
 
         let selected = apply_correlation_filter(candidates, &[], 10, &config);
-        assert_eq!(selected.len(), 2, "sector cap should limit to 2 meme symbols");
+        assert_eq!(
+            selected.len(),
+            2,
+            "sector cap should limit to 2 meme symbols"
+        );
     }
 
     #[test]

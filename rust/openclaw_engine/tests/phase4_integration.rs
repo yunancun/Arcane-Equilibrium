@@ -100,18 +100,13 @@ impl StrategyIpcSink for MockSink {
         params_json: &'a str,
     ) -> IpcFuture<'a> {
         self.total_calls.fetch_add(1, Ordering::SeqCst);
-        self.calls
-            .lock()
-            .unwrap()
-            .push(format!("update_strategy_params({strategy_name}, {params_json})"));
+        self.calls.lock().unwrap().push(format!(
+            "update_strategy_params({strategy_name}, {params_json})"
+        ));
         Box::pin(async move { Ok(format!("params updated for {strategy_name}")) })
     }
 
-    fn set_strategy_active<'a>(
-        &'a self,
-        strategy_name: &'a str,
-        active: bool,
-    ) -> IpcFuture<'a> {
+    fn set_strategy_active<'a>(&'a self, strategy_name: &'a str, active: bool) -> IpcFuture<'a> {
         self.total_calls.fetch_add(1, Ordering::SeqCst);
         self.calls
             .lock()
@@ -192,11 +187,7 @@ fn future_expiry_secs() -> i64 {
         + 86_400) as i64
 }
 
-fn build_directive(
-    ty: DirectiveType,
-    scope: &str,
-    params: serde_json::Value,
-) -> Directive {
+fn build_directive(ty: DirectiveType, scope: &str, params: serde_json::Value) -> Directive {
     Directive {
         directive_type: ty,
         scope: scope.into(),

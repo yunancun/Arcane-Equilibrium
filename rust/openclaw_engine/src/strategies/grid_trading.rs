@@ -444,7 +444,10 @@ impl GridTrading {
         let hi = levels[levels.len() - 1];
 
         if price < lo || price > hi {
-            let count = self.out_of_range_count.entry(symbol.to_string()).or_insert(0);
+            let count = self
+                .out_of_range_count
+                .entry(symbol.to_string())
+                .or_insert(0);
             *count += 1;
             if *count >= self.max_out_of_range {
                 GridHealth::NeedsRebalance
@@ -488,7 +491,10 @@ impl GridTrading {
             )
         };
 
-        self.grid_levels.insert(symbol.to_string(), grid_helpers::build_levels(lower, upper, self.grid_count, &self.spacing_mode));
+        self.grid_levels.insert(
+            symbol.to_string(),
+            grid_helpers::build_levels(lower, upper, self.grid_count, &self.spacing_mode),
+        );
         self.out_of_range_count.insert(symbol.to_string(), 0);
         self.last_cross_idx.remove(symbol);
     }
@@ -550,11 +556,7 @@ impl GridTrading {
             let new_levels = match self.spacing_mode {
                 GridSpacingMode::Linear => {
                     let lower = mu - step * (gc as f64 / 2.0);
-                    grid_helpers::build_linear_levels(
-                        lower,
-                        lower + step * (gc as f64 - 1.0),
-                        gc,
-                    )
+                    grid_helpers::build_linear_levels(lower, lower + step * (gc as f64 - 1.0), gc)
                 }
                 GridSpacingMode::Geometric => {
                     let half_range = step * (gc as f64 / 2.0);
@@ -584,7 +586,11 @@ impl GridTrading {
         self.adx_low_threshold = params.adx_low_threshold;
         self.adx_high_threshold = params.adx_high_threshold;
         self.max_cooldown_boost = params.max_cooldown_boost;
-        info!(strategy = "grid_trading", grid_count = self.grid_count, "params updated / 參數已更新");
+        info!(
+            strategy = "grid_trading",
+            grid_count = self.grid_count,
+            "params updated / 參數已更新"
+        );
         Ok(())
     }
 
@@ -652,8 +658,12 @@ impl Strategy for GridTrading {
     fn on_close_skipped(&mut self, symbol: &str) {
         if let Some(prev) = self.prev_cross_idx.get(symbol) {
             match prev {
-                Some(idx) => { self.last_cross_idx.insert(symbol.to_string(), *idx); }
-                None => { self.last_cross_idx.remove(symbol); }
+                Some(idx) => {
+                    self.last_cross_idx.insert(symbol.to_string(), *idx);
+                }
+                None => {
+                    self.last_cross_idx.remove(symbol);
+                }
             }
         }
         // NOTE: last_trade_ms intentionally NOT rolled back here (FIX-C).
@@ -682,15 +692,23 @@ impl Strategy for GridTrading {
 
         if let Some(prev) = self.prev_cross_idx.get(sym) {
             match prev {
-                Some(idx) => { self.last_cross_idx.insert(sym.to_string(), *idx); }
-                None => { self.last_cross_idx.remove(sym); }
+                Some(idx) => {
+                    self.last_cross_idx.insert(sym.to_string(), *idx);
+                }
+                None => {
+                    self.last_cross_idx.remove(sym);
+                }
             }
         }
         if let Some(&inv) = self.prev_inventory.get(sym) {
             self.net_inventory.insert(sym.to_string(), inv);
         }
         if let Some(&ts) = self.prev_last_trade_ms.get(sym) {
-            if ts == 0 { self.last_trade_ms.remove(sym); } else { self.last_trade_ms.insert(sym.to_string(), ts); }
+            if ts == 0 {
+                self.last_trade_ms.remove(sym);
+            } else {
+                self.last_trade_ms.insert(sym.to_string(), ts);
+            }
         }
     }
 
@@ -717,12 +735,18 @@ impl Strategy for GridTrading {
                     ctx.price * (1.0 + self.adaptive_range_pct),
                 ),
             };
-            self.grid_levels.insert(sym.to_string(), grid_helpers::build_levels(lower, upper, self.grid_count, &self.spacing_mode));
+            self.grid_levels.insert(
+                sym.to_string(),
+                grid_helpers::build_levels(lower, upper, self.grid_count, &self.spacing_mode),
+            );
         }
 
         // Per-symbol health check every health_check_interval ticks.
         // 每幣種每 health_check_interval 個 tick 執行健康檢查。
-        let ticks = self.ticks_since_health_check.entry(sym.to_string()).or_insert(0);
+        let ticks = self
+            .ticks_since_health_check
+            .entry(sym.to_string())
+            .or_insert(0);
         *ticks += 1;
         if *ticks >= self.health_check_interval {
             *ticks = 0;
@@ -782,7 +806,8 @@ impl Strategy for GridTrading {
 
         // RC-04: Snapshot per-symbol state before any mutation for rejection rollback.
         // RC-04：在任何變更前快照該幣種狀態，供拒絕回滾使用。
-        self.prev_cross_idx.insert(sym.to_string(), self.last_cross_idx.get(sym).copied());
+        self.prev_cross_idx
+            .insert(sym.to_string(), self.last_cross_idx.get(sym).copied());
         let cur_inventory = self.net_inventory.get(sym).copied().unwrap_or(0.0);
         self.prev_inventory.insert(sym.to_string(), cur_inventory);
         self.prev_last_trade_ms.insert(sym.to_string(), last_ms);
@@ -794,7 +819,9 @@ impl Strategy for GridTrading {
         // Dynamic confidence: grid thrives in ranging + narrow BB, suffers in trending.
         // 動態信心：grid 在 ranging + 窄 BB 中表現好，trending 中表現差。
         // CONF-D: apply per-strategy scale.
-        let conf = crate::tick_pipeline::on_tick_helpers::clamp_confidence(compute_grid_confidence(ctx.indicators) * self.conf_scale);
+        let conf = crate::tick_pipeline::on_tick_helpers::clamp_confidence(
+            compute_grid_confidence(ctx.indicators) * self.conf_scale,
+        );
 
         if idx < prev_idx {
             // Price crossed down → buy. If net_inventory < 0 (short), this closes short → Close.
@@ -897,7 +924,10 @@ mod tests {
         // Grid levels are lazily initialized on first tick, not at construction.
         // 網格層級在首次 tick 時延遲初始化，不在構造時。
         let mut g = GridTrading::new(49000.0, 51000.0);
-        assert!(g.grid_levels.is_empty(), "grid_levels should be empty before first tick");
+        assert!(
+            g.grid_levels.is_empty(),
+            "grid_levels should be empty before first tick"
+        );
         g.on_tick(&ctx(50000.0, 0)); // triggers lazy init with template_bounds
         let levels = g.grid_levels.get("BTC").unwrap();
         assert_eq!(levels.len(), DEFAULT_GRID_COUNT);
@@ -969,7 +999,10 @@ mod tests {
         }
         // Inventory NOT yet adjusted (deferred until on_close_confirmed)
         // 庫存尚未調整（延遲到 on_close_confirmed）
-        assert!(*g.net_inventory.get("BTC").unwrap_or(&0.0) > 0.0, "inventory deferred: still positive before confirm");
+        assert!(
+            *g.net_inventory.get("BTC").unwrap_or(&0.0) > 0.0,
+            "inventory deferred: still positive before confirm"
+        );
 
         // Pipeline confirms close → inventory adjusted
         // 管線確認平倉 → 庫存已調整
@@ -1003,7 +1036,11 @@ mod tests {
 
         // Pipeline says no position found → skip → roll back
         g.on_close_skipped("BTC");
-        assert_eq!(g.last_cross_idx.get("BTC").copied(), prev_cross, "cross state should be rolled back");
+        assert_eq!(
+            g.last_cross_idx.get("BTC").copied(),
+            prev_cross,
+            "cross state should be rolled back"
+        );
         // Inventory unchanged since Close doesn't adjust eagerly
         let cur_inv = g.net_inventory.get("BTC").copied().unwrap_or(0.0);
         assert!((cur_inv - prev_inventory).abs() < 1e-9);
@@ -1027,7 +1064,7 @@ mod tests {
     fn test_ou_spacing_update() {
         let mut g = GridTrading::new(49000.0, 51000.0);
         g.on_tick(&ctx(50000.0, 0)); // lazy init
-        // Fill price history for BTC
+                                     // Fill price history for BTC
         let history = g.price_history.entry("BTC".into()).or_default();
         for i in 0..60 {
             history.push(50000.0 + (i as f64 * 0.1).sin() * 100.0);
@@ -1216,7 +1253,10 @@ mod tests {
         assert_eq!(g.spacing_mode, GridSpacingMode::Geometric);
 
         g.on_tick(&ctx(50000.0, 0));
-        let btc_levels = g.grid_levels.get("BTC").expect("BTC grid should be initialized on first tick");
+        let btc_levels = g
+            .grid_levels
+            .get("BTC")
+            .expect("BTC grid should be initialized on first tick");
         assert_eq!(btc_levels.len(), DEFAULT_GRID_COUNT);
 
         // Verify geometric property.
@@ -1260,14 +1300,23 @@ mod tests {
     fn test_grid_param_ranges_count() {
         let ranges = GridTradingParams::param_ranges();
         // 4 original + 3 trend cooldown = 7
-        assert_eq!(ranges.len(), 7, "expected 7 param ranges, got {}", ranges.len());
+        assert_eq!(
+            ranges.len(),
+            7,
+            "expected 7 param ranges, got {}",
+            ranges.len()
+        );
     }
 
     #[test]
     fn test_grid_param_ranges_cooldown_names() {
         let ranges = GridTradingParams::param_ranges();
         let names: Vec<&str> = ranges.iter().map(|r| r.name.as_str()).collect();
-        for expected in &["adx_low_threshold", "adx_high_threshold", "max_cooldown_boost"] {
+        for expected in &[
+            "adx_low_threshold",
+            "adx_high_threshold",
+            "max_cooldown_boost",
+        ] {
             assert!(names.contains(expected), "missing param range: {expected}");
         }
     }
@@ -1320,8 +1369,15 @@ mod tests {
     fn test_trend_cooldown_low_adx_no_boost() {
         use openclaw_core::indicators::{AdxResult, HurstResult, IndicatorSnapshot};
         let snap = Box::leak(Box::new(IndicatorSnapshot {
-            adx: Some(AdxResult { adx: 15.0, plus_di: 0.0, minus_di: 0.0 }),
-            hurst: Some(HurstResult { hurst: 0.45, regime: "mean_reverting".into() }),
+            adx: Some(AdxResult {
+                adx: 15.0,
+                plus_di: 0.0,
+                minus_di: 0.0,
+            }),
+            hurst: Some(HurstResult {
+                hurst: 0.45,
+                regime: "mean_reverting".into(),
+            }),
             ..Default::default()
         }));
         let g = GridTrading::new(49000.0, 51000.0);
@@ -1334,8 +1390,15 @@ mod tests {
     fn test_trend_cooldown_high_adx_max_boost() {
         use openclaw_core::indicators::{AdxResult, HurstResult, IndicatorSnapshot};
         let snap = Box::leak(Box::new(IndicatorSnapshot {
-            adx: Some(AdxResult { adx: 60.0, plus_di: 0.0, minus_di: 0.0 }),
-            hurst: Some(HurstResult { hurst: 0.80, regime: "trending".into() }),
+            adx: Some(AdxResult {
+                adx: 60.0,
+                plus_di: 0.0,
+                minus_di: 0.0,
+            }),
+            hurst: Some(HurstResult {
+                hurst: 0.80,
+                regime: "trending".into(),
+            }),
             ..Default::default()
         }));
         let g = GridTrading::new(49000.0, 51000.0);
@@ -1349,8 +1412,15 @@ mod tests {
     fn test_trend_cooldown_mid_adx_partial_boost() {
         use openclaw_core::indicators::{AdxResult, HurstResult, IndicatorSnapshot};
         let snap = Box::leak(Box::new(IndicatorSnapshot {
-            adx: Some(AdxResult { adx: 35.0, plus_di: 0.0, minus_di: 0.0 }),
-            hurst: Some(HurstResult { hurst: 0.625, regime: "uncertain".into() }),
+            adx: Some(AdxResult {
+                adx: 35.0,
+                plus_di: 0.0,
+                minus_di: 0.0,
+            }),
+            hurst: Some(HurstResult {
+                hurst: 0.625,
+                regime: "uncertain".into(),
+            }),
             ..Default::default()
         }));
         let g = GridTrading::new(49000.0, 51000.0);

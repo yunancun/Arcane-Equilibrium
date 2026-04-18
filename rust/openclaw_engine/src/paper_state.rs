@@ -491,10 +491,7 @@ impl PaperState {
     /// 的條目會被靜默丟棄（對應 Bybit 回傳的 "size=0" 殘留行）。
     /// 回傳實際插入的持倉數。同時種入 latest_prices，避免首個市場 tick 抵達前
     /// 跟蹤/止損檢查讀到 0 參考價。
-    pub fn import_positions(
-        &mut self,
-        positions: Vec<(String, bool, f64, f64, u64)>,
-    ) -> usize {
+    pub fn import_positions(&mut self, positions: Vec<(String, bool, f64, f64, u64)>) -> usize {
         self.positions_clear();
         let mut inserted = 0_usize;
         for (symbol, is_long, qty, entry_price, ts_ms) in positions {
@@ -573,9 +570,7 @@ impl PaperState {
                 let strategy = strategy_names[0];
                 if let Some(pos) = self.positions.get_mut(&symbol) {
                     pos.owner_strategy = strategy.to_string();
-                    outcome
-                        .adopted
-                        .push((symbol, strategy.to_string()));
+                    outcome.adopted.push((symbol, strategy.to_string()));
                 }
                 continue;
             }
@@ -596,13 +591,9 @@ impl PaperState {
                             crate::position_reconciler::orphan_handler::DUST_FROZEN_STRATEGY
                                 .to_string();
                     }
-                    outcome.dust_frozen.push((
-                        symbol,
-                        is_long,
-                        qty,
-                        est_notional,
-                        min_notional,
-                    ));
+                    outcome
+                        .dust_frozen
+                        .push((symbol, is_long, qty, est_notional, min_notional));
                     continue;
                 }
             }
@@ -1137,15 +1128,18 @@ impl PaperState {
     }
 
     /// Close all open positions at their latest market price.
-    /// Returns the number of positions closed.
-    /// 以最新市場價平掉所有持倉，返回已平倉數量。
-    pub fn close_all_positions(&mut self) -> usize {
+    /// Returns (symbol, realized_pnl) for each closed position so the caller
+    /// can forward them to the dynamic risk sizer. `.len()` gives the count
+    /// for legacy call sites. DYNAMIC-RISK-1 BUG-1 fix.
+    /// 以最新市場價平掉所有持倉，返回 (symbol, 實現 PnL)；caller 可把 PnL 餵給
+    /// 動態風險調整器。用 `.len()` 取得舊的 count 語義。DYNAMIC-RISK-1 BUG-1。
+    pub fn close_all_positions(&mut self) -> Vec<(String, f64)> {
         let symbols: Vec<String> = self.positions.keys().cloned().collect();
-        let mut closed = 0;
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_millis() as u64)
             .unwrap_or(0);
+        let mut results = Vec::with_capacity(symbols.len());
         for symbol in &symbols {
             let price = self.latest_prices.get(symbol).copied().unwrap_or_else(|| {
                 // Fallback to entry price if no market price available
@@ -1155,10 +1149,11 @@ impl PaperState {
                     .map(|p| p.entry_price)
                     .unwrap_or(0.0)
             });
-            self.close_position(symbol, price, now);
-            closed += 1;
+            if let Some(pnl) = self.close_position(symbol, price, now) {
+                results.push((symbol.clone(), pnl));
+            }
         }
-        closed
+        results
     }
 
     /// Check stops on all positions using per-symbol latest prices.
@@ -1394,7 +1389,10 @@ mod tests {
         assert_eq!(s.position_count(), 2);
 
         let closed = s.close_all_positions();
-        assert_eq!(closed, 2);
+        assert_eq!(closed.len(), 2);
+        // Both closes produce non-zero pnl — sizer-feeding regression check.
+        // 兩筆平倉皆產生非零 pnl — sizer 餵入回歸檢查。
+        assert!(closed.iter().all(|(_, p)| *p != 0.0));
         assert_eq!(s.position_count(), 0);
         // BTC PnL: (51000-50000)*0.1 = 100, ETH PnL: (3000-2900)*1.0 = 100
         assert!((s.balance() - 10200.0).abs() < 0.01);
@@ -1420,8 +1418,8 @@ mod tests {
         let inserted = s.import_positions(vec![
             ("BTCUSDT".to_string(), true, 0.5, 50_000.0, 1_000),
             ("ETHUSDT".to_string(), false, 2.0, 3_000.0, 1_001),
-            ("ZERO".to_string(), true, 0.0, 1.0, 0),       // skipped (qty=0)
-            ("BAD".to_string(), true, 1.0, -5.0, 0),       // skipped (price<=0)
+            ("ZERO".to_string(), true, 0.0, 1.0, 0), // skipped (qty=0)
+            ("BAD".to_string(), true, 1.0, -5.0, 0), // skipped (price<=0)
         ]);
         assert_eq!(inserted, 2);
         assert_eq!(s.position_count(), 2);
@@ -1482,8 +1480,7 @@ mod tests {
             s.get_position("BTCUSDT").unwrap().owner_strategy,
             "ma_crossover"
         );
-        let inserted =
-            s.adopt_orphan("BTCUSDT", true, 0.2, 51_000.0, 1_700_000_000_000, None);
+        let inserted = s.adopt_orphan("BTCUSDT", true, 0.2, 51_000.0, 1_700_000_000_000, None);
         assert!(!inserted, "same-direction adopt must be no-op");
         // Original owner preserved — no strategy overwrite.
         // 原 owner 保留，沒有被覆寫。
@@ -1805,10 +1802,13 @@ mod tests {
     #[test]
     fn triage_adopts_in_universe_positions() {
         let mut s = PaperState::new(10_000.0);
-        seed_bybit_sync(&mut s, &[
-            ("BTCUSDT", true, 0.01, 50000.0),
-            ("ETHUSDT", false, 0.5, 3000.0),
-        ]);
+        seed_bybit_sync(
+            &mut s,
+            &[
+                ("BTCUSDT", true, 0.01, 50000.0),
+                ("ETHUSDT", false, 0.5, 3000.0),
+            ],
+        );
         assert_eq!(s.position_count(), 2);
 
         let active = vec!["BTCUSDT".into(), "ETHUSDT".into(), "SOLUSDT".into()];
@@ -1828,10 +1828,13 @@ mod tests {
     #[test]
     fn triage_evicts_not_in_universe_positions() {
         let mut s = PaperState::new(10_000.0);
-        seed_bybit_sync(&mut s, &[
-            ("BTCUSDT", true, 0.01, 50000.0),
-            ("SHIBUSDT", true, 1000000.0, 0.00001),
-        ]);
+        seed_bybit_sync(
+            &mut s,
+            &[
+                ("BTCUSDT", true, 0.01, 50000.0),
+                ("SHIBUSDT", true, 1000000.0, 0.00001),
+            ],
+        );
         assert_eq!(s.position_count(), 2);
 
         let active = vec!["BTCUSDT".into()];
@@ -1987,9 +1990,7 @@ mod tests {
 
         let active: Vec<String> = vec![];
         let strategies = &["ma_crossover"];
-        let result = s.triage_bybit_sync(&active, strategies, |_, qty| {
-            Some((qty * 5.0, 5.0))
-        });
+        let result = s.triage_bybit_sync(&active, strategies, |_, qty| Some((qty * 5.0, 5.0)));
 
         assert_eq!(result.evicted.len(), 1);
         assert_eq!(result.dust_frozen.len(), 0);
@@ -2000,11 +2001,14 @@ mod tests {
     fn triage_mixed_adopt_evict_dust_in_one_pass() {
         // 綜合場景：三個 bybit_sync 倉位，一個 adopt、一個正常 evict、一個 dust freeze。
         let mut s = PaperState::new(10_000.0);
-        seed_bybit_sync(&mut s, &[
-            ("BTCUSDT", true, 0.01, 50000.0),       // in universe → adopt
-            ("SHIBUSDT", true, 100.0, 0.001),        // not in universe, normal evict
-            ("PNUTUSDT", false, 3.0, 0.06644),       // not in universe, dust freeze
-        ]);
+        seed_bybit_sync(
+            &mut s,
+            &[
+                ("BTCUSDT", true, 0.01, 50000.0),  // in universe → adopt
+                ("SHIBUSDT", true, 100.0, 0.001),  // not in universe, normal evict
+                ("PNUTUSDT", false, 3.0, 0.06644), // not in universe, dust freeze
+            ],
+        );
 
         let active: Vec<String> = vec!["BTCUSDT".into()];
         let strategies = &["ma_crossover"];
@@ -2020,8 +2024,14 @@ mod tests {
         assert_eq!(result.evicted.len(), 1);
         assert_eq!(result.dust_frozen.len(), 1);
         assert_eq!(s.position_count(), 2); // BTC adopted + PNUT frozen
-        assert_eq!(s.get_position("BTCUSDT").unwrap().owner_strategy, "ma_crossover");
-        assert_eq!(s.get_position("PNUTUSDT").unwrap().owner_strategy, "orphan_frozen");
+        assert_eq!(
+            s.get_position("BTCUSDT").unwrap().owner_strategy,
+            "ma_crossover"
+        );
+        assert_eq!(
+            s.get_position("PNUTUSDT").unwrap().owner_strategy,
+            "orphan_frozen"
+        );
         assert!(s.get_position("SHIBUSDT").is_none());
     }
 
@@ -2044,7 +2054,10 @@ mod tests {
             Some(5.0),
         );
         assert_eq!(outcome, RetriageOutcome::NoOp);
-        assert_eq!(s.get_position("BTCUSDT").unwrap().owner_strategy, "ma_crossover");
+        assert_eq!(
+            s.get_position("BTCUSDT").unwrap().owner_strategy,
+            "ma_crossover"
+        );
     }
 
     #[test]
@@ -2062,17 +2075,23 @@ mod tests {
         let mut s = PaperState::new(10_000.0);
         seed_bybit_sync(&mut s, &[("PNUTUSDT", true, 3.0, 0.06644)]);
 
-        let outcome = s.retriage_synthetic_owner(
-            "PNUTUSDT", 0.06644, true, "ma_crossover", Some(5.0),
-        );
+        let outcome =
+            s.retriage_synthetic_owner("PNUTUSDT", 0.06644, true, "ma_crossover", Some(5.0));
         match outcome {
-            RetriageOutcome::FrozenAsDust { was_downgraded, min_notional, .. } => {
+            RetriageOutcome::FrozenAsDust {
+                was_downgraded,
+                min_notional,
+                ..
+            } => {
                 assert!(was_downgraded);
                 assert!((min_notional - 5.0).abs() < 1e-9);
             }
             other => panic!("expected FrozenAsDust, got {:?}", other),
         }
-        assert_eq!(s.get_position("PNUTUSDT").unwrap().owner_strategy, "orphan_frozen");
+        assert_eq!(
+            s.get_position("PNUTUSDT").unwrap().owner_strategy,
+            "orphan_frozen"
+        );
     }
 
     #[test]
@@ -2083,11 +2102,15 @@ mod tests {
         seed_bybit_sync(&mut s, &[("PNUTUSDT", true, 3.0, 0.06644)]);
         // Drop into dust first.
         let _ = s.retriage_synthetic_owner("PNUTUSDT", 0.06644, true, "ma_crossover", Some(5.0));
-        assert_eq!(s.get_position("PNUTUSDT").unwrap().owner_strategy, "orphan_frozen");
+        assert_eq!(
+            s.get_position("PNUTUSDT").unwrap().owner_strategy,
+            "orphan_frozen"
+        );
 
         // Second call — already frozen, should be idempotent no-op log-wise.
         // 第二次呼叫 — 已凍結，應為 idempotent、不重複發日誌。
-        let outcome = s.retriage_synthetic_owner("PNUTUSDT", 0.06644, true, "ma_crossover", Some(5.0));
+        let outcome =
+            s.retriage_synthetic_owner("PNUTUSDT", 0.06644, true, "ma_crossover", Some(5.0));
         match outcome {
             RetriageOutcome::FrozenAsDust { was_downgraded, .. } => {
                 assert!(!was_downgraded);
@@ -2104,20 +2127,30 @@ mod tests {
         // Seed as bybit_sync then manually demote to orphan_frozen (simulate startup triage output).
         seed_bybit_sync(&mut s, &[("PNUTUSDT", true, 100.0, 0.06644)]);
         let _ = s.retriage_synthetic_owner("PNUTUSDT", 0.04, true, "ma_crossover", Some(5.0));
-        assert_eq!(s.get_position("PNUTUSDT").unwrap().owner_strategy, "orphan_frozen");
+        assert_eq!(
+            s.get_position("PNUTUSDT").unwrap().owner_strategy,
+            "orphan_frozen"
+        );
 
         // Price recovers — 100 × 0.08 = 8 > 5 min. In universe → promote.
         // 價格回升 → 8 > 5 → 升級。
         let outcome = s.retriage_synthetic_owner("PNUTUSDT", 0.08, true, "ma_crossover", Some(5.0));
         match outcome {
-            RetriageOutcome::Promoted { from, to, est_notional } => {
+            RetriageOutcome::Promoted {
+                from,
+                to,
+                est_notional,
+            } => {
                 assert_eq!(from, "orphan_frozen");
                 assert_eq!(to, "ma_crossover");
                 assert!((est_notional - 8.0).abs() < 1e-9);
             }
             other => panic!("expected Promoted, got {:?}", other),
         }
-        assert_eq!(s.get_position("PNUTUSDT").unwrap().owner_strategy, "ma_crossover");
+        assert_eq!(
+            s.get_position("PNUTUSDT").unwrap().owner_strategy,
+            "ma_crossover"
+        );
     }
 
     #[test]
@@ -2129,7 +2162,8 @@ mod tests {
         let mut s = PaperState::new(10_000.0);
         seed_bybit_sync(&mut s, &[("ETHUSDT", false, 0.5, 3000.0)]);
 
-        let outcome = s.retriage_synthetic_owner("ETHUSDT", 3000.0, true, "ma_crossover", Some(5.0));
+        let outcome =
+            s.retriage_synthetic_owner("ETHUSDT", 3000.0, true, "ma_crossover", Some(5.0));
         match outcome {
             RetriageOutcome::Promoted { from, to, .. } => {
                 assert_eq!(from, "bybit_sync");
@@ -2146,9 +2180,13 @@ mod tests {
         // orphan_adopted 也應在條件滿足時自動升級。
         let mut s = PaperState::new(10_000.0);
         assert!(s.adopt_orphan("BTCUSDT", true, 0.01, 50000.0, 1000, None));
-        assert_eq!(s.get_position("BTCUSDT").unwrap().owner_strategy, "orphan_adopted");
+        assert_eq!(
+            s.get_position("BTCUSDT").unwrap().owner_strategy,
+            "orphan_adopted"
+        );
 
-        let outcome = s.retriage_synthetic_owner("BTCUSDT", 50000.0, true, "ma_crossover", Some(5.0));
+        let outcome =
+            s.retriage_synthetic_owner("BTCUSDT", 50000.0, true, "ma_crossover", Some(5.0));
         match outcome {
             RetriageOutcome::Promoted { from, to, .. } => {
                 assert_eq!(from, "orphan_adopted");
@@ -2168,7 +2206,11 @@ mod tests {
 
         let outcome = s.retriage_synthetic_owner("OLDUSDT", 10.0, false, "ma_crossover", Some(5.0));
         match outcome {
-            RetriageOutcome::NeedsEviction { is_long, qty, est_notional } => {
+            RetriageOutcome::NeedsEviction {
+                is_long,
+                qty,
+                est_notional,
+            } => {
                 assert!(is_long);
                 assert!((qty - 5.0).abs() < 1e-9);
                 assert!((est_notional - 50.0).abs() < 1e-9);
@@ -2177,7 +2219,10 @@ mod tests {
         }
         // Position kept as-is until caller dispatches close + exchange settles.
         // 呼叫方派 close + 交易所結算前，倉位保留現狀。
-        assert_eq!(s.get_position("OLDUSDT").unwrap().owner_strategy, "bybit_sync");
+        assert_eq!(
+            s.get_position("OLDUSDT").unwrap().owner_strategy,
+            "bybit_sync"
+        );
     }
 
     #[test]
@@ -2199,7 +2244,10 @@ mod tests {
             s.retriage_synthetic_owner("BTCUSDT", -1.0, true, "ma_crossover", Some(5.0)),
             RetriageOutcome::NoOp
         );
-        assert_eq!(s.get_position("BTCUSDT").unwrap().owner_strategy, "bybit_sync");
+        assert_eq!(
+            s.get_position("BTCUSDT").unwrap().owner_strategy,
+            "bybit_sync"
+        );
     }
 
     #[test]
@@ -2236,8 +2284,7 @@ mod tests {
     #[test]
     fn adopt_orphan_custom_owner() {
         let mut s = PaperState::new(10_000.0);
-        let inserted =
-            s.adopt_orphan("BTCUSDT", true, 0.01, 50000.0, 1000, Some("ma_crossover"));
+        let inserted = s.adopt_orphan("BTCUSDT", true, 0.01, 50000.0, 1000, Some("ma_crossover"));
         assert!(inserted);
         let pos = s.get_position("BTCUSDT").unwrap();
         assert_eq!(pos.owner_strategy, "ma_crossover");

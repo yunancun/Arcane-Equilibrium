@@ -1,8 +1,12 @@
 //! on_tick pipeline processing — the core tick-by-tick orchestration loop.
 //! on_tick 管線處理 — 核心逐 tick 編排循環。
 
+use super::on_tick_helpers::{
+    build_intent, ft_reduce_cooldown_expired, make_context_id, make_fill_id, make_order_id,
+    make_signal_id, persist_intent, persist_verdict, push_capped, push_display_intent,
+    sigma_scaled_reduce_cooldown_ms, FT_REDUCE_COOLDOWN_MS,
+};
 use super::*;
-use super::on_tick_helpers::{push_capped, make_context_id, make_signal_id, make_fill_id, make_order_id, persist_verdict, persist_intent, push_display_intent, build_intent, ft_reduce_cooldown_expired, sigma_scaled_reduce_cooldown_ms, FT_REDUCE_COOLDOWN_MS};
 
 impl TickPipeline {
     /// Process a single price event through the full pipeline.
@@ -38,10 +42,8 @@ impl TickPipeline {
         if self.boot_ts_ms.is_none() {
             self.boot_ts_ms = Some(event.ts_ms);
         }
-        self.latest_prices
-            .insert(sym.clone(), event.last_price);
-        self.paper_state
-            .set_latest_price(sym, event.last_price);
+        self.latest_prices.insert(sym.clone(), event.last_price);
+        self.paper_state.set_latest_price(sym, event.last_price);
 
         // DUST-EVICTION-GAP-1 / P1-8 FUP (2026-04-17): opportunistic per-tick re-triage for
         // positions wearing a synthetic owner label (bybit_sync / orphan_adopted /
@@ -81,7 +83,7 @@ impl TickPipeline {
                     ts_ms: event.ts_ms,
                     symbol: sym.clone(),
                     last_price: event.last_price,
-                    mark_price: 0.0,  // not available in PriceEvent yet
+                    mark_price: 0.0, // not available in PriceEvent yet
                     index_price: event.index_price.unwrap_or(0.0),
                     best_bid: event.bid_price,
                     best_ask: event.ask_price,
@@ -100,14 +102,12 @@ impl TickPipeline {
         if event.event_kind.as_ref() == Some(&PriceEventKind::AdlNotice) {
             // P-02: Read structured field first, fall back to legacy metadata.
             // P-02：優先讀結構化欄位，回退到舊版 metadata。
-            let rank = event
-                .adl_rank
-                .or_else(|| {
-                    event
-                        .metadata
-                        .get("adl_rank")
-                        .and_then(|s| s.parse::<u32>().ok())
-                });
+            let rank = event.adl_rank.or_else(|| {
+                event
+                    .metadata
+                    .get("adl_rank")
+                    .and_then(|s| s.parse::<u32>().ok())
+            });
             if let Some(rank) = rank {
                 push_capped(&mut self.adl_alerts, (event.ts_ms, sym.clone(), rank), 50);
                 if rank >= 3 {
@@ -148,10 +148,19 @@ impl TickPipeline {
         let margin_utilization_pct = {
             let balance = self.paper_state.balance();
             if balance > 0.0 {
-                let total_notional: f64 = self.paper_state.positions().iter().map(|p| {
-                    let px = self.latest_prices.get(&p.symbol).copied().unwrap_or(p.entry_price);
-                    p.qty * px
-                }).sum();
+                let total_notional: f64 = self
+                    .paper_state
+                    .positions()
+                    .iter()
+                    .map(|p| {
+                        let px = self
+                            .latest_prices
+                            .get(&p.symbol)
+                            .copied()
+                            .unwrap_or(p.entry_price);
+                        p.qty * px
+                    })
+                    .sum();
                 let leverage = self
                     .intent_processor
                     .risk_config()
@@ -267,11 +276,7 @@ impl TickPipeline {
                     if *entry_notional <= 0.0 {
                         return true;
                     }
-                    let last_price = self
-                        .latest_prices
-                        .get(sym)
-                        .copied()
-                        .unwrap_or(0.0);
+                    let last_price = self.latest_prices.get(sym).copied().unwrap_or(0.0);
                     if last_price <= 0.0 {
                         return true;
                     }
@@ -323,8 +328,18 @@ impl TickPipeline {
                                     .get_entry_context_id(sym)
                                     .unwrap_or("")
                                     .to_string();
-                                let pnl = self.paper_state.reduce_position(sym, half_qty, close_price);
-                                self.emit_close_fill(sym, *is_long, half_qty, close_price, event.ts_ms, pnl, "risk_close:fast_track_reduce_half", &ectx);
+                                let pnl =
+                                    self.paper_state.reduce_position(sym, half_qty, close_price);
+                                self.emit_close_fill(
+                                    sym,
+                                    *is_long,
+                                    half_qty,
+                                    close_price,
+                                    event.ts_ms,
+                                    pnl,
+                                    "risk_close:fast_track_reduce_half",
+                                    &ectx,
+                                );
                                 // FIX-03b: dispatch exchange order for Demo/Live so
                                 // Bybit-side position matches local paper_state.
                                 // FIX-03b：Demo/Live 模式派發交易所訂單，避免本地狀態與交易所倉位脫節。
@@ -414,7 +429,16 @@ impl TickPipeline {
                 if let Some((il, q, px, pnl)) =
                     self.close_position_at_symbol_market(&sym, event.ts_ms)
                 {
-                    self.emit_close_fill(&sym, il, q, px, event.ts_ms, pnl, "risk_close:fast_track", &ectx);
+                    self.emit_close_fill(
+                        &sym,
+                        il,
+                        q,
+                        px,
+                        event.ts_ms,
+                        pnl,
+                        "risk_close:fast_track",
+                        &ectx,
+                    );
                 }
                 self.stats.total_stops += 1;
             }
@@ -458,13 +482,9 @@ impl TickPipeline {
 
         // Step 1: Kline aggregation — collect closed bars for DB write.
         // 步驟 1：K 線聚合 — 收集已關閉的 K 線用於 DB 寫入。
-        let closed_bars = self.kline_manager.on_tick(
-            sym,
-            event.last_price,
-            event.ts_ms,
-            event.volume_24h,
-            0.0,
-        );
+        let closed_bars =
+            self.kline_manager
+                .on_tick(sym, event.last_price, event.ts_ms, event.volume_24h, 0.0);
 
         // Phase 1: Emit KlineClose for each closed bar to market writer (F-2 audit fix).
         // Phase 1：為每根已關閉 K 線發送 KlineClose 到市場寫入器（F-2 審計修復）。
@@ -516,8 +536,7 @@ impl TickPipeline {
 
         // Store latest indicators for IPC snapshot / 存儲最新指標供 IPC 快照使用
         if let Some(ref ind) = indicators {
-            self.latest_indicators
-                .insert(sym.clone(), ind.clone());
+            self.latest_indicators.insert(sym.clone(), ind.clone());
         }
 
         // Phase 1: Emit FeatureSnapshot to DB writer channel (non-blocking try_send).
@@ -582,8 +601,7 @@ impl TickPipeline {
             vec![]
         } else if let Some(ref ind) = indicators {
             let input = snapshot_to_input(ind);
-            self.signal_engine
-                .evaluate(sym, "1m", &input, event.ts_ms)
+            self.signal_engine.evaluate(sym, "1m", &input, event.ts_ms)
         } else {
             vec![]
         };
@@ -711,11 +729,7 @@ impl TickPipeline {
             let block = match self.system_mode {
                 SystemMode::ObserveOnly | SystemMode::DesignOnly => true,
                 SystemMode::ShadowOnly if is_exchange_mode => true,
-                SystemMode::DemoReserved
-                    if self.pipeline_kind == PipelineKind::Live =>
-                {
-                    true
-                }
+                SystemMode::DemoReserved if self.pipeline_kind == PipelineKind::Live => true,
                 _ => false,
             };
             if block {
@@ -752,345 +766,413 @@ impl TickPipeline {
             );
             for action in &strategy_actions {
                 match action {
-                // ═══════════════════════════════════════════════════════════════
-                // StrategyAction::Open — full governance pipeline (unchanged)
-                // StrategyAction::Open — 完整治理管線（不變）
-                // ═══════════════════════════════════════════════════════════════
-                StrategyAction::Open(intent) => {
-                // FIX-03: fast_track ReduceToHalf/PauseNewEntries blocks new opens.
-                // FIX-03：快速通道暫停開倉時跳過所有新開倉意圖。
-                if ft_pause_new_entries {
-                    tracing::debug!(
-                        strategy = %strategy.name(),
-                        symbol = %intent.symbol,
-                        "FIX-03: new entry blocked by fast_track / 快速通道暫停開倉"
-                    );
-                    continue;
-                }
-                // SCANNER-GATE: block new opens on symbols not in scanner active universe.
-                // Prevents death-loop where strategy opens → reconciler closes → repeat.
-                // 掃描器門控：非活躍交易對不開新倉，防止開→平→開死循環。
-                if let Some(ref reg) = self.symbol_registry {
-                    if !reg.is_active(&intent.symbol) {
-                        tracing::debug!(
-                            strategy = %strategy.name(),
-                            symbol = %intent.symbol,
-                            "SCANNER-GATE: new entry blocked — symbol not in scanner universe"
-                        );
-                        continue;
-                    }
-                }
-                if is_exchange_mode {
-                    // ═══ EXCHANGE MODE: gates only, send order to exchange ═══
-                    // ═══ 交易所模式：僅過門禁，發送訂單到交易所 ═══
-                    // EDGE-P3-1 A5: build FeatureVectorV1 and pass into gates-only path.
-                    // Cost is cheap (17 fields from already-available context); gate is gated
-                    // by `cfg.use_edge_predictor=false` in Stage 0 so features are unused until
-                    // operator opts in.
-                    // EDGE-P3-1 A5：組裝 feature 向量；Stage 0 由 config 默認關閉 gate。
-                    let features = crate::edge_predictor::feature_builder::build_feature_vector(
-                        intent,
-                        event,
-                        indicators.as_ref(),
-                        atr_value,
-                        &self.paper_state,
-                    );
-                    let context_id = make_context_id(em, &intent.symbol, event.ts_ms);
-                    // P0-6 方案 A: endpoint-aware profile — LiveDemo must get
-                    // Validation (moderate cost gate, cold-start allowed); only
-                    // Live + Mainnet keeps Production (strict fail-closed).
-                    // Inlined to avoid borrow conflict with orchestrator mutable
-                    // iterator above (pipeline_kind/endpoint_env are Copy).
-                    // P0-6 方案 A：endpoint 感知 profile — LiveDemo 走 Validation。
-                    // 直接呼叫自由函式以避免與上方 orchestrator 可變迭代借用衝突。
-                    let profile = crate::mode_state::effective_governance_profile(
-                        self.pipeline_kind,
-                        self.endpoint_env,
-                    );
-                    let gate = self.intent_processor.process_gates_only_with_features(
-                        intent,
-                        &self.governance,
-                        &self.paper_state,
-                        atr_value,
-                        profile,
-                        Some(&features),
-                        Some(&context_id),
-                        event.ts_ms,
-                    );
-
-                    // S-01: persist verdict via extracted helper
-                    if let Some(ref vi) = gate.verdict_info {
-                        persist_verdict(&self.trading_tx, em, &intent.symbol, event.ts_ms, vi, em);
-                    }
-
-                    if gate.approved {
-
-                        self.exchange_seq = self.exchange_seq.wrapping_add(1);
-                        let order_link_id = format!("oc_{}_{}", event.ts_ms, self.exchange_seq);
-
-                        // Round to exchange precision / 取整至交易所精度
-                        let final_qty = if let Some(ref icache) = self.instrument_cache {
-                            if let Some(spec) = icache.get(&intent.symbol) {
-                                spec.round_qty(gate.approved_qty)
-                            } else {
-                                gate.approved_qty
-                            }
-                        } else {
-                            gate.approved_qty
-                        };
-
-                        // P0-2 fix: Skip if qty rounded to zero / 數量取整為零則跳過
-                        if final_qty <= 0.0 {
-                            warn!(symbol = %intent.symbol, "exchange order skipped: qty=0 after rounding");
+                    // ═══════════════════════════════════════════════════════════════
+                    // StrategyAction::Open — full governance pipeline (unchanged)
+                    // StrategyAction::Open — 完整治理管線（不變）
+                    // ═══════════════════════════════════════════════════════════════
+                    StrategyAction::Open(intent) => {
+                        // FIX-03: fast_track ReduceToHalf/PauseNewEntries blocks new opens.
+                        // FIX-03：快速通道暫停開倉時跳過所有新開倉意圖。
+                        if ft_pause_new_entries {
+                            tracing::debug!(
+                                strategy = %strategy.name(),
+                                symbol = %intent.symbol,
+                                "FIX-03: new entry blocked by fast_track / 快速通道暫停開倉"
+                            );
                             continue;
                         }
-
-                        // S-01+P-09: use helper to push display intent (M-2 post-cap qty)
-                        push_display_intent(&mut self.recent_intents, event.ts_ms, intent, Some(final_qty), format!("pending_exchange:{}", order_link_id));
-
-                        // Dispatch to exchange / 派發到交易所
-                        // I-08 雙軌止損：compute broker-side SL from stop config
-                        let sl_pct = self.paper_state.stop_config_pct();
-                        let broker_sl = if sl_pct > 0.0 {
-                            Some(if intent.is_long {
-                                event.last_price * (1.0 - sl_pct / 100.0)
-                            } else {
-                                event.last_price * (1.0 + sl_pct / 100.0)
-                            })
-                        } else {
-                            None
-                        };
-                        if let Some(ref tx) = self.order_dispatch_tx {
-                            let _ = tx.send(OrderDispatchRequest {
-                                symbol: intent.symbol.clone(),
-                                is_long: intent.is_long,
-                                qty: final_qty,
-                                price: event.last_price,
-                                strategy: intent.strategy.clone(),
-                                paper_fill_ts: event.ts_ms,
-                                is_close: false,
-                                order_link_id,
-                                is_primary: true,
-                                stop_loss: broker_sl,
-                                take_profit: None,
-                            });
-                            // FUP-RACE: proactively mark mirror so reconciler
-                            // won't orphan-close this position before the WS
-                            // Fill arrives.
-                            self.paper_state
-                                .proactive_mirror_insert(&intent.symbol, intent.is_long);
-                        }
-                    } else if let Some(ref reason) = gate.rejected_reason {
-                        strategy.on_rejection(intent, reason);
-                        let mq = gate.verdict_info.as_ref().and_then(|vi| vi.modified_qty);
-                        push_display_intent(&mut self.recent_intents, event.ts_ms, intent, mq, format!("rejected:{}", reason));
-                    }
-                } else {
-                    // ═══ PAPER_ONLY MODE: simulate fill locally + optional shadow order ═══
-                    // ═══ 紙盤模式：本地模擬成交 + 可選影子訂單 ═══
-                    // EDGE-P3-1 A5: mirror the exchange branch — build features + context_id.
-                    // EDGE-P3-1 A5：與交易所分支對齊，組裝 features + context_id。
-                    let features = crate::edge_predictor::feature_builder::build_feature_vector(
-                        intent,
-                        event,
-                        indicators.as_ref(),
-                        atr_value,
-                        &self.paper_state,
-                    );
-                    let context_id = make_context_id(em, &intent.symbol, event.ts_ms);
-                    // P0-6 方案 A: endpoint-aware profile (mirror of exchange
-                    // branch). LiveDemo → Validation; Live + Mainnet → Production.
-                    // Inlined free-fn call sidesteps orchestrator mutable borrow.
-                    // P0-6 方案 A：endpoint 感知（與交易所分支對齊）。
-                    // 直接走自由函式以避免借用衝突。
-                    let profile = crate::mode_state::effective_governance_profile(
-                        self.pipeline_kind,
-                        self.endpoint_env,
-                    );
-                    let result = self.intent_processor.process_with_features(
-                        intent,
-                        &self.governance,
-                        &self.paper_state,
-                        atr_value,
-                        profile,
-                        Some(&features),
-                        Some(&context_id),
-                        event.ts_ms,
-                    );
-
-                    // S-01: persist verdict via extracted helper
-                    if let Some(ref vi) = result.verdict_info {
-                        persist_verdict(&self.trading_tx, em, &intent.symbol, event.ts_ms, vi, em);
-                    }
-
-                    if result.submitted {
-                        self.stats.total_intents += 1;
-                        let mq = result.verdict_info.as_ref().and_then(|vi| vi.modified_qty);
-                        push_display_intent(&mut self.recent_intents, event.ts_ms, intent, mq, "submitted".into());
-                        // S-01: persist intent via extracted helper
-                        // FUP-8 Phase 2: pass result.approved_qty (post-Kelly/P1 sizing) so
-                        // paper's trading.intents.details.submitted_qty records the real sized
-                        // qty instead of the 1e9 sentinel that intent.qty carries. Mirrors the
-                        // exchange path at line ~643 which already passes gate.approved_qty.
-                        // FUP-8 Phase 2：傳 result.approved_qty（Kelly/P1 sizing 後）
-                        // 讓 paper 的 submitted_qty 記錄真實 sized qty，而非 intent.qty 攜帶的 1e9 sentinel。
-                        persist_intent(&self.trading_tx, em, event.ts_ms, intent, result.approved_qty, event.last_price, em);
-
-                        if let Some(mut fill) = result.fill {
-                            if let Some(ref icache) = self.instrument_cache {
-                                if let Some(spec) = icache.get(&intent.symbol) {
-                                    fill.fill_qty = spec.round_qty(fill.fill_qty);
-                                    fill.fill_price = spec.round_price(fill.fill_price);
-                                    // Paper min-qty fallback: if rounding reduced to 0, use min_qty
-                                    // so high-priced assets (BTC/ETH) can still accumulate fill data.
-                                    // Guard: min_qty notional must not exceed 10% of balance.
-                                    // Paper 最小手數後備：取整為 0 時使用 min_qty，
-                                    // 讓高價資產（BTC/ETH）仍能積累成交數據。
-                                    // 防護：min_qty 名義值不得超過餘額的 10%。
-                                    if fill.fill_qty <= 0.0 && spec.min_qty > 0.0 {
-                                        let notional = spec.min_qty * fill.fill_price;
-                                        let balance = self.paper_state.balance();
-                                        if notional <= balance * 0.10 {
-                                            info!(symbol = %intent.symbol, min_qty = spec.min_qty,
-                                                  "paper fill: qty rounded to 0, using min_qty fallback / 數量取整為 0，使用最小手數");
-                                            fill.fill_qty = spec.min_qty;
-                                        }
-                                    }
-                                }
-                            }
-                            // Guard: skip zero-qty fills (instrument rounding can reduce to 0)
-                            // 防護：跳過零數量成交（合約精度取整可能降為 0）
-                            if fill.fill_qty <= 0.0 {
-                                warn!(symbol = %intent.symbol, "paper fill skipped: qty=0 after rounding");
+                        // SCANNER-GATE: block new opens on symbols not in scanner active universe.
+                        // Prevents death-loop where strategy opens → reconciler closes → repeat.
+                        // 掃描器門控：非活躍交易對不開新倉，防止開→平→開死循環。
+                        if let Some(ref reg) = self.symbol_registry {
+                            if !reg.is_active(&intent.symbol) {
+                                tracing::debug!(
+                                    strategy = %strategy.name(),
+                                    symbol = %intent.symbol,
+                                    "SCANNER-GATE: new entry blocked — symbol not in scanner universe"
+                                );
                                 continue;
                             }
-                            strategy.on_fill(intent, &fill);
-                            // EDGE-P3-1 R2: detect whether this fill will open a fresh position
-                            // so we can thread the entry_context_id onto it after apply_fill.
-                            // apply_fill returns non-zero realized_pnl only on CLOSE; opening
-                            // or accumulating returns 0.0. For the "open" case we need to
-                            // distinguish from accumulate — if position did not exist before,
-                            // it's an open. EDGE-P3-1 R2：區分開倉 / 加倉 / 平倉，只在開新倉時
-                            // 打上 entry_context_id（加倉保留原 entry；平倉已被清）。
-                            let was_open = self
-                                .paper_state
-                                .get_position(&intent.symbol)
-                                .is_none();
-                            let realized_pnl = self.paper_state.apply_fill(
-                                &intent.symbol,
-                                intent.is_long,
-                                fill.fill_qty,
-                                fill.fill_price,
-                                fill.fee,
-                                event.ts_ms,
-                                &intent.strategy,
+                        }
+                        if is_exchange_mode {
+                            // ═══ EXCHANGE MODE: gates only, send order to exchange ═══
+                            // ═══ 交易所模式：僅過門禁，發送訂單到交易所 ═══
+                            // EDGE-P3-1 A5: build FeatureVectorV1 and pass into gates-only path.
+                            // Cost is cheap (17 fields from already-available context); gate is gated
+                            // by `cfg.use_edge_predictor=false` in Stage 0 so features are unused until
+                            // operator opts in.
+                            // EDGE-P3-1 A5：組裝 feature 向量；Stage 0 由 config 默認關閉 gate。
+                            let features =
+                                crate::edge_predictor::feature_builder::build_feature_vector(
+                                    intent,
+                                    event,
+                                    indicators.as_ref(),
+                                    atr_value,
+                                    &self.paper_state,
+                                );
+                            let context_id = make_context_id(em, &intent.symbol, event.ts_ms);
+                            // P0-6 方案 A: endpoint-aware profile — LiveDemo must get
+                            // Validation (moderate cost gate, cold-start allowed); only
+                            // Live + Mainnet keeps Production (strict fail-closed).
+                            // Inlined to avoid borrow conflict with orchestrator mutable
+                            // iterator above (pipeline_kind/endpoint_env are Copy).
+                            // P0-6 方案 A：endpoint 感知 profile — LiveDemo 走 Validation。
+                            // 直接呼叫自由函式以避免與上方 orchestrator 可變迭代借用衝突。
+                            let profile = crate::mode_state::effective_governance_profile(
+                                self.pipeline_kind,
+                                self.endpoint_env,
                             );
-                            // EDGE-P3-1 R2: stamp entry_context_id for fresh opens only.
-                            // Uses the same make_context_id signature used below for the
-                            // Fill row (same em, symbol, ts_ms → same context_id).
-                            // EDGE-P3-1 R2：僅開新倉時打 entry_context_id；加倉不覆蓋。
-                            if was_open && realized_pnl == 0.0 {
-                                let ctx = make_context_id(em, &intent.symbol, event.ts_ms);
-                                self.paper_state.set_entry_context_id(&intent.symbol, &ctx);
-                            }
-                            // DYNAMIC-RISK-1: non-zero realized_pnl is a close — feed sizer.
-                            // DYNAMIC-RISK-1：realized_pnl 非零代表平倉，餵入動態風險調整器。
-                            if realized_pnl != 0.0 {
-                                self.dynamic_risk_sizer.record_closed_trade(realized_pnl);
-                            }
-                            self.stats.total_fills += 1;
-                            push_capped(&mut self.recent_fills, TimestampedFill {
-                                timestamp_ms: event.ts_ms,
-                                symbol: intent.symbol.clone(),
-                                is_long: intent.is_long,
-                                qty: fill.fill_qty,
-                                price: fill.fill_price,
-                                fee: fill.fee,
-                                realized_pnl,
-                                strategy: intent.strategy.clone(),
-                            }, 50);
+                            let gate = self.intent_processor.process_gates_only_with_features(
+                                intent,
+                                &self.governance,
+                                &self.paper_state,
+                                atr_value,
+                                profile,
+                                Some(&features),
+                                Some(&context_id),
+                                event.ts_ms,
+                            );
 
-                            if let Some(ref tx) = self.trading_tx {
-                                // EDGE-P3-1 R2: this on_tick.rs path is the STRATEGY OPEN path
-                                // (reached via signal → intent → apply_fill). It produces open or
-                                // accumulate fills; close fills are emitted via emit_close_fill
-                                // on the risk/strategy/fast_track paths. Leave entry_context_id
-                                // empty here — the training JOIN reads it from close-fill rows.
-                                // EDGE-P3-1 R2：此處走策略開倉路徑，不產生平倉 fill；留空即可。
-                                let _ = tx.try_send(crate::database::TradingMsg::Fill {
-                                    fill_id: make_fill_id(em, &intent.symbol, event.ts_ms),
-                                    ts_ms: event.ts_ms,
-                                    order_id: make_order_id(em, &intent.symbol, event.ts_ms),
-                                    symbol: intent.symbol.clone(),
-                                    side: if intent.is_long {
-                                        "Buy".into()
-                                    } else {
-                                        "Sell".into()
-                                    },
-                                    qty: fill.fill_qty,
-                                    price: fill.fill_price,
-                                    fee: fill.fee,
-                                    fee_rate: self.intent_processor.fee_rate(&intent.symbol),
-                                    realized_pnl,
-                                    strategy_name: intent.strategy.clone(),
-                                    context_id: make_context_id(em, &intent.symbol, event.ts_ms),
-                                    entry_context_id: String::new(),
-                                    engine_mode: em.to_string(),
-                                });
+                            // S-01: persist verdict via extracted helper
+                            if let Some(ref vi) = gate.verdict_info {
+                                persist_verdict(
+                                    &self.trading_tx,
+                                    em,
+                                    &intent.symbol,
+                                    event.ts_ms,
+                                    vi,
+                                    em,
+                                );
                             }
 
-                            if let Some(ref tx) = self.stop_request_tx {
-                                if let Some(pos) = self.paper_state.get_position(&intent.symbol) {
-                                    let stop_pct = self.paper_state.stop_config_pct();
-                                    let sl_price = if pos.is_long {
-                                        pos.entry_price * (1.0 - stop_pct / 100.0)
-                                    } else {
-                                        pos.entry_price * (1.0 + stop_pct / 100.0)
-                                    };
-                                    let _ = tx.send(StopRequest {
-                                        symbol: intent.symbol.clone(),
-                                        stop_loss: sl_price,
-                                        is_long: pos.is_long,
-                                    });
-                                }
-                            }
-
-                            // Shadow order: mirror paper fill to Demo API
-                            if let Some(ref tx) = self.order_dispatch_tx {
+                            if gate.approved {
                                 self.exchange_seq = self.exchange_seq.wrapping_add(1);
-                                let _ = tx.send(OrderDispatchRequest {
-                                    symbol: intent.symbol.clone(),
-                                    is_long: intent.is_long,
-                                    qty: fill.fill_qty,
-                                    price: fill.fill_price,
-                                    strategy: intent.strategy.clone(),
-                                    paper_fill_ts: event.ts_ms,
-                                    is_close: false,
-                                    order_link_id: format!(
-                                        "sh_{}_{}",
-                                        event.ts_ms, self.exchange_seq
-                                    ),
-                                    is_primary: false,
-                                    stop_loss: None,
-                                    take_profit: None,
-                                });
+                                let order_link_id =
+                                    format!("oc_{}_{}", event.ts_ms, self.exchange_seq);
+
+                                // Round to exchange precision / 取整至交易所精度
+                                let final_qty = if let Some(ref icache) = self.instrument_cache {
+                                    if let Some(spec) = icache.get(&intent.symbol) {
+                                        spec.round_qty(gate.approved_qty)
+                                    } else {
+                                        gate.approved_qty
+                                    }
+                                } else {
+                                    gate.approved_qty
+                                };
+
+                                // P0-2 fix: Skip if qty rounded to zero / 數量取整為零則跳過
+                                if final_qty <= 0.0 {
+                                    warn!(symbol = %intent.symbol, "exchange order skipped: qty=0 after rounding");
+                                    continue;
+                                }
+
+                                // S-01+P-09: use helper to push display intent (M-2 post-cap qty)
+                                push_display_intent(
+                                    &mut self.recent_intents,
+                                    event.ts_ms,
+                                    intent,
+                                    Some(final_qty),
+                                    format!("pending_exchange:{}", order_link_id),
+                                );
+
+                                // Dispatch to exchange / 派發到交易所
+                                // I-08 雙軌止損：compute broker-side SL from stop config
+                                let sl_pct = self.paper_state.stop_config_pct();
+                                let broker_sl = if sl_pct > 0.0 {
+                                    Some(if intent.is_long {
+                                        event.last_price * (1.0 - sl_pct / 100.0)
+                                    } else {
+                                        event.last_price * (1.0 + sl_pct / 100.0)
+                                    })
+                                } else {
+                                    None
+                                };
+                                if let Some(ref tx) = self.order_dispatch_tx {
+                                    let _ = tx.send(OrderDispatchRequest {
+                                        symbol: intent.symbol.clone(),
+                                        is_long: intent.is_long,
+                                        qty: final_qty,
+                                        price: event.last_price,
+                                        strategy: intent.strategy.clone(),
+                                        paper_fill_ts: event.ts_ms,
+                                        is_close: false,
+                                        order_link_id,
+                                        is_primary: true,
+                                        stop_loss: broker_sl,
+                                        take_profit: None,
+                                    });
+                                    // FUP-RACE: proactively mark mirror so reconciler
+                                    // won't orphan-close this position before the WS
+                                    // Fill arrives.
+                                    self.paper_state
+                                        .proactive_mirror_insert(&intent.symbol, intent.is_long);
+                                }
+                            } else if let Some(ref reason) = gate.rejected_reason {
+                                strategy.on_rejection(intent, reason);
+                                let mq = gate.verdict_info.as_ref().and_then(|vi| vi.modified_qty);
+                                push_display_intent(
+                                    &mut self.recent_intents,
+                                    event.ts_ms,
+                                    intent,
+                                    mq,
+                                    format!("rejected:{}", reason),
+                                );
+                            }
+                        } else {
+                            // ═══ PAPER_ONLY MODE: simulate fill locally + optional shadow order ═══
+                            // ═══ 紙盤模式：本地模擬成交 + 可選影子訂單 ═══
+                            // EDGE-P3-1 A5: mirror the exchange branch — build features + context_id.
+                            // EDGE-P3-1 A5：與交易所分支對齊，組裝 features + context_id。
+                            let features =
+                                crate::edge_predictor::feature_builder::build_feature_vector(
+                                    intent,
+                                    event,
+                                    indicators.as_ref(),
+                                    atr_value,
+                                    &self.paper_state,
+                                );
+                            let context_id = make_context_id(em, &intent.symbol, event.ts_ms);
+                            // P0-6 方案 A: endpoint-aware profile (mirror of exchange
+                            // branch). LiveDemo → Validation; Live + Mainnet → Production.
+                            // Inlined free-fn call sidesteps orchestrator mutable borrow.
+                            // P0-6 方案 A：endpoint 感知（與交易所分支對齊）。
+                            // 直接走自由函式以避免借用衝突。
+                            let profile = crate::mode_state::effective_governance_profile(
+                                self.pipeline_kind,
+                                self.endpoint_env,
+                            );
+                            let result = self.intent_processor.process_with_features(
+                                intent,
+                                &self.governance,
+                                &self.paper_state,
+                                atr_value,
+                                profile,
+                                Some(&features),
+                                Some(&context_id),
+                                event.ts_ms,
+                            );
+
+                            // S-01: persist verdict via extracted helper
+                            if let Some(ref vi) = result.verdict_info {
+                                persist_verdict(
+                                    &self.trading_tx,
+                                    em,
+                                    &intent.symbol,
+                                    event.ts_ms,
+                                    vi,
+                                    em,
+                                );
+                            }
+
+                            if result.submitted {
+                                self.stats.total_intents += 1;
+                                let mq =
+                                    result.verdict_info.as_ref().and_then(|vi| vi.modified_qty);
+                                push_display_intent(
+                                    &mut self.recent_intents,
+                                    event.ts_ms,
+                                    intent,
+                                    mq,
+                                    "submitted".into(),
+                                );
+                                // S-01: persist intent via extracted helper
+                                // FUP-8 Phase 2: pass result.approved_qty (post-Kelly/P1 sizing) so
+                                // paper's trading.intents.details.submitted_qty records the real sized
+                                // qty instead of the 1e9 sentinel that intent.qty carries. Mirrors the
+                                // exchange path at line ~643 which already passes gate.approved_qty.
+                                // FUP-8 Phase 2：傳 result.approved_qty（Kelly/P1 sizing 後）
+                                // 讓 paper 的 submitted_qty 記錄真實 sized qty，而非 intent.qty 攜帶的 1e9 sentinel。
+                                persist_intent(
+                                    &self.trading_tx,
+                                    em,
+                                    event.ts_ms,
+                                    intent,
+                                    result.approved_qty,
+                                    event.last_price,
+                                    em,
+                                );
+
+                                if let Some(mut fill) = result.fill {
+                                    if let Some(ref icache) = self.instrument_cache {
+                                        if let Some(spec) = icache.get(&intent.symbol) {
+                                            fill.fill_qty = spec.round_qty(fill.fill_qty);
+                                            fill.fill_price = spec.round_price(fill.fill_price);
+                                            // Paper min-qty fallback: if rounding reduced to 0, use min_qty
+                                            // so high-priced assets (BTC/ETH) can still accumulate fill data.
+                                            // Guard: min_qty notional must not exceed 10% of balance.
+                                            // Paper 最小手數後備：取整為 0 時使用 min_qty，
+                                            // 讓高價資產（BTC/ETH）仍能積累成交數據。
+                                            // 防護：min_qty 名義值不得超過餘額的 10%。
+                                            if fill.fill_qty <= 0.0 && spec.min_qty > 0.0 {
+                                                let notional = spec.min_qty * fill.fill_price;
+                                                let balance = self.paper_state.balance();
+                                                if notional <= balance * 0.10 {
+                                                    info!(symbol = %intent.symbol, min_qty = spec.min_qty,
+                                                  "paper fill: qty rounded to 0, using min_qty fallback / 數量取整為 0，使用最小手數");
+                                                    fill.fill_qty = spec.min_qty;
+                                                }
+                                            }
+                                        }
+                                    }
+                                    // Guard: skip zero-qty fills (instrument rounding can reduce to 0)
+                                    // 防護：跳過零數量成交（合約精度取整可能降為 0）
+                                    if fill.fill_qty <= 0.0 {
+                                        warn!(symbol = %intent.symbol, "paper fill skipped: qty=0 after rounding");
+                                        continue;
+                                    }
+                                    strategy.on_fill(intent, &fill);
+                                    // EDGE-P3-1 R2: detect whether this fill will open a fresh position
+                                    // so we can thread the entry_context_id onto it after apply_fill.
+                                    // apply_fill returns non-zero realized_pnl only on CLOSE; opening
+                                    // or accumulating returns 0.0. For the "open" case we need to
+                                    // distinguish from accumulate — if position did not exist before,
+                                    // it's an open. EDGE-P3-1 R2：區分開倉 / 加倉 / 平倉，只在開新倉時
+                                    // 打上 entry_context_id（加倉保留原 entry；平倉已被清）。
+                                    let was_open =
+                                        self.paper_state.get_position(&intent.symbol).is_none();
+                                    let realized_pnl = self.paper_state.apply_fill(
+                                        &intent.symbol,
+                                        intent.is_long,
+                                        fill.fill_qty,
+                                        fill.fill_price,
+                                        fill.fee,
+                                        event.ts_ms,
+                                        &intent.strategy,
+                                    );
+                                    // EDGE-P3-1 R2: stamp entry_context_id for fresh opens only.
+                                    // Uses the same make_context_id signature used below for the
+                                    // Fill row (same em, symbol, ts_ms → same context_id).
+                                    // EDGE-P3-1 R2：僅開新倉時打 entry_context_id；加倉不覆蓋。
+                                    if was_open && realized_pnl == 0.0 {
+                                        let ctx = make_context_id(em, &intent.symbol, event.ts_ms);
+                                        self.paper_state.set_entry_context_id(&intent.symbol, &ctx);
+                                    }
+                                    // DYNAMIC-RISK-1: non-zero realized_pnl is a close — feed sizer.
+                                    // DYNAMIC-RISK-1：realized_pnl 非零代表平倉，餵入動態風險調整器。
+                                    if realized_pnl != 0.0 {
+                                        self.dynamic_risk_sizer.record_closed_trade(realized_pnl);
+                                    }
+                                    self.stats.total_fills += 1;
+                                    push_capped(
+                                        &mut self.recent_fills,
+                                        TimestampedFill {
+                                            timestamp_ms: event.ts_ms,
+                                            symbol: intent.symbol.clone(),
+                                            is_long: intent.is_long,
+                                            qty: fill.fill_qty,
+                                            price: fill.fill_price,
+                                            fee: fill.fee,
+                                            realized_pnl,
+                                            strategy: intent.strategy.clone(),
+                                        },
+                                        50,
+                                    );
+
+                                    if let Some(ref tx) = self.trading_tx {
+                                        // EDGE-P3-1 R2: this on_tick.rs path is the STRATEGY OPEN path
+                                        // (reached via signal → intent → apply_fill). It produces open or
+                                        // accumulate fills; close fills are emitted via emit_close_fill
+                                        // on the risk/strategy/fast_track paths. Leave entry_context_id
+                                        // empty here — the training JOIN reads it from close-fill rows.
+                                        // EDGE-P3-1 R2：此處走策略開倉路徑，不產生平倉 fill；留空即可。
+                                        let _ = tx.try_send(crate::database::TradingMsg::Fill {
+                                            fill_id: make_fill_id(em, &intent.symbol, event.ts_ms),
+                                            ts_ms: event.ts_ms,
+                                            order_id: make_order_id(
+                                                em,
+                                                &intent.symbol,
+                                                event.ts_ms,
+                                            ),
+                                            symbol: intent.symbol.clone(),
+                                            side: if intent.is_long {
+                                                "Buy".into()
+                                            } else {
+                                                "Sell".into()
+                                            },
+                                            qty: fill.fill_qty,
+                                            price: fill.fill_price,
+                                            fee: fill.fee,
+                                            fee_rate: self
+                                                .intent_processor
+                                                .fee_rate(&intent.symbol),
+                                            realized_pnl,
+                                            strategy_name: intent.strategy.clone(),
+                                            context_id: make_context_id(
+                                                em,
+                                                &intent.symbol,
+                                                event.ts_ms,
+                                            ),
+                                            entry_context_id: String::new(),
+                                            engine_mode: em.to_string(),
+                                        });
+                                    }
+
+                                    if let Some(ref tx) = self.stop_request_tx {
+                                        if let Some(pos) =
+                                            self.paper_state.get_position(&intent.symbol)
+                                        {
+                                            let stop_pct = self.paper_state.stop_config_pct();
+                                            let sl_price = if pos.is_long {
+                                                pos.entry_price * (1.0 - stop_pct / 100.0)
+                                            } else {
+                                                pos.entry_price * (1.0 + stop_pct / 100.0)
+                                            };
+                                            let _ = tx.send(StopRequest {
+                                                symbol: intent.symbol.clone(),
+                                                stop_loss: sl_price,
+                                                is_long: pos.is_long,
+                                            });
+                                        }
+                                    }
+
+                                    // Shadow order: mirror paper fill to Demo API
+                                    if let Some(ref tx) = self.order_dispatch_tx {
+                                        self.exchange_seq = self.exchange_seq.wrapping_add(1);
+                                        let _ = tx.send(OrderDispatchRequest {
+                                            symbol: intent.symbol.clone(),
+                                            is_long: intent.is_long,
+                                            qty: fill.fill_qty,
+                                            price: fill.fill_price,
+                                            strategy: intent.strategy.clone(),
+                                            paper_fill_ts: event.ts_ms,
+                                            is_close: false,
+                                            order_link_id: format!(
+                                                "sh_{}_{}",
+                                                event.ts_ms, self.exchange_seq
+                                            ),
+                                            is_primary: false,
+                                            stop_loss: None,
+                                            take_profit: None,
+                                        });
+                                    }
+                                }
+                            } else if let Some(ref reason) = result.rejected_reason {
+                                strategy.on_rejection(intent, reason);
+                                let mq =
+                                    result.verdict_info.as_ref().and_then(|vi| vi.modified_qty);
+                                push_display_intent(
+                                    &mut self.recent_intents,
+                                    event.ts_ms,
+                                    intent,
+                                    mq,
+                                    format!("rejected:{}", reason),
+                                );
                             }
                         }
-                    } else if let Some(ref reason) = result.rejected_reason {
-                        strategy.on_rejection(intent, reason);
-                        let mq = result.verdict_info.as_ref().and_then(|vi| vi.modified_qty);
-                        push_display_intent(&mut self.recent_intents, event.ts_ms, intent, mq, format!("rejected:{}", reason));
-                    }
-                }
-                intents.push(intent.clone());
-                } // end StrategyAction::Open
+                        intents.push(intent.clone());
+                    } // end StrategyAction::Open
 
-                // StrategyAction::Close — collected for deferred execution after strategy loop
-                // (borrow checker: strategies_mut() borrows self, can't call self methods inline)
-                // StrategyAction::Close — 收集後在策略循環結束後延遲執行
-                StrategyAction::Close { symbol, confidence: _, reason } => {
-                    pending_strategy_closes.push((symbol.clone(), reason.clone()));
-                }
+                    // StrategyAction::Close — collected for deferred execution after strategy loop
+                    // (borrow checker: strategies_mut() borrows self, can't call self methods inline)
+                    // StrategyAction::Close — 收集後在策略循環結束後延遲執行
+                    StrategyAction::Close {
+                        symbol,
+                        confidence: _,
+                        reason,
+                    } => {
+                        pending_strategy_closes.push((symbol.clone(), reason.clone()));
+                    }
                 } // end match
             }
         }
@@ -1120,7 +1202,13 @@ impl TickPipeline {
             if is_exchange_mode {
                 if self.pending_close_symbols.contains(symbol) {
                     warn!(symbol = %symbol, reason = %reason, "strategy close skipped: pending close exists / 策略平倉跳過：已有待處理平倉");
-                    push_display_intent(&mut self.recent_intents, event.ts_ms, &close_intent, None, format!("close_skipped:pending_{reason}"));
+                    push_display_intent(
+                        &mut self.recent_intents,
+                        event.ts_ms,
+                        &close_intent,
+                        None,
+                        format!("close_skipped:pending_{reason}"),
+                    );
                     close_skipped_symbols.push(symbol.clone());
                     continue;
                 }
@@ -1131,11 +1219,23 @@ impl TickPipeline {
                           "strategy close → exchange / 策略平倉 → 交易所");
                     let tag = format!("strategy_close:{reason}");
                     self.execute_position_close(symbol, is_long, qty, event, true, &tag);
-                    push_display_intent(&mut self.recent_intents, event.ts_ms, &close_intent, None, format!("close_dispatched:{reason}"));
+                    push_display_intent(
+                        &mut self.recent_intents,
+                        event.ts_ms,
+                        &close_intent,
+                        None,
+                        format!("close_dispatched:{reason}"),
+                    );
                     close_confirmed_symbols.push(symbol.clone());
                 } else {
                     warn!(symbol = %symbol, reason = %reason, "strategy close skipped: no position found / 策略平倉跳過：未找到倉位");
-                    push_display_intent(&mut self.recent_intents, event.ts_ms, &close_intent, None, format!("close_skipped:no_position_{reason}"));
+                    push_display_intent(
+                        &mut self.recent_intents,
+                        event.ts_ms,
+                        &close_intent,
+                        None,
+                        format!("close_skipped:no_position_{reason}"),
+                    );
                     close_skipped_symbols.push(symbol.clone());
                 }
             } else {
@@ -1155,7 +1255,16 @@ impl TickPipeline {
                         self.close_position_at_symbol_market(symbol, event.ts_ms)
                     {
                         let tag = format!("strategy_close:{reason}");
-                        self.emit_close_fill(symbol, is_long, qty, close_px, event.ts_ms, pnl, &tag, &ectx);
+                        self.emit_close_fill(
+                            symbol,
+                            is_long,
+                            qty,
+                            close_px,
+                            event.ts_ms,
+                            pnl,
+                            &tag,
+                            &ectx,
+                        );
                         // Update Kelly stats for future sizing / 更新 Kelly 統計供未來 sizing 使用
                         self.intent_processor.record_trade(symbol, pnl);
                         // Track consecutive losses for risk evaluator
@@ -1169,11 +1278,23 @@ impl TickPipeline {
                     // Shadow order: mirror close to Demo API / 影子訂單：鏡像平倉到 Demo API
                     let tag = format!("strategy_close:{reason}");
                     self.execute_position_close(symbol, is_long, qty, event, false, &tag);
-                    push_display_intent(&mut self.recent_intents, event.ts_ms, &close_intent, None, format!("close_filled:{reason}"));
+                    push_display_intent(
+                        &mut self.recent_intents,
+                        event.ts_ms,
+                        &close_intent,
+                        None,
+                        format!("close_filled:{reason}"),
+                    );
                     close_confirmed_symbols.push(symbol.clone());
                 } else {
                     warn!(symbol = %symbol, reason = %reason, "strategy close skipped: no position found / 策略平倉跳過：未找到倉位");
-                    push_display_intent(&mut self.recent_intents, event.ts_ms, &close_intent, None, format!("close_skipped:no_position_{reason}"));
+                    push_display_intent(
+                        &mut self.recent_intents,
+                        event.ts_ms,
+                        &close_intent,
+                        None,
+                        format!("close_skipped:no_position_{reason}"),
+                    );
                     close_skipped_symbols.push(symbol.clone());
                 }
             }
@@ -1294,7 +1415,16 @@ impl TickPipeline {
                             self.close_position_at_symbol_market(symbol, event.ts_ms)
                         {
                             let tag = format!("risk_close:{reason}");
-                            self.emit_close_fill(symbol, *is_long, *qty, close_px, event.ts_ms, pnl, &tag, &ectx);
+                            self.emit_close_fill(
+                                symbol,
+                                *is_long,
+                                *qty,
+                                close_px,
+                                event.ts_ms,
+                                pnl,
+                                &tag,
+                                &ectx,
+                            );
                             // P1-2 fix: update Kelly stats for risk-close (pre-existing omission).
                             // P1-2 修復：風控平倉也更新 Kelly 統計（既有遺漏）。
                             self.intent_processor.record_trade(symbol, pnl);
@@ -1333,13 +1463,20 @@ impl TickPipeline {
                             .get_entry_context_id(sym)
                             .unwrap_or("")
                             .to_string();
-                        if let Some(pnl) =
-                            self.paper_state.close_position(sym, px, event.ts_ms)
-                        {
+                        if let Some(pnl) = self.paper_state.close_position(sym, px, event.ts_ms) {
                             // DYNAMIC-RISK-1: halt-session close is still a realized PnL event.
                             // DYNAMIC-RISK-1：HaltSession 平倉仍算實現 PnL 事件。
                             self.dynamic_risk_sizer.record_closed_trade(pnl);
-                            self.emit_close_fill(sym, *il, *q, px, event.ts_ms, pnl, "risk_close:halt_session", &ectx);
+                            self.emit_close_fill(
+                                sym,
+                                *il,
+                                *q,
+                                px,
+                                event.ts_ms,
+                                pnl,
+                                "risk_close:halt_session",
+                                &ectx,
+                            );
                         }
                         self.stats.total_stops += 1;
                         self.execute_position_close(

@@ -212,7 +212,11 @@ pub(crate) fn persist_intent(
             signal_id: String::new(),
             context_id: make_context_id(em, &intent.symbol, ts_ms),
             symbol: intent.symbol.clone(),
-            side: if intent.is_long { "Buy".into() } else { "Sell".into() },
+            side: if intent.is_long {
+                "Buy".into()
+            } else {
+                "Sell".into()
+            },
             qty: approved_qty,
             price,
             order_type: intent.order_type.clone(),
@@ -239,11 +243,15 @@ pub(crate) fn push_display_intent(
     if let Some(q) = display_qty {
         di.qty = q;
     }
-    push_capped(buf, TimestampedIntent {
-        timestamp_ms: ts_ms,
-        intent: di,
-        result,
-    }, 50);
+    push_capped(
+        buf,
+        TimestampedIntent {
+            timestamp_ms: ts_ms,
+            intent: di,
+            result,
+        },
+        50,
+    );
 }
 
 impl TickPipeline {
@@ -353,12 +361,10 @@ impl TickPipeline {
                     })
                     .unwrap_or_default();
                 if !bids.is_empty() && !asks.is_empty() {
-                    if let Some(msg) = self.ob_aggregator.record(
-                        &event.symbol,
-                        &bids,
-                        &asks,
-                        event.ts_ms,
-                    ) {
+                    if let Some(msg) =
+                        self.ob_aggregator
+                            .record(&event.symbol, &bids, &asks, event.ts_ms)
+                    {
                         if let Some(ref tx) = self.market_data_tx {
                             let _ = tx.try_send(msg);
                         }

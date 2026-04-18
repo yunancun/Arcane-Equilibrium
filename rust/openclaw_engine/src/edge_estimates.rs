@@ -80,23 +80,23 @@ impl EdgeEstimates {
                 continue;
             }
             if let Some(bps) = val.get("shrunk_bps").and_then(|v| v.as_f64()) {
-                let win_rate = val.get("win_rate_shrunk")
+                let win_rate = val
+                    .get("win_rate_shrunk")
                     .or_else(|| val.get("win_rate"))
                     .and_then(|v| v.as_f64())
                     .unwrap_or(0.5)
                     .clamp(0.0, 1.0);
-                let n_trades = val.get("n")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(0);
-                let std_bps = val.get("std_bps")
-                    .and_then(|v| v.as_f64())
-                    .unwrap_or(0.0);
-                data.insert(key.clone(), CellEstimate {
-                    shrunk_bps: bps,
-                    win_rate,
-                    n_trades,
-                    std_bps,
-                });
+                let n_trades = val.get("n").and_then(|v| v.as_u64()).unwrap_or(0);
+                let std_bps = val.get("std_bps").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                data.insert(
+                    key.clone(),
+                    CellEstimate {
+                        shrunk_bps: bps,
+                        win_rate,
+                        n_trades,
+                        std_bps,
+                    },
+                );
             }
         }
 
@@ -108,7 +108,11 @@ impl EdgeEstimates {
             "PH5-WIRE-1: edge estimates loaded / 邊際估計已加載"
         );
 
-        Some(Self { data, grand_mean_bps, n_cells })
+        Some(Self {
+            data,
+            grand_mean_bps,
+            n_cells,
+        })
     }
 
     /// Load from a JSON string (convenience for tests and inline initialization).
@@ -132,35 +136,42 @@ impl EdgeEstimates {
                 continue;
             }
             if let Some(bps) = val.get("shrunk_bps").and_then(|v| v.as_f64()) {
-                let win_rate = val.get("win_rate_shrunk")
+                let win_rate = val
+                    .get("win_rate_shrunk")
                     .or_else(|| val.get("win_rate"))
                     .and_then(|v| v.as_f64())
                     .unwrap_or(0.5)
                     .clamp(0.0, 1.0);
-                let n_trades = val.get("n")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(0);
-                let std_bps = val.get("std_bps")
-                    .and_then(|v| v.as_f64())
-                    .unwrap_or(0.0);
-                data.insert(key.clone(), CellEstimate {
-                    shrunk_bps: bps,
-                    win_rate,
-                    n_trades,
-                    std_bps,
-                });
+                let n_trades = val.get("n").and_then(|v| v.as_u64()).unwrap_or(0);
+                let std_bps = val.get("std_bps").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                data.insert(
+                    key.clone(),
+                    CellEstimate {
+                        shrunk_bps: bps,
+                        win_rate,
+                        n_trades,
+                        std_bps,
+                    },
+                );
             }
         }
 
         let n_cells = data.len();
-        Some(Self { data, grand_mean_bps, n_cells })
+        Some(Self {
+            data,
+            grand_mean_bps,
+            n_cells,
+        })
     }
 
     /// Load from OPENCLAW_EDGE_SNAPSHOT env var or default path.
     /// Silently returns empty on missing file (cold-start).
     /// 從環境變量或默認路徑加載。文件缺失時靜默返回空值（冷啟動）。
     pub fn load_from_env_or_default(base_dir: impl AsRef<Path>) -> Self {
-        let default_path = base_dir.as_ref().join("settings").join("edge_estimates.json");
+        let default_path = base_dir
+            .as_ref()
+            .join("settings")
+            .join("edge_estimates.json");
         let path = std::env::var("OPENCLAW_EDGE_SNAPSHOT")
             .map(std::path::PathBuf::from)
             .unwrap_or(default_path);
@@ -182,7 +193,7 @@ impl EdgeEstimates {
     pub fn load_for_mode(base_dir: impl AsRef<Path>, mode: &str) -> Self {
         let filename = match mode {
             "paper" => "edge_estimates_paper.json",
-            _       => "edge_estimates.json",  // demo + live share production estimates
+            _ => "edge_estimates.json", // demo + live share production estimates
         };
         let path = base_dir.as_ref().join("settings").join(filename);
 
@@ -294,7 +305,7 @@ mod tests {
         let e = EdgeEstimates::load_from_str(sample_json()).unwrap();
         let cell = e.get_cell("grid_trading", "SOLUSDT").unwrap();
         assert!((cell.win_rate - 0.5).abs() < 1e-10); // default 0.5
-        assert!((cell.std_bps - 0.0).abs() < 1e-10);  // default 0.0
+        assert!((cell.std_bps - 0.0).abs() < 1e-10); // default 0.0
     }
 
     #[test]

@@ -381,8 +381,20 @@ mod tests {
     #[test]
     fn test_trade_aggregator_large_trade_flag() {
         let mut agg = TradeAggregator::new();
-        agg.record("BTCUSDT", TradeSide::Buy, LARGE_TRADE_QTY + 1.0, 50_000.0, 0);
-        agg.record("BTCUSDT", TradeSide::Sell, LARGE_TRADE_QTY * 2.0, 50_000.0, 0);
+        agg.record(
+            "BTCUSDT",
+            TradeSide::Buy,
+            LARGE_TRADE_QTY + 1.0,
+            50_000.0,
+            0,
+        );
+        agg.record(
+            "BTCUSDT",
+            TradeSide::Sell,
+            LARGE_TRADE_QTY * 2.0,
+            50_000.0,
+            0,
+        );
         agg.record("BTCUSDT", TradeSide::Buy, 0.5, 50_000.0, 0);
         let drained = agg.drain();
         assert_eq!(drained.len(), 1);
@@ -443,7 +455,7 @@ mod tests {
                 assert!((bid_depth_5 - 15.0).abs() < 1e-9);
                 assert!((ask_depth_5 - 10.5).abs() < 1e-9);
                 assert!(imbalance_ratio > 0.0); // bid-heavy
-                // spread = 0.5 / 100.25 * 10000 ≈ 49.875
+                                                // spread = 0.5 / 100.25 * 10000 ≈ 49.875
                 assert!((spread_bps - 0.5 / 100.25 * 10_000.0).abs() < 1e-6);
             }
             _ => panic!("expected ObSnapshot"),

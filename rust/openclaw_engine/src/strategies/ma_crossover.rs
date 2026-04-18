@@ -463,7 +463,8 @@ impl MaCrossover {
             Some(&prev) => alpha * sma_50 + (1.0 - alpha) * prev,
         };
         self.higher_tf_sma.insert(symbol.to_string(), new_val);
-        self.higher_tf_trend.insert(symbol.to_string(), sma_50 > new_val);
+        self.higher_tf_trend
+            .insert(symbol.to_string(), sma_50 > new_val);
     }
 
     /// Dynamic confidence: ADX excess + Hurst regime fit.
@@ -577,12 +578,20 @@ impl Strategy for MaCrossover {
         let sym = &intent.symbol;
         if let Some(prev) = self.prev_position.get(sym) {
             match prev {
-                Some(b) => { self.positions.insert(sym.clone(), *b); }
-                None => { self.positions.remove(sym); }
+                Some(b) => {
+                    self.positions.insert(sym.clone(), *b);
+                }
+                None => {
+                    self.positions.remove(sym);
+                }
             }
         }
         if let Some(&ts) = self.prev_last_trade_ms.get(sym) {
-            if ts == 0 { self.last_trade_ms.remove(sym); } else { self.last_trade_ms.insert(sym.clone(), ts); }
+            if ts == 0 {
+                self.last_trade_ms.remove(sym);
+            } else {
+                self.last_trade_ms.insert(sym.clone(), ts);
+            }
         }
     }
 
@@ -642,8 +651,12 @@ impl Strategy for MaCrossover {
 
         // RC-04: Snapshot per-symbol state before any mutation for rejection rollback.
         // RC-04：在任何變更前快照該幣種狀態，供拒絕回滾使用。
-        self.prev_position.insert(ctx.symbol.to_string(), self.positions.get(ctx.symbol).copied());
-        self.prev_last_trade_ms.insert(ctx.symbol.to_string(), last_ms);
+        self.prev_position.insert(
+            ctx.symbol.to_string(),
+            self.positions.get(ctx.symbol).copied(),
+        );
+        self.prev_last_trade_ms
+            .insert(ctx.symbol.to_string(), last_ms);
 
         match self.positions.get(ctx.symbol).copied() {
             None => {
@@ -882,7 +895,13 @@ mod tests {
 
     /// Helper: build a TickContext with sma_50 for higher-TF testing.
     /// 輔助函數：用 sma_50 構建 TickContext 以測試較高時間框架。
-    fn ctx_with_sma50(sma_20: f64, kama: f64, adx: f64, ts: u64, sma_50: f64) -> TickContext<'static> {
+    fn ctx_with_sma50(
+        sma_20: f64,
+        kama: f64,
+        adx: f64,
+        ts: u64,
+        sma_50: f64,
+    ) -> TickContext<'static> {
         let ind = Box::leak(Box::new(IndicatorSnapshot {
             sma_20: Some(sma_20),
             sma_50: Some(sma_50),
@@ -916,14 +935,14 @@ mod tests {
     #[test]
     fn test_no_signal_low_adx() {
         let mut s = MaCrossover::new();
-        s.min_persistence_ms = 0;  // disable persistence for unit tests
+        s.min_persistence_ms = 0; // disable persistence for unit tests
         assert!(s.on_tick(&ctx_with(100.0, 101.0, 15.0, 0)).is_empty());
     }
 
     #[test]
     fn test_long_entry() {
         let mut s = MaCrossover::new();
-        s.min_persistence_ms = 0;  // disable persistence for unit tests
+        s.min_persistence_ms = 0; // disable persistence for unit tests
         let i = s.on_tick(&ctx_with(100.0, 101.0, 25.0, 0));
         assert_eq!(i.len(), 1);
         match &i[0] {
@@ -935,7 +954,7 @@ mod tests {
     #[test]
     fn test_exit_on_reverse() {
         let mut s = MaCrossover::new();
-        s.min_persistence_ms = 0;  // disable persistence for unit tests
+        s.min_persistence_ms = 0; // disable persistence for unit tests
         s.on_tick(&ctx_with(100.0, 101.0, 25.0, 0));
         let i = s.on_tick(&ctx_with(101.0, 100.0, 25.0, 500_000));
         assert_eq!(i.len(), 1);
@@ -957,9 +976,9 @@ mod tests {
     #[test]
     fn test_regime_filter_blocks_mean_reverting() {
         let mut s = MaCrossover::new();
-        s.min_persistence_ms = 0;  // disable persistence for unit tests
-        // fast(kama=101) > slow(sma_20=100), ADX=25 → would normally enter long.
-        // 快線 > 慢線, ADX 足夠 → 正常情況會做多入場。
+        s.min_persistence_ms = 0; // disable persistence for unit tests
+                                  // fast(kama=101) > slow(sma_20=100), ADX=25 → would normally enter long.
+                                  // 快線 > 慢線, ADX 足夠 → 正常情況會做多入場。
         let ctx = ctx_with_hurst(100.0, 101.0, 25.0, 0, "mean_reverting", 0.35);
         let intents = s.on_tick(&ctx);
         assert!(
@@ -973,7 +992,7 @@ mod tests {
     #[test]
     fn test_regime_filter_allows_trending() {
         let mut s = MaCrossover::new();
-        s.min_persistence_ms = 0;  // disable persistence for unit tests
+        s.min_persistence_ms = 0; // disable persistence for unit tests
         let ctx = ctx_with_hurst(100.0, 101.0, 25.0, 0, "trending", 0.72);
         let intents = s.on_tick(&ctx);
         assert_eq!(intents.len(), 1, "Entry must be allowed in trending regime");
@@ -988,9 +1007,9 @@ mod tests {
     #[test]
     fn test_regime_filter_allows_exit() {
         let mut s = MaCrossover::new();
-        s.min_persistence_ms = 0;  // disable persistence for unit tests
-        // Step 1: Enter long in trending regime.
-        // 步驟 1：在趨勢狀態下做多入場。
+        s.min_persistence_ms = 0; // disable persistence for unit tests
+                                  // Step 1: Enter long in trending regime.
+                                  // 步驟 1：在趨勢狀態下做多入場。
         let ctx_entry = ctx_with_hurst(100.0, 101.0, 25.0, 0, "trending", 0.72);
         let entry = s.on_tick(&ctx_entry);
         assert_eq!(entry.len(), 1, "Should enter long");
@@ -1015,7 +1034,7 @@ mod tests {
     #[test]
     fn test_regime_filter_blocks_random_walk() {
         let mut s = MaCrossover::new();
-        s.min_persistence_ms = 0;  // disable persistence for unit tests
+        s.min_persistence_ms = 0; // disable persistence for unit tests
         let ctx = ctx_with_hurst(100.0, 101.0, 25.0, 0, "random_walk", 0.50);
         let intents = s.on_tick(&ctx);
         assert!(
@@ -1029,7 +1048,7 @@ mod tests {
     #[test]
     fn test_regime_filter_disabled() {
         let mut s = MaCrossover::new();
-        s.min_persistence_ms = 0;  // disable persistence for unit tests
+        s.min_persistence_ms = 0; // disable persistence for unit tests
         s.regime_filter_enabled = false;
         let ctx = ctx_with_hurst(100.0, 101.0, 25.0, 0, "mean_reverting", 0.35);
         let intents = s.on_tick(&ctx);
@@ -1049,9 +1068,9 @@ mod tests {
     #[test]
     fn test_higher_tf_blocks_misaligned() {
         let mut s = MaCrossover::new();
-        s.min_persistence_ms = 0;  // disable persistence for unit tests
-        // Warm up higher_tf_sma with a high value so sma_50 < higher_tf_sma → bearish trend.
-        // 用高值暖機 higher_tf_sma，使 sma_50 < higher_tf_sma → 看跌趨勢。
+        s.min_persistence_ms = 0; // disable persistence for unit tests
+                                  // Warm up higher_tf_sma with a high value so sma_50 < higher_tf_sma → bearish trend.
+                                  // 用高值暖機 higher_tf_sma，使 sma_50 < higher_tf_sma → 看跌趨勢。
         s.higher_tf_sma.insert("BTC".into(), 110.0);
         // After one tick, higher_tf_sma ≈ 0.01*100 + 0.99*110 = 109.9, sma_50=100 < 109.9 → bearish.
         // 一個 tick 後，higher_tf_sma ≈ 109.9，sma_50=100 < 109.9 → 看跌。
@@ -1070,9 +1089,9 @@ mod tests {
     #[test]
     fn test_higher_tf_allows_aligned() {
         let mut s = MaCrossover::new();
-        s.min_persistence_ms = 0;  // disable persistence for unit tests
-        // Warm up higher_tf_sma with a low value so sma_50 > higher_tf_sma → bullish trend.
-        // 用低值暖機 higher_tf_sma，使 sma_50 > higher_tf_sma → 看漲趨勢。
+        s.min_persistence_ms = 0; // disable persistence for unit tests
+                                  // Warm up higher_tf_sma with a low value so sma_50 > higher_tf_sma → bullish trend.
+                                  // 用低值暖機 higher_tf_sma，使 sma_50 > higher_tf_sma → 看漲趨勢。
         s.higher_tf_sma.insert("BTC".into(), 90.0);
         // After one tick, higher_tf_sma ≈ 0.01*100 + 0.99*90 = 90.1, sma_50=100 > 90.1 → bullish.
         // 一個 tick 後，higher_tf_sma ≈ 90.1，sma_50=100 > 90.1 → 看漲。
@@ -1094,7 +1113,7 @@ mod tests {
     #[test]
     fn test_higher_tf_blocks_short_when_bullish() {
         let mut s = MaCrossover::new();
-        s.min_persistence_ms = 0;  // disable persistence for unit tests
+        s.min_persistence_ms = 0; // disable persistence for unit tests
         s.higher_tf_sma.insert("BTC".into(), 90.0);
         // sma_50=100 > 90.1 → bullish → short blocked.
         let ctx = ctx_with_sma50(101.0, 100.0, 25.0, 0, 100.0);
@@ -1110,9 +1129,9 @@ mod tests {
     #[test]
     fn test_higher_tf_cold_start_allows_entry() {
         let mut s = MaCrossover::new();
-        s.min_persistence_ms = 0;  // disable persistence for unit tests
-        // No sma_50 in context → higher_tf_trend stays None → entry allowed.
-        // 上下文中無 sma_50 → higher_tf_trend 保持 None → 允許入場。
+        s.min_persistence_ms = 0; // disable persistence for unit tests
+                                  // No sma_50 in context → higher_tf_trend stays None → entry allowed.
+                                  // 上下文中無 sma_50 → higher_tf_trend 保持 None → 允許入場。
         let ctx = ctx_with(100.0, 101.0, 25.0, 0);
         let intents = s.on_tick(&ctx);
         assert_eq!(
@@ -1127,8 +1146,8 @@ mod tests {
     #[test]
     fn test_higher_tf_does_not_block_exit() {
         let mut s = MaCrossover::new();
-        s.min_persistence_ms = 0;  // disable persistence for unit tests
-        // Enter long with aligned higher TF.
+        s.min_persistence_ms = 0; // disable persistence for unit tests
+                                  // Enter long with aligned higher TF.
         s.higher_tf_sma.insert("BTC".into(), 90.0);
         let ctx_entry = ctx_with_sma50(100.0, 101.0, 25.0, 0, 100.0);
         let entry = s.on_tick(&ctx_entry);
@@ -1174,7 +1193,7 @@ mod tests {
     #[test]
     fn test_update_and_get_roundtrip() {
         let mut s = MaCrossover::new();
-        s.min_persistence_ms = 0;  // disable persistence for unit tests
+        s.min_persistence_ms = 0; // disable persistence for unit tests
         let new_params = MaCrossoverParams {
             adx_threshold: 35.0,
             ..Default::default()
@@ -1187,7 +1206,7 @@ mod tests {
     #[test]
     fn test_json_roundtrip() {
         let mut s = MaCrossover::new();
-        s.min_persistence_ms = 0;  // disable persistence for unit tests
+        s.min_persistence_ms = 0; // disable persistence for unit tests
         let json = r#"{"cooldown_ms":600000,"adx_threshold":25.0,"default_qty":1000000000.0,"regime_filter_enabled":true,"higher_tf_alpha":0.005}"#;
         assert!(s.update_params_json(json).is_ok());
         let out = s.get_params_json();
@@ -1198,7 +1217,7 @@ mod tests {
     fn test_conf_scale_clamps_to_range() {
         // CONF-D: set_conf_scale must clamp to [0, 2].
         let mut s = MaCrossover::new();
-        s.min_persistence_ms = 0;  // disable persistence for unit tests
+        s.min_persistence_ms = 0; // disable persistence for unit tests
         s.set_conf_scale(3.0);
         assert!((s.conf_scale() - 2.0).abs() < 1e-10);
         s.set_conf_scale(-1.0);
@@ -1222,7 +1241,7 @@ mod tests {
             index_price: None,
         };
         let mut s = MaCrossover::new();
-        s.min_persistence_ms = 0;  // disable persistence for unit tests
+        s.min_persistence_ms = 0; // disable persistence for unit tests
         s.set_conf_scale(0.5);
         let intent = s.make_intent(&ctx, true, 0.8);
         assert!((intent.confidence - 0.4).abs() < 1e-10);
@@ -1238,7 +1257,12 @@ mod tests {
     fn test_ma_param_ranges_count() {
         let ranges = MaCrossoverParams::param_ranges();
         // 5 original + 10 confluence + 1 A2 (max_cooldown_boost) = 16
-        assert_eq!(ranges.len(), 16, "expected 16 param ranges, got {}", ranges.len());
+        assert_eq!(
+            ranges.len(),
+            16,
+            "expected 16 param ranges, got {}",
+            ranges.len()
+        );
     }
 
     #[test]
@@ -1246,9 +1270,16 @@ mod tests {
         let ranges = MaCrossoverParams::param_ranges();
         let names: Vec<&str> = ranges.iter().map(|r| r.name.as_str()).collect();
         for expected in &[
-            "weight_adx", "weight_regime", "weight_volume", "weight_momentum",
-            "adx_floor", "confluence_threshold_no_trade", "confluence_threshold_light",
-            "confluence_threshold_full", "min_persistence_ms", "min_notional_usd",
+            "weight_adx",
+            "weight_regime",
+            "weight_volume",
+            "weight_momentum",
+            "adx_floor",
+            "confluence_threshold_no_trade",
+            "confluence_threshold_light",
+            "confluence_threshold_full",
+            "min_persistence_ms",
+            "min_notional_usd",
         ] {
             assert!(names.contains(expected), "missing param range: {expected}");
         }
@@ -1258,13 +1289,24 @@ mod tests {
     fn test_ma_param_ranges_agent_adjustable() {
         let ranges = MaCrossoverParams::param_ranges();
         // Weights should be agent_adjustable / 權重應可被 Agent 調整
-        for name in &["weight_adx", "weight_regime", "weight_volume", "weight_momentum"] {
+        for name in &[
+            "weight_adx",
+            "weight_regime",
+            "weight_volume",
+            "weight_momentum",
+        ] {
             let r = ranges.iter().find(|r| r.name == *name).unwrap();
             assert!(r.agent_adjustable, "{name} should be agent_adjustable");
         }
         // min_notional_usd should NOT be agent_adjustable
-        let mn = ranges.iter().find(|r| r.name == "min_notional_usd").unwrap();
-        assert!(!mn.agent_adjustable, "min_notional_usd should not be agent_adjustable");
+        let mn = ranges
+            .iter()
+            .find(|r| r.name == "min_notional_usd")
+            .unwrap();
+        assert!(
+            !mn.agent_adjustable,
+            "min_notional_usd should not be agent_adjustable"
+        );
     }
 
     #[test]
@@ -1304,8 +1346,15 @@ mod tests {
     fn ctx_with_er(sma: f64, kama: f64, adx: f64, ts: u64, er: f64) -> TickContext<'static> {
         let ind = Box::leak(Box::new(IndicatorSnapshot {
             sma_20: Some(sma),
-            kama: Some(KamaResult { kama, efficiency_ratio: er }),
-            adx: Some(AdxResult { adx, plus_di: 25.0, minus_di: 15.0 }),
+            kama: Some(KamaResult {
+                kama,
+                efficiency_ratio: er,
+            }),
+            adx: Some(AdxResult {
+                adx,
+                plus_di: 25.0,
+                minus_di: 15.0,
+            }),
             ..Default::default()
         }));
         TickContext {
@@ -1406,14 +1455,20 @@ mod tests {
         s.min_persistence_ms = 180_000;
 
         // t=100_000: reverse tick starts timer.
-        assert!(s.on_tick(&ctx_with_er(101.0, 100.0, 25.0, 100_000, 0.0)).is_empty());
+        assert!(s
+            .on_tick(&ctx_with_er(101.0, 100.0, 25.0, 100_000, 0.0))
+            .is_empty());
         // t=120_000: aligned tick (fast>slow, same as current long) → resets timer.
         // 對齊 tick → 重設計時。
-        assert!(s.on_tick(&ctx_with_er(100.0, 101.0, 25.0, 120_000, 0.0)).is_empty());
+        assert!(s
+            .on_tick(&ctx_with_er(100.0, 101.0, 25.0, 120_000, 0.0))
+            .is_empty());
         // t=200_000: reverse again — 80 s elapsed since new onset, not 100 s
         // since flicker start → must NOT exit.
         // 再次反向，距新 onset 80 秒 < 180 秒 → 不可出場。
-        assert!(s.on_tick(&ctx_with_er(101.0, 100.0, 25.0, 200_000, 0.0)).is_empty());
+        assert!(s
+            .on_tick(&ctx_with_er(101.0, 100.0, 25.0, 200_000, 0.0))
+            .is_empty());
     }
 
     #[test]
@@ -1428,7 +1483,9 @@ mod tests {
         let _ = s.on_tick(&ctx_with_er(100.0, 101.0, 25.0, 0, 0.5));
         s.min_persistence_ms = 180_000;
         // Record an exit_persistence onset via a reverse tick.
-        assert!(s.on_tick(&ctx_with_er(101.0, 100.0, 25.0, 100_000, 0.0)).is_empty());
+        assert!(s
+            .on_tick(&ctx_with_er(101.0, 100.0, 25.0, 100_000, 0.0))
+            .is_empty());
 
         // External close wipes everything for this symbol.
         s.on_external_close("BTC");
@@ -1440,7 +1497,8 @@ mod tests {
         assert_eq!(reopen.len(), 1, "should re-enter after external close");
         s.min_persistence_ms = 180_000;
         assert!(
-            s.on_tick(&ctx_with_er(101.0, 100.0, 25.0, 1_100_000, 0.0)).is_empty(),
+            s.on_tick(&ctx_with_er(101.0, 100.0, 25.0, 1_100_000, 0.0))
+                .is_empty(),
             "exit_persistence must start from zero after on_external_close"
         );
     }
@@ -1452,8 +1510,15 @@ mod tests {
 
     fn indicator_with(adx: Option<f64>, hurst: Option<f64>) -> IndicatorSnapshot {
         IndicatorSnapshot {
-            adx: adx.map(|a| AdxResult { adx: a, plus_di: 25.0, minus_di: 15.0 }),
-            hurst: hurst.map(|h| HurstResult { hurst: h, regime: "trending".into() }),
+            adx: adx.map(|a| AdxResult {
+                adx: a,
+                plus_di: 25.0,
+                minus_di: 15.0,
+            }),
+            hurst: hurst.map(|h| HurstResult {
+                hurst: h,
+                regime: "trending".into(),
+            }),
             ..Default::default()
         }
     }
@@ -1497,7 +1562,10 @@ mod tests {
         // 上界之上再往上也不會加倍 — clamp 在 1.0。
         let s = MaCrossover::new();
         let snap = indicator_with(Some(s.adx_threshold * 5.0), Some(0.95));
-        assert_eq!(s.compute_trend_adjusted_cooldown(Some(&snap)), s.cooldown_ms * 4);
+        assert_eq!(
+            s.compute_trend_adjusted_cooldown(Some(&snap)),
+            s.cooldown_ms * 4
+        );
     }
 
     #[test]
@@ -1531,7 +1599,10 @@ mod tests {
         let mut s = MaCrossover::new();
         s.max_cooldown_boost = 0.0;
         let snap = indicator_with(Some(s.adx_threshold * 3.0), Some(0.90));
-        assert_eq!(s.compute_trend_adjusted_cooldown(Some(&snap)), s.cooldown_ms);
+        assert_eq!(
+            s.compute_trend_adjusted_cooldown(Some(&snap)),
+            s.cooldown_ms
+        );
     }
 
     #[test]

@@ -149,4 +149,10 @@ boot_cooldown_ms = 30000
 signals_heartbeat_ms = 60000
 h0_shadow_mode = true
 
+# DYNAMIC-RISK-1: disabled on paper — paper pipeline drains by default
+# (PAPER-DISABLE-1, 2026-04-16); enabling would accumulate no real trades anyway.
+# DYNAMIC-RISK-1：paper 預設停用（PAPER-DISABLE-1 後 paper 已 drain，無交易可累積）。
+[dynamic_sizing]
+enabled = false
+
 [experimental.flags]

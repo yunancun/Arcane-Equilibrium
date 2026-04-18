@@ -100,10 +100,8 @@ pub const FEATURE_SCHEMA_VERSION: &str = "v1";
 /// 特徵 schema 穩定身分 — sha256 換行串接名稱。單次計算後快取，熱路徑可安全調用。
 pub fn feature_schema_hash() -> &'static str {
     static HASH: std::sync::OnceLock<String> = std::sync::OnceLock::new();
-    HASH.get_or_init(|| {
-        crate::linucb::schema_hash::compute_feature_schema_hash(FEATURE_NAMES_V1)
-    })
-    .as_str()
+    HASH.get_or_init(|| crate::linucb::schema_hash::compute_feature_schema_hash(FEATURE_NAMES_V1))
+        .as_str()
 }
 
 /// Stage 0 alias for `feature_schema_hash()`. Stage 2 (ML-MIT) splits this

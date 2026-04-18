@@ -77,11 +77,7 @@ impl StrategyIpcSink for MockSink {
             .push((strategy_name.into(), params_json.into()));
         Box::pin(async move { Ok(format!("params updated for {strategy_name}")) })
     }
-    fn set_strategy_active<'a>(
-        &'a self,
-        strategy_name: &'a str,
-        active: bool,
-    ) -> IpcFuture<'a> {
+    fn set_strategy_active<'a>(&'a self, strategy_name: &'a str, active: bool) -> IpcFuture<'a> {
         self.total_calls.fetch_add(1, Ordering::SeqCst);
         self.set_active_calls
             .lock()
@@ -117,10 +113,7 @@ pub(super) async fn make_applier(
     let gov_arc = Arc::new(gov);
     let sink_dyn: Option<Arc<dyn StrategyIpcSink>> =
         sink.clone().map(|s| s as Arc<dyn StrategyIpcSink>);
-    let applier = DirectiveApplier::new(
-        gov_arc.clone() as Arc<dyn GovernanceCheck>,
-        sink_dyn,
-        pool,
-    );
+    let applier =
+        DirectiveApplier::new(gov_arc.clone() as Arc<dyn GovernanceCheck>, sink_dyn, pool);
     (applier, gov_arc, sink)
 }

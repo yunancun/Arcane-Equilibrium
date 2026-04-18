@@ -27,7 +27,12 @@ fn make_event(symbol: &str, price: f64, ts_ms: u64) -> PriceEvent {
 
 // P-08: TickContext<'a> uses borrowed refs; Box::leak gives 'static lifetime for test helpers.
 // P-08：TickContext<'a> 使用借用引用；Box::leak 為測試輔助函數提供 'static 生命週期。
-fn make_ctx(symbol: &'static str, price: f64, ts: u64, ind: Option<IndicatorSnapshot>) -> TickContext<'static> {
+fn make_ctx(
+    symbol: &'static str,
+    price: f64,
+    ts: u64,
+    ind: Option<IndicatorSnapshot>,
+) -> TickContext<'static> {
     static NO_SIGNALS: &[openclaw_core::signals::Signal] = &[];
     let indicators = ind.map(|i| &*Box::leak(Box::new(i)));
     TickContext {
@@ -87,7 +92,10 @@ fn bb_snapshot(
         stochastic: Some(StochResult { k: 50.0, d: 50.0 }),
         // EDGE-P1-3: trending regime produces good scores for trend-following strategies.
         // bb_reversion tests override with mean_reverting locally.
-        hurst: Some(HurstResult { hurst: 0.70, regime: "trending".into() }),
+        hurst: Some(HurstResult {
+            hurst: 0.70,
+            regime: "trending".into(),
+        }),
         ewma_vol: None,
         donchian: None,
     }
@@ -212,11 +220,21 @@ fn stress_fa_phantom_1_regression_5_positions_100pct_notional_20x_leverage() {
     );
 
     // Five positions at $2_000 notional each = $10_000 total = 100% of balance.
-    pipeline.paper_state.apply_fill("BTCUSDT", true, 0.04, 50_000.0, 0.0, 1000, "test");
-    pipeline.paper_state.apply_fill("ETHUSDT", true, 1.0, 2_000.0, 0.0, 1000, "test");
-    pipeline.paper_state.apply_fill("SOLUSDT", true, 20.0, 100.0, 0.0, 1000, "test");
-    pipeline.paper_state.apply_fill("XRPUSDT", true, 2_000.0, 1.0, 0.0, 1000, "test");
-    pipeline.paper_state.apply_fill("DOGEUSDT", false, 10_000.0, 0.2, 0.0, 1000, "test");
+    pipeline
+        .paper_state
+        .apply_fill("BTCUSDT", true, 0.04, 50_000.0, 0.0, 1000, "test");
+    pipeline
+        .paper_state
+        .apply_fill("ETHUSDT", true, 1.0, 2_000.0, 0.0, 1000, "test");
+    pipeline
+        .paper_state
+        .apply_fill("SOLUSDT", true, 20.0, 100.0, 0.0, 1000, "test");
+    pipeline
+        .paper_state
+        .apply_fill("XRPUSDT", true, 2_000.0, 1.0, 0.0, 1000, "test");
+    pipeline
+        .paper_state
+        .apply_fill("DOGEUSDT", false, 10_000.0, 0.2, 0.0, 1000, "test");
     assert_eq!(pipeline.paper_state.position_count(), 5);
 
     // Drive a tick at the same entry price so price_drop_pct stays 0 and
@@ -247,11 +265,21 @@ fn stress_fa_phantom_1_cash_mode_100pct_notional_closes_all() {
     rc.limits.leverage_max = 1.0;
     pipeline.intent_processor.update_risk_config(rc);
 
-    pipeline.paper_state.apply_fill("BTCUSDT", true, 0.04, 50_000.0, 0.0, 1000, "test");
-    pipeline.paper_state.apply_fill("ETHUSDT", true, 1.0, 2_000.0, 0.0, 1000, "test");
-    pipeline.paper_state.apply_fill("SOLUSDT", true, 20.0, 100.0, 0.0, 1000, "test");
-    pipeline.paper_state.apply_fill("XRPUSDT", true, 2_000.0, 1.0, 0.0, 1000, "test");
-    pipeline.paper_state.apply_fill("DOGEUSDT", false, 10_000.0, 0.2, 0.0, 1000, "test");
+    pipeline
+        .paper_state
+        .apply_fill("BTCUSDT", true, 0.04, 50_000.0, 0.0, 1000, "test");
+    pipeline
+        .paper_state
+        .apply_fill("ETHUSDT", true, 1.0, 2_000.0, 0.0, 1000, "test");
+    pipeline
+        .paper_state
+        .apply_fill("SOLUSDT", true, 20.0, 100.0, 0.0, 1000, "test");
+    pipeline
+        .paper_state
+        .apply_fill("XRPUSDT", true, 2_000.0, 1.0, 0.0, 1000, "test");
+    pipeline
+        .paper_state
+        .apply_fill("DOGEUSDT", false, 10_000.0, 0.2, 0.0, 1000, "test");
     assert_eq!(pipeline.paper_state.position_count(), 5);
 
     pipeline.on_tick(&make_event("BTCUSDT", 50_000.0, 2000));
@@ -407,7 +435,10 @@ fn stress_bb_reversion_extreme_oversold_bounce() {
     // EDGE-P1-3: bb_reversion needs mean_reverting regime for score ≥ 45.
     // Override bb_snapshot's default trending hurst with mean_reverting.
     let mut snap1 = bb_snapshot(-0.5, 0.06, 10.0, 2050.0, 2040.0, 30.0, 2.0);
-    snap1.hurst = Some(HurstResult { hurst: 0.35, regime: "mean_reverting".into() });
+    snap1.hurst = Some(HurstResult {
+        hurst: 0.35,
+        regime: "mean_reverting".into(),
+    });
     // Extreme oversold: %B = -0.5, RSI = 10
     let ctx1 = make_ctx("ETHUSDT", 2000.0, 0, Some(snap1));
     let intents = strat.on_tick(&ctx1);
@@ -419,7 +450,10 @@ fn stress_bb_reversion_extreme_oversold_bounce() {
 
     // Bounce to mean — should exit
     let mut snap2 = bb_snapshot(0.5, 0.04, 50.0, 2050.0, 2050.0, 25.0, 1.0);
-    snap2.hurst = Some(HurstResult { hurst: 0.35, regime: "mean_reverting".into() });
+    snap2.hurst = Some(HurstResult {
+        hurst: 0.35,
+        regime: "mean_reverting".into(),
+    });
     let ctx2 = make_ctx("ETHUSDT", 2050.0, 700_000, Some(snap2));
     let intents = strat.on_tick(&ctx2);
     assert_eq!(intents.len(), 1, "should exit at mean reversion");
@@ -959,12 +993,9 @@ fn stress_three_pipeline_concurrent_isolation() {
     let mut handles = Vec::new();
     for (kind, balance) in configs {
         handles.push(thread::spawn(move || {
-            let mut pipeline =
-                TickPipeline::with_kind(&["BTCUSDT", "ETHUSDT"], balance, kind);
+            let mut pipeline = TickPipeline::with_kind(&["BTCUSDT", "ETHUSDT"], balance, kind);
             pipeline.grant_paper_auth().unwrap();
-            pipeline
-                .orchestrator
-                .register(Box::new(MaCrossover::new()));
+            pipeline.orchestrator.register(Box::new(MaCrossover::new()));
 
             // Feed 500 ticks with slightly different prices per pipeline kind
             // to create distinct trading paths.
@@ -978,7 +1009,11 @@ fn stress_three_pipeline_concurrent_isolation() {
             }
 
             let status = pipeline.status();
-            (kind.db_mode().to_string(), status.balance, pipeline.stats.total_ticks)
+            (
+                kind.db_mode().to_string(),
+                status.balance,
+                pipeline.stats.total_ticks,
+            )
         }));
     }
 
@@ -994,8 +1029,14 @@ fn stress_three_pipeline_concurrent_isolation() {
 
     // Balances must differ (different initial + different price paths).
     // 餘額必須不同（不同初始值 + 不同價格路徑）。
-    assert_ne!(results[0].1, results[1].1, "Paper and Demo balances must differ");
-    assert_ne!(results[1].1, results[2].1, "Demo and Live balances must differ");
+    assert_ne!(
+        results[0].1, results[1].1,
+        "Paper and Demo balances must differ"
+    );
+    assert_ne!(
+        results[1].1, results[2].1,
+        "Demo and Live balances must differ"
+    );
 
     // db_mode must be correct per kind.
     assert_eq!(results[0].0, "paper");
@@ -1011,10 +1052,7 @@ fn stress_three_pipeline_concurrent_snapshot_writes() {
     use openclaw_engine::tick_pipeline::PipelineKind;
     use std::thread;
 
-    let tmp_dir = std::env::temp_dir().join(format!(
-        "oc_3pipe_test_{}",
-        std::process::id()
-    ));
+    let tmp_dir = std::env::temp_dir().join(format!("oc_3pipe_test_{}", std::process::id()));
     std::fs::create_dir_all(&tmp_dir).ok();
 
     let kinds = [PipelineKind::Paper, PipelineKind::Demo, PipelineKind::Live];
@@ -1023,8 +1061,7 @@ fn stress_three_pipeline_concurrent_snapshot_writes() {
     for kind in kinds {
         let dir = tmp_dir.clone();
         handles.push(thread::spawn(move || {
-            let mut pipeline =
-                TickPipeline::with_kind(&["BTCUSDT"], 10_000.0, kind);
+            let mut pipeline = TickPipeline::with_kind(&["BTCUSDT"], 10_000.0, kind);
             pipeline.grant_paper_auth().unwrap();
 
             for i in 0..100u64 {
@@ -1070,8 +1107,8 @@ fn stress_three_pipeline_concurrent_snapshot_writes() {
 /// 無數據損壞。
 #[test]
 fn stress_config_hot_reload_during_ticks() {
-    use openclaw_engine::config::{ConfigStore, PatchSource};
     use openclaw_engine::config::risk_config::RiskConfig;
+    use openclaw_engine::config::{ConfigStore, PatchSource};
     use std::sync::Arc;
     use std::thread;
 
@@ -1082,13 +1119,15 @@ fn stress_config_hot_reload_during_ticks() {
     let store_writer = Arc::clone(&store);
     let writer_handle = thread::spawn(move || {
         for i in 0..100u32 {
-            store_writer.apply_patch(
-                PatchSource::Operator,
-                |c: &mut RiskConfig| {
-                    c.limits.open_positions_max = i % 50 + 1;
-                },
-                |_| Ok(()),
-            ).unwrap();
+            store_writer
+                .apply_patch(
+                    PatchSource::Operator,
+                    |c: &mut RiskConfig| {
+                        c.limits.open_positions_max = i % 50 + 1;
+                    },
+                    |_| Ok(()),
+                )
+                .unwrap();
         }
     });
 
@@ -1161,6 +1200,8 @@ fn stress_catch_unwind_recovers_from_pipeline_panic() {
         true // signal success
     });
 
-    let recovered = handle.join().expect("thread with catch_unwind must not abort");
+    let recovered = handle
+        .join()
+        .expect("thread with catch_unwind must not abort");
     assert!(recovered, "recovery path must complete successfully");
 }

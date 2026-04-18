@@ -29,12 +29,20 @@ pub(super) fn handle_get_state(
         let parsed = std::fs::read_to_string(&path)
             .ok()
             .and_then(|c| serde_json::from_str::<serde_json::Value>(&c).ok());
-        let sm = parsed.as_ref()
-            .and_then(|v| v.get("system_mode").and_then(|s| s.as_str().map(String::from)))
+        let sm = parsed
+            .as_ref()
+            .and_then(|v| {
+                v.get("system_mode")
+                    .and_then(|s| s.as_str().map(String::from))
+            })
             .filter(|s| !s.is_empty())
             .unwrap_or_else(|| "live_reserved".to_string());
-        let tm = parsed.as_ref()
-            .and_then(|v| v.get("trading_mode").and_then(|t| t.as_str().map(String::from)))
+        let tm = parsed
+            .as_ref()
+            .and_then(|v| {
+                v.get("trading_mode")
+                    .and_then(|t| t.as_str().map(String::from))
+            })
             .unwrap_or_else(|| "paper".to_string());
         (sm, tm)
     };
@@ -222,28 +230,45 @@ pub(super) async fn handle_record_ai_usage(
         Some(s) if !s.is_empty() => s,
         _ => return JsonRpcResponse::error(id, ERR_INVALID_PARAMS, "missing 'model'"),
     };
-    let tokens_in = params.get("tokens_in").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
-    let tokens_out = params.get("tokens_out").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
-    let purpose = params.get("purpose").and_then(|v| v.as_str()).unwrap_or("layer2_external");
-    let request_id = params.get("request_id").and_then(|v| v.as_str()).unwrap_or("py-sync");
+    let tokens_in = params
+        .get("tokens_in")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0) as u32;
+    let tokens_out = params
+        .get("tokens_out")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0) as u32;
+    let purpose = params
+        .get("purpose")
+        .and_then(|v| v.as_str())
+        .unwrap_or("layer2_external");
+    let request_id = params
+        .get("request_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("py-sync");
 
     let guard = slot.read().await;
     let tracker = match guard.as_ref() {
         Some(t) => Arc::clone(t),
         None => {
             return JsonRpcResponse::error(
-                id, ERR_INTERNAL,
+                id,
+                ERR_INTERNAL,
                 "budget tracker not initialized (DB pool unavailable?)",
             );
         }
     };
     drop(guard);
 
-    match tracker.record_usage(scope, provider, model, tokens_in, tokens_out, purpose, request_id).await {
-        Ok(cost_usd) => JsonRpcResponse::success(
-            id,
-            serde_json::json!({ "ok": true, "cost_usd": cost_usd }),
-        ),
+    match tracker
+        .record_usage(
+            scope, provider, model, tokens_in, tokens_out, purpose, request_id,
+        )
+        .await
+    {
+        Ok(cost_usd) => {
+            JsonRpcResponse::success(id, serde_json::json!({ "ok": true, "cost_usd": cost_usd }))
+        }
         Err(e) => JsonRpcResponse::error(id, ERR_INTERNAL, format!("record_usage failed: {e}")),
     }
 }
@@ -274,14 +299,14 @@ pub(super) async fn handle_set_teacher_loop_enabled(
     let handles = match guard.as_ref() {
         Some(h) => h,
         None => {
-            return JsonRpcResponse::success(
-                id,
-                serde_json::json!({"status": "uninitialized"}),
-            );
+            return JsonRpcResponse::success(id, serde_json::json!({"status": "uninitialized"}));
         }
     };
     handles.enabled.store(enabled, Ordering::Relaxed);
-    info!(enabled, "teacher consumer loop enabled flag set via IPC / 透過 IPC 設定 enabled 旗標");
+    info!(
+        enabled,
+        "teacher consumer loop enabled flag set via IPC / 透過 IPC 設定 enabled 旗標"
+    );
     JsonRpcResponse::success(id, serde_json::json!({"ok": true, "enabled": enabled}))
 }
 
@@ -299,17 +324,11 @@ pub(super) async fn handle_get_teacher_loop_status(
     let handles = match guard.as_ref() {
         Some(h) => h,
         None => {
-            return JsonRpcResponse::success(
-                id,
-                serde_json::json!({"status": "uninitialized"}),
-            );
+            return JsonRpcResponse::success(id, serde_json::json!({"status": "uninitialized"}));
         }
     };
     let (attempted, applied, vetoed, errored) = handles.status.snapshot();
-    let last_cycle_ms = handles
-        .status
-        .last_cycle_ms
-        .load(Ordering::Relaxed);
+    let last_cycle_ms = handles.status.last_cycle_ms.load(Ordering::Relaxed);
     let enabled = handles.enabled.load(Ordering::Relaxed);
     JsonRpcResponse::success(
         id,
@@ -459,9 +478,7 @@ pub(super) async fn handle_update_risk_config(
     let dynamic_stop_cap_ratio = params
         .get("dynamic_stop_cap_ratio")
         .and_then(|v| v.as_f64());
-    let trailing_min_rr_ratio = params
-        .get("trailing_min_rr_ratio")
-        .and_then(|v| v.as_f64());
+    let trailing_min_rr_ratio = params.get("trailing_min_rr_ratio").and_then(|v| v.as_f64());
     // Session 12: cost-gate + regime + boot cooldown
     let cost_gate_min_confidence = params
         .get("cost_gate_min_confidence")
@@ -546,16 +563,90 @@ pub(super) async fn handle_risk_runtime_status(
         }
     };
     let (resp_tx, resp_rx) = tokio::sync::oneshot::channel();
-    if let Err(e) = tx.send(PipelineCommand::GetRiskRuntimeStatus { response_tx: resp_tx }) {
+    if let Err(e) = tx.send(PipelineCommand::GetRiskRuntimeStatus {
+        response_tx: resp_tx,
+    }) {
         return JsonRpcResponse::error(id, ERR_INTERNAL, format!("channel send failed: {e}"));
     }
     match tokio::time::timeout(std::time::Duration::from_secs(5), resp_rx).await {
-        Ok(Ok(Ok(json_str))) => {
-            match serde_json::from_str::<serde_json::Value>(&json_str) {
-                Ok(v) => JsonRpcResponse::success(id, v),
-                Err(e) => JsonRpcResponse::error(id, ERR_INTERNAL, format!("parse status: {e}")),
-            }
+        Ok(Ok(Ok(json_str))) => match serde_json::from_str::<serde_json::Value>(&json_str) {
+            Ok(v) => JsonRpcResponse::success(id, v),
+            Err(e) => JsonRpcResponse::error(id, ERR_INTERNAL, format!("parse status: {e}")),
+        },
+        Ok(Ok(Err(e))) => JsonRpcResponse::error(id, ERR_INTERNAL, e),
+        Ok(Err(_)) => JsonRpcResponse::error(id, ERR_INTERNAL, "response channel dropped"),
+        Err(_) => JsonRpcResponse::error(id, ERR_INTERNAL, "timeout waiting for event consumer"),
+    }
+}
+
+/// DYNAMIC-RISK-1: Per-engine Sharpe-aware sizer status snapshot.
+/// Routes the call through the selected engine's command channel (same
+/// `extract_engine_tx` path as every other per-engine RPC).
+/// DYNAMIC-RISK-1：按引擎取動態風險調整器狀態快照。
+pub(super) async fn handle_get_dynamic_risk_status(
+    id: serde_json::Value,
+    pipeline_cmd_tx: &Option<tokio::sync::mpsc::UnboundedSender<PipelineCommand>>,
+) -> JsonRpcResponse {
+    let tx = match pipeline_cmd_tx {
+        Some(tx) => tx,
+        None => {
+            return JsonRpcResponse::error(
+                id,
+                ERR_INTERNAL,
+                "engine command channel not configured",
+            )
         }
+    };
+    let (resp_tx, resp_rx) = tokio::sync::oneshot::channel();
+    if let Err(e) = tx.send(PipelineCommand::GetDynamicRiskStatus {
+        response_tx: resp_tx,
+    }) {
+        return JsonRpcResponse::error(id, ERR_INTERNAL, format!("channel send failed: {e}"));
+    }
+    match tokio::time::timeout(std::time::Duration::from_secs(5), resp_rx).await {
+        Ok(Ok(Ok(json_str))) => match serde_json::from_str::<serde_json::Value>(&json_str) {
+            Ok(v) => JsonRpcResponse::success(id, v),
+            Err(e) => JsonRpcResponse::error(id, ERR_INTERNAL, format!("parse status: {e}")),
+        },
+        Ok(Ok(Err(e))) => JsonRpcResponse::error(id, ERR_INTERNAL, e),
+        Ok(Err(_)) => JsonRpcResponse::error(id, ERR_INTERNAL, "response channel dropped"),
+        Err(_) => JsonRpcResponse::error(id, ERR_INTERNAL, "timeout waiting for event consumer"),
+    }
+}
+
+/// DYNAMIC-RISK-1: Runtime toggle of the per-engine sizer.
+/// Transient override — the next TOML hot-reload restores the file's intent.
+/// DYNAMIC-RISK-1：運行時切換；下次 TOML 熱重載會還原。
+pub(super) async fn handle_set_dynamic_risk_enabled(
+    id: serde_json::Value,
+    pipeline_cmd_tx: &Option<tokio::sync::mpsc::UnboundedSender<PipelineCommand>>,
+    params: &serde_json::Value,
+) -> JsonRpcResponse {
+    let tx = match pipeline_cmd_tx {
+        Some(tx) => tx,
+        None => {
+            return JsonRpcResponse::error(
+                id,
+                ERR_INTERNAL,
+                "engine command channel not configured",
+            )
+        }
+    };
+    let enabled = match params.get("enabled").and_then(|v| v.as_bool()) {
+        Some(v) => v,
+        None => {
+            return JsonRpcResponse::error(id, ERR_INVALID_REQUEST, "missing or non-bool `enabled`")
+        }
+    };
+    let (resp_tx, resp_rx) = tokio::sync::oneshot::channel();
+    if let Err(e) = tx.send(PipelineCommand::SetDynamicRiskEnabled {
+        enabled,
+        response_tx: resp_tx,
+    }) {
+        return JsonRpcResponse::error(id, ERR_INTERNAL, format!("channel send failed: {e}"));
+    }
+    match tokio::time::timeout(std::time::Duration::from_secs(5), resp_rx).await {
+        Ok(Ok(Ok(msg))) => JsonRpcResponse::success(id, serde_json::json!({ "result": msg })),
         Ok(Ok(Err(e))) => JsonRpcResponse::error(id, ERR_INTERNAL, e),
         Ok(Err(_)) => JsonRpcResponse::error(id, ERR_INTERNAL, "response channel dropped"),
         Err(_) => JsonRpcResponse::error(id, ERR_INTERNAL, "timeout waiting for event consumer"),
@@ -576,7 +667,9 @@ pub(super) async fn handle_clear_consecutive_losses(
         }
     };
     let (resp_tx, resp_rx) = tokio::sync::oneshot::channel();
-    if let Err(e) = tx.send(PipelineCommand::ClearConsecutiveLosses { response_tx: resp_tx }) {
+    if let Err(e) = tx.send(PipelineCommand::ClearConsecutiveLosses {
+        response_tx: resp_tx,
+    }) {
         return JsonRpcResponse::error(id, ERR_INTERNAL, format!("channel send failed: {e}"));
     }
     match tokio::time::timeout(std::time::Duration::from_secs(5), resp_rx).await {
@@ -838,7 +931,7 @@ fn spawn_governor_audit_row(
         if let Err(e) = sqlx::query(
             "INSERT INTO observability.engine_events
              (ts_ms, event_type, source, config_name, old_version, new_version, payload)
-             VALUES ($1, $2, $3, $4, NULL, NULL, $5)"
+             VALUES ($1, $2, $3, $4, NULL, NULL, $5)",
         )
         .bind(ts_ms)
         .bind(&event_type)
@@ -934,26 +1027,47 @@ pub(super) async fn handle_set_system_mode_broadcast(
     let tx = match primary_tx {
         Some(tx) => tx,
         None => {
-            return JsonRpcResponse::error(id, ERR_INTERNAL, "no command channel configured".to_string())
+            return JsonRpcResponse::error(
+                id,
+                ERR_INTERNAL,
+                "no command channel configured".to_string(),
+            )
         }
     };
     let (resp_tx, resp_rx) = tokio::sync::oneshot::channel();
-    let _ = tx.send(PipelineCommand::SetSystemMode { mode: mode.clone(), response_tx: resp_tx });
+    let _ = tx.send(PipelineCommand::SetSystemMode {
+        mode: mode.clone(),
+        response_tx: resp_tx,
+    });
     // Fire-and-forget to other pipelines (they don't need response channels for broadcast)
     // 向其他管線 fire-and-forget（廣播不需要回應通道）
     let primary_label = cmd_channels.primary_label();
-    for (label, ch) in [("paper", &cmd_channels.paper), ("demo", &cmd_channels.demo), ("live", &cmd_channels.live)] {
+    for (label, ch) in [
+        ("paper", &cmd_channels.paper),
+        ("demo", &cmd_channels.demo),
+        ("live", &cmd_channels.live),
+    ] {
         // Skip the primary (already sent above) and None channels
         // 跳過主管線（已發送）和 None 通道
-        if label == primary_label { continue; }
+        if label == primary_label {
+            continue;
+        }
         if let Some(tx) = ch {
             let (other_resp_tx, _other_resp_rx) = tokio::sync::oneshot::channel();
-            let _ = tx.send(PipelineCommand::SetSystemMode { mode: mode.clone(), response_tx: other_resp_tx });
-            tracing::debug!(engine = label, "set_system_mode broadcast sent / 系統模式廣播已發送");
+            let _ = tx.send(PipelineCommand::SetSystemMode {
+                mode: mode.clone(),
+                response_tx: other_resp_tx,
+            });
+            tracing::debug!(
+                engine = label,
+                "set_system_mode broadcast sent / 系統模式廣播已發送"
+            );
         }
     }
     match tokio::time::timeout(std::time::Duration::from_secs(3), resp_rx).await {
-        Ok(Ok(Ok(msg))) => JsonRpcResponse::success(id, serde_json::json!({ "ok": true, "detail": msg })),
+        Ok(Ok(Ok(msg))) => {
+            JsonRpcResponse::success(id, serde_json::json!({ "ok": true, "detail": msg }))
+        }
         Ok(Ok(Err(e))) => JsonRpcResponse::error(id, ERR_INTERNAL, e),
         Ok(Err(_)) => JsonRpcResponse::error(id, ERR_INTERNAL, "channel closed".to_string()),
         Err(_) => JsonRpcResponse::error(id, ERR_INTERNAL, "timeout".to_string()),
@@ -1005,10 +1119,7 @@ pub(super) fn handle_get_scanner_status(
     registry: &Option<Arc<crate::scanner::registry::SymbolRegistry>>,
 ) -> JsonRpcResponse {
     let Some(reg) = registry else {
-        return JsonRpcResponse::success(
-            id,
-            serde_json::json!({"status": "uninitialized"}),
-        );
+        return JsonRpcResponse::success(id, serde_json::json!({"status": "uninitialized"}));
     };
     let symbols = reg.snapshot();
     let pinned: Vec<&String> = symbols.iter().filter(|s| reg.is_pinned(s)).collect();

@@ -18,11 +18,12 @@ pub async fn load_all(pool: &DbPool) -> Result<BudgetConfig, String> {
     let pg = pool
         .get()
         .ok_or_else(|| "config_io::load_all: pool not available".to_string())?;
-    let rows: Vec<(String, f32)> =
-        sqlx::query_as::<_, (String, f32)>("SELECT scope, monthly_usd FROM learning.ai_budget_config")
-            .fetch_all(pg)
-            .await
-            .map_err(|e| format!("ai_budget_config select failed: {e}"))?;
+    let rows: Vec<(String, f32)> = sqlx::query_as::<_, (String, f32)>(
+        "SELECT scope, monthly_usd FROM learning.ai_budget_config",
+    )
+    .fetch_all(pg)
+    .await
+    .map_err(|e| format!("ai_budget_config select failed: {e}"))?;
     let mut limits = HashMap::new();
     for (scope, usd) in rows {
         limits.insert(scope, usd as f64);

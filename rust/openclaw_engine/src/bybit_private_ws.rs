@@ -521,14 +521,8 @@ fn parse_private_message(text: &str) -> Option<PrivateWsEvent> {
                 .get("success")
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false);
-            let ret_msg = parsed
-                .get("ret_msg")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
-            let conn_id = parsed
-                .get("conn_id")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
+            let ret_msg = parsed.get("ret_msg").and_then(|v| v.as_str()).unwrap_or("");
+            let conn_id = parsed.get("conn_id").and_then(|v| v.as_str()).unwrap_or("");
             if success {
                 info!(
                     success = success,

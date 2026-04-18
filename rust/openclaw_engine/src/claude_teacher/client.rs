@@ -166,14 +166,10 @@ impl LlmClient for AnthropicClient {
                             .map_err(|e| LlmClientError::InvalidJson(e.to_string()))?;
                         // Anthropic returns content[0].text — extract for parser.
                         // Anthropic 回傳 content[0].text — 取出給 parser。
-                        let content_json = raw["content"][0]["text"]
-                            .as_str()
-                            .unwrap_or("")
-                            .to_string();
-                        let tokens_in =
-                            raw["usage"]["input_tokens"].as_u64().unwrap_or(0) as u32;
-                        let tokens_out =
-                            raw["usage"]["output_tokens"].as_u64().unwrap_or(0) as u32;
+                        let content_json =
+                            raw["content"][0]["text"].as_str().unwrap_or("").to_string();
+                        let tokens_in = raw["usage"]["input_tokens"].as_u64().unwrap_or(0) as u32;
+                        let tokens_out = raw["usage"]["output_tokens"].as_u64().unwrap_or(0) as u32;
                         debug!(tokens_in, tokens_out, "anthropic call ok / 呼叫成功");
                         return Ok(LlmResponse {
                             content_json,

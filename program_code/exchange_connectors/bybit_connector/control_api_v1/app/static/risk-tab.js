@@ -150,7 +150,13 @@ function toggleTPInputs() {
 }
 
 // ─── LIVE-P2-2: Per-engine risk selector (paper|demo|live) ────────────────────
-let _selectedRiskEngine = 'paper';
+// Default to 'demo' since PAPER-DISABLE-1 (2026-04-16): paper pipeline is
+// intentionally drained unless OPENCLAW_ENABLE_PAPER=1 is set, so landing on
+// 'paper' makes the Rust engine look offline even when demo+live are healthy.
+// Demo is the primary learning/edge-accumulation channel per project_edge_data_isolation.md.
+// 預設選 demo：PAPER-DISABLE-1 後 paper 預設 drain，落在 paper 會讓 Rust 引擎看起來離線；
+// demo 才是主要學習/edge 累積通道。
+let _selectedRiskEngine = 'demo';
 let _liveRiskSavePendingCallback = null;
 
 function selectRiskEngine(engine) {
@@ -517,25 +523,39 @@ async function unhaltSession() {
 
 // ─── Data Loading ─────────────────────────────────────────────
 async function loadRiskStatus() {
-  // Check Rust engine availability via session status (engine_available field).
-  // This is INDEPENDENT of paper trading state — engine can be "observing" but still alive.
-  // 通過 session status 的 engine_available 欄位確認 Rust 引擎存活。
-  // 與 paper 交易狀態無關 — 引擎可以是「觀察中」但仍然存活。
+  // Check Rust engine availability via /live endpoint — its engine_available field is
+  // rust.is_available() (process-level), NOT pipeline-level. Paper endpoint uses
+  // pipeline-level and reports false whenever paper is drained (PAPER-DISABLE-1 default).
+  // Fall back to /paper only if /live errors out (first-boot edge case).
+  // 透過 /live 端點檢查 Rust 引擎存活：其 engine_available = rust.is_available()（進程級），
+  // 非管線級。Paper 端點是管線級，paper drained 時會報 false（PAPER-DISABLE-1 預設）。
+  // /live 失敗才退回 /paper（啟動邊界情況）。
   try {
-    const pd = await ocApi('/api/v1/paper/session/status');
     const engineEl = $('r-engine-status');
     const modeEl = $('r-session-mode');
-    if (pd && pd.data) {
-      const engineAvail = pd.data.engine_available === true;
-      const sessState = (pd.data.session && pd.data.session.session_state) || 'unknown';
-      const stateLabels = { active: '运行中', observing: '观察中', paused: '已暂停', offline: '离线', idle: '未启动' };
-      engineEl.textContent = engineAvail ? '✓ 运行中' : '✗ 未连接';
-      engineEl.className = 'oc-chip ' + (engineAvail ? 'oc-chip-good' : 'oc-chip-bad');
-      modeEl.textContent = '| Paper: ' + (stateLabels[sessState] || sessState);
-    } else {
-      engineEl.textContent = '✗ 未连接';
-      engineEl.className = 'oc-chip oc-chip-bad';
+    let engineAvail = false;
+    let sessState = 'unknown';
+    let probeSource = 'live';
+    try {
+      const pd = await ocApi('/api/v1/live/session/status');
+      if (pd && pd.data) {
+        engineAvail = pd.data.engine_available === true;
+        sessState = (pd.data.session && pd.data.session.session_state) || 'unknown';
+      }
+    } catch (_) {
+      probeSource = 'paper';
+      const pd2 = await ocApi('/api/v1/paper/session/status');
+      if (pd2 && pd2.data) {
+        engineAvail = pd2.data.engine_available === true;
+        sessState = (pd2.data.session && pd2.data.session.session_state) || 'unknown';
+      }
     }
+    const stateLabels = { active: '运行中', observing: '观察中', paused: '已暂停', offline: '离线', idle: '未启动', stopped: '已停止' };
+    engineEl.textContent = engineAvail ? '✓ 运行中' : '✗ 未连接';
+    engineEl.className = 'oc-chip ' + (engineAvail ? 'oc-chip-good' : 'oc-chip-bad');
+    modeEl.textContent = engineAvail
+      ? '| ' + probeSource.toUpperCase() + ': ' + (stateLabels[sessState] || sessState)
+      : '';
   } catch (e) { /* non-blocking */ }
 
   const d = await ocApi('/api/v1/paper/risk/status');
@@ -815,28 +835,58 @@ async function loadAIContext() {
 }
 
 async function loadDynamicRisk() {
-  const d = await ocApi('/api/v1/strategy/dynamic-risk/status');
-  // On failure, show error in the status chip rather than silently leaving stale data
-  // 失敗時在狀態 chip 顯示錯誤，而非靜默保留舊數據
-  if (!d || !d.data) { const s = document.getElementById('dr-status'); if (s) { s.textContent = 'API 失败 / Failed'; s.className = 'oc-chip oc-chip-bad'; } return; }
+  // DYNAMIC-RISK-1: per-engine sizer status. Rust returns `SizerStatus` fields:
+  //   enabled, base_pct, current_pct, min_pct, max_pct, step_pct,
+  //   sharpe_high, sharpe_low, trades_in_window, min_trades, last_sharpe,
+  //   last_update_ms, last_direction, update_interval_ms
+  // DYNAMIC-RISK-1：按引擎的調整器狀態；Rust 回 SizerStatus。
+  const engine = _selectedRiskEngine || 'demo';
+  const d = await ocApi('/api/v1/strategy/dynamic-risk/status?engine=' + encodeURIComponent(engine));
+  if (!d || !d.data) {
+    const s = document.getElementById('dr-status');
+    if (s) { s.textContent = 'API 失败 / Failed'; s.className = 'oc-chip oc-chip-bad'; }
+    return;
+  }
   const dr = d.data;
-  document.getElementById('dr-toggle').checked = dr.enabled;
-  ocSetText('dr-current-risk', (dr.current_risk_pct || 0).toFixed(1));
-  ocSetText('dr-base-risk', (dr.base_risk_pct || 0).toFixed(1));
+  const toggleEl = document.getElementById('dr-toggle');
+  if (toggleEl) toggleEl.checked = !!dr.enabled;
+  // Percent fields from Rust are fractional (0.03 = 3%) — convert for display.
+  // Rust 端為小數（0.03=3%）— 顯示時乘 100。
+  const currentPct = (dr.current_pct !== undefined) ? dr.current_pct : (dr.current_risk_pct || 0) / 100;
+  const basePct    = (dr.base_pct    !== undefined) ? dr.base_pct    : (dr.base_risk_pct    || 0) / 100;
+  ocSetText('dr-current-risk', (currentPct * 100).toFixed(2));
+  ocSetText('dr-base-risk',    (basePct    * 100).toFixed(2));
   const statusEl = document.getElementById('dr-status');
-  if (!dr.enabled) { statusEl.textContent = '已禁用'; statusEl.className = 'oc-chip oc-chip-neutral'; }
-  else if (dr.active) { statusEl.textContent = '运行中'; statusEl.className = 'oc-chip oc-chip-good'; }
-  else { statusEl.textContent = '等待数据(' + dr.min_trades + '笔)'; statusEl.className = 'oc-chip oc-chip-warn'; }
+  const tradesInWindow = dr.trades_in_window || 0;
+  const minTrades      = dr.min_trades || 50;
+  const available      = dr.available !== false; // undefined ⇒ true (happy path)
+  if (!available) {
+    statusEl.textContent = '引擎离线 / Engine offline';
+    statusEl.className = 'oc-chip oc-chip-bad';
+  } else if (!dr.enabled) {
+    statusEl.textContent = '已禁用';
+    statusEl.className = 'oc-chip oc-chip-neutral';
+  } else if (tradesInWindow < minTrades) {
+    statusEl.textContent = '等待数据(' + tradesInWindow + '/' + minTrades + '笔)';
+    statusEl.className = 'oc-chip oc-chip-warn';
+  } else {
+    const sharpe = (dr.last_sharpe !== undefined && dr.last_sharpe !== null)
+      ? 'Sharpe=' + dr.last_sharpe.toFixed(2)
+      : '运行中';
+    statusEl.textContent = sharpe + ' · ' + tradesInWindow + '笔';
+    statusEl.className = 'oc-chip oc-chip-good';
+  }
 }
 
 async function toggleDynamicRisk() {
+  const engine = _selectedRiskEngine || 'demo';
   const enabled = document.getElementById('dr-toggle').checked;
-  const d = await ocPost('/api/v1/strategy/dynamic-risk/toggle', { enabled: enabled });
+  const d = await ocPost('/api/v1/strategy/dynamic-risk/toggle', { enabled: enabled, engine: engine });
   if (d) {
     if (enabled) {
-      ocToast('动态风控已启用 — 数据充足后自动生效', 'success');
+      ocToast('动态风控已启用 (' + engine + ') — 数据充足后自动生效', 'success');
     } else {
-      ocToast('动态风控已禁用 — 已恢复基准值', 'success');
+      ocToast('动态风控已禁用 (' + engine + ') — 已恢复基准值', 'success');
     }
     loadDynamicRisk();
   } else {

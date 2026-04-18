@@ -132,10 +132,8 @@ impl FundingArb {
     /// RC-04: Snapshot current state before mutation for rejection rollback.
     /// RC-04：突變前快照當前狀態，用於拒絕回滾。
     fn snapshot_prev(&mut self, sym: &str) {
-        self.prev_positions.insert(
-            sym.to_string(),
-            self.positions.get(sym).cloned(),
-        );
+        self.prev_positions
+            .insert(sym.to_string(), self.positions.get(sym).cloned());
         self.prev_last_trade_ms.insert(
             sym.to_string(),
             self.last_trade_ms.get(sym).copied().unwrap_or(0),
@@ -334,12 +332,20 @@ impl Strategy for FundingArb {
         let sym = &intent.symbol;
         if let Some(prev) = self.prev_positions.get(sym) {
             match prev {
-                Some(p) => { self.positions.insert(sym.clone(), p.clone()); }
-                None => { self.positions.remove(sym); }
+                Some(p) => {
+                    self.positions.insert(sym.clone(), p.clone());
+                }
+                None => {
+                    self.positions.remove(sym);
+                }
             }
         }
         if let Some(&ts) = self.prev_last_trade_ms.get(sym) {
-            if ts == 0 { self.last_trade_ms.remove(sym); } else { self.last_trade_ms.insert(sym.clone(), ts); }
+            if ts == 0 {
+                self.last_trade_ms.remove(sym);
+            } else {
+                self.last_trade_ms.insert(sym.clone(), ts);
+            }
         }
     }
 
@@ -462,7 +468,8 @@ impl Strategy for FundingArb {
     }
 
     fn update_params_json(&mut self, json: &str) -> Result<(), String> {
-        let params: FundingArbUpdateParams = serde_json::from_str(json).map_err(|e| e.to_string())?;
+        let params: FundingArbUpdateParams =
+            serde_json::from_str(json).map_err(|e| e.to_string())?;
         self.update_params(params)
     }
 
@@ -498,12 +505,21 @@ mod tests {
         }
     }
 
-    fn insert_position(s: &mut FundingArb, symbol: &str, is_positive: bool, entry_ms: u64, rate: f64) {
-        s.positions.insert(symbol.to_string(), FundingPosition {
-            is_positive_funding: is_positive,
-            entry_ms,
-            entry_funding_rate: rate,
-        });
+    fn insert_position(
+        s: &mut FundingArb,
+        symbol: &str,
+        is_positive: bool,
+        entry_ms: u64,
+        rate: f64,
+    ) {
+        s.positions.insert(
+            symbol.to_string(),
+            FundingPosition {
+                is_positive_funding: is_positive,
+                entry_ms,
+                entry_funding_rate: rate,
+            },
+        );
     }
 
     // ═════════════════════════════════════════════════════════════════════
@@ -675,7 +691,13 @@ mod tests {
         assert!(s.on_tick(&ctx2).is_empty(), "cooldown blocks re-entry");
 
         // After cooldown
-        let ctx3 = make_ctx("BTC", 50000.0, 100_000 + 3_600_001, Some(0.005), Some(50000.0));
+        let ctx3 = make_ctx(
+            "BTC",
+            50000.0,
+            100_000 + 3_600_001,
+            Some(0.005),
+            Some(50000.0),
+        );
         assert_eq!(s.on_tick(&ctx3).len(), 1, "after cooldown → entry");
     }
 
@@ -782,11 +804,17 @@ mod tests {
         // basis ≈ 0.45%: above entry limit (0.4%) but below exit limit (0.5%)
         // index = perp / (1 + basis/100) → 50000 / 1.0045 ≈ 49776
         let ctx = make_ctx("BTC", 50000.0, 100_000, Some(0.005), Some(49776.0));
-        assert!(s.on_tick(&ctx).is_empty(), "0.45% basis blocks entry (> 0.4%)");
+        assert!(
+            s.on_tick(&ctx).is_empty(),
+            "0.45% basis blocks entry (> 0.4%)"
+        );
 
         // But if already holding, 0.45% does NOT trigger exit
         insert_position(&mut s, "BTC", true, 0, 0.005);
-        assert!(!s.should_exit("BTC", 0.005, 0.45, 1000), "0.45% basis allows hold (< 0.5%)");
+        assert!(
+            !s.should_exit("BTC", 0.005, 0.45, 1000),
+            "0.45% basis allows hold (< 0.5%)"
+        );
     }
 
     #[test]
@@ -849,8 +877,7 @@ mod tests {
         };
         s.update_params_json(&serde_json::to_string(&custom).unwrap())
             .expect("valid payload");
-        let echoed: FundingArbUpdateParams =
-            serde_json::from_str(&s.get_params_json()).unwrap();
+        let echoed: FundingArbUpdateParams = serde_json::from_str(&s.get_params_json()).unwrap();
         assert!(echoed.active);
         assert_eq!(echoed.cooldown_ms, 7_200_000);
         assert!((echoed.total_cost_bps - 42.0).abs() < f64::EPSILON);
@@ -872,7 +899,10 @@ mod tests {
         let err = s
             .update_params_json(&serde_json::to_string(&bad).unwrap())
             .unwrap_err();
-        assert!(err.contains("cooldown_ms"), "err should flag cooldown_ms: {err}");
+        assert!(
+            err.contains("cooldown_ms"),
+            "err should flag cooldown_ms: {err}"
+        );
 
         // expected_periods below 0.5 floor — protects compute_edge divisor
         let bad2 = FundingArbUpdateParams {
@@ -882,7 +912,10 @@ mod tests {
         let err2 = s
             .update_params_json(&serde_json::to_string(&bad2).unwrap())
             .unwrap_err();
-        assert!(err2.contains("expected_periods"), "err should flag expected_periods: {err2}");
+        assert!(
+            err2.contains("expected_periods"),
+            "err should flag expected_periods: {err2}"
+        );
     }
 
     #[test]
@@ -911,8 +944,7 @@ mod tests {
         let s = FundingArb::new();
         let ranges: Vec<ParamRange> =
             serde_json::from_str(&s.param_ranges_json()).expect("valid JSON");
-        let names: std::collections::HashSet<_> =
-            ranges.iter().map(|r| r.name.as_str()).collect();
+        let names: std::collections::HashSet<_> = ranges.iter().map(|r| r.name.as_str()).collect();
         for required in [
             "cooldown_ms",
             "total_cost_bps",

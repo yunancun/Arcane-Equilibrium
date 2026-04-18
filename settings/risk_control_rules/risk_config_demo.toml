@@ -123,4 +123,19 @@ boot_cooldown_ms = 60000
 signals_heartbeat_ms = 60000
 h0_shadow_mode = false
 
+# DYNAMIC-RISK-1: Sharpe-aware dynamic per-trade risk. Demo is the primary
+# learning/edge-accumulation channel (project_edge_data_isolation.md), so
+# enabled with moderate defaults: ±0.5% step, 1%..5% clamp, update every 5min.
+# DYNAMIC-RISK-1：demo 為主要學習/edge 累積通道，啟用中庸參數。
+[dynamic_sizing]
+enabled = true
+min_trades = 50
+step_pct = 0.005
+min_pct = 0.01
+max_pct = 0.05
+sharpe_high = 1.0
+sharpe_low = 0.0
+update_interval_ms = 300000
+window_size = 200
+
 [experimental.flags]

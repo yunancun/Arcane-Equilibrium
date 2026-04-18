@@ -25,8 +25,8 @@ pub fn symbol_sector(base: &str) -> &'static str {
     match base {
         // Layer 1 infrastructure / L1 基礎設施
         "BTC" | "ETH" | "SOL" | "ADA" | "AVAX" | "DOT" | "ATOM" | "NEAR" | "APT" | "SUI"
-        | "SEI" | "INJ" | "TIA" | "ALGO" | "EGLD" | "FTM" | "ONE" | "CELO" | "KAVA"
-        | "FLOW" | "HBAR" | "ICP" | "THETA" | "VET" | "XLM" => "l1_infra",
+        | "SEI" | "INJ" | "TIA" | "ALGO" | "EGLD" | "FTM" | "ONE" | "CELO" | "KAVA" | "FLOW"
+        | "HBAR" | "ICP" | "THETA" | "VET" | "XLM" => "l1_infra",
 
         // Meme coins / 迷因幣
         "DOGE" | "SHIB" | "PEPE" | "FLOKI" | "BONK" | "WIF" | "MEME" | "NEIRO" | "MOG"
@@ -34,49 +34,46 @@ pub fn symbol_sector(base: &str) -> &'static str {
         | "MOODENG" | "FWOG" => "meme",
 
         // Oracle / data networks / 預言機 / 數據網絡
-        "LINK" | "BAND" | "DIA" | "API3" | "TRB" | "UMA" | "REN" | "PYTH" | "SUPRA" => {
-            "oracle"
-        }
+        "LINK" | "BAND" | "DIA" | "API3" | "TRB" | "UMA" | "REN" | "PYTH" | "SUPRA" => "oracle",
 
         // DEX / DeFi AMM / 去中心化交易所
-        "UNI" | "SUSHI" | "CRV" | "BAL" | "GMX" | "GNS" | "DYDX" | "PERP" | "RBN"
-        | "OSMO" | "ASTRO" | "JUP" | "ORCA" | "RAY" | "DRIFT" => "defi_dex",
+        "UNI" | "SUSHI" | "CRV" | "BAL" | "GMX" | "GNS" | "DYDX" | "PERP" | "RBN" | "OSMO"
+        | "ASTRO" | "JUP" | "ORCA" | "RAY" | "DRIFT" => "defi_dex",
 
         // DeFi lending / yield / 借貸 / 收益
         "AAVE" | "COMP" | "MKR" | "SNX" | "YFI" | "PENDLE" | "ENA" | "ETHFI" | "RETH"
         | "FRXETH" | "LIDO" | "LDO" | "RPL" | "SFRX" => "defi_lending",
 
         // Gaming / NFT / Metaverse / 遊戲 / NFT / 元宇宙
-        "AXS" | "SAND" | "MANA" | "ENJ" | "IMX" | "GALA" | "MAGIC" | "LOOKS" | "BLUR"
-        | "BEAM" | "RON" | "YGG" | "PYR" | "ILV" | "GODS" | "MC" | "SLP" => "gaming_nft",
+        "AXS" | "SAND" | "MANA" | "ENJ" | "IMX" | "GALA" | "MAGIC" | "LOOKS" | "BLUR" | "BEAM"
+        | "RON" | "YGG" | "PYR" | "ILV" | "GODS" | "MC" | "SLP" => "gaming_nft",
 
         // Storage / compute / 存儲 / 算力
         "FIL" | "AR" | "STORJ" | "ANKR" | "RLC" | "GLM" | "RENDER" | "AKT" | "IO" | "TAO"
         | "GRT" | "LPT" | "NMR" => "storage_compute",
 
         // Payments / L1 payment chains / 支付 / 支付型 L1
-        "XRP" | "LTC" | "BCH" | "DASH" | "ZEC" | "XMR" | "NANO" | "RVN" | "BTT" | "TRX"
-        | "XEM" | "ZIL" => "payments_l1",
+        "XRP" | "LTC" | "BCH" | "DASH" | "ZEC" | "XMR" | "NANO" | "RVN" | "BTT" | "TRX" | "XEM"
+        | "ZIL" => "payments_l1",
 
         // L2 scaling / rollups / L2 擴容 / Rollup
-        "MATIC" | "POL" | "ARB" | "OP" | "STRK" | "MANTA" | "METIS" | "BOBA" | "ZKS"
-        | "ZKSYNC" | "SCROLL" | "LINEA" | "BLAST" | "MODE" | "BASE" => "l2_scaling",
+        "MATIC" | "POL" | "ARB" | "OP" | "STRK" | "MANTA" | "METIS" | "BOBA" | "ZKS" | "ZKSYNC"
+        | "SCROLL" | "LINEA" | "BLAST" | "MODE" | "BASE" => "l2_scaling",
 
         // Exchange tokens / CEX native / 交易所原生代幣
         "BNB" | "OKB" | "HT" | "KCS" | "FTT" | "CRO" | "GT" | "MX" | "WBT" => "exchange",
 
         // AI / ML infrastructure / AI / 機器學習基礎設施
-        "FET" | "AGIX" | "OCEAN" | "RNDR" | "WLD" | "ARKM" | "BITTENSOR" | "GRASS"
-        | "AIOZ" => "ai_infra",
+        "FET" | "AGIX" | "OCEAN" | "RNDR" | "WLD" | "ARKM" | "BITTENSOR" | "GRASS" | "AIOZ" => {
+            "ai_infra"
+        }
 
         // Privacy / 隱私 (ZEC/XMR already matched in payments_l1)
         "SCRT" | "ROSE" | "NYM" | "PHA" => "privacy",
 
         // Infrastructure / middleware / 基礎設施 / 中間件
         // (BAND/PYTH already matched in oracle)
-        "AXL" | "WORMHOLE" | "W" | "JITO" | "JTO" | "EIGEN" => {
-            "infrastructure"
-        }
+        "AXL" | "WORMHOLE" | "W" | "JITO" | "JTO" | "EIGEN" => "infrastructure",
 
         // Default / 默認
         _ => "other",

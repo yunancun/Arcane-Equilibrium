@@ -8,8 +8,8 @@
 //!   提供 qty 和 price 取整輔助函數以符合交易所精度要求。緩存可定期刷新。
 
 use crate::bybit_rest_client::{BybitApiError, BybitRestClient, BybitResult};
-use std::collections::HashMap;
 use parking_lot::RwLock;
+use std::collections::HashMap;
 use tracing::info;
 
 // ---------------------------------------------------------------------------

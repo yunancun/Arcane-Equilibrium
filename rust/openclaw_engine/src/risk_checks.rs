@@ -32,10 +32,16 @@ pub struct PositionCheck {
 
 impl PositionCheck {
     fn allow() -> Self {
-        Self { allowed: true, reason: "passed all checks".into() }
+        Self {
+            allowed: true,
+            reason: "passed all checks".into(),
+        }
     }
     fn reject(reason: String) -> Self {
-        Self { allowed: false, reason }
+        Self {
+            allowed: false,
+            reason,
+        }
     }
 }
 
@@ -219,10 +225,7 @@ pub fn check_position_on_tick(
     // break-even profits are no longer closed into a loss by exit fees.
     // MICRO-PROFIT-FIX-1：窄帶 [min_profit_to_close_pct, 1 / ratio ceiling 對應值]，
     // ratio 與 pnl_pct 同時達標才觸發，避免 breakeven dust 被 exit fee 吃光。
-    if cost_ratio >= cost_edge_max_ratio
-        && pnl_pct >= min_profit_to_close_pct
-        && pnl_pct > 0.0
-    {
+    if cost_ratio >= cost_edge_max_ratio && pnl_pct >= min_profit_to_close_pct && pnl_pct > 0.0 {
         return RiskAction::ClosePosition(format!(
             "COST EDGE: ratio {:.2} >= {:.2}, pnl {:.2}% >= min_profit {:.2}% (suggest close while profitable)",
             cost_ratio, cost_edge_max_ratio, pnl_pct, min_profit_to_close_pct
@@ -279,7 +282,11 @@ mod tests {
     fn test_order_reducing_always_passes() {
         let cfg = default_config();
         let res = check_order_allowed(100.0, 50.0, 1000.0, 95.0, 70.0, 50.0, 10.0, true, &cfg);
-        assert!(res.allowed, "reducing order must always pass: {}", res.reason);
+        assert!(
+            res.allowed,
+            "reducing order must always pass: {}",
+            res.reason
+        );
     }
 
     #[test]
@@ -340,19 +347,50 @@ mod tests {
     // -- check_position_on_tick tests --
 
     fn call_tick(
-        pnl: f64, peak: f64, hold: f64, cost: f64, regime: &str,
-        atr: Option<f64>, consec: u32, daily: f64, dd: f64, cfg: &RiskConfig,
+        pnl: f64,
+        peak: f64,
+        hold: f64,
+        cost: f64,
+        regime: &str,
+        atr: Option<f64>,
+        consec: u32,
+        daily: f64,
+        dd: f64,
+        cfg: &RiskConfig,
     ) -> RiskAction {
         check_position_on_tick(
-            pnl, peak, hold, cost, regime, atr, "BTCUSDT", 1000,
-            consec, daily, dd, COST_EDGE_DEFAULT, MIN_PROFIT_DEFAULT, cfg,
+            pnl,
+            peak,
+            hold,
+            cost,
+            regime,
+            atr,
+            "BTCUSDT",
+            1000,
+            consec,
+            daily,
+            dd,
+            COST_EDGE_DEFAULT,
+            MIN_PROFIT_DEFAULT,
+            cfg,
         )
     }
 
     #[test]
     fn test_tick_hard_stop() {
         let cfg = default_config();
-        let action = call_tick(-5.0, 0.0, 1.0, 0.0, "trending", Some(1.0), 0, 0.0, 0.0, &cfg);
+        let action = call_tick(
+            -5.0,
+            0.0,
+            1.0,
+            0.0,
+            "trending",
+            Some(1.0),
+            0,
+            0.0,
+            0.0,
+            &cfg,
+        );
         assert!(matches!(action, RiskAction::ClosePosition(ref r) if r.contains("HARD STOP")));
     }
 
@@ -363,17 +401,40 @@ mod tests {
         //   max dyn_stop with anti-cluster (+15%) = 4.6%; use -4.7 to guarantee trigger.
         // 預設 atr_stop_mult=2.0：atr_stop=4%，最大 dyn_stop≈4.6%，用 -4.7% 確保觸發。
         let cfg = default_config();
-        let action = call_tick(-4.7, 0.0, 1.0, 0.0, "trending", Some(2.0), 0, 0.0, 0.0, &cfg);
+        let action = call_tick(
+            -4.7,
+            0.0,
+            1.0,
+            0.0,
+            "trending",
+            Some(2.0),
+            0,
+            0.0,
+            0.0,
+            &cfg,
+        );
         assert!(
             matches!(action, RiskAction::ClosePosition(ref r) if r.contains("DYNAMIC STOP")),
-            "expected dynamic stop, got {:?}", action
+            "expected dynamic stop, got {:?}",
+            action
         );
     }
 
     #[test]
     fn test_tick_take_profit_disabled() {
         let cfg = default_config(); // take_profit_enforced = false by default
-        let action = call_tick(25.0, 25.0, 1.0, 0.0, "trending", Some(1.0), 0, 0.0, 0.0, &cfg);
+        let action = call_tick(
+            25.0,
+            25.0,
+            1.0,
+            0.0,
+            "trending",
+            Some(1.0),
+            0,
+            0.0,
+            0.0,
+            &cfg,
+        );
         assert!(
             !matches!(action, RiskAction::ClosePosition(ref r) if r.contains("TAKE PROFIT")),
             "TP should be disabled"
@@ -386,7 +447,18 @@ mod tests {
         cfg.limits.take_profit_enforced = true;
         cfg.limits.take_profit_max_pct = 10.0;
         // trending TP mult = 1.5 -> target = 15%
-        let action = call_tick(16.0, 16.0, 1.0, 0.0, "trending", Some(1.0), 0, 0.0, 0.0, &cfg);
+        let action = call_tick(
+            16.0,
+            16.0,
+            1.0,
+            0.0,
+            "trending",
+            Some(1.0),
+            0,
+            0.0,
+            0.0,
+            &cfg,
+        );
         assert!(matches!(action, RiskAction::ClosePosition(ref r) if r.contains("TAKE PROFIT")));
     }
 
@@ -412,7 +484,18 @@ mod tests {
     fn test_tick_time_stop() {
         let cfg = default_config();
         // max_holding 72 * trending time 1.5 = 108h
-        let action = call_tick(1.0, 1.0, 110.0, 0.0, "trending", Some(1.0), 0, 0.0, 0.0, &cfg);
+        let action = call_tick(
+            1.0,
+            1.0,
+            110.0,
+            0.0,
+            "trending",
+            Some(1.0),
+            0,
+            0.0,
+            0.0,
+            &cfg,
+        );
         assert!(matches!(action, RiskAction::ClosePosition(ref r) if r.contains("TIME STOP")));
     }
 
@@ -422,17 +505,40 @@ mod tests {
         // pnl=0.4% (≥ 0.3% floor), cost_ratio=0.25 (≥ 0.2 ceiling) → triggers.
         // MICRO-PROFIT-FIX-1：窄帶內同時滿足 ratio 與 pnl 雙條件。
         let cfg = default_config();
-        let action = call_tick(0.4, 0.4, 1.0, 0.25, "trending", Some(1.0), 0, 0.0, 0.0, &cfg);
+        let action = call_tick(
+            0.4,
+            0.4,
+            1.0,
+            0.25,
+            "trending",
+            Some(1.0),
+            0,
+            0.0,
+            0.0,
+            &cfg,
+        );
         assert!(
             matches!(action, RiskAction::ClosePosition(ref r) if r.contains("COST EDGE")),
-            "expected COST EDGE close, got {:?}", action
+            "expected COST EDGE close, got {:?}",
+            action
         );
     }
 
     #[test]
     fn test_tick_cost_edge_not_profitable() {
         let cfg = default_config();
-        let action = call_tick(-0.5, 0.0, 1.0, 0.9, "trending", Some(1.0), 0, 0.0, 0.0, &cfg);
+        let action = call_tick(
+            -0.5,
+            0.0,
+            1.0,
+            0.9,
+            "trending",
+            Some(1.0),
+            0,
+            0.0,
+            0.0,
+            &cfg,
+        );
         assert!(
             !matches!(action, RiskAction::ClosePosition(ref r) if r.contains("COST EDGE")),
             "cost edge should not trigger when not profitable"
@@ -449,7 +555,8 @@ mod tests {
         let action = call_tick(0.1, 0.1, 1.0, 2.0, "trending", Some(1.0), 0, 0.0, 0.0, &cfg);
         assert!(
             !matches!(action, RiskAction::ClosePosition(ref r) if r.contains("COST EDGE")),
-            "cost edge must NOT fire below min_profit floor, got {:?}", action
+            "cost edge must NOT fire below min_profit floor, got {:?}",
+            action
         );
     }
 
@@ -459,17 +566,40 @@ mod tests {
         // MICRO-PROFIT-FIX-1：pnl 達 floor 但 ratio 未達 ceiling 時不觸發。
         let cfg = default_config();
         // pnl = 1.0% (> 0.3 floor), ratio = 0.11 (< 0.2 ceiling) → must NOT fire.
-        let action = call_tick(1.0, 1.0, 1.0, 0.11, "trending", Some(1.0), 0, 0.0, 0.0, &cfg);
+        let action = call_tick(
+            1.0,
+            1.0,
+            1.0,
+            0.11,
+            "trending",
+            Some(1.0),
+            0,
+            0.0,
+            0.0,
+            &cfg,
+        );
         assert!(
             !matches!(action, RiskAction::ClosePosition(ref r) if r.contains("COST EDGE")),
-            "cost edge must NOT fire when cost_ratio < ceiling, got {:?}", action
+            "cost edge must NOT fire when cost_ratio < ceiling, got {:?}",
+            action
         );
     }
 
     #[test]
     fn test_tick_session_drawdown() {
         let cfg = default_config();
-        let action = call_tick(0.0, 0.0, 1.0, 0.0, "trending", Some(1.0), 0, 0.0, 15.0, &cfg);
+        let action = call_tick(
+            0.0,
+            0.0,
+            1.0,
+            0.0,
+            "trending",
+            Some(1.0),
+            0,
+            0.0,
+            15.0,
+            &cfg,
+        );
         assert!(matches!(action, RiskAction::HaltSession(_)));
     }
 
@@ -503,7 +633,18 @@ mod tests {
     #[test]
     fn test_tick_priority_hard_stop_over_trailing() {
         let cfg = default_config();
-        let action = call_tick(-5.0, 3.0, 1.0, 0.0, "trending", Some(1.0), 0, 0.0, 0.0, &cfg);
+        let action = call_tick(
+            -5.0,
+            3.0,
+            1.0,
+            0.0,
+            "trending",
+            Some(1.0),
+            0,
+            0.0,
+            0.0,
+            &cfg,
+        );
         assert!(matches!(action, RiskAction::ClosePosition(ref r) if r.contains("HARD STOP")));
     }
 
@@ -522,16 +663,40 @@ mod tests {
         let mut cfg_wide = RiskConfig::default();
         cfg_wide.dynamic_stop.atr_stop_mult = 2.5;
 
-        let tight = call_tick(-3.5, 0.0, 1.0, 0.0, "trending", Some(1.5), 0, 0.0, 0.0, &cfg_tight);
-        let wide  = call_tick(-3.5, 0.0, 1.0, 0.0, "trending", Some(1.5), 0, 0.0, 0.0, &cfg_wide);
+        let tight = call_tick(
+            -3.5,
+            0.0,
+            1.0,
+            0.0,
+            "trending",
+            Some(1.5),
+            0,
+            0.0,
+            0.0,
+            &cfg_tight,
+        );
+        let wide = call_tick(
+            -3.5,
+            0.0,
+            1.0,
+            0.0,
+            "trending",
+            Some(1.5),
+            0,
+            0.0,
+            0.0,
+            &cfg_wide,
+        );
 
         assert!(
             matches!(tight, RiskAction::ClosePosition(ref r) if r.contains("DYNAMIC STOP")),
-            "tight mult=1.0 should trigger dynamic stop, got {:?}", tight
+            "tight mult=1.0 should trigger dynamic stop, got {:?}",
+            tight
         );
         assert!(
             matches!(wide, RiskAction::Hold),
-            "wide mult=2.5 should hold (wider stop), got {:?}", wide
+            "wide mult=2.5 should hold (wider stop), got {:?}",
+            wide
         );
     }
 
@@ -540,7 +705,11 @@ mod tests {
         // peak 1.1 current 0.2 drawdown 0.9 > 0.8, but locked 0.2 < dyn*0.5 floor
         let cfg = default_config();
         let action = call_tick(0.2, 1.1, 0.5, 0.0, "trending", Some(0.5), 0, 0.0, 0.0, &cfg);
-        assert!(matches!(action, RiskAction::Hold), "expected Hold, got {:?}", action);
+        assert!(
+            matches!(action, RiskAction::Hold),
+            "expected Hold, got {:?}",
+            action
+        );
     }
 
     #[test]
@@ -550,7 +719,8 @@ mod tests {
         let action = call_tick(2.0, 3.0, 0.5, 0.0, "trending", Some(0.5), 0, 0.0, 0.0, &cfg);
         assert!(
             matches!(action, RiskAction::ClosePosition(ref r) if r.contains("TRAILING STOP")),
-            "expected trailing close, got {:?}", action
+            "expected trailing close, got {:?}",
+            action
         );
     }
 }

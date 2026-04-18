@@ -7,13 +7,13 @@
 //! MODULE_NOTE (中): 從 main.rs 提取（Phase 1 Day 0-A），保持 main.rs 在 800 行警告線下。
 //!   擁有 TickPipeline 生命週期：創建管線、註冊策略、執行 K 線引導、然後循環接收 PriceEvent。
 
-#[cfg(test)]
-mod tests;
 mod dispatch;
 mod governor_cooldown;
 pub mod handlers;
 mod paper_state_restore;
 mod setup;
+#[cfg(test)]
+mod tests;
 mod types;
 
 use types::STATUS_INTERVAL_SECS;
@@ -174,8 +174,7 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_nanos())
         .unwrap_or(0);
-    let predictor_seed =
-        crate::edge_predictor::gate::seed_for_engine(startup_nanos, pipeline_kind);
+    let predictor_seed = crate::edge_predictor::gate::seed_for_engine(startup_nanos, pipeline_kind);
     pipeline.set_predictor_rng_seed(predictor_seed);
 
     // QoL-1: Restore cumulative paper_state counters from trading.fills before
@@ -448,7 +447,10 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
                 "PH5-WIRE-1: JS edge estimates loaded / JS 邊際估計已加載"
             );
         } else {
-            info!(mode, "PH5-WIRE-1: no edge snapshot — cold-start ATR×0.2 fallback / 無快照，ATR 回退");
+            info!(
+                mode,
+                "PH5-WIRE-1: no edge snapshot — cold-start ATR×0.2 fallback / 無快照，ATR 回退"
+            );
         }
         pipeline.set_edge_estimates(estimates);
     }
@@ -489,8 +491,7 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
         tokio::spawn(async move {
             // Create PositionManager once if exchange client is available.
             // 若交易所客戶端可用，一次性創建 PositionManager。
-            let pos_mgr = stop_client
-                .map(crate::position_manager::PositionManager::new);
+            let pos_mgr = stop_client.map(crate::position_manager::PositionManager::new);
 
             while let Some(req) = stop_rx.recv().await {
                 info!(
@@ -654,15 +655,22 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
     // 每引擎錯開快照去抖間隔，避免三管線同時刷新時的 I/O 爭用。
     let (state_interval_ms, snapshot_interval_ms) = match pipeline.pipeline_kind {
         PipelineKind::Paper => (30_000, 5_000),
-        PipelineKind::Demo  => (31_000, 5_500),
-        PipelineKind::Live  => (29_000, 4_500),
+        PipelineKind::Demo => (31_000, 5_500),
+        PipelineKind::Live => (29_000, 4_500),
     };
-    let mut state_writer = StateWriter::new(&data_path.join(format!("{kind_tag}_state.json")), state_interval_ms);
-    let primary_writer = StateWriter::new(&data_path.join(&per_engine_snapshot), snapshot_interval_ms);
+    let mut state_writer = StateWriter::new(
+        &data_path.join(format!("{kind_tag}_state.json")),
+        state_interval_ms,
+    );
+    let primary_writer =
+        StateWriter::new(&data_path.join(&per_engine_snapshot), snapshot_interval_ms);
     // Backward compat: primary pipeline also writes pipeline_snapshot.json
     // 向後兼容：主管線同時寫入 pipeline_snapshot.json
     let compat_writer = if is_primary {
-        Some(StateWriter::new(&data_path.join("pipeline_snapshot.json"), 5_000))
+        Some(StateWriter::new(
+            &data_path.join("pipeline_snapshot.json"),
+            5_000,
+        ))
     } else {
         None
     };
@@ -1398,9 +1406,18 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
         }
     }
 
-    // Shutdown: close all open positions before final state write
-    // 關閉：先平掉所有持倉，再寫入最終狀態
-    let closed = pipeline.paper_state.close_all_positions();
+    // Shutdown: close all open positions before final state write.
+    // Feed realized PnL into the sizer so the window captures end-of-session
+    // outcomes (DYNAMIC-RISK-1 BUG-1 fix). The sizer persists only in-memory,
+    // but recording keeps semantics consistent with the paper close-all path.
+    // 關閉：先平掉所有持倉；把實現 PnL 餵入 sizer，語義對齊 paper close-all。
+    let results = pipeline.paper_state.close_all_positions();
+    for (_, pnl) in &results {
+        if *pnl != 0.0 {
+            pipeline.dynamic_risk_sizer.record_closed_trade(*pnl);
+        }
+    }
+    let closed = results.len();
     if closed > 0 {
         info!(
             closed = closed,

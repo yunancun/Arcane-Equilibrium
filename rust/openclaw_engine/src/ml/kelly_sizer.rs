@@ -169,8 +169,8 @@ pub fn compute_kelly_qty(
     // sits in 1–4% band; default 2% so the multiplier sits at 1.0 in steady state).
     // ATR 波動調整：高波動市場縮量。reference_atr_pct 為歸一化錨點，可透過 KellyConfig 調整。
     let vol_adjusted = if atr_pct > 0.0 {
-        let vol_multiplier = (config.reference_atr_pct / atr_pct)
-            .clamp(config.vol_mult_floor, config.vol_mult_ceil);
+        let vol_multiplier =
+            (config.reference_atr_pct / atr_pct).clamp(config.vol_mult_floor, config.vol_mult_ceil);
         kelly_qty * vol_multiplier
     } else {
         kelly_qty

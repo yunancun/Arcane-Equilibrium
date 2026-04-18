@@ -113,7 +113,10 @@ impl NewsPipeline {
             }
         }
 
-        debug!(count = processed.len(), "news pipeline run_once done / 新聞管線本輪完成");
+        debug!(
+            count = processed.len(),
+            "news pipeline run_once done / 新聞管線本輪完成"
+        );
         Ok(processed)
     }
 
@@ -284,10 +287,7 @@ mod tests {
         // 中文: pool 不可用時 run_once 仍返回 processed items（persist 靜默 no-op）。
         let pool = empty_pool().await;
         assert!(!pool.is_available());
-        let pipe = NewsPipeline::new(
-            vec![Box::new(MockProvider::default_fixture())],
-            pool,
-        );
+        let pipe = NewsPipeline::new(vec![Box::new(MockProvider::default_fixture())], pool);
         let out = pipe.run_once(1_700_000_500_000).await.expect("ok");
         assert_eq!(out.len(), 5);
         assert_eq!(pipe.dedup_cache_size(), 5);
@@ -300,7 +300,11 @@ mod tests {
         let pool = empty_pool().await;
         let mut items = Vec::new();
         for i in 0..20 {
-            items.push(raw("Same headline repeated", "cryptopanic", 1_700_000_000_000 + i));
+            items.push(raw(
+                "Same headline repeated",
+                "cryptopanic",
+                1_700_000_000_000 + i,
+            ));
         }
         let prov = VecProvider {
             name: "vec".into(),

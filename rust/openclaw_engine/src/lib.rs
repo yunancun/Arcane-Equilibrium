@@ -18,6 +18,7 @@ pub mod claude_teacher;
 pub mod config;
 pub mod database;
 pub mod decision_context_producer;
+pub mod dynamic_risk_sizer;
 pub mod edge_estimates;
 pub mod edge_predictor;
 pub mod event_consumer;

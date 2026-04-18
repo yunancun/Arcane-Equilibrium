@@ -108,7 +108,9 @@ impl OutcomeTracker {
         let pool = match self.pool.get() {
             Some(p) => p,
             None => {
-                debug!("outcome_tracker: pool unavailable, skipping sweep / pool 不可用，跳過 sweep");
+                debug!(
+                    "outcome_tracker: pool unavailable, skipping sweep / pool 不可用，跳過 sweep"
+                );
                 return Ok(0);
             }
         };
@@ -116,19 +118,18 @@ impl OutcomeTracker {
         // Pull pending rows whose ts is at least min_age_ms in the past.
         // 拉取 ts 至少 min_age_ms 前的待處理 row。
         let min_age_seconds = self.min_age_ms / 1000;
-        let rows: Vec<(i64, chrono::DateTime<chrono::Utc>, Option<String>)> =
-            sqlx::query_as(
-                "SELECT execution_id::bigint, ts, strategy_scope \
+        let rows: Vec<(i64, chrono::DateTime<chrono::Utc>, Option<String>)> = sqlx::query_as(
+            "SELECT execution_id::bigint, ts, strategy_scope \
                  FROM learning.directive_executions \
                  WHERE outcome_computed_at IS NULL \
                    AND ts < NOW() - make_interval(secs => $1::bigint) \
                  ORDER BY ts ASC \
                  LIMIT 100",
-            )
-            .bind(min_age_seconds)
-            .fetch_all(pool)
-            .await
-            .map_err(|e| format!("outcome_tracker: select pending failed: {e}"))?;
+        )
+        .bind(min_age_seconds)
+        .fetch_all(pool)
+        .await
+        .map_err(|e| format!("outcome_tracker: select pending failed: {e}"))?;
 
         let mut processed = 0_usize;
         for (execution_id, ts, scope_opt) in rows {
@@ -337,7 +338,10 @@ mod tests {
     async fn test_compute_outcome_no_pool_returns_default() {
         let pool = empty_pool().await;
         let tracker = OutcomeTracker::new(pool);
-        let outcome = tracker.compute_outcome(1_000, "ma_crossover").await.unwrap();
+        let outcome = tracker
+            .compute_outcome(1_000, "ma_crossover")
+            .await
+            .unwrap();
         assert!(outcome.is_empty());
     }
 

@@ -152,7 +152,7 @@ impl StrategistScheduler {
     fn current_interval(&self) -> Duration {
         let fails = self.consecutive_failures.load(Ordering::Relaxed);
         match fails {
-            0 => NORMAL_INTERVAL,        // 5 min
+            0 => NORMAL_INTERVAL,             // 5 min
             1 => Duration::from_secs(1_800),  // 30 min
             2 => Duration::from_secs(3_600),  // 60 min
             _ => Duration::from_secs(14_400), // 4h cap
@@ -180,25 +180,23 @@ impl StrategistScheduler {
         for pair in top_pairs.iter().take(MAX_EVALS_PER_CYCLE) {
             // 3a. Fetch current params + ranges BEFORE IPC (B3: context for Python AI)
             // 3a. IPC 前獲取當前參數 + 範圍（B3：為 Python AI 提供上下文）
-            let (current_json, ranges_json) = match self
-                .fetch_current_params(&pair.strategy_name)
-                .await
-            {
-                Ok(v) => v,
-                Err(e) => {
-                    warn!(
-                        strategy = %pair.strategy_name,
-                        error = %e,
-                        "fetch_current_params failed, skipping pair / 獲取參數失敗，跳過"
-                    );
-                    continue;
-                }
-            };
+            let (current_json, ranges_json) =
+                match self.fetch_current_params(&pair.strategy_name).await {
+                    Ok(v) => v,
+                    Err(e) => {
+                        warn!(
+                            strategy = %pair.strategy_name,
+                            error = %e,
+                            "fetch_current_params failed, skipping pair / 獲取參數失敗，跳過"
+                        );
+                        continue;
+                    }
+                };
 
             // 3b. Serialize ranges for Python (B3: param_ranges in IPC payload)
             // 3b. 為 Python 序列化範圍（B3：IPC 負載中的 param_ranges）
-            let ranges_value: Value = serde_json::to_value(&ranges_json)
-                .unwrap_or_else(|_| Value::Array(vec![]));
+            let ranges_value: Value =
+                serde_json::to_value(&ranges_json).unwrap_or_else(|_| Value::Array(vec![]));
 
             let params = serde_json::json!({
                 "intel": {
@@ -598,23 +596,35 @@ mod tests {
         let ranges = vec![
             ParamRange {
                 name: "weight_adx".into(),
-                min: 0.0, max: 65.0, step: Some(1.0),
-                agent_adjustable: true, db_persisted: true,
+                min: 0.0,
+                max: 65.0,
+                step: Some(1.0),
+                agent_adjustable: true,
+                db_persisted: true,
             },
             ParamRange {
                 name: "weight_regime".into(),
-                min: 0.0, max: 65.0, step: Some(1.0),
-                agent_adjustable: true, db_persisted: true,
+                min: 0.0,
+                max: 65.0,
+                step: Some(1.0),
+                agent_adjustable: true,
+                db_persisted: true,
             },
             ParamRange {
                 name: "weight_volume".into(),
-                min: 0.0, max: 65.0, step: Some(1.0),
-                agent_adjustable: true, db_persisted: true,
+                min: 0.0,
+                max: 65.0,
+                step: Some(1.0),
+                agent_adjustable: true,
+                db_persisted: true,
             },
             ParamRange {
                 name: "weight_momentum".into(),
-                min: 0.0, max: 65.0, step: Some(1.0),
-                agent_adjustable: true, db_persisted: true,
+                min: 0.0,
+                max: 65.0,
+                step: Some(1.0),
+                agent_adjustable: true,
+                db_persisted: true,
             },
         ];
         assert!(validate_recommendation(&rec, &current, &ranges));
@@ -632,23 +642,35 @@ mod tests {
         let ranges = vec![
             ParamRange {
                 name: "weight_adx".into(),
-                min: 0.0, max: 65.0, step: Some(1.0),
-                agent_adjustable: true, db_persisted: true,
+                min: 0.0,
+                max: 65.0,
+                step: Some(1.0),
+                agent_adjustable: true,
+                db_persisted: true,
             },
             ParamRange {
                 name: "weight_regime".into(),
-                min: 0.0, max: 65.0, step: Some(1.0),
-                agent_adjustable: true, db_persisted: true,
+                min: 0.0,
+                max: 65.0,
+                step: Some(1.0),
+                agent_adjustable: true,
+                db_persisted: true,
             },
             ParamRange {
                 name: "weight_volume".into(),
-                min: 0.0, max: 65.0, step: Some(1.0),
-                agent_adjustable: true, db_persisted: true,
+                min: 0.0,
+                max: 65.0,
+                step: Some(1.0),
+                agent_adjustable: true,
+                db_persisted: true,
             },
             ParamRange {
                 name: "weight_momentum".into(),
-                min: 0.0, max: 65.0, step: Some(1.0),
-                agent_adjustable: true, db_persisted: true,
+                min: 0.0,
+                max: 65.0,
+                step: Some(1.0),
+                agent_adjustable: true,
+                db_persisted: true,
             },
         ];
         assert!(!validate_recommendation(&rec, &current, &ranges));
@@ -669,13 +691,19 @@ mod tests {
         let ranges = vec![
             ParamRange {
                 name: "active".into(),
-                min: 0.0, max: 1.0, step: Some(1.0),
-                agent_adjustable: false, db_persisted: false,
+                min: 0.0,
+                max: 1.0,
+                step: Some(1.0),
+                agent_adjustable: false,
+                db_persisted: false,
             },
             ParamRange {
                 name: "cooldown_ms".into(),
-                min: 10000.0, max: 120000.0, step: Some(1000.0),
-                agent_adjustable: true, db_persisted: true,
+                min: 10000.0,
+                max: 120000.0,
+                step: Some(1000.0),
+                agent_adjustable: true,
+                db_persisted: true,
             },
         ];
         assert!(validate_recommendation(&rec, &current, &ranges));
@@ -688,8 +716,11 @@ mod tests {
         let current = serde_json::json!({});
         let ranges = vec![ParamRange {
             name: "cooldown_ms".into(),
-            min: 10000.0, max: 120000.0, step: Some(1000.0),
-            agent_adjustable: true, db_persisted: true,
+            min: 10000.0,
+            max: 120000.0,
+            step: Some(1000.0),
+            agent_adjustable: true,
+            db_persisted: true,
         }];
         assert!(validate_recommendation(&rec, &current, &ranges));
     }

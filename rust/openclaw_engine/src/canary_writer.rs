@@ -132,8 +132,7 @@ impl CanaryWriterHandle {
 /// 啟動灰度寫入任務（如啟用）。引擎啟動時呼叫一次，回傳 handle（clone 到每條管線）。
 pub fn spawn(data_path: PathBuf, cancel: CancellationToken) -> CanaryWriterHandle {
     let canary_mode = std::env::var("OPENCLAW_CANARY_MODE").unwrap_or_default() == "1";
-    let disable_dump =
-        std::env::var("OPENCLAW_DISABLE_CANARY_DUMP").unwrap_or_default() == "1";
+    let disable_dump = std::env::var("OPENCLAW_DISABLE_CANARY_DUMP").unwrap_or_default() == "1";
     if !canary_mode {
         return CanaryWriterHandle::disabled();
     }
@@ -191,9 +190,8 @@ async fn run_writer(
             return;
         }
     };
-    let mut flush_timer = tokio::time::interval(
-        std::time::Duration::from_millis(FLUSH_INTERVAL_MS),
-    );
+    let mut flush_timer =
+        tokio::time::interval(std::time::Duration::from_millis(FLUSH_INTERVAL_MS));
     flush_timer.tick().await;
 
     loop {
@@ -272,12 +270,7 @@ fn rotate_file(canary_path: &Path, max_rotated: usize) -> std::io::Result<()> {
     Ok(())
 }
 
-fn prune_rotated(
-    dir: &Path,
-    stem: &str,
-    ext: &str,
-    max_rotated: usize,
-) -> std::io::Result<()> {
+fn prune_rotated(dir: &Path, stem: &str, ext: &str, max_rotated: usize) -> std::io::Result<()> {
     let mut entries: Vec<_> = std::fs::read_dir(dir)?
         .filter_map(|e| e.ok())
         .filter(|e| {

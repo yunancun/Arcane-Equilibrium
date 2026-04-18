@@ -134,11 +134,7 @@ where
         }
     };
     if let Err(e) = validate(&next) {
-        return JsonRpcResponse::error(
-            id,
-            ERR_INVALID_REQUEST,
-            format!("validation failed: {e}"),
-        );
+        return JsonRpcResponse::error(id, ERR_INVALID_REQUEST, format!("validation failed: {e}"));
     }
     match store.replace(next, source) {
         Ok(outcome) => {

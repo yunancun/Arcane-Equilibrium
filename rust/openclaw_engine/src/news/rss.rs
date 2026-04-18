@@ -72,7 +72,12 @@ impl RssProvider {
                 .summary
                 .as_ref()
                 .map(|s| truncate(&s.content, 512))
-                .or_else(|| entry.content.as_ref().and_then(|c| c.body.as_ref().map(|b| truncate(b, 512))))
+                .or_else(|| {
+                    entry
+                        .content
+                        .as_ref()
+                        .and_then(|c| c.body.as_ref().map(|b| truncate(b, 512)))
+                })
                 .unwrap_or_default();
 
             let url = entry
