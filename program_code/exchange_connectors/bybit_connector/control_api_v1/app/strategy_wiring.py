@@ -246,11 +246,31 @@ try:
 except ImportError:
     pass
 
+# E5-FN-3 / 5-Agent Decision Audit Trail (pilot = Analyst).
+# E5-FN-3：5-Agent 決策審計跟踪（pilot = Analyst）。
+# Wires AnalystAgent._audit(...) calls into GOV_HUB._change_audit_log via the
+# agent_audit_bridge module. Satisfies Root Principle #8 "Trade Explainability"
+# by ensuring every agent decision produces an append-only audit record.
+# Fail-open: if GOV_HUB is unavailable, the bridge silently drops events so
+# the agent's main path is never disrupted.
+# 將 AnalystAgent._audit(...) 透過 agent_audit_bridge 接到 GOV_HUB._change_audit_log；
+# 落實根原則 #8「交易可解釋」。fail-open：GOV_HUB 不可用時靜默丟棄，不阻塞 agent。
+from .agent_audit_bridge import make_agent_audit_callback
+
+_GOV_HUB_FOR_ANALYST: Any = None
+try:
+    from .paper_trading_routes import GOV_HUB as _GOV_HUB_FOR_ANALYST
+except ImportError:
+    pass
+
+_ANALYST_AUDIT_CB = make_agent_audit_callback(_GOV_HUB_FOR_ANALYST, "AnalystAgent")
+
 ANALYST_AGENT = AnalystAgent(
     config=AnalystConfig(),
     message_bus=MESSAGE_BUS,
     ollama_client=OLLAMA_CLIENT,
     learning_tier_gate=_LTG_FOR_ANALYST,
+    audit_callback=_ANALYST_AUDIT_CB,
 )
 ANALYST_AGENT.start()
 
@@ -313,6 +333,9 @@ except Exception as e:
 
 # --- Batch 10: AnalystAgent initialization ---
 # Batch 10：AnalystAgent 初始化（交易結果分析 + L2 Cron 觸發）
+# E5-FN-3: reuse the same audit bridge as Batch 9 so the re-initialized
+# AnalystAgent keeps emitting 5-Agent audit trail events.
+# E5-FN-3：重用 Batch 9 的審計橋接，確保重建後的 AnalystAgent 仍寫 audit trail。
 try:
     from .analyst_agent import AnalystAgent, AnalystConfig
     from .ollama_client import get_ollama_client_27b
@@ -320,6 +343,7 @@ try:
         config=AnalystConfig(),
         message_bus=MESSAGE_BUS if 'MESSAGE_BUS' in dir() else None,
         ollama_client=get_ollama_client_27b(),  # 27B: complex weekly pattern analysis
+        audit_callback=_ANALYST_AUDIT_CB,
     )
     ANALYST_AGENT.start()
     if MESSAGE_BUS is not None:
