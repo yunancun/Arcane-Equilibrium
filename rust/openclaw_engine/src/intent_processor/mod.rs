@@ -12,13 +12,8 @@ mod router;
 #[cfg(test)]
 mod tests;
 
-use openclaw_core::{
-    execution::{self, FillResult},
-    governance_core::{GovernanceCore, GovernanceProfile},
-    guardian::{ExistingPosition, Guardian, PortfolioContext, TradeIntentCheck, Verdict},
-};
-use crate::config::RiskConfig;
 use crate::config::risk_config::EdgePredictorFallback;
+use crate::config::RiskConfig;
 use crate::edge_predictor::{
     features::FeatureVectorV1,
     gate::{
@@ -28,6 +23,11 @@ use crate::edge_predictor::{
 };
 use crate::risk_checks::check_order_allowed;
 use crate::tick_pipeline::{PipelineCommand, PipelineKind};
+use openclaw_core::{
+    execution::{self, FillResult},
+    governance_core::{GovernanceCore, GovernanceProfile},
+    guardian::{ExistingPosition, Guardian, PortfolioContext, TradeIntentCheck, Verdict},
+};
 use parking_lot::Mutex;
 use rand::{rngs::SmallRng, SeedableRng};
 use serde::{Deserialize, Serialize};
@@ -78,6 +78,22 @@ pub struct VerdictInfo {
     pub modified_qty: Option<f64>,
 }
 
+impl VerdictInfo {
+    /// P0-6 permanent fix: synthetic "Rejected" verdict for pre-Guardian gate
+    /// rejections (cost_gate / qty_zero / risk_gate / duplicate_position / etc.).
+    /// Callers lacking a real Guardian verdict use this so `persist_verdict`
+    /// can still write the rejection reason into `trading.risk_verdicts`.
+    /// P0-6 永久修復：前置 gate 拒絕時的 synthetic Rejected 裁定。
+    pub(crate) fn rejected(reason: String) -> Self {
+        Self {
+            verdict: "Rejected".to_string(),
+            risk_score: 0.0,
+            reasons: vec![reason],
+            modified_qty: None,
+        }
+    }
+}
+
 /// Result of intent processing.
 /// 意圖處理結果。
 #[derive(Debug, Clone)]
@@ -98,6 +114,21 @@ pub struct IntentResult {
     pub approved_qty: f64,
 }
 
+impl IntentResult {
+    /// P0-6 permanent fix: build a rejected IntentResult with synthetic
+    /// `verdict_info` so `persist_verdict` records the reason in DB.
+    pub(crate) fn rejected(reason: String) -> Self {
+        let vi = VerdictInfo::rejected(reason.clone());
+        Self {
+            submitted: false,
+            rejected_reason: Some(reason),
+            fill: None,
+            verdict_info: Some(vi),
+            approved_qty: 0.0,
+        }
+    }
+}
+
 /// EXT-1: Result of gate-only processing for exchange mode.
 /// EXT-1：交易所模式下僅門禁處理的結果。
 #[derive(Debug, Clone)]
@@ -111,6 +142,19 @@ pub struct ExchangeGateResult {
     /// Guardian verdict for DB persistence; None if rejected before guardian check.
     /// Guardian 裁定供 DB 持久化；在 Guardian 前被拒時為 None。
     pub verdict_info: Option<VerdictInfo>,
+}
+
+impl ExchangeGateResult {
+    /// P0-6 permanent fix: see `IntentResult::rejected`.
+    pub(crate) fn rejected(reason: String) -> Self {
+        let vi = VerdictInfo::rejected(reason.clone());
+        Self {
+            approved: false,
+            rejected_reason: Some(reason),
+            approved_qty: 0.0,
+            verdict_info: Some(vi),
+        }
+    }
 }
 
 /// Intent processor with guardian checks.
@@ -131,11 +175,11 @@ const DEFAULT_SLIPPAGE_RATE: f64 = 0.0005;
 /// 按 24h 成交額分級的滑點 — 對齊 Python cost_gate.py。
 /// (min_turnover_usd, slippage_rate)
 const SLIPPAGE_TIERS: [(f64, f64); 5] = [
-    (1_000_000_000.0, 0.0001),  // >$1B: 1 bps (BTC/ETH)
-    (100_000_000.0,   0.0002),  // >$100M: 2 bps
-    (10_000_000.0,    0.0005),  // >$10M: 5 bps
-    (1_000_000.0,     0.0015),  // >$1M: 15 bps
-    (0.0,             0.0030),  // <$1M: 30 bps (illiquid alts)
+    (1_000_000_000.0, 0.0001), // >$1B: 1 bps (BTC/ETH)
+    (100_000_000.0, 0.0002),   // >$100M: 2 bps
+    (10_000_000.0, 0.0005),    // >$10M: 5 bps
+    (1_000_000.0, 0.0015),     // >$1M: 15 bps
+    (0.0, 0.0030),             // <$1M: 30 bps (illiquid alts)
 ];
 
 /// Look up slippage rate by 24h volume tier (mirrors Python _lookup_slippage).
@@ -238,8 +282,7 @@ pub struct IntentProcessor {
     /// EDGE-P3-1 Step 7a：決策特徵 DB 直寫通道。只要拿到真實 `FeatureVectorV1` +
     /// 非空 context_id，於 `evaluate_predictor_gate` 頂端即發射，無論 predictor
     /// 是否啟用 — Stage 0 即刻採集訓練資料；None 時發射為 no-op（fail-soft）。
-    decision_feature_tx:
-        Option<tokio::sync::mpsc::Sender<crate::database::DecisionFeatureMsg>>,
+    decision_feature_tx: Option<tokio::sync::mpsc::Sender<crate::database::DecisionFeatureMsg>>,
 }
 
 /// EDGE-P3-1 A4: Result of predictor-gate evaluation, translated to caller action.
@@ -353,8 +396,11 @@ impl IntentProcessor {
         let n = estimates.n_cells();
         let gm = estimates.grand_mean_bps();
         self.edge_estimates = estimates;
-        tracing::info!(n_cells = n, grand_mean_bps = gm,
-            "PH5-WIRE-1: edge estimates injected / 邊際估計已注入");
+        tracing::info!(
+            n_cells = n,
+            grand_mean_bps = gm,
+            "PH5-WIRE-1: edge estimates injected / 邊際估計已注入"
+        );
     }
 
     /// W-3: Plug in a LinUCB runtime (read-only). When set, callers may invoke
@@ -362,10 +408,7 @@ impl IntentProcessor {
     /// for the current intent without changing any decision logic.
     /// W-3：注入 LinUCB 運行時（唯讀）。設定後 caller 可在 gate 通過後呼叫
     /// `select_arm_after_gates` 記錄當前 intent 對應的 arm，不改變任何決策邏輯。
-    pub fn set_linucb_runtime(
-        &mut self,
-        rt: std::sync::Arc<crate::linucb::LinUcbRuntime>,
-    ) {
+    pub fn set_linucb_runtime(&mut self, rt: std::sync::Arc<crate::linucb::LinUcbRuntime>) {
         self.linucb = Some(rt);
     }
 
@@ -668,9 +711,7 @@ impl IntentProcessor {
     /// gate inside `evaluate_predictor_gate`.
     /// 僅測試用：鎖預測器 RNG 供回歸測試比較兩條獨立 seed 的抽樣流。
     #[cfg(test)]
-    pub fn predictor_rng_lock_for_tests(
-        &self,
-    ) -> parking_lot::MutexGuard<'_, SmallRng> {
+    pub fn predictor_rng_lock_for_tests(&self) -> parking_lot::MutexGuard<'_, SmallRng> {
         self.predictor_rng.lock()
     }
 
@@ -873,8 +914,7 @@ impl IntentProcessor {
             side: if intent.is_long { 1 } else { -1 },
             feature_schema_version: crate::edge_predictor::features::FEATURE_SCHEMA_VERSION
                 .to_string(),
-            feature_schema_hash: crate::edge_predictor::features::feature_schema_hash()
-                .to_string(),
+            feature_schema_hash: crate::edge_predictor::features::feature_schema_hash().to_string(),
             feature_definition_hash: crate::edge_predictor::features::feature_definition_hash()
                 .to_string(),
             features_jsonb: features.to_jsonb(),
@@ -896,17 +936,18 @@ impl IntentProcessor {
         let metric = reason.metric_name();
         match self.risk_config.edge_predictor.fallback_on_error {
             EdgePredictorFallback::Shrinkage => {
-                tracing::info!(fallback_reason = metric,
-                    "edge_predictor: fallback → shrinkage gate / 回退 JS shrinkage");
+                tracing::info!(
+                    fallback_reason = metric,
+                    "edge_predictor: fallback → shrinkage gate / 回退 JS shrinkage"
+                );
                 PredictorAction::UseLegacyGate
             }
             EdgePredictorFallback::FailClosed => {
-                tracing::warn!(fallback_reason = metric,
-                    "edge_predictor: fail-closed rejection / fail-closed 拒絕");
-                PredictorAction::Reject(format!(
-                    "predictor_fallback_fail_closed:{}",
-                    metric
-                ))
+                tracing::warn!(
+                    fallback_reason = metric,
+                    "edge_predictor: fail-closed rejection / fail-closed 拒絕"
+                );
+                PredictorAction::Reject(format!("predictor_fallback_fail_closed:{}", metric))
             }
         }
     }

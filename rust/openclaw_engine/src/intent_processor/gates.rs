@@ -36,22 +36,24 @@ impl IntentProcessor {
                 let wr = cell.win_rate.clamp(0.3, 1.0);
                 let threshold_bps = fee_bps / wr * 1.3;
                 if cell.shrunk_bps < threshold_bps {
-                    return Some(IntentResult {
-                        submitted: false,
-                        rejected_reason: Some(format!(
-                            "cost_gate(JS): edge={:.2}bps < threshold={:.2}bps \
-                             (fee={:.2}bps, wr={:.2}, slip={:.1}bps)",
-                            cell.shrunk_bps, threshold_bps, fee_bps, cell.win_rate,
-                            slippage * 10_000.0,
-                        )),
-                        fill: None,
-                        verdict_info: None,
-                        approved_qty: 0.0,
-                    });
+                    return Some(IntentResult::rejected(format!(
+                        "cost_gate(JS): edge={:.2}bps < threshold={:.2}bps \
+                         (fee={:.2}bps, wr={:.2}, slip={:.1}bps)",
+                        cell.shrunk_bps,
+                        threshold_bps,
+                        fee_bps,
+                        cell.win_rate,
+                        slippage * 10_000.0,
+                    )));
                 }
-                tracing::debug!(strategy, symbol, shrunk_edge_bps = cell.shrunk_bps,
-                    win_rate = cell.win_rate, n_trades = cell.n_trades,
-                    "cost_gate(JS): positive edge — allowed / 正 edge 允許通過");
+                tracing::debug!(
+                    strategy,
+                    symbol,
+                    shrunk_edge_bps = cell.shrunk_bps,
+                    win_rate = cell.win_rate,
+                    n_trades = cell.n_trades,
+                    "cost_gate(JS): positive edge — allowed / 正 edge 允許通過"
+                );
                 None
             }
             Some(cell) => {
@@ -61,9 +63,14 @@ impl IntentProcessor {
                 // 負 JS 估計：探索模式——允許以積累數據。
                 // Paper 管線現在讀取獨立的 edge_estimates_paper.json，
                 // paper 探索噪音不再影響生產估計。
-                tracing::info!(strategy, symbol, estimated_edge_bps = cell.shrunk_bps,
-                    win_rate = cell.win_rate, n_trades = cell.n_trades,
-                    "cost_gate(JS): negative estimate — exploration mode / 負估計探索模式");
+                tracing::info!(
+                    strategy,
+                    symbol,
+                    estimated_edge_bps = cell.shrunk_bps,
+                    win_rate = cell.win_rate,
+                    n_trades = cell.n_trades,
+                    "cost_gate(JS): negative estimate — exploration mode / 負估計探索模式"
+                );
                 None
             }
             None => {
@@ -99,31 +106,21 @@ impl IntentProcessor {
                 let wr = cell.win_rate.clamp(0.3, 1.0);
                 let threshold_bps = fee_bps / wr * 1.3;
                 if cell.shrunk_bps < threshold_bps {
-                    return Some(ExchangeGateResult {
-                        approved: false,
-                        rejected_reason: Some(format!(
-                            "cost_gate(JS-demo): edge={:.2}bps < threshold={:.2}bps \
-                             (fee={:.2}bps, wr={:.2})",
-                            cell.shrunk_bps, threshold_bps, fee_bps, cell.win_rate,
-                        )),
-                        approved_qty: 0.0,
-                        verdict_info: None,
-                    });
+                    return Some(ExchangeGateResult::rejected(format!(
+                        "cost_gate(JS-demo): edge={:.2}bps < threshold={:.2}bps \
+                         (fee={:.2}bps, wr={:.2})",
+                        cell.shrunk_bps, threshold_bps, fee_bps, cell.win_rate,
+                    )));
                 }
                 None // pass
             }
             Some(cell) => {
                 // Negative JS estimate: block (unlike paper exploration which allows)
                 // 負 JS 估計：阻擋（不同於 paper 探索模式允許）
-                Some(ExchangeGateResult {
-                    approved: false,
-                    rejected_reason: Some(format!(
-                        "cost_gate(JS-demo): estimated={:.2}bps < 0 — blocked / 負估計阻擋",
-                        cell.shrunk_bps,
-                    )),
-                    approved_qty: 0.0,
-                    verdict_info: None,
-                })
+                Some(ExchangeGateResult::rejected(format!(
+                    "cost_gate(JS-demo): estimated={:.2}bps < 0 — blocked / 負估計阻擋",
+                    cell.shrunk_bps,
+                )))
             }
             None => {
                 // Cold start: allow with warning (unlike live which blocks)
@@ -159,36 +156,22 @@ impl IntentProcessor {
                 let wr = cell.win_rate.clamp(0.3, 1.0);
                 let threshold_bps = fee_bps / wr * 1.3;
                 if cell.shrunk_bps < threshold_bps {
-                    return Some(ExchangeGateResult {
-                        approved: false,
-                        rejected_reason: Some(format!(
-                            "cost_gate(JS-live): edge={:.2}bps < threshold={:.2}bps \
-                             (fee={:.2}bps, wr={:.2})",
-                            cell.shrunk_bps, threshold_bps, fee_bps, cell.win_rate,
-                        )),
-                        approved_qty: 0.0,
-                        verdict_info: None,
-                    });
+                    return Some(ExchangeGateResult::rejected(format!(
+                        "cost_gate(JS-live): edge={:.2}bps < threshold={:.2}bps \
+                         (fee={:.2}bps, wr={:.2})",
+                        cell.shrunk_bps, threshold_bps, fee_bps, cell.win_rate,
+                    )));
                 }
                 None // pass
             }
-            Some(cell) => Some(ExchangeGateResult {
-                approved: false,
-                rejected_reason: Some(format!(
-                    "cost_gate(JS-live): estimated={:.2}bps < 0 — fail-closed / 負估計失敗關閉",
-                    cell.shrunk_bps,
-                )),
-                approved_qty: 0.0,
-                verdict_info: None,
-            }),
-            None => Some(ExchangeGateResult {
-                approved: false,
-                rejected_reason: Some(
-                    "cost_gate(JS-live): no edge estimate — fail-closed (cold-start) / 無估計失敗關閉".into(),
-                ),
-                approved_qty: 0.0,
-                verdict_info: None,
-            }),
+            Some(cell) => Some(ExchangeGateResult::rejected(format!(
+                "cost_gate(JS-live): estimated={:.2}bps < 0 — fail-closed / 負估計失敗關閉",
+                cell.shrunk_bps,
+            ))),
+            None => Some(ExchangeGateResult::rejected(
+                "cost_gate(JS-live): no edge estimate — fail-closed (cold-start) / 無估計失敗關閉"
+                    .to_string(),
+            )),
         }
     }
 

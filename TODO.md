@@ -95,7 +95,7 @@ v2 n=13 partial 提前結案，net −$2.90 / −36.76 bps / 0 勝率、13/13 ex
 - [x] **Live_Demo 死循環打破**：方案 A — LiveDemo→Validation profile mapping（`cost_gate_moderate` cold-start 允許）✅ 2026-04-17 夜部署
 - [x] **Live_Demo 觀察 ✅ 2026-04-18**：部署後 ~26h 驗證 — live_demo fills 1073 筆（grid/ma_crossover/MICRO-PROFIT-FIX-1 全活躍），`cost_gate(JS-live): no edge estimate` engine.log 出現次數從 85+/hr **歸零**。殘留觀察：(a) `trading.intents` 24h 仍 0 rows（與 P0-6 cost-gate 解耦，是 DEDUP-PY-RUST Tier A 後 Rust 端 intent 持久化未補接線 — 轉為下一步「永久修復」的延伸）；(b) `settings/edge_estimates.json` 仍 `{}`（P1-7 LEARNING-PIPELINE-DORMANT-1 範疇，edge estimator job 未啟）
 - [ ] **Demo 死循環打破**：P1-8 FUP `retriage_synthetic_owner` 已 tick-level 執行（Agent 自主），等一週觀察是否消化 6 個 bybit_sync orphan；若不消化再轉方案 B 臨時調 `correlated_exposure_max_pct` 或方案 C 修 P0-7 Close path
-- [ ] **永久修復**：`rejected_reason` 應 persist 到 DB（新欄位或復用 `reason`），而非只在 struct 裡丟棄
+- [x] **永久修復 ✅ 2026-04-18**：`rejected_reason` 已透過 synthetic `VerdictInfo::rejected(reason)` attached 到 `IntentResult` / `ExchangeGateResult`（`intent_processor/mod.rs` 新增 `VerdictInfo::rejected` / `IntentResult::rejected` / `ExchangeGateResult::rejected` 構造器，`gates.rs` + `router.rs` 所有前置 gate 拒絕點 refactor 使用新構造器）。`persist_verdict` 自此寫入 `trading.risk_verdicts.reasons` 真實拒絕理由（原本 `verdict_info: None` → 寫入被跳過）。+2 新單測（paper + exchange 各一條驗證 synthetic VerdictInfo 存在）。engine lib **1454 passed / 0 failed**。待下次 `--rebuild` 部署。
 - [x] **移除 `on_tick.rs` P0-6 DIAG 代碼 ✅ 2026-04-18**：24-48h 條件已滿，`cost_gate(JS-live)` 0 occurrence 確認，移除 826-839 block（DIAG_COUNTER + rate-limited warn!）。engine lib 測試 **1437 passed / 0 failed**。待下次 `--rebuild` 部署
 
 **注意**：`correlated_exposure_max_pct` config TOML = 60.0 但 runtime 為 65.0（GUI hot-reload 修改過）
