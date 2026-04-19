@@ -284,6 +284,15 @@ impl Default for RateLimitState {
 
 /// Well-known Bybit retCode values with semantic meaning.
 /// 有語義含義的 Bybit retCode 常用值。
+///
+/// EDGE-P2-3 Phase 1B-1 (2026-04-20): extended with PostOnly/price-filter/
+/// order-lifecycle codes discovered during BB audit. PostOnly-cross itself
+/// has NO REST retCode — Bybit returns retCode=0 and surfaces rejection via
+/// WS `order` event with `rejectReason=EC_PostOnlyWillTakeLiquidity`. These
+/// enum additions cover the codes we MUST NOT conflate with that path.
+/// See `docs/audits/2026-04-20--edge_p2_3_phase1b_bybit_postonly_audit.md`.
+/// EDGE-P2-3 Phase 1B-1：新增 PostOnly / 價格過濾器 / 訂單生命週期相關碼。
+/// PostOnly 越過 book 本身無 REST retCode（走 WS rejectReason 路徑）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BybitRetCode {
     /// Success / 成功
@@ -304,14 +313,45 @@ pub enum BybitRetCode {
     UnmatchedIp = 10010,
     /// Order not found / 訂單不存在
     OrderNotFound = 110001,
+    /// Order price exceeds instrument price filter (NOT PostOnly-cross).
+    /// Indicates instrument cache stale or bad offset — recompute tick_size /
+    /// price_limit, do NOT use 30s exchange backoff.
+    /// 訂單價格超出合約允許範圍（非 PostOnly 越過 book）：
+    /// 表示合約快取陳舊或 offset 偏差，需重算 tick_size/price_limit，不走 30s 退避。
+    PriceOutOfRange = 110003,
+    /// Wallet balance insufficient (symbol-level pause, not exchange backoff).
+    /// 錢包餘額不足（該幣種暫停，非交易所退避）。
+    WalletInsufficient = 110004,
+    /// Available balance insufficient (symbol-level pause).
+    /// 可用餘額不足（該幣種暫停）。
+    AvailableInsufficient = 110007,
+    /// Order completed or cancelled (lifecycle race) — treat as noop.
+    /// 訂單已完成或已取消（生命週期競爭）— 視為 noop。
+    OrderCompletedOrCancelled = 110008,
+    /// Position not found / 持倉不存在
+    PositionNotFound = 110009,
+    /// Order already cancelled — noop.
+    /// 訂單已取消 — noop。
+    OrderAlreadyCancelled = 110010,
     /// Insufficient balance / 餘額不足
     InsufficientBalance = 110012,
     /// Leverage not modified (already set) / 槓桿未修改
     LeverageNotModified = 110043,
-    /// Position not found / 持倉不存在
-    PositionNotFound = 110009,
+    /// Price tick invalid — round via InstrumentInfoCache and retry once.
+    /// 價格刻度非法 — 透過 InstrumentInfoCache 重新四捨五入並重試一次。
+    PriceTickInvalid = 110049,
+    /// Contract not live (delisted/suspended) — remove from scanner universe.
+    /// 合約未上線（下架/暫停）— 從掃描器宇宙中移除。
+    ContractNotLive = 110074,
+    /// "Only Post-Only orders at this stage" (pre-open/funding transient).
+    /// 30s exchange backoff is correct here.
+    /// 現階段僅 Post-Only 可用（開市前/資金結算瞬間）— 30s 交易所退避正確。
+    PostOnlyOnlyStage = 110103,
     /// Exceed max order qty / 超過最大下單數量
     ExceedMaxQty = 170210,
+    /// Spot order does not exist (spot cancel path noop).
+    /// 現貨訂單不存在（現貨取消路徑 noop）。
+    OrderNotExistSpot = 170213,
 }
 
 impl BybitRetCode {
@@ -328,10 +368,19 @@ impl BybitRetCode {
             10006 => Some(Self::IpRateLimit),
             10010 => Some(Self::UnmatchedIp),
             110001 => Some(Self::OrderNotFound),
+            110003 => Some(Self::PriceOutOfRange),
+            110004 => Some(Self::WalletInsufficient),
+            110007 => Some(Self::AvailableInsufficient),
+            110008 => Some(Self::OrderCompletedOrCancelled),
+            110009 => Some(Self::PositionNotFound),
+            110010 => Some(Self::OrderAlreadyCancelled),
             110012 => Some(Self::InsufficientBalance),
             110043 => Some(Self::LeverageNotModified),
-            110009 => Some(Self::PositionNotFound),
+            110049 => Some(Self::PriceTickInvalid),
+            110074 => Some(Self::ContractNotLive),
+            110103 => Some(Self::PostOnlyOnlyStage),
             170210 => Some(Self::ExceedMaxQty),
+            170213 => Some(Self::OrderNotExistSpot),
             _ => None,
         }
     }
@@ -343,9 +392,47 @@ impl BybitRetCode {
     }
 
     /// Whether this is a "no-op" error (operation already done).
-    /// 此錯誤是否為"無操作"錯誤（操作已完成）。
+    /// Covers both order lifecycle races (completed/already-cancelled) and
+    /// spot-side missing-order on cancel — caller should treat as success and
+    /// reconcile via WS final state instead of retrying.
+    /// 此錯誤是否為「無操作」（動作已完成）— caller 視為成功，以 WS 最終狀態對賬。
     pub fn is_noop(&self) -> bool {
-        matches!(self, Self::LeverageNotModified | Self::OrderNotFound)
+        matches!(
+            self,
+            Self::LeverageNotModified
+                | Self::OrderNotFound
+                | Self::OrderCompletedOrCancelled
+                | Self::OrderAlreadyCancelled
+                | Self::OrderNotExistSpot
+        )
+    }
+
+    /// Whether the strategy should back off re-emit (exchange-side transient,
+    /// not a strategy bug). Examples: pre-open stage, IP rate limit.
+    /// EDGE-P2-3 Phase 1B-1: added as preparation for Phase 1B-2 WS reject
+    /// routing; caller routes WS `EC_PostOnlyWillTakeLiquidity` through the
+    /// same M-2 `reject_cooldown_until_ms` path.
+    /// 策略是否應退避重發（交易所瞬態，非策略錯誤）。
+    pub fn is_exchange_backoff(&self) -> bool {
+        matches!(self, Self::PostOnlyOnlyStage | Self::IpRateLimit)
+    }
+
+    /// Whether this is an instrument-filter problem (bad price/tick/range)
+    /// that needs recomputation via InstrumentInfoCache — distinct from both
+    /// `is_retryable` (transient) and `is_exchange_backoff` (stage).
+    /// 是否為合約過濾器問題（需重算 tick/price），與瞬態/階段退避不同。
+    pub fn is_instrument_filter(&self) -> bool {
+        matches!(self, Self::PriceOutOfRange | Self::PriceTickInvalid)
+    }
+
+    /// Whether this is a balance-level block (pause the symbol, do not retry
+    /// with the same intent).
+    /// 是否為餘額級別阻塞（暫停該幣種，勿以相同意圖重試）。
+    pub fn is_balance_block(&self) -> bool {
+        matches!(
+            self,
+            Self::WalletInsufficient | Self::AvailableInsufficient | Self::InsufficientBalance
+        )
     }
 }
 
@@ -1092,6 +1179,73 @@ mod tests {
         assert!(!BybitRetCode::InsufficientBalance.is_retryable());
         assert!(BybitRetCode::LeverageNotModified.is_noop());
         assert!(!BybitRetCode::InsufficientBalance.is_noop());
+    }
+
+    /// Test Phase 1B extensions: 9 new retCodes + 3 new classifiers.
+    /// 測試 Phase 1B 擴充：9 個新 retCode + 3 個新分類方法。
+    #[test]
+    fn test_bybit_ret_code_phase1b_extensions() {
+        // 9 new retCodes map correctly / 9 個新 retCode 映射正確
+        assert_eq!(
+            BybitRetCode::from_code(110003),
+            Some(BybitRetCode::PriceOutOfRange)
+        );
+        assert_eq!(
+            BybitRetCode::from_code(110004),
+            Some(BybitRetCode::WalletInsufficient)
+        );
+        assert_eq!(
+            BybitRetCode::from_code(110007),
+            Some(BybitRetCode::AvailableInsufficient)
+        );
+        assert_eq!(
+            BybitRetCode::from_code(110008),
+            Some(BybitRetCode::OrderCompletedOrCancelled)
+        );
+        assert_eq!(
+            BybitRetCode::from_code(110010),
+            Some(BybitRetCode::OrderAlreadyCancelled)
+        );
+        assert_eq!(
+            BybitRetCode::from_code(110049),
+            Some(BybitRetCode::PriceTickInvalid)
+        );
+        assert_eq!(
+            BybitRetCode::from_code(110074),
+            Some(BybitRetCode::ContractNotLive)
+        );
+        assert_eq!(
+            BybitRetCode::from_code(110103),
+            Some(BybitRetCode::PostOnlyOnlyStage)
+        );
+        assert_eq!(
+            BybitRetCode::from_code(170213),
+            Some(BybitRetCode::OrderNotExistSpot)
+        );
+
+        // is_noop() extension / is_noop() 擴充
+        assert!(BybitRetCode::OrderCompletedOrCancelled.is_noop());
+        assert!(BybitRetCode::OrderAlreadyCancelled.is_noop());
+        assert!(BybitRetCode::OrderNotExistSpot.is_noop());
+
+        // is_exchange_backoff() / 交易所側暫時限流
+        assert!(BybitRetCode::PostOnlyOnlyStage.is_exchange_backoff());
+        assert!(BybitRetCode::IpRateLimit.is_exchange_backoff());
+        assert!(!BybitRetCode::PriceOutOfRange.is_exchange_backoff());
+        assert!(!BybitRetCode::InsufficientBalance.is_exchange_backoff());
+
+        // is_instrument_filter() / 合約過濾器拒單
+        assert!(BybitRetCode::PriceOutOfRange.is_instrument_filter());
+        assert!(BybitRetCode::PriceTickInvalid.is_instrument_filter());
+        assert!(!BybitRetCode::PostOnlyOnlyStage.is_instrument_filter());
+        assert!(!BybitRetCode::InsufficientBalance.is_instrument_filter());
+
+        // is_balance_block() / 餘額不足阻擋
+        assert!(BybitRetCode::WalletInsufficient.is_balance_block());
+        assert!(BybitRetCode::AvailableInsufficient.is_balance_block());
+        assert!(BybitRetCode::InsufficientBalance.is_balance_block());
+        assert!(!BybitRetCode::PriceOutOfRange.is_balance_block());
+        assert!(!BybitRetCode::PostOnlyOnlyStage.is_balance_block());
     }
 
     /// Test BybitApiError Display formatting.

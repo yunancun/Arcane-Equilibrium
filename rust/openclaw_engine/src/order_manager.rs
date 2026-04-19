@@ -401,6 +401,41 @@ impl OrderManager {
         parse_order_response(&resp.result)
     }
 
+    /// Cancel a single order by client-minted `orderLinkId`.
+    /// 通過客戶端自訂的 orderLinkId 取消單個訂單。
+    ///
+    /// Bybit V5 natively accepts either `orderId` or `orderLinkId` on the
+    /// cancel endpoint. Using orderLinkId is the idempotency-safe path for
+    /// resting PostOnly maker orders because the client mint survives restart
+    /// and WS lag, while orderId is only known after the REST create round-trip.
+    ///
+    /// Bybit V5 的取消端點原生同時接受 orderId 或 orderLinkId。對於 PostOnly
+    /// 掛單採用 orderLinkId 取消是冪等安全路徑——客戶端鑄造的 id 可跨重啟/WS
+    /// 延遲存活，而 orderId 必須等 REST 下單回傳後才知道。
+    ///
+    /// POST /v5/order/cancel
+    pub async fn cancel_order_by_link_id(
+        &self,
+        category: OrderCategory,
+        symbol: &str,
+        order_link_id: &str,
+    ) -> BybitResult<OrderResponse> {
+        let body = serde_json::json!({
+            "category": category.as_str(),
+            "symbol": symbol,
+            "orderLinkId": order_link_id,
+        });
+
+        info!(
+            symbol = symbol,
+            order_link_id = order_link_id,
+            "cancelling order by link id / 通過 link id 取消訂單"
+        );
+
+        let resp = self.client.post_checked("/v5/order/cancel", &body).await?;
+        parse_order_response(&resp.result)
+    }
+
     /// Cancel all active orders for a symbol.
     /// 取消某交易對的所有活躍訂單。
     ///

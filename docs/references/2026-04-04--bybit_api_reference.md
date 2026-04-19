@@ -354,6 +354,20 @@ Client 創建：`OrderManager::new(client: Arc<BybitRestClient>, instruments: Ar
 
 ---
 
+#### cancel_order_by_link_id
+- **服務**: 通過客戶端自訂 `orderLinkId` 取消訂單。Bybit V5 的取消端點原生同時接受 `orderId` 或 `orderLinkId`（擇一即可）。對於 PostOnly 掛單採用 `orderLinkId` 取消是**冪等安全路徑**：客戶端鑄造的 id 跨重啟、跨 WS 延遲仍可用；而 `orderId` 需等 REST 下單回傳後才知道。
+- **調用**: `client.cancel_order_by_link_id(category, symbol, order_link_id)`
+- **Bybit 路徑**: `POST /v5/order/cancel`（同端點，body 帶 `orderLinkId` 替代 `orderId`）
+- **Input**:
+  - `category: OrderCategory`
+  - `symbol: &str`
+  - `order_link_id: &str`
+- **Output**: `BybitResult<OrderResponse>`
+- **關聯程式**: `order_manager.rs` `cancel_order_by_link_id`
+- **注意**：Bybit 不保證 REST cancel 回應與 WS `order` 最終狀態的先後順序。caller **勿**以 cancel 回傳結果調整部位；一律等 WS 最終狀態對賬（與 `cancel_order` 相同語義）。
+
+---
+
 #### cancel_all
 - **服務**: 取消指定交易對的所有未成交訂單。緊急情況下的批量撤單操作。
 - **調用**: `client.cancel_all(category, symbol)`
@@ -1063,11 +1077,13 @@ pub struct ShadowOrderRequest {
 
 ### 4.1 Rate Limit 分組
 
-| Group | 上限 | 適用路徑 |
+> **2026-04-20 EDGE-P2-3 Phase 1B-1 更新**：Bybit V5 當前 Order/Position/Account 分組預設上限為 **20 req/s**（非 10 req/s）；本表同步。實際上限按 UID/VIP 層級另有調整，以帳戶 `/v5/account/info` 為準。
+
+| Group | 上限（V5 基礎） | 適用路徑 |
 |-------|------|---------|
-| Order | 10 req/s | `/v5/order/*`, `/v5/execution/*` |
-| Position | 10 req/s | `/v5/position/*` |
-| Account | 10 req/s | `/v5/account/*` |
+| Order | 20 req/s | `/v5/order/*`, `/v5/execution/*` |
+| Position | 20 req/s | `/v5/position/*` |
+| Account | 20 req/s | `/v5/account/*` |
 | Market | 120 req/s | `/v5/market/*`, `/v5/spot-lever-token/*` |
 | Asset | 5 req/s | `/v5/asset/*`, `/v5/spot-margin*` |
 | Other | 10 req/s | 其餘 |
@@ -1077,23 +1093,48 @@ pub struct ShadowOrderRequest {
 
 ### 4.2 Error Code
 
-| Code | 名稱 | 含義 | 可重試? | 無操作? |
-|------|------|------|--------|--------|
-| 0 | Ok | 成功 | - | - |
-| 10001 | InvalidParam | 參數無效 | No | No |
-| 10002 | InvalidRequest | 請求無效 | No | No |
-| 10003 | ApiKeyInvalid | API Key 無效 | No | No |
-| 10004 | SignError | 簽名錯誤 | No | No |
-| 10005 | PermissionDenied | 權限不足 | No | No |
-| 10006 | IpRateLimit | IP 限流 | **Yes** | No |
-| 10010 | UnmatchedIp | IP 不匹配 | No | No |
-| 110001 | OrderNotFound | 訂單不存在（可能已成交） | No | **Yes** |
-| 110009 | PositionNotFound | 持倉不存在 | No | No |
-| 110012 | InsufficientBalance | 餘額不足 | No | No |
-| 110043 | LeverageNotModified | 槓桿已是目標值 | No | **Yes** |
-| 170210 | ExceedMaxQty | 超過最大數量 | No | No |
+| Code | 名稱 | 含義 | 可重試? | 無操作? | 分類 |
+|------|------|------|--------|--------|------|
+| 0 | Ok | 成功 | - | - | - |
+| 10001 | InvalidParam | 參數無效 | No | No | - |
+| 10002 | InvalidRequest | 請求無效 | No | No | - |
+| 10003 | ApiKeyInvalid | API Key 無效 | No | No | - |
+| 10004 | SignError | 簽名錯誤 | No | No | - |
+| 10005 | PermissionDenied | 權限不足 | No | No | - |
+| 10006 | IpRateLimit | IP 限流 | **Yes** | No | exchange_backoff |
+| 10010 | UnmatchedIp | IP 不匹配 | No | No | - |
+| 110001 | OrderNotFound | 訂單不存在（可能已成交） | No | **Yes** | - |
+| 110003 | PriceOutOfRange | 價格超出合約過濾範圍（**非** PostOnly 越過 book） | No | No | instrument_filter |
+| 110004 | WalletInsufficient | 錢包餘額不足（該幣種暫停） | No | No | balance_block |
+| 110007 | AvailableInsufficient | 可用餘額不足（該幣種暫停） | No | No | balance_block |
+| 110008 | OrderCompletedOrCancelled | 訂單已完成或已取消（生命週期競爭） | No | **Yes** | - |
+| 110009 | PositionNotFound | 持倉不存在 | No | No | - |
+| 110010 | OrderAlreadyCancelled | 訂單已取消 | No | **Yes** | - |
+| 110012 | InsufficientBalance | 餘額不足 | No | No | balance_block |
+| 110043 | LeverageNotModified | 槓桿已是目標值 | No | **Yes** | - |
+| 110049 | PriceTickInvalid | 價格刻度非法（透過 InstrumentInfoCache 四捨五入後重試一次） | No | No | instrument_filter |
+| 110074 | ContractNotLive | 合約未上線（下架/暫停）→ 從掃描器宇宙移除 | No | No | - |
+| 110103 | PostOnlyOnlyStage | 現階段僅 Post-Only 可用（開市前/資金結算瞬間） | No | No | exchange_backoff |
+| 170210 | ExceedMaxQty | 超過最大數量 | No | No | - |
+| 170213 | OrderNotExistSpot | 現貨訂單不存在（取消路徑 noop） | No | **Yes** | - |
 
-使用：`BybitRetCode::from_code(ret_code)` → `is_retryable()` / `is_noop()`
+使用：`BybitRetCode::from_code(ret_code)` → `is_retryable()` / `is_noop()` / `is_exchange_backoff()` / `is_instrument_filter()` / `is_balance_block()`
+
+**⚠️ PostOnly 越過 book 不是 REST retCode**：PostOnly 限價單觸及 book 時 Bybit 仍回傳 `retCode=0`（訂單建立成功），拒絕訊息透過 Private WS `order` 事件的 `rejectReason=EC_PostOnlyWillTakeLiquidity` 傳遞。**切勿**將 `110003`（PriceOutOfRange）誤認為 PostOnly-cross — 前者屬於合約過濾器（`is_instrument_filter`，需重算 tick_size/price_limit），後者屬於 book 狀態（`is_exchange_backoff`，策略 cooldown）。詳見 `docs/audits/2026-04-20--edge_p2_3_phase1b_bybit_postonly_audit.md`。
+
+### 4.2.1 WS `order` 事件 `rejectReason` 正式字串
+
+> **2026-04-20 EDGE-P2-3 Phase 1B-1 新增**：PostOnly 及其他「REST 成功但 WS 拒絕」的場景透過以下字串分類。路由由 Phase 1B-2 接線到策略 `on_rejection` 回調。
+
+| rejectReason | 含義 | 建議處理 |
+|--------------|------|---------|
+| `EC_PostOnlyWillTakeLiquidity` | PostOnly 越過 book（maker 變 taker） | 策略 cooldown + 重算 maker offset |
+| `EC_PerCancelRequest` | 我方主動 cancel 的最終確認 | noop（由 cancel 路徑驅動） |
+| `EC_CancelForNoFullFill` | PostOnly FOK 未完全成交 | 視為 cancel，走 cancel/fill race 對賬 |
+| `EC_ReachMaxPendingOrders` | 超出最大掛單數 | 整帳戶級背壓，暫停新單 |
+| `EC_Others` | 其他未分類 | 保守退避 + 日誌採集升級 |
+
+> **無排序保證**：Bybit 不保證 REST `cancel_order` 回應與 WS `order` 最終狀態事件的先後順序。cancel 回傳僅視為 advisory，部位/餘額一律由 WS 最終狀態對賬。
 
 ### 4.3 已知陷阱
 
@@ -1108,3 +1149,6 @@ pub struct ShadowOrderRequest {
 8. **recv_window = 5000ms** — 本地與 Bybit 時差超過 5 秒會被拒簽。
 9. **Instrument cache 需定期刷新** — Bybit 偶爾調整合約精度/限額，建議每 4 小時 refresh 一次。
 10. **pre_check_order 不是真正的預檢** — Bybit 無專門端點，代碼用 POST /v5/order/create 模擬。
+11. **PostOnly 越過 book 無 REST retCode** — PostOnly 觸發 taker 路徑時 REST 仍回 `retCode=0`，拒絕透過 Private WS `order.rejectReason=EC_PostOnlyWillTakeLiquidity` 傳遞。**切勿**將 `110003`（PriceOutOfRange，合約過濾器）誤認為 PostOnly-cross。詳見 §4.2 與 §4.2.1（2026-04-20 EDGE-P2-3 Phase 1B-1）。
+12. **cancel/fill 無排序保證** — REST `cancel_order` 回應與 WS `order` 最終狀態無先後保證。cancel 僅 advisory，部位一律以 WS 最終狀態為準（不得用 cancel 回傳減倉）。
+13. **orderLinkId 冪等優先** — 對 PostOnly 掛單用 `cancel_order_by_link_id` 取消（客戶端鑄造 id 跨重啟/WS 延遲存活）；`cancel_order` 依賴 REST 回傳的 `orderId`，在重啟/競爭下可能拿不到。
