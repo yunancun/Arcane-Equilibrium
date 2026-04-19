@@ -8,7 +8,9 @@
 //!   SIGHUP 觸發配置熱加載。SIGTERM/SIGINT 觸發優雅關閉。
 //!   事件消費者將 PriceEvent 送入 TickPipeline 進行紙盤交易。
 
+mod live_auth_watcher;
 mod pipeline_slot;
+mod spawn_backoff;
 mod startup;
 mod tasks;
 
@@ -324,7 +326,7 @@ async fn async_main(
     // the child token next to each slot for later use:
     //   * `live_slot_cancel` → threaded into the Live OS thread's
     //     `live_cancel` AND into `live_deps.cancel` (EventConsumerDeps)
-    //     so the 5-min auth re-verify loop's `live_slot.teardown()` cancels
+    //     so the Phase-3 `LiveAuthWatcher`'s `live_slot.teardown()` cancels
     //     the Live event-consumer main loop, not just the WS supervisor
     //     / listener / balance-refresh tasks. Pre-Phase-2-fix wiring passed
     //     the engine-wide `cancel` clone into `live_deps.cancel`, which
@@ -343,7 +345,7 @@ async fn async_main(
     // `build_exchange_pipeline`，並回傳 bindings + 子 token clone。我們把
     // 子 token 與 slot 一起保留備用：
     //   * `live_slot_cancel` → 串進 Live OS 線程的 `live_cancel` **以及**
-    //     `live_deps.cancel`（EventConsumerDeps），讓 5 分鐘授權重驗 loop 的
+    //     `live_deps.cancel`（EventConsumerDeps），讓 Phase 3 `LiveAuthWatcher` 的
     //     `live_slot.teardown()` 也能取消 Live event-consumer 主迴圈，
     //     不僅是 WS supervisor / listener / balance-refresh。修復前 wiring
     //     把引擎級 `cancel` clone 給 `live_deps.cancel`，導致 teardown 後
@@ -394,14 +396,14 @@ async fn async_main(
             (None, None)
         }
     };
-    // PIPELINE-SLOT-1 Phase 2: Hold slot Arcs for the 5-min auth re-verify
-    // loop (Live only) AND for the ordered shutdown sequence — both `live_slot`
+    // PIPELINE-SLOT-1 Phase 2/3: Hold slot Arcs for the Live auth watcher
+    // (Live only) AND for the ordered shutdown sequence — both `live_slot`
     // and `demo_slot` are torn down explicitly after the engine-wide cancel
     // so their owned task handles (WS supervisor / listener / balance refresh)
     // join deterministically instead of relying on tokio-runtime drop to abort
     // them. E2 MAJOR #3 fix: Phase 2 teardown() promises "clean shutdown" — we
     // must actually invoke it at engine-wide shutdown, not just on auth revoke.
-    // Paper is NOT yet wired through PipelineSlot (Phase 3 deferral).
+    // Paper is NOT yet wired through PipelineSlot (future deferral).
     //
     // PIPELINE-SLOT-1 Phase 2：保留兩個 slot 的 Arc — Live slot 供 5 分鐘授權
     // 重驗 loop 使用，**兩者**都在關機時顯式呼叫 `teardown()` 以確定性 join
@@ -474,6 +476,41 @@ async fn async_main(
         Arc::clone(&budget_store),
     );
     ipc_server.set_scanner_registry(Arc::clone(&symbol_registry));
+
+    // ------------------------------------------------------------------
+    // PIPELINE-SLOT-1 Phase 3: construct Live authorization watcher and
+    // wire its IPC trigger into the IPC server before `.run()` starts.
+    //
+    // Why here, before `ipc_server.run()` spawn?
+    //   * `set_live_auth_recheck_sender` must land before any connection
+    //     is accepted so the `trigger_live_auth_recheck` method can find
+    //     the sender — otherwise Python's first post-renew trigger after
+    //     boot would get `watcher_disabled`.
+    //   * The watcher itself uses `live_slot` + `config` + engine-wide
+    //     cancel token, all of which are ready by this point.
+    //
+    // The watcher replaces the Phase 2 5-min re-verify loop (removed
+    // below). It polls every 5 seconds, tears down on auth invalidation,
+    // AND respawns on renewal (gated by exponential backoff).
+    //
+    // PIPELINE-SLOT-1 Phase 3：構造 Live 授權 watcher 並在 `ipc_server.run()`
+    // spawn 前接入 IPC trigger。
+    //   * `set_live_auth_recheck_sender` 必須在接受任何連線前完成，否則
+    //     Python 開機後首次 post-renew trigger 會收到 `watcher_disabled`。
+    //   * Watcher 自身所需 `live_slot` + `config` + 引擎級 cancel token 此時已就緒。
+    //
+    // Watcher 取代 Phase 2 的 5 分鐘重驗 loop（下方已移除）。每 5 秒輪詢，
+    // 授權失效時 teardown，授權恢復時 respawn（經指數退避閘）。
+    // ------------------------------------------------------------------
+    let (live_auth_watcher, live_auth_trigger_handle) =
+        live_auth_watcher::LiveAuthWatcher::new(
+            Arc::clone(&live_slot) as Arc<dyn live_auth_watcher::SpawnOp>,
+            Arc::clone(&config),
+            live_bybit_environment(),
+            cancel.clone(),
+        );
+    ipc_server.set_live_auth_recheck_sender(live_auth_trigger_handle.sender());
+
     let budget_tracker_slot = ipc_server.budget_tracker_slot();
     let teacher_loop_slot = ipc_server.teacher_loop_slot();
     let audit_pool_slot = ipc_server.audit_pool_slot();
@@ -482,6 +519,18 @@ async fn async_main(
             error!(error = %e, "IPC server error / IPC 服務器錯誤");
         }
     });
+
+    // Spawn the Live auth watcher task. Its `run()` future owns `self`,
+    // so we spawn it after `ipc_server.run()` is detached. The watcher
+    // exits cleanly when the engine-wide `cancel` token fires.
+    // 起 Live 授權 watcher 任務。`run()` future 持有 `self`，故在
+    // `ipc_server.run()` detach 後 spawn。引擎級 `cancel` token 觸發時乾淨退出。
+    let _live_auth_watcher_handle = tokio::spawn(live_auth_watcher.run());
+    info!(
+        env = ?live_bybit_environment(),
+        "PIPELINE-SLOT-1 Phase 3 Live auth watcher spawned (polls 5s, \
+         backoff 1s→60s) / Phase 3 Live 授權 watcher 已啟動（5s 輪詢，1s→60s 退避）"
+    );
 
     // ------------------------------------------------------------------
     // 3E-ARCH: Shared REST client = highest-priority exchange pipeline's client.
@@ -1423,29 +1472,29 @@ async fn async_main(
         // D17: Live runs on dedicated OS thread with catch_unwind for panic isolation.
         // D17：Live 在獨立 OS 線程運行，catch_unwind 隔離 panic。
         //
-        // PIPELINE-SLOT-1 Phase 2: `live_cancel` is the **slot-scoped child
+        // PIPELINE-SLOT-1 Phase 2/3: `live_cancel` is the **slot-scoped child
         // token** returned by `live_slot.try_spawn()` — already guaranteed
         // Some by the outer match arm (E2 MAJOR #2 fix: Option-pair refactor
         // eliminated the Phase 2 `.expect()` previously present here).
         // Before Phase 2 this was `cancel.clone()` (engine-wide). The switch
-        // lets the auth re-verify loop tear down the Live pipeline alone
+        // lets the Phase 3 `LiveAuthWatcher` tear down the Live pipeline alone
         // (cancelling this child) without killing demo/paper. The crash-only
         // Fix 3 (2026-04-14) parity is preserved via `engine_wide_cancel`
         // below: a Live panic still cancels the engine-wide token as before.
         //
-        // PIPELINE-SLOT-1 Phase 2：`live_cancel` 是 `live_slot.try_spawn()`
+        // PIPELINE-SLOT-1 Phase 2/3：`live_cancel` 是 `live_slot.try_spawn()`
         // 回傳的**槽位子 token** — 由外層 match arm 保證 Some（E2 MAJOR #2
         // 修復：Option-pair 重構消除原有的 `.expect()`）。Phase 2 前為
-        // `cancel.clone()`（引擎級）。換成子 token 後，授權重驗 loop 可以只
-        // 拆 Live（取消本子 token）而不波及 demo/paper。Fix 3（2026-04-14）的
+        // `cancel.clone()`（引擎級）。換成子 token 後，Phase 3 `LiveAuthWatcher`
+        // 可以只拆 Live（取消本子 token）而不波及 demo/paper。Fix 3（2026-04-14）的
         // crash-only 對齊藉由下方 `engine_wide_cancel` 保留：Live panic
         // 依舊取消引擎級 token。
         let live_cancel = live_slot_cancel_token.clone();
         // `engine_wide_cancel` is the parent token; only the panic handler
         // uses it (crash-only parity). Clean auth-revoke teardown uses the
-        // child token instead (see main.rs auth re-verify loop below).
+        // child token instead (via `LiveAuthWatcher` → `live_slot.teardown()`).
         // `engine_wide_cancel` 為父 token；僅 panic handler 使用（crash-only 對齊）。
-        // 乾淨的授權撤銷 teardown 走子 token（見下方 main.rs 授權重驗 loop）。
+        // 乾淨的授權撤銷 teardown 走子 token（經 `LiveAuthWatcher` → `live_slot.teardown()`）。
         let engine_wide_cancel = cancel.clone();
         let live_crash_tx = cross_engine_tx.clone();
         let live_health_ref = Arc::clone(&live_b.health);
@@ -1504,11 +1553,11 @@ async fn async_main(
                     // cannot execute trades, we must not keep paper/demo
                     // pretending to learn against stale state.
                     //
-                    // PIPELINE-SLOT-1 Phase 2: we must cancel the **engine-
+                    // PIPELINE-SLOT-1 Phase 2/3: we must cancel the **engine-
                     // wide** token here, not the slot-scoped child — Fix 3's
                     // crash-only invariant takes the engine down. (A clean
                     // authorization revocation takes a different path: see
-                    // the auth re-verify loop below, which calls
+                    // `LiveAuthWatcher` spawned earlier, which calls
                     // `live_slot.teardown()` to cancel the child only.)
                     //
                     // 修復 3：Live 也觸發全引擎 cancel 以與 paper/demo 的 crash-only
@@ -1516,10 +1565,10 @@ async fn async_main(
                     // 意圖是全有或全無：Live 無法下單時 paper/demo 不應繼續在
                     // 陳舊狀態上「假裝學習」。
                     //
-                    // PIPELINE-SLOT-1 Phase 2：此處必須取消**引擎級** token
+                    // PIPELINE-SLOT-1 Phase 2/3：此處必須取消**引擎級** token
                     // 而非槽位子 token — Fix 3 的 crash-only 不變式要求整機下去。
-                    // 乾淨的授權撤銷走另一條路：見下方授權重驗 loop，呼叫
-                    // `live_slot.teardown()` 只取消子 token。
+                    // 乾淨的授權撤銷走另一條路：見前方 spawn 的 `LiveAuthWatcher`，
+                    // 呼叫 `live_slot.teardown()` 只取消子 token。
                     engine_wide_cancel.cancel();
                 }
             })
@@ -1553,114 +1602,21 @@ async fn async_main(
     );
 
     // ------------------------------------------------------------------
-    // LIVE-GATE-BINDING-1 (2026-04-18): periodic re-verify ticker.
-    // PIPELINE-SLOT-1 Phase 2 (2026-04-19): narrowed to Live-only teardown.
-    // 定期重驗 Earned-Trust 授權（每 5 min），Phase 2 收窄為僅拆 Live。
-    // ------------------------------------------------------------------
-    // EN: Live pipeline spawn-time gate is necessary but not sufficient — an
-    //   operator must also be able to revoke or let-expire a Live session
-    //   mid-flight. This task re-reads authorization.json every 300s and,
-    //   on failure, tears down **only the Live pipeline** via
-    //   `live_slot.teardown()`. Demo / Paper continue uninterrupted — they
-    //   are independent pipelines with their own trust surface. Previous
-    //   behaviour (pre-Phase-2) cancelled the engine-wide token on failure,
-    //   killing everything; that was the wrong instrument for a clean
-    //   operator-intent event. Fix 3's crash-only parity still applies to
-    //   unexpected Live panics — see the OS-thread panic handler above,
-    //   which continues to cancel the engine-wide token.
+    // LIVE-GATE-BINDING-1 (2026-04-18) → PIPELINE-SLOT-1 Phase 3 (2026-04-19):
+    // periodic re-verify is now driven by `LiveAuthWatcher` (spawned above
+    // near `ipc_server.run()`). It polls authorization.json every 5s and —
+    // unlike the Phase 2 300s ticker it replaces — handles BOTH invalidation
+    // teardown AND operator-renew respawn, gated by an exponential backoff
+    // so a persistently-failing `build_exchange_pipeline` does not storm
+    // Bybit. IPC fast-path `trigger_live_auth_recheck` from Python's
+    // `/auth/renew` and `/auth/revoke` routes keeps TTR under 100ms.
     //
-    //   After the first authorization failure we break out of the loop:
-    //   Phase 2 does not respawn — Live stays down until next full engine
-    //   restart. Phase 3 will add an auth watcher that drives re-acquisition.
-    //
-    //   The loop also watches the engine-wide cancel token so SIGTERM
-    //   still stops the ticker cleanly.
-    //
-    // 中: Spawn 時 gate 必要但不充分 — operator 須能中途 revoke 或等過期。
-    //   本任務每 300s 重讀 authorization.json，失敗時透過
-    //   `live_slot.teardown()` **只拆 Live 管線**，Demo / Paper 不中斷
-    //   （各自有獨立的信任面）。Phase 2 前的作法是直接取消引擎級 token
-    //   一鍋端，對「乾淨的 operator 意圖事件」是錯誤工具。Fix 3 的
-    //   crash-only 對齊仍適用於 Live **panic** — 見上面 OS 線程的 panic
-    //   handler，它依舊取消引擎級 token。
-    //
-    //   第一次授權失敗後即跳出 loop：Phase 2 不 respawn，Live 保持 down
-    //   直到整機重啟。Phase 3 會補上授權 watcher 驅動重拿授權。
-    //
-    //   Loop 同時監看引擎級 cancel token，SIGTERM 仍能乾淨停止 ticker。
-    if has_live {
-        use openclaw_engine::bybit_rest_client::live_bybit_environment;
-        use openclaw_engine::live_authorization::{auth_error_kind, load_and_verify};
-        const AUTH_REVERIFY_INTERVAL_SECS: u64 = 300;
-        let engine_shutdown = cancel.clone();
-        let reverify_slot = Arc::clone(&live_slot);
-        tokio::spawn(async move {
-            let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(
-                AUTH_REVERIFY_INTERVAL_SECS,
-            ));
-            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-            // Consume immediate first tick — spawn-time gate already verified.
-            interval.tick().await;
-            loop {
-                tokio::select! {
-                    _ = engine_shutdown.cancelled() => {
-                        tracing::info!(
-                            "live authorization re-verify ticker stopped (engine shutdown) \
-                             / live 授權重驗 ticker 已停止（引擎關閉）"
-                        );
-                        break;
-                    }
-                    _ = interval.tick() => {
-                        let env = live_bybit_environment();
-                        match load_and_verify(env) {
-                            Ok(auth) => {
-                                tracing::debug!(
-                                    tier = %auth.tier,
-                                    operator_id = %auth.operator_id,
-                                    expires_at_ms = auth.expires_at_ms,
-                                    "live authorization re-verify OK / 授權重驗通過"
-                                );
-                            }
-                            Err(e) => {
-                                tracing::error!(
-                                    env = ?env,
-                                    error_kind = auth_error_kind(&e),
-                                    error = %e,
-                                    "LIVE AUTHORIZATION INVALIDATED MID-SESSION — \
-                                     tearing down Live slot only (demo/paper continue). \
-                                     Operator: renew via /api/v1/live/auth/renew. \
-                                     / Live 授權中途失效 — 僅拆 Live 槽位（demo/paper 繼續）。"
-                                );
-                                // Live-only teardown: cancels the slot's
-                                // child token and joins its owned tasks.
-                                // Fail-soft: teardown errors are logged
-                                // inside `teardown()` and swallowed.
-                                // Live-only teardown：取消槽位子 token 並 join
-                                // 擁有的任務。Fail-soft：錯誤在 `teardown()` 內
-                                // log 後吞掉。
-                                if let Err(te) = reverify_slot.teardown().await {
-                                    tracing::error!(
-                                        error = %te,
-                                        "live slot teardown returned error (unexpected in Phase 2) \
-                                         / live 槽 teardown 回傳錯誤（Phase 2 不預期）"
-                                    );
-                                }
-                                // Exit the re-verify loop: Phase 2 does not
-                                // respawn. Phase 3 will add a watcher.
-                                // 跳出重驗 loop：Phase 2 不 respawn，Phase 3 補。
-                                break;
-                            }
-                        }
-                    }
-                }
-            }
-        });
-        info!(
-            interval_secs = AUTH_REVERIFY_INTERVAL_SECS,
-            "live authorization re-verify ticker spawned (slot-scoped teardown) \
-             / live 授權重驗 ticker 已啟動（slot-scoped teardown）"
-        );
-    }
+    // LIVE-GATE-BINDING-1 (2026-04-18) → PIPELINE-SLOT-1 Phase 3 (2026-04-19)：
+    // 定期重驗授權由 `LiveAuthWatcher`（上方 `ipc_server.run()` 附近 spawn）驅動。
+    // 5s 輪詢 authorization.json，與 Phase 2 300s ticker 的差異：**同時**處理
+    // 失效 teardown 與 operator renew respawn，並以指數退避閘防止持續失敗
+    // 敲死 Bybit。Python `/auth/renew`、`/auth/revoke` 路由經 IPC 快路徑
+    // `trigger_live_auth_recheck` 讓 TTR 壓在 100ms 內。
 
     // ------------------------------------------------------------------
     // Fix 4 (2026-04-14): WS tick-stale watchdog
@@ -1757,7 +1713,7 @@ async fn async_main(
     // `teardown().await` the slot's task_handles are never joined — they get
     // orphaned and then aborted by tokio runtime drop, not a clean shutdown.
     // `teardown()` is idempotent: if the Live slot was already torn down by
-    // the 5-min auth re-verify loop, calling it again is a no-op (Empty state).
+    // `LiveAuthWatcher` (Phase 3), calling it again is a no-op (Empty state).
     // Paper is NOT wired through PipelineSlot (Phase 3 deferral). Order matches
     // "Live → Demo → Paper" below: Live slot first, then Demo, then Paper is
     // handled by existing handle-await flow.
@@ -1766,8 +1722,8 @@ async fn async_main(
     // 確定性 join task handles。上面的引擎級 `cancel` 已經經父→子連動通知所有
     // 子，但若不顯式 `teardown().await`，槽位的 task_handles 永遠不會被 join —
     // 任務變孤兒，最後靠 tokio runtime drop 粗暴中止，稱不上乾淨關閉。
-    // `teardown()` 冪等：若 Live 槽位已被 5 分鐘授權重驗 loop 拆過，再呼叫即
-    // 無作用（Empty 狀態）。Paper 尚未接入 PipelineSlot（Phase 3 延後）。
+    // `teardown()` 冪等：若 Live 槽位已被 `LiveAuthWatcher`（Phase 3）拆過，
+    // 再呼叫即無作用（Empty 狀態）。Paper 尚未接入 PipelineSlot（未來延後）。
     // 順序符合「Live → Demo → Paper」：先拆 Live slot，再拆 Demo，Paper 走
     // 既有 handle-await 流程。
     if let Err(e) = live_slot.teardown().await {

@@ -116,6 +116,7 @@ async fn test_dispatch_ping() {
         &None,
         &None,
         &None,
+        &None,
     )
     .await;
     assert!(resp.error.is_none());
@@ -138,6 +139,7 @@ async fn test_dispatch_get_state() {
         &EngineCommandChannels::default(),
         &empty_budget_slot(),
         &empty_teacher_slot(),
+        &None,
         &None,
         &None,
         &None,
@@ -174,6 +176,7 @@ async fn test_dispatch_method_not_found() {
         &None,
         &None,
         &None,
+        &None,
     )
     .await;
     assert!(resp.error.is_some());
@@ -192,6 +195,7 @@ async fn test_dispatch_invalid_json() {
         &EngineCommandChannels::default(),
         &empty_budget_slot(),
         &empty_teacher_slot(),
+        &None,
         &None,
         &None,
         &None,
@@ -220,6 +224,7 @@ async fn test_dispatch_missing_version() {
         &None,
         &None,
         &None,
+        &None,
     )
     .await;
     assert!(resp.error.is_some());
@@ -243,6 +248,7 @@ async fn test_dispatch_missing_method() {
         &None,
         &None,
         &None,
+        &None,
     )
     .await;
     assert!(resp.error.is_some());
@@ -261,6 +267,7 @@ async fn test_dispatch_reload_config() {
         &EngineCommandChannels::default(),
         &empty_budget_slot(),
         &empty_teacher_slot(),
+        &None,
         &None,
         &None,
         &None,
@@ -311,6 +318,7 @@ async fn test_get_paper_state_no_file() {
         &None,
         &None,
         &None,
+        &None,
     )
     .await;
     assert!(
@@ -331,6 +339,7 @@ async fn test_get_paper_state_with_snapshot() {
         &EngineCommandChannels::default(),
         &empty_budget_slot(),
         &empty_teacher_slot(),
+        &None,
         &None,
         &None,
         &None,
@@ -362,6 +371,7 @@ async fn test_get_latest_prices_with_snapshot() {
         &None,
         &None,
         &None,
+        &None,
     )
     .await;
     assert!(resp.error.is_none(), "error: {:?}", resp.error);
@@ -382,6 +392,7 @@ async fn test_get_tick_stats_with_snapshot() {
         &EngineCommandChannels::default(),
         &empty_budget_slot(),
         &empty_teacher_slot(),
+        &None,
         &None,
         &None,
         &None,
@@ -505,6 +516,7 @@ async fn test_rc1_get_risk_runtime_status_via_ipc() {
         &None,
         &None,
         &None,
+        &None,
     )
     .await;
     assert!(resp.error.is_none(), "error: {:?}", resp.error);
@@ -530,6 +542,7 @@ async fn test_rc1_clear_consecutive_losses_via_ipc() {
         },
         &empty_budget_slot(),
         &empty_teacher_slot(),
+        &None,
         &None,
         &None,
         &None,
@@ -610,6 +623,7 @@ async fn test_rc1b2_force_governor_tighter_via_ipc() {
         &None,
         &None,
         &None,
+        &None,
     )
     .await;
     assert!(resp.error.is_none(), "error: {:?}", resp.error);
@@ -638,6 +652,7 @@ async fn test_rc1b2_force_governor_tighter_missing_reason() {
         &None,
         &None,
         &None,
+        &None,
     )
     .await;
     assert!(resp.error.is_some());
@@ -659,6 +674,7 @@ async fn test_rc1b2_force_governor_looser_cooldown_rejection() {
         },
         &empty_budget_slot(),
         &empty_teacher_slot(),
+        &None,
         &None,
         &None,
         &None,
@@ -696,6 +712,7 @@ async fn test_rc1b2_force_governor_looser_success() {
         &None,
         &None,
         &None,
+        &None,
     )
     .await;
     assert!(resp.error.is_none(), "error: {:?}", resp.error);
@@ -716,6 +733,7 @@ async fn test_rc1_get_risk_runtime_status_no_channel() {
         &EngineCommandChannels::default(),
         &empty_budget_slot(),
         &empty_teacher_slot(),
+        &None,
         &None,
         &None,
         &None,
@@ -747,6 +765,7 @@ async fn test_get_param_ranges_via_ipc() {
         &None,
         &None,
         &None,
+        &None,
     )
     .await;
     assert!(resp.error.is_none(), "error: {:?}", resp.error);
@@ -772,6 +791,7 @@ async fn test_get_strategy_params_via_ipc() {
         },
         &empty_budget_slot(),
         &empty_teacher_slot(),
+        &None,
         &None,
         &None,
         &None,
@@ -810,6 +830,7 @@ async fn test_update_strategy_params_via_ipc() {
         &None,
         &None,
         &None,
+        &None,
     )
     .await;
     assert!(resp.error.is_none(), "error: {:?}", resp.error);
@@ -831,6 +852,7 @@ async fn test_update_strategy_params_nonexistent() {
         },
         &empty_budget_slot(),
         &empty_teacher_slot(),
+        &None,
         &None,
         &None,
         &None,
@@ -865,6 +887,7 @@ async fn test_update_strategy_params_missing_params() {
         &None,
         &None,
         &None,
+        &None,
     )
     .await;
     assert!(
@@ -894,6 +917,7 @@ async fn test_get_phase4_status_returns_grey_initial() {
         &None,
         &None,
         &None,
+        &None,
     )
     .await;
     assert!(resp.error.is_none(), "phase4 status must succeed");
@@ -918,6 +942,7 @@ async fn test_get_phase4_status_response_schema() {
         &EngineCommandChannels::default(),
         &empty_budget_slot(),
         &empty_teacher_slot(),
+        &None,
         &None,
         &None,
         &None,
@@ -955,6 +980,7 @@ async fn test_dispatch_phase4_status() {
         &EngineCommandChannels::default(),
         &empty_budget_slot(),
         &empty_teacher_slot(),
+        &None,
         &None,
         &None,
         &None,
@@ -1009,6 +1035,7 @@ async fn test_rc1_get_risk_config_returns_snapshot_and_version() {
         &bs,
         &None,
         &None,
+        &None,
     )
     .await;
     assert!(resp.error.is_none(), "expected success: {resp:?}");
@@ -1034,6 +1061,7 @@ async fn test_rc1_patch_risk_config_bumps_version_and_updates() {
         &rs,
         &ls,
         &bs,
+        &None,
         &None,
         &None,
     )
@@ -1069,6 +1097,7 @@ async fn test_rc1_patch_risk_config_validation_failure_rolls_back() {
         &bs,
         &None,
         &None,
+        &None,
     )
     .await;
     assert!(resp.error.is_some(), "expected validation error");
@@ -1097,6 +1126,7 @@ async fn test_rc1_patch_missing_patch_field_errors() {
         &bs,
         &None,
         &None,
+        &None,
     )
     .await;
     assert!(resp.error.is_some());
@@ -1122,6 +1152,7 @@ async fn test_rc1_patch_learning_and_budget_configs_round_trip() {
         &bs,
         &None,
         &None,
+        &None,
     )
     .await;
     assert!(resp.error.is_none(), "patch_learning_config: {resp:?}");
@@ -1136,6 +1167,7 @@ async fn test_rc1_patch_learning_and_budget_configs_round_trip() {
         &rs,
         &ls,
         &bs,
+        &None,
         &None,
         &None,
     )
@@ -1157,6 +1189,7 @@ async fn test_rc1_patch_learning_and_budget_configs_round_trip() {
         &bs,
         &None,
         &None,
+        &None,
     )
     .await;
     assert!(resp.error.is_none(), "patch_budget_config: {resp:?}");
@@ -1175,6 +1208,7 @@ async fn test_rc1_get_config_without_store_errors() {
         &EngineCommandChannels::default(),
         &empty_budget_slot(),
         &empty_teacher_slot(),
+        &None,
         &None,
         &None,
         &None,
@@ -1207,6 +1241,7 @@ async fn test_p2_patch_risk_config_engine_routing() {
         &rs,
         &ls,
         &bs,
+        &None,
         &None,
         &None,
     )
@@ -1256,6 +1291,7 @@ async fn test_p2_get_risk_config_engine_selection() {
         &bs,
         &None,
         &None,
+        &None,
     )
     .await;
     // Now GET demo config — should show version=1.
@@ -1271,6 +1307,7 @@ async fn test_p2_get_risk_config_engine_selection() {
         &rs,
         &ls,
         &bs,
+        &None,
         &None,
         &None,
     )
@@ -1290,6 +1327,7 @@ async fn test_p2_get_risk_config_engine_selection() {
         &rs,
         &ls,
         &bs,
+        &None,
         &None,
         &None,
     )

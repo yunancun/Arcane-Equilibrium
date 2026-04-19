@@ -291,6 +291,16 @@ pub struct IpcServer {
     /// Scanner IPC: SymbolRegistry for get_active_symbols / get_scanner_status.
     /// 掃描器 IPC：SymbolRegistry 供 get_active_symbols / get_scanner_status 使用。
     scanner_registry: Option<Arc<crate::scanner::registry::SymbolRegistry>>,
+    /// PIPELINE-SLOT-1 Phase 3: fast-path wake-up to the Live auth watcher.
+    /// Set in main.rs via [`IpcServer::set_live_auth_recheck_sender`] after
+    /// `LiveAuthWatcher::new` returns its trigger handle. `None` when the
+    /// engine is running without a Live pipeline (paper/demo-only build).
+    ///
+    /// PIPELINE-SLOT-1 Phase 3：Live 授權 watcher 的快路徑喚醒端。於
+    /// main.rs `LiveAuthWatcher::new` 回傳 handle 後透過
+    /// [`IpcServer::set_live_auth_recheck_sender`] 設定。無 Live 管線時
+    /// 為 `None`。
+    live_auth_recheck_tx: Option<tokio::sync::mpsc::Sender<()>>,
 }
 
 impl IpcServer {
@@ -314,7 +324,28 @@ impl IpcServer {
             budget_store: None,
             audit_pool: Arc::new(RwLock::new(None)),
             scanner_registry: None,
+            live_auth_recheck_tx: None,
         }
+    }
+
+    /// PIPELINE-SLOT-1 Phase 3: wire the Live auth watcher's trigger
+    /// sender so the `trigger_live_auth_recheck` IPC method can wake the
+    /// watcher for sub-5s respawn / teardown TTR on operator renew/revoke.
+    ///
+    /// Call after `LiveAuthWatcher::new(...)` returns in main.rs, before
+    /// `ipc_server.run()` starts accepting connections. Absent wiring is
+    /// not an error — the IPC method will respond with a structured
+    /// `watcher_disabled` status.
+    ///
+    /// PIPELINE-SLOT-1 Phase 3：接入 Live 授權 watcher 的 trigger sender，
+    /// 讓 `trigger_live_auth_recheck` IPC method 在 operator renew/revoke
+    /// 時 sub-5s 喚醒 watcher 完成 respawn / teardown。
+    ///
+    /// main.rs 中 `LiveAuthWatcher::new(...)` 回傳後、`ipc_server.run()`
+    /// 開始接受連線前呼叫。未接線非錯誤 — IPC method 會回結構化
+    /// `watcher_disabled` 狀態。
+    pub fn set_live_auth_recheck_sender(&mut self, tx: tokio::sync::mpsc::Sender<()>) {
+        self.live_auth_recheck_tx = Some(tx);
     }
 
     /// Scanner IPC: wire the SymbolRegistry so get_active_symbols / get_scanner_status work.
@@ -433,8 +464,9 @@ impl IpcServer {
                             let budget_store = self.budget_store.clone();
                             let audit_pool = self.audit_pool.read().await.clone();
                             let scanner_reg = self.scanner_registry.clone();
+                            let live_auth_recheck_tx = self.live_auth_recheck_tx.clone();
                             tokio::spawn(async move {
-                                handle_connection(stream, config, cancel, data_dir, cmd_channels, budget_slot, teacher_slot, risk_stores, learning_store, budget_store, audit_pool, scanner_reg).await;
+                                handle_connection(stream, config, cancel, data_dir, cmd_channels, budget_slot, teacher_slot, risk_stores, learning_store, budget_store, audit_pool, scanner_reg, live_auth_recheck_tx).await;
                             });
                         }
                         Err(e) => {
@@ -490,6 +522,7 @@ async fn handle_connection(
     budget_store: Option<Arc<ConfigStore<BudgetConfig>>>,
     audit_pool: Option<sqlx::PgPool>,
     scanner_registry: Option<Arc<crate::scanner::registry::SymbolRegistry>>,
+    live_auth_recheck_tx: Option<tokio::sync::mpsc::Sender<()>>,
 ) {
     let peer = format!("{:?}", stream.peer_addr());
     info!(peer = %peer, "client connected / 客戶端已連接");
@@ -591,7 +624,7 @@ async fn handle_connection(
             line_result = lines.next_line() => {
                 match line_result {
                     Ok(Some(line)) => {
-                        let response = dispatch_request(&line, &config, &data_dir, &cmd_channels, &budget_slot, &teacher_slot, &risk_stores, &learning_store, &budget_store, &audit_pool, &scanner_registry).await;
+                        let response = dispatch_request(&line, &config, &data_dir, &cmd_channels, &budget_slot, &teacher_slot, &risk_stores, &learning_store, &budget_store, &audit_pool, &scanner_registry, &live_auth_recheck_tx).await;
                         let mut resp_bytes = serde_json::to_vec(&response)
                             .unwrap_or_else(|_| br#"{"jsonrpc":"2.0","error":{"code":-32603,"message":"serialization error"},"id":null}"#.to_vec());
                         resp_bytes.push(b'\n');
@@ -631,6 +664,7 @@ async fn dispatch_request(
     budget_store: &Option<Arc<ConfigStore<BudgetConfig>>>,
     audit_pool: &Option<sqlx::PgPool>,
     scanner_registry: &Option<Arc<crate::scanner::registry::SymbolRegistry>>,
+    live_auth_recheck_tx: &Option<tokio::sync::mpsc::Sender<()>>,
 ) -> JsonRpcResponse {
     let req: JsonRpcRequest = match serde_json::from_str(line) {
         Ok(r) => r,
@@ -932,6 +966,11 @@ async fn dispatch_request(
         // ── Scanner observability (IPC-SCAN-1) ──
         "get_active_symbols" => handle_get_active_symbols(id, scanner_registry),
         "get_scanner_status" => handle_get_scanner_status(id, scanner_registry),
+        // ── PIPELINE-SLOT-1 Phase 3: Live auth watcher fast-path ──
+        // PIPELINE-SLOT-1 Phase 3：Live 授權 watcher 快路徑喚醒
+        "trigger_live_auth_recheck" => {
+            handle_trigger_live_auth_recheck(id, live_auth_recheck_tx)
+        }
         _ => JsonRpcResponse::error(
             id,
             ERR_METHOD_NOT_FOUND,
@@ -986,6 +1025,81 @@ fn handle_paper_cmd(
 /// 處理 ping → pong。
 fn handle_ping(id: serde_json::Value) -> JsonRpcResponse {
     JsonRpcResponse::success(id, serde_json::Value::String("pong".into()))
+}
+
+/// PIPELINE-SLOT-1 Phase 3: fast-path wake-up to the Live auth watcher.
+///
+/// Python's `/api/v1/live/auth/renew` (and revoke) routes call this
+/// method fire-and-forget after `_write_signed_live_authorization()` /
+/// `_delete_live_authorization_file()` so the watcher reacts in <100ms
+/// rather than waiting up to 5s for the next poll tick.
+///
+/// Response shape (JSON object):
+///   * `{"accepted": true}`  — wake-up accepted (watcher will recheck now)
+///   * `{"accepted": false, "reason": "coalesced"}` — pending trigger
+///     already queued; the existing wake-up will perform the recheck
+///   * `{"accepted": false, "reason": "watcher_closed"}` — watcher
+///     dropped its receiver (engine shutting down, or failed spawn); the
+///     next full restart will rebind
+///   * `{"accepted": false, "reason": "watcher_disabled"}` — engine
+///     started without a Live pipeline (paper/demo-only build)
+///
+/// Never returns a JSON-RPC error: this is advisory, not authoritative.
+/// The watcher's next poll still converges regardless.
+///
+/// PIPELINE-SLOT-1 Phase 3：Live 授權 watcher 快路徑喚醒。
+///
+/// Python `/api/v1/live/auth/renew`（與 revoke）路由於
+/// `_write_signed_live_authorization()` /
+/// `_delete_live_authorization_file()` 後 fire-and-forget 呼叫此 method，
+/// 讓 watcher <100ms 反應，不必等最多 5s 下個 poll。
+///
+/// 回應（JSON object）：
+///   * `{"accepted": true}` — 喚醒已接受，watcher 立刻 recheck
+///   * `{"accepted": false, "reason": "coalesced"}` — 已有排隊 trigger
+///   * `{"accepted": false, "reason": "watcher_closed"}` — watcher 已 drop receiver
+///   * `{"accepted": false, "reason": "watcher_disabled"}` — 引擎無 Live 管線
+///
+/// 絕不回 JSON-RPC error：此為 advisory、非權威；watcher 下次 poll 仍會收斂。
+fn handle_trigger_live_auth_recheck(
+    id: serde_json::Value,
+    live_auth_recheck_tx: &Option<tokio::sync::mpsc::Sender<()>>,
+) -> JsonRpcResponse {
+    let Some(tx) = live_auth_recheck_tx else {
+        // No watcher wired (paper/demo-only engine) — return structured
+        // "disabled" rather than an error, so Python callers can log-and-ignore.
+        // 無 watcher 接線（僅 paper/demo 引擎）— 回結構化 disabled 而非錯誤，
+        // 讓 Python 呼叫端 log-and-ignore。
+        return JsonRpcResponse::success(
+            id,
+            serde_json::json!({
+                "accepted": false,
+                "reason": "watcher_disabled"
+            }),
+        );
+    };
+    match tx.try_send(()) {
+        Ok(()) => JsonRpcResponse::success(
+            id,
+            serde_json::json!({
+                "accepted": true
+            }),
+        ),
+        Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => JsonRpcResponse::success(
+            id,
+            serde_json::json!({
+                "accepted": false,
+                "reason": "coalesced"
+            }),
+        ),
+        Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => JsonRpcResponse::success(
+            id,
+            serde_json::json!({
+                "accepted": false,
+                "reason": "watcher_closed"
+            }),
+        ),
+    }
 }
 
 /// EDGE-P3-1 Step 7b: report compile-time build-feature flags to Python probes.
