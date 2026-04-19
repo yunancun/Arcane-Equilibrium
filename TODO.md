@@ -1,11 +1,12 @@
 # OpenClaw TODO — 工作清單
 
-**最後更新**：2026-04-19（PIPELINE-SLOT-1 Phase 1-4 全部部署上線 + Track P 骨架隨同 --rebuild 活化）
-**Engine**：PID 2911463 · binary mtime 2026-04-19 15:37 → 含全部先前 staged 修復（P0-6 永久修復 + P1-7 A INTENT-WRITE-GAP-1 + P1-7 B edge_estimator scheduler + P1-17 Winsorize + LIVE-GATE-BINDING-1 + DYNAMIC-RISK-1 + IPC-SCAN-1c + FILL-CONTEXT-LINKAGE-1 + EXIT-FEATURES-TABLE-1 Phase 1b + Plan N ai_budget dedup + E5-P1/P2 + E5-FN-2/3 + DISPATCH-RETRY-1 + MARKET-KLINES-STALE-1 + DUAL-TRACK Track P T1-T5 骨架）+ **PIPELINE-SLOT-1 Phase 1-4**（hot-spawn Live、scoped teardown、auth watcher、daemon-thread trigger offload）
-**Python uvicorn**：PID 2911511（4 workers）· started 2026-04-19 15:37 → 含 P0-12 LIVE-GATE-FALLBACK-1 + E5-FN-3 AnalystAgent pilot + PIPELINE-SLOT-1 Phase 4 daemon-thread trigger
-**PIPELINE-SLOT-1 live 驗證**：LiveAuthWatcher 13:37 啟動 `env=LiveDemo poll_interval_secs=5`；authorization.json 已由 Manual restart sentinel 清除；等 operator 走 GUI renew → 應 ≤1s 觀察到 Live pipeline 重生
-**測試基準線**：Rust engine lib **1629** / bin 38 / core 392 / e2e 35 / reconciler_e2e 19 · Python **2828** passed（+8 from PIPELINE-SLOT-1 Phase 4 daemon-thread tests）+ audit 4 passed / ml_training 238 passed
-**健康**：demo alive（snapshot age 5.3s） · paper/live 預期 dead（PAPER-DISABLE-1 + 待 renew） · 今日 1 crash（12:25，為 redeploy 前殘留）
+**最後更新**：2026-04-19 22:48（EXIT-FEATURES-TABLE-1 Phase 1b GAP-1 部署 + Track P E2+E4 counterfactual audit 驗收完成）
+**Engine**：PID 3029633 · binary mtime 2026-04-19 22:32 → 含全部先前 staged 修復（P0-6 永久修復 + P1-7 A INTENT-WRITE-GAP-1 + P1-7 B edge_estimator scheduler + P1-17 Winsorize + LIVE-GATE-BINDING-1 + DYNAMIC-RISK-1 + IPC-SCAN-1c + FILL-CONTEXT-LINKAGE-1 + EXIT-FEATURES-TABLE-1 Phase 1b + Plan N ai_budget dedup + E5-P1/P2 + E5-FN-2/3 + DISPATCH-RETRY-1 + MARKET-KLINES-STALE-1 + DUAL-TRACK Track P T1-T5 骨架 + PIPELINE-SLOT-1 Phase 1-4）+ **EXIT-FEATURES-TABLE-1 Phase 1b GAP-1**（commit `35808e9` apply_confirmed_fill 接線，待流量驗證）
+**Python uvicorn**：PID 3029688（4 workers）· started 2026-04-19 22:33 → 含 P0-12 LIVE-GATE-FALLBACK-1 + E5-FN-3 AnalystAgent pilot + PIPELINE-SLOT-1 Phase 4 daemon-thread trigger
+**PIPELINE-SLOT-1 live 驗證**：LiveAuthWatcher 22:33 啟動 `env=LiveDemo poll_interval_secs=5`；authorization.json 已由 Manual restart sentinel 清除；等 operator 走 GUI renew → 應 ≤1s 觀察到 Live pipeline 重生
+**測試基準線**：Rust engine lib **1631** / bin 38 / core 392 / e2e 35 / reconciler_e2e 19 · Python **2828** passed（+8 from PIPELINE-SLOT-1 Phase 4 daemon-thread tests）+ audit 4 passed / ml_training 238 passed
+**健康**：demo alive（snapshot age 5.9s） · paper/live 預期 dead（PAPER-DISABLE-1 + 待 renew） · 今日 1 crash（12:25，為 redeploy 前殘留）
+**DB 驗證（22:47）**：market.klines 5 timeframes 在近 1h 寫入 ✅ · trading.intents demo 57 rows/3h ✅（P1-7 A 生效）· learning.exit_features GAP-1 post-22:33 restart 觀察中（目前無 close fill）
 
 > 本文件僅列「待辦/進行中」。已完成 → 文末歸檔索引。詳細設計 → `docs/worklogs/`。
 > Compact 後從此文件恢復；第一個 `[ ]` = 起點。CLAUDE.md §三 = 當前狀態快照。
@@ -62,7 +63,59 @@ git status && git log --oneline -5
 
 - [x] **MARKET-KLINES-STALE-1**（P1-CRITICAL · 2026-04-18 RCA ✅ · 2026-04-18 修復 commit `65acde6`）：**Root cause = PAPER-DISABLE-1 架構遺漏**（非停電事件）。`main.rs` Paper pipeline `market_data_tx: Some(market_tx)`，但 Demo 和 Live 都 `market_data_tx: None`（D19 註釋：`Paper handles that`）→ `on_tick.rs::emit_market_data_if_needed` `if let Some(ref tx)` None check 跳過 → `MarketDataMsg::KlineClose` 零發出 → `market_writer` task 起來但 channel 永遠空。Paper 自 PAPER-DISABLE-1（2026-04-16 21:08 最後一次 tick）預設不 spawn 後，DB kline 寫入完全斷。**修復**（commit `65acde6`，三處 `Some(market_tx.clone())`）：paper/demo/live 三引擎皆 clone market_tx → 三路並行寫入；`market.klines` PK `(symbol, timeframe, ts)` + `ON CONFLICT DO NOTHING`（`market_writer.rs:180`）已 dedup，多 producer 安全。**部署**：待 `restart_all.sh --rebuild`（與 bd45e90 / c7171b2 / E5-P1/P2 同批）。
 - [x] **EXIT-FEATURES-TABLE-1**（P1-HIGH · 2026-04-18 設計草稿 ✅ · 2026-04-19 Phase 1b 全部接線 ✅ · 2026-04-19 Phase 1b GAP-1 修復 ✅）：`docs/worklogs/2026-04-18-2--exit_features_table_design.md`。Phase 1b producer wiring（commit `6ea643e`）覆蓋 `emit_close_fill` 主路徑；Phase 1b FUP（commit `c7171b2`）補完 2 個漏接 close paths（`process_external_fill` IPC 外部 fill 報告 + `ipc_close_symbol` paper 分支：operator `/close_symbol` API + dust eviction + orphan_handler→Paper 模式）；抽出 `try_emit_exit_feature_row` `pub(crate)` helper；+3 tests / 5 pre-existing WIP `test_exit_feature_row_*` 全綠化。Track P 標籤覆蓋完整。
-    - **Phase 1b GAP-1（2026-04-19 修復，待 commit）**：R1 觀察窗發現 demo 重啟後 89 fills 但僅 2 rows `learning.exit_features`（~97% 丟失）；並行 root-cause 審查鎖定 **`apply_confirmed_fill`（Demo/Live WS 確認成交平倉主路徑，commands.rs:421）從未呼叫 `try_emit_exit_feature_row`**。PAPER-DISABLE-1 前 paper 的 `emit_close_fill` 接線還 cover 得到；paper 關閉後 Demo/Live 靠 WS 回報走 `apply_confirmed_fill`，2 rows 是少數走 `process_external_fill` / `ipc_close_symbol` paper 分支的剩餘路徑。修復：`commands.rs:442-566` 在 `apply_fill` 之前捕獲 `pre_close_snapshot`，在 `trading_tx.Fill` 送出後 `if realized_pnl != 0.0` 呼叫 `try_emit_exit_feature_row`（pattern 與 `process_external_fill` 對齊，`entry_context_id` 沿用 pre-close 捕獲的 `existing_entry_ctx`）。+2 regression tests（`apply_confirmed_fill_emits_exit_feature_row_on_close` 驗 demo 平倉送出 row with engine_mode=demo / side=1 / realized_net_bps>0 / peak_pnl_pct≈2% · `apply_confirmed_fill_exit_feature_fail_soft_when_tx_missing` 驗 tx 缺失時 Fill 仍正常送出）。engine lib 1629→**1631** passed。**影響**：修前若不補，DUAL-TRACK Phase 1b W24 7 維閾值校準會嚴重缺料（daily exit_features 增量 ~3%→100%）；Track P T4 wiring 未來上線亦受益。
+    - **Phase 1b GAP-1（2026-04-19 修復 commit `35808e9`，2026-04-19 22:32 部署上線）**：R1 觀察窗發現 demo 重啟後 89 fills 但僅 2 rows `learning.exit_features`（~97% 丟失）；並行 root-cause 審查鎖定 **`apply_confirmed_fill`（Demo/Live WS 確認成交平倉主路徑，commands.rs:421）從未呼叫 `try_emit_exit_feature_row`**。PAPER-DISABLE-1 前 paper 的 `emit_close_fill` 接線還 cover 得到；paper 關閉後 Demo/Live 靠 WS 回報走 `apply_confirmed_fill`，2 rows 是少數走 `process_external_fill` / `ipc_close_symbol` paper 分支的剩餘路徑。修復：`commands.rs:442-566` 在 `apply_fill` 之前捕獲 `pre_close_snapshot`，在 `trading_tx.Fill` 送出後 `if realized_pnl != 0.0` 呼叫 `try_emit_exit_feature_row`（pattern 與 `process_external_fill` 對齊，`entry_context_id` 沿用 pre-close 捕獲的 `existing_entry_ctx`）。+2 regression tests（`apply_confirmed_fill_emits_exit_feature_row_on_close` 驗 demo 平倉送出 row with engine_mode=demo / side=1 / realized_net_bps>0 / peak_pnl_pct≈2% · `apply_confirmed_fill_exit_feature_fail_soft_when_tx_missing` 驗 tx 缺失時 Fill 仍正常送出）。engine lib 1629→**1631** passed。**影響**：修前若不補，DUAL-TRACK Phase 1b W24 7 維閾值校準會嚴重缺料（daily exit_features 增量 ~3%→100%）；Track P T4 wiring 未來上線亦受益。
+    - [ ] **GAP-1 R1 follow-up 12h 驗收（2026-04-20 ~10:30 local 執行）** ⏰：部署後 ~12h 跑下方 SQL 驗證 close fills → exit_features 覆蓋率回升到 ≥95%。若覆蓋率 <80%，代表還有其他靜默 close path（可能 Track P T4 PHYS-LOCK 未來介入後漏接；排查順序 emit_close_fill / process_external_fill / ipc_close_symbol paper / apply_confirmed_fill 四條 + 新增 phys_lock close path）。部署基準時間：2026-04-19 22:32:57 local。
+
+        ```sql
+        -- R1 GAP-1 12h follow-up：目標 coverage_ratio ≥ 0.95
+        -- deploy baseline: '2026-04-19 22:32:57+02'
+        SELECT
+          'post-GAP1-deploy' AS window,
+          (SELECT COUNT(*) FROM trading.fills
+             WHERE engine_mode='demo'
+               AND ts > '2026-04-19 22:32:57+02'
+               AND realized_pnl != 0) AS close_fills,
+          (SELECT COUNT(*) FROM learning.exit_features
+             WHERE engine_mode='demo'
+               AND ts > '2026-04-19 22:32:57+02') AS exit_features,
+          ROUND(
+            (SELECT COUNT(*)::numeric FROM learning.exit_features
+               WHERE engine_mode='demo' AND ts > '2026-04-19 22:32:57+02')
+            / NULLIF((SELECT COUNT(*) FROM trading.fills
+               WHERE engine_mode='demo' AND ts > '2026-04-19 22:32:57+02'
+                 AND realized_pnl != 0), 0)::numeric,
+            3) AS coverage_ratio;
+
+        -- 分 owner_strategy 看 exit kind 分布（方便排查漏接 path）
+        SELECT
+          SPLIT_PART(owner_strategy, ':', 1) AS close_kind,
+          owner_strategy,
+          COUNT(*) AS close_fills,
+          ROUND(SUM(realized_pnl)::numeric, 2) AS total_pnl
+        FROM trading.fills
+        WHERE engine_mode='demo'
+          AND ts > '2026-04-19 22:32:57+02'
+          AND realized_pnl != 0
+        GROUP BY 1, 2
+        ORDER BY 1, 3 DESC;
+
+        -- exit_source 分布（若 Track P T4 wiring 上線，Physical 會出現）
+        SELECT exit_source, COUNT(*)
+        FROM learning.exit_features
+        WHERE engine_mode='demo' AND ts > '2026-04-19 22:32:57+02'
+        GROUP BY 1 ORDER BY 2 DESC;
+        ```
+
+        **驗收準則**：
+        - ✅ `coverage_ratio ≥ 0.95` → GAP-1 修復生效，勾掉此 follow-up、task #6 關閉
+        - ⚠️ `0.80 ≤ coverage_ratio < 0.95` → 找剩餘漏接 path；對照 exit_source / owner_strategy 分布定位
+        - ❌ `coverage_ratio < 0.80` → 修復未生效或有更大架構遺漏，reopen RCA + 檢查 binary mtime 是否為 22:32:57
+
+        **其他觀察指標**（同一 window 跑）：
+        - 12h 內 demo close fill 數應 ≥ 5（驗證 demo 真的在交易）
+        - R:R 不對稱：`AVG(realized_pnl WHERE pnl>0)` vs `AVG(ABS(realized_pnl) WHERE pnl<0)` 比值 → 看 P1-10 路徑是否自然收斂
+        - 若 close fill 數 < 3，延長觀察到 24h 後再判
+
     - Phase 1b 累積 ≥1 週 exit_features 後可校準 7 維閾值（見 Phase 1b §83）。
 - [ ] **DECISION-OUTCOMES-DEAD-1**（P2）：`trading.decision_outcomes` 113k 條 `max_favorable/max_adverse` 全 NULL，寫入管線斷；可沿用此表取代 exit_features 或確認徹底 dead；RCA 決定方向。
 
@@ -82,8 +135,8 @@ git status && git log --oneline -5
 - [x] T4 Combine Layer 骨架 + `ExitSource` 4 tags（commit `094d285`；T4-FIX `c7d6a6c` 修 on_tick wrapper prefix `PHYS-LOCK` → `risk_close:phys_lock_` + `strip_phys_lock_prefix` 剝殼 + `assert_eq!` 升 release 不可繞 + integration test 覆蓋 3 gate）
 - [x] T5 counterfactual exit audit CLI `program_code/audit/counterfactual_exit_audit.py`（commit `4feb17a`，1-min kline 粒度事後歸因，`MARKET-KLINES-STALE-1` 修復後可跑）
 - [ ] `peak_reached_ts_ms` 欄位加到 `PaperPosition`（含 legacy migration）— Phase 1b 7 維累積後展開
-- [ ] E2 + E4：counterfactual 粗粒度 audit（用 fills + 1-min kline 還原 peak-to-exit，非逐 tick）+ ≥18 單測
-- [ ] E5：rebuild + 灰度部署（保守閾值，24h 無 fee 惡化才收緊）
+- [x] **E2 + E4 ✅ 2026-04-19 22:48**：counterfactual 粗粒度 audit + ≥47 單測（≥18 要求超達）。CLI `counterfactual_exit_audit.py` 實跑驗證：grid_trading demo 7d 141 positions / 4 hits / mean delta −39.4 bps（1 better / 2 worse / 1 neutral）· ma_crossover demo 7d 52 positions / 10 hits / mean delta −95.2 bps（5 better / 5 worse）。ENJUSDT 案例砍掉 198 bps 潛在收益 → 驗證 Phase 1a 骨架閾值「設計上保守」，校準工作正確排入 Phase 1b。單測分布：exit_features 6 + exit_feature_schema 3 + compute_roc 12 + phys_lock 9 + combine_layer 9 + tick_pipeline exit_feature_row 7 + position_risk_evaluator 1。工件：`docs/worklogs/2026-04-19-2--track_p_counterfactual_audit.md` + `/tmp/cf_audit_{grid,ma}_demo.json`。
+- [x] **E5 ✅ 2026-04-19 22:33**：rebuild + 灰度部署（T1-T5 骨架隨 22:32 binary 活化；24h 無 fee 惡化觀察中）
 
 **Phase 1a 完成標準**：P1-7 A/B/C 部署 + `edge_estimates.json` 每小時自動刷新 + `trading.intents` live/live_demo 開始有 rows + 第一個 ONNX artifact + Track P 骨架灰度 ≥48h `exit_source=Physical` 正常
 
