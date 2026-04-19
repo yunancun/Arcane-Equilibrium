@@ -254,6 +254,123 @@ fn apply_confirmed_fill_falls_back_when_signal_id_empty() {
     assert_eq!(stamped.as_deref(), Some("ctx-demo-BTCUSDT-2000"));
 }
 
+/// EXIT-FEATURES-TABLE-1 Phase 1b GAP-1 regression (2026-04-19):
+/// `apply_confirmed_fill` (Demo/Live WS-confirmed close primary path) must
+/// emit an ExitFeatureRow on every close fill (realized_pnl != 0). Before
+/// this fix, only `emit_close_fill`, `process_external_fill`, and
+/// `ipc_close_symbol` paper branch emitted rows — the main WS-confirmed
+/// path was silently unwired. Once PAPER-DISABLE-1 disabled paper by
+/// default, this gap caused ~95% of demo exits to produce no exit feature
+/// row (2 vs 89 fills in post-redeploy observation window), which would
+/// starve DUAL-TRACK Phase 1b W24 threshold calibration of training data.
+/// The fix captures `pre_close_snapshot` BEFORE `apply_fill` and calls
+/// `try_emit_exit_feature_row` after the trading_tx Fill emission.
+/// EXIT-FEATURES-TABLE-1 Phase 1b GAP-1 回歸（2026-04-19）：
+/// apply_confirmed_fill（Demo/Live WS 確認平倉主路徑）平倉時必發送
+/// ExitFeatureRow。修前僅 emit_close_fill / process_external_fill /
+/// ipc_close_symbol paper 分支接線，WS 主路徑靜默漏寫；PAPER-DISABLE-1
+/// 關閉 paper 後，demo 平倉約 95% 未產出 exit feature，將餓死
+/// DUAL-TRACK Phase 1b W24 門檻校準。修復 = apply_fill 前快照、trading_tx
+/// 後呼叫 try_emit_exit_feature_row。
+#[test]
+fn apply_confirmed_fill_emits_exit_feature_row_on_close() {
+    let mut pipeline = TickPipeline::with_kind(&["BTCUSDT"], 10_000.0, PipelineKind::Demo);
+    pipeline.intent_processor.set_fee_rate(0.00055);
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<crate::database::ExitFeatureRow>(8);
+    pipeline.set_exit_feature_tx(tx);
+
+    // 1) Open long via apply_confirmed_fill (is_long=true buy side). realized_pnl=0,
+    //    no exit feature row expected on the open.
+    // 開倉（is_long=true），realized_pnl=0，開倉不應送出 exit feature。
+    pipeline.apply_confirmed_fill(
+        "BTCUSDT",
+        true,      // is_long (buy opens long)
+        0.1,       // qty
+        50_000.0,  // fill_price
+        2.75,      // fee
+        1_000,     // ts_ms (open)
+        "ma_crossover",
+        "ctx-demo-BTCUSDT-1000",
+        "oc_open_1",
+    );
+    assert!(
+        rx.try_recv().is_err(),
+        "open fill (realized_pnl=0) must NOT emit exit-feature row"
+    );
+
+    // 2) Seed a favorable tick so peak_pnl_pct captures a non-zero high.
+    // 注入 +2% 的最佳價，讓 peak_pnl_pct 非零。
+    pipeline.paper_state.set_latest_price("BTCUSDT", 51_000.0);
+    pipeline.paper_state.update_best_prices_at(1_500);
+
+    // 3) Close at 51000 via apply_confirmed_fill (is_long=false sell side).
+    //    realized_pnl = 0.1 * (51000 - 50000) = 100 (long win).
+    // 平倉（sell 側），realized_pnl = +100，應送出 exit feature。
+    pipeline.apply_confirmed_fill(
+        "BTCUSDT",
+        false,     // is_long=false (sell closes long)
+        0.1,       // qty
+        51_000.0,  // fill_price
+        2.81,      // fee (close)
+        2_000,     // ts_ms (close)
+        "strategy_close:take_profit",
+        "", // close fill: signal id not threaded; exec-time fallback OK
+        "oc_close_1",
+    );
+
+    let row = rx
+        .try_recv()
+        .expect("close fill via apply_confirmed_fill MUST emit exit-feature row");
+    assert_eq!(row.engine_mode, "demo", "engine_mode must be 'demo'");
+    assert_eq!(row.side, 1, "long position close → side=1");
+    let rbps = row
+        .realized_net_bps
+        .expect("realized_net_bps must be Some on a real close");
+    assert!(
+        rbps > 0.0,
+        "long win close must register positive realized_net_bps, got {}",
+        rbps
+    );
+    let peak = row
+        .peak_pnl_pct
+        .expect("peak_pnl_pct must be Some (captured at the +2% tick)");
+    assert!(
+        (peak - 2.0).abs() < 0.01,
+        "peak_pnl_pct should reflect the +2% favorable tick, got {}",
+        peak
+    );
+}
+
+/// EXIT-FEATURES-TABLE-1 Phase 1b GAP-1 fail-soft: when `exit_feature_tx` is
+/// unwired, `apply_confirmed_fill` must NOT panic and must still emit the
+/// Fill on `trading_tx`. Trading path survives any label-collection outage.
+/// fail-soft：tx 未接線時 apply_confirmed_fill 不 panic，Fill 正常送出。
+#[test]
+fn apply_confirmed_fill_exit_feature_fail_soft_when_tx_missing() {
+    let mut pipeline = TickPipeline::with_kind(&["BTCUSDT"], 10_000.0, PipelineKind::Demo);
+    pipeline.intent_processor.set_fee_rate(0.00055);
+    // Wire trading_tx only — exit_feature_tx deliberately absent.
+    // 只接 trading_tx，不接 exit_feature_tx。
+    let (ttx, mut trx) = tokio::sync::mpsc::channel::<crate::database::TradingMsg>(16);
+    pipeline.set_trading_channel(ttx);
+
+    pipeline.apply_confirmed_fill(
+        "BTCUSDT", true, 0.1, 50_000.0, 2.75, 1_000, "ma_crossover",
+        "ctx-demo-BTCUSDT-1000", "oc_open_2",
+    );
+    pipeline.apply_confirmed_fill(
+        "BTCUSDT", false, 0.1, 51_000.0, 2.81, 2_000,
+        "strategy_close:take_profit", "", "oc_close_2",
+    );
+
+    // Both Fills still flow through trading_tx (open + close).
+    // 開倉與平倉 Fill 都應正常寫入 trading_tx。
+    let open_fill = trx.try_recv().expect("open Fill must be enqueued");
+    assert!(matches!(open_fill, crate::database::TradingMsg::Fill { .. }));
+    let close_fill = trx.try_recv().expect("close Fill must be enqueued");
+    assert!(matches!(close_fill, crate::database::TradingMsg::Fill { .. }));
+}
+
 /// P0-4 R1 regression: execute_position_close must propagate `trigger_tag` to
 /// OrderDispatchRequest.strategy. Previously hardcoded "risk_check", which
 /// collapsed strategy exits + fast_track closes + shadow mirrors into a single

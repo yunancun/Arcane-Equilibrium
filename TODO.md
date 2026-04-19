@@ -1,11 +1,11 @@
 # OpenClaw TODO — 工作清單
 
-**最後更新**：2026-04-19（DUAL-TRACK Phase 1a 軌道 1 Track P 骨架 + T4-FIX/T1-FIX 合併落地）
-**Engine**：PID 2742211 · binary mtime 2026-04-19 12:26 → 含 P0-6 永久修復 + P1-7 A INTENT-WRITE-GAP-1 + P1-17 JS Winsorize + LIVE-GATE-BINDING-1 + DYNAMIC-RISK-1 + IPC-SCAN-1c + FILL-CONTEXT-LINKAGE-1 + EXIT-FEATURES-TABLE-1 Phase 1b + Plan N ai_budget dedup + E5-P1 Wave 1 + E5-P2 Wave 2 + E5-FN-2 Plan N + E5-FN-3 AnalystAgent pilot + DISPATCH-RETRY-1 E2 Plan B
-**Python uvicorn**：PID 2742258（4 workers）· started 2026-04-19 12:26 → 含 P0-12 LIVE-GATE-FALLBACK-1 + E5-FN-3 AnalystAgent pilot
-**待部署**：DUAL-TRACK Track P 骨架（T1-T5 + T4-FIX/T1-FIX 合併）commits `981840f` `4feb17a` `88b4ef9` `a963f0b` `094d285` `c7d6a6c`（E2 APPROVE，待 `--rebuild`）
-**進行中**：DUAL-TRACK Phase 1a 軌道 1 Track P 物理層骨架 ✅（5 路 E1 + T4-FIX/T1-FIX 合 E1 + E2 APPROVE）· 準備 `restart_all.sh --rebuild` 部署
-**測試基準線**：Rust engine lib **1624** / core **392** / e2e 35 / reconciler_e2e 19 · Python **2820** + audit 4 passed / ml_training 238 passed
+**最後更新**：2026-04-19（PIPELINE-SLOT-1 Phase 1-4 全部部署上線 + Track P 骨架隨同 --rebuild 活化）
+**Engine**：PID 2911463 · binary mtime 2026-04-19 15:37 → 含全部先前 staged 修復（P0-6 永久修復 + P1-7 A INTENT-WRITE-GAP-1 + P1-7 B edge_estimator scheduler + P1-17 Winsorize + LIVE-GATE-BINDING-1 + DYNAMIC-RISK-1 + IPC-SCAN-1c + FILL-CONTEXT-LINKAGE-1 + EXIT-FEATURES-TABLE-1 Phase 1b + Plan N ai_budget dedup + E5-P1/P2 + E5-FN-2/3 + DISPATCH-RETRY-1 + MARKET-KLINES-STALE-1 + DUAL-TRACK Track P T1-T5 骨架）+ **PIPELINE-SLOT-1 Phase 1-4**（hot-spawn Live、scoped teardown、auth watcher、daemon-thread trigger offload）
+**Python uvicorn**：PID 2911511（4 workers）· started 2026-04-19 15:37 → 含 P0-12 LIVE-GATE-FALLBACK-1 + E5-FN-3 AnalystAgent pilot + PIPELINE-SLOT-1 Phase 4 daemon-thread trigger
+**PIPELINE-SLOT-1 live 驗證**：LiveAuthWatcher 13:37 啟動 `env=LiveDemo poll_interval_secs=5`；authorization.json 已由 Manual restart sentinel 清除；等 operator 走 GUI renew → 應 ≤1s 觀察到 Live pipeline 重生
+**測試基準線**：Rust engine lib **1629** / bin 38 / core 392 / e2e 35 / reconciler_e2e 19 · Python **2828** passed（+8 from PIPELINE-SLOT-1 Phase 4 daemon-thread tests）+ audit 4 passed / ml_training 238 passed
+**健康**：demo alive（snapshot age 5.3s） · paper/live 預期 dead（PAPER-DISABLE-1 + 待 renew） · 今日 1 crash（12:25，為 redeploy 前殘留）
 
 > 本文件僅列「待辦/進行中」。已完成 → 文末歸檔索引。詳細設計 → `docs/worklogs/`。
 > Compact 後從此文件恢復；第一個 `[ ]` = 起點。CLAUDE.md §三 = 當前狀態快照。
@@ -61,7 +61,9 @@ git status && git log --oneline -5
 ### 🔴 Step 0 衍生新 TODO 項（Phase 1 前置）
 
 - [x] **MARKET-KLINES-STALE-1**（P1-CRITICAL · 2026-04-18 RCA ✅ · 2026-04-18 修復 commit `65acde6`）：**Root cause = PAPER-DISABLE-1 架構遺漏**（非停電事件）。`main.rs` Paper pipeline `market_data_tx: Some(market_tx)`，但 Demo 和 Live 都 `market_data_tx: None`（D19 註釋：`Paper handles that`）→ `on_tick.rs::emit_market_data_if_needed` `if let Some(ref tx)` None check 跳過 → `MarketDataMsg::KlineClose` 零發出 → `market_writer` task 起來但 channel 永遠空。Paper 自 PAPER-DISABLE-1（2026-04-16 21:08 最後一次 tick）預設不 spawn 後，DB kline 寫入完全斷。**修復**（commit `65acde6`，三處 `Some(market_tx.clone())`）：paper/demo/live 三引擎皆 clone market_tx → 三路並行寫入；`market.klines` PK `(symbol, timeframe, ts)` + `ON CONFLICT DO NOTHING`（`market_writer.rs:180`）已 dedup，多 producer 安全。**部署**：待 `restart_all.sh --rebuild`（與 bd45e90 / c7171b2 / E5-P1/P2 同批）。
-- [x] **EXIT-FEATURES-TABLE-1**（P1-HIGH · 2026-04-18 設計草稿 ✅ · 2026-04-19 Phase 1b 全部接線 ✅）：`docs/worklogs/2026-04-18-2--exit_features_table_design.md`。Phase 1b producer wiring（commit `6ea643e`）覆蓋 `emit_close_fill` 主路徑；Phase 1b FUP（commit `c7171b2`）補完 2 個漏接 close paths（`process_external_fill` IPC 外部 fill 報告 + `ipc_close_symbol` paper 分支：operator `/close_symbol` API + dust eviction + orphan_handler→Paper 模式）；抽出 `try_emit_exit_feature_row` `pub(crate)` helper；+3 tests / 5 pre-existing WIP `test_exit_feature_row_*` 全綠化。Track P 標籤覆蓋完整。Phase 1b 累積 ≥1 週 exit_features 後可校準 7 維閾值（見 Phase 1b §83）。
+- [x] **EXIT-FEATURES-TABLE-1**（P1-HIGH · 2026-04-18 設計草稿 ✅ · 2026-04-19 Phase 1b 全部接線 ✅ · 2026-04-19 Phase 1b GAP-1 修復 ✅）：`docs/worklogs/2026-04-18-2--exit_features_table_design.md`。Phase 1b producer wiring（commit `6ea643e`）覆蓋 `emit_close_fill` 主路徑；Phase 1b FUP（commit `c7171b2`）補完 2 個漏接 close paths（`process_external_fill` IPC 外部 fill 報告 + `ipc_close_symbol` paper 分支：operator `/close_symbol` API + dust eviction + orphan_handler→Paper 模式）；抽出 `try_emit_exit_feature_row` `pub(crate)` helper；+3 tests / 5 pre-existing WIP `test_exit_feature_row_*` 全綠化。Track P 標籤覆蓋完整。
+    - **Phase 1b GAP-1（2026-04-19 修復，待 commit）**：R1 觀察窗發現 demo 重啟後 89 fills 但僅 2 rows `learning.exit_features`（~97% 丟失）；並行 root-cause 審查鎖定 **`apply_confirmed_fill`（Demo/Live WS 確認成交平倉主路徑，commands.rs:421）從未呼叫 `try_emit_exit_feature_row`**。PAPER-DISABLE-1 前 paper 的 `emit_close_fill` 接線還 cover 得到；paper 關閉後 Demo/Live 靠 WS 回報走 `apply_confirmed_fill`，2 rows 是少數走 `process_external_fill` / `ipc_close_symbol` paper 分支的剩餘路徑。修復：`commands.rs:442-566` 在 `apply_fill` 之前捕獲 `pre_close_snapshot`，在 `trading_tx.Fill` 送出後 `if realized_pnl != 0.0` 呼叫 `try_emit_exit_feature_row`（pattern 與 `process_external_fill` 對齊，`entry_context_id` 沿用 pre-close 捕獲的 `existing_entry_ctx`）。+2 regression tests（`apply_confirmed_fill_emits_exit_feature_row_on_close` 驗 demo 平倉送出 row with engine_mode=demo / side=1 / realized_net_bps>0 / peak_pnl_pct≈2% · `apply_confirmed_fill_exit_feature_fail_soft_when_tx_missing` 驗 tx 缺失時 Fill 仍正常送出）。engine lib 1629→**1631** passed。**影響**：修前若不補，DUAL-TRACK Phase 1b W24 7 維閾值校準會嚴重缺料（daily exit_features 增量 ~3%→100%）；Track P T4 wiring 未來上線亦受益。
+    - Phase 1b 累積 ≥1 週 exit_features 後可校準 7 維閾值（見 Phase 1b §83）。
 - [ ] **DECISION-OUTCOMES-DEAD-1**（P2）：`trading.decision_outcomes` 113k 條 `max_favorable/max_adverse` 全 NULL，寫入管線斷；可沿用此表取代 exit_features 或確認徹底 dead；RCA 決定方向。
 
 ### Phase 1a · W23 Day 4-7（Step 0 後立即啟動，不阻於 7 維）
@@ -195,6 +197,55 @@ git status && git log --oneline -5
 - **核心問題 2**：ma_crossover demo 不對稱 2.54×（勝 $0.19 / 虧 $0.47），勝率 64% 仍負 edge
 - **下一步**：(1) grid `cooldown_ms` 或 min holding time（`grid_trading.rs` 掛單節奏 audit）(2) ma_crossover SL/TP 比率 audit（ATR mult / R:R gate）
 - **與 DUAL-TRACK Phase 2 並行**：兩者修好 P0-3 才能乾淨重評；ma_crossover 若 2.54× 不能收斂到 ≤1.5× 應 disable 或等 R-02 Strategist 重評
+
+#### 🧠 2026-04-19 推進推理鏈（compact-safe，survive-compact 用）
+
+**⚠️ 起因**：2026-04-19 15:37 redeploy 後重查 R:R 不對稱，追蹤到以下結構事實：
+
+1. **legacy COST EDGE 已死但 Track P T4 未接線 → Priority 6 真空態**
+   - `risk_checks.rs:245-259` 舊 COST EDGE gate block 已註解（DEPRECATED）
+   - 新 PHYS-LOCK gate（`risk_checks.rs:129-165`）存在但依賴 `exit_features: Option<&ExitFeatures>`
+   - `tick_pipeline/on_tick.rs:1456-1474` `evaluate_positions(...)` closure 目前傳 `|_| None` → PHYS-LOCK 永遠拿不到 features → 永遠 Hold
+   - 結果：舊 COST EDGE 不再砍 winner（好），但新 PHYS-LOCK 無法啟動（Priority 6 空轉）
+   - DB 驗證：redeploy 後 `trading.fills` 0 條 COST EDGE close，證明舊路徑徹底死
+
+2. **`trailing_activation_pct=0.8` 非 hardcoded**
+   - `rust/openclaw_engine/src/config/risk_config.rs:518` `default_trailing_activation_pct() -> 1.0`
+   - 三環境 TOML 獨立（已由 `feedback_env_config_independence.md` 記錄）：
+     - `risk_config.toml:35 = 1.0` · `risk_config_demo.toml:35 = 0.8` · `risk_config_paper.toml:51 = 0.5` · `risk_config_live.toml:37 = 0.5`
+   - **7d DB 查核 `trailing_stop` 觸發次數 = 0** → R:R 不對稱**非** trailing 主因
+
+3. **DB 真實 R:R 不對稱主因**：redeploy 前舊 COST EDGE 在 pnl +0.30~0.33% 近 100% 勝率斬 winner，虧損側放任跑到 stop_loss；redeploy 後 COST EDGE 死，但 PHYS-LOCK 未接 → 當前進入「沒有微利退場」的短暫窗口
+
+**路線決策（user 已批 2026-04-19）**：
+
+- **R1 先**（零成本，24-48h）：觀察 post-redeploy R:R / fee-drag / 退場分布，確認舊 COST EDGE 死後的自然 edge 軌跡
+- **A**（接受）：MICRO-PROFIT-FIX-1 / COST EDGE / PHYS-LOCK 為主軸；下一步由 R1 決定
+- **C**（延後）：`trailing_activation_pct` 調 1.5-2.0% + 縮 trailing_distance，**必須** MICRO-PROFIT 修完再動
+- **B**（駁回，見 `feedback_env_config_independence.md`）：統一 paper/live/demo TOML 被駁回，三環境故意獨立
+
+**Track P T4 wiring blocker（Phase 1b W24 排期中）**：
+- `ExitFeatures` 8 欄位（`exit_features.rs:18-36`）需 builder：`est_net_bps` / `peak_pnl_pct` / `current_pnl_pct` / `atr_pct` / `giveback_atr_norm` / `time_since_peak_ms` / `price_roc_short` / `entry_age_secs`
+- 需新增 `peak_reached_ts_ms` 到 `PaperPosition`（legacy migration），見 §DUAL-TRACK Phase 2 Track P 第 82 行
+- **決策**：不搶進度，R1 觀察後若 R:R 持續惡化再考慮加速 T4 wiring；否則按 W24 排期
+
+**R1 觀察 SQL 模板**（每 6h 跑，對比 redeploy 前 24h baseline）：
+```sql
+-- post-redeploy exit-kind distribution (redeploy_utc='2026-04-19 13:37')
+SELECT engine_mode, strategy_name,
+       SPLIT_PART(owner_strategy,':',1) AS close_kind,
+       COUNT(*), ROUND(AVG(realized_pnl)::numeric,4) AS avg_pnl,
+       ROUND(SUM(realized_pnl)::numeric,2) AS total_pnl
+FROM trading.fills
+WHERE ts_ms >= EXTRACT(EPOCH FROM TIMESTAMP '2026-04-19 13:37+00')*1000
+  AND owner_strategy LIKE '%close%' OR owner_strategy LIKE 'risk_close%'
+GROUP BY 1,2,3 ORDER BY 1,2,4 DESC;
+```
+
+**R1 驗收指標**：
+- 若 24h 後 R:R demo ma_crossover ≤1.5× 自然收斂 → Track P T4 不急，按 W24
+- 若 R:R 仍 >2.0× 或 fee-drag 惡化 → 加速 Track P T4 為 P1-critical
+- 若 redeploy 後 `risk_close:phys_lock_*` 數 > 0 → T4 已部分活化（檢查程式碼走查）
 
 ### P1-11 · BB-BREAKOUT-DORMANT-1 — 5 重 AND 14d 0 fills
 - **根因**：`bb_breakout.rs:457-518` 入場 5 重 AND（squeeze → expansion → volume → Donchian → persistence）+ 時序要求過嚴

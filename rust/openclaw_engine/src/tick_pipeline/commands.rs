@@ -439,6 +439,18 @@ impl TickPipeline {
             .get_entry_context_id(symbol)
             .unwrap_or("")
             .to_string();
+        // EXIT-FEATURES-TABLE-1 Phase 1b GAP-1 (2026-04-19): capture pre-close
+        // snapshot on the exchange-confirmed fill path. Before this, only
+        // emit_close_fill / process_external_fill / ipc_close_symbol paper
+        // branch emitted exit_feature rows — apply_confirmed_fill (the primary
+        // Demo/Live close path via WS) was unwired, silently losing ~95% of
+        // exit labels once Paper got disabled (PAPER-DISABLE-1).
+        // EXIT-FEATURES-TABLE-1 Phase 1b GAP-1 修復（2026-04-19）：在交易所
+        // 確認成交路徑捕獲 pre-close 快照。此前僅 emit_close_fill /
+        // process_external_fill / ipc_close_symbol paper 分支發送；
+        // apply_confirmed_fill（Demo/Live 主路徑）未接線，PAPER-DISABLE-1
+        // 後 ~95% exit 標籤靜默遺失。
+        let pre_close_snapshot = self.paper_state.position_exit_snapshot(symbol);
         let realized_pnl = self
             .paper_state
             .apply_fill(symbol, is_long, qty, fill_price, fee, ts_ms, strategy);
@@ -524,6 +536,33 @@ impl TickPipeline {
                 entry_context_id: fill_entry_ctx,
                 engine_mode: em.to_string(),
             });
+        }
+
+        // EXIT-FEATURES-TABLE-1 Phase 1b GAP-1 (2026-04-19): emit exit feature
+        // row on close. `try_emit_exit_feature_row` fail-softs if
+        // `exit_feature_tx` is unwired OR if `pre_close_snapshot` is None
+        // (which shouldn't happen on a real close since the position must
+        // have existed prior to apply_fill for realized_pnl to be nonzero).
+        // Pattern mirrors process_external_fill (commands.rs:285). For
+        // entry_context_id we reuse `existing_entry_ctx` captured above —
+        // the pre-close position's entry id — matching other close paths.
+        // EXIT-FEATURES-TABLE-1 Phase 1b GAP-1：平倉時發送退場特徵行；
+        // fail-soft（tx/snap 缺一即 no-op，對交易無影響）。entry_context_id
+        // 沿用前述 existing_entry_ctx，與其他 close 路徑對齊。
+        if realized_pnl != 0.0 {
+            let fr = self.intent_processor.fee_rate(symbol);
+            self.try_emit_exit_feature_row(
+                symbol,
+                qty,
+                fill_price,
+                ts_ms,
+                realized_pnl,
+                fee,
+                fr,
+                strategy,
+                pre_close_snapshot.as_ref(),
+                &existing_entry_ctx,
+            );
         }
 
         info!(
