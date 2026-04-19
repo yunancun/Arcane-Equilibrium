@@ -666,4 +666,200 @@ mod tests {
         assert!((btc - 0.01).abs() < 1e-6, "btc={btc}");
         assert!((eth - (-0.01)).abs() < 1e-6, "eth={eth}");
     }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // DUAL-TRACK-EXIT-1 Track P T2 — compute_roc hot-path edge coverage
+    // DUAL-TRACK-EXIT-1 Track P T2 — compute_roc 熱路徑邊界覆蓋
+    //
+    // Track P calls compute_roc(symbol, 300) every tick from tick_pipeline.
+    // T3's `stale_and_decaying` gate depends on None meaning "insufficient
+    // history" (never 0.0). These tests lock in that contract against both
+    // sample-sparse starts and adversarial price inputs.
+    //
+    // Track P 熱路徑每 tick 以 lookback_ms=300 呼叫 compute_roc。T3 的
+    // stale_and_decaying gate 依賴 None 表達「歷史不足」（絕不為 0.0）。
+    // 以下測試封死稀疏啟動與惡意價格輸入下的 None 合約。
+    // ═══════════════════════════════════════════════════════════════════════
+
+    #[test]
+    fn test_compute_roc_returns_none_with_two_or_fewer_samples() {
+        // 0-sample / 1-sample paths both MUST return None — never Some(0.0),
+        // which would silently claim "no momentum" on a cold-start symbol and
+        // bypass T3's stale_and_decaying gate.
+        // 0 / 1 樣本必須回 None，不得回 Some(0.0)，否則 T3 的
+        // stale_and_decaying gate 會被冷啟 symbol 誤繞過。
+        let mut t = PriceHistoryTracker::new();
+
+        // 0 samples for symbol → None
+        assert_eq!(
+            t.compute_roc("BTCUSDT", 300),
+            None,
+            "0-sample history must return None (Track P contract)"
+        );
+
+        // 1 sample for symbol → None (len() < 2 branch)
+        t.record("BTCUSDT", 100.0, 1_000);
+        assert_eq!(
+            t.compute_roc("BTCUSDT", 300),
+            None,
+            "1-sample history must return None (Track P contract)"
+        );
+
+        // Sanity: 2 samples with valid lookback → Some(..) (guardrail against
+        // an accidental change that makes the thin-history case permanent).
+        // 防禦測試：2 樣本下合理 lookback 必須能算出 ROC，避免誤改導致永遠回 None。
+        t.record("BTCUSDT", 100.5, 1_200);
+        assert!(
+            t.compute_roc("BTCUSDT", 500).is_some(),
+            "2-sample valid input must succeed — guards against over-tightening"
+        );
+        // 封閉 T3 stale_and_decaying gate 對 None 的保守依賴：
+        // seals T3's stale_and_decaying conservative dependency on None.
+    }
+
+    #[test]
+    fn test_compute_roc_handles_degenerate_prices() {
+        // Degenerate inputs: NaN, +Inf, -Inf, 0.0, and negative prices can
+        // slip through `record()` (no input sanitation there). compute_roc
+        // MUST never surface Some(NaN) or Some(±Inf) to the exit policy —
+        // that would corrupt ExitFeatureRow and poison downstream training.
+        //
+        // 惡意輸入：NaN / ±Inf / 0.0 / 負價格可能滑過 record()（無輸入清洗）。
+        // compute_roc 絕不可回 Some(NaN) 或 Some(±Inf)，否則汙染
+        // ExitFeatureRow 與下游訓練。
+        let mut t = PriceHistoryTracker::new();
+
+        // Case 1: prior=NaN → price finite check on prior_price should reject → None.
+        let mut t_nan_prior = PriceHistoryTracker::new();
+        t_nan_prior.record("BTCUSDT", f64::NAN, 1_000);
+        t_nan_prior.record("BTCUSDT", 100.0, 1_200);
+        let roc = t_nan_prior.compute_roc("BTCUSDT", 500);
+        assert!(
+            roc.is_none() || roc.map(|r| r.is_finite()).unwrap_or(false),
+            "NaN prior must not surface as Some(NaN), got {:?}",
+            roc
+        );
+        // Current impl: prior_price.is_finite() check rejects → None. ✅
+
+        // Case 2: latest=NaN → latest_price.is_finite() check → None.
+        t.record("BTCUSDT", 100.0, 1_000);
+        t.record("BTCUSDT", f64::NAN, 1_200);
+        let roc = t.compute_roc("BTCUSDT", 500);
+        assert_eq!(roc, None, "NaN latest must return None, got {:?}", roc);
+
+        // Case 3: latest=+Inf → latest_price.is_finite() rejects → None.
+        let mut t_inf = PriceHistoryTracker::new();
+        t_inf.record("BTCUSDT", 100.0, 1_000);
+        t_inf.record("BTCUSDT", f64::INFINITY, 1_200);
+        assert_eq!(
+            t_inf.compute_roc("BTCUSDT", 500),
+            None,
+            "+Inf latest must return None"
+        );
+
+        // Case 4: prior=+Inf → find(ts>=cutoff) picks Inf sample → prior_price
+        // is_finite check rejects → None.
+        let mut t_inf_prior = PriceHistoryTracker::new();
+        t_inf_prior.record("BTCUSDT", f64::INFINITY, 1_000);
+        t_inf_prior.record("BTCUSDT", 100.0, 1_200);
+        let roc = t_inf_prior.compute_roc("BTCUSDT", 500);
+        assert!(
+            roc.is_none() || roc.map(|r| r.is_finite()).unwrap_or(false),
+            "+Inf prior must not surface as Some(Inf), got {:?}",
+            roc
+        );
+
+        // Case 5: latest=0.0 → latest_price <= 0.0 rejects → None.
+        let mut t_zero = PriceHistoryTracker::new();
+        t_zero.record("BTCUSDT", 100.0, 1_000);
+        t_zero.record("BTCUSDT", 0.0, 1_200);
+        assert_eq!(
+            t_zero.compute_roc("BTCUSDT", 500),
+            None,
+            "zero latest must return None"
+        );
+
+        // Case 6: prior=0.0 → find picks 0.0 sample → prior_price <= 0.0 → None.
+        let mut t_zero_prior = PriceHistoryTracker::new();
+        t_zero_prior.record("BTCUSDT", 0.0, 1_000);
+        t_zero_prior.record("BTCUSDT", 100.0, 1_200);
+        assert_eq!(
+            t_zero_prior.compute_roc("BTCUSDT", 500),
+            None,
+            "zero prior must return None"
+        );
+
+        // Case 7: negative latest → <= 0.0 branch → None.
+        let mut t_neg = PriceHistoryTracker::new();
+        t_neg.record("BTCUSDT", 100.0, 1_000);
+        t_neg.record("BTCUSDT", -50.0, 1_200);
+        assert_eq!(
+            t_neg.compute_roc("BTCUSDT", 500),
+            None,
+            "negative latest must return None"
+        );
+        // 封閉 T3 對 Track P ExitFeatureRow 有限浮點假設：
+        // seals T3's finite-float assumption for Track P ExitFeatureRow.
+    }
+
+    #[test]
+    fn test_compute_roc_isolates_symbols() {
+        // Track P hot path reads per-symbol ROC each tick; a HashMap-indexing
+        // regression that cross-pollinates symbols would silently leak
+        // BTC momentum into ETH exit decisions. Lock in per-symbol isolation
+        // with distinct price trajectories and lookback windows.
+        //
+        // Track P 熱路徑逐 symbol 讀 ROC；HashMap 索引若回歸跨 symbol 污染，
+        // BTC 動量會悄悄洩漏到 ETH 退出決策。用不同價格軌跡與 lookback 窗
+        // 鎖死 per-symbol 隔離。
+        let mut t = PriceHistoryTracker::new();
+
+        // BTC: +2% climb  / BTC：+2% 上漲
+        t.record("BTCUSDT", 100.0, 1_000);
+        t.record("BTCUSDT", 100.5, 1_150);
+        t.record("BTCUSDT", 102.0, 1_250);
+
+        // ETH: -3% drop  / ETH：-3% 下跌
+        t.record("ETHUSDT", 2_000.0, 1_000);
+        t.record("ETHUSDT", 1_990.0, 1_150);
+        t.record("ETHUSDT", 1_940.0, 1_250);
+
+        // SOL: flat → would be 0.0 ROC (valid, proves BTC/ETH don't mask it)
+        // SOL：持平 → ROC 應為 0.0（驗證 BTC/ETH 不會掩蓋它）
+        t.record("SOLUSDT", 50.0, 1_000);
+        t.record("SOLUSDT", 50.0, 1_150);
+        t.record("SOLUSDT", 50.0, 1_250);
+
+        let btc = t.compute_roc("BTCUSDT", 300).expect("btc roc");
+        let eth = t.compute_roc("ETHUSDT", 300).expect("eth roc");
+        let sol = t.compute_roc("SOLUSDT", 300).expect("sol roc");
+
+        // BTC: anchor=100.0 at ts=1000, latest=102.0 → (102-100)/100 = 0.02
+        assert!(
+            (btc - 0.02).abs() < 1e-6,
+            "BTC ROC must be +2%, got {btc} (cross-symbol contamination?)"
+        );
+        // ETH: anchor=2000 at ts=1000, latest=1940 → (1940-2000)/2000 = -0.03
+        assert!(
+            (eth - (-0.03)).abs() < 1e-6,
+            "ETH ROC must be -3%, got {eth} (cross-symbol contamination?)"
+        );
+        // SOL: flat → exactly 0.0 (important: 0.0 is semantically "no change",
+        // distinct from None which means "insufficient history")
+        // SOL：持平 → 0.0（語意區別：0.0=「無變化」; None=「歷史不足」）
+        assert!(
+            sol.abs() < 1e-9,
+            "SOL ROC must be 0.0 (flat price), got {sol}"
+        );
+
+        // Also verify unknown symbol returns None even when others have data
+        // 同時驗證未知 symbol 回 None 即使其他 symbol 有資料
+        assert_eq!(
+            t.compute_roc("UNKNOWNUSDT", 300),
+            None,
+            "unknown symbol must return None regardless of other symbols' history"
+        );
+        // 封閉 Track P per-symbol HashMap 索引契約：
+        // seals Track P's per-symbol HashMap indexing contract.
+    }
 }
