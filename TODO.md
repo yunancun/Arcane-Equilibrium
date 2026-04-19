@@ -1,10 +1,11 @@
 # OpenClaw TODO — 工作清單
 
-**最後更新**：2026-04-19（Plan N 部署完成 · `restart_all.sh --rebuild` 12:57）
-**Engine**：PID 2536445 · binary mtime 2026-04-19 01:59 → 含 P0-6 永久修復 + P1-7 A INTENT-WRITE-GAP-1（exchange 分支 persist_intent）+ P1-17 JS Winsorize + LIVE-GATE-BINDING-1 + DYNAMIC-RISK-1 + IPC-SCAN-1c + FILL-CONTEXT-LINKAGE-1 + EXIT-FEATURES-TABLE-1 Phase 1b + Plan N ai_budget dedup + E5-P1 Wave 1 + E5-P2 Wave 2 + E5-FN-2 Plan N + E5-FN-3 AnalystAgent pilot
-**Python uvicorn**：PID 2536510（4 workers）· started 2026-04-19 ~12:57 → 含 P0-12 LIVE-GATE-FALLBACK-1 + E5-FN-3 AnalystAgent pilot；重啟後驗證項見 §Plan N 部署 follow-up
-**待部署**：（無 — 全部已 deploy 至 PID 2536445/2536510）
-**測試基準線**：Rust engine lib **1571** / core 380 / e2e 35 / reconciler_e2e 19 · Python **2820** passed / ml_training 238 passed
+**最後更新**：2026-04-19（DUAL-TRACK Phase 1a 軌道 1 Track P 骨架 + T4-FIX/T1-FIX 合併落地）
+**Engine**：PID 2742211 · binary mtime 2026-04-19 12:26 → 含 P0-6 永久修復 + P1-7 A INTENT-WRITE-GAP-1 + P1-17 JS Winsorize + LIVE-GATE-BINDING-1 + DYNAMIC-RISK-1 + IPC-SCAN-1c + FILL-CONTEXT-LINKAGE-1 + EXIT-FEATURES-TABLE-1 Phase 1b + Plan N ai_budget dedup + E5-P1 Wave 1 + E5-P2 Wave 2 + E5-FN-2 Plan N + E5-FN-3 AnalystAgent pilot + DISPATCH-RETRY-1 E2 Plan B
+**Python uvicorn**：PID 2742258（4 workers）· started 2026-04-19 12:26 → 含 P0-12 LIVE-GATE-FALLBACK-1 + E5-FN-3 AnalystAgent pilot
+**待部署**：DUAL-TRACK Track P 骨架（T1-T5 + T4-FIX/T1-FIX 合併）commits `981840f` `4feb17a` `88b4ef9` `a963f0b` `094d285` `c7d6a6c`（E2 APPROVE，待 `--rebuild`）
+**進行中**：DUAL-TRACK Phase 1a 軌道 1 Track P 物理層骨架 ✅（5 路 E1 + T4-FIX/T1-FIX 合 E1 + E2 APPROVE）· 準備 `restart_all.sh --rebuild` 部署
+**測試基準線**：Rust engine lib **1624** / core **392** / e2e 35 / reconciler_e2e 19 · Python **2820** + audit 4 passed / ml_training 238 passed
 
 > 本文件僅列「待辦/進行中」。已完成 → 文末歸檔索引。詳細設計 → `docs/worklogs/`。
 > Compact 後從此文件恢復；第一個 `[ ]` = 起點。CLAUDE.md §三 = 當前狀態快照。
@@ -72,11 +73,13 @@ git status && git log --oneline -5
   - **2026-04-19 結構性阻塞已解除**：原 RCA — `learning.decision_features` 3.36M rows 與 `trading.fills.entry_context_id` 3514 rows JOIN **0 overlap**，`edge_label_backfill.py` 找不到任何可標籤的 fills；root cause = decision_features.context_id 訊號時刻用 `event.ts_ms`，exchange-confirmed fill 用 WS `exec_ts`（漂移 100-500ms），同 `make_context_id(em,sym,ts_ms)` formula 不同 ts_ms → 不同字串。**FILL-CONTEXT-LINKAGE-1（commit `bd45e90`）已修**：訊號時刻 context_id 端到端傳遞（`OrderDispatchRequest.context_id` + `PendingOrder.context_id` 新欄位 → `apply_confirmed_fill(...,signal_context_id:&str,...)` 新參數）；3 close-dispatch sites 帶 `paper_state.get_entry_context_id(symbol)`；+2 regression tests（`apply_confirmed_fill_preserves_signal_context_id` 斷言訊號 id 寫入 + `_falls_back_when_signal_id_empty`）；engine lib 1560→1564 passed。
   - **下一步**：(1) 部署 `restart_all.sh --rebuild` (2) 累積 ≥7d 流量讓 `decision_features.context_id` ↔ `fills.entry_context_id` 形成新 JOIN-able rows (3) 重跑 `edge_label_backfill.py` 確認 overlap > 0 (4) 跑 `run_training_pipeline.py --strategy grid_trading --symbol BTCUSDT --engine-mode demo --use-quantile-predictor` 產首個 ONNX artifact
 
-**軌道 1 Track P 物理層骨架（MARKET-KLINES-STALE-1 修完後）**：
-- [ ] `peak_reached_ts_ms` 欄位加到 `PaperPosition`（含 legacy migration）
-- [ ] `price_tracker` 加 `compute_roc(symbol, lookback_ms)`
-- [ ] 7 維度規則 in `risk_checks.rs`（Priority 6 替換現有 COST EDGE，重命名 `PHYS-LOCK`）+ ConfigStore hot-reload — 7 維缺失先以保守預設值骨架
-- [ ] Combine Layer 骨架（Track L 缺失時 P-only）
+**軌道 1 Track P 物理層骨架（MARKET-KLINES-STALE-1 修完後）** ✅ 2026-04-19：
+- [x] T1 `ExitFeatures` + `PhysicalDecision` 型別（commit `88b4ef9`；T1-FIX `c7d6a6c` 補 `Serialize`/`Deserialize` + 3 邊界測試）
+- [x] T2 `price_tracker` 加 `compute_roc` + 3 邊界測試（commit `981840f`）
+- [x] T3 `physical_micro_profit_lock` + `PhysLockConfig` Priority 6 替換 COST EDGE（commit `a963f0b`，reason 字串 `risk_close:phys_lock_<gate>`）
+- [x] T4 Combine Layer 骨架 + `ExitSource` 4 tags（commit `094d285`；T4-FIX `c7d6a6c` 修 on_tick wrapper prefix `PHYS-LOCK` → `risk_close:phys_lock_` + `strip_phys_lock_prefix` 剝殼 + `assert_eq!` 升 release 不可繞 + integration test 覆蓋 3 gate）
+- [x] T5 counterfactual exit audit CLI `program_code/audit/counterfactual_exit_audit.py`（commit `4feb17a`，1-min kline 粒度事後歸因，`MARKET-KLINES-STALE-1` 修復後可跑）
+- [ ] `peak_reached_ts_ms` 欄位加到 `PaperPosition`（含 legacy migration）— Phase 1b 7 維累積後展開
 - [ ] E2 + E4：counterfactual 粗粒度 audit（用 fills + 1-min kline 還原 peak-to-exit，非逐 tick）+ ≥18 單測
 - [ ] E5：rebuild + 灰度部署（保守閾值，24h 無 fee 惡化才收緊）
 
