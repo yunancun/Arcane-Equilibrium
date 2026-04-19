@@ -10,12 +10,15 @@ use openclaw_engine::config::{
 };
 use openclaw_engine::event_consumer::{ExchangeEvent, SYMBOLS};
 use openclaw_engine::ipc_server::PerEngineRiskStores;
+use openclaw_engine::live_authorization::AUTHORIZATION_FILENAME;
+use openclaw_engine::restart_kind::{self, RestartKind};
 use openclaw_engine::strategies::{
     bb_breakout::BbBreakout, bb_reversion::BbReversion, grid_trading::GridTrading,
     ma_crossover::MaCrossover,
 };
 use openclaw_engine::tick_pipeline::{PipelineKind, TickPipeline};
 use openclaw_types::PriceEvent;
+use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
@@ -1024,6 +1027,120 @@ pub(crate) async fn signal_loop(config: &Arc<ConfigManager>, cancel: &Cancellati
             _ = cancel.cancelled() => {}
         }
     }
+}
+
+/// PIPELINE-SLOT-1 Phase 1: resolve the `settings/` directory using the same
+/// convention as `paper_balance_from_toml` — `OPENCLAW_BASE_DIR/settings`,
+/// falling back to `./settings` when the env var is unset. Cross-platform:
+/// `PathBuf` handles separators correctly on macOS / Linux.
+///
+/// PIPELINE-SLOT-1 Phase 1：用與 `paper_balance_from_toml` 同一套約定解析
+/// `settings/` 目錄 — 優先 `OPENCLAW_BASE_DIR/settings`，env var 未設時
+/// 回退 `./settings`。跨平台（macOS / Linux）。
+pub(crate) fn resolve_settings_dir() -> PathBuf {
+    let base = std::env::var("OPENCLAW_BASE_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| PathBuf::from("."));
+    base.join("settings")
+}
+
+/// PIPELINE-SLOT-1 Phase 1: resolve the Bybit `live/` secret slot path using
+/// the same rule as `live_authorization::authorization_path` — prefer
+/// `OPENCLAW_SECRETS_DIR`, fall back to `$HOME/BybitOpenClaw/secrets/secret_files/bybit`.
+/// Returns None if neither env var nor HOME is available (rare — platform
+/// without a user profile).
+///
+/// PIPELINE-SLOT-1 Phase 1：以 `live_authorization::authorization_path` 相同
+/// 規則解析 Bybit `live/` secret slot 路徑 — 優先 `OPENCLAW_SECRETS_DIR`，
+/// 否則 `$HOME/BybitOpenClaw/secrets/secret_files/bybit`。兩者皆無回傳 None。
+pub(crate) fn resolve_live_secret_slot() -> Option<PathBuf> {
+    let base = if let Ok(dir) = std::env::var("OPENCLAW_SECRETS_DIR") {
+        PathBuf::from(dir)
+    } else {
+        let home = std::env::var("HOME")
+            .or_else(|_| std::env::var("USERPROFILE"))
+            .ok()?;
+        PathBuf::from(home)
+            .join("BybitOpenClaw")
+            .join("secrets")
+            .join("secret_files")
+            .join("bybit")
+    };
+    Some(base.join("live"))
+}
+
+/// PIPELINE-SLOT-1 Phase 1: detect the sentinel written by `restart_all.sh`
+/// and, on Manual restart, clear `authorization.json` so the Live pipeline
+/// is forced to re-acquire operator approval on every code/config push.
+///
+/// Rationale: `restart_all.sh` is the operator-intent path — code changes,
+/// config edits, or a deliberate bounce. Forcing re-auth here closes a
+/// subtle window where an operator could push a security-relevant engine
+/// change without re-consenting to Live. Crashes / watchdog bounces /
+/// systemd auto-restarts do NOT run the script and therefore do NOT clear
+/// the authorization — that is the correct behaviour: the engine should
+/// come back on an already-approved session if it simply died.
+///
+/// The whole flow is best-effort: if the sentinel is unreadable, the file
+/// cannot be removed, or HOME is unresolvable, we log and continue. Startup
+/// MUST not be blocked by any of these.
+///
+/// PIPELINE-SLOT-1 Phase 1：偵測 `restart_all.sh` 寫的 sentinel，Manual 重啟
+/// 時清空 `authorization.json`，強迫 Live 管線每次 code/config 推送後重新
+/// 取得 operator 批准。
+///
+/// 理由：`restart_all.sh` = operator 意圖（改碼、改 config、主動重啟）。此處
+/// 強迫 re-auth 關閉了「operator 推送安全相關改動卻不重新授權」的細微窗口。
+/// 崩潰 / watchdog 拉起 / systemd 自動重啟**不**跑 shell，也**不**清授權 —
+/// 這是正確行為：引擎只是死了一下，應該回到已批准 session。
+///
+/// 整個流程 best-effort：sentinel 讀不到、檔案刪不掉、HOME 解不到，都只
+/// log 不阻塞啟動。
+pub(crate) fn consume_restart_sentinel_and_clear_live_auth_if_manual() -> RestartKind {
+    let settings_dir = resolve_settings_dir();
+    let kind = restart_kind::detect_and_consume(&settings_dir);
+    tracing::info!(
+        kind = ?kind,
+        settings_dir = %settings_dir.display(),
+        "startup: restart kind detected / 偵測重啟類型"
+    );
+
+    if matches!(kind, RestartKind::Manual) {
+        match resolve_live_secret_slot() {
+            Some(live_dir) => {
+                let auth_path = live_dir.join(AUTHORIZATION_FILENAME);
+                match std::fs::remove_file(&auth_path) {
+                    Ok(_) => tracing::info!(
+                        path = %auth_path.display(),
+                        "manual restart: cleared authorization.json — operator must renew via GUI \
+                         / 手動重啟：已清空 authorization.json，operator 須經 GUI 重新批准"
+                    ),
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                        tracing::info!(
+                            path = %auth_path.display(),
+                            "manual restart: authorization.json already absent (nothing to clear) \
+                             / 手動重啟：authorization.json 本就不存在"
+                        );
+                    }
+                    Err(e) => tracing::warn!(
+                        path = %auth_path.display(),
+                        error = %e,
+                        "manual restart: failed to clear authorization.json (continuing) \
+                         / 手動重啟：清空 authorization.json 失敗（繼續啟動）"
+                    ),
+                }
+            }
+            None => {
+                tracing::warn!(
+                    "manual restart: cannot resolve live secret slot — neither \
+                     OPENCLAW_SECRETS_DIR nor HOME/USERPROFILE set \
+                     / 手動重啟：無法解析 live secret slot（env var 都未設）"
+                );
+            }
+        }
+    }
+
+    kind
 }
 
 /// Print startup banner.
