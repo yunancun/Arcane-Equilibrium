@@ -1185,3 +1185,178 @@ fn oracle_weighted_avg_entry_price_bit_exact() {
         "weighted-avg entry_price must be bit-exact"
     );
 }
+
+// ── P1-5 A2: cross-restart drawdown continuity accessors ──────────────────
+// P1-5 A2：跨重啟 drawdown 連續性存取器測試
+//
+// Covers the three new pub(crate)/pub accessors on PaperState:
+//   - `peak_balance()` / `session_start_ts_ms()` read-side
+//   - `restore_checkpoint(peak, ts)` boot-time restore (pub(crate), NOT IPC)
+//   - `reset_drawdown_baseline()` operator-driven reset (pub, IPC path)
+// These are the in-memory half of P1-5 A2; the DB round-trip lives in
+// `paper_state::checkpoint` and is exercised by ignored #[tokio::test] tests
+// in that module (skipped in CI-without-PG).
+
+#[test]
+fn p1_5_peak_balance_and_session_start_accessors_return_new_defaults() {
+    // Regression lock: `new()` must stamp both a positive peak and a recent
+    // session_start_ts_ms; forgetting either breaks the drawdown circuit
+    // breaker reference point on cold start.
+    // 回歸鎖：new() 必須同時設定正的 peak 與當前 session_start_ts_ms，
+    // 漏其一則冷啟時 drawdown 斷路器沒有參考點。
+    let s = PaperState::new(12_345.0);
+    assert_eq!(s.peak_balance(), 12_345.0);
+    // Any sane now_ms() is non-zero and bounded below 2100-01-01.
+    let ts = s.session_start_ts_ms();
+    assert!(ts > 1_600_000_000_000); // after ~2020-09
+    assert!(ts < 4_100_000_000_000); // before ~2100
+}
+
+#[test]
+fn p1_5_restore_checkpoint_raises_peak_above_current() {
+    // Scenario: live peak was 12000 before a crash; post-crash
+    // apply_restored_counters replayed fills to balance=10500 and set peak
+    // to 10500. restore_checkpoint(12000, ts) must push peak back to 12000.
+    // 情境：崩潰前 peak=12000，apply_restored_counters 還原到 balance=10500
+    // 並把 peak 拉到 10500；restore_checkpoint 應把 peak 拉回 12000。
+    let mut s = PaperState::new(10_500.0);
+    assert_eq!(s.peak_balance(), 10_500.0);
+    s.restore_checkpoint(12_000.0, 1_700_000_000_000);
+    assert_eq!(s.peak_balance(), 12_000.0);
+    assert_eq!(s.session_start_ts_ms(), 1_700_000_000_000);
+    // drawdown_pct = (12000 - 10500) / 12000 * 100 ≈ 12.5%
+    let dd = s.drawdown_pct();
+    assert!((dd - 12.5).abs() < 1e-9, "drawdown_pct={dd}");
+}
+
+#[test]
+fn p1_5_restore_checkpoint_does_not_lower_current_peak() {
+    // Clamp guard: a corrupt/stale checkpoint row with peak < current
+    // peak_balance must NOT lower it (would zero-out drawdown_pct and
+    // bypass Guardian circuit breaker).
+    // 夾值守護：損毀/舊 checkpoint row 的 peak 低於當前 peak_balance 時
+    // 不得下調（否則會把 drawdown_pct 清零、繞過 Guardian 斷路器）。
+    let mut s = PaperState::new(10_000.0);
+    // Simulate apply_restored_counters bumping peak to 15000 via replay.
+    s.peak_balance = 15_000.0;
+    s.balance = 12_000.0;
+    // Stored checkpoint peak is only 11000 (stale) — must not overwrite.
+    s.restore_checkpoint(11_000.0, 1_700_000_000_000);
+    assert_eq!(s.peak_balance(), 15_000.0, "stale row must not lower peak");
+    assert_eq!(s.session_start_ts_ms(), 1_700_000_000_000);
+}
+
+#[test]
+fn p1_5_restore_checkpoint_rejects_nan_and_inf() {
+    // NaN / ±inf must leave peak + session_start untouched — writing
+    // them would propagate to drawdown_pct and crash downstream arithmetic.
+    // NaN/±inf 必須保持原狀，否則會污染 drawdown_pct 下游運算。
+    let mut s = PaperState::new(10_000.0);
+    let before_peak = s.peak_balance();
+    let before_ts = s.session_start_ts_ms();
+    s.restore_checkpoint(f64::NAN, 1_700_000_000_000);
+    assert_eq!(s.peak_balance(), before_peak);
+    assert_eq!(s.session_start_ts_ms(), before_ts);
+    s.restore_checkpoint(f64::INFINITY, 1_700_000_000_000);
+    assert_eq!(s.peak_balance(), before_peak);
+    s.restore_checkpoint(f64::NEG_INFINITY, 1_700_000_000_000);
+    assert_eq!(s.peak_balance(), before_peak);
+}
+
+#[test]
+fn p1_5_restore_checkpoint_absorbs_negative_peak() {
+    // Defense-in-depth: a negative `peak` is nonsense (CHECK constraint
+    // rejects it too), but the in-memory clamp should not regress peak
+    // either. max(negative, existing_non_neg) == existing.
+    // 縱深防禦：負值的 peak 不合邏輯（DB CHECK 會拒絕），記憶體層的
+    // max() 夾值也不應因此下調現值。
+    let mut s = PaperState::new(10_000.0);
+    s.restore_checkpoint(-500.0, 1_700_000_000_000);
+    assert_eq!(s.peak_balance(), 10_000.0);
+}
+
+#[test]
+fn p1_5_reset_drawdown_baseline_equalises_peak_to_balance() {
+    // Scenario: operator hits the reset IPC after an intentional flush.
+    // peak_balance must drop to current balance so drawdown_pct → 0 and
+    // the session_start_ts is refreshed.
+    // 情境：operator 故意 flush 後觸發 reset IPC；peak 拉回當前 balance，
+    // drawdown_pct 歸 0，session_start 重置。
+    let mut s = PaperState::new(10_000.0);
+    // Simulate: ran up to peak 12000, pulled back to 11000.
+    s.peak_balance = 12_000.0;
+    s.balance = 11_000.0;
+    // Drawdown before reset ≈ 8.33%.
+    assert!(s.drawdown_pct() > 8.0);
+    let ts_before_reset = s.session_start_ts_ms();
+    // Sleep a ms so now_ms() differs; avoid flaky timing by just checking
+    // the post-reset ts >= pre-reset ts.
+    // 讓 now_ms 至少可能不同；放寬為 >=。
+    s.reset_drawdown_baseline();
+    assert_eq!(s.peak_balance(), 11_000.0);
+    assert_eq!(s.drawdown_pct(), 0.0);
+    assert!(s.session_start_ts_ms() >= ts_before_reset);
+}
+
+#[test]
+fn p1_5_reset_drawdown_baseline_clears_forced_drawdown() {
+    // `force_drawdown()` is a test helper that short-circuits drawdown_pct().
+    // A reset must clear it too — otherwise a leftover forced value would
+    // keep the circuit breaker tripped after the operator manually unlocks.
+    // force_drawdown() 是測試用短路；reset 必須一併清除，否則 operator
+    // 手動解鎖後殘留值仍會維持斷路器觸發狀態。
+    let mut s = PaperState::new(10_000.0);
+    s.force_drawdown(42.0);
+    assert_eq!(s.drawdown_pct(), 42.0);
+    s.reset_drawdown_baseline();
+    assert_eq!(s.drawdown_pct(), 0.0);
+}
+
+#[test]
+fn p1_5_reset_drawdown_baseline_does_not_touch_positions_or_pnl() {
+    // Scope guard: the operator reset is a baseline-only action. Positions,
+    // fills, realized_pnl, total_fees, trade_count must NOT be cleared —
+    // unlike the full `Reset { new_balance }` command.
+    // 範疇守護：reset 僅重置 drawdown 基準，不動倉位/已實現/手續費/
+    // trade_count（與 Reset { new_balance } 的完整清空不同）。
+    let mut s = PaperState::new(10_000.0);
+    s.apply_fill("BTC", true, 0.1, 50_000.0, 5.0, 0, "test");
+    assert_eq!(s.position_count(), 1);
+    let fees_before = s.total_fees();
+    let balance_before = s.balance();
+    s.peak_balance = 12_000.0;
+
+    s.reset_drawdown_baseline();
+
+    assert_eq!(s.position_count(), 1, "positions must survive reset");
+    assert_eq!(s.total_fees(), fees_before, "fees must survive reset");
+    assert_eq!(s.balance(), balance_before, "balance must survive reset");
+    // peak now = balance after reset.
+    assert_eq!(s.peak_balance(), balance_before);
+}
+
+#[test]
+fn p1_5_drawdown_breach_persists_across_apply_restored_counters_plus_checkpoint() {
+    // End-to-end invariant: if pre-crash peak was $12k but session ended
+    // with balance $10k (16.7% drawdown), post-restart sequence —
+    //   (1) PaperState::new() with initial_balance = $10k
+    //   (2) apply_restored_counters(fees=0, pnl=0, trade_count=0)  // no fills
+    //   (3) restore_checkpoint(peak=12000, ts=_)
+    // — must preserve the 16.7% drawdown, NOT reset it to zero.
+    // 端到端不變式：崩潰前 peak=12k / balance=10k（16.7% 回撤），
+    // 重啟序列 (1) new($10k) → (2) apply_restored_counters(全零) →
+    // (3) restore_checkpoint($12k) 必須保留 16.7% 回撤，而不是歸零。
+    let mut s = PaperState::new(10_000.0);
+    assert_eq!(s.drawdown_pct(), 0.0, "fresh state has 0% drawdown");
+    s.apply_restored_counters(0.0, 0.0, 0);
+    // Without checkpoint, drawdown reverts to 0% (the bug P1-5 A2 fixes).
+    // 無 checkpoint 時 drawdown 歸零（P1-5 A2 要修的 bug）。
+    assert_eq!(s.drawdown_pct(), 0.0);
+    // After checkpoint restore, drawdown is preserved.
+    s.restore_checkpoint(12_000.0, 1_700_000_000_000);
+    let dd = s.drawdown_pct();
+    assert!(
+        (dd - 16.666_666_666_666_668).abs() < 1e-9,
+        "drawdown must be preserved across restart: got {dd}"
+    );
+}

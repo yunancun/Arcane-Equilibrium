@@ -237,6 +237,73 @@ impl PaperState {
             .map(super::containers::PositionExitSnapshot::from_position)
     }
 
+    /// P1-5 A2: read current peak balance — driver for `drawdown_pct()`.
+    /// Persisted to `trading.paper_state_checkpoint` every state writer cycle
+    /// and restored on engine startup so drawdown continuity survives a crash
+    /// or operator restart. Reset only by IPC `reset_drawdown_baseline`.
+    /// P1-5 A2：讀取當前 peak_balance — drawdown_pct 計算來源。
+    /// 每狀態寫入週期持久化到 trading.paper_state_checkpoint、重啟時還原。
+    pub fn peak_balance(&self) -> f64 {
+        self.peak_balance
+    }
+
+    /// P1-5 A2: read current session start timestamp (ms since Unix epoch).
+    /// Initialised in `new()` via `openclaw_core::now_ms()`, overwritten by
+    /// checkpoint restore, reset by `reset_drawdown_baseline()`.
+    /// P1-5 A2：讀取當前 session 起始時刻；restore 時由 DB 還原，
+    /// reset_drawdown_baseline 時更新為現在。
+    pub fn session_start_ts_ms(&self) -> u64 {
+        self.session_start_ts_ms
+    }
+
+    /// P1-5 A2: restore `peak_balance` + `session_start_ts_ms` from a
+    /// previously-persisted checkpoint row. ONLY invoked by the boot-time
+    /// restore path (`paper_state_restore::restore_paper_counters`) — NOT
+    /// exposed over IPC. Letting an IPC caller clobber `peak_balance` at
+    /// runtime would bypass the drawdown circuit-breaker that Root Principle
+    /// #5 (生存>利潤) depends on. `peak` is clamped to `max(peak, balance)`
+    /// so a corrupted row can't artificially *lower* the peak below the
+    /// current live balance. A non-finite `peak` leaves state untouched.
+    /// P1-5 A2：從 checkpoint 還原 peak_balance 與 session_start_ts_ms。
+    /// 僅供啟動時 restore 路徑使用，不暴露給 IPC——否則會繞過 Drawdown
+    /// 斷路器（違反根原則 #5）。peak 採 `max(stored, current)` 保留雙方
+    /// 較高者：(a) checkpoint 儲存時 peak 高於 restore_from_db 計算出的
+    /// restored_balance → 保留 checkpoint 值，避免重啟洗歷史 peak；
+    /// (b) 崩潰後 fills 回放又推高 balance → 保留更高的 self.peak_balance。
+    /// 非有限值或負值不會反向降低現值。
+    pub(crate) fn restore_checkpoint(&mut self, peak: f64, session_start_ts_ms: u64) {
+        if !peak.is_finite() {
+            return;
+        }
+        // max(stored, current): honor whichever peak reflects the higher
+        // historical equity. `apply_restored_counters` already ran before this
+        // call and bumped `peak_balance` to at least `restored_balance`; a
+        // negative / poisoned row is absorbed by the max (since the existing
+        // peak is always ≥ 0 after `new()`).
+        // 採 max(stored, current)：apply_restored_counters 已先抬升
+        // peak_balance 至少到 restored_balance，負值/損毀 row 會被 max 吸收。
+        self.peak_balance = peak.max(self.peak_balance);
+        self.session_start_ts_ms = session_start_ts_ms;
+    }
+
+    /// P1-5 A2: operator-driven drawdown baseline reset.
+    /// Sets `peak_balance = balance` (drawdown_pct → 0) and starts a fresh
+    /// `session_start_ts_ms`. ONLY legitimate caller is the IPC handler for
+    /// `reset_drawdown_baseline` — the Python FastAPI route behind it writes a
+    /// `change_audit_log` entry per Root Principle #8. Callers MUST also
+    /// DELETE the `trading.paper_state_checkpoint` row so the next engine
+    /// restart doesn't resurrect the old peak. `forced_drawdown` is cleared
+    /// too so a test-set override doesn't survive the reset.
+    /// P1-5 A2：operator 手動重置 drawdown 基準點。僅供 IPC handler 呼叫；
+    /// Python 路由會同時寫 change_audit_log（根原則 #8）。呼叫者必須同時
+    /// 刪除 trading.paper_state_checkpoint 對應 row，避免下次重啟被舊 peak
+    /// 復活。forced_drawdown 一併清除。
+    pub fn reset_drawdown_baseline(&mut self) {
+        self.peak_balance = self.balance;
+        self.session_start_ts_ms = openclaw_core::now_ms();
+        self.forced_drawdown = 0.0;
+    }
+
     pub fn drawdown_pct(&self) -> f64 {
         if self.forced_drawdown > 0.0 {
             return self.forced_drawdown;

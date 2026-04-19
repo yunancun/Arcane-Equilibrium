@@ -65,6 +65,16 @@ pub fn handle_paper_command(
         PipelineCommand::Reset { new_balance } => {
             lifecycle::handle_reset(new_balance, pipeline, snapshot_writer, pending_orders)
         }
+        // P1-5 A2 · Test-only stub. Production path intercepts this variant
+        // in event_consumer/mod.rs to run the DB DELETE too.
+        // P1-5 A2：測試專用 stub；生產路徑在 mod.rs 攔截並跑 DB DELETE。
+        PipelineCommand::ResetDrawdownBaseline { response_tx } => {
+            lifecycle::handle_reset_drawdown_baseline_local(
+                response_tx,
+                pipeline,
+                snapshot_writer,
+            )
+        }
         // ── Phase 3b: Strategy parameter IPC commands / 策略參數 IPC 命令 ──
         PipelineCommand::UpdateStrategyParams {
             strategy_name,

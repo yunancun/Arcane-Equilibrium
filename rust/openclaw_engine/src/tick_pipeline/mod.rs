@@ -220,6 +220,18 @@ pub enum PipelineCommand {
     /// Reset paper state — clear positions, reset balance.
     /// 重置紙盤狀態 — 清倉、重置餘額。
     Reset { new_balance: f64 },
+    /// P1-5 A2: operator-driven drawdown baseline reset. Sets
+    /// `peak_balance = balance` (drawdown_pct → 0) and DELETEs the persisted
+    /// `trading.paper_state_checkpoint` row for this engine. Does NOT touch
+    /// positions, fills, or realized_pnl — purely a risk-governor acknowledgement
+    /// that the historical peak is no longer load-bearing (e.g., after an
+    /// explicit manual-close flush). Python FastAPI route wraps this with
+    /// `change_audit_log` write per Root Principle #8.
+    /// P1-5 A2：operator 手動重置 drawdown 基準。記憶體 peak_balance=balance、
+    /// 刪除 checkpoint row；不動倉位/成交/已實現。Python 路由寫 change_audit_log。
+    ResetDrawdownBaseline {
+        response_tx: tokio::sync::oneshot::Sender<Result<String, String>>,
+    },
     /// Phase 3b: Update strategy parameters via JSON (Optuna → Rust).
     /// Phase 3b：通過 JSON 更新策略參數（Optuna → Rust）。
     UpdateStrategyParams {

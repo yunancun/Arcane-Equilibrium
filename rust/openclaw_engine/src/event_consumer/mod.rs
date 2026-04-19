@@ -1120,6 +1120,62 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
                                 audit_pool.as_ref(),
                             );
                         }
+                        // P1-5 A2: operator-driven drawdown baseline reset.
+                        // In-memory reset is synchronous; DB row DELETE is awaited
+                        // inline so Python receives confirmation only AFTER the
+                        // persisted checkpoint is gone (avoids "looks reset but
+                        // next restart resurrects old peak" race). If DB write
+                        // fails, respond Err but keep the in-memory reset — the
+                        // next writer cycle will try to UPSERT the NEW (= current
+                        // balance) peak, effectively re-pinning the baseline
+                        // somewhere safe.
+                        // P1-5 A2：operator 重置 drawdown 基準。記憶體同步重置、
+                        // DB DELETE 同步 await，讓 Python 在 row 真正刪除後才收到
+                        // 確認；DB 失敗時仍保留記憶體重置，下個寫入週期會把新
+                        // (=當前 balance) peak 重新 UPSERT。
+                        PipelineCommand::ResetDrawdownBaseline { response_tx } => {
+                            let em_for_reset = pipeline.effective_engine_mode().to_string();
+                            let peak_before = pipeline.paper_state.peak_balance();
+                            let balance_before = pipeline.paper_state.balance();
+                            pipeline.paper_state.reset_drawdown_baseline();
+                            let db_result = if let Some(pool) = audit_pool.as_ref() {
+                                crate::paper_state::checkpoint::delete_checkpoint(
+                                    pool,
+                                    &em_for_reset,
+                                )
+                                .await
+                            } else {
+                                Ok(())
+                            };
+                            let reply = match db_result {
+                                Ok(()) => {
+                                    info!(
+                                        engine_mode = %em_for_reset,
+                                        peak_before,
+                                        peak_after = pipeline.paper_state.peak_balance(),
+                                        balance = balance_before,
+                                        "P1-5 A2: drawdown baseline reset via IPC \
+                                         / 已通過 IPC 重置 drawdown 基準"
+                                    );
+                                    snapshot_writer.force_write(&pipeline.snapshot());
+                                    Ok(format!(
+                                        "reset engine_mode={em_for_reset} \
+                                         peak_before={peak_before:.2} \
+                                         peak_after={balance_before:.2}"
+                                    ))
+                                }
+                                Err(e) => {
+                                    warn!(
+                                        engine_mode = %em_for_reset,
+                                        error = %e,
+                                        "P1-5 A2: checkpoint DELETE failed (memory already reset) \
+                                         / checkpoint 刪除失敗（記憶體已重置）"
+                                    );
+                                    Err(format!("DB delete failed: {e}"))
+                                }
+                            };
+                            let _ = response_tx.send(reply);
+                        }
                         other => {
                             handlers::handle_paper_command(
                                 other,
@@ -1322,6 +1378,39 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
                             state_writer.maybe_write(&snap);
                             let full_snap = pipeline.snapshot();
                             snapshot_writer.maybe_write(&full_snap);
+
+                            // P1-5 A2: piggy-back checkpoint UPSERT on the state-writer
+                            // cadence (~30s per engine). Detached spawn so the event loop
+                            // isn't blocked on the DB round-trip. `audit_pool.clone()` is
+                            // cheap (Arc<Inner>). Fail-soft: warn logs live inside
+                            // `write_checkpoint`, next tick will retry.
+                            // P1-5 A2：在狀態寫入週期（每引擎 ~30s）順手 UPSERT checkpoint。
+                            // 分離 spawn 避免阻塞事件迴圈；pool clone 為 Arc 廉價。
+                            // fail-soft：write_checkpoint 內部 warn log，下週期重試。
+                            if let Some(pool) = audit_pool.as_ref() {
+                                let pool_clone = pool.clone();
+                                let em = pipeline.effective_engine_mode().to_string();
+                                let peak = pipeline.paper_state.peak_balance();
+                                let session_start_ts_ms =
+                                    pipeline.paper_state.session_start_ts_ms();
+                                tokio::spawn(async move {
+                                    if let Err(e) = crate::paper_state::checkpoint::write_checkpoint(
+                                        &pool_clone,
+                                        &em,
+                                        peak,
+                                        session_start_ts_ms,
+                                    )
+                                    .await
+                                    {
+                                        warn!(
+                                            engine_mode = %em,
+                                            error = %e,
+                                            "P1-5 A2: checkpoint UPSERT failed (will retry next cycle) \
+                                             / checkpoint 寫入失敗，下週期重試"
+                                        );
+                                    }
+                                });
+                            }
 
                             // D2: Diff registry vs known_symbols → add/remove from pipeline.
                             // Runs every status interval (30s); scanner cycle is 30 min,

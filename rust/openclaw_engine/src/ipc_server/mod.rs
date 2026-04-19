@@ -864,6 +864,17 @@ async fn dispatch_request(
             let tx = extract_engine_tx(&req.params, cmd_channels);
             handle_clear_consecutive_losses(id, tx).await
         }
+        // P1-5 A2: operator-driven drawdown baseline reset — the in-memory
+        // path + DB DELETE runs in event_consumer/mod.rs ResetDrawdownBaseline
+        // interception. Python FastAPI route MUST front this with operator
+        // auth + change_audit_log per Root Principle #8.
+        // P1-5 A2：operator 手動重置 drawdown 基準。記憶體重置與 DB DELETE
+        // 於 event_consumer/mod.rs 攔截執行；Python 路由須先驗 operator +
+        // 寫 change_audit_log（根原則 #8）。
+        "reset_drawdown_baseline" => {
+            let tx = extract_engine_tx(&req.params, cmd_channels);
+            handle_reset_drawdown_baseline(id, tx).await
+        }
         // DYNAMIC-RISK-1: Per-engine Sharpe-aware sizer status + toggle.
         // DYNAMIC-RISK-1：按引擎動態風險調整器狀態與切換。
         "get_dynamic_risk_status" => {

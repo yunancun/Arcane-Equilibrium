@@ -54,6 +54,7 @@
 //!   bit-exact 算術保留：無任何運算順序重排、無中繼累加器型別變動。
 
 pub mod accessor;
+pub mod checkpoint;
 pub mod containers;
 pub mod dust_gate;
 pub mod fill_engine;
@@ -75,6 +76,14 @@ pub struct PaperState {
     pub(super) _initial_balance: f64,
     pub(super) balance: f64,
     pub(super) peak_balance: f64,
+    /// P1-5 A2: wall-clock ms when the current equity curve began. Preserved
+    /// across restarts via `trading.paper_state_checkpoint`; only reset by
+    /// operator IPC `reset_drawdown_baseline`. Initialised to now_ms() in
+    /// `new()`, overwritten by `restore_checkpoint()` on cross-restart restore.
+    /// P1-5 A2：當前 equity curve 起始時刻（ms）。透過
+    /// `trading.paper_state_checkpoint` 跨重啟保留；僅 operator 手動
+    /// reset_drawdown_baseline 會更新。
+    pub(super) session_start_ts_ms: u64,
     pub(super) positions: HashMap<String, PaperPosition>,
     pub(super) latest_prices: HashMap<String, f64>,
     /// Per-symbol 24h turnover for dynamic slippage calculation.
@@ -112,6 +121,7 @@ impl PaperState {
             _initial_balance: initial_balance,
             balance: initial_balance,
             peak_balance: initial_balance,
+            session_start_ts_ms: openclaw_core::now_ms(),
             positions: HashMap::new(),
             latest_prices: HashMap::new(),
             latest_turnovers: HashMap::new(),

@@ -354,6 +354,36 @@ class RiskViewClient:
         await self.refresh_runtime_status()
         return resp if isinstance(resp, dict) else {}
 
+    async def reset_drawdown_baseline(self, engine: str) -> dict[str, Any]:
+        """
+        P1-5 A2: Operator-driven drawdown baseline reset for the selected engine.
+
+        Equalises `peak_balance = balance` in memory, clears `forced_drawdown`,
+        and DELETEs the `trading.paper_state_checkpoint` row so the next
+        restart cold-starts the drawdown envelope. This is the ONLY path that
+        lowers `peak_balance`; restarts never do it automatically (fail-closed
+        per Root Principle #5 生存>利潤 / #6 失敗默認收縮).
+
+        P1-5 A2：Operator 手動重置所選引擎的 drawdown 基準。記憶體中
+        `peak_balance = balance`、清除 `forced_drawdown`，並 DELETE
+        `trading.paper_state_checkpoint` 對應 row；下次啟動即冷起。此為
+        **唯一**可降 peak 的路徑，重啟永不自動降（根原則 #5/#6 fail-closed）。
+
+        Args:
+            engine: engine mode — one of `paper`, `demo`, `live`, `live_demo`.
+                    Routed to the correct pipeline via IPC `engine` param.
+
+        Returns:
+            Raw IPC response dict; caller is responsible for writing
+            change_audit_log per Root Principle #8 (交易可解釋).
+        """
+        if self._ipc is None:
+            logger.warning("reset_drawdown_baseline skipped — no IPC client")
+            return {}
+        resp = await self._ipc.call("reset_drawdown_baseline", {"engine": engine})
+        await self.refresh_runtime_status()
+        return resp if isinstance(resp, dict) else {}
+
     # ═══════════════════════════════════════════════════════════════════════
     # Governor manual override (1C-3-B-2 — stubs for now)
     # Governor 手動 override（1C-3-B-2 實作，此處先佔位）
