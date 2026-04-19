@@ -279,6 +279,9 @@ state_models ← state_compiler ← state_store ← main_legacy ← main.py
 | `KLINE_MANAGER` / `INDICATOR_ENGINE` / `SIGNAL_ENGINE` / `ORCHESTRATOR` 等 12+ | strategy_wiring.py | 模組級全局，import 時初始化 |
 | `_SHARED_IPC_SLOTS` / `_SHARED_SLOT_LOCK` | ipc_dispatch.py | 內部懶加載 `get_or_connect_shared_client(slot_key)`（E5-P1-5） |
 | `_ANALYST_AUDIT_CB` / `_GOV_HUB_FOR_ANALYST` | strategy_wiring.py | 模組級，由 `agent_audit_bridge.make_agent_audit_callback(...)` 構造；AnalystAgent 建構時注入 `audit_callback`（E5-FN-3）。`agent_audit_bridge` 本身為無狀態工廠模組（不持有 singleton） |
+| `_STRATEGIST_AUDIT_CB` / `_GOV_HUB_FOR_STRATEGIST` | strategy_wiring.py | 模組級，由 `agent_audit_bridge.make_agent_audit_callback(...)` 構造；StrategistAgent 建構時注入 `audit_callback`（E5-FN-3-FUP-a）。ImportError 時 `_GOV_HUB_FOR_STRATEGIST=None` → bridge fail-open 靜默丟棄 |
+| `_GUARDIAN_AUDIT_CB` / `_GOV_HUB_FOR_GUARDIAN` | strategy_wiring.py | 模組級（Batch 8），由 `agent_audit_bridge.make_agent_audit_callback(...)` 構造；GuardianAgent 建構時注入 `audit_callback`（E5-FN-3-FUP-b）。`_GOV_HUB_FOR_GUARDIAN` 於 Batch 8 既存，E5-FN-3-FUP-b 補登記；ImportError 時為 None → bridge fail-open |
+| `_EXECUTOR_AUDIT_CB` / `_GOV_HUB_FOR_EXECUTOR` | strategy_wiring.py | 模組級（Batch 11 try 區塊內），由 `agent_audit_bridge.make_agent_audit_callback(...)` 構造；ExecutorAgent 建構時注入 `audit_callback`（E5-FN-3-FUP-c）。fail-open：GOV_HUB 不可用時 bridge 靜默丟事件 |
 
 新增 singleton 必須在此表登記。禁止子模塊創建未登記的全局可變狀態。
 
