@@ -1,13 +1,10 @@
 # OpenClaw TODO — 工作清單
 
-**最後更新**：2026-04-19（Plan N 重設計 · commit `f0f11c0`）
-**Engine**：PID 2390582 · binary mtime 2026-04-18 23:54 → 含 P0-6 永久修復 + P1-7 A INTENT-WRITE-GAP-1（exchange 分支 persist_intent）+ P1-17 JS Winsorize + LIVE-GATE-BINDING-1 + DYNAMIC-RISK-1 + IPC-SCAN-1c
-**待部署**：
-  - **Rust rebuild**：`65acde6` MARKET-KLINES-STALE-1 fix + EXIT-FEATURES-TABLE-1 skeleton + DUAL-TRACK-EXIT-1 Step 0 · `6ea643e` EXIT-FEATURES Phase 1b producer wiring · `bd45e90` FILL-CONTEXT-LINKAGE-1（P1-7 C 0 標籤根因，訊號時刻 context_id 端到端傳遞）· `c7171b2` EXIT-FEATURES-TABLE-1 Phase 1b FUP（process_external_fill + ipc_close_symbol paper 分支）· ~~`fd480ba` E5-FN-2 V018 partial UNIQUE~~ **reverted `87b7653`** → `f0f11c0` **E5-FN-2 Plan N** ai_budget request_id dedup（既有 hypertable PK，零 schema 改動）· E5-P1 Wave 1（6 commit）· E5-P2 Wave 2（2 commit）
-  - **Rust 部署硬約束**：~~V018 migration~~ **已取消** — Plan N 改用既有 hypertable PK `(time, scope, request_id)` + `ON CONFLICT DO NOTHING`，**無需任何 DDL**。直接 `bash helper_scripts/restart_all.sh --rebuild` 即可。
-  - **Python uvicorn**：自 04-16 未重啟 → **下次重啟即生效 P0-12 LIVE-GATE-FALLBACK-1 + `19f3d85` E5-FN-3 agent_audit_bridge AnalystAgent pilot**
-    - 重啟後驗證：(1) GUI Close All Positions response 應含 `rest_fallback:true, errors:null` (2) engine.log 出現 `LIVE-GATE-FALLBACK-1: IPC close_all_positions channel unavailable ... (REST fallback — live pipeline not authorized)` (3) `python3 -c "from openclaw_core import BybitClient; print([(p['symbol'], p.get('size')) for p in BybitClient(environment='live_demo').get_positions('linear') if float(p.get('size') or 0) > 0])"` 應為空 (4) AnalystAgent `analyze_trade` 後 `change_audit_log` 有 `who="AnalystAgent"` row（E5-FN-3 pilot）
-**測試基準線**：Rust engine lib **1572** / core 380 / e2e 35 / reconciler_e2e 19 · Python **2898** passed / ml_training 182 passed
+**最後更新**：2026-04-19（Plan N 部署完成 · `restart_all.sh --rebuild` 12:57）
+**Engine**：PID 2536445 · binary mtime 2026-04-19 01:59 → 含 P0-6 永久修復 + P1-7 A INTENT-WRITE-GAP-1（exchange 分支 persist_intent）+ P1-17 JS Winsorize + LIVE-GATE-BINDING-1 + DYNAMIC-RISK-1 + IPC-SCAN-1c + FILL-CONTEXT-LINKAGE-1 + EXIT-FEATURES-TABLE-1 Phase 1b + Plan N ai_budget dedup + E5-P1 Wave 1 + E5-P2 Wave 2 + E5-FN-2 Plan N + E5-FN-3 AnalystAgent pilot
+**Python uvicorn**：PID 2536510（4 workers）· started 2026-04-19 ~12:57 → 含 P0-12 LIVE-GATE-FALLBACK-1 + E5-FN-3 AnalystAgent pilot；重啟後驗證項見 §Plan N 部署 follow-up
+**待部署**：（無 — 全部已 deploy 至 PID 2536445/2536510）
+**測試基準線**：Rust engine lib **1571** / core 380 / e2e 35 / reconciler_e2e 19 · Python **2820** passed / ml_training 238 passed
 
 > 本文件僅列「待辦/進行中」。已完成 → 文末歸檔索引。詳細設計 → `docs/worklogs/`。
 > Compact 後從此文件恢復；第一個 `[ ]` = 起點。CLAUDE.md §三 = 當前狀態快照。
@@ -337,12 +334,6 @@ git status && git log --oneline -5
   - [ ] **NIT-3 thread-safety 文檔**：`ChangeAuditLog.record_change` 跨 thread 安全性未在 bridge 文檔化；agents 跨 thread 跑，fail-open 已防 crash，但語義應註明
 
 - **驗收**：全 5 agent（Scout/Strategist/Guardian/Analyst/Executor）wire 完成後，`change_audit_log` 表應看到 `who IN ('ScoutAgent','StrategistAgent','GuardianAgent','AnalystAgent','ExecutorAgent')` 全部出現；搭配 Analyst pilot 觀察週（uvicorn 重啟後）做對比
-
----
-
-- [ ] **E5-FN-1-CANCEL**（資訊）— audit §七.7.1「live_authorization.verify 同步但 main.rs 首次 re-verify 在 5 min 後，中間有窗口」聲稱不成立：`startup.rs:467-494` `build_exchange_pipeline` 在 pipeline 構造前已同步 `load_and_verify(env)`，失敗即 `return None` 拒絕 spawn；5 min ticker 只是 mid-session revoke detector。0 lines changed。(2026-04-19 E5-FN-1 evidence-based CANCEL)
-- [x] ~~**E5-FN-2-DEPLOY** V018 partial UNIQUE~~ **SUPERSEDED** by Plan N（commit `f0f11c0`，revert `87b7653` of `fd480ba`）：V018 partial UNIQUE 無法 apply on TimescaleDB hypertable（UNIQUE index 必須含 partitioning column `time`），empirical error `cannot create a unique index without the column "time"`。改用**既有** hypertable PK `(time, scope, request_id)` 做 `ON CONFLICT DO NOTHING RETURNING 1` — **零 schema 改動、零 migration**；`make_request_id(scope)` 回 `(rid, ts_ms)` tuple，caller 重試必須傳同 tuple。IPC `handle_record_ai_usage` 收 Python 傳入 `(request_id, event_time_ms)` 或本地鑄造，封閉 fd480ba 原本要引入的 `"py-sync"` literal PK 碰撞。engine lib 1567→1571（+4 Plan N tests）。
-- [ ] **E5-FN-2-PLAN-N-FUP** — Plan N 部署後 follow-up：(a) Python Layer-2 sync caller 可選升級為傳入 `(request_id, event_time_ms)` 以獲得跨重試的真實去重（目前 IPC handler 本地鑄造時每次 retry 會被當新 row — 仍不會雙重計費本地 caller 自己，但失去跨 Python 重試保護）；(b) `test_make_request_id_unique_within_same_ms` 為 1 對 mint 對比，flake 機率 ~1/2^32，若 CI 偶發誤報換 seeded RNG；(c) 部署後 `SELECT time, scope, request_id, COUNT(*) FROM learning.ai_usage_log GROUP BY 1,2,3 HAVING COUNT(*) > 1 LIMIT 5;` 應永遠 0 rows（PK 保證）。
 
 ---
 
