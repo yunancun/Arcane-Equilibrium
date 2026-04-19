@@ -659,6 +659,15 @@ pub struct GridTradingParams {
     /// Max cooldown boost factor (default 5.0, range 1x–6x). / 最大冷卻倍率加成。
     #[serde(default = "default_max_cooldown_boost")]
     pub max_cooldown_boost: f64,
+    /// EDGE-P2-3 Phase 1a: emit PostOnly Limit entries (maker fee) instead of Market.
+    /// Default `false` (conservative). Per-env TOML enables.
+    /// EDGE-P2-3 Phase 1a：入場改發 PostOnly Limit（maker 費率）；默認 false，由各環境 TOML 啟用。
+    #[serde(default = "default_use_maker_entry")]
+    pub use_maker_entry: bool,
+    /// EDGE-P2-3 Phase 1a: PostOnly limit placement offset from last_price in bps.
+    /// EDGE-P2-3 Phase 1a：PostOnly 限價相對 last_price 的 bps 偏移。
+    #[serde(default = "default_maker_price_offset_bps")]
+    pub maker_price_offset_bps: f64,
 }
 
 fn default_adaptive_range_pct() -> f64 {
@@ -679,6 +688,12 @@ fn default_adx_high_threshold() -> f64 {
 fn default_max_cooldown_boost() -> f64 {
     5.0
 }
+fn default_use_maker_entry() -> bool {
+    false
+}
+fn default_maker_price_offset_bps() -> f64 {
+    1.0
+}
 
 impl Default for GridTradingParams {
     fn default() -> Self {
@@ -698,6 +713,8 @@ impl Default for GridTradingParams {
             adx_low_threshold: 20.0,
             adx_high_threshold: 50.0,
             max_cooldown_boost: 5.0,
+            use_maker_entry: false,
+            maker_price_offset_bps: 1.0,
         }
     }
 }
@@ -1000,6 +1017,9 @@ impl StrategyFactory {
         gt.adx_low_threshold = p.grid_trading.adx_low_threshold;
         gt.adx_high_threshold = p.grid_trading.adx_high_threshold;
         gt.max_cooldown_boost = p.grid_trading.max_cooldown_boost;
+        // EDGE-P2-3 Phase 1a: wire maker-entry params from TOML.
+        gt.use_maker_entry = p.grid_trading.use_maker_entry;
+        gt.maker_price_offset_bps = p.grid_trading.maker_price_offset_bps;
         gt.set_conf_scale(p.grid_trading.conf_scale);
         gt.set_active(p.grid_trading.active);
         strategies.push(Box::new(gt));

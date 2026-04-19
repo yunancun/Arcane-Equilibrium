@@ -41,6 +41,11 @@ spacing_mode = "linear"
 health_check_interval = 200
 max_out_of_range = 50
 conf_scale = 1.0
+# EDGE-P2-3 Phase 1a (2026-04-20): PostOnly Limit entries; mirrors demo so paper
+# exploration stays representative of live-target fee profile.
+# EDGE-P2-3 Phase 1a：PostOnly Limit 入場；與 demo 對齊以保持紙盤探索費率代表性。
+use_maker_entry = true
+maker_price_offset_bps = 1.0
 
 # OC-5: FundingArb — funding rate capture strategy.
 # Paper = exploration, activated for signal validation.
