@@ -1,7 +1,32 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-04-19（E5-FN-2 Plan N 重設計，revert fd480ba + 取代 V018 / E5-FN-3 agent_audit_bridge / MARKET-KLINES-STALE-1 / EXIT-FEATURES-TABLE-1 Phase 1b producer wiring / DUAL-TRACK-EXIT-1 Step 0 skeleton）
+> 最後更新：2026-04-19（DUAL-TRACK-EXIT-1 Phase 1a Track P E2+E4 驗收 / E5-FN-2 Plan N 重設計，revert fd480ba + 取代 V018 / E5-FN-3 agent_audit_bridge / MARKET-KLINES-STALE-1 / EXIT-FEATURES-TABLE-1 Phase 1b producer wiring / DUAL-TRACK-EXIT-1 Step 0 skeleton）
+
+### DUAL-TRACK-EXIT-1 Phase 1a Track P E2+E4 驗收（2026-04-19 · worklog `2026-04-19-2--track_p_counterfactual_audit.md`）
+
+**目標**：盤點 Track P T1-T5 單測總數（≥18 要求）+ 跑 T5 counterfactual audit CLI 事後歸因 Phase 1a 骨架閾值表現。
+
+**單測盤點（≥47，遠超 ≥18 要求）**：
+- T1 `exit_features.rs` 6 + `database/exit_feature_schema.rs` 3
+- T2 `compute_roc` 專項 12（`price_tracker.rs` 總 30）
+- T3 `physical_micro_profit_lock` 9（`risk_checks.rs` 總 35）+ evaluator wrapper 1
+- T4 `combine_layer.rs` 9
+- `tick_pipeline/tests.rs` `exit_feature_row` 7（5 pre-existing WIP + 2 GAP-1 regression）
+
+**Counterfactual audit**（`program_code/audit/counterfactual_exit_audit.py` commit `4feb17a`，MARKET-KLINES-STALE-1 修復後 market.klines 持續寫入 `kline_fresh=true`）：
+- **grid_trading demo 7d**（`/tmp/cf_audit_grid_demo.json`）：141 positions / 4 hits / delta_bps mean=−39.44 / p50=0 / p75=0；n_phys_better=1 vs n_phys_worse=2
+- **ma_crossover demo 7d**（`/tmp/cf_audit_ma_demo.json`）：52 positions / 10 hits / delta_bps mean=−95.20 / p25=−62.49 / p75=+54.72；n_phys_better=5 vs n_phys_worse=5
+
+**關鍵發現**：
+1. 命中率低但方向分歧（grid 2.8% vs ma 19.2%）——骨架閾值對 grid 極度保守
+2. **ENJUSDT 案例（grid）**：real +2.76% vs cf +0.78% = **−198 bps**。Track P `giveback_atr_threshold=0.6` + `min_peak_atr_norm=0.5` 的骨架預設會砍掉趨勢性大 winner
+3. **BLURUSDT #2 案例（grid）**：real −0.01% vs cf +0.55% = **+55.7 bps**，Track P 成功救回 loser；但正面案例僅 1/4
+4. ma_crossover p75=+54.7 bps 顯示「少數贏家 + 多數被提早砍」分佈，與 P1-10 STRATEGY-ASYMMETRY-1（ma R:R 2.54×）一致
+
+**結論**：E2+E4 驗收通過；Phase 1a 骨架閾值對真實 demo 數據過於保守（與設計預期一致，詳 `docs/worklogs/2026-04-18--dual_track_exit_design.md` §Phase 1b 完成標準）；校準工作正確排入 Phase 1b（累積 ≥1 週 exit_features 後資料驅動 bind）。
+
+**下一步**：等 Phase 1b exit_features 累積 ≥1000 rows 後重跑此 audit 驗證收斂；校準方向由資料決定，初步假設為提高 `min_peak_atr_norm` + `giveback_atr_threshold` + `min_net_floor_bps`。
 
 ### E5-FN-2 Plan N — ai_budget request_id dedup via existing hypertable PK（2026-04-19 · revert `87b7653` + commit `f0f11c0`）
 
