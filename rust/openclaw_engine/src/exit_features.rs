@@ -7,7 +7,14 @@
 ///
 /// 任何 Option 欄位為 None 代表「歷史/樣本不足」，下游 gate 須保守（Hold）。
 /// None means insufficient history/samples; downstream gates must be conservative.
-#[derive(Debug, Clone, PartialEq)]
+///
+/// T1-FIX: `serde::Serialize` + `serde::Deserialize` 供未來 EXIT-FEATURES-TABLE 持久化 /
+/// consumer。`Deserialize` 包含以支持單元測試的 round-trip，Phase 1b+ 的離線
+/// replay/fixture 管線亦會用到。
+/// T1-FIX: `Serialize` + `Deserialize` for future EXIT-FEATURES-TABLE persistence
+/// consumer. `Deserialize` included to support unit-test round-trips and the
+/// Phase 1b+ offline replay/fixture pipeline.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ExitFeatures {
     /// Shrunk JS edge（bps）; None = cell 缺失 / missing cell
     pub est_net_bps: Option<f32>,
@@ -29,7 +36,12 @@ pub struct ExitFeatures {
 }
 
 /// Track P 物理層決策 / Track P physical-layer decision.
-#[derive(Debug, Clone, PartialEq)]
+///
+/// T1-FIX: `serde::Serialize` + `serde::Deserialize` 同 ExitFeatures，供持久化
+/// 與 round-trip 測試。
+/// T1-FIX: `Serialize` + `Deserialize` as ExitFeatures, for persistence and
+/// round-trip tests.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum PhysicalDecision {
     /// 維持持有 / Continue holding
     Hold,
@@ -97,4 +109,83 @@ mod tests {
         assert_ne!(lock_a, lock_b);
         assert_eq!(lock_x_1, lock_x_2);
     }
+
+    // T1-FIX: Serialize boundary tests / Serialize 邊界測試
+    // 驗證 None / 0.0 / stale_peak 邊界條件可安全序列化，未來 EXIT-FEATURES-TABLE
+    // 持久化消費者不會在邊界值爆掉。
+    // Ensure None / 0.0 / stale_peak boundary values serialise safely; future
+    // EXIT-FEATURES-TABLE persistence consumers will not blow up on edges.
+
+    #[test]
+    fn test_exit_features_est_net_bps_none_serializes() {
+        // est_net_bps=None（cell 缺失）必須序列化為 JSON null，
+        // 下游 writer/reader 不可依賴欄位必定為數字。
+        // est_net_bps=None (missing cell) must serialise to JSON null; downstream
+        // writers/readers must not assume the field is always numeric.
+        let f = ExitFeatures {
+            est_net_bps: None,
+            peak_pnl_pct: 0.0,
+            current_pnl_pct: 0.0,
+            atr_pct: None,
+            giveback_atr_norm: None,
+            time_since_peak_ms: None,
+            price_roc_short: None,
+            entry_age_secs: None,
+        };
+        let j = serde_json::to_string(&f).expect("serialize");
+        assert!(
+            j.contains("\"est_net_bps\":null"),
+            "expected est_net_bps:null in {}",
+            j
+        );
+    }
+
+    #[test]
+    fn test_exit_features_atr_pct_zero_boundary() {
+        // atr_pct=Some(0.0) 為合法構造（波動性為 0 的極端邊界），
+        // 僅驗證 ctor + serialize 無 panic；gate 語意歸屬 risk_checks。
+        // atr_pct=Some(0.0) is a valid boundary (degenerate volatility); we only
+        // check that ctor + serialize do not panic. Gate semantics live in
+        // risk_checks.
+        let f = ExitFeatures {
+            est_net_bps: Some(10.0),
+            peak_pnl_pct: 1.0,
+            current_pnl_pct: 0.5,
+            atr_pct: Some(0.0),
+            giveback_atr_norm: Some(0.0),
+            time_since_peak_ms: Some(0),
+            price_roc_short: Some(0.0),
+            entry_age_secs: Some(0.0),
+        };
+        let j = serde_json::to_string(&f).expect("serialize");
+        // atr_pct serialises as 0.0 (serde-json renders floats with decimal).
+        // atr_pct 序列化為 0.0（serde-json 浮點帶小數點）。
+        assert!(
+            j.contains("\"atr_pct\":0.0"),
+            "expected atr_pct:0.0 in {}",
+            j
+        );
+    }
+
+    #[test]
+    fn test_exit_features_time_since_peak_stale_boundary() {
+        // stale_peak_ms 預設 60_000ms（risk_config.phys_lock）——邊界等值值的
+        // round-trip 必須完全還原。
+        // Default stale_peak_ms is 60_000 (risk_config.phys_lock); boundary-equal
+        // value must round-trip losslessly.
+        let original = ExitFeatures {
+            est_net_bps: Some(-25.0),
+            peak_pnl_pct: 0.3,
+            current_pnl_pct: 0.1,
+            atr_pct: Some(0.5),
+            giveback_atr_norm: Some(1.2),
+            time_since_peak_ms: Some(60_000),
+            price_roc_short: Some(-0.001),
+            entry_age_secs: Some(120.0),
+        };
+        let j = serde_json::to_string(&original).expect("serialize");
+        let decoded: ExitFeatures = serde_json::from_str(&j).expect("deserialize");
+        assert_eq!(original, decoded, "round-trip must be lossless");
+    }
+
 }
