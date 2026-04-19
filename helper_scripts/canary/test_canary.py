@@ -43,6 +43,7 @@ from canary_comparator import (
 )
 from engine_watchdog import (
     check_snapshot_freshness,
+    classify_engine_failure,
     on_engine_crash,
     on_engine_recovery,
     WatchdogState,
@@ -437,6 +438,219 @@ class TestWatchdogLoop(unittest.TestCase):
         state = run_watchdog(self._tmpdir.name, stale_threshold=5, poll_interval=0.01, max_iterations=3, grace_period=0)
         self.assertFalse(state.engine_alive)
         self.assertEqual(state.total_crashes, 1)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# WATCHDOG-DNS-CLASSIFY-1 tests (2026-04-20) — DNS outage vs real crash
+# 區分 DNS 斷線與真 crash（P0-9 停電 RCA 後補上的分類器）
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class TestEngineFailureClassifier(unittest.TestCase):
+    """classify_engine_failure(): tail-inspection routing."""
+
+    def setUp(self):
+        import pathlib
+        self._pathlib = pathlib
+        self._tmpdir = tempfile.TemporaryDirectory()
+
+    def tearDown(self):
+        self._tmpdir.cleanup()
+
+    def _write_log(self, lines):
+        path = os.path.join(self._tmpdir.name, "engine.log")
+        with open(path, "w", encoding="utf-8") as f:
+            if lines:
+                f.write("\n".join(lines) + "\n")
+        return self._pathlib.Path(path)
+
+    def test_missing_log_defaults_to_engine_crash(self):
+        """No engine.log → conservative default / 缺日誌 → 保守 engine_crash"""
+        path = self._pathlib.Path(self._tmpdir.name) / "absent.log"
+        self.assertEqual(classify_engine_failure(path), "engine_crash")
+
+    def test_empty_log_defaults_to_engine_crash(self):
+        """Empty file → engine_crash / 空檔 → engine_crash"""
+        path = self._write_log([])
+        self.assertEqual(classify_engine_failure(path), "engine_crash")
+
+    def test_five_consecutive_dns_classified_as_network_outage(self):
+        """≥5 consecutive DNS lines at tail → network_outage / 連續 ≥5 DNS → 網路中斷"""
+        lines = [
+            "INFO startup ok",
+            "INFO some other message",
+        ] + [
+            f"ERROR Temporary failure in name resolution attempt {i}"
+            for i in range(5)
+        ]
+        path = self._write_log(lines)
+        self.assertEqual(classify_engine_failure(path), "network_outage")
+
+    def test_four_consecutive_dns_below_threshold(self):
+        """<5 consecutive DNS → engine_crash / <5 連續 → engine_crash"""
+        lines = ["info"] + [
+            f"ERROR HTTP transport error {i}" for i in range(4)
+        ] + ["info tail"]
+        path = self._write_log(lines)
+        self.assertEqual(classify_engine_failure(path), "engine_crash")
+
+    def test_mixed_patterns_count_together(self):
+        """Mixed DNS/transport/refused lines count as consecutive matches.
+        DNS/transport/connection-refused 跨模式視為同組匹配"""
+        lines = [
+            "INFO ok",
+            "ERROR Temporary failure in name resolution 1",
+            "ERROR HTTP transport error 2",
+            "ERROR connection refused 3",
+            "ERROR failed to lookup address information 4",
+            "ERROR DNS error 5",
+        ]
+        path = self._write_log(lines)
+        self.assertEqual(classify_engine_failure(path), "network_outage")
+
+    def test_panic_overrides_dns_flood(self):
+        """Panic in tail → engine_crash even with plenty of DNS lines.
+        tail 出現 panic 時即使 DNS 成堆也判為 engine_crash"""
+        lines = [
+            "thread 'main' panicked at 'boom' at src/foo.rs:42",
+        ] + [
+            f"ERROR Temporary failure in name resolution {i}"
+            for i in range(10)
+        ]
+        path = self._write_log(lines)
+        self.assertEqual(classify_engine_failure(path), "engine_crash")
+
+    def test_assertion_override(self):
+        """Assertion in tail overrides DNS classification.
+        assertion failed 也強制 engine_crash"""
+        lines = [
+            f"ERROR Temporary failure in name resolution {i}" for i in range(6)
+        ] + ["ERROR assertion failed: left == right"]
+        path = self._write_log(lines)
+        self.assertEqual(classify_engine_failure(path), "engine_crash")
+
+    def test_non_consecutive_dns_below_threshold(self):
+        """Interleaved DNS lines break the run / DNS 被非匹配行打斷 → 不夠連續"""
+        lines = []
+        for i in range(8):
+            lines.append(f"ERROR Temporary failure in name resolution {i}")
+            lines.append(f"INFO unrelated heartbeat {i}")
+        path = self._write_log(lines)
+        # Longest run = 1 (every DNS line is broken by a heartbeat)
+        self.assertEqual(classify_engine_failure(path), "engine_crash")
+
+    def test_case_insensitive_matching(self):
+        """Patterns match regardless of case / 不分大小寫"""
+        lines = [
+            "ERROR TEMPORARY FAILURE IN NAME RESOLUTION 1",
+            "ERROR Http Transport Error 2",
+            "ERROR Connection Refused 3",
+            "ERROR failed to lookup address information 4",
+            "ERROR DNS ERROR 5",
+        ]
+        path = self._write_log(lines)
+        self.assertEqual(classify_engine_failure(path), "network_outage")
+
+    def test_only_tail_window_counts(self):
+        """Only the last tail_lines are inspected / 只看 tail 窗口內的行"""
+        # Put 5 DNS lines far from the tail, then fill with non-matching lines
+        lines = [f"ERROR Temporary failure in name resolution {i}" for i in range(5)]
+        lines += [f"INFO unrelated heartbeat {i}" for i in range(25)]
+        path = self._write_log(lines)
+        # tail_lines=20 sees only the trailing heartbeats, no DNS
+        self.assertEqual(
+            classify_engine_failure(path, tail_lines=20),
+            "engine_crash",
+        )
+
+
+class TestOnEngineCrashClassification(unittest.TestCase):
+    """on_engine_crash() honors classification (strike accounting + canary events)."""
+
+    def setUp(self):
+        import pathlib
+        self._pathlib = pathlib
+        self._tmpdir = tempfile.TemporaryDirectory()
+
+    def tearDown(self):
+        self._tmpdir.cleanup()
+
+    def _write_log(self, lines):
+        path = os.path.join(self._tmpdir.name, "engine.log")
+        with open(path, "w", encoding="utf-8") as f:
+            if lines:
+                f.write("\n".join(lines) + "\n")
+        return self._pathlib.Path(path)
+
+    def test_network_outage_does_not_count_strike(self):
+        """network_outage classification → no strike, no total_crashes increment.
+        網路中斷不計入 strike / total_crashes"""
+        state = WatchdogState()
+        log_path = self._write_log([
+            f"ERROR Temporary failure in name resolution {i}" for i in range(8)
+        ])
+        action = on_engine_crash(state, 30.0, data_dir=self._tmpdir.name, log_path=log_path)
+        self.assertEqual(action, "network_outage")
+        self.assertFalse(state.engine_alive)  # still flipped so recovery can re-fire
+        self.assertEqual(state.total_crashes, 0)
+        self.assertEqual(len(state.crash_timestamps), 0)
+        self.assertEqual(state.total_network_outages, 1)
+        self.assertEqual(len(state.network_outage_timestamps), 1)
+
+    def test_network_outage_emits_canary_event(self):
+        """NETWORK_OUTAGE event written to canary_events.jsonl"""
+        state = WatchdogState()
+        log_path = self._write_log([
+            f"ERROR connection refused {i}" for i in range(6)
+        ])
+        on_engine_crash(state, 60.0, data_dir=self._tmpdir.name, log_path=log_path)
+        events_path = os.path.join(self._tmpdir.name, "canary_events.jsonl")
+        self.assertTrue(os.path.exists(events_path))
+        with open(events_path, "r", encoding="utf-8") as f:
+            events = [json.loads(line) for line in f if line.strip()]
+        self.assertTrue(any(e.get("event") == "NETWORK_OUTAGE" for e in events))
+
+    def test_panic_in_tail_still_counts_strike(self):
+        """Panic amid DNS flood → engine_crash path; strike counted.
+        panic 強制走 engine_crash，即使 tail 有 DNS"""
+        state = WatchdogState()
+        log_path = self._write_log(
+            [f"ERROR Temporary failure in name resolution {i}" for i in range(8)]
+            + ["thread 'main' panicked at 'boom'"]
+        )
+        action = on_engine_crash(state, 30.0, data_dir=self._tmpdir.name, log_path=log_path)
+        self.assertEqual(action, "fallback")
+        self.assertEqual(state.total_crashes, 1)
+        self.assertEqual(state.total_network_outages, 0)
+
+    def test_no_log_path_preserves_legacy_behavior(self):
+        """log_path=None → always engine_crash (pre-DNS-CLASSIFY-1 behavior).
+        未傳 log_path 時保持既有行為"""
+        state = WatchdogState()
+        action = on_engine_crash(state, 30.0)
+        self.assertEqual(action, "fallback")
+        self.assertEqual(state.total_crashes, 1)
+
+    def test_missing_log_file_defaults_to_engine_crash(self):
+        """Missing engine.log + log_path param → classifier defaults to engine_crash.
+        log_path 指向不存在檔案 → 分類器回退 engine_crash → 正常計 strike"""
+        state = WatchdogState()
+        missing = self._pathlib.Path(self._tmpdir.name) / "no_such_log.log"
+        action = on_engine_crash(state, 30.0, data_dir=self._tmpdir.name, log_path=missing)
+        self.assertEqual(action, "fallback")
+        self.assertEqual(state.total_crashes, 1)
+        self.assertEqual(state.total_network_outages, 0)
+
+    def test_repeat_outage_while_in_outage_state_returns_none(self):
+        """Second outage while engine_alive=False is a no-op (dedup guard).
+        已在中斷狀態時再次 on_engine_crash → none"""
+        state = WatchdogState(engine_alive=False)
+        log_path = self._write_log([
+            f"ERROR Temporary failure in name resolution {i}" for i in range(8)
+        ])
+        action = on_engine_crash(state, 30.0, data_dir=self._tmpdir.name, log_path=log_path)
+        self.assertEqual(action, "none")
+        self.assertEqual(state.total_network_outages, 0)
 
 
 if __name__ == "__main__":
