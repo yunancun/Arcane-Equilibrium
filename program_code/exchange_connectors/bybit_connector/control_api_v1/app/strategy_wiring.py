@@ -169,11 +169,40 @@ except Exception as _oc_e:
 #   - Guardian 門控：pipeline_bridge.py 將 intent 路由至 GuardianAgent 審查
 # cost_tracker injected for H1/H5 budget gate; None = no budget constraint (fail-open)
 # cost_tracker 注入以啟用 H1/H5 預算門控；None 表示無預算限制（fail-open）
+
+# ── E5-FN-3-FUP-a: Strategist audit_callback wiring ──
+# Wires StrategistAgent._audit(...) calls into GOV_HUB._change_audit_log via
+# agent_audit_bridge. Satisfies Root Principle #8 "Trade Explainability" by
+# ensuring every Strategist decision (edge_evaluation / intent_produced /
+# shadow_intent / directive_received / risk_verdict_received / ...) produces
+# an append-only audit record.
+# Fail-open: GOV_HUB unavailable → bridge silently drops events; Strategist's
+# main path is never disrupted.
+# Local import of make_agent_audit_callback: the canonical import lives later
+# in the AnalystAgent block (line ~258) — duplicated here to keep Strategist's
+# wiring self-contained without reordering the existing Analyst import.
+# 將 StrategistAgent._audit(...) 透過 agent_audit_bridge 接到 GOV_HUB._change_audit_log；
+# 落實根原則 #8「交易可解釋」。fail-open：GOV_HUB 不可用時靜默丟棄，不阻塞 agent。
+# 此處本地重複 import make_agent_audit_callback 以保持 Strategist 接線自包含，
+# 不重排位於 AnalystAgent 區塊的既有 import（約第 258 行）。
+from .agent_audit_bridge import make_agent_audit_callback as _make_agent_audit_callback_strategist
+
+_GOV_HUB_FOR_STRATEGIST: Any = None
+try:
+    from .paper_trading_routes import GOV_HUB as _GOV_HUB_FOR_STRATEGIST
+except ImportError:
+    pass
+
+_STRATEGIST_AUDIT_CB = _make_agent_audit_callback_strategist(
+    _GOV_HUB_FOR_STRATEGIST, "StrategistAgent"
+)
+
 STRATEGIST_AGENT = StrategistAgent(
     config=StrategistConfig(shadow=False),
     message_bus=MESSAGE_BUS,
     ollama_client=OLLAMA_CLIENT,
     cost_tracker=_COST_TRACKER_FOR_STRATEGIST,
+    audit_callback=_STRATEGIST_AUDIT_CB,
 )
 STRATEGIST_AGENT.start()
 
@@ -212,12 +241,29 @@ try:
 except (ImportError, AttributeError):
     pass
 
+# ── E5-FN-3-FUP-b: Guardian audit_callback wiring ──
+# Wires GuardianAgent._audit(...) calls into GOV_HUB._change_audit_log via
+# agent_audit_bridge. Satisfies Root Principle #8 "Trade Explainability" by
+# ensuring every verdict / event_assessed / risk_pattern_received /
+# directive_received call-site appends an audit row.
+# Fail-open: if GOV_HUB is unavailable the bridge silently drops events so
+# Guardian's main risk-review path is never disrupted.
+# 將 GuardianAgent._audit(...) 透過 agent_audit_bridge 接到 GOV_HUB._change_audit_log；
+# 落實根原則 #8「交易可解釋」。fail-open：GOV_HUB 不可用時靜默丟棄，不阻塞 Guardian。
+# Local import: AnalystAgent pilot (Batch 9) imports make_agent_audit_callback
+# later in the module; we do an isolated import here so re-ordering Batch 8/9
+# stays safe (leaves pilot import intact).
+# 本處使用局部 import，避免影響 Batch 9 AnalystAgent pilot 原有 import 位置。
+from .agent_audit_bridge import make_agent_audit_callback as _make_guardian_audit_cb
+_GUARDIAN_AUDIT_CB = _make_guardian_audit_cb(_GOV_HUB_FOR_GUARDIAN, "GuardianAgent")
+
 GUARDIAN_AGENT = GuardianAgent(
     config=GuardianConfig(),
     message_bus=MESSAGE_BUS,
     risk_manager=_RISK_MGR_FOR_GUARDIAN,
     ollama_client=OLLAMA_CLIENT,
     governance_hub=_GOV_HUB_FOR_GUARDIAN,
+    audit_callback=_GUARDIAN_AUDIT_CB,
 )
 GUARDIAN_AGENT.start()
 
@@ -366,11 +412,20 @@ try:
     except ImportError:
         pass
 
+    # ── E5-FN-3-FUP-c: Executor audit_callback wiring ──
+    # Wires ExecutorAgent._audit(...) calls into GOV_HUB._change_audit_log via
+    # agent_audit_bridge. Satisfies Root Principle #8 "Trade Explainability".
+    # Fail-open: GOV_HUB unavailable → bridge silently drops events.
+    # 將 ExecutorAgent._audit(...) 透過 agent_audit_bridge 接到 GOV_HUB._change_audit_log；
+    # 落實根原則 #8「交易可解釋」。fail-open：GOV_HUB 不可用時靜默丟棄，不阻塞 agent。
+    _EXECUTOR_AUDIT_CB = make_agent_audit_callback(_GOV_HUB_FOR_EXECUTOR, "ExecutorAgent")
+
     EXECUTOR_AGENT = ExecutorAgent(
         config=ExecutorConfig(),
         message_bus=MESSAGE_BUS,
         paper_engine=PAPER_ENGINE,
         governance_hub=_GOV_HUB_FOR_EXECUTOR,
+        audit_callback=_EXECUTOR_AUDIT_CB,
     )
     EXECUTOR_AGENT.start()
     CONDUCTOR.register_agent(_AR11.EXECUTOR, resource_mode="local")
