@@ -304,12 +304,13 @@ impl IntentProcessor {
             .latest_turnover(&intent.symbol)
             .unwrap_or(100_000_000.0);
         // Use live per-symbol fee rate (AccountManager → legacy → constant fallback).
+        // EDGE-P2-3 Phase 1a: PostOnly intents pay maker fee; others pay taker.
         let fill = execution::execute_market_fill_with_rate(
             paper_state.latest_price(&intent.symbol).unwrap_or(0.0),
             final_qty,
             intent.is_long,
             turnover,
-            self.fee_rate(&intent.symbol),
+            self.fee_rate_for_intent(&intent.symbol, intent),
         );
 
         IntentResult {
@@ -535,7 +536,8 @@ impl IntentProcessor {
                     "cost_gate fail-closed: ATR unavailable (SEC-11) / 成本門禁因 ATR 不可用拒絕");
                 return ExchangeGateResult::rejected(RejectionCode::CostGateAtrUnavailable.format());
             }
-            let fee_rate = self.fee_rate(&intent.symbol);
+            // EDGE-P2-3 Phase 1a: PostOnly intents pay maker fee in the cost gate.
+            let fee_rate = self.fee_rate_for_intent(&intent.symbol, intent);
             let volume_24h = paper_state.latest_turnover(&intent.symbol).unwrap_or(0.0);
 
             // ─── Gate 3a · EDGE-P3-1 A4: ML edge-predictor gate (spec §7.3) ───

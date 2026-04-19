@@ -177,6 +177,12 @@ const DEFAULT_P1_RISK_PCT: f64 = 0.02;
 /// Bybit USDT 永續合約默認 taker 費率，API 未提供時的回退值。
 const DEFAULT_TAKER_FEE_RATE: f64 = 0.00055;
 
+/// Bybit USDT perp default maker fee (0.02%) — fallback when API rate not available.
+/// Matches `account_manager::DEFAULT_MAKER_FEE` so cold-boot cost estimates agree
+/// with the AccountManager path once Bybit API rates arrive.
+/// Bybit USDT 永續默認 maker 費率，API 未提供時的回退值；與 AccountManager 常量對齊。
+const DEFAULT_MAKER_FEE_RATE: f64 = 0.0002;
+
 /// Default slippage rate when volume data is unavailable (5 bps).
 /// 無成交量數據時的默認滑點率（5 bps）。
 const DEFAULT_SLIPPAGE_RATE: f64 = 0.0005;
@@ -988,6 +994,33 @@ impl IntentProcessor {
             return am.taker_fee(symbol);
         }
         self.taker_fee_rate.unwrap_or(DEFAULT_TAKER_FEE_RATE)
+    }
+
+    /// Effective maker fee rate for a symbol. Resolution order:
+    ///   1. Live `AccountManager.maker_fee(symbol)` (Bybit API, refreshed hourly)
+    ///   2. `DEFAULT_MAKER_FEE_RATE` constant (cold-boot before API responds)
+    /// EDGE-P2-3 Phase 1a: Separate maker path from taker so cost estimates
+    /// for PostOnly/Limit entries reflect the ~5× lower fee.
+    /// 有效 maker 費率（per-symbol）：API → 常量。
+    pub fn maker_fee_rate(&self, symbol: &str) -> f64 {
+        if let Some(ref am) = self.account_manager {
+            return am.maker_fee(symbol);
+        }
+        DEFAULT_MAKER_FEE_RATE
+    }
+
+    /// Pick maker vs taker fee based on the intent's TimeInForce. PostOnly
+    /// means the order will only rest on book (maker); anything else pays taker.
+    /// EDGE-P2-3 Phase 1a：依 TIF 選擇 maker/taker 費率。PostOnly→maker，其餘→taker。
+    pub fn fee_rate_for_intent(&self, symbol: &str, intent: &OrderIntent) -> f64 {
+        if matches!(
+            intent.time_in_force,
+            Some(crate::order_manager::TimeInForce::PostOnly)
+        ) {
+            self.maker_fee_rate(symbol)
+        } else {
+            self.fee_rate(symbol)
+        }
     }
 }
 

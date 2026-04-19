@@ -1621,4 +1621,47 @@ mod predictor_wiring_tests {
             "ts_ms=0 must not emit snapshot (DB-RUN-6 alignment)"
         );
     }
+
+    // ── EDGE-P2-3 Phase 1a: maker fee selection tests ──
+    // ── EDGE-P2-3 Phase 1a：maker 費率選擇測試 ──
+
+    /// fee_rate_for_intent returns taker rate for non-PostOnly intents
+    /// (Market, Limit+GTC/IOC/FOK). Matches prior `fee_rate()` behavior.
+    /// fee_rate_for_intent 對非 PostOnly 意圖（Market / GTC 等）返回 taker 費率。
+    #[test]
+    fn test_fee_rate_for_intent_uses_taker_for_market() {
+        let proc = IntentProcessor::new();
+        let intent = super::make_intent("BTCUSDT", true);
+        // Market/GTC → taker fallback (cold-boot: DEFAULT_TAKER_FEE_RATE = 0.00055)
+        let rate = proc.fee_rate_for_intent(&intent.symbol, &intent);
+        assert!((rate - 0.00055).abs() < 1e-12);
+        assert_eq!(rate, proc.fee_rate(&intent.symbol));
+    }
+
+    /// PostOnly intents route to maker rate (~2.75× cheaper on cold-boot).
+    /// PostOnly 意圖走 maker 費率（冷啟動為 taker 的約 1/2.75）。
+    #[test]
+    fn test_fee_rate_for_intent_uses_maker_for_postonly() {
+        use crate::order_manager::TimeInForce;
+        let proc = IntentProcessor::new();
+        let mut intent = super::make_intent("BTCUSDT", true);
+        intent.time_in_force = Some(TimeInForce::PostOnly);
+        let rate = proc.fee_rate_for_intent(&intent.symbol, &intent);
+        // Cold-boot maker default = 0.0002, taker default = 0.00055
+        assert!((rate - 0.0002).abs() < 1e-12);
+        assert!(rate < proc.fee_rate(&intent.symbol));
+    }
+
+    /// Explicit GTC (non-PostOnly) must still pay taker — guards against future
+    /// TIF variants being accidentally classified as maker.
+    /// 明確 GTC（非 PostOnly）仍走 taker，防止未來 TIF 變體被誤分類。
+    #[test]
+    fn test_fee_rate_for_intent_gtc_stays_taker() {
+        use crate::order_manager::TimeInForce;
+        let proc = IntentProcessor::new();
+        let mut intent = super::make_intent("BTCUSDT", true);
+        intent.time_in_force = Some(TimeInForce::GTC);
+        let rate = proc.fee_rate_for_intent(&intent.symbol, &intent);
+        assert!((rate - 0.00055).abs() < 1e-12);
+    }
 }

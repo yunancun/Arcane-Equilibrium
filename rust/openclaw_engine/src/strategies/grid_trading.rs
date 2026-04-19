@@ -13,6 +13,7 @@ use std::collections::HashMap;
 use super::grid_helpers;
 use super::{ParamRange, Strategy, StrategyAction, StrategyParams};
 use crate::intent_processor::OrderIntent;
+use crate::order_manager::TimeInForce;
 use serde::{Deserialize, Serialize};
 use tracing::info;
 
@@ -39,6 +40,13 @@ pub struct GridTradingParams {
     pub adx_high_threshold: f64,
     /// Max cooldown multiplier boost (1+boost = max multiplier). / 最大冷卻倍率加成。
     pub max_cooldown_boost: f64,
+    /// EDGE-P2-3 Phase 1a: emit PostOnly Limit entries to pay maker fees.
+    /// Default `false` (conservative; per-env TOML enables).
+    /// EDGE-P2-3 Phase 1a：入場改發 PostOnly Limit 以支付 maker 費率；默認 false。
+    pub use_maker_entry: bool,
+    /// EDGE-P2-3 Phase 1a: bps offset from last_price for PostOnly limit placement.
+    /// EDGE-P2-3 Phase 1a：PostOnly 限價偏移（bps）。
+    pub maker_price_offset_bps: f64,
 }
 
 impl Default for GridTradingParams {
@@ -54,6 +62,8 @@ impl Default for GridTradingParams {
             adx_low_threshold: 20.0,
             adx_high_threshold: 50.0,
             max_cooldown_boost: 5.0,
+            use_maker_entry: DEFAULT_USE_MAKER_ENTRY,
+            maker_price_offset_bps: DEFAULT_MAKER_OFFSET_BPS,
         }
     }
 }
@@ -186,6 +196,21 @@ const DEFAULT_FEE_PCT: f64 = 0.00055;
 /// 默認自適應範圍：當前價格 ±10% 用於初始化/再平衡網格。
 const ADAPTIVE_RANGE_PCT: f64 = 0.10;
 
+/// EDGE-P2-3 Phase 1a: Default PostOnly price offset in basis points.
+/// BUY limit placed at `last_price * (1 - offset/10_000)`, SELL at `last_price * (1 + offset/10_000)`
+/// so the order rests on the passive side of the book. 1 bps is tight enough to
+/// still fill on normal ranging markets while avoiding accidental crossings.
+/// EDGE-P2-3 Phase 1a：PostOnly 限價偏移（bps）。BUY 以 last×(1−offset/萬)，
+/// SELL 以 last×(1+offset/萬)，確保掛單停在被動側。1 bps 在常規震盪中仍能成交。
+const DEFAULT_MAKER_OFFSET_BPS: f64 = 1.0;
+
+/// EDGE-P2-3 Phase 1a: Default for `use_maker_entry`. Root principle #6 —
+/// failure default shrink: cold-boot stays on proven Market path until the
+/// per-env TOML opts in.
+/// EDGE-P2-3 Phase 1a：`use_maker_entry` 默認值。根原則 #6（失敗默認收縮），
+/// 冷啟動維持已驗證的 Market 路徑，待各環境 TOML 顯式啟用。
+const DEFAULT_USE_MAKER_ENTRY: bool = false;
+
 // GridSpacingMode moved to grid_helpers.rs (A0-a extraction), re-exported for compatibility.
 // GridSpacingMode 已移至 grid_helpers.rs（A0-a 提取），此處重導出保持兼容。
 pub use super::grid_helpers::GridSpacingMode;
@@ -281,6 +306,16 @@ pub struct GridTrading {
     pub(crate) adx_high_threshold: f64,
     /// Max cooldown boost factor (range 1x to 1+boost). / 最大冷卻倍率加成。
     pub(crate) max_cooldown_boost: f64,
+    /// EDGE-P2-3 Phase 1a: emit PostOnly Limit entries instead of Market.
+    /// Close path remains Market (entry-only scope). Default `false` per
+    /// root principle #6; enabled via per-env TOML once validated.
+    /// EDGE-P2-3 Phase 1a：入場發 PostOnly Limit 取代 Market；平倉維持 Market。
+    /// 默認 false（根原則 #6），由 TOML 顯式啟用。
+    pub(crate) use_maker_entry: bool,
+    /// EDGE-P2-3 Phase 1a: bps offset from last_price for PostOnly limit placement.
+    /// Only honored when `use_maker_entry = true`.
+    /// EDGE-P2-3 Phase 1a：PostOnly 掛單相對 last_price 的 bps 偏移；僅在開啟 maker 時生效。
+    pub(crate) maker_price_offset_bps: f64,
 }
 
 // build_linear_levels, build_geometric_levels, build_levels moved to grid_helpers.rs (A0-a)
@@ -323,6 +358,8 @@ impl GridTrading {
             adx_low_threshold: 20.0,
             adx_high_threshold: 50.0,
             max_cooldown_boost: 5.0,
+            use_maker_entry: DEFAULT_USE_MAKER_ENTRY,
+            maker_price_offset_bps: DEFAULT_MAKER_OFFSET_BPS,
         }
     }
 
@@ -362,6 +399,8 @@ impl GridTrading {
             adx_low_threshold: 20.0,
             adx_high_threshold: 50.0,
             max_cooldown_boost: 5.0,
+            use_maker_entry: DEFAULT_USE_MAKER_ENTRY,
+            maker_price_offset_bps: DEFAULT_MAKER_OFFSET_BPS,
         }
     }
 
@@ -415,6 +454,8 @@ impl GridTrading {
             adx_low_threshold: 20.0,
             adx_high_threshold: 50.0,
             max_cooldown_boost: 5.0,
+            use_maker_entry: DEFAULT_USE_MAKER_ENTRY,
+            maker_price_offset_bps: DEFAULT_MAKER_OFFSET_BPS,
         }
     }
 
@@ -588,6 +629,9 @@ impl GridTrading {
         self.adx_low_threshold = params.adx_low_threshold;
         self.adx_high_threshold = params.adx_high_threshold;
         self.max_cooldown_boost = params.max_cooldown_boost;
+        // EDGE-P2-3 Phase 1a: honor runtime maker toggle + offset updates.
+        self.use_maker_entry = params.use_maker_entry;
+        self.maker_price_offset_bps = params.maker_price_offset_bps;
         info!(
             strategy = "grid_trading",
             grid_count = self.grid_count,
@@ -608,6 +652,8 @@ impl GridTrading {
             adx_low_threshold: self.adx_low_threshold,
             adx_high_threshold: self.adx_high_threshold,
             max_cooldown_boost: self.max_cooldown_boost,
+            use_maker_entry: self.use_maker_entry,
+            maker_price_offset_bps: self.maker_price_offset_bps,
         }
     }
 }
@@ -825,23 +871,50 @@ impl Strategy for GridTrading {
             compute_grid_confidence(ctx.indicators) * self.conf_scale,
         );
 
+        // EDGE-P2-3 Phase 1a: resolve entry order shape (Market vs PostOnly Limit).
+        // Close path stays Market; only new-open intents use the maker path.
+        // BUY offset below last_price; SELL offset above — so PostOnly always rests passively.
+        // EDGE-P2-3 Phase 1a：決定入場單型（Market 或 PostOnly Limit）。平倉維持 Market；
+        // 僅新開倉意圖走 maker 路徑。BUY 掛 last 下方、SELL 掛 last 上方，確保被動側。
+        let maker_entry_for_buy = if self.use_maker_entry {
+            let offset = self.maker_price_offset_bps / 10_000.0;
+            (
+                "limit".to_string(),
+                Some(ctx.price * (1.0 - offset)),
+                Some(TimeInForce::PostOnly),
+            )
+        } else {
+            ("market".to_string(), None, None)
+        };
+        let maker_entry_for_sell = if self.use_maker_entry {
+            let offset = self.maker_price_offset_bps / 10_000.0;
+            (
+                "limit".to_string(),
+                Some(ctx.price * (1.0 + offset)),
+                Some(TimeInForce::PostOnly),
+            )
+        } else {
+            ("market".to_string(), None, None)
+        };
+
         if idx < prev_idx {
             // Price crossed down → buy. If net_inventory < 0 (short), this closes short → Close.
             // Otherwise it's a new long → Open.
             // 價格下穿 → 買入。若 net_inventory < 0（空倉），為平空 → Close；否則新多 → Open。
+            let (order_type, limit_price, time_in_force) = maker_entry_for_buy;
             let intent = OrderIntent {
                 symbol: ctx.symbol.to_string(),
                 is_long: true,
                 qty: self.qty_per_grid,
                 confidence: conf,
                 strategy: self.name().into(),
-                order_type: "market".into(),
-                limit_price: None,
+                order_type,
+                limit_price,
                 // Grid has no confluence/persistence; builder fills 0.0.
                 // Grid 無 confluence/persistence；builder 填 0。
                 confluence_score: None,
                 persistence_elapsed_ms: None,
-                time_in_force: None,
+                time_in_force,
             };
             if cur_inventory < 0.0 {
                 intents.push(StrategyAction::Close {
@@ -858,19 +931,20 @@ impl Strategy for GridTrading {
             // Price crossed up → sell. If net_inventory > 0 (long), this closes long → Close.
             // Otherwise it's a new short → Open.
             // 價格上穿 → 賣出。若 net_inventory > 0（多倉），為平多 → Close；否則新空 → Open。
+            let (order_type, limit_price, time_in_force) = maker_entry_for_sell;
             let intent = OrderIntent {
                 symbol: ctx.symbol.to_string(),
                 is_long: false,
                 qty: self.qty_per_grid,
                 confidence: conf,
                 strategy: self.name().into(),
-                order_type: "market".into(),
-                limit_price: None,
+                order_type,
+                limit_price,
                 // Grid has no confluence/persistence; builder fills 0.0.
                 // Grid 無 confluence/persistence；builder 填 0。
                 confluence_score: None,
                 persistence_elapsed_ms: None,
-                time_in_force: None,
+                time_in_force,
             };
             if cur_inventory > 0.0 {
                 intents.push(StrategyAction::Close {
@@ -1432,5 +1506,153 @@ mod tests {
         // trend_score=0.6*0.5+0.4*0.5=0.5, multiplier=1+2.5=3.5, cooldown=60_000*3.5=210_000
         let cd = g.compute_trend_adjusted_cooldown(Some(snap));
         assert_eq!(cd, 210_000, "expected 60_000*3.5 = 210_000, got {cd}");
+    }
+
+    // ── EDGE-P2-3 Phase 1a: PostOnly maker entry tests ──
+    // ── EDGE-P2-3 Phase 1a：PostOnly maker 入場測試 ──
+
+    /// Default constructor must keep `use_maker_entry = false` (root principle #6
+    /// — failure default shrink). Cold-boot behavior stays on proven Market path.
+    /// 默認構造必須保持 `use_maker_entry = false`（根原則 #6），冷啟動走已驗證 Market 路徑。
+    #[test]
+    fn test_grid_maker_disabled_by_default() {
+        let g = GridTrading::new(49000.0, 51000.0);
+        assert!(!g.use_maker_entry, "use_maker_entry must default to false");
+        assert_eq!(
+            g.maker_price_offset_bps, DEFAULT_MAKER_OFFSET_BPS,
+            "maker_price_offset_bps must default to 1 bps"
+        );
+        let g2 = GridTrading::new_geometric(49000.0, 51000.0);
+        assert!(!g2.use_maker_entry);
+        let g3 = GridTrading::new_adaptive();
+        assert!(!g3.use_maker_entry);
+    }
+
+    /// When maker disabled, buy intents keep order_type="market" + time_in_force=None
+    /// (byte-identical legacy behavior).
+    /// maker 關閉時，買入意圖維持 market + TIF=None（與舊行為 byte-identical）。
+    #[test]
+    fn test_grid_market_entry_when_maker_disabled() {
+        let mut g = GridTrading::new(49000.0, 51000.0);
+        assert!(!g.use_maker_entry);
+        g.on_tick(&ctx(50500.0, 0));
+        let i = g.on_tick(&ctx(49500.0, 100_000));
+        match &i[0] {
+            StrategyAction::Open(intent) => {
+                assert_eq!(intent.order_type, "market");
+                assert!(intent.limit_price.is_none());
+                assert!(intent.time_in_force.is_none());
+            }
+            other => panic!("expected Open, got {:?}", other),
+        }
+    }
+
+    /// Buy on down-cross with maker enabled emits PostOnly Limit below last_price.
+    /// 下穿買入時，maker 啟用 → PostOnly Limit 掛在 last_price 下方。
+    #[test]
+    fn test_grid_buy_postonly_below_last_price() {
+        let mut g = GridTrading::new(49000.0, 51000.0);
+        g.use_maker_entry = true;
+        g.maker_price_offset_bps = 1.0; // 1 bps
+        g.on_tick(&ctx(50500.0, 0));
+        let i = g.on_tick(&ctx(49500.0, 100_000));
+        match &i[0] {
+            StrategyAction::Open(intent) => {
+                assert!(intent.is_long);
+                assert_eq!(intent.order_type, "limit");
+                assert_eq!(intent.time_in_force, Some(TimeInForce::PostOnly));
+                let lp = intent.limit_price.expect("limit_price set");
+                let expected = 49500.0 * (1.0 - 1.0 / 10_000.0);
+                assert!(
+                    (lp - expected).abs() < 1e-9,
+                    "buy PostOnly must be below last_price: got {lp}, expected {expected}"
+                );
+                assert!(lp < 49500.0, "buy limit must rest below last_price");
+            }
+            other => panic!("expected Open, got {:?}", other),
+        }
+    }
+
+    /// Sell on up-cross with maker enabled emits PostOnly Limit above last_price.
+    /// 上穿賣出時，maker 啟用 → PostOnly Limit 掛在 last_price 上方。
+    #[test]
+    fn test_grid_sell_postonly_above_last_price() {
+        let mut g = GridTrading::new(49000.0, 51000.0);
+        g.use_maker_entry = true;
+        g.maker_price_offset_bps = 2.0; // 2 bps
+        g.on_tick(&ctx(49500.0, 0));
+        let i = g.on_tick(&ctx(50500.0, 100_000));
+        match &i[0] {
+            StrategyAction::Open(intent) => {
+                assert!(!intent.is_long);
+                assert_eq!(intent.order_type, "limit");
+                assert_eq!(intent.time_in_force, Some(TimeInForce::PostOnly));
+                let lp = intent.limit_price.expect("limit_price set");
+                let expected = 50500.0 * (1.0 + 2.0 / 10_000.0);
+                assert!(
+                    (lp - expected).abs() < 1e-9,
+                    "sell PostOnly must be above last_price: got {lp}, expected {expected}"
+                );
+                assert!(lp > 50500.0, "sell limit must rest above last_price");
+            }
+            other => panic!("expected Open, got {:?}", other),
+        }
+    }
+
+    /// maker_price_offset_bps scales the limit price proportionally.
+    /// maker_price_offset_bps 線性縮放限價。
+    #[test]
+    fn test_grid_maker_offset_scales_linearly() {
+        let mut g = GridTrading::new(49000.0, 51000.0);
+        g.use_maker_entry = true;
+        g.maker_price_offset_bps = 5.0; // 5 bps
+        g.on_tick(&ctx(50500.0, 0));
+        let i = g.on_tick(&ctx(49500.0, 100_000));
+        match &i[0] {
+            StrategyAction::Open(intent) => {
+                let lp = intent.limit_price.unwrap();
+                let expected = 49500.0 * (1.0 - 5.0 / 10_000.0);
+                assert!((lp - expected).abs() < 1e-9);
+            }
+            other => panic!("expected Open, got {:?}", other),
+        }
+    }
+
+    /// Close actions stay Market even when maker entry is enabled — Phase 1a scope
+    /// intentionally excludes close path (PostOnly rejects would strand positions).
+    /// 平倉維持 Market，即使 maker 入場啟用 — Phase 1a 刻意排除平倉路徑（避免 PostOnly 拒絕卡倉）。
+    #[test]
+    fn test_grid_close_stays_market_with_maker_enabled() {
+        let mut g = GridTrading::new(49000.0, 51000.0);
+        g.use_maker_entry = true;
+        g.maker_price_offset_bps = 1.0;
+        // Build positive inventory via Open
+        g.on_tick(&ctx(50500.0, 0));
+        g.on_tick(&ctx(49500.0, 100_000));
+        // Sell with positive inventory → Close (not Open)
+        let i = g.on_tick(&ctx(50500.0, 200_000));
+        match &i[0] {
+            StrategyAction::Close { reason, .. } => {
+                assert_eq!(reason, "grid_close_long");
+                // Close variant carries no order_type field — it's always Market at dispatch.
+            }
+            other => panic!("expected Close, got {:?}", other),
+        }
+    }
+
+    /// update_params round-trips maker fields so Agent IPC can toggle at runtime.
+    /// update_params 來回保留 maker 欄位，Agent IPC 可運行時切換。
+    #[test]
+    fn test_grid_update_params_roundtrips_maker_fields() {
+        let mut g = GridTrading::new(49000.0, 51000.0);
+        let mut params = g.get_params();
+        assert!(!params.use_maker_entry);
+        params.use_maker_entry = true;
+        params.maker_price_offset_bps = 3.0;
+        g.update_params(params).expect("update_params");
+        let p2 = g.get_params();
+        assert!(p2.use_maker_entry);
+        assert!((p2.maker_price_offset_bps - 3.0).abs() < 1e-9);
+        assert!(g.use_maker_entry);
     }
 }

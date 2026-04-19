@@ -41,6 +41,14 @@ spacing_mode = "linear"
 health_check_interval = 200
 max_out_of_range = 50
 conf_scale = 1.0
+# EDGE-P2-3 Phase 1a (2026-04-20): live stays on Market entries (conservative,
+# root principle #6). Flip to `true` only after demo validation produces positive
+# net edge with maker fills. Reject/timeout handling lands in Phase 1b before
+# any live opt-in.
+# EDGE-P2-3 Phase 1a：live 維持 Market（根原則 #6 保守）。待 demo 驗證出正 net edge
+# 且 Phase 1b 拒絕/超時處理完成後再評估開啟。
+use_maker_entry = false
+maker_price_offset_bps = 1.0
 
 # OC-5: FundingArb — inactive for live until paper/demo validated.
 # OC-5：FundingArb — live 暫不啟用，待紙盤/模擬盤驗證通過。

@@ -41,6 +41,13 @@ spacing_mode = "linear"
 health_check_interval = 200
 max_out_of_range = 50
 conf_scale = 1.0
+# EDGE-P2-3 Phase 1a (2026-04-20): PostOnly Limit entries cut per-side fee
+# from taker ~5.5 bps → maker ~2 bps, targeting P1-10 grid fee-drag root cause.
+# Close path stays Market (entry-only scope). Demo enabled first for validation.
+# EDGE-P2-3 Phase 1a：入場改發 PostOnly Limit，單邊費率 taker→maker，
+# 針對 P1-10 grid 手續費拖累問題；平倉維持 Market。Demo 先啟用驗證。
+use_maker_entry = true
+maker_price_offset_bps = 1.0
 
 # OC-5: FundingArb — funding rate capture strategy.
 # Demo = validation before live, same params as paper.
