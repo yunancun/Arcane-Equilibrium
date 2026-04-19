@@ -25,6 +25,7 @@ import logging
 import os
 import stat
 import tempfile
+import threading
 import time
 from pathlib import Path
 from typing import Any, Optional
@@ -246,8 +247,10 @@ def _delete_live_authorization_file() -> bool:
 
 def _trigger_live_auth_recheck_fire_and_forget() -> None:
     """
-    PIPELINE-SLOT-1 Phase 3: wake the Rust `LiveAuthWatcher` so it rechecks
-    authorization.json now rather than waiting up to 5s for its next poll.
+    PIPELINE-SLOT-1 Phase 3 + Phase 4: wake the Rust `LiveAuthWatcher` so it
+    rechecks authorization.json now rather than waiting up to 5s for its next
+    poll. Offloaded to a daemon thread so the HTTP request thread returns
+    immediately even if the engine IPC socket is hung.
 
     Call this right after every successful ``_write_signed_live_authorization()``
     (renew / renew-review) AND after every ``_delete_live_authorization_file()``
@@ -258,9 +261,11 @@ def _trigger_live_auth_recheck_fire_and_forget() -> None:
       * No exception propagates to callers — the renew/revoke flow must
         succeed regardless of whether the trigger lands. The watcher's
         5-second poll is the backstop.
-      * A short 1.5-second timeout (via ``sync_ipc_call`` default 3s
-        shrunk) bounds the worst-case stall in the HTTP request thread
-        if the engine socket is temporarily unresponsive.
+      * Phase 4 FUP (F1): the IPC call runs on a **daemon background thread**
+        so even a full 1.5s ``sync_ipc_call`` timeout never delays the
+        operator-facing HTTP response. Prior impl blocked the request thread
+        for up to 1.5s on socket hangs; watcher's 5s poll remains the
+        functional backstop for correctness.
 
     Acceptable response ``accepted`` values (all logged, none raised):
       * ``true``                 — watcher will recheck immediately
@@ -268,35 +273,61 @@ def _trigger_live_auth_recheck_fire_and_forget() -> None:
       * ``false, "watcher_closed"`` — engine is shutting down
       * ``false, "watcher_disabled"`` — engine has no Live pipeline
 
-    PIPELINE-SLOT-1 Phase 3：喚醒 Rust `LiveAuthWatcher` 立刻重檢
-    authorization.json，不等最多 5 秒下次輪詢。`_write_signed_live_authorization()`
-    （renew / renew-review）與 `_delete_live_authorization_file()`（revoke）後
-    緊接呼叫。引擎負責 Live respawn/teardown，Python 只給「剛有變化，麻煩看一下」提示。
+    PIPELINE-SLOT-1 Phase 3 + Phase 4：喚醒 Rust `LiveAuthWatcher` 立刻重檢
+    authorization.json，不等最多 5 秒下次輪詢。Phase 4（F1 修正）把 IPC 調用
+    offload 到 daemon 背景執行緒 — HTTP handler 立即回應，即便 engine socket
+    卡住 1.5 秒 timeout 也不拖累 operator。Watcher 5 秒輪詢仍是正確性 backstop。
 
     設計上 fire-and-forget：錯誤不往上拋，任何失敗交給 5 秒輪詢 backstop。
     """
-    try:
-        # Lazy import so circular import is impossible and test envs that
-        # do not ship ipc_client still load the renew/revoke routes.
-        # 延遲 import 避免循環依賴；測試環境不帶 ipc_client 也能載入本模組。
-        from .ipc_client import sync_ipc_call
 
-        resp = sync_ipc_call(
-            method="trigger_live_auth_recheck",
-            params={},
-            timeout=1.5,
-        )
-        logger.info(
-            "PIPELINE-SLOT-1 Phase 3: trigger_live_auth_recheck resp=%s",
-            resp,
-        )
-    except Exception as exc:
-        # Best-effort: log and move on. The watcher's 5s poll will converge
-        # anyway, and failing the renew/revoke flow because of an advisory
-        # trigger would be the wrong call. 盡力：log 後放過，5s 輪詢自會收斂。
-        logger.warning(
-            "PIPELINE-SLOT-1 Phase 3: trigger_live_auth_recheck failed "
-            "(non-fatal, 5s poll will catch up): %s",
+    def _fire() -> None:
+        """
+        Background body — runs the actual IPC call. All exceptions swallowed;
+        5s watcher poll is the correctness backstop.
+        背景執行函式 — 跑實際 IPC 調用。所有例外吞掉，5 秒輪詢保底。
+        """
+        try:
+            # Lazy import so circular import is impossible and test envs that
+            # do not ship ipc_client still load the renew/revoke routes.
+            # 延遲 import 避免循環依賴；測試環境不帶 ipc_client 也能載入本模組。
+            from .ipc_client import sync_ipc_call
+
+            resp = sync_ipc_call(
+                method="trigger_live_auth_recheck",
+                params={},
+                timeout=1.5,
+            )
+            logger.info(
+                "PIPELINE-SLOT-1 Phase 3: trigger_live_auth_recheck resp=%s",
+                resp,
+            )
+        except Exception as exc:
+            # Best-effort: log and move on. The watcher's 5s poll will converge
+            # anyway, and failing the renew/revoke flow because of an advisory
+            # trigger would be the wrong call. 盡力：log 後放過，5s 輪詢自會收斂。
+            logger.debug(
+                "PIPELINE-SLOT-1 Phase 3: trigger_live_auth_recheck failed "
+                "(non-fatal, 5s poll will catch up): %s",
+                exc,
+            )
+
+    # Daemon thread so it never blocks interpreter shutdown, and so HTTP
+    # handler returns immediately without waiting for the IPC round-trip.
+    # daemon thread — 不阻塞直譯器退出；HTTP 回應不等 IPC 往返。
+    try:
+        threading.Thread(
+            target=_fire,
+            name="live_auth_recheck_trigger",
+            daemon=True,
+        ).start()
+    except Exception as exc:  # noqa: BLE001 — thread-start failure is last-resort
+        # Extremely unlikely (OS thread-limit exhaustion etc). Fall through
+        # silently; watcher's 5s poll will still catch up.
+        # 幾乎不可能（OS thread 上限等）。靜默放過，5 秒輪詢保底。
+        logger.debug(
+            "PIPELINE-SLOT-1 Phase 4: thread start failed (5s poll will "
+            "catch up): %s",
             exc,
         )
 

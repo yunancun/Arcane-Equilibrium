@@ -435,6 +435,15 @@ git status && git log --oneline -5
 
 ## 📚 已完成歸檔索引
 
+**2026-04-19 PIPELINE-SLOT-1 Phases 1-4**（commits `3005fc0` Phase 1 · `e28f3d8` Phase 2 · `d92f25d` Phase 3 · Phase 4 pending）：
+- Phase 1：`pipeline_slot.rs` 物理層抽象（SlotKind / try_spawn / teardown）+ `restart_kind.rs` sentinel（manual vs unattended 區分）+ `restart_all.sh` atomic sentinel write ✅
+- Phase 2：auth-fail scope engine-wide → live-only（demo + paper 不再被 auth 過期拉下）+ `spawn_backoff.rs` exponential backoff 1s→60s ✅
+- Phase 3：`live_auth_watcher.rs` 4-branch state machine + 5s poll + IPC `trigger_live_auth_recheck` fast path（sub-100ms respawn TTR）+ Python `_trigger_live_auth_recheck_fire_and_forget()` hook 到 renew/revoke ✅
+- Phase 4（pending）：E2 F1 threaded-offload FUP（daemon thread 讓 HTTP 回應立即返回）+ 8 新 pytest `test_live_auth_recheck_trigger.py` + ADR `docs/decisions/2026-04-19--pipeline_slot_1_auth_fail_scoping.md`（D1-D4 決策 + 4 替代路徑拒絕）
+- 保留：2026-04-14 Fix 3 panic→engine-wide cancel 語義不變；Rust side NO governance state persistence（ADR D4 理由）
+- 測試基準線：engine lib 1629 / bin 38 / pytest +8 = 2828 passed
+- 詳見 ADR D1-D4 論證
+
 **2026-04-18**（commits `293a808` `1239312` `81a3807` `4de5689` `9bd637a` `b17152f`）：
 - P0-6 永久修復（synthetic VerdictInfo 讓 rejected_reason 寫入 `risk_verdicts.reasons`）+ DIAG 移除 ✅ DEPLOYED
 - P0-11 LIVE-GATE-BINDING-1（Python↔Rust HMAC `authorization.json` + 5min re-verify）→ Rust 可驗證門控 3→**4** ✅ DEPLOYED
