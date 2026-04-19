@@ -244,6 +244,63 @@ def _delete_live_authorization_file() -> bool:
         return False
 
 
+def _trigger_live_auth_recheck_fire_and_forget() -> None:
+    """
+    PIPELINE-SLOT-1 Phase 3: wake the Rust `LiveAuthWatcher` so it rechecks
+    authorization.json now rather than waiting up to 5s for its next poll.
+
+    Call this right after every successful ``_write_signed_live_authorization()``
+    (renew / renew-review) AND after every ``_delete_live_authorization_file()``
+    (revoke). The engine is the owner of Live respawn/teardown — Python only
+    hints "something changed, please look".
+
+    Fire-and-forget by design:
+      * No exception propagates to callers — the renew/revoke flow must
+        succeed regardless of whether the trigger lands. The watcher's
+        5-second poll is the backstop.
+      * A short 1.5-second timeout (via ``sync_ipc_call`` default 3s
+        shrunk) bounds the worst-case stall in the HTTP request thread
+        if the engine socket is temporarily unresponsive.
+
+    Acceptable response ``accepted`` values (all logged, none raised):
+      * ``true``                 — watcher will recheck immediately
+      * ``false, "coalesced"``   — a prior trigger is still pending
+      * ``false, "watcher_closed"`` — engine is shutting down
+      * ``false, "watcher_disabled"`` — engine has no Live pipeline
+
+    PIPELINE-SLOT-1 Phase 3：喚醒 Rust `LiveAuthWatcher` 立刻重檢
+    authorization.json，不等最多 5 秒下次輪詢。`_write_signed_live_authorization()`
+    （renew / renew-review）與 `_delete_live_authorization_file()`（revoke）後
+    緊接呼叫。引擎負責 Live respawn/teardown，Python 只給「剛有變化，麻煩看一下」提示。
+
+    設計上 fire-and-forget：錯誤不往上拋，任何失敗交給 5 秒輪詢 backstop。
+    """
+    try:
+        # Lazy import so circular import is impossible and test envs that
+        # do not ship ipc_client still load the renew/revoke routes.
+        # 延遲 import 避免循環依賴；測試環境不帶 ipc_client 也能載入本模組。
+        from .ipc_client import sync_ipc_call
+
+        resp = sync_ipc_call(
+            method="trigger_live_auth_recheck",
+            params={},
+            timeout=1.5,
+        )
+        logger.info(
+            "PIPELINE-SLOT-1 Phase 3: trigger_live_auth_recheck resp=%s",
+            resp,
+        )
+    except Exception as exc:
+        # Best-effort: log and move on. The watcher's 5s poll will converge
+        # anyway, and failing the renew/revoke flow because of an advisory
+        # trigger would be the wrong call. 盡力：log 後放過，5s 輪詢自會收斂。
+        logger.warning(
+            "PIPELINE-SLOT-1 Phase 3: trigger_live_auth_recheck failed "
+            "(non-fatal, 5s poll will catch up): %s",
+            exc,
+        )
+
+
 def _get_hub():
     """Lazy import GovernanceHub singleton. / 延遲導入 GovernanceHub 單例。"""
     try:
@@ -454,6 +511,10 @@ def _revoke_existing_live_auths(actor_id: str) -> None:
     # 即使 SM-01 revoke 失敗也要嘗試刪除簽名檔案 — Rust gate 是最後防線，
     # 不能留著陳舊 on-disk 記錄繼續跑。
     _delete_live_authorization_file()
+    # PIPELINE-SLOT-1 Phase 3: wake the Rust watcher so teardown happens in
+    # <100ms rather than up to 5s after the next poll tick.
+    # PIPELINE-SLOT-1 Phase 3：喚醒 Rust watcher，<100ms 內拆 Live，不等 5s 輪詢。
+    _trigger_live_auth_recheck_fire_and_forget()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -630,6 +691,11 @@ def post_live_renew(
             detail=f"Signed authorization write failed: {exc}",
         )
 
+    # PIPELINE-SLOT-1 Phase 3: wake the Rust watcher for sub-5s respawn
+    # TTR after renew, rather than waiting for the next poll tick.
+    # PIPELINE-SLOT-1 Phase 3：renew 後喚醒 Rust watcher，<5s 完成 respawn。
+    _trigger_live_auth_recheck_fire_and_forget()
+
     # Re-grant execution authority in live_session_routes / 重新授予 execution_authority
     try:
         from .live_session_routes import _grant_execution_authority_internal
@@ -716,6 +782,11 @@ def post_live_renew_review(
             status_code=500,
             detail=f"Signed authorization write failed: {exc}",
         )
+
+    # PIPELINE-SLOT-1 Phase 3: wake the Rust watcher (same reasoning as
+    # the /renew path — sub-5s respawn TTR after full review).
+    # PIPELINE-SLOT-1 Phase 3：renew-review 後喚醒 Rust watcher，<5s respawn。
+    _trigger_live_auth_recheck_fire_and_forget()
 
     try:
         from .live_session_routes import _grant_execution_authority_internal
