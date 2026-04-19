@@ -1,6 +1,6 @@
 # OpenClaw TODO — 工作清單
 
-**最後更新**：2026-04-19 23:40（E5-FN-3 loop closure — FUP-d Scout wiring + NIT-1/2/3 非阻塞 cleanup 並行 sub-agent 完成 · 5/5 agent 全綠 + log throttle + 默認分支 test + thread-safety 文檔）
+**最後更新**：2026-04-20 00:55（P1-5 A2 落地 + P1-10 R1 觀察 24h 實測 · ma_crossover asym 翻轉 0.88 / win rate 崩 37.8% · MICRO-PROFIT-FIX-1 未空轉 demo+paper 36 closes 100% W +$12.17 · Track P T4 phys_lock 0 觸發符合設計）
 **Engine**：PID 3029633 · binary mtime 2026-04-19 22:32 → 含全部先前 staged 修復（P0-6 永久修復 + P1-7 A INTENT-WRITE-GAP-1 + P1-7 B edge_estimator scheduler + P1-17 Winsorize + LIVE-GATE-BINDING-1 + DYNAMIC-RISK-1 + IPC-SCAN-1c + FILL-CONTEXT-LINKAGE-1 + EXIT-FEATURES-TABLE-1 Phase 1b + Plan N ai_budget dedup + E5-P1/P2 + E5-FN-2/3 + DISPATCH-RETRY-1 + MARKET-KLINES-STALE-1 + DUAL-TRACK Track P T1-T5 骨架 + PIPELINE-SLOT-1 Phase 1-4）+ **EXIT-FEATURES-TABLE-1 Phase 1b GAP-1**（commit `35808e9` apply_confirmed_fill 接線，待流量驗證）
 **Python uvicorn**：PID 3029688（4 workers）· started 2026-04-19 22:33 → 含 P0-12 LIVE-GATE-FALLBACK-1 + E5-FN-3 AnalystAgent pilot + PIPELINE-SLOT-1 Phase 4 daemon-thread trigger
 **PIPELINE-SLOT-1 live 驗證**：LiveAuthWatcher 22:33 啟動 `env=LiveDemo poll_interval_secs=5`；authorization.json 已由 Manual restart sentinel 清除；等 operator 走 GUI renew → 應 ≤1s 觀察到 Live pipeline 重生
@@ -268,12 +268,14 @@ git status && git log --oneline -5
 
 **⚠️ 起因**：2026-04-19 15:37 redeploy 後重查 R:R 不對稱，追蹤到以下結構事實：
 
-1. **legacy COST EDGE 已死但 Track P T4 未接線 → Priority 6 真空態**
+1. **（2026-04-20 修正）legacy COST EDGE block 註解 ≠ 功能退場；MICRO-PROFIT-FIX-1 接手了 Priority 6**
    - `risk_checks.rs:245-259` 舊 COST EDGE gate block 已註解（DEPRECATED）
    - 新 PHYS-LOCK gate（`risk_checks.rs:129-165`）存在但依賴 `exit_features: Option<&ExitFeatures>`
    - `tick_pipeline/on_tick.rs:1456-1474` `evaluate_positions(...)` closure 目前傳 `|_| None` → PHYS-LOCK 永遠拿不到 features → 永遠 Hold
-   - 結果：舊 COST EDGE 不再砍 winner（好），但新 PHYS-LOCK 無法啟動（Priority 6 空轉）
-   - DB 驗證：redeploy 後 `trading.fills` 0 條 COST EDGE close，證明舊路徑徹底死
+   - **但 MICRO-PROFIT-FIX-1 narrow-band gate（`ratio ≥ 0.20 & pnl ∈ [0.30%, 0.55%]`）正常運作**，close 時 `strategy_name` 仍寫 `risk_close:COST EDGE:...` 舊 label → DB grep `COST EDGE` 會命中 MICRO-PROFIT 輸出
+   - 2026-04-20 24h 實測：demo 24 筆 + paper 12 筆 MICRO-PROFIT close，**100% 勝率 / +$4.68 / +$7.49**，是當前最重要的正 edge 安全網
+   - Track P T4 `phys_lock_*` 實測 0 觸發（符合 ExitFeatures=None 設計）
+   - **原稿 claim「0 條 COST EDGE close」有誤** — 是 prefix label 相同造成歸類問題，並非 Priority 6 空轉
 
 2. **`trailing_activation_pct=0.8` 非 hardcoded**
    - `rust/openclaw_engine/src/config/risk_config.rs:518` `default_trailing_activation_pct() -> 1.0`
@@ -281,7 +283,10 @@ git status && git log --oneline -5
      - `risk_config.toml:35 = 1.0` · `risk_config_demo.toml:35 = 0.8` · `risk_config_paper.toml:51 = 0.5` · `risk_config_live.toml:37 = 0.5`
    - **7d DB 查核 `trailing_stop` 觸發次數 = 0** → R:R 不對稱**非** trailing 主因
 
-3. **DB 真實 R:R 不對稱主因**：redeploy 前舊 COST EDGE 在 pnl +0.30~0.33% 近 100% 勝率斬 winner，虧損側放任跑到 stop_loss；redeploy 後 COST EDGE 死，但 PHYS-LOCK 未接 → 當前進入「沒有微利退場」的短暫窗口
+3. **DB 真實 R:R 不對稱主因（2026-04-20 refined）**：
+   - ma_crossover asym 2.54× → 0.88：虧損側已縮小到比獲勝側小；但 win rate 從 64% 跌到 37.8%（37 exits）→ **問題變成「勝率」而非「不對稱」**，Track P T4 加速理由弱化
+   - grid_trading asym 1.71× → 2.09× 惡化：fee drag 持續主導；需 P1-10 grid cooldown_ms / min holding time 結構修
+   - MICRO-PROFIT-FIX-1 在 `risk_checks.rs` MICRO-PROFIT 分支（`pnl ∈ [0.30%, 0.55%]`）仍照常觸發，demo 24 + paper 12 closes/24h，100% 勝率 +$12.17 net → Priority 6 **未空轉**
 
 **路線決策（user 已批 2026-04-19）**：
 
@@ -295,23 +300,33 @@ git status && git log --oneline -5
 - 需新增 `peak_reached_ts_ms` 到 `PaperPosition`（legacy migration），見 §DUAL-TRACK Phase 2 Track P 第 82 行
 - **決策**：不搶進度，R1 觀察後若 R:R 持續惡化再考慮加速 T4 wiring；否則按 W24 排期
 
-**R1 觀察 SQL 模板**（每 6h 跑，對比 redeploy 前 24h baseline）：
-```sql
--- post-redeploy exit-kind distribution (redeploy_utc='2026-04-19 13:37')
-SELECT engine_mode, strategy_name,
-       SPLIT_PART(owner_strategy,':',1) AS close_kind,
-       COUNT(*), ROUND(AVG(realized_pnl)::numeric,4) AS avg_pnl,
-       ROUND(SUM(realized_pnl)::numeric,2) AS total_pnl
-FROM trading.fills
-WHERE ts_ms >= EXTRACT(EPOCH FROM TIMESTAMP '2026-04-19 13:37+00')*1000
-  AND owner_strategy LIKE '%close%' OR owner_strategy LIKE 'risk_close%'
-GROUP BY 1,2,3 ORDER BY 1,2,4 DESC;
-```
+**R1 觀察 SQL 模板**（每 6h 跑，對比 redeploy 前 24h baseline）：`strategy_name` 既是 entry 策略也是 close reason（無 owner_strategy 欄位）。查詢改用 `strategy_name LIKE 'strategy_close:%'` / `'risk_close:%'` / `'stop_trigger:%'` / `'ipc_%'` 等 prefix，見下方 2026-04-20 R1 實跑 SQL（24h bucket by strategy_kind）。
 
-**R1 驗收指標**：
-- 若 24h 後 R:R demo ma_crossover ≤1.5× 自然收斂 → Track P T4 不急，按 W24
-- 若 R:R 仍 >2.0× 或 fee-drag 惡化 → 加速 Track P T4 為 P1-critical
-- 若 redeploy 後 `risk_close:phys_lock_*` 數 > 0 → T4 已部分活化（檢查程式碼走查）
+**R1 驗收 ✅ 2026-04-20 00:55 local（24h 窗口實測，redeploy 2026-04-19 22:32 local）**：
+
+| engine | kind | n | win_rate | asym | total |
+|---|---|---:|---:|---:|---:|
+| demo | ma_crossover | 37 | **0.378** | **0.88** | −$6.39 |
+| demo | grid_trading | 98 | 0.531 | **2.09** | −$9.72 |
+| demo | risk:cost_edge_micro | 24 | 1.000 | — | **+$4.68** |
+| demo | risk:trailing | 2 | 1.000 | — | **+$13.22** |
+| demo | risk:fast_track | 7 | 0.571 | 1.16 | +$0.59 |
+| demo | risk:dynamic_stop | 1 | 0.000 | — | −$10.41 |
+| paper | grid_trading | 34 | 0.235 | 1.80 | −$10.80 |
+| paper | risk:cost_edge_micro | 12 | 1.000 | — | +$7.49 |
+| live_demo | ma/grid | 8 | 0.625 | — | +$0.70（樣本太小） |
+
+**關鍵判讀**：
+- **ma_crossover asym 2.54× → 0.88 翻轉**（虧損側現在比獲勝側小），但 win rate 64%→37.8% 崩 → R:R 題目變成「勝率問題」非「不對稱問題」。Track P T4 加速理由弱化。
+- **grid_trading asym 1.71× → 2.09× 惡化**。fee drag 持續主導，P1-10 grid cooldown audit 仍為 P0-3 edge 重評阻塞。
+- **Track P T4 phys_lock 0 觸發**（符合：`on_tick.rs:1456-1474` `evaluate_positions(..., |_| None)` 導致 PHYS-LOCK 拿不到 ExitFeatures，永遠 Hold）。
+- **⚠️ P1-10 推理鏈 §1 「redeploy 後 `trading.fills` 0 條 COST EDGE close」claim 不成立**：24h demo 24 + paper 12 COST EDGE close 真實發生，都是 MICRO-PROFIT-FIX-1 narrow-band `ratio ≥ 0.20 & pnl ≥ 0.30%` 輸出（`risk_checks.rs` MICRO-PROFIT 分支仍寫 `strategy_name="risk_close:COST EDGE:..."` 重用 label）。**Priority 6 未真空**，MICRO-PROFIT gate 吸收了舊 COST EDGE 的 winner-pick 功能（demo +$4.68 / paper +$7.49 / 24 + 12 fills 100% 勝率），是當前最重要的正 edge 來源。
+- **MICRO-PROFIT + trailing combined 輸出**：demo +$18.49 / 24h（+$6.68 fast_track/cost_edge_micro + $13.22 trailing − $10.41 dynamic_stop outlier）。基礎策略 −$16.11 / risk_close +$7.39 → demo 24h 總 net **−$8.72**。
+
+**判決**：
+1. Track P T4 wiring **按 W24 排期不加速**（asym 已翻、phys_lock 0 fire 符合設計）。
+2. P0-3 edge 重評**仍推遲** — grid fee drag + ma win rate collapse 需要 P1-10 結構性修復（grid cooldown_ms + ma SL/TP 重設），而非退場層補救。
+3. P1-10 推理鏈 §1 需更正（上方 inline 已改述）；MICRO-PROFIT-FIX-1 label reuse 應註釋到 §二 推理鏈，避免後續誤判。
 
 ### P1-11 · BB-BREAKOUT-DORMANT-1 — 5 重 AND 14d 0 fills
 - **根因**：`bb_breakout.rs:457-518` 入場 5 重 AND（squeeze → expansion → volume → Donchian → persistence）+ 時序要求過嚴
