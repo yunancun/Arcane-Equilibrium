@@ -584,6 +584,16 @@ pub struct OrderDispatchRequest {
     /// learning.decision_features.context_id 可 JOIN。開單攜帶新建倉 id；
     /// 平倉攜帶當前持倉 entry id；呼叫方不知時傳空字串。
     pub context_id: String,
+    /// EDGE-P2-3 Phase 1a: mirrored from OrderIntent.order_type — lowercased
+    /// "market" | "limit". Dispatch layer parses to OrderType enum.
+    /// EDGE-P2-3 Phase 1a：鏡射 OrderIntent.order_type — 派發層解析為 enum。
+    pub order_type: String,
+    /// EDGE-P2-3 Phase 1a: mirrored from OrderIntent.limit_price — required
+    /// when `order_type == "limit"`, ignored for market.
+    /// EDGE-P2-3 Phase 1a：鏡射 OrderIntent.limit_price — limit 單必填。
+    pub limit_price: Option<f64>,
+    /// EDGE-P2-3 Phase 1a: mirrored from OrderIntent.time_in_force.
+    pub time_in_force: Option<crate::order_manager::TimeInForce>,
 }
 
 /// Tick context passed to strategies — borrows from on_tick scope to avoid cloning.

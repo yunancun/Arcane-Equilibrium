@@ -85,6 +85,7 @@ impl TickPipeline {
             // 指令派發的 intent 無策略端 confluence/persistence。
             confluence_score: None,
             persistence_elapsed_ms: None,
+            time_in_force: None,
         };
 
         let result = self.intent_processor.process(
@@ -617,6 +618,9 @@ impl TickPipeline {
                 stop_loss: None,
                 take_profit: None,
                 context_id: entry_ctx,
+                order_type: "market".to_string(),
+                limit_price: None,
+                time_in_force: None,
             });
             if is_primary {
                 self.pending_close_symbols.insert(symbol.to_string());
@@ -701,6 +705,9 @@ impl TickPipeline {
                         stop_loss: None,
                         take_profit: None,
                         context_id: entry_ctx,
+                        order_type: "market".to_string(),
+                        limit_price: None,
+                        time_in_force: None,
                     });
                     self.pending_close_symbols.insert(symbol);
                 }
@@ -813,6 +820,9 @@ impl TickPipeline {
                     stop_loss: None,
                     take_profit: None,
                     context_id: entry_ctx,
+                    order_type: "market".to_string(),
+                    limit_price: None,
+                    time_in_force: None,
                 });
                 self.pending_close_symbols.insert(symbol.to_string());
                 true

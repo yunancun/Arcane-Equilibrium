@@ -384,6 +384,7 @@ mod tests {
                     limit_price: None,
                     confluence_score: None,
                     persistence_elapsed_ms: None,
+                    time_in_force: None,
                 },
                 result: "ok".into(),
             });

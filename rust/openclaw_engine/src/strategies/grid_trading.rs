@@ -841,6 +841,7 @@ impl Strategy for GridTrading {
                 // Grid 無 confluence/persistence；builder 填 0。
                 confluence_score: None,
                 persistence_elapsed_ms: None,
+                time_in_force: None,
             };
             if cur_inventory < 0.0 {
                 intents.push(StrategyAction::Close {
@@ -869,6 +870,7 @@ impl Strategy for GridTrading {
                 // Grid 無 confluence/persistence；builder 填 0。
                 confluence_score: None,
                 persistence_elapsed_ms: None,
+                time_in_force: None,
             };
             if cur_inventory > 0.0 {
                 intents.push(StrategyAction::Close {

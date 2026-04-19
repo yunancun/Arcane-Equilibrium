@@ -137,6 +137,7 @@ pub(crate) fn build_intent(
         // 合成平倉/審計意圖無策略端決策特徵。
         confluence_score: None,
         persistence_elapsed_ms: None,
+        time_in_force: None,
     }
 }
 

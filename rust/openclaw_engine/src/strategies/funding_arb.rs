@@ -480,6 +480,7 @@ impl Strategy for FundingArb {
             // FundingArb 無 confluence/persistence；feature_builder 會填 0。
             confluence_score: None,
             persistence_elapsed_ms: None,
+            time_in_force: None,
         })]
     }
 

@@ -665,6 +665,7 @@ impl Strategy for BbBreakout {
                             limit_price: None,
                             confluence_score,
                             persistence_elapsed_ms,
+                            time_in_force: None,
                         }));
                         // Commit per-symbol state in a single get_or_init call
                         // to avoid four separate HashMap lookups.

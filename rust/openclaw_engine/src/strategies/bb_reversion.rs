@@ -468,6 +468,7 @@ impl BbReversion {
             limit_price,
             confluence_score,
             persistence_elapsed_ms,
+            time_in_force: None,
         }
     }
 }
