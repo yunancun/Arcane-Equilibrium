@@ -261,7 +261,14 @@ git status && git log --oneline -5
 
 - **核心問題 1**：grid demo fee $31.43 = gross loss 74%；747 exits/24h = 31 筆/h 過度交易
 - **核心問題 2**：ma_crossover demo 不對稱 2.54×（勝 $0.19 / 虧 $0.47），勝率 64% 仍負 edge
-- **下一步**：(1) grid `cooldown_ms` 或 min holding time（`grid_trading.rs` 掛單節奏 audit）(2) ma_crossover SL/TP 比率 audit（ATR mult / R:R gate）
+- **✅ 2026-04-20 grid cooldown audit（下一步 §1 結案）**：cooldown 健康、不是 cadence 問題，歸因 **per-trade fee drag**（結構性問題）
+  - **Code path**：`GridTradingParams.cooldown_ms` serde default=60_000 ms；A3 trend-adaptive boost 1x-6x（`grid_trading.rs:517-542` `compute_trend_adjusted_cooldown`）
+  - **TOML hygiene**：E5-P2-4 把 TOML 路徑打通（`strategies/mod.rs:993` `gt.cooldown_ms = p.grid_trading.cooldown_ms`）但三個 `strategy_params_*.toml::[grid_trading]` 仍缺 explicit `cooldown_ms` → 靜默走 serde default
+  - **實測驗證（demo 24h BLURUSDT, 46 entries）**：min gap 120.3s / p10 123.7s / avg 471.8s → 60s base × 2x trend boost 生效；**0.7s「min gap」是先前混查 entry+close 的 artifact**（grid 平倉→反向開倉瞬間），entry-only 最小 120s 正常
+  - **BLURUSDT 24h 結構**（47 entries + 46 closes = 93 grid fills）：fees **$2.48** / gross PnL **-$0.35** → **net -$2.83**；每 RT 需 ~$0.054 fee vs 實測 gross -$0.008/RT → **結構性 edge 問題，非 cadence**
+  - **修復**：`strategy_params_{demo,paper,live}.toml::[grid_trading]` 補 explicit `cooldown_ms = 60000` + 中英註釋（零行為改動，純 hygiene，暴露先前隱式 default 讓 operator/audit 可見）
+  - **拒絕 simple cooldown bump**：把 60s 提到 300s 雖可減 5x 交易頻率但同比例減 pnl/fee → net 不改善（gross edge 仍負）。真正修復方向 = EDGE-P2-3 maker order 降 fee 6.5 bps→~1 bps 或放棄 grid 策略改走更有 edge 的 entry
+- **下一步**：(1) ~~grid cooldown audit~~ ✅ 結案 — 已補 TOML hygiene，cadence 無 bug，問題在 fee drag (2) ma_crossover SL/TP 比率 audit（ATR mult / R:R gate）(3) EDGE-P2-3 maker order 列為 P1-10 grid 唯一結構出路
 - **與 DUAL-TRACK Phase 2 並行**：兩者修好 P0-3 才能乾淨重評；ma_crossover 若 2.54× 不能收斂到 ≤1.5× 應 disable 或等 R-02 Strategist 重評
 
 #### 🧠 2026-04-19 推進推理鏈（compact-safe，survive-compact 用）

@@ -30,6 +30,12 @@ conf_scale = 1.0
 
 [grid_trading]
 active = true
+# P1-10 AUDIT 2026-04-20: explicit cooldown surfaces the serde default that was
+# previously silent (E5-P2-4 "TOML 不可達漏洞" hygiene follow-up). A3 trend-adaptive
+# boost multiplies this base 1x-6x in trending regimes (observed demo BLURUSDT
+# entry min-gap 120s = 60s × 2x, p10 123.7s → cooldown respected, P1-10 grid
+# negative edge is per-trade fee drag not cadence).
+cooldown_ms = 60000
 grid_levels = 10
 spacing_mode = "linear"
 health_check_interval = 200
