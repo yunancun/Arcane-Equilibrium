@@ -33,6 +33,9 @@ conf_scale = 1.0
 
 [grid_trading]
 active = true
+# P1-10 AUDIT 2026-04-20: explicit cooldown surfaces the serde default that was
+# previously silent (E5-P2-4 "TOML 不可達漏洞" hygiene follow-up). Matches demo/live.
+cooldown_ms = 60000
 grid_levels = 10
 spacing_mode = "linear"
 health_check_interval = 200
