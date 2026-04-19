@@ -256,6 +256,12 @@ class EarnedTrustEngine:
         self._data_dir = data_dir or os.environ.get("OPENCLAW_DATA_DIR", "/tmp/openclaw")
         self._state_path = Path(self._data_dir) / "earned_trust_state.json"
         self._lock = threading.Lock()
+        # MW-RELOAD-1: track the state-file mtime we last loaded so other uvicorn
+        # workers' writes get picked up on the next read/write path without a
+        # restart. 0 means "nothing loaded yet / file absent at init". See
+        # `_reload_if_stale_locked`.
+        # 多 worker 重載：記錄已加載的狀態檔 mtime，其他 worker 寫入後下次讀/寫時自動拾起。
+        self._state_mtime_ns: int = 0
         self._state: EarnedTrustState = self._load_or_init()
 
     # ── Persistence / 持久化 ─────────────────────────────────────────────────
@@ -267,6 +273,10 @@ class EarnedTrustEngine:
                 raw = self._state_path.read_text(encoding="utf-8")
                 data = json.loads(raw)
                 state = EarnedTrustState.from_dict(data)
+                try:
+                    self._state_mtime_ns = self._state_path.stat().st_mtime_ns
+                except OSError:
+                    self._state_mtime_ns = 0
                 logger.info(
                     "EarnedTrustEngine: loaded state tier=%s clean_days=%.1f / "
                     "已加載狀態 tier=%s clean_days=%.1f",
@@ -284,6 +294,43 @@ class EarnedTrustEngine:
             clean_day_streak_start_ts_ms=int(time.time() * 1000),
         )
 
+    def _reload_if_stale_locked(self) -> None:
+        """
+        MW-RELOAD-1: reload state from disk if another process wrote a newer
+        version since our last load/save. Must be called with ``self._lock``
+        held. Keeps multi-uvicorn-worker deployments in sync without a restart.
+
+        No-ops if the file is absent (never written in this deployment) or if
+        our cached mtime matches disk — both are the common cases and stay O(1).
+
+        多 worker 重載：若其他進程在上次 load/save 後寫過新版本，重新從磁盤加載。
+        必須持 self._lock 調用。檔案缺失或 mtime 未變為 no-op。
+        """
+        try:
+            disk_mtime_ns = self._state_path.stat().st_mtime_ns
+        except FileNotFoundError:
+            return
+        except OSError:
+            return
+        if disk_mtime_ns <= self._state_mtime_ns:
+            return
+        try:
+            raw = self._state_path.read_text(encoding="utf-8")
+            data = json.loads(raw)
+            self._state = EarnedTrustState.from_dict(data)
+            self._state_mtime_ns = disk_mtime_ns
+            logger.debug(
+                "EarnedTrustEngine: reloaded stale state (disk mtime newer) / "
+                "檢測到 mtime 更新，已重新加載狀態",
+            )
+        except Exception as exc:
+            # Surface but don't crash the caller — fall through with cached state.
+            # 錯誤時使用快取狀態，不中斷呼叫者。
+            logger.warning(
+                "EarnedTrustEngine: stale-reload failed (%s); keeping cached state / "
+                "重新加載失敗（%s），保留快取狀態", exc, exc,
+            )
+
     def _save(self) -> None:
         """Persist state to disk (must be called under self._lock) / 持久化到磁盤。"""
         try:
@@ -291,6 +338,13 @@ class EarnedTrustEngine:
             self._state_path.write_text(
                 json.dumps(self._state.to_dict(), indent=2), encoding="utf-8"
             )
+            # MW-RELOAD-1: record mtime of what we just wrote so our own write
+            # is not treated as "external" by the next `_reload_if_stale_locked`.
+            # 記錄剛寫入的 mtime，避免自己的寫入被誤判為外部修改。
+            try:
+                self._state_mtime_ns = self._state_path.stat().st_mtime_ns
+            except OSError:
+                pass
         except Exception as exc:
             logger.error(
                 "EarnedTrustEngine: failed to save state: %s / 保存狀態失敗: %s",
@@ -305,6 +359,10 @@ class EarnedTrustEngine:
         返回當前狀態的字典快照用於 API 響應。
         """
         with self._lock:
+            # MW-RELOAD-1: pick up renewals from a sibling uvicorn worker so
+            # the GUI doesn't flip back to "unauthorized" 15–30s post-renew.
+            # 讓其他 worker 的續期立即可見，避免 GUI 刷新時退回未授權 UI。
+            self._reload_if_stale_locked()
             s = self._state
             ttl_h = TIER_TTL_HOURS.get(s.current_tier, 24)
             expires_remaining_h: Optional[float] = None
@@ -330,6 +388,10 @@ class EarnedTrustEngine:
                     s.current_tier == TrustTier.T3_TRUSTED
                     and s.renewals_at_t3 >= T3_MAX_AUTO_RENEWALS
                 ),
+                # MW-RELOAD-1: exposed so live_session_routes._get_execution_authority
+                # can return the authoritative cross-worker-consistent value.
+                # 讓 _get_execution_authority 能拿到跨 worker 一致的授權狀態。
+                "execution_authority_granted": s.execution_authority_granted,
             }
 
     # ── Auth lifecycle hooks / 授權生命週期 hook ─────────────────────────────
@@ -341,6 +403,7 @@ class EarnedTrustEngine:
         實盤 session 啟動（新開或恢復）時調用。如無先前狀態，初始化為 T0。
         """
         with self._lock:
+            self._reload_if_stale_locked()  # MW-RELOAD-1
             now_ms = int(time.time() * 1000)
             self._state.last_renewal_ts_ms = now_ms
             self._state.last_auth_expires_ts_ms = auth_expires_ts_ms
@@ -360,6 +423,7 @@ class EarnedTrustEngine:
         Operator 確認以建議 tier 續期後調用。應用待處理降級，更新 T3 續期計數。
         """
         with self._lock:
+            self._reload_if_stale_locked()  # MW-RELOAD-1
             now_ms = int(time.time() * 1000)
             old_tier = self._state.current_tier
 
@@ -410,6 +474,7 @@ class EarnedTrustEngine:
         在任何 execution_authority 被設為 granted 時調用（session 啟動/手動授予/恢復）。
         """
         with self._lock:
+            self._reload_if_stale_locked()  # MW-RELOAD-1
             self._state.execution_authority_granted = True
             self._save()
 
@@ -421,6 +486,7 @@ class EarnedTrustEngine:
         在主動撤銷、自動停止（回撤觸發）或 session 停止時調用。
         """
         with self._lock:
+            self._reload_if_stale_locked()  # MW-RELOAD-1
             self._state.execution_authority_granted = False
             self._save()
 
@@ -430,6 +496,7 @@ class EarnedTrustEngine:
         主動 session 停止時調用。下次啟動重置為 T0。
         """
         with self._lock:
+            self._reload_if_stale_locked()  # MW-RELOAD-1
             now_ms = int(time.time() * 1000)
             if self._state.current_tier > 0:
                 self._state.promotion_history.append({
@@ -466,6 +533,7 @@ class EarnedTrustEngine:
         觸發時返回 MidSessionDowngrade 事件，否則返回 None。
         """
         with self._lock:
+            self._reload_if_stale_locked()  # MW-RELOAD-1
             current = self._state.current_tier
             already_pending = self._state.pending_downgrade_tier
             target = current  # default: no change
@@ -537,6 +605,7 @@ class EarnedTrustEngine:
         記錄治理事件；重置連勝天數。
         """
         with self._lock:
+            self._reload_if_stale_locked()  # MW-RELOAD-1
             now_ms = int(time.time() * 1000)
             self._state.clean_days_in_tier = 0.0
             self._state.clean_day_streak_start_ts_ms = now_ms
@@ -557,6 +626,7 @@ class EarnedTrustEngine:
         評估下次續期應在哪個 tier。在授權即將到期或已到期時調用。
         """
         with self._lock:
+            self._reload_if_stale_locked()  # MW-RELOAD-1
             current = self._state.current_tier
             pending_down = self._state.pending_downgrade_tier
             clean_days = self._compute_current_clean_days()
@@ -654,6 +724,7 @@ class EarnedTrustEngine:
         從掛鐘刷新 clean_days_in_tier（定期調用，如每天一次）。
         """
         with self._lock:
+            self._reload_if_stale_locked()  # MW-RELOAD-1
             if self._state.pending_downgrade_tier is None:
                 self._state.clean_days_in_tier = self._compute_current_clean_days()
                 self._save()
