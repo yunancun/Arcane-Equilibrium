@@ -81,9 +81,65 @@ Usage (in strategy_wiring.py):
 from __future__ import annotations
 
 import logging
-from typing import Any, Callable, Optional
+import time
+from typing import Any, Callable, Dict, Optional, Tuple
 
 logger = logging.getLogger(__name__)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Warning throttle for fail-open path / Fail-open 警告節流
+# ═══════════════════════════════════════════════════════════════════════════════
+#
+# Background / 背景:
+#   If ChangeAuditLog.record_change(...) fails (e.g., DB outage), every
+#   _audit(...) call would emit a WARNING. Under the engine's ~50 ticks/sec
+#   workload × 5 agents × multiple audit events per decision cycle, a DB
+#   outage would flood operator logs within seconds.
+#
+#   當 ChangeAuditLog.record_change(...) 失敗（例如 DB 中斷）時，每次 _audit(...)
+#   都會打 WARNING。在 ~50 ticks/sec × 5 agents × 每決策週期多個審計事件的
+#   負載下，DB 中斷幾秒內就會灌滿 operator logs。
+#
+# Design / 設計:
+#   - Throttle WARNING to at most 1 per ``_WARN_THROTTLE_SECONDS`` per
+#     (role, event_class) key. Operator still sees a repeating signal if the
+#     DB stays down, just not a flood.
+#   - Always emit DEBUG for throttled-out events so post-mortem traces are
+#     complete when DEBUG logging is enabled.
+#   - 60-second default chosen as a balance: long enough to prevent flood
+#     but short enough that a 5-min DB outage produces ~5 warnings (obviously
+#     visible) rather than 10s of thousands.
+#   - ``_WARN_THROTTLE_SECONDS`` is module-level to make future operator
+#     tuning trivial (grep-findable knob).
+#
+# Tuning knob / 可調旋鈕:
+#   _WARN_THROTTLE_SECONDS — change here if operator wants more/less warnings.
+#   No runtime config binding on purpose: this is a log-hygiene setting, not
+#   a trading parameter, and hot-reloading logging throttles is not worth
+#   the IPC surface area. If you want to change it, edit this constant and
+#   restart the control_api service.
+_WARN_THROTTLE_SECONDS: float = 60.0
+
+# Keyed by (role_name, event_class_str); value is monotonic timestamp of last WARN.
+# See thread-safety discussion in make_agent_audit_callback docstring — no lock.
+# 以 (role_name, event_class_str) 為鍵；值為最後一次 WARN 的 monotonic 時間戳。
+# 執行緒安全討論見 make_agent_audit_callback docstring — 無鎖。
+_LAST_WARN_AT: Dict[Tuple[str, str], float] = {}
+
+
+def _reset_warn_throttle() -> None:
+    """
+    Reset the warning throttle state (test helper).
+    重置 warning 節流狀態（測試輔助）。
+
+    Mirrors the ``_reset_winsorize_counter`` pattern in
+    ``ml_training/realized_edge_stats.py``. Underscore prefix = internal /
+    test-only; intentionally not in ``__all__``.
+    仿照 ``ml_training/realized_edge_stats.py`` 的 ``_reset_winsorize_counter``
+    模式。底線前綴 = 內部 / 僅測試用；故意不列入 ``__all__``。
+    """
+    _LAST_WARN_AT.clear()
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -214,9 +270,58 @@ def make_agent_audit_callback(
     Fail-open contract (critical):
         - gov_hub None                       → silent skip (debug log)
         - gov_hub._change_audit_log None     → silent skip (debug log)
-        - record_change raises               → swallowed + warning log
+        - record_change raises               → swallowed + throttled warning log
         The wrapped agent's _audit call ALWAYS returns None without side effects
         if the bridge cannot persist. Audit loss is preferred over trade disruption.
+
+    Thread-safety / 執行緒安全:
+        The returned ``_callback`` is SAFE for concurrent invocation from
+        multiple agent threads (Scout / Strategist / Guardian / Analyst /
+        Executor each run on their own thread under the 5-Agent framework).
+
+        返回的 ``_callback`` 可在多個 agent 執行緒中並發呼叫是安全的
+        （5-Agent 框架下 Scout / Strategist / Guardian / Analyst / Executor
+        各自運行於獨立執行緒）。
+
+        Correctness properties / 正確性保證:
+          1. ``ChangeAuditLog.record_change(...)`` is itself thread-safe:
+             verified by ``threading.RLock()`` (``_lock``) guarding all
+             mutating sections in ``change_audit_log.py`` (record_change /
+             approve / reject / snapshot / rollback paths). The bridge relies
+             on this — it does NOT add a redundant outer lock on the fast path.
+             ``ChangeAuditLog.record_change(...)`` 本身為執行緒安全：
+             ``change_audit_log.py`` 所有會變更狀態的區段皆以 ``threading.RLock()``
+             (``_lock``) 保護（record_change / approve / reject / snapshot /
+             rollback 等）。本橋接依賴該保證，熱路徑上不加冗餘外層鎖。
+
+          2. Fail-open exception handling (``except Exception``) ensures no
+             partial-write corruption escapes back into the agent's main
+             path; a failed bridge call is equivalent to a dropped audit row,
+             never a half-written record nor a raised exception.
+             失敗開放的 ``except Exception`` 確保不會有半寫狀態回流至 agent 主路徑；
+             橋接失敗等同於 audit row 被丟棄，絕不會出現半寫記錄或向上拋異常。
+
+          3. The module-level ``_LAST_WARN_AT`` throttle dict used by the
+             warning log path is NOT protected by a lock. This is an
+             intentional design choice: the throttle is approximate — under
+             a race, worst case is a duplicate warning (or one warning missed
+             by a few microseconds). Last-write-wins on a (role, event_class)
+             timestamp is acceptable since the dict key set is small (<20
+             tuples for the 5 agents) and CPython dict writes to existing
+             keys are atomic at the C level. No correctness invariant
+             depends on strict monotonicity of ``_LAST_WARN_AT[key]``.
+             模組級 ``_LAST_WARN_AT`` 節流字典（warning log 路徑使用）未加鎖。
+             此為有意設計：節流本就是近似的 —— race condition 下最壞情況為
+             重複 warning 一次（或漏印一次僅差幾微秒）。以 (role, event_class)
+             為鍵的時間戳「後寫者勝」可接受，因鍵空間小（5 agents 下 <20 tuple），
+             且 CPython 對既有 key 的 dict 寫入在 C 層面為原子操作。
+             無任何正確性不變式依賴 ``_LAST_WARN_AT[key]`` 的嚴格單調性。
+
+        No runtime Lock is added to the bridge itself — the hot path remains
+        lock-free. This keeps per-tick overhead minimal under the expected
+        5-Agent × ~50 ticks/sec workload.
+        橋接本身不引入任何 runtime Lock —— 熱路徑保持無鎖，使得 5-Agent ×
+        ~50 ticks/sec 的預期負載下每 tick 開銷最小。
     """
 
     def _callback(event_type: str, data: Any) -> None:
@@ -268,11 +373,32 @@ def make_agent_audit_callback(
         except Exception as e:
             # Fail-open: never propagate bridge failures into the agent.
             # 失敗開放：橋接失敗絕不向 agent 傳播。
-            logger.warning(
-                "agent_audit_bridge: record_change failed (non-fatal) "
-                "role=%s event=%s err=%s / 橋接失敗（非致命）",
-                role_name, event_type, e,
-            )
+            #
+            # Throttle WARNING to at most 1 per _WARN_THROTTLE_SECONDS per
+            # (role, event_class). This prevents log flood under DB outage
+            # while still surfacing a visible signal every throttle window.
+            # DEBUG is always emitted so post-mortem traces are complete.
+            #
+            # 節流 WARNING：每 _WARN_THROTTLE_SECONDS 每 (role, event_class)
+            # 最多印一次。防止 DB 中斷時 log 被灌爆，同時每節流窗口仍有可見訊號。
+            # DEBUG 永遠印，確保事後追查 trace 完整。
+            event_class = _classify_event(event_type)
+            key = (role_name, event_class)
+            now = time.monotonic()
+            last_at = _LAST_WARN_AT.get(key, 0.0)
+            if now - last_at >= _WARN_THROTTLE_SECONDS:
+                _LAST_WARN_AT[key] = now  # race-tolerant (see module docstring)
+                logger.warning(
+                    "agent_audit_bridge: record_change failed (non-fatal) "
+                    "role=%s event=%s err=%s / 橋接失敗（非致命，每 %.0fs 限印一次）",
+                    role_name, event_type, e, _WARN_THROTTLE_SECONDS,
+                )
+            else:
+                logger.debug(
+                    "agent_audit_bridge: record_change failed (throttled) "
+                    "role=%s event=%s err=%s / 橋接失敗（已節流，%.1fs since last WARN）",
+                    role_name, event_type, e, now - last_at,
+                )
 
     return _callback
 
