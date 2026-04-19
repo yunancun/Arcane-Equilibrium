@@ -194,6 +194,7 @@ mod tests {
             limit_price: None,
             confluence_score: None,
             persistence_elapsed_ms: None,
+            time_in_force: None,
         }
     }
 
@@ -213,6 +214,7 @@ mod tests {
             limit_price: None,
             confluence_score: confluence,
             persistence_elapsed_ms: persistence,
+            time_in_force: None,
         }
     }
 

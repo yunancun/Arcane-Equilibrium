@@ -43,6 +43,7 @@ fn make_intent(symbol: &str, is_long: bool) -> OrderIntent {
         limit_price: None,
         confluence_score: None,
         persistence_elapsed_ms: None,
+        time_in_force: None,
     }
 }
 
@@ -262,6 +263,7 @@ fn test_cost_gate_rejects_low_confidence() {
         limit_price: None,
         confluence_score: None,
         persistence_elapsed_ms: None,
+        time_in_force: None,
     };
     let result = proc.process(&intent, &gov, &state, 10.0, GovernanceProfile::Exploration);
     assert!(!result.submitted);
@@ -291,6 +293,7 @@ fn test_cost_gate_cold_start_exploration_mode() {
         limit_price: None,
         confluence_score: None,
         persistence_elapsed_ms: None,
+        time_in_force: None,
     };
     // ATR=20 (very compressed for BTC) — previously rejected by ATR cold-start gate,
     // now allowed in paper exploration mode to accumulate data.
@@ -320,6 +323,7 @@ fn test_sec11_cost_gate_fail_closed_on_zero_atr() {
         limit_price: None,
         confluence_score: None,
         persistence_elapsed_ms: None,
+        time_in_force: None,
     };
     // ATR=0 (indicator unavailable) — would have been waved through pre-SEC-11
     let result = proc.process(&intent, &gov, &state, 0.0, GovernanceProfile::Exploration);
@@ -351,6 +355,7 @@ fn test_process_gates_only_cost_gate_rejects_low_ev() {
         limit_price: None,
         confluence_score: None,
         persistence_elapsed_ms: None,
+        time_in_force: None,
     };
     // ATR=20 compressed → EV << fee → reject
     let result =
@@ -381,6 +386,7 @@ fn test_cost_gate_accepts_good_ev() {
         limit_price: None,
         confluence_score: None,
         persistence_elapsed_ms: None,
+        time_in_force: None,
     };
     let result = proc.process(&intent, &gov, &state, 5.0, GovernanceProfile::Exploration);
     assert!(result.submitted);
@@ -418,6 +424,7 @@ fn test_cost_gate_cold_start_allows_low_volatility_paper() {
         limit_price: None,
         confluence_score: None,
         persistence_elapsed_ms: None,
+        time_in_force: None,
     };
     let result = proc.process(&intent, &gov, &state, 0.1, GovernanceProfile::Exploration);
     assert!(
@@ -466,6 +473,7 @@ fn test_cost_gate_js_win_rate_weighting() {
         limit_price: None,
         confluence_score: None,
         persistence_elapsed_ms: None,
+        time_in_force: None,
     };
     let result = proc.process(&intent, &gov, &state, 500.0, GovernanceProfile::Exploration);
     assert!(
@@ -495,6 +503,7 @@ fn test_cost_gate_high_volume_reduces_slippage() {
         limit_price: None,
         confluence_score: None,
         persistence_elapsed_ms: None,
+        time_in_force: None,
     };
     // BTC $67k, ATR=300 → atr_pct = 0.4478%
     // cost_pct = (0.00055 + 0.0001) × 2 × 100 = 0.13% (with 1bps slip)
@@ -817,6 +826,7 @@ fn test_opposite_direction_on_existing_position_allowed() {
         limit_price: None,
         confluence_score: None,
         persistence_elapsed_ms: None,
+        time_in_force: None,
     };
     let result = proc.process(
         &intent,
@@ -872,6 +882,7 @@ fn test_gates_only_validation_profile_passes() {
         limit_price: None,
         confluence_score: None,
         persistence_elapsed_ms: None,
+        time_in_force: None,
     };
     let result = proc.process_gates_only(&intent, &gov, &state, 5.0, GovernanceProfile::Validation);
     assert!(
@@ -901,6 +912,7 @@ fn test_gates_only_duplicate_rejected() {
         limit_price: None,
         confluence_score: None,
         persistence_elapsed_ms: None,
+        time_in_force: None,
     };
     let result =
         proc.process_gates_only(&intent, &gov, &state, 50.0, GovernanceProfile::Validation);
@@ -959,6 +971,7 @@ fn test_p06_pre_guardian_reject_exchange_carries_synthetic_verdict_info() {
         limit_price: None,
         confluence_score: None,
         persistence_elapsed_ms: None,
+        time_in_force: None,
     };
     let result =
         proc.process_gates_only(&intent, &gov, &state, 50.0, GovernanceProfile::Validation);
@@ -1048,6 +1061,7 @@ mod predictor_wiring_tests {
             limit_price: None,
             confluence_score: None,
             persistence_elapsed_ms: None,
+            time_in_force: None,
         }
     }
 

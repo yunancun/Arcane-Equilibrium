@@ -970,6 +970,9 @@ impl TickPipeline {
                                         // 讓日後 WS 成交寫入的 entry_context_id
                                         // 與 decision_features 對齊可 JOIN。
                                         context_id: context_id.clone(),
+                                        order_type: intent.order_type.clone(),
+                                        limit_price: intent.limit_price,
+                                        time_in_force: intent.time_in_force,
                                     });
                                     // FUP-RACE: proactively mark mirror so reconciler
                                     // won't orphan-close this position before the WS
@@ -1221,6 +1224,9 @@ impl TickPipeline {
                                             // FILL-CONTEXT-LINKAGE-1：shadow 為 fire-and-forget
                                             // 不註冊 PendingOrder；仍帶入 paper 訊號 id 以備未來追蹤。
                                             context_id: context_id.clone(),
+                                            order_type: intent.order_type.clone(),
+                                            limit_price: intent.limit_price,
+                                            time_in_force: intent.time_in_force,
                                         });
                                     }
                                 }

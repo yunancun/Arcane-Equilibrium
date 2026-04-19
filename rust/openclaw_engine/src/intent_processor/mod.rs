@@ -68,6 +68,13 @@ pub struct OrderIntent {
     /// persistence tracker. Fed to feature slot #10.
     #[serde(default)]
     pub persistence_elapsed_ms: Option<u64>,
+    /// EDGE-P2-3 Phase 1a: optional TimeInForce for maker/limit orders.
+    /// `None` means default (Market → no TIF; Limit → GTC at dispatch).
+    /// Set to `Some(TimeInForce::PostOnly)` for maker-only entries.
+    /// EDGE-P2-3 Phase 1a：maker/limit 可選 TIF。None 保留現行預設行為
+    /// （Market 不帶 TIF；Limit 於派發層預設 GTC）。Maker-only 入場設 Some(PostOnly)。
+    #[serde(default)]
+    pub time_in_force: Option<crate::order_manager::TimeInForce>,
 }
 
 /// Captured Guardian verdict for DB persistence (risk_verdicts table).

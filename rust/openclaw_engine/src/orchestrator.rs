@@ -164,6 +164,7 @@ mod tests {
             limit_price: None,
             confluence_score: None,
             persistence_elapsed_ms: None,
+            time_in_force: None,
         };
         orch.register(Box::new(MockStrategy {
             active: true,
@@ -195,6 +196,7 @@ mod tests {
             limit_price: None,
             confluence_score: None,
             persistence_elapsed_ms: None,
+            time_in_force: None,
         };
         orch.register(Box::new(MockStrategy {
             active: false,

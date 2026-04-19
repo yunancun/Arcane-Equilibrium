@@ -722,6 +722,9 @@ fn test_dual_rail_shadow_order_has_sl_fields() {
         // (apply_confirmed_fill falls back to exec-time recompute).
         // FILL-CONTEXT-LINKAGE-1：空字串保持修前行為（apply_confirmed_fill 退回 exec 重算）。
         context_id: String::new(),
+        order_type: "market".to_string(),
+        limit_price: None,
+        time_in_force: None,
     };
     assert_eq!(req.stop_loss, Some(49000.0));
     assert_eq!(req.take_profit, Some(52000.0));
@@ -765,6 +768,9 @@ fn test_dual_rail_close_orders_no_broker_sl() {
         // FILL-CONTEXT-LINKAGE-1: empty id preserves pre-fix behaviour.
         // FILL-CONTEXT-LINKAGE-1：空字串保持修前行為。
         context_id: String::new(),
+        order_type: "market".to_string(),
+        limit_price: None,
+        time_in_force: None,
     };
     assert!(req.stop_loss.is_none());
     assert!(req.is_close);
@@ -788,6 +794,9 @@ fn test_dual_rail_paper_shadow_skips_broker_sl() {
         // FILL-CONTEXT-LINKAGE-1: empty id preserves pre-fix behaviour.
         // FILL-CONTEXT-LINKAGE-1：空字串保持修前行為。
         context_id: String::new(),
+        order_type: "market".to_string(),
+        limit_price: None,
+        time_in_force: None,
     };
     assert!(!req.is_primary);
     assert!(req.stop_loss.is_none());
@@ -2296,6 +2305,7 @@ fn test_persist_intent_helper_emits_trading_msg_intent_with_engine_mode() {
         limit_price: None,
         confluence_score: None,
         persistence_elapsed_ms: None,
+        time_in_force: None,
     };
     let (tx, mut rx) = tokio::sync::mpsc::channel::<crate::database::TradingMsg>(8);
 

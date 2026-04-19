@@ -424,10 +424,14 @@ pub(super) fn spawn_order_dispatch(
                 category: OrderCategory::Linear,
                 symbol: req.symbol.clone(),
                 side,
-                order_type: OrderType::Market,
+                order_type: if req.order_type.eq_ignore_ascii_case("limit") {
+                    OrderType::Limit
+                } else {
+                    OrderType::Market
+                },
                 qty: req.qty,
-                price: None,
-                time_in_force: None,
+                price: req.limit_price,
+                time_in_force: req.time_in_force,
                 reduce_only: if req.is_close { Some(true) } else { None },
                 close_on_trigger: None,
                 order_link_id: Some(req.order_link_id.clone()),
