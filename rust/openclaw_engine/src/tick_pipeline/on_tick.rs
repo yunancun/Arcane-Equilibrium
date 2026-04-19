@@ -1483,6 +1483,41 @@ impl TickPipeline {
             match decision.action.clone() {
                 RiskAction::Hold => {} // no action / 無動作
                 RiskAction::ClosePosition(reason) => {
+                    // DUAL-TRACK-EXIT-1 T4: route PHYS-LOCK closes through the Combine Layer
+                    // so exit_source is recorded. Phase 1a passes ml_opt=None →
+                    // combine_exit_decision always returns (Lock, Physical). This is a
+                    // pure audit-side wrapper; the existing close path proceeds unchanged.
+                    // Non-PHYS-LOCK reasons (HARD STOP / TAKE PROFIT / TRAILING / TIME STOP /
+                    // COST EDGE pre-T3) are not part of the dual-track exit scope and
+                    // bypass the combine layer (they are P0 hard-stops, not physical-lock
+                    // optimisations).
+                    // TODO(T5 audit): persist exit_source tag into fills.details once
+                    // schema field plumbing lands.
+                    // DUAL-TRACK-EXIT-1 T4：PHYS-LOCK 平倉經 Combine Layer 記錄 exit_source。
+                    // Phase 1a 傳 ml_opt=None → 永遠 (Lock, Physical)；純審計層包裝，
+                    // 現有平倉路徑不變。非 PHYS-LOCK（HARD STOP 等 P0 硬止損）不走 combine layer。
+                    // TODO(T5 audit)：等 fills.details 欄位 plumbing 到位後持久化 exit_source。
+                    if reason.starts_with("PHYS-LOCK") {
+                        let physical = crate::exit_features::PhysicalDecision::Lock(reason.clone());
+                        let combine_cfg = crate::combine_layer::CombineConfig::default();
+                        let (signal, source) = crate::combine_layer::combine_exit_decision(
+                            physical,
+                            None, // Phase 1a: P-only (ml_opt forced None at call-site)
+                            &combine_cfg,
+                        );
+                        debug_assert_eq!(
+                            signal,
+                            crate::combine_layer::ExitSignal::Lock,
+                            "invariant: PHYS-LOCK physical decision must yield ExitSignal::Lock"
+                        );
+                        info!(
+                            symbol = %symbol,
+                            exit_source = %source.as_tag(),
+                            reason = %reason,
+                            "combine layer: PHYS-LOCK → Lock / Combine 層：PHYS-LOCK → Lock"
+                        );
+                    }
+
                     risk_closed_symbols.push(symbol.clone());
                     if is_exchange_mode {
                         if self.pending_close_symbols.contains(symbol) {
