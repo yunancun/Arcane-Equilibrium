@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import json
+import os
 import tempfile
 import threading
 import time
@@ -607,3 +608,117 @@ class TestThreadSafety:
         snap = engine.get_state_snapshot()
         if snap["pending_downgrade_tier"] is not None:
             assert snap["pending_downgrade_tier"] <= snap["current_tier"]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 11. MW-RELOAD-1 — cross-uvicorn-worker state reload / 跨 worker 狀態重載
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestMultiWorkerReload:
+    """
+    Regression coverage for the "GUI flips to unauthorized 15–30s after renew"
+    bug. `uvicorn --workers 4` spawns 4 Python processes, each with its own
+    EarnedTrustEngine singleton. The renew POST mutates one worker; the other
+    three must pick up the new state from the persisted JSON on the next
+    read — not at the next process restart.
+
+    回歸測試：防止 GUI 在 renew 後 15-30 秒退回未授權 UI。uvicorn --workers 4
+    開 4 個進程，每個有獨立 singleton；renew POST 只改一個 worker 的記憶體，
+    其他 worker 必須在下次讀取時從檔案拾起新狀態。
+    """
+
+    def test_snapshot_reloads_when_disk_mtime_advances(self, tmp_path):
+        """Worker B sees worker A's renewal via mtime-based reload."""
+        worker_a = EarnedTrustEngine(data_dir=str(tmp_path))
+        worker_b = EarnedTrustEngine(data_dir=str(tmp_path))
+
+        # Both start T0, no auth expiry / 兩個 worker 初始相同
+        assert worker_a.get_state_snapshot()["last_auth_expires_ts_ms"] is None
+        assert worker_b.get_state_snapshot()["last_auth_expires_ts_ms"] is None
+
+        # Worker A handles /auth/renew → writes new expiry to disk
+        # 模擬 worker A 收到 renew，寫入新到期時間
+        expires = int(time.time() * 1000) + 86_400_000
+        worker_a.on_auth_renewed(new_tier=0, new_expires_ts_ms=expires)
+
+        # Make sure mtime comparison is reliable on coarse-resolution FS
+        # (ext4 is fine, but some tmpfs rounds to seconds).
+        # 某些 tmpfs mtime 只到秒，確保能區分
+        state_path = tmp_path / "earned_trust_state.json"
+        new_mtime = state_path.stat().st_mtime_ns + 1_000_000
+        os.utime(state_path, ns=(new_mtime, new_mtime))
+
+        # Worker B on next snapshot read should see the renewal
+        # Worker B 下次讀取應看見續期
+        snap_b = worker_b.get_state_snapshot()
+        assert snap_b["last_auth_expires_ts_ms"] == expires, (
+            "Worker B must pick up worker A's renewal via mtime reload; "
+            "this is the regression that caused the GUI 'unauthorized flip'."
+        )
+
+    def test_snapshot_no_reload_when_mtime_unchanged(self, tmp_path):
+        """No unnecessary disk reads when state hasn't changed (cheap hot path)."""
+        engine = EarnedTrustEngine(data_dir=str(tmp_path))
+        expires = int(time.time() * 1000) + 86_400_000
+        engine.on_auth_renewed(new_tier=0, new_expires_ts_ms=expires)
+
+        # Mutate in-memory state that isn't on disk (simulate same-process work)
+        # 在記憶體中修改尚未寫盤的欄位
+        with engine._lock:
+            engine._state.last_auth_expires_ts_ms = 99999
+
+        # A stale-check that triggers a reload would clobber the in-memory value
+        # with the saved value. Since mtime hasn't moved, no reload should happen.
+        # 沒有 mtime 變化就不該重載，保留記憶體中的修改
+        snap = engine.get_state_snapshot()
+        assert snap["last_auth_expires_ts_ms"] == 99999
+
+    def test_write_hook_reloads_before_mutating(self, tmp_path):
+        """
+        Write hooks call _reload_if_stale_locked first so a worker doesn't
+        clobber a sibling's newer state. Setup: worker A writes state X;
+        worker B mutates via on_authority_granted; B's save must preserve A's
+        current_tier rather than overwrite with B's stale default.
+        寫 hook 進入時先重載，避免 B worker 覆寫 A worker 的新狀態。
+        """
+        worker_a = EarnedTrustEngine(data_dir=str(tmp_path))
+        worker_b = EarnedTrustEngine(data_dir=str(tmp_path))
+
+        # A promotes to T2 (changes tier) / A 晉升到 T2
+        expires = int(time.time() * 1000) + 86_400_000
+        worker_a.on_auth_renewed(new_tier=2, new_expires_ts_ms=expires)
+
+        state_path = tmp_path / "earned_trust_state.json"
+        new_mtime = state_path.stat().st_mtime_ns + 1_000_000
+        os.utime(state_path, ns=(new_mtime, new_mtime))
+
+        # B sees T0 in its cache, then grants authority
+        # B 的快取還是 T0，但 on_authority_granted 前應先重載
+        worker_b.on_authority_granted()
+
+        # On-disk state must still have tier=2 (A's promotion) AND
+        # execution_authority_granted=true (B's grant)
+        # 磁碟最終狀態：A 的 T2 晉升 + B 的授權都要保留
+        final = json.loads(state_path.read_text(encoding="utf-8"))
+        assert final["current_tier"] == 2, (
+            "Worker B must not clobber worker A's tier=2 promotion"
+        )
+        assert final["execution_authority_granted"] is True, (
+            "Worker B's authority-grant must still take effect"
+        )
+
+    def test_snapshot_exposes_execution_authority_granted(self, engine):
+        """
+        The snapshot exposes `execution_authority_granted` so
+        live_session_routes._get_execution_authority can return the
+        cross-worker-consistent value instead of a per-worker override.
+        """
+        snap = engine.get_state_snapshot()
+        assert "execution_authority_granted" in snap
+        assert snap["execution_authority_granted"] is False  # default
+
+        engine.on_authority_granted()
+        assert engine.get_state_snapshot()["execution_authority_granted"] is True
+
+        engine.on_authority_revoked()
+        assert engine.get_state_snapshot()["execution_authority_granted"] is False

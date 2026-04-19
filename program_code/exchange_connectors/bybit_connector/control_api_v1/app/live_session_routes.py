@@ -269,13 +269,34 @@ def _require_operator(actor: Any) -> None:
 
 def _get_execution_authority() -> str:
     """
-    Read current execution_authority. Checks in-memory override first (set via
-    /api/v1/live/execution-authority/grant), then falls back to governance state.
-    讀取 execution_authority。優先檢查記憶體 override（由 grant 端點設置），
-    然後回退到治理狀態。
+    Read current execution_authority. Prefers the persisted trust-state
+    (cross-worker consistent via MW-RELOAD-1 mtime reload), falls back to
+    this worker's in-memory override, then to GovernanceHub / STORE state.
+
+    Why the trust-state goes first:
+      Uvicorn runs 4 workers. /auth/renew updates only the worker that handled
+      the POST. The trust-state JSON is the single file both workers write and
+      watch, so reading it first guarantees that a GUI poll landing on a
+      sibling worker sees the fresh "granted" within one refresh cycle.
+
+    讀取 execution_authority。優先使用持久化信任狀態（經 MW-RELOAD-1 mtime
+    重載實現跨 worker 一致），退回到本 worker 記憶體 override，再退回 hub/STORE。
+    之所以優先信任狀態：renew 只打到 4 個 worker 中的 1 個，檔案是所有 worker
+    共同讀寫的單一真相來源，能保證 GUI 輪詢撞上其他 worker 時也能立即看到最新。
 
     Returns: "granted" | "not_granted" | "unknown"
     """
+    try:
+        from .earned_trust_engine import get_trust_engine
+        snap = get_trust_engine().get_state_snapshot()
+        persisted = snap.get("execution_authority_granted")
+        if persisted is not None:
+            return "granted" if persisted else "not_granted"
+    except Exception as exc:
+        logger.debug(
+            "trust-state EA read failed, falling back to in-memory/hub: %s", exc,
+        )
+
     global _EXECUTION_AUTHORITY_OVERRIDE
     if _EXECUTION_AUTHORITY_OVERRIDE is not None:
         return _EXECUTION_AUTHORITY_OVERRIDE
