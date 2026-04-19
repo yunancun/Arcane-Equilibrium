@@ -221,11 +221,16 @@ git status && git log --oneline -5
 
 ## 🟡 P1 — 當週活躍
 
-### P1-5 · DEMO-REBOOT-PNL-RESET-1 — drawdown 跨重啟視角斷鏈 audit
-- **現象**：`/tmp/openclaw/demo_state.json` 本輪 `initial=peak=current=747.56`、`total_realized_pnl=72.68`；但 24h `risk_verdicts` 仍見 91,798 條 `drawdown_breach: 92.2% > 25.0%`
-- **問題**：state file 重啟被重 seed → 跨 session drawdown 被遮蔽。設計還是 bug？
-- **下一步**：查 `event_consumer/paper_state_restore.rs` + `demo_state.json` 寫入路徑
-- **影響**：P0-3 重評期 drawdown 真實軌跡 + 21d 穩定性判斷
+### P1-5 · DEMO-REBOOT-PNL-RESET-1 — drawdown 跨重啟視角斷鏈 ✅ 2026-04-20（commit `7cda4e4`）
+- **Root cause**：`peak_balance` 只活在記憶體 → 每次 engine restart 靜默重置 drawdown baseline；剛觸發 5% drawdown 的 session 重啟後看起來乾淨，繞過 fail-closed
+- **修復（Option A + A2）**：`peak_balance` 持久化到 DB；restore-on-start 用 `max(restored, current)` clamp（live recovery 永不降低基準線）；僅 operator IPC 可顯式 reset（重啟不自動重設）
+- **Rust**：`paper_state/checkpoint.rs`（load/write/delete）+ `PaperState::restore_checkpoint` clamp + `reset_drawdown_baseline` + event_consumer hot-path detached UPSERT + `PipelineCommand::ResetDrawdownBaseline` + ipc_server JSON-RPC method
+- **DB**：`V018__paper_state_checkpoint.sql`（trading.paper_state_checkpoint PK=engine_mode，非 hypertable，≤4 rows，CHECK engine_mode whitelist + peak_balance ≥ 0）
+- **Python**：`RiskViewClient.reset_drawdown_baseline` + `POST /api/v1/paper/risk/reset-drawdown-baseline`（Operator role gate + engine whitelist + ChangeType.STATE_CHANGE 審計 + IPC 失敗 HTTP 500 不 fake-success）
+- **Tests**：+9 Rust（engine lib 1629→1640）+ +4 client + +8 route（control_api_v1 2511 passed / 2 pre-existing DYNAMIC-RISK fails）
+- **Deploy**：V018 已 apply 到 trading_postgres；`restart_all.sh --rebuild` 完成（2026-04-20 00:11:43）；checkpoint writer 確認 live（demo row `peak_balance=948.85` 已寫入）
+- **Operator tool**：`helper_scripts/db/deploy_V018.sh`
+- **Worklog**：`docs/worklogs/2026-04-20--p1_5_a2_drawdown_continuity_implementation.md`
 
 ### P1-6 · DEMO-BYBIT-SYNC-ORPHAN-1 — bybit_sync 倉位策略動不了 + Demo 死循環殘留
 - **現象**：6 個 owner_strategy=bybit_sync（DOTUSDT/NEARUSDT/BLESSUSDT/ENAUSDT/AAVEUSDT/BTCUSDT）非本輪策略開
