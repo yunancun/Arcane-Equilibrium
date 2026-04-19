@@ -1,10 +1,10 @@
 # OpenClaw TODO — 工作清單
 
-**最後更新**：2026-04-19 23:15（E5-FN-3-FUP a/b/c 並行 sub-agent wiring 完成 — Strategist + Guardian + Executor audit_callback 接線 + 11 new tests 全綠）
+**最後更新**：2026-04-19 23:40（E5-FN-3 loop closure — FUP-d Scout wiring + NIT-1/2/3 非阻塞 cleanup 並行 sub-agent 完成 · 5/5 agent 全綠 + log throttle + 默認分支 test + thread-safety 文檔）
 **Engine**：PID 3029633 · binary mtime 2026-04-19 22:32 → 含全部先前 staged 修復（P0-6 永久修復 + P1-7 A INTENT-WRITE-GAP-1 + P1-7 B edge_estimator scheduler + P1-17 Winsorize + LIVE-GATE-BINDING-1 + DYNAMIC-RISK-1 + IPC-SCAN-1c + FILL-CONTEXT-LINKAGE-1 + EXIT-FEATURES-TABLE-1 Phase 1b + Plan N ai_budget dedup + E5-P1/P2 + E5-FN-2/3 + DISPATCH-RETRY-1 + MARKET-KLINES-STALE-1 + DUAL-TRACK Track P T1-T5 骨架 + PIPELINE-SLOT-1 Phase 1-4）+ **EXIT-FEATURES-TABLE-1 Phase 1b GAP-1**（commit `35808e9` apply_confirmed_fill 接線，待流量驗證）
 **Python uvicorn**：PID 3029688（4 workers）· started 2026-04-19 22:33 → 含 P0-12 LIVE-GATE-FALLBACK-1 + E5-FN-3 AnalystAgent pilot + PIPELINE-SLOT-1 Phase 4 daemon-thread trigger
 **PIPELINE-SLOT-1 live 驗證**：LiveAuthWatcher 22:33 啟動 `env=LiveDemo poll_interval_secs=5`；authorization.json 已由 Manual restart sentinel 清除；等 operator 走 GUI renew → 應 ≤1s 觀察到 Live pipeline 重生
-**測試基準線**：Rust engine lib **1631** / bin 38 / core 392 / e2e 35 / reconciler_e2e 19 · Python **2839** passed（+11 from E5-FN-3-FUP a/b/c：Strategist 2 + Guardian 6 + Executor 3）+ audit 4 passed / ml_training 238 passed · 2 pre-existing DYNAMIC-RISK-STATUS-TEST-SIG-1 fail（P2 追蹤，不阻 Live）
+**測試基準線**：Rust engine lib **1631** / bin 38 / core 392 / e2e 35 / reconciler_e2e 19 · Python **2848** passed（+9 from E5-FN-3 loop closure：Scout 8 + NIT-2 1）+ audit 4 passed / ml_training 238 passed · 2 pre-existing DYNAMIC-RISK-STATUS-TEST-SIG-1 fail（P2 追蹤，不阻 Live）
 **健康**：demo alive（snapshot age 5.9s） · paper/live 預期 dead（PAPER-DISABLE-1 + 待 renew） · 今日 1 crash（12:25，為 redeploy 前殘留）
 **DB 驗證（22:47）**：market.klines 5 timeframes 在近 1h 寫入 ✅ · trading.intents demo 57 rows/3h ✅（P1-7 A 生效）· learning.exit_features GAP-1 post-22:33 restart 觀察中（目前無 close fill）
 
@@ -431,14 +431,14 @@ GROUP BY 1,2,3 ORDER BY 1,2,4 DESC;
   - [x] **FUP-a Strategist** ✅ 2026-04-19（並行 sub-agent · commit 待填）：wire at `strategy_wiring.py:~172` + `_GOV_HUB_FOR_STRATEGIST` try-import + `_STRATEGIST_AUDIT_CB = make_agent_audit_callback(..., "StrategistAgent")`；new `test_strategist_audit_wiring.py` 2 tests 全綠（ctor + directive_received → STATE_CHANGE row）。StrategistAgent code **零變更**（已於 line 134 接受 `audit_callback` kwarg）。
   - [x] **FUP-b Guardian** ✅ 2026-04-19（並行 sub-agent · commit 待填）：wire at `strategy_wiring.py:~215`（`_GOV_HUB_FOR_GUARDIAN` 既存，補登記）；new `test_guardian_audit_wiring.py` 6 tests 全綠（ctor × 2 + verdict emit + directive state_change + fail-open × 2）。GuardianAgent code **零變更**。
   - [x] **FUP-c Executor** ✅ 2026-04-19（並行 sub-agent · commit 待填）：wire at `strategy_wiring.py:~369`（try 塊內，`_GOV_HUB_FOR_EXECUTOR` 既存）；new `test_executor_audit_wiring.py` 3 tests 全綠（ctor × 2 + directive_received emit）。ExecutorAgent code **零變更**。
-  - [ ] **FUP-d Scout** 🔧（**需 code change**，留最後）：`program_code/.../multi_agent_framework.py:410` ctor 目前硬編碼 `audit_callback=None`，需改為接受 kwarg；另需在 `ScoutAgent.produce_intel()` / `produce_event_alert()` 新增 `self._audit(...)` call-site（當前 0 calls）；最後 wire at `strategy_wiring.py:114`
+  - [x] **FUP-d Scout** ✅ 2026-04-19（並行 sub-agent · commit 待填）：`multi_agent_framework.py` ctor 改為接受 keyword-only `audit_callback` kwarg（positional `(config, message_bus)` 保留）；`produce_intel()` / `produce_event_alert()` 各新增 `self._audit(...)` call-site（bus 路由**之前**）；wire at `strategy_wiring.py:~114` + `_GOV_HUB_FOR_SCOUT` + `_SCOUT_AUDIT_CB`；new `test_scout_audit_wiring.py` 8 tests 全綠（ctor × 3 + produce_intel × 2 + produce_event_alert × 1 + fail-open × 2）。
 
-- **測試模板**：參照 `program_code/.../tests/test_agent_audit_bridge.py`（12 tests）；每新 agent wiring 加 1 integration test 驗 `audit_callback` 被 ctor 收下 + 至少 1 path 觸發 `record_change`
+- **測試模板**：參照 `program_code/.../tests/test_agent_audit_bridge.py`（13 tests）；每新 agent wiring 加 1 integration test 驗 `audit_callback` 被 ctor 收下 + 至少 1 path 觸發 `record_change`
 
 - **E2 APPROVE_WITH_NITS 非阻塞遺留**：
-  - [ ] **NIT-1 log throttle**：`agent_audit_bridge.py` fail-open warning 未限流（`record_change` 失敗時每 tick 1 條 WARNING）→ DB 死時會刷屏；考慮降 `debug` 或每 N 秒節流
-  - [ ] **NIT-2 test 覆蓋缺口**：未知 event_type 落保守默認 `PARAMETER_CHANGE` 分支無 test；加一條 one-liner 鎖定契約
-  - [ ] **NIT-3 thread-safety 文檔**：`ChangeAuditLog.record_change` 跨 thread 安全性未在 bridge 文檔化；agents 跨 thread 跑，fail-open 已防 crash，但語義應註明
+  - [x] **NIT-1 log throttle** ✅ 2026-04-19（Option C DEBUG 常開 + WARNING 60s 節流）：`agent_audit_bridge.py` 新 `_WARN_THROTTLE_SECONDS=60.0` + `_LAST_WARN_AT` dict keyed by `(role_name, event_class)` via `time.monotonic()`；DEBUG 總是發、WARNING 每桶 60s 一條；DB 死時刷屏問題解決。測試用 `_reset_warn_throttle()` 清狀態（未加入 `__all__`）。
+  - [x] **NIT-2 test 覆蓋缺口** ✅ 2026-04-19：新 `test_unknown_event_type_defaults_to_parameter_change`（event_type `"opaque_event_xyz"` 不匹配任何 keyword → `PARAMETER_CHANGE` 保守默認）；bridge test 12 → 13。
+  - [x] **NIT-3 thread-safety 文檔** ✅ 2026-04-19：`make_agent_audit_callback` docstring 新增中英對照 Thread-safety 段，涵蓋 (a) 跨 thread 調用安全 (b) `ChangeAuditLog._lock = threading.RLock()` 驗證（change_audit_log.py:156 + record_change:188）(c) fail-open 防 partial-write (d) `_LAST_WARN_AT` race-tolerant 設計說明。
 
 - **驗收**：全 5 agent（Scout/Strategist/Guardian/Analyst/Executor）wire 完成後，`change_audit_log` 表應看到 `who IN ('ScoutAgent','StrategistAgent','GuardianAgent','AnalystAgent','ExecutorAgent')` 全部出現；搭配 Analyst pilot 觀察週（uvicorn 重啟後）做對比
 

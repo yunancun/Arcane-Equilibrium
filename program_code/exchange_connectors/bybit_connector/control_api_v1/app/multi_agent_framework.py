@@ -401,13 +401,28 @@ class ScoutAgent(BaseAgent):
         self,
         config: Optional[ScoutConfig] = None,
         message_bus: Optional[MessageBus] = None,
+        *,
+        audit_callback: Optional[Callable] = None,
     ):
-        # Preserve legacy positional signature; BaseAgent takes kwargs.
-        # 保留舊式位置參數簽名；BaseAgent 走 kwargs。
+        # Preserve legacy positional signature (config, message_bus); BaseAgent takes kwargs.
+        # audit_callback is keyword-only to avoid positional collision with legacy callers
+        # such as ScoutAgent(config=..., message_bus=...) or ScoutAgent(message_bus=bus).
+        # E5-FN-3-FUP-d: audit_callback is now forwarded to BaseAgent (previously
+        # hardcoded to None). When strategy_wiring.py injects an agent_audit_bridge
+        # callback, Scout's produce_intel / produce_event_alert call-sites write
+        # append-only rows into change_audit_log (Root Principle #8 "Trade Explainability").
+        # When left as None (default), behavior is identical to the pre-FUP-d era.
+        # 保留舊式位置參數簽名（config, message_bus）；BaseAgent 走 kwargs。
+        # audit_callback 為 keyword-only 以避免與 ScoutAgent(config=..., message_bus=...)
+        # 等舊呼叫簽名的位置參數碰撞。
+        # E5-FN-3-FUP-d：audit_callback 改為轉發給 BaseAgent（原本硬編碼 None）；
+        # strategy_wiring.py 注入 bridge callback 後，Scout 的 produce_intel /
+        # produce_event_alert 呼叫點會寫入 change_audit_log（根原則 #8「交易可解釋」）。
+        # None（預設）時行為與 FUP-d 之前完全一致。
         super().__init__(
             role=AgentRole.SCOUT,
             message_bus=message_bus,
-            audit_callback=None,
+            audit_callback=audit_callback,
             cost_tracker=None,
         )
         self.config = config or ScoutConfig()
@@ -452,6 +467,13 @@ class ScoutAgent(BaseAgent):
             self._intel_log.append(intel)
             self._stats["intel_produced"] += 1
 
+        # E5-FN-3-FUP-d: append-only audit before bus routing so intel is audited
+        # even when bus is None or when relevance falls below threshold.
+        # Fail-open: _audit is a no-op when _audit_callback is None (BaseAgent).
+        # E5-FN-3-FUP-d：在匯流排路由前先寫審計記錄，確保 bus=None 或 relevance
+        # 低於閾值時 intel 仍被審計；_audit 在 _audit_callback=None 時為 no-op。
+        self._audit("intel_produced", intel.to_dict())
+
         # Route to Strategist via bus
         if self.bus and relevance_score >= self.config.relevance_threshold:
             msg = AgentMessage(
@@ -495,6 +517,12 @@ class ScoutAgent(BaseAgent):
         with self._lock:
             self._alert_log.append(alert)
             self._stats["alerts_produced"] += 1
+
+        # E5-FN-3-FUP-d: append-only audit before bus routing so alerts are
+        # audited even when bus is None. Fail-open when _audit_callback is None.
+        # E5-FN-3-FUP-d：在匯流排路由前寫審計記錄，確保 bus=None 時 alert 仍被
+        # 審計；_audit 在 _audit_callback=None 時為 no-op。
+        self._audit("event_alert_produced", alert.to_dict())
 
         # Route to Guardian via bus
         if self.bus:

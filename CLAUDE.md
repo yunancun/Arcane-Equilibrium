@@ -282,6 +282,7 @@ state_models ← state_compiler ← state_store ← main_legacy ← main.py
 | `_STRATEGIST_AUDIT_CB` / `_GOV_HUB_FOR_STRATEGIST` | strategy_wiring.py | 模組級，由 `agent_audit_bridge.make_agent_audit_callback(...)` 構造；StrategistAgent 建構時注入 `audit_callback`（E5-FN-3-FUP-a）。ImportError 時 `_GOV_HUB_FOR_STRATEGIST=None` → bridge fail-open 靜默丟棄 |
 | `_GUARDIAN_AUDIT_CB` / `_GOV_HUB_FOR_GUARDIAN` | strategy_wiring.py | 模組級（Batch 8），由 `agent_audit_bridge.make_agent_audit_callback(...)` 構造；GuardianAgent 建構時注入 `audit_callback`（E5-FN-3-FUP-b）。`_GOV_HUB_FOR_GUARDIAN` 於 Batch 8 既存，E5-FN-3-FUP-b 補登記；ImportError 時為 None → bridge fail-open |
 | `_EXECUTOR_AUDIT_CB` / `_GOV_HUB_FOR_EXECUTOR` | strategy_wiring.py | 模組級（Batch 11 try 區塊內），由 `agent_audit_bridge.make_agent_audit_callback(...)` 構造；ExecutorAgent 建構時注入 `audit_callback`（E5-FN-3-FUP-c）。fail-open：GOV_HUB 不可用時 bridge 靜默丟事件 |
+| `_SCOUT_AUDIT_CB` / `_GOV_HUB_FOR_SCOUT` | strategy_wiring.py | 模組級（Plan A2 Scout 區塊內），由 `agent_audit_bridge.make_agent_audit_callback(...)` 構造；ScoutAgent 建構時注入 `audit_callback`（E5-FN-3-FUP-d）。ScoutAgent ctor 新增 keyword-only `audit_callback` 參數並接線 produce_intel / produce_event_alert 兩個 `_audit()` 呼叫點；ImportError 時 `_GOV_HUB_FOR_SCOUT=None` → bridge fail-open 靜默丟棄 |
 
 新增 singleton 必須在此表登記。禁止子模塊創建未登記的全局可變狀態。
 

@@ -145,6 +145,36 @@ class TestBridgeWritesToChangeAuditLog:
 
         assert cal.record_count() == 4
 
+    def test_unknown_event_type_defaults_to_parameter_change(self):
+        """
+        NIT-2 contract-lock: unknown event_type (no keyword match) must fall
+        through _classify_event()'s conservative default → PARAMETER_CHANGE.
+        This defends against a future silent behavior-shift if someone flips
+        the default to STATE_CHANGE.
+
+        NIT-2 契約鎖定：未匹配任何 keyword 的未知 event_type 必須命中
+        _classify_event() 的保守默認分支 → PARAMETER_CHANGE。防止未來有人
+        把默認分支靜默改成 STATE_CHANGE。
+        """
+        cal = ChangeAuditLog()
+        cb = make_agent_audit_callback(_FakeGovHub(cal), "AnalystAgent")
+
+        # Genuinely opaque: contains NO substring from _DECISION_EVENT_KEYWORDS
+        # or _STATE_EVENT_KEYWORDS (no "verdict", "edge_evaluation",
+        # "intent_produced", "shadow_intent", "trade_analyzed",
+        # "execution_report", "l2_pattern_insight", "l2_analysis_triggered",
+        # "knowledge_update", "event_assessed", "_received", "directive",
+        # "risk_verdict", "pattern_insight_received", "risk_pattern_received").
+        cb("opaque_event_xyz", {"foo": "bar"})
+
+        assert cal.record_count() == 1
+        rec = cal.get_all_changes()[0]
+        assert rec.change_type == ChangeType.PARAMETER_CHANGE, (
+            f"unknown event_type must default to PARAMETER_CHANGE; "
+            f"got {rec.change_type}"
+        )
+        assert "opaque_event_xyz" in rec.what
+
 
 class TestBridgeFailOpen:
     """Any bridge failure must NOT propagate to the agent."""

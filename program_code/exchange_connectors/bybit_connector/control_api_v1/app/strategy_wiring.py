@@ -111,7 +111,40 @@ logger.info("TradeAttributionEngine initialized / 交易归因引擎已初始化
 # Scout 代理 + 消息总线（T2.07：方案 A2 — ScoutAgent 作为 OpenClaw 本地代理）
 from .multi_agent_framework import ScoutAgent, MessageBus, ScoutConfig
 MESSAGE_BUS = MessageBus()
-SCOUT_AGENT = ScoutAgent(config=ScoutConfig(), message_bus=MESSAGE_BUS)
+
+# ── E5-FN-3-FUP-d: Scout audit_callback wiring ──
+# Wires ScoutAgent._audit(...) calls into GOV_HUB._change_audit_log via
+# agent_audit_bridge. Satisfies Root Principle #8 "Trade Explainability" by
+# ensuring every Scout intel_produced / event_alert_produced call-site produces
+# an append-only audit record (Scout is the 5-Agent framework's eyes-and-ears,
+# its outputs feed Strategist/Guardian decisions — auditing them completes the
+# decision-trail chain).
+# Fail-open: GOV_HUB unavailable → bridge silently drops events; Scout's main
+# intel/alert path is never disrupted.
+# Local import of make_agent_audit_callback: the canonical import lives later
+# in the AnalystAgent block (line ~258) — duplicated here to keep Scout's
+# wiring self-contained without reordering the Batch 7/8/9 existing imports.
+# 將 ScoutAgent._audit(...) 透過 agent_audit_bridge 接到 GOV_HUB._change_audit_log；
+# 落實根原則 #8「交易可解釋」。Scout 是 5-Agent 體系的「眼耳」，其 intel/alert
+# 輸出會餵給 Strategist/Guardian 決策，審計 Scout 才能完整還原決策鏈。
+# fail-open：GOV_HUB 不可用時 bridge 靜默丟棄，不阻塞 Scout。
+# 此處本地重複 import make_agent_audit_callback 以保持 Scout 接線自包含，
+# 不重排位於 AnalystAgent 區塊的既有 import（約第 258 行）。
+from .agent_audit_bridge import make_agent_audit_callback as _make_scout_audit_cb
+
+_GOV_HUB_FOR_SCOUT: Any = None
+try:
+    from .paper_trading_routes import GOV_HUB as _GOV_HUB_FOR_SCOUT
+except ImportError:
+    pass
+
+_SCOUT_AUDIT_CB = _make_scout_audit_cb(_GOV_HUB_FOR_SCOUT, "ScoutAgent")
+
+SCOUT_AGENT = ScoutAgent(
+    config=ScoutConfig(),
+    message_bus=MESSAGE_BUS,
+    audit_callback=_SCOUT_AUDIT_CB,
+)
 SCOUT_AGENT.start()
 logger.info("ScoutAgent + MessageBus initialized (Plan A2) / Scout 代理 + 消息总线已初始化（方案 A2）")
 
