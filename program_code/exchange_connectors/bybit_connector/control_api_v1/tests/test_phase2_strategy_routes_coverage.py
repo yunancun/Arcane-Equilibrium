@@ -20,6 +20,7 @@ MODULE_NOTE (English):
 from __future__ import annotations
 
 import asyncio
+import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -31,6 +32,13 @@ import pytest
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
+
+# DYNAMIC-RISK-STATUS-TEST-SIG-1: set the API token BEFORE the tests below
+# build a TestClient. Survives sibling tests that `importlib.reload(main_legacy)`,
+# because `settings.api_token` is re-read from env on reload.
+# 在下方測試建立 TestClient 之前設定 API token；兄弟測試 reload main_legacy 後
+# settings.api_token 會從環境變數重新讀取，因此此設定跨 reload 仍有效。
+os.environ.setdefault("OPENCLAW_API_TOKEN", "test-token")
 
 # ── Import production helpers that do NOT trigger heavy module-level side effects ──
 from app.phase2_strategy_routes import (
@@ -375,18 +383,69 @@ class TestTelegramStatusRoute:
 
 
 class TestDynamicRiskRoutes:
+    """DYNAMIC-RISK-STATUS-TEST-SIG-1 (2026-04-20):
+    Tests go through FastAPI's HTTP dispatch so the `engine: str = Query(...)`
+    dependency is properly resolved. Directly awaiting the handler function
+    leaves `engine` as a FastAPI Query default object and `.lower()` fails with
+    AttributeError — that's a test-harness bug, not a prod-code bug.
+
+    DYNAMIC-RISK-STATUS-TEST-SIG-1 (2026-04-20):
+    測試改走 FastAPI HTTP 路徑，讓 `engine: str = Query(...)` 依賴被正確解析。
+    直接 `await` handler 會讓 `engine` 停在 Query default 物件上，
+    下一行 `.lower()` 觸發 AttributeError — 這是測試層的問題，非 prod code bug。
+    """
+
+    # Bearer header driven by OPENCLAW_API_TOKEN set at module top.
+    # Using the header instead of `dependency_overrides[current_actor]` because
+    # sibling tests (`test_learning_chapter.py` etc.) call
+    # `importlib.reload(main_legacy)`, which swaps the `current_actor` function
+    # identity — any pre-captured Depends key would no longer match after reload.
+    # / 走 Bearer 標頭而非 dependency_overrides，因為兄弟測試會 reload main_legacy
+    # 讓 current_actor 函數 identity 改變，提前捕獲的 Depends key 會失配。
+    _AUTH_HEADERS = {"Authorization": "Bearer test-token"}
+
+    @staticmethod
+    def _build_client():
+        """Build an isolated FastAPI TestClient mounting phase2_router only.
+        / 建立只掛載 phase2_router 的隔離 FastAPI TestClient。"""
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+        from app.strategy_wiring import phase2_router
+
+        app = FastAPI()
+        app.include_router(phase2_router)
+        return TestClient(app)
+
     @patch(f"{_MOD_READ}.AUTO_DEPLOYER", None)
     def test_status_no_deployer(self):
-        from app.phase2_strategy_routes import get_dynamic_risk_status
-        result = _run(get_dynamic_risk_status(actor=_FakeActor()))
-        assert result["data"]["available"] is False
+        """When AUTO_DEPLOYER is None and IPC unreachable, response advertises
+        available=False with stable shape.
+        / 當 AUTO_DEPLOYER 為 None 且 IPC 不可達時，回傳 available=False 的穩定形狀。
+        """
+        client = self._build_client()
+        resp = client.get(
+            "/api/v1/strategy/dynamic-risk/status?engine=demo",
+            headers=self._AUTH_HEADERS,
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["data"]["available"] is False
 
     @patch(f"{_MOD_READ}.AUTO_DEPLOYER")
     def test_status_happy(self, mock_ad):
-        from app.phase2_strategy_routes import get_dynamic_risk_status
+        """When IPC fails but AUTO_DEPLOYER stub is present, fallback surfaces
+        the stub's `enabled` field.
+        / IPC 失敗但 AUTO_DEPLOYER stub 存在時，fallback 呈現 stub 的 enabled 欄位。
+        """
         mock_ad.get_dynamic_risk_status.return_value = {"enabled": True}
-        result = _run(get_dynamic_risk_status(actor=_FakeActor()))
-        assert result["data"]["enabled"] is True
+        client = self._build_client()
+        resp = client.get(
+            "/api/v1/strategy/dynamic-risk/status?engine=demo",
+            headers=self._AUTH_HEADERS,
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["data"]["enabled"] is True
 
 
 class TestValidTimeframes:
