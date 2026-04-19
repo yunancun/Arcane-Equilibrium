@@ -1496,26 +1496,18 @@ impl TickPipeline {
                     // DUAL-TRACK-EXIT-1 T4：PHYS-LOCK 平倉經 Combine Layer 記錄 exit_source。
                     // Phase 1a 傳 ml_opt=None → 永遠 (Lock, Physical)；純審計層包裝，
                     // 現有平倉路徑不變。非 PHYS-LOCK（HARD STOP 等 P0 硬止損）不走 combine layer。
+                    // T4-FIX（2026-04-19）：prefix 由 `PHYS-LOCK` 對齊為 T3 實際輸出的
+                    // `risk_close:phys_lock_` (risk_checks.rs:242 `format!("risk_close:{}", reason)`)。
+                    // 之前 prefix 不匹配導致 combine_layer 在生產 0 次被呼叫，459 LOC + 9 tests 死碼。
+                    // 同時 debug_assert_eq! → assert_eq!，release build 也留下不變式 runtime 防線。
                     // TODO(T5 audit)：等 fills.details 欄位 plumbing 到位後持久化 exit_source。
-                    if reason.starts_with("PHYS-LOCK") {
-                        let physical = crate::exit_features::PhysicalDecision::Lock(reason.clone());
-                        let combine_cfg = crate::combine_layer::CombineConfig::default();
-                        let (signal, source) = crate::combine_layer::combine_exit_decision(
-                            physical,
-                            None, // Phase 1a: P-only (ml_opt forced None at call-site)
-                            &combine_cfg,
-                        );
-                        debug_assert_eq!(
-                            signal,
-                            crate::combine_layer::ExitSignal::Lock,
-                            "invariant: PHYS-LOCK physical decision must yield ExitSignal::Lock"
-                        );
-                        info!(
-                            symbol = %symbol,
-                            exit_source = %source.as_tag(),
-                            reason = %reason,
-                            "combine layer: PHYS-LOCK → Lock / Combine 層：PHYS-LOCK → Lock"
-                        );
+                    // T4-FIX (2026-04-19): prefix aligned from `PHYS-LOCK` to the T3-actual
+                    // `risk_close:phys_lock_` (risk_checks.rs:242). Previously mismatched →
+                    // combine_layer called 0× in prod, 459 LOC + 9 tests dead.
+                    // Also promote debug_assert_eq! → assert_eq! so the invariant holds in
+                    // release builds.
+                    if let Some(lock_tag) = strip_phys_lock_prefix(&reason) {
+                        log_phys_lock_through_combine_layer(symbol, &reason, lock_tag);
                     }
 
                     risk_closed_symbols.push(symbol.clone());
@@ -1678,4 +1670,150 @@ impl TickPipeline {
         self.maybe_canary_record(event, indicators, signals, intents, tick_duration_us)
     }
     // FIX-29: maybe_canary_record + compute_indicators moved to on_tick_helpers.rs
+}
+
+// ---------------------------------------------------------------------------
+// DUAL-TRACK-EXIT-1 Track P T4 audit-side wrapper helpers
+// DUAL-TRACK-EXIT-1 Track P T4 審計層包裝 helpers
+// ---------------------------------------------------------------------------
+//
+// Extracted as pub(crate) free functions so the prefix alignment can be unit-
+// tested directly without spinning up the whole tick pipeline. The wrapper is
+// pure audit / info-log side; business close path is unchanged.
+//
+// 抽為 pub(crate) 自由函數以便 prefix 對齊可直接單測，無需啟動整個 tick
+// pipeline。包裝純屬審計 / info log 層，業務平倉路徑不變。
+
+/// T3 (`physical_micro_profit_lock`) 產生 `PhysicalDecision::Lock("phys_lock_xxx")`，
+/// `risk_checks.rs:242` 再用 `format!("risk_close:{}", reason)` 包成
+/// `RiskAction::ClosePosition("risk_close:phys_lock_xxx")`。此 helper 檢查
+/// `risk_close:phys_lock_` 前綴並回傳裸 tag（`"phys_lock_xxx"`）；不匹配回 None。
+///
+/// T3 produces `Lock("phys_lock_xxx")`; risk_checks.rs:242 wraps as
+/// `ClosePosition("risk_close:phys_lock_xxx")`. This helper checks the
+/// `risk_close:phys_lock_` prefix and returns the stripped tag; returns None
+/// if the reason is not a PHYS-LOCK (HARD STOP / TAKE PROFIT / TRAILING / TIME
+/// STOP / DRAWDOWN / CONSECUTIVE LOSS / DAILY LOSS bypass the combine layer).
+pub(crate) fn strip_phys_lock_prefix(reason: &str) -> Option<&str> {
+    // 前綴必須完整（`risk_close:phys_lock_`），後綴至少 1 char（gateN_*）。
+    // Prefix must be exact; suffix (gateN_*) must be non-empty.
+    reason.strip_prefix("risk_close:phys_lock_").and_then(|suf| {
+        if suf.is_empty() {
+            None
+        } else {
+            // 取完整的 `phys_lock_<suf>` 裸 tag — combine_layer 與下游
+            // parse_exit_tag 依賴 `phys_lock_` 開頭的穩定形式。
+            // Return the full `phys_lock_<suf>` stripped tag — combine_layer
+            // and downstream parse_exit_tag depend on the `phys_lock_` prefix.
+            Some(&reason["risk_close:".len()..])
+        }
+    })
+}
+
+/// 以剝離過的 lock_tag 走一次 combine_layer、確認 invariant 並記 info log。
+/// 不改變下游平倉行為（純審計側）。
+/// Run the stripped lock_tag through combine_layer, enforce the invariant and
+/// emit an info log. Does not alter downstream close behaviour (pure audit).
+pub(crate) fn log_phys_lock_through_combine_layer(symbol: &str, reason: &str, lock_tag: &str) {
+    let physical = crate::exit_features::PhysicalDecision::Lock(lock_tag.to_string());
+    let combine_cfg = crate::combine_layer::CombineConfig::default();
+    let (signal, source) = crate::combine_layer::combine_exit_decision(
+        physical,
+        None, // Phase 1a: P-only (ml_opt forced None at call-site)
+        &combine_cfg,
+    );
+    // T4-FIX：promoted from debug_assert_eq! so the invariant is enforced in
+    // release builds too — if combine_layer ever breaks this, we want a loud
+    // runtime panic not silent drift.
+    // T4-FIX：從 debug_assert_eq! 升為 assert_eq!，release build 也保留 runtime
+    // 防線；若 combine_layer 破壞此不變式，寧要顯式 panic 也不要靜默漂移。
+    assert_eq!(
+        signal,
+        crate::combine_layer::ExitSignal::Lock,
+        "invariant: PHYS-LOCK physical decision must yield ExitSignal::Lock"
+    );
+    info!(
+        symbol = %symbol,
+        exit_source = %source.as_tag(),
+        reason = %reason,
+        lock_tag = %lock_tag,
+        "combine layer: PHYS-LOCK → Lock / Combine 層：PHYS-LOCK → Lock"
+    );
+}
+
+#[cfg(test)]
+mod phys_lock_wrapper_tests {
+    use super::*;
+
+    // T4-FIX integration test: ensures the T3 emission string actually fires
+    // the combine_layer path (prefix + strip + release-build invariant). If
+    // someone reverts the prefix back to `PHYS-LOCK` or breaks the strip, this
+    // test goes red and 459 LOC of combine_layer stays live.
+    // T4-FIX 整合測試：確保 T3 精確輸出字串真的觸發 combine_layer 路徑（prefix +
+    // strip + release-build 不變式）。若 prefix 回歸為 `PHYS-LOCK` 或 strip 破壞，
+    // 本測試紅，459 LOC combine_layer 保持活躍。
+
+    #[test]
+    fn t4_fix_end_to_end_phys_lock_reaches_combine_layer_as_physical_lock() {
+        // Arrange — construct the *exact* string T3 emits via
+        // risk_checks.rs:242 `format!("risk_close:{}", reason)` for each of the
+        // 3 phys_lock gate variants.
+        // Arrange — 構造 T3 精確發出的 3 種 phys_lock 字串。
+        for expected_bare_tag in [
+            "phys_lock_gate1_low_edge",
+            "phys_lock_gate4_giveback",
+            "phys_lock_gate4_stale_roc_neg",
+        ] {
+            let reason = format!("risk_close:{expected_bare_tag}");
+
+            // Act #1: strip — must recognise this as a PHYS-LOCK and return
+            // the bare tag (without the `risk_close:` envelope) that
+            // combine_layer + Python parse_exit_tag both consume.
+            // Act #1：strip — 必須識別為 PHYS-LOCK 並回傳 combine_layer 與
+            // Python parse_exit_tag 都消費的裸 tag。
+            let lock_tag = strip_phys_lock_prefix(&reason)
+                .unwrap_or_else(|| panic!("T3 emission must strip: {reason}"));
+            assert_eq!(lock_tag, expected_bare_tag);
+
+            // Act #2: feed through combine_layer exactly as the production
+            // wrapper does. Must yield (Lock, Physical) in Phase 1a.
+            // Act #2：按生產 wrapper 模式走 combine_layer，Phase 1a 必為
+            // (Lock, Physical)。
+            let physical =
+                crate::exit_features::PhysicalDecision::Lock(lock_tag.to_string());
+            let (signal, source) = crate::combine_layer::combine_exit_decision(
+                physical,
+                None,
+                &crate::combine_layer::CombineConfig::default(),
+            );
+            assert_eq!(signal, crate::combine_layer::ExitSignal::Lock);
+            assert_eq!(
+                source.as_tag(),
+                "Physical",
+                "Phase 1a P-only: exit_source MUST be Physical, not Disabled/ML/Hybrid"
+            );
+
+            // Act #3: execute the logging helper — exercises the promoted
+            // `assert_eq!` invariant in release builds (would panic if ever
+            // broken, closing the debug_assert_eq! loophole).
+            // Act #3：執行 logging helper — release build 也會走 `assert_eq!`
+            // invariant（破壞即 panic，封閉 debug_assert_eq! 漏洞）。
+            log_phys_lock_through_combine_layer("BTCUSDT", &reason, lock_tag);
+        }
+
+        // Guard against partial revert: legacy prefix `PHYS-LOCK` must NOT
+        // strip (otherwise prefix mismatch would sneak back in).
+        // 防範部分回退：舊 prefix `PHYS-LOCK` 不能匹配。
+        assert_eq!(
+            strip_phys_lock_prefix("PHYS-LOCK gate1"),
+            None,
+            "legacy PHYS-LOCK prefix must not match — guards against partial revert"
+        );
+        // Non-PHYS-LOCK reasons must bypass the combine layer wrapper.
+        // 非 PHYS-LOCK 原因必須 bypass。
+        assert_eq!(
+            strip_phys_lock_prefix("risk_close:HARD STOP at 5.0%"),
+            None
+        );
+    }
 }
