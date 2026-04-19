@@ -99,6 +99,39 @@ rotate_engine_log() {
     fi
 }
 
+write_restart_sentinel() {
+    # PIPELINE-SLOT-1 Phase 1 (2026-04-19): mark this shutdown as operator-
+    # initiated ("manual") so the engine, on next boot, clears
+    # authorization.json and forces Operator to re-approve Live via GUI.
+    # Crashes / watchdog bounces / systemd auto-restart never run this
+    # script, so they leave the authorization intact — correct behaviour:
+    # engine resumes on already-approved session after a simple death.
+    # Atomic write: tmp + mv so a partial write cannot be observed.
+    # PIPELINE-SLOT-1 Phase 1：標記本次關機為 operator 主動（"manual"），讓
+    # 引擎下次啟動時清空 authorization.json 並強迫 operator 經 GUI 重新批准
+    # Live。崩潰 / watchdog / systemd 自動重啟都不跑本 shell，授權留存 —
+    # 這是正確行為：引擎只是死了一下，應回到已批准 session。
+    # 原子寫入：tmp + mv，避免半寫入狀態被讀到。
+    local settings_runtime="${PWD}/settings/runtime"
+    mkdir -p "$settings_runtime" 2>/dev/null || true
+    if [[ ! -d "$settings_runtime" ]]; then
+        echo "WARN: cannot create $settings_runtime — restart sentinel not written" >&2
+        return 0
+    fi
+    local tmp_file
+    tmp_file=$(mktemp "${settings_runtime}/.last_shutdown_kind.XXXXXX" 2>/dev/null) || {
+        echo "WARN: mktemp failed under $settings_runtime — restart sentinel not written" >&2
+        return 0
+    }
+    printf 'manual' > "$tmp_file"
+    if mv "$tmp_file" "${settings_runtime}/last_shutdown_kind" 2>/dev/null; then
+        echo ">>> Restart sentinel written: ${settings_runtime}/last_shutdown_kind = manual"
+    else
+        echo "WARN: atomic rename of restart sentinel failed" >&2
+        rm -f "$tmp_file" 2>/dev/null || true
+    fi
+}
+
 graceful_stop_engine() {
     # Fix 2 (2026-04-14): SIGTERM-first shutdown with 5s graceful window, then
     # escalate to SIGKILL only if the process is still alive. pkill -f was too
@@ -108,6 +141,14 @@ graceful_stop_engine() {
     # 修復 2：SIGTERM 先行 + 5s 優雅窗口，仍存活才 SIGKILL。pkill -f 太粗暴 —
     # 若引擎正在寫 paper_state.json 中途被 kill，會留下損毀的 tmp 檔，watchdog
     # 誤讀為「引擎死亡」→ 虛假重啟循環。
+    #
+    # PIPELINE-SLOT-1 Phase 1: write the restart sentinel BEFORE any SIGTERM so
+    # a slow operator-kill cannot race the engine restart. Written even when
+    # no engine is running (fresh install / post-crash bounce) because
+    # operator intent on running this script is still "Manual".
+    # PIPELINE-SLOT-1 Phase 1：SIGTERM 前先寫 sentinel，避免 kill 與 engine 重啟
+    # 競態。即使沒有在跑的 engine 也要寫（初次安裝 / 崩潰後重啟都算 Manual 意圖）。
+    write_restart_sentinel
     if ! pgrep -f "openclaw-engine" > /dev/null 2>&1; then
         echo ">>> (no running engine to stop)"
         return 0

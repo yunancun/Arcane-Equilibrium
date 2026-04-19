@@ -8,6 +8,7 @@
 //!   SIGHUP 觸發配置熱加載。SIGTERM/SIGINT 觸發優雅關閉。
 //!   事件消費者將 PriceEvent 送入 TickPipeline 進行紙盤交易。
 
+mod pipeline_slot;
 mod startup;
 mod tasks;
 
@@ -170,6 +171,19 @@ fn main() {
     }
 
     // ------------------------------------------------------------------
+    // 1c. PIPELINE-SLOT-1 Phase 1: consume the restart-kind sentinel written
+    //     by `restart_all.sh`. On Manual restart we clear authorization.json
+    //     so Operator must re-approve Live after any operator-initiated
+    //     push. Crashes / watchdog / systemd auto-restarts do NOT run the
+    //     script and therefore do NOT clear the authorization.
+    // 1c. PIPELINE-SLOT-1 Phase 1：消費 `restart_all.sh` 寫入的 sentinel。
+    //     手動重啟會清空 authorization.json，強迫 operator 每次手動推送後
+    //     重新批准 Live。崩潰 / watchdog / systemd 自動重啟不會跑該 shell，
+    //     也不會清授權。
+    // ------------------------------------------------------------------
+    let _restart_kind = startup::consume_restart_sentinel_and_clear_live_auth_if_manual();
+
+    // ------------------------------------------------------------------
     // 2. Load engine bootstrap config (EngineBootstrap from engine.toml)
     //    加載引擎啟動配置
     // ------------------------------------------------------------------
@@ -303,20 +317,57 @@ async fn async_main(
     // Paper 始終啟動。Demo/Live 依 API key 存在性獨立啟動。
     // ------------------------------------------------------------------
     let cfg_snapshot_pipelines = config.get();
-    let live_bindings = build_exchange_pipeline(
-        PipelineKind::Live,
-        live_bybit_environment(),
-        cancel.clone(),
-        &cfg_snapshot_pipelines,
-    )
-    .await;
-    let demo_bindings = build_exchange_pipeline(
-        PipelineKind::Demo,
-        BybitEnvironment::Demo,
-        cancel.clone(),
-        &cfg_snapshot_pipelines,
-    )
-    .await;
+    // PIPELINE-SLOT-1 Phase 1: slots own the future respawn point. Phase 1
+    // delegates construction directly to `build_exchange_pipeline`; the slot
+    // transitions to Spawned on success and holds the engine-wide cancel
+    // token (narrowed to per-slot tokens in Phase 2).
+    // PIPELINE-SLOT-1 Phase 1：slot 擁有未來的 respawn 接口。Phase 1 直接
+    // 委派給 `build_exchange_pipeline`；成功則槽位轉為 Spawned，並持有引擎級
+    // cancel token（Phase 2 改為 per-slot 子 token）。
+    let live_slot = Arc::new(pipeline_slot::PipelineSlot::new_empty(
+        pipeline_slot::SlotKind::Live,
+    ));
+    let demo_slot = Arc::new(pipeline_slot::PipelineSlot::new_empty(
+        pipeline_slot::SlotKind::Demo,
+    ));
+    let live_bindings = match live_slot
+        .try_spawn(&pipeline_slot::SpawnConfig {
+            kind: pipeline_slot::SlotKind::Live,
+            env: live_bybit_environment(),
+            cancel: cancel.clone(),
+            cfg_snapshot: &cfg_snapshot_pipelines,
+        })
+        .await
+    {
+        Ok(b) => b,
+        // Phase 1 never hits AlreadySpawned because we just created the slot.
+        // Any other SpawnError path is unreachable too (the only other variant
+        // is NotAvailable which we map to None above). Defensive match:
+        Err(e) => {
+            tracing::error!(error = %e, "live slot spawn errored unexpectedly / live 槽啟動錯誤");
+            None
+        }
+    };
+    let demo_bindings = match demo_slot
+        .try_spawn(&pipeline_slot::SpawnConfig {
+            kind: pipeline_slot::SlotKind::Demo,
+            env: BybitEnvironment::Demo,
+            cancel: cancel.clone(),
+            cfg_snapshot: &cfg_snapshot_pipelines,
+        })
+        .await
+    {
+        Ok(b) => b,
+        Err(e) => {
+            tracing::error!(error = %e, "demo slot spawn errored unexpectedly / demo 槽啟動錯誤");
+            None
+        }
+    };
+    // Phase 1 does not consume the slots further; they will be used by the
+    // Phase 4 auth-watcher. Hold via _ binding to prevent drop warning.
+    // Phase 1 不再使用 slot；Phase 4 auth-watcher 會接手。用 _ 綁定避免 drop 警告。
+    let _live_slot = live_slot;
+    let _demo_slot = demo_slot;
     drop(cfg_snapshot_pipelines);
 
     // Log pipeline availability / 記錄管線可用性
