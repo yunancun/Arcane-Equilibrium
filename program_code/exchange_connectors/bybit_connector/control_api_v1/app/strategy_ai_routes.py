@@ -210,25 +210,159 @@ def _engine_owner_strategy_map(engine: str) -> dict[str, str]:
     return mapping
 
 
+# ---------------------------------------------------------------------------
+# Synthetic owner labels — engine-assigned placeholders for untriaged / adopted /
+# dust-frozen positions. Only these labels trigger dust-status enrichment below;
+# real strategy names (ma_crossover / grid_trading / funding_arb / ...) stay lean.
+# 合成 owner 標籤 — 引擎指派給未分流 / 已認領 / dust 凍結倉位的佔位符。
+# 僅這些標籤觸發下方 dust-status 豐富化；真實策略名保持 lean payload。
+# ---------------------------------------------------------------------------
+_SYNTHETIC_OWNER_LABELS = frozenset({
+    "bybit_sync",
+    "orphan_adopted",
+    "orphan_frozen",
+})
+
+
+def _dust_status(
+    owner: str,
+    est_notional: float | None,
+    min_notional: float | None,
+) -> str:
+    """Derive `frozen_reason` string from synthetic owner + notional snapshot.
+
+    - `orphan_frozen` + both values known + est < min → "dust_below_min_notional"
+      (真正 dust 凍結：名義值低於交易所最小單，close 會被拒絕)
+    - `orphan_frozen` + 任一值缺失 or est >= min → "frozen_pending"
+      (凍結但原因未知/待 retriage；snapshot 仍讀為 frozen)
+    - `bybit_sync` → "pending_triage"
+      (啟動時交易所快照尚未分類)
+    - `orphan_adopted` → "pending_edge"
+      (Phase 2A 認領入 paper_state 等 edge 評估)
+    - 其他（非合成 owner）→ ""（不附加）
+
+    從合成 owner + 名義值快照推導 `frozen_reason` 字串。
+    """
+    if owner == "bybit_sync":
+        return "pending_triage"
+    if owner == "orphan_adopted":
+        return "pending_edge"
+    if owner == "orphan_frozen":
+        # Dust 分支需要 est 和 min 都有值且 est < min；其他情況視為 pending。
+        if (
+            est_notional is not None
+            and min_notional is not None
+            and est_notional < min_notional
+        ):
+            return "dust_below_min_notional"
+        return "frozen_pending"
+    return ""
+
+
+def _safe_float(value: Any) -> float | None:
+    """Best-effort float conversion. Returns None on any failure.
+    Bybit REST positions return stringified numbers; this normalizes them.
+    Best-effort 轉 float；失敗返回 None。Bybit REST 倉位數值常為字串。
+    """
+    if value is None:
+        return None
+    try:
+        f = float(value)
+    except (TypeError, ValueError):
+        return None
+    if f != f:  # NaN guard / NaN 守衛
+        return None
+    return f
+
+
+def _fetch_min_notional(symbol: str) -> float | None:
+    """Lazy-fetch instrument min_notional from Rust BybitClient PyO3 bridge.
+    Returns None when bridge unavailable / symbol uncached / any exception.
+    Callers MUST treat None as "dust gate not applicable" (same semantics as
+    paper_state/owner_attribution.rs line 103).
+
+    從 Rust BybitClient PyO3 橋接懶查詢合約 min_notional。
+    橋接不可用 / 合約未緩存 / 任何異常 → 返回 None（與 Rust 端 "no dust gate" 語意對齊）。
+    """
+    rc = _get_rust_client()
+    if rc is None:
+        return None
+    try:
+        spec = rc.get_instrument(symbol)
+    except Exception:
+        return None
+    if not isinstance(spec, dict):
+        return None
+    return _safe_float(spec.get("min_notional"))
+
+
 def _attach_owner_strategy(positions: list, engine: str) -> list:
     """Enrich each Bybit position dict with `owner_strategy` from engine paper_state.
+    For synthetic owners (bybit_sync / orphan_adopted / orphan_frozen) additionally
+    attach `frozen_reason` + `min_notional` + `est_notional` so the GUI can explain
+    WHY a position is held without an active strategy tag.
     No-op when position is not a dict or not found in the map (leaves as-is so the
-    GUI's fills-derived fallback still runs).
-    用引擎 paper_state 的 owner_strategy 豐富每筆 Bybit 倉位 dict。非 dict 或映射未命中時跳過
-    （保留 GUI fills 反推降級路徑）。
+    GUI's fills-derived fallback still runs). Real strategy names skip the dust
+    enrichment path to keep the common payload lean.
+
+    用引擎 paper_state 的 owner_strategy 豐富每筆 Bybit 倉位 dict。
+    對合成 owner (bybit_sync / orphan_adopted / orphan_frozen) 額外附加
+    `frozen_reason` + `min_notional` + `est_notional`，供 GUI 解釋該倉位為何
+    持有卻無活躍策略標籤。非 dict 或映射未命中時跳過；真實策略名略過 dust
+    enrichment 路徑以保持常態 payload lean。
     """
     if not isinstance(positions, list) or not positions:
         return positions
     owner_map = _engine_owner_strategy_map(engine)
     if not owner_map:
         return positions
+    # Cache min_notional per symbol within one enrichment pass — get_instrument
+    # is a cheap in-memory lookup, but avoid repeat calls when the same symbol
+    # appears in multiple position rows (hedge-mode long/short).
+    # 單次豐富化中按 symbol 緩存 min_notional；hedge mode 下同 symbol 可能有
+    # 多筆（long/short）倉位，避免重複查詢。
+    min_notional_cache: dict[str, float | None] = {}
     for p in positions:
         if not isinstance(p, dict):
             continue
         sym = p.get("symbol")
         owner = owner_map.get(sym) if sym else None
-        if owner:
-            p["owner_strategy"] = owner
+        if not owner:
+            continue
+        p["owner_strategy"] = owner
+        # Only synthetic owners get dust-status enrichment; real strategy names stay lean.
+        # 僅合成 owner 觸發 dust-status 豐富化；真實策略名保持 lean。
+        if owner not in _SYNTHETIC_OWNER_LABELS:
+            continue
+        # Per-position try/except — enrichment must never break the endpoint.
+        # 單倉位 try/except — 豐富化絕不可中斷 endpoint。
+        try:
+            # est_notional = qty × ref_price
+            qty = _safe_float(p.get("size")) or _safe_float(p.get("qty"))
+            ref_price = (
+                _safe_float(p.get("markPrice"))
+                or _safe_float(p.get("avgPrice"))
+                or _safe_float(p.get("entry_price"))
+            )
+            est_notional: float | None = None
+            if qty is not None and ref_price is not None and qty > 0.0 and ref_price > 0.0:
+                est_notional = qty * ref_price
+
+            if sym not in min_notional_cache:
+                min_notional_cache[sym] = _fetch_min_notional(sym) if sym else None
+            min_notional = min_notional_cache.get(sym)
+
+            p["frozen_reason"] = _dust_status(owner, est_notional, min_notional)
+            p["min_notional"] = min_notional
+            p["est_notional"] = est_notional
+        except Exception:
+            # Fail-soft — leave whatever was attached so far; do not break endpoint.
+            # Fail-soft — 保留已附加欄位，不中斷 endpoint。
+            logger.exception(
+                "owner_strategy dust enrichment failed for symbol=%s owner=%s",
+                sym,
+                owner,
+            )
     return positions
 
 

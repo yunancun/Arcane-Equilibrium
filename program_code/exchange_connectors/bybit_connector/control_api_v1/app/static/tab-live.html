@@ -659,6 +659,46 @@ async function refreshPage() {
 // ═══════════════════════════════════════════════════════════════
 // Dashboard data / 儀表板數據
 // ═══════════════════════════════════════════════════════════════
+// ─── Synthetic owner_strategy rendering helper ────────────────
+// Rust paper_state may tag positions with synthetic owner labels that are
+// NOT real strategy names. Raw strings confuse operators — e.g. "orphan_frozen"
+// reads like "an abandoned orphan" but actually means "dust: qty×price below
+// Bybit's $5 min_notional, engine auto-waits for price recovery, operator must
+// clear manually on Bybit GUI". This helper renders a localized badge + tooltip.
+//
+// Rust paper_state 可能為倉位打上合成 owner 標籤（非真實策略名）。裸字串會誤導
+// operator — 例如 "orphan_frozen" 字面像「被凍結的孤兒」，實指「塵埃倉位：名義值
+// 低於交易所 $5 最小值，引擎自動等待價格回升，operator 需在 Bybit GUI 手動清除」。
+// 此 helper 依標籤輸出雙語 badge + tooltip；後端欄位缺失時優雅降級為純標籤。
+function _ocRenderOwnerStrategy(strat, posData) {
+  if (strat == null || strat === '' || strat === '--') return '--';
+  const s = String(strat);
+  if (s === 'bybit_sync') {
+    return '<span title="引擎從交易所快照接管的倉位，尚未歸屬到任何策略；待 triage / Engine captured from exchange snapshot; awaiting triage assignment">🟡 同步中 / SYNC</span>';
+  }
+  if (s === 'orphan_adopted') {
+    return '<span title="引擎重啟時接管的孤兒倉位，尚未歸屬到任何策略 / Orphan position adopted on engine start; not yet attributed to a strategy">🟠 接管 / ADOPTED</span>';
+  }
+  if (s === 'orphan_frozen' || s === 'DUST_FROZEN') {
+    // If backend injects dust-specific context, compose the richer tooltip.
+    // 後端注入塵埃上下文時組裝詳盡 tooltip，否則降級為通用版本。
+    let detail = '塵埃倉位：名義值低於 Bybit 最小交易額 · 引擎自動等待價格回升；需在 Bybit GUI 手動清 / Dust position: notional below Bybit min; engine waits for price recovery, operator must clear manually on Bybit GUI';
+    if (posData && posData.frozen_reason === 'dust_below_min_notional') {
+      const est = parseFloat(posData.est_notional);
+      const min = parseFloat(posData.min_notional);
+      if (Number.isFinite(est) && Number.isFinite(min)) {
+        detail = '估值 $' + est.toFixed(2) + ' < 交易所最小 $' + min.toFixed(2) +
+                 ' · 引擎自動等待價格回升；需在 Bybit GUI 手動清 / est $' + est.toFixed(2) +
+                 ' < min $' + min.toFixed(2) + '; engine is waiting for price recovery, operator must clear manually on Bybit GUI';
+      }
+    }
+    return '<span title="' + ocEsc(detail) + '">🔴 塵埃凍結 / DUST</span>';
+  }
+  // Real strategy names pass through escaped.
+  // 真實策略名原樣輸出（已轉義）。
+  return ocEsc(s);
+}
+
 // Live strategy map: symbol → strategy_name, derived from latest fill per symbol.
 // Live 策略映射：symbol → strategy_name，取每個 symbol 最新一筆 fill 推導。
 let _liveStratMap = {};
@@ -780,9 +820,19 @@ async function loadDashboardData() {
         // 優先讀後端從 Rust paper_state 注入的 owner_strategy（權威歸屬）。
         // 降級到 fills 反推映射（低週轉策略可能漏）。
         const strat = p.owner_strategy || _liveStratMap[symRaw] || '--';
+        // Synthetic-owner aware close button: dust-frozen → "清塵 / Clear Dust"
+        // + data-* attrs carrying owner_strategy + frozen_reason so the handler
+        // can warn operator that Bybit will reject the close.
+        // 合成 owner 感知的平倉按鈕：塵埃凍結 → 「清塵 / Clear Dust」，透過
+        // data-* 屬性傳遞 owner_strategy + frozen_reason，提醒交易所會拒單。
+        const isDust = (strat === 'orphan_frozen' || strat === 'DUST_FROZEN' ||
+                        p.frozen_reason === 'dust_below_min_notional');
+        const btnLabel = isDust ? '清塵 / Clear Dust' : '平倉';
+        const ownerAttr = ocEsc(String(strat || ''));
+        const reasonAttr = ocEsc(String(p.frozen_reason || ''));
         return `<tr>
           <td><strong>${sym}</strong></td>
-          <td style="font-size:11px">${ocEsc(strat)}</td>
+          <td style="font-size:11px">${_ocRenderOwnerStrategy(strat, p)}</td>
           <td>${ocEsc(p.side || '--')}</td>
           <td>${ocEsc(String(size))}</td>
           <td>${ocEsc(String(leverage))}x</td>
@@ -790,7 +840,7 @@ async function loadDashboardData() {
           <td>${ocEsc(String(mark))}</td>
           <td style="${pnlCls}">${pnl.toFixed(4)}</td>
           <td>${ocEsc(String(liq))}</td>
-          <td><button class="oc-btn oc-btn-danger" style="padding:2px 8px;font-size:10px" onclick="closeLivePosition('${sym}')">平倉</button></td>
+          <td><button class="oc-btn oc-btn-danger" style="padding:2px 8px;font-size:10px" data-owner-strategy="${ownerAttr}" data-frozen-reason="${reasonAttr}" onclick="closeLivePosition('${sym}', this.dataset.ownerStrategy, this.dataset.frozenReason)">${btnLabel}</button></td>
         </tr>`;
       }).join('');
       // Net-of-fees identity applied to both Realized and Net PnL:
@@ -978,8 +1028,34 @@ async function doLiveCloseAll() {
   }
 }
 
-async function closeLivePosition(symbol) {
+async function closeLivePosition(symbol, ownerStrategy, frozenReason) {
   // Close a single live position by symbol / 平掉單一實盤倉位
+  //
+  // When the caller marks this as a dust-frozen synthetic owner, we switch the
+  // confirm + toast to a warning that Bybit will reject the close (below
+  // min_notional) and the only real clear path is the Bybit GUI.
+  // 當 caller 標示為塵埃凍結合成 owner 時，confirm + toast 改為警告級：
+  // 交易所會拒單，唯一清除路徑是 Bybit 網頁 GUI。
+  const isDust = (frozenReason === 'dust_below_min_notional') ||
+                 (ownerStrategy === 'orphan_frozen') ||
+                 (ownerStrategy === 'DUST_FROZEN');
+  if (isDust) {
+    const warnMsg = '⚠ 此倉位低於交易所最小值，引擎已自動派發平倉但交易所會拒單。' +
+                    '唯一清除路徑：在 Bybit 網頁 GUI 手動平倉。是否仍要嘗試？\n\n' +
+                    'This position is below the exchange minimum. The engine ' +
+                    'has auto-dispatched a close but Bybit will reject it. ' +
+                    'The only real clear path is to close it manually on the ' +
+                    'Bybit GUI. Try anyway?';
+    if (!confirm(warnMsg)) return;
+    const d = await ocPost('/api/v1/live/positions/' + encodeURIComponent(symbol) + '/close', {});
+    if (d) {
+      ocToast('⚠ ' + symbol + ' 清塵指令已發送，交易所可能拒單 / dust-clear dispatched, exchange may reject', 'warn');
+      await refreshPage();
+    } else {
+      ocToast(symbol + ' 清塵失敗，請在 Bybit GUI 手動清', 'error');
+    }
+    return;
+  }
   if (!confirm('確認平倉 ' + symbol + '？\nConfirm close live position: ' + symbol + '?')) return;
   const d = await ocPost('/api/v1/live/positions/' + encodeURIComponent(symbol) + '/close', {});
   if (d) {
