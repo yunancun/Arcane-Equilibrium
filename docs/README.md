@@ -469,6 +469,7 @@ YYYY-MM-DD--HHmm--功能描述.扩展名
 | `2026-04-11--three_engine_parallel_arch_plan.md` | ★★★ 三引擎並行架構遷移計劃 v4：26 設計決策 · PM+PA+FA 三角色（✅ 已完成） |
 | `2026-04-11--3e_arch_session_execution_plan.md` | ★★ 3E-ARCH Session 執行計劃：8 工作日排期（✅ 已完成） |
 | `2026-04-06--math_implementation_notes.md` | 數學實現方案彙編：LinUCB/風控公式/統計檢定/校準/shrinkage |
+| `2026-04-20--dust_frozen_position_manual_clear_procedure.md` | ★ Dust-Frozen 持倉手動清理 SOP：DUST-EVICTION-GAP-1 P1-8 設計背景 · Bybit GUI 三路線 · Live 前 pre-flight checklist |
 
 ### governance_dev/ — 治理开发文档
 
