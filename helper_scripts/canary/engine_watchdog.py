@@ -67,6 +67,40 @@ MAINTENANCE_FLAG = "engine_maintenance.flag"
 WATCHDOG_LOCK_FILE = "watchdog.lock"
 WATCHDOG_STATE_FILE = "watchdog_state.json"
 CANARY_EVENTS_FILE = "canary_events.jsonl"
+ENGINE_LOG_FILENAME = "engine.log"
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# WATCHDOG-DNS-CLASSIFY-1 (2026-04-20): classify infrastructure-level failures
+# (DNS/HTTP transport outages) vs real engine crashes (panic/assertion).
+# Origin: P0-9 RCA — 2026-04-16 power outage produced 30 "ENGINE_CRASH" events
+# that were all DNS resolution failures with zero panics; strikes accumulated
+# toward 21d stability clock reset. Infrastructure events must not reset it.
+# 來源：P0-9 RCA — 停電誤計 30 次 crash；基礎設施事件不應重置 21d 時鐘。
+# ═══════════════════════════════════════════════════════════════════════════════
+
+ENGINE_LOG_TAIL_LINES = 20
+NETWORK_OUTAGE_MIN_CONSECUTIVE = 5
+# Case-insensitive substrings; ≥NETWORK_OUTAGE_MIN_CONSECUTIVE consecutive matching
+# tail lines → classify as network_outage (do not count as strike).
+# 不分大小寫子字串；tail 連續 ≥N 條匹配判為 network_outage（不計 strike）。
+NETWORK_OUTAGE_PATTERNS: tuple[str, ...] = (
+    "temporary failure in name resolution",
+    "failed to lookup address information",
+    "http transport error",
+    "connection refused",
+    "dns error",
+)
+# If ANY tail line contains one of these, override back to engine_crash.
+# Panic / assertion is always a real bug, even amid a network outage.
+# 若 tail 任一行含以下子字串，強制回到 engine_crash（panic/assertion 一定是 bug）。
+CRASH_INDICATOR_PATTERNS: tuple[str, ...] = (
+    "panic",
+    "assertion failed",
+    "stack backtrace",
+)
+# Cap tail scan cost — engine.log can grow large before rotation.
+# 上限 256 KB，避免 log 未輪替時讀取過慢。
+ENGINE_LOG_MAX_READ_BYTES = 256 * 1024
 
 
 @dataclass
@@ -77,6 +111,11 @@ class WatchdogState:
     total_crashes: int = 0
     last_recovery_ts: float = 0.0
     rollback_triggered: bool = False
+    # WATCHDOG-DNS-CLASSIFY-1 (2026-04-20): DNS/transport-outage counters.
+    # Separate from crash_timestamps — outages do not count toward 3-strike rule.
+    # 網路中斷計數；獨立於 crash_timestamps，不計入三振規則。
+    total_network_outages: int = 0
+    network_outage_timestamps: list[float] = field(default_factory=list)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -106,6 +145,82 @@ def prune_old_strikes(state: WatchdogState, window: float) -> None:
     """Remove crash timestamps outside the strike window / 移除窗口外的崩潰時間戳"""
     cutoff = time.time() - window
     state.crash_timestamps = [ts for ts in state.crash_timestamps if ts > cutoff]
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# WATCHDOG-DNS-CLASSIFY-1 (2026-04-20): engine failure classifier
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+def _read_log_tail(log_path: Path, n_lines: int) -> list[str]:
+    """
+    Read the last n_lines from log_path without loading the whole file.
+    讀取 log_path 最後 n_lines 行，不載入整個檔案。
+    Bounded by ENGINE_LOG_MAX_READ_BYTES for cost.
+    Raises OSError on unreadable/missing file (caller handles).
+    """
+    file_size = log_path.stat().st_size
+    read_bytes = min(file_size, ENGINE_LOG_MAX_READ_BYTES)
+    with open(log_path, "rb") as f:
+        if file_size > read_bytes:
+            f.seek(file_size - read_bytes)
+            f.readline()  # discard partial line at seek boundary / 丟棄 seek 邊界半行
+        raw = f.read()
+    text = raw.decode("utf-8", errors="replace")
+    lines = text.splitlines()
+    return lines[-n_lines:] if len(lines) > n_lines else lines
+
+
+def classify_engine_failure(
+    log_path: Path,
+    tail_lines: int = ENGINE_LOG_TAIL_LINES,
+    min_consecutive: int = NETWORK_OUTAGE_MIN_CONSECUTIVE,
+) -> str:
+    """
+    Classify engine failure by inspecting the tail of engine.log.
+    通過檢查 engine.log 尾部分類引擎故障。
+
+    Returns:
+      "network_outage"  iff the tail contains NO CRASH_INDICATOR_PATTERNS AND
+                         has a run of ≥min_consecutive lines all matching any
+                         NETWORK_OUTAGE_PATTERNS (case-insensitive).
+      "engine_crash"    otherwise (conservative default on I/O error or empty log).
+    """
+    try:
+        tail = _read_log_tail(log_path, tail_lines)
+    except OSError as e:
+        logger.warning(
+            "classify_engine_failure: log read failed (%s) — defaulting to engine_crash "
+            "/ 日誌讀取失敗（%s）— 預設 engine_crash", e, e,
+        )
+        return "engine_crash"
+
+    if not tail:
+        return "engine_crash"
+
+    lower = [line.lower() for line in tail]
+
+    # (a) crash-indicator override — panic/assertion is always a real bug
+    # (a) panic/assertion 強制覆蓋為 engine_crash
+    for line in lower:
+        if any(pat in line for pat in CRASH_INDICATOR_PATTERNS):
+            return "engine_crash"
+
+    # (b) longest run of consecutive network-outage lines within the tail
+    # (b) tail 內連續 network-outage 行的最長連續段
+    longest_run = 0
+    current_run = 0
+    for line in lower:
+        if any(pat in line for pat in NETWORK_OUTAGE_PATTERNS):
+            current_run += 1
+            if current_run > longest_run:
+                longest_run = current_run
+        else:
+            current_run = 0
+
+    if longest_run >= min_consecutive:
+        return "network_outage"
+    return "engine_crash"
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -276,15 +391,54 @@ def trigger_restart(data_dir: str) -> bool:
     return False
 
 
-def on_engine_crash(state: WatchdogState, snapshot_age: float, data_dir: str = "") -> str:
+def on_engine_crash(
+    state: WatchdogState,
+    snapshot_age: float,
+    data_dir: str = "",
+    log_path: Optional[Path] = None,
+) -> str:
     """
     Handle engine crash detection.
     處理引擎崩潰檢測。
 
-    Returns: action taken ("fallback" | "rollback" | "none")
+    Returns: action taken ("fallback" | "rollback" | "network_outage" | "none")
+
+    WATCHDOG-DNS-CLASSIFY-1 (2026-04-20): when log_path is given, inspect the
+    engine.log tail; a pure DNS/transport outage (no panic/assertion + ≥5
+    consecutive network-error lines) classifies as `network_outage` — no strike
+    is counted, no auto-restart is attempted (restart can't fix DNS and would
+    burn the circuit-breaker). engine_alive still flips to False so that the
+    recovery path fires normally once the network comes back.
     """
     if not state.engine_alive:
         return "none"  # Already in crash state / 已在崩潰狀態
+
+    # Classify first. A null log_path preserves the pre-DNS-CLASSIFY-1 behavior
+    # (always engine_crash), keeping existing callers unaffected.
+    # 先分類；log_path=None 時維持舊行為（總是 engine_crash）以不影響既有呼叫者。
+    classification = "engine_crash"
+    if log_path is not None:
+        classification = classify_engine_failure(log_path)
+
+    if classification == "network_outage":
+        state.engine_alive = False
+        state.total_network_outages += 1
+        state.network_outage_timestamps.append(time.time())
+        logger.warning(
+            "NETWORK_OUTAGE classified — snapshot age=%.1fs, total outages=%d "
+            "(strike NOT counted, auto-restart skipped) "
+            "/ 網路中斷分類 — 快照年齡=%.1f秒，總次數=%d（不計 strike，跳過自動重啟）",
+            snapshot_age, state.total_network_outages,
+            snapshot_age, state.total_network_outages,
+        )
+        if data_dir:
+            _append_canary_event(data_dir, {
+                "ts": time.time(),
+                "event": "NETWORK_OUTAGE",
+                "snapshot_age_seconds": snapshot_age,
+                "total_outages": state.total_network_outages,
+            })
+        return "network_outage"
 
     state.engine_alive = False
     state.total_crashes += 1
@@ -379,6 +533,10 @@ def run_watchdog(
         data_path / "pipeline_snapshot_demo.json",
         data_path / "pipeline_snapshot_live.json",
     ]
+    # WATCHDOG-DNS-CLASSIFY-1: engine.log tail drives outage-vs-crash classification.
+    # Missing file is fine — classifier falls back to "engine_crash" on OSError.
+    # 引擎日誌路徑；檔案缺失時分類器回退為 engine_crash。
+    engine_log_path = data_path / ENGINE_LOG_FILENAME
     state = WatchdogState()
     iteration = 0
     # Record startup time for grace period calculation / 記錄啟動時間用於寬限期計算
@@ -423,7 +581,9 @@ def run_watchdog(
                     age, elapsed, grace_period,
                 )
             else:
-                action = on_engine_crash(state, age, data_dir=str(data_path))
+                action = on_engine_crash(
+                    state, age, data_dir=str(data_path), log_path=engine_log_path,
+                )
                 if action == "rollback":
                     logger.critical("Initiating runtime rollback... / 啟動運行時回滾...")
                     break

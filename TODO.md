@@ -4,7 +4,7 @@
 **Engine**：PID 3029633 · binary mtime 2026-04-19 22:32 → 含全部先前 staged 修復（P0-6 永久修復 + P1-7 A INTENT-WRITE-GAP-1 + P1-7 B edge_estimator scheduler + P1-17 Winsorize + LIVE-GATE-BINDING-1 + DYNAMIC-RISK-1 + IPC-SCAN-1c + FILL-CONTEXT-LINKAGE-1 + EXIT-FEATURES-TABLE-1 Phase 1b + Plan N ai_budget dedup + E5-P1/P2 + E5-FN-2/3 + DISPATCH-RETRY-1 + MARKET-KLINES-STALE-1 + DUAL-TRACK Track P T1-T5 骨架 + PIPELINE-SLOT-1 Phase 1-4）+ **EXIT-FEATURES-TABLE-1 Phase 1b GAP-1**（commit `35808e9` apply_confirmed_fill 接線，待流量驗證）
 **Python uvicorn**：PID 3029688（4 workers）· started 2026-04-19 22:33 → 含 P0-12 LIVE-GATE-FALLBACK-1 + E5-FN-3 AnalystAgent pilot + PIPELINE-SLOT-1 Phase 4 daemon-thread trigger
 **PIPELINE-SLOT-1 live 驗證**：LiveAuthWatcher 22:33 啟動 `env=LiveDemo poll_interval_secs=5`；authorization.json 已由 Manual restart sentinel 清除；等 operator 走 GUI renew → 應 ≤1s 觀察到 Live pipeline 重生
-**測試基準線**：Rust engine lib **1631** / bin 38 / core 392 / e2e 35 / reconciler_e2e 19 · Python **2848** passed（+9 from E5-FN-3 loop closure：Scout 8 + NIT-2 1）+ audit 4 passed / ml_training 238 passed · 2 pre-existing DYNAMIC-RISK-STATUS-TEST-SIG-1 fail（P2 追蹤，不阻 Live）
+**測試基準線**：Rust engine lib **1631** / bin 38 / core 392 / e2e 35 / reconciler_e2e 19 · Python **2866** passed（+9 E5-FN-3 + 2 DYNAMIC-RISK-STATUS-TEST-SIG-1 修復 83a0475 + 16 WATCHDOG-DNS-CLASSIFY-1 新測）+ audit 4 passed / ml_training 238 passed · **0 pre-existing fail**（DYNAMIC-RISK 已清）
 **健康**：demo alive（snapshot age 5.9s） · paper/live 預期 dead（PAPER-DISABLE-1 + 待 renew） · 今日 1 crash（12:25，為 redeploy 前殘留）
 **DB 驗證（2026-04-20 00:20）**：market.klines 5 timeframes 在近 1h 寫入 ✅ · trading.intents demo 57 rows/3h ✅（P1-7 A 生效）· **learning.exit_features GAP-1 驗收 ✅ 1.8h 提前結案**（demo 8 close fills / 8 exit_features / coverage_ratio=1.000 / Strategy 6 + FastTrack 2）
 
@@ -395,7 +395,7 @@ GROUP BY 1,2,3 ORDER BY 1,2,4 DESC;
 - [ ] **QoL-2** Demo AI cost 追蹤（`tab-demo.html` 硬編碼 'N/A'，依賴 G-1 H1-H5）
 - [ ] **DUST-EVICTION GUI 曝光**（P1-8 FUP）：log-only 觀察滿一週後（起算 2026-04-17）→ GUI 曝光 `dust_frozen` / `orphan_frozen` 倉位給 operator 日報；`paper_state.rs` 已有 `TriageOutcome.dust_frozen` 計數器
 - [ ] **LEARNING-COCKPIT-NO-IPC-1** Learning 8 端點走 Python state_store 非 Rust IPC（設計債，等 G-7/G-10 後再議；不阻 Live，原則 #7 學習平面與 Live 隔離）
-- [ ] **DYNAMIC-RISK-STATUS-TEST-SIG-1** — `test_phase2_strategy_routes_coverage.py::TestDynamicRiskRoutes` 2 測試直接 `await get_dynamic_risk_status(engine="foo")`，跳過 FastAPI 依賴解析，`engine` 仍是 `Query` object → `.lower()` AttributeError @ `strategy_read_routes.py:260`。修復方案：(a) 測試改用 `TestClient(app).get("/api/v1/dynamic-risk/status?engine=...")` 走 HTTP；或 (b) 函數首行加 `engine = engine.default if hasattr(engine, "default") else engine`。嚴重度：測試 only（prod HTTP 路徑正常），**不阻 Live**。引入來源 commit `81a3807` DYNAMIC-RISK-1（2026-04-18 20:06），E5-P0 整合 Phase D 發現並獨立開 ticket。
+- [x] **DYNAMIC-RISK-STATUS-TEST-SIG-1** ✅ 已修復 commit `83a0475` (2026-04-19) — 採方案 (a) `TestClient(app).get(...)` 走 HTTP dispatch，並傳 `Authorization: Bearer` header 因為兄弟測試 `importlib.reload(main_legacy)` 會 swap 掉預先捕獲的 `current_actor` dep key。2 tests pass · pytest baseline 2587+2→2589+0。
 - [ ] **E5-P1-5-FUP** — P1-5 JSON-RPC `param_extractor.rs` 目前帶 `#![allow(dead_code)]` 等 handlers.rs 消費。需開工項：掃 `ipc_server/handlers/*.rs` 把內嵌 `as_str()/as_f64()/as_u64()/unwrap_or(default)` 手寫解包替換成 `param_extractor::require_*` / `optional_*`，至少兩個 handler file 當示範，確認 param_extractor.rs 死碼警示可解。E2 nit 追蹤（a4101cb63edc44e93 / af8076b578356a939）。
 - [ ] **E5-P1-4-FUP** — `llm_call_wrapper.call_ollama_timed` dead-on-arrival，考慮：(a) 接 StrategistAgent `_evaluate_edge` 手寫 latency 計時（strategist_agent.py 約 918 行）；(b) 若永遠不接，下 commit 刪除 helper。E2 nit（a4101cb63edc44e93）。
 - [ ] **E5-P1-8-FUP** — `rejection_coding.rs` 第二 `impl RejectionCode` block（`from_guardian_review` 工廠）可折疊到主 impl；分類 helpers（`is_cost_gate_reject` / `family`）帶 `#[allow(dead_code)]` 等 consumer 接線後移除 allow。E2 nit（a9ccde4552860c973）。
@@ -489,10 +489,11 @@ GROUP BY 1,2,3 ORDER BY 1,2,4 DESC;
 - **工作量**：~1d
 - **接手指南**：`intent_processor/mod.rs` evaluate_predictor_gate 上游；類似機制參考 `governor_cooldown` / `last_ai_call_time_ms`
 
-### WATCHDOG-DNS-CLASSIFY-1 · 區分 DNS 斷線 vs 真 crash
-- **背景**：P0-9 RCA 揭露停電誤分類為 ENGINE_CRASH；發生頻率低（年均 ≤3 次）
-- **設計**：`engine_watchdog.py` 讀 engine.log 末 N=20 行 → 連續 ≥5 條 `Temporary failure in name resolution` / `HTTP transport error` / `connection refused` → 分類 `network_outage` 不計 strike；`panic` / `assertion` → `engine_crash` 正常 strike
-- **工作量**：~2h（純 Python，不動 Rust）
+### WATCHDOG-DNS-CLASSIFY-1 · 區分 DNS 斷線 vs 真 crash ✅ 2026-04-20
+- **狀態**：已實作 `helper_scripts/canary/engine_watchdog.py` — 新 `classify_engine_failure(log_path)` + `on_engine_crash(log_path=...)` 可選參數；P0-9 停電樣本驗證正確分類 `network_outage`
+- **行為**：tail 20 行內連續 ≥5 條 `Temporary failure in name resolution` / `HTTP transport error` / `connection refused` / `failed to lookup address information` / `dns error` → `network_outage`（不計 strike、不觸發 auto-restart 以免 circuit-breaker 被無辜燒穿、engine_alive=False 讓 recovery 正常觸發）；tail 出現 `panic` / `assertion failed` / `stack backtrace` → 強制 `engine_crash` 正常計 strike；缺檔或空檔保守預設 `engine_crash`
+- **測試**：+16 unit tests（10 classifier + 6 on_engine_crash wiring）；pytest helper_scripts/canary/test_canary.py 38→**54 passed**
+- **工作量**：~2h（純 Python，不動 Rust；Rust engine 計數器無變動）
 
 ### WP-F GUI / WP-E4 測試 / WP-E5 大文件 / WP-I 文檔
 - WP-F/O-xx · AH-08~11（詳 `docs/audits/2026-04-06--consolidated_remediation_report.md` §10.1）
