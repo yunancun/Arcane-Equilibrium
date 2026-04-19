@@ -21,6 +21,7 @@ use openclaw_types::PriceEvent;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::mpsc;
+use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
 
@@ -450,14 +451,29 @@ pub(crate) struct ExchangePipelineBindings {
 /// Build exchange pipeline bindings if credentials exist for the given environment.
 /// Returns None if no API key found → that pipeline will not start.
 ///
+/// PIPELINE-SLOT-1 Phase 2:
+///   The `cancel` token passed in is the **slot-scoped child token** created
+///   by `PipelineSlot::try_spawn`. Every `tokio::spawn` performed inside this
+///   function watches that token so a slot-scoped teardown (auth revoke /
+///   expiry) stops them without collateral damage to other slots (demo /
+///   paper). Returns `(bindings, task_handles)` so the caller can hand the
+///   handles to `SlotState::Spawned.task_handles` for deterministic join on
+///   teardown.
+///
 /// 為指定環境構建交易所管線綁定（若有 API key）。
 /// 若無 API key 則返回 None → 該管線不啟動。
+///
+/// PIPELINE-SLOT-1 Phase 2：傳入的 `cancel` 是 `PipelineSlot::try_spawn`
+/// 建立的**槽位子 token**。本函式內每個 `tokio::spawn` 都監看該 token，
+/// 於 slot-scoped teardown（授權撤銷/過期）時乾淨停止，不波及其他 slot。
+/// 回傳 `(bindings, task_handles)`，讓呼叫者把 handle 放入
+/// `SlotState::Spawned.task_handles` 以供 teardown 時確定性地 join。
 pub(crate) async fn build_exchange_pipeline(
     kind: PipelineKind,
     env: BybitEnvironment,
     cancel: CancellationToken,
     cfg_snapshot: &openclaw_engine::config::EngineBootstrap,
-) -> Option<ExchangePipelineBindings> {
+) -> Option<(ExchangePipelineBindings, Vec<JoinHandle<()>>)> {
     // LIVE-GATE-BINDING-1 (2026-04-18): Enforce the signed Earned-Trust
     // authorization for the Live pipeline. Python writes a HMAC-signed
     // `authorization.json` on every renew/approve; Rust refuses to spawn
@@ -706,11 +722,19 @@ pub(crate) async fn build_exchange_pipeline(
     };
 
     // Spawn Private WS supervisor (D21: per-engine isolation) / 啟動私有 WS 監管器
+    //
+    // PIPELINE-SLOT-1 Phase 2: `spawn_private_ws_supervisor` now returns the
+    // two tokio JoinHandles it spawns (ws supervisor + listener) so we can
+    // hand them back to the slot alongside the balance-refresh handle below.
+    // PIPELINE-SLOT-1 Phase 2：`spawn_private_ws_supervisor` 現在回傳它 spawn
+    // 的兩個 tokio JoinHandle（WS supervisor + listener），連同下面的
+    // balance-refresh handle 一併交還給 slot。
     let label = match env {
         BybitEnvironment::Demo | BybitEnvironment::Testnet => "demo",
         BybitEnvironment::Mainnet | BybitEnvironment::LiveDemo => "live",
     };
-    let ws_bindings = spawn_private_ws_supervisor(api_key, api_secret, env, label, cancel.clone());
+    let (ws_bindings, mut task_handles) =
+        spawn_private_ws_supervisor(api_key, api_secret, env, label, cancel.clone());
 
     // BALANCE-REAL-1: Seed reconcile Arc with the REST-fetched value so the
     // event_consumer reconcile path triggers from the very first tick — we do
@@ -733,7 +757,16 @@ pub(crate) async fn build_exchange_pipeline(
         let refresh_arc = Arc::clone(&ws_bindings.bybit_balance);
         let refresh_cancel = cancel.clone();
         let refresh_kind = kind;
-        tokio::spawn(async move {
+        // PIPELINE-SLOT-1 Phase 2: capture the balance-refresh handle so the
+        // slot teardown awaits it instead of orphaning a detached task. Pre-
+        // Phase-2 this was `tokio::spawn(...)` with the handle discarded —
+        // harmless while engine-wide cancel always killed it, but not safe
+        // once we can cancel the slot's child token independently.
+        // PIPELINE-SLOT-1 Phase 2：捕獲 balance-refresh handle，避免 slot
+        // teardown 時殘留 detached task。Phase 2 前這裡是 `tokio::spawn(...)`
+        // 丟棄 handle — 引擎級 cancel 永遠會 kill 時無害，但能獨立 cancel
+        // 子 token 後就不安全。
+        let refresh_handle = tokio::spawn(async move {
             let mut interval = tokio::time::interval(std::time::Duration::from_secs(300));
             interval.tick().await; // skip first immediate tick
             loop {
@@ -770,6 +803,7 @@ pub(crate) async fn build_exchange_pipeline(
                 }
             }
         });
+        task_handles.push(refresh_handle);
     }
 
     let risk_level = Arc::new(std::sync::atomic::AtomicU8::new(
@@ -782,42 +816,66 @@ pub(crate) async fn build_exchange_pipeline(
     info!(kind = %kind, env = ?env, balance = format!("{:.2}", initial_balance),
         "exchange pipeline bindings built / 交易所管線綁定已構建");
 
-    Some(ExchangePipelineBindings {
-        env,
-        rest_client: client_arc,
-        account_manager: acct,
-        taker_fee,
-        initial_balance,
-        ws_bindings,
-        risk_level,
-        health,
-        seed_positions,
-    })
+    Some((
+        ExchangePipelineBindings {
+            env,
+            rest_client: client_arc,
+            account_manager: acct,
+            taker_fee,
+            initial_balance,
+            ws_bindings,
+            risk_level,
+            health,
+            seed_positions,
+        },
+        task_handles,
+    ))
 }
 
 /// Exchange bindings produced by spawning a private WS supervisor.
 /// 啟動私有 WS 監管器後產生的交易所綁定。
+///
+/// PIPELINE-SLOT-1 Phase 2:
+///   The `_ws_handle` and `_listener_handle` fields that previously lived here
+///   (prefixed `_` → kept alive only to prevent task drop) are now returned
+///   separately by `spawn_private_ws_supervisor` so `build_exchange_pipeline`
+///   can bundle them into a `Vec<JoinHandle<()>>` owned by the slot. This
+///   lets `PipelineSlot::teardown()` await them deterministically on
+///   live-scoped teardown. No runtime behaviour change on the happy path —
+///   the handles are still tokio-spawned on the same runtime with the same
+///   cancel-token wiring; we just own them at a different layer now.
+///
+/// PIPELINE-SLOT-1 Phase 2：
+///   原本放在這裡的 `_ws_handle` 與 `_listener_handle`（以 `_` 前綴僅為防
+///   drop）已改由 `spawn_private_ws_supervisor` 另外返回，讓
+///   `build_exchange_pipeline` 可以把它們匯入一個歸槽位擁有的
+///   `Vec<JoinHandle<()>>`，使 `PipelineSlot::teardown()` 能在 live-scoped
+///   teardown 時確定性地 await。Happy path 無行為變動 — 任務仍在同個 runtime
+///   spawn、cancel-token 接線一致，只是擁有權提高到 slot 層。
 pub(crate) struct PrivateWsBindings {
     // BLOCKER-6 / D12: parking_lot::RwLock for non-poisoning cross-pipeline isolation.
     // BLOCKER-6 / D12：parking_lot::RwLock，不中毒 → 跨管線隔離。
     pub bybit_balance: Arc<parking_lot::RwLock<Option<f64>>>,
     pub api_pnl: Arc<parking_lot::RwLock<std::collections::HashMap<String, f64>>>,
     pub exchange_event_rx: mpsc::UnboundedReceiver<ExchangeEvent>,
-    pub _ws_handle: tokio::task::JoinHandle<()>,
-    pub _listener_handle: tokio::task::JoinHandle<()>,
 }
 
 /// Spawn a per-pipeline private WS supervisor + ExecutionListener.
-/// Returns exchange bindings for the pipeline's EventConsumerDeps.
+/// Returns exchange bindings for the pipeline's EventConsumerDeps plus the
+/// two tokio task handles (ws supervisor + listener), so the caller can
+/// hand them to `PipelineSlot` for deterministic teardown.
+///
 /// 為每管線啟動私有 WS 監管器 + 執行監聽器。
-/// 返回管線 EventConsumerDeps 所需的交易所綁定。
+/// 返回管線 EventConsumerDeps 所需的交易所綁定，以及 ws supervisor 與
+/// listener 的 tokio 任務 handle，方便呼叫者交給 `PipelineSlot` 以確定性地
+/// 撤下。
 pub(crate) fn spawn_private_ws_supervisor(
     api_key: String,
     api_secret: String,
     env: BybitEnvironment,
     label: &str,
     cancel: CancellationToken,
-) -> PrivateWsBindings {
+) -> (PrivateWsBindings, Vec<JoinHandle<()>>) {
     use openclaw_engine::bybit_private_ws::BybitPrivateWs;
     use openclaw_engine::execution_listener::ExecutionListener;
     use parking_lot::RwLock;
@@ -972,13 +1030,18 @@ pub(crate) fn spawn_private_ws_supervisor(
         engine = label,
         "Private WS + ExecutionListener started / 私有 WS + 執行監聽器已啟動"
     );
-    PrivateWsBindings {
+    let bindings = PrivateWsBindings {
         bybit_balance,
         api_pnl,
         exchange_event_rx,
-        _ws_handle: ws_handle,
-        _listener_handle: listener_handle,
-    }
+    };
+    // Order here is intentional but not semantically required (teardown awaits
+    // all in sequence). Keep [ws_handle, listener_handle] so logs during
+    // teardown report the supervisor shutting down before the listener.
+    // 順序有意為之但不影響語義（teardown 會依序 await 全部）。保留
+    // [ws_handle, listener_handle]，讓 teardown log 先打 supervisor 再打 listener。
+    let handles = vec![ws_handle, listener_handle];
+    (bindings, handles)
 }
 
 /// Listen for OS signals: SIGHUP → reload, SIGTERM/SIGINT → shutdown.

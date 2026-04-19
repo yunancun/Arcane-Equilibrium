@@ -317,57 +317,97 @@ async fn async_main(
     // Paper 始終啟動。Demo/Live 依 API key 存在性獨立啟動。
     // ------------------------------------------------------------------
     let cfg_snapshot_pipelines = config.get();
-    // PIPELINE-SLOT-1 Phase 1: slots own the future respawn point. Phase 1
-    // delegates construction directly to `build_exchange_pipeline`; the slot
-    // transitions to Spawned on success and holds the engine-wide cancel
-    // token (narrowed to per-slot tokens in Phase 2).
-    // PIPELINE-SLOT-1 Phase 1：slot 擁有未來的 respawn 接口。Phase 1 直接
-    // 委派給 `build_exchange_pipeline`；成功則槽位轉為 Spawned，並持有引擎級
-    // cancel token（Phase 2 改為 per-slot 子 token）。
+    // PIPELINE-SLOT-1 Phase 2: slots own each pipeline's cancel token and
+    // task handles. `try_spawn` derives a slot-scoped child from the engine-
+    // wide shutdown token, threads it into `build_exchange_pipeline`, and
+    // returns both the bindings and a clone of the child token. We store
+    // the child token next to each slot for later use:
+    //   * `live_slot_cancel` → threaded into the Live OS thread's
+    //     `live_cancel` AND into `live_deps.cancel` (EventConsumerDeps)
+    //     so the 5-min auth re-verify loop's `live_slot.teardown()` cancels
+    //     the Live event-consumer main loop, not just the WS supervisor
+    //     / listener / balance-refresh tasks. Pre-Phase-2-fix wiring passed
+    //     the engine-wide `cancel` clone into `live_deps.cancel`, which
+    //     meant teardown left the event consumer running and still
+    //     dispatching orders — a skin-deep teardown. (E2 BLOCKER #1.)
+    //   * `demo_slot_cancel` → threaded into `demo_deps.cancel` for the
+    //     same reason — consistency + future safety if a demo-scoped
+    //     teardown path appears. Demo is never torn down mid-session in
+    //     Phase 2, so behaviour is unchanged on the happy path; binding
+    //     to the child is strictly more correct because cancelling the
+    //     engine-wide parent still cascades down to this child (tokio-util
+    //     CancellationToken contract), so SIGTERM still stops Demo cleanly.
+    //
+    // PIPELINE-SLOT-1 Phase 2：槽位擁有每條管線的 cancel token 與任務
+    // handle。`try_spawn` 從引擎級 shutdown token 派生槽位子 token，傳入
+    // `build_exchange_pipeline`，並回傳 bindings + 子 token clone。我們把
+    // 子 token 與 slot 一起保留備用：
+    //   * `live_slot_cancel` → 串進 Live OS 線程的 `live_cancel` **以及**
+    //     `live_deps.cancel`（EventConsumerDeps），讓 5 分鐘授權重驗 loop 的
+    //     `live_slot.teardown()` 也能取消 Live event-consumer 主迴圈，
+    //     不僅是 WS supervisor / listener / balance-refresh。修復前 wiring
+    //     把引擎級 `cancel` clone 給 `live_deps.cancel`，導致 teardown 後
+    //     event consumer 仍在跑、仍在下單 — 皮毛式 teardown。（E2 BLOCKER #1）
+    //   * `demo_slot_cancel` → 串進 `demo_deps.cancel`，理由同上（一致性
+    //     + 未來若出現 demo-scoped teardown 路徑時的安全性）。Phase 2
+    //     不會中途拆 Demo，happy path 行為不變；綁定子 token 仍嚴格更正確，
+    //     因為取消引擎級父 token 會連帶子 token（tokio-util 契約），
+    //     SIGTERM 依舊乾淨停 Demo。
     let live_slot = Arc::new(pipeline_slot::PipelineSlot::new_empty(
         pipeline_slot::SlotKind::Live,
     ));
     let demo_slot = Arc::new(pipeline_slot::PipelineSlot::new_empty(
         pipeline_slot::SlotKind::Demo,
     ));
-    let live_bindings = match live_slot
+    let (live_bindings, live_slot_cancel) = match live_slot
         .try_spawn(&pipeline_slot::SpawnConfig {
             kind: pipeline_slot::SlotKind::Live,
             env: live_bybit_environment(),
-            cancel: cancel.clone(),
+            parent_shutdown_token: cancel.clone(),
             cfg_snapshot: &cfg_snapshot_pipelines,
         })
         .await
     {
-        Ok(b) => b,
-        // Phase 1 never hits AlreadySpawned because we just created the slot.
-        // Any other SpawnError path is unreachable too (the only other variant
-        // is NotAvailable which we map to None above). Defensive match:
+        Ok(Some(out)) => (Some(out.bindings), Some(out.slot_cancel_token)),
+        Ok(None) => (None, None),
+        // AlreadySpawned cannot happen — we just created the slot. Any future
+        // SpawnError variant is treated as "build_exchange_pipeline returned
+        // None": log structured, continue without Live.
         Err(e) => {
             tracing::error!(error = %e, "live slot spawn errored unexpectedly / live 槽啟動錯誤");
-            None
+            (None, None)
         }
     };
-    let demo_bindings = match demo_slot
+    let (demo_bindings, demo_slot_cancel) = match demo_slot
         .try_spawn(&pipeline_slot::SpawnConfig {
             kind: pipeline_slot::SlotKind::Demo,
             env: BybitEnvironment::Demo,
-            cancel: cancel.clone(),
+            parent_shutdown_token: cancel.clone(),
             cfg_snapshot: &cfg_snapshot_pipelines,
         })
         .await
     {
-        Ok(b) => b,
+        Ok(Some(out)) => (Some(out.bindings), Some(out.slot_cancel_token)),
+        Ok(None) => (None, None),
         Err(e) => {
             tracing::error!(error = %e, "demo slot spawn errored unexpectedly / demo 槽啟動錯誤");
-            None
+            (None, None)
         }
     };
-    // Phase 1 does not consume the slots further; they will be used by the
-    // Phase 4 auth-watcher. Hold via _ binding to prevent drop warning.
-    // Phase 1 不再使用 slot；Phase 4 auth-watcher 會接手。用 _ 綁定避免 drop 警告。
-    let _live_slot = live_slot;
-    let _demo_slot = demo_slot;
+    // PIPELINE-SLOT-1 Phase 2: Hold slot Arcs for the 5-min auth re-verify
+    // loop (Live only) AND for the ordered shutdown sequence — both `live_slot`
+    // and `demo_slot` are torn down explicitly after the engine-wide cancel
+    // so their owned task handles (WS supervisor / listener / balance refresh)
+    // join deterministically instead of relying on tokio-runtime drop to abort
+    // them. E2 MAJOR #3 fix: Phase 2 teardown() promises "clean shutdown" — we
+    // must actually invoke it at engine-wide shutdown, not just on auth revoke.
+    // Paper is NOT yet wired through PipelineSlot (Phase 3 deferral).
+    //
+    // PIPELINE-SLOT-1 Phase 2：保留兩個 slot 的 Arc — Live slot 供 5 分鐘授權
+    // 重驗 loop 使用，**兩者**都在關機時顯式呼叫 `teardown()` 以確定性 join
+    // 槽位擁有的任務 handle，不依賴 tokio runtime drop 粗暴中止。E2 MAJOR #3
+    // 修復：Phase 2 teardown() 承諾「乾淨關閉」 — 引擎關機時必須實際呼叫，
+    // 不是僅授權撤銷時呼叫。Paper 尚未接入 PipelineSlot（Phase 3 延後）。
     drop(cfg_snapshot_pipelines);
 
     // Log pipeline availability / 記錄管線可用性
@@ -1161,7 +1201,20 @@ async fn async_main(
     // Spawn Demo pipeline (conditional — if demo API key exists)
     // 啟動 Demo 管線（條件性 — 若 demo API key 存在）
     // ------------------------------------------------------------------
-    let demo_handle: Option<tokio::task::JoinHandle<()>> = if let Some(demo_b) = demo_bindings {
+    // PIPELINE-SLOT-1 Phase 2 (E2 BLOCKER #1 fix): pair `demo_bindings` with
+    // `demo_slot_cancel` via tuple pattern — `try_spawn` assigns both Options
+    // in the same match arm so the invariant "both Some or both None" is
+    // structural. The compiler enforces the pairing here without `.expect()`.
+    // The `(Some, None) | (None, Some)` arm cannot be reached in practice but
+    // is handled defensively (log + skip Demo spawn, never panic).
+    //
+    // PIPELINE-SLOT-1 Phase 2（E2 BLOCKER #1 修復）：以 tuple pattern 配對
+    // `demo_bindings` 與 `demo_slot_cancel` — `try_spawn` 在同一 match arm
+    // 同時賦值兩個 Option，「同時 Some 或同時 None」為結構不變式。此處由
+    // 編譯器強制配對，無需 `.expect()`。`(Some, None) | (None, Some)` 分支
+    // 實務上不可能發生，但仍防禦性地處理（log + 跳過 Demo 啟動，絕不 panic）。
+    let demo_handle: Option<tokio::task::JoinHandle<()>> = match (demo_bindings, demo_slot_cancel) {
+        (Some(demo_b), Some(demo_slot_cancel_token)) => {
         let (_, demo_event_rx) = demo_event_channel.expect("demo channel must exist");
         // B-1 Phase 2: capture seed_positions before move into deps below.
         // B-1 Phase 2：在 demo_b 被 move 進 deps 之前先取出 seed_positions。
@@ -1171,7 +1224,13 @@ async fn async_main(
             endpoint_env: Some(BybitEnvironment::Demo),
             event_rx: demo_event_rx,
             config: Arc::clone(&config),
-            cancel: cancel.clone(),
+            // PIPELINE-SLOT-1 Phase 2 (E2 BLOCKER #1): bind to slot-scoped
+            // child, not engine-wide. SIGTERM still cascades via parent →
+            // child; a Phase 3+ demo-scoped teardown would stop only Demo.
+            // PIPELINE-SLOT-1 Phase 2（E2 BLOCKER #1）：綁定槽位子 token，
+            // 非引擎級。SIGTERM 仍會經父→子連動；Phase 3+ 的 demo-scoped
+            // teardown 屆時可只拆 Demo。
+            cancel: demo_slot_cancel_token.clone(),
             initial_balance: demo_b.initial_balance,
             paper_initial_balance: None,
             taker_fee_rate: demo_b.taker_fee,
@@ -1235,18 +1294,41 @@ async fn async_main(
             cancel.clone(),
         ));
         info!("demo pipeline spawned (crash-only) / Demo 管線已啟動（crash-only）");
-        Some(h)
-    } else {
-        None
+            Some(h)
+        }
+        (None, None) => None,
+        (Some(_), None) | (None, Some(_)) => {
+            // PIPELINE-SLOT-1 Phase 2 (E2 BLOCKER #1 fix): Option-pair
+            // invariant violation. `try_spawn` assigns both in the same
+            // match arm so this arm is structurally unreachable, but we
+            // log-and-skip rather than panic.
+            tracing::error!(
+                "demo bindings/slot-cancel pairing invariant violated — skipping Demo spawn \
+                 / Demo bindings/slot-cancel 配對不變式違反 — 跳過 Demo 啟動"
+            );
+            None
+        }
     };
 
     // ------------------------------------------------------------------
     // Spawn Live pipeline (conditional — D17: dedicated OS thread + catch_unwind)
     // 啟動 Live 管線（條件性 — D17：獨立 OS 線程 + catch_unwind）
     // ------------------------------------------------------------------
-    let live_thread_handle: Option<std::thread::JoinHandle<()>> = if let Some(live_b) =
-        live_bindings
-    {
+    // PIPELINE-SLOT-1 Phase 2 (E2 BLOCKER #1 + MAJOR #2 fix): pair
+    // `live_bindings` with `live_slot_cancel` via tuple pattern. The paired
+    // Options are assigned together in `try_spawn`'s match arms, so the
+    // compiler enforces the "both Some or both None" invariant here —
+    // eliminating the Phase 2 `.expect()` at the downstream `live_cancel`
+    // binding. The `(Some, None) | (None, Some)` arm is structurally
+    // unreachable but handled defensively (log + skip, never panic).
+    //
+    // PIPELINE-SLOT-1 Phase 2（E2 BLOCKER #1 + MAJOR #2 修復）：以 tuple
+    // pattern 配對 `live_bindings` 與 `live_slot_cancel`。兩個 Option 在
+    // `try_spawn` 的 match arm 同時賦值，結構上即「同時 Some 或同時 None」。
+    // 此處編譯器強制不變式，消除下游 `live_cancel` 處的 `.expect()`。
+    // `(Some, None) | (None, Some)` 實務上不可達，但仍防禦性處理（log + 跳過，絕不 panic）。
+    let live_thread_handle: Option<std::thread::JoinHandle<()>> = match (live_bindings, live_slot_cancel) {
+        (Some(live_b), Some(live_slot_cancel_token)) => {
         let (_, live_event_rx) = live_event_channel.expect("live channel must exist");
         // B-1 Phase 2: capture seed_positions before move into deps below.
         // B-1 Phase 2：在 live_b 被 move 進 deps 之前先取出 seed_positions。
@@ -1256,7 +1338,34 @@ async fn async_main(
             endpoint_env: Some(live_bybit_environment()),
             event_rx: live_event_rx,
             config: Arc::clone(&config),
-            cancel: cancel.clone(),
+            // PIPELINE-SLOT-1 Phase 2 (E2 BLOCKER #1 fix): bind the event
+            // consumer main loop to the slot-scoped child token, not the
+            // engine-wide `cancel`. Before this fix, the event consumer
+            // watched only the engine-wide token — `live_slot.teardown()`
+            // would cancel WS supervisor / listener / balance refresh but
+            // leave the Live event consumer running with a cloned
+            // `Arc<BybitRestClient>`, still processing fan-out market events
+            // and still **dispatching orders**. Teardown was skin-deep.
+            //
+            // With the child token bound here, `teardown()` cancels the
+            // child → the `_ = cancel.cancelled() => break` arm in
+            // `event_consumer/mod.rs::run_event_consumer` (around line 755)
+            // fires → the consumer exits its main loop → rest_client Arc
+            // drops → no further order dispatch. SIGTERM still works via
+            // parent→child cascade (tokio-util CancellationToken contract).
+            //
+            // PIPELINE-SLOT-1 Phase 2（E2 BLOCKER #1 修復）：把 event consumer
+            // 主迴圈綁到槽位子 token，而非引擎級 `cancel`。修復前 event
+            // consumer 僅監看引擎級 token — `live_slot.teardown()` 會拆
+            // WS supervisor / listener / balance refresh，但 Live event
+            // consumer 仍在跑（持有 `Arc<BybitRestClient>` clone）、仍處理
+            // fan-out 市場事件、仍**下單**。此為皮毛式 teardown。
+            //
+            // 綁定子 token 後：`teardown()` 取消子 → event_consumer 主迴圈
+            // 的 `_ = cancel.cancelled() => break` 觸發（約 mod.rs:755）→
+            // consumer 退出、rest_client Arc drop → 不再下單。SIGTERM 仍
+            // 經父→子連動（tokio-util CancellationToken 契約）正常作用。
+            cancel: live_slot_cancel_token.clone(),
             initial_balance: live_b.initial_balance,
             paper_initial_balance: None,
             taker_fee_rate: live_b.taker_fee,
@@ -1313,7 +1422,31 @@ async fn async_main(
 
         // D17: Live runs on dedicated OS thread with catch_unwind for panic isolation.
         // D17：Live 在獨立 OS 線程運行，catch_unwind 隔離 panic。
-        let live_cancel = cancel.clone();
+        //
+        // PIPELINE-SLOT-1 Phase 2: `live_cancel` is the **slot-scoped child
+        // token** returned by `live_slot.try_spawn()` — already guaranteed
+        // Some by the outer match arm (E2 MAJOR #2 fix: Option-pair refactor
+        // eliminated the Phase 2 `.expect()` previously present here).
+        // Before Phase 2 this was `cancel.clone()` (engine-wide). The switch
+        // lets the auth re-verify loop tear down the Live pipeline alone
+        // (cancelling this child) without killing demo/paper. The crash-only
+        // Fix 3 (2026-04-14) parity is preserved via `engine_wide_cancel`
+        // below: a Live panic still cancels the engine-wide token as before.
+        //
+        // PIPELINE-SLOT-1 Phase 2：`live_cancel` 是 `live_slot.try_spawn()`
+        // 回傳的**槽位子 token** — 由外層 match arm 保證 Some（E2 MAJOR #2
+        // 修復：Option-pair 重構消除原有的 `.expect()`）。Phase 2 前為
+        // `cancel.clone()`（引擎級）。換成子 token 後，授權重驗 loop 可以只
+        // 拆 Live（取消本子 token）而不波及 demo/paper。Fix 3（2026-04-14）的
+        // crash-only 對齊藉由下方 `engine_wide_cancel` 保留：Live panic
+        // 依舊取消引擎級 token。
+        let live_cancel = live_slot_cancel_token.clone();
+        // `engine_wide_cancel` is the parent token; only the panic handler
+        // uses it (crash-only parity). Clean auth-revoke teardown uses the
+        // child token instead (see main.rs auth re-verify loop below).
+        // `engine_wide_cancel` 為父 token；僅 panic handler 使用（crash-only 對齊）。
+        // 乾淨的授權撤銷 teardown 走子 token（見下方 main.rs 授權重驗 loop）。
+        let engine_wide_cancel = cancel.clone();
         let live_crash_tx = cross_engine_tx.clone();
         let live_health_ref = Arc::clone(&live_b.health);
         let thread_handle = std::thread::Builder::new()
@@ -1370,19 +1503,43 @@ async fn async_main(
                     // running — operator intent is all-or-nothing: if Live
                     // cannot execute trades, we must not keep paper/demo
                     // pretending to learn against stale state.
+                    //
+                    // PIPELINE-SLOT-1 Phase 2: we must cancel the **engine-
+                    // wide** token here, not the slot-scoped child — Fix 3's
+                    // crash-only invariant takes the engine down. (A clean
+                    // authorization revocation takes a different path: see
+                    // the auth re-verify loop below, which calls
+                    // `live_slot.teardown()` to cancel the child only.)
+                    //
                     // 修復 3：Live 也觸發全引擎 cancel 以與 paper/demo 的 crash-only
                     // 語義對齊。Live panic 以前會讓 paper/demo 繼續跑 — operator
                     // 意圖是全有或全無：Live 無法下單時 paper/demo 不應繼續在
                     // 陳舊狀態上「假裝學習」。
-                    live_cancel.cancel();
+                    //
+                    // PIPELINE-SLOT-1 Phase 2：此處必須取消**引擎級** token
+                    // 而非槽位子 token — Fix 3 的 crash-only 不變式要求整機下去。
+                    // 乾淨的授權撤銷走另一條路：見下方授權重驗 loop，呼叫
+                    // `live_slot.teardown()` 只取消子 token。
+                    engine_wide_cancel.cancel();
                 }
             })
             .expect("failed to spawn live thread / 啟動 live 線程失敗");
 
         info!("live pipeline spawned (dedicated OS thread) / Live 管線已啟動（獨立 OS 線程）");
-        Some(thread_handle)
-    } else {
-        None
+            Some(thread_handle)
+        }
+        (None, None) => None,
+        (Some(_), None) | (None, Some(_)) => {
+            // PIPELINE-SLOT-1 Phase 2 (E2 BLOCKER #1 + MAJOR #2 fix): Option-
+            // pair invariant violation. Structurally unreachable (both are
+            // assigned in the same `try_spawn` match arm) but handled
+            // defensively — log and skip Live spawn rather than panic.
+            tracing::error!(
+                "live bindings/slot-cancel pairing invariant violated — skipping Live spawn \
+                 / Live bindings/slot-cancel 配對不變式違反 — 跳過 Live 啟動"
+            );
+            None
+        }
     };
 
     info!(
@@ -1397,25 +1554,46 @@ async fn async_main(
 
     // ------------------------------------------------------------------
     // LIVE-GATE-BINDING-1 (2026-04-18): periodic re-verify ticker.
-    // 定期重驗 Earned-Trust 授權（每 5 min）。
+    // PIPELINE-SLOT-1 Phase 2 (2026-04-19): narrowed to Live-only teardown.
+    // 定期重驗 Earned-Trust 授權（每 5 min），Phase 2 收窄為僅拆 Live。
     // ------------------------------------------------------------------
     // EN: Live pipeline spawn-time gate is necessary but not sufficient — an
     //   operator must also be able to revoke or let-expire a Live session
-    //   mid-flight. This task re-reads authorization.json every 300s and
-    //   cancels the engine if the record is now invalid (expired / missing /
-    //   tampered / env revoked). We cancel the WHOLE engine (not just Live)
-    //   because Fix 3 (2026-04-14) established the crash-only parity rule:
-    //   if Live cannot trade, demo/paper must not keep pretending to learn
-    //   against stale state.
+    //   mid-flight. This task re-reads authorization.json every 300s and,
+    //   on failure, tears down **only the Live pipeline** via
+    //   `live_slot.teardown()`. Demo / Paper continue uninterrupted — they
+    //   are independent pipelines with their own trust surface. Previous
+    //   behaviour (pre-Phase-2) cancelled the engine-wide token on failure,
+    //   killing everything; that was the wrong instrument for a clean
+    //   operator-intent event. Fix 3's crash-only parity still applies to
+    //   unexpected Live panics — see the OS-thread panic handler above,
+    //   which continues to cancel the engine-wide token.
+    //
+    //   After the first authorization failure we break out of the loop:
+    //   Phase 2 does not respawn — Live stays down until next full engine
+    //   restart. Phase 3 will add an auth watcher that drives re-acquisition.
+    //
+    //   The loop also watches the engine-wide cancel token so SIGTERM
+    //   still stops the ticker cleanly.
+    //
     // 中: Spawn 時 gate 必要但不充分 — operator 須能中途 revoke 或等過期。
-    //   本任務每 300s 重讀 authorization.json，若記錄失效（過期/遺失/竄改/
-    //   env revoke）則取消整個引擎。沿用 Fix 3 的 crash-only 對齊規則：
-    //   Live 不能交易，paper/demo 也不應在陳舊狀態上假裝學習。
+    //   本任務每 300s 重讀 authorization.json，失敗時透過
+    //   `live_slot.teardown()` **只拆 Live 管線**，Demo / Paper 不中斷
+    //   （各自有獨立的信任面）。Phase 2 前的作法是直接取消引擎級 token
+    //   一鍋端，對「乾淨的 operator 意圖事件」是錯誤工具。Fix 3 的
+    //   crash-only 對齊仍適用於 Live **panic** — 見上面 OS 線程的 panic
+    //   handler，它依舊取消引擎級 token。
+    //
+    //   第一次授權失敗後即跳出 loop：Phase 2 不 respawn，Live 保持 down
+    //   直到整機重啟。Phase 3 會補上授權 watcher 驅動重拿授權。
+    //
+    //   Loop 同時監看引擎級 cancel token，SIGTERM 仍能乾淨停止 ticker。
     if has_live {
         use openclaw_engine::bybit_rest_client::live_bybit_environment;
         use openclaw_engine::live_authorization::{auth_error_kind, load_and_verify};
         const AUTH_REVERIFY_INTERVAL_SECS: u64 = 300;
-        let auth_cancel = cancel.clone();
+        let engine_shutdown = cancel.clone();
+        let reverify_slot = Arc::clone(&live_slot);
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(
                 AUTH_REVERIFY_INTERVAL_SECS,
@@ -1425,10 +1603,10 @@ async fn async_main(
             interval.tick().await;
             loop {
                 tokio::select! {
-                    _ = auth_cancel.cancelled() => {
+                    _ = engine_shutdown.cancelled() => {
                         tracing::info!(
-                            "live authorization re-verify ticker stopped (cancel) \
-                             / live 授權重驗 ticker 已停止"
+                            "live authorization re-verify ticker stopped (engine shutdown) \
+                             / live 授權重驗 ticker 已停止（引擎關閉）"
                         );
                         break;
                     }
@@ -1449,11 +1627,27 @@ async fn async_main(
                                     error_kind = auth_error_kind(&e),
                                     error = %e,
                                     "LIVE AUTHORIZATION INVALIDATED MID-SESSION — \
-                                     cancelling engine (crash-only parity). \
-                                     Operator: renew via /api/v1/live/auth/renew \
-                                     then restart. / Live 授權中途失效 — 取消引擎。"
+                                     tearing down Live slot only (demo/paper continue). \
+                                     Operator: renew via /api/v1/live/auth/renew. \
+                                     / Live 授權中途失效 — 僅拆 Live 槽位（demo/paper 繼續）。"
                                 );
-                                auth_cancel.cancel();
+                                // Live-only teardown: cancels the slot's
+                                // child token and joins its owned tasks.
+                                // Fail-soft: teardown errors are logged
+                                // inside `teardown()` and swallowed.
+                                // Live-only teardown：取消槽位子 token 並 join
+                                // 擁有的任務。Fail-soft：錯誤在 `teardown()` 內
+                                // log 後吞掉。
+                                if let Err(te) = reverify_slot.teardown().await {
+                                    tracing::error!(
+                                        error = %te,
+                                        "live slot teardown returned error (unexpected in Phase 2) \
+                                         / live 槽 teardown 回傳錯誤（Phase 2 不預期）"
+                                    );
+                                }
+                                // Exit the re-verify loop: Phase 2 does not
+                                // respawn. Phase 3 will add a watcher.
+                                // 跳出重驗 loop：Phase 2 不 respawn，Phase 3 補。
                                 break;
                             }
                         }
@@ -1463,7 +1657,8 @@ async fn async_main(
         });
         info!(
             interval_secs = AUTH_REVERIFY_INTERVAL_SECS,
-            "live authorization re-verify ticker spawned / live 授權重驗 ticker 已啟動"
+            "live authorization re-verify ticker spawned (slot-scoped teardown) \
+             / live 授權重驗 ticker 已啟動（slot-scoped teardown）"
         );
     }
 
@@ -1555,6 +1750,40 @@ async fn async_main(
     info!("initiating shutdown / 開始關閉序列");
 
     cancel.cancel();
+
+    // PIPELINE-SLOT-1 Phase 2 (E2 MAJOR #3 fix): explicit slot teardown for
+    // deterministic task-handle join. The engine-wide `cancel` above already
+    // signals all children (parent→child cascade), but without an explicit
+    // `teardown().await` the slot's task_handles are never joined — they get
+    // orphaned and then aborted by tokio runtime drop, not a clean shutdown.
+    // `teardown()` is idempotent: if the Live slot was already torn down by
+    // the 5-min auth re-verify loop, calling it again is a no-op (Empty state).
+    // Paper is NOT wired through PipelineSlot (Phase 3 deferral). Order matches
+    // "Live → Demo → Paper" below: Live slot first, then Demo, then Paper is
+    // handled by existing handle-await flow.
+    //
+    // PIPELINE-SLOT-1 Phase 2（E2 MAJOR #3 修復）：顯式呼叫槽位 teardown 以
+    // 確定性 join task handles。上面的引擎級 `cancel` 已經經父→子連動通知所有
+    // 子，但若不顯式 `teardown().await`，槽位的 task_handles 永遠不會被 join —
+    // 任務變孤兒，最後靠 tokio runtime drop 粗暴中止，稱不上乾淨關閉。
+    // `teardown()` 冪等：若 Live 槽位已被 5 分鐘授權重驗 loop 拆過，再呼叫即
+    // 無作用（Empty 狀態）。Paper 尚未接入 PipelineSlot（Phase 3 延後）。
+    // 順序符合「Live → Demo → Paper」：先拆 Live slot，再拆 Demo，Paper 走
+    // 既有 handle-await 流程。
+    if let Err(e) = live_slot.teardown().await {
+        tracing::error!(
+            error = %e,
+            "live slot teardown failed during shutdown (non-fatal) \
+             / 關機時 live 槽 teardown 失敗（非致命）"
+        );
+    }
+    if let Err(e) = demo_slot.teardown().await {
+        tracing::error!(
+            error = %e,
+            "demo slot teardown failed during shutdown (non-fatal) \
+             / 關機時 demo 槽 teardown 失敗（非致命）"
+        );
+    }
 
     let shutdown_timeout = tokio::time::Duration::from_secs(10);
     let _ = tokio::time::timeout(shutdown_timeout, async {
