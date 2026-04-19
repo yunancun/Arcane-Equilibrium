@@ -2059,6 +2059,7 @@ mod tests;
 /// Mapping:
 ///   "risk_close:halt_session*"      → ("HaltSession",  reason)
 ///   "risk_close:fast_track*"        → ("FastTrack",    reason)
+///   "risk_close:phys_lock_*"        → ("Physical",     reason)   // DUAL-TRACK T3
 ///   "risk_close:*"                  → ("Risk",         reason)
 ///   "stop_trigger:hard*"            → ("HardStop",     reason)
 ///   "stop_trigger:trailing*"        → ("TrailingStop", reason)
@@ -2069,6 +2070,7 @@ mod tests;
 ///
 /// EXIT-FEATURES-TABLE-1：將 close_tag 解析為 (exit_source, exit_trigger_rule)；
 /// "<prefix>:<reason>" 格式；未知前綴原樣回退，避免標籤撒謊。
+/// DUAL-TRACK-EXIT-1 Track P T3：`phys_lock_*` prefix 歸類為 "Physical"。
 pub(crate) fn parse_exit_tag(close_tag: &str) -> (String, String) {
     let (prefix, reason) = match close_tag.split_once(':') {
         Some((p, r)) => (p, r),
@@ -2081,6 +2083,13 @@ pub(crate) fn parse_exit_tag(close_tag: &str) -> (String, String) {
                 "HaltSession"
             } else if reason.starts_with("fast_track") {
                 "FastTrack"
+            } else if reason.starts_with("phys_lock_") {
+                // DUAL-TRACK-EXIT-1 Track P T3: physical-layer micro-profit lock.
+                // reason suffix preserved for gate-level drill-down
+                // (phys_lock_gate1_low_edge / phys_lock_gate4_giveback /
+                // phys_lock_gate4_stale_roc_neg).
+                // DUAL-TRACK-EXIT-1 T3：phys_lock_* 歸類 Physical；reason 保留 gate 細節。
+                "Physical"
             } else {
                 "Risk"
             }

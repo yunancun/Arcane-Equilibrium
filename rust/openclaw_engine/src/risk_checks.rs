@@ -16,7 +16,9 @@
 //!     BudgetConfig.attention_tax.cost_edge_max_ratio
 //!   - Risk checks are fail-closed — unknown state → reject
 
+use crate::config::risk_config::PhysLockConfig;
 use crate::config::RiskConfig;
+use crate::exit_features::{ExitFeatures, PhysicalDecision};
 use openclaw_core::risk::{compute_dynamic_stop_pct, regime_multipliers};
 
 // ---------------------------------------------------------------------------
@@ -125,17 +127,20 @@ pub enum RiskAction {
 }
 
 /// Tick-level risk check for a single position. See priority order in MODULE_NOTE.
-/// Tick 級持倉風控檢查。優先級：hard stop → dyn stop → TP → trailing → time → cost_edge → drawdown → consec loss → daily loss。
+/// Tick 級持倉風控檢查。優先級：hard stop → dyn stop → TP → trailing → time → PHYS-LOCK → drawdown → consec loss → daily loss。
 ///
-/// `cost_edge_max_ratio` and `min_profit_to_close_pct` are sourced from
-/// BudgetConfig.attention_tax (cross-Config read per ARCH-RC1 contract). The
-/// gate fires only when the live pnl_pct is simultaneously above
-/// `min_profit_to_close_pct` (floor) and the cost_ratio is above
-/// `cost_edge_max_ratio` (ceiling) — a narrow "lock-in" band.
-/// MICRO-PROFIT-FIX-1 (2026-04-17): floor added to avoid firing on break-even
-/// dust where exit fees would eat the rounding-error profit.
-/// MICRO-PROFIT-FIX-1：新增 floor min_profit_to_close_pct，避免 breakeven dust 被
-/// exit fee 吃光。
+/// DUAL-TRACK-EXIT-1 Track P T3: Priority 6 is now `physical_micro_profit_lock`
+/// (PHYS-LOCK) driven by an `ExitFeatures` snapshot when supplied. When
+/// `exit_features` is `None` (bootstrap / T4 not yet wired), Priority 6 is inert
+/// and behaviour is identical to "COST EDGE disabled" — i.e. the legacy
+/// cost_ratio / cost_edge_max_ratio / min_profit_to_close_pct parameters are
+/// silently ignored. They are kept on the ABI to avoid a caller storm until
+/// T4 lands and ExitFeatures snapshots are always populated.
+///
+/// DUAL-TRACK-EXIT-1 Track P T3：優先級 6 替換為 `physical_micro_profit_lock`。
+/// 當 `exit_features` 為 None 時（bootstrap / T4 尚未接線），此 gate 不觸發，
+/// 舊 cost_ratio/cost_edge_max_ratio/min_profit_to_close_pct 參數保留在 ABI
+/// 但被忽略，避免 caller 爆炸。
 #[allow(clippy::too_many_arguments)]
 pub fn check_position_on_tick(
     pnl_pct: f64,
@@ -151,8 +156,12 @@ pub fn check_position_on_tick(
     session_drawdown_pct: f64,
     cost_edge_max_ratio: f64,
     min_profit_to_close_pct: f64,
+    exit_features: Option<&ExitFeatures>,
     config: &RiskConfig,
 ) -> RiskAction {
+    // Legacy COST EDGE inputs retained on ABI for T4; silence unused-param warnings.
+    // T3：COST EDGE 相關參數保留 ABI，等 T4 接 ExitFeatures 真實值。
+    let _ = (cost_ratio, cost_edge_max_ratio, min_profit_to_close_pct);
     let rm = regime_multipliers(regime);
     let limits = &config.limits;
     let agent = &config.agent;
@@ -218,19 +227,36 @@ pub fn check_position_on_tick(
         ));
     }
 
-    // 6. Cost edge ratio — cross-Config read from BudgetConfig.
-    // MICRO-PROFIT-FIX-1: narrow active band [min_profit_to_close_pct, ceiling
-    // implied by cost_edge_max_ratio]. The gate only fires when BOTH the ratio
-    // is above its ceiling AND the live pnl_pct is above the floor, so tiny
-    // break-even profits are no longer closed into a loss by exit fees.
-    // MICRO-PROFIT-FIX-1：窄帶 [min_profit_to_close_pct, 1 / ratio ceiling 對應值]，
-    // ratio 與 pnl_pct 同時達標才觸發，避免 breakeven dust 被 exit fee 吃光。
-    if cost_ratio >= cost_edge_max_ratio && pnl_pct >= min_profit_to_close_pct && pnl_pct > 0.0 {
-        return RiskAction::ClosePosition(format!(
-            "COST EDGE: ratio {:.2} >= {:.2}, pnl {:.2}% >= min_profit {:.2}% (suggest close while profitable)",
-            cost_ratio, cost_edge_max_ratio, pnl_pct, min_profit_to_close_pct
-        ));
+    // 6. PHYS-LOCK (DUAL-TRACK-EXIT-1 Track P T3) — physical-layer micro-profit lock.
+    // Replaces legacy COST EDGE; only fires when an ExitFeatures snapshot is
+    // supplied (i.e. T4 has wired real features into the per-position closure).
+    // Gate emits reason strings with stable prefixes: `phys_lock_gate1_low_edge`,
+    // `phys_lock_gate4_giveback`, `phys_lock_gate4_stale_roc_neg`.
+    //
+    // 6. PHYS-LOCK（DUAL-TRACK-EXIT-1 Track P T3）：物理層微利鎖定，取代 COST EDGE。
+    // 僅在 caller 傳入有效 ExitFeatures 時觸發；T4 接線前為 no-op。
+    if let Some(features) = exit_features {
+        if let PhysicalDecision::Lock(reason) =
+            physical_micro_profit_lock(features, &config.phys_lock)
+        {
+            return RiskAction::ClosePosition(format!("risk_close:{}", reason));
+        }
     }
+    // DEPRECATED (DUAL-TRACK-EXIT-1 Track P T3): legacy COST EDGE gate block
+    // retained here as comment for historical reference only. Logic replaced
+    // by PHYS-LOCK above. Do not re-enable without design review — the 4-gate
+    // ExitFeatures-driven lock is strictly more conservative than the old
+    // cost_ratio heuristic. See docs/references/2026-04-19--dual_track_exit_1_spec.md.
+    //
+    // // if cost_ratio >= cost_edge_max_ratio
+    // //     && pnl_pct >= min_profit_to_close_pct
+    // //     && pnl_pct > 0.0
+    // // {
+    // //     return RiskAction::ClosePosition(format!(
+    // //         "COST EDGE: ratio {:.2} >= {:.2}, pnl {:.2}% >= min_profit {:.2}% ...",
+    // //         cost_ratio, cost_edge_max_ratio, pnl_pct, min_profit_to_close_pct
+    // //     ));
+    // // }
 
     // 7. Session drawdown
     if session_drawdown_pct >= limits.session_drawdown_max_pct {
@@ -255,6 +281,80 @@ pub fn check_position_on_tick(
     }
 
     RiskAction::Hold
+}
+
+// ---------------------------------------------------------------------------
+// PHYS-LOCK — DUAL-TRACK-EXIT-1 Track P T3 / 物理層微利鎖定
+// ---------------------------------------------------------------------------
+
+/// 4-gate sequential filter that decides whether a winning position should
+/// lock in its current micro-profit. Conservative semantics: any required
+/// Option::None returns Hold (except gate 1 where `Some(value_below_floor)`
+/// returns Lock — insufficient net edge is itself decisive signal).
+///
+/// Gates in order:
+///   1. **Edge floor** — `est_net_bps < cfg.min_net_floor_bps` → Lock
+///      (`phys_lock_gate1_low_edge`). `None` → Hold (unknown edge, conservative).
+///   2. **Min hold** — `entry_age_secs < cfg.min_hold_secs` → Hold (too fresh).
+///      `None` → Hold (unknown age, conservative).
+///   3. **Peak/ATR threshold** — `peak_pnl_pct < cfg.min_peak_atr_norm × atr_pct`
+///      → Hold (peak not meaningful yet). `atr_pct: None` → Hold.
+///   4. **Lock trigger** — either
+///      a. giveback `>= cfg.giveback_atr_norm_threshold`
+///         → Lock (`phys_lock_gate4_giveback`)
+///      b. `time_since_peak_ms > cfg.stale_peak_ms` AND `price_roc_short < 0`
+///         → Lock (`phys_lock_gate4_stale_roc_neg`)
+///      else → Hold.
+///
+/// 4-gate 依序過濾：edge 底 → 最短持有 → peak/ATR 閾值 → giveback 或
+/// stale-peak+negROC。保守：任一所需 Option=None 回傳 Hold（唯一例外為 gate 1
+/// 有值但低於底時 → Lock，因 edge 不足本身就是決定性訊號）。
+pub fn physical_micro_profit_lock(
+    f: &ExitFeatures,
+    cfg: &PhysLockConfig,
+) -> PhysicalDecision {
+    // Gate 1: edge floor.
+    match f.est_net_bps {
+        Some(edge) if edge < cfg.min_net_floor_bps => {
+            return PhysicalDecision::Lock("phys_lock_gate1_low_edge".to_string());
+        }
+        Some(_) => {} // edge above floor → proceed
+        None => return PhysicalDecision::Hold, // unknown edge → conservative Hold
+    }
+
+    // Gate 2: min hold seconds.
+    let age_secs = match f.entry_age_secs {
+        Some(a) => a,
+        None => return PhysicalDecision::Hold,
+    };
+    if age_secs < cfg.min_hold_secs {
+        return PhysicalDecision::Hold;
+    }
+
+    // Gate 3: peak/ATR threshold — peak_pnl_pct must exceed N × ATR%.
+    let atr = match f.atr_pct {
+        Some(a) if a > 0.0 => a,
+        _ => return PhysicalDecision::Hold,
+    };
+    let required_peak = f64::from(cfg.min_peak_atr_norm) * atr;
+    if f64::from(f.peak_pnl_pct) < required_peak {
+        return PhysicalDecision::Hold;
+    }
+
+    // Gate 4a: giveback ≥ threshold → lock.
+    if let Some(gb) = f.giveback_atr_norm {
+        if gb >= cfg.giveback_atr_norm_threshold {
+            return PhysicalDecision::Lock("phys_lock_gate4_giveback".to_string());
+        }
+    }
+
+    // Gate 4b: stale peak + negative short-ROC → lock.
+    match (f.time_since_peak_ms, f.price_roc_short) {
+        (Some(dt), Some(roc)) if dt > cfg.stale_peak_ms && roc < 0.0 => {
+            PhysicalDecision::Lock("phys_lock_gate4_stale_roc_neg".to_string())
+        }
+        _ => PhysicalDecision::Hold,
+    }
 }
 
 // ===========================================================================
@@ -372,8 +472,61 @@ mod tests {
             dd,
             COST_EDGE_DEFAULT,
             MIN_PROFIT_DEFAULT,
+            None, // exit_features — PHYS-LOCK inert / PHYS-LOCK 不觸發
             cfg,
         )
+    }
+
+    /// Variant that exercises the PHYS-LOCK Priority 6 gate by threading an
+    /// `ExitFeatures` snapshot through. Other args mirror `call_tick`.
+    /// 測試 PHYS-LOCK 用變體，其他參數與 `call_tick` 一致。
+    #[allow(clippy::too_many_arguments)]
+    fn call_tick_with_features(
+        pnl: f64,
+        peak: f64,
+        hold: f64,
+        cost: f64,
+        regime: &str,
+        atr: Option<f64>,
+        consec: u32,
+        daily: f64,
+        dd: f64,
+        features: &ExitFeatures,
+        cfg: &RiskConfig,
+    ) -> RiskAction {
+        check_position_on_tick(
+            pnl,
+            peak,
+            hold,
+            cost,
+            regime,
+            atr,
+            "BTCUSDT",
+            1000,
+            consec,
+            daily,
+            dd,
+            COST_EDGE_DEFAULT,
+            MIN_PROFIT_DEFAULT,
+            Some(features),
+            cfg,
+        )
+    }
+
+    /// Build an ExitFeatures snapshot with all-pass values for the PHYS-LOCK
+    /// gates (caller can then override a single field to test a specific gate).
+    /// 構造全通 ExitFeatures；caller 可針對某個 gate 覆蓋單一欄位。
+    fn mk_features() -> ExitFeatures {
+        ExitFeatures {
+            est_net_bps: Some(50.0),          // well above 5.0 floor
+            peak_pnl_pct: 5.0,                // well above 0.5×ATR
+            current_pnl_pct: 3.0,
+            atr_pct: Some(1.0),               // 1% ATR
+            giveback_atr_norm: Some(0.0),     // no giveback yet
+            time_since_peak_ms: Some(0),      // peak just reached
+            price_roc_short: Some(0.0),
+            entry_age_secs: Some(120.0),      // past min_hold
+        }
     }
 
     #[test]
@@ -500,10 +653,14 @@ mod tests {
     }
 
     #[test]
-    fn test_tick_cost_edge_ratio() {
-        // MICRO-PROFIT-FIX-1: band pnl ∈ [0.3, 0.55]%, ratio ≥ 0.2 → fires.
-        // pnl=0.4% (≥ 0.3% floor), cost_ratio=0.25 (≥ 0.2 ceiling) → triggers.
-        // MICRO-PROFIT-FIX-1：窄帶內同時滿足 ratio 與 pnl 雙條件。
+    fn test_tick_priority6_legacy_params_inert_when_no_features() {
+        // DUAL-TRACK-EXIT-1 Track P T3: Priority 6 is now PHYS-LOCK. With
+        // `exit_features = None` (what `call_tick` passes), the legacy
+        // cost_ratio / cost_edge_max_ratio / min_profit_to_close_pct inputs are
+        // silently ignored — they no longer drive any action. This test asserts
+        // the inputs that used to fire COST EDGE now produce no Priority-6 close.
+        // DUAL-TRACK-EXIT-1 T3：Priority 6 改為 PHYS-LOCK。`exit_features=None`
+        // 時舊 cost_* 參數被忽略，不再觸發任何 Priority-6 close。
         let cfg = default_config();
         let action = call_tick(
             0.4,
@@ -517,15 +674,22 @@ mod tests {
             0.0,
             &cfg,
         );
+        // Neither the old COST EDGE reason nor any phys_lock reason should appear.
+        // 舊 COST EDGE 字樣與新 phys_lock_* 字樣皆不得出現。
         assert!(
-            matches!(action, RiskAction::ClosePosition(ref r) if r.contains("COST EDGE")),
-            "expected COST EDGE close, got {:?}",
+            !matches!(action, RiskAction::ClosePosition(ref r)
+                if r.contains("COST EDGE") || r.contains("phys_lock")),
+            "Priority 6 must be inert when exit_features is None, got {:?}",
             action
         );
     }
 
     #[test]
-    fn test_tick_cost_edge_not_profitable() {
+    fn test_tick_priority6_not_profitable_still_hold() {
+        // Negative pnl with high cost_ratio used to NOT fire COST EDGE because
+        // pnl was not positive. Under PHYS-LOCK with no features, also Hold —
+        // just for a different reason (features=None → inert).
+        // 負盈利下舊 COST EDGE 不觸發；PHYS-LOCK 下 features=None 同樣 Hold。
         let cfg = default_config();
         let action = call_tick(
             -0.5,
@@ -540,33 +704,50 @@ mod tests {
             &cfg,
         );
         assert!(
-            !matches!(action, RiskAction::ClosePosition(ref r) if r.contains("COST EDGE")),
-            "cost edge should not trigger when not profitable"
-        );
-    }
-
-    #[test]
-    fn test_tick_cost_edge_below_min_profit_does_not_fire() {
-        // MICRO-PROFIT-FIX-1: dust-profit (pnl < min_profit_to_close_pct floor)
-        // must NOT trigger the gate, even when cost_ratio is far above ceiling.
-        // MICRO-PROFIT-FIX-1：pnl < floor 時即使 ratio 很高也不得觸發（dust 不砍）。
-        let cfg = default_config();
-        // pnl = 0.1% (< 0.3 floor), ratio = 2.0 (>> 0.2) — old code would fire, new code must Hold.
-        let action = call_tick(0.1, 0.1, 1.0, 2.0, "trending", Some(1.0), 0, 0.0, 0.0, &cfg);
-        assert!(
-            !matches!(action, RiskAction::ClosePosition(ref r) if r.contains("COST EDGE")),
-            "cost edge must NOT fire below min_profit floor, got {:?}",
+            !matches!(action, RiskAction::ClosePosition(ref r)
+                if r.contains("COST EDGE") || r.contains("phys_lock")),
+            "Priority 6 must not fire in loss territory, got {:?}",
             action
         );
     }
 
     #[test]
-    fn test_tick_cost_edge_above_min_profit_below_ratio_holds() {
-        // MICRO-PROFIT-FIX-1: pnl above floor but cost_ratio below ceiling → Hold.
-        // MICRO-PROFIT-FIX-1：pnl 達 floor 但 ratio 未達 ceiling 時不觸發。
+    fn test_tick_priority6_phys_lock_fires_with_features() {
+        // DUAL-TRACK-EXIT-1 Track P T3: wire a populated ExitFeatures snapshot
+        // that triggers gate 1 (est_net_bps below floor) → Priority 6 closes
+        // with reason prefix `risk_close:phys_lock_gate1_low_edge`.
+        // DUAL-TRACK-EXIT-1 T3：餵入觸發 gate 1 的 ExitFeatures → Priority 6 關倉。
         let cfg = default_config();
-        // pnl = 1.0% (> 0.3 floor), ratio = 0.11 (< 0.2 ceiling) → must NOT fire.
-        let action = call_tick(
+        let mut features = mk_features();
+        features.est_net_bps = Some(1.0); // below default 5.0 floor
+        let action = call_tick_with_features(
+            0.4,
+            0.4,
+            1.0,
+            0.25,
+            "trending",
+            Some(1.0),
+            0,
+            0.0,
+            0.0,
+            &features,
+            &cfg,
+        );
+        assert!(
+            matches!(action, RiskAction::ClosePosition(ref r)
+                if r.contains("phys_lock_gate1_low_edge")),
+            "expected PHYS-LOCK gate1 close, got {:?}",
+            action
+        );
+    }
+
+    #[test]
+    fn test_tick_priority6_holds_when_features_all_pass() {
+        // All-pass ExitFeatures → no gate fires → Hold (no Priority-6 close).
+        // 全通 ExitFeatures → 所有 gate 都不觸發 → Priority-6 不關倉。
+        let cfg = default_config();
+        let features = mk_features();
+        let action = call_tick_with_features(
             1.0,
             1.0,
             1.0,
@@ -576,11 +757,12 @@ mod tests {
             0,
             0.0,
             0.0,
+            &features,
             &cfg,
         );
         assert!(
-            !matches!(action, RiskAction::ClosePosition(ref r) if r.contains("COST EDGE")),
-            "cost edge must NOT fire when cost_ratio < ceiling, got {:?}",
+            !matches!(action, RiskAction::ClosePosition(ref r) if r.contains("phys_lock")),
+            "all-pass features must not trigger PHYS-LOCK, got {:?}",
             action
         );
     }
@@ -622,9 +804,12 @@ mod tests {
 
     #[test]
     fn test_tick_hold_all_ok() {
-        // MICRO-PROFIT-FIX-1: cost_ratio=0.1 stays below the new 0.2 ceiling so
-        // Hold is the correct outcome. Previous 0.3 would now trigger COST EDGE.
-        // MICRO-PROFIT-FIX-1：cost_ratio 須 < 0.2 才 Hold；原 0.3 在新 default 下會觸發。
+        // DUAL-TRACK-EXIT-1 Track P T3: Priority 6 is now PHYS-LOCK and inert
+        // with exit_features=None (what call_tick passes). All other gates
+        // (hard stop / dyn stop / TP / trailing / time / drawdown / consec
+        // loss / daily loss) also pass, so result is Hold.
+        // DUAL-TRACK-EXIT-1 T3：Priority 6=PHYS-LOCK, features=None 即不觸發；
+        // 其他各 gate 皆未達閾值 → Hold。
         let cfg = default_config();
         let action = call_tick(0.5, 0.8, 2.0, 0.1, "trending", Some(1.0), 0, 1.0, 5.0, &cfg);
         assert!(matches!(action, RiskAction::Hold));
@@ -721,6 +906,143 @@ mod tests {
             matches!(action, RiskAction::ClosePosition(ref r) if r.contains("TRAILING STOP")),
             "expected trailing close, got {:?}",
             action
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // PHYS-LOCK direct unit tests (DUAL-TRACK-EXIT-1 Track P T3)
+    // PHYS-LOCK 直接單測（DUAL-TRACK-EXIT-1 Track P T3）
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_phys_lock_gate1_low_edge_triggers_lock() {
+        // est_net_bps below min_net_floor_bps → Lock(phys_lock_gate1_low_edge).
+        let cfg = PhysLockConfig::default();
+        let mut f = mk_features();
+        f.est_net_bps = Some(1.0); // 1 < default 5.0 floor
+        let decision = physical_micro_profit_lock(&f, &cfg);
+        match decision {
+            PhysicalDecision::Lock(r) => assert_eq!(r, "phys_lock_gate1_low_edge"),
+            other => panic!("expected Lock(gate1_low_edge), got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_phys_lock_gate1_pass_with_sufficient_edge() {
+        // est_net_bps above floor + all later gates all-pass → Hold.
+        let cfg = PhysLockConfig::default();
+        let f = mk_features(); // est_net_bps=50.0 >> 5.0
+        let decision = physical_micro_profit_lock(&f, &cfg);
+        assert_eq!(decision, PhysicalDecision::Hold);
+    }
+
+    #[test]
+    fn test_phys_lock_gate2_holds_within_min_hold_secs() {
+        // entry_age_secs < min_hold_secs → Hold (even if everything else fires).
+        let cfg = PhysLockConfig::default();
+        let mut f = mk_features();
+        f.entry_age_secs = Some(5.0); // < 30s default
+        f.giveback_atr_norm = Some(10.0); // would fire gate4a if reached
+        let decision = physical_micro_profit_lock(&f, &cfg);
+        assert_eq!(
+            decision,
+            PhysicalDecision::Hold,
+            "gate 2 must block gate 4 when position too fresh"
+        );
+    }
+
+    #[test]
+    fn test_phys_lock_gate3_holds_when_peak_below_atr_threshold() {
+        // peak_pnl_pct < min_peak_atr_norm × atr_pct → Hold.
+        // cfg default min_peak_atr_norm=0.5, atr_pct=2.0 → required=1.0.
+        let cfg = PhysLockConfig::default();
+        let mut f = mk_features();
+        f.atr_pct = Some(2.0);
+        f.peak_pnl_pct = 0.5; // < 1.0 required
+        f.giveback_atr_norm = Some(10.0); // would fire gate4a if reached
+        let decision = physical_micro_profit_lock(&f, &cfg);
+        assert_eq!(
+            decision,
+            PhysicalDecision::Hold,
+            "gate 3 must block gate 4 when peak insufficient"
+        );
+    }
+
+    #[test]
+    fn test_phys_lock_gate4_giveback_triggers_lock() {
+        // giveback >= threshold → Lock(phys_lock_gate4_giveback).
+        let cfg = PhysLockConfig::default();
+        let mut f = mk_features();
+        f.giveback_atr_norm = Some(1.0); // > default 0.7 threshold
+        let decision = physical_micro_profit_lock(&f, &cfg);
+        match decision {
+            PhysicalDecision::Lock(r) => assert_eq!(r, "phys_lock_gate4_giveback"),
+            other => panic!("expected Lock(gate4_giveback), got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_phys_lock_gate4_stale_peak_with_negative_roc_locks() {
+        // time_since_peak_ms > stale_peak_ms AND price_roc_short < 0
+        // → Lock(phys_lock_gate4_stale_roc_neg).
+        let cfg = PhysLockConfig::default();
+        let mut f = mk_features();
+        f.giveback_atr_norm = Some(0.0); // gate 4a does NOT fire
+        f.time_since_peak_ms = Some(120_000); // > default 60_000
+        f.price_roc_short = Some(-0.003);
+        let decision = physical_micro_profit_lock(&f, &cfg);
+        match decision {
+            PhysicalDecision::Lock(r) => assert_eq!(r, "phys_lock_gate4_stale_roc_neg"),
+            other => panic!("expected Lock(gate4_stale_roc_neg), got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_phys_lock_holds_on_missing_atr_conservative() {
+        // atr_pct = None → Hold (conservative: cannot normalise peak).
+        let cfg = PhysLockConfig::default();
+        let mut f = mk_features();
+        f.atr_pct = None;
+        f.giveback_atr_norm = Some(10.0); // would fire gate4a if reached
+        let decision = physical_micro_profit_lock(&f, &cfg);
+        assert_eq!(
+            decision,
+            PhysicalDecision::Hold,
+            "missing ATR must block downstream gates"
+        );
+    }
+
+    #[test]
+    fn test_phys_lock_reason_string_format_stable() {
+        // All three lock reason strings must be byte-exact — downstream
+        // `parse_exit_tag` relies on the `phys_lock_*` prefix + exact suffix.
+        // 三種 Lock reason 字串須 byte-exact，下游 `parse_exit_tag` 依賴。
+        let cfg = PhysLockConfig::default();
+
+        // gate 1
+        let mut f1 = mk_features();
+        f1.est_net_bps = Some(0.0);
+        assert_eq!(
+            physical_micro_profit_lock(&f1, &cfg),
+            PhysicalDecision::Lock("phys_lock_gate1_low_edge".to_string())
+        );
+
+        // gate 4a
+        let mut f4a = mk_features();
+        f4a.giveback_atr_norm = Some(5.0);
+        assert_eq!(
+            physical_micro_profit_lock(&f4a, &cfg),
+            PhysicalDecision::Lock("phys_lock_gate4_giveback".to_string())
+        );
+
+        // gate 4b
+        let mut f4b = mk_features();
+        f4b.giveback_atr_norm = Some(0.0);
+        f4b.time_since_peak_ms = Some(500_000);
+        f4b.price_roc_short = Some(-0.01);
+        assert_eq!(
+            physical_micro_profit_lock(&f4b, &cfg),
+            PhysicalDecision::Lock("phys_lock_gate4_stale_roc_neg".to_string())
         );
     }
 }
