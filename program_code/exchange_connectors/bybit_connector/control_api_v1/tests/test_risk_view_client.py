@@ -239,3 +239,57 @@ def test_no_ipc_client_safe():
     # Reads/clears that don't go through _patch still degrade gracefully.
     out2 = _run(c.clear_consecutive_losses())
     assert out2 == {}
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# P1-5 A2: reset_drawdown_baseline client tests
+# P1-5 A2：reset_drawdown_baseline 客戶端測試
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+def test_reset_drawdown_baseline_sends_engine_param(client, fake_ipc):
+    """P1-5 A2: engine param MUST be forwarded to Rust so the right pipeline resets.
+
+    Rust `extract_engine_tx` falls back to the primary pipeline when `engine`
+    is missing, which would silently reset the wrong engine — regression lock.
+    P1-5 A2：engine 參數必須傳到 Rust — 若遺漏，Rust 會 fallback 到主管線，
+    靜默重置到錯誤的引擎。
+    """
+    fake_ipc.responses["reset_drawdown_baseline"] = {
+        "engine": "demo",
+        "result": "drawdown_baseline_reset",
+        "checkpoint_deleted": True,
+    }
+    out = _run(client.reset_drawdown_baseline("demo"))
+    assert out["result"] == "drawdown_baseline_reset"
+    # Must have sent engine param explicitly.
+    reset_calls = [c for c in fake_ipc.calls if c[0] == "reset_drawdown_baseline"]
+    assert len(reset_calls) == 1
+    assert reset_calls[0][1] == {"engine": "demo"}
+    # Post-reset refresh must fire to repopulate status.
+    assert any(c[0] == "get_risk_runtime_status" for c in fake_ipc.calls)
+
+
+def test_reset_drawdown_baseline_distinct_engines_route_independently(client, fake_ipc):
+    """Back-to-back calls for paper / demo / live each forward their own engine tag."""
+    fake_ipc.responses["reset_drawdown_baseline"] = {"result": "ok"}
+    for engine in ("paper", "demo", "live"):
+        _run(client.reset_drawdown_baseline(engine))
+    reset_calls = [c for c in fake_ipc.calls if c[0] == "reset_drawdown_baseline"]
+    assert [c[1]["engine"] for c in reset_calls] == ["paper", "demo", "live"]
+
+
+def test_reset_drawdown_baseline_no_ipc_returns_empty():
+    """Fail-soft: no IPC client → empty dict, no exception — parallels clear_consecutive_losses."""
+    c = RiskViewClient(None)
+    assert _run(c.reset_drawdown_baseline("demo")) == {}
+
+
+def test_reset_drawdown_baseline_ipc_error_propagates(client, fake_ipc):
+    """Rust IPC failure MUST surface to caller so FastAPI route returns HTTP 500
+    (not fake-success). Root Principle: no silent drop on baseline mutation.
+    Rust IPC 失敗必須拋回 caller；路由層回 HTTP 500 而非假成功（不允許靜默丟棄）。
+    """
+    fake_ipc.raise_on.add("reset_drawdown_baseline")
+    with pytest.raises(RuntimeError, match="simulated failure"):
+        _run(client.reset_drawdown_baseline("demo"))

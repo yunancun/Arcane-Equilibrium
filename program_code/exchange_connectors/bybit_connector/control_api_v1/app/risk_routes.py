@@ -376,6 +376,148 @@ async def reset_cooldown(
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# P1-5 A2: Operator-driven drawdown baseline reset
+# P1-5 A2：Operator 手動重置 drawdown 基準
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class ResetDrawdownBaselineRequest(BaseModel):
+    """
+    Request body for POST /reset-drawdown-baseline.
+    POST /reset-drawdown-baseline 的請求 body。
+
+    Explicit `engine` + `reason` are REQUIRED — this endpoint lowers the
+    drawdown circuit breaker baseline and MUST be audit-traceable per Root
+    Principle #8 (交易可解釋).
+
+    `engine` 與 `reason` 為必填 — 此端點會降低 drawdown 斷路器基準，按根
+    原則 #8「交易可解釋」必須可審計。
+    """
+
+    engine: str = Field(
+        ...,
+        description="Target engine: paper | demo | live",
+    )
+    reason: str = Field(
+        ...,
+        min_length=1,
+        max_length=500,
+        description="Operator reason for resetting the drawdown baseline",
+    )
+
+
+def _record_reset_drawdown_audit(
+    who: str,
+    engine: str,
+    reason: str,
+    ipc_response: dict[str, Any],
+) -> None:
+    """
+    Write change_audit_log entry for a drawdown baseline reset.
+    Fail-soft: if the governance hub is unavailable the reset still returns
+    success (the Rust side already confirmed DB DELETE), but we log at WARN so
+    the gap is visible. Root Principle #8 cannot be fully honoured without the
+    hub — operators should see the warning and investigate.
+
+    為一次 drawdown 基準重置寫 change_audit_log。若 governance hub 不可用，
+    重置仍返回成功（Rust 端 DB DELETE 已確認），但以 WARN 記錄缺口。
+    """
+    try:
+        from .governance_routes import _get_governance_hub  # lazy import
+        hub = _get_governance_hub()
+    except Exception as e:
+        logger.warning("reset_drawdown_baseline: governance hub lazy import failed: %s", e)
+        return
+
+    if hub is None or getattr(hub, "_change_audit_log", None) is None:
+        logger.warning(
+            "reset_drawdown_baseline: change_audit_log unavailable — "
+            "operator=%s engine=%s (Root Principle #8 trace gap)",
+            who, engine,
+        )
+        return
+
+    try:
+        from .change_audit_log import ChangeType
+        hub._change_audit_log.record_change(
+            change_type=ChangeType.STATE_CHANGE,
+            who=who,
+            what=f"Drawdown baseline reset (engine={engine})",
+            reason=reason,
+            old_value={"peak_balance": "prev"},
+            new_value={"peak_balance": "equal_to_balance", "ipc_result": ipc_response},
+            affected_components=[f"paper_state:{engine}", "trading.paper_state_checkpoint"],
+            auto_approve=True,  # operator-authenticated action already passed auth
+        )
+    except Exception as e:
+        logger.warning("reset_drawdown_baseline: change_audit_log write failed: %s", e)
+
+
+@risk_router.post("/reset-drawdown-baseline")
+async def reset_drawdown_baseline(
+    body: ResetDrawdownBaselineRequest,
+    actor: base.AuthenticatedActor = Depends(base.current_actor),
+):
+    """
+    P1-5 A2: Operator-driven drawdown baseline reset.
+    P1-5 A2：Operator 手動 drawdown 基準重置。
+
+    Equalises Rust PaperState `peak_balance = balance` and DELETEs the
+    `trading.paper_state_checkpoint` row for the selected engine so the next
+    restart cold-starts. This is the ONLY path that lowers `peak_balance`;
+    restarts never do it automatically (fail-closed per Root Principles
+    #5 生存>利潤 / #6 失敗默認收縮 / #8 交易可解釋).
+
+    Requires Operator role. Writes a STATE_CHANGE entry to change_audit_log.
+
+    讓 Rust PaperState `peak_balance = balance` 並刪除對應引擎的
+    `trading.paper_state_checkpoint` row，下次啟動冷起。此為唯一可降 peak
+    的路徑，重啟永不自動降（根原則 #5/#6/#8 fail-closed）。需 Operator 角色，
+    寫 change_audit_log STATE_CHANGE。
+    """
+    # Operator role gate — use the same duck-typed check as governance_routes.
+    # 以 governance_routes 相同的 duck-typed 檢查來閘 operator 角色。
+    if not actor or not hasattr(actor, "roles") or not hasattr(actor, "actor_id"):
+        raise HTTPException(status_code=401, detail="Authentication required")
+    if "operator" not in actor.roles:
+        logger.warning(
+            "Non-operator attempted reset_drawdown_baseline: actor=%s engine=%s",
+            str(actor.actor_id).replace("\n", "\\n")[:200],
+            body.engine,
+        )
+        raise HTTPException(status_code=403, detail="Operator role required")
+
+    # Whitelist engine to prevent IPC injection.
+    # 白名單 engine 防 IPC 注入。
+    if body.engine not in _ALLOWED_ENGINES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid engine '{body.engine}'. Must be one of: {sorted(_ALLOWED_ENGINES)}",
+        )
+
+    client = await _get_risk_view_client()
+    try:
+        result = await client.reset_drawdown_baseline(body.engine)
+    except Exception as e:
+        raise _ipc_failure(f"reset_drawdown_baseline engine={body.engine}: {e}") from e
+
+    # Root Principle #8: trade explainability — audit ALL baseline resets.
+    # 根原則 #8：交易可解釋 — 所有 baseline 重置皆寫審計。
+    _record_reset_drawdown_audit(
+        who=str(actor.actor_id),
+        engine=body.engine,
+        reason=body.reason,
+        ipc_response=result,
+    )
+
+    return _risk_response({
+        "message": "drawdown_baseline_reset",
+        "engine": body.engine,
+        "result": result,
+        "status": client.get_status(),
+    })
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # LIVE-P2-1/P2-2: Per-engine RiskConfig endpoints
 # LIVE-P2-1/P2-2：每引擎 RiskConfig 端點
 # ═══════════════════════════════════════════════════════════════════════════════

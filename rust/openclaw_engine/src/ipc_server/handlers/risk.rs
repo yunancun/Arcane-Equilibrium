@@ -187,3 +187,42 @@ pub(in crate::ipc_server) async fn handle_clear_consecutive_losses(
         Err(_) => JsonRpcResponse::error(id, ERR_INTERNAL, "timeout waiting for event consumer"),
     }
 }
+
+/// P1-5 A2: operator-driven drawdown baseline reset. Sends
+/// `PipelineCommand::ResetDrawdownBaseline` to the per-engine consumer and
+/// awaits the oneshot reply (fires AFTER the in-memory reset + DB
+/// `paper_state_checkpoint` DELETE). Timeout matches the other risk IPC
+/// handlers (5s) so a stuck event loop surfaces as an explicit IPC error
+/// instead of a silently-hung HTTP request.
+///
+/// Per Root Principle #5 (生存>利潤): this IPC is the ONLY legitimate way to
+/// lower `peak_balance` at runtime; the Python FastAPI route fronting it MUST
+/// attach operator auth + a `change_audit_log` row (Root Principle #8).
+///
+/// P1-5 A2：operator 手動重置 drawdown 基準。發送 ResetDrawdownBaseline、
+/// 等待 oneshot 回覆（於記憶體重置 + DB DELETE 完成後觸發），5s 超時與其他
+/// 風控 IPC 對齊。根原則 #5：此 IPC 是 runtime 唯一合法降低 peak_balance
+/// 的路徑；Python 路由須附加 operator 授權 + change_audit_log（根原則 #8）。
+pub(in crate::ipc_server) async fn handle_reset_drawdown_baseline(
+    id: serde_json::Value,
+    pipeline_cmd_tx: &Option<tokio::sync::mpsc::UnboundedSender<PipelineCommand>>,
+) -> JsonRpcResponse {
+    let tx = match pipeline_cmd_tx {
+        Some(tx) => tx,
+        None => {
+            return JsonRpcResponse::error(id, ERR_INTERNAL, "paper command channel not configured")
+        }
+    };
+    let (resp_tx, resp_rx) = tokio::sync::oneshot::channel();
+    if let Err(e) = tx.send(PipelineCommand::ResetDrawdownBaseline {
+        response_tx: resp_tx,
+    }) {
+        return JsonRpcResponse::error(id, ERR_INTERNAL, format!("channel send failed: {e}"));
+    }
+    match tokio::time::timeout(std::time::Duration::from_secs(5), resp_rx).await {
+        Ok(Ok(Ok(msg))) => JsonRpcResponse::success(id, serde_json::json!({ "result": msg })),
+        Ok(Ok(Err(e))) => JsonRpcResponse::error(id, ERR_INTERNAL, e),
+        Ok(Err(_)) => JsonRpcResponse::error(id, ERR_INTERNAL, "response channel dropped"),
+        Err(_) => JsonRpcResponse::error(id, ERR_INTERNAL, "timeout waiting for event consumer"),
+    }
+}

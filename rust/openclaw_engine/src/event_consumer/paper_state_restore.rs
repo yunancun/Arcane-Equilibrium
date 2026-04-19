@@ -84,4 +84,49 @@ pub(crate) async fn restore_paper_counters(
             );
         }
     }
+
+    // P1-5 A2: restore peak_balance + session_start_ts from the dedicated
+    // checkpoint table so cross-restart drawdown continuity survives. Must run
+    // AFTER `restore_from_db` so `apply_restored_counters` has already brought
+    // peak_balance up to `restored_balance`; restore_checkpoint then takes the
+    // max of that and the stored peak. Cold start / post-reset (no row) falls
+    // through to existing behaviour (peak = restored_balance).
+    // P1-5 A2：還原 peak_balance + session_start_ts 以維持跨重啟 drawdown 連續性。
+    // 必須在 restore_from_db 之後執行（restore_checkpoint 取 max）；冷啟動
+    // 或 reset 後（無 row）維持既有行為（peak = restored_balance）。
+    match crate::paper_state::checkpoint::load_checkpoint(pool, em).await {
+        Ok(Some((peak, session_start_ts_ms))) => {
+            pipeline
+                .paper_state
+                .restore_checkpoint(peak, session_start_ts_ms);
+            info!(
+                kind = %kind,
+                engine_mode = em,
+                restored_peak = peak,
+                effective_peak = pipeline.paper_state.peak_balance(),
+                session_start_ts_ms,
+                drawdown_pct = pipeline.paper_state.drawdown_pct(),
+                "P1-5 A2: peak_balance restored from paper_state_checkpoint \
+                 / 已從 checkpoint 還原 peak_balance（跨重啟 drawdown 連續）"
+            );
+        }
+        Ok(None) => {
+            info!(
+                kind = %kind,
+                engine_mode = em,
+                peak = pipeline.paper_state.peak_balance(),
+                "P1-5 A2: no checkpoint row — cold start / post-reset \
+                 / 無 checkpoint row，視為冷啟動或剛 reset"
+            );
+        }
+        Err(e) => {
+            warn!(
+                kind = %kind,
+                engine_mode = em,
+                error = %e,
+                "P1-5 A2: checkpoint load failed; drawdown continuity disabled this session \
+                 (fail-soft) / checkpoint 載入失敗，此次 session 無 drawdown 連續性"
+            );
+        }
+    }
 }

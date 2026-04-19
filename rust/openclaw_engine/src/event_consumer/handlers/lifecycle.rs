@@ -193,6 +193,34 @@ pub(super) fn handle_set_system_mode(
     let _ = response_tx.send(result);
 }
 
+/// P1-5 A2 · EN: Test-only direct dispatch of `ResetDrawdownBaseline`. The
+///   production path intercepts this variant in `event_consumer/mod.rs` and
+///   runs the full in-memory reset + `checkpoint::delete_checkpoint` DB
+///   round-trip. This stub mirrors `handle_disable_edge_predictor_all_local`:
+///   performs the in-memory reset only, returns Ok so unit tests exercising
+///   `handle_paper_command` stay green without a tokio runtime / PG pool.
+/// P1-5 A2 · 中文：測試專用的 `ResetDrawdownBaseline` 直接派發。生產在
+///   `event_consumer/mod.rs` 攔截並跑完整記憶體重置 + DB DELETE；本 stub
+///   沿用 `handle_disable_edge_predictor_all_local` 模式，僅做記憶體重置、
+///   回 Ok，讓不啟 tokio / PG pool 的單元測試能通過 `handle_paper_command`。
+pub(super) fn handle_reset_drawdown_baseline_local(
+    response_tx: tokio::sync::oneshot::Sender<Result<String, String>>,
+    pipeline: &mut TickPipeline,
+    snapshot_writer: &mut DualStateWriter,
+) {
+    let peak_before = pipeline.paper_state.peak_balance();
+    let balance = pipeline.paper_state.balance();
+    pipeline.paper_state.reset_drawdown_baseline();
+    snapshot_writer.force_write(&pipeline.snapshot());
+    info!(
+        peak_before,
+        balance, "P1-5 A2: drawdown baseline reset (local test path) / 重置 drawdown 基準（測試路徑）"
+    );
+    let _ = response_tx.send(Ok(format!(
+        "reset_local peak_before={peak_before:.2} peak_after={balance:.2}"
+    )));
+}
+
 /// ORPHAN-ADOPT-1 Phase 2A · EN: Adopt an exchange-reported orphan position
 ///   into `paper_state`. `adopt_orphan` is idempotent; a false return means
 ///   same-direction position already present — treated as success from the
