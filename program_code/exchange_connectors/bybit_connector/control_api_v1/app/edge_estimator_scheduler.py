@@ -165,11 +165,46 @@ class EdgeEstimatorScheduler:
             if v and not os.environ.get(k):
                 os.environ[k] = v
 
+    def _run_backfill(self, mode: str) -> dict:
+        """Run edge_label_backfill for `mode` before JS estimation so labels
+        land in `learning.decision_features.label_net_edge_bps` this cycle.
+        fail-open: error is caught by caller; JS still runs.
+        在 JS 估計前先跑 label backfill，讓本輪取得最新 labels；失敗時交由呼叫者處理（fail-open）。"""
+        from ml_training.edge_label_backfill import backfill_labels  # noqa: PLC0415
+        r = backfill_labels(engine_mode=mode, batch_limit=5000, dry_run=False)
+        return {
+            "filled": r.filled_count,
+            "excluded": r.excluded_count,
+            "grid_merged": r.grid_merged_count,
+            "split_blend": r.split_blend_count,
+        }
+
     def _run_cycle(self, reason: str) -> dict[str, dict]:
         results: dict[str, dict] = {}
         for mode in self._modes:
             try:
+                # Backfill first — populate labels so JS sees this cycle's fills.
+                # 先回填 labels 再跑 JS；失敗不阻斷 JS（backfill 是 JS 的 best-effort 前置）。
+                try:
+                    backfill_summary = self._run_backfill(mode)
+                    logger.info(
+                        "EdgeEstimatorScheduler[%s]: mode=%s backfill filled=%d grid=%d "
+                        "/ JS 排程器[%s]：mode=%s 回填 filled=%d grid=%d",
+                        reason, mode, backfill_summary.get("filled", 0),
+                        backfill_summary.get("grid_merged", 0),
+                        reason, mode, backfill_summary.get("filled", 0),
+                        backfill_summary.get("grid_merged", 0),
+                    )
+                except Exception as bexc:
+                    backfill_summary = {"error": str(bexc)}
+                    logger.warning(
+                        "EdgeEstimatorScheduler[%s]: mode=%s backfill failed (fail-open, JS still runs): %s "
+                        "/ JS 排程器[%s]：mode=%s 回填失敗（fail-open，JS 仍執行）：%s",
+                        reason, mode, bexc, reason, mode, bexc,
+                    )
+
                 summary = self._run_one_mode(mode)
+                summary["backfill"] = backfill_summary
                 results[mode] = summary
                 logger.info(
                     "EdgeEstimatorScheduler[%s]: mode=%s n_cells=%d grand_mean_bps=%.2f reason=%s "

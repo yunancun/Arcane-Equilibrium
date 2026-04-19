@@ -251,7 +251,7 @@ def backfill_labels(
 
     Returns BackfillResult summary.
     """
-    if engine_mode not in ("paper", "demo", "live"):
+    if engine_mode not in ("paper", "demo", "live", "live_demo"):
         raise ValueError(f"invalid engine_mode: {engine_mode!r}")
 
     result = BackfillResult()
@@ -411,7 +411,7 @@ def fill_rate_summary(
 # ============================================================
 def _main() -> int:
     parser = argparse.ArgumentParser(description="EDGE-P3-1 label backfill")
-    parser.add_argument("--engine-mode", choices=["paper", "demo", "live"], default="demo")
+    parser.add_argument("--engine-mode", choices=["paper", "demo", "live", "live_demo"], default="demo")
     parser.add_argument("--batch-limit", type=int, default=5000)
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--check-stale", action="store_true",
