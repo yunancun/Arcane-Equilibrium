@@ -1455,6 +1455,13 @@ impl TickPipeline {
         // MICRO-PROFIT-FIX-1：同步讀取 min_profit_to_close_pct，實現窄帶觸發。
         let cost_edge_max_ratio = self.current_cost_edge_max_ratio();
         let min_profit_to_close_pct = self.current_min_profit_to_close_pct();
+        // DUAL-TRACK-EXIT-1 Track P T3 hook point: T4 will replace this
+        // `|_| None` closure with a real ExitFeatures snapshot builder that
+        // reads peak / ATR / ROC / age from paper_state + price_tracker for
+        // each position. Until T4 lands, Priority 6 (PHYS-LOCK) is inert and
+        // legacy cost_edge_max_ratio / min_profit_to_close_pct inputs are
+        // ignored by `check_position_on_tick`.
+        // DUAL-TRACK-EXIT-1 T3 接線點：T4 將替換 `|_| None`。
         let decisions = crate::position_risk_evaluator::evaluate_positions(
             &position_rows,
             daily_loss,
@@ -1462,6 +1469,7 @@ impl TickPipeline {
             event.ts_ms,
             cost_edge_max_ratio,
             min_profit_to_close_pct,
+            |_| None,
             &risk_config,
         );
 

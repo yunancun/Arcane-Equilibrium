@@ -18,6 +18,7 @@
 //!   仍 `break`，本批次後續 decision 與之前一樣被靜默丟棄。
 
 use crate::config::RiskConfig;
+use crate::exit_features::ExitFeatures;
 use crate::risk_checks::{check_position_on_tick, RiskAction};
 
 /// Per-position immutable input row, built upstream from `PaperState` +
@@ -84,13 +85,20 @@ fn compute_cost_ratio(pnl_pct: f64, fee_rate: f64) -> f64 {
 /// Evaluate a single position row, returning the action the dispatch loop
 /// should take. Pure function — no I/O, no mutation, no logging.
 ///
-/// MICRO-PROFIT-FIX-1 (2026-04-17): `min_profit_to_close_pct` threads the new
-/// BudgetConfig.attention_tax.min_profit_to_close_pct floor all the way down to
-/// `check_position_on_tick` so the COST EDGE gate only fires inside the narrow
-/// lock-in band [min_profit, ratio-ceiling].
+/// MICRO-PROFIT-FIX-1 (2026-04-17): `min_profit_to_close_pct` threads the old
+/// BudgetConfig.attention_tax.min_profit_to_close_pct floor to
+/// `check_position_on_tick`. Retained on ABI for continuity after PHYS-LOCK
+/// replaced COST EDGE in T3 — the params are ignored when `exit_features` is
+/// supplied, Priority 6 is driven entirely by the ExitFeatures snapshot.
+///
+/// DUAL-TRACK-EXIT-1 Track P T3: `exit_features` is `Option<&ExitFeatures>`
+/// because T4 (combine_layer wiring) has not landed yet — callers pass `None`
+/// and Priority 6 stays inert. When T4 wires per-position snapshots,
+/// Priority 6 becomes the physical-layer micro-profit lock (PHYS-LOCK).
+///
 /// 評估單一 position row，回傳派發迴圈該執行的 action。純函數。
-/// MICRO-PROFIT-FIX-1：新增 min_profit_to_close_pct，穿透到 check_position_on_tick
-/// 實現窄帶觸發語義。
+/// DUAL-TRACK-EXIT-1 T3：exit_features 為 Option，T4 接線前 caller 傳 None，
+/// Priority 6 為 no-op。
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn evaluate_position(
     row: &PositionRow,
@@ -99,6 +107,7 @@ pub(crate) fn evaluate_position(
     now_ts_ms: u64,
     cost_edge_max_ratio: f64,
     min_profit_to_close_pct: f64,
+    exit_features: Option<&ExitFeatures>,
     config: &RiskConfig,
 ) -> PositionDecision {
     let pnl = pnl_pct(row.current_price, row.entry_price, row.is_long);
@@ -119,6 +128,7 @@ pub(crate) fn evaluate_position(
         session_drawdown,
         cost_edge_max_ratio,
         min_profit_to_close_pct,
+        exit_features,
         config,
     );
     PositionDecision {
@@ -132,7 +142,15 @@ pub(crate) fn evaluate_position(
 }
 
 /// Evaluate a batch of position rows in order, returning one decision per row.
+///
+/// DUAL-TRACK-EXIT-1 Track P T3 hook point: `exit_features_fn` returns an
+/// `Option<ExitFeatures>` per row. T4 (combine_layer wiring) will replace the
+/// current `|_| None` closure with a real snapshot builder reading from
+/// `paper_state` + `price_tracker`. Design goal: keep the risk evaluation
+/// layer pure (closure injection) instead of tangling ExitFeatures
+/// construction here.
 /// 依序評估一批 position row，每行回傳一個決策。
+/// DUAL-TRACK-EXIT-1 T3：`exit_features_fn` 為 T4 接線點，當前傳 `|_| None`。
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn evaluate_positions(
     rows: &[PositionRow],
@@ -141,10 +159,12 @@ pub(crate) fn evaluate_positions(
     now_ts_ms: u64,
     cost_edge_max_ratio: f64,
     min_profit_to_close_pct: f64,
+    exit_features_fn: impl Fn(&PositionRow) -> Option<ExitFeatures>,
     config: &RiskConfig,
 ) -> Vec<PositionDecision> {
     rows.iter()
         .map(|r| {
+            let features = exit_features_fn(r);
             evaluate_position(
                 r,
                 daily_loss,
@@ -152,6 +172,7 @@ pub(crate) fn evaluate_positions(
                 now_ts_ms,
                 cost_edge_max_ratio,
                 min_profit_to_close_pct,
+                features.as_ref(),
                 config,
             )
         })
@@ -228,8 +249,8 @@ mod tests {
     fn test_evaluate_position_smoke() {
         let row = mk_row("BTCUSDT", 105.0, 100.0);
         let cfg = RiskConfig::default();
-        // MICRO-PROFIT-FIX-1: passes new min_profit_to_close_pct arg (0.3 default).
-        let decision = evaluate_position(&row, 0.0, 0.0, 1_000_000, 0.8, 0.3, &cfg);
+        // DUAL-TRACK-EXIT-1 T3: exit_features=None → PHYS-LOCK inert.
+        let decision = evaluate_position(&row, 0.0, 0.0, 1_000_000, 0.8, 0.3, None, &cfg);
         assert_eq!(decision.symbol, "BTCUSDT");
         assert_eq!(decision.is_long, true);
         assert!((decision.pnl_pct - 5.0).abs() < 1e-9);
@@ -242,7 +263,7 @@ mod tests {
     fn test_evaluate_position_hard_stop_close() {
         let row = mk_row("BTCUSDT", 50.0, 100.0); // -50% pnl
         let cfg = RiskConfig::default();
-        let decision = evaluate_position(&row, 0.0, 0.0, 1_000_000, 0.8, 0.3, &cfg);
+        let decision = evaluate_position(&row, 0.0, 0.0, 1_000_000, 0.8, 0.3, None, &cfg);
         assert!(matches!(decision.action, RiskAction::ClosePosition(_)));
     }
 
@@ -251,7 +272,7 @@ mod tests {
     #[test]
     fn test_evaluate_positions_empty() {
         let cfg = RiskConfig::default();
-        let out = evaluate_positions(&[], 0.0, 0.0, 0, 0.8, 0.3, &cfg);
+        let out = evaluate_positions(&[], 0.0, 0.0, 0, 0.8, 0.3, |_| None, &cfg);
         assert!(out.is_empty());
     }
 
@@ -265,43 +286,66 @@ mod tests {
             mk_row("CCC", 100.0, 100.0),
         ];
         let cfg = RiskConfig::default();
-        let out = evaluate_positions(&rows, 0.0, 0.0, 1_000_000, 0.8, 0.3, &cfg);
+        let out = evaluate_positions(&rows, 0.0, 0.0, 1_000_000, 0.8, 0.3, |_| None, &cfg);
         assert_eq!(out.len(), 3);
         assert_eq!(out[0].symbol, "AAA");
         assert_eq!(out[1].symbol, "BBB");
         assert_eq!(out[2].symbol, "CCC");
     }
 
-    /// MICRO-PROFIT-FIX-1: dust-profit + huge cost_ratio must NOT close.
-    /// MICRO-PROFIT-FIX-1：dust 利潤 + 極大 cost_ratio 不得平倉。
+    /// DUAL-TRACK-EXIT-1 T3: dust-profit + huge cost_ratio with no
+    /// ExitFeatures snapshot → PHYS-LOCK inert → Hold (or non-Priority-6
+    /// action from another gate, but never a COST EDGE close because that
+    /// reason string no longer exists).
+    /// DUAL-TRACK-EXIT-1 T3：dust 利潤 + 無 features → PHYS-LOCK 不觸發。
     #[test]
-    fn test_evaluate_position_dust_profit_below_min_holds() {
-        // entry=100, current=100.001 → pnl ≈ 0.001% (≪ 0.3% floor).
-        // fee=0.0006 → cost_ratio = 200*0.0006/0.001 ≈ 120 (≫ 0.2 ceiling).
-        // Old gate: fires. New gate: floor blocks it → Hold.
+    fn test_evaluate_position_dust_profit_none_features_holds() {
+        // entry=100, current=100.001 → pnl ≈ 0.001% (tiny).
+        // With exit_features=None, Priority 6 is inert — legacy COST EDGE
+        // reason string no longer produced.
         let row = mk_row("BTCUSDT", 100.001, 100.0);
         let cfg = RiskConfig::default();
-        let decision = evaluate_position(&row, 0.0, 0.0, 1_000_000, 0.2, 0.3, &cfg);
+        let decision = evaluate_position(&row, 0.0, 0.0, 1_000_000, 0.2, 0.3, None, &cfg);
         assert!(
-            !matches!(decision.action, RiskAction::ClosePosition(ref r) if r.contains("COST EDGE")),
-            "dust profit below floor must not fire COST EDGE, got {:?}",
+            !matches!(decision.action, RiskAction::ClosePosition(ref r)
+                if r.contains("COST EDGE") || r.contains("phys_lock")),
+            "Priority 6 must not fire with exit_features=None, got {:?}",
             decision.action
         );
     }
 
-    /// MICRO-PROFIT-FIX-1: profit inside narrow band [min_profit, ceiling-implied] closes.
-    /// MICRO-PROFIT-FIX-1：位於窄帶內時 COST EDGE 觸發。
+    /// DUAL-TRACK-EXIT-1 T3: when an ExitFeatures snapshot triggering gate 1
+    /// (edge below floor) is supplied, PHYS-LOCK fires with reason prefix
+    /// `risk_close:phys_lock_gate1_low_edge`.
+    /// DUAL-TRACK-EXIT-1 T3：餵入觸發 gate 1 的 features → PHYS-LOCK 關倉。
     #[test]
-    fn test_evaluate_position_in_band_closes() {
-        // entry=100, current=100.4 → pnl = 0.4% (> 0.3 floor).
-        // fee=0.0006 → cost_ratio = 200*0.0006/0.4 = 0.30 (> 0.2 ceiling).
-        // Both conditions satisfied → COST EDGE close.
-        let row = mk_row("BTCUSDT", 100.4, 100.0);
+    fn test_evaluate_position_phys_lock_fires_with_features() {
+        let row = mk_row("BTCUSDT", 100.5, 100.0);
         let cfg = RiskConfig::default();
-        let decision = evaluate_position(&row, 0.0, 0.0, 1_000_000, 0.2, 0.3, &cfg);
+        let features = ExitFeatures {
+            est_net_bps: Some(1.0), // below default 5.0 floor
+            peak_pnl_pct: 5.0,
+            current_pnl_pct: 0.5,
+            atr_pct: Some(1.0),
+            giveback_atr_norm: Some(0.0),
+            time_since_peak_ms: Some(0),
+            price_roc_short: Some(0.0),
+            entry_age_secs: Some(120.0),
+        };
+        let decision = evaluate_position(
+            &row,
+            0.0,
+            0.0,
+            1_000_000,
+            0.2,
+            0.3,
+            Some(&features),
+            &cfg,
+        );
         assert!(
-            matches!(decision.action, RiskAction::ClosePosition(ref r) if r.contains("COST EDGE")),
-            "expected COST EDGE close inside band, got {:?}",
+            matches!(decision.action, RiskAction::ClosePosition(ref r)
+                if r.contains("phys_lock_gate1_low_edge")),
+            "expected PHYS-LOCK gate1 close, got {:?}",
             decision.action
         );
     }
