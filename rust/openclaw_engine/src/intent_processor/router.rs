@@ -128,6 +128,7 @@ impl IntentProcessor {
                     fill: None,
                     verdict_info: vi.take(),
                     approved_qty: 0.0,
+                    resting_order: None,
                 };
             }
             Verdict::Modified => {
@@ -295,11 +296,69 @@ impl IntentProcessor {
         }
 
         // Gate 4: Execute fill (paper mode)
-        // NOTE: order_type and limit_price fields are currently IGNORED. All orders execute as
-        // immediate market fills. Limit order execution (hold until price reaches limit_price)
-        // will be implemented in Phase 2 when the Paper Engine gains an order book simulator.
-        // 注意：order_type 和 limit_price 欄位當前被忽略。所有訂單均以即時市價成交。
-        // 限價單執行（持有直到價格觸及 limit_price）將在 Phase 2 Paper Engine 獲得訂單簿模擬器後實現。
+        // EDGE-P2-3 Phase 1B-4.2: PostOnly limit intents are now ENQUEUED as
+        // resting orders instead of filling at market on enqueue tick. Caller
+        // (`on_tick`) detects `resting_order=Some(_)` and runs the enqueue
+        // side-effect; `PaperState::sweep_resting_limit_orders_for_symbol`
+        // converts queued orders to fills on future ticks that touch/cross
+        // the limit price (bias guard #1 queue-position discount applied).
+        // Legacy behaviour: order_type / limit_price were IGNORED — every
+        // intent produced an immediate market fill, overstating passive
+        // execution edge. Market / non-PostOnly intents keep the legacy path.
+        // EDGE-P2-3 Phase 1B-4.2：PostOnly 限價意圖改為 ENQUEUE 為掛單，而非
+        // 即時市價成交。caller（on_tick）偵測 resting_order=Some(_) 執行
+        // enqueue；`sweep_resting_limit_orders_for_symbol` 於後續 tick 碰觸
+        // 限價時轉為成交（含 bias #1 queue-position discount）。市價/非
+        // PostOnly 保留原市價成交路徑。
+        if matches!(
+            intent.time_in_force,
+            Some(crate::order_manager::TimeInForce::PostOnly)
+        ) && intent.order_type.eq_ignore_ascii_case("limit")
+            && intent.limit_price.is_some()
+        {
+            let limit_price = intent.limit_price.unwrap_or(0.0);
+            if limit_price > 0.0 && now_ms > 0 {
+                let submit_ts_ms = now_ms;
+                let timeout_ms = intent.maker_timeout_ms.unwrap_or(45_000);
+                let deadline_ms = submit_ts_ms.saturating_add(timeout_ms);
+                let mid_price_at_submit =
+                    paper_state.latest_price(&intent.symbol).unwrap_or(0.0);
+                let ctx = context_id.unwrap_or("").to_string();
+                let draft = crate::paper_state::RestingLimitOrder {
+                    symbol: intent.symbol.clone(),
+                    is_long: intent.is_long,
+                    qty: final_qty,
+                    limit_price,
+                    time_in_force: crate::order_manager::TimeInForce::PostOnly,
+                    submit_ts_ms,
+                    deadline_ms,
+                    mid_price_at_submit,
+                    // Client-minted link id — stable per (engine, symbol, ts)
+                    // so `on_tick` Fill-row emission and operator cancel IPC
+                    // can correlate. `pop_{em}_{symbol}_{ts_ms}` prefix keeps
+                    // paper (`pop_`) distinguishable from exchange (`oc_`).
+                    // 客戶端 link id：以 (引擎, 交易對, ts) 穩定生成；pop_ 前綴
+                    // 區隔紙盤（pop_）與交易所（oc_）。
+                    order_link_id: format!(
+                        "pop_{}_{}_{}",
+                        self.effective_engine_mode(),
+                        intent.symbol,
+                        submit_ts_ms
+                    ),
+                    context_id: ctx,
+                    strategy: intent.strategy.clone(),
+                };
+                return IntentResult {
+                    submitted: true,
+                    rejected_reason: None,
+                    fill: None,
+                    verdict_info: vi.take(),
+                    approved_qty: final_qty,
+                    resting_order: Some(draft),
+                };
+            }
+        }
+
         let turnover = paper_state
             .latest_turnover(&intent.symbol)
             .unwrap_or(100_000_000.0);
@@ -319,6 +378,7 @@ impl IntentProcessor {
             fill: Some(fill),
             verdict_info: vi.take(),
             approved_qty: final_qty,
+            resting_order: None,
         }
     }
 
