@@ -59,15 +59,17 @@ pub mod containers;
 pub mod dust_gate;
 pub mod fill_engine;
 pub mod owner_attribution;
+pub mod resting_orders;
 pub mod snapshots;
 
 pub use containers::{PaperPosition, PositionExitSnapshot};
 pub use dust_gate::TriageOutcome;
 pub use owner_attribution::{RetriageOutcome, SYNTHETIC_OWNER_LABELS};
+pub use resting_orders::RestingLimitOrder;
 pub use snapshots::{PaperStateSnapshot, PositionSnapshot};
 
 use openclaw_core::stop_manager::StopConfig;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 
 /// Paper trading state manager.
@@ -113,6 +115,16 @@ pub struct PaperState {
     /// 都同步更新。生產路徑在 TickPipeline 構造後用 `set_positions_mirror()`
     /// 換成與對帳器共享的 handle。
     pub(super) positions_mirror: Arc<parking_lot::RwLock<HashMap<String, bool>>>,
+    /// EDGE-P2-3 Phase 1B-4.1: per-symbol FIFO queue of resting PostOnly
+    /// limit orders awaiting a future tick touch/cross (Paper-only). Empty
+    /// at this commit — 1B-4.2 will wire the enqueue path from the Paper
+    /// dispatch router and the tick-level touch/cross sweep. Exchange mode
+    /// never reads this map; real resting orders sit on Bybit's book and
+    /// surface via WS order/fill events.
+    /// EDGE-P2-3 Phase 1B-4.1：紙盤專用 per-symbol FIFO 掛中 PostOnly 限價單隊列。
+    /// 本提交保持空。1B-4.2 會接線 enqueue 與 tick 碰觸/穿越 sweep。交易所模式
+    /// 不讀此 map；真實掛單在 Bybit 委託簿上，靠 WS 成交事件回流。
+    pub(super) resting_limit_orders: HashMap<String, VecDeque<RestingLimitOrder>>,
 }
 
 impl PaperState {
@@ -133,6 +145,7 @@ impl PaperState {
             bybit_sync_balance: None,
             api_unrealized_pnl: HashMap::new(),
             positions_mirror: Arc::new(parking_lot::RwLock::new(HashMap::new())),
+            resting_limit_orders: HashMap::new(),
         }
     }
 
