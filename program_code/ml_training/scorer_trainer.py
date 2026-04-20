@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
@@ -20,6 +21,12 @@ from typing import Any, Optional
 import numpy as np
 
 logger = logging.getLogger(__name__)
+
+# Honour OPENCLAW_DATA_DIR for cross-platform dev (Mac: $HOME/.openclaw_runtime).
+# 支援 OPENCLAW_DATA_DIR 跨平台開發（Mac：$HOME/.openclaw_runtime）。
+DEFAULT_MODEL_DIR = os.path.join(
+    os.environ.get("OPENCLAW_DATA_DIR", "/tmp/openclaw"), "models"
+)
 
 
 @dataclass
@@ -46,7 +53,7 @@ class ScorerConfig:
     power_threshold: float = 0.5
 
     # Output / 輸出
-    output_dir: str = "/tmp/openclaw/models"
+    output_dir: str = DEFAULT_MODEL_DIR
 
 
 def get_embargo_hours(config: ScorerConfig, strategy_type: str) -> int:

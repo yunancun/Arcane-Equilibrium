@@ -37,7 +37,7 @@ def main() -> int:
     except ImportError as exc:
         print(f"[ERR] BybitClient not importable: {exc}", file=sys.stderr)
         print("      Activate API venv and cd to repo root:", file=sys.stderr)
-        print("      cd /home/ncyu/BybitOpenClaw/srv  # or $OPENCLAW_BASE_DIR", file=sys.stderr)
+        print("      cd \"${OPENCLAW_BASE_DIR:-$HOME/BybitOpenClaw/srv}\"", file=sys.stderr)
         print("      source program_code/exchange_connectors/bybit_connector/"
               "control_api_v1/.venv/bin/activate", file=sys.stderr)
         return 2

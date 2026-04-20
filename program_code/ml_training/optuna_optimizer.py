@@ -61,8 +61,11 @@ except ImportError:
 # Constants / 常量
 # ═══════════════════════════════════════════════════════════════════════════════
 
-DEFAULT_JOURNAL_PATH = "/tmp/openclaw/optuna_studies.log"
-DEFAULT_IPC_SOCKET = "/tmp/openclaw/engine.sock"
+# Honour OPENCLAW_DATA_DIR for cross-platform dev (Mac: $HOME/.openclaw_runtime).
+# 支援 OPENCLAW_DATA_DIR 跨平台開發（Mac：$HOME/.openclaw_runtime）。
+_DATA_DIR = os.environ.get("OPENCLAW_DATA_DIR", "/tmp/openclaw")
+DEFAULT_JOURNAL_PATH = os.path.join(_DATA_DIR, "optuna_studies.log")
+DEFAULT_IPC_SOCKET = os.path.join(_DATA_DIR, "engine.sock")
 IPC_TIMEOUT_SECONDS = 10
 IPC_RECV_BUFFER = 65536
 

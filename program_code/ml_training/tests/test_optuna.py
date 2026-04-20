@@ -220,8 +220,14 @@ class TestOptunaConfig:
         """Verify default configuration values.
         驗證默認配置值。
         """
+        from program_code.ml_training.optuna_optimizer import DEFAULT_JOURNAL_PATH
+
         cfg = OptunaConfig()
-        assert cfg.sqlite_path == "/tmp/openclaw/optuna_studies.log"
+        # Default honours OPENCLAW_DATA_DIR (Mac compat); compare via the module
+        # constant rather than a hardcoded path.
+        # 默認尊重 OPENCLAW_DATA_DIR（Mac 相容）；用模組常量比較而非硬編碼路徑。
+        assert cfg.sqlite_path == DEFAULT_JOURNAL_PATH
+        assert cfg.sqlite_path.endswith("/optuna_studies.log")
         assert cfg.n_trials == 30
         assert cfg.min_fills_required == 80
 

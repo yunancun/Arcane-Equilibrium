@@ -11,9 +11,9 @@ from program_code.ml_training.run_training_pipeline import (
 )
 
 
-def test_pipeline_dry_run_degrades_gracefully_without_lgb(monkeypatch):
+def test_pipeline_dry_run_degrades_gracefully_without_lgb(monkeypatch, tmp_path):
     """Pipeline must report a clean error when LightGBM is absent."""
-    cfg = PipelineConfig(dry_run=True, min_samples=100, output_dir="/tmp/openclaw_test_p1_3")
+    cfg = PipelineConfig(dry_run=True, min_samples=100, output_dir=str(tmp_path / "p1_3"))
     result = run_pipeline(cfg)
     # Dry-run with synthetic data gets past ETL + label stages regardless
     assert "etl" in result.stages_completed

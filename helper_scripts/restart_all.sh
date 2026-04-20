@@ -21,6 +21,10 @@
 set -e
 cd "$(dirname "$0")/.."
 WORKERS="${OPENCLAW_API_WORKERS:-4}"
+# Runtime data dir (env var for Mac compatibility).
+# Mac dev recommendation: export OPENCLAW_DATA_DIR="$HOME/.openclaw_runtime"
+# Runtime 資料目錄（支援 Mac env var 部署）。
+DATA_DIR="${OPENCLAW_DATA_DIR:-/tmp/openclaw}"
 
 # ── Parse flags / 解析旗標 ──
 # Accept --rebuild in any position; SCOPE is the remaining positional.
@@ -68,16 +72,16 @@ rotate_engine_log() {
     # Fix 2 (2026-04-14): preserve engine.log on restart so post-mortem
     # analysis of a crash is possible. The 2026-04-14 incident lost the
     # death logs because restart_all.sh used `>` which truncated the file.
-    # Keep last 10 logs under /tmp/openclaw/engine_logs/.
+    # Keep last 10 logs under $DATA_DIR/engine_logs/.
     # 修復 2：重啟時保留 engine.log 以便崩潰事後分析。2026-04-14 事故中死前
     # 日誌全遺失，因為 restart_all.sh 用 `>` 截斷檔案。保留最近 10 份於
-    # /tmp/openclaw/engine_logs/。
-    local logs_dir="/tmp/openclaw/engine_logs"
+    # $DATA_DIR/engine_logs/（預設 /tmp/openclaw/engine_logs/）。
+    local logs_dir="$DATA_DIR/engine_logs"
     mkdir -p "$logs_dir"
-    if [[ -f /tmp/openclaw/engine.log ]] && [[ -s /tmp/openclaw/engine.log ]]; then
+    if [[ -f "$DATA_DIR/engine.log" ]] && [[ -s "$DATA_DIR/engine.log" ]]; then
         local ts
         ts=$(date +%s)
-        mv /tmp/openclaw/engine.log "$logs_dir/engine-${ts}.log"
+        mv "$DATA_DIR/engine.log" "$logs_dir/engine-${ts}.log"
         echo ">>> Archived previous engine.log → $logs_dir/engine-${ts}.log"
     fi
     # Keep only 10 most recent archived logs.
@@ -165,7 +169,7 @@ restart_engine() {
     rotate_engine_log
     # Clear maintenance flag on explicit restart — operator wants it running.
     # 明確重啟時清除 maintenance flag — operator 意圖是讓引擎跑起來。
-    rm -f /tmp/openclaw/engine_maintenance.flag 2>/dev/null || true
+    rm -f "$DATA_DIR/engine_maintenance.flag" 2>/dev/null || true
     echo ">>> Starting Rust engine..."
     # Load PG password from secrets (cross-platform: no hardcoded credentials)
     local pg_pass
@@ -174,10 +178,10 @@ restart_engine() {
     # 載入 IPC HMAC 密鑰（Live 管線 HMAC 認證必需）
     local ipc_secret
     ipc_secret=$(cat "$HOME/BybitOpenClaw/secrets/environment_files/ipc_secret.txt" 2>/dev/null || echo "")
-    OPENCLAW_DATA_DIR=/tmp/openclaw OPENCLAW_CANARY_MODE=1 \
+    OPENCLAW_DATA_DIR="$DATA_DIR" OPENCLAW_CANARY_MODE=1 \
         OPENCLAW_DATABASE_URL="postgresql://trading_admin:${pg_pass}@127.0.0.1:5432/trading_ai" \
         OPENCLAW_IPC_SECRET="${ipc_secret}" \
-        nohup rust/target/release/openclaw-engine > /tmp/openclaw/engine.log 2>&1 &
+        nohup rust/target/release/openclaw-engine > "$DATA_DIR/engine.log" 2>&1 &
     echo "    PID: $!"
 }
 
@@ -216,9 +220,9 @@ wait_and_verify() {
     sleep 10
     echo "=== Engine ==="
     python3 helper_scripts/canary/engine_watchdog.py \
-        --data-dir /tmp/openclaw --stale-threshold 45 --grace-period 120 --status 2>&1 || true
+        --data-dir "$DATA_DIR" --stale-threshold 45 --grace-period 120 --status 2>&1 || true
     echo "=== Ticks ==="
-    python3 -c "import json;s=json.load(open('/tmp/openclaw/pipeline_snapshot.json'));print('ticks:', s['stats']['total_ticks'], 'fills:', s['stats']['total_fills'], 'paused:', s.get('paper_paused'))" 2>&1 || true
+    python3 -c "import json;s=json.load(open('$DATA_DIR/pipeline_snapshot.json'));print('ticks:', s['stats']['total_ticks'], 'fills:', s['stats']['total_fills'], 'paused:', s.get('paper_paused'))" 2>&1 || true
 }
 
 # ── Pre-flight rebuild (if requested) / 啟動前重建（如有請求） ──
