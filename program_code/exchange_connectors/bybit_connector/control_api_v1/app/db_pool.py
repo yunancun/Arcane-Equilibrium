@@ -53,8 +53,13 @@ def _read_pg_pass_from_secrets() -> str:
 
 
 # Connection parameters / 連接參數
+# Cross-platform: prefer OPENCLAW_PG_PORT (shared with restart_all.sh / engine)
+# before falling through to PG_PORT. Mac dev's dockerised PG runs on 15432;
+# Linux native on 5432.
+# 跨平台：優先讀 OPENCLAW_PG_PORT（與 restart_all.sh / engine 共用），再 fallback
+# PG_PORT。Mac dev dockerised PG 在 15432，Linux 原生 5432。
 PG_HOST = os.getenv("PG_HOST", "127.0.0.1")
-PG_PORT = int(os.getenv("PG_PORT", "5432"))
+PG_PORT = int(os.getenv("OPENCLAW_PG_PORT") or os.getenv("PG_PORT", "5432"))
 PG_USER = os.getenv("PG_USER", "trading_admin")
 PG_PASS = os.getenv("PG_PASS") or _read_pg_pass_from_secrets()
 PG_DB = os.getenv("PG_DB", "trading_ai")
