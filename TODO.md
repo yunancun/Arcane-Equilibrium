@@ -357,8 +357,8 @@ git status && git log --oneline -5
 - [x] 刪除 `rust/openclaw_pyo3/src/hedging_engine.rs`（285 LOC）
 - [x] 從 `rust/openclaw_pyo3/src/lib.rs` #[pymodule] 移除對應 `add_class` 註冊（5 行）
 - [x] 驗證：`cargo build -p openclaw_pyo3 --release` 綠（16.12s，warnings 為預存 openclaw_engine dead_code）
-- [ ] pytest 全量綠（合併 Phase 2 一起跑）
-- [ ] commit：`refactor(pyo3): PYO3-ELIMINATE-1 Phase 1 — drop dead ContextDistiller + HedgingEngine (513 LOC, 0 call sites)`
+- [x] pytest 全量綠（合併 Phase 2 一起跑）
+- [x] commit `a84ecdb`：`refactor(pyo3): PYO3-ELIMINATE-1 Phase 1 — drop dead ContextDistiller + HedgingEngine (513 LOC, 0 call sites)`
 
 **Phase 2 method surface 實測**（2026-04-20，Python 實際使用的 BybitClient method）：
 - **Read-only（9）**：`has_credentials()` `base_url()` `instrument_count()` `refresh_balance()` `refresh_instruments(category)` `get_instrument(symbol)` `get_positions(category)` `get_active_orders(category)` `get_executions(category, limit)`
@@ -373,19 +373,18 @@ git status && git log --oneline -5
 - [x] 3 call sites 遷移完成：`strategy_ai_routes.py`（singleton factory 重命名 `_RUST_BYBIT_CLIENT` → `_BYBIT_CLIENT`）· `live_session_routes.py:220` · `helper_scripts/clean_restart_flatten.py`
 - [x] grep `from openclaw_core` 生產代碼 0 match（剩 docs/spec/archive/Rust 內部 `rust/openclaw_core` crate ref — 預期）
 - [x] pytest control_api 全量 **2647 passed / 6 skipped / 0 failed**（63.50s）
-- [ ] E2 對抗性審查（實作 + parity harness + 3 patch + LIVE-GATE-FALLBACK-1 語意保持）
-- [ ] commit：`refactor(connector): PYO3-ELIMINATE-1 Phase 2 — migrate BybitClient callers to httpx`
+- [x] E2 對抗性審查 APPROVE_WITH_NITS（0 CRITICAL，見 `docs/audits/2026-04-20--pyo3_eliminate_phase2_e2_review.md`）
+- [x] commit `0f8220b`：`refactor(connector): PYO3-ELIMINATE-1 Phase 2 — migrate BybitClient callers to httpx`
 
-**Phase 3 · 拆 crate + 清工具鏈（~1 hr）**
-- [ ] 刪整個 `rust/openclaw_pyo3/` 目錄
-- [ ] `rust/Cargo.toml` 移除 `openclaw_pyo3` member
-- [ ] `rust/Cargo.toml` 移除 workspace `pyo3` 依賴
-- [ ] 刪 `helper_scripts/build_pyo3.sh`
-- [ ] 修 `helper_scripts/clean_restart.sh` / `fresh_start.sh` `SRC_DIRS` 移除 `openclaw_pyo3/src`
-- [ ] 修 `helper_scripts/restart_all.sh --rebuild` 移除 PyO3 path（確認剩下只有 `cargo build --bin openclaw-engine`）
-- [ ] 更新 `README.md:162` 架構圖
-- [ ] 更新 CLAUDE.md §五 / §九（若有 PyO3 相關描述）
-- [ ] 驗證：`cargo build --release` + 完整 `./helper_scripts/restart_all.sh --rebuild` + pytest + engine lib tests 全綠
+**Phase 3 · 拆 crate + 清工具鏈 ✅ 2026-04-20（待 commit）**
+- [x] 刪整個 `rust/openclaw_pyo3/` 目錄（`git rm -rf`，8 檔 ~918 LOC）
+- [x] `rust/Cargo.toml` 移除 `openclaw_pyo3` member
+- [x] `rust/Cargo.toml` 移除 workspace `pyo3` 依賴
+- [x] 刪 `helper_scripts/build_pyo3.sh`（`git rm`）
+- [x] 修 `helper_scripts/clean_restart.sh` / `fresh_start.sh` `SRC_DIRS` 移除 `openclaw_pyo3/src`
+- [x] 修 `helper_scripts/restart_all.sh --rebuild` 移除 `rebuild_pyo3()` function + 呼叫（只剩 `cargo build --release -p openclaw_engine`）
+- [x] 更新 `README.md`（架構圖 4→3 crates、亮点、build 表移除、restart_all 旗標說明）+ `SCRIPT_INDEX.md` + CLAUDE.md §九 singleton 表（`_RUST_BYBIT_CLIENT` → `_BYBIT_CLIENT`）
+- [x] 驗證：`cargo build --release -p openclaw_engine` 11.14s 綠 + `cargo test --lib` 1791 passed / 0 failed + pytest bybit_rest_client 58 passed / 5 skipped
 - [ ] commit：`chore(rust): PYO3-ELIMINATE-1 Phase 3 — drop openclaw_pyo3 crate + build pipeline`
 
 **完成標準**：

@@ -241,7 +241,7 @@ elif [ ! -f "$BIN" ]; then
     cargo build --release -p openclaw-engine --manifest-path rust/Cargo.toml
     ok "binary built"
 else
-    SRC_DIRS="rust/openclaw_engine/src rust/openclaw_core/src rust/openclaw_types/src rust/openclaw_pyo3/src"
+    SRC_DIRS="rust/openclaw_engine/src rust/openclaw_core/src rust/openclaw_types/src"
     MANIFEST_FILES="Cargo.toml rust/Cargo.toml"
     # Build list of existing paths only (find errors on missing dirs abort pipefail)
     # 只用存在的路徑（find 對缺失目錄報錯會觸發 pipefail）
