@@ -14,6 +14,12 @@ adx_threshold = 20.0
 regime_filter_enabled = true
 higher_tf_alpha = 0.003
 conf_scale = 1.0
+# EDGE-P2-3 Phase 2+: live stays on Market (root principle #6). Flip to true
+# after demo validates positive net edge.
+# EDGE-P2-3 Phase 2+：live 維持 Market（根原則 #6）。
+use_maker_entry = false
+maker_price_offset_bps = 1.0
+maker_limit_timeout_ms = 45000
 
 [bb_reversion]
 active = true
