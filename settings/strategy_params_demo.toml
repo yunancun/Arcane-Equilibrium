@@ -38,6 +38,13 @@ enable_oi_signal = false
 oi_buffer_window_ms = 60000   # rolling window for OI-delta, validated [1000, 600000] / OI 差分滾動窗口，校驗 [1000, 600000]
 oi_confluence_bonus = 0.10    # ± bonus applied to confluence score, |value| ≤ 0.5 / 合流加成（±），|value| ≤ 0.5
 oi_min_delta_pct = 0.0        # FUP #3: noise floor for |oi_delta_pct|, 0.0 = pre-FUP behaviour / 噪音地板（0.0 = 維持 FUP 前行為）
+# EDGE-P2-3 Phase 2+ (2026-04-20): PostOnly Limit entries cut per-side fee
+# taker ~5.5 bps -> maker ~2 bps. Same scope rules as grid_trading Phase 1A —
+# entry-only, close stays Market. Demo enabled first for validation.
+# EDGE-P2-3 Phase 2+：入場改發 PostOnly Limit，單邊費率 taker→maker；平倉維持 Market。
+use_maker_entry = true
+maker_price_offset_bps = 1.0
+maker_limit_timeout_ms = 45000
 
 [grid_trading]
 active = true

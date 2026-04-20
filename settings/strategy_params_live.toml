@@ -37,6 +37,12 @@ enable_oi_signal = false
 oi_buffer_window_ms = 60000   # rolling window for OI-delta, validated [1000, 600000] / OI 差分滾動窗口，校驗 [1000, 600000]
 oi_confluence_bonus = 0.10    # ± bonus applied to confluence score, |value| ≤ 0.5 / 合流加成（±），|value| ≤ 0.5
 oi_min_delta_pct = 0.0        # FUP #3: noise floor for |oi_delta_pct|, 0.0 = pre-FUP behaviour / 噪音地板（0.0 = 維持 FUP 前行為）
+# EDGE-P2-3 Phase 2+: live stays on Market (root principle #6). Flip to true
+# only after demo validation shows positive net edge with maker fills.
+# EDGE-P2-3 Phase 2+：live 維持 Market（根原則 #6）；demo 驗證正 edge 後再評估啟用。
+use_maker_entry = false
+maker_price_offset_bps = 1.0
+maker_limit_timeout_ms = 45000
 
 [grid_trading]
 active = true
