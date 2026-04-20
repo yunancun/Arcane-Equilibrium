@@ -1,7 +1,7 @@
 # OpenClaw / Bybit AI Agent Trading System
 <!-- Git 日志 — 项目入口。主日志见 CLAUDE.md -->
 
-AI Agent 自动交易系统 — 自主扫描 650+ 交易对，智能部署策略，**Live_Ready**（换入 mainnet API key 即上线）。
+AI Agent 自动交易系统 — 自主扫描 650+ 交易对，智能部署策略，**Live_Ready ⚠️**（5 项 live gate 全绿才上真实 live，见下文门控表）。
 
 ---
 
@@ -31,15 +31,23 @@ AI Agent 自动交易系统 — 自主扫描 650+ 交易对，智能部署策略
 
 ---
 
-## 当前状态 (2026-04-16 · **LIVE 阶段** · Demo API key 运行完整 Live 路径)
+## 当前状态 (2026-04-20 · **Live_Ready ⚠️** · LIVE-GATE-BINDING-1 5-gate 硬鎖生效)
 
 ```
-系统模式:     LIVE ✅ — Demo API key 运行完整 Live 路径，所有功能按 Live 标准
-执行权限:     auto_granted_on_start（live session 启动后自动授予）
-真实 Live:    换入 mainnet API key 即可（零代码改动）
-测试:         Rust engine lib 1335 (default) / 1341 (ort) · core 380 · e2e 35 · reconciler_e2e 19
-              Python control_api 2898 passed (0 fail · 0 regression) · ml_training 182 passed
-API 路由:     183 条（全部 Rust-first）
+系统模式:     Live_Ready ⚠️ — LIVE-P0/P1/P2 代码完整，0 真实 live 流量（历史 43k "live" = LiveDemo）
+Live 门控:    5 项全绿才上真实 live（LIVE-GUARD-1 + LIVE-GATE-BINDING-1，2026-04-18 ✅）
+              Rust 侧 4 项可验证 + Python 侧 1 项 global mode：
+              (1) Python live_reserved global mode + Operator auth
+              (2) OPENCLAW_ALLOW_MAINNET=1 env var（仅 Mainnet）
+              (3) secret slot 有 api_key + api_secret（Mainnet env var fallback 已封闭）
+              (4) authorization.json HMAC-SHA256 签名 + 未过期（每 5 min re-verify）
+              (5) Python Operator 角色 auth
+execution_authority: Rust 端仅为 P0/P1 denylist 字符串常量（claude_teacher/applier.rs:226）
+                     非真实授权逻辑，"auto_granted_on_start" 为 Python 概念
+测试:         Rust engine lib 1791 passed / 0 failed · bin 38 · core 392 · e2e 35
+              reconciler_e2e 19 · micro_profit_fix_integration 7
+              Python control_api 2866 passed (0 fail · 14 skipped) · ml_training 238 passed
+API 路由:     209 /api/v1 + 11 non-api（2026-04-16 audit 实测）
 代码:         ~62,000 行（Python ~40k + Rust ~22k）
 单一引擎:     Rust openclaw_engine = paper / demo / live 三模式唯一引擎
               tick pipeline + IntentProcessor + paper_state + governance + stop_manager
@@ -49,18 +57,22 @@ ARCH-RC1:     ✅ 1A → 1C-4 WRAP COMPLETE
               Guardian = RiskConfig 纯派生视图
 Phase 5:      ⏸ PAUSED（2026-04-12 reframe）— PNL-FIX-1/2 揭露活跃策略 gross edge 为负
               cost_gate / DL / JS 机械已接线但需真实正 edge；等策略重做（G-SR-1 / Strategist）
-P0-4 R1:      ✅ STRATEGY-CLOSE-TAG-FIX (commit a5401ce 已部署)
-              execute_position_close trigger_tag propagation — strategy_close:{reason} 正确入库
-P0-0:         ✅ RECONCILER-BURST-FIX 已部署 — 启动 5min 宽限防幽灵持仓误判
-P0-5:         🟡 PHANTOM-2-FUP ReduceToHalf 级联修复（A+C 方案实作完成，待 --rebuild 部署）
+近期里程碑:   ✅ EDGE-P2-2 Phase A OI confluence（`381c542`，E2 FUP #1-#7 全修，2026-04-20）
+              ✅ PIPELINE-SLOT-1 Phases 1-4（auth-fail live-only，2026-04-19）
+              ✅ E5-FN / FILL-CONTEXT / EXIT-FEATURES / E5-P0/P1/P2 Refactor Waves
+              ✅ P1-16 HALT-SESSION cross-symbol price corruption（245× cleaner，2026-04-18）
+              ✅ LIVE-GATE-BINDING-1 HMAC authorization.json（2026-04-18）
+              ✅ LIVE-GUARD-1 三重 Mainnet 硬锁（2026-04-16）
+              ✅ P0-10 SCANNER-GATE / P0-5 PHANTOM-2-FUP / P1-8 / MICRO-PROFIT-FIX-1（2026-04-17）
 EDGE-P3-1:    🟡 ONNX loader Phase B #3 ✅（ort backend）+ Lane A CQR ✅；等真 ETL 资料跑首 artifact
 Live 准备:    ✅ P0 API key 管理 + tab-live 动态前置条件 + 仪表板框架
               ✅ P1 TradingMode::Live + slot-aware key 读取 + session routes
               ✅ P2 PerEngineRiskStores（paper/demo/live 独立风控）+ GUI per-engine tab
-              ✅ P3 Gov-P1 + OPENCLAW_ALLOW_MAINNET 锁移除 + 缩仓监控（5%/15% 自动停）
+              ✅ P3 Gov-P1 + OPENCLAW_ALLOW_MAINNET 硬锁回补（Rust fail-safe 三重 gate）
               ✅ P4 Live-Demo 虚拟槽 + live/paper metrics 端点 + DB Signal Diamond 规划
+              ✅ P5 LIVE-GATE-BINDING-1 Python↔Rust HMAC 签名授权
 安全:         ✅ SEC-05 innerHTML XSS 全面修复（safeText→ocEsc + badge fallbacks）
-              ✅ SEC-17 OPENCLAW_ALLOW_MAINNET 架构决策（env var 移除，API key = 唯一门控）
+              ✅ LIVE-GUARD-1 OPENCLAW_ALLOW_MAINNET 三重硬锁（2026-04-16 回补）
               ✅ WP-F/AH-06 risk-tab dirty-tracking 防覆盖
               ✅ W19 G-3 IPC HMAC-SHA256 认证 + G-5 Rate Limit 全局覆盖
               ✅ W20 SEC-04/06/13 E3 深度审查 PASS
@@ -79,10 +91,12 @@ Layer 2:      L0 确定性 → L1 Ollama 9B/27B → L2 Claude API
 Bybit API:    64 REST + 8 WS + 5 Private WS + 8 IPC
 
 下一步（按顺序）:
-  1) P0-5 部署：restart_all.sh --rebuild（ReduceToHalf 级联修复生效）
-  2) P0-3 Phase 5 策略重做：G-SR-1 信号收紧 / Strategist agent 展开（2~3w）
-  3) P0-2 LG-1 21d demo 观察期 + LG-2/3 压测
-  4) LG-4/5 Live Gate + 真实 Live：换入 mainnet API key（最早 ~2026-05-23 W24 末）
+  1) restart_all.sh --rebuild 整合部署 EDGE-P2-2 + E5-FN + FILL-CONTEXT + EXIT-FEATURES + E5-P1/P2
+  2) E5-FN-3-FUP：Strategist/Guardian/Executor/Scout audit_callback wiring
+  3) P0-6 intent write gap / P0-7 order submit gap
+  4) P0-2 LG-1 21d demo 观察期 → P0-3 edge 重评
+  5) P1-7 LEARNING-PIPELINE-DORMANT-1（不阻 live 但阻 Phase 5 edge 收敛）
+  6) LG-4/5 Live Gate + 真实 Live：换入 mainnet API key（最早 ~2026-05-23 W24 末）
 ```
 
 **亮点**：ARCH-RC1 统一 Config 4 IPC 写入面 + 5 engines 热重载（端到端 e2e `4780b04`）· Python 风控/纸盘双退场 · Guardian = RiskConfig 纯派生视图 · 单一 Rust 引擎 · V014 audit · L3 12 路审计完成 · EXT-1 Exchange-as-Truth · 5 Agent · Rust tick <100μs · PyO3 39 方法 · Telegram+Webhook 双通道告警
@@ -288,16 +302,29 @@ srv/
 ## 硬边界（永远不可违背）
 
 ```python
-# ── Live_Ready 状态（2026-04-10）─────────────────────────────────────────
-# 所有代码阻隔已移除。系统以 Live 标准运行（Demo API key 完整测试 Live 路径）。
-# 真实 Live 交易上线唯一前置：settings/secret_files/bybit/live/{api_key,api_secret}
-execution_authority     = "auto_granted_on_start"   # live session start 时自动授予
+# ── Live_Ready 状态（2026-04-18 LIVE-GATE-BINDING-1 ✅ 后更新）────────────
+# LIVE-P0/P1/P2 代码完整，0 真实 live 流量。真实 live 门控 = 5 项全绿：
+#   1. Python live_reserved global mode + Operator 角色 auth
+#   2. OPENCLAW_ALLOW_MAINNET=1 env var（Rust 侧，LIVE-GUARD-1，仅 Mainnet）
+#   3. secret slot 有 api_key+api_secret（Mainnet env var fallback 已封闭）
+#   4. authorization.json HMAC-SHA256 签名 + 未过期 + env_allowed 匹配
+#      路径：$OPENCLAW_SECRETS_DIR/live/authorization.json
+#      检查点：build_exchange_pipeline 启动 + main.rs 每 5 min re-verify
+#      失效 → engine 优雅 shutdown；涵盖 LiveDemo + Mainnet
+#   5. Python Operator 角色 auth
+# execution_authority：Rust 侧仅为 P0/P1 denylist 字符串常量
+#                     （claude_teacher/applier.rs:226），非真实授权逻辑
+decision_lease_emitted  = False
 max_retries             = 0                          # Bybit API timeout → fail-closed，不重试
 
-# 永不允许（无论 Live_Ready 状态）：
+# 永不允许（LIVE-GATE-BINDING-1 后硬边界）：
 # - 绕过 live_reserved global mode 直接启动 live session
 # - 自动修改 engine trading_mode 为 live（需 operator 显式配置）
 # - Bybit API retCode != 0 → fail-closed，不重试
+# - Mainnet 下无 OPENCLAW_ALLOW_MAINNET=1 env var（LIVE-GUARD-1）
+# - Mainnet 下试图用 BYBIT_API_KEY/SECRET env var 作为唯一凭证来源
+# - Live（含 LiveDemo）下没有有效 authorization.json 即 spawn pipeline
+# - 不经 Python _write_signed_live_authorization() 手动写 authorization.json
 # - 伪造 AI 调用或交易活动
 # - 缩仓监控：回撤 ≥15% → 自动撤销 execution_authority + 平仓 + 冻结 GovernanceHub
 ```
