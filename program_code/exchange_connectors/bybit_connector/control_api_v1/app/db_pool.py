@@ -23,11 +23,24 @@ logger = logging.getLogger(__name__)
 
 
 def _read_pg_pass_from_secrets() -> str:
-    """Read PG password from secrets file. 從 secrets 文件讀取數據庫密碼。"""
-    candidates = [
-        os.path.expanduser("~/BybitOpenClaw/secrets/environment_files/basic_system_services.env"),
-        os.path.expanduser("~/BybitOpenClaw/secrets/compose_env/trading_services.env"),
-    ]
+    """Read PG password from secrets file. 從 secrets 文件讀取數據庫密碼。
+
+    Cross-platform (CLAUDE.md §七): resolves $OPENCLAW_SECRETS_ROOT first,
+    then falls back to ~/BybitOpenClaw/secrets (Linux legacy layout).
+    跨平台 (CLAUDE.md §七)：優先解析 $OPENCLAW_SECRETS_ROOT，再 fallback 到
+    ~/BybitOpenClaw/secrets（Linux 舊佈局）。
+    """
+    roots: list[str] = []
+    env_root = os.environ.get("OPENCLAW_SECRETS_ROOT")
+    if env_root:
+        roots.append(env_root)
+    roots.append(os.path.expanduser("~/BybitOpenClaw/secrets"))
+
+    candidates: list[str] = []
+    for root in roots:
+        candidates.append(os.path.join(root, "environment_files", "basic_system_services.env"))
+        candidates.append(os.path.join(root, "compose_env", "trading_services.env"))
+
     for path in candidates:
         try:
             with open(path) as f:
