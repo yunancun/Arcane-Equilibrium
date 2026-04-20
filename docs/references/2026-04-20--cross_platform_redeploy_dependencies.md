@@ -36,13 +36,14 @@
 
 ```bash
 # 核心工具
-brew install rustup-init postgresql@16 ollama git python@3.12
+brew install rustup-init postgresql@16 ollama git python@3.12 libomp
 
 # 可選：Docker Desktop for Mac（跑 timescaledb 測試容器時需要）
 brew install --cask docker
 ```
 
 **特別說明**：
+- `libomp`：✅ **必裝**。LightGBM / scikit-learn / xgboost 的 pip wheel 帶 `lib_lightgbm.dylib`，但該 dylib `dlopen @rpath/libomp.dylib` — 缺席 → 首次 `import lightgbm` 即 `OSError: Library not loaded: @rpath/libomp.dylib`。brew 裝後 Homebrew 自動放在 `/opt/homebrew/opt/libomp/lib/libomp.dylib`，LightGBM rpath search 能命中。
 - `openssl`：❌ 不需要安裝。`openclaw_engine/Cargo.toml` 的 `reqwest`/`tokio-tungstenite`/`sqlx` 全部走 `rustls` TLS。
 - `libpq`：❌ 不需要。`psycopg2-binary` 帶預編譯 libpq。
 - `cmake` / `clang`：❌ 不需要（Xcode Command Line Tools 夠用）。
