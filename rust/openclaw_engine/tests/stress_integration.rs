@@ -566,6 +566,7 @@ fn stress_guardian_rejects_on_high_drawdown() {
         confluence_score: None,
         persistence_elapsed_ms: None,
         time_in_force: None,
+        maker_timeout_ms: None,
     };
     let result = proc.process(&intent, &gov, &state, 500.0, GovernanceProfile::Exploration);
     assert!(!result.submitted, "should reject on high drawdown");
@@ -597,6 +598,7 @@ fn stress_guardian_rejects_direction_conflict() {
         confluence_score: None,
         persistence_elapsed_ms: None,
         time_in_force: None,
+        maker_timeout_ms: None,
     };
     let result = proc.process(&intent, &gov, &state, 500.0, GovernanceProfile::Exploration);
     assert!(!result.submitted, "should reject direction conflict");
@@ -627,6 +629,7 @@ fn stress_guardian_rejects_position_count_limit() {
         confluence_score: None,
         persistence_elapsed_ms: None,
         time_in_force: None,
+        maker_timeout_ms: None,
     };
     let result = proc.process(&intent, &gov, &state, 500.0, GovernanceProfile::Exploration);
     assert!(
@@ -654,6 +657,7 @@ fn stress_governance_not_authorized_rejects_all() {
         confluence_score: None,
         persistence_elapsed_ms: None,
         time_in_force: None,
+        maker_timeout_ms: None,
     };
     let result = proc.process(&intent, &gov, &state, 500.0, GovernanceProfile::Exploration);
     assert!(!result.submitted);

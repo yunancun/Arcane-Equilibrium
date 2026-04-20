@@ -132,6 +132,20 @@ pub struct IntentResult {
     /// 暴露此欄位讓 paper `persist_intent` 寫入真實 sized qty（Phase 2 前為 1e9 sentinel）；
     /// 成功路徑下等同 `fill.fill_qty` 取整前。
     pub approved_qty: f64,
+    /// EDGE-P2-3 Phase 1B-4.2: Paper-only handoff when router classifies a
+    /// PostOnly limit intent as "accepted but waiting to fill". Router builds
+    /// the draft using gate-approved qty + paper_state mid-price snapshot +
+    /// caller-supplied context_id + now_ms; caller (`on_tick`) is responsible
+    /// for `paper_state.enqueue_resting_limit_order(draft)` since router only
+    /// holds `&PaperState` (immutable). `Some(_)` implies `submitted=true`
+    /// and `fill=None` — the "accepted pending" shape. Market intents and
+    /// all non-paper paths leave this `None`.
+    /// EDGE-P2-3 Phase 1B-4.2：紙盤專用 PostOnly「已接受、等成交」交接。
+    /// router 以 gate 通過的 qty、paper_state mid、caller context_id、now_ms
+    /// 組成 draft；caller（on_tick）負責 enqueue（router 僅持唯讀借用）。
+    /// `Some(_)` 蘊含 `submitted=true` 且 `fill=None`（「接受待成交」形狀）。
+    /// 市價意圖與所有非紙盤路徑此欄位為 None。
+    pub resting_order: Option<crate::paper_state::RestingLimitOrder>,
 }
 
 impl IntentResult {
@@ -145,6 +159,7 @@ impl IntentResult {
             fill: None,
             verdict_info: Some(vi),
             approved_qty: 0.0,
+            resting_order: None,
         }
     }
 }

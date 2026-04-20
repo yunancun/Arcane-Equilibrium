@@ -1069,6 +1069,22 @@ impl TickPipeline {
                                     em,
                                 );
 
+                                // EDGE-P2-3 Phase 1B-4.2: router classified
+                                // PostOnly limit intent as "accepted pending".
+                                // Enqueue into paper resting queue; later ticks
+                                // (sweep_resting_limit_orders_for_symbol below)
+                                // convert to fills when price touches/crosses
+                                // the limit. fill=None here so the legacy
+                                // apply_fill path is naturally skipped.
+                                // EDGE-P2-3 Phase 1B-4.2：router 將 PostOnly 限價意圖
+                                // 分類為「已接受、待成交」。enqueue 入紙盤掛單隊列；
+                                // 後續 tick 由下方 sweep 轉為成交。此處 fill=None
+                                // 自然跳過 apply_fill 路徑。
+                                if let Some(draft) = result.resting_order.clone() {
+                                    self.paper_state.enqueue_resting_limit_order(draft);
+                                    continue;
+                                }
+
                                 if let Some(mut fill) = result.fill {
                                     if let Some(ref icache) = self.instrument_cache {
                                         if let Some(spec) = icache.get(&intent.symbol) {
@@ -1267,6 +1283,123 @@ impl TickPipeline {
                         pending_strategy_closes.push((symbol.clone(), reason.clone()));
                     }
                 } // end match
+            }
+        }
+
+        // ═══════════════════════════════════════════════════════════════════════
+        // EDGE-P2-3 Phase 1B-4.2: Paper resting-order sweep — classify any
+        // PostOnly limit orders in `paper_state.resting_limit_orders[event.symbol]`
+        // against the current tick. True cross → 100% fill; touch → 50% fill
+        // via deterministic link-id parity; deadline expired → cancel. Runs
+        // only in Paper mode (exchange path has no resting queue — the exchange
+        // holds the book). Sweep owns `apply_fill` internally so `on_tick` only
+        // emits DB `Fill` rows + stamps entry_context_id for fresh opens.
+        //
+        // Strategy.on_fill is deliberately NOT called here — grid_trading reacts
+        // to closes via `on_close_confirmed` at line ~1403 and inventory drift
+        // is already handled at that layer. Follow-up: 1B-4.3+ may thread the
+        // strategy handle through sweep if maker-specific strategies need
+        // per-fill hooks (funding drag / rung replenishment).
+        //
+        // EDGE-P2-3 Phase 1B-4.2：紙盤掛單 sweep — 對 event.symbol 隊列的每筆
+        // 掛單依當前 tick 分類。真實穿越 → 100% 成交；碰觸 → 以 link-id 奇偶性
+        // 50% 成交；到期 → 取消。僅在紙盤模式執行（交易所由 Bybit 委託簿承擔）。
+        // sweep 內部自行 apply_fill，on_tick 僅負責發 Fill 列與開倉打
+        // entry_context_id。strategy.on_fill 刻意不在此處呼叫 — grid 透過
+        // on_close_confirmed 反應已足夠；1B-4.3+ 再視需要接線。
+        // ═══════════════════════════════════════════════════════════════════════
+        if !is_exchange_mode {
+            let maker_fee_rate = self.intent_processor.maker_fee_rate(&event.symbol);
+            let resting_events = self.paper_state.sweep_resting_limit_orders_for_symbol(
+                &event.symbol,
+                event.last_price,
+                event.ts_ms,
+                maker_fee_rate,
+            );
+            for ev in resting_events {
+                match ev {
+                    crate::paper_state::RestingFillEvent::Filled {
+                        order,
+                        fill_qty,
+                        fill_price,
+                        fee,
+                        realized_pnl,
+                        mid_price_at_fill: _,
+                        true_cross: _,
+                    } => {
+                        self.stats.total_fills += 1;
+                        // Open-path detection mirrors the line ~1108 pattern:
+                        // fresh opens write `entry_context_id`; closes already
+                        // cleared it via apply_fill's remove-position branch.
+                        // 開倉路徑偵測與 line ~1108 一致：開新倉打
+                        // entry_context_id；平倉已由 apply_fill 清除。
+                        let opened_fresh = realized_pnl == 0.0
+                            && self
+                                .paper_state
+                                .get_position(&order.symbol)
+                                .map(|p| p.qty - fill_qty < 1e-12 && p.is_long == order.is_long)
+                                .unwrap_or(false);
+                        if opened_fresh && !order.context_id.is_empty() {
+                            self.paper_state
+                                .set_entry_context_id(&order.symbol, &order.context_id);
+                        }
+                        if realized_pnl != 0.0 {
+                            self.dynamic_risk_sizer.record_closed_trade(realized_pnl);
+                        }
+                        push_capped(
+                            &mut self.recent_fills,
+                            TimestampedFill {
+                                timestamp_ms: event.ts_ms,
+                                symbol: order.symbol.clone(),
+                                is_long: order.is_long,
+                                qty: fill_qty,
+                                price: fill_price,
+                                fee,
+                                realized_pnl,
+                                strategy: order.strategy.clone(),
+                            },
+                            50,
+                        );
+                        if let Some(ref tx) = self.trading_tx {
+                            let _ = tx.try_send(crate::database::TradingMsg::Fill {
+                                fill_id: make_fill_id(em, &order.symbol, event.ts_ms),
+                                ts_ms: event.ts_ms,
+                                order_id: order.order_link_id.clone(),
+                                symbol: order.symbol.clone(),
+                                side: if order.is_long { "Buy".into() } else { "Sell".into() },
+                                qty: fill_qty,
+                                price: fill_price,
+                                fee,
+                                fee_rate: maker_fee_rate,
+                                realized_pnl,
+                                strategy_name: order.strategy.clone(),
+                                // Maker fill context = order's enqueue-time id;
+                                // entry_context_id left empty (open-path, matches
+                                // line ~1182 exchange-path convention).
+                                // Maker 成交 context = 掛單入隊 id；
+                                // entry_context_id 留空（開倉路徑）。
+                                context_id: if order.context_id.is_empty() {
+                                    make_context_id(em, &order.symbol, event.ts_ms)
+                                } else {
+                                    order.context_id.clone()
+                                },
+                                entry_context_id: String::new(),
+                                engine_mode: em.to_string(),
+                            });
+                        }
+                    }
+                    crate::paper_state::RestingFillEvent::Timedout { order } => {
+                        // Timeout draining — no Fill row, just log for observability.
+                        // Counter-worthy but 1B-5 owns the maker_net_edge metric.
+                        // 到期 drain — 無 Fill 列，僅 log 供觀察；計數由 1B-5 接手。
+                        warn!(
+                            symbol = %order.symbol,
+                            order_link_id = %order.order_link_id,
+                            strategy = %order.strategy,
+                            "paper maker timeout / 紙盤掛單到期 cancel"
+                        );
+                    }
+                }
             }
         }
 

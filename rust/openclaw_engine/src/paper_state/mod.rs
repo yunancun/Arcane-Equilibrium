@@ -65,7 +65,7 @@ pub mod snapshots;
 pub use containers::{PaperPosition, PositionExitSnapshot};
 pub use dust_gate::TriageOutcome;
 pub use owner_attribution::{RetriageOutcome, SYNTHETIC_OWNER_LABELS};
-pub use resting_orders::RestingLimitOrder;
+pub use resting_orders::{RestingFillEvent, RestingLimitOrder, RestingSweepAction};
 pub use snapshots::{PaperStateSnapshot, PositionSnapshot};
 
 use openclaw_core::stop_manager::StopConfig;
