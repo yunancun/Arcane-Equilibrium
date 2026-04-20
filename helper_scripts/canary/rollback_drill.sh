@@ -23,6 +23,20 @@ LOG_FILE="${PROJECT_ROOT}/trading_services/rollback_drill_$(date +%Y%m%d_%H%M%S)
 DRY_RUN=false
 SLA_SECONDS=600  # 10 minutes
 
+# Platform guard: this drill uses systemctl (Linux-only). On macOS, the
+# service-management steps are logged as skipped because launchd plists are
+# not wired up yet (deferred to M5 Ultra prod migration). The rest of the
+# drill (git checks, snapshot staleness, API health) still runs so operators
+# can rehearse the non-service parts on Mac dev.
+# 平台守衛：本演練使用 systemctl（Linux 專屬）。macOS 上服務管理步驟記為 skip，
+# 因為 launchd plist 尚未建立（延後到 M5 Ultra prod 遷移處理）。其他步驟
+# （git 檢查 / snapshot 過期 / API 健康）在 Mac 上照樣跑，供 operator
+# 在 dev 機上演練非服務部分。
+IS_MAC=0
+if [[ "$(uname -s)" == "Darwin" ]]; then
+    IS_MAC=1
+fi
+
 if [[ "${1:-}" == "--dry-run" ]]; then
     DRY_RUN=true
     echo "=== DRY RUN MODE — no actual service changes ==="
@@ -88,6 +102,8 @@ step "2. Stop Rust engine / 停止 Rust 引擎"
 
 if [[ "$DRY_RUN" == "true" ]]; then
     log "[DRY RUN] Would stop openclaw-engine service"
+elif [[ "$IS_MAC" == "1" ]]; then
+    log "ℹ macOS: skipping systemctl stop (launchd plist not wired — deferred to M5 Ultra prod migration)"
 else
     if systemctl is-active --quiet openclaw-engine.service 2>/dev/null; then
         sudo systemctl stop openclaw-engine.service
@@ -107,6 +123,8 @@ step "3. Stop shadow process (if running) / 停止影子進程"
 
 if [[ "$DRY_RUN" == "true" ]]; then
     log "[DRY RUN] Would stop openclaw-shadow service"
+elif [[ "$IS_MAC" == "1" ]]; then
+    log "ℹ macOS: skipping systemctl stop (launchd plist not wired — deferred to M5 Ultra prod migration)"
 else
     if systemctl is-active --quiet openclaw-shadow.service 2>/dev/null; then
         sudo systemctl stop openclaw-shadow.service
@@ -186,6 +204,8 @@ step "7. Restart Python services / 重啟 Python 服務"
 
 if [[ "$DRY_RUN" == "true" ]]; then
     log "[DRY RUN] Would restart openclaw-api service"
+elif [[ "$IS_MAC" == "1" ]]; then
+    log "ℹ macOS: skipping systemctl restart (launchd plist not wired — deferred to M5 Ultra prod migration)"
 else
     if systemctl is-active --quiet openclaw-api.service 2>/dev/null; then
         sudo systemctl restart openclaw-api.service
