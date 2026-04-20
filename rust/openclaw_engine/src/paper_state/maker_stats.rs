@@ -51,9 +51,19 @@ pub struct MakerStatsCounters {
     /// Orders drained by deadline without any fill.
     /// 到期未成交、被 sweep 清出隊列的掛單數。
     pub timedout: u64,
-    /// Running sum of signed net edge in bps across valid fills.
-    /// 有效成交的 net edge（bps）累加和。
+    /// Running sum of signed net edge in bps across valid fills. 1B-5 FUP-3:
+    /// accumulated via Kahan summation (`sum_kahan_c` is the compensation
+    /// term). Preserves low-order bits when adding small net_edge_bps values
+    /// (±O(10⁰) bps) into a large running sum across thousands of fills.
+    /// 有效成交的 net edge（bps）累加和。1B-5 FUP-3：以 Kahan summation 累加
+    /// （`sum_kahan_c` 為補償項），於數千次成交的大總和中保留小增量精度。
     pub sum_net_edge_bps: f64,
+    /// 1B-5 FUP-3: Kahan compensation term for `sum_net_edge_bps`. Should
+    /// never be read by callers — exists purely to make the next add more
+    /// precise. Keep `Default` so fresh instances start at 0.0.
+    /// 1B-5 FUP-3：`sum_net_edge_bps` 的 Kahan 補償項。對外不應讀取，僅服務
+    /// 於下一次加法精度。預設 0.0 與 `MakerStatsCounters::default()` 相容。
+    pub sum_kahan_c: f64,
     /// Number of intents that skipped enqueue because the KPI gate reported
     /// `Degraded` — they silently fell back to market fill. Accumulated by
     /// caller (router) on gate rejection, not by the sweep path.
@@ -74,6 +84,23 @@ pub struct MakerStatsCounters {
 }
 
 impl MakerStatsCounters {
+    /// 1B-5 FUP-3: Kahan-style compensated add into `sum_net_edge_bps`.
+    /// Preserves ≈1 ulp of precision per addition versus naive
+    /// `sum += value`, which loses the low-order bits whenever the running
+    /// sum dwarfs the increment — a common regime for `net_edge_bps` since
+    /// individual fills typically report ±O(10⁰) bps while aggregate sums
+    /// grow to O(10³) or larger across thousands of fills.
+    /// 1B-5 FUP-3：Kahan 補償加法，單次加法保留約 1 ulp 精度；避免「大總和
+    /// 蓋掉小增量」低位被截斷（net_edge_bps 單筆 ±O(1e0) bps，總和易長到
+    /// O(1e3)+，正好踩中精度陷阱）。
+    #[inline]
+    fn kahan_add(&mut self, value: f64) {
+        let y = value - self.sum_kahan_c;
+        let t = self.sum_net_edge_bps + y;
+        self.sum_kahan_c = (t - self.sum_net_edge_bps) - y;
+        self.sum_net_edge_bps = t;
+    }
+
     /// Total filled = full cross + partial (coin-flip). Used as edge-mean denom.
     /// 全部成交 = 真實穿越 + 碰觸硬幣。
     pub fn filled_total(&self) -> u64 {
@@ -211,8 +238,11 @@ impl MakerStats {
         if let Some(net_bps) =
             compute_net_edge_bps(is_long, mid_price_at_submit, mid_price_at_fill, qty, fill_price, fee)
         {
-            self.aggregate.sum_net_edge_bps += net_bps;
-            self.entry(symbol).sum_net_edge_bps += net_bps;
+            // 1B-5 FUP-3: Kahan-compensated add on both scopes. The helper
+            // mutates `sum_net_edge_bps` + `sum_kahan_c` together.
+            // 1B-5 FUP-3：兩個 scope 皆走 Kahan 補償加法。
+            self.aggregate.kahan_add(net_bps);
+            self.entry(symbol).kahan_add(net_bps);
         }
         // 1B-5 FUP-2: stamp last-terminal on both scopes so the staleness gate
         // can decay a chronically idle Degraded verdict back to Cold.
@@ -610,6 +640,64 @@ mod tests {
         }
         let cfg = cfg_default();
         assert_eq!(s.status_for("BTCUSDT", &cfg, now), MakerKpiStatus::Healthy);
+    }
+
+    /// 1B-5 FUP-3: Kahan-compensated sum must preserve more precision than
+    /// a naive `+=` when the running sum grows large relative to the
+    /// increment. We exercise `kahan_add` directly against a naive `+=`
+    /// control using bit-identical increments so the comparison isolates
+    /// the accumulation strategy (not rounding in `compute_net_edge_bps`).
+    /// 1B-5 FUP-3：Kahan 補償在「大總和 + 小增量」情境下保留多位精度；
+    /// 直接對 `kahan_add` 與 naive `+=` 餵 bit-identical 增量，隔離出累加策略
+    /// 的差異（不摻入 `compute_net_edge_bps` 的捨入）。
+    #[test]
+    fn kahan_sum_preserves_precision_vs_naive() {
+        // One large seed + 10_000 tiny additions. Exact math:
+        //   1e4 + 10_000 × 1e-8 = 10_000.0001
+        // Naive f64 `+=` loses the low-order bits each add (the ulp of 1e4 is
+        // ~2e-12, far larger than 1e-8 once accumulated), so the sum drifts.
+        // Kahan keeps the compensation term and recovers ≈ full precision.
+        let mut kahan = MakerStatsCounters::default();
+        kahan.kahan_add(1e4);
+        for _ in 0..10_000 {
+            kahan.kahan_add(1e-8);
+        }
+
+        let mut naive: f64 = 1e4;
+        for _ in 0..10_000 {
+            naive += 1e-8;
+        }
+
+        let expected = 1e4 + 1e-4;
+        let kahan_err = (kahan.sum_net_edge_bps - expected).abs();
+        let naive_err = (naive - expected).abs();
+
+        assert!(
+            kahan_err <= naive_err,
+            "Kahan err {kahan_err} must be ≤ naive err {naive_err}"
+        );
+        // Kahan should land within a few ulps of the exact sum; naive
+        // typically drifts by ~1e-4 (essentially losing the entire tail sum).
+        assert!(kahan_err < 1e-12, "Kahan err {kahan_err} should be ≤ 1e-12");
+        assert!(
+            naive_err > 1e-9,
+            "naive err {naive_err} should visibly drift (control sanity)"
+        );
+    }
+
+    #[test]
+    fn kahan_sum_matches_reset_semantics() {
+        // Default `MakerStatsCounters` has `sum_net_edge_bps = 0.0` and
+        // `sum_kahan_c = 0.0` — clearing via `MakerStats::default()` must
+        // zero both halves so no compensation bits survive reset.
+        // default() 必須同時清零 sum + compensation，避免殘留。
+        let mut s = MakerStats::default();
+        s.record_fill("BTCUSDT", true, 100.0, 101.0, 1.0, 101.0, 0.0, true, NOW_MS_FRESH);
+        assert!(s.aggregate.sum_net_edge_bps != 0.0);
+        // Reset by replacement (mimics FUP-1 clear path).
+        s = MakerStats::default();
+        assert_eq!(s.aggregate.sum_net_edge_bps, 0.0);
+        assert_eq!(s.aggregate.sum_kahan_c, 0.0);
     }
 
     #[test]

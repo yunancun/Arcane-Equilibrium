@@ -1697,20 +1697,33 @@ pub(crate) fn classify_pending_sweep(po: &PendingOrder, elapsed_ms: u64) -> Pend
 /// restart + WS lag). Fail-soft: any API error is logged and swallowed — the
 /// tracker row has already been removed by the caller, so a racing fill after
 /// a failed cancel lands in the position reconciler's normal recovery path.
+///
+/// 1B-5 FUP-3: routes through the shared `cancel_by_link_id_raw` helper in
+/// `order_manager` so the Bybit endpoint / body / success-log fields stay
+/// aligned with `OrderManager::cancel_order_by_link_id` (the typed caller).
+/// The fail-soft warn branch remains local because this sweep path swallows
+/// the error instead of surfacing a typed response to a caller.
+///
 /// EDGE-P2-3 Phase 1B-3.2：非阻塞 REST 取消超時的 PostOnly 掛單。
 /// 使用客戶端 orderLinkId（跨重啟/WS 延遲冪等）。fail-soft：API 失敗僅記 log 不回退；
 /// 調用端已移除 tracker，若取消失敗後 race 到成交，走對帳器常規恢復路徑。
+///
+/// 1B-5 FUP-3：改走 `order_manager::cancel_by_link_id_raw` 共用輔助，
+/// 使 endpoint / body / 成功日誌欄位與 `OrderManager::cancel_order_by_link_id`
+/// 對齊。fail-soft warn 分支仍保留於此（本路徑吞錯，不回傳類型化結果）。
 async fn cancel_resting_maker_order(
     client: std::sync::Arc<crate::bybit_rest_client::BybitRestClient>,
     symbol: String,
     order_link_id: String,
 ) {
-    let body = serde_json::json!({
-        "category": crate::order_manager::OrderCategory::Linear.as_str(),
-        "symbol": symbol,
-        "orderLinkId": order_link_id,
-    });
-    match client.post_checked("/v5/order/cancel", &body).await {
+    match crate::order_manager::cancel_by_link_id_raw(
+        &client,
+        crate::order_manager::OrderCategory::Linear,
+        &symbol,
+        &order_link_id,
+    )
+    .await
+    {
         Ok(_) => {
             info!(
                 symbol = %symbol,
