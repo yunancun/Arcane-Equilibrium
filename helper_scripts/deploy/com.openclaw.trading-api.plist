@@ -4,18 +4,22 @@
   MODULE_NOTE (中文):
     macOS launchd 配置模板 — OpenClaw Trading API 服务。
     对应 systemd 的 openclaw-trading-api.service，功能完全等价。
-    使用 __HOME__ 占位符，安装时替换为实际用户 home 目录。
-    放置于 ~/Library/LaunchAgents/ 实现开机自启。
+    使用 __BASE__（repo 根）+ __HOME__（家目錄）雙占位符，安裝時 sed 替換。
+    repo 若部署於非 $HOME 路徑（如 /Users/ncyu/Documents/Projects/TradeBot），
+    __BASE__ 可設為該絕對路徑。放置於 ~/Library/LaunchAgents/ 實現開機自啟。
 
   MODULE_NOTE (English):
     macOS launchd plist template — OpenClaw Trading API service.
     Equivalent to the systemd openclaw-trading-api.service unit.
-    Uses __HOME__ placeholder; replace with actual home path on install.
+    Uses __BASE__ (repo root) + __HOME__ (user home) placeholders.
     Place in ~/Library/LaunchAgents/ for auto-start on login.
 
-  安装步骤 / Installation:
+  安裝步驟 / Installation:
     1. cp com.openclaw.trading-api.plist ~/Library/LaunchAgents/
-    2. sed -i '' "s|__HOME__|$HOME|g" ~/Library/LaunchAgents/com.openclaw.trading-api.plist
+    2. sed -i '' "s|__BASE__|$OPENCLAW_BASE_DIR|g" \
+           ~/Library/LaunchAgents/com.openclaw.trading-api.plist
+       sed -i '' "s|__HOME__|$HOME|g" \
+           ~/Library/LaunchAgents/com.openclaw.trading-api.plist
     3. mkdir -p ~/Library/Logs/openclaw
     4. launchctl load ~/Library/LaunchAgents/com.openclaw.trading-api.plist
 
@@ -39,7 +43,7 @@
        对应 systemd: WorkingDirectory=
        Equivalent to systemd WorkingDirectory= -->
   <key>WorkingDirectory</key>
-  <string>__HOME__/BybitOpenClaw/srv/program_code/exchange_connectors/bybit_connector/control_api_v1</string>
+  <string>__BASE__/program_code/exchange_connectors/bybit_connector/control_api_v1</string>
 
   <!-- 启动命令 / Start command
        对应 systemd: ExecStart=
@@ -47,7 +51,7 @@
        Uses full venv path to ensure correct Python environment -->
   <key>ProgramArguments</key>
   <array>
-    <string>__HOME__/BybitOpenClaw/srv/program_code/exchange_connectors/bybit_connector/control_api_v1/.venv/bin/uvicorn</string>
+    <string>__BASE__/program_code/exchange_connectors/bybit_connector/control_api_v1/.venv/bin/uvicorn</string>
     <string>app.main:app</string>
     <string>--host</string>
     <string>0.0.0.0</string>

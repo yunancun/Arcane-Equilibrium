@@ -17,19 +17,22 @@ Legacy flat script paths may remain during transition, but should be treated as 
 
 ## 2. Canonical root
 
-Canonical local repo root:
+Repo root is resolved via the `OPENCLAW_BASE_DIR` environment variable.
+Shell scripts, Rust, and Python all consume this env var (see CLAUDE.md §七).
 
-`/home/ncyu/BybitOpenClaw`
+Default values per platform:
 
-Current working repo-local source root in this clone:
+| Platform | `OPENCLAW_BASE_DIR` default | Compatibility alias |
+|---|---|---|
+| Linux (default) | `$HOME/BybitOpenClaw/srv` | `/home/ncyu/srv` (symlink, legacy) |
+| macOS | user-chosen absolute path (e.g. `/Users/ncyu/Documents/Projects/TradeBot`) | none |
 
-`/home/ncyu/BybitOpenClaw/srv`
+New code must **not** introduce fresh hardcoded absolute-path literals — always
+go through `OPENCLAW_BASE_DIR` (or `Path(__file__).parent.resolve()` for
+repo-local resolution in tests).
 
-Compatibility access path:
-
-`/home/ncyu/srv`
-
-The compatibility path exists for old tooling and operator habits, but is **not** the preferred design target for new code.
+The Linux `/home/ncyu/srv` compatibility symlink exists for old tooling and
+operator habits, but is **not** the preferred design target for new code.
 
 ---
 

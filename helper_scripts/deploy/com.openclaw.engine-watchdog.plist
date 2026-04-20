@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  MODULE_NOTE (中文):
+    macOS launchd 配置模板 — engine_watchdog 存活監控 daemon。
+    對應 Linux 上 openclaw-watchdog.service；監控
+    $OPENCLAW_DATA_DIR/pipeline_snapshot.json 過期，
+    連續 3 次 stale 觸發 ENGINE_CRASH 事件 + 3-strike 回滾。
+    用 __BASE__（repo 根）+ __HOME__（用戶家目錄）雙占位符。
+    放置於 ~/Library/LaunchAgents/ 實現登入自啟。
+
+  MODULE_NOTE (English):
+    macOS launchd plist template — engine_watchdog liveness daemon.
+    Equivalent to Linux openclaw-watchdog.service; monitors pipeline snapshot
+    staleness, triggers fallback on crash, 3-strike runtime rollback.
+    Uses __BASE__ (repo root) + __HOME__ (user home) placeholders.
+
+  安裝步驟 / Installation:
+    1. cp com.openclaw.engine-watchdog.plist ~/Library/LaunchAgents/
+    2. sed -i '' "s|__BASE__|$OPENCLAW_BASE_DIR|g" \
+           ~/Library/LaunchAgents/com.openclaw.engine-watchdog.plist
+       sed -i '' "s|__HOME__|$HOME|g" \
+           ~/Library/LaunchAgents/com.openclaw.engine-watchdog.plist
+    3. mkdir -p ~/Library/Logs/openclaw
+    4. launchctl load ~/Library/LaunchAgents/com.openclaw.engine-watchdog.plist
+
+  前置條件 / Prerequisites:
+    - Python 3.12+ 在 PATH 上可訪問
+    - com.openclaw.engine 已載入（watchdog 觀察其 pipeline_snapshot）
+-->
+<plist version="1.0">
+<dict>
+
+  <!-- 服務標識 / Service identifier -->
+  <key>Label</key>
+  <string>com.openclaw.engine-watchdog</string>
+
+  <!-- 工作目錄 / Working directory -->
+  <key>WorkingDirectory</key>
+  <string>__BASE__</string>
+
+  <!-- 啟動命令 / Start command
+       參數對應 restart_all.sh:226 的 wait_and_verify() 用法 -->
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/bin/env</string>
+    <string>python3</string>
+    <string>__BASE__/helper_scripts/canary/engine_watchdog.py</string>
+    <string>--data-dir</string>
+    <string>__HOME__/.openclaw_runtime</string>
+    <string>--stale-threshold</string>
+    <string>45</string>
+    <string>--grace-period</string>
+    <string>120</string>
+    <string>--poll-interval</string>
+    <string>1</string>
+  </array>
+
+  <!-- 自動重啟 / Auto-restart on crash -->
+  <key>KeepAlive</key>
+  <true/>
+
+  <!-- 重啟間隔 / Restart throttle -->
+  <key>ThrottleInterval</key>
+  <integer>5</integer>
+
+  <!-- 停止超時 / Stop timeout
+       watchdog 內部有 SIGTERM → cleanup 邏輯，給 10s 足夠 -->
+  <key>ExitTimeOut</key>
+  <integer>10</integer>
+
+  <!-- 環境變量 / Environment variables -->
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>HOME</key>
+    <string>__HOME__</string>
+
+    <key>TMPDIR</key>
+    <string>/tmp</string>
+
+    <key>PATH</key>
+    <string>__HOME__/.local/bin:/usr/local/bin:/usr/bin:/bin</string>
+
+    <!-- Runtime 目錄 / Runtime dir -->
+    <key>OPENCLAW_DATA_DIR</key>
+    <string>__HOME__/.openclaw_runtime</string>
+
+    <!-- Repo 根（watchdog import 路徑解析）-->
+    <key>OPENCLAW_BASE_DIR</key>
+    <string>__BASE__</string>
+  </dict>
+
+  <!-- 標準輸出日誌 / Stdout log -->
+  <key>StandardOutPath</key>
+  <string>__HOME__/Library/Logs/openclaw/engine-watchdog-stdout.log</string>
+
+  <!-- 標準錯誤日誌 / Stderr log -->
+  <key>StandardErrorPath</key>
+  <string>__HOME__/Library/Logs/openclaw/engine-watchdog-stderr.log</string>
+
+  <!-- 登入時自動運行 / Run at load -->
+  <key>RunAtLoad</key>
+  <true/>
+
+</dict>
+</plist>

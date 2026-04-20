@@ -191,28 +191,62 @@ crontab -e
 
 ### plist 文件位置 / Plist File Location
 
+倉庫提供 4 個 launchd plist 範本（對應 Linux systemd 單元）：
+
 ```
-~/Library/LaunchAgents/com.openclaw.trading-api.plist
-~/Library/LaunchAgents/com.openclaw.gateway.plist
+~/Library/LaunchAgents/com.openclaw.trading-api.plist       # FastAPI uvicorn
+~/Library/LaunchAgents/com.openclaw.gateway.plist           # Node.js OpenClaw Gateway
+~/Library/LaunchAgents/com.openclaw.engine.plist            # Rust openclaw-engine 主進程
+~/Library/LaunchAgents/com.openclaw.engine-watchdog.plist   # Python 存活監控
 ```
 
-### 安装 / Installation
+### 占位符 / Placeholders
 
-1. 复制 plist 模板到 LaunchAgents：
+plist 範本使用兩個占位符，安裝時用 `sed` 替換為實際絕對路徑：
+
+| 占位符 | 含義 | 替換來源 |
+|---|---|---|
+| `__HOME__` | 用戶家目錄（log 路徑、PATH） | `$HOME`（e.g. `/Users/ncyu`） |
+| `__BASE__` | repo 根目錄（binary、WorkingDirectory） | `$OPENCLAW_BASE_DIR`（e.g. `/Users/ncyu/Documents/Projects/TradeBot`） |
+
+Gateway plist 只用 `__HOME__`（Node 模組裝在 npm-global，不參考 repo 根）。
+
+### 安裝 / Installation
+
+1. 設定 `OPENCLAW_BASE_DIR` 指向 repo 絕對路徑（若尚未設）：
 
 ```bash
-# 从本仓库复制模板
-cp helper_scripts/deploy/com.openclaw.trading-api.plist ~/Library/LaunchAgents/
-
-# 编辑 plist，替换路径（如果 $HOME 不是 /Users/ncyu）
-# 参见下方 plist 模板中的 __HOME__ 占位符
-sed -i '' "s|__HOME__|$HOME|g" ~/Library/LaunchAgents/com.openclaw.trading-api.plist
+export OPENCLAW_BASE_DIR="$(pwd)"  # 在 repo 根執行
 ```
 
-2. 加载服务：
+2. 複製 plist 範本並 sed 替換占位符：
 
 ```bash
+mkdir -p ~/Library/LaunchAgents ~/Library/Logs/openclaw
+
+for plist in com.openclaw.trading-api com.openclaw.gateway \
+             com.openclaw.engine com.openclaw.engine-watchdog; do
+  cp "helper_scripts/deploy/${plist}.plist" ~/Library/LaunchAgents/
+  sed -i '' "s|__BASE__|$OPENCLAW_BASE_DIR|g" ~/Library/LaunchAgents/${plist}.plist
+  sed -i '' "s|__HOME__|$HOME|g" ~/Library/LaunchAgents/${plist}.plist
+done
+```
+
+3. 載入服務（依賴順序：engine → watchdog → api → gateway）：
+
+```bash
+launchctl load ~/Library/LaunchAgents/com.openclaw.engine.plist
+launchctl load ~/Library/LaunchAgents/com.openclaw.engine-watchdog.plist
 launchctl load ~/Library/LaunchAgents/com.openclaw.trading-api.plist
+launchctl load ~/Library/LaunchAgents/com.openclaw.gateway.plist
+```
+
+**注意**：IPC secret / DB URL 等機敏值**不要**寫在 plist 裡，用 `launchctl setenv` 注入：
+
+```bash
+launchctl setenv OPENCLAW_IPC_SECRET "$(cat $OPENCLAW_SECRETS_ROOT/environment_files/ipc_secret.txt)"
+launchctl setenv OPENCLAW_DATABASE_URL "postgresql://redacted@127.0.0.1:5432/trading_ai"
+# setenv 後需 unload + load 讓 agent 重讀環境
 ```
 
 ### 启动 / 停止 / 重启 / Start / Stop / Restart
