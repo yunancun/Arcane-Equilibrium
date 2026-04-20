@@ -3,7 +3,7 @@
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
 > 最後更新：2026-04-20（PYO3-ELIMINATE-1 Phase 3：openclaw_pyo3 crate + build pipeline 歸零）
 
-### PYO3-ELIMINATE-1 Phase 3：drop openclaw_pyo3 crate + build pipeline（2026-04-20 · commit 待填）
+### PYO3-ELIMINATE-1 Phase 3：drop openclaw_pyo3 crate + build pipeline（2026-04-20 · commit `9b691a0`）
 
 **目標**：消除 PyO3 cdylib 跨平台耦合最後一塊 — 在 Phase 1（刪 ContextDistiller/HedgingEngine 513 LOC）+ Phase 2（`BybitClient` 3 call sites 遷 httpx）後，拆 crate + 清工具鏈讓 `rg '#\[pyclass\]|from openclaw_core'` 歸零、Mac `cargo build` 只產 binary 無 .so/.dylib。
 

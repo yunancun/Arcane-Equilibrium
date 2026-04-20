@@ -385,7 +385,7 @@ git status && git log --oneline -5
 - [x] 修 `helper_scripts/restart_all.sh --rebuild` 移除 `rebuild_pyo3()` function + 呼叫（只剩 `cargo build --release -p openclaw_engine`）
 - [x] 更新 `README.md`（架構圖 4→3 crates、亮点、build 表移除、restart_all 旗標說明）+ `SCRIPT_INDEX.md` + CLAUDE.md §九 singleton 表（`_RUST_BYBIT_CLIENT` → `_BYBIT_CLIENT`）
 - [x] 驗證：`cargo build --release -p openclaw_engine` 11.14s 綠 + `cargo test --lib` 1791 passed / 0 failed + pytest bybit_rest_client 58 passed / 5 skipped
-- [ ] commit：`chore(rust): PYO3-ELIMINATE-1 Phase 3 — drop openclaw_pyo3 crate + build pipeline`
+- [x] commit `9b691a0`：`chore(rust): PYO3-ELIMINATE-1 Phase 3 — drop openclaw_pyo3 crate + build pipeline`
 
 **完成標準**：
 - `cargo.toml` 零 pyo3 依賴
