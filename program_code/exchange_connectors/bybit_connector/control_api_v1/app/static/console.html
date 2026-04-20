@@ -386,8 +386,8 @@ async function refreshSidebar() {
     document.getElementById('s-live-mode-detail').textContent = '';
   }
 
-  // Live balance from /api/v1/live/balance (PyO3 BybitClient — real exchange data)
-  // 實盤餘額來自 /api/v1/live/balance（PyO3 BybitClient — 真實交易所數據）
+  // Live balance from /api/v1/live/balance (httpx BybitClient — real exchange data)
+  // 實盤餘額來自 /api/v1/live/balance（httpx BybitClient — 真實交易所數據）
   try {
     const bd = await api('/api/v1/live/balance');
     if (bd && bd.data && bd.data.available !== false) {

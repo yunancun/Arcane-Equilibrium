@@ -195,7 +195,7 @@ async def _ipc_command(method: str, params: dict | None = None) -> dict[str, Any
 
 def _get_rust_client_safe():
     """
-    Return a PyO3 BybitClient using the live API key slot if configured, else demo.
+    Return an httpx BybitClient using the live API key slot if configured, else demo.
     Live tab 始終使用 live 槽 API key（若已配置），與引擎狀態無關。
 
     - live slot has api_key → use live slot (environment from bybit_endpoint)
@@ -891,9 +891,9 @@ async def revoke_execution_authority(
 # Live account data — balance / positions / orders
 # 實盤帳戶數據端點 — 餘額 / 倉位 / 掛單
 #
-# Primary: Rust PyO3 BybitClient (real exchange data, same client as demo).
+# Primary: httpx BybitClient (real exchange data, same client as demo).
 # Fallback: IPC get_paper_state (engine internal state).
-# 主路徑：Rust PyO3 BybitClient（真實交易所數據，同 demo 使用相同客戶端）。
+# 主路徑：httpx BybitClient（真實交易所數據，同 demo 使用相同客戶端）。
 # 降級：IPC get_paper_state（引擎內部狀態）。
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -904,10 +904,10 @@ async def get_live_balance(
 ):
     """
     GET /api/v1/live/balance
-    Primary: real Bybit account balance via Rust PyO3 client (demo or live key).
+    Primary: real Bybit account balance via httpx BybitClient (demo or live key).
     Fallback: engine internal balance + bybit_sync_balance.
 
-    主路徑：Rust PyO3 client 獲取真實 Bybit 帳戶餘額（demo 或 live key 均可）。
+    主路徑：httpx BybitClient 獲取真實 Bybit 帳戶餘額（demo 或 live key 均可）。
     降級：引擎內部餘額 + bybit_sync_balance。
     """
     # Attach per-engine session baseline (initial/peak/realized/fees) from
@@ -960,10 +960,10 @@ async def get_live_positions(
 ):
     """
     GET /api/v1/live/positions
-    Primary: real Bybit positions via Rust PyO3 client.
+    Primary: real Bybit positions via httpx BybitClient.
     Fallback: engine-tracked positions (internal state).
 
-    主路徑：Rust PyO3 client 獲取真實 Bybit 倉位。
+    主路徑：httpx BybitClient 獲取真實 Bybit 倉位。
     降級：引擎追蹤倉位（內部狀態）。
     """
     rc = _get_rust_client_safe()
@@ -997,10 +997,10 @@ async def get_live_orders(
 ):
     """
     GET /api/v1/live/orders
-    Primary: real Bybit active orders via Rust PyO3 client.
+    Primary: real Bybit active orders via httpx BybitClient.
     Fallback: pending-close orders derived from engine position state.
 
-    主路徑：Rust PyO3 client 獲取真實 Bybit 掛單。
+    主路徑：httpx BybitClient 獲取真實 Bybit 掛單。
     降級：從引擎倉位狀態派生 pending_close 訂單。
     """
     rc = _get_rust_client_safe()
@@ -1082,7 +1082,7 @@ async def get_live_fills(
                 db_pool.put_conn(conn)
             except Exception:
                 pass
-    # Bybit API via PyO3 (closedPnl from exchange).
+    # Bybit API via httpx BybitClient (closedPnl from exchange).
     # Bybit API（closedPnl 來自交易所）。
     rc = _get_rust_client_safe()
     if rc is not None:

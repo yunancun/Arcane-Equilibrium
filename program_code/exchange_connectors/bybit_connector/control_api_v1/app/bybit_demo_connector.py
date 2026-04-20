@@ -8,7 +8,7 @@ MODULE_NOTE (中文):
   - round_price_for_exchange()：按交易所 tickSize 取整價格
 
   BybitDemoConnector 交易類已刪除（DEAD-PY-2）。
-  Demo 帳戶讀取改用 Rust PyO3 BybitClient（只讀）。
+  Demo 帳戶讀取改用 httpx BybitClient（只讀）。
   Demo 訂單執行通過 Rust IPC（openclaw_engine）。
 
 MODULE_NOTE (English):
@@ -17,7 +17,7 @@ MODULE_NOTE (English):
   - round_price_for_exchange(): round price to exchange tickSize precision
 
   BybitDemoConnector trading class deleted (DEAD-PY-2).
-  Demo account reads use Rust PyO3 BybitClient (read-only).
+  Demo account reads use the httpx BybitClient (read-only).
   Demo order execution goes through Rust IPC (openclaw_engine).
 """
 
