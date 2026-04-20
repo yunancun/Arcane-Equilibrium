@@ -336,6 +336,7 @@ impl MakerStats {
 /// funding_drag_threshold）其餘欄位沿用 `impl Default`，與 RiskConfig /
 /// BudgetConfig 模式一致。
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct MakerKpiConfig {
     /// Terminal samples required before the gate evaluates fill_rate / edge.
     /// gate 開始評估前的最少終局樣本數。
@@ -417,6 +418,63 @@ impl Default for MakerKpiConfig {
             stale_window_ms: default_stale_window_ms(),
             funding_drag_threshold: default_funding_drag_threshold(),
         }
+    }
+}
+
+impl MakerKpiConfig {
+    /// EDGE-P2-3 Phase 1B-5 FUP-4: validate invariants so `ConfigStore::apply_patch`
+    /// (which accepts a `FnOnce(&T) -> Result<(), String>` validator) can reject
+    /// bad operator patches atomically without polluting the live snapshot. Mirrors
+    /// the RiskConfig / BudgetConfig validate contract (string error for operator
+    /// readability, no panic). `MakerKpiConfig::default()` MUST satisfy `Ok(())` —
+    /// enforced by `test_maker_kpi_config_validate_default_ok`.
+    ///
+    /// Rules:
+    ///   * `min_fill_rate` ∈ [0.0, 1.0]                — rate is a fraction.
+    ///   * `min_avg_net_edge_bps` ≤ 0.0 or finite      — a positive floor means
+    ///                                                   "demand profit from day 1
+    ///                                                   even in cold-start", which
+    ///                                                   would deadlock the gate;
+    ///                                                   reject >0 explicitly.
+    ///   * `funding_drag_threshold` ≥ 0.0 and finite   — decimal, unsigned semantics
+    ///                                                   (guard checks |rate|).
+    ///                                                   `0.0` disables the guard.
+    ///   * All f64 must be finite (NaN/Inf defeats comparisons silently).
+    /// `stale_window_ms` / `min_samples` are `u64` so non-negative by type; `0`
+    /// has well-defined semantics (disable staleness / evaluate-from-first-sample).
+    ///
+    /// EDGE-P2-3 Phase 1B-5 FUP-4：驗證不變量，供 `ConfigStore::apply_patch`
+    /// 將錯誤 operator 補丁在未汙染 live snapshot 前就拒絕。與 RiskConfig /
+    /// BudgetConfig 的 validate 契約一致（字串錯誤便於 operator 閱讀、不 panic）。
+    /// `MakerKpiConfig::default()` 必須滿足 `Ok(())`。
+    pub fn validate(&self) -> Result<(), String> {
+        if !self.min_fill_rate.is_finite() || !(0.0..=1.0).contains(&self.min_fill_rate) {
+            return Err(format!(
+                "maker_kpi.min_fill_rate must be in [0.0, 1.0] and finite (got {})",
+                self.min_fill_rate
+            ));
+        }
+        if !self.min_avg_net_edge_bps.is_finite() {
+            return Err(format!(
+                "maker_kpi.min_avg_net_edge_bps must be finite (got {})",
+                self.min_avg_net_edge_bps
+            ));
+        }
+        if self.min_avg_net_edge_bps > 0.0 {
+            return Err(format!(
+                "maker_kpi.min_avg_net_edge_bps must be <= 0.0 (a positive floor would \
+                 permanently mark cold-start symbols Degraded and deadlock the gate; got {})",
+                self.min_avg_net_edge_bps
+            ));
+        }
+        if !self.funding_drag_threshold.is_finite() || self.funding_drag_threshold < 0.0 {
+            return Err(format!(
+                "maker_kpi.funding_drag_threshold must be >= 0.0 and finite \
+                 (guard uses |rate|; 0.0 disables; got {})",
+                self.funding_drag_threshold
+            ));
+        }
+        Ok(())
     }
 }
 
