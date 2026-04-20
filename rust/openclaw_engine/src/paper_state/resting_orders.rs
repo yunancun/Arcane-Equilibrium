@@ -248,8 +248,11 @@ impl PaperState {
     /// EDGE-P2-3 Phase 1B-4.1: append a new resting order to the per-symbol
     /// queue. FIFO so queue-position semantics stay intuitive when 1B-4.2
     /// wires touch/cross logic. Returns nothing — enqueue never fails.
+    /// 1B-5: bumps `maker_stats.submitted` on both aggregate and per-symbol.
     /// EDGE-P2-3 Phase 1B-4.1：將新掛單 FIFO append 到 per-symbol 隊列。
+    /// 1B-5：同步累加 `maker_stats.submitted`（aggregate + per-symbol）。
     pub fn enqueue_resting_limit_order(&mut self, order: RestingLimitOrder) {
+        self.maker_stats.record_submit(&order.symbol);
         self.resting_limit_orders
             .entry(order.symbol.clone())
             .or_default()
@@ -277,6 +280,60 @@ impl PaperState {
     /// 單一 symbol 的掛單數量。
     pub fn resting_limit_order_count_for(&self, symbol: &str) -> usize {
         self.resting_limit_orders.get(symbol).map_or(0, |q| q.len())
+    }
+
+    /// EDGE-P2-3 Phase 1B-5: read-only view of maker-order counters (aggregate
+    /// + per-symbol) for operator observability and ML feature extraction.
+    /// EDGE-P2-3 Phase 1B-5：maker 掛單統計的唯讀視圖（aggregate + per-symbol）。
+    pub fn maker_stats(&self) -> &super::MakerStats {
+        &self.maker_stats
+    }
+
+    /// EDGE-P2-3 Phase 1B-5: resolve effective KPI status for `symbol` under
+    /// `cfg`. Router consults this before enqueue — Degraded triggers market
+    /// fallback. Cold (samples < min) is treated as pass at the call site.
+    /// EDGE-P2-3 Phase 1B-5：依 `cfg` 回傳某 symbol 的有效 KPI 狀態。Router
+    /// enqueue 前查此，Degraded → 改走市價；Cold = 允許 enqueue。
+    pub fn maker_kpi_status(
+        &self,
+        symbol: &str,
+        cfg: &super::MakerKpiConfig,
+    ) -> super::MakerKpiStatus {
+        self.maker_stats.status_for(symbol, cfg)
+    }
+
+    /// EDGE-P2-3 Phase 1B-5: counter bump used by router when the gate
+    /// rejected an enqueue — paper-only. Separate from sweep-side counters
+    /// so a reader can distinguish "market fallback triggered by gate" from
+    /// genuine exchange-driven timeouts.
+    /// EDGE-P2-3 Phase 1B-5：router 因 gate 拒絕 enqueue 時累加。與 sweep 端
+    /// 計數分離，便於區分「gate 觸發市價 fallback」與「真實超時」。
+    pub fn record_maker_degraded_fallback(&mut self, symbol: &str) {
+        self.maker_stats.record_degraded_fallback(symbol);
+    }
+
+    /// Test-only helper: seed `maker_stats` with a specific number of filled
+    /// and timed-out orders for `symbol`. Bypasses enqueue / sweep so KPI
+    /// gate / router tests can land exactly on Cold / Healthy / Degraded.
+    /// Fills are recorded with submit_mid = fill_mid = 100 and fee = 0 so
+    /// `sum_net_edge_bps` stays at 0 unless the test inspects it explicitly.
+    /// 測試用：直接塞 filled / timedout 計數到 maker_stats 指定 symbol 的 scope，
+    /// 讓 KPI gate / router 測試能精準對準三態。submit=fill=100、fee=0，使
+    /// `sum_net_edge_bps` 保持 0，除非測試自行另行累加。
+    #[cfg(test)]
+    pub fn test_seed_maker_stats_terminal(
+        &mut self,
+        symbol: &str,
+        filled: u64,
+        timedout: u64,
+    ) {
+        for _ in 0..filled {
+            self.maker_stats
+                .record_fill(symbol, true, 100.0, 100.0, 1.0, 100.0, 0.0, true);
+        }
+        for _ in 0..timedout {
+            self.maker_stats.record_timeout(symbol);
+        }
     }
 
     /// Drop all resting orders — used by PipelineCommand::Reset and
@@ -393,6 +450,10 @@ impl PaperState {
             match decision {
                 Decision::Keep => new_queue.push_back(order),
                 Decision::Timeout { order: drained } => {
+                    // 1B-5: bump maker_stats before emitting event so readers
+                    // see a consistent snapshot once the event is observed.
+                    // 1B-5：先更 maker_stats 再發事件，確保觀察者看見一致快照。
+                    self.maker_stats.record_timeout(&drained.symbol);
                     events.push(RestingFillEvent::Timedout { order: drained });
                 }
                 Decision::Fill {
@@ -414,6 +475,19 @@ impl PaperState {
                         fee,
                         now_ms,
                         &drained.strategy,
+                    );
+                    // 1B-5: accumulate submit→fill edge before emitting event.
+                    // mid_price_at_fill = tick_price (same signal as the event).
+                    // 1B-5：emit 前累計 submit→fill net edge。
+                    self.maker_stats.record_fill(
+                        &drained.symbol,
+                        drained.is_long,
+                        drained.mid_price_at_submit,
+                        tick_price,
+                        fill_qty,
+                        fill_price,
+                        fee,
+                        true_cross,
                     );
                     events.push(RestingFillEvent::Filled {
                         order: drained,

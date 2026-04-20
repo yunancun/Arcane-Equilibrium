@@ -129,6 +129,7 @@ impl IntentProcessor {
                     verdict_info: vi.take(),
                     approved_qty: 0.0,
                     resting_order: None,
+                    maker_degraded_fallback: None,
                 };
             }
             Verdict::Modified => {
@@ -310,6 +311,16 @@ impl IntentProcessor {
         // enqueue；`sweep_resting_limit_orders_for_symbol` 於後續 tick 碰觸
         // 限價時轉為成交（含 bias #1 queue-position discount）。市價/非
         // PostOnly 保留原市價成交路徑。
+        // EDGE-P2-3 Phase 1B-5: MakerKpi gate — before building the resting
+        // draft, consult per-symbol fill-rate / net-edge KPI. When Degraded,
+        // silently drop to the market fill path and flag
+        // `maker_degraded_fallback = Some(symbol)` so caller counts the
+        // fallback. Cold (warmup) is treated as pass — enqueue proceeds so
+        // the accumulator can ever leave warmup.
+        // EDGE-P2-3 Phase 1B-5：MakerKpi gate — 建 draft 前先查 per-symbol
+        // 成交率 / net-edge。Degraded → 靜默 fallback 市價並標記 symbol，
+        // caller 計 counter。Cold（warmup）視為 pass，以便累計離開冷啟。
+        let mut kpi_fallback_symbol: Option<String> = None;
         if matches!(
             intent.time_in_force,
             Some(crate::order_manager::TimeInForce::PostOnly)
@@ -318,44 +329,53 @@ impl IntentProcessor {
         {
             let limit_price = intent.limit_price.unwrap_or(0.0);
             if limit_price > 0.0 && now_ms > 0 {
-                let submit_ts_ms = now_ms;
-                let timeout_ms = intent.maker_timeout_ms.unwrap_or(45_000);
-                let deadline_ms = submit_ts_ms.saturating_add(timeout_ms);
-                let mid_price_at_submit =
-                    paper_state.latest_price(&intent.symbol).unwrap_or(0.0);
-                let ctx = context_id.unwrap_or("").to_string();
-                let draft = crate::paper_state::RestingLimitOrder {
-                    symbol: intent.symbol.clone(),
-                    is_long: intent.is_long,
-                    qty: final_qty,
-                    limit_price,
-                    time_in_force: crate::order_manager::TimeInForce::PostOnly,
-                    submit_ts_ms,
-                    deadline_ms,
-                    mid_price_at_submit,
-                    // Client-minted link id — stable per (engine, symbol, ts)
-                    // so `on_tick` Fill-row emission and operator cancel IPC
-                    // can correlate. `pop_{em}_{symbol}_{ts_ms}` prefix keeps
-                    // paper (`pop_`) distinguishable from exchange (`oc_`).
-                    // 客戶端 link id：以 (引擎, 交易對, ts) 穩定生成；pop_ 前綴
-                    // 區隔紙盤（pop_）與交易所（oc_）。
-                    order_link_id: format!(
-                        "pop_{}_{}_{}",
-                        self.effective_engine_mode(),
-                        intent.symbol,
-                        submit_ts_ms
-                    ),
-                    context_id: ctx,
-                    strategy: intent.strategy.clone(),
-                };
-                return IntentResult {
-                    submitted: true,
-                    rejected_reason: None,
-                    fill: None,
-                    verdict_info: vi.take(),
-                    approved_qty: final_qty,
-                    resting_order: Some(draft),
-                };
+                let kpi_cfg = crate::paper_state::MakerKpiConfig::default();
+                let kpi_status = paper_state.maker_kpi_status(&intent.symbol, &kpi_cfg);
+                if kpi_status.is_degraded() {
+                    // Mark fallback; fall through to market fill path below.
+                    // 標記 fallback；直接走下方市價路徑。
+                    kpi_fallback_symbol = Some(intent.symbol.clone());
+                } else {
+                    let submit_ts_ms = now_ms;
+                    let timeout_ms = intent.maker_timeout_ms.unwrap_or(45_000);
+                    let deadline_ms = submit_ts_ms.saturating_add(timeout_ms);
+                    let mid_price_at_submit =
+                        paper_state.latest_price(&intent.symbol).unwrap_or(0.0);
+                    let ctx = context_id.unwrap_or("").to_string();
+                    let draft = crate::paper_state::RestingLimitOrder {
+                        symbol: intent.symbol.clone(),
+                        is_long: intent.is_long,
+                        qty: final_qty,
+                        limit_price,
+                        time_in_force: crate::order_manager::TimeInForce::PostOnly,
+                        submit_ts_ms,
+                        deadline_ms,
+                        mid_price_at_submit,
+                        // Client-minted link id — stable per (engine, symbol, ts)
+                        // so `on_tick` Fill-row emission and operator cancel IPC
+                        // can correlate. `pop_{em}_{symbol}_{ts_ms}` prefix keeps
+                        // paper (`pop_`) distinguishable from exchange (`oc_`).
+                        // 客戶端 link id：以 (引擎, 交易對, ts) 穩定生成；pop_ 前綴
+                        // 區隔紙盤（pop_）與交易所（oc_）。
+                        order_link_id: format!(
+                            "pop_{}_{}_{}",
+                            self.effective_engine_mode(),
+                            intent.symbol,
+                            submit_ts_ms
+                        ),
+                        context_id: ctx,
+                        strategy: intent.strategy.clone(),
+                    };
+                    return IntentResult {
+                        submitted: true,
+                        rejected_reason: None,
+                        fill: None,
+                        verdict_info: vi.take(),
+                        approved_qty: final_qty,
+                        resting_order: Some(draft),
+                        maker_degraded_fallback: None,
+                    };
+                }
             }
         }
 
@@ -379,6 +399,7 @@ impl IntentProcessor {
             verdict_info: vi.take(),
             approved_qty: final_qty,
             resting_order: None,
+            maker_degraded_fallback: kpi_fallback_symbol,
         }
     }
 
