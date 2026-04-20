@@ -49,6 +49,12 @@ conf_scale = 1.0
 # 且 Phase 1b 拒絕/超時處理完成後再評估開啟。
 use_maker_entry = false
 maker_price_offset_bps = 1.0
+# EDGE-P2-3 Phase 1B-3.1: resting PostOnly Limit sweep timeout (ms).
+# Plumbed for live TOML parity even though use_maker_entry=false means
+# no PostOnly submits happen in live today; prevents schema drift between envs.
+# EDGE-P2-3 Phase 1B-3.1：掛中 PostOnly Limit 逾時清理（毫秒）。
+# live 目前 use_maker_entry=false 不會實際發 PostOnly，但同步設定避免環境配置漂移。
+maker_limit_timeout_ms = 45000
 
 # OC-5: FundingArb — inactive for live until paper/demo validated.
 # OC-5：FundingArb — live 暫不啟用，待紙盤/模擬盤驗證通過。

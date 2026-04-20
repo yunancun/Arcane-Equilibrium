@@ -48,6 +48,11 @@ conf_scale = 1.0
 # 針對 P1-10 grid 手續費拖累問題；平倉維持 Market。Demo 先啟用驗證。
 use_maker_entry = true
 maker_price_offset_bps = 1.0
+# EDGE-P2-3 Phase 1B-3.1: resting PostOnly Limit sweep timeout (ms).
+# Default 45_000 ms; runtime clamped to [15_000, 300_000].
+# EDGE-P2-3 Phase 1B-3.1：掛中 PostOnly Limit 逾時清理（毫秒）。
+# 默認 45_000 ms；運行時 clamp 到 [15_000, 300_000]。
+maker_limit_timeout_ms = 45000
 
 # OC-5: FundingArb — funding rate capture strategy.
 # Demo = validation before live, same params as paper.
