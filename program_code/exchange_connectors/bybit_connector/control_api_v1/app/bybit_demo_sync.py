@@ -31,16 +31,27 @@ logger = logging.getLogger(__name__)
 
 
 def _read_pg_pass_from_secrets() -> str:
-    """Read PG password from secrets file. 从 secrets 文件读取数据库密码。"""
+    """Read PG password from secrets file. 从 secrets 文件读取数据库密码。
+
+    Cross-platform (CLAUDE.md §七): $OPENCLAW_SECRETS_ROOT first, Linux legacy fallback.
+    跨平台：優先 $OPENCLAW_SECRETS_ROOT，再 fallback 到 ~/BybitOpenClaw/secrets。
+    """
     import os
-    try:
-        path = os.path.expanduser("~/BybitOpenClaw/secrets/compose_env/trading_services.env")
-        with open(path) as f:
-            for line in f:
-                if line.startswith("POSTGRES_PASSWORD="):
-                    return line.split("=", 1)[1].strip()
-    except FileNotFoundError:
-        pass
+    roots: list[str] = []
+    env_root = os.environ.get("OPENCLAW_SECRETS_ROOT")
+    if env_root:
+        roots.append(env_root)
+    roots.append(os.path.expanduser("~/BybitOpenClaw/secrets"))
+
+    for root in roots:
+        path = os.path.join(root, "compose_env", "trading_services.env")
+        try:
+            with open(path) as f:
+                for line in f:
+                    if line.startswith("POSTGRES_PASSWORD="):
+                        return line.split("=", 1)[1].strip()
+        except FileNotFoundError:
+            continue
     return ""
 
 
