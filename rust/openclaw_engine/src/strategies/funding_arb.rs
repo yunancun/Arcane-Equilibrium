@@ -520,6 +520,7 @@ mod tests {
             h0_allowed: true,
             funding_rate,
             index_price,
+            open_interest: None,
         }
     }
 
@@ -732,6 +733,7 @@ mod tests {
             h0_allowed: false, // H0 blocks
             funding_rate: Some(0.005),
             index_price: Some(50000.0),
+            open_interest: None,
         };
         assert!(s.on_tick(&ctx).is_empty(), "H0 blocked → no entry");
     }

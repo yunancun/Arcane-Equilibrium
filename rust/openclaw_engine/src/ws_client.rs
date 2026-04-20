@@ -655,6 +655,23 @@ fn parse_ticker_item(item: &serde_json::Value, topic: &str) -> Option<PriceEvent
         .and_then(|s| s.parse::<f64>().ok())
         .filter(|&p| p > 0.0);
 
+    // EDGE-P2-2: Extract open interest (contract count, string-encoded f64).
+    // Bybit sometimes emits null/missing on early snapshots — treat as None
+    // (fail-closed, no panic). `openInterestValue` is a separate USD notional
+    // field we deliberately ignore here; we want raw contract-count deltas.
+    // Reject NaN/Inf/negative (non-finite or <0 never legitimate for OI);
+    // `0.0` is legitimate (fully closed market segment) so use `>= 0.0`.
+    // EDGE-P2-2：提取未平倉合約數（字串編碼 f64；早期 snapshot 可能 null/缺失）。
+    // fail-closed 回 None，絕不 panic。`openInterestValue` 是 USD 名義金額，另一欄位，
+    // 此處只採合約張數（用於差分估算倉位變化方向）。
+    // 拒絕 NaN/Inf/負值（OI 不可能為非有限數或負數）；`0.0` 合法（完全關閉市場段），
+    // 故使用 `>= 0.0` 而非 `> 0.0`（對照 index_price 用 `> 0.0`）。
+    let open_interest = item
+        .get("openInterest")
+        .and_then(|v| v.as_str())
+        .and_then(|s| s.parse::<f64>().ok())
+        .filter(|p| p.is_finite() && *p >= 0.0);
+
     let mut event = PriceEvent::new(symbol, last_price, ts);
     event.volume_24h = volume;
     event.turnover_24h = turnover;
@@ -662,6 +679,7 @@ fn parse_ticker_item(item: &serde_json::Value, topic: &str) -> Option<PriceEvent
     event.ask_price = ask;
     event.funding_rate = funding_rate;
     event.index_price = index_price;
+    event.open_interest = open_interest;
     event.event_kind = Some(PriceEventKind::Ticker);
     event.metadata.insert("type".into(), "ticker".into());
     Some(event)
@@ -897,6 +915,97 @@ mod tests {
         assert!((event.volume_24h - 12345.67).abs() < 0.01);
         assert!((event.bid_price - 65500.0).abs() < f64::EPSILON);
         assert_eq!(event.metadata.get("type").unwrap(), "ticker");
+        // EDGE-P2-2: absent openInterest → None (no panic).
+        // EDGE-P2-2：缺少 openInterest → None（不 panic）。
+        assert!(event.open_interest.is_none());
+    }
+
+    /// EDGE-P2-2: parser extracts openInterest (string-encoded f64).
+    /// EDGE-P2-2：parser 正確提取 openInterest（字串 f64）。
+    #[test]
+    fn test_parse_ticker_item_open_interest() {
+        let item = serde_json::json!({
+            "symbol": "BTCUSDT",
+            "lastPrice": "65500.50",
+            "volume24h": "12345.67",
+            "bid1Price": "65500.0",
+            "ask1Price": "65501.0",
+            "ts": "1700000000000",
+            "openInterest": "12345.678",
+            "openInterestValue": "808717430.00"
+        });
+        let event = parse_ticker_item(&item, "tickers.BTCUSDT").unwrap();
+        // Contract-count OI is plumbed through.
+        assert!((event.open_interest.unwrap() - 12345.678).abs() < 1e-9);
+    }
+
+    /// EDGE-P2-2: malformed openInterest string → None (fail-closed, no panic).
+    /// EDGE-P2-2：openInterest 格式異常 → None（fail-closed，不 panic）。
+    #[test]
+    fn test_parse_ticker_item_open_interest_malformed() {
+        let item = serde_json::json!({
+            "symbol": "BTCUSDT",
+            "lastPrice": "65500.50",
+            "volume24h": "12345.67",
+            "bid1Price": "65500.0",
+            "ask1Price": "65501.0",
+            "ts": "1700000000000",
+            "openInterest": "not-a-number"
+        });
+        let event = parse_ticker_item(&item, "tickers.BTCUSDT").unwrap();
+        assert!(event.open_interest.is_none());
+    }
+
+    /// EDGE-P2-2 FUP: NaN / Infinity / negative OI → None (parser hardening).
+    /// `0.0` is legitimate (fully closed segment) and must be preserved.
+    /// EDGE-P2-2 FUP：NaN / Infinity / 負值 → None；`0.0` 為合法值必須保留。
+    #[test]
+    fn test_parse_ticker_item_open_interest_nan_inf_rejected() {
+        let base = |oi: &str| {
+            serde_json::json!({
+                "symbol": "BTCUSDT",
+                "lastPrice": "65500.50",
+                "volume24h": "12345.67",
+                "bid1Price": "65500.0",
+                "ask1Price": "65501.0",
+                "ts": "1700000000000",
+                "openInterest": oi
+            })
+        };
+        // NaN → rejected.
+        let ev = parse_ticker_item(&base("NaN"), "tickers.BTCUSDT").unwrap();
+        assert!(
+            ev.open_interest.is_none(),
+            "NaN openInterest must be rejected"
+        );
+        // +Infinity → rejected.
+        let ev = parse_ticker_item(&base("Infinity"), "tickers.BTCUSDT").unwrap();
+        assert!(
+            ev.open_interest.is_none(),
+            "+Inf openInterest must be rejected"
+        );
+        // -Infinity → rejected.
+        let ev = parse_ticker_item(&base("-Infinity"), "tickers.BTCUSDT").unwrap();
+        assert!(
+            ev.open_interest.is_none(),
+            "-Inf openInterest must be rejected"
+        );
+        // Negative finite → rejected.
+        let ev = parse_ticker_item(&base("-5.0"), "tickers.BTCUSDT").unwrap();
+        assert!(
+            ev.open_interest.is_none(),
+            "negative openInterest must be rejected"
+        );
+        // Zero → legitimate, preserved (fully closed market segment).
+        let ev = parse_ticker_item(&base("0"), "tickers.BTCUSDT").unwrap();
+        assert_eq!(
+            ev.open_interest,
+            Some(0.0),
+            "zero openInterest is legitimate and must be preserved"
+        );
+        // Also guard the decimal zero spelling.
+        let ev = parse_ticker_item(&base("0.0"), "tickers.BTCUSDT").unwrap();
+        assert_eq!(ev.open_interest, Some(0.0));
     }
 
     #[test]

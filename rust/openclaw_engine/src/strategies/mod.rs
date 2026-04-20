@@ -509,6 +509,27 @@ pub struct BbBreakoutParams {
     /// 帶寬再壓縮時的出場信心扣減幅度（默認 0.05）。
     #[serde(default = "default_bbb_exit_penalty_bw_squeeze")]
     pub exit_penalty_bw_squeeze: f64,
+    // ── EDGE-P2-2: Open Interest confluence signal (experimental, default off) ──
+    // ── EDGE-P2-2：OI 合流信號（實驗性，預設關） ──
+    /// Master switch for OI confluence contribution. Default `false` →
+    /// strategy is bit-identical to pre-EDGE-P2-2 baseline.
+    /// OI 合流總開關；預設 false → 與舊基線 bit-identical。
+    #[serde(default)]
+    pub enable_oi_signal: bool,
+    /// Rolling window (ms) for OI-delta computation. Default 60_000 (~60s).
+    /// OI 差分滾動窗口（ms）；默認 60_000。
+    #[serde(default = "default_bbb_oi_buffer_window_ms")]
+    pub oi_buffer_window_ms: u64,
+    /// ±bonus on confluence score on OI confirmation / divergence.
+    /// Default 0.10; validated ≤ 0.5 in magnitude.
+    /// OI 合流加成（±）；默認 0.10，validate 限制 ≤ 0.5。
+    #[serde(default = "default_bbb_oi_confluence_bonus")]
+    pub oi_confluence_bonus: f64,
+    /// Minimum `|oi_delta_pct|` to apply the bonus — noise floor.
+    /// Default 0.0 keeps pre-FUP behaviour (any non-zero delta triggers).
+    /// 觸發 bonus 所需最小 `|oi_delta_pct|`（噪音地板）；預設 0.0 = pre-FUP 行為。
+    #[serde(default)]
+    pub oi_min_delta_pct: f64,
     // ── G-SR-1 A0-c: Confluence TOML fields (breakout profile) ──
     #[serde(default = "default_min_persistence_ms_breakout")]
     pub min_persistence_ms: u64,
@@ -561,7 +582,45 @@ fn default_bbb_exit_penalty_bw_squeeze() -> f64 {
     0.05
 }
 
+// EDGE-P2-2: OI signal default factories (explicit so `serde(default)` hits them).
+// EDGE-P2-2：OI 信號預設值工廠（顯式函數以配合 `serde(default)`）。
+fn default_bbb_oi_buffer_window_ms() -> u64 {
+    60_000
+}
+fn default_bbb_oi_confluence_bonus() -> f64 {
+    0.10
+}
+
 impl BbBreakoutParams {
+    /// Mirror of `bb_breakout::BbBreakoutParams::validate()` OI rules.
+    /// Called from `StrategyFactory::create_with_params` because the TOML
+    /// path bypasses the runtime `validate()` (E2 FUP #4).
+    /// 鏡射 runtime 的 OI 校驗規則，於工廠路徑手動呼叫（TOML 直達不走 runtime validate）。
+    pub fn validate_oi(&self) -> Result<(), String> {
+        if self.oi_buffer_window_ms < 1_000 || self.oi_buffer_window_ms > 600_000 {
+            return Err(format!(
+                "oi_buffer_window_ms={} must be within [1000, 600000]",
+                self.oi_buffer_window_ms
+            ));
+        }
+        if !self.oi_confluence_bonus.is_finite() || self.oi_confluence_bonus.abs() > 0.5 {
+            return Err(format!(
+                "oi_confluence_bonus={} must be finite and |value| <= 0.5",
+                self.oi_confluence_bonus
+            ));
+        }
+        if !self.oi_min_delta_pct.is_finite()
+            || self.oi_min_delta_pct < 0.0
+            || self.oi_min_delta_pct > 0.5
+        {
+            return Err(format!(
+                "oi_min_delta_pct={} must be finite and within [0.0, 0.5]",
+                self.oi_min_delta_pct
+            ));
+        }
+        Ok(())
+    }
+
     /// Build ConfluenceConfig from TOML params (breakout profile: qty modifier, not gate).
     /// 從 TOML 參數構建 ConfluenceConfig（突破配置：倉位修正器，非門檻）。
     pub fn build_confluence_config(&self) -> confluence::ConfluenceConfig {
@@ -600,6 +659,12 @@ impl Default for BbBreakoutParams {
             exit_bonus_regime_shift: 0.1,
             exit_bonus_pctb_revert: 0.05,
             exit_penalty_bw_squeeze: 0.05,
+            // EDGE-P2-2: OI signal defaults OFF → bit-identical to baseline.
+            // EDGE-P2-2：OI 信號預設 OFF → 與基線 bit-identical。
+            enable_oi_signal: false,
+            oi_buffer_window_ms: 60_000,
+            oi_confluence_bonus: 0.10,
+            oi_min_delta_pct: 0.0,
             min_persistence_ms: 60_000,
             min_notional_usd: 10.0,
             weight_adx: 25.0,
@@ -1003,6 +1068,36 @@ impl StrategyFactory {
         bbb.exit_bonus_regime_shift = p.bb_breakout.exit_bonus_regime_shift;
         bbb.exit_bonus_pctb_revert = p.bb_breakout.exit_bonus_pctb_revert;
         bbb.exit_penalty_bw_squeeze = p.bb_breakout.exit_penalty_bw_squeeze;
+        // EDGE-P2-2: wire OI signal params from TOML (hot-reloadable via ConfigStore).
+        // EDGE-P2-2：從 TOML 接線 OI 信號參數（經 ConfigStore 熱重載）。
+        // E2 FUP #4: TOML path bypasses runtime `validate()`. Call mirror helper so
+        // malformed values in live/demo/paper TOML fall back to defaults instead of
+        // silently poisoning the strategy.
+        // E2 FUP #4：TOML 啟動路徑不走 runtime validate，呼叫 mirror helper；
+        // 若值非法則回退到默認，避免靜默注入壞參數。
+        let (oi_window, oi_bonus, oi_min_delta) = match p.bb_breakout.validate_oi() {
+            Ok(()) => (
+                p.bb_breakout.oi_buffer_window_ms,
+                p.bb_breakout.oi_confluence_bonus,
+                p.bb_breakout.oi_min_delta_pct,
+            ),
+            Err(e) => {
+                tracing::warn!(
+                    strategy = "bb_breakout",
+                    error = %e,
+                    "BbBreakoutParams OI fields failed validation, falling back to defaults"
+                );
+                (
+                    default_bbb_oi_buffer_window_ms(),
+                    default_bbb_oi_confluence_bonus(),
+                    0.0,
+                )
+            }
+        };
+        bbb.enable_oi_signal = p.bb_breakout.enable_oi_signal;
+        bbb.oi_buffer_window_ms = oi_window;
+        bbb.oi_confluence_bonus = oi_bonus;
+        bbb.oi_min_delta_pct = oi_min_delta;
         // G-SR-1 A0-c: Wire confluence params from TOML.
         bbb.min_persistence_ms = p.bb_breakout.min_persistence_ms;
         bbb.min_notional_usd = p.bb_breakout.min_notional_usd;
@@ -1433,6 +1528,64 @@ squeeze_bw = 0.03
             json.contains("\"exit_penalty_bw_squeeze\":0.06"),
             "factory must wire exit_penalty_bw_squeeze=0.06 into runtime, got {json}"
         );
+    }
+
+    /// EDGE-P2-2 FUP #4: the TOML-path factory bypasses `bb_breakout::validate()`.
+    /// A malformed `oi_buffer_window_ms` (above upper bound) must fall back to the
+    /// serde default rather than silently poison the live strategy. The runtime
+    /// OI fields reach the live strategy only via `update_params_json` plumbing,
+    /// so we assert on the JSON echo.
+    /// EDGE-P2-2 FUP #4：TOML 路徑不走 validate，壞 window 需 fallback 默認，
+    /// 不靜默注入壞值。透過 get_params_json 驗證 runtime 接線。
+    #[test]
+    fn test_edge_p2_2_fup4_factory_falls_back_on_invalid_oi() {
+        use serde_json::Value;
+
+        let mut p = StrategyParamsConfig::default();
+        p.bb_breakout.oi_buffer_window_ms = 10_000_000; // way above upper bound
+        p.bb_breakout.oi_confluence_bonus = 0.8; // |value| > 0.5 invalid
+        p.bb_breakout.oi_min_delta_pct = -0.01; // negative invalid
+
+        let strategies = StrategyFactory::create_with_params(&p);
+        let bbb = strategies
+            .iter()
+            .find(|s| s.name() == "bb_breakout")
+            .expect("bb_breakout strategy created");
+        let json = bbb.get_params_json();
+        let v: Value = serde_json::from_str(&json).expect("runtime params deserialize");
+
+        // Fallback to defaults (from default_bbb_oi_buffer_window_ms / _bonus / 0.0).
+        assert_eq!(v["oi_buffer_window_ms"].as_u64(), Some(60_000));
+        let bonus = v["oi_confluence_bonus"].as_f64().expect("f64");
+        assert!((bonus - 0.10).abs() < f64::EPSILON);
+        let floor = v["oi_min_delta_pct"].as_f64().expect("f64");
+        assert!((floor - 0.0).abs() < f64::EPSILON);
+    }
+
+    /// FUP #4: happy-path — valid values reach the runtime untouched.
+    /// FUP #4 正向：合法值必須直通。
+    #[test]
+    fn test_edge_p2_2_fup4_factory_passes_valid_oi() {
+        use serde_json::Value;
+
+        let mut p = StrategyParamsConfig::default();
+        p.bb_breakout.oi_buffer_window_ms = 120_000;
+        p.bb_breakout.oi_confluence_bonus = 0.25;
+        p.bb_breakout.oi_min_delta_pct = 0.03;
+
+        let strategies = StrategyFactory::create_with_params(&p);
+        let bbb = strategies
+            .iter()
+            .find(|s| s.name() == "bb_breakout")
+            .expect("bb_breakout strategy created");
+        let json = bbb.get_params_json();
+        let v: Value = serde_json::from_str(&json).expect("runtime params deserialize");
+
+        assert_eq!(v["oi_buffer_window_ms"].as_u64(), Some(120_000));
+        let bonus = v["oi_confluence_bonus"].as_f64().expect("f64");
+        assert!((bonus - 0.25).abs() < f64::EPSILON);
+        let floor = v["oi_min_delta_pct"].as_f64().expect("f64");
+        assert!((floor - 0.03).abs() < f64::EPSILON);
     }
 
     #[test]

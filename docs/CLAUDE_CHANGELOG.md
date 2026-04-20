@@ -1,7 +1,60 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-04-19（DUAL-TRACK-EXIT-1 Phase 1a Track P E2+E4 驗收 / E5-FN-2 Plan N 重設計，revert fd480ba + 取代 V018 / E5-FN-3 agent_audit_bridge / MARKET-KLINES-STALE-1 / EXIT-FEATURES-TABLE-1 Phase 1b producer wiring / DUAL-TRACK-EXIT-1 Step 0 skeleton）
+> 最後更新：2026-04-20（EDGE-P2-2 Phase A: OI confluence signal + E2 FUP #1-#7）
+
+### EDGE-P2-2 Phase A: OI Confluence Signal + E2 FUP #1-#7（2026-04-20）
+
+**目標**：為 `bb_breakout` 加 Bybit WS `tickers.openInterest` 領先信號 → `oi_delta_pct` 調製 `confluence_score` ±bonus。旗標 `enable_oi_signal` 預設 `false`，保證與 pre-EDGE-P2-2 baseline bit-identical。
+
+**Session 2 前半（11:26–11:37 已寫碼）**：
+- `openclaw_types::PriceEvent` +`open_interest: Option<f64>`（+10 行）
+- `ws_client.rs` ticker 解析新增 OI 欄位（snapshot/delta 合併語義 + NaN/Inf 拒絕，+109 行）
+- `tick_pipeline/mod.rs` + `on_tick.rs` 傳遞 OI 到 `TickContext`（+13/+8 行）
+- `strategies/mod.rs` `TickContext` / `Strategy` trait contract 更新 + 4 非 bb_breakout 策略 `open_interest: None` 補丁
+- `strategies/bb_breakout.rs` OI 邏輯 +620 行（`oi_buffer: VecDeque<(u64, f64)>` per-symbol + `compute_oi_delta_pct` + `apply_oi_confluence_modifier` + `BbBreakoutParams` 三新欄位 `enable_oi_signal`/`oi_buffer_window_ms`/`oi_confluence_bonus` + `ParamRange` 3 新條目 + `validate()` 新規則 + `update_params`/`get_params` 熱重載 + `prev_state` snapshot rollback + 8 新測試）
+- TOML 三環境新欄位 `enable_oi_signal=false` + `oi_buffer_window_ms=60000` + `oi_confluence_bonus=0.10`
+
+**E2 對抗性審查（Session 2 後半）**：派發對抗性審查找到 3 critical + 4 suggestion (#1–#7)。operator 命令「1-7 全部修掉再 commit」。
+
+**FUP #1 — `oi_buffer` 被 trade/orderbook tick 稀釋**：
+- **風險**：`ctx.open_interest=Some(oi)` 在非 ticker stream 上（同一 ticker snapshot 回寫）會重複入隊，縮短滾動窗口的真實時間覆蓋。
+- **修復** `bb_breakout.rs::on_tick` OI push 區塊：改為 change-of-state 推入 — 只在 `ctx.timestamp_ms > back_ts && |oi - back_oi| > EPSILON` 時 `push_back`；否則丟棄。
+- **測試**：`test_oi_buffer_deduplicates_same_value`（3 同值 + 1 變動 → len == 2）。
+
+**FUP #2 — `on_rejection` 回滾錯誤丟棄 `oi_buffer`**：
+- **風險**：`oi_buffer` 是**市場觀察**非**策略決策狀態**。rollback 把它跟著 prev_state 快照一起倒回去 → 下次估計用舊/空 buffer → 誤信 OI 估計。
+- **修復** `on_rejection`：保留 `live_oi_buffer = self.symbols.get(sym).map(|s| s.oi_buffer.clone())`，在還原 prev_state 後覆寫回去；若 prev=None 但有新樣本 → 創建只含 oi_buffer 的 Default state（trading state 保持 unseen）。
+- **測試**：`test_on_rejection_preserves_oi_buffer`（breakout Open → `on_rejection` → buffer len 不變 + back tuple byte-identical）。
+
+**FUP #3 — `d != 0.0` 允許 WS 量化噪音觸發 bonus**：
+- **風險**：Bybit WS `openInterest` 以合約張為單位，±1 張合約 quantisation → `oi_delta_pct ≈ 1e-8` 仍觸發 bonus。
+- **修復**：新參數 `oi_min_delta_pct: f64`（noise floor，預設 0.0 維持 pre-FUP 語義），在 modifier 內 `if d.abs() > self.oi_min_delta_pct`；`validate()` 強制 `[0.0, 0.5] finite`；`ParamRange` 新條目 agent-adjustable。
+- **測試**：`test_oi_min_delta_pct_below_threshold_no_effect`（floor=0.05, delta=2% → f32 bit-identical 於 flat 對照）+ `test_oi_min_delta_pct_validation`（NaN/負/>0.5 拒絕，0.0/0.5 邊界通過）。
+
+**FUP #4 — TOML 啟動路徑 bypass runtime `validate()`**：
+- **風險**：`StrategyFactory::create_with_params` 從 TOML 直寫 runtime，若 TOML 含惡意值（e.g. `oi_buffer_window_ms = 10_000_000`）會靜默注入壞參數。
+- **修復**：`strategies/mod.rs::BbBreakoutParams` 新 `validate_oi()` helper 鏡射 runtime 規則，在 factory 呼叫：`Err(_)` → 記 `warn!` + 回退到 `default_bbb_oi_buffer_window_ms()` / `default_bbb_oi_confluence_bonus()` / `0.0`。
+- **測試**：`test_edge_p2_2_fup4_factory_falls_back_on_invalid_oi`（壞值 → runtime JSON 回預設）+ `test_edge_p2_2_fup4_factory_passes_valid_oi`（合法值直通）。
+
+**FUP #5 — `oi_buffer_window_ms` 缺上限校驗**：
+- **風險**：hostile IPC 寫入 `u64::MAX` + 高頻 ticker → `VecDeque` 無元素上限 → 記憶體無界成長。
+- **修復** `validate()` 新增 `> 600_000` 拒絕；`ParamRange.max = 600_000.0` 對齊（runtime 實際最大 10 min 窗口已覆蓋所有合理 use-case）。
+- **測試**：`test_oi_window_upper_bound_validation`（600_001 失敗 / 600_000 通過）。
+
+**FUP #6 — 跨 stream 交錯導致 ts 回溯**：
+- **風險**：WS 多 topic 合流時可能出現 `ctx.timestamp_ms` 比 `back_ts` 小（stream 到達順序與交易所時戳順序不一致）。
+- **修復**：FUP #1 的 `should_push` guard 已包含 `ctx.timestamp_ms > back_ts`（嚴格 >）；相同 ts 或回溯 ts 均丟棄。
+- **測試**：`test_oi_buffer_skips_ts_regression`（ts=10000 入 → ts=5000 丟 → ts=10000 相同丟，len==1）。
+
+**FUP #7 — bonus magnitude docstring 缺 operator 指引**：
+- **修復**：`oi_confluence_bonus` docstring 加「Score bands no_trade(~30)→light(~40)→full(~45)，typical effective range 0.3-0.5 to move qty_pct by ≥5 pp；default 0.10 偏保守，適合首次 A/B」。
+
+**TOML 三環境同步**：`strategy_params_{demo,paper,live}.toml` `[bb_breakout]` 新增 `oi_min_delta_pct = 0.0` + 更新註釋說明 validate 範圍。
+
+**測試基準**：engine lib **1791 passed**（pre-EDGE-P2-2 baseline 1770 + 13 EDGE-P2-2 + 8 FUP = 1791；0 failed）。`test_bbb_param_ranges_count` 由 19 → 20 反映新增 `oi_min_delta_pct` ParamRange。
+
+**部署準則**：預設旗標 `enable_oi_signal=false`，部署即生效但零行為變更；operator 啟動前需在 `strategy_params_demo.toml` 設 `enable_oi_signal = true`（先 demo 驗證 ≥7d edge 再評估 live）。
 
 ### DUAL-TRACK-EXIT-1 Phase 1a Track P E2+E4 驗收（2026-04-19 · worklog `2026-04-19-2--track_p_counterfactual_audit.md`）
 

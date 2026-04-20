@@ -75,6 +75,13 @@ pub struct PriceEvent {
     /// OC-5：用於基差計算的指數價格（來自 Bybit tickers 流）。
     #[serde(default)]
     pub index_price: Option<f64>,
+    /// EDGE-P2-2: Open interest (contract count, from Bybit tickers stream).
+    /// Distinct from `openInterestValue` (USD notional = OI × mark price).
+    /// None when tickers payload omits or carries an un-parseable value.
+    /// EDGE-P2-2：未平倉合約數（來自 Bybit tickers 流，原始合約張數）。
+    /// 不同於 `openInterestValue`（名義金額 = OI × 標記價）。解析失敗則為 None。
+    #[serde(default)]
+    pub open_interest: Option<f64>,
     /// Legacy metadata map — still populated for backward compat, but prefer structured fields.
     /// 舊版 metadata — 為向後兼容仍填充，但應優先使用結構化欄位。
     #[serde(default)]
@@ -99,6 +106,9 @@ impl PriceEvent {
             adl_rank: None,
             funding_rate: None,
             index_price: None,
+            // EDGE-P2-2: open_interest defaults to None (ticker-only field).
+            // EDGE-P2-2：open_interest 預設 None（僅 tickers 事件會填充）。
+            open_interest: None,
             metadata: HashMap::new(),
         }
     }

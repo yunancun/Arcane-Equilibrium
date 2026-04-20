@@ -63,6 +63,36 @@ pub struct BbBreakoutParams {
     /// Exit confidence penalty (magnitude, subtracted) for BW squeeze exit (default 0.05).
     /// BW 帶寬再壓縮出場時的信心扣減幅度（默認 0.05，實際套用時為減法）。
     pub exit_penalty_bw_squeeze: f64,
+    // ── EDGE-P2-2: Open Interest confluence signal (experimental, default off) ──
+    // ── EDGE-P2-2：OI 合流信號（實驗性，預設關閉） ──
+    /// Master switch for OI confluence contribution. When `false`, strategy
+    /// behaviour is bit-identical to the pre-EDGE-P2-2 baseline.
+    /// OI 合流總開關；`false` 時策略行為與舊基線 bit-identical。
+    pub enable_oi_signal: bool,
+    /// Rolling window (ms) over which `oi_delta_pct` is measured.
+    /// Typical 60_000 (~60s) — long enough to filter noise, short enough to
+    /// capture pre-breakout positioning. Validated `[1_000, 600_000]` ms.
+    /// OI 差分滾動窗口（ms）；典型 60_000，validate 要求 `[1_000, 600_000]`。
+    pub oi_buffer_window_ms: u64,
+    /// Bonus added/subtracted on the raw confluence score when OI confirms
+    /// (add) or diverges from (subtract) the intended entry direction.
+    /// Bounded within ±0.5 by `validate()` to cap influence.
+    /// Score bands are `threshold_no_trade`(~30) → `light`(~40) → `full`(~45).
+    /// Typical effective range 0.3-0.5 to move qty_pct by ≥5 pp; default 0.10
+    /// is intentionally conservative for initial A/B without regime shocks.
+    /// OI 合流加成（±）；validate 限制在 ±0.5 以控制影響幅度。
+    /// 分數帶寬 no_trade(30)→light(40)→full(45)，典型有效區間 0.3-0.5 才能推動
+    /// qty_pct ≥5 pp 改變；預設 0.10 偏保守，適合首次 A/B 不引入 regime 震盪。
+    pub oi_confluence_bonus: f64,
+    /// Minimum absolute `oi_delta_pct` magnitude required to apply the bonus.
+    /// Below this threshold, OI modifier is a no-op (score passes through).
+    /// Guards against WS snapshot quantisation noise (±1 contract → 1e-8 delta)
+    /// being treated as a confirmation signal. Default 0.0 = pre-FUP behaviour
+    /// (any non-zero delta triggers bonus). Validated in `[0.0, 0.5]`, finite.
+    /// 觸發 bonus 所需的最小 `|oi_delta_pct|` 閾值；低於此值視為 no-op。
+    /// 防止 WS 快照量化噪音（±1 張合約 ≈ 1e-8 delta）被誤判為確認信號。
+    /// 預設 0.0 = pre-FUP 行為（任何非零 delta 即觸發）；validate `[0.0, 0.5]` finite。
+    pub oi_min_delta_pct: f64,
 }
 
 impl Default for BbBreakoutParams {
@@ -94,6 +124,16 @@ impl Default for BbBreakoutParams {
             exit_bonus_regime_shift: 0.1,
             exit_bonus_pctb_revert: 0.05,
             exit_penalty_bw_squeeze: 0.05,
+            // EDGE-P2-2: OI signal defaults OFF → bit-identical to baseline.
+            // EDGE-P2-2：OI 信號預設 OFF → 與基線 bit-identical。
+            enable_oi_signal: false,
+            oi_buffer_window_ms: 60_000,
+            oi_confluence_bonus: 0.10,
+            // EDGE-P2-2 FUP: min_delta default 0.0 preserves pre-FUP semantics
+            // (any non-zero delta applies bonus). Operators can raise this to
+            // filter WS quantisation noise without changing the flag default.
+            // EDGE-P2-2 FUP：min_delta 預設 0.0 保留 pre-FUP 語義；operator 可調高過濾 WS 噪音。
+            oi_min_delta_pct: 0.0,
         }
     }
 }
@@ -231,6 +271,42 @@ impl StrategyParams for BbBreakoutParams {
                 agent_adjustable: false,
                 db_persisted: true,
             },
+            // EDGE-P2-2: Open Interest confluence signal parameters.
+            // EDGE-P2-2：OI 合流信號參數。
+            ParamRange {
+                name: "enable_oi_signal".into(),
+                min: 0.0,
+                max: 1.0,
+                step: Some(1.0),
+                agent_adjustable: true,
+                db_persisted: true,
+            },
+            ParamRange {
+                name: "oi_buffer_window_ms".into(),
+                min: 1_000.0,
+                max: 600_000.0,
+                step: Some(1_000.0),
+                agent_adjustable: true,
+                db_persisted: true,
+            },
+            ParamRange {
+                name: "oi_confluence_bonus".into(),
+                min: -0.5,
+                max: 0.5,
+                step: Some(0.01),
+                agent_adjustable: true,
+                db_persisted: true,
+            },
+            // EDGE-P2-2 FUP: minimum delta threshold to apply bonus.
+            // EDGE-P2-2 FUP：觸發 bonus 的最小 delta 閾值。
+            ParamRange {
+                name: "oi_min_delta_pct".into(),
+                min: 0.0,
+                max: 0.5,
+                step: Some(0.001),
+                agent_adjustable: true,
+                db_persisted: true,
+            },
         ]
     }
 
@@ -253,6 +329,30 @@ impl StrategyParams for BbBreakoutParams {
         }
         if self.min_notional_usd < 1.0 {
             return Err("min_notional_usd must be >= 1.0".into());
+        }
+        // EDGE-P2-2: OI signal parameter validation.
+        // - Window must be within `[1_000, 600_000]` ms. Lower bound blocks
+        //   sub-second windows dominated by WS jitter; upper bound (matches
+        //   `param_ranges.max`) prevents a hostile IPC write from requesting
+        //   `u64::MAX`, which combined with a high-frequency ticker stream
+        //   would let `oi_buffer` grow without bound (no element cap).
+        // - Bonus must be finite and magnitude <= 0.5 to bound score influence.
+        // - Min-delta threshold must be finite, non-negative, and <= 0.5.
+        // EDGE-P2-2：OI 信號參數驗證。
+        // - 窗口 `[1_000, 600_000]`：下限擋亞秒窗口 jitter，上限擋 IPC 惡意寫入
+        //   `u64::MAX` 導致 buffer 無界成長（VecDeque 無元素上限）。
+        // - bonus finite 且 |·| ≤ 0.5；min_delta finite 且 `[0.0, 0.5]`。
+        if self.oi_buffer_window_ms < 1_000 || self.oi_buffer_window_ms > 600_000 {
+            return Err("oi_buffer_window_ms must be within [1000, 600000]".into());
+        }
+        if !self.oi_confluence_bonus.is_finite() || self.oi_confluence_bonus.abs() > 0.5 {
+            return Err("oi_confluence_bonus must be finite and within ±0.5".into());
+        }
+        if !self.oi_min_delta_pct.is_finite()
+            || self.oi_min_delta_pct < 0.0
+            || self.oi_min_delta_pct > 0.5
+        {
+            return Err("oi_min_delta_pct must be finite and within [0.0, 0.5]".into());
         }
         Ok(())
     }
@@ -304,6 +404,34 @@ pub(crate) struct BbBreakoutPerSymbolState {
     /// Current ATR trailing stop level.
     /// 當前 ATR 追蹤止損價位。
     pub trailing_stop: Option<f64>,
+    /// EDGE-P2-2: rolling (ts_ms, open_interest) samples. Front = oldest,
+    /// back = newest. Maintained by `on_tick`; only pushed when
+    /// `ctx.open_interest` is `Some`. Window length is controlled by
+    /// `BbBreakout.oi_buffer_window_ms`.
+    /// EDGE-P2-2：滾動 (ts_ms, OI) 樣本；front=最舊、back=最新。
+    /// 只在 `ctx.open_interest` 有值時追加；窗口長度由 `oi_buffer_window_ms` 控制。
+    pub oi_buffer: std::collections::VecDeque<(u64, f64)>,
+}
+
+impl BbBreakoutPerSymbolState {
+    /// EDGE-P2-2: compute the fractional change of open interest between the
+    /// oldest and newest buffer samples. Returns `None` when:
+    ///   * fewer than 2 samples,
+    ///   * oldest sample ≤ 0.0 (guard against div-by-zero / non-positive OI).
+    /// Formula: (newest - oldest) / oldest.
+    /// EDGE-P2-2：以 buffer 最舊與最新樣本計算 OI 變化百分比；
+    /// < 2 個樣本或最舊 ≤ 0 則回 `None`（避免除以零）。
+    pub fn compute_oi_delta_pct(&self) -> Option<f64> {
+        if self.oi_buffer.len() < 2 {
+            return None;
+        }
+        let oldest = self.oi_buffer.front().map(|(_, oi)| *oi)?;
+        let newest = self.oi_buffer.back().map(|(_, oi)| *oi)?;
+        if oldest <= 0.0 {
+            return None;
+        }
+        Some((newest - oldest) / oldest)
+    }
 }
 
 pub struct BbBreakout {
@@ -361,6 +489,19 @@ pub struct BbBreakout {
     pub(crate) exit_bonus_pctb_revert: f64,
     /// BW squeeze exit confidence penalty (magnitude). / BW 再壓縮出場信心扣減幅度。
     pub(crate) exit_penalty_bw_squeeze: f64,
+    // ── EDGE-P2-2: Open Interest confluence signal ──
+    // ── EDGE-P2-2：OI 合流信號 ──
+    /// Master switch; false → signal disabled, no buffer mutation effects.
+    /// 總開關；false → 信號禁用。
+    pub(crate) enable_oi_signal: bool,
+    /// Rolling OI buffer window (ms). / OI 差分窗口（ms）。
+    pub(crate) oi_buffer_window_ms: u64,
+    /// Bonus applied on confluence score on OI confirmation / subtracted on divergence.
+    /// OI 合流加成（確認為加、背離為減）。
+    pub(crate) oi_confluence_bonus: f64,
+    /// EDGE-P2-2 FUP: min `|oi_delta_pct|` to trigger bonus (noise floor).
+    /// EDGE-P2-2 FUP：觸發 bonus 的最小 `|oi_delta_pct|`（噪音地板）。
+    pub(crate) oi_min_delta_pct: f64,
 }
 
 impl BbBreakout {
@@ -392,6 +533,14 @@ impl BbBreakout {
             exit_bonus_regime_shift: 0.1,
             exit_bonus_pctb_revert: 0.05,
             exit_penalty_bw_squeeze: 0.05,
+            // EDGE-P2-2: OI signal defaults OFF → bit-identical to baseline.
+            // EDGE-P2-2：OI 信號預設 OFF → 與基線 bit-identical。
+            enable_oi_signal: false,
+            oi_buffer_window_ms: 60_000,
+            oi_confluence_bonus: 0.10,
+            // EDGE-P2-2 FUP: 0.0 → any non-zero delta applies bonus (pre-FUP).
+            // EDGE-P2-2 FUP：0.0 = 任何非零 delta 即觸發（pre-FUP 行為）。
+            oi_min_delta_pct: 0.0,
         }
     }
 
@@ -417,6 +566,16 @@ impl BbBreakout {
         self.exit_bonus_regime_shift = params.exit_bonus_regime_shift;
         self.exit_bonus_pctb_revert = params.exit_bonus_pctb_revert;
         self.exit_penalty_bw_squeeze = params.exit_penalty_bw_squeeze;
+        // EDGE-P2-2: hot-reload OI signal knobs. Buffers are retained so a flip
+        // from true→false→true doesn't lose signal continuity on next enable.
+        // EDGE-P2-2：熱重載 OI 信號開關；buffer 不清空（true→false→true 切換連續性保留）。
+        self.enable_oi_signal = params.enable_oi_signal;
+        self.oi_buffer_window_ms = params.oi_buffer_window_ms;
+        self.oi_confluence_bonus = params.oi_confluence_bonus;
+        // EDGE-P2-2 FUP: hot-reload the min-delta noise floor. Retained samples
+        // outside the new window are evicted lazily on the next tick.
+        // EDGE-P2-2 FUP：熱重載 min_delta 噪音地板；舊樣本下次 tick 懶淘汰。
+        self.oi_min_delta_pct = params.oi_min_delta_pct;
         info!(strategy = "bb_breakout", "params updated / 參數已更新");
         Ok(())
     }
@@ -448,6 +607,14 @@ impl BbBreakout {
             exit_bonus_regime_shift: self.exit_bonus_regime_shift,
             exit_bonus_pctb_revert: self.exit_bonus_pctb_revert,
             exit_penalty_bw_squeeze: self.exit_penalty_bw_squeeze,
+            // EDGE-P2-2: echo OI signal params.
+            // EDGE-P2-2：回傳 OI 信號參數。
+            enable_oi_signal: self.enable_oi_signal,
+            oi_buffer_window_ms: self.oi_buffer_window_ms,
+            oi_confluence_bonus: self.oi_confluence_bonus,
+            // EDGE-P2-2 FUP: echo min-delta threshold for Agent round-trip.
+            // EDGE-P2-2 FUP：回傳 min_delta 噪音地板供 Agent 往返。
+            oi_min_delta_pct: self.oi_min_delta_pct,
         }
     }
 
@@ -513,16 +680,47 @@ impl Strategy for BbBreakout {
     /// RC-04: Revert per-symbol state on rejection. Snapshot is the full
     /// `BbBreakoutPerSymbolState` (or `None` if the symbol was unseen); restoring
     /// it exactly reproduces the pre-tick per-symbol state.
-    /// RC-04：拒絕時還原該幣種整包逐 symbol 狀態快照（快照時若未見過 symbol 則為 None）。
+    ///
+    /// EDGE-P2-2 FUP (E2 finding #2): `oi_buffer` is a market-observation
+    /// series, not a strategy decision state. Rolling it back on rejection
+    /// would discard the OI sample pushed earlier this tick, and under a high
+    /// rejection rate (budget/风控) this systematically starves the delta
+    /// estimator. We therefore preserve the live `oi_buffer` across rollback:
+    /// - `prev_st = Some(...)`: clone prev_st but overwrite its oi_buffer with
+    ///   the current live buffer (carry the new sample forward).
+    /// - `prev_st = None`: symbol was unseen pre-tick. If a sample was just
+    ///   pushed, seed a fresh Default state with only the oi_buffer populated
+    ///   so trading state stays "unseen" but market observation survives.
+    ///
+    /// EDGE-P2-2 FUP（E2 #2）：`oi_buffer` 是市場觀察序列不是策略決策狀態，
+    /// 若一起回滾，在高拒絕率下會系統性餓死 delta 估計。故保留活 buffer：
+    /// prev=Some → 克隆 prev_st 但覆寫 oi_buffer；prev=None 且有新樣本 → 創建只
+    /// 含 oi_buffer 的 Default 狀態（trading state 保持 unseen，OI 觀察續存）。
     fn on_rejection(&mut self, intent: &OrderIntent, _reason: &str) {
         let sym = &intent.symbol;
+        // Snapshot the current (live) OI buffer so rollback of trading state
+        // does not discard the sample pushed earlier this tick.
+        // 先取當前活 OI buffer 快照，以免 rollback 丟掉本 tick push 的新樣本。
+        let live_oi_buffer = self
+            .symbols
+            .get(sym)
+            .map(|s| s.oi_buffer.clone())
+            .unwrap_or_default();
         if let Some(prev) = self.prev_state.get(sym) {
             match prev {
                 Some(prev_st) => {
-                    self.symbols.insert(sym.to_string(), prev_st.clone());
+                    let mut restored = prev_st.clone();
+                    restored.oi_buffer = live_oi_buffer;
+                    self.symbols.insert(sym.to_string(), restored);
                 }
                 None => {
-                    self.symbols.remove(sym);
+                    if live_oi_buffer.is_empty() {
+                        self.symbols.remove(sym);
+                    } else {
+                        let mut fresh = BbBreakoutPerSymbolState::default();
+                        fresh.oi_buffer = live_oi_buffer;
+                        self.symbols.insert(sym.to_string(), fresh);
+                    }
                 }
             }
         }
@@ -561,6 +759,60 @@ impl Strategy for BbBreakout {
             let st = self.symbols.get_or_init(sym);
             if st.squeeze_detected_ms.is_none() {
                 st.squeeze_detected_ms = Some(ctx.timestamp_ms);
+            }
+        }
+        // EDGE-P2-2: Maintain per-symbol OI buffer regardless of flag, so the
+        // buffer is warm whenever the flag gets flipped on via hot-reload.
+        // We only populate when ctx.open_interest is Some; front-evict by window.
+        // Always DEBUG-log the derived delta for operator observability.
+        //
+        // EDGE-P2-2 FUP (E2 finding #1 + #6): `ctx.open_interest` is the
+        // pipeline's latest cached OI — every tick carries it, even non-ticker
+        // events (trades/orderbook) replaying the same value under new
+        // timestamps. Without dedup, 10 Hz trade + 0.2 Hz ticker yields a
+        // buffer that's ≥95% same-OI/different-ts samples, silently shrinking
+        // the real time coverage of `oi_buffer_window_ms`. We therefore skip
+        // push when (a) ts is not strictly newer than back (monotonic guard,
+        // E2 #6 cross-stream regression) OR (b) OI value equals back's OI
+        // (dedup, E2 #1). Eviction still runs unconditionally so stale samples
+        // age out even on a ticker-less symbol.
+        // EDGE-P2-2：無論 flag 是否啟用都維護 OI buffer，hot-reload 開啟時立即可用。
+        // FUP：`ctx.open_interest` 是 pipeline 最新快取，每個 tick（含 trade/orderbook）
+        //   都會攜帶同一 OI 值不同時間戳，未去重時 10Hz trade+0.2Hz ticker 會讓 buffer
+        //   95% 是重複樣本，窗口實際覆蓋遠小於 `oi_buffer_window_ms`。因此：
+        //   (a) 非嚴格新 ts（E2 #6 跨流倒流）或 (b) OI 值未變（E2 #1 去重）皆 skip push。
+        //   淘汰邏輯永遠執行，空 tick 也能讓舊樣本過期。
+        if let Some(oi) = ctx.open_interest {
+            let window = self.oi_buffer_window_ms;
+            let st = self.symbols.get_or_init(sym);
+            let should_push = match st.oi_buffer.back() {
+                None => true,
+                Some(&(back_ts, back_oi)) => {
+                    ctx.timestamp_ms > back_ts && (oi - back_oi).abs() > f64::EPSILON
+                }
+            };
+            if should_push {
+                st.oi_buffer.push_back((ctx.timestamp_ms, oi));
+            }
+            while let Some(&(front_ts, _)) = st.oi_buffer.front() {
+                // Use saturating_sub to avoid underflow when timestamps regress.
+                // 用 saturating_sub 防時間戳倒流造成 underflow。
+                if ctx.timestamp_ms.saturating_sub(front_ts) > window {
+                    st.oi_buffer.pop_front();
+                } else {
+                    break;
+                }
+            }
+            if let Some(d) = st.compute_oi_delta_pct() {
+                tracing::debug!(
+                    target: "bb_breakout.oi",
+                    strategy = "bb_breakout",
+                    symbol = %sym,
+                    oi_delta_pct = d,
+                    oi_buffer_len = st.oi_buffer.len(),
+                    enabled = self.enable_oi_signal,
+                    "OI delta computed / OI 差分已計算"
+                );
             }
         }
         if !self.cooldown.is_cooled_down(sym, ctx.timestamp_ms) {
@@ -633,6 +885,43 @@ impl Strategy for BbBreakout {
                             ind.rsi_14,
                             is_long,
                         );
+                        // EDGE-P2-2: OI confluence modifier.
+                        // When `enable_oi_signal=false`, `score` is untouched (bit-exact).
+                        // When enabled + buffer has a valid delta, add bonus on confirmation
+                        // (rising OI + long, falling OI + short) or subtract on divergence.
+                        // `compute_score` may return `None` (confluence disabled upstream);
+                        // in that case we do not fabricate a score from OI alone — the
+                        // downstream `score_to_qty_pct` handles `None` as "no modifier".
+                        //
+                        // EDGE-P2-2 FUP (E2 finding #3): require `|d| > oi_min_delta_pct`
+                        // to apply the bonus. Default threshold is 0.0, which preserves
+                        // pre-FUP semantics (any non-zero delta triggers). Raising this
+                        // filters WS snapshot quantisation noise (±1 contract → ~1e-8
+                        // delta) from being treated as a confirmation signal.
+                        // EDGE-P2-2：OI 合流修飾器。flag=false 時 score 完全不變（bit-exact）。
+                        // 開啟且 buffer 有有效 delta 時：方向一致加 bonus，背離則扣 bonus。
+                        // score=None（上游合流停用）時不憑 OI 偽造 score。
+                        // FUP：需 `|d| > oi_min_delta_pct` 才套 bonus；預設 0.0 保留 pre-FUP 行為。
+                        let score = if self.enable_oi_signal {
+                            let delta_opt = self
+                                .symbols
+                                .get(sym)
+                                .and_then(|s| s.compute_oi_delta_pct());
+                            match (score, delta_opt) {
+                                (Some(s), Some(d)) if d.abs() > self.oi_min_delta_pct => {
+                                    let confirms = (d > 0.0 && is_long) || (d < 0.0 && !is_long);
+                                    let adj = if confirms {
+                                        self.oi_confluence_bonus
+                                    } else {
+                                        -self.oi_confluence_bonus
+                                    };
+                                    Some(s + adj)
+                                }
+                                _ => score,
+                            }
+                        } else {
+                            score
+                        };
                         let qty_pct = confluence::score_to_qty_pct(score, &self.confluence_config);
                         // confluence_as_gate=false: always trade if triple gate passed,
                         // but scale qty. qty_pct=0 only blocks if confluence_as_gate=true.
@@ -839,6 +1128,7 @@ mod tests {
             h0_allowed: true,
             funding_rate: None,
             index_price: None,
+            open_interest: None,
         }
     }
 
@@ -1136,11 +1426,13 @@ mod tests {
     #[test]
     fn test_bbb_param_ranges_count() {
         let ranges = BbBreakoutParams::param_ranges();
-        // 5 original + 11 confluence (includes confluence_as_gate) = 16
+        // 5 original + 11 confluence (includes confluence_as_gate) + 4 EDGE-P2-2 OI
+        // (enable_oi_signal + oi_buffer_window_ms + oi_confluence_bonus + oi_min_delta_pct) = 20
+        // EDGE-P2-2 FUP：oi_min_delta_pct 是 noise floor，需作為 agent-tunable ParamRange 暴露。
         assert_eq!(
             ranges.len(),
-            16,
-            "expected 16 param ranges, got {}",
+            20,
+            "expected 20 param ranges, got {}",
             ranges.len()
         );
     }
@@ -1263,5 +1555,654 @@ mod tests {
         let back = s.get_params();
         assert!((back.hurst_regime_boost - 0.17).abs() < f64::EPSILON);
         assert!((back.exit_bonus_trailing_stop - 0.25).abs() < f64::EPSILON);
+    }
+
+    /// EDGE-P2-2 FUP: update_params must hot-reload the 3 OI fields
+    /// (`enable_oi_signal` / `oi_buffer_window_ms` / `oi_confluence_bonus`) and
+    /// get_params must echo the mutated values — mirrors the
+    /// `test_e5_p2_4_update_params_hot_reloads_offsets` contract.
+    /// EDGE-P2-2 FUP：update_params 需熱重載 OI 三欄位；get_params 回吐新值。
+    #[test]
+    fn test_oi_params_update_hot_reloads() {
+        let mut s = BbBreakout::new();
+        // Baseline defaults — document the pre-EDGE-P2-2 bit-identical floor.
+        // 預設值—記錄 pre-EDGE-P2-2 bit-identical 基線。
+        assert!(!s.enable_oi_signal, "default enable_oi_signal must be false");
+        assert_eq!(
+            s.oi_buffer_window_ms, 60_000,
+            "default oi_buffer_window_ms must be 60_000"
+        );
+        assert!(
+            (s.oi_confluence_bonus - 0.10).abs() < f64::EPSILON,
+            "default oi_confluence_bonus must be 0.10"
+        );
+
+        let mut p = BbBreakoutParams::default();
+        p.enable_oi_signal = true;
+        p.oi_buffer_window_ms = 30_000;
+        p.oi_confluence_bonus = 0.25;
+        s.update_params(p.clone()).expect("valid OI params");
+
+        // Runtime fields reflect the hot-reloaded values.
+        // 運行時欄位反映熱重載後的值。
+        assert!(s.enable_oi_signal, "flag must hot-reload to true");
+        assert_eq!(s.oi_buffer_window_ms, 30_000, "window ms must hot-reload");
+        assert!((s.oi_confluence_bonus - 0.25).abs() < f64::EPSILON);
+
+        // get_params round-trip echoes the mutated values.
+        // get_params 回吐後須等同變更值。
+        let back = s.get_params();
+        assert!(back.enable_oi_signal);
+        assert_eq!(back.oi_buffer_window_ms, 30_000);
+        assert!((back.oi_confluence_bonus - 0.25).abs() < f64::EPSILON);
+    }
+
+    /// EDGE-P2-2 FUP: JSON round-trip — serialize → mutate → update_params_json
+    /// must apply the 3 OI fields to the live runtime (ConfigStore Agent path).
+    /// EDGE-P2-2 FUP：JSON 往返 — 序列化→修改→update_params_json 熱重載 OI 三欄位。
+    #[test]
+    fn test_oi_params_json_round_trip() {
+        use crate::strategies::Strategy;
+
+        let mut s = BbBreakout::new();
+        // Serialize defaults.
+        let json_v0 = s.get_params_json();
+        assert!(
+            !json_v0.is_empty(),
+            "get_params_json must emit non-empty string"
+        );
+
+        // Deserialize, mutate OI fields, re-serialize.
+        let mut p: BbBreakoutParams =
+            serde_json::from_str(&json_v0).expect("default params must deserialize");
+        p.enable_oi_signal = true;
+        p.oi_buffer_window_ms = 15_000;
+        p.oi_confluence_bonus = 0.33;
+        let json_v1 = serde_json::to_string(&p).expect("params must serialize");
+
+        // Apply via the Strategy-trait JSON path.
+        s.update_params_json(&json_v1)
+            .expect("valid JSON params must hot-reload");
+
+        // Runtime reflects the mutated JSON values.
+        assert!(s.enable_oi_signal);
+        assert_eq!(s.oi_buffer_window_ms, 15_000);
+        assert!((s.oi_confluence_bonus - 0.33).abs() < f64::EPSILON);
+
+        // And round-trip back through get_params_json.
+        let json_v2 = s.get_params_json();
+        let back: BbBreakoutParams =
+            serde_json::from_str(&json_v2).expect("round-trip JSON must deserialize");
+        assert!(back.enable_oi_signal);
+        assert_eq!(back.oi_buffer_window_ms, 15_000);
+        assert!((back.oi_confluence_bonus - 0.33).abs() < f64::EPSILON);
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    // EDGE-P2-2: Open Interest (OI) confluence signal tests
+    // EDGE-P2-2：OI 合流信號單元測試
+    // ════════════════════════════════════════════════════════════════════════
+
+    use openclaw_core::indicators::{AdxResult, DonchianResult, IndicatorSnapshot as IS};
+
+    /// Build a context with custom OI value (kept separate from `ctx_ext` to
+    /// preserve bit-identical behaviour for all non-OI callers).
+    /// 建立帶 OI 的 context；與 `ctx_ext` 分開避免改動既有調用點的位元等價性。
+    fn ctx_oi(
+        bw: f64,
+        pct_b: f64,
+        vol: f64,
+        ts: u64,
+        price: f64,
+        open_interest: Option<f64>,
+    ) -> TickContext<'static> {
+        let ind = Box::leak(Box::new(IS {
+            bollinger: Some(BollingerResult {
+                upper: 51000.0,
+                middle: 50000.0,
+                lower: 49000.0,
+                bandwidth: bw,
+                percent_b: pct_b,
+            }),
+            volume_ratio: Some(vol),
+            ..Default::default()
+        }));
+        TickContext {
+            symbol: "BTC",
+            price,
+            timestamp_ms: ts,
+            indicators: Some(ind),
+            signals: &[],
+            h0_allowed: true,
+            funding_rate: None,
+            index_price: None,
+            open_interest,
+        }
+    }
+
+    /// Full-indicator context for end-to-end confluence testing (ADX + Donchian +
+    /// volume). Simulates a clean breakout setup with OI override.
+    /// 完整指標 context（ADX + Donchian + volume）用於端到端 confluence 測試。
+    fn ctx_full_entry(
+        bw: f64,
+        pct_b: f64,
+        vol: f64,
+        ts: u64,
+        price: f64,
+        open_interest: Option<f64>,
+    ) -> TickContext<'static> {
+        let ind = Box::leak(Box::new(IS {
+            bollinger: Some(BollingerResult {
+                upper: 51000.0,
+                middle: 50000.0,
+                lower: 49000.0,
+                bandwidth: bw,
+                percent_b: pct_b,
+            }),
+            volume_ratio: Some(vol),
+            adx: Some(AdxResult {
+                adx: 30.0,
+                plus_di: 25.0,
+                minus_di: 15.0,
+            }),
+            rsi_14: Some(55.0),
+            donchian: Some(DonchianResult {
+                upper: 50500.0,
+                lower: 49500.0,
+                middle: 50000.0,
+                width: 1000.0,
+            }),
+            ..Default::default()
+        }));
+        TickContext {
+            symbol: "BTC",
+            price,
+            timestamp_ms: ts,
+            indicators: Some(ind),
+            signals: &[],
+            h0_allowed: true,
+            funding_rate: None,
+            index_price: None,
+            open_interest,
+        }
+    }
+
+    /// Helper: direct-construct a per-symbol state populated with OI samples.
+    /// 輔助：直接構造帶 OI 樣本的 per-symbol 狀態。
+    fn state_with_oi(samples: &[(u64, f64)]) -> BbBreakoutPerSymbolState {
+        let mut st = BbBreakoutPerSymbolState::default();
+        for (ts, oi) in samples {
+            st.oi_buffer.push_back((*ts, *oi));
+        }
+        st
+    }
+
+    /// TEST 1: oi_buffer fills on every ticker event carrying OI and evicts
+    /// samples older than the configured window (saturating_sub guards regress).
+    /// 測試 1：每個帶 OI 的 ticker 入隊，超出窗口者從前端淘汰。
+    #[test]
+    fn test_oi_buffer_fills_and_evicts() {
+        let mut s = BbBreakout::new();
+        s.oi_buffer_window_ms = 60_000; // 60s rolling window
+        // Feed 10 samples every 12s → span = 108s > 60s window.
+        // 每 12s 入一筆，共 10 筆，跨 108s > 60s 窗口。
+        for i in 0..10u64 {
+            let ts = i * 12_000;
+            // Use squeeze-neutral bandwidth; this exercises the buffer path only.
+            // 用普通帶寬只驗 buffer 路徑。
+            s.on_tick(&ctx_oi(0.03, 0.5, 1.0, ts, 50000.0, Some(100.0 + i as f64)));
+        }
+        let st = s.symbols.get("BTC").expect("symbol tracked");
+        // Newest ts = 108_000; anything older than (108_000 - 60_000) = 48_000 evicted.
+        // 最新 108_000；< 48_000 者淘汰 → 保留 ts ≥ 48_000 共 5 筆 (48,60,72,84,96,108) = 6 筆。
+        for (ts, _) in st.oi_buffer.iter() {
+            assert!(*ts >= 48_000, "sample ts {ts} should have been evicted");
+        }
+        assert!(st.oi_buffer.len() <= 10, "must not exceed push count");
+        assert!(
+            st.oi_buffer.len() >= 2,
+            "window should retain at least newest + one previous sample"
+        );
+    }
+
+    /// TEST 2: basic (newest - oldest)/oldest delta = 10% when oi goes 100→110.
+    /// 測試 2：基本差分 100→110 = +10%。
+    #[test]
+    fn test_oi_delta_pct_basic() {
+        let st = state_with_oi(&[(0, 100.0), (30_000, 105.0), (60_000, 110.0)]);
+        let d = st.compute_oi_delta_pct().expect("delta available");
+        assert!((d - 0.10).abs() < 1e-12, "expected +0.10, got {d}");
+    }
+
+    /// TEST 3: single sample → None (cannot compute delta).
+    /// 測試 3：單一樣本 → None（無法計算差分）。
+    #[test]
+    fn test_oi_delta_pct_insufficient_samples() {
+        let st = state_with_oi(&[(0, 100.0)]);
+        assert!(st.compute_oi_delta_pct().is_none());
+        // And empty buffer also None.
+        // 空 buffer 亦應 None。
+        let empty = BbBreakoutPerSymbolState::default();
+        assert!(empty.compute_oi_delta_pct().is_none());
+    }
+
+    /// TEST 4: oldest == 0 → None (guard against div-by-zero; no panic).
+    /// 測試 4：oldest == 0 → None（防除以零，不 panic）。
+    #[test]
+    fn test_oi_delta_pct_zero_guard() {
+        let st = state_with_oi(&[(0, 0.0), (30_000, 50.0)]);
+        assert!(st.compute_oi_delta_pct().is_none());
+        // Negative oldest also rejected (unusual but defensive).
+        // 負數 oldest 亦拒絕（防守式檢查）。
+        let st_neg = state_with_oi(&[(0, -5.0), (30_000, 50.0)]);
+        assert!(st_neg.compute_oi_delta_pct().is_none());
+    }
+
+    /// TEST 5: flag=false → bit-identical behaviour to pre-EDGE-P2-2 baseline.
+    /// Run two strategy instances (one with OI feeds, one without) and assert
+    /// the emitted intent confluence_score is identical when flag is disabled.
+    /// 測試 5：flag=false → 與舊基線 bit-identical。
+    #[test]
+    fn test_confluence_bonus_disabled_by_default() {
+        let mut baseline = BbBreakout::new();
+        baseline.min_persistence_ms = 0;
+        assert!(!baseline.enable_oi_signal, "default must be OFF");
+
+        let mut with_oi = BbBreakout::new();
+        with_oi.min_persistence_ms = 0;
+        assert!(!with_oi.enable_oi_signal, "default must be OFF");
+
+        // Seed squeeze on both.
+        // 雙方都先進入壓縮。
+        baseline.on_tick(&ctx_full_entry(0.01, 0.5, 1.0, 0, 50000.0, None));
+        with_oi.on_tick(&ctx_full_entry(0.01, 0.5, 1.0, 0, 50000.0, Some(100.0)));
+
+        // Feed mid-tick with OI climb (only affects buffer, not score, because flag=false).
+        // 中途加入 OI 上升樣本（flag=false 時不應影響 score）。
+        with_oi.on_tick(&ctx_full_entry(0.02, 0.5, 1.0, 300_000, 50000.0, Some(110.0)));
+
+        // Breakout tick (long).
+        // 突破 tick（多頭）。
+        let i_baseline = baseline.on_tick(&ctx_full_entry(0.05, 1.1, 2.0, 700_000, 51000.0, None));
+        let i_oi = with_oi.on_tick(&ctx_full_entry(
+            0.05,
+            1.1,
+            2.0,
+            700_000,
+            51000.0,
+            Some(120.0),
+        ));
+        assert_eq!(i_baseline.len(), 1);
+        assert_eq!(i_oi.len(), 1);
+        let (sb, so) = match (&i_baseline[0], &i_oi[0]) {
+            (StrategyAction::Open(a), StrategyAction::Open(b)) => {
+                (a.confluence_score, b.confluence_score)
+            }
+            _ => panic!("expected Open intents"),
+        };
+        // Bit-identical (both Some or both None; if Some, equal bits).
+        // bit-identical：同為 Some 且 bits 相等，或同為 None。
+        match (sb, so) {
+            (Some(a), Some(b)) => assert_eq!(
+                a.to_bits(),
+                b.to_bits(),
+                "confluence_score must be bit-identical when flag=false"
+            ),
+            (None, None) => {}
+            other => panic!("confluence_score mismatch: {:?}", other),
+        }
+    }
+
+    /// TEST 6: flag=on + rising OI + bullish signal → confluence_score shifted
+    /// up by exactly `oi_confluence_bonus` relative to the same tick sequence
+    /// with OI held constant.
+    /// 測試 6：flag=on + OI 上升 + 多頭 → confluence_score 較 OI 無變化者高 +bonus。
+    #[test]
+    fn test_confluence_bonus_applied_when_flag_on() {
+        // Two instances: both OI-enabled, one with OI rising, one flat.
+        // 兩個實例：都啟用 OI，一個 OI 上升、一個持平。
+        let mut rising = BbBreakout::new();
+        rising.min_persistence_ms = 0;
+        rising.enable_oi_signal = true;
+        rising.oi_confluence_bonus = 0.10;
+        rising.oi_buffer_window_ms = 600_000;
+
+        let mut flat = BbBreakout::new();
+        flat.min_persistence_ms = 0;
+        flat.enable_oi_signal = true;
+        flat.oi_confluence_bonus = 0.10;
+        flat.oi_buffer_window_ms = 600_000;
+
+        // Squeeze tick (same OI base on both).
+        // 壓縮 tick（兩者 OI 相同基準）。
+        rising.on_tick(&ctx_full_entry(0.01, 0.5, 1.0, 0, 50000.0, Some(100.0)));
+        flat.on_tick(&ctx_full_entry(0.01, 0.5, 1.0, 0, 50000.0, Some(100.0)));
+        // Mid tick — rising climbs, flat holds.
+        // 中段：rising 上升，flat 不變。
+        rising.on_tick(&ctx_full_entry(0.02, 0.5, 1.0, 300_000, 50000.0, Some(110.0)));
+        flat.on_tick(&ctx_full_entry(0.02, 0.5, 1.0, 300_000, 50000.0, Some(100.0)));
+        // Breakout long on both.
+        // 突破多頭。
+        let i_rising = rising.on_tick(&ctx_full_entry(
+            0.05,
+            1.1,
+            2.0,
+            700_000,
+            51000.0,
+            Some(120.0),
+        ));
+        let i_flat = flat.on_tick(&ctx_full_entry(
+            0.05,
+            1.1,
+            2.0,
+            700_000,
+            51000.0,
+            Some(100.0),
+        ));
+        assert_eq!(i_rising.len(), 1);
+        assert_eq!(i_flat.len(), 1);
+        let (sr, sf) = match (&i_rising[0], &i_flat[0]) {
+            (StrategyAction::Open(a), StrategyAction::Open(b)) => (
+                a.confluence_score.expect("score present"),
+                b.confluence_score.expect("score present"),
+            ),
+            _ => panic!("expected Open intents"),
+        };
+        let diff = sr - sf;
+        // Rising OI confirms long → bonus applied; flat → no bonus.
+        // OI 上升確認多頭加 bonus；OI 不變（delta=0）不加；差異 ≈ bonus。
+        // NOTE: confluence_score is stored as f32 in OrderIntent (EDGE-P3-1 A6),
+        // so tolerance is relaxed to accommodate single-precision cast error.
+        // 備註：OrderIntent.confluence_score 為 f32，放寬容差以容納 f32 cast 誤差。
+        assert!(
+            (diff - 0.10).abs() < 1e-4,
+            "expected confluence_score diff ≈ +0.10, got {diff}"
+        );
+    }
+
+    /// TEST 7: flag=on + falling OI + bullish signal (divergence) → score
+    /// shifted DOWN by `oi_confluence_bonus` vs the flat-OI control.
+    /// 測試 7：flag=on + OI 下降 + 多頭（背離）→ confluence_score 較對照組低 -bonus。
+    #[test]
+    fn test_confluence_penalty_on_divergence() {
+        let mut falling = BbBreakout::new();
+        falling.min_persistence_ms = 0;
+        falling.enable_oi_signal = true;
+        falling.oi_confluence_bonus = 0.10;
+        falling.oi_buffer_window_ms = 600_000;
+
+        let mut flat = BbBreakout::new();
+        flat.min_persistence_ms = 0;
+        flat.enable_oi_signal = true;
+        flat.oi_confluence_bonus = 0.10;
+        flat.oi_buffer_window_ms = 600_000;
+
+        // Squeeze baseline.
+        falling.on_tick(&ctx_full_entry(0.01, 0.5, 1.0, 0, 50000.0, Some(100.0)));
+        flat.on_tick(&ctx_full_entry(0.01, 0.5, 1.0, 0, 50000.0, Some(100.0)));
+        // Mid: falling drops, flat holds.
+        falling.on_tick(&ctx_full_entry(0.02, 0.5, 1.0, 300_000, 50000.0, Some(95.0)));
+        flat.on_tick(&ctx_full_entry(0.02, 0.5, 1.0, 300_000, 50000.0, Some(100.0)));
+        // Breakout long on both.
+        let i_falling = falling.on_tick(&ctx_full_entry(
+            0.05,
+            1.1,
+            2.0,
+            700_000,
+            51000.0,
+            Some(90.0),
+        ));
+        let i_flat = flat.on_tick(&ctx_full_entry(
+            0.05,
+            1.1,
+            2.0,
+            700_000,
+            51000.0,
+            Some(100.0),
+        ));
+        let (sfall, sflat) = match (&i_falling[0], &i_flat[0]) {
+            (StrategyAction::Open(a), StrategyAction::Open(b)) => (
+                a.confluence_score.expect("score present"),
+                b.confluence_score.expect("score present"),
+            ),
+            _ => panic!("expected Open intents"),
+        };
+        let diff = sfall - sflat;
+        // Falling OI + long = divergence → -bonus; flat delta=0 → no change.
+        // OI 下降 + 多頭 = 背離扣 bonus；flat delta=0 不變；差異 ≈ -bonus。
+        // f32 cast tolerance as above.
+        assert!(
+            (diff - (-0.10)).abs() < 1e-4,
+            "expected confluence_score diff ≈ -0.10, got {diff}"
+        );
+    }
+
+    /// TEST 8: validate() rejects out-of-range OI parameters.
+    /// 測試 8：validate() 拒絕超出範圍的 OI 參數。
+    #[test]
+    fn test_oi_params_validation() {
+        let mut p = BbBreakoutParams::default();
+        // Window too short.
+        // 窗口太短。
+        p.oi_buffer_window_ms = 500;
+        assert!(p.validate().is_err(), "window < 1000ms must fail");
+        p.oi_buffer_window_ms = 60_000;
+        // Bonus out of bounds.
+        // bonus 超界。
+        p.oi_confluence_bonus = 0.6;
+        assert!(p.validate().is_err(), "|bonus| > 0.5 must fail");
+        p.oi_confluence_bonus = f64::NAN;
+        assert!(p.validate().is_err(), "NaN bonus must fail");
+        p.oi_confluence_bonus = 0.10;
+        assert!(p.validate().is_ok(), "defaults must pass");
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    // EDGE-P2-2 FUP (E2 findings #1 #2 #3 #5 #6): regression tests
+    // EDGE-P2-2 FUP（E2 #1 #2 #3 #5 #6）：回歸測試
+    // ════════════════════════════════════════════════════════════════════════
+
+    fn make_open_intent(symbol: &str) -> OrderIntent {
+        OrderIntent {
+            symbol: symbol.into(),
+            is_long: true,
+            qty: 0.01,
+            confidence: 0.6,
+            strategy: "bb_breakout".into(),
+            order_type: "market".into(),
+            limit_price: None,
+            confluence_score: None,
+            persistence_elapsed_ms: None,
+            time_in_force: None,
+            maker_timeout_ms: None,
+        }
+    }
+
+    /// FUP #1: identical OI values must dedup so trade-tick replays don't
+    /// dilute the rolling window (change-of-state semantics).
+    /// FUP #1：相同 OI 值必須 dedup，避免 trade-tick 重播稀釋窗口。
+    #[test]
+    fn test_oi_buffer_deduplicates_same_value() {
+        let mut s = BbBreakout::new();
+        s.oi_buffer_window_ms = 60_000;
+        s.on_tick(&ctx_oi(0.03, 0.5, 1.0, 0, 50000.0, Some(100.0)));
+        s.on_tick(&ctx_oi(0.03, 0.5, 1.0, 1_000, 50000.0, Some(100.0)));
+        s.on_tick(&ctx_oi(0.03, 0.5, 1.0, 2_000, 50000.0, Some(100.0)));
+        let st = s.symbols.get("BTC").expect("symbol tracked");
+        assert_eq!(
+            st.oi_buffer.len(),
+            1,
+            "repeated identical OI values must be deduped; got {}",
+            st.oi_buffer.len()
+        );
+        // A genuine change should push a new sample.
+        // 真實變動必須入隊。
+        s.on_tick(&ctx_oi(0.03, 0.5, 1.0, 3_000, 50000.0, Some(100.0001)));
+        let st = s.symbols.get("BTC").unwrap();
+        assert_eq!(st.oi_buffer.len(), 2, "change-of-state must append");
+    }
+
+    /// FUP #6: out-of-order or regressed timestamps (cross-stream interleave)
+    /// must be rejected — strict monotonic push guard.
+    /// FUP #6：亂序 / 回溯 ts（跨 stream 交錯）必須被拒絕，嚴格單調入隊。
+    #[test]
+    fn test_oi_buffer_skips_ts_regression() {
+        let mut s = BbBreakout::new();
+        s.oi_buffer_window_ms = 60_000;
+        s.on_tick(&ctx_oi(0.03, 0.5, 1.0, 10_000, 50000.0, Some(100.0)));
+        // Stale sample with older ts → must be dropped even though OI changed.
+        // 舊 ts（即使 OI 變動）必須丟棄。
+        s.on_tick(&ctx_oi(0.03, 0.5, 1.0, 5_000, 50000.0, Some(95.0)));
+        // Equal ts → must also drop (strict >).
+        // 相同 ts → 也丟（嚴格 >）。
+        s.on_tick(&ctx_oi(0.03, 0.5, 1.0, 10_000, 50000.0, Some(105.0)));
+        let st = s.symbols.get("BTC").expect("symbol tracked");
+        assert_eq!(st.oi_buffer.len(), 1, "ts regressions must not push");
+        let (ts, oi) = *st.oi_buffer.back().unwrap();
+        assert_eq!(ts, 10_000);
+        assert!((oi - 100.0).abs() < f64::EPSILON);
+    }
+
+    /// FUP #2: `on_rejection` must preserve the live `oi_buffer` (market
+    /// observation) while rolling back trading-state fields.
+    /// FUP #2：on_rejection 僅回滾策略狀態，oi_buffer（市場觀察）必須保留。
+    #[test]
+    fn test_on_rejection_preserves_oi_buffer() {
+        use crate::strategies::Strategy;
+
+        let mut s = BbBreakout::new();
+        s.min_persistence_ms = 0;
+        s.oi_buffer_window_ms = 600_000;
+        // Seed squeeze → OI sample #1.
+        s.on_tick(&ctx_full_entry(0.01, 0.5, 1.0, 0, 50000.0, Some(100.0)));
+        // Mid tick → OI sample #2 (change of state pushes).
+        s.on_tick(&ctx_full_entry(0.02, 0.5, 1.0, 10_000, 50000.0, Some(105.0)));
+        // Breakout tick → emits Open intent + stashes prev_state snapshot.
+        let actions = s.on_tick(&ctx_full_entry(
+            0.05,
+            1.1,
+            2.0,
+            20_000,
+            51000.0,
+            Some(110.0),
+        ));
+        assert!(
+            matches!(actions.first(), Some(StrategyAction::Open(_))),
+            "expected Open intent on breakout tick"
+        );
+        let buf_len_before = s.symbols.get("BTC").unwrap().oi_buffer.len();
+        assert!(buf_len_before >= 2, "buffer must have samples");
+
+        // Reject → trading state rolls back; oi_buffer must NOT.
+        // 拒絕 → 交易狀態回滾；oi_buffer 不能丟。
+        let intent = make_open_intent("BTC");
+        s.on_rejection(&intent, "test rejection");
+
+        let buf_after = &s.symbols.get("BTC").expect("symbol still tracked").oi_buffer;
+        assert_eq!(
+            buf_after.len(),
+            buf_len_before,
+            "oi_buffer must be preserved across rollback (market observation, not strategy state)"
+        );
+        // Values/ts must be byte-identical.
+        let back = *buf_after.back().unwrap();
+        assert_eq!(back.0, 20_000);
+        assert!((back.1 - 110.0).abs() < f64::EPSILON);
+    }
+
+    /// FUP #3 (noise floor) + FUP #2 (buffer preserved) — if
+    /// `|oi_delta_pct| <= oi_min_delta_pct`, bonus must NOT apply and the
+    /// score equals the flat-OI control bit-for-bit (when both paths are at
+    /// the same suppression regime).
+    /// FUP #3：|oi_delta_pct| ≤ noise floor 時 bonus 不施加，與 flat 對照組相同。
+    #[test]
+    fn test_oi_min_delta_pct_below_threshold_no_effect() {
+        let mut guarded = BbBreakout::new();
+        guarded.min_persistence_ms = 0;
+        guarded.enable_oi_signal = true;
+        guarded.oi_confluence_bonus = 0.10;
+        guarded.oi_buffer_window_ms = 600_000;
+        // Noise floor 5% — OI must change by more than 5% to contribute.
+        // 噪音地板 5% — OI 必須 >5% 變動才貢獻 bonus。
+        guarded.oi_min_delta_pct = 0.05;
+
+        let mut flat = BbBreakout::new();
+        flat.min_persistence_ms = 0;
+        flat.enable_oi_signal = true;
+        flat.oi_confluence_bonus = 0.10;
+        flat.oi_buffer_window_ms = 600_000;
+        flat.oi_min_delta_pct = 0.05;
+
+        // Squeeze baseline.
+        guarded.on_tick(&ctx_full_entry(0.01, 0.5, 1.0, 0, 50000.0, Some(100.0)));
+        flat.on_tick(&ctx_full_entry(0.01, 0.5, 1.0, 0, 50000.0, Some(100.0)));
+        // Mid-tick: guarded rises 2% (< floor); flat stays.
+        // 中段：guarded 上升 2%（< 地板）；flat 不動。
+        guarded.on_tick(&ctx_full_entry(0.02, 0.5, 1.0, 300_000, 50000.0, Some(102.0)));
+        flat.on_tick(&ctx_full_entry(0.02, 0.5, 1.0, 300_000, 50000.0, Some(100.0)));
+        // Breakout long.
+        let i_g = guarded.on_tick(&ctx_full_entry(
+            0.05,
+            1.1,
+            2.0,
+            700_000,
+            51000.0,
+            Some(102.0),
+        ));
+        let i_f = flat.on_tick(&ctx_full_entry(
+            0.05,
+            1.1,
+            2.0,
+            700_000,
+            51000.0,
+            Some(100.0),
+        ));
+        let (sg, sf) = match (&i_g[0], &i_f[0]) {
+            (StrategyAction::Open(a), StrategyAction::Open(b)) => (
+                a.confluence_score.expect("score present"),
+                b.confluence_score.expect("score present"),
+            ),
+            _ => panic!("expected Open intents"),
+        };
+        // Below floor → bonus suppressed → equal to flat control (f32 bit-identical).
+        // 低於地板 → bonus 被壓制 → 與 flat 相等（f32 bit-identical）。
+        assert_eq!(
+            sg.to_bits(),
+            sf.to_bits(),
+            "below noise floor, score must match flat control exactly"
+        );
+    }
+
+    /// FUP #5: validate() must reject `oi_buffer_window_ms` above upper bound
+    /// (600_000 ms / 10 min) — prevents memory blow-up scenarios.
+    /// FUP #5：validate() 須拒絕 window > 600_000ms（防記憶體膨脹）。
+    #[test]
+    fn test_oi_window_upper_bound_validation() {
+        let mut p = BbBreakoutParams::default();
+        p.oi_buffer_window_ms = 600_001;
+        assert!(
+            p.validate().is_err(),
+            "window > 600_000ms must fail"
+        );
+        p.oi_buffer_window_ms = 600_000;
+        assert!(p.validate().is_ok(), "exact upper bound must pass");
+    }
+
+    /// FUP #3: validate() must enforce `oi_min_delta_pct` ∈ [0.0, 0.5] and
+    /// reject NaN/Inf.
+    /// FUP #3：validate() 須強制 oi_min_delta_pct 在 [0.0, 0.5] 且非 NaN/Inf。
+    #[test]
+    fn test_oi_min_delta_pct_validation() {
+        let mut p = BbBreakoutParams::default();
+        p.oi_min_delta_pct = -0.01;
+        assert!(p.validate().is_err(), "negative floor must fail");
+        p.oi_min_delta_pct = 0.51;
+        assert!(p.validate().is_err(), "floor > 0.5 must fail");
+        p.oi_min_delta_pct = f64::NAN;
+        assert!(p.validate().is_err(), "NaN floor must fail");
+        p.oi_min_delta_pct = 0.0;
+        assert!(p.validate().is_ok(), "0.0 (default) must pass");
+        p.oi_min_delta_pct = 0.5;
+        assert!(p.validate().is_ok(), "0.5 upper bound must pass");
     }
 }
