@@ -21,6 +21,11 @@
 set -e
 cd "$(dirname "$0")/.."
 
+# Runtime data dir (env var for Mac compatibility).
+# Mac dev recommendation: export OPENCLAW_DATA_DIR="$HOME/.openclaw_runtime"
+# Runtime 資料目錄（支援 Mac env var 部署）。
+DATA_DIR="${OPENCLAW_DATA_DIR:-/tmp/openclaw}"
+
 SCOPE="${1:-all}"
 case "$SCOPE" in
     --engine-only|--api-only|all|"") ;;
@@ -34,11 +39,11 @@ esac
 stop_engine() {
     # Fix 2 (2026-04-14): create maintenance flag BEFORE killing engine so
     # watchdog sees the flag on its next poll and will not restart. Flag
-    # lives in /tmp/openclaw/ to match the rest of the runtime data dir.
+    # lives in $DATA_DIR/ (default /tmp/openclaw/) to match runtime data dir.
     # 修復 2：kill 引擎前先建立 maintenance flag，watchdog 下次 poll 時看到
-    # flag 就不會重啟。flag 放於 /tmp/openclaw/ 與其他 runtime 資料對齊。
-    mkdir -p /tmp/openclaw
-    touch /tmp/openclaw/engine_maintenance.flag
+    # flag 就不會重啟。flag 放於 $DATA_DIR/（預設 /tmp/openclaw/）與其他 runtime 資料對齊。
+    mkdir -p "$DATA_DIR"
+    touch "$DATA_DIR/engine_maintenance.flag"
     echo ">>> Created maintenance flag → watchdog will NOT auto-restart"
     echo ">>> Stopping Rust engine (graceful SIGTERM)..."
     if ! pgrep -f "openclaw-engine" > /dev/null 2>&1; then
@@ -84,6 +89,6 @@ esac
 
 echo ""
 echo "=== Status ==="
-echo "Engine maintenance flag: $(ls -la /tmp/openclaw/engine_maintenance.flag 2>/dev/null || echo 'NONE')"
-echo "Remove with: rm /tmp/openclaw/engine_maintenance.flag"
+echo "Engine maintenance flag: $(ls -la "$DATA_DIR/engine_maintenance.flag" 2>/dev/null || echo 'NONE')"
+echo "Remove with: rm \"$DATA_DIR/engine_maintenance.flag\""
 echo "Or: bash helper_scripts/restart_all.sh (auto-clears flag)"

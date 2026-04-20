@@ -172,9 +172,23 @@ max_retries             = 0
 
 ```
 GitHub repo:    yunancun/BybitOpenClaw
-本地主工作樹:   /home/ncyu/BybitOpenClaw/srv（/home/ncyu/srv ← symlink）
+本地主工作樹:   Linux: /home/ncyu/BybitOpenClaw/srv（/home/ncyu/srv ← symlink）
+                Mac:   $HOME/BybitOpenClaw/srv（由 git pull 建立；無 symlink）
 本地-only：     settings/（secrets）  trading_services/（runtime）
 ```
+
+### 跨平台 Runtime 路徑（Mac/Linux 共用）
+**Mac dev 必設**（Linux 上可選，默認 `/tmp/openclaw`）：
+```bash
+export OPENCLAW_DATA_DIR="$HOME/.openclaw_runtime"
+mkdir -p "$OPENCLAW_DATA_DIR"
+```
+原因：Mac `/tmp` 是 `/private/tmp` symlink 且 LaunchAgents 看到不同路徑；Mac 上跑 pytest、`restart_all.sh`、IPC socket 都必須走 `$OPENCLAW_DATA_DIR`。Linux 上不設時 fallback 到 `/tmp/openclaw`，行為不變。
+
+**Mac 差異注意**：`$HOME/.openclaw_runtime` **不會**在開機時被清（Linux `/tmp` 每次重啟清空），因此：
+- `engine_maintenance.flag` 若上次異常留下會阻塞 watchdog → 開工前先 `rm -f "$OPENCLAW_DATA_DIR/engine_maintenance.flag"`
+- 舊 socket 檔（`engine.sock` / `ai_service.sock`）殘留會讓新 process 拒綁 → 啟動前清或讓腳本 unlink 舊 socket
+- 建議 Mac `.zshrc` 加 `alias oc-clean-runtime='rm -f "$OPENCLAW_DATA_DIR"/{*.sock,engine_maintenance.flag}'`
 
 ### 啟動檢查
 ```bash

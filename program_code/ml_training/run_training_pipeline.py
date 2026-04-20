@@ -19,11 +19,18 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
+
+# Honour OPENCLAW_DATA_DIR for cross-platform dev (Mac: $HOME/.openclaw_runtime).
+# 支援 OPENCLAW_DATA_DIR 跨平台開發（Mac：$HOME/.openclaw_runtime）。
+DEFAULT_MODEL_DIR = os.path.join(
+    os.environ.get("OPENCLAW_DATA_DIR", "/tmp/openclaw"), "models"
+)
 
 
 @dataclass
@@ -34,7 +41,7 @@ class PipelineConfig:
     strategy_type: str = "trending"
     symbol: str = "BTCUSDT"
     regime: str = "trending"
-    output_dir: str = "/tmp/openclaw/models"
+    output_dir: str = DEFAULT_MODEL_DIR
     dsn: Optional[str] = None  # PostgreSQL DSN for ETL + posteriors persistence
     min_samples: int = 200
     dry_run: bool = False
@@ -328,7 +335,7 @@ if __name__ == "__main__":  # pragma: no cover
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--strategy", default="trending")
     ap.add_argument("--symbol", default="BTCUSDT")
-    ap.add_argument("--output", default="/tmp/openclaw/models")
+    ap.add_argument("--output", default=DEFAULT_MODEL_DIR)
     ap.add_argument("--engine-mode", default="demo", choices=("paper", "demo", "live"))
     ap.add_argument("--use-quantile-predictor", action="store_true",
                     help="Route to EDGE-P3-1 Stage 2 quantile trio path")

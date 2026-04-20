@@ -69,7 +69,9 @@ err()  { echo -e "${C_ERR}✗${C_END} $*" >&2; }
 confirm() {
     [ "$YES" -eq 1 ] && return 0
     read -r -p "$1 [yes/NO]: " r
-    [ "${r,,}" = "yes" ]
+    # Portable lowercase match (macOS bash 3.2 has no ${var,,}).
+    # 可攜式大小寫匹配（macOS bash 3.2 不支援 ${var,,}）。
+    case "$r" in [Yy][Ee][Ss]) return 0 ;; *) return 1 ;; esac
 }
 
 # ── Step 1: Pre-flight ────────────────────────────────────────────────────
@@ -231,7 +233,7 @@ OPENCLAW_DATABASE_URL="postgresql://redacted@127.0.0.1:5432/trading_ai" \
 OPENCLAW_IPC_SECRET="${IPC_SECRET}" \
     nohup .venv/bin/python3 .venv/bin/uvicorn app.main:app \
     --host 0.0.0.0 --port 8000 --workers 4 \
-    > /tmp/openclaw/api.log 2>&1 &
+    > "$DATA_DIR/api.log" 2>&1 &
 API_PID=$!
 echo "    API PID: $API_PID"
 cd "$REPO_ROOT"

@@ -22,7 +22,11 @@ from typing import Optional
 logger = logging.getLogger(__name__)
 
 # Default output directory / 默認輸出目錄
-DEFAULT_OUTPUT_DIR = "/tmp/openclaw/parquet"
+# Honour OPENCLAW_DATA_DIR for cross-platform dev (Mac: $HOME/.openclaw_runtime).
+# 支援 OPENCLAW_DATA_DIR 跨平台開發（Mac：$HOME/.openclaw_runtime）。
+DEFAULT_OUTPUT_DIR = os.path.join(
+    os.environ.get("OPENCLAW_DATA_DIR", "/tmp/openclaw"), "parquet"
+)
 
 # EDGE-P3-1 Stage 1/2: canonical 17-feature order matching Rust FeatureVectorV1
 # (rust/openclaw_engine/src/edge_predictor/features.rs §3.2). The order must be

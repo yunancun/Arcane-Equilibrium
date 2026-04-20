@@ -121,15 +121,16 @@ async def test_ai_service_dispatch_unknown_method_returns_error():
 # T-P1-4: ipc_client.EngineIPCClient
 # ─────────────────────────────────────────────────────────────────────────
 
-def test_engine_ipc_client_initial_state():
+def test_engine_ipc_client_initial_state(tmp_path):
     from app.ipc_client import EngineIPCClient
 
-    client = EngineIPCClient(socket_path="/tmp/openclaw_test_smoke.sock")
+    socket_path = str(tmp_path / "smoke.sock")
+    client = EngineIPCClient(socket_path=socket_path)
     assert client.is_connected is False
     # Engine considered available until fallback explicitly trips.
     # 在降級模式被觸發前 engine 視為可用。
     assert client.is_engine_available is True
-    assert client._socket_path == "/tmp/openclaw_test_smoke.sock"
+    assert client._socket_path == socket_path
 
 
 def test_engine_ipc_client_socket_env_fallback(monkeypatch):

@@ -70,7 +70,9 @@ HANDLER_TTLS: dict[str, float] = {
 }
 
 # Socket path defaults / Socket 路徑默認值
-_DEFAULT_SOCKET_DIR = "/tmp/openclaw"
+# Honour OPENCLAW_DATA_DIR for cross-platform dev (Mac: $HOME/.openclaw_runtime).
+# 支援 OPENCLAW_DATA_DIR 跨平台開發（Mac：$HOME/.openclaw_runtime）。
+_DEFAULT_SOCKET_DIR = os.environ.get("OPENCLAW_DATA_DIR", "/tmp/openclaw")
 _DEFAULT_SOCKET_NAME = "ai_service.sock"
 
 JSONRPC_VERSION = "2.0"                   # JSON-RPC protocol version
