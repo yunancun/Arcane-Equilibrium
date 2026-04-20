@@ -312,6 +312,15 @@ pub struct RestingLimitOrder {
     /// 超過 operator 設定的 `funding_drag_threshold` 且方向逆向 maker 時，sweep
     /// 將碰觸 FillPartial 降級為 Keep。`0.0` = 未知 / 尚未見 ticker，本單停用
     /// guard。於提交時鎖定，不受後續 funding regime 變動回溯影響。
+    ///
+    /// EDGE-P2-3 Phase 1B-5 FUP-4: `#[serde(default)]` falls back to `0.0` when
+    /// an older persisted queue (written before 1B-4.3 landed) is loaded —
+    /// equivalent to "unknown rate, guard stays off", which is the correct
+    /// backcompat semantic. Without this, deserialising pre-1B-4.3 data
+    /// would fail with "missing field".
+    /// 1B-5 FUP-4：`#[serde(default)]` 讓 1B-4.3 之前持久化的隊列反序列化時
+    /// 此欄位回退 `0.0`（= rate 未知、guard 關閉），語意與缺欄位前一致。
+    #[serde(default)]
     pub funding_rate_at_submit: f64,
 }
 
