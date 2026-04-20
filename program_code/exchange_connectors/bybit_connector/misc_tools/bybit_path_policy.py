@@ -6,8 +6,15 @@ Shared path policy helper for the local BybitOpenClaw repo.
 
 Design goal:
 - provide a single place for canonical repo-local path resolution
-- reduce future re-introduction of hardcoded /home/ncyu/srv paths
+- reduce future re-introduction of hardcoded absolute-path literals
+  (Linux `/home/<user>/...` or macOS `/Users/<user>/...`)
 - keep compatibility path visible, but not the preferred target for new code
+
+Env var contract:
+- `OPENCLAW_SRV_ROOT` is consumed here for historical reasons (~115 scripts)
+- `OPENCLAW_BASE_DIR` is the authoritative env var for new code (see CLAUDE.md §六)
+- Deployers should `export` both to the same absolute path until a future
+  unification pass retires `OPENCLAW_SRV_ROOT`.
 """
 
 from __future__ import annotations
@@ -15,11 +22,11 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-# Resolve project root: env var OPENCLAW_SRV_ROOT > __file__ relative > legacy compat path
-# 项目根目录解析：优先环境变量 > 脚本相对路径推导 > 历史兼容路径
+# Resolve project root: env var OPENCLAW_SRV_ROOT > __file__ relative
+# 项目根目录解析：优先环境变量 > 脚本相对路径推导（不再 fallback 到任何 hardcoded 历史路径）
 _env_root = os.environ.get("OPENCLAW_SRV_ROOT")
 REPO_ROOT = Path(_env_root) if _env_root else Path(__file__).resolve().parents[4]
-COMPAT_ROOT = REPO_ROOT  # No longer hardcoded / 不再硬编码 /home/ncyu/srv
+COMPAT_ROOT = REPO_ROOT  # No longer hardcoded to any user-home absolute path / 不再硬编码
 
 DOCKER_PROJECTS_ROOT = REPO_ROOT / "docker_projects"
 PROGRAM_CODE_ROOT = REPO_ROOT / "program_code"
