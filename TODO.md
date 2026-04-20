@@ -1,12 +1,12 @@
 # OpenClaw TODO — 工作清單
 
-**最後更新**：2026-04-20（EDGE-P2-3 Phase 1B-4.3 + 1B-5 hot-reload + FUP-4 全部結案；14 個完成項批量歸檔 → `docs/archive/2026-04-20--completed_todo_batch.md`）
+**最後更新**：2026-04-20（EDGE-P2-2 Phase A OI confluence signal + E2 FUP #1-#7 全修 `381c542`；EDGE-P2-3 Phase 1B-4.3 + 1B-5 hot-reload + FUP-4 全部結案；14 個完成項批量歸檔 → `docs/archive/2026-04-20--completed_todo_batch.md`）
 **Engine**：PID 3029633 · binary mtime 2026-04-19 22:32 → 含全部先前 staged 修復（P0-6 永久修復 + P1-7 A INTENT-WRITE-GAP-1 + P1-7 B edge_estimator scheduler + P1-17 Winsorize + LIVE-GATE-BINDING-1 + DYNAMIC-RISK-1 + IPC-SCAN-1c + FILL-CONTEXT-LINKAGE-1 + EXIT-FEATURES-TABLE-1 Phase 1b + Plan N ai_budget dedup + E5-P1/P2 + E5-FN-2/3 + DISPATCH-RETRY-1 + MARKET-KLINES-STALE-1 + DUAL-TRACK Track P T1-T5 骨架 + PIPELINE-SLOT-1 Phase 1-4）+ **EXIT-FEATURES-TABLE-1 Phase 1b GAP-1**（commit `35808e9` apply_confirmed_fill 接線，待流量驗證）
 **Python uvicorn**：PID 3029688（4 workers）· started 2026-04-19 22:33 → 含 P0-12 LIVE-GATE-FALLBACK-1 + E5-FN-3 AnalystAgent pilot + PIPELINE-SLOT-1 Phase 4 daemon-thread trigger
 **PIPELINE-SLOT-1 live 驗證**：LiveAuthWatcher 22:33 啟動 `env=LiveDemo poll_interval_secs=5`；authorization.json 已由 Manual restart sentinel 清除；等 operator 走 GUI renew → 應 ≤1s 觀察到 Live pipeline 重生
-**測試基準線**：Rust engine lib **1770** / bin 38 / core 392 / e2e 35 / reconciler_e2e 19 · Python **2866** passed（+9 E5-FN-3 + 2 DYNAMIC-RISK-STATUS-TEST-SIG-1 修復 83a0475 + 16 WATCHDOG-DNS-CLASSIFY-1 新測）+ audit 4 passed / ml_training 238 passed · **0 pre-existing fail**（DYNAMIC-RISK 已清）
+**測試基準線**：Rust engine lib **1791** / bin 38 / core 392 / e2e 35 / reconciler_e2e 19 · Python **2866** passed（+9 E5-FN-3 + 2 DYNAMIC-RISK-STATUS-TEST-SIG-1 修復 83a0475 + 16 WATCHDOG-DNS-CLASSIFY-1 新測）+ audit 4 passed / ml_training 238 passed · **0 pre-existing fail**（DYNAMIC-RISK 已清）
 
-> engine lib 1631 → 1770（+139）差距 = 1B-4.1/4.2 · 1B-5 gate · 3 FUPs · 1B-4.3 funding drag · 1B-5 hot-reload · FUP-4 共 9 commits（`0febdc3` · `6b02e49` · `1c79c6b` · `a3744fa` · `bf75986` · `94810b4` · `bd1a429` · `a2a791b` · `a93dbda`）。當前 engine binary PID 3029633（mtime 2026-04-19 22:32）**不含** `bd1a429` + `a2a791b` + `a93dbda`，下次 `--rebuild` 才會進入 runtime。
+> engine lib 1631 → 1770（+139）→ 1791（+21）差距 = 1B-4.1/4.2 · 1B-5 gate · 3 FUPs · 1B-4.3 funding drag · 1B-5 hot-reload · FUP-4（9 commits `0febdc3..a93dbda`）+ **EDGE-P2-2 Phase A + FUP #1-#7 `381c542`**（+13 OI tests + 8 FUP tests）。當前 engine binary PID 3029633（mtime 2026-04-19 22:32）**不含** `bd1a429` + `a2a791b` + `a93dbda` + `381c542`，下次 `--rebuild` 才會進入 runtime。
 **健康**：demo alive（snapshot age 5.9s） · paper/live 預期 dead（PAPER-DISABLE-1 + 待 renew） · 今日 1 crash（12:25，為 redeploy 前殘留）
 **DB 驗證（2026-04-20 00:20）**：market.klines 5 timeframes 在近 1h 寫入 ✅ · trading.intents demo 57 rows/3h ✅（P1-7 A 生效）· **learning.exit_features GAP-1 驗收 ✅ 1.8h 提前結案**（demo 8 close fills / 8 exit_features / coverage_ratio=1.000 / Strategy 6 + FastTrack 2）
 
