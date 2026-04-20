@@ -2,13 +2,13 @@
 """
 clean_restart_flatten.py — Exchange flatten helper for clean_restart.sh.
 
-MODULE_NOTE (EN): Uses PyO3 openclaw_core.BybitClient to close every open
-  position with reduce_only market orders and cancel every open order, for a
-  given environment ("demo" or "mainnet"). Safe to run with the Rust engine
-  stopped — talks to Bybit REST directly.
-MODULE_NOTE (中): 使用 PyO3 openclaw_core.BybitClient 對指定環境（demo 或
-  mainnet）的每個未平倉持倉下 reduce_only 市價單，並取消所有未成交訂單。
-  Rust 引擎停止時可安全運行 — 直接透過 Bybit REST 通訊。
+MODULE_NOTE (EN): Uses httpx-based BybitClient (PYO3-ELIMINATE-1 Phase 2) to
+  close every open position with reduce_only market orders and cancel every
+  open order, for a given environment ("demo" or "mainnet"). Safe to run with
+  the Rust engine stopped — talks to Bybit REST directly.
+MODULE_NOTE (中): 使用 httpx 版 BybitClient（PYO3-ELIMINATE-1 Phase 2 後）
+  對指定環境（demo 或 mainnet）的每個未平倉持倉下 reduce_only 市價單，
+  並取消所有未成交訂單。Rust 引擎停止時可安全運行 — 直接透過 Bybit REST 通訊。
 
 Usage:
     python3 clean_restart_flatten.py --env demo [--yes] [--dry-run]
@@ -30,12 +30,14 @@ def main() -> int:
     ap.add_argument("--dry-run", action="store_true", help="Report only")
     args = ap.parse_args()
 
-    # ── Import PyO3 bridge ───────────────────────────────────────────────
+    # ── Import Python BybitClient (PYO3-ELIMINATE-1 Phase 2) ────────────
+    # ── 使用純 Python httpx 版 BybitClient（已從 PyO3 遷移）
     try:
-        from openclaw_core import BybitClient
+        from program_code.exchange_connectors.bybit_connector.control_api_v1.app.bybit_rest_client import BybitClient
     except ImportError as exc:
-        print(f"[ERR] openclaw_core not importable: {exc}", file=sys.stderr)
-        print("      Activate API venv first:", file=sys.stderr)
+        print(f"[ERR] BybitClient not importable: {exc}", file=sys.stderr)
+        print("      Activate API venv and cd to repo root:", file=sys.stderr)
+        print("      cd /home/ncyu/BybitOpenClaw/srv  # or $OPENCLAW_BASE_DIR", file=sys.stderr)
         print("      source program_code/exchange_connectors/bybit_connector/"
               "control_api_v1/.venv/bin/activate", file=sys.stderr)
         return 2

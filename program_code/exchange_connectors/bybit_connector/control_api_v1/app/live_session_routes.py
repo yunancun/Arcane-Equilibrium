@@ -217,7 +217,7 @@ def _get_rust_client_safe():
             ep_file = Path(secrets_base) / "live" / "bybit_endpoint"
             endpoint = ep_file.read_text(encoding="utf-8").strip() if ep_file.exists() else "mainnet"
             environment = "live_demo" if endpoint == "demo" else "mainnet"
-            from openclaw_core import BybitClient
+            from .bybit_rest_client import BybitClient
             return BybitClient(environment=environment)
         # No live slot — fall back to demo
         # 無 live 槽 — 回退到 demo

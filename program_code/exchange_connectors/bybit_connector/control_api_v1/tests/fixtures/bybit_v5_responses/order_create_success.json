@@ -1,0 +1,10 @@
+{
+  "retCode": 0,
+  "retMsg": "OK",
+  "result": {
+    "orderId": "1712262345000-NEW-ORDER-01",
+    "orderLinkId": "openclaw-create-001"
+  },
+  "retExtInfo": {},
+  "time": 1712262345500
+}
