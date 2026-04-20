@@ -2,11 +2,11 @@
 # clean_restart.sh — 乾淨重啟腳本
 #
 # MODULE_NOTE (EN): Full clean-reset of the trading stack. Stops engine+API,
-#   flattens every exchange position (demo + optional live) via PyO3 Bybit
-#   client, archives runtime state + damaged DB tables, verifies the Rust
+#   flattens every exchange position (demo + optional live) via the httpx
+#   BybitClient, archives runtime state + damaged DB tables, verifies the Rust
 #   binary is current (rebuilds if source is newer), then restarts engine +
 #   API and validates via watchdog. Re-opens Paper/Demo/Live engines cleanly.
-# MODULE_NOTE (中): 交易棧完整乾淨重設。停止引擎+API，透過 PyO3 Bybit 客戶端
+# MODULE_NOTE (中): 交易棧完整乾淨重設。停止引擎+API，透過 httpx BybitClient
 #   清空所有交易所持倉（demo + 可選 live），歸檔運行期狀態 + 污染 DB 表，
 #   驗證 Rust 二進制為最新（若源碼更新則重編），重啟引擎+API 並以 watchdog
 #   驗證。乾淨地重新啟動 Paper/Demo/Live 三引擎。

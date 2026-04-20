@@ -92,7 +92,7 @@ async def get_ai_consultation_status(
 
 @phase2_router.get("/demo/status")
 async def get_demo_status(actor: base.AuthenticatedActor = Depends(base.current_actor)):
-    """Get Bybit Demo connector status via PyO3 BybitClient / 通過 PyO3 獲取 Demo 狀態"""
+    """Get Bybit Demo connector status via httpx BybitClient / 通過 httpx BybitClient 獲取 Demo 狀態"""
     rc = _get_rust_client()
     if rc is None:
         return _envelope({"enabled": False, "source": "rust_engine"})
@@ -107,11 +107,11 @@ async def get_demo_status(actor: base.AuthenticatedActor = Depends(base.current_
 @phase2_router.get("/demo/balance")
 async def get_demo_balance(actor: base.AuthenticatedActor = Depends(base.current_actor)):
     """
-    Get Bybit Demo account balance via PyO3 BybitClient.
+    Get Bybit Demo account balance via httpx BybitClient.
     Also exposes engine-side session baseline (initial_balance, peak_balance) so the
     GUI can show "session initial / peak" that resets on engine process restart and
     persists across pause/resume.
-    通過 PyO3 獲取 Demo 餘額；同時暴露引擎側 session 基線（initial_balance / peak_balance），
+    通過 httpx BybitClient 獲取 Demo 餘額；同時暴露引擎側 session 基線（initial_balance / peak_balance），
     供 GUI 顯示「本次 session 初始 / 峰值」，引擎進程重啟時重置，pause/resume 期間保持不變。
     """
     # BALANCE-REAL-1: Demo pipeline now refuses to start when Bybit wallet REST
@@ -279,13 +279,13 @@ def _safe_float(value: Any) -> float | None:
 
 
 def _fetch_min_notional(symbol: str) -> float | None:
-    """Lazy-fetch instrument min_notional from Rust BybitClient PyO3 bridge.
-    Returns None when bridge unavailable / symbol uncached / any exception.
+    """Lazy-fetch instrument min_notional from the httpx BybitClient.
+    Returns None when client unavailable / symbol uncached / any exception.
     Callers MUST treat None as "dust gate not applicable" (same semantics as
     paper_state/owner_attribution.rs line 103).
 
-    從 Rust BybitClient PyO3 橋接懶查詢合約 min_notional。
-    橋接不可用 / 合約未緩存 / 任何異常 → 返回 None（與 Rust 端 "no dust gate" 語意對齊）。
+    從 httpx BybitClient 懶查詢合約 min_notional。
+    客戶端不可用 / 合約未緩存 / 任何異常 → 返回 None（與 Rust 端 "no dust gate" 語意對齊）。
     """
     rc = _get_rust_client()
     if rc is None:
@@ -371,7 +371,7 @@ def _attach_owner_strategy(positions: list, engine: str) -> list:
 
 @phase2_router.get("/demo/positions")
 async def get_demo_positions(actor: base.AuthenticatedActor = Depends(base.current_actor)):
-    """Get Bybit Demo open positions via PyO3 BybitClient / 通過 PyO3 獲取 Demo 持倉"""
+    """Get Bybit Demo open positions via httpx BybitClient / 通過 httpx BybitClient 獲取 Demo 持倉"""
     rc = _get_rust_client()
     if rc is None:
         return _envelope({"enabled": False, "source": "rust_engine"})
@@ -408,8 +408,8 @@ def _normalize_order(o: dict) -> dict:
 @phase2_router.get("/demo/orders")
 async def get_demo_orders(actor: base.AuthenticatedActor = Depends(base.current_actor)):
     """
-    Get Bybit Demo open orders via PyO3 BybitClient.
-    通過 PyO3 BybitClient 獲取 Demo 活躍訂單。
+    Get Bybit Demo open orders via httpx BybitClient.
+    通過 httpx BybitClient 獲取 Demo 活躍訂單。
     """
     rc = _get_rust_client()
     if rc is None:
@@ -837,8 +837,8 @@ async def get_demo_fills(actor: base.AuthenticatedActor = Depends(base.current_a
                 db_pool.put_conn(conn)
             except Exception:
                 pass
-    # Fallback: Bybit API via PyO3 (closedPnl from exchange).
-    # 備援：通過 PyO3 調 Bybit API（closedPnl 來自交易所）。
+    # Fallback: Bybit API via httpx BybitClient (closedPnl from exchange).
+    # 備援：通過 httpx BybitClient 調 Bybit API（closedPnl 來自交易所）。
     rc = _get_rust_client()
     if rc is None:
         return _envelope({"enabled": False, "source": "rust_engine"})

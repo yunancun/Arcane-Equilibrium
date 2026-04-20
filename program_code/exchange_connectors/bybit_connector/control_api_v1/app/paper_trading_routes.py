@@ -168,8 +168,8 @@ async def _ipc_command(method: str, params: dict | None = None) -> dict:
 
 
 def _get_demo_summary() -> dict:
-    """Get Demo account summary (balance + position count) via PyO3 BybitClient.
-    通過 PyO3 BybitClient 獲取 Demo 帳戶摘要。
+    """Get Demo account summary (balance + position count) via httpx BybitClient.
+    通過 httpx BybitClient 獲取 Demo 帳戶摘要。
     """
     from .strategy_ai_routes import _get_rust_client
     rc = _get_rust_client()

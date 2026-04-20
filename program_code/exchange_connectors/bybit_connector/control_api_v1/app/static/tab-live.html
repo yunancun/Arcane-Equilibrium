@@ -735,13 +735,13 @@ async function loadDashboardData() {
     _liveStratMap = _buildLiveStratMap(fArr);
   } catch (_) { _liveStratMap = {}; }
 
-  // Balance — from /api/v1/live/balance (PyO3 Rust client → real exchange data)
-  // 餘額 — 來自實盤端點（PyO3 Rust client → 真實交易所帳戶資料）
+  // Balance — from /api/v1/live/balance (httpx BybitClient → real exchange data)
+  // 餘額 — 來自實盤端點（httpx BybitClient → 真實交易所帳戶資料）
   try {
     const balData = balRes.status === 'fulfilled' && balRes.value && balRes.value.data;
     if (balData && balData.available !== false) {
-      // PyO3 returns snake_case; Bybit REST returns camelCase — handle both
-      // PyO3 返回 snake_case；Bybit REST 返回 camelCase — 兩者均相容
+      // httpx BybitClient returns snake_case; Bybit REST raw returns camelCase — handle both
+      // httpx BybitClient 返回 snake_case；Bybit REST 原樣返回 camelCase — 兩者均相容
       const equity = parseFloat(
         balData.total_equity || balData.totalEquity || balData.equity || balData.balance || 0
       );

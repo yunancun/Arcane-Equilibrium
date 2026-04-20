@@ -368,8 +368,8 @@ logger.info(
 )
 
 # DEAD-PY-2: DEMO_CONNECTOR removed — BybitDemoConnector trading methods deleted.
-# Demo account data is read via Rust PyO3 BybitClient (read-only).
-# DEMO_CONNECTOR 已移除 — BybitDemoConnector 交易方法已刪除。Demo 帳戶數據改用 Rust PyO3 BybitClient 讀取（只讀）。
+# Demo account data is read via the httpx BybitClient (read-only).
+# DEMO_CONNECTOR 已移除 — BybitDemoConnector 交易方法已刪除。Demo 帳戶數據改用 httpx BybitClient 讀取（只讀）。
 DEMO_CONNECTOR = None
 
 logger.info(
@@ -541,7 +541,7 @@ except Exception as e:
     logger.info("Grafana data writer not available: %s / Grafana 写入器不可用: %s", e, e)
 
 # DEAD-PY-2: Demo connector wiring removed. DEMO_CONNECTOR = None.
-# Demo 連接器接線已移除。Demo 帳戶數據讀取改用 Rust PyO3 BybitClient。
+# Demo 連接器接線已移除。Demo 帳戶數據讀取改用 httpx BybitClient。
 DEMO_SYNC = None
 
 # ── Market Scanner + Strategy Auto-Deployer (autonomous opportunity discovery) ──
