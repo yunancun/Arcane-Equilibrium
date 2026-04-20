@@ -178,12 +178,36 @@ GitHub repo:    yunancun/BybitOpenClaw
 ```
 
 ### 跨平台 Runtime 路徑（Mac/Linux 共用）
-**Mac dev 必設**（Linux 上可選，默認 `/tmp/openclaw`）：
+**Mac dev 必設**（Linux 上可選，默認 `/tmp/openclaw` + `$HOME/BybitOpenClaw/`）：
 ```bash
+# Repo 位置（任意路徑皆可，例如 /Users/ncyu/Documents/Projects/TradeBot）
+export OPENCLAW_BASE_DIR="/Users/ncyu/Documents/Projects/TradeBot"
+
+# Runtime / socket / log 目錄（Mac /tmp 是 /private/tmp symlink，必須顯式設）
 export OPENCLAW_DATA_DIR="$HOME/.openclaw_runtime"
-mkdir -p "$OPENCLAW_DATA_DIR"
+
+# Secrets 根目錄（含 environment_files/ + secret_files/）
+export OPENCLAW_SECRETS_ROOT="$HOME/.openclaw_secrets"
+
+# Bybit slot base（Rust/Python 專用，= $SECRETS_ROOT/secret_files/bybit）
+export OPENCLAW_SECRETS_DIR="$HOME/.openclaw_secrets/secret_files/bybit"
+
+# 歸檔目錄（clean_restart / fresh_start 寫入）
+export OPENCLAW_ARCHIVE_DIR="$HOME/.openclaw_archive"
+
+mkdir -p "$OPENCLAW_DATA_DIR" "$OPENCLAW_SECRETS_ROOT/environment_files" \
+         "$OPENCLAW_SECRETS_ROOT/secret_files/bybit" "$OPENCLAW_ARCHIVE_DIR"
 ```
-原因：Mac `/tmp` 是 `/private/tmp` symlink 且 LaunchAgents 看到不同路徑；Mac 上跑 pytest、`restart_all.sh`、IPC socket 都必須走 `$OPENCLAW_DATA_DIR`。Linux 上不設時 fallback 到 `/tmp/openclaw`，行為不變。
+原因：Mac `/tmp` 是 `/private/tmp` symlink 且 LaunchAgents 看到不同路徑；Mac 上跑 pytest、`restart_all.sh`、IPC socket 都必須走 `$OPENCLAW_DATA_DIR`。Linux 上不設時 fallback 到 `/tmp/openclaw` + `$HOME/BybitOpenClaw/{secrets,archive}`，行為不變。
+
+**env var 語義速查**：
+| env var | 指向 | 誰在讀 |
+|---|---|---|
+| `OPENCLAW_BASE_DIR` | repo 根（srv） | Rust `startup.rs` / `strategies` · Python 多處 · `start_paper_trading.sh` |
+| `OPENCLAW_DATA_DIR` | runtime（sockets / logs / flags / snapshot） | Rust engine · API · scripts |
+| `OPENCLAW_SECRETS_ROOT` | secrets/ 根（含 env_files + secret_files） | shell scripts（restart/clean/fresh） |
+| `OPENCLAW_SECRETS_DIR` | secrets/secret_files/bybit（slot base） | Rust `bybit_rest_client` · Python `bybit_rest_client.py` · live_auth |
+| `OPENCLAW_ARCHIVE_DIR` | archive（damaged_/fresh_start_ dumps） | clean_restart / fresh_start |
 
 **Mac 差異注意**：`$HOME/.openclaw_runtime` **不會**在開機時被清（Linux `/tmp` 每次重啟清空），因此：
 - `engine_maintenance.flag` 若上次異常留下會阻塞 watchdog → 開工前先 `rm -f "$OPENCLAW_DATA_DIR/engine_maintenance.flag"`

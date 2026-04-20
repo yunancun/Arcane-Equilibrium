@@ -15,8 +15,11 @@ MAX_WAIT_SEC=60
 POLL_INTERVAL=2
 
 # ── Resolve API token / 解析 API Token ──
+# Repo root: prefer $OPENCLAW_BASE_DIR, else resolve from script location (cross-platform).
+# Repo 根目錄：優先 $OPENCLAW_BASE_DIR，否則由腳本位置解析（跨平台）。
+REPO_ROOT="${OPENCLAW_BASE_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 if [[ -z "${OPENCLAW_API_TOKEN:-}" ]]; then
-    TOKEN_FILE="$HOME/BybitOpenClaw/srv/program_code/exchange_connectors/bybit_connector/control_api_v1/.secrets/api_token"
+    TOKEN_FILE="$REPO_ROOT/program_code/exchange_connectors/bybit_connector/control_api_v1/.secrets/api_token"
     if [[ -f "$TOKEN_FILE" ]]; then
         OPENCLAW_API_TOKEN=$(cat "$TOKEN_FILE")
     else
