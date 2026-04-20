@@ -352,21 +352,29 @@ git status && git log --oneline -5
   - `BybitClient`（bybit_bridge/ ~880 LOC）— **3 call sites**：`strategy_ai_routes.py:46` / `live_session_routes.py:220` / `helper_scripts/clean_restart_flatten.py:35`
 - **前置**：無阻塞，可隨時啟動。**不阻 Live Gate**（Mac 遷移是 Live 後長期工作）。
 
-**Phase 1 · 刪死代碼（~30 min，零風險）**
-- [ ] 刪除 `rust/openclaw_pyo3/src/context_distiller.rs`（228 LOC）
-- [ ] 刪除 `rust/openclaw_pyo3/src/hedging_engine.rs`（285 LOC）
-- [ ] 從 `rust/openclaw_pyo3/src/lib.rs` #[pymodule] 移除對應 `add_class` 註冊（5 行）
-- [ ] 驗證：`cargo build -p openclaw_pyo3 --release` 綠 + `pytest` 全量綠（確認無隱藏 import）
+**Phase 1 · 刪死代碼（~30 min，零風險）✅ 2026-04-20（待 commit）**
+- [x] 刪除 `rust/openclaw_pyo3/src/context_distiller.rs`（228 LOC）
+- [x] 刪除 `rust/openclaw_pyo3/src/hedging_engine.rs`（285 LOC）
+- [x] 從 `rust/openclaw_pyo3/src/lib.rs` #[pymodule] 移除對應 `add_class` 註冊（5 行）
+- [x] 驗證：`cargo build -p openclaw_pyo3 --release` 綠（16.12s，warnings 為預存 openclaw_engine dead_code）
+- [ ] pytest 全量綠（合併 Phase 2 一起跑）
 - [ ] commit：`refactor(pyo3): PYO3-ELIMINATE-1 Phase 1 — drop dead ContextDistiller + HedgingEngine (513 LOC, 0 call sites)`
 
-**Phase 2 · `BybitClient` 3 call sites Python 化（~0.5-1 day）**
-- [ ] 先分析 3 call sites 實際調用的 `BybitClient` 方法集（`strategy_ai_routes.py` 單例初始化做什麼 / `live_session_routes.py:220` 取 positions / `clean_restart_flatten.py` 做什麼）
-- [ ] 決策點：Python httpx 重寫 vs IPC 到 Rust engine
-  - 若 ≤5 methods 且無 WS → **Python httpx 直接寫**（預估 ~150 LOC）
-  - 若涉及共享認證/reconnect 邏輯 → **加 IPC handler** 到 `ipc_server/handlers`（重用 engine 已有的 `bybit_rest_client.rs`）
-- [ ] 實作 + 單測對等（`pytest` 對比新舊返回 shape）
-- [ ] 3 call sites 遷移 + 刪除 `from openclaw_core import BybitClient`
-- [ ] commit：`refactor(connector): PYO3-ELIMINATE-1 Phase 2 — migrate BybitClient callers to {httpx|IPC}`
+**Phase 2 method surface 實測**（2026-04-20，Python 實際使用的 BybitClient method）：
+- **Read-only（9）**：`has_credentials()` `base_url()` `instrument_count()` `refresh_balance()` `refresh_instruments(category)` `get_instrument(symbol)` `get_positions(category)` `get_active_orders(category)` `get_executions(category, limit)`
+- **Write（3）**：`round_qty(symbol, qty)` · `place_order(...)` (LIVE-GATE-FALLBACK-1 reduce_only close) · `BybitClient(environment=...)` ctor
+- **決策**：Option A httpx — `place_order` reduce_only 必須繞過引擎走 REST（根原則 #6），其他 11 個 method 一起走 httpx 保持接口一致；IPC 方案會破壞緊急平倉路徑的「繞過引擎」語意。
+
+**Phase 2 · `BybitClient` 3 call sites Python 化 ✅ 2026-04-20（待 commit + E2 審）**
+- [x] 先分析 3 call sites 實際調用的 `BybitClient` 方法集（12 methods + 1 `cancel_order` 盤點；spec 詳見 `docs/worklogs/2026-04-20--pyo3_eliminate_phase2_migration_spec.md`）
+- [x] 決策：Python httpx 重寫（理由：`place_order` reduce_only 必須繞引擎走 REST，所有 method 統一走 httpx 最一致；無 WS 需求）
+- [x] 實作：`program_code/.../app/bybit_rest_client.py` 914 行（457 code + 357 doc + 140 blank）+ 40 unit tests（0.53s 綠）
+- [x] Parity harness：`tests/test_bybit_rest_client_parity.py` 23 tests（15 Mode B passed + 8 Mode A skip 因 PyO3 cdylib 未裝 venv）+ 8 Bybit V5 fixtures
+- [x] 3 call sites 遷移完成：`strategy_ai_routes.py`（singleton factory 重命名 `_RUST_BYBIT_CLIENT` → `_BYBIT_CLIENT`）· `live_session_routes.py:220` · `helper_scripts/clean_restart_flatten.py`
+- [x] grep `from openclaw_core` 生產代碼 0 match（剩 docs/spec/archive/Rust 內部 `rust/openclaw_core` crate ref — 預期）
+- [x] pytest control_api 全量 **2647 passed / 6 skipped / 0 failed**（63.50s）
+- [ ] E2 對抗性審查（實作 + parity harness + 3 patch + LIVE-GATE-FALLBACK-1 語意保持）
+- [ ] commit：`refactor(connector): PYO3-ELIMINATE-1 Phase 2 — migrate BybitClient callers to httpx`
 
 **Phase 3 · 拆 crate + 清工具鏈（~1 hr）**
 - [ ] 刪整個 `rust/openclaw_pyo3/` 目錄

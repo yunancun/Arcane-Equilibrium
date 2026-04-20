@@ -1,0 +1,117 @@
+{
+  "retCode": 0,
+  "retMsg": "OK",
+  "result": {
+    "category": "linear",
+    "nextPageCursor": "",
+    "list": [
+      {
+        "symbol": "BTCUSDT",
+        "contractType": "LinearPerpetual",
+        "status": "Trading",
+        "baseCoin": "BTC",
+        "quoteCoin": "USDT",
+        "launchTime": "1585526400000",
+        "deliveryTime": "0",
+        "deliveryFeeRate": "",
+        "priceScale": "2",
+        "leverageFilter": {
+          "minLeverage": "1",
+          "maxLeverage": "100.00",
+          "leverageStep": "0.01"
+        },
+        "priceFilter": {
+          "minPrice": "0.10",
+          "maxPrice": "1000000.00",
+          "tickSize": "0.10"
+        },
+        "lotSizeFilter": {
+          "maxOrderQty": "1190.000",
+          "maxMktOrderQty": "500.000",
+          "minOrderQty": "0.001",
+          "qtyStep": "0.001",
+          "postOnlyMaxOrderQty": "1190.000",
+          "minNotionalValue": "5"
+        },
+        "unifiedMarginTrade": true,
+        "fundingInterval": 480,
+        "settleCoin": "USDT",
+        "copyTrading": "both",
+        "upperFundingRate": "0.00375",
+        "lowerFundingRate": "-0.00375"
+      },
+      {
+        "symbol": "ETHUSDT",
+        "contractType": "LinearPerpetual",
+        "status": "Trading",
+        "baseCoin": "ETH",
+        "quoteCoin": "USDT",
+        "launchTime": "1585526400000",
+        "deliveryTime": "0",
+        "deliveryFeeRate": "",
+        "priceScale": "2",
+        "leverageFilter": {
+          "minLeverage": "1",
+          "maxLeverage": "50.00",
+          "leverageStep": "0.01"
+        },
+        "priceFilter": {
+          "minPrice": "0.01",
+          "maxPrice": "199999.98",
+          "tickSize": "0.01"
+        },
+        "lotSizeFilter": {
+          "maxOrderQty": "10000.00",
+          "maxMktOrderQty": "5000.00",
+          "minOrderQty": "0.01",
+          "qtyStep": "0.01",
+          "postOnlyMaxOrderQty": "10000.00",
+          "minNotionalValue": "5"
+        },
+        "unifiedMarginTrade": true,
+        "fundingInterval": 480,
+        "settleCoin": "USDT",
+        "copyTrading": "both",
+        "upperFundingRate": "0.00375",
+        "lowerFundingRate": "-0.00375"
+      },
+      {
+        "symbol": "DOGEUSDT",
+        "contractType": "LinearPerpetual",
+        "status": "Trading",
+        "baseCoin": "DOGE",
+        "quoteCoin": "USDT",
+        "launchTime": "1607068800000",
+        "deliveryTime": "0",
+        "deliveryFeeRate": "",
+        "priceScale": "5",
+        "leverageFilter": {
+          "minLeverage": "1",
+          "maxLeverage": "50.00",
+          "leverageStep": "0.01"
+        },
+        "priceFilter": {
+          "minPrice": "0.00001",
+          "maxPrice": "199.99998",
+          "tickSize": "0.00001"
+        },
+        "lotSizeFilter": {
+          "maxOrderQty": "25000000",
+          "maxMktOrderQty": "10000000",
+          "minOrderQty": "1",
+          "qtyStep": "1",
+          "postOnlyMaxOrderQty": "25000000",
+          "minNotionalValue": "5"
+        },
+        "unifiedMarginTrade": true,
+        "fundingInterval": 480,
+        "settleCoin": "USDT",
+        "copyTrading": "both",
+        "upperFundingRate": "0.00375",
+        "lowerFundingRate": "-0.00375"
+      }
+    ]
+  },
+  "retExtInfo": {},
+  "time": 1712262345000
+}

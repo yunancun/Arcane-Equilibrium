@@ -1,13 +1,13 @@
 """Strategy AI & Demo Routes — AI consultation, Telegram, Demo data read (TD-02 split).
 策略 AI 和 Demo 路由 — AI 諮詢、Telegram、Demo 數據讀取。
 
-All demo data reads use Rust PyO3 BybitClient exclusively.
+All demo data reads use httpx-based BybitClient (PYO3-ELIMINATE-1 Phase 2).
 All trading operations (close) go through Rust IPC.
-Python BybitDemoConnector fallbacks removed — Rust is the sole exchange interface.
+Python BybitDemoConnector fallbacks removed — pure-Python httpx BybitClient + Rust IPC.
 
-所有 Demo 數據讀取使用 Rust PyO3 BybitClient。
+所有 Demo 數據讀取使用 httpx 版 BybitClient（PYO3-ELIMINATE-1 Phase 2）。
 所有交易操作（平倉）通過 Rust IPC。
-Python BybitDemoConnector 降級路徑已移除 — Rust 是唯一交易所接口。
+Python BybitDemoConnector 降級路徑已移除 — 純 Python httpx BybitClient + Rust IPC。
 """
 from __future__ import annotations
 
@@ -27,30 +27,33 @@ from .strategy_wiring import (
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Rust PyO3 bridge (PYO3-BYBIT) — lazy singleton
-# Rust PyO3 橋接 — 懶加載單例
+# Bybit REST client (PYO3-ELIMINATE-1 Phase 2) — lazy singleton
+# httpx-based Python client replacing former PyO3 bridge.
+# Bybit REST 客戶端 — 已從 PyO3 橋接遷移為純 Python httpx 實作。
 # ---------------------------------------------------------------------------
-_RUST_BYBIT_CLIENT = None
-_RUST_BRIDGE_AVAILABLE = None  # None = not checked yet / None = 尚未檢查
+_BYBIT_CLIENT = None
+_BYBIT_CLIENT_AVAILABLE = None  # None = not checked yet / None = 尚未檢查
 
 
 def _get_rust_client():
-    """Get or create the Rust BybitClient singleton. Returns None if unavailable.
-    獲取或創建 Rust BybitClient 單例。不可用時返回 None。"""
-    global _RUST_BYBIT_CLIENT, _RUST_BRIDGE_AVAILABLE
-    if _RUST_BRIDGE_AVAILABLE is False:
+    """Get or create the BybitClient singleton. Returns None if unavailable.
+    Name `_get_rust_client` retained for call-site stability (grep-safe); the
+    implementation is now pure-Python httpx (not Rust/PyO3).
+    獲取或創建 BybitClient 單例。不可用時返回 None。函數名保留以降低改動面。"""
+    global _BYBIT_CLIENT, _BYBIT_CLIENT_AVAILABLE
+    if _BYBIT_CLIENT_AVAILABLE is False:
         return None
-    if _RUST_BYBIT_CLIENT is not None:
-        return _RUST_BYBIT_CLIENT
+    if _BYBIT_CLIENT is not None:
+        return _BYBIT_CLIENT
     try:
-        from openclaw_core import BybitClient
-        _RUST_BYBIT_CLIENT = BybitClient()
-        _RUST_BRIDGE_AVAILABLE = True
-        logger.info("Rust BybitClient initialized (PyO3 bridge active) / Rust BybitClient 已初始化")
-        return _RUST_BYBIT_CLIENT
+        from .bybit_rest_client import BybitClient
+        _BYBIT_CLIENT = BybitClient()
+        _BYBIT_CLIENT_AVAILABLE = True
+        logger.info("BybitClient initialized (httpx) / BybitClient 已初始化（httpx）")
+        return _BYBIT_CLIENT
     except Exception as e:
-        _RUST_BRIDGE_AVAILABLE = False
-        logger.warning(f"Rust BybitClient unavailable, using Python fallback: {e}")
+        _BYBIT_CLIENT_AVAILABLE = False
+        logger.warning(f"BybitClient unavailable: {e}")
         return None
 
 
