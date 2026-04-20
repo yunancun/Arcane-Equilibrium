@@ -277,7 +277,7 @@ state_models ← state_compiler ← state_store ← main_legacy ← main.py
 | `_evolution_engine` | evolution_routes.py | 內部懶加載 `get_evolution_engine()` |
 | `_ledger` | experiment_routes.py | 內部懶加載 `get_experiment_ledger()` |
 | `LeaseTTLConfigManager._instance` | lease_ttl_config.py | `LeaseTTLConfigManager.get_instance()` |
-| `_RUST_BYBIT_CLIENT` | strategy_ai_routes.py | 內部懶加載 `_get_rust_client()` |
+| `_BYBIT_CLIENT` / `_BYBIT_CLIENT_AVAILABLE` | strategy_ai_routes.py | 內部懶加載 `_get_rust_client()`（PYO3-ELIMINATE-1 Phase 2 後指向 `app.bybit_rest_client.BybitClient` 純 httpx；函數名為 grep-stability 保留） |
 | `KLINE_MANAGER` / `INDICATOR_ENGINE` / `SIGNAL_ENGINE` / `ORCHESTRATOR` 等 12+ | strategy_wiring.py | 模組級全局，import 時初始化 |
 | `_SHARED_IPC_SLOTS` / `_SHARED_SLOT_LOCK` | ipc_dispatch.py | 內部懶加載 `get_or_connect_shared_client(slot_key)`（E5-P1-5） |
 | `_ANALYST_AUDIT_CB` / `_GOV_HUB_FOR_ANALYST` | strategy_wiring.py | 模組級，由 `agent_audit_bridge.make_agent_audit_callback(...)` 構造；AnalystAgent 建構時注入 `audit_callback`（E5-FN-3）。`agent_audit_bridge` 本身為無狀態工廠模組（不持有 singleton） |

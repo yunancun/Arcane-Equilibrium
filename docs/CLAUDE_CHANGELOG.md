@@ -1,7 +1,43 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-04-20（EDGE-P2-2 Phase A: OI confluence signal + E2 FUP #1-#7）
+> 最後更新：2026-04-20（PYO3-ELIMINATE-1 Phase 3：openclaw_pyo3 crate + build pipeline 歸零）
+
+### PYO3-ELIMINATE-1 Phase 3：drop openclaw_pyo3 crate + build pipeline（2026-04-20 · commit 待填）
+
+**目標**：消除 PyO3 cdylib 跨平台耦合最後一塊 — 在 Phase 1（刪 ContextDistiller/HedgingEngine 513 LOC）+ Phase 2（`BybitClient` 3 call sites 遷 httpx）後，拆 crate + 清工具鏈讓 `rg '#\[pyclass\]|from openclaw_core'` 歸零、Mac `cargo build` 只產 binary 無 .so/.dylib。
+
+**改動**（18 檔 / +40 / -1420 LOC 淨 -1380）：
+- `git rm -rf rust/openclaw_pyo3/`（Cargo.toml + pyproject.toml + src/bybit_bridge/\*.rs + lib.rs；8 檔 ~918 LOC）
+- `rust/Cargo.toml`：workspace members 4→3（移除 `openclaw_pyo3`）+ 移除 `pyo3 = { version = "0.24" }` workspace dep
+- `git rm helper_scripts/build_pyo3.sh`（285 LOC maturin build + dual-venv pip install）
+- `helper_scripts/restart_all.sh`：移除 `rebuild_pyo3()` function + 呼叫；MODULE_NOTE 更新（`--rebuild` 只剩 engine binary）；pre-flight 注釋反映新單一建構產物語意
+- `helper_scripts/clean_restart.sh` + `helper_scripts/fresh_start.sh`：`SRC_DIRS` 移除 `rust/openclaw_pyo3/src`（binary freshness 掃描）
+- `helper_scripts/SCRIPT_INDEX.md`：移除 `build_pyo3.sh` 列 + 更新 `restart_all.sh` 說明
+- `README.md`：架構圖 4→3 crates + 亮点「PyO3 39 方法」→「PYO3-ELIMINATE-1 完成（純 Python httpx）」+ 建構章節移除（pure Python API 無 build step）+ `restart_all` 旗標說明更新
+- `CLAUDE.md §九 singleton 表`：`_RUST_BYBIT_CLIENT` → `_BYBIT_CLIENT` / `_BYBIT_CLIENT_AVAILABLE`（函數名 `_get_rust_client()` 為 grep-stability 保留）
+- `TODO.md §PYO3-ELIMINATE-1`：Phase 1 `[x]` commit `a84ecdb` + Phase 2 `[x]` commit `0f8220b` + Phase 3 全 `[x]`（commit 待填）
+
+**驗證**：
+- `cargo build --release -p openclaw_engine`（在 `rust/` workspace）：11.14s 綠，warnings 為預存 `openclaw_engine` dead_code（非 Phase 3 引入）
+- `cargo test --release -p openclaw_engine --lib`：**1791 passed / 0 failed**（0.52s）
+- pytest `test_bybit_rest_client.py` + `test_bybit_rest_client_parity.py`：58 passed / 5 skipped（0.76s）
+- `bash -n` syntax-check 三 restart 腳本：OK
+- `git grep 'openclaw_pyo3\|build_pyo3\|rebuild_pyo3'` 活躍代碼/腳本 0 match（剩 TODO/worklog/audit/archive 歷史文件 — 預期）
+
+**遷移量化（三 phase 總計）**：
+- 刪除 LOC：Phase 1 513 + Phase 2 +914 code / -0（純新增 httpx client）+ Phase 3 -1420 = PyO3 surface 歸零
+- 移除 `maturin` / `cibuildwheel` 跨平台 wheel 管道需求
+- Rust workspace 4 crates → 3 crates；`pyo3 = "0.24"` workspace dep 消失
+- Mac M5 (aarch64-apple-darwin) 部署阻力：PyO3 wheel cross-compile（唯一硬骨頭）→ **消失**
+- `restart_all.sh --rebuild` 從「engine binary + PyO3 wheel dual-build」簡化為單一 `cargo build --release -p openclaw_engine`
+
+**下一步**：
+- 部署：直接 `bash helper_scripts/restart_all.sh --rebuild` — API 不需 build（純 Python），engine binary 從 rebuild 路徑下 11s 編好
+- Mac 準備度：workspace 現在在 Linux + macOS 均可 `cargo build --release` 產 binary；Python `.venv` 跨平台安裝即可（移除了唯一的 ABI 耦合點）
+- 回歸監控：FD leak（E2 F2.1）/ BybitError 例外類型（E2 F2.2）— 見 `docs/audits/2026-04-20--pyo3_eliminate_phase2_e2_review.md`
+
+---
 
 ### EDGE-P2-2 Phase A: OI Confluence Signal + E2 FUP #1-#7（2026-04-20）
 

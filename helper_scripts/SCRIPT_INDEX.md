@@ -11,18 +11,17 @@
 
 | 腳本 | 用途 |
 |------|------|
-| `restart_all.sh` | **輕量重啟**：停+啟 Rust 引擎 + API server（不動數據）。旗標：`--engine-only` / `--api-only` 限定範圍；`--rebuild` 先重建 PyO3 .so + openclaw-engine binary 再啟動。 |
+| `restart_all.sh` | **輕量重啟**：停+啟 Rust 引擎 + API server（不動數據）。旗標：`--engine-only` / `--api-only` 限定範圍；`--rebuild` 先重建 openclaw-engine binary 再啟動（PYO3-ELIMINATE-1 Phase 3 後無 PyO3 wheel）。 |
 | `stop_all.sh` | **優雅停止**：停引擎 + 建立 `engine_maintenance.flag`，讓 `engine_watchdog.py` 不自動重啟。`--engine-only` / `--api-only`。移除 flag: `rm /tmp/openclaw/engine_maintenance.flag` 或跑 `restart_all.sh`。 |
 | `clean_restart.sh` | **交易所層重啟**：停引擎 → PyO3 flatten demo/live 倉位 → 歸檔 runtime 文件（**不動 paper_state，不動 DB**）→ 檢查 binary 新舊 → 重建/重啟 → watchdog 驗證。輕度重置，保留歷史累計。旗標：`--yes` / `--mark-damaged`（歸檔 DB 交易表）/ `--include-live` / `--skip-flatten` / `--skip-build-check` |
 | `fresh_start.sh` | **完整 DB 重置重啟**（2026-04-15 新增）：在 clean_restart 基礎上額外清空所有 PnL / 手續費 / 勝率 / 經驗數據（透過 `fresh_start_reset.py`）讓引擎從零歷史冷啟動。**保留**：市場數據（klines/funding/OI/LSR/liquidations/regime/news）、model_registry、linucb_state_archive、features.versions、ai_budget_config。**摧毀**：fills/intents/orders/outcomes/signals/agent 活動/學習狀態。旗標：`--yes` / `--include-live` / `--skip-flatten` / `--skip-build-check` |
 | `start_paper_trading.sh` | API server 就緒後自動啟動 Paper Trading（systemd / cron @reboot） |
 
-### 建構 / 平倉 (Build & Flatten)
+### 平倉 (Flatten)
 
 | 腳本 | 用途 |
 |------|------|
-| `build_pyo3.sh` | **PyO3 (.so) 統一建構+部署**：`maturin build --release` 一次，`pip install --force-reinstall` 雙寫至 `~/.venv` 與 `control_api_v1/.venv`。旗標：`--release`（預設）/ `--debug` / `--venv <path>`（單一目標）/ `-n`/`--dry-run` / `--help`。退出碼：0 ok / 1 args / 2 build / 3 install / 4 verify。解決 Rust struct 改動後需手動 `maturin develop` 兩次的痛點。 |
-| `clean_restart_flatten.py` | 交易所平倉助手（被 clean_restart.sh / fresh_start.sh 調用；亦可獨立 `--env demo\|mainnet [--dry-run]`）。先 `refresh_instruments` 載入品種規格，再對每倉下 reduce_only 市價單 + 取消所有未成交單；5 輪 verify 循環掃殘尾 |
+| `clean_restart_flatten.py` | 交易所平倉助手（被 clean_restart.sh / fresh_start.sh 調用；亦可獨立 `--env demo\|mainnet [--dry-run]`）。PYO3-ELIMINATE-1 Phase 2 後改用 httpx BybitClient — 先 `refresh_instruments` 載入品種規格，再對每倉下 reduce_only 市價單 + 取消所有未成交單；5 輪 verify 循環掃殘尾 |
 
 ### 定時任務 / CI (Cron & CI)
 

@@ -196,7 +196,7 @@ elif [ ! -f "$BIN" ]; then
     cargo build --release -p openclaw-engine --manifest-path rust/Cargo.toml
     ok "binary built"
 else
-    SRC_DIRS="rust/openclaw_engine/src rust/openclaw_core/src rust/openclaw_types/src rust/openclaw_pyo3/src"
+    SRC_DIRS="rust/openclaw_engine/src rust/openclaw_core/src rust/openclaw_types/src"
     MANIFEST_FILES="Cargo.toml rust/Cargo.toml"
     EXIST_PATHS=""
     for p in $SRC_DIRS $MANIFEST_FILES; do [ -e "$p" ] && EXIST_PATHS="$EXIST_PATHS $p"; done
