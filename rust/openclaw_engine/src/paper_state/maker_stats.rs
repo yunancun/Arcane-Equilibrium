@@ -81,6 +81,17 @@ pub struct MakerStatsCounters {
     /// .stale_window_ms` → KPI 結果重設為 Cold，避免長期閒置 symbol 卡在
     /// 舊 regime 的 Degraded 結論裡不得翻身。
     pub last_terminal_ms: u64,
+    /// EDGE-P2-3 Phase 1B-4.3: number of sweep ticks on which the funding-drag
+    /// guard (#3) converted a touch-equal `FillPartial` classification into
+    /// `Keep`. Observability-only — it does NOT feed the KPI Degraded gate
+    /// (chronic adverse funding is a real-world signal, not a maker-path
+    /// defect) and it does NOT imply the order was cancelled (a deferred
+    /// touch can still fill via true cross on a later tick, or time out).
+    /// 1B-4.3：funding drag guard (#3) 把「碰觸」FillPartial 轉為 Keep 的 sweep
+    /// 次數。僅供觀察 —— 不計入 KPI Degraded 判斷（長期負 funding 是市場
+    /// 現象，非 maker 路徑故障），也不代表掛單被取消（後續 tick 仍可真實穿越
+    /// 成交或超時）。
+    pub funding_drag_skips: u64,
 }
 
 impl MakerStatsCounters {
@@ -267,6 +278,19 @@ impl MakerStats {
         self.entry(symbol).degraded_fallbacks += 1;
     }
 
+    /// EDGE-P2-3 Phase 1B-4.3: bump `funding_drag_skips` on both aggregate and
+    /// per-symbol when the sweep's funding-drag guard deferred a `FillPartial`
+    /// touch into `Keep`. Observability-only — does not touch terminal counters
+    /// or KPI inputs; same order may increment this across multiple ticks if
+    /// funding stays adverse and price keeps touching the limit.
+    /// EDGE-P2-3 Phase 1B-4.3：funding drag guard 將 FillPartial 改為 Keep 時，
+    /// aggregate 與 per-symbol 的 `funding_drag_skips` 各 +1。純觀察用，不影響
+    /// 終局 / KPI；同一張單在後續多個 tick 持續碰觸並逆向 funding 時會重複累計。
+    pub fn record_funding_drag_skip(&mut self, symbol: &str) {
+        self.aggregate.funding_drag_skips += 1;
+        self.entry(symbol).funding_drag_skips += 1;
+    }
+
     /// Resolve effective KPI status for `symbol`. Uses per-symbol counters
     /// when they have enough terminal samples; otherwise falls back to
     /// aggregate so cross-symbol experience can rescue a cold single symbol.
@@ -317,6 +341,23 @@ pub struct MakerKpiConfig {
     /// 重設為 Cold，避免 regime 已變（掃描器輪替等）卻被舊 Degraded 鎖住。
     /// `0` 關閉衰減（測試/固定時鐘情境）。
     pub stale_window_ms: u64,
+    /// EDGE-P2-3 Phase 1B-4.3: absolute funding-rate threshold above which the
+    /// maker sweep defers touch-equal (`FillPartial`) fills whose side is on
+    /// the wrong end of funding. Expressed as a decimal (0.0001 = 1 bps per
+    /// 8h settlement). Default `0.0005` (≈5 bps / 8h ≈ 55% annualised) — well
+    /// above the ±1 bps typical regime, bites only when funding is unambiguously
+    /// hostile to one side. `0.0` disables the guard entirely (tests +
+    /// deployments that don't want maker exposure shaped by funding).
+    /// True-cross `FillFull` and deadline `Timeout` are NEVER shaped by this
+    /// guard — it only touches the coin-flip branch where real-market fills
+    /// are statistically adverse-selected.
+    /// EDGE-P2-3 Phase 1B-4.3：funding rate 絕對值閾值，超過時 sweep 會把「碰觸」
+    /// FillPartial 於逆向 funding 側的掛單改判 Keep。decimal 表示
+    /// （0.0001 = 8h 1 bps）。預設 `0.0005`（≈5 bps / 8h ≈ 55% 年化）——遠高於
+    /// ±1 bps 常態，只有 funding 明顯敵對時介入。`0.0` 關閉本 guard。真實穿越
+    /// FillFull 與 Timeout 不受此 guard 影響 —— 僅限硬幣投擲分支，真實市場
+    /// 於該分支存在統計意義上的 adverse selection。
+    pub funding_drag_threshold: f64,
 }
 
 impl Default for MakerKpiConfig {
@@ -331,6 +372,11 @@ impl Default for MakerKpiConfig {
             // 30 分鐘 — 比一般交易空窗長，不會在安靜時段誤傷有效 Degraded；
             // 也不會讓掃描器輪替出的 symbol 卡太久。
             stale_window_ms: 1_800_000,
+            // 1B-4.3: 5 bps / 8h ≈ 55% annualised — conservative ceiling so
+            // the funding-drag guard bites only on unambiguously hostile
+            // regimes. Operators that want the guard disabled set this to 0.
+            // 1B-4.3：5 bps / 8h ≈ 55% 年化；保守上限，funding 明顯敵對才介入。
+            funding_drag_threshold: 0.0005,
         }
     }
 }

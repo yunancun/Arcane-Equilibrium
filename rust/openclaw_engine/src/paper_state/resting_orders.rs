@@ -28,6 +28,34 @@ use crate::order_manager::TimeInForce;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
 
+/// EDGE-P2-3 Phase 1B-4.3: pure predicate — does the order's submit-time
+/// funding rate exceed `|threshold|` in the direction that is adverse to the
+/// maker side? Positive funding is paid by longs to shorts, so:
+///   * Long maker, `funding > +threshold` → adverse (fill tilts against you)
+///   * Short maker, `funding < -threshold` → adverse (fill tilts against you)
+/// Threshold `0.0` (or non-finite input) disables the guard → always `false`.
+/// The boundary `|funding| == threshold` is NOT adverse (strict `>`), so an
+/// operator setting `threshold = 0.0003` can explicitly gate at 3 bps and
+/// expect the 3 bps case itself to fill.
+/// EDGE-P2-3 Phase 1B-4.3：純謂詞——提交時的 funding rate 是否以「逆向 maker
+/// 側」方向超過 `|threshold|`。正 funding 由多方支付給空方，所以：
+///   * 多 maker，`funding > +threshold` → 逆向（成交向你不利傾斜）
+///   * 空 maker，`funding < -threshold` → 逆向
+/// threshold `0.0`（或非有限輸入）關閉 guard → 恆回 false。邊界
+/// `|funding| == threshold` 不算逆向（嚴格 `>`），operator 設 `threshold = 0.0003`
+/// 可明確於 3 bps gate，並期待 3 bps 本身能成交。
+#[inline]
+pub fn funding_drag_adverse(funding_rate: f64, is_long: bool, threshold: f64) -> bool {
+    if !funding_rate.is_finite() || !threshold.is_finite() || threshold <= 0.0 {
+        return false;
+    }
+    if is_long {
+        funding_rate > threshold
+    } else {
+        funding_rate < -threshold
+    }
+}
+
 /// EDGE-P2-3 Phase 1B-4.2: pure classifier output for one resting order at
 /// a given tick. Kept separate from `RestingFillEvent` so sweep tests can
 /// assert classification independently of `apply_fill` side-effects.
@@ -74,7 +102,7 @@ pub(crate) fn resting_partial_fill_heads(order_link_id: &str) -> bool {
     sum & 1 == 0
 }
 
-/// EDGE-P2-3 Phase 1B-4.2: pure classifier. No mutation, no I/O, no `&mut`.
+/// EDGE-P2-3 Phase 1B-4.2/4.3: pure classifier. No mutation, no I/O, no `&mut`.
 /// Returns the action the sweep should execute for this order at this tick.
 ///
 /// Rules (checked in order):
@@ -86,15 +114,57 @@ pub(crate) fn resting_partial_fill_heads(order_link_id: &str) -> bool {
 ///    `FillPartial`; `>  limit_price` → `Keep`.
 /// 4. Sell mirror: `tick_price > limit_price` → `FillFull`; `==` → `FillPartial`;
 ///    `<` → `Keep`.
+/// 5. EDGE-P2-3 Phase 1B-4.3 Bias-guard #3 funding drag: if the chosen action
+///    is `FillPartial` (touch-equal coin flip) AND `funding_drag_adverse(
+///    order.funding_rate_at_submit, order.is_long, funding_drag_threshold)`
+///    holds, downgrade to `Keep`. Real-market maker fills on touch in the
+///    face of adverse funding are heavily adverse-selected — the sweep
+///    should not paper-simulate a 50/50 coin flip in that regime. True cross
+///    (`FillFull`) is NOT downgraded (the limit was actually crossed — not
+///    a statistical artefact) and `Timeout` retains precedence (step 1).
 ///
-/// EDGE-P2-3 Phase 1B-4.2：純函式分類器。不變動狀態、不讀寫 I/O、不需 &mut。
+/// EDGE-P2-3 Phase 1B-4.2/4.3：純函式分類器。不變動狀態、不讀寫 I/O、不需 &mut。
 /// 規則（依序判定）：
 /// 1. `now_ms >= deadline_ms` → `Timeout`（與 1B-3.2 交易所側對齊）。
 /// 2. bias 保護「同 tick 不掛中」：`submit_ts_ms >= now_ms` → `Keep`（掛單
 ///    必須至少等到下一 tick 才可成交）。
 /// 3. Buy：tick < limit → FillFull；== → FillPartial；> → Keep。
 /// 4. Sell 鏡像：tick > limit → FillFull；== → FillPartial；< → Keep。
+/// 5. 1B-4.3 funding drag guard：若結果為 `FillPartial` 且提交時 funding
+///    對 maker 側嚴重逆向（超過 `funding_drag_threshold`），降級為 `Keep`。
+///    真實穿越 FillFull 不受影響；Timeout 保留步驟 1 優先序。
 pub fn classify_resting_order(
+    order: &RestingLimitOrder,
+    tick_price: f64,
+    now_ms: u64,
+    funding_drag_threshold: f64,
+) -> RestingSweepAction {
+    let base = classify_resting_order_raw(order, tick_price, now_ms);
+    // 1B-4.3 bias guard #3: only FillPartial is shaped by funding drag.
+    // True cross + Keep + Timeout pass through verbatim.
+    // 1B-4.3 bias #3：僅 FillPartial 受 funding drag 影響；其他分支原樣返回。
+    if matches!(base, RestingSweepAction::FillPartial)
+        && funding_drag_adverse(
+            order.funding_rate_at_submit,
+            order.is_long,
+            funding_drag_threshold,
+        )
+    {
+        return RestingSweepAction::Keep;
+    }
+    base
+}
+
+/// EDGE-P2-3 Phase 1B-4.3: classifier stages 1-4 only (no funding-drag guard).
+/// Kept `pub(crate)` so the sweep can inspect the pre-guard verdict, detect a
+/// `FillPartial → Keep` downgrade, and attribute it to the funding-drag
+/// counter. External callers should continue using `classify_resting_order`
+/// (which layers rule 5 on top) — only sweep-side accounting needs the raw form.
+/// EDGE-P2-3 Phase 1B-4.3：分類器規則 1-4（不含 funding drag guard）。`pub(crate)`
+/// 讓 sweep 可讀取未套 guard 的原始結論以判斷 FillPartial→Keep 降級並歸屬
+/// funding_drag 計數器。外部呼叫者沿用 `classify_resting_order`，只有 sweep
+/// 側統計邏輯需要此 raw 版本。
+pub(crate) fn classify_resting_order_raw(
     order: &RestingLimitOrder,
     tick_price: f64,
     now_ms: u64,
@@ -229,6 +299,20 @@ pub struct RestingLimitOrder {
     /// keep owner_strategy attribution stable for any future maker strategy).
     /// 發起策略名稱（1B-4 為 "grid_trading"；欄位明列以便未來其他 maker 策略擴充）。
     pub strategy: String,
+    /// EDGE-P2-3 Phase 1B-4.3: decimal funding rate captured at enqueue time,
+    /// stamped by the router via `paper_state.latest_funding_rate(symbol)`.
+    /// Feeds bias guard #3: if |rate| exceeds the operator's
+    /// `funding_drag_threshold` in the direction that is adverse to this
+    /// maker's side, the sweep downgrades touch-equal `FillPartial` fills to
+    /// `Keep`. `0.0` means "unknown / no ticker seen yet" — treated as neutral
+    /// (guard stays off for this order). Stored at submit time so later funding
+    /// regime changes do not retroactively reshape the decision.
+    /// 1B-4.3：enqueue 時錄入的 decimal funding rate，router 透過
+    /// `paper_state.latest_funding_rate(symbol)` 打標。餵 bias 保護 #3：|rate|
+    /// 超過 operator 設定的 `funding_drag_threshold` 且方向逆向 maker 時，sweep
+    /// 將碰觸 FillPartial 降級為 Keep。`0.0` = 未知 / 尚未見 ticker，本單停用
+    /// guard。於提交時鎖定，不受後續 funding regime 變動回溯影響。
+    pub funding_rate_at_submit: f64,
 }
 
 impl PaperState {
@@ -409,6 +493,7 @@ impl PaperState {
         tick_price: f64,
         now_ms: u64,
         maker_fee_rate: f64,
+        funding_drag_threshold: f64,
     ) -> Vec<RestingFillEvent> {
         // Fast path: no queue for this symbol → nothing to do.
         // 快速路徑：本 symbol 無掛單 → 直接返回。
@@ -419,10 +504,23 @@ impl PaperState {
         // Pass 1: classify without mutating state. We need to buffer decisions
         // because `apply_fill` takes `&mut self` and we can't hold `q` mutable
         // while calling self methods. Cloning per-order is cheap (< 10 fields).
+        // 1B-4.3: we run the *raw* classifier (rules 1-4) here so that when
+        // funding drag downgrades FillPartial to Keep we can attribute the
+        // skip to `maker_stats.funding_drag_skips` instead of silently
+        // conflating with ordinary "tick didn't cross" Keeps.
         // Pass 1：先分類再執行。因 apply_fill 需 &mut self，不能邊持有 q
         // 邊呼叫；per-order clone 廉價（欄位 < 10）。
+        // 1B-4.3：本處使用 *raw* 分類器（規則 1-4），以便在 funding drag guard
+        // 把 FillPartial 降級為 Keep 時能精準計入 `maker_stats.funding_drag_skips`，
+        // 不與「tick 未穿越」類的 Keep 混為一談。
         enum Decision {
             Keep,
+            /// 1B-4.3: FillPartial touch that got vetoed by funding drag guard.
+            /// Same end-state as Keep (order stays in queue) but counted
+            /// separately so operators can see when the guard fires.
+            /// 1B-4.3：本輪 funding drag 否決的 FillPartial 碰觸。最終狀態同
+            /// Keep（訂單留在隊列）但另行計數供觀察 guard 觸發頻率。
+            FundingDragSkip,
             Fill { order: RestingLimitOrder, true_cross: bool },
             Timeout { order: RestingLimitOrder },
         }
@@ -432,7 +530,7 @@ impl PaperState {
                 .get(symbol)
                 .expect("queue existence checked by fast-path");
             q.iter()
-                .map(|o| match classify_resting_order(o, tick_price, now_ms) {
+                .map(|o| match classify_resting_order_raw(o, tick_price, now_ms) {
                     RestingSweepAction::Keep => Decision::Keep,
                     RestingSweepAction::Timeout => Decision::Timeout { order: o.clone() },
                     RestingSweepAction::FillFull => Decision::Fill {
@@ -440,7 +538,15 @@ impl PaperState {
                         true_cross: true,
                     },
                     RestingSweepAction::FillPartial => {
-                        if resting_partial_fill_heads(&o.order_link_id) {
+                        // 1B-4.3 bias guard #3: adverse funding → defer (Skip).
+                        // 1B-4.3：逆向 funding → 延後成交（Skip）。
+                        if funding_drag_adverse(
+                            o.funding_rate_at_submit,
+                            o.is_long,
+                            funding_drag_threshold,
+                        ) {
+                            Decision::FundingDragSkip
+                        } else if resting_partial_fill_heads(&o.order_link_id) {
                             Decision::Fill {
                                 order: o.clone(),
                                 true_cross: false,
@@ -467,6 +573,17 @@ impl PaperState {
         for (order, decision) in old_queue.into_iter().zip(decisions.into_iter()) {
             match decision {
                 Decision::Keep => new_queue.push_back(order),
+                Decision::FundingDragSkip => {
+                    // 1B-4.3: bump observability counter then keep order in
+                    // queue. A later tick where funding has moderated or the
+                    // price truly crosses can still fill it; the deadline
+                    // branch still evicts it if the full maker_timeout_ms
+                    // elapses without a favourable fill window.
+                    // 1B-4.3：累加觀察計數器後原序留在隊列；後續 funding 緩和
+                    // 或價格真實穿越時仍可成交；超時到期仍照常被 Timeout 清出。
+                    self.maker_stats.record_funding_drag_skip(&order.symbol);
+                    new_queue.push_back(order);
+                }
                 Decision::Timeout { order: drained } => {
                     // 1B-5: bump maker_stats before emitting event so readers
                     // see a consistent snapshot once the event is observed.
@@ -546,6 +663,7 @@ mod tests {
             order_link_id: link_id.to_string(),
             context_id: "ctx_test".to_string(),
             strategy: "grid_trading".to_string(),
+            funding_rate_at_submit: 0.0,
         }
     }
 
@@ -675,7 +793,27 @@ mod tests {
             order_link_id: link_id.to_string(),
             context_id: "ctx_test".to_string(),
             strategy: "grid_trading".to_string(),
+            funding_rate_at_submit: 0.0,
         }
+    }
+
+    /// 1B-4.3 test helper: build an order with an explicit submit-time funding
+    /// rate so guard tests can exercise the threshold comparison without
+    /// touching the other 11 fields. Everything else mirrors `order_at`.
+    /// 1B-4.3 測試輔助：以顯式 submit-time funding rate 建構訂單，其餘欄位
+    /// 等同 `order_at`。
+    fn order_with_funding(
+        link_id: &str,
+        symbol: &str,
+        is_long: bool,
+        limit_price: f64,
+        submit_ts: u64,
+        deadline_ms: u64,
+        funding_rate: f64,
+    ) -> RestingLimitOrder {
+        let mut o = order_at(link_id, symbol, is_long, limit_price, submit_ts, deadline_ms);
+        o.funding_rate_at_submit = funding_rate;
+        o
     }
 
     #[test]
@@ -683,7 +821,8 @@ mod tests {
         // Deadline expired AND price would cross → still Timeout (conservative).
         // 截止到期且價格會穿越 → 仍 Timeout（保守，對齊 1B-3.2）。
         let o = order_at("oc_t", "BTCUSDT", true, 50_000.0, 1_000, 2_000);
-        let a = classify_resting_order(&o, 49_500.0, 2_500);
+        // 1B-4.3: threshold `0.0` disables funding-drag guard — legacy behaviour.
+        let a = classify_resting_order(&o, 49_500.0, 2_500, 0.0);
         assert_eq!(a, RestingSweepAction::Timeout);
     }
 
@@ -692,49 +831,49 @@ mod tests {
         // submit_ts_ms == now_ms → Keep (bias guard: resting must wait ≥1 tick).
         // 同 tick 不成交（bias 保護）。
         let o = order_at("oc_same", "BTCUSDT", true, 50_000.0, 1_000, 60_000);
-        let a = classify_resting_order(&o, 49_000.0, 1_000);
+        let a = classify_resting_order(&o, 49_000.0, 1_000, 0.0);
         assert_eq!(a, RestingSweepAction::Keep);
     }
 
     #[test]
     fn test_classify_buy_tick_below_limit_fills_full() {
         let o = order_at("oc_b_cross", "BTCUSDT", true, 50_000.0, 1_000, 60_000);
-        let a = classify_resting_order(&o, 49_999.0, 1_500);
+        let a = classify_resting_order(&o, 49_999.0, 1_500, 0.0);
         assert_eq!(a, RestingSweepAction::FillFull);
     }
 
     #[test]
     fn test_classify_buy_tick_equal_limit_fill_partial() {
         let o = order_at("oc_b_touch", "BTCUSDT", true, 50_000.0, 1_000, 60_000);
-        let a = classify_resting_order(&o, 50_000.0, 1_500);
+        let a = classify_resting_order(&o, 50_000.0, 1_500, 0.0);
         assert_eq!(a, RestingSweepAction::FillPartial);
     }
 
     #[test]
     fn test_classify_buy_tick_above_limit_keeps() {
         let o = order_at("oc_b_keep", "BTCUSDT", true, 50_000.0, 1_000, 60_000);
-        let a = classify_resting_order(&o, 50_001.0, 1_500);
+        let a = classify_resting_order(&o, 50_001.0, 1_500, 0.0);
         assert_eq!(a, RestingSweepAction::Keep);
     }
 
     #[test]
     fn test_classify_sell_tick_above_limit_fills_full() {
         let o = order_at("oc_s_cross", "BTCUSDT", false, 50_000.0, 1_000, 60_000);
-        let a = classify_resting_order(&o, 50_001.0, 1_500);
+        let a = classify_resting_order(&o, 50_001.0, 1_500, 0.0);
         assert_eq!(a, RestingSweepAction::FillFull);
     }
 
     #[test]
     fn test_classify_sell_tick_equal_limit_fill_partial() {
         let o = order_at("oc_s_touch", "BTCUSDT", false, 50_000.0, 1_000, 60_000);
-        let a = classify_resting_order(&o, 50_000.0, 1_500);
+        let a = classify_resting_order(&o, 50_000.0, 1_500, 0.0);
         assert_eq!(a, RestingSweepAction::FillPartial);
     }
 
     #[test]
     fn test_classify_sell_tick_below_limit_keeps() {
         let o = order_at("oc_s_keep", "BTCUSDT", false, 50_000.0, 1_000, 60_000);
-        let a = classify_resting_order(&o, 49_999.0, 1_500);
+        let a = classify_resting_order(&o, 49_999.0, 1_500, 0.0);
         assert_eq!(a, RestingSweepAction::Keep);
     }
 
@@ -744,11 +883,11 @@ mod tests {
         // 負/零 tick_price 保守 → Keep（防禦性）。
         let o = order_at("oc_bad", "BTCUSDT", true, 50_000.0, 1_000, 60_000);
         assert_eq!(
-            classify_resting_order(&o, 0.0, 1_500),
+            classify_resting_order(&o, 0.0, 1_500, 0.0),
             RestingSweepAction::Keep
         );
         assert_eq!(
-            classify_resting_order(&o, -1.0, 1_500),
+            classify_resting_order(&o, -1.0, 1_500, 0.0),
             RestingSweepAction::Keep
         );
     }
@@ -766,7 +905,7 @@ mod tests {
     #[test]
     fn test_sweep_empty_queue_returns_empty_events() {
         let mut s = PaperState::new(10_000.0);
-        let events = s.sweep_resting_limit_orders_for_symbol("BTCUSDT", 50_000.0, 2_000, 0.0002);
+        let events = s.sweep_resting_limit_orders_for_symbol("BTCUSDT", 50_000.0, 2_000, 0.0002, 0.0);
         assert!(events.is_empty());
     }
 
@@ -778,7 +917,7 @@ mod tests {
             "oc_to", "BTCUSDT", true, 49_000.0, 1_000, 2_000,
         ));
         let events =
-            s.sweep_resting_limit_orders_for_symbol("BTCUSDT", 48_000.0, 5_000, 0.0002);
+            s.sweep_resting_limit_orders_for_symbol("BTCUSDT", 48_000.0, 5_000, 0.0002, 0.0);
         assert_eq!(events.len(), 1);
         match &events[0] {
             RestingFillEvent::Timedout { order } => {
@@ -801,7 +940,7 @@ mod tests {
         // Tick drops below limit — buy limit fills at the limit price, not tick.
         // Tick 跌破限價 — buy 限價以限價成交，非 tick 價。
         let events =
-            s.sweep_resting_limit_orders_for_symbol("BTCUSDT", 48_900.0, 2_000, 0.0002);
+            s.sweep_resting_limit_orders_for_symbol("BTCUSDT", 48_900.0, 2_000, 0.0002, 0.0);
         assert_eq!(events.len(), 1);
         match &events[0] {
             RestingFillEvent::Filled {
@@ -841,7 +980,7 @@ mod tests {
         // Tick rises above limit — sell limit fills at limit price.
         // Tick 升至限價之上 — sell 限價以限價成交。
         let events =
-            s.sweep_resting_limit_orders_for_symbol("ETHUSDT", 3_105.0, 2_000, 0.0002);
+            s.sweep_resting_limit_orders_for_symbol("ETHUSDT", 3_105.0, 2_000, 0.0002, 0.0);
         assert_eq!(events.len(), 1);
         match &events[0] {
             RestingFillEvent::Filled { fill_price, true_cross, .. } => {
@@ -862,7 +1001,7 @@ mod tests {
             "oc_keep", "BTCUSDT", true, 49_000.0, 1_000, 60_000,
         ));
         let events =
-            s.sweep_resting_limit_orders_for_symbol("BTCUSDT", 50_000.0, 2_000, 0.0002);
+            s.sweep_resting_limit_orders_for_symbol("BTCUSDT", 50_000.0, 2_000, 0.0002, 0.0);
         assert!(events.is_empty());
         assert_eq!(s.resting_limit_order_count_for("BTCUSDT"), 1);
         assert!(s.get_position("BTCUSDT").is_none());
@@ -877,7 +1016,7 @@ mod tests {
             "oc_st", "BTCUSDT", true, 49_000.0, 2_000, 60_000,
         ));
         let events =
-            s.sweep_resting_limit_orders_for_symbol("BTCUSDT", 48_500.0, 2_000, 0.0002);
+            s.sweep_resting_limit_orders_for_symbol("BTCUSDT", 48_500.0, 2_000, 0.0002, 0.0);
         assert!(events.is_empty());
         assert_eq!(s.resting_limit_order_count_for("BTCUSDT"), 1);
     }
@@ -898,7 +1037,7 @@ mod tests {
         ));
         // Tick = 49_000 — only oc_2 (limit 49_500) fills; oc_1/oc_3 keep.
         let events =
-            s.sweep_resting_limit_orders_for_symbol("BTCUSDT", 49_000.0, 2_000, 0.0002);
+            s.sweep_resting_limit_orders_for_symbol("BTCUSDT", 49_000.0, 2_000, 0.0002, 0.0);
         assert_eq!(events.len(), 1);
         match &events[0] {
             RestingFillEvent::Filled { order, .. } => {
@@ -932,7 +1071,7 @@ mod tests {
             id_b, "SOLUSDT", true, 100.0, 1_000, 60_000,
         ));
         let events =
-            s.sweep_resting_limit_orders_for_symbol("SOLUSDT", 100.0, 2_000, 0.0002);
+            s.sweep_resting_limit_orders_for_symbol("SOLUSDT", 100.0, 2_000, 0.0002, 0.0);
         // count expected fills by precomputed coin flips.
         let expected_fills = (a_heads as usize) + (b_heads as usize);
         let actual_fills = events
@@ -968,5 +1107,252 @@ mod tests {
         assert_eq!(back.context_id, o.context_id);
         assert_eq!(back.strategy, o.strategy);
         assert_eq!(back.time_in_force, TimeInForce::PostOnly);
+        assert_eq!(back.funding_rate_at_submit, o.funding_rate_at_submit);
+    }
+
+    // ── 1B-4.3: funding drag bias guard #3 tests ──
+    // 1B-4.3：funding drag bias guard #3 測試
+
+    #[test]
+    fn test_funding_drag_adverse_zero_threshold_disables_guard() {
+        // threshold = 0.0 must return false regardless of funding magnitude.
+        // 0.0 門檻必須一律回 false（guard 關閉）。
+        assert!(!funding_drag_adverse(0.10, true, 0.0));
+        assert!(!funding_drag_adverse(-0.10, false, 0.0));
+    }
+
+    #[test]
+    fn test_funding_drag_adverse_negative_threshold_disables_guard() {
+        // Defensive: operator accidentally sets negative threshold → disabled.
+        // 防禦性：operator 誤設負門檻 → 關閉 guard。
+        assert!(!funding_drag_adverse(0.10, true, -0.001));
+    }
+
+    #[test]
+    fn test_funding_drag_adverse_non_finite_inputs_return_false() {
+        // NaN / inf on either arg → guard fails open (don't defer fills on
+        // corrupt data — exchange-side maker queue isn't paused either).
+        // 非有限輸入 → guard 失效開（腐敗資料下不改變行為）。
+        assert!(!funding_drag_adverse(f64::NAN, true, 0.0005));
+        assert!(!funding_drag_adverse(f64::INFINITY, true, 0.0005));
+        assert!(!funding_drag_adverse(0.001, true, f64::NAN));
+        assert!(!funding_drag_adverse(0.001, true, f64::INFINITY));
+    }
+
+    #[test]
+    fn test_funding_drag_adverse_long_positive_funding_is_adverse() {
+        // Positive funding paid by longs → long maker is adverse.
+        // 正 funding 由多方支付 → 多 maker 逆向。
+        assert!(funding_drag_adverse(0.0010, true, 0.0005));
+    }
+
+    #[test]
+    fn test_funding_drag_adverse_long_negative_funding_is_favorable() {
+        // Negative funding received by longs → long maker favorable.
+        // 負 funding 由空方支付 → 多 maker 有利。
+        assert!(!funding_drag_adverse(-0.0010, true, 0.0005));
+    }
+
+    #[test]
+    fn test_funding_drag_adverse_short_negative_funding_is_adverse() {
+        // Short pays when funding is negative → short maker adverse.
+        // funding < −threshold → 空 maker 逆向。
+        assert!(funding_drag_adverse(-0.0010, false, 0.0005));
+    }
+
+    #[test]
+    fn test_funding_drag_adverse_short_positive_funding_is_favorable() {
+        assert!(!funding_drag_adverse(0.0010, false, 0.0005));
+    }
+
+    #[test]
+    fn test_funding_drag_adverse_boundary_is_strict() {
+        // |funding| == threshold must NOT be adverse (strict `>`).
+        // An operator setting threshold = 0.0003 can expect 3 bps to still fill.
+        // 邊界 (==) 非逆向（嚴格 >），operator 設 0.0003 可期待 3 bps 仍能成交。
+        assert!(!funding_drag_adverse(0.0003, true, 0.0003));
+        assert!(!funding_drag_adverse(-0.0003, false, 0.0003));
+        // One ulp above → adverse.
+        assert!(funding_drag_adverse(0.0003 + f64::EPSILON, true, 0.0003));
+    }
+
+    #[test]
+    fn test_classify_long_adverse_funding_downgrades_partial_to_keep() {
+        // FillPartial + long + adverse funding → Keep.
+        // Pre-guard raw classifier confirms this would have been FillPartial.
+        let o = order_with_funding(
+            "oc_fd_long", "BTCUSDT", /*is_long*/ true, 50_000.0, 1_000, 60_000, 0.0010,
+        );
+        assert_eq!(
+            classify_resting_order_raw(&o, 50_000.0, 1_500),
+            RestingSweepAction::FillPartial
+        );
+        assert_eq!(
+            classify_resting_order(&o, 50_000.0, 1_500, 0.0005),
+            RestingSweepAction::Keep
+        );
+    }
+
+    #[test]
+    fn test_classify_short_adverse_funding_downgrades_partial_to_keep() {
+        let o = order_with_funding(
+            "oc_fd_short", "BTCUSDT", /*is_long*/ false, 50_000.0, 1_000, 60_000, -0.0010,
+        );
+        assert_eq!(
+            classify_resting_order(&o, 50_000.0, 1_500, 0.0005),
+            RestingSweepAction::Keep
+        );
+    }
+
+    #[test]
+    fn test_classify_favorable_funding_leaves_partial_unchanged() {
+        // Long + negative (favorable) funding → FillPartial stays FillPartial.
+        // 多方 + 負（有利）funding → FillPartial 不變。
+        let o = order_with_funding(
+            "oc_fd_fav", "BTCUSDT", true, 50_000.0, 1_000, 60_000, -0.0010,
+        );
+        assert_eq!(
+            classify_resting_order(&o, 50_000.0, 1_500, 0.0005),
+            RestingSweepAction::FillPartial
+        );
+    }
+
+    #[test]
+    fn test_classify_fill_full_not_downgraded_by_adverse_funding() {
+        // True cross + adverse funding → still FillFull (the limit was actually
+        // crossed; no adverse-selection statistical artefact to protect against).
+        // 真實穿越 + 逆向 funding → 仍 FillFull（非統計偏誤，無需保護）。
+        let o = order_with_funding(
+            "oc_fd_cross", "BTCUSDT", true, 50_000.0, 1_000, 60_000, 0.0020,
+        );
+        assert_eq!(
+            classify_resting_order(&o, 49_500.0, 1_500, 0.0005),
+            RestingSweepAction::FillFull
+        );
+    }
+
+    #[test]
+    fn test_classify_timeout_precedence_preserved_under_adverse_funding() {
+        // Deadline-expired orders must still Timeout even when adverse funding
+        // would otherwise trigger the guard. Rule 1 > rule 5.
+        // 截止到期 + 逆向 funding → 仍 Timeout（規則 1 勝過規則 5）。
+        let o = order_with_funding(
+            "oc_fd_to", "BTCUSDT", true, 50_000.0, 1_000, 2_000, 0.0020,
+        );
+        assert_eq!(
+            classify_resting_order(&o, 50_000.0, 3_000, 0.0005),
+            RestingSweepAction::Timeout
+        );
+    }
+
+    #[test]
+    fn test_sweep_adverse_funding_keeps_order_and_bumps_skip_counter() {
+        // Touch-equal FillPartial on adverse long funding → order stays in
+        // queue AND maker_stats.funding_drag_skips increments.
+        // 逆向 funding 下的碰觸 → 訂單留隊 + funding_drag_skips += 1。
+        let mut s = PaperState::new(10_000.0);
+        s.set_latest_price("BTCUSDT", 50_000.0);
+        s.enqueue_resting_limit_order(order_with_funding(
+            "oc_fd_sweep", "BTCUSDT", true, 50_000.0, 1_000, 60_000, 0.0010,
+        ));
+        let events = s.sweep_resting_limit_orders_for_symbol(
+            "BTCUSDT", 50_000.0, 2_000, 0.0002, /*threshold*/ 0.0005,
+        );
+        // No fills (guard deferred the touch), no events emitted (Keep paths
+        // stay silent — events are only for drained orders).
+        assert!(events.is_empty(), "guard skip must not emit events");
+        // Order still in queue.
+        assert_eq!(s.resting_limit_order_count_for("BTCUSDT"), 1);
+        // Counter bumped on both scopes.
+        let stats = s.maker_stats();
+        assert_eq!(stats.aggregate.funding_drag_skips, 1);
+        assert_eq!(
+            stats.per_symbol.get("BTCUSDT").unwrap().funding_drag_skips,
+            1
+        );
+        // Terminal counters untouched — this is observability only.
+        assert_eq!(stats.aggregate.filled_full, 0);
+        assert_eq!(stats.aggregate.filled_partial, 0);
+        assert_eq!(stats.aggregate.timedout, 0);
+    }
+
+    #[test]
+    fn test_sweep_favorable_funding_retains_legacy_coin_flip_behaviour() {
+        // Favorable funding + touch → coin flip proceeds; guard is a no-op.
+        // 有利 funding + 碰觸 → 原本 heads/tails 行為不變；guard 不介入。
+        let mut s = PaperState::new(10_000.0);
+        // Use favorable funding (long + negative = long receives).
+        let link_id = "oc_fd_fav_sweep"; // deterministic coin: check heads below
+        s.enqueue_resting_limit_order(order_with_funding(
+            link_id, "BTCUSDT", true, 50_000.0, 1_000, 60_000, -0.0010,
+        ));
+        let events = s.sweep_resting_limit_orders_for_symbol(
+            "BTCUSDT", 50_000.0, 2_000, 0.0002, 0.0005,
+        );
+        // Counter stays at zero — guard never fired.
+        assert_eq!(s.maker_stats().aggregate.funding_drag_skips, 0);
+        // Outcome matches the deterministic coin: heads → Filled, tails → Keep.
+        let heads = resting_partial_fill_heads(link_id);
+        if heads {
+            assert_eq!(events.len(), 1, "heads must fill");
+            assert_eq!(s.resting_limit_order_count_for("BTCUSDT"), 0);
+        } else {
+            assert!(events.is_empty(), "tails must keep");
+            assert_eq!(s.resting_limit_order_count_for("BTCUSDT"), 1);
+        }
+    }
+
+    #[test]
+    fn test_sweep_true_cross_ignores_adverse_funding() {
+        // True cross + adverse funding → still fills. Guard only shapes the
+        // coin-flip branch.
+        // 真實穿越 + 逆向 funding → 照常成交；guard 僅作用於碰觸分支。
+        let mut s = PaperState::new(10_000.0);
+        s.enqueue_resting_limit_order(order_with_funding(
+            "oc_fd_cross_sweep", "BTCUSDT", true, 50_000.0, 1_000, 60_000, 0.0020,
+        ));
+        let events = s.sweep_resting_limit_orders_for_symbol(
+            "BTCUSDT", 49_500.0, 2_000, 0.0002, 0.0005,
+        );
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            RestingFillEvent::Filled { true_cross, .. } => assert!(*true_cross),
+            _ => panic!("expected Filled(true_cross=true)"),
+        }
+        // Counter unchanged — only FillPartial downgrades are counted.
+        assert_eq!(s.maker_stats().aggregate.funding_drag_skips, 0);
+    }
+
+    #[test]
+    fn test_sweep_guard_zero_threshold_is_passthrough() {
+        // threshold = 0.0 → guard disabled → behaviour identical to 1B-4.2
+        // coin flip regardless of funding_rate_at_submit.
+        // threshold = 0.0 → guard 關閉 → 行為同 1B-4.2。
+        let mut s = PaperState::new(10_000.0);
+        s.enqueue_resting_limit_order(order_with_funding(
+            "oc_fd_off", "BTCUSDT", true, 50_000.0, 1_000, 60_000, 0.9999,
+        ));
+        let _ = s.sweep_resting_limit_orders_for_symbol(
+            "BTCUSDT", 50_000.0, 2_000, 0.0002, 0.0,
+        );
+        assert_eq!(
+            s.maker_stats().aggregate.funding_drag_skips,
+            0,
+            "zero threshold must not count skips"
+        );
+    }
+
+    #[test]
+    fn test_router_stamps_funding_rate_from_paper_state_accessor() {
+        // Direct accessor test — router uses `latest_funding_rate`. Zero when
+        // no ticker seen; reflects the last `set_latest_funding_rate` after.
+        // 直接測 accessor — router 於 ticker 未見時讀 0，見過後讀最後值。
+        let mut s = PaperState::new(10_000.0);
+        assert_eq!(s.latest_funding_rate("BTCUSDT"), None);
+        s.set_latest_funding_rate("BTCUSDT", 0.0007);
+        assert_eq!(s.latest_funding_rate("BTCUSDT"), Some(0.0007));
+        // Overwrite semantics — latest wins.
+        s.set_latest_funding_rate("BTCUSDT", -0.0003);
+        assert_eq!(s.latest_funding_rate("BTCUSDT"), Some(-0.0003));
     }
 }

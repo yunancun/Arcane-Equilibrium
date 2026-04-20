@@ -367,8 +367,18 @@ git status && git log --oneline -5
 - [ ] E2/E4/QC/E5（5-10~13）
 
 ### EDGE P2 架構重工
-- [ ] **EDGE-P2-2** OI + Liquidation 信號源（給 bb_breakout 加領先信號，Bybit WS `tickers` OI + `liquidation` stream）
-- [ ] **EDGE-P2-3** Maker order 支持（5.5 bps → ~1 bps/side；改 IntentProcessor + order_manager + execution layer）
+- [ ] **EDGE-P2-2** OI + Liquidation 信號源（給 bb_breakout 加領先信號，Bybit WS `tickers` OI + `liquidation` stream）— 未啟動
+- 🟡 **EDGE-P2-3** Maker order 支持（5.5 bps → ~1 bps/side）
+  - [x] **Phase 1A** PostOnly maker 入場管線（grid_trading demo/paper；live off）— `24f28a1` `7178d63`
+  - [x] **Phase 1B-1** `BybitRetCode` enum + `cancel_order_by_link_id` helper — `16b69fa`
+  - [x] **Phase 1B-2** WS `rejectReason` 捕獲 + 分類（僅 observability）— `86b568f`
+  - [x] **Phase 1B-3** `maker_limit_timeout_ms` + `PendingOrder` order_type/tif + sweep cancel — `4c35616` `89805e7`
+  - [x] **Phase 1B-4.1/4.2** Paper resting-limit queue + touch-based Limit fill + 3 bias guards — `0febdc3` `6b02e49`
+  - [x] **Phase 1B-5** `maker_net_edge` metric + **MakerKpi gate**（Cold/Healthy/Degraded）— `1c79c6b`
+  - [x] **3 FUPs** — `a3744fa`（clear_resting_limit_orders 重置 maker_stats）· `bf75986`（KPI staleness window 時間衰減）· `94810b4`（Kahan summation + cancel route 統一 via 1B-1 helper）
+  - [ ] **Phase 1B-4.3** funding drag（bias guard #3）— 需 funding rate feed 接入
+  - [ ] **Phase 1B-5 hot-reload** `MakerKpiConfig` 閾值 via ConfigStore（目前 startup 讀一次，改動需重啟）
+  - [ ] **Phase 2+** live endpoint 啟用 · 其他策略（bb_breakout / ma_crossover / funding_arb）接 PostOnly · learning integration
 
 ---
 

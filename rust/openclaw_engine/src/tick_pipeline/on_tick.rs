@@ -725,9 +725,19 @@ impl TickPipeline {
         // P-08: Borrow instead of clone — lifetime scoped to this on_tick call.
         // P-08：借用取代克隆 — 生命週期限定在此 on_tick 調用中。
         // EDGE-P1-2: Cache funding rate from Ticker events; pass latest to strategies.
+        // EDGE-P2-3 Phase 1B-4.3: also mirror the rate onto PaperState so the
+        // maker router can stamp `RestingLimitOrder.funding_rate_at_submit` at
+        // enqueue time (bias guard #3 input). TickPipeline's `funding_rates`
+        // stays authoritative for the rest of the tick; the PaperState copy is
+        // a read-only view for the router and the sweep has no further need.
         // EDGE-P1-2：緩存 Ticker 事件的資金費率；傳遞最新值給策略。
+        // EDGE-P2-3 Phase 1B-4.3：同時同步到 PaperState，讓 maker router 於
+        // enqueue 時打標 `RestingLimitOrder.funding_rate_at_submit`（bias #3
+        // 輸入）。TickPipeline 的 `funding_rates` 仍為本 tick 權威；PaperState
+        // 側僅供 router 讀取。
         if let Some(fr) = event.funding_rate {
             self.funding_rates.insert(sym.to_string(), fr);
+            self.paper_state.set_latest_funding_rate(sym, fr);
         }
         // OC-5: Cache index price from Ticker events for FundingArb basis calculation.
         // OC-5：緩存 Ticker 事件的指數價格，用於 FundingArb 基差計算。
@@ -1327,11 +1337,21 @@ impl TickPipeline {
         // ═══════════════════════════════════════════════════════════════════════
         if !is_exchange_mode {
             let maker_fee_rate = self.intent_processor.maker_fee_rate(&event.symbol);
+            // EDGE-P2-3 Phase 1B-4.3: funding-drag guard threshold is read
+            // from `MakerKpiConfig::default()` in this commit — the hot-reload
+            // ConfigStore plumbing lands in 1B-5 and will replace this read
+            // with an owned snapshot refreshed at the top of on_tick.
+            // EDGE-P2-3 Phase 1B-4.3：本 commit 以 `MakerKpiConfig::default()`
+            // 提供門檻；ConfigStore 熱重載於 1B-5 接入，屆時改讀 tick 頂部同步
+            // 的 owned snapshot。
+            let funding_drag_threshold =
+                crate::paper_state::MakerKpiConfig::default().funding_drag_threshold;
             let resting_events = self.paper_state.sweep_resting_limit_orders_for_symbol(
                 &event.symbol,
                 event.last_price,
                 event.ts_ms,
                 maker_fee_rate,
+                funding_drag_threshold,
             );
             for ev in resting_events {
                 match ev {

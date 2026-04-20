@@ -342,6 +342,19 @@ impl IntentProcessor {
                     let mid_price_at_submit =
                         paper_state.latest_price(&intent.symbol).unwrap_or(0.0);
                     let ctx = context_id.unwrap_or("").to_string();
+                    // EDGE-P2-3 Phase 1B-4.3: stamp the submit-time funding rate
+                    // so the sweep's bias guard #3 can later judge "adverse
+                    // funding at submit → defer touch-equal FillPartial". An
+                    // unknown rate (0.0) is treated as neutral — the guard
+                    // short-circuits to `false` on zero thresholds or zero
+                    // rates, so a symbol that has never emitted a ticker
+                    // update still behaves bit-identically to pre-1B-4.3.
+                    // EDGE-P2-3 Phase 1B-4.3：壓入提交時 funding rate 供 sweep
+                    // bias guard #3 判斷「提交時逆向 → 推遲碰觸 FillPartial」。
+                    // 0.0 = 尚未見過 ticker，視為中性；guard 於零門檻或零 rate
+                    // 時短路回 false，因此行為與 1B-4.3 前一致。
+                    let funding_rate_at_submit =
+                        paper_state.latest_funding_rate(&intent.symbol).unwrap_or(0.0);
                     let draft = crate::paper_state::RestingLimitOrder {
                         symbol: intent.symbol.clone(),
                         is_long: intent.is_long,
@@ -365,6 +378,7 @@ impl IntentProcessor {
                         ),
                         context_id: ctx,
                         strategy: intent.strategy.clone(),
+                        funding_rate_at_submit,
                     };
                     return IntentResult {
                         submitted: true,
