@@ -27,6 +27,17 @@ expansion_bw = 0.04
 volume_threshold = 1.5
 trailing_stop_atr_mult = 2.0
 conf_scale = 1.0
+# EDGE-P2-2: Open Interest confluence signal — experimental, default off.
+# Rising OI + long (or falling OI + short) adds `oi_confluence_bonus` to the
+# confluence score; opposite direction subtracts it. `oi_buffer_window_ms` is
+# the rolling window for OI-delta. Flag default = false so bb_breakout behaviour
+# is bit-identical to pre-EDGE-P2-2 baseline.
+# EDGE-P2-2：OI 合流信號（實驗性，預設關）。同向加 bonus，背離扣 bonus。
+# 預設 false → 行為與舊基線 bit-identical。
+enable_oi_signal = false
+oi_buffer_window_ms = 60000   # rolling window for OI-delta, validated [1000, 600000] / OI 差分滾動窗口，校驗 [1000, 600000]
+oi_confluence_bonus = 0.10    # ± bonus applied to confluence score, |value| ≤ 0.5 / 合流加成（±），|value| ≤ 0.5
+oi_min_delta_pct = 0.0        # FUP #3: noise floor for |oi_delta_pct|, 0.0 = pre-FUP behaviour / 噪音地板（0.0 = 維持 FUP 前行為）
 
 [grid_trading]
 active = true

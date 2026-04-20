@@ -754,8 +754,15 @@ impl TickPipeline {
         if let Some(ip) = event.index_price {
             self.index_prices.insert(sym.to_string(), ip);
         }
+        // EDGE-P2-2: Cache open interest from Ticker events. Raw value only; each
+        // consuming strategy owns its own rolling window (see bb_breakout OI buffer).
+        // EDGE-P2-2：緩存 Ticker 事件的 OI 原始值；滾動窗口由各策略自維護。
+        if let Some(oi) = event.open_interest {
+            self.open_interests.insert(sym.to_string(), oi);
+        }
         let funding_rate = self.funding_rates.get(sym).copied();
         let index_price = self.index_prices.get(sym).copied();
+        let open_interest = self.open_interests.get(sym).copied();
 
         let ctx = TickContext {
             symbol: sym,
@@ -766,6 +773,7 @@ impl TickPipeline {
             h0_allowed, // RRC-1-A1: real H0 gate result from Step 0.5
             funding_rate,
             index_price,
+            open_interest,
         };
 
         // NOTE: Current rejection rollback assumes each strategy emits at most 1 intent per tick.

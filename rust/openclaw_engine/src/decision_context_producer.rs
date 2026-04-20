@@ -224,6 +224,9 @@ mod tests {
             adl_rank: None,
             funding_rate: None,
             index_price: None,
+            // EDGE-P2-2: Default test fixtures carry no OI (tickers-only signal).
+            // EDGE-P2-2：測試 fixture 預設無 OI（僅 tickers 事件攜帶）。
+            open_interest: None,
             metadata: Default::default(),
         }
     }

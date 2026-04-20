@@ -1,10 +1,12 @@
 # OpenClaw TODO — 工作清單
 
-**最後更新**：2026-04-20（14 個完成項批量歸檔 → `docs/archive/2026-04-20--completed_todo_batch.md`；TODO 結構壓縮為「真活躍 / 待辦」）
+**最後更新**：2026-04-20（EDGE-P2-3 Phase 1B-4.3 + 1B-5 hot-reload + FUP-4 全部結案；14 個完成項批量歸檔 → `docs/archive/2026-04-20--completed_todo_batch.md`）
 **Engine**：PID 3029633 · binary mtime 2026-04-19 22:32 → 含全部先前 staged 修復（P0-6 永久修復 + P1-7 A INTENT-WRITE-GAP-1 + P1-7 B edge_estimator scheduler + P1-17 Winsorize + LIVE-GATE-BINDING-1 + DYNAMIC-RISK-1 + IPC-SCAN-1c + FILL-CONTEXT-LINKAGE-1 + EXIT-FEATURES-TABLE-1 Phase 1b + Plan N ai_budget dedup + E5-P1/P2 + E5-FN-2/3 + DISPATCH-RETRY-1 + MARKET-KLINES-STALE-1 + DUAL-TRACK Track P T1-T5 骨架 + PIPELINE-SLOT-1 Phase 1-4）+ **EXIT-FEATURES-TABLE-1 Phase 1b GAP-1**（commit `35808e9` apply_confirmed_fill 接線，待流量驗證）
 **Python uvicorn**：PID 3029688（4 workers）· started 2026-04-19 22:33 → 含 P0-12 LIVE-GATE-FALLBACK-1 + E5-FN-3 AnalystAgent pilot + PIPELINE-SLOT-1 Phase 4 daemon-thread trigger
 **PIPELINE-SLOT-1 live 驗證**：LiveAuthWatcher 22:33 啟動 `env=LiveDemo poll_interval_secs=5`；authorization.json 已由 Manual restart sentinel 清除；等 operator 走 GUI renew → 應 ≤1s 觀察到 Live pipeline 重生
-**測試基準線**：Rust engine lib **1631** / bin 38 / core 392 / e2e 35 / reconciler_e2e 19 · Python **2866** passed（+9 E5-FN-3 + 2 DYNAMIC-RISK-STATUS-TEST-SIG-1 修復 83a0475 + 16 WATCHDOG-DNS-CLASSIFY-1 新測）+ audit 4 passed / ml_training 238 passed · **0 pre-existing fail**（DYNAMIC-RISK 已清）
+**測試基準線**：Rust engine lib **1770** / bin 38 / core 392 / e2e 35 / reconciler_e2e 19 · Python **2866** passed（+9 E5-FN-3 + 2 DYNAMIC-RISK-STATUS-TEST-SIG-1 修復 83a0475 + 16 WATCHDOG-DNS-CLASSIFY-1 新測）+ audit 4 passed / ml_training 238 passed · **0 pre-existing fail**（DYNAMIC-RISK 已清）
+
+> engine lib 1631 → 1770（+139）差距 = 1B-4.1/4.2 · 1B-5 gate · 3 FUPs · 1B-4.3 funding drag · 1B-5 hot-reload · FUP-4 共 9 commits（`0febdc3` · `6b02e49` · `1c79c6b` · `a3744fa` · `bf75986` · `94810b4` · `bd1a429` · `a2a791b` · `a93dbda`）。當前 engine binary PID 3029633（mtime 2026-04-19 22:32）**不含** `bd1a429` + `a2a791b` + `a93dbda`，下次 `--rebuild` 才會進入 runtime。
 **健康**：demo alive（snapshot age 5.9s） · paper/live 預期 dead（PAPER-DISABLE-1 + 待 renew） · 今日 1 crash（12:25，為 redeploy 前殘留）
 **DB 驗證（2026-04-20 00:20）**：market.klines 5 timeframes 在近 1h 寫入 ✅ · trading.intents demo 57 rows/3h ✅（P1-7 A 生效）· **learning.exit_features GAP-1 驗收 ✅ 1.8h 提前結案**（demo 8 close fills / 8 exit_features / coverage_ratio=1.000 / Strategy 6 + FastTrack 2）
 
@@ -367,7 +369,9 @@ git status && git log --oneline -5
 - [ ] E2/E4/QC/E5（5-10~13）
 
 ### EDGE P2 架構重工
-- [ ] **EDGE-P2-2** OI + Liquidation 信號源（給 bb_breakout 加領先信號，Bybit WS `tickers` OI + `liquidation` stream）— 未啟動
+- 🟢 **EDGE-P2-2** OI + Liquidation 信號源（給 bb_breakout 加領先信號）
+  - [x] **OI signal — bb_breakout confluence 調製（Phase A）** — WS `tickers.openInterest` 解析 + `PriceEvent.open_interest` 欄位 + 每 symbol 滾動 buffer + `oi_delta_pct` → `confluence_score` ±bonus（預設 `enable_oi_signal=false`，與基線 bit-identical）；E2 7 findings 全修：#1 dedup + #2 on_rejection 保留 buffer + #3 `oi_min_delta_pct` noise floor + #4 TOML factory validate_oi fallback + #5 window 上限 600000ms + #6 ts monotonic guard + #7 bonus 典型區間 docstring；engine lib **1791 passed**（baseline 1770 +21）
+  - [ ] **Liquidation signal — Phase B（待 OI signal demo 驗證後啟動）**
 - 🟡 **EDGE-P2-3** Maker order 支持（5.5 bps → ~1 bps/side）
   - [x] **Phase 1A** PostOnly maker 入場管線（grid_trading demo/paper；live off）— `24f28a1` `7178d63`
   - [x] **Phase 1B-1** `BybitRetCode` enum + `cancel_order_by_link_id` helper — `16b69fa`
@@ -376,8 +380,9 @@ git status && git log --oneline -5
   - [x] **Phase 1B-4.1/4.2** Paper resting-limit queue + touch-based Limit fill + 3 bias guards — `0febdc3` `6b02e49`
   - [x] **Phase 1B-5** `maker_net_edge` metric + **MakerKpi gate**（Cold/Healthy/Degraded）— `1c79c6b`
   - [x] **3 FUPs** — `a3744fa`（clear_resting_limit_orders 重置 maker_stats）· `bf75986`（KPI staleness window 時間衰減）· `94810b4`（Kahan summation + cancel route 統一 via 1B-1 helper）
-  - [ ] **Phase 1B-4.3** funding drag（bias guard #3）— 需 funding rate feed 接入
-  - [ ] **Phase 1B-5 hot-reload** `MakerKpiConfig` 閾值 via ConfigStore（目前 startup 讀一次，改動需重啟）
+  - [x] **Phase 1B-4.3** funding drag（bias guard #3）— `bd1a429`（PostOnly draft 打標 `funding_rate_at_submit`；sweep 分類 FillPartial 時若 `|rate| > threshold` 且逆向持倉 → FundingDragSkip 保留掛單；bias #1 same-tick Keep 優先）
+  - [x] **Phase 1B-5 hot-reload** `MakerKpiConfig` 閾值 via ConfigStore — `a2a791b`（IPC 寫入面 + `sync_maker_kpi_config_if_changed` tick 頂部 sync + IntentProcessor 熱重載；零重啟）
+  - [x] **E2 APPROVE_WITH_NITS + 5 FUP tests** — `a93dbda`（N1 `MakerKpiConfig::validate()` 4 不變量 + N2 `#[serde(default)]` on `funding_rate_at_submit` 升級安全 + N3 `deny_unknown_fields` 拼錯即失敗；FUP T1-T3/T5-T8/T10 共 8 新測試；engine lib 1762 → **1770 passed**）
   - [ ] **Phase 2+** live endpoint 啟用 · 其他策略（bb_breakout / ma_crossover / funding_arb）接 PostOnly · learning integration
 
 ---

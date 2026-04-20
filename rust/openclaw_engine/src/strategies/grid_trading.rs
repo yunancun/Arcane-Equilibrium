@@ -1064,6 +1064,7 @@ mod tests {
             h0_allowed: true,
             funding_rate: None,
             index_price: None,
+            open_interest: None,
         }
     }
 

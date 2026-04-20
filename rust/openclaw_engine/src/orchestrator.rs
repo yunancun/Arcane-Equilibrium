@@ -147,6 +147,7 @@ mod tests {
             h0_allowed: true,
             funding_rate: None,
             index_price: None,
+            open_interest: None,
         };
         assert!(orch.dispatch_tick(&ctx).is_empty());
     }
@@ -180,6 +181,7 @@ mod tests {
             h0_allowed: true,
             funding_rate: None,
             index_price: None,
+            open_interest: None,
         };
         assert_eq!(orch.dispatch_tick(&ctx).len(), 1);
     }
@@ -213,6 +215,7 @@ mod tests {
             h0_allowed: true,
             funding_rate: None,
             index_price: None,
+            open_interest: None,
         };
         assert!(orch.dispatch_tick(&ctx).is_empty());
     }

@@ -620,6 +620,11 @@ pub struct TickContext<'a> {
     /// OC-5: Latest index price for basis calculation (from Bybit tickers).
     /// OC-5：最新指數價格，用於基差計算（來自 Bybit tickers）。
     pub index_price: Option<f64>,
+    /// EDGE-P2-2: Latest open interest (contract count, from Bybit tickers).
+    /// Raw value — consumer strategies buffer + compute delta on their own window.
+    /// EDGE-P2-2：最新未平倉合約數（合約張數，來自 Bybit tickers）。
+    /// 此處僅暴露原始值；差分窗口由各策略自行維護。
+    pub open_interest: Option<f64>,
 }
 
 /// Tick statistics for monitoring / Tick 統計。
@@ -840,6 +845,11 @@ pub struct TickPipeline {
     /// OC-5: Cached latest index price per symbol (from Ticker events).
     /// OC-5：每幣種最新指數價格緩存（來自 Ticker 事件）。
     index_prices: HashMap<String, f64>,
+    /// EDGE-P2-2: Cached latest open interest per symbol (from Ticker events).
+    /// Raw value only — delta/window computation lives inside consuming strategies.
+    /// EDGE-P2-2：每幣種最新 OI 緩存（來自 Ticker 事件）。僅儲原始值，
+    /// 差分／滾動窗口由消費者策略自行維護，避免跨策略污染。
+    open_interests: HashMap<String, f64>,
     /// EDGE-P3-1 Stage 0: Per-strategy quantile predictor store for this engine.
     /// None until the engine bootstrap registers one. When present, the
     /// intent processor's cost gate consults it before falling through to the
@@ -976,6 +986,9 @@ impl TickPipeline {
             ft_reduced_symbols: std::collections::HashMap::new(),
             funding_rates: HashMap::new(),
             index_prices: HashMap::new(),
+            // EDGE-P2-2: init empty OI cache; filled on first ticker with openInterest.
+            // EDGE-P2-2：初始化空 OI 緩存；首次攜帶 openInterest 的 ticker 後填充。
+            open_interests: HashMap::new(),
             edge_predictor_store: None,
             decision_feature_tx: None,
             shadow_fill_db_tx: None,
