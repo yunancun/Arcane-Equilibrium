@@ -185,8 +185,8 @@ oc-clean-runtime
 | 項目 | 狀態 | 備註 |
 |---|---|---|
 | `helper_scripts/mac_bootstrap.sh` | ⏳ TODO | 一鍵安裝腳本（跟本 README 配套） |
-| launchd `.plist` 範本 | ⏳ 未寫 | 對應 Linux `engine_watchdog.service` 等 |
-| `/home/ncyu/...` 硬編碼殘留 | ⚠️ 未 100% 清 | CLAUDE.md §七 要求但未全查；搬遷前 `grep -r /home/ncyu rust/ program_code/` 一次 |
+| launchd `.plist` 範本 | ✅ 已寫 | 4 個 plist 齊全（engine / engine-watchdog / trading-api / gateway），`__BASE__` 占位符支援非 $HOME 部署；見 `helper_scripts/deploy/README.md` |
+| `/home/ncyu/...` 硬編碼殘留 | ✅ 已清 | 活躍源/配置路徑已抽成 `$OPENCLAW_BASE_DIR`（`settings/system_notes/bybit_readonly_credentials_protocol_v1.md` + `REPO_LAYOUT_POLICY.md`）；其餘出現處為政策說明、歷史 worklog、gitignored snapshot，不動 |
 | GUI dev hot-reload | 未驗證 | Mac uvicorn `--reload` 路徑 watch 行為與 Linux inotify 差異 |
 
 ---

@@ -11,10 +11,13 @@
     Equivalent to the systemd openclaw-gateway.service unit.
     AI provider keys MUST be passed via environment variables; never hardcode.
 
-  安装步骤 / Installation:
+  安裝步驟 / Installation:
     1. cp com.openclaw.gateway.plist ~/Library/LaunchAgents/
-    2. sed -i '' "s|__HOME__|$HOME|g" ~/Library/LaunchAgents/com.openclaw.gateway.plist
-    3. 编辑 plist 填入 AI 密钥（或通过 launchctl setenv 设置）
+    2. sed -i '' "s|__HOME__|$HOME|g" \
+           ~/Library/LaunchAgents/com.openclaw.gateway.plist
+       # Gateway 不參考 repo 根路徑（Node 模組裝在 npm-global），
+       # 所以無需 __BASE__ sed（保留此行僅為形狀一致性）。
+    3. 編輯 plist 填入 AI 密鑰（或透過 launchctl setenv 設置）
        Edit plist to add AI keys (or use launchctl setenv)
     4. mkdir -p ~/Library/Logs/openclaw
     5. launchctl load ~/Library/LaunchAgents/com.openclaw.gateway.plist

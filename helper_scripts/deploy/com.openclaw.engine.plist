@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  MODULE_NOTE (中文):
+    macOS launchd 配置模板 — Rust openclaw-engine 主進程。
+    對應 Linux 上 `nohup rust/target/release/openclaw-engine > engine.log`
+    的角色；功能等價（KeepAlive=true 等同 systemd Restart=always）。
+    用 __BASE__（repo 根）+ __HOME__（用戶家目錄）雙占位符；安裝時 sed 替換。
+    放置於 ~/Library/LaunchAgents/ 實現登入自啟。
+
+  MODULE_NOTE (English):
+    macOS launchd plist template — Rust openclaw-engine main process.
+    Equivalent to Linux `nohup rust/target/release/openclaw-engine`.
+    Uses __BASE__ (repo root) + __HOME__ (user home) placeholders.
+    Place in ~/Library/LaunchAgents/ for auto-start on login.
+
+  安裝步驟 / Installation:
+    1. cp com.openclaw.engine.plist ~/Library/LaunchAgents/
+    2. sed -i '' "s|__BASE__|$OPENCLAW_BASE_DIR|g" \
+           ~/Library/LaunchAgents/com.openclaw.engine.plist
+       sed -i '' "s|__HOME__|$HOME|g" \
+           ~/Library/LaunchAgents/com.openclaw.engine.plist
+    3. mkdir -p ~/Library/Logs/openclaw
+    4. launchctl load ~/Library/LaunchAgents/com.openclaw.engine.plist
+
+  前置條件 / Prerequisites:
+    - 已透過 restart_all.sh（rebuild 模式）產出 rust/target/release/openclaw-engine
+    - OPENCLAW_DATA_DIR 已 mkdir（預設 $HOME/.openclaw_runtime）
+    - IPC_SECRET / DATABASE_URL 透過 launchctl setenv 注入，不寫在這
+-->
+<plist version="1.0">
+<dict>
+
+  <!-- 服務標識 / Service identifier -->
+  <key>Label</key>
+  <string>com.openclaw.engine</string>
+
+  <!-- 工作目錄 / Working directory
+       對應 systemd: WorkingDirectory= -->
+  <key>WorkingDirectory</key>
+  <string>__BASE__</string>
+
+  <!-- 啟動命令 / Start command
+       對應 Linux: nohup rust/target/release/openclaw-engine -->
+  <key>ProgramArguments</key>
+  <array>
+    <string>__BASE__/rust/target/release/openclaw-engine</string>
+  </array>
+
+  <!-- 自動重啟 / Auto-restart on crash
+       對應 systemd: Restart=always -->
+  <key>KeepAlive</key>
+  <true/>
+
+  <!-- 重啟間隔（秒）/ Restart throttle -->
+  <key>ThrottleInterval</key>
+  <integer>5</integer>
+
+  <!-- 停止超時（秒）/ Stop timeout
+       給 5s graceful stop + 2s buffer（restart_all.sh:160 邏輯一致）-->
+  <key>ExitTimeOut</key>
+  <integer>10</integer>
+
+  <!-- 環境變量 / Environment variables
+       機敏值（IPC_SECRET / DATABASE_URL）請用 launchctl setenv 注入，
+       不要寫在此 plist 文件裡。
+       Sensitive values must be injected via launchctl setenv, never hardcoded. -->
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>HOME</key>
+    <string>__HOME__</string>
+
+    <key>TMPDIR</key>
+    <string>/tmp</string>
+
+    <key>PATH</key>
+    <string>__HOME__/.local/bin:/usr/local/bin:/usr/bin:/bin</string>
+
+    <!-- Runtime / socket / log 目錄 / Runtime data dir -->
+    <key>OPENCLAW_DATA_DIR</key>
+    <string>__HOME__/.openclaw_runtime</string>
+
+    <!-- Repo 根（settings/ 解析） / Repo root (settings/ resolution) -->
+    <key>OPENCLAW_BASE_DIR</key>
+    <string>__BASE__</string>
+
+    <!-- 灰度模式 flag — 對應 restart_all.sh 的 OPENCLAW_CANARY_MODE=1 -->
+    <key>OPENCLAW_CANARY_MODE</key>
+    <string>1</string>
+
+    <!-- 時區 / Timezone -->
+    <key>TZ</key>
+    <string>Europe/Madrid</string>
+  </dict>
+
+  <!-- 標準輸出日誌 / Stdout log -->
+  <key>StandardOutPath</key>
+  <string>__HOME__/Library/Logs/openclaw/engine-stdout.log</string>
+
+  <!-- 標準錯誤日誌 / Stderr log -->
+  <key>StandardErrorPath</key>
+  <string>__HOME__/Library/Logs/openclaw/engine-stderr.log</string>
+
+  <!-- 登入時自動運行 / Run at load -->
+  <key>RunAtLoad</key>
+  <true/>
+
+</dict>
+</plist>

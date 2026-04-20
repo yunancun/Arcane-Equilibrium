@@ -9,7 +9,7 @@ Grafana monitoring stack for OpenClaw Trading AI system.
 ## Quick Start
 
 ```bash
-cd /home/ncyu/BybitOpenClaw/srv/docker_projects/monitoring_services
+cd "${OPENCLAW_BASE_DIR:-$HOME/BybitOpenClaw/srv}/docker_projects/monitoring_services"
 docker compose up -d
 ```
 

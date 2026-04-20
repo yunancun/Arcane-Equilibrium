@@ -16,11 +16,17 @@ Current stage principles:
 - 不应把真实凭据写入 README 或普通配置文件。
 - Real credentials must not be written into README files or normal config files.
 
-默认路径：
-Default paths:
+默认路径（相对 repo 根 / relative to repo root）：
+Default paths (relative to `$OPENCLAW_BASE_DIR`):
 
-- api_key_file: /home/ncyu/srv/settings/secret_files/bybit/read_only/api_key
-- api_secret_file: /home/ncyu/srv/settings/secret_files/bybit/read_only/api_secret
+- api_key_file:    `$OPENCLAW_BASE_DIR/settings/secret_files/bybit/read_only/api_key`
+- api_secret_file: `$OPENCLAW_BASE_DIR/settings/secret_files/bybit/read_only/api_secret`
+
+在 Linux 預設部署下 `$OPENCLAW_BASE_DIR = $HOME/BybitOpenClaw/srv`；
+在 macOS 非 $HOME 部署可指向任意絕對路徑（例如
+`/Users/ncyu/Documents/Projects/TradeBot`）。
+On Linux default, `$OPENCLAW_BASE_DIR = $HOME/BybitOpenClaw/srv`; on macOS
+non-$HOME deployments, it may point to any absolute path.
 
 只读模式下必须满足：
 Read-only mode must satisfy:
