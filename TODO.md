@@ -341,6 +341,63 @@ git status && git log --oneline -5
 - ✅ **E5-FN-2 Plan N** 2026-04-19 commit `f0f11c0`（revert `87b7653`；歸檔 §12）— 用既有 hypertable PK `(time, scope, request_id)` + `ON CONFLICT DO NOTHING RETURNING 1` 取代 V018 partial UNIQUE（TimescaleDB hypertable 不接受不含 partitioning column 的 UNIQUE index）。零 schema/migration。
 - [ ] **E5-FN-2-PLAN-N-FUP** — Plan N 部署後 follow-up：(a) Python Layer-2 sync caller 可選升級為傳入 `(request_id, event_time_ms)` 以獲得跨重試的真實去重（目前 IPC handler 本地鑄造時每次 retry 會被當新 row — 仍不會雙重計費本地 caller 自己，但失去跨 Python 重試保護）；(b) `test_make_request_id_unique_within_same_ms` 為 1 對 mint 對比，flake 機率 ~1/2^32，若 CI 偶發誤報換 seeded RNG；(c) 部署後 `SELECT time, scope, request_id, COUNT(*) FROM learning.ai_usage_log GROUP BY 1,2,3 HAVING COUNT(*) > 1 LIMIT 5;` 應永遠 0 rows（PK 保證）。
 
+### 跨平台 / Mac 部署準備
+
+#### PYO3-ELIMINATE-1 · PyO3 surface 歸零（3 phase）📦
+- **動機**：Mac (M5 Max) 本地開發 + Linux 部署短期雙軌 → 未來 M5 Ultra 完整遷移。PyO3 cdylib 是**唯一**跨平台 ABI 耦合點；消除後 Rust binary + Python source 完全正交，CI wheel pipeline 可關閉。符合憲法 §一 #2 讀寫分離（PyO3 實質繞過 IPC 邊界）。
+- **盤點結果**（2026-04-20 grep `#[pyclass]` / `from openclaw_core`）：
+  - `openclaw_pyo3` crate 共 1426 LOC / 3 暴露對象
+  - `ContextDistiller` + `NotableEvent`（228 LOC）— **0 Python call sites** 💀
+  - `HedgingEngine` + `HedgeRecommendation` + `Position`（285 LOC）— **0 Python call sites** 💀
+  - `BybitClient`（bybit_bridge/ ~880 LOC）— **3 call sites**：`strategy_ai_routes.py:46` / `live_session_routes.py:220` / `helper_scripts/clean_restart_flatten.py:35`
+- **前置**：無阻塞，可隨時啟動。**不阻 Live Gate**（Mac 遷移是 Live 後長期工作）。
+
+**Phase 1 · 刪死代碼（~30 min，零風險）**
+- [ ] 刪除 `rust/openclaw_pyo3/src/context_distiller.rs`（228 LOC）
+- [ ] 刪除 `rust/openclaw_pyo3/src/hedging_engine.rs`（285 LOC）
+- [ ] 從 `rust/openclaw_pyo3/src/lib.rs` #[pymodule] 移除對應 `add_class` 註冊（5 行）
+- [ ] 驗證：`cargo build -p openclaw_pyo3 --release` 綠 + `pytest` 全量綠（確認無隱藏 import）
+- [ ] commit：`refactor(pyo3): PYO3-ELIMINATE-1 Phase 1 — drop dead ContextDistiller + HedgingEngine (513 LOC, 0 call sites)`
+
+**Phase 2 · `BybitClient` 3 call sites Python 化（~0.5-1 day）**
+- [ ] 先分析 3 call sites 實際調用的 `BybitClient` 方法集（`strategy_ai_routes.py` 單例初始化做什麼 / `live_session_routes.py:220` 取 positions / `clean_restart_flatten.py` 做什麼）
+- [ ] 決策點：Python httpx 重寫 vs IPC 到 Rust engine
+  - 若 ≤5 methods 且無 WS → **Python httpx 直接寫**（預估 ~150 LOC）
+  - 若涉及共享認證/reconnect 邏輯 → **加 IPC handler** 到 `ipc_server/handlers`（重用 engine 已有的 `bybit_rest_client.rs`）
+- [ ] 實作 + 單測對等（`pytest` 對比新舊返回 shape）
+- [ ] 3 call sites 遷移 + 刪除 `from openclaw_core import BybitClient`
+- [ ] commit：`refactor(connector): PYO3-ELIMINATE-1 Phase 2 — migrate BybitClient callers to {httpx|IPC}`
+
+**Phase 3 · 拆 crate + 清工具鏈（~1 hr）**
+- [ ] 刪整個 `rust/openclaw_pyo3/` 目錄
+- [ ] `rust/Cargo.toml` 移除 `openclaw_pyo3` member
+- [ ] `rust/Cargo.toml` 移除 workspace `pyo3` 依賴
+- [ ] 刪 `helper_scripts/build_pyo3.sh`
+- [ ] 修 `helper_scripts/clean_restart.sh` / `fresh_start.sh` `SRC_DIRS` 移除 `openclaw_pyo3/src`
+- [ ] 修 `helper_scripts/restart_all.sh --rebuild` 移除 PyO3 path（確認剩下只有 `cargo build --bin openclaw-engine`）
+- [ ] 更新 `README.md:162` 架構圖
+- [ ] 更新 CLAUDE.md §五 / §九（若有 PyO3 相關描述）
+- [ ] 驗證：`cargo build --release` + 完整 `./helper_scripts/restart_all.sh --rebuild` + pytest + engine lib tests 全綠
+- [ ] commit：`chore(rust): PYO3-ELIMINATE-1 Phase 3 — drop openclaw_pyo3 crate + build pipeline`
+
+**完成標準**：
+- `cargo.toml` 零 pyo3 依賴
+- `rg '#\[pyclass\]|from openclaw_core'` 零結果
+- CI matrix 無 maturin/wheel step
+- engine lib + pytest 基準線不回退
+- Mac 上 `cargo build` 僅產 binary，無 .so/.dylib
+
+**遷移收益量化**：
+- 移除 1426 LOC PyO3 code
+- 移除 `maturin` / `cibuildwheel` 跨平台 wheel 管道需求
+- CI build time 估計 -2~3 min（省掉 pyo3 cdylib link）
+- Mac 跨平台阻力：PyO3 wheel cross-compile（唯一硬骨頭）→ 消失
+
+**風險與退路**：
+- Phase 1：零風險（刪的是 0 call site 代碼）
+- Phase 2 風險：httpx 與 Rust `reqwest` 在 Bybit V5 簽名/timeout/retry 行為差異 → 退路 = 改走 IPC（Rust 側邏輯無改動）
+- Phase 3 風險：清理遺漏（script 殘留 PyO3 路徑）→ 退路 = CI 會立即爆
+
 ### ✅ E5-FN-3-FUP · 全 5 Agent audit_callback wiring 2026-04-19（歸檔 §14）
 - FUP-a Strategist / FUP-b Guardian / FUP-c Executor / FUP-d Scout 全 4 agent 接 audit_callback + 3 NITs（log throttle 60s / unknown event_type default / thread-safety 文檔）全綠；新測 2+6+3+8=19 integration tests。5 agent 完成後 `change_audit_log` 可驗 `who IN ('ScoutAgent','StrategistAgent','GuardianAgent','AnalystAgent','ExecutorAgent')`。
 
