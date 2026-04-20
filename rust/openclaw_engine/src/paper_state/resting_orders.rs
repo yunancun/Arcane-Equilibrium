@@ -340,9 +340,18 @@ impl PaperState {
     /// CloseAll paths so a session reset does not leak stale maker orders
     /// into the next session. 1B-4.2 will also call this when the engine
     /// transitions out of Paper mode.
-    /// 丟棄所有掛單 — Reset / CloseAll 路徑使用，避免 session 切換時洩漏。
+    ///
+    /// EDGE-P2-3 Phase 1B-5 FUP-1: also reset `maker_stats` so
+    /// `degraded_fallbacks` / `sum_net_edge_bps` / terminal counters do not
+    /// survive into the next session. Without this, future Reset wiring would
+    /// inherit a stale Degraded verdict across sessions, silently blocking
+    /// PostOnly enqueues even though the resting queue itself is empty.
+    /// EDGE-P2-3 Phase 1B-5 FUP-1：同時重置 `maker_stats`，避免 session 切換
+    /// 時讓 Degraded 結論/統計跨 session 污染 — 否則新 session 儘管 queue 空，
+    /// 仍會因陳舊 Degraded verdict 靜默 PostOnly 入隊。
     pub fn clear_resting_limit_orders(&mut self) {
         self.resting_limit_orders.clear();
+        self.maker_stats = super::maker_stats::MakerStats::default();
     }
 
     /// Remove a specific resting order by `order_link_id`. Returns the
@@ -590,6 +599,32 @@ mod tests {
         assert_eq!(s.resting_limit_order_count(), 2);
         s.clear_resting_limit_orders();
         assert_eq!(s.resting_limit_order_count(), 0);
+    }
+
+    /// FUP-1: `clear_resting_limit_orders` must also reset maker_stats so a
+    /// Degraded verdict or counter residue does not leak across sessions.
+    /// FUP-1：clear 必須一併重置 maker_stats，避免 Degraded 結論跨 session 污染。
+    #[test]
+    fn test_clear_also_resets_maker_stats() {
+        let mut s = PaperState::new(10_000.0);
+        s.enqueue_resting_limit_order(make_order("oc_1", "BTCUSDT", 1_000, 46_000));
+        // Seed terminal stats so Degraded could sticky if not cleared.
+        s.test_seed_maker_stats_terminal("BTCUSDT", 0, 25);
+        s.record_maker_degraded_fallback("BTCUSDT");
+        let before = s.maker_stats();
+        assert!(before.aggregate.timedout > 0);
+        assert!(before.aggregate.degraded_fallbacks > 0);
+
+        s.clear_resting_limit_orders();
+
+        let after = s.maker_stats();
+        assert_eq!(after.aggregate.submitted, 0);
+        assert_eq!(after.aggregate.filled_full, 0);
+        assert_eq!(after.aggregate.filled_partial, 0);
+        assert_eq!(after.aggregate.timedout, 0);
+        assert_eq!(after.aggregate.degraded_fallbacks, 0);
+        assert_eq!(after.aggregate.sum_net_edge_bps, 0.0);
+        assert!(after.per_symbol.is_empty());
     }
 
     #[test]
