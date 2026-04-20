@@ -200,6 +200,13 @@ phase_check() {
         fail "Git 未安裝 → brew install git"
     fi
 
+    # libomp (LightGBM dlopen 依賴)
+    if brew list libomp >/dev/null 2>&1; then
+        ok "libomp 已安裝（LightGBM OpenMP runtime）"
+    else
+        warn "libomp 未安裝 → brew install libomp（LightGBM/sklearn 在 Mac 必需）"
+    fi
+
     # Runtime 目錄狀態
     head1 "Runtime 目錄狀態"
     if [ -d "${OPENCLAW_DATA_DIR:-$DEFAULT_OC_DATA_DIR}" ]; then
@@ -250,7 +257,8 @@ phase_install_deps() {
 
     # brew 套件
     info "安裝核心 brew 套件..."
-    brew install git python@3.12 rustup-init
+    # libomp: LightGBM/sklearn/xgboost 在 macOS 需要 OpenMP runtime (dlopen libomp.dylib)
+    brew install git python@3.12 rustup-init libomp
 
     if [ "$SKIP_POSTGRES" -eq 0 ]; then
         info "安裝 postgresql@16..."
