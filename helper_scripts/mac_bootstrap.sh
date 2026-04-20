@@ -165,8 +165,8 @@ phase_check() {
     elif command -v python3 >/dev/null 2>&1; then
         PYVER="$(python3 --version 2>&1 | awk '{print $2}')"
         case "$PYVER" in
-            3.12*|3.13*) ok "Python $PYVER 可用（python3 指向）" ;;
-            *)           warn "Python $PYVER（需要 3.12+）→ brew install python@3.12" ;;
+            3.12*|3.13*) ok "Python ${PYVER} 可用（python3 指向）" ;;
+            *)           warn "Python ${PYVER}（需要 3.12+）→ brew install python@3.12" ;;
         esac
     else
         fail "Python 未安裝 → brew install python@3.12"
@@ -297,10 +297,10 @@ phase_install_deps() {
         info "安裝 control_api_v1 requirements..."
         pip install -r "$CONTROL_API_REQ"
     else
-        warn "未找到 $CONTROL_API_REQ，跳過"
+        warn "未找到 ${CONTROL_API_REQ}，跳過"
     fi
     deactivate
-    ok "Python venv 就緒（$VENV_DIR）"
+    ok "Python venv 就緒（${VENV_DIR}）"
 
     head1 "Phase 2 完成"
     info "下一步：bash helper_scripts/mac_bootstrap.sh --init-runtime"
