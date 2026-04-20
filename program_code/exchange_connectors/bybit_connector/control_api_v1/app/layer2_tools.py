@@ -36,7 +36,7 @@ import subprocess
 import time
 from typing import Any
 
-from .ollama_client import get_ollama_client
+from .local_llm_factory import get_local_llm_client
 from .layer2_types import (
     SEARCH_PROVIDER_LOCAL_LLM,
     SEARCH_PROVIDER_LOCAL_LLM_WEB,
@@ -393,7 +393,7 @@ class LocalLLMWebSearchProvider(SearchProvider):
         return SEARCH_PROVIDER_LOCAL_LLM_WEB
 
     def is_available(self) -> bool:
-        client = get_ollama_client()
+        client = get_local_llm_client()
         if not client.is_available():
             return False
         web_pilot = os.path.expanduser("~/.local/bin/web-pilot")
@@ -456,12 +456,12 @@ class LocalLLMSearchProvider(SearchProvider):
         return SEARCH_PROVIDER_LOCAL_LLM
 
     def is_available(self) -> bool:
-        return get_ollama_client().is_available()
+        return get_local_llm_client().is_available()
 
     async def search(self, query: str, *, max_results: int = 5) -> SearchResponse:
         start = time.time()
         try:
-            client = get_ollama_client()
+            client = get_local_llm_client()
             resp = client.generate(f"Briefly answer: {query}", max_tokens=512, timeout=60)
             content = resp.text if resp.success else ""
             if not content:

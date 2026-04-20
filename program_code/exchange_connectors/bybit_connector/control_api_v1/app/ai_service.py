@@ -32,26 +32,30 @@ from typing import Any, Callable
 logger = logging.getLogger(__name__)
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# Ollama client lazy singleton / Ollama 客戶端懶加載單例
+# Local LLM client lazy singleton / 本地 LLM 客戶端懶加載單例
+# LLM-ABC-MIGRATION-1: routed via local_llm_factory (LOCAL_LLM_PROVIDER env);
+# variable name kept as _OLLAMA_CLIENT for §九 singleton-table grep-stability.
+# LLM-ABC-MIGRATION-1：統一經 local_llm_factory（LOCAL_LLM_PROVIDER env 切換）；
+# 變數名保留 _OLLAMA_CLIENT 以維持 §九 單例表的 grep 穩定性。
 # ═══════════════════════════════════════════════════════════════════════════════
 
-_OLLAMA_CLIENT: Any = None  # OllamaClient | None
+_OLLAMA_CLIENT: Any = None  # LocalLLM client singleton (Ollama | LMStudio) | None
 _OLLAMA_INIT_ATTEMPTED: bool = False
 
 
 def _get_ollama_client() -> Any:
-    """Lazy-init OllamaClient singleton. Returns None if unavailable (fail-open).
-    懶加載 OllamaClient 單例。不可用時返回 None（失敗開放）。"""
+    """Lazy-init local LLM client singleton. Returns None if unavailable (fail-open).
+    懶加載本地 LLM 客戶端單例。不可用時返回 None（失敗開放）。"""
     global _OLLAMA_CLIENT, _OLLAMA_INIT_ATTEMPTED
     if _OLLAMA_INIT_ATTEMPTED:
         return _OLLAMA_CLIENT
     _OLLAMA_INIT_ATTEMPTED = True
     try:
-        from .ollama_client import OllamaClient
-        _OLLAMA_CLIENT = OllamaClient()
-        logger.info("OllamaClient initialized for AIService / AIService 的 OllamaClient 已初始化")
+        from .local_llm_factory import get_local_llm_client
+        _OLLAMA_CLIENT = get_local_llm_client()
+        logger.info("Local LLM client initialized for AIService / AIService 的本地 LLM 客戶端已初始化")
     except Exception as exc:
-        logger.warning("OllamaClient init failed (AI handlers will use heuristics): %s", exc)
+        logger.warning("Local LLM client init failed (AI handlers will use heuristics): %s", exc)
         _OLLAMA_CLIENT = None
     return _OLLAMA_CLIENT
 
