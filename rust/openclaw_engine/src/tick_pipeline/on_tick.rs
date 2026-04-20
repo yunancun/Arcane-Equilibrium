@@ -1085,6 +1085,23 @@ impl TickPipeline {
                                     continue;
                                 }
 
+                                // EDGE-P2-3 Phase 1B-5: router flagged a
+                                // MakerKpi Degraded fallback — count + warn.
+                                // The `result.fill` branch below still runs
+                                // (market fill executes normally).
+                                // EDGE-P2-3 Phase 1B-5：router 標記 MakerKpi
+                                // Degraded fallback — 計數 + warn。下方
+                                // result.fill 分支照常執行（市價成交）。
+                                if let Some(ref fb_sym) = result.maker_degraded_fallback {
+                                    self.paper_state
+                                        .record_maker_degraded_fallback(fb_sym);
+                                    warn!(
+                                        symbol = %fb_sym,
+                                        strategy = %intent.strategy,
+                                        "maker KPI degraded → market fallback / KPI Degraded 改走市價"
+                                    );
+                                }
+
                                 if let Some(mut fill) = result.fill {
                                     if let Some(ref icache) = self.instrument_cache {
                                         if let Some(spec) = icache.get(&intent.symbol) {

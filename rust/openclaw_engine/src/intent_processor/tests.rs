@@ -1679,3 +1679,227 @@ mod predictor_wiring_tests {
         assert!((rate - 0.00055).abs() < 1e-12);
     }
 }
+
+// ════════════════════════════════════════════════════════════════════════════
+// EDGE-P2-3 Phase 1B-5: MakerKpi gate router tests.
+// Verifies router consults per-symbol fill-rate / net-edge KPI before enqueueing
+// a PostOnly intent. Cold (warmup) and Healthy → enqueue as resting order;
+// Degraded → silent fallback to market fill with `maker_degraded_fallback`
+// sentinel set so `on_tick` bumps the counter and warns.
+// EDGE-P2-3 Phase 1B-5：MakerKpi gate 路由測試。驗 router 於 enqueue PostOnly
+// 前查 per-symbol fill-rate / net-edge KPI。Cold / Healthy → 入掛單隊列；
+// Degraded → 靜默改走市價，`maker_degraded_fallback` 標記由 on_tick 計數 + warn。
+// ════════════════════════════════════════════════════════════════════════════
+#[cfg(test)]
+mod maker_kpi_gate_tests {
+    use super::*;
+    use crate::order_manager::TimeInForce;
+
+    const NOW_MS: u64 = 1_700_000_000_000;
+
+    fn approved_gov() -> GovernanceCore {
+        let mut g = GovernanceCore::new();
+        g.grant_paper_authorization(None).unwrap();
+        g
+    }
+
+    fn paper_state_seeded(price: f64) -> PaperState {
+        let mut s = PaperState::new(10_000.0);
+        s.set_latest_price("BTCUSDT", price);
+        s.set_latest_turnover("BTCUSDT", 100_000_000.0);
+        s
+    }
+
+    fn postonly_intent(price: f64) -> OrderIntent {
+        OrderIntent {
+            symbol: "BTCUSDT".into(),
+            is_long: true,
+            qty: 0.001,
+            confidence: 0.7,
+            strategy: "grid_trading".into(),
+            order_type: "limit".into(),
+            limit_price: Some(price * 0.999),
+            confluence_score: None,
+            persistence_elapsed_ms: None,
+            time_in_force: Some(TimeInForce::PostOnly),
+            maker_timeout_ms: Some(45_000),
+        }
+    }
+
+    #[test]
+    fn test_postonly_cold_gate_allows_enqueue() {
+        // No terminal samples → Cold → router must build the resting draft.
+        // 零終局樣本 → Cold → router 必須建立 resting draft。
+        let proc = IntentProcessor::new();
+        let gov = approved_gov();
+        let state = paper_state_seeded(30_000.0);
+        let r = proc.process_with_features(
+            &postonly_intent(30_000.0),
+            &gov,
+            &state,
+            2000.0,
+            GovernanceProfile::Exploration,
+            None,
+            None,
+            NOW_MS,
+        );
+        assert!(r.submitted, "cold gate must allow enqueue");
+        assert!(
+            r.resting_order.is_some(),
+            "cold gate must produce resting draft; got fill={:?}",
+            r.fill
+        );
+        assert!(r.fill.is_none(), "resting draft implies no immediate fill");
+        assert!(r.maker_degraded_fallback.is_none());
+    }
+
+    #[test]
+    fn test_postonly_healthy_gate_allows_enqueue() {
+        // Seed 18 fills / 2 timeouts → fill_rate 0.9 > 0.15, edge 0 > -5 → Healthy.
+        // 塞 18 fills / 2 timeouts → 成交率 0.9 > 0.15、edge 0 > -5 → Healthy。
+        let proc = IntentProcessor::new();
+        let gov = approved_gov();
+        let mut state = paper_state_seeded(30_000.0);
+        state.test_seed_maker_stats_terminal("BTCUSDT", 18, 2);
+        let r = proc.process_with_features(
+            &postonly_intent(30_000.0),
+            &gov,
+            &state,
+            2000.0,
+            GovernanceProfile::Exploration,
+            None,
+            None,
+            NOW_MS,
+        );
+        assert!(r.submitted);
+        assert!(r.resting_order.is_some(), "healthy gate must enqueue");
+        assert!(r.maker_degraded_fallback.is_none());
+    }
+
+    #[test]
+    fn test_postonly_degraded_low_fill_rate_falls_back_to_market() {
+        // Seed 2 fills / 18 timeouts → fill_rate 0.1 < 0.15 → Degraded.
+        // Router must skip enqueue and produce a market fill, with the
+        // fallback sentinel pointing at the rejected symbol.
+        // 塞 2/18 → rate 0.1 < 0.15 → Degraded。router 必須跳過 enqueue、
+        // 走市價成交、maker_degraded_fallback 指向被拒的 symbol。
+        let proc = IntentProcessor::new();
+        let gov = approved_gov();
+        let mut state = paper_state_seeded(30_000.0);
+        state.test_seed_maker_stats_terminal("BTCUSDT", 2, 18);
+        let r = proc.process_with_features(
+            &postonly_intent(30_000.0),
+            &gov,
+            &state,
+            2000.0,
+            GovernanceProfile::Exploration,
+            None,
+            None,
+            NOW_MS,
+        );
+        assert!(r.submitted);
+        assert!(
+            r.resting_order.is_none(),
+            "degraded gate must NOT enqueue"
+        );
+        assert!(r.fill.is_some(), "degraded gate must take market fallback");
+        assert_eq!(
+            r.maker_degraded_fallback.as_deref(),
+            Some("BTCUSDT"),
+            "fallback sentinel must carry the symbol so on_tick can count it"
+        );
+    }
+
+    #[test]
+    fn test_postonly_degraded_per_symbol_leaves_other_symbol_healthy() {
+        // BTCUSDT saturated with timeouts (Degraded), ETHUSDT untouched (Cold
+        // per-symbol → falls back to aggregate). Aggregate = BTCUSDT stats
+        // alone → also Degraded. So ETHUSDT should also fall back to market
+        // when fed the same gate. This locks the aggregate-fallback semantics.
+        // BTCUSDT 被 timeouts 灌滿（Degraded）、ETHUSDT 未觸碰（per-symbol Cold
+        // → fallback 到 aggregate）。aggregate = BTCUSDT 獨撐 → 也 Degraded。
+        // 故 ETHUSDT 也會被 gate 擋。此測固化 aggregate fallback 語意。
+        let proc = IntentProcessor::new();
+        let gov = approved_gov();
+        let mut state = paper_state_seeded(30_000.0);
+        state.test_seed_maker_stats_terminal("BTCUSDT", 2, 18);
+        state.set_latest_price("ETHUSDT", 3_000.0);
+        state.set_latest_turnover("ETHUSDT", 100_000_000.0);
+        let mut eth_intent = postonly_intent(3_000.0);
+        eth_intent.symbol = "ETHUSDT".into();
+        eth_intent.limit_price = Some(3_000.0 * 0.999);
+        let r = proc.process_with_features(
+            &eth_intent,
+            &gov,
+            &state,
+            300.0,
+            GovernanceProfile::Exploration,
+            None,
+            None,
+            NOW_MS,
+        );
+        assert!(r.submitted);
+        assert!(
+            r.resting_order.is_none(),
+            "ETHUSDT must ride aggregate verdict (Degraded) → no enqueue"
+        );
+        assert_eq!(r.maker_degraded_fallback.as_deref(), Some("ETHUSDT"));
+    }
+
+    #[test]
+    fn test_market_intent_is_never_tagged_with_fallback() {
+        // Market intents bypass the gate entirely — the sentinel must stay
+        // None so downstream observers don't mistakenly count them.
+        // 市價意圖完全不進 gate — sentinel 保持 None。
+        let proc = IntentProcessor::new();
+        let gov = approved_gov();
+        let mut state = paper_state_seeded(30_000.0);
+        // Even with Degraded stats present, a market intent shouldn't care.
+        // 即使 stats 呈 Degraded，市價意圖也不應受影響。
+        state.test_seed_maker_stats_terminal("BTCUSDT", 2, 18);
+        let intent = super::make_intent("BTCUSDT", true); // order_type=market
+        let r = proc.process_with_features(
+            &intent,
+            &gov,
+            &state,
+            2000.0,
+            GovernanceProfile::Exploration,
+            None,
+            None,
+            NOW_MS,
+        );
+        assert!(r.submitted);
+        assert!(r.fill.is_some());
+        assert!(r.maker_degraded_fallback.is_none());
+    }
+
+    #[test]
+    fn test_enqueue_bumps_submit_counter() {
+        // Enqueue side-effect on PaperState must increment `maker_stats.submitted`
+        // on both aggregate and per-symbol scopes. Gate not involved here —
+        // this is an integration check of the 1B-5 wiring through PaperState.
+        // enqueue 副作用必須同時更新 aggregate + per-symbol 的 submitted。
+        let proc = IntentProcessor::new();
+        let gov = approved_gov();
+        let mut state = paper_state_seeded(30_000.0);
+        let r = proc.process_with_features(
+            &postonly_intent(30_000.0),
+            &gov,
+            &state,
+            2000.0,
+            GovernanceProfile::Exploration,
+            None,
+            None,
+            NOW_MS,
+        );
+        let draft = r.resting_order.expect("cold gate enqueues");
+        // Caller (on_tick) normally runs this; replicate manually for the test.
+        // caller（on_tick）通常執行此行；測試中手動重現。
+        state.enqueue_resting_limit_order(draft);
+        assert_eq!(state.maker_stats().aggregate.submitted, 1);
+        assert_eq!(
+            state.maker_stats().per_symbol.get("BTCUSDT").unwrap().submitted,
+            1
+        );
+    }
+}

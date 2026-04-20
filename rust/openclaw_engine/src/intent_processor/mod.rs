@@ -146,6 +146,16 @@ pub struct IntentResult {
     /// `Some(_)` 蘊含 `submitted=true` 且 `fill=None`（「接受待成交」形狀）。
     /// 市價意圖與所有非紙盤路徑此欄位為 None。
     pub resting_order: Option<crate::paper_state::RestingLimitOrder>,
+    /// EDGE-P2-3 Phase 1B-5: set by router when the MakerKpi gate downgraded
+    /// a PostOnly intent to market execution because the symbol's fill rate
+    /// / net-edge KPI is Degraded. Caller (`on_tick`) calls
+    /// `paper_state.record_maker_degraded_fallback(symbol)` and logs — the
+    /// market fill still happens on the normal path. `None` means "no gate
+    /// action" (either market intent, Healthy/Cold gate, or exchange path).
+    /// EDGE-P2-3 Phase 1B-5：router 因 MakerKpi gate 判定 Degraded 而將 PostOnly
+    /// 降級為市價時填入 Some(symbol)。caller（on_tick）記 counter + warn，
+    /// 市價成交仍走正常路徑。None = 無 gate 動作。
+    pub maker_degraded_fallback: Option<String>,
 }
 
 impl IntentResult {
@@ -160,6 +170,7 @@ impl IntentResult {
             verdict_info: Some(vi),
             approved_qty: 0.0,
             resting_order: None,
+            maker_degraded_fallback: None,
         }
     }
 }

@@ -58,12 +58,16 @@ pub mod checkpoint;
 pub mod containers;
 pub mod dust_gate;
 pub mod fill_engine;
+pub mod maker_stats;
 pub mod owner_attribution;
 pub mod resting_orders;
 pub mod snapshots;
 
 pub use containers::{PaperPosition, PositionExitSnapshot};
 pub use dust_gate::TriageOutcome;
+pub use maker_stats::{
+    compute_net_edge_bps, MakerKpiConfig, MakerKpiStatus, MakerStats, MakerStatsCounters,
+};
 pub use owner_attribution::{RetriageOutcome, SYNTHETIC_OWNER_LABELS};
 pub use resting_orders::{RestingFillEvent, RestingLimitOrder, RestingSweepAction};
 pub use snapshots::{PaperStateSnapshot, PositionSnapshot};
@@ -125,6 +129,16 @@ pub struct PaperState {
     /// 本提交保持空。1B-4.2 會接線 enqueue 與 tick 碰觸/穿越 sweep。交易所模式
     /// 不讀此 map；真實掛單在 Bybit 委託簿上，靠 WS 成交事件回流。
     pub(super) resting_limit_orders: HashMap<String, VecDeque<RestingLimitOrder>>,
+    /// EDGE-P2-3 Phase 1B-5: aggregate + per-symbol maker-order counters
+    /// (submit / fill-full / fill-partial / timeout / degraded-fallback) plus
+    /// running `sum_net_edge_bps`. Fed by `enqueue_resting_limit_order` and
+    /// `sweep_resting_limit_orders_for_symbol`; read by router before enqueue
+    /// so chronically timed-out symbols fall back to market execution.
+    /// Paper-only — exchange path has its own WS-driven observability.
+    /// EDGE-P2-3 Phase 1B-5：紙盤 maker 掛單統計（aggregate + per-symbol）+
+    /// running `sum_net_edge_bps`。enqueue 與 sweep 餵入；router enqueue 前讀
+    /// 此，KPI Degraded 時 fallback 市價。僅紙盤使用。
+    pub(super) maker_stats: MakerStats,
 }
 
 impl PaperState {
@@ -146,6 +160,7 @@ impl PaperState {
             api_unrealized_pnl: HashMap::new(),
             positions_mirror: Arc::new(parking_lot::RwLock::new(HashMap::new())),
             resting_limit_orders: HashMap::new(),
+            maker_stats: MakerStats::default(),
         }
     }
 
