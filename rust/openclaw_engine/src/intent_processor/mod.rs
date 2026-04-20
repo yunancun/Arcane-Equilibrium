@@ -75,6 +75,16 @@ pub struct OrderIntent {
     /// （Market 不帶 TIF；Limit 於派發層預設 GTC）。Maker-only 入場設 Some(PostOnly)。
     #[serde(default)]
     pub time_in_force: Option<crate::order_manager::TimeInForce>,
+    /// EDGE-P2-3 Phase 1B-3.2: per-order maker-resting timeout (ms). Only
+    /// populated when `time_in_force == Some(PostOnly)`. `None` means the
+    /// event consumer falls back to its default (no special sweep). Caller
+    /// MUST pass the strategy-configured value (already clamped by the
+    /// factory to `[MAKER_LIMIT_TIMEOUT_MIN_MS, MAKER_LIMIT_TIMEOUT_MAX_MS]`).
+    /// EDGE-P2-3 Phase 1B-3.2：每單 maker 掛單逾時（毫秒），僅在 PostOnly 時填。
+    /// None → 消費端走預設行為（不特別 sweep）。呼叫方必須傳入策略配置值
+    /// （已於工廠 clamp 到 [15s, 300s]）。
+    #[serde(default)]
+    pub maker_timeout_ms: Option<u64>,
 }
 
 /// Captured Guardian verdict for DB persistence (risk_verdicts table).

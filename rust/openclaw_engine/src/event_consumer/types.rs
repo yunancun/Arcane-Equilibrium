@@ -85,6 +85,12 @@ pub struct PendingOrder {
     /// EDGE-P2-3 Phase 1B-3.1：鏡射 OrderDispatchRequest.time_in_force。
     /// Market 為 None；PostOnly 掛單帶 Some(PostOnly)，逾時可 cancel + rebuild。
     pub time_in_force: Option<crate::order_manager::TimeInForce>,
+    /// EDGE-P2-3 Phase 1B-3.2: per-order maker-resting timeout in ms. Populated
+    /// only for PostOnly orders; the sweep cancels via orderLinkId once
+    /// elapsed exceeds this. `None` for Market (legacy 60s hard-remove applies).
+    /// EDGE-P2-3 Phase 1B-3.2：每單 maker 掛單逾時（毫秒）。僅 PostOnly 帶值；
+    /// 逾時後 sweep 以 orderLinkId 取消。Market 為 None（沿用 60s 硬移除）。
+    pub maker_timeout_ms: Option<u64>,
 }
 
 /// Dependencies bundle for the event consumer (W1 fix: avoids 9+ parameter function).

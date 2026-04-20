@@ -973,6 +973,10 @@ impl TickPipeline {
                                         order_type: intent.order_type.clone(),
                                         limit_price: intent.limit_price,
                                         time_in_force: intent.time_in_force,
+                                        // EDGE-P2-3 Phase 1B-3.2: forward maker timeout
+                                        // for the PostOnly resting-order sweep.
+                                        // EDGE-P2-3 Phase 1B-3.2：轉發 PostOnly sweep 逾時。
+                                        maker_timeout_ms: intent.maker_timeout_ms,
                                     });
                                     // FUP-RACE: proactively mark mirror so reconciler
                                     // won't orphan-close this position before the WS
@@ -1227,6 +1231,12 @@ impl TickPipeline {
                                             order_type: intent.order_type.clone(),
                                             limit_price: intent.limit_price,
                                             time_in_force: intent.time_in_force,
+                                            // Shadow orders are fire-and-forget; sweep
+                                            // never sees them (is_primary=false means no
+                                            // PendingOrder registered). Forward for schema parity.
+                                            // Shadow 為 fire-and-forget；is_primary=false 不註冊
+                                            // PendingOrder，sweep 永不觸及。仍帶值保持結構一致。
+                                            maker_timeout_ms: intent.maker_timeout_ms,
                                         });
                                     }
                                 }

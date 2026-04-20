@@ -946,9 +946,10 @@ impl Strategy for GridTrading {
                 "limit".to_string(),
                 Some(ctx.price * (1.0 - offset)),
                 Some(TimeInForce::PostOnly),
+                Some(self.maker_limit_timeout_ms),
             )
         } else {
-            ("market".to_string(), None, None)
+            ("market".to_string(), None, None, None)
         };
         let maker_entry_for_sell = if self.use_maker_entry {
             let offset = self.maker_price_offset_bps / 10_000.0;
@@ -956,16 +957,18 @@ impl Strategy for GridTrading {
                 "limit".to_string(),
                 Some(ctx.price * (1.0 + offset)),
                 Some(TimeInForce::PostOnly),
+                Some(self.maker_limit_timeout_ms),
             )
         } else {
-            ("market".to_string(), None, None)
+            ("market".to_string(), None, None, None)
         };
 
         if idx < prev_idx {
             // Price crossed down → buy. If net_inventory < 0 (short), this closes short → Close.
             // Otherwise it's a new long → Open.
             // 價格下穿 → 買入。若 net_inventory < 0（空倉），為平空 → Close；否則新多 → Open。
-            let (order_type, limit_price, time_in_force) = maker_entry_for_buy;
+            let (order_type, limit_price, time_in_force, maker_timeout_ms) =
+                maker_entry_for_buy;
             let intent = OrderIntent {
                 symbol: ctx.symbol.to_string(),
                 is_long: true,
@@ -979,6 +982,7 @@ impl Strategy for GridTrading {
                 confluence_score: None,
                 persistence_elapsed_ms: None,
                 time_in_force,
+                maker_timeout_ms,
             };
             if cur_inventory < 0.0 {
                 intents.push(StrategyAction::Close {
@@ -995,7 +999,8 @@ impl Strategy for GridTrading {
             // Price crossed up → sell. If net_inventory > 0 (long), this closes long → Close.
             // Otherwise it's a new short → Open.
             // 價格上穿 → 賣出。若 net_inventory > 0（多倉），為平多 → Close；否則新空 → Open。
-            let (order_type, limit_price, time_in_force) = maker_entry_for_sell;
+            let (order_type, limit_price, time_in_force, maker_timeout_ms) =
+                maker_entry_for_sell;
             let intent = OrderIntent {
                 symbol: ctx.symbol.to_string(),
                 is_long: false,
@@ -1009,6 +1014,7 @@ impl Strategy for GridTrading {
                 confluence_score: None,
                 persistence_elapsed_ms: None,
                 time_in_force,
+                maker_timeout_ms,
             };
             if cur_inventory > 0.0 {
                 intents.push(StrategyAction::Close {

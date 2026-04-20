@@ -88,6 +88,7 @@ fn test_reset_clears_all_state() {
             context_id: String::new(),
             order_type: "market".into(),
             time_in_force: None,
+            maker_timeout_ms: None,
         },
     );
     handle_paper_command(

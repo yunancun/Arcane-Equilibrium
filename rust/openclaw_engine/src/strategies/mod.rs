@@ -1137,6 +1137,7 @@ mod tests {
             confluence_score: None,
             persistence_elapsed_ms: None,
             time_in_force: None,
+            maker_timeout_ms: None,
         };
         s.on_rejection(&intent, "test reason");
         // No assertion — only checking no panic / 僅檢查不 panic

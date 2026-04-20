@@ -1322,26 +1322,45 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
                             }
                         }
 
-                        // EXT-1: Check for timed-out pending orders (every 5s)
+                        // EXT-1 + EDGE-P2-3 Phase 1B-3.2: Sweep timed-out pending orders (every 5s).
+                        // Branch by TimeInForce:
+                        //   - PostOnly maker: once elapsed >= po.maker_timeout_ms (default 45s),
+                        //     spawn non-blocking REST cancel via orderLinkId + remove tracker row.
+                        //   - Market (legacy): 5s soft warn / 60s hard remove (unchanged).
+                        // Tracker row removal after cancel is intentional — if a race fills the
+                        // order between our sweep and Bybit's cancel processing, the existing
+                        // legacy hard-remove semantics apply (unmatched WS fill goes through the
+                        // position reconciler). A stricter "wait-for-cancel-ack then remove"
+                        // pattern is deferred to an FUP.
+                        // EDGE-P2-3 Phase 1B-3.2：超時 pending order 掃描（每 5s）。
+                        //   - PostOnly 掛單：elapsed >= maker_timeout_ms（預設 45s）→ 非阻塞 REST 取消 + 移除。
+                        //   - Market（舊行為）：5s 軟警告 / 60s 硬移除，不變。
                         if !pending_orders.is_empty() && last_pending_check.elapsed() >= pending_timeout {
                             let now_ms = openclaw_core::now_ms();
-                            let stale_keys: Vec<String> = pending_orders
-                                .iter()
-                                .filter(|(_, po)| now_ms.saturating_sub(po.sent_ts_ms) > 5000)
-                                .map(|(k, _)| k.clone())
-                                .collect();
-                            for key in &stale_keys {
-                                if let Some(po) = pending_orders.get(key) {
-                                    let elapsed = now_ms.saturating_sub(po.sent_ts_ms);
-                                    if elapsed > 60_000 {
-                                        // P1-1 fix: Hard timeout — remove after 60s
+                            let mut maker_to_cancel: Vec<(String, String, u64, u64)> = Vec::new();
+                            let mut legacy_to_remove: Vec<String> = Vec::new();
+                            for (key, po) in pending_orders.iter() {
+                                let elapsed = now_ms.saturating_sub(po.sent_ts_ms);
+                                match classify_pending_sweep(po, elapsed) {
+                                    PendingSweepAction::MakerTimeoutCancel => {
+                                        let deadline_ms = po.maker_timeout_ms.unwrap_or(45_000);
+                                        maker_to_cancel.push((
+                                            key.clone(),
+                                            po.symbol.clone(),
+                                            elapsed,
+                                            deadline_ms,
+                                        ));
+                                    }
+                                    PendingSweepAction::LegacyHardRemove => {
                                         error!(
                                             order_link_id = %key,
                                             symbol = %po.symbol,
                                             elapsed_ms = elapsed,
                                             "pending order hard timeout (>60s) — removing / 待處理訂單硬超時，移除"
                                         );
-                                    } else {
+                                        legacy_to_remove.push(key.clone());
+                                    }
+                                    PendingSweepAction::LegacySoftWarn => {
                                         warn!(
                                             order_link_id = %key,
                                             symbol = %po.symbol,
@@ -1351,10 +1370,39 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
                                             "pending order soft timeout (>5s) / 待處理訂單軟超時"
                                         );
                                     }
+                                    PendingSweepAction::Keep => {}
                                 }
                             }
-                            // P1-1: Remove orders that exceeded hard timeout / 移除超過硬超時的訂單
-                            pending_orders.retain(|_, po| now_ms.saturating_sub(po.sent_ts_ms) <= 60_000);
+                            // Dispatch non-blocking cancels for timed-out PostOnly makers.
+                            // 非阻塞派發超時 PostOnly 掛單取消。
+                            for (link_id, symbol, elapsed, deadline_ms) in &maker_to_cancel {
+                                warn!(
+                                    order_link_id = %link_id,
+                                    symbol = %symbol,
+                                    elapsed_ms = elapsed,
+                                    deadline_ms = deadline_ms,
+                                    reason = "maker_timeout_cancel",
+                                    "PostOnly maker timed out — cancelling via orderLinkId / PostOnly 掛單超時 — 以 orderLinkId 取消"
+                                );
+                                if let Some(ref client) = shared_client {
+                                    let c = client.clone();
+                                    let sym = symbol.clone();
+                                    let lid = link_id.clone();
+                                    tokio::spawn(async move {
+                                        cancel_resting_maker_order(c, sym, lid).await;
+                                    });
+                                }
+                            }
+                            // Remove maker rows we just dispatched cancels for.
+                            // 移除剛派發取消的 maker 訂單記錄。
+                            for (link_id, _, _, _) in &maker_to_cancel {
+                                pending_orders.remove(link_id);
+                            }
+                            // Remove legacy Market hard-timeout rows.
+                            // 移除舊 Market 硬超時記錄。
+                            for key in &legacy_to_remove {
+                                pending_orders.remove(key);
+                            }
                             // Clean stale order_id mappings: only keep those with active pending orders
                             // 清理過期 order_id 映射：僅保留有活躍待處理訂單的
                             if order_id_to_link.len() > 50 {
@@ -1609,4 +1657,78 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
         uptime_secs = start_time.elapsed().as_secs(),
         "event consumer stopped — final state saved / 事件消費者已停止 — 最終狀態已保存"
     );
+}
+
+/// EDGE-P2-3 Phase 1B-3.2: Sweep classification for a pending order at `elapsed_ms`.
+/// Pure function so the Market vs PostOnly branching is unit-testable.
+/// EDGE-P2-3 Phase 1B-3.2：pending order 超時掃描的純函數分類器，便於單元測試。
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum PendingSweepAction {
+    /// Keep tracking — no action this sweep tick / 繼續追蹤
+    Keep,
+    /// Market legacy: soft warn (elapsed > 5s but ≤ 60s) / Market 軟警告
+    LegacySoftWarn,
+    /// Market legacy: hard remove (elapsed > 60s) / Market 硬移除
+    LegacyHardRemove,
+    /// PostOnly maker: spawn REST cancel + remove (elapsed ≥ maker_timeout_ms)
+    /// PostOnly 掛單超時：派發 REST 取消並移除記錄
+    MakerTimeoutCancel,
+}
+
+pub(crate) fn classify_pending_sweep(po: &PendingOrder, elapsed_ms: u64) -> PendingSweepAction {
+    if po.time_in_force == Some(crate::order_manager::TimeInForce::PostOnly) {
+        let deadline_ms = po.maker_timeout_ms.unwrap_or(45_000);
+        if elapsed_ms >= deadline_ms {
+            PendingSweepAction::MakerTimeoutCancel
+        } else {
+            PendingSweepAction::Keep
+        }
+    } else if elapsed_ms > 60_000 {
+        PendingSweepAction::LegacyHardRemove
+    } else if elapsed_ms > 5000 {
+        PendingSweepAction::LegacySoftWarn
+    } else {
+        PendingSweepAction::Keep
+    }
+}
+
+/// EDGE-P2-3 Phase 1B-3.2: Non-blocking REST cancel for a timed-out PostOnly
+/// resting maker order. Uses client-minted `orderLinkId` (idempotent across
+/// restart + WS lag). Fail-soft: any API error is logged and swallowed — the
+/// tracker row has already been removed by the caller, so a racing fill after
+/// a failed cancel lands in the position reconciler's normal recovery path.
+/// EDGE-P2-3 Phase 1B-3.2：非阻塞 REST 取消超時的 PostOnly 掛單。
+/// 使用客戶端 orderLinkId（跨重啟/WS 延遲冪等）。fail-soft：API 失敗僅記 log 不回退；
+/// 調用端已移除 tracker，若取消失敗後 race 到成交，走對帳器常規恢復路徑。
+async fn cancel_resting_maker_order(
+    client: std::sync::Arc<crate::bybit_rest_client::BybitRestClient>,
+    symbol: String,
+    order_link_id: String,
+) {
+    let body = serde_json::json!({
+        "category": crate::order_manager::OrderCategory::Linear.as_str(),
+        "symbol": symbol,
+        "orderLinkId": order_link_id,
+    });
+    match client.post_checked("/v5/order/cancel", &body).await {
+        Ok(_) => {
+            info!(
+                symbol = %symbol,
+                order_link_id = %order_link_id,
+                reason = "maker_timeout_cancel",
+                "PostOnly maker cancel acknowledged / PostOnly 掛單取消已確認"
+            );
+        }
+        Err(err) => {
+            // Common benign cases: 110001 order not exists (already filled/cancelled).
+            // 常見良性情形：110001 訂單不存在（已成交或已取消）。
+            warn!(
+                symbol = %symbol,
+                order_link_id = %order_link_id,
+                error = %err,
+                reason = "maker_timeout_cancel_failed",
+                "PostOnly maker cancel REST failed — likely already filled/cancelled / PostOnly 取消失敗，很可能已成交或取消"
+            );
+        }
+    }
 }

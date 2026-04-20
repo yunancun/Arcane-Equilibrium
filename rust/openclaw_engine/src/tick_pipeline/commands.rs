@@ -86,6 +86,7 @@ impl TickPipeline {
             confluence_score: None,
             persistence_elapsed_ms: None,
             time_in_force: None,
+            maker_timeout_ms: None,
         };
 
         let result = self.intent_processor.process(
@@ -621,6 +622,9 @@ impl TickPipeline {
                 order_type: "market".to_string(),
                 limit_price: None,
                 time_in_force: None,
+                // Close path stays Market (EDGE-P2-3 Phase 1a entry-only scope).
+                // 平倉維持 Market（EDGE-P2-3 Phase 1a 僅入場走 maker 路徑）。
+                maker_timeout_ms: None,
             });
             if is_primary {
                 self.pending_close_symbols.insert(symbol.to_string());
@@ -708,6 +712,9 @@ impl TickPipeline {
                         order_type: "market".to_string(),
                         limit_price: None,
                         time_in_force: None,
+                        // ipc_close_all goes Market (no maker sweep needed).
+                        // ipc_close_all 走 Market，不需 maker sweep。
+                        maker_timeout_ms: None,
                     });
                     self.pending_close_symbols.insert(symbol);
                 }
@@ -823,6 +830,9 @@ impl TickPipeline {
                     order_type: "market".to_string(),
                     limit_price: None,
                     time_in_force: None,
+                    // Per-symbol IPC close goes Market.
+                    // 單幣種 IPC 平倉走 Market。
+                    maker_timeout_ms: None,
                 });
                 self.pending_close_symbols.insert(symbol.to_string());
                 true

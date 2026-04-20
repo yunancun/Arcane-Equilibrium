@@ -195,6 +195,7 @@ mod tests {
             confluence_score: None,
             persistence_elapsed_ms: None,
             time_in_force: None,
+            maker_timeout_ms: None,
         }
     }
 
@@ -215,6 +216,7 @@ mod tests {
             confluence_score: confluence,
             persistence_elapsed_ms: persistence,
             time_in_force: None,
+            maker_timeout_ms: None,
         }
     }
 
