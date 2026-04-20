@@ -74,6 +74,33 @@ echo "[bootstrap] timescaledb extension ensured"
 echo "[bootstrap] testing trading_admin login..."
 PGPASSWORD="$PG_PASS" psql -h "$PG_HOST" -p "$PG_PORT" -U trading_admin -d trading_ai -c "SELECT current_user, current_database();"
 
+# -----------------------------------------------------------------------------
+# Pre-migration: legacy public.* tables must exist before V005 can RENAME them.
+# Linux deploys run monitoring_services/init_trading_schema.sql first via
+# docker-compose init; Mac dev bootstraps a fresh DB without that entrypoint,
+# so V005 fails on the compat views. init script is pure CREATE TABLE IF NOT
+# EXISTS → idempotent and safe to run on any state.
+#
+# 預遷移：V005 需要 public.* 舊表已存在才能 RENAME。Linux 走 docker-compose
+# 會先跑 init_trading_schema.sql，Mac dev 新建 DB 沒有這條路徑，V005 會在
+# compat view 那步炸。init 全是 CREATE TABLE IF NOT EXISTS，任何狀態重跑都安全。
+# -----------------------------------------------------------------------------
+INIT_SQL="$BASE/docker_projects/monitoring_services/init_trading_schema.sql"
+if [[ -f "$INIT_SQL" ]]; then
+    LEGACY_PRESENT="$(PGPASSWORD="$PG_PASS" psql -h "$PG_HOST" -p "$PG_PORT" -U trading_admin -d trading_ai -tAc \
+        "SELECT 1 FROM pg_tables WHERE schemaname='public' AND tablename IN ('account_snapshots','account_snapshots_legacy') LIMIT 1")"
+    if [[ -z "$LEGACY_PRESENT" ]]; then
+        echo "[bootstrap] running init_trading_schema.sql (pre-migration legacy tables)"
+        PGPASSWORD="$PG_PASS" psql -h "$PG_HOST" -p "$PG_PORT" -U trading_admin -d trading_ai \
+            -v ON_ERROR_STOP=1 -q -f "$INIT_SQL"
+        echo "[bootstrap] init_trading_schema.sql applied"
+    else
+        echo "[bootstrap] legacy tables already present — skipping init_trading_schema.sql"
+    fi
+else
+    echo "[bootstrap] WARN: $INIT_SQL not found; V005 may fail if legacy tables are absent" >&2
+fi
+
 echo "[bootstrap] running migrations from $MIG_DIR"
 cd "$MIG_DIR"
 FAILED=""
