@@ -16,6 +16,7 @@ pub mod funding_arb;
 pub mod grid_helpers;
 pub mod grid_trading;
 pub mod ma_crossover;
+pub mod maker_rejection;
 
 use crate::intent_processor::OrderIntent;
 use crate::tick_pipeline::{PipelineKind, TickContext};
