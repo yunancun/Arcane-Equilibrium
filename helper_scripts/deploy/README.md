@@ -23,7 +23,8 @@ Trading API 通过 `/openclaw/*` 反向代理自动连接 Gateway（如运行中
 
 | 变量 / Variable | 用途 / Purpose | 默认值 / Default | 必需 / Required |
 |---|---|---|---|
-| `OPENCLAW_SRV_ROOT` | 项目根目录 / Project root dir | 自动推导 / Auto-detected | 否（推荐设置） |
+| `OPENCLAW_SRV_ROOT` | 项目根目录（legacy 别名 / legacy alias）| 自动推导 / Auto-detected | 否（115 历史脚本仍读取；新代码请用 `OPENCLAW_BASE_DIR`） |
+| `OPENCLAW_BASE_DIR` | 项目根目录（新代码权威 / Authoritative for new code）| 自动推导 / Auto-detected | 否（推荐设置，Mac 部署必设） |
 | `OPENCLAW_API_TOKEN` | API 认证 Token | 无（从文件读取） | 是（或设置文件） |
 | `OPENCLAW_API_TOKEN_FILE` | Token 文件路径 | `.secrets/api_token` | 否 |
 | `OPENCLAW_GATEWAY_HOST` | Gateway 绑定地址 | `127.0.0.1` | 否 |
@@ -66,7 +67,9 @@ Trading API 通过 `/openclaw/*` 反向代理自动连接 Gateway（如运行中
 ## 文件路径约定 / File Path Conventions
 
 ```
-$SRV_ROOT/                                          # 项目根（如 /home/ncyu/BybitOpenClaw/srv）
+$SRV_ROOT/                                          # 项目根 = $OPENCLAW_BASE_DIR
+                                                     # Linux 例: /home/ncyu/BybitOpenClaw/srv
+                                                     # Mac   例: /Users/ncyu/Documents/Projects/TradeBot
 ├── program_code/.../control_api_v1/                 # Trading API 应用目录（uvicorn WorkingDirectory）
 │   ├── .venv/                                       # Python 虚拟环境
 │   ├── .secrets/api_token                           # API Token 文件

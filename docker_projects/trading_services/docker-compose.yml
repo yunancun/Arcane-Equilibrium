@@ -4,7 +4,8 @@ services:
     container_name: bybit_connector
     restart: unless-stopped
     env_file:
-      - /home/ncyu/srv/settings/environment_files/trading_services.env
+      # Relative path resolved from this compose file's directory (repo-root agnostic, Mac/Linux safe)
+      - ../../settings/environment_files/trading_services.env
     command:
       [
         "sh",
@@ -17,7 +18,8 @@ services:
     container_name: binance_connector
     restart: unless-stopped
     env_file:
-      - /home/ncyu/srv/settings/environment_files/trading_services.env
+      # Relative path resolved from this compose file's directory (repo-root agnostic, Mac/Linux safe)
+      - ../../settings/environment_files/trading_services.env
     command:
       [
         "sh",
@@ -30,7 +32,8 @@ services:
     container_name: pretrade_risk_gate
     restart: unless-stopped
     env_file:
-      - /home/ncyu/srv/settings/environment_files/trading_services.env
+      # Relative path resolved from this compose file's directory (repo-root agnostic, Mac/Linux safe)
+      - ../../settings/environment_files/trading_services.env
     command:
       [
         "sh",
@@ -43,7 +46,8 @@ services:
     container_name: audit_logger
     restart: unless-stopped
     env_file:
-      - /home/ncyu/srv/settings/environment_files/trading_services.env
+      # Relative path resolved from this compose file's directory (repo-root agnostic, Mac/Linux safe)
+      - ../../settings/environment_files/trading_services.env
     command:
       [
         "sh",

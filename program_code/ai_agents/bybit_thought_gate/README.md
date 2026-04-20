@@ -80,7 +80,7 @@ These are currently the authoritative minimal chapter-closure runners for the re
 
 New business-logic changes for the canonical H-chain should be made here first.
 
-Do not introduce new hardcoded `/home/ncyu/srv` paths in newly-refactored code unless there is an explicit compatibility reason.
+Do not introduce any user-home absolute-path literal (`/home/<user>/...` on Linux, `/Users/<user>/...` on macOS) in newly-refactored code unless there is an explicit compatibility reason. Resolve via `OPENCLAW_BASE_DIR` / `OPENCLAW_SRV_ROOT` (legacy alias) / `Path(__file__).parent` instead.
 
 Prefer:
 - repo-relative resolution
