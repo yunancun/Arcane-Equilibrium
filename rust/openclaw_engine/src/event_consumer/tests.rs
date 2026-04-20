@@ -135,6 +135,8 @@ fn test_handle_reset_clears_state_and_pending() {
             // FILL-CONTEXT-LINKAGE-1: empty id preserves pre-fix behaviour.
             // FILL-CONTEXT-LINKAGE-1：空字串保持修前行為。
             context_id: String::new(),
+            order_type: "market".into(),
+            time_in_force: None,
         },
     );
     pipeline.paper_paused = true;
@@ -417,6 +419,8 @@ fn test_pending_order_clone_preserves_state() {
         // FILL-CONTEXT-LINKAGE-1: empty id preserves pre-fix behaviour.
         // FILL-CONTEXT-LINKAGE-1：空字串保持修前行為。
         context_id: String::new(),
+        order_type: "market".into(),
+        time_in_force: None,
     };
     let cloned = po.clone();
     assert_eq!(cloned.order_link_id, "oc_1");

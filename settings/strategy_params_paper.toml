@@ -46,6 +46,11 @@ conf_scale = 1.0
 # EDGE-P2-3 Phase 1a：PostOnly Limit 入場；與 demo 對齊以保持紙盤探索費率代表性。
 use_maker_entry = true
 maker_price_offset_bps = 1.0
+# EDGE-P2-3 Phase 1B-3.1: resting PostOnly Limit sweep timeout (ms).
+# Default 45_000 ms; runtime clamped to [15_000, 300_000].
+# EDGE-P2-3 Phase 1B-3.1：掛中 PostOnly Limit 逾時清理（毫秒）。
+# 默認 45_000 ms；運行時 clamp 到 [15_000, 300_000]。
+maker_limit_timeout_ms = 45000
 
 # OC-5: FundingArb — funding rate capture strategy.
 # Paper = exploration, activated for signal validation.

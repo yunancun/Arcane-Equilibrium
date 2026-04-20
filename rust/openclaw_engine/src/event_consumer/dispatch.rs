@@ -413,6 +413,12 @@ pub(super) fn spawn_order_dispatch(
                     // FILL-CONTEXT-LINKAGE-1：鏡射 OrderDispatchRequest.context_id，
                     // WS 成交處理器再傳給 apply_confirmed_fill。
                     context_id: req.context_id.clone(),
+                    // EDGE-P2-3 Phase 1B-3.1: mirror order_type + time_in_force
+                    // so the sweep can distinguish Market vs resting PostOnly.
+                    // EDGE-P2-3 Phase 1B-3.1：鏡射 order_type + time_in_force，
+                    // 便於逾時清理區分 Market 與掛中 PostOnly。
+                    order_type: req.order_type.clone(),
+                    time_in_force: req.time_in_force,
                 });
             }
             let side = if req.is_long {

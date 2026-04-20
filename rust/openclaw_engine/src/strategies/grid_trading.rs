@@ -47,6 +47,14 @@ pub struct GridTradingParams {
     /// EDGE-P2-3 Phase 1a: bps offset from last_price for PostOnly limit placement.
     /// EDGE-P2-3 Phase 1a：PostOnly 限價偏移（bps）。
     pub maker_price_offset_bps: f64,
+    /// EDGE-P2-3 Phase 1B-3.1: milliseconds a PostOnly maker order may rest
+    /// before the event_consumer sweeps it via cancel-by-link-id. Consumer
+    /// clamps to `[MAKER_LIMIT_TIMEOUT_MIN_MS, MAKER_LIMIT_TIMEOUT_MAX_MS]`.
+    /// 1B-3.1 is plumbing-only: no call site reads this yet. 1B-3.2 wires
+    /// the sweep.
+    /// EDGE-P2-3 Phase 1B-3.1：PostOnly 掛單最長停留時間（毫秒）。消費端 clamp
+    /// 至 `[15_000, 300_000]`。本批次僅埋線，1B-3.2 接入 sweep。
+    pub maker_limit_timeout_ms: u64,
 }
 
 impl Default for GridTradingParams {
@@ -64,6 +72,7 @@ impl Default for GridTradingParams {
             max_cooldown_boost: 5.0,
             use_maker_entry: DEFAULT_USE_MAKER_ENTRY,
             maker_price_offset_bps: DEFAULT_MAKER_OFFSET_BPS,
+            maker_limit_timeout_ms: DEFAULT_MAKER_LIMIT_TIMEOUT_MS,
         }
     }
 }
@@ -211,6 +220,41 @@ const DEFAULT_MAKER_OFFSET_BPS: f64 = 1.0;
 /// 冷啟動維持已驗證的 Market 路徑，待各環境 TOML 顯式啟用。
 const DEFAULT_USE_MAKER_ENTRY: bool = false;
 
+/// EDGE-P2-3 Phase 1B-3.1: Default timeout for resting PostOnly maker orders.
+/// QC-recommended base for tier-1 perps at 1 bps offset: 45_000 ms balances
+/// expected fill probability (40-55% on liquid pairs in this window) against
+/// adverse-selection decay. Distinct from `cooldown_ms` (which gates re-emit)
+/// — this is the "order has rested too long, cancel it" knob consumed by the
+/// event_consumer sweep (Phase 1B-3.2 wires actual cancellation).
+///
+/// Runtime clamp (enforced where it's read, not here): `[15_000, 300_000]` ms.
+/// Values below 15s starve fill probability; above 300s stale inventory risk.
+/// QC justification: base 45s ≈ 0.75 × grid cooldown (60s) at current config.
+///
+/// EDGE-P2-3 Phase 1B-3.1：PostOnly 掛單超時預設。QC 針對 tier-1 永續於 1 bps
+/// 偏移的建議：45 秒平衡成交機率（流動性良好幣對 40-55%）與逆向選擇衰減。
+/// 有別於 `cooldown_ms`（限制重發），此為「掛單停留過久應取消」；實際取消由
+/// event_consumer sweep（1B-3.2）執行。消費端 clamp 至 [15_000, 300_000]。
+const DEFAULT_MAKER_LIMIT_TIMEOUT_MS: u64 = 45_000;
+
+/// EDGE-P2-3 Phase 1B-3.1: Hard lower bound — below this, maker fills too
+/// rarely to justify the cancel round-trip cost.
+/// EDGE-P2-3 Phase 1B-3.1：硬下限，低於此值成交機率太低，不值得一次 cancel 往返。
+pub(crate) const MAKER_LIMIT_TIMEOUT_MIN_MS: u64 = 15_000;
+
+/// EDGE-P2-3 Phase 1B-3.1: Hard upper bound — above this, a resting order is
+/// more stale inventory than price discovery.
+/// EDGE-P2-3 Phase 1B-3.1：硬上限，超出後掛單已屬過期庫存而非價格發現。
+pub(crate) const MAKER_LIMIT_TIMEOUT_MAX_MS: u64 = 300_000;
+
+/// Clamp a maker-limit timeout value into the strategy's supported range.
+/// Centralised so TOML binding + factory + tests all agree on the bounds.
+/// 將 maker-limit 超時值 clamp 至策略支援區間。集中處理以保 TOML binding /
+/// 工廠 / 測試皆一致。
+pub(crate) fn clamp_maker_limit_timeout_ms(v: u64) -> u64 {
+    v.clamp(MAKER_LIMIT_TIMEOUT_MIN_MS, MAKER_LIMIT_TIMEOUT_MAX_MS)
+}
+
 // GridSpacingMode moved to grid_helpers.rs (A0-a extraction), re-exported for compatibility.
 // GridSpacingMode 已移至 grid_helpers.rs（A0-a 提取），此處重導出保持兼容。
 pub use super::grid_helpers::GridSpacingMode;
@@ -316,6 +360,14 @@ pub struct GridTrading {
     /// Only honored when `use_maker_entry = true`.
     /// EDGE-P2-3 Phase 1a：PostOnly 掛單相對 last_price 的 bps 偏移；僅在開啟 maker 時生效。
     pub(crate) maker_price_offset_bps: f64,
+    /// EDGE-P2-3 Phase 1B-3.1: milliseconds a resting PostOnly maker order may
+    /// sit before event_consumer sweep cancels it. Stored here as the param
+    /// source-of-truth; actual sweep wiring lands in 1B-3.2. Always pre-clamped
+    /// on assignment (factory / update_params) into
+    /// `[MAKER_LIMIT_TIMEOUT_MIN_MS, MAKER_LIMIT_TIMEOUT_MAX_MS]`.
+    /// EDGE-P2-3 Phase 1B-3.1：PostOnly 掛單允許停留的最長毫秒數，超時後由
+    /// event_consumer 取消。本批次僅資料欄位；1B-3.2 接入 sweep。
+    pub(crate) maker_limit_timeout_ms: u64,
 }
 
 // build_linear_levels, build_geometric_levels, build_levels moved to grid_helpers.rs (A0-a)
@@ -360,6 +412,7 @@ impl GridTrading {
             max_cooldown_boost: 5.0,
             use_maker_entry: DEFAULT_USE_MAKER_ENTRY,
             maker_price_offset_bps: DEFAULT_MAKER_OFFSET_BPS,
+            maker_limit_timeout_ms: DEFAULT_MAKER_LIMIT_TIMEOUT_MS,
         }
     }
 
@@ -401,6 +454,7 @@ impl GridTrading {
             max_cooldown_boost: 5.0,
             use_maker_entry: DEFAULT_USE_MAKER_ENTRY,
             maker_price_offset_bps: DEFAULT_MAKER_OFFSET_BPS,
+            maker_limit_timeout_ms: DEFAULT_MAKER_LIMIT_TIMEOUT_MS,
         }
     }
 
@@ -456,6 +510,7 @@ impl GridTrading {
             max_cooldown_boost: 5.0,
             use_maker_entry: DEFAULT_USE_MAKER_ENTRY,
             maker_price_offset_bps: DEFAULT_MAKER_OFFSET_BPS,
+            maker_limit_timeout_ms: DEFAULT_MAKER_LIMIT_TIMEOUT_MS,
         }
     }
 
@@ -632,6 +687,14 @@ impl GridTrading {
         // EDGE-P2-3 Phase 1a: honor runtime maker toggle + offset updates.
         self.use_maker_entry = params.use_maker_entry;
         self.maker_price_offset_bps = params.maker_price_offset_bps;
+        // EDGE-P2-3 Phase 1B-3.1: clamp runtime timeout into supported range on
+        // assignment so the event_consumer sweep (1B-3.2) can read this field
+        // directly without re-clamping. Out-of-range values indicate operator
+        // misconfiguration; prefer the clamped value to silent failure.
+        // EDGE-P2-3 Phase 1B-3.1：賦值時 clamp 超時至支援區間，1B-3.2 的 sweep
+        // 可直接讀取不必再 clamp。超界值屬 operator 誤配，採 clamp 不靜默失敗。
+        self.maker_limit_timeout_ms =
+            clamp_maker_limit_timeout_ms(params.maker_limit_timeout_ms);
         info!(
             strategy = "grid_trading",
             grid_count = self.grid_count,
@@ -654,6 +717,7 @@ impl GridTrading {
             max_cooldown_boost: self.max_cooldown_boost,
             use_maker_entry: self.use_maker_entry,
             maker_price_offset_bps: self.maker_price_offset_bps,
+            maker_limit_timeout_ms: self.maker_limit_timeout_ms,
         }
     }
 }

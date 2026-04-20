@@ -71,6 +71,20 @@ pub struct PendingOrder {
     /// 成交時傳入 apply_confirmed_fill，使 trading.fills.entry_context_id 與
     /// learning.decision_features.context_id 對齊（訊號時刻 id，非 WS exec_ts）。
     pub context_id: String,
+    /// EDGE-P2-3 Phase 1B-3.1: mirrors OrderDispatchRequest.order_type (e.g.
+    /// `"market"` / `"limit"`). Used by the timeout sweep to branch on
+    /// Market vs PostOnly Limit — a resting PostOnly entry must be cancelled
+    /// via orderLinkId rather than nuked as a stale tracker row.
+    /// EDGE-P2-3 Phase 1B-3.1：鏡射 OrderDispatchRequest.order_type
+    /// （`"market"` / `"limit"`）。逾時清理需靠此區分 Market 與 PostOnly —
+    /// 掛中的 PostOnly 應以 orderLinkId 取消，而非當成過期追蹤記錄刪除。
+    pub order_type: String,
+    /// EDGE-P2-3 Phase 1B-3.1: mirrors OrderDispatchRequest.time_in_force.
+    /// `None` for legacy Market; `Some(PostOnly)` marks a resting maker order
+    /// the sweep can cancel + rebuild on timeout.
+    /// EDGE-P2-3 Phase 1B-3.1：鏡射 OrderDispatchRequest.time_in_force。
+    /// Market 為 None；PostOnly 掛單帶 Some(PostOnly)，逾時可 cancel + rebuild。
+    pub time_in_force: Option<crate::order_manager::TimeInForce>,
 }
 
 /// Dependencies bundle for the event consumer (W1 fix: avoids 9+ parameter function).

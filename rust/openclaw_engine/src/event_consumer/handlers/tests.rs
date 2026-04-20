@@ -86,6 +86,8 @@ fn test_reset_clears_all_state() {
             // FILL-CONTEXT-LINKAGE-1: empty id preserves pre-fix behaviour.
             // FILL-CONTEXT-LINKAGE-1：空字串保持修前行為。
             context_id: String::new(),
+            order_type: "market".into(),
+            time_in_force: None,
         },
     );
     handle_paper_command(

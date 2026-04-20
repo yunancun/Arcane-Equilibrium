@@ -669,6 +669,13 @@ pub struct GridTradingParams {
     /// EDGE-P2-3 Phase 1a：PostOnly 限價相對 last_price 的 bps 偏移。
     #[serde(default = "default_maker_price_offset_bps")]
     pub maker_price_offset_bps: f64,
+    /// EDGE-P2-3 Phase 1B-3: timeout (ms) after which an unfilled PostOnly
+    /// Limit entry should be swept (cancel-by-link-id + rebuild). Default
+    /// 45_000 ms (45s). Clamped at runtime to [15_000, 300_000].
+    /// EDGE-P2-3 Phase 1B-3：未成交 PostOnly Limit 入場的清理逾時（毫秒）。
+    /// 默認 45_000 ms；運行時 clamp 到 [15_000, 300_000]。
+    #[serde(default = "default_maker_limit_timeout_ms")]
+    pub maker_limit_timeout_ms: u64,
 }
 
 fn default_adaptive_range_pct() -> f64 {
@@ -695,6 +702,9 @@ fn default_use_maker_entry() -> bool {
 fn default_maker_price_offset_bps() -> f64 {
     1.0
 }
+fn default_maker_limit_timeout_ms() -> u64 {
+    45_000
+}
 
 impl Default for GridTradingParams {
     fn default() -> Self {
@@ -716,6 +726,7 @@ impl Default for GridTradingParams {
             max_cooldown_boost: 5.0,
             use_maker_entry: false,
             maker_price_offset_bps: 1.0,
+            maker_limit_timeout_ms: 45_000,
         }
     }
 }
@@ -1021,6 +1032,11 @@ impl StrategyFactory {
         // EDGE-P2-3 Phase 1a: wire maker-entry params from TOML.
         gt.use_maker_entry = p.grid_trading.use_maker_entry;
         gt.maker_price_offset_bps = p.grid_trading.maker_price_offset_bps;
+        // EDGE-P2-3 Phase 1B-3.1: wire PostOnly Limit timeout (clamp [15s, 300s]).
+        // EDGE-P2-3 Phase 1B-3.1：PostOnly Limit 逾時 clamp 到 [15s, 300s]。
+        gt.maker_limit_timeout_ms = grid_trading::clamp_maker_limit_timeout_ms(
+            p.grid_trading.maker_limit_timeout_ms,
+        );
         gt.set_conf_scale(p.grid_trading.conf_scale);
         gt.set_active(p.grid_trading.active);
         strategies.push(Box::new(gt));
@@ -1460,5 +1476,84 @@ squeeze_bw = 0.03
         let toml_str = toml::to_string(&cfg).expect("serialize to TOML");
         let de: StrategyParamsConfig = toml::from_str(&toml_str).expect("deserialize from TOML");
         assert_eq!(de.grid_trading.cooldown_ms, 90_000);
+    }
+
+    // ── EDGE-P2-3 Phase 1B-3.1: maker_limit_timeout_ms plumbing ──
+    // ── EDGE-P2-3 Phase 1B-3.1：maker_limit_timeout_ms 配置接線 ──
+
+    #[test]
+    fn test_edge_p2_3_1b31_maker_timeout_toml_default_bit_exact() {
+        // Default must equal the canonical 45_000 ms (P0 QC design budget).
+        // 默認值需等於規格 45_000 ms（P0 QC 設計預算）。
+        let p = GridTradingParams::default();
+        assert_eq!(
+            p.maker_limit_timeout_ms, 45_000,
+            "grid_trading.maker_limit_timeout_ms default must be 45_000"
+        );
+    }
+
+    #[test]
+    fn test_edge_p2_3_1b31_maker_timeout_toml_roundtrip() {
+        // TOML round-trip must preserve the configured timeout.
+        // TOML 往返需保留設定值。
+        let mut cfg = StrategyParamsConfig::default();
+        cfg.grid_trading.maker_limit_timeout_ms = 60_000;
+        let toml_str = toml::to_string(&cfg).expect("serialize to TOML");
+        let de: StrategyParamsConfig = toml::from_str(&toml_str).expect("deserialize from TOML");
+        assert_eq!(de.grid_trading.maker_limit_timeout_ms, 60_000);
+    }
+
+    #[test]
+    fn test_edge_p2_3_1b31_maker_timeout_factory_clamps_low_value() {
+        // Factory must clamp below-floor TOML values up to MIN (15_000 ms).
+        // 工廠對低於下限的 TOML 值需 clamp 到 MIN (15_000 ms)。
+        let mut p = StrategyParamsConfig::default();
+        p.grid_trading.maker_limit_timeout_ms = 1_000; // below 15_000 floor
+        let strategies = StrategyFactory::create_with_params(&p);
+        let gt_any = strategies
+            .iter()
+            .find(|s| s.name() == "grid_trading")
+            .expect("grid_trading strategy created");
+        let json = gt_any.get_params_json();
+        assert!(
+            json.contains("\"maker_limit_timeout_ms\":15000"),
+            "factory must clamp 1_000 → 15_000, got {json}"
+        );
+    }
+
+    #[test]
+    fn test_edge_p2_3_1b31_maker_timeout_factory_clamps_high_value() {
+        // Factory must clamp above-ceiling TOML values down to MAX (300_000 ms).
+        // 工廠對超過上限的 TOML 值需 clamp 到 MAX (300_000 ms)。
+        let mut p = StrategyParamsConfig::default();
+        p.grid_trading.maker_limit_timeout_ms = 10_000_000; // above 300_000 ceiling
+        let strategies = StrategyFactory::create_with_params(&p);
+        let gt_any = strategies
+            .iter()
+            .find(|s| s.name() == "grid_trading")
+            .expect("grid_trading strategy created");
+        let json = gt_any.get_params_json();
+        assert!(
+            json.contains("\"maker_limit_timeout_ms\":300000"),
+            "factory must clamp 10_000_000 → 300_000, got {json}"
+        );
+    }
+
+    #[test]
+    fn test_edge_p2_3_1b31_maker_timeout_factory_passes_through_in_range() {
+        // Within-range TOML value must flow through unchanged.
+        // 在範圍內的 TOML 值需原樣傳遞。
+        let mut p = StrategyParamsConfig::default();
+        p.grid_trading.maker_limit_timeout_ms = 60_000;
+        let strategies = StrategyFactory::create_with_params(&p);
+        let gt_any = strategies
+            .iter()
+            .find(|s| s.name() == "grid_trading")
+            .expect("grid_trading strategy created");
+        let json = gt_any.get_params_json();
+        assert!(
+            json.contains("\"maker_limit_timeout_ms\":60000"),
+            "factory must pass 60_000 through unchanged, got {json}"
+        );
     }
 }
