@@ -29,6 +29,18 @@ DATA_DIR="${OPENCLAW_DATA_DIR:-/tmp/openclaw}"
 # Mac dev recommendation: export OPENCLAW_SECRETS_ROOT="$HOME/.openclaw_secrets"
 # Secrets 根目錄（支援 Mac / 非 $HOME 路徑部署）。
 SECRETS_ROOT="${OPENCLAW_SECRETS_ROOT:-$HOME/BybitOpenClaw/secrets}"
+# Postgres port (Linux native on 5432; Mac dev's dockerised PG on 15432).
+# Set OPENCLAW_PG_PORT=15432 on Mac dev or any host that dockerises PG to
+# avoid colliding with a system / Homebrew Postgres on 5432.
+# Postgres 埠（Linux 原生 5432；Mac dev dockerised PG 在 15432）。
+# Mac dev 或任何 dockerised PG 的主機請 export OPENCLAW_PG_PORT=15432。
+PG_PORT="${OPENCLAW_PG_PORT:-5432}"
+# API venv path. Relative paths resolve against program_code/.../control_api_v1
+# (where the script cd's before invoking uvicorn). Absolute paths let Mac dev
+# point at a shared venv outside the per-service tree (e.g. srv/venvs/mac_dev).
+# API venv 路徑。相對路徑以 control_api_v1 為基準（script 會 cd 進去再跑 uvicorn）。
+# 絕對路徑讓 Mac dev 指向共用 venv（例：srv/venvs/mac_dev）。
+API_VENV="${OPENCLAW_API_VENV:-.venv}"
 
 # ── Parse flags / 解析旗標 ──
 # Accept --rebuild in any position; SCOPE is the remaining positional.
@@ -183,7 +195,7 @@ restart_engine() {
     local ipc_secret
     ipc_secret=$(cat "$SECRETS_ROOT/environment_files/ipc_secret.txt" 2>/dev/null || echo "")
     OPENCLAW_DATA_DIR="$DATA_DIR" OPENCLAW_CANARY_MODE=1 \
-        OPENCLAW_DATABASE_URL="postgresql://redacted@127.0.0.1:5432/trading_ai" \
+        OPENCLAW_DATABASE_URL="postgresql://redacted@127.0.0.1:${PG_PORT}/trading_ai" \
         OPENCLAW_IPC_SECRET="${ipc_secret}" \
         nohup rust/target/release/openclaw-engine > "$DATA_DIR/engine.log" 2>&1 &
     echo "    PID: $!"
@@ -203,9 +215,9 @@ restart_api() {
     # 載入 IPC HMAC 密鑰（API 端 HMAC 驗證）
     local ipc_secret
     ipc_secret=$(cat "$SECRETS_ROOT/environment_files/ipc_secret.txt" 2>/dev/null || echo "")
-    OPENCLAW_DATABASE_URL="postgresql://redacted@127.0.0.1:5432/trading_ai" \
+    OPENCLAW_DATABASE_URL="postgresql://redacted@127.0.0.1:${PG_PORT}/trading_ai" \
         OPENCLAW_IPC_SECRET="${ipc_secret}" \
-        .venv/bin/python3 .venv/bin/uvicorn app.main:app \
+        "$API_VENV/bin/python3" "$API_VENV/bin/uvicorn" app.main:app \
         --host 0.0.0.0 --port 8000 --workers "$WORKERS" &
     cd - > /dev/null
 }
