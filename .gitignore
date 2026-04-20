@@ -18,6 +18,13 @@ logs/
 log_files/
 connector_logs/
 decision_packets/
+
+# -----------------------------
+# Local-only dev artifacts / 本地专属开发产物
+# -----------------------------
+# CC per-task review reports for local LLM (Qwen/LM Studio) — Mac dev only.
+# CC 每任務審核報告供本地 LLM（Qwen/LM Studio）—— Mac dev 專用。
+.claude_reports/
 verdicts/
 database_files/
 tmp/
