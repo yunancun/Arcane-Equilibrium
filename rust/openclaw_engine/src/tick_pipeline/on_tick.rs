@@ -25,6 +25,16 @@ impl TickPipeline {
         // ARCH-RC1 1C-2-B：熱重載檢查 — RiskConfig store 版本有變即同步。
         self.sync_risk_config_if_changed();
 
+        // EDGE-P2-3 Phase 1B-5: mirror MakerKpiConfig store into the owned
+        // snapshot so the paper-only maker sweep and the router KPI gate both
+        // see operator patches without waiting for the next boot. Free when
+        // the store is unwired or the version is unchanged (one atomic load
+        // + equality check).
+        // EDGE-P2-3 Phase 1B-5：把 MakerKpiConfig 最新快照鏡像至 owned copy，
+        // 讓紙盤 maker sweep 與 router KPI gate 下一 tick 即見 operator patch。
+        // 未接 store 或未升版時只花一次 atomic load + equality 比較。
+        self.sync_maker_kpi_config_if_changed();
+
         // DYNAMIC-RISK-1: throttled Sharpe-aware sizer tick. Internally rate-limited
         // by `update_interval_ms` and `min_trades`, so safe to call on every tick.
         // When it publishes a new pct, push into IntentProcessor. Disabled in TOML
@@ -1337,15 +1347,16 @@ impl TickPipeline {
         // ═══════════════════════════════════════════════════════════════════════
         if !is_exchange_mode {
             let maker_fee_rate = self.intent_processor.maker_fee_rate(&event.symbol);
-            // EDGE-P2-3 Phase 1B-4.3: funding-drag guard threshold is read
-            // from `MakerKpiConfig::default()` in this commit — the hot-reload
-            // ConfigStore plumbing lands in 1B-5 and will replace this read
-            // with an owned snapshot refreshed at the top of on_tick.
-            // EDGE-P2-3 Phase 1B-4.3：本 commit 以 `MakerKpiConfig::default()`
-            // 提供門檻；ConfigStore 熱重載於 1B-5 接入，屆時改讀 tick 頂部同步
-            // 的 owned snapshot。
-            let funding_drag_threshold =
-                crate::paper_state::MakerKpiConfig::default().funding_drag_threshold;
+            // EDGE-P2-3 Phase 1B-5: read the hot-reloadable funding-drag
+            // threshold from the owned MakerKpiConfig snapshot (refreshed at
+            // the top of this tick by `sync_maker_kpi_config_if_changed`). When
+            // no ConfigStore is wired, `maker_kpi_config` stays at
+            // `MakerKpiConfig::default()` so behaviour is bit-identical to the
+            // pre-hot-reload commit.
+            // EDGE-P2-3 Phase 1B-5：從 tick 頂部同步過的 owned `maker_kpi_config`
+            // 讀 funding_drag_threshold；未接 store 時維持
+            // `MakerKpiConfig::default()`，行為 bit-identical。
+            let funding_drag_threshold = self.maker_kpi_config.funding_drag_threshold;
             let resting_events = self.paper_state.sweep_resting_limit_orders_for_symbol(
                 &event.symbol,
                 event.last_price,

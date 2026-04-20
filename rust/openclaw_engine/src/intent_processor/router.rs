@@ -329,8 +329,16 @@ impl IntentProcessor {
         {
             let limit_price = intent.limit_price.unwrap_or(0.0);
             if limit_price > 0.0 && now_ms > 0 {
-                let kpi_cfg = crate::paper_state::MakerKpiConfig::default();
-                let kpi_status = paper_state.maker_kpi_status(&intent.symbol, &kpi_cfg, now_ms);
+                // EDGE-P2-3 Phase 1B-5: honour operator patches via the live
+                // MakerKpiConfig snapshot that TickPipeline mirrors into
+                // IntentProcessor on every store version bump. Default fallback
+                // is bit-identical to the pre-hot-reload commit.
+                // EDGE-P2-3 Phase 1B-5：讀 TickPipeline 於每次 store 升版
+                // 鏡像到 IntentProcessor 的 live MakerKpiConfig 快照，尊重
+                // operator patch；未接 store 時仍為 `MakerKpiConfig::default()`
+                // bit-identical。
+                let kpi_cfg = &self.maker_kpi_config;
+                let kpi_status = paper_state.maker_kpi_status(&intent.symbol, kpi_cfg, now_ms);
                 if kpi_status.is_degraded() {
                     // Mark fallback; fall through to market fill path below.
                     // 標記 fallback；直接走下方市價路徑。
