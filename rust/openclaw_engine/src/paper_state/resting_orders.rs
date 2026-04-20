@@ -298,8 +298,9 @@ impl PaperState {
         &self,
         symbol: &str,
         cfg: &super::MakerKpiConfig,
+        now_ms: u64,
     ) -> super::MakerKpiStatus {
-        self.maker_stats.status_for(symbol, cfg)
+        self.maker_stats.status_for(symbol, cfg, now_ms)
     }
 
     /// EDGE-P2-3 Phase 1B-5: counter bump used by router when the gate
@@ -326,13 +327,21 @@ impl PaperState {
         symbol: &str,
         filled: u64,
         timedout: u64,
+        now_ms: u64,
     ) {
+        // 1B-5 FUP-2: seed with the caller's `now_ms` so the staleness window
+        // does not silently decay the Degraded verdict in router integration
+        // tests that advance time (NOW_MS ≈ 1.7 trillion) beyond the default
+        // 30-minute window. Callers that want stale seed data pass an old
+        // `now_ms` explicitly.
+        // 1B-5 FUP-2：以 caller 的 `now_ms` seed，避免 staleness 默默把整合
+        // 測試裡的 Degraded 衰減成 Cold；想測陳舊場景的 caller 自行傳舊 ts。
         for _ in 0..filled {
             self.maker_stats
-                .record_fill(symbol, true, 100.0, 100.0, 1.0, 100.0, 0.0, true);
+                .record_fill(symbol, true, 100.0, 100.0, 1.0, 100.0, 0.0, true, now_ms);
         }
         for _ in 0..timedout {
-            self.maker_stats.record_timeout(symbol);
+            self.maker_stats.record_timeout(symbol, now_ms);
         }
     }
 
@@ -462,7 +471,7 @@ impl PaperState {
                     // 1B-5: bump maker_stats before emitting event so readers
                     // see a consistent snapshot once the event is observed.
                     // 1B-5：先更 maker_stats 再發事件，確保觀察者看見一致快照。
-                    self.maker_stats.record_timeout(&drained.symbol);
+                    self.maker_stats.record_timeout(&drained.symbol, now_ms);
                     events.push(RestingFillEvent::Timedout { order: drained });
                 }
                 Decision::Fill {
@@ -497,6 +506,7 @@ impl PaperState {
                         fill_price,
                         fee,
                         true_cross,
+                        now_ms,
                     );
                     events.push(RestingFillEvent::Filled {
                         order: drained,
@@ -609,7 +619,7 @@ mod tests {
         let mut s = PaperState::new(10_000.0);
         s.enqueue_resting_limit_order(make_order("oc_1", "BTCUSDT", 1_000, 46_000));
         // Seed terminal stats so Degraded could sticky if not cleared.
-        s.test_seed_maker_stats_terminal("BTCUSDT", 0, 25);
+        s.test_seed_maker_stats_terminal("BTCUSDT", 0, 25, 10_000);
         s.record_maker_degraded_fallback("BTCUSDT");
         let before = s.maker_stats();
         assert!(before.aggregate.timedout > 0);
