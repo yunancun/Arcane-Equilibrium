@@ -330,7 +330,7 @@ impl IntentProcessor {
             let limit_price = intent.limit_price.unwrap_or(0.0);
             if limit_price > 0.0 && now_ms > 0 {
                 let kpi_cfg = crate::paper_state::MakerKpiConfig::default();
-                let kpi_status = paper_state.maker_kpi_status(&intent.symbol, &kpi_cfg);
+                let kpi_status = paper_state.maker_kpi_status(&intent.symbol, &kpi_cfg, now_ms);
                 if kpi_status.is_degraded() {
                     // Mark fallback; fall through to market fill path below.
                     // 標記 fallback；直接走下方市價路徑。

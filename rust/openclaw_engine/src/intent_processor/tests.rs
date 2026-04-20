@@ -1760,7 +1760,7 @@ mod maker_kpi_gate_tests {
         let proc = IntentProcessor::new();
         let gov = approved_gov();
         let mut state = paper_state_seeded(30_000.0);
-        state.test_seed_maker_stats_terminal("BTCUSDT", 18, 2);
+        state.test_seed_maker_stats_terminal("BTCUSDT", 18, 2, NOW_MS);
         let r = proc.process_with_features(
             &postonly_intent(30_000.0),
             &gov,
@@ -1786,7 +1786,7 @@ mod maker_kpi_gate_tests {
         let proc = IntentProcessor::new();
         let gov = approved_gov();
         let mut state = paper_state_seeded(30_000.0);
-        state.test_seed_maker_stats_terminal("BTCUSDT", 2, 18);
+        state.test_seed_maker_stats_terminal("BTCUSDT", 2, 18, NOW_MS);
         let r = proc.process_with_features(
             &postonly_intent(30_000.0),
             &gov,
@@ -1822,7 +1822,7 @@ mod maker_kpi_gate_tests {
         let proc = IntentProcessor::new();
         let gov = approved_gov();
         let mut state = paper_state_seeded(30_000.0);
-        state.test_seed_maker_stats_terminal("BTCUSDT", 2, 18);
+        state.test_seed_maker_stats_terminal("BTCUSDT", 2, 18, NOW_MS);
         state.set_latest_price("ETHUSDT", 3_000.0);
         state.set_latest_turnover("ETHUSDT", 100_000_000.0);
         let mut eth_intent = postonly_intent(3_000.0);
@@ -1856,7 +1856,7 @@ mod maker_kpi_gate_tests {
         let mut state = paper_state_seeded(30_000.0);
         // Even with Degraded stats present, a market intent shouldn't care.
         // 即使 stats 呈 Degraded，市價意圖也不應受影響。
-        state.test_seed_maker_stats_terminal("BTCUSDT", 2, 18);
+        state.test_seed_maker_stats_terminal("BTCUSDT", 2, 18, NOW_MS);
         let intent = super::make_intent("BTCUSDT", true); // order_type=market
         let r = proc.process_with_features(
             &intent,

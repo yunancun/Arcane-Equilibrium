@@ -60,6 +60,17 @@ pub struct MakerStatsCounters {
     /// KPI gate 回 `Degraded` 而被跳過 enqueue 的 intent 數（改走 market）。
     /// 由 router 在 gate 拒絕時累加，不由 sweep 路徑觸發。
     pub degraded_fallbacks: u64,
+    /// EDGE-P2-3 Phase 1B-5 FUP-2: wall-clock ms of the most recent terminal
+    /// event (fill or timeout) on this scope. 0 means "no terminal event yet"
+    /// (distinct from a genuine timestamp since epoch). Drives the staleness
+    /// gate: when `now - last_terminal_ms > cfg.stale_window_ms`, the KPI
+    /// verdict resets to Cold regardless of sample count so a chronically idle
+    /// symbol cannot stay stuck in a Degraded verdict from an old regime.
+    /// 1B-5 FUP-2：本 scope 最後一次終局事件（fill / timeout）的 wall-clock ms。
+    /// 0 = 尚未有終局事件。觸發 staleness gate：`now - last_terminal_ms > cfg
+    /// .stale_window_ms` → KPI 結果重設為 Cold，避免長期閒置 symbol 卡在
+    /// 舊 regime 的 Degraded 結論裡不得翻身。
+    pub last_terminal_ms: u64,
 }
 
 impl MakerStatsCounters {
@@ -104,12 +115,27 @@ impl MakerStatsCounters {
     }
 
     /// Evaluate KPI gate. Order of checks (first match wins):
+    ///   0. staleness:    last terminal event older than stale_window_ms → Cold
+    ///                    (1B-5 FUP-2: prevents sticky Degraded on idle symbols)
     ///   1. terminal_samples < min_samples → Cold (warmup, allow enqueue)
     ///   2. fill_rate < min_fill_rate       → Degraded("fill_rate_below_threshold")
     ///   3. avg_net_edge_bps < min_edge_bps → Degraded("net_edge_below_threshold")
     ///   4. otherwise                       → Healthy
-    /// 先判樣本數 → 再判成交率 → 再判平均 edge → 其餘為 Healthy。
-    pub fn kpi_status(&self, cfg: &MakerKpiConfig) -> MakerKpiStatus {
+    /// 先判 staleness → 樣本數 → 成交率 → 平均 edge → 其餘 Healthy。
+    ///
+    /// The staleness branch only fires when `cfg.stale_window_ms > 0` and
+    /// `self.last_terminal_ms > 0` — a scope that never saw a terminal event
+    /// is already Cold via the samples path, and `stale_window_ms = 0`
+    /// disables decay entirely (useful in tests that pin to Healthy/Degraded).
+    /// staleness 分支僅在 `cfg.stale_window_ms > 0` 且確實有過終局事件時觸發；
+    /// `stale_window_ms = 0` 代表關閉衰減（測試鎖死 Healthy/Degraded 用）。
+    pub fn kpi_status(&self, cfg: &MakerKpiConfig, now_ms: u64) -> MakerKpiStatus {
+        if cfg.stale_window_ms > 0
+            && self.last_terminal_ms > 0
+            && now_ms.saturating_sub(self.last_terminal_ms) > cfg.stale_window_ms
+        {
+            return MakerKpiStatus::Cold;
+        }
         if self.terminal_samples() < cfg.min_samples {
             return MakerKpiStatus::Cold;
         }
@@ -173,6 +199,7 @@ impl MakerStats {
         fill_price: f64,
         fee: f64,
         true_cross: bool,
+        now_ms: u64,
     ) {
         if true_cross {
             self.aggregate.filled_full += 1;
@@ -187,13 +214,20 @@ impl MakerStats {
             self.aggregate.sum_net_edge_bps += net_bps;
             self.entry(symbol).sum_net_edge_bps += net_bps;
         }
+        // 1B-5 FUP-2: stamp last-terminal on both scopes so the staleness gate
+        // can decay a chronically idle Degraded verdict back to Cold.
+        // 1B-5 FUP-2：同步更新 aggregate 與 per-symbol 的終局時戳。
+        self.aggregate.last_terminal_ms = now_ms;
+        self.entry(symbol).last_terminal_ms = now_ms;
     }
 
     /// Record timeout — bumps `timedout` on both aggregate and per-symbol.
     /// 記錄超時 — aggregate 與 per-symbol 的 timedout 各 +1。
-    pub fn record_timeout(&mut self, symbol: &str) {
+    pub fn record_timeout(&mut self, symbol: &str, now_ms: u64) {
         self.aggregate.timedout += 1;
         self.entry(symbol).timedout += 1;
+        self.aggregate.last_terminal_ms = now_ms;
+        self.entry(symbol).last_terminal_ms = now_ms;
     }
 
     /// Record a router-level degraded fallback (KPI gate rejected enqueue).
@@ -209,13 +243,22 @@ impl MakerStats {
     /// 解析某 symbol 的有效 KPI 狀態。per-symbol 終局樣本足夠時以 per-symbol
     /// 判定；不足則 fallback 到 aggregate，讓單一 symbol 的冷啟動借用其他
     /// symbol 的經驗。
-    pub fn status_for(&self, symbol: &str, cfg: &MakerKpiConfig) -> MakerKpiStatus {
+    pub fn status_for(&self, symbol: &str, cfg: &MakerKpiConfig, now_ms: u64) -> MakerKpiStatus {
         if let Some(per) = self.per_symbol.get(symbol) {
-            if per.terminal_samples() >= cfg.min_samples {
-                return per.kpi_status(cfg);
+            // 1B-5 FUP-2: a per-symbol scope whose last terminal event is
+            // older than the staleness window should not be "rescued" by its
+            // own stale Degraded verdict — fall through to aggregate which
+            // carries the freshest cross-symbol experience.
+            // 1B-5 FUP-2：per-symbol 若自身終局事件已陳舊，不應被本身舊
+            // Degraded 結論鎖定，直接落到 aggregate 借用其他 symbol 新經驗。
+            let is_stale = cfg.stale_window_ms > 0
+                && per.last_terminal_ms > 0
+                && now_ms.saturating_sub(per.last_terminal_ms) > cfg.stale_window_ms;
+            if !is_stale && per.terminal_samples() >= cfg.min_samples {
+                return per.kpi_status(cfg, now_ms);
             }
         }
-        self.aggregate.kpi_status(cfg)
+        self.aggregate.kpi_status(cfg, now_ms)
     }
 }
 
@@ -235,6 +278,15 @@ pub struct MakerKpiConfig {
     /// Mean net edge floor in bps. Below → Degraded.
     /// 平均 net edge 下限（bps）。低於此值 → Degraded。
     pub min_avg_net_edge_bps: f64,
+    /// 1B-5 FUP-2: staleness window in ms. When `now - last_terminal_ms`
+    /// exceeds this, the KPI verdict resets to Cold regardless of sample
+    /// count — prevents a symbol whose regime flipped (e.g. scanner swapped
+    /// it out for an hour) from being stuck in a stale Degraded verdict.
+    /// `0` disables staleness decay (tests + fixed-clock scenarios).
+    /// 1B-5 FUP-2：陳舊窗口（ms）。`now - last_terminal_ms` 超過時 KPI 結論
+    /// 重設為 Cold，避免 regime 已變（掃描器輪替等）卻被舊 Degraded 鎖住。
+    /// `0` 關閉衰減（測試/固定時鐘情境）。
+    pub stale_window_ms: u64,
 }
 
 impl Default for MakerKpiConfig {
@@ -243,6 +295,12 @@ impl Default for MakerKpiConfig {
             min_samples: 20,
             min_fill_rate: 0.15,
             min_avg_net_edge_bps: -5.0,
+            // 30 min — longer than any normal trading lull so a quiet hour
+            // doesn't wipe a valid Degraded verdict, short enough to unlock
+            // a scanner-rotated symbol within a reasonable delay.
+            // 30 分鐘 — 比一般交易空窗長，不會在安靜時段誤傷有效 Degraded；
+            // 也不會讓掃描器輪替出的 symbol 卡太久。
+            stale_window_ms: 1_800_000,
         }
     }
 }
@@ -396,13 +454,20 @@ mod tests {
         assert!((c.avg_net_edge_bps().unwrap() - 5.0).abs() < 1e-9);
     }
 
+    /// Convenience: "now" that is always past any seeded last_terminal_ms in
+    /// non-staleness tests, but under the default 30-min window so staleness
+    /// stays inactive.
+    /// 測試輔助：代表「現在」，對 seed 的 last_terminal_ms 而言不會觸發 staleness。
+    const NOW_MS_FRESH: u64 = 10_000;
+
     #[test]
     fn kpi_status_cold_when_samples_below_min() {
         let mut c = MakerStatsCounters::default();
         c.filled_full = 5;
         c.timedout = 5;
+        c.last_terminal_ms = NOW_MS_FRESH;
         let cfg = cfg_default(); // min_samples = 20
-        assert_eq!(c.kpi_status(&cfg), MakerKpiStatus::Cold);
+        assert_eq!(c.kpi_status(&cfg, NOW_MS_FRESH), MakerKpiStatus::Cold);
     }
 
     #[test]
@@ -411,8 +476,9 @@ mod tests {
         c.filled_full = 18;
         c.timedout = 2;
         c.sum_net_edge_bps = 18.0; // mean = +1.0 bps
+        c.last_terminal_ms = NOW_MS_FRESH;
         let cfg = cfg_default();
-        assert_eq!(c.kpi_status(&cfg), MakerKpiStatus::Healthy);
+        assert_eq!(c.kpi_status(&cfg, NOW_MS_FRESH), MakerKpiStatus::Healthy);
     }
 
     #[test]
@@ -421,8 +487,9 @@ mod tests {
         c.filled_full = 2; // fill_rate = 2/20 = 0.1 (< 0.15)
         c.timedout = 18;
         c.sum_net_edge_bps = 0.0;
+        c.last_terminal_ms = NOW_MS_FRESH;
         let cfg = cfg_default();
-        match c.kpi_status(&cfg) {
+        match c.kpi_status(&cfg, NOW_MS_FRESH) {
             MakerKpiStatus::Degraded { reason } => {
                 assert_eq!(reason, "fill_rate_below_threshold")
             }
@@ -436,8 +503,9 @@ mod tests {
         c.filled_full = 18; // fill_rate = 18/20 = 0.9
         c.timedout = 2;
         c.sum_net_edge_bps = -200.0; // mean = -11.1 bps (< -5)
+        c.last_terminal_ms = NOW_MS_FRESH;
         let cfg = cfg_default();
-        match c.kpi_status(&cfg) {
+        match c.kpi_status(&cfg, NOW_MS_FRESH) {
             MakerKpiStatus::Degraded { reason } => {
                 assert_eq!(reason, "net_edge_below_threshold")
             }
@@ -454,13 +522,110 @@ mod tests {
         c.filled_full = 2; // rate 0.1
         c.timedout = 18;
         c.sum_net_edge_bps = -200.0; // mean very negative
+        c.last_terminal_ms = NOW_MS_FRESH;
         let cfg = cfg_default();
-        match c.kpi_status(&cfg) {
+        match c.kpi_status(&cfg, NOW_MS_FRESH) {
             MakerKpiStatus::Degraded { reason } => {
                 assert_eq!(reason, "fill_rate_below_threshold")
             }
             other => panic!("expected Degraded fill_rate precedence, got {:?}", other),
         }
+    }
+
+    // ────────────────────────────────────────────────────────────────
+    // 1B-5 FUP-2: staleness window decay
+    // ────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn staleness_decays_degraded_to_cold_after_window() {
+        // Build a Degraded-by-fill-rate counter, then advance time past the
+        // staleness window. Expect: verdict resets to Cold.
+        // 建造 fill-rate Degraded 的計數器，時間過了 stale window 後應回 Cold。
+        let mut c = MakerStatsCounters::default();
+        c.filled_full = 2;
+        c.timedout = 18;
+        c.last_terminal_ms = 1_000;
+        let cfg = cfg_default(); // stale_window_ms = 1_800_000 (30 min)
+
+        // Still fresh — Degraded verdict holds.
+        let now_fresh = 1_000 + 60_000; // +1 min
+        assert!(matches!(
+            c.kpi_status(&cfg, now_fresh),
+            MakerKpiStatus::Degraded { .. }
+        ));
+
+        // Past window — Cold.
+        let now_stale = 1_000 + cfg.stale_window_ms + 1;
+        assert_eq!(c.kpi_status(&cfg, now_stale), MakerKpiStatus::Cold);
+    }
+
+    #[test]
+    fn staleness_zero_window_disables_decay() {
+        // With stale_window_ms = 0, the staleness branch is inactive — even a
+        // very old last_terminal_ms keeps the verdict at Degraded.
+        // stale_window_ms=0 表示關閉衰減，舊時戳仍保 Degraded。
+        let mut c = MakerStatsCounters::default();
+        c.filled_full = 2;
+        c.timedout = 18;
+        c.last_terminal_ms = 1_000;
+        let mut cfg = cfg_default();
+        cfg.stale_window_ms = 0;
+        assert!(matches!(
+            c.kpi_status(&cfg, 9_999_999_999),
+            MakerKpiStatus::Degraded { .. }
+        ));
+    }
+
+    #[test]
+    fn staleness_not_triggered_when_no_terminal_events_yet() {
+        // `last_terminal_ms = 0` sentinel means "never had a terminal event".
+        // The staleness branch must not fire on the sentinel (else a fresh
+        // counter would mis-trip on any now_ms > stale_window_ms).
+        // 0 = sentinel「未有終局事件」，staleness 分支不應觸發。
+        let c = MakerStatsCounters::default(); // last_terminal_ms = 0
+        let cfg = cfg_default();
+        // Cold comes from insufficient samples, not from staleness — both
+        // paths return Cold here, but the point is "no spurious fire".
+        assert_eq!(c.kpi_status(&cfg, 9_999_999_999), MakerKpiStatus::Cold);
+    }
+
+    #[test]
+    fn staleness_per_symbol_falls_through_to_aggregate() {
+        // Per-symbol BTCUSDT is stale-and-Degraded; aggregate is fresh-Healthy
+        // via ETHUSDT. status_for(BTCUSDT) must ignore stale per-symbol and
+        // fall through to aggregate → Healthy.
+        // 過期 per-symbol 應被跳過，fallback 到新 aggregate → Healthy。
+        let mut s = MakerStats::default();
+        // BTCUSDT stuck Degraded at t=1_000
+        for _ in 0..2 {
+            s.record_fill("BTCUSDT", true, 100.0, 100.0, 1.0, 100.0, 0.0, true, 1_000);
+        }
+        for _ in 0..18 {
+            s.record_timeout("BTCUSDT", 1_000);
+        }
+        // ETHUSDT healthy, recent
+        let now = 1_000 + 1_800_000 + 10_000; // past window for BTC
+        for _ in 0..20 {
+            s.record_fill("ETHUSDT", true, 100.0, 100.0, 1.0, 100.0, 0.0, true, now);
+        }
+        let cfg = cfg_default();
+        assert_eq!(s.status_for("BTCUSDT", &cfg, now), MakerKpiStatus::Healthy);
+    }
+
+    #[test]
+    fn record_fill_stamps_last_terminal_ms() {
+        let mut s = MakerStats::default();
+        s.record_fill("BTCUSDT", true, 100.0, 100.0, 1.0, 100.0, 0.0, true, 42_000);
+        assert_eq!(s.aggregate.last_terminal_ms, 42_000);
+        assert_eq!(s.per_symbol.get("BTCUSDT").unwrap().last_terminal_ms, 42_000);
+    }
+
+    #[test]
+    fn record_timeout_stamps_last_terminal_ms() {
+        let mut s = MakerStats::default();
+        s.record_timeout("BTCUSDT", 77_000);
+        assert_eq!(s.aggregate.last_terminal_ms, 77_000);
+        assert_eq!(s.per_symbol.get("BTCUSDT").unwrap().last_terminal_ms, 77_000);
     }
 
     // ────────────────────────────────────────────────────────────────
@@ -482,9 +647,9 @@ mod tests {
     fn record_fill_full_vs_partial_counters() {
         let mut s = MakerStats::default();
         // true_cross=true → filled_full
-        s.record_fill("BTCUSDT", true, 100.0, 100.0, 1.0, 100.0, 0.0, true);
+        s.record_fill("BTCUSDT", true, 100.0, 100.0, 1.0, 100.0, 0.0, true, NOW_MS_FRESH);
         // true_cross=false → filled_partial
-        s.record_fill("BTCUSDT", true, 100.0, 100.0, 1.0, 100.0, 0.0, false);
+        s.record_fill("BTCUSDT", true, 100.0, 100.0, 1.0, 100.0, 0.0, false, NOW_MS_FRESH);
         assert_eq!(s.aggregate.filled_full, 1);
         assert_eq!(s.aggregate.filled_partial, 1);
         assert_eq!(s.per_symbol.get("BTCUSDT").unwrap().filled_full, 1);
@@ -496,12 +661,12 @@ mod tests {
         let mut s = MakerStats::default();
         // Valid submit mid → sum += net_edge_bps (= 0 in this case since
         // mid_fill == mid_submit and fee = 0).
-        s.record_fill("BTCUSDT", true, 100.0, 100.0, 1.0, 100.0, 0.0, true);
+        s.record_fill("BTCUSDT", true, 100.0, 100.0, 1.0, 100.0, 0.0, true, NOW_MS_FRESH);
         assert_eq!(s.aggregate.sum_net_edge_bps, 0.0);
         assert_eq!(s.aggregate.filled_full, 1);
 
         // Unknown submit mid (0.0) → count the fill but skip sum.
-        s.record_fill("BTCUSDT", true, 0.0, 100.0, 1.0, 100.0, 0.0, true);
+        s.record_fill("BTCUSDT", true, 0.0, 100.0, 1.0, 100.0, 0.0, true, NOW_MS_FRESH);
         assert_eq!(s.aggregate.filled_full, 2);
         assert_eq!(s.aggregate.sum_net_edge_bps, 0.0, "bootstrap tick must not poison sum");
     }
@@ -510,9 +675,9 @@ mod tests {
     fn record_fill_accumulates_signed_edge() {
         let mut s = MakerStats::default();
         // Long favorable: mid 100 → 101 = +100 bps, fee=0 → net=+100
-        s.record_fill("BTCUSDT", true, 100.0, 101.0, 1.0, 101.0, 0.0, true);
+        s.record_fill("BTCUSDT", true, 100.0, 101.0, 1.0, 101.0, 0.0, true, NOW_MS_FRESH);
         // Short favorable: mid 100 → 99 = +100 bps (signed), fee=0 → net=+100
-        s.record_fill("BTCUSDT", false, 100.0, 99.0, 1.0, 99.0, 0.0, true);
+        s.record_fill("BTCUSDT", false, 100.0, 99.0, 1.0, 99.0, 0.0, true, NOW_MS_FRESH);
         assert!((s.aggregate.sum_net_edge_bps - 200.0).abs() < 1e-6);
         // Per-symbol should mirror aggregate (only 1 symbol active).
         let per = s.per_symbol.get("BTCUSDT").unwrap();
@@ -522,8 +687,8 @@ mod tests {
     #[test]
     fn record_timeout_updates_both_scopes() {
         let mut s = MakerStats::default();
-        s.record_timeout("BTCUSDT");
-        s.record_timeout("ETHUSDT");
+        s.record_timeout("BTCUSDT", NOW_MS_FRESH);
+        s.record_timeout("ETHUSDT", NOW_MS_FRESH);
         assert_eq!(s.aggregate.timedout, 2);
         assert_eq!(s.per_symbol.get("BTCUSDT").unwrap().timedout, 1);
         assert_eq!(s.per_symbol.get("ETHUSDT").unwrap().timedout, 1);
@@ -547,14 +712,17 @@ mod tests {
         let mut s = MakerStats::default();
         // Build healthy aggregate on a different symbol.
         for _ in 0..18 {
-            s.record_fill("BTCUSDT", true, 100.0, 100.0, 1.0, 100.0, 0.0, true);
+            s.record_fill("BTCUSDT", true, 100.0, 100.0, 1.0, 100.0, 0.0, true, NOW_MS_FRESH);
         }
         for _ in 0..2 {
-            s.record_timeout("BTCUSDT");
+            s.record_timeout("BTCUSDT", NOW_MS_FRESH);
         }
         // Unknown symbol → no per-symbol entry → aggregate path.
         let cfg = cfg_default();
-        assert_eq!(s.status_for("NEWCOIN", &cfg), MakerKpiStatus::Healthy);
+        assert_eq!(
+            s.status_for("NEWCOIN", &cfg, NOW_MS_FRESH),
+            MakerKpiStatus::Healthy
+        );
     }
 
     #[test]
@@ -563,25 +731,28 @@ mod tests {
         // Aggregate mixes two symbols into Healthy, but BTCUSDT alone is bad.
         // BTCUSDT: 2 fills / 18 timeouts → fill_rate 0.1 (Degraded)
         for _ in 0..2 {
-            s.record_fill("BTCUSDT", true, 100.0, 100.0, 1.0, 100.0, 0.0, true);
+            s.record_fill("BTCUSDT", true, 100.0, 100.0, 1.0, 100.0, 0.0, true, NOW_MS_FRESH);
         }
         for _ in 0..18 {
-            s.record_timeout("BTCUSDT");
+            s.record_timeout("BTCUSDT", NOW_MS_FRESH);
         }
         // ETHUSDT: 30 fills / 0 timeouts → fill_rate 1.0 (Healthy)
         for _ in 0..30 {
-            s.record_fill("ETHUSDT", true, 100.0, 100.0, 1.0, 100.0, 0.0, true);
+            s.record_fill("ETHUSDT", true, 100.0, 100.0, 1.0, 100.0, 0.0, true, NOW_MS_FRESH);
         }
         let cfg = cfg_default();
         // BTCUSDT has 20 terminal samples → its own counters decide → Degraded.
-        match s.status_for("BTCUSDT", &cfg) {
+        match s.status_for("BTCUSDT", &cfg, NOW_MS_FRESH) {
             MakerKpiStatus::Degraded { reason } => {
                 assert_eq!(reason, "fill_rate_below_threshold")
             }
             other => panic!("expected BTCUSDT Degraded, got {:?}", other),
         }
         // ETHUSDT: Healthy from its own counters.
-        assert_eq!(s.status_for("ETHUSDT", &cfg), MakerKpiStatus::Healthy);
+        assert_eq!(
+            s.status_for("ETHUSDT", &cfg, NOW_MS_FRESH),
+            MakerKpiStatus::Healthy
+        );
     }
 
     #[test]
@@ -589,12 +760,15 @@ mod tests {
         let mut s = MakerStats::default();
         // Aggregate healthy via ETHUSDT (20 fills, 0 timeouts).
         for _ in 0..20 {
-            s.record_fill("ETHUSDT", true, 100.0, 100.0, 1.0, 100.0, 0.0, true);
+            s.record_fill("ETHUSDT", true, 100.0, 100.0, 1.0, 100.0, 0.0, true, NOW_MS_FRESH);
         }
         // BTCUSDT only has 1 timeout → terminal_samples=1 < 20 → fallback.
-        s.record_timeout("BTCUSDT");
+        s.record_timeout("BTCUSDT", NOW_MS_FRESH);
         let cfg = cfg_default();
-        assert_eq!(s.status_for("BTCUSDT", &cfg), MakerKpiStatus::Healthy);
+        assert_eq!(
+            s.status_for("BTCUSDT", &cfg, NOW_MS_FRESH),
+            MakerKpiStatus::Healthy
+        );
     }
 
     #[test]
