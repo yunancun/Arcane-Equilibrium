@@ -725,6 +725,7 @@ fn test_dual_rail_shadow_order_has_sl_fields() {
         order_type: "market".to_string(),
         limit_price: None,
         time_in_force: None,
+        maker_timeout_ms: None,
     };
     assert_eq!(req.stop_loss, Some(49000.0));
     assert_eq!(req.take_profit, Some(52000.0));
@@ -771,6 +772,7 @@ fn test_dual_rail_close_orders_no_broker_sl() {
         order_type: "market".to_string(),
         limit_price: None,
         time_in_force: None,
+        maker_timeout_ms: None,
     };
     assert!(req.stop_loss.is_none());
     assert!(req.is_close);
@@ -797,6 +799,7 @@ fn test_dual_rail_paper_shadow_skips_broker_sl() {
         order_type: "market".to_string(),
         limit_price: None,
         time_in_force: None,
+        maker_timeout_ms: None,
     };
     assert!(!req.is_primary);
     assert!(req.stop_loss.is_none());
@@ -2306,6 +2309,7 @@ fn test_persist_intent_helper_emits_trading_msg_intent_with_engine_mode() {
         confluence_score: None,
         persistence_elapsed_ms: None,
         time_in_force: None,
+        maker_timeout_ms: None,
     };
     let (tx, mut rx) = tokio::sync::mpsc::channel::<crate::database::TradingMsg>(8);
 

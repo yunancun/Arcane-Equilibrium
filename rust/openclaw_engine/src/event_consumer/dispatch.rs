@@ -419,6 +419,9 @@ pub(super) fn spawn_order_dispatch(
                     // 便於逾時清理區分 Market 與掛中 PostOnly。
                     order_type: req.order_type.clone(),
                     time_in_force: req.time_in_force,
+                    // EDGE-P2-3 Phase 1B-3.2: per-order maker sweep timeout.
+                    // EDGE-P2-3 Phase 1B-3.2：每單 maker sweep 逾時。
+                    maker_timeout_ms: req.maker_timeout_ms,
                 });
             }
             let side = if req.is_long {

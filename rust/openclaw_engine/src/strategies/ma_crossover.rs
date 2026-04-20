@@ -445,6 +445,7 @@ impl MaCrossover {
             confluence_score,
             persistence_elapsed_ms,
             time_in_force: None,
+            maker_timeout_ms: None,
         }
     }
 

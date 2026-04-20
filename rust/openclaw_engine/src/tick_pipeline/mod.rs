@@ -594,6 +594,13 @@ pub struct OrderDispatchRequest {
     pub limit_price: Option<f64>,
     /// EDGE-P2-3 Phase 1a: mirrored from OrderIntent.time_in_force.
     pub time_in_force: Option<crate::order_manager::TimeInForce>,
+    /// EDGE-P2-3 Phase 1B-3.2: mirrored from OrderIntent.maker_timeout_ms.
+    /// Set only when `time_in_force == Some(PostOnly)`. Consumed by the
+    /// event_consumer timeout sweep to decide when a resting maker order
+    /// must be cancelled (via orderLinkId) rather than left idle.
+    /// EDGE-P2-3 Phase 1B-3.2：鏡射 OrderIntent.maker_timeout_ms。僅 PostOnly
+    /// 帶值。event_consumer sweep 依此判斷何時以 orderLinkId 取消掛單。
+    pub maker_timeout_ms: Option<u64>,
 }
 
 /// Tick context passed to strategies — borrows from on_tick scope to avoid cloning.
