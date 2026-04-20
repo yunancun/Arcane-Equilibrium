@@ -335,6 +335,18 @@ pub struct IntentProcessor {
     /// 非空 context_id，於 `evaluate_predictor_gate` 頂端即發射，無論 predictor
     /// 是否啟用 — Stage 0 即刻採集訓練資料；None 時發射為 no-op（fail-soft）。
     decision_feature_tx: Option<tokio::sync::mpsc::Sender<crate::database::DecisionFeatureMsg>>,
+    /// EDGE-P2-3 Phase 1B-5: owned snapshot of `MakerKpiConfig` consulted by the
+    /// router's PostOnly KPI gate (Degraded → silent market fallback). Mirrors
+    /// the `risk_config` ownership pattern: TickPipeline pushes the latest
+    /// `ConfigStore<MakerKpiConfig>` snapshot through `update_maker_kpi_config`
+    /// whenever `sync_maker_kpi_config_if_changed` detects a version bump.
+    /// Defaults to `MakerKpiConfig::default()` so tests and unwired bootstraps
+    /// stay bit-identical to the pre-hot-reload commit.
+    /// EDGE-P2-3 Phase 1B-5：router KPI gate 查詢用的 owned MakerKpiConfig 快照。
+    /// 與 `risk_config` 同模式：TickPipeline 於偵測到版本升版時透過
+    /// `update_maker_kpi_config` 推入最新快照；預設 `MakerKpiConfig::default()`
+    /// 保持測試與未接線路徑的 bit-identical。
+    maker_kpi_config: crate::paper_state::MakerKpiConfig,
 }
 
 /// EDGE-P3-1 A4: Result of predictor-gate evaluation, translated to caller action.
@@ -376,6 +388,7 @@ impl IntentProcessor {
             predictor_rng: Mutex::new(SmallRng::seed_from_u64(0)),
             shadow_fill_tx: None,
             decision_feature_tx: None,
+            maker_kpi_config: crate::paper_state::MakerKpiConfig::default(),
         }
     }
 
@@ -403,6 +416,7 @@ impl IntentProcessor {
             predictor_rng: Mutex::new(SmallRng::seed_from_u64(0)),
             shadow_fill_tx: None,
             decision_feature_tx: None,
+            maker_kpi_config: crate::paper_state::MakerKpiConfig::default(),
         }
     }
 
@@ -549,6 +563,25 @@ impl IntentProcessor {
     /// RRC-1-B4：風控配置的唯讀訪問。
     pub fn risk_config(&self) -> &RiskConfig {
         &self.risk_config
+    }
+
+    /// EDGE-P2-3 Phase 1B-5: Push a fresh MakerKpiConfig snapshot (called by
+    /// TickPipeline's `sync_maker_kpi_config_if_changed` on store version bump).
+    /// The router reads this snapshot inside `process_with_features` when
+    /// evaluating the PostOnly KPI gate, so the next intent routed after a
+    /// patch lands already sees the new thresholds without a restart.
+    /// EDGE-P2-3 Phase 1B-5：推入最新 MakerKpiConfig 快照；由 TickPipeline 在
+    /// store 升版時呼叫。router 在 `process_with_features` 裡評估 PostOnly KPI
+    /// gate 時讀此快照，patch 落地後下一筆意圖即見新門檻、無需重啟。
+    pub fn update_maker_kpi_config(&mut self, config: crate::paper_state::MakerKpiConfig) {
+        self.maker_kpi_config = config;
+    }
+
+    /// EDGE-P2-3 Phase 1B-5: Read-only access to the live MakerKpiConfig
+    /// snapshot consulted by the router KPI gate.
+    /// EDGE-P2-3 Phase 1B-5：router KPI gate 使用的 MakerKpiConfig 唯讀存取。
+    pub fn maker_kpi_config(&self) -> &crate::paper_state::MakerKpiConfig {
+        &self.maker_kpi_config
     }
 
     /// PNL-7: Patch the dynamic-stop / RR tunables in-place. Each Some(v) is

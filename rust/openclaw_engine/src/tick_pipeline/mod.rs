@@ -788,6 +788,35 @@ pub struct TickPipeline {
     /// ARCH-RC1 1C-2-B：上一次見到的 RiskConfig 版本號 — 用於檢測 store 更新並
     /// 僅在變化時同步 intent_processor 快照。
     risk_config_version_seen: u64,
+    /// EDGE-P2-3 Phase 1B-5: live MakerKpiConfig store (hot-reload). `None` =
+    /// unwired mode (tick-level sync is a no-op; `maker_kpi_config` stays at
+    /// `MakerKpiConfig::default()`). Tick path checks `store.version()` at
+    /// tick start vs `maker_kpi_version_seen`; on bump → `apply_maker_kpi_snapshot`
+    /// mirrors the snapshot into the owned `maker_kpi_config` copy. Read sites
+    /// (sweep call in `on_tick`, router KPI gate) use the owned copy so they
+    /// stay lock-free inside the tick.
+    /// EDGE-P2-3 Phase 1B-5：live MakerKpiConfig store（熱重載）。None = 未接線
+    /// （tick 同步 no-op，`maker_kpi_config` 維持 `MakerKpiConfig::default()`）。
+    /// tick 頂部比對 `store.version()` 與 `maker_kpi_version_seen`；升版時
+    /// `apply_maker_kpi_snapshot` 把快照鏡像進 owned copy。讀取端（on_tick 的
+    /// sweep 呼叫、router 的 KPI gate）一律讀 owned copy，tick 內保持無鎖。
+    maker_kpi_store: Option<std::sync::Arc<crate::config::ConfigStore<crate::paper_state::MakerKpiConfig>>>,
+    /// EDGE-P2-3 Phase 1B-5: owned snapshot of the live MakerKpiConfig used
+    /// by the tick hot path. Initialised to `MakerKpiConfig::default()` in
+    /// the constructor (bit-identical to the pre-hot-reload behaviour when
+    /// no store is wired); overwritten by `apply_maker_kpi_snapshot` on every
+    /// detected store version bump.
+    /// EDGE-P2-3 Phase 1B-5：tick 熱路徑使用的 owned MakerKpiConfig 快照。
+    /// 建構子設為 `MakerKpiConfig::default()`（未接 store 時 bit-identical
+    /// 於熱重載前的行為）；store 升版時由 `apply_maker_kpi_snapshot` 覆寫。
+    maker_kpi_config: crate::paper_state::MakerKpiConfig,
+    /// EDGE-P2-3 Phase 1B-5: last seen MakerKpiConfig version number — mirrors
+    /// the `risk_config_version_seen` pattern so the tick-level sync can skip
+    /// the `ArcSwap::load()` allocation whenever no patch has landed.
+    /// EDGE-P2-3 Phase 1B-5：上一次見到的 MakerKpiConfig 版本號；與
+    /// `risk_config_version_seen` 同模式，未升版時 tick 同步可跳過
+    /// `ArcSwap::load()` 分配。
+    maker_kpi_version_seen: u64,
     /// Phase 3: Per-mode trading state (Signal Diamond architecture).
     // 3E-4: mode_states and active_modes REMOVED — each pipeline is now
     // an independent TickPipeline instance with its own PipelineKind.
@@ -939,6 +968,9 @@ impl TickPipeline {
             risk_store: None,
             budget_store: None,
             risk_config_version_seen: 0,
+            maker_kpi_store: None,
+            maker_kpi_config: crate::paper_state::MakerKpiConfig::default(),
+            maker_kpi_version_seen: 0,
             // 3E-4: mode_states/active_modes removed (per-pipeline architecture)
             system_mode: SystemMode::default(),
             ft_reduced_symbols: std::collections::HashMap::new(),
@@ -1413,6 +1445,69 @@ impl TickPipeline {
                 tracing::info!(
                     new_version = v,
                     "ARCH-RC1 risk config hot-reloaded (pipeline + guardian)"
+                );
+            }
+        }
+    }
+
+    /// EDGE-P2-3 Phase 1B-5: Inject the live MakerKpiConfig ConfigStore handle.
+    /// After wiring, the pipeline seeds the owned `maker_kpi_config` copy from
+    /// the current snapshot and records the version so the next tick-level
+    /// sync no-ops. Subsequent operator patches bump the version and the
+    /// next `on_tick` picks up the new snapshot via
+    /// `sync_maker_kpi_config_if_changed`.
+    /// EDGE-P2-3 Phase 1B-5：注入 live MakerKpiConfig ConfigStore。接線後立即把
+    /// 當前快照播入 owned `maker_kpi_config` 並記錄版本號，後續 tick 同步
+    /// 在未升版時 no-op；operator patch 升版後下一個 `on_tick` 自動拾取。
+    pub fn set_maker_kpi_store(
+        &mut self,
+        store: std::sync::Arc<crate::config::ConfigStore<crate::paper_state::MakerKpiConfig>>,
+    ) {
+        // Immediate sync so the first tick already sees the live config.
+        // Push to the router-facing IntentProcessor snapshot too, so a
+        // `set_maker_kpi_store` wired before any ticks run still leaves the
+        // router's KPI gate reading the live thresholds (not the
+        // constructor's `MakerKpiConfig::default()` placeholder).
+        // 立即同步：首個 tick 就看到 live 快照；同步推入 IntentProcessor，
+        // 避免 `set_maker_kpi_store` 於首個 tick 之前接線時，router 的
+        // KPI gate 仍讀到建構子預設值。
+        let snap = store.load();
+        let fresh = (*snap).clone();
+        self.intent_processor.update_maker_kpi_config(fresh.clone());
+        self.maker_kpi_config = fresh;
+        self.maker_kpi_version_seen = store.version();
+        self.maker_kpi_store = Some(store);
+    }
+
+    /// EDGE-P2-3 Phase 1B-5: Hot-reload hook called at the top of on_tick.
+    /// Mirrors `sync_risk_config_if_changed`: compare the store's monotonic
+    /// version to `maker_kpi_version_seen`; on bump, pull the snapshot into
+    /// the owned `maker_kpi_config` copy (used by the paper sweep) AND push
+    /// the same snapshot into `IntentProcessor.maker_kpi_config` so the
+    /// router's PostOnly KPI gate picks up the patched thresholds on the
+    /// very next routed intent — without any `ArcSwap::load()` inside the
+    /// tick hot path for subsequent ticks.
+    /// EDGE-P2-3 Phase 1B-5：`on_tick` 頂部的熱重載檢查。與
+    /// `sync_risk_config_if_changed` 同模式：比對版本，升版時把快照寫進
+    /// owned `maker_kpi_config`（紙盤 sweep 使用），並推入
+    /// `IntentProcessor.maker_kpi_config` 讓 router PostOnly KPI gate 下一筆
+    /// 意圖即見新門檻；後續 tick 無需再觸發 `ArcSwap::load()`。
+    #[inline]
+    fn sync_maker_kpi_config_if_changed(&mut self) {
+        if let Some(ref store) = self.maker_kpi_store {
+            let v = store.version();
+            if v != self.maker_kpi_version_seen {
+                let snap = store.load();
+                let fresh = (*snap).clone();
+                self.intent_processor.update_maker_kpi_config(fresh.clone());
+                self.maker_kpi_config = fresh;
+                self.maker_kpi_version_seen = v;
+                tracing::info!(
+                    new_version = v,
+                    funding_drag_threshold = self.maker_kpi_config.funding_drag_threshold,
+                    min_fill_rate = self.maker_kpi_config.min_fill_rate,
+                    min_avg_net_edge_bps = self.maker_kpi_config.min_avg_net_edge_bps,
+                    "EDGE-P2-3 1B-5 maker KPI config hot-reloaded"
                 );
             }
         }

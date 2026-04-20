@@ -24,6 +24,7 @@
 //!   + 自有 observability，不需把這模組升到 paper_state 之上。門檻暫時寫死；
 //!   ConfigStore 動態覆寫列為 1B-5 FUP。
 
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 /// Per-scope counters (aggregate or per-symbol).
@@ -319,18 +320,34 @@ impl MakerStats {
 /// KPI gate configuration. Conservative defaults chosen so the gate stays
 /// *inactive* until enough data accumulates, then bites only on clearly bad
 /// behaviour (fill rate <15% or avg edge <-5 bps).
+///
+/// EDGE-P2-3 Phase 1B-5: hot-reloadable via `ConfigStore<MakerKpiConfig>`.
+/// `Serialize + Deserialize` are derived so the store can persist operator
+/// patches to TOML via `with_toml_persist()`. All fields carry
+/// `#[serde(default)]` + a matching module-level default fn so a partial TOML
+/// (e.g. `funding_drag_threshold = 0.0008` only) leaves the rest at their
+/// `impl Default` values — matches the RiskConfig / BudgetConfig pattern.
+///
 /// KPI gate 設定。預設保守：樣本不足時閒置，累積後只針對明確劣化（fill<15%
-/// 或平均 edge<-5 bps）介入。
-#[derive(Debug, Clone)]
+/// 或平均 edge<-5 bps）介入。EDGE-P2-3 Phase 1B-5：可透過
+/// `ConfigStore<MakerKpiConfig>` 熱重載；`Serialize + Deserialize` 讓 store
+/// 能以 `with_toml_persist()` 把 operator 補丁落回 TOML。每個欄位皆 `#[serde
+/// (default)]` + 對應 module-level default fn，使部分 TOML（例如只寫
+/// funding_drag_threshold）其餘欄位沿用 `impl Default`，與 RiskConfig /
+/// BudgetConfig 模式一致。
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MakerKpiConfig {
     /// Terminal samples required before the gate evaluates fill_rate / edge.
     /// gate 開始評估前的最少終局樣本數。
+    #[serde(default = "default_min_samples")]
     pub min_samples: u64,
     /// Fill rate floor (filled / (filled + timedout)). Below → Degraded.
     /// 成交率下限。低於此值 → Degraded。
+    #[serde(default = "default_min_fill_rate")]
     pub min_fill_rate: f64,
     /// Mean net edge floor in bps. Below → Degraded.
     /// 平均 net edge 下限（bps）。低於此值 → Degraded。
+    #[serde(default = "default_min_avg_net_edge_bps")]
     pub min_avg_net_edge_bps: f64,
     /// 1B-5 FUP-2: staleness window in ms. When `now - last_terminal_ms`
     /// exceeds this, the KPI verdict resets to Cold regardless of sample
@@ -340,6 +357,7 @@ pub struct MakerKpiConfig {
     /// 1B-5 FUP-2：陳舊窗口（ms）。`now - last_terminal_ms` 超過時 KPI 結論
     /// 重設為 Cold，避免 regime 已變（掃描器輪替等）卻被舊 Degraded 鎖住。
     /// `0` 關閉衰減（測試/固定時鐘情境）。
+    #[serde(default = "default_stale_window_ms")]
     pub stale_window_ms: u64,
     /// EDGE-P2-3 Phase 1B-4.3: absolute funding-rate threshold above which the
     /// maker sweep defers touch-equal (`FillPartial`) fills whose side is on
@@ -357,26 +375,47 @@ pub struct MakerKpiConfig {
     /// ±1 bps 常態，只有 funding 明顯敵對時介入。`0.0` 關閉本 guard。真實穿越
     /// FillFull 與 Timeout 不受此 guard 影響 —— 僅限硬幣投擲分支，真實市場
     /// 於該分支存在統計意義上的 adverse selection。
+    #[serde(default = "default_funding_drag_threshold")]
     pub funding_drag_threshold: f64,
+}
+
+// ─── module-level defaults / 模組級預設值 ───────────────────────────────────
+// 與 `impl Default for MakerKpiConfig` 對齊；serde `#[serde(default = "...")]`
+// 要求每欄位一個無引數 fn，所以分開寫而非直接讀 Default::default()。
+fn default_min_samples() -> u64 {
+    20
+}
+fn default_min_fill_rate() -> f64 {
+    0.15
+}
+fn default_min_avg_net_edge_bps() -> f64 {
+    -5.0
+}
+fn default_stale_window_ms() -> u64 {
+    1_800_000
+}
+fn default_funding_drag_threshold() -> f64 {
+    0.0005
 }
 
 impl Default for MakerKpiConfig {
     fn default() -> Self {
+        // Delegate to the module-level defaults so `#[serde(default = ...)]`
+        // and `impl Default` cannot drift. See defaults above for rationale:
+        // * stale_window_ms = 30 min — longer than any normal trading lull so
+        //   a quiet hour doesn't wipe a valid Degraded verdict, short enough
+        //   to unlock a scanner-rotated symbol within a reasonable delay.
+        // * funding_drag_threshold = 0.0005 = 5 bps / 8h ≈ 55% annualised —
+        //   conservative ceiling so the guard bites only on unambiguously
+        //   hostile regimes (steady-state funding is ±1 bps / 8h). Operators
+        //   that want the guard disabled set this to `0.0`.
+        // 統一指向 module-level defaults，避免 serde default 與 impl Default 漂移。
         Self {
-            min_samples: 20,
-            min_fill_rate: 0.15,
-            min_avg_net_edge_bps: -5.0,
-            // 30 min — longer than any normal trading lull so a quiet hour
-            // doesn't wipe a valid Degraded verdict, short enough to unlock
-            // a scanner-rotated symbol within a reasonable delay.
-            // 30 分鐘 — 比一般交易空窗長，不會在安靜時段誤傷有效 Degraded；
-            // 也不會讓掃描器輪替出的 symbol 卡太久。
-            stale_window_ms: 1_800_000,
-            // 1B-4.3: 5 bps / 8h ≈ 55% annualised — conservative ceiling so
-            // the funding-drag guard bites only on unambiguously hostile
-            // regimes. Operators that want the guard disabled set this to 0.
-            // 1B-4.3：5 bps / 8h ≈ 55% 年化；保守上限，funding 明顯敵對才介入。
-            funding_drag_threshold: 0.0005,
+            min_samples: default_min_samples(),
+            min_fill_rate: default_min_fill_rate(),
+            min_avg_net_edge_bps: default_min_avg_net_edge_bps(),
+            stale_window_ms: default_stale_window_ms(),
+            funding_drag_threshold: default_funding_drag_threshold(),
         }
     }
 }
