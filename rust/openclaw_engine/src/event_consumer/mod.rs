@@ -947,6 +947,37 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
                                     "pending order status update / 待處理訂單狀態更新"
                                 );
                                 if status == "Cancelled" || status == "Rejected" || status == "Deactivated" {
+                                    // EDGE-P2-3 Phase 1B-2: classify Bybit's rejectReason
+                                    // string (non-empty only on terminal status). Surface
+                                    // PostOnly-cross at warn! so it's grep-able; route
+                                    // the short category label into DB `reason` so the
+                                    // audit log is queryable without parsing free-form
+                                    // strings. Strategy callback wiring lands in 1B-3.
+                                    // EDGE-P2-3 Phase 1B-2：分類 Bybit rejectReason 字串。
+                                    // PostOnly-cross 以 warn! 顯性記錄；短標籤進 DB reason。
+                                    let reject_category = crate::strategies::maker_rejection::classify(
+                                        &order.reject_reason,
+                                    );
+                                    let reject_label = reject_category.label();
+                                    if reject_category.is_post_only_cross() {
+                                        warn!(
+                                            order_link_id = %order.order_link_id,
+                                            symbol = %order.symbol,
+                                            status = %status,
+                                            reject_reason = %order.reject_reason,
+                                            "maker order rejected: PostOnly would have crossed \
+                                             / maker 掛單遭拒：PostOnly 會越過 book"
+                                        );
+                                    } else if reject_category.is_backpressure() {
+                                        warn!(
+                                            order_link_id = %order.order_link_id,
+                                            symbol = %order.symbol,
+                                            status = %status,
+                                            reject_reason = %order.reject_reason,
+                                            "maker order rejected: account-level backpressure \
+                                             / maker 掛單遭拒：帳戶級背壓"
+                                        );
+                                    }
                                     // P0-4: If this was a close order, clear pending_close flag
                                     // P0-4：如果是平倉訂單，清除待處理平倉標記
                                     if let Some(po) = pending_orders.get(&order.order_link_id) {
@@ -960,7 +991,21 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
                                             );
                                         }
                                         // Emit order state change: Working → Cancelled/Rejected.
+                                        // EDGE-P2-3 Phase 1B-2: append classified reject label
+                                        // when Bybit provided a rejectReason; keeps legacy
+                                        // `exchange_status:{status}` prefix stable for any
+                                        // consumer grepping the reason column.
                                         // 發出訂單狀態轉換：Working → Cancelled/Rejected。
+                                        // 1B-2：若 Bybit 附 rejectReason，追加分類短標；保留
+                                        // legacy `exchange_status:{status}` 前綴以維持下游相容。
+                                        let reason_str = if order.reject_reason.is_empty() {
+                                            format!("exchange_status:{}", status)
+                                        } else {
+                                            format!(
+                                                "exchange_status:{}|reject={}|category={}",
+                                                status, order.reject_reason, reject_label,
+                                            )
+                                        };
                                         if let Some(ref tx) = order_tx {
                                             let em = pipeline.effective_engine_mode().to_string();
                                             let _ = tx.try_send(crate::database::TradingMsg::OrderStateChange {
@@ -970,7 +1015,7 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
                                                 to_status: status.to_string(),
                                                 filled_qty: None,
                                                 avg_price: None,
-                                                reason: Some(format!("exchange_status:{}", status)),
+                                                reason: Some(reason_str),
                                                 engine_mode: em,
                                             });
                                         }
@@ -978,6 +1023,7 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
                                     warn!(
                                         order_link_id = %order.order_link_id,
                                         status = %status,
+                                        reject_category = %reject_label,
                                         "pending order failed — removing / 待處理訂單失敗，移除"
                                     );
                                     pending_orders.remove(&order.order_link_id);

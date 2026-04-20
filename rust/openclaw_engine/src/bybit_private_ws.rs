@@ -115,6 +115,21 @@ pub struct OrderUpdate {
     /// Last update timestamp / 最後更新時間戳
     #[serde(default)]
     pub updated_time: String,
+    /// Rejection reason string from Bybit. Non-empty only on terminal
+    /// `Cancelled` / `Rejected` / `Deactivated` statuses.
+    /// Canonical values (EDGE-P2-3 Phase 1B):
+    ///   - `EC_PostOnlyWillTakeLiquidity` (PostOnly would have been a taker)
+    ///   - `EC_PerCancelRequest` (caller-initiated cancel)
+    ///   - `EC_CancelForNoFullFill` (PostOnly FOK failed)
+    ///   - `EC_ReachMaxPendingOrders` (account-level backpressure)
+    ///   - `EC_Others` / empty (unclassified)
+    /// See `docs/references/2026-04-04--bybit_api_reference.md` §4.2.1 and
+    /// classifier `strategies::maker_rejection::classify`.
+    ///
+    /// Bybit 回傳的訂單拒絕原因。僅在終態 Cancelled/Rejected/Deactivated 時非空。
+    /// EDGE-P2-3 Phase 1B 標準字串（見文件 §4.2.1 與 classify）。
+    #[serde(default)]
+    pub reject_reason: String,
 }
 
 /// Execution/fill update from Bybit private WS.

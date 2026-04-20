@@ -334,6 +334,7 @@ mod tests {
             order_status: "New".into(),
             created_time: "1700000000000".into(),
             updated_time: "1700000000000".into(),
+            reject_reason: String::new(),
         }))
         .await
         .unwrap();
@@ -445,6 +446,7 @@ mod tests {
             order_status: "Filled".into(),
             created_time: "1700000000000".into(),
             updated_time: "1700000001000".into(),
+            reject_reason: String::new(),
         }))
         .await
         .unwrap();
