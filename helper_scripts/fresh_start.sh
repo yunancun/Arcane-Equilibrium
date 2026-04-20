@@ -53,12 +53,17 @@ done
 
 TS="$(date +%Y%m%d_%H%M%S)"
 CONFIRM_CODE="FRESH_START_$(date +%Y_%m_%d)"
-ARCHIVE_ROOT="$HOME/BybitOpenClaw/archive/fresh_start_${TS}"
 DATA_DIR="${OPENCLAW_DATA_DIR:-/tmp/openclaw}"
+# Secrets root + archive dir (env vars for Mac / non-HOME deployment).
+# Mac dev recommendation: export OPENCLAW_SECRETS_ROOT / OPENCLAW_ARCHIVE_DIR.
+# Secrets 根 + 歸檔目錄（支援 Mac / 非 $HOME 路徑部署）。
+SECRETS_ROOT="${OPENCLAW_SECRETS_ROOT:-$HOME/BybitOpenClaw/secrets}"
+ARCHIVE_DIR="${OPENCLAW_ARCHIVE_DIR:-$HOME/BybitOpenClaw/archive}"
+ARCHIVE_ROOT="$ARCHIVE_DIR/fresh_start_${TS}"
 BIN="rust/target/release/openclaw-engine"
 API_VENV="program_code/exchange_connectors/bybit_connector/control_api_v1/.venv"
-SECRETS_ENV="$HOME/BybitOpenClaw/secrets/environment_files/basic_system_services.env"
-IPC_SECRET_FILE="$HOME/BybitOpenClaw/secrets/environment_files/ipc_secret.txt"
+SECRETS_ENV="$SECRETS_ROOT/environment_files/basic_system_services.env"
+IPC_SECRET_FILE="$SECRETS_ROOT/environment_files/ipc_secret.txt"
 MAINT_FLAG="$DATA_DIR/engine_maintenance.flag"
 
 C_HDR='\033[1;36m'; C_OK='\033[1;32m'; C_WARN='\033[1;33m'; C_ERR='\033[1;31m'; C_END='\033[0m'

@@ -25,6 +25,10 @@ WORKERS="${OPENCLAW_API_WORKERS:-4}"
 # Mac dev recommendation: export OPENCLAW_DATA_DIR="$HOME/.openclaw_runtime"
 # Runtime 資料目錄（支援 Mac env var 部署）。
 DATA_DIR="${OPENCLAW_DATA_DIR:-/tmp/openclaw}"
+# Secrets root (env var for Mac / non-HOME deployment).
+# Mac dev recommendation: export OPENCLAW_SECRETS_ROOT="$HOME/.openclaw_secrets"
+# Secrets 根目錄（支援 Mac / 非 $HOME 路徑部署）。
+SECRETS_ROOT="${OPENCLAW_SECRETS_ROOT:-$HOME/BybitOpenClaw/secrets}"
 
 # ── Parse flags / 解析旗標 ──
 # Accept --rebuild in any position; SCOPE is the remaining positional.
@@ -173,11 +177,11 @@ restart_engine() {
     echo ">>> Starting Rust engine..."
     # Load PG password from secrets (cross-platform: no hardcoded credentials)
     local pg_pass
-    pg_pass=$(grep POSTGRES_PASSWORD "$HOME/BybitOpenClaw/secrets/environment_files/basic_system_services.env" 2>/dev/null | cut -d= -f2-)
+    pg_pass=$(grep POSTGRES_PASSWORD "$SECRETS_ROOT/environment_files/basic_system_services.env" 2>/dev/null | cut -d= -f2-)
     # Load IPC HMAC secret for Live pipeline authentication
     # 載入 IPC HMAC 密鑰（Live 管線 HMAC 認證必需）
     local ipc_secret
-    ipc_secret=$(cat "$HOME/BybitOpenClaw/secrets/environment_files/ipc_secret.txt" 2>/dev/null || echo "")
+    ipc_secret=$(cat "$SECRETS_ROOT/environment_files/ipc_secret.txt" 2>/dev/null || echo "")
     OPENCLAW_DATA_DIR="$DATA_DIR" OPENCLAW_CANARY_MODE=1 \
         OPENCLAW_DATABASE_URL="postgresql://trading_admin:${pg_pass}@127.0.0.1:5432/trading_ai" \
         OPENCLAW_IPC_SECRET="${ipc_secret}" \
@@ -193,12 +197,12 @@ restart_api() {
     # Pass DB URL to API server for metrics DB fallback (fills query).
     # 傳遞 DB URL 給 API 以支持指標 DB 降級（成交查詢）。
     local pg_pass
-    pg_pass=$(grep POSTGRES_PASSWORD "$HOME/BybitOpenClaw/secrets/environment_files/basic_system_services.env" 2>/dev/null | cut -d= -f2-)
+    pg_pass=$(grep POSTGRES_PASSWORD "$SECRETS_ROOT/environment_files/basic_system_services.env" 2>/dev/null | cut -d= -f2-)
     cd program_code/exchange_connectors/bybit_connector/control_api_v1
     # Load IPC HMAC secret for API-side HMAC verification
     # 載入 IPC HMAC 密鑰（API 端 HMAC 驗證）
     local ipc_secret
-    ipc_secret=$(cat "$HOME/BybitOpenClaw/secrets/environment_files/ipc_secret.txt" 2>/dev/null || echo "")
+    ipc_secret=$(cat "$SECRETS_ROOT/environment_files/ipc_secret.txt" 2>/dev/null || echo "")
     OPENCLAW_DATABASE_URL="postgresql://trading_admin:${pg_pass}@127.0.0.1:5432/trading_ai" \
         OPENCLAW_IPC_SECRET="${ipc_secret}" \
         .venv/bin/python3 .venv/bin/uvicorn app.main:app \
