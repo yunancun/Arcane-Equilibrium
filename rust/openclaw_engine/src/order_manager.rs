@@ -265,6 +265,40 @@ pub struct ExecutionInfo {
 // OrderManager / 訂單管理器
 // ---------------------------------------------------------------------------
 
+/// 1B-5 FUP-3: shared cancel-by-orderLinkId REST helper. The canonical
+/// implementation of `POST /v5/order/cancel { category, symbol, orderLinkId }`.
+/// Both `OrderManager::cancel_order_by_link_id` (typed caller for `create →
+/// cancel` flows) and the `event_consumer` non-blocking PostOnly maker timeout
+/// sweep route through this function so the Bybit endpoint / body shape /
+/// log fields stay single-sourced. Instruments cache is not needed — cancel
+/// does not validate qty / price.
+///
+/// 1B-5 FUP-3：共用的 orderLinkId 取消 REST 輔助函數。 `POST /v5/order/cancel
+/// { category, symbol, orderLinkId }` 的唯一實作點，`OrderManager::
+/// cancel_order_by_link_id` 與 `event_consumer` 的非阻塞 PostOnly 掛單超時
+/// sweep 皆走此處，維持 endpoint / body / 日誌欄位單一來源。取消不需 instruments。
+pub(crate) async fn cancel_by_link_id_raw(
+    client: &BybitRestClient,
+    category: OrderCategory,
+    symbol: &str,
+    order_link_id: &str,
+) -> BybitResult<OrderResponse> {
+    let body = serde_json::json!({
+        "category": category.as_str(),
+        "symbol": symbol,
+        "orderLinkId": order_link_id,
+    });
+
+    info!(
+        symbol = symbol,
+        order_link_id = order_link_id,
+        "cancelling order by link id / 通過 link id 取消訂單"
+    );
+
+    let resp = client.post_checked("/v5/order/cancel", &body).await?;
+    parse_order_response(&resp.result)
+}
+
 /// Manages order lifecycle on Bybit V5.
 /// 管理 Bybit V5 上的訂單生命週期。
 ///
@@ -413,6 +447,13 @@ impl OrderManager {
     /// 掛單採用 orderLinkId 取消是冪等安全路徑——客戶端鑄造的 id 可跨重啟/WS
     /// 延遲存活，而 orderId 必須等 REST 下單回傳後才知道。
     ///
+    /// 1B-5 FUP-3: delegates the actual REST path + body construction to
+    /// `cancel_by_link_id_raw` so other call sites (e.g. the non-blocking
+    /// maker timeout cancel spawned from event_consumer) share one endpoint
+    /// definition and do not drift apart on category / body shape.
+    /// 1B-5 FUP-3：實際 REST 呼叫委託到 `cancel_by_link_id_raw`，使其他呼叫點
+    /// （如 event_consumer 非阻塞掛單超時取消）共用單一端點定義，避免發散。
+    ///
     /// POST /v5/order/cancel
     pub async fn cancel_order_by_link_id(
         &self,
@@ -420,20 +461,7 @@ impl OrderManager {
         symbol: &str,
         order_link_id: &str,
     ) -> BybitResult<OrderResponse> {
-        let body = serde_json::json!({
-            "category": category.as_str(),
-            "symbol": symbol,
-            "orderLinkId": order_link_id,
-        });
-
-        info!(
-            symbol = symbol,
-            order_link_id = order_link_id,
-            "cancelling order by link id / 通過 link id 取消訂單"
-        );
-
-        let resp = self.client.post_checked("/v5/order/cancel", &body).await?;
-        parse_order_response(&resp.result)
+        cancel_by_link_id_raw(&self.client, category, symbol, order_link_id).await
     }
 
     /// Cancel all active orders for a symbol.
