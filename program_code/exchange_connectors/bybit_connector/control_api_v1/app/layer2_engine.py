@@ -64,7 +64,7 @@ from .layer2_types import (
 )
 from .layer2_cost_tracker import Layer2CostTracker
 from .layer2_tools import TOOL_SCHEMAS, ToolExecutor
-from .ollama_client import get_ollama_client
+from .local_llm_factory import get_local_llm_client
 
 logger = logging.getLogger(__name__)
 
@@ -258,16 +258,16 @@ class Layer2Engine:
 
     async def _l1_triage_local(self, context: str) -> dict[str, Any]:
         """
-        L1 triage via local Ollama/Qwen (fallback when Anthropic unavailable).
-        本地 Ollama/Qwen L1 分诊（Anthropic 不可用时的回退路径）。
+        L1 triage via local LLM (Ollama/Qwen | LM Studio, fallback when Anthropic unavailable).
+        本地 LLM L1 分诊（Anthropic 不可用时的回退路径，provider 由 LOCAL_LLM_PROVIDER 決定）。
         """
         try:
-            client = get_ollama_client()
+            client = get_local_llm_client()
             if not client.is_available():
-                logger.warning("L1 local triage: Ollama not available / Ollama 不可用")
+                logger.warning("L1 local triage: local LLM not available / 本地 LLM 不可用")
                 return {
                     "worth_investigating": False,
-                    "reason": "Ollama not available for L1 local triage",
+                    "reason": "Local LLM not available for L1 local triage",
                     "error": True,
                     "triage_cost_usd": 0.0,
                 }

@@ -319,15 +319,7 @@ git status && git log --oneline -5
 ### AI Layer 接通（W23）
 - [ ] **G-7** ClaudeTeacher 啟用（`consumer_loop.rs enabled=false`，前置 21d demo + G-3 IPC auth ✅）
 - [ ] **G-10** Calibration.py 整合（isotonic → `run_training_pipeline.py` + ECE < 0.05）
-- [ ] **LLM-ABC-MIGRATION-1** · 切 5 call-site 到 `LocalLLMClient` ABC（解除 Ollama 硬耦合）
-  - **動機**：Mac operator 將裝 LM Studio（Qwen3.6 35G 本地模型），不想再裝 Ollama。`local_model_tools/local_llm_client.py` 已有 `OllamaProvider` + `LMStudioProvider` 齊全的 ABC，但活躍路徑仍直 import `OllamaClient`，違反 CLAUDE.md §七「LocalLLMClient 抽象乾淨」準則（既有技術債）
-  - **範圍（5 檔）**：`ai_service.py:42-51` `_get_ollama_client()` / `strategy_wiring.py:184` `OLLAMA_CLIENT` singleton / `layer2_engine.py:265` / `layer2_routes.py:384` / `layer2_tools.py:396,459,464`
-  - **設計**：新 `app/local_llm_factory.py` 提供 `get_local_llm_client() -> LocalLLMClient`，讀 `LOCAL_LLM_PROVIDER` env（`ollama` / `lm_studio`，預設 `ollama` 保留向後相容），回對應 provider
-  - **適配器**：`OllamaClient` 既有 API（`.generate(...) -> OllamaResponse` 等）shape 與 `LocalLLMClient.generate(...) -> LLMResponse` 不一致 → 需 thin adapter 或 provider 端提供相容方法；兩條路徑擇一（adapter 較不侵入）
-  - **測試**：`test_local_llm_factory.py` 覆蓋 env 切換 + provider fallback + 兩 provider 都不可用時的 fail-soft；既有 `test_ollama_integration.py` 保留作為 ollama 路徑回歸
-  - **完成準則**：(1) `LOCAL_LLM_PROVIDER=lm_studio` + LM Studio 啟動 → layer2 AI 推理可跑 (2) 5 call-site 不再 `import OllamaClient` (3) `import ollama_client` grep 僅出現在 provider 檔 + 既有 test (4) CLAUDE.md §七 準則合規
-  - **優先級**：P2（非阻塞 live；operator 可透過 `--no-ollama` 跳過安裝，fail-soft 降級啟發式）
-  - **預估**：1 session（~2h 含測試）
+- ✅ **LLM-ABC-MIGRATION-1** 2026-04-20 — 5 call-site 遷至 `local_llm_factory.get_local_llm_client()`（`ai_service.py` / `strategy_wiring.py` / `layer2_engine.py` / `layer2_routes.py` / `layer2_tools.py`）。新 `app/local_llm_factory.py` + `LMStudioShimClient` 暴露 OllamaClient-shape 介面（`.generate/.chat/.classify/.judge_edge/.is_available[_async]/.config/.model`）回傳 `OllamaResponse`，call-site 0 parsing 變動。`LOCAL_LLM_PROVIDER=ollama`(預設)/`lm_studio` 切換，未知值 fallback Ollama。17 個新 pytest（env 切換/heavy 變體/surface 對齊/fail-soft HTTP/classify & judge_edge 代理/singleton 語義）+ 11 個既有 patch-target 更新 + 1 訊息文案對齊。變數名 `_OLLAMA_CLIENT`/`OLLAMA_CLIENT` 保留 §九 grep 穩定。grep 驗證：business code 0 `import OllamaClient`。**Mac operator 設 `LOCAL_LLM_PROVIDER=lm_studio`+`LM_STUDIO_BASE_URL` 即可不裝 Ollama 跑 Layer 2。**
 
 ### QoL & 設計債
 - [ ] **QoL-2** Demo AI cost 追蹤（`tab-demo.html` 硬編碼 'N/A'，依賴 G-1 H1-H5）

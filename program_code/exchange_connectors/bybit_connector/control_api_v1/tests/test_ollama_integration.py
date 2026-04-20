@@ -446,7 +446,7 @@ class TestLocalLLMSearchProvider:
             latency_ms=1200.5,
         )
 
-        with patch("app.layer2_tools.get_ollama_client") as mock_get_client:
+        with patch("app.layer2_tools.get_local_llm_client") as mock_get_client:
             mock_client = MagicMock()
             mock_client.generate.return_value = mock_response
             mock_get_client.return_value = mock_client
@@ -468,7 +468,7 @@ class TestLocalLLMSearchProvider:
         """
         provider = LocalLLMSearchProvider()
 
-        with patch("app.layer2_tools.get_ollama_client") as mock_get_client:
+        with patch("app.layer2_tools.get_local_llm_client") as mock_get_client:
             mock_client = MagicMock()
             mock_client.is_available.return_value = True
             mock_get_client.return_value = mock_client
@@ -494,7 +494,7 @@ class TestLocalLLMSearchProvider:
             error="Ollama connection timeout",
         )
 
-        with patch("app.layer2_tools.get_ollama_client") as mock_get_client:
+        with patch("app.layer2_tools.get_local_llm_client") as mock_get_client:
             mock_client = MagicMock()
             mock_client.generate.return_value = mock_response
             mock_get_client.return_value = mock_client
@@ -538,7 +538,7 @@ class TestL1TriageLocalFallback:
         )
 
         with patch("app.layer2_engine._get_anthropic_client", return_value=None):
-            with patch("app.layer2_engine.get_ollama_client") as mock_get_ollama:
+            with patch("app.layer2_engine.get_local_llm_client") as mock_get_ollama:
                 mock_client = MagicMock()
                 mock_client.is_available.return_value = True
                 mock_client.generate.return_value = mock_ollama_response
@@ -572,7 +572,7 @@ class TestL1TriageLocalFallback:
             latency_ms=720.5,
         )
 
-        with patch("app.layer2_engine.get_ollama_client") as mock_get_ollama:
+        with patch("app.layer2_engine.get_local_llm_client") as mock_get_ollama:
             mock_client = MagicMock()
             mock_client.is_available.return_value = True
             mock_client.generate.return_value = mock_response
@@ -608,7 +608,7 @@ class TestL1TriageLocalFallback:
             latency_ms=650.0,
         )
 
-        with patch("app.layer2_engine.get_ollama_client") as mock_get_ollama:
+        with patch("app.layer2_engine.get_local_llm_client") as mock_get_ollama:
             mock_client = MagicMock()
             mock_client.is_available.return_value = True
             mock_client.generate.return_value = mock_response
@@ -641,7 +641,7 @@ class TestL1TriageLocalFallback:
             latency_ms=580.0,
         )
 
-        with patch("app.layer2_engine.get_ollama_client") as mock_get_ollama:
+        with patch("app.layer2_engine.get_local_llm_client") as mock_get_ollama:
             mock_client = MagicMock()
             mock_client.is_available.return_value = True
             mock_client.generate.return_value = mock_response
@@ -666,7 +666,7 @@ class TestL1TriageLocalFallback:
             shadow_consumer=MagicMock(),
         )
 
-        with patch("app.layer2_engine.get_ollama_client") as mock_get_ollama:
+        with patch("app.layer2_engine.get_local_llm_client") as mock_get_ollama:
             mock_client = MagicMock()
             mock_client.is_available.return_value = False
             mock_get_ollama.return_value = mock_client
@@ -675,7 +675,9 @@ class TestL1TriageLocalFallback:
 
         assert result["worth_investigating"] is False
         assert result["error"] is True
-        assert "Ollama not available" in result["reason"]
+        # LLM-ABC-MIGRATION-1: message generalized from "Ollama" to "Local LLM".
+        # LLM-ABC-MIGRATION-1：訊息由 Ollama 推廣為 Local LLM（provider-agnostic）。
+        assert "Local LLM not available" in result["reason"]
         assert result["triage_cost_usd"] == 0.0
 
     @pytest.mark.asyncio
@@ -697,7 +699,7 @@ class TestL1TriageLocalFallback:
             await asyncio.sleep(60)  # Sleep longer than timeout
             return OllamaResponse(text="", model="", success=False, latency_ms=0)
 
-        with patch("app.layer2_engine.get_ollama_client") as mock_get_ollama:
+        with patch("app.layer2_engine.get_local_llm_client") as mock_get_ollama:
             mock_client = MagicMock()
             mock_client.is_available.return_value = True
             mock_client.generate = slow_generate
@@ -737,7 +739,7 @@ class TestL1TriageLocalFallback:
             latency_ms=900.0,
         )
 
-        with patch("app.layer2_engine.get_ollama_client") as mock_get_ollama:
+        with patch("app.layer2_engine.get_local_llm_client") as mock_get_ollama:
             mock_client = MagicMock()
             mock_client.is_available.return_value = True
             mock_client.generate.return_value = mock_response
@@ -772,7 +774,7 @@ class TestL1TriageLocalFallback:
             latency_ms=750.0,
         )
 
-        with patch("app.layer2_engine.get_ollama_client") as mock_get_ollama:
+        with patch("app.layer2_engine.get_local_llm_client") as mock_get_ollama:
             mock_client = MagicMock()
             mock_client.is_available.return_value = True
             mock_client.generate.return_value = mock_response

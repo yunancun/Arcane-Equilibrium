@@ -369,36 +369,53 @@ async def get_config(
 @layer2_router.get("/ollama/status")
 async def get_ollama_status() -> dict[str, Any]:
     """
-    Check Ollama connectivity and list available models.
-    检查 Ollama 连通状态并列出可用模型。
+    Check local LLM connectivity and list available models.
+    检查本地 LLM 连通状态并列出可用模型。
+
+    LLM-ABC-MIGRATION-1: routed via local_llm_factory (LOCAL_LLM_PROVIDER env
+    switches between Ollama /api/tags and LM Studio /v1/models).
+    Endpoint name retained for GUI compatibility.
+    LLM-ABC-MIGRATION-1：經 local_llm_factory 路由；依 provider 切換模型列表端點。
+    端點名保留不動以維持 GUI 相容。
 
     Returns:
-        available (bool)   — whether Ollama is reachable / Ollama 是否可达
+        available (bool)   — whether local LLM is reachable / 本地 LLM 是否可达
+        provider  (str)    — "ollama" | "lm_studio"
         base_url  (str)    — configured endpoint / 已配置的端点地址
         default_model (str)— default model name / 默认模型名称
-        models    (list)   — installed model names from /api/tags / 已安装的模型列表
+        models    (list)   — installed model names / 已安装的模型列表
         model_count (int)  — number of installed models / 已安装模型数量
     """
-    from .ollama_client import get_ollama_client  # local import to avoid circular deps / 避免循环导入
+    from .local_llm_factory import (  # local import to avoid circular deps / 避免循环导入
+        get_local_llm_client, PROVIDER_LM_STUDIO, _resolve_provider,
+    )
 
-    client = get_ollama_client()
+    client = get_local_llm_client()
+    provider = _resolve_provider()
     # is_available() has a 60s TTL cache — cheap to call on every GUI refresh
     # is_available() 内置 60s TTL 缓存，每次 GUI 刷新调用无额外开销
     available = client.is_available()
     result: dict[str, Any] = {
         "available": available,
+        "provider": provider,
         "base_url": client.config.base_url,
         "default_model": client.config.model,
     }
     if available:
-        # Fetch installed model list via /api/tags (Ollama standard endpoint)
-        # 通过 /api/tags 获取已安装模型列表（Ollama 标准端点）
+        # Fetch installed model list per provider — Ollama: /api/tags; LM Studio: /v1/models
+        # 依 provider 取模型列表 — Ollama 走 /api/tags，LM Studio 走 /v1/models
         import urllib.request, json as _json
         try:
-            url = client.config.base_url.rstrip("/") + "/api/tags"
-            with urllib.request.urlopen(url, timeout=5) as resp:
-                data = _json.loads(resp.read())
-            models = [m["name"] for m in data.get("models", [])]
+            if provider == PROVIDER_LM_STUDIO:
+                url = client.config.base_url.rstrip("/") + "/models"
+                with urllib.request.urlopen(url, timeout=5) as resp:
+                    data = _json.loads(resp.read())
+                models = [m.get("id", "") for m in data.get("data", [])]
+            else:
+                url = client.config.base_url.rstrip("/") + "/api/tags"
+                with urllib.request.urlopen(url, timeout=5) as resp:
+                    data = _json.loads(resp.read())
+                models = [m["name"] for m in data.get("models", [])]
             result["models"] = models
             result["model_count"] = len(models)
         except Exception as exc:
