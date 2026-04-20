@@ -139,6 +139,17 @@ pub struct PaperState {
     /// running `sum_net_edge_bps`。enqueue 與 sweep 餵入；router enqueue 前讀
     /// 此，KPI Degraded 時 fallback 市價。僅紙盤使用。
     pub(super) maker_stats: MakerStats,
+    /// EDGE-P2-3 Phase 1B-4.3: latest WS-ticker funding rate per symbol.
+    /// Populated by `on_tick` whenever `PriceEvent.funding_rate` is `Some(_)`;
+    /// read by the router at maker-enqueue time to stamp
+    /// `RestingLimitOrder.funding_rate_at_submit`. A symbol that has never
+    /// seen a funding rate tick returns `None` → the router stamps 0.0 and the
+    /// sweep's funding-drag guard treats it as "unknown / no bias".
+    /// EDGE-P2-3 Phase 1B-4.3：每交易對最新的 WS tickers 資金費率。`on_tick` 於
+    /// `PriceEvent.funding_rate` 非 None 時填入；router enqueue 時讀出，
+    /// 壓入 `RestingLimitOrder.funding_rate_at_submit`。未見過的 symbol 回
+    /// None → 壓 0.0、sweep funding drag guard 視為「未知 / 無偏差」。
+    pub(super) funding_rates: HashMap<String, f64>,
 }
 
 impl PaperState {
@@ -161,6 +172,7 @@ impl PaperState {
             positions_mirror: Arc::new(parking_lot::RwLock::new(HashMap::new())),
             resting_limit_orders: HashMap::new(),
             maker_stats: MakerStats::default(),
+            funding_rates: HashMap::new(),
         }
     }
 

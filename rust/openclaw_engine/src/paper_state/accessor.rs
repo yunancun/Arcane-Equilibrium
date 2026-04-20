@@ -332,6 +332,29 @@ impl PaperState {
         self.latest_turnovers.insert(symbol.to_string(), turnover);
     }
 
+    /// EDGE-P2-3 Phase 1B-4.3: most recent funding rate for `symbol`, as a
+    /// decimal fraction (0.0001 = 1 bps per 8h). Router stamps this onto
+    /// `RestingLimitOrder.funding_rate_at_submit` at maker-order enqueue so
+    /// the sweep's funding-drag guard (#3) can refuse touch-equal fills when
+    /// funding is strongly adverse to the maker side. Returns `None` until
+    /// the first `PriceEvent.funding_rate` lands for this symbol.
+    /// EDGE-P2-3 Phase 1B-4.3：symbol 最新資金費率（decimal；0.0001 = 8h 1 bps）。
+    /// Router 於 maker enqueue 時讀入 `RestingLimitOrder.funding_rate_at_submit`，
+    /// sweep 的 funding drag guard (#3) 以此判斷是否拒絕「碰觸」成交。symbol
+    /// 首筆 `PriceEvent.funding_rate` 到達前回 None。
+    pub fn latest_funding_rate(&self, symbol: &str) -> Option<f64> {
+        self.funding_rates.get(symbol).copied()
+    }
+
+    /// EDGE-P2-3 Phase 1B-4.3: setter called by `on_tick` on every
+    /// `PriceEvent.funding_rate = Some(_)`. Unconditional overwrite — the
+    /// latest rate is always the authoritative value for router stamping.
+    /// EDGE-P2-3 Phase 1B-4.3：`on_tick` 在每次 `PriceEvent.funding_rate` 非
+    /// None 時呼叫的 setter。無條件覆寫 —— 最新值即權威值。
+    pub fn set_latest_funding_rate(&mut self, symbol: &str, rate: f64) {
+        self.funding_rates.insert(symbol.to_string(), rate);
+    }
+
     /// Set Bybit Demo sync balance (Mode B). Call with None to disable sync mode.
     /// 設定 Bybit Demo 同步餘額（模式 B）。傳 None 關閉同步模式。
     pub fn set_bybit_sync_balance(&mut self, balance: Option<f64>) {

@@ -48,6 +48,14 @@
 
 ## 關鍵教訓（任務完成後追加）
 
+### 2026-04-20：EDGE-P2-3 Phase 1B — maker timeout & paper fill sim
+- **Timeout 應 < cooldown，不是 ≥ cooldown。** grid entry 信號 half-life = 秒級（瞬時價格穿越，非 regime 信號）。timeout 1.5× 的提議錯在方向：舊未成交單會與下一個 cooldown 週期的新 tick 評估重疊，造成 stale order 與 fresh intent 雙重 exposure。正確 = 0.5–0.75× cooldown。
+- **Timeout 要 scale with A3 effective cooldown，不是 base。** 趨勢越強 → maker 單在 1 bps offset 上越難 fill（單邊行情很少回探），同比例拉長 timeout 給 resting order 一個 fill 窗口才合理。推薦公式 `min(0.75 × effective_cooldown, 300_000)`。
+- **Maker passive order = 賣出一個看跌期權。** 思考 timeout 不該問「信號還有效嗎」（45s 後幾乎都無效了），要問「order 還在 book 上提供選擇性嗎」。附帶指標 `(fill × rebate) - (cancel × adverse_move × size)` 為負 → timeout 太長或 offset 太窄。
+- **Paper Limit fill 必須 touch-based，不是 optimistic。** optimistic fill 高估 edge 5-8 bps/RT（maker rebate 全吃 + 零 adverse selection），會再次污染 edge_estimates，重演 `project_edge_data_isolation.md` 的墮落循環。
+- **Paper→demo 一致性必須 day-1 catch 4 項 bias：** (i) queue position 折扣（tick == limit 僅 50% fill，tick 真實穿越 100% fill）；(ii) partial fill 不模擬但 schema 預留 `filled_qty`；(iii) funding 跨越結算邊界即使未 fill 也要計 funding drag（grid 大量 resting 放大此 bias）；(iv) 記 adverse selection marker `mid@submit` vs `mid@fill`。
+- **Paper fill_rate / demo fill_rate 比例 >1.3 或 <0.7 → paper 微結構偏離真實**，禁止餵 edge_estimates（原則重申）。
+
 ### 2026-04-02：自適應參數審查
 - **20 筆交易的統計量什麼都說明不了。** 任何基於歷史交易的參數優化需要 200+ 筆同 regime 數據。Deflated Sharpe 修正後觀察到的 SR 要扣掉 ~0.9。
 - **MA Crossover 的 Kelly fraction 為負 (f* = -0.014)。** 數學上建議不交易。根本問題不在參數，在策略本身無 edge。
@@ -62,3 +70,5 @@
 | 日期 | 報告 | 結論 |
 |------|------|------|
 | 2026-04-02 | [自適應參數架構審查](workspace/reports/2026-04-02--adaptive_params_architecture_review.md) | PROCEED WITH REVISIONS — 確定性適應立即做，統計適應暫緩，核心問題是策略無 edge |
+| 2026-04-03 | [外部改善報告數學驗證](workspace/reports/2026-04-03--improvement_report_math_validation.md) | 6/6 兼容，0 衝突，3 採用 / 2 疊加 / 1 暫緩 |
+| 2026-04-20 | [EDGE-P2-3 Phase 1B timeout & paper sim](workspace/reports/2026-04-20--edge_p2_3_phase1b_timeout_and_paper_sim.md) | timeout = 0.75× effective_cooldown (base 45s / cap 300s)；paper = (a) touch-based + 4 項 bias 保護 |
