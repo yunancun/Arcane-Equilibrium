@@ -1,7 +1,48 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-04-21（TRACK-P-T4-WIRING-1 Priority 6 runtime 接線）
+> 最後更新：2026-04-21（EXIT-FEATURES-SPLIT-1 目錄拆分）
+
+### EXIT-FEATURES-SPLIT-1 — `exit_features.rs` 1317 行拆為 4 檔目錄（2026-04-21）
+
+**觸發**：上一 commit `e95c779`（TRACK-P-T4-WIRING-1）後 `rust/openclaw_engine/src/exit_features.rs` 長度 1317 行，超 §七「文件大小限制」1200 行硬上限。2026-04-21 報告 `.claude_reports/20260421_191842_track_p_t4_wiring.md` §4 治理對照已 flag。本 refactor 為跟進項，純檔案佈局重構，零語意改動。
+
+**拆分結構**：
+
+```text
+rust/openclaw_engine/src/exit_features/
+├── mod.rs        68 行   # 頂層 doctrine + pub use re-exports
+├── core.rs      204 行   # ExitFeatures + PhysicalDecision（types + 7 core tests）
+├── v2.rs        747 行   # ExitConfig + non_linear_giveback_fn
+│                          # + physical_micro_profit_lock_v2（24 v2 tests）
+└── builder.rs   368 行   # build_exit_features_for_tick（T4 wiring + 12 builder tests）
+```
+
+- **mod.rs**：Track P 文檔（§七 Phase 1b 段 + EXIT-FEATURES-SPLIT-1 佈局說明）+ 三個 `pub use` re-export 保向後相容：
+  - `pub use crate::exit_features::core::{ExitFeatures, PhysicalDecision};`
+  - `pub use crate::exit_features::v2::{physical_micro_profit_lock_v2, ExitConfig};`
+  - `pub use crate::exit_features::builder::build_exit_features_for_tick;`
+  - `non_linear_giveback_fn` 刻意保持 `pub(crate)` 不 re-export（只 v2 tests 內部呼叫，避免 crate-private 介面外洩）。
+- **core.rs**：純 types；`ExitFeatures` 8 欄位 + `PhysicalDecision::{Hold, Lock(String)}` + serde 測試（ctor round-trip / None-field ctor / variant equality / est_net_bps=None 序列化 / atr_pct=0.0 邊界 / time_since_peak_ms 60k 邊界 / PhysicalDecision::Hold 往返）。
+- **v2.rs**：`ExitConfig` 7 欄位 + `Default` + `validate()` + `non_linear_giveback_fn` + `physical_micro_profit_lock_v2` 4-Gate pure fn；模組頂部頁更新 Gate 1 v2 對齊 doctrine（GATE1-REVERSAL-1 hotfix A `d0f0c21` 後 v1 + v2 共享 Gate 1 Hold 語意，v2 額外保留非線性 giveback 閾值）；24 測試覆蓋 Gate 1-4 + 非線性 fn 單調性 + ExitConfig 驗證 + Option=None 保守路徑 + end-to-end Gate 1→Gate 4a Lock。
+- **builder.rs**：`build_exit_features_for_tick` pure fn（7 維衍生鏡像 close-time `tick_pipeline::build_exit_feature_row`）；12 測試含 happy path / short-side / fresh-high 夾 0 / None ATR / 非正 ATR / legacy peak ts / same-tick peak / clock skew / entry 0∞ / end-to-end feed v2 Gate 4a Lock / missing edge Hold；tests 模組 `use super::super::v2::{physical_micro_profit_lock_v2, ExitConfig}` 跨模組 import 做 end-to-end 驗證（Rust module tree 標準做法）。
+
+**外部呼叫零改動**：4 個 crate-local caller（`risk_checks.rs` L21 `use crate::exit_features::{ExitFeatures, PhysicalDecision}` / `tick_pipeline/on_tick.rs` × 3 個 `crate::exit_features::…` 呼叫 / `position_risk_evaluator.rs` L21 同 / `combine_layer.rs` L34 `use crate::exit_features::PhysicalDecision`）全部維持原 path，由 `mod.rs` 的 `pub use` re-export 解析。
+
+**Tests**：engine lib **1839 passed / 0 failed**（與 split 前一致；43 exit_features 測試分佈到 core 7 / v2 24 / builder 12，0 regression）。
+
+**檔案變更**（2 changed — `git rm` 1 + create 4 = net +4，total +1,391/-1,317）：
+- `rust/openclaw_engine/src/exit_features.rs`（刪除，1317 行）
+- `rust/openclaw_engine/src/exit_features/mod.rs`（新增，68 行）
+- `rust/openclaw_engine/src/exit_features/core.rs`（新增，204 行）
+- `rust/openclaw_engine/src/exit_features/v2.rs`（新增，747 行）
+- `rust/openclaw_engine/src/exit_features/builder.rs`（新增，368 行）
+
+**治理對照**：§七「文件大小限制」四檔全部 ≤ 800 行警告線（mod 68 / core 204 / v2 747 / builder 368），最大 v2.rs 747 < 800，無需再拆。`on_tick.rs` 2079 行仍超硬上限 — 屬另案 legacy bloat，不在本 ticket scope。
+
+**Workflow**：operator 明確指示「先做 EXIT-FEATURES-SPLIT-1」；Mac 本地 `cargo check --lib` + `cargo test --lib exit_features::` + 全 engine lib 1839 → 1839 無 regression → commit + push → Linux release 驗證（本 commit 同鏈接 ssh）。未派 sub-agent（refactor scope 小且機械性，主 session 直接處理更快）。
+
+---
 
 ### TRACK-P-T4-WIRING-1 — Priority 6 PHYS-LOCK runtime 接線（2026-04-21 · commit `e95c779`）
 
