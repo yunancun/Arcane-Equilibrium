@@ -3,7 +3,7 @@
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
 > 最後更新：2026-04-21（DUAL-TRACK-EXIT-1 Phase 1b Track P v2 非線性 giveback pure fn + QC Gate 1 語意反轉）
 
-### DUAL-TRACK-EXIT-1 Phase 1b Track P v2 非線性 giveback pure fn（2026-04-21 · commit 待填）
+### DUAL-TRACK-EXIT-1 Phase 1b Track P v2 非線性 giveback pure fn（2026-04-21 · commit `aee96b9`）
 
 **目標**：推進 DUAL-TRACK-EXIT-1 主軸 Phase 1b 軌道 1 — 在既有 v1 `risk_checks::physical_micro_profit_lock` 線性閾值版（MICRO-PROFIT-FIX-1 / 2026-04-17 已上線）之外，新增 v2 **非線性 giveback** pure fn + 7 參數 `ExitConfig`，作為下一波 Priority 6 替換的基礎。設計意圖（operator QC）：「防止剛有大於 fee 的微利就套離場；保證 trailing stop；追求最高單筆 close 盈利」。
 
