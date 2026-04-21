@@ -193,11 +193,22 @@ mkdir -p "$OPENCLAW_DATA_DIR" "$OPENCLAW_SECRETS_ROOT/environment_files" \
 - 建議 Mac `.zshrc` 加 `alias oc-clean-runtime='rm -f "$OPENCLAW_DATA_DIR"/{*.sock,engine_maintenance.flag}'`
 
 ### 啟動檢查（每次 session 起點）
+
+**Linux 端（trade-core 本地 session）**：
 ```bash
 git status && git log --oneline -5
 python3 helper_scripts/canary/engine_watchdog.py --data-dir "$OPENCLAW_DATA_DIR" --stale-threshold 45 --grace-period 120 --status
 ```
-R-07 Go/No-Go 已 PASS（見 `memory/archive/project_rust_migration_status.md`）。watchdog 回 `engine_alive: false` 代表引擎沒在跑，按 TODO.md 重啟指引處理。
+
+**Mac 端（SSH bridge workflow，2026-04-21 起）**：
+```bash
+git status && git log --oneline -5                                    # Mac 本地 repo 狀態
+ssh trade-core "cd ~/BybitOpenClaw/srv && git log --oneline -5"       # Linux repo 狀態（可能領先）
+ssh trade-core "python3 helper_scripts/canary/engine_watchdog.py --data-dir /tmp/openclaw --stale-threshold 45 --grace-period 120 --status"  # engine 真實狀態
+```
+Mac 本地跑 watchdog 永遠回 `engine_alive: false`（engine 只跑 Linux，見 `memory/project_dev_runtime_split.md`）；必須透過 ssh 查。Mac 接手三連 = git status + ssh Linux git log + ssh Linux watchdog。
+
+R-07 Go/No-Go 已 PASS（見 `memory/archive/project_rust_migration_status.md`）。watchdog 回 `engine_alive: false` 代表引擎沒在跑，按 TODO.md 重啟指引處理（Mac 端：`ssh trade-core "bash helper_scripts/restart_all.sh --rebuild"`）。
 
 ### TODO.md 強制規則（每次接手必須遵守）
 
@@ -257,11 +268,11 @@ Operator 在 Mac 並行跑 Qwen3.6-35B（LM Studio）做代碼審核。CC 每完
 3. **關鍵 diff** — 最能說明變更的片段（非全量）
 4. **治理對照** — 涉及的 DOC/SM/EX/P0 編號 + 符合 / 違反 / 未規範 / 建議修改文件
 5. **不確定之處** — 未確認假設 / 跨平台風險（對照 §七.★★）/ 測試覆蓋判斷
-6. **Operator 下一步** — 審查重點 / 需跑測試 / trade-core `git pull` 與重啟步驟
+6. **Operator 下一步** — 審查重點 / Mac CC 透過 SSH bridge 已做的驗證（cargo test / psql / engine log）/ 若需 operator 親自動手的步驟（high-risk per-case 授權項 / Linux 端 interactive 操作）
 
 **Git 自動化（強制）**：
 - CC 每完成一個**合理可交付單位**（任務完成 + 本節 report 已寫 + 無跑不過的測試）→ 自動 `git add` + `git commit`
-- **Mac 端**：commit 後自動 `git push origin main`（operator 在 trade-core 端 `git pull` 拉取；此為同步方向）
+- **Mac 端**：commit 後自動 `git push origin main`；若後續要 ssh 跑 Linux 驗證（cargo test / restart_all 等），push 完接 `ssh trade-core "cd ~/BybitOpenClaw/srv && git pull --ff-only origin main"` 同步 Linux 工作樹（詳 `memory/project_ssh_bridge_workflow.md`）
 - **CC 絕不執行**：`pull` / `merge` / `checkout` / `reset` / `rebase`（狀態變更操作留給 operator）
 
 ### Mac dev-only 模式（環境檢測 + 操作細節）
@@ -269,7 +280,7 @@ Operator 在 Mac 並行跑 Qwen3.6-35B（LM Studio）做代碼審核。CC 每完
 **環境檢測**：CC 從 system prompt `Platform:` 讀取，**不分大小寫**做子串比對：含 `darwin` → Mac dev-only · 含 `linux` → trade-core 生產（Linux session 實測回 `Linux`，Mac 回 `darwin`）。下面 4 條僅在 Mac 端生效，**不必詢問 operator**。
 
 1. **pytest 必從 srv root 跑** — 部分測試用絕對 import `from program_code.…`，從 `control_api_v1/` 內跑會 `ImportError: No module named 'program_code'`（例：`test_earned_trust_engine.py`）。
-2. **整合測試打真實 Bybit 會 fail —— by design** — 3 個 secret slot 已 rename 為 `*.dev_disabled_*`（避免與 Linux trade-core 撞單；還原見 README § Mac dev-only 模式）。任何 connect 真實 Bybit 的 test 拿不到 credentials → fail-closed。Mock-based unit test 不受影響。Reproduce「engine lib 1791 / 0 failed」基準需在 Linux 跑。
+2. **整合測試打真實 Bybit 會 fail —— by design** — 3 個 secret slot 已 rename 為 `*.dev_disabled_*`（避免與 Linux trade-core 撞單；還原見 README § Mac dev-only 模式）。任何 connect 真實 Bybit 的 test 拿不到 credentials → fail-closed。Mock-based unit test 不受影響。**Reproduce release 基準**（engine lib 1827 / 0 failed 等）現可 `ssh trade-core "cd ~/BybitOpenClaw/srv/rust && cargo test --release -p openclaw_engine --lib"` 直驗，不需要離開 Mac session。
 3. **Sub-agent (E1) 寫碼若 refuse** — Linux 端 2026-04-19「第 3 次驗證解除」refuse pattern，但跨平台/跨 session 仍偶發。Workaround：主 session 直接寫。
 4. **Mac↔Linux SSH bridge workflow（2026-04-21 採納，取代原「同步單向」）** — 詳 memory `project_ssh_bridge_workflow.md`。核心：Mac CC 為 SSOT，透過 `ssh trade-core`（Tailscale + key auth，免密碼）遠端觸發 Linux runtime 任務（cargo test / psql / restart_all / git 操作 / engine log）。
    - ✅ **Mac 本地 git 放寬**：允許 `git fetch` + `git pull --ff-only`（純 fast-forward，衝突時 abort 不破壞 state）；**仍禁** `git merge <branch>` / `rebase` / `reset --hard` / `checkout <branch>`
