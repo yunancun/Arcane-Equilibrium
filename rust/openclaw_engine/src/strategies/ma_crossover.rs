@@ -12,6 +12,7 @@ use super::common::{ConfidenceBuilder, PerSymbolState, TrendCooldown};
 use super::confluence::{self, ConfluenceConfig, PersistenceTracker};
 use super::{ParamRange, Strategy, StrategyAction, StrategyParams};
 use crate::intent_processor::OrderIntent;
+use crate::order_manager::TimeInForce;
 use crate::tick_pipeline::TickContext;
 use serde::{Deserialize, Serialize};
 use tracing::info;
@@ -46,6 +47,17 @@ pub struct MaCrossoverParams {
     /// cooldown scales 1x→4x in strong trends (ADX≥2.5×adx_threshold + Hurst≥0.75).
     /// A2：趨勢自適應冷卻倍率上限。strong trend 下冷卻 1x→4x（預設 3.0）。
     pub max_cooldown_boost: f64,
+    /// EDGE-P2-3 Phase 2+: emit PostOnly Limit entries to pay maker fees.
+    /// Default `false` (root principle #6).
+    /// EDGE-P2-3 Phase 2+：入場改發 PostOnly Limit 以支付 maker 費率；默認 false。
+    pub use_maker_entry: bool,
+    /// EDGE-P2-3 Phase 2+: bps offset from last_price for PostOnly limit placement.
+    /// EDGE-P2-3 Phase 2+：PostOnly 限價偏移（bps）。
+    pub maker_price_offset_bps: f64,
+    /// EDGE-P2-3 Phase 2+: ms a resting PostOnly maker order may sit before sweep.
+    /// Clamped to [15_000, 300_000] on assignment.
+    /// EDGE-P2-3 Phase 2+：PostOnly 掛單最長停留時間（毫秒），寫入時 clamp。
+    pub maker_limit_timeout_ms: u64,
 }
 
 impl Default for MaCrossoverParams {
@@ -68,6 +80,9 @@ impl Default for MaCrossoverParams {
             confluence_threshold_light: cc.threshold_light,
             confluence_threshold_full: cc.threshold_full,
             max_cooldown_boost: 3.0,
+            use_maker_entry: false,
+            maker_price_offset_bps: 1.0,
+            maker_limit_timeout_ms: 45_000,
         }
     }
 }
@@ -333,6 +348,14 @@ pub struct MaCrossover {
     /// `compute_trend_adjusted_cooldown()`. Default 3.0.
     /// 趨勢自適應冷卻的最大加成倍率。
     pub(crate) max_cooldown_boost: f64,
+    /// EDGE-P2-3 Phase 2+: emit PostOnly Limit entries instead of Market.
+    /// Close path remains Market (entry-only scope). Default `false`.
+    /// EDGE-P2-3 Phase 2+：入場發 PostOnly Limit；平倉維持 Market。
+    pub(crate) use_maker_entry: bool,
+    /// EDGE-P2-3 Phase 2+: bps offset from last_price for PostOnly limit placement.
+    pub(crate) maker_price_offset_bps: f64,
+    /// EDGE-P2-3 Phase 2+: ms a resting PostOnly maker order may sit (clamped on assign).
+    pub(crate) maker_limit_timeout_ms: u64,
 }
 
 impl MaCrossover {
@@ -360,6 +383,9 @@ impl MaCrossover {
             min_notional_usd: 10.0,
             exit_persistence: PersistenceTracker::new(),
             max_cooldown_boost: 3.0,
+            use_maker_entry: false,
+            maker_price_offset_bps: 1.0,
+            maker_limit_timeout_ms: 45_000,
         }
     }
 
@@ -384,6 +410,15 @@ impl MaCrossover {
         self.min_persistence_ms = params.min_persistence_ms;
         self.min_notional_usd = params.min_notional_usd;
         self.max_cooldown_boost = params.max_cooldown_boost;
+        // EDGE-P2-3 Phase 2+: hot-reload PostOnly entry toggles.
+        // EDGE-P2-3 Phase 2+：熱重載 PostOnly 入場參數。
+        self.use_maker_entry = params.use_maker_entry;
+        self.maker_price_offset_bps = params.maker_price_offset_bps;
+        // Clamp at assignment so runtime values satisfy invariant.
+        // 於寫入時 clamp，運行時值恆在區間內。
+        self.maker_limit_timeout_ms = super::grid_trading::clamp_maker_limit_timeout_ms(
+            params.maker_limit_timeout_ms,
+        );
         info!(strategy = "ma_crossover", "params updated / 參數已更新");
         Ok(())
     }
@@ -408,6 +443,9 @@ impl MaCrossover {
             confluence_threshold_light: self.confluence_config.threshold_light,
             confluence_threshold_full: self.confluence_config.threshold_full,
             max_cooldown_boost: self.max_cooldown_boost,
+            use_maker_entry: self.use_maker_entry,
+            maker_price_offset_bps: self.maker_price_offset_bps,
+            maker_limit_timeout_ms: self.maker_limit_timeout_ms,
         }
     }
 
@@ -434,18 +472,39 @@ impl MaCrossover {
     ) -> OrderIntent {
         let scaled =
             crate::tick_pipeline::on_tick_helpers::clamp_confidence(conf * self.conf_scale);
+        // EDGE-P2-3 Phase 2+: resolve entry order shape (Market vs PostOnly Limit).
+        // BUY offset below last_price; SELL offset above — PostOnly always rests passively.
+        // Close path (StrategyAction::Close) bypasses this helper entirely.
+        // EDGE-P2-3 Phase 2+：決定入場單型。BUY 掛 last 下方、SELL 掛上方；平倉走 Close variant 不經此。
+        let (order_type, limit_price, time_in_force, maker_timeout_ms) =
+            if self.use_maker_entry {
+                let offset = self.maker_price_offset_bps / 10_000.0;
+                let limit = if is_long {
+                    ctx.price * (1.0 - offset)
+                } else {
+                    ctx.price * (1.0 + offset)
+                };
+                (
+                    "limit".to_string(),
+                    Some(limit),
+                    Some(TimeInForce::PostOnly),
+                    Some(self.maker_limit_timeout_ms),
+                )
+            } else {
+                ("market".to_string(), None, None, None)
+            };
         OrderIntent {
             symbol: ctx.symbol.to_string(),
             is_long,
             qty,
             confidence: scaled,
             strategy: self.name().into(),
-            order_type: "market".into(),
-            limit_price: None,
+            order_type,
+            limit_price,
             confluence_score,
             persistence_elapsed_ms,
-            time_in_force: None,
-            maker_timeout_ms: None,
+            time_in_force,
+            maker_timeout_ms,
         }
     }
 
@@ -1648,5 +1707,129 @@ mod tests {
         assert!(p.validate().is_ok());
         p.max_cooldown_boost = 10.0;
         assert!(p.validate().is_ok());
+    }
+
+    // ── EDGE-P2-3 Phase 2+ (b): PostOnly maker entry tests ──
+    // ── EDGE-P2-3 Phase 2+ (b)：PostOnly maker 入場測試 ──
+
+    /// Default constructor must keep `use_maker_entry = false` (root principle #6 —
+    /// failure default shrink). Market entry emits order_type="market" + TIF=None
+    /// (byte-identical legacy behavior) when long-entry gate fires.
+    /// 默認 maker 關閉時，入場 intent 維持 market + TIF=None（與舊行為 byte-identical）。
+    #[test]
+    fn test_ma_crossover_market_entry_when_maker_disabled() {
+        let mut s = MaCrossover::new();
+        s.min_persistence_ms = 0; // disable persistence for unit tests
+        assert!(!s.use_maker_entry, "use_maker_entry must default to false");
+        let i = s.on_tick(&ctx_with(100.0, 101.0, 25.0, 0));
+        assert_eq!(i.len(), 1);
+        match &i[0] {
+            StrategyAction::Open(intent) => {
+                assert_eq!(intent.order_type, "market");
+                assert!(intent.limit_price.is_none());
+                assert!(intent.time_in_force.is_none());
+                assert!(intent.maker_timeout_ms.is_none());
+            }
+            other => panic!("expected StrategyAction::Open, got {:?}", other),
+        }
+    }
+
+    /// Long entry with maker enabled emits PostOnly Limit below last_price.
+    /// Limit = price × (1 − offset_bps / 10_000), bit-exact.
+    /// 多頭入場啟用 maker → PostOnly Limit 掛在 last_price 下方（bit-exact）。
+    #[test]
+    fn test_ma_crossover_buy_postonly_below_last_price() {
+        let mut s = MaCrossover::new();
+        s.min_persistence_ms = 0;
+        s.use_maker_entry = true;
+        s.maker_price_offset_bps = 1.0; // 1 bps
+        let i = s.on_tick(&ctx_with(100.0, 101.0, 25.0, 0));
+        assert_eq!(i.len(), 1);
+        match &i[0] {
+            StrategyAction::Open(intent) => {
+                assert!(intent.is_long);
+                assert_eq!(intent.order_type, "limit");
+                assert_eq!(intent.time_in_force, Some(TimeInForce::PostOnly));
+                assert_eq!(intent.maker_timeout_ms, Some(45_000));
+                let lp = intent.limit_price.expect("limit_price set");
+                let expected = 50000.0 * (1.0 - 1.0 / 10_000.0);
+                assert!(
+                    (lp - expected).abs() < 1e-9,
+                    "buy PostOnly must be below last_price: got {lp}, expected {expected}"
+                );
+                assert!(lp < 50000.0, "buy limit must rest below last_price");
+            }
+            other => panic!("expected StrategyAction::Open, got {:?}", other),
+        }
+    }
+
+    /// Short entry with maker enabled emits PostOnly Limit above last_price.
+    /// Limit = price × (1 + offset_bps / 10_000), bit-exact.
+    /// 空頭入場啟用 maker → PostOnly Limit 掛在 last_price 上方。
+    #[test]
+    fn test_ma_crossover_sell_postonly_above_last_price() {
+        let mut s = MaCrossover::new();
+        s.min_persistence_ms = 0;
+        s.use_maker_entry = true;
+        s.maker_price_offset_bps = 2.0; // 2 bps
+        // Fast KAMA below slow SMA → short signal.
+        // 快 KAMA 低於慢 SMA → 空頭信號。
+        let i = s.on_tick(&ctx_with(101.0, 100.0, 25.0, 0));
+        assert_eq!(i.len(), 1);
+        match &i[0] {
+            StrategyAction::Open(intent) => {
+                assert!(!intent.is_long);
+                assert_eq!(intent.order_type, "limit");
+                assert_eq!(intent.time_in_force, Some(TimeInForce::PostOnly));
+                assert_eq!(intent.maker_timeout_ms, Some(45_000));
+                let lp = intent.limit_price.expect("limit_price set");
+                let expected = 50000.0 * (1.0 + 2.0 / 10_000.0);
+                assert!(
+                    (lp - expected).abs() < 1e-9,
+                    "sell PostOnly must be above last_price: got {lp}, expected {expected}"
+                );
+                assert!(lp > 50000.0, "sell limit must rest above last_price");
+            }
+            other => panic!("expected StrategyAction::Open, got {:?}", other),
+        }
+    }
+
+    /// update_params round-trips maker fields so Agent IPC can toggle at runtime.
+    /// Also verifies maker_limit_timeout_ms is clamped on assignment
+    /// (500_000 → 300_000 upper bound, 1_000 → 15_000 lower bound).
+    /// update_params 來回保留 maker 欄位；timeout 於寫入時 clamp 到 [15s, 300s]。
+    #[test]
+    fn test_ma_crossover_update_params_roundtrips_maker_fields() {
+        let mut s = MaCrossover::new();
+        let mut params = s.get_params();
+        assert!(!params.use_maker_entry);
+        assert!((params.maker_price_offset_bps - 1.0).abs() < 1e-9);
+        assert_eq!(params.maker_limit_timeout_ms, 45_000);
+
+        // Round-trip basic values.
+        // 基本往返。
+        params.use_maker_entry = true;
+        params.maker_price_offset_bps = 3.0;
+        params.maker_limit_timeout_ms = 60_000;
+        s.update_params(params).expect("update_params");
+        let p2 = s.get_params();
+        assert!(p2.use_maker_entry);
+        assert!((p2.maker_price_offset_bps - 3.0).abs() < 1e-9);
+        assert_eq!(p2.maker_limit_timeout_ms, 60_000);
+        assert!(s.use_maker_entry);
+
+        // Upper clamp: 500_000 → 300_000.
+        // 上限 clamp：500_000 → 300_000。
+        let mut params_hi = s.get_params();
+        params_hi.maker_limit_timeout_ms = 500_000;
+        s.update_params(params_hi).expect("update_params clamp hi");
+        assert_eq!(s.get_params().maker_limit_timeout_ms, 300_000);
+
+        // Lower clamp: 1_000 → 15_000.
+        // 下限 clamp：1_000 → 15_000。
+        let mut params_lo = s.get_params();
+        params_lo.maker_limit_timeout_ms = 1_000;
+        s.update_params(params_lo).expect("update_params clamp lo");
+        assert_eq!(s.get_params().maker_limit_timeout_ms, 15_000);
     }
 }
