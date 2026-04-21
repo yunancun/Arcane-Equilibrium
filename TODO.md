@@ -304,6 +304,17 @@ git status && git log --oneline -5
 - **阻塞**：不阻 Live；阻 DUAL-TRACK Phase 1 軌道 2 B 完成判定 + Phase 5 cost_gate 重啟
 - **關聯**：P1-10 STRATEGY-ASYMMETRY-1（必要前置）· DUAL-TRACK Phase 1 軌道 2 B · P0-3 Phase 5 edge 重評
 
+### P1-18 · GATE1-REVERSAL-OBS-1 — Priority 6 Gate 1 Lock→Hold 2-3d 行為觀察窗
+- **基準線**：2026-04-21 13:44:54 CEST (epoch 1776771894) engine PID `3813984` rebuild restart 起算；部署內容 = `d0f0c21` GATE1-REVERSAL-1 hotfix A（Priority 6 Gate 1 `edge < floor → Lock` 改為 `edge <= floor → Hold`，對齊 DUAL-TRACK-EXIT-1 設計文檔 §三 L108-111 + operator 明確意圖「防止剛有大於 fee 的微利就套離場」）
+- **觀察指標**（≥2-3d）：
+  - [ ] `phys_lock_gate1_low_edge` reason tag 新 fills 應 = 0（Gate 1 改 Hold 後不再產 Lock；SQL：`SELECT count(*) FROM trading.fills WHERE close_reason LIKE '%phys_lock_gate1_low_edge%' AND created_at > '2026-04-21 13:44:54+02'`）
+  - [ ] demo 平均持倉時長分佈（預期略增，不再被 Gate 1 提前 Lock）
+  - [ ] 單筆 close 盈利分佈右尾（Gate 4 trailing 接管後允許 edge 繼續累積，右尾預期略厚）
+  - [ ] Phase 5 edge 指標（`settings/edge_estimates.json` 各策略 shrunk_bps 不應惡化）
+- **Gate**：觀察窗 ≥2-3d，上述 4 指標均未惡化 → 解鎖下一波 Priority 6 全替換（DUAL-TRACK-EXIT-1 Phase 2/3 Track P 接線 v2 pure fn 到其他 Priority 位置）；若任一指標惡化 → pause 回查 + E2 對抗性審查
+- **阻塞**：不阻 P0 主路徑（P0-6/P0-7/P0-2）；阻 DUAL-TRACK-EXIT-1 下一波 Priority 6 替換
+- **關聯**：DUAL-TRACK-EXIT-1 Phase 1b Track P v2（commit `aee96b9`）· `risk_checks.rs:312-323` Priority 6 · CLAUDE.md §三 2026-04-21 Phase 1b 條目
+
 ### ✅ P1-15 LEARNING-SCHEMA-QUALITY-1 2026-04-18 commit `b0df1b3`（歸檔 §8）
 - `commands.rs:668` 加 `risk_close:ipc_close_symbol` 前綴 + `realized_edge_stats.py:238` allowlist 加 `live_demo`。清 28 phantom cells（18 ipc + 10 risk_check），live_demo grand_mean −14.97 bps。真實 grand_mean 毒源由 P1-16/17 解。
 
