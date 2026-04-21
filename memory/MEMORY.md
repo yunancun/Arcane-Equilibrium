@@ -18,7 +18,8 @@
 - [Paper 預設關閉 (2026-04-16)](project_paper_pipeline_disabled_by_default.md) — OPENCLAW_ENABLE_PAPER=1 才 spawn；預設 drain task + DISABLED marker；3E-ARCH 結構保留；新增負餘額 Gate 1.6
 - [P0-6 RCA + Fix Plan (2026-04-17)](project_p06_rca_and_fix_plan.md) — FUP抑制致bybit_sync死鎖+cost_gate冷啟動死循環；修復：startup triage + natural bootstrap
 - [Mac=開發 / Linux=Runtime](project_dev_runtime_split.md) — Mac 只做讀碼/寫碼/RCA；engine/python/PG 全在 Linux；Mac 上 engine not_running 是預期
-- [decision_outcomes 不是 dead，但有 2 bug (2026-04-21 Linux 驗證後更正)](project_decision_outcomes_not_dead.md) — Writer 活躍、不可刪；但 (1) outcome_* 100% NULL 是 JOIN/horizon-window 斷鏈非 klines 稀疏 (2) engine_mode 100% 'paper' tagging 寫入邏輯故障；升級 P1 fix（2 新 TODO）；Mac RCA 盲點：不驗證外部資料就採納「情境 3 reframe」
+- [decision_outcomes 不是 dead，但有 2 bug (2026-04-21 Linux 驗證後更正)](project_decision_outcomes_not_dead.md) — Writer 活躍、不可刪；但 (1) outcome_* 100% NULL 是 timeframe 字串格式 ('1' vs '1m') 不一致非 klines 稀疏 (2) engine_mode 100% 'paper' 是 INSERT 漏接線；升級 P1 fix（2 新 TODO）；Mac RCA 盲點：不驗證外部資料就採納「情境 3 reframe」
+- [Track P 物理層 runtime dead (2026-04-21)](project_track_p_runtime_dead.md) — DUAL-TRACK-EXIT-1 Track P 代碼完整但 on_tick.rs:1677 硬編碼 `\|_\| None`，exit_features 永遠 None → Priority 6 從未 fire；aee96b9/d0f0c21 runtime 影響 = 0；主軸解阻塞 = TRACK-P-T4-WIRING-1 (P1，~3d) 接真實 builder
 
 ## Working principles & autonomy
 - [Agent 自主權偏好](feedback_agent_autonomy.md) — 用戶只設global止盈止損，Agent自主決定策略/參數/時機/倉位
