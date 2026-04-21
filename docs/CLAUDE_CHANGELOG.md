@@ -1,7 +1,34 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-04-21（Linux trade-core GATE1-REVERSAL-1 hotfix A 部署 + 2 個 pre-existing Python startup warning 清零 + P0-2 時鐘解耦 + P1-18 觀察窗建立）
+> 最後更新：2026-04-21（TODO 1+2 outcome_backfiller wire engine_mode + timeframe strings fix）
+
+### TODO 1+2 outcome_backfiller wiring fix（2026-04-21 · commit `PENDING`）
+
+**觸發**：前輪 session 發現 `trading.decision_outcomes` 兩個 P1 bug：
+- **TODO 1 `DECISION-OUTCOMES-ENGINE-MODE-TAG-BUG-1`**：264,800 rows 100% `engine_mode='paper'`，但 `context_id` 前綴涵蓋 demo/live/live_demo。根因：`outcome_backfiller.rs` INSERT 省略 `engine_mode` 欄位 → `V015` 遷移的 `DEFAULT 'paper'::text` 兜底（migration L64-66 明確寫 "No writer exists yet"）。
+- **TODO 2 `OUTCOME-BACKFILL-JOIN-NULL-1`**：264,800 rows 100% NULL outcome_* / MFE / MAE。根因：writer LATERAL subquery 用 Bybit API interval 字串（`'1'/'5'/'60'/'240'`），但 `market.klines.timeframe` 儲存格式是 `'1m'/'5m'/'1h'/'4h'`（ingest 時 normalize 過）→ 每個 LATERAL 回 NULL。
+
+**改動**（2 檔 / Rust + 診斷 SQL）：
+
+1. `rust/openclaw_engine/src/database/outcome_backfiller.rs`
+   - Inline SQL 抽出成 `pub(crate) const BACKFILL_SQL: &str`（便於單測斷言字串形狀）。
+   - 7 處 timeframe 字串替換：`'1'→'1m'`（price_1m + MFE `MAX(high)` + MAE `MIN(low)`）、`'5'→'5m'`、`'60'→'1h'`、`'240'→'4h'`（×2：price_4h + price_24h 都用 4h klines）。
+   - 新增 `engine_mode` 傳遞鏈：pending CTE SELECT → outcomes CTE SELECT → INSERT column list → INSERT SELECT final column。
+   - 新增 3 個 `#[cfg(test)]` 回歸測試：`sql_uses_klines_timeframe_storage_format`（4 正面 + 4 負面 assertion）、`sql_propagates_engine_mode_into_insert`、`sql_24h_window_uses_4h_timeframe`。
+
+2. `helper_scripts/db/audit/2026-04-21--decision_outcomes_bugs_diagnostic.sql`（新增）
+   - 可重跑的診斷腳本：SPLIT_PART 前綴 × engine_mode 交叉表、`market.klines.timeframe` distinct 值、fixed vs buggy LATERAL 並排、rows need re-backfill 規模。
+   - 附 fix spec 注釋（L91-103）供未來 audit 對照。
+
+**驗證**：
+- `cargo test --release -p openclaw_engine --lib` → **1819 passed / 0 failed**（baseline 1816 + 3 new regression）。
+- `bash helper_scripts/restart_all.sh --rebuild` 部署新 binary（`rust/target/release/openclaw-engine` stat = 16:01:37）。
+- 歷史回填 TODO 1：`UPDATE trading.decision_outcomes SET engine_mode = ...` **267,400 rows**。
+- 歷史回填 TODO 2：`/tmp/openclaw/backfill_outcomes_historical.sql` LATERAL UPDATE **267,776 rows**（post-commit 248,963 / 269,200 = 92.5% outcome_1m non-NULL；live 99.9% / demo 92.4% / live_demo 77.9%；剩餘 NULL 由 `market.klines` 資料缺口造成，屬 LEARNING-PIPELINE-DORMANT-1 範疇）。
+- engine_mode 分佈對齊：`demo|demo|133944`、`live|live|89734`、`live_demo|live_demo|45522`（無 mismatch）。
+
+**Mac-end 關聯**：TODO 3 `GATE1-REVERSAL-OBSERVABILITY-1` 本輪不動，Mac 端已 doc-only 關閉（commit `663f670`）；`TRACK-P-T4-WIRING-1`（production caller `tick_pipeline/on_tick.rs:1677` 的 `|_| None` 真實接線）留待後續 sprint 獨立處理。
 
 ### Linux trade-core 部署 + startup noise 清零 + P0-2 解耦 + GATE1-REVERSAL-OBS-1（2026-04-21 · commit `6b1b10d`）
 
