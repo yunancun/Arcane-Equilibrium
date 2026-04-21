@@ -270,9 +270,13 @@ Operator 在 Mac 並行跑 Qwen3.6-35B（LM Studio）做代碼審核。CC 每完
 5. **不確定之處** — 未確認假設 / 跨平台風險（對照 §七.★★）/ 測試覆蓋判斷
 6. **Operator 下一步** — 審查重點 / Mac CC 透過 SSH bridge 已做的驗證（cargo test / psql / engine log）/ 若需 operator 親自動手的步驟（high-risk per-case 授權項 / Linux 端 interactive 操作）
 
-**Git 自動化（強制）**：
-- CC 每完成一個**合理可交付單位**（任務完成 + 本節 report 已寫 + 無跑不過的測試）→ 自動 `git add` + `git commit`
-- **Mac 端**：commit 後自動 `git push origin main`；若後續要 ssh 跑 Linux 驗證（cargo test / restart_all 等），push 完接 `ssh trade-core "cd ~/BybitOpenClaw/srv && git pull --ff-only origin main"` 同步 Linux 工作樹（詳 `memory/project_ssh_bridge_workflow.md`）
+**Git 自動化（強制，2026-04-21 operator 加嚴：所有 commit 必 push）**：
+- CC 每完成一個**合理可交付單位**（任務完成 + 本節 report 已寫 + 無跑不過的測試）→ 自動 `git add` + `git commit` + **`git push origin main`**（三者同 Bash 鏈內完成，不允許 commit 後留著沒 push 就結束回合）
+- **無例外**：Mac CC / Linux CC 都遵守「commit 即 push」；維持 Mac / Linux / origin 三處 state 一致性
+- **Session 接手三連 sync**（所有 CC 起手必做）：`git fetch --prune origin` + 若 local 落後 `git pull --ff-only` + 若 local 超前（前 session 漏 push）`git push origin main` —— 例行自動做，不待 operator 提醒
+- **Mac CC 觸發 Linux 驗證前**：push 完接 `ssh trade-core "cd ~/BybitOpenClaw/srv && git pull --ff-only origin main"` 同步 Linux 工作樹
+- **ff-only pull 失敗（divergent branches）**：報告 operator，不擅自 merge/rebase（CC 本地規則仍禁這 3 op）
+- 詳 memory `project_ssh_bridge_workflow.md`「硬規則：commit 完必 push」章節
 - **CC 絕不執行**：`pull` / `merge` / `checkout` / `reset` / `rebase`（狀態變更操作留給 operator）
 
 ### Mac dev-only 模式（環境檢測 + 操作細節）
