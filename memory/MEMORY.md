@@ -18,6 +18,7 @@
 - [Paper 預設關閉 (2026-04-16)](project_paper_pipeline_disabled_by_default.md) — OPENCLAW_ENABLE_PAPER=1 才 spawn；預設 drain task + DISABLED marker；3E-ARCH 結構保留；新增負餘額 Gate 1.6
 - [P0-6 RCA + Fix Plan (2026-04-17)](project_p06_rca_and_fix_plan.md) — FUP抑制致bybit_sync死鎖+cost_gate冷啟動死循環；修復：startup triage + natural bootstrap
 - [Mac=開發 / Linux=Runtime](project_dev_runtime_split.md) — Mac 只做讀碼/寫碼/RCA；engine/python/PG 全在 Linux；Mac 上 engine not_running 是預期
+- [decision_outcomes 不是 dead (2026-04-21)](project_decision_outcomes_not_dead.md) — 113k NULL 根因是 market.klines 稀疏非 writer 死；Rust outcome_backfiller 活躍；下游 LinUCB 仍用；2026-04-18 文件「dead」誤判已更正
 
 ## Working principles & autonomy
 - [Agent 自主權偏好](feedback_agent_autonomy.md) — 用戶只設global止盈止損，Agent自主決定策略/參數/時機/倉位

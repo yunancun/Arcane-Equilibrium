@@ -59,7 +59,7 @@ git status && git log --oneline -5
 
 - ✅ **MARKET-KLINES-STALE-1** 2026-04-18 commit `65acde6`（歸檔 §2）— paper/demo/live 三引擎 `market_data_tx` 並行化，DB kline 寫入恢復。
 - ✅ **EXIT-FEATURES-TABLE-1** 2026-04-19 commits `6ea643e` · `c7171b2` · `35808e9`（歸檔 §3）— Phase 1b 全部接線 + GAP-1 `apply_confirmed_fill` 補接線 + R1 驗收 coverage=1.000 / 8 of 8 demo 平倉。Phase 1b 累積 ≥1 週 exit_features 後可校準 7 維閾值。**若未來 Track P T4 PHYS-LOCK 接線**：需重跑驗收 SQL 確認不漏接 `Physical` exit_source。
-- [ ] **DECISION-OUTCOMES-DEAD-1**（P2）：`trading.decision_outcomes` 113k 條 `max_favorable/max_adverse` 全 NULL，寫入管線斷；可沿用此表取代 exit_features 或確認徹底 dead；RCA 決定方向。
+- [~] **ATTEMPT-LOG-NOT-DEAD-1**（原 DECISION-OUTCOMES-DEAD-1，P2 → **P3 doc-only**，2026-04-21 RCA 結案） — RCA 詳 `docs/worklogs/2026-04-21--decision_outcomes_rca.md`：`decision_outcomes` **不是 dead**，Rust `outcome_backfiller.rs` 5min tick writer 活躍 + `main.rs:873` spawn；113k 條 `max_favorable/max_adverse` NULL 根因 = 上游 `market.klines` 歷史稀疏（MARKET-KLINES-STALE-1 2026-04-18 只修 forward-going 不回填歷史），**症狀不是 bug**；與 `exit_features` 語意正交（entry-anchored forward-return label vs exit-anchored 7 維 trajectory feature），**不互相取代**；下游 `linucb_trainer.py:215` + `linucb_shadow_compare.py:188` 仍 JOIN 取 label **絕不可刪**。**Linux 端一次性 SQL 驗證**（worklog §五）：若 `backfilled_ts IS NOT NULL ≈ total` 且 `outcome_1h IS NOT NULL ≪ total` → 結案改 `[x]`。後續若 `market.klines` 歷史補齊 → 自動受益無需動 code。2026-04-18 設計文件誤判「dead」已在 memory `project_decision_outcomes_not_dead.md` 更正。
 
 ### Phase 1a · W23 Day 4-7（Step 0 後立即啟動，不阻於 7 維）
 
