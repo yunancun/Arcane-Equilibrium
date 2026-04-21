@@ -265,7 +265,7 @@ Operator 在 Mac 並行跑 Qwen3.6-35B（LM Studio）做代碼審核。CC 每完
 
 ### Mac dev-only 模式（環境檢測 + 操作細節）
 
-**環境檢測**：CC 從 system prompt `Platform:` 讀取（`darwin` = Mac dev-only / `linux` = trade-core 生產）。下面 4 條僅在 `darwin` 生效，**不必詢問 operator**。
+**環境檢測**：CC 從 system prompt `Platform:` 讀取，**不分大小寫**做子串比對：含 `darwin` → Mac dev-only · 含 `linux` → trade-core 生產（Linux session 實測回 `Linux`，Mac 回 `darwin`）。下面 4 條僅在 Mac 端生效，**不必詢問 operator**。
 
 1. **pytest 必從 srv root 跑** — 部分測試用絕對 import `from program_code.…`，從 `control_api_v1/` 內跑會 `ImportError: No module named 'program_code'`（例：`test_earned_trust_engine.py`）。
 2. **整合測試打真實 Bybit 會 fail —— by design** — 3 個 secret slot 已 rename 為 `*.dev_disabled_*`（避免與 Linux trade-core 撞單；還原見 README § Mac dev-only 模式）。任何 connect 真實 Bybit 的 test 拿不到 credentials → fail-closed。Mock-based unit test 不受影響。Reproduce「engine lib 1791 / 0 failed」基準需在 Linux 跑。
