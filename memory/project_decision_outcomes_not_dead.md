@@ -33,10 +33,26 @@ originSessionId: aaf4cf28-cfa5-48d0-9847-f0c087dbeed8
 - PAPER-DISABLE-1 (2026-04-16) 後 paper 預設關閉，不可能全量都是真 paper → **engine_mode 欄位寫入邏輯故障**（writer 落 'paper' 而非用 INSERT 時的 context_id 前綴判斷 engine）
 - 影響：所有 **outcome-based edge 歸因失效**（EDGE-P3-1 / Phase 5 JS 估計 / LinUCB reward 切 per-engine）
 
-## 已拆成的 P1 fix TODO
+## 已拆成的 P1 fix TODO（**全部 2026-04-21 結案**）
 
-1. `DECISION-OUTCOMES-ENGINE-MODE-TAG-BUG-1` (P1) — engine_mode 100% 'paper' 不符實際；fix writer 路徑正確 tagging
-2. `OUTCOME-BACKFILL-JOIN-NULL-1` (P1) — outcome_* 100% NULL，audit `outcome_backfiller.rs` JOIN/horizon-window 實作，修好後 LinUCB 才有可用 reward
+1. ~~`DECISION-OUTCOMES-ENGINE-MODE-TAG-BUG-1` (P1)~~ ✅ fixed by commit `5e2981d` + Linux backfill
+2. ~~`OUTCOME-BACKFILL-JOIN-NULL-1` (P1)~~ ✅ fixed by commit `5e2981d` + Linux backfill
+3. ~~`GATE1-REVERSAL-OBSERVABILITY-1` (P2)~~ ✅ doc-only close（Priority 6 從未 fire，等 `TRACK-P-T4-WIRING-1`）
+
+## 2026-04-21 Mac session ssh psql 驗證終態
+
+| 驗證項 | Pre-fix | Post-fix | 狀態 |
+|---|---|---|---|
+| total rows | 113k (Mac RCA 時) / 264k (Linux audit 時) | 273,963 | ✅ writer 持續活躍 |
+| engine_mode 分布 | 100% 'paper'（不符實際） | demo 136k / live 89k / live_demo 47k | ✅ 對齊 context_id 前綴 |
+| `outcome_1h` non-NULL | 0% | live 98% / demo 90% / live_demo 74% | ✅ LinUCB reward 恢復可用 |
+| `max_favorable` non-NULL | 0% | live 100% / demo 72% / live_demo 21% | ✅ (live_demo 21% 為 recent data 未到 25h+ backfill 窗口，非 bug) |
+
+驗證方法：
+```bash
+ssh trade-core "psql -h 127.0.0.1 -U trading_admin -d trading_ai -c 'SELECT ...'"
+```
+（.pgpass 同日設於 ~/.pgpass，`*:5432:trading_ai:trading_admin:xxx` 600 perms）
 
 ## 未來遇到這個表時
 
