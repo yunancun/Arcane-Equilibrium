@@ -12,6 +12,7 @@ use super::common::{PerSymbolState, TrendCooldown};
 use super::confluence::{self, ConfluenceConfig, PersistenceTracker};
 use super::{ParamRange, Strategy, StrategyAction, StrategyParams};
 use crate::intent_processor::OrderIntent;
+use crate::order_manager::TimeInForce;
 use crate::tick_pipeline::TickContext;
 use serde::{Deserialize, Serialize};
 use tracing::info;
@@ -93,6 +94,17 @@ pub struct BbBreakoutParams {
     /// 防止 WS 快照量化噪音（±1 張合約 ≈ 1e-8 delta）被誤判為確認信號。
     /// 預設 0.0 = pre-FUP 行為（任何非零 delta 即觸發）；validate `[0.0, 0.5]` finite。
     pub oi_min_delta_pct: f64,
+    /// EDGE-P2-3 Phase 2+: emit PostOnly Limit entries to pay maker fees.
+    /// Default `false` (root principle #6 — conservative cold-boot).
+    /// EDGE-P2-3 Phase 2+：入場改發 PostOnly Limit 以支付 maker 費率；默認 false。
+    pub use_maker_entry: bool,
+    /// EDGE-P2-3 Phase 2+: bps offset from last_price for PostOnly limit placement.
+    /// EDGE-P2-3 Phase 2+：PostOnly 限價偏移（bps）。
+    pub maker_price_offset_bps: f64,
+    /// EDGE-P2-3 Phase 2+: ms a resting PostOnly maker order may sit before the
+    /// event_consumer sweep cancels it. Clamped to [15_000, 300_000] on assign.
+    /// EDGE-P2-3 Phase 2+：PostOnly 掛單最長停留時間（毫秒），寫入時 clamp。
+    pub maker_limit_timeout_ms: u64,
 }
 
 impl Default for BbBreakoutParams {
@@ -134,6 +146,11 @@ impl Default for BbBreakoutParams {
             // filter WS quantisation noise without changing the flag default.
             // EDGE-P2-2 FUP：min_delta 預設 0.0 保留 pre-FUP 語義；operator 可調高過濾 WS 噪音。
             oi_min_delta_pct: 0.0,
+            // EDGE-P2-3 Phase 2+: conservative cold-boot (root principle #6).
+            // EDGE-P2-3 Phase 2+：冷啟動保守默認（根原則 #6）。
+            use_maker_entry: false,
+            maker_price_offset_bps: 1.0,
+            maker_limit_timeout_ms: 45_000,
         }
     }
 }
@@ -502,6 +519,18 @@ pub struct BbBreakout {
     /// EDGE-P2-2 FUP: min `|oi_delta_pct|` to trigger bonus (noise floor).
     /// EDGE-P2-2 FUP：觸發 bonus 的最小 `|oi_delta_pct|`（噪音地板）。
     pub(crate) oi_min_delta_pct: f64,
+    // ── EDGE-P2-3 Phase 2+: PostOnly maker entry toggles ──
+    // ── EDGE-P2-3 Phase 2+：PostOnly maker 入場開關 ──
+    /// EDGE-P2-3 Phase 2+: emit PostOnly Limit entries instead of Market.
+    /// Close path remains Market (entry-only scope). Default `false`.
+    /// EDGE-P2-3 Phase 2+：入場發 PostOnly Limit；平倉維持 Market。
+    pub(crate) use_maker_entry: bool,
+    /// EDGE-P2-3 Phase 2+: bps offset from last_price for PostOnly limit placement.
+    /// EDGE-P2-3 Phase 2+：PostOnly 限價相對 last_price 的 bps 偏移。
+    pub(crate) maker_price_offset_bps: f64,
+    /// EDGE-P2-3 Phase 2+: ms a resting PostOnly maker order may sit (clamped on assign).
+    /// EDGE-P2-3 Phase 2+：PostOnly 掛單最長停留時間（毫秒；寫入時 clamp）。
+    pub(crate) maker_limit_timeout_ms: u64,
 }
 
 impl BbBreakout {
@@ -541,6 +570,11 @@ impl BbBreakout {
             // EDGE-P2-2 FUP: 0.0 → any non-zero delta applies bonus (pre-FUP).
             // EDGE-P2-2 FUP：0.0 = 任何非零 delta 即觸發（pre-FUP 行為）。
             oi_min_delta_pct: 0.0,
+            // EDGE-P2-3 Phase 2+: conservative cold-boot (root principle #6).
+            // EDGE-P2-3 Phase 2+：冷啟動保守默認（根原則 #6）。
+            use_maker_entry: false,
+            maker_price_offset_bps: 1.0,
+            maker_limit_timeout_ms: 45_000,
         }
     }
 
@@ -576,6 +610,15 @@ impl BbBreakout {
         // outside the new window are evicted lazily on the next tick.
         // EDGE-P2-2 FUP：熱重載 min_delta 噪音地板；舊樣本下次 tick 懶淘汰。
         self.oi_min_delta_pct = params.oi_min_delta_pct;
+        // EDGE-P2-3 Phase 2+: hot-reload PostOnly entry toggles.
+        // EDGE-P2-3 Phase 2+：熱重載 PostOnly 入場參數。
+        self.use_maker_entry = params.use_maker_entry;
+        self.maker_price_offset_bps = params.maker_price_offset_bps;
+        // Clamp at assignment so runtime values always satisfy the invariant.
+        // 於寫入時 clamp，運行時值恆在區間內。
+        self.maker_limit_timeout_ms = super::grid_trading::clamp_maker_limit_timeout_ms(
+            params.maker_limit_timeout_ms,
+        );
         info!(strategy = "bb_breakout", "params updated / 參數已更新");
         Ok(())
     }
@@ -615,6 +658,11 @@ impl BbBreakout {
             // EDGE-P2-2 FUP: echo min-delta threshold for Agent round-trip.
             // EDGE-P2-2 FUP：回傳 min_delta 噪音地板供 Agent 往返。
             oi_min_delta_pct: self.oi_min_delta_pct,
+            // EDGE-P2-3 Phase 2+: PostOnly maker entry fields round-trip.
+            // EDGE-P2-3 Phase 2+：PostOnly maker 入場欄位往返。
+            use_maker_entry: self.use_maker_entry,
+            maker_price_offset_bps: self.maker_price_offset_bps,
+            maker_limit_timeout_ms: self.maker_limit_timeout_ms,
         }
     }
 
@@ -942,6 +990,28 @@ impl Strategy for BbBreakout {
                         let confluence_score = score.map(|s| s as f32);
                         let persistence_elapsed_ms =
                             self.persistence.elapsed_ms(sym, ctx.timestamp_ms);
+                        // EDGE-P2-3 Phase 2+: resolve entry order shape (Market vs PostOnly Limit).
+                        // Only new-open intents go maker; close path below stays Market (scope guard).
+                        // BUY offset below last_price; SELL offset above — PostOnly always rests passively.
+                        // EDGE-P2-3 Phase 2+：決定入場單型（Market 或 PostOnly Limit）。
+                        // 僅新開倉走 maker；平倉保持 Market。BUY 掛 last 下方、SELL 掛上方。
+                        let (order_type, limit_price, time_in_force, maker_timeout_ms) =
+                            if self.use_maker_entry {
+                                let offset = self.maker_price_offset_bps / 10_000.0;
+                                let limit = if is_long {
+                                    ctx.price * (1.0 - offset)
+                                } else {
+                                    ctx.price * (1.0 + offset)
+                                };
+                                (
+                                    "limit".to_string(),
+                                    Some(limit),
+                                    Some(TimeInForce::PostOnly),
+                                    Some(self.maker_limit_timeout_ms),
+                                )
+                            } else {
+                                ("market".to_string(), None, None, None)
+                            };
                         intents.push(StrategyAction::Open(OrderIntent {
                             symbol: ctx.symbol.to_string(),
                             is_long,
@@ -950,12 +1020,12 @@ impl Strategy for BbBreakout {
                                 raw_conf * self.conf_scale,
                             ),
                             strategy: self.name().into(),
-                            order_type: "market".into(),
-                            limit_price: None,
+                            order_type,
+                            limit_price,
                             confluence_score,
                             persistence_elapsed_ms,
-                            time_in_force: None,
-                            maker_timeout_ms: None,
+                            time_in_force,
+                            maker_timeout_ms,
                         }));
                         // Commit per-symbol state in a single get_or_init call
                         // to avoid four separate HashMap lookups.
@@ -2204,5 +2274,139 @@ mod tests {
         assert!(p.validate().is_ok(), "0.0 (default) must pass");
         p.oi_min_delta_pct = 0.5;
         assert!(p.validate().is_ok(), "0.5 upper bound must pass");
+    }
+
+    // ── EDGE-P2-3 Phase 2+: PostOnly maker entry tests ──
+    // ── EDGE-P2-3 Phase 2+：PostOnly maker 入場測試 ──
+
+    /// When `use_maker_entry=false` (default), the entry intent keeps the legacy
+    /// Market shape: order_type="market", limit_price=None, TIF=None, maker_timeout_ms=None.
+    /// Byte-identical to pre-Phase-2+ behaviour.
+    /// 當 use_maker_entry=false（默認）時，入場意圖維持原本 Market 形態；與 Phase 2+ 之前 byte-identical。
+    #[test]
+    fn test_bb_breakout_market_entry_when_maker_disabled() {
+        let mut s = BbBreakout::new();
+        s.min_persistence_ms = 0; // disable persistence gate for unit test
+        assert!(!s.use_maker_entry, "use_maker_entry must default to false");
+        // Squeeze then expansion long breakout (mirrors test_squeeze_then_breakout).
+        // 先壓縮再擴張多頭突破（與 test_squeeze_then_breakout 同模式）。
+        s.on_tick(&ctx(0.01, 0.5, 1.0, 0));
+        let i = s.on_tick(&ctx(0.05, 1.1, 2.0, 700_000));
+        assert_eq!(i.len(), 1);
+        match &i[0] {
+            StrategyAction::Open(intent) => {
+                assert_eq!(intent.order_type, "market");
+                assert!(intent.limit_price.is_none());
+                assert!(intent.time_in_force.is_none());
+                assert!(intent.maker_timeout_ms.is_none());
+            }
+            other => panic!("expected Open, got {:?}", other),
+        }
+    }
+
+    /// Long breakout with maker enabled emits PostOnly Limit below last_price.
+    /// Offset 2 bps → limit = price * (1 - 2/10_000). Bit-exact.
+    /// 多頭突破且 maker 啟用 → PostOnly Limit 掛在 last_price 下方（2 bps）。
+    #[test]
+    fn test_bb_breakout_buy_postonly_below_last_price() {
+        let mut s = BbBreakout::new();
+        s.min_persistence_ms = 0;
+        s.use_maker_entry = true;
+        s.maker_price_offset_bps = 2.0; // 2 bps for bit-exact math check
+        s.maker_limit_timeout_ms = 45_000;
+        // Long setup: pctb=1.1 > 1.0 -> is_long
+        // 多頭設置：pctb=1.1 > 1.0 → is_long
+        s.on_tick(&ctx(0.01, 0.5, 1.0, 0));
+        let i = s.on_tick(&ctx(0.05, 1.1, 2.0, 700_000));
+        assert_eq!(i.len(), 1);
+        match &i[0] {
+            StrategyAction::Open(intent) => {
+                assert!(intent.is_long);
+                assert_eq!(intent.order_type, "limit");
+                assert_eq!(intent.time_in_force, Some(TimeInForce::PostOnly));
+                assert_eq!(intent.maker_timeout_ms, Some(45_000));
+                let lp = intent.limit_price.expect("limit_price set");
+                let expected = 50000.0 * (1.0 - 2.0 / 10_000.0);
+                assert!(
+                    (lp - expected).abs() < 1e-9,
+                    "buy PostOnly must be below last_price: got {lp}, expected {expected}"
+                );
+                assert!(lp < 50000.0, "buy limit must rest below last_price");
+            }
+            other => panic!("expected Open, got {:?}", other),
+        }
+    }
+
+    /// Short breakout with maker enabled emits PostOnly Limit above last_price.
+    /// 空頭突破且 maker 啟用 → PostOnly Limit 掛在 last_price 上方。
+    #[test]
+    fn test_bb_breakout_sell_postonly_above_last_price() {
+        let mut s = BbBreakout::new();
+        s.min_persistence_ms = 0;
+        s.use_maker_entry = true;
+        s.maker_price_offset_bps = 2.0; // 2 bps
+        s.maker_limit_timeout_ms = 45_000;
+        // Short setup: pctb=-0.1 < 0.0 -> is_short
+        // 空頭設置：pctb=-0.1 < 0.0 → is_short
+        s.on_tick(&ctx(0.01, 0.5, 1.0, 0));
+        let i = s.on_tick(&ctx(0.05, -0.1, 2.0, 700_000));
+        assert_eq!(i.len(), 1);
+        match &i[0] {
+            StrategyAction::Open(intent) => {
+                assert!(!intent.is_long);
+                assert_eq!(intent.order_type, "limit");
+                assert_eq!(intent.time_in_force, Some(TimeInForce::PostOnly));
+                assert_eq!(intent.maker_timeout_ms, Some(45_000));
+                let lp = intent.limit_price.expect("limit_price set");
+                let expected = 50000.0 * (1.0 + 2.0 / 10_000.0);
+                assert!(
+                    (lp - expected).abs() < 1e-9,
+                    "sell PostOnly must be above last_price: got {lp}, expected {expected}"
+                );
+                assert!(lp > 50000.0, "sell limit must rest above last_price");
+            }
+            other => panic!("expected Open, got {:?}", other),
+        }
+    }
+
+    /// update_params round-trips maker fields for Agent IPC hot-reload, and the
+    /// maker_limit_timeout_ms clamp invariant [15_000, 300_000] is enforced at
+    /// assignment. Tests both extremes (1_000 → 15_000, 500_000 → 300_000).
+    /// update_params 回吐 maker 欄位供 Agent IPC 熱重載；maker_limit_timeout_ms 寫入時
+    /// clamp 至 [15_000, 300_000]；驗證兩端（1_000→15_000、500_000→300_000）。
+    #[test]
+    fn test_bb_breakout_update_params_roundtrips_maker_fields() {
+        let mut s = BbBreakout::new();
+        let mut p = s.get_params();
+        assert!(!p.use_maker_entry, "default must be false");
+        // In-band round-trip: flag + offset + in-range timeout.
+        // 在有效區間內的往返：旗標 + offset + timeout。
+        p.use_maker_entry = true;
+        p.maker_price_offset_bps = 3.0;
+        p.maker_limit_timeout_ms = 60_000;
+        s.update_params(p.clone()).expect("valid params");
+        let back = s.get_params();
+        assert!(back.use_maker_entry);
+        assert!((back.maker_price_offset_bps - 3.0).abs() < 1e-9);
+        assert_eq!(back.maker_limit_timeout_ms, 60_000);
+        // Runtime fields reflect the update.
+        // 運行時欄位亦已更新。
+        assert!(s.use_maker_entry);
+        assert!((s.maker_price_offset_bps - 3.0).abs() < 1e-9);
+        assert_eq!(s.maker_limit_timeout_ms, 60_000);
+
+        // Upper-bound clamp: 500_000 → 300_000.
+        // 上限 clamp：500_000 → 300_000。
+        let mut p_hi = s.get_params();
+        p_hi.maker_limit_timeout_ms = 500_000;
+        s.update_params(p_hi).expect("valid params");
+        assert_eq!(s.get_params().maker_limit_timeout_ms, 300_000);
+
+        // Lower-bound clamp: 1_000 → 15_000.
+        // 下限 clamp：1_000 → 15_000。
+        let mut p_lo = s.get_params();
+        p_lo.maker_limit_timeout_ms = 1_000;
+        s.update_params(p_lo).expect("valid params");
+        assert_eq!(s.get_params().maker_limit_timeout_ms, 15_000);
     }
 }

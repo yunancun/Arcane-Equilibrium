@@ -569,6 +569,20 @@ pub struct BbBreakoutParams {
     pub confluence_threshold_light: f64,
     #[serde(default = "default_threshold_full")]
     pub confluence_threshold_full: f64,
+    /// EDGE-P2-3 Phase 2+: emit PostOnly Limit entries (maker fee) instead of Market.
+    /// Default `false`; per-env TOML enables.
+    /// EDGE-P2-3 Phase 2+：入場改發 PostOnly Limit（maker 費率）；默認 false。
+    #[serde(default = "default_use_maker_entry")]
+    pub use_maker_entry: bool,
+    /// EDGE-P2-3 Phase 2+: PostOnly limit placement offset from last_price (bps).
+    /// EDGE-P2-3 Phase 2+：PostOnly 限價相對 last_price 的 bps 偏移。
+    #[serde(default = "default_maker_price_offset_bps")]
+    pub maker_price_offset_bps: f64,
+    /// EDGE-P2-3 Phase 2+: timeout (ms) for unfilled PostOnly Limit sweep.
+    /// Default 45_000; runtime clamped to [15_000, 300_000].
+    /// EDGE-P2-3 Phase 2+：PostOnly 掛單逾時毫秒；運行時 clamp [15_000, 300_000]。
+    #[serde(default = "default_maker_limit_timeout_ms")]
+    pub maker_limit_timeout_ms: u64,
 }
 
 fn default_entry_conf_base_bbb() -> f64 {
@@ -690,6 +704,11 @@ impl Default for BbBreakoutParams {
             confluence_threshold_no_trade: 45.0,
             confluence_threshold_light: 52.0,
             confluence_threshold_full: 58.0,
+            // EDGE-P2-3 Phase 2+: conservative cold-boot defaults (root principle #6).
+            // EDGE-P2-3 Phase 2+：冷啟動保守默認（根原則 #6）。
+            use_maker_entry: false,
+            maker_price_offset_bps: 1.0,
+            maker_limit_timeout_ms: 45_000,
         }
     }
 }
@@ -1123,6 +1142,15 @@ impl StrategyFactory {
         bbb.min_persistence_ms = p.bb_breakout.min_persistence_ms;
         bbb.min_notional_usd = p.bb_breakout.min_notional_usd;
         bbb.confluence_config = p.bb_breakout.build_confluence_config();
+        // EDGE-P2-3 Phase 2+: wire maker-entry params from TOML.
+        // EDGE-P2-3 Phase 2+：從 TOML 接線 PostOnly 入場參數。
+        bbb.use_maker_entry = p.bb_breakout.use_maker_entry;
+        bbb.maker_price_offset_bps = p.bb_breakout.maker_price_offset_bps;
+        // Clamp at assignment (same invariant as grid_trading).
+        // 於寫入時 clamp（與 grid_trading 相同不變量）。
+        bbb.maker_limit_timeout_ms = grid_trading::clamp_maker_limit_timeout_ms(
+            p.bb_breakout.maker_limit_timeout_ms,
+        );
         bbb.set_conf_scale(p.bb_breakout.conf_scale);
         bbb.set_active(p.bb_breakout.active);
         strategies.push(Box::new(bbb));
