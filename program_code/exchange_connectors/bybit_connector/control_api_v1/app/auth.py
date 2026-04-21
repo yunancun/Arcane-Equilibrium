@@ -56,13 +56,29 @@ _AUTH_CREDENTIALS: dict[str, str] | None = None
 def _load_auth_credentials() -> dict[str, str]:
     """Load auth credentials once at startup and cache.
     启动时加载一次认证凭证并缓存，后续直接返回缓存值。
+
+    Cross-platform path resolution (CLAUDE.md §七.★★.1):
+    1. $OPENCLAW_SECRETS_ROOT/environment_files/gui_auth.env
+    2. Linux legacy: ~/BybitOpenClaw/secrets/gui_auth.env
+
+    跨平台路徑解析（CLAUDE.md §七.★★.1）：優先讀 $OPENCLAW_SECRETS_ROOT，
+    再 fallback 到 Linux legacy 預設路徑（不破壞既有部署）。
     """
     global _AUTH_CREDENTIALS
     if _AUTH_CREDENTIALS is not None:
         return _AUTH_CREDENTIALS
     creds: dict[str, str] = {}
-    env_path = Path(os.path.expanduser("~/BybitOpenClaw/secrets/gui_auth.env"))
-    if env_path.exists():
+    env_path: Path | None = None
+    secrets_root = os.environ.get("OPENCLAW_SECRETS_ROOT")
+    if secrets_root:
+        candidate = Path(secrets_root) / "environment_files" / "gui_auth.env"
+        if candidate.exists():
+            env_path = candidate
+    if env_path is None:
+        legacy = Path(os.path.expanduser("~/BybitOpenClaw/secrets/gui_auth.env"))
+        if legacy.exists():
+            env_path = legacy
+    if env_path is not None:
         with open(env_path) as f:
             for line in f:
                 line = line.strip()
