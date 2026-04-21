@@ -3,7 +3,7 @@
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
 > 最後更新：2026-04-21（GATE1-REVERSAL-1 hotfix A：v1 risk_checks Gate 1 Lock → Hold 同步對齊 v2 設計意圖）
 
-### GATE1-REVERSAL-1 hotfix A — v1 risk_checks Gate 1 Lock → Hold（2026-04-21 · commit 待填）
+### GATE1-REVERSAL-1 hotfix A — v1 risk_checks Gate 1 Lock → Hold（2026-04-21 · commit `d0f0c21`）
 
 **目標**：上一 commit `aee96b9` DUAL-TRACK-EXIT-1 Phase 1b v2 交付後，主會話 QC 揭露 v1 `risk_checks::physical_micro_profit_lock` Priority 6 Gate 1 行為（`edge < floor → Lock`）違反 DUAL-TRACK-EXIT-1 設計意圖「防止剛有大於 fee 的微利就套離場」。Operator 選 (A) 獨立 hotfix commit 立即修 v1，不等下一波 Priority 6 整體替換。理由：v1 是 live 行為，continue 會在 demo 持續產出過早 close 紀錄，壓低 Phase 5 edge 觀察信號純度。
 
