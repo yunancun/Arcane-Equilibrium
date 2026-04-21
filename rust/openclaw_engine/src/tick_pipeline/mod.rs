@@ -11,7 +11,6 @@
 //!   持有所有子系統（KlineManager、IndicatorEngine、SignalEngine、Orchestrator、
 //!   IntentProcessor、PaperState、StopManager、Governance）。
 
-use crate::risk_checks::RiskAction;
 use openclaw_core::{
     governance_core::{GovernanceCore, GovernanceProfile},
     h0_gate::H0Gate,
@@ -24,8 +23,7 @@ use openclaw_types::{PriceEvent, PriceEventKind};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
-use std::time::Instant;
-use tracing::{debug, info, warn};
+use tracing::{info, warn};
 
 use crate::instrument_info::InstrumentInfoCache;
 use crate::intent_processor::IntentProcessor;
