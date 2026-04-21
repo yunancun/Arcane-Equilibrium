@@ -1,10 +1,10 @@
 # OpenClaw TODO — 工作清單
 
-**最後更新**：2026-04-20（EDGE-P2-2 Phase A OI confluence signal + E2 FUP #1-#7 全修 `381c542`；EDGE-P2-3 Phase 1B-4.3 + 1B-5 hot-reload + FUP-4 全部結案；14 個完成項批量歸檔 → `docs/archive/2026-04-20--completed_todo_batch.md`）
+**最後更新**：2026-04-21（DUAL-TRACK-EXIT-1 Phase 1b Track P v2 非線性 giveback pure fn ✅ — `physical_micro_profit_lock_v2` + `ExitConfig` + 31 單測；QC 反轉 Gate 1 語意 `edge <= floor → Hold`（v1 Priority 6 仍為 Lock，待 `GATE1-REVERSAL-1` 下一波同步修）；engine lib **1791 → 1816** passed。先前：2026-04-20 EDGE-P2-2 Phase A `381c542` + EDGE-P2-3 Phase 1B-4.3/1B-5/FUP-4 全部結案；14 個完成項批量歸檔 → `docs/archive/2026-04-20--completed_todo_batch.md`）
 **Engine**：PID 3029633 · binary mtime 2026-04-19 22:32 → 含全部先前 staged 修復（P0-6 永久修復 + P1-7 A INTENT-WRITE-GAP-1 + P1-7 B edge_estimator scheduler + P1-17 Winsorize + LIVE-GATE-BINDING-1 + DYNAMIC-RISK-1 + IPC-SCAN-1c + FILL-CONTEXT-LINKAGE-1 + EXIT-FEATURES-TABLE-1 Phase 1b + Plan N ai_budget dedup + E5-P1/P2 + E5-FN-2/3 + DISPATCH-RETRY-1 + MARKET-KLINES-STALE-1 + DUAL-TRACK Track P T1-T5 骨架 + PIPELINE-SLOT-1 Phase 1-4）+ **EXIT-FEATURES-TABLE-1 Phase 1b GAP-1**（commit `35808e9` apply_confirmed_fill 接線，待流量驗證）
 **Python uvicorn**：PID 3029688（4 workers）· started 2026-04-19 22:33 → 含 P0-12 LIVE-GATE-FALLBACK-1 + E5-FN-3 AnalystAgent pilot + PIPELINE-SLOT-1 Phase 4 daemon-thread trigger
 **PIPELINE-SLOT-1 live 驗證**：LiveAuthWatcher 22:33 啟動 `env=LiveDemo poll_interval_secs=5`；authorization.json 已由 Manual restart sentinel 清除；等 operator 走 GUI renew → 應 ≤1s 觀察到 Live pipeline 重生
-**測試基準線**：Rust engine lib **1791** / bin 38 / core 392 / e2e 35 / reconciler_e2e 19 · Python **2866** passed（+9 E5-FN-3 + 2 DYNAMIC-RISK-STATUS-TEST-SIG-1 修復 83a0475 + 16 WATCHDOG-DNS-CLASSIFY-1 新測）+ audit 4 passed / ml_training 238 passed · **0 pre-existing fail**（DYNAMIC-RISK 已清）
+**測試基準線**：Rust engine lib **1816**（+25 DUAL-TRACK-EXIT-1 Phase 1b v2 / Mac debug 跑出；Linux release 待 `--rebuild` 後驗證）/ bin 38 / core 392 / e2e 35 / reconciler_e2e 19 · Python **2866** passed（+9 E5-FN-3 + 2 DYNAMIC-RISK-STATUS-TEST-SIG-1 修復 83a0475 + 16 WATCHDOG-DNS-CLASSIFY-1 新測）+ audit 4 passed / ml_training 238 passed · **0 pre-existing fail**（DYNAMIC-RISK 已清）
 
 > engine lib 1631 → 1770（+139）→ 1791（+21）差距 = 1B-4.1/4.2 · 1B-5 gate · 3 FUPs · 1B-4.3 funding drag · 1B-5 hot-reload · FUP-4（9 commits `0febdc3..a93dbda`）+ **EDGE-P2-2 Phase A + FUP #1-#7 `381c542`**（+13 OI tests + 8 FUP tests）。當前 engine binary PID 3029633（mtime 2026-04-19 22:32）**不含** `bd1a429` + `a2a791b` + `a93dbda` + `381c542`，下次 `--rebuild` 才會進入 runtime。
 **健康**：demo alive（snapshot age 5.9s） · paper/live 預期 dead（PAPER-DISABLE-1 + 待 renew） · 今日 1 crash（12:25，為 redeploy 前殘留）
@@ -97,12 +97,17 @@ git status && git log --oneline -5
 ### Phase 2 · W25（原 W24，延後 1 週）— Track L shadow + P1-10 並行
 
 **軌道 1 Track P 物理層**：
-- [ ] `peak_reached_ts_ms` 欄位加到 `PaperPosition`（含 legacy migration）
-- [ ] `price_tracker` 加 `compute_roc(symbol, lookback_ms)`
+- [x] `peak_reached_ts_ms` 欄位加到 `PaperPosition`（含 legacy migration）— 2026-04-19 EXIT-FEATURES-TABLE-1 Phase 1b FUP（5 tests in paper_state/containers.rs）
+- [x] `price_tracker` 加 `compute_roc(symbol, lookback_ms)`— 2026-04-19 同 wave（15 tests in openclaw_core::risk::price_tracker）
 - [ ] 7 維度規則 in `risk_checks.rs`（Priority 6 替換現有 COST EDGE，重命名 `PHYS-LOCK`）+ ConfigStore hot-reload
+  - ✅ **v2 pure fn 已落地 2026-04-21**：`exit_features::physical_micro_profit_lock_v2` + `ExitConfig` 7 欄位 + `non_linear_giveback_fn`（linear decay + floor bound）+ 31 單測（Gate 1 Hold 語意對齊設計）
+  - 待做：Priority 6 替換 + ConfigStore ArcSwap 綁定 + 閾值由 counterfactual replay 校準
 - [ ] Combine Layer 骨架（Track L 缺失時等同 P-only）
 - [ ] E2 + E4：counterfactual replay audit（demo 7d）+ ≥18 單測（spike-wick 不誤觸 / 長期 winner 不誤砍 / 波動率歸一化邊界 / hot-reload / 早期寬容 / ML 缺席退化）
+  - ✅ 單測 **31 個**（含 Gate 1-4 + 非線性單調 + 邊界 + serde + Gate 1→Gate 4 端到端）2026-04-21
+  - 待做：counterfactual replay audit（demo 7d tick-level，Mac 做不了，待 Linux）
 - [ ] E5：rebuild + 灰度部署（保守閾值，24h 無 fee 惡化才收緊）
+- [ ] **GATE1-REVERSAL-1 (P1，2026-04-21)**：v1 `risk_checks.rs:312-323` Priority 6 Gate 1 `edge < floor → Lock` 違反 DUAL-TRACK-EXIT-1 設計意圖（應 Hold；設計文檔 §三 L108-111 偽代碼 + operator QC 明確指示「防止剛有大於 fee 的微利就套離場」+「Lock 唯一路徑收斂至 Gate 4 trailing」）。v2 `physical_micro_profit_lock_v2` 已修為 Hold。**下一波 Priority 6 替換時一併修 v1** + 統一符號：Gate 1 `<` → `<=`、Gate 4b `>` → `>=` 對齊設計。影響評估：v1 現行「edge 掉到 5 bps 以下即 Lock」等同 greedy 微利鎖，可能壓低 Phase 5 demo 單筆 close 盈利；修復後需重新觀察 demo 1-3d 看 edge 變化
 
 - [ ] Combine Layer 啟用 `ml_override_high=2.0`（不可達），只寫 `learning.decision_shadow_fills`
 - [ ] 每日對比 P vs L 一致性（target ≥60%）→ 校準 `ml_confirm_threshold / ml_override_high / ml_veto_low`
