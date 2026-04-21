@@ -1,7 +1,31 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-04-21（TODO 1+2 outcome_backfiller wire engine_mode + timeframe strings fix）
+> 最後更新：2026-04-21（EDGE-P2-3 Phase 2+ (b) bb_breakout + ma_crossover PostOnly entry wiring merged）
+
+### EDGE-P2-3 Phase 2+ (b) bb_breakout + ma_crossover PostOnly entry wiring（2026-04-21 · merges `f5f4dc2` + `8280132`）
+
+**觸發**：兩個 2026-04-20 分工平行 feature 分支（`ma_crossover_postonly` / `bb_breakout_postonly`）rebase 上 main 後依次 `--no-ff` merge 收尾；兩者鏡像 grid_trading Phase 1A 的 `default_use_maker_entry` / `default_maker_price_offset_bps` / `default_maker_limit_timeout_ms` + `grid_trading::clamp_maker_limit_timeout_ms` shared helpers，把 PostOnly Limit entry path 擴展到第二、三個策略。Close path 不動，維持 entry-only scope。
+
+**Rebase 衝突處理**（CC 解）：`bb_breakout_postonly` 與 main 在 `bb_breakout.rs`（7 hunks：struct / Default / runtime / ctor / update_params / get_params / test module）+ `settings/strategy_params_{demo,live,paper}.toml` 衝突；HEAD 帶 EDGE-P2-2 Phase A OI confluence signal（`enable_oi_signal` / `oi_buffer_window_ms` / `oi_confluence_bonus` / `oi_min_delta_pct`），branch 帶 EDGE-P2-3 Phase 2+ (b) PostOnly entry（`use_maker_entry` / `maker_price_offset_bps` / `maker_limit_timeout_ms`）——兩組 feature 正交，全部保留並排放。Test module 特別處理：HEAD 647 行 OI tests + branch 133 行 PostOnly tests 之間補上缺失的 `}` 關閉 `fn test_oi_min_delta_pct_validation` 避免編譯斷裂。`ma_crossover_postonly` 自動 merge（branch 僅加新欄位，無衝突）。
+
+**Operator 加碼**（merge 後）：三個 env TOML `[ma_crossover]` section 補上 `use_maker_entry` + `maker_price_offset_bps` + `maker_limit_timeout_ms`（demo/paper = true，live = false，與 bb_breakout 對齊）。
+
+**改動**（2 feature commit + 2 merge commit）：
+
+1. `9edc6a4` — bb_breakout：`BbBreakoutParams` 3 PostOnly 欄位 + Default + runtime + ctor + update_params + get_params + 4 新 unit tests；`mod.rs` `BbBreakoutParamsToml` 接線；三環境 TOML 加欄位（demo/paper true、live false）。
+2. `b2d8ac5` — ma_crossover：`make_intent_with_qty` 依 `use_maker_entry` flag 解析 order shape（PostOnly Limit BUY below / SELL above last_price，否則 Market）；Close path 不變；+4 tests；三環境 TOML 加欄位。
+3. `f5f4dc2` — `merge: EDGE-P2-3 Phase 2+ (b) ma_crossover PostOnly entry wiring`（`--no-ff`，fast-forward-safe rebase 後）。
+4. `8280132` — `merge: EDGE-P2-3 Phase 2+ (b) bb_breakout PostOnly entry wiring`（`--no-ff`，CC 手動解 7 hunks + TOML 3 hunks 後）。
+
+**驗證**：
+- `cargo test -p openclaw_engine --lib` (debug)：**1827 passed / 0 failed / 0 ignored**（baseline 1819 + 4 bb PostOnly + 4 ma PostOnly）/ 0.52s。
+- Fee routing 沿用既有 `intent_processor::fee_rate_for_intent`（strategy-agnostic，keys off `intent.time_in_force`），3 個 PostOnly 策略（grid / bb_breakout / ma_crossover）現走同一條 maker-fee path。
+- Live 端三個 TOML 全部 `use_maker_entry = false`（root principle #6 保守；demo 驗證正 net edge 後再評估 flip）。
+
+**Runtime 狀態**：engine binary 未重新部署（當前 PID 3813984 不含此兩 commit）；下次 `restart_all.sh --rebuild` 才進 runtime。部署前三個 PostOnly 策略 live TOML 均保留 `false`，風險為零。
+
+**清理**：`bb_breakout_postonly` + `ma_crossover_postonly` 本地分支已 merged 進 main（可 `git branch -d` 安全刪除）；遠端 `origin/feature/p1-16-h0-gate-deterministic` tip `372432f` 已在 origin/main 上（可刪）。
 
 ### TODO 1+2 outcome_backfiller wiring fix（2026-04-21 · commit `5e2981d`）
 
