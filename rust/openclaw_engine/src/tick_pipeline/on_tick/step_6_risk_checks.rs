@@ -1,0 +1,359 @@
+//! Step 6: position risk checks (9-check RRC-1-C2) + halt / cooldown dispatch.
+//! Step 6：9 項持倉風控檢查（RRC-1-C2）+ halt / cooldown 派發。
+//!
+//! Per-position math (pnl_pct / peak_pnl_pct / holding_hours / cost_ratio +
+//! `check_position_on_tick`) is delegated to
+//! `position_risk_evaluator::evaluate_positions`. Decision-vs-mechanism
+//! split: that module computes WHAT to do (pure), the dispatch loop below
+//! executes the side-effects (close / halt / cooldown). Behaviour preserved
+//! because the original code already snapshotted positions into a Vec before
+//! dispatching, so reading-then-acting in two phases is identical to the
+//! inline form.
+//!
+//! 逐倉計算抽出至 `position_risk_evaluator::evaluate_positions`；派發迴圈
+//! 仍負責所有副作用。行為與原始碼一致（原碼本就先快照後派發，兩階段等價於
+//! 內聯）。
+//!
+//! ## T4 builder closure borrow shape
+//!
+//! The `exit_features_fn` closure captures three immutable sub-borrows of
+//! `self` (`paper_state`, `price_tracker`, `intent_processor.edge_estimates`)
+//! which coexist with the already-live `&risk_config`. The closure is
+//! consumed by `evaluate_positions` and its borrows end before the side-
+//! effectful `risk_closed_symbols` dispatch loop below. This pattern MUST
+//! stay inside a single method — splitting `risk_config` and the closure
+//! capture across functions would force clones or RefCell, both disallowed
+//! under ON-TICK-SPLIT-1's zero-change mandate.
+//!
+//! Closure 捕獲 self 的三個 immutable sub-borrow，與既有 `&risk_config` 共
+//! 存；於 `evaluate_positions` 返回後借用結束，派發迴圈才執行 side-effect。
+//! 此借用型態必須整塊留在單一方法內（跨方法拆分需要 clone / RefCell，與
+//! ON-TICK-SPLIT-1 零變更契約牴觸）。
+
+use tracing::{info, warn};
+
+use super::super::*;
+use crate::risk_checks::RiskAction;
+
+impl TickPipeline {
+    /// Execute Step 6: position risk checks + halt / cooldown dispatch +
+    /// external-close callbacks.
+    ///
+    /// No return value and no early exit — mutates `self` in place. Strategy
+    /// external-close notifications are emitted at the end of the method so
+    /// `strategies_mut()` is only borrowed once the `risk_closed_symbols`
+    /// vector is stable.
+    ///
+    /// 執行 Step 6：持倉風控 + halt/cooldown 派發 + 策略外部平倉回調。無返回
+    /// 值、無早退；`strategies_mut()` 借用延至 `risk_closed_symbols` 穩定後。
+    pub(super) fn on_tick_step_6_risk_checks(&mut self, event: &PriceEvent) {
+        // Step 6: Position risk checks — 9-check (RRC-1-C2, replaces basic check_stops).
+        // 步驟 6：持倉風控 9 項檢查（RRC-1-C2，替代基本止損）。
+        //
+        // P2 refactor (2026-04-07): per-position math (pnl_pct / peak_pnl_pct /
+        // holding_hours / cost_ratio + check_position_on_tick) extracted to
+        // `position_risk_evaluator::evaluate_positions`. Decision-vs-mechanism
+        // split: that module computes WHAT to do (pure), the dispatch loop
+        // below executes the side-effects (close / halt / cooldown). Behavior
+        // preserved because the original code already snapshotted positions
+        // into a Vec before dispatching, so reading-then-acting in two phases
+        // is identical to the inline form.
+        // P2 重構（2026-04-07）：逐倉計算抽出至 position_risk_evaluator；
+        // 派發迴圈仍負責所有副作用，行為與原始碼一致。
+        // EXIT-FEATURES-TABLE-1: pass wall-clock ts so `peak_reached_ts_ms`
+        // advances whenever max_favorable_pnl_pct records a new high. Legacy
+        // `update_best_prices()` (ts=0) leaves peak timestamps stuck.
+        // EXIT-FEATURES-TABLE-1：傳入 tick 時戳，讓 peak_reached_ts_ms 在新高
+        // 時同步推進；舊 update_best_prices() 等同 ts=0，peak 戳不動。
+        self.paper_state.update_best_prices_at(event.ts_ms as i64);
+        let session_drawdown = self.paper_state.drawdown_pct();
+        let daily_loss = self
+            .intent_processor
+            .daily_loss_pct_pub(self.paper_state.balance());
+        // FIX-32: borrow instead of deep-cloning RiskConfig per tick.
+        let risk_config = self.intent_processor.risk_config();
+        let position_rows: Vec<crate::position_risk_evaluator::PositionRow> = self
+            .paper_state
+            .positions()
+            .iter()
+            .map(|p| {
+                let current_price = self
+                    .latest_prices
+                    .get(&p.symbol)
+                    .copied()
+                    .unwrap_or(p.entry_price);
+                crate::position_risk_evaluator::PositionRow {
+                    symbol: p.symbol.clone(),
+                    is_long: p.is_long,
+                    qty: p.qty,
+                    entry_price: p.entry_price,
+                    entry_ts_ms: p.entry_ts_ms,
+                    peak_price: p.best_price,
+                    current_price,
+                    atr_pct: self.price_tracker.compute_atr_pct(&p.symbol),
+                    fee_rate: self.intent_processor.fee_rate(&p.symbol),
+                    regime: self.derive_regime(self.latest_indicators.get(&p.symbol)),
+                    consecutive_losses: self
+                        .consecutive_losses
+                        .get(&p.symbol)
+                        .copied()
+                        .unwrap_or(0),
+                }
+            })
+            .collect();
+        // ARCH-RC1 1C-2-B: live read from BudgetConfig store (falls back to
+        // defaults in tests where store is not wired).
+        // MICRO-PROFIT-FIX-1 (2026-04-17): add matching live read for
+        // min_profit_to_close_pct so the narrow lock-in band is applied on every tick.
+        // ARCH-RC1 1C-2-B：即時從 BudgetConfig store 讀取；未接線時回退 default。
+        // MICRO-PROFIT-FIX-1：同步讀取 min_profit_to_close_pct，實現窄帶觸發。
+        let cost_edge_max_ratio = self.current_cost_edge_max_ratio();
+        let min_profit_to_close_pct = self.current_min_profit_to_close_pct();
+        // DUAL-TRACK-EXIT-1 Track P **T4 wiring** (2026-04-21 · TRACK-P-T4-WIRING-1):
+        // real ExitFeatures builder replaces the former `|_| None` placeholder.
+        // Per live position we look up (a) the mid-life `PositionExitSnapshot`
+        // from `paper_state`, (b) short-horizon ROC (300 ms) from
+        // `price_tracker` — ATR% is already on the row, (c) the JS-shrunk edge
+        // estimate for `(owner_strategy, symbol)` from the intent-processor
+        // cache. Any miss → `Option::None` → Priority-6 4-Gate responds with a
+        // conservative Hold (pre-T3 semantics preserved as the degenerate case).
+        //
+        // Borrow split: closure captures only immutable sub-borrows of `self`
+        // (paper_state / price_tracker / edge_estimates), which coexist with
+        // the already-live `&risk_config` (= `&self.intent_processor.risk_config()`).
+        // The closure is consumed by `evaluate_positions` and its borrows end
+        // before the side-effectful `risk_closed_symbols` dispatch loop.
+        //
+        // Before T4: Priority 6 PHYS-LOCK was inert in production (0 fires
+        // over the full decision_outcomes history; see
+        // `memory/project_track_p_runtime_dead.md`). With T4 in place the
+        // 4-Gate lock runs every tick and can trigger
+        // `phys_lock_gate4_giveback` / `phys_lock_gate4_stale_roc_neg`.
+        //
+        // DUAL-TRACK-EXIT-1 Track P **T4 接線**（2026-04-21 · TRACK-P-T4-WIRING-1）：
+        // 以實際 ExitFeatures 建構器取代舊 `|_| None` 佔位。逐倉查
+        // (a) `paper_state` 即時快照、(b) `price_tracker.compute_roc(300ms)`、
+        // (c) intent_processor 邊際估計快取；任一缺失 → None → Priority 6
+        // 4-Gate 保守 Hold。Closure 僅捕獲 self 的 immutable sub-borrow，
+        // 與既有 `&risk_config` 共存；借用於 evaluate_positions 返回後結束。
+        // T4 接線前 Priority 6 生產 0 次觸發（見 memory/project_track_p_runtime_dead.md）。
+        let paper_state_ref = &self.paper_state;
+        let price_tracker_ref = &self.price_tracker;
+        let edge_estimates_ref = self.intent_processor.edge_estimates();
+        let tick_ts_ms = event.ts_ms;
+        let exit_features_fn =
+            |row: &crate::position_risk_evaluator::PositionRow|
+                -> Option<crate::exit_features::ExitFeatures> {
+                // Mid-life snapshot (not pre-close). Skip (None → Hold) when
+                // the position has vanished between row collection and here —
+                // e.g. racing IPC close on the same tick batch.
+                // 即時快照（非 pre-close）；position 在收集與此處之間被移除
+                // （例：同 tick IPC 先行 close）→ None → 下游 Hold。
+                let snap = paper_state_ref.position_exit_snapshot(&row.symbol)?;
+                let price_roc_short = price_tracker_ref.compute_roc(&row.symbol, 300);
+                let est_net_bps = edge_estimates_ref
+                    .get_cell(&snap.owner_strategy, &row.symbol)
+                    .map(|c| c.shrunk_bps as f32);
+                Some(crate::exit_features::build_exit_features_for_tick(
+                    &snap,
+                    row.current_price,
+                    row.atr_pct,
+                    price_roc_short,
+                    est_net_bps,
+                    tick_ts_ms,
+                ))
+            };
+        let decisions = crate::position_risk_evaluator::evaluate_positions(
+            &position_rows,
+            daily_loss,
+            session_drawdown,
+            event.ts_ms,
+            cost_edge_max_ratio,
+            min_profit_to_close_pct,
+            exit_features_fn,
+            &risk_config,
+        );
+
+        let is_exchange_mode = self.pipeline_kind.is_exchange();
+        let mut risk_closed_symbols: Vec<String> = Vec::new();
+        for decision in &decisions {
+            let symbol = &decision.symbol;
+            let is_long = &decision.is_long;
+            let qty = &decision.qty;
+            let pnl_pct = &decision.pnl_pct;
+            let _entry_ts_ms = &decision.entry_ts_ms;
+            match decision.action.clone() {
+                RiskAction::Hold => {} // no action / 無動作
+                RiskAction::ClosePosition(reason) => {
+                    // DUAL-TRACK-EXIT-1 T4: route PHYS-LOCK closes through the Combine Layer
+                    // so exit_source is recorded. Phase 1a passes ml_opt=None →
+                    // combine_exit_decision always returns (Lock, Physical). This is a
+                    // pure audit-side wrapper; the existing close path proceeds unchanged.
+                    // Non-PHYS-LOCK reasons (HARD STOP / TAKE PROFIT / TRAILING / TIME STOP /
+                    // COST EDGE pre-T3) are not part of the dual-track exit scope and
+                    // bypass the combine layer (they are P0 hard-stops, not physical-lock
+                    // optimisations).
+                    // TODO(T5 audit): persist exit_source tag into fills.details once
+                    // schema field plumbing lands.
+                    // DUAL-TRACK-EXIT-1 T4：PHYS-LOCK 平倉經 Combine Layer 記錄 exit_source。
+                    // Phase 1a 傳 ml_opt=None → 永遠 (Lock, Physical)；純審計層包裝，
+                    // 現有平倉路徑不變。非 PHYS-LOCK（HARD STOP 等 P0 硬止損）不走 combine layer。
+                    // T4-FIX（2026-04-19）：prefix 由 `PHYS-LOCK` 對齊為 T3 實際輸出的
+                    // `risk_close:phys_lock_` (risk_checks.rs:242 `format!("risk_close:{}", reason)`)。
+                    // 之前 prefix 不匹配導致 combine_layer 在生產 0 次被呼叫，459 LOC + 9 tests 死碼。
+                    // 同時 debug_assert_eq! → assert_eq!，release build 也留下不變式 runtime 防線。
+                    // TODO(T5 audit)：等 fills.details 欄位 plumbing 到位後持久化 exit_source。
+                    // T4-FIX (2026-04-19): prefix aligned from `PHYS-LOCK` to the T3-actual
+                    // `risk_close:phys_lock_` (risk_checks.rs:242). Previously mismatched →
+                    // combine_layer called 0× in prod, 459 LOC + 9 tests dead.
+                    // Also promote debug_assert_eq! → assert_eq! so the invariant holds in
+                    // release builds.
+                    if let Some(lock_tag) = super::strip_phys_lock_prefix(&reason) {
+                        super::log_phys_lock_through_combine_layer(symbol, &reason, lock_tag);
+                    }
+
+                    risk_closed_symbols.push(symbol.clone());
+                    if is_exchange_mode {
+                        if self.pending_close_symbols.contains(symbol) {
+                            continue;
+                        }
+                        warn!(symbol = %symbol, reason = %reason, "risk close → exchange / 風控平倉 → 交易所");
+                        let tag = format!("risk_close:{reason}");
+                        self.execute_position_close(symbol, *is_long, *qty, event, true, &tag);
+                    } else {
+                        warn!(symbol = %symbol, reason = %reason, "risk close (paper) / 風控平倉（紙盤）");
+                        if *pnl_pct < 0.0 {
+                            *self.consecutive_losses.entry(symbol.clone()).or_insert(0) += 1;
+                        } else {
+                            self.consecutive_losses.remove(symbol);
+                        }
+                        // PNL-FIX-1: risk evaluator can act on cross-symbol positions —
+                        // close at this symbol's own latest price, not event.last_price.
+                        // PNL-FIX-1：風控評估器可作用於跨交易對倉位，必須以該交易對自己的最新價平倉。
+                        let ectx = self
+                            .paper_state
+                            .get_entry_context_id(symbol)
+                            .unwrap_or("")
+                            .to_string();
+                        // EXIT-FEATURES-TABLE-1: snapshot BEFORE close.
+                        // EXIT-FEATURES-TABLE-1：先取快照再平倉。
+                        let snap = self.paper_state.position_exit_snapshot(symbol);
+                        if let Some((_il, _q, close_px, pnl)) =
+                            self.close_position_at_symbol_market(symbol, event.ts_ms)
+                        {
+                            let tag = format!("risk_close:{reason}");
+                            self.emit_close_fill(
+                                symbol,
+                                *is_long,
+                                *qty,
+                                close_px,
+                                event.ts_ms,
+                                pnl,
+                                &tag,
+                                &ectx,
+                                snap.as_ref(),
+                            );
+                            // P1-2 fix: update Kelly stats for risk-close (pre-existing omission).
+                            // P1-2 修復：風控平倉也更新 Kelly 統計（既有遺漏）。
+                            self.intent_processor.record_trade(symbol, pnl);
+                        }
+                        self.stats.total_stops += 1;
+                        let tag = format!("risk_close:{reason}");
+                        self.execute_position_close(symbol, *is_long, *qty, event, false, &tag);
+                    }
+                }
+                RiskAction::HaltSession(reason) => {
+                    // RRC-1-C4: Circuit breaker — halt + close all / 熔斷 — 暫停+全部平倉
+                    warn!(reason = %reason, "SESSION HALTED / 會話暫停");
+                    self.session_halted = true;
+                    self.paper_paused = true;
+                    let all_pos: Vec<(String, bool, f64)> = self
+                        .paper_state
+                        .positions()
+                        .iter()
+                        .map(|p| (p.symbol.clone(), p.is_long, p.qty))
+                        .collect();
+                    for (sym, _, _) in &all_pos {
+                        risk_closed_symbols.push(sym.clone());
+                    }
+                    for (sym, il, q) in &all_pos {
+                        // Q1 fix: skip already-dispatched closes / 跳過已派發的平倉
+                        if is_exchange_mode && self.pending_close_symbols.contains(sym) {
+                            continue;
+                        }
+                        // P1-16 fix: use the per-symbol helper (paper_state.latest_price →
+                        // entry_price fallback) instead of `event.last_price`, which carries
+                        // the triggering tick's symbol price and would stamp that single
+                        // price across every other symbol's halt close fill — the root cause
+                        // behind `learning.decision_features` getting `-17M bps` realized
+                        // edge rows when ETHUSDT triggered halt.
+                        // P1-16 修復：改用 per-symbol helper（paper_state.latest_price →
+                        // entry_price fallback）取代 `event.last_price`。後者攜帶觸發 tick
+                        // 的那個交易對的價，會把這一個價蓋到 halt 時每個其他交易對的平倉
+                        // fill，正是 ETHUSDT 觸發 halt 時 learning.decision_features 出現
+                        // `-17M bps` realized edge 列的根因。
+                        let ectx = self
+                            .paper_state
+                            .get_entry_context_id(sym)
+                            .unwrap_or("")
+                            .to_string();
+                        // EXIT-FEATURES-TABLE-1: snapshot BEFORE close.
+                        // EXIT-FEATURES-TABLE-1：先取快照再平倉。
+                        let snap = self.paper_state.position_exit_snapshot(sym);
+                        if let Some((_il, _q, close_px, pnl)) =
+                            self.close_position_at_symbol_market(sym, event.ts_ms)
+                        {
+                            self.emit_close_fill(
+                                sym,
+                                *il,
+                                *q,
+                                close_px,
+                                event.ts_ms,
+                                pnl,
+                                "risk_close:halt_session",
+                                &ectx,
+                                snap.as_ref(),
+                            );
+                        }
+                        self.stats.total_stops += 1;
+                        self.execute_position_close(
+                            sym,
+                            *il,
+                            *q,
+                            event,
+                            is_exchange_mode,
+                            "risk_close:halt_session",
+                        );
+                    }
+                    break;
+                }
+                RiskAction::SetCooldown(ms) => {
+                    // RRC-1-C4: Set cooldown on H0Gate to suppress new orders.
+                    // RRC-1-C4：在 H0 門控設置冷卻期，抑制新訂單。
+                    let until_ms = event.ts_ms + ms;
+                    info!(cooldown_ms = ms, symbol = %symbol,
+                        "cooldown set by risk check / 風控設置冷卻期");
+                    self.h0_gate
+                        .update_risk(openclaw_types::H0GateRiskSnapshot {
+                            open_position_count: self.paper_state.positions().len() as u32,
+                            total_exposure_pct: 0.0, // recalculated next status interval
+                            cooldown_until_ts_ms: until_ms,
+                            kill_switch_active: false,
+                            snapshot_ts_ms: event.ts_ms,
+                        });
+                }
+            }
+        }
+
+        // Notify strategies of externally-closed positions (risk-stop/halt)
+        // so they can reset internal state (e.g., grid net_inventory, position flag).
+        // 通知策略外部平倉的倉位（風控止損/熔斷），讓策略重設內部狀態。
+        if !risk_closed_symbols.is_empty() {
+            for strategy in self.orchestrator.strategies_mut() {
+                for sym in &risk_closed_symbols {
+                    strategy.on_external_close(sym);
+                }
+            }
+        }
+    }
+}
