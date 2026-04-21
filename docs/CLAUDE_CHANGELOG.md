@@ -1,7 +1,47 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-04-21（ON-TICK-SPLIT-1 + AI-SERVICE-CLIENT-ENV-RACE-1 並行派發）
+> 最後更新：2026-04-21（CANARY-WRITER-ENV-RACE-1 + TICK-PIPELINE-MOD-UNUSED-IMPORTS-1 並行派發清尾）
+
+### CANARY-WRITER-ENV-RACE-1 + TICK-PIPELINE-MOD-UNUSED-IMPORTS-1 — 並行派發清尾（2026-04-21 · commits `d454c17` + `c164cb6`）
+
+**觸發**：ON-TICK-SPLIT-1 sub-agent 回報兩個 pre-existing 問題，operator 指示並行派發兩個 sub-agent 清：
+
+1. **CANARY-WRITER-ENV-RACE-1** (`d454c17`)：`canary_writer::tests::{spawn_honours_disable_dump, spawn_without_canary_mode_is_disabled}` 並行跑偶發 flake。套 AI-SERVICE-CLIENT-ENV-RACE-1 (`580304a`) 同一 pure-fn pattern：
+   - 抽 `decide_canary_enable_from(canary_mode: Option<&str>, disable_dump: Option<&str>) -> CanaryEnableDecision`（3-variant enum `Enabled` / `DisabledByMode` / `DisabledByKillSwitch`；3-variant 而非 bool 為保留原 silent-disable vs `info!` log 雙語意）
+   - `spawn()` 改為薄 wrapper 讀 env → 轉呼 pure fn → match 3 variant 保留 fall-through 行為
+   - 移除 2 env-racy 測試，新增 5 decision 測試（`decide_honours_disable_dump` / `decide_without_canary_mode_is_disabled` / `decide_canary_mode_only_enables` / `decide_kill_switch_requires_canary_mode_first` / `decide_non_one_canary_mode_values_are_disabled`）；7 → 10 tests（net +3）
+   - `canary_writer.rs` 454 → 569 行（仍 ≤ 800 soft cap）
+   - 2× parallel `cargo test` 清無 flake
+   - 加 `CANARY-WRITER-ENV-RACE-1 (2026-04-21)` 雙語 explanatory block 於 test module 頂部，鏡像 `580304a` 模板
+
+2. **TICK-PIPELINE-MOD-UNUSED-IMPORTS-1** (`c164cb6`)：ON-TICK-SPLIT-1 (`bfedb56`) 後 `tick_pipeline/mod.rs` 暴露 3 個 unused-import warnings（`RiskAction` / `Instant` / `debug`）。Option A（最乾淨）清法：
+   - 刪 `tick_pipeline/mod.rs` L14 `use crate::risk_checks::RiskAction;`（step_6_risk_checks.rs:36 已有直接 use）
+   - 刪 L27 `use std::time::Instant;`（5 個 step 檔 + on_tick/mod.rs 皆已有直接 use）
+   - L28 `use tracing::{debug, info, warn};` → `use tracing::{info, warn};`（僅移除 `debug`；step_0_5_h0_gate + step_3_signals 已直接 use，其他 callers 走 FQ macro path）
+   - **無 step 檔變動** — ON-TICK-SPLIT-1 拆分時就已將必要 imports 安置於各 step 檔；本次純屬 mod.rs 的殭屍 use 清除
+
+**驗證**（合併後）：
+- Mac debug `cargo test -p openclaw_engine --lib`: 1840 → **1843 passed / 0 failed**（+3 from canary_writer；tick_pipeline-mod-unused 為零語意改動）
+- Linux release `ssh trade-core ... cargo test --release`: 1843 passed / 0 failed
+- `cargo build -p openclaw_engine` warning count: 13 → **10**（-3 對齊 unused-imports 清除；零新 warning）
+- 2× parallel full-lib 跑皆清，CANARY-WRITER flake 根除
+
+**Workflow**：單一 Agent tool-use block 同時發兩個 sub-agent 並行（per system prompt 「並行」指示）。Task A (canary_writer) ~3min scope + Task B (mod.rs imports) ~2min scope，後者更快但兩者非同步完成通知。兩個 sub-agent 被明確指示不 commit/不 push，主 session 收到兩個完成通知後先跑合併測試驗證再分別 commit（A 先 B 後，利 bisect）。
+
+**檔案**（2 commits, 2 files）：
+- `d454c17` — `rust/openclaw_engine/src/canary_writer.rs` +144/-29
+- `c164cb6` — `rust/openclaw_engine/src/tick_pipeline/mod.rs` +1/-3
+
+**Governance**：
+- §七 file size：canary_writer 569 ≤ 800；mod.rs 2273 仍超 1200 hard cap（legacy bloat，`TICK-PIPELINE-MOD-SPLIT-1` P3 另案處理）
+- §七 bilingual：兩 commit 新加 comments 皆中英
+- feedback_subagent_first：典型小 scope 並行派發案例（非編碼決策、機械性 refactor）
+
+**後續 TODO**（本 entry 內衍生）：
+- `TICK-PIPELINE-MOD-SPLIT-1`（P3，~2-3d）：`tick_pipeline/mod.rs` 2273 行超 1200 hard cap，結構上比 on_tick.rs 難拆（涉及 `TickPipeline` struct 定義 + 多 impl block 分散）。不阻塞但列為尾巴。
+
+---
 
 ### ON-TICK-SPLIT-1 — `tick_pipeline/on_tick.rs` 2071 行拆為 8 檔目錄（2026-04-21 · commit `bfedb56` · sub-agent 並行派發）
 
