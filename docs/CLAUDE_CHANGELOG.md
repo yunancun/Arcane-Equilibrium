@@ -1,7 +1,71 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-04-21（EXIT-FEATURES-SPLIT-1 目錄拆分）
+> 最後更新：2026-04-21（ON-TICK-SPLIT-1 + AI-SERVICE-CLIENT-ENV-RACE-1 並行派發）
+
+### ON-TICK-SPLIT-1 — `tick_pipeline/on_tick.rs` 2071 行拆為 8 檔目錄（2026-04-21 · commit `bfedb56` · sub-agent 並行派發）
+
+**觸發**：EXIT-FEATURES-SPLIT-1 報告 §6 flag 的 follow-up；operator 指示「並行派發 sub-agent 做 ON-TICK-RS-SPLIT-1，同時主 session 做 AI-SERVICE-CLIENT-ENV-RACE-1」。Sub-agent 工時 ~15min（general-purpose agent 在背景跑，主 session 並行做 env-race fix）。
+
+**拆分結構**：
+
+```text
+rust/openclaw_engine/src/tick_pipeline/on_tick/
+├── mod.rs                           157 行  # orchestrator: impl TickPipeline::on_tick
+│                                            #   threads owned state via
+│                                            #   ControlFlow<Break=early-return, Continue=state>
+├── helpers.rs                       152 行  # strip/log PHYS-LOCK pub(crate) helpers
+│                                            #   + T4-FIX 端到端測試
+├── step_0_fast_track.rs             516 行  # prelude（熱重載/stats/ADL/市場事件）
+│                                            #   + Step 0 halt/halve/close-all
+├── step_0_5_h0_gate.rs               93 行  # H0 門控 shadow/硬阻斷
+├── step_1_2_klines_indicators.rs    111 行  # kline 聚合 + 指標 + FeatureSnapshot
+├── step_3_signals.rs                192 行  # pause gate + boot cooldown + 信號評估
+├── step_4_5_dispatch.rs             929 行  # 策略分派 + intent + maker sweep + 策略平倉
+└── step_6_risk_checks.rs            359 行  # 9-check + halt/cooldown 派發 + T4 closure
+```
+
+- **mod.rs**：Track P 文檔 + borrow-check surface doctrine 中英雙語；6 個 step 以 `ControlFlow` 早退 + owned return value 串接：`ft_pause_new_entries` (step_0 → step_4_5) / `h0_allowed` (step_0_5 → step_4_5) / `Option<IndicatorSnapshot>` (step_1_2 → step_3/4_5/tail canary) / `Vec<Signal>` (step_3 → step_4_5/tail canary) / `Vec<OrderIntent>` (step_4_5 → tail canary)。`pub(crate) use helpers::…` 保 `crate::tick_pipeline::on_tick::strip_phys_lock_prefix` 等路徑相容。
+- **step_4_5_dispatch.rs** 929 行超 800 soft warn：sub-agent 記錄「`self.orchestrator.strategies_mut()` 迭代借用必須與 `intent_processor/paper_state/recent_intents/exchange_seq/...` disjoint field 存取共存於 **單一 fn**，NLL 限制無法再拆；強拆會 force `clone/RefCell/field-layout` 改動，違反零語意變更」。<1200 hard cap 可接受，doctrine 在 mod.rs header 記錄。
+- **step_6_risk_checks.rs**：T4 `exit_features_fn` closure（commit `e95c779`）含 3 sub-borrow (`paper_state_ref / price_tracker_ref / edge_estimates_ref`) + `build_exit_features_for_tick` 呼叫完整保留，**不得**跨 step 拆。
+
+**外部呼叫零改動**：`tick_pipeline/mod.rs` 的 `mod on_tick;` 自動解析為 `on_tick/mod.rs`（Rust 模組 tree 規則）。`tick_pipeline::on_tick::strip_phys_lock_prefix` 等 pub(crate) 路徑透過 `pub use helpers::…` 保持穩定。grep 無 external caller 直接進入這些 helper（只 `risk_checks.rs:235` 的 comment 提及）。
+
+**Tests**：engine lib **1840 passed / 0 failed**（Mac debug `--test-threads=1` + 預設 parallel + Linux release 均驗）。Sub-agent 單次 parallel 跑見 `canary_writer::tests::spawn_honours_disable_dump` 偶發 fail，驗證為 pre-existing env-var race（與本 refactor 無關），列為 `CANARY-WRITER-ENV-RACE-1` (P4) 候補 TODO 套同一 pure-fn pattern 清。
+
+**Workflow**：並行派發策略 — 主 session 做小 scope env-race fix（commit `580304a`，先 push），sub-agent 跑背景做大 scope split。兩個 task 檔案不重疊（ai_service_client.rs vs tick_pipeline/），零 git race。Sub-agent 遵守「不 commit 不 push」指令，dirty tree 交回主 session 審 + commit。Full test 驗 1840 綠後才 commit。
+
+**檔案變更**（9 changed — `git rm` 1 + create 8 = net +8，total +2,509/-2,071）。
+
+**Governance**：
+- §七 file size：7/8 檔 ≤ 800 soft warn；step_4_5 929 超 soft 但 doctrine documented ≤ hard cap
+- §七 bilingual：all 8 files 中英 module headers
+- 根原則 #10 認知誠實：sub-agent 明確標示 deviation（step_4_5 為何未拆）+ pre-existing flaky test 與本 PR 無關
+
+**後續 TODO**（本 changelog entry 內衍生）：
+- `CANARY-WRITER-ENV-RACE-1` (P4, ~30min)：`canary_writer::tests::spawn_honours_disable_dump` 並行 flake，套 `resolve_socket_path_from` pure-fn pattern 修
+- `TICK-PIPELINE-MOD-SPLIT-1` (P3, ~2-3d)：`tick_pipeline/mod.rs` 本身 2276 行也超 §七 hard cap，另案處理（結構上比 on_tick.rs 更難拆，涉及 `TickPipeline` struct def + impl 的跨 trait 組織）
+
+---
+
+### AI-SERVICE-CLIENT-ENV-RACE-1 — env-var test flake 根除（2026-04-21 · commit `580304a`）
+
+**觸發**：EXIT-FEATURES-SPLIT-1 報告 §5 flag。`ai_service_client::tests::{test_default_socket_path, test_env_override_socket_path, test_data_dir_fallback}` 三測試 `std::env::set_var/remove_var` `OPENCLAW_AI_SERVICE_SOCKET` + `OPENCLAW_DATA_DIR` 與並行測試競爭同 key；Mac 本地 `$OPENCLAW_DATA_DIR` 有值時 ~1/1839 run 偶發 fail。
+
+**修復**：抽 pure fn `resolve_socket_path_from(sock: Option<&str>, data_dir: Option<&str>) -> PathBuf` 承接優先序邏輯（sock 覆寫 > data_dir + 預設名 > hard-coded default）；舊 `resolve_socket_path()` 改為薄包裝讀 env 後 forward。3 race 測試改呼 pure fn + 直接注入 `Option<&str>`，完全不動 env = 零 race 可能。
+
+**新測試**：`test_sock_override_beats_data_dir`（顯式斷言 sock 覆寫 > data_dir 優先序；舊測試透過 env 組合隱含假設，新測試提升為 first-class assertion）。
+
+**Tests**：`cargo test -p openclaw_engine --lib ai_service_client::tests` 9 passed / 0 failed（原 8 + 新加 1）。engine lib baseline 1839 → **1840**（+1 新測試）。
+
+**Workflow**：與 ON-TICK-SPLIT-1 並行派發。主 session 3 min 完成 + 先 push，避免等 sub-agent 完成才合併；commit 順序 `580304a` (env-race) → `bfedb56` (on_tick split)，兩者檔案不重疊。
+
+**檔案**（1 changed, +59/-45）：
+- `rust/openclaw_engine/src/ai_service_client.rs`
+
+**Governance**：修復僅測試層。Production `resolve_socket_path()` wrapper 仍讀 env — 單執行緒啟動時讀，無 race，不需改。
+
+---
 
 ### EXIT-FEATURES-SPLIT-1 — `exit_features.rs` 1317 行拆為 4 檔目錄（2026-04-21）
 
