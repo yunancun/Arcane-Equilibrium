@@ -404,7 +404,7 @@ except ImportError:
 # --- B4: CognitiveModulator instantiation + injection into StrategistAgent ---
 # B4：实例化 CognitiveModulator 并注入 StrategistAgent（L0 决策门槛调制）
 try:
-    from program_code.local_model_tools.cognitive_modulator import CognitiveModulator
+    from local_model_tools.cognitive_modulator import CognitiveModulator
     _cognitive_modulator = CognitiveModulator()
     STRATEGIST_AGENT.set_cognitive_modulator(_cognitive_modulator)
     logger.info(

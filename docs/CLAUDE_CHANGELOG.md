@@ -1,9 +1,45 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-04-21（GATE1-REVERSAL-1 hotfix A：v1 risk_checks Gate 1 Lock → Hold 同步對齊 v2 設計意圖）
+> 最後更新：2026-04-21（Linux trade-core GATE1-REVERSAL-1 hotfix A 部署 + 2 個 pre-existing Python startup warning 清零 + P0-2 時鐘解耦 + P1-18 觀察窗建立）
 
-### GATE1-REVERSAL-1 hotfix A — v1 risk_checks Gate 1 Lock → Hold（2026-04-21 · commit `d0f0c21`）
+### Linux trade-core 部署 + startup noise 清零 + P0-2 解耦 + GATE1-REVERSAL-OBS-1（2026-04-21 · commit `__HASH__`）
+
+**觸發**：Mac 端 `d0f0c21`（GATE1-REVERSAL-1 hotfix A）pull 至 Linux trade-core 後完整部署；同時 operator 要求把歷來兩個 pre-existing startup warning 一併修掉（不是本次引入，但累積多 commit 未處理，`restart_all` 日誌被噪音稀釋）。
+
+**改動**（5 檔 / 純 Python + 文檔）：
+
+1. `program_code/.../app/strategy_wiring.py` L407 — `from program_code.local_model_tools.cognitive_modulator import CognitiveModulator` → `from local_model_tools.cognitive_modulator import ...`
+   - 根因：同檔 L65 已 `from . import _path_setup` 把 `program_code/` 加 `sys.path`，但 L407 用長形式 `from program_code....` 要求 `srv/`（program_code 的 parent）在 sys.path，該路徑從未被加。與同檔 L67-70 短形式不一致。
+   - 效果：`restart_all.sh` log 上 `Could not inject CognitiveModulator: No module named 'program_code'` 從 4×/ restart 歸零；`STRATEGIST_AGENT.set_cognitive_modulator` 真實執行（此前 try/except 吞錯下，L0 決策門檻調制一直沒綁上）。
+
+2. `program_code/.../app/ai_service.py` — 加 `import errno` + `import socket as _socket_stdlib`；`AIServiceListener.start()` 前加 multi-worker guard；新增 `_probe_unix_listener_alive(path, timeout=0.1)` module helper。
+   - 根因：uvicorn `--workers 4` 下 4 workers 並行 `os.unlink + asyncio.start_unix_server`，unlink-war 導致 ≥2 個 LISTEN 指向同 path、殘 FD 不確定，`ss -xl` 實測兩 inode 並存。
+   - 守衛邏輯：probe connect → peer listener 活 = 被動跳過；殘留窄 race 用 `EADDRINUSE` 軟吞降級。
+   - 效果：`ss -xl | grep ai_service` 從 2 LISTEN → **1 LISTEN**；log 上 `AIServiceListener.start() failed: Address ... already in use` 從 2× → 0；`connect('/tmp/openclaw/ai_service.sock')` probe OK。Rust engine IPC 行為不變（仍一對一）。
+
+3. `CLAUDE.md` §十 — P0-2 21d demo 時鐘錨定敘述更新：從「當前 PID 1364222 於 22:16 local 啟動，時鐘從此起算」改為「時鐘從 **2026-04-16 22:16 local**（P0-9 STABILITY-1 RCA 穩定點）起算；PID 已多次輪替，當前 engine PID `3813984` 於 2026-04-21 13:44 CEST rebuild restart 起，計劃性 rebuild/deploy 不重置時鐘，僅 crash/hang 才重置」。
+   - 修正 PID 指針 stale 4 天（1364222 實際 2026-04-17 20:55 已被 MICRO-PROFIT-FIX-1 取代為 1771173，後續多次輪替未更新）。
+   - 明確 PID 與 21d 時鐘解耦原則，避免未來每次 deploy 都混淆。
+
+4. `TODO.md` — 新增 `P1-18 · GATE1-REVERSAL-OBS-1` 條目。
+   - 基準線時間戳：`2026-04-21 13:44:54 CEST (epoch 1776771894)` / engine PID `3813984`。
+   - 4 觀察指標（`phys_lock_gate1_low_edge` 新 fills=0 / 持倉時長分佈 / close 盈利右尾 / edge_estimates shrunk_bps）。
+   - Gate：≥2-3d 未惡化 → 解鎖下一波 Priority 6 全替換（DUAL-TRACK-EXIT-1 Phase 2/3 Track P）。
+
+5. `docs/CLAUDE_CHANGELOG.md` — 本條目。
+
+**部署執行**：
+- `bash helper_scripts/restart_all.sh --rebuild`：release 增量 23.51s；engine PID `3813984`；`execution_authority` T0 Entry 剩 12.4h auto-restored。
+- `cargo test -p openclaw_engine --lib --release`：**1816 passed / 0 failed / 0.51s**（與 Mac debug 對齊）。
+- `bash helper_scripts/restart_all.sh --api-only`（pre-existing fix 部署，不動 engine，保留觀察基準線）：4 workers Application startup complete；0× CognitiveModulator warning；0× AIServiceListener warning；1 LISTEN；probe OK。
+- targeted pytest（`-k "ai_service or listener or strategy_wiring or cognitive"`）：**15 passed / 1 skipped / 0 failed**。
+
+**未動**：兩個 `WARNING: database "trading_ai" has no actual collation version` 屬 Postgres initdb locale 問題、與本系統無關，不處理。
+
+**後續**：2-3d 觀察窗由 P1-18 接管；通過後進 Priority 6 全替換。
+
+
 
 **目標**：上一 commit `aee96b9` DUAL-TRACK-EXIT-1 Phase 1b v2 交付後，主會話 QC 揭露 v1 `risk_checks::physical_micro_profit_lock` Priority 6 Gate 1 行為（`edge < floor → Lock`）違反 DUAL-TRACK-EXIT-1 設計意圖「防止剛有大於 fee 的微利就套離場」。Operator 選 (A) 獨立 hotfix commit 立即修 v1，不等下一波 Priority 6 整體替換。理由：v1 是 live 行為，continue 會在 demo 持續產出過早 close 紀錄，壓低 Phase 5 edge 觀察信號純度。
 

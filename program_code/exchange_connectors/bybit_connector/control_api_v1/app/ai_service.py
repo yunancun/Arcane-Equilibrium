@@ -21,10 +21,12 @@ MODULE_NOTE (EN/中):
 from __future__ import annotations
 
 import asyncio
+import errno
 import json
 import logging
 import os
 import re
+import socket as _socket_stdlib
 
 import time
 from typing import Any, Callable
@@ -846,6 +848,34 @@ class AIService:
 # AIServiceListener — Unix socket IPC listener / Unix socket IPC 監聽器
 # ═══════════════════════════════════════════════════════════════════════════════
 
+def _probe_unix_listener_alive(path: str, timeout: float = 0.1) -> bool:
+    """
+    Non-blocking probe: does `path` have a live Unix-socket listener right now?
+    非阻塞探測：當下 `path` 是否有活的 Unix socket listener？
+
+    Returns True only on a successful connect (a peer process is accepting).
+    僅在成功 connect 時回 True（有 peer process 正在 accept）。
+
+    Any of these conditions → False (safe to bind ourselves):
+      - File missing (FileNotFoundError)
+      - File exists but nobody listening (ConnectionRefusedError)
+      - File not a socket / permission error (OSError)
+      - Connect hangs past timeout (socket.timeout)
+    任一條件 → False（可安全 bind）：檔案不存在、無 listener、非 socket/權限、超時。
+    """
+    probe = _socket_stdlib.socket(_socket_stdlib.AF_UNIX, _socket_stdlib.SOCK_STREAM)
+    try:
+        probe.settimeout(timeout)
+        probe.connect(path)
+        return True
+    except (FileNotFoundError, ConnectionRefusedError, _socket_stdlib.timeout):
+        return False
+    except OSError:
+        return False
+    finally:
+        probe.close()
+
+
 class AIServiceListener:
     """
     Listens on a Unix socket for incoming AI requests from the Rust engine.
@@ -892,6 +922,11 @@ class AIServiceListener:
         """
         Start listening on the Unix socket. Creates dir, removes stale socket.
         開始在 Unix socket 上監聽。創建目錄，移除殘留 socket。
+
+        Multi-worker safe: under uvicorn --workers N, only one worker successfully
+        binds; peers probe-detect the live listener and passively no-op.
+        多 worker 安全：uvicorn --workers N 下僅一個 worker 綁定成功，其餘探測到
+        活 listener 後被動跳過（不 unlink、不 bind、不告警）。
         """
         if self._running:
             logger.warning("AIServiceListener already running, ignoring start()")
@@ -902,16 +937,38 @@ class AIServiceListener:
         if socket_dir:
             os.makedirs(socket_dir, exist_ok=True)
 
+        # Multi-worker guard: peer worker already serving → passive no-op.
+        # 多 worker 守衛：peer worker 已在服務 → 被動跳過（不 unlink、不 bind）。
+        if _probe_unix_listener_alive(self._socket_path):
+            logger.info(
+                "AIServiceListener: peer worker already listening at %s, "
+                "running as passive worker / 另一 worker 已監聽，被動模式",
+                self._socket_path,
+            )
+            return
+
         # Remove stale socket file if present / 移除殘留 socket 文件
         try:
             os.unlink(self._socket_path)
         except FileNotFoundError:
             pass
 
-        self._server = await asyncio.start_unix_server(
-            self._handle_connection,
-            path=self._socket_path,
-        )
+        try:
+            self._server = await asyncio.start_unix_server(
+                self._handle_connection,
+                path=self._socket_path,
+            )
+        except OSError as bind_exc:
+            if bind_exc.errno == errno.EADDRINUSE:
+                # Lost the narrow probe→bind race with a peer worker.
+                # 與 peer worker 的窄 probe→bind 競速敗北，降級被動模式。
+                logger.info(
+                    "AIServiceListener: lost bind race at %s, "
+                    "running as passive worker / 綁定競速敗北，被動模式",
+                    self._socket_path,
+                )
+                return
+            raise
         self._running = True
         logger.info("AIServiceListener started: %s", self._socket_path)
 
