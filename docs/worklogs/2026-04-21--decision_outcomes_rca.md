@@ -145,3 +145,84 @@ GROUP BY engine_mode;
 - **VIEW**：`sql/migrations/V005__indexes_views.sql:261-282`
 - **設計決策歷史**：`docs/worklogs/2026-04-18-2--exit_features_table_design.md:15-18`（2026-04-18 時誤判 dead，本 RCA 更正）
 - **MARKET-KLINES-STALE-1 修復紀錄**：`docs/archive/2026-04-20--completed_todo_batch.md:21-27`
+
+---
+
+## 七、Linux 驗證結果（2026-04-21 15:00 CEST 後 amendment）
+
+Mac Push 後 Linux CC 跑 5 task 驗證，揭露 **2 個未預期發現** + **1 個 Mac RCA 盲點**。本 RCA 結論 **情境 3 doc-only** 被推翻，升級為 **情境 1 fix 路徑**。
+
+### 7.1 SQL 驗證結果
+
+```
+total=264,800 rows
+mf_non_null = 0         ← 盲點 1
+o1h_non_null = 0         ← 盲點 1
+bt_non_null ≈ total      ← 預期 ✓
+engine_mode = 'paper' 100%  ← 盲點 2
+first_bf / last_bf: 持續 24h 內有新 row（writer 活躍 ✓）
+```
+
+### 7.2 盲點 1：outcome_* 100% NULL **不是** klines 稀疏
+
+本 RCA §2.3 推斷「LATERAL 子查詢無 kline → NULL」，但 Linux CC 實測：
+- `outcome_1m / outcome_5m / outcome_horizon_minutes` **100% NULL**（264,800 rows 全空）
+- **抽樣符號在 `market.klines` 有資料**（非稀疏；MARKET-KLINES-STALE-1 forward-going 後新 writer 應拿得到 kline）
+
+→ 真實根因 = `outcome_backfiller` 的 **JOIN / horizon-window 邏輯斷鏈**。本 RCA §B 列出的寫入 SQL（L94-107）中 LATERAL 子查詢實際行為不是預期的 `(high - last_price) / last_price`；或 JOIN ON clause 漏關鍵索引；或 horizon window 邊界計算錯。具體斷鏈點需 Linux 端代碼 audit。
+
+### 7.3 盲點 2：engine_mode 100% 'paper' = tagging bug
+
+本 RCA §2.1 從 V015:64-68 DEFAULT='paper' 推斷「V015 後 row 全 'paper' 合理」，但 Linux CC 實測：
+- `engine_mode = 'paper'` 佔 100% (264,800 / 264,800)
+- 但 **context_id 前綴展示 demo_* / live_demo_* 混雜**
+- PAPER-DISABLE-1 (2026-04-16) 後 paper 預設關閉 → 不可能全量是真 paper
+
+→ `outcome_backfiller` INSERT 時 engine_mode 欄位**直接落 'paper' 預設值**，沒用 INSERT 時的 context_id 前綴判斷實際 engine。**寫入邏輯故障**。
+
+影響：所有 **outcome-based per-engine 歸因失效**：
+- EDGE-P3-1 ML filter 用 `engine_mode IN ('live','live_demo')` 篩 decision_outcomes → 永遠 0 rows
+- Phase 5 JS estimator 如依賴此欄位切 per-engine mean → 全當 paper 忽略
+- LinUCB reward 若 per-engine 拆開 → 全部歸 paper bucket
+
+### 7.4 盲點 3：P1-18 觀察 metric 空殼
+
+本 RCA 建議 operator「2-3d 觀察 `phys_lock_gate1_low_edge` 新 fills 應歸 0」，但 Linux CC 實測：
+- `SELECT * FROM trading.fills WHERE strategy_name LIKE 'phys_lock%' OR reason LIKE '%phys_lock%'` **全時段 0 筆**
+- 不僅 hotfix 後，hotfix 前也是 0
+
+→ Priority 6 PHYS-LOCK 的 `PhysicalDecision::Lock(...)` reason 字串**從未出現在 `trading.fills`**。可能原因：
+- (X) Priority 6 在 demo 環境從未實際觸發（edge/profit gates 過嚴，或 `ExitFeatures::None` 導致 Priority 6 noop）
+- (Y) close reason 編碼路徑**不**把 `phys_lock_*` 前綴寫到 `trading.fills.reason` / `strategy_name`（僅 `PhysicalDecision` 返回但 downstream wrapping 丟失）
+
+**意涵**：本 RCA 給 operator 的 2-3d 觀察計畫**失效**（比較 `phys_lock_gate1_low_edge` 新 vs 舊 fills 無法辨別 hotfix 是否生效，因為舊值本來就 0）。需替換為 engine 內部 metric（Prometheus counter 或 engine log）。
+
+### 7.5 結論升級
+
+本 RCA 原採納 **情境 3 doc-only reframe**，基於「writer 活躍 + NULL 是 klines 稀疏 = 症狀不是 bug」。Linux 實測推翻後半句 → 真的有 bug。升級處置：
+
+| 原判斷 | 更正 |
+|---|---|
+| `decision_outcomes` 不是 dead | 仍成立 ✓ |
+| NULL 是 klines 稀疏症狀 | **推翻** ❌ → JOIN/horizon-window 斷鏈 bug |
+| engine_mode='paper' 合理 | **推翻** ❌ → tagging 寫入邏輯 bug |
+| 情境 3 doc-only P3 結案 | **升級** 🔴 → 情境 1+ 拆 2 個 P1 fix TODO |
+| hotfix A 2-3d fills 觀察 | **失效** 🔴 → metric 替換為 engine 內部 counter |
+
+### 7.6 拆分後的 P1 TODO（已加入 TODO.md）
+
+1. **`DECISION-OUTCOMES-ENGINE-MODE-TAG-BUG-1`** (P1) — audit `outcome_backfiller.rs` INSERT SQL，確認 engine_mode 欄位來源；fix 為讀 `context_id` 前綴（`demo_*` / `live_demo_*` / `paper_*`）或從 `decision_context_snapshots.engine_mode` JOIN；backfill 歷史 rows（或標 `engine_mode=NULL` 表示 unknown）
+2. **`OUTCOME-BACKFILL-JOIN-NULL-1`** (P1) — audit `outcome_backfiller.rs:94-107` LATERAL 子查詢，為何 264,800 rows 的 `outcome_1m/5m/1h/4h/24h` 全 NULL；懷疑窗口 ON clause bug 或 kline 對應失敗；先寫 diagnostic query 取一個 context_id 人工推演 outcome 該有值，比對實際
+3. **`GATE1-REVERSAL-OBSERVABILITY-1`** (P2) — 原 hotfix A 的 2-3d 觀察計畫失效（fills 層 0 訊號）；替換為 engine 內部 Prometheus counter（`phys_lock_gate1_hold_total` / `phys_lock_gate4_lock_total`）或 engine log；或追查為何 `phys_lock_*` 不寫到 `trading.fills`（若本身 wrapping bug → 併入其他 TODO）
+
+### 7.7 Mac RCA 流程反省
+
+- sub-agent RCA 採「從代碼推論 NULL 成因」的路徑，沒堅持「Linux DB 實測反證」
+- 主會話 QC 時信了 sub-agent 的結論；`outcome_1h ≪ total` 驗證條件雖列在 worklog §2.3 Q1，但我在採納情境 3 時沒等 Linux 跑 SQL 才決定 reframe
+- 結構性問題：**「結論依賴外部驗證」的 RCA 不能在 Mac 端就採納情境結案**，至少要列 ⏳ pending Linux confirm 才能進 commit
+- 從此例學到：Mac 端 RCA 最多給 **候選情境 + 驗證 SQL**，結案判定留 Linux 實測回來做
+
+### 7.8 認知誠實聲明
+
+本 worklog §一「RCA 結論（一句話）」中「症狀不是 bug」**錯誤**，應讀為「writer 活躍 ✓ 但有 2 個 bug 需修」。§三「情境 3 採納」**過早**，應為「Linux DB SQL 驗證後再決定」。§四「情境 3 執行」的 commit `5a2c241` 內容保留但**狀態應為 interim**，本 §七 是正式 follow-up。
+
