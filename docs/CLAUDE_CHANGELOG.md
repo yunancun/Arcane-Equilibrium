@@ -3,7 +3,7 @@
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
 > 最後更新：2026-04-21（TODO 1+2 outcome_backfiller wire engine_mode + timeframe strings fix）
 
-### TODO 1+2 outcome_backfiller wiring fix（2026-04-21 · commit `PENDING`）
+### TODO 1+2 outcome_backfiller wiring fix（2026-04-21 · commit `1bb7e30`）
 
 **觸發**：前輪 session 發現 `trading.decision_outcomes` 兩個 P1 bug：
 - **TODO 1 `DECISION-OUTCOMES-ENGINE-MODE-TAG-BUG-1`**：264,800 rows 100% `engine_mode='paper'`，但 `context_id` 前綴涵蓋 demo/live/live_demo。根因：`outcome_backfiller.rs` INSERT 省略 `engine_mode` 欄位 → `V015` 遷移的 `DEFAULT 'paper'::text` 兜底（migration L64-66 明確寫 "No writer exists yet"）。
