@@ -1,6 +1,5 @@
 # OpenClaw / Bybit AI Agent 交易系統
 # CLAUDE.md — 項目指令文件（核心規則 + 下一步指針）
-# 最後更新：2026-04-16
 
 ---
 
@@ -51,7 +50,7 @@
 **權威原則**：Rust `openclaw_engine` = paper/demo/live 三引擎並行唯一引擎（ARCH-RC1 1C-4 + 3E-ARCH）。Rust ConfigStore 為所有交易/風控/學習/預算參數權威，4 IPC 寫入面 → tick-level hot-reload。**禁止 restart-to-apply**。Guardian = RiskConfig 純派生視圖。Python 無交易邏輯（DEAD-PY-2 清除 ~4500 行後）。**2026-04-16 audit 更正**：`legacy_routes.py + main_legacy.py` 共 1630 行**仍是活躍主承載**（main_legacy.py:450-451 `register_legacy_routes(app)` 注冊 54 路由），覆蓋 auth/login/gui/console/`/api/v1/system/*`/`/api/v1/health/db`/`/api/v1/learning/*`——原「已隔離不執行」敘述錯誤，此層拆分未完成。
 
 **進行中/阻塞**（已完成 ≤2 日的項目 + 仍活躍的 gap）：
-- **LEARNING-PIPELINE-DORMANT-1（P1-HIGH，2026-04-16 audit 新增 · 2026-04-18 refine v2）**：學習管線不是空殼是**半殼**——`learning.decision_features` 已累積 **1.65M rows**（live 1.07M / live_demo 576k / demo 800），`trading.risk_verdicts` 已累積 1.54M 24h。**P1-16 halt_session cross-symbol price corruption 根因修復已完成**（2026-04-18 commit `fef688e`，上游 Rust `on_tick.rs::HaltSession` + 下游 pairer price-jump gate & 分母保護；archived 6616 fills empirical 245× cleaner，-2214 → -9.02 bps）。當前剩下的 gap：`settings/edge_estimates.json` writer/reader 鏈通但屬手動 run（無 cron/timer/scheduler，hot-reload 未接）；bind cost_gate 門檻改為 grand_mean > −50 bps 且 ≥2 策略 shrunk_bps>0；`experiment_ledger_snapshot.json` top-level 結構異常；21 個 learning schema 表存在但無訓練任務消費；**EDGE-P3-1 Phase B #3 ONNX loader 宣稱部署但 0 artifact 產出**。TODO §P1-7 + §P1-14 + §P1-17。
+- **LEARNING-PIPELINE-DORMANT-1（P1-HIGH，2026-04-16 audit · 2026-04-18 refine v2）**：學習管線半殼 — `learning.decision_features` 累積 **1.65M rows**（live 1.07M / live_demo 576k / demo 800），`trading.risk_verdicts` 累積 1.54M 24h；P1-16 halt_session cross-symbol price corruption 根因修復已完成（詳 `docs/archive/2026-04-21--claude_md_section3_snapshot.md` 引用的 `fef688e`）。**剩餘 gap**：`settings/edge_estimates.json` writer/reader 手動 run（無 cron/scheduler/hot-reload，bind cost_gate 門檻 grand_mean > −50 bps 且 ≥2 策略 shrunk_bps>0）；`experiment_ledger_snapshot.json` 結構異常；21 個 learning schema 表無訓練任務消費；**EDGE-P3-1 Phase B #3 ONNX loader 宣稱部署但 0 artifact 產出**。TODO §P1-7 / §P1-14 / §P1-17。
 - **INTENT-WRITE-GAP-1（P0-CRITICAL，2026-04-16 refine）**：`trading.risk_verdicts` 24h 內 live/live_demo Approved **154 萬條**（每條含 `intent_id`），`learning.decision_features` 同期 live/live_demo **165 萬 rows**，但 `trading.intents` 對 live/live_demo 同期 **0 條**。→ 改釐清為「canonical `trading.intents` 斷鏈 vs Rust 側影子路徑寫入」：Rust 分析/風控 path 照跑、canonical intent 持久化被 DEDUP-PY-RUST Tier A stub 掉 Python 端後未補 Rust 接線。下游 Phase 5/experiment_ledger 讀 `trading.intents` 查不到；讀 `decision_features` 可以。TODO §P0-6。
 - **ORDER-SUBMIT-GAP-1（P0-CRITICAL，2026-04-16 新增）**：live_demo Approved verdict 持續但 `trading.fills` live/live_demo = 0。意味 Guardian 在跑、Approved verdict 寫入 DB，但 order submit path 被跳過（可能 OMSProxy 是 noop、或 trading_mode/live_reserved 未啟）。「Live_Ready」下真實下單能力 0%。TODO §P0-7。
 - **Phase 5 PAUSED**（2026-04-12 reframe）— PNL-FIX-1/2 清理後所有活躍策略 gross edge 為負（net -$2775）；cost_gate/DL/JS 機械已接線但需真實正 edge。**下一步**：乾淨 demo 2 週後 P0-3 重評，若仍負則轉 EDGE-P3-1/EDGE-P2 接管。詳見 `memory/project_phase5_promotion_edge_crisis.md`。
@@ -90,56 +89,35 @@
 ## 四、硬邊界（永遠不能違背）
 
 ```python
-# ── Live_Ready 真實狀態（2026-04-18 LIVE-GATE-BINDING-1 ✅ 後更新）──
-# LIVE-P0/P1/P2 基礎設施代碼完整（SM-01/02/04 + Reconciler + 3E-ARCH）
-# 單測綠但 0 真實 live 流量（歷史 43k 條 "live" 實為 LiveDemo）。
-#
-# 當前真實 live 門控（Rust 端可驗證 = 4 項 / 全部 = 5 項）：
-#   1. Python `live_reserved` global mode          （Python 狀態，重啟會丟）
-#   2. Python Operator 角色 auth                   （Python 側）
-#   3. OPENCLAW_ALLOW_MAINNET=1 env var            （Rust 側，LIVE-GUARD-1，僅 Mainnet）
-#   4. secret slot 有 api_key + api_secret         （Rust 側，LIVE-GUARD-1，憑證空 → Err）
-#        來源優先級（bybit_rest_client.rs:386-497）：
-#          Mainnet:  a. 顯式參數 → b. slot file（env var 回退已封閉）
-#          Demo/Testnet: a. 顯式參數 → b. env var → c. slot file
-#   5. authorization.json 簽名+未過期+env_allowed 匹配  （Rust 側，LIVE-GATE-BINDING-1，新）
+# ── Live_Ready 真實狀態 ──
+# LIVE-P0/P1/P2 代碼完整（SM-01/02/04 + Reconciler + 3E-ARCH），0 真實 live 流量
+# （歷史 43k 條 engine_mode="live" 實為 LiveDemo）。
+
+# 真實 live 門控（Rust 端可驗證 = 4 項 / 全部 = 5 項）：
+#   1. Python `live_reserved` global mode           （Python 側，重啟會丟）
+#   2. Python Operator 角色 auth                    （Python 側）
+#   3. OPENCLAW_ALLOW_MAINNET=1 env var             （Rust 側，僅 Mainnet）
+#   4. secret slot 有 api_key + api_secret          （Rust 側，憑證空 → Err；
+#        Mainnet env-var fallback 封閉，來源優先級見 bybit_rest_client.rs:386-497）
+#   5. authorization.json 簽名+未過期+env_allowed 匹配  （Rust 側，HMAC-SHA256）
 #        路徑：$OPENCLAW_SECRETS_DIR/live/authorization.json
-#        驗證：canonical_payload HMAC-SHA256（key=OPENCLAW_IPC_SECRET）
 #        檢查點：build_exchange_pipeline 啟動 + main.rs 每 5 min re-verify
 #        失效 → engine 優雅 shutdown（cancel_token）
 #        涵蓋 LiveDemo + Mainnet（LiveDemo 不因 api-demo endpoint 降級）
-#
-# ✅ LIVE-GATE-BINDING-1（TODO §P0-11，2026-04-18）：
-#   - Python EarnedTrust renew/approve 路由寫出 signed authorization.json（0o600 + atomic rename）
-#   - Revoke 路徑刪 authorization.json → Rust 下個 5 min re-verify 即 shutdown
-#   - canonical payload byte-for-byte Python↔Rust 雙端對齊（sort+dedup envs）
-#   - Rust 15 新單測 / Python 10 新單測 / engine lib 1452 passed
-#   - 閉合「Operator 未 renew 即 Live 自拉」旁通漏洞
-#
-# ✅ LIVE-GUARD-1（TODO §P0-8，2026-04-16 深夜）：
-#   - Gate #3: 恢復 OPENCLAW_ALLOW_MAINNET=1（SEC-17 回退）
-#   - Gate #4a: Mainnet 禁用 BYBIT_API_KEY/SECRET env var fallback（封閉繞 slot 攻擊面）
-#   - Gate #4b: 憑證空時構造 Err（不再 warn!+signing-stage 401）
-#   - 7 新單測 + E2 對抗性審查 5/5 APPROVED
-#
+#        **必經** Python renew/approve 路由 `_write_signed_live_authorization()`，不可手動寫
+
 # execution_authority：Rust 僅為 P0/P1 denylist 字串常量
-#                      （claude_teacher/applier.rs:226）非真實授權邏輯
-#                      「auto_granted_on_start」= Python 概念
+# （claude_teacher/applier.rs:226），非真實授權邏輯；「auto_granted_on_start」屬 Python 概念。
 decision_lease_emitted  = False
 max_retries             = 0
 
-# 永不允許的硬錯誤（2026-04-18 LIVE-GATE-BINDING-1 後修正）：
-# - 繞過 Operator 角色認證或 live_reserved global mode 直接啟動 live session
+# 永不允許的硬錯誤：
+# - 繞過 Operator 角色認證或 live_reserved 直接啟動 live session
 # - 自動修改 engine trading_mode 為 live（需 operator 顯式配置）
 # - Bybit API timeout / retCode != 0 → fail-closed，不重試
-# - should_call_ai=true 但 invocation 沒發生
-# - 偽造 AI 調用或交易活動
-# - Mainnet 下無 OPENCLAW_ALLOW_MAINNET=1 env var（LIVE-GUARD-1）
-# - Mainnet 下試圖用 BYBIT_API_KEY/SECRET env var 作為唯一憑證來源（LIVE-GUARD-1）
-# - Live（含 LiveDemo）下沒有有效 authorization.json 即 spawn pipeline（LIVE-GATE-BINDING-1）
-#   LiveDemo 不因使用 api-demo endpoint 而降級任何 live-level 門控
-# - 不經 _write_signed_live_authorization() 手動寫 authorization.json
-#   必經 Python renew/approve 路由簽章寫入
+# - should_call_ai=true 但 invocation 沒發生；偽造 AI 調用或交易活動
+# - Mainnet 下無 OPENCLAW_ALLOW_MAINNET=1，或用 env var 當唯一憑證來源
+# - Live（含 LiveDemo）下無有效 authorization.json 即 spawn pipeline
 ```
 
 ---
@@ -213,20 +191,12 @@ mkdir -p "$OPENCLAW_DATA_DIR" "$OPENCLAW_SECRETS_ROOT/environment_files" \
 - 舊 socket 檔（`engine.sock` / `ai_service.sock`）殘留會讓新 process 拒綁 → 啟動前清或讓腳本 unlink 舊 socket
 - 建議 Mac `.zshrc` 加 `alias oc-clean-runtime='rm -f "$OPENCLAW_DATA_DIR"/{*.sock,engine_maintenance.flag}'`
 
-### 啟動檢查
+### 啟動檢查（每次 session 起點）
 ```bash
 git status && git log --oneline -5
+python3 helper_scripts/canary/engine_watchdog.py --data-dir "$OPENCLAW_DATA_DIR" --stale-threshold 45 --grace-period 120 --status
 ```
-
-### ★ 灰度驗證檢查（每次啟動必做，直到 R-07 Go/No-Go 通過）
-Rust 引擎灰度驗證正在後台運行。**每次 session 啟動時先跑以下命令確認引擎健康：**
-```bash
-# 引擎存活？+ canary 記錄數 + 崩潰數 + 最新狀態
-python3 helper_scripts/canary/engine_watchdog.py --data-dir /tmp/openclaw --stale-threshold 45 --grace-period 120 --status
-wc -l /tmp/openclaw/engine_results.jsonl
-grep -c "ENGINE_CRASH" /tmp/openclaw/watchdog.log 2>/dev/null || echo "0 crashes"
-```
-詳細操作指南見 TODO.md 頂部「灰度驗證檢查」段。如引擎掛了按 TODO.md 指引重啟。
+R-07 Go/No-Go 已 PASS（見 `memory/archive/project_rust_migration_status.md`）。watchdog 回 `engine_alive: false` 代表引擎沒在跑，按 TODO.md 重啟指引處理。
 
 ### TODO.md 強制規則（每次接手必須遵守）
 
@@ -288,7 +258,10 @@ Operator 在 Mac 並行跑 Qwen3.6-35B（LM Studio）做代碼審核。CC 每完
 5. **不確定之處** — 未確認假設 / 跨平台風險（對照 §七.★★）/ 測試覆蓋判斷
 6. **Operator 下一步** — 審查重點 / 需跑測試 / trade-core `git pull` 與重啟步驟
 
-**邊界（強制）**：git `push` / `pull` / `merge` / `checkout` / `reset` / `rebase` 全由 operator 手動，CC 不執行。CC 可 `git add` + `git commit`（落地到 operator 待審）。
+**Git 自動化（強制）**：
+- CC 每完成一個**合理可交付單位**（任務完成 + 本節 report 已寫 + 無跑不過的測試）→ 自動 `git add` + `git commit`
+- **Mac 端**：commit 後自動 `git push origin main`（operator 在 trade-core 端 `git pull` 拉取；此為同步方向）
+- **CC 絕不執行**：`pull` / `merge` / `checkout` / `reset` / `rebase`（狀態變更操作留給 operator）
 
 ---
 
@@ -335,11 +308,7 @@ state_models ← state_compiler ← state_store ← main_legacy ← main.py
 | `_BYBIT_CLIENT` / `_BYBIT_CLIENT_AVAILABLE` | strategy_ai_routes.py | 內部懶加載 `_get_rust_client()`（PYO3-ELIMINATE-1 Phase 2 後指向 `app.bybit_rest_client.BybitClient` 純 httpx；函數名為 grep-stability 保留） |
 | `KLINE_MANAGER` / `INDICATOR_ENGINE` / `SIGNAL_ENGINE` / `ORCHESTRATOR` 等 12+ | strategy_wiring.py | 模組級全局，import 時初始化 |
 | `_SHARED_IPC_SLOTS` / `_SHARED_SLOT_LOCK` | ipc_dispatch.py | 內部懶加載 `get_or_connect_shared_client(slot_key)`（E5-P1-5） |
-| `_ANALYST_AUDIT_CB` / `_GOV_HUB_FOR_ANALYST` | strategy_wiring.py | 模組級，由 `agent_audit_bridge.make_agent_audit_callback(...)` 構造；AnalystAgent 建構時注入 `audit_callback`（E5-FN-3）。`agent_audit_bridge` 本身為無狀態工廠模組（不持有 singleton） |
-| `_STRATEGIST_AUDIT_CB` / `_GOV_HUB_FOR_STRATEGIST` | strategy_wiring.py | 模組級，由 `agent_audit_bridge.make_agent_audit_callback(...)` 構造；StrategistAgent 建構時注入 `audit_callback`（E5-FN-3-FUP-a）。ImportError 時 `_GOV_HUB_FOR_STRATEGIST=None` → bridge fail-open 靜默丟棄 |
-| `_GUARDIAN_AUDIT_CB` / `_GOV_HUB_FOR_GUARDIAN` | strategy_wiring.py | 模組級（Batch 8），由 `agent_audit_bridge.make_agent_audit_callback(...)` 構造；GuardianAgent 建構時注入 `audit_callback`（E5-FN-3-FUP-b）。`_GOV_HUB_FOR_GUARDIAN` 於 Batch 8 既存，E5-FN-3-FUP-b 補登記；ImportError 時為 None → bridge fail-open |
-| `_EXECUTOR_AUDIT_CB` / `_GOV_HUB_FOR_EXECUTOR` | strategy_wiring.py | 模組級（Batch 11 try 區塊內），由 `agent_audit_bridge.make_agent_audit_callback(...)` 構造；ExecutorAgent 建構時注入 `audit_callback`（E5-FN-3-FUP-c）。fail-open：GOV_HUB 不可用時 bridge 靜默丟事件 |
-| `_SCOUT_AUDIT_CB` / `_GOV_HUB_FOR_SCOUT` | strategy_wiring.py | 模組級（Plan A2 Scout 區塊內），由 `agent_audit_bridge.make_agent_audit_callback(...)` 構造；ScoutAgent 建構時注入 `audit_callback`（E5-FN-3-FUP-d）。ScoutAgent ctor 新增 keyword-only `audit_callback` 參數並接線 produce_intel / produce_event_alert 兩個 `_audit()` 呼叫點；ImportError 時 `_GOV_HUB_FOR_SCOUT=None` → bridge fail-open 靜默丟棄 |
+| `_<AGENT>_AUDIT_CB` / `_GOV_HUB_FOR_<AGENT>` × 5（Scout/Strategist/Guardian/Analyst/Executor） | strategy_wiring.py | 模組級，由 `agent_audit_bridge.make_agent_audit_callback(...)` 構造；各 agent ctor 注入 `audit_callback`（E5-FN-3 Analyst pilot + FN-3-FUP-a~d 4 agents 補接線）。ImportError 時 GOV_HUB=None → bridge fail-open 靜默丟事件。`agent_audit_bridge` 本身無狀態工廠（不持 singleton） |
 
 新增 singleton 必須在此表登記。禁止子模塊創建未登記的全局可變狀態。
 
@@ -372,4 +341,4 @@ state_models ← state_compiler ← state_store ← main_legacy ← main.py
 
 ## 十一、一句話狀態
 
-> 截至 2026-04-20：tests engine lib **1791 passed / 0 failed** + bin **38 passed** + core **392** + e2e **35** + reconciler_e2e **19** + micro_profit_fix_integration **7** · pytest 全量 **2866 passed / 0 pre-existing fail / 14 skipped**（+8 PIPELINE-SLOT-1 Phase 4 + 2 DYNAMIC-RISK-STATUS-TEST-SIG-1 修復 `83a0475` + 16 WATCHDOG-DNS-CLASSIFY-1 新測） · **EDGE-P2-2 Phase A ✅**（commit `381c542`；OI confluence signal for `bb_breakout`，3 新參數 `enable_oi_signal`/`oi_buffer_window_ms`/`oi_confluence_bonus`/`oi_min_delta_pct` + 3 env TOML；E2 對抗性審查 7 findings 全修 #1-#7；engine lib 1770→**1791** passed；Phase B Liquidation signal 待做）· **PIPELINE-SLOT-1 Phases 1-4 ✅**（`3005fc0` + `e28f3d8` + `d92f25d` + Phase 4 Python-only：daemon-thread trigger offload + 8 pytest + ADR `docs/decisions/2026-04-19--pipeline_slot_1_auth_fail_scoping.md`；auth-fail scope engine-wide → live-only，live respawn TTR ≤5s / <100ms，demo+paper 不再連坐） · **E5-FN Functional Defects Wave ✅**（3 派發 → 1 CANCEL（FN-1 evidence-based：`startup.rs:467-494` 已同步驗 authorization）+ 2 delivered；FN-2 **Plan N 重設計** `f0f11c0` ai_budget request_id dedup — 原 V018 partial UNIQUE 無法 apply on TimescaleDB hypertable（`cannot create a unique index without the column "time"`），revert fd480ba 改用既有 hypertable PK `(time, scope, request_id)` + `ON CONFLICT DO NOTHING RETURNING 1`，零 schema 改動、零 migration；`make_request_id(scope) -> (String, i64)` tuple + `record_usage(...,event_time_ms)` + IPC handler 本地鑄造封閉 `py-sync` PK 碰撞；FN-3 `19f3d85` agent_audit_bridge + AnalystAgent pilot + 12 tests + 4-agent follow-up；兩者 E2 2/2 APPROVE_WITH_NITS）· **FILL-CONTEXT-LINKAGE-1 ✅**（commit `bd45e90`） · **EXIT-FEATURES-TABLE-1 Phase 1b FUP ✅**（commit `c7171b2`） · **E5-P2 Refactor Wave 2 ✅**（commits **11dedbf** · **822f799**；E5-P2-4b follow-up：bb_breakout 1265 / grid_trading 1434 / strategies/mod.rs 1442 均超 §九 1200 硬上限） · **E5-P1 Refactor Wave 1 ✅**（6 delivered + 2 cancel） · **P1-16 HALT-SESSION CROSS-SYMBOL PRICE CORRUPTION ✅**（commit `fef688e`；mean -9.02 bps vs 修前 -2214 bps，245× cleaner）· **E5-P0 Refactor Wave ✅** · **LIVE-GATE-BINDING-1 ✅** · **MICRO-PROFIT-FIX-1 ✅** · **P1-8 DUST-EVICTION-GAP-1 E1/E4 ✅** · **P0-10 SCANNER-GATE ✅ 部署** · **P0-5 PHANTOM-2-FUP ✅ 部署** · **P0-9 STABILITY-1 ✅ RCA** · **LIVE-GUARD-1 ✅** · **Phase 5 PAUSED** · **Live_Ready ⚠️** · **下一步**：restart_all.sh --rebuild 整合部署 E5-FN + FILL-CONTEXT + EXIT-FEATURES + E5-P1/P2（Plan N 零 migration，直接 rebuild）→ 累積流量後 P1-7 C 首跑 ONNX artifact · E5-FN-3-FUP（Strategist:172 / Guardian:215 / Executor:345 / Scout:114 audit_callback wiring）· E5-P2-4b 策略檔拆解排期 · P0-2 LG-1 21d demo 觀察 → P0-3 edge 重評 · P0-6 intent write / Demo 死循環打破 · **P1-7 LEARNING-PIPELINE-DORMANT-1** · Phase 2B Strategist 等 G-1 R-02。
+> 截至 2026-04-20：engine lib **1791 / 0 failed** + bin 38 · pytest 全量 **2866 / 0 fail / 14 skipped** · **Live_Ready ⚠️**（門控 5 項，Rust 可驗證 4 項）· **Phase 5 PAUSED**（demo 2w 後 P0-3 重評）· 主路徑：P0-6 intent write → P0-7 order submit → P0-2 21d demo → P0-3 edge 重評 → Live（最早 W24 末 ~2026-05-23）。活躍細節 → §三 · commit 歷史 → `docs/CLAUDE_CHANGELOG.md` · 里程碑敘述 → §三「已完成里程碑索引」+ `docs/archive/`。
