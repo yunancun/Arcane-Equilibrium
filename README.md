@@ -346,6 +346,29 @@ cd docker_projects/monitoring_services && docker compose up -d   # 端口 3000
 bash helper_scripts/start_paper_trading.sh
 ```
 
+### Mac dev-only 模式（开发环境，不参与交易）
+
+**使用场景**：Mac 端只做开发（编辑 / build / test / commit / auto-push），Linux trade-core 是唯一 OMS。两端共用同一个 Bybit demo API key —— Mac 跑 engine 会与 Linux 撞单（违反根原则 #1「单一写入口」）。
+
+**启用 dev-only**（重命名 secret slot 让 engine 找不到 credentials → fail-closed）：
+```bash
+cd "$OPENCLAW_SECRETS_DIR" && for s in demo live read_only; do
+  [[ -d "$s" ]] && mv "$s" "$s.dev_disabled_$(date +%Y%m%d)"
+done
+rm -f "$OPENCLAW_SECRETS_DIR/live/authorization.json"   # 顺便撤 live 签章
+```
+
+**还原**（未来想 Mac 跑测试 / 回到 deploy 模式）：
+```bash
+# 用实际后缀替换 SUFFIX（例如 .dev_disabled_20260421）
+cd "$OPENCLAW_SECRETS_DIR" && for s in demo live read_only; do
+  [[ -d "$s.dev_disabled_"* ]] && mv "$s.dev_disabled_"* "$s"
+done
+# authorization.json 需透过 GUI /api/v1/live/auth/renew 重簽（HMAC 与本机 IPC_SECRET 绑定，不能从 Linux copy）
+```
+
+效果：Mac engine 即使被误启也无 credentials 可连 Bybit → 0 订单冲突；Linux trade-core 文件分属不同主机，完全不受影响。
+
 ---
 
 ## 常用脚本 (Common Scripts)
