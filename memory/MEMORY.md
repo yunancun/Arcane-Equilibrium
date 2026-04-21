@@ -19,7 +19,7 @@
 - [P0-6 RCA + Fix Plan (2026-04-17)](project_p06_rca_and_fix_plan.md) — FUP抑制致bybit_sync死鎖+cost_gate冷啟動死循環；修復：startup triage + natural bootstrap
 - [Mac=開發 / Linux=Runtime](project_dev_runtime_split.md) — Mac 只做讀碼/寫碼/RCA；engine/python/PG 全在 Linux；Mac 上 engine not_running 是預期
 - [decision_outcomes 不是 dead，但有 2 bug (2026-04-21 Linux 驗證後更正)](project_decision_outcomes_not_dead.md) — Writer 活躍、不可刪；但 (1) outcome_* 100% NULL 是 timeframe 字串格式 ('1' vs '1m') 不一致非 klines 稀疏 (2) engine_mode 100% 'paper' 是 INSERT 漏接線；升級 P1 fix（2 新 TODO）；Mac RCA 盲點：不驗證外部資料就採納「情境 3 reframe」
-- [Track P 物理層 runtime dead (2026-04-21)](project_track_p_runtime_dead.md) — DUAL-TRACK-EXIT-1 Track P 代碼完整但 on_tick.rs:1677 硬編碼 `\|_\| None`，exit_features 永遠 None → Priority 6 從未 fire；aee96b9/d0f0c21 runtime 影響 = 0；主軸解阻塞 = TRACK-P-T4-WIRING-1 (P1，~3d) 接真實 builder
+- [Track P 物理層 runtime 接線 (2026-04-21)](project_track_p_runtime_dead.md) — dead 於晚 2 Linux audit 揭露 + 晚 3 T4 接線解除（commit `e95c779`）；tick_pipeline/on_tick.rs:1677 `\|_\| None` 替換為實際 builder closure（paper_state + price_tracker + edge_estimates），Priority 6 每 tick 評估；engine lib 1827→1839（Mac + Linux release 均驗）；待 `--rebuild` 部署後實際 runtime fire；v2 non-linear swap 為後續 `TRACK-P-V2-SWAP-1` (P2，~1d)
 - [SSH bridge workflow (2026-04-21)](project_ssh_bridge_workflow.md) — Mac CC 為 SSOT 透過 ssh trade-core 遠端觸發 Linux runtime 任務；取代雙 CC session prompt 同步的浪費；Mac 本地允許 fetch + pull --ff-only（禁 merge/rebase/reset）；授權範圍 + 範例 + Linux CC 剩餘職能
 
 ## Working principles & autonomy

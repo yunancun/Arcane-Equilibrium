@@ -1,7 +1,45 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-04-21（EDGE-P2-3 Phase 2+ (b) bb_breakout + ma_crossover PostOnly entry wiring merged）
+> 最後更新：2026-04-21（TRACK-P-T4-WIRING-1 Priority 6 runtime 接線）
+
+### TRACK-P-T4-WIRING-1 — Priority 6 PHYS-LOCK runtime 接線（2026-04-21 · commit `e95c779`）
+
+**觸發**：2026-04-21 晚 2 Linux audit 揭露 `tick_pipeline/on_tick.rs:1677` 硬編碼 `|_| None`，Priority 6 `physical_micro_profit_lock` 在生產從未 fire（`trading.fills` `risk_close:phys_lock_*` 0 筆 / 24h engine log `phys_lock` 0 matches）。Track P 全體（MICRO-PROFIT-FIX-1 2026-04-17 + Phase 1b v2 `aee96b9` + GATE1-REVERSAL-1 hotfix A `d0f0c21`）代碼對齊設計但 runtime 影響 = 0。設計文件 §七 Phase 1 軌道 1 L271-276 漏列「T4 builder 實作」為獨立交付項。
+
+**修復**：
+- 新 pure fn `exit_features::build_exit_features_for_tick(&PositionExitSnapshot, current_price, atr_pct, price_roc_short, est_net_bps, ts_ms) -> ExitFeatures`，鏡像 close-time `tick_pipeline::build_exit_feature_row` 的 7 維衍生規則（peak_pnl_pct / current_pnl_pct / giveback_atr_norm / time_since_peak_ms / entry_age_secs），可脫離 TickPipeline 單測。
+- `tick_pipeline/on_tick.rs:1677` 舊 `|_| None` 替換為實際 closure：逐 PositionRow 查 `paper_state.position_exit_snapshot(&symbol)` + `price_tracker.compute_roc(&symbol, 300)` + `intent_processor.edge_estimates().get_cell(snap.owner_strategy, symbol).shrunk_bps` → 餵 builder → 產 `Some(ExitFeatures)`。
+- Closure 僅捕獲 self 的 immutable sub-borrow（`paper_state` / `price_tracker` / `edge_estimates`），與既有 `&risk_config` 共存；借用於 `evaluate_positions` 返回後結束，不妨礙後續 `risk_closed_symbols` dispatch 的 `&mut self`。
+- Fail-soft：任一 Option::None → 4-Gate 保守 Hold（pre-T3 語意，零 regression 風險；最壞情況 builder 全欄位 None = 等同舊 `|_| None`）。
+
+**Runtime 效果**（待 Linux `restart_all.sh --rebuild` 部署）：
+- Priority 6 4-Gate `physical_micro_profit_lock`（v1 linear `PhysLockConfig`）每 tick 評估活躍持倉。
+- 合法 Lock 唯二 `phys_lock_gate4_giveback`（giveback ≥ 線性閾值）/ `phys_lock_gate4_stale_roc_neg`（peak 陳舊 + 短窗 ROC < 0）。
+- Gate 1 (edge floor) 在 `edge_estimates` 冷啟動（`is_populated()=false`）時全 Hold — 預期 fail-safe，不是 bug；Phase 5 edge 收斂後自然解鎖實際 Lock。
+- v2 非線性 giveback + `ExitConfig` swap 留待後續 TODO `TRACK-P-V2-SWAP-1` (P2，~1d)。
+
+**Tests** (+12，全在 `exit_features::tests`)：
+- `test_build_for_tick_long_profit_happy`：happy path，8 欄位完整填值，arithmetic 對齊手算
+- `test_build_for_tick_short_profit_side_sign`：空倉側符號對稱
+- `test_build_for_tick_giveback_clamped_to_zero_when_fresh_high`：current > peak 時 giveback 夾回 0
+- `test_build_for_tick_atr_none_giveback_none` / `test_build_for_tick_atr_nonpositive_giveback_none`：ATR None / 0 / 負 / NaN → giveback None
+- `test_build_for_tick_legacy_peak_ts_none`：legacy snapshot (peak_reached_ts_ms=0) → time_since_peak_ms None
+- `test_build_for_tick_peak_same_tick_zero`：ts_ms == peak_reached_ts_ms → Some(0)
+- `test_build_for_tick_clock_skew_entry_age_none`：ts_ms < entry_ts_ms → entry_age_secs None
+- `test_build_for_tick_entry_price_zero_defensive` / `test_build_for_tick_entry_price_nonfinite_defensive`：entry 0 或 ∞ → current_pnl_pct=0.0
+- `test_build_for_tick_feeds_v2_gate4_lock`：builder → v2 Gate 4a Lock 端對端
+- `test_build_for_tick_none_edge_feeds_v2_hold`：missing edge → v2 Gate 1 保守 Hold
+
+**測試**：engine lib 1827 → **1839 passed / 0 failed**（Mac debug + Linux release 均驗）。
+
+**檔案**（2 changed, +410/-8）：
+- `rust/openclaw_engine/src/exit_features.rs`（+355：builder + tests；962 → 1317 行，超 §七 1200 硬上限 ⚠️ 後續獨立 ticket `EXIT-FEATURES-SPLIT-1` 拆分）
+- `rust/openclaw_engine/src/tick_pipeline/on_tick.rs`（+55/-8：T4 接線點；2024 → 2079 行，既有 legacy bloat 另案）
+
+**Workflow**：主 session 直接寫（scope 小 ~50 LOC code + tests），未派 sub-agent。Mac `cargo check --lib` + `cargo test --lib exit_features::` + 全 engine lib 1839 綠 → commit + push → `ssh trade-core "git pull --ff-only && cargo test --release"` 1839 綠 → docs 二次 commit。
+
+---
 
 ### EDGE-P2-3 Phase 2+ (b) bb_breakout + ma_crossover PostOnly entry wiring（2026-04-21 · merges `f5f4dc2` + `8280132`）
 
