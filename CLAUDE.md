@@ -263,6 +263,15 @@ Operator 在 Mac 並行跑 Qwen3.6-35B（LM Studio）做代碼審核。CC 每完
 - **Mac 端**：commit 後自動 `git push origin main`（operator 在 trade-core 端 `git pull` 拉取；此為同步方向）
 - **CC 絕不執行**：`pull` / `merge` / `checkout` / `reset` / `rebase`（狀態變更操作留給 operator）
 
+### Mac dev-only 模式（環境檢測 + 操作細節）
+
+**環境檢測**：CC 從 system prompt `Platform:` 讀取（`darwin` = Mac dev-only / `linux` = trade-core 生產）。下面 4 條僅在 `darwin` 生效，**不必詢問 operator**。
+
+1. **pytest 必從 srv root 跑** — 部分測試用絕對 import `from program_code.…`，從 `control_api_v1/` 內跑會 `ImportError: No module named 'program_code'`（例：`test_earned_trust_engine.py`）。
+2. **整合測試打真實 Bybit 會 fail —— by design** — 3 個 secret slot 已 rename 為 `*.dev_disabled_*`（避免與 Linux trade-core 撞單；還原見 README § Mac dev-only 模式）。任何 connect 真實 Bybit 的 test 拿不到 credentials → fail-closed。Mock-based unit test 不受影響。Reproduce「engine lib 1791 / 0 failed」基準需在 Linux 跑。
+3. **Sub-agent (E1) 寫碼若 refuse** — Linux 端 2026-04-19「第 3 次驗證解除」refuse pattern，但跨平台/跨 session 仍偶發。Workaround：主 session 直接寫。
+4. **Mac↔Linux 同步單向** — Mac → origin auto-push（per 上方規則）；Linux trade-core 由 operator 手動 `git pull`；反向（Linux 端 hotfix → Mac）由 operator 手動在 Mac `git pull`（CC 不 pull）。**啟動 Mac session 前**先確認 Linux main 無 in-flight commit，避免 push 衝突。
+
 ---
 
 ## 八、16 Agent 角色體系與強制工作鏈
