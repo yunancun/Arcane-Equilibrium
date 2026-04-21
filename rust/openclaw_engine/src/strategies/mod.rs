@@ -234,6 +234,17 @@ pub struct MaCrossoverParams {
     pub confluence_threshold_light: f64,
     #[serde(default = "default_threshold_full")]
     pub confluence_threshold_full: f64,
+    /// EDGE-P2-3 Phase 2+: emit PostOnly Limit entries (maker fee) instead of Market.
+    /// EDGE-P2-3 Phase 2+：入場改發 PostOnly Limit（maker 費率）。
+    #[serde(default = "default_use_maker_entry")]
+    pub use_maker_entry: bool,
+    /// EDGE-P2-3 Phase 2+: PostOnly limit placement offset from last_price (bps).
+    #[serde(default = "default_maker_price_offset_bps")]
+    pub maker_price_offset_bps: f64,
+    /// EDGE-P2-3 Phase 2+: timeout (ms) for unfilled PostOnly Limit sweep.
+    /// Default 45_000; runtime clamped to [15_000, 300_000].
+    #[serde(default = "default_maker_limit_timeout_ms")]
+    pub maker_limit_timeout_ms: u64,
 }
 
 fn default_entry_conf_base_ma() -> f64 {
@@ -333,6 +344,9 @@ impl Default for MaCrossoverParams {
             confluence_threshold_no_trade: 45.0,
             confluence_threshold_light: 52.0,
             confluence_threshold_full: 58.0,
+            use_maker_entry: false,
+            maker_price_offset_bps: 1.0,
+            maker_limit_timeout_ms: 45_000,
         }
     }
 }
@@ -1027,6 +1041,13 @@ impl StrategyFactory {
         mac.min_persistence_ms = p.ma_crossover.min_persistence_ms;
         mac.min_notional_usd = p.ma_crossover.min_notional_usd;
         mac.confluence_config = p.ma_crossover.build_confluence_config();
+        // EDGE-P2-3 Phase 2+: wire maker-entry params from TOML.
+        // EDGE-P2-3 Phase 2+：從 TOML 接線 PostOnly 入場參數。
+        mac.use_maker_entry = p.ma_crossover.use_maker_entry;
+        mac.maker_price_offset_bps = p.ma_crossover.maker_price_offset_bps;
+        mac.maker_limit_timeout_ms = grid_trading::clamp_maker_limit_timeout_ms(
+            p.ma_crossover.maker_limit_timeout_ms,
+        );
         mac.set_conf_scale(p.ma_crossover.conf_scale);
         mac.set_active(p.ma_crossover.active);
         strategies.push(Box::new(mac));

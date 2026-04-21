@@ -11,6 +11,12 @@ adx_threshold = 20.0
 regime_filter_enabled = true
 higher_tf_alpha = 0.003
 conf_scale = 1.0
+# EDGE-P2-3 Phase 2+ (2026-04-20): PostOnly Limit entries; entry-only scope
+# (close stays Market). Demo enabled first for validation.
+# EDGE-P2-3 Phase 2+：入場改 PostOnly Limit；平倉維持 Market。Demo 先驗證。
+use_maker_entry = true
+maker_price_offset_bps = 1.0
+maker_limit_timeout_ms = 45000
 
 [bb_reversion]
 active = true
