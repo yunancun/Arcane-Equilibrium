@@ -1,14 +1,14 @@
 # OpenClaw TODO — 工作清單
 
-**最後更新**：2026-04-21（晚） Linux 驗證後 RCA 升級 — Mac commits：(1) `aee96b9` Phase 1b Track P v2 非線性 giveback pure fn ✅；(2) `d0f0c21` GATE1-REVERSAL-1 hotfix A ✅；(3) `5a2c241` DECISION-OUTCOMES RCA v1 doc-only（**已被 Linux 驗證部分推翻** — 見下）。Linux release rebuild 驗證 engine lib **1816 passed / 0 failed** ✓；Gate 1 行為確認 Hold ✓。**但 DECISION-OUTCOMES 情境 3 reframe 推翻**：outcome_* 100% NULL 不是稀疏是 JOIN bug + engine_mode 100% 'paper' 是 tagging bug + `phys_lock_*` fills 全時段 0 使 hotfix A 觀察計畫失效。升級為 3 個新 TODO（L62 下 DECISION-OUTCOMES-ENGINE-MODE-TAG-BUG-1 P1 / OUTCOME-BACKFILL-JOIN-NULL-1 P1 / GATE1-REVERSAL-OBSERVABILITY-1 P2）。
-**Engine**：PID 3029633 · binary mtime 2026-04-19 22:32 → 含全部先前 staged 修復（P0-6 永久修復 + P1-7 A INTENT-WRITE-GAP-1 + P1-7 B edge_estimator scheduler + P1-17 Winsorize + LIVE-GATE-BINDING-1 + DYNAMIC-RISK-1 + IPC-SCAN-1c + FILL-CONTEXT-LINKAGE-1 + EXIT-FEATURES-TABLE-1 Phase 1b + Plan N ai_budget dedup + E5-P1/P2 + E5-FN-2/3 + DISPATCH-RETRY-1 + MARKET-KLINES-STALE-1 + DUAL-TRACK Track P T1-T5 骨架 + PIPELINE-SLOT-1 Phase 1-4）+ **EXIT-FEATURES-TABLE-1 Phase 1b GAP-1**（commit `35808e9` apply_confirmed_fill 接線，待流量驗證）
-**Python uvicorn**：PID 3029688（4 workers）· started 2026-04-19 22:33 → 含 P0-12 LIVE-GATE-FALLBACK-1 + E5-FN-3 AnalystAgent pilot + PIPELINE-SLOT-1 Phase 4 daemon-thread trigger
-**PIPELINE-SLOT-1 live 驗證**：LiveAuthWatcher 22:33 啟動 `env=LiveDemo poll_interval_secs=5`；authorization.json 已由 Manual restart sentinel 清除；等 operator 走 GUI renew → 應 ≤1s 觀察到 Live pipeline 重生
-**測試基準線**：Rust engine lib **1816**（+25 DUAL-TRACK-EXIT-1 Phase 1b v2 / Mac debug 跑出；Linux release 待 `--rebuild` 後驗證）/ bin 38 / core 392 / e2e 35 / reconciler_e2e 19 · Python **2866** passed（+9 E5-FN-3 + 2 DYNAMIC-RISK-STATUS-TEST-SIG-1 修復 83a0475 + 16 WATCHDOG-DNS-CLASSIFY-1 新測）+ audit 4 passed / ml_training 238 passed · **0 pre-existing fail**（DYNAMIC-RISK 已清）
+**最後更新**：2026-04-21（晚 6 · 批次歸檔 + 狀態同步） — 當日完成項已歸檔至 `docs/archive/2026-04-21--completed_todo_batch.md`（14 項，含 DECISION-OUTCOMES-* 三連、TRACK-P-T4-WIRING-1、DUAL-TRACK-EXIT-1 Phase 1b Track P v2、GATE1-REVERSAL-1 hotfix A、EDGE-P2-3 Phase 2+ (b) PostOnly 擴展、EXIT-FEATURES-SPLIT-1 / ON-TICK-SPLIT-1、3 個 env-race pure-fn 模板化、TICK-PIPELINE-MOD-UNUSED-IMPORTS-1、20:44 CEST `--rebuild` 部署）。
+**Engine**：PID **3954769** · binary mtime **2026-04-21 20:44** · baseline commit `f128af5`（`8460505` 為 docs-only post-deploy sync）· 22.85 MB release → **首次含** TRACK-P-T4-WIRING-1 / EDGE-P2-3 Phase 2+ (b) PostOnly / DECISION-OUTCOMES backfill fix / EXIT-FEATURES-SPLIT / ON-TICK-SPLIT / CANARY-WRITER env-race / AI-SERVICE-CLIENT env-race / TICK-PIPELINE-MOD unused-imports cleanup
+**Python uvicorn**：PID 3029688（4 workers）· started 2026-04-19 22:33 → uvicorn 未隨 `--rebuild` 重啟（`restart_all.sh --rebuild` 只重建 engine binary），仍含 P0-12 LIVE-GATE-FALLBACK-1 + E5-FN-3 AnalystAgent pilot + PIPELINE-SLOT-1 Phase 4 daemon-thread trigger
+**PIPELINE-SLOT-1 live 驗證**：LiveAuthWatcher 22:33 啟動 `env=LiveDemo poll_interval_secs=5`；authorization.json 仍未簽（operator 待決定何時啟 live 流量）
+**測試基準線**：Rust engine lib **1843**（Mac debug + Linux release 均驗，post-rebuild）/ bin 38 / core 392 / e2e 35 / reconciler_e2e 19 · Python **2866** passed + audit 4 + ml_training 238 · build warnings 13 → **10**（TICK-PIPELINE-MOD-UNUSED-IMPORTS-1 清 3）· **0 pre-existing fail**
 
-> engine lib 1631 → 1770（+139）→ 1791（+21）差距 = 1B-4.1/4.2 · 1B-5 gate · 3 FUPs · 1B-4.3 funding drag · 1B-5 hot-reload · FUP-4（9 commits `0febdc3..a93dbda`）+ **EDGE-P2-2 Phase A + FUP #1-#7 `381c542`**（+13 OI tests + 8 FUP tests）。當前 engine binary PID 3029633（mtime 2026-04-19 22:32）**不含** `bd1a429` + `a2a791b` + `a93dbda` + `381c542`，下次 `--rebuild` 才會進入 runtime。
-**健康**：demo alive（snapshot age 5.9s） · paper/live 預期 dead（PAPER-DISABLE-1 + 待 renew） · 今日 1 crash（12:25，為 redeploy 前殘留）
-**DB 驗證（2026-04-20 00:20）**：market.klines 5 timeframes 在近 1h 寫入 ✅ · trading.intents demo 57 rows/3h ✅（P1-7 A 生效）· **learning.exit_features GAP-1 驗收 ✅ 1.8h 提前結案**（demo 8 close fills / 8 exit_features / coverage_ratio=1.000 / Strategy 6 + FastTrack 2）
+**健康**（post-rebuild 2026-04-21 21:03 check）：demo alive（snapshot age 1.5s） · paper disabled（PAPER-DISABLE-1 預期）· live not alive（未簽 auth 預期）· 0 panics · 24 errors 全 pre-existing cold-start noise（21× cryptopanic news auth missing / 3× instrument spec 冷啟動 fail-closed）
+**DB 驗證（2026-04-21 21:00，24h 窗口）**：`trading.intents` demo **144 rows** ✅（P1-7 A `2a36a3f` 生效，live/live_demo 0 因 auth 未簽為預期）· `trading.fills` demo **123 rows** ✅（P0-7 ARCHIVED）· `settings/edge_estimates.json` mtime 20:45 ✅（scheduler 隨 uvicorn 運作中）· `decision_outcomes` 273,963 rows 三分對齊（demo 136k / live 89k / live_demo 47k）
+**21d demo 時鐘**：起算 2026-04-16 22:16 local（P0-9 STABILITY-1 RCA 穩定點），目前 ~5d；計劃性 rebuild 不重置；目標 21d 解鎖最早 **2026-05-07**
 
 > 本文件僅列「待辦/進行中」。已完成 → 文末歸檔索引。詳細設計 → `docs/worklogs/`。
 > Compact 後從此文件恢復；第一個 `[ ]` = 起點。CLAUDE.md §三 = 當前狀態快照。
@@ -59,17 +59,9 @@ git status && git log --oneline -5
 
 - ✅ **MARKET-KLINES-STALE-1** 2026-04-18 commit `65acde6`（歸檔 §2）— paper/demo/live 三引擎 `market_data_tx` 並行化，DB kline 寫入恢復。
 - ✅ **EXIT-FEATURES-TABLE-1** 2026-04-19 commits `6ea643e` · `c7171b2` · `35808e9`（歸檔 §3）— Phase 1b 全部接線 + GAP-1 `apply_confirmed_fill` 補接線 + R1 驗收 coverage=1.000 / 8 of 8 demo 平倉。Phase 1b 累積 ≥1 週 exit_features 後可校準 7 維閾值。**若未來 Track P T4 PHYS-LOCK 接線**：需重跑驗收 SQL 確認不漏接 `Physical` exit_source。
-- [x] **~~ATTEMPT-LOG-NOT-DEAD-1~~ / DECISION-OUTCOMES-* 全系列 2026-04-21 Linux 驗證結案** — 原 RCA 情境 3 推翻後升級 2 個 P1 fix + 1 個 P2 doc-close + 1 個 P1 T4-wiring follow-up；TODO 1+2 fix 在 commit `5e2981d` implement + 歷史 backfill 完成；2026-04-21 Mac session 驗證 SQL（ssh bridge 直驗）：`decision_outcomes` 273,963 rows 分布 demo 136k / live 89k / live_demo 47k；`engine_mode` tagging 修復（對應 context_id 前綴）；`outcome_1h non_null` 覆蓋率 live 98% / demo 90% / live_demo 74%；`max_favorable non_null` live 100% / demo 72% / live_demo 21%（live_demo 偏低為 recent data 未到 25h+ backfill 窗口，非 bug）。memory `project_decision_outcomes_not_dead.md` 更新終態。
-- [x] **DECISION-OUTCOMES-ENGINE-MODE-TAG-BUG-1** ✅ fixed by commit `5e2981d` + Linux backfill — Mac session 2026-04-21 ssh psql 驗證：engine_mode 分布 demo/live/live_demo 三分對齊 context_id 前綴，不再 100% 'paper'
-- [x] **OUTCOME-BACKFILL-JOIN-NULL-1** ✅ fixed by commit `5e2981d` + Linux backfill — Mac session 2026-04-21 ssh psql 驗證：outcome_1h 覆蓋率 74-98%，不再 0%；max_favorable 覆蓋率 21-100%（live_demo 21% 為 recent data 未到 backfill 窗口）
-- [x] **GATE1-REVERSAL-OBSERVABILITY-1** ✅ doc-only close — Linux audit 揭露 Priority 6 PHYS-LOCK 從未 fire（`exit_features` 永遠 None），hotfix A (`d0f0c21`) runtime 影響 0；加 Prometheus counter 無意義（upstream None）。`phys_lock_*` observability 等 `TRACK-P-T4-WIRING-1` 落地後自動生效。memory `project_track_p_runtime_dead.md` 記錄。
-- [x] **TRACK-P-T4-WIRING-1** ✅ fixed by commit `e95c779`（2026-04-21 晚 3）— Mac + Linux 均驗：**engine lib 1827 → 1839 passed / 0 failed**（+12 new builder tests）。替換 `tick_pipeline/on_tick.rs:1677` 的 `|_| None` 為實際 closure：查 `paper_state.position_exit_snapshot` + `price_tracker.compute_roc(300ms)` + `intent_processor.edge_estimates().get_cell` → 餵新 pure fn `exit_features::build_exit_features_for_tick` → 產 `Some(ExitFeatures)`。鏡像 close-time `tick_pipeline::build_exit_feature_row` 的 7 維衍生規則；Option::None → 4-Gate 保守 Hold（fail-soft，零 regression）。**Runtime 效果待 `restart_all.sh --rebuild`**：Priority 6 每 tick 評估，合法 Lock 唯二 `phys_lock_gate4_giveback` / `phys_lock_gate4_stale_roc_neg`（v1 linear 版；v2 non-linear swap 為後續 `TRACK-P-V2-SWAP-1` TODO）。edge_estimates 快取冷啟動時 Gate 1 全 Hold，Phase 5 edge 收斂後自然解鎖。詳 `.claude_reports/20260421_191842_track_p_t4_wiring.md`。
-- [ ] **TRACK-P-V2-SWAP-1**（P2，2026-04-21 新增，跟進 TRACK-P-T4）：Priority 6 由 v1 `risk_checks::physical_micro_profit_lock` + `PhysLockConfig`（線性 giveback 閾值）切換到 v2 `exit_features::physical_micro_profit_lock_v2` + `ExitConfig`（非線性 giveback 閾值，`base - slope × peak_atr_norm`，floor 保底）。v2 pure fn 於 commit `aee96b9` 實作 + 31 單測綠，T4 builder 已就位；swap 只剩 (1) `ExitConfig` ArcSwap 熱重載 plumbing、(2) `check_position_on_tick` Priority 6 改餵 v2、(3) 三環境 TOML 加 `[phys_lock]` → `[exit_config]`。估工程量 ~1 天。前置：無。排在 LinUCB 訓練 + Track L ML 層前，但不阻。
-- [x] **EXIT-FEATURES-SPLIT-1** ✅ 2026-04-21（跟進 TRACK-P-T4-WIRING-1）— 單檔 `rust/openclaw_engine/src/exit_features.rs` 1317 行超 §七 1200 硬上限，拆為 `exit_features/{mod,core,v2,builder}.rs` 四檔：**mod.rs** 68 行（頂層 doctrine + `pub use` re-exports，保向後相容 `crate::exit_features::…`）· **core.rs** 204 行（`ExitFeatures` + `PhysicalDecision` types + 7 core tests）· **v2.rs** 747 行（`ExitConfig` + `non_linear_giveback_fn` + `physical_micro_profit_lock_v2` + 24 v2 tests，含 Gate 1 v2 對齊設計 doctrine）· **builder.rs** 368 行（`build_exit_features_for_tick` T4 wiring + 12 builder tests，end-to-end feed tests 跨模組 import v2 consumer）。測試 1839 passed / 0 failed 不變；外部呼叫（`risk_checks.rs` / `on_tick.rs` / `position_risk_evaluator.rs` / `combine_layer.rs`）零改動。
-- [x] **AI-SERVICE-CLIENT-ENV-RACE-1** ✅ 2026-04-21 commit `580304a`（跟進 EXIT-FEATURES-SPLIT-1 §5 flag 的 flake）— `ai_service_client::tests::{test_default_socket_path, test_env_override_socket_path, test_data_dir_fallback}` 三測試原 `std::env::set_var/remove_var` `OPENCLAW_AI_SERVICE_SOCKET` + `OPENCLAW_DATA_DIR` 與並行測試競爭（Mac `$OPENCLAW_DATA_DIR` 有值時 ~1/1839 flake）；抽 pure fn `resolve_socket_path_from(sock: Option<&str>, data_dir: Option<&str>) -> PathBuf` 承接優先序，舊 `resolve_socket_path()` 改為薄包裝讀 env。測試改呼 pure fn 直接注入輸入，零 env 動作 = 零 race。+1 新測試 `test_sock_override_beats_data_dir` 顯式斷言優先序。Mac 9/9 ai_service_client 綠；engine lib 1839 → **1840**（新增 1 測試）。詳 `.claude_reports/20260421_200045_ai_service_env_race.md`。
-- [x] **ON-TICK-SPLIT-1** ✅ 2026-04-21 commit `bfedb56`（跟進 EXIT-FEATURES-SPLIT-1；與 AI-SERVICE-CLIENT-ENV-RACE-1 並行派發）— 單檔 `rust/openclaw_engine/src/tick_pipeline/on_tick.rs` 2071 行超 §七 1200 硬上限，拆為 `tick_pipeline/on_tick/{mod,helpers,step_0_fast_track,step_0_5_h0_gate,step_1_2_klines_indicators,step_3_signals,step_4_5_dispatch,step_6_risk_checks}.rs` 八檔：**mod.rs** 157 行（orchestrator，`ControlFlow<Break=early-return, Continue=state>` 串接 6 個 step + `pub(crate) use` re-exports）· **helpers.rs** 152 行（strip/log PHYS-LOCK + T4-FIX 端到端測試）· **step_0_fast_track.rs** 516 行（prelude 熱重載/stats/ADL + Step 0 halt/halve/close-all）· **step_0_5_h0_gate.rs** 93 行（H0 門控 shadow/硬阻斷）· **step_1_2_klines_indicators.rs** 111 行（kline 聚合 + 指標 + FeatureSnapshot）· **step_3_signals.rs** 192 行（pause gate + boot cooldown + 信號評估）· **step_4_5_dispatch.rs** 929 行（策略分派 + intent + maker sweep + 策略平倉；超 800 soft warn 但 <1200 hard cap，borrow 原因在 mod.rs header 記錄：`strategies_mut()` 迭代借用必須與 `intent_processor/paper_state/...` disjoint field 存取共存於單 fn，NLL 限制）· **step_6_risk_checks.rs** 359 行（9-check + halt/cooldown 派發，T4 `exit_features_fn` closure 完整保留不得跨 step 拆）。跨 step owned state 串接：`ft_pause_new_entries`/`h0_allowed`/`IndicatorSnapshot`/`Vec<Signal>`/`Vec<OrderIntent>`。Mac debug + Linux release 均 1840/0。Sub-agent (general-purpose) 並行 ~15min 完成。外部呼叫零改動（`tick_pipeline/mod.rs` 的 `mod on_tick;` 自動解析為 `on_tick/mod.rs`）。
-- [x] **CANARY-WRITER-ENV-RACE-1** ✅ 2026-04-21 commit `d454c17`（與 TICK-PIPELINE-MOD-UNUSED-IMPORTS-1 並行派發 sub-agent）— 抽 pure fn `decide_canary_enable_from(canary_mode, disable_dump) -> CanaryEnableDecision`（3-variant enum 保留原 silent-disable vs `info!` log 雙語意）；`spawn()` 改為薄 wrapper 讀 env 轉呼 pure fn，runtime 行為 byte-identical。移除 2 env-racy 測試，新增 5 decision 測試（net +3）；全 engine lib 1840 → **1843 passed**（Mac debug + Linux release 均驗）；2× parallel runs 清無 flake；warnings 零新增。`canary_writer.rs` 454 → 569 行（≤ 800 soft）。詳 `.claude_reports/20260421_…`（如有）。
-- [x] **TICK-PIPELINE-MOD-UNUSED-IMPORTS-1** ✅ 2026-04-21 commit `c164cb6`（與 CANARY-WRITER-ENV-RACE-1 並行派發 sub-agent）— 清除 ON-TICK-SPLIT-1 (commit `bfedb56`) 後 `tick_pipeline/mod.rs` 暴露的 3 個 unused-import warnings（`RiskAction` / `Instant` / `debug`）。採 Option A（最乾淨）：step files 原本已有直接 `use`，單純從 `mod.rs` 移除 3 個 `use` 行即可；無 step 檔變動。warnings 13 → 10（-3 對齊）；engine lib 1843 passed / 0 failed 不變；零語意改動。
+- ✅ **2026-04-21 批次結案**（14 項，歸檔 `docs/archive/2026-04-21--completed_todo_batch.md`）— DECISION-OUTCOMES-* 三連 · TRACK-P-T4-WIRING-1（主軸解阻塞，`e95c779` + runtime 已 deploy）· DUAL-TRACK Phase 1b Track P v2 pure fn（`aee96b9`）· GATE1-REVERSAL-1 hotfix A（`d0f0c21`）· EDGE-P2-3 Phase 2+ (b) bb + ma PostOnly · EXIT-FEATURES-SPLIT-1（`3a9b988`）· ON-TICK-SPLIT-1（`bfedb56`，sub-agent）· AI-SERVICE-CLIENT-ENV-RACE-1（`580304a`）· CANARY-WRITER-ENV-RACE-1（`d454c17`，sub-agent）· TICK-PIPELINE-MOD-UNUSED-IMPORTS-1（`c164cb6`，sub-agent）· 20:44 CEST `restart_all.sh --rebuild` 部署（engine PID 3954769）
+- [ ] **TRACK-P-V2-SWAP-1**（P2，2026-04-21 新增，跟進 TRACK-P-T4）：Priority 6 由 v1 `risk_checks::physical_micro_profit_lock` + `PhysLockConfig`（線性 giveback）切 v2 `exit_features::physical_micro_profit_lock_v2` + `ExitConfig`（非線性 `base - slope × peak_atr_norm`，floor 保底）。v2 pure fn `aee96b9` + 31 單測綠，T4 builder 已就位；剩 (1) `ExitConfig` ArcSwap 熱重載 (2) `check_position_on_tick` Priority 6 改餵 v2 (3) 三環境 TOML `[phys_lock]` → `[exit_config]`。~1d。前置無。不阻塞。
+- [ ] **TICK-PIPELINE-MOD-SPLIT-1**（P3，2026-04-21 新增，ON-TICK-SPLIT-1 衍生）：`rust/openclaw_engine/src/tick_pipeline/mod.rs` 2276 行超 §七 1200 硬上限；結構上比 on_tick.rs 難拆（`TickPipeline` struct + 多 impl block 分散跨 tick dispatch / emitters / config sync / periodic snapshots）。~2-3d。前置無。不阻主路徑。
 
 ### Phase 1a · W23 Day 4-7（Step 0 後立即啟動，不阻於 7 維）
 
@@ -106,21 +98,15 @@ git status && git log --oneline -5
 
 ### Phase 2 · W25（原 W24，延後 1 週）— Track L shadow + P1-10 並行
 
-**軌道 1 Track P 物理層**：
-- [x] `peak_reached_ts_ms` 欄位加到 `PaperPosition`（含 legacy migration）— 2026-04-19 EXIT-FEATURES-TABLE-1 Phase 1b FUP（5 tests in paper_state/containers.rs）
-- [x] `price_tracker` 加 `compute_roc(symbol, lookback_ms)`— 2026-04-19 同 wave（15 tests in openclaw_core::risk::price_tracker）
-- [ ] 7 維度規則 in `risk_checks.rs`（Priority 6 替換現有 COST EDGE，重命名 `PHYS-LOCK`）+ ConfigStore hot-reload
-  - ✅ **v2 pure fn 已落地 2026-04-21**：`exit_features::physical_micro_profit_lock_v2` + `ExitConfig` 7 欄位 + `non_linear_giveback_fn`（linear decay + floor bound）+ 31 單測（Gate 1 Hold 語意對齊設計）
-  - 待做：Priority 6 替換 + ConfigStore ArcSwap 綁定 + 閾值由 counterfactual replay 校準
-- [ ] Combine Layer 骨架（Track L 缺失時等同 P-only）
-- [ ] E2 + E4：counterfactual replay audit（demo 7d）+ ≥18 單測（spike-wick 不誤觸 / 長期 winner 不誤砍 / 波動率歸一化邊界 / hot-reload / 早期寬容 / ML 缺席退化）
-  - ✅ 單測 **31 個**（含 Gate 1-4 + 非線性單調 + 邊界 + serde + Gate 1→Gate 4 端到端）2026-04-21
-  - 待做：counterfactual replay audit（demo 7d tick-level，Mac 做不了，待 Linux）
-- [ ] E5：rebuild + 灰度部署（保守閾值，24h 無 fee 惡化才收緊）
-- [~] **GATE1-REVERSAL-1 (P1，2026-04-21)** — 部分完成（hotfix A 已 commit）+ 剩餘下一波
-  - ✅ **hotfix A 完成 2026-04-21**：v1 `risk_checks::physical_micro_profit_lock` Gate 1 `edge < floor → Lock` 反轉為 `→ Hold`（對齊 v2 + 設計文檔 §三 L108-111 + operator 意圖「防止剛有大於 fee 的微利就套離場」）；3 tests rename + assert 反轉（risk_checks 2 + position_risk_evaluator 1）；`phys_lock_gate1_low_edge` reason v1 不再 emit，下游 parse 路徑向後兼容保留；engine lib 仍 1816 passed / 0 failed
-  - **Linux 端部署後觀察**：`--rebuild` 後 2-3d 對比 demo 平均持倉時長 / 單筆 close 盈利分佈 / Phase 5 edge 指標；`phys_lock_gate1_low_edge` 新 fills 應歸 0
-  - **剩餘下一波 Priority 6 替換時做**：(1) 統一符號 Gate 1 `<` → `<=` / Gate 4b `>` → `>=` 對齊設計 (2) 把 Priority 6 從 v1 `physical_micro_profit_lock` + `PhysLockConfig` 切換為 v2 `exit_features::physical_micro_profit_lock_v2` + `ExitConfig` (3) ConfigStore ArcSwap 綁定 `ExitConfig` 支持 hot-reload (4) 非線性 giveback 3 參數（base/slope/floor）由 counterfactual replay（demo 7d）校準 (5) 下游 `on_tick.rs` t4_fix + `tick_pipeline::infer_source` + Python `parse_exit_tag` 的 `phys_lock_gate1_low_edge` 分支評估何時清理（需所有含此 tag 的歷史 fills 歸檔或過期後）
+**軌道 1 Track P 物理層**（2026-04-21 post-rebuild 狀態）：
+- ✅ **基礎設施**：`peak_reached_ts_ms` 欄位（PaperPosition + legacy migration）+ `price_tracker.compute_roc(symbol, lookback_ms)` 2026-04-19 EXIT-FEATURES-TABLE-1 Phase 1b FUP（5 + 15 tests）
+- ✅ **v2 pure fn** 2026-04-21 commit `aee96b9`：`exit_features::physical_micro_profit_lock_v2` + `ExitConfig` 7 欄位 + `non_linear_giveback_fn`（linear decay + floor bound）+ 31 單測（Gate 1 Hold 語意對齊設計）
+- ✅ **v1 Gate 1 Lock→Hold hotfix A** 2026-04-21 commit `d0f0c21`：3 tests rename + assert 反轉；對齊設計意圖
+- ✅ **T4 runtime 接線** 2026-04-21 commit `e95c779`：替換 `tick_pipeline/on_tick.rs:1677` `|_| None` 為實際 closure；Priority 6 每 tick 評估；已在 20:44 CEST `--rebuild` 部署
+- [ ] **Combine Layer 骨架**（Track L 缺失時等同 P-only；目前 `exit_source=Physical` 路徑接線，ML 路徑為 None）
+- [ ] **counterfactual replay audit**（demo 7d tick-level，Mac 做不了，待 Linux sub-agent 或 Operator）→ 校準 v2 `ExitConfig` 3 個非線性 giveback 參數（base/slope/floor）
+- [ ] **`TRACK-P-V2-SWAP-1`**（P2，~1d）：Priority 6 v1 linear → v2 non-linear + ExitConfig ArcSwap 熱重載（見 Step 0 衍生項）
+- [ ] **E5**：v2 swap 後 24h 灰度驗 fee 無惡化才收緊閾值
 
 - [ ] Combine Layer 啟用 `ml_override_high=2.0`（不可達），只寫 `learning.decision_shadow_fills`
 - [ ] 每日對比 P vs L 一致性（target ≥60%）→ 校準 `ml_confirm_threshold / ml_override_high / ml_veto_low`
@@ -314,16 +300,17 @@ git status && git log --oneline -5
 - **阻塞**：不阻 Live；阻 DUAL-TRACK Phase 1 軌道 2 B 完成判定 + Phase 5 cost_gate 重啟
 - **關聯**：P1-10 STRATEGY-ASYMMETRY-1（必要前置）· DUAL-TRACK Phase 1 軌道 2 B · P0-3 Phase 5 edge 重評
 
-### P1-18 · GATE1-REVERSAL-OBS-1 — Priority 6 Gate 1 Lock→Hold 2-3d 行為觀察窗
-- **基準線**：2026-04-21 13:44:54 CEST (epoch 1776771894) engine PID `3813984` rebuild restart 起算；部署內容 = `d0f0c21` GATE1-REVERSAL-1 hotfix A（Priority 6 Gate 1 `edge < floor → Lock` 改為 `edge <= floor → Hold`，對齊 DUAL-TRACK-EXIT-1 設計文檔 §三 L108-111 + operator 明確意圖「防止剛有大於 fee 的微利就套離場」）
-- **觀察指標**（≥2-3d）：
-  - [ ] `phys_lock_gate1_low_edge` reason tag 新 fills 應 = 0（Gate 1 改 Hold 後不再產 Lock；SQL：`SELECT count(*) FROM trading.fills WHERE close_reason LIKE '%phys_lock_gate1_low_edge%' AND created_at > '2026-04-21 13:44:54+02'`）
-  - [ ] demo 平均持倉時長分佈（預期略增，不再被 Gate 1 提前 Lock）
+### P1-18 · GATE1-REVERSAL-OBS-1 — Priority 6 Gate 1 Lock→Hold + T4 接線 runtime 觀察窗
+- **基準線（更新 2026-04-21 晚）**：engine PID `3954769` 於 **2026-04-21 20:44 CEST `restart_all.sh --rebuild`** 起算（baseline commit `f128af5`）。首次真正承載 T4 接線（`e95c779` build_exit_features_for_tick closure）+ GATE1-REVERSAL-1 hotfix A（`d0f0c21` Gate 1 `<= floor → Hold`）+ DUAL-TRACK Phase 1b v2 pure fn（`aee96b9`）。舊基準線 13:44 CEST rebuild 雖含 hotfix A 但 T4 builder 未接線，Priority 6 仍走 `|_| None` = inert — 不構成真實觀察窗。
+- **觀察指標**（≥2-3d，從 20:44 CEST 起算）：
+  - [ ] `phys_lock_gate1_low_edge` 新 fills 應 = 0（Gate 1 Hold 後不再產此 tag；post-rebuild 當日 grep = 0，符合預期）
+  - [ ] `phys_lock_gate4_giveback` + `phys_lock_gate4_stale_roc_neg` 首次 fire 時間（edge_estimates 冷啟動 → Gate 1 全 Hold 預期初期 0 fire；Phase 5 edge 收斂後自然解鎖）
+  - [ ] demo 平均持倉時長分佈（預期略增，Gate 1 不再提前 Lock）
   - [ ] 單筆 close 盈利分佈右尾（Gate 4 trailing 接管後允許 edge 繼續累積，右尾預期略厚）
   - [ ] Phase 5 edge 指標（`settings/edge_estimates.json` 各策略 shrunk_bps 不應惡化）
-- **Gate**：觀察窗 ≥2-3d，上述 4 指標均未惡化 → 解鎖下一波 Priority 6 全替換（DUAL-TRACK-EXIT-1 Phase 2/3 Track P 接線 v2 pure fn 到其他 Priority 位置）；若任一指標惡化 → pause 回查 + E2 對抗性審查
-- **阻塞**：不阻 P0 主路徑（P0-6/P0-7/P0-2）；阻 DUAL-TRACK-EXIT-1 下一波 Priority 6 替換
-- **關聯**：DUAL-TRACK-EXIT-1 Phase 1b Track P v2（commit `aee96b9`）· `risk_checks.rs:312-323` Priority 6 · CLAUDE.md §三 2026-04-21 Phase 1b 條目
+- **Gate**：觀察窗 ≥2-3d，上述 5 指標均未惡化 → 解鎖 `TRACK-P-V2-SWAP-1`（Priority 6 v1 → v2 non-linear + ExitConfig 熱重載）；若任一指標惡化 → pause 回查 + E2 對抗性審查
+- **阻塞**：不阻 P0 主路徑；阻 `TRACK-P-V2-SWAP-1` + Phase 2/3 Track L
+- **關聯**：DUAL-TRACK-EXIT-1 Phase 1b Track P v2（`aee96b9`）· T4 builder（`e95c779`）· `risk_checks.rs:312-323` Priority 6 · CLAUDE.md §三 2026-04-21 · memory `project_track_p_runtime_dead.md`（post-T4 下次 audit 應改寫 live）
 
 ### ✅ P1-15 LEARNING-SCHEMA-QUALITY-1 2026-04-18 commit `b0df1b3`（歸檔 §8）
 - `commands.rs:668` 加 `risk_close:ipc_close_symbol` 前綴 + `realized_edge_stats.py:238` allowlist 加 `live_demo`。清 28 phantom cells（18 ipc + 10 risk_check），live_demo grand_mean −14.97 bps。真實 grand_mean 毒源由 P1-16/17 解。
@@ -373,74 +360,7 @@ git status && git log --oneline -5
 
 ### 跨平台 / Mac 部署準備
 
-#### PYO3-ELIMINATE-1 · PyO3 surface 歸零（3 phase）📦
-- **動機**：Mac (M5 Max) 本地開發 + Linux 部署短期雙軌 → 未來 M5 Ultra 完整遷移。PyO3 cdylib 是**唯一**跨平台 ABI 耦合點；消除後 Rust binary + Python source 完全正交，CI wheel pipeline 可關閉。符合憲法 §一 #2 讀寫分離（PyO3 實質繞過 IPC 邊界）。
-- **盤點結果**（2026-04-20 grep `#[pyclass]` / `from openclaw_core`）：
-  - `openclaw_pyo3` crate 共 1426 LOC / 3 暴露對象
-  - `ContextDistiller` + `NotableEvent`（228 LOC）— **0 Python call sites** 💀
-  - `HedgingEngine` + `HedgeRecommendation` + `Position`（285 LOC）— **0 Python call sites** 💀
-  - `BybitClient`（bybit_bridge/ ~880 LOC）— **3 call sites**：`strategy_ai_routes.py:46` / `live_session_routes.py:220` / `helper_scripts/clean_restart_flatten.py:35`
-- **前置**：無阻塞，可隨時啟動。**不阻 Live Gate**（Mac 遷移是 Live 後長期工作）。
-
-**Phase 1 · 刪死代碼（~30 min，零風險）✅ 2026-04-20（待 commit）**
-- [x] 刪除 `rust/openclaw_pyo3/src/context_distiller.rs`（228 LOC）
-- [x] 刪除 `rust/openclaw_pyo3/src/hedging_engine.rs`（285 LOC）
-- [x] 從 `rust/openclaw_pyo3/src/lib.rs` #[pymodule] 移除對應 `add_class` 註冊（5 行）
-- [x] 驗證：`cargo build -p openclaw_pyo3 --release` 綠（16.12s，warnings 為預存 openclaw_engine dead_code）
-- [x] pytest 全量綠（合併 Phase 2 一起跑）
-- [x] commit `a84ecdb`：`refactor(pyo3): PYO3-ELIMINATE-1 Phase 1 — drop dead ContextDistiller + HedgingEngine (513 LOC, 0 call sites)`
-
-**Phase 2 method surface 實測**（2026-04-20，Python 實際使用的 BybitClient method）：
-- **Read-only（9）**：`has_credentials()` `base_url()` `instrument_count()` `refresh_balance()` `refresh_instruments(category)` `get_instrument(symbol)` `get_positions(category)` `get_active_orders(category)` `get_executions(category, limit)`
-- **Write（3）**：`round_qty(symbol, qty)` · `place_order(...)` (LIVE-GATE-FALLBACK-1 reduce_only close) · `BybitClient(environment=...)` ctor
-- **決策**：Option A httpx — `place_order` reduce_only 必須繞過引擎走 REST（根原則 #6），其他 11 個 method 一起走 httpx 保持接口一致；IPC 方案會破壞緊急平倉路徑的「繞過引擎」語意。
-
-**Phase 2 · `BybitClient` 3 call sites Python 化 ✅ 2026-04-20（待 commit + E2 審）**
-- [x] 先分析 3 call sites 實際調用的 `BybitClient` 方法集（12 methods + 1 `cancel_order` 盤點；spec 詳見 `docs/worklogs/2026-04-20--pyo3_eliminate_phase2_migration_spec.md`）
-- [x] 決策：Python httpx 重寫（理由：`place_order` reduce_only 必須繞引擎走 REST，所有 method 統一走 httpx 最一致；無 WS 需求）
-- [x] 實作：`program_code/.../app/bybit_rest_client.py` 914 行（457 code + 357 doc + 140 blank）+ 40 unit tests（0.53s 綠）
-- [x] Parity harness：`tests/test_bybit_rest_client_parity.py` 23 tests（15 Mode B passed + 8 Mode A skip 因 PyO3 cdylib 未裝 venv）+ 8 Bybit V5 fixtures
-- [x] 3 call sites 遷移完成：`strategy_ai_routes.py`（singleton factory 重命名 `_RUST_BYBIT_CLIENT` → `_BYBIT_CLIENT`）· `live_session_routes.py:220` · `helper_scripts/clean_restart_flatten.py`
-- [x] grep `from openclaw_core` 生產代碼 0 match（剩 docs/spec/archive/Rust 內部 `rust/openclaw_core` crate ref — 預期）
-- [x] pytest control_api 全量 **2647 passed / 6 skipped / 0 failed**（63.50s）
-- [x] E2 對抗性審查 APPROVE_WITH_NITS（0 CRITICAL，見 `docs/audits/2026-04-20--pyo3_eliminate_phase2_e2_review.md`）
-- [x] commit `0f8220b`：`refactor(connector): PYO3-ELIMINATE-1 Phase 2 — migrate BybitClient callers to httpx`
-
-**Phase 3 · 拆 crate + 清工具鏈 ✅ 2026-04-20（待 commit）**
-- [x] 刪整個 `rust/openclaw_pyo3/` 目錄（`git rm -rf`，8 檔 ~918 LOC）
-- [x] `rust/Cargo.toml` 移除 `openclaw_pyo3` member
-- [x] `rust/Cargo.toml` 移除 workspace `pyo3` 依賴
-- [x] 刪 `helper_scripts/build_pyo3.sh`（`git rm`）
-- [x] 修 `helper_scripts/clean_restart.sh` / `fresh_start.sh` `SRC_DIRS` 移除 `openclaw_pyo3/src`
-- [x] 修 `helper_scripts/restart_all.sh --rebuild` 移除 `rebuild_pyo3()` function + 呼叫（只剩 `cargo build --release -p openclaw_engine`）
-- [x] 更新 `README.md`（架構圖 4→3 crates、亮点、build 表移除、restart_all 旗標說明）+ `SCRIPT_INDEX.md` + CLAUDE.md §九 singleton 表（`_RUST_BYBIT_CLIENT` → `_BYBIT_CLIENT`）
-- [x] 驗證：`cargo build --release -p openclaw_engine` 11.14s 綠 + `cargo test --lib` 1791 passed / 0 failed + pytest bybit_rest_client 58 passed / 5 skipped
-- [x] commit `9b691a0`：`chore(rust): PYO3-ELIMINATE-1 Phase 3 — drop openclaw_pyo3 crate + build pipeline`
-
-**完成標準**：
-- `cargo.toml` 零 pyo3 依賴
-- `rg '#\[pyclass\]|from openclaw_core'` 零結果
-- CI matrix 無 maturin/wheel step
-- engine lib + pytest 基準線不回退
-- Mac 上 `cargo build` 僅產 binary，無 .so/.dylib
-
-**遷移收益量化**：
-- 移除 1426 LOC PyO3 code
-- 移除 `maturin` / `cibuildwheel` 跨平台 wheel 管道需求
-- CI build time 估計 -2~3 min（省掉 pyo3 cdylib link）
-- Mac 跨平台阻力：PyO3 wheel cross-compile（唯一硬骨頭）→ 消失
-
-**風險與退路**：
-- Phase 1：零風險（刪的是 0 call site 代碼）
-- Phase 2 風險：httpx 與 Rust `reqwest` 在 Bybit V5 簽名/timeout/retry 行為差異 → 退路 = 改走 IPC（Rust 側邏輯無改動）
-- Phase 3 風險：清理遺漏（script 殘留 PyO3 路徑）→ 退路 = CI 會立即爆
-
-### ✅ E5-FN-3-FUP · 全 5 Agent audit_callback wiring 2026-04-19（歸檔 §14）
-- FUP-a Strategist / FUP-b Guardian / FUP-c Executor / FUP-d Scout 全 4 agent 接 audit_callback + 3 NITs（log throttle 60s / unknown event_type default / thread-safety 文檔）全綠；新測 2+6+3+8=19 integration tests。5 agent 完成後 `change_audit_log` 可驗 `who IN ('ScoutAgent','StrategistAgent','GuardianAgent','AnalystAgent','ExecutorAgent')`。
-
----
-
-## 🔵 P3 — 長期專項（W25+）
+- ✅ **PYO3-ELIMINATE-1 全 3 Phase** 2026-04-20（commits `a84ecdb` + `0f8220b` + `9b691a0`）— Phase 1 刪死碼 513 LOC ContextDistiller + HedgingEngine · Phase 2 BybitClient 3 call sites 遷 httpx（914 行 `bybit_rest_client.py` + 40 unit tests + 23 parity tests；E2 APPROVE_WITH_NITS）· Phase 3 刪 crate + 清工具鏈（8 檔 ~918 LOC + `rebuild_pyo3()` + `build_pyo3.sh`）。總移除 1426 LOC PyO3 code，Mac 上 `cargo build` 僅產 binary 無 .so/.dylib，PyO3 wheel cross-compile 障礙消失。
 
 ### AI Agent 全 5 鏈路
 - [ ] **G-1 / R-06** 5 agent 全 real（Conductor 仍 stub；其他 4 已 R-06-v2 ✅）
@@ -464,20 +384,11 @@ git status && git log --oneline -5
 
 ### EDGE P2 架構重工
 - 🟢 **EDGE-P2-2** OI + Liquidation 信號源（給 bb_breakout 加領先信號）
-  - [x] **OI signal — bb_breakout confluence 調製（Phase A）** — WS `tickers.openInterest` 解析 + `PriceEvent.open_interest` 欄位 + 每 symbol 滾動 buffer + `oi_delta_pct` → `confluence_score` ±bonus（預設 `enable_oi_signal=false`，與基線 bit-identical）；E2 7 findings 全修：#1 dedup + #2 on_rejection 保留 buffer + #3 `oi_min_delta_pct` noise floor + #4 TOML factory validate_oi fallback + #5 window 上限 600000ms + #6 ts monotonic guard + #7 bonus 典型區間 docstring；engine lib **1791 passed**（baseline 1770 +21）
-  - [ ] **Liquidation signal — Phase B（待 OI signal demo 驗證後啟動）**
+  - ✅ **Phase A OI signal** 2026-04-20 commit `381c542` — bb_breakout confluence 調製；WS `tickers.openInterest` + `oi_delta_pct` → `confluence_score` ±bonus，預設關（bit-identical）；E2 7 findings 全修；engine lib 1770 → **1791**。
+  - [ ] **Phase B Liquidation signal**（待 OI signal demo 驗證後啟動）
 - 🟡 **EDGE-P2-3** Maker order 支持（5.5 bps → ~1 bps/side）
-  - [x] **Phase 1A** PostOnly maker 入場管線（grid_trading demo/paper；live off）— `24f28a1` `7178d63`
-  - [x] **Phase 1B-1** `BybitRetCode` enum + `cancel_order_by_link_id` helper — `16b69fa`
-  - [x] **Phase 1B-2** WS `rejectReason` 捕獲 + 分類（僅 observability）— `86b568f`
-  - [x] **Phase 1B-3** `maker_limit_timeout_ms` + `PendingOrder` order_type/tif + sweep cancel — `4c35616` `89805e7`
-  - [x] **Phase 1B-4.1/4.2** Paper resting-limit queue + touch-based Limit fill + 3 bias guards — `0febdc3` `6b02e49`
-  - [x] **Phase 1B-5** `maker_net_edge` metric + **MakerKpi gate**（Cold/Healthy/Degraded）— `1c79c6b`
-  - [x] **3 FUPs** — `a3744fa`（clear_resting_limit_orders 重置 maker_stats）· `bf75986`（KPI staleness window 時間衰減）· `94810b4`（Kahan summation + cancel route 統一 via 1B-1 helper）
-  - [x] **Phase 1B-4.3** funding drag（bias guard #3）— `bd1a429`（PostOnly draft 打標 `funding_rate_at_submit`；sweep 分類 FillPartial 時若 `|rate| > threshold` 且逆向持倉 → FundingDragSkip 保留掛單；bias #1 same-tick Keep 優先）
-  - [x] **Phase 1B-5 hot-reload** `MakerKpiConfig` 閾值 via ConfigStore — `a2a791b`（IPC 寫入面 + `sync_maker_kpi_config_if_changed` tick 頂部 sync + IntentProcessor 熱重載；零重啟）
-  - [x] **E2 APPROVE_WITH_NITS + 5 FUP tests** — `a93dbda`（N1 `MakerKpiConfig::validate()` 4 不變量 + N2 `#[serde(default)]` on `funding_rate_at_submit` 升級安全 + N3 `deny_unknown_fields` 拼錯即失敗；FUP T1-T3/T5-T8/T10 共 8 新測試；engine lib 1762 → **1770 passed**）
-  - [ ] **Phase 2+** live endpoint 啟用 · 其他策略（bb_breakout / ma_crossover / funding_arb）接 PostOnly · learning integration
+  - ✅ **Phase 1A → 1B-5 + 3 FUPs + hot-reload + E2 + Phase 2+ (a/b)** 2026-04-18~21（commits 15+ commits；最終 merges `f5f4dc2` + `8280132` 把 PostOnly 擴展到 bb + ma）— PostOnly maker 入場管線覆蓋 grid/ma/bb 三策略（demo/paper=true, live=false）；`MakerKpiConfig` Cold/Healthy/Degraded gate + ConfigStore 熱重載；funding drag bias guard；engine lib 1762 → 1827。**Runtime 已在 2026-04-21 20:44 `--rebuild` 部署**。
+  - [ ] **Phase 2+ (c)** live endpoint 啟用 · funding_arb 接 PostOnly · learning integration（待 demo/paper accumulate ≥1w 驗正效果）
 
 ---
 
@@ -546,8 +457,11 @@ git status && git log --oneline -5
 
 ## 📚 已完成歸檔索引
 
+**2026-04-21 批次歸檔**（14 項）：`docs/archive/2026-04-21--completed_todo_batch.md`
+- DECISION-OUTCOMES-* 三連（engine_mode tagging + outcome_* JOIN null + observability doc-close）· TRACK-P-T4-WIRING-1 主軸解阻塞（`e95c779` + 20:44 CEST runtime 部署）· DUAL-TRACK-EXIT-1 Phase 1b Track P v2 pure fn(`aee96b9`) · GATE1-REVERSAL-1 hotfix A(`d0f0c21`) · EDGE-P2-3 Phase 2+ (b) bb + ma PostOnly · EXIT-FEATURES-SPLIT-1(`3a9b988`) · ON-TICK-SPLIT-1(`bfedb56`，sub-agent) · AI-SERVICE-CLIENT-ENV-RACE-1(`580304a`) · CANARY-WRITER-ENV-RACE-1(`d454c17`，sub-agent) · TICK-PIPELINE-MOD-UNUSED-IMPORTS-1(`c164cb6`，sub-agent) · 20:44 CEST `restart_all.sh --rebuild` 部署
+
 **2026-04-20 批次歸檔**（14 項）：`docs/archive/2026-04-20--completed_todo_batch.md`
-- Step 0 可行性 Sprint · MARKET-KLINES-STALE-1 · EXIT-FEATURES-TABLE-1 Phase 1b + GAP-1 · P1-7 A(`2a36a3f`)/B(`23b14ef`) · Track P T1-T5 骨架（6 commits）· P1-5 DRAWDOWN-RESET(`7cda4e4`)· P1-15(`b0df1b3`) · P1-16(`fef688e`) · P1-17 Winsorize · DYNAMIC-RISK-STATUS(`83a0475`) · E5-FN-2 Plan N(`f0f11c0`) · WATCHDOG-DNS-CLASSIFY-1 · E5-FN-3-FUP 全 5 agent audit wiring + 3 NITs
+- Step 0 可行性 Sprint · MARKET-KLINES-STALE-1 · EXIT-FEATURES-TABLE-1 Phase 1b + GAP-1 · P1-7 A(`2a36a3f`)/B(`23b14ef`) · Track P T1-T5 骨架（6 commits）· P1-5 DRAWDOWN-RESET(`7cda4e4`)· P1-15(`b0df1b3`) · P1-16(`fef688e`) · P1-17 Winsorize · DYNAMIC-RISK-STATUS(`83a0475`) · E5-FN-2 Plan N(`f0f11c0`) · WATCHDOG-DNS-CLASSIFY-1 · E5-FN-3-FUP 全 5 agent audit wiring + 3 NITs · PYO3-ELIMINATE-1 全 3 Phase（`a84ecdb`/`0f8220b`/`9b691a0` — 1426 LOC 移除）
 
 **2026-04-19 PIPELINE-SLOT-1 Phases 1-4**（commits `3005fc0` Phase 1 · `e28f3d8` Phase 2 · `d92f25d` Phase 3 · Phase 4 pending）：
 - Phase 1：`pipeline_slot.rs` 物理層抽象（SlotKind / try_spawn / teardown）+ `restart_kind.rs` sentinel（manual vs unattended 區分）+ `restart_all.sh` atomic sentinel write ✅
