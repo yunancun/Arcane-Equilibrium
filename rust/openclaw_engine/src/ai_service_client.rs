@@ -37,16 +37,38 @@ fn method_ttl(method: &str) -> Duration {
     }
 }
 
-/// Resolve socket path from env or default.
-/// 從環境變量或默認值解析 socket 路徑。
-fn resolve_socket_path() -> PathBuf {
-    if let Ok(p) = std::env::var("OPENCLAW_AI_SERVICE_SOCKET") {
+/// Resolve socket path from explicit inputs.
+///
+/// Pure function: precedence is (1) explicit `sock` override, (2) `data_dir`
+/// + default socket name, (3) hard-coded `DEFAULT_SOCKET_DIR` +
+/// `DEFAULT_SOCKET_NAME`. No env or filesystem I/O — callers supply the
+/// strings they want resolved. Exists as a separate fn so unit tests can
+/// assert the precedence matrix without racing on process-global env vars
+/// (AI-SERVICE-CLIENT-ENV-RACE-1, 2026-04-21).
+///
+/// 從顯式輸入解析 socket 路徑。純函數：優先序 (1) 顯式 sock 覆寫 → (2)
+/// data_dir + 預設 socket 名 → (3) 硬編碼 DEFAULT_SOCKET_DIR + DEFAULT_SOCKET_NAME。
+/// 無 env 或檔案 I/O — 呼叫端自行提供要解析的字串。拆出獨立 fn 供單元測試
+/// 驗證優先序矩陣，避免並行測試在 process-global env var 上競爭
+/// （AI-SERVICE-CLIENT-ENV-RACE-1，2026-04-21）。
+fn resolve_socket_path_from(sock: Option<&str>, data_dir: Option<&str>) -> PathBuf {
+    if let Some(p) = sock {
         return PathBuf::from(p);
     }
-    if let Ok(d) = std::env::var("OPENCLAW_DATA_DIR") {
+    if let Some(d) = data_dir {
         return PathBuf::from(d).join(DEFAULT_SOCKET_NAME);
     }
     PathBuf::from(DEFAULT_SOCKET_DIR).join(DEFAULT_SOCKET_NAME)
+}
+
+/// Resolve socket path from env or default. Thin wrapper around
+/// `resolve_socket_path_from` that reads the two override env vars.
+/// 從環境變量或默認值解析 socket 路徑。此為 `resolve_socket_path_from` 的
+/// 薄包裝，讀取兩個覆寫 env var。
+fn resolve_socket_path() -> PathBuf {
+    let sock = std::env::var("OPENCLAW_AI_SERVICE_SOCKET").ok();
+    let data_dir = std::env::var("OPENCLAW_DATA_DIR").ok();
+    resolve_socket_path_from(sock.as_deref(), data_dir.as_deref())
 }
 
 /// IPC client for Python AIService. Thread-safe, cloneable via Arc.
@@ -221,60 +243,52 @@ mod tests {
         assert_eq!(method_ttl("nonexistent"), Duration::from_secs(10));
     }
 
+    // AI-SERVICE-CLIENT-ENV-RACE-1 (2026-04-21): these three tests used to
+    // mutate process-global env vars (`OPENCLAW_AI_SERVICE_SOCKET` /
+    // `OPENCLAW_DATA_DIR`) to probe `resolve_socket_path`. Under parallel
+    // cargo-test execution (Mac dev env sets `OPENCLAW_DATA_DIR`) the setvar /
+    // removevar pairs raced with other tests reading the same keys, producing
+    // flakes (~1 / 1839 runs). Refactored `resolve_socket_path_from(sock,
+    // data_dir)` as the pure precedence fn so tests inject inputs directly —
+    // no env mutation, no race.
+    //
+    // AI-SERVICE-CLIENT-ENV-RACE-1（2026-04-21）：下列三個測試原以 set/remove
+    // `OPENCLAW_AI_SERVICE_SOCKET` / `OPENCLAW_DATA_DIR` 探 `resolve_socket_path`
+    // 優先序。並行 cargo test（Mac 本地有設 OPENCLAW_DATA_DIR）下與其他讀
+    // 同 key 的測試競爭，出現偶發 flake（約 1/1839）。重構為 pure fn
+    // `resolve_socket_path_from(sock, data_dir)` 直接注入輸入，不動 env，零 race。
+
     #[test]
     fn test_default_socket_path() {
-        // Clear env for deterministic test / 清除環境變量以確保測試確定性
-        let prev_sock = std::env::var("OPENCLAW_AI_SERVICE_SOCKET").ok();
-        let prev_dir = std::env::var("OPENCLAW_DATA_DIR").ok();
-        std::env::remove_var("OPENCLAW_AI_SERVICE_SOCKET");
-        std::env::remove_var("OPENCLAW_DATA_DIR");
-
-        let path = resolve_socket_path();
+        // No sock override, no data_dir → hard-coded default.
+        // 無 sock 覆寫、無 data_dir → 使用硬編碼 default。
+        let path = resolve_socket_path_from(None, None);
         assert_eq!(path, PathBuf::from("/tmp/openclaw/ai_service.sock"));
-
-        // Restore / 還原
-        if let Some(v) = prev_sock {
-            std::env::set_var("OPENCLAW_AI_SERVICE_SOCKET", v);
-        }
-        if let Some(v) = prev_dir {
-            std::env::set_var("OPENCLAW_DATA_DIR", v);
-        }
     }
 
     #[test]
     fn test_env_override_socket_path() {
-        let prev = std::env::var("OPENCLAW_AI_SERVICE_SOCKET").ok();
-        std::env::set_var("OPENCLAW_AI_SERVICE_SOCKET", "/custom/path.sock");
-
-        let path = resolve_socket_path();
+        // Sock override wins over data_dir + default-name fallback.
+        // sock 覆寫優先於 data_dir + 預設名 fallback。
+        let path = resolve_socket_path_from(Some("/custom/path.sock"), None);
         assert_eq!(path, PathBuf::from("/custom/path.sock"));
-
-        // Restore / 還原
-        match prev {
-            Some(v) => std::env::set_var("OPENCLAW_AI_SERVICE_SOCKET", v),
-            None => std::env::remove_var("OPENCLAW_AI_SERVICE_SOCKET"),
-        }
     }
 
     #[test]
     fn test_data_dir_fallback() {
-        let prev_sock = std::env::var("OPENCLAW_AI_SERVICE_SOCKET").ok();
-        let prev_dir = std::env::var("OPENCLAW_DATA_DIR").ok();
-        std::env::remove_var("OPENCLAW_AI_SERVICE_SOCKET");
-        std::env::set_var("OPENCLAW_DATA_DIR", "/custom/data");
-
-        let path = resolve_socket_path();
+        // data_dir set (no sock override) → data_dir + default-name join.
+        // 設 data_dir（無 sock 覆寫）→ data_dir + 預設名組合。
+        let path = resolve_socket_path_from(None, Some("/custom/data"));
         assert_eq!(path, PathBuf::from("/custom/data/ai_service.sock"));
+    }
 
-        // Restore / 還原
-        match prev_sock {
-            Some(v) => std::env::set_var("OPENCLAW_AI_SERVICE_SOCKET", v),
-            None => {}
-        }
-        match prev_dir {
-            Some(v) => std::env::set_var("OPENCLAW_DATA_DIR", v),
-            None => std::env::remove_var("OPENCLAW_DATA_DIR"),
-        }
+    /// Sock override takes precedence even when data_dir is also set — the
+    /// precedence contract encoded in `resolve_socket_path_from`'s if-chain.
+    /// 同時給 sock + data_dir → sock 勝，驗證 `resolve_socket_path_from` 優先序。
+    #[test]
+    fn test_sock_override_beats_data_dir() {
+        let path = resolve_socket_path_from(Some("/explicit.sock"), Some("/ignored/dir"));
+        assert_eq!(path, PathBuf::from("/explicit.sock"));
     }
 
     #[tokio::test]
