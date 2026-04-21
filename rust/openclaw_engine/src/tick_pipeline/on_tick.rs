@@ -1660,13 +1660,60 @@ impl TickPipeline {
         // MICRO-PROFIT-FIX-1：同步讀取 min_profit_to_close_pct，實現窄帶觸發。
         let cost_edge_max_ratio = self.current_cost_edge_max_ratio();
         let min_profit_to_close_pct = self.current_min_profit_to_close_pct();
-        // DUAL-TRACK-EXIT-1 Track P T3 hook point: T4 will replace this
-        // `|_| None` closure with a real ExitFeatures snapshot builder that
-        // reads peak / ATR / ROC / age from paper_state + price_tracker for
-        // each position. Until T4 lands, Priority 6 (PHYS-LOCK) is inert and
-        // legacy cost_edge_max_ratio / min_profit_to_close_pct inputs are
-        // ignored by `check_position_on_tick`.
-        // DUAL-TRACK-EXIT-1 T3 接線點：T4 將替換 `|_| None`。
+        // DUAL-TRACK-EXIT-1 Track P **T4 wiring** (2026-04-21 · TRACK-P-T4-WIRING-1):
+        // real ExitFeatures builder replaces the former `|_| None` placeholder.
+        // Per live position we look up (a) the mid-life `PositionExitSnapshot`
+        // from `paper_state`, (b) short-horizon ROC (300 ms) from
+        // `price_tracker` — ATR% is already on the row, (c) the JS-shrunk edge
+        // estimate for `(owner_strategy, symbol)` from the intent-processor
+        // cache. Any miss → `Option::None` → Priority-6 4-Gate responds with a
+        // conservative Hold (pre-T3 semantics preserved as the degenerate case).
+        //
+        // Borrow split: closure captures only immutable sub-borrows of `self`
+        // (paper_state / price_tracker / edge_estimates), which coexist with
+        // the already-live `&risk_config` (= `&self.intent_processor.risk_config()`).
+        // The closure is consumed by `evaluate_positions` and its borrows end
+        // before the side-effectful `risk_closed_symbols` dispatch loop.
+        //
+        // Before T4: Priority 6 PHYS-LOCK was inert in production (0 fires
+        // over the full decision_outcomes history; see
+        // `memory/project_track_p_runtime_dead.md`). With T4 in place the
+        // 4-Gate lock runs every tick and can trigger
+        // `phys_lock_gate4_giveback` / `phys_lock_gate4_stale_roc_neg`.
+        //
+        // DUAL-TRACK-EXIT-1 Track P **T4 接線**（2026-04-21 · TRACK-P-T4-WIRING-1）：
+        // 以實際 ExitFeatures 建構器取代舊 `|_| None` 佔位。逐倉查
+        // (a) `paper_state` 即時快照、(b) `price_tracker.compute_roc(300ms)`、
+        // (c) intent_processor 邊際估計快取；任一缺失 → None → Priority 6
+        // 4-Gate 保守 Hold。Closure 僅捕獲 self 的 immutable sub-borrow，
+        // 與既有 `&risk_config` 共存；借用於 evaluate_positions 返回後結束。
+        // T4 接線前 Priority 6 生產 0 次觸發（見 memory/project_track_p_runtime_dead.md）。
+        let paper_state_ref = &self.paper_state;
+        let price_tracker_ref = &self.price_tracker;
+        let edge_estimates_ref = self.intent_processor.edge_estimates();
+        let tick_ts_ms = event.ts_ms;
+        let exit_features_fn =
+            |row: &crate::position_risk_evaluator::PositionRow|
+                -> Option<crate::exit_features::ExitFeatures> {
+                // Mid-life snapshot (not pre-close). Skip (None → Hold) when
+                // the position has vanished between row collection and here —
+                // e.g. racing IPC close on the same tick batch.
+                // 即時快照（非 pre-close）；position 在收集與此處之間被移除
+                // （例：同 tick IPC 先行 close）→ None → 下游 Hold。
+                let snap = paper_state_ref.position_exit_snapshot(&row.symbol)?;
+                let price_roc_short = price_tracker_ref.compute_roc(&row.symbol, 300);
+                let est_net_bps = edge_estimates_ref
+                    .get_cell(&snap.owner_strategy, &row.symbol)
+                    .map(|c| c.shrunk_bps as f32);
+                Some(crate::exit_features::build_exit_features_for_tick(
+                    &snap,
+                    row.current_price,
+                    row.atr_pct,
+                    price_roc_short,
+                    est_net_bps,
+                    tick_ts_ms,
+                ))
+            };
         let decisions = crate::position_risk_evaluator::evaluate_positions(
             &position_rows,
             daily_loss,
@@ -1674,7 +1721,7 @@ impl TickPipeline {
             event.ts_ms,
             cost_edge_max_ratio,
             min_profit_to_close_pct,
-            |_| None,
+            exit_features_fn,
             &risk_config,
         );
 
