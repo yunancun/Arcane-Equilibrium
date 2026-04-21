@@ -3,7 +3,7 @@
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
 > 最後更新：2026-04-21（Linux trade-core GATE1-REVERSAL-1 hotfix A 部署 + 2 個 pre-existing Python startup warning 清零 + P0-2 時鐘解耦 + P1-18 觀察窗建立）
 
-### Linux trade-core 部署 + startup noise 清零 + P0-2 解耦 + GATE1-REVERSAL-OBS-1（2026-04-21 · commit `__HASH__`）
+### Linux trade-core 部署 + startup noise 清零 + P0-2 解耦 + GATE1-REVERSAL-OBS-1（2026-04-21 · commit `6b1b10d`）
 
 **觸發**：Mac 端 `d0f0c21`（GATE1-REVERSAL-1 hotfix A）pull 至 Linux trade-core 後完整部署；同時 operator 要求把歷來兩個 pre-existing startup warning 一併修掉（不是本次引入，但累積多 commit 未處理，`restart_all` 日誌被噪音稀釋）。
 
