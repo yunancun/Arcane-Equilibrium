@@ -127,21 +127,74 @@ impl CanaryWriterHandle {
     }
 }
 
+/// Three-way decision for the canary spawn precedence. `Enabled` spawns the
+/// writer task; `DisabledByMode` is silent (feature simply off); `DisabledByKillSwitch`
+/// logs an `info!` explaining the override so operators see why CANARY_MODE=1
+/// didn't take effect.
+/// 灰度 spawn 優先序三態決策。`Enabled` → 啟動寫入任務；`DisabledByMode` → 靜默
+/// 停用（功能未開）；`DisabledByKillSwitch` → 記 info 說明覆寫原因，讓 operator
+/// 看見為何 CANARY_MODE=1 沒生效。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CanaryEnableDecision {
+    Enabled,
+    DisabledByMode,
+    DisabledByKillSwitch,
+}
+
+/// Decide whether the canary writer should spawn, from explicit string inputs.
+///
+/// Pure function: precedence is (1) if `OPENCLAW_CANARY_MODE != "1"` →
+/// `DisabledByMode` (feature off, silent); (2) otherwise if
+/// `OPENCLAW_DISABLE_CANARY_DUMP == "1"` → `DisabledByKillSwitch` (override,
+/// caller logs info); (3) otherwise `Enabled`. No env or filesystem I/O —
+/// callers supply the two strings they want resolved. Exists as a separate
+/// fn so unit tests can assert the precedence matrix without racing on
+/// process-global env vars (CANARY-WRITER-ENV-RACE-1, 2026-04-21).
+///
+/// 從顯式字串輸入決策是否啟動灰度寫入器。純函數：優先序 (1) `OPENCLAW_CANARY_MODE`
+/// 非 `"1"` → `DisabledByMode`（功能未開，靜默）；(2) 否則若
+/// `OPENCLAW_DISABLE_CANARY_DUMP == "1"` → `DisabledByKillSwitch`（覆寫，呼叫端記 info）；
+/// (3) 否則 `Enabled`。無 env 或檔案 I/O — 呼叫端自行提供要解析的字串。拆出
+/// 獨立 fn 供單元測試驗證優先序矩陣，避免並行測試在 process-global env var 上競爭
+/// （CANARY-WRITER-ENV-RACE-1，2026-04-21）。
+fn decide_canary_enable_from(
+    canary_mode: Option<&str>,
+    disable_dump: Option<&str>,
+) -> CanaryEnableDecision {
+    let canary_mode_on = canary_mode.unwrap_or("") == "1";
+    let disable_dump_on = disable_dump.unwrap_or("") == "1";
+    if !canary_mode_on {
+        return CanaryEnableDecision::DisabledByMode;
+    }
+    if disable_dump_on {
+        return CanaryEnableDecision::DisabledByKillSwitch;
+    }
+    CanaryEnableDecision::Enabled
+}
+
 /// Spawn the canary writer task if the feature is enabled. Safe to call once at
 /// engine startup; returns a `CanaryWriterHandle` (clone into every pipeline).
 /// 啟動灰度寫入任務（如啟用）。引擎啟動時呼叫一次，回傳 handle（clone 到每條管線）。
 pub fn spawn(data_path: PathBuf, cancel: CancellationToken) -> CanaryWriterHandle {
-    let canary_mode = std::env::var("OPENCLAW_CANARY_MODE").unwrap_or_default() == "1";
-    let disable_dump = std::env::var("OPENCLAW_DISABLE_CANARY_DUMP").unwrap_or_default() == "1";
-    if !canary_mode {
-        return CanaryWriterHandle::disabled();
-    }
-    if disable_dump {
-        info!(
-            "canary mode disabled by OPENCLAW_DISABLE_CANARY_DUMP=1 (overrides CANARY_MODE) \
-             / 旗標關閉灰度寫盤（覆寫 CANARY_MODE）"
-        );
-        return CanaryWriterHandle::disabled();
+    // Thin wrapper over `decide_canary_enable_from` that reads the two gating
+    // env vars. Runtime reads are not races (single-threaded at engine startup),
+    // so production behaviour is byte-identical to the pre-refactor version.
+    // 薄包裝 `decide_canary_enable_from`，讀取兩個 gating env var。runtime 讀取
+    // 為單執行緒（引擎啟動時），非競爭；生產行為與重構前 byte-identical。
+    let canary_mode_env = std::env::var("OPENCLAW_CANARY_MODE").ok();
+    let disable_dump_env = std::env::var("OPENCLAW_DISABLE_CANARY_DUMP").ok();
+    match decide_canary_enable_from(canary_mode_env.as_deref(), disable_dump_env.as_deref()) {
+        CanaryEnableDecision::DisabledByMode => {
+            return CanaryWriterHandle::disabled();
+        }
+        CanaryEnableDecision::DisabledByKillSwitch => {
+            info!(
+                "canary mode disabled by OPENCLAW_DISABLE_CANARY_DUMP=1 (overrides CANARY_MODE) \
+                 / 旗標關閉灰度寫盤（覆寫 CANARY_MODE）"
+            );
+            return CanaryWriterHandle::disabled();
+        }
+        CanaryEnableDecision::Enabled => {}
     }
 
     let rotate_mb: u64 = std::env::var("OPENCLAW_CANARY_ROTATE_MB")
@@ -299,6 +352,27 @@ mod tests {
     use super::*;
     use tempfile::TempDir;
 
+    // CANARY-WRITER-ENV-RACE-1 (2026-04-21): `spawn_honours_disable_dump` and
+    // `spawn_without_canary_mode_is_disabled` used to mutate process-global env
+    // vars (`OPENCLAW_CANARY_MODE` / `OPENCLAW_DISABLE_CANARY_DUMP`) to probe
+    // `spawn`'s enable decision. Under parallel cargo-test execution those
+    // setvar / removevar pairs raced with any other test reading the same keys,
+    // producing pre-existing flakes (~1 / 1839 runs) — flagged during
+    // ON-TICK-SPLIT-1 as the sibling of AI-SERVICE-CLIENT-ENV-RACE-1.
+    // Refactored `decide_canary_enable_from(canary_mode, disable_dump)` as the
+    // pure precedence fn so tests inject inputs directly — no env mutation, no
+    // race. `spawn()` retains the env read (wrapper that forwards to the pure
+    // fn); runtime behaviour is byte-identical.
+    //
+    // CANARY-WRITER-ENV-RACE-1（2026-04-21）：`spawn_honours_disable_dump` 與
+    // `spawn_without_canary_mode_is_disabled` 原以 set/remove
+    // `OPENCLAW_CANARY_MODE` / `OPENCLAW_DISABLE_CANARY_DUMP` 探 `spawn` 啟用決策。
+    // 並行 cargo test 下與其他讀同 key 的測試競爭，出現既存 flake
+    // （約 1/1839），ON-TICK-SPLIT-1 過程中被標記為 AI-SERVICE-CLIENT-ENV-RACE-1
+    // 的同類。重構為 pure fn `decide_canary_enable_from(canary_mode, disable_dump)`
+    // 直接注入輸入，不動 env，零 race；`spawn()` 保留 env 讀取（薄包裝轉呼 pure
+    // fn），生產行為 byte-identical。
+
     fn mk_record(n: u64) -> CanaryRecord {
         CanaryRecord {
             schema_version: "test".into(),
@@ -376,26 +450,67 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn spawn_honours_disable_dump() {
-        let tmp = TempDir::new().unwrap();
-        std::env::set_var("OPENCLAW_CANARY_MODE", "1");
-        std::env::set_var("OPENCLAW_DISABLE_CANARY_DUMP", "1");
-        let cancel = CancellationToken::new();
-        let h = spawn(tmp.path().to_path_buf(), cancel);
-        std::env::remove_var("OPENCLAW_CANARY_MODE");
-        std::env::remove_var("OPENCLAW_DISABLE_CANARY_DUMP");
-        assert!(!h.is_enabled(), "disable flag must override canary mode");
+    #[test]
+    fn decide_honours_disable_dump() {
+        // CANARY_MODE=1 + DISABLE_CANARY_DUMP=1 → kill switch wins over mode.
+        // CANARY_MODE=1 + DISABLE_CANARY_DUMP=1 → 旗標覆寫 CANARY_MODE。
+        let d = decide_canary_enable_from(Some("1"), Some("1"));
+        assert_eq!(d, CanaryEnableDecision::DisabledByKillSwitch);
     }
 
-    #[tokio::test]
-    async fn spawn_without_canary_mode_is_disabled() {
-        let tmp = TempDir::new().unwrap();
-        std::env::remove_var("OPENCLAW_CANARY_MODE");
-        std::env::remove_var("OPENCLAW_DISABLE_CANARY_DUMP");
-        let cancel = CancellationToken::new();
-        let h = spawn(tmp.path().to_path_buf(), cancel);
-        assert!(!h.is_enabled());
+    #[test]
+    fn decide_without_canary_mode_is_disabled() {
+        // Both vars unset → feature off, silent (DisabledByMode).
+        // 兩個 env 皆未設 → 功能未開，靜默停用。
+        let d = decide_canary_enable_from(None, None);
+        assert_eq!(d, CanaryEnableDecision::DisabledByMode);
+    }
+
+    #[test]
+    fn decide_canary_mode_only_enables() {
+        // CANARY_MODE=1, no kill switch → Enabled. This is the only combo
+        // that actually spawns the writer task.
+        // CANARY_MODE=1、無 kill switch → Enabled，為唯一會啟動 writer 任務的組合。
+        let d = decide_canary_enable_from(Some("1"), None);
+        assert_eq!(d, CanaryEnableDecision::Enabled);
+        let d2 = decide_canary_enable_from(Some("1"), Some(""));
+        assert_eq!(d2, CanaryEnableDecision::Enabled);
+        let d3 = decide_canary_enable_from(Some("1"), Some("0"));
+        assert_eq!(d3, CanaryEnableDecision::Enabled);
+    }
+
+    #[test]
+    fn decide_kill_switch_requires_canary_mode_first() {
+        // DISABLE_CANARY_DUMP=1 alone (no CANARY_MODE=1) → DisabledByMode,
+        // not DisabledByKillSwitch. The `info!` log for the override should
+        // only fire when the feature was actually requested — the precedence
+        // contract encoded in `decide_canary_enable_from`'s if-chain.
+        // 只設 DISABLE_CANARY_DUMP=1（無 CANARY_MODE=1）→ DisabledByMode，非
+        // DisabledByKillSwitch。覆寫的 `info!` 只應在功能被請求時發出 —
+        // 這是 `decide_canary_enable_from` if-chain 編碼的優先序契約。
+        let d = decide_canary_enable_from(None, Some("1"));
+        assert_eq!(d, CanaryEnableDecision::DisabledByMode);
+        let d2 = decide_canary_enable_from(Some("0"), Some("1"));
+        assert_eq!(d2, CanaryEnableDecision::DisabledByMode);
+    }
+
+    #[test]
+    fn decide_non_one_canary_mode_values_are_disabled() {
+        // Only the literal string "1" enables CANARY_MODE — matches the
+        // original `== "1"` string compare in `spawn()`.
+        // 只有字串 "1" 會啟用 CANARY_MODE，與 `spawn()` 原本 `== "1"` 比對一致。
+        assert_eq!(
+            decide_canary_enable_from(Some("true"), None),
+            CanaryEnableDecision::DisabledByMode
+        );
+        assert_eq!(
+            decide_canary_enable_from(Some("yes"), None),
+            CanaryEnableDecision::DisabledByMode
+        );
+        assert_eq!(
+            decide_canary_enable_from(Some(""), None),
+            CanaryEnableDecision::DisabledByMode
+        );
     }
 
     #[tokio::test]
