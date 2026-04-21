@@ -17,6 +17,7 @@
 - [engine_mode 標籤 live_demo 升級 (2026-04-16)](project_engine_mode_tag_live_demo.md) — Live+LiveDemo endpoint 寫 "live_demo" 非 "live"；歷史 43k 條 "live" 其實是 LiveDemo；ML filter 用 IN ('live','live_demo')
 - [Paper 預設關閉 (2026-04-16)](project_paper_pipeline_disabled_by_default.md) — OPENCLAW_ENABLE_PAPER=1 才 spawn；預設 drain task + DISABLED marker；3E-ARCH 結構保留；新增負餘額 Gate 1.6
 - [P0-6 RCA + Fix Plan (2026-04-17)](project_p06_rca_and_fix_plan.md) — FUP抑制致bybit_sync死鎖+cost_gate冷啟動死循環；修復：startup triage + natural bootstrap
+- [Mac=開發 / Linux=Runtime](project_dev_runtime_split.md) — Mac 只做讀碼/寫碼/RCA；engine/python/PG 全在 Linux；Mac 上 engine not_running 是預期
 
 ## Working principles & autonomy
 - [Agent 自主權偏好](feedback_agent_autonomy.md) — 用戶只設global止盈止損，Agent自主決定策略/參數/時機/倉位

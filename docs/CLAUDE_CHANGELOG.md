@@ -1,7 +1,54 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-04-20（PYO3-ELIMINATE-1 Phase 3：openclaw_pyo3 crate + build pipeline 歸零）
+> 最後更新：2026-04-21（DUAL-TRACK-EXIT-1 Phase 1b Track P v2 非線性 giveback pure fn + QC Gate 1 語意反轉）
+
+### DUAL-TRACK-EXIT-1 Phase 1b Track P v2 非線性 giveback pure fn（2026-04-21 · commit 待填）
+
+**目標**：推進 DUAL-TRACK-EXIT-1 主軸 Phase 1b 軌道 1 — 在既有 v1 `risk_checks::physical_micro_profit_lock` 線性閾值版（MICRO-PROFIT-FIX-1 / 2026-04-17 已上線）之外，新增 v2 **非線性 giveback** pure fn + 7 參數 `ExitConfig`，作為下一波 Priority 6 替換的基礎。設計意圖（operator QC）：「防止剛有大於 fee 的微利就套離場；保證 trailing stop；追求最高單筆 close 盈利」。
+
+**改動**（1 檔 / +698 / -0 LOC）：
+- `rust/openclaw_engine/src/exit_features.rs`（191 → 889 行）：
+  - **`ExitConfig` struct** 7 欄位（`min_net_floor_bps=5.0` / `min_hold_secs=30` / `min_peak_atr_norm=0.5` / `stale_peak_ms=60_000` / `giveback_base=1.0` / `giveback_slope=0.15` / `giveback_floor=0.3`）+ `Default`/`validate()`/serde round-trip
+  - **`non_linear_giveback_fn(peak_atr_norm, cfg) -> f64`**：linear decay + floor bound — `max(base − slope × norm, floor)`；NaN/Inf/負值夾回 0.0 → 回 base（total over all f64 inputs）
+  - **`physical_micro_profit_lock_v2(&ExitFeatures, &ExitConfig) -> PhysicalDecision`** 4-Gate 非線性 pure fn：
+    - Gate 1 `edge <= floor → Hold`（**設計意圖**：防止微利即套離場；QC 反轉 v1 Lock 語意）
+    - Gate 2 `entry_age_secs < min_hold → Hold`
+    - Gate 3 `peak_pnl_pct / atr_pct < min_peak_atr_norm → Hold`
+    - Gate 4a `giveback_atr_norm >= non_linear_giveback_fn(peak_atr_norm) → Lock("phys_lock_gate4_giveback")`
+    - Gate 4b `time_since_peak_ms >= stale_peak_ms AND price_roc_short < 0 → Lock("phys_lock_gate4_stale_roc_neg")`
+    - 保守：任一所需 `Option::None` 回 Hold；Lock 唯一合法路徑 = Gate 4
+  - **31 單測**：Gate 1-4 覆蓋 + 非線性 fn 單調性 / 高峰值 floor / 低峰值 base / NaN 保護 + ExitConfig validate 7 不變量 + serde round-trip + Gate 1 Hold 後 Gate 4 端到端觸發驗證
+
+**QC 反轉過程**：
+- E1 第一輪：無條件對齊 v1 `edge < floor → Lock`，doc comment 自我解釋「insufficient net edge is itself decisive signal」
+- 主會話 QC：揭露此違反設計文檔 §三 L108-111 偽代碼（`<= → Hold`）+ operator 明確 DUAL-TRACK-EXIT-1 設計要求「防止剛有大於 fee 的微利就套離場 / 保證 trailing stop / 追求最高單筆 close 盈利」
+- E1 回修：Gate 1 分支反轉 `Lock → Hold` / 刪除 `phys_lock_gate1_low_edge` reason 字串 / Test 1/2 rename `_locks → _holds` + assert 改 Hold / Test 22 assert 改 Hold / 新增 Test 25 端到端 Gate 1 Hold 後 Gate 4 trailing 觸發驗證
+
+**v1 `risk_checks.rs:312-323` 仍為 Lock 語意**（本輪 operator 指示「不動 Priority 6」）→ 新 TODO `GATE1-REVERSAL-1`（P1）追蹤下一波替換時：(1) 修 v1 Gate 1 → Hold (2) 統一符號 Gate 1 `<` → `<=` / Gate 4b `>` → `>=` 對齊設計文檔 (3) 接 ConfigStore ArcSwap hot-reload (4) Combine Layer 骨架。
+
+**驗證（Mac debug）**：
+- `cargo check --lib`：綠（6 預存 warnings）
+- `cargo test --lib exit_features`：**31 passed / 0 failed**（24 E1 第一輪 + 3 QC rename + 4 增補：Gate 1→4 端到端 + non_linear 單調 + validate 邊界 + serde round-trip）
+- `cargo test --lib`（全量）：**1816 passed / 0 failed**（1791 基準 + 25 新測）
+- `grep -cE '(/home/ncyu|/Users/[^/]+)' exit_features.rs` → 0 跨平台違規
+- `grep 'phys_lock_gate1_low_edge' exit_features.rs` → 0（QC 後全清）
+
+**工作流**：PM+FA（主會話 QC 對齊設計文檔 360 行）→ E1（general-purpose sub-agent 寫碼）→ E2（主會話 QC 揭露 Gate 1 反轉）→ E1 回修 → E4（cargo test 1816/0）→ PM（本 CHANGELOG + CLAUDE.md §三/§十一 + TODO.md + `.claude_reports/20260421_132015_dual_track_exit_phase1b_v2.md` + commit + push）。Mac dev-only，1 E1 sub-agent 無 refuse。
+
+**不確定之處**（→ operator 下次 Linux session 處置）：
+- v1 Priority 6 本週是否 hotfix（獨立 commit）還是等下一波替換 — 目前 v1 行為「edge < 5 bps 立即 Lock」= greedy 微利鎖，違反設計意圖，demo 可能正在累積「不該有的 close 紀錄」
+- ExitConfig 7 閾值 default 未經 demo 資料校準（Mac 做不了 counterfactual replay 7d tick-level audit）
+- 檔案大小 889 行已過 800 警告線，下一波 Priority 6 替換前建議 split
+
+**commit 歷程**（本次同 commit 一次交付）：
+- `rust/openclaw_engine/src/exit_features.rs`（+698）
+- `TODO.md`（Phase 1b 進度更新 + `GATE1-REVERSAL-1` 新條目 + 基準線 1816）
+- `CLAUDE.md`（§三 2026-04-21 里程碑行 + §十一 一句話狀態）
+- `docs/CLAUDE_CHANGELOG.md`（本條目）
+- `memory/MEMORY.md` + `memory/project_dev_runtime_split.md`（Mac dev-only runtime split 記憶）
+
+---
 
 ### PYO3-ELIMINATE-1 Phase 3：drop openclaw_pyo3 crate + build pipeline（2026-04-20 · commit `9b691a0`）
 
