@@ -19,6 +19,34 @@ type: project
 | **Linux CC**（輔助 session，24h 守夜） | 監控 watchdog alert、處理 Mac CC 做不了的 local 操作（rebase、amend、interactive git）、接 operator 直接指令做獨立 audit/fix、從 Mac push 的 docs 中 pull 更新 |
 | **Operator** | 決策、cross-session 溝通、pull Mac → Linux（若需 Linux session context 要最新）、按 per-case 授權高風險動作 |
 
+## 🔒 硬規則：commit 完必 push（2026-04-21 operator 指示）
+
+**無例外**。維持 Mac / Linux / GitHub origin 三處 state 一致性。
+
+| 主體 | 規則 |
+|---|---|
+| **Mac CC** commit | 同一個 Bash 鏈內接 `git push origin main`，禁 commit 不 push 就離開 |
+| **Linux CC** commit | 同樣規範，禁 commit 不 push |
+| **Operator 手動 Linux shell commit** | 建議自己 push；若忘 → 下次 CC 接手會偵測 + 補 push（不批評，但不保證零時差可見） |
+| **Operator 手動 Mac shell commit** | 同上 |
+
+### Session 開始強制 sync 三連檢查
+
+所有 CC 接手 session 第一件事（無論 Mac / Linux）：
+```bash
+git fetch --prune origin
+# 若 local 落後 origin：
+git pull --ff-only origin main
+# 若 local 超前 origin（前一 session 漏 push）：
+git push origin main
+```
+
+這三步應**例行自動做**，不待 operator 提醒；目的是接手時確保 origin、Mac、Linux 三處對齊，後續動作才不會基於 stale state 產生 divergence。
+
+**ff-only pull 失敗**（divergent branches，雙邊各自有 commit 無重疊）→ 報告 operator，不擅自 merge/rebase（見下方 SSH bridge workflow Mac 本地 git 規則）。
+
+---
+
 ## SSH 命令授權範圍
 
 ### 允許（Mac CC 可直接透過 ssh 執行）
