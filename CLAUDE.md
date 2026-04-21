@@ -271,7 +271,12 @@ Operator 在 Mac 並行跑 Qwen3.6-35B（LM Studio）做代碼審核。CC 每完
 1. **pytest 必從 srv root 跑** — 部分測試用絕對 import `from program_code.…`，從 `control_api_v1/` 內跑會 `ImportError: No module named 'program_code'`（例：`test_earned_trust_engine.py`）。
 2. **整合測試打真實 Bybit 會 fail —— by design** — 3 個 secret slot 已 rename 為 `*.dev_disabled_*`（避免與 Linux trade-core 撞單；還原見 README § Mac dev-only 模式）。任何 connect 真實 Bybit 的 test 拿不到 credentials → fail-closed。Mock-based unit test 不受影響。Reproduce「engine lib 1791 / 0 failed」基準需在 Linux 跑。
 3. **Sub-agent (E1) 寫碼若 refuse** — Linux 端 2026-04-19「第 3 次驗證解除」refuse pattern，但跨平台/跨 session 仍偶發。Workaround：主 session 直接寫。
-4. **Mac↔Linux 同步單向** — Mac → origin auto-push（per 上方規則）；Linux trade-core 由 operator 手動 `git pull`；反向（Linux 端 hotfix → Mac）由 operator 手動在 Mac `git pull`（CC 不 pull）。**啟動 Mac session 前**先確認 Linux main 無 in-flight commit，避免 push 衝突。
+4. **Mac↔Linux SSH bridge workflow（2026-04-21 採納，取代原「同步單向」）** — 詳 memory `project_ssh_bridge_workflow.md`。核心：Mac CC 為 SSOT，透過 `ssh trade-core`（Tailscale + key auth，免密碼）遠端觸發 Linux runtime 任務（cargo test / psql / restart_all / git 操作 / engine log）。
+   - ✅ **Mac 本地 git 放寬**：允許 `git fetch` + `git pull --ff-only`（純 fast-forward，衝突時 abort 不破壞 state）；**仍禁** `git merge <branch>` / `rebase` / `reset --hard` / `checkout <branch>`
+   - ✅ **SSH 允許**：ssh trade-core 跑 cargo/psql/git pull&push/restart_all/tail log/watchdog/rm tmp sentinel
+   - 🚫 **SSH 需 operator per-case 授權**：觸及 live API/authorization.json/secrets、刪 remote branch（本 session 已試 trigger guardrail 成功擋住）、刪 worktree、DROP/TRUNCATE table 資料、改 risk_config TOML
+   - **工作流**：Mac 寫碼 → `git add/commit/push` → `ssh trade-core "git pull --ff-only && cargo test --release"` → 看結果 → 綠就完成，紅就回頭 fix。**不再派 Linux CC 做寫 prompt 的 round-trip**（除非需要 interactive rebase/amend 等 Mac CC 禁做的動作）。
+   - **Linux CC 剩餘職能**：24h 守夜監控、interactive git 操作、operator 急令 hotfix、Mac CC 離線時兜底。
 
 ---
 
