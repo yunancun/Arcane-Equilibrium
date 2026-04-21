@@ -314,12 +314,12 @@ mod tests {
         );
     }
 
-    /// DUAL-TRACK-EXIT-1 T3: when an ExitFeatures snapshot triggering gate 1
-    /// (edge below floor) is supplied, PHYS-LOCK fires with reason prefix
-    /// `risk_close:phys_lock_gate1_low_edge`.
-    /// DUAL-TRACK-EXIT-1 T3：餵入觸發 gate 1 的 features → PHYS-LOCK 關倉。
+    /// GATE1-REVERSAL-1 (2026-04-21): ExitFeatures with gate 1 trigger condition
+    /// (edge below floor) → PHYS-LOCK **Hold** (not Lock). Only Gate 4 paths
+    /// produce `risk_close:phys_lock_gate4_*`.
+    /// GATE1-REVERSAL-1：gate 1 edge 低 → PHYS-LOCK Hold（不關倉）。
     #[test]
-    fn test_evaluate_position_phys_lock_fires_with_features() {
+    fn test_evaluate_position_phys_lock_gate1_holds_with_low_edge() {
         let row = mk_row("BTCUSDT", 100.5, 100.0);
         let cfg = RiskConfig::default();
         let features = ExitFeatures {
@@ -343,9 +343,9 @@ mod tests {
             &cfg,
         );
         assert!(
-            matches!(decision.action, RiskAction::ClosePosition(ref r)
+            !matches!(decision.action, RiskAction::ClosePosition(ref r)
                 if r.contains("phys_lock_gate1_low_edge")),
-            "expected PHYS-LOCK gate1 close, got {:?}",
+            "Gate 1 must Hold post-GATE1-REVERSAL-1, got {:?}",
             decision.action
         );
     }

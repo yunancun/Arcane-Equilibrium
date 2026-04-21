@@ -1,6 +1,6 @@
 # OpenClaw TODO — 工作清單
 
-**最後更新**：2026-04-21（DUAL-TRACK-EXIT-1 Phase 1b Track P v2 非線性 giveback pure fn ✅ — `physical_micro_profit_lock_v2` + `ExitConfig` + 31 單測；QC 反轉 Gate 1 語意 `edge <= floor → Hold`（v1 Priority 6 仍為 Lock，待 `GATE1-REVERSAL-1` 下一波同步修）；engine lib **1791 → 1816** passed。先前：2026-04-20 EDGE-P2-2 Phase A `381c542` + EDGE-P2-3 Phase 1B-4.3/1B-5/FUP-4 全部結案；14 個完成項批量歸檔 → `docs/archive/2026-04-20--completed_todo_batch.md`）
+**最後更新**：2026-04-21（兩個 commits：(1) DUAL-TRACK-EXIT-1 Phase 1b Track P v2 非線性 giveback pure fn ✅ commit `aee96b9` — `physical_micro_profit_lock_v2` + `ExitConfig` + 31 單測；QC 反轉 Gate 1 語意 `edge <= floor → Hold`；(2) **GATE1-REVERSAL-1 hotfix A ✅** — v1 `risk_checks.rs` Priority 6 Gate 1 同步反轉 Lock → Hold 對齊設計意圖，3 tests rename + assert 反轉；engine lib **1816 passed / 0 failed** 不變。`GATE1-REVERSAL-1` 剩餘下一波：符號統一 + Priority 6 整體替換 v1 → v2 + ConfigStore 綁定 + replay 校準。先前：2026-04-20 EDGE-P2-2 Phase A `381c542` + EDGE-P2-3 Phase 1B-4.3/1B-5/FUP-4 全部結案；14 個完成項批量歸檔 → `docs/archive/2026-04-20--completed_todo_batch.md`）
 **Engine**：PID 3029633 · binary mtime 2026-04-19 22:32 → 含全部先前 staged 修復（P0-6 永久修復 + P1-7 A INTENT-WRITE-GAP-1 + P1-7 B edge_estimator scheduler + P1-17 Winsorize + LIVE-GATE-BINDING-1 + DYNAMIC-RISK-1 + IPC-SCAN-1c + FILL-CONTEXT-LINKAGE-1 + EXIT-FEATURES-TABLE-1 Phase 1b + Plan N ai_budget dedup + E5-P1/P2 + E5-FN-2/3 + DISPATCH-RETRY-1 + MARKET-KLINES-STALE-1 + DUAL-TRACK Track P T1-T5 骨架 + PIPELINE-SLOT-1 Phase 1-4）+ **EXIT-FEATURES-TABLE-1 Phase 1b GAP-1**（commit `35808e9` apply_confirmed_fill 接線，待流量驗證）
 **Python uvicorn**：PID 3029688（4 workers）· started 2026-04-19 22:33 → 含 P0-12 LIVE-GATE-FALLBACK-1 + E5-FN-3 AnalystAgent pilot + PIPELINE-SLOT-1 Phase 4 daemon-thread trigger
 **PIPELINE-SLOT-1 live 驗證**：LiveAuthWatcher 22:33 啟動 `env=LiveDemo poll_interval_secs=5`；authorization.json 已由 Manual restart sentinel 清除；等 operator 走 GUI renew → 應 ≤1s 觀察到 Live pipeline 重生
@@ -107,7 +107,10 @@ git status && git log --oneline -5
   - ✅ 單測 **31 個**（含 Gate 1-4 + 非線性單調 + 邊界 + serde + Gate 1→Gate 4 端到端）2026-04-21
   - 待做：counterfactual replay audit（demo 7d tick-level，Mac 做不了，待 Linux）
 - [ ] E5：rebuild + 灰度部署（保守閾值，24h 無 fee 惡化才收緊）
-- [ ] **GATE1-REVERSAL-1 (P1，2026-04-21)**：v1 `risk_checks.rs:312-323` Priority 6 Gate 1 `edge < floor → Lock` 違反 DUAL-TRACK-EXIT-1 設計意圖（應 Hold；設計文檔 §三 L108-111 偽代碼 + operator QC 明確指示「防止剛有大於 fee 的微利就套離場」+「Lock 唯一路徑收斂至 Gate 4 trailing」）。v2 `physical_micro_profit_lock_v2` 已修為 Hold。**下一波 Priority 6 替換時一併修 v1** + 統一符號：Gate 1 `<` → `<=`、Gate 4b `>` → `>=` 對齊設計。影響評估：v1 現行「edge 掉到 5 bps 以下即 Lock」等同 greedy 微利鎖，可能壓低 Phase 5 demo 單筆 close 盈利；修復後需重新觀察 demo 1-3d 看 edge 變化
+- [~] **GATE1-REVERSAL-1 (P1，2026-04-21)** — 部分完成（hotfix A 已 commit）+ 剩餘下一波
+  - ✅ **hotfix A 完成 2026-04-21**：v1 `risk_checks::physical_micro_profit_lock` Gate 1 `edge < floor → Lock` 反轉為 `→ Hold`（對齊 v2 + 設計文檔 §三 L108-111 + operator 意圖「防止剛有大於 fee 的微利就套離場」）；3 tests rename + assert 反轉（risk_checks 2 + position_risk_evaluator 1）；`phys_lock_gate1_low_edge` reason v1 不再 emit，下游 parse 路徑向後兼容保留；engine lib 仍 1816 passed / 0 failed
+  - **Linux 端部署後觀察**：`--rebuild` 後 2-3d 對比 demo 平均持倉時長 / 單筆 close 盈利分佈 / Phase 5 edge 指標；`phys_lock_gate1_low_edge` 新 fills 應歸 0
+  - **剩餘下一波 Priority 6 替換時做**：(1) 統一符號 Gate 1 `<` → `<=` / Gate 4b `>` → `>=` 對齊設計 (2) 把 Priority 6 從 v1 `physical_micro_profit_lock` + `PhysLockConfig` 切換為 v2 `exit_features::physical_micro_profit_lock_v2` + `ExitConfig` (3) ConfigStore ArcSwap 綁定 `ExitConfig` 支持 hot-reload (4) 非線性 giveback 3 參數（base/slope/floor）由 counterfactual replay（demo 7d）校準 (5) 下游 `on_tick.rs` t4_fix + `tick_pipeline::infer_source` + Python `parse_exit_tag` 的 `phys_lock_gate1_low_edge` 分支評估何時清理（需所有含此 tag 的歷史 fills 歸檔或過期後）
 
 - [ ] Combine Layer 啟用 `ml_override_high=2.0`（不可達），只寫 `learning.decision_shadow_fills`
 - [ ] 每日對比 P vs L 一致性（target ≥60%）→ 校準 `ml_confirm_threshold / ml_override_high / ml_veto_low`

@@ -1,7 +1,48 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-04-21（DUAL-TRACK-EXIT-1 Phase 1b Track P v2 非線性 giveback pure fn + QC Gate 1 語意反轉）
+> 最後更新：2026-04-21（GATE1-REVERSAL-1 hotfix A：v1 risk_checks Gate 1 Lock → Hold 同步對齊 v2 設計意圖）
+
+### GATE1-REVERSAL-1 hotfix A — v1 risk_checks Gate 1 Lock → Hold（2026-04-21 · commit 待填）
+
+**目標**：上一 commit `aee96b9` DUAL-TRACK-EXIT-1 Phase 1b v2 交付後，主會話 QC 揭露 v1 `risk_checks::physical_micro_profit_lock` Priority 6 Gate 1 行為（`edge < floor → Lock`）違反 DUAL-TRACK-EXIT-1 設計意圖「防止剛有大於 fee 的微利就套離場」。Operator 選 (A) 獨立 hotfix commit 立即修 v1，不等下一波 Priority 6 整體替換。理由：v1 是 live 行為，continue 會在 demo 持續產出過早 close 紀錄，壓低 Phase 5 edge 觀察信號純度。
+
+**改動**（2 檔 / ±18 LOC）：
+- `rust/openclaw_engine/src/risk_checks.rs`：
+  - L230-239 PHYS-LOCK 模組 comment：明確 active emits = `phys_lock_gate4_giveback` / `phys_lock_gate4_stale_roc_neg`；`phys_lock_gate1_low_edge` 標為 historical/backward-compat（v1 不再 emit，下游 `strip_phys_lock_prefix` + `parse_exit_tag` 保留解析）
+  - L293-313 `physical_micro_profit_lock` doc：Gate 1 敘述改 `edge < floor → Hold (prevents micro-profit premature lock)`；整段「Lock is reached **only** via Gate 4 (trailing)」加粗
+  - L316-326 Gate 1 分支：`PhysicalDecision::Lock("phys_lock_gate1_low_edge".to_string()) → PhysicalDecision::Hold`
+  - L918-932 `test_phys_lock_gate1_low_edge_triggers_lock` → rename `_holds`，assert 改 `PhysicalDecision::Hold`
+  - L1015-1044 `test_phys_lock_reason_string_format_stable`：刪 gate 1 段（7 行），保留 gate 4a/4b
+  - L716-744 `test_tick_priority6_phys_lock_fires_with_features` → rename `_gate1_holds_with_low_edge`，assert 反轉為 `!ClosePosition`
+- `rust/openclaw_engine/src/position_risk_evaluator.rs`：
+  - L317-352 `test_evaluate_position_phys_lock_fires_with_features` → rename `_gate1_holds_with_low_edge` + doc 更新 + assert 反轉
+
+**未動（刻意留下一波 Priority 6 替換時處理）**：
+- Gate 1 `<` → `<=` 符號統一（與 v2 對齊）
+- Gate 4b `>` → `>=` 符號統一
+- `phys_lock_gate1_low_edge` 字串常量從 `on_tick.rs` t4_fix + `tick_pipeline/mod.rs` infer_source + Python `parse_exit_tag` 的清理（需所有含此 tag 的歷史 fills 歸檔或過期後）
+- Priority 6 整體替換 v1 → v2 `physical_micro_profit_lock_v2` + `ExitConfig`
+- ConfigStore ArcSwap 綁定 `ExitConfig`
+- 非線性 giveback 3 參數校準（counterfactual replay 7d）
+
+**驗證（Mac debug）**：
+- `cargo test --lib risk_checks`：**35 passed / 0 failed**
+- `cargo test --lib position_risk_evaluator`：**11 passed / 0 failed**
+- `cargo test --lib`（全量）：**1816 passed / 0 failed**（不變 — rename 等價、刪除 1 個 assert 段 + Gate 1 Hold 邏輯路徑由整合測試覆蓋）
+
+**設計一致性**：v1 和 v2 現已語意一致 — Gate 1 Hold / Lock 路徑唯一 = Gate 4 trailing。
+
+**Linux 端部署步驟（→ operator）**：
+1. `git pull origin main`
+2. `bash helper_scripts/restart_all.sh --rebuild` 把行為推到 runtime
+3. 記錄時間戳作為 demo 新行為基準線
+4. 2-3d 觀察期：`phys_lock_gate1_low_edge` 新 fills 應歸 0；對比 demo 平均持倉時長 / 單筆 close 盈利分佈 / Phase 5 edge 指標
+5. 若觀察期 edge 未惡化 → 進入下一波 Priority 6 替換
+
+**TODO 狀態**：`GATE1-REVERSAL-1` 從 `[ ]` 改為 `[~]`（部分完成：hotfix A 已結，剩餘符號統一 + Priority 6 替換留下一波）。
+
+---
 
 ### DUAL-TRACK-EXIT-1 Phase 1b Track P v2 非線性 giveback pure fn（2026-04-21 · commit `aee96b9`）
 
