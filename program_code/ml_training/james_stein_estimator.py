@@ -36,6 +36,90 @@ from typing import Optional
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
+# P0-14 Option B: sync-label proxy cells / 同步標籤代理格子
+# ---------------------------------------------------------------------------
+# Runtime owner_strategy values produced by synthetic adoption / eviction
+# pipelines do NOT appear as trained labels in learning.james_stein_estimates
+# (they have no round-trip fills tagged with those strategy names). Without a
+# proxy cell, the Rust cost_gate Gate 1 `edge_estimates.get_cell` misses and
+# returns None → Priority 6 forces Hold, silently disabling phys_lock for
+# sync-label positions. Inject grand_mean_bps proxies so Gate 1 can evaluate
+# (fail-safe: still below min_net_floor_bps → Hold by default, unless
+# operator raises `missing_edge_fallback_bps` per P0-14 Option A).
+#
+# 運行時 owner_strategy 由合成採納 / 驅逐管線產生，在
+# learning.james_stein_estimates 中沒有對應訓練標籤（該策略名無 round-trip
+# 成交）。若無 proxy cell，Rust cost_gate Gate 1 的 edge_estimates.get_cell
+# 找不到 → Priority 6 強制 Hold，靜默關閉 sync-label 倉位的 phys_lock。
+# 注入 grand_mean_bps 代理讓 Gate 1 可評估（保守：預設仍低於門檻 Hold，
+# 除非 operator 按 P0-14 Option A 調高 missing_edge_fallback_bps）。
+SYNC_LABEL_STRATEGIES: tuple[str, ...] = (
+    "bybit_sync",
+    "orphan_adopted",
+    "orphan_frozen",
+    "dust_frozen",
+)
+
+
+def _inject_sync_label_proxy_cells(
+    snapshot: dict,
+    grand_mean_bps: float,
+) -> int:
+    """
+    Inject proxy cells into an edge_estimates JSON snapshot for sync-label
+    owner_strategy × existing-symbol combinations that have no trained cells.
+
+    為 sync-label owner_strategy × 已存在 symbol 的組合注入代理格子，
+    避免 Rust cost_gate Gate 1 miss。
+
+    Principles / 原則:
+    1. Does NOT overwrite existing cells (key absent-only writes). /
+       不覆蓋既有格子（僅 key 不存在時寫入）。
+    2. `shrunk_bps` = `grand_mean_bps` (weak prior, symmetric across strats). /
+       `shrunk_bps` 取全域均值（弱先驗，跨策略對稱）。
+    3. `n = 0` signals "no direct observations". / `n = 0` 表示無直接觀測。
+    4. `_proxy_from = "grand_mean"` marks provenance for downstream filters. /
+       `_proxy_from = "grand_mean"` 標記來源供下游過濾。
+
+    Args:
+        snapshot: The in-progress JSON snapshot dict. `_meta` key is skipped
+            when enumerating symbols. Mutated in place.
+            進行中的 JSON 快照字典，列舉 symbol 時跳過 `_meta` 鍵；原地修改。
+        grand_mean_bps: Shrinkage target used for every proxy cell. /
+            每個代理格子使用的收縮目標。
+
+    Returns:
+        Number of proxy cells added. / 新增的代理格子數量。
+    """
+    # Derive existing symbols from current cells of the form "strategy::symbol".
+    # `_meta` is the only top-level key without "::" and must be skipped.
+    # 從形如 "strategy::symbol" 的現有格子取 symbol 集合；`_meta` 是唯一
+    # 沒有 "::" 的頂層 key，必須跳過。
+    known_symbols: set[str] = set()
+    for key in snapshot.keys():
+        if key == "_meta" or "::" not in key:
+            continue
+        _, _, sym = key.partition("::")
+        if sym:
+            known_symbols.add(sym)
+
+    added = 0
+    for strategy in SYNC_LABEL_STRATEGIES:
+        for symbol in known_symbols:
+            proxy_key = f"{strategy}::{symbol}"
+            if proxy_key in snapshot:
+                # Don't overwrite a real trained cell. / 不覆蓋真實訓練格子。
+                continue
+            snapshot[proxy_key] = {
+                "shrunk_bps": round(grand_mean_bps, 4),
+                "n": 0,
+                "_proxy_from": "grand_mean",
+            }
+            added += 1
+    return added
+
+
+# ---------------------------------------------------------------------------
 # DB helpers / 數據庫工具
 # ---------------------------------------------------------------------------
 
@@ -362,13 +446,25 @@ def _write_json_snapshot(
     Write a compact JSON snapshot for Rust cost_gate hot-reload (PH5-WIRE-1).
     Format: {"strategy::symbol": {"shrunk_bps": X, "n": N, "updated_at": ISO}, ...}
     寫入 JSON 快照供 Rust cost_gate 熱重載（PH5-WIRE-1）。
+
+    P0-14 Option B: Before writing to disk, synthesize proxy cells for sync-label
+    owner_strategy values (bybit_sync, orphan_adopted, orphan_frozen, dust_frozen)
+    that have no trained JS estimates but appear in runtime positions. This
+    prevents Gate 1 miss-induced silent Hold in Priority 6. See
+    `_inject_sync_label_proxy_cells` for full rationale.
+
+    P0-14 Option B：寫入磁碟前為 sync-label owner_strategy 合成代理格子，
+    避免 Priority 6 Gate 1 miss 導致靜默 Hold。詳見 `_inject_sync_label_proxy_cells`。
     """
     now_iso = datetime.now(tz=timezone.utc).isoformat()
+    grand_mean_bps = (
+        results[next(iter(results))]["grand_mean_bps"] if results else 0.0
+    )
     snapshot: dict = {
         "_meta": {
             "updated_at": now_iso,
             "n_cells": len(results),
-            "grand_mean_bps": results[next(iter(results))]["grand_mean_bps"] if results else 0.0,
+            "grand_mean_bps": grand_mean_bps,
         }
     }
     for (strategy, symbol), r in results.items():
@@ -389,12 +485,25 @@ def _write_json_snapshot(
             "combined_ev_bps": round(r.get("combined_ev_bps", r["shrunk_bps"]), 4),
         }
 
+    # P0-14 Option B: inject sync-label proxy cells (grand_mean prior).
+    # P0-14 Option B：注入 sync-label 代理格子（全域均值先驗）。
+    proxy_added = _inject_sync_label_proxy_cells(snapshot, grand_mean_bps)
+    if proxy_added:
+        logger.info(
+            "Injected %d sync-label proxy cells (grand_mean=%.4f bps)",
+            proxy_added,
+            grand_mean_bps,
+        )
+
     os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
     tmp = path + ".tmp"
     with open(tmp, "w") as f:
         json.dump(snapshot, f, indent=2)
     os.replace(tmp, path)  # atomic rename / 原子重命名
-    logger.info("Edge snapshot written to %s (%d cells)", path, len(results))
+    logger.info(
+        "Edge snapshot written to %s (%d real cells + %d proxy cells)",
+        path, len(results), proxy_added,
+    )
 
 
 # ---------------------------------------------------------------------------
