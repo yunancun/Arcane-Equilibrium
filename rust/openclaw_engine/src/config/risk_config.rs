@@ -19,6 +19,8 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+use crate::exit_features::ExitConfig;
+
 // ---------------------------------------------------------------------------
 // Top-level / 頂層
 // ---------------------------------------------------------------------------
@@ -76,12 +78,23 @@ pub struct RiskConfig {
     pub correlation: Correlation,
     #[serde(default)]
     pub runtime: RuntimeKnobs,
-    /// DUAL-TRACK-EXIT-1 Track P T3: Physical-layer micro-profit lock config.
-    /// Replaces legacy Priority 6 COST EDGE. Hot-reloaded via `Arc<ArcSwap<RiskConfig>>`.
-    /// DUAL-TRACK-EXIT-1 Track P T3：物理層微利鎖定參數，取代舊 Priority 6 COST EDGE。
-    /// 透過 `Arc<ArcSwap<RiskConfig>>` 熱重載。
-    #[serde(default)]
-    pub phys_lock: PhysLockConfig,
+    /// DUAL-TRACK-EXIT-1 Track P: Physical-layer exit config (non-linear
+    /// giveback v2). Drives Priority 6 `physical_micro_profit_lock_v2` in
+    /// `risk_checks::check_position_on_tick`. Hot-reloaded via
+    /// `Arc<ArcSwap<RiskConfig>>`.
+    ///
+    /// TRACK-P-V2-SWAP-1 (2026-04-22): replaced linear `PhysLockConfig` with
+    /// `ExitConfig` defined in `exit_features::v2`. See that module for the
+    /// non-linear giveback threshold (`base - slope × peak_atr_norm`, bounded
+    /// below by `floor`) which replaces the former single fixed threshold.
+    ///
+    /// DUAL-TRACK-EXIT-1 Track P：物理層退出參數（v2 非線性 giveback）。
+    /// 驅動 `risk_checks::check_position_on_tick` 的 Priority 6
+    /// `physical_micro_profit_lock_v2`，透過 `Arc<ArcSwap<RiskConfig>>` 熱重載。
+    /// TRACK-P-V2-SWAP-1（2026-04-22）：線性 `PhysLockConfig` 換為
+    /// `exit_features::v2::ExitConfig`，threshold 由固定值改非線性。
+    #[serde(default, alias = "phys_lock")]
+    pub exit: ExitConfig,
     #[serde(default)]
     pub experimental: Experimental,
     /// DYNAMIC-RISK-1: Sharpe-aware dynamic `per_trade_risk_pct` sizer.
@@ -107,7 +120,7 @@ impl RiskConfig {
         self.anti_cluster.validate()?;
         self.correlation.validate()?;
         self.runtime.validate()?;
-        self.phys_lock.validate()?;
+        self.exit.validate().map_err(|e| format!("risk.exit: {}", e))?;
         self.dynamic_sizing.validate()?;
 
         // Cross-sub-struct invariant: partial_tp levels must not exceed take_profit_max_pct.
@@ -1287,99 +1300,13 @@ impl RuntimeKnobs {
 }
 
 // ---------------------------------------------------------------------------
-// PhysLockConfig — DUAL-TRACK-EXIT-1 Track P T3 / 物理層微利鎖定配置
-// ---------------------------------------------------------------------------
-//
-// Replaces legacy Priority 6 COST EDGE in `check_position_on_tick`. The 4-gate
-// sequential filter (edge floor → min hold → peak/ATR threshold → giveback OR
-// stale-peak+neg-ROC) locks in micro-profits when momentum exhausts rather
-// than relying on cost/edge ratio heuristics. All defaults are conservative;
-// any required field being `None` in the ExitFeatures snapshot results in
-// `Hold` (except gate 1 where `Some(value_below_floor)` → `Lock`).
-//
-// 取代舊 Priority 6 COST EDGE。4-gate 依序過濾：edge 底 → 最短持有 → peak/ATR
-// 閾值 → giveback 或 stale-peak+negROC。任一所需欄位為 None 皆回傳 Hold
-// （例外：gate 1 若 Some(低於底) 則回傳 Lock）。預設全部保守。
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct PhysLockConfig {
-    /// Gate 1: est_net_bps floor. Positions below this edge lock immediately
-    /// (insufficient net edge to keep running cost). Default 5.0 bps.
-    /// Gate 1：est_net_bps 下限。低於此 edge 立即鎖定。
-    #[serde(default = "default_phys_lock_min_net_floor_bps")]
-    pub min_net_floor_bps: f32,
-    /// Gate 2: do not fire lock before this minimum hold time (seconds).
-    /// Default 30.0 s — gives entry logic time to let peak form.
-    /// Gate 2：不鎖定持有時間低於此值的倉位（秒）。Default 30s。
-    #[serde(default = "default_phys_lock_min_hold_secs")]
-    pub min_hold_secs: f32,
-    /// Gate 3: peak_pnl_pct must have reached at least this many ATR units
-    /// above break-even before we consider locking. Default 0.5 × ATR%.
-    /// Gate 3：peak PnL 須達 N×ATR 以上方考慮鎖定。Default 0.5。
-    #[serde(default = "default_phys_lock_min_peak_atr_norm")]
-    pub min_peak_atr_norm: f32,
-    /// Gate 4a: giveback (peak − current) normalised by ATR. ≥ this threshold
-    /// triggers lock. Default 0.7 — 70% of one ATR retraced.
-    /// Gate 4a：giveback 以 ATR 正規化後 ≥ 此值觸發鎖定。Default 0.7。
-    #[serde(default = "default_phys_lock_giveback_atr_norm_threshold")]
-    pub giveback_atr_norm_threshold: f32,
-    /// Gate 4b: time since peak beyond this value **plus** negative short-ROC
-    /// triggers stale-peak lock. Default 60_000 ms (1 min).
-    /// Gate 4b：peak 超過此時長且短 ROC 為負 → stale-peak 鎖定。Default 60_000ms。
-    #[serde(default = "default_phys_lock_stale_peak_ms")]
-    pub stale_peak_ms: i64,
-}
-
-fn default_phys_lock_min_net_floor_bps() -> f32 {
-    5.0
-}
-fn default_phys_lock_min_hold_secs() -> f32 {
-    30.0
-}
-fn default_phys_lock_min_peak_atr_norm() -> f32 {
-    0.5
-}
-fn default_phys_lock_giveback_atr_norm_threshold() -> f32 {
-    0.7
-}
-fn default_phys_lock_stale_peak_ms() -> i64 {
-    60_000
-}
-
-impl Default for PhysLockConfig {
-    fn default() -> Self {
-        Self {
-            min_net_floor_bps: default_phys_lock_min_net_floor_bps(),
-            min_hold_secs: default_phys_lock_min_hold_secs(),
-            min_peak_atr_norm: default_phys_lock_min_peak_atr_norm(),
-            giveback_atr_norm_threshold: default_phys_lock_giveback_atr_norm_threshold(),
-            stale_peak_ms: default_phys_lock_stale_peak_ms(),
-        }
-    }
-}
-
-impl PhysLockConfig {
-    fn validate(&self) -> Result<(), String> {
-        if !self.min_net_floor_bps.is_finite() || self.min_net_floor_bps < 0.0 {
-            return Err("risk.phys_lock.min_net_floor_bps must be finite and >= 0".into());
-        }
-        if !self.min_hold_secs.is_finite() || self.min_hold_secs < 0.0 {
-            return Err("risk.phys_lock.min_hold_secs must be finite and >= 0".into());
-        }
-        if !self.min_peak_atr_norm.is_finite() || self.min_peak_atr_norm < 0.0 {
-            return Err("risk.phys_lock.min_peak_atr_norm must be finite and >= 0".into());
-        }
-        if !self.giveback_atr_norm_threshold.is_finite()
-            || self.giveback_atr_norm_threshold <= 0.0
-        {
-            return Err("risk.phys_lock.giveback_atr_norm_threshold must be finite and > 0".into());
-        }
-        if self.stale_peak_ms < 0 {
-            return Err("risk.phys_lock.stale_peak_ms must be >= 0".into());
-        }
-        Ok(())
-    }
-}
+// Physical-layer exit config → see `exit_features::v2::ExitConfig`
+// (TRACK-P-V2-SWAP-1, 2026-04-22). The legacy linear `PhysLockConfig` used to
+// live here; it was retired when Priority 6 swapped from
+// `physical_micro_profit_lock` (linear threshold) to
+// `physical_micro_profit_lock_v2` (non-linear giveback).
+// 物理層退出參數見 `exit_features::v2::ExitConfig`（TRACK-P-V2-SWAP-1，
+// 2026-04-22）。舊 `PhysLockConfig`（線性閾值）於本次 swap 退役。
 
 // ---------------------------------------------------------------------------
 // Experimental

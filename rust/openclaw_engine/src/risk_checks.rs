@@ -16,9 +16,8 @@
 //!     BudgetConfig.attention_tax.cost_edge_max_ratio
 //!   - Risk checks are fail-closed — unknown state → reject
 
-use crate::config::risk_config::PhysLockConfig;
 use crate::config::RiskConfig;
-use crate::exit_features::{ExitFeatures, PhysicalDecision};
+use crate::exit_features::{physical_micro_profit_lock_v2, ExitFeatures, PhysicalDecision};
 use openclaw_core::risk::{compute_dynamic_stop_pct, regime_multipliers};
 
 // ---------------------------------------------------------------------------
@@ -243,7 +242,7 @@ pub fn check_position_on_tick(
     // 對齊設計意圖「防止剛有大於 fee 的微利就套離場」）。
     if let Some(features) = exit_features {
         if let PhysicalDecision::Lock(reason) =
-            physical_micro_profit_lock(features, &config.phys_lock)
+            physical_micro_profit_lock_v2(features, &config.exit)
         {
             return RiskAction::ClosePosition(format!("risk_close:{}", reason));
         }
@@ -290,84 +289,21 @@ pub fn check_position_on_tick(
 }
 
 // ---------------------------------------------------------------------------
-// PHYS-LOCK — DUAL-TRACK-EXIT-1 Track P T3 / 物理層微利鎖定
+// PHYS-LOCK — DUAL-TRACK-EXIT-1 Track P / 物理層微利鎖定
 // ---------------------------------------------------------------------------
-
-/// 4-gate sequential filter that decides whether a winning position should
-/// lock in its current micro-profit. Conservative semantics: any required
-/// Option::None returns Hold. Lock is reached **only** via Gate 4 (trailing)
-/// — Gate 1-3 are pass-through guards (Hold early-return on failure).
-///
-/// Gates in order:
-///   1. **Edge floor** — `est_net_bps < cfg.min_net_floor_bps` → Hold
-///      (prevents micro-profit premature lock; design intent per DUAL-TRACK-EXIT-1).
-///      `None` → Hold (unknown edge, conservative).
-///   2. **Min hold** — `entry_age_secs < cfg.min_hold_secs` → Hold (too fresh).
-///      `None` → Hold (unknown age, conservative).
-///   3. **Peak/ATR threshold** — `peak_pnl_pct < cfg.min_peak_atr_norm × atr_pct`
-///      → Hold (peak not meaningful yet). `atr_pct: None` → Hold.
-///   4. **Lock trigger (only Lock path)** — either
-///      a. giveback `>= cfg.giveback_atr_norm_threshold`
-///         → Lock (`phys_lock_gate4_giveback`)
-///      b. `time_since_peak_ms > cfg.stale_peak_ms` AND `price_roc_short < 0`
-///         → Lock (`phys_lock_gate4_stale_roc_neg`)
-///      else → Hold.
-///
-/// 4-gate 依序過濾：edge 底 → 最短持有 → peak/ATR 閾值 → giveback 或
-/// stale-peak+negROC。保守：任一所需 Option=None 回 Hold；Gate 1-3 僅 Hold 路徑，
-/// Lock 唯一合法路徑 = Gate 4 trailing（設計意圖：防止微利即套離場，追求最高單筆
-/// close 盈利）。GATE1-REVERSAL-1 (2026-04-21)：Gate 1 由舊「edge<floor → Lock」
-/// 反轉為 Hold，與 `exit_features::physical_micro_profit_lock_v2` 對齊。
-pub fn physical_micro_profit_lock(
-    f: &ExitFeatures,
-    cfg: &PhysLockConfig,
-) -> PhysicalDecision {
-    // Gate 1: edge floor — conservative Hold when edge insufficient.
-    // Gate 1：淨邊緣底線 — edge 不足時保守 Hold（防止微利即套離場）。
-    // GATE1-REVERSAL-1 (2026-04-21): `< floor → Lock` → `< floor → Hold`
-    // 對齊 DUAL-TRACK-EXIT-1 設計 + exit_features::physical_micro_profit_lock_v2.
-    match f.est_net_bps {
-        Some(edge) if edge < cfg.min_net_floor_bps => {
-            return PhysicalDecision::Hold;
-        }
-        Some(_) => {} // edge above floor → proceed to later gates
-        None => return PhysicalDecision::Hold, // unknown edge → conservative Hold
-    }
-
-    // Gate 2: min hold seconds.
-    let age_secs = match f.entry_age_secs {
-        Some(a) => a,
-        None => return PhysicalDecision::Hold,
-    };
-    if age_secs < cfg.min_hold_secs {
-        return PhysicalDecision::Hold;
-    }
-
-    // Gate 3: peak/ATR threshold — peak_pnl_pct must exceed N × ATR%.
-    let atr = match f.atr_pct {
-        Some(a) if a > 0.0 => a,
-        _ => return PhysicalDecision::Hold,
-    };
-    let required_peak = f64::from(cfg.min_peak_atr_norm) * atr;
-    if f64::from(f.peak_pnl_pct) < required_peak {
-        return PhysicalDecision::Hold;
-    }
-
-    // Gate 4a: giveback ≥ threshold → lock.
-    if let Some(gb) = f.giveback_atr_norm {
-        if gb >= cfg.giveback_atr_norm_threshold {
-            return PhysicalDecision::Lock("phys_lock_gate4_giveback".to_string());
-        }
-    }
-
-    // Gate 4b: stale peak + negative short-ROC → lock.
-    match (f.time_since_peak_ms, f.price_roc_short) {
-        (Some(dt), Some(roc)) if dt > cfg.stale_peak_ms && roc < 0.0 => {
-            PhysicalDecision::Lock("phys_lock_gate4_stale_roc_neg".to_string())
-        }
-        _ => PhysicalDecision::Hold,
-    }
-}
+//
+// TRACK-P-V2-SWAP-1 (2026-04-22) retired the linear `physical_micro_profit_lock`
+// pure fn + `PhysLockConfig` previously defined here. Priority 6 above now
+// calls `exit_features::physical_micro_profit_lock_v2` with
+// `RiskConfig.exit: ExitConfig` (non-linear giveback: threshold =
+// max(base − slope × peak_atr_norm, floor)). Reason-string ABI unchanged —
+// downstream `strip_phys_lock_prefix` + `parse_exit_tag` still see
+// `phys_lock_gate4_giveback` / `phys_lock_gate4_stale_roc_neg`.
+//
+// TRACK-P-V2-SWAP-1（2026-04-22）退役舊線性 `physical_micro_profit_lock` +
+// `PhysLockConfig`，Priority 6 改呼 `exit_features::physical_micro_profit_lock_v2`
+// + `RiskConfig.exit: ExitConfig`（非線性 giveback 閾值）。reason 字串 ABI
+// 不變，下游解析兼容。
 
 // ===========================================================================
 // Tests / 測試
@@ -923,139 +859,16 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // PHYS-LOCK direct unit tests (DUAL-TRACK-EXIT-1 Track P T3)
-    // PHYS-LOCK 直接單測（DUAL-TRACK-EXIT-1 Track P T3）
+    // PHYS-LOCK direct unit tests retired by TRACK-P-V2-SWAP-1 (2026-04-22).
+    // Priority 6 now dispatches to `exit_features::physical_micro_profit_lock_v2`,
+    // whose 25 direct unit tests live in `exit_features/v2.rs`. The end-to-end
+    // Priority 6 gating is covered above through `call_tick_with_features`,
+    // which exercises the v2 path via `check_position_on_tick`.
+    //
+    // PHYS-LOCK 直接單測於 TRACK-P-V2-SWAP-1（2026-04-22）退役。
+    // Priority 6 改呼 `exit_features::physical_micro_profit_lock_v2`，
+    // 其 25 個直測位於 `exit_features/v2.rs`。Priority 6 的 end-to-end
+    // 行為由上方 `call_tick_with_features` 測試經 `check_position_on_tick`
+    // 覆蓋。
     // -----------------------------------------------------------------------
-
-    #[test]
-    fn test_phys_lock_gate1_low_edge_holds() {
-        // GATE1-REVERSAL-1 (2026-04-21): est_net_bps below min_net_floor_bps → Hold
-        // (was Lock pre-reversal; reversed to align with DUAL-TRACK-EXIT-1 intent
-        // "prevent micro-profit premature lock"). Lock path is Gate 4 only.
-        // GATE1-REVERSAL-1：edge 低於底線 → Hold（反轉前為 Lock）。防微利即套離場。
-        let cfg = PhysLockConfig::default();
-        let mut f = mk_features();
-        f.est_net_bps = Some(1.0); // 1 < default 5.0 floor
-        let decision = physical_micro_profit_lock(&f, &cfg);
-        assert_eq!(
-            decision,
-            PhysicalDecision::Hold,
-            "Gate 1 low edge must Hold (not Lock) post-GATE1-REVERSAL-1"
-        );
-    }
-
-    #[test]
-    fn test_phys_lock_gate1_pass_with_sufficient_edge() {
-        // est_net_bps above floor + all later gates all-pass → Hold.
-        let cfg = PhysLockConfig::default();
-        let f = mk_features(); // est_net_bps=50.0 >> 5.0
-        let decision = physical_micro_profit_lock(&f, &cfg);
-        assert_eq!(decision, PhysicalDecision::Hold);
-    }
-
-    #[test]
-    fn test_phys_lock_gate2_holds_within_min_hold_secs() {
-        // entry_age_secs < min_hold_secs → Hold (even if everything else fires).
-        let cfg = PhysLockConfig::default();
-        let mut f = mk_features();
-        f.entry_age_secs = Some(5.0); // < 30s default
-        f.giveback_atr_norm = Some(10.0); // would fire gate4a if reached
-        let decision = physical_micro_profit_lock(&f, &cfg);
-        assert_eq!(
-            decision,
-            PhysicalDecision::Hold,
-            "gate 2 must block gate 4 when position too fresh"
-        );
-    }
-
-    #[test]
-    fn test_phys_lock_gate3_holds_when_peak_below_atr_threshold() {
-        // peak_pnl_pct < min_peak_atr_norm × atr_pct → Hold.
-        // cfg default min_peak_atr_norm=0.5, atr_pct=2.0 → required=1.0.
-        let cfg = PhysLockConfig::default();
-        let mut f = mk_features();
-        f.atr_pct = Some(2.0);
-        f.peak_pnl_pct = 0.5; // < 1.0 required
-        f.giveback_atr_norm = Some(10.0); // would fire gate4a if reached
-        let decision = physical_micro_profit_lock(&f, &cfg);
-        assert_eq!(
-            decision,
-            PhysicalDecision::Hold,
-            "gate 3 must block gate 4 when peak insufficient"
-        );
-    }
-
-    #[test]
-    fn test_phys_lock_gate4_giveback_triggers_lock() {
-        // giveback >= threshold → Lock(phys_lock_gate4_giveback).
-        let cfg = PhysLockConfig::default();
-        let mut f = mk_features();
-        f.giveback_atr_norm = Some(1.0); // > default 0.7 threshold
-        let decision = physical_micro_profit_lock(&f, &cfg);
-        match decision {
-            PhysicalDecision::Lock(r) => assert_eq!(r, "phys_lock_gate4_giveback"),
-            other => panic!("expected Lock(gate4_giveback), got {:?}", other),
-        }
-    }
-
-    #[test]
-    fn test_phys_lock_gate4_stale_peak_with_negative_roc_locks() {
-        // time_since_peak_ms > stale_peak_ms AND price_roc_short < 0
-        // → Lock(phys_lock_gate4_stale_roc_neg).
-        let cfg = PhysLockConfig::default();
-        let mut f = mk_features();
-        f.giveback_atr_norm = Some(0.0); // gate 4a does NOT fire
-        f.time_since_peak_ms = Some(120_000); // > default 60_000
-        f.price_roc_short = Some(-0.003);
-        let decision = physical_micro_profit_lock(&f, &cfg);
-        match decision {
-            PhysicalDecision::Lock(r) => assert_eq!(r, "phys_lock_gate4_stale_roc_neg"),
-            other => panic!("expected Lock(gate4_stale_roc_neg), got {:?}", other),
-        }
-    }
-
-    #[test]
-    fn test_phys_lock_holds_on_missing_atr_conservative() {
-        // atr_pct = None → Hold (conservative: cannot normalise peak).
-        let cfg = PhysLockConfig::default();
-        let mut f = mk_features();
-        f.atr_pct = None;
-        f.giveback_atr_norm = Some(10.0); // would fire gate4a if reached
-        let decision = physical_micro_profit_lock(&f, &cfg);
-        assert_eq!(
-            decision,
-            PhysicalDecision::Hold,
-            "missing ATR must block downstream gates"
-        );
-    }
-
-    #[test]
-    fn test_phys_lock_reason_string_format_stable() {
-        // Active Lock reason strings must be byte-exact — downstream
-        // `parse_exit_tag` relies on the `phys_lock_*` prefix + exact suffix.
-        // GATE1-REVERSAL-1 (2026-04-21): Gate 1 no longer emits a reason (Hold);
-        // only Gate 4a/4b segments remain. Historical `phys_lock_gate1_low_edge`
-        // string retained in on_tick.rs t4_fix backward-compat test.
-        // 兩種 Lock reason 字串須 byte-exact，下游依賴；GATE1-REVERSAL-1 後 Gate 1
-        // 不再 emit（Hold），歷史 tag 由下游 parse 向後相容處理。
-        let cfg = PhysLockConfig::default();
-
-        // gate 4a
-        let mut f4a = mk_features();
-        f4a.giveback_atr_norm = Some(5.0);
-        assert_eq!(
-            physical_micro_profit_lock(&f4a, &cfg),
-            PhysicalDecision::Lock("phys_lock_gate4_giveback".to_string())
-        );
-
-        // gate 4b
-        let mut f4b = mk_features();
-        f4b.giveback_atr_norm = Some(0.0);
-        f4b.time_since_peak_ms = Some(500_000);
-        f4b.price_roc_short = Some(-0.01);
-        assert_eq!(
-            physical_micro_profit_lock(&f4b, &cfg),
-            PhysicalDecision::Lock("phys_lock_gate4_stale_roc_neg".to_string())
-        );
-    }
 }
