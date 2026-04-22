@@ -1,8 +1,8 @@
 # OpenClaw TODO — 工作清單
 
-**最後更新**：2026-04-22（Step 0 衍生章節收尾 · 全 5/5 ✅ 歸檔 · 20:55 CEST `--rebuild` 部署 runtime live · P1-10 下一步 (2) ma_crossover SL/TP audit 結案 · **P1-19 BACKFILL-LABELS-STALLED-1 RCA 結案 = duplicate of P1-10** · **🔴 被動等待 audit 揭露 3 個 P0 runtime silent fail**：P0-13 EXIT-FEATURES-UNIT-BUG-1（giveback 放大 100x）+ P0-14 EDGE-ESTIMATES-MISS-1（est_net_bps 99% NULL）+ P0-15 COST-EDGE-DEPRECATION-MICRO-PROFIT-GAP-1（退場層 2.5d 空窗 + 文檔敘事脫節）· PASSIVE-WAIT-HEALTHCHECK-1 ✅ tool 上線）— 當日完成 TRACK-P-V2-SWAP-1（`306993e`）+ TICK-PIPELINE-MOD-SPLIT-1（`3d67a99`）兩項；Step 0 衍生新 TODO 章節全歸檔至 `docs/archive/2026-04-22--step_0_derived_todo_batch.md`；P1-10 (2) ma_crossover SL/TP 結構 audit 完成；**P1-19 RCA 結案**：operator 授權 psql 驗證 H3 命中（demo 24h close_fills 14/14 entry_context_id 100% 填充 → H1 證偽；backfill 7d 139→24→44→14 對齊 close_fills → H2 證偽；結論 = 策略自我收斂 fee drag 壓制入場，ONNX 訓練延後至 2026-04-28+ 由 EDGE-P2-3 PostOnly 1w 觀察決定），附帶 3 個 P2 可觀測性 TODO（RESTART-ALL-UVICORN-LOG-1 / EDGE-SCHEDULER-LEADER-1 / SCHEDULER-FAILURE-OBSERVABILITY-1）。2026-04-21 批次歸檔至 `docs/archive/2026-04-21--completed_todo_batch.md`（14 項）。**2026-04-22 20:55 CEST `restart_all.sh --rebuild` 部署完成**（engine PID 158918；binary mtime 20:55；baseline HEAD `9fcc7d4`）— TRACK-P-V2-SWAP-1 v2 non-linear giveback + TICK-PIPELINE-MOD-SPLIT-1 首次進 runtime。
-**Engine**：PID **158918** · binary mtime **2026-04-22 20:55** · baseline HEAD `9fcc7d4`（docs sync 在 `306993e` TRACK-P-V2-SWAP-1 + `3d67a99` TICK-PIPELINE-MOD-SPLIT-1 之上；二者首次進 runtime）· 22.84 MB release → **首次含** TRACK-P-V2-SWAP-1（Priority 6 v2 non-linear giveback + ExitConfig）+ TICK-PIPELINE-MOD-SPLIT-1（tick_pipeline impl 3-way split）；前一 binary 2026-04-21 20:44 baseline `f128af5` 首次含的 TRACK-P-T4-WIRING-1 / EDGE-P2-3 Phase 2+ (b) PostOnly / DECISION-OUTCOMES backfill fix / EXIT-FEATURES-SPLIT / ON-TICK-SPLIT / CANARY-WRITER env-race / AI-SERVICE-CLIENT env-race / TICK-PIPELINE-MOD unused-imports cleanup 皆已承襲
-**Python uvicorn**：PID **158973**（4 workers）· 2026-04-22 20:55 CEST `--rebuild` 隨 engine 一併重啟 · 仍含 P0-12 LIVE-GATE-FALLBACK-1 + E5-FN-3 AnalystAgent pilot + PIPELINE-SLOT-1 Phase 4 daemon-thread trigger（無 Python 側改動）
+**最後更新**：2026-04-22（Step 0 收尾 · P1-10 (2) SL/TP audit · P1-19 結案 duplicate of P1-10 · **P0-13 + P0-14 A + P0-14 B 三 commits 2026-04-22 23:35 CEST `--rebuild` 部署完成**，engine PID **213144** / uvicorn **213195**，healthcheck [7] 從 43/43 → **135/135 cells**（+92 proxy cells，6 prefixes 全齊 bybit_sync/dust_frozen/grid_trading/ma_crossover/orphan_adopted/orphan_frozen），P0-14 B Python proxy 立即生效；P0-13 F kline ATR + P0-14 A Gate 1 fallback 待 cold-start 15 min ATR 可用 + 24h+ phys_lock fire 累積驗證）· P0-15 文檔更正 · PASSIVE-WAIT-HEALTHCHECK-1 ✅— 當日完成 TRACK-P-V2-SWAP-1（`306993e`）+ TICK-PIPELINE-MOD-SPLIT-1（`3d67a99`）兩項；Step 0 衍生新 TODO 章節全歸檔至 `docs/archive/2026-04-22--step_0_derived_todo_batch.md`；P1-10 (2) ma_crossover SL/TP 結構 audit 完成；**P1-19 RCA 結案**：operator 授權 psql 驗證 H3 命中（demo 24h close_fills 14/14 entry_context_id 100% 填充 → H1 證偽；backfill 7d 139→24→44→14 對齊 close_fills → H2 證偽；結論 = 策略自我收斂 fee drag 壓制入場，ONNX 訓練延後至 2026-04-28+ 由 EDGE-P2-3 PostOnly 1w 觀察決定），附帶 3 個 P2 可觀測性 TODO（RESTART-ALL-UVICORN-LOG-1 / EDGE-SCHEDULER-LEADER-1 / SCHEDULER-FAILURE-OBSERVABILITY-1）。2026-04-21 批次歸檔至 `docs/archive/2026-04-21--completed_todo_batch.md`（14 項）。**2026-04-22 20:55 CEST `restart_all.sh --rebuild` 部署完成**（engine PID 158918；binary mtime 20:55；baseline HEAD `9fcc7d4`）— TRACK-P-V2-SWAP-1 v2 non-linear giveback + TICK-PIPELINE-MOD-SPLIT-1 首次進 runtime。
+**Engine**：PID **213144** · binary mtime **2026-04-22 23:35** · baseline HEAD `9710ff9`（docs + 3 P0 fix commits：`ff694e8` P0-13 F kline ATR source / `2484263` P0-14 A Gate 1 fallback / `9710ff9` P0-14 B Python proxy cells）· **首次含** P0-13 ATR kline-based + P0-14 A + P0-14 B（Priority 6 現在能拿到真持倉期 ATR + sync-label edge proxy）；承襲 TRACK-P-V2-SWAP-1 + TICK-PIPELINE-MOD-SPLIT-1（`306993e`/`3d67a99` 於 20:55 CEST baseline 已進 runtime）+ TRACK-P-T4-WIRING-1 / EDGE-P2-3 PostOnly / DECISION-OUTCOMES / split refactor 等
+**Python uvicorn**：PID **213195**（4 workers）· 2026-04-22 23:35 CEST `--rebuild` 隨 engine 一併重啟 · 首次含 P0-14 B `james_stein_estimator._inject_sync_label_proxy_cells`（4 sync strategies × 23 symbols = +92 proxy cells；`edge_estimates.json` 43→135 cells）· 原有 P0-12 LIVE-GATE-FALLBACK-1 + E5-FN-3 + PIPELINE-SLOT-1 全承襲
 **Post-deploy 24h 觀察**：`helper_scripts/v2_swap_24h_observation.sh` Linux PID **166383** 跑到 **2026-04-23 21:16 CEST**；每小時採 engine_watchdog + `phys_lock` 計數（total/gate4_giveback/gate4_stale_roc_neg）+ edge_estimates populate 狀態 + PID drift 檢查；log `/tmp/openclaw/v2_swap_24h_observation.log`（`ssh trade-core 'tail -50 <path>'` 可查進度）；結束後 operator / 下次 session review 結果 + 跑 SQL fills 分布（ad-hoc template 在 script header comment block，`ts_ms >= 1776885391000`）；異常中止用 `ssh trade-core 'pkill -f v2_swap_24h_observation.sh'`。
 **PIPELINE-SLOT-1 live 驗證**：LiveAuthWatcher 22:33 啟動 `env=LiveDemo poll_interval_secs=5`；authorization.json 仍未簽（operator 待決定何時啟 live 流量）
 **測試基準線**：Rust engine lib **1835**（2026-04-22 TRACK-P-V2-SWAP-1 退役 8 個 v1 直測後；Mac debug + Linux release `cargo test -p openclaw_engine --lib` 均驗；v2 等值覆蓋在 `exit_features/v2.rs` 25 單測；TICK-PIPELINE-MOD-SPLIT-1 為純 refactor 零測試數變化）/ bin 38 / core 392 / e2e 35 / reconciler_e2e 19 · Python **2866** passed + audit 4 + ml_training 238 · build warnings **10** · **0 pre-existing fail** · `tick_pipeline/mod.rs` 2274 → **1012** 行（§七 1200 硬上限符合，降 55.5%）
@@ -34,7 +34,16 @@ git status && git log --oneline -5
 
 ## 🔴 P0 — 阻塞 Live Gate 關鍵路徑
 
-### 🔴 P0-13 · ATR-SCALE-BUG-1 — `compute_atr_pct` per-tick 尺度誤為持倉期尺度（QC 推薦 Option F）
+### ✅ P0-13 · ATR-SCALE-BUG-1 — **已部署 2026-04-22 23:35 CEST**（`ff694e8`）
+
+**Runtime 狀態**：engine PID 213144 跑新 binary，三 consumer atr_pct 來源從 per-tick `compute_atr_pct` 切為 kline 1m OHLCV + `indicators::atr(14)`。Cold-start 15 min 內 `atr_pct = None`（不到 15 bars）下游保守 Hold。24h+ 後驗：DB `learning.exit_features.atr_pct` avg 應從 0.003 → ~0.05-0.5、`giveback_atr_norm` avg 從 364 → ~0.3-3.0。
+
+**Fix 範圍**：
+- `tick_pipeline/on_tick/step_6_risk_checks.rs:93-116`
+- `tick_pipeline/pipeline_helpers.rs:277-294`（close-time `build_exit_feature_row`）
+- `openclaw_core/src/risk/price_tracker.rs::compute_atr_pct` 加 `#[deprecated]`（保留給 fast_track）
+
+### 🟡 原 P0-13 details（執行前 reference，保留供稽核）
 
 - **現象**：`learning.exit_features` 實測 `atr_pct` 0.001-0.006 量級（per-tick percent-as-number），但三 consumer 假設「持倉期 ATR」(~1-2%) → `giveback_atr_norm` 放大 100-1000x（DB avg 364.85）
 - **跨 consumer 影響**：
@@ -52,7 +61,19 @@ git status && git log --oneline -5
 - **待 operator approve** Option F execution plan → 主 session E1 開工
 - 觸發：2026-04-22 被動等待 audit，詳 `docs/worklogs/2026-04-22--passive_wait_silent_fail_audit.md` §3.0 + QC research `docs/worklogs/2026-04-22--p0_13_atr_scale_qc_research.md`
 
-### 🔴 P0-14 · EDGE-ESTIMATES-MISS-1 — T4 closure `est_net_bps` 99.1% NULL
+### ✅ P0-14 · EDGE-ESTIMATES-MISS-1 — **已部署 2026-04-22 23:35 CEST**（`2484263` A + `9710ff9` B）
+
+**Runtime 狀態**：
+- **Option A（Rust Gate 1 fallback）**：`ExitConfig.missing_edge_fallback_bps = -10.0`（default 保守，仍 Hold；operator 可熱重載調高）
+- **Option B（Python JS proxy cells）立即生效**：`edge_estimates.json` 從 43 cells（僅 grid + ma）→ **135 cells**（+4 sync-label strategies × 23 symbols = 92 proxy cells）· prefixes 全齊 `bybit_sync:23 / dust_frozen:23 / orphan_adopted:23 / orphan_frozen:23 / grid_trading:22 / ma_crossover:21`
+
+**Fix 範圍**：
+- Rust：`exit_features/v2.rs`（+99 / -6，2 new tests `test_v2_gate1_missing_edge_*`）
+- Python：`program_code/ml_training/james_stein_estimator.py`（+113 / -2）+ `tests/test_james_stein_proxy_cells.py`（new 213 lines，9 tests）
+
+**結果**：healthcheck [7] 從 WARN → PASS（135/135 populated cells，4 sync-label prefix 全出現）；runtime Priority 6 Gate 1 對 sync-label positions（P1-6 的 6 個 bybit_sync 倉位）首次可查到 edge_estimates cell（`shrunk_bps = grand_mean_bps` 弱先驗）。
+
+### 🟡 原 P0-14 details（執行前 reference，保留供稽核）
 
 - **現象**：`learning.exit_features` 7d 110 rows 中 109 個 `est_net_bps IS NULL`（99.1% miss）；healthcheck 觀察 `edge_estimates.json` populated cells 0/0（可能 JSON cells key mismatch 或實質空 list）
 - **影響**：TRACK-P v2 Priority 6 Gate 1（`edge <= floor=5.0 → Hold`）對 `None` 一律 Hold → **v2 swap + T4 wiring 全鏈在 runtime 等效 dead code**
