@@ -1,7 +1,49 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-04-21（CANARY-WRITER-ENV-RACE-1 + TICK-PIPELINE-MOD-UNUSED-IMPORTS-1 並行派發清尾）
+> 最後更新：2026-04-22（TRACK-P-V2-SWAP-1 — Priority 6 v1 linear → v2 non-linear + ExitConfig）
+
+### TRACK-P-V2-SWAP-1 — Priority 6 v1 linear → v2 non-linear + ExitConfig（2026-04-22 · commit `306993e`）
+
+**觸發**：2026-04-21 晚 3 TRACK-P-T4-WIRING-1（`e95c779`）接上 `ExitFeatures` builder 後，Priority 6 仍呼 v1 `physical_micro_profit_lock` + 線性 `PhysLockConfig`（`giveback_atr_norm_threshold=0.7` 固定閾值）。v2 non-linear pure fn + `ExitConfig`（threshold = max(base − slope × peak_atr_norm, floor)）在 `aee96b9` + 31 單測綠，但 runtime 未接。本次解除此 dual-track 殘留。
+
+**範圍**：
+1. `config/risk_config.rs`：field `phys_lock: PhysLockConfig` → `exit: ExitConfig`（`#[serde(alias = "phys_lock")]` 保 TOML 相容 — 當前三環境 `risk_config*.toml` 均無此 section 全走 Default，alias 為保險）；`use crate::exit_features::ExitConfig` 新增；validate 掛 `self.exit.validate().map_err(|e| format!("risk.exit: {}", e))?`；EOF `PhysLockConfig` struct + 5 default fn + `Default` + `validate` impl 共 ~94 行整塊退役（留一段雙語 retire comment 作為 grep anchor）
+2. `risk_checks.rs`：import 改 `use crate::exit_features::{physical_micro_profit_lock_v2, ExitFeatures, PhysicalDecision}`；Priority 6 call site 從 `physical_micro_profit_lock(features, &config.phys_lock)` 改為 `physical_micro_profit_lock_v2(features, &config.exit)`；本檔 v1 `physical_micro_profit_lock` pure fn（~50 行）+ 8 個 v1 直接單測（~135 行）全刪（v2 在 `exit_features/v2.rs` 已有 25 等值單測）
+3. 保留 4 個 end-to-end 整合測試經 `check_position_on_tick` exercise Priority 6（v2 boundary `<=` / `>=` 較 v1 `<` / `>` 更保守，既有輸入全通過）
+
+**v2 vs v1 runtime 差異**（部署後可觀察）：
+
+| 維度 | v1 linear | v2 non-linear | 觀察點 |
+|---|---|---|---|
+| Gate 1 邊界 | `edge < floor` → Hold | `edge <= floor` → Hold | edge 剛好等於 floor 的 position 會被擋更久（保守） |
+| Gate 4a giveback 閾值 | 固定 `0.7` | `max(1.0 − 0.15 × peak_atr_norm, 0.3)` | 高 peak 倉鎖得更快（peak_atr_norm=5 → 閾值 0.3 vs v1 0.7）；淺 peak 倉鎖得更慢（peak_atr_norm=0 → 閾值 1.0 vs v1 0.7） |
+| Gate 4b 陳舊邊界 | `dt > stale_peak_ms` | `dt >= stale_peak_ms` | 剛滿時間窗且 ROC 負的 position 會被鎖（v1 要嚴格超過） |
+
+整體方向符合 DUAL-TRACK-EXIT-1 §三 L108-111 設計意圖「防微利即套離場、追求最高單筆 close 盈利」。
+
+**Reason-string ABI 不變**：v2 也 emit `phys_lock_gate4_giveback` / `phys_lock_gate4_stale_roc_neg`，下游 `strip_phys_lock_prefix` + `parse_exit_tag` 零改。歷史 `phys_lock_gate1_low_edge` tag（v1 反轉前）由下游解析層向後相容。
+
+**驗證**：
+- Mac debug `cargo test -p openclaw_engine --lib`: 1843 → **1835 passed / 0 failed**（−8 = 退役 8 個 v1 直測：gate1_low_edge_holds / gate1_pass_with_sufficient_edge / gate2_holds_within_min_hold_secs / gate3_holds_when_peak_below_atr_threshold / gate4_giveback_triggers_lock / gate4_stale_peak_with_negative_roc_locks / holds_on_missing_atr_conservative / reason_string_format_stable；精確對帳）
+- Linux release `ssh trade-core ... cargo test --release`: **1835 passed / 0 failed**（0.52s）
+- Mac + Linux 完全對齊，無平台分歧
+
+**Workflow**：Mac CC 本地開發 → `cargo check` + `cargo test` 綠 → 寫 `.claude_reports/20260422_200623_track_p_v2_swap.md` → commit → operator 明確授權本 session 後續直接 push → push origin main → `ssh trade-core "git pull --ff-only && cargo test --release"` 驗 Linux release 同綠。第一次 commit 時 push 被 permission hook 擋（理由：本次 prompt 無 explicit push 授權）— operator 放行後順利推送，已納入 §七「commit 即 push」硬規則。
+
+**檔案**（1 commit, 2 files）：
+- `306993e` — `rust/openclaw_engine/src/config/risk_config.rs` +23/−96 · `rust/openclaw_engine/src/risk_checks.rs` +31/−218（淨 LOC −260）
+
+**Governance**：
+- §七 file size：`risk_config.rs` 1402 → ~1306（硬上限 1200 以下再緩衝 96 行）；`risk_checks.rs` 1062 → ~884（硬上限 1200 以下）
+- §七 bilingual：所有新增 comment 皆中英對照（field doc / retire block / integration-test note）
+- feedback_no_dead_params：v1 pure fn + `PhysLockConfig` swap 後即為死碼，故整塊退役（不保留 dual-track）
+- feedback_env_config_independence：三環境 `risk_config*.toml` 未動，`#[serde(alias)]` 保未來手寫相容
+- ARCH-RC1 / 3E-ARCH：`RiskConfig` 保持 `Arc<ArcSwap<RiskConfig>>` 熱重載語意不變，`ExitConfig` 走同一 ArcSwap 快照
+
+**部署**：operator 指示先不部署；engine PID 3954769 仍跑 v1 linear。下次 `ssh trade-core "cd ~/BybitOpenClaw/srv && bash helper_scripts/restart_all.sh --rebuild"` 後 v2 non-linear giveback 即時 fire。部署後建議 24h 看 `trading.fills.exit_reason LIKE 'risk_close:phys_lock_gate4_%'` 分布與 v1 歷史對比（v1 部署期 = 2026-04-21 20:44 ~ 下次 `--rebuild`，短窗但可做樣本參考）。
+
+**Memory 更新**：`project_track_p_runtime_dead.md` supersede 為 `project_track_p_runtime_live.md`（runtime 接線層面已 live、v2 swap 代碼層面也 live，僅部署未執行）。
 
 ### CANARY-WRITER-ENV-RACE-1 + TICK-PIPELINE-MOD-UNUSED-IMPORTS-1 — 並行派發清尾（2026-04-21 · commits `d454c17` + `c164cb6`）
 
