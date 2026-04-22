@@ -298,7 +298,22 @@ Operator 在 Mac 並行跑 Qwen3.6-35B（LM Studio）做代碼審核。CC 每完
 
 ---
 
-## 八、16 Agent 角色體系與強制工作鏈
+## 八、工作流編排、16 Agent 角色與自我改進循環
+
+### ★ 工作流編排 6 條 + 3 底線（2026-04-22 operator 指令融合）
+
+1. **規劃優先 Plan-First**：非平凡任務（≥3 步 / 涉架構決策）先進規劃模式再動手；前期寫詳細 spec 減歧義；過程遇阻即停重規劃，**禁強推**；驗證階段同樣套規劃節點。Auto mode 下放寬「開工前 operator confirm」，但規劃思考仍要做。
+2. **Sub-agent 卸載**：研究/探索/並行分析一律派 sub-agent 保主上下文整潔；一 agent 一任務精準執行；複雜問題投更多算力。詳 memory `feedback_subagent_first.md`。
+3. **自我改進循環**：operator 任何糾正 → 抽模式寫 `docs/lessons.md`（場景 / 錯誤模式 / 預防規則 / 相關檔案）；會話起手掃近期相關條目；對錯誤率無情迭代。lessons.md = 可 grep 技術/流程錯誤庫，與 auto-memory `feedback_*.md`（跨 session 偏好）互補不重複。
+4. **完成前驗證 Verify-Before-Done**：永不先標 done；跑測試 / 查 log / 對比 main 分支行為差 / 自問「senior engineer + FA 會 approve 嗎？」。強化既有 E2/E4 + memory `feedback_working_principles.md` 原則 3 對抗性驗證。
+5. **追求優雅（平衡）**：非平凡修改前停問「有更優雅方式嗎？」；修復像 patch 就重做「基於現在所知一切實作優雅解」；**簡單/明顯修復跳過本條禁過度設計**。
+6. **自主 bug 修復**：收到 bug 直接修；指 log/錯誤/失敗測試再解；CI 紅直接修不等手把手；operator 零上下文切換。詳 memory `feedback_minimal_confirmation.md`。
+
+**3 條核心底線**：**簡單優先**（只動必要代碼，禁無關重構） · **不偷懶**（找 root cause，禁臨時 patch，senior/FA 標準） · **最小影響**（變更只觸必要部分，禁引 bug）。
+
+**會話任務管理 6 步**（與 §六 TODO.md 強制規則同體，流程化版）：1) TODO.md 先寫 checkbox 計畫 → 2) 開工前 operator confirm（auto mode 跳過）→ 3) 逐步勾選進度 → 4) 每步高階摘要 → 5) TODO.md 結尾補 Review 章節 → 6) 任何糾正後寫入 `docs/lessons.md`。
+
+### 16 Agent 角色體系與強制工作鏈
 
 **強制**：所有任務按角色派發，主會話 = PM+Conductor。完整角色定義/激活矩陣見 `docs/CLAUDE_REFERENCE.md`。
 
