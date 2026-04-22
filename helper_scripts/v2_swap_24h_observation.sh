@@ -15,10 +15,15 @@
 #
 # 採集指標 / Metrics:
 #   1. engine_watchdog 狀態（engine_alive + snapshot_age_seconds）
-#   2. engine.log 內 `phys_lock` 累計出現次數
-#   3. trading.fills 自部署起 `risk_close:phys_lock_gate4_*` 分布（SQL GROUP BY）
-#   4. engine PID 是否仍為啟動時快照（穩定性檢查）
-#   5. edge_estimates populate 狀態（是否已過冷啟動期）
+#   2. engine.log 內 `phys_lock` 累計出現次數（gate4_giveback / gate4_stale 分別計）
+#   3. engine PID 是否仍為啟動時快照（穩定性檢查）
+#   4. edge_estimates populate 狀態（是否已過冷啟動期）
+#
+#   SQL fills 分布（`risk_close:phys_lock_%` GROUP BY）刻意不在本腳本自動跑，
+#   因 DB 需 credentials；operator 可 ad-hoc 執行：
+#     psql -d trading_ai -c "SELECT exit_reason, COUNT(*) FROM trading.fills
+#       WHERE ts_ms >= <deploy_ms> AND exit_reason LIKE 'risk_close:phys_lock_%'
+#       GROUP BY 1;"
 #
 # 使用 / Usage:
 #   nohup bash ~/BybitOpenClaw/srv/helper_scripts/v2_swap_24h_observation.sh \
@@ -48,12 +53,6 @@ BASE_DIR="${OPENCLAW_BASE_DIR:-$HOME/BybitOpenClaw/srv}"
 DATA_DIR="${OPENCLAW_DATA_DIR:-/tmp/openclaw}"
 ENGINE_LOG="${DATA_DIR}/engine.log"
 WATCHDOG_PY="${BASE_DIR}/helper_scripts/canary/engine_watchdog.py"
-
-# PostgreSQL connection (uses $PG* env vars from openclaw standard)
-PG_HOST="${PG_HOST:-127.0.0.1}"
-PG_PORT="${PG_PORT:-5432}"
-PG_DB="${PG_DB:-trading_ai}"
-PG_USER="${PG_USER:-ncyu}"
 
 # Capture baseline engine PID at script start / 啟動時固定引擎 PID 作為穩定性錨
 BASELINE_PID="$(pgrep -f 'openclaw-engine' | head -1)"
@@ -95,12 +94,14 @@ run_tick() {
     fi
 
     # 3. phys_lock occurrences in engine.log
+    # grep -c 無匹配時 exit=1（count=0），需 `|| true` 吸住失敗且抓乾淨數字。
+    # grep -c exits 1 on zero matches; suppress with `|| true` and take a clean integer.
     if [[ -f "${ENGINE_LOG}" ]]; then
         local phys_total phys_gate4_giveback phys_gate4_stale
-        phys_total="$(grep -c 'phys_lock' "${ENGINE_LOG}" 2>/dev/null || echo 0)"
-        phys_gate4_giveback="$(grep -c 'phys_lock_gate4_giveback' "${ENGINE_LOG}" 2>/dev/null || echo 0)"
-        phys_gate4_stale="$(grep -c 'phys_lock_gate4_stale_roc_neg' "${ENGINE_LOG}" 2>/dev/null || echo 0)"
-        echo "[phys_lock] total=${phys_total} gate4_giveback=${phys_gate4_giveback} gate4_stale_roc_neg=${phys_gate4_stale}"
+        phys_total="$({ grep -c 'phys_lock' "${ENGINE_LOG}" 2>/dev/null || true; } | head -1)"
+        phys_gate4_giveback="$({ grep -c 'phys_lock_gate4_giveback' "${ENGINE_LOG}" 2>/dev/null || true; } | head -1)"
+        phys_gate4_stale="$({ grep -c 'phys_lock_gate4_stale_roc_neg' "${ENGINE_LOG}" 2>/dev/null || true; } | head -1)"
+        echo "[phys_lock] total=${phys_total:-0} gate4_giveback=${phys_gate4_giveback:-0} gate4_stale_roc_neg=${phys_gate4_stale:-0}"
     else
         echo "[phys_lock] engine.log missing"
     fi
@@ -116,27 +117,10 @@ run_tick() {
         echo "[edge_estimates] file missing"
     fi
 
-    # 5. trading.fills distribution since deploy
-    echo "[fills since deploy]"
-    if command -v psql >/dev/null 2>&1; then
-        psql -h "${PG_HOST}" -p "${PG_PORT}" -U "${PG_USER}" -d "${PG_DB}" \
-            -tA -F '|' -c "
-            SELECT
-                COALESCE(exit_reason, '<null>') AS exit_reason,
-                COUNT(*) AS n
-            FROM trading.fills
-            WHERE ts_ms >= ${DEPLOY_MS}
-              AND exit_reason LIKE 'risk_close:phys_lock_%'
-            GROUP BY 1
-            ORDER BY 2 DESC;
-            " 2>&1 | head -10 | sed 's/^/  /'
-        local total_fills
-        total_fills="$(psql -h "${PG_HOST}" -p "${PG_PORT}" -U "${PG_USER}" -d "${PG_DB}" \
-            -tA -c "SELECT COUNT(*) FROM trading.fills WHERE ts_ms >= ${DEPLOY_MS};" 2>/dev/null || echo ?)"
-        echo "  (total fills since deploy: ${total_fills})"
-    else
-        echo "  psql unavailable"
-    fi
+    # 5. SQL fills 分布刻意不在本腳本跑（DB 需 credentials，不在自動化範圍）。
+    # SQL fills distribution intentionally not automated here (needs DB credentials);
+    # operator runs ad-hoc. See header comment for template.
+    echo "[fills SQL] skip — operator ad-hoc (ts_ms >= ${DEPLOY_MS})"
 }
 
 # ─── Main / 主循環 ──────────────────────────────────────────────────────
