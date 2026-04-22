@@ -273,14 +273,17 @@ git status && git log --oneline -5
 
 **⚠️ 起因**：2026-04-19 15:37 redeploy 後重查 R:R 不對稱，追蹤到以下結構事實：
 
-1. **（2026-04-20 修正）legacy COST EDGE block 註解 ≠ 功能退場；MICRO-PROFIT-FIX-1 接手了 Priority 6**
-   - `risk_checks.rs:245-259` 舊 COST EDGE gate block 已註解（DEPRECATED）
-   - 新 PHYS-LOCK gate（`risk_checks.rs:129-165`）存在但依賴 `exit_features: Option<&ExitFeatures>`
-   - `tick_pipeline/on_tick.rs:1456-1474` `evaluate_positions(...)` closure 目前傳 `|_| None` → PHYS-LOCK 永遠拿不到 features → 永遠 Hold
-   - **但 MICRO-PROFIT-FIX-1 narrow-band gate（`ratio ≥ 0.20 & pnl ∈ [0.30%, 0.55%]`）正常運作**，close 時 `strategy_name` 仍寫 `risk_close:COST EDGE:...` 舊 label → DB grep `COST EDGE` 會命中 MICRO-PROFIT 輸出
-   - 2026-04-20 24h 實測：demo 24 筆 + paper 12 筆 MICRO-PROFIT close，**100% 勝率 / +$4.68 / +$7.49**，是當前最重要的正 edge 安全網
-   - Track P T4 `phys_lock_*` 實測 0 觸發（符合 ExitFeatures=None 設計）
-   - **原稿 claim「0 條 COST EDGE close」有誤** — 是 prefix label 相同造成歸類問題，並非 Priority 6 空轉
+> **🔴 2026-04-22 P0-15 推翻第 1 點**：本節原敘述「MICRO-PROFIT-FIX-1 narrow-band gate 正常運作 / 2026-04-20 demo 24 + paper 12 MICRO-PROFIT close 100% 勝率 +$4.68」**經 psql 實測對帳完全錯誤**。真相：`risk_close:COST EDGE%` 7d **只有 35 rows 全集中在 2026-04-18/19 T3 rebuild 之前**，2026-04-20/21/22 **連續 3 天 0 fire**。原「24 筆 MICRO-PROFIT close」是查詢窗口涵蓋 rebuild 前 cached 行為的誤判。詳 `docs/worklogs/2026-04-22--passive_wait_silent_fail_audit.md` §3.4。
+> **影響**：P0-3 Phase 5 edge 重評所依賴的「MICRO-PROFIT 是當前最重要正 edge 安全網」基礎錯誤；退場層實際 2026-04-19 晚 → 2026-04-21 晚 2.5 天完全空窗（7d 只 trailing 7 + dynamic stop 1）。
+
+1. **（2026-04-22 P0-15 推翻；下文為 2026-04-20 錯誤版本，保留供稽核）** ~~legacy COST EDGE block 註解 ≠ 功能退場；MICRO-PROFIT-FIX-1 接手了 Priority 6~~
+   - `risk_checks.rs:245-259` 舊 COST EDGE gate block 已註解（DEPRECATED）— ✅ 此句仍對
+   - 新 PHYS-LOCK gate（`risk_checks.rs:129-165`）存在但依賴 `exit_features: Option<&ExitFeatures>` — ✅ 仍對
+   - `tick_pipeline/on_tick.rs:1456-1474` `evaluate_positions(...)` closure 目前傳 `|_| None` → PHYS-LOCK 永遠拿不到 features → 永遠 Hold — ⚠️ **2026-04-21 commit `e95c779` T4 接線後此 claim 過時**，但 T4 後 Gate 1 est_net_bps 99.1% NULL + P0-13 unit bug 仍讓 PHYS-LOCK 0 fire（看 P0-13/P0-14）
+   - ~~**但 MICRO-PROFIT-FIX-1 narrow-band gate（`ratio ≥ 0.20 & pnl ∈ [0.30%, 0.55%]`）正常運作**~~ 🔴 **false** — 該 gate 被 T3 deprecation 一併註解，2026-04-19 T3 rebuild 後沒有 runtime 實作
+   - ~~2026-04-20 24h 實測：demo 24 筆 + paper 12 筆 MICRO-PROFIT close~~ 🔴 **false** — 查詢窗口 artifact，實際 04-20 起 0 rows
+   - Track P T4 `phys_lock_*` 實測 0 觸發 — ✅ 當時對；2026-04-21 T4 接線後仍 0（P0-13/14 雙 bug 疊加）
+   - ~~**原稿 claim「0 條 COST EDGE close」有誤**~~ 🔴 原稿其實接近對（04-20/21/22 確實 0 rows），2026-04-20 修正版本才是誤判
 
 2. **`trailing_activation_pct=0.8` 非 hardcoded**
    - `rust/openclaw_engine/src/config/risk_config.rs:518` `default_trailing_activation_pct() -> 1.0`
@@ -291,7 +294,7 @@ git status && git log --oneline -5
 3. **DB 真實 R:R 不對稱主因（2026-04-20 refined）**：
    - ma_crossover asym 2.54× → 0.88：虧損側已縮小到比獲勝側小；但 win rate 從 64% 跌到 37.8%（37 exits）→ **問題變成「勝率」而非「不對稱」**，Track P T4 加速理由弱化
    - grid_trading asym 1.71× → 2.09× 惡化：fee drag 持續主導；需 P1-10 grid cooldown_ms / min holding time 結構修
-   - MICRO-PROFIT-FIX-1 在 `risk_checks.rs` MICRO-PROFIT 分支（`pnl ∈ [0.30%, 0.55%]`）仍照常觸發，demo 24 + paper 12 closes/24h，100% 勝率 +$12.17 net → Priority 6 **未空轉**
+   - ~~MICRO-PROFIT-FIX-1 在 `risk_checks.rs` MICRO-PROFIT 分支仍照常觸發，demo 24 + paper 12 closes/24h，100% 勝率 +$12.17 net~~ 🔴 **2026-04-22 P0-15 推翻**：runtime 實測 0 fire（此 claim 為 rebuild 前 cached 查詢 artifact）
 
 **路線決策（user 已批 2026-04-19）**：
 
