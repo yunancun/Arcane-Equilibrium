@@ -1,6 +1,6 @@
 # OpenClaw TODO — 工作清單
 
-**最後更新**：2026-04-22（Step 0 衍生章節收尾 · 全 5/5 ✅ 歸檔 · 20:55 CEST `--rebuild` 部署 runtime live · P1-10 下一步 (2) ma_crossover SL/TP audit 結案 · **P1-19 BACKFILL-LABELS-STALLED-1 RCA 結案 = duplicate of P1-10**）— 當日完成 TRACK-P-V2-SWAP-1（`306993e`）+ TICK-PIPELINE-MOD-SPLIT-1（`3d67a99`）兩項；Step 0 衍生新 TODO 章節全歸檔至 `docs/archive/2026-04-22--step_0_derived_todo_batch.md`；P1-10 (2) ma_crossover SL/TP 結構 audit 完成；**P1-19 RCA 結案**：operator 授權 psql 驗證 H3 命中（demo 24h close_fills 14/14 entry_context_id 100% 填充 → H1 證偽；backfill 7d 139→24→44→14 對齊 close_fills → H2 證偽；結論 = 策略自我收斂 fee drag 壓制入場，ONNX 訓練延後至 2026-04-28+ 由 EDGE-P2-3 PostOnly 1w 觀察決定），附帶 3 個 P2 可觀測性 TODO（RESTART-ALL-UVICORN-LOG-1 / EDGE-SCHEDULER-LEADER-1 / SCHEDULER-FAILURE-OBSERVABILITY-1）。2026-04-21 批次歸檔至 `docs/archive/2026-04-21--completed_todo_batch.md`（14 項）。**2026-04-22 20:55 CEST `restart_all.sh --rebuild` 部署完成**（engine PID 158918；binary mtime 20:55；baseline HEAD `9fcc7d4`）— TRACK-P-V2-SWAP-1 v2 non-linear giveback + TICK-PIPELINE-MOD-SPLIT-1 首次進 runtime。
+**最後更新**：2026-04-22（Step 0 衍生章節收尾 · 全 5/5 ✅ 歸檔 · 20:55 CEST `--rebuild` 部署 runtime live · P1-10 下一步 (2) ma_crossover SL/TP audit 結案 · **P1-19 BACKFILL-LABELS-STALLED-1 RCA 結案 = duplicate of P1-10** · **🔴 被動等待 audit 揭露 3 個 P0 runtime silent fail**：P0-13 EXIT-FEATURES-UNIT-BUG-1（giveback 放大 100x）+ P0-14 EDGE-ESTIMATES-MISS-1（est_net_bps 99% NULL）+ P0-15 COST-EDGE-DEPRECATION-MICRO-PROFIT-GAP-1（退場層 2.5d 空窗 + 文檔敘事脫節）· PASSIVE-WAIT-HEALTHCHECK-1 ✅ tool 上線）— 當日完成 TRACK-P-V2-SWAP-1（`306993e`）+ TICK-PIPELINE-MOD-SPLIT-1（`3d67a99`）兩項；Step 0 衍生新 TODO 章節全歸檔至 `docs/archive/2026-04-22--step_0_derived_todo_batch.md`；P1-10 (2) ma_crossover SL/TP 結構 audit 完成；**P1-19 RCA 結案**：operator 授權 psql 驗證 H3 命中（demo 24h close_fills 14/14 entry_context_id 100% 填充 → H1 證偽；backfill 7d 139→24→44→14 對齊 close_fills → H2 證偽；結論 = 策略自我收斂 fee drag 壓制入場，ONNX 訓練延後至 2026-04-28+ 由 EDGE-P2-3 PostOnly 1w 觀察決定），附帶 3 個 P2 可觀測性 TODO（RESTART-ALL-UVICORN-LOG-1 / EDGE-SCHEDULER-LEADER-1 / SCHEDULER-FAILURE-OBSERVABILITY-1）。2026-04-21 批次歸檔至 `docs/archive/2026-04-21--completed_todo_batch.md`（14 項）。**2026-04-22 20:55 CEST `restart_all.sh --rebuild` 部署完成**（engine PID 158918；binary mtime 20:55；baseline HEAD `9fcc7d4`）— TRACK-P-V2-SWAP-1 v2 non-linear giveback + TICK-PIPELINE-MOD-SPLIT-1 首次進 runtime。
 **Engine**：PID **158918** · binary mtime **2026-04-22 20:55** · baseline HEAD `9fcc7d4`（docs sync 在 `306993e` TRACK-P-V2-SWAP-1 + `3d67a99` TICK-PIPELINE-MOD-SPLIT-1 之上；二者首次進 runtime）· 22.84 MB release → **首次含** TRACK-P-V2-SWAP-1（Priority 6 v2 non-linear giveback + ExitConfig）+ TICK-PIPELINE-MOD-SPLIT-1（tick_pipeline impl 3-way split）；前一 binary 2026-04-21 20:44 baseline `f128af5` 首次含的 TRACK-P-T4-WIRING-1 / EDGE-P2-3 Phase 2+ (b) PostOnly / DECISION-OUTCOMES backfill fix / EXIT-FEATURES-SPLIT / ON-TICK-SPLIT / CANARY-WRITER env-race / AI-SERVICE-CLIENT env-race / TICK-PIPELINE-MOD unused-imports cleanup 皆已承襲
 **Python uvicorn**：PID **158973**（4 workers）· 2026-04-22 20:55 CEST `--rebuild` 隨 engine 一併重啟 · 仍含 P0-12 LIVE-GATE-FALLBACK-1 + E5-FN-3 AnalystAgent pilot + PIPELINE-SLOT-1 Phase 4 daemon-thread trigger（無 Python 側改動）
 **Post-deploy 24h 觀察**：`helper_scripts/v2_swap_24h_observation.sh` Linux PID **166383** 跑到 **2026-04-23 21:16 CEST**；每小時採 engine_watchdog + `phys_lock` 計數（total/gate4_giveback/gate4_stale_roc_neg）+ edge_estimates populate 狀態 + PID drift 檢查；log `/tmp/openclaw/v2_swap_24h_observation.log`（`ssh trade-core 'tail -50 <path>'` 可查進度）；結束後 operator / 下次 session review 結果 + 跑 SQL fills 分布（ad-hoc template 在 script header comment block，`ts_ms >= 1776885391000`）；異常中止用 `ssh trade-core 'pkill -f v2_swap_24h_observation.sh'`。
@@ -33,6 +33,56 @@ git status && git log --oneline -5
 ---
 
 ## 🔴 P0 — 阻塞 Live Gate 關鍵路徑
+
+### 🔴 P0-13 · EXIT-FEATURES-UNIT-BUG-1 — `builder.rs:110` giveback_atr_norm 放大 100x
+
+- **現象**：`learning.exit_features` 7d 110 rows avg `giveback_atr_norm = 364.85`；正確值應 ~3.0（100x 放大）
+- **Code**：[`builder.rs:110`](rust/openclaw_engine/src/exit_features/builder.rs:110) `Some((gb / atr) as f32)` 中 `gb` 單位 %（e.g. 2.33=2.33%），`atr` 單位 decimal（e.g. 0.0077=0.77%），ratio 放大 100x
+- **影響**：
+  - Gate 3（`peak_pnl_pct / atr_pct >= min_peak_atr_norm=0.5`）永遠 ≥100，原意「過濾 shallow peak」失效
+  - Gate 4a（`gb_norm >= threshold ∈ [0.3, 1.0]`）若 Gate 1 過，giveback=364 立刻 Lock → **mass close winners 災難風險**
+  - 當前被 P0-14 掩蓋（Gate 1 永遠 Hold）
+- **Fix scope**：1 行改 `peak_pnl_pct / 100.0` 或 `atr * 100.0` 統一單位 + 4-5 regression tests（`builder.rs` 單測新增 real-scale inputs 如 peak=2.33 atr=0.0077 expect_gb=~3.0）
+- **必須**與 P0-14 一起部署：單修 P0-14 讓 Gate 1 過 → Gate 4a mass close
+- **預估**：~4h code + `--rebuild`
+- 觸發：2026-04-22 被動等待 audit，詳 `docs/worklogs/2026-04-22--passive_wait_silent_fail_audit.md` §3.1
+
+### 🔴 P0-14 · EDGE-ESTIMATES-MISS-1 — T4 closure `est_net_bps` 99.1% NULL
+
+- **現象**：`learning.exit_features` 7d 110 rows 中 109 個 `est_net_bps IS NULL`（99.1% miss）；healthcheck 觀察 `edge_estimates.json` populated cells 0/0（可能 JSON cells key mismatch 或實質空 list）
+- **影響**：TRACK-P v2 Priority 6 Gate 1（`edge <= floor=5.0 → Hold`）對 `None` 一律 Hold → **v2 swap + T4 wiring 全鏈在 runtime 等效 dead code**
+- **7d 0 `phys_lock_*` fire** 是此 bug 的直接後果（healthcheck FAIL [4]）
+- **潛在根因假設**：
+  1. `edge_estimates.json` 的 cells key 與 `edge_estimates.get_cell(strategy, symbol)` 查詢 key 不匹配
+  2. JSON 用 `engine_mode:strategy:symbol` 三段式，T4 closure 只傳 2 段
+  3. Scheduler 實際寫入 cells 遠少於預期（P1-19 症狀再現 — label 不足 → cells 少）
+- **Fix path**：先 RCA 假設 1/2/3 → 若是 key mismatch 改 T4 closure 1-2 行；若是資料不足則 fallback Gate 1「edge=None → 保守但不 block」（加 config flag `gate_1_allow_null_edge=true`）
+- **預估**：0.5-2d 視假設命中
+- **必須**與 P0-13 一起部署
+- 觸發：2026-04-22 被動等待 audit，詳 `docs/worklogs/2026-04-22--passive_wait_silent_fail_audit.md` §3.2
+
+### 🔴 P0-15 · COST-EDGE-DEPRECATION-MICRO-PROFIT-GAP-1 — 2.5 天退場層空窗 + 文檔敘事脫節
+
+- **現象**：
+  - `risk_checks.rs:250-264` 舊 COST EDGE gate 在 Track P T3 commit 被註解 deprecated；P0-3 原定依靠的「MICRO-PROFIT-FIX-1 narrow-band gate」其實是同一個 gate 的 runtime
+  - 實證：demo `risk_close:COST EDGE%` 24h=0、7d=35（全集中在 2026-04-18/19 T3 rebuild **之前**）
+  - 2026-04-19 T3 rebuild → 2026-04-21 晚 T4 接線 + `--rebuild` 期間 **2.5 天 0 退場層 fire**（除 trailing 5 / dynamic 1）
+  - TODO/memory 裡「2026-04-20 demo 24 筆 MICRO-PROFIT close 100% 勝率 +$4.68」敘述為 cached window 誤判，實際 2026-04-20 後 0 fire
+- **影響**：
+  - P0-3 Phase 5 edge 重評的「MICRO-PROFIT 是當前最重要正 edge 安全網」論斷**基礎錯誤**
+  - P1-10 STRATEGY-ASYMMETRY-1 「2026-04-20 R1 驗收」結論需 redo（當時退場分布查詢 stale cache）
+  - CLAUDE.md §三 / TODO P1-10 推理鏈 / worklog narrative 需同步更正
+- **Fix scope**（文檔 only，不動代碼）：
+  1. 更正 TODO P1-10 §推理鏈 §1-§4 的 MICRO-PROFIT 敘述
+  2. 更正 CLAUDE.md §三 「MICRO-PROFIT-FIX-1 正常運作」論斷
+  3. 重跑 P0-3 Phase 5 edge baseline（待 P0-13/P0-14 修好 + PostOnly 1w 觀察期後）
+- **預估**：~2h 文檔更正；edge baseline 重跑延後
+- 觸發：2026-04-22 被動等待 audit，詳 `docs/worklogs/2026-04-22--passive_wait_silent_fail_audit.md` §3.3 + §3.4
+
+### 🔧 健康檢查基礎設施 / Healthcheck infra
+
+- ✅ **PASSIVE-WAIT-HEALTHCHECK-1** 2026-04-22 commit `edc4a21` — 新 `helper_scripts/db/passive_wait_healthcheck.py`，單命令 READ-ONLY 檢查 7 個關鍵 pipeline（close_fills / label_backfill / exit_features_writer / phys_lock / micro_profit / trailing_stop / edge_estimates freshness）。Exit 1 = silent-dead 自動偵測。**2026-04-22 首跑結果：FAIL [4] + WARN [5][7]**（符合 P0-13/14/15 預期）。建議 operator cron 每 6h 自動跑。
+- [ ] **CLAUDE.md §七 新規則提議**：任何「被動等待 Nd/Nw」TODO 必須同步附可執行 healthcheck（通常 1 SQL/oneliner 加入 `passive_wait_healthcheck.py`）。缺此項不允許登記被動等待 TODO。
 
 ### P0-2 · LG-1 Demo 21d 觀察期 🕰️
 - **起算**：當前 PID 2217378（2026-04-18 20:13 local）
