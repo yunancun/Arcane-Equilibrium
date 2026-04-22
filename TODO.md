@@ -1,6 +1,6 @@
 # OpenClaw TODO — 工作清單
 
-**最後更新**：2026-04-22（Step 0 衍生章節收尾 · 全 5/5 ✅ 歸檔 · 20:55 CEST `--rebuild` 部署 runtime live · P1-10 下一步 (2) ma_crossover SL/TP audit 結案 · **🔴 P1-19 BACKFILL-LABELS-STALLED-1 新開**）— 當日完成 TRACK-P-V2-SWAP-1（`306993e`）+ TICK-PIPELINE-MOD-SPLIT-1（`3d67a99`）兩項；Step 0 衍生新 TODO 章節全歸檔至 `docs/archive/2026-04-22--step_0_derived_todo_batch.md`；P1-10 (2) ma_crossover SL/TP 結構 audit 完成（`docs/worklogs/2026-04-22--p1_10_ma_crossover_sl_tp_audit.md`）；**P1-19 BACKFILL-LABELS-STALLED-1**：`learning.decision_features` 24h label 速率 ≈ 0 但 `edge_estimates.json` mtime 21:56 CEST 剛寫 → backfill 分支疑 silent fail-open，blocks P1-7 C（需要 ≥1 slice 過 200 labels），派 sub-agent RCA 進行中。2026-04-21 批次歸檔至 `docs/archive/2026-04-21--completed_todo_batch.md`（14 項）。**2026-04-22 20:55 CEST `restart_all.sh --rebuild` 部署完成**（engine PID 158918；binary mtime 20:55；baseline HEAD `9fcc7d4`）— TRACK-P-V2-SWAP-1 v2 non-linear giveback + TICK-PIPELINE-MOD-SPLIT-1 首次進 runtime。
+**最後更新**：2026-04-22（Step 0 衍生章節收尾 · 全 5/5 ✅ 歸檔 · 20:55 CEST `--rebuild` 部署 runtime live · P1-10 下一步 (2) ma_crossover SL/TP audit 結案 · **P1-19 BACKFILL-LABELS-STALLED-1 RCA 結案 = duplicate of P1-10**）— 當日完成 TRACK-P-V2-SWAP-1（`306993e`）+ TICK-PIPELINE-MOD-SPLIT-1（`3d67a99`）兩項；Step 0 衍生新 TODO 章節全歸檔至 `docs/archive/2026-04-22--step_0_derived_todo_batch.md`；P1-10 (2) ma_crossover SL/TP 結構 audit 完成；**P1-19 RCA 結案**：operator 授權 psql 驗證 H3 命中（demo 24h close_fills 14/14 entry_context_id 100% 填充 → H1 證偽；backfill 7d 139→24→44→14 對齊 close_fills → H2 證偽；結論 = 策略自我收斂 fee drag 壓制入場，ONNX 訓練延後至 2026-04-28+ 由 EDGE-P2-3 PostOnly 1w 觀察決定），附帶 3 個 P2 可觀測性 TODO（RESTART-ALL-UVICORN-LOG-1 / EDGE-SCHEDULER-LEADER-1 / SCHEDULER-FAILURE-OBSERVABILITY-1）。2026-04-21 批次歸檔至 `docs/archive/2026-04-21--completed_todo_batch.md`（14 項）。**2026-04-22 20:55 CEST `restart_all.sh --rebuild` 部署完成**（engine PID 158918；binary mtime 20:55；baseline HEAD `9fcc7d4`）— TRACK-P-V2-SWAP-1 v2 non-linear giveback + TICK-PIPELINE-MOD-SPLIT-1 首次進 runtime。
 **Engine**：PID **158918** · binary mtime **2026-04-22 20:55** · baseline HEAD `9fcc7d4`（docs sync 在 `306993e` TRACK-P-V2-SWAP-1 + `3d67a99` TICK-PIPELINE-MOD-SPLIT-1 之上；二者首次進 runtime）· 22.84 MB release → **首次含** TRACK-P-V2-SWAP-1（Priority 6 v2 non-linear giveback + ExitConfig）+ TICK-PIPELINE-MOD-SPLIT-1（tick_pipeline impl 3-way split）；前一 binary 2026-04-21 20:44 baseline `f128af5` 首次含的 TRACK-P-T4-WIRING-1 / EDGE-P2-3 Phase 2+ (b) PostOnly / DECISION-OUTCOMES backfill fix / EXIT-FEATURES-SPLIT / ON-TICK-SPLIT / CANARY-WRITER env-race / AI-SERVICE-CLIENT env-race / TICK-PIPELINE-MOD unused-imports cleanup 皆已承襲
 **Python uvicorn**：PID **158973**（4 workers）· 2026-04-22 20:55 CEST `--rebuild` 隨 engine 一併重啟 · 仍含 P0-12 LIVE-GATE-FALLBACK-1 + E5-FN-3 AnalystAgent pilot + PIPELINE-SLOT-1 Phase 4 daemon-thread trigger（無 Python 側改動）
 **Post-deploy 24h 觀察**：`helper_scripts/v2_swap_24h_observation.sh` Linux PID **166383** 跑到 **2026-04-23 21:16 CEST**；每小時採 engine_watchdog + `phys_lock` 計數（total/gate4_giveback/gate4_stale_roc_neg）+ edge_estimates populate 狀態 + PID drift 檢查；log `/tmp/openclaw/v2_swap_24h_observation.log`（`ssh trade-core 'tail -50 <path>'` 可查進度）；結束後 operator / 下次 session review 結果 + 跑 SQL fills 分布（ad-hoc template 在 script header comment block，`ts_ms >= 1776885391000`）；異常中止用 `ssh trade-core 'pkill -f v2_swap_24h_observation.sh'`。
@@ -163,45 +163,19 @@ git status && git log --oneline -5
 ### ✅ P1-5 · DEMO-REBOOT-PNL-RESET-1 2026-04-20 commit `7cda4e4`（歸檔 §7）
 - `peak_balance` 持久化（V018 `trading.paper_state_checkpoint`）+ restore clamp `max(restored, current)` + `reset_drawdown_baseline` IPC。封死「重啟洗 drawdown」fail-closed 繞過路徑。demo row `peak_balance=948.85` 已寫入；worklog `docs/worklogs/2026-04-20--p1_5_a2_drawdown_continuity_implementation.md`。
 
-### 🔴 P1-19 · BACKFILL-LABELS-STALLED-1 — `learning.decision_features` 24h label 速率 ≈ 0
+### ✅ P1-19 · BACKFILL-LABELS-STALLED-1 — 結案 2026-04-22（duplicate of P1-10）
 
-- **現象**（2026-04-22 22:10 CEST `phase1a_c_readiness.py --engine-mode demo` 驗證）：
-  - 最大 slice `demo grid_trading BLURUSDT` **47/200**，與 2026-04-19 原始值同（3 天 0 成長）
-  - 39 個 slice 中 **35 個 24h rate = 0**；剩 4 個皆 1-4 labels/24h（CL/MET/基於 grid/ma 等邊緣 symbol）
-  - **vs edge_estimator_scheduler JS 分支活著**：`settings/edge_estimates.json` mtime = **2026-04-22 21:56 CEST**（剛寫）
-- **設計提醒**：`edge_estimator_scheduler.py::_run_cycle` 每小時跑 `backfill_labels(mode)` **再** 跑 JS；**fail-open 不阻斷另一條**（per 2026-04-19 commit `23b14ef`） → JS 正常 ≠ backfill 正常
-- **潛在根因假設**（待 RCA 驗）：
-  1. `backfill_labels` 分支靜默 skip／exception 被 fail-open 吸收 → **最可能**
-  2. FILL-CONTEXT-LINKAGE-1 `bd45e90`（2026-04-19）的 `signal_context_id` 寫入鏈被 2026-04-21/22 兩次 `--rebuild` 破壞（僅邏輯性可能，非手動調整）
-  3. demo 24h 新 fills 已大幅下降（P1-10 fee drag 抑制入場 → 沒 fills 可 label）— 非 pipeline bug，是上游資料乾枯
-  4. `edge_estimator_scheduler.py` daemon thread 在 rebuild 後未正確重啟，但 JS 有某個獨立入口仍跑（非日常 scheduler path）
-- **blocks**：P1-7 C run_training_pipeline.py grid_trading 首跑（直到 ≥1 slice 過 200 labels）
-- **不 block Live**：Live gate 獨立於學習管線
-- **RCA 範圍限制**：
-  - READ-ONLY — 不動 code、不動 TOML、不動 scheduler runtime
-  - **不** 跑 psql 查生產 DB（需 operator 明確授權；本 TODO 的驗證查詢在 "驗證腳本" 一節備查）
-  - **可** ssh trade-core 讀 `/tmp/openclaw/*.log` + tail uvicorn log + 代碼路徑追蹤
-- **下一步**：派 sub-agent 做 RCA（2026-04-22 派出），產出 `docs/worklogs/2026-04-22--backfill_labels_stalled_rca.md` 列 5 個排序假設 + 具體 file:line 驗證點 + 需 operator 動手的查詢清單（帶 SQL 範本）
-- **驗證腳本模板**（operator 明確授權 prod DB read 後）：
-  ```sql
-  -- Q1: demo 24h fills — 驗 H3 「資料乾枯」
-  SELECT engine_mode, COUNT(*) AS fills_24h FROM trading.fills
-  WHERE ts_ms > extract(epoch from now() - interval '24 hours')*1000
-  GROUP BY 1;
+**判決**：不是 pipeline bug，是上游 P1-10 STRATEGY-ASYMMETRY-1 的症狀。RCA worklog `docs/worklogs/2026-04-22--backfill_labels_stalled_rca.md` §7-§9。
 
-  -- Q2: 48h backfill writes — 驗 H1「backfill 分支掛了」
-  SELECT DATE_TRUNC('hour', label_filled_at) AS hr, COUNT(*) AS rows
-  FROM learning.decision_features
-  WHERE label_net_edge_bps IS NOT NULL AND label_filled_at > now() - interval '48 hours'
-  GROUP BY 1 ORDER BY 1;
+**實證驗證**（2026-04-22 22:15 CEST operator 授權跑 psql）：
+- demo 24h close_fills = 14，**entry_context_id 100% 填充（14/14）** → **H1 證偽**（FILL-CONTEXT-LINKAGE-1 Rust 鏈健康）
+- backfill 實寫 7d timeline：139 → 24 → 44 → 14，線性對齊 close_fills → **H2 證偽**（無 silent fail-open）
+- demo close_fills 4 日軌跡 199 → 31 → 54 → 14（2026-04-19 起每日 85% 驟降）→ **H3 命中**（策略自我收斂，fee drag + MICRO-PROFIT-FIX-1 narrow-band 壓制入場）
+- 按當前 14 labels/day/2 主 slice 速率，BLURUSDT 47→200 需 **~22 天**（非原估 3-5d）
 
-  -- Q3: signal_context_id 接線狀態 — 驗 H2「FILL-CONTEXT-LINKAGE-1 破」
-  SELECT COUNT(*) FILTER (WHERE entry_context_id IS NOT NULL) AS with_ctx,
-         COUNT(*) AS total
-  FROM trading.fills
-  WHERE ts_ms > extract(epoch from now() - interval '24 hours')*1000
-    AND engine_mode = 'demo';
-  ```
+**連帶 P1-7 C 影響**：ONNX 訓練延後至 **2026-04-28+**（由 P1-10 EDGE-P2-3 PostOnly 1w 觀察結果決定入場量是否回升）。P1-7 C 進入被動等待，無獨立 unblock 路徑。
+
+**附帶產出**（3 個 P2 可觀測性 TODO，獨立於 H3 判決）：見 §P2 新增項 RESTART-ALL-UVICORN-LOG-1 / EDGE-SCHEDULER-LEADER-1 / SCHEDULER-FAILURE-OBSERVABILITY-1。
 
 ### P1-6 · DEMO-BYBIT-SYNC-ORPHAN-1 — bybit_sync 倉位策略動不了 + Demo 死循環殘留
 - **現象**：6 個 owner_strategy=bybit_sync（DOTUSDT/NEARUSDT/BLESSUSDT/ENAUSDT/AAVEUSDT/BTCUSDT）非本輪策略開
@@ -360,6 +334,11 @@ git status && git log --oneline -5
 ---
 
 ## 🟢 P2 — 下週 / Live Gate / QoL
+
+### 可觀測性（P1-19 RCA 副產品，2026-04-22 新開）
+- [ ] **RESTART-ALL-UVICORN-LOG-1** — `helper_scripts/restart_all.sh:220` uvicorn 啟動無 stdout 重定向，`/tmp/openclaw/api.log` mtime 停在 2026-04-19（3 天無更新）。修：加 `> "$DATA_DIR/api.log" 2>&1` 對齊 engine 寫法（`:200`）。~0.5d。
+- [ ] **EDGE-SCHEDULER-LEADER-1** — uvicorn `--workers 4` 每 worker 跑一份 `EdgeEstimatorScheduler` daemon（module global `_scheduler=None` 在每個 process 獨立）→ 4 份同時 UPDATE `learning.decision_features`（PG MVCC 容忍但浪費）。修：加 env `OPENCLAW_SCHEDULER_LEADER=1`，只讓 worker 0 跑 scheduler。~1d。
+- [ ] **SCHEDULER-FAILURE-OBSERVABILITY-1** — `edge_estimator_scheduler._run_cycle` fail-open 的 `logger.warning` 寫 stdout（而非可 SQL 查的表），將來類似 silent fail 需追 log 才能看。修：失敗寫 `learning.scheduler_runs` 或 `engine_events`，operator GUI 可查。~0.5d。
 
 ### Live Gate
 - [ ] **LG-2** H0 Gate blocking 驗證（shadow → blocking, W23）

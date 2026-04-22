@@ -294,4 +294,86 @@ curl -s http://localhost:8000/api/v1/learning/edge-estimator/status | jq .
 - uvicorn `--workers 4` + 每 worker 獨立 scheduler 在 singleton 語義上有歧義（`_scheduler = None` module global 在每個 process 獨立），拆 P2 TODO `EDGE-SCHEDULER-LEADER-1`
 - scheduler fail-open 的 `logger.warning` 寫不出到可 query 表（engine_events 或 scheduler_runs），拆 P2 TODO `SCHEDULER-FAILURE-OBSERVABILITY-1`
 
+---
+
+## 7. 驗證執行結果（2026-04-22 22:15 CEST · operator 直接授權跑 psql）
+
+實測 SQL 於 `trade-core` PG `trading_ai`（`trading.fills.ts` 是 `timestamptz` 非 `ts_ms` — 原 spec 用 `ts_ms` 過濾寫錯，本實跑改 `ts > now() - interval '24 hours'`）：
+
+### 7.1 Q1 修正版：24h fills by engine_mode
+
+| engine_mode | fills_24h | close_fills_24h |
+|---|---:|---:|
+| demo | **28** | **14** |
+
+live_demo / paper / demo_archive_20260418 24h 全 0（符合 authorization.json 未簽 + PAPER-DISABLE-1 + fresh_start 歸檔）。
+
+### 7.2 Q3 修正版：demo 24h close fills 的 entry_context_id 填充率
+
+| engine_mode | with_ctx | null_ctx | total |
+|---|---:|---:|---:|
+| demo | **14** | **0** | 14 |
+
+**→ H1 完全證偽**：FILL-CONTEXT-LINKAGE-1 Rust 鏈健康，**100% close fills 帶 entry_context_id**（實得 14/14，非預期「可能大幅 NULL」）。
+
+### 7.3 Q2 修正版：7 天 fills 分佈 + close ctx 填充
+
+| day | engine_mode | all_fills | close_fills | close_with_ctx |
+|---|---|---:|---:|---:|
+| 2026-04-22 | demo | 28 | 14 | **14** |
+| 2026-04-21 | demo | 114 | 54 | **52** |
+| 2026-04-20 | demo | 60 | 31 | **29** |
+| 2026-04-19 | demo | **426** | **199** | **193** |
+| 2026-04-19 | live_demo | 19 | 8 | 8 |
+| 2026-04-19 | paper | 102 | 46 | 46 |
+| 2026-04-18 | demo | 15 | 5 | 5 |
+| 2026-04-18 | demo_archive_20260418 | 1418 | 689 | 683 |
+| 2026-04-18 | live_demo | 961 | 465 | 465 |
+
+### 7.4 Q2（backfill 7d 出 rows）：label 實寫時序
+
+| day | rows |
+|---|---:|
+| 2026-04-19 | 139 |
+| 2026-04-20 | 24 |
+| 2026-04-21 | 44 |
+| 2026-04-22 | 14 |
+
+**→ H1 + H2 雙雙證偽**：backfill 實際在寫，只是量小。寫入量與當日 close_fills 高度相關（139/199 · 24/31 · 44/54 · 14/14 = 70-100% conversion rate）→ backfill pipeline 健康，無 silent fail-open。
+
+---
+
+## 8. 最終判決：H3 命中
+
+**P1-19 不是 bug，是上游 P1-10 STRATEGY-ASYMMETRY-1 的症狀**：
+
+1. 2026-04-18 晚 `fresh_start.sh` 洗 demo engine_mode（舊 fills 重命名為 `demo_archive_20260418`）→ 2026-04-19 是新 demo 第 1 天
+2. 2026-04-19 當天 426 fills (199 close) — 策略全量開倉前未被 MICRO-PROFIT-FIX-1 narrow-band + fee drag 完全壓制，backfill 成功寫 139 labels
+3. **2026-04-20 起 close fills 驟降 85% 到 31**（P1-10 結構性 fee drag / grid cooldown + ma_crossover 勝率崩潰 → 策略內部自我收斂；MICRO-PROFIT-FIX-1 narrow-band gate 濾掉更多 intent；EDGE-P2-3 PostOnly 2026-04-21 部署但 maker order 非 100% 成交率）
+4. 分 25 symbol × 2 活躍策略 ≈ 50 slice，每天 14-54 close fills 分散 → 每 slice 平均每天 0.3-1 labels → 最大 slice BLURUSDT 47/200 對應前 3d 累積不動
+5. 按當前速率 `14 labels/day / 2 dominant slice = 7 labels/day/slice`，BLURUSDT 到 200 需 **~22 天**，遠超原 ETA 78h 樂觀估計
+
+**H1 證偽依據**：demo 24h 100% close fills 帶 entry_context_id；7 天 close_with_ctx/close_fills = 93-100%。兩次 `--rebuild` 後 Rust 鏈完好。
+
+**H2 證偽依據**：backfill 每日實際寫入 14-139 rows，數字與 close_fills 線性相關，不是 silent fail-open。
+
+**H4 / H5 無法驗也不需要**：H3 已解釋全部現象。
+
+---
+
+## 9. P1-19 結案建議
+
+**關閉為 "duplicate of P1-10 EDGE-P2-3 observation window"**：
+- Pipeline 無 bug，不需修 code
+- 真正治理入口 = 等 EDGE-P2-3 PostOnly 在 demo/paper 觀察 ≥1w（TODO P2 §EDGE-P2-3 Phase 2+ (c) 追蹤中）後看 maker 成交率是否拉高入場量
+- 若 1w 後 close_fills 無回升 → 升級 P1-10 為 "critical"，重評 MICRO-PROFIT-FIX-1 narrow-band threshold（2026-04-17 commit `cb2e3a4` 值 `ratio ≥ 0.20 & pnl ∈ [0.30%, 0.55%]`）是否過緊
+- ONNX 訓練延後：P1-7 C 進入 **non-ownership 被動等待期**，與 P0-2 21d 並跑；最早 unblock 時間由 P1-10 觀察結果決定（預估 2026-04-28+）
+
+**不結案的附帶價值**（獨立於 H3 判決）：
+- **RESTART-ALL-UVICORN-LOG-1** P2 新 TODO：`restart_all.sh:220` uvicorn 無 stdout redirect，`/tmp/openclaw/api.log` mtime 2026-04-19 停更（此事實在本 RCA §2.H2 發現，與 H2 判決無關仍值得修）— 可觀測性基礎建設 0.5 日
+- **EDGE-SCHEDULER-LEADER-1** P2 新 TODO：uvicorn `--workers 4` 每 worker 獨立 scheduler daemon → 4 份同時 UPDATE（PG MVCC 容忍但浪費）; 加 env `OPENCLAW_SCHEDULER_LEADER=1` 只讓 worker 0 跑 scheduler — 效能 + 觀測性 ~1 日
+- **SCHEDULER-FAILURE-OBSERVABILITY-1** P2 新 TODO：scheduler fail-open 的 `logger.warning` 寫到 engine_events 表而非 stdout → 將來類似 silent fail 可 SQL 查 — ~0.5 日
+
+三個 P2 TODO 獨立於本 H3 判決，**無論 P1-19 結案與否都應做**。
+
 — END —
