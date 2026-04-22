@@ -274,11 +274,23 @@ impl TickPipeline {
         // peak_pnl_pct — already maintained tick-by-tick on PaperPosition.
         let peak_pnl_pct = Some(snap.max_favorable_pnl_pct);
 
-        // atr_pct — reuses PriceHistoryTracker; None until ≥ min_samples.
+        // P0-13 Option F (2026-04-22): atr_pct now from kline 1m OHLCV +
+        // Wilder's 14-period ATR to match position-life scale (~0.05-0.5%),
+        // replacing per-tick micro-volatility from `compute_atr_pct`. Keep
+        // close-time row and tick-time ExitFeatures on the same atr scale so
+        // replay / audit / phys_lock decisions stay consistent pre/post fix.
+        // P0-13 Option F（2026-04-22）：atr_pct 改用 kline 1m OHLCV +
+        // Wilder's 14-period ATR 對齊持倉期尺度（~0.05-0.5%），與 tick-time
+        // ExitFeatures 同源，保持 replay / audit / phys_lock 一致性。
         let atr_pct = self
-            .price_tracker
-            .compute_atr_pct(symbol)
-            .map(|v| v as f32);
+            .kline_manager
+            .get_ohlcv(symbol, "1m", Some(20))
+            .and_then(|o| {
+                openclaw_core::indicators::atr(
+                    &o.high, &o.low, &o.close, 14,
+                )
+            })
+            .map(|r| r.atr_percent as f32);
 
         // current_pnl_pct at exit (side-signed, in %). Used to derive the
         // normalized giveback. If entry_price was zero we'd have returned early
