@@ -545,4 +545,44 @@ fn default_giveback_floor()    -> f64 { 0.3 }        // Gate 4a ← grid search 
 
 ---
 
+## Appendix C — 並行 sub-audit：ma_crossover `trailing_distance_pct` sensitivity（2026-04-22 新增）
+
+**動機**：P1-10 下一步 (2) ma_crossover SL/TP audit（`docs/worklogs/2026-04-22--p1_10_ma_crossover_sl_tp_audit.md`）發現 demo `trailing_distance_pct=3.5` 相對 ma_crossover 典型 move size（ATR ~1-1.5%）過寬，假設為 2026-04-20 R1 win rate 64%→37.8% 崩潰主因。該參數屬 `risk_checks.rs` trailing stop 邏輯，**與 `ExitConfig` v2 non-linear giveback 正交**。
+
+**範圍隔離**：
+- 主 audit（§1-§11）：`ExitConfig` 三參數 `base/slope/floor` grid search，**不動 trailing**
+- Sub-audit（本 Appendix）：trailing_distance_pct 單參數 scan，**不動 ExitConfig**
+- 兩者共用 7d demo replay 資料集（§2.1）但 simulate fn 分離：主用 `simulate_phys_lock_v2()`，sub 用新 `simulate_trailing_stop()` 呼 既有 `risk_checks::check_position_on_tick` 的 trailing 分支
+
+**Axis**：`trailing_distance_pct ∈ {2.0, 2.5, 3.0, 3.5}`（4 值 · 含當前 demo=3.5 baseline + 對齊 live/paper 的 2.0 + 中間點）
+
+**其他固定**（所有 4 值共用，取 demo TOML 現值）：
+```
+trailing_activation_pct = 0.8
+trailing_min_rr         = 0.3
+stop_loss_max_pct       = 25.0
+base_ratio              = 0.4
+cap_ratio               = 0.85
+atr_stop_mult           = 2.0
+```
+
+**評估**：
+- `ma_crossover_win_rate`（pnl > 0 ÷ total exits）— 主 signal，看是否從 37.8% 回升
+- `mean_per_rt_usdt` · `median_per_rt_usdt` — 是否犧牲平均收益換取勝率
+- `trailing_stop_trigger_count` vs `strategy_close:ma_reverse_cross` count — 比較兩條 exit path 的相對觸發率
+- `asym_ratio`（|mean_loss| / mean_win）— 與 2026-04-20 R1 baseline 0.88 比較
+
+**判決 gate**：類同主 audit §7.0 的 A/B/C/D 四條 — 但縮小 scope 至 ma_crossover · demo 單策略單 engine_mode，Bonferroni correction α=0.05/4=0.0125。
+
+**執行時點**：與主 audit 同 session（2026-04-29+），可於主 audit 跑完 grid 後併行 sub-audit scan；~~不~~ 作為主 audit 的前置（互相獨立）。
+
+**Non-goal**：
+- 不調 `trailing_activation_pct`（單 axis 保純淨）
+- 不跨策略（ma_crossover only）
+- 不改 live/paper TOML（只驗 demo）
+
+**資料驅動的前提**：主 audit 確認 v2 `ExitConfig` 三參數穩定後，再獨立驗 trailing scan — 避免兩者交互作用污染結論。若主 audit 結論先改了 `ExitConfig`，sub-audit 需 rebaseline 後重跑。
+
+---
+
 **EOF — spec 完成，未執行。實際 audit 最早 2026-04-29 進行。**
