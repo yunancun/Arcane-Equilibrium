@@ -34,18 +34,21 @@ git status && git log --oneline -5
 
 ## 🔴 P0 — 阻塞 Live Gate 關鍵路徑
 
-### 🔴 P0-13 · EXIT-FEATURES-UNIT-BUG-1 — `builder.rs:110` giveback_atr_norm 放大 100x
+### 🔴 P0-13 · ATR-SCALE-BUG-1 — `compute_atr_pct` per-tick 尺度誤為持倉期尺度（2026-04-22 深度追查 reframed）
 
-- **現象**：`learning.exit_features` 7d 110 rows avg `giveback_atr_norm = 364.85`；正確值應 ~3.0（100x 放大）
-- **Code**：[`builder.rs:110`](rust/openclaw_engine/src/exit_features/builder.rs:110) `Some((gb / atr) as f32)` 中 `gb` 單位 %（e.g. 2.33=2.33%），`atr` 單位 decimal（e.g. 0.0077=0.77%），ratio 放大 100x
-- **影響**：
-  - Gate 3（`peak_pnl_pct / atr_pct >= min_peak_atr_norm=0.5`）永遠 ≥100，原意「過濾 shallow peak」失效
-  - Gate 4a（`gb_norm >= threshold ∈ [0.3, 1.0]`）若 Gate 1 過，giveback=364 立刻 Lock → **mass close winners 災難風險**
-  - 當前被 P0-14 掩蓋（Gate 1 永遠 Hold）
-- **Fix scope**：1 行改 `peak_pnl_pct / 100.0` 或 `atr * 100.0` 統一單位 + 4-5 regression tests（`builder.rs` 單測新增 real-scale inputs 如 peak=2.33 atr=0.0077 expect_gb=~3.0）
-- **必須**與 P0-14 一起部署：單修 P0-14 讓 Gate 1 過 → Gate 4a mass close
-- **預估**：~4h code + `--rebuild`
-- 觸發：2026-04-22 被動等待 audit，詳 `docs/worklogs/2026-04-22--passive_wait_silent_fail_audit.md` §3.1
+- **現象**：`learning.exit_features` 實測 `atr_pct` 0.001-0.006 量級（percent-as-number 但 per-tick 尺度）→ `giveback_atr_norm` 放大 100-1000x（DB avg 364.85）
+- **原 diagnosis 誤判**：以為是「單位 bug（gb% ÷ atr-decimal）」可 1 行 fix。**實際是尺度 bug**：`compute_atr_pct`（[`price_tracker.rs:105`](rust/openclaw_core/src/risk/price_tracker.rs:105)）返回「連續 tick abs return 平均 × 100」= **per-tick percent-as-number**，而非持倉期 ATR
+- **跨 consumer 影響**：
+  - `compute_dynamic_stop_pct`：`atr_stop = atr × 2 = 0.002` < base_stop=10 → 永遠 fallback base（**DYNAMIC STOP 7d 1 次證實**）
+  - `build_exit_features_for_tick` / `build_exit_feature_row`：giveback 放大 100-1000x
+  - `exit_features/v2.rs` Gate 3 `peak / atr >= 0.5`：atr 過小永遠過 → 「過濾 shallow peak」功能失效
+- **Fix scope 重估**：
+  - 原 4h 1-line fix 不成立
+  - 需 **ATR 語義決策**（Option A 新 fn `compute_atr_14period` / Option B builder 端乘 holding_period tick count / Option C 全部 gate 閾值 recalibrate）
+  - 推薦 Option A，預估 2-3d work chain：ATR design doc → Rust 新 fn → 多 consumer 遷移 → 閾值 recalibrate → regression + end-to-end tests → counterfactual spec 同步
+- **必須**與 P0-14 一起部署（不然單修 P0-14 讓 Gate 1 過 → Gate 4a 立刻 mass close）
+- **P0-13 本 session 不 autonomously fix**：等 operator 拍板 Option A/B/C
+- 觸發：2026-04-22 被動等待 audit，詳 `docs/worklogs/2026-04-22--passive_wait_silent_fail_audit.md` **§3.0**（深度追查取代原 §3.1）
 
 ### 🔴 P0-14 · EDGE-ESTIMATES-MISS-1 — T4 closure `est_net_bps` 99.1% NULL
 
