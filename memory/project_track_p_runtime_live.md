@@ -1,6 +1,6 @@
 ---
-name: Track P 物理層 runtime live（2026-04-21 T4 接線 + 2026-04-22 V2 SWAP 完成；runtime 部署未執行）
-description: DUAL-TRACK-EXIT-1 Track P Phase 1b 全鏈代碼 live — T4 builder 接線（`e95c779` 2026-04-21）+ V2 SWAP（`306993e` 2026-04-22）完成，Priority 6 呼 `physical_micro_profit_lock_v2` + `ExitConfig`；v1 linear pure fn + `PhysLockConfig` + 8 v1 直測已退役；engine lib 1843 → 1835 passed（Mac + Linux release 均驗）；operator 指示先不部署，engine PID 3954769 仍跑 v1，v2 非線性 giveback 待下次 `--rebuild` 生效
+name: Track P 物理層 runtime live（2026-04-21 T4 接線 + 2026-04-22 V2 SWAP + 20:55 CEST 部署生效）
+description: DUAL-TRACK-EXIT-1 Track P Phase 1b 全鏈 runtime live — T4 builder 接線（`e95c779` 2026-04-21 20:44 部署）+ V2 SWAP（`306993e` 2026-04-22 20:55 部署）完成，engine PID 158918 Priority 6 每 tick 呼 `physical_micro_profit_lock_v2` + `ExitConfig` 非線性 giveback；v1 linear pure fn + `PhysLockConfig` + 8 v1 直測已退役；engine lib 1843 → 1835 passed（Mac + Linux release 均驗）；合法 Lock 唯二 `phys_lock_gate4_giveback` / `phys_lock_gate4_stale_roc_neg`
 type: project
 ---
 
@@ -11,13 +11,14 @@ type: project
 - 2026-04-21 晚 2：Linux audit 揭露 `tick_pipeline/on_tick.rs:1677` 硬編碼 `|_| None` → Priority 6 從未 fire，Track P 所有 commits runtime 影響 = 0（dead）。
 - 2026-04-21 晚 3：`TRACK-P-T4-WIRING-1` commit `e95c779` — `|_| None` 替換為實際 `ExitFeatures` builder closure；新 pure fn `exit_features::build_exit_features_for_tick`（查 `paper_state.position_exit_snapshot` + `price_tracker.compute_roc(300ms)` + `intent_processor.edge_estimates().get_cell`）；Mac + Linux release 均驗 engine lib 1827 → 1839 passed（+12 builder tests）。Runtime dead 狀態解除，但 Priority 6 仍呼 v1 linear `physical_micro_profit_lock` + `PhysLockConfig`。
 - 2026-04-21 20:44 CEST：`restart_all.sh --rebuild` 部署（baseline commit `f128af5`，engine PID 3954769）— T4 接線首次進 runtime，Priority 6 v1 linear 開始 per-tick 評估。
-- 2026-04-22：`TRACK-P-V2-SWAP-1` commit `306993e` — Priority 6 改呼 v2 `physical_micro_profit_lock_v2` + `ExitConfig`；`RiskConfig.phys_lock: PhysLockConfig` → `RiskConfig.exit: ExitConfig`（`#[serde(alias = "phys_lock")]` 保 TOML 相容）；v1 pure fn + `PhysLockConfig` struct + 8 個 v1 直測整塊退役（v2 在 `exit_features/v2.rs` 已有 25 等值單測）；Mac debug + Linux release `cargo test -p openclaw_engine --lib` 均 **1835 / 0 failed**（1843 baseline − 8 退役 v1 直測 = 1835，精確對帳）。**Runtime 部署未執行**（operator 指示先不部署），engine PID 3954769 仍跑 v1 linear。
+- 2026-04-22：`TRACK-P-V2-SWAP-1` commit `306993e` — Priority 6 改呼 v2 `physical_micro_profit_lock_v2` + `ExitConfig`；`RiskConfig.phys_lock: PhysLockConfig` → `RiskConfig.exit: ExitConfig`（`#[serde(alias = "phys_lock")]` 保 TOML 相容）；v1 pure fn + `PhysLockConfig` struct + 8 個 v1 直測整塊退役（v2 在 `exit_features/v2.rs` 已有 25 等值單測）；Mac debug + Linux release `cargo test -p openclaw_engine --lib` 均 **1835 / 0 failed**。
+- 2026-04-22 20:55 CEST：`ssh trade-core "cd ~/BybitOpenClaw/srv && bash helper_scripts/restart_all.sh --rebuild"` 部署完成 — engine PID 3954769 → **158918**（uvicorn 158973 隨 rebuild 同期重啟）；binary mtime 2026-04-21 20:44 → **2026-04-22 20:55**；baseline HEAD `9fcc7d4`（docs sync 在 `306993e` + `3d67a99` 上，二者 runtime 首次生效）；Priority 6 v2 non-linear giveback 即時 fire。
 
-**TL;DR**：代碼層面 Track P 全鏈 live（T4 + V2）；runtime 層面 v1 linear 已在跑（2026-04-21 起），v2 non-linear 待下次 `--rebuild` 生效。v1 ↔ v2 reason-string ABI 完全一致，無下游影響。
+**TL;DR**：代碼 + runtime 全鏈 live。Priority 6 每 tick 呼 v2 非線性 giveback (`max(1.0 − 0.15 × peak_atr_norm, 0.3)`)；edge_estimates 冷啟動期 Gate 1 全 Hold（預期 fail-safe，1 小時 scheduler 刷新後逐步解鎖）。v1 ↔ v2 reason-string ABI 完全一致，下游 parse 零改。
 
-## 當前 runtime 狀態（engine PID 3954769，binary mtime 2026-04-21 20:44）
+## 當前 runtime 狀態（engine PID **158918**，binary mtime **2026-04-22 20:55**）
 
-**Priority 6 call chain（v1 linear 版）**：
+**Priority 6 call chain（v2 non-linear 版）**：
 ```rust
 // tick_pipeline/on_tick/step_6_risk_checks.rs (T4 接線)
 let exit_features_fn = |row: &PositionRow| -> Option<ExitFeatures> {
@@ -29,10 +30,10 @@ let exit_features_fn = |row: &PositionRow| -> Option<ExitFeatures> {
     Some(build_exit_features_for_tick(&snap, row.current_price, row.atr_pct,
                                        price_roc_short, est_net_bps, tick_ts_ms))
 };
-// risk_checks.rs Priority 6（pre-V2-SWAP）
+// risk_checks.rs Priority 6（post-V2-SWAP）
 if let Some(features) = exit_features {
     if let PhysicalDecision::Lock(reason) =
-        physical_micro_profit_lock(features, &config.phys_lock)  // v1 linear
+        physical_micro_profit_lock_v2(features, &config.exit)  // v2 non-linear
     { return RiskAction::ClosePosition(format!("risk_close:{}", reason)); }
 }
 ```
@@ -41,26 +42,23 @@ if let Some(features) = exit_features {
 
 **edge_estimates 冷啟動**：`is_populated()=false` → `est_net_bps=None` → v1 Gate 1 `None → Hold`（保守 fail-safe；Phase 5 edge 收斂後自然解鎖）。
 
-## 部署後（`--rebuild`）切換 v2 的 runtime 差異
+## v2 vs v1 runtime 差異（2026-04-22 20:55 起 runtime 為 v2）
 
-| 維度 | v1 linear（當前 runtime） | v2 non-linear（代碼已合） | 部署後觀察點 |
-|---|---|---|---|
-| Gate 1 邊界 | `edge < floor` → Hold | `edge <= floor` → Hold | edge 剛好等於 floor 的 position 會被擋更久 |
-| Gate 4a 閾值 | 固定 `0.7` | `max(1.0 − 0.15 × peak_atr_norm, 0.3)` | 高 peak 倉鎖得更快（peak_atr_norm=5 → 閾值 0.3 vs v1 0.7）；淺 peak 倉鎖得更慢（peak_atr_norm=0 → 閾值 1.0 vs v1 0.7） |
-| Gate 4b 邊界 | `dt > stale_peak_ms` | `dt >= stale_peak_ms` | 剛滿時間窗且 ROC 負的 position 會被鎖 |
+| 維度 | v1 linear（2026-04-21 20:44 ~ 2026-04-22 20:54 短窗） | v2 non-linear（2026-04-22 20:55 ~ 當前） |
+|---|---|---|
+| Gate 1 邊界 | `edge < floor` → Hold | `edge <= floor` → Hold（等於 floor 也擋） |
+| Gate 4a 閾值 | 固定 `0.7` | `max(1.0 − 0.15 × peak_atr_norm, 0.3)`（高 peak 更快鎖、淺 peak 更慢鎖） |
+| Gate 4b 邊界 | `dt > stale_peak_ms` | `dt >= stale_peak_ms`（剛滿即擋） |
 
 整體方向符合 DUAL-TRACK-EXIT-1 §三 L108-111「防微利即套離場、追求最高單筆 close 盈利」。
 
-## 部署動作（operator 決定何時執行）
+## 部署後觀察點（24h）
 
-```bash
-ssh trade-core "cd ~/BybitOpenClaw/srv && bash helper_scripts/restart_all.sh --rebuild"
-```
-
-部署後建議 24h 內看 `trading.fills.exit_reason LIKE 'risk_close:phys_lock_gate4_%'` 分布：
-- 若 `gate4_giveback` 比例明顯上升（高 peak 倉更快鎖）→ v2 non-linear 生效。
-- 若 `gate4_stale_roc_neg` 比例上升 → 邊界 `>=` 效應（通常佔比小）。
-- fee/edge 無顯著惡化即接受。
+建議看 `trading.fills.exit_reason LIKE 'risk_close:phys_lock_gate4_%'` 分布：
+- 若 `gate4_giveback` 比例明顯上升（高 peak 倉更快鎖）→ v2 非線性生效；
+- 若 `gate4_stale_roc_neg` 比例上升 → 邊界 `>=` 效應（通常佔比小）；
+- fee/edge 無顯著惡化即接受；
+- **冷啟動期（1h 內）**：`edge_estimates` `is_populated=false` → `est_net_bps=None` → Gate 1 全 Hold；等 scheduler 刷新（整點觸發）後逐步解鎖。
 
 ## 代碼結構（post-V2-SWAP）
 
