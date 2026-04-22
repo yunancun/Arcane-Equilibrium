@@ -94,14 +94,47 @@ impl PriceHistoryTracker {
         }
     }
 
-    /// Compute ATR as percentage of current price using consecutive returns.
-    /// 使用連續回報計算 ATR（佔當前價格的百分比）。
+    /// Compute "ATR" as average of consecutive-tick absolute returns × 100.
+    /// 以連續 tick 絕對回報平均 × 100 計算 "ATR"。
+    ///
+    /// # ⚠️ DEPRECATED for position-life ATR use (P0-13, 2026-04-22)
+    ///
+    /// This function returns **per-tick micro-volatility**（~0.001-0.006%
+    /// scale），NOT position-life ATR（~0.5-2% scale）。The name "atr_pct"
+    /// misled three downstream consumers（`compute_dynamic_stop_pct`,
+    /// `build_exit_features_for_tick`, `physical_micro_profit_lock_v2`）into
+    /// reading it as holding-period ATR, producing 100-1000x scale errors.
+    /// See `docs/worklogs/2026-04-22--p0_13_atr_scale_qc_research.md`.
+    ///
+    /// **For position-life ATR, use**：
+    /// ```ignore
+    /// kline_manager.get_ohlcv(symbol, "1m", Some(20))
+    ///     .and_then(|o| openclaw_core::indicators::volatility::atr(
+    ///         &o.high, &o.low, &o.close, 14
+    ///     ))
+    ///     .map(|r| r.atr_percent)
+    /// ```
+    ///
+    /// This function is retained ONLY for consumers that genuinely want
+    /// per-tick micro-volatility (e.g. fast_track spike detection, market
+    /// activity heuristics). Do NOT use for stops, exits, or any
+    /// position-life threshold gate.
+    ///
+    /// # 已棄用於持倉期 ATR（P0-13，2026-04-22）
+    ///
+    /// 本函式回傳**每 tick 微波動度**（~0.001-0.006% 尺度），**不是**持倉期 ATR
+    /// （~0.5-2%）。名稱 "atr_pct" 誤導下游三個 consumer 當持倉期 ATR 用，造成
+    /// 100-1000x 尺度錯誤。改用上述 `indicators::volatility::atr` on kline OHLC。
     ///
     /// Returns `None` if insufficient samples.
     /// 樣本不足時回傳 `None`。
-    ///
-    /// Method: average absolute return between consecutive observations.
-    /// 方法：連續觀測值之間的平均絕對回報。
+    #[deprecated(
+        since = "2026-04-22",
+        note = "Returns per-tick micro-volatility (~0.001-0.006% scale), NOT \
+                position-life ATR. For stops/exits use \
+                `openclaw_core::indicators::volatility::atr` on KlineManager OHLCV. \
+                See docs/worklogs/2026-04-22--p0_13_atr_scale_qc_research.md."
+    )]
     pub fn compute_atr_pct(&self, symbol: &str) -> Option<f64> {
         let deque = self.history.get(symbol)?;
         if deque.len() < self.min_samples {

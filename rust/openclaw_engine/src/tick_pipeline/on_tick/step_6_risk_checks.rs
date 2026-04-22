@@ -82,6 +82,31 @@ impl TickPipeline {
                     .get(&p.symbol)
                     .copied()
                     .unwrap_or(p.entry_price);
+                // P0-13 Option F (2026-04-22): atr_pct now sourced from kline
+                // 1m OHLCV + Wilder's 14-period ATR (via
+                // `openclaw_core::indicators::volatility::atr`) instead of
+                // `PriceHistoryTracker::compute_atr_pct` which returned per-tick
+                // micro-volatility (~0.001-0.006% scale) and broke position-life
+                // semantics for both `compute_dynamic_stop_pct` (never exceeded
+                // base stop) and `physical_micro_profit_lock_v2` Gate 3/4a
+                // (giveback inflated 100-1000x). Kline ATR gives ~0.05-0.5%
+                // scale matching trader intuition and ExitConfig seed values.
+                // Cold-start 15 min after restart returns None (< 15 bars) →
+                // downstream Gates Hold conservatively (same as previous None).
+                // P0-13 Option F（2026-04-22）：atr_pct 改用 kline 1m OHLCV +
+                // Wilder's 14-period ATR，取代 per-tick micro-volatility 的
+                // compute_atr_pct（~0.001-0.006% 尺度）；新來源 ~0.05-0.5%
+                // 吻合交易員直覺與 ExitConfig seed。Cold-start 首 15 min 返
+                // None（< 15 bars），下游 Gates 保守 Hold 與原行為一致。
+                let atr_pct = self
+                    .kline_manager
+                    .get_ohlcv(&p.symbol, "1m", Some(20))
+                    .and_then(|o| {
+                        openclaw_core::indicators::atr(
+                            &o.high, &o.low, &o.close, 14,
+                        )
+                    })
+                    .map(|r| r.atr_percent);
                 crate::position_risk_evaluator::PositionRow {
                     symbol: p.symbol.clone(),
                     is_long: p.is_long,
@@ -90,7 +115,7 @@ impl TickPipeline {
                     entry_ts_ms: p.entry_ts_ms,
                     peak_price: p.best_price,
                     current_price,
-                    atr_pct: self.price_tracker.compute_atr_pct(&p.symbol),
+                    atr_pct,
                     fee_rate: self.intent_processor.fee_rate(&p.symbol),
                     regime: self.derive_regime(self.latest_indicators.get(&p.symbol)),
                     consecutive_losses: self
