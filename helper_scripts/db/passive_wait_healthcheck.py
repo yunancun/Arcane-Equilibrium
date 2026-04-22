@@ -182,15 +182,48 @@ def check_edge_estimates_freshness() -> tuple[str, str]:
         return ("FAIL", f"edge_estimates.json age {age_min:.0f} min — scheduler 可能掛了")
     if age_min > 65:
         return ("WARN", f"edge_estimates.json age {age_min:.0f} min — 略過 hourly 節奏")
-    # 補充: est_net_bps 填充率（P0-14 指標）
+    # P0-14 RCA 2026-04-22 修正：JSON 是 flat map（key = "{strategy}::{symbol}"），不是
+    # 「cells array」。原 `.get("cells", [])` 永遠回 [] 空。改成 flat map 遍歷，並同時
+    # 計算 strategy prefix 分布（驗 H4 — `bybit_sync` / `orphan_*` / `dust_*` 等
+    # runtime owner_strategy 是否有對應 cell）。
+    # P0-14 RCA 2026-04-22 fix: JSON is a flat map (key = "{strategy}::{symbol}")
+    # not a "cells array". The old `.get("cells", [])` always returned []. This
+    # walks the flat map and also breaks down by strategy prefix to verify H4
+    # (whether runtime owner_strategy values — bybit_sync / orphan_* / dust_* —
+    # have matching cells at all).
     try:
-        cells = json.load(p.open()).get("cells", [])
-        populated = sum(1 for c in cells if c.get("shrunk_bps") is not None)
-        total = len(cells)
+        data = json.load(p.open())
+        # Flat map path — skip meta keys (anything starting with "_" or matching
+        # known aggregate names like "grand_mean_bps" / "generated_at").
+        meta_keys = {"grand_mean_bps", "generated_at", "n_total", "version"}
+        cell_items = {
+            k: v for k, v in data.items()
+            if isinstance(v, dict) and not k.startswith("_") and k not in meta_keys
+        }
+        total = len(cell_items)
+        populated = sum(
+            1 for v in cell_items.values() if v.get("shrunk_bps") is not None
+        )
+        # strategy prefix breakdown（用於 P0-14 H4 判斷）
+        prefixes: dict[str, int] = {}
+        for k in cell_items:
+            prefix = k.split("::", 1)[0] if "::" in k else k
+            prefixes[prefix] = prefixes.get(prefix, 0) + 1
+        prefix_summary = ",".join(f"{p}:{n}" for p, n in sorted(prefixes.items()))
         cov = populated / total if total else 0.0
+        msg = (f"edge_estimates.json age {age_min:.0f}m, "
+               f"populated {populated}/{total} ({cov:.1%}), "
+               f"prefixes[{prefix_summary or 'NONE'}]")
+        if total == 0:
+            return ("FAIL", msg + " — JSON 無 cells（scheduler first-run 或完全停寫）")
+        # H4 指紋：若 runtime 有 bybit_sync/orphan/dust 持倉但 JSON 無對應 prefix
+        known_dormant = {"bybit_sync", "orphan_adopted", "orphan_frozen", "dust_frozen"}
+        missing_dormant = known_dormant - set(prefixes.keys())
+        if missing_dormant:
+            return ("WARN", msg + f" — P0-14 H4 indicator：JSON 缺 {sorted(missing_dormant)} prefix cells")
         if cov < 0.3:
-            return ("WARN", f"edge_estimates.json age {age_min:.0f}m, populated cells {populated}/{total} ({cov:.1%}) — P0-14 low coverage")
-        return ("PASS", f"edge_estimates.json age {age_min:.0f}m, populated cells {populated}/{total} ({cov:.1%})")
+            return ("WARN", msg + " — low coverage")
+        return ("PASS", msg)
     except Exception as e:
         return ("WARN", f"edge_estimates.json age {age_min:.0f}m, parse error: {e}")
 
