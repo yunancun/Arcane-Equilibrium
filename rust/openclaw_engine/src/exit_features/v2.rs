@@ -101,6 +101,29 @@ pub struct ExitConfig {
     /// 非線性 giveback 下限 — 高 peak 時 threshold 不低於此值。Default 0.3。
     #[serde(default = "default_giveback_floor")]
     pub giveback_floor: f64,
+    /// P0-14 Option A — Gate 1 fallback bps when `est_net_bps` is `None`.
+    /// Runtime owner_strategy values for sync-label positions (bybit_sync /
+    /// orphan_* / dust_frozen) miss `edge_estimates.json` cells ~99% of the
+    /// time (per P0-14 RCA), so pre-fix Gate 1 always Held and Priority 6
+    /// never evaluated trailing for those positions. This fallback lets
+    /// operators treat missing edge as a weak prior: default `-10.0` keeps
+    /// fail-safe (still `<= min_net_floor_bps=5.0` → Hold), matching the
+    /// pre-fix conservative behavior; raise to a value `> min_net_floor_bps`
+    /// to allow sync-label positions to reach Gate 2+ before the Option B
+    /// proxy-cell fill lands. Complementary to P0-14 Option B which populates
+    /// the JSON from `grand_mean_bps` — A is the runtime safety net, B is
+    /// the source-of-truth fill.
+    /// P0-14 Option A — Gate 1 在 `est_net_bps` 為 `None` 時的 fallback bps。
+    /// Runtime sync-label 倉位（bybit_sync / orphan_* / dust_frozen）的
+    /// owner_strategy 在 `edge_estimates.json` 約 99% miss（P0-14 RCA），
+    /// 修復前 Gate 1 永遠 Hold、Priority 6 從未為這些倉位評估 trailing。
+    /// 此 fallback 讓 operator 把「邊緣缺值」視為弱先驗：預設 `-10.0` 保守
+    /// 仍 Hold（`<= min_net_floor_bps=5.0`），與修復前 fail-safe 行為一致；
+    /// 設 > `min_net_floor_bps` 則允許 sync-label 倉位在 Option B proxy
+    /// cells 填入前也進 Gate 2+。與 P0-14 Option B 用 `grand_mean_bps`
+    /// 回填 JSON 互補：A 是 runtime 兜底，B 是 source-of-truth 填補。
+    #[serde(default = "default_missing_edge_fallback_bps")]
+    pub missing_edge_fallback_bps: f64,
 }
 
 fn default_min_net_floor_bps() -> f64 {
@@ -124,6 +147,13 @@ fn default_giveback_slope() -> f64 {
 fn default_giveback_floor() -> f64 {
     0.3
 }
+fn default_missing_edge_fallback_bps() -> f64 {
+    // Conservative: stays below default `min_net_floor_bps` (5.0) so Gate 1
+    // continues to Hold for missing edge, preserving pre-fix fail-safe.
+    // 保守值：仍低於預設 `min_net_floor_bps` (5.0)，故 edge 缺值時 Gate 1
+    // 繼續 Hold，維持修復前 fail-safe 行為。
+    -10.0
+}
 
 impl Default for ExitConfig {
     fn default() -> Self {
@@ -135,6 +165,7 @@ impl Default for ExitConfig {
             giveback_base: default_giveback_base(),
             giveback_slope: default_giveback_slope(),
             giveback_floor: default_giveback_floor(),
+            missing_edge_fallback_bps: default_missing_edge_fallback_bps(),
         }
     }
 }
@@ -166,6 +197,9 @@ impl ExitConfig {
         }
         if self.giveback_floor > self.giveback_base {
             return Err("exit.giveback_floor must be <= giveback_base".into());
+        }
+        if !self.missing_edge_fallback_bps.is_finite() {
+            return Err("exit.missing_edge_fallback_bps must be finite".into());
         }
         Ok(())
     }
@@ -241,13 +275,22 @@ pub fn physical_micro_profit_lock_v2(
     cfg: &ExitConfig,
 ) -> PhysicalDecision {
     // Gate 1: est_net_bps floor — conservative Hold when edge insufficient.
+    // P0-14 Option A: when `est_net_bps` is None (sync-label / proxy-miss),
+    // substitute `missing_edge_fallback_bps` as a weak prior; default is a
+    // conservative negative value that still Holds via the floor comparison,
+    // preserving pre-fix fail-safe. Raising the fallback above the floor
+    // escalates sync-label positions to evaluate Gate 2+.
     // Gate 1：淨邊緣底線 — edge 不足時保守 Hold（防止微利即套離場）。
-    match f.est_net_bps {
-        Some(edge) if f64::from(edge) <= cfg.min_net_floor_bps => {
-            return PhysicalDecision::Hold;
-        }
-        Some(_) => {} // edge above floor → proceed to later gates
-        None => return PhysicalDecision::Hold, // unknown → conservative Hold
+    // P0-14 Option A：`est_net_bps` 為 None（sync-label / proxy 缺值）時
+    // 以 `missing_edge_fallback_bps` 作弱先驗；預設保守負值透過 floor 比較
+    // 仍 Hold，維持修復前 fail-safe；若 fallback 調高於 floor，則允許
+    // sync-label 倉位進入 Gate 2+ 評估。
+    let effective_edge = f
+        .est_net_bps
+        .map(f64::from)
+        .unwrap_or(cfg.missing_edge_fallback_bps);
+    if effective_edge <= cfg.min_net_floor_bps {
+        return PhysicalDecision::Hold;
     }
 
     // Gate 2: minimum hold time.
@@ -642,6 +685,7 @@ mod tests {
             giveback_base: 1.25,
             giveback_slope: 0.2,
             giveback_floor: 0.4,
+            missing_edge_fallback_bps: -7.5,
         };
         let j = serde_json::to_string(&cfg).expect("ser");
         let back: ExitConfig = serde_json::from_str(&j).expect("de");
@@ -714,6 +758,55 @@ mod tests {
         assert_eq!(
             physical_micro_profit_lock_v2(&f, &cfg),
             PhysicalDecision::Hold
+        );
+    }
+
+    /// P0-14 Option A — Gate 1: `est_net_bps=None` uses the configured
+    /// `missing_edge_fallback_bps`; when fallback ≤ floor → Hold (default).
+    /// 預設 fallback (-10.0) ≤ floor (5.0) → Hold（與修復前 fail-safe 一致）。
+    #[test]
+    fn test_v2_gate1_missing_edge_uses_fallback_below_floor() {
+        let cfg = ExitConfig {
+            missing_edge_fallback_bps: -10.0,
+            min_net_floor_bps: 5.0,
+            ..ExitConfig::default()
+        };
+        let mut f = mk_pass_features();
+        f.est_net_bps = None;
+        // fallback=-10 ≤ floor=5 → Gate 1 Holds (preserves fail-safe).
+        // fallback=-10 ≤ floor=5 → Gate 1 Hold（維持 fail-safe）。
+        assert_eq!(
+            physical_micro_profit_lock_v2(&f, &cfg),
+            PhysicalDecision::Hold
+        );
+    }
+
+    /// P0-14 Option A — Gate 1: `est_net_bps=None` with a fallback raised
+    /// above the floor escalates past Gate 1 so later gates can evaluate.
+    /// Here we use `mk_pass_features` (all-pass) → Gate 1 passes, 2/3 pass,
+    /// Gate 4a/4b unarmed (giveback=0, roc>0, ts=0) → final Hold; the key
+    /// assertion is that Gate 1 does NOT short-circuit Hold on missing edge
+    /// when fallback > floor. Same decision as `test_v2_all_pass_features_hold`.
+    /// P0-14 A：fallback 調高於 floor 時 missing edge 不再於 Gate 1 短路，
+    /// 流入後續 gate；本例 mk_pass_features 其他 gate 全 pass、4a/4b 未觸發
+    /// → 最終 Hold，關鍵是不因 Gate 1 missing edge 被 Hold。
+    #[test]
+    fn test_v2_gate1_missing_edge_fallback_above_floor_passes_to_gate2() {
+        let cfg = ExitConfig {
+            missing_edge_fallback_bps: 20.0,
+            min_net_floor_bps: 5.0,
+            ..ExitConfig::default()
+        };
+        let mut f = mk_pass_features();
+        f.est_net_bps = None; // Gate 1 falls back to 20 bps > 5 floor → pass
+        // If Gate 1 still short-circuited Hold on None, we'd not reach Gate
+        // 4a. Confirm we pass Gate 1 by arming Gate 4a and asserting Lock.
+        // 透過武裝 Gate 4a 反向證明 Gate 1 未短路 Hold — 若仍 Hold 則退化。
+        f.giveback_atr_norm = Some(0.75); // threshold @ peak_atr_norm=2 is 0.7
+        assert_eq!(
+            physical_micro_profit_lock_v2(&f, &cfg),
+            PhysicalDecision::Lock("phys_lock_gate4_giveback".to_string()),
+            "fallback above floor must pass Gate 1 so Gate 4a can fire"
         );
     }
 
