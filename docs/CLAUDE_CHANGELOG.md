@@ -1,7 +1,49 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-04-22（TRACK-P-V2-SWAP-1 — Priority 6 v1 linear → v2 non-linear + ExitConfig）
+> 最後更新：2026-04-22（TICK-PIPELINE-MOD-SPLIT-1 + Step 0 章節歸檔）
+
+### TICK-PIPELINE-MOD-SPLIT-1 — tick_pipeline/mod.rs 拆 3 檔進 §七 1200 硬上限（2026-04-22 · commit `3d67a99`）
+
+**觸發**：ON-TICK-SPLIT-1（`bfedb56` 2026-04-21）後 `tick_pipeline/mod.rs` 仍 2274 行違反 §七 1200 行硬上限；`impl TickPipeline` 巨塊 L906-2178 ~1272 行（ctor/config sync/exit helpers/channel setters 交織）。原列 P3 backlog `TICK-PIPELINE-MOD-SPLIT-1` ~2-3d；收尾 Step 0 衍生章節前最後一項。
+
+**執行**：sub-agent（`general-purpose`）機械 split，~14 分鐘 70 tool uses 完成。
+
+**範圍**：把唯一的 `impl TickPipeline { ... }` 塊拆成 3 個 sibling child-module 檔（每檔一個 `impl super::TickPipeline { ... }`），按語意分組：
+
+| 新檔 | LOC | 內容 |
+|---|---|---|
+| `pipeline_ctor.rs` | 422 | `new` / `with_balance` / `with_kind` + 20+ 基本 setters/getters（endpoint / symbol_registry / edge_estimates / linucb / predictor / shadow_fill_tx / decision_feature_tx / exit_feature_tx / price_tracker / rng_seed / edge_predictor_store / risk_store 等） |
+| `pipeline_config.rs` | 300 | `set_news_snapshot` / `set_risk_store` + `apply_risk_snapshot` / `set_budget_store` / `sync_risk_config_if_changed` / `set_maker_kpi_store` + `sync_maker_kpi_config_if_changed` / `current_cost_edge_max_ratio` / `current_min_profit_to_close_pct` / `set_fee_rate` / `set_account_manager` |
+| `pipeline_helpers.rs` | 654 | `close_position_at_symbol_market` / `emit_close_fill` / `try_emit_exit_feature_row` + `build_exit_feature_row` / `should_persist_signal` / `derive_regime` / `set_instrument_cache` / `set_stop_channel` / `set_shadow_channel` / `clear_pending_close` / `clear_all_pending_close` / `set_*_channel` × 4 / `retriage_synthetic_owner_for_symbol` |
+
+mod.rs 保留 types/struct/enum-impls/free-fns（`parse_exit_tag` / `snapshot_to_input`）+ mod decls；**1012 行**（降 55.5%，進 1200 硬上限）。3 新檔皆 under 800 soft warn。
+
+**Visibility 升級**：8 個被 on_tick/ 跨檔呼的私有 fn 從 `fn` 升 `pub(super) fn`：
+- pipeline_config：`sync_risk_config_if_changed`（step_0_fast_track） · `sync_maker_kpi_config_if_changed`（step_0_fast_track） · `current_cost_edge_max_ratio`（step_6_risk_checks） · `current_min_profit_to_close_pct`（step_6_risk_checks）
+- pipeline_helpers：`close_position_at_symbol_market`（step_0_5 / step_0_fast_track / step_3 / step_4_5 / step_6） · `emit_close_fill`（同 set） · `should_persist_signal`（step_3_signals） · `derive_regime`（step_6_risk_checks）
+
+保持私有（同檔內 caller）：`apply_risk_snapshot`（`set_risk_store` 呼） · `build_exit_feature_row`（`try_emit_exit_feature_row` 呼）。
+
+**驗證**：
+- Mac debug `cargo test -p openclaw_engine --lib`: **1835 passed / 0 failed**（與 pre-split 同 baseline，純 refactor）
+- Linux release `ssh trade-core ... cargo test --release`: **1835 passed / 0 failed**（0.52s）
+- `cargo check -p openclaw_engine --lib`：clean，6 warnings 皆 pre-existing
+- 所有檔 under 1200 hard cap（mod.rs 1012 / pipeline_ctor 422 / pipeline_config 300 / pipeline_helpers 654）
+
+**Workflow**：主 session 讀 mod.rs 邊界 + 決定 3-way split 分組 + 撰 sub-agent spec（method 逐個列、visibility 升級規則、檔案 skeleton 模板、driver 驗證步驟、禁止清單）→ Agent tool 派 `general-purpose` sub-agent → sub-agent 完成 14 分鐘 → 主 session 驗 wc + cargo test → 寫 `.claude_reports/20260422_204237_tick_pipeline_mod_split.md` → commit + push。
+
+**檔案**（1 commit, 4 files）：
+- `3d67a99` — `tick_pipeline/mod.rs` +11/−1273 · `tick_pipeline/pipeline_ctor.rs` +422（新）· `tick_pipeline/pipeline_config.rs` +300（新）· `tick_pipeline/pipeline_helpers.rs` +654（新）
+- 淨 LOC +114（純結構分檔，零邏輯改動）
+
+**Governance**：
+- §七 file size：mod.rs 2274 → 1012（under 1200 hard cap，降 55.5%）；3 新檔最大 654（pipeline_helpers，under 800 soft warn）
+- §七 bilingual：3 新檔頂 MODULE_NOTE 中英對照
+- feedback_subagent_first：典型機械 refactor 案例，主 session 專注 spec 設計 + 驗收，執行力卸載
+- Step 0 衍生新 TODO 章節 5/5 ✅ 於本 commit 收尾 — 歸檔 `docs/archive/2026-04-22--step_0_derived_todo_batch.md`
+
+---
 
 ### TRACK-P-V2-SWAP-1 — Priority 6 v1 linear → v2 non-linear + ExitConfig（2026-04-22 · commit `306993e`）
 
