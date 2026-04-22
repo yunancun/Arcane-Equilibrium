@@ -11,11 +11,13 @@
 
 ## 0. Quickstart（給未來 operator / sub-agent 的 TL;DR）
 
-1. 確認 `trading.fills WHERE engine_mode='demo' AND ts_ms >= 1776884100000 AND exit_reason LIKE 'risk_close:phys_lock_gate4_%'` ≥ **100 rows**（§8 Step 1）；不夠延後到 2026-05-06。
-2. 擴展 `program_code/audit/counterfactual_exit_audit.py`：加 `ExitConfigV2` dataclass 與 `simulate_phys_lock_v2()`（§2 擴展點清單）— **不改原 v1 `PhysLockConfig` 與 `simulate_phys_lock()`**。
-3. 跑 120 tuple grid search（§3），寫 `/tmp/openclaw/counterfactual_v2_grid_search_<YYYYMMDD>.json`。
-4. 按 §5 ranking 選 best tuple → §7 Go/No-Go 判斷。
-5. Go：改 `exit_features/v2.rs::ExitConfig::Default` seed → `cargo test -p openclaw_engine --lib` → `ssh trade-core "bash helper_scripts/restart_all.sh --rebuild"` → §8 Step 5 觀察 24h。
+1. **§11 schema prerequisite**：`\d trading.fills` + `\d trading.klines_1m` + fee/order_type NULL 率 + klines freshness — 任一 block → 不得進 Step 2。
+2. 確認 `trading.fills WHERE engine_mode='demo' AND ts_ms >= 1776884100000 AND exit_reason LIKE 'risk_close:phys_lock_gate4_%'` ≥ **100 rows**（§8 Step 1）；不夠延後到 2026-05-06。
+3. 擴展 `program_code/audit/counterfactual_exit_audit.py`：加 `--mode {single-v1, grid-v2}` flag + `ExitConfigV2` dataclass + `simulate_phys_lock_v2()`（§2 擴展點 / §8 Step 3）— **不改原 v1 `PhysLockConfig` 與 `simulate_phys_lock()`**。
+4. **v1 fee regression check**（§3.5）：先用新 per-fill fee source 重跑 v1，對帳 `2026-04-19` 歷史基準 ±10%，不 pass 不得進 v2 grid。
+5. 跑 v2 grid-v2 掃描（§3，110 tuple + Wilcoxon + 10% hold-out seed=42），寫 `/tmp/openclaw/counterfactual_v2_grid_search_<YYYYMMDD>.{json,md}`。
+6. 按 §7.0 **四條 gate（A hard guards + B significance + C effect size + D hold-out）** 判決；**兩條設計意圖必驗**：(i) 追求最高單筆 close 盈利（right_tail + total PnL 不得稀釋） (ii) 防微利即套離場（lock_count 與持倉時長分布不得極端飄移）。
+7. Promote（四條全過）：改 `exit_features/v2.rs::ExitConfig::Default` seed → `cargo test -p openclaw_engine --lib` → `ssh trade-core "bash helper_scripts/restart_all.sh --rebuild"` → §8 Step 6 跑 `v2_swap_24h_observation.sh` 觀察 24h。
 
 ---
 
@@ -187,8 +189,28 @@ min_hold_secs     = 30.0
 min_peak_atr_norm = 0.5
 stale_peak_ms     = 60_000
 atr_fallback_pct  = 1.0
-fee_rate_bps      = 10.0        # 保守估計；EDGE-P2-3 PostOnly 上線後可降到 6.0，須與 operator 對齊
 ```
+
+### 3.4 Fee source — **不 hardcode，per-fill 實 fee**（2026-04-22 panel 修正）
+
+舊版 spec 曾假設單一 `fee_rate_bps=10.0` scalar — 已作廢。原因：EDGE-P2-3 PostOnly（2026-04-21 20:44 部署）後 `grid_trading` / `ma_crossover` / `bb_breakout` 三策略於 demo 走 maker-entry path，runtime fee 由 `intent_processor::fee_rate_for_intent` 按 `order_type`（maker/taker）routing。固定 10 bps 會把 PostOnly 效果抹平，違反 counterfactual 對齊 runtime 的基本前提。
+
+**Fee source 優先級**（`simulate_phys_lock_v2()` 新增參數 `fee_bps_per_fill: Optional[float] = None`）：
+
+1. **優先（A）**：`trading.fills.fee_usdt` / `trading.fills.fee_rate` per-fill 實 fee（每筆 replay 帶自己的實 fee）— **需先跑 §11 schema prerequisite 確認欄位存在**
+2. **Fallback（B）**：兩層 tier 按 `trading.fills.order_type` 分：`PostOnly/maker = 1 bps`、`taker = 5 bps`，round-trip 乘 2（入場 + 出場兩側）
+3. **禁用（C）**：single scalar `fee_rate_bps` — 只在 `ExitConfigV2` unit test / mock fixture 允許
+
+### 3.5 Fee sanity regression check（v1 回歸）
+
+在跑 v2 grid 前，**必須先用新 fee source 重跑一次 v1 `simulate_phys_lock`**（既有 `PhysLockConfig` default），與 `docs/worklogs/2026-04-19-2--track_p_counterfactual_audit.md` 的歷史結果對帳：
+
+| 歷史基準（fee_rate_bps=10 scalar） | 本輪重跑（per-fill fee） | 判定 |
+|---|---|---|
+| grid: 141 hits, mean **−39.4 bps** | grid: N hits, mean **X bps** | \|ΔX\| ≤ 4 bps（±10%）才信 fee source 正確 |
+| ma: 52 hits, mean **−95.2 bps** | ma: N hits, mean **Y bps** | \|ΔY\| ≤ 9.5 bps（±10%）同上 |
+
+**不 pass 不得進 v2 grid**。差異若 > 10% 代表：(1) fee source 欄位抓錯，(2) PostOnly 部署 revenue 實質改變 fee 分布（需先 operator 確認這是期望中的改變，而非 data bug）。
 
 ---
 
@@ -252,15 +274,44 @@ fee_rate_bps      = 10.0        # 保守估計；EDGE-P2-3 PostOnly 上線後可
 
 ## 7. Go/No-Go 決策 / Promotion decision
 
-| Signal | 判斷 | Action |
-|---|---|---|
-| best tuple `total_cf_pnl_usdt` ≥ **1.15 × default_total_cf_pnl_usdt** AND `(lock_count_4a+4b)` ∈ [0.8×, 1.5×] × default_lock_count | **Promote** | 修 `exit_features/v2.rs::ExitConfig::Default`，commit 附 worklog |
-| best tuple 提升 < 15% OR lock_count 飄出 [0.8×, 1.5×] | **Hold** | 保持 default，寫 summary worklog 存檔，下輪（14d）重跑 |
-| best tuple `total_cf_pnl_usdt` < default OR > 50% tuples 觸 sanity guard | **Reject audit** | 不動 config；flag 資料品質（klines stale? fills pairing gap?）raise issue |
+**（2026-04-22 panel 修正 — 取代原「≥ 15% single threshold」四條 gate）**
+
+核心原則：**設計意圖（§三 L108-111）有兩條，缺一不可驗**：
+1. **「追求最高單筆 close 盈利」**（right-tail + total PnL 必須 ≥ default，不得因鎖得太早而喪失大贏家）
+2. **「防微利即套離場」**（Gate 1 Hold + 4a non-linear threshold 讓淺 peak 不亂鎖；lock_count 與持倉時長分布不得偏離合理區間）
+
+### 7.0 Four-condition gate（必須全中才能 Promote）
+
+**Gate A — Hard sanity guards（既有 §5 reject rule 升級為必要條件）**：
+- `lock_count_4a + lock_count_4b ∈ [0.8×, 1.5×]` × default_lock_count（驗「防微利即套」不過度觸發）
+- `hold_secs_median ∈ [0.5×, 2×]` × default_hold_median（驗持倉時長未極端飄移）
+- `right_tail_concentration ≥ 0.85 × default_right_tail`（驗「追求最高單筆 close 盈利」未被稀釋）
+
+**Gate B — Statistical significance（multiple testing correction）**：
+對 paired-fill counterfactual delta（best tuple 每 fill PnL − default tuple 每 fill PnL）跑 **Wilcoxon signed-rank test**，Bonferroni-corrected：
+- `p < 0.05 / 110 ≈ 4.5e-4`（對 110 tuple 做 correction）
+- 避免 120 tuple 掃描下 best tuple 為 lucky winner
+
+**Gate C — Effect size**（兩條 OR，任一 trigger 即可）：
+- `Winsorized (cap ±5000 bps) total_cf_pnl_usdt 改善 ≥ 8%`（從 15% 降，並用 P1-17 同 Winsorize 閾值去尾）
+- `mean_per_rt_bps 改善 ≥ 5 bps`
+
+**Gate D — Hold-out validation（防過擬合）**：
+- Random 10% fills 預留 **不入 grid search**（隨機 seed 固定 `42` 保可重現）
+- Best tuple 在 hold-out set 重算 `total_cf_pnl_usdt`，應顯示 **≥ 50% of in-sample improvement**
+- 若 hold-out improvement < 50% of in-sample → treat as overfit → Hold
+
+### 7.1 判決矩陣
+
+| Gate 通過狀態 | Action |
+|---|---|
+| A+B+C+D 全過 | **Promote** — 按 §7.2 部署流程 |
+| A 過但 B/C/D 任一不過 | **Hold** — 保持 default，寫 summary worklog，下輪（14d）重跑 |
+| A 不過（lock_count / hold_time / right_tail 任一飄出） | **Reject audit** — 不動 config，flag 資料品質（klines stale? fills pairing gap? fee source 錯？）raise issue |
+
+### 7.2 Promote 部署流程
 
 **15% 門檻**（TBD by operator）— 本 spec 取 15%，operator 保留調整權；太低會把 noise 當 signal、太高會浪費校準機會。
-
-### 7.1 Promote 部署流程
 
 1. 編輯 `rust/openclaw_engine/src/exit_features/v2.rs` 下列 3 fn 的 return 值：
    - `fn default_giveback_base() -> f64 { <new> }`
@@ -298,10 +349,55 @@ ssh trade-core "cd ~/BybitOpenClaw/srv && git pull --ff-only origin main && git 
 
 ### Step 3 — 跑 counterfactual v2 grid search
 
-（假設擴展後 CLI 名稱 — sub-agent 可調整）
+**（2026-04-22 panel 決定：延伸既有 `counterfactual_exit_audit.py` 加 `--mode` flag，不新檔）**
+
+CLI 固定：`python -m program_code.audit.counterfactual_exit_audit --mode grid-v2 ...`
+
+`--mode` 取值：
+- `single-v1`（既有 default 行為，向後相容）— 跑 v1 `PhysLockConfig` 單一 config
+- `grid-v2`（新增）— 跑 v2 `ExitConfigV2` 110 tuple grid + Wilcoxon + hold-out
+
+**E2 必查**：`argparse` sub-command 結構 + v1 single-mode 回歸測試不破（既有 `counterfactual_exit_audit.py::tests::test_phys_lock_rule_on_synthetic_fixture_locks_expected` 仍綠）。
+
+**3a — v1 fee regression check（§3.5 前置）**：
 
 ```bash
-ssh trade-core "cd ~/BybitOpenClaw/srv && source ~/.venv/bin/activate && python -m program_code.audit.counterfactual_v2_grid_search --days 7 --engine-mode demo --start-ts 2026-04-22T20:55:00Z --out-json /tmp/openclaw/counterfactual_v2_grid_search_$(date +%Y%m%d).json --out-md /tmp/openclaw/counterfactual_v2_grid_search_$(date +%Y%m%d).md --fee-rate-bps 10.0"
+ssh trade-core "cd ~/BybitOpenClaw/srv && source ~/.venv/bin/activate && python -m program_code.audit.counterfactual_exit_audit --mode single-v1 --days 7 --engine-mode demo --start-ts 2026-04-22T20:55:00Z --fee-source per-fill --out /tmp/openclaw/v1_fee_regression_$(date +%Y%m%d).json"
+```
+
+比對 `/tmp/openclaw/v1_fee_regression_*.json` 與 `docs/worklogs/2026-04-19-2--track_p_counterfactual_audit.md` 基準（grid −39.4 bps / ma −95.2 bps ±10%）。**不 pass 不得進 Step 3b**。
+
+**3b — v2 grid-v2 主掃描**：
+
+```bash
+ssh trade-core "cd ~/BybitOpenClaw/srv && source ~/.venv/bin/activate && python -m program_code.audit.counterfactual_exit_audit --mode grid-v2 --days 7 --engine-mode demo --start-ts 2026-04-22T20:55:00Z --fee-source per-fill --holdout-pct 10 --holdout-seed 42 --out-json /tmp/openclaw/counterfactual_v2_grid_search_$(date +%Y%m%d).json --out-md /tmp/openclaw/counterfactual_v2_grid_search_$(date +%Y%m%d).md"
+```
+
+`--fee-source` 取值：
+- `per-fill`（default，§3.4 A 層，最精確）
+- `tier`（§3.4 B 層 fallback — PostOnly=1 bps / taker=5 bps 按 `order_type`）
+- `scalar:<bps>`（§3.4 C 層 禁用，只供 unit test）
+
+### JSON schema（output artifact 固化）
+
+`counterfactual_v2_grid_search_*.json` 每 tuple 一 row：
+
+```jsonc
+{
+  "base": 1.0, "slope": 0.15, "floor": 0.3,       // tuple identity
+  "total_pnl_usdt": 12.34, "total_pnl_winsorized_usdt": 11.87,   // Gate C
+  "mean_per_rt_bps": -8.2, "median_per_rt_bps": -3.1,            // Gate C alt
+  "lock_count_4a": 42, "lock_count_4b": 8, "no_lock_count": 97,  // Gate A
+  "hold_secs_p50": 180, "hold_secs_p90": 720, "hold_secs_max": 3600,  // Gate A
+  "right_tail_concentration": 0.62,                                   // Gate A
+  "wilcoxon_p_value": 0.0003,                                          // Gate B
+  "holdout_in_sample_total_pnl_usdt": 11.12,                           // Gate D
+  "holdout_out_sample_total_pnl_usdt": 6.78,                           // Gate D
+  "holdout_ratio": 0.61,                                                // Gate D (≥ 0.5 要求)
+  "passes_gate_a": true, "passes_gate_b": true,
+  "passes_gate_c": true, "passes_gate_d": true,
+  "overall_verdict": "Promote"  // or "Hold" | "Reject"
+}
 ```
 
 ### Step 4 — Read summary
@@ -314,16 +410,18 @@ ssh trade-core "tail -n 200 /tmp/openclaw/counterfactual_v2_grid_search_$(date +
 
 ### Step 5 — Go/No-Go
 
-- **Go** → 按 §7.1 編 `exit_features/v2.rs` → commit → push → `ssh trade-core "... && bash helper_scripts/restart_all.sh --rebuild"`
-- **Hold/Reject** → 寫 summary worklog `docs/worklogs/YYYY-MM-DD--counterfactual_v2_audit_result.md` → commit → push
+按 §7.0 四條 gate 判決：
+- **Promote (A+B+C+D 全過)** → 按 §7.2 編 `exit_features/v2.rs` → commit → push → `ssh trade-core "... && bash helper_scripts/restart_all.sh --rebuild"`
+- **Hold (A 過 B/C/D 任一不過)** → 寫 summary worklog `docs/worklogs/YYYY-MM-DD--counterfactual_v2_audit_result.md` 記錄判決理由 → commit → push；14d 後重跑
+- **Reject (A 不過)** → 不動 config，raise issue 調查資料品質（klines stale / fills pairing / fee source）
 
-### Step 6 — Post-calibration 24h 觀察（Go 路徑才做）
+### Step 6 — Post-calibration 24h 觀察（Promote 路徑才做）
 
 ```bash
-ssh trade-core "bash helper_scripts/canary/v2_swap_24h_observation.sh"
+ssh trade-core "nohup bash ~/BybitOpenClaw/srv/helper_scripts/v2_swap_24h_observation.sh > /tmp/openclaw/v2_swap_24h_observation_post_calib.log 2>&1 & disown"
 ```
 
-（若 script 不存在則用既有 canary watchdog + 手工 `SELECT exit_reason, COUNT(*) FROM trading.fills WHERE ts_ms >= <rebuild_ts> AND engine_mode='demo' GROUP BY 1;` 對照）。
+24h 後 tail log 確認 (1) PID 穩定 (2) phys_lock_gate4_* fire 分布 (3) fills total PnL 方向與 audit prediction 一致 (± 20%)。
 
 ---
 
@@ -352,6 +450,63 @@ ssh trade-core "bash helper_scripts/canary/v2_swap_24h_observation.sh"
 - Memory `feedback_demo_over_paper_for_edge.md` — demo fills 為 edge analysis 唯一合法源
 - Memory `feedback_shell_paste_safety.md` — §8 shell 寫法約束
 - Memory `feedback_env_config_independence.md` — 三環境 risk_config 獨立；**本 audit 只動 Rust Default seed（全環境共用 Default），不動 TOML 覆寫**
+
+---
+
+## 11. 前置 schema 驗證 / Schema prerequisite check（2026-04-22 panel 新增）
+
+§3.4 per-fill fee source 依賴 `trading.fills` 欄位；§3.1 replay 依賴 `trading.fills` 與 `trading.klines_1m` join。**執行 §8 Step 1 之前必須跑本節 Step 0a–0d**，確認欄位存在且 NULL 率可接受。
+
+### Step 0a — `trading.fills` schema
+
+```bash
+ssh trade-core 'psql -d trading_ai -c "\d trading.fills"'
+```
+
+**必須存在欄位**（預期清單，missing 任一 → block audit）：
+- `ts_ms BIGINT NOT NULL`（replay 時序）
+- `engine_mode TEXT NOT NULL`（filter demo）
+- `symbol TEXT NOT NULL`
+- `exit_reason TEXT`（filter `risk_close:phys_lock_%`）
+- `entry_context_id TEXT`（pair positions）
+- **`fee_usdt NUMERIC` OR `fee_rate NUMERIC`**（§3.4 A 層必要；兩者至少有一個）
+- **`order_type TEXT`**（§3.4 B 層 fallback 必要；PostOnly/maker/taker 區分）
+- `realized_pnl_usdt NUMERIC`（total PnL baseline）
+
+### Step 0b — Fee 欄位 NULL 率
+
+```bash
+ssh trade-core 'psql -d trading_ai -tAc "SELECT COUNT(*) FILTER (WHERE fee_usdt IS NULL)::float / NULLIF(COUNT(*),0) AS fee_null_rate, COUNT(*) FILTER (WHERE order_type IS NULL)::float / NULLIF(COUNT(*),0) AS order_type_null_rate FROM trading.fills WHERE engine_mode='\''demo'\'' AND ts_ms >= 1776884100000;"'
+```
+
+**判讀**：
+- `fee_null_rate > 0.05` → A 層不可用，退 B 層（tier by `order_type`）
+- `order_type_null_rate > 0.05` → B 層也不可用，**block audit**（RCA fills writer 缺欄位接線）
+- 兩者 ≤ 0.05 → A 層 per-fill fee 可用，進 §8 Step 1
+
+### Step 0c — `trading.klines_1m` schema
+
+```bash
+ssh trade-core 'psql -d trading_ai -c "\d trading.klines_1m" | head -20'
+```
+
+**必須存在欄位**：`ts_ms` / `symbol` / `engine_mode` / `open` / `high` / `low` / `close`。
+
+**判讀**：任一 missing → block audit（schema drift，開 RCA）。
+
+### Step 0d — Klines freshness
+
+```bash
+ssh trade-core 'psql -d trading_ai -tAc "SELECT symbol, MAX(ts_ms) AS latest_ms, (EXTRACT(EPOCH FROM NOW())*1000 - MAX(ts_ms))/1000 AS stale_secs FROM trading.klines_1m WHERE engine_mode='\''demo'\'' GROUP BY symbol ORDER BY stale_secs DESC LIMIT 10;"'
+```
+
+**判讀**：任一 symbol `stale_secs > 86400`（24h）→ 該 symbol 所有 position 走 `klines_stale_fallback` 路徑；若 > 30% symbol 陳舊則 block audit。
+
+### 觸發 block 時處置
+
+- fee/order_type NULL rate 高：RCA `fills writer`（Rust `fill_engine.rs`）是否漏接欄位；修完後重跑 §8 Step 1
+- klines schema drift：grep 最新 migration 與 §10 reference 版本對比，若有改動先同步 spec 再跑 audit
+- klines staleness：檢查 `MARKET-KLINES-STALE-1`（`65acde6`）相關看板，確保三引擎 market_data_tx 並行 writer 在跑
 
 ---
 
