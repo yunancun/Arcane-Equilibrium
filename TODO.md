@@ -34,21 +34,23 @@ git status && git log --oneline -5
 
 ## 🔴 P0 — 阻塞 Live Gate 關鍵路徑
 
-### 🔴 P0-13 · ATR-SCALE-BUG-1 — `compute_atr_pct` per-tick 尺度誤為持倉期尺度（2026-04-22 深度追查 reframed）
+### 🔴 P0-13 · ATR-SCALE-BUG-1 — `compute_atr_pct` per-tick 尺度誤為持倉期尺度（QC 推薦 Option F）
 
-- **現象**：`learning.exit_features` 實測 `atr_pct` 0.001-0.006 量級（percent-as-number 但 per-tick 尺度）→ `giveback_atr_norm` 放大 100-1000x（DB avg 364.85）
-- **原 diagnosis 誤判**：以為是「單位 bug（gb% ÷ atr-decimal）」可 1 行 fix。**實際是尺度 bug**：`compute_atr_pct`（[`price_tracker.rs:105`](rust/openclaw_core/src/risk/price_tracker.rs:105)）返回「連續 tick abs return 平均 × 100」= **per-tick percent-as-number**，而非持倉期 ATR
+- **現象**：`learning.exit_features` 實測 `atr_pct` 0.001-0.006 量級（per-tick percent-as-number），但三 consumer 假設「持倉期 ATR」(~1-2%) → `giveback_atr_norm` 放大 100-1000x（DB avg 364.85）
 - **跨 consumer 影響**：
-  - `compute_dynamic_stop_pct`：`atr_stop = atr × 2 = 0.002` < base_stop=10 → 永遠 fallback base（**DYNAMIC STOP 7d 1 次證實**）
+  - `compute_dynamic_stop_pct`：atr 小 100x 永遠 fallback base（**DYNAMIC STOP 7d 1 次**）
   - `build_exit_features_for_tick` / `build_exit_feature_row`：giveback 放大 100-1000x
-  - `exit_features/v2.rs` Gate 3 `peak / atr >= 0.5`：atr 過小永遠過 → 「過濾 shallow peak」功能失效
-- **Fix scope 重估**：
-  - 原 4h 1-line fix 不成立
-  - 需 **ATR 語義決策**（Option A 新 fn `compute_atr_14period` / Option B builder 端乘 holding_period tick count / Option C 全部 gate 閾值 recalibrate）
-  - 推薦 Option A，預估 2-3d work chain：ATR design doc → Rust 新 fn → 多 consumer 遷移 → 閾值 recalibrate → regression + end-to-end tests → counterfactual spec 同步
-- **必須**與 P0-14 一起部署（不然單修 P0-14 讓 Gate 1 過 → Gate 4a 立刻 mass close）
-- **P0-13 本 session 不 autonomously fix**：等 operator 拍板 Option A/B/C
-- 觸發：2026-04-22 被動等待 audit，詳 `docs/worklogs/2026-04-22--passive_wait_silent_fail_audit.md` **§3.0**（深度追查取代原 §3.1）
+  - `exit_features/v2.rs` Gate 3 `peak / atr >= 0.5`：永遠過，功能失效
+- **QC 推薦 Option F**（score **0.91** vs A=0.72 / B=0.54 / C=0.43；詳 [`docs/worklogs/2026-04-22--p0_13_atr_scale_qc_research.md`](docs/worklogs/2026-04-22--p0_13_atr_scale_qc_research.md)）：
+  - **reuse 既有 `openclaw_core::indicators::volatility::atr()`**（[`volatility.rs:75`](rust/openclaw_core/src/indicators/volatility.rs:75) production-quality Wilder 實作 + Kahan-summed + 既有 `test_atr_basic/edge` 單測）
+  - **reuse 既有 `KlineManager`**（[`klines.rs:437`](rust/openclaw_core/src/klines.rs:437)）— 每 tick 已聚合 1m/5m/15m/1h/4h OHLCV，已在 `tick_pipeline/on_tick/step_1_2_klines_indicators.rs:37` 接線 runtime
+  - 三 consumer `atr_pct` 來源同步切 `kline_manager.get_ohlcv(sym, "1m", 20).and_then(|o| atr(&o.high, &o.low, &o.close, 14)).map(|r| r.atr_percent)`
+  - 舊 `compute_atr_pct` 加 `#[deprecated]` warning 保留給 `fast_track` 閃崩偵測（per-tick micro-volatility 語義合理）
+  - **零 schema 變更、零重造輪子、與 counterfactual replay spec `ExitConfig` seed 完全相容**（`min_peak_atr_norm=0.5 / giveback_base=1.0 / slope=0.15 / floor=0.3` 保留原 interpretation）
+- **Execution plan**（E1 實作 ~4-6h；E2 審查 ~2h；E4 測試 ~1h；deploy +24h 監控）：3 個 commits 同 `restart_all.sh --rebuild` 一次 deploy — Commit #1 P0-13 Option F atr source / Commit #2 P0-14 Option A Rust Gate 1 `missing_edge_fallback_bps` / Commit #3 P0-14 Option B Python JS proxy cells
+- **必同 P0-14 deploy**（硬約束）：單修 P0-14 → Gate 4a mass close 災難；單修 P0-13 → Gate 1 仍擋 99%，失觀測性
+- **待 operator approve** Option F execution plan → 主 session E1 開工
+- 觸發：2026-04-22 被動等待 audit，詳 `docs/worklogs/2026-04-22--passive_wait_silent_fail_audit.md` §3.0 + QC research `docs/worklogs/2026-04-22--p0_13_atr_scale_qc_research.md`
 
 ### 🔴 P0-14 · EDGE-ESTIMATES-MISS-1 — T4 closure `est_net_bps` 99.1% NULL
 
