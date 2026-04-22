@@ -81,15 +81,15 @@ git status && git log --oneline -5
 - ✅ T1-T5 骨架 commits `88b4ef9`/`c7d6a6c`/`981840f`/`a963f0b`/`094d285`/`4feb17a` — `ExitFeatures`/`PhysicalDecision` 型別、`compute_roc`、`physical_micro_profit_lock` Priority 6、Combine Layer + `ExitSource` 4 tags、counterfactual audit CLI。
 - ✅ E2 + E4 2026-04-19 22:48 — ≥47 單測（超達 ≥18 要求）；counterfactual 實跑 grid 141/4 hits mean −39.4 bps · ma 52/10 hits mean −95.2 bps，驗證「設計上保守」；工件 `docs/worklogs/2026-04-19-2--track_p_counterfactual_audit.md`。
 - ✅ E5 2026-04-19 22:33 — rebuild + 灰度部署活化（24h fee 觀察）。
-- [ ] `peak_reached_ts_ms` 欄位加到 `PaperPosition`（含 legacy migration）— Phase 1b 7 維累積後展開
+- ✅ `peak_reached_ts_ms` 欄位加到 `PaperPosition`（含 legacy migration）2026-04-19 EXIT-FEATURES-TABLE-1 Phase 1b FUP 完成（`paper_state/containers.rs:85` 已驗證）
 
 **Phase 1a 完成標準**：P1-7 A/B/C 部署 + `edge_estimates.json` 每小時自動刷新 + `trading.intents` live/live_demo 開始有 rows + 第一個 ONNX artifact + Track P 骨架灰度 ≥48h `exit_source=Physical` 正常
 
 ### Phase 1b · W24（exit_features 累積）
 
-- [ ] `learning.exit_features` 表建立 + Rust exit handler 寫入
-- [ ] 累積 ≥1 週 exit_features 資料（W24 全週）
-- [ ] 7 維度規則 bind 真實閾值（取代 Phase 1a 骨架預設）
+- ✅ `learning.exit_features` 表建立 + Rust exit handler 寫入 — 2026-04-19 EXIT-FEATURES-TABLE-1（`database/exit_feature_writer.rs` + `exit_feature_tx` channel @ `tasks.rs:446`，`INSERT INTO learning.exit_features` 運作中）
+- [ ] 累積 ≥1 週 exit_features 資料（W24 全週）— 2026-04-19 起算，預計 2026-04-26 滿一週
+- [ ] 7 維度規則 bind 真實閾值（取代 Phase 1a 骨架預設）— 待資料量足夠 + counterfactual replay audit 校準（見 Phase 2 軌道 1）
 
 **Phase 1b 完成標準**：≥2 策略 exit_features 累積 ≥1000 rows + 7 維閾值可由資料 calibrate
 
@@ -297,17 +297,16 @@ git status && git log --oneline -5
 - **阻塞**：不阻 Live；阻 DUAL-TRACK Phase 1 軌道 2 B 完成判定 + Phase 5 cost_gate 重啟
 - **關聯**：P1-10 STRATEGY-ASYMMETRY-1（必要前置）· DUAL-TRACK Phase 1 軌道 2 B · P0-3 Phase 5 edge 重評
 
-### P1-18 · GATE1-REVERSAL-OBS-1 — Priority 6 Gate 1 Lock→Hold + T4 接線 runtime 觀察窗
-- **基準線（更新 2026-04-21 晚）**：engine PID `3954769` 於 **2026-04-21 20:44 CEST `restart_all.sh --rebuild`** 起算（baseline commit `f128af5`）。首次真正承載 T4 接線（`e95c779` build_exit_features_for_tick closure）+ GATE1-REVERSAL-1 hotfix A（`d0f0c21` Gate 1 `<= floor → Hold`）+ DUAL-TRACK Phase 1b v2 pure fn（`aee96b9`）。舊基準線 13:44 CEST rebuild 雖含 hotfix A 但 T4 builder 未接線，Priority 6 仍走 `|_| None` = inert — 不構成真實觀察窗。
-- **觀察指標**（≥2-3d，從 20:44 CEST 起算）：
-  - [ ] `phys_lock_gate1_low_edge` 新 fills 應 = 0（Gate 1 Hold 後不再產此 tag；post-rebuild 當日 grep = 0，符合預期）
-  - [ ] `phys_lock_gate4_giveback` + `phys_lock_gate4_stale_roc_neg` 首次 fire 時間（edge_estimates 冷啟動 → Gate 1 全 Hold 預期初期 0 fire；Phase 5 edge 收斂後自然解鎖）
-  - [ ] demo 平均持倉時長分佈（預期略增，Gate 1 不再提前 Lock）
-  - [ ] 單筆 close 盈利分佈右尾（Gate 4 trailing 接管後允許 edge 繼續累積，右尾預期略厚）
-  - [ ] Phase 5 edge 指標（`settings/edge_estimates.json` 各策略 shrunk_bps 不應惡化）
-- **Gate**：觀察窗 ≥2-3d，上述 5 指標均未惡化 → 解鎖 `TRACK-P-V2-SWAP-1`（Priority 6 v1 → v2 non-linear + ExitConfig 熱重載）；若任一指標惡化 → pause 回查 + E2 對抗性審查
-- **阻塞**：不阻 P0 主路徑；阻 `TRACK-P-V2-SWAP-1` + Phase 2/3 Track L
-- **關聯**：DUAL-TRACK-EXIT-1 Phase 1b Track P v2（`aee96b9`）· T4 builder（`e95c779`）· `risk_checks.rs:312-323` Priority 6 · CLAUDE.md §三 2026-04-21 · memory `project_track_p_runtime_dead.md`（post-T4 下次 audit 應改寫 live）
+### ✅ P1-18 · GATE1-REVERSAL-OBS-1 — superseded 2026-04-22 by TRACK-P-V2-SWAP-1 runtime live
+
+**結案理由**：原條目要求 ≥2-3d observation window 驗證 v1 Gate 1 `< floor → Hold` hotfix A（`d0f0c21`）+ T4 接線（`e95c779`）runtime 無惡化，作為 gate 解鎖 `TRACK-P-V2-SWAP-1`。實際執行：2026-04-21 20:44 CEST `--rebuild` 部署 v1+T4，至 2026-04-22 TRACK-P-V2-SWAP-1（`306993e`）完成代碼切換 → 20:55 CEST `--rebuild` 部署 v2 runtime。v1 observation window 被 v2 runtime **直接接管**（v1 已退役，code removed），觀察對象從「v1 Gate 1 hotfix A 是否惡化」轉為「v2 non-linear giveback 是否優於 v1 linear」，由 **`v2_swap_24h_observation.sh`**（PID 166383，2026-04-23 21:16 CEST 結束）接手。
+
+原 5 項 checkbox 結果：
+- `phys_lock_gate1_low_edge` 新 fills — v1 期間 0（符合 hotfix A 預期），v2 期間仍 0（v2 Gate 1 也 Hold）
+- `phys_lock_gate4_*` fire — 24h loop 追蹤中；冷啟動期 `edge_estimates.cells=0` Gate 1 全 Hold（預期）
+- 持倉時長 / right-tail / edge 指標 — 隨 24h loop 觀察
+
+**不寫 CLAUDE.md**（不是獨立里程碑，已由 V2-SWAP 覆蓋）；memory `project_track_p_runtime_dead.md` 已在 V2-SWAP supersede 時改為 `project_track_p_runtime_live.md`（2026-04-22 commit `871e11e`）。
 
 ### ✅ P1-15 LEARNING-SCHEMA-QUALITY-1 2026-04-18 commit `b0df1b3`（歸檔 §8）
 - `commands.rs:668` 加 `risk_close:ipc_close_symbol` 前綴 + `realized_edge_stats.py:238` allowlist 加 `live_demo`。清 28 phantom cells（18 ipc + 10 risk_check），live_demo grand_mean −14.97 bps。真實 grand_mean 毒源由 P1-16/17 解。
