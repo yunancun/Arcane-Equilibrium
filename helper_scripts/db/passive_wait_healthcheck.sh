@@ -38,7 +38,9 @@
 set -u
 
 BASE_DIR="${OPENCLAW_BASE_DIR:-$HOME/BybitOpenClaw/srv}"
-SECRETS_ROOT="${OPENCLAW_SECRETS_ROOT:-$BASE_DIR/secrets}"
+# Mirror restart_all.sh:31 + fresh_start.sh:60 — secrets sit *next to* srv,
+# not inside it. Don't change this default; it must match the canonical layout.
+SECRETS_ROOT="${OPENCLAW_SECRETS_ROOT:-$HOME/BybitOpenClaw/secrets}"
 SECRETS_ENV="$SECRETS_ROOT/environment_files/basic_system_services.env"
 HEALTHCHECK_PY="$BASE_DIR/helper_scripts/db/passive_wait_healthcheck.py"
 
