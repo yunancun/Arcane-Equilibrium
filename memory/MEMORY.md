@@ -45,6 +45,7 @@
 - [主會話角色：PM+Conductor](feedback_role_definition.md) — 主會話=PM+Conductor合一，sub-agent只做執行/審查/研究
 - [強制先評估 sub-agent 拆分](feedback_subagent_first.md) — 收到任務先思考能否拆成後台並行 sub-agent
 - [Sub-agent 可寫碼（2026-04-18 驗證通過）](feedback_subagent_code_writing_refusal.md) — 2026-04-07 refuse pattern 已解除，2/2 probe 成功；E1 可派並行 sub-agent 寫碼
+- [Meta-doc 改動用 git commit --only 隔絕 index race](feedback_git_commit_only_for_metadoc.md) — CLAUDE.md/TODO.md/docs/memory 等 meta-doc 必用 `git commit --only <file>`；multi-session 下 `git add + commit` 不安全（2026-04-23 同 session 吸收 operator WIP 兩次）
 
 ## Code & architecture rules
 - [Rust 為唯一交易參數權威](feedback_rust_authoritative_config.md) — 所有交易/風控/模型參數GUI直寫Rust，Python僅只讀
