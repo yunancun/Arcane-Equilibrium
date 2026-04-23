@@ -241,8 +241,34 @@ impl RejectionCode {
         }
     }
 
+    /// Build a `GuardianRejected` rejection code from a `GuardianResult`.
+    /// Keeps callers terse: `RejectionCode::from_guardian_review(&guardian_result)`.
+    /// Clones `reasons` so the original review can still be captured into
+    /// `VerdictInfo` alongside.
+    /// 由 `GuardianResult` 建 `GuardianRejected`；clone reasons 不影響上游 capture。
+    pub(super) fn from_guardian_review(review: &GuardianResult) -> Self {
+        RejectionCode::GuardianRejected {
+            reasons: review.reasons.clone(),
+        }
+    }
+
     // ─── Classification helpers (coarse family predicates) ───
     // 分類輔助（粗類型判定）
+    //
+    // TODO (E5-P1-8-FUP, 2026-04-23): `#[allow(dead_code)]` kept intentionally.
+    // These helpers have no consumer outside the in-file unit tests yet — they
+    // are seeded here so the Analyst agent / Python learning pipeline / audit
+    // routes can switch on the coarse family without substring-matching the
+    // `format()` string. Remove the `allow` attribute once the first real
+    // consumer lands (candidate sites: `strategy_ai_routes.py` analytics bucket,
+    // `learning.exit_features` engine-side tagger, or any Rust-side
+    // `retriage_synthetic_owner` follow-up that needs family-level dispatch).
+    //
+    // 中文：分類 helpers 刻意保留 `#[allow(dead_code)]`。目前僅本檔單測使用；
+    // 預期下游（Analyst agent / Python 學習管線 / 審計路由）接線後移除 allow。
+    // 候選接線點：`strategy_ai_routes.py` 分析分桶、引擎端
+    // `learning.exit_features` 標記器、或任何 Rust 端需要家族層級派發的
+    // `retriage_synthetic_owner` 後續工作。
 
     /// Any `cost_gate*` family rejection (confidence / ATR / JS variants).
     /// 任一 `cost_gate*` 家族拒絕。
@@ -315,20 +341,6 @@ impl RejectionCode {
             | RejectionCode::CostGateJsLiveThreshold { .. }
             | RejectionCode::CostGateJsLiveNegative { .. }
             | RejectionCode::CostGateJsLiveColdStart => "cost_gate",
-        }
-    }
-}
-
-/// Build a `GuardianRejected` rejection code from a `GuardianResult`.
-/// Placed on the review side to keep callers terse:
-///     `RejectionCode::from_guardian_review(&guardian_result)`
-/// Clones `reasons` so the original review can still be captured into
-/// `VerdictInfo` alongside.
-/// 由 `GuardianResult` 建 `GuardianRejected`；clone reasons 不影響上游 capture。
-impl RejectionCode {
-    pub(super) fn from_guardian_review(review: &GuardianResult) -> Self {
-        RejectionCode::GuardianRejected {
-            reasons: review.reasons.clone(),
         }
     }
 }
