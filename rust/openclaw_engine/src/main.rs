@@ -877,19 +877,46 @@ async fn async_main(
     // Periodic param tuner: DB metrics → AI evaluate → validate → apply.
     // B0/R3-1：策略師排程器 — 單個 tokio 後台任務。
     // 定期參數調諧：DB 指標 → AI 評估 → 驗證 → 應用。
+    //
+    // STRATEGIST-SCHED-CHANNEL-PAPER-ORPHAN-1 (2026-04-23):
+    // - tune target = Demo (not Paper). Paper is disabled-by-default under
+    //   PAPER-DISABLE-1; its cmd channel is drained-and-dropped, causing the
+    //   scheduler's oneshot response to vanish and emit "channel closed"
+    //   warnings every 5 minutes.
+    // - Live is passed as optional promote target (None when authorization.json
+    //   is unsigned / Live binding absent). Wiring present so Phase 5+ can add
+    //   the promotion trigger + criteria without touching this call site.
+    // - If Demo is itself not bound, skip scheduler spawn entirely (single
+    //   info log). This handles dev scenarios where demo_bindings is None.
+    // STRATEGIST-SCHED-CHANNEL-PAPER-ORPHAN-1（2026-04-23）：
+    // - tune target = Demo（非 Paper）。Paper 預設禁用下其 cmd channel 被 drain-drop，
+    //   scheduler 的 oneshot response 跟著消失 → 每 5 分鐘噴 "channel closed" 假警。
+    // - Live 作 optional promote target（authorization.json 未簽則為 None）。
+    //   接線已備，Phase 5+ 補觸發器 + criteria 即可用，不需動此處。
+    // - Demo 未綁則 scheduler 整個不 spawn（單行 info log），涵蓋 demo_bindings=None 情境。
     // ------------------------------------------------------------------
-    {
+    if let Some(ref demo_tx) = demo_cmd_tx {
         let ai_client = Arc::new(openclaw_engine::ai_service_client::AiServiceClient::new());
         let scheduler = Arc::new(
             openclaw_engine::strategist_scheduler::StrategistScheduler::new(
                 ai_client,
-                paper_cmd_tx.clone(),
+                demo_tx.clone(),
+                openclaw_engine::tick_pipeline::PipelineKind::Demo,
+                live_cmd_tx.clone(),
                 Arc::clone(&db_pool),
                 cancel.clone(),
             ),
         );
         tokio::spawn(scheduler.run_forever());
-        info!("StrategistScheduler spawned (5-min cycle) / 策略師排程器已啟動");
+        info!(
+            has_live_promote = live_cmd_tx.is_some(),
+            "StrategistScheduler spawned — tune_target=Demo / 策略師排程器已啟動（調諧目標=Demo）",
+        );
+    } else {
+        info!(
+            "StrategistScheduler not spawned — Demo engine not bound \
+             / Demo 引擎未綁定，策略師排程器未啟動"
+        );
     }
 
     // ------------------------------------------------------------------
