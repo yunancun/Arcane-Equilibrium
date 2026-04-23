@@ -239,17 +239,32 @@ pub struct InstrumentInfoCache {
     ///
     /// INSTR-ENSURE-FIX-1 (2026-04-23, B-1): upgraded value type from
     /// `Arc<Notify>` → `Arc<InflightEntry>` so followers can observe a
-    /// `done` flag in addition to subscribing to the Notify. `Notify::
-    /// notify_waiters()` does NOT store a permit, so if a follower's
-    /// `.notified()` is not yet registered at the moment of the call, the
-    /// notification is lost. With the `done` AtomicBool, followers enable
-    /// their `Notified` future first (capturing future notifications),
-    /// then load `done` with Acquire ordering: if it is already `true`,
-    /// the leader has finished and we skip the `.await`; otherwise we
-    /// await, guaranteed to be woken because our waker is registered
-    /// BEFORE the leader's store-to-done Release.
+    /// `done` flag in addition to subscribing to the Notify. The precise
+    /// race this closes is a snapshot-counter ordering window: a `Notified`
+    /// future captures the Notify's internal `notify_waiters_calls` counter
+    /// at **construction time** (before the first `.poll()`). If the leader
+    /// calls `notify_waiters()` AFTER the follower `.notified()` call has
+    /// snapshotted the counter but BEFORE the follower polls the future
+    /// (or enables its waker slot), the counter bump happens during the
+    /// "pre-enable" window — but if the leader bumps the counter BEFORE
+    /// the follower constructs `.notified()`, the follower's snapshot
+    /// equals the current counter value, the first poll sees no mismatch,
+    /// and it simply registers a waker and sleeps. No pending permit
+    /// remains, and no future `notify_waiters()` is issued, so the waker
+    /// is never fired → follower sleeps forever. With the `done`
+    /// AtomicBool we publish the "leader finished" fact BEFORE bumping
+    /// the counter. Followers enable the waker first (to catch any
+    /// POST-enable counter bump) THEN Acquire-load `done`; if `done==true`
+    /// we short-circuit the `.await` entirely, bypassing the snapshot
+    /// window. required for correctness.
     /// INSTR-ENSURE-FIX-1：inflight 值升級為 InflightEntry，含 done 旗標 +
-    /// Notify。follower 先 enable 再 Acquire-load done，race 關閉。
+    /// Notify。race 本質：`Notified` 在 construction 時 snapshot
+    /// `notify_waiters_calls` counter；若 leader 在 follower 呼
+    /// `.notified()` 之前已 bump counter，follower 的 snapshot 等於
+    /// 當前值，poll 時無 mismatch，只登記 waker 睡死。
+    /// 修復：`done` 在 counter bump 前先 Release-store；follower 先
+    /// enable waker 再 Acquire-load done，true 則跳 await 繞過 snapshot
+    /// 窗。required for correctness。
     inflight: Mutex<HashMap<String, Arc<InflightEntry>>>,
 
     /// INSTR-ENSURE-1: global semaphore to cap concurrent ensure_symbol REST
@@ -304,11 +319,24 @@ impl InstrumentInfoCache {
         loop {
             pages += 1;
             if pages > MAX_PAGES {
+                // PAGINATE-METRIC-1 (2026-04-23, P1-5): hard cap hit. This is
+                // a soft signal — Bybit's linear universe has grown past our
+                // expected ceiling (10_000 symbols @ 1000/page). Promote to
+                // warn! so operators can spot it in log tailing; on a healthy
+                // exchange universe this line should never emit. If it does,
+                // raise MAX_PAGES or page_limit and redeploy.
+                // PAGINATE-METRIC-1（2026-04-23，P1-5）：硬上限觸發。若出現此
+                // log 代表 Bybit linear 宇宙已超越預期，operator 應調大 MAX_PAGES。
                 tracing::error!(
                     category = category,
                     max_pages = MAX_PAGES,
                     total_so_far = total,
                     "instrument info pagination hit max_pages guard — aborting loop / 分頁達硬上限，強制停止"
+                );
+                warn!(
+                    category = category,
+                    pages = MAX_PAGES,
+                    "refresh hit MAX_PAGES cap — possible Bybit linear universe growth beyond cache expectation, add metric/alert / 達頂可能代表 Bybit 宇宙擴張，建議加 metric/alert"
                 );
                 break;
             }
@@ -354,6 +382,27 @@ impl InstrumentInfoCache {
             pages = pages,
             "instrument info refreshed / 合約信息已刷新"
         );
+
+        // PAGINATE-METRIC-1: pages-utilisation signal. `pages > MAX_PAGES`
+        // means the loop broke via the guard (already warn!-logged above).
+        // `pages == MAX_PAGES` (exactly) = used the full envelope; warn so
+        // operator sees it trending. `pages < MAX_PAGES` = healthy, debug-only.
+        // PAGINATE-METRIC-1：分頁使用率訊號。達頂 warn，未達頂 debug。
+        if pages == MAX_PAGES {
+            warn!(
+                category = category,
+                pages = pages,
+                max_pages = MAX_PAGES,
+                "refresh used full pagination envelope — close to MAX_PAGES cap, consider raising limit / 分頁接近上限"
+            );
+        } else if pages < MAX_PAGES {
+            tracing::debug!(
+                category = category,
+                pages = pages,
+                max_pages = MAX_PAGES,
+                "refresh pagination within envelope / 分頁在上限內"
+            );
+        }
 
         Ok(total)
     }
@@ -656,24 +705,41 @@ impl Default for InstrumentInfoCache {
 ///
 /// Why we need `done` alongside `notify`:
 ///
-/// `tokio::sync::Notify::notify_waiters()` does NOT store a permit for future
-/// subscribers — it only wakes tasks that have already registered their
-/// waker at the moment of the call. That creates a classic lost-wakeup race
-/// for the singleflight follower path:
+/// The real (subtle) race is NOT just "notify_waiters() stores no permit".
+/// `tokio::sync::Notify::Notified` captures an internal counter
+/// (`notify_waiters_calls`) at **construction time**, before the first
+/// `.poll()` call. Roughly:
 ///
-/// 1. Follower observes the leader's inflight entry (under mutex), clones
-///    the `Arc<InflightEntry>`, drops the mutex.
-/// 2. Leader completes its fetch, writes the positive/negative cache, and
-///    calls `notify_waiters()`.
-/// 3. Follower, not yet having polled `.notified()`, has no registered
-///    waker — notification lost → `.notified().await` blocks forever.
+/// ```text
+///   let fut = notify.notified();       // <-- snapshots counter = K
+///   // ... leader does notify_waiters() which bumps counter to K+1 ...
+///   fut.poll();                        // sees current != snapshot → consume
+/// ```
 ///
-/// Fix: follower `Notified::enable()`s its waker slot synchronously BEFORE
-/// the await, then Acquire-loads `done`. If the leader has already finished
-/// (done==true), the follower skips the await and immediately re-checks the
-/// caches. If done==false, the follower awaits — safe, because its waker
-/// is registered in the Notify's intrusive list PRIOR to the leader's
-/// Release-store-to-done + notify_waiters sequence.
+/// The common understanding "notify_waiters stores no permit so if follower
+/// hasn't polled yet the notify is lost" is *directionally* correct but
+/// imprecise. The precise failure mode for our singleflight is:
+///
+/// 1. Leader calls `notify_waiters()`, bumping the counter (before the
+///    follower even constructs `.notified()`).
+/// 2. Follower, scheduled later, constructs `notify.notified()`. The
+///    `Notified` future snapshots the counter at its now-current value —
+///    **equal** to the current counter because the bump already happened.
+/// 3. Follower calls `enable()` / `.poll()`. Seeing `snapshot == current`,
+///    the future finds no mismatch to consume, registers its waker in the
+///    intrusive list, and suspends.
+/// 4. No further `notify_waiters()` is ever issued (leader is done,
+///    inflight slot already removed). Waker never fires → hang forever.
+///
+/// Fix: the leader publishes a separate `done` flag in the `InflightEntry`
+/// BEFORE bumping the Notify counter, with Release ordering. The follower
+/// enables its waker slot first (so any post-enable counter bump will wake
+/// it), THEN Acquire-loads `done`. If `done == true`, the follower skips
+/// `.await` entirely and re-reads the cache — this bypasses the snapshot
+/// window completely. If `done == false`, the Acquire-load synchronises
+/// with a future Release store that must occur before its paired
+/// `notify_waiters()`, and since `enable()` has already installed the
+/// waker, the follower is guaranteed to be woken. required for correctness.
 ///
 /// Memory ordering:
 ///   * Leader: `done.store(true, Release)` → `notify_waiters()`.
@@ -682,8 +748,13 @@ impl Default for InstrumentInfoCache {
 ///   `done == true` guarantees the follower sees all cache writes the
 ///   leader performed BEFORE the store.
 ///
-/// `notify_waiters()` 不儲存 permit，所以需要 `done` 旗標 + Acquire load
-/// 配合 enable() 才能關閉 lost-wakeup race。
+/// 真正的 race 不是「notify_waiters 無 permit」這麼簡單。`Notified` 在
+/// construction 時 snapshot counter；若 leader 在 follower 建 `.notified()`
+/// **之前**已 bump counter，follower snapshot 等於當前值，poll 時無
+/// mismatch，直接登記 waker 睡死。修復機制：`done` 在 counter bump
+/// 前先 Release-store；follower 先 enable 再 Acquire-load done，true
+/// 則短路 `.await`，false 則由 Release/Acquire 配對保證後續 notify 會
+/// 喚醒 follower。required for correctness。
 struct InflightEntry {
     /// Set to `true` by the leader once its fetch + cache writes are complete.
     /// Load with Acquire ordering to synchronise-with the leader's Release store.
