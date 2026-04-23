@@ -105,9 +105,28 @@ def _connect(dsn: Optional[str] = None):
         logger.info("model_registry: psycopg not installed; skipping DB write")
         return None
     try:
-        conninfo = dsn or os.environ.get("OPENCLAW_DATABASE_URL")
+        # DSN resolution mirrors parquet_etl._get_pg_conn so all ml_training
+        # callers share identical DB wiring (OPENCLAW_DATABASE_URL first, then
+        # POSTGRES_* env vars, then graceful skip).
+        # DSN 解析與 parquet_etl._get_pg_conn 對齊；ml_training 模組統一走
+        # OPENCLAW_DATABASE_URL → POSTGRES_* → skip。
+        conninfo = (
+            dsn
+            or os.environ.get("OPENCLAW_DATABASE_URL")
+            or os.environ.get("DSN")
+        )
         if not conninfo:
-            logger.info("model_registry: no DSN provided + OPENCLAW_DATABASE_URL unset; skipping")
+            user = os.environ.get("POSTGRES_USER")
+            password = os.environ.get("POSTGRES_PASSWORD")
+            db = os.environ.get("POSTGRES_DB")
+            if user and db:
+                host = os.environ.get("POSTGRES_HOST", "127.0.0.1")
+                port = os.environ.get("POSTGRES_PORT", "5432")
+                conninfo = f"postgresql://{user}:{password or ''}@{host}:{port}/{db}"
+        if not conninfo:
+            logger.info(
+                "model_registry: no DSN (OPENCLAW_DATABASE_URL / DSN / POSTGRES_* all unset); skipping"
+            )
             return None
         return psycopg.connect(conninfo)
     except Exception as e:  # noqa: BLE001 — any connect error → skip
