@@ -246,6 +246,80 @@ def check_edge_estimates_freshness() -> tuple[str, str]:
         return ("WARN", f"edge_estimates.json age {age_min:.0f}m, parse error: {e}")
 
 
+def check_model_registry_freshness(cur) -> tuple[str, str]:
+    """[9] learning.model_registry latest production model age — INFRA-PREBUILD-1 Part B.
+
+    Phase 1a/2: registry is empty (no training runs yet). PASS with explicit
+    "empty" message so operator knows this is expected dormancy and not a bug.
+
+    Phase 3+ (once production models land): latest production `train_date` per
+    slot should be within 30 days — PSI/drift mitigation. Thresholds:
+    - table missing → FAIL (V023 not applied)
+    - no production row → PASS + "empty" (Phase 1a/2 expected)
+    - latest production row train_date within 30d → PASS
+    - 30d < age ≤ 60d → WARN (retraining overdue)
+    - age > 60d → FAIL (model likely stale, drift risk)
+
+    [9] learning.model_registry 最新 production model 齡期。Phase 1a/2 空表屬預期；
+    Phase 3+ 要求最新 production model train_date 30 天內。
+    """
+    try:
+        cur.execute("""
+            SELECT to_regclass('learning.model_registry') IS NOT NULL
+        """)
+        exists = cur.fetchone()[0]
+    except Exception as e:
+        return ("FAIL", f"table existence check failed: {e}")
+    if not exists:
+        return ("FAIL", "learning.model_registry missing — V023 not applied")
+
+    # Per-slot latest-production max age: for each (strategy, engine_mode,
+    # quantile) with at least one production row, find the most recent
+    # train_date. Report the MIN across slots (the oldest slot is the bottleneck).
+    # 每 slot 最新 production 的最大齡：跨 slots 取最小（最舊 slot = 瓶頸）。
+    try:
+        cur.execute("""
+            WITH latest AS (
+                SELECT strategy, engine_mode, quantile,
+                       MAX(train_date) AS last_train_date
+                FROM learning.model_registry
+                WHERE canary_status = 'production'
+                GROUP BY strategy, engine_mode, quantile
+            )
+            SELECT
+                COUNT(*)::int                         AS production_slots,
+                MIN(last_train_date)                  AS oldest_train_date,
+                MAX(last_train_date)                  AS newest_train_date
+            FROM latest
+        """)
+        slots, oldest, newest = cur.fetchone()
+    except Exception as e:
+        return ("WARN", f"registry query failed: {e}")
+
+    if slots == 0:
+        return (
+            "PASS",
+            "model_registry production slots=0 (expected in Phase 1a/2; flip once "
+            "training pipeline writes first row via run_training_pipeline.py)",
+        )
+
+    # Compute age in days from oldest slot's train_date.
+    # 以最舊 slot 的 train_date 計算天數。
+    if oldest is None:
+        return ("PASS", f"model_registry production slots={slots} but no train_date set")
+    now = datetime.now(timezone.utc).date()
+    age_days = (now - oldest).days
+    msg = (
+        f"model_registry production slots={slots}, "
+        f"oldest={oldest} ({age_days}d ago), newest={newest}"
+    )
+    if age_days > 60:
+        return ("FAIL", msg + " — oldest production model >60d, retrain overdue")
+    if age_days > 30:
+        return ("WARN", msg + " — oldest production model >30d, retrain due")
+    return ("PASS", msg)
+
+
 def check_shadow_exit_ratio(cur) -> tuple[str, str]:
     """[8] learning.decision_shadow_exits activity — INFRA-PREBUILD-1 Part A.
 
@@ -365,6 +439,12 @@ def main() -> int:
             # [8] shadow_exits — INFRA-PREBUILD-1 A 部；在 conn.close 前跑。
             s, m = check_shadow_exit_ratio(cur)
             results.append(("[8] shadow_exits_24h", s, m))
+
+            # [9] model_registry — INFRA-PREBUILD-1 Part B
+            # Phase 1a/2 expected empty; [9] turns signal once Phase 3+ lands.
+            # [9] model_registry — INFRA-PREBUILD-1 B 部；Phase 1a/2 預期空。
+            s, m = check_model_registry_freshness(cur)
+            results.append(("[9] model_registry_freshness", s, m))
     finally:
         conn.close()
 
