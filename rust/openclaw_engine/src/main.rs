@@ -807,6 +807,43 @@ async fn async_main(
     let db_pool =
         Arc::new(openclaw_engine::database::pool::DbPool::connect(&cfg_snap_db.database).await);
 
+    // Phase 2 (2026-04-24 V023 postmortem): opt-in auto-migrate.
+    // Default OFF; set OPENCLAW_AUTO_MIGRATE=1 to run `sql/migrations/V*.sql`
+    // through a hand-parsed Migrator before any writer task depends on a
+    // specific schema revision. Seeds `_sqlx_migrations` from the canary
+    // `learning.model_registry` table when the tracker is empty but V023 has
+    // already been applied via the legacy manual `psql < V*.sql` path. Aborts
+    // startup on error to make silent-noop classes of bugs loud.
+    // 2026-04-24 V023 postmortem 後新加：opt-in 自動遷移。
+    // 預設關；設 OPENCLAW_AUTO_MIGRATE=1 才於依賴 schema 的 writer 啟動前
+    // 套用 `sql/migrations/V*.sql`（自刻 parser 認 Flyway V###__ 格式）。
+    // 若 `_sqlx_migrations` 空而 V023 canary 已建，seed legacy 已套用狀態。
+    // 失敗直接中止啟動，讓靜默 noop 類錯誤顯性化。
+    {
+        let base_dir = std::env::var("OPENCLAW_BASE_DIR")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|_| std::path::PathBuf::from("."));
+        match openclaw_engine::database::migrations::MigrationRunner::run_if_enabled(
+            db_pool.get(),
+            &base_dir,
+        )
+        .await
+        {
+            Ok(outcome) => info!(
+                ?outcome,
+                "auto_migrate runner completed / 自動遷移執行器已完成"
+            ),
+            Err(e) => {
+                error!(
+                    error = %e,
+                    "auto_migrate runner failed — aborting startup \
+                     / 自動遷移失敗，中止啟動"
+                );
+                std::process::exit(1);
+            }
+        }
+    }
+
     // Initialize BudgetTracker + audit pool
     tasks::init_budget_and_audit(&db_pool, &budget_tracker_slot, &audit_pool_slot).await;
 
