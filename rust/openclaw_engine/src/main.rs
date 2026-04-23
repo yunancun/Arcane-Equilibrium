@@ -557,29 +557,56 @@ async fn async_main(
     // R-05 + INSTR-WIRE-1: Load instrument info cache using shared client.
     //
     // INSTR-WIRE-1 (2026-04-23) fail-closed startup:
-    //   - Ok(0)          → panic (universe empty; refusing to start trading)
-    //   - Err(e)         → panic (exchange unreachable; refusing to start trading)
+    //   - Ok(0)          → graceful cancel + exit(1) (universe empty)
+    //   - Err(e)         → graceful cancel + exit(1) (exchange unreachable)
     //   - Ok(n) n<100    → warn but continue (health threshold; conservative)
     //   - Ok(n) n>=100   → info
     //
-    // Rationale: without a populated instrument cache, M-1 fail-closed rejects
-    // every order ever placed. Starting anyway just wastes compute + pollutes
-    // logs; worse, the engine looks "up" to operators while silently dead.
-    // Fail noisily at boot so restarts are attempted and the root cause
-    // (network / Bybit outage / credential failure) is visible immediately.
+    // INSTR-WIRE-1-GRACEFUL (2026-04-23, E2 review): replaced panic! with
+    // cancel.cancel() + tokio::task::yield_now().await + std::process::exit(1).
+    // Rationale: panic! inside async runtime has ambiguous shutdown semantics
+    // (depends on whether this future is polled on the runtime's main thread
+    // or a worker; abort vs unwind; whether panic_hook has had a chance to
+    // flush). An explicit cancel + exit gives us:
+    //   1. `cancel.cancel()` — every already-spawned child task (IPC server,
+    //      live/demo slots, cancel-scoped helpers) observes the token and
+    //      shuts down cleanly before we tear the runtime down.
+    //   2. `tokio::task::yield_now().await` — gives the runtime one scheduler
+    //      turn so the cancel signal propagates and the tracing subscriber
+    //      has a window to flush the error! line to disk.
+    //   3. `std::process::exit(1)` — signals "hard fail" to the supervising
+    //      process (systemd / restart_all.sh) so restart policy kicks in.
+    //      Destructors at runtime scope still run (unlike abort).
+    // The global panic_hook installed earlier in main.rs remains in place
+    // for other unexpected panic paths; this refactor only touches the two
+    // INSTR-WIRE-1 fail-closed arms.
+    //
+    // Rationale (original): without a populated instrument cache, M-1
+    // fail-closed rejects every order ever placed. Starting anyway just
+    // wastes compute + pollutes logs; worse, the engine looks "up" to
+    // operators while silently dead. Fail noisily at boot so restarts are
+    // attempted and the root cause (network / Bybit outage / credential
+    // failure) is visible immediately.
     //
     // INSTR-WIRE-1 啟動 fail-closed：缺 universe 等於 M-1 全拒單，不如當場
     // 炸掉讓 operator 立即發現，而非假裝跑著實則全啞。
+    // INSTR-WIRE-1-GRACEFUL：panic! 在 async runtime 裡語意曖昧，改為
+    // cancel.cancel() + yield + exit(1)。panic_hook 仍保留為其他路徑的兜底。
     if let Some(ref client) = shared_client {
         let instrument_cache =
             Arc::new(openclaw_engine::instrument_info::InstrumentInfoCache::new());
         match instrument_cache.refresh(&**client, "linear").await {
             Ok(0) => {
-                panic!(
+                error!(
                     "instrument info startup refresh returned 0 symbols — \
                      fail-closed (refusing to start trading with empty universe) / \
                      啟動拉取合約信息回傳 0 — 空 universe 拒絕啟動交易引擎"
                 );
+                cancel.cancel();
+                // One runtime turn for tracing flush + child-task cancel pickup.
+                // 讓出一個 scheduler turn，供 tracing flush + 子任務接 cancel。
+                tokio::task::yield_now().await;
+                std::process::exit(1);
             }
             Ok(count) if count < 100 => {
                 shared_instruments = Some(Arc::clone(&instrument_cache));
@@ -596,11 +623,15 @@ async fn async_main(
                 info!(symbols = count, "instrument info loaded / 品種規格已加載");
             }
             Err(e) => {
-                panic!(
-                    "instrument info startup refresh failed: {e} — \
+                error!(
+                    error = ?e,
+                    "instrument info startup refresh failed — \
                      fail-closed (refusing to start trading without universe) / \
-                     啟動拉取合約信息失敗：{e} — 無 universe 拒絕啟動交易引擎"
+                     啟動拉取合約信息失敗 — 無 universe 拒絕啟動交易引擎"
                 );
+                cancel.cancel();
+                tokio::task::yield_now().await;
+                std::process::exit(1);
             }
         }
 
