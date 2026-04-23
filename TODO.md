@@ -201,6 +201,53 @@ git status && git log --oneline -5
 **執行順序**：短期實驗已部署 → 等 24-48h 樣本 → 並行寫 #3 counterfactual replay → #3 結果驅動 #1/2/4/5 是否做。
 - Operator 執行：`ssh trade-core "cd ~/BybitOpenClaw/srv && python3 helper_scripts/db/counterfactual_exit_replay.py --days 7 --cost-model both"` → 讀 VERDICT（`fee_only` 模型為主）
 
+**2026-04-24 Phase 1+2 完成 + 主要 findings**（QC/FA/FM/PM 多角色審議 + 2 輪 adversarial review）：
+
+✅ **Phase 1 完成 commit `5cabfd9`** — 加 5 flag + 168-LoC sibling `counterfactual_v2_parity.py`：
+  - `--v2-parity` (v2 4-Gate + 7 sensitivity overrides) · `--exclude-close-tag '%risk_close:%'` 默認 ON（FA category-error）· `--split-window` 4-bucket (pre-T3 / T3-T4-vacuum / post-T4-pre-P013 / **post-P013-clean**) · `--bootstrap-ci` + `--per-strategy-median` + `--trimmed-mean-pct` · `--peak-sanity-histogram`
+  - script 684 → 1235 行（略超 §九 1200 soft warn，sibling 分拆後合 1403；bilingual MODULE_NOTE + exhaustive CLI help 所致，進一步 trim FUP）
+
+✅ **Phase 2 完成 2026-04-24 23:00 UTC** — v2-parity + 4-bucket rerun on 7d window 揭露：
+
+| Bucket | n | cf_fired | improv_avg (bps) | actual_avg (bps) |
+|---|---:|---:|---:|---:|
+| pre-T3 | 0 | 0 | — | — |
+| T3-T4-vacuum (4/19–4/21) | 89 | 76 | **+239.64** | +9.21 |
+| post-T4-pre-P013 (4/21–4/22 21:35) | 14 | 11 | +60.06 | −22.31 |
+| **post-P013-clean** (4/22 21:35+, ~30h) | **74** | **37** | **+11.95** | −3.72 |
+| **ALL pooled** | 177 | 124 | +155.77 | +1.31 |
+
+**重大發現**：
+1. **FA H3 MICRO-PROFIT vacuum hypothesis ✅ 強確認** — vacuum +239 bps / clean +12 bps = **20x**；**+223 bps 首跑結果 90% 是 vacuum contamination**，不是 phys_lock 真實效益
+2. **PM P0-13 ATR pollution hypothesis ✅ 確認** — post-T4-pre-P013 +60 / clean +12 = 5x；ATR scale bug 另疊 5x 放大（pre-fix `atr_pct` 下 scale 100-1000x，`giveback_atr_norm` 上 scale 200-400x）
+3. **真實 clean signal = +11.95 bps/exit** (37 fires, 89.2% pos) — 方向對但 magnitude 遠低於 FM 預測 (+250-450 bps)
+4. **orphan_frozen clean window = 0 rows**（FA 強 fit 候選無 clean 資料；outlier HIGHUSDT +3551 Δ 在 vacuum bucket）
+5. **Option A `missing_edge_fallback=10.0` 已 deploy 且 loaded**（TOML mtime 20:07 < engine start 21:12，B1 驗證），Gate 1 fallback 對 sync-label 已生效
+6. **QC 揭露**：CLAUDE.md §三「`ExitConfig` hot-reload 可調」claim **過期** — IPC handler 無 `exit.*` 欄位，實際需 TOML + `--rebuild`（新 P2 debt EDGE-DIAG-1-FUP-IPC）
+
+### 🟡 EDGE-DIAG-1 後續（Phase 3 延後 / Phase 4 active）
+
+- [ ] **Phase 3（延後，等資料）** — strategy-scoped Gate 1 fallback 部署決策
+  - **前提條件**（必須 ALL 滿足才進）：(a) post-P013-clean bucket ≥ 200 rows pooled，或 per-strategy ≥ 50 cf_fired；(b) ma_crossover + grid_trading bootstrap 95% CI lo > 0；(c) orphan_frozen clean 樣本 ≥ 20 rows（FA 強 fit 候選必須獨立驗證）
+  - **當前**（2026-04-24）：clean rows 74（grid 44 / ma 24 / bb 2 / orphan 0 / bb_breakout 0）遠不足；按 ~2.5 rows/h 速率，至 200 rows 預估 ≥ 5 天（~2026-05-01）
+  - **healthcheck**（CLAUDE.md §七 強制）：`passive_wait_healthcheck.py` check [10] `check_counterfactual_clean_window_growth`（下 Phase 4 實作）
+  - **Kill switch**：未來部署後用 `ssh trade-core "sed -i 's/missing_edge_fallback_bps = 10.0/missing_edge_fallback_bps = -10.0/' settings/risk_control_rules/risk_config_demo.toml && bash helper_scripts/restart_all.sh --rebuild"`；< 60s 可逆需先解 EDGE-DIAG-1-FUP-IPC
+
+- [ ] **Phase 4（active，可立即做）** — daily cron counterfactual monitor
+  - 接入 `passive_wait_healthcheck.py` 為 check [10] `check_counterfactual_clean_window_growth`
+  - 每日 06:00 UTC 跑 `counterfactual_exit_replay.py --days 2 --v2-parity --split-window --cost-model fee_only --output-json /tmp/openclaw/audit/daily/`
+  - Persist `post-P013-clean` bucket 每日 n/cf_fired/improv_avg/per-strategy breakdown
+  - 退出條件：clean n ≥ 200 + per-strategy 樣本滿足 Phase 3 前提 → healthcheck 提示 "Phase 3 go"
+  - ~30-50 LoC 單 file，零 runtime 風險
+  - **對齊 CLAUDE.md §七 強制規則「被動等待 TODO 必附 healthcheck」**（2026-04-23 新增）— Phase 3 deferral 是典型被動等待，Phase 4 本質即該規則要求的 check function
+
+- [ ] **EDGE-DIAG-1-FUP-IPC（P2，QC round 1 揭露）** — `ExitConfig` 加 IPC hot-reload 路徑
+  - 現狀：`rust/openclaw_engine/src/ipc_server/handlers/risk.rs:42-138` IPC `update_risk_config` 只暴露 21 legacy fields，**零個 `exit.*`**；`ConfigStore<RiskConfig>` 用 ArcSwap 但僅 bootstrap load，無 SIGHUP 路徑。CLAUDE.md §三「`missing_edge_fallback_bps` hot-reload 可調」claim 過期。
+  - 修：加 7 個 `exit.*` 欄位到 `IpcRiskUpdate` struct + handler parse → `ConfigStore::apply_patch` + `with_toml_persist`（~15 LoC + 1 test）；同步更正 CLAUDE.md §三
+  - **價值**：Phase 3 部署後任何 fallback 調整 < 60s 可逆（非 rebuild ~3 min）
+  - **優先級**：P2；非 blocker；做在 Phase 3 前更安全
+  - 估 ~1d
+
 **關聯**：P0-3 Phase 5 edge 重評（前置）· P1-10 EDGE-P2-3 PostOnly 1w 觀察（並行）· DUAL-TRACK Phase 1b counterfactual replay audit（已列）· §P1-14 EDGE-ESTIMATE-BIND-BLOCKED-1（cells 翻正前提）
 
 **檔案/工件**：
