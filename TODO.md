@@ -102,6 +102,7 @@ git status && git log --oneline -5
   3. 重跑 P0-3 Phase 5 edge baseline（待 P0-13/P0-14 修好 + PostOnly 1w 觀察期後）
 - **預估**：~2h 文檔更正；edge baseline 重跑延後
 - 觸發：2026-04-22 被動等待 audit，詳 `docs/worklogs/2026-04-22--passive_wait_silent_fail_audit.md` §3.3 + §3.4
+- ✅ **2026-04-23 文檔更正完成**（commit pending）— TODO.md P1-10 §推理鏈 R1 驗收表 + 關鍵判讀 bullets + P1-19 H3 RCA 連帶更正；CLAUDE.md §三 無 active MICRO-PROFIT claim（operator 已手動精簡吸收）；Fix scope §1-§2 達成，§3 edge baseline 重跑仍依 P0-13/P0-14 + PostOnly 1w 排期
 
 ### 🔧 健康檢查基礎設施 / Healthcheck infra
 
@@ -277,7 +278,7 @@ git status && git log --oneline -5
 **實證驗證**（2026-04-22 22:15 CEST operator 授權跑 psql）：
 - demo 24h close_fills = 14，**entry_context_id 100% 填充（14/14）** → **H1 證偽**（FILL-CONTEXT-LINKAGE-1 Rust 鏈健康）
 - backfill 實寫 7d timeline：139 → 24 → 44 → 14，線性對齊 close_fills → **H2 證偽**（無 silent fail-open）
-- demo close_fills 4 日軌跡 199 → 31 → 54 → 14（2026-04-19 起每日 85% 驟降）→ **H3 命中**（策略自我收斂，fee drag + MICRO-PROFIT-FIX-1 narrow-band 壓制入場）
+- demo close_fills 4 日軌跡 199 → 31 → 54 → 14（2026-04-19 起每日 85% 驟降）→ **H3 命中**（策略自我收斂，fee drag + ~~MICRO-PROFIT-FIX-1 narrow-band 壓制入場~~ 🔴 **2026-04-22 P0-15 部分推翻**：MICRO-PROFIT narrow-band gate 在 T3 deprecation 被連帶註解、無 runtime 實作，「壓制入場」機制實際不存在；H3 主因純為 fee drag / R:R 結構問題，不含 MICRO-PROFIT 影響）
 - 按當前 14 labels/day/2 主 slice 速率，BLURUSDT 47→200 需 **~22 天**（非原估 3-5d）
 
 **連帶 P1-7 C 影響**：ONNX 訓練延後至 **2026-04-28+**（由 P1-10 EDGE-P2-3 PostOnly 1w 觀察結果決定入場量是否回升）。P1-7 C 進入被動等待，無獨立 unblock 路徑。
@@ -366,24 +367,26 @@ git status && git log --oneline -5
 
 **R1 驗收 ✅ 2026-04-20 00:55 local（24h 窗口實測，redeploy 2026-04-19 22:32 local）**：
 
+> 🔴 **2026-04-22 P0-15 推翻**：本表 `risk:cost_edge_micro` 兩行（demo 24 / paper 12）所依據的查詢窗口涵蓋 2026-04-19 T3 rebuild **之前** cached `risk_close:COST EDGE%` 行為；實際 2026-04-20 起 `cost_edge_micro` **0 fire**（7d 35 rows 全集中在 04-18/19 rebuild 前）。MICRO-PROFIT-FIX-1 narrow-band gate 在 T3 deprecation 時被連帶註解、沒有獨立 runtime 實作。表格行保留供稽核（勿刪），下方以 🔴 strikethrough 標明失效，詳見 §P0-15 + `docs/worklogs/2026-04-22--passive_wait_silent_fail_audit.md` §3.3/§3.4。
+
 | engine | kind | n | win_rate | asym | total |
 |---|---|---:|---:|---:|---:|
 | demo | ma_crossover | 37 | **0.378** | **0.88** | −$6.39 |
 | demo | grid_trading | 98 | 0.531 | **2.09** | −$9.72 |
-| demo | risk:cost_edge_micro | 24 | 1.000 | — | **+$4.68** |
+| demo | ~~risk:cost_edge_micro~~ | ~~24~~ | ~~1.000~~ | — | ~~**+$4.68**~~ 🔴 P0-15 推翻（cached artifact，實際 0 fire） |
 | demo | risk:trailing | 2 | 1.000 | — | **+$13.22** |
 | demo | risk:fast_track | 7 | 0.571 | 1.16 | +$0.59 |
 | demo | risk:dynamic_stop | 1 | 0.000 | — | −$10.41 |
 | paper | grid_trading | 34 | 0.235 | 1.80 | −$10.80 |
-| paper | risk:cost_edge_micro | 12 | 1.000 | — | +$7.49 |
+| paper | ~~risk:cost_edge_micro~~ | ~~12~~ | ~~1.000~~ | — | ~~+$7.49~~ 🔴 P0-15 推翻（cached artifact，實際 0 fire） |
 | live_demo | ma/grid | 8 | 0.625 | — | +$0.70（樣本太小） |
 
 **關鍵判讀**：
 - **ma_crossover asym 2.54× → 0.88 翻轉**（虧損側現在比獲勝側小），但 win rate 64%→37.8% 崩 → R:R 題目變成「勝率問題」非「不對稱問題」。Track P T4 加速理由弱化。
 - **grid_trading asym 1.71× → 2.09× 惡化**。fee drag 持續主導，P1-10 grid cooldown audit 仍為 P0-3 edge 重評阻塞。
 - **Track P T4 phys_lock 0 觸發**（符合：`on_tick.rs:1456-1474` `evaluate_positions(..., |_| None)` 導致 PHYS-LOCK 拿不到 ExitFeatures，永遠 Hold）。
-- **⚠️ P1-10 推理鏈 §1 「redeploy 後 `trading.fills` 0 條 COST EDGE close」claim 不成立**：24h demo 24 + paper 12 COST EDGE close 真實發生，都是 MICRO-PROFIT-FIX-1 narrow-band `ratio ≥ 0.20 & pnl ≥ 0.30%` 輸出（`risk_checks.rs` MICRO-PROFIT 分支仍寫 `strategy_name="risk_close:COST EDGE:..."` 重用 label）。**Priority 6 未真空**，MICRO-PROFIT gate 吸收了舊 COST EDGE 的 winner-pick 功能（demo +$4.68 / paper +$7.49 / 24 + 12 fills 100% 勝率），是當前最重要的正 edge 來源。
-- **MICRO-PROFIT + trailing combined 輸出**：demo +$18.49 / 24h（+$6.68 fast_track/cost_edge_micro + $13.22 trailing − $10.41 dynamic_stop outlier）。基礎策略 −$16.11 / risk_close +$7.39 → demo 24h 總 net **−$8.72**。
+- 🔴 **2026-04-22 P0-15 推翻** ~~**⚠️ P1-10 推理鏈 §1 「redeploy 後 `trading.fills` 0 條 COST EDGE close」claim 不成立**：24h demo 24 + paper 12 COST EDGE close 真實發生，都是 MICRO-PROFIT-FIX-1 narrow-band `ratio ≥ 0.20 & pnl ≥ 0.30%` 輸出（`risk_checks.rs` MICRO-PROFIT 分支仍寫 `strategy_name="risk_close:COST EDGE:..."` 重用 label）。**Priority 6 未真空**，MICRO-PROFIT gate 吸收了舊 COST EDGE 的 winner-pick 功能（demo +$4.68 / paper +$7.49 / 24 + 12 fills 100% 勝率），是當前最重要的正 edge 來源。~~ — 真相：`risk_close:COST EDGE%` 7d 僅 35 rows 全集中在 T3 rebuild 前，2026-04-20/21/22 連續 3 天 0 fire；原「24 筆 / 12 筆」為查詢窗口涵蓋 rebuild 前 cached 行為的誤判。**推理鏈 §1 原「0 條」claim 其實接近對**（2026-04-20 修正版本才是誤判）。Priority 6 在 T3 rebuild→T4 接線期間真正空窗 2.5 天。
+- 🔴 **2026-04-22 P0-15 推翻** ~~**MICRO-PROFIT + trailing combined 輸出**：demo +$18.49 / 24h（+$6.68 fast_track/cost_edge_micro + $13.22 trailing − $10.41 dynamic_stop outlier）。基礎策略 −$16.11 / risk_close +$7.39 → demo 24h 總 net **−$8.72**。~~ — MICRO-PROFIT 部分為 cached artifact；combined 真實值 = trailing +$13.22 − dynamic_stop $10.41 ≈ +$2.81 / 24h，風險層實際只有 trailing + dynamic 兩個被動止損在動（詳 §P0-15）。
 
 **判決**：
 1. Track P T4 wiring **按 W24 排期不加速**（asym 已翻、phys_lock 0 fire 符合設計）。
