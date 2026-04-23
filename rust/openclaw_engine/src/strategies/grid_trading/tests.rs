@@ -1,0 +1,696 @@
+//! Grid Trading unit tests.
+//! Grid Trading 單元測試。
+//!
+//! MODULE_NOTE (EN): Split out of `strategies/grid_trading.rs` by GRID-TRADING-MOD-SPLIT-1
+//!   (2026-04-23) to honour CLAUDE.md §九's 1200-line hard cap (pre-split 1729 lines).
+//!   Contains the 36-case test suite covering grid creation, lazy init, buy/sell
+//!   on cross, Close-on-inventory-reduction lifecycle, close_skipped rollback,
+//!   adaptive + geometric grid behaviours, OU spacing update, health check +
+//!   auto-rebalance, param range / validation, G-SR-1 A3 trend cooldown, and
+//!   EDGE-P2-3 Phase 1a PostOnly maker entry. All tests preserved byte-identical
+//!   to pre-split; no tests added, removed, or reordered.
+//! MODULE_NOTE (中)：GRID-TRADING-MOD-SPLIT-1（2026-04-23）由
+//!   `strategies/grid_trading.rs` 拆出以遵守 CLAUDE.md §九 1200 行硬上限
+//!   （拆前 1729 行）。本檔包含 36 個測試案例，涵蓋網格建構、延遲初始化、
+//!   穿越時買入/賣出、庫存縮減時 Close 生命週期、close_skipped 回滾、自適應
+//!   + 幾何網格行為、OU 間距更新、健康檢查 + 自動再平衡、參數範圍 / 驗證、
+//!   G-SR-1 A3 趨勢冷卻，以及 EDGE-P2-3 Phase 1a PostOnly maker 入場。所有
+//!   測試與拆前逐字節相同；未新增、刪除或重排任何測試。
+
+use super::*;
+use crate::order_manager::TimeInForce;
+use crate::strategies::{Strategy, StrategyAction, StrategyParams};
+use crate::tick_pipeline::TickContext;
+
+fn ctx(price: f64, ts: u64) -> TickContext<'static> {
+    TickContext {
+        symbol: "BTC",
+        price,
+        timestamp_ms: ts,
+        indicators: None,
+        signals: &[],
+        h0_allowed: true,
+        funding_rate: None,
+        index_price: None,
+        open_interest: None,
+    }
+}
+
+#[test]
+fn test_grid_creation() {
+    // Grid levels are lazily initialized on first tick, not at construction.
+    // 網格層級在首次 tick 時延遲初始化，不在構造時。
+    let mut g = GridTrading::new(49000.0, 51000.0);
+    assert!(
+        g.grid_levels.is_empty(),
+        "grid_levels should be empty before first tick"
+    );
+    g.on_tick(&ctx(50000.0, 0)); // triggers lazy init with template_bounds
+    let levels = g.grid_levels.get("BTC").unwrap();
+    assert_eq!(levels.len(), DEFAULT_GRID_COUNT);
+    assert!((levels[0] - 49000.0).abs() < 0.01);
+}
+
+#[test]
+fn test_grid_buy_on_down_cross() {
+    let mut g = GridTrading::new(49000.0, 51000.0);
+    g.on_tick(&ctx(50500.0, 0)); // initial
+    let i = g.on_tick(&ctx(49500.0, 100_000)); // cross down
+    assert!(!i.is_empty());
+    // net_inventory was 0 before buy → Open (new long)
+    match &i[0] {
+        StrategyAction::Open(intent) => assert!(intent.is_long),
+        other => panic!("expected Open, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_grid_sell_on_up_cross() {
+    let mut g = GridTrading::new(49000.0, 51000.0);
+    g.on_tick(&ctx(49500.0, 0));
+    let i = g.on_tick(&ctx(50500.0, 100_000));
+    assert!(!i.is_empty());
+    // net_inventory was 0 before sell → Open (new short)
+    match &i[0] {
+        StrategyAction::Open(intent) => assert!(!intent.is_long),
+        other => panic!("expected Open, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_no_inventory_cap_blocking() {
+    // Inventory cap removed — intent_processor Gate 1.5 handles duplicates.
+    // 庫存上限已移除 — intent_processor Gate 1.5 處理重複。
+    let mut g = GridTrading::new(49000.0, 51000.0);
+    // First tick initializes grid lazily / 首次 tick 延遲初始化網格
+    g.on_tick(&ctx(50500.0, 0));
+    g.net_inventory.insert("BTC".into(), g.max_inventory);
+    let i = g.on_tick(&ctx(49500.0, 100_000));
+    assert!(!i.is_empty()); // Grid always emits; intent_processor decides
+}
+
+#[test]
+fn test_grid_close_on_inventory_reduction() {
+    // When net_inventory > 0 and price crosses up (sell), it's a Close (closing long).
+    // When net_inventory < 0 and price crosses down (buy), it's a Close (closing short).
+    // 當 net_inventory > 0 且價格上穿（賣出），為 Close（平多）。
+    // 當 net_inventory < 0 且價格下穿（買入），為 Close（平空）。
+    let mut g = GridTrading::new(49000.0, 51000.0);
+
+    // Step 1: Buy to build positive inventory / 步驟 1：買入建立正庫存
+    g.on_tick(&ctx(50500.0, 0));
+    let i = g.on_tick(&ctx(49500.0, 100_000));
+    assert!(!i.is_empty());
+    assert!(*g.net_inventory.get("BTC").unwrap_or(&0.0) > 0.0);
+    match &i[0] {
+        StrategyAction::Open(intent) => assert!(intent.is_long),
+        other => panic!("expected Open for initial buy, got {:?}", other),
+    }
+
+    // Step 2: Sell with positive inventory → Close / 步驟 2：正庫存賣出 → Close
+    let i = g.on_tick(&ctx(50500.0, 200_000));
+    assert!(!i.is_empty());
+    match &i[0] {
+        StrategyAction::Close { reason, .. } => assert_eq!(reason, "grid_close_long"),
+        other => panic!("expected Close for inventory reduction, got {:?}", other),
+    }
+    // Inventory NOT yet adjusted (deferred until on_close_confirmed)
+    // 庫存尚未調整（延遲到 on_close_confirmed）
+    assert!(
+        *g.net_inventory.get("BTC").unwrap_or(&0.0) > 0.0,
+        "inventory deferred: still positive before confirm"
+    );
+
+    // Pipeline confirms close → inventory adjusted
+    // 管線確認平倉 → 庫存已調整
+    g.on_close_confirmed("BTC");
+    let inv = g.net_inventory.get("BTC").copied().unwrap_or(0.0);
+    assert!(
+        inv.abs() < 1e-9,
+        "inventory should be 0 after close confirmed, got {}",
+        inv
+    );
+}
+
+#[test]
+fn test_grid_close_skipped_rolls_back() {
+    // When pipeline skips a Close (no position), on_close_skipped rolls back cross state.
+    // 管線跳過 Close（無倉位）時，on_close_skipped 回滾交叉狀態。
+    let mut g = GridTrading::new(49000.0, 51000.0);
+    // Build positive inventory via Open
+    g.on_tick(&ctx(50500.0, 0));
+    g.on_tick(&ctx(49500.0, 100_000));
+    let prev_cross = g.last_cross_idx.get("BTC").copied();
+    let prev_inventory = g.net_inventory.get("BTC").copied().unwrap_or(0.0);
+
+    // Emit Close (sell with positive inventory)
+    let i = g.on_tick(&ctx(50500.0, 200_000));
+    assert!(!i.is_empty());
+    match &i[0] {
+        StrategyAction::Close { .. } => {}
+        other => panic!("expected Close, got {:?}", other),
+    }
+
+    // Pipeline says no position found → skip → roll back
+    g.on_close_skipped("BTC");
+    assert_eq!(
+        g.last_cross_idx.get("BTC").copied(),
+        prev_cross,
+        "cross state should be rolled back"
+    );
+    // Inventory unchanged since Close doesn't adjust eagerly
+    let cur_inv = g.net_inventory.get("BTC").copied().unwrap_or(0.0);
+    assert!((cur_inv - prev_inventory).abs() < 1e-9);
+}
+
+#[test]
+fn test_adaptive_grid_init_on_first_tick() {
+    // Adaptive grid starts empty and auto-initializes on first tick
+    // 自适应网格初始为空，首次 tick 时自动初始化
+    let mut g = GridTrading::new_adaptive();
+    assert!(g.grid_levels.is_empty());
+    let intents = g.on_tick(&ctx(50000.0, 0));
+    let levels = g.grid_levels.get("BTC").unwrap();
+    assert_eq!(levels.len(), DEFAULT_GRID_COUNT);
+    // Range should be ±10% of 50000 → 45000..55000
+    assert!((levels[0] - 45000.0).abs() < 1.0);
+    assert!(intents.is_empty()); // first tick = no trade
+}
+
+#[test]
+fn test_ou_spacing_update() {
+    let mut g = GridTrading::new(49000.0, 51000.0);
+    g.on_tick(&ctx(50000.0, 0)); // lazy init
+                                 // Fill price history for BTC
+    let history = g.price_history.entry("BTC".into()).or_default();
+    for i in 0..60 {
+        history.push(50000.0 + (i as f64 * 0.1).sin() * 100.0);
+    }
+    g.update_ou_spacing("BTC");
+    let levels = g.grid_levels.get("BTC").unwrap();
+    assert_eq!(levels.len(), DEFAULT_GRID_COUNT);
+}
+
+// ── Geometric spacing tests / 幾何間距測試 ──
+
+#[test]
+fn test_geometric_grid_levels() {
+    // Verify geometric spacing produces correct ratio-based levels.
+    // 驗證幾何間距產生正確的等比層級。
+    let mut g = GridTrading::new_geometric(1000.0, 2000.0);
+    g.on_tick(&ctx(1500.0, 0)); // lazy init with template_bounds
+    let levels = g.grid_levels.get("BTC").unwrap();
+    assert_eq!(levels.len(), DEFAULT_GRID_COUNT);
+    assert!((levels[0] - 1000.0).abs() < 0.01);
+    let last = levels[levels.len() - 1];
+    assert!((last - 2000.0).abs() < 0.1);
+
+    // All ratios between consecutive levels should be equal.
+    // 所有相鄰層級之間的比率應相等。
+    let expected_ratio = (2000.0_f64 / 1000.0).powf(1.0 / 9.0);
+    for i in 1..levels.len() {
+        let ratio = levels[i] / levels[i - 1];
+        assert!(
+            (ratio - expected_ratio).abs() < 1e-10,
+            "Ratio at index {} was {}, expected {}",
+            i,
+            ratio,
+            expected_ratio
+        );
+    }
+}
+
+#[test]
+fn test_geometric_vs_linear() {
+    // Geometric levels should differ from linear levels for the same bounds.
+    // 相同邊界下，幾何層級應與線性層級不同。
+    let mut lin = GridTrading::new(1000.0, 2000.0);
+    let mut geo = GridTrading::new_geometric(1000.0, 2000.0);
+    lin.on_tick(&ctx(1500.0, 0)); // lazy init
+    geo.on_tick(&ctx(1500.0, 0)); // lazy init
+    let lin_l = lin.grid_levels.get("BTC").unwrap();
+    let geo_l = geo.grid_levels.get("BTC").unwrap();
+
+    assert_eq!(lin_l.len(), geo_l.len());
+
+    // First and last levels match (same bounds).
+    // 首末層級應相同（邊界一致）。
+    assert!((lin_l[0] - geo_l[0]).abs() < 0.01);
+    let last = lin_l.len() - 1;
+    assert!((lin_l[last] - geo_l[last]).abs() < 0.5);
+
+    // Middle levels should differ — geometric bunches more toward lower end.
+    // 中間層級應不同 — 幾何模式在低端更密集。
+    let mid = lin_l.len() / 2;
+    assert!(
+        (lin_l[mid] - geo_l[mid]).abs() > 1.0,
+        "Middle levels should differ: linear={}, geometric={}",
+        lin_l[mid],
+        geo_l[mid]
+    );
+}
+
+// ── Health check tests / 健康檢查測試 ──
+
+#[test]
+fn test_health_check_in_range() {
+    // Price within grid → Healthy.
+    // 價格在網格範圍內 → Healthy。
+    let mut g = GridTrading::new(49000.0, 51000.0);
+    g.on_tick(&ctx(50000.0, 0)); // lazy init
+    let h = g.check_health("BTC", 50000.0);
+    assert_eq!(h, GridHealth::Healthy);
+    assert_eq!(g.out_of_range_count.get("BTC").copied().unwrap_or(0), 0);
+}
+
+#[test]
+fn test_health_check_out_of_range() {
+    // Price outside grid → OutOfRange (but not yet NeedsRebalance).
+    // 價格超出網格 → OutOfRange（但尚未到 NeedsRebalance）。
+    let mut g = GridTrading::new(49000.0, 51000.0);
+    g.on_tick(&ctx(50000.0, 0)); // lazy init
+
+    // Price below grid
+    let h = g.check_health("BTC", 48000.0);
+    assert_eq!(h, GridHealth::OutOfRange);
+    assert_eq!(g.out_of_range_count.get("BTC").copied().unwrap_or(0), 1);
+
+    // Price above grid
+    let h = g.check_health("BTC", 52000.0);
+    assert_eq!(h, GridHealth::OutOfRange);
+    assert_eq!(g.out_of_range_count.get("BTC").copied().unwrap_or(0), 2);
+
+    // Price back in range → resets counter
+    // 價格回到範圍 → 重置計數器
+    let h = g.check_health("BTC", 50000.0);
+    assert_eq!(h, GridHealth::Healthy);
+    assert_eq!(g.out_of_range_count.get("BTC").copied().unwrap_or(0), 0);
+}
+
+#[test]
+fn test_auto_rebalance() {
+    // After max_out_of_range ticks outside grid, grid recenters.
+    // 連續超出範圍達到 max_out_of_range 次後，網格重新居中。
+    let mut g = GridTrading::new(49000.0, 51000.0);
+    g.max_out_of_range = 5;
+    g.health_check_interval = 1; // Check every tick for test / 測試用每 tick 檢查
+
+    let far_price = 60000.0; // Well outside 49000-51000 range
+
+    // Feed ticks at the far price. Health check runs every tick.
+    // 以遠離價格餵入 tick。每 tick 執行健康檢查。
+    for ts in 0..10 {
+        g.on_tick(&ctx(far_price, ts * 100_000));
+    }
+
+    // Grid should have rebalanced around 60000 (±10% → 54000..66000).
+    // 網格應已以 60000 為中心重建（±10% → 54000..66000）。
+    let levels = g.grid_levels.get("BTC").unwrap();
+    assert_eq!(levels.len(), DEFAULT_GRID_COUNT);
+    let lo = levels[0];
+    let hi = levels[levels.len() - 1];
+    // The new grid should contain the far price.
+    // 新網格應包含遠離的價格。
+    assert!(
+        lo < far_price && far_price < hi,
+        "Rebalanced grid [{}, {}] should contain price {}",
+        lo,
+        hi,
+        far_price
+    );
+    assert_eq!(g.out_of_range_count.get("BTC").copied().unwrap_or(0), 0);
+}
+
+#[test]
+fn test_geometric_rebalance() {
+    // Rebalance in geometric mode preserves geometric spacing.
+    // 幾何模式下再平衡應保持等比間距。
+    let mut g = GridTrading::new_geometric(49000.0, 51000.0);
+    g.max_out_of_range = 3;
+    g.health_check_interval = 1;
+
+    let far_price = 60000.0;
+    for ts in 0..8 {
+        g.on_tick(&ctx(far_price, ts * 100_000));
+    }
+
+    // Grid should have rebalanced with geometric spacing.
+    // 網格應已以幾何間距重建。
+    let levels = g.grid_levels.get("BTC").unwrap();
+    assert_eq!(levels.len(), DEFAULT_GRID_COUNT);
+    assert_eq!(g.spacing_mode, GridSpacingMode::Geometric);
+
+    // Verify geometric property: constant ratio between consecutive levels.
+    // 驗證幾何特性：相鄰層級間比率恆定。
+    let ratios: Vec<f64> = levels.windows(2).map(|w| w[1] / w[0]).collect();
+    let first_ratio = ratios[0];
+    for (i, &r) in ratios.iter().enumerate() {
+        assert!(
+            (r - first_ratio).abs() < 1e-8,
+            "Ratio at index {} was {}, expected {} (geometric invariant broken)",
+            i,
+            r,
+            first_ratio
+        );
+    }
+
+    // New grid should contain the rebalance price.
+    // 新網格應包含再平衡價格。
+    let lo = levels[0];
+    let hi = levels[levels.len() - 1];
+    assert!(lo < far_price && far_price < hi);
+}
+
+#[test]
+fn test_adaptive_geometric_init() {
+    // Adaptive geometric grid initializes with geometric spacing on first tick.
+    // 自適應幾何網格在首次 tick 時以幾何間距初始化。
+    let mut g = GridTrading::new_adaptive_geometric();
+    assert!(g.grid_levels.is_empty());
+    assert_eq!(g.spacing_mode, GridSpacingMode::Geometric);
+
+    g.on_tick(&ctx(50000.0, 0));
+    let btc_levels = g
+        .grid_levels
+        .get("BTC")
+        .expect("BTC grid should be initialized on first tick");
+    assert_eq!(btc_levels.len(), DEFAULT_GRID_COUNT);
+
+    // Verify geometric property.
+    // 驗證幾何特性。
+    let ratios: Vec<f64> = btc_levels.windows(2).map(|w| w[1] / w[0]).collect();
+    let first_ratio = ratios[0];
+    for &r in &ratios {
+        assert!((r - first_ratio).abs() < 1e-10);
+    }
+}
+
+#[test]
+fn test_grid_param_ranges() {
+    assert!(!GridTradingParams::param_ranges().is_empty());
+}
+#[test]
+fn test_grid_validate() {
+    assert!(GridTradingParams::default().validate().is_ok());
+    assert!(GridTradingParams {
+        max_inventory: 0.5,
+        ..Default::default()
+    }
+    .validate()
+    .is_err());
+}
+#[test]
+fn test_grid_update() {
+    let mut g = GridTrading::new(100.0, 110.0);
+    assert!(g
+        .update_params(GridTradingParams {
+            max_inventory: 10.0,
+            ..Default::default()
+        })
+        .is_ok());
+    assert!((g.get_params().max_inventory - 10.0).abs() < 0.01);
+}
+
+// ── G-SR-1 S3+S4: param_ranges + validation tests ──
+
+#[test]
+fn test_grid_param_ranges_count() {
+    let ranges = GridTradingParams::param_ranges();
+    // 4 original + 3 trend cooldown = 7
+    assert_eq!(
+        ranges.len(),
+        7,
+        "expected 7 param ranges, got {}",
+        ranges.len()
+    );
+}
+
+#[test]
+fn test_grid_param_ranges_cooldown_names() {
+    let ranges = GridTradingParams::param_ranges();
+    let names: Vec<&str> = ranges.iter().map(|r| r.name.as_str()).collect();
+    for expected in &[
+        "adx_low_threshold",
+        "adx_high_threshold",
+        "max_cooldown_boost",
+    ] {
+        assert!(names.contains(expected), "missing param range: {expected}");
+    }
+}
+
+#[test]
+fn test_grid_validate_default_ok() {
+    assert!(GridTradingParams::default().validate().is_ok());
+}
+
+#[test]
+fn test_grid_validate_bad_adx_order() {
+    let mut p = GridTradingParams::default();
+    p.adx_low_threshold = 50.0;
+    p.adx_high_threshold = 20.0; // low > high
+    assert!(p.validate().is_err());
+}
+
+#[test]
+fn test_grid_validate_equal_adx_thresholds() {
+    let mut p = GridTradingParams::default();
+    p.adx_low_threshold = 30.0;
+    p.adx_high_threshold = 30.0; // equal = invalid
+    assert!(p.validate().is_err());
+}
+
+#[test]
+fn test_grid_validate_bad_cooldown_boost() {
+    let mut p = GridTradingParams::default();
+    p.max_cooldown_boost = 15.0; // > 10
+    assert!(p.validate().is_err());
+}
+
+#[test]
+fn test_grid_validate_negative_cooldown_boost() {
+    let mut p = GridTradingParams::default();
+    p.max_cooldown_boost = -1.0;
+    assert!(p.validate().is_err());
+}
+
+// ── G-SR-1 S4: Trend cooldown unit tests (A3) ──
+
+#[test]
+fn test_trend_cooldown_no_indicators() {
+    let g = GridTrading::new(49000.0, 51000.0);
+    // None indicators → base cooldown (new() sets cooldown_ms=60_000)
+    assert_eq!(g.compute_trend_adjusted_cooldown(None), 60_000);
+}
+
+#[test]
+fn test_trend_cooldown_low_adx_no_boost() {
+    use openclaw_core::indicators::{AdxResult, HurstResult, IndicatorSnapshot};
+    let snap = Box::leak(Box::new(IndicatorSnapshot {
+        adx: Some(AdxResult {
+            adx: 15.0,
+            plus_di: 0.0,
+            minus_di: 0.0,
+        }),
+        hurst: Some(HurstResult {
+            hurst: 0.45,
+            regime: "mean_reverting".into(),
+        }),
+        ..Default::default()
+    }));
+    let g = GridTrading::new(49000.0, 51000.0);
+    // ADX=15 < adx_low(20) → factor=0, Hurst=0.45 < 0.50 → factor=0
+    // trend_score=0, multiplier=1.0, cooldown=60_000
+    assert_eq!(g.compute_trend_adjusted_cooldown(Some(snap)), 60_000);
+}
+
+#[test]
+fn test_trend_cooldown_high_adx_max_boost() {
+    use openclaw_core::indicators::{AdxResult, HurstResult, IndicatorSnapshot};
+    let snap = Box::leak(Box::new(IndicatorSnapshot {
+        adx: Some(AdxResult {
+            adx: 60.0,
+            plus_di: 0.0,
+            minus_di: 0.0,
+        }),
+        hurst: Some(HurstResult {
+            hurst: 0.80,
+            regime: "trending".into(),
+        }),
+        ..Default::default()
+    }));
+    let g = GridTrading::new(49000.0, 51000.0);
+    // ADX=60 > adx_high(50) → factor=1.0, Hurst=0.80 > 0.75 → factor=1.0
+    // trend_score=0.6*1+0.4*1=1.0, multiplier=1+5=6, cooldown=60_000*6=360_000
+    let cd = g.compute_trend_adjusted_cooldown(Some(snap));
+    assert_eq!(cd, 360_000, "expected 60_000*6 = 360_000, got {cd}");
+}
+
+#[test]
+fn test_trend_cooldown_mid_adx_partial_boost() {
+    use openclaw_core::indicators::{AdxResult, HurstResult, IndicatorSnapshot};
+    let snap = Box::leak(Box::new(IndicatorSnapshot {
+        adx: Some(AdxResult {
+            adx: 35.0,
+            plus_di: 0.0,
+            minus_di: 0.0,
+        }),
+        hurst: Some(HurstResult {
+            hurst: 0.625,
+            regime: "uncertain".into(),
+        }),
+        ..Default::default()
+    }));
+    let g = GridTrading::new(49000.0, 51000.0);
+    // ADX=35: (35-20)/(50-20)=0.5, Hurst=0.625: (0.625-0.50)/0.25=0.5
+    // trend_score=0.6*0.5+0.4*0.5=0.5, multiplier=1+2.5=3.5, cooldown=60_000*3.5=210_000
+    let cd = g.compute_trend_adjusted_cooldown(Some(snap));
+    assert_eq!(cd, 210_000, "expected 60_000*3.5 = 210_000, got {cd}");
+}
+
+// ── EDGE-P2-3 Phase 1a: PostOnly maker entry tests ──
+// ── EDGE-P2-3 Phase 1a：PostOnly maker 入場測試 ──
+
+/// Default constructor must keep `use_maker_entry = false` (root principle #6
+/// — failure default shrink). Cold-boot behavior stays on proven Market path.
+/// 默認構造必須保持 `use_maker_entry = false`（根原則 #6），冷啟動走已驗證 Market 路徑。
+#[test]
+fn test_grid_maker_disabled_by_default() {
+    let g = GridTrading::new(49000.0, 51000.0);
+    assert!(!g.use_maker_entry, "use_maker_entry must default to false");
+    assert_eq!(
+        g.maker_price_offset_bps, DEFAULT_MAKER_OFFSET_BPS,
+        "maker_price_offset_bps must default to 1 bps"
+    );
+    let g2 = GridTrading::new_geometric(49000.0, 51000.0);
+    assert!(!g2.use_maker_entry);
+    let g3 = GridTrading::new_adaptive();
+    assert!(!g3.use_maker_entry);
+}
+
+/// When maker disabled, buy intents keep order_type="market" + time_in_force=None
+/// (byte-identical legacy behavior).
+/// maker 關閉時，買入意圖維持 market + TIF=None（與舊行為 byte-identical）。
+#[test]
+fn test_grid_market_entry_when_maker_disabled() {
+    let mut g = GridTrading::new(49000.0, 51000.0);
+    assert!(!g.use_maker_entry);
+    g.on_tick(&ctx(50500.0, 0));
+    let i = g.on_tick(&ctx(49500.0, 100_000));
+    match &i[0] {
+        StrategyAction::Open(intent) => {
+            assert_eq!(intent.order_type, "market");
+            assert!(intent.limit_price.is_none());
+            assert!(intent.time_in_force.is_none());
+        }
+        other => panic!("expected Open, got {:?}", other),
+    }
+}
+
+/// Buy on down-cross with maker enabled emits PostOnly Limit below last_price.
+/// 下穿買入時，maker 啟用 → PostOnly Limit 掛在 last_price 下方。
+#[test]
+fn test_grid_buy_postonly_below_last_price() {
+    let mut g = GridTrading::new(49000.0, 51000.0);
+    g.use_maker_entry = true;
+    g.maker_price_offset_bps = 1.0; // 1 bps
+    g.on_tick(&ctx(50500.0, 0));
+    let i = g.on_tick(&ctx(49500.0, 100_000));
+    match &i[0] {
+        StrategyAction::Open(intent) => {
+            assert!(intent.is_long);
+            assert_eq!(intent.order_type, "limit");
+            assert_eq!(intent.time_in_force, Some(TimeInForce::PostOnly));
+            let lp = intent.limit_price.expect("limit_price set");
+            let expected = 49500.0 * (1.0 - 1.0 / 10_000.0);
+            assert!(
+                (lp - expected).abs() < 1e-9,
+                "buy PostOnly must be below last_price: got {lp}, expected {expected}"
+            );
+            assert!(lp < 49500.0, "buy limit must rest below last_price");
+        }
+        other => panic!("expected Open, got {:?}", other),
+    }
+}
+
+/// Sell on up-cross with maker enabled emits PostOnly Limit above last_price.
+/// 上穿賣出時，maker 啟用 → PostOnly Limit 掛在 last_price 上方。
+#[test]
+fn test_grid_sell_postonly_above_last_price() {
+    let mut g = GridTrading::new(49000.0, 51000.0);
+    g.use_maker_entry = true;
+    g.maker_price_offset_bps = 2.0; // 2 bps
+    g.on_tick(&ctx(49500.0, 0));
+    let i = g.on_tick(&ctx(50500.0, 100_000));
+    match &i[0] {
+        StrategyAction::Open(intent) => {
+            assert!(!intent.is_long);
+            assert_eq!(intent.order_type, "limit");
+            assert_eq!(intent.time_in_force, Some(TimeInForce::PostOnly));
+            let lp = intent.limit_price.expect("limit_price set");
+            let expected = 50500.0 * (1.0 + 2.0 / 10_000.0);
+            assert!(
+                (lp - expected).abs() < 1e-9,
+                "sell PostOnly must be above last_price: got {lp}, expected {expected}"
+            );
+            assert!(lp > 50500.0, "sell limit must rest above last_price");
+        }
+        other => panic!("expected Open, got {:?}", other),
+    }
+}
+
+/// maker_price_offset_bps scales the limit price proportionally.
+/// maker_price_offset_bps 線性縮放限價。
+#[test]
+fn test_grid_maker_offset_scales_linearly() {
+    let mut g = GridTrading::new(49000.0, 51000.0);
+    g.use_maker_entry = true;
+    g.maker_price_offset_bps = 5.0; // 5 bps
+    g.on_tick(&ctx(50500.0, 0));
+    let i = g.on_tick(&ctx(49500.0, 100_000));
+    match &i[0] {
+        StrategyAction::Open(intent) => {
+            let lp = intent.limit_price.unwrap();
+            let expected = 49500.0 * (1.0 - 5.0 / 10_000.0);
+            assert!((lp - expected).abs() < 1e-9);
+        }
+        other => panic!("expected Open, got {:?}", other),
+    }
+}
+
+/// Close actions stay Market even when maker entry is enabled — Phase 1a scope
+/// intentionally excludes close path (PostOnly rejects would strand positions).
+/// 平倉維持 Market，即使 maker 入場啟用 — Phase 1a 刻意排除平倉路徑（避免 PostOnly 拒絕卡倉）。
+#[test]
+fn test_grid_close_stays_market_with_maker_enabled() {
+    let mut g = GridTrading::new(49000.0, 51000.0);
+    g.use_maker_entry = true;
+    g.maker_price_offset_bps = 1.0;
+    // Build positive inventory via Open
+    g.on_tick(&ctx(50500.0, 0));
+    g.on_tick(&ctx(49500.0, 100_000));
+    // Sell with positive inventory → Close (not Open)
+    let i = g.on_tick(&ctx(50500.0, 200_000));
+    match &i[0] {
+        StrategyAction::Close { reason, .. } => {
+            assert_eq!(reason, "grid_close_long");
+            // Close variant carries no order_type field — it's always Market at dispatch.
+        }
+        other => panic!("expected Close, got {:?}", other),
+    }
+}
+
+/// update_params round-trips maker fields so Agent IPC can toggle at runtime.
+/// update_params 來回保留 maker 欄位，Agent IPC 可運行時切換。
+#[test]
+fn test_grid_update_params_roundtrips_maker_fields() {
+    let mut g = GridTrading::new(49000.0, 51000.0);
+    let mut params = g.get_params();
+    assert!(!params.use_maker_entry);
+    params.use_maker_entry = true;
+    params.maker_price_offset_bps = 3.0;
+    g.update_params(params).expect("update_params");
+    let p2 = g.get_params();
+    assert!(p2.use_maker_entry);
+    assert!((p2.maker_price_offset_bps - 3.0).abs() < 1e-9);
+    assert!(g.use_maker_entry);
+}

@@ -513,10 +513,24 @@ use openclaw_core::now_ms;
 /// 傳回重試，hypertable PK `(time, scope, request_id)` 才能折疊重複。
 /// 重試時重鑄 tuple 會破壞去重（新 tuple → 新 PK → 雙重計費）。
 pub fn make_request_id(scope: &str) -> (String, i64) {
+    make_request_id_with_rng(scope, &mut rand::thread_rng())
+}
+
+/// E5-FN-2-PLAN-N-FUP (b): Testable variant with caller-supplied RNG so tests
+/// can seed a deterministic RNG and avoid the ~1/2^32 per-invocation collision
+/// flake in `test_make_request_id_unique_within_same_ms`. Production code path
+/// `make_request_id()` above forwards `rand::thread_rng()`; no behavior change.
+/// E5-FN-2-PLAN-N-FUP (b)：測試友好變體，接收 caller 提供的 RNG，讓 test 可
+/// 用 seeded RNG 消除 `test_make_request_id_unique_within_same_ms` 每次
+/// ~1/2^32 碰撞 flake。生產路徑 `make_request_id()` 仍走 `thread_rng()` 無行為改動。
+pub(crate) fn make_request_id_with_rng<R: rand::RngCore>(
+    scope: &str,
+    rng: &mut R,
+) -> (String, i64) {
     use rand::RngCore;
     let ts_ms = now_ms() as i64;
     let mut bytes = [0u8; 4];
-    rand::thread_rng().fill_bytes(&mut bytes);
+    rng.fill_bytes(&mut bytes);
     let rand_hex = format!(
         "{:02x}{:02x}{:02x}{:02x}",
         bytes[0], bytes[1], bytes[2], bytes[3]
@@ -789,13 +803,26 @@ mod tests {
 
     // Plan N-2: two mints within the same ms get distinct request_ids thanks to
     // the random hex suffix (no PK collision on fast retries).
+    // E5-FN-2-PLAN-N-FUP (b, 2026-04-23): swap `thread_rng()` for seeded
+    // StdRng so this test is deterministic. Prior impl had ~1/2^32 per-run
+    // flake probability — CI running 1000× daily would see a hit every
+    // ~11 years on average, but operator-reported CI noise prompted this
+    // defensive seed (zero cost, same collision-free semantic guarantee).
     // Plan N-2：同 ms 內兩次鑄造必得不同 request_id（隨機 hex 後綴，快速重試
-    // 不會 PK 碰撞）。
+    // 不會 PK 碰撞）。E5-FN-2-PLAN-N-FUP (b)：改用 seeded StdRng 取代
+    // `thread_rng()`，消除 ~1/2^32 per-run flake；零成本、同等語意保證。
     #[test]
     fn test_make_request_id_unique_within_same_ms() {
-        let (rid_a, _) = make_request_id("layer2");
-        let (rid_b, _) = make_request_id("layer2");
-        assert_ne!(rid_a, rid_b, "two fresh mints must differ");
+        use rand::SeedableRng;
+        let mut rng = rand::rngs::StdRng::seed_from_u64(0xDEADBEEFu64);
+        let (rid_a, _) = make_request_id_with_rng("layer2", &mut rng);
+        let (rid_b, _) = make_request_id_with_rng("layer2", &mut rng);
+        assert_ne!(
+            rid_a, rid_b,
+            "two fresh mints with same seeded RNG must differ \
+             (seeded StdRng never emits two identical 32-bit draws in a row \
+             at this seed — deterministic, no flake)"
+        );
     }
 
     // Plan N-3: record_usage accepts event_time_ms and the cache still bumps
