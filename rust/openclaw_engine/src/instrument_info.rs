@@ -8,9 +8,13 @@
 //!   提供 qty 和 price 取整輔助函數以符合交易所精度要求。緩存可定期刷新。
 
 use crate::bybit_rest_client::{BybitApiError, BybitRestClient, BybitResult};
-use parking_lot::RwLock;
+use async_trait::async_trait;
+use parking_lot::{Mutex, RwLock};
 use std::collections::HashMap;
-use tracing::info;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+use tokio::sync::{Notify, Semaphore};
+use tracing::{info, warn};
 
 // ---------------------------------------------------------------------------
 // SymbolSpec — per-symbol trading spec / 單交易對交易規格
@@ -137,13 +141,117 @@ impl SymbolSpec {
 // InstrumentInfoCache / 合約信息緩存
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// INSTR-ENSURE-1 — lazy single-symbol fetch trait (2026-04-23)
+// INSTR-ENSURE-1 — 單 symbol 按需拉取抽象（2026-04-23）
+// ---------------------------------------------------------------------------
+
+/// Abstraction over Bybit's single-symbol instruments-info endpoint.
+/// Exists purely so `ensure_symbol` can be unit-tested without a live REST
+/// client: tests implement this trait with an in-memory mock + call counter.
+///
+/// 單 symbol instruments-info 抽象。只為了 `ensure_symbol` 可以用 mock +
+/// 計數器做單測（不打網）。
+///
+/// Contract:
+///   * `Ok(Some(serde_json::Value))` — Bybit responded 200 with a non-empty
+///     `result.list[0]` item (exchange confirmed symbol exists).
+///   * `Ok(None)` — Bybit responded 200 with an empty `result.list` (Bybit
+///     denies the symbol). Caller enters neg cache.
+///   * `Err(..)` — transport / timeout / 5xx / business error. Caller must NOT
+///     enter neg cache (prevents cache poisoning on transient failures).
+///
+/// 契約：
+///   * `Ok(Some(..))` — Bybit 回 200 + list 非空（交易所確認存在）。
+///   * `Ok(None)` — Bybit 回 200 + list 空（Bybit 否認）→ 入 neg cache。
+///   * `Err(..)` — 網路/timeout/5xx/業務錯 → **不入** neg cache（防 poisoning）。
+#[async_trait]
+pub trait SingleSymbolFetcher: Send + Sync {
+    async fn fetch_single_symbol(
+        &self,
+        category: &str,
+        symbol: &str,
+    ) -> BybitResult<Option<serde_json::Value>>;
+}
+
+/// Live adapter: `BybitRestClient` fetches from Bybit with a 2s hard timeout
+/// (fail-fast on hot path — dispatch can't wait on a stuck connect).
+///
+/// Live 適配器：BybitRestClient 2s 硬超時（熱路徑失敗快速，不等 hang）。
+#[async_trait]
+impl SingleSymbolFetcher for BybitRestClient {
+    async fn fetch_single_symbol(
+        &self,
+        category: &str,
+        symbol: &str,
+    ) -> BybitResult<Option<serde_json::Value>> {
+        // 2s hard timeout on the hot order path — if Bybit stalls, fail closed
+        // and let dispatch's fail-closed path reject this order instead of
+        // blocking on a dead socket.
+        // 熱路徑 2s 硬超時：Bybit 卡住 → 讓下單 fail-closed 拒單，不阻塞。
+        let params = [("category", category), ("symbol", symbol)];
+        let fut = self.get("/v5/market/instruments-info", &params);
+        let resp = match tokio::time::timeout(Duration::from_secs(2), fut).await {
+            Ok(r) => r?,
+            Err(_) => {
+                return Err(BybitApiError::Business {
+                    ret_code: -1,
+                    ret_msg: format!(
+                        "ensure_symbol timeout after 2s for {symbol} / 2s 超時"
+                    ),
+                    response: serde_json::json!({"timeout_ms": 2000, "symbol": symbol}),
+                });
+            }
+        };
+
+        if resp.ret_code != 0 {
+            // Business error from exchange → treat as transient; do not poison neg cache.
+            // 業務錯（例如 10001 參數錯）→ 視為瞬時，**不入** neg cache，保守拒單。
+            return Err(BybitApiError::Business {
+                ret_code: resp.ret_code,
+                ret_msg: resp.ret_msg.clone(),
+                response: serde_json::to_value(&resp).unwrap_or_default(),
+            });
+        }
+
+        let list = resp.result.get("list").and_then(|v| v.as_array());
+        let first = list.and_then(|arr| arr.first()).cloned();
+        Ok(first)
+    }
+}
+
 /// Thread-safe instrument info cache.
 /// 線程安全的合約信息緩存。
 pub struct InstrumentInfoCache {
     /// Map of symbol -> SymbolSpec / 交易對 -> 規格 映射
     /// pub(crate) for test access from sibling modules / pub(crate) 供兄弟模組測試存取
     pub(crate) cache: RwLock<HashMap<String, SymbolSpec>>,
+
+    /// INSTR-ENSURE-1: negative cache — symbols Bybit explicitly denied.
+    /// Entry value = insertion `Instant`; TTL = `NEG_CACHE_TTL`.
+    /// INSTR-ENSURE-1：否定快取 — Bybit 明確否認的 symbol。TTL 60s。
+    negative_cache: RwLock<HashMap<String, Instant>>,
+
+    /// INSTR-ENSURE-1: singleflight by symbol — concurrent ensures for the same
+    /// symbol only issue one REST call; others await the `Notify`.
+    /// INSTR-ENSURE-1：symbol 維度 singleflight — 同 symbol 併發只打 1 次。
+    inflight: Mutex<HashMap<String, Arc<Notify>>>,
+
+    /// INSTR-ENSURE-1: global semaphore to cap concurrent ensure_symbol REST
+    /// calls (prevents scanner-storm from multi-miss burst).
+    /// INSTR-ENSURE-1：全域併發上限，防 scanner 多 miss 風暴。
+    ensure_semaphore: Arc<Semaphore>,
 }
+
+/// Negative-cache TTL (60s). A symbol Bybit denied once is silently rejected
+/// for this long before we retry.
+/// 負緩存 TTL（60s）。Bybit 一旦否認，60s 內直接拒單不重試。
+const NEG_CACHE_TTL: Duration = Duration::from_secs(60);
+
+/// Max concurrent single-symbol ensure calls — prevents a multi-symbol scanner
+/// sweep from fan-outing REST calls faster than Bybit's rate limit window.
+/// 最大併發 ensure 呼叫數 — 防 scanner 多 symbol 同時 fan-out 爆 rate limit。
+const ENSURE_CONCURRENCY: usize = 4;
 
 impl InstrumentInfoCache {
     /// Create an empty cache.
@@ -151,6 +259,9 @@ impl InstrumentInfoCache {
     pub fn new() -> Self {
         Self {
             cache: RwLock::new(HashMap::new()),
+            negative_cache: RwLock::new(HashMap::new()),
+            inflight: Mutex::new(HashMap::new()),
+            ensure_semaphore: Arc::new(Semaphore::new(ENSURE_CONCURRENCY)),
         }
     }
 
@@ -238,6 +349,175 @@ impl InstrumentInfoCache {
         self.cache.read().get(symbol).cloned()
     }
 
+    // -----------------------------------------------------------------------
+    // INSTR-ENSURE-1 — lazy single-symbol fetch with neg cache + singleflight
+    // INSTR-ENSURE-1 — 按需拉取 + 負緩存 + singleflight
+    // -----------------------------------------------------------------------
+
+    /// Ensure a symbol's spec is cached, fetching on demand if absent.
+    /// See `ensure_symbol_with_fetcher` for the full protocol.
+    ///
+    /// 確保 symbol 的規格已緩存，缺失時按需向 Bybit 拉取。
+    /// 詳細協議見 `ensure_symbol_with_fetcher`。
+    pub async fn ensure_symbol(
+        &self,
+        client: &BybitRestClient,
+        category: &str,
+        symbol: &str,
+    ) -> BybitResult<Option<SymbolSpec>> {
+        self.ensure_symbol_with_fetcher(client, category, symbol)
+            .await
+    }
+
+    /// Core ensure_symbol implementation, generic over `SingleSymbolFetcher`.
+    ///
+    /// Protocol / 協議：
+    ///   1. Positive cache hit → return Some immediately (no network).
+    ///   2. Negative cache hit (not TTL-expired) → return None immediately.
+    ///   3. Singleflight: if another task is already fetching this symbol,
+    ///      await its Notify, then re-check positive cache and return.
+    ///   4. Otherwise acquire the global semaphore + install inflight slot,
+    ///      call the fetcher, and:
+    ///        - `Ok(Some(item))` → parse + insert positive cache → return Some.
+    ///        - `Ok(None)` → insert fresh neg-cache entry → return None.
+    ///        - `Err(_)` → do NOT poison neg cache (prevents transient-fail
+    ///          cache poisoning) → propagate the error.
+    ///   5. Always drain the inflight slot + notify waiters in a guard drop.
+    ///
+    /// 協議：
+    ///   1. 正緩存 hit → 立即 Some（不打網）。
+    ///   2. 負緩存 hit（TTL 內）→ 立即 None。
+    ///   3. Singleflight：同 symbol 有 inflight → await Notify → 重查正緩存。
+    ///   4. 否則 acquire semaphore + 裝 inflight → fetcher：
+    ///        - Ok(Some) → 解析插正緩存 → Some。
+    ///        - Ok(None) → 插新鮮負緩存 → None。
+    ///        - Err → **不**入負緩存（防 poisoning）→ 傳錯。
+    ///   5. Drop 時固定清 inflight + notify 等待者。
+    pub async fn ensure_symbol_with_fetcher<F: SingleSymbolFetcher + ?Sized>(
+        &self,
+        fetcher: &F,
+        category: &str,
+        symbol: &str,
+    ) -> BybitResult<Option<SymbolSpec>> {
+        // Step 1: positive cache fast path / 正緩存快路徑
+        if let Some(spec) = self.get(symbol) {
+            return Ok(Some(spec));
+        }
+
+        // Step 2: negative cache check (TTL-gated) / 負緩存查驗（TTL 內拒）
+        if self.neg_cache_hit(symbol) {
+            return Ok(None);
+        }
+
+        // Step 3: singleflight — install or subscribe to inflight slot.
+        //          Step 3：singleflight — 裝 / 訂閱 inflight 槽位。
+        let (notify, is_leader) = {
+            let mut inflight = self.inflight.lock();
+            match inflight.get(symbol) {
+                Some(existing) => (Arc::clone(existing), false),
+                None => {
+                    let notify = Arc::new(Notify::new());
+                    inflight.insert(symbol.to_string(), Arc::clone(&notify));
+                    (notify, true)
+                }
+            }
+        };
+
+        if !is_leader {
+            // Follower — wait for the leader's fetch to complete, then re-check both caches.
+            // 跟隨者：等領導者完成後重查兩層 cache。
+            notify.notified().await;
+            if let Some(spec) = self.get(symbol) {
+                return Ok(Some(spec));
+            }
+            if self.neg_cache_hit(symbol) {
+                return Ok(None);
+            }
+            // Leader failed with Err and did not populate either cache — follower
+            // returns the same "missing" signal (None). Caller's M-1 fail-closed
+            // will reject this order; next call will trigger a fresh fetch.
+            // 領導者錯誤未填 cache → 跟隨者回 None（M-1 會拒單）；下次觸發新 fetch。
+            return Ok(None);
+        }
+
+        // Leader path: acquire semaphore + perform fetch.
+        // 領導者路徑：acquire semaphore + 執行 fetch。
+        let inflight_guard = InflightGuard {
+            cache: self,
+            symbol: symbol.to_string(),
+            notify: Arc::clone(&notify),
+        };
+
+        let _permit = self
+            .ensure_semaphore
+            .clone()
+            .acquire_owned()
+            .await
+            .map_err(|e| BybitApiError::Business {
+                ret_code: -1,
+                ret_msg: format!("ensure_symbol semaphore closed: {e}"),
+                response: serde_json::json!(null),
+            })?;
+
+        let fetch_result = fetcher.fetch_single_symbol(category, symbol).await;
+
+        match fetch_result {
+            Ok(Some(item)) => {
+                let parsed = parse_instrument_item(&item);
+                match parsed {
+                    Some(spec) => {
+                        {
+                            let mut cache = self.cache.write();
+                            cache.insert(spec.symbol.clone(), spec.clone());
+                        }
+                        drop(inflight_guard); // explicit drop to notify waiters
+                        Ok(Some(spec))
+                    }
+                    None => {
+                        // Bybit returned an item but our parser rejected it (missing required
+                        // fields). Treat as "Bybit confirms exists but we can't trade it" —
+                        // insert neg cache so the scanner stops retrying every tick.
+                        // Bybit 回了但解析失敗（欄位缺）→ 入負緩存停止重試。
+                        warn!(
+                            symbol = symbol,
+                            "ensure_symbol: Bybit returned item but parse failed — neg cache / 回應不可解析，入負緩存"
+                        );
+                        self.neg_cache_insert(symbol);
+                        drop(inflight_guard);
+                        Ok(None)
+                    }
+                }
+            }
+            Ok(None) => {
+                // Bybit confirms symbol does not exist → neg cache.
+                // Bybit 確認不存在 → 負緩存。
+                self.neg_cache_insert(symbol);
+                drop(inflight_guard);
+                Ok(None)
+            }
+            Err(e) => {
+                // Transport / timeout / 5xx / business error — do NOT neg-cache.
+                // 網路/超時/5xx/業務錯 — **不**入負緩存。
+                drop(inflight_guard);
+                Err(e)
+            }
+        }
+    }
+
+    fn neg_cache_hit(&self, symbol: &str) -> bool {
+        let guard = self.negative_cache.read();
+        match guard.get(symbol) {
+            Some(ts) if ts.elapsed() < NEG_CACHE_TTL => true,
+            _ => false,
+        }
+    }
+
+    fn neg_cache_insert(&self, symbol: &str) {
+        self.negative_cache
+            .write()
+            .insert(symbol.to_string(), Instant::now());
+    }
+
     /// Get lot size (qty_step) for a symbol. Returns None if not cached.
     /// 取得交易對的步長。未緩存時返回 None。
     pub fn get_lot_size(&self, symbol: &str) -> Option<f64> {
@@ -290,6 +570,28 @@ impl InstrumentInfoCache {
 impl Default for InstrumentInfoCache {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// InflightGuard — singleflight slot cleanup on drop (success or panic).
+// InflightGuard — 無論 ensure 成功或 panic 都保證清 inflight + notify。
+// ---------------------------------------------------------------------------
+
+struct InflightGuard<'a> {
+    cache: &'a InstrumentInfoCache,
+    symbol: String,
+    notify: Arc<Notify>,
+}
+
+impl<'a> Drop for InflightGuard<'a> {
+    fn drop(&mut self) {
+        {
+            let mut inflight = self.cache.inflight.lock();
+            inflight.remove(&self.symbol);
+        }
+        // Wake every follower awaiting this symbol's fetch.
+        self.notify.notify_waiters();
     }
 }
 
@@ -737,6 +1039,236 @@ mod tests {
         let mut cache: HashMap<String, SymbolSpec> = HashMap::new();
         let (_c, next) = parse_page(&result, &mut cache);
         assert!(next.is_none(), "absent nextPageCursor must terminate");
+    }
+
+    // -----------------------------------------------------------------------
+    // INSTR-ENSURE-1 — ensure_symbol unit tests (mock SingleSymbolFetcher)
+    // INSTR-ENSURE-1 — ensure_symbol 單元測試（mock SingleSymbolFetcher）
+    // -----------------------------------------------------------------------
+
+    use std::sync::atomic::{AtomicU64, AtomicU8, Ordering};
+
+    /// Mock fetcher — programmable response + REST call counter.
+    /// Mock fetcher — 可編程回應 + REST 呼叫計數器。
+    struct MockFetcher {
+        /// 0 = Ok(Some(item)), 1 = Ok(None), 2 = Err transient, 3 = Err 5xx
+        mode: AtomicU8,
+        /// Counts every call to fetch_single_symbol
+        calls: Arc<AtomicU64>,
+        /// Optional per-call delay to force concurrency overlap
+        delay_ms: u64,
+    }
+
+    impl MockFetcher {
+        fn new(mode: u8) -> Self {
+            Self {
+                mode: AtomicU8::new(mode),
+                calls: Arc::new(AtomicU64::new(0)),
+                delay_ms: 0,
+            }
+        }
+        fn with_delay(mode: u8, delay_ms: u64) -> Self {
+            Self {
+                mode: AtomicU8::new(mode),
+                calls: Arc::new(AtomicU64::new(0)),
+                delay_ms,
+            }
+        }
+        fn set_mode(&self, m: u8) {
+            self.mode.store(m, Ordering::SeqCst);
+        }
+        fn call_count(&self) -> u64 {
+            self.calls.load(Ordering::SeqCst)
+        }
+    }
+
+    #[async_trait]
+    impl SingleSymbolFetcher for MockFetcher {
+        async fn fetch_single_symbol(
+            &self,
+            _category: &str,
+            symbol: &str,
+        ) -> BybitResult<Option<serde_json::Value>> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            if self.delay_ms > 0 {
+                tokio::time::sleep(Duration::from_millis(self.delay_ms)).await;
+            }
+            match self.mode.load(Ordering::SeqCst) {
+                0 => Ok(Some(sample_item(symbol))),
+                1 => Ok(None),
+                2 => Err(BybitApiError::Business {
+                    ret_code: -1,
+                    ret_msg: "simulated transient error".into(),
+                    response: serde_json::json!(null),
+                }),
+                _ => Err(BybitApiError::Business {
+                    ret_code: 10002,
+                    ret_msg: "simulated 5xx".into(),
+                    response: serde_json::json!(null),
+                }),
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_ensure_symbol_positive_cache_hit_no_fetch() {
+        let cache = InstrumentInfoCache::new();
+        {
+            let mut map = cache.cache.write();
+            map.insert("BTCUSDT".to_string(), sample_btc_spec());
+        }
+        let fetcher = MockFetcher::new(0);
+
+        let got = cache
+            .ensure_symbol_with_fetcher(&fetcher, "linear", "BTCUSDT")
+            .await
+            .unwrap();
+        assert!(got.is_some());
+        assert_eq!(fetcher.call_count(), 0, "positive cache hit must not fetch");
+    }
+
+    #[tokio::test]
+    async fn test_ensure_symbol_fetch_inserts_positive_cache() {
+        let cache = InstrumentInfoCache::new();
+        let fetcher = MockFetcher::new(0);
+
+        let got = cache
+            .ensure_symbol_with_fetcher(&fetcher, "linear", "AAAUSDT")
+            .await
+            .unwrap();
+        assert!(got.is_some());
+        assert_eq!(fetcher.call_count(), 1);
+        assert!(cache.get("AAAUSDT").is_some(), "spec must be cached");
+
+        // Second call — positive cache served, no new fetch
+        let _ = cache
+            .ensure_symbol_with_fetcher(&fetcher, "linear", "AAAUSDT")
+            .await
+            .unwrap();
+        assert_eq!(fetcher.call_count(), 1, "second call must hit positive cache");
+    }
+
+    #[tokio::test]
+    async fn test_ensure_symbol_neg_cache_blocks_refetch() {
+        let cache = InstrumentInfoCache::new();
+        let fetcher = MockFetcher::new(1); // Bybit says "not found"
+
+        let got = cache
+            .ensure_symbol_with_fetcher(&fetcher, "linear", "FAKE__USDT")
+            .await
+            .unwrap();
+        assert!(got.is_none());
+        assert_eq!(fetcher.call_count(), 1);
+
+        // Second call within TTL — neg cache hit, no new fetch
+        let got2 = cache
+            .ensure_symbol_with_fetcher(&fetcher, "linear", "FAKE__USDT")
+            .await
+            .unwrap();
+        assert!(got2.is_none());
+        assert_eq!(
+            fetcher.call_count(),
+            1,
+            "neg cache hit must not trigger fetch"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_ensure_symbol_transient_error_not_neg_cached() {
+        let cache = InstrumentInfoCache::new();
+        let fetcher = MockFetcher::new(3); // simulated 5xx-like
+
+        let r1 = cache
+            .ensure_symbol_with_fetcher(&fetcher, "linear", "FOOBAR")
+            .await;
+        assert!(r1.is_err(), "transient error must propagate");
+        assert_eq!(fetcher.call_count(), 1);
+
+        // Neg cache must NOT contain FOOBAR
+        assert!(
+            !cache.neg_cache_hit("FOOBAR"),
+            "transient errors must not poison neg cache"
+        );
+
+        // Second call — fetcher is called again (retry allowed because
+        // no neg cache poisoning + not in positive cache)
+        let _ = cache
+            .ensure_symbol_with_fetcher(&fetcher, "linear", "FOOBAR")
+            .await;
+        assert_eq!(
+            fetcher.call_count(),
+            2,
+            "transient error must permit retry on next call"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_ensure_symbol_singleflight_dedup() {
+        // 10 concurrent tasks request the same symbol — only 1 REST call should issue.
+        let cache = Arc::new(InstrumentInfoCache::new());
+        // Use a per-call delay so tasks overlap in the inflight slot.
+        let fetcher = Arc::new(MockFetcher::with_delay(0, 50));
+
+        let mut handles = Vec::new();
+        for _ in 0..10 {
+            let c = Arc::clone(&cache);
+            let f = Arc::clone(&fetcher);
+            handles.push(tokio::spawn(async move {
+                c.ensure_symbol_with_fetcher(&*f, "linear", "RACEUSDT")
+                    .await
+                    .map(|o| o.is_some())
+            }));
+        }
+
+        let results: Vec<_> = futures_util::future::join_all(handles).await;
+        for r in results {
+            assert!(r.unwrap().unwrap(), "every task must see a positive result");
+        }
+
+        assert_eq!(
+            fetcher.call_count(),
+            1,
+            "singleflight must dedup concurrent fetches to 1 REST call"
+        );
+        assert!(cache.get("RACEUSDT").is_some());
+    }
+
+    #[tokio::test]
+    async fn test_ensure_symbol_neg_cache_ttl_expiry_then_refetch() {
+        // Same flow as test_ensure_symbol_neg_cache_blocks_refetch, but we
+        // manually expire the neg cache entry to prove the TTL gate works.
+        let cache = InstrumentInfoCache::new();
+        let fetcher = MockFetcher::new(1);
+
+        let _ = cache
+            .ensure_symbol_with_fetcher(&fetcher, "linear", "EXPIREUSDT")
+            .await
+            .unwrap();
+        assert_eq!(fetcher.call_count(), 1);
+
+        // Force-expire: rewrite entry with an Instant well beyond TTL.
+        {
+            let mut guard = cache.negative_cache.write();
+            guard.insert(
+                "EXPIREUSDT".to_string(),
+                Instant::now()
+                    .checked_sub(NEG_CACHE_TTL + Duration::from_secs(1))
+                    .expect("test clock subtraction"),
+            );
+        }
+
+        // Bybit flips to "found"
+        fetcher.set_mode(0);
+        let got = cache
+            .ensure_symbol_with_fetcher(&fetcher, "linear", "EXPIREUSDT")
+            .await
+            .unwrap();
+        assert!(got.is_some());
+        assert_eq!(
+            fetcher.call_count(),
+            2,
+            "TTL-expired neg entry must allow refetch"
+        );
     }
 
     /// Test ETH-style spec with different precision.
