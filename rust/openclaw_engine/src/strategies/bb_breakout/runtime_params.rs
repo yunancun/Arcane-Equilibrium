@@ -56,6 +56,13 @@ impl BbBreakout {
         self.maker_limit_timeout_ms = super::super::grid_trading::clamp_maker_limit_timeout_ms(
             params.maker_limit_timeout_ms,
         );
+        // P1-11 (2): hot-reload Donchian mode + score bonus. Mode flip takes
+        // effect on the next tick (no stale state — evaluated fresh each tick).
+        // Score bonus change propagates immediately under Score mode.
+        // P1-11 (2)：熱重載 Donchian 模式 + 評分加成；模式切換下一 tick 生效（每 tick
+        // fresh 評估）；Score 模式下分數改動立即生效。
+        self.donchian_mode = params.donchian_mode;
+        self.donchian_score_bonus = params.donchian_score_bonus;
         info!(strategy = "bb_breakout", "params updated / 參數已更新");
         Ok(())
     }
@@ -100,6 +107,10 @@ impl BbBreakout {
             use_maker_entry: self.use_maker_entry,
             maker_price_offset_bps: self.maker_price_offset_bps,
             maker_limit_timeout_ms: self.maker_limit_timeout_ms,
+            // P1-11 (2): echo Donchian mode + score bonus for Agent round-trip.
+            // P1-11 (2)：回傳 Donchian 模式 + 評分加成供 Agent 往返。
+            donchian_mode: self.donchian_mode,
+            donchian_score_bonus: self.donchian_score_bonus,
         }
     }
 }

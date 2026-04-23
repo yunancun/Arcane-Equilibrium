@@ -32,8 +32,10 @@ mod runtime_params;
 mod tests;
 #[cfg(test)]
 mod tests_oi;
+#[cfg(test)]
+mod tests_p1_11;
 
-pub use params::BbBreakoutParams;
+pub use params::{BbBreakoutParams, BbBreakoutProfile, DonchianMode};
 use params::{DEFAULT_EXPANSION_BW, DEFAULT_SQUEEZE_BW, DEFAULT_VOLUME_THRESHOLD};
 
 /// Per-symbol dynamic state for `BbBreakout`. All fields are independently
@@ -166,6 +168,15 @@ pub struct BbBreakout {
     /// EDGE-P2-3 Phase 2+: ms a resting PostOnly maker order may sit (clamped on assign).
     /// EDGE-P2-3 Phase 2+：PostOnly 掛單最長停留時間（毫秒；寫入時 clamp）。
     pub(crate) maker_limit_timeout_ms: u64,
+    // ── P1-11 (2): Donchian mode + score bonus ──
+    // ── P1-11 (2)：Donchian 模式 + 評分加成 ──
+    /// How Donchian breach combines with the BB-core 3-gate chain. Default
+    /// `Hard` = bit-identical baseline (hard AND). See `DonchianMode` doc.
+    /// Donchian 突破與 BB 核心三閘的結合方式；預設 `Hard` bit-identical。
+    pub(crate) donchian_mode: DonchianMode,
+    /// Score delta applied on Donchian breach / miss under `Score` mode.
+    /// `Score` 模式下 Donchian 突破 / 未突破時的評分增減量。
+    pub(crate) donchian_score_bonus: f64,
 }
 
 impl BbBreakout {
@@ -210,6 +221,10 @@ impl BbBreakout {
             use_maker_entry: false,
             maker_price_offset_bps: 1.0,
             maker_limit_timeout_ms: 45_000,
+            // P1-11 (2): Hard preserves bit-identical pre-P1-11 behaviour.
+            // P1-11 (2)：`Hard` 保留 pre-P1-11 bit-identical 行為。
+            donchian_mode: DonchianMode::Hard,
+            donchian_score_bonus: 0.15,
         }
     }
 
@@ -432,16 +447,46 @@ impl Strategy for BbBreakout {
                     let is_long = bb.percent_b > 1.0;
                     let is_short = bb.percent_b < 0.0;
 
-                    // A3: Donchian confirmation — price must also breach Donchian channel
-                    // A3：Donchian 确认 — 价格需同时突破 Donchian 通道
-                    if let Some(dc) = &ind.donchian {
-                        if is_long && ctx.price < dc.upper {
-                            return vec![];
+                    // A3 / P1-11 (2): Donchian confirmation gate, now mode-aware.
+                    // - `Hard` (baseline): price must breach Donchian in entry
+                    //   direction or hard-reject (bit-identical to pre-P1-11).
+                    // - `Score`: breach adds +donchian_score_bonus to the score
+                    //   (applied after compute_score below); miss subtracts the
+                    //   same. Entry proceeds regardless — downstream confluence
+                    //   gate decides via `confluence_as_gate` + thresholds.
+                    // - `Off`: skip Donchian entirely; score delta = 0.
+                    // Missing `ind.donchian` indicator data (e.g., warm-up)
+                    // yields score delta 0 regardless of mode — same semantics
+                    // as the original Hard path (which also silently passed
+                    // through when `dc` was None).
+                    //
+                    // A3 / P1-11 (2)：Donchian 確認門，mode-aware。
+                    // - `Hard`（基線）：方向未突破即硬拒（pre-P1-11 bit-identical）。
+                    // - `Score`：突破 +donchian_score_bonus / 未突破扣同量（於下方 compute_score
+                    //   後套用）；入場繼續，由合流閘仲裁。
+                    // - `Off`：完全跳過。
+                    // `ind.donchian` 缺值（暖機期）→ score delta=0；與原 Hard 路徑 None 放行一致。
+                    let donchian_score_delta: f64 = match (self.donchian_mode, &ind.donchian) {
+                        (DonchianMode::Hard, Some(dc)) => {
+                            if is_long && ctx.price < dc.upper {
+                                return vec![];
+                            }
+                            if is_short && ctx.price > dc.lower {
+                                return vec![];
+                            }
+                            0.0
                         }
-                        if is_short && ctx.price > dc.lower {
-                            return vec![];
+                        (DonchianMode::Score, Some(dc)) => {
+                            let breach = (is_long && ctx.price >= dc.upper)
+                                || (is_short && ctx.price <= dc.lower);
+                            if breach {
+                                self.donchian_score_bonus
+                            } else {
+                                -self.donchian_score_bonus
+                            }
                         }
-                    }
+                        (DonchianMode::Off, _) | (_, None) => 0.0,
+                    };
 
                     if is_long || is_short {
                         // A1: Persistence filter — triple gate signal must hold.
@@ -517,6 +562,15 @@ impl Strategy for BbBreakout {
                         } else {
                             score
                         };
+                        // P1-11 (2): apply Donchian score delta (0.0 under Hard /
+                        // Off / missing-data paths, +/-donchian_score_bonus under
+                        // Score mode). Applied after OI so both modifiers stack
+                        // additively on the base confluence score; `score=None`
+                        // path (confluence disabled upstream) stays None — we
+                        // don't fabricate a score from Donchian alone.
+                        // P1-11 (2)：套用 Donchian 評分增減；Hard/Off/缺資料 → 0.0。
+                        // OI 之後套用，兩修飾器加性疊加；score=None（上游停用）保持 None。
+                        let score = score.map(|s| s + donchian_score_delta);
                         let qty_pct = confluence::score_to_qty_pct(score, &self.confluence_config);
                         // confluence_as_gate=false: always trade if triple gate passed,
                         // but scale qty. qty_pct=0 only blocks if confluence_as_gate=true.
