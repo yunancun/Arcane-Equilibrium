@@ -31,11 +31,13 @@ MODULE_NOTE (中):
 """
 
 import datetime
+import fcntl
 import logging
 import os
 import sys
 import threading
 import time
+from pathlib import Path
 from typing import Optional
 
 _app_dir = os.path.dirname(os.path.abspath(__file__))
@@ -404,20 +406,190 @@ class EdgeEstimatorScheduler:
 _scheduler: Optional[EdgeEstimatorScheduler] = None
 _scheduler_lock = threading.Lock()
 
+# EDGE-SCHEDULER-LEADER-1 (2026-04-23): process-wide flock fd, held for the
+# lifetime of the leader worker. OS auto-releases on process exit (including
+# SIGKILL), so a crashed leader does not prevent the next restart from
+# electing a new leader.
+# EDGE-SCHEDULER-LEADER-1：leader worker 進程壽命內持有的 flock fd。
+# OS 在進程退出（含 SIGKILL）時自動釋放鎖，crashed leader 不阻塞下次啟動重新選舉。
+_LEADER_LOCK_FD: Optional[int] = None
+_LEADER_LOCK_PATH: Optional[str] = None
+
+
+def _leader_lock_path() -> Path:
+    """
+    Resolve the leader-election sentinel path.
+    計算 leader 選舉 sentinel 檔案路徑。
+
+    Uses $OPENCLAW_DATA_DIR (cross-platform; Mac sets this in ~/.zshrc per
+    CLAUDE.md §六) and falls back to /tmp/openclaw to match the Linux
+    runtime default. Parent is created if missing (matches engine.sock /
+    api.log convention).
+    使用 $OPENCLAW_DATA_DIR 跨平台變數（Mac 需在 ~/.zshrc 設定，見 CLAUDE.md §六），
+    fallback 到 /tmp/openclaw 對齊 Linux runtime 預設。Parent 不存在則建立，
+    與 engine.sock / api.log 慣例一致。
+    """
+    data_dir = os.environ.get("OPENCLAW_DATA_DIR", "/tmp/openclaw")
+    return Path(data_dir) / "edge_scheduler.leader.lock"
+
+
+def _acquire_leader_lock() -> bool:
+    """
+    EDGE-SCHEDULER-LEADER-1: per-host leader election via fcntl.flock.
+
+    Returns True iff THIS process is now the leader (it successfully acquired
+    an exclusive non-blocking lock on the sentinel file). The fd is stashed
+    in `_LEADER_LOCK_FD` module-global so the lock is held for the process
+    lifetime — the OS releases it automatically at process exit.
+
+    Under uvicorn --workers N, N worker processes call this on startup; only
+    the first to reach `flock(LOCK_EX|LOCK_NB)` wins. The other N-1 workers
+    receive `BlockingIOError` (EWOULDBLOCK) and return False.
+
+    Env override / test hook:
+      OPENCLAW_SCHEDULER_LEADER=0 → force non-leader (skip flock; return False).
+        Useful for: single-worker dev where you want no scheduler; tests
+        that need to simulate a follower; operator disabling the scheduler
+        without touching code.
+
+    Cross-platform: fcntl.flock is available on Linux and macOS (per POSIX /
+    BSD). Not Windows — but per CLAUDE.md §七.★★ the project's portability
+    target is Mac + Linux only.
+
+    EDGE-SCHEDULER-LEADER-1：單機 leader 選舉（fcntl.flock）。
+
+    回傳 True 表示本進程剛贏得選舉（成功取得 sentinel 檔的 exclusive
+    non-blocking 鎖）。fd 保存於 `_LEADER_LOCK_FD` 模組全域，進程退出時
+    OS 自動釋放，無需 atexit handler。
+
+    uvicorn --workers N 下 N 個 worker 進程於啟動時呼叫此函數；最早到達
+    `flock(LOCK_EX|LOCK_NB)` 的 worker 獲勝，其餘 N-1 個收到
+    `BlockingIOError (EWOULDBLOCK)` 後回 False。
+
+    env opt-out / 測試鉤子：
+      OPENCLAW_SCHEDULER_LEADER=0 → 強制非 leader（跳過 flock 直接 return False）。
+        適用於：單 worker 開發情境、測試模擬 follower、operator 臨時
+        關閉 scheduler 不動碼。
+
+    跨平台：fcntl.flock 支援 Linux 與 macOS（POSIX/BSD），不支援 Windows；
+    本專案目標平台為 Mac + Linux（CLAUDE.md §七.★★），涵蓋完整。
+    """
+    global _LEADER_LOCK_FD, _LEADER_LOCK_PATH
+
+    # Idempotent: if already leader in this process, return True immediately
+    # without re-flocking (re-flock on the same fd from same process would
+    # succeed but wastefully churn the inode).
+    # 冪等：若本進程已是 leader，直接回 True，避免重複 flock 同一 fd。
+    if _LEADER_LOCK_FD is not None:
+        return True
+
+    # Env opt-out for tests / single-worker dev / operator disable.
+    # 測試、單 worker 開發、operator 手動停用通道：env=0 強制非 leader。
+    if os.environ.get("OPENCLAW_SCHEDULER_LEADER") == "0":
+        logger.info(
+            "EdgeEstimatorScheduler[pid=%d]: OPENCLAW_SCHEDULER_LEADER=0, "
+            "forced non-leader / pid=%d：環境變數強制非 leader",
+            os.getpid(), os.getpid(),
+        )
+        return False
+
+    lock_path = _leader_lock_path()
+    try:
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+    except OSError as mkdir_exc:
+        logger.warning(
+            "EdgeEstimatorScheduler[pid=%d]: cannot mkdir parent for leader "
+            "lock %s (%s) — falling back to non-leader / 無法建立 leader "
+            "lock 父目錄 %s（%s），降級為非 leader",
+            os.getpid(), lock_path, mkdir_exc, lock_path, mkdir_exc,
+        )
+        return False
+
+    try:
+        # O_CREAT: create if missing; O_RDWR so we can write PID for debug.
+        # O_CREAT：檔案不存在則建立；O_RDWR 允許寫入 PID 方便 debug。
+        fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR, 0o644)
+    except OSError as open_exc:
+        logger.warning(
+            "EdgeEstimatorScheduler[pid=%d]: cannot open leader lock %s "
+            "(%s) — non-leader / 無法開啟 leader lock %s（%s），非 leader",
+            os.getpid(), lock_path, open_exc, lock_path, open_exc,
+        )
+        return False
+
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except (BlockingIOError, OSError) as lock_exc:
+        # Another worker in the same uvicorn cohort already holds the lock.
+        # This is the EXPECTED path for N-1 of N workers — log at info not warn.
+        # 同 uvicorn 群組另一 worker 已持鎖，N-1 個 worker 走此路徑，info 級別。
+        os.close(fd)
+        logger.info(
+            "EdgeEstimatorScheduler[pid=%d]: non-leader worker (lock held "
+            "by another worker at %s; %s) / 非 leader worker（鎖由另一 "
+            "worker 持有於 %s；%s）",
+            os.getpid(), lock_path, lock_exc, lock_path, lock_exc,
+        )
+        return False
+
+    # Write current PID into the lock file for operator debuggability
+    # (`cat edge_scheduler.leader.lock` → current leader PID). Non-fatal.
+    # 寫入 current PID 便於 operator debug（cat 檔案即見 leader PID）；寫失敗不致命。
+    try:
+        os.ftruncate(fd, 0)
+        os.write(fd, f"{os.getpid()}\n".encode("utf-8"))
+    except OSError:
+        pass
+
+    _LEADER_LOCK_FD = fd
+    _LEADER_LOCK_PATH = str(lock_path)
+    logger.info(
+        "EdgeEstimatorScheduler[pid=%d]: elected leader (lock=%s) / "
+        "pid=%d 當選 leader（鎖=%s）",
+        os.getpid(), lock_path, os.getpid(), lock_path,
+    )
+    return True
+
 
 def start_scheduler(
     modes: tuple[str, ...] = EdgeEstimatorScheduler.DEFAULT_MODES,
     interval_s: float = 3600.0,
     days_back: int = EdgeEstimatorScheduler.DEFAULT_DAYS,
-) -> EdgeEstimatorScheduler:
+) -> Optional[EdgeEstimatorScheduler]:
     """
-    Idempotent global start. Called from main.py startup hook.
-    冪等全域啟動，由 main.py startup hook 呼叫。
+    Idempotent global start, gated by EDGE-SCHEDULER-LEADER-1 election.
+    冪等全域啟動，受 EDGE-SCHEDULER-LEADER-1 選舉把關。
+
+    Under uvicorn --workers N (N=4 in restart_all.sh), only the worker that
+    wins `_acquire_leader_lock()` actually instantiates the scheduler and
+    spawns the daemon thread. The other N-1 workers return None and their
+    `get_scheduler()` returns None — route handlers surface 503 (Operator
+    can retry; uvicorn's round-robin will eventually hit the leader).
+    uvicorn --workers N（restart_all.sh 中 N=4）下只有贏得選舉的 worker
+    實際建立 scheduler 並啟動 daemon thread；其餘 N-1 個 worker 回 None，
+    其 `get_scheduler()` 也回 None，route handler 回 503（operator 重試，
+    uvicorn round-robin 最終會打到 leader）。
+
+    Rationale — this prevents 4 parallel JS estimations per hour, each
+    holding a PG connection and UPDATE-ing `learning.decision_features`
+    (PG MVCC tolerates the race but it's pure waste: 4x DB load, 4x
+    settings/edge_estimates.json atomic-replace races, 4x observability
+    rows).
+    修復動機：避免 4 個 worker 每小時同時跑 JS 估計（各自佔 PG 連線 +
+    UPDATE learning.decision_features），PG MVCC 可容忍但純粹浪費：4 倍 DB
+    負載、4 倍 settings/edge_estimates.json atomic-replace 競爭、4 倍
+    observability 行數。
     """
     global _scheduler
     if _scheduler is None:
         with _scheduler_lock:
             if _scheduler is None:
+                if not _acquire_leader_lock():
+                    # Non-leader — no instance, no thread, no cycles. Main.py
+                    # ignores return value; routes see None and 503.
+                    # 非 leader：無 instance、無 thread、無 cycle。main.py 忽略回傳值；
+                    # routes 看到 None 回 503。
+                    return None
                 _scheduler = EdgeEstimatorScheduler(
                     modes=modes,
                     interval_s=interval_s,
@@ -430,3 +602,24 @@ def start_scheduler(
 def get_scheduler() -> Optional[EdgeEstimatorScheduler]:
     """Return current global scheduler (None if not yet started). / 返回單例。"""
     return _scheduler
+
+
+def _reset_for_tests() -> None:
+    """
+    Test-only: reset module globals + release leader lock fd so tests can
+    re-exercise the election path without process restart.
+    測試專用：重置模組全域變數並釋放 leader lock fd，讓測試可重複跑選舉路徑而不需重啟進程。
+    """
+    global _scheduler, _LEADER_LOCK_FD, _LEADER_LOCK_PATH
+    _scheduler = None
+    if _LEADER_LOCK_FD is not None:
+        try:
+            fcntl.flock(_LEADER_LOCK_FD, fcntl.LOCK_UN)
+        except OSError:
+            pass
+        try:
+            os.close(_LEADER_LOCK_FD)
+        except OSError:
+            pass
+        _LEADER_LOCK_FD = None
+        _LEADER_LOCK_PATH = None

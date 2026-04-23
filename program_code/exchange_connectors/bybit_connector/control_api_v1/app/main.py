@@ -369,12 +369,23 @@ async def _startup_integrity_check() -> None:
     # Activates LEARNING-PIPELINE-DORMANT-1 writer chain. File-only — does NOT
     # bind cost_gate; engine still reads edge_estimates.json once at startup.
     # 啟用 LEARNING-PIPELINE-DORMANT-1 writer 鏈，僅寫檔不 bind cost_gate。
+    # EDGE-SCHEDULER-LEADER-1 (2026-04-23): under uvicorn --workers 4 only the
+    # leader-elected worker returns a scheduler; others return None → skip log.
+    # EDGE-SCHEDULER-LEADER-1：uvicorn --workers 4 下僅當選 leader 的 worker
+    # 回傳 scheduler；其餘 workers 回 None 跳過啟動日誌。
     try:
         from .edge_estimator_scheduler import start_scheduler as _start_edge_scheduler  # noqa: PLC0415
-        _start_edge_scheduler()
-        base.logger.info(
-            "EdgeEstimatorScheduler started / JS 邊際估計器排程器已啟動"
-        )
+        _edge_sched = _start_edge_scheduler()
+        if _edge_sched is not None:
+            base.logger.info(
+                "EdgeEstimatorScheduler started (leader worker) / "
+                "JS 邊際估計器排程器已啟動（leader worker）"
+            )
+        else:
+            base.logger.info(
+                "EdgeEstimatorScheduler skipped (non-leader worker) / "
+                "JS 邊際估計器排程器跳過（非 leader worker）"
+            )
     except Exception as _edge_sched_exc:
         base.logger.warning(
             "EdgeEstimatorScheduler startup failed (fail-open): %s / JS 排程器啟動失敗（不阻斷）：%s",
