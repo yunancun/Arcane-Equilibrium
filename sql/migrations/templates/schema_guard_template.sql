@@ -1,0 +1,340 @@
+-- ============================================================
+-- schema_guard_template.sql
+-- Reusable PL/pgSQL guards for idempotent migrations (Option A)
+-- 遷移用 PL/pgSQL 哨兵模板（可重複執行的 Option A）
+-- ============================================================
+--
+-- Why this file exists / 為什麼有這個檔案：
+--   Postgres `CREATE TABLE IF NOT EXISTS`, `ALTER TABLE ... ADD COLUMN
+--   IF NOT EXISTS`, and `CREATE INDEX IF NOT EXISTS` all **silently
+--   skip** when the target object already exists **with a different
+--   shape**. This caused the V023 model_registry incident on
+--   2026-04-23 where V004 had pre-created `learning.model_registry`
+--   with a legacy schema; V023's `CREATE TABLE IF NOT EXISTS` saw the
+--   existing table and no-op'd — the `canary_status` column never
+--   landed and downstream Rust reads returned nothing.
+--
+--   `helper_scripts/db/audit_migrations.py` catches this **after**
+--   the fact. The better gate is an **in-migration DO block** that
+--   RAISES EXCEPTION before the silent no-op DDL can run. This file
+--   is the canonical copy-paste source for those guards.
+--
+--   Postgres 的 `CREATE TABLE IF NOT EXISTS`/`ADD COLUMN IF NOT
+--   EXISTS`/`CREATE INDEX IF NOT EXISTS` 在對象已存在但 schema 形狀
+--   不同時會**靜默跳過**。2026-04-23 的 V023 事件即此：V004 先建了
+--   `learning.model_registry` 的舊結構，V023 的 CREATE 看到表存在
+--   就跳過，`canary_status` 欄位從未 land。
+--
+--   post-apply audit 腳本（audit_migrations.py）只能**事後**抓到，
+--   更好的防線是**在 migration 內**用 DO block 主動 RAISE。這個
+--   檔案就是那些 guard 的 canonical 範本。
+--
+-- Usage rules / 使用規則：
+--   1. Every `CREATE TABLE IF NOT EXISTS schema.table` MUST be
+--      preceded by a **Guard A** block.
+--      每個 `CREATE TABLE IF NOT EXISTS schema.table` 前**必加**
+--      Guard A。
+--   2. Every `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` MUST be
+--      preceded by a **Guard B** block (when column type matters).
+--      每個 `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` 前**必加**
+--      Guard B（欄位類型 matters 時）。
+--   3. `CREATE INDEX IF NOT EXISTS` SHOULD use **Guard C** when the
+--      index column list is load-bearing (production/hot-path query
+--      depends on it). Optional for audit-only indexes.
+--      `CREATE INDEX IF NOT EXISTS` 若索引欄位組合關鍵（production
+--      熱查詢依賴），用 Guard C；純 audit 索引可略。
+--   4. Guards are **idempotent** — re-running the same migration on
+--      an already-correct schema does NOT RAISE. RAISE happens only
+--      when shape drifts (legacy pre-existing with wrong columns).
+--      Guard 必須 idempotent —— 同一 migration 重跑，shape 正確時
+--      不 RAISE；只有 drift（legacy 先存在但 shape 錯）才 RAISE。
+--   5. Reviewer (E2) MUST verify guards exist per §七 CLAUDE.md.
+--      E2 必查：新 migration 符合 §七 規範。
+--
+-- ============================================================
+
+
+-- ============================================================
+-- Guard A: Table exists with required columns
+-- Guard A：表存在且必要欄位俱在
+-- ============================================================
+--
+-- When to use / 使用時機：
+--   Before any `CREATE TABLE IF NOT EXISTS schema.table (...)` that
+--   introduces columns that downstream code relies on.
+--   在任何引入「下游依賴欄位」的 CREATE TABLE IF NOT EXISTS 前。
+--
+-- How it works / 運作原理：
+--   If the table exists, verify ALL required columns are present.
+--   If the table doesn't exist, no-op (the CREATE TABLE below will
+--   create it fresh). RAISE EXCEPTION only when table exists but
+--   is missing ≥1 required column.
+--
+--   若表已存在，驗證所有必要欄位俱在。
+--   若表不存在，不動作（下方 CREATE TABLE 會自然建立）。
+--   僅當「表存在但缺 ≥1 必要欄位」時才 RAISE。
+--
+-- Template / 範本：
+--
+-- DO $$
+-- DECLARE
+--     v_schema    TEXT := '<schema>';       -- e.g. 'learning'
+--     v_table     TEXT := '<table>';        -- e.g. 'model_registry'
+--     v_required  TEXT[] := ARRAY[          -- required column names
+--         '<col_a>', '<col_b>', '<col_c>'
+--     ];
+--     v_missing   TEXT[];
+-- BEGIN
+--     IF EXISTS (
+--         SELECT 1 FROM information_schema.tables
+--         WHERE table_schema = v_schema AND table_name = v_table
+--     ) THEN
+--         SELECT array_agg(c) INTO v_missing
+--         FROM unnest(v_required) AS c
+--         WHERE NOT EXISTS (
+--             SELECT 1 FROM information_schema.columns
+--             WHERE table_schema = v_schema
+--               AND table_name   = v_table
+--               AND column_name  = c
+--         );
+--         IF v_missing IS NOT NULL AND array_length(v_missing, 1) > 0 THEN
+--             RAISE EXCEPTION
+--                 'schema_guard A: %.% exists but missing required columns: %. '
+--                 'A previous migration likely pre-created this table with a '
+--                 'different shape. Resolve legacy schema (DROP + re-apply, or '
+--                 'ALTER ADD missing columns) then re-run this migration.',
+--                 v_schema, v_table, v_missing;
+--         END IF;
+--     END IF;
+-- END $$;
+--
+-- Real examples / 實例：
+--
+--   -- (1) V023: model_registry must have canary_status + verdict
+--   DO $$
+--   DECLARE v_missing TEXT[];
+--   BEGIN
+--       IF EXISTS (SELECT 1 FROM information_schema.tables
+--                  WHERE table_schema='learning' AND table_name='model_registry') THEN
+--           SELECT array_agg(c) INTO v_missing
+--           FROM unnest(ARRAY['canary_status','verdict','artifact_path']) AS c
+--           WHERE NOT EXISTS (
+--               SELECT 1 FROM information_schema.columns
+--               WHERE table_schema='learning' AND table_name='model_registry'
+--                 AND column_name=c
+--           );
+--           IF v_missing IS NOT NULL AND array_length(v_missing,1) > 0 THEN
+--               RAISE EXCEPTION
+--                   'schema_guard A: learning.model_registry exists but missing: %. '
+--                   'Legacy V004 pre-seed likely present; drop + re-apply V023.',
+--                   v_missing;
+--           END IF;
+--       END IF;
+--   END $$;
+--
+--   -- (2) learning.decision_shadow_exits must carry context_id + engine_mode
+--   DO $$
+--   DECLARE v_missing TEXT[];
+--   BEGIN
+--       IF EXISTS (SELECT 1 FROM information_schema.tables
+--                  WHERE table_schema='learning' AND table_name='decision_shadow_exits') THEN
+--           SELECT array_agg(c) INTO v_missing
+--           FROM unnest(ARRAY['context_id','engine_mode','exit_source','disagreed']) AS c
+--           WHERE NOT EXISTS (
+--               SELECT 1 FROM information_schema.columns
+--               WHERE table_schema='learning' AND table_name='decision_shadow_exits'
+--                 AND column_name=c
+--           );
+--           IF v_missing IS NOT NULL AND array_length(v_missing,1) > 0 THEN
+--               RAISE EXCEPTION
+--                   'schema_guard A: learning.decision_shadow_exits exists but missing: %',
+--                   v_missing;
+--           END IF;
+--       END IF;
+--   END $$;
+
+
+-- ============================================================
+-- Guard B: Column exists with expected type
+-- Guard B：欄位存在且型別符合預期
+-- ============================================================
+--
+-- When to use / 使用時機：
+--   Before any `ALTER TABLE schema.tbl ADD COLUMN IF NOT EXISTS
+--   col TYPE` where TYPE mismatch would break downstream writers.
+--   在任何 `ALTER TABLE ADD COLUMN IF NOT EXISTS col TYPE` 前，
+--   若類型錯會讓下游 writer 失敗。
+--
+-- How it works / 運作原理：
+--   If the column exists, verify data_type matches expected.
+--   If the column doesn't exist, no-op (ADD COLUMN below adds it).
+--   RAISE EXCEPTION only when column exists with wrong type.
+--
+--   欄位存在時驗 data_type；不存在時 no-op（下方 ADD COLUMN 會加）；
+--   存在但型別錯才 RAISE。
+--
+-- Type matching / 型別比對：
+--   information_schema.columns.data_type returns canonical names:
+--     'text', 'bigint', 'integer', 'smallint', 'double precision',
+--     'timestamp with time zone', 'boolean', 'jsonb', 'numeric',
+--     'ARRAY' (for arrays — check udt_name for element type)
+--   Always use canonical name (lowercase) in v_expected_type.
+--
+--   information_schema.columns.data_type 回規範名（小寫）：
+--     'text' / 'bigint' / 'integer' / 'smallint' / 'double precision' /
+--     'timestamp with time zone' / 'boolean' / 'jsonb' / 'numeric' /
+--     'ARRAY'（陣列，element type 看 udt_name）
+--   v_expected_type 必用規範小寫名。
+--
+-- Template / 範本：
+--
+-- DO $$
+-- DECLARE
+--     v_schema    TEXT := '<schema>';
+--     v_table     TEXT := '<table>';
+--     v_column    TEXT := '<column>';
+--     v_expected  TEXT := '<canonical_type>';  -- e.g. 'text', 'bigint'
+--     v_actual    TEXT;
+-- BEGIN
+--     SELECT data_type INTO v_actual
+--     FROM information_schema.columns
+--     WHERE table_schema = v_schema
+--       AND table_name   = v_table
+--       AND column_name  = v_column;
+--
+--     IF v_actual IS NOT NULL AND v_actual <> v_expected THEN
+--         RAISE EXCEPTION
+--             'schema_guard B: %.%.% exists as type %, expected %. '
+--             'Column type drift detected. Resolve manually (ALTER COLUMN '
+--             'TYPE) or DROP COLUMN + re-apply migration.',
+--             v_schema, v_table, v_column, v_actual, v_expected;
+--     END IF;
+-- END $$;
+--
+-- Real examples / 實例：
+--
+--   -- (1) trading.fills.exit_source must be TEXT
+--   DO $$
+--   DECLARE v_actual TEXT;
+--   BEGIN
+--       SELECT data_type INTO v_actual
+--       FROM information_schema.columns
+--       WHERE table_schema='trading' AND table_name='fills' AND column_name='exit_source';
+--       IF v_actual IS NOT NULL AND v_actual <> 'text' THEN
+--           RAISE EXCEPTION
+--               'schema_guard B: trading.fills.exit_source is %, expected text',
+--               v_actual;
+--       END IF;
+--   END $$;
+--
+--   -- (2) learning.decision_shadow_exits.ts must be timestamptz
+--   DO $$
+--   DECLARE v_actual TEXT;
+--   BEGIN
+--       SELECT data_type INTO v_actual
+--       FROM information_schema.columns
+--       WHERE table_schema='learning' AND table_name='decision_shadow_exits' AND column_name='ts';
+--       IF v_actual IS NOT NULL AND v_actual <> 'timestamp with time zone' THEN
+--           RAISE EXCEPTION
+--               'schema_guard B: learning.decision_shadow_exits.ts is %, expected timestamp with time zone',
+--               v_actual;
+--       END IF;
+--   END $$;
+
+
+-- ============================================================
+-- Guard C: Index exists with expected column set
+-- Guard C：索引存在且欄位組合符合預期
+-- ============================================================
+--
+-- When to use / 使用時機：
+--   Before a `CREATE INDEX IF NOT EXISTS idx_name ON ...(cols...)`
+--   whose column order/set is load-bearing for a hot-path query.
+--   在影響 production 熱查詢的 `CREATE INDEX IF NOT EXISTS` 前。
+--
+-- How it works / 運作原理：
+--   If the index exists, verify its column list matches expected.
+--   If absent, no-op. RAISE only when existing index has wrong cols.
+--
+--   索引存在時驗欄位順序 + 集合；不存在時 no-op；存在但欄位錯 RAISE。
+--
+-- Index column matching / 索引欄位比對：
+--   pg_index.indkey is int2vector of attnum referencing pg_attribute;
+--   we decode via pg_get_indexdef(indexrelid). The test compares the
+--   decoded `(col_a, col_b DESC)` string against expected pattern.
+--
+--   pg_index.indkey 是 attnum 序列；解碼用 pg_get_indexdef(indexrelid)，
+--   比對解碼後字串含目標欄位組合。
+--
+-- Template / 範本：
+--
+-- DO $$
+-- DECLARE
+--     v_schema    TEXT := '<schema>';
+--     v_index     TEXT := '<index_name>';
+--     v_expected  TEXT := '(<col_a>, <col_b> DESC)';  -- substring match
+--     v_actual    TEXT;
+-- BEGIN
+--     SELECT pg_get_indexdef(i.indexrelid) INTO v_actual
+--     FROM pg_index i
+--     JOIN pg_class c ON c.oid = i.indexrelid
+--     JOIN pg_namespace n ON n.oid = c.relnamespace
+--     WHERE n.nspname = v_schema AND c.relname = v_index;
+--
+--     IF v_actual IS NOT NULL AND position(v_expected IN v_actual) = 0 THEN
+--         RAISE EXCEPTION
+--             'schema_guard C: %.% exists but column list mismatch. '
+--             'Expected to contain %, actual: %. '
+--             'DROP INDEX + re-apply migration to repair.',
+--             v_schema, v_index, v_expected, v_actual;
+--     END IF;
+-- END $$;
+--
+-- Real examples / 實例：
+--
+--   -- (1) model_registry production-latest index must use promoted_at DESC
+--   DO $$
+--   DECLARE v_actual TEXT;
+--   BEGIN
+--       SELECT pg_get_indexdef(i.indexrelid) INTO v_actual
+--       FROM pg_index i
+--       JOIN pg_class c ON c.oid = i.indexrelid
+--       JOIN pg_namespace n ON n.oid = c.relnamespace
+--       WHERE n.nspname='learning' AND c.relname='idx_model_registry_production_latest';
+--       IF v_actual IS NOT NULL AND position('promoted_at DESC' IN v_actual) = 0 THEN
+--           RAISE EXCEPTION
+--               'schema_guard C: idx_model_registry_production_latest missing promoted_at DESC. Actual: %',
+--               v_actual;
+--       END IF;
+--   END $$;
+
+
+-- ============================================================
+-- Copy-paste checklist / 複製貼上清單
+-- ============================================================
+--
+-- When authoring a new migration V<NNN>__<desc>.sql:
+--   1. At the top of the file, after the header comment block,
+--      paste the relevant Guard A/B/C blocks (drop the `-- ` prefix;
+--      the templates above are fully commented for reference).
+--   2. Replace <schema> / <table> / <column> / <required> / <expected>
+--      placeholders with real values.
+--   3. Run the migration twice locally to prove idempotency:
+--        psql -f V<NNN>__<desc>.sql
+--        psql -f V<NNN>__<desc>.sql       # must succeed, no RAISE
+--   4. If a guard ever RAISES in prod, the migration aborts
+--      atomically (no partial changes) — operator must resolve
+--      legacy drift manually before re-applying.
+--
+-- 新 migration 撰寫步驟：
+--   1. 在 header 註解下方貼上對應 Guard A/B/C（去掉 `-- ` prefix，
+--      上方模板完全用註解包住是給 reference）。
+--   2. 替換 <schema>/<table>/<column>/<required>/<expected> 等
+--      占位符為實際值。
+--   3. 本地跑兩次驗 idempotent：
+--        psql -f V<NNN>__<desc>.sql
+--        psql -f V<NNN>__<desc>.sql       # 第二次必須成功、不 RAISE
+--   4. 若 guard 在 prod RAISE，migration 會 atomic 中止（無部分寫入），
+--      operator 要先解決 legacy drift 才能重新 apply。
+--
+-- ============================================================

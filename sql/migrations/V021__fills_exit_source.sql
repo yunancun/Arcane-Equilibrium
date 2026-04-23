@@ -46,6 +46,36 @@
 --   這裡用 CHECK IN 對歷史 NULL 不觸發）。
 
 -- ------------------------------------------------------------
+-- Schema Guard B (retrofit 2026-04-24, V023 postmortem)
+-- ------------------------------------------------------------
+-- If trading.fills.exit_source already exists with a non-TEXT type,
+-- the ADD COLUMN IF NOT EXISTS below would silently skip and
+-- downstream writers would later fail in confusing ways. RAISE now.
+--
+-- 若 trading.fills.exit_source 已存在但非 TEXT，下方 ADD COLUMN
+-- IF NOT EXISTS 會靜默跳過、下游 writer 之後才報難解錯誤。提前 RAISE。
+--
+-- Template source: sql/migrations/templates/schema_guard_template.sql § Guard B
+-- ------------------------------------------------------------
+DO $$
+DECLARE
+    v_actual TEXT;
+BEGIN
+    SELECT data_type INTO v_actual
+    FROM information_schema.columns
+    WHERE table_schema = 'trading'
+      AND table_name   = 'fills'
+      AND column_name  = 'exit_source';
+
+    IF v_actual IS NOT NULL AND v_actual <> 'text' THEN
+        RAISE EXCEPTION
+            'schema_guard B: trading.fills.exit_source exists as type %, expected text. '
+            'Legacy drift detected — resolve via ALTER COLUMN TYPE or DROP COLUMN + re-apply.',
+            v_actual;
+    END IF;
+END $$;
+
+-- ------------------------------------------------------------
 -- 1. Add column (nullable) / 加欄位（可 NULL）
 -- ------------------------------------------------------------
 ALTER TABLE trading.fills
@@ -113,6 +143,70 @@ COMMENT ON INDEX trading.idx_fills_exit_source_non_physical IS
 --   純觀測，永不入 `learning.decision_features` label 回填。
 --   Pure observation; never enters training label backfill.
 -- ============================================================
+
+-- ------------------------------------------------------------
+-- Schema Guard A (retrofit 2026-04-24, V023 postmortem)
+-- ------------------------------------------------------------
+-- If learning.decision_shadow_exits already exists from a prior
+-- attempt, verify all required columns are present before the
+-- CREATE TABLE IF NOT EXISTS silently no-ops.
+--
+-- 若 learning.decision_shadow_exits 已存在（前次嘗試殘留），
+-- 驗所有必要欄位都在；避免 CREATE TABLE IF NOT EXISTS 靜默跳過。
+--
+-- Template source: sql/migrations/templates/schema_guard_template.sql § Guard A
+-- ------------------------------------------------------------
+DO $$
+DECLARE
+    v_missing TEXT[];
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.tables
+        WHERE table_schema = 'learning'
+          AND table_name   = 'decision_shadow_exits'
+    ) THEN
+        SELECT array_agg(c) INTO v_missing
+        FROM unnest(ARRAY[
+            'context_id', 'ts', 'engine_mode',
+            'strategy_name', 'symbol', 'side',
+            'physical_action', 'exit_source',
+            'disagreed'
+        ]) AS c
+        WHERE NOT EXISTS (
+            SELECT 1 FROM information_schema.columns
+            WHERE table_schema = 'learning'
+              AND table_name   = 'decision_shadow_exits'
+              AND column_name  = c
+        );
+        IF v_missing IS NOT NULL AND array_length(v_missing, 1) > 0 THEN
+            RAISE EXCEPTION
+                'schema_guard A: learning.decision_shadow_exits exists but missing required columns: %. '
+                'Resolve legacy schema (DROP + re-apply V021) before continuing.',
+                v_missing;
+        END IF;
+    END IF;
+END $$;
+
+-- Guard B: ts column must be timestamptz (hypertable partition column).
+-- Guard B：ts 欄位必須是 timestamptz（hypertable 分區欄）。
+DO $$
+DECLARE
+    v_actual TEXT;
+BEGIN
+    SELECT data_type INTO v_actual
+    FROM information_schema.columns
+    WHERE table_schema = 'learning'
+      AND table_name   = 'decision_shadow_exits'
+      AND column_name  = 'ts';
+
+    IF v_actual IS NOT NULL AND v_actual <> 'timestamp with time zone' THEN
+        RAISE EXCEPTION
+            'schema_guard B: learning.decision_shadow_exits.ts is %, expected timestamp with time zone. '
+            'TimescaleDB hypertable partition column type must match; resolve manually.',
+            v_actual;
+    END IF;
+END $$;
+
 CREATE TABLE IF NOT EXISTS learning.decision_shadow_exits (
     shadow_exit_id        BIGSERIAL,
     context_id            TEXT            NOT NULL,   -- FK → decision_features.context_id
