@@ -419,6 +419,7 @@ impl InstrumentInfoCache {
     // -----------------------------------------------------------------------
 
     /// Ensure a symbol's spec is cached, fetching on demand if absent.
+    /// Thin wrapper over `ensure_symbol_force(client, category, symbol, false)`.
     /// See `ensure_symbol_with_fetcher` for the full protocol.
     ///
     /// 確保 symbol 的規格已緩存，缺失時按需向 Bybit 拉取。
@@ -429,15 +430,65 @@ impl InstrumentInfoCache {
         category: &str,
         symbol: &str,
     ) -> BybitResult<Option<SymbolSpec>> {
-        self.ensure_symbol_with_fetcher(client, category, symbol)
+        self.ensure_symbol_with_fetcher_opts(client, category, symbol, false)
+            .await
+    }
+
+    /// INSTR-ENSURE-FORCE-1 (2026-04-23): force-refresh a symbol's spec even
+    /// if a positive cache entry already exists. Intended for mid-window
+    /// recovery on `PriceTickInvalid` / `PriceOutOfRange` retcodes where a
+    /// cached tick_size / qty_step has gone stale (Bybit listed a symbol on
+    /// a new precision since our last refresh).
+    ///
+    /// Semantics:
+    ///   * `force_refresh = true`: skip Step 1 (positive cache fast path);
+    ///     still respects singleflight dedup (same-symbol concurrent force
+    ///     calls collapse to a single REST) + global semaphore + neg-cache
+    ///     poisoning rules (Bybit denies → insert neg cache; transient Err
+    ///     → NO neg cache).
+    ///   * `force_refresh = false`: equivalent to `ensure_symbol`.
+    ///
+    /// Note: this does NOT clear an existing positive cache entry before
+    /// fetching — if the fetch returns Err, the stale entry remains usable
+    /// as a fallback. Only on successful parse does the new spec overwrite
+    /// the cache (same write semantics as leader path).
+    ///
+    /// INSTR-ENSURE-FORCE-1：強制重拉 symbol 規格（繞正 cache 快路徑）。
+    /// 用於 PriceTickInvalid 等 retcode 觸發的中窗 spec 漂移自癒。
+    /// singleflight + semaphore + neg cache 防 poisoning 規則全部保留。
+    pub async fn ensure_symbol_force(
+        &self,
+        client: &BybitRestClient,
+        category: &str,
+        symbol: &str,
+        force_refresh: bool,
+    ) -> BybitResult<Option<SymbolSpec>> {
+        self.ensure_symbol_with_fetcher_opts(client, category, symbol, force_refresh)
+            .await
+    }
+
+    /// Convenience wrapper that preserves the pre-FORCE-1 API surface for tests
+    /// that inject mock fetchers. Calls the full `_opts` form with
+    /// `force_refresh=false`.
+    /// 舊測試相容 wrapper（force_refresh=false）。
+    pub async fn ensure_symbol_with_fetcher<F: SingleSymbolFetcher + ?Sized>(
+        &self,
+        fetcher: &F,
+        category: &str,
+        symbol: &str,
+    ) -> BybitResult<Option<SymbolSpec>> {
+        self.ensure_symbol_with_fetcher_opts(fetcher, category, symbol, false)
             .await
     }
 
     /// Core ensure_symbol implementation, generic over `SingleSymbolFetcher`.
     ///
     /// Protocol / 協議：
-    ///   1. Positive cache hit → return Some immediately (no network).
+    ///   1. Positive cache fast path (SKIPPED if `force_refresh=true`).
     ///   2. Negative cache hit (not TTL-expired) → return None immediately.
+    ///      Applies regardless of `force_refresh` — if Bybit has denied this
+    ///      symbol in the last 60s, force-refreshing won't help and would
+    ///      burn rate limit. Operator clears neg cache explicitly via TTL.
     ///   3. Singleflight: if another task is already fetching this symbol,
     ///      await its Notify, then re-check positive cache and return.
     ///   4. Otherwise acquire the global semaphore + install inflight slot,
@@ -449,26 +500,34 @@ impl InstrumentInfoCache {
     ///   5. Always drain the inflight slot + notify waiters in a guard drop.
     ///
     /// 協議：
-    ///   1. 正緩存 hit → 立即 Some（不打網）。
-    ///   2. 負緩存 hit（TTL 內）→ 立即 None。
+    ///   1. 正緩存 hit → 立即 Some（不打網）。`force_refresh=true` 時跳過。
+    ///   2. 負緩存 hit（TTL 內）→ 立即 None。force_refresh 不影響負緩存門。
     ///   3. Singleflight：同 symbol 有 inflight → await Notify → 重查正緩存。
     ///   4. 否則 acquire semaphore + 裝 inflight → fetcher：
     ///        - Ok(Some) → 解析插正緩存 → Some。
     ///        - Ok(None) → 插新鮮負緩存 → None。
     ///        - Err → **不**入負緩存（防 poisoning）→ 傳錯。
     ///   5. Drop 時固定清 inflight + notify 等待者。
-    pub async fn ensure_symbol_with_fetcher<F: SingleSymbolFetcher + ?Sized>(
+    pub async fn ensure_symbol_with_fetcher_opts<F: SingleSymbolFetcher + ?Sized>(
         &self,
         fetcher: &F,
         category: &str,
         symbol: &str,
+        force_refresh: bool,
     ) -> BybitResult<Option<SymbolSpec>> {
         // Step 1: positive cache fast path / 正緩存快路徑
-        if let Some(spec) = self.get(symbol) {
-            return Ok(Some(spec));
+        // INSTR-ENSURE-FORCE-1: skip when force_refresh=true so the caller
+        // can recover from a stale tick_size / qty_step spec.
+        if !force_refresh {
+            if let Some(spec) = self.get(symbol) {
+                return Ok(Some(spec));
+            }
         }
 
         // Step 2: negative cache check (TTL-gated) / 負緩存查驗（TTL 內拒）
+        // Kept under force_refresh path too: Bybit denied → no force-refresh
+        // can find it before TTL. Skipping this would burn rate limit.
+        // 負緩存門對 force_refresh 也生效：Bybit 已否認的 symbol 強拉也找不到。
         if self.neg_cache_hit(symbol) {
             return Ok(None);
         }
@@ -1817,5 +1876,100 @@ mod tests {
             cache.get("DRIFTUSDT").is_some(),
             "positive cache must now hold the symbol"
         );
+    }
+
+    // -----------------------------------------------------------------------
+    // INSTR-ENSURE-FORCE-1 — ensure_symbol_force regression tests
+    // INSTR-ENSURE-FORCE-1 — 強制重拉規格的回歸測試
+    // -----------------------------------------------------------------------
+
+    /// force=true MUST bypass the positive cache fast path and invoke the
+    /// fetcher. force=false (same state) MUST NOT.
+    /// force=true 必繞正 cache；force=false 同情境不打網。
+    #[tokio::test]
+    async fn test_ensure_symbol_force_bypasses_positive_cache() {
+        // Pre-seed positive cache. Normal ensure_symbol would short-circuit
+        // on Step 1 — this test proves force=true skips that step.
+        // 先放正 cache。若 force=true 仍短路，fetcher 不會被呼叫 → 測試失敗。
+        let cache = InstrumentInfoCache::new();
+        {
+            let mut map = cache.cache.write();
+            map.insert("FORCEUSDT".to_string(), sample_btc_spec());
+        }
+
+        let fetcher = MockFetcher::new(0); // mode 0 = Ok(Some(sample_item))
+
+        // force=false: positive cache hit, fetcher NOT called.
+        let r = cache
+            .ensure_symbol_with_fetcher_opts(&fetcher, "linear", "FORCEUSDT", false)
+            .await
+            .expect("force=false ok");
+        assert!(r.is_some(), "force=false must return the cached spec");
+        assert_eq!(
+            fetcher.call_count(),
+            0,
+            "force=false: positive cache fast path must skip fetcher"
+        );
+
+        // force=true: bypass fast path, fetcher MUST be called exactly once.
+        let r2 = cache
+            .ensure_symbol_with_fetcher_opts(&fetcher, "linear", "FORCEUSDT", true)
+            .await
+            .expect("force=true ok");
+        assert!(r2.is_some(), "force=true must still return a spec");
+        assert_eq!(
+            fetcher.call_count(),
+            1,
+            "force=true must bypass positive cache and call fetcher"
+        );
+
+        // Subsequent force=false call returns cached spec (the fresh one
+        // written by the force=true call); no additional fetch.
+        // 後續 force=false 直接走 cache，呼叫計數不變。
+        let _ = cache
+            .ensure_symbol_with_fetcher_opts(&fetcher, "linear", "FORCEUSDT", false)
+            .await
+            .expect("ok");
+        assert_eq!(fetcher.call_count(), 1);
+    }
+
+    /// force=true still collapses concurrent same-symbol calls into a single
+    /// REST hit via the singleflight inflight slot. Critical: without this,
+    /// a burst of tick-invalid errors could fan out N parallel force-refresh
+    /// REST calls for the same symbol and blow the rate limit.
+    /// force=true 仍遵守 singleflight；同 symbol N 併發只 1 次 REST。
+    #[tokio::test]
+    async fn test_ensure_symbol_force_still_respects_singleflight() {
+        let cache = Arc::new(InstrumentInfoCache::new());
+        // Delay the fetcher so all 10 contenders are guaranteed to overlap
+        // in the inflight slot. Matches singleflight_dedup test style.
+        // 加延遲讓 10 個 task 全部重疊在 inflight 槽位。
+        let fetcher = Arc::new(MockFetcher::with_delay(0, 50));
+
+        let mut handles = Vec::new();
+        for _ in 0..10 {
+            let c = Arc::clone(&cache);
+            let f = Arc::clone(&fetcher);
+            handles.push(tokio::spawn(async move {
+                c.ensure_symbol_with_fetcher_opts(&*f, "linear", "FORCERACE", true)
+                    .await
+                    .map(|o| o.is_some())
+            }));
+        }
+
+        let results: Vec<_> = futures_util::future::join_all(handles).await;
+        for r in results {
+            assert!(
+                r.unwrap().unwrap(),
+                "every force=true contender must see a positive result"
+            );
+        }
+
+        assert_eq!(
+            fetcher.call_count(),
+            1,
+            "force=true singleflight: 10 concurrent must collapse to 1 REST"
+        );
+        assert!(cache.get("FORCERACE").is_some());
     }
 }

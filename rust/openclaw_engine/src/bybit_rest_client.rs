@@ -339,6 +339,20 @@ pub enum BybitRetCode {
     LeverageNotModified = 110043,
     /// Price tick invalid — round via InstrumentInfoCache and retry once.
     /// 價格刻度非法 — 透過 InstrumentInfoCache 重新四捨五入並重試一次。
+    ///
+    /// INSTR-ENSURE-FORCE-1 TODO (2026-04-23): the order-submit caller that
+    /// handles 110049 / 110003 should invoke
+    /// `InstrumentInfoCache::ensure_symbol_force(client, category, symbol,
+    /// true)` to force-refresh the cached tick_size / qty_step before
+    /// re-rounding the price and resubmitting. Today this retcode is only
+    /// CLASSIFIED (`is_instrument_filter`) — no actual retry path reads the
+    /// cache and retries. Wiring the retry requires the submit caller to
+    /// hold an `Arc<InstrumentInfoCache>`; `OrderManager` already does, so
+    /// the actual wire can live in `order_manager::place_order` (or the
+    /// dispatcher wrapping it) rather than here in the REST client.
+    /// INSTR-ENSURE-FORCE-1 TODO：真正的重試接線留給 order_manager 層
+    /// （因為 OrderManager 已握 Arc<InstrumentInfoCache>），
+    /// 呼 ensure_symbol_force(.., force_refresh=true) 強拉新 spec 重算後重發。
     PriceTickInvalid = 110049,
     /// Contract not live (delisted/suspended) — remove from scanner universe.
     /// 合約未上線（下架/暫停）— 從掃描器宇宙中移除。
@@ -421,6 +435,17 @@ impl BybitRetCode {
     /// that needs recomputation via InstrumentInfoCache — distinct from both
     /// `is_retryable` (transient) and `is_exchange_backoff` (stage).
     /// 是否為合約過濾器問題（需重算 tick/price），與瞬態/階段退避不同。
+    ///
+    /// INSTR-ENSURE-FORCE-1 TODO (2026-04-23): when the order-submit path
+    /// observes `is_instrument_filter() == true`, it should call
+    /// `InstrumentInfoCache::ensure_symbol_force(.., force_refresh=true)` to
+    /// bypass the stale positive cache and pull a fresh spec. If that
+    /// returns `None` (Bybit denies → neg cache), fall through to M-1
+    /// fail-closed rejection. If it returns `Some(spec)`, re-round price/
+    /// qty with `spec.round_price` / `spec.round_qty` and retry once.
+    /// Wire point: the OrderManager submit wrapper, not this classifier.
+    /// INSTR-ENSURE-FORCE-1 TODO：consumer 收到 is_instrument_filter=true 時
+    /// 呼 ensure_symbol_force(force_refresh=true) 取得 fresh spec，重算後重發。
     pub fn is_instrument_filter(&self) -> bool {
         matches!(self, Self::PriceOutOfRange | Self::PriceTickInvalid)
     }
