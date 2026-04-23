@@ -65,18 +65,20 @@
 
 ### maintenance_scripts/bybit_connector/ — 舊治理鏈腳本 (Legacy H/I/J/K Chain)
 
-> **注意**：此目錄包含 ~60 個舊 H-chain / I-chain / J-chain / K-chain 維護腳本，
-> 來自 2026-03 的治理管線開發期。DEAD-PY-2 後大部分已無法直接運行（依賴已刪除的
-> Python 治理類），但作為歷史參考保留。以下僅列出仍可能有用的：
+> **2026-04-23 清理**：原本 60 檔（含 README），DEDUP-PY-RUST 系列尾聲刪除 53 個
+> 一次性 H/I/J/K-chain 修復腳本（0 caller，DEAD-PY-2 後 Python 治理類已刪、依賴斷鏈，
+> git history 可復原）。同步刪除 `program_code/exchange_connectors/bybit_connector/scripts/`
+> 下對應的 45 個 REAL= shim wrappers。保留 6 個基礎工具：
 
 | 腳本 | 用途 |
 |------|------|
-| `lib_trading_env.sh` | 共享環境變量設定（被其他腳本 source） |
-| `run_with_trading_env.sh` | 在交易環境中運行任意命令 |
-| `run_i10_canonical_h_chain_recheck.sh` | H 鏈權威檢查器 |
-| `run_i10_canonical_decision_lease_recheck.sh` | I 鏈權威檢查器 |
-| `_bybit_latest_wrapper.py` | Bybit API 最新值包裝器 |
-| `repair_i10_stage_source_aliases.py` | 修復 I10 stage source 別名 |
+| `lib_trading_env.sh` | 共享環境變量設定（被 `run_with_trading_env.sh` source） |
+| `run_with_trading_env.sh` | 在交易環境中運行任意命令（純 bash，無 Python 依賴） |
+| `run_i10_canonical_h_chain_recheck.sh` | H 鏈權威檢查器（讀 runtime JSON + 嵌入式驗證） |
+| `run_i10_canonical_decision_lease_recheck.sh` | I 鏈權威檢查器（讀 runtime JSON + 嵌入式驗證） |
+| `_bybit_latest_wrapper.py` | Bybit API 最新值包裝器（通用工具，標準庫 only） |
+| `repair_i10_stage_source_aliases.py` | 修復 I10 stage source 別名（無外部依賴） |
 
-其餘 ~50 個 `fix_*` / `repair_*` / `run_h*` / `run_i*` 腳本為一次性修復腳本，
-各自的 MODULE_NOTE 內有用途說明。
+`program_code/.../scripts/` 下剩餘 5 檔：`lib_trading_env.sh` / `run_with_trading_env.sh`
+兩個 shim 指向上面白名單，以及 3 個獨立原檔 `bybit_bind_active_route_env.sh`
+（shim 指 `misc_tools/`）、`bybit_h1_report_utils.py`、`bybit_readonly_loop_writer.sh`。
