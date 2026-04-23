@@ -1,15 +1,13 @@
 # OpenClaw TODO — 工作清單
 
-**最後更新**：2026-04-22（Step 0 收尾 · P1-10 (2) SL/TP audit · P1-19 結案 duplicate of P1-10 · **P0-13 + P0-14 A + P0-14 B 三 commits 2026-04-22 23:35 CEST `--rebuild` 部署完成**，engine PID **213144** / uvicorn **213195**，healthcheck [7] 從 43/43 → **135/135 cells**（+92 proxy cells，6 prefixes 全齊 bybit_sync/dust_frozen/grid_trading/ma_crossover/orphan_adopted/orphan_frozen），P0-14 B Python proxy 立即生效；P0-13 F kline ATR + P0-14 A Gate 1 fallback 待 cold-start 15 min ATR 可用 + 24h+ phys_lock fire 累積驗證）· P0-15 文檔更正 · PASSIVE-WAIT-HEALTHCHECK-1 ✅— 當日完成 TRACK-P-V2-SWAP-1（`306993e`）+ TICK-PIPELINE-MOD-SPLIT-1（`3d67a99`）兩項；Step 0 衍生新 TODO 章節全歸檔至 `docs/archive/2026-04-22--step_0_derived_todo_batch.md`；P1-10 (2) ma_crossover SL/TP 結構 audit 完成；**P1-19 RCA 結案**：operator 授權 psql 驗證 H3 命中（demo 24h close_fills 14/14 entry_context_id 100% 填充 → H1 證偽；backfill 7d 139→24→44→14 對齊 close_fills → H2 證偽；結論 = 策略自我收斂 fee drag 壓制入場，ONNX 訓練延後至 2026-04-28+ 由 EDGE-P2-3 PostOnly 1w 觀察決定），附帶 3 個 P2 可觀測性 TODO（RESTART-ALL-UVICORN-LOG-1 / EDGE-SCHEDULER-LEADER-1 / SCHEDULER-FAILURE-OBSERVABILITY-1）。2026-04-21 批次歸檔至 `docs/archive/2026-04-21--completed_todo_batch.md`（14 項）。**2026-04-22 20:55 CEST `restart_all.sh --rebuild` 部署完成**（engine PID 158918；binary mtime 20:55；baseline HEAD `9fcc7d4`）— TRACK-P-V2-SWAP-1 v2 non-linear giveback + TICK-PIPELINE-MOD-SPLIT-1 首次進 runtime。
-**Engine**：PID **213144** · binary mtime **2026-04-22 23:35** · baseline HEAD `9710ff9`（docs + 3 P0 fix commits：`ff694e8` P0-13 F kline ATR source / `2484263` P0-14 A Gate 1 fallback / `9710ff9` P0-14 B Python proxy cells）· **首次含** P0-13 ATR kline-based + P0-14 A + P0-14 B（Priority 6 現在能拿到真持倉期 ATR + sync-label edge proxy）；承襲 TRACK-P-V2-SWAP-1 + TICK-PIPELINE-MOD-SPLIT-1（`306993e`/`3d67a99` 於 20:55 CEST baseline 已進 runtime）+ TRACK-P-T4-WIRING-1 / EDGE-P2-3 PostOnly / DECISION-OUTCOMES / split refactor 等
-**Python uvicorn**：PID **213195**（4 workers）· 2026-04-22 23:35 CEST `--rebuild` 隨 engine 一併重啟 · 首次含 P0-14 B `james_stein_estimator._inject_sync_label_proxy_cells`（4 sync strategies × 23 symbols = +92 proxy cells；`edge_estimates.json` 43→135 cells）· 原有 P0-12 LIVE-GATE-FALLBACK-1 + E5-FN-3 + PIPELINE-SLOT-1 全承襲
-**Post-deploy 24h 觀察**：`helper_scripts/v2_swap_24h_observation.sh` Linux PID **166383** 跑到 **2026-04-23 21:16 CEST**；每小時採 engine_watchdog + `phys_lock` 計數（total/gate4_giveback/gate4_stale_roc_neg）+ edge_estimates populate 狀態 + PID drift 檢查；log `/tmp/openclaw/v2_swap_24h_observation.log`（`ssh trade-core 'tail -50 <path>'` 可查進度）；結束後 operator / 下次 session review 結果 + 跑 SQL fills 分布（ad-hoc template 在 script header comment block，`ts_ms >= 1776885391000`）；異常中止用 `ssh trade-core 'pkill -f v2_swap_24h_observation.sh'`。
-**PIPELINE-SLOT-1 live 驗證**：LiveAuthWatcher 22:33 啟動 `env=LiveDemo poll_interval_secs=5`；authorization.json 仍未簽（operator 待決定何時啟 live 流量）
-**測試基準線**：Rust engine lib **1835**（2026-04-22 TRACK-P-V2-SWAP-1 退役 8 個 v1 直測後；Mac debug + Linux release `cargo test -p openclaw_engine --lib` 均驗；v2 等值覆蓋在 `exit_features/v2.rs` 25 單測；TICK-PIPELINE-MOD-SPLIT-1 為純 refactor 零測試數變化）/ bin 38 / core 392 / e2e 35 / reconciler_e2e 19 · Python **2866** passed + audit 4 + ml_training 238 · build warnings **10** · **0 pre-existing fail** · `tick_pipeline/mod.rs` 2274 → **1012** 行（§七 1200 硬上限符合，降 55.5%）
+**最後更新**：2026-04-23（WS-RETIRE-1 + DEDUP-PY-RUST A+B+C+D + INFRA-PREBUILD-1 Part A/B 於 21:13 CEST `--rebuild` 後 runtime live；Session 2026-04-23 QC/FA/FM/E4 audit 結案；P0-13/14/15 + PASSIVE-WAIT-HEALTHCHECK-1 於 2026-04-22 23:35 CEST 部署後持續觀察）
+**Engine**：PID **764820** · binary mtime **2026-04-23 21:13** · baseline HEAD `f42face`（含 WS-RETIRE + DEDUP A+B+C+D + INFRA-PREBUILD A+B；承襲 P0-13/14 + TRACK-P-V2-SWAP-1 + TICK-PIPELINE-MOD-SPLIT-1 + T4 + EDGE-P2-3 PostOnly + DECISION-OUTCOMES fix 等）
+**Python uvicorn**：PID **764878**（4 workers）· 2026-04-23 21:13 CEST `--rebuild` 隨 engine 重啟；包含 P0-14 B JS proxy cells（43→135）+ P0-12 LIVE-GATE-FALLBACK-1 + E5-FN-3 + PIPELINE-SLOT-1 承襲
+**PIPELINE-SLOT-1 live 驗證**：LiveAuthWatcher 跑中 `env=LiveDemo poll_interval_secs=5`；`authorization.json` 未簽（operator 待決定 live 啟動時機）
+**測試基準線**：Rust engine lib **1939**（Mac + Linux release；2026-04-23 session 累積 +104 vs 1835 baseline）/ bin 38 / core 392 / e2e 35 / reconciler_e2e 19 · pytest **2996 / 0 fail / 1 skipped** · `tick_pipeline/mod.rs` **1012** 行（§七 1200 硬上限符合）
 
-**健康**（post-rebuild 2026-04-21 21:03 check）：demo alive（snapshot age 1.5s） · paper disabled（PAPER-DISABLE-1 預期）· live not alive（未簽 auth 預期）· 0 panics · 24 errors 全 pre-existing cold-start noise（21× cryptopanic news auth missing / 3× instrument spec 冷啟動 fail-closed）
-**DB 驗證（2026-04-21 21:00，24h 窗口）**：`trading.intents` demo **144 rows** ✅（P1-7 A `2a36a3f` 生效，live/live_demo 0 因 auth 未簽為預期）· `trading.fills` demo **123 rows** ✅（P0-7 ARCHIVED）· `settings/edge_estimates.json` mtime 20:45 ✅（scheduler 隨 uvicorn 運作中）· `decision_outcomes` 273,963 rows 三分對齊（demo 136k / live 89k / live_demo 47k）
-**21d demo 時鐘**：起算 2026-04-16 22:16 local（P0-9 STABILITY-1 RCA 穩定點），目前 ~5d；計劃性 rebuild 不重置；目標 21d 解鎖最早 **2026-05-07**
+**健康**（post-rebuild 2026-04-23）：demo alive · paper disabled（PAPER-DISABLE-1 預期）· live not alive（auth 未簽預期）· 0 panics
+**21d demo 時鐘**：起算 2026-04-16 22:16 local（P0-9 STABILITY-1 RCA 穩定點），目前 ~7d；計劃性 rebuild 不重置；目標 21d 解鎖最早 **2026-05-07**
 
 > 本文件僅列「待辦/進行中」。已完成 → 文末歸檔索引。詳細設計 → `docs/worklogs/`。
 > Compact 後從此文件恢復；第一個 `[ ]` = 起點。CLAUDE.md §三 = 當前狀態快照。
@@ -236,9 +234,6 @@ git status && git log --oneline -5
 
 ## 🟡 P1 — 當週活躍
 
-### ✅ P1-5 · DEMO-REBOOT-PNL-RESET-1 2026-04-20 commit `7cda4e4`（歸檔 §7）
-- `peak_balance` 持久化（V018 `trading.paper_state_checkpoint`）+ restore clamp `max(restored, current)` + `reset_drawdown_baseline` IPC。封死「重啟洗 drawdown」fail-closed 繞過路徑。demo row `peak_balance=948.85` 已寫入；worklog `docs/worklogs/2026-04-20--p1_5_a2_drawdown_continuity_implementation.md`。
-
 ### 🟡 EDGE-DIAG-1 · 2026-04-23 · Edge investigation infra（P1，主軸）
 
 **動機（operator 2026-04-23）**：P0-14 B 部署後 healthcheck [4] 揭露 v2 Gate 1 在當前 edge 環境是 by-design noop —— 全 135 cells `shrunk_bps = -4.30 < floor 5.0`（v2.rs:292-294 hard short-circuit）→ Gate 4 (giveback lock) 永遠到不了 → phys_lock 7d=0 不是 bug 是設計。Operator 進一步擔憂「EDGE-P2-3 PostOnly 修復後 edge 很可能仍是負」（grid BLURUSDT 24h gross −0.008/RT vs fee −5.4/RT，PostOnly 降 fee ~9 bps/雙側，net 仍可能 −0.5 bps/RT 量級）。若 PostOnly 後仍負 → 證明策略結構性沒正 edge → 整個 phys_lock + MICRO-PROFIT 鎖利層全是 noop → 系統只剩 trailing/dynamic 兩個被動止損層，本質是「逐步少賠」非「累積邊際正利」。
@@ -426,26 +421,6 @@ git status && git log --oneline -5
 - **阻塞**：不阻 Live；阻 DUAL-TRACK Phase 1 軌道 2 B 完成判定 + Phase 5 cost_gate 重啟
 - **關聯**：P1-10 STRATEGY-ASYMMETRY-1（必要前置）· DUAL-TRACK Phase 1 軌道 2 B · P0-3 Phase 5 edge 重評
 
-### ✅ P1-18 · GATE1-REVERSAL-OBS-1 — superseded 2026-04-22 by TRACK-P-V2-SWAP-1 runtime live
-
-**結案理由**：原條目要求 ≥2-3d observation window 驗證 v1 Gate 1 `< floor → Hold` hotfix A（`d0f0c21`）+ T4 接線（`e95c779`）runtime 無惡化，作為 gate 解鎖 `TRACK-P-V2-SWAP-1`。實際執行：2026-04-21 20:44 CEST `--rebuild` 部署 v1+T4，至 2026-04-22 TRACK-P-V2-SWAP-1（`306993e`）完成代碼切換 → 20:55 CEST `--rebuild` 部署 v2 runtime。v1 observation window 被 v2 runtime **直接接管**（v1 已退役，code removed），觀察對象從「v1 Gate 1 hotfix A 是否惡化」轉為「v2 non-linear giveback 是否優於 v1 linear」，由 **`v2_swap_24h_observation.sh`**（PID 166383，2026-04-23 21:16 CEST 結束）接手。
-
-原 5 項 checkbox 結果：
-- `phys_lock_gate1_low_edge` 新 fills — v1 期間 0（符合 hotfix A 預期），v2 期間仍 0（v2 Gate 1 也 Hold）
-- `phys_lock_gate4_*` fire — 24h loop 追蹤中；冷啟動期 `edge_estimates.cells=0` Gate 1 全 Hold（預期）
-- 持倉時長 / right-tail / edge 指標 — 隨 24h loop 觀察
-
-**不寫 CLAUDE.md**（不是獨立里程碑，已由 V2-SWAP 覆蓋）；memory `project_track_p_runtime_dead.md` 已在 V2-SWAP supersede 時改為 `project_track_p_runtime_live.md`（2026-04-22 commit `871e11e`）。
-
-### ✅ P1-15 LEARNING-SCHEMA-QUALITY-1 2026-04-18 commit `b0df1b3`（歸檔 §8）
-- `commands.rs:668` 加 `risk_close:ipc_close_symbol` 前綴 + `realized_edge_stats.py:238` allowlist 加 `live_demo`。清 28 phantom cells（18 ipc + 10 risk_check），live_demo grand_mean −14.97 bps。真實 grand_mean 毒源由 P1-16/17 解。
-
-### ✅ P1-16 HALT-SESSION-CROSS-SYMBOL-PRICE-CORRUPTION-1 2026-04-18 commit `fef688e`（歸檔 §9）
-- 雙管修復：(Rust) `on_tick.rs` HaltSession 改用 `close_position_at_symbol_market` helper，斷絕 triggering tick 價格跨 symbol 汙染；(Python) `_pair_round_trips` 加 price-jump gate `|ln(exit/entry)| > 0.5` skip + 分母托底 `max(entry_notional_full, match_notional)`。demo 6616 fills → 5129 pairs，27 skips / 0 clamps / mean **−9.02 bps**（vs 修前 −2214，**245× cleaner**）；engine lib 1499 / ml_training 238 passed。
-
-### ✅ P1-17 JS-ESTIMATOR-WINSORIZATION-1 2026-04-18（歸檔 §10）
-- `_WINSORIZE_BPS=5000` + `_winsorize_bps()` helper + clamp counter；demo 30d archived grand_mean **−2214 → −78.38 bps**（19 clamps）。P1-16 上游修好後 Winsorize 退為 safety net 第三線。ml_training 217 passed。
-
 ---
 
 ## 🟢 P2 — 下週 / Live Gate / QoL
@@ -496,13 +471,12 @@ git status && git log --oneline -5
 ### AI Layer 接通（W23）
 - [ ] **G-7** ClaudeTeacher 啟用（`consumer_loop.rs enabled=false`，前置 21d demo + G-3 IPC auth ✅）
 - [ ] **G-10** Calibration.py 整合（isotonic → `run_training_pipeline.py` + ECE < 0.05）
-- ✅ **LLM-ABC-MIGRATION-1** 2026-04-20 — 5 call-site 遷至 `local_llm_factory.get_local_llm_client()`（`ai_service.py` / `strategy_wiring.py` / `layer2_engine.py` / `layer2_routes.py` / `layer2_tools.py`）。新 `app/local_llm_factory.py` + `LMStudioShimClient` 暴露 OllamaClient-shape 介面（`.generate/.chat/.classify/.judge_edge/.is_available[_async]/.config/.model`）回傳 `OllamaResponse`，call-site 0 parsing 變動。`LOCAL_LLM_PROVIDER=ollama`(預設)/`lm_studio` 切換，未知值 fallback Ollama。17 個新 pytest（env 切換/heavy 變體/surface 對齊/fail-soft HTTP/classify & judge_edge 代理/singleton 語義）+ 11 個既有 patch-target 更新 + 1 訊息文案對齊。變數名 `_OLLAMA_CLIENT`/`OLLAMA_CLIENT` 保留 §九 grep 穩定。grep 驗證：business code 0 `import OllamaClient`。**Mac operator 設 `LOCAL_LLM_PROVIDER=lm_studio`+`LM_STUDIO_BASE_URL` 即可不裝 Ollama 跑 Layer 2。**
+- ✅ **LLM-ABC-MIGRATION-1** 2026-04-20（CLAUDE.md 里程碑索引）— 5 call-site 遷至 `local_llm_factory`；`LOCAL_LLM_PROVIDER=lm_studio` 即可不裝 Ollama 跑 Layer 2。
 
 ### QoL & 設計債
 - [ ] **QoL-2** Demo AI cost 追蹤（`tab-demo.html` 硬編碼 'N/A'，依賴 G-1 H1-H5）
 - [ ] **DUST-EVICTION GUI 曝光**（P1-8 FUP）：log-only 觀察滿一週後（起算 2026-04-17）→ GUI 曝光 `dust_frozen` / `orphan_frozen` 倉位給 operator 日報；`paper_state.rs` 已有 `TriageOutcome.dust_frozen` 計數器
 - [ ] **LEARNING-COCKPIT-NO-IPC-1** Learning 8 端點走 Python state_store 非 Rust IPC（設計債，等 G-7/G-10 後再議；不阻 Live，原則 #7 學習平面與 Live 隔離）
-- ✅ **DYNAMIC-RISK-STATUS-TEST-SIG-1** 2026-04-19 commit `83a0475`（歸檔 §11）— `TestClient(app).get(...)` 走 HTTP dispatch + `Authorization: Bearer` header 規避兄弟測試 `importlib.reload` swap。2 tests pass。
 - ✅ **E5-P1-5-FUP** 2026-04-23 commit `b5fa443` — 挑 `budget.rs` (10 hits) + `risk.rs` (16 hits) 當示範，替換 20 處內嵌手寫解包成 `param_extractor::require_*` / `optional_*`；移除檔案級 `#![allow(dead_code)]`；保留 4 個未採用 fn 的函數級 allow + 雙語 `TODO(E5-P1-5-FUP-2)` 註明採用條件。+5 單測 (`require_str` happy/error + `optional_u64` × 3)。engine lib 1845 → **1850 passed / 0 failed**。`strategy.rs` / `governance.rs` 未替換為 scope 控制。
 - ✅ **E5-P1-4-FUP** 2026-04-23 commit `3d1f764` — 選 (b) 刪除：`call_ollama_timed` 於 business code 0 call sites + 0 imports；唯一理論接線點 `strategist_agent._ai_evaluate` 若接會靜默排除 prompt 構建違反 docstring 契約；Analyst / Guardian 無計時 pattern，無跨 agent 統一需求 → YAGNI。
 - ✅ **E5-P1-8-FUP** 2026-04-23 commit `139c65b` — `from_guardian_review` 折疊入主 impl + 第二 block 整段刪除。classification helpers (5 方法) 的 `#[allow(dead_code)]` 保留：grep 確認唯一呼叫點在 test module 內，無 production consumer；加統整 TODO 註記記錄 3 個候選接線點 (`strategy_ai_routes.py` / `learning.exit_features` tagger / `retriage_synthetic_owner`)。Public API 零影響；engine lib 1845 → 1845（refactor-only）。
@@ -526,12 +500,12 @@ git status && git log --oneline -5
 - · **E5-P2-7-CLOSED** — `claude_teacher/directive_handler` 抽取 cancel（R6 cohesion invariant + FIX-08 fixtures 已拆 + denylist/helpers/apply_* 1-to-1 耦合無外部消費者）。**重啟條件**：新增第 5 種 directive 或跨 directive 共享 veto 邏輯。
 - · **E5-P2-8-CLOSED** — Python `learning_batch_writer` cancel（control_api 唯 1 個 `INSERT INTO learning.*`；ml_training 11 writer 寫 distinct schema 無共用 row shape；真實批寫重複已由 E5-P0-4 Rust `batch_insert.rs` 處理）。**重啟條件**：出現新的跨寫入器共享 row shape 時。
 - · **E5-FN-1-CANCEL** — audit §七.7.1「live_authorization.verify 同步但 main.rs 首次 re-verify 在 5 min 後有窗口」evidence-based 證偽：`startup.rs:467-494` `build_exchange_pipeline` 已同步 `load_and_verify(env)`，失敗即 `return None` 拒絕 spawn；5 min ticker 只是 mid-session revoke detector（2026-04-19）。
-- ✅ **E5-FN-2 Plan N** 2026-04-19 commit `f0f11c0`（revert `87b7653`；歸檔 §12）— 用既有 hypertable PK `(time, scope, request_id)` + `ON CONFLICT DO NOTHING RETURNING 1` 取代 V018 partial UNIQUE（TimescaleDB hypertable 不接受不含 partitioning column 的 UNIQUE index）。零 schema/migration。
+- ✅ **E5-FN-2 Plan N** 2026-04-19（歸檔 `docs/archive/2026-04-20--completed_todo_batch.md` §12）— 用既有 hypertable PK 取代 V018 partial UNIQUE；零 schema/migration。
 - [ ] **E5-FN-2-PLAN-N-FUP** — Plan N 部署後 follow-up：(a) ⬜ Python Layer-2 sync caller 可選升級為傳入 `(request_id, event_time_ms)` 以獲得跨重試的真實去重（目前 IPC handler 本地鑄造時每次 retry 會被當新 row — 仍不會雙重計費本地 caller 自己，但失去跨 Python 重試保護）；(b) ✅ 2026-04-23 `make_request_id_with_rng()` 新測試友好 variant（`pub(crate)`，生產路徑 `make_request_id()` 薄 forward 到 `thread_rng()`）；`test_make_request_id_unique_within_same_ms` 改 seeded `StdRng::seed_from_u64(0xDEADBEEF)` 消除 ~1/2^32 CI flake；(c) ⬜ 部署後 `SELECT time, scope, request_id, COUNT(*) FROM learning.ai_usage_log GROUP BY 1,2,3 HAVING COUNT(*) > 1 LIMIT 5;` 應永遠 0 rows（PK 保證）— 延後 post-deploy verification。
 
 ### 跨平台 / Mac 部署準備
 
-- ✅ **PYO3-ELIMINATE-1 全 3 Phase** 2026-04-20（commits `a84ecdb` + `0f8220b` + `9b691a0`）— Phase 1 刪死碼 513 LOC ContextDistiller + HedgingEngine · Phase 2 BybitClient 3 call sites 遷 httpx（914 行 `bybit_rest_client.py` + 40 unit tests + 23 parity tests；E2 APPROVE_WITH_NITS）· Phase 3 刪 crate + 清工具鏈（8 檔 ~918 LOC + `rebuild_pyo3()` + `build_pyo3.sh`）。總移除 1426 LOC PyO3 code，Mac 上 `cargo build` 僅產 binary 無 .so/.dylib，PyO3 wheel cross-compile 障礙消失。
+- ✅ **PYO3-ELIMINATE-1 全 3 Phase** 2026-04-20（歸檔於 `docs/archive/2026-04-20--completed_todo_batch.md`）— 總移除 1426 LOC PyO3 code，Mac `cargo build` 僅產 binary 無 .so/.dylib。
 
 ### AI Agent 全 5 鏈路
 - [ ] **G-1 / R-06** 5 agent 全 real（Conductor 仍 stub；其他 4 已 R-06-v2 ✅）
