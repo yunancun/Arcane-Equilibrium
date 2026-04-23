@@ -1,6 +1,6 @@
 # OpenClaw TODO — 工作清單
 
-**最後更新**：2026-04-23（WS-RETIRE-1 + DEDUP-PY-RUST A+B+C+D + INFRA-PREBUILD-1 Part A/B 於 21:13 CEST `--rebuild` 後 runtime live；Session 2026-04-23 QC/FA/FM/E4 audit 結案；P0-13/14/15 + PASSIVE-WAIT-HEALTHCHECK-1 於 2026-04-22 23:35 CEST 部署後持續觀察）
+**最後更新**：2026-04-23（WS-RETIRE-1 + DEDUP-PY-RUST A+B+C+D + INFRA-PREBUILD-1 Part A/B 於 21:13 CEST `--rebuild` 後 runtime live；Session 2026-04-23 QC/FA/FM/E4 audit 結案；**P0-13/14 24h+ runtime 驗收 PASS + P0-15 doc fix commit 2330360 landed → 三項 P0 全結**；PASSIVE-WAIT-HEALTHCHECK-1 於 2026-04-22 23:35 CEST 部署後持續觀察）
 **Engine**：PID **764820** · binary mtime **2026-04-23 21:13** · baseline HEAD `f42face`（含 WS-RETIRE + DEDUP A+B+C+D + INFRA-PREBUILD A+B；承襲 P0-13/14 + TRACK-P-V2-SWAP-1 + TICK-PIPELINE-MOD-SPLIT-1 + T4 + EDGE-P2-3 PostOnly + DECISION-OUTCOMES fix 等）
 **Python uvicorn**：PID **764878**（4 workers）· 2026-04-23 21:13 CEST `--rebuild` 隨 engine 重啟；包含 P0-14 B JS proxy cells（43→135）+ P0-12 LIVE-GATE-FALLBACK-1 + E5-FN-3 + PIPELINE-SLOT-1 承襲
 **PIPELINE-SLOT-1 live 驗證**：LiveAuthWatcher 跑中 `env=LiveDemo poll_interval_secs=5`；`authorization.json` 未簽（operator 待決定 live 啟動時機）
@@ -34,7 +34,13 @@ git status && git log --oneline -5
 
 ### ✅ P0-13 · ATR-SCALE-BUG-1 — **已部署 2026-04-22 23:35 CEST**（`ff694e8`）
 
-**Runtime 狀態**：engine PID 213144 跑新 binary，三 consumer atr_pct 來源從 per-tick `compute_atr_pct` 切為 kline 1m OHLCV + `indicators::atr(14)`。Cold-start 15 min 內 `atr_pct = None`（不到 15 bars）下游保守 Hold。24h+ 後驗：DB `learning.exit_features.atr_pct` avg 應從 0.003 → ~0.05-0.5、`giveback_atr_norm` avg 從 364 → ~0.3-3.0。
+**Runtime 狀態**：engine PID 213144 跑新 binary，三 consumer atr_pct 來源從 per-tick `compute_atr_pct` 切為 kline 1m OHLCV + `indicators::atr(14)`。Cold-start 15 min 內 `atr_pct = None`（不到 15 bars）下游保守 Hold。
+
+**2026-04-23 24h+ 驗收（deploy 後 ~24h）** ✅ —
+- `learning.exit_features.atr_pct` demo 24h avg **0.24338**（n=66，預期 0.05-0.5 ✅；pre-fix 0.003，~81× 放大回真實量級）
+- `giveback_atr_norm` demo 24h avg **1.108**（預期 0.3-3.0 ✅；pre-fix DB avg 364.85，~329× 縮小回真實量級）
+- Priority 6 `risk_close:phys_lock_gate4_giveback` demo 24h=**21 fires**（pre-fix 7d=0；healthcheck [4] FAIL → PASS）
+- 所有三 consumer（`compute_dynamic_stop_pct` / `build_exit_features_for_tick` / `build_exit_feature_row`）atr 源已切換；`exit_features/v2.rs` Gate 3 `peak/atr >= 0.5` 重新具備判別力
 
 **Fix 範圍**：
 - `tick_pipeline/on_tick/step_6_risk_checks.rs:93-116`
@@ -71,6 +77,11 @@ git status && git log --oneline -5
 
 **結果**：healthcheck [7] 從 WARN → PASS（135/135 populated cells，4 sync-label prefix 全出現）；runtime Priority 6 Gate 1 對 sync-label positions（P1-6 的 6 個 bybit_sync 倉位）首次可查到 edge_estimates cell（`shrunk_bps = grand_mean_bps` 弱先驗）。
 
+**2026-04-23 24h+ 驗收（deploy 後 ~24h）** ✅ —
+- `phys_lock_gate4_giveback` demo 24h=**21 fires**（pre-fix 7d=0，healthcheck [4] FAIL → PASS；Priority 6 鏈完整 live）
+- `edge_estimates.json` populated **162/162 cells**（100%；prefixes bybit_sync:28 / dust_frozen:28 / grid_trading:27 / ma_crossover:23 / orphan_adopted:28 / orphan_frozen:28；mtime age 5m，scheduler 活躍）
+- 備註：`learning.exit_features.est_net_bps` 24h 仍 100% NULL（66/66）— 屬 write-side gap（寫入時未讀 edge_estimates 快照），與 Gate 1 fallback 決策流獨立；21 筆 phys_lock 證明 `missing_edge_fallback_bps = -10.0` fallback path 工作中。est_net_bps 落地需另案跟進（非 P0）
+
 ### 🟡 原 P0-14 details（執行前 reference，保留供稽核）
 
 - **現象**：`learning.exit_features` 7d 110 rows 中 109 個 `est_net_bps IS NULL`（99.1% miss）；healthcheck 觀察 `edge_estimates.json` populated cells 0/0（可能 JSON cells key mismatch 或實質空 list）
@@ -85,7 +96,9 @@ git status && git log --oneline -5
 - **必須**與 P0-13 一起部署
 - 觸發：2026-04-22 被動等待 audit，詳 `docs/worklogs/2026-04-22--passive_wait_silent_fail_audit.md` §3.2
 
-### 🔴 P0-15 · COST-EDGE-DEPRECATION-MICRO-PROFIT-GAP-1 — 2.5 天退場層空窗 + 文檔敘事脫節
+### ✅ P0-15 · COST-EDGE-DEPRECATION-MICRO-PROFIT-GAP-1 — **結案 2026-04-23**（doc fix commit `2330360`；§3 併入 P0-3）
+
+- **結案摘要**：文檔敘事脫節已修正（§1-§2）；§3 edge baseline 重跑自然併入 P0-3 執行（P0-13/14 已 2026-04-23 24h+ 驗收通過，剩 PostOnly 1w 觀察窗 ~5d 到期，約 2026-04-28）
 
 - **現象**：
   - `risk_checks.rs:250-264` 舊 COST EDGE gate 在 Track P T3 commit 被註解 deprecated；P0-3 原定依靠的「MICRO-PROFIT-FIX-1 narrow-band gate」其實是同一個 gate 的 runtime
@@ -102,7 +115,7 @@ git status && git log --oneline -5
   3. 重跑 P0-3 Phase 5 edge baseline（待 P0-13/P0-14 修好 + PostOnly 1w 觀察期後）
 - **預估**：~2h 文檔更正；edge baseline 重跑延後
 - 觸發：2026-04-22 被動等待 audit，詳 `docs/worklogs/2026-04-22--passive_wait_silent_fail_audit.md` §3.3 + §3.4
-- ✅ **2026-04-23 文檔更正完成**（commit pending）— TODO.md P1-10 §推理鏈 R1 驗收表 + 關鍵判讀 bullets + P1-19 H3 RCA 連帶更正；CLAUDE.md §三 無 active MICRO-PROFIT claim（operator 已手動精簡吸收）；Fix scope §1-§2 達成，§3 edge baseline 重跑仍依 P0-13/P0-14 + PostOnly 1w 排期
+- ✅ **2026-04-23 文檔更正完成**（commit `2330360` landed）— TODO.md P1-10 §推理鏈 R1 驗收表 + 關鍵判讀 bullets + P1-19 H3 RCA 連帶更正；CLAUDE.md §三 無 active MICRO-PROFIT claim（operator 已手動精簡吸收）；Fix scope §1-§2 達成，§3 edge baseline 重跑自然併入 P0-3（P0-13/14 2026-04-23 24h+ 驗收 PASS；PostOnly 1w 窗口 2026-04-21 起算，預計 ~2026-04-28 解鎖）
 
 ### 🔧 健康檢查基礎設施 / Healthcheck infra
 
