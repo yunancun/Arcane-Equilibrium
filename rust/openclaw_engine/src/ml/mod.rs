@@ -14,6 +14,7 @@
 
 pub mod kelly_sizer;
 pub mod model_manager;
+pub mod registry;
 pub mod scorer;
 
 /// Result of scoring a trading signal / 交易信號評分結果
