@@ -107,12 +107,37 @@ run_tick() {
     fi
 
     # 4. edge_estimates populate status (via settings/edge_estimates.json mtime)
+    # P0-14 B follow-up 2026-04-23: 原 `d.get('cells',[])` 永遠回 [] —— 真實結構是
+    # flat top-level map（key = "{strategy}::{symbol}"），meta 在 `_meta`/`grand_mean_bps`
+    # 等鍵。改為遍歷 flat map，與 helper_scripts/db/passive_wait_healthcheck.py L185-228
+    # 對齊；同步打 prefix 分布以驗 P0-14 H4（sync-label proxy cells 是否齊）。
+    # The original `d.get('cells',[])` always returned [] because the JSON is a flat
+    # top-level map keyed by "{strategy}::{symbol}", with meta under `_meta` /
+    # `grand_mean_bps` etc. Walk the flat map and emit prefix breakdown to catch
+    # P0-14 H4 (sync-label proxy cell coverage) in the loop log.
     local edge_json="${BASE_DIR}/settings/edge_estimates.json"
     if [[ -f "${edge_json}" ]]; then
-        local edge_mtime cell_count
+        local edge_mtime edge_summary
         edge_mtime="$(stat -c '%y' "${edge_json}" 2>/dev/null | cut -d. -f1 || echo unknown)"
-        cell_count="$(python3 -c "import json; d=json.load(open('${edge_json}')); print(len(d.get('cells',[])))" 2>/dev/null || echo ?)"
-        echo "[edge_estimates] mtime=${edge_mtime} cells=${cell_count}"
+        edge_summary="$(python3 - "${edge_json}" <<'PY' 2>/dev/null || echo "cells=? parse_error")
+import json, sys
+p = sys.argv[1]
+with open(p) as f:
+    d = json.load(f)
+meta = {"grand_mean_bps", "generated_at", "n_total", "version"}
+cells = {k: v for k, v in d.items()
+         if isinstance(v, dict) and not k.startswith("_") and k not in meta}
+total = len(cells)
+populated = sum(1 for v in cells.values() if v.get("shrunk_bps") is not None)
+prefixes = {}
+for k in cells:
+    pfx = k.split("::", 1)[0] if "::" in k else k
+    prefixes[pfx] = prefixes.get(pfx, 0) + 1
+pfx_str = ",".join(f"{p}:{n}" for p, n in sorted(prefixes.items())) or "NONE"
+print(f"cells={populated}/{total} prefixes[{pfx_str}]")
+PY
+)"
+        echo "[edge_estimates] mtime=${edge_mtime} ${edge_summary}"
     else
         echo "[edge_estimates] file missing"
     fi
