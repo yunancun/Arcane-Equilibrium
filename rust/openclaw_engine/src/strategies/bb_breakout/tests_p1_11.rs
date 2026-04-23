@@ -123,7 +123,7 @@ fn test_donchian_mode_score_allows_entry_on_miss() {
     // Expect Score mode to proceed to OrderIntent emission (not empty).
     // 同 Hard 測試的「未突破」情境：Score 應發 intent，不硬拒。
     let out = s.on_tick(&ctx_p1_11(0.05, 1.1, 1.5, 100_000, 50_400.0, 50_500.0, 49_500.0));
-    let emitted = out.iter().any(|a| matches!(a, StrategyAction::SubmitIntent(_)));
+    let emitted = out.iter().any(|a| matches!(a, StrategyAction::Open(_)));
     assert!(emitted, "Score mode must soft-gate Donchian miss (expected intent emission)");
 }
 
@@ -139,7 +139,7 @@ fn test_donchian_mode_score_allows_entry_on_breach() {
     // (doesn't affect emission gate under confluence_as_gate=false); entry fires.
     // 突破情境：price>upper，Score 加 +bonus（非門控），入場觸發。
     let out = s.on_tick(&ctx_p1_11(0.05, 1.1, 1.5, 100_000, 50_600.0, 50_500.0, 49_500.0));
-    let emitted = out.iter().any(|a| matches!(a, StrategyAction::SubmitIntent(_)));
+    let emitted = out.iter().any(|a| matches!(a, StrategyAction::Open(_)));
     assert!(emitted, "Score mode must emit on Donchian breach");
 }
 
@@ -154,7 +154,7 @@ fn test_donchian_mode_off_skips_check_entirely() {
     // Off mode: even price 50_400 (would Hard-reject) should pass through.
     // Off 模式：即使 price=50_400（Hard 會拒）也應放行。
     let out = s.on_tick(&ctx_p1_11(0.05, 1.1, 1.5, 100_000, 50_400.0, 50_500.0, 49_500.0));
-    let emitted = out.iter().any(|a| matches!(a, StrategyAction::SubmitIntent(_)));
+    let emitted = out.iter().any(|a| matches!(a, StrategyAction::Open(_)));
     assert!(emitted, "Off mode must skip Donchian check and emit");
 }
 
