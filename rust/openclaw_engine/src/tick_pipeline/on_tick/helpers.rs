@@ -45,9 +45,33 @@ pub(crate) fn strip_phys_lock_prefix(reason: &str) -> Option<&str> {
 
 /// 以剝離過的 lock_tag 走一次 combine_layer、確認 invariant 並記 info log。
 /// 不改變下游平倉行為（純審計側）。
+///
+/// **EDGE-DIAG-1（2026-04-23）參數擴充**：新增 `owner_strategy` 與 `est_net_bps`
+/// 兩個診斷欄位，讓每次 PHYS-LOCK fire 的 INFO log 自帶「Gate 1 是經 cell 還是
+/// 經 fallback 路徑通過」的證據。Caller 在 lock 觸發時應重查 paper_state 與
+/// edge_estimates 以取得 fire 時點的 owner_strategy / cell shrunk_bps（pre-close
+/// snapshot 仍存在於 paper_state，因為 close 動作排在 log 之後）。
+///
+/// `est_net_bps = None` → fallback path 觸發（v2 ExitConfig.missing_edge_fallback_bps）；
+/// `Some(v)` → cell hit，`v` 為 shrunk_bps。
+///
 /// Run the stripped lock_tag through combine_layer, enforce the invariant and
 /// emit an info log. Does not alter downstream close behaviour (pure audit).
-pub(crate) fn log_phys_lock_through_combine_layer(symbol: &str, reason: &str, lock_tag: &str) {
+///
+/// **EDGE-DIAG-1 (2026-04-23) signature extension**: `owner_strategy` and
+/// `est_net_bps` are appended so every PHYS-LOCK fire log records *why* it
+/// cleared Gate 1 — via cell hit or via fallback. Caller re-queries paper_state
+/// and edge_estimates at fire time (pre-close snapshot is still live).
+///
+/// `est_net_bps = None` → fallback path triggered;
+/// `Some(v)` → cell hit, `v` is shrunk_bps.
+pub(crate) fn log_phys_lock_through_combine_layer(
+    symbol: &str,
+    reason: &str,
+    lock_tag: &str,
+    owner_strategy: &str,
+    est_net_bps: Option<f32>,
+) {
     let physical = crate::exit_features::PhysicalDecision::Lock(lock_tag.to_string());
     let combine_cfg = crate::combine_layer::CombineConfig::default();
     let (signal, source) = crate::combine_layer::combine_exit_decision(
@@ -65,8 +89,12 @@ pub(crate) fn log_phys_lock_through_combine_layer(symbol: &str, reason: &str, lo
         crate::combine_layer::ExitSignal::Lock,
         "invariant: PHYS-LOCK physical decision must yield ExitSignal::Lock"
     );
+    let edge_source = if est_net_bps.is_some() { "cell" } else { "fallback" };
     info!(
         symbol = %symbol,
+        owner_strategy = %owner_strategy,
+        est_net_bps = ?est_net_bps,
+        edge_source = %edge_source,
         exit_source = %source.as_tag(),
         reason = %reason,
         lock_tag = %lock_tag,
@@ -131,7 +159,9 @@ mod phys_lock_wrapper_tests {
             // broken, closing the debug_assert_eq! loophole).
             // Act #3：執行 logging helper — release build 也會走 `assert_eq!`
             // invariant（破壞即 panic，封閉 debug_assert_eq! 漏洞）。
-            log_phys_lock_through_combine_layer("BTCUSDT", &reason, lock_tag);
+            // EDGE-DIAG-1 signature extension: pass placeholder owner + None
+            // est_net_bps for unit test (production caller re-queries).
+            log_phys_lock_through_combine_layer("BTCUSDT", &reason, lock_tag, "test", None);
         }
 
         // Guard against partial revert: legacy prefix `PHYS-LOCK` must NOT

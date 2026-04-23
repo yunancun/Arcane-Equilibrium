@@ -234,7 +234,34 @@ impl TickPipeline {
                     // Also promote debug_assert_eq! → assert_eq! so the invariant holds in
                     // release builds.
                     if let Some(lock_tag) = super::strip_phys_lock_prefix(&reason) {
-                        super::log_phys_lock_through_combine_layer(symbol, &reason, lock_tag);
+                        // EDGE-DIAG-1（2026-04-23）：每次 PHYS-LOCK fire 重查 paper_state
+                        // owner_strategy + edge_estimates cell，把「Gate 1 是經 cell 還是
+                        // 經 fallback 通過」的證據附在 INFO log。pre-close snapshot 仍存
+                        // （close 排在 log 之後）。Closed mid-tick 的罕見競態 → owner=
+                        // "<closed>"、est=None。
+                        // EDGE-DIAG-1: re-query paper_state and edge_estimates at fire
+                        // time so the INFO log records *why* Gate 1 was bypassed (cell
+                        // hit vs fallback). Pre-close snapshot is still live; rare
+                        // mid-tick close race → owner="<closed>", est=None.
+                        let (owner_strategy, est_net_bps) = self
+                            .paper_state
+                            .position_exit_snapshot(symbol)
+                            .map(|snap| {
+                                let est = self
+                                    .intent_processor
+                                    .edge_estimates()
+                                    .get_cell(&snap.owner_strategy, symbol)
+                                    .map(|c| c.shrunk_bps as f32);
+                                (snap.owner_strategy.clone(), est)
+                            })
+                            .unwrap_or_else(|| (String::from("<closed>"), None));
+                        super::log_phys_lock_through_combine_layer(
+                            symbol,
+                            &reason,
+                            lock_tag,
+                            &owner_strategy,
+                            est_net_bps,
+                        );
                     }
 
                     risk_closed_symbols.push(symbol.clone());
