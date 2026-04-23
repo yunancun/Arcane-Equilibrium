@@ -201,6 +201,15 @@ app.include_router(shadow_fills_router)
 from .edge_estimator_routes import router as edge_estimator_router  # noqa: E402
 app.include_router(edge_estimator_router)
 
+# ── ML Model Registry Router / ML 模型註冊表路由（INFRA-PREBUILD-1 Part B B5）──
+# Reads/writes learning.model_registry (V023 migration). Registry still empty
+# in Phase 1a (no training runs completed yet); routes functional but return
+# 404 until run_training_pipeline.py has populated rows.
+# 讀寫 learning.model_registry（V023）。Phase 1a registry 尚空；routes 可用，
+# 但到 run_training_pipeline.py 寫入前均回 404。
+from .ml_routes import router as ml_router  # noqa: E402
+app.include_router(ml_router)
+
 # ── Startup Integrity Check / 啟動完整性驗證 ────────────────────────────────
 # Verify that non-optional critical dependencies were successfully injected at
 # module initialisation time.  H0_GATE is allowed to be None in degraded /
