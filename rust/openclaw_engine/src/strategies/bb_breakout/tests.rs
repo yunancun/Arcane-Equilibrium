@@ -351,12 +351,14 @@ fn test_bw_squeeze_exit() {
 fn test_bbb_param_ranges_count() {
     let ranges = BbBreakoutParams::param_ranges();
     // 5 original + 11 confluence (includes confluence_as_gate) + 4 EDGE-P2-2 OI
-    // (enable_oi_signal + oi_buffer_window_ms + oi_confluence_bonus + oi_min_delta_pct) = 20
+    // (enable_oi_signal + oi_buffer_window_ms + oi_confluence_bonus + oi_min_delta_pct)
+    // + 1 P1-11 (donchian_score_bonus; donchian_mode is enum, not in numeric ranges) = 21
     // EDGE-P2-2 FUP：oi_min_delta_pct 是 noise floor，需作為 agent-tunable ParamRange 暴露。
+    // P1-11 (2)：donchian_score_bonus 為 numeric ParamRange；donchian_mode 為 enum 不入此表。
     assert_eq!(
         ranges.len(),
-        20,
-        "expected 20 param ranges, got {}",
+        21,
+        "expected 21 param ranges, got {}",
         ranges.len()
     );
 }
