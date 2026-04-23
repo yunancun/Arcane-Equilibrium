@@ -408,21 +408,24 @@ git status && git log --oneline -5
 2. P0-3 edge 重評**仍推遲** — grid fee drag + ma win rate collapse 需要 P1-10 結構性修復（grid cooldown_ms + ma SL/TP 重設），而非退場層補救。
 3. P1-10 推理鏈 §1 需更正（上方 inline 已改述）；MICRO-PROFIT-FIX-1 label reuse 應註釋到 §二 推理鏈，避免後續誤判。
 
-### P1-11 · BB-BREAKOUT-DORMANT-1 — 5 重 AND 14d 0 fills
-- **根因**：`bb_breakout.rs:457-518` 入場 5 重 AND（squeeze → expansion → volume → Donchian → persistence）+ 時序要求過嚴
-- **下一步**：(1) 閾值 offline backtest（squeeze 0.025 / expansion 0.035 / volume 1.2）(2) Donchian AND→OR/score (3) 考慮 aggressive/conservative 分拆 A/B
-- **優先級**：P1 低 — 不緊急但影響 Phase 5 策略多樣性
+### P1-11 · BB-BREAKOUT/REVERSION-DORMANT-1 — Bollinger 家族 AND 條件過嚴
+- **範圍（2026-04-24 擴展，吸收原 P1-12）**：同時覆蓋 `bb_breakout.rs` + `bb_reversion.rs`，兩者同為 BB 家族 AND-chain signal gating 過嚴，demo 產量嚴重不足。
+- **bb_breakout 根因**：`bb_breakout.rs:457-518` 入場 5 重 AND（squeeze → expansion → volume → Donchian → persistence）+ 時序要求過嚴；14d demo 0 fills。
+- **bb_reversion 根因**：BB squeeze + mean-reversion 兩個 AND 條件下 demo 14d **僅 8 signal → 12 intents → 5 fills（阻擋率 37.5% 來自 liquidity / timing，非 Guardian）**；signal 產量本身太低使樣本不足以做統計學習（P1-13 SAMPLE-FLOOR-GAP-1 的 bb_reversion 1 RT 數據反映此結構）。
+- **下一步**：(1) 閾值 offline backtest — bb_breakout（squeeze 0.025 / expansion 0.035 / volume 1.2）+ bb_reversion（squeeze 寬度 + reversion z-score / band 距離）(2) Donchian + confluence AND→OR/score (3) 考慮 aggressive/conservative 分拆 A/B
+- **優先級**：P1 低 — 不緊急但影響 Phase 5 策略多樣性與 ML 樣本池。
 
-### ✅ P1-12 · BB-REVERSION-BLOCKED-1 — **2026-04-23 反轉結案**
+### ✅ P1-12 · BB-REVERSION-BLOCKED-1 — **2026-04-23 反轉結案 · 2026-04-24 gap audit 收尾**
 - **原判**：~~24h live_demo 66 筆 decision_features 但 0 fills（14d demo 僅 2 筆），100% 被下游擋，下一步 trace risk_verdicts + engine.log~~
-- **實測反轉（commit `4520823` + `81cde54`）**：
-  - **當前 14d demo bb_reversion**：8 df → 8 rv **全 Approved** → 8 intents **全寫入** → 5 fills / 3 未成交。阻擋率 = 3/8 = **37.5%（非 100%）**，且 Guardian 層無任何阻擋。
+- **實測反轉（commits `4520823` + `81cde54` + `025dd17` + 2026-04-24 gap fix）**：
+  - **當前 14d demo bb_reversion**：8 df → 8 rv **全 Approved** → **12 intents**（df=8；多出 4 筆為 exit/retry intents）→ 5 fills / 3 entry 未成交。阻擋率 = 3/8 = **37.5%（非 100%）**，且 Guardian 層無任何阻擋。
   - **原「66 筆」數字來源**：實際是 **2026-04-17 live_demo 609 筆**（TODO 記的 66 是早期 snapshot），全 rv Approved 但 `trading.intents` 0 rows。
   - **意外發現 — 根因非 bb_reversion**：同日 **demo 1755 orders / 0 intents**、**live_demo 190 orders / 0 intents** — **4/17 trading.intents writer 全表 silent outage**，橫跨全策略全 engine_mode。4/16-4/19 live_demo intents 幾乎全斷，4/20+ 恢復（4/23 demo 266 intents / 339 orders ratio 0.78 ∈ healthy baseline 0.70-0.87）。
-- **歸類**：bb_reversion 當前並無阻擋問題；「14d 8 signal」是 **signal generation 量級問題**（BB squeeze + reversion 兩個 AND 條件下 demo 14d 產量本來就低），同類問題應併入 **§P1-11 BB-BREAKOUT-DORMANT-1** 的 signal threshold audit（兩者都屬 Bollinger 家族 AND 條件過嚴）。
-- **防復發**：commit `4520823` 新增 `passive_wait_healthcheck.py` check [10] `intents_writer_ratio` — 專擋 4/17-style 全表 writer outage 隱形復發（orders>0 + intents=0 → FAIL；ratio<0.3 → WARN）。commit `81cde54` 補防禦式 rollback 避免前 check tx poisoning。Live 驗證 PASS（ratio 0.78）。
-- **報告**：`.claude_reports/20260423_XXXXXX_p1_12_reversal_postmortem.md`
-- **接棒項（已登記在他處）**：bb_reversion signal threshold audit → 併入 P1-11 工作時一併掃；intents writer 4/17 事件是否對應特定 commit → 不追 cold case（已恢復 3 天，healthcheck 把關即可）。
+- **歸類**：bb_reversion 當前並無阻擋問題；「14d 8 signal」是 **signal generation 量級問題**（BB squeeze + reversion 兩個 AND 條件下 demo 14d 產量本來就低），**已正式納入 §P1-11（本次更名 BB-BREAKOUT/REVERSION-DORMANT-1）** signal threshold audit scope。
+- **防復發**：commit `4520823` 新增 `passive_wait_healthcheck.py` check [10] `intents_writer_ratio`，**2026-04-24 gap audit 升級為 per-mode（demo + live_demo 同時覆蓋）**，任一 mode orders>0+intents=0 即 FAIL；ratio<0.3 → WARN（baseline 0.70-0.87）；paper 排除（PAPER-DISABLE-1 opt-in）。commit `81cde54` 補防禦式 rollback 避免前 check tx poisoning。Live 驗證 per-mode 輸出（live_demo 當前 quiet → skip；demo ratio 0.78 PASS）。
+- **報告**：`.claude_reports/20260423_233644_p1_12_reversal_postmortem.md`
+- **Gap-audit 2026-04-24** 掃出 3 gaps 已修：(Gap1 ✅) [10] 擴展至 demo+live_demo per-mode；(Gap2 ✅) P1-11 條目本體擴 scope 吸收 bb_reversion；(Gap3 ✅) df=8/intents=12 數字校正。
+- **接棒項**：bb_reversion signal threshold audit → 已併入 §P1-11；intents writer 4/17 事件對應特定 commit → 不追 cold case（已恢復 ≥7 天、healthcheck 把關）。
 
 ### P1-13 · SAMPLE-FLOOR-GAP-1 — per-strategy round-trip 樣本低於 ML 訓練閘口
 
