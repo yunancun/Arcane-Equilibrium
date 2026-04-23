@@ -116,18 +116,25 @@ def check_exit_features_writer(cur, close_fills: int) -> tuple[str, str]:
 
 
 def check_phys_lock_runtime(cur) -> tuple[str, str]:
-    """[4] TRACK-P v2 phys_lock runtime fire rate — expect ≥1 per 24h if edge populated."""
+    """[4] TRACK-P v2 phys_lock runtime fire rate — expect ≥1 per 24h if edge populated.
+
+    Pattern note (EDGE-DIAG-1 2026-04-23): Rust upstream currently emits
+    `strategy_name = "risk_close:risk_close:phys_lock_gate4_giveback"` (double
+    prefix — upstream bug, tracked as RUST-DOUBLE-PREFIX-1 in TODO). Use
+    `risk_close:%phys_lock_%` wildcard so the check survives both the current
+    double-prefix form and the post-fix single-prefix form.
+    """
     n_24h = _scalar(cur,
         "SELECT COUNT(*) FROM trading.fills "
         "WHERE ts > now() - interval '24 hours' "
         "AND engine_mode = 'demo' "
-        "AND strategy_name LIKE 'risk_close:phys_lock_%'"
+        "AND strategy_name LIKE 'risk_close:%phys_lock_%'"
     )
     n_7d = _scalar(cur,
         "SELECT COUNT(*) FROM trading.fills "
         "WHERE ts > now() - interval '7 days' "
         "AND engine_mode = 'demo' "
-        "AND strategy_name LIKE 'risk_close:phys_lock_%'"
+        "AND strategy_name LIKE 'risk_close:%phys_lock_%'"
     )
     if n_7d == 0:
         return ("FAIL", f"phys_lock_* 7d=0 — Priority 6 runtime 完全 dead (P0-13/P0-14)")

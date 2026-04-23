@@ -451,6 +451,7 @@ git status && git log --oneline -5
 ## 🟢 P2 — 下週 / Live Gate / QoL
 
 ### 可觀測性（P1-19 RCA 副產品，2026-04-22 新開）
+- [ ] **RUST-DOUBLE-PREFIX-1** — 2026-04-23 EDGE-DIAG-1 實驗揭露：Rust 端 phys_lock fill 的 `strategy_name` 實寫為 `"risk_close:risk_close:phys_lock_gate4_giveback"`（雙重 `risk_close:` 前綴），log 顯示 `reason=risk_close:phys_lock_gate4_giveback` + `strategy=risk_close:risk_close:phys_lock_gate4_giveback` → 某處 emit 時把已含 prefix 的 reason 再 format `"risk_close:{reason}"`。**COST EDGE + TRAILING 單前綴正常，只 phys_lock 路徑中招**。影響：healthcheck.py [4] 原 pattern `'risk_close:phys_lock_%'` 0 match 假 FAIL；已先 patch `'risk_close:%phys_lock_%'` 容錯。根治修法：查 Rust emit 路徑（`tick_pipeline/on_tick/step_6_risk_checks.rs` risk close dispatch + `event_consumer` pending order registered），去掉重複 prefix；修後把 healthcheck pattern 收回 single-prefix 形式。~0.5d 含回歸測試。
 - [ ] **RESTART-ALL-UVICORN-LOG-1** — `helper_scripts/restart_all.sh:220` uvicorn 啟動無 stdout 重定向，`/tmp/openclaw/api.log` mtime 停在 2026-04-19（3 天無更新）。修：加 `> "$DATA_DIR/api.log" 2>&1` 對齊 engine 寫法（`:200`）。~0.5d。
 - [ ] **EDGE-SCHEDULER-LEADER-1** — uvicorn `--workers 4` 每 worker 跑一份 `EdgeEstimatorScheduler` daemon（module global `_scheduler=None` 在每個 process 獨立）→ 4 份同時 UPDATE `learning.decision_features`（PG MVCC 容忍但浪費）。修：加 env `OPENCLAW_SCHEDULER_LEADER=1`，只讓 worker 0 跑 scheduler。~1d。
 - [ ] **SCHEDULER-FAILURE-OBSERVABILITY-1** — `edge_estimator_scheduler._run_cycle` fail-open 的 `logger.warning` 寫 stdout（而非可 SQL 查的表），將來類似 silent fail 需追 log 才能看。修：失敗寫 `learning.scheduler_runs` 或 `engine_events`，operator GUI 可查。~0.5d。
