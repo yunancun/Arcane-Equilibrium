@@ -540,7 +540,9 @@ git status && git log --oneline -5
 
 - [ ] **STRATEGIST-TUNE-TARGET-CONFIG-1** — `tune_target` 運行時可配置（非啟動時 hardcode Demo）。當前 `main.rs:907` 傳 `PipelineKind::Demo` 固定；Phase 5+ 若需要切到 Live 做短期 live tune（不建議但有 argument）或測試環境用 Paper（重新啟用），需加 IPC `patch_strategist_config { tune_target: "demo" | "live" }` + scheduler 動態 swap cmd_tx。注意：swap 需保證 in-flight cycle 完成不跨引擎。**優先級低**，目前 Demo 固定是正確路線。~1d。
 
-- [ ] **STRATEGIST-HISTORY-OBSERVABILITY-1** — 補 promote 歷史 GUI。operator 需看「最近 N 個 promote 事件 + 成功失敗比 + each promoted params 在 Live 上的 7d edge 效果」。綁 `learning.strategist_promotions` 表（由 TRIGGER-1 建）+ `trading.fills` join。~0.5d GUI + 0.5d backend。
+- [x] **STRATEGIST-HISTORY-OBSERVABILITY-1 (backend)** ✅ 2026-04-23 commit `6faa3cb` — 3 read-only endpoints 綁 `learning.strategist_applied_params`（V019+V020，不是原 TODO 誤寫的 `strategist_promotions`；後者不存在，`strategist_applied_params` 已含 `source`/`prev_params_json`/`params_json` 為嚴格超集）：`GET /api/v1/strategist/history` / `/history/summary` / `/history/{id}/effect`（附 `trading.fills` 7d net/win/count join，live row 自動 widen live+live_demo）；pytest 17/17 passed；pg-down safe-degrade；503 行 route + 459 行測試；restart_all.sh（無 --rebuild）即生效。TRIGGER-1 完成後 `source='manual_promote'` 自動納入，無須再動 schema。
+
+- [ ] **STRATEGIST-HISTORY-OBSERVABILITY-1 (GUI)** — backend endpoints 已 live（`6faa3cb`），GUI tab 待實作：最近 N 個 promote/auto-tune 事件列表 + source 分佈 summary 卡 + 單筆點開看 before/after param diff + 7d edge effect（呼 `/history/{id}/effect`）。~0.5d GUI。建議新增「Strategist History」tab 或併入既有 Learning Cockpit / Strategy tab。待 P1-7 C 訓練管線解阻塞後價值最大（屆時 promote 頻率會上升）。
 
 ### EDGE P2 架構重工
 - 🟢 **EDGE-P2-2** OI + Liquidation 信號源（給 bb_breakout 加領先信號）
