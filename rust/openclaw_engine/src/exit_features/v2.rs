@@ -124,6 +124,30 @@ pub struct ExitConfig {
     /// 回填 JSON 互補：A 是 runtime 兜底，B 是 source-of-truth 填補。
     #[serde(default = "default_missing_edge_fallback_bps")]
     pub missing_edge_fallback_bps: f64,
+    /// INFRA-PREBUILD-1 Part A (2026-04-23) — Combine Layer shadow mode switch.
+    /// `false` (default): Phase 1a behavior — close-path passes `ml_opt=None`
+    ///     to `combine_exit_decision`, output always `(Lock, Physical)`; no
+    ///     ShadowExitMsg emission; `learning.decision_shadow_exits` stays empty.
+    /// `true` (Phase 2+): close-path builds a mock `MLInference` from the
+    ///     `edge_estimates` cell (`score = sigmoid(shrunk_bps/floor)`), runs
+    ///     Combine Layer normally, and emits one ShadowExitMsg per close for
+    ///     audit. `ml_override_high=2.0` sentinel still keeps Phase 1a
+    ///     invariant (ML cannot flip Physical Hold → Lock).
+    ///
+    /// Toggle via TOML hot-reload or IPC write-face (no restart).
+    ///
+    /// INFRA-PREBUILD-1 A 部（2026-04-23）— Combine Layer shadow 模式開關。
+    /// `false`（預設）：Phase 1a 行為，close-path 傳 `ml_opt=None`，
+    ///     Combine 永遠回 `(Lock, Physical)`，不發射 ShadowExitMsg；
+    ///     `learning.decision_shadow_exits` 維持空表。
+    /// `true`（Phase 2+）：close-path 從 `edge_estimates` cell 建構 mock
+    ///     `MLInference`（score = sigmoid(shrunk_bps/floor)），正常走
+    ///     Combine，每筆 close 發一條 ShadowExitMsg 作審計。
+    ///     `ml_override_high=2.0` sentinel 仍然守 Phase 1a 不變式
+    ///     （ML 不能把 Physical Hold 翻 Lock）。
+    /// 透過 TOML 熱重載或 IPC 寫入面切換（不需重啟）。
+    #[serde(default = "default_shadow_enabled")]
+    pub shadow_enabled: bool,
 }
 
 fn default_min_net_floor_bps() -> f64 {
@@ -154,6 +178,13 @@ fn default_missing_edge_fallback_bps() -> f64 {
     // 繼續 Hold，維持修復前 fail-safe 行為。
     -10.0
 }
+fn default_shadow_enabled() -> bool {
+    // INFRA-PREBUILD-1 default OFF: Phase 1a behavior preserved. Operator
+    // flips to true via TOML / IPC when Phase 2 shadow observation begins.
+    // INFRA-PREBUILD-1 預設關閉：Phase 1a 行為保持；Operator Phase 2
+    // 啟動觀察時透過 TOML/IPC 切 true。
+    false
+}
 
 impl Default for ExitConfig {
     fn default() -> Self {
@@ -166,6 +197,7 @@ impl Default for ExitConfig {
             giveback_slope: default_giveback_slope(),
             giveback_floor: default_giveback_floor(),
             missing_edge_fallback_bps: default_missing_edge_fallback_bps(),
+            shadow_enabled: default_shadow_enabled(),
         }
     }
 }
@@ -686,10 +718,33 @@ mod tests {
             giveback_slope: 0.2,
             giveback_floor: 0.4,
             missing_edge_fallback_bps: -7.5,
+            shadow_enabled: true,
         };
         let j = serde_json::to_string(&cfg).expect("ser");
         let back: ExitConfig = serde_json::from_str(&j).expect("de");
         assert_eq!(cfg, back);
+    }
+
+    /// INFRA-PREBUILD-1 Part A: shadow_enabled defaults to false — Phase 1a
+    /// pass-through behavior preserved when new field not set in TOML.
+    /// INFRA-PREBUILD-1 A 部：shadow_enabled 預設 false，TOML 未設時 Phase 1a 行為不變。
+    #[test]
+    fn test_shadow_enabled_default_off() {
+        let cfg = ExitConfig::default();
+        assert!(!cfg.shadow_enabled, "default must be OFF");
+    }
+
+    /// INFRA-PREBUILD-1: serde `default` attribute works when the field is
+    /// missing from JSON (existing TOML configs without `shadow_enabled` must
+    /// still parse to false, not error).
+    /// INFRA-PREBUILD-1：欄位缺省時 serde default 生效，舊 TOML 解析為 false。
+    #[test]
+    fn test_shadow_enabled_missing_field_defaults_false() {
+        // Minimal JSON: only field that differs from default
+        let j = r#"{"min_net_floor_bps": 6.0}"#;
+        let cfg: ExitConfig = serde_json::from_str(j).expect("parse");
+        assert_eq!(cfg.min_net_floor_bps, 6.0);
+        assert!(!cfg.shadow_enabled);
     }
 
     /// Test 21 — `non_linear_giveback_fn` rejects NaN / negative peak_atr_norm

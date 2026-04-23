@@ -155,4 +155,10 @@ h0_shadow_mode = true
 [dynamic_sizing]
 enabled = false
 
+# INFRA-PREBUILD-1 Part A (2026-04-23) — Combine Layer shadow mode.
+# Paper defaults follow demo: shadow OFF. Flip via hot-reload when observing.
+# 詳見 risk_config_demo.toml 的 [exit] 註解說明。
+[exit]
+shadow_enabled = false
+
 [experimental.flags]

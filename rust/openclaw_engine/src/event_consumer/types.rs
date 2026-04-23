@@ -191,6 +191,15 @@ pub struct EventConsumerDeps {
     /// （fail-soft，不影響交易僅停退場 label 採集）。
     /// 避免重蹈 MARKET-KLINES-STALE-1 的 D19 覆轍（不可僅接某一 pipeline）。
     pub exit_feature_tx: Option<tokio::sync::mpsc::Sender<crate::database::ExitFeatureRow>>,
+    /// INFRA-PREBUILD-1 Part A (2026-04-23): Combine Layer exit-time shadow
+    /// observation channel. Dormant when `RiskConfig.exit.shadow_enabled=false`
+    /// (default) — zero emits. Phase 2+ toggle flips to true, close path emits
+    /// one ShadowExitMsg per close fill to audit Track P vs Combine Layer
+    /// agreement. Fail-soft: `None` disables emission entirely.
+    /// INFRA-PREBUILD-1 A 部：Combine Layer 退場時刻 shadow 觀測通道。
+    /// 預設 dormant（shadow_enabled=false）；Phase 2+ 開啟後每筆 close
+    /// 寫一列 ShadowExitMsg。None 時完全關閉（fail-soft）。
+    pub shadow_exit_tx: Option<tokio::sync::mpsc::Sender<crate::database::ShadowExitMsg>>,
     /// EXT-1: Channel to receive exchange events (fills/order updates) from ExecutionListener.
     /// EXT-1：從執行監聽器接收交易所事件（成交/訂單更新）的通道。
     pub exchange_event_rx: Option<mpsc::UnboundedReceiver<ExchangeEvent>>,

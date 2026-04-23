@@ -152,4 +152,11 @@ sharpe_low = 0.5
 update_interval_ms = 600000
 window_size = 500
 
+# INFRA-PREBUILD-1 Part A (2026-04-23) — Combine Layer shadow mode.
+# Live defaults OFF. When Phase 3+ Track L graduates, flip to true via IPC
+# (not hand-edit for live — use write-face for audit trail).
+# Live 預設關閉；Phase 3+ Track L 成熟時經 IPC（非手編 TOML）切換便於審計。
+[exit]
+shadow_enabled = false
+
 [experimental.flags]

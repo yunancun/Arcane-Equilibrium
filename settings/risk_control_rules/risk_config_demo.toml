@@ -150,3 +150,13 @@ window_size = 200
 # slope=0.15, floor=0.3). Only override the fallback for the A/B comparison.
 [exit]
 missing_edge_fallback_bps = 10.0
+
+# INFRA-PREBUILD-1 Part A (2026-04-23) — Combine Layer shadow mode switch.
+# false (default): Phase 1a pass-through — close-path still hands ml_opt=None to
+#   combine_exit_decision, learning.decision_shadow_exits stays empty.
+# true  (Phase 2+): close-path builds mock MLInference from edge_estimates and
+#   emits one ShadowExitMsg per close. Safe to flip via TOML hot-reload + IPC
+#   (ArcSwap). ml_override_high=2.0 sentinel keeps ML unreachable for overrides.
+# INFRA-PREBUILD-1 A 部：Combine Layer shadow 開關；false 維持 Phase 1a，
+# true 開 Phase 2+ 觀察寫入。熱重載即可，不須重啟。
+shadow_enabled = false

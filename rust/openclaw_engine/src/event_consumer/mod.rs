@@ -65,6 +65,10 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
         // `emit_close_fill` 建 7 維 ExitFeatureRow 並 try_send 入此通道。
         // 三引擎共用同一 writer（多 producer 安全）。
         exit_feature_tx,
+        // INFRA-PREBUILD-1 Part A (2026-04-23): Combine Layer exit-time shadow
+        // observation. Dormant default; Phase 2+ shadow_enabled flip activates.
+        // INFRA-PREBUILD-1 A 部：Combine Layer 退場時刻 shadow 觀測通道。
+        shadow_exit_tx,
         exchange_event_rx,
         seed_positions,
         account_manager,
@@ -170,6 +174,17 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
     // 產生一列寫入 `learning.exit_features`。未接線為 fail-soft no-op。
     if let Some(tx) = exit_feature_tx.clone() {
         pipeline.set_exit_feature_tx(tx);
+    }
+
+    // INFRA-PREBUILD-1 Part A (2026-04-23): Wire shadow-exit DB channel so
+    // Combine Layer's close-path can emit one ShadowExitMsg per close fill
+    // when shadow_enabled=true. Dormant default (flag OFF → no emit). Fail-
+    // soft: None disables entirely, trading path unaffected.
+    // INFRA-PREBUILD-1 A 部：接入 shadow-exit DB 通道，Combine Layer close path
+    // 在 shadow_enabled=true 時每筆 close 寫一列。預設 flag 關 → 零 emit。
+    // fail-soft：None 時完全關閉，交易路徑不受影響。
+    if let Some(tx) = shadow_exit_tx.clone() {
+        pipeline.set_shadow_exit_tx(tx);
     }
 
     // EDGE-P3-1 Phase B #4: Seed the IntentProcessor predictor RNG with a per-

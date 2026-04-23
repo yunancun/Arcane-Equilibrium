@@ -883,6 +883,13 @@ pub struct TickPipeline {
     /// 平倉組一列並 try_send 入此通道。None = 停用（fail-soft，不影響交易）。
     /// 由 `main.rs` 逐引擎接線。
     exit_feature_tx: Option<tokio::sync::mpsc::Sender<crate::database::ExitFeatureRow>>,
+    /// INFRA-PREBUILD-1 Part A (2026-04-23): `ShadowExitMsg` sender for Combine
+    /// Layer exit-time shadow observations. Phase 2+ only emits when
+    /// `RiskConfig.exit.shadow_enabled=true`; otherwise dormant. `None` =
+    /// emission disabled (fail-soft; trading unaffected). Wired per-engine.
+    /// INFRA-PREBUILD-1 A 部：`ShadowExitMsg` 發送端；Phase 2+ 僅在
+    /// `shadow_enabled=true` 時發射。None = 停用（fail-soft）。逐引擎接線。
+    shadow_exit_tx: Option<tokio::sync::mpsc::Sender<crate::database::ShadowExitMsg>>,
     /// Scanner symbol registry — gates new opens to scanner-active symbols only.
     /// None = gate disabled (all symbols allowed, e.g. tests / standalone).
     /// 掃描器交易對注冊表 — 新開倉僅限掃描器活躍交易對。
