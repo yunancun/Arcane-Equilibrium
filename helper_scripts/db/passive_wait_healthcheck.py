@@ -30,6 +30,7 @@ Checks（each prints PASS / FAIL / WARN with a one-line explanation）:
   [5] micro_profit_fire              — trading.fills 'risk_close:COST EDGE*' count (MICRO-PROFIT-FIX-1)
   [6] trailing_stop_fire             — trading.fills 'risk_close:TRAILING STOP%' count
   [7] edge_estimates_freshness       — settings/edge_estimates.json mtime < 90min
+  [10] intents_writer_ratio          — trading.intents vs orders 24h ratio (P1-12 post-mortem 2026-04-17 outage)
 
 Rule of thumb: close_fills_24h ≥ 10 且 labels 1:1 ratio ≥ 0.8 且 exit_features
 1:1 ratio ≥ 0.8 且 ≥1 risk-layer exit mechanism (#4/5/6) fire ≥ 1 time.
@@ -320,6 +321,55 @@ def check_model_registry_freshness(cur) -> tuple[str, str]:
     return ("PASS", msg)
 
 
+def check_intents_writer_ratio(cur) -> tuple[str, str]:
+    """[10] trading.intents vs trading.orders 24h ratio — P1-12 post-mortem guard.
+
+    Context: on 2026-04-17, ``trading.intents`` took zero rows for the entire
+    day across demo+live_demo while ``trading.orders``/``fills``/``risk_verdicts``
+    kept writing normally (e.g. demo 4/17 had 1755 orders but 0 intents). The
+    P1-12 "bb_reversion 100% blocked" framing was actually a symptom of this
+    whole-table intents-writer silent outage. This check catches recurrence.
+
+    Heuristic: demo 4/20-23 healthy baseline shows intents/orders ≈ 0.70-0.87
+    (orders include ``strategy_close:*`` / ``risk_close:*`` tags that originate
+    downstream of the intent stage, so ratio < 1.0 is normal). We treat:
+        - orders_24h=0 → PASS (engine quiet, nothing to compare)
+        - orders>0 + intents=0 → FAIL (4/17-style outage fingerprint)
+        - ratio < 0.3 → WARN (intents writer under-firing)
+        - ratio ≥ 0.3 → PASS
+
+    [10] trading.intents / orders 24h 比率守衛（P1-12 2026-04-17 全天斷裂事件
+    post-mortem）：當時 risk_verdicts / orders / fills 都正常寫，唯獨 intents
+    整天 0 rows。TODO §P1-12 原判「bb_reversion 100% 被擋」實為此全表性
+    writer outage 的症狀。此 check 專門擋復發：orders>0 + intents=0 → FAIL。
+    """
+    try:
+        orders_24h = _scalar(cur,
+            "SELECT COUNT(*) FROM trading.orders "
+            "WHERE ts > now() - interval '24 hours' AND engine_mode = 'demo'"
+        )
+        intents_24h = _scalar(cur,
+            "SELECT COUNT(*) FROM trading.intents "
+            "WHERE ts > now() - interval '24 hours' AND engine_mode = 'demo'"
+        )
+    except Exception as e:
+        return ("WARN", f"intents/orders 24h query failed: {e}")
+    if orders_24h == 0:
+        return ("PASS", f"intents_24h={intents_24h}, orders_24h=0 (engine quiet, nothing to compare)")
+    if intents_24h == 0:
+        return (
+            "FAIL",
+            f"intents_24h=0 BUT orders_24h={orders_24h} — writer silent-dead "
+            "(matches 2026-04-17 outage fingerprint; check Rust trading_writer "
+            "intent INSERT path + DB connection pool)",
+        )
+    ratio = intents_24h / orders_24h
+    msg = f"intents_24h={intents_24h} vs orders_24h={orders_24h} (ratio {ratio:.2f})"
+    if ratio < 0.3:
+        return ("WARN", msg + " — intents writer under-firing (healthy baseline 0.70-0.87)")
+    return ("PASS", msg)
+
+
 def _read_shadow_enabled_from_toml() -> tuple[bool | None, str]:
     """INFRA-PREBUILD-1 L2-5 (2026-04-23): parse `[exit].shadow_enabled` from
     `settings/risk_control_rules/risk_config_demo.toml`.
@@ -552,6 +602,12 @@ def main() -> int:
             # [9] model_registry — INFRA-PREBUILD-1 B 部；Phase 1a/2 預期空。
             s, m = check_model_registry_freshness(cur)
             results.append(("[9] model_registry_freshness", s, m))
+
+            # [10] intents_writer_ratio — P1-12 post-mortem guard
+            # Catches 4/17-style whole-table intents-writer silent outage.
+            # [10] intents writer 比率守衛 — P1-12 post-mortem，防 4/17 事件復發。
+            s, m = check_intents_writer_ratio(cur)
+            results.append(("[10] intents_writer_ratio", s, m))
     finally:
         conn.close()
 
