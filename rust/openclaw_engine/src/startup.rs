@@ -981,11 +981,52 @@ pub(crate) fn spawn_private_ws_supervisor(
         let _ = disc_tx.send(ExchangeEvent::Disconnected);
     });
 
+    // C-WIRING: extract stats Arc BEFORE listener is moved into its spawn, so
+    // the status-JSON writer can read live counters.
+    // 取 stats Arc（必須在 listener 被 spawn 搬走前完成）以供 status JSON writer 使用。
+    let stats_arc = listener.stats_arc();
+
     // Spawn listener task / 啟動監聽器任務
     let listener_handle = tokio::spawn(async move {
         let mut listener = listener;
         listener.run().await;
     });
+
+    // C-WIRING: spawn status-JSON writer to replace the Python
+    // `bybit_private_ws_listener.py` that previously produced the
+    // `bybit_private_ws_listener_status_latest.json` file consumed by
+    // `readonly_observer_pipeline/{build_ws_runtime_facts,runtime_state_
+    // resolver,observer_acceptance_check}.py`. Only for Demo / LiveDemo to
+    // match the Python listener's scope (it ran against a demo API key;
+    // Paper has no real private WS and Mainnet live isn't active yet).
+    //
+    // 啟動 status JSON writer 取代 Python listener；僅對 Demo/LiveDemo 啟動以
+    // 對齊 Python 原本的 scope（paper 無真實私有 WS；Mainnet live 尚未啟用）。
+    let status_writer_handle: Option<JoinHandle<()>> =
+        if matches!(env, BybitEnvironment::Demo | BybitEnvironment::LiveDemo) {
+            use openclaw_engine::bybit_private_ws_status_writer::{
+                run_private_ws_status_writer, WriterConfig,
+            };
+            let ws_url = env.private_ws_url().to_string();
+            let topics: Vec<String> = env
+                .private_ws_topics()
+                .iter()
+                .map(|s| (*s).to_string())
+                .collect();
+            let cfg = WriterConfig::from_env(label.to_string(), ws_url, topics);
+            let stats_for_writer = Arc::clone(&stats_arc);
+            let cancel_for_writer = cancel.clone();
+            let handle = tokio::spawn(async move {
+                run_private_ws_status_writer(stats_for_writer, cfg, cancel_for_writer).await;
+            });
+            info!(
+                engine = label,
+                "Private WS status-JSON writer spawned / 私有 WS status JSON writer 已啟動"
+            );
+            Some(handle)
+        } else {
+            None
+        };
 
     // RE-2: Supervisor wrapper — restarts on unexpected exit
     // RE-2：監管器包裝 — 意外退出時自動重啟
@@ -1036,11 +1077,19 @@ pub(crate) fn spawn_private_ws_supervisor(
         exchange_event_rx,
     };
     // Order here is intentional but not semantically required (teardown awaits
-    // all in sequence). Keep [ws_handle, listener_handle] so logs during
-    // teardown report the supervisor shutting down before the listener.
+    // all in sequence). Keep [ws_handle, listener_handle, status_writer?] so
+    // logs during teardown report the supervisor shutting down first, then
+    // the listener, then the writer (the writer's final running=false write
+    // uses the stale stats but that's fine — it just means observers see
+    // the terminal state).
     // 順序有意為之但不影響語義（teardown 會依序 await 全部）。保留
-    // [ws_handle, listener_handle]，讓 teardown log 先打 supervisor 再打 listener。
-    let handles = vec![ws_handle, listener_handle];
+    // [ws_handle, listener_handle, status_writer?]，teardown log 先打
+    // supervisor → listener → writer；writer 的最後 running=false 寫入使用最新
+    // stats 快照，observer 會看到終止狀態。
+    let mut handles = vec![ws_handle, listener_handle];
+    if let Some(h) = status_writer_handle {
+        handles.push(h);
+    }
     (bindings, handles)
 }
 
