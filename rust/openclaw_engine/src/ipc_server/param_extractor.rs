@@ -47,13 +47,18 @@
 //!   - Byte-for-byte message compatibility with legacy handlers.rs code.
 //!   - No I/O, no async — pure ``serde_json::Value`` inspection.
 
-// E5-P1-5: helpers are new; handlers.rs migrations are intentionally deferred
-//         to avoid conflicting with the parallel E5-P1-3 handlers split. Allow
-//         dead_code until the first adopter lands (proof-of-correctness is
-//         covered by unit tests in the #[cfg(test)] block below).
-// E5-P1-5：避免與並行 E5-P1-3 衝突，handlers.rs 採用刻意延後；首批採用點
-//         落地前以 #[cfg(test)] 單測保障正確性，暫容許 dead_code。
-#![allow(dead_code)]
+// E5-P1-5-FUP: file-level `#![allow(dead_code)]` removed now that the first
+//         adopters (`handlers/budget.rs` + `handlers/risk.rs`) consume the
+//         canonical `require_*` / `optional_*` helpers.  The three helpers
+//         that no handler consumes yet (`require_f64`, `require_bool`,
+//         `optional_str`, `internal_error`) carry individual
+//         `#[allow(dead_code)]` + TODO markers so new call sites can adopt
+//         them drop-in without re-enabling the module-level suppression.
+// E5-P1-5-FUP：首批採用點（`handlers/budget.rs` + `handlers/risk.rs`）
+//         落地後移除檔案級 `#![allow(dead_code)]`；尚未被消費的
+//         `require_f64` / `require_bool` / `optional_str` / `internal_error`
+//         改加函數級 `#[allow(dead_code)]` + TODO，新 call site 採用時可
+//         即刻移除，避免再次打開檔案級壓制。
 
 use super::{JsonRpcResponse, ERR_INTERNAL};
 use serde_json::Value;
@@ -110,6 +115,14 @@ pub(crate) fn require_str_with_msg(
 
 /// Fetch an optional string param, returning ``None`` if absent / empty.
 /// 取可選字串參數；缺失或空字串回 ``None``。
+// TODO(E5-P1-5-FUP-2): no handler currently distinguishes between "absent" and
+//     "present but empty" for optional strings (all call sites either use a
+//     default via `optional_str_or` or short-circuit via `require_str`).
+//     Remove the attribute once a handler adopts this two-state variant.
+// TODO(E5-P1-5-FUP-2)：目前 handlers 對可選字串都用 `optional_str_or`（帶預設）
+//     或 `require_str`（必填），沒有 call site 需要區分「缺失」vs「空字串」。
+//     待有 handler 採用此二態版本後即可移除本屬性。
+#[allow(dead_code)]
 pub(crate) fn optional_str<'a>(params: &'a Value, key: &str) -> Option<&'a str> {
     params.get(key).and_then(|v| v.as_str()).filter(|s| !s.is_empty())
 }
@@ -128,6 +141,12 @@ pub(crate) fn optional_str_or<'a>(
 
 /// Require a finite ``f64`` param; error if missing or not finite.
 /// 要求必填有限 ``f64`` 參數；缺失或非有限值即回錯誤。
+// TODO(E5-P1-5-FUP-2): no handler currently needs an unconstrained required
+//     f64 (existing risk/budget sites use either `require_non_negative_f64`
+//     or two-state `optional_f64`).  Drop the attribute when adopted.
+// TODO(E5-P1-5-FUP-2)：目前 handlers 僅用 `require_non_negative_f64` 或
+//     二態 `optional_f64`；首個 unconstrained 必填 f64 call site 落地後移除。
+#[allow(dead_code)]
 pub(crate) fn require_f64(
     params: &Value,
     key: &str,
@@ -177,6 +196,12 @@ pub(crate) fn optional_u64(params: &Value, key: &str) -> Option<u64> {
 
 /// Require a boolean param; error if missing or wrong type.
 /// 要求必填布林值；缺失或型別錯誤回錯誤回應。
+// TODO(E5-P1-5-FUP-2): risk.rs uses `optional_bool` (h0_shadow_mode is an
+//     optional toggle).  Wire this once a handler requires a non-optional
+//     bool (e.g. a dry-run flag that must be explicit).
+// TODO(E5-P1-5-FUP-2)：risk.rs 用 `optional_bool`（如 h0_shadow_mode 可選）。
+//     未來需要強制指定的布林（例如 dry-run flag）時再採用此必填版本。
+#[allow(dead_code)]
 pub(crate) fn require_bool(
     params: &Value,
     key: &str,
@@ -203,6 +228,13 @@ pub(crate) fn optional_bool(params: &Value, key: &str) -> Option<bool> {
 /// Build an ``ERR_INTERNAL`` response — common shorthand when a DB write or
 /// channel send fails inside a handler.
 /// 建構 ``ERR_INTERNAL`` 錯誤回應 — handler 內 DB 寫入或 channel 失敗常用。
+// TODO(E5-P1-5-FUP-2): budget.rs keeps its inline `JsonRpcResponse::error(id,
+//     ERR_INTERNAL, ...)` calls because the `format!(...)` message paths
+//     differ per-call.  Adopt `internal_error` when a handler has a static
+//     error string to keep the helper exercised.
+// TODO(E5-P1-5-FUP-2)：budget.rs 各 `ERR_INTERNAL` 訊息為動態 `format!`，保留
+//     內嵌調用；未來有靜態錯誤訊息的 handler 可用此便捷建構子取代。
+#[allow(dead_code)]
 pub(crate) fn internal_error(id: Value, message: impl Into<String>) -> JsonRpcResponse {
     JsonRpcResponse::error(id, ERR_INTERNAL, message.into())
 }
@@ -341,5 +373,69 @@ mod tests {
         let err = resp.error.as_ref().unwrap();
         assert_eq!(err.code, ERR_INTERNAL);
         assert_eq!(err.message, "boom");
+    }
+
+    // ── E5-P1-5-FUP: adopter-level tests ─────────────────────────────────
+    // ── E5-P1-5-FUP：採用點層級單測 ─────────────────────────────────────
+    //
+    // EN: the helpers below back the newly-migrated `handlers/budget.rs` and
+    //     `handlers/risk.rs` call sites.  Adding explicit happy / error path
+    //     tests here makes the contract with those handlers self-evident and
+    //     guards against future edits that would silently change the JSON-RPC
+    //     error payload.
+    // 中：以下輔助函式承載剛遷移的 `handlers/budget.rs` 與 `handlers/risk.rs`
+    //     call site。補上 happy / error 雙路徑單測使其對 handler 的契約清晰，
+    //     並避免未來改動靜默改變 JSON-RPC error payload。
+
+    #[test]
+    fn require_str_adopter_happy_budget_scope() {
+        // Mirrors `handle_update_ai_budget_config` happy path.
+        // 對應 `handle_update_ai_budget_config` 的 happy 路徑。
+        let p = json!({"scope": "layer2_scout", "monthly_usd": 10.0});
+        assert_eq!(require_str(&p, "scope", rid()).unwrap(), "layer2_scout");
+    }
+
+    #[test]
+    fn require_str_adopter_error_preserves_canonical_message() {
+        // Byte-identity on the error message is load-bearing for the Python
+        // test suite (asserts on exact text).
+        // 錯誤訊息的逐位元組一致對 Python 測試是關鍵契約（對字串精確比對）。
+        let p = json!({"monthly_usd": 5.0});
+        let err = require_str(&p, "scope", rid()).unwrap_err();
+        let body = err.error.as_ref().unwrap();
+        assert_eq!(body.code, ERR_INVALID_PARAMS);
+        assert_eq!(body.message, "missing or empty 'scope' (string)");
+    }
+
+    #[test]
+    fn optional_u64_adopter_happy_tokens_in() {
+        // Mirrors `handle_record_ai_usage` token-count extraction.
+        // 對應 `handle_record_ai_usage` 的 token 數抽取。
+        let p = json!({"tokens_in": 12_345u64});
+        assert_eq!(optional_u64(&p, "tokens_in"), Some(12_345));
+    }
+
+    #[test]
+    fn optional_u64_adopter_missing_falls_to_none_for_unwrap_or_zero() {
+        // Legacy handlers.rs did `.and_then(as_u64).unwrap_or(0)`; the migrated
+        // call site does `optional_u64(...).unwrap_or(0)` — verify the
+        // `None`-on-missing branch so the fallback is identical.
+        // 舊 handlers.rs 寫 `.and_then(as_u64).unwrap_or(0)`；遷移後為
+        // `optional_u64(...).unwrap_or(0)`。驗證缺失時回 `None`，fallback 等義。
+        let p = json!({});
+        assert_eq!(optional_u64(&p, "tokens_in"), None);
+        assert_eq!(optional_u64(&p, "tokens_in").unwrap_or(0) as u32, 0u32);
+    }
+
+    #[test]
+    fn optional_u64_adopter_rejects_negative_and_float() {
+        // serde_json `as_u64()` is `None` for negatives and non-integers; this
+        // matches the legacy `.and_then(|v| v.as_u64())` behaviour so the
+        // downstream `unwrap_or(0)` collapses suspicious inputs to zero.
+        // serde_json `as_u64()` 對負數與非整數回 `None`，與舊 `.and_then(as_u64)`
+        // 一致；下游 `unwrap_or(0)` 將可疑輸入歸零。
+        let p = json!({"a": -1, "b": 3.14});
+        assert_eq!(optional_u64(&p, "a"), None);
+        assert_eq!(optional_u64(&p, "b"), None);
     }
 }
