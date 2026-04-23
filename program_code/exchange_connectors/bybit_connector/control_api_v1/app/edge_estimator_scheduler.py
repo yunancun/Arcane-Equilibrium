@@ -286,35 +286,56 @@ class EdgeEstimatorScheduler:
         Fail-soft：此 writer 任何異常（連線中斷/schema drift/序列化錯誤）
         一律吞下並 warning log，永不 re-raise、永不阻塞 scheduler 主循環。
         """
-        status = "fail" if js_error is not None else "ok"
-        error_class: Optional[str] = type(js_error).__name__ if js_error else None
-        error_msg: Optional[str] = str(js_error) if js_error else None
+        # QC-2 (2026-04-23): wrap the ENTIRE writer body in try/except so the
+        # fail-soft contract in the docstring is actually enforced. Previously
+        # payload build (int/float conversions on `results_for_mode`) sat
+        # outside any guard — a non-numeric value would raise and escape via
+        # _run_cycle's `finally` back up into the daemon thread.
+        # QC-2：payload 構建包入最外層 try/except，兌現 docstring 宣告的
+        # fail-soft 契約。原來 int/float 轉換在 try 外，非數字值會拋出並經
+        # _run_cycle 的 finally 穿透回 daemon thread。
+        try:
+            status = "fail" if js_error is not None else "ok"
+            error_class: Optional[str] = type(js_error).__name__ if js_error else None
+            error_msg: Optional[str] = str(js_error) if js_error else None
 
-        # Build payload JSON — structured enough for SQL projection but
-        # capped to what operator needs for triage.
-        # payload JSON 保持結構化、可 SQL 投影，同時只收 operator triage 必需資訊。
-        payload = {
-            "scheduler_name": "edge_estimator",
-            "cycle_phase": "full_cycle",  # backfill + JS estimate, per _run_cycle contract
-            "reason": reason,
-            "mode": mode,
-            "engine_mode": mode,  # alias for operator SQL ergonomics / 便於 operator SQL
-            "status": status,
-            "duration_ms": duration_ms,
-            "error_class": error_class,
-            "error_msg": error_msg,
-            "backfill_error_class": (
-                type(backfill_error).__name__ if backfill_error else None
-            ),
-            "n_cells": (
-                int(results_for_mode.get("n_cells", 0))
-                if isinstance(results_for_mode, dict) else None
-            ),
-            "grand_mean_bps": (
-                float(results_for_mode.get("grand_mean_bps", 0.0))
-                if isinstance(results_for_mode, dict) else None
-            ),
-        }
+            # Build payload JSON — structured enough for SQL projection but
+            # capped to what operator needs for triage.
+            # payload JSON 保持結構化、可 SQL 投影，同時只收 operator triage 必需資訊。
+            payload = {
+                "scheduler_name": "edge_estimator",
+                "cycle_phase": "full_cycle",  # backfill + JS estimate, per _run_cycle contract
+                "reason": reason,
+                "mode": mode,
+                "engine_mode": mode,  # alias for operator SQL ergonomics / 便於 operator SQL
+                "status": status,
+                "duration_ms": duration_ms,
+                "error_class": error_class,
+                "error_msg": error_msg,
+                "backfill_error_class": (
+                    type(backfill_error).__name__ if backfill_error else None
+                ),
+                "n_cells": (
+                    int(results_for_mode.get("n_cells", 0))
+                    if isinstance(results_for_mode, dict) else None
+                ),
+                "grand_mean_bps": (
+                    float(results_for_mode.get("grand_mean_bps", 0.0))
+                    if isinstance(results_for_mode, dict) else None
+                ),
+            }
+        except Exception as payload_exc:
+            # Payload build raised (non-numeric value, serialisation edge, etc.).
+            # Warn and return — do NOT propagate up into _run_cycle's finally.
+            # payload 構建失敗（非數字值 / 序列化邊界）— warning 後 return，
+            # 絕不傳播回 _run_cycle 的 finally block。
+            logger.warning(
+                "EdgeEstimatorScheduler: payload build failed "
+                "(fail-soft, event dropped): mode=%s js_error=%r payload_exc=%s "
+                "/ payload 構建失敗（fail-soft，事件丟棄）：mode=%s js_error=%r payload_exc=%s",
+                mode, js_error, payload_exc, mode, js_error, payload_exc,
+            )
+            return
 
         # Lazy imports so a PG-less environment never breaks module load.
         # 懶 import；PG 不可達環境下不影響模組載入。

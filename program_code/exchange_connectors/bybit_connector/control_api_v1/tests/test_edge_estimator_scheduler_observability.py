@@ -263,3 +263,66 @@ def test_record_cycle_event_pool_unavailable_is_fail_soft(caplog):
 
     assert "demo" in results
     assert any("DB pool unavailable" in r.getMessage() for r in caplog.records)
+
+
+# ---------------------------------------------------------------------------
+# Test 5 (E4 audit follow-up) — backfill fails + JS succeeds → status='ok'
+# AND payload.backfill_error_class captures the backfill error class name.
+# The pre-fix test suite had no scenario exercising this asymmetric branch;
+# E4 audit flagged it because `_record_cycle_event` line 306-308 set
+# `backfill_error_class` only on this specific path.
+# 測試 5（E4 audit 補）：backfill 失敗 + JS 成功 → status='ok' 且
+# payload.backfill_error_class 捕獲 backfill 錯誤類名。原測試套件缺這
+# 不對稱分支；E4 審核指出 `backfill_error_class` 只在此路徑設值，無測試覆蓋。
+# ---------------------------------------------------------------------------
+
+def test_backfill_fail_js_ok_records_backfill_error_class():
+    """backfill raises, JS succeeds → status='ok' + backfill_error_class set.
+    backfill 拋錯、JS 成功 → status='ok' 且 backfill_error_class 有值。"""
+    captured: list[tuple[str, tuple]] = []
+    conn = _FakeConn(captured)
+
+    sched = _make_scheduler(modes=("demo",))
+
+    class _BackfillBlewUp(RuntimeError):
+        """Custom error class for precise class-name assertion.
+        自訂 error class 以精確斷言 class 名稱。"""
+        pass
+
+    with patch.object(sched, "_run_backfill", side_effect=_BackfillBlewUp("simulated backfill fail")), \
+         patch.object(sched, "_run_one_mode", return_value={"n_cells": 7, "grand_mean_bps": -8.3}), \
+         patch(
+             "program_code.exchange_connectors.bybit_connector.control_api_v1.app.db_pool.get_pg_conn",
+             _fake_get_pg_conn(conn),
+         ):
+        results = sched._run_cycle(reason="test_backfill_fail_js_ok")
+
+    # JS still ran and produced summary / JS 仍執行並產出摘要
+    assert "demo" in results
+    assert results["demo"].get("n_cells") == 7
+    assert sched._failures == 0, "backfill failure must not bump _failures counter"
+
+    # Exactly one obs event written / 恰寫一行 obs event
+    assert len(captured) == 1
+    sql, params = captured[0]
+    _, event_type, _, _, payload_json = params
+
+    # Status is still 'ok' because JS succeeded — backfill fail is non-fatal
+    # status 仍 'ok' 因 JS 成功 — backfill 失敗不致命
+    assert event_type == "scheduler_ok"
+
+    import json as _json
+    payload = _json.loads(payload_json)
+    assert payload["status"] == "ok"
+    assert payload["error_class"] is None
+    assert payload["error_msg"] is None
+
+    # The distinguishing assertion: backfill error class captured
+    # 關鍵斷言：backfill 錯誤類名被捕
+    assert payload["backfill_error_class"] == "_BackfillBlewUp", (
+        f"expected 'backfill_error_class'='_BackfillBlewUp', got "
+        f"{payload.get('backfill_error_class')!r}"
+    )
+    # JS succeeded so summary fields populated / JS 成功，摘要欄位填入
+    assert payload["n_cells"] == 7
+    assert payload["grand_mean_bps"] == pytest.approx(-8.3)

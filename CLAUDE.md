@@ -358,6 +358,8 @@ state_models ← state_compiler ← state_store ← main_legacy ← main.py
 | `KLINE_MANAGER` / `INDICATOR_ENGINE` / `SIGNAL_ENGINE` / `ORCHESTRATOR` 等 12+ | strategy_wiring.py | 模組級全局，import 時初始化 |
 | `_SHARED_IPC_SLOTS` / `_SHARED_SLOT_LOCK` | ipc_dispatch.py | 內部懶加載 `get_or_connect_shared_client(slot_key)`（E5-P1-5） |
 | `_<AGENT>_AUDIT_CB` / `_GOV_HUB_FOR_<AGENT>` × 5（Scout/Strategist/Guardian/Analyst/Executor） | strategy_wiring.py | 模組級，由 `agent_audit_bridge.make_agent_audit_callback(...)` 構造；各 agent ctor 注入 `audit_callback`（E5-FN-3 Analyst pilot + FN-3-FUP-a~d 4 agents 補接線）。ImportError 時 GOV_HUB=None → bridge fail-open 靜默丟事件。`agent_audit_bridge` 本身無狀態工廠（不持 singleton） |
+| `_scheduler` / `_scheduler_lock` | edge_estimator_scheduler.py | 內部懶加載 `start_scheduler()`（P1-7 B JS estimator，每小時 cycle）。QC-3 audit FUP 補登（2026-04-23） |
+| `_LEADER_LOCK_FD` / `_LEADER_LOCK_PATH` | edge_estimator_scheduler.py | 模組級全局；`_acquire_leader_lock()` 取得 flock fd 後寫入，OS 進程退出自動釋放（含 SIGKILL）。uvicorn --workers 4 leader election sentinel。測試用 `_reset_for_tests()` 釋放。EDGE-SCHEDULER-LEADER-1（2026-04-23 `f32629c`）|
 
 新增 singleton 必須在此表登記。禁止子模塊創建未登記的全局可變狀態。
 
