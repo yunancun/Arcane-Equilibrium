@@ -20,6 +20,75 @@ pub(super) const DEFAULT_EXPANSION_BW: f64 = 0.04;
 /// Default volume ratio threshold for breakout confirmation (成交量確認閾值默認)
 pub(super) const DEFAULT_VOLUME_THRESHOLD: f64 = 1.2; // EDGE-P1-4: 1.5→1.2 (lower volume bar)
 
+/// P1-11 (2): how the Donchian-channel breach condition combines with the
+/// BB-core gates (squeeze / expansion / volume).
+///
+/// - `Hard` (default, bit-identical to baseline): price must breach Donchian
+///   in the entry direction or the tick is hard-rejected (`return vec![]`).
+/// - `Score`: breach adds `+donchian_score_bonus` to the confluence score;
+///   miss subtracts the same. Entry path is NOT hard-rejected — downstream
+///   confluence gate (`confluence_as_gate` + thresholds) decides. Softens the
+///   5-AND chain documented in TODO §P1-11 (BB-BREAKOUT/REVERSION-DORMANT-1).
+/// - `Off`: Donchian check skipped entirely (score unmodified). For A/B
+///   measuring Donchian's contribution vs the 4-gate chain alone.
+///
+/// P1-11 (2)：Donchian 通道與 BB 核心三閘（壓縮/擴張/成交量）的結合方式。
+/// - `Hard` 預設與基線 bit-identical：方向不突破即硬拒。
+/// - `Score`：突破加 `+donchian_score_bonus` 到合流分；未突破扣同量。不硬拒，
+///   由下游合流閘（`confluence_as_gate` + thresholds）最終仲裁。軟化 TODO
+///   §P1-11 記錄的 5-AND chain，為 dormant 策略開放信號面。
+/// - `Off`：完全跳過 Donchian 檢查（score 不改）。A/B 用於量化 Donchian 貢獻。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum DonchianMode {
+    /// Hard AND gate (baseline, bit-identical). / 硬 AND 閘（基線，bit-identical）。
+    #[default]
+    Hard,
+    /// Soft score contribution: breach = +bonus, miss = -bonus. / 軟評分貢獻。
+    Score,
+    /// Skip Donchian entirely. / 完全跳過 Donchian。
+    Off,
+}
+
+/// P1-11 (3): A/B profile preset for BB Breakout thresholds. Consumers call
+/// `BbBreakoutParams::for_profile(...)` to get a fully-populated params struct
+/// with profile-adjusted bandwidth / volume / persistence gates, then feed it
+/// through the normal `update_params` hot-reload path.
+///
+/// - `Conservative`: tightest squeeze + widest expansion gap + highest volume
+///   + longest persistence — few signals, high-confidence breakouts.
+/// - `Balanced` (default): current production defaults (EDGE-P1-4 tuned).
+///   `for_profile(Balanced) == default()` — verified by test.
+/// - `Aggressive`: loosest squeeze + narrow gap + lowest volume + shortest
+///   persistence — many signals at lower confidence; paired with `Score`
+///   DonchianMode is the recommended dormant-strategy rescue path.
+///
+/// Profile is NOT hot-reloadable in the strict sense — switching changes
+/// strategy semantics, so A/B by swapping TOML + `restart_all.sh --rebuild`
+/// (or via IPC `update_params` in demo only). The `for_profile` helper keeps
+/// all non-profile fields at `Default` so operators can layer custom overrides
+/// on top (e.g., `{ ..BbBreakoutParams::for_profile(Aggressive), volume_threshold: 1.10 }`).
+///
+/// P1-11 (3)：BB Breakout 閾值 A/B profile 預設。呼叫 `for_profile` 拿到已填滿
+/// 的 params，餵進 `update_params` 熱重載。
+/// - `Conservative`：最嚴 squeeze + 最寬 gap + 最高 volume + 最長 persistence，
+///   信號稀少但高信心。
+/// - `Balanced`（預設）：當前生產預設（EDGE-P1-4 調校後）。`for_profile(Balanced)
+///   == default()`，測試固化。
+/// - `Aggressive`：最鬆 squeeze + 窄 gap + 最低 volume + 最短 persistence，信號多
+///   但信心低；建議搭配 `DonchianMode::Score` 作 dormant 策略救援組合。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum BbBreakoutProfile {
+    /// Strict gates — few signals, high-confidence. / 嚴格門控，信號少但信心高。
+    Conservative,
+    /// Current production defaults (EDGE-P1-4 tuned). / 當前生產預設。
+    #[default]
+    Balanced,
+    /// Loose gates — many signals, lower confidence. / 寬鬆門控，信號多但信心低。
+    Aggressive,
+}
+
 /// Tunable parameters for BB Breakout (Phase 3a).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -108,6 +177,64 @@ pub struct BbBreakoutParams {
     /// event_consumer sweep cancels it. Clamped to [15_000, 300_000] on assign.
     /// EDGE-P2-3 Phase 2+：PostOnly 掛單最長停留時間(毫秒)，寫入時 clamp。
     pub maker_limit_timeout_ms: u64,
+    /// P1-11 (2): how Donchian breach combines with the BB-core 3-gate chain.
+    /// Default `Hard` → bit-identical to baseline. `Score` softens to confluence
+    /// contribution, `Off` disables Donchian check entirely.
+    /// P1-11 (2)：Donchian 突破與 BB 核心三閘的結合方式。預設 `Hard` bit-identical；
+    /// `Score` 軟化為合流評分貢獻，`Off` 完全跳過。
+    pub donchian_mode: DonchianMode,
+    /// P1-11 (2): score delta added on Donchian breach confirmation (subtracted
+    /// on miss) when `donchian_mode == Score`. Default 0.15 — empirical starting
+    /// point near the weight_* range (0-65 confluence score scale). Validated
+    /// `[0.0, 0.5]` finite to match other bonus caps. Ignored under Hard / Off.
+    /// P1-11 (2)：`Score` 模式下 Donchian 突破確認加 / 未突破扣的分數量；預設 0.15，
+    /// validate `[0.0, 0.5]` finite。Hard / Off 模式下忽略。
+    pub donchian_score_bonus: f64,
+}
+
+/// P1-11 (3) helper: build a `BbBreakoutParams` with profile-adjusted gate
+/// thresholds. All non-profile fields use `Default`. Consumers can layer
+/// overrides with struct-update syntax:
+/// `{ ..BbBreakoutParams::for_profile(Aggressive), volume_threshold: 1.10 }`.
+///
+/// P1-11 (3) 輔助：回傳帶 profile 閾值的 `BbBreakoutParams`；非 profile 欄位走
+/// `Default`。可用 struct-update 語法疊加 operator 自訂：
+/// `{ ..BbBreakoutParams::for_profile(Aggressive), volume_threshold: 1.10 }`。
+impl BbBreakoutParams {
+    pub fn for_profile(profile: BbBreakoutProfile) -> Self {
+        match profile {
+            // Conservative: narrow squeeze, wide expansion gap, high volume
+            // bar, long persistence hold. Signal count expected 30-50% below
+            // Balanced baseline; suitable when Guardian / AI cost budget is
+            // tight and only clearest breakouts should fire.
+            // 嚴格 Conservative：窄 squeeze + 寬擴張 gap + 高 volume + 長 persistence。
+            BbBreakoutProfile::Conservative => Self {
+                squeeze_bw: 0.02,
+                expansion_bw: 0.05,
+                volume_threshold: 1.5,
+                min_persistence_ms: 120_000, // 2 min
+                ..Self::default()
+            },
+            // Balanced: bit-identical to current production default. Test
+            // `test_profile_balanced_equals_default` pins this invariant.
+            // 預設 Balanced：與 Default bit-identical；測試 `test_profile_balanced_equals_default` 固化。
+            BbBreakoutProfile::Balanced => Self::default(),
+            // Aggressive: loose squeeze (easier to qualify), narrow expansion
+            // gap (easier to cross), lower volume bar, short persistence. Paired
+            // with DonchianMode::Score is the recommended dormant-rescue combo
+            // per TODO §P1-11 (2)+(3). Still respects `squeeze_bw < expansion_bw`
+            // invariant to pass validate().
+            // 寬鬆 Aggressive：鬆 squeeze + 窄 gap + 低 volume + 短 persistence；
+            // 建議與 `DonchianMode::Score` 組合 — §P1-11 (2)+(3) 救援路徑。
+            BbBreakoutProfile::Aggressive => Self {
+                squeeze_bw: 0.035,
+                expansion_bw: 0.040,
+                volume_threshold: 1.05,
+                min_persistence_ms: 30_000, // 30s
+                ..Self::default()
+            },
+        }
+    }
 }
 
 impl Default for BbBreakoutParams {
@@ -154,6 +281,11 @@ impl Default for BbBreakoutParams {
             use_maker_entry: false,
             maker_price_offset_bps: 1.0,
             maker_limit_timeout_ms: 45_000,
+            // P1-11 (2): Hard default preserves bit-identical pre-P1-11 behaviour.
+            // Operators flip to Score / Off explicitly when A/B testing.
+            // P1-11 (2)：`Hard` 預設保留 pre-P1-11 bit-identical；operator A/B 時顯式切換。
+            donchian_mode: DonchianMode::Hard,
+            donchian_score_bonus: 0.15,
         }
     }
 }
@@ -327,6 +459,20 @@ impl StrategyParams for BbBreakoutParams {
                 agent_adjustable: true,
                 db_persisted: true,
             },
+            // P1-11 (2): donchian_score_bonus param range. donchian_mode is
+            // enum-typed and doesn't fit the numeric ParamRange surface — it's
+            // hot-reloaded via update_params but not Agent-tunable through
+            // the numeric slider UI; ChangeConfig TOML is the operator path.
+            // P1-11 (2)：donchian_score_bonus 數值 range；donchian_mode 為 enum
+            // 不走 numeric slider，operator 改 TOML + IPC update_params 切換。
+            ParamRange {
+                name: "donchian_score_bonus".into(),
+                min: 0.0,
+                max: 0.5,
+                step: Some(0.01),
+                agent_adjustable: true,
+                db_persisted: true,
+            },
         ]
     }
 
@@ -373,6 +519,17 @@ impl StrategyParams for BbBreakoutParams {
             || self.oi_min_delta_pct > 0.5
         {
             return Err("oi_min_delta_pct must be finite and within [0.0, 0.5]".into());
+        }
+        // P1-11 (2): donchian_score_bonus bounded to match other score
+        // contributors (±0.5) so a hostile IPC write cannot swamp the
+        // confluence decision. donchian_mode is enum-typed and self-validating.
+        // P1-11 (2)：donchian_score_bonus 上限 0.5 對齊其他貢獻者，防 IPC 惡意
+        // 寫入壓倒合流判決；donchian_mode 為 enum type 自身 validate。
+        if !self.donchian_score_bonus.is_finite()
+            || self.donchian_score_bonus < 0.0
+            || self.donchian_score_bonus > 0.5
+        {
+            return Err("donchian_score_bonus must be finite and within [0.0, 0.5]".into());
         }
         Ok(())
     }
