@@ -246,6 +246,76 @@ def check_edge_estimates_freshness() -> tuple[str, str]:
         return ("WARN", f"edge_estimates.json age {age_min:.0f}m, parse error: {e}")
 
 
+def check_shadow_exit_ratio(cur) -> tuple[str, str]:
+    """[8] learning.decision_shadow_exits activity — INFRA-PREBUILD-1 Part A.
+
+    Shadow mode is OFF by default (ExitConfig.shadow_enabled=false). This check
+    triangulates three states:
+
+    - table missing → FAIL (V021 migration not applied)
+    - table exists, 0 rows last 24h → PASS (expected Phase 1a dormant) but also
+      the silent-dead fingerprint if Operator flipped shadow_enabled=true and
+      the writer is broken. The message surfaces this ambiguity so Operator
+      checks risk_config*.toml to disambiguate.
+    - >0 rows last 24h → PASS with disagreement breakdown (key Phase 2 metric:
+      target ≥60% agreement between physical-only vs Combine-with-mock-ML).
+
+    When `shadow_enabled` flips on, Operator should see rows begin landing on
+    the next PHYS-LOCK close fire. 24h of zero rows after flip = silent-dead.
+
+    [8] learning.decision_shadow_exits 活性 — INFRA-PREBUILD-1 A 部。
+    shadow mode 預設關閉。三態三角檢：表缺 → FAIL；表存在但 24h 0 行 → PASS
+    （預期 Phase 1a dormant；但若 operator 開了 shadow_enabled 則為 silent-dead
+    指紋）；>0 行 → PASS + 分歧分布（Phase 2 一致性目標 ≥60%）。
+    """
+    # Table existence check — V021 applied?
+    # 檢查表是否存在（V021 是否已套用？）。
+    try:
+        cur.execute("""
+            SELECT to_regclass('learning.decision_shadow_exits') IS NOT NULL
+        """)
+        exists = cur.fetchone()[0]
+    except Exception as e:
+        return ("FAIL", f"table existence check failed: {e}")
+    if not exists:
+        return ("FAIL", "learning.decision_shadow_exits missing — V021 not applied")
+
+    # Row count + disagreement breakdown over 24h window.
+    # 24h 窗口：行數 + 分歧比率。
+    try:
+        cur.execute("""
+            SELECT
+                COUNT(*)::int                                        AS total,
+                COUNT(*) FILTER (WHERE disagreed)::int               AS disagreed_n,
+                COUNT(DISTINCT engine_mode)::int                     AS engines,
+                MAX(ts) AT TIME ZONE 'UTC'                            AS last_ts
+            FROM learning.decision_shadow_exits
+            WHERE ts > now() - interval '24 hours'
+        """)
+        total, disagreed_n, engines, last_ts = cur.fetchone()
+    except Exception as e:
+        return ("WARN", f"shadow_exits 24h query failed: {e}")
+
+    if total == 0:
+        return (
+            "PASS",
+            "decision_shadow_exits 24h=0 "
+            "(expected: shadow_enabled=false; "
+            "if flag ON, this is silent-dead → check risk_config*.toml + writer logs)",
+        )
+
+    agreement_pct = 100.0 * (1.0 - disagreed_n / total)
+    msg = (
+        f"decision_shadow_exits 24h={total}, disagreed={disagreed_n} "
+        f"({100 - agreement_pct:.1f}%), engines={engines}, last_ts={last_ts}"
+    )
+    # Phase 2 agreement target ≥60% (Track P vs Combine+mock-ML).
+    # Phase 2 一致性目標 ≥60%（Track P vs Combine+mock-ML）。
+    if agreement_pct < 60.0:
+        return ("WARN", msg + " — agreement <60% Phase 2 target")
+    return ("PASS", msg)
+
+
 # ---- main ----
 
 def main() -> int:
@@ -289,6 +359,12 @@ def main() -> int:
             # [6] trailing stop
             s, m = check_trailing_stop_fire(cur)
             results.append(("[6] trailing_stop_fire", s, m))
+
+            # [8] shadow_exits — INFRA-PREBUILD-1 Part A
+            # Runs before conn.close(); [7] (filesystem-only) runs after.
+            # [8] shadow_exits — INFRA-PREBUILD-1 A 部；在 conn.close 前跑。
+            s, m = check_shadow_exit_ratio(cur)
+            results.append(("[8] shadow_exits_24h", s, m))
     finally:
         conn.close()
 
