@@ -157,46 +157,79 @@ impl InstrumentInfoCache {
     /// Refresh cache by fetching instrument info from Bybit.
     /// 通過從 Bybit 獲取合約信息刷新緩存。
     ///
-    /// Fetches both linear and spot categories in one call each.
-    /// 分別獲取 linear 和 spot 品類。
+    /// INSTR-PAGINATE-1 (2026-04-23): cursor loop + limit=1000 + max_pages=10.
+    /// Bybit `/v5/market/instruments-info` linear has > 500 symbols; single-page
+    /// fetch (the pre-fix behaviour) silently dropped every symbol alphabetically
+    /// after ~"SOONUSDT" (XRP/ZEC/SUI/STRK/SPK/UB...), causing OrderManager
+    /// M-1 fail-closed to reject every scanner-routed order for those names.
+    /// Today's `fills=0` root cause.
+    ///
+    /// INSTR-PAGINATE-1（2026-04-23）：cursor 迴圈 + limit=1000 + max_pages=10 護欄。
+    /// Bybit linear 超過 500 symbol；單頁拉取會讓字母序 > "SOONUSDT" 的 symbol
+    /// 全部從 cache 缺席，導致 M-1 fail-closed 全面拒單，今日 fills=0 根因。
     pub async fn refresh(&self, client: &BybitRestClient, category: &str) -> BybitResult<usize> {
-        let resp = client
-            .get("/v5/market/instruments-info", &[("category", category)])
-            .await?;
+        const MAX_PAGES: usize = 10;
+        const PAGE_LIMIT: &str = "1000";
 
-        if resp.ret_code != 0 {
-            let ret_msg = resp.ret_msg.clone();
-            return Err(BybitApiError::Business {
-                ret_code: resp.ret_code,
-                ret_msg,
-                response: serde_json::to_value(&resp).unwrap_or_default(),
-            });
-        }
+        let mut cursor = String::new();
+        let mut total = 0usize;
+        let mut pages = 0usize;
 
-        let list = resp
-            .result
-            .get("list")
-            .and_then(|v| v.as_array())
-            .cloned()
-            .unwrap_or_default();
+        loop {
+            pages += 1;
+            if pages > MAX_PAGES {
+                tracing::error!(
+                    category = category,
+                    max_pages = MAX_PAGES,
+                    total_so_far = total,
+                    "instrument info pagination hit max_pages guard — aborting loop / 分頁達硬上限，強制停止"
+                );
+                break;
+            }
 
-        let mut count = 0;
-        let mut cache = self.cache.write();
+            // Build params — always include category + limit; cursor only if non-empty.
+            // 構建 params — category + limit 必帶；cursor 非空才帶。
+            let mut params: Vec<(&str, &str)> =
+                vec![("category", category), ("limit", PAGE_LIMIT)];
+            if !cursor.is_empty() {
+                params.push(("cursor", cursor.as_str()));
+            }
 
-        for item in &list {
-            if let Some(spec) = parse_instrument_item(item) {
-                cache.insert(spec.symbol.clone(), spec);
-                count += 1;
+            let resp = client.get("/v5/market/instruments-info", &params).await?;
+
+            if resp.ret_code != 0 {
+                let ret_msg = resp.ret_msg.clone();
+                return Err(BybitApiError::Business {
+                    ret_code: resp.ret_code,
+                    ret_msg,
+                    response: serde_json::to_value(&resp).unwrap_or_default(),
+                });
+            }
+
+            // Parse this page into the cache + get next cursor.
+            // 解析本頁到 cache 並讀下一頁 cursor。
+            let (page_count, next_cursor) = {
+                let mut cache = self.cache.write();
+                parse_page(&resp.result, &mut cache)
+            };
+            total += page_count;
+
+            match next_cursor {
+                Some(next) if !next.is_empty() => {
+                    cursor = next;
+                }
+                _ => break,
             }
         }
 
         info!(
             category = category,
-            symbols = count,
+            symbols = total,
+            pages = pages,
             "instrument info refreshed / 合約信息已刷新"
         );
 
-        Ok(count)
+        Ok(total)
     }
 
     /// Get the SymbolSpec for a given symbol.
@@ -263,6 +296,48 @@ impl Default for InstrumentInfoCache {
 // ---------------------------------------------------------------------------
 // Parsing helpers / 解析輔助函數
 // ---------------------------------------------------------------------------
+
+/// Parse a single page of Bybit `/v5/market/instruments-info` into the cache,
+/// returning `(parsed_count, next_cursor)`.
+///
+/// 解析 Bybit `/v5/market/instruments-info` 單頁並寫入 cache，
+/// 回傳 `(本頁新增計數, 下一頁 cursor)`。
+///
+/// `next_cursor` semantics:
+///   * `Some(s)` when `result.nextPageCursor` is a non-empty string.
+///   * `None` when missing, not a string, or empty (Bybit's end-of-pages signal).
+///
+/// `next_cursor` 語意：
+///   * `result.nextPageCursor` 是非空字串時回 `Some(s)`。
+///   * 缺失 / 非字串 / 空字串 → `None`（Bybit 末頁約定）。
+///
+/// Kept as a pure function so pagination logic is unit-testable without a live
+/// HTTP client (INSTR-PAGINATE-1).
+/// 保留為純函數，方便在無 HTTP 客戶端情況下單測分頁邏輯（INSTR-PAGINATE-1）。
+pub(crate) fn parse_page(
+    result: &serde_json::Value,
+    cache: &mut HashMap<String, SymbolSpec>,
+) -> (usize, Option<String>) {
+    let list = result.get("list").and_then(|v| v.as_array());
+
+    let mut count = 0usize;
+    if let Some(items) = list {
+        for item in items {
+            if let Some(spec) = parse_instrument_item(item) {
+                cache.insert(spec.symbol.clone(), spec);
+                count += 1;
+            }
+        }
+    }
+
+    let next_cursor = result
+        .get("nextPageCursor")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string());
+
+    (count, next_cursor)
+}
 
 /// Parse a single instrument item from Bybit API response.
 /// 從 Bybit API 回應中解析單個合約信息。
@@ -537,6 +612,131 @@ mod tests {
         assert!((cache.round_qty("BTCUSDT", 0.0056).unwrap() - 0.005).abs() < 1e-10);
         assert!((cache.round_price("BTCUSDT", 65000.55).unwrap() - 65000.6).abs() < 1e-10);
         assert!(cache.symbols().contains(&"BTCUSDT".to_string()));
+    }
+
+    // -----------------------------------------------------------------------
+    // INSTR-PAGINATE-1 — pagination unit tests (pure parse_page)
+    // INSTR-PAGINATE-1 — 分頁單元測試（純 parse_page）
+    // -----------------------------------------------------------------------
+
+    fn sample_item(symbol: &str) -> serde_json::Value {
+        serde_json::json!({
+            "symbol": symbol,
+            "baseCoin": "FOO",
+            "quoteCoin": "USDT",
+            "contractType": "LinearPerpetual",
+            "lotSizeFilter": {
+                "qtyStep": "0.001",
+                "minOrderQty": "0.001",
+                "maxOrderQty": "100",
+                "minNotionalValue": "5"
+            },
+            "priceFilter": {
+                "tickSize": "0.10",
+                "minPrice": "0.10",
+                "maxPrice": "999999.00"
+            }
+        })
+    }
+
+    #[test]
+    fn test_parse_page_single_page_empty_cursor_absent() {
+        // result has no nextPageCursor field → next = None
+        let result = serde_json::json!({
+            "list": [sample_item("AAAUSDT"), sample_item("BBBUSDT")],
+        });
+        let mut cache: HashMap<String, SymbolSpec> = HashMap::new();
+        let (count, next) = parse_page(&result, &mut cache);
+        assert_eq!(count, 2);
+        assert_eq!(next, None);
+        assert!(cache.contains_key("AAAUSDT"));
+        assert!(cache.contains_key("BBBUSDT"));
+    }
+
+    #[test]
+    fn test_parse_page_empty_string_cursor_is_none() {
+        // Bybit end-of-pages: nextPageCursor = "" → next = None
+        let result = serde_json::json!({
+            "list": [sample_item("ZZZUSDT")],
+            "nextPageCursor": "",
+        });
+        let mut cache: HashMap<String, SymbolSpec> = HashMap::new();
+        let (count, next) = parse_page(&result, &mut cache);
+        assert_eq!(count, 1);
+        assert_eq!(next, None);
+    }
+
+    #[test]
+    fn test_parse_page_non_empty_cursor_propagates() {
+        let result = serde_json::json!({
+            "list": [sample_item("AAAUSDT")],
+            "nextPageCursor": "page2_cursor",
+        });
+        let mut cache: HashMap<String, SymbolSpec> = HashMap::new();
+        let (count, next) = parse_page(&result, &mut cache);
+        assert_eq!(count, 1);
+        assert_eq!(next, Some("page2_cursor".to_string()));
+    }
+
+    #[test]
+    fn test_parse_page_missing_list_returns_zero() {
+        let result = serde_json::json!({"nextPageCursor": "c1"});
+        let mut cache: HashMap<String, SymbolSpec> = HashMap::new();
+        let (count, next) = parse_page(&result, &mut cache);
+        assert_eq!(count, 0);
+        assert_eq!(next, Some("c1".to_string()));
+    }
+
+    #[test]
+    fn test_parse_page_three_page_concatenation() {
+        // Simulate the three-page loop the refresh() cursor loop would drive.
+        // Pages cursor chain: "" → "c1" → "c2" → "" (terminal).
+        // 模擬 refresh() cursor 迴圈跑三頁：空 → c1 → c2 → 空。
+        let page1 = serde_json::json!({
+            "list": [sample_item("AAAUSDT"), sample_item("BBBUSDT")],
+            "nextPageCursor": "c1",
+        });
+        let page2 = serde_json::json!({
+            "list": [sample_item("CCCUSDT"), sample_item("DDDUSDT"), sample_item("EEEUSDT")],
+            "nextPageCursor": "c2",
+        });
+        let page3 = serde_json::json!({
+            "list": [sample_item("FFFUSDT")],
+            "nextPageCursor": "",
+        });
+
+        let mut cache: HashMap<String, SymbolSpec> = HashMap::new();
+        let mut total = 0usize;
+        let mut pages_iter = 0usize;
+        let mut cursor: Option<String> = None;
+        for page in [&page1, &page2, &page3] {
+            pages_iter += 1;
+            let (c, next) = parse_page(page, &mut cache);
+            total += c;
+            cursor = next;
+            if cursor.is_none() {
+                break;
+            }
+        }
+
+        assert_eq!(total, 6);
+        assert_eq!(pages_iter, 3);
+        assert_eq!(cursor, None);
+        assert_eq!(cache.len(), 6);
+        for s in ["AAAUSDT", "BBBUSDT", "CCCUSDT", "DDDUSDT", "EEEUSDT", "FFFUSDT"] {
+            assert!(cache.contains_key(s), "missing {s}");
+        }
+    }
+
+    #[test]
+    fn test_parse_page_cursor_chain_terminates() {
+        // Page with `nextPageCursor` field absent entirely should also terminate.
+        let result = serde_json::json!({
+            "list": [sample_item("ONLYUSDT")],
+        });
+        let mut cache: HashMap<String, SymbolSpec> = HashMap::new();
+        let (_c, next) = parse_page(&result, &mut cache);
+        assert!(next.is_none(), "absent nextPageCursor must terminate");
     }
 
     /// Test ETH-style spec with different precision.
