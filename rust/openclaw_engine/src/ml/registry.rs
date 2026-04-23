@@ -76,6 +76,94 @@ pub struct ResolvedArtifact {
     /// Optional sha256 integrity check — caller may verify on load.
     /// 可選的 sha256 完整性檢查，caller 載入時可校驗。
     pub artifact_sha256: Option<String>,
+    /// Hash of the feature schema (feature names + dtypes) used at training
+    /// time. Must match the engine's runtime `FEATURE_NAMES_V1_HASH` before
+    /// the artifact is loaded — mismatch means feature dim / ordering drift
+    /// which would crash `session.run` at inference. `None` for legacy rows
+    /// that were registered before the column was populated — caller should
+    /// treat `None` as OK (warn-log) to preserve backward compat.
+    ///
+    /// 訓練時使用的 feature schema（feature names + dtypes）hash。載入前
+    /// 必須與 engine 運行時的 `FEATURE_NAMES_V1_HASH` 比對；mismatch 表示
+    /// feature dim / 排序漂移，`session.run` 會 panic。legacy row 未填寫時
+    /// `None`，caller 應視為 OK（warn-log）以保相容。
+    pub feature_schema_hash: Option<String>,
+}
+
+/// Feature-schema hash mismatch between registry row and engine runtime.
+/// Returned by `validate_schema_hash` when the registered artifact was
+/// trained against a different feature schema than the engine is currently
+/// built with. Caller should treat this as "disable this slot" — loading
+/// the ONNX would likely panic on the first `session.run` call due to
+/// feature dim / ordering drift.
+///
+/// Registry row 與 engine 運行時之間的 feature schema hash 不匹配。
+/// `validate_schema_hash` 在註冊 artifact 與當前 engine 的 feature schema
+/// 不同時回此錯；caller 應 disable 該 slot（直接 load ONNX 會在第一次
+/// `session.run` 因 feature dim/排序漂移 panic）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SchemaHashMismatch {
+    /// The hash stored in `learning.model_registry.feature_schema_hash`.
+    /// 存於 `learning.model_registry.feature_schema_hash` 的值。
+    pub registry: String,
+    /// The hash compiled into the engine (typically `FEATURE_NAMES_V1_HASH`).
+    /// 編譯進 engine 的 hash（通常為 `FEATURE_NAMES_V1_HASH`）。
+    pub engine: String,
+}
+
+impl std::fmt::Display for SchemaHashMismatch {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "feature schema hash mismatch: registry={} engine={} \
+             (feature dim/ordering drift — load disabled)",
+            self.registry, self.engine,
+        )
+    }
+}
+
+impl std::error::Error for SchemaHashMismatch {}
+
+/// Validate that a resolved artifact's `feature_schema_hash` matches the
+/// engine's compiled-in feature schema. Pure function — no side effects.
+///
+/// Semantics:
+/// * `None` on the resolved artifact → `Ok(())` + warn log. Registered
+///   before the column was populated; treat as best-effort legacy OK so
+///   early adopters aren't locked out at Phase 3 cut-over.
+/// * Hash matches → `Ok(())`.
+/// * Hash differs → `Err(SchemaHashMismatch)`. Caller should skip loading
+///   this slot and fall back to the Disabled path (not panic).
+///
+/// Phase 3+ integration: the startup sequence / SIGHUP handler in
+/// `OnnxModelManager` will call this before every `new(path, ...)` attempt
+/// with the engine's `FEATURE_NAMES_V1_HASH` constant. Failure → log +
+/// Disabled fallback, never panic.
+///
+/// 驗 resolved artifact 的 feature_schema_hash 是否匹配 engine 編譯的 schema。
+/// 純函式，無副作用。語意：None → Ok + warn（legacy row 當 OK 向後相容）；
+/// 相符 → Ok；不符 → Err，caller 應跳過 load 走 Disabled fallback（不 panic）。
+/// Phase 3+ 整合時由 `OnnxModelManager::new(...)` 前呼，失敗 → log + Disabled。
+pub fn validate_schema_hash(
+    resolved: &ResolvedArtifact,
+    engine_schema_hash: &str,
+) -> Result<(), SchemaHashMismatch> {
+    match &resolved.feature_schema_hash {
+        None => {
+            warn!(
+                registry_id = resolved.id,
+                engine_hash = %engine_schema_hash,
+                "registry row has no feature_schema_hash — legacy row, treating as OK / \
+                 legacy row 無 feature_schema_hash，視為 OK"
+            );
+            Ok(())
+        }
+        Some(reg_hash) if reg_hash == engine_schema_hash => Ok(()),
+        Some(reg_hash) => Err(SchemaHashMismatch {
+            registry: reg_hash.clone(),
+            engine: engine_schema_hash.to_string(),
+        }),
+    }
 }
 
 /// Resolve the canonical artifact for a slot. Prefers canary_status='production'
@@ -84,9 +172,20 @@ pub struct ResolvedArtifact {
 /// `Err` only on DB error — caller should log and treat as `None` equivalent
 /// for graceful degradation (a broken registry query must never block inference).
 ///
+/// **Phase 3+ integration contract**: before feeding the returned
+/// `ResolvedArtifact.artifact_path` to `OnnxModelManager::new(...)`, the caller
+/// MUST invoke `validate_schema_hash(resolved, FEATURE_NAMES_V1_HASH)` to
+/// detect feature-schema drift between training time and engine runtime. A
+/// mismatch means `session.run` would panic on feature dim / ordering mismatch
+/// — on `Err(SchemaHashMismatch)` caller should log + route the slot through
+/// the Disabled fallback path, not surface the error or retry.
+///
 /// 取 slot 的權威 artifact。優先 production → promoting；promoted_at DESC NULLS
 /// LAST，進行中的晉升勝出。無匹配 row → Ok(None)（caller 回退 symlink）。
 /// Err 僅 DB 錯誤，caller 應 log 並視為 None（優雅降級）。
+/// **Phase 3+ 整合契約**：把 `artifact_path` 餵給 `OnnxModelManager::new(...)`
+/// 前必須呼 `validate_schema_hash(resolved, FEATURE_NAMES_V1_HASH)` 檢 schema
+/// 漂移；mismatch → `session.run` 會 panic，caller 應 log + 走 Disabled fallback。
 pub async fn resolve_latest_production_artifact(
     pool: &DbPool,
     slot: &ModelSlot,
@@ -112,9 +211,18 @@ pub async fn resolve_latest_production_artifact(
     // 注意 ORDER BY：canary_status ASC 會是 promoting 先（字母序），但我們
     // 想要 production 贏。用 CASE 強制 production=0 / promoting=1 讓 ASC
     // 排 production 前。promoted_at DESC NULLS LAST 讓新晉升的勝出。
-    let row: Option<(i64, String, String, String, String, Option<String>)> = sqlx::query_as(
+    let row: Option<(
+        i64,
+        String,
+        String,
+        String,
+        String,
+        Option<String>,
+        Option<String>,
+    )> = sqlx::query_as(
         "SELECT id, artifact_path, canary_status, verdict, \
-                to_char(train_date, 'YYYY-MM-DD') AS train_date, artifact_sha256 \
+                to_char(train_date, 'YYYY-MM-DD') AS train_date, \
+                artifact_sha256, feature_schema_hash \
          FROM learning.model_registry \
          WHERE strategy = $1 AND engine_mode = $2 AND quantile = $3 \
            AND canary_status IN ('production', 'promoting') \
@@ -131,7 +239,15 @@ pub async fn resolve_latest_production_artifact(
     .await?;
 
     match row {
-        Some((id, artifact_path, canary_status, verdict, train_date, artifact_sha256)) => {
+        Some((
+            id,
+            artifact_path,
+            canary_status,
+            verdict,
+            train_date,
+            artifact_sha256,
+            feature_schema_hash,
+        )) => {
             debug!(
                 strategy = %slot.strategy,
                 engine_mode = %slot.engine_mode,
@@ -147,6 +263,7 @@ pub async fn resolve_latest_production_artifact(
                 verdict,
                 train_date,
                 artifact_sha256,
+                feature_schema_hash,
             }))
         }
         None => {
@@ -253,6 +370,7 @@ mod tests {
             verdict: "should_ship".into(),
             train_date: "2026-04-23".into(),
             artifact_sha256: Some("deadbeef".into()),
+            feature_schema_hash: Some("abc123".into()),
         };
         let b = a.clone();
         assert_eq!(a, b);
@@ -268,5 +386,85 @@ mod tests {
         assert!(s.contains("funding_arb"));
         assert!(s.contains("live"));
         assert!(s.contains("q90"));
+    }
+
+    // ───── L2-9: feature_schema_hash validation ─────────────────────
+    // INFRA-PREBUILD-1 audit L2-9 (2026-04-23): ResolvedArtifact must carry
+    // feature_schema_hash so Phase 3+ callers can detect feature-schema drift
+    // between training and runtime before loading the ONNX. Missing → panic
+    // in session.run at inference time.
+    // L2-9 審計：ResolvedArtifact 必須帶 feature_schema_hash，Phase 3+ caller
+    // 載入 ONNX 前偵測 schema 漂移；無此驗證 → runtime session.run panic。
+
+    fn _make_resolved(feature_schema_hash: Option<String>) -> ResolvedArtifact {
+        // Helper: build ResolvedArtifact with only feature_schema_hash varying.
+        // 測試 helper：固定其他欄位、只變動 feature_schema_hash。
+        ResolvedArtifact {
+            id: 7,
+            artifact_path: "/tmp/x.onnx".into(),
+            canary_status: "production".into(),
+            verdict: "should_ship".into(),
+            train_date: "2026-04-23".into(),
+            artifact_sha256: Some("sha".into()),
+            feature_schema_hash,
+        }
+    }
+
+    #[test]
+    fn test_resolved_artifact_has_schema_hash_field() {
+        // Field existence + struct literal compile — drift guard against
+        // accidental field removal that would silently disable L2-9.
+        // 欄位存在 + struct literal 可編譯；守意外移除欄位後 L2-9 失效。
+        let a = _make_resolved(Some("hash_v1".into()));
+        assert_eq!(a.feature_schema_hash.as_deref(), Some("hash_v1"));
+        let b = _make_resolved(None);
+        assert_eq!(b.feature_schema_hash, None);
+    }
+
+    #[test]
+    fn test_validate_schema_hash_match_ok() {
+        // Happy path: registry hash == engine hash → Ok(()).
+        // 快樂路徑：registry hash 等於 engine hash → Ok(())。
+        let resolved = _make_resolved(Some("feat_hash_v1".into()));
+        assert!(validate_schema_hash(&resolved, "feat_hash_v1").is_ok());
+    }
+
+    #[test]
+    fn test_validate_schema_hash_none_ok_with_warn() {
+        // Legacy row (feature_schema_hash NULL pre-backfill) → Ok(()) with
+        // warn log. Preserves backward compat so early rows don't lock out
+        // the Phase 3+ cut-over.
+        // Legacy row（feature_schema_hash NULL）→ Ok + warn；保向後相容。
+        let resolved = _make_resolved(None);
+        assert!(validate_schema_hash(&resolved, "feat_hash_v1").is_ok());
+    }
+
+    #[test]
+    fn test_validate_schema_hash_mismatch_err() {
+        // Mismatch → Err with both hashes populated for logging.
+        // 不匹配 → Err，兩邊 hash 都帶回供 log。
+        let resolved = _make_resolved(Some("registry_hash_old".into()));
+        let result = validate_schema_hash(&resolved, "engine_hash_new");
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert_eq!(err.registry, "registry_hash_old");
+        assert_eq!(err.engine, "engine_hash_new");
+    }
+
+    #[test]
+    fn test_schema_hash_mismatch_display() {
+        // Display trait must include both hashes so log output is actionable
+        // — operator needs to see which hash rolled forward / rolled back.
+        // Display 必含兩邊 hash；operator log 才能診斷哪邊動了。
+        let err = SchemaHashMismatch {
+            registry: "abc123".into(),
+            engine: "def456".into(),
+        };
+        let s = format!("{}", err);
+        assert!(s.contains("abc123"), "display missing registry hash: {s}");
+        assert!(s.contains("def456"), "display missing engine hash: {s}");
+        // std::error::Error trait implementation must compile.
+        // std::error::Error trait 需能編譯。
+        let _: &dyn std::error::Error = &err;
     }
 }
