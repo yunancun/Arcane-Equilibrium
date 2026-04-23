@@ -270,3 +270,157 @@ def test_multiprocess_election_reclaim_after_leader_exits(
     scheduler_module._reset_for_tests()
     assert scheduler_module._acquire_leader_lock() is True
     assert scheduler_module._LEADER_LOCK_FD is not None
+
+
+# ───── E4-3 EDGE CASES / 邊界測試（audit finding 補測） ─────────────────────────
+#
+# Rationale / 理由：
+#   E4-3 audit 指出 _acquire_leader_lock() 有 3 條 fallback path 與 1 條
+#   _reset_for_tests 冪等性無測試覆蓋：
+#     (a) mkdir parent 失敗（permission / read-only fs）
+#     (b) os.open 失敗（fd 耗盡 / path 非法）
+#     (c) OPENCLAW_SCHEDULER_LEADER 非 "0" 非法值（任何非 "0" 都應走 flock）
+#     (d) _reset_for_tests 連續呼叫（冪等）
+#   補此四 test 覆蓋 E4-3 列舉的 primitive-level 邊界；
+#   shutdown primitive（daemon thread 可中止）明確**不在**本 commit 範圍
+#   （scope creep，operator 延後）。
+
+
+def test_acquire_leader_lock_mkdir_fail_returns_non_leader(
+    scheduler_module, isolated_data_dir, monkeypatch,
+):
+    """
+    mkdir parent 目錄失敗（OSError）→ _acquire_leader_lock() 回 False，fd 未設。
+    Parent dir mkdir raises OSError → return False; no fd stashed.
+
+    E4-3 (a)：read-only FS / permission denied / ENOSPC 等情境下，scheduler
+    應 fail-open 降級為非 leader（warning log），而非拋出未捕獲異常使整個
+    uvicorn worker 啟動失敗。
+    E4-3 (a)：唯讀檔案系統 / 權限不足 / 空間滿等情境下，scheduler 應 fail-open
+    降級為非 leader（warning），不應拋出未捕獲異常中斷 uvicorn worker 啟動。
+    """
+    # Patch Path.mkdir to always raise OSError (regardless of exist_ok).
+    # 所有 Path.mkdir 呼叫一律拋 OSError 模擬 permission denied。
+    def _boom_mkdir(self, *args, **kwargs):
+        raise OSError("permission denied (simulated)")
+
+    monkeypatch.setattr(Path, "mkdir", _boom_mkdir)
+
+    assert scheduler_module._acquire_leader_lock() is False, (
+        "mkdir OSError must fail-open as non-leader, not raise"
+    )
+    assert scheduler_module._LEADER_LOCK_FD is None, (
+        "fd must not be stashed when mkdir failed"
+    )
+
+
+def test_acquire_leader_lock_open_fail_returns_non_leader(
+    scheduler_module, isolated_data_dir, monkeypatch,
+):
+    """
+    os.open 失敗（OSError）→ _acquire_leader_lock() 回 False，fd 未設。
+    os.open raises OSError → return False; no fd stashed.
+
+    E4-3 (b)：fd table 耗盡 (EMFILE) / path 非法 / SELinux 拒絕等情境下，
+    scheduler 降級為非 leader，不影響其他進程競選。注意：parent mkdir 必須
+    成功（不 patch），才能測到 os.open 這條 path。
+    E4-3 (b)：fd 表滿 / path 非法 / SELinux 拒絕等情境下，scheduler 降級為
+    非 leader，不阻斷其他進程競選。注意：不 patch mkdir 確保先通過 parent
+    建立階段，才測到 os.open 這條 path。
+    """
+    real_open = os.open
+
+    def _boom_open(path, flags, mode=0o777, *args, **kwargs):
+        # Only poison the leader lock path; let other os.open calls
+        # (e.g. pytest internals) pass through to the real os.open.
+        # 只污染 leader lock 檔案路徑；pytest 內部其他 os.open 仍走原實作。
+        if "edge_scheduler.leader.lock" in str(path):
+            raise OSError("no fd available (simulated EMFILE)")
+        return real_open(path, flags, mode, *args, **kwargs)
+
+    monkeypatch.setattr(os, "open", _boom_open)
+
+    assert scheduler_module._acquire_leader_lock() is False, (
+        "os.open OSError must fail-open as non-leader, not raise"
+    )
+    assert scheduler_module._LEADER_LOCK_FD is None, (
+        "fd must not be stashed when os.open failed"
+    )
+
+
+@pytest.mark.parametrize(
+    "env_value",
+    ["", "1", "true", "yes"],
+    ids=["empty_string", "one", "true_literal", "yes_literal"],
+)
+def test_env_non_zero_values_still_attempt_flock(
+    scheduler_module, isolated_data_dir, monkeypatch, env_value,
+):
+    """
+    OPENCLAW_SCHEDULER_LEADER 非 "0" 值（空串/"1"/"true"/"yes"）→ 仍走 flock path
+    →（單測進程無競爭）應當選 leader。
+    OPENCLAW_SCHEDULER_LEADER set to any non-"0" value still runs flock path
+    and (in a contention-free test) acquires the lock.
+
+    E4-3 (c)：opt-out 機制設計意圖是「唯 '0' 關閉」，其他任何值都不該誤判為
+    強制非 leader。這防止 operator 誤設 `OPENCLAW_SCHEDULER_LEADER=1`（期待
+    「強制當 leader」）卻意外觸發 opt-out 的反直覺陷阱 — 實際語意：只認 "0"
+    為 opt-out signal，其他值一律忽略 env 照常競選。
+    E4-3 (c)：opt-out 設計語意為「僅 '0' 生效」，其他值（含 '1'/'true'/'yes'/空串）
+    皆應被忽略照常參與選舉。避免 operator 誤設 `=1` 期待「強制 leader」卻反被
+    opt-out 的反直覺行為。實際語意：唯 "0" 字面值為 opt-out signal。
+    """
+    monkeypatch.setenv("OPENCLAW_SCHEDULER_LEADER", env_value)
+
+    # In this isolated test process there's no competing flock holder, so the
+    # non-"0" path should end up electing THIS process leader.
+    # 測試進程隔離無競爭 flock holder，非 "0" 值應順利 flock 成功當選 leader。
+    assert scheduler_module._acquire_leader_lock() is True, (
+        f"env value {env_value!r} must NOT be treated as opt-out; "
+        f"only the literal '0' disables leader election"
+    )
+    assert scheduler_module._LEADER_LOCK_FD is not None, (
+        f"fd must be stashed when env={env_value!r} (non-opt-out path)"
+    )
+
+
+def test_reset_for_tests_is_idempotent(scheduler_module):
+    """
+    _reset_for_tests() 連續呼叫多次不應 raise（冪等性）。
+    _reset_for_tests() must be idempotent — repeated calls don't raise.
+
+    E4-3 (d)：pytest fixture teardown + setup 順序下 _reset_for_tests 可能在
+    同一進程被重複呼叫（fixture yield 後 teardown、下一 test setup 再呼）。
+    第 2+ 次呼叫時 _LEADER_LOCK_FD 已為 None，flock/close 的 guard 必須保
+    「None 狀態下 no-op」的契約，不應拋 TypeError/AttributeError。
+    E4-3 (d)：pytest fixture teardown/setup 順序可能讓 _reset_for_tests 於同一
+    進程重複呼叫。第 2+ 次呼叫時 _LEADER_LOCK_FD 已為 None，flock/close guard
+    須維持 no-op 契約，不得拋 TypeError/AttributeError。
+    """
+    # First call — may or may not have state to release depending on what
+    # earlier fixtures did; should always succeed.
+    # 第一次：可能有可能沒 leader state，皆應成功。
+    scheduler_module._reset_for_tests()
+    assert scheduler_module._LEADER_LOCK_FD is None
+    assert scheduler_module._scheduler is None
+
+    # Second call immediately — fd is already None, must no-op cleanly.
+    # 第二次立即呼叫：fd 已為 None，必須乾淨 no-op。
+    scheduler_module._reset_for_tests()
+    assert scheduler_module._LEADER_LOCK_FD is None
+    assert scheduler_module._scheduler is None
+
+    # Third call — still idempotent.
+    # 第三次：仍冪等。
+    scheduler_module._reset_for_tests()
+    assert scheduler_module._LEADER_LOCK_FD is None
+    assert scheduler_module._scheduler is None
+
+    # After acquiring then reset-reset, still clean.
+    # 取得 leader 後連續 reset 兩次，狀態仍乾淨。
+    assert scheduler_module._acquire_leader_lock() is True
+    assert scheduler_module._LEADER_LOCK_FD is not None
+    scheduler_module._reset_for_tests()
+    assert scheduler_module._LEADER_LOCK_FD is None
+    scheduler_module._reset_for_tests()  # second reset — must no-op
+    assert scheduler_module._LEADER_LOCK_FD is None
