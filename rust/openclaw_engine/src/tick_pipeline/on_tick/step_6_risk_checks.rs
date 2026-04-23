@@ -72,6 +72,15 @@ impl TickPipeline {
             .daily_loss_pct_pub(self.paper_state.balance());
         // FIX-32: borrow instead of deep-cloning RiskConfig per tick.
         let risk_config = self.intent_processor.risk_config();
+        // INFRA-PREBUILD-1 Part A: snapshot shadow_enabled to an owned bool
+        // up-front so the `risk_config` immutable borrow doesn't have to
+        // survive into the `decisions` for-loop's match arms (which need
+        // mutable `self` for execute_position_close / emit_close_fill etc.).
+        // NLL would still extend the borrow through the match arm otherwise.
+        // INFRA-PREBUILD-1 A 部：先將 shadow_enabled 取為 owned bool，
+        // 避免 risk_config 借用延到 for-loop match arm 內（arm 需 mutable self 做
+        // execute_position_close 等），NLL 否則會延長借用造成衝突。
+        let shadow_enabled: bool = risk_config.exit.shadow_enabled;
         let position_rows: Vec<crate::position_risk_evaluator::PositionRow> = self
             .paper_state
             .positions()
@@ -296,6 +305,49 @@ impl TickPipeline {
                             &owner_strategy,
                             est_net_bps,
                         );
+
+                        // INFRA-PREBUILD-1 Part A (2026-04-23): Combine Layer
+                        // shadow observation. Dormant by default — runs only
+                        // when `ExitConfig.shadow_enabled=true` AND the writer
+                        // channel is wired. Zero emits in Phase 1a.
+                        // All borrows are copied/cloned into owned locals so
+                        // the subsequent mutable `self` calls in this match
+                        // arm (execute_position_close / close_position_at_
+                        // symbol_market / emit_close_fill / record_trade) stay
+                        // borrow-clean — matches the T4 wiring closure pattern.
+                        // INFRA-PREBUILD-1 A 部：Combine Layer shadow 觀測。預設
+                        // dormant — 僅當 ExitConfig.shadow_enabled=true 且 writer
+                        // 通道已接線時 fire。所有借用先 copy/clone 為 owned local，
+                        // 讓後續 match arm 內 mutable self 呼叫保持 borrow-clean。
+                        if shadow_enabled {
+                            let tx_opt = self.shadow_exit_tx().cloned();
+                            if let Some(tx) = tx_opt {
+                                // Snapshot + engine_mode captured as owned to
+                                // drop the `&self.paper_state` immediate borrow
+                                // before emit runs. `effective_engine_mode()`
+                                // returns &'static str so no borrow lifetime.
+                                // 快照與 engine_mode 先抓為 owned，emit 前 drop
+                                // `&self.paper_state` 借用；engine_mode 為 &'static。
+                                let engine_mode = self.effective_engine_mode();
+                                let snap_opt =
+                                    self.paper_state.position_exit_snapshot(symbol);
+                                if let Some(snap) = snap_opt {
+                                    let side_i16: i16 = if snap.is_long { 1 } else { -1 };
+                                    super::emit_shadow_exit_observation(
+                                        &snap.entry_context_id,
+                                        event.ts_ms as i64,
+                                        engine_mode,
+                                        &snap.owner_strategy,
+                                        symbol,
+                                        side_i16,
+                                        lock_tag,
+                                        est_net_bps,
+                                        None, // cell_age_secs — mock uses 0
+                                        &tx,
+                                    );
+                                }
+                            }
+                        }
                     }
 
                     risk_closed_symbols.push(symbol.clone());

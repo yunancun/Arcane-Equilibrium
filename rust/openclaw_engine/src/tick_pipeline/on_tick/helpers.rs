@@ -129,6 +129,113 @@ pub(crate) fn log_phys_lock_through_combine_layer(
     );
 }
 
+/// INFRA-PREBUILD-1 Part A (2026-04-23) — Combine Layer shadow-mode emit.
+///
+/// Fired alongside `log_phys_lock_through_combine_layer` when
+/// `ExitConfig.shadow_enabled=true`. Builds a mock `MLInference` from the
+/// edge_estimates cell, runs `combine_exit_decision` with it, and emits one
+/// `ShadowExitMsg` to the shadow-exit writer so `learning.decision_shadow_exits`
+/// captures what Combine Layer would have output if a real ML model were
+/// available. **Pure audit** — does not alter the downstream close path.
+///
+/// The `disagreed` field is populated by comparing:
+/// - `physical_only` = `combine_exit_decision(physical, None, cfg)` — pure Track P
+/// - `shadow_combined` = `combine_exit_decision(physical, Some(mock_ml), cfg)`
+/// When the signal differs (or source differs on Hybrid/ML), `disagreed=true`.
+/// Phase 1a invariant: `ml_override_high=2.0` sentinel prevents ML from
+/// escalating Hold→Lock, so disagreement is only possible via Hybrid on Lock
+/// (Physical→Hybrid source change with identical signal=Lock).
+///
+/// # Fail-soft semantics
+/// - `tx` is `&Sender`, not `Option`: caller already checked `shadow_enabled`
+///   and `tx.is_some()` before calling. Channel full → silent drop (`try_send`).
+///
+/// INFRA-PREBUILD-1 A 部（2026-04-23）— Combine Layer shadow 模式發射。
+/// 與 `log_phys_lock_through_combine_layer` 並行觸發（當 ExitConfig.shadow_enabled=true）。
+/// 從 edge_estimates cell 建 mock MLInference，走 combine_exit_decision，
+/// 發一條 ShadowExitMsg 到 writer，寫入 `learning.decision_shadow_exits`。
+/// 純審計 — 不改變下游平倉路徑。
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn emit_shadow_exit_observation(
+    context_id: &str,
+    ts_ms: i64,
+    engine_mode: &str,
+    strategy_name: &str,
+    symbol: &str,
+    side: i16,
+    lock_tag: &str,
+    est_net_bps: Option<f32>,
+    cell_age_secs: Option<u64>,
+    tx: &tokio::sync::mpsc::Sender<crate::database::ShadowExitMsg>,
+) {
+    let physical = crate::exit_features::PhysicalDecision::Lock(lock_tag.to_string());
+    let combine_cfg = crate::combine_layer::CombineConfig::default();
+
+    // Build mock MLInference from edge_estimates (score = clamp((shrunk+10)/20))
+    // None shrunk_bps → None MLInference → Combine falls back to Physical path
+    // (disagreed=false). See combine_layer::build_ml_inference_shadow docstring.
+    // 用 edge_estimates 建 mock MLInference（score = clamp((shrunk+10)/20)）；
+    // 無 shrunk_bps → MLInference=None → Combine 走 Physical 路徑（disagreed=false）。
+    let mock_ml = crate::combine_layer::build_ml_inference_shadow(
+        est_net_bps.map(|v| v as f64),
+        cell_age_secs,
+    );
+
+    // Run Combine twice: once P-only, once with mock ML. Compare for disagreement.
+    // Combine 兩次：一次純 Physical，一次帶 mock ML。比對是否分歧。
+    let (phys_only_signal, phys_only_source) =
+        crate::combine_layer::combine_exit_decision(physical.clone(), None, &combine_cfg);
+    let (shadow_signal, shadow_source) =
+        crate::combine_layer::combine_exit_decision(physical, mock_ml.clone(), &combine_cfg);
+
+    let disagreed = phys_only_signal != shadow_signal
+        || phys_only_source.as_tag() != shadow_source.as_tag();
+    let disagreement_reason = if disagreed {
+        Some(format!(
+            "phys_only={}:{} shadow={}:{}",
+            match phys_only_signal {
+                crate::combine_layer::ExitSignal::Lock => "Lock",
+                crate::combine_layer::ExitSignal::Hold => "Hold",
+            },
+            phys_only_source.as_tag(),
+            match shadow_signal {
+                crate::combine_layer::ExitSignal::Lock => "Lock",
+                crate::combine_layer::ExitSignal::Hold => "Hold",
+            },
+            shadow_source.as_tag(),
+        ))
+    } else {
+        None
+    };
+
+    let msg = crate::database::ShadowExitMsg {
+        context_id: context_id.to_string(),
+        ts_ms,
+        engine_mode: engine_mode.to_string(),
+        strategy_name: strategy_name.to_string(),
+        symbol: symbol.to_string(),
+        side,
+        physical_action: "Lock".to_string(), // PHYS-LOCK path → always Lock
+        physical_reason: Some(lock_tag.to_string()),
+        ml_model_id: mock_ml.as_ref().map(|m| m.id.clone()),
+        ml_score: mock_ml.as_ref().map(|m| m.score as f64),
+        ml_age_secs: mock_ml.as_ref().map(|m| m.age_secs as i64),
+        ml_confidence: mock_ml.as_ref().map(|m| m.confidence as f64),
+        exit_source: shadow_source.as_tag().to_string(),
+        disagreed,
+        disagreement_reason,
+        ml_confirm_threshold: Some(combine_cfg.ml_confirm_threshold as f64),
+        ml_override_high: Some(combine_cfg.ml_override_high as f64),
+        ml_veto_low: Some(combine_cfg.ml_veto_low as f64),
+    };
+
+    // try_send: channel full → silent drop (fail-soft). Shadow is pure audit —
+    // losing a row is strictly preferable to backpressuring the tick pipeline.
+    // try_send：通道滿 → 靜默丟棄（fail-soft）。shadow 純審計，
+    // 丟列絕對優於讓 tick pipeline backpressure。
+    let _ = tx.try_send(msg);
+}
+
 #[cfg(test)]
 mod phys_lock_wrapper_tests {
     use super::*;
