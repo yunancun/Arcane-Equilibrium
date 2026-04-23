@@ -35,16 +35,93 @@ Design notes:
 
 import logging
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from .governance_routes import _get_auth_actor, _require_operator_role
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/ml", tags=["ml-registry"])
+
+
+# ───── INFRA-PREBUILD-1 P3-1 (2026-04-23): ExitSource drift-guard constants ──
+# Single-source-of-truth tuple mirroring Rust combine_layer.rs EXIT_SOURCE_TAGS.
+# Any drift between:
+#   - rust/openclaw_engine/src/combine_layer.rs: EXIT_SOURCE_TAGS
+#   - sql/migrations/V021__fills_exit_source.sql: CHECK (exit_source IN ...)
+#   - this tuple
+# is caught by test_exit_source_tags_aligned_across_layers in
+# program_code/ml_training/tests/test_model_registry.py.
+#
+# INFRA-PREBUILD-1 P3-1（2026-04-23）：ExitSource 漂移守常數。
+# 與 Rust combine_layer.rs EXIT_SOURCE_TAGS + V021 migration CHECK 對齊；
+# 任一漂移由 ml_training/tests/test_model_registry.py 的
+# test_exit_source_tags_aligned_across_layers 測試擋紅。
+VALID_EXIT_SOURCES: tuple[str, ...] = ("Physical", "Hybrid", "ML", "Disabled")
+
+# Literal type for route / schema validation (optional; available to callers).
+# Literal 型別供路由 / schema 驗證（下游可選採納）。
+ExitSourceLiteral = Literal["Physical", "Hybrid", "ML", "Disabled"]
+
+
+# ───── INFRA-PREBUILD-1 P3-2 (2026-04-23): Python ModelSlot ──────────
+# Mirror of rust::ml::registry::ModelSlot. A slot = (strategy, engine_mode,
+# quantile); registry rows are identified by this tuple + canary_status.
+# Currently used only for Python-side test scaffolding + drift guard;
+# model_info route keeps its 3-Query-param surface for backwards compat.
+# Future refactor may switch model_info to use this via FastAPI Depends().
+#
+# INFRA-PREBUILD-1 P3-2（2026-04-23）：Python ModelSlot 對應 Rust
+# ml::registry::ModelSlot。slot = (strategy, engine_mode, quantile)；registry
+# 列以此 tuple + canary_status 識別。目前僅用於測試 scaffold 與漂移守；
+# model_info route 保持 3 個 Query params 介面不動（向後相容）。未來可透過
+# FastAPI Depends() 注入 ModelSlot 統一。
+
+
+class ModelSlot(BaseModel):
+    """INFRA-PREBUILD-1 P3-2: Python mirror of rust::ml::registry::ModelSlot.
+
+    A slot = (strategy, engine_mode, quantile) uniquely identifies which
+    production-or-promoting model the Rust engine should load for that
+    strategy × engine_mode × quantile combination. Registry rows with
+    matching (slot, canary_status) represent the active artifact.
+
+    INFRA-PREBUILD-1 P3-2：Rust ModelSlot 的 Python 對應。slot 3 欄唯一識別一個
+    strategy × engine_mode × quantile 組合對應的 production/promoting model。
+    """
+
+    strategy: str = Field(
+        ...,
+        min_length=1,
+        description="Strategy name, e.g. 'ma_crossover'. Non-empty string.",
+    )
+    engine_mode: str = Field(
+        ...,
+        description="One of paper|demo|live|live_demo (same domain as V023 CHECK).",
+    )
+    quantile: str = Field(
+        ...,
+        description="One of q10|q50|q90 (same domain as V023 CHECK).",
+    )
+
+    @field_validator("engine_mode")
+    @classmethod
+    def _validate_engine_mode(cls, v: str) -> str:
+        if v not in ("paper", "demo", "live", "live_demo"):
+            raise ValueError(
+                f"engine_mode must be one of paper|demo|live|live_demo, got {v!r}"
+            )
+        return v
+
+    @field_validator("quantile")
+    @classmethod
+    def _validate_quantile(cls, v: str) -> str:
+        if v not in ("q10", "q50", "q90"):
+            raise ValueError(f"quantile must be one of q10|q50|q90, got {v!r}")
+        return v
 
 
 # ───── Pydantic models ───────────────────────────────────────────────
