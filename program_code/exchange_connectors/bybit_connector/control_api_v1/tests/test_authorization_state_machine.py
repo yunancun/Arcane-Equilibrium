@@ -517,6 +517,52 @@ class TestAuditTrail:
         auth = sm.get(auth.authorization_id)
         assert auth.version == 3
 
+    def test_governance_initiator_auto_approves_cal(self):
+        """
+        Bootstrap-path submit (initiator=AUTHORIZATION_GOVERNANCE) must mark the
+        CAL entry AUTO_APPROVED so it stays out of the Pending Approvals queue.
+        Bootstrap 提交（initiator=AUTHORIZATION_GOVERNANCE）應讓 CAL 記錄標記為
+        AUTO_APPROVED，不進人工批准佇列。
+        """
+        from app.change_audit_log import ChangeApprovalStatus, ChangeAuditLog
+        cal = ChangeAuditLog()
+        machine = AuthorizationStateMachine()
+        machine.set_change_audit_log(cal)
+
+        auth = machine.create_draft(title="Bootstrap", scope={}, created_by="system_bootstrap")
+        machine.submit_for_approval(
+            auth.authorization_id,
+            initiator=AuthInitiator.AUTHORIZATION_GOVERNANCE,
+        )
+
+        records = cal.get_all_changes()
+        submit_records = [r for r in records if "DRAFT → PENDING_APPROVAL" in r.what]
+        assert len(submit_records) == 1
+        assert submit_records[0].approval_status == ChangeApprovalStatus.AUTO_APPROVED, (
+            f"Bootstrap submit should AUTO_APPROVE in CAL; got {submit_records[0].approval_status}"
+        )
+        # Not in pending queue
+        pending = cal.get_pending_approvals()
+        assert all("DRAFT → PENDING_APPROVAL" not in r.what for r in pending)
+
+    def test_operator_initiator_still_pending_cal(self):
+        """
+        Human Operator submit must still surface in Pending Approvals (no regression).
+        人工 Operator 提交仍需進入待批准佇列（不得誤殺）。
+        """
+        from app.change_audit_log import ChangeApprovalStatus, ChangeAuditLog
+        cal = ChangeAuditLog()
+        machine = AuthorizationStateMachine()
+        machine.set_change_audit_log(cal)
+
+        auth = machine.create_draft(title="ByHand", scope={}, created_by="operator")
+        machine.submit_for_approval(auth.authorization_id)  # default OPERATOR
+
+        records = cal.get_all_changes()
+        submit_records = [r for r in records if "DRAFT → PENDING_APPROVAL" in r.what]
+        assert len(submit_records) == 1
+        assert submit_records[0].approval_status == ChangeApprovalStatus.PENDING
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # 8. Persistence (Export/Import) / 持久化测试
