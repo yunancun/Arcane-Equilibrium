@@ -450,6 +450,26 @@ git status && git log --oneline -5
 
 ## 🟢 P2 — 下週 / Live Gate / QoL
 
+### Session 2026-04-23 Review Follow-up (QC/FA/FM/E4 audit)
+
+**4 人獨立 review commit d9bd451** — 0 BLOCKER + 5 MAJOR 已修 6 項（P0+P1），3 項延後。
+
+**✅ 已修**（commit `d9bd451`）：
+- QC-2: `_record_cycle_event` payload-build 包進最外層 try/except（兌現 fail-soft docstring 契約）
+- QC-3: CLAUDE.md §九 singleton 表補 `_scheduler` / `_scheduler_lock` / `_LEADER_LOCK_FD` / `_LEADER_LOCK_PATH`
+- FA-1: `gather_strategy_metrics` 加 `debug_assert!(tune_target == Demo)` 防 Live tune 無聲 SQL miss（`effective_engine_mode` 寫 `"live_demo"` 但 `db_mode()` 回 `"live"`，Phase 5+ STRATEGIST-TUNE-TARGET-CONFIG-1 需擴 IN 多值前 debug_assert 先擋）
+- FA-2: `/status` + `/trigger` 對 non-leader worker 讀 flock sentinel 誠實回 `{started: True, is_leader: False, leader_pid: N}`，原回 `{started: False}` 致 monitoring dashboard 誤報 3/4 worker scheduler 死
+- E4-2: `test_backfill_fail_js_ok_records_backfill_error_class` 補 backfill-fail + JS-ok asymmetric scenario
+- E4-4: `test_pipeline_kind_db_mode_demo_is_lowercase_snake` 釘 `db_mode()` 返 `"demo"` 小寫防漂移
+- 測試：engine lib 1850 → **1851 passed**，Python obs+leader 11 → **12 passed**
+
+**⬜ 延後（本 session 未做，非 BLOCKER，下次疊加）**：
+- [ ] **E4-1** `step_6_risk_checks.rs:306/339/352` 三個 `execute_position_close` / `emit_close_fill` 呼叫點的 close_tag end-to-end 測試（當前只有 helper `build_risk_close_tag` 單元測，無 pipeline-out 斷言；Phase 5 促升 Live 前補）
+- [ ] **E4-5** `ipc_server/handlers/budget.rs` + `handlers/risk.rs` 端到端 JSON-RPC response 測試（20 處 `param_extractor` 替換聲稱 byte-identity 錯誤訊息但無 handler-level 測試攔截；Phase 5 促升 Live 前補 min 1 happy + 1 error per handler）
+- [ ] **E4-3** Leader election 邊界：mkdir fail / open fail / `OPENCLAW_SCHEDULER_LEADER` 非 `"0"` 非法值的 fallback test + scheduler shutdown primitive（當前 `_reset_for_tests` 不釋放 daemon thread 是 race workaround 非根治；pytest CI flakiness 可能）
+- [ ] **Cross-gap** `trading.intents` / `trading.fills` 持久化 gap：Strategist tune 只進 `pipeline_snapshot_*.json`，engine restart 從 TOML 重讀，tuned params 丟失。Phase 5+ STRATEGIST-AUTO-PROMOTE-CRITERIA-1 要依賴「N 輪穩定 demo apply」— 但每 rebuild 重置計數器 → 永遠不達 criteria。解：加 `learning.strategist_applied_params` 表持久化 + engine startup 讀回套用
+- [ ] **Cross-gap** Operator Grafana / docs / adhoc SQL 掃 `risk_close:risk_close:` 殘留 pattern（commit `46a9cad` 收單前綴後任何依賴舊格式的外部查詢會失效；historical 17 rows 保留稽核用）
+
 ### 可觀測性（P1-19 RCA 副產品，2026-04-22 新開）
 - ✅ **RUST-DOUBLE-PREFIX-1** 2026-04-23 commit `46a9cad` — 採 Option B：`step_6_risk_checks.rs` 單一 emission 點新增 `build_risk_close_tag` helper（already 含 `risk_close:` 則直用，否則 wrap）。不選 A 因 `strip_phys_lock_prefix` + helpers 既有 test 依賴 PHYS-LOCK reason 帶顯式前綴。+2 regression tests（`phys_lock_reasons_do_not_double_prefix` / `non_phys_lock_reasons_get_single_prefix`）。`passive_wait_healthcheck.py` pattern 收回嚴格 `'risk_close:phys_lock_%'`（留容錯會遮蔽 regression）。engine lib Linux release 1837 → **1839** / 0 failed。**Runtime 待 `--rebuild` 部署**，deploy 後 `trading.fills.strategy_name` 單前綴生效、healthcheck [4] 從 double-prefix 容錯觀察模式恢復嚴格 invariant 檢查。
 - ✅ **STRATEGIST-SCHED-CHANNEL-PAPER-ORPHAN-1** 2026-04-23 commit `a0730db` — 採「一步到位」架構（Demo 訓練 + Live 促升，Phase 5+ 路線），不選簡單 paper→demo 替換。**根因精修**：不是 mpsc channel 關閉，而是 paper drain task (`main.rs:1143`) 收到 `GetStrategyParams` 命令後直接丟棄 → 內層 oneshot `response_tx` drop → `params_rx.await` 返 `RecvError` 假報 "channel closed"。**實作**：（1）`StrategistScheduler` 新增 `tune_target: PipelineKind` + `promote_cmd_tx: Option<...>` 欄位；ctor `assert!` panic-reject Paper（啟動 fail-fast 好過 runtime 沈默降級）（2）新 `promote_params_to_live(strategy, params_json)` method — 對 Live channel 送 `UpdateStrategyParams` + await oneshot response；本 PR **不自動調用**，Phase 5+ 疊加 IPC 觸發器或 N 輪穩定 criteria 即可啟用，不需重構（3）`gather_strategy_metrics` SQL 加 `WHERE engine_mode = $tune_target.db_mode()` 對齊 tune target，取代原跨引擎混查（4）`main.rs` 改傳 `demo_cmd_tx` 為 tune target + `PipelineKind::Demo` + `live_cmd_tx` 為 optional promote；`demo_cmd_tx=None` 時完全不 spawn scheduler（單行 info 退場）。+6 regression test（ctor reject Paper / Demo without promote / Demo with Live promote / promote err when no channel / promote 端到端 mock handler 驗命令形狀 + await / promote handler err 傳播）。engine lib Mac + Linux release 1839 → **1845 passed / 0 failed**。下次 `--rebuild` 部署後 engine.log 不再噴每 5 min 3 行 channel-closed spam，真實 scheduler 失敗（AI service down 等）才顯露。Phase 5+ 需補 `POST /api/v1/strategist/promote` route 觸發器或 scheduler 內自動 criteria（stub interface 已備）。報告 `.claude_reports/20260423_144135_strategist_sched_channel_paper_orphan.md`。
