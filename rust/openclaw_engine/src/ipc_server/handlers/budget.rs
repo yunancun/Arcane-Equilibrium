@@ -10,7 +10,22 @@
 //!   三個 handler 都操作延後注入的 `BudgetTrackerSlot`；讀路徑槽位為 None 時
 //!   fail-soft 回傳 uninitialized，寫路徑 fail-closed 回傳 -32603，避免
 //!   tracker 缺失時靜默丟單。
+//!
+//! E5-P1-5-FUP: first adopter of `super::super::param_extractor` — the inline
+//!   `as_str()/as_f64()/as_u64()/unwrap_or` patterns for `scope` / `monthly_usd`
+//!   / `updated_by` / `tokens_in` / `tokens_out` / `purpose` / `request_id`
+//!   are replaced with the typed `require_*` / `optional_*` helpers.  Error
+//!   messages are byte-identical to the pre-migration strings (Python tests
+//!   assert on the exact text), so the external contract is unchanged.
+//! E5-P1-5-FUP：本檔為 `super::super::param_extractor` 的首個採用點；`scope`
+//!   / `monthly_usd` / `updated_by` / `tokens_in` / `tokens_out` / `purpose`
+//!   / `request_id` 的內嵌 `as_str()/as_f64()/as_u64()/unwrap_or` 改走
+//!   `require_*` / `optional_*` 型別化輔助。錯誤訊息與遷移前逐位元組一致
+//!   （Python 測試會精確比對），對外契約不變。
 
+use super::super::param_extractor::{
+    optional_str_or, optional_u64, require_non_negative_f64, require_str, require_str_with_msg,
+};
 use super::super::*;
 
 /// Phase 4 (4-15): Return current AI budget status snapshot.
@@ -62,33 +77,20 @@ pub(in crate::ipc_server) async fn handle_update_ai_budget_config(
     params: &serde_json::Value,
     slot: &BudgetTrackerSlot,
 ) -> JsonRpcResponse {
-    const ERR_INVALID_PARAMS: i64 = -32602;
-
-    let scope = match params.get("scope").and_then(|v| v.as_str()) {
-        Some(s) if !s.is_empty() => s.to_string(),
-        _ => {
-            return JsonRpcResponse::error(
-                id,
-                ERR_INVALID_PARAMS,
-                "missing or empty 'scope' (string)",
-            );
-        }
+    // E5-P1-5-FUP: delegate parsing to the typed param_extractor helpers.
+    //   Error payloads remain byte-for-byte identical to the pre-migration
+    //   hand-written path (same `ERR_INVALID_PARAMS` code, same message).
+    // E5-P1-5-FUP：改由型別化 param_extractor 解析；錯誤 payload 與遷移前
+    //   手寫路徑逐位元組一致（相同錯誤碼、相同訊息）。
+    let scope = match require_str(params, "scope", id.clone()) {
+        Ok(s) => s,
+        Err(resp) => return resp,
     };
-    let monthly_usd = match params.get("monthly_usd").and_then(|v| v.as_f64()) {
-        Some(v) if v.is_finite() && v >= 0.0 => v,
-        _ => {
-            return JsonRpcResponse::error(
-                id,
-                ERR_INVALID_PARAMS,
-                "missing or invalid 'monthly_usd' (must be finite f64 >= 0)",
-            );
-        }
+    let monthly_usd = match require_non_negative_f64(params, "monthly_usd", id.clone()) {
+        Ok(v) => v,
+        Err(resp) => return resp,
     };
-    let updated_by = params
-        .get("updated_by")
-        .and_then(|v| v.as_str())
-        .unwrap_or("ipc")
-        .to_string();
+    let updated_by = optional_str_or(params, "updated_by", "ipc").to_string();
 
     let guard = slot.read().await;
     let tracker = match guard.as_ref() {
@@ -137,32 +139,29 @@ pub(in crate::ipc_server) async fn handle_record_ai_usage(
     params: &serde_json::Value,
     slot: &BudgetTrackerSlot,
 ) -> JsonRpcResponse {
-    const ERR_INVALID_PARAMS: i64 = -32602;
-
-    let scope = match params.get("scope").and_then(|v| v.as_str()) {
-        Some(s) if !s.is_empty() => s,
-        _ => return JsonRpcResponse::error(id, ERR_INVALID_PARAMS, "missing 'scope'"),
+    // E5-P1-5-FUP: three short-form missing messages ("missing 'scope'" etc.)
+    //   are preserved byte-for-byte via `require_str_with_msg`.  `tokens_in`
+    //   / `tokens_out` fall back to 0 on absence/wrong-type (same as legacy
+    //   `.unwrap_or(0)`).  `purpose` default is `"layer2_external"`.
+    // E5-P1-5-FUP：三處短訊息（如 "missing 'scope'"）以 `require_str_with_msg`
+    //   逐位元組保留；`tokens_in` / `tokens_out` 缺失或型別不符仍回落 0
+    //   （與原 `.unwrap_or(0)` 等義）；`purpose` 預設 `"layer2_external"`。
+    let scope = match require_str_with_msg(params, "scope", id.clone(), "missing 'scope'") {
+        Ok(s) => s,
+        Err(resp) => return resp,
     };
-    let provider = match params.get("provider").and_then(|v| v.as_str()) {
-        Some(s) if !s.is_empty() => s,
-        _ => return JsonRpcResponse::error(id, ERR_INVALID_PARAMS, "missing 'provider'"),
+    let provider =
+        match require_str_with_msg(params, "provider", id.clone(), "missing 'provider'") {
+            Ok(s) => s,
+            Err(resp) => return resp,
+        };
+    let model = match require_str_with_msg(params, "model", id.clone(), "missing 'model'") {
+        Ok(s) => s,
+        Err(resp) => return resp,
     };
-    let model = match params.get("model").and_then(|v| v.as_str()) {
-        Some(s) if !s.is_empty() => s,
-        _ => return JsonRpcResponse::error(id, ERR_INVALID_PARAMS, "missing 'model'"),
-    };
-    let tokens_in = params
-        .get("tokens_in")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(0) as u32;
-    let tokens_out = params
-        .get("tokens_out")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(0) as u32;
-    let purpose = params
-        .get("purpose")
-        .and_then(|v| v.as_str())
-        .unwrap_or("layer2_external");
+    let tokens_in = optional_u64(params, "tokens_in").unwrap_or(0) as u32;
+    let tokens_out = optional_u64(params, "tokens_out").unwrap_or(0) as u32;
+    let purpose = optional_str_or(params, "purpose", "layer2_external");
 
     // E5-FN-2 Plan N: Python callers SHOULD pass a deterministic
     // `(request_id, event_time_ms)` tuple so Layer 2 retries collapse at the
@@ -183,7 +182,7 @@ pub(in crate::ipc_server) async fn handle_record_ai_usage(
     let supplied_event_time_ms = params.get("event_time_ms").and_then(|v| v.as_i64());
     let (request_id, event_time_ms) = match (supplied_request_id, supplied_event_time_ms) {
         (Some(rid), Some(ts)) => (rid, ts),
-        _ => crate::ai_budget::make_request_id(scope),
+        _ => crate::ai_budget::make_request_id(&scope),
     };
 
     let guard = slot.read().await;
@@ -201,9 +200,9 @@ pub(in crate::ipc_server) async fn handle_record_ai_usage(
 
     match tracker
         .record_usage(
-            scope,
-            provider,
-            model,
+            &scope,
+            &provider,
+            &model,
             tokens_in,
             tokens_out,
             purpose,

@@ -10,7 +10,21 @@
 //!   三個 handler 僅負責 JSON 解析與 PipelineCommand 發送；所有 clamp 與
 //!   驗證邏輯均在事件消費者側，確保單一真理源。`parse_opt_opt_f64` 為
 //!   `handle_update_risk_config` 獨用的檔案內私有輔助。
+//!
+//! E5-P1-5-FUP: second adopter of `super::super::param_extractor`.  The plain
+//!   optional `as_f64()` / `as_u64()` / `as_bool()` single-value reads use the
+//!   typed `optional_*` helpers.  The tri-state `parse_opt_opt_f64` (absent
+//!   vs. explicit JSON `null` vs. number) is NOT migrated because
+//!   `param_extractor` only exposes two-state optionals — keeping `parse_opt_opt_f64`
+//!   local preserves the disable-via-null semantic that `trailing_stop_pct`
+//!   and peers rely on.
+//! E5-P1-5-FUP：本檔為 `super::super::param_extractor` 的第二個採用點。
+//!   單值可選 `as_f64()` / `as_u64()` / `as_bool()` 直接改走 `optional_*`。
+//!   三態 `parse_opt_opt_f64`（缺失 vs. JSON `null` vs. 數字）不改；
+//!   `param_extractor` 只提供二態可選，保留本地 `parse_opt_opt_f64` 以
+//!   維持 `trailing_stop_pct` 等「以 null 關閉」的語意。
 
+use super::super::param_extractor::{optional_bool, optional_f64, optional_u64};
 use super::super::*;
 
 /// Update risk config at runtime (GUI → Python → IPC → Rust engine).
@@ -38,41 +52,35 @@ pub(in crate::ipc_server) async fn handle_update_risk_config(
     };
 
     // Parse all risk params / 解析所有風控參數
-    let hard_stop_pct = params.get("hard_stop_pct").and_then(|v| v.as_f64());
-    let p1_risk_pct = params.get("p1_risk_pct").and_then(|v| v.as_f64());
+    // E5-P1-5-FUP: two-state optionals via `optional_*`; tri-state via
+    //   the file-local `parse_opt_opt_f64` (null → explicit disable).
+    // E5-P1-5-FUP：二態用 `optional_*`，三態仍走本地 `parse_opt_opt_f64`
+    //   （null → 顯式關閉）。
+    let hard_stop_pct = optional_f64(params, "hard_stop_pct");
+    let p1_risk_pct = optional_f64(params, "p1_risk_pct");
     let trailing_stop_pct = parse_opt_opt_f64(params, "trailing_stop_pct");
     let trailing_activation_pct = parse_opt_opt_f64(params, "trailing_activation_pct");
     let time_stop_hours = parse_opt_opt_f64(params, "time_stop_hours");
     let atr_multiplier = parse_opt_opt_f64(params, "atr_multiplier");
     let take_profit_pct = parse_opt_opt_f64(params, "take_profit_pct");
-    let max_leverage = params.get("max_leverage").and_then(|v| v.as_f64());
-    let max_drawdown_pct = params.get("max_drawdown_pct").and_then(|v| v.as_f64());
-    let max_same_direction_positions = params
-        .get("max_same_direction_positions")
-        .and_then(|v| v.as_u64())
-        .map(|v| v as usize);
+    let max_leverage = optional_f64(params, "max_leverage");
+    let max_drawdown_pct = optional_f64(params, "max_drawdown_pct");
+    let max_same_direction_positions =
+        optional_u64(params, "max_same_direction_positions").map(|v| v as usize);
     // RRC-1-A3: H0Gate shadow mode toggle / H0 門控影子模式切換
-    let h0_shadow_mode = params.get("h0_shadow_mode").and_then(|v| v.as_bool());
+    let h0_shadow_mode = optional_bool(params, "h0_shadow_mode");
     // PNL-7: agent-tunable dynamic-stop knobs / PNL-7：Agent 可調動態止損參數
-    let dynamic_stop_base_ratio = params
-        .get("dynamic_stop_base_ratio")
-        .and_then(|v| v.as_f64());
-    let dynamic_stop_cap_ratio = params
-        .get("dynamic_stop_cap_ratio")
-        .and_then(|v| v.as_f64());
-    let trailing_min_rr_ratio = params.get("trailing_min_rr_ratio").and_then(|v| v.as_f64());
+    let dynamic_stop_base_ratio = optional_f64(params, "dynamic_stop_base_ratio");
+    let dynamic_stop_cap_ratio = optional_f64(params, "dynamic_stop_cap_ratio");
+    let trailing_min_rr_ratio = optional_f64(params, "trailing_min_rr_ratio");
     // Session 12: cost-gate + regime + boot cooldown
-    let cost_gate_min_confidence = params
-        .get("cost_gate_min_confidence")
-        .and_then(|v| v.as_f64());
-    let cost_gate_k_base = params.get("cost_gate_k_base").and_then(|v| v.as_f64());
-    let cost_gate_k_medium = params.get("cost_gate_k_medium").and_then(|v| v.as_f64());
-    let cost_gate_k_small = params.get("cost_gate_k_small").and_then(|v| v.as_f64());
-    let adx_trending_threshold = params
-        .get("adx_trending_threshold")
-        .and_then(|v| v.as_f64());
-    let boot_cooldown_ms = params.get("boot_cooldown_ms").and_then(|v| v.as_u64());
-    let signals_heartbeat_ms = params.get("signals_heartbeat_ms").and_then(|v| v.as_u64());
+    let cost_gate_min_confidence = optional_f64(params, "cost_gate_min_confidence");
+    let cost_gate_k_base = optional_f64(params, "cost_gate_k_base");
+    let cost_gate_k_medium = optional_f64(params, "cost_gate_k_medium");
+    let cost_gate_k_small = optional_f64(params, "cost_gate_k_small");
+    let adx_trending_threshold = optional_f64(params, "adx_trending_threshold");
+    let boot_cooldown_ms = optional_u64(params, "boot_cooldown_ms");
+    let signals_heartbeat_ms = optional_u64(params, "signals_heartbeat_ms");
 
     // At least one param must be provided / 至少需要一個參數
     let has_any = hard_stop_pct.is_some()
