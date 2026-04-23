@@ -99,6 +99,7 @@ fn test_donchian_mode_default_is_hard() {
 fn test_donchian_mode_hard_rejects_long_below_upper() {
     let mut s = BbBreakout::new();
     assert_eq!(s.donchian_mode, DonchianMode::Hard); // baseline
+    s.min_persistence_ms = 0; // disable persistence for unit tests
     prime_squeeze(&mut s);
     // Expansion tick: bandwidth 0.05 > expansion_bw 0.04, vol 1.5 > 1.2,
     // %B 1.1 → is_long. Price 50_400 < donchian_upper 50_500 → Hard rejects.
@@ -110,6 +111,7 @@ fn test_donchian_mode_hard_rejects_long_below_upper() {
 #[test]
 fn test_donchian_mode_score_allows_entry_on_miss() {
     let mut s = BbBreakout::new();
+    s.min_persistence_ms = 0; // disable persistence for unit tests
     // Flip to Score mode via update_params (exercises hot-reload path too).
     // 經 update_params 切 Score 模式，同時覆蓋熱重載路徑。
     let mut p = s.get_params();
@@ -117,6 +119,11 @@ fn test_donchian_mode_score_allows_entry_on_miss() {
     // Make confluence non-gate so score delta only affects qty_pct, not gate.
     // confluence 不做門控，score delta 只動 qty_pct 不擋入場。
     p.confluence_as_gate = false;
+    // Also disable persistence in the params struct so hot-reload doesn't
+    // restore the default 60_000 ms min_persistence. Without this the test
+    // asserts soft-gate emission but is silently blocked upstream.
+    // update_params 也會覆寫 min_persistence_ms，需在 params 端一併關閉。
+    p.min_persistence_ms = 0;
     s.update_params(p).expect("valid Score params");
     prime_squeeze(&mut s);
     // Same "miss" scenario as Hard test: price 50_400 < upper 50_500.
@@ -130,9 +137,11 @@ fn test_donchian_mode_score_allows_entry_on_miss() {
 #[test]
 fn test_donchian_mode_score_allows_entry_on_breach() {
     let mut s = BbBreakout::new();
+    s.min_persistence_ms = 0;
     let mut p = s.get_params();
     p.donchian_mode = DonchianMode::Score;
     p.confluence_as_gate = false;
+    p.min_persistence_ms = 0;
     s.update_params(p).expect("valid Score params");
     prime_squeeze(&mut s);
     // Breach scenario: price 50_600 > upper 50_500. Score mode applies +bonus
@@ -146,9 +155,11 @@ fn test_donchian_mode_score_allows_entry_on_breach() {
 #[test]
 fn test_donchian_mode_off_skips_check_entirely() {
     let mut s = BbBreakout::new();
+    s.min_persistence_ms = 0;
     let mut p = s.get_params();
     p.donchian_mode = DonchianMode::Off;
     p.confluence_as_gate = false;
+    p.min_persistence_ms = 0;
     s.update_params(p).expect("valid Off params");
     prime_squeeze(&mut s);
     // Off mode: even price 50_400 (would Hard-reject) should pass through.
