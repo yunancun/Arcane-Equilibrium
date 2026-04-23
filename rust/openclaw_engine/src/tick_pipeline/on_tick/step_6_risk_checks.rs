@@ -333,34 +333,6 @@ impl TickPipeline {
                                     self.paper_state.position_exit_snapshot(symbol);
                                 if let Some(snap) = snap_opt {
                                     let side_i16: i16 = if snap.is_long { 1 } else { -1 };
-                                    // INFRA-PREBUILD-1 L1-1 (2026-04-23):
-                                    // compute real cell age from
-                                    // `settings/edge_estimates*.json` file mtime
-                                    // so Phase 2's 7d stale gate can fire when
-                                    // the Python writer stalls. Resolves
-                                    // `OPENCLAW_BASE_DIR` at call time (cheap
-                                    // env var read); missing var falls back to
-                                    // CWD — same precedence as
-                                    // `event_consumer::mod.rs` edge loader so
-                                    // writer-side and reader-side agree.
-                                    // INFRA-PREBUILD-1 L1-1（2026-04-23）：從
-                                    // `settings/edge_estimates*.json` 檔案
-                                    // mtime 計算真實 cell 齡期，讓 Phase 2
-                                    // 7d stale gate 在 Python writer 停寫時
-                                    // 能 fire。env 解析與 event_consumer 同
-                                    // 優先序，讀寫兩端對齊。
-                                    let base_dir = std::env::var("OPENCLAW_BASE_DIR")
-                                        .map(std::path::PathBuf::from)
-                                        .unwrap_or_else(|_| {
-                                            std::env::current_dir().unwrap_or_else(|_| {
-                                                std::path::PathBuf::from(".")
-                                            })
-                                        });
-                                    let cell_age_secs =
-                                        super::compute_edge_estimates_file_age_secs(
-                                            engine_mode,
-                                            &base_dir,
-                                        );
                                     super::emit_shadow_exit_observation(
                                         &snap.entry_context_id,
                                         event.ts_ms as i64,
@@ -370,7 +342,7 @@ impl TickPipeline {
                                         side_i16,
                                         lock_tag,
                                         est_net_bps,
-                                        cell_age_secs,
+                                        None, // cell_age_secs — mock uses 0
                                         &tx,
                                     );
                                 }
