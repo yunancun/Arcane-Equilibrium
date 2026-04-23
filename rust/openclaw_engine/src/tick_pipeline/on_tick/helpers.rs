@@ -309,4 +309,239 @@ mod phys_lock_wrapper_tests {
     // module so a refactor must touch both sides in lockstep.
     // 本地常數鏡像 `build_risk_close_tag` 的前綴 — 重構必須兩邊同步改。
     const PREFIX_LEN: usize = "risk_close:".len();
+
+    // E4-1 audit FUP (2026-04-23): the two regression tests below close the
+    // pipeline-out gap flagged by E4-1 against RUST-DOUBLE-PREFIX-1's
+    // `build_risk_close_tag` (see `step_6_risk_checks.rs:306/339/352`). The
+    // existing unit tests above pin the helper's output shape for the current
+    // call-site; these two add defence-in-depth so the fix cannot silently
+    // regress via a new `format!("risk_close:{...}")` literal slipping into the
+    // pipeline, nor via a step_6 edit that accidentally applies the helper
+    // twice in a row.
+    //
+    // (A) `no_new_literal_risk_close_format_outside_helpers_rs`:
+    //     static file-system scan that asserts the ONLY two files in the engine
+    //     crate allowed to contain `format!("risk_close:` are
+    //     `on_tick/helpers.rs` (this file — holds both the production helper
+    //     impl and this test module's own PHYS-LOCK emission replica) and
+    //     `risk_checks.rs` (holds the design-sanctioned single PHYS-LOCK wrap
+    //     at line 247 that hands the `risk_close:phys_lock_...` envelope to
+    //     downstream `strip_phys_lock_prefix`). Any new call-site — e.g. some
+    //     future dev re-adding `format!("risk_close:{reason}")` inside
+    //     `step_6_risk_checks.rs` — immediately fails this test.
+    //
+    // (C) `build_risk_close_tag_is_idempotent`:
+    //     contractually pins idempotency. If anyone ever rewires step_6 so the
+    //     helper is applied twice in a row (e.g. a bad refactor that calls
+    //     `build_risk_close_tag(build_risk_close_tag(reason))`), the second
+    //     invocation must be a no-op — no double prefix can sneak back in.
+    //
+    // E4-1 審計 FUP（2026-04-23）：下方兩個回歸測試補 E4-1 對 RUST-DOUBLE-PREFIX-1
+    // 修復提出的「pipeline 出口端 e2e 斷言」缺口（對應 step_6_risk_checks.rs
+    // 第 306/339/352 行）。既有單測固化了 helper 當下輸出形狀；這兩個補 defence-
+    // in-depth，防止別處新增 `format!("risk_close:{...}")` literal 繞過 helper，
+    // 或 step_6 被改成連呼兩次 helper。
+    //
+    // (A) `no_new_literal_risk_close_format_outside_helpers_rs`：
+    //     靜態檔案系統掃描，斷言整個 engine crate 只允許兩個檔案出現
+    //     `format!("risk_close:` — `on_tick/helpers.rs`（本檔；production helper
+    //     + test module 中的 PHYS-LOCK emission replica）與 `risk_checks.rs`
+    //     （line 247 設計上合法的 PHYS-LOCK 單次 wrap，產生
+    //     `risk_close:phys_lock_...` envelope 供下游 `strip_phys_lock_prefix`
+    //     消費）。任何新增呼叫點（例如在 `step_6_risk_checks.rs` 內重加
+    //     `format!("risk_close:{reason}")`）立即 red。
+    //
+    // (C) `build_risk_close_tag_is_idempotent`：
+    //     契約固化 idempotency。若有人改 step_6 連呼兩次 helper（例如錯誤重構
+    //     變成 `build_risk_close_tag(build_risk_close_tag(reason))`），第二次
+    //     呼叫必為 no-op，雙前綴無法潛回。
+
+    /// E4-1 audit FUP — static regression guard for `format!("risk_close:`
+    /// literals. Only `helpers.rs` (this file) and `risk_checks.rs` are
+    /// allowed to contain the prefix pattern in this form. Any other file
+    /// means a new `format!("risk_close:{...}")` call-site has slipped in,
+    /// which is exactly the class of bug RUST-DOUBLE-PREFIX-1 fixed.
+    ///
+    /// E4-1 審計 FUP — `format!("risk_close:` literal 靜態回歸防線。
+    /// 只有 `helpers.rs`（本檔）和 `risk_checks.rs` 允許出現此 pattern。
+    /// 其他檔案命中 = 有人新增 `format!("risk_close:{...}")` 呼叫點，正是
+    /// RUST-DOUBLE-PREFIX-1 修復的 bug class。
+    #[test]
+    fn no_new_literal_risk_close_format_outside_helpers_rs() {
+        use std::fs;
+        use std::path::{Path, PathBuf};
+
+        // Pattern we guard against. Note: matches the `format!("risk_close:`
+        // OPENING — both `{reason}` interpolation and `{}` + arg forms trip it.
+        // 防禦 pattern：匹配 `format!("risk_close:` 的開頭 —— `{reason}` 與
+        // `{}` + arg 兩種形式都會命中。
+        const GUARD_PATTERN: &str = "format!(\"risk_close:";
+
+        // Allowlist: files where this literal is legitimately present.
+        // - `on_tick/helpers.rs`: production helper impl + this test module's
+        //   PHYS-LOCK emission replica (`format!("risk_close:{expected_bare_tag}")`
+        //   at line 155) that mirrors `risk_checks.rs:247` for the combine-layer
+        //   e2e test.
+        // - `risk_checks.rs`: the single design-sanctioned PHYS-LOCK wrap at
+        //   line 247 (`RiskAction::ClosePosition(format!("risk_close:{}", reason))`)
+        //   that produces the `risk_close:phys_lock_...` envelope downstream.
+        // 白名單：合法出現此 literal 的兩個檔案。
+        const ALLOWLIST: &[&str] = &[
+            "tick_pipeline/on_tick/helpers.rs",
+            "risk_checks.rs",
+        ];
+
+        // Recursively walk `src/` from CARGO_MANIFEST_DIR, collect all `.rs`
+        // files, grep for GUARD_PATTERN, flag any outside ALLOWLIST.
+        // 從 CARGO_MANIFEST_DIR 遞歸掃 `src/`，收集所有 `.rs` 檔，抓
+        // GUARD_PATTERN，不在白名單的檔案即違規。
+        fn walk(dir: &Path, acc: &mut Vec<PathBuf>) {
+            let entries = match fs::read_dir(dir) {
+                Ok(e) => e,
+                Err(_) => return,
+            };
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    walk(&path, acc);
+                } else if path.extension().and_then(|s| s.to_str()) == Some("rs") {
+                    acc.push(path);
+                }
+            }
+        }
+
+        let manifest_dir = env!("CARGO_MANIFEST_DIR");
+        let src_dir = Path::new(manifest_dir).join("src");
+        assert!(
+            src_dir.is_dir(),
+            "src/ dir not found at {} — test harness broken",
+            src_dir.display()
+        );
+
+        let mut rs_files: Vec<PathBuf> = Vec::new();
+        walk(&src_dir, &mut rs_files);
+        assert!(
+            !rs_files.is_empty(),
+            "walk found 0 .rs files under {} — harness broken",
+            src_dir.display()
+        );
+
+        let mut violations: Vec<String> = Vec::new();
+        for file in &rs_files {
+            let rel = file
+                .strip_prefix(&src_dir)
+                .unwrap()
+                .to_string_lossy()
+                .replace('\\', "/"); // Windows path sep normalisation
+            let allowed = ALLOWLIST.iter().any(|a| rel == *a);
+            let contents = match fs::read_to_string(file) {
+                Ok(c) => c,
+                Err(_) => continue,
+            };
+            if allowed {
+                continue;
+            }
+            // Only count lines that are not pure comments. Block-doc comments
+            // (`///`, `//!`) and line comments (`//`) are informational —
+            // RUST-DOUBLE-PREFIX-1's design notes legitimately quote the
+            // pattern in several places. A real violation is an executable
+            // statement containing the pattern.
+            // 僅計入非純註解行。區塊/行註解（`///`、`//!`、`//`）僅為說明，
+            // RUST-DOUBLE-PREFIX-1 的設計註解合法引用此 pattern。真正違規是
+            // 內含 pattern 的可執行語句。
+            let hits: Vec<(usize, &str)> = contents
+                .lines()
+                .enumerate()
+                .filter(|(_, l)| l.contains(GUARD_PATTERN))
+                .filter(|(_, l)| {
+                    let trimmed = l.trim_start();
+                    !(trimmed.starts_with("//") || trimmed.starts_with("/*"))
+                })
+                .collect();
+            if !hits.is_empty() {
+                // Capture offending line numbers for actionable diagnostic.
+                // 擷取違規行號便於定位。
+                let lines: Vec<String> = hits
+                    .iter()
+                    .map(|(n, l)| format!("  line {}: {}", n + 1, l.trim()))
+                    .collect();
+                violations.push(format!("{}:\n{}", rel, lines.join("\n")));
+            }
+        }
+
+        assert!(
+            violations.is_empty(),
+            "RUST-DOUBLE-PREFIX-1 regression: new `format!(\"risk_close:` literal \
+             detected outside the allowlist ({:?}). Use `build_risk_close_tag()` \
+             from `on_tick/helpers.rs` instead. Offenders:\n{}\n\n\
+             RUST-DOUBLE-PREFIX-1 回歸：白名單外出現 `format!(\"risk_close:` \
+             literal。請改呼 `on_tick/helpers.rs::build_risk_close_tag()`。違規檔：\n{}",
+            ALLOWLIST,
+            violations.join("\n\n"),
+            violations.join("\n\n"),
+        );
+    }
+
+    /// E4-1 audit FUP — contractual idempotency pin. `build_risk_close_tag`
+    /// applied twice in a row must equal applied once, for every reason
+    /// variant `risk_checks.rs` can emit. Guards against a future step_6
+    /// edit that accidentally wraps the helper output through the helper
+    /// again (which would re-introduce the double-prefix bug from a
+    /// different angle).
+    ///
+    /// E4-1 審計 FUP — 契約 idempotency 固化。對 `risk_checks.rs` 能產出的
+    /// 每種 reason 變體，連呼 `build_risk_close_tag` 兩次結果必須等同呼一次。
+    /// 防止日後 step_6 改動誤將 helper 輸出再餵回 helper（會從另一角度
+    /// 重引入雙前綴 bug）。
+    #[test]
+    fn build_risk_close_tag_is_idempotent() {
+        // Representative reason set covers every emission path currently in
+        // `risk_checks.rs`: PHYS-LOCK (already-wrapped) + all bare variants
+        // (HARD STOP / TRAILING / TIME / TP / COST EDGE / DRAWDOWN /
+        // CONSECUTIVE LOSS / DAILY LOSS).
+        // 代表性 reason 集合涵蓋 `risk_checks.rs` 當前所有 emission path：
+        // PHYS-LOCK（已 wrap）+ 全部裸變體。
+        let reasons = [
+            // PHYS-LOCK variants (already wrapped by risk_checks.rs:247).
+            // PHYS-LOCK 變體（risk_checks.rs:247 已 wrap）。
+            "risk_close:phys_lock_gate4_giveback",
+            "risk_close:phys_lock_gate4_stale_roc_neg",
+            "risk_close:phys_lock_gate1_low_edge",
+            // Bare variants (risk_checks.rs emits without wrap).
+            // 裸變體（risk_checks.rs 不 wrap 直接 emit）。
+            "HARD STOP: pnl -6.00% <= -5.00%",
+            "TRAILING STOP: peak 3.00% - current 1.00% = 2.00% >= distance 1.50%",
+            "TIME STOP: held 24.0h >= limit 24.0h",
+            "TAKE PROFIT: pnl 5.00% >= 4.50%",
+            "COST EDGE: ratio 0.85 >= 0.80",
+            "DRAWDOWN: session equity -2.50% <= -2.00%",
+            "CONSECUTIVE LOSS: 3 in a row",
+            "DAILY LOSS: -3.50% <= -3.00%",
+            // Defensive edge cases.
+            // 防禦性邊界。
+            "",
+            "risk_close:",
+        ];
+
+        for reason in reasons {
+            let once = build_risk_close_tag(reason);
+            let twice = build_risk_close_tag(&once);
+
+            // Assert #1: exact equality — helper is f(f(x)) == f(x).
+            // Assert #1：精確相等 — helper 滿足 f(f(x)) == f(x)。
+            assert_eq!(
+                once, twice,
+                "build_risk_close_tag must be idempotent for reason={reason:?}: \
+                 once={once:?} twice={twice:?}"
+            );
+
+            // Assert #2: no double-prefix regardless of input (belt + braces).
+            // Assert #2：無論輸入為何，結果必無雙前綴（雙保險）。
+            assert!(
+                !twice.starts_with("risk_close:risk_close:"),
+                "double prefix slipped in on second application: reason={reason:?} \
+                 once={once:?} twice={twice:?}"
+            );
+        }
+    }
 }
