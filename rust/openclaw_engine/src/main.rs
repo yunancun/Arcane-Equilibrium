@@ -563,7 +563,7 @@ async fn async_main(
     //   - Ok(n) n>=100   → info
     //
     // INSTR-WIRE-1-GRACEFUL (2026-04-23, E2 review): replaced panic! with
-    // cancel.cancel() + tokio::task::yield_now().await + std::process::exit(1).
+    // cancel.cancel() + tokio::time::sleep(500ms) + std::process::exit(1).
     // Rationale: panic! inside async runtime has ambiguous shutdown semantics
     // (depends on whether this future is polled on the runtime's main thread
     // or a worker; abort vs unwind; whether panic_hook has had a chance to
@@ -571,12 +571,27 @@ async fn async_main(
     //   1. `cancel.cancel()` — every already-spawned child task (IPC server,
     //      live/demo slots, cancel-scoped helpers) observes the token and
     //      shuts down cleanly before we tear the runtime down.
-    //   2. `tokio::task::yield_now().await` — gives the runtime one scheduler
-    //      turn so the cancel signal propagates and the tracing subscriber
-    //      has a window to flush the error! line to disk.
+    //   2. `tokio::time::sleep(500ms).await` — bounded window for the cancel
+    //      signal to propagate across all tokio workers so spawned tasks
+    //      (IPC server socket at /tmp/openclaw/engine.sock, live_auth_watcher,
+    //      etc.) can observe `cancel.is_cancelled()` and run their own cleanup
+    //      branches (e.g. `std::fs::remove_file` on the IPC socket). Without
+    //      this window, the next startup can fail with `bind: address in use`
+    //      because the socket file is left on disk. 500ms is enough for
+    //      cooperative teardown but short enough to still feel like a crash
+    //      to the supervising process. Earlier revision used
+    //      `tokio::task::yield_now()` which only hands off a single scheduler
+    //      turn — insufficient under load.
     //   3. `std::process::exit(1)` — signals "hard fail" to the supervising
     //      process (systemd / restart_all.sh) so restart policy kicks in.
-    //      Destructors at runtime scope still run (unlike abort).
+    //      `exit(1)` runs `atexit`-registered handlers (tracing subscriber
+    //      flush, libc stdio cleanup, some tokio hooks) but does NOT unwind
+    //      the Rust stack — stack-scope `Drop`s on live locals DO NOT fire.
+    //      This is still better than `panic!` in an async runtime, which has
+    //      undefined shutdown ordering across tokio worker threads (the
+    //      runtime may abort mid-poll on an unrelated worker). The difference
+    //      vs `abort()` is that atexit handlers + C-style static destructors
+    //      run under `exit`; neither runs Rust `Drop`.
     // The global panic_hook installed earlier in main.rs remains in place
     // for other unexpected panic paths; this refactor only touches the two
     // INSTR-WIRE-1 fail-closed arms.
@@ -591,7 +606,11 @@ async fn async_main(
     // INSTR-WIRE-1 啟動 fail-closed：缺 universe 等於 M-1 全拒單，不如當場
     // 炸掉讓 operator 立即發現，而非假裝跑著實則全啞。
     // INSTR-WIRE-1-GRACEFUL：panic! 在 async runtime 裡語意曖昧，改為
-    // cancel.cancel() + yield + exit(1)。panic_hook 仍保留為其他路徑的兜底。
+    // cancel.cancel() + sleep(500ms) + exit(1)。sleep 給子任務時間接 cancel
+    // 並清理 IPC socket（否則下次 startup bind EADDRINUSE）。exit(1) 只跑
+    // atexit handler（tracing flush / libc），不 unwind Rust stack，
+    // stack-scope Drop 不會 fire——這點跟 abort() 的差異在 atexit 而非 Drop。
+    // panic_hook 仍保留為其他路徑的兜底。
     if let Some(ref client) = shared_client {
         let instrument_cache =
             Arc::new(openclaw_engine::instrument_info::InstrumentInfoCache::new());
@@ -603,9 +622,12 @@ async fn async_main(
                      啟動拉取合約信息回傳 0 — 空 universe 拒絕啟動交易引擎"
                 );
                 cancel.cancel();
-                // One runtime turn for tracing flush + child-task cancel pickup.
-                // 讓出一個 scheduler turn，供 tracing flush + 子任務接 cancel。
-                tokio::task::yield_now().await;
+                // Bounded window (500ms) for child tasks to observe cancel +
+                // cleanup IPC socket + tracing flush. See doc comment above for
+                // why yield_now() alone is insufficient.
+                // 500ms 給子任務時間清理 IPC socket + tracing flush；
+                // yield_now 只一個 turn 不夠。
+                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
                 std::process::exit(1);
             }
             Ok(count) if count < 100 => {
@@ -630,7 +652,9 @@ async fn async_main(
                      啟動拉取合約信息失敗 — 無 universe 拒絕啟動交易引擎"
                 );
                 cancel.cancel();
-                tokio::task::yield_now().await;
+                // 500ms window — same reasoning as Ok(0) arm above.
+                // 500ms 窗口——理由同上。
+                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
                 std::process::exit(1);
             }
         }

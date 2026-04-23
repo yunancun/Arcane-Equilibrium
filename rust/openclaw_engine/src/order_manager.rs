@@ -1323,6 +1323,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_wire_cache_miss_ensure_success_populates_and_passes() {
+        use std::sync::atomic::Ordering::SeqCst;
+
         let cache = Arc::new(InstrumentInfoCache::new());
         let fetcher = WireMockFetcher::new(0); // Bybit returns item
 
@@ -1349,10 +1351,27 @@ mod tests {
         let req = make_req("WIRE001USDT");
         let (qty, _price) = mgr.validate_and_round(&req).await.expect("should pass");
         assert!(qty > 0.0);
+
+        // INSTR-ENSURE-POLISH-1 (2026-04-23): counter invariant.
+        // The symbol was pre-seeded into the positive cache via
+        // `ensure_symbol_with_fetcher` BEFORE we ran validate_and_round, so
+        // validate_and_round's `self.instruments.get(&req.symbol)` hits the
+        // fast path and must NOT enter the lazy-fetch else branch. Counter
+        // stays at 0. (Contrast with the neg-cache test below, where the
+        // positive-cache miss forces entry into the else branch and bumps
+        // the counter to 1 before the neg-cache short-circuit.)
+        // 正緩存已預填 → 走 fast path，ensure 分支不進 → counter 保持 0。
+        assert_eq!(
+            mgr.ensure_call_count.load(SeqCst),
+            0,
+            "pre-seeded positive cache must bypass ensure branch (INSTR-ENSURE-POLISH-1)"
+        );
     }
 
     #[tokio::test]
     async fn test_wire_cache_miss_ensure_neg_fails_closed() {
+        use std::sync::atomic::Ordering::SeqCst;
+
         // Seed the cache with a neg-cached symbol directly (simulating a prior
         // ensure that returned None). validate_and_round must NOT re-fetch and
         // must fail-closed with the exhausted message.
@@ -1381,6 +1400,21 @@ mod tests {
         assert!(
             err.contains("lazy fetch") || err.contains("按需拉取"),
             "error must indicate lazy fetch attempted: {err}"
+        );
+
+        // INSTR-ENSURE-POLISH-1 (2026-04-23): counter invariant.
+        // The positive cache has no entry for NOTEXISTUSDT (only neg cache),
+        // so validate_and_round's `self.instruments.get(...)` returns None →
+        // enters the lazy-fetch else branch → counter increments to 1 BEFORE
+        // ensure_symbol short-circuits on the neg-cache hit. This proves the
+        // miss path exercises the ensure codepath exactly once, symmetric to
+        // test_wire_cache_hit_no_ensure_call's count==0 assertion.
+        // 正緩存 miss → 進 else 分支 → counter +=1 → 再被 ensure_symbol
+        // 內部的 neg_cache 短路。對稱 hit test 的 count==0。
+        assert_eq!(
+            mgr.ensure_call_count.load(SeqCst),
+            1,
+            "positive-miss must trigger exactly one ensure branch entry (INSTR-ENSURE-POLISH-1)"
         );
     }
 
