@@ -482,6 +482,126 @@ mod phys_lock_wrapper_tests {
         );
     }
 
+    /// E4-1 FA BLOCKER FUP (2026-04-23 post-commit b0b47b5 review):
+    /// Static grep for BARE `"risk_close:phys_lock_` string literals outside
+    /// the allowlist. FA audit flagged that the sibling test
+    /// `no_new_literal_risk_close_format_outside_helpers_rs` above only
+    /// catches `format!("risk_close:{...}")` — it does NOT catch plain
+    /// literals such as `"risk_close:phys_lock_new_reason"` that would
+    /// bypass `build_risk_close_tag()` and hit the same double-prefix bug
+    /// class from the string-constant angle.
+    ///
+    /// Scope deliberately narrowed to **`risk_close:phys_lock_`** (not all
+    /// `risk_close:` literals) because other bare literals in production
+    /// (e.g., `"risk_close:halt_session"` in step_6, `"risk_close:fast_track"`
+    /// in step_0, `"risk_close:ipc_close_symbol"` in commands.rs) are each
+    /// self-contained tags that the helper intentionally forwards through
+    /// `build_risk_close_tag()` unchanged — they are not PHYS-LOCK-class
+    /// reasons and do NOT participate in the `risk_checks.rs:247` wrap →
+    /// `step_6:_close_tag()` double-wrap flow that RUST-DOUBLE-PREFIX-1 fixed.
+    ///
+    /// E4-1 FA BLOCKER FUP（2026-04-23 post-commit review）：
+    /// 掃描白名單外的 BARE `"risk_close:phys_lock_` 字串字面量。FA 審核指出
+    /// 上方 `format!` 靜態掃只抓 `format!("risk_close:{...}")` — 不抓
+    /// `"risk_close:phys_lock_new_reason"` 這類純字面量，可從另一角度繞過
+    /// `build_risk_close_tag()` 重引入雙前綴 bug。
+    ///
+    /// Scope 縮到 **`risk_close:phys_lock_`**（而非所有 `risk_close:`）因
+    /// 其他 bare literal（如 `"risk_close:halt_session"` / `"risk_close:fast_track"`
+    /// / `"risk_close:ipc_close_symbol"`）本身就是 self-contained tag，helper
+    /// 刻意 forward 不動，非 PHYS-LOCK 類 reason、不參與 double-wrap 流程。
+    #[test]
+    fn no_new_literal_risk_close_phys_lock_outside_helpers_rs() {
+        use std::fs;
+        use std::path::{Path, PathBuf};
+
+        // PHYS-LOCK-specific bare literal guard.
+        // PHYS-LOCK 類 bare literal 專屬守護。
+        const GUARD_PATTERN: &str = "\"risk_close:phys_lock_";
+
+        // Allowlist: files where `risk_close:phys_lock_` literal is legitimate.
+        // - `helpers.rs`: this test + `strip_phys_lock_prefix` + idempotency
+        //   test reasons that legitimately exercise the full envelope.
+        // - `risk_checks.rs`: `#[cfg(test)]` mod tests referencing the tag.
+        // - `step_6_risk_checks.rs`: design comments + `#[cfg(test)]` tests.
+        // 白名單：`helpers.rs`（本 test + strip_phys_lock_prefix + idempotency
+        // test 合法引用）/ `risk_checks.rs`（test mod 引用）/
+        // `step_6_risk_checks.rs`（設計註解 + test mod 引用）。
+        const ALLOWLIST: &[&str] = &[
+            "tick_pipeline/on_tick/helpers.rs",
+            "risk_checks.rs",
+            "tick_pipeline/on_tick/step_6_risk_checks.rs",
+        ];
+
+        fn walk(dir: &Path, acc: &mut Vec<PathBuf>) {
+            let entries = match fs::read_dir(dir) {
+                Ok(e) => e,
+                Err(_) => return,
+            };
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    walk(&path, acc);
+                } else if path.extension().and_then(|s| s.to_str()) == Some("rs") {
+                    acc.push(path);
+                }
+            }
+        }
+
+        let manifest_dir = env!("CARGO_MANIFEST_DIR");
+        let src_dir = Path::new(manifest_dir).join("src");
+        let mut rs_files: Vec<PathBuf> = Vec::new();
+        walk(&src_dir, &mut rs_files);
+
+        let mut violations: Vec<String> = Vec::new();
+        for file in &rs_files {
+            let rel = file
+                .strip_prefix(&src_dir)
+                .unwrap()
+                .to_string_lossy()
+                .replace('\\', "/");
+            if ALLOWLIST.iter().any(|a| rel == *a) {
+                continue;
+            }
+            let contents = match fs::read_to_string(file) {
+                Ok(c) => c,
+                Err(_) => continue,
+            };
+            // Strip pure comment lines (same filter as the sibling test).
+            // 排除純註解行（與上方 sibling test 同過濾）。
+            let hits: Vec<(usize, &str)> = contents
+                .lines()
+                .enumerate()
+                .filter(|(_, l)| l.contains(GUARD_PATTERN))
+                .filter(|(_, l)| {
+                    let trimmed = l.trim_start();
+                    !(trimmed.starts_with("//") || trimmed.starts_with("/*"))
+                })
+                .collect();
+            if !hits.is_empty() {
+                let lines: Vec<String> = hits
+                    .iter()
+                    .map(|(n, l)| format!("  line {}: {}", n + 1, l.trim()))
+                    .collect();
+                violations.push(format!("{}:\n{}", rel, lines.join("\n")));
+            }
+        }
+
+        assert!(
+            violations.is_empty(),
+            "RUST-DOUBLE-PREFIX-1 regression (bare literal angle): new \
+             `\"risk_close:phys_lock_...\"` string literal outside allowlist {:?}. \
+             PHYS-LOCK-class reasons MUST go through `build_risk_close_tag()` to \
+             avoid the double-prefix bug from the string-constant angle. Offenders:\n{}\n\n\
+             RUST-DOUBLE-PREFIX-1 回歸（裸字面量角度）：白名單外出現 \
+             `\"risk_close:phys_lock_...\"` literal。PHYS-LOCK 類 reason 必須\
+             經 `build_risk_close_tag()` 以防從字串常量角度重引入雙前綴 bug。違規檔：\n{}",
+            ALLOWLIST,
+            violations.join("\n\n"),
+            violations.join("\n\n"),
+        );
+    }
+
     /// E4-1 audit FUP — contractual idempotency pin. `build_risk_close_tag`
     /// applied twice in a row must equal applied once, for every reason
     /// variant `risk_checks.rs` can emit. Guards against a future step_6
