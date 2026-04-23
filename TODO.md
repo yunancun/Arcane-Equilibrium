@@ -514,6 +514,18 @@ git status && git log --oneline -5
 - [ ] JS + Scorer 整合 + correlation_pairs（5-08~09）
 - [ ] E2/E4/QC/E5（5-10~13）
 
+### Phase 5+ Strategist Demo→Live 促升（STRATEGIST-SCHED-CHANNEL-PAPER-ORPHAN-1 2026-04-23 `a0730db` 疊加）
+
+**前置已就緒**：`StrategistScheduler::promote_params_to_live(strategy, params_json)` method 已實作、`promote_cmd_tx: Option<UnboundedSender<PipelineCommand>>` 已接線；當 `authorization.json` 簽完 Live channel 到位即 `Some(_)`，單測 Mac + Linux 1845/0 failed。
+
+- [ ] **STRATEGIST-PROMOTE-TRIGGER-1** — 補 promote 觸發器。**路徑**：(1) Python 新 `POST /api/v1/strategist/promote { strategy: str, params_json: str }` route，Operator-only auth；(2) 新 Rust IPC command `PromoteStrategistParams { strategy, params_json, response_tx }` 由 Python 傳入；(3) `main.rs` ctor 保存 `scheduler: Arc<StrategistScheduler>` 讓 IPC handler 可呼 `scheduler.promote_params_to_live(...)`；(4) 驗證：strategy 名稱在 registry、params_json 是合法 JSON、Live engine 已綁（`has_promote_channel()` 為 true，否則回 409）；(5) 記 `observability.engine_events { event_type='strategist_promote_ok'/'fail' }` + `learning.strategist_promotions` 審計表（含 from_params/to_params/ts）。~1d 含 route + IPC command + 測試。
+
+- [ ] **STRATEGIST-AUTO-PROMOTE-CRITERIA-1** — 自動促升（可選，operator 預設關閉）。**criteria 建議**：demo 上此 strategy 連 **N=10** 輪 `evaluate_cycle` 全部：(a) `validate_recommendation` 通過且 (b) 應用後 demo 的 drawdown 無越界 (`peak_balance - current_balance < max_drawdown_pct`) 且 (c) 應用後 AI recommend delta 收斂到 ≤±5%（代表 param 已穩定）。scheduler 內部持 per-strategy 計數器，達 criteria 自動呼 `promote_params_to_live()`。**Kill-switch**：`OPENCLAW_STRATEGIST_AUTO_PROMOTE=0`（default）/ `=1` 啟用 + optional IPC `patch_strategist_config { auto_promote: bool, criteria_rounds: u32 }`。**對抗性驗證**：需 Live hold-out control（隨機 5-10% strategy 不接促升），每月對比 promoted-params Live edge vs control Live edge 確認非 feedback bias。~2-3d 含 criteria 計數器 + hold-out control + 整合測試。
+
+- [ ] **STRATEGIST-TUNE-TARGET-CONFIG-1** — `tune_target` 運行時可配置（非啟動時 hardcode Demo）。當前 `main.rs:907` 傳 `PipelineKind::Demo` 固定；Phase 5+ 若需要切到 Live 做短期 live tune（不建議但有 argument）或測試環境用 Paper（重新啟用），需加 IPC `patch_strategist_config { tune_target: "demo" | "live" }` + scheduler 動態 swap cmd_tx。注意：swap 需保證 in-flight cycle 完成不跨引擎。**優先級低**，目前 Demo 固定是正確路線。~1d。
+
+- [ ] **STRATEGIST-HISTORY-OBSERVABILITY-1** — 補 promote 歷史 GUI。operator 需看「最近 N 個 promote 事件 + 成功失敗比 + each promoted params 在 Live 上的 7d edge 效果」。綁 `learning.strategist_promotions` 表（由 TRIGGER-1 建）+ `trading.fills` join。~0.5d GUI + 0.5d backend。
+
 ### EDGE P2 架構重工
 - 🟢 **EDGE-P2-2** OI + Liquidation 信號源（給 bb_breakout 加領先信號）
   - ✅ **Phase A OI signal** 2026-04-20 commit `381c542` — bb_breakout confluence 調製；WS `tickers.openInterest` + `oi_delta_pct` → `confluence_score` ±bonus，預設關（bit-identical）；E2 7 findings 全修；engine lib 1770 → **1791**。
