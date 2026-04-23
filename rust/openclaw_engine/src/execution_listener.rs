@@ -46,21 +46,29 @@ pub struct ListenerStats {
 
 /// Internal atomic counters for thread-safe stats tracking.
 /// 用於線程安全統計追蹤的內部原子計數器。
+///
+/// EN: Fields stay `pub(crate)` so auxiliary tasks like the private-WS
+///     status-JSON writer (see `bybit_private_ws_status_writer.rs`) can poll
+///     them without consuming the listener. The listener itself stays the
+///     sole writer; `snapshot()` returns an owned, serialisable `ListenerStats`.
+/// 中文：欄位保持 `pub(crate)`，讓私有 WS status JSON writer 等輔助任務可不
+///     消耗 listener 即可輪詢；listener 本身仍是唯一寫入方，`snapshot()`
+///     回傳可序列化的 `ListenerStats` 擁有式副本。
 #[derive(Debug, Default)]
-struct AtomicStats {
-    total_fills: AtomicU64,
-    total_order_updates: AtomicU64,
-    total_position_updates: AtomicU64,
-    total_balance_updates: AtomicU64,
-    last_event_ts: AtomicU64,
-    total_auth_successes: AtomicU64,
-    total_disconnects: AtomicU64,
+pub struct AtomicStats {
+    pub(crate) total_fills: AtomicU64,
+    pub(crate) total_order_updates: AtomicU64,
+    pub(crate) total_position_updates: AtomicU64,
+    pub(crate) total_balance_updates: AtomicU64,
+    pub(crate) last_event_ts: AtomicU64,
+    pub(crate) total_auth_successes: AtomicU64,
+    pub(crate) total_disconnects: AtomicU64,
 }
 
 impl AtomicStats {
     /// Snapshot current counters into a ListenerStats.
     /// 將當前計數器快照為 ListenerStats。
-    fn snapshot(&self) -> ListenerStats {
+    pub fn snapshot(&self) -> ListenerStats {
         ListenerStats {
             total_fills: self.total_fills.load(Ordering::Relaxed),
             total_order_updates: self.total_order_updates.load(Ordering::Relaxed),
@@ -165,6 +173,16 @@ impl ExecutionListener {
     /// 取得當前彙總統計的快照。
     pub fn stats(&self) -> ListenerStats {
         self.stats.snapshot()
+    }
+
+    /// Share the underlying `Arc<AtomicStats>` so auxiliary tasks (e.g. the
+    /// private-WS status-JSON writer) can poll live counters without
+    /// consuming the listener.
+    ///
+    /// 共享底層 `Arc<AtomicStats>`，讓輔助任務（如私有 WS status JSON
+    /// writer）可不消耗 listener 即輪詢即時計數器。
+    pub fn stats_arc(&self) -> Arc<AtomicStats> {
+        Arc::clone(&self.stats)
     }
 
     /// Run the event dispatch loop. Consumes self.
