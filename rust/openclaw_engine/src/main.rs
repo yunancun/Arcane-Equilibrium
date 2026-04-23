@@ -896,6 +896,103 @@ async fn async_main(
     // - Demo 未綁則 scheduler 整個不 spawn（單行 info log），涵蓋 demo_bindings=None 情境。
     // ------------------------------------------------------------------
     if let Some(ref demo_tx) = demo_cmd_tx {
+        // ------------------------------------------------------------------
+        // STRATEGIST-PARAMS-PERSIST-1 (2026-04-23): restore last-known tuned
+        // params from DB BEFORE spawning the scheduler. Without this, every
+        // engine rebuild silently reverts tuned strategy params to TOML
+        // baseline, resetting the AUTO-PROMOTE stability counter forever.
+        //
+        // Ordering: we restore BEFORE `tokio::spawn(scheduler.run_forever())`
+        // so the scheduler's first cycle (5 min after spawn) observes the
+        // restored state via `fetch_current_params`. Technically the scheduler
+        // sleeps 5 min before its first cycle so a race is impossible, but
+        // restoring first makes the invariant obvious at the call site.
+        //
+        // Fail-soft: DB unavailable / migration V019 not applied → empty vec,
+        // log single warn, engine starts normally. The system degrades to
+        // pre-PERSIST-1 behaviour (TOML baseline) rather than failing to boot.
+        //
+        // STRATEGIST-PARAMS-PERSIST-1（2026-04-23）：spawn scheduler 前先從
+        // DB 恢復上次 tune 好的參數，避免 rebuild 靜默回 TOML baseline 重置
+        // AUTO-PROMOTE 計數器。順序：restore → spawn（雖然 scheduler 5min 後
+        // 才首跑、無 race，但顯式排序讓 invariant 清楚）。Fail-soft：DB 不可用
+        // or V019 未套用 → 空 Vec，engine 正常啟動（退化到 pre-PERSIST-1 行為）。
+        // ------------------------------------------------------------------
+        let demo_mode = openclaw_engine::tick_pipeline::PipelineKind::Demo.db_mode();
+        match openclaw_engine::strategist_scheduler::load_latest_applied_params(
+            &db_pool,
+            demo_mode,
+        )
+        .await
+        {
+            Ok(restored) if !restored.is_empty() => {
+                let total = restored.len();
+                let mut ok = 0usize;
+                for (strategy_name, params_json) in restored {
+                    let (tx, rx) = tokio::sync::oneshot::channel();
+                    if let Err(e) = demo_tx.send(
+                        openclaw_engine::tick_pipeline::PipelineCommand::UpdateStrategyParams {
+                            strategy_name: strategy_name.clone(),
+                            params_json,
+                            response_tx: tx,
+                        },
+                    ) {
+                        warn!(
+                            strategy = %strategy_name,
+                            error = %e,
+                            "STRATEGIST-PARAMS-PERSIST-1: restore IPC send failed \
+                             / 恢復 IPC 發送失敗"
+                        );
+                        continue;
+                    }
+                    match rx.await {
+                        Ok(Ok(_)) => {
+                            ok += 1;
+                        }
+                        Ok(Err(e)) => {
+                            warn!(
+                                strategy = %strategy_name,
+                                error = %e,
+                                "STRATEGIST-PARAMS-PERSIST-1: restore handler rejected \
+                                 / 恢復 handler 拒絕"
+                            );
+                        }
+                        Err(e) => {
+                            warn!(
+                                strategy = %strategy_name,
+                                error = %e,
+                                "STRATEGIST-PARAMS-PERSIST-1: restore response channel closed \
+                                 / 恢復回應 channel 已關閉"
+                            );
+                        }
+                    }
+                }
+                info!(
+                    n = ok,
+                    total,
+                    engine_mode = %demo_mode,
+                    "STRATEGIST-PARAMS-PERSIST-1: restored N tuned params from DB \
+                     / 從 DB 恢復 N 條已調參數",
+                );
+            }
+            Ok(_) => {
+                info!(
+                    engine_mode = %demo_mode,
+                    "STRATEGIST-PARAMS-PERSIST-1: no tuned params to restore (first boot / clean DB) \
+                     / 無需恢復（首次啟動或空表）",
+                );
+            }
+            Err(e) => {
+                warn!(
+                    error = %e,
+                    engine_mode = %demo_mode,
+                    "STRATEGIST-PARAMS-PERSIST-1: restore query failed (fail-soft, \
+                     continuing with TOML baseline) \
+                     / 恢復查詢失敗（容錯跳過，使用 TOML baseline 啟動）"
+                );
+            }
+        }
+
         let ai_client = Arc::new(openclaw_engine::ai_service_client::AiServiceClient::new());
         let scheduler = Arc::new(
             openclaw_engine::strategist_scheduler::StrategistScheduler::new(
