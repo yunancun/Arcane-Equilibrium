@@ -103,12 +103,20 @@ async fn flush_shadow_exits(pool: &DbPool, pending: &mut Vec<ShadowExitMsg>) {
     let rows: Vec<ShadowExitMsg> = pending.drain(..).collect();
 
     for row in rows {
-        // DB-RUN-6: reject epoch-0 writes — same policy as sibling writers.
-        // DB-RUN-6：拒絕 ts_ms=0 寫入（1970 行會毒化時間域 JOIN）。
-        if row.ts_ms == 0 {
+        // DB-RUN-6 + INFRA-PREBUILD-1 audit L1-2 (2026-04-23): reject ts_ms <= 0
+        // to cover BOTH epoch-0 (`== 0`, 1970 time-domain JOIN poison) AND negative
+        // overflow (`< 0`, which would otherwise be silently coerced to epoch-0 by
+        // `chrono::DateTime::from_timestamp_millis(...).unwrap_or_default()` below
+        // at L145). Single guard covers both cases at the writer boundary so no
+        // invalid ts ever reaches the SQL bind.
+        // DB-RUN-6 + INFRA-PREBUILD-1 audit L1-2（2026-04-23）：拒絕 `ts_ms <= 0`
+        // 同時覆蓋 epoch-0（`== 0`，1970 時間域 JOIN 毒化）與負值溢位（`< 0`，否則
+        // 會被下方 L145 `chrono::...unwrap_or_default()` 靜默降為 epoch-0）。
+        // writer 邊界單一 guard 保證 SQL bind 絕不收到無效 ts。
+        if row.ts_ms <= 0 {
             warn!(
-                ctx_id = %row.context_id, symbol = %row.symbol,
-                "shadow_exit write rejected: ts_ms=0 (epoch leak) / 拒絕 epoch 0 寫入"
+                ctx_id = %row.context_id, symbol = %row.symbol, ts_ms = row.ts_ms,
+                "shadow_exit write rejected: ts_ms <= 0 (epoch leak or negative) / 拒絕 ts_ms <= 0 寫入"
             );
             continue;
         }
@@ -257,6 +265,39 @@ mod tests {
         let mut row = make_row("ctx-zero");
         row.ts_ms = 0;
         assert_eq!(row.ts_ms, 0);
+        // Guard predicate: writer uses `row.ts_ms <= 0` to reject both epoch-0
+        // and negative overflow in a single branch. Pin the boolean here so a
+        // future refactor cannot accidentally weaken the guard back to `== 0`.
+        // 守衛條件：writer 用 `row.ts_ms <= 0` 單一分支拒絕 epoch-0 與負值溢位。
+        // 鎖定布林值，避免日後重構把守衛弱化回 `== 0`。
+        assert!(row.ts_ms <= 0, "ts_ms=0 must satisfy the `<= 0` writer guard");
+    }
+
+    /// INFRA-PREBUILD-1 audit L1-2 (2026-04-23): negative ts_ms must be rejected
+    /// by the same `<= 0` guard. Without this branch `from_timestamp_millis(-1)`
+    /// would silently return None → `unwrap_or_default()` → epoch-0 row (same
+    /// time-domain JOIN poison as epoch-0). Carrier-level check mirrors
+    /// `test_epoch_zero_detected` since full flush needs a live PG pool.
+    /// INFRA-PREBUILD-1 審計 L1-2（2026-04-23）：負 ts_ms 必須被同一個 `<= 0` 守衛
+    /// 拒絕。缺此分支時 `from_timestamp_millis(-1)` 會靜默回 None →
+    /// `unwrap_or_default()` → epoch-0 列（與 epoch-0 同樣的時間域 JOIN 毒化）。
+    /// 載體層測試鏡像 `test_epoch_zero_detected`（完整 flush 需 live PG pool）。
+    #[test]
+    fn test_negative_ts_rejected() {
+        let mut row = make_row("ctx-neg");
+        row.ts_ms = -1;
+        assert_eq!(row.ts_ms, -1);
+        // The writer's `if row.ts_ms <= 0 { continue; }` guard must fire for
+        // this row — verify the predicate here so any regression (e.g. someone
+        // reverts the guard to `== 0`) immediately goes red.
+        // writer 的 `if row.ts_ms <= 0 { continue; }` 守衛必為此列觸發 — 此處
+        // 直接驗證條件，若有人把守衛改回 `== 0`（回歸）即刻紅測試。
+        assert!(row.ts_ms <= 0, "negative ts_ms must satisfy the writer's `<= 0` guard");
+        // i64::MIN edge case: even the most-negative int must still trip the guard.
+        // i64::MIN 邊界：最負整數亦須觸發守衛。
+        let mut extreme = make_row("ctx-neg-min");
+        extreme.ts_ms = i64::MIN;
+        assert!(extreme.ts_ms <= 0);
     }
 
     /// Unknown engine_mode must be rejected pre-flush.

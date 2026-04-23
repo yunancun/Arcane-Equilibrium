@@ -417,6 +417,186 @@ mod phys_lock_wrapper_tests {
     // 本地常數鏡像 `build_risk_close_tag` 的前綴 — 重構必須兩邊同步改。
     const PREFIX_LEN: usize = "risk_close:".len();
 
+    // ─────────────────────────────────────────────────────────────────────
+    // INFRA-PREBUILD-1 audit L1-3 (2026-04-23): emit_shadow_exit_observation
+    // decision matrix pure-fn tests. Each case pins (est_net_bps, ml_model_id,
+    // exit_source, disagreed) tuple for one row of the matrix so regression in
+    // `build_ml_inference_shadow` clamp semantics OR `combine_exit_decision`
+    // fusion rules turn a single test red instead of silently drifting shadow
+    // observation distribution in Phase 2.
+    //
+    // Scenario: Physical = `Lock(lock_tag)` on PHYS-LOCK path (Phase 1a).
+    // Matrix (CombineConfig default: ml_confirm_threshold=0.70, override_high=2.0):
+    //
+    // | est_net_bps       | shrunk_score           | exit_source | disagreed | ml_model_id          |
+    // |-------------------|------------------------|-------------|-----------|----------------------|
+    // | None              | None → ml_opt=None     | Physical    | false     | None                 |
+    // | Some(-20.0)       | clamp low → 0.0        | Physical    | false     | Some("shadow_...")   |
+    // | Some(0.0)         | mid → 0.5 (<0.70)      | Physical    | false     | Some("shadow_...")   |
+    // | Some(5.0)         | 0.75 (≥0.70) confirm   | Hybrid      | TRUE      | Some("shadow_...")   |
+    // | Some(20.0)        | clamp high → 1.0       | Hybrid      | TRUE      | Some("shadow_...")   |
+    // | Some(NaN)         | mock→None              | Physical    | false     | None                 |
+    // | Some(INFINITY)    | mock→None              | Physical    | false     | None                 |
+    //
+    // INFRA-PREBUILD-1 審計 L1-3（2026-04-23）：emit_shadow_exit_observation 的
+    // 決策矩陣純函式測試。每 case 固化 (est_net_bps, ml_model_id, exit_source,
+    // disagreed) 四元組，令 `build_ml_inference_shadow` clamp 語意或
+    // `combine_exit_decision` 融合規則回歸時單測紅，避免 Phase 2 shadow 觀測
+    // 分布靜默漂移。Scenario = Physical=`Lock(lock_tag)` 在 PHYS-LOCK 路徑 Phase 1a。
+    // ─────────────────────────────────────────────────────────────────────
+
+    /// Helper: drain one ShadowExitMsg out of an mpsc channel created with
+    /// capacity ≥ 1. Must be called in a `#[tokio::test]` async context OR
+    /// synchronous context using `try_recv` — we pick `try_recv` so the
+    /// decision-matrix cases stay plain `#[test]` (no async runtime needed,
+    /// matches the pure-fn spirit of the audit finding).
+    /// 輔助：從容量 ≥ 1 的 mpsc 通道取一條 ShadowExitMsg；採 `try_recv` 保持
+    /// 純 `#[test]`（無需 async runtime），契合審計要求「pure-fn 單測」。
+    fn recv_one_shadow(
+        rx: &mut tokio::sync::mpsc::Receiver<crate::database::ShadowExitMsg>,
+    ) -> crate::database::ShadowExitMsg {
+        rx.try_recv().expect("emit_shadow_exit_observation must produce exactly one msg")
+    }
+
+    #[test]
+    fn test_emit_shadow_none_edge_gives_physical_no_disagreement() {
+        // Case: est_net_bps=None → build_ml_inference_shadow returns None →
+        // combine falls back to P-only path → (Lock, Physical) source.
+        // Case：est_net_bps=None → mock ML=None → combine 走 P-only → Physical。
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<crate::database::ShadowExitMsg>(4);
+        emit_shadow_exit_observation(
+            "ctx-none", 1_700_000_000_000, "demo", "ma_crossover", "BTCUSDT", 1,
+            "phys_lock_gate4_giveback", None, None,
+            &tx,
+        );
+        let msg = recv_one_shadow(&mut rx);
+        assert_eq!(msg.exit_source, "Physical");
+        assert!(!msg.disagreed);
+        assert!(msg.ml_model_id.is_none());
+        assert!(msg.ml_score.is_none());
+        assert_eq!(msg.physical_action, "Lock");
+        assert_eq!(msg.physical_reason.as_deref(), Some("phys_lock_gate4_giveback"));
+    }
+
+    #[test]
+    fn test_emit_shadow_low_edge_clamps_to_physical() {
+        // Case: est_net_bps=-20.0 → shrunk raw (-20+10)/20 = -0.5 → clamp 0.0.
+        // score=0.0 < 0.70 confirm → physical Lock + ml (any low) falls to Physical.
+        // Case：est_net_bps=-20 → score 0.0（clamp）<0.70 → Physical。
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<crate::database::ShadowExitMsg>(4);
+        emit_shadow_exit_observation(
+            "ctx-low", 1_700_000_000_000, "demo", "ma_crossover", "BTCUSDT", 1,
+            "phys_lock_gate4_giveback", Some(-20.0), None,
+            &tx,
+        );
+        let msg = recv_one_shadow(&mut rx);
+        assert_eq!(msg.exit_source, "Physical");
+        assert!(!msg.disagreed);
+        // Mock ML was built (ml_model_id populated) but score < confirm → Physical.
+        // Mock ML 有被建（ml_model_id 有值），但 score < confirm → Physical。
+        assert_eq!(msg.ml_model_id.as_deref(), Some("shadow_mock_v1"));
+        assert!(msg.ml_score.unwrap().abs() < 1e-6, "score should clamp to 0.0");
+    }
+
+    #[test]
+    fn test_emit_shadow_neutral_edge_below_confirm_threshold() {
+        // Case: est_net_bps=0.0 → score (0+10)/20 = 0.5 < 0.70 → Physical.
+        // Case：est_net_bps=0 → score 0.5 < 0.70 → Physical。
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<crate::database::ShadowExitMsg>(4);
+        emit_shadow_exit_observation(
+            "ctx-neu", 1_700_000_000_000, "demo", "ma_crossover", "BTCUSDT", 1,
+            "phys_lock_gate4_giveback", Some(0.0), None,
+            &tx,
+        );
+        let msg = recv_one_shadow(&mut rx);
+        assert_eq!(msg.exit_source, "Physical");
+        assert!(!msg.disagreed);
+        assert_eq!(msg.ml_model_id.as_deref(), Some("shadow_mock_v1"));
+        assert!((msg.ml_score.unwrap() - 0.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_emit_shadow_confirm_threshold_triggers_hybrid_disagreement() {
+        // Case: est_net_bps=5.0 → score (5+10)/20 = 0.75 ≥ 0.70 → Hybrid.
+        // `phys_only` path (ml=None) → (Lock, Physical). With mock ML → (Lock, Hybrid).
+        // Signal identical but source differs → disagreed=true.
+        // Case：est_net_bps=5 → score 0.75 ≥ 0.70 → Hybrid；source 與 P-only 不同
+        // → disagreed=true。
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<crate::database::ShadowExitMsg>(4);
+        emit_shadow_exit_observation(
+            "ctx-hit", 1_700_000_000_000, "demo", "ma_crossover", "BTCUSDT", 1,
+            "phys_lock_gate4_giveback", Some(5.0), None,
+            &tx,
+        );
+        let msg = recv_one_shadow(&mut rx);
+        assert_eq!(msg.exit_source, "Hybrid");
+        assert!(msg.disagreed, "score ≥ confirm_threshold must flip exit_source to Hybrid → disagreed");
+        assert_eq!(msg.ml_model_id.as_deref(), Some("shadow_mock_v1"));
+        assert!((msg.ml_score.unwrap() - 0.75).abs() < 1e-6);
+        // disagreement_reason should name the source difference.
+        // disagreement_reason 應列出 source 差異。
+        let reason = msg.disagreement_reason.as_deref().unwrap_or("");
+        assert!(reason.contains("Physical"), "disagreement_reason missing Physical: {reason:?}");
+        assert!(reason.contains("Hybrid"), "disagreement_reason missing Hybrid: {reason:?}");
+    }
+
+    #[test]
+    fn test_emit_shadow_high_edge_clamps_to_hybrid() {
+        // Case: est_net_bps=20.0 → score (20+10)/20 = 1.5 → clamp 1.0 ≥ 0.70 → Hybrid.
+        // Case：est_net_bps=20 → score clamp 1.0 → Hybrid。
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<crate::database::ShadowExitMsg>(4);
+        emit_shadow_exit_observation(
+            "ctx-high", 1_700_000_000_000, "demo", "ma_crossover", "BTCUSDT", 1,
+            "phys_lock_gate4_giveback", Some(20.0), None,
+            &tx,
+        );
+        let msg = recv_one_shadow(&mut rx);
+        assert_eq!(msg.exit_source, "Hybrid");
+        assert!(msg.disagreed);
+        assert!((msg.ml_score.unwrap() - 1.0).abs() < 1e-6, "score should clamp to 1.0");
+    }
+
+    #[test]
+    fn test_emit_shadow_nan_edge_degrades_to_physical() {
+        // Case: est_net_bps=NaN → build_ml_inference_shadow is_finite() → None
+        // → ml_opt=None → (Lock, Physical), disagreed=false, ml_model_id=None.
+        // This differs from the combine_layer's safety-net `Disabled` path
+        // because the mock producer rejects NaN *before* combine ever sees it
+        // (defence-in-depth).
+        // Case：est_net_bps=NaN → mock builder is_finite() 拒 → None →
+        // ml_opt=None → Physical。mock 層先拒，輪不到 combine 的 Disabled 安全網
+        //（雙層防禦）。
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<crate::database::ShadowExitMsg>(4);
+        emit_shadow_exit_observation(
+            "ctx-nan", 1_700_000_000_000, "demo", "ma_crossover", "BTCUSDT", 1,
+            "phys_lock_gate4_giveback", Some(f32::NAN), None,
+            &tx,
+        );
+        let msg = recv_one_shadow(&mut rx);
+        assert_eq!(msg.exit_source, "Physical");
+        assert!(!msg.disagreed);
+        assert!(msg.ml_model_id.is_none(), "NaN edge → mock returns None → no ml_model_id");
+        assert!(msg.ml_score.is_none());
+    }
+
+    #[test]
+    fn test_emit_shadow_inf_edge_degrades_to_physical() {
+        // Case: est_net_bps=+Inf → build_ml_inference_shadow is_finite() → None
+        // → Physical. Same defence-in-depth as NaN case.
+        // Case：est_net_bps=+Inf → mock builder is_finite() 拒 → None → Physical。
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<crate::database::ShadowExitMsg>(4);
+        emit_shadow_exit_observation(
+            "ctx-inf", 1_700_000_000_000, "demo", "ma_crossover", "BTCUSDT", 1,
+            "phys_lock_gate4_giveback", Some(f32::INFINITY), None,
+            &tx,
+        );
+        let msg = recv_one_shadow(&mut rx);
+        assert_eq!(msg.exit_source, "Physical");
+        assert!(!msg.disagreed);
+        assert!(msg.ml_model_id.is_none(), "Inf edge → mock returns None → no ml_model_id");
+        assert!(msg.ml_score.is_none());
+    }
+
     // E4-1 audit FUP (2026-04-23): the two regression tests below close the
     // pipeline-out gap flagged by E4-1 against RUST-DOUBLE-PREFIX-1's
     // `build_risk_close_tag` (see `step_6_risk_checks.rs:306/339/352`). The
