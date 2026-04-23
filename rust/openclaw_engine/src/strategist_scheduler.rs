@@ -21,7 +21,7 @@
 
 use crate::ai_service_client::AiServiceClient;
 use crate::strategies::ParamRange;
-use crate::tick_pipeline::PipelineCommand;
+use crate::tick_pipeline::{PipelineCommand, PipelineKind};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -78,12 +78,54 @@ impl PairMetrics {
 }
 
 /// Strategist scheduler configuration / 策略師排程器配置
+///
+/// STRATEGIST-SCHED-CHANNEL-PAPER-ORPHAN-1 (2026-04-23):
+///
+/// 原設計（pre-fix）把 `paper_cmd_tx` 當 tuning target，PAPER-DISABLE-1
+/// 之後 paper 預設不 spawn event_consumer，改由 `main.rs:1143-1157` 的
+/// drain task 接管 paper_cmd_rx。drain task 收到 `GetStrategyParams` 命令
+/// 只做 `if cmd.is_none() { break; }` 後直接丟棄 → 命令裡的 oneshot
+/// `response_tx` 跟著 drop → scheduler `params_rx.await` 得 `RecvError`
+/// → log spam 每 5 min 噴 "channel closed"。
+///
+/// Fix：scheduler 改為 demo-primary 語意（符合「Demo 階段完成測試 → 部署
+/// Live」的 Phase 5+ 路線）：
+///   - `tune_cmd_tx` + `tune_target`：scheduler 學習 + 應用的目標引擎，
+///     當前恆為 Demo（`PipelineKind::Demo`）；若 main.rs 發現 demo 未綁定則
+///     根本不 spawn scheduler（單行 log 退場，不走此結構）
+///   - `promote_cmd_tx`：Live 促升目標 channel（Live 未綁 → None）；
+///     配合 `promote_params_to_live()` method — **此 PR 不自動調用**，
+///     Phase 5 IPC 觸發器 + 促升 criteria 接上即可使用
+///   - SQL 加 `WHERE engine_mode = $tune_target.db_mode()` 對齊 tune 目標，
+///     原跨引擎學習（paper+demo+live_demo 混）在 Phase 5 Live 架構下不再適用
+///
+/// STRATEGIST-SCHED-CHANNEL-PAPER-ORPHAN-1（2026-04-23）：
+///
+/// 原設計把 paper_cmd_tx 當 tune target，PAPER-DISABLE-1 後 drain task
+/// 接管 → 丟棄命令 → oneshot response drop → "channel closed" 假報。
+///
+/// 修：scheduler demo-primary（符 Phase 5+ Demo→Live 促升路線）：
+///   - tune_cmd_tx + tune_target 當前固定 Demo，main.rs 若 demo 未綁則
+///     scheduler 整個不 spawn
+///   - promote_cmd_tx 是 Live 促升 channel（本 PR 僅 stub `promote_params_to_live()`，
+///     Phase 5 加 IPC 觸發器 + criteria）
+///   - SQL 加 engine_mode filter 對齊 tune target
 pub struct StrategistScheduler {
     /// AI service IPC client / AI 服務 IPC 客戶端
     ai_client: Arc<AiServiceClient>,
-    /// Pipeline command sender (paper — primary tuning target).
-    /// 管線命令發送器（paper — 主要調參目標）。
-    cmd_tx: UnboundedSender<PipelineCommand>,
+    /// Tuning-target pipeline command sender (Demo in the current design).
+    /// 調諧目標引擎的管線命令發送器（當前設計恆為 Demo）。
+    tune_cmd_tx: UnboundedSender<PipelineCommand>,
+    /// Which engine this scheduler tunes. Must be Demo or Live — never Paper.
+    /// 排程器調諧的引擎類型。只能是 Demo 或 Live，不接受 Paper。
+    tune_target: PipelineKind,
+    /// Optional Live-promotion command sender. `None` when Live engine is not
+    /// bound (authorization.json unsigned). When `Some(_)`, enables
+    /// `promote_params_to_live()` — not auto-invoked in this PR; Phase 5+ will
+    /// wire the trigger and promotion criteria.
+    /// Live 促升命令 channel。Live 引擎未綁（authorization.json 未簽）時為 None。
+    /// 有值時啟用 `promote_params_to_live()` — 本 PR 不自動調用，Phase 5+ 接觸發器。
+    promote_cmd_tx: Option<UnboundedSender<PipelineCommand>>,
     /// Database pool for fills query / 用於 fills 查詢的資料庫連接池
     db_pool: Arc<crate::database::pool::DbPool>,
     /// Consecutive IPC failure counter for exponential backoff (R4-2).
@@ -96,25 +138,102 @@ pub struct StrategistScheduler {
 impl StrategistScheduler {
     /// Create a new scheduler. Does NOT start the background task.
     /// 創建新排程器。不啟動後台任務。
+    ///
+    /// Contract: `tune_target` MUST be `PipelineKind::Demo` or
+    /// `PipelineKind::Live`. Paper is rejected (paper is disabled-by-default
+    /// per PAPER-DISABLE-1; tuning a drained engine is meaningless). Construction
+    /// with `PipelineKind::Paper` panics to surface the mis-wiring loudly at
+    /// startup rather than silently degrading.
+    /// 契約：tune_target 只能是 Demo 或 Live。傳 Paper 直接 panic（paper 被 drain，
+    /// 調它無意義）— 啟動時顯性失敗好過沈默降級。
     pub fn new(
         ai_client: Arc<AiServiceClient>,
-        cmd_tx: UnboundedSender<PipelineCommand>,
+        tune_cmd_tx: UnboundedSender<PipelineCommand>,
+        tune_target: PipelineKind,
+        promote_cmd_tx: Option<UnboundedSender<PipelineCommand>>,
         db_pool: Arc<crate::database::pool::DbPool>,
         cancel: CancellationToken,
     ) -> Self {
+        assert!(
+            matches!(tune_target, PipelineKind::Demo | PipelineKind::Live),
+            "StrategistScheduler tune_target must be Demo or Live, got {:?} \
+             / tune_target 只能是 Demo 或 Live，拒絕 {:?}",
+            tune_target, tune_target,
+        );
         Self {
             ai_client,
-            cmd_tx,
+            tune_cmd_tx,
+            tune_target,
+            promote_cmd_tx,
             db_pool,
             consecutive_failures: AtomicU32::new(0),
             cancel,
         }
     }
 
+    /// Tune target introspection (mainly for tests + status logging).
+    /// tune target 讀取（主要給測試 + 狀態日誌用）。
+    pub fn tune_target(&self) -> PipelineKind {
+        self.tune_target
+    }
+
+    /// Whether a Live-promotion channel is wired. `false` when Live engine
+    /// is not bound at startup (authorization.json unsigned).
+    /// Live 促升 channel 是否接線。Live 引擎未綁時為 false。
+    pub fn has_promote_channel(&self) -> bool {
+        self.promote_cmd_tx.is_some()
+    }
+
+    /// Promote validated params from the tune target (Demo) to Live.
+    /// 從 tune target（Demo）促升已驗證參數到 Live。
+    ///
+    /// **Not invoked internally in this PR.** Phase 5+ will wire:
+    ///   - Promotion criteria (N consecutive stable demo applies + no drawdown breach)
+    ///   - IPC trigger (operator `POST /api/v1/strategist/promote`)
+    /// This method exists so that wiring becomes additive, not structural.
+    ///
+    /// Returns `Err` if:
+    ///   - `promote_cmd_tx` is `None` (Live engine not bound)
+    ///   - Send fails (Live engine's cmd channel closed — reports up)
+    ///   - UpdateStrategyParams handler returns error (strategy unknown / invalid params)
+    ///
+    /// **本 PR 不會自動調用。** Phase 5+ 再補：
+    ///   - 促升 criteria（N 輪穩定 demo 應用 + 無 drawdown 越界）
+    ///   - IPC 觸發器（operator `POST /api/v1/strategist/promote`）
+    /// 此方法存在是為了讓接線變成疊加而非重構。
+    pub async fn promote_params_to_live(
+        &self,
+        strategy_name: &str,
+        params_json: &str,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let live_tx = self.promote_cmd_tx.as_ref().ok_or(
+            "promote_params_to_live: Live engine not bound (promote_cmd_tx is None) \
+             / promote_params_to_live：Live 引擎未綁定"
+        )?;
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        live_tx.send(PipelineCommand::UpdateStrategyParams {
+            strategy_name: strategy_name.to_string(),
+            params_json: params_json.to_string(),
+            response_tx: tx,
+        })?;
+        rx.await??;
+        info!(
+            strategy = %strategy_name,
+            from = ?self.tune_target,
+            to = ?PipelineKind::Live,
+            "strategist params promoted to Live / 策略師參數已促升至 Live",
+        );
+        Ok(())
+    }
+
     /// Run the scheduler forever (until cancelled). Spawn via tokio::spawn.
     /// 永久運行排程器（直到取消）。通過 tokio::spawn 啟動。
     pub async fn run_forever(self: Arc<Self>) {
-        info!("StrategistScheduler started (5-min cycle) / 策略師排程器已啟動（5 分鐘週期）");
+        info!(
+            tune_target = ?self.tune_target,
+            has_promote_channel = self.has_promote_channel(),
+            "StrategistScheduler started (5-min cycle) / 策略師排程器已啟動（5 分鐘週期）",
+        );
 
         loop {
             tokio::select! {
@@ -277,12 +396,27 @@ impl StrategistScheduler {
         // (risk_checks.rs format!("risk_close:{}",) / strategy emit
         // `strategy_close:{tag}` / IPC close handler `ipc_close_symbol` /
         // `ipc_close:{tag}`).
+        //
+        // STRATEGIST-SCHED-CHANNEL-PAPER-ORPHAN-1 (2026-04-23): additional
+        // `engine_mode = $2` filter aligns metrics source with `tune_target`.
+        // Pre-fix the SQL was cross-engine (paper + demo + live_demo + live
+        // mixed), which was incoherent in the Phase 5+ "Demo trains, Live
+        // receives promoted params" architecture — if scheduler tunes Demo
+        // engine, it should learn from Demo fills only (otherwise live_demo
+        // behaviour pollutes demo tuning signal). Paper is tolerated in the
+        // filter as a value even though the enum rejects it in `new()` — the
+        // `db_mode()` string goes through as-is with no special-casing.
         // R5-3：列名為 ts, strategy_name（非 created_at, strategy）
         // R5-4：HAVING count(*) >= 30 — 跳過低成交對
         // STRATEGIST-SCHED-CLOSE-FILTER-1（EDGE-DIAG-1 副產品 2026-04-23）：
         // `trading.fills.strategy_name` 混合入場策略與三類 close-path reasons；
         // 修復前 scheduler 把整段 reason 當策略名 IPC 致每 5min 噴 channel-closed
         // WARN，掩蓋真正失敗。三條 NOT LIKE 涵蓋已知 close prefix。
+        //
+        // STRATEGIST-SCHED-CHANNEL-PAPER-ORPHAN-1（2026-04-23）：新增
+        // `engine_mode = $2` filter 對齊 tune_target。原跨引擎 SQL 在
+        // 「Demo 訓練、Live 受促升」架構下不合理 — 調 Demo 就該只學 Demo。
+        let tune_mode = self.tune_target.db_mode();
         let rows = sqlx::query_as::<_, PairMetricsRow>(
             r#"
             SELECT
@@ -297,6 +431,7 @@ impl StrategistScheduler {
                 ) AS win_rate
             FROM trading.fills
             WHERE ts > now() - interval '7 days'
+              AND engine_mode = $2
               AND strategy_name IS NOT NULL
               AND strategy_name NOT LIKE 'risk_close:%'
               AND strategy_name NOT LIKE 'strategy_close:%'
@@ -307,6 +442,7 @@ impl StrategistScheduler {
             "#,
         )
         .bind(MIN_SAMPLE_COUNT)
+        .bind(tune_mode)
         .fetch_all(pool)
         .await?;
 
@@ -330,7 +466,7 @@ impl StrategistScheduler {
     ) -> Result<(Value, Vec<ParamRange>), Box<dyn std::error::Error + Send + Sync>> {
         // Get current params / 獲取當前參數
         let (params_tx, params_rx) = tokio::sync::oneshot::channel();
-        self.cmd_tx.send(PipelineCommand::GetStrategyParams {
+        self.tune_cmd_tx.send(PipelineCommand::GetStrategyParams {
             strategy_name: strategy_name.to_string(),
             response_tx: params_tx,
         })?;
@@ -339,7 +475,7 @@ impl StrategistScheduler {
 
         // Get param ranges / 獲取參數範圍
         let (ranges_tx, ranges_rx) = tokio::sync::oneshot::channel();
-        self.cmd_tx.send(PipelineCommand::GetParamRanges {
+        self.tune_cmd_tx.send(PipelineCommand::GetParamRanges {
             strategy_name: strategy_name.to_string(),
             response_tx: ranges_tx,
         })?;
@@ -358,7 +494,7 @@ impl StrategistScheduler {
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let params_json = serde_json::to_string(recommendation)?;
         let (tx, rx) = tokio::sync::oneshot::channel();
-        self.cmd_tx.send(PipelineCommand::UpdateStrategyParams {
+        self.tune_cmd_tx.send(PipelineCommand::UpdateStrategyParams {
             strategy_name: strategy_name.to_string(),
             params_json,
             response_tx: tx,
@@ -746,11 +882,19 @@ mod tests {
     #[test]
     fn test_backoff_intervals() {
         // Verify the backoff intervals are correct
+        // 驗證退避間隔正確
         let ai = Arc::new(AiServiceClient::new());
         let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
         let pool = Arc::new(crate::database::pool::DbPool::disconnected());
         let cancel = CancellationToken::new();
-        let sched = StrategistScheduler::new(ai, tx, pool, cancel);
+        let sched = StrategistScheduler::new(
+            ai,
+            tx,
+            PipelineKind::Demo,
+            None,
+            pool,
+            cancel,
+        );
 
         assert_eq!(sched.current_interval(), Duration::from_secs(300));
         sched.consecutive_failures.store(1, Ordering::Relaxed);
@@ -759,5 +903,194 @@ mod tests {
         assert_eq!(sched.current_interval(), Duration::from_secs(3_600));
         sched.consecutive_failures.store(5, Ordering::Relaxed);
         assert_eq!(sched.current_interval(), Duration::from_secs(14_400));
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // STRATEGIST-SCHED-CHANNEL-PAPER-ORPHAN-1 regression tests (2026-04-23).
+    // Verify:
+    //   1. ctor rejects Paper tune_target (panics)
+    //   2. ctor accepts Demo / Live
+    //   3. tune_target() + has_promote_channel() getters
+    //   4. promote_params_to_live returns Err when no promote channel
+    //   5. promote_params_to_live sends on the promote channel + awaits response
+    // STRATEGIST-SCHED-CHANNEL-PAPER-ORPHAN-1 回歸測試（2026-04-23）。
+    // ═══════════════════════════════════════════════════════════════════
+
+    fn mk_deps() -> (
+        Arc<AiServiceClient>,
+        Arc<crate::database::pool::DbPool>,
+        CancellationToken,
+    ) {
+        (
+            Arc::new(AiServiceClient::new()),
+            Arc::new(crate::database::pool::DbPool::disconnected()),
+            CancellationToken::new(),
+        )
+    }
+
+    #[test]
+    #[should_panic(expected = "tune_target must be Demo or Live")]
+    fn test_new_rejects_paper_tune_target() {
+        // Paper is drained-and-dropped (PAPER-DISABLE-1) — tuning it is the
+        // exact bug we're fixing, so the ctor panics defensively.
+        // Paper 是 PAPER-DISABLE-1 後的 drained engine，調它正是 bug 來源，
+        // ctor 防禦性 panic 拒絕。
+        let (ai, pool, cancel) = mk_deps();
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+        let _ = StrategistScheduler::new(
+            ai,
+            tx,
+            PipelineKind::Paper,
+            None,
+            pool,
+            cancel,
+        );
+    }
+
+    #[test]
+    fn test_new_accepts_demo_without_promote_channel() {
+        // Canonical current deployment: Demo tune, no Live promote channel
+        // (authorization.json unsigned).
+        // 標準部署：Demo tune，Live 未接（authorization.json 未簽）。
+        let (ai, pool, cancel) = mk_deps();
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+        let sched = StrategistScheduler::new(
+            ai,
+            tx,
+            PipelineKind::Demo,
+            None,
+            pool,
+            cancel,
+        );
+        assert_eq!(sched.tune_target(), PipelineKind::Demo);
+        assert!(!sched.has_promote_channel());
+    }
+
+    #[test]
+    fn test_new_accepts_demo_with_live_promote_channel() {
+        // Phase 5+ deployment: Demo tune, Live promote wired (auth signed).
+        // Phase 5+ 部署：Demo tune，Live 促升已接線（authorization 已簽）。
+        let (ai, pool, cancel) = mk_deps();
+        let (tune_tx, _tune_rx) = tokio::sync::mpsc::unbounded_channel();
+        let (live_tx, _live_rx) = tokio::sync::mpsc::unbounded_channel();
+        let sched = StrategistScheduler::new(
+            ai,
+            tune_tx,
+            PipelineKind::Demo,
+            Some(live_tx),
+            pool,
+            cancel,
+        );
+        assert_eq!(sched.tune_target(), PipelineKind::Demo);
+        assert!(sched.has_promote_channel());
+    }
+
+    #[tokio::test]
+    async fn test_promote_params_to_live_err_when_no_channel() {
+        // has_promote_channel() == false → promote is unavailable; return Err
+        // without panicking / blocking.
+        // 無促升 channel 時應回 Err，不 panic、不 block。
+        let (ai, pool, cancel) = mk_deps();
+        let (tune_tx, _tune_rx) = tokio::sync::mpsc::unbounded_channel();
+        let sched = StrategistScheduler::new(
+            ai,
+            tune_tx,
+            PipelineKind::Demo,
+            None,
+            pool,
+            cancel,
+        );
+        let result = sched
+            .promote_params_to_live("grid_trading", r#"{"cooldown_ms":60000}"#)
+            .await;
+        assert!(result.is_err());
+        let msg = format!("{}", result.unwrap_err());
+        assert!(
+            msg.contains("Live engine not bound"),
+            "expected 'Live engine not bound' in error, got: {}",
+            msg,
+        );
+    }
+
+    #[tokio::test]
+    async fn test_promote_params_to_live_sends_and_awaits_response() {
+        // With a promote channel wired, verify:
+        //   (a) the exact command shape delivered (UpdateStrategyParams with
+        //       strategy_name + params_json matching inputs)
+        //   (b) the method awaits the oneshot response and returns Ok on Ok(_)
+        // 接線後驗證：(a) 命令形狀正確 (b) 等待 oneshot 回應後回 Ok。
+        let (ai, pool, cancel) = mk_deps();
+        let (tune_tx, _tune_rx) = tokio::sync::mpsc::unbounded_channel();
+        let (live_tx, mut live_rx) =
+            tokio::sync::mpsc::unbounded_channel::<PipelineCommand>();
+        let sched = StrategistScheduler::new(
+            ai,
+            tune_tx,
+            PipelineKind::Demo,
+            Some(live_tx),
+            pool,
+            cancel,
+        );
+
+        // Spawn a stub handler that responds with Ok("ok") to any
+        // UpdateStrategyParams command on the Live channel.
+        // 啟動 stub handler 對 Live channel 上的 UpdateStrategyParams 回 Ok。
+        let handler = tokio::spawn(async move {
+            let mut seen_strategy: Option<String> = None;
+            let mut seen_params: Option<String> = None;
+            if let Some(cmd) = live_rx.recv().await {
+                if let PipelineCommand::UpdateStrategyParams {
+                    strategy_name,
+                    params_json,
+                    response_tx,
+                } = cmd
+                {
+                    seen_strategy = Some(strategy_name);
+                    seen_params = Some(params_json);
+                    let _ = response_tx.send(Ok("ok".to_string()));
+                }
+            }
+            (seen_strategy, seen_params)
+        });
+
+        let result = sched
+            .promote_params_to_live("ma_crossover", r#"{"adx_threshold":22}"#)
+            .await;
+        assert!(result.is_ok(), "expected Ok, got: {:?}", result.err());
+
+        let (seen_strategy, seen_params) = handler.await.expect("handler panicked");
+        assert_eq!(seen_strategy.as_deref(), Some("ma_crossover"));
+        assert_eq!(seen_params.as_deref(), Some(r#"{"adx_threshold":22}"#));
+    }
+
+    #[tokio::test]
+    async fn test_promote_params_to_live_err_on_handler_failure() {
+        // Handler returns Err → promote_params_to_live propagates it.
+        // Handler 回 Err → promote 應傳播。
+        let (ai, pool, cancel) = mk_deps();
+        let (tune_tx, _tune_rx) = tokio::sync::mpsc::unbounded_channel();
+        let (live_tx, mut live_rx) =
+            tokio::sync::mpsc::unbounded_channel::<PipelineCommand>();
+        let sched = StrategistScheduler::new(
+            ai,
+            tune_tx,
+            PipelineKind::Demo,
+            Some(live_tx),
+            pool,
+            cancel,
+        );
+
+        tokio::spawn(async move {
+            if let Some(cmd) = live_rx.recv().await {
+                if let PipelineCommand::UpdateStrategyParams { response_tx, .. } = cmd {
+                    let _ = response_tx.send(Err("strategy unknown".to_string()));
+                }
+            }
+        });
+
+        let result = sched
+            .promote_params_to_live("unknown_strategy", "{}")
+            .await;
+        assert!(result.is_err());
     }
 }
