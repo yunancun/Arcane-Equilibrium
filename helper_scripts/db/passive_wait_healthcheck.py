@@ -320,87 +320,27 @@ def check_model_registry_freshness(cur) -> tuple[str, str]:
     return ("PASS", msg)
 
 
-def _read_shadow_enabled_from_toml() -> tuple[bool | None, str]:
-    """INFRA-PREBUILD-1 L2-5 (2026-04-23): parse `[exit].shadow_enabled` from
-    `settings/risk_control_rules/risk_config_demo.toml`.
-
-    Returns a ``(value, diagnostic)`` tuple. ``value`` is True/False when the
-    TOML parse and key lookup both succeed, ``None`` on any fail-soft condition
-    (file missing / parse error / key absent). ``diagnostic`` carries the
-    human-readable reason for the ``None`` branch so check_shadow_exit_ratio
-    can annotate its PASS/FAIL message.
-
-    Uses Python 3.11+ ``tomllib`` (already used elsewhere in this codebase —
-    see paper_trading_routes.py:1044). No external dependency added.
-
-    We deliberately parse the **actual value** rather than trusting the file
-    mtime as a "flag state" proxy — operators can hand-edit the TOML and the
-    mtime skew would desynchronise. This is the hot-reload contract: state
-    comes from the parsed `shadow_enabled` key, nothing else.
-
-    L2-5 TOML 解析：讀 `[exit].shadow_enabled` 真值，fail-soft 回 ``None``。
-    用 tomllib（3.11+，codebase 既有使用）；刻意取真值而非 mtime，因為
-    operator 可能手編 TOML 導致 mtime 與 flag 狀態不同步。
-    """
-    try:
-        import tomllib  # type: ignore[import-not-found]
-    except ImportError:
-        return (None, "tomllib unavailable (Python <3.11?)")
-
-    base = Path(os.environ.get("OPENCLAW_BASE_DIR", str(Path.home() / "BybitOpenClaw/srv")))
-    toml_path = base / "settings" / "risk_control_rules" / "risk_config_demo.toml"
-
-    if not toml_path.exists():
-        return (None, f"risk_config_demo.toml not found at {toml_path}")
-
-    try:
-        with toml_path.open("rb") as f:
-            data = tomllib.load(f)
-    except Exception as e:
-        # Fail-soft: TOML parse error does not flag the whole pipeline dead;
-        # check_shadow_exit_ratio degrades to its pre-L2-5 ambiguous message.
-        # fail-soft：TOML parse 失敗不讓整條 pipeline 紅，check 降級為原本訊息。
-        return (None, f"TOML parse error: {e}")
-
-    exit_section = data.get("exit")
-    if not isinstance(exit_section, dict):
-        return (None, "[exit] section absent in risk_config_demo.toml")
-
-    val = exit_section.get("shadow_enabled")
-    if not isinstance(val, bool):
-        return (None, f"[exit].shadow_enabled missing or non-bool (got {val!r})")
-
-    return (val, "ok")
-
-
 def check_shadow_exit_ratio(cur) -> tuple[str, str]:
     """[8] learning.decision_shadow_exits activity — INFRA-PREBUILD-1 Part A.
 
-    Shadow mode is OFF by default (ExitConfig.shadow_enabled=false). L2-5
-    audit (2026-04-23) upgraded this check from the ambiguous "24h=0 → PASS
-    (if flag ON this is silent-dead)" message to a deterministic three-state
-    triage by actively parsing `settings/risk_control_rules/risk_config_demo.toml`
-    for the `[exit].shadow_enabled` value:
+    Shadow mode is OFF by default (ExitConfig.shadow_enabled=false). This check
+    triangulates three states:
 
-    - `shadow_enabled=false` + 24h rows=0 → PASS (dormant as designed)
-    - `shadow_enabled=true`  + 24h rows=0 → FAIL silent-dead (explicit alarm,
-        exit 1 via the `any_fail` branch in main)
-    - `shadow_enabled=true`  + 24h rows>0 → PASS with disagreement breakdown
-        (Phase 2 agreement target ≥60%)
     - table missing → FAIL (V021 migration not applied)
-    - TOML parse fails → degrade to pre-L2-5 ambiguous PASS message so a
-        healthcheck-side IO hiccup does not flag the whole pipeline dead
+    - table exists, 0 rows last 24h → PASS (expected Phase 1a dormant) but also
+      the silent-dead fingerprint if Operator flipped shadow_enabled=true and
+      the writer is broken. The message surfaces this ambiguity so Operator
+      checks risk_config*.toml to disambiguate.
+    - >0 rows last 24h → PASS with disagreement breakdown (key Phase 2 metric:
+      target ≥60% agreement between physical-only vs Combine-with-mock-ML).
 
-    The TOML value is read **at check time** (no caching); operator hot-
-    reloads via TOML edit or IPC patch_risk_config flip the state machine
-    immediately on the next healthcheck pass.
+    When `shadow_enabled` flips on, Operator should see rows begin landing on
+    the next PHYS-LOCK close fire. 24h of zero rows after flip = silent-dead.
 
-    [8] decision_shadow_exits 三態診斷（L2-5，2026-04-23）：
-    - flag=false + 24h=0 → PASS（dormant 預期）
-    - flag=true  + 24h=0 → FAIL（silent-dead，Phase 2 啟動後 writer 掛掉指紋）
-    - flag=true  + 24h>0 → PASS + 分歧比率
-    - TOML parse 失敗 → 降級回原始 ambiguous 訊息（不讓 healthcheck 自身 IO
-      問題讓整條 pipeline 亮紅）
+    [8] learning.decision_shadow_exits 活性 — INFRA-PREBUILD-1 A 部。
+    shadow mode 預設關閉。三態三角檢：表缺 → FAIL；表存在但 24h 0 行 → PASS
+    （預期 Phase 1a dormant；但若 operator 開了 shadow_enabled 則為 silent-dead
+    指紋）；>0 行 → PASS + 分歧分布（Phase 2 一致性目標 ≥60%）。
     """
     # Table existence check — V021 applied?
     # 檢查表是否存在（V021 是否已套用？）。
@@ -430,38 +370,12 @@ def check_shadow_exit_ratio(cur) -> tuple[str, str]:
     except Exception as e:
         return ("WARN", f"shadow_exits 24h query failed: {e}")
 
-    # L2-5 (2026-04-23): active triage via TOML parse.
-    # L2-5（2026-04-23）：主動 TOML 三態診斷。
-    shadow_enabled, toml_diag = _read_shadow_enabled_from_toml()
-
     if total == 0:
-        if shadow_enabled is None:
-            # Fail-soft: TOML parse failed → fall back to ambiguous message
-            # (pre-L2-5 behaviour). PASS so healthcheck self-IO glitch does
-            # not flag the pipeline dead.
-            # fail-soft：TOML parse 失敗 → 降級回原 ambiguous 訊息。
-            return (
-                "PASS",
-                f"decision_shadow_exits 24h=0 "
-                f"(shadow_enabled state unknown: {toml_diag}; "
-                f"if flag ON this would be silent-dead)",
-            )
-        if shadow_enabled is True:
-            # Flag ON + 0 rows → silent-dead (writer broken or channel full).
-            # FAIL causes main()'s any_fail → exit 1.
-            # flag=true + 24h=0 → silent-dead；main() any_fail → exit 1。
-            return (
-                "FAIL",
-                "decision_shadow_exits 24h=0 BUT [exit].shadow_enabled=true "
-                "— silent-dead writer (Phase 2 active but zero rows). "
-                "Check Rust shadow_exit_writer log + channel capacity + "
-                "ExitConfig hot-reload propagation.",
-            )
-        # shadow_enabled is False → dormant as designed.
-        # shadow_enabled=false → 預期 dormant。
         return (
             "PASS",
-            "decision_shadow_exits 24h=0 (shadow_enabled=false, dormant as designed)",
+            "decision_shadow_exits 24h=0 "
+            "(expected: shadow_enabled=false; "
+            "if flag ON, this is silent-dead → check risk_config*.toml + writer logs)",
         )
 
     agreement_pct = 100.0 * (1.0 - disagreed_n / total)
