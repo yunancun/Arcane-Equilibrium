@@ -119,14 +119,19 @@ run_tick() {
     if [[ -f "${edge_json}" ]]; then
         local edge_mtime edge_summary
         edge_mtime="$(stat -c '%y' "${edge_json}" 2>/dev/null | cut -d. -f1 || echo unknown)"
-        edge_summary="$(python3 - "${edge_json}" <<'PY' 2>/dev/null || echo "cells=? parse_error")
+        # 用 python3 -c 取代 heredoc，避開「heredoc-in-$(...)」bash 解析坑
+        # （`<<'PY' ... PY)"` 會讓 bash 提前在 line-1 末尾的 `)` 關閉 substitution，
+        # 印出多餘 `)` 並警告 unterminated here-document）。
+        # Use `python3 -c` instead of a heredoc to dodge a bash parser quirk where
+        # `<<'PY' ... PY)"` causes bash to close the command substitution at the
+        # first `)` on the opening line, emitting a stray `)` and an
+        # "unterminated here-document" warning.
+        edge_summary="$(python3 -c '
 import json, sys
-p = sys.argv[1]
-with open(p) as f:
+with open(sys.argv[1]) as f:
     d = json.load(f)
 meta = {"grand_mean_bps", "generated_at", "n_total", "version"}
-cells = {k: v for k, v in d.items()
-         if isinstance(v, dict) and not k.startswith("_") and k not in meta}
+cells = {k: v for k, v in d.items() if isinstance(v, dict) and not k.startswith("_") and k not in meta}
 total = len(cells)
 populated = sum(1 for v in cells.values() if v.get("shrunk_bps") is not None)
 prefixes = {}
@@ -135,8 +140,7 @@ for k in cells:
     prefixes[pfx] = prefixes.get(pfx, 0) + 1
 pfx_str = ",".join(f"{p}:{n}" for p, n in sorted(prefixes.items())) or "NONE"
 print(f"cells={populated}/{total} prefixes[{pfx_str}]")
-PY
-)"
+' "${edge_json}" 2>/dev/null || echo "cells=? parse_error")"
         echo "[edge_estimates] mtime=${edge_mtime} ${edge_summary}"
     else
         echo "[edge_estimates] file missing"
