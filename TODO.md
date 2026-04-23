@@ -108,7 +108,7 @@ git status && git log --oneline -5
 ### 🔧 健康檢查基礎設施 / Healthcheck infra
 
 - ✅ **PASSIVE-WAIT-HEALTHCHECK-1** 2026-04-22 commit `edc4a21` — 新 `helper_scripts/db/passive_wait_healthcheck.py`，單命令 READ-ONLY 檢查 7 個關鍵 pipeline（close_fills / label_backfill / exit_features_writer / phys_lock / micro_profit / trailing_stop / edge_estimates freshness）。Exit 1 = silent-dead 自動偵測。**2026-04-22 首跑結果：FAIL [4] + WARN [5][7]**（符合 P0-13/14/15 預期）。建議 operator cron 每 6h 自動跑。
-- [ ] **CLAUDE.md §七 新規則提議**：任何「被動等待 Nd/Nw」TODO 必須同步附可執行 healthcheck（通常 1 SQL/oneliner 加入 `passive_wait_healthcheck.py`）。缺此項不允許登記被動等待 TODO。
+- ✅ **CLAUDE.md §七 新規則** 2026-04-23 commit `b0b47b5` — 已加「被動等待 TODO 必附 healthcheck」4 條規則 + 3 情境例（21d demo / 7d replay / 1w PostOnly）。E2 必查 policy。
 
 ### P0-2 · LG-1 Demo 21d 觀察期 🕰️
 - **起算**：當前 PID 2217378（2026-04-18 20:13 local）
@@ -463,12 +463,16 @@ git status && git log --oneline -5
 - E4-4: `test_pipeline_kind_db_mode_demo_is_lowercase_snake` 釘 `db_mode()` 返 `"demo"` 小寫防漂移
 - 測試：engine lib 1850 → **1851 passed**，Python obs+leader 11 → **12 passed**
 
-**⬜ 延後（本 session 未做，非 BLOCKER，下次疊加）**：
-- [ ] **E4-1** `step_6_risk_checks.rs:306/339/352` 三個 `execute_position_close` / `emit_close_fill` 呼叫點的 close_tag end-to-end 測試（當前只有 helper `build_risk_close_tag` 單元測，無 pipeline-out 斷言；Phase 5 促升 Live 前補）
-- [ ] **E4-5** `ipc_server/handlers/budget.rs` + `handlers/risk.rs` 端到端 JSON-RPC response 測試（20 處 `param_extractor` 替換聲稱 byte-identity 錯誤訊息但無 handler-level 測試攔截；Phase 5 促升 Live 前補 min 1 happy + 1 error per handler）
-- [ ] **E4-3** Leader election 邊界：mkdir fail / open fail / `OPENCLAW_SCHEDULER_LEADER` 非 `"0"` 非法值的 fallback test + scheduler shutdown primitive（當前 `_reset_for_tests` 不釋放 daemon thread 是 race workaround 非根治；pytest CI flakiness 可能）
-- [ ] **Cross-gap** `trading.intents` / `trading.fills` 持久化 gap：Strategist tune 只進 `pipeline_snapshot_*.json`，engine restart 從 TOML 重讀，tuned params 丟失。Phase 5+ STRATEGIST-AUTO-PROMOTE-CRITERIA-1 要依賴「N 輪穩定 demo apply」— 但每 rebuild 重置計數器 → 永遠不達 criteria。解：加 `learning.strategist_applied_params` 表持久化 + engine startup 讀回套用
-- [ ] **Cross-gap** Operator Grafana / docs / adhoc SQL 掃 `risk_close:risk_close:` 殘留 pattern（commit `46a9cad` 收單前綴後任何依賴舊格式的外部查詢會失效；historical 17 rows 保留稽核用）
+**✅ 本 session 已閉合**（commit `b0b47b5` + FA-BLOCKER fix）：
+- ✅ **E4-1** commit `b0b47b5` + 補強 — `helpers.rs` +3 regression test：(a) `no_new_literal_risk_close_format_outside_helpers_rs` 掃 `format!("risk_close:{..}")` literal (b) `no_new_literal_risk_close_phys_lock_outside_helpers_rs` 掃 bare `"risk_close:phys_lock_..."` literal（FA post-commit audit BLOCKER 補）(c) `build_risk_close_tag_is_idempotent` 契約 idempotency 固化。
+- ✅ **E4-5** commit `b0b47b5` — `ipc_server/tests.rs` +6 handler e2e test（3 handler × 2 path），byte-identity 斷言 3 條錯誤訊息。
+- ✅ **E4-3** commit `b0b47b5` — `test_leader_lock.py` +4 test / +7 parametrize（mkdir fail / open fail / env 非 `"0"` 4 值 / `_reset_for_tests` idempotent）。Shutdown primitive 延後 → 見下 `SCHEDULER-SHUTDOWN-PRIMITIVE-1`。
+- ✅ **Cross-gap Grafana/SQL pattern 掃描** commit `b0b47b5` B1 audit — docs/scripts/grafana/sql/program_code/settings 全空；Rust executable 只 helpers.rs test 斷言 + risk_checks.rs 單一 emission 點；其他 4 hits 為 doc comment 無 runtime 影響。0 code 改動。
+
+**⬜ 仍延後（新增 + 保留）**：
+- [ ] **Cross-gap persistence** `trading.intents` / `trading.fills` 持久化 gap：Strategist tune 只進 `pipeline_snapshot_*.json`，engine restart 從 TOML 重讀，tuned params 丟失。Phase 5+ STRATEGIST-AUTO-PROMOTE-CRITERIA-1 要依賴「N 輪穩定 demo apply」— 但每 rebuild 重置計數器 → 永遠不達 criteria。解：加 `learning.strategist_applied_params` 表持久化 + engine startup 讀回套用。~1-2d。
+- [ ] **SCHEDULER-SHUTDOWN-PRIMITIVE-1（P2，2026-04-23 post-review 登記）** — `EdgeEstimatorScheduler._loop` 的 `while True:` 無 stop_event + `_reset_for_tests()` 不 join daemon thread → pytest CI 慢機器有 flakiness 風險（合 leader_lock + observability test 約 33 test / session 內 daemon thread 累計可達 5+ 條）。修：(1) `__init__` 加 `self._stop = threading.Event()` (2) `_loop` 改 `while not self._stop.is_set(): ...; self._stop.wait(self._interval_s)` (3) 加 `shutdown(join_timeout=5.0)` method (4) `_reset_for_tests` 呼 `shutdown()` + `thread.join(timeout=5.0)`。**重啟條件**：pytest CI 實際出現 flaky（>1/20 run）or 需支援 graceful scheduler restart（Live 熱升級）。~0.5-1d 含測試。
+- [ ] **IPC-SERVER-TESTS-SPLIT-1（P1，2026-04-23 post-review 登記）** — `rust/openclaw_engine/src/ipc_server/tests.rs` 現 **1847 行**（commit `b0b47b5` 前 1543，本 commit +304）**越 §九 1200 硬上限 647 行**。違規非本 commit 首次引入（`d92f25d` PIPELINE-SLOT-1 Phase 3 從 1062 → 1543 時已越界），但本 commit 惡化 → 必須立即分拆。參照 `3d67a99` TICK-PIPELINE-MOD-SPLIT-1 sibling-child-module 拆法：`ipc_server/tests/{mod.rs, budget.rs, risk.rs, scanner.rs, teacher.rs, strategy.rs, governance.rs, lifecycle.rs}`。**重啟條件**：本項**已違規**，應本週內做掉；延後期間不再加 ipc_server/tests.rs 新 test。~1d。
 
 ### 可觀測性（P1-19 RCA 副產品，2026-04-22 新開）
 - ✅ **RUST-DOUBLE-PREFIX-1** 2026-04-23 commit `46a9cad` — 採 Option B：`step_6_risk_checks.rs` 單一 emission 點新增 `build_risk_close_tag` helper（already 含 `risk_close:` 則直用，否則 wrap）。不選 A 因 `strip_phys_lock_prefix` + helpers 既有 test 依賴 PHYS-LOCK reason 帶顯式前綴。+2 regression tests（`phys_lock_reasons_do_not_double_prefix` / `non_phys_lock_reasons_get_single_prefix`）。`passive_wait_healthcheck.py` pattern 收回嚴格 `'risk_close:phys_lock_%'`（留容錯會遮蔽 regression）。engine lib Linux release 1837 → **1839** / 0 failed。**Runtime 待 `--rebuild` 部署**，deploy 後 `trading.fills.strategy_name` 單前綴生效、healthcheck [4] 從 double-prefix 容錯觀察模式恢復嚴格 invariant 檢查。
