@@ -1,14 +1,14 @@
 apiVersion: 1
 datasources:
   - name: PostgreSQL
-    type: postgres
+    type: grafana-postgresql-datasource
     access: proxy
     url: trading_postgres:5432
-    database: trading_ai
     user: trading_admin
     secureJsonData:
       password: "<REDACTED>"
     jsonData:
+      database: trading_ai
       sslmode: disable
       maxOpenConns: 10
       maxIdleConns: 5
