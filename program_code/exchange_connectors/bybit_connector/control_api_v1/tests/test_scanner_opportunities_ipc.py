@@ -32,7 +32,16 @@ class _FakeActor:
 
 
 def _run(coro):
-    return asyncio.get_event_loop().run_until_complete(coro)
+    # Py 3.12：asyncio.get_event_loop() 在無 current loop 時 raise RuntimeError。
+    # 前序 test 可能關閉 loop，故每 call 自管 new loop + close，不污染 global state。
+    # Py 3.12: asyncio.get_event_loop() raises when no current loop exists.
+    # Earlier tests may close the loop, so we manage a fresh loop per call with
+    # proper cleanup to avoid polluting global state.
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(coro)
+    finally:
+        loop.close()
 
 
 def _fake_ipc_class(call_result: dict | Exception):

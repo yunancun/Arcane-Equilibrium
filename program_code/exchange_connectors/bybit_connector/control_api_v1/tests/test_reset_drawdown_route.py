@@ -37,7 +37,14 @@ from app.risk_routes import (
 
 
 def _run(coro):
-    return asyncio.get_event_loop().run_until_complete(coro)
+    # Py 3.12：asyncio.get_event_loop() 在無 current loop 時 raise RuntimeError。
+    # 前序 test 可能關閉 loop，故每 call 自管 new loop + close，不污染 global state。
+    # Py 3.12: asyncio.get_event_loop() raises when no current loop exists.
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(coro)
+    finally:
+        loop.close()
 
 
 class _FakeRiskViewClient:
