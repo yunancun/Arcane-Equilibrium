@@ -216,7 +216,6 @@ This file is only a logical classification aid.
 
 - _bybit_latest_wrapper.py
 - apply_mainline_dirty_points_cleanup.sh
-- cleanup_legacy_ai_env.py
 - diag_and_repair_upstream_truth_sources.sh
 - final_truth_repair_round1.sh
 - fix_h5_and_real_h1_dirty_points.sh

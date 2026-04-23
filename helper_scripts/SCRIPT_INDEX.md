@@ -76,7 +76,6 @@
 | `run_with_trading_env.sh` | 在交易環境中運行任意命令 |
 | `run_i10_canonical_h_chain_recheck.sh` | H 鏈權威檢查器 |
 | `run_i10_canonical_decision_lease_recheck.sh` | I 鏈權威檢查器 |
-| `cleanup_legacy_ai_env.py` | 清理舊 AI 環境殘留 |
 | `_bybit_latest_wrapper.py` | Bybit API 最新值包裝器 |
 | `repair_i10_stage_source_aliases.py` | 修復 I10 stage source 別名 |
 
