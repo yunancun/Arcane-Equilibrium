@@ -197,7 +197,7 @@ git status && git log --oneline -5
 
 ### Phase 4 · W28+（原 W27+，連帶延後）— 持續優化常態
 
-- [ ] 週 retraining cron + model registry + canary deployment
+- ⚠️ 週 retraining cron + model registry + canary deployment — **model registry 骨架 ready（INFRA-PREBUILD-1 Part B，2026-04-23 commits `3c3a030`/`91288f1`/`9f6d4c5`/`061cb19`/`01085a6`）**：V023 `learning.model_registry` 表 + Python writer `model_registry.py`（hook 到 `run_training_pipeline.py` stage 5.5）+ Rust 讀 helper `ml::registry::resolve_latest_production_artifact` + `/api/v1/ml/model_registry|model_info|model_promote` (Operator gate) + canary rules draft `docs/references/2026-04-23--model_canary_promotion_rules_draft.md` + healthcheck [9] `check_model_registry_freshness`。**Phase 4 剩餘**：週 retraining cron driver（讀閾值 → 呼 `/model_promote`）+ Rust OnnxModelManager 整合 registry（目前只讀 symlink；需在 Phase 3+ SIGHUP handler 補呼 resolve_latest_production_artifact）。
 - [ ] 月 CPCV 驗證 + drift 檢測
 - [ ] 整合 G-7 Teacher / Symbol Embedding / Regime LSTM
 
