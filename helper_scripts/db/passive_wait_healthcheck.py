@@ -343,6 +343,16 @@ def check_intents_writer_ratio(cur) -> tuple[str, str]:
     整天 0 rows。TODO §P1-12 原判「bb_reversion 100% 被擋」實為此全表性
     writer outage 的症狀。此 check 專門擋復發：orders>0 + intents=0 → FAIL。
     """
+    # Defensive rollback: if an earlier check aborted the transaction (e.g.
+    # check [9] model_registry hitting a schema mismatch under Phase 1a), the
+    # cursor is poisoned until rollback. Each check should be transactionally
+    # independent — so we clear any dangling aborted-tx state before running.
+    # 防禦式 rollback：前 check 若打斷 transaction（例如 [9] model_registry schema
+    # 不匹配），後續 query 會全被 "transaction aborted" 拒絕。每 check 獨立 — 先清。
+    try:
+        cur.connection.rollback()
+    except Exception:
+        pass
     try:
         orders_24h = _scalar(cur,
             "SELECT COUNT(*) FROM trading.orders "
