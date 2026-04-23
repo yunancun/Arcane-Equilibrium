@@ -324,6 +324,24 @@ pub enum TradingMsg {
         entry_context_id: String,
         /// Engine mode: "paper", "demo", or "live" / 引擎模式
         engine_mode: String,
+        /// INFRA-PREBUILD-1 Part A (2026-04-23): ExitSource tag from Combine
+        /// Layer — populated on close fills only. None = open fill OR legacy
+        /// exit path not routed through Combine Layer (HARD STOP / TRAILING /
+        /// TIME / TAKE PROFIT / DRAWDOWN / CONSECUTIVE LOSS / DAILY LOSS —
+        /// per DUAL-TRACK-EXIT-1 design these are P0 hard-stops, not
+        /// physical-lock optimisations, so they bypass Combine Layer).
+        /// Some(tag) = "Physical" | "Hybrid" | "ML" | "Disabled"
+        /// (stable dictionary aligned with `combine_layer::ExitSource::as_tag`
+        /// and `trading.fills.exit_source` CHECK constraint in V021).
+        /// Phase 1a always "Physical" on PHYS-LOCK path (ml_opt=None).
+        /// INFRA-PREBUILD-1 A 部（2026-04-23）：Combine Layer 的 ExitSource 標籤，
+        /// 僅在 close fill 時填入。None = open fill 或未走 Combine Layer 的
+        /// 退場路徑（HARD STOP / TRAILING / TIME / TP / DRAWDOWN / CONSECUTIVE
+        /// LOSS / DAILY LOSS 皆為 P0 硬止損，DUAL-TRACK-EXIT-1 設計上 bypass
+        /// Combine Layer）。Some 值為 "Physical" / "Hybrid" / "ML" /
+        /// "Disabled"，與 V021 fills CHECK 字典對齊。Phase 1a PHYS-LOCK 路徑
+        /// 恆為 "Physical"（ml_opt=None）。
+        exit_source: Option<String>,
     },
     /// Position snapshot after fill / 成交後持倉快照
     PositionSnapshot {

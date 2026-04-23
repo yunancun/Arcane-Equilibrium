@@ -274,6 +274,11 @@ impl TickPipeline {
                 context_id,
                 entry_context_id: fill_entry_ctx.clone(),
                 engine_mode: em.to_string(),
+                // INFRA-PREBUILD-1 Part A: external / IPC close path bypasses
+                // Combine Layer — exit_source stays NULL (no Track P eval here).
+                // INFRA-PREBUILD-1 A 部：外部 / IPC close 不走 Combine Layer，
+                // exit_source 保持 NULL。
+                exit_source: None,
             });
         }
 
@@ -537,6 +542,9 @@ impl TickPipeline {
                 context_id: fill_ctx_id,
                 entry_context_id: fill_entry_ctx,
                 engine_mode: em.to_string(),
+                // INFRA-PREBUILD-1 Part A: exchange-confirmed fill path — exit_source NULL.
+                // INFRA-PREBUILD-1 A 部：交易所確認 fill 不經 Combine Layer。
+                exit_source: None,
             });
         }
 

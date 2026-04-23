@@ -142,7 +142,7 @@ async fn flush_all(
 // 每表欄位數 — `batch_insert` 以此集中推算 chunk_rows，取代先前各表硬編碼常數。
 const SIGNAL_COLS: usize = 8;
 const INTENT_COLS: usize = 12; // includes details JSONB
-const FILL_COLS: usize = 15; // includes entry_context_id (V017)
+const FILL_COLS: usize = 16; // includes exit_source (V021, INFRA-PREBUILD-1 A)
 const POSITION_COLS: usize = 9;
 const VERDICT_COLS: usize = 9; // ts + 7 + engine_mode (flattened reason + JSONB details)
 const ORDER_COLS: usize = 11;
@@ -272,7 +272,7 @@ async fn flush_fills(pool: &DbPool, buf: &mut Vec<TradingMsg>) {
         FILL_COLS,
         |chunk| {
             let mut qb: QueryBuilder<Postgres> = QueryBuilder::new(
-                "INSERT INTO trading.fills (ts, fill_id, order_id, symbol, side, qty, price, fee, fee_rate, realized_pnl, is_paper, strategy_name, context_id, entry_context_id, engine_mode) "
+                "INSERT INTO trading.fills (ts, fill_id, order_id, symbol, side, qty, price, fee, fee_rate, realized_pnl, is_paper, strategy_name, context_id, entry_context_id, engine_mode, exit_source) "
             );
             qb.push_values(chunk.iter(), |mut b, msg| {
                 if let TradingMsg::Fill {
@@ -290,6 +290,7 @@ async fn flush_fills(pool: &DbPool, buf: &mut Vec<TradingMsg>) {
                     context_id,
                     entry_context_id,
                     engine_mode,
+                    exit_source,
                 } = msg
                 {
                     b.push_bind(
@@ -320,6 +321,12 @@ async fn flush_fills(pool: &DbPool, buf: &mut Vec<TradingMsg>) {
                         b.push_bind(Some(entry_context_id.as_str().to_string()));
                     }
                     b.push_bind(engine_mode.as_str());
+                    // INFRA-PREBUILD-1 Part A: Combine Layer ExitSource tag
+                    // (V021 trading.fills.exit_source). None → NULL (open
+                    // fill or non-Combine exit path like HARD STOP).
+                    // INFRA-PREBUILD-1 A 部：Combine Layer ExitSource 標籤。
+                    // None → NULL（開倉 fill 或非 Combine 退場如 HARD STOP）。
+                    b.push_bind(exit_source.as_deref());
                 }
             });
             qb.push(" ON CONFLICT (fill_id, ts) DO NOTHING");
@@ -589,6 +596,7 @@ mod tests {
             context_id: "c1".into(),
             entry_context_id: String::new(),
             engine_mode: "paper".into(),
+            exit_source: None,
         };
         assert!(matches!(fill, TradingMsg::Fill { .. }));
     }
@@ -680,6 +688,7 @@ mod tests {
                 context_id: "c1".into(),
                 entry_context_id: String::new(),
                 engine_mode: "paper".into(),
+                exit_source: None,
             },
             TradingMsg::PositionSnapshot {
                 ts_ms: 0,
