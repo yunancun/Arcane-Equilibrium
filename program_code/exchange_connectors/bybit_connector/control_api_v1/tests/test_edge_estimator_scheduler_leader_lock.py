@@ -424,3 +424,124 @@ def test_reset_for_tests_is_idempotent(scheduler_module):
     assert scheduler_module._LEADER_LOCK_FD is None
     scheduler_module._reset_for_tests()  # second reset — must no-op
     assert scheduler_module._LEADER_LOCK_FD is None
+
+
+# ───── SCHEDULER-SHUTDOWN-PRIMITIVE-1 / shutdown 原語測試 ────────────────────
+#
+# Rationale / 理由：
+#   Prior to SHUTDOWN-PRIMITIVE-1 (2026-04-23), EdgeEstimatorScheduler._loop
+#   was `while True:` with no stop_event. `_reset_for_tests()` cleared the
+#   singleton but could not join the daemon thread — pytest sessions leaked
+#   5+ scheduler daemons. The leader_returns_none test above used a
+#   before/after thread-count workaround instead of absolute zero.
+#
+#   This commit adds an Event-based shutdown + `shutdown(join_timeout)` method
+#   + `_reset_for_tests()` now calls `shutdown()` before clearing. Three new
+#   tests exercise the happy path, idempotency, and the _reset_for_tests()
+#   integration.
+#
+#   2026-04-23 以前 `_loop` 為 `while True:` 無 stop_event，`_reset_for_tests()`
+#   不 join daemon thread → pytest session 累積 5+ 條 daemon。本 commit 新增
+#   Event-based shutdown + `shutdown(join_timeout)` + `_reset_for_tests` 改
+#   呼 shutdown；以下 3 test 驗 happy path、冪等性、與 reset 整合。
+
+
+def test_shutdown_exits_cleanly_when_thread_idle(scheduler_module):
+    """
+    Scheduler started → short delay → shutdown() → returns True + thread dead.
+    啟動 scheduler → 短暫延遲 → shutdown() → 回 True 且 thread 已退出。
+
+    Happy path：warm-up 期間被 stop_event 打斷，thread 乾淨退出。
+    """
+    import threading as _threading
+    sched = scheduler_module.start_scheduler(
+        modes=("demo",),
+        interval_s=3600.0,
+        days_back=7,
+    )
+    assert sched is not None
+
+    # Let the thread actually enter the warm-up wait before we signal stop.
+    # 稍等確保 thread 已進入 warm-up wait，再發 stop 訊號。
+    time.sleep(0.1)
+    thread = sched._thread
+    assert thread is not None and thread.is_alive(), "daemon should be running pre-shutdown"
+
+    clean = sched.shutdown(join_timeout=5.0)
+    assert clean is True, "shutdown must return True on clean exit"
+    assert not thread.is_alive(), "daemon thread must be dead after shutdown"
+
+    # Ensure the name is no longer in threading.enumerate() (absolute check).
+    # 絕對檢查：threading.enumerate() 不再包含 scheduler thread。
+    remaining = [t for t in _threading.enumerate()
+                 if t.name == "edge-estimator-scheduler" and t.is_alive()]
+    assert remaining == [], (
+        f"no live edge-estimator-scheduler thread should remain, got {remaining}"
+    )
+
+
+def test_shutdown_idempotent(scheduler_module):
+    """
+    Consecutive shutdown() calls both return True; the second returns
+    immediately without blocking on join.
+    連呼兩次 shutdown() 都回 True，第二次立即回（不 join 已退出的 thread）。
+    """
+    sched = scheduler_module.start_scheduler(
+        modes=("demo",),
+        interval_s=3600.0,
+        days_back=7,
+    )
+    assert sched is not None
+    time.sleep(0.1)
+
+    first = sched.shutdown(join_timeout=5.0)
+    assert first is True, "first shutdown must succeed"
+
+    # Second call: thread already dead, must return True immediately.
+    # 第二次：thread 已死，應立即回 True。
+    t0 = time.time()
+    second = sched.shutdown(join_timeout=5.0)
+    elapsed = time.time() - t0
+    assert second is True, "second shutdown must also return True (idempotent)"
+    assert elapsed < 0.5, (
+        f"second shutdown should be near-instant (thread already dead), "
+        f"got elapsed={elapsed:.3f}s"
+    )
+
+
+def test_reset_for_tests_cleanly_joins_thread(scheduler_module):
+    """
+    _reset_for_tests() now calls shutdown() before clearing the singleton
+    → no scheduler daemon thread leaks into subsequent tests.
+    _reset_for_tests() 清單例前呼 shutdown()，daemon thread 不再洩漏到後續 test。
+
+    This is the core SHUTDOWN-PRIMITIVE-1 contract the test-count workaround
+    in `test_start_scheduler_non_leader_returns_none` was working around.
+    此為 SHUTDOWN-PRIMITIVE-1 核心契約，解除 `test_start_scheduler_non_leader_returns_none`
+    內 before/after thread 計數 workaround 的需要。
+    """
+    import threading as _threading
+    sched = scheduler_module.start_scheduler(
+        modes=("demo",),
+        interval_s=3600.0,
+        days_back=7,
+    )
+    assert sched is not None
+    time.sleep(0.1)
+    assert sched._thread is not None and sched._thread.is_alive()
+
+    # _reset_for_tests() should shutdown + join before nulling the singleton.
+    # _reset_for_tests() 應先 shutdown + join 再清單例。
+    scheduler_module._reset_for_tests()
+
+    # Absolute-zero assertion: no live edge-estimator-scheduler thread remains.
+    # 絕對 0 斷言：無存活 edge-estimator-scheduler thread。
+    live_sched_threads = [
+        t for t in _threading.enumerate()
+        if t.name == "edge-estimator-scheduler" and t.is_alive()
+    ]
+    assert live_sched_threads == [], (
+        f"_reset_for_tests must join the daemon thread, but "
+        f"{len(live_sched_threads)} still alive: {live_sched_threads}"
+    )
+    assert scheduler_module._scheduler is None, "singleton must be cleared"

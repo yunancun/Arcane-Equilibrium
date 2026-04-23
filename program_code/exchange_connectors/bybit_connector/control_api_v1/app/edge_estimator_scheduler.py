@@ -79,6 +79,13 @@ class EdgeEstimatorScheduler:
         self._failures: int = 0
         self._last_run_ts: Optional[float] = None
         self._last_results: dict[str, dict] = {}
+        # SCHEDULER-SHUTDOWN-PRIMITIVE-1 (2026-04-23): event-based shutdown
+        # so pytest session teardown can cleanly join the daemon thread
+        # instead of leaking `while True:` daemon threads per test.
+        # SCHEDULER-SHUTDOWN-PRIMITIVE-1：事件式關閉原語，pytest session
+        # teardown 可乾淨 join daemon thread，不再每測洩漏 `while True:` daemon。
+        self._stop_event: threading.Event = threading.Event()
+        self._thread: Optional[threading.Thread] = None
 
     def start(self) -> None:
         """Idempotent start. Spawns the daemon thread on first call. / 冪等啟動。"""
@@ -86,18 +93,53 @@ class EdgeEstimatorScheduler:
             if self._started:
                 return
             self._started = True
-        t = threading.Thread(
+        # SHUTDOWN-PRIMITIVE-1: retain thread handle for `shutdown()` join.
+        # SHUTDOWN-PRIMITIVE-1：保存 thread handle 供 shutdown() join。
+        self._thread = threading.Thread(
             target=self._loop,
             daemon=True,
             name="edge-estimator-scheduler",
         )
-        t.start()
+        self._thread.start()
         logger.info(
             "EdgeEstimatorScheduler started: modes=%s interval=%.0fs days=%d "
             "/ JS 估計器排程器已啟動：modes=%s interval=%.0fs days=%d",
             self._modes, self._interval_s, self._days_back,
             self._modes, self._interval_s, self._days_back,
         )
+
+    def shutdown(self, join_timeout: float = 5.0) -> bool:
+        """
+        Graceful shutdown. Signals the loop to stop, joins thread within timeout.
+        優雅關閉：發出停止訊號並在 timeout 內 join thread。
+
+        Returns True if thread exited cleanly (or was never running), False if
+        join timed out.
+        回傳 True 表 thread 乾淨退出（或從未啟動），False 表 join timeout。
+
+        Idempotent: a second call after the thread has exited returns True
+        immediately without blocking.
+        冪等：thread 已退出後再次呼叫立即回 True，不阻塞。
+
+        SCHEDULER-SHUTDOWN-PRIMITIVE-1 (2026-04-23): purpose is to let pytest
+        session teardown reclaim the daemon thread; production code keeps
+        running the daemon for the process lifetime (OS cleans up at exit).
+        SHUTDOWN-PRIMITIVE-1：目的為讓 pytest session teardown 回收 daemon
+        thread；正式環境 daemon 伴隨進程壽命，OS 在進程退出時自動清理。
+        """
+        self._stop_event.set()
+        thread = self._thread
+        if thread is None or not thread.is_alive():
+            return True
+        thread.join(timeout=join_timeout)
+        clean = not thread.is_alive()
+        if not clean:
+            logger.warning(
+                "EdgeEstimatorScheduler.shutdown: thread did not exit within "
+                "%.1fs / 排程器 thread 未在 %.1fs 內退出",
+                join_timeout, join_timeout,
+            )
+        return clean
 
     def trigger_now(self) -> dict[str, dict]:
         """
@@ -125,12 +167,23 @@ class EdgeEstimatorScheduler:
             }
 
     def _loop(self) -> None:
-        # First run after a 60s warm-up so startup ordering is forgiving.
-        # 首次延遲 60s 避免和啟動其它任務搶資源
-        time.sleep(60.0)
-        while True:
+        # SHUTDOWN-PRIMITIVE-1: replace bare `time.sleep` + `while True:` with
+        # stop_event-aware waits so `shutdown()` can interrupt both the warm-up
+        # and the interval sleep without leaving the thread dangling until the
+        # next `time.sleep` wakes. `Event.wait(timeout)` returns True iff the
+        # event was set (shutdown requested), False on timeout (keep looping).
+        # SHUTDOWN-PRIMITIVE-1：以 stop_event-aware wait 取代 time.sleep + while True，
+        # shutdown() 可在 warm-up 或 interval sleep 中斷，thread 不會卡到下一輪
+        # time.sleep 才退出。Event.wait(timeout) 事件被 set 回 True，timeout 回 False。
+
+        # First-run warm-up: 60s or until stop signalled.
+        # 首次延遲 60s 或直到停止訊號（避免與啟動其他任務搶資源）。
+        if self._stop_event.wait(timeout=60.0):
+            return  # Shutdown requested during warm-up / 啟動期已被要求關閉
+        while not self._stop_event.is_set():
             self._run_cycle(reason="scheduled")
-            time.sleep(self._interval_s)
+            if self._stop_event.wait(timeout=self._interval_s):
+                return  # Clean exit on shutdown / 被要求關閉，乾淨退出
 
     @staticmethod
     def _ensure_pg_env_from_database_url() -> None:
@@ -630,8 +683,25 @@ def _reset_for_tests() -> None:
     Test-only: reset module globals + release leader lock fd so tests can
     re-exercise the election path without process restart.
     測試專用：重置模組全域變數並釋放 leader lock fd，讓測試可重複跑選舉路徑而不需重啟進程。
+
+    SCHEDULER-SHUTDOWN-PRIMITIVE-1 (2026-04-23): before clearing the singleton,
+    gracefully shut down any running scheduler so its daemon thread actually
+    joins instead of leaking across tests in the same pytest session.
+    SHUTDOWN-PRIMITIVE-1：清單例前先優雅關閉既有 scheduler，daemon thread
+    真正 join，而非跨測試累積於同一 pytest session。
     """
     global _scheduler, _LEADER_LOCK_FD, _LEADER_LOCK_PATH
+    # SHUTDOWN-PRIMITIVE-1: stop-signal + 5s join before dropping reference.
+    # SHUTDOWN-PRIMITIVE-1：放棄引用前 signal stop 並 join（5s 上限）。
+    if _scheduler is not None:
+        try:
+            _scheduler.shutdown(join_timeout=5.0)
+        except Exception:
+            # Best-effort: teardown must never raise, otherwise fixtures that
+            # chain _reset_for_tests() at yield break and wedge the suite.
+            # Best-effort：teardown 絕不可 raise，否則 fixture 於 yield 後串呼
+            # _reset_for_tests 會中斷整個測試。
+            pass
     _scheduler = None
     if _LEADER_LOCK_FD is not None:
         try:
