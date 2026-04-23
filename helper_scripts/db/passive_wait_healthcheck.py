@@ -370,6 +370,26 @@ def check_shadow_exit_ratio(cur) -> tuple[str, str]:
     except Exception as e:
         return ("WARN", f"shadow_exits 24h query failed: {e}")
 
+    # INFRA-PREBUILD-1 P3-4 (2026-04-23): 加查 last_1h 作為 channel-stall 指紋。
+    # 若 24h 有大量 rows 但 last_1h=0 → writer/channel 近期停擺（overflow 或 lag），
+    # 24h 累積掩蓋了近期狀態。operator 看到 `24h=100, last_1h=0` 即可直覺判斷。
+    # 純 observability context，不加決策邏輯（無新 WARN/FAIL 觸發條件）。
+    #
+    # INFRA-PREBUILD-1 P3-4（2026-04-23）：加查 last_1h 作 channel-stall 指紋。
+    # 若 24h 有量但 last_1h=0 → 近期 writer/channel 停擺，24h 累積遮蔽近期；
+    # operator 肉眼見 `24h=100, last_1h=0` 即秒懂。純觀察 context，不加決策邏輯。
+    try:
+        cur.execute("""
+            SELECT COUNT(*)::int
+            FROM learning.decision_shadow_exits
+            WHERE ts > now() - interval '1 hour'
+        """)
+        last_1h = cur.fetchone()[0]
+    except Exception:
+        # Sub-query best-effort — don't fail the whole check on this.
+        # 次要查詢 best-effort — 失敗不拖垮整體檢查。
+        last_1h = -1  # sentinel for "query failed"
+
     if total == 0:
         return (
             "PASS",
@@ -379,8 +399,9 @@ def check_shadow_exit_ratio(cur) -> tuple[str, str]:
         )
 
     agreement_pct = 100.0 * (1.0 - disagreed_n / total)
+    last_1h_str = f"last_1h={last_1h}" if last_1h >= 0 else "last_1h=?"
     msg = (
-        f"decision_shadow_exits 24h={total}, disagreed={disagreed_n} "
+        f"decision_shadow_exits 24h={total}, {last_1h_str}, disagreed={disagreed_n} "
         f"({100 - agreement_pct:.1f}%), engines={engines}, last_ts={last_ts}"
     )
     # Phase 2 agreement target ≥60% (Track P vs Combine+mock-ML).

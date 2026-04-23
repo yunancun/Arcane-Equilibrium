@@ -32,6 +32,26 @@ use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
 
+/// INFRA-PREBUILD-1 P3-3 (2026-04-23): 單次 flush 最大 batch 大小。
+/// INFRA-PREBUILD-1 P3-3 (2026-04-23): Maximum rows drained per flush.
+///
+/// 為什麼 256 / Why 256:
+///   - Pending buffer 初始容量 = 128（見 `Vec::with_capacity(128)`），
+///     預期穩態下 fire rate 不會超過 128/flush_tick。
+///   - Phase 2 shadow fire rate spike（例如 25 symbol × 4 strategies × 多 TF
+///     同時觸發 close）可能堆積 > 128 訊息，若無上限將同步執行超大 INSERT
+///     loop 阻塞 writer task、延誤 cancel / 其他 flush。
+///   - 256 = 2× 初始容量 headroom；超出部分延遲到下一個 flush_interval tick。
+///   - Initial pending capacity = 128; steady-state fire rate shouldn't exceed
+///     128/flush_tick. Phase 2 shadow fire-rate spikes (close-cluster across
+///     25 symbol × 4 strategies × multi-TF) can push > 128; without a cap the
+///     flush loop synchronously INSERTs the whole batch and blocks cancel +
+///     subsequent flushes. 256 = 2× initial-cap headroom; overflow rows defer
+///     to the next `flush_interval` tick (normal backpressure, not data loss —
+///     the producer channel already bounds total in-flight, so deferring here
+///     just slows consumption and surfaces the spike in tracing).
+pub(crate) const MAX_FLUSH_BATCH: usize = 256;
+
 /// Coerce NaN/Inf f64 to None; finite values pass through.
 /// NaN/Inf f64 → None；有限值原樣透傳。
 #[inline]
@@ -40,6 +60,19 @@ fn sanitize_f64_opt(v: Option<f64>) -> Option<f64> {
         Some(x) if x.is_finite() => Some(x),
         _ => None,
     }
+}
+
+/// INFRA-PREBUILD-1 P3-3 pure helper: drain up to `cap` rows from `pending`.
+/// Returned Vec = batch to flush; `pending` mutated in place (remaining rows
+/// stay for next tick). No SQL / no async / no logging — pure for testability.
+///
+/// INFRA-PREBUILD-1 P3-3 純函數：從 `pending` 最多 drain `cap` 列。
+/// 回傳值 = 本次 flush batch；`pending` 就地修改（剩餘列留到下次 tick）。
+/// 無 SQL / 無 async / 無 log — 純函數便於測試。
+#[inline]
+pub(crate) fn take_batch(pending: &mut Vec<ShadowExitMsg>, cap: usize) -> Vec<ShadowExitMsg> {
+    let batch_size = pending.len().min(cap);
+    pending.drain(..batch_size).collect()
 }
 
 /// Run the shadow exit writer task.
@@ -100,7 +133,19 @@ async fn flush_shadow_exits(pool: &DbPool, pending: &mut Vec<ShadowExitMsg>) {
         }
     };
 
-    let rows: Vec<ShadowExitMsg> = pending.drain(..).collect();
+    // INFRA-PREBUILD-1 P3-3 (2026-04-23): bounded drain to avoid monster INSERT
+    // loops under Phase 2 fire-rate spikes. Remaining rows defer to next tick.
+    // INFRA-PREBUILD-1 P3-3（2026-04-23）：有上限 drain，避免 Phase 2 fire-rate
+    // spike 下超大 INSERT 迴圈。剩餘列延後下次 tick 處理。
+    let rows: Vec<ShadowExitMsg> = take_batch(pending, MAX_FLUSH_BATCH);
+    if !pending.is_empty() {
+        warn!(
+            remaining = pending.len(),
+            batch_size = rows.len(),
+            cap = MAX_FLUSH_BATCH,
+            "shadow_exit flush: batch capped, rows deferred to next tick / batch 上限，列延後下次"
+        );
+    }
 
     for row in rows {
         // DB-RUN-6 + INFRA-PREBUILD-1 audit L1-2 (2026-04-23): reject ts_ms <= 0
@@ -329,6 +374,67 @@ mod tests {
         row.disagreement_reason = Some("ml_override_high crossed".into());
         assert!(row.disagreed);
         assert!(row.disagreement_reason.is_some());
+    }
+
+    /// INFRA-PREBUILD-1 P3-3 (2026-04-23): take_batch respects cap on over-sized
+    /// pending buffer. Tests: pending.len() > cap → drained = cap, remaining > 0;
+    /// pending.len() <= cap → drained = full, remaining = 0; cap = 0 → noop.
+    ///
+    /// INFRA-PREBUILD-1 P3-3（2026-04-23）：take_batch 在 pending 超量時尊重上限。
+    #[test]
+    fn test_take_batch_respects_cap() {
+        // Case 1: pending 超過 cap → drain 剛好 cap，剩餘 = len - cap
+        // Case 1: pending exceeds cap → drain exactly cap, remaining = len-cap
+        let mut pending: Vec<ShadowExitMsg> = (0..300)
+            .map(|i| make_row(&format!("ctx-{}", i)))
+            .collect();
+        assert_eq!(pending.len(), 300);
+        let batch = take_batch(&mut pending, MAX_FLUSH_BATCH);
+        assert_eq!(batch.len(), MAX_FLUSH_BATCH, "batch must be exactly MAX_FLUSH_BATCH");
+        assert_eq!(pending.len(), 300 - MAX_FLUSH_BATCH, "remaining = 300 - cap");
+        // Drain is FIFO — first 256 must be ctx-0..ctx-255.
+        // drain 是 FIFO — 前 256 筆必是 ctx-0..ctx-255。
+        assert_eq!(batch[0].context_id, "ctx-0");
+        assert_eq!(batch[MAX_FLUSH_BATCH - 1].context_id, format!("ctx-{}", MAX_FLUSH_BATCH - 1));
+        // Remaining in pending starts from ctx-256 onward.
+        // pending 剩餘從 ctx-256 開始。
+        assert_eq!(pending[0].context_id, format!("ctx-{}", MAX_FLUSH_BATCH));
+
+        // Case 2: pending 小於 cap → 全 drain，剩餘 = 0
+        // Case 2: pending < cap → drain all, remaining = 0
+        let mut small: Vec<ShadowExitMsg> = (0..50)
+            .map(|i| make_row(&format!("small-{}", i)))
+            .collect();
+        let batch2 = take_batch(&mut small, MAX_FLUSH_BATCH);
+        assert_eq!(batch2.len(), 50);
+        assert!(small.is_empty());
+
+        // Case 3: 空 pending → 空 batch，pending 仍空
+        // Case 3: empty pending → empty batch, pending still empty
+        let mut empty: Vec<ShadowExitMsg> = Vec::new();
+        let batch3 = take_batch(&mut empty, MAX_FLUSH_BATCH);
+        assert!(batch3.is_empty());
+        assert!(empty.is_empty());
+
+        // Case 4: cap = 0 → noop，pending 不變
+        // Case 4: cap = 0 → noop, pending unchanged
+        let mut five: Vec<ShadowExitMsg> =
+            (0..5).map(|i| make_row(&format!("z-{}", i))).collect();
+        let batch4 = take_batch(&mut five, 0);
+        assert!(batch4.is_empty());
+        assert_eq!(five.len(), 5);
+    }
+
+    /// INFRA-PREBUILD-1 P3-3: cap value pinned at 256 per docstring rationale.
+    /// Any refactor that changes the cap must update the docstring + this test.
+    ///
+    /// INFRA-PREBUILD-1 P3-3：cap 值固定 256（依 docstring 推理）。若改動須同步
+    /// 更新 docstring 與本測試。
+    #[test]
+    fn test_max_flush_batch_cap_value_pinned() {
+        // 256 = 2× initial pending capacity (128), see module-level const docstring.
+        // 256 = 2× pending 初始容量（128），見模組級 const docstring。
+        assert_eq!(MAX_FLUSH_BATCH, 256);
     }
 
     /// Lock column list against silent schema drift vs V021.

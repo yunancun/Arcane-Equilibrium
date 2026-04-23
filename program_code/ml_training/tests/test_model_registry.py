@@ -267,3 +267,168 @@ def test_register_model_sql_has_canary_preserve_where_clause():
         "register_model SQL lost canary_status preserve filter — retrain could regress promoting/production"
     assert "'promoting'" in src
     assert "'production'" in src
+
+
+# ───── INFRA-PREBUILD-1 P3-1 (2026-04-23): ExitSource 4-tag cross-layer drift ─
+# 4 storage sites must agree on the exact 4-string tag vocabulary:
+#   1. Rust const EXIT_SOURCE_TAGS (combine_layer.rs)
+#   2. V021 CHECK on trading.fills.exit_source
+#   3. V021 CHECK on learning.decision_shadow_exits.exit_source
+#   4. Python VALID_EXIT_SOURCES (ml_routes.py)
+# Any drift → silent runtime rejection or ORM mis-cast. Test greps + imports
+# to verify all 4 sites stay aligned without spinning up a real PG / engine.
+#
+# INFRA-PREBUILD-1 P3-1（2026-04-23）：ExitSource 4-tag 跨層漂移守。4 個儲存點
+# 必須共享一致 4-string 字典。drift → runtime 靜默拒收或 ORM mis-cast。
+# grep + import 驗證，不需 live PG / engine。
+
+
+def test_exit_source_tags_aligned_across_layers():
+    """INFRA-PREBUILD-1 P3-1: ExitSource 4-tag dict drift guard.
+
+    Rust combine_layer.rs EXIT_SOURCE_TAGS / V021 CHECK (x2) / ml_routes
+    VALID_EXIT_SOURCES must all align. Any drift red-lights this test.
+
+    Uses source-level grep for ml_routes to avoid a fastapi/pydantic import
+    dependency on Mac dev envs that don't install them (the test should be
+    runnable without the full API stack).
+
+    INFRA-PREBUILD-1 P3-1：ExitSource 4-tag 字典漂移守。Rust EXIT_SOURCE_TAGS /
+    V021 CHECK x2 / Python VALID_EXIT_SOURCES 必須對齊；任一漂移本測試紅。
+    對 ml_routes 走源碼 grep 避免 fastapi/pydantic import 依賴（Mac dev 通常
+    不裝全 API stack），測試在 bare Python 環境亦可跑。
+    """
+    expected = ("Physical", "Hybrid", "ML", "Disabled")
+    srv_root = Path(__file__).parent.parent.parent.parent
+
+    # (1) Python ml_routes VALID_EXIT_SOURCES — source-level grep (avoid
+    #     fastapi/pydantic import cost + Mac-dev missing-deps false red).
+    # (1) Python ml_routes VALID_EXIT_SOURCES — 源碼 grep，避免 fastapi/pydantic
+    #     import 依賴（Mac dev 可能沒裝 → 假紅）。
+    ml_routes = (
+        srv_root / "program_code" / "exchange_connectors" / "bybit_connector"
+        / "control_api_v1" / "app" / "ml_routes.py"
+    )
+    assert ml_routes.exists(), f"ml_routes.py missing at {ml_routes}"
+    py_src = ml_routes.read_text()
+    assert "VALID_EXIT_SOURCES" in py_src, (
+        "ml_routes.py missing VALID_EXIT_SOURCES constant — P3-1 drift guard broken"
+    )
+    # The tuple literal must name each tag in quotes (order-insensitive grep).
+    # tuple 字面值必須以引號列出每個 tag（無序 grep）。
+    for tag in expected:
+        assert f'"{tag}"' in py_src, (
+            f"ml_routes.py missing VALID_EXIT_SOURCES tag literal: \"{tag}\""
+        )
+
+    # (2) V021 migration content must mention each tag as a quoted literal
+    # (2) V021 遷移檔必須每個 tag 都以引號字串出現
+    v021 = srv_root / "sql" / "migrations" / "V021__fills_exit_source.sql"
+    assert v021.exists(), f"V021 migration missing at {v021}"
+    sql = v021.read_text()
+    for tag in expected:
+        assert f"'{tag}'" in sql, f"V021 CHECK missing tag literal: '{tag}'"
+
+    # (3) Rust combine_layer.rs must declare EXIT_SOURCE_TAGS + each tag literal
+    # (3) Rust combine_layer.rs 必須宣告 EXIT_SOURCE_TAGS 且每個 tag 字面值到位
+    combine = srv_root / "rust" / "openclaw_engine" / "src" / "combine_layer.rs"
+    assert combine.exists(), f"combine_layer.rs missing at {combine}"
+    rust_src = combine.read_text()
+    assert "EXIT_SOURCE_TAGS" in rust_src, (
+        "combine_layer.rs missing EXIT_SOURCE_TAGS const — P3-1 drift guard broken"
+    )
+    for tag in expected:
+        assert f'"{tag}"' in rust_src, (
+            f"combine_layer.rs missing Rust string literal for tag: \"{tag}\""
+        )
+
+
+# ───── INFRA-PREBUILD-1 P3-2 (2026-04-23): Python ModelSlot validation ───
+# Mirrors Rust ml::registry::ModelSlot; validate engine_mode / quantile
+# against the same 4 × 3 tag domains V023 CHECK enforces. Operator-facing
+# type so mistyped params fail at API boundary, not at DB.
+#
+# INFRA-PREBUILD-1 P3-2（2026-04-23）：Python ModelSlot 驗證。鏡像 Rust
+# ml::registry::ModelSlot；engine_mode / quantile 與 V023 CHECK 同域
+# (4 × 3)。操作者側型別，typo 在 API 邊界拒，不落 DB。
+
+
+# Mac dev envs may lack fastapi/pydantic; ml_routes import chain requires both.
+# Linux runtime + CI have them; skip gracefully rather than fail on Mac.
+# Mac dev 可能沒裝 fastapi/pydantic；Linux runtime + CI 都有。缺包時優雅 skip。
+def _ml_routes_available() -> bool:
+    try:
+        import fastapi  # noqa: F401
+        import pydantic  # noqa: F401
+        return True
+    except ImportError:
+        return False
+
+
+@pytest.mark.skipif(
+    not _ml_routes_available(),
+    reason="fastapi/pydantic not installed (Mac dev env); ModelSlot validation exercised on Linux",
+)
+def test_model_slot_accepts_valid_combinations():
+    """Happy path: all 4 × 3 combinations construct successfully.
+    正常路徑：全部 4 × 3 組合皆可構造。"""
+    from program_code.exchange_connectors.bybit_connector.control_api_v1.app.ml_routes import (
+        ModelSlot,
+    )
+    for eng in ("paper", "demo", "live", "live_demo"):
+        for q in ("q10", "q50", "q90"):
+            slot = ModelSlot(strategy="ma_crossover", engine_mode=eng, quantile=q)
+            assert slot.strategy == "ma_crossover"
+            assert slot.engine_mode == eng
+            assert slot.quantile == q
+
+
+@pytest.mark.skipif(
+    not _ml_routes_available(),
+    reason="fastapi/pydantic not installed (Mac dev env)",
+)
+def test_model_slot_rejects_invalid_engine_mode():
+    """Typo engine_mode → ValidationError at construction.
+    engine_mode typo → 構造時 ValidationError。"""
+    from program_code.exchange_connectors.bybit_connector.control_api_v1.app.ml_routes import (
+        ModelSlot,
+    )
+    from pydantic import ValidationError
+    with pytest.raises(ValidationError):
+        ModelSlot(strategy="ma_crossover", engine_mode="main_net", quantile="q50")
+    # Case-sensitive: "Demo" with capital D must be rejected too.
+    # 大小寫敏感：大寫 "Demo" 也必須被拒。
+    with pytest.raises(ValidationError):
+        ModelSlot(strategy="ma_crossover", engine_mode="Demo", quantile="q50")
+
+
+@pytest.mark.skipif(
+    not _ml_routes_available(),
+    reason="fastapi/pydantic not installed (Mac dev env)",
+)
+def test_model_slot_rejects_invalid_quantile():
+    """Typo quantile (q05 / q99 / median) → ValidationError.
+    quantile typo → ValidationError。"""
+    from program_code.exchange_connectors.bybit_connector.control_api_v1.app.ml_routes import (
+        ModelSlot,
+    )
+    from pydantic import ValidationError
+    with pytest.raises(ValidationError):
+        ModelSlot(strategy="ma_crossover", engine_mode="demo", quantile="q05")
+    with pytest.raises(ValidationError):
+        ModelSlot(strategy="ma_crossover", engine_mode="demo", quantile="median")
+
+
+@pytest.mark.skipif(
+    not _ml_routes_available(),
+    reason="fastapi/pydantic not installed (Mac dev env)",
+)
+def test_model_slot_rejects_empty_strategy():
+    """Empty strategy name → ValidationError (min_length=1 on Field).
+    空 strategy → ValidationError（Field min_length=1）。"""
+    from program_code.exchange_connectors.bybit_connector.control_api_v1.app.ml_routes import (
+        ModelSlot,
+    )
+    from pydantic import ValidationError
+    with pytest.raises(ValidationError):
+        ModelSlot(strategy="", engine_mode="demo", quantile="q50")

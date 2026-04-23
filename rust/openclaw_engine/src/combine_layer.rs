@@ -68,11 +68,30 @@ pub enum ExitSource {
     Disabled { reason: String },
 }
 
+/// INFRA-PREBUILD-1 P3-1 (2026-04-23): ExitSource 4-tag 單一事實源。
+/// INFRA-PREBUILD-1 P3-1 (2026-04-23): ExitSource 4-tag single-source-of-truth.
+///
+/// 字典同步點 / Dictionary sync points（任一漂移會靜默破表）:
+///   1. `ExitSource::as_tag()` (此檔 / this file)
+///   2. V021 migration `trading.fills.exit_source` CHECK
+///   3. V021 migration `learning.decision_shadow_exits.exit_source` CHECK
+///   4. Python `ml_routes.VALID_EXIT_SOURCES` constant
+///   5. `shadow_exit_writer.rs` matches! guard (reject unknown tag)
+///
+/// Drift guard tests:
+///   - Rust: `test_exit_source_tags_constant_covers_all_variants` (本檔)
+///   - Python: `test_exit_source_tags_aligned_across_layers` (ml_training/tests/test_model_registry.py)
+///   - Python 端 grep `EXIT_SOURCE_TAGS` 與 V021 SQL 對齊 4 字串（硬編碼）。
+///   - Python side greps for `EXIT_SOURCE_TAGS` + V021 SQL literals to match 4 hard-coded strings.
+pub const EXIT_SOURCE_TAGS: &[&str] = &["Physical", "Hybrid", "ML", "Disabled"];
+
 impl ExitSource {
     /// 穩定 tag 字串 / Stable tag string for persistence & Python parse alignment.
     ///
     /// 字典鎖定：只有這 4 個 variant 對應到 fills.details.exit_source。
     /// Dictionary frozen: exactly 4 variants map to `fills.details.exit_source`.
+    /// 見 `EXIT_SOURCE_TAGS` const 為跨語言對齊單一事實源。
+    /// See `EXIT_SOURCE_TAGS` const for cross-language single-source-of-truth.
     pub fn as_tag(&self) -> &'static str {
         match self {
             ExitSource::Physical => "Physical",
@@ -605,5 +624,57 @@ mod tests {
             "shrunk_bps 4 must sit exactly on confirm_threshold 0.70, got {}",
             m.score,
         );
+    }
+
+    /// INFRA-PREBUILD-1 P3-1 (2026-04-23): EXIT_SOURCE_TAGS const drift guard.
+    /// Every ExitSource variant's as_tag() must appear in the const; length equals
+    /// variant count so new variants can't be added without updating the const.
+    ///
+    /// INFRA-PREBUILD-1 P3-1（2026-04-23）：EXIT_SOURCE_TAGS 常數漂移守。每個
+    /// ExitSource variant 的 as_tag() 都要在 const 內；長度 = variant 數，保證
+    /// 新增 variant 必須同步擴充 const。
+    #[test]
+    fn test_exit_source_tags_constant_covers_all_variants() {
+        // 4 known variants, each produces a unique tag covered by the const.
+        // 4 個已知 variant，每個產生唯一 tag 且都在 const 內。
+        let variants: Vec<ExitSource> = vec![
+            ExitSource::Physical,
+            ExitSource::ML {
+                model_id: "m".into(),
+                score: 0.5,
+            },
+            ExitSource::Hybrid {
+                physical_reason: "r".into(),
+                ml_score: 0.5,
+            },
+            ExitSource::Disabled {
+                reason: "d".into(),
+            },
+        ];
+        // Length parity: any new variant added without updating const → red.
+        // 長度等價：variant 擴充未同步 const 即紅。
+        assert_eq!(
+            variants.len(),
+            EXIT_SOURCE_TAGS.len(),
+            "EXIT_SOURCE_TAGS length mismatch vs variants.len() — const drift",
+        );
+        for v in &variants {
+            let tag = v.as_tag();
+            assert!(
+                EXIT_SOURCE_TAGS.contains(&tag),
+                "variant {:?} as_tag()={:?} not in EXIT_SOURCE_TAGS {:?}",
+                v,
+                tag,
+                EXIT_SOURCE_TAGS,
+            );
+        }
+        // Exact dictionary content — any typo or reordering (order doesn't
+        // strictly matter for correctness but pinning avoids accidental
+        // additions).
+        // 精確字典內容 — 任何 typo 紅測。順序非必要但固定避免意外擴充。
+        assert!(EXIT_SOURCE_TAGS.contains(&"Physical"));
+        assert!(EXIT_SOURCE_TAGS.contains(&"Hybrid"));
+        assert!(EXIT_SOURCE_TAGS.contains(&"ML"));
+        assert!(EXIT_SOURCE_TAGS.contains(&"Disabled"));
     }
 }
