@@ -266,8 +266,23 @@ impl StrategistScheduler {
 
         // R5-3: column names are ts, strategy_name (not created_at, strategy)
         // R5-4: HAVING count(*) >= 30 — skip low-fill pairs
+        // STRATEGIST-SCHED-CLOSE-FILTER-1 (2026-04-23 EDGE-DIAG-1 RCA byproduct):
+        // `trading.fills.strategy_name` mixes entry strategies
+        // (grid_trading / ma_crossover / bb_* / funding_arb) with close-path
+        // reasons (`risk_close:*` / `strategy_close:*` / `ipc_close*`). Pre-fix
+        // the scheduler took the unfiltered DISTINCT set and called
+        // `fetch_current_params(strategy=<entire reason string>)` for each →
+        // `channel closed` error spam in engine.log every 5 min, masking real
+        // failures. Three NOT LIKE prefixes cover all known close paths
+        // (risk_checks.rs format!("risk_close:{}",) / strategy emit
+        // `strategy_close:{tag}` / IPC close handler `ipc_close_symbol` /
+        // `ipc_close:{tag}`).
         // R5-3：列名為 ts, strategy_name（非 created_at, strategy）
         // R5-4：HAVING count(*) >= 30 — 跳過低成交對
+        // STRATEGIST-SCHED-CLOSE-FILTER-1（EDGE-DIAG-1 副產品 2026-04-23）：
+        // `trading.fills.strategy_name` 混合入場策略與三類 close-path reasons；
+        // 修復前 scheduler 把整段 reason 當策略名 IPC 致每 5min 噴 channel-closed
+        // WARN，掩蓋真正失敗。三條 NOT LIKE 涵蓋已知 close prefix。
         let rows = sqlx::query_as::<_, PairMetricsRow>(
             r#"
             SELECT
@@ -283,6 +298,9 @@ impl StrategistScheduler {
             FROM trading.fills
             WHERE ts > now() - interval '7 days'
               AND strategy_name IS NOT NULL
+              AND strategy_name NOT LIKE 'risk_close:%'
+              AND strategy_name NOT LIKE 'strategy_close:%'
+              AND strategy_name NOT LIKE 'ipc_close%'
             GROUP BY strategy_name, symbol
             HAVING count(*) >= $1
             ORDER BY avg_pnl ASC
