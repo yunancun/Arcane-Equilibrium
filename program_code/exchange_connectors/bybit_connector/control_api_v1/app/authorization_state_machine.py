@@ -477,8 +477,28 @@ class AuthorizationStateMachine(MultiObjectStoreMixin, StateMachineBase[AuthStat
 
             # T5.02: ChangeAuditLog with SM-01 specific auto_approve branch
             # T5.02：带 SM-01 特有的 auto_approve 分支
+            #
+            # auto_approve=True means the CAL entry bypasses Operator sign-off
+            # (it doesn't surface in the Pending Approvals queue). Triggers:
+            #   (a) who_str substring match "auto"/"system" — e.g.
+            #       approved_by="system_paper_auto" from bootstrap.
+            #   (b) initiator == AuthorizationGovernance — the governance module
+            #       itself acting programmatically (DRAFT→PENDING_APPROVAL during
+            #       bootstrap before any human touches the queue). Other system
+            #       initiators (IncidentPolicy / RecoveryApprovalFlow /
+            #       ExpiryGuardian) still require Operator sign-off because they
+            #       represent real incidents/recoveries worth auditing.
+            # auto_approve=True 表示該 CAL 記錄跳過 Operator 事後簽字（不進 Pending
+            # Approvals 佇列）。觸發條件：(a) who_str 含 "auto"/"system"；(b)
+            # initiator 為 AuthorizationGovernance（治理模組自身程序化動作，
+            # 如 bootstrap 的 DRAFT→PENDING_APPROVAL）。其他系統 initiator
+            # （事件響應/恢復/過期）仍需 Operator 背書。
             who_str = str(approved_by or initiator.value)
-            is_auto = "auto" in who_str.lower() or "system" in who_str.lower()
+            is_auto = (
+                "auto" in who_str.lower()
+                or "system" in who_str.lower()
+                or initiator == AuthInitiator.AUTHORIZATION_GOVERNANCE
+            )
             self._record_change_audit(
                 from_label=from_state.value,
                 to_label=to_state.value,

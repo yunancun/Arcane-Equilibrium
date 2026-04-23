@@ -652,7 +652,16 @@ class GovernanceHub(GovernanceHubStatusCascadeMixin, GovernanceHubEventHandlersM
 
                 # Step 2: Submit (DRAFT → PENDING_APPROVAL)
                 # 步骤 2：提交（DRAFT → PENDING_APPROVAL）
-                self._authorization_sm.submit_for_approval(auth_id)
+                # Use AUTHORIZATION_GOVERNANCE initiator (not default OPERATOR) so the
+                # CAL entry auto-approves — this is programmatic bootstrap, not a human
+                # submission, and should not surface in the Pending Approvals queue.
+                # 使用 AUTHORIZATION_GOVERNANCE 發起者（非預設 OPERATOR），讓 CAL 自動
+                # 批准 — bootstrap 屬程序化動作，不應污染人工批准佇列。
+                from .authorization_state_machine import AuthInitiator
+                self._authorization_sm.submit_for_approval(
+                    auth_id,
+                    initiator=AuthInitiator.AUTHORIZATION_GOVERNANCE,
+                )
 
                 # Step 3: Auto-approve (PENDING_APPROVAL → ACTIVE)
                 # 步骤 3：自动批准（PENDING_APPROVAL → ACTIVE）
