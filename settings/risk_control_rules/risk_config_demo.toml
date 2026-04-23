@@ -139,3 +139,14 @@ update_interval_ms = 300000
 window_size = 200
 
 [experimental.flags]
+
+# EDGE-DIAG-1 對照實驗（2026-04-23 起）— 升 missing_edge_fallback_bps：default -10 → +10。
+# 目的：讓 sync-label 倉位（bybit_sync / orphan_* / dust_frozen，est_net_bps=None）
+# 跳過 v2 Gate 1，進 Gate 2-4 評估；grid/ma 倉位（raw shrunk_bps=-4.30）仍走 Gate 1
+# Hold 作對照組。24-48h 後對比 sync-label phys_lock fire 後 net 是否優於 trailing/dynamic。
+# 詳 TODO §EDGE-DIAG-1。其他 ExitConfig 欄位走 v2.rs default。
+# Other ExitConfig fields fall through to v2.rs defaults (min_net_floor_bps=5.0,
+# min_hold_secs=30, min_peak_atr_norm=0.5, stale_peak_ms=60000, giveback_base=1.0,
+# slope=0.15, floor=0.3). Only override the fallback for the A/B comparison.
+[exit]
+missing_edge_fallback_bps = 10.0

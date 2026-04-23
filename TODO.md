@@ -239,6 +239,42 @@ git status && git log --oneline -5
 ### ✅ P1-5 · DEMO-REBOOT-PNL-RESET-1 2026-04-20 commit `7cda4e4`（歸檔 §7）
 - `peak_balance` 持久化（V018 `trading.paper_state_checkpoint`）+ restore clamp `max(restored, current)` + `reset_drawdown_baseline` IPC。封死「重啟洗 drawdown」fail-closed 繞過路徑。demo row `peak_balance=948.85` 已寫入；worklog `docs/worklogs/2026-04-20--p1_5_a2_drawdown_continuity_implementation.md`。
 
+### 🟡 EDGE-DIAG-1 · 2026-04-23 · Edge investigation infra（P1，主軸）
+
+**動機（operator 2026-04-23）**：P0-14 B 部署後 healthcheck [4] 揭露 v2 Gate 1 在當前 edge 環境是 by-design noop —— 全 135 cells `shrunk_bps = -4.30 < floor 5.0`（v2.rs:292-294 hard short-circuit）→ Gate 4 (giveback lock) 永遠到不了 → phys_lock 7d=0 不是 bug 是設計。Operator 進一步擔憂「EDGE-P2-3 PostOnly 修復後 edge 很可能仍是負」（grid BLURUSDT 24h gross −0.008/RT vs fee −5.4/RT，PostOnly 降 fee ~9 bps/雙側，net 仍可能 −0.5 bps/RT 量級）。若 PostOnly 後仍負 → 證明策略結構性沒正 edge → 整個 phys_lock + MICRO-PROFIT 鎖利層全是 noop → 系統只剩 trailing/dynamic 兩個被動止損層，本質是「逐步少賠」非「累積邊際正利」。
+
+**核心矛盾**：當前設計假設「策略有正 edge → 退場層幫鎖利」；真實是「策略無正 edge → 退場層只能減損失」。等 edge 翻正才允許 Lock 在沒有 edge 翻正路徑時是死循環。
+
+**短期 · 對照實驗**（今天執行；零 rebuild 成本）：
+- [x] **2026-04-23 部署**：`risk_config_demo.toml` 加 `[exit] missing_edge_fallback_bps = 10.0`（> floor 5.0）
+- 預期效果：sync-label 倉位（grand_mean 來源、`est_net_bps=None`）→ Gate 1 過 → 進 Gate 2-4 評估；grid/ma cells（raw `shrunk_bps=-4.30`）→ 仍走 Gate 1 Hold（對照組）
+- 24-48h 後對比：sync-label 組 phys_lock fire 後 net **vs** 同組 trailing/dynamic 平均
+  - 若 sync-label fire 後 net 更好 → 證明「鎖利機制有效，只是需要弱先驗繞過 Gate 1」→ 永久放開 fallback / 重評 floor
+  - 若 sync-label fire 後 不如被動止損 → 證明「v2 設計在當前 edge 環境就是錯的」→ EDGE-P2-3 後也別期待 phys_lock 有用，整個 Track P 物理層需重評
+
+**中期 · Edge discovery diagnostic suite**（24-48h 內可建）：
+
+新建 `helper_scripts/db/edge_diagnostics.sh`，把 healthcheck 從「pipeline 活著嗎」升級到「edge 為何負，在哪裡漏」5 張表：
+
+| # | 表 | 答的問題 |
+|---|---|---|
+| 1 | (engine_mode, strategy, symbol) 24h **gross / fee / slippage / net** 拆解，按 net 排序 | 哪些 (策略×symbol) 是 edge 黑洞？哪些有救？ |
+| 2 | 7d 連續 net < 0 的 symbol kill-list candidate | 該下架哪些 symbol？ |
+| 3 | **Counterfactual exit replay**：對 7d close_fills，模擬「在 peak − 0.3 ATR 鎖定」net 改善值 | phys_lock 真開了會贏嗎？（pure SQL/Python on `learning.exit_features`，零部署） |
+| 4 | **holding time × net edge** 分桶（30s/5m/30m/2h/8h+） | 最佳持倉長度多少？是不是該強制 max_hold？ |
+| 5 | cells `shrunk_bps` 7d trend + 距 floor 的 gap | EDGE-P2-3 部署後是否真在收斂？多久能過 floor？ |
+
+#3 是回答「PostOnly 後 edge 仍負怎辦」的關鍵 — 若 counterfactual 顯示 phys_lock 鎖也救不了，**整個 DUAL-TRACK Track P 物理層需要重新評估**，不是調參數的事。
+
+**執行順序**：短期實驗已部署 → 等 24-48h 樣本 → 並行寫 #3 counterfactual replay → #3 結果驅動 #1/2/4/5 是否做。
+
+**關聯**：P0-3 Phase 5 edge 重評（前置）· P1-10 EDGE-P2-3 PostOnly 1w 觀察（並行）· DUAL-TRACK Phase 1b counterfactual replay audit（已列）· §P1-14 EDGE-ESTIMATE-BIND-BLOCKED-1（cells 翻正前提）
+
+**檔案/工件**：
+- `settings/risk_control_rules/risk_config_demo.toml` `[exit]` section
+- `rust/openclaw_engine/src/exit_features/v2.rs:104-126` Gate 1 fallback design
+- 對照數據 SQL：`SELECT engine_mode, strategy_name, COUNT(*), AVG(net_pnl_bps) FROM trading.fills WHERE ts > now() - interval '24 hours' AND engine_mode='demo' AND strategy_name LIKE 'risk_close:phys_lock_%' GROUP BY 1,2;` vs `'risk_close:TRAILING%'`
+
 ### ✅ P1-19 · BACKFILL-LABELS-STALLED-1 — 結案 2026-04-22（duplicate of P1-10）
 
 **判決**：不是 pipeline bug，是上游 P1-10 STRATEGY-ASYMMETRY-1 的症狀。RCA worklog `docs/worklogs/2026-04-22--backfill_labels_stalled_rca.md` §7-§9。
