@@ -39,6 +39,61 @@
 --
 -- ============================================================
 
+-- ------------------------------------------------------------
+-- Schema Guard A (retrofit 2026-04-24, V023 incident postmortem)
+-- ------------------------------------------------------------
+-- Historical context / 歷史脈絡：
+--   V023 originally shipped without this guard. V004 had pre-seeded
+--   a legacy `learning.model_registry` stub without canary_status /
+--   verdict columns; `CREATE TABLE IF NOT EXISTS` below silently
+--   no-op'd and the table stayed in the legacy shape — Rust reads
+--   on canary_status returned nothing. Resolved manually on
+--   2026-04-23; this guard is retrofitted so that any future DROP
+--   + partial re-apply reveals the drift immediately instead of
+--   silent-no-op-ing.
+--
+--   V023 原無此 guard。V004 預留了缺少 canary_status / verdict 的
+--   legacy stub，下方 CREATE TABLE IF NOT EXISTS 靜默跳過，導致
+--   Rust 讀 canary_status 空。2026-04-23 手動修好；此 guard 回補
+--   避免未來 DROP + 不完整 re-apply 再次 silent no-op。
+--
+-- Template source / 模板來源：
+--   sql/migrations/templates/schema_guard_template.sql § Guard A
+-- ------------------------------------------------------------
+DO $$
+DECLARE
+    v_missing TEXT[];
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.tables
+        WHERE table_schema = 'learning'
+          AND table_name   = 'model_registry'
+    ) THEN
+        SELECT array_agg(c) INTO v_missing
+        FROM unnest(ARRAY[
+            'strategy', 'engine_mode', 'quantile',
+            'schema_version', 'train_date',
+            'artifact_path', 'verdict',
+            'canary_status', 'promoted_at',
+            'created_at', 'updated_at'
+        ]) AS c
+        WHERE NOT EXISTS (
+            SELECT 1 FROM information_schema.columns
+            WHERE table_schema = 'learning'
+              AND table_name   = 'model_registry'
+              AND column_name  = c
+        );
+        IF v_missing IS NOT NULL AND array_length(v_missing, 1) > 0 THEN
+            RAISE EXCEPTION
+                'schema_guard A: learning.model_registry exists but missing required columns: %. '
+                'This likely means a legacy V004-era stub is present. '
+                'Resolve by dropping/repairing the legacy table before re-applying V023. '
+                'See sql/migrations/templates/schema_guard_template.sql for details.',
+                v_missing;
+        END IF;
+    END IF;
+END $$;
+
 CREATE TABLE IF NOT EXISTS learning.model_registry (
     id                       BIGSERIAL     PRIMARY KEY,
     -- Identity (unique per row) / 身份（每列唯一）
