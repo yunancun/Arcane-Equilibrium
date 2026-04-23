@@ -34,8 +34,14 @@ def test_pipeline_rejects_too_few_samples():
 
 
 def test_pipeline_config_defaults():
+    # P1-7 C (2026-04-23): default symbol flipped "BTCUSDT" → None (pooled).
+    # Rationale: grid_trading rotating across short-lived symbols cannot reach
+    # min_samples=200 per-symbol; pooled is the correct default for multi-
+    # symbol strategies. Per-symbol still available via explicit --symbol.
+    # P1-7 C：預設 symbol 由 "BTCUSDT" 改為 None（pooled）；grid_trading 輪動
+    # symbol 無法逐 symbol 累積 200，pooled 為多 symbol 策略正確預設。
     cfg = PipelineConfig()
     assert cfg.strategy_type == "trending"
-    assert cfg.symbol == "BTCUSDT"
+    assert cfg.symbol is None
     assert cfg.skip_onnx is True
     assert cfg.dry_run is False
