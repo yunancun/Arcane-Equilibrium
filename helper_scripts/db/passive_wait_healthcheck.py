@@ -322,26 +322,37 @@ def check_model_registry_freshness(cur) -> tuple[str, str]:
 
 
 def check_intents_writer_ratio(cur) -> tuple[str, str]:
-    """[10] trading.intents vs trading.orders 24h ratio — P1-12 post-mortem guard.
+    """[10] trading.intents vs trading.orders 24h ratio per active engine_mode
+    — P1-12 post-mortem guard.
 
     Context: on 2026-04-17, ``trading.intents`` took zero rows for the entire
     day across demo+live_demo while ``trading.orders``/``fills``/``risk_verdicts``
-    kept writing normally (e.g. demo 4/17 had 1755 orders but 0 intents). The
-    P1-12 "bb_reversion 100% blocked" framing was actually a symptom of this
-    whole-table intents-writer silent outage. This check catches recurrence.
+    kept writing normally (e.g. demo 4/17 had 1755 orders but 0 intents;
+    live_demo 4/17 had 190 orders but 0 intents, and stayed broken 4/16-4/19).
+    The P1-12 "bb_reversion 100% blocked" framing was actually a symptom of
+    this whole-table intents-writer silent outage. This check catches recurrence.
+
+    Coverage: (demo, live_demo). Per-mode evaluation — each mode gets its own
+    verdict, then composite status = worst across modes. Skip any mode with
+    orders_24h=0 (engine quiet). ``paper`` is excluded — PAPER-DISABLE-1 makes
+    paper pipeline opt-in (OPENCLAW_ENABLE_PAPER=1), so silence is expected
+    default; if paper is actively spawned and the writer silently dies, the
+    operator is already in an investigation path for paper separately.
 
     Heuristic: demo 4/20-23 healthy baseline shows intents/orders ≈ 0.70-0.87
     (orders include ``strategy_close:*`` / ``risk_close:*`` tags that originate
-    downstream of the intent stage, so ratio < 1.0 is normal). We treat:
-        - orders_24h=0 → PASS (engine quiet, nothing to compare)
+    downstream of the intent stage, so ratio < 1.0 is normal). Per-mode:
+        - orders=0 → skip (engine quiet)
         - orders>0 + intents=0 → FAIL (4/17-style outage fingerprint)
-        - ratio < 0.3 → WARN (intents writer under-firing)
+        - ratio < 0.3 → WARN (writer under-firing)
         - ratio ≥ 0.3 → PASS
 
-    [10] trading.intents / orders 24h 比率守衛（P1-12 2026-04-17 全天斷裂事件
-    post-mortem）：當時 risk_verdicts / orders / fills 都正常寫，唯獨 intents
-    整天 0 rows。TODO §P1-12 原判「bb_reversion 100% 被擋」實為此全表性
-    writer outage 的症狀。此 check 專門擋復發：orders>0 + intents=0 → FAIL。
+    [10] trading.intents / orders 24h 比率守衛，逐 engine_mode 判定（P1-12
+    2026-04-17 全天斷裂事件 post-mortem）：當時 risk_verdicts / orders / fills
+    都正常寫，唯獨 intents 整天 0 rows —— **demo 與 live_demo 同時受災**，
+    live_demo 更延續 4/16-4/19 四天。原只查 demo 的版本無法捕捉 live_demo
+    未來再啟用後的復發。此 check 覆蓋 (demo, live_demo)，任一 mode orders>0 +
+    intents=0 即 FAIL；paper 排除（OPENCLAW_ENABLE_PAPER=1 opt-in，預設 dormant）。
     """
     # Defensive rollback: if an earlier check aborted the transaction (e.g.
     # check [9] model_registry hitting a schema mismatch under Phase 1a), the
@@ -353,31 +364,53 @@ def check_intents_writer_ratio(cur) -> tuple[str, str]:
         cur.connection.rollback()
     except Exception:
         pass
+
+    modes = ("demo", "live_demo")
+    per_mode: list[tuple[str, str, str]] = []  # (mode, status, short_msg)
     try:
-        orders_24h = _scalar(cur,
-            "SELECT COUNT(*) FROM trading.orders "
-            "WHERE ts > now() - interval '24 hours' AND engine_mode = 'demo'"
-        )
-        intents_24h = _scalar(cur,
-            "SELECT COUNT(*) FROM trading.intents "
-            "WHERE ts > now() - interval '24 hours' AND engine_mode = 'demo'"
-        )
+        for mode in modes:
+            cur.execute(
+                "SELECT COUNT(*) FROM trading.orders "
+                "WHERE ts > now() - interval '24 hours' AND engine_mode = %s",
+                (mode,),
+            )
+            orders_n = int(cur.fetchone()[0] or 0)
+            cur.execute(
+                "SELECT COUNT(*) FROM trading.intents "
+                "WHERE ts > now() - interval '24 hours' AND engine_mode = %s",
+                (mode,),
+            )
+            intents_n = int(cur.fetchone()[0] or 0)
+
+            if orders_n == 0:
+                per_mode.append((mode, "SKIP", f"{mode}: quiet (orders=0)"))
+                continue
+            if intents_n == 0:
+                per_mode.append((
+                    mode, "FAIL",
+                    f"{mode}: intents=0 / orders={orders_n} — writer silent-dead (4/17 fingerprint)",
+                ))
+                continue
+            ratio = intents_n / orders_n
+            seg = f"{mode}: intents={intents_n}/orders={orders_n} (ratio {ratio:.2f})"
+            if ratio < 0.3:
+                per_mode.append((mode, "WARN", seg + " under-firing"))
+            else:
+                per_mode.append((mode, "PASS", seg))
     except Exception as e:
         return ("WARN", f"intents/orders 24h query failed: {e}")
-    if orders_24h == 0:
-        return ("PASS", f"intents_24h={intents_24h}, orders_24h=0 (engine quiet, nothing to compare)")
-    if intents_24h == 0:
-        return (
-            "FAIL",
-            f"intents_24h=0 BUT orders_24h={orders_24h} — writer silent-dead "
-            "(matches 2026-04-17 outage fingerprint; check Rust trading_writer "
-            "intent INSERT path + DB connection pool)",
-        )
-    ratio = intents_24h / orders_24h
-    msg = f"intents_24h={intents_24h} vs orders_24h={orders_24h} (ratio {ratio:.2f})"
-    if ratio < 0.3:
-        return ("WARN", msg + " — intents writer under-firing (healthy baseline 0.70-0.87)")
-    return ("PASS", msg)
+
+    # Composite: worst wins (FAIL > WARN > PASS > SKIP-only).
+    # 彙總：最差者勝（FAIL > WARN > PASS > 只有 SKIP 代表全 engine quiet）。
+    statuses = [s for _, s, _ in per_mode]
+    summary = " | ".join(m for _, _, m in per_mode)
+    if "FAIL" in statuses:
+        return ("FAIL", summary + " — check Rust trading_writer intent INSERT + DB pool")
+    if "WARN" in statuses:
+        return ("WARN", summary + " — healthy baseline 0.70-0.87")
+    if all(s == "SKIP" for s in statuses):
+        return ("PASS", summary + " — all engines quiet, nothing to compare")
+    return ("PASS", summary)
 
 
 def _read_shadow_enabled_from_toml() -> tuple[bool | None, str]:
