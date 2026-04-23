@@ -7,7 +7,8 @@
 - [ML/DL 自主學習架構](project_ml_dl_learning_architecture.md) — v0.4 Teacher-Student+LightGBM+Optuna+3DL
 - [Agent P2 動態 SL/TP](project_agent_p2_dynamic_sl_tp.md) — SL/TP 默認 ATR動態, agent_adjust()可覆蓋, P1 max 為硬頂
 - [Agent 工作空間系統](project_agent_workspace.md) — docs/CCAgentWorkSpace/ 下 Agent profile/memory/workspace
-- [Layer 2 AI推理循環](project_layer2_agent_design.md) — 三層架構 L0/L1/L2，阻斷條件已解除，W22+ G-1 AI Agent 展開
+- [Layer 2 AI推理循環 (2026-04-23 更正)](project_layer2_agent_design.md) — 三層 L0/L1/L2；**先前「H1-H5 全 stub」過期**；真正 gap = Layer 2 自主推理 + ExecutorAgent shadow→live 整合
+- [5-Agent + H1-H5 Runtime 狀態 (2026-04-23)](project_5agent_runtime_state.md) — ~4552 行代碼 live shadow；Strategist live / Executor shadow 默認；與 Rust hot path 解耦；G-1 真正工作範圍
 - [GUI 寫入面盤點](project_gui_write_paths_inventory.md) — 93 endpoints 分類 + Rust trading_mode 是冷參數陷阱 + fake-success 真假判別
 - [Phase 5 reframed (2026-04-12)](project_phase5_promotion_edge_crisis.md) — PNL-FIX-1/2 揭露所有策略 gross 負 edge，Phase 5 cost_gate 工作暫停等策略重做
 - [Edge 數據隔離 (2026-04-13)](project_edge_data_isolation.md) — 疑似 paper 噪音污染 JS edge 估計的墮落循環，demo/paper edge 分離計算
