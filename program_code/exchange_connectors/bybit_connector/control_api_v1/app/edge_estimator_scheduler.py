@@ -182,6 +182,10 @@ class EdgeEstimatorScheduler:
     def _run_cycle(self, reason: str) -> dict[str, dict]:
         results: dict[str, dict] = {}
         for mode in self._modes:
+            # Per-mode wall-clock for duration_ms / 每個 mode 各自計時
+            t_start = time.time()
+            backfill_error: Optional[BaseException] = None
+            js_error: Optional[BaseException] = None
             try:
                 # Backfill first — populate labels so JS sees this cycle's fills.
                 # 先回填 labels 再跑 JS；失敗不阻斷 JS（backfill 是 JS 的 best-effort 前置）。
@@ -196,6 +200,7 @@ class EdgeEstimatorScheduler:
                         backfill_summary.get("grid_merged", 0),
                     )
                 except Exception as bexc:
+                    backfill_error = bexc
                     backfill_summary = {"error": str(bexc)}
                     logger.warning(
                         "EdgeEstimatorScheduler[%s]: mode=%s backfill failed (fail-open, JS still runs): %s "
@@ -213,6 +218,7 @@ class EdgeEstimatorScheduler:
                     reason, mode, summary.get("n_cells", 0), summary.get("grand_mean_bps", 0.0), reason,
                 )
             except Exception as exc:
+                js_error = exc
                 results[mode] = {"error": str(exc)}
                 with self._lock:
                     self._failures += 1
@@ -221,11 +227,147 @@ class EdgeEstimatorScheduler:
                     "/ JS 排程器[%s]：mode=%s 失敗（不阻斷）：%s",
                     reason, mode, exc, reason, mode, exc,
                 )
+            finally:
+                # SCHEDULER-FAILURE-OBSERVABILITY-1: persist one row per mode
+                # to observability.engine_events so operators can SQL-query
+                # scheduler heartbeat + failures without greping stdout.
+                # SCHEDULER-FAILURE-OBSERVABILITY-1：每個 mode 寫一行到
+                # observability.engine_events，operator 可 SQL 查排程心跳與失敗，
+                # 不必翻 stdout log。
+                duration_ms = int((time.time() - t_start) * 1000)
+                self._record_cycle_event(
+                    reason=reason,
+                    mode=mode,
+                    duration_ms=duration_ms,
+                    backfill_error=backfill_error,
+                    js_error=js_error,
+                    results_for_mode=results.get(mode),
+                )
         with self._lock:
             self._runs += 1
             self._last_run_ts = time.time()
             self._last_results = results
         return results
+
+    def _record_cycle_event(
+        self,
+        *,
+        reason: str,
+        mode: str,
+        duration_ms: int,
+        backfill_error: Optional[BaseException],
+        js_error: Optional[BaseException],
+        results_for_mode: Optional[dict],
+    ) -> None:
+        """
+        Fail-soft INSERT into observability.engine_events for scheduler
+        heartbeat + failure observability (SCHEDULER-FAILURE-OBSERVABILITY-1).
+
+        Status semantics / status 語意：
+          'ok'   — JS estimation succeeded (backfill may or may not have failed;
+                   backfill failure is non-fatal and still yields ok status
+                   but is recorded in payload.backfill_error_class).
+          'fail' — JS estimation raised; cycle produced no estimates this mode.
+
+        Fail-soft: any exception in this writer (connection loss, schema drift,
+        serialisation error) is swallowed and logged at warning — never re-raised,
+        never blocks the scheduler cycle.
+
+        Fail-soft INSERT 寫入 observability.engine_events，為排程器心跳 +
+        失敗觀察性（SCHEDULER-FAILURE-OBSERVABILITY-1）。
+
+        status 語意：
+          'ok'   — JS 估計成功（backfill 可失可成，backfill 失敗不致命、
+                   仍算整輪 ok，但 payload.backfill_error_class 會記錄）
+          'fail' — JS 估計拋出；此 mode 本輪無估計。
+
+        Fail-soft：此 writer 任何異常（連線中斷/schema drift/序列化錯誤）
+        一律吞下並 warning log，永不 re-raise、永不阻塞 scheduler 主循環。
+        """
+        status = "fail" if js_error is not None else "ok"
+        error_class: Optional[str] = type(js_error).__name__ if js_error else None
+        error_msg: Optional[str] = str(js_error) if js_error else None
+
+        # Build payload JSON — structured enough for SQL projection but
+        # capped to what operator needs for triage.
+        # payload JSON 保持結構化、可 SQL 投影，同時只收 operator triage 必需資訊。
+        payload = {
+            "scheduler_name": "edge_estimator",
+            "cycle_phase": "full_cycle",  # backfill + JS estimate, per _run_cycle contract
+            "reason": reason,
+            "mode": mode,
+            "engine_mode": mode,  # alias for operator SQL ergonomics / 便於 operator SQL
+            "status": status,
+            "duration_ms": duration_ms,
+            "error_class": error_class,
+            "error_msg": error_msg,
+            "backfill_error_class": (
+                type(backfill_error).__name__ if backfill_error else None
+            ),
+            "n_cells": (
+                int(results_for_mode.get("n_cells", 0))
+                if isinstance(results_for_mode, dict) else None
+            ),
+            "grand_mean_bps": (
+                float(results_for_mode.get("grand_mean_bps", 0.0))
+                if isinstance(results_for_mode, dict) else None
+            ),
+        }
+
+        # Lazy imports so a PG-less environment never breaks module load.
+        # 懶 import；PG 不可達環境下不影響模組載入。
+        try:
+            import json  # noqa: PLC0415
+            from .db_pool import get_pg_conn  # noqa: PLC0415
+        except Exception as imp_exc:
+            logger.warning(
+                "EdgeEstimatorScheduler: observability writer import failed "
+                "(fail-soft, event dropped): %s "
+                "/ 觀察性寫入器 import 失敗（fail-soft，事件丟棄）：%s",
+                imp_exc, imp_exc,
+            )
+            return
+
+        ts_ms = int(time.time() * 1000)
+        event_type = "scheduler_ok" if status == "ok" else "scheduler_fail"
+
+        try:
+            with get_pg_conn() as conn:
+                if conn is None:
+                    # Pool unavailable — degrade silently + one warning.
+                    # Pool 不可達 — 靜默降級，一次 warning。
+                    logger.warning(
+                        "EdgeEstimatorScheduler: DB pool unavailable, "
+                        "scheduler event not persisted (mode=%s status=%s) "
+                        "/ DB pool 不可達，排程事件未持久化 (mode=%s status=%s)",
+                        mode, status, mode, status,
+                    )
+                    return
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        INSERT INTO observability.engine_events
+                            (ts_ms, event_type, source, config_name, payload)
+                        VALUES (%s, %s, %s, %s, %s::jsonb)
+                        """,
+                        (
+                            ts_ms,
+                            event_type,
+                            "edge_estimator_scheduler",
+                            None,  # config_name unused for scheduler events
+                            json.dumps(payload),
+                        ),
+                    )
+                conn.commit()
+        except Exception as insert_exc:
+            # Fail-soft — scheduler main loop must not see this.
+            # Fail-soft — 不讓 scheduler 主循環看到這個錯。
+            logger.warning(
+                "EdgeEstimatorScheduler: observability INSERT failed "
+                "(fail-soft, cycle not affected): %s "
+                "/ 觀察性 INSERT 失敗（fail-soft，不影響 cycle）：%s",
+                insert_exc, insert_exc,
+            )
 
     def _run_one_mode(self, mode: str) -> dict:
         """
