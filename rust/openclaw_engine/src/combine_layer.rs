@@ -242,6 +242,66 @@ pub fn combine_exit_decision(
 }
 
 // ---------------------------------------------------------------------------
+// INFRA-PREBUILD-1 Part A (2026-04-23): Shadow-mode MLInference mock builder
+// ---------------------------------------------------------------------------
+
+/// Build a mock `MLInference` from a strategy/symbol edge estimate — used only
+/// in Phase 2 shadow mode (`RiskConfig.exit.shadow_enabled=true`) to exercise
+/// the Combine Layer's Hybrid path without a real ONNX model. Phase 3+ will
+/// swap this for the real `edge_predictor::predict_exit(...)` call.
+///
+/// # Semantics
+///
+/// Maps `shrunk_bps ∈ [-∞, +∞]` → `score ∈ [0, 1]` via clamp-rescale centred
+/// on ±10 bps (the `edge_estimates.json` typical operating range):
+///
+///   score = clamp01((shrunk_bps + 10) / 20)
+///
+/// - `shrunk_bps ≤ -10` → `score = 0.0` (ML says "exit urgently")
+/// - `shrunk_bps =   0` → `score = 0.5` (neutral)
+/// - `shrunk_bps ≥ +10` → `score = 1.0` (ML says "keep running")
+///
+/// This mapping is intentionally a monotone proxy for "expected net edge" so
+/// Combine Layer behaviour in shadow looks roughly like what a trained model
+/// would do: positive-edge positions get `score ≥ ml_confirm_threshold=0.70`
+/// (i.e. `shrunk_bps ≥ +4`), producing `Hybrid` tags on physical Locks.
+///
+/// # Invariants
+///
+/// 1. Returns `None` when `shrunk_bps_opt = None` — caller's `combine_exit_decision`
+///    falls back to `ml_opt=None` path (pure Physical).
+/// 2. `model_id` is stable `"shadow_mock_v1"` — downstream persistence can
+///    distinguish mock from real inference via this tag.
+/// 3. `confidence` is a placeholder `0.5` (mid) — mock has no calibration.
+/// 4. `ml_override_high=2.0` sentinel still holds: score ≤ 1.0 can never
+///    trigger `Hold → Lock` escalation (invariant #4 in `combine_exit_decision`).
+///
+/// # 語意 / Semantics（中）
+///
+/// 將 `shrunk_bps` 對應到 `score ∈ [0, 1]`，中心 ±10 bps（edge_estimates.json 典型範圍）。
+/// 此為 Phase 2 shadow 模式下的 mock，讓 Combine Layer 走 Hybrid 路徑練兵；
+/// Phase 3+ 將切真 ONNX 推論。`ml_override_high=2.0` 不可達 sentinel 仍守
+/// Phase 1a 不變式（ML 永遠不能 Hold → Lock）。
+pub fn build_ml_inference_shadow(
+    shrunk_bps_opt: Option<f64>,
+    cell_age_secs: Option<u64>,
+) -> Option<MLInference> {
+    let shrunk_bps = shrunk_bps_opt?;
+    if !shrunk_bps.is_finite() {
+        return None;
+    }
+    // clamp01((x + 10) / 20) — center=0 bps, domain ±10 bps → score ∈ [0, 1]
+    let raw = (shrunk_bps + 10.0) / 20.0;
+    let score = raw.clamp(0.0, 1.0) as f32;
+    Some(MLInference {
+        id: "shadow_mock_v1".to_string(),
+        score,
+        age_secs: cell_age_secs.unwrap_or(0),
+        confidence: 0.5,
+    })
+}
+
+// ---------------------------------------------------------------------------
 // Tests / 測試
 // ---------------------------------------------------------------------------
 
