@@ -145,10 +145,24 @@ def register_model(
       so re-training the same slot doesn't regress an already-promoted model
       to 'shadow'. Operator explicitly transitions via
       `transition_canary_status`.
+    - INFRA-PREBUILD-1 audit L2-3 (2026-04-23) hardening: the ON CONFLICT DO
+      UPDATE clause is filtered by
+      `WHERE learning.model_registry.canary_status NOT IN ('promoting',
+      'production')` — PostgreSQL's UPSERT-where rule skips the UPDATE entirely
+      when the existing row is mid-promote or already in production. Without
+      the filter, a re-training run would rewrite artifact_path / verdict /
+      acceptance_report / created_by on top of a promoted slot, effectively
+      swapping the live canary/production ONNX behind Operator's back. With
+      the filter the UPDATE no-ops and `RETURNING id` yields nothing, so this
+      function returns `None` — the caller can treat that as "slot is locked
+      in promoting/production, skipping refresh" and act accordingly.
 
-    回傳 row id 於成功；None = skip（DB 不可用 / verdict=no_ship 拒絕）。
-    ON CONFLICT 刷新 artifact/verdict/report 但**保留** canary_status /
-    promoted_at / retired_at，避免 retrain 把已晉升 model 退回 shadow。
+    回傳 row id 於成功；None = skip（DB 不可用 / verdict=no_ship 拒絕 / slot
+    正在 promoting|production 被 WHERE 過濾跳過 DO UPDATE）。ON CONFLICT 刷新
+    artifact/verdict/report 但**保留** canary_status / promoted_at / retired_at，
+    並透過 `WHERE ... NOT IN ('promoting','production')` 保證 promoting/production
+    slot 下的 artifact/verdict 全欄位不被 retrain 悄悄改寫；此時 RETURNING 無值
+    → return None，caller 應視為「slot 已鎖，跳過刷新」。
     """
     if verdict == VERDICT_NO_SHIP:
         logger.info(
@@ -199,6 +213,7 @@ def register_model(
                     training_sample_size = EXCLUDED.training_sample_size,
                     created_by           = EXCLUDED.created_by,
                     updated_at           = NOW()
+                WHERE learning.model_registry.canary_status NOT IN ('promoting', 'production')
                 RETURNING id
                 """,
                 (

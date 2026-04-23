@@ -241,3 +241,29 @@ def test_transition_shadow_to_rejected_allowed():
         # Transition logic accepted; return value reflects execute + commit path.
         # 轉移邏輯通過；return value 反映 execute + commit 是否成功。
         assert result is True
+
+
+# ───── INFRA-PREBUILD-1 audit L2-3: ON CONFLICT canary preserve ─────
+# Static SQL drift guard: the ON CONFLICT DO UPDATE clause MUST filter out
+# rows where canary_status IN ('promoting', 'production') so a re-training
+# run cannot silently rewrite artifact_path / verdict / acceptance_report
+# on top of a promoted model slot. Without the filter, the promoted canary
+# or production ONNX gets swapped behind Operator's back. Source-level
+# assertion so this test stays green without a live PG connection.
+# INFRA-PREBUILD-1 審計 L2-3：ON CONFLICT DO UPDATE 必須用
+# `WHERE canary_status NOT IN ('promoting','production')` 過濾已晉升列，
+# 否則 retrain 會把 canary / production ONNX 的 metadata 覆寫。純源碼
+# 斷言，不需要 live PG 連線。
+
+
+def test_register_model_sql_has_canary_preserve_where_clause():
+    """Drift guard: ON CONFLICT DO UPDATE must filter out promoting/production rows
+    so re-training doesn't regress an already-promoted model back to shadow metadata.
+    漂移守：ON CONFLICT DO UPDATE 需過濾 promoting/production，retrain 不能回退已晉升 model。"""
+    from program_code.ml_training import model_registry
+    import inspect
+    src = inspect.getsource(model_registry.register_model)
+    assert "canary_status NOT IN" in src, \
+        "register_model SQL lost canary_status preserve filter — retrain could regress promoting/production"
+    assert "'promoting'" in src
+    assert "'production'" in src

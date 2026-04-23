@@ -516,4 +516,94 @@ mod tests {
         assert!(cfg.ml_veto_low > 0.0 && cfg.ml_veto_low < cfg.ml_confirm_threshold);
         assert_eq!(cfg.max_model_age_secs, 7 * 24 * 3600);
     }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // INFRA-PREBUILD-1 audit L1-4 (2026-04-23): build_ml_inference_shadow
+    // boundary tests. `build_ml_inference_shadow` is the sole mock ML producer
+    // wired into Phase 2 shadow mode — `emit_shadow_exit_observation` relies on
+    // its clamp semantics + NaN/Inf rejection to stay consistent with
+    // `combine_exit_decision`'s safety net. Every boundary & threshold value
+    // gets a locked test so future refactors cannot silently widen / narrow the
+    // score domain without going red here first.
+    //
+    // INFRA-PREBUILD-1 審計 L1-4（2026-04-23）：`build_ml_inference_shadow` 的
+    // 邊界測試。此 fn 是 Phase 2 shadow 模式唯一的 mock ML 產生器；
+    // `emit_shadow_exit_observation` 依賴其 clamp 語意 + NaN/Inf 拒絕與
+    // `combine_exit_decision` 安全網保持一致。每個邊界 / 閾值都鎖測試，避免
+    // 日後重構靜默放寬 / 收緊 score 域而未先紅測試。
+    // ─────────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_build_ml_shadow_none_returns_none() {
+        // None shrunk_bps → mock returns None → emit wrapper falls through to
+        // ml_opt=None path (pure Physical).
+        // None shrunk_bps → mock 回 None → emit 走 ml_opt=None（純 Physical）。
+        assert!(build_ml_inference_shadow(None, None).is_none());
+    }
+
+    #[test]
+    fn test_build_ml_shadow_nan_returns_none() {
+        // NaN must not leak into MLInference.score — defence-in-depth ahead of
+        // combine_layer's own `is_finite()` safety net.
+        // NaN 不得進入 MLInference.score — 先於 combine_layer 的 `is_finite()`
+        // 安全網做雙層防禦。
+        assert!(build_ml_inference_shadow(Some(f64::NAN), None).is_none());
+    }
+
+    #[test]
+    fn test_build_ml_shadow_pos_inf_returns_none() {
+        // +Inf rejected (same reasoning as NaN).
+        // +Inf 拒收（與 NaN 同理）。
+        assert!(build_ml_inference_shadow(Some(f64::INFINITY), None).is_none());
+    }
+
+    #[test]
+    fn test_build_ml_shadow_neg_inf_returns_none() {
+        // -Inf rejected.
+        // -Inf 拒收。
+        assert!(build_ml_inference_shadow(Some(f64::NEG_INFINITY), None).is_none());
+    }
+
+    #[test]
+    fn test_build_ml_shadow_clamp_low() {
+        // shrunk_bps = -20 → raw = (-20+10)/20 = -0.5 → clamp(0.0, 1.0) = 0.0.
+        // score 為 0.0；id 固定為 "shadow_mock_v1"。
+        let m = build_ml_inference_shadow(Some(-20.0), None).expect("finite input");
+        assert_eq!(m.score, 0.0, "shrunk_bps -20 must clamp to score 0.0");
+        assert_eq!(m.id, "shadow_mock_v1");
+    }
+
+    #[test]
+    fn test_build_ml_shadow_clamp_high() {
+        // shrunk_bps = 20 → raw = 1.5 → clamp(0.0, 1.0) = 1.0.
+        // shrunk_bps 20 → clamp 1.0。
+        let m = build_ml_inference_shadow(Some(20.0), None).expect("finite input");
+        assert_eq!(m.score, 1.0, "shrunk_bps 20 must clamp to score 1.0");
+    }
+
+    #[test]
+    fn test_build_ml_shadow_mid_score_0_5() {
+        // shrunk_bps = 0 → raw = 0.5 exactly (no clamp). Sits below
+        // ml_confirm_threshold=0.70 so `emit_shadow_exit_observation` would
+        // still classify this as Physical, not Hybrid.
+        // shrunk_bps 0 → score 0.5（無 clamp）；低於 confirm_threshold 0.70 → Physical。
+        let m = build_ml_inference_shadow(Some(0.0), None).expect("finite input");
+        assert!((m.score - 0.5).abs() < 1e-6, "shrunk_bps 0 must map to score 0.5, got {}", m.score);
+    }
+
+    #[test]
+    fn test_build_ml_shadow_confirm_threshold_at_4_bps() {
+        // shrunk_bps = 4 → raw = (4+10)/20 = 0.7 exactly — the confirm threshold
+        // boundary (>=0.70 triggers Hybrid in emit_shadow_exit_observation).
+        // Pin this so a refactor of the mapping never silently moves the Phase 2
+        // Hybrid onset below or above +4 bps.
+        // shrunk_bps 4 → score 0.7 剛好 = confirm threshold；固化此邊界避免
+        // Phase 2 Hybrid 起點靜默偏移。
+        let m = build_ml_inference_shadow(Some(4.0), None).expect("finite input");
+        assert!(
+            (m.score - 0.7).abs() < 1e-6,
+            "shrunk_bps 4 must sit exactly on confirm_threshold 0.70, got {}",
+            m.score,
+        );
+    }
 }
