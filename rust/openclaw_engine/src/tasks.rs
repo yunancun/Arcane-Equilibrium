@@ -320,10 +320,10 @@ pub(crate) fn spawn_news_pipeline(
 /// 啟動所有 DB 寫入器任務 + 特徵版本初始化。
 ///
 /// Returns the sender halves for (market, feature, trading, context,
-/// decision_feature, shadow_fill, exit_feature) channels.
+/// decision_feature, shadow_fill, exit_feature, shadow_exit) channels.
 /// The caller uses these to wire into EventConsumerDeps.
 /// 返回 (market, feature, trading, context, decision_feature, shadow_fill,
-/// exit_feature) 通道的發送端。
+/// exit_feature, shadow_exit) 通道的發送端。
 #[allow(clippy::type_complexity)]
 pub(crate) async fn spawn_db_writers(
     db_pool: &Arc<DbPool>,
@@ -340,9 +340,13 @@ pub(crate) async fn spawn_db_writers(
     Option<tokio::sync::mpsc::Sender<openclaw_engine::database::DecisionFeatureMsg>>,
     Option<tokio::sync::mpsc::Sender<openclaw_engine::database::ShadowFillMsg>>,
     Option<tokio::sync::mpsc::Sender<openclaw_engine::database::ExitFeatureRow>>,
+    // INFRA-PREBUILD-1 Part A (2026-04-23): Combine Layer exit-time shadow
+    // observations (Phase 2+ shadow_enabled toggle). Dormant by default.
+    // INFRA-PREBUILD-1 A 部：Combine Layer 退場時刻 shadow 觀測通道。
+    Option<tokio::sync::mpsc::Sender<openclaw_engine::database::ShadowExitMsg>>,
 ) {
     if !db_pool.is_available() {
-        return (None, None, None, None, None, None, None);
+        return (None, None, None, None, None, None, None, None);
     }
 
     // Market writer channel + task
@@ -458,6 +462,29 @@ pub(crate) async fn spawn_db_writers(
         );
     }
 
+    // INFRA-PREBUILD-1 Part A (2026-04-23): Shadow exit writer channel + task.
+    // Combine Layer Phase 2+ shadow mode — fires one row per close fill when
+    // `RiskConfig.exit.shadow_enabled=true`. Sized 512 (half of exit_features);
+    // shadow rows are a subset (only closes that pass Combine Layer evaluation).
+    // Shares writer infra with sibling writers. Dormant by default (default
+    // shadow_enabled=false → zero emits).
+    // INFRA-PREBUILD-1 A 部：Combine Layer 退場時刻 shadow writer 通道 + 任務。
+    // 容量 512；僅當 shadow_enabled=true 才發射（預設 false，dormant）。
+    let (shadow_exit_tx, shadow_exit_rx) = tokio::sync::mpsc::channel(512);
+    {
+        let se_pool = Arc::clone(db_pool);
+        let se_config = Arc::clone(config);
+        let se_cancel = cancel.clone();
+        tokio::spawn(
+            openclaw_engine::database::shadow_exit_writer::run_shadow_exit_writer(
+                shadow_exit_rx,
+                se_pool,
+                se_config,
+                se_cancel,
+            ),
+        );
+    }
+
     // F-4 fix: Spawn REST pollers for funding/OI/LSR
     // F-4 修復：啟動 funding/OI/LSR REST 輪詢器
     if let Some(ref client) = shared_client {
@@ -518,6 +545,7 @@ pub(crate) async fn spawn_db_writers(
         Some(decision_feature_tx),
         Some(shadow_fill_tx),
         Some(exit_feature_tx),
+        Some(shadow_exit_tx),
     )
 }
 

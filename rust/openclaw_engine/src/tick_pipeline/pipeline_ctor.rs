@@ -119,6 +119,7 @@ impl TickPipeline {
             decision_feature_tx: None,
             shadow_fill_db_tx: None,
             exit_feature_tx: None,
+            shadow_exit_tx: None,
             symbol_registry: None,
             retriage_last_evict_ms: HashMap::new(),
             // DYNAMIC-RISK-1: anchored on IntentProcessor's default p1_risk_pct (3%).
@@ -361,6 +362,31 @@ impl TickPipeline {
         &self,
     ) -> Option<&tokio::sync::mpsc::Sender<crate::database::ExitFeatureRow>> {
         self.exit_feature_tx.as_ref()
+    }
+
+    /// INFRA-PREBUILD-1 Part A (2026-04-23): Wire the shadow-exit DB channel.
+    /// Called once per pipeline at bootstrap. `None` keeps emission as
+    /// fail-soft no-op (trading unaffected; Combine Layer shadow dormant).
+    /// INFRA-PREBUILD-1 A 部：接 shadow-exit DB 通道；每 pipeline 啟動時呼叫一次。
+    /// 未接線時 fail-soft no-op（交易不受影響；shadow dormant）。
+    pub fn set_shadow_exit_tx(
+        &mut self,
+        tx: tokio::sync::mpsc::Sender<crate::database::ShadowExitMsg>,
+    ) {
+        debug_assert!(
+            self.shadow_exit_tx.is_none(),
+            "shadow_exit_tx injected twice — bootstrap should call this exactly once per pipeline"
+        );
+        self.shadow_exit_tx = Some(tx);
+    }
+
+    /// INFRA-PREBUILD-1 Part A: Accessor for the Combine Layer close-path
+    /// producer. Returns `None` until `set_shadow_exit_tx` is called.
+    /// INFRA-PREBUILD-1 A 部：Combine Layer close-path 的 tx 取用器。
+    pub fn shadow_exit_tx(
+        &self,
+    ) -> Option<&tokio::sync::mpsc::Sender<crate::database::ShadowExitMsg>> {
+        self.shadow_exit_tx.as_ref()
     }
 
     /// EXIT-FEATURES-TABLE-1: Read-only accessor to the pre-existing

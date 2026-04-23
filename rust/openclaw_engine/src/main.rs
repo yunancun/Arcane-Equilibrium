@@ -871,6 +871,7 @@ async fn async_main(
         decision_feature_tx,
         shadow_fill_tx,
         exit_feature_tx,
+        shadow_exit_tx,
     ) = tasks::spawn_db_writers(
         &db_pool,
         &config,
@@ -1424,6 +1425,12 @@ async fn async_main(
             // EXIT-FEATURES-TABLE-1：Paper 接入退場特徵 writer。三引擎必須對齊，
             // 避免 MARKET-KLINES-STALE-1 D19 單引擎接線導致的寫入丟失覆轍。
             exit_feature_tx: exit_feature_tx.clone(),
+            // INFRA-PREBUILD-1 Part A (2026-04-23): Combine Layer exit-time
+            // shadow observation. Same fan-out policy as exit_feature_tx
+            // (all three engines share one writer). Dormant default.
+            // INFRA-PREBUILD-1 A 部：Combine Layer 退場時刻 shadow 觀測；
+            // 三引擎共享，預設 dormant（flag OFF → 0 emit）。
+            shadow_exit_tx: shadow_exit_tx.clone(),
             exchange_event_rx: None,
             seed_positions: Vec::new(), // Paper has no exchange-side positions to seed
             account_manager: None,
@@ -1529,6 +1536,12 @@ async fn async_main(
             // EXIT-FEATURES-TABLE-1: Demo wires exit_feature writer (see Paper note).
             // EXIT-FEATURES-TABLE-1：Demo 接入退場特徵 writer（見 Paper 說明）。
             exit_feature_tx: exit_feature_tx.clone(),
+            // INFRA-PREBUILD-1 Part A (2026-04-23): Combine Layer exit-time
+            // shadow observation. Same fan-out policy as exit_feature_tx
+            // (all three engines share one writer). Dormant default.
+            // INFRA-PREBUILD-1 A 部：Combine Layer 退場時刻 shadow 觀測；
+            // 三引擎共享，預設 dormant（flag OFF → 0 emit）。
+            shadow_exit_tx: shadow_exit_tx.clone(),
             exchange_event_rx: Some(demo_b.ws_bindings.exchange_event_rx),
             seed_positions: demo_seed_positions,
             account_manager: Some(demo_b.account_manager),
@@ -1664,6 +1677,12 @@ async fn async_main(
             // EXIT-FEATURES-TABLE-1: Live wires exit_feature writer (see Paper note).
             // EXIT-FEATURES-TABLE-1：Live 接入退場特徵 writer（見 Paper 說明）。
             exit_feature_tx: exit_feature_tx.clone(),
+            // INFRA-PREBUILD-1 Part A (2026-04-23): Combine Layer exit-time
+            // shadow observation. Same fan-out policy as exit_feature_tx
+            // (all three engines share one writer). Dormant default.
+            // INFRA-PREBUILD-1 A 部：Combine Layer 退場時刻 shadow 觀測；
+            // 三引擎共享，預設 dormant（flag OFF → 0 emit）。
+            shadow_exit_tx: shadow_exit_tx.clone(),
             exchange_event_rx: Some(live_b.ws_bindings.exchange_event_rx),
             seed_positions: live_seed_positions,
             account_manager: Some(live_b.account_manager),

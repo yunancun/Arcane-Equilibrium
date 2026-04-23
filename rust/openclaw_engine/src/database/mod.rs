@@ -26,6 +26,7 @@ pub mod outcome_backfiller;
 pub mod pool;
 pub mod quality_writer;
 pub mod rest_poller;
+pub mod shadow_exit_writer;
 pub mod shadow_fill_writer;
 pub mod trading_writer;
 
@@ -568,6 +569,72 @@ pub struct ExitFeatureRow {
     /// Hash of the ordered feature-name list — detects schema drift.
     /// 欄位結構 hash，偵測 schema 漂移。
     pub feature_schema_hash: String,
+}
+
+/// Combine Layer exit-time shadow observation row → shadow_exit_writer.
+/// Combine Layer 退場時刻 shadow 觀測列 → shadow_exit_writer。
+///
+/// INFRA-PREBUILD-1 Part A (2026-04-23): Phase 2 shadow mode writes one row
+/// per close fill when `RiskConfig.exit.shadow_enabled=true`, capturing the
+/// divergence (or agreement) between Track P physical-only decision and the
+/// Combine Layer output that also considered (mock or real) ML inference.
+///
+/// Target table: `learning.decision_shadow_exits` (V021 migration).
+/// Pure observation — never enters label backfill. Distinct from
+/// `decision_shadow_fills` (V017, entry-time ε-greedy, paper-only).
+///
+/// INFRA-PREBUILD-1 A 部（2026-04-23）：Phase 2 shadow mode 下，每筆退場 fill
+/// 寫一列到 `learning.decision_shadow_exits`，記錄純 Track P 決策 vs
+/// Combine Layer（含 mock/real ML inference）的一致性或分歧。純觀測，
+/// 不入 label 回填；與 V017 的 `decision_shadow_fills`（entry-time ε-greedy、
+/// paper-only）語意不同。
+#[derive(Debug, Clone)]
+pub struct ShadowExitMsg {
+    /// Entry-time context_id / 開倉 context_id
+    pub context_id: String,
+    /// Close fill timestamp (ms since epoch) / 退場時刻（毫秒）
+    pub ts_ms: i64,
+    /// 'paper' | 'demo' | 'live' | 'live_demo' — unlike shadow_fills V017
+    /// this accepts demo (主力驗證環境). CHECK constraint enforces.
+    /// 'paper'/'demo'/'live'/'live_demo' — 與 V017 shadow_fills 不同，
+    /// 本表接受 demo（主力驗證環境）；CHECK 在 DB 層守。
+    pub engine_mode: String,
+    pub strategy_name: String,
+    pub symbol: String,
+    /// +1 long / -1 short (i16 → SMALLINT)
+    pub side: i16,
+
+    // ── Track P physical-only decision / Track P 純物理層決策 ──
+    /// 'Lock' | 'Hold' — what Track P alone would have produced.
+    /// 'Lock' | 'Hold' — 僅 Track P 會產生的結果。
+    pub physical_action: String,
+    /// Trigger reason (e.g. 'phys_lock_gate4_giveback') or None for Hold.
+    /// 觸發原因字串；Hold 時可能為 None。
+    pub physical_reason: Option<String>,
+
+    // ── ML inference snapshot (None when ml_opt=None) ──
+    /// None = Phase 1a default / ML disabled / model not loaded.
+    /// 非空 = Phase 2 shadow mock 或真實 ONNX.
+    pub ml_model_id: Option<String>,
+    pub ml_score: Option<f64>,
+    pub ml_age_secs: Option<i64>,
+    pub ml_confidence: Option<f64>,
+
+    // ── Combine Layer final decision / Combine Layer 最終決策 ──
+    /// 'Physical' | 'Hybrid' | 'ML' | 'Disabled'
+    pub exit_source: String,
+    /// TRUE when Combine output != what Physical-only would have produced.
+    /// Key audit metric for Phase 2 shadow agreement ratio target ≥60%.
+    /// TRUE 當 Combine 結果 ≠ Physical-only 結果；Phase 2 一致性目標 ≥60%。
+    pub disagreed: bool,
+    /// Human-readable reason when disagreed=true (may be None when agreed).
+    /// 分歧原因（disagreed=true 時）；一致時可為 None。
+    pub disagreement_reason: Option<String>,
+
+    // ── Combine config snapshot at decision time (debug on demotion) ──
+    pub ml_confirm_threshold: Option<f64>,
+    pub ml_override_high: Option<f64>,
+    pub ml_veto_low: Option<f64>,
 }
 
 /// Sanitize a float for PG insertion: replace NaN/Inf with None.
