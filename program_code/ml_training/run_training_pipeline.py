@@ -226,6 +226,36 @@ def _run_quantile_pipeline(
     result.onnx_artifacts = onnx_out
     result.stages_completed.append("onnx_export")
 
+    # Stage 5.5: Register ONNX artifacts in learning.model_registry (V023).
+    # INFRA-PREBUILD-1 Part B (2026-04-23): persist artifact path + verdict +
+    # acceptance report JSONB + provenance hashes so Rust OnnxModelManager can
+    # query "latest production model for this slot" from DB instead of relying
+    # solely on the filesystem `_current` symlink. Skipped when DB unavailable
+    # or verdict=no_ship (registry stays clean of unshippable models).
+    # INFRA-PREBUILD-1 B 部：寫 learning.model_registry，讓 Rust OnnxModelManager
+    # 可以查 DB 取「這個 slot 的 latest production model」，不必只依賴 _current
+    # symlink。DB 不可用或 verdict=no_ship 時跳過。
+    try:
+        from ml_training.model_registry import register_quantile_trio_from_onnx_out
+        registry_ids = register_quantile_trio_from_onnx_out(
+            onnx_out=onnx_out,
+            strategy=config.strategy_type,
+            engine_mode=config.engine_mode,
+            schema_version=config.schema_version,
+            verdict=result.verdict,
+            acceptance_report_path=result.acceptance_report_path,
+            feature_schema_hash=train_result.feature_schema_hash,
+            training_sample_size=train_result.n_samples_labeled,
+            dsn=config.dsn,
+        )
+        if registry_ids:
+            result.stages_completed.append(f"model_registry_wrote_{len(registry_ids)}")
+        else:
+            result.stages_completed.append("model_registry_skipped")
+    except Exception as e:  # noqa: BLE001 — registry write is audit-only
+        logger.warning("model_registry write failed (non-fatal): %s", e)
+        result.stages_completed.append("model_registry_error")
+
     # Stage 6: summary metrics for pipeline consumer.
     result.metrics = {
         "verdict": result.verdict,
