@@ -239,4 +239,160 @@ gate in `governance_routes.py`). Non-Operator callers get 403.
 - `program_code/exchange_connectors/bybit_connector/control_api_v1/app/ml_routes.py`
   — `/api/v1/ml/*` endpoints
 - `docs/worklogs/2026-04-18--dual_track_exit_design.md` — upstream design
+
+---
+
+## Shadow observation ↔ canary promotion linkage
+
+INFRA-PREBUILD-1 audit L2-7 (2026-04-23) identified that this draft spelled
+out both the `canary_status` state machine and the per-phase eligibility
+gates, but never explained **how an operator is supposed to coordinate**
+`ExitConfig.shadow_enabled` (Part A) with `canary_status` (Part B) during
+Phase 2 activation. This section closes that gap with the concrete
+playbook — what to flip first, what each disagreement percentage means
+under Phase 1a, and the one-line diagnostic commands.
+
+INFRA-PREBUILD-1 審計 L2-7（2026-04-23）：原 draft 有 canary 狀態機與
+phase 晉升閾值，但沒有「shadow_enabled（A 部）與 canary_status（B 部）
+一起如何操作」的 playbook。本節補齊 Phase 2 啟動流程 + disagreement%
+解讀 + 門檻對應 + 一鍵診斷。
+
+### 1. Phase 2 啟動流程對照表（shadow flag state vs registry state）
+
+```
+Step 1 · initial state
+  shadow_enabled = false                  (全三環境 TOML)
+  model_registry  = all rows canary_status='shadow'
+  runtime effect  = 0 shadow exit rows, mock ML 不跑
+
+Step 2 · operator review acceptance_report
+  operator 比對 shadow rows 的 disagreement% / agreement breakdown，
+  判定某個 strategy × engine_mode × quantile slot 的 shadow model 可
+  進入 Phase 2 觀察。觀察完成 → 呼叫
+  POST /api/v1/ml/model_promote (canary_status: shadow → promoting)
+
+Step 3 · open observation window
+  operator 同時在 risk_config_demo.toml 把 [exit].shadow_enabled = true
+  （或走 IPC patch_risk_config 熱重載），Combine Layer 開始寫
+  learning.decision_shadow_exits。**此時** shadow_enabled 與 promoting
+  slot 才真正聯動。
+
+Step 4 · 7d/14d observation
+  每 6h 跑 passive_wait_healthcheck.py → check [8] 顯示 disagreement%
+  + engine breakdown。累積 n ≥ 500 rows 後：
+    - agreement ≥ 60% → 呼 POST /model_promote
+      (canary_status: promoting → production)
+      shadow_enabled 可保 true（觀察下一 slot）或 flip false
+    - agreement < 40% 持續 3d → POST /model_promote
+      (canary_status: promoting → shadow 或直接 retired)
+      shadow_enabled flip false，重訓 + 調 mock 或 veto path
+```
+
+### 2. disagreement% 解讀 cheat sheet（Phase 1a 限制下）
+
+⚠️ **Phase 1a 警告留尾** — 當前 `ml_override_high=2.0` sentinel 不可達，
+所有 Hold→Lock 升級路徑對 ML 封閉。這意味著 disagreement **實質只是
+"Physical→Hybrid tag 差異"**（同樣產出 Lock 信號，只是 source 欄位從
+`Physical` 變 `Hybrid`），不是真正的 ML 與 Track P「該不該平倉」分歧。
+
+```
+disagreed = 0%
+  → mock score < 0.70 for all rows → edge_estimates 全 below confirm
+  → 要嘛 JS cells 過度保守，要嘛 edge 估計偏負
+  → 行動：查 settings/edge_estimates.json 的 grand_mean_bps，若 <-5 bps
+         代表 fee drag 壓制 edge，正常；若 >0 bps 但 shrunk_bps 全 <4 bps
+         需檢查 JS estimator 的 shrinkage 強度（k in shrinkage_weight）
+
+disagreed = 30–50%
+  → 部分 PHYS-LOCK fire 時 score ≥ 0.70 → Combine 產 Hybrid source
+  → Hybrid confirm 對 Lock 決策是一致的（不改信號）但可用於信心加成
+  → 行動：觀察 Hybrid vs Physical 平均 net_pnl 差異，Hybrid 若無額外
+         信息增益（差距 < 1 bps）代表 mock 尚未提供價值；Hybrid 若平均
+         淨賺多 2+ bps 代表 confirm threshold 0.70 可用於 Phase 3+ veto
+
+disagreed > 70%
+  → mock score 經常 ≥ 0.70（edge_estimates 偏高）
+  → 行動：mock 的 (shrunk+10)/20 公式假設 ±10 bps 典型域；若 cells 普遍
+         >+8 bps 代表 clamp 經常撞 1.0，線性映射失真
+         → 考慮重校 build_ml_inference_shadow 的中心點/寬度，或先收緊
+         edge estimator 的 shrinkage（避免極端 cells 落到域外）
+
+disagreed % volatile day-to-day（±20% 跳動）
+  → 樣本量不足 / cells 冷啟動中
+  → 行動：n ≥ 500 前不下結論，待 7d 穩態再決策
+```
+
+### 3. 決策門檻對應（連動 Phase 3 `ml_override_high` 收緊）
+
+```
+Phase 2 exit criteria（any slot 進 production 的必要條件）：
+  (a) shadow n ≥ 500                    (樣本量)
+  (b) 7d rolling agreement ≥ 60%        (一致性)
+  (c) Hybrid avg net_pnl ≥ Physical     (無負向偏差；Phase 1a 下通常持平)
+  (d) healthcheck [8] 連續 ≥ 7d no FAIL (silent-dead 指紋歸零)
+
+(a)–(d) 全 PASS → 呼 POST /model_promote (promoting → production)
+         同時 CLAUDE.md §三 記 milestone：「Phase 2 shadow PASS → Phase 3 入口」
+
+Phase 3 entry（production model 上線真 ONNX 推論）：
+  (e) 切 real ONNX 訓練 pipeline   → model_registry 寫第一筆 ONNX artifact
+  (f) ml_override_high 0.95 → 0.85  → 解鎖 Hold → Lock 升級路徑
+  (g) build_ml_inference_shadow 退役 → combine_layer 直接讀 OnnxModelManager
+
+Phase 3 reject criteria（slot 降級）：
+  (h) agreement < 40% 持續 3d     → reject current shadow → retired
+  (i) Hybrid avg net_pnl < Physical - 2 bps → mock 注入負向偏差 → retired
+  (j) healthcheck [8] FAIL 連續 ≥ 2 次 → writer/channel 問題 → 立即 flip
+      shadow_enabled=false，RCA 先於下一輪 promote
+```
+
+### 4. Operator 一鍵診斷指令
+
+```bash
+# 當前三環境 shadow flag 狀態
+grep "shadow_enabled" settings/risk_control_rules/risk_config_*.toml
+
+# 當前 registry 各 slot 狀態（list + per-slot resolver）
+curl -sS http://localhost:8000/api/v1/ml/model_registry | jq '.rows[] | [.strategy, .engine_mode, .quantile, .canary_status, .train_date]'
+
+# 24h disagreement 分布（per engine_mode）
+psql "${OPENCLAW_DATABASE_URL}" -c "
+  SELECT engine_mode,
+         COUNT(*) AS total,
+         COUNT(*) FILTER (WHERE disagreed) AS disagreed_n,
+         ROUND(100.0 * COUNT(*) FILTER (WHERE NOT disagreed) / NULLIF(COUNT(*),0), 1) AS agreement_pct
+    FROM learning.decision_shadow_exits
+   WHERE ts > now() - interval '7 days'
+   GROUP BY engine_mode
+   ORDER BY engine_mode;
+"
+
+# 整體 runtime 健康（含 [8] shadow_exits + [9] model_registry）
+python3 helper_scripts/db/passive_wait_healthcheck.py
+
+# 若 [8] FAIL（silent-dead 指紋）→ 先 flip shadow_enabled=false 再 RCA
+#   1. 編 settings/risk_control_rules/risk_config_demo.toml [exit].shadow_enabled=false
+#   2. 或 IPC 熱重載：curl -X POST .../api/v1/risk/patch -d '{"exit":{"shadow_enabled":false}}'
+#   3. 查 engine log：journalctl -u openclaw-engine -n 200 | grep -iE "shadow|ShadowExit"
+```
+
+### 5. Audit L2-1 警告留尾（誠實告知 operator）
+
+⚠️ **Phase 1a disagreement 非真 ML disagreement。** 當前
+`ml_override_high=2.0` sentinel 使 mock ML 永遠無法觸發 `Hold → Lock`
+升級，`combine_exit_decision` 對 ML 輸入的唯一可觀測反應是 `Lock` 路徑
+的 source 欄位由 `Physical` 變 `Hybrid`（信號完全相同）。因此：
+
+- 本節所有 disagreement% 數字，物理意義等同於「mock score ≥ 0.70 的比率」
+- Phase 3+ 切真 ONNX + `ml_override_high` 收到 0.85 後，disagreement
+  才開始帶上「ML 認為該 Hold 但 Track P 認為該 Lock」這類有意義的
+  決策分歧語意
+- 目前 disagreement% 可當作 **mock 穩定性 proxy + edge_estimates 校準
+  警報**，但 **不代表 ML 本身對交易結果的實際影響**
+- Phase 3 入口前，operator 不應用 disagreement% 推論「ML 能否改善 PnL」—
+  那是 Phase 3+ 才有的問題
+
+L2-1 警告同步寫入 `model_canary_promotion_rules_draft.md`（本檔）與
+`CLAUDE.md §三`（當下次 §三 snapshot 歸檔時），避免 Phase 2 狀態
+在 operator/audit round-trip 之間丟失。
 - TODO.md INFRA-PREBUILD-1 section
