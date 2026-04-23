@@ -1,8 +1,20 @@
 # Python–Rust 重複代碼清理計劃
 
 **日期**：2026-04-16（路徑與事實修正版；原稿路徑/importer 數誤差已校正）
-**狀態**：計劃級（Tier A stub 替換法，尚未動工）
-**預估效益**：Python 有效計算代碼 ~8,136 → ~2,100 行（淨減 ~6,000+）
+**狀態**：✅ **已完成**（2026-04-16~17；主 commit `d41f72a` + follow-up `d1e171c` + stub-shape fix `2215bee`）
+**實測效益**：Python 有效計算代碼 ~8,136 → ~1,800 行 stub（淨減 ~6,700 行，略超原預估 ~6,000+）
+
+**執行與收尾記錄**（2026-04-23 audit 補寫）：
+
+- Step 1-10 全部落實，10 個 step 對應檔案均具 `STUB:` docstring header + 方法返 `None`/`[]`/`{}`/`False`/0.0 + 無實質計算邏輯
+- 所有 stub 保留 public class name / method signature / dataclass 欄位（維持 `strategy_wiring.py` singleton 實例化 + `strategy_read_routes.py` Rust-first fallback 路徑不破裂）
+- 對應測試整合為 `program_code/local_model_tools/tests/test_stub_contracts.py`（59 tests，pytest collect 全綠；以契約驗證取代 skip 模式）
+- contract_check 相關檔案已清除（`find . -name "contract_check*"` 零匹配）
+- test_stub_contracts.py 採 **RUNNING_OK** 模式：assert stub 返回預期空值形狀（如 `assert result is None` / `assert result == []`），無 `is not None` 或 `> 0` 類爆炸斷言，符合原計劃「保留 interface + 手動驗證」精神
+- 原計劃第三部分「Step 9 evolution_engine.py 特殊處理」採「Step 9 直接 stub」解法，`evolution_engine.py` 本身保留（計劃第五部分已列保留清單，非 Tier A 範圍）
+- Tier A 收尾 audit 於 2026-04-23 commit 驗證並補錄於本檔（subagent Explore 全檔案驗證：10/10 `STUB_DONE`）
+
+**後續方向（非本計劃範圍）**：Tier B 為 `main_legacy.py` 1630 行 + 54 routes 拆分（見 CLAUDE.md §三 2026-04-16 audit），獨立規劃。
 
 ---
 
