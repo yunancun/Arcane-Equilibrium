@@ -54,7 +54,6 @@
 
 | 腳本 | 用途 |
 |------|------|
-| `phase4/backfill_directive_outcomes.py` | 回填 directive 結果到學習表 |
 | `phase4/dl3_go_no_go.py` | DL-3 Go/No-Go 決策檢查 |
 | `phase4/weekly_report.py` | 每週學習/交易績效報告 |
 
