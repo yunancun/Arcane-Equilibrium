@@ -118,23 +118,34 @@ def check_exit_features_writer(cur, close_fills: int) -> tuple[str, str]:
 def check_phys_lock_runtime(cur) -> tuple[str, str]:
     """[4] TRACK-P v2 phys_lock runtime fire rate — expect ≥1 per 24h if edge populated.
 
-    Pattern note (EDGE-DIAG-1 2026-04-23): Rust upstream currently emits
-    `strategy_name = "risk_close:risk_close:phys_lock_gate4_giveback"` (double
-    prefix — upstream bug, tracked as RUST-DOUBLE-PREFIX-1 in TODO). Use
-    `risk_close:%phys_lock_%` wildcard so the check survives both the current
-    double-prefix form and the post-fix single-prefix form.
+    Pattern note (RUST-DOUBLE-PREFIX-1 2026-04-23 post-fix): the upstream
+    double-prefix bug was rooted out at the single `step_6_risk_checks.rs`
+    emission site (Option B via `build_risk_close_tag`), so rows now land as
+    canonical `strategy_name = "risk_close:phys_lock_gate4_giveback"` (single
+    prefix). The healthcheck pattern is therefore restored to the strict
+    `risk_close:phys_lock_%` form. The temporary-tolerant `risk_close:%phys_lock_%`
+    pattern (commit `21e3d5e`) is intentionally **withdrawn**: keeping it would
+    hide any future recurrence of the double-prefix regression — we want this
+    check to go red again if the invariant breaks.
+
+    Pattern note（RUST-DOUBLE-PREFIX-1 2026-04-23 修復後）：雙前綴 bug 已在單一
+    `step_6_risk_checks.rs` emission 點（`build_risk_close_tag` Option B）根治，
+    所有 PHYS-LOCK 列現以標準 `strategy_name = "risk_close:phys_lock_gate4_giveback"`
+    （單前綴）寫入。Pattern 恢復為嚴格 `risk_close:phys_lock_%` 形式。
+    原容錯 `risk_close:%phys_lock_%`（commit `21e3d5e`）刻意**收回**：保留會遮蔽
+    未來雙前綴 regression，本檢查必須在 invariant 破壞時再次亮紅。
     """
     n_24h = _scalar(cur,
         "SELECT COUNT(*) FROM trading.fills "
         "WHERE ts > now() - interval '24 hours' "
         "AND engine_mode = 'demo' "
-        "AND strategy_name LIKE 'risk_close:%phys_lock_%'"
+        "AND strategy_name LIKE 'risk_close:phys_lock_%'"
     )
     n_7d = _scalar(cur,
         "SELECT COUNT(*) FROM trading.fills "
         "WHERE ts > now() - interval '7 days' "
         "AND engine_mode = 'demo' "
-        "AND strategy_name LIKE 'risk_close:%phys_lock_%'"
+        "AND strategy_name LIKE 'risk_close:phys_lock_%'"
     )
     if n_7d == 0:
         return ("FAIL", f"phys_lock_* 7d=0 — Priority 6 runtime 完全 dead (P0-13/P0-14)")

@@ -233,6 +233,40 @@ impl TickPipeline {
                     // combine_layer called 0× in prod, 459 LOC + 9 tests dead.
                     // Also promote debug_assert_eq! → assert_eq! so the invariant holds in
                     // release builds.
+                    //
+                    // RUST-DOUBLE-PREFIX-1 (2026-04-23): defensive prefix normalisation.
+                    // `risk_checks.rs:247` already emits PHYS-LOCK reasons with a
+                    // `risk_close:` envelope (so `strip_phys_lock_prefix` at line 236
+                    // below can recognise them as PHYS-LOCK). Other reasons
+                    // (HARD STOP / TRAILING / TIME / TAKE PROFIT / DRAWDOWN / CONSECUTIVE
+                    // LOSS / DAILY LOSS) come through bare. Previously we unconditionally
+                    // wrapped each with `format!("risk_close:{reason}")` → PHYS-LOCK rows
+                    // landed in `trading.fills.strategy_name` as
+                    // `"risk_close:risk_close:phys_lock_gate4_giveback"` (double prefix),
+                    // which broke `trading.fills.strategy_name LIKE 'risk_close:phys_lock_%'`
+                    // style queries and the healthcheck [4] pattern. We fix it defensively
+                    // at the single outbound emission site: if `reason` already starts
+                    // with `risk_close:`, treat the whole thing as the tag; otherwise wrap.
+                    // This is the Option (B) fix from TODO §RUST-DOUBLE-PREFIX-1 —
+                    // chosen over (A) because `strip_phys_lock_prefix` and its helpers-test
+                    // still depend on the PHYS-LOCK reason having an explicit
+                    // `risk_close:phys_lock_` prefix (see `on_tick/helpers.rs:30-44`).
+                    //
+                    // RUST-DOUBLE-PREFIX-1（2026-04-23）：防禦性 prefix 正規化。
+                    // `risk_checks.rs:247` 的 PHYS-LOCK 分支已經加過一次 `risk_close:`
+                    // 前綴（讓下方 line 236 的 `strip_phys_lock_prefix` 能識別為
+                    // PHYS-LOCK）。其他 reason（HARD STOP / TRAILING / TIME / TP /
+                    // DRAWDOWN / CONSECUTIVE LOSS / DAILY LOSS）則沒加。原本這裡對所有
+                    // reason 無條件 `format!("risk_close:{reason}")` → PHYS-LOCK 進入
+                    // `trading.fills.strategy_name` 變成
+                    // `"risk_close:risk_close:phys_lock_gate4_giveback"`（雙前綴），
+                    // 打爆 `LIKE 'risk_close:phys_lock_%'` 查詢 + healthcheck [4]。
+                    // 此處採 TODO §RUST-DOUBLE-PREFIX-1 選項 (B)：單一 emission 點防禦性
+                    // 檢查 reason 是否已含 `risk_close:`，已含則直接用；未含則 wrap。
+                    // 不選 (A) 的理由：strip_phys_lock_prefix + 既有 helpers test 仍依賴
+                    // PHYS-LOCK reason 帶顯式 `risk_close:phys_lock_` 前綴
+                    // （見 on_tick/helpers.rs:30-44）。
+                    let close_tag: String = super::build_risk_close_tag(&reason);
                     if let Some(lock_tag) = super::strip_phys_lock_prefix(&reason) {
                         // EDGE-DIAG-1（2026-04-23）：每次 PHYS-LOCK fire 重查 paper_state
                         // owner_strategy + edge_estimates cell，把「Gate 1 是經 cell 還是
@@ -270,8 +304,10 @@ impl TickPipeline {
                             continue;
                         }
                         warn!(symbol = %symbol, reason = %reason, "risk close → exchange / 風控平倉 → 交易所");
-                        let tag = format!("risk_close:{reason}");
-                        self.execute_position_close(symbol, *is_long, *qty, event, true, &tag);
+                        // RUST-DOUBLE-PREFIX-1: use pre-computed `close_tag` (single
+                        // `risk_close:` prefix). See comment block above.
+                        // RUST-DOUBLE-PREFIX-1：使用上方已計算好的 `close_tag`（單前綴）。
+                        self.execute_position_close(symbol, *is_long, *qty, event, true, &close_tag);
                     } else {
                         warn!(symbol = %symbol, reason = %reason, "risk close (paper) / 風控平倉（紙盤）");
                         if *pnl_pct < 0.0 {
@@ -293,7 +329,9 @@ impl TickPipeline {
                         if let Some((_il, _q, close_px, pnl)) =
                             self.close_position_at_symbol_market(symbol, event.ts_ms)
                         {
-                            let tag = format!("risk_close:{reason}");
+                            // RUST-DOUBLE-PREFIX-1: reuse `close_tag` to avoid the
+                            // double-prefix drift PHYS-LOCK used to suffer.
+                            // RUST-DOUBLE-PREFIX-1：重用 `close_tag`，避免 PHYS-LOCK 雙前綴漂移。
                             self.emit_close_fill(
                                 symbol,
                                 *is_long,
@@ -301,7 +339,7 @@ impl TickPipeline {
                                 close_px,
                                 event.ts_ms,
                                 pnl,
-                                &tag,
+                                &close_tag,
                                 &ectx,
                                 snap.as_ref(),
                             );
@@ -310,8 +348,9 @@ impl TickPipeline {
                             self.intent_processor.record_trade(symbol, pnl);
                         }
                         self.stats.total_stops += 1;
-                        let tag = format!("risk_close:{reason}");
-                        self.execute_position_close(symbol, *is_long, *qty, event, false, &tag);
+                        // RUST-DOUBLE-PREFIX-1: single outbound tag, single prefix.
+                        // RUST-DOUBLE-PREFIX-1：單一出口 tag，單前綴。
+                        self.execute_position_close(symbol, *is_long, *qty, event, false, &close_tag);
                     }
                 }
                 RiskAction::HaltSession(reason) => {

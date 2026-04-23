@@ -17,6 +17,33 @@
 
 use tracing::info;
 
+/// RUST-DOUBLE-PREFIX-1 (2026-04-23): build the outbound `risk_close:*` close
+/// tag from a `RiskAction::ClosePosition(reason)` payload, normalising exactly
+/// **one** `risk_close:` prefix regardless of whether the caller (risk_checks /
+/// position_risk_evaluator) emitted the reason bare or pre-prefixed.
+///
+/// Historical context: `risk_checks.rs:247` wraps PHYS-LOCK reasons as
+/// `"risk_close:{reason}"` so downstream `strip_phys_lock_prefix` can recognise
+/// them; other reasons (HARD STOP / TRAILING / TIME / TP / DRAWDOWN) stay bare.
+/// Previously the `step_6` emission site unconditionally re-wrapped again,
+/// producing `"risk_close:risk_close:phys_lock_gate4_giveback"` (double
+/// prefix) in `trading.fills.strategy_name`. This helper is the single point
+/// of truth for how the outbound tag is constructed — use it at every close
+/// emission.
+///
+/// RUST-DOUBLE-PREFIX-1（2026-04-23）：從 `RiskAction::ClosePosition(reason)`
+/// 建立單一 `risk_close:` 前綴的出口 close tag，不論 reason 已含前綴（PHYS-LOCK
+/// 路徑：risk_checks.rs:247 已 wrap）或裸字串（HARD STOP / TRAILING 等），
+/// 對外只會有一層前綴。此 helper 為所有平倉 emit 點的唯一構造規則。
+pub(crate) fn build_risk_close_tag(reason: &str) -> String {
+    const PREFIX: &str = "risk_close:";
+    if reason.starts_with(PREFIX) {
+        reason.to_string()
+    } else {
+        format!("{PREFIX}{reason}")
+    }
+}
+
 /// T3 (`physical_micro_profit_lock`) 產生 `PhysicalDecision::Lock("phys_lock_xxx")`，
 /// `risk_checks.rs:242` 再用 `format!("risk_close:{}", reason)` 包成
 /// `RiskAction::ClosePosition("risk_close:phys_lock_xxx")`。此 helper 檢查
@@ -179,4 +206,107 @@ mod phys_lock_wrapper_tests {
             None
         );
     }
+
+    // RUST-DOUBLE-PREFIX-1 (2026-04-23) regression: verify that the outbound
+    // close tag emitted from `step_6_risk_checks` carries exactly ONE
+    // `risk_close:` prefix regardless of whether `risk_checks.rs` produced the
+    // reason bare (HARD STOP / TRAILING / TIME STOP / TP / DRAWDOWN) or
+    // pre-prefixed (PHYS-LOCK — `risk_checks.rs:247` wraps before returning).
+    // The production bug saw PHYS-LOCK rows land as
+    // `"risk_close:risk_close:phys_lock_gate4_giveback"` (double prefix).
+    //
+    // This test pins the `build_risk_close_tag` contract used at the single
+    // outbound emission site in `step_6_risk_checks.rs`.
+    //
+    // RUST-DOUBLE-PREFIX-1（2026-04-23）回歸：驗證 `step_6_risk_checks` 出口的
+    // close tag 永遠只有一層 `risk_close:` 前綴，不論 reason 是裸字串
+    // （HARD STOP / TRAILING / TIME STOP / TP / DRAWDOWN）或已 wrap
+    // （PHYS-LOCK — risk_checks.rs:247 在回傳前已 wrap）。生產 bug 讓 PHYS-LOCK
+    // 進表變成 `"risk_close:risk_close:phys_lock_gate4_giveback"`（雙前綴）。
+    // 本測固化 step_6_risk_checks.rs 唯一 emission 點使用的 `build_risk_close_tag`
+    // 契約。
+
+    #[test]
+    fn phys_lock_reasons_do_not_double_prefix() {
+        // Arrange: the exact strings `risk_checks.rs` emits for PHYS-LOCK
+        // (already wrapped with `risk_close:` envelope so strip_phys_lock_prefix
+        // recognises them).
+        // Arrange：risk_checks.rs 對 PHYS-LOCK 實際輸出的字串（已含前綴）。
+        for reason in [
+            "risk_close:phys_lock_gate4_giveback",
+            "risk_close:phys_lock_gate4_stale_roc_neg",
+            "risk_close:phys_lock_gate1_low_edge",
+        ] {
+            // Act — build the outbound tag exactly as step_6 does.
+            // Act — 按 step_6 方式構造出口 tag。
+            let tag = build_risk_close_tag(reason);
+
+            // Assert #1: single prefix (no `risk_close:risk_close:` drift).
+            // Assert #1：單一前綴（無 `risk_close:risk_close:` 漂移）。
+            assert!(
+                !tag.starts_with("risk_close:risk_close:"),
+                "double prefix regression: {tag}"
+            );
+            // Assert #2: outbound tag is byte-identical to the reason (since it
+            // already carries the single prefix).
+            // Assert #2：出口 tag 與 reason 位元相同（reason 已帶單前綴）。
+            assert_eq!(tag, reason);
+            // Assert #3: the healthcheck's post-fix pattern
+            // `strategy_name LIKE 'risk_close:phys_lock_%'` matches (single
+            // colon, `phys_lock_` starts immediately after).
+            // Assert #3：healthcheck 修復後的 pattern
+            // `strategy_name LIKE 'risk_close:phys_lock_%'` 必命中（單冒號，
+            // `phys_lock_` 緊接其後）。
+            let expected_tag_core = reason.strip_prefix("risk_close:").unwrap();
+            assert!(
+                tag.starts_with("risk_close:") && tag[PREFIX_LEN..].starts_with("phys_lock_"),
+                "healthcheck pattern 'risk_close:phys_lock_%' must match, got {tag} (core={expected_tag_core})"
+            );
+        }
+    }
+
+    #[test]
+    fn non_phys_lock_reasons_get_single_prefix() {
+        // Cost-edge / trailing / hard stop / time stop / take profit / drawdown
+        // / daily-loss / consecutive-loss reasons come from risk_checks.rs
+        // bare (no `risk_close:` wrap). step_6 must add exactly one prefix.
+        // Cost-edge 等 reason 從 risk_checks.rs 裸字串出，step_6 必加且只加一次
+        // `risk_close:` 前綴。
+        let samples = [
+            // (bare_reason, expected_outbound_tag)
+            (
+                "HARD STOP: pnl -6.00% <= -5.00%",
+                "risk_close:HARD STOP: pnl -6.00% <= -5.00%",
+            ),
+            (
+                "TRAILING STOP: peak 3.00% - current 1.00% = 2.00% >= distance 1.50%",
+                "risk_close:TRAILING STOP: peak 3.00% - current 1.00% = 2.00% >= distance 1.50%",
+            ),
+            (
+                "TIME STOP: held 24.0h >= limit 24.0h",
+                "risk_close:TIME STOP: held 24.0h >= limit 24.0h",
+            ),
+            (
+                "TAKE PROFIT: pnl 5.00% >= 4.50%",
+                "risk_close:TAKE PROFIT: pnl 5.00% >= 4.50%",
+            ),
+            (
+                "COST EDGE: ratio 0.85 >= 0.80",
+                "risk_close:COST EDGE: ratio 0.85 >= 0.80",
+            ),
+        ];
+        for (reason, expected) in samples {
+            let tag = build_risk_close_tag(reason);
+            assert_eq!(tag, expected, "bare reason must get exactly one prefix");
+            assert!(
+                !tag.starts_with("risk_close:risk_close:"),
+                "bare reason must NOT double-prefix: {tag}"
+            );
+        }
+    }
+
+    // Local constant mirrors `build_risk_close_tag`'s prefix — kept in the test
+    // module so a refactor must touch both sides in lockstep.
+    // 本地常數鏡像 `build_risk_close_tag` 的前綴 — 重構必須兩邊同步改。
+    const PREFIX_LEN: usize = "risk_close:".len();
 }
