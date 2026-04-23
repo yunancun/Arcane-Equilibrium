@@ -36,10 +36,26 @@ DEFAULT_MODEL_DIR = os.path.join(
 @dataclass
 class PipelineConfig:
     """End-to-end training pipeline configuration.
-    端到端訓練管線配置。"""
+    端到端訓練管線配置。
+
+    symbol semantics (P1-7 C pooled-training, 2026-04-23):
+      - str (e.g. "BTCUSDT"): per-symbol training (future ma/bb path).
+      - None or "ALL": pooled across all symbols for this strategy. Use when a
+        single symbol cannot reach `min_samples` within a reasonable window
+        (e.g. grid_trading rotating across short-lived symbols).
+
+    symbol 語義（P1-7 C pooled-training，2026-04-23）：
+      - 具體字串（如 "BTCUSDT"）：逐 symbol 訓練（未來 ma/bb 路徑）。
+      - None 或 "ALL"：跨 symbol pooled（grid_trading 類策略輪動 symbol 時使用，
+        單一 symbol 無法在合理時間內累積到 min_samples）。
+
+    min_samples 語義（pooled vs per-slice）：
+      - pooled 模式：跨所有 symbol 合計 labels 數 ≥ min_samples 即可訓練。
+      - per-symbol 模式：該 symbol 單獨的 labels 數 ≥ min_samples 才訓練。
+    """
 
     strategy_type: str = "trending"
-    symbol: str = "BTCUSDT"
+    symbol: Optional[str] = None  # None → pooled across all symbols for strategy
     regime: str = "trending"
     output_dir: str = DEFAULT_MODEL_DIR
     dsn: Optional[str] = None  # PostgreSQL DSN for ETL + posteriors persistence
@@ -71,6 +87,24 @@ class PipelineResult:
     verdict: str = ""
     acceptance_report_path: str = ""
     onnx_artifacts: Dict[str, Any] = field(default_factory=dict)
+
+
+def _resolve_symbol_slot(config: PipelineConfig) -> tuple[bool, str]:
+    """Resolve (pooled_flag, artifact_symbol_slot) from config.symbol.
+
+    Returns:
+      (pooled, slot) where:
+        - pooled=True  slot="ALL"        → symbol=None or "ALL" in config
+        - pooled=False slot=<symbol>     → per-symbol training
+
+    解析 (pooled_flag, artifact_symbol_slot)：symbol=None/"ALL" → pooled+"ALL"；
+    具體字串 → per-symbol + symbol 自身。artifact slot 統一以字串形式向下游
+    流（onnx_exporter / model_registry）傳遞，避免 Optional refactor 擴散。
+    """
+    sym = config.symbol
+    if sym is None or (isinstance(sym, str) and sym.upper() == "ALL"):
+        return True, "ALL"
+    return False, sym
 
 
 def _load_dataset(
@@ -108,10 +142,16 @@ def _load_dataset(
         timestamps = (np.arange(n, dtype=np.int64) * 60_000)
         return features, labels, timestamps, feature_names
 
+    # Resolve pooling: symbol=None or "ALL" → SQL-level symbol filter skipped.
+    # Everything else → filter to that exact symbol.
+    # 解析 pooling：symbol=None 或 "ALL" → SQL 不加 symbol filter；其他 → 精確過濾。
+    pooled, _slot = _resolve_symbol_slot(config)
+    sql_symbol: Optional[str] = None if pooled else config.symbol
+
     if config.use_quantile_predictor:
         from ml_training.parquet_etl import load_training_data
         features, labels, timestamps, feature_names = load_training_data(
-            symbol=config.symbol,
+            symbol=sql_symbol,
             strategy_type=config.strategy_type,
             dsn=config.dsn,
             engine_mode=config.engine_mode,
@@ -119,11 +159,77 @@ def _load_dataset(
     else:
         from ml_training.parquet_etl import load_training_data
         features, labels, timestamps, feature_names = load_training_data(
-            symbol=config.symbol,
+            symbol=sql_symbol,
             strategy_type=config.strategy_type,
             dsn=config.dsn,
         )
+
+    # Explicit pooled vs per-symbol log line + row count — caller / audit trail
+    # reads `[pipeline] dataset_mode=...` to verify the run's slicing decision.
+    # Pooled mode additionally emits distinct-symbol count + top-N per-symbol
+    # rows so operator can see which symbols dominate the training set.
+    # 明確標記 pooled 或 per-symbol 模式 + 樣本數；pooled 額外輸出 distinct
+    # symbol 數與 top-N per-symbol 細分，供 operator 檢視主導 symbol 分布。
+    if pooled:
+        try:
+            breakdown = _pooled_symbol_breakdown(
+                config=config, engine_mode=config.engine_mode,
+            )
+        except Exception as e:  # noqa: BLE001 — breakdown is diagnostic-only
+            logger.warning("pooled breakdown query failed (non-fatal): %s", e)
+            breakdown = []
+        distinct = len(breakdown)
+        top = ", ".join(f"{s}={n}" for s, n in breakdown[:10])
+        logger.info(
+            "[pipeline] dataset_mode=pooled strategy=%s engine_mode=%s n_rows=%d "
+            "distinct_symbols=%d top=[%s] (symbol filter skipped; cross-symbol aggregate)",
+            config.strategy_type, config.engine_mode, len(labels), distinct, top,
+        )
+    else:
+        logger.info(
+            "[pipeline] dataset_mode=per_symbol strategy=%s engine_mode=%s "
+            "symbol=%s n_rows=%d",
+            config.strategy_type, config.engine_mode, sql_symbol, len(labels),
+        )
     return features, labels, timestamps, feature_names
+
+
+def _pooled_symbol_breakdown(
+    config: "PipelineConfig",
+    engine_mode: str,
+    max_age_days: int = 90,
+) -> list[tuple[str, int]]:
+    """Return [(symbol, labeled_count), ...] desc for the strategy's pooled set.
+
+    Diagnostic-only — failures return [] in the caller. Dry-run or missing DSN
+    skips to avoid synthetic-dataset log noise.
+
+    僅供診斷日誌使用；失敗在 caller 端返回 []。dry_run 或無 DSN 時跳過。
+    """
+    if config.dry_run:
+        return []
+    from ml_training.parquet_etl import _get_pg_conn
+    sql = """
+    SELECT symbol, COUNT(*) AS labeled
+    FROM learning.decision_features
+    WHERE label_net_edge_bps IS NOT NULL
+      AND engine_mode = %(engine_mode)s
+      AND (%(strategy_name)s IS NULL OR strategy_name = %(strategy_name)s)
+      AND ts >= now() - (%(max_age_days)s || ' days')::interval
+    GROUP BY symbol
+    ORDER BY labeled DESC
+    """
+    conn = _get_pg_conn(config.dsn)
+    try:
+        with conn.cursor() as cur:
+            cur.execute(sql, {
+                "engine_mode": engine_mode,
+                "strategy_name": config.strategy_type,
+                "max_age_days": max_age_days,
+            })
+            return [(sym, int(n)) for sym, n in cur.fetchall()]
+    finally:
+        conn.close()
 
 
 def _run_quantile_pipeline(
@@ -147,6 +253,10 @@ def _run_quantile_pipeline(
     result = PipelineResult()
     output_dir = Path(config.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
+
+    # P1-7 C pooled vs per-symbol — drive filename slots + metrics annotations.
+    # P1-7 C：解析 pooled / per-symbol；供 acceptance report 檔名 + 指標標記。
+    pooled, symbol_slot = _resolve_symbol_slot(config)
 
     qcfg = QuantileTrainingConfig(schema_version=config.schema_version)
 
@@ -182,7 +292,13 @@ def _run_quantile_pipeline(
     result.stages_completed.append("cqr_calibration")
 
     # Stage 4: acceptance report.
-    report_path = output_dir / f"{config.strategy_type}_{config.engine_mode}_acceptance_report.json"
+    # Filename includes symbol_slot so pooled ("ALL") vs per-symbol runs don't
+    # overwrite each other's acceptance report on the same output_dir.
+    # 檔名含 symbol_slot：pooled ("ALL") 與 per-symbol 報告可在同一 output_dir 共存。
+    report_path = (
+        output_dir
+        / f"{config.strategy_type}_{config.engine_mode}_{symbol_slot}_acceptance_report.json"
+    )
     report = generate_acceptance_report(
         train_result, qcfg,
         cqr_offsets=cqr_offsets,
@@ -257,6 +373,7 @@ def _run_quantile_pipeline(
         result.stages_completed.append("model_registry_error")
 
     # Stage 6: summary metrics for pipeline consumer.
+    # pooled / symbol_slot 直接進 metrics JSON，acceptance report 檔名也帶 slot。
     result.metrics = {
         "verdict": result.verdict,
         "n_samples_labeled": train_result.n_samples_labeled,
@@ -268,6 +385,8 @@ def _run_quantile_pipeline(
         "decile_lift_point": train_result.decile_lift_point,
         "decile_lift_ci_lower": train_result.decile_lift_ci_lower,
         "feature_schema_hash": train_result.feature_schema_hash,
+        "pooled": pooled,
+        "symbol_slot": symbol_slot,
     }
     result.success = True
     return result
@@ -300,6 +419,13 @@ def _run_legacy_scorer_pipeline(
     result.stages_completed.append("cpcv_training")
     result.model_path = train_result.model_path
     result.metrics.update(train_result.metrics)
+
+    # P1-7 C: tag legacy-path metrics with pooled / symbol_slot too, for audit
+    # parity with quantile path (same operator CLI + same metrics.json shape).
+    # 傳統路徑同樣標記 pooled / symbol_slot，維持與分位路徑的審計一致性。
+    _pooled, _slot = _resolve_symbol_slot(config)
+    result.metrics["pooled"] = _pooled
+    result.metrics["symbol_slot"] = _slot
 
     result.stages_completed.append("calibration_skipped")
 
@@ -364,7 +490,17 @@ if __name__ == "__main__":  # pragma: no cover
     ap = argparse.ArgumentParser()
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--strategy", default="trending")
-    ap.add_argument("--symbol", default="BTCUSDT")
+    ap.add_argument(
+        "--symbol",
+        default=None,
+        help=(
+            "Symbol filter for training data. Omit or pass 'ALL' to pool all "
+            "symbols for the strategy (recommended for grid_trading which "
+            "rotates across short-lived symbols). Specify e.g. 'BTCUSDT' for "
+            "per-symbol training. Default = pooled. "
+            "省略或 'ALL' = 跨 symbol pooled（grid_trading 建議）；具體 symbol = 逐 symbol 訓練。"
+        ),
+    )
     ap.add_argument("--output", default=DEFAULT_MODEL_DIR)
     ap.add_argument("--engine-mode", default="demo", choices=("paper", "demo", "live"))
     ap.add_argument("--use-quantile-predictor", action="store_true",
@@ -373,7 +509,7 @@ if __name__ == "__main__":  # pragma: no cover
 
     cfg = PipelineConfig(
         strategy_type=args.strategy,
-        symbol=args.symbol,
+        symbol=args.symbol,  # None → pooled (P1-7 C)
         output_dir=args.output,
         dry_run=args.dry_run,
         use_quantile_predictor=args.use_quantile_predictor,
