@@ -1,0 +1,155 @@
+//! Grid Trading position management — inventory lifecycle + trend-adaptive cooldown.
+//! Grid Trading 持倉管理 — 庫存生命週期 + 趨勢自適應冷卻。
+//!
+//! MODULE_NOTE (EN): Split out of `strategies/grid_trading.rs` by GRID-TRADING-MOD-SPLIT-1
+//!   (2026-04-23) to honour CLAUDE.md §九's 1200-line hard cap (pre-split 1729 lines).
+//!   Contains per-symbol position bookkeeping used by the `Strategy` trait
+//!   callbacks: external-close inventory reset (risk-stop path), strategy-emitted
+//!   Close confirm / skip rollback (FIX-C preserves `last_trade_ms` so the 30s
+//!   reject backoff stays active), RC-04 rejection rollback + M-2 per-symbol
+//!   backoff arming, and the G-SR-1 A3 trend-adjusted cooldown computation
+//!   (ADX + Hurst → 1x..6x multiplier). All logic / signatures / field
+//!   mutations preserved byte-identical to pre-split.
+//! MODULE_NOTE (中)：GRID-TRADING-MOD-SPLIT-1（2026-04-23）由
+//!   `strategies/grid_trading.rs` 拆出以遵守 CLAUDE.md §九 1200 行硬上限
+//!   （拆前 1729 行）。本檔包含 `Strategy` trait callback 使用的逐幣種倉位
+//!   記帳：外部平倉（風控止損路徑）的 net_inventory 重設、策略發出 Close
+//!   的 confirm / skip 回滾（FIX-C 保留 `last_trade_ms` 使 30s reject 退避
+//!   仍生效）、RC-04 拒絕回滾 + M-2 逐幣種退避設定，以及 G-SR-1 A3 趨勢調整
+//!   冷卻計算（ADX + Hurst → 1x..6x 倍率）。所有邏輯 / 簽名 / 欄位變更
+//!   與拆前逐字節相同。
+
+use openclaw_core::indicators::IndicatorSnapshot;
+use tracing::info;
+
+use super::GridTrading;
+use crate::intent_processor::OrderIntent;
+
+impl GridTrading {
+    /// G-SR-1 A3: Compute trend-adjusted cooldown for a symbol.
+    /// In trending markets (high ADX + high Hurst), cooldown scales up 1x→6x
+    /// to reduce grid frequency and limit inventory drift losses.
+    /// G-SR-1 A3：計算趨勢調整後的冷卻時間。
+    /// 趨勢市場（高 ADX + 高 Hurst）中，冷卻從 1x 增至 6x，降低網格頻率。
+    pub(super) fn compute_trend_adjusted_cooldown(
+        &self,
+        snap: Option<&IndicatorSnapshot>,
+    ) -> u64 {
+        let Some(ind) = snap else {
+            return self.cooldown_ms;
+        };
+
+        let adx_val = ind.adx.as_ref().map(|a| a.adx).unwrap_or(0.0);
+        let hurst_val = ind.hurst.as_ref().map(|h| h.hurst).unwrap_or(0.5);
+
+        // ADX factor: adx_low→adx_high maps to 0→1
+        let adx_range = self.adx_high_threshold - self.adx_low_threshold;
+        let adx_factor = if adx_range > 0.0 {
+            ((adx_val - self.adx_low_threshold) / adx_range).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+
+        // Hurst factor: 0.50→0.75 maps to 0→1
+        let hurst_factor = ((hurst_val - 0.50) / 0.25).clamp(0.0, 1.0);
+
+        // Blend 60/40 (ADX reacts faster than Hurst) / 混合 60/40（ADX 反應快於 Hurst）
+        let trend_score = 0.6 * adx_factor + 0.4 * hurst_factor;
+
+        // Multiplier range: 1x to (1 + max_cooldown_boost)x / 倍率範圍：1x 到 (1+max_cooldown_boost)x
+        let multiplier = 1.0 + (trend_score * self.max_cooldown_boost);
+
+        (self.cooldown_ms as f64 * multiplier) as u64
+    }
+
+    /// Reset per-symbol net_inventory on external close (risk-stop) to prevent desync.
+    /// 外部平倉（風控止損）時重設該幣種 net_inventory，防止與 paper_state 脫鉤。
+    pub(super) fn on_external_close_impl(&mut self, symbol: &str) {
+        let inv = self.net_inventory.get(symbol).copied().unwrap_or(0.0);
+        if inv != 0.0 {
+            info!(strategy = "grid_trading", %symbol, prev_inventory = %inv,
+                  "external close: resetting net_inventory / 外部平倉：重設淨庫存");
+            self.net_inventory.insert(symbol.to_string(), 0.0);
+        }
+    }
+
+    /// Pipeline confirmed a strategy-emitted Close was executed — adjust per-symbol inventory.
+    /// 管線確認策略平倉已執行 — 調整該幣種庫存。
+    pub(super) fn on_close_confirmed_impl(&mut self, symbol: &str) {
+        let prev_inv = self.prev_inventory.get(symbol).copied().unwrap_or(0.0);
+        let cur_inv = self.net_inventory.entry(symbol.to_string()).or_insert(0.0);
+        if prev_inv < 0.0 {
+            *cur_inv += self.qty_per_grid;
+        } else if prev_inv > 0.0 {
+            *cur_inv -= self.qty_per_grid;
+        }
+        info!(strategy = "grid_trading", %symbol, new_inventory = %cur_inv,
+              "close confirmed: inventory adjusted / 平倉確認：庫存已調整");
+    }
+
+    /// Pipeline skipped a strategy-emitted Close (no position found) — roll back cross state.
+    /// FIX-C: Do NOT roll back last_trade_ms. The emit timestamp is kept as-is so the
+    /// existing 30s cooldown (REJECT_BACKOFF_MS) stays active and prevents tight-loop
+    /// re-emission on the next tick. Previously, rolling back last_trade_ms removed the
+    /// cooldown entirely, causing grid to re-emit the same Close intent every single tick
+    /// (observed: hundreds of `close_skipped:no_position_grid_close_short` per second during CB).
+    /// 管線跳過策略平倉（未找到倉位）— 回滾交叉狀態。
+    /// FIX-C：不回滾 last_trade_ms。保留發送時間戳使現有 30s 冷卻繼續有效，防止下一 tick 立即重發。
+    /// 舊行為：回滾 last_trade_ms → 冷卻失效 → 每 tick 重發 Close（CB 期間每秒數百條 close_skipped）。
+    pub(super) fn on_close_skipped_impl(&mut self, symbol: &str) {
+        if let Some(prev) = self.prev_cross_idx.get(symbol) {
+            match prev {
+                Some(idx) => {
+                    self.last_cross_idx.insert(symbol.to_string(), *idx);
+                }
+                None => {
+                    self.last_cross_idx.remove(symbol);
+                }
+            }
+        }
+        // NOTE: last_trade_ms intentionally NOT rolled back here (FIX-C).
+        // last_trade_ms 此處刻意不回滾（FIX-C）。
+        info!(strategy = "grid_trading", %symbol, "close skipped: cross state rolled back, trade_ms preserved / 平倉跳過：交叉狀態已回滾，trade_ms 保留");
+    }
+
+    /// RC-04: Revert per-symbol net_inventory, last_cross_idx, last_trade_ms on rejection.
+    /// M-2: Also arm a per-symbol rejection backoff using the emit timestamp captured
+    /// in `last_trade_ms` BEFORE the rollback overwrites it. This breaks tight retry
+    /// loops on persistent guardian/cost_gate rejections without losing state coherence.
+    /// RC-04：拒絕時回滾該幣種的 net_inventory、last_cross_idx、last_trade_ms。
+    /// M-2：同時使用回滾前 `last_trade_ms` 中捕獲的發送時間戳設定該幣種拒絕退避。
+    /// 在不破壞狀態一致性的前提下打破持續性 guardian/cost_gate 拒絕的緊湊重試迴圈。
+    pub(super) fn on_rejection_impl(&mut self, intent: &OrderIntent, _reason: &str) {
+        let sym = &intent.symbol;
+
+        // M-2: Capture emit timestamp before rollback overwrites it.
+        // M-2：在回滾覆蓋之前捕獲發送時間戳。
+        if let Some(&emit_ts) = self.last_trade_ms.get(sym) {
+            if emit_ts > 0 {
+                self.reject_cooldown_until_ms
+                    .insert(sym.to_string(), emit_ts + self.reject_backoff_ms);
+            }
+        }
+
+        if let Some(prev) = self.prev_cross_idx.get(sym) {
+            match prev {
+                Some(idx) => {
+                    self.last_cross_idx.insert(sym.to_string(), *idx);
+                }
+                None => {
+                    self.last_cross_idx.remove(sym);
+                }
+            }
+        }
+        if let Some(&inv) = self.prev_inventory.get(sym) {
+            self.net_inventory.insert(sym.to_string(), inv);
+        }
+        if let Some(&ts) = self.prev_last_trade_ms.get(sym) {
+            if ts == 0 {
+                self.last_trade_ms.remove(sym);
+            } else {
+                self.last_trade_ms.insert(sym.to_string(), ts);
+            }
+        }
+    }
+}

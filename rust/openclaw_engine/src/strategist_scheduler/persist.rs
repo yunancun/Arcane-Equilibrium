@@ -127,8 +127,17 @@ pub async fn load_latest_applied_params(
     };
 
     // DISTINCT ON picks the row with the highest applied_at_ms per
-    // (engine_mode, strategy_name) — matches the index
-    // `idx_strategist_applied_engine_strategy_ts` (ORDER BY applied_at_ms DESC).
+    // (engine_mode, strategy_name) — matches the V020 index
+    // `idx_strategist_applied_engine_strategy_ts`
+    // (applied_at_ms DESC, id DESC).
+    //
+    // STRATEGIST-PERSIST-TIE-BREAK-1 (2026-04-23, V020): `, id DESC` tie-break
+    // ensures deterministic ordering when two concurrent writers produce rows
+    // with identical applied_at_ms (millisecond precision can collide under
+    // Phase 5+ manual_promote + auto cycle). Without tie-break, DISTINCT ON
+    // falls back to PG physical row order (not stable).
+    // STRATEGIST-PERSIST-TIE-BREAK-1（V020）：加 `id DESC` tie-break，
+    // 並發同 ms 寫入時取 id 最大者（最晚寫入），確定性勝出。
     // DISTINCT ON 配合索引取每組最新 1 row。
     let rows: Vec<(String, serde_json::Value)> =
         sqlx::query_as::<_, (String, serde_json::Value)>(
@@ -136,7 +145,7 @@ pub async fn load_latest_applied_params(
                 strategy_name, params_json \
              FROM learning.strategist_applied_params \
              WHERE engine_mode = $1 \
-             ORDER BY engine_mode, strategy_name, applied_at_ms DESC",
+             ORDER BY engine_mode, strategy_name, applied_at_ms DESC, id DESC",
         )
         .bind(engine_mode)
         .fetch_all(pool)
@@ -168,16 +177,41 @@ mod tests {
         )
     }
 
+    /// Source snapshot of this file — used by SQL property tests below to
+    /// verify the inline SQL literals in `persist_applied_params` /
+    /// `load_latest_applied_params` still contain the critical clauses.
+    /// This is a test-only compile-time embed (`include_str!` zero-cost in
+    /// release, no production path runs it).
+    /// 本檔源碼快照（test-only），property test 用來 grep SQL 字面，確保
+    /// 後續重構不會誤改 SQL 關鍵子句（DISTINCT ON / ORDER BY / column list）。
+    const PERSIST_SRC: &str = include_str!("persist.rs");
+
     // ═══════════════════════════════════════════════════════════════════
-    // STRATEGIST-PARAMS-PERSIST-1 tests (2026-04-23).
-    // Verify fail-soft semantics when DB pool is disconnected:
-    //   1. persist_applied_params returns Ok(()) with pool=None
-    //   2. load_latest_applied_params returns Ok(vec![]) with pool=None
-    // Real PG integration deferred to Linux CI (requires live learning schema).
-    // STRATEGIST-PARAMS-PERSIST-1 測試（2026-04-23）。驗 fail-soft：
-    //   1. pool=None 時 persist 回 Ok(())，不 raise
-    //   2. pool=None 時 load 回 Ok(vec![])
-    // 真 PG 整合測試延後 Linux CI（需 live learning schema）。
+    // STRATEGIST-PARAMS-PERSIST-1 tests (2026-04-23 初版).
+    // STRATEGIST-PERSIST-TEST-BROADEN-1 補強 (2026-04-23 QC M2 audit FUP).
+    //
+    // Coverage matrix / 覆蓋矩陣:
+    //   [pool=None fail-soft]
+    //     1. persist_applied_params     → test_persist_..._fails_soft_on_pool_none  (QC M2 a 的降級 mock)
+    //     2. load_latest_applied_params → test_load_..._empty_on_pool_none          (QC M2 a 的降級 mock)
+    //   [SQL property / string literal assertions]
+    //     3. load SQL has DISTINCT ON + DESC order     (QC M2 b)
+    //     4. load SQL column list + WHERE engine_mode  (QC M2 b 補）
+    //     5. persist SQL has full 7-column INSERT      (QC M2 c)
+    //     6. persist SQL binds $1..$7 placeholders     (QC M2 c 補）
+    //
+    // 無法測試項（需真 PG integration test, 延後到 Linux CI harness）：
+    //   - SQL schema 不存在（relation "learning.strategist_applied_params"
+    //     does not exist）時回 Err 路徑：sqlx 類型綁定 PG-specific，Mac 無
+    //     Docker PG，sqlite in-memory 不兼容 sqlx::postgres::PgPool 類型參數。
+    //   - DISTINCT ON 真實多 row 排序語意：需 INSERT 多 row 後 SELECT 驗最新
+    //     applied_at_ms 勝出，同樣需真 PG。
+    //   - Multi-row persist→load round-trip：同上。
+    //   上述三項 QC M2 a/b/c 的「SQL 真實執行」層面由 Linux CI sqlx::test
+    //   integration harness 覆蓋（超出本 Mac unit-test scope）。
+    //
+    // STRATEGIST-PARAMS-PERSIST-1 測試（2026-04-23）+ TEST-BROADEN-1（QC M2）。
+    // 上表 3 層覆蓋：pool=None fail-soft / SQL 字面屬性 / 真 PG 延後。
     // ═══════════════════════════════════════════════════════════════════
 
     #[tokio::test]
@@ -230,6 +264,183 @@ mod tests {
             rows.is_empty(),
             "expected empty vec from disconnected pool, got {} rows",
             rows.len()
+        );
+    }
+
+    // ───────────────────────────────────────────────────────────────────
+    // STRATEGIST-PERSIST-TEST-BROADEN-1 (QC M2) — SQL literal property tests.
+    //
+    // Rationale / 理由:
+    //   The behavioural guarantees of load/persist SQL (DISTINCT ON picks the
+    //   highest applied_at_ms; INSERT writes all 7 audit columns) can only be
+    //   end-to-end verified against a real PG server. On Mac dev (no Docker
+    //   PG, no sqlite fallback because sqlx::postgres::PgPool is PG-typed),
+    //   the best unit-level defense is to pin the exact SQL substrings so a
+    //   well-meaning refactor can't silently drop `DISTINCT ON`, reverse the
+    //   ORDER BY direction, or forget a column — any of which would break
+    //   STRATEGIST-PARAMS-PERSIST-1's restore-on-restart semantics without
+    //   a failing test.
+    //
+    //   These are property tests (not semantic tests): they guarantee the
+    //   source code contains the intended SQL shape, not that the SQL
+    //   produces correct rows. Semantic round-trip coverage is tracked as
+    //   a deferred Linux-CI integration harness task.
+    //
+    // 本組 3 test 為 SQL 字面 property test（非語意 test）：
+    //   - 防 SQL 關鍵子句（DISTINCT ON / ORDER BY DESC / 7 欄 INSERT）被後續
+    //     重構誤改而無測試失敗擋住。
+    //   - 真 SQL 語意正確性（多 row DISTINCT ON 取最新、round-trip）需真 PG
+    //     integration test，延後到 Linux CI harness。
+    // ───────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_load_sql_has_distinct_on_and_desc_order() {
+        // QC M2 (b): verify load_latest_applied_params SQL keeps the
+        // DISTINCT ON (engine_mode, strategy_name) + ORDER BY ...
+        // applied_at_ms DESC clause pair. Dropping DISTINCT ON would return
+        // every historical audit row instead of the latest; flipping DESC →
+        // ASC would return the oldest row (breaking restore-on-restart).
+        // QC M2 (b)：驗 load SQL 保持 DISTINCT ON + applied_at_ms DESC 子句對。
+        // 丟掉 DISTINCT ON 會回全部歷史 audit row；DESC → ASC 會回最舊 row，
+        // 兩者都會使 restart 後參數還原錯誤（拿舊參數或重複 IPC）。
+        assert!(
+            PERSIST_SRC.contains("DISTINCT ON (engine_mode, strategy_name)"),
+            "load_latest_applied_params SQL must contain \
+             'DISTINCT ON (engine_mode, strategy_name)' — \
+             load SQL 必須含 DISTINCT ON 子句才能取每組最新 row"
+        );
+        assert!(
+            PERSIST_SRC.contains("applied_at_ms DESC"),
+            "load_latest_applied_params SQL must contain \
+             'applied_at_ms DESC' — DESC 方向是拿「最新」 applied_at_ms 的關鍵"
+        );
+        assert!(
+            PERSIST_SRC
+                .contains("ORDER BY engine_mode, strategy_name, applied_at_ms DESC"),
+            "load_latest_applied_params SQL ORDER BY must exactly match \
+             DISTINCT ON target columns + applied_at_ms DESC tiebreak — \
+             ORDER BY 前綴必須同 DISTINCT ON 目標欄，最後以 applied_at_ms DESC \
+             決勝（PG 語法硬要求）"
+        );
+    }
+
+    /// STRATEGIST-PERSIST-TIE-BREAK-1 (2026-04-23, FA H1 post-commit audit):
+    /// pin the V020 `, id DESC` tie-break so concurrent writers with identical
+    /// applied_at_ms always restore the latest row (highest id). Without this
+    /// tie-break, DISTINCT ON falls back to PG physical row order — not stable,
+    /// depends on page layout, intermittently restores the older row.
+    ///
+    /// This test pairs with V020 migration that adds `id DESC` to the
+    /// `idx_strategist_applied_engine_strategy_ts` index so the executor can
+    /// actually use the index for this ORDER BY shape.
+    ///
+    /// STRATEGIST-PERSIST-TIE-BREAK-1（V020）：pin `, id DESC` tie-break。
+    /// 並發同 ms 寫入時必取 id 最大者（最晚寫入），無此 tie-break 時
+    /// DISTINCT ON 落回 PG physical row order 間歇取到舊 row。
+    #[test]
+    fn test_load_sql_has_id_desc_tie_break() {
+        assert!(
+            PERSIST_SRC.contains("applied_at_ms DESC, id DESC"),
+            "load_latest_applied_params SQL ORDER BY must contain \
+             'applied_at_ms DESC, id DESC' tie-break — \
+             ORDER BY 必須含 `applied_at_ms DESC, id DESC` 雙層 tie-break，\
+             防並發同 ms 寫入時 DISTINCT ON 取到非確定 row（FA H1 / V020）"
+        );
+    }
+
+    #[test]
+    fn test_load_sql_selects_expected_columns_and_filters_engine_mode() {
+        // QC M2 (b) supplement: verify load SQL projects the 2-tuple
+        // (strategy_name, params_json) that matches the query_as::<_, (String,
+        // serde_json::Value)>() decode target, and filters by $1 engine_mode
+        // so we don't accidentally mix paper/demo/live restore rows.
+        // QC M2 (b) 補：驗 SELECT 投影欄對齊 query_as 2-tuple 解碼目標 +
+        // WHERE engine_mode 過濾（不跨 paper/demo/live 污染還原）。
+        assert!(
+            PERSIST_SRC.contains("SELECT DISTINCT ON (engine_mode, strategy_name)"),
+            "load SQL SELECT clause shape regression — \
+             SELECT 子句形狀被改動"
+        );
+        assert!(
+            PERSIST_SRC.contains("strategy_name, params_json"),
+            "load SQL must project exactly (strategy_name, params_json) \
+             to match query_as decode tuple — \
+             投影欄必須對齊 query_as::<_, (String, serde_json::Value)> 解碼元組"
+        );
+        assert!(
+            PERSIST_SRC.contains("FROM learning.strategist_applied_params"),
+            "load SQL must read from learning.strategist_applied_params — \
+             必須從 learning schema 讀（非 public 或他 schema）"
+        );
+        assert!(
+            PERSIST_SRC.contains("WHERE engine_mode = $1"),
+            "load SQL must filter by engine_mode = $1 to scope restore to \
+             current engine (paper/demo/live/live_demo) — \
+             必須以 engine_mode = $1 過濾，避免跨引擎還原污染"
+        );
+    }
+
+    #[test]
+    fn test_persist_sql_has_all_seven_audit_columns_and_placeholders() {
+        // QC M2 (c): verify persist_applied_params INSERT writes all 7
+        // audit-trail columns (engine_mode / strategy_name / params_json /
+        // applied_at_ms / source / reason / prev_params_json) with
+        // matching $1..$7 placeholders. Dropping any column would corrupt
+        // the audit trail and break the multi-row round-trip guarantee
+        // (e.g. missing prev_params_json = no diff reconstruction; missing
+        // applied_at_ms = DISTINCT ON can't pick latest).
+        // QC M2 (c)：驗 persist INSERT 寫入全 7 個 audit 欄 + $1..$7 綁定對齊。
+        // 少任一欄都會破壞 audit trail + multi-row round-trip 保證
+        // （缺 prev_params_json → 無 diff 重建；缺 applied_at_ms → DISTINCT ON 無法取最新）。
+        assert!(
+            PERSIST_SRC.contains("INSERT INTO learning.strategist_applied_params"),
+            "persist SQL must INSERT INTO learning.strategist_applied_params — \
+             必須 INSERT 到 learning.strategist_applied_params"
+        );
+        for col in &[
+            "engine_mode",
+            "strategy_name",
+            "params_json",
+            "applied_at_ms",
+            "source",
+            "reason",
+            "prev_params_json",
+        ] {
+            assert!(
+                PERSIST_SRC.contains(col),
+                "persist SQL must include column '{}' — \
+                 INSERT 必須含 7 個 audit 欄之 '{}'",
+                col,
+                col
+            );
+        }
+        // Exact column-list clause (7 columns in declaration order, matches
+        // $1..$7 bind order below). The source uses Rust line-continuation
+        // (`\` + newline) inside the string literal, so we strip backslashes
+        // then collapse all whitespace before substring matching — this keeps
+        // the test stable across minor whitespace/indent refactors while
+        // still pinning the 7-column declaration order.
+        // 精確列欄子句（宣告順序對齊 $1..$7 綁定順序）。源碼用 Rust 行延續
+        // `\` + 換行，故先剝除反斜線再空白正規化後比對，小幅排版重構不破壞
+        // test 但仍鎖定 7 欄聲明順序。
+        let src_normalised: String = PERSIST_SRC
+            .replace('\\', " ")
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert!(
+            src_normalised.contains(
+                "(engine_mode, strategy_name, params_json, applied_at_ms, \
+                 source, reason, prev_params_json)"
+            ),
+            "persist SQL column-list clause must preserve 7-column \
+             declaration order aligning with $1..$7 binds — \
+             INSERT 欄列順序必須嚴格對齊 $1..$7 綁定順序"
+        );
+        assert!(
+            src_normalised.contains("VALUES ($1, $2, $3, $4, $5, $6, $7)"),
+            "persist SQL VALUES clause must bind exactly $1..$7 (7 placeholders) — \
+             VALUES 必須正好 7 個 $1..$7 placeholder 對齊 7 欄"
         );
     }
 }
