@@ -140,7 +140,8 @@ git status && git log --oneline -5
 **軌道 2 P1-7 解阻塞（完全不阻塞，優先推進）**：
 - ✅ **A** 2026-04-18 commit `2a36a3f`（歸檔 §4）— Rust exchange 分支補 `persist_intent`；demo 29 intents / 32 Approved verdicts = 90.6% ratio 驗收。live_demo 驗證 pending（operator 重簽 `authorization.json` 後）。
 - ✅ **B** 2026-04-19 commit `23b14ef`（歸檔 §5）— `edge_estimator_scheduler.py` daemon + routes；live_demo grand_mean −8.46 bps（n_cells=28）；僅寫檔，未 bind cost_gate（待 P1-16 ✅ + grand_mean>−50 + ≥2 策略 shrunk>0）。
-- [ ] **C** `run_training_pipeline.py` 首跑 grid_trading（用 decision_features 17 維做 entry-decision 模型，不等 exit_features）→ 產 `models/demo/grid_trading_entry_policy_v20260425.onnx`
+- [ ] **C** `run_training_pipeline.py` 首跑 grid_trading（**範圍限 grid_trading 單策略 PoC**，詳 §P1-13 SAMPLE-FLOOR-GAP-1；ma_crossover ~380 RT / funding_arb ~38 RT / bb_reversion 1 RT / bb_breakout 0 RT 均低於 QA 守衛 ≥1000/策略閘口，Phase 1 其他策略走 Track P only；用 decision_features 17 維做 entry-decision 模型，不等 exit_features）→ 產 `models/demo/grid_trading_entry_policy_v20260425.onnx`
+  - **2026-04-23 Target 改 grid_trading pooled（跨 symbol）**（commit pending — `PipelineConfig.symbol` Optional + `--symbol` 改 optional/`ALL` + per-strategy pooled readiness view + pooled/per-symbol 測試）：原逐 symbol 目標 `demo grid_trading BLURUSDT 47/200` 冷凍 3.5d（策略 2026-04-20 起停交易 BLURUSDT，輪動到 PENGUUSDT 15 / SPKUSDT 11 等）→ 單一 symbol 永遠到不了 200；改 **pooled** 跨所有 grid_trading demo symbol 合計 ~200+ labels 可立即訓練。模型架構 symbol-agnostic（17 feature 無 symbol_embedding，train_quantile_trio 只吃 feature/label matrix），pooled 安全。Per-symbol 路徑保留（為未來 ma/bb 單策略高 RT symbol 用）。`phase1a_c_readiness.py` 新加 Per-strategy pooled view 回答「總量夠不夠訓練」，per-slice view 保留。
   - **2026-04-19 結構性阻塞已解除**：原 RCA — `learning.decision_features` 3.36M rows 與 `trading.fills.entry_context_id` 3514 rows JOIN **0 overlap**，`edge_label_backfill.py` 找不到任何可標籤的 fills；root cause = decision_features.context_id 訊號時刻用 `event.ts_ms`，exchange-confirmed fill 用 WS `exec_ts`（漂移 100-500ms），同 `make_context_id(em,sym,ts_ms)` formula 不同 ts_ms → 不同字串。**FILL-CONTEXT-LINKAGE-1（commit `bd45e90`）已修**：訊號時刻 context_id 端到端傳遞（`OrderDispatchRequest.context_id` + `PendingOrder.context_id` 新欄位 → `apply_confirmed_fill(...,signal_context_id:&str,...)` 新參數）；3 close-dispatch sites 帶 `paper_state.get_entry_context_id(symbol)`；+2 regression tests（`apply_confirmed_fill_preserves_signal_context_id` 斷言訊號 id 寫入 + `_falls_back_when_signal_id_empty`）；engine lib 1560→1564 passed。
   - **2026-04-19 晚間進度（收尾準備）**：
     - ✅ (1) 部署完成 — binary mtime 22:32（bd45e90 on PID 3029633）
@@ -256,13 +257,14 @@ git status && git log --oneline -5
 |---|---|---|
 | 1 | (engine_mode, strategy, symbol) 24h **gross / fee / slippage / net** 拆解，按 net 排序 | 哪些 (策略×symbol) 是 edge 黑洞？哪些有救？ |
 | 2 | 7d 連續 net < 0 的 symbol kill-list candidate | 該下架哪些 symbol？ |
-| 3 | **Counterfactual exit replay**：對 7d close_fills，模擬「在 peak − 0.3 ATR 鎖定」net 改善值 | phys_lock 真開了會贏嗎？（pure SQL/Python on `learning.exit_features`，零部署） |
+| 3 | **Counterfactual exit replay**：對 7d close_fills，模擬「在 peak − 0.3 ATR 鎖定」net 改善值 | phys_lock 真開了會贏嗎？（pure SQL/Python on `learning.exit_features`，零部署）→ ✅ 2026-04-23 `helper_scripts/db/counterfactual_exit_replay.py`（Linux trade-core 執行；`--cost-model both` 雙模型並列，proxy 代數退化保留 sanity check、fee_only 為經驗有效模型；`--include-funding-arb` opt-in；v2 non-linear + Gate 1/2/3 parity 為 FUP） |
 | 4 | **holding time × net edge** 分桶（30s/5m/30m/2h/8h+） | 最佳持倉長度多少？是不是該強制 max_hold？ |
 | 5 | cells `shrunk_bps` 7d trend + 距 floor 的 gap | EDGE-P2-3 部署後是否真在收斂？多久能過 floor？ |
 
 #3 是回答「PostOnly 後 edge 仍負怎辦」的關鍵 — 若 counterfactual 顯示 phys_lock 鎖也救不了，**整個 DUAL-TRACK Track P 物理層需要重新評估**，不是調參數的事。
 
 **執行順序**：短期實驗已部署 → 等 24-48h 樣本 → 並行寫 #3 counterfactual replay → #3 結果驅動 #1/2/4/5 是否做。
+- Operator 執行：`ssh trade-core "cd ~/BybitOpenClaw/srv && python3 helper_scripts/db/counterfactual_exit_replay.py --days 7 --cost-model both"` → 讀 VERDICT（`fee_only` 模型為主）
 
 **關聯**：P0-3 Phase 5 edge 重評（前置）· P1-10 EDGE-P2-3 PostOnly 1w 觀察（並行）· DUAL-TRACK Phase 1b counterfactual replay audit（已列）· §P1-14 EDGE-ESTIMATE-BIND-BLOCKED-1（cells 翻正前提）
 
@@ -413,7 +415,7 @@ git status && git log --oneline -5
 
 - **現象**：Step 0 不確定 3 audit — `trading.fills` 配對 RT 遠低於 QA 守衛「≥1000/策略」；僅 grid_trading 勉強過閘
 - **影響**：DUAL-TRACK Phase 1 Track L 範圍限 grid_trading 單策略 PoC；ma_crossover/bb_*/funding_arb 延後，累積期間 Track P only
-- **下一步**：(1) 正式更新 DUAL-TRACK Phase 1 軌道 2 C 範圍聲明限 grid_trading (2) 每週 per-strategy 樣本 audit 判斷加入時點
+- **下一步**：(1) ✅ 2026-04-23 DUAL-TRACK Phase 1 軌道 2 C 範圍聲明已更新限 grid_trading 單策略 PoC（TODO §Phase 1a 軌道 2 C 首行附 scope note，列出 ma_crossover/funding_arb/bb_reversion/bb_breakout RT 均低於 1000 閘口的依據） (2) 每週 per-strategy 樣本 audit 判斷加入時點（條件：per-strategy RT ≥1000 + P0-3 edge 判決後再入訓練池）
 - **關聯**：DUAL-TRACK Step 0 不確定 3 / Phase 1 軌道 2 C · QA 守衛 #1 · 風險退路 #5
 
 ### P1-14 · EDGE-ESTIMATE-BIND-BLOCKED-1 — JS estimator snapshot edge 不足以 bind cost_gate
@@ -488,7 +490,8 @@ git status && git log --oneline -5
   - `grid_trading/` 7 檔（mod 322 / params 165 / constructors 231 / grid_layout 133 / position_mgmt 155 / signal 241 / tests 696）；36 tests 逐字保留
   - `strategies/` 4 新 sibling（mod 168 / params 152 / strategy_params 798 / registry 208 / tests 552）；`pub mod <strategy>;` + `StrategyAction` / `Strategy` trait / re-exports 留在 mod.rs
   零邏輯改動，cargo test 1862 → 1866 (strategies module 280/280 綠，C2 補 +3 SQL property test + C1 新 +1 tie-break test)。
-- [ ] **E5-P2-4c（follow-up，2026-04-23 實測新發現）** — 兩檔仍超 §九 1200 硬上限但 E5-P2-4b scope 未涵蓋：`strategies/ma_crossover.rs` 1835（超 635）+ `strategies/bb_reversion.rs` 1143（soft-warn 邊緣）。同 sibling-child-module pattern 拆。優先級 P1（ma_crossover 嚴重違規）+ P3（bb_reversion 邊緣）。~2h 並行。
+- ✅ **E5-P2-4c ma_crossover** 2026-04-23 commit `5b61e64` — `strategies/ma_crossover.rs` 1835 → `strategies/ma_crossover/` 6 sibling（mod 406 / config 81 / helpers 218 / strategy_impl 285 / tests 536 / tests_a1_a2_maker 463，max 536 < 800 soft warn）。Zero-logic sibling-child-module split，pattern mirrors TICK-PIPELINE-MOD-SPLIT-1 (`3d67a99`)：原檔保 types/struct/ctor + mod decls，impl blocks 移 sibling `impl super::MaCrossover { ... }`。engine lib **1942 passed / 0 failed**（baseline 1939 → 1942，+3 來自其他 commits，非 split）。§九 1200 硬上限合規。
+- [ ] **E5-P2-4c bb_reversion（P3 邊緣）** — `strategies/bb_reversion.rs` 1143 行（soft-warn 邊緣，未觸硬上限）。同 sibling-child-module pattern 拆；優先級低，ma_crossover 拆完後獨立工作項。~1h。
 
 #### E5 已決議（CANCEL / CLOSED / DEFERRED — 不是待辦，是決策記錄）
 
