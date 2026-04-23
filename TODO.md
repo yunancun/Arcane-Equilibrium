@@ -413,11 +413,16 @@ git status && git log --oneline -5
 - **下一步**：(1) 閾值 offline backtest（squeeze 0.025 / expansion 0.035 / volume 1.2）(2) Donchian AND→OR/score (3) 考慮 aggressive/conservative 分拆 A/B
 - **優先級**：P1 低 — 不緊急但影響 Phase 5 策略多樣性
 
-### P1-12 · BB-REVERSION-BLOCKED-1 — 66 信號產生 100% 被下游擋
-- **現象**：24h live_demo 66 筆 decision_features 但 0 fills（14d demo 僅 2 筆）
-- **可能阻擋**：confluence / `check_order_allowed` / cooldown 10min / dispatch min_notional / risk_close 秒殺
-- **下一步**：(1) 找出 66 筆 intent_id/context_id join `risk_verdicts` + engine.log trace (2) 統計阻擋分佈 (3) 對症處理
-- **備註**：P0-6 永久修復後 `rejected_reason` 已 persist 到 `risk_verdicts.reasons` → trace 高效化
+### ✅ P1-12 · BB-REVERSION-BLOCKED-1 — **2026-04-23 反轉結案**
+- **原判**：~~24h live_demo 66 筆 decision_features 但 0 fills（14d demo 僅 2 筆），100% 被下游擋，下一步 trace risk_verdicts + engine.log~~
+- **實測反轉（commit `4520823` + `81cde54`）**：
+  - **當前 14d demo bb_reversion**：8 df → 8 rv **全 Approved** → 8 intents **全寫入** → 5 fills / 3 未成交。阻擋率 = 3/8 = **37.5%（非 100%）**，且 Guardian 層無任何阻擋。
+  - **原「66 筆」數字來源**：實際是 **2026-04-17 live_demo 609 筆**（TODO 記的 66 是早期 snapshot），全 rv Approved 但 `trading.intents` 0 rows。
+  - **意外發現 — 根因非 bb_reversion**：同日 **demo 1755 orders / 0 intents**、**live_demo 190 orders / 0 intents** — **4/17 trading.intents writer 全表 silent outage**，橫跨全策略全 engine_mode。4/16-4/19 live_demo intents 幾乎全斷，4/20+ 恢復（4/23 demo 266 intents / 339 orders ratio 0.78 ∈ healthy baseline 0.70-0.87）。
+- **歸類**：bb_reversion 當前並無阻擋問題；「14d 8 signal」是 **signal generation 量級問題**（BB squeeze + reversion 兩個 AND 條件下 demo 14d 產量本來就低），同類問題應併入 **§P1-11 BB-BREAKOUT-DORMANT-1** 的 signal threshold audit（兩者都屬 Bollinger 家族 AND 條件過嚴）。
+- **防復發**：commit `4520823` 新增 `passive_wait_healthcheck.py` check [10] `intents_writer_ratio` — 專擋 4/17-style 全表 writer outage 隱形復發（orders>0 + intents=0 → FAIL；ratio<0.3 → WARN）。commit `81cde54` 補防禦式 rollback 避免前 check tx poisoning。Live 驗證 PASS（ratio 0.78）。
+- **報告**：`.claude_reports/20260423_XXXXXX_p1_12_reversal_postmortem.md`
+- **接棒項（已登記在他處）**：bb_reversion signal threshold audit → 併入 P1-11 工作時一併掃；intents writer 4/17 事件是否對應特定 commit → 不追 cold case（已恢復 3 天，healthcheck 把關即可）。
 
 ### P1-13 · SAMPLE-FLOOR-GAP-1 — per-strategy round-trip 樣本低於 ML 訓練閘口
 
