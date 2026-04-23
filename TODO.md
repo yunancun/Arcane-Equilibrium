@@ -474,19 +474,24 @@ git status && git log --oneline -5
 - [ ] **DUST-EVICTION GUI 曝光**（P1-8 FUP）：log-only 觀察滿一週後（起算 2026-04-17）→ GUI 曝光 `dust_frozen` / `orphan_frozen` 倉位給 operator 日報；`paper_state.rs` 已有 `TriageOutcome.dust_frozen` 計數器
 - [ ] **LEARNING-COCKPIT-NO-IPC-1** Learning 8 端點走 Python state_store 非 Rust IPC（設計債，等 G-7/G-10 後再議；不阻 Live，原則 #7 學習平面與 Live 隔離）
 - ✅ **DYNAMIC-RISK-STATUS-TEST-SIG-1** 2026-04-19 commit `83a0475`（歸檔 §11）— `TestClient(app).get(...)` 走 HTTP dispatch + `Authorization: Bearer` header 規避兄弟測試 `importlib.reload` swap。2 tests pass。
-- [ ] **E5-P1-5-FUP** — P1-5 JSON-RPC `param_extractor.rs` 目前帶 `#![allow(dead_code)]` 等 handlers.rs 消費。需開工項：掃 `ipc_server/handlers/*.rs` 把內嵌 `as_str()/as_f64()/as_u64()/unwrap_or(default)` 手寫解包替換成 `param_extractor::require_*` / `optional_*`，至少兩個 handler file 當示範，確認 param_extractor.rs 死碼警示可解。E2 nit 追蹤（a4101cb63edc44e93 / af8076b578356a939）。
-- [ ] **E5-P1-4-FUP** — `llm_call_wrapper.call_ollama_timed` dead-on-arrival，考慮：(a) 接 StrategistAgent `_evaluate_edge` 手寫 latency 計時（strategist_agent.py 約 918 行）；(b) 若永遠不接，下 commit 刪除 helper。E2 nit（a4101cb63edc44e93）。
-- [ ] **E5-P1-8-FUP** — `rejection_coding.rs` 第二 `impl RejectionCode` block（`from_guardian_review` 工廠）可折疊到主 impl；分類 helpers（`is_cost_gate_reject` / `family`）帶 `#[allow(dead_code)]` 等 consumer 接線後移除 allow。E2 nit（a9ccde4552860c973）。
-- [ ] **E5-P1-CANCEL-P1-6** — `h0_gate.py` vs `paper_live_gate.py` pipeline 抽象經 sub-agent 實測 0 真實共用，cancel。未來出現第三個類似 gate 時再重開評估（見 2026-04-19 CHANGELOG Wave 1 章節）。
-- [ ] **E5-P1-CANCEL-P1-7** — `PipelineCommand` dispatch-match 已在 prior pass 從 `tick_pipeline/` 遷至 `event_consumer/handlers/`（由 P1-3 進一步 by-domain 拆完），原任務前提過時 cancel。真正候選：`tick_pipeline/commands.rs` 836 LOC helper impl 切 `commands/orders.rs` / `commands/governor.rs` / `commands/close.rs` 等 topical submodules（新排 E5-P2-X 非本 E5-P1-7）。
-- [ ] **E5-P1-2-DEFERRED** — `rust/openclaw_engine/src/main.rs` bootstrap 拆分依 E5 audit 建議「觀察穩定性再拆」（P0-9 停電 RCA 後唯一未重組模塊）暫不派；operator 可在 Live 對後覆蓋。
+- ✅ **E5-P1-5-FUP** 2026-04-23 commit `b5fa443` — 挑 `budget.rs` (10 hits) + `risk.rs` (16 hits) 當示範，替換 20 處內嵌手寫解包成 `param_extractor::require_*` / `optional_*`；移除檔案級 `#![allow(dead_code)]`；保留 4 個未採用 fn 的函數級 allow + 雙語 `TODO(E5-P1-5-FUP-2)` 註明採用條件。+5 單測 (`require_str` happy/error + `optional_u64` × 3)。engine lib 1845 → **1850 passed / 0 failed**。`strategy.rs` / `governance.rs` 未替換為 scope 控制。
+- ✅ **E5-P1-4-FUP** 2026-04-23 commit `3d1f764` — 選 (b) 刪除：`call_ollama_timed` 於 business code 0 call sites + 0 imports；唯一理論接線點 `strategist_agent._ai_evaluate` 若接會靜默排除 prompt 構建違反 docstring 契約；Analyst / Guardian 無計時 pattern，無跨 agent 統一需求 → YAGNI。
+- ✅ **E5-P1-8-FUP** 2026-04-23 commit `139c65b` — `from_guardian_review` 折疊入主 impl + 第二 block 整段刪除。classification helpers (5 方法) 的 `#[allow(dead_code)]` 保留：grep 確認唯一呼叫點在 test module 內，無 production consumer；加統整 TODO 註記記錄 3 個候選接線點 (`strategy_ai_routes.py` / `learning.exit_features` tagger / `retriage_synthetic_owner`)。Public API 零影響；engine lib 1845 → 1845（refactor-only）。
 - [ ] **E5-P2-4b** — 3 檔超 §九 1200 LOC 硬上限（`strategies/bb_breakout.rs` 1265 / `strategies/grid_trading.rs` 1434 / `strategies/mod.rs` 1442），pre-existing tech debt（非 E5-P2-4 新增）；分檔切：bb_breakout 核心邏輯 vs 進出場工具 vs helpers；grid_trading 網格佈局 vs 持倉管理；strategies/mod.rs registry/factory 拆 `strategies/registry.rs`。(2026-04-19 E5-P2-4 E2 nit 追蹤 a79a2607845253fdb)
-- [ ] **E5-P2-2-CLOSED**（資訊）— onnx_inference consolidate 優化前提已由 EDGE-P3-1 Phase B Step 7b `OrtPredictor.input_name: String` load-time cache 滿足；`ml/model_manager.rs` 仍是 stub，待 ort 真接線後若出現第二個 session 再評；audit §九 blueprint 對應行建議下修或刪除。(2026-04-19 Wave 2 CANCEL evidence)
-- [ ] **E5-P2-6-DEFERRED** — `tick_pipeline/fill_context_builder.rs` 抽取暫延，等 EXIT-FEATURES-TABLE-1 operator WIP 落地後重新評估衝突面。(2026-04-19 defer evidence)
-- [ ] **E5-P2-1-DEFERRED** — PipelineCommand enum reorg 暫延，與 P2-6 共爭 tick_pipeline/mod.rs；同等待 EXIT-FEATURES-TABLE-1 落地。
-- [ ] **E5-P2-7-CLOSED**（資訊）— claude_teacher/directive_handler 抽取 cancel：R6 cohesion invariant + FIX-08 fixtures 已拆 + denylist/helpers/apply_* 1-to-1 耦合無外部消費者；未來新增第 5 種 directive 或跨 directive 共享 veto 邏輯時重開。
-- [ ] **E5-P2-8-CLOSED**（資訊）— Python learning_batch_writer cancel：control_api 唯 1 個 `INSERT INTO learning.*`，ml_training 11 writer 各寫 distinct schema 無共用 row shape，真實批寫重複已由 E5-P0-4 Rust `batch_insert.rs` 處理。
-- [ ] **E5-FN-1-CANCEL**（資訊）— audit §七.7.1「live_authorization.verify 同步但 main.rs 首次 re-verify 在 5 min 後，中間有窗口」聲稱不成立：`startup.rs:467-494` `build_exchange_pipeline` 在 pipeline 構造前已同步 `load_and_verify(env)`，失敗即 `return None` 拒絕 spawn；5 min ticker 只是 mid-session revoke detector。0 lines changed。(2026-04-19 E5-FN-1 evidence-based CANCEL)
+
+#### E5 已決議（CANCEL / CLOSED / DEFERRED — 不是待辦，是決策記錄）
+
+> **體例**：這批條目**不再作 checkbox TODO 追蹤**；保留作審計溯源用，改用 bullet。重啟條件 = bullet 內明確觸發事件。避免混在 `[ ]` 清單裡造成「長期 pending」錯覺。
+
+- · **E5-P1-CANCEL-P1-6** — `h0_gate.py` vs `paper_live_gate.py` pipeline 抽象經 sub-agent 實測 0 真實共用，cancel。**重啟條件**：未來出現第三個類似 gate 時（2026-04-19 CHANGELOG Wave 1）。
+- · **E5-P1-CANCEL-P1-7** — `PipelineCommand` dispatch-match 已由 P1-3 進一步 by-domain 拆完，原任務前提過時 cancel。**接棒任務**：`tick_pipeline/commands.rs` 836 LOC helper impl 切 `commands/{orders,governor,close}.rs` 已排 E5-P2-X（新排非本項）。
+- · **E5-P1-2-DEFERRED** — `main.rs` bootstrap 拆分按 E5 audit 建議「觀察穩定性再拆」延後。**重啟條件**：Live 對後 operator 覆蓋（P0-9 停電 RCA 後唯一未重組模塊）。
+- · **E5-P2-1-DEFERRED** — `PipelineCommand` enum reorg 暫延，與 P2-6 共爭 `tick_pipeline/mod.rs`。**重啟條件**：EXIT-FEATURES-TABLE-1 落地後衝突面可重評估。
+- · **E5-P2-2-CLOSED** — `onnx_inference` consolidate 優化前提已由 EDGE-P3-1 Phase B Step 7b `OrtPredictor.input_name: String` load-time cache 滿足；`ml/model_manager.rs` 仍 stub。**重啟條件**：ort 真接線 + 出現第二個 session 時（2026-04-19 Wave 2）。
+- · **E5-P2-6-DEFERRED** — `tick_pipeline/fill_context_builder.rs` 抽取暫延。**重啟條件**：EXIT-FEATURES-TABLE-1 operator WIP 落地後（2026-04-19 defer）。
+- · **E5-P2-7-CLOSED** — `claude_teacher/directive_handler` 抽取 cancel（R6 cohesion invariant + FIX-08 fixtures 已拆 + denylist/helpers/apply_* 1-to-1 耦合無外部消費者）。**重啟條件**：新增第 5 種 directive 或跨 directive 共享 veto 邏輯。
+- · **E5-P2-8-CLOSED** — Python `learning_batch_writer` cancel（control_api 唯 1 個 `INSERT INTO learning.*`；ml_training 11 writer 寫 distinct schema 無共用 row shape；真實批寫重複已由 E5-P0-4 Rust `batch_insert.rs` 處理）。**重啟條件**：出現新的跨寫入器共享 row shape 時。
+- · **E5-FN-1-CANCEL** — audit §七.7.1「live_authorization.verify 同步但 main.rs 首次 re-verify 在 5 min 後有窗口」evidence-based 證偽：`startup.rs:467-494` `build_exchange_pipeline` 已同步 `load_and_verify(env)`，失敗即 `return None` 拒絕 spawn；5 min ticker 只是 mid-session revoke detector（2026-04-19）。
 - ✅ **E5-FN-2 Plan N** 2026-04-19 commit `f0f11c0`（revert `87b7653`；歸檔 §12）— 用既有 hypertable PK `(time, scope, request_id)` + `ON CONFLICT DO NOTHING RETURNING 1` 取代 V018 partial UNIQUE（TimescaleDB hypertable 不接受不含 partitioning column 的 UNIQUE index）。零 schema/migration。
 - [ ] **E5-FN-2-PLAN-N-FUP** — Plan N 部署後 follow-up：(a) Python Layer-2 sync caller 可選升級為傳入 `(request_id, event_time_ms)` 以獲得跨重試的真實去重（目前 IPC handler 本地鑄造時每次 retry 會被當新 row — 仍不會雙重計費本地 caller 自己，但失去跨 Python 重試保護）；(b) `test_make_request_id_unique_within_same_ms` 為 1 對 mint 對比，flake 機率 ~1/2^32，若 CI 偶發誤報換 seeded RNG；(c) 部署後 `SELECT time, scope, request_id, COUNT(*) FROM learning.ai_usage_log GROUP BY 1,2,3 HAVING COUNT(*) > 1 LIMIT 5;` 應永遠 0 rows（PK 保證）。
 
