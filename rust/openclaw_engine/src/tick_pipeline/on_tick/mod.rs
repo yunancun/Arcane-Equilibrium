@@ -76,6 +76,7 @@ mod step_6_risk_checks;
 // 向後相容 re-export：外部繼續以 `crate::tick_pipeline::on_tick::…` 訪問，
 // 與拆分前一致；每個符號單獨一行以利 diff 審計。
 pub(crate) use helpers::build_risk_close_tag;
+pub(crate) use helpers::compute_edge_estimates_file_age_secs;
 pub(crate) use helpers::emit_shadow_exit_observation;
 pub(crate) use helpers::log_phys_lock_through_combine_layer;
 pub(crate) use helpers::strip_phys_lock_prefix;

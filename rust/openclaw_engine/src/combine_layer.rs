@@ -282,6 +282,31 @@ pub fn combine_exit_decision(
 /// 此為 Phase 2 shadow 模式下的 mock，讓 Combine Layer 走 Hybrid 路徑練兵；
 /// Phase 3+ 將切真 ONNX 推論。`ml_override_high=2.0` 不可達 sentinel 仍守
 /// Phase 1a 不變式（ML 永遠不能 Hold → Lock）。
+///
+/// # `cell_age_secs` semantics (INFRA-PREBUILD-1 L1-1, 2026-04-23)
+///
+/// - `Some(age)` → caller measured the freshness of the edge_estimates cell
+///   (or the whole `edge_estimates.json` file mtime as a conservative proxy,
+///   since Python `james_stein_estimator` rewrites the whole file atomically
+///   on each cycle) and is passing the real age. Values > `max_model_age_secs`
+///   (7d default, see [`CombineConfig`]) flow through to
+///   [`combine_exit_decision`]'s stale-age guard → `ExitSource::Disabled
+///   { reason: "ML model stale ..." }` fallback.
+/// - `None` → freshness is not (yet) known. Treated as `0` (fresh) —
+///   accepted limitation in Phase 2 activation because the Python writer
+///   rewrites the file hourly so a caller wiring the file-mtime proxy
+///   gets real staleness once wired. See `helpers::
+///   compute_edge_estimates_file_age_secs` for the caller-side recipe.
+///
+/// # `cell_age_secs` 語意（INFRA-PREBUILD-1 L1-1，2026-04-23）
+///
+/// - `Some(age)` → caller 已測出 edge_estimates cell（或 `edge_estimates.json`
+///   整檔 mtime 作保守 proxy）的真實齡期，超過 `max_model_age_secs`（預設 7 天）
+///   會走 [`combine_exit_decision`] 的 stale guard →
+///   `ExitSource::Disabled { reason: "ML model stale ..." }` 降級。
+/// - `None` → freshness 未知，視為 0（fresh）— Phase 2 啟用前的 accepted
+///   limitation；Python 每小時原子重寫整檔，caller 接 file-mtime proxy
+///   即可取得真實齡期。參見 `helpers::compute_edge_estimates_file_age_secs`。
 pub fn build_ml_inference_shadow(
     shrunk_bps_opt: Option<f64>,
     cell_age_secs: Option<u64>,
@@ -296,6 +321,12 @@ pub fn build_ml_inference_shadow(
     Some(MLInference {
         id: "shadow_mock_v1".to_string(),
         score,
+        // INFRA-PREBUILD-1 L1-1 (2026-04-23): propagate caller-supplied cell
+        // age so combine_exit_decision's stale-age guard can actually fire
+        // in Phase 2. `None` → 0 is an accepted limitation (see fn doc).
+        // INFRA-PREBUILD-1 L1-1（2026-04-23）：傳遞 caller 的 cell 齡期，
+        // 讓 combine_exit_decision 的 stale guard 在 Phase 2 真能 fire；
+        // `None` → 0 為 accepted limitation（見 fn 文件）。
         age_secs: cell_age_secs.unwrap_or(0),
         confidence: 0.5,
     })
@@ -605,5 +636,73 @@ mod tests {
             "shrunk_bps 4 must sit exactly on confirm_threshold 0.70, got {}",
             m.score,
         );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // INFRA-PREBUILD-1 audit L1-1 (2026-04-23): cell freshness propagation.
+    // The mock builder must forward a Some(age) to MLInference.age_secs so
+    // combine_exit_decision's stale-age guard can actually fire during
+    // Phase 2. Without this, `cell_age_secs.unwrap_or(0)` makes every mock
+    // eternally fresh and the 7d `max_model_age_secs` gate degenerates to
+    // dead code → Phase 2 never exercises the Disabled fallback.
+    //
+    // INFRA-PREBUILD-1 審計 L1-1（2026-04-23）：cell freshness 傳遞。
+    // mock builder 必須把 Some(age) 轉到 MLInference.age_secs，
+    // 讓 combine_exit_decision 的 stale guard 在 Phase 2 能 fire；
+    // 否則 `unwrap_or(0)` 使所有 mock 永遠 fresh、7d gate 退化為死碼、
+    // Phase 2 永遠測不到 Disabled fallback。
+    // ─────────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_build_ml_shadow_propagates_fresh_age() {
+        // age_secs=Some(60) → MLInference.age_secs=60 (not clobbered to 0).
+        // age_secs=Some(60) → MLInference.age_secs=60（未被 clobber 為 0）。
+        let m = build_ml_inference_shadow(Some(0.0), Some(60)).expect("finite input");
+        assert_eq!(m.age_secs, 60, "fresh age must propagate unchanged");
+    }
+
+    #[test]
+    fn test_build_ml_shadow_propagates_stale_age() {
+        // 8d age must propagate → downstream combine_exit_decision sees
+        // age_secs > max_model_age_secs (7d) → Disabled fallback path.
+        // 8 天齡期必須傳遞 → combine_exit_decision 偵測 > 7d → Disabled。
+        let eight_days_secs: u64 = 8 * 24 * 3600;
+        let m = build_ml_inference_shadow(Some(5.0), Some(eight_days_secs))
+            .expect("finite input");
+        assert_eq!(m.age_secs, eight_days_secs);
+    }
+
+    #[test]
+    fn test_stale_shadow_age_triggers_disabled_via_combine() {
+        // End-to-end: build_ml_inference_shadow(+5 bps, 8d age) → combine →
+        // ExitSource::Disabled { reason contains "stale" }. This is the
+        // test that, absent L1-1 propagation, would go red because the
+        // mock would arrive at combine as age_secs=0 (eternally fresh).
+        // 端到端：+5bps & 8d age → combine 必回 Disabled（reason 含 "stale"）。
+        // 沒有 L1-1 傳遞的話，mock 到 combine 時 age_secs=0 永遠 fresh，
+        // 此測試紅，證明 L1-1 修復有效。
+        let cfg = default_cfg();
+        let eight_days_secs: u64 = 8 * 24 * 3600;
+        assert!(
+            eight_days_secs > cfg.max_model_age_secs,
+            "test premise: 8d must exceed max_model_age_secs 7d"
+        );
+        let mock = build_ml_inference_shadow(Some(5.0), Some(eight_days_secs))
+            .expect("finite input");
+        let (sig, src) = combine_exit_decision(
+            PhysicalDecision::Lock("PHYS-LOCK: giveback".to_string()),
+            Some(mock),
+            &cfg,
+        );
+        assert_eq!(sig, ExitSignal::Lock);
+        match &src {
+            ExitSource::Disabled { reason } => {
+                assert!(
+                    reason.contains("stale"),
+                    "expected stale-age Disabled reason, got {reason:?}"
+                );
+            }
+            other => panic!("expected Disabled (stale), got {other:?}"),
+        }
     }
 }
