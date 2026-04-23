@@ -135,6 +135,41 @@ impl TickPipeline {
         let close_fee = qty * price * fr;
         self.paper_state.charge_fee(close_fee);
         let em = self.effective_engine_mode();
+        // INFRA-PREBUILD-1 Part A (2026-04-23): derive exit_source from
+        // close_tag. Only PHYS-LOCK fires pass through combine_layer in
+        // Phase 1a (with ml_opt=None → always Physical). Other close reasons
+        // (HARD STOP / TRAILING / TIME / TP / DRAWDOWN / CONSECUTIVE LOSS /
+        // DAILY LOSS / strategy exits) bypass Combine Layer entirely per
+        // DUAL-TRACK-EXIT-1 design — their exit_source stays NULL.
+        // Phase 2 shadow observations land in learning.decision_shadow_exits
+        // (separate table); trading.fills.exit_source records only the real
+        // decision actually used for the close (Phase 1a always Physical for
+        // PHYS-LOCK; Phase 3+ Hybrid/ML when Track L goes live).
+        //
+        // Uses `strip_phys_lock_prefix` (re-exported from on_tick::helpers)
+        // instead of a bare `"risk_close:phys_lock_"` literal — the
+        // RUST-DOUBLE-PREFIX-1 regression guard rejects new bare literals
+        // outside its allowlist (helpers.rs / risk_checks.rs /
+        // step_6_risk_checks.rs). Single point of truth for PHYS-LOCK
+        // recognition stays at strip_phys_lock_prefix.
+        //
+        // INFRA-PREBUILD-1 A 部：從 close_tag 推 exit_source。Phase 1a 只有
+        // PHYS-LOCK 走 Combine Layer（ml_opt=None → 恆 Physical）。其他 close
+        // reason（HARD STOP / TRAILING / TIME / TP / DRAWDOWN / CONSECUTIVE
+        // LOSS / DAILY LOSS / 策略退場）依 DUAL-TRACK-EXIT-1 設計 bypass
+        // Combine Layer，exit_source 保持 NULL。Phase 2 shadow 觀測寫
+        // learning.decision_shadow_exits；trading.fills.exit_source 只記
+        // **實際採用**的決策來源（Phase 1a PHYS-LOCK 恆 Physical；Phase 3+
+        // Track L live 後才會出現 Hybrid/ML）。
+        // 使用 `strip_phys_lock_prefix`（on_tick::helpers re-export）而非裸
+        // `"risk_close:phys_lock_"` 字面量，避免 RUST-DOUBLE-PREFIX-1 regression
+        // guard 警報；PHYS-LOCK 識別的單一事實源維持在 strip_phys_lock_prefix。
+        let exit_source: Option<String> =
+            if crate::tick_pipeline::on_tick::strip_phys_lock_prefix(close_tag).is_some() {
+                Some("Physical".to_string())
+            } else {
+                None
+            };
         if let Some(ref tx) = self.trading_tx {
             // Fill side reflects the closing direction (opposite of position side).
             let close_side = if is_long { "Sell" } else { "Buy" };
@@ -153,6 +188,7 @@ impl TickPipeline {
                 context_id: on_tick_helpers::make_context_id(em, symbol, ts_ms),
                 entry_context_id: entry_context_id.to_string(),
                 engine_mode: em.to_string(),
+                exit_source,
             });
         }
         self.stats.total_fills += 1;

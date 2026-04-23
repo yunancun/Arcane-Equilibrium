@@ -568,6 +568,9 @@ impl TickPipeline {
                                             ),
                                             entry_context_id: String::new(),
                                             engine_mode: em.to_string(),
+                                            // INFRA-PREBUILD-1 Part A: strategy open fill.
+                                            // INFRA-PREBUILD-1 A 部：策略開倉 fill。
+                                            exit_source: None,
                                         });
                                     }
 
@@ -767,6 +770,9 @@ impl TickPipeline {
                                 },
                                 entry_context_id: String::new(),
                                 engine_mode: em.to_string(),
+                                // INFRA-PREBUILD-1 Part A: PostOnly maker fill (open).
+                                // INFRA-PREBUILD-1 A 部：PostOnly maker 成交（開倉）。
+                                exit_source: None,
                             });
                         }
                     }
