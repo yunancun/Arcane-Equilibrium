@@ -59,7 +59,6 @@ MODULE_NOTE (English):
 from __future__ import annotations
 
 import logging
-import time
 from typing import Any, List, Optional
 
 logger = logging.getLogger(__name__)
@@ -156,24 +155,22 @@ def call_ollama_generate(
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# Timed call helper / 帶計時的調用輔助
+# Removed: call_ollama_timed (E5-P1-4-FUP, 2026-04-23)
+# 已刪除：call_ollama_timed（E5-P1-4-FUP，2026-04-23）
 # ═══════════════════════════════════════════════════════════════════════════════
-
-def call_ollama_timed(
-    fn: Any,
-    *args: Any,
-    **kwargs: Any,
-) -> tuple[Any, float]:
-    """
-    Invoke `fn(*args, **kwargs)` and return (response, latency_ms).
-    調用 fn(*args, **kwargs)，返回 (response, latency_ms)。
-
-    Convenience for agents that need duration_ms for cost_tracker.record_call().
-    Exceptions propagate — caller owns fallback behavior.
-    供需要 duration_ms 傳給 cost_tracker.record_call() 的 agent 使用。
-    異常原樣拋出，調用方擁有回退邏輯。
-    """
-    start = time.time()
-    resp = fn(*args, **kwargs)
-    latency_ms = (time.time() - start) * 1000.0
-    return resp, latency_ms
+# Rationale / 刪除理由：
+#   - Only theoretical call site was StrategistAgent._ai_evaluate, which already
+#     uses inline time.time() spanning prompt-build + LLM call (intentional scope).
+#     唯一理論接線點 StrategistAgent._ai_evaluate 使用 inline time.time()
+#     包覆 prompt 構建 + LLM 調用（有意的計時範圍）。
+#   - Swapping to this helper would exclude _build_prompt_context from the
+#     measured window, silently shrinking cost_tracker duration_ms — violates
+#     module "strict zero-behavior-change" contract.
+#     改用此 helper 會把 _build_prompt_context 排除在計時窗外，靜默縮減
+#     cost_tracker duration_ms — 違反本模組「strict zero-behavior-change」契約。
+#   - Analyst/Guardian do not time their LLM calls, so there is no broader
+#     pattern to unify.
+#     Analyst / Guardian 未計時其 LLM 調用，無跨 agent 統一模式需求。
+#   - Dead-on-arrival since 2026-04-18; deleted rather than kept as unused debt.
+#     2026-04-18 寫出後 dead-on-arrival；刪除而非作為未用技術債保留。
+# ═══════════════════════════════════════════════════════════════════════════════
