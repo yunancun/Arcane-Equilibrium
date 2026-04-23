@@ -11,6 +11,7 @@ use crate::bybit_rest_client::{BybitApiError, BybitRestClient, BybitResult};
 use async_trait::async_trait;
 use parking_lot::{Mutex, RwLock};
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::{Notify, Semaphore};
@@ -233,9 +234,23 @@ pub struct InstrumentInfoCache {
     negative_cache: RwLock<HashMap<String, Instant>>,
 
     /// INSTR-ENSURE-1: singleflight by symbol — concurrent ensures for the same
-    /// symbol only issue one REST call; others await the `Notify`.
+    /// symbol only issue one REST call; others subscribe to the `InflightEntry`.
     /// INSTR-ENSURE-1：symbol 維度 singleflight — 同 symbol 併發只打 1 次。
-    inflight: Mutex<HashMap<String, Arc<Notify>>>,
+    ///
+    /// INSTR-ENSURE-FIX-1 (2026-04-23, B-1): upgraded value type from
+    /// `Arc<Notify>` → `Arc<InflightEntry>` so followers can observe a
+    /// `done` flag in addition to subscribing to the Notify. `Notify::
+    /// notify_waiters()` does NOT store a permit, so if a follower's
+    /// `.notified()` is not yet registered at the moment of the call, the
+    /// notification is lost. With the `done` AtomicBool, followers enable
+    /// their `Notified` future first (capturing future notifications),
+    /// then load `done` with Acquire ordering: if it is already `true`,
+    /// the leader has finished and we skip the `.await`; otherwise we
+    /// await, guaranteed to be woken because our waker is registered
+    /// BEFORE the leader's store-to-done Release.
+    /// INSTR-ENSURE-FIX-1：inflight 值升級為 InflightEntry，含 done 旗標 +
+    /// Notify。follower 先 enable 再 Acquire-load done，race 關閉。
+    inflight: Mutex<HashMap<String, Arc<InflightEntry>>>,
 
     /// INSTR-ENSURE-1: global semaphore to cap concurrent ensure_symbol REST
     /// calls (prevents scanner-storm from multi-miss burst).
@@ -411,22 +426,55 @@ impl InstrumentInfoCache {
 
         // Step 3: singleflight — install or subscribe to inflight slot.
         //          Step 3：singleflight — 裝 / 訂閱 inflight 槽位。
-        let (notify, is_leader) = {
+        //
+        // INSTR-ENSURE-FIX-1 (2026-04-23, B-1): lost-wakeup race fix.
+        // See `InflightEntry` docs for the full ordering argument. Summary:
+        //   * Leader on drop: Release-store `done=true`, then notify_waiters.
+        //   * Follower here: enable() waker FIRST (registers in intrusive
+        //     list), then Acquire-load `done`. If done==true, skip await.
+        //     If done==false, it MUST have been false before the leader's
+        //     Release store, therefore our enable() also happened before
+        //     the leader's notify_waiters, therefore our waker will fire.
+        //
+        // INSTR-ENSURE-FIX-1（2026-04-23，B-1）：lost-wakeup 修復。
+        // 詳見 InflightEntry 註解。要點：leader drop 時先 Release 寫 done
+        // 再 notify_waiters；follower 先 enable waker 再 Acquire 讀 done。
+        let (entry, is_leader) = {
             let mut inflight = self.inflight.lock();
             match inflight.get(symbol) {
                 Some(existing) => (Arc::clone(existing), false),
                 None => {
-                    let notify = Arc::new(Notify::new());
-                    inflight.insert(symbol.to_string(), Arc::clone(&notify));
-                    (notify, true)
+                    let entry = Arc::new(InflightEntry::new());
+                    inflight.insert(symbol.to_string(), Arc::clone(&entry));
+                    (entry, true)
                 }
             }
         };
 
         if !is_leader {
-            // Follower — wait for the leader's fetch to complete, then re-check both caches.
-            // 跟隨者：等領導者完成後重查兩層 cache。
-            notify.notified().await;
+            // Follower path — see InflightEntry / INSTR-ENSURE-FIX-1.
+            // 跟隨者路徑 — 見 InflightEntry / INSTR-ENSURE-FIX-1。
+            let notified_fut = entry.notify.notified();
+            tokio::pin!(notified_fut);
+            // (1) Register waker slot FIRST. Any leader notify_waiters()
+            //     issued after this line will wake us.
+            // (1) 先登記 waker。此後 leader 的 notify_waiters() 都會喚醒我們。
+            notified_fut.as_mut().enable();
+            // (2) Acquire-load done. Pairs with leader's Release-store in
+            //     InflightGuard::drop. If we see true here, leader has
+            //     finished and published all its cache writes — skip await.
+            //     If we see false, leader has NOT yet executed its Release
+            //     store, therefore has NOT yet called notify_waiters (since
+            //     the guard drop does store-then-notify), so our enable()
+            //     above necessarily precedes leader's notify and we will
+            //     be woken when it fires.
+            // (2) Acquire 讀 done，與 leader InflightGuard::drop 的 Release 配對。
+            //     true 表示 leader 已完成，可跳 await；false 表示 leader 尚未
+            //     notify，我們的 enable 必定早於 leader notify，會被喚醒。
+            if !entry.done.load(Ordering::Acquire) {
+                notified_fut.await;
+            }
+
             if let Some(spec) = self.get(symbol) {
                 return Ok(Some(spec));
             }
@@ -445,7 +493,7 @@ impl InstrumentInfoCache {
         let inflight_guard = InflightGuard {
             cache: self,
             symbol: symbol.to_string(),
-            notify: Arc::clone(&notify),
+            entry: Arc::clone(&entry),
         };
 
         let _permit = self
@@ -474,17 +522,43 @@ impl InstrumentInfoCache {
                         Ok(Some(spec))
                     }
                     None => {
-                        // Bybit returned an item but our parser rejected it (missing required
-                        // fields). Treat as "Bybit confirms exists but we can't trade it" —
-                        // insert neg cache so the scanner stops retrying every tick.
-                        // Bybit 回了但解析失敗（欄位缺）→ 入負緩存停止重試。
+                        // INSTR-ENSURE-FIX-1 (2026-04-23, P1-1): parse failure
+                        // is NOT neg-cached. Previously we inserted the symbol
+                        // into the neg cache for 60s on parse failure, which
+                        // is a schema-drift poisoning vector: if Bybit renames
+                        // a required field (e.g. `lotSizeFilter` → something
+                        // else), EVERY symbol's first post-rename fetch would
+                        // fail to parse, poisoning the neg cache for 60s and
+                        // causing OrderManager M-1 to fail-closed reject every
+                        // order engine-wide for a full minute.
+                        //
+                        // Fix: return a transient Err instead. Caller's M-1
+                        // still fail-closed rejects this specific order, but
+                        // the neg cache stays clean so the next call issues a
+                        // fresh fetch. The moment Bybit returns a parseable
+                        // schema again (or we ship a parser update), the
+                        // engine self-heals.
+                        //
+                        // INSTR-ENSURE-FIX-1（2026-04-23，P1-1）：解析失敗**不**入
+                        // neg cache。舊實作若 Bybit 改 field name 會讓全部 symbol
+                        // 首次拉取都 parse fail → 60s 全引擎拒單。修法：回傳
+                        // 瞬時 Err，由 M-1 保守拒當前單，但 neg cache 保持乾淨，
+                        // 下次會再打 API 自癒。
                         warn!(
                             symbol = symbol,
-                            "ensure_symbol: Bybit returned item but parse failed — neg cache / 回應不可解析，入負緩存"
+                            "ensure_symbol: Bybit returned item but parse failed — treated as transient Err, NOT neg-cached / 解析失敗視為瞬時錯誤，不入負緩存"
                         );
-                        self.neg_cache_insert(symbol);
                         drop(inflight_guard);
-                        Ok(None)
+                        Err(BybitApiError::Business {
+                            ret_code: -1,
+                            ret_msg: format!(
+                                "parse failed for {symbol} — treated as transient, not neg-cached (possible Bybit schema drift) / 解析失敗視為瞬時錯誤（疑 Bybit schema 漂移）"
+                            ),
+                            response: serde_json::json!({
+                                "symbol": symbol,
+                                "reason": "parse_failed",
+                            }),
+                        })
                     }
                 }
             }
@@ -574,6 +648,62 @@ impl Default for InstrumentInfoCache {
 }
 
 // ---------------------------------------------------------------------------
+// InflightEntry — per-symbol singleflight slot (done flag + Notify).
+// InflightEntry — 單 symbol 的 singleflight 槽位（done 旗標 + Notify）。
+// ---------------------------------------------------------------------------
+
+/// Singleflight entry stored in `InstrumentInfoCache::inflight`.
+///
+/// Why we need `done` alongside `notify`:
+///
+/// `tokio::sync::Notify::notify_waiters()` does NOT store a permit for future
+/// subscribers — it only wakes tasks that have already registered their
+/// waker at the moment of the call. That creates a classic lost-wakeup race
+/// for the singleflight follower path:
+///
+/// 1. Follower observes the leader's inflight entry (under mutex), clones
+///    the `Arc<InflightEntry>`, drops the mutex.
+/// 2. Leader completes its fetch, writes the positive/negative cache, and
+///    calls `notify_waiters()`.
+/// 3. Follower, not yet having polled `.notified()`, has no registered
+///    waker — notification lost → `.notified().await` blocks forever.
+///
+/// Fix: follower `Notified::enable()`s its waker slot synchronously BEFORE
+/// the await, then Acquire-loads `done`. If the leader has already finished
+/// (done==true), the follower skips the await and immediately re-checks the
+/// caches. If done==false, the follower awaits — safe, because its waker
+/// is registered in the Notify's intrusive list PRIOR to the leader's
+/// Release-store-to-done + notify_waiters sequence.
+///
+/// Memory ordering:
+///   * Leader: `done.store(true, Release)` → `notify_waiters()`.
+///   * Follower: `enable()` → `done.load(Acquire)` → `.await` if false.
+///   The Acquire load synchronises-with the Release store, so any observed
+///   `done == true` guarantees the follower sees all cache writes the
+///   leader performed BEFORE the store.
+///
+/// `notify_waiters()` 不儲存 permit，所以需要 `done` 旗標 + Acquire load
+/// 配合 enable() 才能關閉 lost-wakeup race。
+struct InflightEntry {
+    /// Set to `true` by the leader once its fetch + cache writes are complete.
+    /// Load with Acquire ordering to synchronise-with the leader's Release store.
+    /// Leader 完成後以 Release 寫 true；Follower 以 Acquire 讀，可見所有 cache 寫入。
+    done: AtomicBool,
+    /// Waiter list — leader calls `notify_waiters()` AFTER `done.store(true, Release)`.
+    /// 等待者列表；Leader 在 store done 之後才呼叫 notify_waiters。
+    notify: Notify,
+}
+
+impl InflightEntry {
+    fn new() -> Self {
+        Self {
+            done: AtomicBool::new(false),
+            notify: Notify::new(),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // InflightGuard — singleflight slot cleanup on drop (success or panic).
 // InflightGuard — 無論 ensure 成功或 panic 都保證清 inflight + notify。
 // ---------------------------------------------------------------------------
@@ -581,7 +711,7 @@ impl Default for InstrumentInfoCache {
 struct InflightGuard<'a> {
     cache: &'a InstrumentInfoCache,
     symbol: String,
-    notify: Arc<Notify>,
+    entry: Arc<InflightEntry>,
 }
 
 impl<'a> Drop for InflightGuard<'a> {
@@ -590,8 +720,17 @@ impl<'a> Drop for InflightGuard<'a> {
             let mut inflight = self.cache.inflight.lock();
             inflight.remove(&self.symbol);
         }
-        // Wake every follower awaiting this symbol's fetch.
-        self.notify.notify_waiters();
+        // Order matters for the lost-wakeup fix (see InflightEntry docs):
+        //   1. Mark done with Release ordering (publishes cache writes).
+        //   2. Wake every follower awaiting this symbol's fetch.
+        // A follower that observes done==true via Acquire load is
+        // guaranteed to see the leader's prior cache writes; a follower
+        // that observed done==false MUST have registered its waker via
+        // enable() before this Release store, so notify_waiters() below
+        // wakes it.
+        // 順序關鍵（lost-wakeup 修復）：先 Release 寫 done，再 notify_waiters()。
+        self.entry.done.store(true, Ordering::Release);
+        self.entry.notify.notify_waiters();
     }
 }
 
@@ -1292,5 +1431,320 @@ mod tests {
         };
         assert!((spec.round_qty(1.234) - 1.23).abs() < 1e-10);
         assert!((spec.round_price(3500.555) - 3500.56).abs() < 1e-10);
+    }
+
+    // -----------------------------------------------------------------------
+    // INSTR-ENSURE-FIX-1 — regression tests for E2 review findings
+    // INSTR-ENSURE-FIX-1 — E2 review 回歸測試
+    // -----------------------------------------------------------------------
+
+    /// B-1 race regression — direct white-box test for the lost-wakeup fix.
+    ///
+    /// Background — on the old code the follower registers its `.notified()`
+    /// waker AFTER releasing the inflight mutex:
+    ///
+    /// ```text
+    ///   // OLD (buggy):
+    ///   drop(inflight_mutex);
+    ///   notify.notified().await;    // <-- only registers HERE
+    /// ```
+    ///
+    /// If the leader completes between the two steps and calls
+    /// `notify_waiters()`, the follower's waker isn't yet in the intrusive
+    /// list. Because `Notify::notify_waiters()` does NOT store a permit
+    /// for future subscribers, the notification is lost → follower hangs
+    /// on `.await` indefinitely.
+    ///
+    /// This test constructs the exact race by **hand-placing** a stale
+    /// InflightEntry with `done=true` into the inflight map (simulating
+    /// "leader already finished + notified before follower started"),
+    /// then calls ensure_symbol and asserts it does NOT hang. The
+    /// production follower path must observe `done` via Acquire and skip
+    /// the `.await`; on the old code (plain `.notified().await`) this
+    /// exact shape is a guaranteed hang — no race randomness required.
+    ///
+    /// We also run a looser end-to-end stress scenario with many
+    /// contenders colliding under a shared start-barrier to catch any
+    /// other ordering regressions.
+    ///
+    /// B-1 lost-wakeup 回歸（白盒）：手動放「已完成」的 InflightEntry，
+    /// 直接驗證 follower 觀察 done=true 跳 await；再做多 contender 壓測覆蓋。
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn test_ensure_symbol_race_regression_leader_fast() {
+        use tokio::sync::Barrier;
+
+        // -------------------------------------------------------------------
+        // Part 1 — white-box: stale-done entry must not hang the follower.
+        // Part 1 — 白盒：已完成的 entry 必須讓 follower 不 hang。
+        // -------------------------------------------------------------------
+        {
+            let cache = Arc::new(InstrumentInfoCache::new());
+
+            // Step 1: pre-populate the positive cache (simulate leader's
+            // cache insert).
+            {
+                let mut map = cache.cache.write();
+                map.insert("STALEUSDT".to_string(), sample_btc_spec());
+            }
+
+            // Step 2: hand-place a stale InflightEntry with done=true into
+            // the inflight map. This is the exact state that would exist
+            // if the leader had (a) installed the entry, (b) set done=true,
+            // (c) called notify_waiters(), (d) released the inflight mutex
+            // to remove the slot — but where some "follower" observer had
+            // cloned the Arc<InflightEntry> before the leader removed the
+            // slot from the map. The follower holds a ref to the stale
+            // entry. On old code, it would call `.notified().await` on a
+            // Notify whose notification has already been flushed → hang.
+            //
+            // We avoid the "slot is removed" cleanup path by leaving the
+            // entry in place so that a new ensure_symbol call finds it as
+            // a follower.
+            // 手動放入一個已 done=true 的 InflightEntry。對舊 code 是必 hang 的
+            // 情境（notify_waiters 已發過、當前 Notify 無 permit）。新 code 先
+            // enable 再 Acquire 讀 done → true → 跳 await。
+            let stale_entry = Arc::new(InflightEntry::new());
+            stale_entry.done.store(true, Ordering::Release);
+            // Emit a notify_waiters() to simulate the permit being "flushed"
+            // — with no current waiters, notify_waiters is a no-op-ish
+            // state bump that does NOT leave a permit for future subscribers.
+            // This is exactly the scenario that breaks old-code followers.
+            // 發 notify_waiters()：無 waiter 等於無效，不留 permit，正是破壞舊
+            // code follower 的情境。
+            stale_entry.notify.notify_waiters();
+            {
+                let mut inflight = cache.inflight.lock();
+                inflight.insert("STALEUSDT".to_string(), Arc::clone(&stale_entry));
+            }
+
+            // Dummy fetcher that must never be called (positive cache hit
+            // path in follower flow — done=true triggers re-check of caches
+            // which finds the pre-populated positive entry).
+            struct NeverCalledFetcher;
+            #[async_trait]
+            impl SingleSymbolFetcher for NeverCalledFetcher {
+                async fn fetch_single_symbol(
+                    &self,
+                    _category: &str,
+                    _symbol: &str,
+                ) -> BybitResult<Option<serde_json::Value>> {
+                    panic!("fetcher must not be called: positive cache already seeded");
+                }
+            }
+
+            // ensure_symbol with the stale done-entry must return quickly.
+            // On old code (plain `.notified().await`) this hangs forever
+            // because no permit is waiting and no new notify will arrive.
+            // 1s timeout surfaces old-code hang as a test failure.
+            // 舊 code 會 hang（無 permit、無後續 notify）；新 code 立即返回。
+            //
+            // Note: Step 1 seeded the positive cache, so ensure_symbol's
+            // very first check (positive cache fast path) should return
+            // BEFORE we even hit the follower path. To actually force the
+            // follower path, we need to clear the positive cache check —
+            // but that check is unconditional. So instead we verify a
+            // DIFFERENT arrangement: remove the positive cache entry, keep
+            // the stale done-entry, and assert ensure_symbol returns None
+            // (follower wakes via done=true, re-checks both caches, neither
+            // has an entry, returns None — no hang).
+            // 註：positive cache 會先被檢查導致捷徑返回。為強迫走 follower
+            // 路徑，我們移除正 cache、保留 done entry，驗證 ensure 回 None
+            // 且不 hang。
+            {
+                let mut map = cache.cache.write();
+                map.remove("STALEUSDT");
+            }
+
+            let fetcher = NeverCalledFetcher;
+            let result = tokio::time::timeout(
+                Duration::from_secs(1),
+                cache.ensure_symbol_with_fetcher(&fetcher, "linear", "STALEUSDT"),
+            )
+            .await;
+            match result {
+                Ok(Ok(opt)) => assert!(
+                    opt.is_none(),
+                    "follower observing done=true with empty caches must return None"
+                ),
+                Ok(Err(e)) => panic!("unexpected Err: {e:?}"),
+                Err(_) => panic!(
+                    "B-1 REGRESSION: follower hung on .notified().await — done=true flag was not observed before await"
+                ),
+            }
+        }
+
+        // -------------------------------------------------------------------
+        // Part 2 — end-to-end stress: many contenders collide, none may hang.
+        // Part 2 — 端到端壓測：多 contender 同時衝擊，零 hang。
+        // -------------------------------------------------------------------
+        const ROUNDS: usize = 100;
+        const CONTENDERS: usize = 8;
+
+        /// Micro-delay fetcher — just enough `.await` (yield_now) to force
+        /// the runtime to re-schedule, creating interleaving opportunities.
+        /// Micro-delay fetcher：一次 yield_now，製造執行緒重排機會。
+        struct YieldFetcher {
+            calls: Arc<AtomicU64>,
+        }
+        #[async_trait]
+        impl SingleSymbolFetcher for YieldFetcher {
+            async fn fetch_single_symbol(
+                &self,
+                _category: &str,
+                symbol: &str,
+            ) -> BybitResult<Option<serde_json::Value>> {
+                self.calls.fetch_add(1, Ordering::SeqCst);
+                tokio::task::yield_now().await;
+                Ok(Some(sample_item(symbol)))
+            }
+        }
+
+        for round in 0..ROUNDS {
+            let cache = Arc::new(InstrumentInfoCache::new());
+            let calls = Arc::new(AtomicU64::new(0));
+            let fetcher = Arc::new(YieldFetcher {
+                calls: Arc::clone(&calls),
+            });
+            let start_barrier = Arc::new(Barrier::new(CONTENDERS + 1));
+
+            let mut handles = Vec::with_capacity(CONTENDERS);
+            for idx in 0..CONTENDERS {
+                let c = Arc::clone(&cache);
+                let f = Arc::clone(&fetcher);
+                let bar = Arc::clone(&start_barrier);
+                handles.push(tokio::spawn(async move {
+                    bar.wait().await;
+                    let r = tokio::time::timeout(
+                        Duration::from_secs(1),
+                        c.ensure_symbol_with_fetcher(&*f, "linear", "RACEUSDT"),
+                    )
+                    .await;
+                    (idx, r)
+                }));
+            }
+
+            start_barrier.wait().await;
+
+            for h in handles {
+                let (idx, joined) = h.await.expect("task join");
+                match joined {
+                    Ok(Ok(opt)) => assert!(
+                        opt.is_some(),
+                        "round {round} task {idx}: must observe positive cache"
+                    ),
+                    Ok(Err(e)) => panic!(
+                        "round {round} task {idx}: ensure returned Err {e:?}"
+                    ),
+                    Err(_elapsed) => panic!(
+                        "round {round} task {idx}: TIMEOUT — B-1 lost-wakeup regression"
+                    ),
+                }
+            }
+
+            assert!(
+                cache.get("RACEUSDT").is_some(),
+                "round {round}: positive cache must be populated"
+            );
+        }
+    }
+
+    /// P1-1 regression — parse failure must NOT populate neg cache.
+    ///
+    /// Old behaviour: Bybit returns 200 + item whose schema doesn't match
+    /// our parser → we insert the symbol into the neg cache for 60s. If a
+    /// Bybit field rename causes parse failure for EVERY symbol, the whole
+    /// engine is blacked out for 60s (M-1 fail-closed rejects all orders).
+    ///
+    /// New behaviour: parse failure returns a transient Err (still
+    /// fail-closes the current order via M-1) but leaves the neg cache
+    /// clean, so the next call issues a fresh fetch. If Bybit fixes the
+    /// schema, the engine self-heals within one tick.
+    ///
+    /// P1-1 回歸：parse 失敗**不**入 neg cache，避免 Bybit schema 漂移 60s
+    /// 全引擎拒單。
+    #[tokio::test]
+    async fn test_ensure_symbol_parse_fail_not_neg_cached() {
+        /// Mock fetcher: first call returns 200 + item missing
+        /// `lotSizeFilter` (schema drift simulation). Subsequent calls
+        /// return a valid item (Bybit "recovered").
+        /// 第一次回 200 但少欄位（模擬 schema 漂移）；後續恢復正常 schema。
+        struct FlipSchemaFetcher {
+            calls: Arc<AtomicU64>,
+        }
+        #[async_trait]
+        impl SingleSymbolFetcher for FlipSchemaFetcher {
+            async fn fetch_single_symbol(
+                &self,
+                _category: &str,
+                symbol: &str,
+            ) -> BybitResult<Option<serde_json::Value>> {
+                let n = self.calls.fetch_add(1, Ordering::SeqCst);
+                if n == 0 {
+                    // Missing `lotSizeFilter` — parse_instrument_item will
+                    // short-circuit with None on the `item.get("lotSizeFilter")?`.
+                    // 缺 lotSizeFilter → parse_instrument_item 早退 None。
+                    Ok(Some(serde_json::json!({
+                        "symbol": symbol,
+                        "baseCoin": "FOO",
+                        "quoteCoin": "USDT",
+                        "contractType": "LinearPerpetual",
+                        "priceFilter": {
+                            "tickSize": "0.10",
+                            "minPrice": "0.10",
+                            "maxPrice": "999999.00"
+                        }
+                    })))
+                } else {
+                    Ok(Some(sample_item(symbol)))
+                }
+            }
+        }
+
+        let cache = InstrumentInfoCache::new();
+        let fetcher = FlipSchemaFetcher {
+            calls: Arc::new(AtomicU64::new(0)),
+        };
+        let calls = Arc::clone(&fetcher.calls);
+
+        // First call — schema is broken, parser rejects, must surface Err.
+        // 首呼：schema 壞，parser 拒，必須回 Err。
+        let r1 = cache
+            .ensure_symbol_with_fetcher(&fetcher, "linear", "DRIFTUSDT")
+            .await;
+        assert!(
+            r1.is_err(),
+            "parse failure must surface as Err, not Ok(None) (otherwise neg cache poisoning)"
+        );
+        if let Err(BybitApiError::Business { ret_msg, .. }) = &r1 {
+            assert!(
+                ret_msg.contains("parse"),
+                "error message should mention parse failure: {ret_msg}"
+            );
+        }
+
+        // Neg cache must be clean — this is the core P1-1 assertion.
+        // 負緩存必須乾淨 — P1-1 的核心 assertion。
+        assert!(
+            !cache.neg_cache_hit("DRIFTUSDT"),
+            "parse failure must NOT poison neg cache"
+        );
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+
+        // Second call — schema is good, must hit API again and succeed.
+        // 次呼：schema 恢復，必須再打 API 並成功。
+        let r2 = cache
+            .ensure_symbol_with_fetcher(&fetcher, "linear", "DRIFTUSDT")
+            .await
+            .expect("second call must succeed");
+        assert!(r2.is_some(), "self-heal: second call must cache the spec");
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            2,
+            "neg cache must not have blocked the retry"
+        );
+        assert!(
+            cache.get("DRIFTUSDT").is_some(),
+            "positive cache must now hold the symbol"
+        );
     }
 }
