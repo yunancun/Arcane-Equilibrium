@@ -416,6 +416,25 @@ impl StrategistScheduler {
         // STRATEGIST-SCHED-CHANNEL-PAPER-ORPHAN-1（2026-04-23）：新增
         // `engine_mode = $2` filter 對齊 tune_target。原跨引擎 SQL 在
         // 「Demo 訓練、Live 受促升」架構下不合理 — 調 Demo 就該只學 Demo。
+        //
+        // FA-1 (2026-04-23 review follow-up): Live tune path NOT yet supported.
+        // `PipelineKind::Live.db_mode() == "live"` but real LiveDemo fills write
+        // `engine_mode = "live_demo"` (see memory/project_engine_mode_tag_live_demo.md
+        // + mode_state.rs::effective_engine_mode). A single-value `= $2` filter
+        // would silently miss 95%+ of Live-endpoint fills. Phase 5+
+        // STRATEGIST-TUNE-TARGET-CONFIG-1 must widen this to
+        // `engine_mode IN ('live','live_demo','live_testnet')` when enabling
+        // Live tune. Until then, fail-fast at first real use (Demo only).
+        // FA-1：Live tune 路徑尚未支援。db_mode() 回 "live" 但真 LiveDemo fills
+        // 的 engine_mode = "live_demo"；單值 filter 會靜默丟 95%+ 資料。
+        // Phase 5+ STRATEGIST-TUNE-TARGET-CONFIG-1 必須擴為 IN 多值。
+        debug_assert!(
+            matches!(self.tune_target, PipelineKind::Demo),
+            "STRATEGIST-SCHED gather_strategy_metrics: Live tune_target not yet \
+             supported — SQL filter must widen to multi-mode IN before enabling \
+             (see STRATEGIST-TUNE-TARGET-CONFIG-1 in TODO.md). Got tune_target={:?}",
+            self.tune_target,
+        );
         let tune_mode = self.tune_target.db_mode();
         let rows = sqlx::query_as::<_, PairMetricsRow>(
             r#"
@@ -1061,6 +1080,24 @@ mod tests {
         let (seen_strategy, seen_params) = handler.await.expect("handler panicked");
         assert_eq!(seen_strategy.as_deref(), Some("ma_crossover"));
         assert_eq!(seen_params.as_deref(), Some(r#"{"adx_threshold":22}"#));
+    }
+
+    // E4-4 audit follow-up (2026-04-23): 釘 `PipelineKind::Demo.db_mode()`
+    // 返回值恆為 `"demo"`（與 `trading.fills.engine_mode` 欄位的 snake_case
+    // 慣例對齊）。若將來 enum 變成 PascalCase / 改 serde rename 導致回 "Demo"，
+    // `gather_strategy_metrics` SQL `engine_mode = $2` 會永不命中任何列，
+    // scheduler 靜默空跑而無任何錯誤。1 行 regression test 可擋此無聲故障。
+    // E4-4 audit FUP：pin db_mode 返回值，防 snake_case 漂移致 SQL 空跑。
+    #[test]
+    fn test_pipeline_kind_db_mode_demo_is_lowercase_snake() {
+        assert_eq!(PipelineKind::Demo.db_mode(), "demo",
+            "SQL filter in gather_strategy_metrics depends on db_mode() \
+             returning lowercase 'demo' — see STRATEGIST-SCHED-CHANNEL-PAPER-ORPHAN-1");
+        // For completeness — these are the currently expected values for all
+        // three variants; if anyone changes db_mode() this test trips too.
+        // 完整性：另兩個 variant 也 pin。任何人動 db_mode() 都會紅。
+        assert_eq!(PipelineKind::Paper.db_mode(), "paper");
+        assert_eq!(PipelineKind::Live.db_mode(), "live");
     }
 
     #[tokio::test]
