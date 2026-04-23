@@ -31,7 +31,7 @@
       },
       "targets": [
         {
-          "rawSql": "SELECT DISTINCT ON (symbol, side) symbol, side, size, entry_price, mark_price, unrealized_pnl, leverage, position_value, category, ts FROM position_snapshots ORDER BY symbol, side, ts DESC;",
+          "rawSql": "SELECT DISTINCT ON (symbol, side) symbol, side, size, entry_price, mark_price, unrealized_pnl, leverage, position_value, category, engine_mode AS mode, ts FROM position_snapshots ORDER BY symbol, side, ts DESC;",
           "format": "table",
           "refId": "A"
         }
@@ -175,7 +175,7 @@
       },
       "targets": [
         {
-          "rawSql": "SELECT ts, order_id, symbol, side, order_type, qty, price, status, filled_qty, avg_price, fee, CASE WHEN is_paper THEN 'Paper' ELSE 'Live' END AS mode FROM order_events WHERE $__timeFilter(ts) ORDER BY ts DESC LIMIT 100;",
+          "rawSql": "SELECT o.ts, o.order_id, o.symbol, o.side, o.order_type, o.qty, o.price, o.status, f.filled_qty, f.avg_price, f.fee, f.realized_pnl, (COALESCE(f.realized_pnl, 0) - COALESCE(f.fee, 0)) AS net_pnl, o.engine_mode AS mode FROM order_events o LEFT JOIN LATERAL (SELECT SUM(qty) AS filled_qty, (CASE WHEN SUM(qty) > 0 THEN SUM(qty*price)/SUM(qty) ELSE NULL END) AS avg_price, SUM(fee) AS fee, SUM(realized_pnl) AS realized_pnl FROM trading.fills WHERE order_id = o.order_id) f ON true WHERE $__timeFilter(o.ts) ORDER BY o.ts DESC LIMIT 100;",
           "format": "table",
           "refId": "A"
         }
@@ -233,6 +233,64 @@
                     }
                   }
                 ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "realized_pnl"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "currencyUSD"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "fee"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "currencyUSD"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "net_pnl"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "currencyUSD"
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "red",
+                      "value": null
+                    },
+                    {
+                      "color": "green",
+                      "value": 0
+                    }
+                  ]
+                }
               }
             ]
           }

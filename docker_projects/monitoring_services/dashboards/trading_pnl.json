@@ -224,7 +224,7 @@
       },
       "targets": [
         {
-          "rawSql": "SELECT ts, symbol, side, exec_type, exec_qty, exec_price, fee, realized_pnl, CASE WHEN is_paper THEN 'Paper' ELSE 'Live' END AS mode FROM trade_executions WHERE $__timeFilter(ts) ORDER BY ts DESC LIMIT 100;",
+          "rawSql": "SELECT ts, symbol, side, exec_type, exec_qty, exec_price, fee, realized_pnl, (COALESCE(realized_pnl, 0) - COALESCE(fee, 0)) AS net_pnl, engine_mode AS mode FROM trade_executions WHERE $__timeFilter(ts) ORDER BY ts DESC LIMIT 100;",
           "format": "table",
           "refId": "A"
         }
@@ -264,6 +264,40 @@
               {
                 "id": "unit",
                 "value": "currencyUSD"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "net_pnl"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "currencyUSD"
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "red",
+                      "value": null
+                    },
+                    {
+                      "color": "green",
+                      "value": 0
+                    }
+                  ]
+                }
               }
             ]
           }
