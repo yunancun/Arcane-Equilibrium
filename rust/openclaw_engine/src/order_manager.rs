@@ -14,6 +14,8 @@
 use crate::bybit_rest_client::{BybitApiError, BybitRestClient, BybitResult};
 use crate::instrument_info::InstrumentInfoCache;
 use std::sync::Arc;
+#[cfg(test)]
+use std::sync::atomic::AtomicU64;
 use tracing::{debug, info};
 
 // ---------------------------------------------------------------------------
@@ -309,6 +311,20 @@ pub struct OrderManager {
     client: Arc<BybitRestClient>,
     /// Shared instrument info cache for validation / 共享合約信息緩存用於驗證
     instruments: Arc<InstrumentInfoCache>,
+
+    /// INSTR-WIRE-TEST-STRENGTHEN-1 (2026-04-23): test-only observability
+    /// counter. Incremented by `validate_and_round` when it takes the
+    /// `ensure_symbol` lazy-fetch branch (positive-cache miss). Tests
+    /// assert the counter directly to verify whether the fast path or
+    /// lazy-fetch path executed, replacing the old "completion implies
+    /// fast path" indirect inference.
+    ///
+    /// Zero runtime cost in release (gated by #[cfg(test)]).
+    ///
+    /// INSTR-WIRE-TEST-STRENGTHEN-1：#[cfg(test)] 計數器，專供 test 直接驗證
+    /// validate_and_round 是否進 ensure 分支。release build 不存在。
+    #[cfg(test)]
+    pub(crate) ensure_call_count: Arc<AtomicU64>,
 }
 
 impl OrderManager {
@@ -318,6 +334,8 @@ impl OrderManager {
         Self {
             client,
             instruments,
+            #[cfg(test)]
+            ensure_call_count: Arc::new(AtomicU64::new(0)),
         }
     }
 
@@ -651,6 +669,13 @@ impl OrderManager {
                 // 2s timeout + neg cache, so this does NOT extend the hot path
                 // unboundedly on persistent failure.
                 // INSTR-WIRE-1 按需拉取 — 2s 超時 + neg cache，熱路徑上界有界。
+                //
+                // INSTR-WIRE-TEST-STRENGTHEN-1: bump test-only counter so
+                // tests can directly assert whether this branch ran.
+                // INSTR-WIRE-TEST-STRENGTHEN-1：測試計數器 +1。
+                #[cfg(test)]
+                self.ensure_call_count
+                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 let category = req.category.as_str();
                 match self
                     .instruments
@@ -1362,10 +1387,16 @@ mod tests {
     #[tokio::test]
     async fn test_wire_cache_hit_no_ensure_call() {
         // Canonical fast path: BTCUSDT already in sample_cache → ensure must not fire.
-        // We can only indirectly verify this by confirming positive cache hit
-        // is served (the InstrumentInfoCache.ensure_symbol short-circuits on
-        // get() hit before any fetcher invocation). This test guards against
-        // a regression where validate_and_round calls ensure unconditionally.
+        //
+        // INSTR-WIRE-TEST-STRENGTHEN-1 (2026-04-23): upgraded from indirect
+        // inference ("completion implies fast path") to a direct assertion
+        // via the #[cfg(test)] `ensure_call_count` counter on OrderManager.
+        // The old test would have silently passed if a future refactor made
+        // validate_and_round call ensure unconditionally; this one fails.
+        //
+        // INSTR-WIRE-TEST-STRENGTHEN-1：從間接推斷升級為直接 counter 斷言。
+        use std::sync::atomic::Ordering::SeqCst;
+
         let cache = Arc::new(sample_cache());
         let client = Arc::new(
             BybitRestClient::new(
@@ -1394,13 +1425,29 @@ mod tests {
             tp_trigger_by: None,
             sl_trigger_by: None,
         };
+
+        // Baseline: counter starts at 0.
+        assert_eq!(
+            mgr.ensure_call_count.load(SeqCst),
+            0,
+            "new OrderManager must have ensure_call_count=0"
+        );
+
         let _ = mgr
             .validate_and_round(&req)
             .await
             .expect("cache hit must pass");
-        // If ensure had fired with the real (test) client, it would either
-        // NoCredentials-Err (bypassed here because we provided fake creds) or
-        // hang on network — positive completion proves the fast path took over.
+
+        // STRONG assert: the positive-cache fast path must bypass the ensure
+        // branch entirely. If a future change makes ensure_symbol run
+        // unconditionally (e.g. to force-refresh every request), this assert
+        // surfaces the regression immediately rather than silently passing.
+        // STRONG 斷言：正 cache hit 必跳過 ensure 分支；回歸立即可見。
+        assert_eq!(
+            mgr.ensure_call_count.load(SeqCst),
+            0,
+            "cache hit should NOT trigger ensure (INSTR-WIRE-TEST-STRENGTHEN-1)"
+        );
     }
 
     // -- Field helpers tests / 欄位輔助函數測試 --
