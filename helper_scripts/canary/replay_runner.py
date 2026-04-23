@@ -218,56 +218,6 @@ def run_python_shadow(
     return 0
 
 
-def _serialize_indicators(ind: Any) -> dict:
-    """Convert indicator result to flat dict for JSONL / 將指標結果轉換為扁平字典"""
-    if ind is None:
-        return {}
-    if isinstance(ind, dict):
-        return ind
-    # If it's an object with attributes / 如果是帶屬性的對象
-    result = {}
-    for attr in ("sma_20", "ema_12", "rsi_14", "volume_ratio"):
-        val = getattr(ind, attr, None)
-        if val is not None:
-            result[attr] = val
-    for compound in ("macd", "bollinger", "atr", "stochastic", "adx", "kama", "hurst", "ewma_vol", "donchian"):
-        sub = getattr(ind, compound, None)
-        if sub is not None:
-            if isinstance(sub, dict):
-                result[compound] = sub
-            elif hasattr(sub, "__dict__"):
-                result[compound] = {k: v for k, v in sub.__dict__.items() if not k.startswith("_")}
-    return result
-
-
-def _serialize_signal_obj(s: Any) -> dict:
-    """Convert a single signal object to dict / 將單個信號對象轉換為字典"""
-    if isinstance(s, dict):
-        return s
-    if hasattr(s, "__dict__"):
-        return {k: v for k, v in s.__dict__.items() if not k.startswith("_")}
-    return {"value": str(s)}
-
-
-def _serialize_intent(intent: Any) -> dict:
-    """
-    Convert an OrderIntent to dict for JSONL canary record.
-    將 OrderIntent 轉換為字典供 JSONL 灰度記錄使用。
-    """
-    if isinstance(intent, dict):
-        return intent
-    if hasattr(intent, "to_dict"):
-        return intent.to_dict()
-    if hasattr(intent, "__dict__"):
-        return {k: v for k, v in intent.__dict__.items() if not k.startswith("_")}
-    return {"value": str(intent)}
-
-
-def _serialize_signals(signals: list) -> list[dict]:
-    """Convert signal objects to dicts for JSONL / 將信號對象轉換為字典"""
-    return [_serialize_signal_obj(s) for s in signals]
-
-
 # ═══════════════════════════════════════════════════════════════════════════════
 # Rust Engine Replay / Rust 引擎回放
 # ═══════════════════════════════════════════════════════════════════════════════
