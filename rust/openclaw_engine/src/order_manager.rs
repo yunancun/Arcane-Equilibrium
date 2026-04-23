@@ -1230,7 +1230,7 @@ mod tests {
 
     use crate::instrument_info::SingleSymbolFetcher;
     use async_trait::async_trait;
-    use std::sync::atomic::{AtomicU8, AtomicU64, Ordering};
+    use std::sync::atomic::{AtomicU64, AtomicU8, Ordering};
 
     struct WireMockFetcher {
         /// 0=Some(item), 1=None, 2=Err
@@ -1239,9 +1239,14 @@ mod tests {
     }
     impl WireMockFetcher {
         fn new(mode: u8) -> Self {
-            Self { mode: AtomicU8::new(mode), calls: AtomicU64::new(0) }
+            Self {
+                mode: AtomicU8::new(mode),
+                calls: AtomicU64::new(0),
+            }
         }
-        fn call_count(&self) -> u64 { self.calls.load(Ordering::SeqCst) }
+        fn call_count(&self) -> u64 {
+            self.calls.load(Ordering::SeqCst)
+        }
     }
     #[async_trait]
     impl SingleSymbolFetcher for WireMockFetcher {
@@ -1389,7 +1394,10 @@ mod tests {
             tp_trigger_by: None,
             sl_trigger_by: None,
         };
-        let _ = mgr.validate_and_round(&req).await.expect("cache hit must pass");
+        let _ = mgr
+            .validate_and_round(&req)
+            .await
+            .expect("cache hit must pass");
         // If ensure had fired with the real (test) client, it would either
         // NoCredentials-Err (bypassed here because we provided fake creds) or
         // hang on network — positive completion proves the fast path took over.
