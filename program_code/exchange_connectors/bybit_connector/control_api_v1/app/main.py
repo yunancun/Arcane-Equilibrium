@@ -210,6 +210,16 @@ app.include_router(edge_estimator_router)
 from .ml_routes import router as ml_router  # noqa: E402
 app.include_router(ml_router)
 
+# ── Strategist History Router / 策略師參數變更歷史路由 ──
+# STRATEGIST-HISTORY-OBSERVABILITY-1 backend — read-only view on
+# learning.strategist_applied_params (V019 + V020) plus 7d edge effect from
+# trading.fills. GUI lands in a follow-up PR; backend is safe to wire now
+# because the table already contains auto-tune rows from the Rust scheduler.
+# STRATEGIST-HISTORY-OBSERVABILITY-1 後端：讀 strategist_applied_params + 7d
+# edge effect；GUI 另開 PR；後端可即時接線（表已由 Rust scheduler 寫入）。
+from .strategist_history_routes import strategist_history_router  # noqa: E402
+app.include_router(strategist_history_router)
+
 # ── Startup Integrity Check / 啟動完整性驗證 ────────────────────────────────
 # Verify that non-optional critical dependencies were successfully injected at
 # module initialisation time.  H0_GATE is allowed to be None in degraded /
