@@ -381,7 +381,12 @@ git status && git log --oneline -5
 - **範圍（2026-04-24 擴展，吸收原 P1-12）**：同時覆蓋 `bb_breakout.rs` + `bb_reversion.rs`，兩者同為 BB 家族 AND-chain signal gating 過嚴，demo 產量嚴重不足。
 - **bb_breakout 根因**：`bb_breakout.rs:457-518` 入場 5 重 AND（squeeze → expansion → volume → Donchian → persistence）+ 時序要求過嚴；14d demo 0 fills。
 - **bb_reversion 根因**：BB squeeze + mean-reversion 兩個 AND 條件下 demo 14d **僅 8 signal → 12 intents → 5 fills（阻擋率 37.5% 來自 liquidity / timing，非 Guardian）**；signal 產量本身太低使樣本不足以做統計學習（P1-13 SAMPLE-FLOOR-GAP-1 的 bb_reversion 1 RT 數據反映此結構）。
-- **下一步**：(1) 閾值 offline backtest — bb_breakout（squeeze 0.025 / expansion 0.035 / volume 1.2）+ bb_reversion（squeeze 寬度 + reversion z-score / band 距離）(2) Donchian + confluence AND→OR/score (3) 考慮 aggressive/conservative 分拆 A/B
+- **下一步**：
+  - (1) ⬜ 閾值 offline backtest — bb_breakout（squeeze 0.025 / expansion 0.035 / volume 1.2）+ bb_reversion（squeeze 寬度 + reversion z-score / band 距離）。需建策略-level backtest harness（Rust `openclaw_core::backtest.rs` 目前是 stop-manager-level，不接策略）；~1-2d 或改走 Python 敏感度腳本 ~0.5d。
+  - (2) ✅ **2026-04-24 commit `0528d96`+`38a14ca`** Donchian AND→Score/Off 三模式 — `DonchianMode::{Hard, Score, Off}` enum；Hard 預設 bit-identical 基線；Score breach=+donchian_score_bonus（默認 0.15）/ miss=扣同量，由下游合流閘仲裁；Off 跳過 Donchian 完全；熱重載 + validate [0.0, 0.5] + 14 新 tests。
+  - (3) ✅ **2026-04-24 commit `0528d96`+`38a14ca`** aggressive/conservative 分拆 A/B — `BbBreakoutProfile::{Conservative, Balanced, Aggressive}` enum + `BbBreakoutParams::for_profile(profile)` helper；`Balanced == default()` 測試固化；Aggressive squeeze=0.035/expansion=0.040/vol=1.05/persist=30s 建議搭配 `DonchianMode::Score` 做 dormant-rescue 組合；全 3 variant 通過 validate。
+- **狀態**：(2)+(3) ✅ 完成（engine lib 1939→**1956 passed/0 failed**；baseline bit-identical 保留）。(1) 仍 pending — 實驗 (2)+(3) 組合參數需 offline backtest 量化；若 operator 想無 backtest 即試，可直接 IPC patch `donchian_mode='score' + for_profile(Aggressive)` demo observe ≥1w。
+- **Followup**：bb_reversion 尚未拆 sibling（`bb_reversion.rs` 單檔 1143 行）+ 未加 profile — (2)+(3) 類似改造可在 `bb_reversion` 落地但目前 scope 只做 bb_breakout，另列獨立條目或併入 E5-P2-4c 邊緣拆分。
 - **優先級**：P1 低 — 不緊急但影響 Phase 5 策略多樣性與 ML 樣本池。
 
 ### ✅ P1-12 · BB-REVERSION-BLOCKED-1 — **2026-04-23 反轉結案 · 2026-04-24 gap audit 收尾**
