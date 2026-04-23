@@ -92,6 +92,17 @@ def session():
     return Layer2Session()
 
 
+def _run(coro):
+    # Py 3.12：asyncio.get_event_loop() 在無 current loop 時 raise RuntimeError。
+    # 前序 test 可能關閉 loop，故每 call 自管 new loop + close，不污染 global state。
+    # Py 3.12: asyncio.get_event_loop() raises when no current loop exists.
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(coro)
+    finally:
+        loop.close()
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # Types Tests / 类型测试
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -379,14 +390,14 @@ class TestToolExecutor:
         return ToolExecutor()
 
     def test_unknown_tool(self, executor):
-        result = asyncio.get_event_loop().run_until_complete(
+        result = _run(
             executor.execute("nonexistent_tool", {})
         )
         parsed = json.loads(result)
         assert "error" in parsed
 
     def test_submit_recommendation(self, executor):
-        result = asyncio.get_event_loop().run_until_complete(
+        result = _run(
             executor.execute(TOOL_SUBMIT_RECOMMENDATION, {
                 "action": "buy",
                 "symbol": "BTCUSDT",
@@ -401,7 +412,7 @@ class TestToolExecutor:
         assert executor.recommendation.action == "buy"
 
     def test_record_insight(self, executor):
-        result = asyncio.get_event_loop().run_until_complete(
+        result = _run(
             executor.execute("record_insight", {
                 "category": "macro",
                 "title": "Test Insight",
@@ -413,42 +424,42 @@ class TestToolExecutor:
         assert len(executor.insights) == 1
 
     def test_get_account_state_no_engine(self, executor):
-        result = asyncio.get_event_loop().run_until_complete(
+        result = _run(
             executor.execute("get_account_state", {})
         )
         parsed = json.loads(result)
         assert "error" in parsed
 
     def test_get_market_state_no_files(self, executor):
-        result = asyncio.get_event_loop().run_until_complete(
+        result = _run(
             executor.execute("get_market_state", {"symbol": "BTCUSDT"})
         )
         parsed = json.loads(result)
         assert parsed["symbol"] == "BTCUSDT"
 
     def test_web_search_empty_query(self, executor):
-        result = asyncio.get_event_loop().run_until_complete(
+        result = _run(
             executor.execute("web_search", {"query": ""})
         )
         parsed = json.loads(result)
         assert "error" in parsed
 
     def test_fetch_url_empty(self, executor):
-        result = asyncio.get_event_loop().run_until_complete(
+        result = _run(
             executor.execute("fetch_url", {"url": ""})
         )
         parsed = json.loads(result)
         assert "error" in parsed
 
     def test_get_recent_decisions_no_dir(self, executor):
-        result = asyncio.get_event_loop().run_until_complete(
+        result = _run(
             executor.execute("get_recent_decisions", {"limit": 5})
         )
         parsed = json.loads(result)
         assert "decisions" in parsed or "error" in parsed
 
     def test_get_experience_no_state(self, executor):
-        result = asyncio.get_event_loop().run_until_complete(
+        result = _run(
             executor.execute("get_experience", {"category": "all"})
         )
         parsed = json.loads(result)
@@ -475,7 +486,7 @@ class TestSearchProviders:
     def test_search_with_degradation_all_unavailable(self):
         """When all providers are unavailable, should return error"""
         with patch("app.layer2_tools.SEARCH_PROVIDERS", {}):
-            response = asyncio.get_event_loop().run_until_complete(
+            response = _run(
                 search_with_degradation("test query", enabled_providers=["nonexistent"])
             )
             assert response.error is not None
@@ -508,7 +519,7 @@ class TestLayer2Engine:
             from app.layer2_engine import reset_anthropic_client
             reset_anthropic_client()
 
-            session = asyncio.get_event_loop().run_until_complete(
+            session = _run(
                 engine.run_session(trigger="manual", symbol="BTCUSDT")
             )
             assert session.state == SESSION_STATE_FAILED
@@ -522,7 +533,7 @@ class TestLayer2Engine:
         s = Layer2Session()
         tracker.record_claude_cost(s, 1000000, 500000, MODEL_OPUS)
 
-        session = asyncio.get_event_loop().run_until_complete(
+        session = _run(
             engine.run_session(trigger="manual")
         )
         assert session.state == SESSION_STATE_BUDGET_EXCEEDED
@@ -530,17 +541,22 @@ class TestLayer2Engine:
     def test_concurrent_session_blocked(self, engine_setup):
         """Second concurrent session should fail"""
         engine, _ = engine_setup
-        loop = asyncio.get_event_loop()
-        # Acquire the asyncio lock to simulate a running session (P1-NEW-7: asyncio.Lock)
-        loop.run_until_complete(engine._session_lock.acquire())
+        # Py 3.12：改 new_event_loop + close 外層 try/finally，內層 try/finally 保留 lock release。
+        # Py 3.12: wrap with new_event_loop+close (outer); keep lock release in inner try/finally.
+        loop = asyncio.new_event_loop()
         try:
-            session = loop.run_until_complete(
-                engine.run_session(trigger="manual")
-            )
-            assert session.state == SESSION_STATE_FAILED
-            assert "already running" in session.final_summary.lower()
+            # Acquire the asyncio lock to simulate a running session (P1-NEW-7: asyncio.Lock)
+            loop.run_until_complete(engine._session_lock.acquire())
+            try:
+                session = loop.run_until_complete(
+                    engine.run_session(trigger="manual")
+                )
+                assert session.state == SESSION_STATE_FAILED
+                assert "already running" in session.final_summary.lower()
+            finally:
+                engine._session_lock.release()
         finally:
-            engine._session_lock.release()
+            loop.close()
 
     def test_l1_triage_no_client(self, engine_setup):
         """L1 triage without API key should return not worth investigating"""
@@ -550,7 +566,7 @@ class TestLayer2Engine:
             from app.layer2_engine import reset_anthropic_client
             reset_anthropic_client()
 
-            result = asyncio.get_event_loop().run_until_complete(
+            result = _run(
                 engine.l1_triage()
             )
             assert result.get("worth_investigating") is False
@@ -567,7 +583,7 @@ class TestLayer2Engine:
         mock_client.messages.create.return_value = mock_response
         mock_client_fn.return_value = mock_client
 
-        result = asyncio.get_event_loop().run_until_complete(
+        result = _run(
             engine.l1_triage({"test": "context"})
         )
         assert result.get("worth_investigating") is True
@@ -590,7 +606,7 @@ class TestLayer2Engine:
         mock_client.messages.create.return_value = mock_response
         mock_client_fn.return_value = mock_client
 
-        session = asyncio.get_event_loop().run_until_complete(
+        session = _run(
             engine.run_session(trigger="manual", symbol="BTCUSDT")
         )
         assert session.state == SESSION_STATE_COMPLETED
@@ -633,7 +649,7 @@ class TestLayer2Engine:
         mock_client.messages.create.side_effect = [tool_response, end_response]
         mock_client_fn.return_value = mock_client
 
-        session = asyncio.get_event_loop().run_until_complete(
+        session = _run(
             engine.run_session(trigger="manual", symbol="BTCUSDT")
         )
         assert session.state == SESSION_STATE_COMPLETED
@@ -656,7 +672,7 @@ class TestLayer2Engine:
         mock_client_fn.return_value = mock_client
 
         session = Layer2Session()
-        result = asyncio.get_event_loop().run_until_complete(
+        result = _run(
             engine._model_upgrade_triage(session, '{"results": [{"title": "Fed rate hike"}]}', mock_client)
         )
         assert result is True
@@ -723,7 +739,7 @@ class TestLayer2Routes:
         tracker, _ = setup_routes
 
         mock_actor = MagicMock()
-        result = asyncio.get_event_loop().run_until_complete(
+        result = _run(
             get_cost_summary(actor=mock_actor)
         )
         assert result["action_result"] == "success"
@@ -733,7 +749,7 @@ class TestLayer2Routes:
     def test_get_pricing(self, setup_routes):
         from app.layer2_routes import get_pricing
         mock_actor = MagicMock()
-        result = asyncio.get_event_loop().run_until_complete(
+        result = _run(
             get_pricing(actor=mock_actor)
         )
         assert result["action_result"] == "success"
@@ -742,7 +758,7 @@ class TestLayer2Routes:
     def test_get_config(self, setup_routes):
         from app.layer2_routes import get_config
         mock_actor = MagicMock()
-        result = asyncio.get_event_loop().run_until_complete(
+        result = _run(
             get_config(actor=mock_actor)
         )
         assert result["action_result"] == "success"
@@ -751,7 +767,7 @@ class TestLayer2Routes:
     def test_get_sessions_empty(self, setup_routes):
         from app.layer2_routes import get_sessions
         mock_actor = MagicMock()
-        result = asyncio.get_event_loop().run_until_complete(
+        result = _run(
             get_sessions(limit=20, offset=0, actor=mock_actor)
         )
         assert result["data"]["sessions"] == []
@@ -759,7 +775,7 @@ class TestLayer2Routes:
     def test_get_adaptive_budget(self, setup_routes):
         from app.layer2_routes import get_adaptive_budget
         mock_actor = MagicMock()
-        result = asyncio.get_event_loop().run_until_complete(
+        result = _run(
             get_adaptive_budget(recalculate=False, actor=mock_actor)
         )
         assert result["action_result"] == "success"
@@ -768,7 +784,7 @@ class TestLayer2Routes:
     def test_get_adaptive_budget_recalculate(self, setup_routes):
         from app.layer2_routes import get_adaptive_budget
         mock_actor = MagicMock()
-        result = asyncio.get_event_loop().run_until_complete(
+        result = _run(
             get_adaptive_budget(recalculate=True, actor=mock_actor)
         )
         assert result["action_result"] == "success"
@@ -777,7 +793,7 @@ class TestLayer2Routes:
         from app.layer2_routes import update_config, ConfigUpdateRequest
         mock_actor = MagicMock()
         req = ConfigUpdateRequest()
-        result = asyncio.get_event_loop().run_until_complete(
+        result = _run(
             update_config(req=req, actor=mock_actor)
         )
         assert result["action_result"] == "blocked"
@@ -787,7 +803,7 @@ class TestLayer2Routes:
         tracker, _ = setup_routes
         mock_actor = MagicMock()
         req = ConfigUpdateRequest(daily_hard_cap_usd=20.0)
-        result = asyncio.get_event_loop().run_until_complete(
+        result = _run(
             update_config(req=req, actor=mock_actor)
         )
         assert result["action_result"] == "success"
@@ -797,7 +813,7 @@ class TestLayer2Routes:
         from app.layer2_routes import update_pricing, PricingUpdateRequest
         mock_actor = MagicMock()
         req = PricingUpdateRequest()
-        result = asyncio.get_event_loop().run_until_complete(
+        result = _run(
             update_pricing(req=req, actor=mock_actor)
         )
         assert result["action_result"] == "blocked"
@@ -808,7 +824,7 @@ class TestLayer2Routes:
         req = PricingUpdateRequest(
             models={"haiku": {"input_per_mtok": 1.0, "last_verified_date": "2026-03-28"}},
         )
-        result = asyncio.get_event_loop().run_until_complete(
+        result = _run(
             update_pricing(req=req, actor=mock_actor)
         )
         assert result["action_result"] == "success"
@@ -817,7 +833,7 @@ class TestLayer2Routes:
         from app.layer2_routes import get_session_detail
         mock_actor = MagicMock()
         with pytest.raises(Exception):  # HTTPException
-            asyncio.get_event_loop().run_until_complete(
+            _run(
                 get_session_detail(session_id="nonexistent", actor=mock_actor)
             )
 
@@ -833,7 +849,7 @@ class TestLayer2Routes:
         mock_actor = MagicMock()
         background = MagicMock()
         req = TriggerRequest(symbol="BTCUSDT")
-        result = asyncio.get_event_loop().run_until_complete(
+        result = _run(
             trigger_l2_session(req=req, background_tasks=background, actor=mock_actor)
         )
         assert result["action_result"] == "blocked"
