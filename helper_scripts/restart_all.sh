@@ -215,10 +215,21 @@ restart_api() {
     # 載入 IPC HMAC 密鑰（API 端 HMAC 驗證）
     local ipc_secret
     ipc_secret=$(cat "$SECRETS_ROOT/environment_files/ipc_secret.txt" 2>/dev/null || echo "")
+    # RESTART-ALL-UVICORN-LOG-1 (2026-04-23): redirect uvicorn stdout/stderr to
+    # $DATA_DIR/api.log with nohup, mirroring engine startup pattern (L200).
+    # Previously uvicorn had no redirect, so api.log stayed frozen at the
+    # 2026-04-19 PIPELINE-SLOT-1 Phase 1 restart — any API error / traceback
+    # was lost to the shell that launched restart_all.sh.
+    # RESTART-ALL-UVICORN-LOG-1：uvicorn 加 nohup + stdout/stderr 重定向到
+    # $DATA_DIR/api.log，與 engine 啟動模式（L200）對齊。原本 uvicorn 無
+    # redirect，api.log 自 2026-04-19 PIPELINE-SLOT-1 Phase 1 重啟後不再更新，
+    # 任何 API 錯誤 / traceback 隨啟動 shell 散失。
     OPENCLAW_DATABASE_URL="postgresql://trading_admin:${pg_pass}@127.0.0.1:${PG_PORT}/trading_ai" \
         OPENCLAW_IPC_SECRET="${ipc_secret}" \
-        "$API_VENV/bin/python3" "$API_VENV/bin/uvicorn" app.main:app \
-        --host 0.0.0.0 --port 8000 --workers "$WORKERS" &
+        nohup "$API_VENV/bin/python3" "$API_VENV/bin/uvicorn" app.main:app \
+        --host 0.0.0.0 --port 8000 --workers "$WORKERS" \
+        > "$DATA_DIR/api.log" 2>&1 &
+    echo "    PID: $!"
     cd - > /dev/null
 }
 
