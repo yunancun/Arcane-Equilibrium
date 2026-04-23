@@ -176,14 +176,14 @@ git status && git log --oneline -5
 - ✅ **v2 pure fn** 2026-04-21 commit `aee96b9`：`exit_features::physical_micro_profit_lock_v2` + `ExitConfig` 7 欄位 + `non_linear_giveback_fn`（linear decay + floor bound）+ 31 單測（Gate 1 Hold 語意對齊設計）
 - ✅ **v1 Gate 1 Lock→Hold hotfix A** 2026-04-21 commit `d0f0c21`：3 tests rename + assert 反轉；對齊設計意圖
 - ✅ **T4 runtime 接線** 2026-04-21 commit `e95c779`：替換 `tick_pipeline/on_tick.rs:1677` `|_| None` 為實際 closure；Priority 6 每 tick 評估；已在 20:44 CEST `--rebuild` 部署
-- [ ] **Combine Layer 骨架**（Track L 缺失時等同 P-only；目前 `exit_source=Physical` 路徑接線，ML 路徑為 None）
+- ✅ **Combine Layer 骨架**（INFRA-PREBUILD-1 Part A，2026-04-23 commits `6226b38`/`419bd34`/`83ece53`/`66b061f`/`74b678a`）— V021 migration（`trading.fills.exit_source` + `learning.decision_shadow_exits` hypertable）/ `shadow_exit_writer.rs` 全鏈接線 tasks→main→event_consumer→pipeline / `ExitConfig.shadow_enabled` flag（三 TOML，default false）/ `combine_layer::build_ml_inference_shadow` mock + `helpers::emit_shadow_exit_observation` / step_6 PHYS-LOCK path shadow-aware emit / `TradingMsg::Fill.exit_source` + trading_writer INSERT 寫入 / passive_wait_healthcheck [8] `check_shadow_exit_ratio` silent-dead guard。**Phase 1a 完全 dormant**（flag OFF → 0 emit、0 DB 行、fills.exit_source 除 PHYS-LOCK 外全 NULL）。operator Phase 2 啟動時 TOML/IPC flip `shadow_enabled=true` 即 live，無需 rebuild。engine lib **1905 passed**（baseline 1835 → 1905，+70）。
 - [ ] **counterfactual replay audit**（demo 7d tick-level，Mac 做不了，待 Linux sub-agent 或 Operator）→ 校準 v2 `ExitConfig` 3 個非線性 giveback 參數（base/slope/floor）
 - ✅ **`TRACK-P-V2-SWAP-1`** 2026-04-22 commit `306993e`：Priority 6 v1 linear → v2 non-linear + ExitConfig 熱重載（詳 Step 0 衍生項結案條目）
 - [ ] **E5**：v2 swap 後 24h 灰度驗 fee 無惡化才收緊閾值
 
-- [ ] Combine Layer 啟用 `ml_override_high=2.0`（不可達），只寫 `learning.decision_shadow_fills`
-- [ ] 每日對比 P vs L 一致性（target ≥60%）→ 校準 `ml_confirm_threshold / ml_override_high / ml_veto_low`
-- [ ] 每筆 `trading.fills` 寫入 `exit_source` 欄位（Physical / Hybrid-shadow / ML-shadow）
+- ⚠️ Combine Layer 啟用 `ml_override_high=2.0`（不可達）+ `learning.decision_shadow_exits` 寫入 — **骨架 ready（INFRA-PREBUILD-1 A）**，改寫為「operator 將 `risk_config_demo.toml [exit] shadow_enabled = true`（或 IPC patch_risk_config）即觸發」。flip 後以 `helper_scripts/db/passive_wait_healthcheck.py` [8] 觀察 24h 是否有 row。
+- [ ] 每日對比 P vs L 一致性（target ≥60%）→ 校準 `ml_confirm_threshold / ml_override_high / ml_veto_low`。shadow 啟用後用 `SELECT disagreed, COUNT(*) FROM learning.decision_shadow_exits GROUP BY 1` 比對。
+- ✅ 每筆 `trading.fills` 寫入 `exit_source` 欄位（INFRA-PREBUILD-1 A，commit `66b061f`）— Phase 1a PHYS-LOCK → `Physical`，其他 close + 所有 open → NULL；Phase 2 shadow 啟動後 `decision_shadow_exits` 記錄 Hybrid/ML/Disabled 分布，fills 表仍只記實際採用決策（Phase 3+ Track L live 才會出現非 Physical）。
 - [ ] **並行 P1-10** grid 過度交易 + ma_crossover R:R 不對稱（比 ML 重要 5 倍）
 
 **完成標準**：shadow 一致性 ≥60% + P1-10 fee 佔比 <50% + 不對稱倍數 ≤1.5×
