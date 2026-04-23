@@ -114,7 +114,7 @@ COMMENT ON INDEX trading.idx_fills_exit_source_non_physical IS
 --   Pure observation; never enters training label backfill.
 -- ============================================================
 CREATE TABLE IF NOT EXISTS learning.decision_shadow_exits (
-    shadow_exit_id        BIGSERIAL       PRIMARY KEY,
+    shadow_exit_id        BIGSERIAL,
     context_id            TEXT            NOT NULL,   -- FK → decision_features.context_id
     ts                    TIMESTAMPTZ     NOT NULL,   -- close fill 時間
     engine_mode           TEXT            NOT NULL
@@ -143,7 +143,15 @@ CREATE TABLE IF NOT EXISTS learning.decision_shadow_exits (
     -- Combine config snapshot（降級時 debug 用）
     ml_confirm_threshold  DOUBLE PRECISION,
     ml_override_high      DOUBLE PRECISION,
-    ml_veto_low           DOUBLE PRECISION
+    ml_veto_low           DOUBLE PRECISION,
+
+    -- Composite PK required by TimescaleDB create_hypertable: any unique index
+    -- must include the partition column (ts). shadow_exit_id BIGSERIAL still
+    -- guarantees global uniqueness on its own; (shadow_exit_id, ts) satisfies
+    -- the hypertable constraint without weakening identity.
+    -- TimescaleDB 要求：hypertable 上任何 unique index 必須含 partition 欄；
+    -- BIGSERIAL 本身全局唯一，複合 PK 加上 ts 兩者一致不衝突。
+    PRIMARY KEY (shadow_exit_id, ts)
 );
 
 DO $$ BEGIN
