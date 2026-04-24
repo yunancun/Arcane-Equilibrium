@@ -1,7 +1,37 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-04-22（TICK-PIPELINE-MOD-SPLIT-1 + Step 0 章節歸檔）
+> 最後更新：2026-04-24（P1-11 全工 + FIX-26-DEADLOCK-1）
+
+### P1-11 BB-BREAKOUT/REVERSION-DORMANT-1 全工 + 多輪 audit 收尾（2026-04-24 · commits `0528d96`/`38a14ca`/`148bd96`/`bcc5401`/`63957ad`/`3b483a3`/`c8a2a2c`/`69ea580` 等）
+
+**範圍**：P1-11 (2)+(3) Rust 落地 + (1) Phase 1 Python 信號級 sweep + 多輪 self-audit + QC/MIT/PM/PA/FA multi-role 並行 audit 收尾。
+
+**(2) DonchianMode enum** — Donchian AND→Score/Off 三模式（`DonchianMode::{Hard, Score, Off}`）；Hard 預設 bit-identical 基線；Score breach=+`donchian_score_bonus`(默認 0.15)/miss=扣同量；Off 跳過 Donchian；validate `[0.0, 0.5]` + 熱重載 + 14 unit tests。
+
+**(3) BbBreakoutProfile enum** — A/B preset variant（Conservative/Balanced/Aggressive）+ `BbBreakoutParams::for_profile()` helper；`Balanced == default()` 測試固化；3 variant 全通過 validate（注：種子值在 1m bandwidth 分佈下皆不可觸發，Phase 2 需 rescale）。
+
+**(1) Phase 1 Python sweep** — `helper_scripts/research/bb_breakout_threshold_sweep.py` 信號級閾值 sensitivity sweep（5 symbols × 14d × 64 combos pooled）；首版 commit `148bd96` 後經 first selfaudit 修 3 bug（F1 wording / F2 stats / B3 FIX-26 parity 錯）+ 多角色 audit 修 5 FAIL + 6 WARN（mod.rs:492 saturating_add 對稱 / Python ddof=1 + df-aware t_crit + Bonferroni / cluster-SE / leak-free Donchian shift(1) / +4 boundary tests / [12] healthcheck）。
+
+**F4 Rust bug FIX-26-DEADLOCK-1**（commit `bcc5401`）— self-audit 修 Python sweep 對齊 Rust FIX-26 語義時，發現 Rust `bb_breakout::on_tick` 中 `squeeze_detected_ms` 過期後**無清除路徑**（只有入場 mod.rs:636 設 None；on_external_close 明示 preserve；無其他 clear）。後果：若首次 squeeze 45min 窗口內無入場（任何 expansion/vol/%B/Donchian gate 失敗），該 symbol **永久 dormant**。是 bb_breakout 14d 0 fills 的**第一層真正根因**（threshold 不對是第二層）。修：is_none() guard 前加 expiry-based auto-clear；commit `63957ad` 同時補 line 492 entry path saturating_add 對稱；3 + 4 = 7 個 regression test（含 overflow / expiry=0 / exact-boundary / on_external_close interaction）。
+
+**Findings 最終判決**：
+- F1 1m scale mismatch CONFIRMED（squeeze_bw=0.03 在 1m BB bandwidth 100% 觸發；expansion_bw=0.04 永不達成；q=0.99 僅 0.014）
+- F2 「signals ≠ edge」方向觀察 PASS / 「top edge」claim FAIL（56 qualified combo 沒一個達 naive |t|>1.96）
+- **F3 RETRACT** — 原「Donchian breach 反向關聯 fwd30 -3.20 顯著」是 measurement bias artifact（`rolling(N).max()` 含 current bar → breach=「current bar 是 N-bar max」必然 mean-revert）；leak-free shift(1) Donchian 下 effect 消失（-0.45/+0.34）。`DonchianMode::Score` 方向現無證據判定錯。
+- F4 FIX-26-DEADLOCK-1 deterministic 邏輯 bug，已修 + 測試固化
+
+**Healthcheck [12] `bb_breakout_post_deadlock_fix`**（commit `c8a2a2c`）— §七「被動等待 TODO 必附 healthcheck」硬規則合規。bb_breakout 7d entries 數三態：0=FAIL（fix 沒生效或閾值還錯）/ 1-5=WARN / ≥6=PASS。
+
+**測試**：bb_breakout 模組 42 → 56 → 59 → **63 passed / 0 failed**；engine lib 1939 → **1980 passed / 0 failed**（+41）。Mac + Linux release 均驗。
+
+**部署**：所有 commits 已 push origin main。**待 operator 下次 `restart_all.sh --rebuild`** 部署 FIX-26-DEADLOCK-1；部署後 [12] healthcheck cron 6h 自動報 fill 復活。
+
+**Phase 2 backlog**（priority sorted in TODO §P1-11）：F3 leak-free 大樣本 / fee model / persistence+cooldown sim / profile rescale / timeframe assert / bb_reversion 同構改造。
+
+**報告**：`.claude_reports/20260424_024807_p1_11_qcmitpmpafa_audit_closeout.md` (audit 全細節)。
+
+---
 
 ### TICK-PIPELINE-MOD-SPLIT-1 — tick_pipeline/mod.rs 拆 3 檔進 §七 1200 硬上限（2026-04-22 · commit `3d67a99`）
 
