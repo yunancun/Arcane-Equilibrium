@@ -123,3 +123,62 @@ Wave 6 第一批（最大並行）：
 - 10 個主題（架構完整性、Path A/B 設計、Leverage 3+、架構債分類、依賴圖、TODO 重組、技術建議、CLAUDE 一致性、風險熱點、PA 最終判決）
 - ~3400 字、詳細文件指針與備查表
 - 簽核路由：PM → 下一輪 10-agent 審議
+
+---
+
+## 2026-04-24 PA TODO 完整提案盤點完成
+
+### 關鍵工作
+
+執行**完整的 PA 10 份歷史報告盤點 + 當前 TODO.md + FIX-PLAN 對比分析**，產出：
+
+**輸出**：`docs/CCAgentWorkSpace/PA/workspace/reports/2026-04-24--todo_complete_proposal.md`（333 行）
+
+### 核心發現
+
+1. **未入當前 TODO 的潛在遺漏項**：~5-8 條
+   - DI-UNIFY-01：governance_routes DI 模式統一（High/Mid 級）
+   - STARTUP-VERIFY-01：依賴完整性 fail-closed check（High 級）
+   - PIPELINE-TIMING-WINDOW-01：注入時間窗口防衛（Mid 級）
+   - COST-GATE-NEW-01：cost_gate.py 實裝（Mid 級）
+   - 5 個 RFC + 文檔 spec（Etc 級）
+
+2. **完整提案表**：~80 條 TODO items
+   - High（架構/安全/合規）：19 項
+   - Mid（技術債/可讀性）：28 項
+   - Low（文檔/QoL）：15 項
+   - Etc（RFC/規範）：10 項
+   - Backlog：~8 項
+
+3. **架構債分類**（PA 視角）
+   - 架構債：7 項（Path A/B、DI、ExecutorAgent toggle、risk_manager 拆分、MessageBus 路徑、startup check、timing window）
+   - 功能債：8 項（TruthRegistry 注入/持久化、BacktestEngine 數據、MessageBus 路徑、detail=str、FIX-26、PostOnly、auto-revoke）
+   - 參數債：5 項（scheduler、PostOnly、hard_cap、shadow_enabled、FUP-IPC）
+   - 文檔債：6 項（CLAUDE.md 同步、Guard retrofit、healthcheck、model canary playbook 等）
+
+4. **3 大 Leverage Points**（確認強化）
+   1. FUP-SHADOW-ENABLED-IPC（1d，Phase 2 無 rebuild）
+   2. ExecutorAgent ConfigStore + IPC toggle（3-4d，原則 #11 完整）
+   3. event_consumer fn 拆分（3-4d，8 檔 refactor 解阻）
+
+5. **當前 TODO.md 對比**
+   - ✅ Wave 1-4 + G1-G6 + P0/P1/P2/P3/P4 主軸已覆蓋
+   - ✅ healthcheck + 被動等待規則已納入
+   - 🆕 新增強調項：DI 統一、startup verify、文檔 RFC 清單明確化
+
+### 方法論
+
+PA 10 份報告盤點流程（可重複使用）：
+1. 逐份讀取歷史報告，提取架構發現 + 技術債 + 遺漏項
+2. 對比當前 TODO.md + FIX-PLAN，去重+分優先級
+3. 按「架構級 vs 功能級」、「High/Mid/Low/Etc」分類
+4. 提出新增遺漏項 + 強化 Leverage points + 關鍵決策點
+5. 輸出完整提案表（含工時、前置、並行）
+
+### 下次行動
+
+- 【提案交付】：本報告給 PM 審核 + 後續整合核實會
+- 【Memory 同步】：記錄新遺漏項 + 10 份報告盤點方法論
+- 【Wave 1 啟動】：G1-01~05 + G2-01~05 + G6-01~04 的實施時序確認
+
+---
