@@ -173,3 +173,91 @@
 - **此週關鍵動作**：edge_estimates 產能確認 + counterfactual replay 運行 + healthcheck 補登
 - **Live 時間保守估計**：若 counterfactual PASS，W24 末；若需重評，延至 W26
 
+
+## 2026-04-24 完整 TODO Audit 發現
+
+### 工作成果
+- **時間**：2026-04-24，PM 獨立 audit 15 份歷史報告 + 當前 TODO.md
+- **輸出**：`docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-24--todo_complete_proposal.md`（362 行）
+- **覆蓋度**：206+ 歷史 findings → 80+ 活躍 TODO（去重 91%）
+
+### 三大 Verified 發現（立即行動）
+
+1. **edge_estimator_scheduler 停滯 4 天 — G1-01 ROOT CAUSE**
+   - 現象：`settings/edge_estimates.json` 僅 1 cell（ORDIUSDT n=3，grand_mean=-45.73）vs CLAUDE.md 宣稱 162 cells
+   - mtime 2026-04-20 23:50，4 天無新數據
+   - 影響：P0-14 / EDGE-DIAG-1 / P1-7 C / P1-14 四個 TODO 的前提認知全誤差
+   - 解決：G1-01 當週第 1 項，工時 2h
+   - 監控：加入 healthcheck [13] daily cron（mtime + cell count 驗證）
+
+2. **PostOnly 配置反向 — G1-05 立即修**
+   - 現象：`strategy_params_{demo,live}.toml` 中 demo=false / live=true（反向！）
+   - 違反原則 #6（失敗默認收縮）
+   - 風險：若下線後遺忘改回，demo 環境實際跑 live 參數
+   - 修：G1-05 0.5d，改 demo=true / live=false
+   - 驗證：FA 已審查；config 驗證 test suite 補齊
+
+3. **ExecutorAgent _shadow_mode=True 硬編碼 — G3-02 Wave 2 重構**
+   - 位置：`executor_agent.py:482` + `strategy_wiring.py:467` 硬設 `ExecutorConfig(_shadow_mode=True)`
+   - 違反原則 #3（AI 輸出 ≠ 即時命令）
+   - 現況：5-Agent→Rust IPC 物理斷路（ExecutorAgent 只產 shadow intent log，不發 SubmitOrder IPC）
+   - 解決：G3-01/02/03（Wave 2），實裝 shadow→live toggle + ConfigStore IPC
+
+### 15 份歷史報告統計
+
+| 日期範圍 | 報告數 | 狀態分布 | 活躍 findings |
+|---------|--------|---------|-------------|
+| 2026-03-31（Wave 5/6） | 7 | 95% 完成 | 68 |
+| 2026-04-01~04-03（計劃） | 6 | 50% 進行 + 50% 推遲 | 72 |
+| 2026-04-24（audit） | 2 | 100% 簽核 | 45 (FIX-PLAN) + 18 (PM audit) |
+| **合計** | **15** | — | **206+** |
+
+### 當前 TODO.md 覆蓋度評估
+
+| 維度 | 評分 | 狀態 |
+|------|------|------|
+| **優先級分層** | 8.5/10 | P0/P1/P2/P3/P4 清晰，Wave 結構完整 |
+| **依賴關係** | 8/10 | G1→G3/G5 並行邏輯正確；critical path 清晰 |
+| **被動等待監控** | 7.5→9/10 | G6-01/02 補齊 healthcheck 全覆蓋 |
+| **4 大議題覆蓋** | 78→85/100 | AI-ML-多Agent 從 65→75（G3 重構） |
+| **整體可執行性** | 8.2/10 | 每條帶工時/前置/驗證；Wave 1 依賴 G1-02（3-4d critical path） |
+
+**遺漏項補強**：
+- ✅ 被動等待 healthcheck（G6-01/02）
+- ✅ 3 大 verified 發現（G1-01/05 + G3-02）
+- ✅ 架構合規 refactor（G5 + Rust 硬違反 8 檔）
+- ✅ AI 接線缺口（G3-06~09）
+
+### 決策記憶
+
+**Wave 1 critical path**（3-4d 序列，非並行）：
+```
+Day 1: G1-01 恢復 + G1-05 config 反向 + G2-05 rebuild 驗證
+       ‖ G1-04 PostOnly 基準線
+Day 2-4: G1-02 event_consumer 拆（1696→<1200）
+        → G1-03 Rust 8 檔 refactor 並行
+        → G6-01/02 healthcheck 補齊
+        → G6-03/04 規範遵守（SQL Guard / CLAUDE.md §三）
+```
+
+**G1-02 延期風險**：若拆分超過 4d，Wave 2 G3-G5 推遲 1-2d，live 最早日期 ~2026-05-30（vs 樂觀估計 5-23）
+
+**Phase 5 決策時間窗口**：
+- P0-2 21d clock 解鎖 → 2026-05-07（確定）
+- P0-3 決策會必須 3 日內 → 2026-05-10（hard deadline）
+- 決策結果驅動後續 Phase 5 + 策略框架（Branch A/B）
+
+### 與 PA 整合建議
+
+PA 收到本報告 + 其他 9 agent 報告後，執行：
+1. **去重矩陣**（e.g. edge_estimator 被 MIT/QC/PM 重複報）
+2. **優先級調和**（若意見不一致主持會）
+3. **前置依賴圖驗證**（有無環路）
+4. **Wave 時序驗證**（G1-02 實際工期決定後續 Wave）
+5. **高風險補充掃**（隱性風險，如 Bybit API 升版本預告）
+
+最終目標：新 TODO.md merge 入 main 之前，PA sign-off ✅
+
+---
+
+**最後更新**：2026-04-24 CEST · PM complete
