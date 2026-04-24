@@ -5,10 +5,10 @@
 lightgbm>=4.6.0          # Scorer model (LightGBM)
 optuna>=3.6.0            # Hyperparameter optimization (TPE)
 scikit-learn>=1.5.0      # Isotonic calibration, metrics, preprocessing
-onnx>=1.16.2             # Model export format
-onnxruntime>=1.18.0      # ONNX inference (Python side)
-onnxmltools>=1.12.0      # LightGBM → ONNX conversion (depends on skl2onnx)
-skl2onnx>=1.17.0         # sklearn → ONNX (transitive via onnxmltools; declared for reproducibility)
+onnx>=1.21.0             # Model export format
+onnxruntime>=1.20.0      # ONNX inference (Python side)
+onnxmltools>=1.13.0      # LightGBM → ONNX conversion (depends on skl2onnx)
+skl2onnx>=1.18.0         # sklearn → ONNX (transitive via onnxmltools; declared for reproducibility)
 shap>=0.45.0             # Feature importance / explainability
 duckdb>=1.1.0            # Parquet ETL (fast columnar queries)
 pyarrow>=17.0.0          # Parquet file I/O
