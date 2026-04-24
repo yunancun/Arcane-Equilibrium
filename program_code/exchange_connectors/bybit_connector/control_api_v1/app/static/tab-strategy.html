@@ -188,6 +188,14 @@
       </table>
     </div>
     <div id="sh-detail-box" style="margin-top:10px"></div>
+    <!-- Footer: cycle metrics 解釋 empty table / 週期指標解釋空表原因 -->
+    <div id="sh-cycle-footer" style="margin-top:12px;padding:8px 10px;background:var(--bg);border:1px solid #21262d;border-radius:6px;font-size:11px;color:var(--text-dim)">
+      <span style="font-weight:600;color:var(--text)">近 scheduler cycle 健康度 /  Recent cycle health:</span>
+      <span style="margin-left:6px">rejects <strong id="sh-cyc-rejects" style="color:var(--yellow)">--</strong></span>
+      <span style="margin-left:10px">applies <strong id="sh-cyc-applies" style="color:var(--green)">--</strong></span>
+      <span style="margin-left:10px" id="sh-cyc-last">last: --</span>
+      <div style="margin-top:4px;font-size:10px" id="sh-cyc-hint"></div>
+    </div>
   </div>
 </details>
 
@@ -743,10 +751,48 @@ async function showStratHistEffect(rowId) {
   ocSetHtml('sh-detail-box', html);
 }
 
+async function loadStrategistCycleMetrics() {
+  let d;
+  try { d = await ocApi('/api/v1/strategist/history/cycle_metrics'); } catch(e) { d = null; }
+  if (!d || !d.data) {
+    ocSetText('sh-cyc-rejects', '--');
+    ocSetText('sh-cyc-applies', '--');
+    ocSetText('sh-cyc-last', 'last: --');
+    ocSetHtml('sh-cyc-hint', '<span style="color:var(--red)">端點不可用（uvicorn 需 restart 帶入新 route）</span>');
+    return;
+  }
+  const r = d.data.rejects || 0;
+  const a = d.data.applies || 0;
+  ocSetText('sh-cyc-rejects', String(r));
+  ocSetText('sh-cyc-applies', String(a));
+  let lastStr = '';
+  if (d.data.last_apply && d.data.last_apply.ts) {
+    lastStr = 'last apply: ' + ocTimeShort(d.data.last_apply.ts);
+  } else if (d.data.last_reject && d.data.last_reject.ts) {
+    const lr = d.data.last_reject;
+    lastStr = 'last reject: ' + ocTimeShort(lr.ts)
+            + (lr.param ? ' · ' + lr.param + ' ' + lr.current + '→' + lr.proposed + ' (' + lr.delta_pct + ')' : '');
+  } else {
+    lastStr = 'last: (none in ' + ocEsc(d.data.scan_window || 'recent log') + ')';
+  }
+  ocSetText('sh-cyc-last', lastStr);
+  let hint = '';
+  if (d.data.degraded) {
+    hint = '<span style="color:var(--yellow)">log 檔不可讀（' + ocEsc(d.data.log_path || '?') + '），計數未必完整</span>';
+  } else if (a === 0 && r > 0) {
+    hint = '<span style="color:var(--yellow)">⚠ 所有 propose 被 ±30% cap 拒絕（LLM 產出超邊界）→ 表永遠空 ≠ GUI 壞</span>';
+  } else if (a === 0 && r === 0) {
+    hint = '近 ' + ocEsc(d.data.scan_window || '?') + ' 內無 strategist cycle 活動（scheduler 可能停滯或未啟動）';
+  } else {
+    hint = '掃描範圍：' + ocEsc(d.data.scan_window || '?') + ' · log ' + ocEsc(d.data.log_path || '?');
+  }
+  ocSetHtml('sh-cyc-hint', hint);
+}
+
 async function loadAll() {
   await Promise.allSettled([
     loadStrategies(), loadOrchestrator(), loadScanner(), loadDeployed(), loadIntents(),
-    loadStrategistSummary(), loadStrategistHistory()
+    loadStrategistSummary(), loadStrategistHistory(), loadStrategistCycleMetrics()
   ]);
 }
 

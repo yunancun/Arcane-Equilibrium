@@ -342,9 +342,9 @@ ssh trade-core "cd ~/BybitOpenClaw/srv && python3 helper_scripts/db/passive_wait
 | **QoL-2** | Demo AI cost 追蹤 | G3-08 | 🟡P2 | GUI 硬編碼 'N/A' |
 | **DUST-EVICTION GUI** | GUI 曝光 orphan_frozen | P1-8 觀察完 | 🟡P2 | 日報 |
 | **LEARNING-COCKPIT-NO-IPC** | Learning 8 端點走 Python state_store | G-7/G-10 後 | 🟡P2 | 設計債 |
-| **STRATEGIST-PERSIST-AUDIT-GAP-COUNTER-1** | Phase 5+ 硬依賴 | G3-02 | 🟡P2 | FA H2 |
-| **STRATEGIST-TUNE-TARGET-CONFIG-1** | 運行時可配置 | Phase 5+ | 🟡P2 | |
-| **STRATEGIST-HISTORY GUI** | ✅ 2026-04-24 完成 | — | ✅ | tab-strategy.html 折疊 sub-panel（summary KPI + 3 filter + list 50 行 + Diff/7d Effect 展開） |
+| **STRATEGIST-PERSIST-AUDIT-GAP-COUNTER-1** | 🔴 實證阻塞（2026-04-24） | G3-02 | 🟡P2→🔴P1 | **2026-04-24 GUI Live 後實證**：`learning.strategist_applied_params` 0 rows；engine log 近 15 cycle 100% propose 被 ±30% cap reject（cooldown_ms=60000 → propose 30000/150000/180000 = 50-200% delta）；root cause = Python `ai_service._handle_strategist` Ollama L1-9b LLM 不遵守 "Keep changes conservative (within ±30%)" prompt；Rust cap (safe-by-design) 永遠攔；`persist_applied_params` 從未 invoke。此 gap 讓 STRATEGIST-HISTORY GUI live 但永遠空（footer cycle_metrics 端點已暴露給 operator 區分「GUI 壞 vs scheduler 沒 apply」）。修復選項：(a) 硬 enforce LLM 輸出邊界（prompt 注入 clamp 表達式 "Your new value must be between 42000 and 78000"）· (b) 升 L2 Claude model · (c) Rust-side clamp 而非 reject（違背設計）。FA H2 原為 Phase 5 依賴，今升 P1。|
+| **STRATEGIST-TUNE-TARGET-CONFIG-1** | 運行時可配置 | Phase 5+ | 🟡P2 | 同上 root cause — MAX_PARAM_DELTA_PCT 硬寫 `strategist_scheduler/mod.rs:48 = 0.30`，若 LLM 暫難約束，可先放寬或 per-param 配置 |
+| **STRATEGIST-HISTORY GUI** | ✅ 2026-04-24 完成（含 cycle_metrics footer FUP） | — | ✅ | tab-strategy.html 折疊 sub-panel（summary KPI + 3 filter + list 50 行 + Diff/7d Effect 展開）+ 底部 `近 scheduler cycle 健康度` 指標（rejects / applies / last ts / 提示文案）· endpoint `/api/v1/strategist/history/cycle_metrics` engine log tail parse 提供 root cause 自助診斷 |
 
 ---
 
