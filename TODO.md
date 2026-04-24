@@ -6,7 +6,7 @@
 **簽核**：PM Approved FIX-PLAN v2 → [Sign-off](docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-24--FixPlan_v2_PMApproval.md)
 **基礎方案**：[FIX-PLAN v2](docs/CCAgentWorkSpace/PA/workspace/reports/2026-04-24--4.24TodoAudit_FixPlan_v2.md) · [10-Agent audit 索引](docs/audits/2026-04-24--todo_refactor_audit.md)
 
-**Engine**（採集 2026-04-24 23:41 CEST · rebuild + ssh verify）：engine PID **1376094**（23:41 start）· binary mtime 2026-04-24 23:41（含 G7-09 FIX-FEE-POSTONLY-1）· HEAD `872478a` · uvicorn PID **1376147**（4 workers 23:41 start）· Private WS demo auth success · 4 topics subscribed · outcome_backfiller 5min interval started · post-G7-09 fee column 將開始出現 2bps maker 列（觀察中）· crashloop #6/12h pattern 延續（10:18/12:53/20:35/23:10 crashes pre-rebuild），本次 rebuild 引入 G7-09 會改 fee 下游
+**Engine**（採集 2026-04-24 23:55 CEST · ssh verify 後**重大發現**）：engine PID **1382653**（23:52 start 由 `restart_all.sh` 重啟，binary 仍是 23:41 G7-09 build）· HEAD `0f59e7e` · engine process **alive**；`pipeline_snapshot.json` 45min 沒更新 = **news guardian halt** fired at 23:53 CEST（severity=0.85 headline_hash `8ce179191752ac22`），`news::guardian_impl.rs:84` 把共享 `session_halted` atomic 設 true 之後無自動 reset 路徑，tick pipeline 不寫 snapshot → watchdog `snapshot_age > 45s` **誤判 crash 觸發 auto-restart 循環** · **先前稱「crashloop #6/12h」實質是 news-halt false-positive**：10:18/12:53/20:35/23:10 四次 watchdog auto-restart 都是此 pattern，engine 本身沒崩潰 · **G6-FUP-NEWS-HALT-DEDUP** 新增（見下方 Wave 2 G6 欄）
 **測試基準（2026-04-24）**：engine lib **1995 / 0 fail**（baseline 1992 + G7-09 3 tests）· pytest 2996
 **21d demo 時鐘**：起算 2026-04-16 22:16 → 解鎖 2026-05-07
 
@@ -46,7 +46,7 @@
 
 **並行可派 sub-agent**：G3-02 實裝（需 E1+PA 鏈，主 session 啟動）· G5-02/G5-04 Python 拆（獨立軌道）· G7-01~04 量化並行
 
-**⚠️ Engine crashloop #6/12h pattern**：10:18/12:53/20:35/23:10 四次 auto-restart 成功，本次 23:41 rebuild 引入 G7-09 觀察穩定性；若 pattern 持續需開 G6 軌道 FUP RCA（不屬 Wave 2 範疇）
+**⚠️ Engine "crashloop" 解密（2026-04-24 23:55 CEST）**：不是 crash 是 news guardian halt 持久化 + watchdog false-positive。`guardian_impl.rs:84` store session_halted=true 後無自動 reset 路徑；同一個 headline_hash `8ce179191752ac22` 每分鐘被 news pipeline re-fire，engine 持續 halt，snapshot 不更新，watchdog `snapshot_age > 45s` 判 crash → auto-restart 新 engine → 同一 headline 又 halt → 死循環。**修復方向**（G6-FUP-NEWS-HALT-DEDUP 列入 Wave 2 G6，見下表）：(a) news pipeline dedup by headline_hash — 同一 headline 只 fire 一次 halt (b) halt TTL 或 stale-headline auto-clear (c) watchdog 改判「session_halted=true 時 snapshot 不更新是預期行為」 · **不影響 G7-09 部署**：binary 含 G7-09 代碼，halt 清除後就生效。
 
 ---
 
@@ -234,7 +234,11 @@ ssh trade-core "cd ~/BybitOpenClaw/srv && python3 helper_scripts/db/passive_wait
 | **G5-06** | 🟡P2 | 其他 5 檔（bybit_rest_client / order_manager / startup / resting_orders / risk_config） | 無 | E5+E1 / E2+E4 | 5-8d 全部 | all <1200 |
 | **G5-07** | ✅完成 | `event_consumer/tests.rs` 1298→拆至 tests/ 6 sibling：mod.rs 298（shared helpers + 8 util tests）· handlers_paper_cmd 371 · exit_config_ipc 214 · governor_override 160 · cross_engine 123 · reconciler 89 · submit_order 76；全 <1200；42 tests 逐字保留；Linux release 1992/0（baseline 不動）；0 production file touched | G1-02 | E5+E1 / E2+E4 | 完成 2026-04-24 | [G5-07 report](.claude_reports/20260424_233852_g5_07_tests_split.md)（commit `913b536`）|
 
-### G7 量化 / 統計方法論（新增，from QC）
+### G6-FUP Wave 2 延伸（news-halt / watchdog RCA）
+
+| ID | Tag | 項目 | 前置 | 負責修/驗 | 工時 | 完成標準 |
+|---|---|---|---|---|---|---|
+| **G6-FUP-NEWS-HALT-DEDUP-1** | 🔴P0 | news guardian halt dedup — **2026-04-24 23:55 CEST 發現**：`news::guardian_impl.rs:84` 把 `session_halted=true` 後無自動 reset 路徑；同一 headline_hash `8ce179191752ac22` 每 1min 被 news pipeline re-fire（dedup 失效 or cache 不過期），engine 持續 halted → snapshot 不更新 → watchdog `snapshot_age > 45s` 誤判 crash → auto-restart 死循環；前述「crashloop #6/12h」實為此 pattern。**範圍**：(a) `news::pipeline` 加 headline_hash dedup（最近 N 分鐘內已見過的 hash 不重送 Guardian） (b) `news::guardian_impl` 加 halt TTL 或收到 lower-severity news 後自動 clear (c) `passive_wait_healthcheck.py [0] engine_alive` 改判「session_halted=true 時 snapshot stale 是預期」 (d) 提供手動 unhalt API endpoint `/api/v1/news/guardian/clear_halt` · **阻塞**：blocks G1-04 fee 列累積 + G7-09 真實效果驗證（engine halt 時無新 fill）| 無 | E1+QA / E2 | 4-6h | engine 能持續跑 >1h 無 watchdog false-positive auto-restart |
 
 | ID | Tag | 項目 | 前置 | 負責修/驗 | 工時 | 完成標準 |
 |---|---|---|---|---|---|---|
