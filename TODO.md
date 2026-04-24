@@ -103,14 +103,14 @@ ssh trade-core "cd ~/BybitOpenClaw/srv && python3 helper_scripts/db/passive_wait
 
 ## ⏩ Wave 1（W17/18 · 4/24→5/08）— 基礎設施解凍【主體完成 — G1-02 E1 實裝待】
 
-**狀態（2026-04-24 8 sub-agent 並行派發 + operator merge 後）**：8/9 項完成（G1-02 PA 規劃完成，E1 實裝 4-6h 待）；**全 9 commit 已 ff-merge 到 main 並 push origin（HEAD `040a02a`）**。
+**狀態（2026-04-24 8 sub-agent 並行派發 + operator merge 後 + Mac CC G1-02 Step 1 接手後）**：8/9 項完成，G1-02 Step 1 完成（branch `g1-02-event-consumer-split` commit `0155c9a` Linux release test 1990 passed），Step 2+3 下 session；**前 9 commit 已 ff-merge 到 main + push origin（HEAD `040a02a`）**，Step 1 待 operator ff-merge。
 
 ### G1 Edge 危機根源修復
 
 | ID | Tag | 項目 | 前置 | 負責修/驗 | 工時 | 完成標準 |
 |---|---|---|---|---|---|---|
 | **G1-01** | ✅完成 | `edge_estimator_scheduler` 診斷 + 恢復 — operator commit `f32629c` (leader election) + `abc85c0` (graceful shutdown) 已修；2026-04-24 02:06 `--rebuild` 部署；現 cells **59** / mtime <30min | 無 | MIT+E4 / E2 | 完成 2026-04-24 | [G1-01 report](.claude_reports/20260424_122700_g1_01_scheduler_recovery.md) |
-| **G1-02** | 🟡規劃完 | `event_consumer/mod.rs` 1762 行拆（硬上限 1200）— **PA 規劃完成**，E1 實裝待 | 無 | E1+PA 同session / E2 | **4-6h** 實裝 | <1200 行 + test cov ≥95% + engine lib pass / [PA plan](docs/CCAgentWorkSpace/PA/workspace/reports/2026-04-24--g1_02_event_consumer_split_plan.md)（commit `7908164`）|
+| **G1-02** | 🟡Step 1/3 完成 | `event_consumer/mod.rs` 拆（硬上限 1200）— **Step 1 `pending_sweep` 抽出 + 7 tests 搬遷完成（mod.rs 1762→1677）；Step 2+3 待**（bootstrap ~680 LOC + loop_handlers ~650 LOC 抽出，3-5h 下 session）| 無 | E1+PA 同session / E2 | Step 1 已完成 2026-04-24 / Step 2+3 **3-5h** | <1200 行 + test cov ≥95% + engine lib pass / [PA plan](docs/CCAgentWorkSpace/PA/workspace/reports/2026-04-24--g1_02_event_consumer_split_plan.md) + [Step 1 report](.claude_reports/20260424_130953_g1_02_step1_pending_sweep_split.md)（branch `g1-02-event-consumer-split` commit `0155c9a`）|
 | **G1-03** | 🟠P1 | Rust 硬違反 7 檔 refactor（main/instrument/rest_client 等） | G1-02 | E5+E1 / E2+E4 | 2-3d | all rust files <1200 lines |
 | **G1-04** | 🟠P1 | fee drag / R:R 邊際驗證基線 | PostOnly demo | QC / FA | 1-2d | counterfactual baseline report |
 | **G1-05** | ✅完成 | PostOnly 配置驗證 — `use_maker_entry` 配置正確（demo/paper=true, live=false）；FA v1 誤判收回 | 無 | FA+E1 / E2 | 完成 2026-04-24 | [design intent doc](docs/references/2026-04-24--postonly_design_intent.md)（commit `0da10c0`）|
@@ -128,7 +128,7 @@ ssh trade-core "cd ~/BybitOpenClaw/srv && python3 helper_scripts/db/passive_wait
 ### Wave 1 完成標準（Go / No-Go）
 
 - [x] G1-01 scheduler n_cells ≥50（cells **59** / mtime <30min）— healthcheck [13] PASS 待連 3 日累積
-- [ ] G1-02 event_consumer <1200 行 + engine lib 1980+ pass — **PA 規劃完成**，E1 實裝 4-6h 待
+- [ ] G1-02 event_consumer <1200 行 + engine lib 1980+ pass — **Step 1 完成（mod.rs 1762→1677，Linux release test 1990 passed）**；Step 2 (bootstrap) + Step 3 (loop_handlers) 下 session
 - [x] G1-05 PostOnly design intent doc 存檔（修正 FA v1 誤判）— `docs/references/2026-04-24--postonly_design_intent.md`（2026-04-24）
 - [x] G6-01+02 所有被動等待項附 healthcheck — 5 缺陷修 + [Xb] FUP + [13-15] 新增；6h cron 待 operator 設
 - [x] G6-04 CLAUDE.md §三 drift 規則已登 `docs/lessons.md:30` + §七（2026-04-24）
@@ -156,7 +156,9 @@ ssh trade-core "cd ~/BybitOpenClaw/srv && python3 helper_scripts/db/passive_wait
 2. ~~ssh deploy~~ ✅ 已完成 — engine PID `1099327` / binary mtime 2026-04-24 12:52 / paper+demo alive / total_ticks 5000+ / cost_gate normal warmup（**G6-03 V019/V020 retrofit 撤回**因 sqlx checksum mismatch；engine 第一次 rebuild 啟動失敗 → revert `55ed449` → 第二次啟動成功）
 3. 設 6h cron `passive_wait_healthcheck.py`（CLAUDE.md §七 強制）
 4. （可選）清理 feature branch：`git branch -D g1-06-drawdown-auto-revoke && git push origin --delete g1-06-drawdown-auto-revoke fix/g6-01-healthcheck-5-defects`
-5. **下一 session**：(a) G1-02 E1 實裝（PA+E1 同 session 緊密，4-6h，按 [PA plan 3 步順序](docs/CCAgentWorkSpace/PA/workspace/reports/2026-04-24--g1_02_event_consumer_split_plan.md#3-拆分順序避免循環依賴-最小-review-surface)）(b) G6-03 重做為 V024 純新增 migration（避免 sqlx checksum trap）
+5. **下一 session**：(a) G1-02 Step 2+3 E1 實裝（3-5h；bootstrap 優先更機械，或按 PA plan 原序 loop_handlers→bootstrap；詳 [Step 1 report §4/§5](.claude_reports/20260424_130953_g1_02_step1_pending_sweep_split.md)）(b) G6-03 重做為 V024 純新增 migration（避免 sqlx checksum trap）
+
+6. ⚠️ **engine 停擺診斷（新發現 2026-04-24 13:00 UTC）**：Mac CC 接手 G1-02 時 ssh trade-core 實測 `pgrep openclaw_engine` = 0 process + `rust/target/release/openclaw_engine` 不存在（本 TODO §三 line 156 敘述的 PID `1099327` / binary 12:52 已過期）；watchdog 回 `engine_alive: false`（paper 2.6h / demo 2.5min / live 5d stale）。uvicorn 4 workers 仍 alive（PID `1095536`），所以 scheduler + healthcheck 繼續工作但 trading engine 不 tick。可能原因：(a) operator 手動 `cargo clean` 準備 rebuild (b) engine crash 未留 maintenance.flag (c) 別的 session 意外 kill。**Operator 確認並 `--rebuild` 恢復**（可同步帶入 G1-02 Step 1 + 先前 pending P1-11 FIX-26-DEADLOCK-1）
 
 ---
 
