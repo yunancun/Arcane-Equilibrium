@@ -351,7 +351,9 @@ def aggregate_combo(
             stats[f"fwd{h}_se"] = se
             stats[f"fwd{h}_tstat"] = mu / se if se and se > 1e-12 else float("nan")
 
-    stats["donchian_breach_frac"] = float(entries["donchian_breach"].mean())
+    # Also coerce here; mean of object-dtype bools returns NaN on pandas 3.
+    # 同樣需強制 bool：object dtype 下 mean() 於 pandas 3 會返 NaN。
+    stats["donchian_breach_frac"] = float(entries["donchian_breach"].astype(bool).mean())
     # Score-mode indicator: does Donchian breach actually correlate with better
     # outcomes? If the diff is ~0, the +bonus vs -bonus under Score mode is
     # just noise; if strongly positive, Score mode's bias is real.
@@ -362,8 +364,18 @@ def aggregate_combo(
     primary = horizons_bars[len(horizons_bars) // 2]  # middle horizon as primary
     col = f"fwd_{primary}"
     if col in entries:
-        br = entries[entries["donchian_breach"]][col].dropna()
-        mi = entries[~entries["donchian_breach"]][col].dropna()
+        # Coerce donchian_breach to real bool dtype. When the column arrives
+        # as object dtype (pandas fallback for list-of-tuples with numpy bool
+        # scalars), `~series` does Python `~bool` → int (~False = -1, ~True
+        # = -2). The resulting int Series, when used as a mask, is interpreted
+        # by pandas as POSITIONAL column indexing and raises
+        # "None of [Index([-1, ...])] are in the [columns]". Cast forces the
+        # bitwise-NOT to return a proper bool mask.
+        # 強制 bool dtype：object dtype 下 `~series` 會把 bool 轉成 int
+        # (~False=-1, ~True=-2)，mask 變成整數 column-name 查詢 → 神秘錯誤。
+        breach_mask = entries["donchian_breach"].astype(bool)
+        br = entries[breach_mask][col].dropna()
+        mi = entries[~breach_mask][col].dropna()
         stats["breach_n"] = float(len(br))
         stats["miss_n"] = float(len(mi))
         if len(br) > 1 and len(mi) > 1:
