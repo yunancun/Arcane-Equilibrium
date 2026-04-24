@@ -315,23 +315,21 @@ fn test_profile_serde_snake_case() {
 fn test_fix26_deadlock_expiry_clears_stale_squeeze() {
     let mut s = BbBreakout::new();
     s.min_persistence_ms = 0;
-    // squeeze_expiry_ms default is 2_700_000 (45 min). Use bar timestamps in ms
-    // so `saturating_add` doesn't saturate; well within u64 range.
-    // Bar 1 at ts=0 triggers squeeze registration.
-    // squeeze_expiry_ms 默認 2_700_000 ms (45min)；ts 用 ms 整數，saturating_add 安全。
+    // Default squeeze_bw=0.03, expansion_bw=0.04, squeeze_expiry_ms=2_700_000.
+    // Bar 1 at ts=0: bw=0.01 < 0.03 → register squeeze.
+    // 默認 squeeze_bw=0.03；bw=0.01 觸發 squeeze 記錄。
     let _ = s.on_tick(&ctx_p1_11(0.01, 0.5, 1.0, 0, 50_000.0, 50_500.0, 49_500.0));
     assert!(
         s.has_squeeze("BTC"),
         "after first squeeze bar, squeeze_detected_ms must be set"
     );
-    // Fast-forward past expiry (default 2_700_000 ms). Bandwidth stays ABOVE
-    // squeeze_bw so no new record would be made without auto-clear; and below
-    // expansion_bw so no entry fires. Before the fix, squeeze_detected_ms
-    // would stay stuck at ts=0 forever. After the fix, it's auto-cleared
-    // on the first post-expiry tick.
-    // 超過 expiry；bandwidth 保持在 squeeze_bw 之上（不會新記錄）也在 expansion_bw 之下
-    // （不會入場）；修正前 squeeze_detected_ms 永遠卡在 0，修正後這一 tick 就清。
-    let _ = s.on_tick(&ctx_p1_11(0.02, 0.5, 1.0, 2_800_000, 50_000.0, 50_500.0, 49_500.0));
+    // Fast-forward past expiry with bw=0.035 (between squeeze_bw 0.03 and
+    // expansion_bw 0.04): above squeeze threshold so NO new recording; below
+    // expansion so no entry. Before the fix: squeeze_detected_ms stuck at 0
+    // forever. After the fix: auto-cleared on this post-expiry tick.
+    // 超過 expiry + bw=0.035（squeeze 0.03 與 expansion 0.04 之間）：無新記錄亦無入場；
+    // 修前永遠卡 0，修後本 tick 即清。
+    let _ = s.on_tick(&ctx_p1_11(0.035, 0.5, 1.0, 2_800_000, 50_000.0, 50_500.0, 49_500.0));
     assert!(
         !s.has_squeeze("BTC"),
         "post-expiry tick must auto-clear stale squeeze_detected_ms (FIX-26-DEADLOCK-1)"
@@ -359,13 +357,14 @@ fn test_fix26_deadlock_active_squeeze_preserved() {
 fn test_fix26_deadlock_re_registration_after_clear() {
     let mut s = BbBreakout::new();
     s.min_persistence_ms = 0;
-    // Register at ts=0, expire at ts=2_800_000, then a fresh squeeze at
-    // ts=3_000_000 must be able to register (would have been blocked by
-    // pre-fix is_none() guard since stored_ts was stuck at 0).
-    // 首次 ts=0 登記；ts=2_800_000 過期後清除；ts=3_000_000 新 squeeze bar 必須能重登記
-    // （修前被 is_none() guard 擋住，永遠無法重登）。
+    // Register at ts=0, post-expiry non-squeeze tick at ts=2_800_000 clears,
+    // then a fresh squeeze at ts=3_000_000 must re-register. Pre-fix: blocked
+    // by is_none()=false forever.
+    // bw=0.035 on clear tick (above squeeze 0.03); bw=0.01 on re-register.
+    // 首登 ts=0；ts=2_800_000 bw=0.035 過期+非 squeeze tick 清除；ts=3_000_000 bw=0.01
+    // 新 squeeze 必須能重登記（修前被永久鎖住）。
     let _ = s.on_tick(&ctx_p1_11(0.01, 0.5, 1.0, 0, 50_000.0, 50_500.0, 49_500.0));
-    let _ = s.on_tick(&ctx_p1_11(0.02, 0.5, 1.0, 2_800_000, 50_000.0, 50_500.0, 49_500.0));
+    let _ = s.on_tick(&ctx_p1_11(0.035, 0.5, 1.0, 2_800_000, 50_000.0, 50_500.0, 49_500.0));
     assert!(!s.has_squeeze("BTC"), "cleared after expiry");
     let _ = s.on_tick(&ctx_p1_11(0.01, 0.5, 1.0, 3_000_000, 50_000.0, 50_500.0, 49_500.0));
     assert!(
