@@ -179,4 +179,13 @@ shadow_mode = true
 max_position_pct = 0.05
 per_symbol_position_cap = {}
 
+# G7-02 (2026-04-24) — Per-timeframe EWMA Vol lambda decay constants.
+# Paper mirrors live/demo with default_lambda = 0.97 (pre-G7-02 hardcoded value).
+# Per-timeframe overrides go in [ewma_vol.lambdas] for paper-only experiments
+# without polluting live/demo configs (3-env config independence rule).
+# G7-02：Paper 與 live/demo 對齊 0.97；per-tf overrides 走獨立路徑保 3-env 隔離。
+[ewma_vol]
+default_lambda = 0.97
+lambdas = {}
+
 [experimental.flags]

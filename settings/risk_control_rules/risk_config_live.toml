@@ -177,4 +177,14 @@ shadow_mode = true
 max_position_pct = 0.05
 per_symbol_position_cap = {}
 
+# G7-02 (2026-04-24) — Per-timeframe EWMA Vol lambda decay constants.
+# Live default `default_lambda = 0.97` mirrors the pre-G7-02 hardcoded value
+# so live runtime stays bit-identical until operators add per-tf overrides.
+# See risk_config_demo.toml for the full rationale; live keeps an empty
+# overrides table to enforce the conservative single-lambda default.
+# G7-02：Live 維持 G7-02 前單一 0.97 衰減；overrides 表保持空以維持保守預設。
+[ewma_vol]
+default_lambda = 0.97
+lambdas = {}
+
 [experimental.flags]

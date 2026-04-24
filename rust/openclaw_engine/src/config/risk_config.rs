@@ -132,6 +132,14 @@ pub struct RiskConfig {
     /// 預設 shadow_mode=true 保留現行為，Phase A 不改 risk 表面。
     #[serde(default)]
     pub executor: ExecutorConfig,
+    /// G7-02 (2026-04-24): Per-timeframe EWMA Vol lambda decay constants.
+    /// `default_lambda` defaults to `0.97` to preserve the pre-G7-02
+    /// hardcoded behavior; operators may add timeframe-keyed overrides
+    /// ("1m" / "5m" / "1h" / "4h" …). Hot-reloaded with the rest of
+    /// `RiskConfig` via `Arc<ArcSwap<RiskConfig>>`.
+    /// G7-02：逐 timeframe EWMA Vol lambda；預設 0.97 保留 G7-02 前行為。
+    #[serde(default)]
+    pub ewma_vol: EwmaVolConfig,
 }
 
 impl RiskConfig {
@@ -154,6 +162,7 @@ impl RiskConfig {
         self.dynamic_sizing.validate()?;
         self.kelly.validate()?;
         self.executor.validate()?;
+        self.ewma_vol.validate()?;
 
         // Cross-sub-struct invariant: partial_tp levels must not exceed take_profit_max_pct.
         // 跨 sub-struct 不變量：partial_tp 各層不得超過 take_profit_max_pct。
@@ -776,6 +785,97 @@ impl ExecutorConfig {
             }
         }
         Ok(())
+    }
+}
+
+// ---------------------------------------------------------------------------
+// EwmaVolConfig — Per-timeframe EWMA Vol lambda decay constants (G7-02)
+// 逐 timeframe EWMA Vol lambda 衰減常數 (G7-02)
+// ---------------------------------------------------------------------------
+
+/// G7-02 (2026-04-24): Operator-tunable EWMA Vol lambda overrides per
+/// timeframe. The pre-G7-02 hardcoded `0.97` was applied uniformly to every
+/// timeframe; operators now configure timeframe-specific decay so a 1m series
+/// can decay faster (e.g. 0.94) than a 4h series (e.g. 0.97 / 0.99).
+///
+/// `default_lambda` is the fallback when the requested timeframe has no
+/// per-timeframe override, so existing call sites stay bit-identical when the
+/// `lambdas` map is empty (the pre-G7-02 behavior).
+///
+/// `validate()` rejects any lambda outside the open interval `(0.0, 1.0)` —
+/// the same range `openclaw_core::indicators::ewma_vol` enforces internally,
+/// so an out-of-range value would silently make `EwmaVolResult` `None` for
+/// every tick. We fail fast at config-load time instead.
+///
+/// G7-02：逐 timeframe EWMA Vol lambda 覆寫。`default_lambda` 為缺失 fallback，
+/// `validate()` 強制 lambda 落於 `(0.0, 1.0)` 開區間。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EwmaVolConfig {
+    /// Fallback lambda when the requested timeframe has no per-tf override.
+    /// Default `0.97` mirrors the pre-G7-02 hardcoded value.
+    /// 缺失 timeframe 覆寫時的 fallback；預設 0.97 保留 G7-02 前行為。
+    #[serde(default = "default_ewma_vol_lambda")]
+    pub default_lambda: f64,
+    /// Per-timeframe lambda overrides keyed by timeframe string ("1m", "5m",
+    /// "1h", "4h", ...). Empty by default → all timeframes use
+    /// `default_lambda`. Operators add entries to tune specific timeframes.
+    /// 逐 timeframe lambda 覆寫；預設空表 → 全部走 `default_lambda`。
+    #[serde(default)]
+    pub lambdas: HashMap<String, f64>,
+}
+
+fn default_ewma_vol_lambda() -> f64 {
+    // 0.97 — RiskMetrics convention for sub-daily series, matches the
+    // pre-G7-02 hardcoded constant in `indicators::IndicatorEngine::compute_all`.
+    // 0.97 — RiskMetrics 慣例（次日級數列），與 G7-02 前的硬編碼常量對齊。
+    openclaw_core::indicators::DEFAULT_EWMA_VOL_LAMBDA
+}
+
+impl Default for EwmaVolConfig {
+    fn default() -> Self {
+        Self {
+            default_lambda: default_ewma_vol_lambda(),
+            lambdas: HashMap::new(),
+        }
+    }
+}
+
+impl EwmaVolConfig {
+    /// G7-02: Validate that `default_lambda` and every per-tf override sit
+    /// in the open interval `(0.0, 1.0)` — the EWMA recursion needs
+    /// `0 < lambda < 1` (lambda=0 collapses to last-tick variance, lambda=1
+    /// freezes the first-tick variance forever).
+    /// G7-02：驗證 `default_lambda` 與 per-tf 覆寫皆落於 (0.0, 1.0) 開區間。
+    pub fn validate(&self) -> Result<(), String> {
+        if !(0.0 < self.default_lambda && self.default_lambda < 1.0) {
+            return Err(format!(
+                "risk.ewma_vol.default_lambda ({}) must be in open interval (0.0, 1.0)",
+                self.default_lambda
+            ));
+        }
+        for (tf, lambda) in &self.lambdas {
+            if tf.is_empty() {
+                return Err("risk.ewma_vol.lambdas timeframe key must be non-empty".into());
+            }
+            if !(0.0 < *lambda && *lambda < 1.0) {
+                return Err(format!(
+                    "risk.ewma_vol.lambdas[{}] ({}) must be in open interval (0.0, 1.0)",
+                    tf, lambda
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    /// G7-02: Look up the configured lambda for a timeframe, falling back to
+    /// `default_lambda` when no per-tf override exists. Hot-path safe (single
+    /// HashMap lookup on the live snapshot).
+    /// G7-02：依 timeframe 查 lambda；缺失時退回 `default_lambda`。
+    pub fn lambda_for_timeframe(&self, tf: &str) -> f64 {
+        self.lambdas
+            .get(tf)
+            .copied()
+            .unwrap_or(self.default_lambda)
     }
 }
 

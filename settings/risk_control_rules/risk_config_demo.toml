@@ -183,3 +183,17 @@ mature_threshold = 200
 shadow_mode = true
 max_position_pct = 0.05
 per_symbol_position_cap = {}
+
+# G7-02 (2026-04-24) — Per-timeframe EWMA Vol lambda decay constants.
+# Drives openclaw_core::indicators::ewma_vol via
+# IndicatorEngine::compute_all_with_lambda. `default_lambda = 0.97` mirrors the
+# pre-G7-02 hardcoded RiskMetrics value; per-tf overrides go in `[ewma_vol.lambdas]`
+# and tune the decay rate of a specific timeframe (e.g. 1m/5m faster decay,
+# 1h/4h slower). Empty `lambdas = {}` keeps the runtime bit-identical to the
+# pre-G7-02 behavior. validate() rejects any lambda outside (0.0, 1.0).
+# G7-02：逐 timeframe EWMA Vol lambda 衰減常數。預設 0.97 保留 G7-02 前行為，
+# `lambdas = {}` 為空時所有 timeframe 走 default_lambda；validate() 強制
+# (0.0, 1.0) 開區間。
+[ewma_vol]
+default_lambda = 0.97
+lambdas = {}
