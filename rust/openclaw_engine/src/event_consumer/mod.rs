@@ -11,6 +11,7 @@ mod bootstrap;
 mod dispatch;
 mod governor_cooldown;
 pub mod handlers;
+mod loop_handlers;
 mod paper_state_restore;
 mod pending_sweep;
 mod setup;
@@ -23,7 +24,6 @@ use types::STATUS_INTERVAL_SECS;
 pub use types::{EventConsumerDeps, ExchangeEvent, PendingOrder, SYMBOLS};
 
 use crate::tick_pipeline::PipelineCommand;
-use std::collections::HashMap;
 use std::time::Instant;
 use tracing::{error, info, warn};
 
@@ -43,7 +43,7 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
         data_path: _data_path,
         kind_tag: _kind_tag,
         order_tx,
-        mut known_symbols,
+        known_symbols,
         cfg_snapshot,
         bootstrap_client,
         symbol_registry,
@@ -64,25 +64,18 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
         canary_handle,
     } = bootstrap::bootstrap_runtime(deps).await;
 
-    let mut last_status = Instant::now();
+    // G1-02 Step 2a (2026-04-24): 7 loop-internal mut fields bundled into
+    // `LoopState` so the select! arms can pass a single `&mut state` borrow
+    // instead of juggling 7 individual bindings. `MAX_SEEN_EXEC_IDS` is
+    // now `LoopState::MAX_SEEN_EXEC_IDS`.
+    // G1-02 Step 2a（2026-04-24）：7 個 loop-internal mut 欄位合併進
+    // `LoopState`，select! arm 可傳單一 `&mut state` 借用。
+    let mut state = loop_handlers::LoopState::new(known_symbols);
     let status_interval = std::time::Duration::from_secs(STATUS_INTERVAL_SECS);
     let start_time = Instant::now();
 
-    // EXT-1: Pending order tracking for exchange mode
-    // EXT-1：交易所模式的待處理訂單追蹤
-    let mut pending_orders: HashMap<String, PendingOrder> = HashMap::new();
-    // P0-1 fix: order_id → order_link_id mapping (populated from OrderUpdate, used in Fill matching)
-    let mut order_id_to_link: HashMap<String, String> = HashMap::new();
-    // P0-2 fix: exec_id dedup (prevent duplicate fill application on WS reconnect)
-    // FIX-33: HashSet for O(1) lookup + VecDeque for eviction ordering (was O(n) scan).
-    // P0-2 修復：exec_id 去重（防止 WS 重連時重複應用成交）
-    // FIX-33：HashSet O(1) 查找 + VecDeque 淘汰順序（原為 O(n) 線性掃描）。
-    let mut seen_exec_set: std::collections::HashSet<String> = std::collections::HashSet::new();
-    let mut seen_exec_order: std::collections::VecDeque<String> = std::collections::VecDeque::new();
-    const MAX_SEEN_EXEC_IDS: usize = 500;
     let mut exchange_event_rx = exchange_event_rx;
     let mut pending_reg_rx = pending_reg_rx_slot;
-    let mut last_pending_check = Instant::now();
     let pending_timeout = std::time::Duration::from_secs(5);
 
     // ── Main event loop / 主事件循環 ──
@@ -103,51 +96,18 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
         tokio::select! {
             _ = cancel.cancelled() => break,
 
-            // ── BLOCKER-2 D6: Cross-engine crash/CB event handler ──
-            // ── BLOCKER-2 D6：跨引擎崩潰/熔斷事件處理 ──
+            // ── BLOCKER-2 D6: Cross-engine crash/CB event handler (Arm A) ──
+            // ── BLOCKER-2 D6：跨引擎崩潰/熔斷事件處理（Arm A）──
             engine_evt = async {
                 if let Some(ref mut rx) = cross_engine_rx { rx.recv().await } else { std::future::pending().await }
             } => {
-                match engine_evt {
-                    Ok(crate::tick_pipeline::EngineEvent::Crashed(crashed_kind)) => {
-                        warn!(
-                            this = %pipeline_kind, crashed = %crashed_kind,
-                            "BLOCKER-2: peer pipeline crashed — escalating to Cautious (60s) \
-                             / 對等管線崩潰 — 升級至 Cautious（60s）"
-                        );
-                        // Cascade: escalate this pipeline's risk to Cautious.
-                        // 級聯：將本管線風控升級至 Cautious。
-                        let duration_s = if crashed_kind == crate::tick_pipeline::PipelineKind::Paper { 60 } else { 120 };
-                        let _ = pipeline.governance.risk.reconciler_escalate_to(
-                            openclaw_core::sm::risk_gov::RiskLevel::Cautious,
-                            &format!("cross_engine_cascade: {} crashed, hold {}s", crashed_kind, duration_s),
-                        );
-                    }
-                    Ok(crate::tick_pipeline::EngineEvent::CircuitBreakerTripped(cb_kind)) => {
-                        warn!(
-                            this = %pipeline_kind, cb = %cb_kind,
-                            "BLOCKER-2: peer pipeline hit circuit breaker — escalating to Cautious \
-                             / 對等管線觸發熔斷 — 升級至 Cautious"
-                        );
-                        let _ = pipeline.governance.risk.reconciler_escalate_to(
-                            openclaw_core::sm::risk_gov::RiskLevel::Cautious,
-                            &format!("cross_engine_cascade: {} circuit_breaker", cb_kind),
-                        );
-                    }
-                    Err(_) => {
-                        // Sender dropped — all peers gone, no more events.
-                    }
-                }
+                loop_handlers::handle_cross_engine_event(engine_evt, &mut pipeline, pipeline_kind);
             },
 
-            // ── D3: Receive async kline bootstrap results and seed pipeline ──
-            // ── D3：接收異步 K 線引導結果並植入管線 ──
+            // ── D3: Receive async kline bootstrap results and seed pipeline (Arm B) ──
+            // ── D3：接收異步 K 線引導結果並植入管線（Arm B）──
             seed = kline_seed_rx.recv() => {
-                if let Some((sym, bars)) = seed {
-                    let count = pipeline.kline_manager.seed_bars(&sym, "1m", bars);
-                    info!(symbol = %sym, bars = count,
-                          "dynamic kline bootstrap complete / 動態 K 線引導完成");
-                }
+                loop_handlers::handle_kline_seed(seed, &mut pipeline);
             },
 
             // ── EXT-1: Exchange events (fills/order updates) from ExecutionListener ──
@@ -159,15 +119,15 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
                     Some(ExchangeEvent::Fill(exec)) => {
                         // P0-2: Dedup by exec_id (prevent duplicate fill on WS reconnect)
                         // FIX-33: O(1) HashSet lookup instead of O(n) VecDeque scan.
-                        if seen_exec_set.contains(&exec.exec_id) {
+                        if state.seen_exec_set.contains(&exec.exec_id) {
                             warn!(exec_id = %exec.exec_id, "duplicate fill skipped / 重複成交已跳過");
                             continue;
                         }
-                        seen_exec_set.insert(exec.exec_id.clone());
-                        seen_exec_order.push_back(exec.exec_id.clone());
-                        if seen_exec_order.len() > MAX_SEEN_EXEC_IDS {
-                            if let Some(old) = seen_exec_order.pop_front() {
-                                seen_exec_set.remove(&old);
+                        state.seen_exec_set.insert(exec.exec_id.clone());
+                        state.seen_exec_order.push_back(exec.exec_id.clone());
+                        if state.seen_exec_order.len() > loop_handlers::LoopState::MAX_SEEN_EXEC_IDS {
+                            if let Some(old) = state.seen_exec_order.pop_front() {
+                                state.seen_exec_set.remove(&old);
                             }
                         }
 
@@ -217,17 +177,17 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
 
                         // P0-1 fix: Match fill via order_id → order_link_id mapping
                         // OrderUpdate populates the mapping, Fill uses it
-                        let matched_key = order_id_to_link.get(&exec.order_id).cloned()
+                        let matched_key = state.order_id_to_link.get(&exec.order_id).cloned()
                             .or_else(|| {
                                 // Fallback: symbol+side match if no order_id mapping yet
                                 let is_buy = exec.side == "Buy";
-                                pending_orders.iter()
+                                state.pending_orders.iter()
                                     .find(|(_, po)| po.symbol == exec.symbol && po.is_long == is_buy && po.cum_filled_qty < po.qty)
                                     .map(|(k, _)| k.clone())
                             });
 
                         if let Some(key) = matched_key {
-                            if let Some(po) = pending_orders.get_mut(&key) {
+                            if let Some(po) = state.pending_orders.get_mut(&key) {
                                 po.cum_filled_qty += exec_qty;
                                 // FILL-CONTEXT-LINKAGE-1: thread signal-time context_id
                                 // from PendingOrder into apply_confirmed_fill so
@@ -270,7 +230,7 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
 
                                 if fully_filled {
                                     info!(order_link_id = %key, "pending order fully filled, removing / 待處理訂單完全成交，移除");
-                                    pending_orders.remove(&key);
+                                    state.pending_orders.remove(&key);
                                 }
                             }
                         } else {
@@ -283,11 +243,11 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
                     Some(ExchangeEvent::OrderUpdate(order)) => {
                         // P0-1: Build order_id → order_link_id mapping for fill matching
                         if !order.order_link_id.is_empty() && !order.order_id.is_empty() {
-                            order_id_to_link.insert(order.order_id.clone(), order.order_link_id.clone());
+                            state.order_id_to_link.insert(order.order_id.clone(), order.order_link_id.clone());
                         }
                         // Match by order_link_id directly
                         if !order.order_link_id.is_empty() {
-                            if let Some(_po) = pending_orders.get_mut(&order.order_link_id) {
+                            if let Some(_po) = state.pending_orders.get_mut(&order.order_link_id) {
                                 let status = &order.order_status;
                                 info!(
                                     order_link_id = %order.order_link_id,
@@ -329,7 +289,7 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
                                     }
                                     // P0-4: If this was a close order, clear pending_close flag
                                     // P0-4：如果是平倉訂單，清除待處理平倉標記
-                                    if let Some(po) = pending_orders.get(&order.order_link_id) {
+                                    if let Some(po) = state.pending_orders.get(&order.order_link_id) {
                                         if po.is_close {
                                             pipeline.clear_pending_close(&po.symbol);
                                             warn!(
@@ -375,7 +335,7 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
                                         reject_category = %reject_label,
                                         "pending order failed — removing / 待處理訂單失敗，移除"
                                     );
-                                    pending_orders.remove(&order.order_link_id);
+                                    state.pending_orders.remove(&order.order_link_id);
                                 }
                             }
                         }
@@ -421,14 +381,14 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
                     }
                     Some(ExchangeEvent::DcpTriggered) => {
                         // DCP: Exchange auto-cancelled all orders
-                        let count = pending_orders.len();
+                        let count = state.pending_orders.len();
                         if count > 0 {
                             warn!(
                                 count = count,
                                 "DCP triggered — clearing {} pending orders / DCP 觸發，清除 {} 個待處理訂單",
                                 count, count,
                             );
-                            pending_orders.clear();
+                            state.pending_orders.clear();
                         }
                         // Also clear pending_close flags since DCP cancelled close orders too
                         pipeline.clear_all_pending_close();
@@ -436,12 +396,12 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
                     }
                     Some(ExchangeEvent::Disconnected) => {
                         // Private WS disconnected — pending orders may be in unknown state
-                        if !pending_orders.is_empty() {
+                        if !state.pending_orders.is_empty() {
                             warn!(
-                                pending = pending_orders.len(),
+                                pending = state.pending_orders.len(),
                                 "private WS disconnected with {} pending orders — reconcile on reconnect \
                                 / 私有 WS 斷連，{} 個待處理訂單 — 重連後對賬",
-                                pending_orders.len(), pending_orders.len(),
+                                state.pending_orders.len(), state.pending_orders.len(),
                             );
                         }
                     }
@@ -449,44 +409,17 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
                 }
             },
 
-            // ── EXT-1: Pending order registration from dispatch task ──
+            // ── EXT-1: Pending order registration from dispatch task (Arm D) ──
+            // ── EXT-1：dispatch task 推送的 pending order 註冊（Arm D）──
             pending_reg = async {
                 if let Some(ref mut rx) = pending_reg_rx { rx.recv().await } else { std::future::pending().await }
             } => {
-                if let Some(po) = pending_reg {
-                    info!(
-                        order_link_id = %po.order_link_id, symbol = %po.symbol,
-                        qty = %po.qty, strategy = %po.strategy,
-                        "pending order registered / 待處理訂單已註冊"
-                    );
-                    // Emit Order row when exchange confirms Working state.
-                    // 訂單進入 Working 狀態時寫入 trading.orders。
-                    if let Some(ref tx) = order_tx {
-                        let em = pipeline.effective_engine_mode().to_string();
-                        let _ = tx.try_send(crate::database::TradingMsg::Order {
-                            order_id: po.order_link_id.clone(),
-                            ts_ms: po.sent_ts_ms,
-                            symbol: po.symbol.clone(),
-                            side: if po.is_long { "Buy".into() } else { "Sell".into() },
-                            order_type: "Market".into(),
-                            qty: po.qty,
-                            strategy_name: po.strategy.clone(),
-                            is_close: po.is_close,
-                            engine_mode: em.clone(),
-                        });
-                        let _ = tx.try_send(crate::database::TradingMsg::OrderStateChange {
-                            order_id: po.order_link_id.clone(),
-                            ts_ms: po.sent_ts_ms,
-                            from_status: Some("Submitted".into()),
-                            to_status: "Working".into(),
-                            filled_qty: None,
-                            avg_price: None,
-                            reason: None,
-                            engine_mode: em,
-                        });
-                    }
-                    pending_orders.insert(po.order_link_id.clone(), po);
-                }
+                loop_handlers::handle_pending_registration(
+                    pending_reg,
+                    &pipeline,
+                    &mut state,
+                    order_tx.as_ref(),
+                );
             },
 
             // ── Paper session commands from IPC / 來自 IPC 的紙盤 session 命令 ──
@@ -576,7 +509,7 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
                                 other,
                                 &mut pipeline,
                                 &mut snapshot_writer,
-                                &mut pending_orders,
+                                &mut state.pending_orders,
                             );
                         }
                     }
@@ -684,11 +617,11 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
                         // EDGE-P2-3 Phase 1B-3.2：超時 pending order 掃描（每 5s）。
                         //   - PostOnly 掛單：elapsed >= maker_timeout_ms（預設 45s）→ 非阻塞 REST 取消 + 移除。
                         //   - Market（舊行為）：5s 軟警告 / 60s 硬移除，不變。
-                        if !pending_orders.is_empty() && last_pending_check.elapsed() >= pending_timeout {
+                        if !state.pending_orders.is_empty() && state.last_pending_check.elapsed() >= pending_timeout {
                             let now_ms = openclaw_core::now_ms();
                             let mut maker_to_cancel: Vec<(String, String, u64, u64)> = Vec::new();
                             let mut legacy_to_remove: Vec<String> = Vec::new();
-                            for (key, po) in pending_orders.iter() {
+                            for (key, po) in state.pending_orders.iter() {
                                 let elapsed = now_ms.saturating_sub(po.sent_ts_ms);
                                 match classify_pending_sweep(po, elapsed) {
                                     PendingSweepAction::MakerTimeoutCancel => {
@@ -745,21 +678,21 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
                             // Remove maker rows we just dispatched cancels for.
                             // 移除剛派發取消的 maker 訂單記錄。
                             for (link_id, _, _, _) in &maker_to_cancel {
-                                pending_orders.remove(link_id);
+                                state.pending_orders.remove(link_id);
                             }
                             // Remove legacy Market hard-timeout rows.
                             // 移除舊 Market 硬超時記錄。
                             for key in &legacy_to_remove {
-                                pending_orders.remove(key);
+                                state.pending_orders.remove(key);
                             }
                             // Clean stale order_id mappings: only keep those with active pending orders
                             // 清理過期 order_id 映射：僅保留有活躍待處理訂單的
-                            if order_id_to_link.len() > 50 {
+                            if state.order_id_to_link.len() > 50 {
                                 let active_links: std::collections::HashSet<&String> =
-                                    pending_orders.keys().collect();
-                                order_id_to_link.retain(|_, link| active_links.contains(link));
+                                    state.pending_orders.keys().collect();
+                                state.order_id_to_link.retain(|_, link| active_links.contains(link));
                             }
-                            last_pending_check = Instant::now();
+                            state.last_pending_check = Instant::now();
                             // R-02: Cross-check pipeline pending_close_symbols against open positions.
                             // Clears stale flags for symbols whose close fill was already processed.
                             // R-02：與實際持倉交叉驗證，清理已成交但標記未清除的 pending-close 殘留。
@@ -768,7 +701,7 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
 
                         // RRC-1-A2: Periodic H0Gate risk snapshot update (every status interval).
                         // RRC-1-A2：定期更新 H0 門控風控快照（每狀態報告間隔）。
-                        if last_status.elapsed() >= status_interval {
+                        if state.last_status.elapsed() >= status_interval {
                             let positions = pipeline.paper_state.positions();
                             let position_count = positions.len() as u32;
                             let balance = pipeline.paper_state.export_state().balance;
@@ -865,17 +798,18 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
                                 let current: std::collections::HashSet<String> =
                                     reg.snapshot().into_iter().collect();
                                 let to_add: Vec<String> = current
-                                    .difference(&known_symbols)
+                                    .difference(&state.known_symbols)
                                     .cloned()
                                     .collect();
-                                let to_remove: Vec<String> = known_symbols
+                                let to_remove: Vec<String> = state
+                                    .known_symbols
                                     .difference(&current)
                                     .cloned()
                                     .collect();
 
                                 for sym in &to_remove {
                                     pipeline.remove_symbol(sym);
-                                    known_symbols.remove(sym);
+                                    state.known_symbols.remove(sym);
                                     info!(symbol = %sym,
                                           "D2: scanner removed symbol from pipeline \
                                            / 掃描器從管線移除交易對");
@@ -883,7 +817,7 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
 
                                 for sym in &to_add {
                                     pipeline.add_symbol(sym);
-                                    known_symbols.insert(sym.clone());
+                                    state.known_symbols.insert(sym.clone());
                                     info!(symbol = %sym,
                                           "D2: scanner added symbol to pipeline \
                                            / 掃描器向管線添加交易對");
@@ -956,7 +890,7 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
                                 }
                             }
 
-                            last_status = Instant::now();
+                            state.last_status = Instant::now();
                         }
                     }
                     None => break,
