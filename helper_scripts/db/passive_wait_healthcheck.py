@@ -23,16 +23,26 @@ Exit codes:
   2 = DB connection error
 
 Checks（each prints PASS / FAIL / WARN with a one-line explanation）:
-  [1] close_fills_24h                — baseline: close fills on demo in last 24h
-  [2] label_backfill_ratio           — learning.decision_features writes vs close_fills ratio
-  [3] exit_features_writer_ratio     — learning.exit_features writes vs close_fills (EXIT-FEATURES-TABLE-1)
-  [4] phys_lock_runtime              — trading.fills 'risk_close:phys_lock_*' count (TRACK-P v2)
-  [5] micro_profit_fire              — trading.fills 'risk_close:COST EDGE*' count (MICRO-PROFIT-FIX-1)
-  [6] trailing_stop_fire             — trading.fills 'risk_close:TRAILING STOP%' count
-  [7] edge_estimates_freshness       — settings/edge_estimates.json mtime < 90min
-  [10] intents_writer_ratio          — trading.intents vs orders 24h ratio (P1-12 post-mortem 2026-04-17 outage)
+  [1]  close_fills_24h                 — baseline: close fills on demo in last 24h
+  [2]  label_backfill_ratio            — learning.decision_features writes vs close_fills ratio
+                                          (G6-01 [2a]: includes table-existence guard +
+                                           entry_context_id JOIN ratio for fills→features linkage)
+  [3]  exit_features_writer_ratio      — learning.exit_features writes vs close_fills (EXIT-FEATURES-TABLE-1)
+  [4]  phys_lock_runtime               — trading.fills 'risk_close:phys_lock_*' count (TRACK-P v2)
+  [5]  micro_profit_fire               — trading.fills 'risk_close:COST EDGE*' count (MICRO-PROFIT-FIX-1)
+  [6]  trailing_stop_fire              — trading.fills 'risk_close:TRAILING STOP%' count
+  [7]  edge_estimates_freshness        — settings/edge_estimates.json mtime < 90min
+                                          (G6-01 [7a]: includes structure validation + active
+                                           runtime owner_strategy prefix coverage warning)
+  [8]  shadow_exits_24h                — INFRA-PREBUILD-1 Part A; ExitConfig.shadow_enabled gate
+  [9]  model_registry_freshness        — INFRA-PREBUILD-1 Part B; production-model train_date age
+  [10] intents_writer_ratio            — trading.intents vs orders 24h ratio (P1-12 post-mortem 2026-04-17 outage)
   [11] counterfactual_clean_window_growth — post-P013-clean EDGE-DIAG-1 Phase 3 gate (2026-04-24)
-  [12] bb_breakout_post_deadlock_fix — bb_breakout fill rate after FIX-26-DEADLOCK-1 deploy (P1-11 (1) Phase 1)
+  [12] bb_breakout_post_deadlock_fix   — bb_breakout fill rate after FIX-26-DEADLOCK-1 deploy (P1-11 (1) Phase 1)
+  [Xa] leader_election_health          — G6-01 new: edge_estimator_scheduler flock file age +
+                                          leader-PID liveness; catches stale-lock / dead-leader
+                                          drift that masks scheduler silent-death (edge_estimates
+                                          freshness alone misses leader-election failures).
 
 Rule of thumb: close_fills_24h ≥ 10 且 labels 1:1 ratio ≥ 0.8 且 exit_features
 1:1 ratio ≥ 0.8 且 ≥1 risk-layer exit mechanism (#4/5/6) fire ≥ 1 time.
@@ -87,7 +97,56 @@ def check_close_fills_24h(cur) -> tuple[str, str, int]:
 
 
 def check_label_backfill_ratio(cur, close_fills: int) -> tuple[str, str]:
-    """[2] learning.decision_features labels vs close_fills (target ratio ≥ 0.5)."""
+    """[2] learning.decision_features labels vs close_fills (target ratio ≥ 0.5).
+
+    G6-01 [2a] (2026-04-24): upgraded to a 3-layer guard against silent-dead
+    label backfill that the original ratio-only check could not catch:
+
+    1. **Table-existence guard** — `learning.decision_features` is a hypertable
+       provisioned by V019. If V019 silent-noop'd (V023 postmortem pattern),
+       the table is absent and the original `SELECT COUNT(*) FROM ...` would
+       raise `UndefinedTable` → caller wrapped exception → ambiguous WARN.
+       Now we explicitly check `to_regclass(...) IS NOT NULL` first and FAIL
+       with a clear "V019 not applied" message.
+
+    2. **Original ratio guard** (preserved): label rows / close_fills ratio
+       triage; <0.3 FAIL, <0.7 WARN, ≥0.7 PASS.
+
+    3. **JOIN-ratio guard** — the QA audit (2026-04-24 §2.2 #1) flagged that a
+       healthy total ratio still hides broken `entry_context_id` linkage:
+       fills can land with `entry_context_id` populated but the matching
+       `decision_features` row may never appear, breaking downstream
+       counterfactual / training joins. We compute the actual JOIN ratio
+       between `trading.fills.entry_context_id` (closes only) and
+       `learning.decision_features.context_id` for the same 24h window;
+       <0.3 FAIL, <0.7 WARN annotation appended to the main verdict. JOIN
+       failure does not downgrade an existing PASS to FAIL silently — it
+       upgrades the message to WARN with the linkage ratio shown.
+
+    [2] learning.decision_features 標籤 vs close_fills 比率（目標 ≥0.5）。
+    G6-01 [2a]（2026-04-24）三層守衛：
+      1. 表存在性：V019 silent-noop（V023 postmortem 模式）→ 直接 FAIL，不
+         讓原 try/except 把 UndefinedTable 吞成 ambiguous WARN。
+      2. 原比率守衛：總標籤 / close_fills，<0.3 FAIL / <0.7 WARN / ≥0.7 PASS。
+      3. JOIN linkage 守衛：實算 fills.entry_context_id ↔ features.context_id
+         的 JOIN 比率，<0.3 FAIL（linkage 斷裂指紋）/ <0.7 WARN annotated。
+         JOIN 失敗不會悄悄把總比率 PASS 降為 FAIL；linkage 比率附加到訊息上。
+    """
+    # [2a] guard 1: table-existence check — V019 provisioned `learning.decision_features`.
+    # Without this, an absent hypertable raises UndefinedTable and the original
+    # exception path returned ambiguous WARN — masking V023-style silent-noop
+    # migration failures (`migrations` ledger says "applied" but DDL skipped).
+    # [2a] guard 1：表存在性 — V019 建 learning.decision_features hypertable。
+    # 若缺，原 SELECT 會 UndefinedTable，舊版回 ambiguous WARN，遮蔽 V023-postmortem
+    # 模式（migrations ledger 說「已套用」但 DDL 跳過）的 silent-noop migration 失敗。
+    try:
+        cur.execute("SELECT to_regclass('learning.decision_features') IS NOT NULL")
+        exists = cur.fetchone()[0]
+    except Exception as e:
+        return ("FAIL", f"label table existence check failed: {e}")
+    if not exists:
+        return ("FAIL", "learning.decision_features missing — V019 not applied (audit_migrations.py)")
+
     n = _scalar(cur,
         "SELECT COUNT(*) FROM learning.decision_features "
         "WHERE label_filled_at > now() - interval '24 hours' "
@@ -97,11 +156,61 @@ def check_label_backfill_ratio(cur, close_fills: int) -> tuple[str, str]:
     if close_fills == 0:
         return ("WARN", f"no close_fills baseline, labels={n} unscoreable")
     ratio = n / close_fills if close_fills else 0.0
+
+    # [2a] guard 3: JOIN linkage between fills.entry_context_id and
+    # decision_features.context_id (counterfactual / training joins
+    # silently break when this drops). Best-effort — failures don't
+    # downgrade overall verdict, just annotate.
+    # [2a] guard 3：fills.entry_context_id ↔ features.context_id JOIN 比率
+    # （斷裂時 counterfactual / training join 全壞）。Best-effort — 失敗不
+    # 降級總結論，僅附加註解。
+    join_annot = ""
+    try:
+        cur.execute("""
+            WITH closes AS (
+                SELECT entry_context_id
+                FROM trading.fills
+                WHERE ts > now() - interval '24 hours'
+                  AND engine_mode = 'demo'
+                  AND realized_pnl != 0
+                  AND entry_context_id IS NOT NULL
+            ),
+            joined AS (
+                SELECT c.entry_context_id
+                FROM closes c
+                INNER JOIN learning.decision_features d
+                  ON d.context_id = c.entry_context_id
+            )
+            SELECT
+                (SELECT COUNT(*) FROM closes)::int AS n_closes_with_ctx,
+                (SELECT COUNT(*) FROM joined)::int AS n_joined
+        """)
+        n_ctx, n_join = cur.fetchone()
+        if n_ctx and n_ctx > 0:
+            join_ratio = n_join / n_ctx
+            if join_ratio < 0.3:
+                join_annot = f", JOIN_LINKAGE_LOW {n_join}/{n_ctx} ({join_ratio:.0%})"
+            elif join_ratio < 0.7:
+                join_annot = f", join_linkage {n_join}/{n_ctx} ({join_ratio:.0%}) partial"
+            else:
+                join_annot = f", join_linkage {join_ratio:.0%}"
+    except Exception as e:
+        # JOIN probe failed (e.g. legacy schema missing entry_context_id col);
+        # don't fail the check — just note the gap.
+        # JOIN 探測失敗（如舊 schema 缺欄）— 不讓整體 check 紅，僅註明。
+        join_annot = f", join_probe_unavailable: {type(e).__name__}"
+
+    base = f"labels_24h={n} vs close_fills={close_fills} (ratio {ratio:.2f}){join_annot}"
     if ratio < 0.3:
-        return ("FAIL", f"labels_24h={n} vs close_fills={close_fills} (ratio {ratio:.2f}) — backfill stalled")
+        return ("FAIL", base + " — backfill stalled")
     if ratio < 0.7:
-        return ("WARN", f"labels_24h={n} vs close_fills={close_fills} (ratio {ratio:.2f}) — partial backfill")
-    return ("PASS", f"labels_24h={n} vs close_fills={close_fills} (ratio {ratio:.2f})")
+        return ("WARN", base + " — partial backfill")
+    # If ratio passes but JOIN linkage cratered, downgrade to WARN — the
+    # downstream join consumers care more about linkage than total volume.
+    # 比率 PASS 但 JOIN 斷裂時降為 WARN — 下游 join consumer 關注 linkage 勝過總量。
+    if "JOIN_LINKAGE_LOW" in join_annot:
+        return ("WARN", base + " — JOIN linkage low (counterfactual / training joins broken)")
+    return ("PASS", base)
 
 
 def check_exit_features_writer(cur, close_fills: int) -> tuple[str, str]:
@@ -192,7 +301,36 @@ def check_trailing_stop_fire(cur) -> tuple[str, str]:
 
 
 def check_edge_estimates_freshness() -> tuple[str, str]:
-    """[7] settings/edge_estimates.json mtime < 90 min (scheduler hourly)."""
+    """[7] settings/edge_estimates.json mtime < 90 min (scheduler hourly).
+
+    G6-01 [7a] (2026-04-24): added expected-minimum cell-count guard. The
+    QA audit (§2.2 #2) flagged that the existing freshness + structure check
+    cannot distinguish "JSON written hourly with 1 cell" (= near-empty
+    estimator output, mostly useless for downstream cost_gate) from "JSON
+    written with full coverage". 2026-04-24 verified Reality: JSON had only
+    **1 cell** despite CLAUDE.md narrative claiming 162 — exactly the
+    coverage-collapse failure mode this guard catches. We now FAIL when
+    populated cells < `MIN_EXPECTED_CELLS` (=10, conservative floor matching
+    OPENCLAW's ~25 active strategy×symbol pairs). The 90-min freshness +
+    structure parse + dormant-prefix breakdown checks are preserved as
+    layered guards above this new floor.
+
+    [7] settings/edge_estimates.json mtime < 90 min（scheduler 每小時）。
+    G6-01 [7a]（2026-04-24）：新增最低 cell 數守衛 — QA audit §2.2 #2 指
+    現有 freshness + 結構檢查無法區分「按時寫入但只 1 cell」（等於空輸出，
+    cost_gate 無法用）與「全覆蓋」。2026-04-24 實測 JSON 只 1 cell（vs
+    CLAUDE.md 宣稱 162），正是此守衛要 catch 的 coverage-collapse 模式。
+    populated < `MIN_EXPECTED_CELLS`（=10，保守底線匹配 OPENCLAW 約 25 active
+    strategy×symbol pair）即 FAIL。原 freshness + 結構 + dormant prefix 檢查
+    皆保留為堆疊防線。
+    """
+    # G6-01 [7a]: minimum cell count below which the JSON is "freshly written
+    # but useless" — cost_gate / phys_lock fall back to defaults. Conservative
+    # floor; raise to 25 once scheduler stabilises post-G1-01 recovery.
+    # G6-01 [7a]：低於此 cell 數視為「按時寫入但無用」— cost_gate / phys_lock
+    # 改用 default。保守底線 10；待 G1-01 scheduler 恢復穩定後可拉到 25。
+    MIN_EXPECTED_CELLS = 10
+
     base = Path(os.environ.get("OPENCLAW_BASE_DIR", str(Path.home() / "BybitOpenClaw/srv")))
     p = base / "settings" / "edge_estimates.json"
     if not p.exists():
@@ -237,6 +375,13 @@ def check_edge_estimates_freshness() -> tuple[str, str]:
                f"prefixes[{prefix_summary or 'NONE'}]")
         if total == 0:
             return ("FAIL", msg + " — JSON 無 cells（scheduler first-run 或完全停寫）")
+        # G6-01 [7a]: cell-count floor — JSON exists + fresh but coverage
+        # collapsed. This is the 2026-04-24 "1-cell" failure mode RCA flag.
+        # G6-01 [7a]：cell 數底線 — JSON 存在且新鮮但覆蓋崩潰。
+        # 即 2026-04-24 「1 cell」失效模式 RCA 的指紋。
+        if populated < MIN_EXPECTED_CELLS:
+            return ("FAIL", msg + f" — populated {populated} < min_expected {MIN_EXPECTED_CELLS} "
+                    "(coverage collapse; cost_gate fallback active; G1-01 scheduler diagnosis)")
         # H4 指紋：若 runtime 有 bybit_sync/orphan/dust 持倉但 JSON 無對應 prefix
         known_dormant = {"bybit_sync", "orphan_adopted", "orphan_frozen", "dust_frozen"}
         missing_dormant = known_dormant - set(prefixes.keys())
@@ -663,6 +808,142 @@ def check_shadow_exit_ratio(cur) -> tuple[str, str]:
     return ("PASS", msg)
 
 
+def check_leader_election_health() -> tuple[str, str]:
+    """[Xa] G6-01 (2026-04-24): edge_estimator_scheduler leader-lock health.
+
+    The QA audit (§2.2 #5) flagged a blind spot: check [7] catches
+    `edge_estimates.json` staleness but **cannot distinguish**:
+      A. scheduler died entirely → eventually [7] FAILs after 90 min, AND
+      B. the leader-lock holder PID died but the lock file survives → no
+         worker re-elects itself → estimator silently dormant; [7] catches
+         this only after 90 min with no narrative help on root cause; AND
+      C. lock holder is alive but scheduler thread crashed → [7] eventually
+         FAILs after 90 min but operator has no fast triage signal.
+
+    EDGE-SCHEDULER-LEADER-1 (2026-04-23 commit `f32629c`) writes the leader
+    PID into `$OPENCLAW_DATA_DIR/edge_scheduler.leader.lock` for operator
+    debug (`cat <lock>` → leader PID). This check inspects:
+      1. Lock file existence + mtime (stale = >24h since last leader touch).
+      2. Lock holder PID liveness (`/proc/<pid>` on Linux; `ps` fallback).
+      3. Cross-correlate with [7] freshness — if [7] failing AND lock dead
+         → the diagnosis is "leader election broken" not "scheduler busy".
+
+    Three-state output:
+      - FAIL: lock missing entirely, or lock present but PID dead AND age > 1h
+        (operator action: `rm <lock>`; restart api process to re-elect).
+      - WARN: lock age >12h (stale-lock drift; restart at next maintenance).
+      - PASS: lock present, PID alive, age <12h.
+
+    Cross-platform: `/proc/<pid>` on Linux is the cheap path; macOS / fallback
+    uses `os.kill(pid, 0)` which raises if PID dead. Both work without root.
+    Fail-soft: any check-internal IO error → WARN (never FAIL on this check
+    alone; we don't want a healthcheck plumbing bug to mask the real signal).
+
+    [Xa] G6-01（2026-04-24）：edge_estimator_scheduler leader-lock 健康檢查。
+    QA audit §2.2 #5 指 check [7] 抓不到「leader 死掉但 lock 沒清」的 silent
+    death（worker 不重選舉，estimator 靜默 dormant），且 90 min 後 [7] 才
+    亮紅，operator 缺快速 triage 信號。EDGE-SCHEDULER-LEADER-1（2026-04-23
+    commit `f32629c`）把 leader PID 寫入 $OPENCLAW_DATA_DIR/
+    edge_scheduler.leader.lock 供 operator `cat` debug。本 check：
+      1. 檢查 lock 檔存在 + mtime（>24h 視為 stale）
+      2. 檢查 lock 內 PID 是否存活（Linux 走 /proc，macOS fallback os.kill(0)）
+      3. 與 [7] 互補：[7] FAIL + 本 check FAIL → 「leader election 壞」而非
+         「scheduler 在跑」
+    三態：FAIL（lock 缺 / PID 死 + age>1h）、WARN（age>12h）、PASS。
+    跨平台：/proc 走 Linux 快路徑，os.kill(pid, 0) 雙平台 fallback。
+    Fail-soft：本 check 內部 IO 錯一律 WARN，避免 plumbing bug 遮掩真信號。
+    """
+    data_dir = Path(os.environ.get("OPENCLAW_DATA_DIR", "/tmp/openclaw"))
+    lock_path = data_dir / "edge_scheduler.leader.lock"
+
+    if not lock_path.exists():
+        # Distinguish "scheduler never ran" (lock never created) from
+        # "scheduler ran then lock got rm'd" — both register as missing
+        # and both warrant FAIL because no leader is currently holding it.
+        # OPENCLAW_SCHEDULER_LEADER=0 (operator disable) is the only valid
+        # path to no-lock + no-FAIL — we annotate that explicitly.
+        # 區分「scheduler 從未跑」vs「跑後 lock 被刪」— 兩者都 FAIL，因為當前
+        # 無 leader 持鎖。OPENCLAW_SCHEDULER_LEADER=0（operator 手動停用）是
+        # 唯一合理的「無 lock 不 FAIL」路徑，我們明確標注。
+        if os.environ.get("OPENCLAW_SCHEDULER_LEADER") == "0":
+            return ("PASS", f"leader lock absent at {lock_path} — "
+                    "OPENCLAW_SCHEDULER_LEADER=0 (operator disabled, expected)")
+        return ("FAIL", f"leader lock missing at {lock_path} — "
+                "edge_estimator_scheduler never elected (uvicorn dead? G1-01)")
+
+    # Read lock metadata. mtime stays current as long as the leader process
+    # holds the fd; OS releases on process exit, but the file inode persists
+    # (sentinel mode). So mtime ~= last leader-acquire time, not "last write".
+    # 讀 lock metadata。leader 持 fd 時 mtime 維持；OS 在 process 退出時釋放鎖，
+    # 但 inode 留下（sentinel 模式）。所以 mtime ≈ 最近一次 leader 取得時間。
+    try:
+        mtime = datetime.fromtimestamp(lock_path.stat().st_mtime, tz=timezone.utc)
+        age_h = (datetime.now(tz=timezone.utc) - mtime).total_seconds() / 3600.0
+    except OSError as e:
+        return ("WARN", f"leader lock stat failed: {e}")
+
+    # Read PID from lock body — `_acquire_leader_lock` writes "<pid>\n" after
+    # successful flock. May be empty if write failed (non-fatal in scheduler).
+    # 從 lock 內容讀 PID — `_acquire_leader_lock` 在 flock 後寫入「<pid>\n」。
+    # 若寫失敗（scheduler 端 non-fatal）內容會空。
+    leader_pid: int | None = None
+    try:
+        raw = lock_path.read_text(encoding="utf-8").strip()
+        if raw:
+            leader_pid = int(raw.splitlines()[0])
+    except (OSError, ValueError) as e:
+        # PID malformed — surface as WARN with raw read for operator debug.
+        # PID 格式壞 — WARN 並回顯原始內容供 operator debug。
+        return ("WARN", f"leader lock at {lock_path} (age {age_h:.1f}h) — "
+                f"PID read malformed: {e}")
+
+    if leader_pid is None:
+        # Lock acquired but PID write empty — partial init or scheduler crash
+        # mid-acquire. Don't FAIL (lock-holder may still be alive), but WARN.
+        # Lock 取得但 PID 寫入為空 — 初始化中斷或 scheduler 取鎖中崩潰。
+        # 不 FAIL（持鎖者可能仍活）但 WARN。
+        return ("WARN", f"leader lock at {lock_path} (age {age_h:.1f}h) — "
+                "PID body empty (partial init? scheduler crash mid-acquire?)")
+
+    # Check PID liveness. /proc/<pid> on Linux is cheapest; os.kill(pid, 0)
+    # works on both Linux and macOS without sending an actual signal — raises
+    # ProcessLookupError if PID doesn't exist, PermissionError if PID exists
+    # but we lack rights (still proves it's alive).
+    # PID 存活檢查。Linux 走 /proc 最便宜；os.kill(pid, 0) 雙平台不發訊號 —
+    # 不存在則 ProcessLookupError；存在但無權限則 PermissionError（仍證活著）。
+    pid_alive = False
+    try:
+        os.kill(leader_pid, 0)
+        pid_alive = True
+    except ProcessLookupError:
+        pid_alive = False
+    except PermissionError:
+        # PID exists but other-user owned — we proved it's alive.
+        # PID 存在但屬其他 user — 證明活著。
+        pid_alive = True
+    except OSError as e:
+        # Other OS errors (rare) — fail-soft to WARN.
+        # 其他 OSError（罕見）— fail-soft 為 WARN。
+        return ("WARN", f"leader lock pid={leader_pid} liveness probe failed: {e}")
+
+    if not pid_alive:
+        # Dead leader + lock survives = the silent-death blind spot QA flagged.
+        # Operator: rm <lock>; restart uvicorn process to re-elect.
+        # 死 leader + lock 留存 = QA 指的 silent-death 盲點。
+        # Operator 動作：rm <lock>; restart uvicorn 觸發重選舉。
+        return ("FAIL", f"leader lock pid={leader_pid} DEAD (age {age_h:.1f}h, "
+                f"lock at {lock_path}) — re-election blocked; operator: "
+                f"`rm {lock_path}` + restart uvicorn")
+
+    # PID alive — check age for staleness drift.
+    # PID 活著 — 檢查 age 是否漂移過久。
+    base_msg = (f"leader_pid={leader_pid} alive, lock_age={age_h:.1f}h, "
+                f"path={lock_path}")
+    if age_h > 24:
+        return ("WARN", base_msg + " — lock >24h old (drift; restart at next maintenance)")
+    return ("PASS", base_msg)
+
+
 def check_counterfactual_clean_window_growth() -> tuple[str, str]:
     """[11] EDGE-DIAG-1 Phase 3 gate — post-P013-clean bucket row/fire growth.
 
@@ -916,6 +1197,14 @@ def main() -> int:
     # 同時自 bootstrap audit/daily/ 每日快照歷史。
     s, m = check_counterfactual_clean_window_growth()
     results.append(("[11] counterfactual_clean_window_growth", s, m))
+
+    # [Xa] G6-01 (2026-04-24): leader-lock health for edge_estimator_scheduler
+    # — covers the QA-flagged blind spot where check [7] alone cannot
+    # distinguish a stale-lock dead leader from a busy scheduler.
+    # [Xa] G6-01（2026-04-24）：edge_estimator_scheduler leader-lock 健康 —
+    # 覆蓋 QA 指出的盲點：[7] 單獨無法區分 stale-lock 死 leader vs busy scheduler。
+    s, m = check_leader_election_health()
+    results.append(("[Xa] leader_election_health", s, m))
 
     # output
     any_fail = False
