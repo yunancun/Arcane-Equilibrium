@@ -25,6 +25,8 @@
 - [SSH bridge workflow (2026-04-21)](project_ssh_bridge_workflow.md) — Mac CC 為 SSOT 透過 ssh trade-core 遠端觸發 Linux runtime 任務；取代雙 CC session prompt 同步的浪費；Mac 本地允許 fetch + pull --ff-only（禁 merge/rebase/reset）；授權範圍 + 範例 + Linux CC 剩餘職能
 - [LinUCB shadow compare 保留 (2026-04-23)](project_linucb_shadow_compare_retention.md) — Phase 4 子任務 4-06 deferred；`linucb_shadow_compare.py` 保留至 Rust warm-start 實裝或 4-06 降級；同次 audit 已刪 backfill_directive_outcomes
 - [First-detection deadlock 反模式 (2026-04-24)](project_first_detection_deadlock_pattern.md) — `is_none()` guard + 無過期 auto-clear → symbol 永久 dormant；bb_breakout FIX-26-DEADLOCK-1 確認；查其他策略
+- [TODO 10-Agent Audit 重構 (2026-04-24)](project_2026_04_24_todo_refactor.md) — 10 agent 獨立 audit + PA FIX-PLAN（45 findings/6 工作組/4 wave）+ PM Sign-off；舊 TODO 700→新 328 行；3 大 Verified 發現（edge_estimates 1 cell / PostOnly 反向 / Executor shadow hardcoded）
+- [edge_estimator_scheduler 4 天停滯 (2026-04-24)](project_edge_scheduler_stalled.md) — `edge_estimates.json` 實測 1 cell，mtime 2026-04-20 4d 停滯；CLAUDE.md 宣稱 162 cells 嚴重過期；G1-01 立即恢復
 
 ## Working principles & autonomy
 - [Agent 自主權偏好](feedback_agent_autonomy.md) — 用戶只設global止盈止損，Agent自主決定策略/參數/時機/倉位

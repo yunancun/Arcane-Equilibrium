@@ -44,3 +44,47 @@
 | 2026-04-01 | 全程序優化審計 v2 | `docs/CCAgentWorkSpace/E5/workspace/reports/2026-04-01--optimization_audit.md` |
 | 2026-04-12 | E5 Performance Optimization Wave 最終報告 | `docs/CCAgentWorkSpace/E5/2026-04-12--e5_optimization_final_report.md` |
 | 2026-04-24 | 全程序鏈優化審計（P0 Rust 硬違反焦點） | `docs/CCAgentWorkSpace/E5/workspace/reports/2026-04-24--full_chain_optimization_audit.md` |
+
+## 2026-04-24 TODO.md Audit 發現
+
+**執行時間**：2026-04-24 04:00-05:30 CEST (E5 self-audit)  
+**方法**：自動檔案行數驗證 + 手工複雜度分析 + 規範檢查  
+**報告**：`docs/CCAgentWorkSpace/E5/workspace/reports/2026-04-24--4.24TodoAudit.md`
+
+### 關鍵發現
+
+**P0 警報**：
+- Rust 8 個檔超硬上限（1200 行）；Python 2 個檔超硬上限
+  - 最嚴峻：`event_consumer/mod.rs::run_event_consumer()` 單 async fn 1696 行
+  - 次嚴峻：main.rs 2062 行；instrument_info.rs 1975 行
+- **生效日期**：即刻（W24 前必須解決，否則違反 CLAUDE.md §九）
+
+**拆分驗證結果**：
+- ✅ TICK-PIPELINE-MOD-SPLIT-1：`mod.rs` 1035 < 1200，通過
+- ✅ ma_crossover split：6 sibling，max 536 < 800，優秀；可作 bb_reversion 拆分範本
+- ✅ IPC-SERVER-TESTS-SPLIT-1：11 sibling，max 343，完美
+- ✅ main_legacy.py：468 + 5 sibling 1558 = 2026，瘦身 60%；Tier B 閉環確認
+- ⚠️ bb_breakout/grid_trading：宣稱與實際不完全同步；需補審
+
+**可讀性 pain points**：
+1. event_consumer fn 1696 行（P0 優先）
+2. main.rs async_main 邏輯雜糅（P1）
+3. bb_reversion 1143 行未拆分（P2）
+4. Python governance 3600 行邊界模糊（P2）
+5. ipc_server/mod.rs 1192 行距硬限 8 行（P2）
+
+**Singleton 表**：完整；QC-3 audit FUP 已補登 _scheduler/_scheduler_lock/_LEADER_LOCK_*
+
+**Dead code**：無 orphan；全有標記（E5-P1 FUP 已執行 call_ollama_timed/from_guardian_review 清理）
+
+### 執行計畫
+
+| Phase | Timeline | 主要任務 | 投資 |
+|-------|----------|---------|------|
+| A | W0 即刻 | event_consumer fn 拆分 | 2-3d |
+| B | W1-2 | main.rs / instrument_info.rs / live_session_routes.py | 4-5d |
+| C | W3-4 | 其餘 5 Rust 硬違反 | 4-5d |
+| D | 長期 | 策略層拆分 / governance 重構 / monkeypatch 遷移評估 | TBD |
+
+**推薦開工**：立即 W0（不延遲；無前置依賴）
+
