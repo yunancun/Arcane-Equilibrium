@@ -1,8 +1,8 @@
 # OpenClaw TODO — 工作清單
 
-**最後更新**：2026-04-24（**P0-13/14/15 三項結案歸檔 → `docs/archive/2026-04-24--completed_todo_batch.md`**；承襲 2026-04-23 WS-RETIRE-1 + DEDUP-PY-RUST A+B+C+D + INFRA-PREBUILD-1 Part A/B 於 21:13 CEST `--rebuild` 後 runtime live；PASSIVE-WAIT-HEALTHCHECK-1 持續觀察）
-**Engine**：PID **764820** · binary mtime **2026-04-23 21:13** · baseline HEAD `f42face`（含 WS-RETIRE + DEDUP A+B+C+D + INFRA-PREBUILD A+B；承襲 P0-13/14 + TRACK-P-V2-SWAP-1 + TICK-PIPELINE-MOD-SPLIT-1 + T4 + EDGE-P2-3 PostOnly + DECISION-OUTCOMES fix 等）
-**Python uvicorn**：PID **764878**（4 workers）· 2026-04-23 21:13 CEST `--rebuild` 隨 engine 重啟；包含 P0-14 B JS proxy cells（43→135）+ P0-12 LIVE-GATE-FALLBACK-1 + E5-FN-3 + PIPELINE-SLOT-1 承襲
+**最後更新**：2026-04-24（**EDGE-DIAG-1 Phase 1+2+4 + EDGE-DIAG-1-FUP-IPC 完成** 於 02:06 CEST `--rebuild` 後 runtime live，commits `5b0908b` + `1a53400`；Phase 3 passive-wait 至 clean n≥200 ~2026-05-01；承襲 P0-13/14/15 三項結案歸檔 → `docs/archive/2026-04-24--completed_todo_batch.md` + 2026-04-23 WS-RETIRE-1 + DEDUP-PY-RUST A+B+C+D + INFRA-PREBUILD-1 A+B；PASSIVE-WAIT-HEALTHCHECK-1 check [11] daily cron 06:00 UTC）
+**Engine**：PID **884467** · binary mtime **2026-04-24 02:06:24** · baseline HEAD `1a53400`（含 EDGE-DIAG-1-FUP-IPC 7 exit.* IPC 熱重載；承襲 WS-RETIRE + DEDUP A+B+C+D + INFRA-PREBUILD A+B + P0-13/14 + TRACK-P-V2-SWAP-1 + TICK-PIPELINE-MOD-SPLIT-1 + T4 + EDGE-P2-3 PostOnly + DECISION-OUTCOMES fix 等）
+**Python uvicorn**：PID **884519**（4 workers）· 2026-04-24 02:06 CEST `--rebuild` 隨 engine 重啟；包含 P0-14 B JS proxy cells（43→135）+ P0-12 LIVE-GATE-FALLBACK-1 + E5-FN-3 + PIPELINE-SLOT-1 承襲
 **PIPELINE-SLOT-1 live 驗證**：LiveAuthWatcher 跑中 `env=LiveDemo poll_interval_secs=5`；`authorization.json` 未簽（operator 待決定 live 啟動時機）
 **測試基準線**：Rust engine lib **1939**（Mac + Linux release；2026-04-23 session 累積 +104 vs 1835 baseline）/ bin 38 / core 392 / e2e 35 / reconciler_e2e 19 · pytest **2996 / 0 fail / 1 skipped** · `tick_pipeline/mod.rs` **1012** 行（§七 1200 硬上限符合）
 
@@ -233,13 +233,18 @@ git status && git log --oneline -5
   - **healthcheck**（CLAUDE.md §七 強制）：`passive_wait_healthcheck.py` check [10] `check_counterfactual_clean_window_growth`（下 Phase 4 實作）
   - **Kill switch**：未來部署後用 `ssh trade-core "sed -i 's/missing_edge_fallback_bps = 10.0/missing_edge_fallback_bps = -10.0/' settings/risk_control_rules/risk_config_demo.toml && bash helper_scripts/restart_all.sh --rebuild"`；< 60s 可逆需先解 EDGE-DIAG-1-FUP-IPC
 
-- [ ] **Phase 4（active，可立即做）** — daily cron counterfactual monitor
-  - 接入 `passive_wait_healthcheck.py` 為 check [10] `check_counterfactual_clean_window_growth`
-  - 每日 06:00 UTC 跑 `counterfactual_exit_replay.py --days 2 --v2-parity --split-window --cost-model fee_only --output-json /tmp/openclaw/audit/daily/`
-  - Persist `post-P013-clean` bucket 每日 n/cf_fired/improv_avg/per-strategy breakdown
-  - 退出條件：clean n ≥ 200 + per-strategy 樣本滿足 Phase 3 前提 → healthcheck 提示 "Phase 3 go"
-  - ~30-50 LoC 單 file，零 runtime 風險
+- [x] **Phase 4 ✅ 2026-04-24 commit `5b0908b`** — daily cron counterfactual monitor live
+  - `check_counterfactual_clean_window_growth` as `passive_wait_healthcheck.py` check **[11]**（[10] 被 intents_writer_ratio 佔用，取 next free id）
+  - Cron `0 6 * * * /home/ncyu/BybitOpenClaw/srv/helper_scripts/db/counterfactual_daily_cron.sh` 已 install 於 Linux trade-core（idempotent dedupe）
+  - 每日 06:00 UTC 跑 `counterfactual_exit_replay.py --days 2 --v2-parity --split-window --cost-model fee_only --bootstrap-ci --per-strategy-median --trimmed-mean-pct 5`，stdout + JSON 寫 `$OPENCLAW_DATA_DIR/audit/counterfactual_daily_cron.log` + `audit/daily/YYYYMMDD.json`
+  - Phase 3 auto-gate: check [11] 回 **PASS** 當 `n_rows >= 200 AND grid_trading.cf_fired >= 50 AND ma_crossover.cf_fired >= 50 AND orphan_frozen.n_rows >= 20`
+  - 302 LoC (healthcheck fn 152 + cron wrapper 122 + SCRIPT_INDEX 1)，零 runtime 風險
   - **對齊 CLAUDE.md §七 強制規則「被動等待 TODO 必附 healthcheck」**（2026-04-23 新增）— Phase 3 deferral 是典型被動等待，Phase 4 本質即該規則要求的 check function
+
+- [ ] **EDGE-DIAG-1-FUP-SHADOW-ENABLED-IPC（P3 backlog，Task 5 agent 2026-04-24 flagged）** — `ExitConfig.shadow_enabled` 也缺 IPC hot-reload 路徑
+  - 現狀：CLAUDE.md §三 另一句「`shadow_enabled=false ... flip TOML 即啟，無須再 rebuild`」與先前 `missing_edge_fallback_bps` claim 同類錯誤（ArcSwap 無 file-watch path，本質需 IPC patch）
+  - 修：加 `exit_shadow_enabled: Option<bool>` 到 EDGE-DIAG-1-FUP-IPC 已建立的 7-field 套件；~5 LoC 延伸 + 1 test
+  - 優先級 P3：非 blocker，Phase 2 Combine Layer shadow 要 flip `true` 時才需要（operator 尚未決定 Phase 2 start）
 
 - [x] **EDGE-DIAG-1-FUP-IPC（P2，QC round 1 揭露）** ✅ 2026-04-24 — `ExitConfig` 加 IPC hot-reload 路徑
   - 現狀：`rust/openclaw_engine/src/ipc_server/handlers/risk.rs:42-138` IPC `update_risk_config` 只暴露 21 legacy fields，**零個 `exit.*`**；`ConfigStore<RiskConfig>` 用 ArcSwap 但僅 bootstrap load，無 SIGHUP 路徑。CLAUDE.md §三「`missing_edge_fallback_bps` hot-reload 可調」claim 過期。
