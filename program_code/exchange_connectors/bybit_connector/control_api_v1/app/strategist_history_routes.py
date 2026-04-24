@@ -542,6 +542,12 @@ async def effect_for_history_row(
 # 為何不走 PG：`strategist_applied_params` 只記 apply 成功；reject 動作不入表。
 # engine_events 表 schema 是 config snapshot，不適合。最低侵入選擇 = log tail parse。
 
+# ANSI escape code stripper — tracing-subscriber 彩色輸出嵌 `\x1b[Nm` 在 log 行內，
+# 會把 `param=` 切成 `[3mparam[0m[2m=[0m`。先 strip 再 regex match 較穩。
+# tracing-subscriber colored output injects ANSI escapes like `\x1b[3m...\x1b[0m`
+# between field name and value, breaking naive `param=` regex. Strip first.
+_ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;]*m")
+
 # Regex 對應 `strategist_scheduler/mod.rs` 的 log 模板：
 # - reject: `delta exceeds ±30% cap / delta 超過 ±30% 上限`（line 639）
 # - apply:  `strategist params applied / 策略師參數已應用`（line 358 evaluate_cycle）
@@ -549,14 +555,18 @@ _LOG_REJECT_RE = re.compile(r"delta exceeds")
 _LOG_APPLY_RE = re.compile(r"strategist params applied")
 # 提取 timestamp 的 ISO prefix（tracing-subscriber 標準格式：2026-04-24T17:12:50.xxxZ）
 _LOG_TS_RE = re.compile(r"(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z?)")
-# 提取 reject 詳情（param + current + proposed + delta_pct）
+# 提取 reject 詳情（ANSI stripped 後：param=<name> current=<num> proposed=<num> delta_pct="<str>"）
+# ANSI 剝除後標準 tracing fmt 的 span field：`param=cooldown_ms current=60000.0 proposed=30000.0 delta_pct="50.0%"`
 _LOG_REJECT_DETAIL_RE = re.compile(
-    r"param=(\w+).*?current=([\d.]+).*?proposed=([\d.]+).*?delta_pct=\"([^\"]+)\""
+    r"param=(\w+)\s+current=([\d.eE+-]+)\s+proposed=([\d.eE+-]+)\s+delta_pct=\"([^\"]+)\""
 )
 
 # Bounded read to avoid memory blowup if engine.log is huge.
-# 讀取上限，避免 engine.log 巨大時爆記憶體。
-_LOG_TAIL_MAX_BYTES = 512 * 1024  # 512 KB
+# 讀取上限 — engine.log 可能到 GB 量級（416 MB 已實測）。4 MB tail 在 high-tick-rate
+# 環境約覆蓋 ~20 秒，可能完全錯過 5 min cycle；但 SSD 實際 IO 成本可接受，
+# 且端點下游邏輯會先 pre-filter 掉 tick log 行再做 full scan。
+# Bump from 512KB → 4MB after engine.log high-frequency tick noise observed in prod.
+_LOG_TAIL_MAX_BYTES = 4 * 1024 * 1024  # 4 MB
 # 掃描範圍：近 100 cycle × 5 min 間隔 = 近 8h 視窗。log 每 cycle 大約 1-3 行。
 _LOG_CYCLE_SCAN_LIMIT = 300
 
@@ -612,13 +622,16 @@ def _parse_cycle_metrics(lines: list[str]) -> dict[str, Any]:
     matched = 0
 
     # 從尾部倒掃以最近優先 / scan tail-first for "most recent"
+    # ANSI strip per-line before regex match; tracing-subscriber colored output
+    # injects escapes that break naive field-name=value patterns.
     for raw in reversed(lines):
-        if _LOG_REJECT_RE.search(raw):
+        line = _ANSI_ESCAPE_RE.sub("", raw)
+        if _LOG_REJECT_RE.search(line):
             rejects += 1
             matched += 1
             if last_reject is None:
-                ts_match = _LOG_TS_RE.search(raw)
-                detail = _LOG_REJECT_DETAIL_RE.search(raw)
+                ts_match = _LOG_TS_RE.search(line)
+                detail = _LOG_REJECT_DETAIL_RE.search(line)
                 last_reject = {
                     "ts": ts_match.group(1) if ts_match else None,
                     "param": detail.group(1) if detail else None,
@@ -626,11 +639,11 @@ def _parse_cycle_metrics(lines: list[str]) -> dict[str, Any]:
                     "proposed": float(detail.group(3)) if detail else None,
                     "delta_pct": detail.group(4) if detail else None,
                 }
-        elif _LOG_APPLY_RE.search(raw):
+        elif _LOG_APPLY_RE.search(line):
             applies += 1
             matched += 1
             if last_apply is None:
-                ts_match = _LOG_TS_RE.search(raw)
+                ts_match = _LOG_TS_RE.search(line)
                 last_apply = {"ts": ts_match.group(1) if ts_match else None}
         if matched >= _LOG_CYCLE_SCAN_LIMIT:
             break
