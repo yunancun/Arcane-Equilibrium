@@ -363,6 +363,46 @@ impl Strategy for BbBreakout {
         let last_ms = self.cooldown.last_ms(sym).unwrap_or(0);
         self.prev_last_trade_ms.insert(sym.to_string(), last_ms);
 
+        // P1-11 FIX-26-DEADLOCK-1 (2026-04-24): the original FIX-26 guard
+        // `is_none()` makes `squeeze_detected_ms` a record of the FIRST squeeze
+        // in a given squeeze regime — intentional. But the ONLY clear paths
+        // are (a) entry emission at line ~636 and (b) `on_external_close`
+        // explicitly preserves it (line 282-284 docstring). There is no
+        // expiry-based auto-clear.
+        //
+        // Consequence: if a symbol registers a squeeze at T and the subsequent
+        // 45-min expiry window passes WITHOUT an entry (all expansion/vol/%B/
+        // Donchian gates failing to align), the stale timestamp persists
+        // forever. Every future `is_none()` check sees Some(T_stale), no new
+        // recording happens, and `in_squeeze` (checked at line ~440) stays
+        // false because ctx.timestamp_ms >= T_stale + expiry. **Permanent
+        // dormancy for that symbol**.
+        //
+        // This was discovered by 2026-04-24 offline sweep (P1-11 (1)): under
+        // FIX-26 parity, 14d × 5 symbols × 64 threshold combos yielded n≤4
+        // entries per combo — 5-6× below a naive "signal-rate" estimate. The
+        // sweep's 0-entry majority corresponds to symbols stuck post-first-
+        // expiry.
+        //
+        // Fix: clear the stored timestamp when it has expired, BEFORE the
+        // `is_none()` guard. This restores the "next new squeeze re-registers"
+        // behaviour that FIX-26's author almost certainly intended. Keeping
+        // the `is_none()` guard preserves FIX-26's "record first, not last"
+        // semantic within an active squeeze window; the expiry clear runs
+        // OUTSIDE that window.
+        //
+        // P1-11 FIX-26-DEADLOCK-1（2026-04-24）：原 FIX-26 只在入場時清 squeeze_detected_ms，
+        // 若首次 squeeze 窗口（45min）內無入場，時間戳永久卡住 → 該 symbol 進入永久
+        // 休眠。bb_breakout 14d 0 fills 真正根因之一。修：在 is_none() guard 前先
+        // auto-clear 過期時間戳，允許下一次新 squeeze 重新登記；FIX-26 「只記首次」語義
+        // 在每個 squeeze 窗口內仍保留。
+        if let Some(st) = self.symbols.get_mut(sym) {
+            if let Some(stored_ts) = st.squeeze_detected_ms {
+                if ctx.timestamp_ms >= stored_ts.saturating_add(self.squeeze_expiry_ms) {
+                    st.squeeze_detected_ms = None;
+                }
+            }
+        }
         if bb.bandwidth < self.squeeze_bw {
             // FIX-26: Only record first detection time; don't reset on continued squeeze.
             // FIX-26：只記錄首次偵測，持續壓縮不重置。

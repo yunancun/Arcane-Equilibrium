@@ -305,3 +305,71 @@ fn test_profile_serde_snake_case() {
     let back: BbBreakoutProfile = serde_json::from_str("\"balanced\"").unwrap();
     assert_eq!(back, BbBreakoutProfile::Balanced);
 }
+
+// ═════════════════════════════════════════════════════════════════════════════
+// FIX-26-DEADLOCK-1 (2026-04-24): expiry-based auto-clear of squeeze_detected_ms.
+// See mod.rs comment above the clear block for full RCA.
+// ═════════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn test_fix26_deadlock_expiry_clears_stale_squeeze() {
+    let mut s = BbBreakout::new();
+    s.min_persistence_ms = 0;
+    // squeeze_expiry_ms default is 2_700_000 (45 min). Use bar timestamps in ms
+    // so `saturating_add` doesn't saturate; well within u64 range.
+    // Bar 1 at ts=0 triggers squeeze registration.
+    // squeeze_expiry_ms 默認 2_700_000 ms (45min)；ts 用 ms 整數，saturating_add 安全。
+    let _ = s.on_tick(&ctx_p1_11(0.01, 0.5, 1.0, 0, 50_000.0, 50_500.0, 49_500.0));
+    assert!(
+        s.has_squeeze("BTC"),
+        "after first squeeze bar, squeeze_detected_ms must be set"
+    );
+    // Fast-forward past expiry (default 2_700_000 ms). Bandwidth stays ABOVE
+    // squeeze_bw so no new record would be made without auto-clear; and below
+    // expansion_bw so no entry fires. Before the fix, squeeze_detected_ms
+    // would stay stuck at ts=0 forever. After the fix, it's auto-cleared
+    // on the first post-expiry tick.
+    // 超過 expiry；bandwidth 保持在 squeeze_bw 之上（不會新記錄）也在 expansion_bw 之下
+    // （不會入場）；修正前 squeeze_detected_ms 永遠卡在 0，修正後這一 tick 就清。
+    let _ = s.on_tick(&ctx_p1_11(0.02, 0.5, 1.0, 2_800_000, 50_000.0, 50_500.0, 49_500.0));
+    assert!(
+        !s.has_squeeze("BTC"),
+        "post-expiry tick must auto-clear stale squeeze_detected_ms (FIX-26-DEADLOCK-1)"
+    );
+}
+
+#[test]
+fn test_fix26_deadlock_active_squeeze_preserved() {
+    let mut s = BbBreakout::new();
+    s.min_persistence_ms = 0;
+    // Register squeeze at ts=0, then tick at ts=1_000_000 (< 2_700_000 expiry).
+    // Inside the expiry window, the record must NOT be cleared — that's the
+    // original FIX-26 "record first detection, don't reset" invariant.
+    // 未過期窗口內，squeeze_detected_ms 必須保留（原 FIX-26 不變量）。
+    let _ = s.on_tick(&ctx_p1_11(0.01, 0.5, 1.0, 0, 50_000.0, 50_500.0, 49_500.0));
+    assert!(s.has_squeeze("BTC"));
+    let _ = s.on_tick(&ctx_p1_11(0.02, 0.5, 1.0, 1_000_000, 50_000.0, 50_500.0, 49_500.0));
+    assert!(
+        s.has_squeeze("BTC"),
+        "within-expiry tick must not clear (FIX-26 first-detection invariant preserved)"
+    );
+}
+
+#[test]
+fn test_fix26_deadlock_re_registration_after_clear() {
+    let mut s = BbBreakout::new();
+    s.min_persistence_ms = 0;
+    // Register at ts=0, expire at ts=2_800_000, then a fresh squeeze at
+    // ts=3_000_000 must be able to register (would have been blocked by
+    // pre-fix is_none() guard since stored_ts was stuck at 0).
+    // 首次 ts=0 登記；ts=2_800_000 過期後清除；ts=3_000_000 新 squeeze bar 必須能重登記
+    // （修前被 is_none() guard 擋住，永遠無法重登）。
+    let _ = s.on_tick(&ctx_p1_11(0.01, 0.5, 1.0, 0, 50_000.0, 50_500.0, 49_500.0));
+    let _ = s.on_tick(&ctx_p1_11(0.02, 0.5, 1.0, 2_800_000, 50_000.0, 50_500.0, 49_500.0));
+    assert!(!s.has_squeeze("BTC"), "cleared after expiry");
+    let _ = s.on_tick(&ctx_p1_11(0.01, 0.5, 1.0, 3_000_000, 50_000.0, 50_500.0, 49_500.0));
+    assert!(
+        s.has_squeeze("BTC"),
+        "fresh squeeze at ts=3M must re-register after the stale record was cleared"
+    );
+}
