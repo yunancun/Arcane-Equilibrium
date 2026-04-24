@@ -204,14 +204,35 @@ def detect_entries(
     entries = []
     last_squeeze_idx = -1
     for i in range(start, n):
-        # Continue tracking squeeze regardless of entry.
-        # 無論是否入場，先維護 squeeze 狀態。
+        # FIX-26 parity: Rust `bb_breakout::on_tick` records squeeze_detected_ms
+        # ONLY on first detection (see mod.rs:370 `if st.squeeze_detected_ms.is_none()`).
+        # Continued squeeze does NOT refresh the timer — expiry clock runs from the
+        # first bar after the previous clear. Mirror this exactly or signal counts
+        # inflate under long-continuous-squeeze regimes (e.g., 1m BTC where
+        # bandwidth stays < typical squeeze_bw for hundreds of bars).
+        # FIX-26 對齊：Rust 只在 squeeze_detected_ms 為 None 時才記錄首次偵測；持續
+        # 壓縮不會刷新 timer。若覆寫（overwrite-each-bar）會讓連續壓縮下的信號數
+        # 大幅膨脹（1m BTC 典型情況），sweep 結果會偏離 runtime 行為。
         if bw[i] < squeeze_bw:
-            last_squeeze_idx = i
-            continue  # cannot simultaneously expand on the same bar in engine semantics
+            if last_squeeze_idx < 0:
+                last_squeeze_idx = i
+            continue  # cannot simultaneously expand on the same bar
         if last_squeeze_idx < 0:
             continue
         if i - last_squeeze_idx > SQUEEZE_EXPIRY_BARS:
+            # FIX-26 NOTE: Rust does NOT auto-clear squeeze_detected_ms on expiry;
+            # the only clear paths are (a) entry emission + (b) `on_external_close`.
+            # This means if squeeze runs uninterrupted past expiry, the strategy
+            # deadlocks until an entry fires. In pure-sweep offline replay there
+            # is no position/close mechanic, so we continue (don't clear) — the
+            # record stays stuck and no further squeezes register for this symbol
+            # until we hit expiry, at which point NOTHING fires until we see a
+            # bar with bandwidth ≥ squeeze_bw to "break" the continuous squeeze.
+            # That post-break bar then still has the stale squeeze_detected_ms,
+            # so entry is still blocked (expired). The strategy is effectively
+            # locked out — matches real Rust behaviour on prolonged squeeze.
+            # FIX-26 注意：Rust 過期不自動清 squeeze_detected_ms（僅入場或外部平倉會清）。
+            # 長時間持續壓縮會讓策略死鎖，本 sweep 亦不清 → 與 runtime 一致。
             continue
         if bw[i] <= expansion_bw:
             continue
@@ -297,29 +318,50 @@ def aggregate_combo(
             stats[f"fwd{h}_med"] = float("nan")
             stats[f"fwd{h}_winr"] = float("nan")
             stats[f"fwd{h}_sharpe"] = float("nan")
+            stats[f"fwd{h}_se"] = float("nan")
+            stats[f"fwd{h}_tstat"] = float("nan")
         else:
             mu = float(vals.mean())
             sd = float(vals.std(ddof=0))
+            k = len(vals)
+            # SE of mean + two-sided t-like statistic (mu / SE). |t| > 1.96 ≈
+            # 95% significance; |t| > 2.58 ≈ 99%. This gates the top-N rankings
+            # against the "small-N illusion" where a handful of lucky right-tail
+            # winners look like edge but aren't distinguishable from zero.
+            # SE = 標準誤；|t| > 1.96 ≈ 95% 顯著；過濾「小樣本右尾幻覺」。
+            se = sd / (k ** 0.5) if k > 0 and sd > 1e-12 else float("nan")
             stats[f"fwd{h}_mean"] = mu
             stats[f"fwd{h}_med"] = float(vals.median())
             stats[f"fwd{h}_winr"] = float((vals > 0).mean())
             stats[f"fwd{h}_sharpe"] = mu / sd if sd > 1e-12 else float("nan")
+            stats[f"fwd{h}_se"] = se
+            stats[f"fwd{h}_tstat"] = mu / se if se and se > 1e-12 else float("nan")
 
     stats["donchian_breach_frac"] = float(entries["donchian_breach"].mean())
     # Score-mode indicator: does Donchian breach actually correlate with better
     # outcomes? If the diff is ~0, the +bonus vs -bonus under Score mode is
     # just noise; if strongly positive, Score mode's bias is real.
-    # Score mode 指標：Donchian 突破是否真的關聯更好結果？diff≈0 則 Score 模式
-    # +/- bonus 為噪音；強正則 Score 模式有方向性。
+    # Add breach subset SIZE + Welch-like t-stat for the diff so readers can
+    # see whether the signed diff is distinguishable from zero, not just read
+    # the sign. Small breach_n (< ~15) means the diff is noise-dominated.
+    # Score mode 指標 + subset size + Welch-like t 以判讀 diff 是否顯著。
     primary = horizons_bars[len(horizons_bars) // 2]  # middle horizon as primary
     col = f"fwd_{primary}"
     if col in entries:
         br = entries[entries["donchian_breach"]][col].dropna()
         mi = entries[~entries["donchian_breach"]][col].dropna()
-        if len(br) > 0 and len(mi) > 0:
-            stats["breach_fwd_mean_diff"] = float(br.mean() - mi.mean())
+        stats["breach_n"] = float(len(br))
+        stats["miss_n"] = float(len(mi))
+        if len(br) > 1 and len(mi) > 1:
+            diff = float(br.mean() - mi.mean())
+            var_b = float(br.var(ddof=1)) / len(br)
+            var_m = float(mi.var(ddof=1)) / len(mi)
+            se_diff = (var_b + var_m) ** 0.5 if (var_b + var_m) > 1e-18 else float("nan")
+            stats["breach_fwd_mean_diff"] = diff
+            stats["breach_diff_tstat"] = diff / se_diff if se_diff and se_diff > 1e-12 else float("nan")
         else:
             stats["breach_fwd_mean_diff"] = float("nan")
+            stats["breach_diff_tstat"] = float("nan")
     return stats
 
 
@@ -418,27 +460,34 @@ def print_top(result: pd.DataFrame, horizons_bars: list[int], top_n: int) -> Non
     if qualified.empty:
         qualified = result.copy()
 
-    # Rankings.
-    # 排序。
-    print(f"\n═════ Top {top_n} by fwd{primary}_mean (signal-weighted) ═════")
-    print(qualified.nlargest(top_n, f"fwd{primary}_mean")[
-        ["squeeze_bw", "expansion_bw", "volume_threshold", "n_signals",
-         f"fwd{primary}_mean", f"fwd{primary}_winr", f"fwd{primary}_sharpe",
-         "donchian_breach_frac", "breach_fwd_mean_diff"]
-    ].to_string(index=False))
+    # Rankings. `tstat` = mean / SE; |tstat| > 1.96 ≈ 95% significance. A top
+    # combo with |tstat| < 1.0 is not distinguishable from zero edge even if it
+    # sorts high — print it so the reader sees the caveat directly, not only
+    # after reading the report.
+    # 排序：tstat = mean/SE；|tstat|<1.0 基本等於噪音，即使排前也無意義。
+    cols_full = [
+        "squeeze_bw", "expansion_bw", "volume_threshold", "n_signals",
+        f"fwd{primary}_mean", f"fwd{primary}_winr", f"fwd{primary}_sharpe",
+        f"fwd{primary}_tstat",
+        "donchian_breach_frac", "breach_n",
+        "breach_fwd_mean_diff", "breach_diff_tstat",
+    ]
+    cols_short = [
+        "squeeze_bw", "expansion_bw", "volume_threshold", "n_signals",
+        f"fwd{primary}_mean", f"fwd{primary}_winr",
+        f"fwd{primary}_sharpe", f"fwd{primary}_tstat",
+    ]
+    print(f"\n═════ Top {top_n} by fwd{primary}_mean ═════")
+    print(qualified.nlargest(top_n, f"fwd{primary}_mean")[cols_full].to_string(index=False))
+
+    print(f"\n═════ Top {top_n} by fwd{primary}_tstat (statistical edge, |t|>1.96 ≈ 95%) ═════")
+    print(qualified.nlargest(top_n, f"fwd{primary}_tstat")[cols_full].to_string(index=False))
 
     print(f"\n═════ Top {top_n} by fwd{primary}_sharpe (risk-adjusted) ═════")
-    print(qualified.nlargest(top_n, f"fwd{primary}_sharpe")[
-        ["squeeze_bw", "expansion_bw", "volume_threshold", "n_signals",
-         f"fwd{primary}_mean", f"fwd{primary}_winr", f"fwd{primary}_sharpe",
-         "donchian_breach_frac", "breach_fwd_mean_diff"]
-    ].to_string(index=False))
+    print(qualified.nlargest(top_n, f"fwd{primary}_sharpe")[cols_full].to_string(index=False))
 
     print(f"\n═════ Top {top_n} by n_signals (dormancy check) ═════")
-    print(qualified.nlargest(top_n, "n_signals")[
-        ["squeeze_bw", "expansion_bw", "volume_threshold", "n_signals",
-         f"fwd{primary}_mean", f"fwd{primary}_winr", f"fwd{primary}_sharpe"]
-    ].to_string(index=False))
+    print(qualified.nlargest(top_n, "n_signals")[cols_short].to_string(index=False))
 
 
 def main() -> int:
