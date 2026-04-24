@@ -123,6 +123,74 @@
   </div>
 </details>
 
+<!-- ═══ Strategist Apply History ═══ -->
+<!-- STRATEGIST-HISTORY-OBSERVABILITY-1 GUI tab (backend: strategist_history_routes.py) -->
+<details class="oc-collapse">
+  <summary>&#x1F553; 策略师变更历史 / Strategist Apply History</summary>
+  <div class="oc-collapse-body">
+    <div style="font-size:11px;color:var(--text-dim);margin-bottom:8px">
+      Strategist 5-min 自动 tune 与 Operator 手动 promote 审计轨迹（learning.strategist_applied_params，V019+V020）。
+      All rows are successful applies (V019 persists post-apply).
+    </div>
+    <div class="oc-metrics" style="margin-bottom:10px">
+      <div class="oc-metric"><div class="oc-metric-label">Total Applies</div><div class="oc-metric-val" id="sh-total">--</div></div>
+      <div class="oc-metric"><div class="oc-metric-label">Auto-tune</div><div class="oc-metric-val" id="sh-auto">--</div></div>
+      <div class="oc-metric"><div class="oc-metric-label">Manual Promote</div><div class="oc-metric-val" id="sh-manual">--</div></div>
+      <div class="oc-metric"><div class="oc-metric-label">Operator Override</div><div class="oc-metric-val" id="sh-override">--</div></div>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;align-items:flex-end">
+      <div>
+        <label style="font-size:10px;color:var(--text-dim);display:block">Engine Mode</label>
+        <select class="oc-select" id="sh-mode">
+          <option value="">All / 全部</option>
+          <option value="paper">paper</option>
+          <option value="demo">demo</option>
+          <option value="live">live</option>
+          <option value="live_demo">live_demo</option>
+          <option value="live_testnet">live_testnet</option>
+        </select>
+      </div>
+      <div>
+        <label style="font-size:10px;color:var(--text-dim);display:block">Strategy</label>
+        <select class="oc-select" id="sh-strat">
+          <option value="">All / 全部</option>
+          <option value="ma_crossover">ma_crossover</option>
+          <option value="bb_reversion">bb_reversion</option>
+          <option value="bb_breakout">bb_breakout</option>
+          <option value="grid_trading">grid_trading</option>
+          <option value="funding_arb">funding_arb</option>
+        </select>
+      </div>
+      <div>
+        <label style="font-size:10px;color:var(--text-dim);display:block">Source</label>
+        <select class="oc-select" id="sh-source">
+          <option value="">All / 全部</option>
+          <option value="strategist_scheduler">strategist_scheduler</option>
+          <option value="manual_promote">manual_promote</option>
+          <option value="operator_override">operator_override</option>
+        </select>
+      </div>
+      <button class="oc-btn oc-btn-primary" onclick="loadStrategistHistory()">Apply / 应用</button>
+    </div>
+    <div class="oc-table-wrap">
+      <table class="oc-table">
+        <thead>
+          <tr>
+            <th>Time / 时间</th>
+            <th>Engine</th>
+            <th>Strategy / 策略</th>
+            <th>Source / 来源</th>
+            <th>Reason / 原因</th>
+            <th>Action / 操作</th>
+          </tr>
+        </thead>
+        <tbody id="sh-tbody"><tr class="empty-row"><td colspan="6">Loading...</td></tr></tbody>
+      </table>
+    </div>
+    <div id="sh-detail-box" style="margin-top:10px"></div>
+  </div>
+</details>
+
 <script>
 // ─── Strategy Chinese Name Map ────────────────────────────────
 const STRAT_CN = {
@@ -543,8 +611,143 @@ async function loadIntents() {
   ocSetHtml('intents-tbody', html);
 }
 
+// ─── Strategist Apply History (STRATEGIST-HISTORY-OBSERVABILITY-1) ──────────
+let _shRows = [];
+
+async function loadStrategistSummary() {
+  let d;
+  try { d = await ocApi('/api/v1/strategist/history/summary'); } catch(e) { d = null; }
+  if (!d || !d.data) {
+    ocSetText('sh-total', '--');
+    ocSetText('sh-auto', '--');
+    ocSetText('sh-manual', '--');
+    ocSetText('sh-override', '--');
+    return;
+  }
+  ocSetText('sh-total', d.data.total || 0);
+  const bySrc = {};
+  (d.data.by_source || []).forEach(r => { bySrc[r.source] = r.n; });
+  ocSetText('sh-auto', bySrc['strategist_scheduler'] || 0);
+  ocSetText('sh-manual', bySrc['manual_promote'] || 0);
+  ocSetText('sh-override', bySrc['operator_override'] || 0);
+}
+
+async function loadStrategistHistory() {
+  const mode = document.getElementById('sh-mode').value;
+  const strat = document.getElementById('sh-strat').value;
+  const src = document.getElementById('sh-source').value;
+  const params = new URLSearchParams();
+  if (mode) params.set('engine_mode', mode);
+  if (strat) params.set('strategy_name', strat);
+  if (src) params.set('source', src);
+  params.set('limit', '50');
+  const qs = params.toString();
+
+  let d;
+  try { d = await ocApi('/api/v1/strategist/history' + (qs ? '?' + qs : '')); } catch(e) { d = null; }
+  if (!d || !d.data) {
+    ocSetHtml('sh-tbody', '<tr class="empty-row"><td colspan="6" style="color:var(--text-dim)">无法加载 / Failed to load</td></tr>');
+    _shRows = [];
+    return;
+  }
+  if (d.data.degraded) {
+    ocSetHtml('sh-tbody', '<tr class="empty-row"><td colspan="6" style="color:var(--yellow)">Degraded: ' + ocEsc(d.data.reason || 'unknown') + '</td></tr>');
+    _shRows = [];
+    return;
+  }
+  const rows = d.data.rows || [];
+  _shRows = rows;
+  if (!rows.length) {
+    ocSetHtml('sh-tbody', '<tr class="empty-row"><td colspan="6">暂无记录 / No history yet</td></tr>');
+    return;
+  }
+  let html = '';
+  rows.forEach(r => {
+    const srcType = r.source === 'manual_promote' ? 'warn'
+                  : r.source === 'operator_override' ? 'info'
+                  : 'neutral';
+    html += '<tr>';
+    html += '<td style="font-size:11px;white-space:nowrap">' + ocTimeShort(r.applied_at) + '</td>';
+    html += '<td>' + ocChip(r.engine_mode || '--', 'neutral') + '</td>';
+    html += '<td>' + ocEsc(r.strategy_name || '--') + '</td>';
+    html += '<td>' + ocChip(r.source || '--', srcType) + '</td>';
+    html += '<td style="max-width:260px;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + ocEsc(r.reason || '') + '">' + ocEsc(r.reason || '') + '</td>';
+    html += '<td style="white-space:nowrap">';
+    html += '<button class="oc-btn" style="padding:2px 8px;font-size:10px" onclick="showStratHistDiff(' + r.id + ')">Diff</button> ';
+    html += '<button class="oc-btn" style="padding:2px 8px;font-size:10px" onclick="showStratHistEffect(' + r.id + ')">7d Effect</button>';
+    html += '</td>';
+    html += '</tr>';
+  });
+  ocSetHtml('sh-tbody', html);
+}
+
+function showStratHistDiff(rowId) {
+  const row = _shRows.find(r => r.id === rowId);
+  if (!row) {
+    ocSetHtml('sh-detail-box', '<div class="oc-chip oc-chip-bad">Row not in cache — refresh first</div>');
+    return;
+  }
+  const prev = row.prev_params_json || {};
+  const cur = row.params_json || {};
+  const keys = Array.from(new Set([...Object.keys(prev), ...Object.keys(cur)])).sort();
+  let html = '<div class="oc-card" style="padding:10px;background:var(--bg)">';
+  html += '<div style="font-weight:600;margin-bottom:6px">Diff: ' + ocEsc(row.strategy_name) + ' (' + ocEsc(row.engine_mode) + ') @ ' + ocTimeShort(row.applied_at) + '</div>';
+  html += '<div style="font-size:11px;color:var(--text-dim);margin-bottom:8px">Reason: ' + ocEsc(row.reason || '-') + ' · Source: ' + ocEsc(row.source || '-') + '</div>';
+  if (!keys.length) {
+    html += '<div style="color:var(--text-dim);font-size:11px">No params recorded</div>';
+  } else {
+    html += '<table class="oc-table"><thead><tr><th>Param</th><th>Prev</th><th>Current</th></tr></thead><tbody>';
+    keys.forEach(k => {
+      const a = JSON.stringify(prev[k]);
+      const b = JSON.stringify(cur[k]);
+      const changed = a !== b;
+      html += '<tr' + (changed ? ' style="background:rgba(210,153,34,0.06)"' : '') + '>';
+      html += '<td style="font-size:11px">' + ocEsc(k) + '</td>';
+      html += '<td style="font-family:ui-monospace,monospace;font-size:11px">' + ocEsc(a != null ? a : '-') + '</td>';
+      html += '<td style="font-family:ui-monospace,monospace;font-size:11px' + (changed ? ';color:var(--yellow);font-weight:600' : '') + '">' + ocEsc(b != null ? b : '-') + '</td>';
+      html += '</tr>';
+    });
+    html += '</tbody></table>';
+  }
+  html += '</div>';
+  ocSetHtml('sh-detail-box', html);
+}
+
+async function showStratHistEffect(rowId) {
+  ocSetHtml('sh-detail-box', '<div class="oc-loading">Loading 7d effect...</div>');
+  let d;
+  try { d = await ocApi('/api/v1/strategist/history/' + rowId + '/effect'); } catch(e) { d = null; }
+  if (!d || !d.data) {
+    ocSetHtml('sh-detail-box', '<div class="oc-chip oc-chip-bad">Failed to load effect</div>');
+    return;
+  }
+  if (d.data.degraded) {
+    ocSetHtml('sh-detail-box', '<div class="oc-chip oc-chip-warn">Degraded: ' + ocEsc(d.data.reason || 'unknown') + '</div>');
+    return;
+  }
+  const row = d.data.row || {};
+  const eff = d.data.effect || {};
+  const pnlClass = ocPnlClass(eff.net_pnl);
+  let html = '<div class="oc-card" style="padding:10px;background:var(--bg)">';
+  html += '<div style="font-weight:600;margin-bottom:6px">7-day Effect: ' + ocEsc(row.strategy_name || '-') + ' (' + ocEsc(row.engine_mode || '-') + ')</div>';
+  html += '<div style="font-size:11px;color:var(--text-dim);margin-bottom:8px">Since apply @ ' + ocTimeShort(row.applied_at) + '</div>';
+  html += '<div class="oc-metrics">';
+  html += '<div class="oc-metric"><div class="oc-metric-label">Fills</div><div class="oc-metric-val">' + (eff.fill_count || 0) + '</div></div>';
+  html += '<div class="oc-metric"><div class="oc-metric-label">Net PnL</div><div class="oc-metric-val ' + pnlClass + '">' + ocMoney(eff.net_pnl, 4) + '</div></div>';
+  html += '<div class="oc-metric"><div class="oc-metric-label">Win Rate</div><div class="oc-metric-val">' + ocPct(eff.win_rate) + '</div></div>';
+  html += '</div>';
+  html += '<div style="font-size:10px;color:var(--text-dim);margin-top:8px">Window: ' + ocTimeShort(eff.window_start_ms) + ' → ' + ocTimeShort(eff.window_end_ms);
+  if (eff.first_fill_ts) html += ' · first fill ' + ocTimeShort(eff.first_fill_ts);
+  if (eff.last_fill_ts) html += ' · last fill ' + ocTimeShort(eff.last_fill_ts);
+  html += '</div></div>';
+  ocSetHtml('sh-detail-box', html);
+}
+
 async function loadAll() {
-  await Promise.allSettled([loadStrategies(), loadOrchestrator(), loadScanner(), loadDeployed(), loadIntents()]);
+  await Promise.allSettled([
+    loadStrategies(), loadOrchestrator(), loadScanner(), loadDeployed(), loadIntents(),
+    loadStrategistSummary(), loadStrategistHistory()
+  ]);
 }
 
 loadAll();
