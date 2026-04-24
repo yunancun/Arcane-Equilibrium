@@ -48,6 +48,19 @@
 
 ## 關鍵教訓（任務完成後追加）
 
+### 2026-04-24：策略・風控・數學全面 audit
+- **ATR P0-13 修復確認有效**：`atr(high, low, close, 14)` 用 Kahan summation + Wilder's smoothing 實作正確，且 `tick_pipeline/pipeline_helpers.rs::build_exit_feature_row` + `step_6_risk_checks.rs` 都已從 `kline_manager.get_ohlcv("1m", 20)` + `atr(_, _, _, 14)` 取 atr_pct（~0.05-0.5% scale），舊 per-tick `compute_atr_pct` deprecated。phys_lock Gate 3 peak/ATR 閾值在新 scale 下健康運作。
+- **Donchian leak-free bias 還沒修 runtime**：CLAUDE.md F3 retract 已記述 measurement bias 在 leak-free `shift(1)` 下消失，但 `openclaw_core/src/indicators/trend.rs::donchian` 視窗 `&high[n-period..n]` 仍含 current bar，`bb_breakout/mod.rs:532` Hard mode 仍做 current-bar-inclusive breach 判定。P1-11 Phase 2 backlog 需修 `&high[n-period-1..n-1]`（或加 shift 參數）。
+- **v2 `physical_micro_profit_lock_v2` 25 測試 + 設計文檔對齊**：Gate 1 Hold（非 Lock）、Non-linear giveback fn NaN/Inf 輸入 clamp 到 0、volatility normalisation 經 peak_atr_norm 雙路驗證。設計 + 實作雙重嚴謹，無 finding。
+- **Kelly tier 邊界 50 / 200 trades 寫死不在 config**：`ml/kelly_sizer.rs:153-159` 分母 `8/6/4` 全 hardcoded；operator 前置 memory「200+ 筆同 regime」意圖 — 要 regime shift 重置 sample timer 沒 knob。
+- **Guardian 裁決數學全硬編碼**：`risk_score` 增量 `0.4/0.3/0.4/0.15/0.35` + verdict threshold `0.3` + `leverage_ratio > 2.0` 寫死；與 E-Merge-4「GuardianConfig = RiskConfig 派生視圖」精神對立，operator 無 IPC/TOML 調裁決敏感度路徑。
+- **grid_trading OU σ 估計有偏**：`grid_helpers.rs:128 sigma = sqrt(Σ Δx²/n)` 是 raw second moment，非 residual std；weak drift 期 mean_dx≠0 會高估 σ → ou_step 偏大。對 `b >= 0` fallback 路徑無影響（擋趨勢期），但 ranging 期 σ 高估導致 levels 過鬆、fewer fills。
+- **cost_gate safety margin 30%（`fee_bps/wr*1.3`）寫死**：三個 cost_gate 變體（paper/moderate/live）都用同一 literal `1.3`，EDGE-P2-3 PostOnly 降 fee 後此 margin 是否過嚴需重驗。
+- **SLIPPAGE_TIERS 整張表 const**：`intent_processor/mod.rs:229-235` 五層硬編碼，IPC 不可改；altseason vs bear 流動性差異需 config table。
+- **FastTrack 閾值 15% / 5% / 3σ 寫死，僅 90% margin 合法寫死（Bybit MMR 物理常數）**：fast_track.rs:64 comment 正確文件化為何 90% 不可 auto-scale；但 74/89 的 15% 閃崩 + 5%+3σ 是風控參數不是物理常數，應 config 化。
+- **Bb_breakout ctor vs params.default `cooldown_ms` 分歧（600_000 vs 300_000）**：潛在 BUG candidate —— 取決於 factory 是否在 cold-boot 跑 `update_params(Default::default())`，現場生效值需驗證。
+- **ewma_vol `(w[1]/w[0]).ln()` 無 w[0]>0 guard**：與 hurst() 的 filter 不一致，零成本修補。
+
 ### 2026-04-20：EDGE-P2-3 Phase 1B — maker timeout & paper fill sim
 - **Timeout 應 < cooldown，不是 ≥ cooldown。** grid entry 信號 half-life = 秒級（瞬時價格穿越，非 regime 信號）。timeout 1.5× 的提議錯在方向：舊未成交單會與下一個 cooldown 週期的新 tick 評估重疊，造成 stale order 與 fresh intent 雙重 exposure。正確 = 0.5–0.75× cooldown。
 - **Timeout 要 scale with A3 effective cooldown，不是 base。** 趨勢越強 → maker 單在 1 bps offset 上越難 fill（單邊行情很少回探），同比例拉長 timeout 給 resting order 一個 fill 窗口才合理。推薦公式 `min(0.75 × effective_cooldown, 300_000)`。
@@ -72,3 +85,4 @@
 | 2026-04-02 | [自適應參數架構審查](workspace/reports/2026-04-02--adaptive_params_architecture_review.md) | PROCEED WITH REVISIONS — 確定性適應立即做，統計適應暫緩，核心問題是策略無 edge |
 | 2026-04-03 | [外部改善報告數學驗證](workspace/reports/2026-04-03--improvement_report_math_validation.md) | 6/6 兼容，0 衝突，3 採用 / 2 疊加 / 1 暫緩 |
 | 2026-04-20 | [EDGE-P2-3 Phase 1B timeout & paper sim](workspace/reports/2026-04-20--edge_p2_3_phase1b_timeout_and_paper_sim.md) | timeout = 0.75× effective_cooldown (base 45s / cap 300s)；paper = (a) touch-based + 4 項 bias 保護 |
+| 2026-04-24 | [策略・風控・數學全面 audit](workspace/reports/2026-04-24--strategy_risk_math_audit.md) | 16 findings（1 HIGH leak-free donchian, 5 HIGH 硬編碼 fast_track/guardian/cost_gate/slippage/kelly, 11 MEDIUM/LOW），P0 修補 = donchian shift(1) + StopConfig-RiskConfig drift 文件化；P1 = cost_gate 1.3 safety margin / fast_track thresholds / Guardian scoring weights config 化 / Grid OU σ residual-based |

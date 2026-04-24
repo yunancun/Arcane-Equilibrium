@@ -123,3 +123,53 @@
 | 2026-03-31 | Sprint 5b 詳細派發計劃 | workspace/reports/2026-03-31--sprint5b_dispatch.md |
 | 2026-03-31 | Wave 5 完成進度報告 + 下一步安排 | workspace/reports/2026-03-31--wave5_completion_progress_report.md |
 | 2026-03-31 | Wave 6 正式派發計劃（Sprint 0~2）| workspace/reports/2026-03-31--wave6_dispatch.md |
+
+## 2026-04-24 TODO.md 全面 Audit（PM 視角）
+
+### 關鍵發現
+
+1. **edge_estimates.json 與 CLAUDE.md 嚴重不符**
+   - CLAUDE.md 宣稱 162 cells，實際僅 1 cell（ORDIUSDT grid）；mtime 2026-04-20 23:50（4 天前）
+   - **影響**：P0-14 / EDGE-DIAG-1 / P1-14 等 4 個 TODO 的前提認知全有誤差
+   - **行動**：Linux operator 此週驗證產能原因（假說 A:僅 ORDIUSDT 跑 / B:scheduler crash / C:JSON 寫入 bug）
+
+2. **被動等待 TODO 缺乏自動化監控**
+   - P0-2 21d demo、P1-7 C 訓練資料兩項關鍵被動等待無 explicit healthcheck 引用
+   - **行動**：補 healthcheck 登記；P0-2 應有 demo-alive check，P1-7 C 應有 automated trigger 判「何時達 200」
+
+3. **counterfactual_exit_replay 失敗風險（HIGH）**
+   - EDGE-DIAG-1 §3 item #3 須在 Linux 驗證「phys_lock 開了會贏嗎」
+   - **影響**：若答案 NO，DUAL-TRACK Phase 1-3 整體架構需重評，Live 延遲 2-4 週
+   - **行動**：此週優先運行 counterfactual_exit_replay.py，開決策會
+
+4. **DUAL-TRACK-EXIT-1 與日常 P0/P1 混編導致視覺混亂**
+   - DUAL-TRACK 本身結構優秀（Step 0 + Phase 1-4 + QA 守衛），但 50+ sub-TODO 與 P0/P1 交織
+   - **建議**：應分離為「Live 路徑」+ 「當週活躍工作」+ 「主軸 DUAL-TRACK」+ 「邊界增強」四個視圖（見審計報告§六）
+
+5. **多 Agent 協作議題散落，無統整 TODO**
+   - ExecutorAgent shadow→live 切換、層 2 推理循環、Conductor 實作均無 TODO
+   - **行動**：新增「G-1/R-06 多 Agent 全連接」專項 P2 TODO
+
+### 風險優先級（此週必解）
+
+| 優先級 | 項目 | 估時 | Owner |
+|---|---|---|---|
+| **P0** | 驗證 edge_estimates 產能 + RCA | 1h | Linux op |
+| **P0** | 運行 counterfactual_exit_replay + 決策會 | 4h | Linux op |
+| **P1** | 補 P0-2 clock healthcheck | 2h | PM/E1 |
+| **P1** | 驗證 P1-7 C pooled label 改進已部署 | 1h | E1 |
+| **P2** | 重構 TODO.md 視圖（新分類方案） | 2h | PM |
+
+### TODO.md 健康度評分
+
+- **優先級分層**：8.5/10（P0/P1/P2/P3/P4 清晰，依賴映射完整）
+- **依賴關係**：7.5/10（邏輯正確，但 DUAL-TRACK 混編降低可視性）
+- **被動等待監控**：6/10（healthcheck 80% 登記，但 P0-2/P1-7 缺引用）
+- **4 大議題覆蓋**：Edge 85/ 頻率金額 65 / 虧損 90 / AI-ML 75（整體 78/100）
+
+### 決策記憶
+
+- **不改 TODO 內容**，待 operator 根據 P0 兩項風險決策後再重構
+- **此週關鍵動作**：edge_estimates 產能確認 + counterfactual replay 運行 + healthcheck 補登
+- **Live 時間保守估計**：若 counterfactual PASS，W24 末；若需重評，延至 W26
+

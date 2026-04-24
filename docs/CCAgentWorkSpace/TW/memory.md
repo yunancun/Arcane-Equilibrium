@@ -1,17 +1,37 @@
 # TW Memory — 工作記憶
 
-## 項目上下文（2026-03-31）
+## 項目上下文（2026-04-24 刷新）
 
-- 當前 Wave：Wave 4 完成，Wave 5 規劃中
-- 測試基準：2555 passed
-- 系統模式：demo_only
+- 當前 Wave：Live_Ready ⚠️，EDGE-DIAG-1 Phase 1+2+4 + FUP-IPC live；P1-11 全工待 `--rebuild` 部署 FIX-26-DEADLOCK-1
+- 測試基準：engine lib **1980 / 0 failed**（+39 vs 2026-04-23 baseline 1941）+ pytest 2996
+- 系統模式：demo（P0-2 21d demo 期，~2026-05-07 解鎖）
+- binary mtime：2026-04-24 02:06（engine PID 884467；本 session CC 不動 runtime）
+- Mac dev-only：platform=darwin，engine/pytest real 驗證透過 ssh trade-core 觸發
 
 ## 工作記憶
 
-（首次啟動，記憶從這次任務開始積累）
+- **TW 角色 2 次審計**：04-12（全量文檔盤查，10 個 P0-P3 項）+ 04-24（窗口 04-01 ~ 04-24 重複/合併/死文件盤查）
+- **03-30 / 04-12 既有審計洞察**：CLAUDE.md §七衛生 + 同步規則 = TW 角色最常 catch 的違規源
+- **TW 工作節奏**：優先 P1（誤導風險）> P2（歸檔 hygiene）> P3（長期優化）
 
 ## 報告索引
 
 | 日期 | 任務 | 文件位置 |
 |------|------|---------|
-| — | — | — |
+| 2026-04-12 | 全量文檔盤查（445 .md + 38 .txt，47 dir） | `docs/CCAgentWorkSpace/TW/2026-04-12--document_audit_report.md` |
+| 2026-04-24 | 04-01 ~ 04-24 窗口重複/合併/死文件審計（539 .md + 52 .claude_reports） | `docs/CCAgentWorkSpace/TW/workspace/reports/2026-04-24--file_dedup_merge_audit_apr01_apr24.md` |
+
+## 審計結論摘要（2026-04-24）
+
+**整體健康**：中等偏好。P0 = 0（無誤導性矛盾）；P1 = 7 組（需合併 / 補 daily_summary / 更新 meta-doc）；P2 = 11 組可歸檔；P3 = 4 個死文件候選。
+
+**P1 重點**：
+1. 2026-04-18 / 19 / 20 / 21 / **22**（碎片最多，7 個）/ 24 缺 daily_summary
+2. CLAUDE_CHANGELOG.md 1976 行仍超 1200 行硬上限（中段 04-10 ~ 04-20 未拆）
+3. KNOWN_ISSUES.md 停在 04-12（10 OPEN 項未 review，現實已閉合多個）
+4. CLAUDE_REFERENCE.md 停在 04-12（缺 H1-H5 非 stub 正名 / 5-Agent runtime state / Mac dev）
+5. §三 04-22 + 04-23 明細未歸檔 snapshot（應新建 `archive/2026-04-23--claude_md_section3_snapshot.md`）
+6. `g_sr1_signal_tightening_plan_v2.md` 已被 v2.5 superseded，未歸檔
+7. `g2_funding_arb_clean_edge.md` + `v2.md` 同議題 2 份可合為 closeout
+
+**上輪 04-12 P0 閉合進度**：3 個 DEPRECATED 已進 archive ✅；arch_rc1_1c 雙副本已消 ✅；04-09 ~ 04-15 連續 daily_summary ✅。但 CLAUDE_REFERENCE / KNOWN_ISSUES / CHANGELOG 倒退（12 天未 sync）。
