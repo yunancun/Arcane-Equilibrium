@@ -1,13 +1,13 @@
 # OpenClaw TODO — 工作清單（v3 · 單一時間軸版）
 
-**最後更新**：2026-04-24 23:41 CEST（Wave 2 G5-07 + G3-01 RFC + G7-09 三合一 deploy）
+**最後更新**：2026-04-25 00:05 CEST（Wave 2 batch 1 + batch 2 全部完成：G5-05/07 + G3-01 RFC + G7-01 + G7-09）
 **版本**：v3（Wave 線性版；廢除雙軌 P0-P4 章節，P0/P1/P2 降為每項 tag）
 **舊版歸檔**：v2 `docs/archive/2026-04-24--todo_v2_dual_axis_snapshot.md`（458 行，Wave+P 雙軌）· v1 `docs/archive/2026-04-24--todo_v1_refactor_snapshot.md`（328 行）· v0 `docs/archive/2026-04-24--todo_snapshot_pre_refactor.md`（700 行）
 **簽核**：PM Approved FIX-PLAN v2 → [Sign-off](docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-24--FixPlan_v2_PMApproval.md)
 **基礎方案**：[FIX-PLAN v2](docs/CCAgentWorkSpace/PA/workspace/reports/2026-04-24--4.24TodoAudit_FixPlan_v2.md) · [10-Agent audit 索引](docs/audits/2026-04-24--todo_refactor_audit.md)
 
 **Engine**（採集 2026-04-24 23:55 CEST · ssh verify 後**重大發現**）：engine PID **1382653**（23:52 start 由 `restart_all.sh` 重啟，binary 仍是 23:41 G7-09 build）· HEAD `0f59e7e` · engine process **alive**；`pipeline_snapshot.json` 45min 沒更新 = **news guardian halt** fired at 23:53 CEST（severity=0.85 headline_hash `8ce179191752ac22`），`news::guardian_impl.rs:84` 把共享 `session_halted` atomic 設 true 之後無自動 reset 路徑，tick pipeline 不寫 snapshot → watchdog `snapshot_age > 45s` **誤判 crash 觸發 auto-restart 循環** · **先前稱「crashloop #6/12h」實質是 news-halt false-positive**：10:18/12:53/20:35/23:10 四次 watchdog auto-restart 都是此 pattern，engine 本身沒崩潰 · **G6-FUP-NEWS-HALT-DEDUP** 新增（見下方 Wave 2 G6 欄）
-**測試基準（2026-04-24）**：engine lib **1995 / 0 fail**（baseline 1992 + G7-09 3 tests）· pytest 2996
+**測試基準（2026-04-25）**：engine lib **2003 / 0 fail**（1995 + G7-01 8 new tests - test bug fixed by e4b63b4）· pytest 2996
 **21d demo 時鐘**：起算 2026-04-16 22:16 → 解鎖 2026-05-07
 
 ---
@@ -16,7 +16,7 @@
 
 **Wave 1 進度**：10/11 完成；剩 G1-04 P1 背景（依賴 PostOnly demo 累積 + **G7-09 已 deploy** 需 ~1w 後 compute）。
 
-**Wave 2 進度**：3/若干 完成（G5-07 ✅ + G3-01 RFC ✅ + G7-09 ✅）；G7-05 blocked on data（~05-01+）；G3-02/03/04 / G4-01~03 / G5-02/04/05 / G7-01~04/06/07/08 未開工。
+**Wave 2 進度**：5/若干 完成（G5-05 ✅ + G5-07 ✅ + G3-01 RFC ✅ + G7-01 ✅ + G7-09 ✅）；G7-05 blocked on data（~05-01+）；G6-FUP-NEWS-HALT-DEDUP-1 🔴P0 阻塞 G1-04 / G7-09 實效驗證；G3-02/03/04 / G4-01~03 / G5-02/03/04/06 / G7-02/03/04/06/07/08 未開工。
 
 **本週 Top 4**（按順序）：
 
@@ -230,7 +230,7 @@ ssh trade-core "cd ~/BybitOpenClaw/srv && python3 helper_scripts/db/passive_wait
 | **G5-02** | 🟠P1 | `live_session_routes.py` 1449 行拆 | 無 | E5+E1 / E2 | 1-2d | <1200 lines |
 | **G5-03** | 🟠P1 | `instrument_info.rs` 1975 行拆 | 無 | E5+E1 / E2 | 1-2d | <1200 lines |
 | **G5-04** | 🟡P2 | `ai_service.py` 1258 行拆 | 無 | E5+E1 / E2 | 1d | <1200 lines |
-| **G5-05** | 🟡P3 | `bb_reversion.rs` 1143 行 sibling 拆 | 無 | E5 | 1h | <1200 lines |
+| **G5-05** | ✅完成 | `bb_reversion.rs` 1143 → 3 sibling：mod.rs 433 + params.rs 287 + tests.rs 460（全 <800 §九 warning 線）；`positions`/`cooldown`/`persistence` 由 private → `pub(crate)` 讓 sibling tests.rs mutate；`BbReversionParams` 由 `pub use params::BbReversionParams` 保留外部 path；bb_reversion filter 20/20 + stress_integration 35/35 全綠；Linux release 2003/0 | 無 | E5 | 完成 2026-04-25 | [G5-05 report](.claude_reports/20260425_000438_g5_05_bb_reversion_split.md)（commit `8523946`）|
 | **G5-06** | 🟡P2 | 其他 5 檔（bybit_rest_client / order_manager / startup / resting_orders / risk_config） | 無 | E5+E1 / E2+E4 | 5-8d 全部 | all <1200 |
 | **G5-07** | ✅完成 | `event_consumer/tests.rs` 1298→拆至 tests/ 6 sibling：mod.rs 298（shared helpers + 8 util tests）· handlers_paper_cmd 371 · exit_config_ipc 214 · governor_override 160 · cross_engine 123 · reconciler 89 · submit_order 76；全 <1200；42 tests 逐字保留；Linux release 1992/0（baseline 不動）；0 production file touched | G1-02 | E5+E1 / E2+E4 | 完成 2026-04-24 | [G5-07 report](.claude_reports/20260424_233852_g5_07_tests_split.md)（commit `913b536`）|
 
@@ -242,7 +242,7 @@ ssh trade-core "cd ~/BybitOpenClaw/srv && python3 helper_scripts/db/passive_wait
 
 | ID | Tag | 項目 | 前置 | 負責修/驗 | 工時 | 完成標準 |
 |---|---|---|---|---|---|---|
-| **G7-01** | 🟠P1 | Kelly 分級 tier boundaries 參數化（50/200 dividers TOML） | 無 | QC+E1 / FA | 1d | TOML config 生效 |
+| **G7-01** | 🟡surface ready, router 未 wire | Kelly 分級 tier boundaries 參數化 — `KellyConfig.young_threshold` / `mature_threshold` 默認 50/200 + `validate()`（拒 0 / 逆轉）；`RiskConfig.kelly` mirror struct + TOML `[kelly]` 三環境補齊（demo/live/paper）；`kelly_sizer.rs:153-159` fractional-Kelly tier branch 改讀 config；+8 unit tests（kelly_sizer 4 + risk_config 4）；Linux release 2003/0 ✅ · **Caveat**：`set_kelly_config()` 在 router callsites 尚未 wire（FA L3 audit 標「未啟用」）→ 新 TOML 尚未 flow 到 runtime，defaults 保持當前行為；wiring 為後續任務（可能 part of G4-01 labels work） | 無 | QC+E1 / FA | 完成 surface 2026-04-25（wiring 未做）| [G7-01 report](.claude_reports/20260425_000414_g7_01_kelly_tier_config.md)（commits `42758e7` feature + `e4b63b4` test fix）|
 | **G7-02** | 🟠P1 | EWMA Vol lambda 參數化（per-timeframe） | 無 | QC+E1 | 0.5d | λ configurable |
 | **G7-03** | 🟠P1 | Hurst + Hysteresis 整合（6-period lag） | 無 | QC / FA+MIT | 2-3d | R/S analysis live |
 | **G7-04** | 🟠P1 | CUSUM 策略衰減監控 | 無 | QC+E1 | 1-2d | σ-based slack/threshold |
