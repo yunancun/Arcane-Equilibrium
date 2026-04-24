@@ -117,3 +117,57 @@
 | 2026-03-31 | FA-2/3/4 深度審計 | workspace/reports/2026-03-31--fa_deep_audit.md |
 | 2026-03-31 | Wave 5 功能 Gap 分析 | workspace/reports/2026-03-31--wave5_gap_analysis.md |
 | 2026-03-31 | Wave 5 功能驗收匯報 | workspace/reports/2026-03-31--wave5_functional_acceptance.md |
+
+## 2026-04-24 全面 Audit 發現（TODO.md 4.24 版本）
+
+### FA-13 PostOnly 配置反向（高優先度）
+- **發現**：CLAUDE.md §三 敘述 `demo=true, live=false`，實際配置反向
+  - `risk_config_demo.toml:40 post_only_limit = false` ❌
+  - `risk_config_live.toml:42 post_only_limit = true` ❌
+- **影響**：demo 環境無 PostOnly 費用控制，live 環境反向啟動（違反保守原則）
+- **建議**：operator 確認設計意圖並修正 TOML；同時修正 CLAUDE.md 敘述
+- **追蹤**：TODO.md 應新增「EDGE-P2-3 PostOnly 配置驗証」P0 項
+
+### FA-14 edge_estimates.json 嚴重不足（高優先度）
+- **發現**：`_meta.n_cells=1`（grid_trading::ORDIUSDT），遠低於預期 135-162 cells
+  - mtime: 2026-04-20 23:50
+  - grand_mean_bps: -45.7（負）— 符合當前 edge 危機狀態
+- **根本原因**：edge_estimator_scheduler.py daemon 運行或 labels 累積速度遠不及預期
+- **影響**：cost_gate / DL / JS 機械依賴充分邊際數據；1 cell 無法支撐 5 策略決策
+- **建議**：
+  1. 檢查 edge_estimator_scheduler 是否持續運行（cron/daemon）
+  2. 確認 labels 累積進度（P1-7 C 當前 47/200）
+  3. 若需加速，考慮人工觸發回填或提高 scheduler frequency
+- **追蹤**：與 P1-7 LEARNING-PIPELINE-DORMANT-1 綁定；可能需延後 Phase 5 重評
+
+### FA-15 StrategistAgent/ExecutorAgent 檔案位置異常（中優先度）
+- **發現**：CLAUDE.md 敘述位置 `program_code/control_api_v1/app/`，實際位置 `program_code/exchange_connectors/bybit_connector/control_api_v1/app/`
+- **影響**：無法驗證 StrategistAgent.shadow=False、ExecutorAgent._shadow_mode=True 預設值
+- **根本原因**：DEDUP-PY-RUST Tier B Wave A-D 拆分後位置改變；CLAUDE.md §三 敘述未同步更新
+- **建議**：補查新位置、驗證預設值、更新 CLAUDE.md 敘述
+- **追蹤**：文檔準確度 P2 項
+
+### FA-16 Track P v2 T4 wiring 無法定位（中優先度）
+- **發現**：搜 `physical_micro_profit_lock_v2` 和 `TRACK-P-T4-WIRING` 無定位結果
+- **推測**：實現位置可能在 `exit_features/` 或 `tick_pipeline/` 層，但檔案名或函數名異於搜尋項
+- **建議**：補查 `grep -r "micro_profit\|phys_lock\|Priority 6" rust/openclaw_engine/src/{exit_features,tick_pipeline,signal_engine}/*.rs`
+- **影響**：無法驗證 Priority 6 T4 closure 是否真實接線
+
+### FA-17 INFRA-PREBUILD-1 Part B 函數名確認
+- **發現**：`model_registry.py` 430 行（含 tests）；但搜 `resolve_latest_production_artifact` 無結果
+- **推測**：函數名可能為 `resolve_latest_production` 或在 OnnxModelManager 內，需補查
+- **建議**：補查 `grep -r "latest.*production\|resolve.*artifact" rust/openclaw_engine/src/ml/`
+
+### 完全驗證通過的 6 項
+- EDGE-DIAG-1-FUP-IPC（ipc_server/handlers/risk.rs:92-98 全 7 欄位）
+- P1-11 FIX-26-DEADLOCK-1（bb_breakout/mod.rs:410-414 auto-clear + saturating_add）
+- INFRA-PREBUILD-1 Part A shadow（shadow_exit_writer.rs 存在，dormant 預期）
+- INFRA-PREBUILD-1 Part B Guard A（V023 DO block 驗證完整）
+- Phase 4 counterfactual cron + [11]（healthcheck 3 態正確）
+- engine_watchdog（watchdog.py 3-strike 回滾完整）
+
+### 審計等級調整
+- 前期 Wave 5 評級 B → 今日 B（功能實現 70% 完整，文檔準確度 60%）
+- 關鍵瓶頸：edge_estimates 充分性 + PostOnly 配置一致性 + 文檔同步
+- 下次審計應重點：P1-7 labels 累積進度、TOML 配置驗証、檔案位置對帳
+
