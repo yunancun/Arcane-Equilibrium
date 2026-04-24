@@ -241,12 +241,13 @@ git status && git log --oneline -5
   - ~30-50 LoC 單 file，零 runtime 風險
   - **對齊 CLAUDE.md §七 強制規則「被動等待 TODO 必附 healthcheck」**（2026-04-23 新增）— Phase 3 deferral 是典型被動等待，Phase 4 本質即該規則要求的 check function
 
-- [ ] **EDGE-DIAG-1-FUP-IPC（P2，QC round 1 揭露）** — `ExitConfig` 加 IPC hot-reload 路徑
+- [x] **EDGE-DIAG-1-FUP-IPC（P2，QC round 1 揭露）** ✅ 2026-04-24 — `ExitConfig` 加 IPC hot-reload 路徑
   - 現狀：`rust/openclaw_engine/src/ipc_server/handlers/risk.rs:42-138` IPC `update_risk_config` 只暴露 21 legacy fields，**零個 `exit.*`**；`ConfigStore<RiskConfig>` 用 ArcSwap 但僅 bootstrap load，無 SIGHUP 路徑。CLAUDE.md §三「`missing_edge_fallback_bps` hot-reload 可調」claim 過期。
   - 修：加 7 個 `exit.*` 欄位到 `IpcRiskUpdate` struct + handler parse → `ConfigStore::apply_patch` + `with_toml_persist`（~15 LoC + 1 test）；同步更正 CLAUDE.md §三
   - **價值**：Phase 3 部署後任何 fallback 調整 < 60s 可逆（非 rebuild ~3 min）
   - **優先級**：P2；非 blocker；做在 Phase 3 前更安全
   - 估 ~1d
+  - **完成**：`PipelineCommand::UpdateRiskConfig` + `ipc_server/handlers/risk.rs` + `event_consumer/handlers/risk.rs` + `risk_store.apply_patch`（validate() 全或無 rollback）；+2 regression tests（round-trip + validate-reject）；CLAUDE.md §三 sentence 已更正
 
 **關聯**：P0-3 Phase 5 edge 重評（前置）· P1-10 EDGE-P2-3 PostOnly 1w 觀察（並行）· DUAL-TRACK Phase 1b counterfactual replay audit（已列）· §P1-14 EDGE-ESTIMATE-BIND-BLOCKED-1（cells 翻正前提）
 
@@ -382,10 +383,14 @@ git status && git log --oneline -5
 - **bb_breakout 根因**：`bb_breakout.rs:457-518` 入場 5 重 AND（squeeze → expansion → volume → Donchian → persistence）+ 時序要求過嚴；14d demo 0 fills。
 - **bb_reversion 根因**：BB squeeze + mean-reversion 兩個 AND 條件下 demo 14d **僅 8 signal → 12 intents → 5 fills（阻擋率 37.5% 來自 liquidity / timing，非 Guardian）**；signal 產量本身太低使樣本不足以做統計學習（P1-13 SAMPLE-FLOOR-GAP-1 的 bb_reversion 1 RT 數據反映此結構）。
 - **下一步**：
-  - (1) ⬜ 閾值 offline backtest — bb_breakout（squeeze 0.025 / expansion 0.035 / volume 1.2）+ bb_reversion（squeeze 寬度 + reversion z-score / band 距離）。需建策略-level backtest harness（Rust `openclaw_core::backtest.rs` 目前是 stop-manager-level，不接策略）；~1-2d 或改走 Python 敏感度腳本 ~0.5d。
+  - (1) 🟡 **Phase 1 完成 2026-04-24 commit `148bd96`**：`helper_scripts/research/bb_breakout_threshold_sweep.py` — 信號級閾值 sensitivity sweep（5 symbols × 14d × 64 combos pooled）。**3 重大發現**（詳 `.claude_reports/20260424_015831_p1_11_threshold_sweep_findings.md`）：
+    - **F1（dormancy 真正根因）**：production `squeeze_bw=0.03` 是 1m BB bandwidth 的 **10× 過大**（BTC 99 分位僅 0.014）→ 不是 5-AND chain 過嚴，是**單一尺度錯位**。任何 1m 市場結構下 0.03/0.04 都不可能觸發完整 squeeze→expansion。production default 可能是為更高 TF（15m/1h）或更高波動 regime 調校。
+    - **F2（信號 vs edge 反直覺）**：top-sharpe combo `squeeze=0.002 / expansion=0.011 / vol=2.0` n=23 fwd30=+0.088%；top-count combo `squeeze=0.003 / expansion=0.005 / vol=1.0` n=255 fwd30=**−0.016%**。信號多 ≠ edge 好。
+    - **F3（Donchian Score 方向可能倒置）**：60 combo 全 `breach_fwd_mean_diff ∈ [-0.004, -0.001]` — Donchian breach 確認反而關聯更差 fwd30。`DonchianMode::Score +bonus on breach` 可能需反向；樣本太小（14d/5 sym）**不足以反轉** production code。
+  - (1) ⬜ **Phase 2 backlog**：(a) sweep 擴 20+ symbols × 30-60 days (b) 加 fee model (round-trip 11 bps taker) 重排 top-N (c) 加 persistence + cooldown 模擬 (d) F3 驗證 — ADX regime 拆分 breach diff，判斷是否需改 Score 方向 (e) rescale Conservative/Aggressive profile 值為 1m-realistic（Balanced==Default 保持 bit-identical）
   - (2) ✅ **2026-04-24 commit `0528d96`+`38a14ca`** Donchian AND→Score/Off 三模式 — `DonchianMode::{Hard, Score, Off}` enum；Hard 預設 bit-identical 基線；Score breach=+donchian_score_bonus（默認 0.15）/ miss=扣同量，由下游合流閘仲裁；Off 跳過 Donchian 完全；熱重載 + validate [0.0, 0.5] + 14 新 tests。
-  - (3) ✅ **2026-04-24 commit `0528d96`+`38a14ca`** aggressive/conservative 分拆 A/B — `BbBreakoutProfile::{Conservative, Balanced, Aggressive}` enum + `BbBreakoutParams::for_profile(profile)` helper；`Balanced == default()` 測試固化；Aggressive squeeze=0.035/expansion=0.040/vol=1.05/persist=30s 建議搭配 `DonchianMode::Score` 做 dormant-rescue 組合；全 3 variant 通過 validate。
-- **狀態**：(2)+(3) ✅ 完成（engine lib 1939→**1956 passed/0 failed**；baseline bit-identical 保留）。(1) 仍 pending — 實驗 (2)+(3) 組合參數需 offline backtest 量化；若 operator 想無 backtest 即試，可直接 IPC patch `donchian_mode='score' + for_profile(Aggressive)` demo observe ≥1w。
+  - (3) ✅ **2026-04-24 commit `0528d96`+`38a14ca`** aggressive/conservative 分拆 A/B — `BbBreakoutProfile::{Conservative, Balanced, Aggressive}` enum + `BbBreakoutParams::for_profile(profile)` helper；`Balanced == default()` 測試固化；**但** 3 profile 種子值在 1m bandwidth 分佈下全為不可觸發範圍（F1）— Phase 2 (e) 需 rescale。
+- **狀態**：(1) Phase 1 🟡 Python sensitivity 完成 / (1) Phase 2 ⬜ backlog / (2)(3) ✅ code 完成。**Operator 可立即用 IPC 熱重載** Phase 1 top combo `{squeeze:0.002, expansion:0.011, vol:1.2, donchian_mode:'off', confluence_as_gate:false}` demo observe ≥1w 校準 sweep 預測（F3 選 `off` 對應 Donchian breach 反向發現；無需 rebuild）。
 - **Followup**：bb_reversion 尚未拆 sibling（`bb_reversion.rs` 單檔 1143 行）+ 未加 profile — (2)+(3) 類似改造可在 `bb_reversion` 落地但目前 scope 只做 bb_breakout，另列獨立條目或併入 E5-P2-4c 邊緣拆分。
 - **優先級**：P1 低 — 不緊急但影響 Phase 5 策略多樣性與 ML 樣本池。
 
