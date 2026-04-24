@@ -3,7 +3,7 @@ from __future__ import annotations
 """
 MODULE_NOTE (中文):
   System / Health legacy 路由（E5-P0-5 拆分自 legacy_routes.py）。
-  包含 12 條只讀路由：
+  包含 13 條只讀路由：
     GET /api/v1/system/overview           — 系統總覽
     GET /api/v1/system/chapter-status     — 章節狀態
     GET /api/v1/system/control-plane      — 控制平面
@@ -11,11 +11,12 @@ MODULE_NOTE (中文):
     GET /api/v1/system/product-families   — 產品族狀態
     GET /api/v1/system/business/daily     — 當日經營指標
     GET /api/v1/system/business/summary   — 完整經營與收益摘要
-    GET /api/v1/system/health             — 健康遙測
+    GET /api/v1/system/health             — 健康遙測（需 auth，完整 snapshot）
     GET /api/v1/system/grafana-health     — Grafana 健康代理
     GET /api/v1/system/audit-summary      — 審計摘要
     GET /api/v1/system/source-context     — 資料源上下文
     GET /api/v1/health/db                 — PostgreSQL 連接池健康檢查
+    GET /api/v1/healthz                   — 輕量 liveness probe（無 auth，監控用）
 
   ★ Monkey-patch 安全：所有 request-time 呼叫透過 `_base.xxx(...)` 取值，不可
     在模組 top-level 捕獲 STORE / envelope_response / get_latest_snapshot。
@@ -220,6 +221,32 @@ def register_system_legacy_routes(app) -> None:
             return {"ok": False, "pool": stats, "probe": str(exc)}
         finally:
             db_pool.put_conn(conn)
+
+    @app.get(
+        f"{settings.api_prefix}/healthz",
+        include_in_schema=False,
+    )
+    def healthz():
+        """
+        Lightweight liveness probe for monitoring scripts / external probes.
+        輕量存活探測，供監控腳本/外部探針使用。
+
+        Intentionally unauthenticated and dependency-free: returns 200 + minimal
+        payload as long as the FastAPI app is alive and serving requests.
+        Use /api/v1/system/health (auth required) for richer telemetry, or
+        /api/v1/health/db for DB pool probe.
+        故意不需 auth 也不依賴下游元件：只要 FastAPI 服務在跑就回 200。
+        如需更完整遙測請打 /api/v1/system/health（需登入），DB 連線探針請打
+        /api/v1/health/db。
+        """
+        import time as _time
+
+        return {
+            "status": "ok",
+            "api_version": settings.api_version,
+            "schema_version": settings.schema_version,
+            "ts_ms": int(_time.time() * 1000),
+        }
 
     @app.get(
         f"{settings.api_prefix}/system/audit-summary",
