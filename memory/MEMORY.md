@@ -26,7 +26,7 @@
 - [LinUCB shadow compare 保留 (2026-04-23)](project_linucb_shadow_compare_retention.md) — Phase 4 子任務 4-06 deferred；`linucb_shadow_compare.py` 保留至 Rust warm-start 實裝或 4-06 降級；同次 audit 已刪 backfill_directive_outcomes
 - [First-detection deadlock 反模式 (2026-04-24)](project_first_detection_deadlock_pattern.md) — `is_none()` guard + 無過期 auto-clear → symbol 永久 dormant；bb_breakout FIX-26-DEADLOCK-1 確認；查其他策略
 - [TODO 10-Agent Audit 重構 (2026-04-24)](project_2026_04_24_todo_refactor.md) — 10 agent 獨立 audit + PA FIX-PLAN（45 findings/6 工作組/4 wave）+ PM Sign-off；舊 TODO 700→新 328 行；3 大 Verified 發現（edge_estimates 1 cell / PostOnly 反向 / Executor shadow hardcoded）
-- [edge_estimator_scheduler 4 天停滯 (2026-04-24)](project_edge_scheduler_stalled.md) — `edge_estimates.json` 實測 1 cell，mtime 2026-04-20 4d 停滯；CLAUDE.md 宣稱 162 cells 嚴重過期；G1-01 立即恢復
+- [edge_estimator_scheduler 停滯→修復 (2026-04-24)](project_edge_scheduler_stalled.md) — ✅ G1-01 同日 operator commits f32629c/abc85c0 + 02:06 --rebuild；現 187 cells / 59 updated/cycle / mtime <30min；JSON 非 `cells{}` nested 而是 strategy::symbol top-level key
 
 ## Working principles & autonomy
 - [Agent 自主權偏好](feedback_agent_autonomy.md) — 用戶只設global止盈止損，Agent自主決定策略/參數/時機/倉位
@@ -51,6 +51,7 @@
 - [Sub-agent 可寫碼（2026-04-18 驗證通過）](feedback_subagent_code_writing_refusal.md) — 2026-04-07 refuse pattern 已解除，2/2 probe 成功；E1 可派並行 sub-agent 寫碼
 - [Meta-doc 改動用 git commit --only 隔絕 index race](feedback_git_commit_only_for_metadoc.md) — CLAUDE.md/TODO.md/docs/memory 等 meta-doc 必用 `git commit --only <file>`；multi-session 下 `git add + commit` 不安全（2026-04-23 同 session 吸收 operator WIP 兩次）
 - [多角色 adversarial review (2026-04-24)](feedback_multi_role_strategic_review.md) — 關鍵決策派 QC+FA+FM+PM 並行獨立 review；實證 EDGE-DIAG-1 Phase 2 catch 3 個 unique blind spots
+- [派 sub-agent 前 fetch + 查遠端 branch (2026-04-24)](feedback_fetch_before_dispatch.md) — Multi-agent 派發前必 `git fetch` + `git branch -r | grep <topic>`；G6-01 被重派教訓（隔壁已開 feature branch 做完）
 
 ## Code & architecture rules
 - [Rust 為唯一交易參數權威](feedback_rust_authoritative_config.md) — 所有交易/風控/模型參數GUI直寫Rust，Python僅只讀
