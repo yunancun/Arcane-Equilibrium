@@ -86,3 +86,51 @@
 | 2026-04-03 | [外部改善報告數學驗證](workspace/reports/2026-04-03--improvement_report_math_validation.md) | 6/6 兼容，0 衝突，3 採用 / 2 疊加 / 1 暫緩 |
 | 2026-04-20 | [EDGE-P2-3 Phase 1B timeout & paper sim](workspace/reports/2026-04-20--edge_p2_3_phase1b_timeout_and_paper_sim.md) | timeout = 0.75× effective_cooldown (base 45s / cap 300s)；paper = (a) touch-based + 4 項 bias 保護 |
 | 2026-04-24 | [策略・風控・數學全面 audit](workspace/reports/2026-04-24--strategy_risk_math_audit.md) | 16 findings（1 HIGH leak-free donchian, 5 HIGH 硬編碼 fast_track/guardian/cost_gate/slippage/kelly, 11 MEDIUM/LOW），P0 修補 = donchian shift(1) + StopConfig-RiskConfig drift 文件化；P1 = cost_gate 1.3 safety margin / fast_track thresholds / Guardian scoring weights config 化 / Grid OU σ residual-based |
+
+### 2026-04-24：TODO.md 全面審計 — Edge 危機診斷 + 統計方法驗證
+
+**審計報告位置**：`workspace/reports/2026-04-24--4.24TodoAudit.md` (435 行)
+
+**主要發現**（分層）：
+
+1. **數據不一致 — edge_estimates.json 陳舊 4 日**
+   - TODO 聲稱 §P0-14「162/162 cells」，實況 n_cells=1 (grid_trading::ORDIUSDT only)
+   - mtime 2026-04-20 23:50，當前 2026-04-24 02:06，未更新 4 日
+   - Proxy cell 注入邏輯 (james_stein_estimator.py:490-496) 存在但 JSON 缺失代理
+   - 可能根因：edge_estimator_scheduler.py cron 未跑，或 JSON 是舊版本未被讀取
+
+2. **grand_mean_bps = -45.7275 無統計意義（n=1 樣本）**
+   - James-Stein 公式在 p < 3 時未定義 (正確) ，但代碼未標記 `is_valid=false`
+   - 單一 cell 的 grand_mean 等於該 cell 的 raw 值，無「跨域平均」意義
+   - QC 建議：當 n_cells < 3 時，grand_mean 改設 NaN 並加 `_meta.is_valid = false`
+
+3. **策略層 edge 結構診斷（可信）**
+   - **Grid Trading**：fee drag 佔 74% 虧損 (~3.5 bps/RT)；PostOnly 改革預期可降 50% (→ 1.75 bps/RT)
+   - **MA Crossover**：R:R 不對稱（avg_win=1.2 bps vs avg_loss=4.7 bps，不匹配）; win_rate 64% 折算為有效 37.8% 
+     - TODO 數字需驗證：淨 -31.3 bps/RT，毛虧損推測 -27.8 bps 無法對齊上述 W/L
+     - 建議查 SQL：SELECT ... WHERE direction=1/−1 驗證平均贏/虧計算
+   - **FundingArb**：邏輯正確 (永續-現貨套利) 但成本未精算，樣本量太低 (n=77 fills)
+   - **BB Reversion/Breakout**：無 edge 數據，信號量過低或純技術指標無 alpha
+
+4. **統計方法正確性評分 8/10**
+   - ✅ James-Stein estimator 公式無誤；per-parameter 多維收縮 (win_rate/avg_win/avg_loss) 合理
+   - ✅ BB breakout sweep 用 ddof=1 (Bessel correction) + df-aware t-critical table，防小樣本膨脹
+   - ✅ Donchian leak-free shift(1) 驗證了測量偏 (F3)，雙軌計算設計優雅
+   - ⚠️ 缺 Bonferroni 修正在代碼層（但代碼註明在報告層應用），OK
+   - 🟡 樣本量不足根本問題：edge cells 平均 n=8.9/135 (grid 1200 RT / 135 cells)，遠低於 30 基準
+
+5. **P0-13 ATR 修復驗證（無法完全驗證，缺 Rust 源碼）**
+   - CLAUDE.md 聲稱 Wilder's ATR (α=1/14)；TODO 稱 atr_pct 0.05-0.5% scale 驗證過
+   - 無 Rust 代碼可讀，建議：測試 10 根 K 線 ATR vs pandas_ta，差異 > 3% 需 hotfix
+
+**關鍵教訓（須記住）**：
+- **Grand mean 統計有效性門檻**：p ≥ 3 個 cells 才能信任 JS 收縮目標，否則回 NaN
+- **Edge estimate 樣本量門檻**：n ≥ 30 per cell (= ~4050 total RT for 135 cells) 才可 bind cost_gate；目前 8.9/cell 是噪音主導
+- **策略層 alpha 缺失是根本問題**：4/5 策略無可解釋的邏輯，PostOnly fee 改革 (grid) 與 R:R 調優 (ma) 可救一部分，但需新策略研究
+- **Win rate 折扣**：勝率本身不等於 PnL 正，需同時看 win_bps / loss_bps 幅度；MA 64% 勝率折算為實質 37.8% 有效勝率示例
+- **Paper → Demo 一致性**：紙盤樂觀偏誤 (optimistic fill, 零 adverse selection) 污染過 edge_estimates；監控 paper/demo fill_rate ratio，超過 ±30% 應警告
+
+**下一審查點**：
+- ≥ 5 月 1 日 （EDGE-DIAG-1 Phase 3 passive-wait 至 clean n≥200）
+- 或 ≥ 5 月 7 日 (21d demo 時鐘解鎖，P0-3 Phase 5 edge 重評)
+

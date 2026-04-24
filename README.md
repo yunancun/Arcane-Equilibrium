@@ -31,7 +31,22 @@ AI Agent 自动交易系统 — 自主扫描 650+ 交易对，智能部署策略
 
 ---
 
-## 当前状态 (2026-04-20 · **Live_Ready ⚠️** · LIVE-GATE-BINDING-1 5-gate 硬鎖生效)
+## 当前状态 (2026-04-24 · **Live_Ready ⚠️** · TODO 10-Agent Audit 重構完成)
+
+**最新更新**：10 個獨立 Agent（PM/FA/PA/CC/QC/QA/AI-E/MIT/E5/BB）並行 audit → PA FIX-PLAN（45 findings/6 工作組 G1-G6/4 wave）→ PM Sign-off Approved → 舊 TODO 700 行歸檔、新 TODO 328 行（精煉 53%，每條帶 audit 指針）
+- audit 索引：`docs/audits/2026-04-24--todo_refactor_audit.md`
+- FIX-PLAN：`docs/CCAgentWorkSpace/PA/workspace/reports/2026-04-24--4.24TodoAudit_FixPlan.md`
+- PM Sign-off：`docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-24--FixPlan_PMApproval.md`
+- 舊 TODO 歸檔：`docs/archive/2026-04-24--todo_snapshot_pre_refactor.md`
+- 新 TODO（按 Wave 1-4 組織）：`TODO.md`
+
+**3 大 Verified 發現**（讀代碼驗證）：
+1. `settings/edge_estimates.json` 僅 **1 cell**（vs CLAUDE.md 宣稱 162），`edge_estimator_scheduler` 4 天未運行
+2. PostOnly 配置 demo=false/live=true **反向**（違反原則 #6）
+3. `executor_agent.py:482` `_shadow_mode=True` hardcoded（違反原則 #3，AI→Rust 執行鏈斷路）
+
+**主路徑**：Wave 1 G1 scheduler+fn 拆（W17/18）→ Wave 2 G3 AI 接線+G5 refactor+G4 ML（W19）→ Wave 3 EDGE-DIAG Phase 3+Phase 1b（W20-W23）→ Wave 4 LG-2/3/4/5+P0-3 決策（W23-W24）→ Live（最早 ~2026-05-23）
+
 
 ```
 系统模式:     Live_Ready ⚠️ — LIVE-P0/P1/P2 代码完整，0 真实 live 流量（历史 43k "live" = LiveDemo）
