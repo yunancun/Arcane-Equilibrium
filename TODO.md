@@ -103,7 +103,7 @@ ssh trade-core "cd ~/BybitOpenClaw/srv && python3 helper_scripts/db/passive_wait
 
 ## ⏩ Wave 1（W17/18 · 4/24→5/08）— 基礎設施解凍【主體完成 — G1-02 E1 實裝待】
 
-**狀態（2026-04-24 8 sub-agent 並行派發後）**：8/9 項完成（G1-02 PA 規劃完成，E1 實裝 4-6h 待）；commit 集中於 feature branch `g1-06-drawdown-auto-revoke`，待 operator merge to main。
+**狀態（2026-04-24 8 sub-agent 並行派發 + operator merge 後）**：8/9 項完成（G1-02 PA 規劃完成，E1 實裝 4-6h 待）；**全 9 commit 已 ff-merge 到 main 並 push origin（HEAD `040a02a`）**。
 
 ### G1 Edge 危機根源修復
 
@@ -136,25 +136,27 @@ ssh trade-core "cd ~/BybitOpenClaw/srv && python3 helper_scripts/db/passive_wait
 
 ### Wave 1 收尾通知（給 operator）
 
-**所有 G6 + G1（除 G1-02 E1 實裝）已完成**，9 commit 集中於 feature branch `g1-06-drawdown-auto-revoke`（push to main 被 sandbox 阻；feature branch 已 push origin）：
+**所有 G6 + G1（除 G1-02 E1 實裝）已完成 + main 已含全部 commit**（feature branch `g1-06-drawdown-auto-revoke` 可清理）：
 
-| Commit | 任務 | 在 main | 在 feature branch |
-|---|---|---|---|
-| `d60ad45` | G6-04 §三 drift rule | ✅ | ✅ |
-| `ff5bf1f` | G6-03 V019/V020 Guard A | ✅ | ✅ |
-| `0da10c0` | G1-05 PostOnly doc | ✅ | ✅ |
-| `d1cdd49` | G1-06 drawdown auto-revoke | — | ✅ |
-| `1cf7ad9` | G6-01 healthcheck 5 fix | — | ✅ |
-| `7908164` | G1-02 PA plan | — | ✅ |
-| `309d5b1` | G6-03 FUP test fixtures | — | ✅ |
-| `9120af7` | G6-01 FUP [Xb] cross-validation | — | ✅ |
-| `a0a4981` | G6-02 [13-15] new checks | — | ✅ |
+| Commit | 任務 |
+|---|---|
+| `040a02a` | Wave 1 收尾 TODO 更新 |
+| `a0a4981` | G6-02 [13-15] new checks |
+| `309d5b1` | G6-03 FUP test fixtures |
+| `9120af7` | G6-01 FUP [Xb] cross-validation |
+| `7908164` | G1-02 PA plan |
+| `1cf7ad9` | G6-01 healthcheck 5 fix |
+| `d1cdd49` | G1-06 drawdown auto-revoke |
+| `0da10c0` | G1-05 PostOnly doc |
+| `ff5bf1f` | G6-03 V019/V020 Guard A |
+| `d60ad45` | G6-04 §三 drift rule |
 
 **Operator 下一步**：
-1. `git checkout main && git merge --ff-only g1-06-drawdown-auto-revoke && git push origin main`（feature branch = main 線性後 6 commit，可 ff merge）
+1. ~~merge feature branch → main~~ ✅ 已完成（ff-merge + push 到 origin/main `040a02a`）
 2. `ssh trade-core "cd ~/BybitOpenClaw/srv && git pull --ff-only origin main && bash helper_scripts/restart_all.sh --rebuild"` 部署 G1-06 drawdown_revoke 到 runtime + 帶入 P1-11 FIX-26-DEADLOCK-1
 3. 設 6h cron `passive_wait_healthcheck.py`（CLAUDE.md §七 強制）
-4. **下一 session**：G1-02 E1 實裝（PA+E1 同 session 緊密，4-6h，按 [PA plan 3 步順序](docs/CCAgentWorkSpace/PA/workspace/reports/2026-04-24--g1_02_event_consumer_split_plan.md#3-拆分順序避免循環依賴-最小-review-surface)）
+4. （可選）清理 feature branch：`git branch -D g1-06-drawdown-auto-revoke && git push origin --delete g1-06-drawdown-auto-revoke fix/g6-01-healthcheck-5-defects`
+5. **下一 session**：G1-02 E1 實裝（PA+E1 同 session 緊密，4-6h，按 [PA plan 3 步順序](docs/CCAgentWorkSpace/PA/workspace/reports/2026-04-24--g1_02_event_consumer_split_plan.md#3-拆分順序避免循環依賴-最小-review-surface)）
 
 ---
 
