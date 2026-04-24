@@ -180,31 +180,68 @@ pub(crate) async fn spawn_strategist_scheduler(
     // engine rebuild silently reverts tuned strategy params to TOML
     // baseline, resetting the AUTO-PROMOTE stability counter forever.
     //
-    // Ordering: we restore BEFORE `tokio::spawn(scheduler.run_forever())`
-    // so the scheduler's first cycle (5 min after spawn) observes the
-    // restored state via `fetch_current_params`. Technically the scheduler
-    // sleeps 5 min before its first cycle so a race is impossible, but
-    // restoring first makes the invariant obvious at the call site.
-    //
     // Fail-soft: DB unavailable / migration V019 not applied → empty vec,
     // log single warn, engine starts normally. The system degrades to
     // pre-PERSIST-1 behaviour (TOML baseline) rather than failing to boot.
     //
-    // STRATEGIST-PARAMS-PERSIST-1（2026-04-23）：spawn scheduler 前先從
-    // DB 恢復上次 tune 好的參數，避免 rebuild 靜默回 TOML baseline 重置
-    // AUTO-PROMOTE 計數器。順序：restore → spawn（雖然 scheduler 5min 後
-    // 才首跑、無 race，但顯式排序讓 invariant 清楚）。Fail-soft：DB 不可用
-    // or V019 未套用 → 空 Vec，engine 正常啟動（退化到 pre-PERSIST-1 行為）。
+    // BOOT-DEADLOCK-FIX (G6-FUP-TICK-PIPELINE-DEAD-1, 2026-04-25):
+    //   The original implementation `await`d each `rx.await` per restored
+    //   row on the calling (main) thread. But this fn is invoked BEFORE
+    //   `main_pipelines::spawn_demo_pipeline`, so demo's event consumer is
+    //   not yet draining `demo_cmd_tx`. The first `rx.await` therefore
+    //   blocks forever, main thread never reaches pipeline spawn, and the
+    //   engine sits with WS subscribed but tick_pipeline never created
+    //   (no snapshot writes, watchdog reads stale snapshot as "crash").
+    //   This was harmless when `learning.strategist_applied_params` was
+    //   empty (first-boot path: `Ok(_)` arm). It became a hard deadlock
+    //   the moment STRATEGIST-PERSIST-AUDIT-GAP-COUNTER-1 (`d8f5560` /
+    //   `e47b1e9` / `5538e52`, 2026-04-24) wrote the first row.
+    //   Fix: do the DB load synchronously (small bounded query, returns in
+    //   ms), then dispatch the IPC fan-out + per-row audit-await in a
+    //   spawned task. The unbounded `demo_cmd_tx` queues messages until
+    //   demo pipeline drains them after bootstrap; the spawned task can
+    //   wait for responses without blocking main thread. Scheduler's
+    //   first cycle is 5 min later — plenty of buffer for restore to land.
+    // BOOT-DEADLOCK-FIX：原寫法在主執行緒上對每筆 restored row 做 rx.await，
+    // 但此函式在 demo pipeline spawn 之前被呼叫，主執行緒於是死鎖。
+    // 改為：DB 載入在主執行緒（小查詢，毫秒級），IPC 派送 + 等待回應改丟
+    // tokio::spawn，不阻塞主執行緒推進到 pipeline spawn。
     let demo_mode = openclaw_engine::tick_pipeline::PipelineKind::Demo.db_mode();
-    match openclaw_engine::strategist_scheduler::load_latest_applied_params(db_pool, demo_mode)
-        .await
+    let restored = match openclaw_engine::strategist_scheduler::load_latest_applied_params(
+        db_pool, demo_mode,
+    )
+    .await
     {
-        Ok(restored) if !restored.is_empty() => {
+        Ok(rows) => rows,
+        Err(e) => {
+            warn!(
+                error = %e,
+                engine_mode = %demo_mode,
+                "STRATEGIST-PARAMS-PERSIST-1: restore query failed (fail-soft, \
+                 continuing with TOML baseline) \
+                 / 恢復查詢失敗（容錯跳過，使用 TOML baseline 啟動）"
+            );
+            Vec::new()
+        }
+    };
+
+    if restored.is_empty() {
+        info!(
+            engine_mode = %demo_mode,
+            "STRATEGIST-PARAMS-PERSIST-1: no tuned params to restore (first boot / clean DB) \
+             / 無需恢復（首次啟動或空表）",
+        );
+    } else {
+        let demo_tx_for_restore = demo_tx.clone();
+        let demo_mode_owned = demo_mode.to_string();
+        // BOOT-DEADLOCK-FIX: dispatch restore IPC + audit in background task.
+        // BOOT-DEADLOCK-FIX：背景任務派送恢復 IPC，不阻主執行緒。
+        tokio::spawn(async move {
             let total = restored.len();
             let mut ok = 0usize;
             for (strategy_name, params_json) in restored {
                 let (tx, rx) = tokio::sync::oneshot::channel();
-                if let Err(e) = demo_tx.send(
+                if let Err(e) = demo_tx_for_restore.send(
                     openclaw_engine::tick_pipeline::PipelineCommand::UpdateStrategyParams {
                         strategy_name: strategy_name.clone(),
                         params_json,
@@ -244,27 +281,11 @@ pub(crate) async fn spawn_strategist_scheduler(
             info!(
                 n = ok,
                 total,
-                engine_mode = %demo_mode,
+                engine_mode = %demo_mode_owned,
                 "STRATEGIST-PARAMS-PERSIST-1: restored N tuned params from DB \
                  / 從 DB 恢復 N 條已調參數",
             );
-        }
-        Ok(_) => {
-            info!(
-                engine_mode = %demo_mode,
-                "STRATEGIST-PARAMS-PERSIST-1: no tuned params to restore (first boot / clean DB) \
-                 / 無需恢復（首次啟動或空表）",
-            );
-        }
-        Err(e) => {
-            warn!(
-                error = %e,
-                engine_mode = %demo_mode,
-                "STRATEGIST-PARAMS-PERSIST-1: restore query failed (fail-soft, \
-                 continuing with TOML baseline) \
-                 / 恢復查詢失敗（容錯跳過，使用 TOML baseline 啟動）"
-            );
-        }
+        });
     }
 
     let ai_client = Arc::new(openclaw_engine::ai_service_client::AiServiceClient::new());

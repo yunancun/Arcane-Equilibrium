@@ -257,6 +257,13 @@ pub(crate) fn spawn_news_pipeline(
     let regime_buffer = Arc::new(RwLock::new(
         openclaw_engine::news::RegimeNewsBuffer::default(),
     ));
+    // G6-FUP-NEWS-HALT-DEDUP-1 (2026-04-25): retain the concrete Arc handle for
+    // the periodic TTL expiry check below. The router needs `Arc<dyn ...>` so
+    // we clone before the trait-object cast moves the original.
+    // G6-FUP-NEWS-HALT-DEDUP-1：保留具體型別 Arc handle 給下方 TTL 檢查；
+    // router 拿 trait-object Arc，先 clone 再轉型避免 move。
+    let guardian_for_expiry: Arc<openclaw_engine::news::GuardianHaltCheckImpl> =
+        Arc::clone(&guardian_impl);
     let router = Arc::new(NewsRouter::new(
         Some(guardian_impl as Arc<dyn GuardianHaltCheck>),
         regime_buffer,
@@ -281,6 +288,26 @@ pub(crate) fn spawn_news_pipeline(
                     break;
                 }
                 _ = interval.tick() => {
+                    // G6-FUP-NEWS-HALT-DEDUP-1 (2026-04-25): TTL expiry check
+                    // runs BEFORE provider fetch each tick. Decouples halt
+                    // duration from headline_hash dedup window: even if the
+                    // same severe headline keeps re-emitting (dedup-protected
+                    // at pipeline level via `dedup.rs`), the halt atomic will
+                    // self-clear once `now_ms - last_trigger > halt_ttl_ms`.
+                    // Resolves the 2026-04-24 watchdog crashloop false-positive
+                    // where session_halted=true persisted forever and tick
+                    // pipeline appeared dead to watchdog.
+                    // Independent of `news_pipeline_enabled` gate: even if
+                    // news pipeline is disabled mid-halt, expiry should still
+                    // fire so trading can resume.
+                    // G6-FUP-NEWS-HALT-DEDUP-1：每 tick 跑 TTL 過期檢查，
+                    // 同一嚴重 headline 不斷重發也能在 TTL 後自動清除 halt。
+                    let wallclock_ms = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_millis() as u64;
+                    guardian_for_expiry.check_and_clear_expired(wallclock_ms);
+
                     // Hot-reload gate: check LearningConfig each tick.
                     // 熱重載 gate：每 tick 檢查 LearningConfig。
                     let cfg = news_learning_store.load();
