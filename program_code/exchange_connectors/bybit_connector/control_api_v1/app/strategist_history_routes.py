@@ -54,6 +54,8 @@ MODULE_NOTE (中): 策略師已應用參數歷史查詢路由（STRATEGIST-HISTO
 """
 
 import logging
+import os
+import re
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query
@@ -530,4 +532,157 @@ async def effect_for_history_row(
         "data": data,
         "is_simulated": False,
         "data_category": "strategist_history_effect",
+    }
+
+
+# ── Cycle metrics (engine log tail parse) / 週期指標（引擎 log 尾部解析）───────
+# STRATEGIST-HISTORY GUI follow-up 2026-04-24: 暴露「近 N cycle reject/apply 計數」
+# 給 GUI footer，讓 operator 區分「GUI 壞」vs「scheduler 沒 apply」。
+#
+# 為何不走 PG：`strategist_applied_params` 只記 apply 成功；reject 動作不入表。
+# engine_events 表 schema 是 config snapshot，不適合。最低侵入選擇 = log tail parse。
+
+# Regex 對應 `strategist_scheduler/mod.rs` 的 log 模板：
+# - reject: `delta exceeds ±30% cap / delta 超過 ±30% 上限`（line 639）
+# - apply:  `strategist params applied / 策略師參數已應用`（line 358 evaluate_cycle）
+_LOG_REJECT_RE = re.compile(r"delta exceeds")
+_LOG_APPLY_RE = re.compile(r"strategist params applied")
+# 提取 timestamp 的 ISO prefix（tracing-subscriber 標準格式：2026-04-24T17:12:50.xxxZ）
+_LOG_TS_RE = re.compile(r"(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z?)")
+# 提取 reject 詳情（param + current + proposed + delta_pct）
+_LOG_REJECT_DETAIL_RE = re.compile(
+    r"param=(\w+).*?current=([\d.]+).*?proposed=([\d.]+).*?delta_pct=\"([^\"]+)\""
+)
+
+# Bounded read to avoid memory blowup if engine.log is huge.
+# 讀取上限，避免 engine.log 巨大時爆記憶體。
+_LOG_TAIL_MAX_BYTES = 512 * 1024  # 512 KB
+# 掃描範圍：近 100 cycle × 5 min 間隔 = 近 8h 視窗。log 每 cycle 大約 1-3 行。
+_LOG_CYCLE_SCAN_LIMIT = 300
+
+
+def _engine_log_path() -> str:
+    """Resolve engine log path via env var + fallback. / 解析 engine log 路徑。"""
+    data_dir = os.environ.get("OPENCLAW_DATA_DIR", "/tmp/openclaw")
+    return os.path.join(data_dir, "engine.log")
+
+
+def _read_log_tail(path: str, max_bytes: int = _LOG_TAIL_MAX_BYTES) -> list[str]:
+    """Read last max_bytes of a log file and split to lines. / 讀 log 尾部並切行。"""
+    try:
+        with open(path, "rb") as f:
+            f.seek(0, os.SEEK_END)
+            size = f.tell()
+            seek_to = max(0, size - max_bytes)
+            f.seek(seek_to)
+            data = f.read()
+        # If we seeked mid-line, drop the partial first line.
+        # 若中途切行，丟掉首行殘片。
+        text = data.decode("utf-8", errors="replace")
+        if seek_to > 0:
+            nl = text.find("\n")
+            if nl >= 0:
+                text = text[nl + 1 :]
+        return text.splitlines()
+    except FileNotFoundError:
+        return []
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.warning("engine log tail read failed: %s", exc)
+        return []
+
+
+def _parse_cycle_metrics(lines: list[str]) -> dict[str, Any]:
+    """
+    Parse last N strategist cycle events from log lines.
+    從 log lines 解析近 N 次 strategist cycle 事件。
+
+    Returns: {
+        rejects: int,             # 反對計數
+        applies: int,             # 應用計數
+        last_reject: {ts, param, current, proposed, delta_pct} | None,
+        last_apply: {ts} | None,
+        sample_lines: int,        # 實際掃描的 cycle 相關行數
+        scan_window: str,         # 文字摘要 "last N matched lines"
+    }
+    """
+    rejects = 0
+    applies = 0
+    last_reject: dict[str, Any] | None = None
+    last_apply: dict[str, Any] | None = None
+    matched = 0
+
+    # 從尾部倒掃以最近優先 / scan tail-first for "most recent"
+    for raw in reversed(lines):
+        if _LOG_REJECT_RE.search(raw):
+            rejects += 1
+            matched += 1
+            if last_reject is None:
+                ts_match = _LOG_TS_RE.search(raw)
+                detail = _LOG_REJECT_DETAIL_RE.search(raw)
+                last_reject = {
+                    "ts": ts_match.group(1) if ts_match else None,
+                    "param": detail.group(1) if detail else None,
+                    "current": float(detail.group(2)) if detail else None,
+                    "proposed": float(detail.group(3)) if detail else None,
+                    "delta_pct": detail.group(4) if detail else None,
+                }
+        elif _LOG_APPLY_RE.search(raw):
+            applies += 1
+            matched += 1
+            if last_apply is None:
+                ts_match = _LOG_TS_RE.search(raw)
+                last_apply = {"ts": ts_match.group(1) if ts_match else None}
+        if matched >= _LOG_CYCLE_SCAN_LIMIT:
+            break
+
+    return {
+        "rejects": rejects,
+        "applies": applies,
+        "last_reject": last_reject,
+        "last_apply": last_apply,
+        "sample_lines": matched,
+        "scan_window": f"last {matched} matched lines (up to {_LOG_CYCLE_SCAN_LIMIT})",
+    }
+
+
+@strategist_history_router.get("/cycle_metrics")
+async def strategist_cycle_metrics(
+    actor: base.AuthenticatedActor = Depends(base.current_actor),
+) -> dict[str, Any]:
+    """
+    GET /api/v1/strategist/history/cycle_metrics — recent reject / apply counts.
+    近 N cycle 的 reject / apply 計數（engine log tail parse）。
+
+    背景：`learning.strategist_applied_params` 只記成功 apply（V019 post-apply 寫入）。
+    若 scheduler 所有 propose 被 ±30% cap 拒絕，`applied_params` 表永遠空，GUI
+    會看到 0 rows — 易誤判「GUI 壞」。此端點暴露近 300 條匹配 log 的聚合，
+    讓 operator 快速區分「GUI 正確但無 apply」vs「GUI 本身壞」。
+
+    Fail-closed: log file 不存在 / 讀失敗 → 200 + degraded=true + 全 0。
+
+    - reject rule: `delta exceeds ±30% cap` line
+    - apply rule:  `strategist params applied` line
+    - log path:    $OPENCLAW_DATA_DIR/engine.log (default /tmp/openclaw/engine.log)
+    """
+    path = _engine_log_path()
+    lines = _read_log_tail(path)
+    degraded = not lines
+    metrics = _parse_cycle_metrics(lines) if lines else {
+        "rejects": 0,
+        "applies": 0,
+        "last_reject": None,
+        "last_apply": None,
+        "sample_lines": 0,
+        "scan_window": "log_unreadable",
+    }
+    return {
+        "ok": True,
+        "data": {
+            **metrics,
+            "log_path": path,
+            "degraded": degraded,
+            "reason": "log_unreadable" if degraded else None,
+        },
+        "is_simulated": False,
+        "data_category": "strategist_cycle_metrics",
     }
