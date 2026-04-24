@@ -11,11 +11,13 @@ mod dispatch;
 mod governor_cooldown;
 pub mod handlers;
 mod paper_state_restore;
+mod pending_sweep;
 mod setup;
 #[cfg(test)]
 mod tests;
 mod types;
 
+use pending_sweep::{classify_pending_sweep, PendingSweepAction};
 use types::STATUS_INTERVAL_SECS;
 pub use types::{EventConsumerDeps, ExchangeEvent, PendingOrder, SYMBOLS};
 
@@ -1404,7 +1406,7 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
                                     let sym = symbol.clone();
                                     let lid = link_id.clone();
                                     tokio::spawn(async move {
-                                        cancel_resting_maker_order(c, sym, lid).await;
+                                        pending_sweep::cancel_resting_maker_order(c, sym, lid).await;
                                     });
                                 }
                             }
@@ -1672,91 +1674,4 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
         uptime_secs = start_time.elapsed().as_secs(),
         "event consumer stopped — final state saved / 事件消費者已停止 — 最終狀態已保存"
     );
-}
-
-/// EDGE-P2-3 Phase 1B-3.2: Sweep classification for a pending order at `elapsed_ms`.
-/// Pure function so the Market vs PostOnly branching is unit-testable.
-/// EDGE-P2-3 Phase 1B-3.2：pending order 超時掃描的純函數分類器，便於單元測試。
-#[derive(Debug, PartialEq, Eq)]
-pub(crate) enum PendingSweepAction {
-    /// Keep tracking — no action this sweep tick / 繼續追蹤
-    Keep,
-    /// Market legacy: soft warn (elapsed > 5s but ≤ 60s) / Market 軟警告
-    LegacySoftWarn,
-    /// Market legacy: hard remove (elapsed > 60s) / Market 硬移除
-    LegacyHardRemove,
-    /// PostOnly maker: spawn REST cancel + remove (elapsed ≥ maker_timeout_ms)
-    /// PostOnly 掛單超時：派發 REST 取消並移除記錄
-    MakerTimeoutCancel,
-}
-
-pub(crate) fn classify_pending_sweep(po: &PendingOrder, elapsed_ms: u64) -> PendingSweepAction {
-    if po.time_in_force == Some(crate::order_manager::TimeInForce::PostOnly) {
-        let deadline_ms = po.maker_timeout_ms.unwrap_or(45_000);
-        if elapsed_ms >= deadline_ms {
-            PendingSweepAction::MakerTimeoutCancel
-        } else {
-            PendingSweepAction::Keep
-        }
-    } else if elapsed_ms > 60_000 {
-        PendingSweepAction::LegacyHardRemove
-    } else if elapsed_ms > 5000 {
-        PendingSweepAction::LegacySoftWarn
-    } else {
-        PendingSweepAction::Keep
-    }
-}
-
-/// EDGE-P2-3 Phase 1B-3.2: Non-blocking REST cancel for a timed-out PostOnly
-/// resting maker order. Uses client-minted `orderLinkId` (idempotent across
-/// restart + WS lag). Fail-soft: any API error is logged and swallowed — the
-/// tracker row has already been removed by the caller, so a racing fill after
-/// a failed cancel lands in the position reconciler's normal recovery path.
-///
-/// 1B-5 FUP-3: routes through the shared `cancel_by_link_id_raw` helper in
-/// `order_manager` so the Bybit endpoint / body / success-log fields stay
-/// aligned with `OrderManager::cancel_order_by_link_id` (the typed caller).
-/// The fail-soft warn branch remains local because this sweep path swallows
-/// the error instead of surfacing a typed response to a caller.
-///
-/// EDGE-P2-3 Phase 1B-3.2：非阻塞 REST 取消超時的 PostOnly 掛單。
-/// 使用客戶端 orderLinkId（跨重啟/WS 延遲冪等）。fail-soft：API 失敗僅記 log 不回退；
-/// 調用端已移除 tracker，若取消失敗後 race 到成交，走對帳器常規恢復路徑。
-///
-/// 1B-5 FUP-3：改走 `order_manager::cancel_by_link_id_raw` 共用輔助，
-/// 使 endpoint / body / 成功日誌欄位與 `OrderManager::cancel_order_by_link_id`
-/// 對齊。fail-soft warn 分支仍保留於此（本路徑吞錯，不回傳類型化結果）。
-async fn cancel_resting_maker_order(
-    client: std::sync::Arc<crate::bybit_rest_client::BybitRestClient>,
-    symbol: String,
-    order_link_id: String,
-) {
-    match crate::order_manager::cancel_by_link_id_raw(
-        &client,
-        crate::order_manager::OrderCategory::Linear,
-        &symbol,
-        &order_link_id,
-    )
-    .await
-    {
-        Ok(_) => {
-            info!(
-                symbol = %symbol,
-                order_link_id = %order_link_id,
-                reason = "maker_timeout_cancel",
-                "PostOnly maker cancel acknowledged / PostOnly 掛單取消已確認"
-            );
-        }
-        Err(err) => {
-            // Common benign cases: 110001 order not exists (already filled/cancelled).
-            // 常見良性情形：110001 訂單不存在（已成交或已取消）。
-            warn!(
-                symbol = %symbol,
-                order_link_id = %order_link_id,
-                error = %err,
-                reason = "maker_timeout_cancel_failed",
-                "PostOnly maker cancel REST failed — likely already filled/cancelled / PostOnly 取消失敗，很可能已成交或取消"
-            );
-        }
-    }
 }
