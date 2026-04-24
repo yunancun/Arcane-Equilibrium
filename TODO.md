@@ -1,52 +1,52 @@
 # OpenClaw TODO — 工作清單（v3 · 單一時間軸版）
 
-**最後更新**：2026-04-24 23:12 CEST（Wave 1 + G1-04 initial baseline + 4 operator items 全做）
+**最後更新**：2026-04-24 23:41 CEST（Wave 2 G5-07 + G3-01 RFC + G7-09 三合一 deploy）
 **版本**：v3（Wave 線性版；廢除雙軌 P0-P4 章節，P0/P1/P2 降為每項 tag）
 **舊版歸檔**：v2 `docs/archive/2026-04-24--todo_v2_dual_axis_snapshot.md`（458 行，Wave+P 雙軌）· v1 `docs/archive/2026-04-24--todo_v1_refactor_snapshot.md`（328 行）· v0 `docs/archive/2026-04-24--todo_snapshot_pre_refactor.md`（700 行）
 **簽核**：PM Approved FIX-PLAN v2 → [Sign-off](docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-24--FixPlan_v2_PMApproval.md)
 **基礎方案**：[FIX-PLAN v2](docs/CCAgentWorkSpace/PA/workspace/reports/2026-04-24--4.24TodoAudit_FixPlan_v2.md) · [10-Agent audit 索引](docs/audits/2026-04-24--todo_refactor_audit.md)
 
-**Engine**（採集 2026-04-24 23:12 CEST · rebuild + ssh verify）：engine PID **1361203**（23:10 start）· binary mtime **2026-04-24 23:09** · HEAD `bb8b7a8` · uvicorn PID **1361256**（4 workers 23:10 start）· demo engine alive balance $951.94 · auto_migrate `seeded=0 applied=0 elapsed_ms=4`（V024 上次已 applied）· total_ticks 556302 · edge_estimates.json fresh · 6h cron 已安裝
-**測試基準（2026-04-24）**：engine lib 1992 / 0 fail（baseline 1980 + G1-06 7 + parallel 5）· pytest 2996
+**Engine**（採集 2026-04-24 23:41 CEST · rebuild + ssh verify）：engine PID **1376094**（23:41 start）· binary mtime 2026-04-24 23:41（含 G7-09 FIX-FEE-POSTONLY-1）· HEAD `872478a` · uvicorn PID **1376147**（4 workers 23:41 start）· Private WS demo auth success · 4 topics subscribed · outcome_backfiller 5min interval started · post-G7-09 fee column 將開始出現 2bps maker 列（觀察中）· crashloop #6/12h pattern 延續（10:18/12:53/20:35/23:10 crashes pre-rebuild），本次 rebuild 引入 G7-09 會改 fee 下游
+**測試基準（2026-04-24）**：engine lib **1995 / 0 fail**（baseline 1992 + G7-09 3 tests）· pytest 2996
 **21d demo 時鐘**：起算 2026-04-16 22:16 → 解鎖 2026-05-07
 
 ---
 
-## 🎯 此刻該做什麼（2026-04-24 22:50 CEST · Wave 1 主體驗證通過後）
+## 🎯 此刻該做什麼（2026-04-24 23:41 CEST · Wave 2 第一批 deploy 後）
 
-**Wave 1 進度**：9/10 完成（G1-01/02/03/05/06 + G6-01/02/03/04）；剩 G1-04 P1 背景（依賴 PostOnly demo 累積）+ G6-05 P2 選作。
+**Wave 1 進度**：10/11 完成；剩 G1-04 P1 背景（依賴 PostOnly demo 累積 + **G7-09 已 deploy** 需 ~1w 後 compute）。
+
+**Wave 2 進度**：3/若干 完成（G5-07 ✅ + G3-01 RFC ✅ + G7-09 ✅）；G7-05 blocked on data（~05-01+）；G3-02/03/04 / G4-01~03 / G5-02/04/05 / G7-01~04/06/07/08 未開工。
 
 **本週 Top 4**（按順序）：
 
-1. **✅ G1-01 + G1-02 + G6-03 三聯驗證通過 + Rebuild deploy（2026-04-24 23:10 CEST）**
-   - G1-01：edge_estimates.json 199 cells / age 16min / leader alive / [13] PASS
-   - G1-02：event_consumer/mod.rs = 225 行（<<1200）
-   - G6-03：V024 auto_migrate success installed_on 21:58:11
-   - Rebuild：engine PID 1361203 / binary 23:09 / Wave 1 全代碼 live
+1. **✅ Wave 2 三合一 deploy（2026-04-24 23:41 CEST）**
+   - G5-07 `913b536`：event_consumer/tests.rs 1298→tests/ 6 sibling，最大 371（全 <1200）
+   - G3-01 `4d24f48`：ExecutorAgent ConfigStore + IPC RFC 755 行（PA sub-agent）
+   - G7-09 `872478a`：FIX-FEE-POSTONLY-1，`loop_handlers.rs:405-447` hoist matched_key，新增 `fee_rate_for_tif(symbol, tif)`，3 unit tests（PostOnly=maker / GTC=taker / None=taker race safety）
+   - Linux release cargo test **1995/0**（baseline 1992 + G7-09 3 tests）
+   - `--rebuild` 部署 engine PID 1376094 / binary 23:41 / WS demo auth success / 4 topics subscribed
 
-2. **✅ G6-05 retired-check audit 完成（22:55 CEST）**：NO ZOMBIES；[Report](.claude_reports/20260424_225536_g6_05_retired_check_audit.md)
+2. **🟡 G7-05 cost_gate grand_mean bind — blocked on post-G7-09 data accumulation**
+   - 當前 snapshot（ssh verify 23:41 CEST）：grand_mean_bps=**-9.80** · n_cells=62 · **shrunk_bps > 0 count = 0**
+   - `>-50 bps` 條件已滿足（-9.80 > -50）；`≥2 strategies shrunk>0` **未滿足**（0/62）
+   - Post-G7-09 預期：fee 列由全 taker 5.5bps → 混合（PostOnly maker 2bps + Market/GTC taker 5.5bps）→ net edge 上升 → 部分策略 shrunk_bps 可能跨 0
+   - 需等 ≥1w post-fix demo fills（~2026-05-01+）取真實分布後再校準閾值 + 接活 cost_gate bind 判決
+   - **不另派 sub-agent**：要 passive 觀察 + 後續 commit
 
-3. **🟡 G1-04 initial baseline 完成 + FIX-FEE-POSTONLY-1 發現（23:05 CEST）**
-   - PostOnly dispatch 驗證成立（04-21 起 limit 佔比 0%→99%）
-   - fee_rate 7d 均勻 5.5bps 揭發 `loop_handlers.rs:408` FIX-19b 未用 `fee_rate_for_intent()`
-   - R:R 實證 P1-10：ma_reverse 0.45🔴 + grid_short 0.53🔴 + phys_lock 3.91✅
-   - [Report](.claude_reports/20260424_230500_g1_04_initial_baseline.md)
-   - **未結案**：等 1w（~04-28）+ G7-09 FIX
+3. **🟡 G1-04 fee drag / R:R baseline — G7-09 已 deploy，繼續累積等 ~04-28+**
+   - Post-G7-09 fee 列自 23:41 CEST 起開始出現 maker 2bps（觀察中）
+   - ~04-28 滿 1w 時 compute：fee drop % + R:R per-strategy delta + shrunk_bps movements
 
-4. **⚪ Wave 2 啟動準備**
-   - **G7-09 + G7-05 綁批做**（FIX-FEE-POSTONLY-1 + cost_gate grand_mean bind；解鎖 G1-04）— downstream cascade 強制綁批
-   - G3-01 ExecutorAgent ConfigStore + IPC RFC
-   - G5-01~07 refactor 可派多 subagent 並行（含 G5-07 tests.rs 1298 行）
-   - G4-01 labels 加速準備
+4. **⚪ Wave 2 後續（可派 sub-agent）**
+   - G3-02/03/04 ExecutorAgent shadow→live toggle 實裝 + Rust IPC handler + e2e test（前置 G3-01 RFC ✅）
+   - G5-02/04/05 剩餘拆分（live_session_routes.py 1449 / ai_service.py 1258 / bb_reversion.rs 1143）
+   - G7-01/02/03/04 量化配置化（Kelly / EWMA / Hurst / CUSUM）
+   - G4-01 Labels pooled 加速（等 PipelineConfig.symbol Optional commit）
 
-**並行可派 sub-agent**：FA L1 / L2 proposal 清算（獨立軌道）· G5-07 tests.rs split 獨立軌道可先派（不涉 fee 路徑，無 cascade 風險）
+**並行可派 sub-agent**：G3-02 實裝（需 E1+PA 鏈，主 session 啟動）· G5-02/G5-04 Python 拆（獨立軌道）· G7-01~04 量化並行
 
-**❌ 提前做 G7-09 評估結論**（2026-04-24 23:17）：不提前。
-- 不加速 G1-04 結案（仍等 04-28 資料 + fix 後重跑）
-- Downstream cascade（cost_gate / edge_estimator / exit_features / PnL 共用 fee 列）→ 必綁 G7-05 同批調閾值
-- Race condition 邊界（Fill 先於 OrderUpdate）使 fix 僅 best-effort
-- Historical 5.5bps 鎖死，fix 後分析仍需 split window
-- Context 新鮮度損失已由 [baseline report](.claude_reports/20260424_230500_g1_04_initial_baseline.md) root cause 鎖存彌補
+**⚠️ Engine crashloop #6/12h pattern**：10:18/12:53/20:35/23:10 四次 auto-restart 成功，本次 23:41 rebuild 引入 G7-09 觀察穩定性；若 pattern 持續需開 G6 軌道 FUP RCA（不屬 Wave 2 範疇）
 
 ---
 
@@ -200,7 +200,7 @@ ssh trade-core "cd ~/BybitOpenClaw/srv && python3 helper_scripts/db/passive_wait
 
 | ID | Tag | 項目 | 前置 | 負責修/驗 | 工時 | 完成標準 |
 |---|---|---|---|---|---|---|
-| **G3-01** | 🔴P0 | ExecutorAgent ConfigStore + IPC RFC 設計 | G1-02 | PA / E2 | 1d | RFC doc + PA 簽核 |
+| **G3-01** | ✅完成 | ExecutorAgent ConfigStore + IPC RFC 設計 — PA sub-agent 755 行 RFC：11 必備節 + §12 impl order；鎖定決策：shadow_mode 住 Rust `RiskConfig.executor.shadow_mode`（新 sub-struct 不動 Python `ExecutorConfig`）· `patch_executor_config` 鏡射 `patch_risk_config` 重用 generic · `executor_config_cache.py` 100ms polling fail-closed to `shadow=true` · 3 階段 migration（Rust foundation → Python read path → operator 驅動 demo flip）· 防禦深度（Rust intent_processor 亦檢 shadow_mode on SubmitOrder）· Auth matrix（retreat cheap = Operator only, live flip = 5-gate chain）· 開放問題: per-symbol override / gradual ramp / `max_slippage_bps` 位置 / partial-map delete / GUI surface / `live_reserved` coupling / Phase 6 Reconciler interaction | G1-02 | PA / E2 | 完成 2026-04-24 | [RFC](docs/CCAgentWorkSpace/PA/workspace/reports/2026-04-24--g3_01_executor_agent_ipc_rfc.md)（commit `4d24f48`）|
 | **G3-02** | 🔴P0 | ExecutorAgent shadow→live toggle 實裝（IPC `patch_executor_config`） | G3-01 | E1+PA / E2+E4 | 2-3d | e2e test shadow→live + Rust receive |
 | **G3-03** | 🔴P0 | Rust `intent_processor` IPC handler（接 Python SubmitOrder） | G3-02 | E1 / E2+E4 | 2d | Rust can receive Python intent IPC |
 | **G3-04** | 🟠P1 | ExecutorAgent shadow→live e2e 整合測試 | G3-03 | E4 / QA | 2d | QA 端到端驗證 pass |
@@ -232,7 +232,7 @@ ssh trade-core "cd ~/BybitOpenClaw/srv && python3 helper_scripts/db/passive_wait
 | **G5-04** | 🟡P2 | `ai_service.py` 1258 行拆 | 無 | E5+E1 / E2 | 1d | <1200 lines |
 | **G5-05** | 🟡P3 | `bb_reversion.rs` 1143 行 sibling 拆 | 無 | E5 | 1h | <1200 lines |
 | **G5-06** | 🟡P2 | 其他 5 檔（bybit_rest_client / order_manager / startup / resting_orders / risk_config） | 無 | E5+E1 / E2+E4 | 5-8d 全部 | all <1200 |
-| **G5-07** | 🟡P2 | `event_consumer/tests.rs` 1298 行 > 1200 硬上限 — G1-02 mod.rs 主體拆完後遺留（主檔已 225 行破標）；**範圍**：(a) 按測試範疇（bootstrap / dispatch / loop_handlers / pending_sweep / paper_state_restore / governor_cooldown / types / setup）拆到各自 sibling 的 `#[cfg(test)] mod tests {}` inline 或同目錄 `*_tests.rs` sibling (b) 保 `cargo test -p openclaw_engine --lib` 1992/0 failed 基準 · **觸發**：2026-04-24 Mac ssh verify G1-02 發現登記 | G1-02 | E5+E1 / E2+E4 | 2-4h | tests.rs <1200 ✅ + engine lib 1992+ pass |
+| **G5-07** | ✅完成 | `event_consumer/tests.rs` 1298→拆至 tests/ 6 sibling：mod.rs 298（shared helpers + 8 util tests）· handlers_paper_cmd 371 · exit_config_ipc 214 · governor_override 160 · cross_engine 123 · reconciler 89 · submit_order 76；全 <1200；42 tests 逐字保留；Linux release 1992/0（baseline 不動）；0 production file touched | G1-02 | E5+E1 / E2+E4 | 完成 2026-04-24 | [G5-07 report](.claude_reports/20260424_233852_g5_07_tests_split.md)（commit `913b536`）|
 
 ### G7 量化 / 統計方法論（新增，from QC）
 
@@ -242,11 +242,11 @@ ssh trade-core "cd ~/BybitOpenClaw/srv && python3 helper_scripts/db/passive_wait
 | **G7-02** | 🟠P1 | EWMA Vol lambda 參數化（per-timeframe） | 無 | QC+E1 | 0.5d | λ configurable |
 | **G7-03** | 🟠P1 | Hurst + Hysteresis 整合（6-period lag） | 無 | QC / FA+MIT | 2-3d | R/S analysis live |
 | **G7-04** | 🟠P1 | CUSUM 策略衰減監控 | 無 | QC+E1 | 1-2d | σ-based slack/threshold |
-| **G7-05** | 🟠P1（**與 G7-09 綁批**）| cost_gate grand_mean bind condition — **決策**：綁 G7-09 FIX-FEE-POSTONLY-1 同批調；原因：fix 後 fee 列 2/5.5 bps 混合分布會推 grand_mean_bps 下降 → 「edge 看似變正」可能是 artifact 非真改善，bind 閾值 `>-50 bps` 需 post-fix 重校準 | G1-01 + G7-09 | QC+E1 / FA | 2-3h（含聯合校準）| bind when grand_mean > -50 bps ∧ ≥2 strategies shrunk>0 + post-fix threshold validated |
+| **G7-05** | 🟡passive wait | cost_gate grand_mean bind condition — G7-09 已 deploy（2026-04-24 23:41 CEST），開始累積 post-fix data；**當前狀態**（ssh verify 23:41）：grand_mean_bps=-9.80 / n_cells=62 / shrunk_bps>0 count=**0**；`>-50 bps` 條件已滿足，**`≥2 strategies shrunk>0` 未滿足**；預計 ≥1w post-fix fills（~2026-05-01+）後有足夠 maker/taker 混合樣本，屆時 (a) 校準閾值是否仍合理（artifact vs real edge） (b) 落地 cost_gate bind 判決 code（TBD：ExitConfig 新 flag 或 IPC patch）| G1-01 + G7-09 | QC+E1 / FA | 2-3h（post-data） | bind when grand_mean > -50 bps ∧ ≥2 strategies shrunk>0 + post-fix threshold validated |
 | **G7-06** | 🟡P2 | Grid OU σ residual-based 修正 | 無 | QC / E1+E2 | 1d | σ = sqrt(Σ(Δx-mean)²/n) |
 | **G7-07** | 🟡P2 | Slippage / confluence 硬編碼清理 → TOML | 無 | QC+E1 / FA | 2-3d | 8 檔硬編碼移除 |
 | **G7-08** | 🟡P2 | outcome_backfiller SQL slow query 優化（PG resource）— **症狀**：1.5s slow query 反覆觸發，PG CPU/IO spike；**範圍**：(a) `EXPLAIN ANALYZE` 找熱點 query（`outcome_backfiller_runner.py` 系列）(b) 加 partial / composite index 或重寫 query (c) 確認 timeframe `'1m'` fix（`5e2981d`）後 backfill volume 是否仍對 PG 造成壓力；**前置**：confirm 反覆觸發來源（cron 頻率 / engine path），可能是 backfill 自然壓力非 bug | 無 | QC+E1 / FA | 1-2d | slow query <500ms p95 OR 觸發頻率降低 |
-| **G7-09** | 🟠P1（**與 G7-05 綁批**）| FIX-FEE-POSTONLY-1 — `loop_handlers.rs:408` FIX-19b fallback 改經 pending-order TIF 判決 → `fee_rate_for_intent()`（`intent_processor/mod.rs:1084` 已實作，依 `TimeInForce::PostOnly` 選 maker 2bps vs taker 5.5bps）；修完 entry-side fee 可降 ~45%（maker 2 vs taker 5.5 = 3.5bps saving）· **觸發**：G1-04 initial baseline 揭發 demo 7d fee_rate 100% 均勻 taker 5.5bps，未反映 PostOnly maker rebate；intent_processor 已有 maker 路徑但 exec→fill 回流未接線 · **範圍**：(a) `event_consumer/loop_handlers.rs` exec→pending order lookup 加 TIF metadata（`PendingOrder.time_in_force: Option<TimeInForce>` 已存在 EDGE-P2-3 Phase 1B-3.1，hoist matched_key lookup 到 fee compute 前即可）(b) 新增 `intent_processor::fee_rate_for_tif(symbol, tif: Option<TimeInForce>)` helper（現有 `fee_rate_for_intent` 需 `&OrderIntent`，此 path 只有 `&PendingOrder`）(c) 加測 maker/taker fee 分流單測 + race test（Fill 先於 OrderUpdate 時 TIF=None → taker fallback 不退化）；保 engine lib 1992+ baseline · **downstream cascade 風險**：fee 列被 cost_gate grand_mean / edge_estimator shrunk_bps / exit_features.giveback_atr_norm / PnL aggregation 吃；改成 2/5.5 bps 混合分布後 grand_mean 下降 → 「edge 看似變正」是 artifact 而非真 edge；**故必與 G7-05 `cost_gate grand_mean bind condition` 同批做**，post-fix 重校準 bind 閾值 `>-50 bps` 是否仍合理 · **race condition 邊界**：Bybit Fill event 可能先於 OrderUpdate 填 `order_id_to_link`，此時 hoist lookup 拿不到 TIF → taker fallback（= 現行行為）；設計為 best-effort，不致命 · **不加速 G1-04 結案**：G1-04 full closure 需 (a) 1w 資料（~04-28）+ (b) fix 部署 + (c) fix 後重跑；即使今晚做，G1-04 仍等 04-28；Wave 2 頭 2-3d 做 G7-09 趕得上 cutoff · **決策（2026-04-24 23:17）**：等 Wave 2 與 G7-05 綁批，原因 = adversarial 完整 / downstream 閾值同批調 / Wave 1 收官乾淨；context 新鮮度損失由 [G1-04 baseline report](.claude_reports/20260424_230500_g1_04_initial_baseline.md) 鎖死 root cause 補償 · **歷史資料不可逆**：pre-fix 所有 fills 鎖 5.5bps；未來 baseline 分析需 split pre/post window | G1-02 E1 實作路徑可複用 / 與 G7-05 綁批 | E1+QC / E2+E4（QC+FA adversarial review 強制）| 1-2d（含與 G7-05 聯合校準）| (a) demo fills fee_rate 開始出現 maker 2bps 列（現 100% taker）(b) G7-05 cost_gate bind 閾值 post-fix 重 validated (c) engine lib 1992+ maintained / [G1-04 baseline](.claude_reports/20260424_230500_g1_04_initial_baseline.md) |
+| **G7-09** | ✅完成 | FIX-FEE-POSTONLY-1 — 修三處：(1) `intent_processor/mod.rs:1084` 新增 `fee_rate_for_tif(symbol, tif: Option<TimeInForce>)` helper，既有 `fee_rate_for_intent` delegate 進同一選擇點 (2) `event_consumer/loop_handlers.rs:405-447` hoist matched_key lookup 至 fee compute 前，取 `PendingOrder.time_in_force` 後用新 helper，race (Fill 先於 OrderUpdate) → TIF=None → taker fallback 保本 (3) `intent_processor/tests.rs` 加 3 unit tests（PostOnly=maker / GTC=taker / None=taker race safety）· Linux release cargo test **1995/0**（baseline 1992 + 3 new）· `--rebuild` 部署 engine PID 1376094 binary 23:41 CEST · **downstream cascade**：fee 列 post-fix 會出現 2bps maker 混 5.5bps taker → grand_mean_bps 會變，G7-05 bind 閾值需重校準（passive ~1w）· **historical 資料不可逆**：pre-872478a 所有 fills 鎖 5.5bps；baseline 分析需 split pre/post commit ts | G1-02 | E1+QC / E2+E4 | 完成 2026-04-24 | demo fills fee_rate 開始出現 maker 2bps 列（觀察中）· engine lib 1995 / 0 failed · commit `872478a` |
 
 ### Wave 2 完成標準
 
