@@ -1,0 +1,439 @@
+from __future__ import annotations
+
+"""
+Live Session Account Routes — balance / positions / orders / fills / close handlers
+實盤 Session 帳戶路由 — 餘額 / 倉位 / 掛單 / 成交 / 平倉處理器
+
+MODULE_NOTE (中文):
+  本檔由 G5-02 從 ``live_session_routes.py`` 拆出（§九 1200 行硬上限）。
+  純結構搬遷 — 0 邏輯變更。所有 handler 行為、路由路徑、Depends 守衛、
+  fallback 路徑（DB → Bybit API → engine snapshot）byte-for-byte 一致。
+
+  端點：
+  - GET  /api/v1/live/balance                       — 餘額（DB → API → engine）
+  - GET  /api/v1/live/positions                     — 倉位
+  - GET  /api/v1/live/orders                        — 掛單
+  - GET  /api/v1/live/fills                         — 成交（DB primary）
+  - POST /api/v1/live/positions/{symbol}/close      — 單倉平倉（IPC + REST 降級）
+  - POST /api/v1/live/close-all-positions           — 全倉平倉（IPC + REST 降級）
+  - GET  /api/v1/live/metrics                       — 性能指標
+
+  關鍵設計（保留 monkey-patch 行為）：
+    所有對 ``live_session_routes`` 模組屬性（_get_rust_client_safe / _ipc_command /
+    _is_live_channel_unavailable_error / _rest_close_position_reduce_only /
+    _sweep_live_orphan_positions / _live_response 等）的引用走 ``core.<name>``，
+    不走 ``from .live_session_routes import <name>``。原因：
+    tests/test_live_gate_fallback.py 用 ``monkeypatch.setattr(lsr, ...)`` 重綁
+    模組屬性；如果 sibling 用 from-import 捕獲早期函數引用，monkeypatch 失效。
+
+MODULE_NOTE (English):
+  Split out of ``live_session_routes.py`` by G5-02 (§九 1200-line hard cap).
+  Pure structural move — zero logic changes. Handlers, routes, Depends,
+  fallback paths (DB → Bybit API → engine snapshot) are byte-for-byte identical.
+
+  Module-attribute lookup matters: all references to ``live_session_routes``
+  internals go via ``core.<name>`` so test monkeypatches still bind correctly.
+"""
+
+import logging
+from typing import Any
+
+from fastapi import Depends, HTTPException
+
+from . import live_session_routes as core
+from . import main_legacy as base
+from .ipc_state_reader import get_rust_reader
+
+logger = logging.getLogger(__name__)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Live account data — balance / positions / orders
+# 實盤帳戶數據端點 — 餘額 / 倉位 / 掛單
+#
+# Primary: httpx BybitClient (real exchange data, same client as demo).
+# Fallback: IPC get_paper_state (engine internal state).
+# 主路徑：httpx BybitClient（真實交易所數據，同 demo 使用相同客戶端）。
+# 降級：IPC get_paper_state（引擎內部狀態）。
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+@core.live_router.get("/balance")
+async def get_live_balance(
+    actor: base.AuthenticatedActor = Depends(base.current_actor),
+):
+    """
+    GET /api/v1/live/balance
+    Primary: real Bybit account balance via httpx BybitClient (demo or live key).
+    Fallback: engine internal balance + bybit_sync_balance.
+
+    主路徑：httpx BybitClient 獲取真實 Bybit 帳戶餘額（demo 或 live key 均可）。
+    降級：引擎內部餘額 + bybit_sync_balance。
+    """
+    # Attach per-engine session baseline (initial/peak/realized/fees) from
+    # Rust paper_state so the GUI can display net-of-fees PnL identity
+    # (equity - initial = realized - fees + unrealized). Best-effort: snapshot
+    # failure does not block wallet payload.
+    # 掛載 Rust paper_state 的本 session 基線（初始/峰值/已實現/手續費），
+    # 讓 GUI 以 "淨利口徑" 呈現 PnL（equity - initial = realized - fees + unrealized）。
+    # best-effort：快照失敗不影響 wallet payload。
+    session_baseline: dict[str, Any] = {}
+    try:
+        live_state = get_rust_reader().get_paper_state(engine="live") or {}
+        if live_state:
+            session_baseline = {
+                "engine_initial_balance": live_state.get("initial_balance"),
+                "engine_peak_balance": live_state.get("peak_balance"),
+                "engine_current_balance": live_state.get("balance"),
+                "engine_realized_pnl": live_state.get("total_realized_pnl"),
+                "engine_total_fees": live_state.get("total_fees"),
+            }
+    except Exception:
+        pass
+
+    rc = core._get_rust_client_safe()
+    if rc is not None:
+        try:
+            wallet = rc.refresh_balance()
+            return core._live_response({"source": "rust_engine", **wallet, **session_baseline})
+        except Exception as e:
+            logger.warning("Rust balance fetch failed for live endpoint: %s", e)
+    # Fallback: engine internal state / 降級：引擎內部狀態
+    try:
+        state = await core._ipc_command("get_paper_state", {"engine": "live"})
+    except HTTPException:
+        return core._live_response({"available": False, "source": "engine_unavailable"})
+    sync_bal = state.get("bybit_sync_balance")
+    return core._live_response({
+        "balance": sync_bal if sync_bal is not None else state.get("balance"),
+        "peak_balance": state.get("peak_balance"),
+        "bybit_sync_balance": sync_bal,
+        "engine_balance": state.get("balance"),
+        "source": "bybit_sync" if sync_bal is not None else "engine_internal",
+        **session_baseline,
+    })
+
+
+@core.live_router.get("/positions")
+async def get_live_positions(
+    actor: base.AuthenticatedActor = Depends(base.current_actor),
+):
+    """
+    GET /api/v1/live/positions
+    Primary: real Bybit positions via httpx BybitClient.
+    Fallback: engine-tracked positions (internal state).
+
+    主路徑：httpx BybitClient 獲取真實 Bybit 倉位。
+    降級：引擎追蹤倉位（內部狀態）。
+    """
+    rc = core._get_rust_client_safe()
+    if rc is not None:
+        try:
+            positions = rc.get_positions("linear")
+            from .strategy_ai_routes import _attach_owner_strategy  # noqa: PLC0415
+            positions = _attach_owner_strategy(positions, engine="live")
+            return core._live_response({
+                "source": "rust_engine",
+                "positions": positions,
+                "list": positions,
+                "count": len(positions),
+            })
+        except Exception as e:
+            logger.warning("Rust positions fetch failed for live endpoint: %s", e)
+    # Fallback: engine internal state / 降級：引擎內部狀態
+    # paper_state positions already carry owner_strategy natively; no enrichment needed.
+    # paper_state 倉位原生帶 owner_strategy，無需額外 enrichment。
+    try:
+        state = await core._ipc_command("get_paper_state", {"engine": "live"})
+    except HTTPException:
+        return core._live_response({"positions": [], "count": 0, "available": False})
+    positions = state.get("positions", [])
+    return core._live_response({"positions": positions, "count": len(positions), "source": "engine_state"})
+
+
+@core.live_router.get("/orders")
+async def get_live_orders(
+    actor: base.AuthenticatedActor = Depends(base.current_actor),
+):
+    """
+    GET /api/v1/live/orders
+    Primary: real Bybit active orders via httpx BybitClient.
+    Fallback: pending-close orders derived from engine position state.
+
+    主路徑：httpx BybitClient 獲取真實 Bybit 掛單。
+    降級：從引擎倉位狀態派生 pending_close 訂單。
+    """
+    rc = core._get_rust_client_safe()
+    if rc is not None:
+        try:
+            orders = rc.get_active_orders("linear")
+            return core._live_response({
+                "source": "rust_engine",
+                "list": orders,
+                "count": len(orders),
+                "regular_count": len(orders),
+                "conditional_count": 0,
+            })
+        except Exception as e:
+            logger.warning("Rust orders fetch failed for live endpoint: %s", e)
+    # Fallback: engine internal state / 降級：引擎內部狀態
+    try:
+        state = await core._ipc_command("get_paper_state", {"engine": "live"})
+    except HTTPException:
+        return core._live_response({"list": [], "count": 0, "available": False})
+    positions: list = state.get("positions", [])
+    pending = [p for p in positions if p.get("pending_close") or p.get("stop_order_id")]
+    return core._live_response({
+        "list": pending,
+        "count": len(pending),
+        "regular_count": 0,
+        "conditional_count": len(pending),
+        "source": "engine_state",
+    })
+
+
+@core.live_router.get("/fills")
+async def get_live_fills(
+    actor: Any = Depends(base.current_actor),
+) -> dict:
+    """
+    GET /api/v1/live/fills
+    DB primary (realized_pnl) → Bybit API fallback → engine snapshot fallback.
+    DB 為主（帶 realized_pnl）→ Bybit API 備援 → 引擎快照備援。
+    """
+    # DB path — engine-calculated realized_pnl, same pattern as demo/paper.
+    # DB 路徑 — 引擎計算的 realized_pnl，與 demo/paper 相同模式。
+    try:
+        from . import db_pool
+        conn = db_pool.get_conn()
+    except Exception:
+        conn = None
+    if conn is not None:
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT ts, symbol, side, qty, price, fee, realized_pnl, strategy_name "
+                "FROM trading.fills WHERE engine_mode IN (%s, %s) ORDER BY ts DESC LIMIT %s",
+                ("live", "live_demo", 50),
+            )
+            rows = cur.fetchall()
+            if rows:
+                fills = []
+                for ts, symbol, side, qty, price, fee, rpnl, strategy in rows:
+                    ts_ms = int(ts.timestamp() * 1000) if ts is not None else 0
+                    sym = symbol or ""
+                    cat = "inverse" if sym.endswith("USD") and not sym.endswith("USDT") else "linear"
+                    fills.append({
+                        "execTime": str(ts_ms),
+                        "symbol": sym,
+                        "side": side or "",
+                        "execQty": float(qty) if qty is not None else 0.0,
+                        "execPrice": float(price) if price is not None else 0.0,
+                        "execFee": float(fee) if fee is not None else 0.0,
+                        "closedPnl": float(rpnl) if rpnl is not None else 0.0,
+                        "strategy": strategy or "",
+                        "category": cat,
+                    })
+                return core._live_response({"list": fills, "count": len(fills), "source": "pg_trading_fills"})
+        except Exception as e:
+            logger.warning("PG live fills query failed, falling back to Bybit API: %s", e)
+        finally:
+            try:
+                db_pool.put_conn(conn)
+            except Exception:
+                pass
+    # Bybit API via httpx BybitClient (closedPnl from exchange).
+    # Bybit API（closedPnl 來自交易所）。
+    rc = core._get_rust_client_safe()
+    if rc is not None:
+        try:
+            from .strategy_ai_routes import _normalize_execution
+            fills = [_normalize_execution(f) for f in rc.get_executions("linear", limit=50)]
+            return core._live_response({"source": "rust_engine", "list": fills, "count": len(fills)})
+        except Exception as e:
+            logger.warning("Rust fills fetch failed for live endpoint: %s", e)
+    # Fallback: engine recent fills (3E-ARCH snapshot, now carries realized_pnl).
+    # 降級：引擎快照 recent_fills（現帶 realized_pnl）。
+    rust = get_rust_reader()
+    if rust.is_engine_available("live"):
+        try:
+            recent = rust.get_recent_fills(mode="live")
+            return core._live_response({"source": "engine_state", "list": recent or [], "count": len(recent or [])})
+        except Exception:
+            pass
+    return core._live_response({"list": [], "count": 0, "available": False})
+
+
+@core.live_router.post("/positions/{symbol}/close")
+async def post_live_close_position(
+    symbol: str,
+    actor: Any = Depends(base.current_actor),
+) -> dict:
+    """
+    POST /api/v1/live/positions/{symbol}/close
+    通過 IPC close_position 平掉指定 symbol 的倉位。
+    執行路徑完全在 Rust 引擎內：
+      1. Python 從 Bybit REST 查詢持倉（只讀），取得 is_long / qty 作為 hints
+      2. IPC 帶 hints 傳給 Rust
+      3. Rust 引擎直接 dispatch reduce_only 市價單至 Bybit（不經 Python 下單）
+      4. paper_state 有倉 → 走既有路徑；無倉 → 用 hints 平孤兒倉位
+
+    Close a single Live position by symbol. All trading execution happens inside Rust:
+    Python only does a read-only REST lookup to supply is_long/qty hints.
+    Rust dispatches the reduce_only market order directly.
+    """
+    core._require_operator(actor)
+    sym = symbol.upper()
+
+    # Step 1: read-only lookup of exchange position to build hints for Rust.
+    # Python 只查倉位資料（只讀），供 Rust 平孤兒倉位時使用。
+    hint_is_long: bool | None = None
+    hint_qty: float | None = None
+    rc = core._get_rust_client_safe()
+    if rc is not None:
+        try:
+            positions = rc.get_positions("linear")
+            for p in positions:
+                if p.get("symbol") == sym:
+                    size = float(p.get("size") or p.get("qty") or 0)
+                    if size > 0:
+                        hint_is_long = p.get("side") == "Buy"
+                        hint_qty = size
+                    break
+        except Exception as exc:
+            logger.warning("live close: position hint lookup failed for %s: %s", sym, exc)
+
+    # Step 2: send IPC — Rust handles the actual close order.
+    # 發 IPC — Rust 引擎執行平倉，Python 不介入下單。
+    ipc_params: dict = {"symbol": sym, "engine": "live"}
+    if hint_is_long is not None:
+        ipc_params["is_long"] = hint_is_long
+    if hint_qty is not None and hint_qty > 0:
+        ipc_params["qty"] = hint_qty
+
+    rest_fallback_used = False
+    try:
+        result = await core._ipc_command("close_position", ipc_params)
+    except Exception as exc:
+        if core._is_live_channel_unavailable_error(exc) and rc is not None \
+                and hint_qty is not None and hint_qty > 0 and hint_is_long is not None:
+            # LIVE-GATE-FALLBACK-1：Live pipeline 未授權 → REST reduce_only 降級。
+            # 需要 hints 俱全才能降級（qty/is_long 缺一不可，避免誤下方向）。
+            try:
+                result = core._rest_close_position_reduce_only(rc, sym, hint_qty, hint_is_long)
+                rest_fallback_used = True
+                logger.warning(
+                    "LIVE-GATE-FALLBACK-1: close_position %s qty=%.4f is_long=%s "
+                    "(REST fallback — live pipeline not authorized)",
+                    sym, hint_qty, hint_is_long,
+                )
+            except Exception as rest_exc:
+                logger.error(
+                    "LIVE-GATE-FALLBACK-1 REST fallback failed for %s: %s", sym, rest_exc,
+                )
+                raise HTTPException(status_code=502, detail=f"REST fallback error: {rest_exc}")
+        else:
+            logger.error("IPC close_position failed for %s: %s", sym, exc)
+            raise HTTPException(status_code=502, detail=f"IPC error: {exc}")
+
+    # If no exchange position AND paper IPC also found nothing, return 404.
+    # 交易所和紙盤都沒倉，回 404（避免謊報 closed=True）。
+    if hint_qty is None or hint_qty <= 0:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No position found for {sym} (neither paper state nor exchange) / 倉位不存在",
+        )
+
+    logger.warning(
+        "⚠ close_position %s hint_is_long=%s hint_qty=%s rest_fallback=%s — actor=%s",
+        sym, hint_is_long, hint_qty, rest_fallback_used, getattr(actor, "actor_id", "?"),
+    )
+    return core._live_response({
+        "symbol": sym,
+        "closed": True,
+        "source": "rust_engine_with_rest_fallback" if rest_fallback_used else "rust_engine",
+        "rest_fallback": rest_fallback_used,
+        "reason": "live_pipeline_not_authorized" if rest_fallback_used else None,
+        "ipc": result,
+    })
+
+
+@core.live_router.post("/close-all-positions")
+async def post_live_close_all_positions(
+    actor: Any = Depends(base.current_actor),
+) -> dict:
+    """
+    POST /api/v1/live/close-all-positions
+    通過 IPC close_all_positions 立即平掉所有倉位（不停止 session，引擎繼續運行）。
+    Rust 引擎依 pipeline_kind 分派：Demo/Live → reduce_only 市價單；Paper → 清 paper_state。
+    需要 Operator 角色。
+
+    Close all positions immediately without stopping the session via IPC close_all_positions.
+    Rust engine branches by pipeline_kind: Demo/Live → reduce_only market orders; Paper → paper_state.
+    Requires Operator role.
+    """
+    core._require_operator(actor)
+    errors: list[str] = []
+    rest_fallback_used = False
+    try:
+        result = await core._ipc_command("close_all_positions", {"engine": "live"})
+    except Exception as exc:
+        if core._is_live_channel_unavailable_error(exc):
+            # LIVE-GATE-FALLBACK-1：Live pipeline 未授權啟動，IPC channel 不存在。
+            # paper_state live 槽也一定是空的（pipeline 沒跑），所以直接靠孤兒清掃 REST 降級平倉。
+            logger.warning(
+                "LIVE-GATE-FALLBACK-1: IPC close_all_positions channel unavailable "
+                "(live pipeline not authorized) — falling back to REST orphan sweep / "
+                "Live 命令通道不可用（管線未授權）— 降級至 REST 孤兒清掃"
+            )
+            result = {"skipped": True, "reason": "live_pipeline_not_authorized"}
+            rest_fallback_used = True
+        else:
+            logger.error("IPC close_all_positions failed: %s", exc)
+            errors.append(f"ipc_close_all: {exc}")
+            result = {"error": str(exc)}
+    # Orphan sweep: close exchange positions not tracked in paper_state.
+    # IPC close_all only iterates paper_state — orphan positions are silently skipped.
+    # 孤兒清掃：IPC close_all 只遍歷 paper_state，交易所孤兒倉位會被跳過，此處補掃。
+    orphan_result = await core._sweep_live_orphan_positions(errors)
+    if orphan_result.get("rest_fallback"):
+        rest_fallback_used = True
+    logger.warning(
+        "⚠ close-all-positions (manual, session continues, rest_fallback=%s) — actor=%s",
+        rest_fallback_used, getattr(actor, "actor_id", "?"),
+    )
+    return core._live_response({
+        "message": "All positions closed — session continues / 已平掉所有倉位，session 繼續運行",
+        "source": "rust_engine_with_rest_fallback" if rest_fallback_used else "rust_engine",
+        "rest_fallback": rest_fallback_used,
+        "reason": "live_pipeline_not_authorized" if rest_fallback_used else None,
+        "close_result": result,
+        "orphan_sweep": orphan_result,
+        "errors": errors if errors else None,
+    })
+
+
+@core.live_router.get("/metrics")
+def get_live_metrics(
+    actor: Any = Depends(base.current_actor),
+) -> dict:
+    """GET /api/v1/live/metrics — performance metrics from Rust engine (fills/positions/PnL). / 性能指標。"""
+    from .paper_trading_metrics import compute_full_metrics
+
+    rust = get_rust_reader()
+    # 3E-5: query per-engine snapshot for live metrics.
+    # 3E-5：查詢每引擎快照用於 live 指標。
+    engine_kind = core._get_live_engine_kind()
+    rust_state = rust.get_paper_state(engine=engine_kind) if rust.is_available() and engine_kind != "unknown" else None
+    if rust_state is None:
+        return core._live_response({"available": False, "source": "engine_unavailable"})
+    full = compute_full_metrics(rust_state, engine_mode=engine_kind)
+    # Read per-engine tick stats / 讀取每引擎 tick 統計
+    engine_snap = rust.get_engine_snapshot(engine_kind) if engine_kind != "unknown" else None
+    stats = (engine_snap or {}).get("stats") or {}
+    full["source"] = "rust_engine"
+    full["total_ticks"] = stats.get("total_ticks", 0)
+    full["total_intents"] = stats.get("total_intents", 0)
+    full["total_fills"] = stats.get("total_fills", 0)
+    full["total_stops"] = stats.get("total_stops", 0)
+    return core._live_response(full)
