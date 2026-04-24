@@ -71,6 +71,13 @@ pub(crate) fn kahan_sum(values: &[f64]) -> f64 {
 /// 無狀態指標引擎 — 將全部 13 個指標封裝為單一入口。
 pub struct IndicatorEngine;
 
+/// G7-02 (2026-04-24): Default EWMA volatility decay constant (lambda).
+/// 0.97 mirrors the pre-G7-02 hardcoded value and the RiskMetrics convention
+/// for sub-daily series; per-timeframe overrides flow in via
+/// `IndicatorEngine::compute_all_with_lambda`.
+/// G7-02：預設 EWMA 波動率衰減常數，0.97 保留 G7-02 前的硬編碼行為。
+pub const DEFAULT_EWMA_VOL_LAMBDA: f64 = 0.97;
+
 impl IndicatorEngine {
     /// Compute all indicators for given OHLCV data with default parameters.
     /// 使用默認參數計算給定 OHLCV 數據的所有指標。
@@ -78,12 +85,34 @@ impl IndicatorEngine {
     /// Default params / 默認參數:
     ///   SMA(20), SMA(50), EMA(12), EMA(26), RSI(14), MACD(12,26,9),
     ///   Bollinger(20,2.0), ATR(14), ATR(5), Stochastic(14,3), KAMA(10,2,30),
-    ///   ADX(14), Hurst(10,50), EWMA_vol(0.97), VolumeRatio(20), Donchian(20)
+    ///   ADX(14), Hurst(10,50), EWMA_vol(DEFAULT_EWMA_VOL_LAMBDA=0.97),
+    ///   VolumeRatio(20), Donchian(20)
+    ///
+    /// G7-02: thin wrapper over `compute_all_with_lambda` using
+    /// `DEFAULT_EWMA_VOL_LAMBDA`. Existing call sites stay bit-identical.
+    /// G7-02：薄包裝，保留既有呼叫端 bit-identical 行為。
     pub fn compute_all(
         high: &[f64],
         low: &[f64],
         close: &[f64],
         volume: &[f64],
+    ) -> IndicatorSnapshot {
+        Self::compute_all_with_lambda(high, low, close, volume, DEFAULT_EWMA_VOL_LAMBDA)
+    }
+
+    /// G7-02 (2026-04-24): Compute all indicators with an explicit EWMA Vol
+    /// lambda decay constant. Wired from `RiskConfig.ewma_vol` so operators
+    /// can tune lambda per timeframe (1m / 5m / 1h / 4h …) via TOML hot-reload.
+    /// All other indicator parameters remain at the `compute_all` defaults.
+    ///
+    /// G7-02：以顯式 EWMA Vol lambda 計算全部指標。lambda 由
+    /// `RiskConfig.ewma_vol` 透過 TOML 熱重載驅動，operator 可逐 timeframe 調整。
+    pub fn compute_all_with_lambda(
+        high: &[f64],
+        low: &[f64],
+        close: &[f64],
+        volume: &[f64],
+        ewma_lambda: f64,
     ) -> IndicatorSnapshot {
         // SMA / EMA with additional periods to match Python side.
         // 額外週期的 SMA / EMA，與 Python 端對齊。
@@ -114,7 +143,7 @@ impl IndicatorEngine {
                 volatility::DEFAULT_HURST_TRENDING_THRESHOLD,
                 volatility::DEFAULT_HURST_MEAN_REVERTING_THRESHOLD,
             ),
-            ewma_vol: ewma_vol(close, 0.97),
+            ewma_vol: ewma_vol(close, ewma_lambda),
             volume_ratio: volume_ratio(volume, 20),
             donchian: donchian(high, low, close, 20),
         }

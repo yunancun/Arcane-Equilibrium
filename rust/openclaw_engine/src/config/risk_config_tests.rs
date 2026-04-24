@@ -588,3 +588,129 @@ fn test_g3_02_executor_partial_toml_falls_back_to_defaults() {
     assert!(cfg.executor.per_symbol_position_cap.is_empty());
     assert!(cfg.validate().is_ok());
 }
+
+// ----- G7-02 (2026-04-24): EwmaVolConfig per-timeframe lambda configurability -----
+
+#[test]
+fn test_g7_02_ewma_vol_default_preserves_pre_g7_02_value() {
+    // Default EwmaVolConfig must expose default_lambda = 0.97 (mirrors the
+    // pre-G7-02 hardcoded constant in `IndicatorEngine::compute_all`) and an
+    // empty per-tf overrides map; lambda_for_timeframe must fall back to
+    // default_lambda for any timeframe.
+    // 預設 EwmaVolConfig 的 default_lambda 必須為 0.97 保留 G7-02 前行為，
+    // overrides 表為空時 lambda_for_timeframe 必回傳 default_lambda。
+    let cfg = RiskConfig::default();
+    assert!(
+        (cfg.ewma_vol.default_lambda - 0.97).abs() < 1e-12,
+        "default_lambda must be 0.97 (pre-G7-02 RiskMetrics value)"
+    );
+    assert!(
+        cfg.ewma_vol.lambdas.is_empty(),
+        "default lambdas map must be empty"
+    );
+    // Bit-identical to compute_all_with_lambda call from Core.
+    assert!(
+        (cfg.ewma_vol.lambda_for_timeframe("1m")
+            - openclaw_core::indicators::DEFAULT_EWMA_VOL_LAMBDA)
+            .abs()
+            < 1e-12,
+        "lambda_for_timeframe('1m') must equal core DEFAULT_EWMA_VOL_LAMBDA"
+    );
+    assert!(cfg.validate().is_ok(), "default ewma_vol must validate");
+}
+
+#[test]
+fn test_g7_02_ewma_vol_validate_rejects_out_of_range() {
+    // EWMA recursion needs 0 < lambda < 1 — both endpoints + negative + >=1
+    // must be rejected. validate() should fail-fast at config-load time
+    // instead of letting `ewma_vol()` return None silently every tick.
+    // 0 < lambda < 1 開區間外的所有值（負/0/1/>1）都必須拒絕。
+    let mut cfg = RiskConfig::default();
+    cfg.ewma_vol.default_lambda = -0.1;
+    assert!(cfg.validate().is_err(), "negative default_lambda must reject");
+    cfg.ewma_vol.default_lambda = 0.0;
+    assert!(cfg.validate().is_err(), "default_lambda == 0 must reject");
+    cfg.ewma_vol.default_lambda = 1.0;
+    assert!(cfg.validate().is_err(), "default_lambda == 1.0 must reject");
+    cfg.ewma_vol.default_lambda = 1.5;
+    assert!(cfg.validate().is_err(), "default_lambda > 1.0 must reject");
+    cfg.ewma_vol.default_lambda = 0.94;
+    assert!(cfg.validate().is_ok(), "0.94 (in-range) must accept");
+
+    // Per-tf override out-of-range must reject as well.
+    // Per-tf 覆寫越界亦必拒。
+    cfg.ewma_vol.default_lambda = 0.97;
+    cfg.ewma_vol.lambdas.insert("1m".into(), 1.5);
+    assert!(cfg.validate().is_err(), "per-tf lambda > 1.0 must reject");
+    cfg.ewma_vol.lambdas.clear();
+    cfg.ewma_vol.lambdas.insert("5m".into(), 0.0);
+    assert!(cfg.validate().is_err(), "per-tf lambda == 0 must reject");
+    cfg.ewma_vol.lambdas.clear();
+    cfg.ewma_vol.lambdas.insert("".into(), 0.95);
+    assert!(cfg.validate().is_err(), "empty timeframe key must reject");
+}
+
+#[test]
+fn test_g7_02_ewma_vol_toml_roundtrip() {
+    // Custom default + per-tf overrides must survive TOML round-trip cleanly.
+    // 自訂 default + per-tf 覆寫必須無損穿越 TOML round-trip。
+    let mut cfg = RiskConfig::default();
+    cfg.ewma_vol.default_lambda = 0.95;
+    cfg.ewma_vol.lambdas.insert("1m".into(), 0.94);
+    cfg.ewma_vol.lambdas.insert("5m".into(), 0.95);
+    cfg.ewma_vol.lambdas.insert("1h".into(), 0.97);
+    cfg.ewma_vol.lambdas.insert("4h".into(), 0.99);
+
+    let toml_str = toml::to_string(&cfg).unwrap();
+    let de: RiskConfig = toml::from_str(&toml_str).unwrap();
+
+    assert!((de.ewma_vol.default_lambda - 0.95).abs() < 1e-12);
+    assert_eq!(de.ewma_vol.lambdas.len(), 4);
+    assert!((de.ewma_vol.lambda_for_timeframe("1m") - 0.94).abs() < 1e-12);
+    assert!((de.ewma_vol.lambda_for_timeframe("5m") - 0.95).abs() < 1e-12);
+    assert!((de.ewma_vol.lambda_for_timeframe("1h") - 0.97).abs() < 1e-12);
+    assert!((de.ewma_vol.lambda_for_timeframe("4h") - 0.99).abs() < 1e-12);
+    // Unconfigured timeframe must fall back to default_lambda.
+    // 未設定 timeframe 必回退至 default_lambda。
+    assert!((de.ewma_vol.lambda_for_timeframe("15m") - 0.95).abs() < 1e-12);
+    assert!(de.validate().is_ok());
+}
+
+#[test]
+fn test_g7_02_ewma_vol_partial_toml_falls_back_to_defaults() {
+    // [ewma_vol] section absent → #[serde(default)] returns 0.97 + empty map,
+    // preserving the pre-G7-02 runtime behavior bit-for-bit.
+    // TOML 缺 [ewma_vol] 區段時，#[serde(default)] 補回 0.97 + 空表保留 G7-02 前行為。
+    let toml_str = r#"
+        [meta]
+        version = 1
+        saved_ts_ms = 0
+    "#;
+    let cfg: RiskConfig = toml::from_str(toml_str).unwrap();
+    assert!((cfg.ewma_vol.default_lambda - 0.97).abs() < 1e-12);
+    assert!(cfg.ewma_vol.lambdas.is_empty());
+    assert!((cfg.ewma_vol.lambda_for_timeframe("anything") - 0.97).abs() < 1e-12);
+    assert!(cfg.validate().is_ok());
+}
+
+#[test]
+fn test_g7_02_ewma_vol_lambda_for_timeframe_lookup() {
+    // Per-timeframe lookup must return the override when present and
+    // default_lambda otherwise; ensures the helper used by the tick path is
+    // semantically correct before relying on it for hot-path indicator calc.
+    // lambda_for_timeframe 必須在有 override 時回傳 override，否則回 default_lambda；
+    // 確保 tick 熱路徑指標計算所依賴的 helper 語義正確。
+    let mut cfg = EwmaVolConfig::default();
+    cfg.default_lambda = 0.97;
+    cfg.lambdas.insert("1m".into(), 0.94);
+    cfg.lambdas.insert("4h".into(), 0.99);
+
+    assert!((cfg.lambda_for_timeframe("1m") - 0.94).abs() < 1e-12);
+    assert!((cfg.lambda_for_timeframe("4h") - 0.99).abs() < 1e-12);
+    // Missing 5m / 1h → default_lambda (0.97)
+    assert!((cfg.lambda_for_timeframe("5m") - 0.97).abs() < 1e-12);
+    assert!((cfg.lambda_for_timeframe("1h") - 0.97).abs() < 1e-12);
+    // Unknown / empty key → default_lambda (must not panic).
+    assert!((cfg.lambda_for_timeframe("random") - 0.97).abs() < 1e-12);
+    assert!((cfg.lambda_for_timeframe("") - 0.97).abs() < 1e-12);
+}

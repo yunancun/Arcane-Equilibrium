@@ -288,16 +288,30 @@ impl TickPipeline {
 
     /// Compute indicator snapshot from aggregated klines.
     /// 從聚合 K 線計算指標快照。
+    ///
+    /// G7-02 (2026-04-24): EWMA Vol lambda is sourced from
+    /// `RiskConfig.ewma_vol.lambda_for_timeframe("1m")` when a `risk_store` is
+    /// wired; otherwise the core indicator engine's `DEFAULT_EWMA_VOL_LAMBDA`
+    /// (0.97) preserves the pre-G7-02 behavior.
+    /// G7-02：EWMA Vol lambda 由 RiskConfig.ewma_vol 驅動；未接 store 時回退至
+    /// 0.97 保留 G7-02 前行為。
     pub(super) fn compute_indicators(&self, symbol: &str) -> Option<IndicatorSnapshot> {
-        let ohlcv = self.kline_manager.get_ohlcv(symbol, "1m", Some(100))?;
+        const TIMEFRAME: &str = "1m";
+        let ohlcv = self.kline_manager.get_ohlcv(symbol, TIMEFRAME, Some(100))?;
         if ohlcv.close.len() < 30 {
             return None;
         }
-        Some(IndicatorEngine::compute_all(
+        let ewma_lambda = self
+            .risk_store
+            .as_ref()
+            .map(|store| store.load().ewma_vol.lambda_for_timeframe(TIMEFRAME))
+            .unwrap_or(openclaw_core::indicators::DEFAULT_EWMA_VOL_LAMBDA);
+        Some(IndicatorEngine::compute_all_with_lambda(
             &ohlcv.high,
             &ohlcv.low,
             &ohlcv.close,
             &ohlcv.volume,
+            ewma_lambda,
         ))
     }
 
