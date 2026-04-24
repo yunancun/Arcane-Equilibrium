@@ -161,4 +161,13 @@ enabled = false
 [exit]
 shadow_enabled = false
 
+# G7-01 (2026-04-24) — Kelly fractional-tier sample-size boundaries.
+# Paper defaults match demo (50 / 200). Paper pipeline is drained by default
+# (PAPER-DISABLE-1) so Kelly sizing rarely fires here, but keeping the section
+# present preserves three-environment config parity.
+# G7-01：Kelly 分層樣本量邊界。Paper 預設與 demo 對齊（50/200），保持三環境配置對稱。
+[kelly]
+young_threshold = 50
+mature_threshold = 200
+
 [experimental.flags]

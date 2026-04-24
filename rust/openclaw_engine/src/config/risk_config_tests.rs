@@ -421,3 +421,68 @@ fn test_ft_min_notional_ratio_serialization_roundtrip() {
     let de2: RiskConfig = toml::from_str(&toml_str).unwrap();
     assert!((de2.limits.ft_min_notional_ratio_of_entry - 0.4).abs() < f64::EPSILON);
 }
+
+// ----- G7-01 (2026-04-24): Kelly tier boundary TOML configurability -----
+
+#[test]
+fn test_g7_01_kelly_tier_default_50_200() {
+    // Default RiskConfig must have Kelly thresholds = 50 / 200 (mirrors
+    // ml::kelly_sizer::KellyConfig defaults; preserves pre-G7-01 behavior).
+    // 預設 RiskConfig 的 Kelly 門檻必須為 50/200，保留 G7-01 前行為。
+    let cfg = RiskConfig::default();
+    assert_eq!(cfg.kelly.young_threshold, 50);
+    assert_eq!(cfg.kelly.mature_threshold, 200);
+    assert!(cfg.validate().is_ok(), "default Kelly config must validate");
+}
+
+#[test]
+fn test_g7_01_kelly_tier_validate_rejects_inverted_and_zero() {
+    // young >= mature must be rejected; either-zero must be rejected.
+    // young >= mature 必須拒絕；任一為 0 必須拒絕。
+    let mut cfg = RiskConfig::default();
+
+    cfg.kelly.young_threshold = 200;
+    cfg.kelly.mature_threshold = 50;
+    assert!(cfg.validate().is_err(), "young > mature must reject");
+
+    cfg.kelly.young_threshold = 100;
+    cfg.kelly.mature_threshold = 100;
+    assert!(cfg.validate().is_err(), "young == mature must reject");
+
+    cfg.kelly.young_threshold = 0;
+    cfg.kelly.mature_threshold = 200;
+    assert!(cfg.validate().is_err(), "young == 0 must reject");
+
+    cfg.kelly.young_threshold = 50;
+    cfg.kelly.mature_threshold = 0;
+    assert!(cfg.validate().is_err(), "mature == 0 must reject");
+}
+
+#[test]
+fn test_g7_01_kelly_tier_toml_roundtrip() {
+    // Custom thresholds must survive TOML round-trip cleanly.
+    // 自訂門檻必須無損穿越 TOML round-trip。
+    let mut cfg = RiskConfig::default();
+    cfg.kelly.young_threshold = 30;
+    cfg.kelly.mature_threshold = 150;
+    let toml_str = toml::to_string(&cfg).unwrap();
+    let de: RiskConfig = toml::from_str(&toml_str).unwrap();
+    assert_eq!(de.kelly.young_threshold, 30);
+    assert_eq!(de.kelly.mature_threshold, 150);
+    assert!(de.validate().is_ok());
+}
+
+#[test]
+fn test_g7_01_kelly_tier_partial_toml_falls_back_to_defaults() {
+    // [kelly] section absent in TOML → defaults 50/200 apply via #[serde(default)].
+    // TOML 缺 [kelly] 區段時，#[serde(default)] 應補回 50/200。
+    let toml_str = r#"
+        [meta]
+        version = 1
+        saved_ts_ms = 0
+    "#;
+    let cfg: RiskConfig = toml::from_str(toml_str).unwrap();
+    assert_eq!(cfg.kelly.young_threshold, 50);
+    assert_eq!(cfg.kelly.mature_threshold, 200);
+    assert!(cfg.validate().is_ok());
+}

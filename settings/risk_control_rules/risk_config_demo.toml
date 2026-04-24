@@ -160,3 +160,15 @@ missing_edge_fallback_bps = 10.0
 # INFRA-PREBUILD-1 A 部：Combine Layer shadow 開關；false 維持 Phase 1a，
 # true 開 Phase 2+ 觀察寫入。熱重載即可，不須重啟。
 shadow_enabled = false
+
+# G7-01 (2026-04-24) — Kelly fractional-tier sample-size boundaries.
+# Drives ml::kelly_sizer::compute_kelly_qty:
+#   trades < young_threshold     → 1/8 Kelly (young, most conservative)
+#   trades < mature_threshold    → 1/6 Kelly (mature)
+#   trades >= mature_threshold   → 1/4 Kelly (established, never full Kelly)
+# Defaults 50 / 200 mirror the pre-G7-01 hardcoded constants — runtime
+# behavior is unchanged unless an operator edits these.
+# G7-01：Kelly 分層樣本量邊界。預設 50/200 保留 G7-01 前的硬編碼行為。
+[kelly]
+young_threshold = 50
+mature_threshold = 200
