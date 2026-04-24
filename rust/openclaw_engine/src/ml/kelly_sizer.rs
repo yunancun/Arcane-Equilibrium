@@ -388,28 +388,41 @@ mod tests {
 
     #[test]
     fn test_g7_01_custom_thresholds_change_tier_selection() {
-        // With custom thresholds 30/100, a 50-trade sample should land in the
-        // mature tier (1/6 Kelly) instead of the default young tier (1/8).
-        // 自訂門檻 30/100 下，50 筆樣本應落在 mature tier (1/6)，預設則是 young (1/8)。
-        let cfg_default = KellyConfig::default();
-        let cfg_custom = KellyConfig {
-            young_threshold: 30,
-            mature_threshold: 100,
-            ..Default::default()
+        // Verify that the tier boundary is actually read from `config.young_threshold`
+        // and not hardcoded. With `min_trades` lowered to 10 (so the tier branch is
+        // exercised), a 50-trade sample lands in different tiers under different
+        // configs:
+        //   - default (young=50):     50 < 50  is false → mature (1/6 Kelly)
+        //   - custom  (young=80):     50 < 80  is true  → young  (1/8 Kelly)
+        // Same Kelly-full ⇒ qty_default > qty_custom (default's 1/6 beats 1/8).
+        // 同樣 50 筆樣本，預設邊界 50 → mature (1/6)，自訂邊界 80 → young (1/8)。
+        let cfg_default = KellyConfig {
+            min_trades: 10, // expose the tier branch
+            ..KellyConfig::default()
         };
-        let stats = make_stats(30, 20, 100.0, 80.0); // 50 trades total
+        let cfg_custom = KellyConfig {
+            young_threshold: 80,
+            mature_threshold: 200,
+            min_trades: 10,
+            ..KellyConfig::default()
+        };
+        // 50 trades: 30 wins + 20 losses, win_rate 0.6, avg_win=100, avg_loss=80,
+        // R=1.25 → Kelly_full = 0.6 - 0.4/1.25 = 0.28 (positive).
+        // 50 筆 60% 勝率，Kelly_full = 0.28 > 0，進 tier 分支。
+        let stats = make_stats(30, 20, 100.0, 80.0);
+        assert_eq!(stats.total_trades, 50);
 
         let qty_default = compute_kelly_qty(&cfg_default, &stats, 10000.0, 50000.0, 0.02, 1.0);
         let qty_custom = compute_kelly_qty(&cfg_custom, &stats, 10000.0, 50000.0, 0.02, 1.0);
 
-        // Custom (1/6) > default (1/8) for the same Kelly-full.
+        // Default (1/6) > custom (1/8) for the same Kelly-full.
         // 同 Kelly-full 下，1/6 > 1/8。
         assert!(
-            qty_custom > qty_default,
-            "custom mature tier (1/6) must size larger than default young tier (1/8): \
-             custom={} default={}",
-            qty_custom,
-            qty_default
+            qty_default > qty_custom,
+            "default mature tier (1/6, young=50) must size larger than custom young tier \
+             (1/8, young=80): default={} custom={}",
+            qty_default,
+            qty_custom
         );
     }
 }
