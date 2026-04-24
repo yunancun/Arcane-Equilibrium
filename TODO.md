@@ -344,7 +344,7 @@ ssh trade-core "cd ~/BybitOpenClaw/srv && python3 helper_scripts/db/passive_wait
 | **LEARNING-COCKPIT-NO-IPC** | Learning 8 端點走 Python state_store | G-7/G-10 後 | 🟡P2 | 設計債 |
 | **STRATEGIST-PERSIST-AUDIT-GAP-COUNTER-1** | Phase 5+ 硬依賴 | G3-02 | 🟡P2 | FA H2 |
 | **STRATEGIST-TUNE-TARGET-CONFIG-1** | 運行時可配置 | Phase 5+ | 🟡P2 | |
-| **STRATEGIST-HISTORY GUI** | backend 已 live | — | 🟡P2 | 0.5d GUI |
+| **STRATEGIST-HISTORY GUI** | ✅ 2026-04-24 完成 | — | ✅ | tab-strategy.html 折疊 sub-panel（summary KPI + 3 filter + list 50 行 + Diff/7d Effect 展開）· main `ed24509` |
 
 ---
 
