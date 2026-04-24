@@ -1,458 +1,387 @@
-# OpenClaw TODO — 工作清單（2026-04-24 FIX-PLAN v2 整合版）
+# OpenClaw TODO — 工作清單（v3 · 單一時間軸版）
 
-**最後更新**：2026-04-24 16:00 CEST（FIX-PLAN v2 PM 簽核版；整合 10-agent audit + 180-220 findings）  
-**簽核**：PM Approved with 6 adjustments · [Sign-off](docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-24--FixPlan_v2_PMApproval.md)  
-**FIX-PLAN**：[v2 完整方案](docs/CCAgentWorkSpace/PA/workspace/reports/2026-04-24--4.24TodoAudit_FixPlan_v2.md) · [PA 核實](docs/CCAgentWorkSpace/PA/workspace/reports/2026-04-24--4.24TodoAudit_FixPlan_v2.md#3-工作分組按執行軸) · [10 agent 提案彙整](docs/audits/2026-04-24--todo_refactor_audit.md)
+**最後更新**：2026-04-24 CEST
+**版本**：v3（Wave 線性版；廢除雙軌 P0-P4 章節，P0/P1/P2 降為每項 tag）
+**舊版歸檔**：v2 `docs/archive/2026-04-24--todo_v2_dual_axis_snapshot.md`（458 行，Wave+P 雙軌）· v1 `docs/archive/2026-04-24--todo_v1_refactor_snapshot.md`（328 行）· v0 `docs/archive/2026-04-24--todo_snapshot_pre_refactor.md`（700 行）
+**簽核**：PM Approved FIX-PLAN v2 → [Sign-off](docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-24--FixPlan_v2_PMApproval.md)
+**基礎方案**：[FIX-PLAN v2](docs/CCAgentWorkSpace/PA/workspace/reports/2026-04-24--4.24TodoAudit_FixPlan_v2.md) · [10-Agent audit 索引](docs/audits/2026-04-24--todo_refactor_audit.md)
 
-**Engine**：PID **884467** · binary mtime **2026-04-24 02:06** · baseline HEAD `1a53400`（含 EDGE-DIAG-1-FUP-IPC + Phase 4 counterfactual cron；待 `--rebuild` 部署 P1-11 FIX-26-DEADLOCK-1）  
-**測試基準線**：Rust engine lib **1980 passed / 0 failed** · pytest **2996**  
-**健康狀態**：demo alive · 0 panics · 21d clock 起算 2026-04-16 22:16 → 目標解鎖 2026-05-07
+**Engine**：PID 884467 · mtime 2026-04-24 02:06 · HEAD `1a53400`（待 `--rebuild` 帶 P1-11 FIX-26）
+**測試**：engine lib 1980 / 0 fail · pytest 2996
+**21d demo 時鐘**：起算 2026-04-16 22:16 → 解鎖 2026-05-07
 
 ---
 
-## 🎯 接手三連檢查
+## 🎯 此刻該做什麼（2026-04-24，Wave 1 第 1 天）
+
+**本週 Top 3**（按順序）：
+
+1. **🔴 G1-01** `edge_estimator_scheduler` 恢復 — **Linux 2h 診斷 + 1d 修復**
+   - 4 天停滯（edge_estimates.json 僅 1 cell），阻塞 G4 ML / P0-3 邊評 / EDGE-DIAG Phase 3
+   - 負責：MIT+E4 / 驗 E2
+   - 先做：ssh trade-core 查 scheduler 進程 + flock sentinel + log
+
+2. **🔴 G1-02** `event_consumer/mod.rs` fn 拆分（1696 行 → <1200） — **4-5d**
+   - 阻塞 G3 (AI 接線) + G5 (refactor) — Wave 1 主體工時
+   - 負責：E1+PA 同 session 緊密 / 驗 E2
+
+3. **🔴 G1-05** PostOnly 配置驗證（**實際正確，簡化為驗證+註解**）— **≤0.5d**
+   - FA 初審誤判 demo/live 反向；PA 核實 `strategy_params_{demo,live}.toml` 配置正確
+   - 負責：FA+E1 / 驗 E2
+
+**並行可派 sub-agent**：G6-01 healthcheck 補齊（E1/QA，1-2d）· FA L1 / L2 proposal 清算（獨立軌道）
+
+---
+
+## 🔗 依賴關係圖
+
+```
+Wave 1（W17/18 · 4/24→5/08）              Wave 2（W19 · 5/08→5/22）            Wave 3（W20-W23 · 5/22→6/12）         Wave 4（W23-W24 · 6/12→6/23）
+─────────────────────────────            ────────────────────────            ─────────────────────────────       ──────────────────────────
+G1-01 scheduler ──┐                       G3-01 RFC ──→ G3-02 toggle ──┐       EDGE-DIAG Phase 3 ──┐               P0-3 邊評決策 ──┐
+                  ├── G4 labels           G3-03 Rust IPC ─────────────┤      Phase 1b exit_features┤               LG-2 H0 block ──┤
+G1-02 fn 拆 ──────┼── G3 AI 接線 ──→     G3-04 e2e test ─────────────┤      G2-01 PostOnly 驗（背景→驗）┤         LG-3 pricing ───┤───→ Live
+                  ├── G5 main.rs 拆       G4-01 labels 加速 ──→ G4-02 first ONNX ──→ G4-03 canary  ┤               LG-4 supervised┤
+G1-05 PostOnly ───┘                       G5-01~06 refactor （並行）                  Phase 2 shadow flip          LG-5 autonomous ─┘
+                                          G7 量化（Kelly/EWMA/Hurst/CUSUM）
+G6-01~04 healthcheck + Guard              G8 e2e + healthcheck [13-15]                G9 Bybit API 精進（並行）
+
+背景線程（貫穿 Wave 1-4）
+──────────────────────
+P0-2 21d demo（→ 5/07 解鎖） · PostOnly 1-2w 驗（→ 5/07-08 出結果） · Labels 累積（→ 需 200 pooled）
+P1-8 DUST log-only 觀察（04-17 起算）· exit_features 累積 ≥1w（04-26 滿）· BB rebuild 觀察（待 operator）
+```
+
+**關鍵判讀**：
+- Wave 1 必須先完成 G1-01/02/05（P0 三項），G6 並行
+- Wave 2 **取決於 G1-02 拆完**（event_consumer 不拆則 G3 Rust handler 加不進）
+- Wave 3 Phase 3 **取決於 healthcheck [11] 連續 3d PASS**（被動等待）
+- Wave 4 **取決於 P0-2 21d 解鎖 + P0-3 決策會**（事件驅動，非 hard date）
+
+**compact 拆 session 建議**：
+- Session A（Wave 1）：G1-01 + G1-05 + G6-01 並行（短 session OK）
+- Session B（Wave 1 核心）：G1-02 event_consumer 拆 — **PA+E1 同 session 緊密**（不可拆）
+- Session C（Wave 1 末）：G5 refactor 起步 — 可派 2-3 subagent 並行
+- Session D（Wave 2）：G3 RFC + 實裝 — PA+E1+E2 鏈
+- Session E（Wave 2）：G7 量化 + G4 ML — 獨立軌道
+- Session F+（Wave 3-4）：被動觀察 + 決策會
+
+---
+
+## 🕐 接手三連檢查
 
 ```bash
-# 1. git 狀態 + log
+# 1. git 狀態 + 領先/落後
 git status && git log --oneline -5
+git fetch --prune origin && git pull --ff-only origin main 2>/dev/null || echo "divergent, manual fix"
 
-# 2. engine 存活 + watchdog
+# 2. engine 存活（Mac 透過 ssh）
 ssh trade-core "python3 helper_scripts/canary/engine_watchdog.py --data-dir /tmp/openclaw --status"
 
-# 3. healthcheck 掃一遍（W1 新強制規則）
-python3 helper_scripts/db/passive_wait_healthcheck.py
+# 3. healthcheck 一眼看（CLAUDE.md §七 強制）
+ssh trade-core "cd ~/BybitOpenClaw/srv && python3 helper_scripts/db/passive_wait_healthcheck.py"
 
-# 若 healthcheck FAIL：evaluate whether passive-wait prerequisite still holds
-# 若 engine 掛：bash helper_scripts/restart_all.sh --engine-only --rebuild
+# 若 engine 掛：ssh trade-core "bash helper_scripts/restart_all.sh --rebuild"
 ```
 
 ---
 
-## 🗺️ 核心路線圖（Wave 1-4 結構）
+## 🗺️ Wave 時序 + 里程碑
 
-| Wave | 週次 | 日期 | 主軸 | 結束狀態 | PM 簽核 |
+| Wave | 週次 | 日期 | 主軸 | 結束標準 | 狀態 |
 |---|---|---|---|---|---|
-| **W1** | W17/18 | 2026-04-24~2026-05-08 | G1 scheduler 恢復 + fn 拆分 + G6 healthcheck | 基礎設施解凍 | ✅ |
-| **W2** | W19 | 2026-05-08~2026-05-22 | G3 AI 接線 + G5 refactor + G4 ML pipeline + G7 量化 | AI 全連接 + 代碼合規 | ✅ |
-| **W3** | W20-W23 | 2026-05-22~2026-06-12 | EDGE-DIAG Phase 3 + Phase 1b + Phase 2 shadow | 邊界穩定 + ML canary | ✅ |
-| **W4** | W23-W24 | 2026-06-12~2026-06-23 | LG-2/3/4/5 + P0-3 edge 決策 + Phase 2→3 | Live Gate 簽準 → Live | ✅ |
+| **W1** | W17/18 | **4/24→5/08** | G1 edge infra + G6 healthcheck | scheduler live + event_consumer <1200 行 | 🟡 **進行中** |
+| **W2** | W19 | 5/08→5/22 | G3 AI 接線 + G5 refactor + G4 ML + G7 量化 | Executor shadow→live + 首個 ONNX + 8 檔 <1200 | ⬜ |
+| **W3** | W20-W23 | 5/22→6/12 | EDGE-DIAG Phase 3 + Phase 1b + G2 策略驗 + G8 test | clean n≥200 + shadow agreement ≥95% | ⬜ |
+| **W4** | W23-W24 | 6/12→6/23 | P0-3 決策 + LG-2/3/4/5 + G9 Bybit | Live Gate 全綠 | ⬜ |
 
-**最早 Live**：中位 **2026-05-30** / 樂觀 ~2026-05-23 / 悲觀 ~2026-06-15（PM 簽核 +10% 緩衝建議 ~2026-06-01）  
-**關鍵依賴鏈**：G1 → G3/G5 (並行) → EDGE-DIAG Phase 3 + Phase 1b → LG-2/3/4/5 → Live  
-**3 大 Verified 發現**：(1) scheduler 4d 停滯 G1-01 即時 (2) PostOnly 配置正確 G1-05 簡化 (3) ExecutorAgent shadow G3-02 W2 核心
+**Live 最早**：~2026-05-30 中位 / ~2026-05-23 樂觀 / ~2026-06-15 悲觀 / **對外 ~2026-06-01**（PM +10% 緩衝）
 
 ---
 
-## 🔴 P0 — Live 阻塞關鍵路徑
-
-### ✅ P0-13/14/15 三連 — 歸檔 2026-04-24
-ATR-SCALE-BUG-1 · EDGE-ESTIMATES-MISS-1 · COST-EDGE-DEPRECATION → `docs/archive/2026-04-24--completed_todo_batch.md`
-
-### P0-2 · LG-1 Demo 21d 觀察期 🕰️
-
-**時鐘**：2026-04-16 22:16 local → 目標解鎖 **2026-05-07**  
-**狀態**：🟡 進行中（~8d 無異常）  
-**healthcheck 對應**：[0] engine_alive last 24h + [1] 0 engine_crash（CLAUDE.md §七 強制）  
-**完成標準**：連續 21d 無異常火警 → P0-3 邊評觸發  
-**Audit 指針**：[PM](docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-24--4.24TodoAudit.md) § B.1 / [QA](docs/CCAgentWorkSpace/QA/workspace/reports/)
-
-### P0-3 · Phase 5 策略 Edge 重評（決策點）
-
-**狀態**：⬜ 待 P0-2 解鎖後 3 日內觸發  
-**決策輸入**：counterfactual replay（EDGE-DIAG Phase 2 result）+ P1-10 邊際分析 + PostOnly 1-2w 驗證  
-**outcome 分支**：
-  - A. edge 翻正 → cost_gate 重啟 / Track P Phase 1b 解凍
-  - B. edge 仍負 → DUAL-TRACK 全力 / Phase 5 重做 / 策略下架
-  - C. edge 結構性改善（策略層調適）→ Phase 5 部分接線
-
-**Audit 指針**：[FA](docs/CCAgentWorkSpace/FA/workspace/reports/) C-3 / [QC](docs/CCAgentWorkSpace/QC/workspace/) B.5
-
----
-
-## 🟠 Wave 1（W17/18 · 2026-04-24~2026-05-08）— 基礎設施解凍
+## ⏩ Wave 1（W17/18 · 4/24→5/08）— 基礎設施解凍【進行中】
 
 ### G1 Edge 危機根源修復
 
-| ID | 項目 | 狀態 | 前置 | 負責修/驗 | 工時 | 優先級 | 完成標準 |
-|---|---|---|---|---|---|---|---|
-| **G1-01** | edge_estimator_scheduler 診斷 + 恢復（4 天停滯 root cause） | ⬜ | 無 | MIT+E4 / E2 | **2h 診斷 + 1d 修復** | **🔴 P0** | `edge_estimates.json` mtime 24h fresh、cell count ≥50 |
-| **G1-02** | event_consumer/mod.rs fn 1696 行拆分（硬上限 1200） | ⬜ | 無 | E1+PA / E2 | **4-5d** | **🔴 P0** | <1200 行、test coverage ≥95% |
-| **G1-03** | Rust 硬違反 8 檔 refactor（bybit_rest_client/order_manager 等） | ⬜ | G1-02 | E5+E1 / E2+E4 | 2-3d | 🟠 P1 | all files <1200 lines |
-| **G1-04** | fee drag / R:R 邊際驗證基線 | ⬜ | P1-10 demo | QC / FA | 1-2d | 🟠 P1 | counterfactual analysis complete |
-| **G1-05** | PostOnly 配置驗證（demo=true/live=false） | ⬜ | 無 | FA+E1 / E2 | **≤0.5d** | **🔴 P0 簡化** | read TOML + design intent doc |
-| **G1-06** | Drawdown auto-revoke 實裝（原則 #5） | ⬜ | 無 | E1 / E2 | 1d | 🟠 P1 | reconciler.py implement + test |
+| ID | Tag | 項目 | 前置 | 負責修/驗 | 工時 | 完成標準 |
+|---|---|---|---|---|---|---|
+| **G1-01** | 🔴P0 | `edge_estimator_scheduler` 診斷 + 恢復 | 無 | MIT+E4 / E2 | 2h+1d | `edge_estimates.json` mtime <6h + cells ≥50 |
+| **G1-02** | 🔴P0 | `event_consumer/mod.rs` fn 1696 行拆（硬上限 1200） | 無 | E1+PA 同session / E2 | **4-5d** | <1200 行 + test cov ≥95% + engine lib pass |
+| **G1-03** | 🟠P1 | Rust 硬違反 7 檔 refactor（main/instrument/rest_client 等） | G1-02 | E5+E1 / E2+E4 | 2-3d | all rust files <1200 lines |
+| **G1-04** | 🟠P1 | fee drag / R:R 邊際驗證基線 | PostOnly demo | QC / FA | 1-2d | counterfactual baseline report |
+| **G1-05** | 🔴P0 | PostOnly 配置驗證（實際正確，**簡化**） | 無 | FA+E1 / E2 | ≤0.5d | TOML 確認 + design intent doc |
+| **G1-06** | 🟠P1 | Drawdown auto-revoke 實裝（原則 #5） | 無 | E1 / E2 | 1d | reconciler drawdown-triggered revoke |
 
-### G6 合規 + 觀察性（W1 起，W2 完成）
+### G6 合規 + 觀察性
 
-| ID | 項目 | 狀態 | 前置 | 負責修/驗 | 工時 | 優先級 | healthcheck |
-|---|---|---|---|---|---|---|---|
-| **G6-01** | passive_wait_healthcheck.py 補齊 5 缺陷 | ⬜ | 無 | E1 / QA | 1-2d | 🟠 P1 | [0-7] core checks |
-| **G6-02** | 被動等待 TODO 全覆蓋 healthcheck [13-15] | ⬜ | G6-01 | PM+E1 / QA | 1d | 🟠 P1 | [13] postonly_fee_drag / [14] exit_features_rate / [15] shadow_exit_agreement |
-| **G6-03** | V019/V020 retrofit Guard A（V023 postmortem） | ⬜ | 無 | E1+E2 | 1d | 🟡 P2 | migration test suite pass |
-| **G6-04** | CLAUDE.md §三 敘述同步規則 | ⬜ | 無 | TW | 0.5d | 🟡 P2 | §三 ≤2 日敘述 |
+| ID | Tag | 項目 | 前置 | 負責修/驗 | 工時 | 完成標準 |
+|---|---|---|---|---|---|---|
+| **G6-01** | 🟠P1 | `passive_wait_healthcheck.py` 補齊 5 缺陷（QA 發現） | 無 | E1 / QA | 1-2d | 12 現有 check 邏輯全驗 |
+| **G6-02** | 🟠P1 | 被動等待 TODO 全覆蓋 healthcheck [13-15] | G6-01 | PM+E1 / QA | 1d | [13] edge_fresh / [14] exit_feat_rate / [15] shadow_agree |
+| **G6-03** | 🟡P2 | V019/V020 retrofit Guard A（V023 postmortem 規範） | 無 | E1+E2 | 1d | migration test suite pass |
+| **G6-04** | 🟡P2 | CLAUDE.md §三 敘述同步規則（TODO vs runtime） | 無 | TW | 0.5d | Lessons 新 rule 登記 |
+
+### Wave 1 完成標準（Go / No-Go）
+
+- [ ] G1-01 scheduler 24h fresh + n_cells ≥50（healthcheck [13] PASS 連 3 日）
+- [ ] G1-02 event_consumer <1200 行 + engine lib 1980+ pass
+- [ ] G1-05 PostOnly design intent doc 存檔（修正 FA v1 誤判）
+- [ ] G6-01+02 所有被動等待項附 healthcheck + 6h cron 跑起
+- [ ] 背景：P0-2 時鐘未重置、PostOnly 驗收資料累積中
 
 ---
 
-## 🟡 Wave 2（W19 · 2026-05-08~2026-05-22）— AI 接線 + 架構合規
+## ⏩ Wave 2（W19 · 5/08→5/22）— AI 接線 + 架構合規
 
-### G3 AI 多 Agent 接線（執行 Agent 決策鏈補全）
+### G3 AI 多 Agent 接線（5-Agent → Rust 補全）
 
-| ID | 項目 | 狀態 | 前置 | 負責修/驗 | 工時 | 優先級 | 完成標準 |
-|---|---|---|---|---|---|---|---|
-| **G3-01** | ExecutorAgent ConfigStore + IPC RFC | ⬜ | G1-02 | PA / E2 | 1d | **🔴 P0** | RFC 設計 doc + PA 簽核 |
-| **G3-02** | ExecutorAgent shadow→live toggle 實裝 | ⬜ | G3-01 | E1+PA / E2+E4 | **2-3d** | **🔴 P0** | e2e test shadow→live + Rust intent receive |
-| **G3-03** | Rust intent_processor IPC handler | ⬜ | G3-02 | E1 / E2+E4 | 2d | **🔴 P0** | Rust can receive Python intent IPC |
-| **G3-04** | ExecutorAgent shadow→live e2e 整合 | ⬜ | G3-03 | E4 / QA | 2d | 🟠 P1 | QA 端到端驗證 pass |
-| **G3-05** | EDGE-DIAG-1-FUP-SHADOW-ENABLED-IPC | ⬜ | 無 | E1+E2 | 1d | 🟡 P2（PM 升） | IPC hotpatch test |
-| **G3-06** | Layer 2 自主推理升級觸發規則 | ⬜ | G3-02 | AI-E+PA / E2 | 2-3d | 🟡 P2 | L0→L1→L2 量化 criteria active |
-| **G3-07** | Layer 2 工具箱補全（query_onchain 等） | ⬜ | G3-06 | E1 | 2-3d | 🟡 P3 | tool unit tests + e2e |
-| **G3-08** | H1-H5 → Rust IPC Gateway | ⬜ | G3-03 | E1+PA / E2 | 3-5d | 🟡 P3 | Rust can query H1-H5 state |
-| **G3-09** | cost_edge_ratio 原則 #13 演算法 | ⬜ | G3-08 | AI-E+E1 / E2 | 2d | 🟡 P3 | cost_gate active when ratio ≥ 0.8 |
-| **G3-10** | STRATEGIST-PROMOTE-TRIGGER-1 | ⬜ | G3-02 | E1+E2 | 1d | 🟡 P2 | POST /api/v1/learning/strategist_promote |
+| ID | Tag | 項目 | 前置 | 負責修/驗 | 工時 | 完成標準 |
+|---|---|---|---|---|---|---|
+| **G3-01** | 🔴P0 | ExecutorAgent ConfigStore + IPC RFC 設計 | G1-02 | PA / E2 | 1d | RFC doc + PA 簽核 |
+| **G3-02** | 🔴P0 | ExecutorAgent shadow→live toggle 實裝（IPC `patch_executor_config`） | G3-01 | E1+PA / E2+E4 | 2-3d | e2e test shadow→live + Rust receive |
+| **G3-03** | 🔴P0 | Rust `intent_processor` IPC handler（接 Python SubmitOrder） | G3-02 | E1 / E2+E4 | 2d | Rust can receive Python intent IPC |
+| **G3-04** | 🟠P1 | ExecutorAgent shadow→live e2e 整合測試 | G3-03 | E4 / QA | 2d | QA 端到端驗證 pass |
+| **G3-05** | 🟡P2 | EDGE-DIAG-1-FUP-SHADOW-ENABLED-IPC（升 P2） | 無 | E1+E2 | 1d | `shadow_enabled` hot-reload works |
+| **G3-06** | 🟡P2 | Layer 2 autonomous 升級規則（L0→L1→L2 criteria） | G3-02 | AI-E+PA / E2 | 2-3d | 量化升級觸發條件 code |
+| **G3-07** | 🟡P3 | Layer 2 工具箱補全（query_onchain / check_derivatives） | G3-06 | E1 | 2-3d | tool unit + e2e |
+| **G3-08** | 🟡P3 | H1-H5 → Rust IPC Gateway | G3-03 | E1+PA / E2 | 3-5d | Rust query H1-H5 state |
+| **G3-09** | 🟡P3 | `cost_edge_ratio` 原則 #13 演算法 | G3-08 | AI-E+E1 / E2 | 2d | cost_gate active when ratio ≥0.8 |
+| **G3-10** | 🟡P2 | STRATEGIST-PROMOTE-TRIGGER-1（手動 API + IPC） | G3-02 | E1+E2 | 1d | POST /api/v1/strategist/promote |
 
 ### G4 ML 管線解凍
 
-| ID | 項目 | 狀態 | 前置 | 負責修/驗 | 工時 | 優先級 | healthcheck |
-|---|---|---|---|---|---|---|---|
-| **G4-01** | Labels 累積加速（pooled → 200） | ⬜ | commit pending | MIT+E1 / E2 | 1-2d | 🟠 P1 | labels ≥200 pooled in DB |
-| **G4-02** | run_training_pipeline 首跑 grid_trading | ⬜ | G4-01+labels≥200 | MIT / E4 | 4h | 🟠 P1 | model_registry has first ONNX |
-| **G4-03** | model_registry canary rules + auto-promote | ⬜ | G4-02 | E1+E2 | 2d | 🟡 P2 | /api/v1/ml/model_promote routes active |
-| **G4-04** | edge_estimator_scheduler healthcheck [13] | ⬜ | G1-01 | E1 / QA | 0.5d | 🟡 P2 | [13] freshness check in cron |
-| **G4-05** | ExitConfig.shadow_enabled flip ON + 24h | ⬜ | G3-05 | PM+MIT / QA | passive 24h | 🟡 P2 | healthcheck [8] decision_shadow_exits |
+| ID | Tag | 項目 | 前置 | 負責修/驗 | 工時 | 完成標準 |
+|---|---|---|---|---|---|---|
+| **G4-01** | 🟠P1 | Labels pooled 加速（per-strategy pool） | `PipelineConfig.symbol` Optional commit | MIT+E1 / E2 | 1-2d | labels ≥200 pooled |
+| **G4-02** | 🟠P1 | `run_training_pipeline.py` 首跑 grid_trading | G4-01 | MIT / E4 | 4h | 首個 ONNX artifact + registry row |
+| **G4-03** | 🟡P2 | model_registry canary rules + auto-promote draft | G4-02 | E1+E2 | 2d | `/api/v1/ml/model_promote` route live |
+| **G4-04** | 🟡P2 | edge_estimator_scheduler healthcheck [13] | G1-01 | E1 / QA | 0.5d | cron 每 1h check mtime |
+| **G4-05** | 🟡P2 | `ExitConfig.shadow_enabled` flip ON + 24h 觀察 | G3-05 | PM+MIT / QA | passive 24h | healthcheck [8] decision_shadow_exits 有 row |
 
-### G5 架構 / 可讀性債務
+### G5 架構 / 可讀性債務（可派 3+ subagent 並行）
 
-| ID | 項目 | 狀態 | 前置 | 負責修/驗 | 工時 | 優先級 | 完成標準 |
-|---|---|---|---|---|---|---|---|
-| **G5-01** | main.rs 2062 行拆分 | ⬜ | 無 | E5+E1 / E2 | 2-3d | 🟠 P1 | main.rs <1200 lines |
-| **G5-02** | live_session_routes.py 1449 行拆 | ⬜ | 無 | E5+E1 / E2 | 1-2d | 🟠 P1 | <1200 lines |
-| **G5-03** | instrument_info.rs 1975 行拆 | ⬜ | 無 | E5+E1 / E2 | 1-2d | 🟠 P1 | <1200 lines |
-| **G5-04** | ai_service.py 1258 行拆 | ⬜ | 無 | E5+E1 / E2 | 1d | 🟡 P2 | <1200 lines |
-| **G5-05** | bb_reversion.rs 1143 行拆 sibling | ⬜ | 無 | E5 | 1h | 🟡 P3 | <1200 lines |
-| **G5-06** | bybit_rest_client / order_manager / startup 等 | ⬜ | 無 | E5+E1 / E2+E4 | 5-8d 並行 | 🟡 P2 | all files <1200 |
+| ID | Tag | 項目 | 前置 | 負責修/驗 | 工時 | 完成標準 |
+|---|---|---|---|---|---|---|
+| **G5-01** | 🟠P1 | `main.rs` 2062 行拆分 | 無 | E5+E1 / E2 | 2-3d | <1200 lines |
+| **G5-02** | 🟠P1 | `live_session_routes.py` 1449 行拆 | 無 | E5+E1 / E2 | 1-2d | <1200 lines |
+| **G5-03** | 🟠P1 | `instrument_info.rs` 1975 行拆 | 無 | E5+E1 / E2 | 1-2d | <1200 lines |
+| **G5-04** | 🟡P2 | `ai_service.py` 1258 行拆 | 無 | E5+E1 / E2 | 1d | <1200 lines |
+| **G5-05** | 🟡P3 | `bb_reversion.rs` 1143 行 sibling 拆 | 無 | E5 | 1h | <1200 lines |
+| **G5-06** | 🟡P2 | 其他 5 檔（bybit_rest_client / order_manager / startup / resting_orders / risk_config） | 無 | E5+E1 / E2+E4 | 5-8d 全部 | all <1200 |
 
-### G7 量化 / 統計方法論（新增，共 8-10d）
+### G7 量化 / 統計方法論（新增，from QC）
 
-| ID | 項目 | 狀態 | 前置 | 負責修/驗 | 工時 | 優先級 | 完成標準 |
-|---|---|---|---|---|---|---|---|
-| **G7-01** | Kelly 分級 tier boundaries 參數化 | ⬜ | 無 | QC+E1 / FA | 1d | 🟠 P1 | TOML config 50/200 dividers |
-| **G7-02** | EWMA Vol lambda 參數化 | ⬜ | 無 | QC+E1 | 0.5d | 🟠 P1 | TOML per-timeframe lambda |
-| **G7-03** | Hurst + Hysteresis 整合 | ⬜ | 無 | QC / FA+MIT | 2-3d | 🟠 P1 | R/S analysis + 6-period lag |
-| **G7-04** | CUSUM 策略衰減監控 | ⬜ | 無 | QC+E1 | 1-2d | 🟠 P1 | σ-based slack/threshold |
-| **G7-05** | cost_gate grand_mean binding | ⬜ | G1-01 | QC+E1 / FA | 2-3h | 🟠 P1 | bind when grand_mean > -50 bps |
-| **G7-06** | Grid OU σ residual-based 修正 | ⬜ | 無 | QC / E1+E2 | 1d | 🟠 P1 | σ = sqrt(Σ(Δx-mean)²/n) |
-| **G7-07** | Slippage / Kelly / confluence 參數化 | ⬜ | 無 | QC+E1 / FA | 2-3d | 🟠 P1 | TOML hardcoded cleanup |
+| ID | Tag | 項目 | 前置 | 負責修/驗 | 工時 | 完成標準 |
+|---|---|---|---|---|---|---|
+| **G7-01** | 🟠P1 | Kelly 分級 tier boundaries 參數化（50/200 dividers TOML） | 無 | QC+E1 / FA | 1d | TOML config 生效 |
+| **G7-02** | 🟠P1 | EWMA Vol lambda 參數化（per-timeframe） | 無 | QC+E1 | 0.5d | λ configurable |
+| **G7-03** | 🟠P1 | Hurst + Hysteresis 整合（6-period lag） | 無 | QC / FA+MIT | 2-3d | R/S analysis live |
+| **G7-04** | 🟠P1 | CUSUM 策略衰減監控 | 無 | QC+E1 | 1-2d | σ-based slack/threshold |
+| **G7-05** | 🟠P1 | cost_gate grand_mean bind condition | G1-01 | QC+E1 / FA | 2-3h | bind when grand_mean > -50 bps ∧ ≥2 strategies shrunk>0 |
+| **G7-06** | 🟡P2 | Grid OU σ residual-based 修正 | 無 | QC / E1+E2 | 1d | σ = sqrt(Σ(Δx-mean)²/n) |
+| **G7-07** | 🟡P2 | Slippage / confluence 硬編碼清理 → TOML | 無 | QC+E1 / FA | 2-3d | 8 檔硬編碼移除 |
+
+### Wave 2 完成標準
+
+- [ ] G3-01~04 ExecutorAgent shadow→live e2e pass
+- [ ] G4-02 第一個 ONNX artifact 進 registry
+- [ ] G5-01~06 所有 Rust / Python 檔 <1200 行
+- [ ] G7 量化配置化完成
 
 ---
 
-## 🟢 Wave 3（W20-W23 · 2026-05-22~2026-06-12）— 量化驗證 + 灰度部署
+## ⏩ Wave 3（W20-W23 · 5/22→6/12）— Edge 穩定 + ML canary
 
-### EDGE-DIAG-1 Phase 1+2+4 已完成；Phase 3 + 1b 活躍
+### EDGE-DIAG-1 Phase 3 部署 + Phase 1b（前置條件嚴格）
 
-| ID | 項目 | 狀態 | 前置 | 負責修/驗 | 工時 | 優先級 | healthcheck |
-|---|---|---|---|---|---|---|---|
-| **EDGE-DIAG-P3** | Phase 3 strategy-scoped Gate 1 部署 | ⬜ | Phase 1b完成 + [11]≥3d | PM+FA+QC / E2 | 2d | 🟡 MID | [11] gate auto-check |
-| **EDGE-DIAG-P1b** | exit_features 累積 ≥1w（2026-04-26） | ⬜ | 無 | PM+QC / E4 | passive 7d | 🟡 MID | [14] accumulation_rate ≥threshold |
-| **EDGE-DIAG-P2** | Track L shadow flip + P1-10 並行 | ⬜ | Phase 1b | QC+PM / E2 | passive 7d | 🟡 MID | [15] shadow_exit_agreement ≥95% |
+| ID | Tag | 項目 | 前置條件（必須 ALL 滿足） | 負責 | 工時 |
+|---|---|---|---|---|---|
+| **EDGE-P3** | 🟡P1 | strategy-scoped Gate 1 fallback 部署 | (a) clean bucket ≥200 rows pooled · (b) per-strategy bootstrap 95% CI lo >0 · (c) orphan_frozen clean ≥20 rows · **(d) healthcheck [11] 連 3d PASS** | PM+FA+QC / E2 | 2d |
+| **EDGE-P1b** | 🟡P1 | `exit_features` 累積 ≥1w + 7 維閾值 bind | W19 起算，預計 5/03 滿週 | PM+QC / E4 | passive 7d |
+| **EDGE-P2-flip** | 🟡P2 | Track L shadow flip + P1-10 並行 | EDGE-P1b | QC+PM / E2 | passive 7d |
 
 ### G2 策略驗證 + 決策
 
-| ID | 項目 | 狀態 | 前置 | 負責修/驗 | 工時 | 優先級 | healthcheck |
-|---|---|---|---|---|---|---|---|
-| **G2-01** | P1-10 PostOnly 1-2w 驗證（passive） | ⬜ | PostOnly demo | PM+QC+FA / E4 | **≥1w 被動**（04-21~05-07） | 🟠 P1 | [3] maker_fill_rate > X% |
-| **G2-02** | ma_crossover R:R 對稱性 counterfactual | ⬜ | EDGE-DIAG Phase 2 | QC+FA / E2 | 2-3d | 🟠 P1 | counterfactual output analysis |
-| **G2-03** | ma_crossover SL/TP 策略定制 | ⬜ | G2-02 結果 | E1+FA / E2+E4 | 2-3d | 🟡 P2 | test backtest pass |
-| **G2-04** | Grid disable 決策會 | ⬜ | G2-01 + P0-3 | PM+FA | 1h 會議 | **🔴 P0** | keep/kill decision log |
-| **G2-05** | bb_breakout FIX-26-DEADLOCK-1 rebuild | ⬜ | operator rebuild | MIT / QA | 6h+ 監控 | 🟠 P1 | [12] bb_breakout fill_rate |
+| ID | Tag | 項目 | 前置 | 負責 | 工時 |
+|---|---|---|---|---|---|
+| **G2-01** | 🟠P1 | P1-10 PostOnly 1-2w 驗證（passive） | PostOnly demo 04-21 部署 | PM+QC+FA / E4 | passive ≥1w（04-21~05-07 出結果）|
+| **G2-02** | 🟠P1 | ma_crossover R:R 對稱性 counterfactual | EDGE-P2 結果 | QC+FA / E2 | 2-3d |
+| **G2-03** | 🟡P2 | ma_crossover SL/TP 策略層定制（Option B） | G2-02 驗收 | E1+FA / E2+E4 | 2-3d |
+| **G2-04** | 🔴P0 | **Grid disable 決策會**（若 PostOnly 後仍負 edge） | G2-01 + P0-3 輸入 | PM+FA 決策 | 1h 會議 |
+| **G2-05** | 🟠P1 | bb_breakout FIX-26-DEADLOCK-1 rebuild 驗證 | operator rebuild | MIT / QA [12] | 6h+ 觀察 |
 
-### G8 測試 / Healthcheck 擴展（新增）
+### G8 測試 / Healthcheck 擴展（新增，QA+AI-E）
 
-| ID | 項目 | 狀態 | 前置 | 負責修/驗 | 工時 | 優先級 | 完成標準 |
-|---|---|---|---|---|---|---|---|
-| **G8-01** | e2e 認知自適應測試 | ⬜ | 無 | QA+E4 / E2 | 2-3d | 🟠 P1 | 80+ test coverage |
-| **G8-02** | Python↔Rust parity test | ⬜ | 無 | QA+E4 / E2 | 1-2d | 🟠 P1 | decision agreement rate ≥95% |
-| **G8-03** | 灰度驗收自動化 | ⬜ | 無 | QA / E2 | 2-3d | 🟠 P1 | production shadow metrics active |
+| ID | Tag | 項目 | 前置 | 負責 | 工時 |
+|---|---|---|---|---|---|
+| **G8-01** | 🟠P1 | e2e 認知自適應測試（80+ coverage） | G3-04 | QA+E4 / E2 | 2-3d |
+| **G8-02** | 🟠P1 | Python↔Rust parity test（decision agree ≥95%） | G3-03 | QA+E4 / E2 | 1-2d |
+| **G8-03** | 🟠P1 | 灰度驗收自動化（shadow metrics） | EDGE-P2 flip | QA / E2 | 2-3d |
+| **G8-04** | 🟡P2 | healthcheck DAG 線性化（依賴清晰） | G6-02 | QA | 1d |
+| **G8-05** | 🟡P2 | AI cost ROI 監控面板（from AI-E） | G3-09 | AI-E+E1a / QA | 1-2d |
+
+### Wave 3 完成標準
+
+- [ ] EDGE-P3 前 4 條件全滿足，Gate 1 fallback 部署
+- [ ] exit_features ≥1000 rows
+- [ ] G2-01 PostOnly 驗收：fee drop ≥60% 或決策策略下架
+- [ ] G2-02 ma R:R ≤1.5× 或 SL/TP Option B 定制
+- [ ] bb_breakout 復活（fill count > 0）或正式 disable
 
 ---
 
-## 🔵 Wave 4（W23-W24 · 2026-06-12~2026-06-23）— Live Gate + 決策
+## ⏩ Wave 4（W23-W24 · 6/12→6/23）— Live Gate + P0-3 決策
 
-### P0-3 邊評 + LG-2/3/4/5
+### P0-3 Phase 5 Edge 重評（決策點）
 
-| ID | 項目 | 狀態 | 前置 | 負責修/驗 | 工時 | 優先級 | 完成標準 |
-|---|---|---|---|---|---|---|---|
-| **P0-3-01** | counterfactual_exit_replay 完整分析 | ⬜ | Phase 2 result | MIT+PM / FA | 2d | **🔴 P0** | analysis report complete |
-| **P0-3-02** | edge 重評決策會（邊正/負/重做） | ⬜ | P0-3-01 | PM+FA+PA+QC | 1d 決策 | **🔴 P0** | decision vote + direction lock |
-| **LG-2** | H0 Gate blocking 驗證 | ⬜ | P0-3 | E1+PM / E2 | 1d | 🔴 P0 | shadow → blocking confirm |
-| **LG-3** | provider pricing 綁定 | ⬜ | P0-3 | E1 | 0.5d | 🔴 P0 | pricing table finalized |
-| **LG-4** | M 章 Supervised Live Gate | ⬜ | P0-3 | E1 | 1d | 🔴 P0 | supervised mode verified |
-| **LG-5** | N 章 Constrained Autonomous | ⬜ | P0-3+LG-2/3/4 | E1+PM | 0.5d | 🔴 P0 | autonomous mode confirmed |
+| ID | Tag | 項目 | 前置 | 負責 | 工時 |
+|---|---|---|---|---|---|
+| **P0-3-01** | 🔴P0 | counterfactual_exit_replay 完整分析報告 | Phase 2 result + G2 完成 | MIT+PM / FA | 2d |
+| **P0-3-02** | 🔴P0 | Edge 重評決策會（3 分支：翻正/仍負/部分改善） | P0-3-01 | PM+FA+PA+QC | 1d 會議 |
 
-### G9 Bybit API 精進（新增）
+**outcome 分支**：
+- A. edge 翻正 → cost_gate 重啟 + Track P Phase 1b 解凍 → LG-2~5 推進
+- B. edge 仍負 → DUAL-TRACK 全力 + 策略重做 + 部分策略下架
+- C. 結構性改善 → Phase 5 部分接線
 
-| ID | 項目 | 狀態 | 前置 | 負責修/驗 | 工時 | 優先級 | 完成標準 |
-|---|---|---|---|---|---|---|---|
-| **G9-01** | Bybit API 字典更新 | ⬜ | 無 | BB+E1 | 2h | 🟡 P2 | dictionary sync |
-| **G9-02** | WS 容錯強化 | ⬜ | 無 | BB+E1 / E2 | 1-2h | 🟡 P2 | handler not found reconnect |
+### Live Gate（5 項全綠）
+
+| ID | Tag | 項目 | 前置 | 負責 | 工時 |
+|---|---|---|---|---|---|
+| **LG-2** | 🔴P0 | H0 Gate blocking 驗證（shadow → blocking） | P0-3 | E1+PM / E2 | 1d |
+| **LG-3** | 🔴P0 | provider pricing table 正式綁定 | P0-3 | E1 | 0.5d |
+| **LG-4** | 🔴P0 | M 章 Supervised Live Gate | P0-3 | E1 | 1d |
+| **LG-5** | 🔴P0 | N 章 Constrained Autonomous Live | LG-2/3/4 | E1+PM | 0.5d |
+| **G-4** | 🟡P2 | Cookie `secure=True`（HTTPS 部署後） | HTTPS | E1 | 0.5d |
+
+### G9 Bybit API 精進（新增，from BB，並行執行）
+
+| ID | Tag | 項目 | 前置 | 負責 | 工時 |
+|---|---|---|---|---|---|
+| **G9-01** | 🟡P2 | Bybit API 字典 confirm-mmr 路徑修正 + SSOT 標記 | 無 | BB+TW | 2h |
+| **G9-02** | 🟡P2 | WS 容錯強化（handler not found 強制重連） | 無 | BB+E1 / E2 | 1-2h |
+| **G9-03** | 🟡P2 | `bybit_public_connectivity_check.py` 環境變數化 | 無 | BB+E1 / E2 | 1h |
+| **G9-04** | 🟡P2 | `bybit_private_ws_smoke_test` 環境感知或刪除 | 無 | BB+E1+PM / E2 | 1-2h |
+| **G9-05** | 🟡P3 | L-2~5 字典補錄（參數名稱 / 缺失欄位） | 無 | BB+TW | 2-3h |
+
+### Wave 4 完成標準 → LIVE
+
+- [ ] P0-3 決策產生具體執行路徑（A/B/C 三選一）
+- [ ] LG-2/3/4/5 全綠
+- [ ] 5 項硬邊界全綠 → operator 簽 `authorization.json` → Live 開啟
+
+---
+
+## 🔄 背景線程（獨立於 Wave，持續運行）
+
+這些**不阻塞主路徑**，跟著 Wave 並行進行。每項都有對應 healthcheck 6h cron 監控。
+
+| 項目 | 類型 | 起算/結束 | 狀態 | Healthcheck | 若 FAIL |
+|---|---|---|---|---|---|
+| **P0-2** 21d demo 時鐘 | 時間被動 | 2026-04-16 → 2026-05-07 | 🟡 進行中 ~8d | [0] engine_alive + [1] 0 crash | 時鐘重置 |
+| **P1-10** PostOnly 1-2w 驗證 | 資料被動 | 2026-04-21 → 05-07/08 | 🟡 累積中 | [3] maker_fill_rate | 驗收失效→G2-04 決策 |
+| **EDGE-DIAG** exit_features 累積 | 資料被動 | 2026-04-19 → 04-26 滿週 | 🟡 累積中 | [14] exit_features_rate | 延後 Phase 1b |
+| **P1-7 C** labels pooled ≥200 | 資料被動 | 持續累積 | 🟡 47→200 ETA 3-5d | [10] label 速率 | G4-02 延後 |
+| **P1-8 FUP** DUST-EVICTION 觀察 | log 被動 | 2026-04-17 → 04-24 滿週 | 🟡 ~7d | dust log count | 觀察到新 pattern 才提案 |
+| **P1-11** bb_breakout rebuild 後觀察 | 部署被動 | 待 operator rebuild | ⬜ | [12] fill rate recover | 結構性 dormancy confirmed |
+
+**規則（CLAUDE.md §七）**：任何背景項連續 3 次 healthcheck FAIL = 中止被動等待，轉人工介入。
+
+---
+
+## 📦 Backlog（條件觸發，非當前 Wave）
+
+| # | 項目 | 觸發條件 | Tag | 備註 |
+|---|---|---|---|---|
+| **STRATEGIST-AUTO-PROMOTE** | 自動晉升規則 | P2-01 穩定後 | 🟡P3 | 默認關，可選 |
+| **EDGE-P2 Phase B** | Liquidation signal | Phase A OI 驗收後 | 🟡P3 | OI 2026-04-20 已完 |
+| **EDGE-P2-3 Phase 2+** | live endpoint / funding_arb PostOnly | Phase 1b | 🟡P3 | ML integration 前置 |
+| **Phase 5 補強** | Symbol Embedding / Regime LSTM / JS+Scorer | P0-3 判決 | 🟢P3-P4 | 取決於 P0-3 outcome |
+| **G-2 FundingArb 重評** | 三參數重評 | R-02 Strategist 在線 | 🟡P3 | G-1 AI Agent 推進後 |
+| **ORPHAN-ADOPT-1 Phase 2B** | Strategist `would_take` 終仲裁 | G-1 R-02 | 🟡P3 | |
+| **IP-DEDUP-1** | IntentProcessor 去抖 | P0-3 後 edge 仍負 + 高重發率 | ⚫P4 | 條件觸發 |
+| **4-06** | LinUCB live warm-start | v1→v2 遷移 | ⚫P4 | memory archive |
+| **OC-4** | MCP PostgreSQL 自然語言 | Phase 5+ | ⚫P4 | |
+| **G-6** | Edge JS 滾動重訓 | P1-7 B 解 | ⚫P4 | 自然解鎖 |
+| **G-8** | cost_gate 可信度 | EDGE-P3-1 Stage 2 | ⚫P4 | |
+| **4-Conditional** | PairsTrading / Beta Hedging / Kalman / Mac遷移 / Jump detection | post-live | ⚫P4 | 未來功能 |
+| **G-7** | ClaudeTeacher 啟用 | 21d demo + G-3 | 🟡P2-P3 | consumer_loop.rs enabled |
+| **G-10** | Calibration.py isotonic | run_training_pipeline 輸出 | 🟡P2-P3 | ECE < 0.05 |
+| **LLM-ABC-MIGRATION-1** | ✅ 2026-04-20 完成 | — | ✅ | FA 驗 |
+| **QoL-2** | Demo AI cost 追蹤 | G3-08 | 🟡P2 | GUI 硬編碼 'N/A' |
+| **DUST-EVICTION GUI** | GUI 曝光 orphan_frozen | P1-8 觀察完 | 🟡P2 | 日報 |
+| **LEARNING-COCKPIT-NO-IPC** | Learning 8 端點走 Python state_store | G-7/G-10 後 | 🟡P2 | 設計債 |
+| **STRATEGIST-PERSIST-AUDIT-GAP-COUNTER-1** | Phase 5+ 硬依賴 | G3-02 | 🟡P2 | FA H2 |
+| **STRATEGIST-TUNE-TARGET-CONFIG-1** | 運行時可配置 | Phase 5+ | 🟡P2 | |
+| **STRATEGIST-HISTORY GUI** | backend 已 live | — | 🟡P2 | 0.5d GUI |
+
+---
+
+## 📊 Healthcheck 清單（15 + 新增 [13-15]）
+
+**CLAUDE.md §七 強制**：被動等待 TODO 必附 healthcheck · 每 6h cron 跑 · 連續 3 FAIL → 中止等待。
+
+### 現有（12 個，`passive_wait_healthcheck.py` 已實裝）
+
+| # | 項目 | SQL / 檢查 | 對應 Wave TODO |
+|---|---|---|---|
+| [0] | engine_alive | last 24h PID activity | P0-2 21d |
+| [1] | engine_crash count | COUNT last 24h | P0-2 21d |
+| [2] | synthetic_owner_retriage | row count growth | P1-6 |
+| [3] | maker_fill_rate | PostOnly fill rate | G2-01 |
+| [4] | IPC hotpatch | last applied ts <5min | G3-05 |
+| [7] | edge_estimates_freshness | n_cells + mtime | G1-01 / G4-04 |
+| [8] | decision_shadow_exits | row count | G4-05 |
+| [9] | model_registry_freshness | train_date per slot | G4-03 |
+| [10] | intents_writer_ratio | orders vs intents per-mode | — |
+| [11] | counterfactual_clean_window_growth | clean n ≥200 | EDGE-P3 auto-gate |
+| [12] | bb_breakout_post_deadlock_fix | fill count recover | G2-05 |
+
+### 新增（Wave 1 G6-02 補齊，3 個）
+
+| # | 項目 | SQL / 檢查 | 對應 Wave TODO |
+|---|---|---|---|
+| **[13]** | edge_estimator_scheduler_fresh | `edge_estimates.json` mtime <6h + cells ≥50 | G1-01 / G4-04 強制 |
+| **[14]** | exit_features_accumulation_rate | 週 row count 增長率 ≥ threshold | EDGE-P1b |
+| **[15]** | shadow_exit_agreement_phase2 | Python vs Rust decision agree rate ≥95% | EDGE-P2 flip |
 
 ---
 
 ## 📚 已完成歸檔索引
 
-| 日期 | 歸檔路徑 | 批次 | 行數 |
-|---|---|---|---|
-| 2026-04-24 | `docs/archive/2026-04-24--todo_v1_refactor_snapshot.md` | v1 重構版（本 session 稍早完成） | 328 |
-| 2026-04-24 | `docs/archive/2026-04-24--todo_snapshot_pre_refactor.md` | v0 原始版（舊完整版） | 700 |
-| 2026-04-24 | `docs/archive/2026-04-24--completed_todo_batch.md` | P0-13/14/15 三連 | — |
-| 2026-04-23 | `docs/archive/` | DEDUP-PY-RUST + INFRA-PREBUILD-1 系列 | — |
-| 更早 | `docs/archive/` | 見各批次歷史歸檔檔 | — |
-
-**當前 TODO 版本**：v2 FIX-PLAN 整合版（2026-04-24，包含 180-220 findings，6 Wave 工作組）
+| 日期 | 歸檔 | 內容 |
+|---|---|---|
+| 2026-04-24 | `docs/archive/2026-04-24--completed_todo_batch.md` | P0-13/14/15 三連 · P1-11 Phase 1 · EDGE-DIAG 1+2+4 |
+| 2026-04-24 | `docs/archive/2026-04-24--todo_v2_dual_axis_snapshot.md` | v2 458 行（雙軌混用，本次重組前快照） |
+| 2026-04-24 | `docs/archive/2026-04-24--todo_v1_refactor_snapshot.md` | v1 328 行（10-Agent Round 1 重構版）|
+| 2026-04-24 | `docs/archive/2026-04-24--todo_snapshot_pre_refactor.md` | v0 700 行（重構前舊版） |
+| 2026-04-23 | `docs/archive/` | DEDUP-PY-RUST A+B+C+D · INFRA-PREBUILD-1 A+B |
+| 2026-04-22 | `docs/archive/2026-04-22--step_0_derived_todo_batch.md` | TRACK-P-V2-SWAP · TICK-PIPELINE-MOD-SPLIT |
+| 2026-04-21 | `docs/archive/2026-04-21--completed_todo_batch.md` | TRACK-P-T4-WIRING + 14 項 |
+| 更早 | `docs/archive/` | 按日期批次 |
 
 ---
 
 ## ⚙️ 工作流程速查
 
 ```
-E1/E1a 並行（≤5）→ E2 審查（強制）→ E4 回歸（強制）→ PM 確認 → commit + push
-被動等待 TODO 必附 healthcheck（CLAUDE.md §七新規則）
+角色鏈：E1/E1a 並行（≤5）→ E2 審查（強制）→ E4 回歸（強制）→ PM 確認 → commit + push
 詳見 CLAUDE.md §八 · 16 Agent 定義 docs/CLAUDE_REFERENCE.md
 ```
 
-**Bybit API 開發必查**：`docs/references/2026-04-04--bybit_api_reference.md`
+**部署**：
+- 改碼 → `ssh trade-core "bash helper_scripts/restart_all.sh --rebuild"`
+- 清倉 → `ssh trade-core "bash helper_scripts/clean_restart.sh --yes"`
+- 全重 → `ssh trade-core "bash helper_scripts/fresh_start.sh --yes"`
+- 停機 → `ssh trade-core "bash helper_scripts/stop_all.sh"`
 
-**風控參數修改**：必須透過 IPC `patch_risk_config` 單一通道  
+**SSH bridge（Mac → Linux）**：Mac = SSOT，透過 `ssh trade-core` 遠端觸發 Linux runtime；Mac 本地僅 `git fetch / pull --ff-only`，禁 merge/rebase/reset。
 
-**部署三件套**：  
-```
-改了代碼需部署              → bash helper_scripts/restart_all.sh --rebuild
-只想清交易所持倉             → bash helper_scripts/clean_restart.sh --yes
-開發告一段落要清 PnL         → bash helper_scripts/fresh_start.sh --yes
-```
-
-**Mac↔Linux SSH bridge**：  
-```
-ssh trade-core "cd ~/BybitOpenClaw/srv && git log --oneline -5"  # 查 Linux repo 狀態
-ssh trade-core "python3 helper_scripts/canary/engine_watchdog.py --status"  # 查 engine 狀態
-ssh trade-core "bash helper_scripts/restart_all.sh --rebuild"  # 遠端部署
-```
-
+**Bybit API**：先讀 `docs/references/2026-04-04--bybit_api_reference.md`，新端點同步字典。
+**風控參數**：必須透過 IPC `patch_risk_config` 單一通道。
+**被動等待**：必附 `passive_wait_healthcheck.py` check（CLAUDE.md §七）。
 
 ---
 
-## 🔵 P1 — 當週活躍（跨 Wave 1-3）
-
-### DUAL-TRACK-EXIT-1（主軸 W19-W27+）
-
-- **✅ Phase 1a 完成 2026-04-21**：T1-T5 骨架 + v2 + T4 wiring + P1-7 A/B
-- **🟡 Phase 1b（W3）**：exit_features 累積 ≥1w（2026-04-19 起算，2026-04-26 滿週）+ 7 維度閾值 bind + counterfactual audit
-  - 前置：Phase 1a complete + ≥1w exit_features 數據
-  - healthcheck：[14] exit_features_accumulation_rate ≥閾值
-  - 負責：MIT+QC / E2
-  - 工時：7d passive + 2d audit
-- **⬜ Phase 2（W3-W4）**：Track L shadow flip + P1-10 並行驗證
-  - 前置：Phase 1b 結果
-  - healthcheck：[15] shadow_exit_agreement_phase2 ≥95%
-  - 負責：QC+PM / E2+E4
-  - 工時：7d passive + 2d tuning
-- **⬜ Phase 3（W4-W5）**：Track L 灰度 + ml_override_high 下調
-  - 前置：Phase 2 gate
-  - 負責：FA+QC / E2
-  - 工時：7d灰度 + 3d tuning
-
-### P1-6 · DEMO-BYBIT-SYNC-ORPHAN-1（被動觀察）
-
-- **狀態**：🟡 被動等待（起算 2026-04-17，1w 觀察）
-- **描述**：6 倉位 bybit_sync 策略；P1-8 FUP `retriage_synthetic_owner` tick-level 自主接管
-- **healthcheck**：[2] synthetic_owner_retriage 接管成功（row count > baseline）
-- **完成標準**：1w 期間 synthetic_owner 無 duplication
-- **Audit 指針**：[PM audit](docs/CCAgentWorkSpace/PM/workspace/reports/) § B.5
-
-### P1-10 · STRATEGY-ASYMMETRY-1（已納入 G2）
-
-- 已納入 Wave 3 G2-01 被動驗證
-
-### P1-11 · BB-BREAKOUT-DORMANT-1（Phase 1 完成，待 rebuild）
-
-- **✅ (2)+(3) DonchianMode/BbBreakoutProfile enum** 完成 2026-04-24
-- **✅ (1) Phase 1 信號級 sweep** 完成 2026-04-24
-- **✅ FIX-26-DEADLOCK-1 bug fix** 完成 2026-04-24（commit `63957ad`）
-- **⬜ 待 `--rebuild` 部署**
-- **後置 Phase 2 backlog**：sweep fee model / persistence+cooldown 模擬 / Rescale seed / Python SQUEEZE_EXPIRY_BARS / bb_reversion sibling
-- **healthcheck**：[12] bb_breakout_post_deadlock_fix fill rate recover
-- **Audit 指針**：[QC](docs/CCAgentWorkSpace/QC/workspace/) / [MIT](docs/CCAgentWorkSpace/MIT/workspace/)
-
-### P1-7 · ML 訓練管線（Phase 1 C 部分合入 G4）
-
-- Labels 累積加速已納入 G4-01
-- run_training_pipeline 首跑已納入 G4-02
-- model_registry canary 已納入 G4-03
-
-### P1 其他項（簡化）
-
-| ID | 項目 | 狀態 | 完成標準 |
-|---|---|---|---|
-| P1-8 FUP DUST-EVICTION-GAP-1 | 🟡 被動觀察滿 1w | DUST-EVICTION log-only 無新動作 |
-| P1-13 SAMPLE-FLOOR-GAP | ✅ 已決策 | Phase 1a 限 grid_trading pooled；其他策略延後 ≥1000 RT |
-| P1-14 EDGE-ESTIMATE-BIND | ⬜ 待 G1-01 | grand_mean > -50 bps ∧ ≥2 策略 shrunk>0 |
-
----
-
-## 🟢 P2 — 下週 / Live Gate / QoL（跨 Wave 2-4）
-
-### P2 高優先項
-
-| ID | 項目 | 狀態 | 工時 | 前置 | 負責 | healthcheck |
-|---|---|---|---|---|---|---|
-| **P2-01** | EDGE-DIAG-1-FUP-IPC（✅ 完成） | ✅ | — | — | FA verified | [4] IPC hotpatch confirmed |
-| **P2-02** | EDGE-DIAG-1-FUP-SHADOW-ENABLED-IPC（升 P2）| ⬜ | 1d | Phase 3 前 | G3-05 | [8] shadow_exit writing |
-| **P2-03** | STRATEGIST-PERSIST-AUDIT-GAP-COUNTER-1 | ⬜ | 1d | G3-02 | E1+E2 | [5] strategist audit counter >0 |
-| **P2-04** | STRATEGIST-TUNE-TARGET-CONFIG-1 | ⬜ | 1d | G3-02 | E1 | [6] strategist target firing |
-| **P2-05** | STRATEGIST-HISTORY-OBSERVABILITY GUI | ⬜ | 0.5d | backend live | E1a | [7] history dashboard endpoint |
-| **P2-06** | counterfactual_exit_replay Linux deploy | ⬜ | 1d | operator | MIT | [9] replay output fresh |
-
-### Live Gate（W4 最後檢查）
-
-| # | 項目 | 狀態 | 前置 | 負責 |
-|---|---|---|---|---|
-| **LG-2** | H0 Gate blocking 驗證（shadow → blocking） | ⬜ | P0-3 | E1+PM |
-| **LG-3** | provider pricing 綁定 | ⬜ | P0-3 | E1 |
-| **LG-4** | M 章 Supervised Live Gate | ⬜ | P0-3 | E1 |
-| **LG-5** | N 章 Constrained Autonomous | ⬜ | LG-2/3/4 | E1+PM |
-
-### AI Layer 補遺
-
-| # | 項目 | 狀態 | 前置 | 負責 | 優先級 |
-|---|---|---|---|---|---|
-| **G-7** | ClaudeTeacher 啟用（consumer_loop.rs） | ⬜ | 21d demo + G-3 | E1 | P2 Phase 2+ |
-| **G-10** | Calibration.py 整合（ECE < 0.05） | ⬜ | run_training_pipeline | MIT+E1 | P2 Phase 3+ |
-| **LLM-ABC-MIGRATION-1** | ✅ 2026-04-20 完成（BLOCKER FA 驗） | ✅ | — | — | — |
-
-### QoL & 設計債
-
-| # | 項目 | 狀態 | 優先級 |
-|---|---|---|---|
-| **QoL-2** | Demo AI cost 追蹤（依 G3-08） | ⬜ | P2 |
-| **DUST-EVICTION GUI** | 已 P1-8 log-only 觀察中 | 🟡 passive | QoL |
-| **LEARNING-COCKPIT-NO-IPC** | Learning 8 端點走 Python state_store | ⬜ | P2 design debt |
-
----
-
-## ⚪ P3 — 中期（Wave 2-4 後）
-
-| # | 項目 | 狀態 | 前置 | 優先級 |
-|---|---|---|---|---|
-| **STRATEGIST-AUTO-PROMOTE** | 自動晉升規則（可選，默認關） | ⬜ | P2-01 | P3 |
-| **EDGE-P2 Phase B** | Liquidation signal + OI confluence | ⬜ | EDGE-P2-2 Phase A ✅ | P3 |
-| **EDGE-P2-3 Phase 2+** | live endpoint 啟用；funding_arb PostOnly；ML integration | ⬜ | Phase 1b | P3 |
-| **Phase 5 補強** | Symbol Embedding / Regime LSTM / JS+Scorer / correlation_pairs | ⬜ | P0-3 判決 | P3-P4 |
-| **G-2 FundingArb 重評** | 三參數重評（待 R-02 Strategist） | ⬜ | G-2 launch | P3 |
-| **ORPHAN-ADOPT-1 Phase 2B** | 前置 G-1 R-02 | ⬜ | G-1 stub fill | P3 |
-
----
-
-## ⚫ P4 — Backlog / Conditional
-
-| # | 項目 | 狀態 | 觸發條件 | 優先級 |
-|---|---|---|---|---|
-| **IP-DEDUP-1** | IntentProcessor 去抖 | ⬜ | P0-3 判決後 edge 仍負 + 重發率高 | P4 |
-| **4-06** | LinUCB live warm-start | ⬜ | v1→v2 遷移 | P4 |
-| **OC-4** | MCP PostgreSQL 自然語言查詢 | ⬜ | Phase 5+ | P4 |
-| **G-6** | Edge JS 滾動重訓（P1-7 B 解後） | ⬜ | Phase 5+ | P4 |
-| **G-8** | cost_gate 可信度評估（EDGE-P3） | ⬜ | EDGE-P3-1 Stage 2 | P4 |
-| **4-Conditional** | PairsTrading / Beta Hedging / Kalman / Mac遷移 / Jump detection | ⬜ | post-live | P4 |
-
----
-
-## 🔍 Gap 索引
-
-| Gap | 描述 | Wave | 狀態 |
-|---|---|---|---|
-| **G-1** | AI Agent 5 stub（Conductor 剩 stub） | W2 G3 | 🟡 |
-| **G-2** | FundingArb 三參數待 R-02 重評 | P3 | 🔵 |
-| **G-3/5/9** | IPC auth / Rate Limit / HMAC | — | ✅ |
-| **G-4** | Cookie secure=False | W4 LG | ⬜ |
-| **G-6** | ML edge 噪音（P1-7 B 解後自然解） | W3 G4 | ⬜ |
-| **G-7** | ClaudeTeacher consumer_loop | W3 G4 | ⬜ |
-| **G-8** | cost_gate 可信度 | P3 | ⬜ |
-| **G-10** | Calibration.py isotonic | W3 G4 | ⬜ |
-| **G-11** | dust silent drift（P1-8） | — | ✅ FUP 觀察中 |
-| **G-12** | 微利退場（DUAL-TRACK） | W1-W4 | 🟢 |
-
----
-
-## 📊 Healthcheck 監控清單（CLAUDE.md §七 新強制規則）
-
-**被動等待 TODO 必附 healthcheck**（每 6h cron 檢查）。若連續 3 次 FAIL 中止被動等待，轉人工介入。
-
-### 強制 Healthcheck（已實裝）
-
-| Check # | 項目 | SQL / 檢查 | PASS 條件 | 失效影響 |
-|---|---|---|---|---|
-| **[0]** | engine_alive | last PID activity last 24h | true | engine hang → 重啟 |
-| **[1]** | engine_crash | COUNT crash logs last 24h | = 0 | multiple crash → RCA |
-| **[2]** | synthetic_owner_retriage | row count growth | > baseline | P1-6 stalled |
-| **[3]** | postonly_fee_drag_baseline | maker fill rate | > X% + fee drop ≥60% | G2-01 驗證失效 |
-| **[4]** | IPC_hotpatch_working | IPC last applied ts | within 5min | G3-05 dead |
-
-### 新增 Healthcheck（W1 補齊）
-
-| Check # | 項目 | SQL / 檢查 | PASS 條件 | 失效影響 | 來源 |
-|---|---|---|---|---|---|
-| **[13]** | edge_estimator_scheduler | edge_estimates.json mtime | < 24h old + n_cells ≥50 | G1-01 / G4-04 失效 | G6-02 新增 |
-| **[14]** | exit_features_accumulation_rate | weekly row count growth | ≥閾值 | EDGE-DIAG Phase 1b 緩 | G6-02 新增 |
-| **[15]** | shadow_exit_agreement_phase2 | Python vs Rust decision agree rate | ≥95% | EDGE-DIAG Phase 2 失效 | G6-02 新增 |
-
-### 其他 Healthcheck（被動等待 / 監控）
-
-| Check # | 項目 | 對應 Wave TODO | 監控頻率 |
-|---|---|---|---|
-| **[5]** | strategist_audit_counter | P2-03 | 每 1h |
-| **[6]** | strategist_target_firing | P2-04 | 每 6h |
-| **[7]** | history_dashboard | P2-05 | 每 6h |
-| **[8]** | decision_shadow_exits | G4-05 | 每 6h |
-| **[9]** | counterfactual_replay_fresh | P2-06 | 每 12h |
-| **[10]** | model_registry_freshness | G4 canary | 每 24h |
-| **[11]** | edge_diag_phase3_gate | EDGE-DIAG-P3 | 每 6h（決策）|
-| **[12]** | bb_breakout_post_deadlock | G2-05 | 每 6h |
-
----
-
-## 📝 會話操作指引
-
-### Session 起手三連
-
-```bash
-# 1. Sync local → remote
-git fetch --prune origin
-if git log --oneline -1 | grep -v "$(git rev-parse origin/main | cut -c1-7)"; then
-  git pull --ff-only origin main
-fi
-
-# 2. Check engine status
-ssh trade-core "python3 helper_scripts/canary/engine_watchdog.py --status"
-
-# 3. Healthcheck scan
-python3 helper_scripts/db/passive_wait_healthcheck.py --check all
-
-# If any FAIL: evaluate whether passive-wait prerequisite still holds
-```
-
-### Session 完成三連
-
-```bash
-# 1. Stage + commit
-git add docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-24--FixPlan_v2_PMApproval.md
-git commit -m "PM Sign-off FIX-PLAN v2 + approve 6 adjustments"
-git push origin main
-
-# 2. Archive old TODO
-cp TODO.md docs/archive/2026-04-24--todo_v1_refactor_snapshot.md
-git add docs/archive/2026-04-24--todo_v1_refactor_snapshot.md TODO.md
-git commit -m "Archive TODO v1 + adopt v2 FIX-PLAN integration (500-800 lines, G1-G9)"
-git push origin main
-
-# 3. Sync to Linux
-ssh trade-core "cd ~/BybitOpenClaw/srv && git pull --ff-only origin main"
-```
-
+**簽核鏈**：PA 核實 → PM Sign-off → commit/push → Linux pull → Wave 1 開工
+**下一步（2026-04-24 立即）**：G1-01 Linux 診斷 scheduler + G1-02 PA/E1 啟動 event_consumer 拆分規劃
