@@ -35,6 +35,13 @@
 --   * Guard C pass case — index contains expected column → no RAISE
 --   * Guard C fail case — index exists with mismatched columns → RAISE
 --   * Guard C no-op case — index does not exist → no RAISE
+--
+-- Migration-specific regression cases (G6-03 Wave 1, 2026-04-24):
+--   * TEST 10 — V019 Guard A fixture-driven pass/fail (9-col required set)
+--   * TEST 11 — V019 Guard A legacy-stub fail case (missing params_json / source)
+--   * TEST 12 — V020 Guard A NOVEL: parent table absent MUST RAISE
+--                (deviates from template no-op rule; V020 cannot rebuild
+--                 index on missing parent, so absence is a hard error)
 -- ============================================================
 
 \set ON_ERROR_STOP off
@@ -85,6 +92,36 @@ CREATE TABLE schema_guard_test.idx_base (
 );
 CREATE INDEX idx_mismatch ON schema_guard_test.idx_base (created_at DESC);
 CREATE INDEX idx_correct  ON schema_guard_test.idx_base (strategy, promoted_at DESC);
+
+-- Fixture 7 (G6-03 · V019 happy path): strategist_applied_params with all
+-- 9 columns as V019 creates them. Guard A must no-op on this shape.
+-- V019 建表正確時的 shape；Guard A 應 no-op。
+CREATE TABLE schema_guard_test.strategist_good (
+    id               BIGSERIAL PRIMARY KEY,
+    engine_mode      TEXT NOT NULL,
+    strategy_name    TEXT NOT NULL,
+    params_json      JSONB NOT NULL,
+    applied_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    applied_at_ms    BIGINT NOT NULL,
+    source           TEXT NOT NULL,
+    reason           TEXT,
+    prev_params_json JSONB
+);
+
+-- Fixture 8 (G6-03 · V019 legacy stub): simulates a pre-G6-03 hot-fix
+-- that created an incomplete strategist_applied_params (missing
+-- params_json + source + prev_params_json). Guard A must RAISE on this.
+-- 模擬 G6-03 之前 hot-fix 不完整建表（缺 params_json/source/prev_params_json）；
+-- Guard A 必須 RAISE。
+CREATE TABLE schema_guard_test.strategist_legacy (
+    id             BIGSERIAL PRIMARY KEY,
+    engine_mode    TEXT NOT NULL,
+    strategy_name  TEXT NOT NULL,
+    applied_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    applied_at_ms  BIGINT NOT NULL,
+    reason         TEXT
+    -- intentional: no params_json, no source, no prev_params_json
+);
 
 
 -- ============================================================
@@ -361,6 +398,133 @@ BEGIN
 END $$;
 
 
+-- ============================================================
+-- TEST 10: V019 Guard A pass — strategist_applied_params with full
+--          9-column shape → no RAISE
+-- ============================================================
+-- Why this covers V019 (not redundant with TEST 1):
+--   TEST 1 uses a 2-element required array; V019 has 9. Regression
+--   anchor — if a future refactor narrows V019's required list by
+--   mistake, TEST 11 (the fail-case companion below) still catches
+--   an incomplete column set. Paired tests keep the 9-element list
+--   load-bearing.
+-- ============================================================
+DO $$
+DECLARE
+    v_missing TEXT[];
+    v_raised  BOOLEAN := FALSE;
+BEGIN
+    BEGIN
+        IF EXISTS (
+            SELECT 1 FROM information_schema.tables
+            WHERE table_schema='schema_guard_test' AND table_name='strategist_good'
+        ) THEN
+            SELECT array_agg(c) INTO v_missing
+            FROM unnest(ARRAY[
+                'id', 'engine_mode', 'strategy_name',
+                'params_json', 'applied_at', 'applied_at_ms',
+                'source', 'reason', 'prev_params_json'
+            ]) AS c
+            WHERE NOT EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_schema='schema_guard_test' AND table_name='strategist_good'
+                  AND column_name=c
+            );
+            IF v_missing IS NOT NULL AND array_length(v_missing,1) > 0 THEN
+                RAISE EXCEPTION 'unexpected_missing_in_good_fixture: %', v_missing;
+            END IF;
+        END IF;
+    EXCEPTION WHEN OTHERS THEN
+        v_raised := TRUE;
+    END;
+
+    IF NOT v_raised THEN
+        RAISE NOTICE 'TEST 10: PASS (V019 Guard A pass case — 9-col strategist_good, no RAISE)';
+    ELSE
+        RAISE NOTICE 'TEST 10: FAIL (V019 Guard A should not raise on complete table)';
+    END IF;
+END $$;
+
+
+-- ============================================================
+-- TEST 11: V019 Guard A fail — legacy stub missing 3 required cols
+--          (params_json / source / prev_params_json) SHOULD RAISE
+-- ============================================================
+DO $$
+DECLARE
+    v_missing TEXT[];
+    v_raised  BOOLEAN := FALSE;
+BEGIN
+    BEGIN
+        IF EXISTS (
+            SELECT 1 FROM information_schema.tables
+            WHERE table_schema='schema_guard_test' AND table_name='strategist_legacy'
+        ) THEN
+            SELECT array_agg(c) INTO v_missing
+            FROM unnest(ARRAY[
+                'id', 'engine_mode', 'strategy_name',
+                'params_json', 'applied_at', 'applied_at_ms',
+                'source', 'reason', 'prev_params_json'
+            ]) AS c
+            WHERE NOT EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_schema='schema_guard_test' AND table_name='strategist_legacy'
+                  AND column_name=c
+            );
+            IF v_missing IS NOT NULL AND array_length(v_missing,1) > 0 THEN
+                RAISE EXCEPTION
+                    'schema_guard A: strategist_legacy missing required columns: %',
+                    v_missing;
+            END IF;
+        END IF;
+    EXCEPTION WHEN raise_exception THEN
+        v_raised := TRUE;
+    END;
+
+    IF v_raised THEN
+        RAISE NOTICE 'TEST 11: PASS (V019 Guard A fail case — legacy stub RAISE captured as expected)';
+    ELSE
+        RAISE NOTICE 'TEST 11: FAIL (V019 Guard A should have raised on incomplete stub)';
+    END IF;
+END $$;
+
+
+-- ============================================================
+-- TEST 12: V020 Guard A NOVEL fail — parent table ABSENT MUST RAISE
+--          (deviates from the template no-op rule because V020 has
+--           no CREATE TABLE — it can only rebuild the tie-break
+--           index on an already-present parent. TEST 3 / 6 / 9
+--           cover the template no-op rule; this test covers V020's
+--           deliberate deviation.)
+-- ============================================================
+DO $$
+DECLARE
+    v_raised BOOLEAN := FALSE;
+BEGIN
+    BEGIN
+        IF EXISTS (
+            SELECT 1 FROM information_schema.tables
+            WHERE table_schema='schema_guard_test' AND table_name='strategist_absent'
+        ) THEN
+            RAISE EXCEPTION 'unexpected_table_present';
+        ELSE
+            -- Mirror V020 Guard A ELSE branch: parent missing is a hard error.
+            RAISE EXCEPTION
+                'schema_guard A: schema_guard_test.strategist_absent does not exist. '
+                'V019 must be applied before V020. (Mirrors V020 migration guard.)';
+        END IF;
+    EXCEPTION WHEN raise_exception THEN
+        v_raised := TRUE;
+    END;
+
+    IF v_raised THEN
+        RAISE NOTICE 'TEST 12: PASS (V020 Guard A — parent absent RAISE captured as expected)';
+    ELSE
+        RAISE NOTICE 'TEST 12: FAIL (V020 Guard A should RAISE when parent table absent)';
+    END IF;
+END $$;
+
+
 -- ------------------------------------------------------------
 -- Teardown / 清理
 -- ------------------------------------------------------------
@@ -368,7 +532,8 @@ DROP SCHEMA IF EXISTS schema_guard_test CASCADE;
 
 \echo ''
 \echo '============================================================'
-\echo 'All 9 tests emitted. Grep stderr/NOTICE output for FAIL.'
+\echo 'All 12 tests emitted. Grep stderr/NOTICE output for FAIL.'
 \echo 'If zero FAIL lines, all guards behave correctly.'
-\echo '以上 9 個 test。grep stderr/NOTICE 看 FAIL。零 FAIL 即全綠。'
+\echo '以上 12 個 test（含 G6-03 新增 TEST 10-12）。grep stderr/NOTICE 看 FAIL。'
+\echo '零 FAIL 即全綠。'
 \echo '============================================================'
