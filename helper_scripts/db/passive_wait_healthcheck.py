@@ -29,7 +29,10 @@ Checks（each prints PASS / FAIL / WARN with a one-line explanation）:
                                            entry_context_id JOIN ratio for fills→features linkage)
   [3]  exit_features_writer_ratio      — learning.exit_features writes vs close_fills (EXIT-FEATURES-TABLE-1)
   [4]  phys_lock_runtime               — trading.fills 'risk_close:phys_lock_*' count (TRACK-P v2)
-  [5]  micro_profit_fire               — trading.fills 'risk_close:COST EDGE*' count (MICRO-PROFIT-FIX-1)
+  [5]  micro_profit_fire (RETIRED)     — legacy COST EDGE gate replaced by PHYS-LOCK in TRACK-P-V2-SWAP-1
+                                          (commit 306993e, 2026-04-22). [4] phys_lock_runtime is the
+                                          authoritative micro-profit-lock health signal. [5] always
+                                          returns PASS w/ historical residue counts (informational).
   [6]  trailing_stop_fire              — trading.fills 'risk_close:TRAILING STOP%' count
   [7]  edge_estimates_freshness        — settings/edge_estimates.json mtime < 90min
                                           (G6-01 [7a]: includes structure validation + active
@@ -280,7 +283,32 @@ def check_phys_lock_runtime(cur) -> tuple[str, str]:
 
 
 def check_micro_profit_fire(cur) -> tuple[str, str]:
-    """[5] MICRO-PROFIT-FIX-1 (legacy COST EDGE gate) — expect ≥1 per 24h if alive."""
+    """[5] RETIRED — legacy COST EDGE gate replaced by PHYS-LOCK v2.
+
+    Background / 背景:
+      The legacy COST EDGE gate (MICRO-PROFIT-FIX-1, 2026-04-17) was permanently
+      removed from `risk_checks.rs` Priority 6 by TRACK-P-V2-SWAP-1
+      (commit 306993e, 2026-04-22). The replacement is `physical_micro_profit_lock_v2`
+      which emits `risk_close:phys_lock_*` tags — covered by [4] phys_lock_runtime.
+      `risk_checks.rs:250-264` keeps the old block as a comment for historical
+      reference only ("DEPRECATED ... Do not re-enable without design review").
+
+      Therefore `strategy_name LIKE 'risk_close:COST EDGE%'` will never increment
+      again; once the 7d window slides past 2026-04-22, both counts become 0
+      forever. Continuing to FAIL/WARN on it produces a permanent false alarm
+      (24h=0 since the swap, eventually 7d=0 too) that masks real signals in
+      the cron summary.
+
+      傳統 COST EDGE gate（MICRO-PROFIT-FIX-1）已於 2026-04-22 commit 306993e
+      被 TRACK-P-V2-SWAP-1 永久移除，由 `physical_micro_profit_lock_v2`
+      取代，產出 `risk_close:phys_lock_*` 標籤——由 [4] phys_lock_runtime
+      接管監控。本 check 永遠回 PASS（informational only），保留歷史殘留計數
+      供 audit；要看 micro-profit-lock 是否健康請看 [4]。
+
+    This check is intentionally kept (not deleted) so the cron output retains
+    a stable check-id mapping; it just no longer fires alarms.
+    本 check 故意保留（不刪），維持 cron 輸出 check-id 穩定；不再發出告警。
+    """
     n_24h = _scalar(cur,
         "SELECT COUNT(*) FROM trading.fills "
         "WHERE ts > now() - interval '24 hours' "
@@ -293,11 +321,9 @@ def check_micro_profit_fire(cur) -> tuple[str, str]:
         "AND engine_mode = 'demo' "
         "AND strategy_name LIKE 'risk_close:COST EDGE%'"
     )
-    if n_7d == 0:
-        return ("FAIL", f"COST EDGE 7d=0 — MICRO-PROFIT gate 已被 T3 deprecated (P0-15)，現在靠 PHYS-LOCK")
-    if n_24h == 0:
-        return ("WARN", f"COST EDGE 24h=0 (7d={n_7d}) — stale; 確認 runtime 是否 rebuild 後 gate 被註解")
-    return ("PASS", f"COST EDGE 24h={n_24h} (7d={n_7d})")
+    return ("PASS",
+            f"RETIRED (replaced by [4] phys_lock_runtime, see TRACK-P-V2-SWAP-1 "
+            f"commit 306993e); residue 24h={n_24h} 7d={n_7d}")
 
 
 def check_trailing_stop_fire(cur) -> tuple[str, str]:
