@@ -80,3 +80,52 @@ operator 最關心 4 大議題，對應新 TODO 章節分佈：
 
 **索引建立時間**：2026-04-24 CEST
 **更新負責**：主會話（PM+Conductor）
+
+---
+
+## § 附錄：TODO v2 整合完成摘要（2026-04-24 16:30 CEST）
+
+### TODO 版本演進
+
+| 版本 | 日期 | 行數 | 來源 | 狀態 |
+|------|------|------|------|------|
+| **v0** | 2026-04-23 23:59 | 700 | 舊完整版（多輪 audit 累積） | ✅ 歸檔：`2026-04-24--todo_snapshot_pre_refactor.md` |
+| **v1** | 2026-04-24 09:00 | 328 | PM Sign-off 後重構（精煉 53%） | ✅ 歸檔：`2026-04-24--todo_v1_refactor_snapshot.md` |
+| **v2** | 2026-04-24 16:00 | 458 | FIX-PLAN v2 + 10 agent audit 整合 | 🟢 **CURRENT（實際檔案）** |
+
+### v2 整合來源
+
+| 來源 | 貢獻項數 | 涵蓋內容 |
+|------|---------|---------|
+| PA FIX-PLAN v2 | ~180-220 | G1-G9 工作組、Wave 1-4、核實結果表 |
+| PM 提案 | ~45 | P0-P3 優先級、歷史報告盤點、遺漏清單 |
+| FA 提案 | ~34 | C-1~C-3 Critical、H-1~H-9 High、M-1~M-2 Mid |
+| QC 提案 | ~60 | 量化五層、Kelly/EWMA/Hurst/CUSUM、硬編碼清單 |
+| QA 提案 | ~60 | healthcheck 補齊 5 缺陷、e2e 覆蓋、migration Guard |
+| PA 提案 | ~80 | 文件大小違反、Rust refactor、並行策略 |
+| CC/AI-E/MIT/E5/BB 提案 | ~150 | 合規規則、AI 接線、ML 管線、API audit |
+
+### PM 簽核調整 6 項
+
+| # | 原案 | PM 修正 | 影響 |
+|----|------|--------|------|
+| 1 | G1-02 3-4d | 確認 4-5d + PA/E1 同 session | 時序更準確 |
+| 2 | EDGE-DIAG Phase 3 3 項前提 | 補第 4 項：healthcheck [11] ≥3d PASS | passive-wait 監控強制 |
+| 3 | G2-01 無 heartbeat | 加 healthcheck [3] maker fill rate | PostOnly 驗證可觀測 |
+| 4 | G3-05 P3 優先級 | 升 P2 | Phase 2 shadow flip 前置 |
+| 5 | G2-01 passive 1-2w | 改至少 1w（完整週期） | 統計有效期 |
+| 6 | G4-01 無限制 | 追加「pending `PipelineConfig.symbol` Optional」| 清晰前置條件 |
+
+### Healthcheck 新規則（CLAUDE.md §七）
+
+- **強制規則**：被動等待 TODO 必附 healthcheck（6h cron）
+- **新增 check**：[13] edge_estimator_scheduler fresh / [14] exit_features 累積率 / [15] shadow_exit agreement
+- **失效條件**：連續 3 次 FAIL → 中止被動等待，轉人工介入
+
+### 結論
+
+✅ **v2 覆蓋範圍**：180-220 findings（去重率 55-60%）、G1-G9 工作組、Wave 1-4、P0-P4 優先級、被動等待 + healthcheck 強制、並行策略清晰  
+✅ **PM 簽核**：Approved with 6 minor adjustments、可交付性 HIGH (95%)、時序可信度 MEDIUM (78%)  
+✅ **Live 日期**：中位 2026-05-30（PM 建議 +10% 緩衝 ~2026-06-01）  
+✅ **執行準備**：subagent 派遣清單、session 拆分方案、並行軌道文檔齊全
+
