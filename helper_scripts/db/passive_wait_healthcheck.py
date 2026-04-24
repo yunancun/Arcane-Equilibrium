@@ -32,6 +32,7 @@ Checks（each prints PASS / FAIL / WARN with a one-line explanation）:
   [7] edge_estimates_freshness       — settings/edge_estimates.json mtime < 90min
   [10] intents_writer_ratio          — trading.intents vs orders 24h ratio (P1-12 post-mortem 2026-04-17 outage)
   [11] counterfactual_clean_window_growth — post-P013-clean EDGE-DIAG-1 Phase 3 gate (2026-04-24)
+  [12] bb_breakout_post_deadlock_fix — bb_breakout fill rate after FIX-26-DEADLOCK-1 deploy (P1-11 (1) Phase 1)
 
 Rule of thumb: close_fills_24h ≥ 10 且 labels 1:1 ratio ≥ 0.8 且 exit_features
 1:1 ratio ≥ 0.8 且 ≥1 risk-layer exit mechanism (#4/5/6) fire ≥ 1 time.
@@ -412,6 +413,77 @@ def check_intents_writer_ratio(cur) -> tuple[str, str]:
     if all(s == "SKIP" for s in statuses):
         return ("PASS", summary + " — all engines quiet, nothing to compare")
     return ("PASS", summary)
+
+
+def check_bb_breakout_post_deadlock_fix(cur) -> tuple[str, str]:
+    """[12] bb_breakout post-FIX-26-DEADLOCK-1 fill rate — P1-11 (1) Phase 1.
+
+    Context: 2026-04-24 sweep + Rust commit ``bcc5401`` discovered + fixed
+    `squeeze_detected_ms` permanent-deadlock bug. Pre-fix, bb_breakout had
+    14d 0 fills (symbol-locked after first failed-entry expiry). Post-fix
+    + ``--rebuild`` deploy, bb_breakout should exit permanent-dormant.
+
+    Three-state triage:
+      - 7d entries (`strategy_name='bb_breakout'`, no risk_close prefix):
+        - 0 over 7d post-deploy → FAIL (fix didn't work or thresholds still
+          mis-scaled per F1; check engine binary rebuild + thresholds)
+        - 1-5 over 7d → WARN (out of dormant but very low; threshold tuning
+          per Phase 2 backlog needed)
+        - ≥6 over 7d → PASS (operating normally)
+      - Pre-deploy state: this check fails until ``--rebuild`` deploys the
+        Rust fix. Operator should mark this expected until that happens.
+
+    The check looks for the **engine PID start time** as a deploy proxy
+    (`/tmp/openclaw/engine_pid` mtime); if absent, falls back to a
+    7d-window strategy fill count without deploy gating.
+
+    [12] FIX-26-DEADLOCK-1 部署後 bb_breakout 是否真的脫離 permanent-dormant。
+    7d entry 數三態：0=FAIL（修沒生效或閾值還錯）/ 1-5=WARN（出 dormant 但極低）/
+    >=6=PASS（正常運作）。--rebuild 部署前此檢查預期 FAIL。
+    """
+    try:
+        n_7d = _scalar(cur,
+            "SELECT COUNT(*) FROM trading.fills "
+            "WHERE ts > now() - interval '7 days' "
+            "AND engine_mode = 'demo' "
+            "AND strategy_name = 'bb_breakout'"
+        )
+    except Exception as e:
+        return ("WARN", f"bb_breakout 7d query failed: {e}")
+
+    # Deploy proxy: check engine PID file mtime as a "since-rebuild" timestamp.
+    # 部署代理：用 engine PID 檔 mtime 作「自 rebuild 起算」時間。
+    deploy_age_hint = ""
+    try:
+        pid_path = Path(os.environ.get("OPENCLAW_DATA_DIR", "/tmp/openclaw")) / "engine_pid"
+        if pid_path.exists():
+            mtime = datetime.fromtimestamp(pid_path.stat().st_mtime, tz=timezone.utc)
+            age_h = (datetime.now(tz=timezone.utc) - mtime).total_seconds() / 3600.0
+            deploy_age_hint = f", engine_pid age {age_h:.1f}h"
+            # If engine deployed within last 7d, the "7d window" includes
+            # pre-fix bars. Operator should re-eval after >7d of post-fix runtime.
+            # 引擎部署 <7d 時 7d 窗包含修前資料，需等 >7d 才有 clean baseline。
+            if age_h < 168:  # < 7d
+                deploy_age_hint += " (window includes pre-fix data, baseline pending)"
+    except Exception:
+        pass
+
+    if n_7d == 0:
+        return (
+            "FAIL",
+            f"bb_breakout 7d entries=0{deploy_age_hint} — FIX-26-DEADLOCK-1 fix "
+            f"may not be deployed (--rebuild?) or thresholds still mis-scaled (P1-11 F1)",
+        )
+    if n_7d < 6:
+        return (
+            "WARN",
+            f"bb_breakout 7d entries={n_7d}{deploy_age_hint} — out of permanent-dormant "
+            f"but very low; Phase 2 threshold tuning recommended",
+        )
+    return (
+        "PASS",
+        f"bb_breakout 7d entries={n_7d}{deploy_age_hint} — operating normally post-deadlock-fix",
+    )
 
 
 def _read_shadow_enabled_from_toml() -> tuple[bool | None, str]:
@@ -824,6 +896,13 @@ def main() -> int:
             # [10] intents writer 比率守衛 — P1-12 post-mortem，防 4/17 事件復發。
             s, m = check_intents_writer_ratio(cur)
             results.append(("[10] intents_writer_ratio", s, m))
+
+            # [12] bb_breakout_post_deadlock_fix — P1-11 (1) FIX-26-DEADLOCK-1
+            # Once Rust commit bcc5401 deploys via --rebuild, bb_breakout
+            # should exit "permanent dormant" state. Track real fill count.
+            # [12] FIX-26-DEADLOCK-1 部署後 bb_breakout 是否脫離 permanent-dormant。
+            s, m = check_bb_breakout_post_deadlock_fix(cur)
+            results.append(("[12] bb_breakout_post_deadlock_fix", s, m))
     finally:
         conn.close()
 
