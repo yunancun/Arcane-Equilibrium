@@ -120,6 +120,18 @@ pub struct RiskConfig {
     /// `ml::kelly_sizer::compute_kelly_qty` 的可調 knob，預設 50/200 保留原行為。
     #[serde(default)]
     pub kelly: KellyTierConfig,
+    /// G3-02 Phase A (2026-04-25): ExecutorAgent shadow→live control plane.
+    /// Per `docs/CCAgentWorkSpace/PA/workspace/reports/2026-04-24--g3_01_executor_agent_ipc_rfc.md`,
+    /// hosts the canonical `shadow_mode` + `max_position_pct` knobs that
+    /// previously lived as a hardcoded Python class attribute. Phase A lands
+    /// the schema + TOML section only; Phase B (Python read path) and Phase C
+    /// (operator IPC flip) follow. Default `shadow_mode=true` preserves
+    /// current ExecutorAgent behavior — no risk surface change in Phase A.
+    /// G3-02 Phase A：ExecutorAgent shadow→live 控制平面 schema 落地；Python
+    /// 讀取路徑（Phase B）+ operator IPC flip（Phase C）後續完成。
+    /// 預設 shadow_mode=true 保留現行為，Phase A 不改 risk 表面。
+    #[serde(default)]
+    pub executor: ExecutorConfig,
 }
 
 impl RiskConfig {
@@ -141,6 +153,7 @@ impl RiskConfig {
         self.exit.validate().map_err(|e| format!("risk.exit: {}", e))?;
         self.dynamic_sizing.validate()?;
         self.kelly.validate()?;
+        self.executor.validate()?;
 
         // Cross-sub-struct invariant: partial_tp levels must not exceed take_profit_max_pct.
         // 跨 sub-struct 不變量：partial_tp 各層不得超過 take_profit_max_pct。
@@ -662,6 +675,105 @@ impl KellyTierConfig {
                 "risk.kelly.young_threshold ({}) must be < risk.kelly.mature_threshold ({})",
                 self.young_threshold, self.mature_threshold
             ));
+        }
+        Ok(())
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ExecutorConfig — ExecutorAgent shadow→live control plane (G3-02 Phase A)
+// ExecutorAgent shadow→live 控制平面（G3-02 Phase A）
+// ---------------------------------------------------------------------------
+
+/// G3-02 Phase A (2026-04-25): canonical ExecutorAgent control plane.
+///
+/// Replaces the hardcoded `_shadow_mode = True` class attribute on Python
+/// `app/executor_agent.py:482` per RFC at
+/// `docs/CCAgentWorkSpace/PA/workspace/reports/2026-04-24--g3_01_executor_agent_ipc_rfc.md`.
+/// The Python attribute violated DOC-01 principle #3 (AI output ≠ immediate
+/// command) because flipping required a code edit + rebuild instead of the
+/// `<60s` IPC hot-reload turnaround used for the rest of the trading config.
+///
+/// Phase A scope: schema + TOML section + validation. Defaults preserve the
+/// pre-G3-02 Python ExecutorAgent behavior (shadow_mode = true), so this
+/// struct is dormant — no runtime change until Phase B wires Python's read
+/// path through a cache layer and Phase C connects an operator IPC flip
+/// behind the existing live-gate auth chain.
+///
+/// G3-02 Phase A：ExecutorAgent 控制平面落地。原 Python 硬編碼旗標違反
+/// 原則 #3，現提升為 Rust ConfigStore 一級欄位。Phase A 僅落 schema +
+/// TOML + validation；預設 shadow_mode=true 保留現行為，Phase B/C 後續完成。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExecutorConfig {
+    /// Shadow mode flag.
+    /// - `true`: log intents, do NOT submit orders to Bybit.
+    /// - `false`: submit orders (requires full live-gate chain green).
+    ///
+    /// Default `true` preserves current Python ExecutorAgent behavior, so
+    /// Phase A landing has zero runtime impact. Phase B reads via cache;
+    /// Phase C unlocks operator IPC flip behind auth.
+    /// 影子模式旗標。true=log 但不下單；false=真實下單（需 live-gate 全綠）。
+    #[serde(default = "default_executor_shadow_mode")]
+    pub shadow_mode: bool,
+    /// Maximum position size as fraction of available margin (0.0 – 1.0).
+    /// Per-symbol overrides via `per_symbol_position_cap` take precedence.
+    /// Default `0.05` (5%) — conservative starting point matching the
+    /// existing P0/P1 cascade defaults.
+    /// 最大倉位佔保證金比例（0.0–1.0）；per-symbol 覆蓋優先。預設 5%。
+    #[serde(default = "default_executor_max_position_pct")]
+    pub max_position_pct: f64,
+    /// Per-symbol max position fraction overrides. Symbol → fraction (0.0–1.0).
+    /// Empty default = use `max_position_pct` for all symbols.
+    /// 逐 symbol 最大倉位比例覆蓋；空表 = 全 symbol 用 max_position_pct。
+    #[serde(default)]
+    pub per_symbol_position_cap: HashMap<String, f64>,
+}
+
+fn default_executor_shadow_mode() -> bool {
+    // Phase A safe default: preserve pre-G3-02 Python ExecutorAgent behavior
+    // (forced shadow). Phase C operator IPC flip lifts this once verified.
+    // Phase A 安全默認：保留 Python ExecutorAgent 強制 shadow 行為。
+    true
+}
+
+fn default_executor_max_position_pct() -> f64 {
+    // 5% — matches the conservative starting point in P0/P1 cascade defaults.
+    // 5% — 與 P0/P1 cascade 默認保守起點一致。
+    0.05
+}
+
+impl Default for ExecutorConfig {
+    fn default() -> Self {
+        Self {
+            shadow_mode: default_executor_shadow_mode(),
+            max_position_pct: default_executor_max_position_pct(),
+            per_symbol_position_cap: HashMap::new(),
+        }
+    }
+}
+
+impl ExecutorConfig {
+    /// G3-02 Phase A: validate fraction bounds.
+    /// G3-02 Phase A：驗證比例範圍。
+    pub fn validate(&self) -> Result<(), String> {
+        if !(0.0..=1.0).contains(&self.max_position_pct) {
+            return Err(format!(
+                "risk.executor.max_position_pct ({}) must be in [0.0, 1.0]",
+                self.max_position_pct
+            ));
+        }
+        for (symbol, frac) in &self.per_symbol_position_cap {
+            if !(0.0..=1.0).contains(frac) {
+                return Err(format!(
+                    "risk.executor.per_symbol_position_cap[{}] ({}) must be in [0.0, 1.0]",
+                    symbol, frac
+                ));
+            }
+            if symbol.is_empty() {
+                return Err(
+                    "risk.executor.per_symbol_position_cap key must be non-empty".into(),
+                );
+            }
         }
         Ok(())
     }

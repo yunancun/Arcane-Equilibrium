@@ -170,4 +170,13 @@ shadow_enabled = false
 young_threshold = 50
 mature_threshold = 200
 
+# G3-02 Phase A (2026-04-25): ExecutorAgent shadow→live control plane.
+# Paper default shadow_mode=true — paper is opt-in via OPENCLAW_ENABLE_PAPER
+# env, but the executor flag mirrors live for symmetry.
+# G3-02 Phase A：Paper 預設 shadow_mode=true（與 live 對齊保 symmetry）。
+[executor]
+shadow_mode = true
+max_position_pct = 0.05
+per_symbol_position_cap = {}
+
 [experimental.flags]
