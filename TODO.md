@@ -122,7 +122,7 @@ ssh trade-core "cd ~/BybitOpenClaw/srv && python3 helper_scripts/db/passive_wait
 |---|---|---|---|---|---|---|
 | **G6-01** | ✅完成 | `passive_wait_healthcheck.py` 補齊 5 QA 缺陷 + FUP `[Xb] pipeline_triangulation` cross-validation；Linux 14 check 全執行無 stack trace | 無 | E1 / QA | 完成 2026-04-24 | [G6-01 report](.claude_reports/20260424_123625_g6_01_healthcheck_fixes.md)（commits `1cf7ad9` + `9120af7`）|
 | **G6-02** | ✅完成 | healthcheck [13-15] 新增 — edge_fresh + exit_feat_rate + shadow_agree | G6-01 | PM+E1 / QA | 完成 2026-04-24 | commit `a0a4981` |
-| **G6-03** | ✅完成 | V019/V020 retrofit Guard A — 9 欄位 guard + idempotent x2 + test_schema_guards.sql 9/9 PASS + FUP TEST 10/11/12 V019/V020 regression fixtures | 無 | E1+E2 | 完成 2026-04-24 | [G6-03 report](.claude_reports/20260424_123200_g6_03_v019_v020_guard.md)（commits `ff5bf1f` + `309d5b1`）|
+| **G6-03** | 🟡部分 | V019/V020 retrofit Guard A — **部署時 sqlx checksum mismatch crash engine，已 revert (`55ed449`)**；`test_schema_guards.sql` 9/9 + TEST 10/11/12 fixtures 保留；V023/V021 既有 Guard A 未動。Guard A 重做為 V024 純新增 migration 留 E1 下次 session | 無 | E1+E2 | 部分完成 2026-04-24 | [G6-03 report](.claude_reports/20260424_123200_g6_03_v019_v020_guard.md)（commits `ff5bf1f` + `309d5b1` + revert `55ed449`）|
 | **G6-04** | ✅完成 | CLAUDE.md §三 敘述同步規則（TODO vs runtime） — `docs/lessons.md:30` 條目 + `CLAUDE.md §七「§三 敘述 vs runtime drift 防線」` 規則已收錄 | 無 | TW | 完成 2026-04-24 | [lessons.md:30](docs/lessons.md) + CLAUDE.md §七（commit `d60ad45`）|
 
 ### Wave 1 完成標準（Go / No-Go）
@@ -153,10 +153,10 @@ ssh trade-core "cd ~/BybitOpenClaw/srv && python3 helper_scripts/db/passive_wait
 
 **Operator 下一步**：
 1. ~~merge feature branch → main~~ ✅ 已完成（ff-merge + push 到 origin/main `040a02a`）
-2. `ssh trade-core "cd ~/BybitOpenClaw/srv && git pull --ff-only origin main && bash helper_scripts/restart_all.sh --rebuild"` 部署 G1-06 drawdown_revoke 到 runtime + 帶入 P1-11 FIX-26-DEADLOCK-1
+2. ~~ssh deploy~~ ✅ 已完成 — engine PID `1099327` / binary mtime 2026-04-24 12:52 / paper+demo alive / total_ticks 5000+ / cost_gate normal warmup（**G6-03 V019/V020 retrofit 撤回**因 sqlx checksum mismatch；engine 第一次 rebuild 啟動失敗 → revert `55ed449` → 第二次啟動成功）
 3. 設 6h cron `passive_wait_healthcheck.py`（CLAUDE.md §七 強制）
 4. （可選）清理 feature branch：`git branch -D g1-06-drawdown-auto-revoke && git push origin --delete g1-06-drawdown-auto-revoke fix/g6-01-healthcheck-5-defects`
-5. **下一 session**：G1-02 E1 實裝（PA+E1 同 session 緊密，4-6h，按 [PA plan 3 步順序](docs/CCAgentWorkSpace/PA/workspace/reports/2026-04-24--g1_02_event_consumer_split_plan.md#3-拆分順序避免循環依賴-最小-review-surface)）
+5. **下一 session**：(a) G1-02 E1 實裝（PA+E1 同 session 緊密，4-6h，按 [PA plan 3 步順序](docs/CCAgentWorkSpace/PA/workspace/reports/2026-04-24--g1_02_event_consumer_split_plan.md#3-拆分順序避免循環依賴-最小-review-surface)）(b) G6-03 重做為 V024 純新增 migration（避免 sqlx checksum trap）
 
 ---
 
