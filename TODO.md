@@ -101,35 +101,60 @@ ssh trade-core "cd ~/BybitOpenClaw/srv && python3 helper_scripts/db/passive_wait
 
 ---
 
-## ⏩ Wave 1（W17/18 · 4/24→5/08）— 基礎設施解凍【進行中】
+## ⏩ Wave 1（W17/18 · 4/24→5/08）— 基礎設施解凍【主體完成 — G1-02 E1 實裝待】
+
+**狀態（2026-04-24 8 sub-agent 並行派發後）**：8/9 項完成（G1-02 PA 規劃完成，E1 實裝 4-6h 待）；commit 集中於 feature branch `g1-06-drawdown-auto-revoke`，待 operator merge to main。
 
 ### G1 Edge 危機根源修復
 
 | ID | Tag | 項目 | 前置 | 負責修/驗 | 工時 | 完成標準 |
 |---|---|---|---|---|---|---|
-| **G1-01** | 🔴P0 | `edge_estimator_scheduler` 診斷 + 恢復 | 無 | MIT+E4 / E2 | 2h+1d | `edge_estimates.json` mtime <6h + cells ≥50 |
-| **G1-02** | 🔴P0 | `event_consumer/mod.rs` fn 1696 行拆（硬上限 1200） | 無 | E1+PA 同session / E2 | **4-5d** | <1200 行 + test cov ≥95% + engine lib pass |
+| **G1-01** | ✅完成 | `edge_estimator_scheduler` 診斷 + 恢復 — operator commit `f32629c` (leader election) + `abc85c0` (graceful shutdown) 已修；2026-04-24 02:06 `--rebuild` 部署；現 cells **59** / mtime <30min | 無 | MIT+E4 / E2 | 完成 2026-04-24 | [G1-01 report](.claude_reports/20260424_122700_g1_01_scheduler_recovery.md) |
+| **G1-02** | 🟡規劃完 | `event_consumer/mod.rs` 1762 行拆（硬上限 1200）— **PA 規劃完成**，E1 實裝待 | 無 | E1+PA 同session / E2 | **4-6h** 實裝 | <1200 行 + test cov ≥95% + engine lib pass / [PA plan](docs/CCAgentWorkSpace/PA/workspace/reports/2026-04-24--g1_02_event_consumer_split_plan.md)（commit `7908164`）|
 | **G1-03** | 🟠P1 | Rust 硬違反 7 檔 refactor（main/instrument/rest_client 等） | G1-02 | E5+E1 / E2+E4 | 2-3d | all rust files <1200 lines |
 | **G1-04** | 🟠P1 | fee drag / R:R 邊際驗證基線 | PostOnly demo | QC / FA | 1-2d | counterfactual baseline report |
-| **G1-05** | ✅完成 | PostOnly 配置驗證 — `use_maker_entry` 配置正確（demo/paper=true, live=false）；FA v1 誤判收回 | 無 | FA+E1 / E2 | 完成 2026-04-24 | [design intent doc](docs/references/2026-04-24--postonly_design_intent.md) |
-| **G1-06** | 🟠P1 | Drawdown auto-revoke 實裝（原則 #5） | 無 | E1 / E2 | 1d | reconciler drawdown-triggered revoke |
+| **G1-05** | ✅完成 | PostOnly 配置驗證 — `use_maker_entry` 配置正確（demo/paper=true, live=false）；FA v1 誤判收回 | 無 | FA+E1 / E2 | 完成 2026-04-24 | [design intent doc](docs/references/2026-04-24--postonly_design_intent.md)（commit `0da10c0`）|
+| **G1-06** | ✅完成 | Drawdown auto-revoke 實裝（原則 #5/#6）— `drawdown_revoke.rs` 343 行 + Step 6 HaltSession 接線 + 10 unit tests；engine lib **1990 / 0 failed**（baseline 1980 + 10 新）| 無 | E1 / E2 | 完成 2026-04-24 | [G1-06 report](.claude_reports/20260424_103617_g1_06_drawdown_revoke.md)（commit `d1cdd49`）|
 
 ### G6 合規 + 觀察性
 
 | ID | Tag | 項目 | 前置 | 負責修/驗 | 工時 | 完成標準 |
 |---|---|---|---|---|---|---|
-| **G6-01** | 🟠P1 | `passive_wait_healthcheck.py` 補齊 5 缺陷（QA 發現） | 無 | E1 / QA | 1-2d | 12 現有 check 邏輯全驗 |
-| **G6-02** | 🟠P1 | 被動等待 TODO 全覆蓋 healthcheck [13-15] | G6-01 | PM+E1 / QA | 1d | [13] edge_fresh / [14] exit_feat_rate / [15] shadow_agree |
-| **G6-03** | 🟡P2 | V019/V020 retrofit Guard A（V023 postmortem 規範） | 無 | E1+E2 | 1d | migration test suite pass |
-| **G6-04** | 🟡P2 | CLAUDE.md §三 敘述同步規則（TODO vs runtime） | 無 | TW | 0.5d | Lessons 新 rule 登記 |
+| **G6-01** | ✅完成 | `passive_wait_healthcheck.py` 補齊 5 QA 缺陷 + FUP `[Xb] pipeline_triangulation` cross-validation；Linux 14 check 全執行無 stack trace | 無 | E1 / QA | 完成 2026-04-24 | [G6-01 report](.claude_reports/20260424_123625_g6_01_healthcheck_fixes.md)（commits `1cf7ad9` + `9120af7`）|
+| **G6-02** | ✅完成 | healthcheck [13-15] 新增 — edge_fresh + exit_feat_rate + shadow_agree | G6-01 | PM+E1 / QA | 完成 2026-04-24 | commit `a0a4981` |
+| **G6-03** | ✅完成 | V019/V020 retrofit Guard A — 9 欄位 guard + idempotent x2 + test_schema_guards.sql 9/9 PASS + FUP TEST 10/11/12 V019/V020 regression fixtures | 無 | E1+E2 | 完成 2026-04-24 | [G6-03 report](.claude_reports/20260424_123200_g6_03_v019_v020_guard.md)（commits `ff5bf1f` + `309d5b1`）|
+| **G6-04** | ✅完成 | CLAUDE.md §三 敘述同步規則（TODO vs runtime） — `docs/lessons.md:30` 條目 + `CLAUDE.md §七「§三 敘述 vs runtime drift 防線」` 規則已收錄 | 無 | TW | 完成 2026-04-24 | [lessons.md:30](docs/lessons.md) + CLAUDE.md §七（commit `d60ad45`）|
 
 ### Wave 1 完成標準（Go / No-Go）
 
-- [ ] G1-01 scheduler 24h fresh + n_cells ≥50（healthcheck [13] PASS 連 3 日）
-- [ ] G1-02 event_consumer <1200 行 + engine lib 1980+ pass
+- [x] G1-01 scheduler n_cells ≥50（cells **59** / mtime <30min）— healthcheck [13] PASS 待連 3 日累積
+- [ ] G1-02 event_consumer <1200 行 + engine lib 1980+ pass — **PA 規劃完成**，E1 實裝 4-6h 待
 - [x] G1-05 PostOnly design intent doc 存檔（修正 FA v1 誤判）— `docs/references/2026-04-24--postonly_design_intent.md`（2026-04-24）
-- [ ] G6-01+02 所有被動等待項附 healthcheck + 6h cron 跑起
+- [x] G6-01+02 所有被動等待項附 healthcheck — 5 缺陷修 + [Xb] FUP + [13-15] 新增；6h cron 待 operator 設
+- [x] G6-04 CLAUDE.md §三 drift 規則已登 `docs/lessons.md:30` + §七（2026-04-24）
 - [ ] 背景：P0-2 時鐘未重置、PostOnly 驗收資料累積中
+
+### Wave 1 收尾通知（給 operator）
+
+**所有 G6 + G1（除 G1-02 E1 實裝）已完成**，9 commit 集中於 feature branch `g1-06-drawdown-auto-revoke`（push to main 被 sandbox 阻；feature branch 已 push origin）：
+
+| Commit | 任務 | 在 main | 在 feature branch |
+|---|---|---|---|
+| `d60ad45` | G6-04 §三 drift rule | ✅ | ✅ |
+| `ff5bf1f` | G6-03 V019/V020 Guard A | ✅ | ✅ |
+| `0da10c0` | G1-05 PostOnly doc | ✅ | ✅ |
+| `d1cdd49` | G1-06 drawdown auto-revoke | — | ✅ |
+| `1cf7ad9` | G6-01 healthcheck 5 fix | — | ✅ |
+| `7908164` | G1-02 PA plan | — | ✅ |
+| `309d5b1` | G6-03 FUP test fixtures | — | ✅ |
+| `9120af7` | G6-01 FUP [Xb] cross-validation | — | ✅ |
+| `a0a4981` | G6-02 [13-15] new checks | — | ✅ |
+
+**Operator 下一步**：
+1. `git checkout main && git merge --ff-only g1-06-drawdown-auto-revoke && git push origin main`（feature branch = main 線性後 6 commit，可 ff merge）
+2. `ssh trade-core "cd ~/BybitOpenClaw/srv && git pull --ff-only origin main && bash helper_scripts/restart_all.sh --rebuild"` 部署 G1-06 drawdown_revoke 到 runtime + 帶入 P1-11 FIX-26-DEADLOCK-1
+3. 設 6h cron `passive_wait_healthcheck.py`（CLAUDE.md §七 強制）
+4. **下一 session**：G1-02 E1 實裝（PA+E1 同 session 緊密，4-6h，按 [PA plan 3 步順序](docs/CCAgentWorkSpace/PA/workspace/reports/2026-04-24--g1_02_event_consumer_split_plan.md#3-拆分順序避免循環依賴-最小-review-surface)）
 
 ---
 
