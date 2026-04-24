@@ -3,12 +3,14 @@
 //!
 //! MODULE_NOTE (EN): Ported from Python position_sizer.py. Computes Kelly-optimal
 //!   position size with conservative fractional adjustment:
-//!   - < 50 trades: 1/8 Kelly (most conservative)
-//!   - < 200 trades: 1/6 Kelly
-//!   - >= 200 trades: 1/4 Kelly (never full Kelly)
-//!   ATR-based volatility adjustment caps size in high-vol regimes.
+//!   - < `young_threshold` trades (default 50): 1/8 Kelly (most conservative)
+//!   - < `mature_threshold` trades (default 200): 1/6 Kelly
+//!   - >= `mature_threshold` trades: 1/4 Kelly (never full Kelly)
+//!   Tier boundaries are TOML-configurable via `RiskConfig.kelly` (G7-01,
+//!   2026-04-24). ATR-based volatility adjustment caps size in high-vol regimes.
 //! MODULE_NOTE (中): 從 Python position_sizer.py 移植。計算 Kelly 最優倉位，
-//!   保守分數調整：< 50 筆 1/8，< 200 筆 1/6，>= 200 筆 1/4。
+//!   保守分數調整：< young_threshold 筆 1/8，< mature_threshold 筆 1/6，
+//!   >= mature_threshold 筆 1/4。分級邊界 G7-01 起可由 `RiskConfig.kelly` TOML 配置。
 //!   ATR 波動率調整在高波動 regime 中限制倉位。
 
 use tracing::debug;
@@ -81,6 +83,22 @@ pub struct KellyConfig {
     pub vol_mult_floor: f64,
     /// Maximum vol multiplier (ceil for low-vol expansion) / 最大波動乘數
     pub vol_mult_ceil: f64,
+    /// G7-01 (2026-04-24): Sample-size tier boundary for "young" → "mature".
+    /// Trades < `young_threshold` use 1/8 Kelly (most conservative).
+    /// Default 50 preserves pre-G7-01 behavior; mirror of
+    /// `RiskConfig.kelly.young_threshold`. Must satisfy `young < mature`.
+    /// G7-01：樣本量分級邊界 — 「young」轉「mature」門檻。
+    /// 交易數 < `young_threshold` 用 1/8 Kelly（最保守）。預設 50 保留 G7-01 前行為，
+    /// 對應 `RiskConfig.kelly.young_threshold`。需滿足 `young < mature`。
+    pub young_threshold: u32,
+    /// G7-01 (2026-04-24): Sample-size tier boundary for "mature" → "established".
+    /// Trades in `[young_threshold, mature_threshold)` use 1/6 Kelly;
+    /// trades `>= mature_threshold` use 1/4 Kelly. Default 200 preserves
+    /// pre-G7-01 behavior; mirror of `RiskConfig.kelly.mature_threshold`.
+    /// G7-01：樣本量分級邊界 — 「mature」轉「established」門檻。
+    /// 交易數 ∈ `[young_threshold, mature_threshold)` 用 1/6 Kelly；
+    /// `>= mature_threshold` 用 1/4 Kelly。預設 200 保留 G7-01 前行為。
+    pub mature_threshold: u32,
 }
 
 impl Default for KellyConfig {
@@ -93,7 +111,30 @@ impl Default for KellyConfig {
             reference_atr_pct: 0.02,
             vol_mult_floor: 0.5,
             vol_mult_ceil: 1.5,
+            young_threshold: 50,
+            mature_threshold: 200,
         }
+    }
+}
+
+impl KellyConfig {
+    /// G7-01 (2026-04-24): Validate Kelly tier boundaries.
+    /// Both thresholds must be > 0 and `young_threshold < mature_threshold`.
+    /// G7-01：驗證 Kelly 分級邊界。兩個門檻必須 > 0 且 young < mature。
+    pub fn validate(&self) -> Result<(), String> {
+        if self.young_threshold == 0 {
+            return Err("kelly.young_threshold must be > 0".into());
+        }
+        if self.mature_threshold == 0 {
+            return Err("kelly.mature_threshold must be > 0".into());
+        }
+        if self.young_threshold >= self.mature_threshold {
+            return Err(format!(
+                "kelly.young_threshold ({}) must be < kelly.mature_threshold ({})",
+                self.young_threshold, self.mature_threshold
+            ));
+        }
+        Ok(())
     }
 }
 
@@ -149,13 +190,17 @@ pub fn compute_kelly_qty(
         return 0.0;
     }
 
-    // Fractional Kelly based on sample size (conservative)
-    let fraction = if stats.total_trades < 50 {
-        kelly_full / 8.0 // 1/8 Kelly
-    } else if stats.total_trades < 200 {
-        kelly_full / 6.0 // 1/6 Kelly
+    // Fractional Kelly based on sample size (conservative).
+    // G7-01 (2026-04-24): boundaries now read from `config.young_threshold` /
+    // `config.mature_threshold` (TOML-configurable via `RiskConfig.kelly`);
+    // defaults 50/200 preserve pre-G7-01 behavior.
+    // G7-01：分級邊界改讀 config，預設 50/200 保留原行為。
+    let fraction = if stats.total_trades < config.young_threshold {
+        kelly_full / 8.0 // 1/8 Kelly (young)
+    } else if stats.total_trades < config.mature_threshold {
+        kelly_full / 6.0 // 1/6 Kelly (mature)
     } else {
-        kelly_full / 4.0 // 1/4 Kelly
+        kelly_full / 4.0 // 1/4 Kelly (established)
     };
 
     // Cap at configured max fraction
@@ -277,5 +322,94 @@ mod tests {
         let stats = make_stats(100, 50, 100.0, 80.0);
         let qty = compute_kelly_qty(&cfg, &stats, 10000.0, 50000.0, 0.02, 0.5);
         assert_eq!(qty, 0.5, "disabled = passthrough max_qty");
+    }
+
+    // ----- G7-01 (2026-04-24): tier boundary configurability tests -----
+
+    #[test]
+    fn test_g7_01_default_tier_thresholds() {
+        // Defaults must preserve pre-G7-01 hardcoded values 50/200.
+        // 預設值必須保留 G7-01 前的硬編碼 50/200。
+        let cfg = KellyConfig::default();
+        assert_eq!(cfg.young_threshold, 50, "default young_threshold = 50");
+        assert_eq!(cfg.mature_threshold, 200, "default mature_threshold = 200");
+        assert!(cfg.validate().is_ok(), "default must validate");
+    }
+
+    #[test]
+    fn test_g7_01_validate_rejects_inverted_thresholds() {
+        // young >= mature is invalid (would skip the 1/6 Kelly tier).
+        // young >= mature 無效（會跳過 1/6 Kelly 分層）。
+        let cfg_eq = KellyConfig {
+            young_threshold: 100,
+            mature_threshold: 100,
+            ..Default::default()
+        };
+        assert!(
+            cfg_eq.validate().is_err(),
+            "young == mature must be rejected"
+        );
+
+        let cfg_gt = KellyConfig {
+            young_threshold: 250,
+            mature_threshold: 100,
+            ..Default::default()
+        };
+        assert!(
+            cfg_gt.validate().is_err(),
+            "young > mature must be rejected"
+        );
+    }
+
+    #[test]
+    fn test_g7_01_validate_rejects_zero_thresholds() {
+        // 0 is invalid for either threshold.
+        // 任一門檻為 0 皆無效。
+        let cfg_young_zero = KellyConfig {
+            young_threshold: 0,
+            mature_threshold: 200,
+            ..Default::default()
+        };
+        assert!(
+            cfg_young_zero.validate().is_err(),
+            "young_threshold = 0 must be rejected"
+        );
+
+        let cfg_mature_zero = KellyConfig {
+            young_threshold: 50,
+            mature_threshold: 0,
+            ..Default::default()
+        };
+        assert!(
+            cfg_mature_zero.validate().is_err(),
+            "mature_threshold = 0 must be rejected"
+        );
+    }
+
+    #[test]
+    fn test_g7_01_custom_thresholds_change_tier_selection() {
+        // With custom thresholds 30/100, a 50-trade sample should land in the
+        // mature tier (1/6 Kelly) instead of the default young tier (1/8).
+        // 自訂門檻 30/100 下，50 筆樣本應落在 mature tier (1/6)，預設則是 young (1/8)。
+        let cfg_default = KellyConfig::default();
+        let cfg_custom = KellyConfig {
+            young_threshold: 30,
+            mature_threshold: 100,
+            ..Default::default()
+        };
+        let stats = make_stats(30, 20, 100.0, 80.0); // 50 trades total
+
+        let qty_default = compute_kelly_qty(&cfg_default, &stats, 10000.0, 50000.0, 0.02, 1.0);
+        let qty_custom = compute_kelly_qty(&cfg_custom, &stats, 10000.0, 50000.0, 0.02, 1.0);
+
+        // Custom (1/6) > default (1/8) for the same Kelly-full.
+        // 同 Kelly-full 下，1/6 > 1/8。
+        assert!(
+            qty_custom > qty_default,
+            "custom mature tier (1/6) must size larger than default young tier (1/8): \
+             custom={} default={}",
+            qty_custom,
+            qty_default
+        );
     }
 }

@@ -112,6 +112,14 @@ pub struct RiskConfig {
     /// DYNAMIC-RISK-1：Sharpe 動態 `per_trade_risk_pct` 調整器，可熱重載，預設停用。
     #[serde(default)]
     pub dynamic_sizing: crate::dynamic_risk_sizer::DynamicRiskSizerConfig,
+    /// G7-01 (2026-04-24): Kelly fractional-tier sample-size boundaries.
+    /// Operator-tunable knob for `ml::kelly_sizer::compute_kelly_qty`'s
+    /// young/mature/established tier classification (defaults 50/200 mirror
+    /// the pre-G7-01 hardcoded constants).
+    /// G7-01：Kelly 分層樣本量邊界（young/mature/established）。
+    /// `ml::kelly_sizer::compute_kelly_qty` 的可調 knob，預設 50/200 保留原行為。
+    #[serde(default)]
+    pub kelly: KellyTierConfig,
 }
 
 impl RiskConfig {
@@ -132,6 +140,7 @@ impl RiskConfig {
         self.runtime.validate()?;
         self.exit.validate().map_err(|e| format!("risk.exit: {}", e))?;
         self.dynamic_sizing.validate()?;
+        self.kelly.validate()?;
 
         // Cross-sub-struct invariant: partial_tp levels must not exceed take_profit_max_pct.
         // 跨 sub-struct 不變量：partial_tp 各層不得超過 take_profit_max_pct。
@@ -587,6 +596,72 @@ impl AgentParams {
             if tp <= 0.0 {
                 return Err("risk.agent.take_profit_pct must be > 0 when set".into());
             }
+        }
+        Ok(())
+    }
+}
+
+// ---------------------------------------------------------------------------
+// KellyTierConfig — Kelly fractional-tier sample-size boundaries (G7-01)
+// Kelly 分層樣本量邊界 (G7-01)
+// ---------------------------------------------------------------------------
+
+/// G7-01 (2026-04-24): Operator-tunable Kelly tier boundaries.
+///
+/// Drives `ml::kelly_sizer::compute_kelly_qty`'s sample-size tier classification:
+/// - trades `< young_threshold`: 1/8 Kelly (young, most conservative)
+/// - trades in `[young_threshold, mature_threshold)`: 1/6 Kelly (mature)
+/// - trades `>= mature_threshold`: 1/4 Kelly (established, never full Kelly)
+///
+/// Defaults `50` / `200` preserve the pre-G7-01 hardcoded constants;
+/// `young_threshold < mature_threshold` and both `> 0` enforced by `validate()`.
+///
+/// G7-01：Operator 可調的 Kelly 分層邊界。驅動 `compute_kelly_qty` 的樣本量分級。
+/// 預設 50/200 保留原硬編碼常量；`validate()` 強制 young < mature 且兩者 > 0。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct KellyTierConfig {
+    /// Boundary trades-count for young → mature tier (default 50).
+    /// Young → mature 分層門檻（預設 50）。
+    #[serde(default = "default_kelly_young_threshold")]
+    pub young_threshold: u32,
+    /// Boundary trades-count for mature → established tier (default 200).
+    /// Mature → established 分層門檻（預設 200）。
+    #[serde(default = "default_kelly_mature_threshold")]
+    pub mature_threshold: u32,
+}
+
+fn default_kelly_young_threshold() -> u32 {
+    50
+}
+
+fn default_kelly_mature_threshold() -> u32 {
+    200
+}
+
+impl Default for KellyTierConfig {
+    fn default() -> Self {
+        Self {
+            young_threshold: default_kelly_young_threshold(),
+            mature_threshold: default_kelly_mature_threshold(),
+        }
+    }
+}
+
+impl KellyTierConfig {
+    /// G7-01: Validate `young < mature` and both `> 0`.
+    /// G7-01：驗證 young < mature 且兩者 > 0。
+    pub fn validate(&self) -> Result<(), String> {
+        if self.young_threshold == 0 {
+            return Err("risk.kelly.young_threshold must be > 0".into());
+        }
+        if self.mature_threshold == 0 {
+            return Err("risk.kelly.mature_threshold must be > 0".into());
+        }
+        if self.young_threshold >= self.mature_threshold {
+            return Err(format!(
+                "risk.kelly.young_threshold ({}) must be < risk.kelly.mature_threshold ({})",
+                self.young_threshold, self.mature_threshold
+            ));
         }
         Ok(())
     }

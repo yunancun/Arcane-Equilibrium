@@ -159,4 +159,13 @@ window_size = 500
 [exit]
 shadow_enabled = false
 
+# G7-01 (2026-04-24) — Kelly fractional-tier sample-size boundaries.
+# Live defaults match demo (50 / 200). Tighten on live (e.g. 100 / 400) only
+# after demo statistics support a higher sample-size requirement.
+# G7-01：Kelly 分層樣本量邊界。Live 預設與 demo 對齊（50/200）；
+# 待 demo 統計支持更高樣本量門檻時可在 live 收緊（如 100/400）。
+[kelly]
+young_threshold = 50
+mature_threshold = 200
+
 [experimental.flags]
