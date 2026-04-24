@@ -301,13 +301,27 @@ def aggregate_combo(
     n = len(entries)
     stats: dict[str, float] = {"n_signals": float(n)}
     if n == 0:
+        # Empty-combo path — populate the SAME keys as the populated path so
+        # pd.DataFrame construction from list-of-dicts yields a consistent
+        # schema across all combos. Missing a key in the empty branch causes
+        # `print_top`'s column subscript to explode with an Index([-1]*len)
+        # error (pandas silently treats the missing column as a positional
+        # -1 index). Keep in lockstep with the populated `for h in ...` loop
+        # and the Donchian breach block below.
+        # 空組合也要填齊 key：list-of-dicts → DataFrame 才會 schema 一致。
+        # 缺 key 會觸發「Index([-1]*n)」pandas 降級定位錯誤。
         for h in horizons_bars:
             stats[f"fwd{h}_mean"] = float("nan")
             stats[f"fwd{h}_med"] = float("nan")
             stats[f"fwd{h}_winr"] = float("nan")
             stats[f"fwd{h}_sharpe"] = float("nan")
+            stats[f"fwd{h}_se"] = float("nan")
+            stats[f"fwd{h}_tstat"] = float("nan")
         stats["donchian_breach_frac"] = float("nan")
+        stats["breach_n"] = 0.0
+        stats["miss_n"] = 0.0
         stats["breach_fwd_mean_diff"] = float("nan")
+        stats["breach_diff_tstat"] = float("nan")
         return stats
 
     for h in horizons_bars:
