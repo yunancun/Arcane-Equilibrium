@@ -1,13 +1,13 @@
 # OpenClaw TODO — 工作清單（v3 · 單一時間軸版）
 
-**最後更新**：2026-04-25 01:30 CEST（**🔴P0 RCA 雙修完成**：G6-FUP-TICK-PIPELINE-DEAD-1 + G6-FUP-NEWS-HALT-DEDUP-1 deploy → engine 復活，snapshot 17s 新鮮，5 策略 5 符號 ready）
+**最後更新**：2026-04-25 01:55 CEST（Wave 2 batch 5：G3-02 Phase A 完成（part 1+2）+ G5-02 完成 + G7-02/G5-04 sub-agent 進行中；Linux test baseline 2018/0）
 **版本**：v3（Wave 線性版；廢除雙軌 P0-P4 章節，P0/P1/P2 降為每項 tag）
 **舊版歸檔**：v2 `docs/archive/2026-04-24--todo_v2_dual_axis_snapshot.md`（458 行，Wave+P 雙軌）· v1 `docs/archive/2026-04-24--todo_v1_refactor_snapshot.md`（328 行）· v0 `docs/archive/2026-04-24--todo_snapshot_pre_refactor.md`（700 行）
 **簽核**：PM Approved FIX-PLAN v2 → [Sign-off](docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-24--FixPlan_v2_PMApproval.md)
 **基礎方案**：[FIX-PLAN v2](docs/CCAgentWorkSpace/PA/workspace/reports/2026-04-24--4.24TodoAudit_FixPlan_v2.md) · [10-Agent audit 索引](docs/audits/2026-04-24--todo_refactor_audit.md)
 
 **Engine**（採集 2026-04-25 01:30 CEST · 雙 P0 RCA fix 部署後 · ssh verify）：engine 復活 ✅ · `engine_alive: true` · snapshot_age **17.2s**（< 45s 閾值）· paper alive 18.3s / demo alive 17.2s · binary 2026-04-25 01:29 CEST 含 G7-09 + G6-FUP fixes · HEAD `b980986` · `pipeline ready — 5 strategies (ma_crossover, bb_reversion, bb_breakout, grid_trading + 1) on 5 symbols (BTCUSDT/ETHUSDT/SOLUSDT/XRPUSDT/DOGEUSDT) balance 951.94` · `fan-out: all pipelines ready, starting tick distribution` · `STRATEGIST-PARAMS-PERSIST-1 restored N=1 tuned params from DB` ✅（背景任務無阻主線） · G7-09 fill fee path 自此 tick 起活著，post-fix maker 2bps 列開始累積
-**測試基準（2026-04-25）**：engine lib **2003 / 0 fail**（1995 + G7-01 8 new tests - test bug fixed by e4b63b4）· pytest 2996
+**測試基準（2026-04-25）**：engine lib **2018 / 0 fail**（2003 + G6-FUP 6 + G3-02 A1 5 + G3-02 A2 4）· pytest 2996
 **21d demo 時鐘**：起算 2026-04-16 22:16 → 解鎖 2026-05-07
 
 ---
@@ -16,7 +16,7 @@
 
 **Wave 1 進度**：10/11 完成；剩 G1-04 P1 背景（依賴 PostOnly demo 累積 + **G7-09 已 deploy** 需 ~1w 後 compute）。
 
-**Wave 2 進度**：5/若干 完成（G5-05 ✅ + G5-07 ✅ + G3-01 RFC ✅ + G7-01 ✅ + G7-09 ✅）；G7-05 blocked on data（~05-01+）；G6-FUP-NEWS-HALT-DEDUP-1 🔴P0 阻塞 G1-04 / G7-09 實效驗證；G3-02/03/04 / G4-01~03 / G5-02/03/04/06 / G7-02/03/04/06/07/08 未開工。
+**Wave 2 進度**：8/若干 完成（G3-02 ✅ + G5-02 ✅ + G5-05 ✅ + G5-07 ✅ + G3-01 RFC ✅ + G7-01 ✅ + G7-09 ✅ + 雙 P0 RCA ✅）；G7-02 / G5-04 sub-agent 跑中；G7-05 blocked on data（~05-01+）；G3-03/04 / G4-01~03 / G5-03/06 / G7-03/04/06/07/08 未開工。
 
 **本週 Top 4**（按順序）：
 
@@ -201,6 +201,7 @@ ssh trade-core "cd ~/BybitOpenClaw/srv && python3 helper_scripts/db/passive_wait
 | ID | Tag | 項目 | 前置 | 負責修/驗 | 工時 | 完成標準 |
 |---|---|---|---|---|---|---|
 | **G3-01** | ✅完成 | ExecutorAgent ConfigStore + IPC RFC 設計 — PA sub-agent 755 行 RFC：11 必備節 + §12 impl order；鎖定決策：shadow_mode 住 Rust `RiskConfig.executor.shadow_mode`（新 sub-struct 不動 Python `ExecutorConfig`）· `patch_executor_config` 鏡射 `patch_risk_config` 重用 generic · `executor_config_cache.py` 100ms polling fail-closed to `shadow=true` · 3 階段 migration（Rust foundation → Python read path → operator 驅動 demo flip）· 防禦深度（Rust intent_processor 亦檢 shadow_mode on SubmitOrder）· Auth matrix（retreat cheap = Operator only, live flip = 5-gate chain）· 開放問題: per-symbol override / gradual ramp / `max_slippage_bps` 位置 / partial-map delete / GUI surface / `live_reserved` coupling / Phase 6 Reconciler interaction | G1-02 | PA / E2 | 完成 2026-04-24 | [RFC](docs/CCAgentWorkSpace/PA/workspace/reports/2026-04-24--g3_01_executor_agent_ipc_rfc.md)（commit `4d24f48`）|
+| **G3-02 Phase A** | ✅完成（Part 1 + Part 2）| ExecutorConfig schema + IPC e2e — **Part 1** (`16c97c1`)：`RiskConfig.executor` sub-struct（shadow_mode/max_position_pct/per_symbol_position_cap）+ `validate()`（fraction range + non-empty key）+ 3-env TOML `[executor]` 區段（demo/live/paper 預設 shadow_mode=true / max=0.05 / cap={}）+ 5 unit tests（default / out-of-range / per-symbol bad / TOML round-trip / partial fallback）· **Part 2** (`03acedb`)：4 IPC e2e tests 證明 `patch_risk_config` deep-merge 已涵蓋 executor 子欄位（shadow_mode flip / max_position_pct partial patch / out-of-range rollback / per-engine demo routing）；**設計：不另開 `patch_executor_config` 方法**（auth gate 在 actor 層加，與 IPC entry 無關，Phase C 統一處理）· Linux release 2018/0 · `--rebuild` 部署 verify pipeline live ✅ | G3-01 RFC | E1+PA / E2+E4 | 完成 2026-04-25 | Schema/TOML/IPC e2e ✅ · Phase B (Python read path via cache) + Phase C (operator IPC flip behind auth) 待續 |
 | **G3-02** | 🔴P0 | ExecutorAgent shadow→live toggle 實裝（IPC `patch_executor_config`） | G3-01 | E1+PA / E2+E4 | 2-3d | e2e test shadow→live + Rust receive |
 | **G3-03** | 🔴P0 | Rust `intent_processor` IPC handler（接 Python SubmitOrder） | G3-02 | E1 / E2+E4 | 2d | Rust can receive Python intent IPC |
 | **G3-04** | 🟠P1 | ExecutorAgent shadow→live e2e 整合測試 | G3-03 | E4 / QA | 2d | QA 端到端驗證 pass |
@@ -227,7 +228,7 @@ ssh trade-core "cd ~/BybitOpenClaw/srv && python3 helper_scripts/db/passive_wait
 | ID | Tag | 項目 | 前置 | 負責修/驗 | 工時 | 完成標準 |
 |---|---|---|---|---|---|---|
 | **G5-01** | 🟠P1 | `main.rs` 2062 行拆分 | 無 | E5+E1 / E2 | 2-3d | <1200 lines |
-| **G5-02** | 🟠P1 | `live_session_routes.py` 1449 行拆 | 無 | E5+E1 / E2 | 1-2d | <1200 lines |
+| **G5-02** | ✅完成 | `live_session_routes.py` 1449 → 706+436+439（live_session_routes 706 / live_session_endpoints 436 / live_session_account_routes 439，全 <800）+ `live_session_governance` 178；sibling 走 `from . import live_session_routes as core` 經 namespace 引用，保留所有外部 import + monkeypatch；14 routes byte-identical；test_live_gate_fallback 14/14 + pytest -k live 117/0 + pytest -k live_trust|live_session|live_gate 77/0 全綠 | 無 | E5+E1 / E2 | 完成 2026-04-25 | [G5-02 report](.claude_reports/20260425_014424_g5_02_live_session_split.md)（commit `e0d02b2`）|
 | **G5-03** | 🟠P1 | `instrument_info.rs` 1975 行拆 | 無 | E5+E1 / E2 | 1-2d | <1200 lines |
 | **G5-04** | 🟡P2 | `ai_service.py` 1258 行拆 | 無 | E5+E1 / E2 | 1d | <1200 lines |
 | **G5-05** | ✅完成 | `bb_reversion.rs` 1143 → 3 sibling：mod.rs 433 + params.rs 287 + tests.rs 460（全 <800 §九 warning 線）；`positions`/`cooldown`/`persistence` 由 private → `pub(crate)` 讓 sibling tests.rs mutate；`BbReversionParams` 由 `pub use params::BbReversionParams` 保留外部 path；bb_reversion filter 20/20 + stress_integration 35/35 全綠；Linux release 2003/0 | 無 | E5 | 完成 2026-04-25 | [G5-05 report](.claude_reports/20260425_000438_g5_05_bb_reversion_split.md)（commit `8523946`）|
