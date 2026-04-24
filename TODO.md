@@ -388,14 +388,17 @@ git status && git log --oneline -5
 - **bb_breakout 根因**：`bb_breakout.rs:457-518` 入場 5 重 AND（squeeze → expansion → volume → Donchian → persistence）+ 時序要求過嚴；14d demo 0 fills。
 - **bb_reversion 根因**：BB squeeze + mean-reversion 兩個 AND 條件下 demo 14d **僅 8 signal → 12 intents → 5 fills（阻擋率 37.5% 來自 liquidity / timing，非 Guardian）**；signal 產量本身太低使樣本不足以做統計學習（P1-13 SAMPLE-FLOOR-GAP-1 的 bb_reversion 1 RT 數據反映此結構）。
 - **下一步**：
-  - (1) 🟡 **Phase 1 完成 2026-04-24 commit `148bd96`**：`helper_scripts/research/bb_breakout_threshold_sweep.py` — 信號級閾值 sensitivity sweep（5 symbols × 14d × 64 combos pooled）。**3 重大發現**（詳 `.claude_reports/20260424_015831_p1_11_threshold_sweep_findings.md`）：
-    - **F1（dormancy 真正根因）**：production `squeeze_bw=0.03` 是 1m BB bandwidth 的 **10× 過大**（BTC 99 分位僅 0.014）→ 不是 5-AND chain 過嚴，是**單一尺度錯位**。任何 1m 市場結構下 0.03/0.04 都不可能觸發完整 squeeze→expansion。production default 可能是為更高 TF（15m/1h）或更高波動 regime 調校。
-    - **F2（信號 vs edge 反直覺）**：top-sharpe combo `squeeze=0.002 / expansion=0.011 / vol=2.0` n=23 fwd30=+0.088%；top-count combo `squeeze=0.003 / expansion=0.005 / vol=1.0` n=255 fwd30=**−0.016%**。信號多 ≠ edge 好。
-    - **F3（Donchian Score 方向可能倒置）**：60 combo 全 `breach_fwd_mean_diff ∈ [-0.004, -0.001]` — Donchian breach 確認反而關聯更差 fwd30。`DonchianMode::Score +bonus on breach` 可能需反向；樣本太小（14d/5 sym）**不足以反轉** production code。
-  - (1) ⬜ **Phase 2 backlog**：(a) sweep 擴 20+ symbols × 30-60 days (b) 加 fee model (round-trip 11 bps taker) 重排 top-N (c) 加 persistence + cooldown 模擬 (d) F3 驗證 — ADX regime 拆分 breach diff，判斷是否需改 Score 方向 (e) rescale Conservative/Aggressive profile 值為 1m-realistic（Balanced==Default 保持 bit-identical）
-  - (2) ✅ **2026-04-24 commit `0528d96`+`38a14ca`** Donchian AND→Score/Off 三模式 — `DonchianMode::{Hard, Score, Off}` enum；Hard 預設 bit-identical 基線；Score breach=+donchian_score_bonus（默認 0.15）/ miss=扣同量，由下游合流閘仲裁；Off 跳過 Donchian 完全；熱重載 + validate [0.0, 0.5] + 14 新 tests。
-  - (3) ✅ **2026-04-24 commit `0528d96`+`38a14ca`** aggressive/conservative 分拆 A/B — `BbBreakoutProfile::{Conservative, Balanced, Aggressive}` enum + `BbBreakoutParams::for_profile(profile)` helper；`Balanced == default()` 測試固化；**但** 3 profile 種子值在 1m bandwidth 分佈下全為不可觸發範圍（F1）— Phase 2 (e) 需 rescale。
-- **狀態**：(1) Phase 1 🟡 Python sensitivity 完成 / (1) Phase 2 ⬜ backlog / (2)(3) ✅ code 完成。**Operator 可立即用 IPC 熱重載** Phase 1 top combo `{squeeze:0.002, expansion:0.011, vol:1.2, donchian_mode:'off', confluence_as_gate:false}` demo observe ≥1w 校準 sweep 預測（F3 選 `off` 對應 Donchian breach 反向發現；無需 rebuild）。
+  - (1) 🟡 **Phase 1 完成 2026-04-24 + self-audit 修正** — sweep `helper_scripts/research/bb_breakout_threshold_sweep.py`（5 symbols × 14d × 64 combos pooled）：
+    - **Self-audit 修 3 bug**（commits `def9018` / `c370ffa` / `d9e86c7` / `b689eab`）：B1 F1 wording 反了 · B2 F2 top edge 未測統計顯著 · B3 Python FIX-26 parity 錯（每 bar 覆寫 timer）。詳 `.claude_reports/20260424_022414_p1_11_findings_verified_after_selfaudit.md`。
+    - **驗證中發現 F4 真 Rust bug** — **FIX-26-DEADLOCK-1**：`squeeze_detected_ms` 過期後無清除路徑；首次 squeeze 窗口無入場 → symbol **永久 dormant**。是 bb_breakout 14d 0 fills **第一層真正根因**。修：Rust commit `bcc5401` 加 expiry auto-clear + 3 regression tests；engine lib 1956 → **1976 passed / 0 failed**。**下次 `restart_all.sh --rebuild` 生效後** 預期 bb_breakout 脫離 permanent-dormant。
+    - **驗證後 findings**：
+      - **F1（CONFIRMED 措辭修）**：1m BB bandwidth q=0.99 僅 0.014，production `expansion_bw=0.04` 從不達成（不是 squeeze_bw 問題，bandwidth 100% 低於 0.03 反而使 squeeze 永遠觸發；卡在 expansion）
+      - **F2（signals≠edge 方向成立但未達 95%）**：top sharpe combo n=20 fwd30=+0.150% tstat=1.35 → 未達 95%；top count n=211 fwd30=-0.022% tstat=-0.57。信號多≠edge 好但需更大樣本才能 confirm top-edge。
+      - **F3（CONFIRMED + 達 95-99% 顯著）**：post-fix sweep `breach_diff_tstat` 在 top sharpe 三個 combo 達 **-3.10 到 -3.20**（>99%）；`0.0025/0.011/1.2` 達 **-2.21**（>97%）。**`DonchianMode::Score +bonus on breach` 方向確定錯**，正解是 Off 或反轉 bonus 符號。
+  - (1) ⬜ **Phase 2 backlog**：(a) 擴 20+ symbols × 30-60 days 追 95% top-edge 顯著 (b) 加 fee model (round-trip 11 bps taker) (c) persistence + cooldown 模擬 (d) F3 深驗 — ADX regime 拆分，決定改 Score 方向或推 Off default (e) rescale Conservative/Aggressive profile 值為 1m-realistic
+  - (2) ✅ **2026-04-24 commit `0528d96`+`38a14ca`** Donchian AND→Score/Off — `DonchianMode::{Hard, Score, Off}` enum；Hard 預設 bit-identical 基線；熱重載 + validate + 14 tests。**F3 證偽 Score +bonus 方向；Phase 2 驗證後建議改 Off 為 production default 或反轉 bonus 符號。**
+  - (3) ✅ **2026-04-24 commit `0528d96`+`38a14ca`** aggressive/conservative A/B — `BbBreakoutProfile::{Conservative, Balanced, Aggressive}` enum + `for_profile()` helper；`Balanced == default()` 測試固化；**3 profile 種子值在 1m 下皆不可觸發（F1）— Phase 2 (e) 需 rescale。**
+- **狀態**：(1) Phase 1 🟡 完成含 self-audit 修 3 bug + 發現並修 F4 Rust deadlock / (1) Phase 2 ⬜ backlog / (2)(3) ✅ code 完成但 F3 暗示 Score 方向錯。**下次 `--rebuild` 部署 FIX-26-DEADLOCK-1**，預期 bb_breakout 脫離 permanent-dormant；operator observe 1w 看實際 fill 數。若要同時軟化 Donchian，**建議 `DonchianMode::Off`** 而非 Score（F3 證偽 Score +bonus 方向）。
 - **Followup**：bb_reversion 尚未拆 sibling（`bb_reversion.rs` 單檔 1143 行）+ 未加 profile — (2)+(3) 類似改造可在 `bb_reversion` 落地但目前 scope 只做 bb_breakout，另列獨立條目或併入 E5-P2-4c 邊緣拆分。
 - **優先級**：P1 低 — 不緊急但影響 Phase 5 策略多樣性與 ML 樣本池。
 
