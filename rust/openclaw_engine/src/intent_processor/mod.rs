@@ -1082,10 +1082,24 @@ impl IntentProcessor {
     /// means the order will only rest on book (maker); anything else pays taker.
     /// EDGE-P2-3 Phase 1a：依 TIF 選擇 maker/taker 費率。PostOnly→maker，其餘→taker。
     pub fn fee_rate_for_intent(&self, symbol: &str, intent: &OrderIntent) -> f64 {
-        if matches!(
-            intent.time_in_force,
-            Some(crate::order_manager::TimeInForce::PostOnly)
-        ) {
+        self.fee_rate_for_tif(symbol, intent.time_in_force)
+    }
+
+    /// Pick maker vs taker fee from a raw TimeInForce. Used on the fill path
+    /// (`event_consumer/loop_handlers.rs`) where only `&PendingOrder` is
+    /// available, not `&OrderIntent`. `None` falls back to taker: a Bybit Fill
+    /// event can arrive before OrderUpdate has populated `order_id_to_link`,
+    /// so matched_key lookup may fail and TIF is unknown — degrading to
+    /// current pre-fix behaviour is safe (accounts fee at taker rate, which
+    /// is the more conservative estimate for PnL).
+    /// FIX-FEE-POSTONLY-1 (G7-09)：從原始 TIF 選費率；fill 路徑 race
+    /// (Fill 先於 OrderUpdate) → TIF=None → taker 保本。
+    pub fn fee_rate_for_tif(
+        &self,
+        symbol: &str,
+        tif: Option<crate::order_manager::TimeInForce>,
+    ) -> f64 {
+        if matches!(tif, Some(crate::order_manager::TimeInForce::PostOnly)) {
             self.maker_fee_rate(symbol)
         } else {
             self.fee_rate(symbol)

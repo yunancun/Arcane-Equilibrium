@@ -1678,6 +1678,45 @@ mod predictor_wiring_tests {
         let rate = proc.fee_rate_for_intent(&intent.symbol, &intent);
         assert!((rate - 0.00055).abs() < 1e-12);
     }
+
+    // ── FIX-FEE-POSTONLY-1 (G7-09): fee_rate_for_tif fill-path helper ──
+    // ── FIX-FEE-POSTONLY-1：fee_rate_for_tif fill 路徑 TIF-aware 費率 ──
+
+    /// TIF=PostOnly on fill path → maker rate. Mirrors fee_rate_for_intent but
+    /// accepts raw Option<TimeInForce> so event_consumer can call it with a
+    /// PendingOrder TIF lookup (no OrderIntent available on the exec event).
+    /// TIF=PostOnly → maker；對應 loop_handlers hoisted matched_tif 路徑。
+    #[test]
+    fn test_fee_rate_for_tif_postonly_returns_maker() {
+        use crate::order_manager::TimeInForce;
+        let proc = IntentProcessor::new();
+        let rate = proc.fee_rate_for_tif("BTCUSDT", Some(TimeInForce::PostOnly));
+        assert!((rate - 0.0002).abs() < 1e-12);
+        assert!(rate < proc.fee_rate("BTCUSDT"));
+    }
+
+    /// TIF=GTC on fill path → taker (same as fee_rate_for_intent for GTC).
+    /// TIF=GTC → taker。
+    #[test]
+    fn test_fee_rate_for_tif_gtc_stays_taker() {
+        use crate::order_manager::TimeInForce;
+        let proc = IntentProcessor::new();
+        let rate = proc.fee_rate_for_tif("BTCUSDT", Some(TimeInForce::GTC));
+        assert!((rate - 0.00055).abs() < 1e-12);
+    }
+
+    /// Race-safety: Bybit Fill event can arrive before OrderUpdate fills
+    /// `order_id_to_link`, in which case matched_key lookup fails and TIF is
+    /// unknown. Degrade to taker (= pre-G7-09 behaviour) so we never
+    /// under-estimate fees when order type is uncertain.
+    /// Race 安全：Fill 先於 OrderUpdate → matched_tif=None → fallback taker。
+    #[test]
+    fn test_fee_rate_for_tif_none_falls_back_to_taker() {
+        let proc = IntentProcessor::new();
+        let rate = proc.fee_rate_for_tif("BTCUSDT", None);
+        assert!((rate - 0.00055).abs() < 1e-12);
+        assert_eq!(rate, proc.fee_rate("BTCUSDT"));
+    }
 }
 
 // ════════════════════════════════════════════════════════════════════════════

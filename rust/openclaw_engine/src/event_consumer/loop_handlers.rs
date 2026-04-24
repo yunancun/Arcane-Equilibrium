@@ -395,17 +395,59 @@ pub(super) fn handle_exchange_event(
             let exec_price: f64 = exec.exec_price.parse().unwrap_or(0.0);
             let exec_ts: u64 = exec.exec_time.parse().unwrap_or(0);
 
+            // P0-1 fix: Match fill via order_id → order_link_id mapping.
+            // OrderUpdate populates the mapping, Fill uses it.
+            // FIX-FEE-POSTONLY-1 (G7-09): hoisted above fee compute so the
+            // matched PendingOrder's TimeInForce can drive maker/taker fee
+            // selection. Race: Fill may arrive before OrderUpdate has filled
+            // `order_id_to_link`; symbol+side fallback still resolves most
+            // cases, and unresolved (TIF=None) degrades to taker (safe).
+            // FIX-FEE-POSTONLY-1：hoist matched_key 至 fee 計算前，以便
+            // 依 PendingOrder.time_in_force 分流 maker/taker 費率。
+            let matched_key = state
+                .order_id_to_link
+                .get(&exec.order_id)
+                .cloned()
+                .or_else(|| {
+                    // Fallback: symbol+side match if no order_id mapping yet
+                    let is_buy = exec.side == "Buy";
+                    state
+                        .pending_orders
+                        .iter()
+                        .find(|(_, po)| {
+                            po.symbol == exec.symbol
+                                && po.is_long == is_buy
+                                && po.cum_filled_qty < po.qty
+                        })
+                        .map(|(k, _)| k.clone())
+                });
+
+            // FIX-FEE-POSTONLY-1 (G7-09): look up the matched PendingOrder's
+            // TIF so the fee fallback picks maker rate for PostOnly entries.
+            // `None` if (a) matched_key unresolved (race) or (b) PendingOrder
+            // had TIF=None — both fall through to taker in fee_rate_for_tif.
+            let matched_tif = matched_key
+                .as_ref()
+                .and_then(|k| state.pending_orders.get(k))
+                .and_then(|po| po.time_in_force);
+
             // FIX-19: execution.fast topic omits execFee/feeRate fields.
             // When the field is empty or unparseable, estimate fee from
             // notional × per-symbol fee rate so PnL accounting stays correct.
             // FIX-19b: Use pipeline.intent_processor.fee_rate(symbol) for
             // per-symbol resolution (AccountManager → legacy → constant).
+            // FIX-FEE-POSTONLY-1 (G7-09): switched to fee_rate_for_tif so
+            // PostOnly pending orders get maker rate (~2.75× cheaper) instead
+            // of always-taker. Historical pre-fix fills are locked at taker;
+            // future baseline analysis must split pre/post window on commit ts.
             // FIX-19：execution.fast 不帶 execFee，空值時用名義值×手續費率估算。
-            // FIX-19b：改用 per-symbol 費率（AccountManager → 單一費率 → 常量）。
+            // FIX-FEE-POSTONLY-1：改經 TIF-aware helper，PostOnly 走 maker。
             let exec_fee: f64 = {
                 let parsed = exec.exec_fee.parse::<f64>().unwrap_or(0.0);
                 if parsed == 0.0 && exec_qty > 0.0 && exec_price > 0.0 {
-                    let fee_rate = pipeline.intent_processor.fee_rate(&exec.symbol);
+                    let fee_rate = pipeline
+                        .intent_processor
+                        .fee_rate_for_tif(&exec.symbol, matched_tif);
                     let estimated = exec_qty * exec_price * fee_rate;
                     if estimated > 0.0 {
                         tracing::debug!(
@@ -413,9 +455,10 @@ pub(super) fn handle_exchange_event(
                             symbol = %exec.symbol,
                             notional = exec_qty * exec_price,
                             fee_rate,
+                            tif_known = matched_tif.is_some(),
                             estimated_fee = estimated,
-                            "FIX-19b: execFee missing, estimated from per-symbol rate \
-                             / execFee 缺失，使用 per-symbol 費率估算"
+                            "FIX-19b: execFee missing, estimated from TIF-aware rate \
+                             / execFee 缺失，使用 TIF-aware 費率估算"
                         );
                     }
                     estimated
@@ -434,26 +477,6 @@ pub(super) fn handle_exchange_event(
                 fee = exec_fee,
                 "exchange fill received / 收到交易所成交"
             );
-
-            // P0-1 fix: Match fill via order_id → order_link_id mapping
-            // OrderUpdate populates the mapping, Fill uses it
-            let matched_key = state
-                .order_id_to_link
-                .get(&exec.order_id)
-                .cloned()
-                .or_else(|| {
-                    // Fallback: symbol+side match if no order_id mapping yet
-                    let is_buy = exec.side == "Buy";
-                    state
-                        .pending_orders
-                        .iter()
-                        .find(|(_, po)| {
-                            po.symbol == exec.symbol
-                                && po.is_long == is_buy
-                                && po.cum_filled_qty < po.qty
-                        })
-                        .map(|(k, _)| k.clone())
-                });
 
             if let Some(key) = matched_key {
                 if let Some(po) = state.pending_orders.get_mut(&key) {
