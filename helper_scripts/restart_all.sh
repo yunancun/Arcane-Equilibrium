@@ -194,9 +194,22 @@ restart_engine() {
     # 載入 IPC HMAC 密鑰（Live 管線 HMAC 認證必需）
     local ipc_secret
     ipc_secret=$(cat "$SECRETS_ROOT/environment_files/ipc_secret.txt" 2>/dev/null || echo "")
+    # Phase 2 auto-migrate opt-in (V023 postmortem 2026-04-24): pass through
+    # OPENCLAW_AUTO_MIGRATE + OPENCLAW_BASE_DIR so the engine's migration
+    # runner can locate sql/migrations/ and honor the env toggle. Defaults
+    # preserve legacy behavior (flag unset → runner disabled → 0 impact).
+    # Phase 2 自動遷移 opt-in：從 env file 取 OPENCLAW_AUTO_MIGRATE 與 base dir
+    # 傳給引擎，讓 runner 能找到 sql/migrations/ 並遵守 opt-in 旗標；預設不
+    # 設則維持舊行為（runner 關閉，零影響）。
+    local auto_migrate
+    auto_migrate=$(grep '^OPENCLAW_AUTO_MIGRATE=' "$SECRETS_ROOT/environment_files/basic_system_services.env" 2>/dev/null | cut -d= -f2- || echo "")
+    local base_dir
+    base_dir="${OPENCLAW_BASE_DIR:-$(pwd)}"
     OPENCLAW_DATA_DIR="$DATA_DIR" OPENCLAW_CANARY_MODE=1 \
         OPENCLAW_DATABASE_URL="postgresql://trading_admin:${pg_pass}@127.0.0.1:${PG_PORT}/trading_ai" \
         OPENCLAW_IPC_SECRET="${ipc_secret}" \
+        OPENCLAW_AUTO_MIGRATE="${auto_migrate}" \
+        OPENCLAW_BASE_DIR="${base_dir}" \
         nohup rust/target/release/openclaw-engine > "$DATA_DIR/engine.log" 2>&1 &
     echo "    PID: $!"
 }
