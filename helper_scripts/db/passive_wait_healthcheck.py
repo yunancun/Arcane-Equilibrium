@@ -43,6 +43,13 @@ Checks（each prints PASS / FAIL / WARN with a one-line explanation）:
                                           leader-PID liveness; catches stale-lock / dead-leader
                                           drift that masks scheduler silent-death (edge_estimates
                                           freshness alone misses leader-election failures).
+  [Xb] pipeline_triangulation          — G6-01 new: cross-validates [1] close_fills / [2] labels /
+                                          [10] intents scale ratios. Individual checks pass their
+                                          local thresholds but collectively can diverge (e.g. fills
+                                          healthy + labels healthy + intents 10× over — suggests a
+                                          duplicate-intent writer bug that neither [1] nor [10]
+                                          individually catches). Covers QA §2.2 #4 blind spot
+                                          "12 檢查彼此獨立，無 fills/labels/intents 三角形驗證".
 
 Rule of thumb: close_fills_24h ≥ 10 且 labels 1:1 ratio ≥ 0.8 且 exit_features
 1:1 ratio ≥ 0.8 且 ≥1 risk-layer exit mechanism (#4/5/6) fire ≥ 1 time.
@@ -944,6 +951,175 @@ def check_leader_election_health() -> tuple[str, str]:
     return ("PASS", base_msg)
 
 
+def check_pipeline_triangulation(cur, close_fills_24h: int) -> tuple[str, str]:
+    """[Xb] G6-01 (2026-04-24): cross-pipeline triangulation between fills / labels / intents.
+
+    QA audit §2.2 #4 flagged a blind spot: the 12 existing checks are each
+    locally consistent (ratio ≥ N%, row count ≥ M, fire count ≥ K) but they
+    **do not cross-reference each other**. A subtle pipeline-level failure can
+    leave every individual check green while the aggregate telemetry is
+    incoherent. Examples this check catches that individual [1]/[2]/[10]
+    miss:
+
+      A. **Duplicate-intent writer bug**: intents_24h = 3× orders_24h because
+         an IPC retry loop double-emits the same intent. [10] rates 0.3-1.0 as
+         under-firing / normal; it does **not** alarm on 3.0. Fills + labels
+         look clean, but intent ledger is inflated — contaminates downstream
+         auditing + strategy attribution.
+
+      B. **Label-backfill lagging fill rate but above floor**: close_fills=50,
+         labels=40 (ratio 0.80 PASS by [2]), intents=15 (ratio 0.30 PASS by
+         [10]). Each looks OK; triangulation notices fills >> intents (3.3×)
+         which points at engine emitting fills from a path that skips intent
+         ledger (orphan adopter? phantom close?). This is the P0-4 / P0-5
+         phantom-close fingerprint that [10] alone cannot surface because
+         [10] compares intents to orders, not to fills.
+
+      C. **Silent scale drift**: all three counts non-zero but one drifts 2+
+         orders of magnitude vs the others over 24h. Without cross-check, a
+         "fills=5 / labels=500" scenario (label backfiller looping on stale
+         rows) passes [2] (ratio=100) without flagging the absurd mismatch.
+
+    Three-state triage:
+      - **FAIL**: any pairwise ratio outside the "plausible" band
+        `[0.1, 10.0]` when all three anchors > 0 (severe divergence; silent
+        corruption indicator).
+      - **WARN**: any pairwise ratio outside `[0.3, 3.0]` (drift indicator,
+        investigate).
+      - **PASS**: all three pairwise ratios inside `[0.3, 3.0]`, or close_fills
+        too low (< 5) to triangulate reliably (defer to [1]'s own FAIL/WARN).
+
+    Fail-soft: if any of the 3 counts cannot be queried (schema drift, aborted
+    transaction), downgrade to WARN with diag — do NOT let a healthcheck-side
+    IO glitch shadow the triangulation signal.
+
+    [Xb] G6-01（2026-04-24）：fills / labels / intents 跨管線三角驗證。
+    QA audit §2.2 #4 指 12 個 check 彼此獨立（各驗自己門檻），不做交叉比對。
+    許多管線級 bug（重複寫 intent、phantom fill、label backfill 失控循環）個別
+    check 全綠但彙總不合理；本 check 做 pairwise ratio 檢查，覆蓋 [1]/[2]/[10]
+    個別盲點。三態：全部 ratio ∈ [0.3, 3.0] = PASS；任一在 [0.1, 0.3) 或
+    (3.0, 10.0] = WARN（drift）；任一超出 [0.1, 10.0] = FAIL（severe divergence）。
+    Close_fills < 5 時樣本太小無法三角化，降級回 [1] 自身判決。
+    Fail-soft：任一查詢失敗 WARN + diag，不讓 IO glitch 遮蔽信號。
+    """
+    # Defensive rollback: keep cursor clean in case an earlier check aborted
+    # the transaction. Same pattern as check_intents_writer_ratio.
+    # 防禦式 rollback：避免前 check 異常打斷 transaction 讓後續 query 全失敗。
+    try:
+        cur.connection.rollback()
+    except Exception:
+        pass
+
+    # Small-sample short-circuit: close_fills < 5 makes every ratio noisy.
+    # Defer to [1]'s own WARN/FAIL verdict; emit PASS with an explicit note so
+    # operator sees the triangulation was intentionally skipped, not silenced.
+    # 樣本過小（close_fills < 5）比率完全不可信 — 降級 PASS + 明示被跳過，
+    # 不要變成「沉默 PASS」讓 operator 以為真的三角化過。
+    if close_fills_24h < 5:
+        return (
+            "PASS",
+            f"triangulation skipped: close_fills_24h={close_fills_24h} < 5 "
+            "(defer to [1] verdict; ratios unreliable at this sample size)",
+        )
+
+    # Query labels_24h (same filter as [2]) and intents_24h (same filter as [10]
+    # but demo-only, since close_fills baseline is demo-scoped).
+    # 查 labels_24h（同 [2]）與 intents_24h（同 [10]，demo-only 匹配 baseline）。
+    try:
+        cur.execute(
+            "SELECT COUNT(*) FROM learning.decision_features "
+            "WHERE label_filled_at > now() - interval '24 hours' "
+            "AND label_net_edge_bps IS NOT NULL "
+            "AND engine_mode = 'demo'"
+        )
+        labels_24h = int(cur.fetchone()[0] or 0)
+    except Exception as e:
+        return ("WARN", f"triangulation labels query failed: {e}")
+
+    try:
+        cur.execute(
+            "SELECT COUNT(*) FROM trading.intents "
+            "WHERE ts > now() - interval '24 hours' AND engine_mode = 'demo'"
+        )
+        intents_24h = int(cur.fetchone()[0] or 0)
+    except Exception as e:
+        return ("WARN", f"triangulation intents query failed: {e}")
+
+    # Pairwise ratio analysis. Reference anchor = close_fills_24h.
+    # fills:labels and fills:intents are most informative; labels:intents is
+    # a secondary cross-check.
+    # Pairwise 比率分析。參考錨 = close_fills_24h。
+    def _ratio(a: int, b: int) -> float:
+        """Safe ratio a/b; returns float('inf') on b=0, 0.0 on a=b=0.
+        安全比率：b=0 時 inf，a=b=0 時 0.0，讓上層判 "one-sided" 分歧。"""
+        if b == 0:
+            return float("inf") if a > 0 else 0.0
+        return a / b
+
+    r_fl = _ratio(close_fills_24h, labels_24h)     # fills / labels
+    r_fi = _ratio(close_fills_24h, intents_24h)    # fills / intents
+    r_li = _ratio(labels_24h, intents_24h)         # labels / intents
+
+    # Plausible / WARN / FAIL bands (symmetric around 1.0).
+    # 合理 / WARN / FAIL 區間（對稱於 1.0）。
+    WARN_LO, WARN_HI = 0.3, 3.0       # outside this → WARN
+    FAIL_LO, FAIL_HI = 0.1, 10.0      # outside this → FAIL
+
+    def _classify(r: float) -> str:
+        """Return '', 'WARN', or 'FAIL' for a single ratio.
+        單一比率分類：空字串（正常）/ WARN / FAIL。"""
+        if r == 0.0 or r == float("inf"):
+            # One-sided zero — e.g. fills>0 + labels=0. FAIL-grade because
+            # either anchor totally missing despite baseline alive.
+            # 單邊零 — 其中一方完全空，FAIL（基線活但某端完全斷）。
+            return "FAIL"
+        if r < FAIL_LO or r > FAIL_HI:
+            return "FAIL"
+        if r < WARN_LO or r > WARN_HI:
+            return "WARN"
+        return ""
+
+    classes = {
+        "fills/labels": (r_fl, _classify(r_fl)),
+        "fills/intents": (r_fi, _classify(r_fi)),
+        "labels/intents": (r_li, _classify(r_li)),
+    }
+
+    # Summarise pairwise ratios for operator readability. Use "inf" / "0.00"
+    # sentinels for one-sided divergence; float('inf') formats as 'inf' so
+    # explicit branch for clarity.
+    # 總結 pairwise 比率供 operator 可讀。單邊分歧用 inf / 0.00 顯示。
+    def _fmt(r: float) -> str:
+        if r == float("inf"):
+            return "inf"
+        return f"{r:.2f}"
+
+    pairs_str = ", ".join(
+        f"{name}={_fmt(r)}{'[' + cls + ']' if cls else ''}"
+        for name, (r, cls) in classes.items()
+    )
+    base = (
+        f"close_fills={close_fills_24h}, labels={labels_24h}, intents={intents_24h} | "
+        f"{pairs_str}"
+    )
+
+    # Composite verdict: FAIL wins > WARN wins > PASS.
+    # 彙總：FAIL > WARN > PASS。
+    statuses = [cls for _, (_, cls) in classes.items() if cls]
+    if "FAIL" in statuses:
+        return (
+            "FAIL",
+            base + " — severe pairwise divergence (duplicate writer / phantom "
+            "close / label-backfill runaway; see RCA log)",
+        )
+    if "WARN" in statuses:
+        return (
+            "WARN",
+            base + " — drift; inspect intent writer + label backfill lag",
+        )
+    return ("PASS", base)
+
+
 def check_counterfactual_clean_window_growth() -> tuple[str, str]:
     """[11] EDGE-DIAG-1 Phase 3 gate — post-P013-clean bucket row/fire growth.
 
@@ -1184,6 +1360,16 @@ def main() -> int:
             # [12] FIX-26-DEADLOCK-1 部署後 bb_breakout 是否脫離 permanent-dormant。
             s, m = check_bb_breakout_post_deadlock_fix(cur)
             results.append(("[12] bb_breakout_post_deadlock_fix", s, m))
+
+            # [Xb] G6-01 (2026-04-24): pipeline triangulation covers QA §2.2 #4
+            # "12 檢查彼此獨立，無 fills/labels/intents 三角形驗證". Uses the
+            # close_fills from [1] as baseline anchor; cross-validates against
+            # labels (same filter as [2]) and intents (same filter as [10]).
+            # Runs inside the cursor block because it issues DB queries.
+            # [Xb] G6-01（2026-04-24）：fills/labels/intents 三角驗證，彌補 QA
+            # §2.2 #4 盲點。必須在 cursor 區塊內跑（會發 SQL）。
+            s, m = check_pipeline_triangulation(cur, close_fills)
+            results.append(("[Xb] pipeline_triangulation", s, m))
     finally:
         conn.close()
 
