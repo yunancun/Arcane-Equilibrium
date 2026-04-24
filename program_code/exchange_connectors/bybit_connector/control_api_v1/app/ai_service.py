@@ -486,12 +486,34 @@ class AIService:
             logger.warning("Strategist response not a dict: %s", type(result).__name__)
             result = {}
 
-        # Filter to only numeric values (param recommendations)
-        # 只保留數值類型（參數推薦）
+        # Filter to only numeric values (param recommendations).
+        # 只保留數值類型（參數推薦）。
+        #
+        # STRATEGIST-TUNE-CAP-ENFORCE-1-FUP (2026-04-24): preserve integer-ness
+        # instead of force-cast to float. Rust side uses typed params (`u64` /
+        # `u32` for e.g. `cooldown_ms`); if we force every numeric to float,
+        # `78000.0` fails serde `u64` deserialize with "invalid type: floating
+        # point, expected u64". LLM naturally returns `78000` (int) in JSON;
+        # the bug was the blanket `float(v)` cast here.
+        #
+        # Rule: if value is int-typed OR float that equals its int round,
+        # store as int; otherwise keep as float (for fractional weights).
+        # 修 bug：舊 `float(v)` 強轉讓整數參數（如 cooldown_ms u64）在 Rust
+        # serde 反序列化失敗。改為保留整數性：值為 int 或 float.is_integer()
+        # 為 True 時存為 int，其餘保 float（分數權重仍可帶小數）。
         filtered: dict[str, Any] = {}
         for k, v in result.items():
-            if isinstance(v, (int, float)):
-                filtered[k] = float(v)
+            if isinstance(v, bool):
+                # bool 是 int 的子類，必須排除避免 True/False 當 0/1 混入
+                logger.debug("Skipping bool param recommendation: %s=%s", k, v)
+                continue
+            if isinstance(v, int):
+                filtered[k] = v
+            elif isinstance(v, float):
+                if v.is_integer():
+                    filtered[k] = int(v)
+                else:
+                    filtered[k] = v
             else:
                 logger.debug("Skipping non-numeric param recommendation: %s=%s", k, v)
 
