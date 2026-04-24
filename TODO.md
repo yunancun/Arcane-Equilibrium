@@ -130,6 +130,7 @@ ssh trade-core "cd ~/BybitOpenClaw/srv && python3 helper_scripts/db/passive_wait
 | **G6-02** | ✅完成 | healthcheck [13-15] 新增 — edge_fresh + exit_feat_rate + shadow_agree | G6-01 | PM+E1 / QA | 完成 2026-04-24 | commit `a0a4981` |
 | **G6-03** | 🟡部分 | V019/V020 retrofit Guard A — **部署時 sqlx checksum mismatch crash engine，已 revert (`55ed449`)**；`test_schema_guards.sql` 9/9 + TEST 10/11/12 fixtures 保留；V023/V021 既有 Guard A 未動。Guard A 重做為 V024 純新增 migration 留 E1 下次 session | 無 | E1+E2 | 部分完成 2026-04-24 | [G6-03 report](.claude_reports/20260424_123200_g6_03_v019_v020_guard.md)（commits `ff5bf1f` + `309d5b1` + revert `55ed449`）|
 | **G6-04** | ✅完成 | CLAUDE.md §三 敘述同步規則（TODO vs runtime） — `docs/lessons.md:30` 條目 + `CLAUDE.md §七「§三 敘述 vs runtime drift 防線」` 規則已收錄 | 無 | TW | 完成 2026-04-24 | [lessons.md:30](docs/lessons.md) + CLAUDE.md §七（commit `d60ad45`）|
+| **G6-05** | 🟡P2 | retired-check audit（[5] micro_profit RETIRE 後跟進）— sweep `passive_wait_healthcheck.py` 14 checks 找其他 zombie：(a) 對應的 Rust pipeline 是否還活著（grep `compute_*_fire` / `MicroProfitTrigger` 等）(b) 對應 schema/column 是否還寫入 (c) 邏輯是否被其他 v2 (PHYS-LOCK / DUAL-TRACK) 取代 — **觸發**：`88ddd30` [5] RETIRE 揭示「pipeline 退役但 healthcheck 留著」反模式，可能還有同類僵屍 | G6-04 | E1+QA | 0.5-1d | audit report + 任何發現的 zombie check 標 RETIRE 或刪除 |
 
 ### Wave 1 完成標準（Go / No-Go）
 
@@ -217,6 +218,7 @@ ssh trade-core "cd ~/BybitOpenClaw/srv && python3 helper_scripts/db/passive_wait
 | **G7-05** | 🟠P1 | cost_gate grand_mean bind condition | G1-01 | QC+E1 / FA | 2-3h | bind when grand_mean > -50 bps ∧ ≥2 strategies shrunk>0 |
 | **G7-06** | 🟡P2 | Grid OU σ residual-based 修正 | 無 | QC / E1+E2 | 1d | σ = sqrt(Σ(Δx-mean)²/n) |
 | **G7-07** | 🟡P2 | Slippage / confluence 硬編碼清理 → TOML | 無 | QC+E1 / FA | 2-3d | 8 檔硬編碼移除 |
+| **G7-08** | 🟡P2 | outcome_backfiller SQL slow query 優化（PG resource）— **症狀**：1.5s slow query 反覆觸發，PG CPU/IO spike；**範圍**：(a) `EXPLAIN ANALYZE` 找熱點 query（`outcome_backfiller_runner.py` 系列）(b) 加 partial / composite index 或重寫 query (c) 確認 timeframe `'1m'` fix（`5e2981d`）後 backfill volume 是否仍對 PG 造成壓力；**前置**：confirm 反覆觸發來源（cron 頻率 / engine path），可能是 backfill 自然壓力非 bug | 無 | QC+E1 / FA | 1-2d | slow query <500ms p95 OR 觸發頻率降低 |
 
 ### Wave 2 完成標準
 
@@ -246,6 +248,7 @@ ssh trade-core "cd ~/BybitOpenClaw/srv && python3 helper_scripts/db/passive_wait
 | **G2-03** | 🟡P2 | ma_crossover SL/TP 策略層定制（Option B） | G2-02 驗收 | E1+FA / E2+E4 | 2-3d |
 | **G2-04** | 🔴P0 | **Grid disable 決策會**（若 PostOnly 後仍負 edge） | G2-01 + P0-3 輸入 | PM+FA 決策 | 1h 會議 |
 | **G2-05** | 🟠P1 | bb_breakout FIX-26-DEADLOCK-1 rebuild 驗證 | operator rebuild | MIT / QA [12] | 6h+ 觀察 |
+| **G2-06** | 🟠P1 | bb_breakout threshold 重 calibrate（G2-05 後 7d 仍 0 fills 觸發）— **觸發**：FIX-26-DEADLOCK-1 已在 binary（21:58）+ healthcheck [12] 仍 FAIL ≥7d → 結構性 1m bandwidth mis-scale 確認（squeeze_bw=0.03 100% 觸發 / expansion_bw=0.04 永不達），非 deadlock 殘留；**範圍**：(a) 用 P1-11 Phase 1 sweep 工具 `helper_scripts/research/bb_breakout_threshold_sweep.py` 重跑 1m 30d data 找正常 trigger rate（squeeze 5-15% / expansion 30-60%）的 bw 區間 (b) 評估升 5m timeframe 替代（profile mismatch 結構解決）(c) 用 `BbBreakoutProfile::Aggressive` enum 已有的 helper 落 TOML 而非 hardcode；**前置**：G2-05 結論為 dormancy 非 deadlock；**避免**：直接調 conservative profile（會掩蓋 root cause）| G2-05 | QC+MIT+E1 / FA | 2-3d | sweep report + TOML threshold update + healthcheck [12] PASS 連 3d |
 
 ### G8 測試 / Healthcheck 擴展（新增，QA+AI-E）
 
