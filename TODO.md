@@ -25,8 +25,10 @@
    - 阻塞 G3 (AI 接線) + G5 (refactor) — Wave 1 主體工時
    - 負責：E1+PA 同 session 緊密 / 驗 E2
 
-3. **🔴 G1-05** PostOnly 配置驗證（**實際正確，簡化為驗證+註解**）— **≤0.5d**
-   - FA 初審誤判 demo/live 反向；PA 核實 `strategy_params_{demo,live}.toml` 配置正確
+3. **✅ G1-05** PostOnly 配置驗證 — **完成 2026-04-24**
+   - FA 初審誤判 demo/live 反向；PA + 本次 FA+E1 sub-agent 核實 `strategy_params_{demo,live,paper}.toml` `use_maker_entry` 配置正確（demo/paper=true, live=false 符合原則 #6）
+   - FA v1 誤判根因：抓錯欄位（`risk_config.post_only_limit` 是 declared-but-unread GUI 偏好旗，非策略熱路徑）
+   - Design intent doc：[`docs/references/2026-04-24--postonly_design_intent.md`](docs/references/2026-04-24--postonly_design_intent.md)
    - 負責：FA+E1 / 驗 E2
 
 **並行可派 sub-agent**：G6-01 healthcheck 補齊（E1/QA，1-2d）· FA L1 / L2 proposal 清算（獨立軌道）
@@ -109,7 +111,7 @@ ssh trade-core "cd ~/BybitOpenClaw/srv && python3 helper_scripts/db/passive_wait
 | **G1-02** | 🔴P0 | `event_consumer/mod.rs` fn 1696 行拆（硬上限 1200） | 無 | E1+PA 同session / E2 | **4-5d** | <1200 行 + test cov ≥95% + engine lib pass |
 | **G1-03** | 🟠P1 | Rust 硬違反 7 檔 refactor（main/instrument/rest_client 等） | G1-02 | E5+E1 / E2+E4 | 2-3d | all rust files <1200 lines |
 | **G1-04** | 🟠P1 | fee drag / R:R 邊際驗證基線 | PostOnly demo | QC / FA | 1-2d | counterfactual baseline report |
-| **G1-05** | 🔴P0 | PostOnly 配置驗證（實際正確，**簡化**） | 無 | FA+E1 / E2 | ≤0.5d | TOML 確認 + design intent doc |
+| **G1-05** | ✅完成 | PostOnly 配置驗證 — `use_maker_entry` 配置正確（demo/paper=true, live=false）；FA v1 誤判收回 | 無 | FA+E1 / E2 | 完成 2026-04-24 | [design intent doc](docs/references/2026-04-24--postonly_design_intent.md) |
 | **G1-06** | 🟠P1 | Drawdown auto-revoke 實裝（原則 #5） | 無 | E1 / E2 | 1d | reconciler drawdown-triggered revoke |
 
 ### G6 合規 + 觀察性
@@ -125,7 +127,7 @@ ssh trade-core "cd ~/BybitOpenClaw/srv && python3 helper_scripts/db/passive_wait
 
 - [ ] G1-01 scheduler 24h fresh + n_cells ≥50（healthcheck [13] PASS 連 3 日）
 - [ ] G1-02 event_consumer <1200 行 + engine lib 1980+ pass
-- [ ] G1-05 PostOnly design intent doc 存檔（修正 FA v1 誤判）
+- [x] G1-05 PostOnly design intent doc 存檔（修正 FA v1 誤判）— `docs/references/2026-04-24--postonly_design_intent.md`（2026-04-24）
 - [ ] G6-01+02 所有被動等待項附 healthcheck + 6h cron 跑起
 - [ ] 背景：P0-2 時鐘未重置、PostOnly 驗收資料累積中
 
