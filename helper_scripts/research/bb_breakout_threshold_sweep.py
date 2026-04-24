@@ -204,15 +204,23 @@ def detect_entries(
     entries = []
     last_squeeze_idx = -1
     for i in range(start, n):
-        # FIX-26 parity: Rust `bb_breakout::on_tick` records squeeze_detected_ms
-        # ONLY on first detection (see mod.rs:370 `if st.squeeze_detected_ms.is_none()`).
-        # Continued squeeze does NOT refresh the timer — expiry clock runs from the
-        # first bar after the previous clear. Mirror this exactly or signal counts
-        # inflate under long-continuous-squeeze regimes (e.g., 1m BTC where
-        # bandwidth stays < typical squeeze_bw for hundreds of bars).
-        # FIX-26 對齊：Rust 只在 squeeze_detected_ms 為 None 時才記錄首次偵測；持續
-        # 壓縮不會刷新 timer。若覆寫（overwrite-each-bar）會讓連續壓縮下的信號數
-        # 大幅膨脹（1m BTC 典型情況），sweep 結果會偏離 runtime 行為。
+        # FIX-26-DEADLOCK-1 parity (Rust commit bcc5401, 2026-04-24): stale
+        # squeeze records are auto-cleared BEFORE the is_none() guard when
+        # they have expired. The pre-fix semantic permanently locked out
+        # symbols after one failed-entry expiry window; the post-fix semantic
+        # (now shipped in Rust) allows fresh squeeze re-registration. Python
+        # now mirrors post-fix. For pre-fix behaviour studies, comment this
+        # block out.
+        # FIX-26-DEADLOCK-1 對齊（Rust 2026-04-24 修）：過期 squeeze 記錄在 is_none()
+        # guard 前自動清除。修前語義會永久鎖住符號，修後允許新 squeeze 重新登記。
+        if last_squeeze_idx >= 0 and i - last_squeeze_idx > SQUEEZE_EXPIRY_BARS:
+            last_squeeze_idx = -1
+
+        # FIX-26 original: record ONLY on first detection within a window.
+        # Continued-squeeze bars do NOT refresh the timer (preserved by Rust
+        # commit bcc5401 — auto-clear only triggers on expiry, not on continued
+        # detection within an active window).
+        # FIX-26 原語義：每個 squeeze 窗口內僅首次記錄；持續壓縮不刷新。
         if bw[i] < squeeze_bw:
             if last_squeeze_idx < 0:
                 last_squeeze_idx = i
@@ -220,19 +228,8 @@ def detect_entries(
         if last_squeeze_idx < 0:
             continue
         if i - last_squeeze_idx > SQUEEZE_EXPIRY_BARS:
-            # FIX-26 NOTE: Rust does NOT auto-clear squeeze_detected_ms on expiry;
-            # the only clear paths are (a) entry emission + (b) `on_external_close`.
-            # This means if squeeze runs uninterrupted past expiry, the strategy
-            # deadlocks until an entry fires. In pure-sweep offline replay there
-            # is no position/close mechanic, so we continue (don't clear) — the
-            # record stays stuck and no further squeezes register for this symbol
-            # until we hit expiry, at which point NOTHING fires until we see a
-            # bar with bandwidth ≥ squeeze_bw to "break" the continuous squeeze.
-            # That post-break bar then still has the stale squeeze_detected_ms,
-            # so entry is still blocked (expired). The strategy is effectively
-            # locked out — matches real Rust behaviour on prolonged squeeze.
-            # FIX-26 注意：Rust 過期不自動清 squeeze_detected_ms（僅入場或外部平倉會清）。
-            # 長時間持續壓縮會讓策略死鎖，本 sweep 亦不清 → 與 runtime 一致。
+            # Redundant with the auto-clear at top of loop, kept as safety net.
+            # 與迴圈頂的 auto-clear 冗餘，保留為安全網。
             continue
         if bw[i] <= expansion_bw:
             continue
