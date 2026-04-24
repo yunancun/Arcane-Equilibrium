@@ -288,6 +288,22 @@ pub enum PipelineCommand {
         boot_cooldown_ms: Option<u64>,
         // DB-RUN-1: signals heartbeat (0 = disable throttling)
         signals_heartbeat_ms: Option<u64>,
+        // EDGE-DIAG-1-FUP-IPC: ExitConfig hot-reload fields. Each Some(_)
+        //   triggers a ConfigStore::apply_patch mutation on RiskConfig.exit,
+        //   preserving validate() invariants (all-or-nothing rollback). Pre
+        //   this FUP there was NO IPC path — operators had to edit TOML +
+        //   restart engine (no <60s rollback for Phase 3 fallback adjustments).
+        // EDGE-DIAG-1-FUP-IPC：ExitConfig 熱重載欄位。每個 Some(_) 觸發
+        //   RiskConfig.exit 的 ConfigStore::apply_patch，並保留 validate()
+        //   不變量（全或無 rollback）。此 FUP 前 IPC 無路徑，operator 須
+        //   編輯 TOML + 重啟引擎（Phase 3 fallback 調整無法 <60s 回滾）。
+        exit_missing_edge_fallback_bps: Option<f64>,
+        exit_min_net_floor_bps: Option<f64>,
+        exit_min_hold_secs: Option<f64>,
+        exit_min_peak_atr_norm: Option<f64>,
+        exit_giveback_base: Option<f64>,
+        exit_giveback_slope: Option<f64>,
+        exit_giveback_floor: Option<f64>,
     },
     /// ARCH-RC1 1C-3-B: Get Rust-native risk runtime status snapshot.
     /// Returns JSON: `{governor_tier, consecutive_losses_by_symbol, boot_cooldown_remaining_ms,

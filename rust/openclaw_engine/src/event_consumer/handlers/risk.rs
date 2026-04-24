@@ -14,7 +14,7 @@
 
 use crate::persistence::DualStateWriter;
 use crate::tick_pipeline::TickPipeline;
-use tracing::info;
+use tracing::{info, warn};
 
 /// ARCH-RC1 1C-3-B · EN: Serialise the risk runtime snapshot (pipeline
 ///   governance + engine clocks) into a JSON string and return it through
@@ -212,6 +212,21 @@ pub(super) fn handle_update_risk_config(
     adx_trending_threshold: Option<f64>,
     boot_cooldown_ms: Option<u64>,
     signals_heartbeat_ms: Option<u64>,
+    // EDGE-DIAG-1-FUP-IPC: ExitConfig hot-reload fields — applied atomically
+    //   via `risk_store.apply_patch()` with `RiskConfig::validate()`. Any
+    //   invariant violation rolls back ALL exit mutations (all-or-nothing)
+    //   and logs a warn; non-exit fields above are unaffected.
+    // EDGE-DIAG-1-FUP-IPC：ExitConfig 熱重載欄位，透過
+    //   `risk_store.apply_patch()` + `RiskConfig::validate()` 原子套用；
+    //   違反任一不變量即回滾所有 exit 修改（全或無）並 warn，上方非 exit
+    //   欄位不受影響。
+    exit_missing_edge_fallback_bps: Option<f64>,
+    exit_min_net_floor_bps: Option<f64>,
+    exit_min_hold_secs: Option<f64>,
+    exit_min_peak_atr_norm: Option<f64>,
+    exit_giveback_base: Option<f64>,
+    exit_giveback_slope: Option<f64>,
+    exit_giveback_floor: Option<f64>,
     pipeline: &mut TickPipeline,
     snapshot_writer: &mut DualStateWriter,
 ) {
@@ -338,6 +353,107 @@ pub(super) fn handle_update_risk_config(
     if let Some(v) = signals_heartbeat_ms {
         let applied = pipeline.set_signals_heartbeat_ms(v);
         info!(signals_heartbeat_ms = applied, "signals heartbeat updated");
+    }
+    // EDGE-DIAG-1-FUP-IPC: ExitConfig hot-reload path. All 7 exit.* fields are
+    //   applied atomically via `risk_store.apply_patch()` so that a validate()
+    //   failure rolls BOTH the ArcSwap AND any persisted TOML state back to
+    //   the last-good config (all-or-nothing per ConfigStore::apply_patch
+    //   contract). `apply_risk_snapshot` is invoked on the next tick via
+    //   `sync_risk_config_if_changed` — the version bump here guarantees the
+    //   pipeline picks up the new exit values on the next on_tick without
+    //   any extra plumbing. When `risk_store` is unwired (unit test path),
+    //   we warn + skip so the rest of the update_risk_config call still
+    //   completes cleanly (fail-soft, matches the edge_predictor kill-switch
+    //   degrade-to-memory-only pattern).
+    // EDGE-DIAG-1-FUP-IPC：ExitConfig 熱重載路徑。全部 7 個 exit.* 欄位經
+    //   `risk_store.apply_patch()` 原子套用 —— validate() 失敗同時回滾
+    //   ArcSwap 與 TOML（ConfigStore::apply_patch 全或無契約）。
+    //   `apply_risk_snapshot` 於下一 tick 由 `sync_risk_config_if_changed`
+    //   觸發，版本號遞增即保證 pipeline 於下次 on_tick 取到新值，無需額外
+    //   接線。`risk_store` 未接線時（單元測試路徑）warn + 跳過，讓其他
+    //   update_risk_config 呼叫仍乾淨完成（fail-soft，與 edge_predictor
+    //   kill-switch 的 degrade-to-memory-only 模式一致）。
+    let has_exit_patch = exit_missing_edge_fallback_bps.is_some()
+        || exit_min_net_floor_bps.is_some()
+        || exit_min_hold_secs.is_some()
+        || exit_min_peak_atr_norm.is_some()
+        || exit_giveback_base.is_some()
+        || exit_giveback_slope.is_some()
+        || exit_giveback_floor.is_some();
+    if has_exit_patch {
+        match pipeline.risk_store() {
+            Some(risk_store) => {
+                // Capture inputs by value before the move into the closure so
+                // we can log them after apply_patch returns (the closure takes
+                // ownership of the copies).
+                // 關閉前複製輸入值以便 apply_patch 後記錄（closure 會移動副本）。
+                let p_missing = exit_missing_edge_fallback_bps;
+                let p_floor_bps = exit_min_net_floor_bps;
+                let p_hold = exit_min_hold_secs;
+                let p_peak = exit_min_peak_atr_norm;
+                let p_gb_base = exit_giveback_base;
+                let p_gb_slope = exit_giveback_slope;
+                let p_gb_floor = exit_giveback_floor;
+                let outcome = risk_store.apply_patch(
+                    crate::config::PatchSource::Operator,
+                    |cfg| {
+                        if let Some(v) = p_missing {
+                            cfg.exit.missing_edge_fallback_bps = v;
+                        }
+                        if let Some(v) = p_floor_bps {
+                            cfg.exit.min_net_floor_bps = v;
+                        }
+                        if let Some(v) = p_hold {
+                            cfg.exit.min_hold_secs = v;
+                        }
+                        if let Some(v) = p_peak {
+                            cfg.exit.min_peak_atr_norm = v;
+                        }
+                        if let Some(v) = p_gb_base {
+                            cfg.exit.giveback_base = v;
+                        }
+                        if let Some(v) = p_gb_slope {
+                            cfg.exit.giveback_slope = v;
+                        }
+                        if let Some(v) = p_gb_floor {
+                            cfg.exit.giveback_floor = v;
+                        }
+                    },
+                    |cfg| cfg.validate(),
+                );
+                match outcome {
+                    Ok(patch) => {
+                        info!(
+                            version = patch.version,
+                            missing_edge_fallback_bps = ?exit_missing_edge_fallback_bps,
+                            min_net_floor_bps = ?exit_min_net_floor_bps,
+                            min_hold_secs = ?exit_min_hold_secs,
+                            min_peak_atr_norm = ?exit_min_peak_atr_norm,
+                            giveback_base = ?exit_giveback_base,
+                            giveback_slope = ?exit_giveback_slope,
+                            giveback_floor = ?exit_giveback_floor,
+                            "exit config updated via IPC / exit 配置已通過 IPC 更新"
+                        );
+                    }
+                    Err(e) => {
+                        // Validation failure: apply_patch rolled back atomically
+                        // (no partial mutation on the ArcSwap, no TOML write).
+                        // 驗證失敗：apply_patch 已原子回滾（ArcSwap 無部分變更、TOML 未寫）。
+                        warn!(
+                            error = %e,
+                            "exit config patch rejected by validate() / exit 配置補丁被 validate() 拒絕"
+                        );
+                    }
+                }
+            }
+            None => {
+                // Test / bootstrap path without a wired store.
+                // 測試 / 啟動階段未接線 store 的路徑。
+                warn!(
+                    "risk_store not wired — exit config patch skipped (fail-soft) / risk_store 未接線，exit 配置補丁已跳過（fail-soft）"
+                );
+            }
+        }
     }
     snapshot_writer.force_write(&pipeline.snapshot());
 }

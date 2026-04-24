@@ -81,6 +81,22 @@ pub(in crate::ipc_server) async fn handle_update_risk_config(
     let adx_trending_threshold = optional_f64(params, "adx_trending_threshold");
     let boot_cooldown_ms = optional_u64(params, "boot_cooldown_ms");
     let signals_heartbeat_ms = optional_u64(params, "signals_heartbeat_ms");
+    // EDGE-DIAG-1-FUP-IPC: ExitConfig hot-reload fields. Each field maps 1:1
+    //   to `RiskConfig.exit.<name>` and is applied via ConfigStore::apply_patch
+    //   on the event-consumer side (all-or-nothing validate()); the wire
+    //   protocol here is a simple `exit_<name>` number → Option<f64>. Pre-FUP
+    //   these were TOML-only and required an engine rebuild for any change.
+    // EDGE-DIAG-1-FUP-IPC：ExitConfig 熱重載欄位。每個欄位 1:1 對應
+    //   `RiskConfig.exit.<name>`，由 event-consumer 端透過 ConfigStore::apply_patch
+    //   套用（validate() 全或無）；wire 協定為 `exit_<name>` 數值 → Option<f64>。
+    //   本 FUP 前僅 TOML 可改且需引擎 rebuild 才生效。
+    let exit_missing_edge_fallback_bps = optional_f64(params, "exit_missing_edge_fallback_bps");
+    let exit_min_net_floor_bps = optional_f64(params, "exit_min_net_floor_bps");
+    let exit_min_hold_secs = optional_f64(params, "exit_min_hold_secs");
+    let exit_min_peak_atr_norm = optional_f64(params, "exit_min_peak_atr_norm");
+    let exit_giveback_base = optional_f64(params, "exit_giveback_base");
+    let exit_giveback_slope = optional_f64(params, "exit_giveback_slope");
+    let exit_giveback_floor = optional_f64(params, "exit_giveback_floor");
 
     // At least one param must be provided / 至少需要一個參數
     let has_any = hard_stop_pct.is_some()
@@ -103,7 +119,14 @@ pub(in crate::ipc_server) async fn handle_update_risk_config(
         || cost_gate_k_small.is_some()
         || adx_trending_threshold.is_some()
         || boot_cooldown_ms.is_some()
-        || signals_heartbeat_ms.is_some();
+        || signals_heartbeat_ms.is_some()
+        || exit_missing_edge_fallback_bps.is_some()
+        || exit_min_net_floor_bps.is_some()
+        || exit_min_hold_secs.is_some()
+        || exit_min_peak_atr_norm.is_some()
+        || exit_giveback_base.is_some()
+        || exit_giveback_slope.is_some()
+        || exit_giveback_floor.is_some();
     if !has_any {
         return JsonRpcResponse::error(
             id,
@@ -134,6 +157,13 @@ pub(in crate::ipc_server) async fn handle_update_risk_config(
         adx_trending_threshold,
         boot_cooldown_ms,
         signals_heartbeat_ms,
+        exit_missing_edge_fallback_bps,
+        exit_min_net_floor_bps,
+        exit_min_hold_secs,
+        exit_min_peak_atr_norm,
+        exit_giveback_base,
+        exit_giveback_slope,
+        exit_giveback_floor,
     });
     JsonRpcResponse::success(id, serde_json::json!({ "updated": true }))
 }
