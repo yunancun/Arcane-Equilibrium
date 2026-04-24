@@ -388,17 +388,24 @@ git status && git log --oneline -5
 - **bb_breakout 根因**：`bb_breakout.rs:457-518` 入場 5 重 AND（squeeze → expansion → volume → Donchian → persistence）+ 時序要求過嚴；14d demo 0 fills。
 - **bb_reversion 根因**：BB squeeze + mean-reversion 兩個 AND 條件下 demo 14d **僅 8 signal → 12 intents → 5 fills（阻擋率 37.5% 來自 liquidity / timing，非 Guardian）**；signal 產量本身太低使樣本不足以做統計學習（P1-13 SAMPLE-FLOOR-GAP-1 的 bb_reversion 1 RT 數據反映此結構）。
 - **下一步**：
-  - (1) 🟡 **Phase 1 完成 2026-04-24 + self-audit 修正** — sweep `helper_scripts/research/bb_breakout_threshold_sweep.py`（5 symbols × 14d × 64 combos pooled）：
-    - **Self-audit 修 3 bug**（commits `def9018` / `c370ffa` / `d9e86c7` / `b689eab`）：B1 F1 wording 反了 · B2 F2 top edge 未測統計顯著 · B3 Python FIX-26 parity 錯（每 bar 覆寫 timer）。詳 `.claude_reports/20260424_022414_p1_11_findings_verified_after_selfaudit.md`。
-    - **驗證中發現 F4 真 Rust bug** — **FIX-26-DEADLOCK-1**：`squeeze_detected_ms` 過期後無清除路徑；首次 squeeze 窗口無入場 → symbol **永久 dormant**。是 bb_breakout 14d 0 fills **第一層真正根因**。修：Rust commit `bcc5401` 加 expiry auto-clear + 3 regression tests；engine lib 1956 → **1976 passed / 0 failed**。**下次 `restart_all.sh --rebuild` 生效後** 預期 bb_breakout 脫離 permanent-dormant。
-    - **驗證後 findings**：
-      - **F1（CONFIRMED 措辭修）**：1m BB bandwidth q=0.99 僅 0.014，production `expansion_bw=0.04` 從不達成（不是 squeeze_bw 問題，bandwidth 100% 低於 0.03 反而使 squeeze 永遠觸發；卡在 expansion）
-      - **F2（signals≠edge 方向成立但未達 95%）**：top sharpe combo n=20 fwd30=+0.150% tstat=1.35 → 未達 95%；top count n=211 fwd30=-0.022% tstat=-0.57。信號多≠edge 好但需更大樣本才能 confirm top-edge。
-      - **F3（CONFIRMED + 達 95-99% 顯著）**：post-fix sweep `breach_diff_tstat` 在 top sharpe 三個 combo 達 **-3.10 到 -3.20**（>99%）；`0.0025/0.011/1.2` 達 **-2.21**（>97%）。**`DonchianMode::Score +bonus on breach` 方向確定錯**，正解是 Off 或反轉 bonus 符號。
-  - (1) ⬜ **Phase 2 backlog**：(a) 擴 20+ symbols × 30-60 days 追 95% top-edge 顯著 (b) 加 fee model (round-trip 11 bps taker) (c) persistence + cooldown 模擬 (d) F3 深驗 — ADX regime 拆分，決定改 Score 方向或推 Off default (e) rescale Conservative/Aggressive profile 值為 1m-realistic
-  - (2) ✅ **2026-04-24 commit `0528d96`+`38a14ca`** Donchian AND→Score/Off — `DonchianMode::{Hard, Score, Off}` enum；Hard 預設 bit-identical 基線；熱重載 + validate + 14 tests。**F3 證偽 Score +bonus 方向；Phase 2 驗證後建議改 Off 為 production default 或反轉 bonus 符號。**
-  - (3) ✅ **2026-04-24 commit `0528d96`+`38a14ca`** aggressive/conservative A/B — `BbBreakoutProfile::{Conservative, Balanced, Aggressive}` enum + `for_profile()` helper；`Balanced == default()` 測試固化；**3 profile 種子值在 1m 下皆不可觸發（F1）— Phase 2 (e) 需 rescale。**
-- **狀態**：(1) Phase 1 🟡 完成含 self-audit 修 3 bug + 發現並修 F4 Rust deadlock / (1) Phase 2 ⬜ backlog / (2)(3) ✅ code 完成但 F3 暗示 Score 方向錯。**下次 `--rebuild` 部署 FIX-26-DEADLOCK-1**，預期 bb_breakout 脫離 permanent-dormant；operator observe 1w 看實際 fill 數。若要同時軟化 Donchian，**建議 `DonchianMode::Off`** 而非 Score（F3 證偽 Score +bonus 方向）。
+  - (1) 🟡 **Phase 1 完成 2026-04-24 + 多輪 self-audit + QC/MIT/PM/PA/FA multi-role audit** — sweep `helper_scripts/research/bb_breakout_threshold_sweep.py`（5 symbols × 14d × 64 combos pooled，post-fix FIX-26 parity + ddof=1 + leak-free Donchian）：
+    - **First selfaudit 修 3 bug**（commits `def9018` / `c370ffa` / `d9e86c7` / `b689eab`）：F1 wording / F2 stats / B3 Python FIX-26 parity。
+    - **多角色 audit 揭 5 FAIL + 6 WARN 全修/文檔化**（commits `63957ad` / `3b483a3` / `c8a2a2c`）：(E2) Rust mod.rs:492 saturating_add 對稱 / Python `>=` parity / +4 boundary tests · (FA) ddof=1 / df-aware t_crit / Bonferroni health / cluster-SE caveat / leak-free Donchian · (PM) 補 healthcheck [12]。詳 `.claude_reports/20260424_024807_p1_11_qcmitpmpafa_audit_closeout.md`。
+    - **F4 Rust bug FIX-26-DEADLOCK-1**：`squeeze_detected_ms` 過期後無清除路徑 → symbol **永久 dormant**。修：Rust commit `bcc5401` + `63957ad` 加 expiry auto-clear + 7 regression tests；engine lib 1956 → **1980 passed / 0 failed**。**下次 `restart_all.sh --rebuild` 生效**。Healthcheck `[12] bb_breakout_post_deadlock_fix` 將追蹤實際 fill 復活。
+    - **驗證後 final findings**：
+      - **F1（CONFIRMED）**：1m BB bandwidth q=0.99 僅 0.014，production `expansion_bw=0.04` 不可達；bandwidth 100% < 0.03 squeeze 永遠觸發但永遠卡 expansion。dormancy 結構性原因（deterministic 觀察非統計推論）。
+      - **F2（方向 PASS / "top edge" claim FAIL）**：56 qualified combo **沒一個達 naive |t|>1.96**（df-aware t_crit 2.09）；Bonferroni 校正 ~3.5 更不用說。signals≠edge 方向觀察成立但具體 top edge 未顯著，需 Phase 2 擴樣本才能 confirm。
+      - **F3 RETRACT — 是 measurement bias 不是 signal property**：原 `breach_diff_tstat=-3.20` 在 leak-free Donchian (`shift(1)`) 下變 **-0.45**。Donchian breach=「current bar 是 N-bar max」必然 mean-revert，是 selection bias。**`DonchianMode::Score` 方向**現無證據判定錯，Phase 2 leak-free 設計重驗才能下結論。
+  - (1) ⬜ **Phase 2 backlog**（priority sorted）：
+    1. **HIGH** F3 leak-free 大樣本（30-60d × 20+ symbols）真實重驗 — 決定 `DonchianMode` production default
+    2. **HIGH** sweep 加 fee model (round-trip 11 bps taker) → top-N 重排
+    3. **MID** sweep 加 persistence + cooldown 模擬（engine 真實 path）
+    4. **MID** rescale Conservative/Aggressive profile 種子值為 1m-realistic（Balanced==Default bit-identical 不變）
+    5. **LOW** Python `SQUEEZE_EXPIRY_BARS` 改 derive from MS / bar_ms（多 timeframe sweep 才需）
+    6. **LOW** bb_reversion 拆 sibling + (2)(3) 同構改造（已存在 §E5-P2-4c 條目）
+  - (2) ✅ **2026-04-24 commit `0528d96`+`38a14ca`** Donchian AND→Score/Off — `DonchianMode::{Hard, Score, Off}` enum；Hard 預設 bit-identical 基線；熱重載 + validate + 14 tests。**F3 retract 後 Score 方向無證據錯**，Phase 2 leak-free 大樣本決定。
+  - (3) ✅ **2026-04-24 commit `0528d96`+`38a14ca`** aggressive/conservative A/B — `BbBreakoutProfile::{Conservative, Balanced, Aggressive}` enum + `for_profile()` helper；`Balanced == default()` 測試固化；**3 profile 種子值在 1m 下皆不可觸發（F1）— Phase 2 (4) 需 rescale。**
+- **狀態**：(1) Phase 1 🟡 完成含多輪 audit / (1) Phase 2 ⬜ priority backlog / (2)(3) ✅ code 完成。**Operator 下次 `--rebuild` 部署 FIX-26-DEADLOCK-1**；`passive_wait_healthcheck.py [12]` 將每 6h 自動報 fill 數（FAIL→WARN→PASS 階梯標 dormancy 真否解除）；觀察 ≥1w 決定 Phase 2 啟動。Donchian 方向爭議懸宕等 leak-free 大樣本驗證。
 - **Followup**：bb_reversion 尚未拆 sibling（`bb_reversion.rs` 單檔 1143 行）+ 未加 profile — (2)+(3) 類似改造可在 `bb_reversion` 落地但目前 scope 只做 bb_breakout，另列獨立條目或併入 E5-P2-4c 邊緣拆分。
 - **優先級**：P1 低 — 不緊急但影響 Phase 5 策略多樣性與 ML 樣本池。
 
