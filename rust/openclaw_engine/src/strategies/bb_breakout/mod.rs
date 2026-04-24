@@ -485,11 +485,21 @@ impl Strategy for BbBreakout {
         match current_position {
             None => {
                 // FIX-26: Check squeeze exists AND hasn't expired.
+                // FIX-26-DEADLOCK-1 audit (2026-04-24): use saturating_add to
+                // match the auto-clear at line ~410 — the original `ts +
+                // self.squeeze_expiry_ms` is a naked add that panics in debug
+                // and wraps in release on u64 overflow. Practical risk for
+                // epoch-ms timestamps in u64 is essentially nil (~580M years
+                // headroom) but internal asymmetry (clear path saturating,
+                // check path naked) is the kind of inconsistency that bites
+                // when someone later moves to u32 / nanosecond / synthetic ts.
+                // FIX-26-DEADLOCK-1 audit：與 line ~410 auto-clear 對齊用 saturating_add，
+                // 避免 release 下 wrap → in_squeeze 永真的 degenerate。
                 let in_squeeze = self
                     .symbols
                     .get(sym)
                     .and_then(|s| s.squeeze_detected_ms)
-                    .map(|ts| ctx.timestamp_ms < ts + self.squeeze_expiry_ms)
+                    .map(|ts| ctx.timestamp_ms < ts.saturating_add(self.squeeze_expiry_ms))
                     .unwrap_or(false);
                 if in_squeeze
                     && bb.bandwidth > self.expansion_bw

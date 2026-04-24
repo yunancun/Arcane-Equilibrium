@@ -110,6 +110,38 @@ BB_STDDEV = 2.0
 DONCHIAN_PERIOD = 20
 VOLUME_MA_PERIOD = 20
 
+# t-critical values for two-sided alpha=0.05 (df = n-1). Hand-curated from
+# scipy.stats.t.ppf(0.975, df=k-1). Used by aggregate_combo to stamp each
+# combo with the correct df-aware threshold instead of relying on the |t|>1.96
+# Normal approximation (which only holds for n>=~30 and silently inflates
+# apparent significance for small samples).
+# t 雙尾 0.05 臨界值表（df=n-1）；用 df-aware 不用大樣本 1.96 近似避免膨脹小樣本顯著性。
+_T_CRIT_95_TABLE = {
+    2: 12.706, 3: 4.303, 4: 3.182, 5: 2.776, 6: 2.571, 7: 2.447, 8: 2.365,
+    9: 2.306, 10: 2.262, 11: 2.228, 12: 2.201, 13: 2.179, 14: 2.160, 15: 2.145,
+    16: 2.131, 17: 2.120, 18: 2.110, 19: 2.101, 20: 2.093, 25: 2.064, 29: 2.045,
+}
+
+
+def _t_crit_95_for_n(n: int) -> float:
+    """Return df=n-1 two-sided alpha=0.05 t-critical value. n<2 → NaN; n>=30
+    → 1.96 (Normal approximation valid). Linearly interpolate within table.
+    回傳 df=n-1 雙尾 0.05 t 臨界；n<2 → NaN；n>=30 大樣本回 1.96。"""
+    if n < 2:
+        return float("nan")
+    if n >= 30:
+        return 1.96
+    if n in _T_CRIT_95_TABLE:
+        return _T_CRIT_95_TABLE[n]
+    # interpolate between nearest table entries
+    keys = sorted(_T_CRIT_95_TABLE.keys())
+    for i, k in enumerate(keys):
+        if k > n:
+            lo = keys[i - 1]
+            hi = k
+            return _T_CRIT_95_TABLE[lo] + (_T_CRIT_95_TABLE[hi] - _T_CRIT_95_TABLE[lo]) * (n - lo) / (hi - lo)
+    return 1.96
+
 
 def compute_indicators(df: pd.DataFrame) -> pd.DataFrame:
     """Add BB bandwidth/%B + Donchian upper/lower + volume_ratio columns.
@@ -141,13 +173,37 @@ def compute_indicators(df: pd.DataFrame) -> pd.DataFrame:
     out["percent_b"] = ((close - lower) / band.replace(0, np.nan)).fillna(0.5)
 
     # Donchian (rolling max high / min low).
-    # Donchian（滾動 N 根最高/最低）。
+    # IMPORTANT — measurement bias context (FA audit 2026-04-24):
+    # Both Rust (`indicators/trend.rs:190`) and pandas `rolling(N).max()`
+    # INCLUDE the current bar in the window. So `dc.upper[i] = max(high[i-19..=i])`
+    # — by construction `high[i] <= dc.upper[i]` always holds. The breach
+    # check `close[i] >= dc.upper[i]` therefore fires only when this bar is
+    # the new local max (close == high == max). Such bars are by their nature
+    # at the top of a recent push and tend to mean-revert → forward returns
+    # from breach bars are biased low NOT because Donchian is a bad signal,
+    # but because the breach-detection methodology itself selects mean-reverting
+    # tops. Production engine inherits this bias.
+    #
+    # We compute BOTH the engine-faithful (current-bar-inclusive) and a
+    # leak-free (`shift(1)`, prior-bar-only) variant so the report can show
+    # F3-style results under both definitions. Leak-free Donchian is the
+    # textbook breakout signal; current-bar-inclusive is what the engine
+    # actually does. Operator should compare to decide whether to also fix
+    # the engine's Donchian usage.
+    #
+    # Donchian（滾動 N 根最高/最低）：Rust 與 pandas rolling 都**包含 current bar**。
+    # close[i]>=dc.upper[i] 只在「本根=近 N 根新高」時 true → 必然 mean-revert，
+    # 是測量偏 not signal property。同時計算 leak-free shift(1) 版本供對比。
     out["donchian_upper"] = out["high"].rolling(
         DONCHIAN_PERIOD, min_periods=DONCHIAN_PERIOD
     ).max()
     out["donchian_lower"] = out["low"].rolling(
         DONCHIAN_PERIOD, min_periods=DONCHIAN_PERIOD
     ).min()
+    # Leak-free variant: shift(1) excludes the current bar.
+    # Leak-free 變體：shift(1) 排除 current bar。
+    out["donchian_upper_leakfree"] = out["donchian_upper"].shift(1)
+    out["donchian_lower_leakfree"] = out["donchian_lower"].shift(1)
 
     # Volume ratio (current / 20-period avg).
     # 量比（當前 / 20 根均量）。
@@ -194,6 +250,13 @@ def detect_entries(
     price = ind["close"].to_numpy()
     dc_up = ind["donchian_upper"].to_numpy()
     dc_lo = ind["donchian_lower"].to_numpy()
+    # FA audit (2026-04-24) leak-free Donchian: shift(1) values excluding
+    # current bar. NaN on first DONCHIAN_PERIOD+1 bars, harmless because we
+    # already enforce `start = max(BB_PERIOD, DONCHIAN_PERIOD, VOLUME_MA_PERIOD)`
+    # and breach check tolerates NaN (any comparison with NaN returns False).
+    # FA audit leak-free 欄位；前 N+1 根 NaN 安全（比較 NaN 必為 False，不誤判 breach）。
+    dc_up_lf = ind["donchian_upper_leakfree"].to_numpy()
+    dc_lo_lf = ind["donchian_lower_leakfree"].to_numpy()
     ts = ind["ts"].to_numpy()
 
     # Need enough warm-up for BB/Donchian to be valid.
@@ -211,9 +274,15 @@ def detect_entries(
         # (now shipped in Rust) allows fresh squeeze re-registration. Python
         # now mirrors post-fix. For pre-fix behaviour studies, comment this
         # block out.
+        #
+        # E2 audit follow-up (2026-04-24): Rust uses `>=` for the inclusive
+        # boundary (mod.rs:412 `ctx.timestamp_ms >= stored_ts.saturating_add(...)`).
+        # Original Python used `>` which leaves a 1-bar gap at the exact
+        # boundary (`i - stored == SQUEEZE_EXPIRY_BARS` clears in Rust but not
+        # Python). Switch to `>=` for strict parity.
         # FIX-26-DEADLOCK-1 對齊（Rust 2026-04-24 修）：過期 squeeze 記錄在 is_none()
-        # guard 前自動清除。修前語義會永久鎖住符號，修後允許新 squeeze 重新登記。
-        if last_squeeze_idx >= 0 and i - last_squeeze_idx > SQUEEZE_EXPIRY_BARS:
+        # guard 前自動清除。E2 audit：用 `>=` inclusive 對齊 Rust，原 `>` 在邊界差 1 bar。
+        if last_squeeze_idx >= 0 and i - last_squeeze_idx >= SQUEEZE_EXPIRY_BARS:
             last_squeeze_idx = -1
 
         # FIX-26 original: record ONLY on first detection within a window.
@@ -241,18 +310,30 @@ def detect_entries(
             direction = -1
         else:
             continue
+        # Engine-faithful (current-bar-inclusive) breach AND leak-free
+        # (prior-bar-only) breach. Capture both per entry so aggregate_combo
+        # can compute breach_diff_tstat under both definitions and the report
+        # can show whether the F3 finding survives the look-ahead correction.
+        # 引擎一致 breach（含當前 bar）與 leak-free breach（僅排除當前 bar），
+        # 兩者並存供 aggregate 對比、揭露 F3 是否仍成立於 leak-free 定義下。
         if direction == 1:
             donchian_breach = price[i] >= dc_up[i]
+            donchian_breach_lf = price[i] >= dc_up_lf[i] if not np.isnan(dc_up_lf[i]) else False
         else:
             donchian_breach = price[i] <= dc_lo[i]
-        entries.append((ts[i], direction, price[i], donchian_breach, i))
+            donchian_breach_lf = price[i] <= dc_lo_lf[i] if not np.isnan(dc_lo_lf[i]) else False
+        entries.append((ts[i], direction, price[i], donchian_breach, donchian_breach_lf, i))
         # Consume this squeeze (engine sets squeeze_detected_ms=None on entry).
         # 入場後消耗此 squeeze（對齊 engine 在入場時清除 squeeze_detected_ms）。
         last_squeeze_idx = -1
 
     return pd.DataFrame(
         entries,
-        columns=["ts", "direction", "price", "donchian_breach", "bar_idx"],
+        columns=[
+            "ts", "direction", "price",
+            "donchian_breach", "donchian_breach_leakfree",
+            "bar_idx",
+        ],
     )
 
 
@@ -306,7 +387,6 @@ def aggregate_combo(
         # -1 index). Keep in lockstep with the populated `for h in ...` loop
         # and the Donchian breach block below.
         # 空組合也要填齊 key：list-of-dicts → DataFrame 才會 schema 一致。
-        # 缺 key 會觸發「Index([-1]*n)」pandas 降級定位錯誤。
         for h in horizons_bars:
             stats[f"fwd{h}_mean"] = float("nan")
             stats[f"fwd{h}_med"] = float("nan")
@@ -314,11 +394,17 @@ def aggregate_combo(
             stats[f"fwd{h}_sharpe"] = float("nan")
             stats[f"fwd{h}_se"] = float("nan")
             stats[f"fwd{h}_tstat"] = float("nan")
+            stats[f"fwd{h}_t_crit_95"] = float("nan")
         stats["donchian_breach_frac"] = float("nan")
+        stats["donchian_breach_leakfree_frac"] = float("nan")
         stats["breach_n"] = 0.0
         stats["miss_n"] = 0.0
         stats["breach_fwd_mean_diff"] = float("nan")
         stats["breach_diff_tstat"] = float("nan")
+        stats["breach_n_leakfree"] = 0.0
+        stats["miss_n_leakfree"] = 0.0
+        stats["breach_fwd_mean_diff_leakfree"] = float("nan")
+        stats["breach_diff_tstat_leakfree"] = float("nan")
         return stats
 
     for h in horizons_bars:
@@ -333,24 +419,37 @@ def aggregate_combo(
             stats[f"fwd{h}_tstat"] = float("nan")
         else:
             mu = float(vals.mean())
-            sd = float(vals.std(ddof=0))
+            # FA audit (2026-04-24): use SAMPLE std (ddof=1, Bessel correction)
+            # not POPULATION std (ddof=0). For small n (<30) the bias is
+            # ~7-15% and biases tstat upward, inflating apparent significance.
+            # FA audit：sample std 用 ddof=1，否則小 n 下 sd 被低估、tstat 膨脹。
+            sd = float(vals.std(ddof=1)) if len(vals) > 1 else float("nan")
             k = len(vals)
-            # SE of mean + two-sided t-like statistic (mu / SE). |t| > 1.96 ≈
-            # 95% significance; |t| > 2.58 ≈ 99%. This gates the top-N rankings
-            # against the "small-N illusion" where a handful of lucky right-tail
-            # winners look like edge but aren't distinguishable from zero.
-            # SE = 標準誤；|t| > 1.96 ≈ 95% 顯著；過濾「小樣本右尾幻覺」。
-            se = sd / (k ** 0.5) if k > 0 and sd > 1e-12 else float("nan")
+            # SE of mean + t-statistic. NOTE the t-test is one-sample with
+            # null mu0=0 and df=k-1; for n<30 the |t|>1.96 Normal approximation
+            # is inadequate — use df-aware critical values from
+            # `scipy.stats.t.ppf(0.975, df=k-1)` if possible, or refer to the
+            # `fwd{h}_t_crit_95` column we add below for a self-contained
+            # rule-of-thumb threshold.
+            # SE 與 t 統計；df=k-1。n<30 不適用 1.96 大樣本近似 — 看 t_crit_95 欄。
+            se = sd / (k ** 0.5) if k > 1 and sd > 1e-12 else float("nan")
             stats[f"fwd{h}_mean"] = mu
             stats[f"fwd{h}_med"] = float(vals.median())
             stats[f"fwd{h}_winr"] = float((vals > 0).mean())
-            stats[f"fwd{h}_sharpe"] = mu / sd if sd > 1e-12 else float("nan")
+            stats[f"fwd{h}_sharpe"] = mu / sd if sd and sd > 1e-12 else float("nan")
             stats[f"fwd{h}_se"] = se
             stats[f"fwd{h}_tstat"] = mu / se if se and se > 1e-12 else float("nan")
+            # df-aware 95% two-sided t critical value (Welch-Satterthwaite-free,
+            # uses simple df=k-1). Table values for n=2..30; n>=30 use 1.96.
+            # df 對應 95% 雙尾 t 臨界值；小 n 用查表，n>=30 用 1.96。
+            stats[f"fwd{h}_t_crit_95"] = _t_crit_95_for_n(k)
 
     # Also coerce here; mean of object-dtype bools returns NaN on pandas 3.
     # 同樣需強制 bool：object dtype 下 mean() 於 pandas 3 會返 NaN。
     stats["donchian_breach_frac"] = float(entries["donchian_breach"].astype(bool).mean())
+    stats["donchian_breach_leakfree_frac"] = float(
+        entries["donchian_breach_leakfree"].astype(bool).mean()
+    )
     # Score-mode indicator: does Donchian breach actually correlate with better
     # outcomes? If the diff is ~0, the +bonus vs -bonus under Score mode is
     # just noise; if strongly positive, Score mode's bias is real.
@@ -360,31 +459,54 @@ def aggregate_combo(
     # Score mode 指標 + subset size + Welch-like t 以判讀 diff 是否顯著。
     primary = horizons_bars[len(horizons_bars) // 2]  # middle horizon as primary
     col = f"fwd_{primary}"
-    if col in entries:
-        # Coerce donchian_breach to real bool dtype. When the column arrives
-        # as object dtype (pandas fallback for list-of-tuples with numpy bool
-        # scalars), `~series` does Python `~bool` → int (~False = -1, ~True
-        # = -2). The resulting int Series, when used as a mask, is interpreted
-        # by pandas as POSITIONAL column indexing and raises
-        # "None of [Index([-1, ...])] are in the [columns]". Cast forces the
-        # bitwise-NOT to return a proper bool mask.
-        # 強制 bool dtype：object dtype 下 `~series` 會把 bool 轉成 int
-        # (~False=-1, ~True=-2)，mask 變成整數 column-name 查詢 → 神秘錯誤。
-        breach_mask = entries["donchian_breach"].astype(bool)
-        br = entries[breach_mask][col].dropna()
-        mi = entries[~breach_mask][col].dropna()
-        stats["breach_n"] = float(len(br))
-        stats["miss_n"] = float(len(mi))
-        if len(br) > 1 and len(mi) > 1:
-            diff = float(br.mean() - mi.mean())
-            var_b = float(br.var(ddof=1)) / len(br)
-            var_m = float(mi.var(ddof=1)) / len(mi)
+
+    def _breach_diff_stats(mask_col: str, n_key: str, miss_key: str,
+                           diff_key: str, tstat_key: str) -> None:
+        """Helper to compute one set of breach-vs-miss diff stats. Coerces
+        bool dtype (avoids ~series → int trap) and applies Welch SE.
+        Note: `breach_diff_tstat` should be compared against
+        `_t_crit_95_for_n(min(breach_n, miss_n))` not 1.96 — small subsamples
+        invalidate the Normal approximation.
+        Bonferroni note: when ranking 64 combos × N horizons, the proper
+        family-wise α=0.05 critical |t| is `_t_crit_95_for_n(min_n) +
+        log(n_tests)` adjustment per dim. This is recorded for the report
+        layer to apply, NOT applied here (script is per-combo agnostic).
+        Helper：計算一組 breach-vs-miss 差異統計；強制 bool dtype + Welch SE。"""
+        mask = entries[mask_col].astype(bool)
+        br_v = entries[mask][col].dropna()
+        mi_v = entries[~mask][col].dropna()
+        stats[n_key] = float(len(br_v))
+        stats[miss_key] = float(len(mi_v))
+        if len(br_v) > 1 and len(mi_v) > 1:
+            diff = float(br_v.mean() - mi_v.mean())
+            var_b = float(br_v.var(ddof=1)) / len(br_v)
+            var_m = float(mi_v.var(ddof=1)) / len(mi_v)
             se_diff = (var_b + var_m) ** 0.5 if (var_b + var_m) > 1e-18 else float("nan")
-            stats["breach_fwd_mean_diff"] = diff
-            stats["breach_diff_tstat"] = diff / se_diff if se_diff and se_diff > 1e-12 else float("nan")
+            stats[diff_key] = diff
+            stats[tstat_key] = diff / se_diff if se_diff and se_diff > 1e-12 else float("nan")
         else:
-            stats["breach_fwd_mean_diff"] = float("nan")
-            stats["breach_diff_tstat"] = float("nan")
+            stats[diff_key] = float("nan")
+            stats[tstat_key] = float("nan")
+
+    if col in entries:
+        # FA audit (2026-04-24): compute breach-diff stats under BOTH the
+        # engine-faithful Donchian (current-bar-inclusive, mean-revert biased)
+        # AND the leak-free Donchian (prior-bar-only, textbook breakout).
+        # The leak-free numbers are the "real" measurement of Donchian's
+        # value as a confirmation signal; the engine-faithful numbers reflect
+        # what the production strategy will actually see.
+        # FA audit：對引擎一致 + leak-free 兩種 Donchian 各算一組 breach diff，
+        # 報告需同時呈現以揭露 F3 是否為測量偏。
+        _breach_diff_stats(
+            "donchian_breach",
+            "breach_n", "miss_n",
+            "breach_fwd_mean_diff", "breach_diff_tstat",
+        )
+        _breach_diff_stats(
+            "donchian_breach_leakfree",
+            "breach_n_leakfree", "miss_n_leakfree",
+            "breach_fwd_mean_diff_leakfree", "breach_diff_tstat_leakfree",
+        )
     return stats
 
 
@@ -483,17 +605,38 @@ def print_top(result: pd.DataFrame, horizons_bars: list[int], top_n: int) -> Non
     if qualified.empty:
         qualified = result.copy()
 
-    # Rankings. `tstat` = mean / SE; |tstat| > 1.96 ≈ 95% significance. A top
-    # combo with |tstat| < 1.0 is not distinguishable from zero edge even if it
-    # sorts high — print it so the reader sees the caveat directly, not only
-    # after reading the report.
-    # 排序：tstat = mean/SE；|tstat|<1.0 基本等於噪音，即使排前也無意義。
+    # Rankings + STATISTICAL HEALTH WARNINGS.
+    # Use df-aware t_crit_95 column for per-row significance gate, NOT the
+    # 1.96 Normal approximation (only valid n>=30). Also remind operator
+    # of Bonferroni correction for multiple-testing — running 64 combos ×
+    # k horizons, naive top-N picking IS look-elsewhere fishing.
+    # 排序 + 統計健康警告。用 df-aware t_crit_95，不用 1.96 大樣本近似；
+    # 提醒 operator 多重檢驗 Bonferroni 校正（top-N 是 look-elsewhere fishing）。
+    n_combos = len(qualified)
+    n_horizons = len(horizons_bars)
+    n_tests = n_combos * n_horizons
+    # Bonferroni-corrected α for family-wise 0.05; use α/n then convert to
+    # ~|z| for n>=30 or ~t with worst-case df. Conservative threshold for
+    # operator visual scan: |t| > 3.5 ~= Bonferroni 95% with df>=20.
+    # Bonferroni 95% 校正：family-wise α=0.05 → |t|>~3.5（保守，Normal 端）。
+    bonferroni_t = 3.5 if n_tests > 16 else 2.5
+    print(f"\n═════ STATISTICAL HEALTH ═════")
+    print(f"  combos: {n_combos} × horizons: {n_horizons} = {n_tests} tests")
+    print(f"  Bonferroni-corrected |t| threshold for FW α=0.05: ~{bonferroni_t}")
+    print(f"  Pooled signals across 5 strongly-correlated symbols (BTC/ETH/SOL/")
+    print(f"  XRP/DOGE corr ~0.6-0.8) — effective independent n ≈ raw_n / 3-4.")
+    print(f"  Engine-faithful Donchian (`donchian_breach_*`) includes current bar")
+    print(f"  → mean-revert biased. Compare against `*_leakfree` columns (shift(1))")
+    print(f"  to see if F3-style breach effects survive the look-ahead correction.")
+    print(f"  Per-row: |fwd{primary}_tstat| vs `fwd{primary}_t_crit_95` is df-aware.")
+
     cols_full = [
         "squeeze_bw", "expansion_bw", "volume_threshold", "n_signals",
         f"fwd{primary}_mean", f"fwd{primary}_winr", f"fwd{primary}_sharpe",
-        f"fwd{primary}_tstat",
+        f"fwd{primary}_tstat", f"fwd{primary}_t_crit_95",
         "donchian_breach_frac", "breach_n",
         "breach_fwd_mean_diff", "breach_diff_tstat",
+        "breach_n_leakfree", "breach_diff_tstat_leakfree",
     ]
     cols_short = [
         "squeeze_bw", "expansion_bw", "volume_threshold", "n_signals",
@@ -503,7 +646,7 @@ def print_top(result: pd.DataFrame, horizons_bars: list[int], top_n: int) -> Non
     print(f"\n═════ Top {top_n} by fwd{primary}_mean ═════")
     print(qualified.nlargest(top_n, f"fwd{primary}_mean")[cols_full].to_string(index=False))
 
-    print(f"\n═════ Top {top_n} by fwd{primary}_tstat (statistical edge, |t|>1.96 ≈ 95%) ═════")
+    print(f"\n═════ Top {top_n} by fwd{primary}_tstat (compare to t_crit_95 for df-aware 95%; Bonferroni ~{bonferroni_t}) ═════")
     print(qualified.nlargest(top_n, f"fwd{primary}_tstat")[cols_full].to_string(index=False))
 
     print(f"\n═════ Top {top_n} by fwd{primary}_sharpe (risk-adjusted) ═════")
