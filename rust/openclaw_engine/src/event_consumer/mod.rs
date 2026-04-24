@@ -422,115 +422,21 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
                 );
             },
 
-            // ── Paper session commands from IPC / 來自 IPC 的紙盤 session 命令 ──
+            // ── Paper session commands from IPC (Arm E) ──
+            // ── 來自 IPC 的紙盤 session 命令（Arm E）──
             cmd = async {
                 if let Some(ref mut rx) = pipeline_cmd_rx { rx.recv().await } else { std::future::pending().await }
             } => {
-                if let Some(cmd) = cmd {
-                    // EDGE-P3-1 Step 7e: intercept the kill-switch variant so the
-                    // production path runs the full two-phase commit + V014 audit.
-                    // All other variants still flow through handle_paper_command.
-                    // EDGE-P3-1 Step 7e：截獲 kill-switch 變體，跑完整兩階段 + V014 審計；
-                    // 其餘變體仍走 handle_paper_command。
-                    match cmd {
-                        PipelineCommand::DisableEdgePredictorAll {
-                            operator_token,
-                            reason,
-                            response_tx,
-                        } => {
-                            let em_for_audit = pipeline.effective_engine_mode();
-                            handlers::handle_disable_edge_predictor_all(
-                                operator_token,
-                                reason,
-                                response_tx,
-                                &mut pipeline,
-                                em_for_audit,
-                                audit_pool.as_ref(),
-                            );
-                        }
-                        // P1-5 A2: operator-driven drawdown baseline reset.
-                        // In-memory reset is synchronous; DB row DELETE is awaited
-                        // inline so Python receives confirmation only AFTER the
-                        // persisted checkpoint is gone (avoids "looks reset but
-                        // next restart resurrects old peak" race). If DB write
-                        // fails, respond Err but keep the in-memory reset — the
-                        // next writer cycle will try to UPSERT the NEW (= current
-                        // balance) peak, effectively re-pinning the baseline
-                        // somewhere safe.
-                        // P1-5 A2：operator 重置 drawdown 基準。記憶體同步重置、
-                        // DB DELETE 同步 await，讓 Python 在 row 真正刪除後才收到
-                        // 確認；DB 失敗時仍保留記憶體重置，下個寫入週期會把新
-                        // (=當前 balance) peak 重新 UPSERT。
-                        PipelineCommand::ResetDrawdownBaseline { response_tx } => {
-                            let em_for_reset = pipeline.effective_engine_mode().to_string();
-                            let peak_before = pipeline.paper_state.peak_balance();
-                            let balance_before = pipeline.paper_state.balance();
-                            pipeline.paper_state.reset_drawdown_baseline();
-                            let db_result = if let Some(pool) = audit_pool.as_ref() {
-                                crate::paper_state::checkpoint::delete_checkpoint(
-                                    pool,
-                                    &em_for_reset,
-                                )
-                                .await
-                            } else {
-                                Ok(())
-                            };
-                            let reply = match db_result {
-                                Ok(()) => {
-                                    info!(
-                                        engine_mode = %em_for_reset,
-                                        peak_before,
-                                        peak_after = pipeline.paper_state.peak_balance(),
-                                        balance = balance_before,
-                                        "P1-5 A2: drawdown baseline reset via IPC \
-                                         / 已通過 IPC 重置 drawdown 基準"
-                                    );
-                                    snapshot_writer.force_write(&pipeline.snapshot());
-                                    Ok(format!(
-                                        "reset engine_mode={em_for_reset} \
-                                         peak_before={peak_before:.2} \
-                                         peak_after={balance_before:.2}"
-                                    ))
-                                }
-                                Err(e) => {
-                                    warn!(
-                                        engine_mode = %em_for_reset,
-                                        error = %e,
-                                        "P1-5 A2: checkpoint DELETE failed (memory already reset) \
-                                         / checkpoint 刪除失敗（記憶體已重置）"
-                                    );
-                                    Err(format!("DB delete failed: {e}"))
-                                }
-                            };
-                            let _ = response_tx.send(reply);
-                        }
-                        other => {
-                            handlers::handle_paper_command(
-                                other,
-                                &mut pipeline,
-                                &mut snapshot_writer,
-                                &mut state.pending_orders,
-                            );
-                        }
-                    }
-                    // Phase 6: sync governor risk level to shared atomic for reconciler.
-                    // Phase 6：同步 governor 風控級別到共享原子量供對帳器讀取。
-                    let current_level = pipeline.governance.risk.snapshot_level();
-                    if let Some(ref rl) = shared_risk_level {
-                        rl.store(
-                            current_level.value(),
-                            std::sync::atomic::Ordering::Relaxed,
-                        );
-                    }
-
-                    // BLOCKER-2 D6: Broadcast CircuitBreaker event to peer pipelines.
-                    // BLOCKER-2 D6：向對等管線廣播熔斷事件。
-                    if current_level == openclaw_core::sm::risk_gov::RiskLevel::CircuitBreaker {
-                        if let Some(ref tx) = _cross_engine_tx {
-                            let _ = tx.send(crate::tick_pipeline::EngineEvent::CircuitBreakerTripped(pipeline_kind));
-                        }
-                    }
-                }
+                loop_handlers::handle_pipeline_command(
+                    cmd,
+                    &mut pipeline,
+                    &mut snapshot_writer,
+                    &mut state,
+                    audit_pool.as_ref(),
+                    shared_risk_level.as_ref(),
+                    _cross_engine_tx.as_ref(),
+                    pipeline_kind,
+                ).await;
             },
 
             event = event_rx.recv() => {
