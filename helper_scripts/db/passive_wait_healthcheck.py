@@ -39,6 +39,12 @@ Checks（each prints PASS / FAIL / WARN with a one-line explanation）:
   [10] intents_writer_ratio            — trading.intents vs orders 24h ratio (P1-12 post-mortem 2026-04-17 outage)
   [11] counterfactual_clean_window_growth — post-P013-clean EDGE-DIAG-1 Phase 3 gate (2026-04-24)
   [12] bb_breakout_post_deadlock_fix   — bb_breakout fill rate after FIX-26-DEADLOCK-1 deploy (P1-11 (1) Phase 1)
+  [13] edge_estimator_scheduler_fresh  — G6-02 new: edge_estimates.json mtime <6h + cells ≥50
+                                          (tighter sibling of [7]/[7a]; G1-01/G4-04 recovery target).
+  [14] exit_features_accumulation_rate — G6-02 new: weekly row growth ≥0.5× last week
+                                          (EDGE-P1b ML-training accumulation passive-wait sentinel).
+  [15] shadow_exit_agreement_phase2    — G6-02 new: Combine ↔ Physical 24h agreement ≥95%
+                                          (EDGE-P2 Phase 2 strict quality gate; PASS when dormant).
   [Xa] leader_election_health          — G6-01 new: edge_estimator_scheduler flock file age +
                                           leader-PID liveness; catches stale-lock / dead-leader
                                           drift that masks scheduler silent-death (edge_estimates
@@ -1292,6 +1298,351 @@ def check_counterfactual_clean_window_growth() -> tuple[str, str]:
             f"ETA ~{eta_days}d at current rate")
 
 
+def check_edge_estimator_scheduler_fresh() -> tuple[str, str]:
+    """[13] G6-02 (2026-04-24): edge_estimator_scheduler freshness + cell-count.
+
+    MODULE_NOTE (EN): G1-01 / G4-04 mandatory passive-wait healthcheck per
+    CLAUDE.md §七 rule (any "wait Nh / Nd" TODO must register a check). The
+    2026-04-24 10-Agent audit Verified Finding #1 was that
+    `settings/edge_estimates.json` had collapsed to **1 cell** with mtime 4d
+    stale — scheduler had been silently dead despite uvicorn running. Existing
+    check [7] catches the freshness side at 90-min granularity (and [7a]
+    enforces a 10-cell floor as the 2026-04-24 fix), but G6-02 adds a stricter
+    6-hour + 50-cell sibling threshold targeted at the G1-01 recovery path:
+    while we wait for scheduler to repopulate the JSON to ≥50 cells (target
+    coverage matching 5 strategies × 25 symbols ≈ 125 cells with sparse
+    backoff), this check FAILs the moment the JSON drifts >6h or coverage
+    crosses below 10 cells. Once G1-01 stabilises and JSON is consistently
+    ≥50 cells, this becomes the steady-state passive-wait sentinel.
+
+    Distinction vs [7] / [7a]:
+      - [7]: 90-min freshness floor (scheduler hourly cadence) + structure
+        validation + dormant-prefix breakdown. Catches "scheduler stopped"
+        within ~90 min.
+      - [7a]: 10-cell minimum floor (2026-04-24 G6-01). Catches
+        "JSON written but coverage collapsed".
+      - [13] (this check, G6-02): tighter 6h + 50-cell **target** threshold
+        for G1-01 / G4-04 recovery monitoring. Three-state distinguishes
+        "scheduler healthy + full coverage" (PASS) from "partial recovery"
+        (WARN at 10-49 cells) from "still broken" (FAIL at <10 OR >6h).
+
+    Three-state output:
+      - PASS: mtime <6h AND populated cells ≥50 (full G1-01 recovery target).
+      - WARN: 10 ≤ populated cells < 50 (partial coverage; backfill in progress).
+      - FAIL: mtime ≥6h OR populated cells <10 (scheduler dead OR coverage
+        collapse — G1-01 root cause not resolved).
+
+    Reads `_meta.n_cells` first (introduced 2026-04-20+), falls back to
+    counting non-meta entries (matches [7]'s flat-map walk pattern).
+
+    [13] G6-02（2026-04-24）：edge_estimator_scheduler 新鮮度 + cell 數雙閾值
+    （CLAUDE.md §七 G1-01 / G4-04 強制要求）。2026-04-24 10-Agent audit Verified
+    Finding #1 = `settings/edge_estimates.json` 縮到 1 cell + mtime 4d 停滯。
+    [7]/[7a] 已覆蓋 90min freshness + 10-cell 底線；[13] 新增更嚴的 6h + 50 cell
+    目標閾值，作為 G1-01 復原期主信號：scheduler 重新填滿到 ≥50 cells 期間，
+    此 check 在 JSON 漂移 >6h 或覆蓋 <10 cells 時立即 FAIL。
+    三態：PASS（<6h + ≥50 cells，G1-01 復原目標）/ WARN（10-49 cells partial）/
+    FAIL（>=6h OR <10 cells，scheduler 仍掛或 coverage 崩潰）。
+    讀法：`_meta.n_cells` 優先（2026-04-20+ 新增），fallback 數非 meta entries。
+    """
+    # G6-02 thresholds — tighter than [7] (90 min / 10 cells); these are the
+    # G1-01 / G4-04 recovery-target sentinels. Adjust upward to 100+ cells once
+    # full strategy×symbol coverage is restored (5 strategies × 25 symbols).
+    # G6-02 閾值：比 [7] (90min/10 cells) 更嚴，是 G1-01 / G4-04 復原目標哨兵。
+    # 全策略×幣對覆蓋恢復後（5 策略 × 25 幣對）可上調到 100+ cells。
+    MAX_AGE_HOURS = 6.0
+    MIN_CELLS_PASS = 50
+    MIN_CELLS_WARN = 10
+
+    base = Path(os.environ.get("OPENCLAW_BASE_DIR", str(Path.home() / "BybitOpenClaw/srv")))
+    p = base / "settings" / "edge_estimates.json"
+    if not p.exists():
+        return ("FAIL", f"edge_estimates.json 不存在 at {p} — scheduler never ran (G1-01)")
+
+    mtime = datetime.fromtimestamp(p.stat().st_mtime, tz=timezone.utc)
+    age_h = (datetime.now(tz=timezone.utc) - mtime).total_seconds() / 3600.0
+
+    # Parse cells: prefer `_meta.n_cells` (2026-04-20+ field), fall back to
+    # walking the flat map (consistent with [7]'s walker for legacy JSON).
+    # Cells 解析：`_meta.n_cells` 優先（2026-04-20+），fallback 走 flat map（與 [7] 一致）。
+    n_cells: int | None = None
+    parse_diag = ""
+    try:
+        data = json.load(p.open())
+        meta = data.get("_meta") if isinstance(data, dict) else None
+        if isinstance(meta, dict) and isinstance(meta.get("n_cells"), int):
+            n_cells = int(meta["n_cells"])
+            parse_diag = f"via _meta.n_cells={n_cells}"
+        else:
+            # Fallback: count non-meta dict entries (same logic as [7]).
+            # Fallback：數非 meta dict entries（與 [7] 一致）。
+            meta_keys = {"_meta", "grand_mean_bps", "generated_at", "n_total", "version"}
+            cell_items = {
+                k: v for k, v in data.items()
+                if isinstance(v, dict) and not k.startswith("_") and k not in meta_keys
+            }
+            n_cells = len(cell_items)
+            parse_diag = f"via flat-map walk={n_cells}"
+    except Exception as e:
+        # Parse failure: return FAIL because we cannot triage scheduler health
+        # without cell count. Distinguish from [7] which WARNs on parse error
+        # (because [7] still PASSes on freshness alone). G6-02 needs both signals.
+        # Parse 失敗 FAIL：無 cell 數無法判 scheduler 狀態。與 [7] 區別：[7] 只
+        # WARN（freshness 仍可單獨 PASS），G6-02 要兩個信號都齊。
+        return ("FAIL",
+                f"edge_estimates.json age {age_h:.1f}h, parse error: {e} — "
+                "cannot triage scheduler health (G1-01)")
+
+    msg_core = f"age={age_h:.1f}h, cells={n_cells} ({parse_diag})"
+
+    # FAIL conditions (either dimension alone is enough).
+    # FAIL 條件（任一 dimension 觸發即 FAIL）。
+    if age_h >= MAX_AGE_HOURS:
+        return ("FAIL",
+                msg_core + f" — mtime ≥{MAX_AGE_HOURS}h (scheduler silent-dead; "
+                "G1-01 root cause not resolved)")
+    if n_cells < MIN_CELLS_WARN:
+        return ("FAIL",
+                msg_core + f" — cells <{MIN_CELLS_WARN} (coverage collapse; "
+                "G1-01 / G4-04 recovery target not met)")
+
+    # WARN: partial coverage band.
+    # WARN：覆蓋恢復中。
+    if n_cells < MIN_CELLS_PASS:
+        return ("WARN",
+                msg_core + f" — cells {n_cells}/{MIN_CELLS_PASS} (partial G1-01 "
+                "recovery; backfill in progress)")
+
+    # PASS: both dimensions meet G1-01 / G4-04 recovery target.
+    # PASS：兩 dimension 皆達 G1-01 / G4-04 復原目標。
+    return ("PASS",
+            msg_core + f" — full G1-01 recovery target met (≥{MIN_CELLS_PASS} cells, "
+            f"<{MAX_AGE_HOURS}h)")
+
+
+def check_exit_features_accumulation_rate(cur) -> tuple[str, str]:
+    """[14] G6-02 (2026-04-24): learning.exit_features weekly accumulation rate.
+
+    MODULE_NOTE (EN): EDGE-P1b passive-wait healthcheck — the EDGE-P1b TODO
+    waits for `learning.exit_features` to accumulate enough rows for ML
+    training (per-strategy-symbol cell ≥ 200 labels). Without this check, a
+    silent writer regression (e.g. paper_state hook deletion, schema_hash
+    mismatch causing INSERT to be silently swapped to a no-op) could leave the
+    table flat for days while the TODO still says "passive wait". This check
+    compares this-week vs last-week row counts to catch acute decay.
+
+    Compared to [3] `check_exit_features_writer` which validates the 24h
+    1:1 ratio with close_fills, [14] adds a week-over-week trend signal:
+      - [3] asks "is the writer firing right now per fill?"
+      - [14] asks "is the writer's overall throughput consistent week to week?"
+    Both can pass independently; both are needed because [3] catches per-fill
+    misses (delta > 33% over 24h) and [14] catches longer-trend collapse
+    (close_fills also dropped, so per-fill ratio still looks fine).
+
+    Three-state output:
+      - PASS: this_week > 0 AND this_week ≥ last_week × 0.5 (no severe decay).
+      - WARN: this_week > 0 AND this_week < last_week × 0.3 (severe decay).
+      - FAIL: this_week == 0 (writer completely silent — EDGE-P1b assumption
+        violated; downstream ML training pipeline gates would silently stall).
+
+    Edge case: last_week == 0 → if this_week > 0 the writer just started or
+    came back from outage (PASS with note); if both 0 → FAIL (writer dead for
+    ≥2 weeks).
+
+    Filter: no engine_mode filter — exit_features writes for paper/demo/live_demo
+    all matter for ML training corpus. Operator can grep for engine_mode
+    breakdown via direct SQL if a specific engine looks anomalous.
+
+    [14] G6-02（2026-04-24）：learning.exit_features 週環比累積速率守衛
+    （EDGE-P1b TODO 被動等待 ML 訓練樣本累積到 per-cell ≥200 labels）。
+    [3] 驗 24h per-fill 1:1 比率；[14] 補週環比趨勢信號。兩者互補：close_fills
+    同步下降時 [3] 仍 PASS 但 [14] 抓長趨勢崩潰。三態：PASS（>0 且 ≥0.5×上週）/
+    WARN（<0.3×上週）/ FAIL（this_week=0，writer 完全靜默 EDGE-P1b 假設破裂）。
+    """
+    # Defensive rollback: keep cursor clean.
+    # 防禦式 rollback：保持 cursor 乾淨。
+    try:
+        cur.connection.rollback()
+    except Exception:
+        pass
+
+    # Table existence guard — same defensive pattern as [2]/[8]/[9].
+    # 表存在性守衛 — 與 [2]/[8]/[9] 同模式。
+    try:
+        cur.execute("SELECT to_regclass('learning.exit_features') IS NOT NULL")
+        exists = cur.fetchone()[0]
+    except Exception as e:
+        return ("FAIL", f"exit_features table existence check failed: {e}")
+    if not exists:
+        return ("FAIL", "learning.exit_features missing — V999 not applied")
+
+    # This week (last 7d) vs last week (8d-14d ago) row counts.
+    # 本週（最近 7d）vs 上週（8d-14d 前）行數。
+    try:
+        cur.execute(
+            "SELECT COUNT(*) FROM learning.exit_features "
+            "WHERE ts > now() - interval '7 days'"
+        )
+        this_week = int(cur.fetchone()[0] or 0)
+        cur.execute(
+            "SELECT COUNT(*) FROM learning.exit_features "
+            "WHERE ts > now() - interval '14 days' "
+            "AND ts <= now() - interval '7 days'"
+        )
+        last_week = int(cur.fetchone()[0] or 0)
+    except Exception as e:
+        return ("WARN", f"exit_features rate query failed: {e}")
+
+    base = f"this_week={this_week}, last_week={last_week}"
+
+    # FAIL: completely silent — EDGE-P1b assumption broken.
+    # FAIL：完全靜默 — EDGE-P1b 假設破裂。
+    if this_week == 0:
+        if last_week == 0:
+            return ("FAIL", base + " — writer dead ≥2 weeks (EDGE-P1b stalled; "
+                    "check exit_feature_writer.rs + paper_state hook)")
+        return ("FAIL", base + " — writer went silent this week "
+                "(check exit_feature_writer.rs + Rust panic log)")
+
+    # Special case: last_week == 0 but this_week > 0 → writer just started
+    # or recovered from outage. Treat as PASS with note.
+    # 特例：last_week=0 但 this_week>0 → writer 剛啟動或剛恢復。PASS + 註解。
+    if last_week == 0:
+        return ("PASS", base + " — writer recently activated "
+                "(no historical baseline; defer trend evaluation 1 more week)")
+
+    ratio = this_week / last_week
+
+    # WARN: severe decay (< 30% of last week).
+    # WARN：嚴重衰減（<30% 上週）。
+    if ratio < 0.3:
+        return ("WARN", base + f" (ratio={ratio:.2f}) — severe decay <30%; "
+                "EDGE-P1b accumulation stalled, investigate fill rate + writer health")
+
+    # WARN: moderate decay (30%-50% of last week).
+    # WARN：中度衰減（30%-50% 上週）。
+    if ratio < 0.5:
+        return ("WARN", base + f" (ratio={ratio:.2f}) — moderate decay 30-50%; "
+                "monitor next-week trend")
+
+    # PASS: stable or growing.
+    # PASS：穩定或成長。
+    return ("PASS", base + f" (ratio={ratio:.2f}) — accumulation healthy")
+
+
+def check_shadow_exit_agreement_phase2(cur) -> tuple[str, str]:
+    """[15] G6-02 (2026-04-24): Combine Layer shadow exit Python↔Rust agreement.
+
+    MODULE_NOTE (EN): EDGE-P2 passive-wait healthcheck — the EDGE-P2 "flip
+    shadow_enabled=true and observe N days" TODO requires that the Combine
+    Layer (Python decision side) and the Physical-only baseline (Rust track P
+    decision side) agree on ≥95% of close events. Without this check, the
+    flip period could silently produce a divergent Combine vs Physical
+    distribution that operator only notices at TODO sign-off (potentially
+    days late).
+
+    Note on column semantics: V021 schema does not have separate
+    `decision_python` / `decision_rust` columns; the agreement signal is
+    encoded in the `disagreed BOOLEAN` column (`disagreed=FALSE` means the
+    Combine output matched what Physical-only would have produced — i.e.
+    Python ↔ Rust agree). This check computes 1 - disagreed_ratio over the
+    last 24h window. Phase 2 target ≥95% (this G6-02 check); existing [8]
+    `check_shadow_exit_ratio` uses ≥60% as the soft entry-criterion floor.
+
+    Three-state output:
+      - PASS: 24h rows = 0 (Phase 1a dormant — shadow_enabled=false; deferred
+        to [8]'s TOML-based triage), OR agreement ≥95%.
+      - WARN: 80% ≤ agreement < 95% (Phase 2 below target but above
+        intervention threshold; investigate disagreement_reason distribution).
+      - FAIL: agreement < 80% (Combine layer materially diverging from
+        Physical baseline; flip should be reverted, EDGE-P2 paused).
+
+    Distinction vs [8] `check_shadow_exit_ratio`:
+      - [8]: Phase 2 entry guard. Asks "is shadow_enabled=true and writer
+        firing?" + "is agreement ≥60% soft floor?". Checks the TOML state
+        machine + writer liveness.
+      - [15]: Phase 2 quality gate. Asks "given shadow is firing, is the
+        Combine agreement strict ≥95% target met?". No TOML check — relies
+        on row presence to indicate Phase 2 is actively underway.
+
+    [15] G6-02（2026-04-24）：Combine Layer shadow exit Python↔Rust 一致率守衛
+    （EDGE-P2 flip 期被動等待 ≥95% agreement TODO）。V021 schema 用
+    `disagreed BOOLEAN` 編碼一致性（FALSE=Combine 同 Physical baseline=Python ↔
+    Rust agree）。本 check 算 24h 窗口 1 - disagreed_ratio。Phase 2 目標 ≥95%。
+    與 [8] 區別：[8] 是入場守衛（TOML state + ≥60% 軟底線）；[15] 是品質閘
+    （strict ≥95% 目標）。三態：PASS（24h=0 Phase 1a dormant，或 ≥95%）/
+    WARN（80-95%）/ FAIL（<80% 且非空，Combine 材質性分歧 EDGE-P2 應回退）。
+    """
+    # Defensive rollback: keep cursor clean.
+    # 防禦式 rollback：保持 cursor 乾淨。
+    try:
+        cur.connection.rollback()
+    except Exception:
+        pass
+
+    # Table existence guard.
+    # 表存在性守衛。
+    try:
+        cur.execute("SELECT to_regclass('learning.decision_shadow_exits') IS NOT NULL")
+        exists = cur.fetchone()[0]
+    except Exception as e:
+        return ("FAIL", f"decision_shadow_exits table existence check failed: {e}")
+    if not exists:
+        return ("FAIL", "learning.decision_shadow_exits missing — V021 not applied")
+
+    # 24h agreement query — `disagreed` BOOLEAN encodes Combine vs Physical
+    # mismatch. Agreement = 1 - disagreed_ratio.
+    # 24h agreement 查詢 — `disagreed` 編碼 Combine vs Physical 分歧。
+    # Agreement = 1 - disagreed_ratio。
+    try:
+        cur.execute(
+            "SELECT "
+            "  COUNT(*)::int AS total, "
+            "  COUNT(*) FILTER (WHERE disagreed = FALSE)::int AS agree_n "
+            "FROM learning.decision_shadow_exits "
+            "WHERE ts > now() - interval '24 hours'"
+        )
+        total, agree_n = cur.fetchone()
+        total = int(total or 0)
+        agree_n = int(agree_n or 0)
+    except Exception as e:
+        return ("WARN", f"shadow_exit agreement query failed: {e}")
+
+    # Phase 1a dormant (shadow_enabled=false) — table empty by design.
+    # Defer to [8] for the TOML-based triage; here we just pass with note.
+    # Phase 1a dormant（shadow_enabled=false）— 表預期空，pass + note，
+    # 細部 TOML triage 留給 [8]。
+    if total == 0:
+        return ("PASS",
+                "decision_shadow_exits 24h=0 (Phase 1a dormant; agreement "
+                "evaluation deferred until shadow_enabled=true — see [8])")
+
+    agree_pct = 100.0 * agree_n / total
+    base = f"24h_total={total}, agree={agree_n} ({agree_pct:.1f}%)"
+
+    # FAIL: Combine layer materially diverging — EDGE-P2 should be paused.
+    # FAIL：Combine 層材質性分歧 — EDGE-P2 應回退。
+    if agree_pct < 80.0:
+        return ("FAIL",
+                base + " — agreement <80%; EDGE-P2 flip should be reverted "
+                "(set [exit].shadow_enabled=false in risk_config_demo.toml + "
+                "investigate disagreement_reason distribution)")
+
+    # WARN: below 95% strict target but above intervention threshold.
+    # WARN：低於 95% 嚴格目標但高於介入門檻。
+    if agree_pct < 95.0:
+        return ("WARN",
+                base + " — Phase 2 target ≥95% not met; investigate "
+                "disagreement_reason breakdown via SQL: "
+                "SELECT disagreement_reason, COUNT(*) FROM "
+                "learning.decision_shadow_exits WHERE disagreed=TRUE AND "
+                "ts > now() - interval '24 hours' GROUP BY 1 ORDER BY 2 DESC")
+
+    # PASS: ≥95% target met.
+    # PASS：≥95% 目標達成。
+    return ("PASS", base + " — Phase 2 ≥95% target met")
+
+
 # ---- main ----
 
 def main() -> int:
@@ -1370,12 +1721,38 @@ def main() -> int:
             # §2.2 #4 盲點。必須在 cursor 區塊內跑（會發 SQL）。
             s, m = check_pipeline_triangulation(cur, close_fills)
             results.append(("[Xb] pipeline_triangulation", s, m))
+
+            # [14] G6-02 (2026-04-24): exit_features weekly accumulation rate —
+            # EDGE-P1b passive-wait sentinel for ML-training row growth.
+            # [14] G6-02（2026-04-24）：exit_features 週環比累積速率
+            # — EDGE-P1b 被動等待 ML 訓練樣本累積守衛。
+            s, m = check_exit_features_accumulation_rate(cur)
+            results.append(("[14] exit_features_accumulation_rate", s, m))
+
+            # [15] G6-02 (2026-04-24): shadow exit Combine vs Physical
+            # agreement — EDGE-P2 Phase 2 quality gate (≥95% strict).
+            # Phase 1a dormant when shadow_enabled=false (table empty → PASS).
+            # [15] G6-02（2026-04-24）：shadow exit Combine vs Physical 一致率
+            # — EDGE-P2 Phase 2 品質閘（≥95% 嚴格）。Phase 1a 空表 PASS。
+            s, m = check_shadow_exit_agreement_phase2(cur)
+            results.append(("[15] shadow_exit_agreement_phase2", s, m))
     finally:
         conn.close()
 
     # [7] filesystem check
     s, m = check_edge_estimates_freshness()
     results.append(("[7] edge_estimates_freshness", s, m))
+
+    # [13] G6-02 (2026-04-24): edge_estimator_scheduler freshness +
+    # cell-count combined sentinel (G1-01 / G4-04 recovery monitoring).
+    # Tighter than [7] (6h vs 90min) + (50 cells vs 10 cells); both run
+    # because [7] catches steady-state hourly cadence + dormant prefix
+    # breakdown, [13] catches G1-01-class scheduler outage + coverage target.
+    # [13] G6-02（2026-04-24）：edge_estimator_scheduler 雙閾值哨兵
+    # （G1-01 / G4-04 復原監控）。比 [7] 嚴：6h vs 90min + 50 cells vs 10。
+    # 兩個並存 — [7] 抓穩態小時節奏 + dormant prefix；[13] 抓 G1-01 級停滯。
+    s, m = check_edge_estimator_scheduler_fresh()
+    results.append(("[13] edge_estimator_scheduler_fresh", s, m))
 
     # [11] EDGE-DIAG-1 Phase 3 gate (cron-driven, filesystem-only).
     # Also self-bootstraps daily snapshot history in audit/daily/.
