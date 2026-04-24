@@ -438,6 +438,30 @@ impl TickPipeline {
                     warn!(reason = %reason, "SESSION HALTED / 會話暫停");
                     self.session_halted = true;
                     self.paper_paused = true;
+                    // G1-06 (Root Principle #5/#6): on Live drawdown halts, also
+                    // delete authorization.json so the Live session cannot be
+                    // silently un-paused without operator re-approval. The
+                    // live_auth_watcher (5s poll) will tear down the Live slot
+                    // on the next cycle. Demo / Paper kinds are no-op (Demo /
+                    // Paper have no authorization.json). The pure decision
+                    // function also gates daily-loss halts out (operator
+                    // policy: daily-loss is an opt-in limit, not a re-auth
+                    // event). Fail-soft: a failed remove_file does not block
+                    // the close-all loop below.
+                    // G1-06（根原則 #5/#6）：Live drawdown halt 同步刪除
+                    // authorization.json，避免靜默 unpause；Demo/Paper 與
+                    // daily-loss 不觸發。失敗也不阻塞下方關倉迴圈。
+                    if let Some(decision) = crate::drawdown_revoke::should_revoke(
+                        &reason,
+                        self.pipeline_kind,
+                    ) {
+                        let outcome = crate::drawdown_revoke::revoke_live_authorization(&decision);
+                        info!(
+                            outcome = outcome.kind_str(),
+                            reason = %reason,
+                            "drawdown auto-revoke evaluated / 提款自動撤銷已評估"
+                        );
+                    }
                     let all_pos: Vec<(String, bool, f64)> = self
                         .paper_state
                         .positions()

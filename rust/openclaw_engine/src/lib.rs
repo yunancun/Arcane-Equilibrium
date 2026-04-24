@@ -21,6 +21,7 @@ pub mod common;
 pub mod config;
 pub mod database;
 pub mod decision_context_producer;
+pub mod drawdown_revoke;
 pub mod dynamic_risk_sizer;
 pub mod edge_estimates;
 pub mod edge_predictor;
