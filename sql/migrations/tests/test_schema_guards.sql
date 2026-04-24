@@ -36,12 +36,22 @@
 --   * Guard C fail case — index exists with mismatched columns → RAISE
 --   * Guard C no-op case — index does not exist → no RAISE
 --
--- Migration-specific regression cases (G6-03 Wave 1, 2026-04-24):
---   * TEST 10 — V019 Guard A fixture-driven pass/fail (9-col required set)
---   * TEST 11 — V019 Guard A legacy-stub fail case (missing params_json / source)
---   * TEST 12 — V020 Guard A NOVEL: parent table absent MUST RAISE
---                (deviates from template no-op rule; V020 cannot rebuild
---                 index on missing parent, so absence is a hard error)
+-- Migration-specific regression cases (G6-03 V024 redo, 2026-04-24):
+--   * TEST 10 — V024 Guard A (retroactive for V019) fixture-driven pass case
+--                (9-col required set on fully-shaped strategist_applied_params)
+--   * TEST 11 — V024 Guard A (retroactive for V019) legacy-stub fail case
+--                (table missing params_json / source / prev_params_json → RAISE)
+--   * TEST 12 — V024 Guard A (retroactive for V019/V020) parent-absent fail case
+--                NOVEL: deviates from the template no-op rule because V024 is a
+--                retroactive guard, not a creator — if the parent table is
+--                missing, V019 was never applied and silent no-op would mask
+--                that. V024 RAISES instead.
+--
+-- Note: TEST 10/11/12 fixtures still anchor the 9-column required set V019
+--   creates; only the comment header was updated to reflect the redo path
+--   (Guard A now lives in V024, not in V019/V020). Fixture contracts unchanged.
+-- 註：TEST 10/11/12 fixture 仍鎖定 V019 建立的 9 欄位必要集；註解 header 更新
+--   反映重做路徑（Guard A 現居 V024，非 V019/V020）。fixture 契約不變。
 -- ============================================================
 
 \set ON_ERROR_STOP off
@@ -93,9 +103,10 @@ CREATE TABLE schema_guard_test.idx_base (
 CREATE INDEX idx_mismatch ON schema_guard_test.idx_base (created_at DESC);
 CREATE INDEX idx_correct  ON schema_guard_test.idx_base (strategy, promoted_at DESC);
 
--- Fixture 7 (G6-03 · V019 happy path): strategist_applied_params with all
--- 9 columns as V019 creates them. Guard A must no-op on this shape.
--- V019 建表正確時的 shape；Guard A 應 no-op。
+-- Fixture 7 (G6-03 V024 redo · V019 happy path): strategist_applied_params with
+-- all 9 columns as V019 creates them. V024 Guard A (retroactive for V019)
+-- must no-op on this shape.
+-- V019 建表正確時的 shape；V024 追溯式 Guard A 應 no-op。
 CREATE TABLE schema_guard_test.strategist_good (
     id               BIGSERIAL PRIMARY KEY,
     engine_mode      TEXT NOT NULL,
@@ -108,11 +119,11 @@ CREATE TABLE schema_guard_test.strategist_good (
     prev_params_json JSONB
 );
 
--- Fixture 8 (G6-03 · V019 legacy stub): simulates a pre-G6-03 hot-fix
+-- Fixture 8 (G6-03 V024 redo · V019 legacy stub): simulates a pre-V019 hot-fix
 -- that created an incomplete strategist_applied_params (missing
--- params_json + source + prev_params_json). Guard A must RAISE on this.
--- 模擬 G6-03 之前 hot-fix 不完整建表（缺 params_json/source/prev_params_json）；
--- Guard A 必須 RAISE。
+-- params_json + source + prev_params_json). V024 Guard A must RAISE.
+-- 模擬 pre-V019 hot-fix 不完整建表（缺 params_json/source/prev_params_json）；
+-- V024 追溯式 Guard A 必須 RAISE。
 CREATE TABLE schema_guard_test.strategist_legacy (
     id             BIGSERIAL PRIMARY KEY,
     engine_mode    TEXT NOT NULL,
@@ -399,15 +410,19 @@ END $$;
 
 
 -- ============================================================
--- TEST 10: V019 Guard A pass — strategist_applied_params with full
---          9-column shape → no RAISE
+-- TEST 10: V024 Guard A (retroactive for V019) pass —
+--          strategist_applied_params with full 9-column shape → no RAISE
 -- ============================================================
--- Why this covers V019 (not redundant with TEST 1):
---   TEST 1 uses a 2-element required array; V019 has 9. Regression
---   anchor — if a future refactor narrows V019's required list by
---   mistake, TEST 11 (the fail-case companion below) still catches
---   an incomplete column set. Paired tests keep the 9-element list
---   load-bearing.
+-- Why this covers V024 redo (not redundant with TEST 1):
+--   TEST 1 uses a 2-element required array; V024's retroactive guard for
+--   V019 has 9 required columns. Regression anchor — if a future refactor
+--   narrows the required list by mistake, TEST 11 (the fail-case companion
+--   below) still catches an incomplete column set. Paired tests keep the
+--   9-element list load-bearing.
+--
+--   Guard A originally lived in V019 (commit ff5bf1f, reverted 55ed449
+--   due to sqlx checksum collision); now lives in V024 as a pure-new
+--   migration. Fixture / required-column contract unchanged.
 -- ============================================================
 DO $$
 DECLARE
@@ -439,16 +454,16 @@ BEGIN
     END;
 
     IF NOT v_raised THEN
-        RAISE NOTICE 'TEST 10: PASS (V019 Guard A pass case — 9-col strategist_good, no RAISE)';
+        RAISE NOTICE 'TEST 10: PASS (V024 Guard A pass case — 9-col strategist_good, no RAISE)';
     ELSE
-        RAISE NOTICE 'TEST 10: FAIL (V019 Guard A should not raise on complete table)';
+        RAISE NOTICE 'TEST 10: FAIL (V024 Guard A should not raise on complete table)';
     END IF;
 END $$;
 
 
 -- ============================================================
--- TEST 11: V019 Guard A fail — legacy stub missing 3 required cols
---          (params_json / source / prev_params_json) SHOULD RAISE
+-- TEST 11: V024 Guard A (retroactive for V019) fail — legacy stub missing
+--          3 required cols (params_json / source / prev_params_json) SHOULD RAISE
 -- ============================================================
 DO $$
 DECLARE
@@ -482,20 +497,20 @@ BEGIN
     END;
 
     IF v_raised THEN
-        RAISE NOTICE 'TEST 11: PASS (V019 Guard A fail case — legacy stub RAISE captured as expected)';
+        RAISE NOTICE 'TEST 11: PASS (V024 Guard A fail case — legacy stub RAISE captured as expected)';
     ELSE
-        RAISE NOTICE 'TEST 11: FAIL (V019 Guard A should have raised on incomplete stub)';
+        RAISE NOTICE 'TEST 11: FAIL (V024 Guard A should have raised on incomplete stub)';
     END IF;
 END $$;
 
 
 -- ============================================================
--- TEST 12: V020 Guard A NOVEL fail — parent table ABSENT MUST RAISE
---          (deviates from the template no-op rule because V020 has
---           no CREATE TABLE — it can only rebuild the tie-break
---           index on an already-present parent. TEST 3 / 6 / 9
---           cover the template no-op rule; this test covers V020's
---           deliberate deviation.)
+-- TEST 12: V024 Guard A (retroactive for V019/V020) NOVEL fail — parent table
+--          ABSENT MUST RAISE (deviates from the template no-op rule because
+--          V024 is a retroactive guard, not a creator. TEST 3 / 6 / 9 cover
+--          the template no-op rule; this test covers V024's deliberate
+--          deviation. If V019 was never applied, V024 cannot validate shape
+--          and must surface the gap loudly rather than silent-pass.)
 -- ============================================================
 DO $$
 DECLARE
@@ -508,19 +523,22 @@ BEGIN
         ) THEN
             RAISE EXCEPTION 'unexpected_table_present';
         ELSE
-            -- Mirror V020 Guard A ELSE branch: parent missing is a hard error.
+            -- Mirror V024 Guard A ELSE branch: parent missing is a hard error
+            -- because V024 is a retroactive guard for V019/V020 (no CREATE
+            -- TABLE in V024 itself); silent no-op would mask V019 never having
+            -- been applied. V024's actual ELSE branch raises the same shape.
             RAISE EXCEPTION
                 'schema_guard A: schema_guard_test.strategist_absent does not exist. '
-                'V019 must be applied before V020. (Mirrors V020 migration guard.)';
+                'V019 must be applied before V024. (Mirrors V024 migration guard.)';
         END IF;
     EXCEPTION WHEN raise_exception THEN
         v_raised := TRUE;
     END;
 
     IF v_raised THEN
-        RAISE NOTICE 'TEST 12: PASS (V020 Guard A — parent absent RAISE captured as expected)';
+        RAISE NOTICE 'TEST 12: PASS (V024 Guard A — parent absent RAISE captured as expected)';
     ELSE
-        RAISE NOTICE 'TEST 12: FAIL (V020 Guard A should RAISE when parent table absent)';
+        RAISE NOTICE 'TEST 12: FAIL (V024 Guard A should RAISE when parent table absent)';
     END IF;
 END $$;
 
