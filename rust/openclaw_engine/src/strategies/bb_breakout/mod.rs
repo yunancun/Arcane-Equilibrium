@@ -275,9 +275,20 @@ impl Strategy for BbBreakout {
     }
 
     /// Reset per-symbol position state on external close (risk-stop).
-    /// Preserves `squeeze_detected_ms` (squeeze can continue across close).
+    /// Preserves `squeeze_detected_ms` (squeeze record is preserved across
+    /// close — rationale: the squeeze regime can continue observing the same
+    /// market condition).
+    ///
+    /// FIX-26-DEADLOCK-1 note (2026-04-24): post-fix, `squeeze_detected_ms`
+    /// is auto-cleared in `on_tick` when it has expired (see line ~346+).
+    /// So the preservation across close is now bounded by the 45-min expiry
+    /// window rather than being indefinite. This is the intended semantic
+    /// — external close no longer creates a permanent-dormant hole.
+    ///
     /// 外部平倉（風控止損）時重設該幣種內部狀態；`squeeze_detected_ms` 保留
-    /// （壓縮狀態可跨越平倉延續）。
+    /// （壓縮狀態可跨越平倉延續）。FIX-26-DEADLOCK-1（2026-04-24）修復後，
+    /// squeeze_detected_ms 在過期時會由 on_tick 自動清除，跨平倉保留現受
+    /// 45min expiry 窗口約束（而非原本無限保留）。
     fn on_external_close(&mut self, symbol: &str) {
         if let Some(st) = self.symbols.get_mut(symbol) {
             st.position = None;
