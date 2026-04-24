@@ -1,13 +1,13 @@
 # OpenClaw TODO — 工作清單（v3 · 單一時間軸版）
 
-**最後更新**：2026-04-25 01:55 CEST（Wave 2 batch 5：G3-02 Phase A 完成（part 1+2）+ G5-02 完成 + G7-02/G5-04 sub-agent 進行中；Linux test baseline 2018/0）
+**最後更新**：2026-04-25 02:05 CEST（Wave 2 batch 6：G7-02 EWMA + G5-04 ai_service 完成；Linux baseline 2023/0；engine 部署 alive）
 **版本**：v3（Wave 線性版；廢除雙軌 P0-P4 章節，P0/P1/P2 降為每項 tag）
 **舊版歸檔**：v2 `docs/archive/2026-04-24--todo_v2_dual_axis_snapshot.md`（458 行，Wave+P 雙軌）· v1 `docs/archive/2026-04-24--todo_v1_refactor_snapshot.md`（328 行）· v0 `docs/archive/2026-04-24--todo_snapshot_pre_refactor.md`（700 行）
 **簽核**：PM Approved FIX-PLAN v2 → [Sign-off](docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-24--FixPlan_v2_PMApproval.md)
 **基礎方案**：[FIX-PLAN v2](docs/CCAgentWorkSpace/PA/workspace/reports/2026-04-24--4.24TodoAudit_FixPlan_v2.md) · [10-Agent audit 索引](docs/audits/2026-04-24--todo_refactor_audit.md)
 
 **Engine**（採集 2026-04-25 01:30 CEST · 雙 P0 RCA fix 部署後 · ssh verify）：engine 復活 ✅ · `engine_alive: true` · snapshot_age **17.2s**（< 45s 閾值）· paper alive 18.3s / demo alive 17.2s · binary 2026-04-25 01:29 CEST 含 G7-09 + G6-FUP fixes · HEAD `b980986` · `pipeline ready — 5 strategies (ma_crossover, bb_reversion, bb_breakout, grid_trading + 1) on 5 symbols (BTCUSDT/ETHUSDT/SOLUSDT/XRPUSDT/DOGEUSDT) balance 951.94` · `fan-out: all pipelines ready, starting tick distribution` · `STRATEGIST-PARAMS-PERSIST-1 restored N=1 tuned params from DB` ✅（背景任務無阻主線） · G7-09 fill fee path 自此 tick 起活著，post-fix maker 2bps 列開始累積
-**測試基準（2026-04-25）**：engine lib **2018 / 0 fail**（2003 + G6-FUP 6 + G3-02 A1 5 + G3-02 A2 4）· pytest 2996
+**測試基準（2026-04-25）**：engine lib **2023 / 0 fail**（2003 + G6-FUP 6 + G3-02 A1 5 + G3-02 A2 4 + G7-02 5）· pytest 2996
 **21d demo 時鐘**：起算 2026-04-16 22:16 → 解鎖 2026-05-07
 
 ---
@@ -16,7 +16,7 @@
 
 **Wave 1 進度**：10/11 完成；剩 G1-04 P1 背景（依賴 PostOnly demo 累積 + **G7-09 已 deploy** 需 ~1w 後 compute）。
 
-**Wave 2 進度**：8/若干 完成（G3-02 ✅ + G5-02 ✅ + G5-05 ✅ + G5-07 ✅ + G3-01 RFC ✅ + G7-01 ✅ + G7-09 ✅ + 雙 P0 RCA ✅）；G7-02 / G5-04 sub-agent 跑中；G7-05 blocked on data（~05-01+）；G3-03/04 / G4-01~03 / G5-03/06 / G7-03/04/06/07/08 未開工。
+**Wave 2 進度**：10/若干 完成（G3-02 ✅ + G5-02 ✅ + G5-04 ✅ + G5-05 ✅ + G5-07 ✅ + G3-01 RFC ✅ + G7-01 ✅ + G7-02 ✅ + G7-09 ✅ + 雙 P0 RCA ✅）；G7-05 blocked on data（~05-01+）；G3-03/04 / G4-01~03 / G5-03/06 / G7-03/04/06/07/08 未開工。
 
 **本週 Top 4**（按順序）：
 
@@ -230,7 +230,7 @@ ssh trade-core "cd ~/BybitOpenClaw/srv && python3 helper_scripts/db/passive_wait
 | **G5-01** | 🟠P1 | `main.rs` 2062 行拆分 | 無 | E5+E1 / E2 | 2-3d | <1200 lines |
 | **G5-02** | ✅完成 | `live_session_routes.py` 1449 → 706+436+439（live_session_routes 706 / live_session_endpoints 436 / live_session_account_routes 439，全 <800）+ `live_session_governance` 178；sibling 走 `from . import live_session_routes as core` 經 namespace 引用，保留所有外部 import + monkeypatch；14 routes byte-identical；test_live_gate_fallback 14/14 + pytest -k live 117/0 + pytest -k live_trust|live_session|live_gate 77/0 全綠 | 無 | E5+E1 / E2 | 完成 2026-04-25 | [G5-02 report](.claude_reports/20260425_014424_g5_02_live_session_split.md)（commit `e0d02b2`）|
 | **G5-03** | 🟠P1 | `instrument_info.rs` 1975 行拆 | 無 | E5+E1 / E2 | 1-2d | <1200 lines |
-| **G5-04** | 🟡P2 | `ai_service.py` 1258 行拆 | 無 | E5+E1 / E2 | 1d | <1200 lines |
+| **G5-04** | ✅完成 | `ai_service.py` **1318**（實測比 TODO 估的 1258 多 60 行）→ ai_service.py 242（facade + singleton + system prompts + factory）+ ai_service_dispatch.py 813（`AIService` class + 5 handlers）+ ai_service_listener.py 373（`_probe_unix_listener_alive` + `AIServiceListener`）；sibling pattern 同 G5-02（`from . import ai_service as core` + `core.<name>` 引用）；外部 import 透過 re-export 不變；Linux pytest -k 'ai_service or llm or budget' **50/0**；3 檔全 <1200，2 檔 <800（dispatch 813 為 class cohesion 不可避免） | 無 | E5+E1 / E2 | 完成 2026-04-25 | [G5-04 report](.claude_reports/20260425_015603_g5_04_ai_service_split.md)（commit `37172b0`）|
 | **G5-05** | ✅完成 | `bb_reversion.rs` 1143 → 3 sibling：mod.rs 433 + params.rs 287 + tests.rs 460（全 <800 §九 warning 線）；`positions`/`cooldown`/`persistence` 由 private → `pub(crate)` 讓 sibling tests.rs mutate；`BbReversionParams` 由 `pub use params::BbReversionParams` 保留外部 path；bb_reversion filter 20/20 + stress_integration 35/35 全綠；Linux release 2003/0 | 無 | E5 | 完成 2026-04-25 | [G5-05 report](.claude_reports/20260425_000438_g5_05_bb_reversion_split.md)（commit `8523946`）|
 | **G5-06** | 🟡P2 | 其他 5 檔（bybit_rest_client / order_manager / startup / resting_orders / risk_config） | 無 | E5+E1 / E2+E4 | 5-8d 全部 | all <1200 |
 | **G5-07** | ✅完成 | `event_consumer/tests.rs` 1298→拆至 tests/ 6 sibling：mod.rs 298（shared helpers + 8 util tests）· handlers_paper_cmd 371 · exit_config_ipc 214 · governor_override 160 · cross_engine 123 · reconciler 89 · submit_order 76；全 <1200；42 tests 逐字保留；Linux release 1992/0（baseline 不動）；0 production file touched | G1-02 | E5+E1 / E2+E4 | 完成 2026-04-24 | [G5-07 report](.claude_reports/20260424_233852_g5_07_tests_split.md)（commit `913b536`）|
@@ -245,7 +245,7 @@ ssh trade-core "cd ~/BybitOpenClaw/srv && python3 helper_scripts/db/passive_wait
 | ID | Tag | 項目 | 前置 | 負責修/驗 | 工時 | 完成標準 |
 |---|---|---|---|---|---|---|
 | **G7-01** | 🟡surface ready, router 未 wire | Kelly 分級 tier boundaries 參數化 — `KellyConfig.young_threshold` / `mature_threshold` 默認 50/200 + `validate()`（拒 0 / 逆轉）；`RiskConfig.kelly` mirror struct + TOML `[kelly]` 三環境補齊（demo/live/paper）；`kelly_sizer.rs:153-159` fractional-Kelly tier branch 改讀 config；+8 unit tests（kelly_sizer 4 + risk_config 4）；Linux release 2003/0 ✅ · **Caveat**：`set_kelly_config()` 在 router callsites 尚未 wire（FA L3 audit 標「未啟用」）→ 新 TOML 尚未 flow 到 runtime，defaults 保持當前行為；wiring 為後續任務（可能 part of G4-01 labels work） | 無 | QC+E1 / FA | 完成 surface 2026-04-25（wiring 未做）| [G7-01 report](.claude_reports/20260425_000414_g7_01_kelly_tier_config.md)（commits `42758e7` feature + `e4b63b4` test fix）|
-| **G7-02** | 🟠P1 | EWMA Vol lambda 參數化（per-timeframe） | 無 | QC+E1 | 0.5d | λ configurable |
+| **G7-02** | ✅完成 | EWMA Vol lambda per-timeframe 參數化 — 新 `EwmaVolConfig { default_lambda, lambdas: HashMap<String, f64> }`（預設 0.97 mirror G7-02 前 RiskMetrics 硬編碼）+ `validate()` 強制 (0.0, 1.0) 開區間 + `lambda_for_timeframe()` helper；接入 `RiskConfig.ewma_vol` + 3-env TOML `[ewma_vol]` 區段（demo/live/paper 預設 default_lambda=0.97 / lambdas={} 保留現行為）；`indicators::IndicatorEngine::compute_all_with_lambda` 接 config；5 unit tests（default / out-of-range / TOML round-trip / partial fallback / per-tf lookup）· Linux release **2023/0** ✅ · `--rebuild` 部署 engine alive 13.1s ✅ | 無 | QC+E1 | 完成 2026-04-25 | TOML configurable ✅ / 預設保現行為 / commit `6b7246d` |
 | **G7-03** | 🟠P1 | Hurst + Hysteresis 整合（6-period lag） | 無 | QC / FA+MIT | 2-3d | R/S analysis live |
 | **G7-04** | 🟠P1 | CUSUM 策略衰減監控 | 無 | QC+E1 | 1-2d | σ-based slack/threshold |
 | **G7-05** | 🟡passive wait | cost_gate grand_mean bind condition — G7-09 已 deploy（2026-04-24 23:41 CEST），開始累積 post-fix data；**當前狀態**（ssh verify 23:41）：grand_mean_bps=-9.80 / n_cells=62 / shrunk_bps>0 count=**0**；`>-50 bps` 條件已滿足，**`≥2 strategies shrunk>0` 未滿足**；預計 ≥1w post-fix fills（~2026-05-01+）後有足夠 maker/taker 混合樣本，屆時 (a) 校準閾值是否仍合理（artifact vs real edge） (b) 落地 cost_gate bind 判決 code（TBD：ExitConfig 新 flag 或 IPC patch）| G1-01 + G7-09 | QC+E1 / FA | 2-3h（post-data） | bind when grand_mean > -50 bps ∧ ≥2 strategies shrunk>0 + post-fix threshold validated |
