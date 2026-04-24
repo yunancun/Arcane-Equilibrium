@@ -389,19 +389,52 @@ class AIService:
         current_params: dict[str, Any],
         param_ranges: list[dict[str, Any]],
     ) -> str:
-        """Build prompt for Ollama strategy param tuning. / 構建 Ollama 策略參數調優 prompt。"""
-        # Format adjustable param ranges for the prompt
-        # 為 prompt 格式化可調參數範圍
+        """Build prompt for Ollama strategy param tuning. / 構建 Ollama 策略參數調優 prompt。
+
+        STRATEGIST-TUNE-CAP-ENFORCE-1 (2026-04-24): pre-compute ±30% allowed range
+        for each adjustable param and list it explicitly. Earlier prompt only said
+        "conservative (within ±30%)" and LLM proposals 100% violated it; Rust-side
+        cap (strategist_scheduler/mod.rs:48 MAX_PARAM_DELTA_PCT=0.30) rejected all
+        → strategist_applied_params永遠空表。Math should not be LLM's job.
+        預先算好邊界再讓 LLM 填值，不要讓 LLM 自己算 ±30%。
+        """
+        # Format adjustable param ranges for the prompt, including pre-computed
+        # ±30% delta cap bounds so the LLM doesn't have to do math.
+        # 為 prompt 格式化可調參數範圍，預算 ±30% cap 邊界避免 LLM 算錯。
         adjustable = [
             r for r in param_ranges
             if r.get("agent_adjustable", False)
         ]
+        # Must mirror rust/openclaw_engine/src/strategist_scheduler/mod.rs:48
+        # MAX_PARAM_DELTA_PCT = 0.30 — if Rust cap changes, update here.
+        # 須與 Rust 端 MAX_PARAM_DELTA_PCT 對齊；若 Rust 調 cap 此處亦改。
+        max_delta_pct = 0.30
         range_lines = []
         for r in adjustable:
-            cur_val = current_params.get(r["name"], "?")
-            range_lines.append(
-                f"  - {r['name']}: current={cur_val}, min={r.get('min', '?')}, max={r.get('max', '?')}"
-            )
+            name = r["name"]
+            cur_val = current_params.get(name, None)
+            outer_min = r.get("min", "?")
+            outer_max = r.get("max", "?")
+            # Pre-compute ±30% inner bounds when current is numeric.
+            # current 為數值時預算 ±30% 內部邊界。
+            if isinstance(cur_val, (int, float)) and cur_val != 0:
+                lo = cur_val * (1.0 - max_delta_pct)
+                hi = cur_val * (1.0 + max_delta_pct)
+                # Clip to outer min/max when provided.
+                if isinstance(outer_min, (int, float)):
+                    lo = max(lo, outer_min)
+                if isinstance(outer_max, (int, float)):
+                    hi = min(hi, outer_max)
+                range_lines.append(
+                    f"  - {name}: current={cur_val}, "
+                    f"allowed_range=[{lo:g}, {hi:g}] "
+                    f"(±30% cap, outer bounds min={outer_min} max={outer_max})"
+                )
+            else:
+                range_lines.append(
+                    f"  - {name}: current={cur_val}, min={outer_min}, max={outer_max} "
+                    f"(zero/unknown current — skip unless certain)"
+                )
         ranges_text = "\n".join(range_lines) if range_lines else "  (no adjustable params available)"
 
         return (
@@ -411,12 +444,17 @@ class AIService:
             f"  - Win rate: {win_rate:.2%}\n"
             f"  - Average PnL per fill: {avg_pnl:.6f}\n"
             f"  - Fill count: {fill_count}\n"
-            f"\nAdjustable parameters and ranges:\n{ranges_text}\n"
+            f"\nAdjustable parameters with PRE-COMPUTED allowed ranges:\n{ranges_text}\n"
             f"\nRecommend parameter adjustments to improve this strategy's performance.\n"
             f"Respond with ONLY a JSON object of param_name: new_value pairs.\n"
-            f"Only include params you want to change. Keep changes conservative (within ±30%).\n"
-            f"Weight params (weight_adx, weight_regime, weight_volume, weight_momentum) must sum to 65.\n"
-            f"If performance is acceptable or data is insufficient, respond with {{}}."
+            f"\n"
+            f"HARD RULES (violation → rejected, your suggestion wasted):\n"
+            f"  1. Each new value MUST be WITHIN the allowed_range shown above.\n"
+            f"     Example: if allowed_range=[42000, 78000], values like 30000 or 150000 are REJECTED.\n"
+            f"  2. Do not guess bounds — use the pre-computed allowed_range exactly.\n"
+            f"  3. Only include params you want to change.\n"
+            f"  4. Weight params (weight_adx, weight_regime, weight_volume, weight_momentum) must sum to 65.\n"
+            f"  5. If performance is acceptable or data is insufficient, respond with {{}} (empty object).\n"
         )
 
     @staticmethod
