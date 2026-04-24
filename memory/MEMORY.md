@@ -24,6 +24,7 @@
 - [多 CC session memory race (2026-04-23)](project_multi_session_memory_race.md) — memory Write 被隔壁 Mac session 誤 revert；協議 = commit-first / 不認識改動禁 revert / 接手三連加 memory log 檢查 / Mac 被 revert 從 Linux+origin 重建不可重做
 - [SSH bridge workflow (2026-04-21)](project_ssh_bridge_workflow.md) — Mac CC 為 SSOT 透過 ssh trade-core 遠端觸發 Linux runtime 任務；取代雙 CC session prompt 同步的浪費；Mac 本地允許 fetch + pull --ff-only（禁 merge/rebase/reset）；授權範圍 + 範例 + Linux CC 剩餘職能
 - [LinUCB shadow compare 保留 (2026-04-23)](project_linucb_shadow_compare_retention.md) — Phase 4 子任務 4-06 deferred；`linucb_shadow_compare.py` 保留至 Rust warm-start 實裝或 4-06 降級；同次 audit 已刪 backfill_directive_outcomes
+- [First-detection deadlock 反模式 (2026-04-24)](project_first_detection_deadlock_pattern.md) — `is_none()` guard + 無過期 auto-clear → symbol 永久 dormant；bb_breakout FIX-26-DEADLOCK-1 確認；查其他策略
 
 ## Working principles & autonomy
 - [Agent 自主權偏好](feedback_agent_autonomy.md) — 用戶只設global止盈止損，Agent自主決定策略/參數/時機/倉位
@@ -39,6 +40,7 @@
 - [中文輸出偏好](feedback_chinese_output.md) — 面向 operator 的對話輸出以中文為主（2026-04-15）；英文只留技術名詞/代碼/commit
 - [三環境風控 config 獨立](feedback_env_config_independence.md) — paper/live/demo risk_config*.toml 故意分開，禁「純衛生」合併（2026-04-19）
 - [Shell 指令必須抗貼上](feedback_shell_paste_safety.md) — 給 operator 手貼的 shell 一律單行 one-liner，禁 heredoc / 多行 for / 複雜變數注引號；複雜邏輯寫檔案（2026-04-21）
+- [Rolling-window breach look-ahead bias (2026-04-24)](feedback_indicator_lookahead_bias.md) — `rolling(N).max()` 含 current bar → breach=「current 是 N-bar max」必然 mean-revert；任何 sweep/研究必並列 leak-free shift(1) 對比
 
 ## Workflow & roles
 - [強制工作鏈與審計模板](feedback_workflow_audit_chain.md) — E1→E2→E4→PM 不可跳過；策略改動加 QA Audit；L1/L2/L3 分級模板
