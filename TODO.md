@@ -34,12 +34,19 @@
    - **未結案**：等 1w（~04-28）+ G7-09 FIX
 
 4. **⚪ Wave 2 啟動準備**
-   - **G7-09 FIX-FEE-POSTONLY-1（P1，解鎖 G1-04）**
+   - **G7-09 + G7-05 綁批做**（FIX-FEE-POSTONLY-1 + cost_gate grand_mean bind；解鎖 G1-04）— downstream cascade 強制綁批
    - G3-01 ExecutorAgent ConfigStore + IPC RFC
    - G5-01~07 refactor 可派多 subagent 並行（含 G5-07 tests.rs 1298 行）
    - G4-01 labels 加速準備
 
-**並行可派 sub-agent**：FA L1 / L2 proposal 清算（獨立軌道）· G7-09 FIX + G5-07 tests.rs split（並行可做）
+**並行可派 sub-agent**：FA L1 / L2 proposal 清算（獨立軌道）· G5-07 tests.rs split 獨立軌道可先派（不涉 fee 路徑，無 cascade 風險）
+
+**❌ 提前做 G7-09 評估結論**（2026-04-24 23:17）：不提前。
+- 不加速 G1-04 結案（仍等 04-28 資料 + fix 後重跑）
+- Downstream cascade（cost_gate / edge_estimator / exit_features / PnL 共用 fee 列）→ 必綁 G7-05 同批調閾值
+- Race condition 邊界（Fill 先於 OrderUpdate）使 fix 僅 best-effort
+- Historical 5.5bps 鎖死，fix 後分析仍需 split window
+- Context 新鮮度損失已由 [baseline report](.claude_reports/20260424_230500_g1_04_initial_baseline.md) root cause 鎖存彌補
 
 ---
 
@@ -183,7 +190,7 @@ ssh trade-core "cd ~/BybitOpenClaw/srv && python3 helper_scripts/db/passive_wait
 1. ✅ **6h cron 已安裝**（CLAUDE.md §七 強制）：`0 */6 * * * /home/ncyu/BybitOpenClaw/srv/helper_scripts/db/passive_wait_healthcheck_cron.sh`，log → `/tmp/openclaw/passive_wait_healthcheck_cron.log`；下次觸發 2026-04-25 00:00 CEST
 2. ✅ **Feature branches 已清理**：local `g1-02-event-consumer-split` + `audit/v022-missing-2026-04-24` 刪除；remote origin 兩者均 `gone`；`g1-06-drawdown-auto-revoke` 本地已無
 3. ✅ **Engine --rebuild 完成**（`ssh trade-core "source ~/.cargo/env && bash helper_scripts/restart_all.sh --rebuild"`）：新 binary 2026-04-24 23:09 · engine PID 1361203 · demo alive balance $951.94 · total_ticks 556302 · auto_migrate 綠（V024 已 applied 不重套）· Wave 1 全代碼 live
-4. ⚪ **下一 session**：Wave 2 啟動 — G3 AI 接線 + G5 refactor（G5-07 含 event_consumer/tests.rs 1298 行拆）+ G4 ML + **G7-09 FIX-FEE-POSTONLY-1（P1，解鎖 G1-04 full closure）** + G7-01~08 量化配置化
+4. ⚪ **下一 session**：Wave 2 啟動 — G3 AI 接線 + G5 refactor（G5-07 含 event_consumer/tests.rs 1298 行拆）+ G4 ML + **G7-09 FIX-FEE-POSTONLY-1 + G7-05 cost_gate bind 綁批做**（2026-04-24 23:17 明確決策：不提前做，等 Wave 2 與 G7-05 同批以獲 adversarial 完整 + 閾值同批校準；Wave 2 頭 2-3d 做趕得上 04-28 G1-04 cutoff）+ G7-01~08 量化配置化
 
 ---
 
@@ -235,11 +242,11 @@ ssh trade-core "cd ~/BybitOpenClaw/srv && python3 helper_scripts/db/passive_wait
 | **G7-02** | 🟠P1 | EWMA Vol lambda 參數化（per-timeframe） | 無 | QC+E1 | 0.5d | λ configurable |
 | **G7-03** | 🟠P1 | Hurst + Hysteresis 整合（6-period lag） | 無 | QC / FA+MIT | 2-3d | R/S analysis live |
 | **G7-04** | 🟠P1 | CUSUM 策略衰減監控 | 無 | QC+E1 | 1-2d | σ-based slack/threshold |
-| **G7-05** | 🟠P1 | cost_gate grand_mean bind condition | G1-01 | QC+E1 / FA | 2-3h | bind when grand_mean > -50 bps ∧ ≥2 strategies shrunk>0 |
+| **G7-05** | 🟠P1（**與 G7-09 綁批**）| cost_gate grand_mean bind condition — **決策**：綁 G7-09 FIX-FEE-POSTONLY-1 同批調；原因：fix 後 fee 列 2/5.5 bps 混合分布會推 grand_mean_bps 下降 → 「edge 看似變正」可能是 artifact 非真改善，bind 閾值 `>-50 bps` 需 post-fix 重校準 | G1-01 + G7-09 | QC+E1 / FA | 2-3h（含聯合校準）| bind when grand_mean > -50 bps ∧ ≥2 strategies shrunk>0 + post-fix threshold validated |
 | **G7-06** | 🟡P2 | Grid OU σ residual-based 修正 | 無 | QC / E1+E2 | 1d | σ = sqrt(Σ(Δx-mean)²/n) |
 | **G7-07** | 🟡P2 | Slippage / confluence 硬編碼清理 → TOML | 無 | QC+E1 / FA | 2-3d | 8 檔硬編碼移除 |
 | **G7-08** | 🟡P2 | outcome_backfiller SQL slow query 優化（PG resource）— **症狀**：1.5s slow query 反覆觸發，PG CPU/IO spike；**範圍**：(a) `EXPLAIN ANALYZE` 找熱點 query（`outcome_backfiller_runner.py` 系列）(b) 加 partial / composite index 或重寫 query (c) 確認 timeframe `'1m'` fix（`5e2981d`）後 backfill volume 是否仍對 PG 造成壓力；**前置**：confirm 反覆觸發來源（cron 頻率 / engine path），可能是 backfill 自然壓力非 bug | 無 | QC+E1 / FA | 1-2d | slow query <500ms p95 OR 觸發頻率降低 |
-| **G7-09** | 🟠P1 | FIX-FEE-POSTONLY-1 — `loop_handlers.rs:408` FIX-19b fallback 改經 pending-order TIF 判決 → `fee_rate_for_intent()`（`intent_processor/mod.rs:1084` 已實作，依 `TimeInForce::PostOnly` 選 maker 2bps vs taker 5.5bps）；修完 entry-side fee 可降 ~45%（maker 2 vs taker 5.5 = 3.5bps saving）· **觸發**：G1-04 initial baseline 揭發 demo 7d fee_rate 100% 均勻 taker 5.5bps，未反映 PostOnly maker rebate；intent_processor 已有 maker 路徑但 exec→fill 回流未接線 · **範圍**：(a) `event_consumer/loop_handlers.rs` exec→pending order lookup 加 TIF metadata (b) `paper_state/resting_orders.rs` 或 `order_manager.rs` pending struct 補 TIF (c) 加測 maker/taker fee 分流單測；保 engine lib 1992+ baseline · **阻塞**：G1-04 full closure 依此修完 | G1-02 E1 實作路徑可複用 | E1+QC / E2+E4 | 1-2d | demo fills fee_rate 開始出現 maker 2bps 列（現 100% taker）+ cost_gate PNL 反映真實 edge / [G1-04 baseline](.claude_reports/20260424_230500_g1_04_initial_baseline.md) |
+| **G7-09** | 🟠P1（**與 G7-05 綁批**）| FIX-FEE-POSTONLY-1 — `loop_handlers.rs:408` FIX-19b fallback 改經 pending-order TIF 判決 → `fee_rate_for_intent()`（`intent_processor/mod.rs:1084` 已實作，依 `TimeInForce::PostOnly` 選 maker 2bps vs taker 5.5bps）；修完 entry-side fee 可降 ~45%（maker 2 vs taker 5.5 = 3.5bps saving）· **觸發**：G1-04 initial baseline 揭發 demo 7d fee_rate 100% 均勻 taker 5.5bps，未反映 PostOnly maker rebate；intent_processor 已有 maker 路徑但 exec→fill 回流未接線 · **範圍**：(a) `event_consumer/loop_handlers.rs` exec→pending order lookup 加 TIF metadata（`PendingOrder.time_in_force: Option<TimeInForce>` 已存在 EDGE-P2-3 Phase 1B-3.1，hoist matched_key lookup 到 fee compute 前即可）(b) 新增 `intent_processor::fee_rate_for_tif(symbol, tif: Option<TimeInForce>)` helper（現有 `fee_rate_for_intent` 需 `&OrderIntent`，此 path 只有 `&PendingOrder`）(c) 加測 maker/taker fee 分流單測 + race test（Fill 先於 OrderUpdate 時 TIF=None → taker fallback 不退化）；保 engine lib 1992+ baseline · **downstream cascade 風險**：fee 列被 cost_gate grand_mean / edge_estimator shrunk_bps / exit_features.giveback_atr_norm / PnL aggregation 吃；改成 2/5.5 bps 混合分布後 grand_mean 下降 → 「edge 看似變正」是 artifact 而非真 edge；**故必與 G7-05 `cost_gate grand_mean bind condition` 同批做**，post-fix 重校準 bind 閾值 `>-50 bps` 是否仍合理 · **race condition 邊界**：Bybit Fill event 可能先於 OrderUpdate 填 `order_id_to_link`，此時 hoist lookup 拿不到 TIF → taker fallback（= 現行行為）；設計為 best-effort，不致命 · **不加速 G1-04 結案**：G1-04 full closure 需 (a) 1w 資料（~04-28）+ (b) fix 部署 + (c) fix 後重跑；即使今晚做，G1-04 仍等 04-28；Wave 2 頭 2-3d 做 G7-09 趕得上 cutoff · **決策（2026-04-24 23:17）**：等 Wave 2 與 G7-05 綁批，原因 = adversarial 完整 / downstream 閾值同批調 / Wave 1 收官乾淨；context 新鮮度損失由 [G1-04 baseline report](.claude_reports/20260424_230500_g1_04_initial_baseline.md) 鎖死 root cause 補償 · **歷史資料不可逆**：pre-fix 所有 fills 鎖 5.5bps；未來 baseline 分析需 split pre/post window | G1-02 E1 實作路徑可複用 / 與 G7-05 綁批 | E1+QC / E2+E4（QC+FA adversarial review 強制）| 1-2d（含與 G7-05 聯合校準）| (a) demo fills fee_rate 開始出現 maker 2bps 列（現 100% taker）(b) G7-05 cost_gate bind 閾值 post-fix 重 validated (c) engine lib 1992+ maintained / [G1-04 baseline](.claude_reports/20260424_230500_g1_04_initial_baseline.md) |
 
 ### Wave 2 完成標準
 
