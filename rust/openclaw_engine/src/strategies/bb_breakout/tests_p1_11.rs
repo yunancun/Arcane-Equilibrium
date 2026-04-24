@@ -354,6 +354,117 @@ fn test_fix26_deadlock_active_squeeze_preserved() {
 }
 
 #[test]
+fn test_fix26_deadlock_overflow_safety_via_saturating_add() {
+    // Edge case: stored_ts near u64::MAX. saturating_add at line ~410 (clear)
+    // and line ~492 (entry in_squeeze check) should both saturate, not panic.
+    // Without saturating_add, release builds wrap → in_squeeze permanently
+    // true (degenerate); debug builds panic. We construct a degenerate state
+    // with ts near u64::MAX and verify no panic + sensible behavior.
+    // 邊界：stored_ts 接近 u64::MAX；兩處 saturating_add 應 saturate 不 panic。
+    let mut s = BbBreakout::new();
+    s.min_persistence_ms = 0;
+    // First, register a normal squeeze.
+    let _ = s.on_tick(&ctx_p1_11(0.01, 0.5, 1.0, 0, 50_000.0, 50_500.0, 49_500.0));
+    // Then directly poke stored_ts to near u64::MAX (test-only; production
+    // can't reach this with real epoch ms in u64). We need pub(crate) field
+    // access; otherwise simulate via the public path. Use accessor mutation
+    // through `symbols.get_mut()` pattern, but field is on internal struct,
+    // so this test relies on `BbBreakoutPerSymbolState` exposing
+    // `squeeze_detected_ms` (it does via `pub` — line 53).
+    if let Some(st) = s.symbols.get_mut("BTC") {
+        st.squeeze_detected_ms = Some(u64::MAX - 100);
+    }
+    // Now tick at a very small ts. Without saturating_add, line 492's
+    // `ts + self.squeeze_expiry_ms` would overflow u64::MAX → wrap to small
+    // → ctx.timestamp_ms (large) < small_wrapped → in_squeeze=false. With
+    // saturating_add it saturates at u64::MAX → ctx.timestamp_ms < u64::MAX
+    // → in_squeeze=true (correct: we're inside the [u64::MAX-100, u64::MAX]
+    // window from the perspective of the stored timestamp).
+    // 不應 panic；行為由 saturating_add 定義（飽和而非 wrap）。
+    let _ = s.on_tick(&ctx_p1_11(0.02, 0.5, 1.0, u64::MAX - 50, 50_000.0, 50_500.0, 49_500.0));
+    // Test passes if we got here without panic. Specific behaviour (cleared
+    // or not) depends on saturating semantics; we just verify no crash.
+    // 通過 = 沒 panic；具體狀態取決於 saturating 語意，不細測。
+}
+
+#[test]
+fn test_fix26_deadlock_zero_expiry_degenerate() {
+    // Edge case: squeeze_expiry_ms = 0 makes auto-clear condition
+    // `ctx.timestamp_ms >= stored_ts.saturating_add(0)` ≡
+    // `ctx.timestamp_ms >= stored_ts`, true on the very next tick. Effectively
+    // disables squeeze (any squeeze record cleared on next tick before it
+    // can produce an entry). Not a useful production config but should not
+    // panic; document the degenerate behavior so operators don't
+    // accidentally set this expecting "no expiry".
+    // 邊界：squeeze_expiry_ms=0 等於 disable squeeze；不該 panic，文檔化此 degenerate。
+    let mut s = BbBreakout::new();
+    s.min_persistence_ms = 0;
+    s.squeeze_expiry_ms = 0;
+    let _ = s.on_tick(&ctx_p1_11(0.01, 0.5, 1.0, 100, 50_000.0, 50_500.0, 49_500.0));
+    // Next tick at ts=200 (≥ stored_ts=100 + 0): auto-clear fires; if bw
+    // qualifies, new record at ts=200; subsequent tick clears that too.
+    // We just verify no panic and the field cycles correctly.
+    // ts=200 (>= 100+0)：auto-clear；若 bw 仍 squeeze 則新登記 ts=200。
+    let _ = s.on_tick(&ctx_p1_11(0.01, 0.5, 1.0, 200, 50_000.0, 50_500.0, 49_500.0));
+    let _ = s.on_tick(&ctx_p1_11(0.04, 0.5, 1.0, 300, 50_000.0, 50_500.0, 49_500.0));
+    assert!(
+        !s.has_squeeze("BTC"),
+        "with expiry=0 + bw=0.04 (above squeeze_bw 0.03), squeeze must be cleared"
+    );
+}
+
+#[test]
+fn test_fix26_deadlock_exact_boundary_inclusive() {
+    // Boundary: ctx.timestamp_ms = stored_ts + squeeze_expiry_ms exactly.
+    // Code uses `>=` inclusive, so this should clear. Pinning the inclusive
+    // semantics means any future refactor to `>` (exclusive) breaks this
+    // test.
+    // 邊界 inclusive：ctx.ts == stored_ts + expiry 必須清；鎖住 `>=` 語意防 refactor 退化。
+    let mut s = BbBreakout::new();
+    s.min_persistence_ms = 0;
+    let _ = s.on_tick(&ctx_p1_11(0.01, 0.5, 1.0, 0, 50_000.0, 50_500.0, 49_500.0));
+    // ts = 0 + squeeze_expiry_ms (default 2_700_000) exactly
+    let _ = s.on_tick(&ctx_p1_11(
+        0.035, 0.5, 1.0, 2_700_000,
+        50_000.0, 50_500.0, 49_500.0,
+    ));
+    assert!(
+        !s.has_squeeze("BTC"),
+        "exact boundary ts == stored_ts + expiry must clear (>= inclusive)"
+    );
+}
+
+#[test]
+fn test_fix26_deadlock_external_close_then_expiry() {
+    // Interaction: on_external_close preserves squeeze_detected_ms (per
+    // docstring), but FIX-26-DEADLOCK-1 auto-clear must still fire on the
+    // NEXT post-expiry tick — preserving across close should NOT extend
+    // beyond the original 45-min window. This locks the docstring promise
+    // (mod.rs:281-291) into a regression test so future refactor of either
+    // on_external_close OR auto-clear can't silently break the bounded
+    // preservation invariant.
+    // 互動：on_external_close 跨平倉保留 squeeze_detected_ms 仍受 FIX-26-DEADLOCK-1
+    // 45min 窗口約束；鎖住 mod.rs:281-291 docstring 承諾。
+    let mut s = BbBreakout::new();
+    s.min_persistence_ms = 0;
+    // Establish squeeze.
+    let _ = s.on_tick(&ctx_p1_11(0.01, 0.5, 1.0, 0, 50_000.0, 50_500.0, 49_500.0));
+    assert!(s.has_squeeze("BTC"));
+    // External close (e.g., risk-stop) — squeeze record should survive this.
+    s.on_external_close("BTC");
+    assert!(
+        s.has_squeeze("BTC"),
+        "on_external_close must preserve squeeze (within-expiry window)"
+    );
+    // Tick past expiry — auto-clear should fire.
+    let _ = s.on_tick(&ctx_p1_11(0.035, 0.5, 1.0, 2_800_000, 50_000.0, 50_500.0, 49_500.0));
+    assert!(
+        !s.has_squeeze("BTC"),
+        "post-expiry auto-clear must fire even after external close (bounded preservation)"
+    );
+}
+
+#[test]
 fn test_fix26_deadlock_re_registration_after_clear() {
     let mut s = BbBreakout::new();
     s.min_persistence_ms = 0;
