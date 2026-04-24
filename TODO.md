@@ -6,8 +6,8 @@
 **簽核**：PM Approved FIX-PLAN v2 → [Sign-off](docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-24--FixPlan_v2_PMApproval.md)
 **基礎方案**：[FIX-PLAN v2](docs/CCAgentWorkSpace/PA/workspace/reports/2026-04-24--4.24TodoAudit_FixPlan_v2.md) · [10-Agent audit 索引](docs/audits/2026-04-24--todo_refactor_audit.md)
 
-**Engine**：PID 884467 · mtime 2026-04-24 02:06 · HEAD `1a53400`（待 `--rebuild` 帶 P1-11 FIX-26）
-**測試**：engine lib 1980 / 0 fail · pytest 2996
+**Engine**（採集 2026-04-24 22:00 CEST）：PID 1319839 · binary mtime 2026-04-24 21:58 · HEAD `09bd76c`（含 G1-02 step 1+2+3 + G1-03 部分 + G1-06 drawdown_revoke + V024 applied 21:58:11）
+**測試**：engine lib 1992 / 0 fail（baseline 1980 + G1-06 7 + parallel 5）· pytest 2996
 **21d demo 時鐘**：起算 2026-04-16 22:16 → 解鎖 2026-05-07
 
 ---
