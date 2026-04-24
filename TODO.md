@@ -1,12 +1,12 @@
 # OpenClaw TODO — 工作清單（v3 · 單一時間軸版）
 
-**最後更新**：2026-04-24 22:50 CEST（Wave 1 主體 + G6-03 V024 deployed verify）
+**最後更新**：2026-04-24 23:12 CEST（Wave 1 + G1-04 initial baseline + 4 operator items 全做）
 **版本**：v3（Wave 線性版；廢除雙軌 P0-P4 章節，P0/P1/P2 降為每項 tag）
 **舊版歸檔**：v2 `docs/archive/2026-04-24--todo_v2_dual_axis_snapshot.md`（458 行，Wave+P 雙軌）· v1 `docs/archive/2026-04-24--todo_v1_refactor_snapshot.md`（328 行）· v0 `docs/archive/2026-04-24--todo_snapshot_pre_refactor.md`（700 行）
 **簽核**：PM Approved FIX-PLAN v2 → [Sign-off](docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-24--FixPlan_v2_PMApproval.md)
 **基礎方案**：[FIX-PLAN v2](docs/CCAgentWorkSpace/PA/workspace/reports/2026-04-24--4.24TodoAudit_FixPlan_v2.md) · [10-Agent audit 索引](docs/audits/2026-04-24--todo_refactor_audit.md)
 
-**Engine**（採集 2026-04-24 22:47 UTC+2 verify）：uvicorn PID 1344338（22:30 start）· binary HEAD `418edbe` · **openclaw_engine tick process 不在 ps**（只 uvicorn + edge scheduler leader PID 1344342；engine tick 停擺需 operator `restart_all.sh --rebuild` 重啟）· V024 已 `installed_on 21:58:11` auto_migrate 套用 · edge_estimates.json 199 cells / age 16min fresh
+**Engine**（採集 2026-04-24 23:12 CEST · rebuild + ssh verify）：engine PID **1361203**（23:10 start）· binary mtime **2026-04-24 23:09** · HEAD `bb8b7a8` · uvicorn PID **1361256**（4 workers 23:10 start）· demo engine alive balance $951.94 · auto_migrate `seeded=0 applied=0 elapsed_ms=4`（V024 上次已 applied）· total_ticks 556302 · edge_estimates.json fresh · 6h cron 已安裝
 **測試基準（2026-04-24）**：engine lib 1992 / 0 fail（baseline 1980 + G1-06 7 + parallel 5）· pytest 2996
 **21d demo 時鐘**：起算 2026-04-16 22:16 → 解鎖 2026-05-07
 
@@ -16,24 +16,30 @@
 
 **Wave 1 進度**：9/10 完成（G1-01/02/03/05/06 + G6-01/02/03/04）；剩 G1-04 P1 背景（依賴 PostOnly demo 累積）+ G6-05 P2 選作。
 
-**本週 Top 3**（按順序）：
+**本週 Top 4**（按順序）：
 
-1. **✅ G1-01 + G1-02 + G6-03 三聯驗證通過（2026-04-24 22:47 CEST）**
-   - G1-01：edge_estimates.json 199 cells / age 16min / leader alive，healthcheck [13] PASS
-   - G1-02：event_consumer/mod.rs = 225 行（<<1200 硬上限）
-   - G6-03：V024 auto_migrate apply success at 21:58:11
+1. **✅ G1-01 + G1-02 + G6-03 三聯驗證通過 + Rebuild deploy（2026-04-24 23:10 CEST）**
+   - G1-01：edge_estimates.json 199 cells / age 16min / leader alive / [13] PASS
+   - G1-02：event_consumer/mod.rs = 225 行（<<1200）
+   - G6-03：V024 auto_migrate success installed_on 21:58:11
+   - Rebuild：engine PID 1361203 / binary 23:09 / Wave 1 全代碼 live
 
-2. **✅ G6-05 retired-check audit 完成**（2026-04-24 22:55 CEST）
-   - 結論：NO ZOMBIES DETECTED；[5] 為唯一退役且正確處理
-   - 17 checks 分類：9 ACTIVE / 3 DORMANT-BY-DESIGN / 1 UNDERFIRING-STRUCTURAL / 3 G6-02 NEW
-   - [Report](.claude_reports/20260424_225536_g6_05_retired_check_audit.md)
+2. **✅ G6-05 retired-check audit 完成（22:55 CEST）**：NO ZOMBIES；[Report](.claude_reports/20260424_225536_g6_05_retired_check_audit.md)
 
-3. **⚪ Wave 2 啟動準備**
-   - G3-01 ExecutorAgent ConfigStore + IPC RFC（PA 設計）
-   - G5-01~07 refactor 可派多 subagent 並行（含 G5-07 event_consumer/tests.rs 1298 行）
-   - G4-01 labels 加速準備（依 PipelineConfig.symbol Optional commit）
+3. **🟡 G1-04 initial baseline 完成 + FIX-FEE-POSTONLY-1 發現（23:05 CEST）**
+   - PostOnly dispatch 驗證成立（04-21 起 limit 佔比 0%→99%）
+   - fee_rate 7d 均勻 5.5bps 揭發 `loop_handlers.rs:408` FIX-19b 未用 `fee_rate_for_intent()`
+   - R:R 實證 P1-10：ma_reverse 0.45🔴 + grid_short 0.53🔴 + phys_lock 3.91✅
+   - [Report](.claude_reports/20260424_230500_g1_04_initial_baseline.md)
+   - **未結案**：等 1w（~04-28）+ G7-09 FIX
 
-**並行可派 sub-agent**：FA L1 / L2 proposal 清算（獨立軌道）· G6-05 E1/QA audit sweep
+4. **⚪ Wave 2 啟動準備**
+   - **G7-09 FIX-FEE-POSTONLY-1（P1，解鎖 G1-04）**
+   - G3-01 ExecutorAgent ConfigStore + IPC RFC
+   - G5-01~07 refactor 可派多 subagent 並行（含 G5-07 tests.rs 1298 行）
+   - G4-01 labels 加速準備
+
+**並行可派 sub-agent**：FA L1 / L2 proposal 清算（獨立軌道）· G7-09 FIX + G5-07 tests.rs split（並行可做）
 
 ---
 
@@ -103,9 +109,9 @@ ssh trade-core "cd ~/BybitOpenClaw/srv && python3 helper_scripts/db/passive_wait
 
 ---
 
-## ⏩ Wave 1（W17/18 · 4/24→5/08）— 基礎設施解凍【✅ 10/11 完成；剩 G1-04 P1 背景 + [12] FAIL 結構性非 bug】
+## ⏩ Wave 1（W17/18 · 4/24→5/08）— 基礎設施解凍【✅ 10/11 + G1-04 initial baseline + Operator items 全執行】
 
-**狀態（2026-04-24 22:55 CEST · G1-01/G1-02/G6-03 三聯驗 + G6-05 audit）**：實際 **10/11 核心完成**（G1-01/02/03/05/06 + G6-01/02/03/04/05；剩 G1-04 P1 背景）：
+**狀態（2026-04-24 23:12 CEST · G1-01/G1-02/G6-03 三聯驗 + G6-05 audit + G1-04 initial baseline + 4 operator items 全做 + rebuild 部署）**：實際 **10/11 核心完成 + G1-04 initial baseline（blocked by FIX-FEE-POSTONLY-1）**：
 - ✅ **G1-01 scheduler 復活驗證通過**：Linux ssh 實測 `edge_estimates.json` **199 cells / age 16min**（`_meta.n_cells=62` healthcheck [13] PASS · age=0.3h 遠低 <6h 閾值）· leader election PID `1344342` alive + lock_age=0.3h；scheduler daemon 已真正接管並累積，cells 從首發現的 1→59→**199**（recovery target ≥50 大幅超額）。
 - ✅ **G1-02 event_consumer 拆分驗證通過**：`event_consumer/mod.rs` = **225 行**（遠低 §九 800 警告線，遠低 1200 硬上限）· 10 sibling（bootstrap 847 / dispatch 1124 / governor_cooldown 126 / loop_handlers 1096 / paper_state_restore 132 / pending_sweep 286 / setup 108 / tests 1298 ⚠️ / types 305）· Linux release cargo test **1992/0 failed** 基準不變。⚠️ `tests.rs` 1298 行 > 1200 硬上限（非 Wave 1 完成標準範疇，登記為 Wave 2 G5 refactor 候選，新 tag G5-07）。
 - ✅ **G1-03 全 7/7 完成**：所有 Rust 違規檔 <1200 硬上限（main 1075 / instrument_info 1011 / order_manager 916 / bybit_rest_client 933 / resting_orders 659 / risk_config 908 / startup 1126）。
@@ -113,9 +119,9 @@ ssh trade-core "cd ~/BybitOpenClaw/srv && python3 helper_scripts/db/passive_wait
 - ✅ **G1-06 Drawdown auto-revoke 完成**：343 行 + 10 unit tests。
 - ✅ **G6-01/02/04 完成**：healthcheck + cron 6h 全線。
 - ✅ **G6-03 V024 auto_migrate apply 成功（新驗）**：`_sqlx_migrations` row 24 `installed_on 2026-04-24 21:58:11.767039+02 success=t`，engine 啟動前 auto_migrate 完成（CLAUDE.md §七 Phase 2 opt-in 路徑）· Guard A DO block PASS（無 RAISE），V019/V020 legacy table + indexes shape 正確；`psql -f V024` 人工路徑也已備好（2026-04-24 21:35 CEST）。sqlx checksum mismatch 規避（V024 純新增，不改 V019/V020）。
-- 🟠 **G1-04 fee drag / R:R baseline**：P1 tag 未動（依賴 PostOnly demo 累積 ≥1w，背景等待，非本 session 範圍；04-21 部署起算約 05-07 出結果）。
+- 🟡 **G1-04 fee drag / R:R baseline — initial 3d window baseline 完成**：PostOnly intent dispatch 驗證成立（04-21 起 limit 佔比 0%→99%）；**7d fee_rate 均勻 taker 5.5bps（sd=0.000）pre/post 零差異**揭發 FIX-FEE-POSTONLY-1 bug（`loop_handlers.rs:408` 未用 `fee_rate_for_intent()`）；R:R per-strategy 聚合 P1-10 ma_reverse 0.45🔴 + grid_short 0.53🔴 + fast_track_reduce 0.48🔴 + phys_lock 3.91✅ + grid_long 1.55🟢 實證。**未結案，等 Wave 2 G7-09 FIX-FEE-POSTONLY-1 + 滿 1w 後（~04-28+）重 compute**。報告 [.claude_reports/20260424_230500_g1_04_initial_baseline.md](.claude_reports/20260424_230500_g1_04_initial_baseline.md)
 - 🔴 **Healthcheck [12] FAIL 結構性已確認非新 bug**：bb_breakout 7d entries=0 — FIX-26-DEADLOCK-1 (`bcc5401`+`63957ad`) **已在 binary**，排除部署嫌疑。**根因 = P1-11 F1 結構性 1m bandwidth 永不達 expansion_bw=0.04**，屬 bb_breakout profile/timeframe 不匹配範疇（Wave 2+3 G2-05/G2-06 profile 調整或 5m timeframe 範圍）。本 session 不修。
-- ⚠️ **Runtime drift 注意**：Mac ssh 實測 `ps -ef | grep openclaw_engine` = 0 process（只 uvicorn + edge scheduler leader alive）· 先前 §三 line 9 敘述 `engine PID 1319839 · binary mtime 21:58` 與當前 runtime 不符（ps 測時 operator 可能已 stop 準備新 rebuild；V024 DB apply 已成功，rebuild 後 engine 啟動將直接用新 schema）。不阻塞 Wave 1 完成判定（G1-01 驗證依賴的是 edge_scheduler + json 輸出，不依賴 engine tick process；engine tick 停擺 = operator `restart_all.sh --rebuild` 恢復）。
+- ✅ **Engine rebuild + deploy 驗證**（2026-04-24 23:10 CEST `--rebuild` 成功）：新 binary 2026-04-24 23:09 · engine PID 1361203 · uvicorn PID 1361256（4 workers）· demo engine alive balance $951.94 · total_ticks 556302 · auto_migrate `seeded=0 applied=0`（V024 已 applied）· ExecutionListener / Private WS / position_reconciler / shadow_exit_writer / shadow_fill_writer 全啟動 · 含 Wave 1 全部代碼（G1-02/03/06 + V024 Guard A）。
 
 ### G1 Edge 危機根源修復
 
@@ -124,7 +130,7 @@ ssh trade-core "cd ~/BybitOpenClaw/srv && python3 helper_scripts/db/passive_wait
 | **G1-01** | ✅完成+驗證 | `edge_estimator_scheduler` 診斷 + 恢復 — operator commit `f32629c` (leader election) + `abc85c0` (graceful shutdown) 已修；2026-04-24 02:06 `--rebuild` 部署；**2026-04-24 22:47 CEST ssh verify**：cells **199** / `_meta.n_cells=62` / age 16min / healthcheck [13] PASS / leader PID `1344342` alive | 無 | MIT+E4 / E2 | 完成 2026-04-24 | [G1-01 report](.claude_reports/20260424_122700_g1_01_scheduler_recovery.md) · healthcheck [13] 連 3d PASS 累積中 |
 | **G1-02** | ✅完成+驗證 | `event_consumer/mod.rs` 拆（硬上限 1200）— **Step 1 `pending_sweep` ✅ + Step 2 `loop_handlers` ✅ (方案 B 3 sub-commit) + Step 3 `bootstrap` ✅ 完成；mod.rs 1762→**225**（<1200 ✅，遠低 §九 800 警告線）；loop_handlers.rs 1096 行（<1200）；Linux release **1992 / 0 failed**（baseline 1980 + G1-03 10 + LoopState 2 tests）**。**2026-04-24 22:47 Mac ssh `wc -l` verify**：mod.rs=225 / loop_handlers=1096 / bootstrap=847 / dispatch=1124 / pending_sweep=286 / types=305 / setup=108 / governor_cooldown=126 / paper_state_restore=132。⚠️ `tests.rs=1298` 超硬上限，登記為 Wave 2 G5-07 候選（**非 Wave 1 完成標準範疇**，mod.rs 是 Wave 1 目標）。 | 無 | E1+PA / E2 | 完成 2026-04-24 | <1200 行 ✅ + test cov ≥95% ✅ + engine lib pass ✅ / [PA plan Step 1-3](docs/CCAgentWorkSpace/PA/workspace/reports/2026-04-24--g1_02_event_consumer_split_plan.md) + [Step 2 detail plan](docs/CCAgentWorkSpace/PA/workspace/reports/2026-04-24--g1_02_step2_loop_handlers_detail_plan.md) + [Step 1 report](.claude_reports/20260424_130953_g1_02_step1_pending_sweep_split.md) + [Step 2 report](.claude_reports/20260424_141500_g1_02_step2_loop_handlers_complete.md) + [Step 3 report](.claude_reports/20260424_133541_g1_02_step3_bootstrap_extracted.md)（branch `g1-02-event-consumer-split` commits Step 1 `0155c9a` + Step 3 `96f9f92` + Step 2a `3b18990` / Step 2b `5989e6d` / Step 2c `1d8d7ab`）|
 | **G1-03** | ✅7/7 完成 | Rust 硬違反 7 檔 refactor — 7/7 全破 <1200 硬上限：resting_orders 1367→659 `224699e` / risk_config 1328→908 `e2317ae` / startup 1377→1126 `39773e1`+`ab03dcb` / **instrument_info 1975→1011 `1127f38` / bybit_rest_client 1725→933 `6b2eeee` / order_manager 1554→916 `d9d25eb` / main 2062→1075 `357a1e7`**（後 4 檔本 session 4 parallel subagent + 主 session 接手；含 silent-failure 防護驗證）。Mac debug cargo test **1992/0 failed** 雙驗 | G1-02 | E5+E1 / E2+E4 | 完成 2026-04-24 | all rust files <1200 lines ✅ |
-| **G1-04** | 🟠P1 | fee drag / R:R 邊際驗證基線 | PostOnly demo | QC / FA | 1-2d | counterfactual baseline report |
+| **G1-04** | 🟡initial baseline | fee drag / R:R 邊際驗證基線 — **2026-04-24 23:05 初步完成 3d window baseline**：PostOnly intent dispatch 驗證成立（order_type 04-21 起 limit 佔比 0%→99%）；**fee_rate 7d 均勻 5.5bps pre/post 零差異（sd=0.000）**揭發 FIX-FEE-POSTONLY-1 bug（`loop_handlers.rs:408` FIX-19b fallback 用 `fee_rate()` always taker，未用 `fee_rate_for_intent()` 的 maker 路徑）；R:R per-strategy 7d 聚合：grid_short 0.53🔴 / ma_reverse 0.45🔴（P1-10 confirmed）/ fast_track_reduce 0.48🔴 / phys_lock 3.91✅ / grid_long 1.55🟢。**未結案**：滿 1w（04-28）+ fix 部署後重 compute 才能真正驗 fee drop | PostOnly demo ≥1w | QC / FA | 繼續 passive wait ~04-28 | [G1-04 initial baseline](.claude_reports/20260424_230500_g1_04_initial_baseline.md) · 衍生 FIX-FEE-POSTONLY-1 新 Wave 2 G7 item |
 | **G1-05** | ✅完成 | PostOnly 配置驗證 — `use_maker_entry` 配置正確（demo/paper=true, live=false）；FA v1 誤判收回 | 無 | FA+E1 / E2 | 完成 2026-04-24 | [design intent doc](docs/references/2026-04-24--postonly_design_intent.md)（commit `0da10c0`）|
 | **G1-06** | ✅完成 | Drawdown auto-revoke 實裝（原則 #5/#6）— `drawdown_revoke.rs` 343 行 + Step 6 HaltSession 接線 + 10 unit tests；engine lib **1990 / 0 failed**（baseline 1980 + 10 新）| 無 | E1 / E2 | 完成 2026-04-24 | [G1-06 report](.claude_reports/20260424_103617_g1_06_drawdown_revoke.md)（commit `d1cdd49`）|
 
@@ -173,11 +179,11 @@ ssh trade-core "cd ~/BybitOpenClaw/srv && python3 helper_scripts/db/passive_wait
 2. ✅ **G1-02 verify**：Mac ssh `wc -l`→ mod.rs=225（遠低 §九 800 警告線，遠低 1200 硬上限）· loop_handlers=1096 · bootstrap=847 · dispatch=1124 · ⚠️ tests.rs=1298（**另登 Wave 2 G5-07 候選**，非 Wave 1 完成標準範疇）
 3. ✅ **G6-03 V024 verify**：`_sqlx_migrations` row 24 `installed_on 2026-04-24 21:58:11.767039+02 success=t`（auto_migrate opt-in `OPENCLAW_AUTO_MIGRATE=1` 生效）· sqlx checksum mismatch 規避（V024 純新增，不改 V019/V020）
 
-**Operator 下一步**：
-1. 設 6h cron `passive_wait_healthcheck.py`（CLAUDE.md §七 強制）
-2. （可選）清理 feature branch：`git branch -D g1-06-drawdown-auto-revoke g1-02-event-consumer-split audit/v022-missing-2026-04-24`（origin 已 gone）
-3. ⚠️ **engine tick process 不在 ps**（2026-04-24 22:47 ssh verify）：uvicorn PID 1344338 + edge_scheduler leader PID 1344342 alive，但 `ps -ef | grep openclaw_engine` = 0；先前 §三 line 9 敘述 PID 1319839 / binary 21:58 過期。**若需 tick resume**：operator `ssh trade-core "bash helper_scripts/restart_all.sh --rebuild"` 恢復（V024 DB 已 apply，重啟不會 crash）
-4. **下一 session**：Wave 2 啟動 — G3 AI 接線 + G5 refactor（G5-07 含 event_consumer/tests.rs 1298 行拆）+ G4 ML + G7 量化
+**Operator 下一步（2026-04-24 23:12 CEST · 四條已全執行）**：
+1. ✅ **6h cron 已安裝**（CLAUDE.md §七 強制）：`0 */6 * * * /home/ncyu/BybitOpenClaw/srv/helper_scripts/db/passive_wait_healthcheck_cron.sh`，log → `/tmp/openclaw/passive_wait_healthcheck_cron.log`；下次觸發 2026-04-25 00:00 CEST
+2. ✅ **Feature branches 已清理**：local `g1-02-event-consumer-split` + `audit/v022-missing-2026-04-24` 刪除；remote origin 兩者均 `gone`；`g1-06-drawdown-auto-revoke` 本地已無
+3. ✅ **Engine --rebuild 完成**（`ssh trade-core "source ~/.cargo/env && bash helper_scripts/restart_all.sh --rebuild"`）：新 binary 2026-04-24 23:09 · engine PID 1361203 · demo alive balance $951.94 · total_ticks 556302 · auto_migrate 綠（V024 已 applied 不重套）· Wave 1 全代碼 live
+4. ⚪ **下一 session**：Wave 2 啟動 — G3 AI 接線 + G5 refactor（G5-07 含 event_consumer/tests.rs 1298 行拆）+ G4 ML + **G7-09 FIX-FEE-POSTONLY-1（P1，解鎖 G1-04 full closure）** + G7-01~08 量化配置化
 
 ---
 
@@ -233,6 +239,7 @@ ssh trade-core "cd ~/BybitOpenClaw/srv && python3 helper_scripts/db/passive_wait
 | **G7-06** | 🟡P2 | Grid OU σ residual-based 修正 | 無 | QC / E1+E2 | 1d | σ = sqrt(Σ(Δx-mean)²/n) |
 | **G7-07** | 🟡P2 | Slippage / confluence 硬編碼清理 → TOML | 無 | QC+E1 / FA | 2-3d | 8 檔硬編碼移除 |
 | **G7-08** | 🟡P2 | outcome_backfiller SQL slow query 優化（PG resource）— **症狀**：1.5s slow query 反覆觸發，PG CPU/IO spike；**範圍**：(a) `EXPLAIN ANALYZE` 找熱點 query（`outcome_backfiller_runner.py` 系列）(b) 加 partial / composite index 或重寫 query (c) 確認 timeframe `'1m'` fix（`5e2981d`）後 backfill volume 是否仍對 PG 造成壓力；**前置**：confirm 反覆觸發來源（cron 頻率 / engine path），可能是 backfill 自然壓力非 bug | 無 | QC+E1 / FA | 1-2d | slow query <500ms p95 OR 觸發頻率降低 |
+| **G7-09** | 🟠P1 | FIX-FEE-POSTONLY-1 — `loop_handlers.rs:408` FIX-19b fallback 改經 pending-order TIF 判決 → `fee_rate_for_intent()`（`intent_processor/mod.rs:1084` 已實作，依 `TimeInForce::PostOnly` 選 maker 2bps vs taker 5.5bps）；修完 entry-side fee 可降 ~45%（maker 2 vs taker 5.5 = 3.5bps saving）· **觸發**：G1-04 initial baseline 揭發 demo 7d fee_rate 100% 均勻 taker 5.5bps，未反映 PostOnly maker rebate；intent_processor 已有 maker 路徑但 exec→fill 回流未接線 · **範圍**：(a) `event_consumer/loop_handlers.rs` exec→pending order lookup 加 TIF metadata (b) `paper_state/resting_orders.rs` 或 `order_manager.rs` pending struct 補 TIF (c) 加測 maker/taker fee 分流單測；保 engine lib 1992+ baseline · **阻塞**：G1-04 full closure 依此修完 | G1-02 E1 實作路徑可複用 | E1+QC / E2+E4 | 1-2d | demo fills fee_rate 開始出現 maker 2bps 列（現 100% taker）+ cost_gate PNL 反映真實 edge / [G1-04 baseline](.claude_reports/20260424_230500_g1_04_initial_baseline.md) |
 
 ### Wave 2 完成標準
 
