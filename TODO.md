@@ -101,9 +101,15 @@ ssh trade-core "cd ~/BybitOpenClaw/srv && python3 helper_scripts/db/passive_wait
 
 ---
 
-## ⏩ Wave 1（W17/18 · 4/24→5/08）— 基礎設施解凍【✅ 全部完成】
+## ⏩ Wave 1（W17/18 · 4/24→5/08）— 基礎設施解凍【✅ 主體 + G1-03 全完成，剩 G1-04 背景 + [12] FAIL 結構性】
 
-**狀態（2026-04-24 Mac CC G1-02 Step 2 收尾後）**：9/9 項完成 ✅；G1-02 **Step 1 + Step 2 + Step 3 全完成**（branch `g1-02-event-consumer-split` 6 commits：Step 1 `0155c9a` + Step 3 `96f9f92` + Step 2a `3b18990` / Step 2b `5989e6d` / Step 2c `1d8d7ab`；Linux release **1992 passed / 0 failed**）；mod.rs 1762 → **225** 行（遠低 §九 800 警告）；loop_handlers.rs 1096 行（<1200 硬上限）；**前 9 commit 已 ff-merge 到 main HEAD `f4e7826`**，feature branch 6 commits 待 operator ff-merge（含 Step 2 三 commit + G1-03 三 commit + docs sync）。
+**狀態（2026-04-24 21:55 CEST 1-4 任務全做後）**：實際 **8/10 核心完成**（G1-01/02/03/05/06 + G6-01/02/04；剩 G1-04 P1 背景 + G6-03 部分）：
+- ✅ **G1-01/02/03/05/06 全完成**：G1-03 本 session 4 subagent + 主 session 接手收尾，**所有 7 Rust 違規檔破 <1200 硬上限**（detail 在 G1-03 列）。
+- ✅ **G6-01/02/04 完成**：healthcheck + cron 6h 全線。
+- ✅ **G6-03 V024 DB apply**：2026-04-24 21:35 CEST `psql -f V024` 跑完，DO block guards PASS（無 RAISE），V019/V020 legacy table + indexes shape 正確；**但 binary 20:21 不含 V024 code**（binary 需重建後 auto_migrate 或純 DB apply 完成）。
+- 🟠 **G1-04 fee drag / R:R baseline**：P1 tag 未動（依賴 PostOnly demo 累積，背景等待，非本 session 範圍）。
+- 🔴 **Healthcheck [12] FAIL 結構性已確認**：bb_breakout 7d entries=0 — FIX-26-DEADLOCK-1 (`bcc5401`+`63957ad`) **已在 binary 20:21** 中，排除部署嫌疑。**根因 = P1-11 F1 結構性 1m bandwidth 永不達 expansion_bw=0.04**，非新 bug；屬 bb_breakout profile/timeframe 不匹配範疇（Wave 2+3 profile 調整或 5m timeframe 範圍）。本 session 不修。
+- 🟡 **Binary 落後 origin/main**：binary 20:21 落後 origin/main tip（含 G1-03 後 4 檔 + V024 + 各 docs），operator `restart_all.sh --rebuild` 後即同步；V024 DB 已 apply，重啟不會 crash。
 
 ### G1 Edge 危機根源修復
 
@@ -111,7 +117,7 @@ ssh trade-core "cd ~/BybitOpenClaw/srv && python3 helper_scripts/db/passive_wait
 |---|---|---|---|---|---|---|
 | **G1-01** | ✅完成 | `edge_estimator_scheduler` 診斷 + 恢復 — operator commit `f32629c` (leader election) + `abc85c0` (graceful shutdown) 已修；2026-04-24 02:06 `--rebuild` 部署；現 cells **59** / mtime <30min | 無 | MIT+E4 / E2 | 完成 2026-04-24 | [G1-01 report](.claude_reports/20260424_122700_g1_01_scheduler_recovery.md) |
 | **G1-02** | ✅完成 | `event_consumer/mod.rs` 拆（硬上限 1200）— **Step 1 `pending_sweep` ✅ + Step 2 `loop_handlers` ✅ (方案 B 3 sub-commit) + Step 3 `bootstrap` ✅ 完成；mod.rs 1762→**225**（<1200 ✅，遠低 §九 800 警告線）；loop_handlers.rs 1096 行（<1200）；Linux release **1992 / 0 failed**（baseline 1980 + G1-03 10 + LoopState 2 tests）** | 無 | E1+PA / E2 | 完成 2026-04-24 | <1200 行 ✅ + test cov ≥95% ✅ + engine lib pass ✅ / [PA plan Step 1-3](docs/CCAgentWorkSpace/PA/workspace/reports/2026-04-24--g1_02_event_consumer_split_plan.md) + [Step 2 detail plan](docs/CCAgentWorkSpace/PA/workspace/reports/2026-04-24--g1_02_step2_loop_handlers_detail_plan.md) + [Step 1 report](.claude_reports/20260424_130953_g1_02_step1_pending_sweep_split.md) + [Step 2 report](.claude_reports/20260424_141500_g1_02_step2_loop_handlers_complete.md) + [Step 3 report](.claude_reports/20260424_133541_g1_02_step3_bootstrap_extracted.md)（branch `g1-02-event-consumer-split` commits Step 1 `0155c9a` + Step 3 `96f9f92` + Step 2a `3b18990` / Step 2b `5989e6d` / Step 2c `1d8d7ab`）|
-| **G1-03** | 🟡3/7 完成 | Rust 硬違反 7 檔 refactor — **resting_orders.rs 1367→659 ✅ `224699e`** (subagent B) + **risk_config.rs 1328→908 ✅ `e2317ae`** (主 session) + **startup.rs 1377→1126 ✅ `39773e1`+`ab03dcb`** (subagent A 加 private_ws.rs 但遺漏 duplicate 刪除；gap 由 `ab03dcb` 關閉 — `mod private_ws;` + delete duplicate 260 LOC)；剩 4 檔：main 2062 / instrument_info 1975 / bybit_rest_client 1725 / order_manager 1554。Mac debug 1992/0 + Linux release 1992/0 failed 雙驗 | G1-02 | E5+E1 / E2+E4 | 部分完成 2026-04-24 / 剩 1-2d | all rust files <1200 lines |
+| **G1-03** | ✅7/7 完成 | Rust 硬違反 7 檔 refactor — 7/7 全破 <1200 硬上限：resting_orders 1367→659 `224699e` / risk_config 1328→908 `e2317ae` / startup 1377→1126 `39773e1`+`ab03dcb` / **instrument_info 1975→1011 `1127f38` / bybit_rest_client 1725→933 `6b2eeee` / order_manager 1554→916 `d9d25eb` / main 2062→1075 `357a1e7`**（後 4 檔本 session 4 parallel subagent + 主 session 接手；含 silent-failure 防護驗證）。Mac debug cargo test **1992/0 failed** 雙驗 | G1-02 | E5+E1 / E2+E4 | 完成 2026-04-24 | all rust files <1200 lines ✅ |
 | **G1-04** | 🟠P1 | fee drag / R:R 邊際驗證基線 | PostOnly demo | QC / FA | 1-2d | counterfactual baseline report |
 | **G1-05** | ✅完成 | PostOnly 配置驗證 — `use_maker_entry` 配置正確（demo/paper=true, live=false）；FA v1 誤判收回 | 無 | FA+E1 / E2 | 完成 2026-04-24 | [design intent doc](docs/references/2026-04-24--postonly_design_intent.md)（commit `0da10c0`）|
 | **G1-06** | ✅完成 | Drawdown auto-revoke 實裝（原則 #5/#6）— `drawdown_revoke.rs` 343 行 + Step 6 HaltSession 接線 + 10 unit tests；engine lib **1990 / 0 failed**（baseline 1980 + 10 新）| 無 | E1 / E2 | 完成 2026-04-24 | [G1-06 report](.claude_reports/20260424_103617_g1_06_drawdown_revoke.md)（commit `d1cdd49`）|
