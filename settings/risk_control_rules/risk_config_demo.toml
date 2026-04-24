@@ -172,3 +172,14 @@ shadow_enabled = false
 [kelly]
 young_threshold = 50
 mature_threshold = 200
+
+# G3-02 Phase A (2026-04-25): ExecutorAgent shadow→live control plane.
+# Replaces hardcoded Python `_shadow_mode = True` (executor_agent.py:482).
+# Phase A schema-only landing — defaults preserve forced shadow behaviour.
+# Phase B (Python read path) + Phase C (operator IPC flip) follow.
+# G3-02 Phase A：ExecutorAgent 控制平面 schema 落地，預設 shadow_mode=true
+# 保留現行為；Phase B/C 後續完成 Python 讀路徑 + operator IPC flip。
+[executor]
+shadow_mode = true
+max_position_pct = 0.05
+per_symbol_position_cap = {}

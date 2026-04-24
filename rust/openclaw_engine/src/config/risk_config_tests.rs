@@ -486,3 +486,105 @@ fn test_g7_01_kelly_tier_partial_toml_falls_back_to_defaults() {
     assert_eq!(cfg.kelly.mature_threshold, 200);
     assert!(cfg.validate().is_ok());
 }
+
+// ----- G3-02 Phase A (2026-04-25): ExecutorConfig schema + validation -----
+
+#[test]
+fn test_g3_02_executor_default_shadow_true_5pct() {
+    // Phase A default preserves Python ExecutorAgent's pre-G3-02 forced-shadow
+    // behavior. shadow_mode=true, max_position_pct=5%, no per-symbol overrides.
+    // Phase A 預設保留 Python ExecutorAgent 強制 shadow 行為。
+    let cfg = RiskConfig::default();
+    assert!(cfg.executor.shadow_mode, "shadow_mode must default true");
+    assert!((cfg.executor.max_position_pct - 0.05).abs() < 1e-12);
+    assert!(cfg.executor.per_symbol_position_cap.is_empty());
+    assert!(cfg.validate().is_ok());
+}
+
+#[test]
+fn test_g3_02_executor_validate_rejects_out_of_range_max_position_pct() {
+    // max_position_pct must be in [0.0, 1.0]; -0.1 / 1.1 must reject.
+    // max_position_pct 必須在 [0.0, 1.0]；越界必拒。
+    let mut cfg = RiskConfig::default();
+    cfg.executor.max_position_pct = -0.1;
+    assert!(cfg.validate().is_err(), "negative max_position_pct must reject");
+    cfg.executor.max_position_pct = 1.1;
+    assert!(cfg.validate().is_err(), "max_position_pct > 1.0 must reject");
+    cfg.executor.max_position_pct = 0.0;
+    assert!(cfg.validate().is_ok(), "0.0 (no-op) must accept");
+    cfg.executor.max_position_pct = 1.0;
+    assert!(cfg.validate().is_ok(), "1.0 (full margin) must accept");
+}
+
+#[test]
+fn test_g3_02_executor_validate_rejects_bad_per_symbol_overrides() {
+    // per_symbol fraction out-of-range or empty key must reject.
+    // per_symbol fraction 越界或空 key 必拒。
+    let mut cfg = RiskConfig::default();
+    cfg.executor
+        .per_symbol_position_cap
+        .insert("BTCUSDT".into(), 1.5);
+    assert!(
+        cfg.validate().is_err(),
+        "per_symbol fraction > 1.0 must reject"
+    );
+
+    cfg.executor.per_symbol_position_cap.clear();
+    cfg.executor
+        .per_symbol_position_cap
+        .insert("ETHUSDT".into(), -0.05);
+    assert!(
+        cfg.validate().is_err(),
+        "per_symbol fraction < 0.0 must reject"
+    );
+
+    cfg.executor.per_symbol_position_cap.clear();
+    cfg.executor
+        .per_symbol_position_cap
+        .insert("".into(), 0.10);
+    assert!(
+        cfg.validate().is_err(),
+        "empty symbol key must reject"
+    );
+}
+
+#[test]
+fn test_g3_02_executor_toml_roundtrip() {
+    // Custom executor knobs must survive TOML round-trip.
+    // 自訂 executor knob 必須無損穿越 TOML round-trip。
+    let mut cfg = RiskConfig::default();
+    cfg.executor.shadow_mode = false;
+    cfg.executor.max_position_pct = 0.10;
+    cfg.executor
+        .per_symbol_position_cap
+        .insert("BTCUSDT".into(), 0.15);
+    cfg.executor
+        .per_symbol_position_cap
+        .insert("ETHUSDT".into(), 0.08);
+    let toml_str = toml::to_string(&cfg).unwrap();
+    let de: RiskConfig = toml::from_str(&toml_str).unwrap();
+    assert!(!de.executor.shadow_mode);
+    assert!((de.executor.max_position_pct - 0.10).abs() < 1e-12);
+    assert_eq!(de.executor.per_symbol_position_cap.len(), 2);
+    assert!(
+        (de.executor.per_symbol_position_cap.get("BTCUSDT").copied().unwrap() - 0.15).abs()
+            < 1e-12
+    );
+    assert!(de.validate().is_ok());
+}
+
+#[test]
+fn test_g3_02_executor_partial_toml_falls_back_to_defaults() {
+    // [executor] section absent → #[serde(default)] returns Phase A defaults.
+    // TOML 缺 [executor] 區段時，#[serde(default)] 補回 Phase A 預設。
+    let toml_str = r#"
+        [meta]
+        version = 1
+        saved_ts_ms = 0
+    "#;
+    let cfg: RiskConfig = toml::from_str(toml_str).unwrap();
+    assert!(cfg.executor.shadow_mode, "default shadow_mode must be true");
+    assert!((cfg.executor.max_position_pct - 0.05).abs() < 1e-12);
+    assert!(cfg.executor.per_symbol_position_cap.is_empty());
+    assert!(cfg.validate().is_ok());
+}

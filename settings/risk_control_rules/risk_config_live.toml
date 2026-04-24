@@ -168,4 +168,13 @@ shadow_enabled = false
 young_threshold = 50
 mature_threshold = 200
 
+# G3-02 Phase A (2026-04-25): ExecutorAgent shadow→live control plane.
+# Live default shadow_mode=true — Phase C operator IPC flip (auth-gated)
+# is the only way to land on shadow_mode=false in this environment.
+# G3-02 Phase A：Live 預設 shadow_mode=true；唯有 Phase C 經 auth IPC 才能 flip。
+[executor]
+shadow_mode = true
+max_position_pct = 0.05
+per_symbol_position_cap = {}
+
 [experimental.flags]
