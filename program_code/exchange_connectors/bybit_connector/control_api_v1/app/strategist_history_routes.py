@@ -70,6 +70,26 @@ strategist_history_router = APIRouter(
     tags=["Strategist History / 策略師參數變更歷史"],
 )
 
+# G3-11 STRATEGIST-CYCLE-OBSERVABILITY-1 (2026-04-25, MVP slice).
+# Sibling top-level router for the structured IPC-backed cycle metrics
+# endpoint. Distinct from `strategist_history_router` because:
+#   1. Different prefix (`/strategist/cycle_metrics` vs `/strategist/history/...`).
+#   2. Read source is Rust IPC `get_strategist_cycle_metrics`, not Postgres.
+#   3. Pairs cleanly with the existing `/strategist/history/cycle_metrics`
+#      log-tail-parse fallback — GUI can call the IPC variant and fall back
+#      to the log-parse one when scheduler isn't bound (Demo unbound) or
+#      while running pre-rebuild engine binaries.
+# Per TODO §G3-11 downgrade rationale, the Postgres `learning
+# .strategist_cycle_events` sink is **deliberately deferred**; this MVP
+# slice satisfies the 80% observability case (per-reason rejects + apply
+# count + freshness) without a new hypertable.
+#
+# G3-11：策略師 cycle 計數器 IPC-backed 路由。獨立 router 避免污染 history 命名空間。
+strategist_cycle_router = APIRouter(
+    prefix="/api/v1/strategist",
+    tags=["Strategist Cycle Metrics / 策略師排程器計數器"],
+)
+
 
 # ── Allow-list tables / 允許白名單 ────────────────────────────────────────────
 # engine_mode filter whitelist. We accept everything a fill might tag with
@@ -698,4 +718,97 @@ async def strategist_cycle_metrics(
         },
         "is_simulated": False,
         "data_category": "strategist_cycle_metrics",
+    }
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# G3-11 STRATEGIST-CYCLE-OBSERVABILITY-1: IPC-backed cycle_metrics route
+# ─────────────────────────────────────────────────────────────────────────
+
+
+@strategist_cycle_router.get("/cycle_metrics")
+async def strategist_cycle_metrics_ipc(
+    actor: base.AuthenticatedActor = Depends(base.current_actor),
+) -> dict[str, Any]:
+    """
+    GET /api/v1/strategist/cycle_metrics — structured IPC-backed cycle counters.
+    G3-11：透過 IPC `get_strategist_cycle_metrics` 取結構化 scheduler 計數器。
+
+    背景（G3-11，2026-04-25 MVP slice）：原 GUI footer 走
+    `/api/v1/strategist/history/cycle_metrics` engine.log tail-parse；本路由是
+    結構化替代品，由 Rust scheduler 內存 `CycleCounters` 直接快照（IPC
+    `get_strategist_cycle_metrics`），不依賴 ANSI escape parsing / log rotation。
+
+    Returns（schema 與 IPC 對齊）：
+      apply_count:        u64
+      cycle_count:        u64  (每輪 evaluate_cycle 完成 +1，無論成敗)
+      last_cycle_ts_ms:   u64  (epoch-ms；0 = 從未跑)
+      last_apply_ts_ms:   u64  (epoch-ms；0 = 從未 apply)
+      reject_by_reason:   {"out_of_range": N, "delta_exceeded": N, ...}
+      status:             "ok" | "scheduler_unavailable"
+
+    Fail-closed: IPC 失敗 / scheduler 未綁 / engine 不在 → 200 +
+      `degraded=true` + 全 0 + status='scheduler_unavailable'，**不 5xx**。
+      可與 history/cycle_metrics（log tail-parse）並列，operator 任一綠即代表
+      cycle 有在跑。
+    """
+    # 內部 import 避免 cold-start 把所有 ipc_client 依賴載進來。
+    from .ipc_client import EngineIPCClient  # noqa: PLC0415
+
+    fallback_payload = {
+        "status": "scheduler_unavailable",
+        "apply_count": 0,
+        "cycle_count": 0,
+        "last_cycle_ts_ms": 0,
+        "last_apply_ts_ms": 0,
+        "reject_by_reason": {},
+    }
+
+    client = EngineIPCClient()
+    degraded_reason: str | None = None
+    payload: dict[str, Any]
+    try:
+        try:
+            await client.connect()
+            result = await client.call(
+                "get_strategist_cycle_metrics", params={}, timeout=3.0
+            )
+        finally:
+            await client.disconnect()
+        # `result` is the JSON-RPC `result` field (Rust returns the snapshot
+        # directly via `JsonRpcResponse::success`). Validate keys and
+        # coerce types so a partial payload doesn't blow up the GUI.
+        # `result` 為 IPC 直接返回的 snapshot；驗 key + 強制型別避免 GUI 爆。
+        payload = {
+            "status": str(result.get("status", "ok")),
+            "apply_count": int(result.get("apply_count", 0) or 0),
+            "cycle_count": int(result.get("cycle_count", 0) or 0),
+            "last_cycle_ts_ms": int(result.get("last_cycle_ts_ms", 0) or 0),
+            "last_apply_ts_ms": int(result.get("last_apply_ts_ms", 0) or 0),
+            "reject_by_reason": dict(result.get("reject_by_reason") or {}),
+        }
+    except Exception as exc:  # pragma: no cover - exact subclasses vary
+        # IPC unreachable / engine down / socket missing → fail-closed.
+        # IPC 不通 / engine 掛 / socket 缺 → fail-closed 不 5xx。
+        logger.warning(
+            "G3-11: get_strategist_cycle_metrics IPC failed: %s / IPC 取 cycle 計數器失敗",
+            exc,
+        )
+        payload = fallback_payload
+        degraded_reason = "ipc_unreachable"
+
+    degraded = (
+        degraded_reason is not None
+        or payload["status"] == "scheduler_unavailable"
+    )
+    return {
+        "ok": True,
+        "data": {
+            **payload,
+            "degraded": degraded,
+            "reason": degraded_reason
+            or ("scheduler_unavailable" if degraded else None),
+        },
+        "is_simulated": False,
+        "data_category": "strategist_cycle_metrics_ipc",
     }

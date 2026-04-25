@@ -48,6 +48,12 @@ Checks（each prints PASS / FAIL / WARN with a one-line explanation）:
                                           (EDGE-P1b ML-training accumulation passive-wait sentinel).
   [15] shadow_exit_agreement_phase2    — G6-02 new: Combine ↔ Physical 24h agreement ≥95%
                                           (EDGE-P2 Phase 2 strict quality gate; PASS when dormant).
+  [16] strategist_cycle_fresh          — G3-11 new (2026-04-25 MVP): Rust StrategistScheduler
+                                          last cycle completion ≤10min ago via IPC
+                                          `get_strategist_cycle_metrics`. Pure liveness sentinel —
+                                          catches scheduler wedged / engine restart-without-rebind /
+                                          AI service down causing exponential backoff to 4h.
+                                          PASS when scheduler unbound (Demo missing — by design).
   [Xa] leader_election_health          — G6-01 new: edge_estimator_scheduler flock file age +
                                           leader-PID liveness; catches stale-lock / dead-leader
                                           drift that masks scheduler silent-death (edge_estimates
@@ -1556,6 +1562,124 @@ def check_exit_features_accumulation_rate(cur) -> tuple[str, str]:
     return ("PASS", base + f" (ratio={ratio:.2f}) — accumulation healthy")
 
 
+def check_strategist_cycle_fresh() -> tuple[str, str]:
+    """[16] G3-11 (2026-04-25 MVP): StrategistScheduler last cycle ≤10 min ago.
+
+    MODULE_NOTE (EN): G3-11 STRATEGIST-CYCLE-OBSERVABILITY-1 passive-wait
+    sentinel. The Rust scheduler runs a 5-min cycle (R3-1; backoff to 4h on
+    AI service failure). Once the cycle wedges (engine restart that didn't
+    re-spawn scheduler / Demo cmd channel orphan / panic in cycle body) the
+    only operator-visible symptom is "applied params haven't moved in 24h",
+    which is also the legitimate steady-state. Without this check, a wedged
+    scheduler can hide for days.
+
+    Implementation choice: filesystem-only via engine.log tail parse, NOT
+    IPC. The IPC method `get_strategist_cycle_metrics` exists (G3-11 Rust
+    side) but requires the HMAC handshake — pulling the auth secret into
+    this script would couple the healthcheck to control-api wiring. Tail
+    parsing matches existing footer fallback (
+    /api/v1/strategist/history/cycle_metrics in
+    `strategist_history_routes.py:_parse_cycle_metrics`) and has identical
+    blind-spot profile (log rotation past N min → WARN/FAIL). Operator can
+    run the GUI route in parallel for the structured snapshot.
+
+    Three-state output:
+      - PASS: scheduler logged a cycle (Ok or Err) within last 10 min, OR
+        scheduler not bound (engine.log shows no startup line — Demo unbound
+        is by design per memory `project_strategist_scheduler_paper_orphan`).
+      - WARN: last cycle 10-30 min ago (within 30-min backoff window after
+        first IPC failure — still healthy but degraded).
+      - FAIL: last cycle >30 min ago AND scheduler was started.
+
+    [16] G3-11（2026-04-25 MVP）：StrategistScheduler 上次 cycle ≤10 分鐘哨兵。
+    Rust 5-min cycle wedge 後唯一外部症狀「24h 沒新 apply」也可能是穩態，
+    本 check 用 engine.log tail parse 區分 wedged vs 穩態。
+    PASS：10 分鐘內有 cycle log，或 scheduler 未綁（log 無啟動行）。
+    WARN：10-30 分鐘（首次 IPC 失敗後 30-min backoff 仍健康但降級）。
+    FAIL：>30 分鐘且 scheduler 啟動過。
+    """
+    log_path = Path(
+        os.environ.get(
+            "OPENCLAW_DATA_DIR",
+            "/tmp/openclaw" if os.name != "nt" else str(Path.home() / "openclaw"),
+        )
+    ) / "engine.log"
+    if not log_path.exists():
+        return ("WARN", f"engine.log missing at {log_path} — cannot evaluate cycle freshness")
+    try:
+        # Bounded tail (last 4 MB) mirrors the GUI footer route. The
+        # scheduler logs ~1 line per 5 min so 4 MB covers many days.
+        # Bounded tail（最後 4 MB）對齊 GUI footer 路由；scheduler 每 5 min
+        # 一行，4 MB 覆蓋多日。
+        size = log_path.stat().st_size
+        with log_path.open("rb") as f:
+            if size > 4 * 1024 * 1024:
+                f.seek(-4 * 1024 * 1024, 2)
+                f.readline()  # discard partial line
+            tail = f.read().decode("utf-8", errors="replace")
+    except Exception as exc:  # pragma: no cover - filesystem race
+        return ("WARN", f"engine.log read failed: {exc}")
+
+    # Look for the most recent scheduler activity log. The Rust side emits:
+    #   "StrategistScheduler started"  — once per spawn
+    #   "StrategistScheduler cycle complete" — every successful cycle
+    #   "StrategistScheduler cycle failed"   — every failed cycle
+    #   "StrategistScheduler cancelled"      — shutdown
+    # Pre-deploy of G3-11 the apply path emits "strategist params applied".
+    # Match the broad family so we work pre/post G3-11 rebuild.
+    # 比對所有 scheduler 活動行；廣域 match 讓 pre/post G3-11 部署都能用。
+    started = "StrategistScheduler started" in tail or "策略師排程器已啟動" in tail
+    activity_markers = (
+        "StrategistScheduler cycle complete",
+        "StrategistScheduler cycle failed",
+        "strategist params applied",
+        "evaluated_cycle",  # debug-level marker
+        "策略師參數已應用",  # zh apply
+    )
+
+    # Find the latest matching log timestamp. Engine.log uses tracing's
+    # default format with a leading RFC3339 timestamp.
+    # 找最新匹配的 log 時戳；tracing 默認是 RFC3339 起頭。
+    import re
+    last_seen_dt: datetime | None = None
+    pattern = re.compile(
+        r"^(?P<ts>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z)"
+    )
+    # Walk backwards through lines for efficiency on long tails.
+    # 反向走訪行以加速長 tail 處理。
+    for line in reversed(tail.splitlines()):
+        if not any(marker in line for marker in activity_markers):
+            continue
+        m = pattern.match(line)
+        if not m:
+            continue
+        try:
+            last_seen_dt = datetime.fromisoformat(m.group("ts").replace("Z", "+00:00"))
+            break
+        except Exception:
+            continue
+
+    if last_seen_dt is None:
+        if not started:
+            return ("PASS",
+                    "StrategistScheduler not started in tail — Demo unbound or fresh boot "
+                    "(by design per project_strategist_scheduler_paper_orphan)")
+        return ("FAIL",
+                "scheduler started but no cycle activity in 4MB tail — wedged?")
+
+    age_min = (datetime.now(tz=timezone.utc) - last_seen_dt).total_seconds() / 60.0
+    if age_min < 0:
+        # Clock skew — log timestamp is in the future. Pass with note.
+        # 時鐘偏移 — log 時戳在未來。pass + note。
+        return ("PASS", f"last cycle ts in future by {-age_min:.0f} min — clock skew")
+    base = f"last cycle {age_min:.1f} min ago"
+    if age_min <= 10.0:
+        return ("PASS", base)
+    if age_min <= 30.0:
+        return ("WARN", f"{base} — within 30-min backoff window (first IPC failure?)")
+    return ("FAIL", f"{base} — exceeds 30-min ceiling, scheduler likely wedged")
+
+
 def check_shadow_exit_agreement_phase2(cur) -> tuple[str, str]:
     """[15] G6-02 (2026-04-24): Combine Layer shadow exit Python↔Rust agreement.
 
@@ -1794,6 +1918,15 @@ def main() -> int:
     # 覆蓋 QA 指出的盲點：[7] 單獨無法區分 stale-lock 死 leader vs busy scheduler。
     s, m = check_leader_election_health()
     results.append(("[Xa] leader_election_health", s, m))
+
+    # [16] G3-11 (2026-04-25 MVP): StrategistScheduler last cycle freshness via
+    # engine.log tail parse. Catches wedged scheduler invisible to "applied
+    # params haven't moved" steady-state observation. Pure filesystem (no DB,
+    # no IPC HMAC) so kept outside the cur block.
+    # [16] G3-11（2026-04-25 MVP）：StrategistScheduler last cycle 新鮮度
+    # （engine.log tail parse），抓 wedge 而 "params 沒動" 看不出來的盲點。
+    s, m = check_strategist_cycle_fresh()
+    results.append(("[16] strategist_cycle_fresh", s, m))
 
     # output
     any_fail = False

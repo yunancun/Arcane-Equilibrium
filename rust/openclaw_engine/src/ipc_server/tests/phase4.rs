@@ -24,6 +24,7 @@ async fn test_get_phase4_status_returns_grey_initial() {
         &None,
         &None,
         &None,
+        &None,
     )
     .await;
     assert!(resp.error.is_none(), "phase4 status must succeed");
@@ -48,6 +49,7 @@ async fn test_get_phase4_status_response_schema() {
         &EngineCommandChannels::default(),
         &empty_budget_slot(),
         &empty_teacher_slot(),
+        &None,
         &None,
         &None,
         &None,
@@ -86,6 +88,7 @@ async fn test_dispatch_phase4_status() {
         &EngineCommandChannels::default(),
         &empty_budget_slot(),
         &empty_teacher_slot(),
+        &None,
         &None,
         &None,
         &None,

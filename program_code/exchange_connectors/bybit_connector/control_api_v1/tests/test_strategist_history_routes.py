@@ -38,6 +38,7 @@ from app.strategist_history_routes import (  # noqa: E402
     _ALLOWED_SOURCES,
     _ALLOWED_STRATEGIES,
     _SEVEN_DAYS_MS,
+    strategist_cycle_router,
     strategist_history_router,
 )
 
@@ -457,3 +458,132 @@ def test_whitelists_populated() -> None:
     assert "manual_promote" in _ALLOWED_SOURCES
     assert "ma_crossover" in _ALLOWED_STRATEGIES
     assert "grid_trading" in _ALLOWED_STRATEGIES
+
+
+# ─── G3-11 STRATEGIST-CYCLE-OBSERVABILITY-1 / IPC-backed cycle_metrics ───
+# Mock IPC client → exercise the route's success / scheduler-unavailable /
+# IPC-failure (fail-closed) paths.
+# G3-11：mock IPC client 三條路徑 — success / scheduler_unavailable /
+# IPC fail-closed。
+
+
+@pytest.fixture
+def cycle_client() -> TestClient:
+    """FastAPI test client for the new /strategist/cycle_metrics router.
+    /strategist/cycle_metrics 專用 TestClient。"""
+    app = FastAPI()
+    app.include_router(strategist_cycle_router)
+    app.dependency_overrides[current_actor] = _viewer_actor
+    return TestClient(app)
+
+
+class _FakeIPCClient:
+    """Minimal IPC client stub matching `EngineIPCClient` shape used by the
+    route: connect / disconnect / call.
+    最小 IPC client stub。"""
+
+    def __init__(
+        self,
+        result: dict[str, Any] | None = None,
+        raise_on_call: BaseException | None = None,
+    ) -> None:
+        self._result = result
+        self._raise = raise_on_call
+        self.calls: list[tuple[str, dict[str, Any]]] = []
+
+    async def connect(self) -> None:
+        return None
+
+    async def disconnect(self) -> None:
+        return None
+
+    async def call(
+        self,
+        method: str,
+        params: dict[str, Any] | None = None,
+        timeout: float | None = None,
+    ) -> Any:
+        self.calls.append((method, params or {}))
+        if self._raise is not None:
+            raise self._raise
+        return self._result or {}
+
+
+@contextmanager
+def _patch_ipc_client(stub: _FakeIPCClient):
+    """Patch `EngineIPCClient` import inside the route module so the route
+    receives the stub instead of opening a real socket.
+    Patch route 內 EngineIPCClient import 讓路由收 stub 而非真 socket。"""
+    import app.ipc_client as ipc_module
+
+    with patch.object(ipc_module, "EngineIPCClient", lambda: stub):
+        yield
+
+
+def test_cycle_metrics_ipc_returns_snapshot(cycle_client: TestClient) -> None:
+    """G3-11：scheduler 已綁定 + IPC 回 ok payload → 200 + degraded=false +
+    apply/reject 數據透過。"""
+    snapshot = {
+        "status": "ok",
+        "apply_count": 7,
+        "cycle_count": 12,
+        "last_cycle_ts_ms": 1_700_000_300_000,
+        "last_apply_ts_ms": 1_700_000_290_000,
+        "reject_by_reason": {"out_of_range": 3, "delta_exceeded": 2},
+    }
+    stub = _FakeIPCClient(result=snapshot)
+    with _patch_ipc_client(stub):
+        resp = cycle_client.get("/api/v1/strategist/cycle_metrics")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["ok"] is True
+    data = body["data"]
+    assert data["status"] == "ok"
+    assert data["apply_count"] == 7
+    assert data["cycle_count"] == 12
+    assert data["last_cycle_ts_ms"] == 1_700_000_300_000
+    assert data["last_apply_ts_ms"] == 1_700_000_290_000
+    assert data["reject_by_reason"] == {"out_of_range": 3, "delta_exceeded": 2}
+    assert data["degraded"] is False
+    assert data["reason"] is None
+    assert body["data_category"] == "strategist_cycle_metrics_ipc"
+    assert stub.calls == [("get_strategist_cycle_metrics", {})]
+
+
+def test_cycle_metrics_ipc_scheduler_unavailable_marks_degraded(
+    cycle_client: TestClient,
+) -> None:
+    """G3-11：scheduler 未綁（Demo unbound）→ Rust IPC 回
+    status='scheduler_unavailable'，路由 degraded=true 不 5xx。"""
+    snapshot = {
+        "status": "scheduler_unavailable",
+        "apply_count": 0,
+        "cycle_count": 0,
+        "last_cycle_ts_ms": 0,
+        "last_apply_ts_ms": 0,
+        "reject_by_reason": {},
+    }
+    with _patch_ipc_client(_FakeIPCClient(result=snapshot)):
+        resp = cycle_client.get("/api/v1/strategist/cycle_metrics")
+    assert resp.status_code == 200
+    data = resp.json()["data"]
+    assert data["status"] == "scheduler_unavailable"
+    assert data["degraded"] is True
+    assert data["reason"] == "scheduler_unavailable"
+    assert data["apply_count"] == 0
+    assert data["cycle_count"] == 0
+
+
+def test_cycle_metrics_ipc_failure_falls_back(cycle_client: TestClient) -> None:
+    """G3-11：IPC 整段不通（engine 掛 / socket 缺）→ 200 + degraded=true +
+    全 0 + reason='ipc_unreachable'，不 5xx。"""
+    stub = _FakeIPCClient(raise_on_call=ConnectionRefusedError("engine down"))
+    with _patch_ipc_client(stub):
+        resp = cycle_client.get("/api/v1/strategist/cycle_metrics")
+    assert resp.status_code == 200
+    data = resp.json()["data"]
+    assert data["status"] == "scheduler_unavailable"
+    assert data["degraded"] is True
+    assert data["reason"] == "ipc_unreachable"
+    assert data["apply_count"] == 0
+    assert data["reject_by_reason"] == {}

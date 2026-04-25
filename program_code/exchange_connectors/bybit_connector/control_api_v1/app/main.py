@@ -217,8 +217,15 @@ app.include_router(ml_router)
 # because the table already contains auto-tune rows from the Rust scheduler.
 # STRATEGIST-HISTORY-OBSERVABILITY-1 後端：讀 strategist_applied_params + 7d
 # edge effect；GUI 另開 PR；後端可即時接線（表已由 Rust scheduler 寫入）。
-from .strategist_history_routes import strategist_history_router  # noqa: E402
+from .strategist_history_routes import (  # noqa: E402
+    strategist_cycle_router,
+    strategist_history_router,
+)
 app.include_router(strategist_history_router)
+# G3-11 STRATEGIST-CYCLE-OBSERVABILITY-1 (2026-04-25 MVP): IPC-backed
+# `/api/v1/strategist/cycle_metrics` route, sibling to the legacy
+# `/strategist/history/cycle_metrics` log-tail-parse fallback.
+app.include_router(strategist_cycle_router)
 
 # ── Executor Router / 執行器控制路由（G3-02 Phase C）──
 # Operator-facing IPC bridge for ExecutorAgent shadow_mode flip; gated by the

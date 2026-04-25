@@ -517,6 +517,12 @@ async fn async_main(
     let budget_tracker_slot = ipc_server.budget_tracker_slot();
     let teacher_loop_slot = ipc_server.teacher_loop_slot();
     let audit_pool_slot = ipc_server.audit_pool_slot();
+    // G3-11 STRATEGIST-CYCLE-OBSERVABILITY-1 (2026-04-25): grab the counters
+    // slot before detaching IPC server so we can write the scheduler's
+    // CycleCounters Arc into it after `spawn_strategist_scheduler` returns
+    // below. Mirrors the late-injection pattern used by budget/teacher/audit.
+    // G3-11：在 IPC server detach 前取 slot handle，scheduler spawn 後 late-inject counters。
+    let strategist_counters_slot = ipc_server.strategist_counters_slot();
     let ipc_handle = tokio::spawn(async move {
         if let Err(e) = ipc_server.run().await {
             error!(error = %e, "IPC server error / IPC 服務器錯誤");
@@ -769,7 +775,7 @@ async fn async_main(
     // B0/R3-1 StrategistScheduler — 抽至 `main_boot_tasks.rs`。
     // 從 DB 恢復 last-applied tuned params 後 spawn scheduler。
     // ------------------------------------------------------------------
-    main_boot_tasks::spawn_strategist_scheduler(
+    let strategist_counters = main_boot_tasks::spawn_strategist_scheduler(
         &db_pool,
         &cancel,
         &demo_cmd_tx,
@@ -777,6 +783,14 @@ async fn async_main(
         &risk_stores,
     )
     .await;
+    // G3-11 STRATEGIST-CYCLE-OBSERVABILITY-1: late-inject the scheduler's
+    // shared `CycleCounters` Arc into the IPC slot. `None` means scheduler
+    // wasn't spawned (Demo unbound) — slot stays empty and IPC method
+    // returns `{"status":"scheduler_unavailable"}` (fail-soft).
+    // G3-11：scheduler counters Arc 寫入 IPC slot；None 則 IPC 回 scheduler_unavailable。
+    if let Some(counters) = strategist_counters {
+        strategist_counters_slot.write().await.replace(counters);
+    }
 
     // ------------------------------------------------------------------
     // 3E-ARCH: Three-pipeline fan-out + independent spawn

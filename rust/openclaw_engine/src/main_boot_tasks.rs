@@ -167,13 +167,13 @@ pub(crate) async fn spawn_strategist_scheduler(
     demo_cmd_tx: &Option<tokio::sync::mpsc::UnboundedSender<PipelineCommand>>,
     live_cmd_tx: &Option<tokio::sync::mpsc::UnboundedSender<PipelineCommand>>,
     risk_stores: &PerEngineRiskStores,
-) {
+) -> Option<Arc<openclaw_engine::strategist_scheduler::CycleCounters>> {
     let Some(demo_tx) = demo_cmd_tx.as_ref() else {
         info!(
             "StrategistScheduler not spawned — Demo engine not bound \
              / Demo 引擎未綁定，策略師排程器未啟動"
         );
-        return;
+        return None;
     };
 
     // STRATEGIST-PARAMS-PERSIST-1 (2026-04-23): restore last-known tuned
@@ -307,9 +307,17 @@ pub(crate) async fn spawn_strategist_scheduler(
         )
         .with_risk_store(Arc::clone(&risk_stores.demo)),
     );
+    // G3-11 STRATEGIST-CYCLE-OBSERVABILITY-1 (2026-04-25): grab the shared
+    // CycleCounters Arc BEFORE moving the scheduler into run_forever. main.rs
+    // hands this to `IpcServer::set_strategist_counters` so the
+    // `get_strategist_cycle_metrics` IPC method can read live counters
+    // without going through the pipeline command channel.
+    // G3-11：在 scheduler move 進 run_forever 前抓 CycleCounters Arc，給 IPC server 讀。
+    let counters = scheduler.cycle_counters();
     tokio::spawn(scheduler.run_forever());
     info!(
         has_live_promote = live_cmd_tx.is_some(),
         "StrategistScheduler spawned — tune_target=Demo / 策略師排程器已啟動（調諧目標=Demo）",
     );
+    Some(counters)
 }
