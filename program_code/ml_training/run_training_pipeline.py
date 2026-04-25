@@ -122,7 +122,7 @@ def _load_dataset(
         n = 600
         rng = np.random.default_rng(42)
         if config.use_quantile_predictor:
-            from ml_training.parquet_etl import EDGE_P3_FEATURE_NAMES
+            from program_code.ml_training.parquet_etl import EDGE_P3_FEATURE_NAMES
             feature_names = list(EDGE_P3_FEATURE_NAMES)
             n_features = len(feature_names)
         else:
@@ -149,7 +149,7 @@ def _load_dataset(
     sql_symbol: Optional[str] = None if pooled else config.symbol
 
     if config.use_quantile_predictor:
-        from ml_training.parquet_etl import load_training_data
+        from program_code.ml_training.parquet_etl import load_training_data
         features, labels, timestamps, feature_names = load_training_data(
             symbol=sql_symbol,
             strategy_type=config.strategy_type,
@@ -157,7 +157,7 @@ def _load_dataset(
             engine_mode=config.engine_mode,
         )
     else:
-        from ml_training.parquet_etl import load_training_data
+        from program_code.ml_training.parquet_etl import load_training_data
         features, labels, timestamps, feature_names = load_training_data(
             symbol=sql_symbol,
             strategy_type=config.strategy_type,
@@ -208,7 +208,7 @@ def _pooled_symbol_breakdown(
     """
     if config.dry_run:
         return []
-    from ml_training.parquet_etl import _get_pg_conn
+    from program_code.ml_training.parquet_etl import _get_pg_conn
     sql = """
     SELECT symbol, COUNT(*) AS labeled
     FROM learning.decision_features
@@ -239,16 +239,16 @@ def _run_quantile_pipeline(
     """EDGE-P3-1 Stage 2 quantile path end-to-end.
     EDGE-P3-1 Stage 2 分位路徑端到端。"""
     import numpy as np
-    from ml_training.quantile_trainer import (
+    from program_code.ml_training.quantile_trainer import (
         QuantileTrainingConfig,
         train_quantile_trio,
     )
-    from ml_training.calibration import fit_cqr_trio, evaluate_cqr_coverage
-    from ml_training.quantile_reports import (
+    from program_code.ml_training.calibration import fit_cqr_trio, evaluate_cqr_coverage
+    from program_code.ml_training.quantile_reports import (
         VERDICT_NO_SHIP,
         generate_acceptance_report,
     )
-    from ml_training.onnx_exporter import export_quantile_trio_to_onnx
+    from program_code.ml_training.onnx_exporter import export_quantile_trio_to_onnx
 
     result = PipelineResult()
     output_dir = Path(config.output_dir)
@@ -352,7 +352,7 @@ def _run_quantile_pipeline(
     # 可以查 DB 取「這個 slot 的 latest production model」，不必只依賴 _current
     # symlink。DB 不可用或 verdict=no_ship 時跳過。
     try:
-        from ml_training.model_registry import register_quantile_trio_from_onnx_out
+        from program_code.ml_training.model_registry import register_quantile_trio_from_onnx_out
         registry_ids = register_quantile_trio_from_onnx_out(
             onnx_out=onnx_out,
             strategy=config.strategy_type,
@@ -402,7 +402,7 @@ def _run_legacy_scorer_pipeline(
     output_dir = Path(config.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    from ml_training.scorer_trainer import ScorerConfig, train_scorer
+    from program_code.ml_training.scorer_trainer import ScorerConfig, train_scorer
 
     scorer_cfg = ScorerConfig(output_dir=str(output_dir))
     train_result = train_scorer(
