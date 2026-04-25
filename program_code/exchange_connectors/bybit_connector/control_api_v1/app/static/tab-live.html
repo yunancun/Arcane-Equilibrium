@@ -289,6 +289,36 @@ html, body {
     </table>
   </div>
 
+  <!-- Dust positions summary panel / 塵埃倉位匯總面板
+       Aggregates positions whose owner_strategy is `orphan_frozen` / `DUST_FROZEN`
+       or whose `frozen_reason === 'dust_below_min_notional'`. The main positions
+       table above shows them inline (with the synthetic-owner badge); this panel
+       gives a cross-position summary so operators can see the whole dust footprint
+       at a glance. Default collapsed to keep the live tab compact when there is
+       no dust. Backend ships `frozen_reason` / `est_notional` / `min_notional`
+       on the live positions payload (no backend change required for this panel).
+       匯總所有 owner_strategy 為 orphan_frozen / DUST_FROZEN 或 frozen_reason 為
+       dust_below_min_notional 的倉位。上方主持倉表已 inline 顯示 dust badge，
+       本面板提供「跨倉位 dust 全貌」便於 operator 一眼掃完。預設摺疊，dust 為空
+       時不喧賓奪主。後端 /api/v1/live/positions 已 inject 所需 frozen_reason /
+       est_notional / min_notional 欄位（本面板 0 後端動）。 -->
+  <details style="margin-top:14px;padding:8px 12px;background:rgba(13,17,23,0.5);border:1px solid #21262d;border-radius:6px">
+    <summary style="cursor:pointer;font-weight:600;color:var(--text-dim)">&#x1FA99; 塵埃倉位匯總 / Dust Positions Summary (<span id="liveDustCount">0</span>)</summary>
+    <div id="liveDustPanel" style="margin-top:10px">
+      <p style="color:var(--text-dim);font-size:11px;margin:4px 0 8px 0">塵埃倉位：名義值低於 Bybit 最小交易額 · 引擎自動等待價格回升；需在 Bybit GUI 手動清。<br>Dust positions: notional below Bybit min; engine waits for price recovery, operator must clear manually on Bybit GUI.</p>
+      <div style="overflow-x:auto">
+        <table class="live-table" id="liveDustTable">
+          <thead><tr>
+            <th>Symbol</th><th>Side</th><th>Qty</th><th>Mark</th>
+            <th>Est. Notional</th><th>Min Notional</th><th>Gap %</th><th>Owner Tag</th>
+          </tr></thead>
+          <tbody><!-- populated by loadDashboardData() / 由 loadDashboardData() 填入 --></tbody>
+        </table>
+      </div>
+      <p style="color:var(--text-dim);font-size:11px;margin:8px 0 0 0" id="liveDustFooter">— 無塵埃倉位 / No dust positions —</p>
+    </div>
+  </details>
+
   <!-- Open orders table / 掛單表格 -->
   <div class="live-section-title">&#x1F4CB; 掛單 / Open Orders</div>
   <div style="overflow-x:auto">
@@ -699,6 +729,68 @@ function _ocRenderOwnerStrategy(strat, posData) {
   return ocEsc(s);
 }
 
+// Render the dust-positions summary panel from a positions array. Filters rows
+// whose owner_strategy is `orphan_frozen` / `DUST_FROZEN` or whose
+// `frozen_reason === 'dust_below_min_notional'`. Reuses `_ocRenderOwnerStrategy`
+// for the Owner Tag column so the badge styling stays consistent with the main
+// positions table. Empty / no-match arrays show "no dust" footer + empty body
+// without throwing. Counter in the <details> summary updates so operators can
+// see dust count without expanding.
+//
+// 從 positions 陣列渲染塵埃倉位匯總面板。filter owner_strategy 為 orphan_frozen /
+// DUST_FROZEN 或 frozen_reason === 'dust_below_min_notional' 的列。Owner Tag
+// 欄重用 _ocRenderOwnerStrategy 確保 badge 樣式與主持倉表一致。空陣列 /
+// 無匹配時 footer 顯示「無塵埃倉位」、table body 留空，不拋錯。<details>
+// summary 的計數即時更新，operator 不展開即可知 dust 數量。
+function _renderLiveDustPanel(positions) {
+  const tbody = document.querySelector('#liveDustTable tbody');
+  const countEl = document.getElementById('liveDustCount');
+  const footer = document.getElementById('liveDustFooter');
+  if (!tbody || !countEl || !footer) return;
+  const arr = Array.isArray(positions) ? positions : [];
+  const dust = arr.filter(p => {
+    const owner = p && (p.owner_strategy || '');
+    return owner === 'orphan_frozen' || owner === 'DUST_FROZEN' ||
+           (p && p.frozen_reason === 'dust_below_min_notional');
+  });
+  countEl.textContent = String(dust.length);
+  if (dust.length === 0) {
+    tbody.innerHTML = '';
+    footer.style.display = '';
+    footer.textContent = '— 無塵埃倉位 / No dust positions —';
+    return;
+  }
+  footer.style.display = 'none';
+  tbody.innerHTML = dust.map(p => {
+    const sym = ocEsc(p.symbol || '--');
+    const side = ocEsc(p.side || '--');
+    const qty = ocEsc(String(p.size || p.qty || '--'));
+    const mark = ocEsc(String(p.markPrice || p.mark_price || '--'));
+    const est = parseFloat(p.est_notional);
+    const min = parseFloat(p.min_notional);
+    const estCell = Number.isFinite(est) ? '$' + est.toFixed(2) : '--';
+    const minCell = Number.isFinite(min) ? '$' + min.toFixed(2) : '--';
+    // Gap % = how far the position notional is below the exchange minimum.
+    // Higher = harder to recover via price drift alone.
+    // Gap % = 倉位名義值距交易所最小值的差距百分比。越高代表越難靠價格漂移自然恢復。
+    let gap = '--';
+    if (Number.isFinite(est) && Number.isFinite(min) && min > 0) {
+      gap = ((min - est) / min * 100).toFixed(1) + '%';
+    }
+    const owner = p.owner_strategy || '';
+    return '<tr>' +
+      '<td><strong>' + sym + '</strong></td>' +
+      '<td>' + side + '</td>' +
+      '<td>' + qty + '</td>' +
+      '<td>' + mark + '</td>' +
+      '<td>' + estCell + '</td>' +
+      '<td>' + minCell + '</td>' +
+      '<td>' + gap + '</td>' +
+      '<td style="font-size:11px">' + _ocRenderOwnerStrategy(owner, p) + '</td>' +
+      '</tr>';
+  }).join('');
+}
+
 // Live strategy map: symbol → strategy_name, derived from latest fill per symbol.
 // Live 策略映射：symbol → strategy_name，取每個 symbol 最新一筆 fill 推導。
 let _liveStratMap = {};
@@ -865,6 +957,21 @@ async function loadDashboardData() {
     }
   } catch (_) {
     posBody.innerHTML = '<tr><td colspan="10" style="color:var(--text-dim);text-align:center">無法加載持倉數據</td></tr>';
+  }
+
+  // Render dust-positions summary panel from the same positions payload above.
+  // Filters rows whose owner_strategy is `orphan_frozen` / `DUST_FROZEN` or whose
+  // `frozen_reason === 'dust_below_min_notional'`. Empty array → footer shows
+  // "no dust" and table body stays empty.
+  // 從上方同一份 positions payload 渲染塵埃倉位匯總面板。filter owner_strategy
+  // 為 orphan_frozen / DUST_FROZEN 或 frozen_reason === 'dust_below_min_notional'
+  // 的列。空陣列 → footer 顯示「無塵埃倉位」，table body 留空。
+  try {
+    const posData2 = posRes.status === 'fulfilled' && posRes.value && posRes.value.data;
+    const arr2 = (posData2 && Array.isArray(posData2.positions)) ? posData2.positions : [];
+    _renderLiveDustPanel(arr2);
+  } catch (_) {
+    _renderLiveDustPanel([]);
   }
 
   // Orders — from /api/v1/live/orders (pending-close + stop orders from engine state)
