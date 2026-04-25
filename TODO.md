@@ -1,6 +1,6 @@
 # OpenClaw TODO — 工作清單（v3 · 單一時間軸版）
 
-**最後更新**：2026-04-25 04:10 CEST（Wave 2 batch 14：G4-03 canary auto-promote evaluator Phase A 完成；Linux **2116/0**；pytest **3056**（+18 G4-03）；engine alive）
+**最後更新**：2026-04-25 20:30 CEST（Wave 2 batch 15：G7-03 Phase B + G3-06 + G3-11 三批並行完成；Linux **2138/0**；pytest 真實 baseline ≈ 2710+（previous 3056 為 Mac local，Linux 受限於 ipc_server tests 13-arg breakage 已被 G3-11 修復；deferred 35 G3-10 strategist_promote test failures 後續校正）；engine alive 8.4s）
 **版本**：v3（Wave 線性版；廢除雙軌 P0-P4 章節，P0/P1/P2 降為每項 tag）
 **舊版歸檔**：v2 `docs/archive/2026-04-24--todo_v2_dual_axis_snapshot.md`（458 行，Wave+P 雙軌）· v1 `docs/archive/2026-04-24--todo_v1_refactor_snapshot.md`（328 行）· v0 `docs/archive/2026-04-24--todo_snapshot_pre_refactor.md`（700 行）
 **簽核**：PM Approved FIX-PLAN v2 → [Sign-off](docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-24--FixPlan_v2_PMApproval.md)
@@ -16,7 +16,7 @@
 
 **Wave 1 進度**：10/11 完成；剩 G1-04 P1 背景（依賴 PostOnly demo 累積 + **G7-09 已 deploy** 需 ~1w 後 compute）。
 
-**Wave 2 進度**：24/若干 完成（前述 23 + G4-03 canary auto-promote Phase A）；G7-05 blocked on data（~05-01+）；G3-06/07/08/11 / G7-03 Phase B 未開工。**G3-02 全 Phase + G3-10 + G4-02 + G4-03 + G3-05 完成** → operator 工具鏈完整：shadow-toggle / strategist promote / canary auto-promote dry-run + apply（all DEFAULT-OFF env-gated）；ML pipeline retrain + first ONNX 已落 registry；EDGE-P2 Phase 2+ shadow flip 60s IPC。
+**Wave 2 進度**：27/若干 完成（前述 24 + G7-03 Phase B + G3-06 + G3-11）；G7-05 blocked on data（~05-01+）；G3-07/08（P3 Layer 2 toolkit / H1-H5 Rust IPC Gateway）+ G7-03-Phase-B-FUP-grid（grid_trading 遷移 deferred）未開工。**Wave 2 大致完成**：G3 全鏈（01 RFC + 02 全 Phase + 03 Phase B + 04 e2e + 05 IPC + 06 Layer 2 + 10 promote + 11 cycle metrics）+ G4 完整（01 marker + 02 first ONNX + 03 canary）+ G5 大部 + G7 9/10。Operator 工具鏈：shadow-toggle / strategist promote / canary auto-promote / cycle metrics / Layer 2 escalation rules（all DEFAULT-OFF env-gated）。
 
 **本週 Top 4**（按順序）：
 
