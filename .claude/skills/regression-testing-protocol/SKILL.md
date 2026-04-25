@@ -6,6 +6,9 @@ allowed-tools: Read, Grep, Glob, Bash
 
 # Regression Testing Protocol（回歸測試手冊）
 
+> **優先序**：runtime RiskConfig TOML > Rust schema > CLAUDE.md > 治理 .md > memory > 本 skill
+> **衝突時向 PM / operator push back，不單方面執行 skill 內 SOP**
+
 ## 何時觸發
 
 - E4 收到 E2 通過的 PR → commit 前必跑（強制工作鏈，CLAUDE.md §八）
@@ -21,15 +24,20 @@ allowed-tools: Read, Grep, Glob, Bash
 4. **跨語言浮點 1e-4 容差**：Python ↔ Rust 同輸入差異 ≥ 1e-4 = bug
 5. **跑兩遍**：第一次過 ≠ 真綠（race / flaky）；第二次同樣綠才算
 
-## 1. 當前測試基準線（CLAUDE.md §九）
+## 1. 當前測試基準線（**動態，每次審計前重跑命令拿，不信本表寫死數字**）
 
-| 引擎 | passed | failed (pre-existing) | 備註 |
-|---|---|---|---|
-| Python pytest | 2555 | 17 | 從 srv root 跑（`from program_code.…` 絕對 import）|
-| Rust engine lib | ~1980 | 0 | `cd rust && cargo test --release -p openclaw_engine --lib` |
-| Rust integration | varies | 0 | `tests/` 集成測試需 `OPENCLAW_TEST_PG` env |
+| 引擎 | 命令 | 解讀 |
+|---|---|---|
+| Python pytest | `cd /Users/ncyu/Projects/TradeBot/srv && python3 -m pytest tests/ -q --tb=short \| tail -5` | passed / failed 數 |
+| Rust engine lib | `cd /Users/ncyu/Projects/TradeBot/srv/rust && cargo test --release -p openclaw_engine --lib 2>&1 \| tail -5` | passed / failed 數 |
+| Rust integration | `cd /Users/ncyu/Projects/TradeBot/srv/rust && OPENCLAW_TEST_PG="..." cargo test --release -p openclaw_engine 2>&1 \| tail -5` | 需 PG |
 
-任何 commit 不可降低 passed 或增加 failed。
+**baseline 規則**（CLAUDE.md §九）：
+- 任何 commit 不可降低 passed 數
+- 任何 commit 不可增加 pre-existing failed 數
+- 數字以**改動前最後一次 baseline run** 為準（不信本 skill 內任何寫死數字）
+
+⚠️ Mac 端：整合測試打真實 Bybit 會 fail by design（`*.dev_disabled_*` secret slot；CLAUDE.md §七 Mac dev-only 模式）。Rust release 基準 → `ssh trade-core "cd ~/BybitOpenClaw/srv/rust && cargo test --release -p openclaw_engine --lib"` 取真實值。
 
 ## 2. Python pytest 標準命令
 

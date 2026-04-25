@@ -6,6 +6,9 @@ allowed-tools: Read, Grep, Glob, WebSearch
 
 # Crypto Microstructure Knowledge（Crypto 微結構手冊）
 
+> **優先序**：runtime RiskConfig TOML > Rust schema > CLAUDE.md > 治理 .md > memory > 本 skill
+> **衝突時向 PM / operator push back，不單方面執行 skill 內 SOP**
+
 ## 何時觸發
 
 - QC 評估涉 funding / basis / liquidation 動態的策略
@@ -58,11 +61,18 @@ allowed-tools: Read, Grep, Glob, WebSearch
 - **Liquidation feed**（Bybit WS `allLiquidation`）：實時清算事件
 - **Spread 爆**：bid-ask 從 ~0.01% 跳到 ~0.5%+
 
-### 2.4 防禦設計
-- 倉位限 ≤ 帳戶 30% （CLAUDE.md memory `feedback_position_sizing` 3% risk / trade）
-- Stop loss 必設交易所側（原則 9 雙重防線）
-- 不在 funding settlement 前 5 min 開新倉
-- 帳戶整體 leverage ≤ 3x
+### 2.4 防禦設計（對齊 EX-01 §6.2 + RiskConfig）
+
+**所有風控數值以 `settings/risk_control_rules/risk_config_<env>.toml` 為 SSOT**；以下為 EX-01 §6.2（`srv/docs/decisions/EX-01_..._V2.md`）+ 治理框架：
+
+- **Single-position cap**：P1 = 20% of equity；具體值讀 RiskConfig `[limits].position_size_max_pct`（base 15% / demo 25%）
+- **Sector allocation cap**：P2 adaptive = 40%；對應 RiskConfig `[limits].correlated_exposure_max_pct = 60%`
+- **Reserve buffer**（注意：是 reserve **不是** cap）：最少 30% of equity 不分配（margin calls + opportunities）— **不是「倉位上限 30%」，而是「30% 不投資」**
+- **Per-trade risk**：讀 RiskConfig `[limits].per_trade_risk_pct`（base 0.1%）；memory `feedback_position_sizing` 寫的「3% per trade」與 config 衝突 → **信 config，不信 memory**
+- **Stop loss**：必設交易所側（DOC-01 §5.9 雙重防線）+ 本地 tick() 隱身（EX-01 §4.2）
+- **Funding settlement**：不在前 5 min 開新倉（建議 default，可由 strategy override，**非 hard rule**）
+- **Leverage**：讀 RiskConfig `[limits].leverage_max`（base 9.9× / demo 50×）；EX-01 §3 Guardian 動態收縮
+- **Risk Governor 狀態觸發**：見 SM-04 §3-§9（NORMAL / CAUTIOUS / REDUCED / DEFENSIVE / CIRCUIT_BREAKER / MANUAL_REVIEW），不是 % threshold
 
 ## 3. Basis Trading & Cross-Exchange Arb
 

@@ -6,6 +6,9 @@ allowed-tools: Read, Grep, Glob, WebSearch
 
 # Portfolio Construction Protocol（組合構建手冊）
 
+> **優先序**：runtime RiskConfig TOML > Rust schema > CLAUDE.md > 治理 .md > memory > 本 skill
+> **衝突時向 PM / operator push back，不單方面執行 skill 內 SOP**
+
 ## 何時觸發
 
 - QC 收到「多策略並行如何分配資金」「Kelly sizing 設計」「組合 VaR 計算」「Live 階段為何 PnL 偏離 backtest」
@@ -61,17 +64,25 @@ f_safe = f_frac × (1 − std(p)·z) / mean(p)
 - 高信心策略 → 高 budget
 - 新策略 / shadow 階段 → 低 budget
 
-### 2.3 OpenClaw 5 策略當前 budget（建議）
-| 策略 | Risk budget | 理由 |
+### 2.3 OpenClaw 5 策略當前 risk budget（**建議起點，非治理硬規範**）
+
+| 策略 | suggested budget | 理由 |
 |---|---|---|
-| grid_trading | 25% | edge 不明，fee drag 大 |
+| grid_trading | 25% | edge 不明 + fee drag 大 |
 | ma_crossover | 20% | R:R 不對稱（CLAUDE.md §三 P1-10）|
 | bb_breakout | 15% | dormancy 修復後重新累積 |
 | bb_reversion | 15% | 同上 |
-| funding_arb | 0% | G-2 結案 negative，待重評 |
+| funding_arb | 0% | G-2 結案 negative；**保留 dormant slot 待 R-02 重評**（不刪）|
 | **未分配 buffer** | 25% | 緊急 + new strategy slot |
 
-合計 100%。**任何分配修改必經 QC + PM 雙簽**。
+合計 100%。
+
+**修改流程**（對齊 DOC-01 §4.3 + §5.11）：
+- **P2 範圍內**（不觸 P0/P1 硬上限）→ Agent 自主調整（DOC-01 §5.11）
+- **觸 P0/P1 hard limit** → Operator 批准（DOC-01 §4.3 已定 5 項批准範圍）
+- 跨 strategy 分配建議經 QC + PM 審查（quant + project 視角），但**不是治理規定的硬流程**
+
+實際 RiskConfig `[per_strategy]` 段是治理的真實分配位置；本表為 reference，每次調整以 RiskConfig TOML 為準。
 
 ## 3. 相關性與因子分析
 
@@ -160,24 +171,50 @@ component_VaR_i = w_i · ρ_iP · σ_i / σ_p × VaR
 - Marginal VaR：增加單位 i 倉位對 portfolio VaR 的影響
 - Component VaR：i 對 total VaR 的貢獻
 
-## 5. Drawdown Control 動態降倉
+## 5. Drawdown Control（對齊 SM-04 + RiskConfig）
 
-### 5.1 Drawdown trigger 階梯
-| DD level | 動作 |
-|---|---|
-| -2% (target buffer) | warning，無動作 |
-| -5% | qty -25%（降一檔）|
-| -10% | qty -50%（再降）|
-| -15% | qty -75%（最後緩衝）|
-| -20% | flat all + halt |
+**SM-04 是治理 SSOT**（`srv/docs/decisions/SM-04_..._V1.md`）：6 named states + event-driven + observation window；具體 % threshold 讀 RiskConfig `[cascade]`。
 
-### 5.2 Recovery path
-- DD 改善 → 漸進回升 qty（每 24h 升一階且需 net positive PnL ≥ 1d）
-- 不要快速回滿（whipsaw 風險）
+### 5.1 SM-04 狀態與 RiskConfig 觸發 mapping
 
-### 5.3 OpenClaw 對應
-- CognitiveModulator.confidence_floor 動態調整（CLAUDE.md memory 提及）
-- P0/P1 硬邊界仍生效（原則 11 Agent 最大自主，但 P0/P1 內）
+| SM-04 state | 行為約束（見 SM-04 §9） | RiskConfig threshold（base / demo） |
+|---|---|---|
+| **NORMAL** | 正常裁決 | drawdown < `drawdown_cautious_pct` |
+| **CAUTIOUS** | 提高入場門檻 + 下調倉位 + 提高 manual review | drawdown ≥ `drawdown_cautious_pct`（5.0 / 8.0）|
+| **REDUCED** | 大比例 downsize + 局部凍結 + 限制訂單類型 | drawdown ≥ `drawdown_reduced_pct`（8.0 / 15.0）|
+| **DEFENSIVE** | reduce-only + protective only + 禁新風險 | drawdown ≥ `drawdown_defensive_pct`（12.0 / 20.0）|
+| **CIRCUIT_BREAKER** | 停止非保護性推進 + 凍結 live 扩张 | drawdown ≥ `drawdown_circuit_pct`（15.0 / 22.0）|
+| **MANUAL_REVIEW** | 人工審批指定範圍 | operator emergency / multi-layer conflict |
+
+具體值以 `settings/risk_control_rules/risk_config_<env>.toml` `[cascade]` 為 SSOT。**不信本表內數字**，每次 audit 必 grep TOML 重驗。
+
+### 5.2 跨級恢復禁止（SM-04 §7.1）
+
+明禁：
+- CIRCUIT_BREAKER → NORMAL
+- DEFENSIVE → NORMAL
+- REDUCED → NORMAL
+
+恢復必須**渐进**：CIRCUIT_BREAKER → DEFENSIVE → REDUCED → CAUTIOUS → NORMAL，且每步須觀察窗口完成。
+
+### 5.3 觀察窗口要求（SM-04 §11）
+
+進入更宽松前必有 observation_window：
+- 禁進一步放寬超過當前批准級別
+- 提高審計密度
+- 提高 incident / near-miss 檢查頻率
+
+結束條件（SM-04 §11.3）：
+- 無新增同類異常
+- 觸發恢復的根因已不再出現
+- 審計鏈、對賬鏈、健康鏈穩定
+- Operator 未提出回退
+
+### 5.4 OpenClaw 對應實現
+
+- CognitiveModulator.confidence_floor 動態調整（CLAUDE.md memory `feedback_agent_autonomy`）
+- P0/P1 硬邊界（DOC-01 §5.11；P2 範圍 Agent 自主）
+- Performance Attribution 拆解（見 §6 Live 階段績效歸因）
 
 ## 6. Live 階段績效歸因（a3 整合）
 
