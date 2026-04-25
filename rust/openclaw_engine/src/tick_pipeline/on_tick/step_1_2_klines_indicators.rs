@@ -83,7 +83,20 @@ impl TickPipeline {
 
         // Step 2: Compute indicators (need enough 1m bars)
         // 步驟 2：計算指標（需要足夠的 1 分鐘 K 線）
-        let indicators = self.compute_indicators(sym);
+        let mut indicators = self.compute_indicators(sym);
+
+        // G7-03 Phase B: stabilize `hurst.regime` via per-symbol hysteresis when
+        // `risk.hurst.enabled = true`. No-op (bit-identical to Phase A) when the
+        // flag is off or risk_store is unwired. Must run BEFORE `latest_indicators`
+        // mirror + FeatureSnapshot emit so downstream readers see the stabilized
+        // label, not the instantaneous one.
+        // G7-03 Phase B：當 hurst.enabled=true 時將 regime 標籤套上 per-symbol 滯回。
+        // 旗標關閉或 risk_store 未接線時 no-op，bit-identical Phase A。
+        // 必須在 latest_indicators 鏡像 + FeatureSnapshot 發送前完成，
+        // 讓下游讀的是穩定後標籤而非瞬時標籤。
+        if let Some(ref mut ind) = indicators {
+            self.apply_hurst_regime_label_for(sym, ind);
+        }
 
         // Store latest indicators for IPC snapshot / 存儲最新指標供 IPC 快照使用
         if let Some(ref ind) = indicators {

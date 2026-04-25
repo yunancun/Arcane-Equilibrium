@@ -699,4 +699,103 @@ impl TickPipeline {
             }
         }
     }
+
+    /// G7-03 Phase B: apply per-symbol hysteresis-stabilized regime label to
+    /// a freshly-computed `IndicatorSnapshot`. Bypassed entirely when
+    /// `risk_store=None` or `risk.hurst.enabled=false` so Phase A behaviour
+    /// (instantaneous regime string from `compute_indicators`) is preserved
+    /// bit-identical for the dormant default config.
+    ///
+    /// When enabled:
+    ///   1. Pull the latest `n = window_size` 1m closes via `kline_manager`.
+    ///   2. Compute raw Hurst via `regime::compute_hurst` (R/S analysis).
+    ///   3. Lazy-init a per-symbol `HysteresisDetector` from the live config.
+    ///   4. `push(h)` → stabilized `RegimeLabel`.
+    ///   5. Overwrite `indicators.hurst.regime` with `label.as_legacy_str()`
+    ///      so legacy strategy comparison sites (`h.regime == "trending"`)
+    ///      pick up the *stabilized* label without needing per-strategy
+    ///      detector ownership.
+    ///
+    /// Fail-safe behaviour (any of these → no-op, regime untouched):
+    ///   * risk_store wiring absent (tests / standalone harness)
+    ///   * `hurst.enabled = false` (default — Phase A bit-identical)
+    ///   * 1m kline buffer too short for `compute_hurst` window
+    ///   * `compute_hurst` returns None (degenerate / NaN / inf)
+    ///   * `indicators.hurst` is None (core hurst failed → don't fabricate)
+    ///
+    /// Note: detectors live as long as the pipeline; they are not pruned on
+    /// universe shrinkage. At ~25-100 active symbols × ~6 lag * 1 f64 each,
+    /// the cache footprint is negligible (<5 KB).
+    ///
+    /// G7-03 Phase B：對剛算好的 `IndicatorSnapshot` 套用 per-symbol 滯回穩定標籤。
+    /// 當 `risk_store=None` 或 `hurst.enabled=false` 時整段 bypass，與 Phase A
+    /// bit-identical（dormant 預設）。啟用時用 `kline_manager.get_ohlcv("1m",N)`
+    /// 取最新 1m closes → `compute_hurst` 算原始 H → 懶分配 per-symbol
+    /// `HysteresisDetector` → `push(h)` 取穩定標籤 → 覆寫 `indicators.hurst.regime`，
+    /// 讓 legacy 策略比較點（`h.regime == "trending"`）自動拿到穩定後標籤，
+    /// 無須各策略自持 detector。
+    pub(super) fn apply_hurst_regime_label_for(
+        &mut self,
+        symbol: &str,
+        indicators: &mut openclaw_core::indicators::IndicatorSnapshot,
+    ) {
+        // ── Bypass gate: dormant when risk_store unwired or hurst disabled ──
+        // 旁路門控：risk_store 未接線或 hurst.enabled=false 即 no-op。
+        let risk_store = match &self.risk_store {
+            Some(s) => s,
+            None => return,
+        };
+        let snapshot = risk_store.load();
+        let cfg = &snapshot.hurst;
+        if !cfg.enabled {
+            return;
+        }
+
+        // Need a freshly-computed `hurst` slot to overwrite. If `compute_indicators`
+        // returned None for hurst (degenerate window / cold start), don't fabricate.
+        // 必須先有 compute_indicators 寫入的 hurst 槽位才覆寫；core 為 None 時不偽造。
+        let h_result = match indicators.hurst.as_mut() {
+            Some(h) => h,
+            None => return,
+        };
+
+        // Pull 1m closes from kline_manager. `compute_hurst` requires
+        // `len >= min_window * 4`; if the symbol has fewer 1m bars yet we
+        // bail and leave the instantaneous label intact (cold-start safe).
+        // 取 1m closes；不足時 bail 保留瞬時標籤（冷啟動安全）。
+        let closes = match self
+            .kline_manager
+            .get_ohlcv(symbol, "1m", Some(cfg.window_size))
+        {
+            Some(o) => o.close,
+            None => return,
+        };
+
+        let max_window = cfg.window_size / 2;
+        let h_value =
+            match crate::regime::compute_hurst(&closes, cfg.min_window(), max_window) {
+                Some(h) => h,
+                None => return,
+            };
+
+        // Lazy-init detector from live config snapshot. If config thresholds /
+        // lag changed between ticks, the existing detector keeps its history
+        // and old thresholds — this matches the "config snapshot at first
+        // observation" semantic; operator restarts engine to fully re-seed.
+        // (Acceptable: hurst.enabled is the dormant-by-default flip flag, not
+        // a hot threshold knob.)
+        // 懶分配 detector；config 中途變動不重設既有 detector（restart 才完整重種）。
+        let detector = self
+            .hurst_detectors
+            .entry(symbol.to_string())
+            .or_insert_with(|| crate::regime::HysteresisDetector::from_config(cfg));
+
+        let label = detector.push(h_value);
+
+        // Overwrite legacy regime string with stabilized label. The numeric
+        // `hurst` value is left untouched (it is the raw R/S estimate, not a
+        // function of the hysteresis filter).
+        // 覆寫 legacy regime 字串為穩定標籤；數值 `hurst` 保持為原始 R/S 估計。
+        h_result.regime = label.as_legacy_str().to_string();
+    }
 }

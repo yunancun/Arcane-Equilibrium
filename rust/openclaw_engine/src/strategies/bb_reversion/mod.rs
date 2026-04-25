@@ -314,11 +314,22 @@ impl Strategy for BbReversion {
         };
         let rsi = ind.rsi_14.unwrap_or(50.0);
 
-        // A4: Hurst regime boost — mean-reverting regime boosts reversion confidence
-        // A4：Hurst 市场状态 — 均值回归型市场提升回归信心
+        // A4: Hurst regime boost — AntiPersistent regime boosts reversion confidence
+        // A4：Hurst 市场状态 — AntiPersistent 市场提升回归信心
         // QC-#7: hurst_regime_boost configurable (was hardcoded 0.1)
+        // G7-03 Phase B: typed `RegimeLabel` via `from_legacy_str`. Phase B's
+        //   per-symbol hysteresis stabilizes the regime label upstream so this
+        //   match sees a stabilized label when `hurst.enabled = true`, otherwise
+        //   the instantaneous one (bit-identical to pre-G7-03 behaviour).
+        // G7-03 Phase B：legacy 字串轉 typed enum；hurst 啟用時上游已穩定，停用時
+        //   等同 G7-03 前的瞬時行為（bit-identical）。
         let hurst_boost: f64 = match &ind.hurst {
-            Some(h) if h.regime == "mean_reverting" => self.hurst_regime_boost,
+            Some(h)
+                if crate::regime::RegimeLabel::from_legacy_str(&h.regime)
+                    == crate::regime::RegimeLabel::AntiPersistent =>
+            {
+                self.hurst_regime_boost
+            }
             _ => 0.0,
         };
 

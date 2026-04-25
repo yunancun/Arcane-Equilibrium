@@ -805,3 +805,178 @@ fn test_g7_09c_bb_breakout_sell_uses_best_ask_passive() {
         other => panic!("expected Open, got {other:?}"),
     }
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// G7-03 Phase B regression — typed `RegimeLabel` migration
+// G7-03 Phase B 回歸 — 切換為 typed RegimeLabel
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// Purpose: prove that swapping the legacy `h.regime == "trending"` /
+// `"mean_reverting" || "random_walk"` string compares for typed
+// `RegimeLabel::from_legacy_str(&h.regime) == RegimeLabel::*` is a
+// behaviour-preserving rewrite. Same input → same decision (entry boost or
+// regime_shift exit) at every site touched by the migration.
+//
+// 目的：證明把 legacy 字串比較換成 typed enum 是行為保留改寫。
+
+#[test]
+fn test_phase_b_persistent_label_triggers_hurst_boost() {
+    // Same scenario as `test_regime_exit` entry path: trending Hurst →
+    // confidence base (0.7) + hurst_regime_boost (0.1) = 0.8.
+    // 與 test_regime_exit 入場路徑同情境：trending → 0.7 + 0.1 = 0.8。
+    let mut s = BbBreakout::new();
+    s.min_persistence_ms = 0;
+    let trending = || {
+        Some(HurstResult {
+            hurst: 0.7,
+            regime: "trending".into(), // == RegimeLabel::Persistent.as_legacy_str()
+        })
+    };
+    s.on_tick(&ctx(0.01, 0.5, 1.0, 0)); // squeeze
+    let i = s.on_tick(&ctx_ext(0.05, 1.1, 2.0, 700_000, 50000.0, None, trending()));
+    assert_eq!(i.len(), 1);
+    match &i[0] {
+        StrategyAction::Open(intent) => {
+            assert!(
+                (intent.confidence - 0.8).abs() < 1e-9,
+                "Persistent regime must add hurst_regime_boost (0.1) to base 0.7 → 0.8, got {}",
+                intent.confidence
+            );
+        }
+        other => panic!("expected Open, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_phase_b_random_label_does_not_trigger_hurst_boost() {
+    // Unknown / Random regime must NOT trigger the boost. With the typed
+    // match, `from_legacy_str("random_walk") == Random ≠ Persistent`, so
+    // the `_ => 0.0` branch fires (legacy string compare also fails).
+    // Random regime 不應觸發加成；typed match 與 legacy 字串比對皆走 _ 分支。
+    let mut s = BbBreakout::new();
+    s.min_persistence_ms = 0;
+    let random = || {
+        Some(HurstResult {
+            hurst: 0.5,
+            regime: "random_walk".into(), // RegimeLabel::Random
+        })
+    };
+    s.on_tick(&ctx(0.01, 0.5, 1.0, 0));
+    let i = s.on_tick(&ctx_ext(0.05, 1.1, 2.0, 700_000, 50000.0, None, random()));
+    assert_eq!(i.len(), 1);
+    match &i[0] {
+        StrategyAction::Open(intent) => {
+            assert!(
+                (intent.confidence - 0.7).abs() < 1e-9,
+                "Random regime must NOT add hurst_regime_boost; expect base 0.7, got {}",
+                intent.confidence
+            );
+        }
+        other => panic!("expected Open, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_phase_b_anti_persistent_triggers_regime_shift_exit() {
+    // Anti-persistent regime after trending entry → regime_shift exit.
+    // Reproduces the migration target: `RegimeLabel::AntiPersistent || Random`.
+    // AntiPersistent 出場觸發 regime_shift；對應 migration target。
+    let mut s = BbBreakout::new();
+    s.min_persistence_ms = 0;
+    let trending = || {
+        Some(HurstResult {
+            hurst: 0.7,
+            regime: "trending".into(),
+        })
+    };
+    let anti = || {
+        Some(HurstResult {
+            hurst: 0.4,
+            regime: "mean_reverting".into(),
+        })
+    };
+    s.on_tick(&ctx(0.01, 0.5, 1.0, 0));
+    s.on_tick(&ctx_ext(0.05, 1.1, 2.0, 700_000, 50000.0, None, trending()));
+    let i = s.on_tick(&ctx_ext(0.05, 1.1, 2.0, 1_400_000, 51000.0, None, anti()));
+    assert_eq!(i.len(), 1);
+    match &i[0] {
+        StrategyAction::Close { reason, .. } => {
+            assert_eq!(
+                reason, "regime_shift",
+                "AntiPersistent must trigger regime_shift exit"
+            );
+        }
+        other => panic!("expected Close, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_phase_b_random_walk_triggers_regime_shift_exit() {
+    // After trending entry, regime drifting to Random (not AntiPersistent)
+    // must still trigger regime_shift exit — `Random || AntiPersistent`.
+    // 從 Persistent 漂回 Random 也必須觸發 regime_shift 出場。
+    let mut s = BbBreakout::new();
+    s.min_persistence_ms = 0;
+    let trending = || {
+        Some(HurstResult {
+            hurst: 0.7,
+            regime: "trending".into(),
+        })
+    };
+    let random = || {
+        Some(HurstResult {
+            hurst: 0.55,
+            regime: "random_walk".into(),
+        })
+    };
+    s.on_tick(&ctx(0.01, 0.5, 1.0, 0));
+    s.on_tick(&ctx_ext(0.05, 1.1, 2.0, 700_000, 50000.0, None, trending()));
+    let i = s.on_tick(&ctx_ext(0.05, 1.1, 2.0, 1_400_000, 51000.0, None, random()));
+    assert_eq!(i.len(), 1);
+    match &i[0] {
+        StrategyAction::Close { reason, .. } => {
+            assert_eq!(
+                reason, "regime_shift",
+                "Random regime must trigger regime_shift exit (drop from Persistent)"
+            );
+        }
+        other => panic!("expected Close, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_phase_b_unknown_regime_string_treated_as_random() {
+    // Defensive: an unrecognised regime string (e.g. data corruption upstream)
+    // must map to `RegimeLabel::Random` via `from_legacy_str`. This proves the
+    // typed migration preserves the legacy fail-safe (legacy code's _ branch).
+    // 防禦性：未知 regime 字串映射為 Random，保留 legacy fail-safe 語意。
+    let mut s = BbBreakout::new();
+    s.min_persistence_ms = 0;
+    let trending = || {
+        Some(HurstResult {
+            hurst: 0.7,
+            regime: "trending".into(),
+        })
+    };
+    let bogus = || {
+        Some(HurstResult {
+            hurst: 0.5,
+            regime: "totally_invalid_label".into(),
+        })
+    };
+    s.on_tick(&ctx(0.01, 0.5, 1.0, 0));
+    s.on_tick(&ctx_ext(0.05, 1.1, 2.0, 700_000, 50000.0, None, trending()));
+    // Unknown → Random → triggers regime_shift exit (Random branch matches).
+    // 未知 → Random → 觸發 regime_shift（Random 分支命中）。
+    let i = s.on_tick(&ctx_ext(0.05, 1.1, 2.0, 1_400_000, 51000.0, None, bogus()));
+    assert_eq!(i.len(), 1);
+    match &i[0] {
+        StrategyAction::Close { reason, .. } => {
+            assert_eq!(
+                reason, "regime_shift",
+                "Unknown regime string must map to Random and trigger exit"
+            );
+        }
+        other => panic!("expected Close, got {:?}", other),
+    }
+}

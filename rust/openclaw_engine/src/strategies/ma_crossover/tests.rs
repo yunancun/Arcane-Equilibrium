@@ -546,3 +546,74 @@ fn test_ma_validate_bad_min_notional() {
     p.min_notional_usd = 0.5; // < 1.0
     assert!(p.validate().is_err());
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// G7-03 Phase B regression — typed `RegimeLabel` migration
+// G7-03 Phase B 回歸 — 切換為 typed RegimeLabel
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// Purpose: prove `regime_allows_entry` (helpers.rs) returns the same gate
+// decision when the legacy `hr.regime == "trending"` compare is replaced by
+// `from_legacy_str(&hr.regime) == RegimeLabel::Persistent`.
+
+#[test]
+fn test_phase_b_persistent_regime_allows_entry() {
+    // Equivalent to `test_regime_filter_allows_trending` but framed as a
+    // Phase B parity check — typed match must ACCEPT "trending" (Persistent).
+    // 對齊 test_regime_filter_allows_trending；typed match 必須接受 trending。
+    let mut s = MaCrossover::new();
+    s.min_persistence_ms = 0;
+    let ctx = ctx_with_hurst(100.0, 101.0, 25.0, 0, "trending", 0.72);
+    let intents = s.on_tick(&ctx);
+    assert_eq!(
+        intents.len(),
+        1,
+        "Persistent regime (legacy 'trending') must allow entry"
+    );
+}
+
+#[test]
+fn test_phase_b_anti_persistent_regime_blocks_entry() {
+    // `mean_reverting` → `from_legacy_str` → `AntiPersistent` ≠ `Persistent`,
+    // so the gate must block entry. Same expectation as the legacy compare.
+    // mean_reverting → AntiPersistent ≠ Persistent → 阻擋；對齊 legacy 行為。
+    let mut s = MaCrossover::new();
+    s.min_persistence_ms = 0;
+    let ctx = ctx_with_hurst(100.0, 101.0, 25.0, 0, "mean_reverting", 0.35);
+    let intents = s.on_tick(&ctx);
+    assert!(
+        intents.is_empty(),
+        "AntiPersistent regime (legacy 'mean_reverting') must block entry"
+    );
+}
+
+#[test]
+fn test_phase_b_random_regime_blocks_entry() {
+    // Random regime → not Persistent → block. Same as
+    // `test_regime_filter_blocks_random_walk` but framed as Phase B parity.
+    // Random 不命中 Persistent → 阻擋；對齊 legacy。
+    let mut s = MaCrossover::new();
+    s.min_persistence_ms = 0;
+    let ctx = ctx_with_hurst(100.0, 101.0, 25.0, 0, "random_walk", 0.5);
+    let intents = s.on_tick(&ctx);
+    assert!(
+        intents.is_empty(),
+        "Random regime (legacy 'random_walk') must block entry"
+    );
+}
+
+#[test]
+fn test_phase_b_unknown_regime_string_blocks_entry() {
+    // Defensive: unknown regime string → from_legacy_str → Random → block.
+    // Pre-migration code's `hr.regime == "trending"` → false → block.
+    // Same fail-safe behaviour preserved by the typed migration.
+    // 未知字串 → Random → 阻擋；migration 保留 legacy fail-safe。
+    let mut s = MaCrossover::new();
+    s.min_persistence_ms = 0;
+    let ctx = ctx_with_hurst(100.0, 101.0, 25.0, 0, "totally_invalid_label", 0.5);
+    let intents = s.on_tick(&ctx);
+    assert!(
+        intents.is_empty(),
+        "Unknown regime string must map to non-Persistent and block entry"
+    );
+}

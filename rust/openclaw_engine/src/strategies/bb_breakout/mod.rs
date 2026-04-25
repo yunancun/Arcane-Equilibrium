@@ -570,12 +570,24 @@ impl Strategy for BbBreakout {
                             return intents;
                         }
 
-                        // A4: Hurst regime boost — trending regime boosts breakout confidence
-                        // A4：Hurst 趋势状态 — 趋势型市场提升突破信心
+                        // A4: Hurst regime boost — Persistent regime boosts breakout confidence
+                        // A4：Hurst 趋势状态 — Persistent 状态提升突破信心
                         // E5-P2-4: magnitude now config-driven (was hard-coded 0.1).
                         // E5-P2-4：加成幅度改由 config 控制（原 hard-coded 0.1）。
+                        // G7-03 Phase B: legacy "trending" string → typed `RegimeLabel`
+                        //   via `from_legacy_str`. Phase B's per-symbol hysteresis
+                        //   stabilizes the regime label upstream in step 1+2 so this
+                        //   match sees a *stabilized* label when `hurst.enabled = true`,
+                        //   bit-identical instantaneous label when disabled.
+                        // G7-03 Phase B：legacy 字串透過 from_legacy_str 轉 typed enum；
+                        //   啟用 hurst 時上游已套滯回，stale flip 受 lag 保護。
                         let hurst_boost: f64 = match &ind.hurst {
-                            Some(h) if h.regime == "trending" => self.hurst_regime_boost,
+                            Some(h)
+                                if crate::regime::RegimeLabel::from_legacy_str(&h.regime)
+                                    == crate::regime::RegimeLabel::Persistent =>
+                            {
+                                self.hurst_regime_boost
+                            }
                             _ => 0.0,
                         };
 
@@ -765,13 +777,20 @@ impl Strategy for BbBreakout {
                     }
                 }
 
-                // V2: Regime exit — Hurst drops from trending to mean_reverting/random_walk.
-                // V2：Regime 出場 — Hurst 從趨勢轉為均值回歸/隨機漫步。
+                // V2: Regime exit — Hurst drops from Persistent to AntiPersistent/Random.
+                // V2：Regime 出場 — Hurst 從 Persistent 轉為 AntiPersistent/Random。
                 // E5-P2-4: regime_shift bonus now config-driven (was 0.1).
                 // E5-P2-4：regime 轉向加成改由 config 控制（原 0.1）。
+                // G7-03 Phase B: typed match — anything not Persistent is a shift trigger.
+                //   `from_legacy_str` maps unknown strings → Random (legacy-safe).
+                // G7-03 Phase B：typed match — 非 Persistent 即視為 shift 觸發；
+                //   from_legacy_str 將未知字串映射為 Random（legacy-safe）。
                 if exit_reason.is_none() {
                     if let Some(h) = &ind.hurst {
-                        if h.regime == "mean_reverting" || h.regime == "random_walk" {
+                        let label = crate::regime::RegimeLabel::from_legacy_str(&h.regime);
+                        if label == crate::regime::RegimeLabel::AntiPersistent
+                            || label == crate::regime::RegimeLabel::Random
+                        {
                             exit_reason = Some("regime_shift");
                             exit_confidence = self.exit_conf_base + self.exit_bonus_regime_shift;
                         }

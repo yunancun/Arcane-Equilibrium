@@ -98,8 +98,17 @@ impl MaCrossover {
         }
     }
 
-    /// RC-01: Check if Hurst regime allows entry (only "trending" passes).
-    /// RC-01: 檢查赫斯特狀態是否允許入場（僅 "trending" 通過）。
+    /// RC-01: Check if Hurst regime allows entry (only `Persistent` passes).
+    /// RC-01: 檢查赫斯特狀態是否允許入場（僅 Persistent 通過）。
+    ///
+    /// G7-03 Phase B: legacy "trending" string → typed `RegimeLabel` via
+    /// `from_legacy_str`. Phase B's per-symbol hysteresis stabilizes the
+    /// regime label upstream when `risk.hurst.enabled = true`, so this gate
+    /// sees stabilized labels (regime flip requires `lag` consecutive
+    /// observations on the same side). When the flag is disabled the
+    /// instantaneous label flows through bit-identical.
+    /// G7-03 Phase B：legacy 字串轉 typed enum；啟用 hurst 時 lag 真正生效，
+    /// 停用時 bit-identical 於 G7-03 前。
     pub(super) fn regime_allows_entry(&self, ctx: &TickContext<'_>) -> bool {
         if !self.regime_filter_enabled {
             return true;
@@ -112,7 +121,10 @@ impl MaCrossover {
             // No Hurst data — don't block (cold-start safe).
             // 無赫斯特數據 — 不阻擋（冷啟動安全）。
             None => true,
-            Some(hr) => hr.regime == "trending",
+            Some(hr) => {
+                crate::regime::RegimeLabel::from_legacy_str(&hr.regime)
+                    == crate::regime::RegimeLabel::Persistent
+            }
         }
     }
 
