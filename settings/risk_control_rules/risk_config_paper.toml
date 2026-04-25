@@ -237,4 +237,17 @@ rate = 0.0015                   # >$1M: 15 bps
 min_turnover_usd = 0.0
 rate = 0.0030                   # <$1M: 30 bps (illiquid alts)
 
+# G7-06 (2026-04-24) — Grid OU residual-based σ estimator (Phase A: schema only).
+# Replaces (in Phase B) the raw-Δx σ path in `grid_helpers::compute_ou_step`
+# with a proper residual estimator σ̂ = sqrt(Σ ε² / (n-1)) where ε_t = Δx_t −
+# θ̂(μ̂ − x_{t-1}). Phase A: `use_residual_sigma = false` keeps the runtime
+# bit-identical to pre-G7-06 behavior. validate() enforces residual_window_size
+# ∈ [20, 5000] and fallback_sigma ∈ [0.0, 1.0].
+# G7-06：Grid OU 殘差 σ 估計器 schema；Phase A 預設 use_residual_sigma=false
+# 保留現行為，Phase B 接 wire 後 operator 才翻 true。
+[grid_ou]
+use_residual_sigma = false      # Phase A dormant; flip after Phase B wire-up
+residual_window_size = 200      # rolling window for residual σ̂
+fallback_sigma = 0.001          # 10 bps fallback when σ̂ degenerates
+
 [experimental.flags]

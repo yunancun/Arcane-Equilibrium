@@ -1109,3 +1109,90 @@ impl CusumConfig {
         Ok(())
     }
 }
+
+// ---------------------------------------------------------------------------
+// GridOuConfig — Grid OU residual-based sigma estimator schema (G7-06 Phase A)
+// Grid OU 殘差 σ 估計器 schema（G7-06 Phase A）
+// ---------------------------------------------------------------------------
+
+/// G7-06 (2026-04-24): Schema for the residual-based σ estimator used by Grid
+/// Trading's OU optimal-spacing math. `compute_ou_step`'s current path uses raw
+/// `σ = sqrt(Σ Δx²/n)` which conflates drift with innovation; the residual
+/// estimator returns `σ̂ = sqrt(Σ ε²/(n-1))` after subtracting `θ̂(μ̂ − x_{t-1})`.
+/// Phase A: schema + TOML + validate only; default `use_residual_sigma = false`
+/// keeps runtime bit-identical. Phase B wires `grid_helpers::compute_ou_step`.
+/// `validate()` enforces `residual_window_size ∈ [20, 5_000]` and
+/// `fallback_sigma ∈ [0.0, 1.0]`.
+///
+/// G7-06：Grid OU 殘差 σ 估計器 schema；Phase A 預設 false 保留現行為。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GridOuConfig {
+    /// Master enable flag. Phase A default `false` keeps `compute_ou_step` on
+    /// the raw-Δx σ path. Operators flip after Phase B wires the call site.
+    /// 主開關；Phase A=false 靜默，Phase B 接 wire 後翻 true。
+    #[serde(default = "default_grid_ou_use_residual_sigma")]
+    pub use_residual_sigma: bool,
+    /// Rolling window length for the residual σ estimator. Default `200`
+    /// matches typical Grid `ou_lookback`.
+    /// 殘差 σ 滾動窗口長度，預設 200 對齊 Grid ou_lookback。
+    #[serde(default = "default_grid_ou_residual_window_size")]
+    pub residual_window_size: u32,
+    /// Fallback σ (fraction of price) when the estimator degenerates. Default
+    /// `0.001` (10 bps) is a conservative crypto-1m placeholder.
+    /// 退化時的 fallback σ（價格百分比），預設 0.001（10 bps）。
+    #[serde(default = "default_grid_ou_fallback_sigma")]
+    pub fallback_sigma: f64,
+}
+
+fn default_grid_ou_use_residual_sigma() -> bool {
+    false
+}
+fn default_grid_ou_residual_window_size() -> u32 {
+    200
+}
+fn default_grid_ou_fallback_sigma() -> f64 {
+    0.001
+}
+
+impl Default for GridOuConfig {
+    fn default() -> Self {
+        Self {
+            use_residual_sigma: default_grid_ou_use_residual_sigma(),
+            residual_window_size: default_grid_ou_residual_window_size(),
+            fallback_sigma: default_grid_ou_fallback_sigma(),
+        }
+    }
+}
+
+impl GridOuConfig {
+    /// G7-06: validate `residual_window_size ∈ [20, 5_000]` and
+    /// `fallback_sigma ∈ [0.0, 1.0]`.
+    /// G7-06：驗證 residual_window_size ∈ [20, 5_000]、fallback_sigma ∈ [0, 1]。
+    pub fn validate(&self) -> Result<(), String> {
+        if self.residual_window_size < 20 {
+            return Err(format!(
+                "risk.grid_ou.residual_window_size ({}) must be >= 20",
+                self.residual_window_size
+            ));
+        }
+        if self.residual_window_size > 5_000 {
+            return Err(format!(
+                "risk.grid_ou.residual_window_size ({}) must be <= 5_000",
+                self.residual_window_size
+            ));
+        }
+        if !(self.fallback_sigma >= 0.0) {
+            return Err(format!(
+                "risk.grid_ou.fallback_sigma ({}) must be >= 0.0",
+                self.fallback_sigma
+            ));
+        }
+        if self.fallback_sigma > 1.0 {
+            return Err(format!(
+                "risk.grid_ou.fallback_sigma ({}) must be <= 1.0",
+                self.fallback_sigma
+            ));
+        }
+        Ok(())
+    }
+}

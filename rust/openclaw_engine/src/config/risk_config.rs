@@ -28,8 +28,8 @@ use crate::exit_features::ExitConfig;
 mod advanced;
 pub use advanced::{
     AntiCluster, Correlation, CusumConfig, DynamicStop, EdgePredictor, EdgePredictorFallback,
-    EwmaVolConfig, ExecutorConfig, Experimental, MarketGate, RuntimeKnobs, SlippageConfig,
-    SlippageTier,
+    EwmaVolConfig, ExecutorConfig, Experimental, GridOuConfig, MarketGate, RuntimeKnobs,
+    SlippageConfig, SlippageTier,
 };
 
 // ---------------------------------------------------------------------------
@@ -162,6 +162,16 @@ pub struct RiskConfig {
     /// 0.3 / 1.3。預設保持 G7-07 前行為 bit-identical，可熱重載。
     #[serde(default)]
     pub slippage: SlippageConfig,
+    /// G7-06 (2026-04-24): Grid OU residual-based σ estimator schema.
+    /// Configures the rolling-window residual-stdev estimator used (in Phase B)
+    /// by `grid_helpers::compute_ou_step` to replace the raw-Δx σ path with a
+    /// proper OU-residual σ̂ = sqrt(Σ e²/(n-1)). Phase A schema-only landing:
+    /// defaults `use_residual_sigma = false` keep the runtime bit-identical
+    /// to pre-G7-06 behavior. Hot-reloaded via `Arc<ArcSwap<RiskConfig>>`.
+    /// G7-06：Grid OU 殘差 σ 估計器 schema；Phase A 預設 use_residual_sigma=false
+    /// 保留現行為（compute_ou_step 用原始 Δx stdev），Phase B 接 wire 後切換。
+    #[serde(default)]
+    pub grid_ou: GridOuConfig,
 }
 
 impl RiskConfig {
@@ -187,6 +197,7 @@ impl RiskConfig {
         self.ewma_vol.validate()?;
         self.cusum.validate()?;
         self.slippage.validate()?;
+        self.grid_ou.validate()?;
 
         // Cross-sub-struct invariant: partial_tp levels must not exceed take_profit_max_pct.
         // 跨 sub-struct 不變量：partial_tp 各層不得超過 take_profit_max_pct。
