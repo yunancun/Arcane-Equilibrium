@@ -29,7 +29,7 @@ mod advanced;
 pub use advanced::{
     AntiCluster, Correlation, CusumConfig, DynamicStop, EdgePredictor, EdgePredictorFallback,
     EwmaVolConfig, ExecutorConfig, Experimental, GridOuConfig, MarketGate, RuntimeKnobs,
-    SlippageConfig, SlippageTier,
+    SlippageConfig, SlippageTier, StrategistConfig,
 };
 
 // G7-03 (2026-04-24): Hurst + hysteresis regime detector schema lives in its
@@ -192,6 +192,16 @@ pub struct RiskConfig {
     /// G7-03：Hurst + 滯回 regime 偵測 schema；Phase A 預設 enabled=false 完全 no-op。
     #[serde(default)]
     pub hurst: HurstConfig,
+    /// STRATEGIST-TUNE-TARGET-CONFIG-1 (2026-04-25): StrategistScheduler param
+    /// tuner clamp. Lifts the pre-config `MAX_PARAM_DELTA_PCT = 0.30` constant
+    /// in `strategist_scheduler/mod.rs:48` into IPC-hot-reloadable config.
+    /// Default `0.30` preserves bit-identical pre-extraction behaviour;
+    /// operators tune via TOML or `patch_risk_config` IPC (deep-merge already
+    /// supports this sub-struct). Per-param overrides are deferred to v2.
+    /// STRATEGIST-TUNE-TARGET-CONFIG-1：策略師調參 delta 上限可配置；預設 0.30
+    /// 與原硬編碼一致，operator 可 IPC 熱重載；v2 再做 per-param。
+    #[serde(default)]
+    pub strategist: StrategistConfig,
 }
 
 impl RiskConfig {
@@ -221,6 +231,7 @@ impl RiskConfig {
         self.hurst
             .validate()
             .map_err(|e| format!("risk.hurst: {}", e))?;
+        self.strategist.validate()?;
 
         // Cross-sub-struct invariant: partial_tp levels must not exceed take_profit_max_pct.
         // 跨 sub-struct 不變量：partial_tp 各層不得超過 take_profit_max_pct。

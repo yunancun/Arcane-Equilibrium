@@ -6,7 +6,9 @@
 //!   1) Query fills table for per-strategy×symbol metrics (R4-6, R5-3, R5-4)
 //!   2) Rank top-10 pairs by absolute deviation from target (R2 H-5)
 //!   3) IPC call to Python ai_service.sock → strategist_evaluate (judge_edge via Ollama)
-//!   4) Validate response: param_ranges bounds + weight sum=65±0.1 + delta ≤±30% (R3-4)
+//!   4) Validate response: param_ranges bounds + weight sum=65±0.1 + delta clamp
+//!      (R3-4; clamp default ±30% from `RiskConfig.strategist.max_param_delta_pct`,
+//!      operator-tunable since STRATEGIST-TUNE-TARGET-CONFIG-1, 2026-04-25)
 //!   5) Apply via PipelineCommand::UpdateStrategyParams
 //!   Exponential backoff on IPC failure: 5m→30m→60m→4h cap (R4-2).
 //!   Fail-closed: any error → skip cycle, retain current params.
@@ -28,6 +30,8 @@ mod persist;
 pub use persist::load_latest_applied_params;
 
 use crate::ai_service_client::AiServiceClient;
+use crate::config::risk_config::RiskConfig;
+use crate::config::store::ConfigStore;
 use crate::strategies::ParamRange;
 use crate::tick_pipeline::{PipelineCommand, PipelineKind};
 use serde::{Deserialize, Serialize};
@@ -43,9 +47,15 @@ use tracing::{debug, error, info, warn};
 /// 每輪評估的最大交易對數（R2 H-5：top-10，非全部 96）。
 const MAX_EVALS_PER_CYCLE: usize = 10;
 
-/// Maximum delta allowed for param updates (R3-4: ±30%).
-/// 參數更新允許的最大 delta（R3-4：±30%）。
-const MAX_PARAM_DELTA_PCT: f64 = 0.30;
+/// Default fallback for `RiskConfig.strategist.max_param_delta_pct` when no
+/// `ConfigStore<RiskConfig>` is wired into the scheduler (boot-edge cases /
+/// existing direct-call test paths). Mirrors the pre-config hardcoded
+/// `MAX_PARAM_DELTA_PCT = 0.30` (R3-4 ±30%) so behaviour is bit-identical
+/// when the store is absent.
+/// 缺 RiskConfig store 時的 max_param_delta_pct 後備值；對齊原 R3-4 ±30% 硬編碼。
+/// STRATEGIST-TUNE-TARGET-CONFIG-1（2026-04-25）：值權威落到
+/// `RiskConfig.strategist.max_param_delta_pct`，本常量僅作為缺 store 時的備援。
+pub const DEFAULT_MAX_PARAM_DELTA_PCT: f64 = 0.30;
 
 /// Weight sum target for confluence weights (65-point scale).
 /// 匯合權重目標總和（65 分制）。
@@ -136,6 +146,15 @@ pub struct StrategistScheduler {
     promote_cmd_tx: Option<UnboundedSender<PipelineCommand>>,
     /// Database pool for fills query / 用於 fills 查詢的資料庫連接池
     db_pool: Arc<crate::database::pool::DbPool>,
+    /// STRATEGIST-TUNE-TARGET-CONFIG-1 (2026-04-25): Optional RiskConfig store
+    /// for hot-reading `strategist.max_param_delta_pct` per cycle. `None`
+    /// keeps the scheduler on the `DEFAULT_MAX_PARAM_DELTA_PCT = 0.30` legacy
+    /// fallback (boot-edge cases / direct-call tests). Production wires this
+    /// via `StrategistScheduler::with_risk_store(...)` so the existing
+    /// `Arc<ArcSwap<RiskConfig>>` deep-merge IPC path drives the clamp.
+    /// STRATEGIST-TUNE-TARGET-CONFIG-1：可選 RiskConfig store；缺則走 0.30 legacy
+    /// 後備（測試/啟動邊界），生產用 `with_risk_store` 接 IPC 熱重載。
+    risk_store: Option<Arc<ConfigStore<RiskConfig>>>,
     /// Consecutive IPC failure counter for exponential backoff (R4-2).
     /// IPC 連續失敗計數器，用於指數退避。
     consecutive_failures: AtomicU32,
@@ -174,9 +193,37 @@ impl StrategistScheduler {
             tune_target,
             promote_cmd_tx,
             db_pool,
+            risk_store: None,
             consecutive_failures: AtomicU32::new(0),
             cancel,
         }
+    }
+
+    /// STRATEGIST-TUNE-TARGET-CONFIG-1 (2026-04-25): Builder-style attach a
+    /// `ConfigStore<RiskConfig>` so the scheduler reads
+    /// `strategist.max_param_delta_pct` from the live snapshot each cycle
+    /// (hot-reloadable via IPC `patch_risk_config`). Without this call the
+    /// scheduler falls back to `DEFAULT_MAX_PARAM_DELTA_PCT` (0.30, the
+    /// previously hardcoded value) — preserving direct-call test paths
+    /// without forcing every test to wire a store.
+    /// STRATEGIST-TUNE-TARGET-CONFIG-1：builder-style 注入 RiskConfig store。
+    /// 接線後 scheduler 每輪從 live snapshot 讀 max_param_delta_pct（IPC 熱重載）；
+    /// 不接時走 0.30 後備保留現行測試路徑。
+    pub fn with_risk_store(mut self, risk_store: Arc<ConfigStore<RiskConfig>>) -> Self {
+        self.risk_store = Some(risk_store);
+        self
+    }
+
+    /// STRATEGIST-TUNE-TARGET-CONFIG-1: Snapshot the current `max_param_delta_pct`
+    /// from the wired `RiskConfig` store, or fall back to `DEFAULT_MAX_PARAM_DELTA_PCT`
+    /// when no store is wired. Hot-path safe (single ArcSwap load).
+    /// STRATEGIST-TUNE-TARGET-CONFIG-1：從 risk_store 取當前 max_param_delta_pct，
+    /// 缺 store 時走 0.30 後備。ArcSwap 無鎖讀取。
+    fn current_max_param_delta_pct(&self) -> f64 {
+        self.risk_store
+            .as_ref()
+            .map(|store| store.load().strategist.max_param_delta_pct)
+            .unwrap_or(DEFAULT_MAX_PARAM_DELTA_PCT)
     }
 
     /// Tune target introspection (mainly for tests + status logging).
@@ -347,9 +394,12 @@ impl StrategistScheduler {
                 }
             };
 
-            // 4. Validate recommendation against ranges, delta, weight sum
-            // 4. 根據範圍、delta、權重總和驗證建議
-            if validate_recommendation(&response, &current_json, &ranges_json) {
+            // 4. Validate recommendation against ranges, delta, weight sum.
+            //    STRATEGIST-TUNE-TARGET-CONFIG-1: delta cap pulled from the
+            //    RiskConfig store snapshot (or 0.30 fallback when no store wired).
+            // 4. 根據範圍、delta、權重總和驗證建議；delta cap 從 RiskConfig 取（缺 store=0.30）。
+            let max_delta_pct = self.current_max_param_delta_pct();
+            if validate_recommendation(&response, &current_json, &ranges_json, max_delta_pct) {
                 // 5. Apply via PipelineCommand
                 // 5. 通過 PipelineCommand 應用
                 if let Err(e) = self.apply_params(&pair.strategy_name, &response).await {
@@ -571,12 +621,26 @@ fn rank_by_deviation(metrics: &[PairMetrics]) -> Vec<&PairMetrics> {
 /// 根據參數範圍、權重總和和 delta 上限驗證策略師建議。
 ///
 /// R3-4: Weight params (weight_adx, weight_regime, weight_volume, weight_momentum)
-/// are exempt from the ±30% delta cap — the weight_sum=65 validation is sufficient.
-/// R3-4：權重參數免除 ±30% delta 上限 — weight_sum=65 驗證已足夠。
+/// are exempt from the delta cap — the weight_sum=65 validation is sufficient.
+/// R3-4：權重參數免除 delta 上限 — weight_sum=65 驗證已足夠。
+///
+/// STRATEGIST-TUNE-TARGET-CONFIG-1 (2026-04-25): `max_delta_pct` is now a
+/// caller-supplied parameter (was the hardcoded `MAX_PARAM_DELTA_PCT = 0.30`
+/// constant). Production callers route the live `RiskConfig.strategist
+/// .max_param_delta_pct` snapshot here so the clamp is IPC-hot-reloadable;
+/// direct-call tests pass the legacy `0.30` (or whatever value the test
+/// pins). Values are expected to satisfy `0 < max_delta_pct < 1` per
+/// `StrategistConfig::validate()`; out-of-range values still function (the
+/// gate just becomes either always-reject or always-accept), but the config
+/// validate path is supposed to have failed earlier so misconfigured TOML
+/// can't reach this fn at runtime.
+/// STRATEGIST-TUNE-TARGET-CONFIG-1：max_delta_pct 改為呼叫端傳入；生產接 RiskConfig
+/// live snapshot（IPC 熱重載），測試傳 0.30 或被釘的值。
 pub fn validate_recommendation(
     recommendation: &Value,
     current_params: &Value,
     param_ranges: &[ParamRange],
+    max_delta_pct: f64,
 ) -> bool {
     let rec_obj = match recommendation.as_object() {
         Some(o) => o,
@@ -630,13 +694,15 @@ pub fn validate_recommendation(
         } else if let Some(cur_val) = current_params.get(name).and_then(|v| v.as_f64()) {
             if cur_val.abs() > f64::EPSILON {
                 let delta_pct = ((new_val - cur_val) / cur_val).abs();
-                if delta_pct > MAX_PARAM_DELTA_PCT {
+                if delta_pct > max_delta_pct {
                     warn!(
                         param = %name,
                         current = cur_val,
                         proposed = new_val,
                         delta_pct = format!("{:.1}%", delta_pct * 100.0),
-                        "delta exceeds ±30% cap / delta 超過 ±30% 上限"
+                        cap_pct = format!("{:.1}%", max_delta_pct * 100.0),
+                        "delta exceeds configured cap (RiskConfig.strategist.max_param_delta_pct) \
+                         / delta 超過配置上限"
                     );
                     return false;
                 }
@@ -741,7 +807,7 @@ mod tests {
                 db_persisted: true,
             },
         ];
-        assert!(validate_recommendation(&rec, &current, &ranges));
+        assert!(validate_recommendation(&rec, &current, &ranges, DEFAULT_MAX_PARAM_DELTA_PCT));
     }
 
     #[test]
@@ -760,7 +826,7 @@ mod tests {
             agent_adjustable: true,
             db_persisted: true,
         }];
-        assert!(!validate_recommendation(&rec, &current, &ranges));
+        assert!(!validate_recommendation(&rec, &current, &ranges, DEFAULT_MAX_PARAM_DELTA_PCT));
     }
 
     #[test]
@@ -779,7 +845,7 @@ mod tests {
             agent_adjustable: true,
             db_persisted: true,
         }];
-        assert!(!validate_recommendation(&rec, &current, &ranges));
+        assert!(!validate_recommendation(&rec, &current, &ranges, DEFAULT_MAX_PARAM_DELTA_PCT));
     }
 
     #[test]
@@ -832,7 +898,7 @@ mod tests {
                 db_persisted: true,
             },
         ];
-        assert!(validate_recommendation(&rec, &current, &ranges));
+        assert!(validate_recommendation(&rec, &current, &ranges, DEFAULT_MAX_PARAM_DELTA_PCT));
     }
 
     #[test]
@@ -878,7 +944,7 @@ mod tests {
                 db_persisted: true,
             },
         ];
-        assert!(!validate_recommendation(&rec, &current, &ranges));
+        assert!(!validate_recommendation(&rec, &current, &ranges, DEFAULT_MAX_PARAM_DELTA_PCT));
     }
 
     #[test]
@@ -911,7 +977,7 @@ mod tests {
                 db_persisted: true,
             },
         ];
-        assert!(validate_recommendation(&rec, &current, &ranges));
+        assert!(validate_recommendation(&rec, &current, &ranges, DEFAULT_MAX_PARAM_DELTA_PCT));
     }
 
     #[test]
@@ -927,7 +993,7 @@ mod tests {
             agent_adjustable: true,
             db_persisted: true,
         }];
-        assert!(validate_recommendation(&rec, &current, &ranges));
+        assert!(validate_recommendation(&rec, &current, &ranges, DEFAULT_MAX_PARAM_DELTA_PCT));
     }
 
     #[test]
@@ -1161,6 +1227,189 @@ mod tests {
             .promote_params_to_live("unknown_strategy", "{}")
             .await;
         assert!(result.is_err());
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // STRATEGIST-TUNE-TARGET-CONFIG-1 (2026-04-25): e2e behaviour test for
+    // the configurable delta clamp. Wires a `ConfigStore<RiskConfig>`,
+    // mutates `strategist.max_param_delta_pct` via `swap()`, and re-runs
+    // `validate_recommendation` through the scheduler's
+    // `current_max_param_delta_pct()` snapshot path. Ensures:
+    //   - cfg=0.10 → reject a +15% delta (would have passed under 0.30)
+    //   - cfg=0.50 → accept a +40% delta (would have failed under 0.30)
+    // This is the integration check the prompt explicitly requires
+    // ("不要省 e2e behavior 驗證").
+    // STRATEGIST-TUNE-TARGET-CONFIG-1 e2e：把 max_param_delta_pct 改 0.10
+    // 餵 +15% 須拒；改 0.50 餵 +40% 須收。驗證 schema → snapshot → validator
+    // 整鏈通暢。
+    // ═══════════════════════════════════════════════════════════════════
+
+    #[test]
+    fn test_param_delta_clamp_uses_config_value() {
+        use crate::config::risk_config::RiskConfig;
+        use crate::config::store::ConfigStore;
+        use std::sync::Arc;
+
+        // Helper to build a fresh scheduler with a wired RiskConfig store.
+        // 工廠函式：建立帶 RiskConfig store 的 scheduler。
+        let make_sched = |max_delta_pct: f64| {
+            let mut rc = RiskConfig::default();
+            rc.strategist.max_param_delta_pct = max_delta_pct;
+            assert!(rc.validate().is_ok(), "test config must validate");
+            let store = Arc::new(ConfigStore::new(rc));
+
+            let (ai, pool, cancel) = mk_deps();
+            let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+            StrategistScheduler::new(ai, tx, PipelineKind::Demo, None, pool, cancel)
+                .with_risk_store(store)
+        };
+
+        // The single agent_adjustable param is `cooldown_ms`. Range is wide
+        // enough that out-of-range never triggers — the only gate that
+        // changes verdict between cfg values is the delta clamp.
+        // 單一 agent_adjustable 參數 cooldown_ms；範圍寬到 out-of-range 不會
+        // 觸發，唯有 delta clamp 隨 cfg 變動而切換結果。
+        let ranges = vec![ParamRange {
+            name: "cooldown_ms".into(),
+            min: 1_000.0,
+            max: 1_000_000.0,
+            step: Some(1_000.0),
+            agent_adjustable: true,
+            db_persisted: true,
+        }];
+
+        // Scenario 1: clamp = 0.10, recommend +15% delta → REJECT.
+        // 情境 1：clamp=0.10 拒 +15% delta（在 0.30 預設下原本會通過）。
+        let sched_tight = make_sched(0.10);
+        let snapshot_tight = sched_tight.current_max_param_delta_pct();
+        assert!(
+            (snapshot_tight - 0.10).abs() < 1e-12,
+            "scheduler must read 0.10 from wired RiskConfig (got {})",
+            snapshot_tight
+        );
+
+        let current = serde_json::json!({"cooldown_ms": 50_000.0});
+        let rec_15pct = serde_json::json!({"cooldown_ms": 57_500.0}); // +15%
+        let pass_15pct_at_010 = validate_recommendation(
+            &rec_15pct,
+            &current,
+            &ranges,
+            snapshot_tight,
+        );
+        assert!(
+            !pass_15pct_at_010,
+            "+15% delta must be REJECTED when max_param_delta_pct=0.10 \
+             (would have passed at default 0.30 — proves clamp config-driven)"
+        );
+
+        // Sanity: same +15% delta must PASS at the legacy 0.30 default,
+        // proving scenario 1 actually depends on the configured value
+        // (not some unrelated gate).
+        // 健全性：同一 +15% 在 0.30 預設下必通過，證明場景 1 拒絕的確由 clamp 驅動。
+        let pass_15pct_at_default = validate_recommendation(
+            &rec_15pct,
+            &current,
+            &ranges,
+            DEFAULT_MAX_PARAM_DELTA_PCT,
+        );
+        assert!(
+            pass_15pct_at_default,
+            "+15% delta must PASS at legacy 0.30 (clamp difference must be observable)"
+        );
+
+        // Scenario 2: clamp = 0.50, recommend +40% delta → ACCEPT.
+        // 情境 2：clamp=0.50 收 +40% delta（在 0.30 預設下原本會被拒）。
+        let sched_loose = make_sched(0.50);
+        let snapshot_loose = sched_loose.current_max_param_delta_pct();
+        assert!(
+            (snapshot_loose - 0.50).abs() < 1e-12,
+            "scheduler must read 0.50 from wired RiskConfig (got {})",
+            snapshot_loose
+        );
+
+        let rec_40pct = serde_json::json!({"cooldown_ms": 70_000.0}); // +40%
+        let pass_40pct_at_050 = validate_recommendation(
+            &rec_40pct,
+            &current,
+            &ranges,
+            snapshot_loose,
+        );
+        assert!(
+            pass_40pct_at_050,
+            "+40% delta must be ACCEPTED when max_param_delta_pct=0.50 \
+             (would have failed at default 0.30 — proves clamp config-driven)"
+        );
+
+        // Symmetric sanity: same +40% must FAIL at the legacy 0.30, so
+        // scenario 2 acceptance is genuinely caused by the relaxed clamp.
+        // 對稱健全性：+40% 在 0.30 預設下必拒，證明場景 2 通過確由 clamp 放寬驅動。
+        let pass_40pct_at_default = validate_recommendation(
+            &rec_40pct,
+            &current,
+            &ranges,
+            DEFAULT_MAX_PARAM_DELTA_PCT,
+        );
+        assert!(
+            !pass_40pct_at_default,
+            "+40% delta must FAIL at legacy 0.30 (clamp difference must be observable)"
+        );
+
+        // Final scenario: scheduler with NO risk_store wired falls back to
+        // DEFAULT_MAX_PARAM_DELTA_PCT (0.30) — the previously hardcoded
+        // value. Ensures backward compatibility for direct-call tests /
+        // boot-edge cases.
+        // 最後場景：未接 risk_store 時走 0.30 後備（保留原硬編碼行為）。
+        let (ai, pool, cancel) = mk_deps();
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+        let sched_no_store =
+            StrategistScheduler::new(ai, tx, PipelineKind::Demo, None, pool, cancel);
+        let snapshot_no_store = sched_no_store.current_max_param_delta_pct();
+        assert!(
+            (snapshot_no_store - DEFAULT_MAX_PARAM_DELTA_PCT).abs() < 1e-12,
+            "no-store scheduler must fall back to DEFAULT_MAX_PARAM_DELTA_PCT (0.30)"
+        );
+    }
+
+    #[test]
+    fn test_param_delta_clamp_hot_reload_via_config_store_replace() {
+        // Companion to the e2e test: verify that replacing the wired
+        // ConfigStore via `replace()` (the same write API the IPC
+        // `patch_risk_config` deep-merge path uses) flips the snapshot
+        // mid-flight. Confirms hot-reload works end-to-end without engine
+        // restart.
+        // 補充：驗證 ConfigStore.replace()（IPC patch_risk_config 寫入路徑同款 API）
+        // 即時反映；證明 clamp 真的能熱重載，無須重啟。
+        use crate::config::risk_config::RiskConfig;
+        use crate::config::store::{ConfigStore, PatchSource};
+        use std::sync::Arc;
+
+        let mut rc = RiskConfig::default();
+        rc.strategist.max_param_delta_pct = 0.30;
+        let store = Arc::new(ConfigStore::new(rc));
+
+        let (ai, pool, cancel) = mk_deps();
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+        let sched = StrategistScheduler::new(ai, tx, PipelineKind::Demo, None, pool, cancel)
+            .with_risk_store(Arc::clone(&store));
+
+        assert!(
+            (sched.current_max_param_delta_pct() - 0.30).abs() < 1e-12,
+            "initial snapshot must be 0.30"
+        );
+
+        // Replace with a tighter clamp — simulates IPC patch_risk_config
+        // landing through the deep-merge path.
+        // 熱替換為較緊 clamp — 模擬 IPC patch_risk_config deep-merge 落入。
+        let mut new_rc = RiskConfig::default();
+        new_rc.strategist.max_param_delta_pct = 0.15;
+        store
+            .replace(new_rc, PatchSource::Operator)
+            .expect("replace must succeed");
+
+        assert!(
+            (sched.current_max_param_delta_pct() - 0.15).abs() < 1e-12,
+            "post-replace snapshot must reflect 0.15 (ArcSwap hot-reload visible to scheduler)"
+        );
     }
 
 }

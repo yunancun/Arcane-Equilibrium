@@ -166,6 +166,7 @@ pub(crate) async fn spawn_strategist_scheduler(
     cancel: &CancellationToken,
     demo_cmd_tx: &Option<tokio::sync::mpsc::UnboundedSender<PipelineCommand>>,
     live_cmd_tx: &Option<tokio::sync::mpsc::UnboundedSender<PipelineCommand>>,
+    risk_stores: &PerEngineRiskStores,
 ) {
     let Some(demo_tx) = demo_cmd_tx.as_ref() else {
         info!(
@@ -289,14 +290,23 @@ pub(crate) async fn spawn_strategist_scheduler(
     }
 
     let ai_client = Arc::new(openclaw_engine::ai_service_client::AiServiceClient::new());
-    let scheduler = Arc::new(openclaw_engine::strategist_scheduler::StrategistScheduler::new(
-        ai_client,
-        demo_tx.clone(),
-        openclaw_engine::tick_pipeline::PipelineKind::Demo,
-        live_cmd_tx.clone(),
-        Arc::clone(db_pool),
-        cancel.clone(),
-    ));
+    // STRATEGIST-TUNE-TARGET-CONFIG-1 (2026-04-25): wire the demo RiskConfig
+    // store into the scheduler so each evaluation cycle reads
+    // `strategist.max_param_delta_pct` from the live snapshot (IPC-hot-reloadable).
+    // The scheduler tunes Demo, so the Demo store is the authoritative source.
+    // STRATEGIST-TUNE-TARGET-CONFIG-1：把 demo RiskConfig store 接給 scheduler，
+    // 每輪從 live snapshot 讀 max_param_delta_pct（IPC 熱重載）。
+    let scheduler = Arc::new(
+        openclaw_engine::strategist_scheduler::StrategistScheduler::new(
+            ai_client,
+            demo_tx.clone(),
+            openclaw_engine::tick_pipeline::PipelineKind::Demo,
+            live_cmd_tx.clone(),
+            Arc::clone(db_pool),
+            cancel.clone(),
+        )
+        .with_risk_store(Arc::clone(&risk_stores.demo)),
+    );
     tokio::spawn(scheduler.run_forever());
     info!(
         has_live_promote = live_cmd_tx.is_some(),

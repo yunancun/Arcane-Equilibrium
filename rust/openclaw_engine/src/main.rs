@@ -774,6 +774,7 @@ async fn async_main(
         &cancel,
         &demo_cmd_tx,
         &live_cmd_tx,
+        &risk_stores,
     )
     .await;
 

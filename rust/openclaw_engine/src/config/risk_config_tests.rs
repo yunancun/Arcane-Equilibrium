@@ -874,3 +874,172 @@ fn test_g7_04_cusum_partial_toml_falls_back_to_defaults() {
     assert!((cfg.cusum.target_return_bps - 0.0).abs() < 1e-12);
     assert!(cfg.validate().is_ok());
 }
+
+// ----- STRATEGIST-TUNE-TARGET-CONFIG-1 (2026-04-25): StrategistConfig schema -----
+// Lifts the previously hardcoded `MAX_PARAM_DELTA_PCT = 0.30` constant from
+// `strategist_scheduler/mod.rs` into `RiskConfig.strategist.max_param_delta_pct`
+// so the StrategistScheduler param tuner clamp becomes IPC-hot-reloadable.
+// Default 0.30 preserves the pre-extraction behaviour bit-for-bit.
+
+#[test]
+fn test_strategist_config_defaults() {
+    // Default `max_param_delta_pct = 0.30` must match the pre-extraction
+    // hardcoded constant exactly (otherwise this landing silently changes the
+    // clamp). Default RiskConfig must also pass validate().
+    // 預設 max_param_delta_pct=0.30 必須與原硬編碼完全一致；validate() 必須通過。
+    let cfg = StrategistConfig::default();
+    assert!(
+        (cfg.max_param_delta_pct - 0.30).abs() < 1e-12,
+        "default max_param_delta_pct must be 0.30 (was hardcoded MAX_PARAM_DELTA_PCT)"
+    );
+    assert!(cfg.validate().is_ok(), "default StrategistConfig must validate");
+
+    let rc = RiskConfig::default();
+    assert!(
+        (rc.strategist.max_param_delta_pct - 0.30).abs() < 1e-12,
+        "RiskConfig::default().strategist.max_param_delta_pct must be 0.30"
+    );
+    assert!(rc.validate().is_ok(), "default RiskConfig must validate");
+}
+
+#[test]
+fn test_strategist_config_validate_ok() {
+    // Mid-interval values cover the design envelope: tight 0.05 (operator
+    // wants very small per-cycle moves) through default 0.30 to relaxed 0.99
+    // (just below the 1.0 ceiling). All three must validate.
+    // 驗證 0.30 / 0.05 / 0.99 — 設計信封內的緊/中/鬆三個代表值，皆需通過。
+    for v in [0.30_f64, 0.05_f64, 0.99_f64] {
+        let cfg = StrategistConfig {
+            max_param_delta_pct: v,
+        };
+        assert!(
+            cfg.validate().is_ok(),
+            "max_param_delta_pct={} must validate",
+            v
+        );
+    }
+}
+
+#[test]
+fn test_strategist_config_validate_rejects_zero_or_negative() {
+    // ≤ 0 collapses the clamp to instantly-reject every recommendation
+    // (delta_pct > 0 always) — degenerate. validate() must reject so a
+    // misconfigured TOML can't reach the hot path.
+    // ≤ 0 死區零退化為任意 delta 即拒絕；validate() 必須拒絕。
+    for bad in [0.0_f64, -0.1_f64, -1.0_f64] {
+        let cfg = StrategistConfig {
+            max_param_delta_pct: bad,
+        };
+        assert!(
+            cfg.validate().is_err(),
+            "max_param_delta_pct={} must reject (≤ 0 collapses gate)",
+            bad
+        );
+    }
+}
+
+#[test]
+fn test_strategist_config_validate_rejects_ge_one() {
+    // ≥ 1.0 means "≥100% delta accepted" which is wholesale parameter
+    // replacement — defeats the purpose of a sanity gate. validate() must
+    // reject the boundary and beyond.
+    // ≥ 1.0 等於完全替換無意義；validate() 必須拒絕邊界 + 超界值。
+    for bad in [1.0_f64, 1.5_f64, 2.0_f64, 100.0_f64] {
+        let cfg = StrategistConfig {
+            max_param_delta_pct: bad,
+        };
+        assert!(
+            cfg.validate().is_err(),
+            "max_param_delta_pct={} must reject (≥1.0 = wholesale replace)",
+            bad
+        );
+    }
+}
+
+#[test]
+fn test_strategist_config_validate_rejects_nan_inf() {
+    // NaN comparisons are always false in Rust, so a NaN clamp would silently
+    // pass through every recommendation regardless of delta. ±∞ is similarly
+    // pathological. Fail fast at config-load time to surface the bug.
+    // NaN 比較恆為 false 會讓 clamp 失效；±∞ 同樣病態，必須在 config-load 時拒絕。
+    for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        let cfg = StrategistConfig {
+            max_param_delta_pct: bad,
+        };
+        assert!(
+            cfg.validate().is_err(),
+            "max_param_delta_pct={:?} must reject (non-finite collapses gate)",
+            bad
+        );
+    }
+}
+
+#[test]
+fn test_strategist_config_toml_roundtrip() {
+    // Operator-edited [strategist] section in risk_config_{demo,live,paper}.toml
+    // must survive Rust ConfigStore reload bit-for-bit, otherwise an IPC
+    // hot-reload would silently revert to defaults.
+    // 自訂 [strategist] 經 TOML round-trip 必須無損保留。
+    let toml_str = r#"
+        [meta]
+        version = 1
+        saved_ts_ms = 0
+
+        [strategist]
+        max_param_delta_pct = 0.30
+    "#;
+    let cfg: RiskConfig = toml::from_str(toml_str).unwrap();
+    assert!(
+        (cfg.strategist.max_param_delta_pct - 0.30).abs() < 1e-12,
+        "TOML [strategist] section must parse max_param_delta_pct=0.30"
+    );
+    assert!(cfg.validate().is_ok());
+
+    // Round-trip via to_string + from_str preserves the value across the
+    // serde boundary (catches any Serialize/Deserialize asymmetry).
+    // Round-trip 也驗證 Serialize/Deserialize 對稱。
+    let mut custom = RiskConfig::default();
+    custom.strategist.max_param_delta_pct = 0.45;
+    let s = toml::to_string(&custom).unwrap();
+    let de: RiskConfig = toml::from_str(&s).unwrap();
+    assert!((de.strategist.max_param_delta_pct - 0.45).abs() < 1e-12);
+    assert!(de.validate().is_ok());
+}
+
+#[test]
+fn test_strategist_config_partial_fallback() {
+    // TOML missing [strategist] section entirely → #[serde(default)] returns
+    // the canonical default (0.30), preserving the pre-extraction runtime
+    // bit-for-bit. This is the path every existing live risk_config_*.toml
+    // takes the first time the engine boots after this change lands.
+    // TOML 缺 [strategist] 區段 → #[serde(default)] 補預設 0.30，保留現行為。
+    // 此路徑為現存 risk_config_*.toml 在升級首啟時走的路徑。
+    let toml_str = r#"
+        [meta]
+        version = 1
+        saved_ts_ms = 0
+    "#;
+    let cfg: RiskConfig = toml::from_str(toml_str).unwrap();
+    assert!(
+        (cfg.strategist.max_param_delta_pct - 0.30).abs() < 1e-12,
+        "absent [strategist] section must default to 0.30"
+    );
+    assert!(cfg.validate().is_ok());
+
+    // Empty `[strategist]` section (operator left it blank intentionally) ->
+    // same default fallback applies (#[serde(default = "...")]) on the field.
+    // 空白 [strategist] 區段同樣回 0.30。
+    let toml_empty = r#"
+        [meta]
+        version = 1
+        saved_ts_ms = 0
+
+        [strategist]
+    "#;
+    let cfg2: RiskConfig = toml::from_str(toml_empty).unwrap();
+    assert!(
+        (cfg2.strategist.max_param_delta_pct - 0.30).abs() < 1e-12,
+        "empty [strategist] section must default to 0.30"
+    );
+    assert!(cfg2.validate().is_ok());
+}
