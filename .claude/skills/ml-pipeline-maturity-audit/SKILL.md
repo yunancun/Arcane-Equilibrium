@@ -6,6 +6,9 @@ allowed-tools: Read, Grep, Glob, Bash
 
 # ML Pipeline Maturity Audit（ML 管線成熟度審計）
 
+> **優先序**：runtime RiskConfig TOML > Rust schema > CLAUDE.md > 治理 .md > memory > 本 skill
+> **衝突時向 PM / operator push back，不單方面執行 skill 內 SOP**
+
 ## 何時觸發
 
 - MIT 收到「ML pipeline 進度評估」「H1-H5 / Layer 2 / 5-Agent / Combine Layer 接線狀態」
@@ -37,6 +40,8 @@ allowed-tools: Read, Grep, Glob, Bash
 
 每階段對應每個 pipeline component 必填：
 
+> ⚠️ **警告：以下表是 2026-04-24 baseline 快照**。Sub-agent **必須先 re-verify** 才能用作 audit 結論：每行的 Writer/Consumer/Rows/Decision 都會隨 commit / TOML flag flip / row 累積變動。**任何用本表內容當「現在事實」直接結論 = 違反本檔 §★ 黃金法則對抗性驗證**。
+
 | Component | Writer spawn? | Consumer exists? | Row累積? | Decision impact? | Stage |
 |---|---|---|---|---|---|
 | `decision_shadow_exits` | ✅ Rust task | ❌ none | ❌ flag off | ❌ no | Skeleton |
@@ -44,7 +49,9 @@ allowed-tools: Read, Grep, Glob, Bash
 | `exit_features` | ✅ Rust | ⚠️ partial | ✅ ~0.05-0.5 atr | ⚠️ shadow only | Shadow |
 | `edge_estimates` | ✅ scheduler | ✅ cost_gate | ✅ 187 cells | ⚠️ gate not bound | Skeleton+ |
 
-## 工作流（10 步審計）
+## 工作流（11 步審計，含 step 0 強制重驗）
+
+0. **Re-verify 不信表內快照**（強制）：對每 component 跑 SQL（`SELECT count(*), max(ts) FROM learning.X`）+ grep writer spawn（`grep -r "spawn_X_writer" rust/openclaw_engine/src/`）+ grep consumer SELECT（`grep -r "FROM learning.X" rust/openclaw_engine/src/ control_api_v1/`）。**確認與本檔 §「OpenClaw 已知 ML pipeline 狀態」表一致**；不一致即更新表 + audit 報告開頭 RETRACT 漂移點。
 
 1. **Migration 對照** — V001-V024 全部 schema 是否套用：`SELECT * FROM _sqlx_migrations` + `audit_migrations.py`
 2. **Hypertable 確認** — TimescaleDB chunk 是否實際建：`SELECT show_chunks('learning.X')`
@@ -58,6 +65,8 @@ allowed-tools: Read, Grep, Glob, Bash
 10. **Stage 評級** — 5 階段 + 4 維度填表
 
 ## OpenClaw 已知 ML pipeline 狀態（2026-04-24 baseline）
+
+> ⚠️ **警告：以下表是 2026-04-24 採集 baseline**。Pipeline 狀態 / 阻塞原因會隨日期變動，sub-agent **必須對每 component 重跑 SQL + grep verify** 才能引用本表。**直接信用 = 違反本檔 §★ 對抗性驗證**。
 
 | Pipeline | 階段 | 阻塞 |
 |---|---|---|
