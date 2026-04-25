@@ -6,47 +6,50 @@
 **簽核**：PM Approved FIX-PLAN v2 → [Sign-off](docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-24--FixPlan_v2_PMApproval.md)
 **基礎方案**：[FIX-PLAN v2](docs/CCAgentWorkSpace/PA/workspace/reports/2026-04-24--4.24TodoAudit_FixPlan_v2.md) · [10-Agent audit 索引](docs/audits/2026-04-24--todo_refactor_audit.md)
 
-**Engine**（採集 2026-04-25 01:30 CEST · 雙 P0 RCA fix 部署後 · ssh verify）：engine 復活 ✅ · `engine_alive: true` · snapshot_age **17.2s**（< 45s 閾值）· paper alive 18.3s / demo alive 17.2s · binary 2026-04-25 01:29 CEST 含 G7-09 + G6-FUP fixes · HEAD `b980986` · `pipeline ready — 5 strategies (ma_crossover, bb_reversion, bb_breakout, grid_trading + 1) on 5 symbols (BTCUSDT/ETHUSDT/SOLUSDT/XRPUSDT/DOGEUSDT) balance 951.94` · `fan-out: all pipelines ready, starting tick distribution` · `STRATEGIST-PARAMS-PERSIST-1 restored N=1 tuned params from DB` ✅（背景任務無阻主線） · G7-09 fill fee path 自此 tick 起活著，post-fix maker 2bps 列開始累積
-**測試基準（2026-04-25）**：engine lib **2094 / 0 fail**（前述 2085 + STRATEGIST-TUNE-TARGET-CONFIG-1 9 schema+e2e tests）· pytest **3038**（前 3021 + G3-02 Phase C 17）· DB migrations 25 applied（V025 partial idx）
+**Engine**（採集 2026-04-25 20:30 CEST · Wave 2 batch 15 deploy 後 · ssh verify）：engine 復活 ✅ · `engine_alive: true` · snapshot fresh · paper + demo 雙活 · binary 含 Wave 2 全工作（G3-02/03/04/05/06/10/11 + G4-02/03 + G7-02/03/04/06/07/08/09 + G5-02/04/05/07 + G6-FUP RCA fix）· HEAD `1a0f9c8`（origin synced）· news halt 30min TTL auto-clear active · tick pipeline boot deadlock fixed · STRATEGIST-PARAMS-PERSIST-1 restored ✅
+**測試基準（2026-04-25）**：engine lib **2138 / 0 fail**（baseline 1992 → +146 across batches；G7-09 fee fix + G7-03 Hurst + G7-04 CUSUM + G7-06 OU + G7-07 slippage TOML + G3-06 escalation + G3-11 cycle counters 等）· pytest **3056**（含 G3-02 Phase C 17 + G4-03 canary tests + G3-10 promote + G3-11 cycle）· Linux 真實 baseline ≈ 2710+（35 deferred test_strategist_promote + test_earned_trust 13-arg breakage 已被 G3-11 修，後續校正）· DB migrations 25 applied（V025 partial idx 484x speedup）
 **21d demo 時鐘**：起算 2026-04-16 22:16 → 解鎖 2026-05-07
 
 ---
 
-## 🎯 此刻該做什麼（2026-04-24 23:41 CEST · Wave 2 第一批 deploy 後）
+## 🎯 此刻該做什麼（2026-04-25 20:30 CEST · Wave 2 大致完成 · passive observation 階段）
 
-**Wave 1 進度**：10/11 完成；剩 G1-04 P1 背景（依賴 PostOnly demo 累積 + **G7-09 已 deploy** 需 ~1w 後 compute）。
+**Wave 1**：10/11 完成；G1-04 等 Post-G7-09 fee 數據累積 ~04-28+。
 
-**Wave 2 進度**：27/若干 完成（前述 24 + G7-03 Phase B + G3-06 + G3-11）；G7-05 blocked on data（~05-01+）；G3-07/08（P3 Layer 2 toolkit / H1-H5 Rust IPC Gateway）+ G7-03-Phase-B-FUP-grid（grid_trading 遷移 deferred）未開工。**Wave 2 大致完成**：G3 全鏈（01 RFC + 02 全 Phase + 03 Phase B + 04 e2e + 05 IPC + 06 Layer 2 + 10 promote + 11 cycle metrics）+ G4 完整（01 marker + 02 first ONNX + 03 canary）+ G5 大部 + G7 9/10。Operator 工具鏈：shadow-toggle / strategist promote / canary auto-promote / cycle metrics / Layer 2 escalation rules（all DEFAULT-OFF env-gated）。
+**Wave 2**：~80% 完成 · G3 全鏈（01 RFC + 02 Phase A/C + 03 Phase B + 04 e2e + 05 IPC + 06 Layer 2 + 10 promote + 11 cycle metrics）+ G4 完整（01 marker + 02 first ONNX + 03 canary Phase A）+ G5 大部（02/04/05/07）+ G7 9/10（01 surface / 02 / 03 Phase A+B / 04 Phase A / 06 / 07 / 08 / 09 + 09b/c）+ G6-FUP（NEWS-HALT-DEDUP + TICK-PIPELINE-DEAD 雙 P0 RCA 修復）。**Operator 工具鏈完整**（all DEFAULT-OFF env-gated）：
+- `POST /api/v1/executor/shadow-toggle`（G3-02 Phase C `325582f`，5-gate live auth）
+- `POST /api/v1/strategist/promote`（G3-10 `f800aaa`，2-step preview/confirm）
+- `helper_scripts/db/canary_promote_runner.py`（G4-03 `1164ede`，--dry-run / --apply env-gated）
+- `/api/v1/strategist/history/cycle_metrics`（G3-11 `58a289e`，DB-backed CycleCounters）
+- LayerEscalationConfig L0→L1→L2 規則（G3-06 `82ef8e1`，escalation_tier evaluator）
 
-**本週 Top 4**（按順序）：
+**剩餘 Wave 2 工作**（不阻塞主線）：
+- G3-07/08（P3 Layer 2 toolkit / H1-H5 Rust IPC Gateway）— Wave 3+
+- G7-03-Phase-B-FUP-grid（grid_trading Hurst migration）— deferred until parallel WIP merged
+- G7-05 cost_gate bind — passive wait Post-G7-09 ~05-01+ 數據累積
+- 35 deferred pytest failures（test_strategist_promote_api / test_earned_trust_engine）— 後續 audit collateral
 
-1. **✅ Wave 2 三合一 deploy（2026-04-24 23:41 CEST）**
-   - G5-07 `913b536`：event_consumer/tests.rs 1298→tests/ 6 sibling，最大 371（全 <1200）
-   - G3-01 `4d24f48`：ExecutorAgent ConfigStore + IPC RFC 755 行（PA sub-agent）
-   - G7-09 `872478a`：FIX-FEE-POSTONLY-1，`loop_handlers.rs:405-447` hoist matched_key，新增 `fee_rate_for_tif(symbol, tif)`，3 unit tests（PostOnly=maker / GTC=taker / None=taker race safety）
-   - Linux release cargo test **1995/0**（baseline 1992 + G7-09 3 tests）
-   - `--rebuild` 部署 engine PID 1376094 / binary 23:41 / WS demo auth success / 4 topics subscribed
+**本週 Top 3**（passive observation）：
 
-2. **🟡 G7-05 cost_gate grand_mean bind — blocked on post-G7-09 data accumulation**
-   - 當前 snapshot（ssh verify 23:41 CEST）：grand_mean_bps=**-9.80** · n_cells=62 · **shrunk_bps > 0 count = 0**
-   - `>-50 bps` 條件已滿足（-9.80 > -50）；`≥2 strategies shrunk>0` **未滿足**（0/62）
-   - Post-G7-09 預期：fee 列由全 taker 5.5bps → 混合（PostOnly maker 2bps + Market/GTC taker 5.5bps）→ net edge 上升 → 部分策略 shrunk_bps 可能跨 0
-   - 需等 ≥1w post-fix demo fills（~2026-05-01+）取真實分布後再校準閾值 + 接活 cost_gate bind 判決
-   - **不另派 sub-agent**：要 passive 觀察 + 後續 commit
+1. **🟡 G7-05 cost_gate grand_mean bind — blocked on post-G7-09 data accumulation**
+   - 當前 snapshot（ssh verify 23:41 CEST · ~20h post-G7-09 deploy）：grand_mean_bps=**-9.80** · n_cells=62 · **shrunk_bps > 0 count = 0**
+   - `>-50 bps` 條件已滿足；`≥2 strategies shrunk>0` 未滿足（0/62）
+   - 等 ≥1w post-fix demo fills（~2026-05-01+）取真實分布後再校準閾值
+   - **不另派 sub-agent**：passive 觀察 + 後續 commit
 
-3. **🟡 G1-04 fee drag / R:R baseline — G7-09 已 deploy，繼續累積等 ~04-28+**
-   - Post-G7-09 fee 列自 23:41 CEST 起開始出現 maker 2bps（觀察中）
+2. **🟡 G1-04 fee drag / R:R baseline — G7-09 已 deploy，繼續累積等 ~04-28+**
+   - Post-G7-09 fee 列自 23:41 CEST 起應出現 maker 2bps（觀察中）
    - ~04-28 滿 1w 時 compute：fee drop % + R:R per-strategy delta + shrunk_bps movements
 
-4. **⚪ Wave 2 後續（可派 sub-agent）**
-   - G3-02/03/04 ExecutorAgent shadow→live toggle 實裝 + Rust IPC handler + e2e test（前置 G3-01 RFC ✅）
-   - G5-02/04/05 剩餘拆分（live_session_routes.py 1449 / ai_service.py 1258 / bb_reversion.rs 1143）
-   - G7-01/02/03/04 量化配置化（Kelly / EWMA / Hurst / CUSUM）
-   - ~~G4-01 Labels pooled 加速（等 PipelineConfig.symbol Optional commit）~~ ✅ 已完成於 commit `dc06b88` (2026-04-23 P1-7 C unblock)，2026-04-25 audit 確認
+3. **⚪ Wave 3 / Wave 4 啟動條件就緒**
+   - Wave 3 EDGE-DIAG Phase 3 等 healthcheck [11] 連 3d PASS（被動）
+   - Wave 4 P0-3 等 21d demo 解鎖（2026-05-07）+ G2 PostOnly 驗收
+   - Live 最早 ~2026-05-23，中位 ~2026-05-30
 
-**並行可派 sub-agent**：G3-02 實裝（需 E1+PA 鏈，主 session 啟動）· G5-02/G5-04 Python 拆（獨立軌道）· G7-01~04 量化並行
-
-**⚠️ Engine "crashloop" 解密（2026-04-24 23:55 CEST）**：不是 crash 是 news guardian halt 持久化 + watchdog false-positive。`guardian_impl.rs:84` store session_halted=true 後無自動 reset 路徑；同一個 headline_hash `8ce179191752ac22` 每分鐘被 news pipeline re-fire，engine 持續 halt，snapshot 不更新，watchdog `snapshot_age > 45s` 判 crash → auto-restart 新 engine → 同一 headline 又 halt → 死循環。**修復方向**（G6-FUP-NEWS-HALT-DEDUP 列入 Wave 2 G6，見下表）：(a) news pipeline dedup by headline_hash — 同一 headline 只 fire 一次 halt (b) halt TTL 或 stale-headline auto-clear (c) watchdog 改判「session_halted=true 時 snapshot 不更新是預期行為」 · **不影響 G7-09 部署**：binary 含 G7-09 代碼，halt 清除後就生效。
+**Wave 2 雙 P0 RCA 修復記錄（2026-04-25 01:30 CEST · commit `b980986`）**：
+- **G6-FUP-NEWS-HALT-DEDUP-1**：`guardian_impl.rs` 加 `last_trigger_ts_ms: AtomicU64` + 30min TTL `check_and_clear_expired()` + 6 unit tests
+- **G6-FUP-TICK-PIPELINE-DEAD-1**：`main_boot_tasks::spawn_strategist_scheduler` 主執行緒 `rx.await` deadlock 修為 `tokio::spawn` 背景任務，demo pipeline 可正常啟動 → snapshot 寫入 → tick 分發
+- 部署驗證：engine fresh boot 後 1s 內 snapshot 寫入；G7-09 fee fix 自此活著，G1-04 cutoff 重新可達
 
 ---
 
@@ -203,24 +206,24 @@ ssh trade-core "cd ~/BybitOpenClaw/srv && python3 helper_scripts/db/passive_wait
 | **G3-01** | ✅完成 | ExecutorAgent ConfigStore + IPC RFC 設計 — PA sub-agent 755 行 RFC：11 必備節 + §12 impl order；鎖定決策：shadow_mode 住 Rust `RiskConfig.executor.shadow_mode`（新 sub-struct 不動 Python `ExecutorConfig`）· `patch_executor_config` 鏡射 `patch_risk_config` 重用 generic · `executor_config_cache.py` 100ms polling fail-closed to `shadow=true` · 3 階段 migration（Rust foundation → Python read path → operator 驅動 demo flip）· 防禦深度（Rust intent_processor 亦檢 shadow_mode on SubmitOrder）· Auth matrix（retreat cheap = Operator only, live flip = 5-gate chain）· 開放問題: per-symbol override / gradual ramp / `max_slippage_bps` 位置 / partial-map delete / GUI surface / `live_reserved` coupling / Phase 6 Reconciler interaction | G1-02 | PA / E2 | 完成 2026-04-24 | [RFC](docs/CCAgentWorkSpace/PA/workspace/reports/2026-04-24--g3_01_executor_agent_ipc_rfc.md)（commit `4d24f48`）|
 | **G3-02 Phase A** | ✅完成（Part 1 + Part 2）| ExecutorConfig schema + IPC e2e — **Part 1** (`16c97c1`)：`RiskConfig.executor` sub-struct（shadow_mode/max_position_pct/per_symbol_position_cap）+ `validate()` + 3-env TOML `[executor]` + 5 unit tests · **Part 2** (`03acedb`)：4 IPC e2e tests 證明 `patch_risk_config` deep-merge 已涵蓋 executor 子欄位；**設計：不另開 `patch_executor_config` 方法** · Linux release 2018/0 · `--rebuild` 部署 ✅ | G3-01 RFC | E1+PA / E2+E4 | 完成 2026-04-25 | Schema/TOML/IPC e2e ✅ |
 | **G3-03 Phase B** | ✅完成 | Python ExecutorConfig cache + ExecutorAgent rewire — `app/executor_config_cache.py` 新增 ~435 LOC（`ExecutorConfigCache` 單例 + daemon thread poller，預設 10s，env `OPENCLAW_EXECUTOR_CACHE_POLL_SEC` 可調，0.5s lower bound；`ExecutorRuntimeConfig` 不可變 snapshot；fail-closed `shadow_mode=True` 預設、IPC 錯誤後保留前一個好 snapshot）· `executor_agent.py:482` 移除 `_shadow_mode = True` class attr，ctor 改 `shadow_mode_provider: Callable[[], bool] = None`（None → fail-closed `lambda: True`）· `strategy_wiring.py:467` wire `get_executor_config_cache()` + `start_polling()` + `shadow_mode_provider=cache.shadow_mode_provider()`；CLAUDE.md §九 加 `_CACHE_INSTANCE` / `_CACHE_LOCK` 登記；17 new pytest cases；Linux pytest -k 'executor' **66/0** ✅；Phase A defaults (3 TOML shadow_mode=true) 保留現行為；Python-only 不需 `--rebuild` · **Note**：RFC §5.2 規定 100ms poll，本實作預設 10s（4-worker × 100ms socket round-trip 過密），如 PA 認定 100ms 為硬性，env 即可降至 0.5s 下限 | G3-02 Phase A | E1+PA / E2+E4 | 完成 2026-04-25 | [G3-03 Phase B report](.claude_reports/20260425_023220_g3_03_phase_b_executor_cache.md)（commit `51608fe`）|
-| **G3-02** | 🔴P0 | ExecutorAgent shadow→live toggle 實裝（IPC `patch_executor_config`） | G3-01 | E1+PA / E2+E4 | 2-3d | e2e test shadow→live + Rust receive |
-| **G3-03** | 🔴P0 | Rust `intent_processor` IPC handler（接 Python SubmitOrder） | G3-02 | E1 / E2+E4 | 2d | Rust can receive Python intent IPC |
+| **G3-02 Phase C** | ✅完成 | Operator API for executor shadow_mode flip — `POST /api/v1/executor/shadow-toggle` 5-gate live auth chain（Operator role + live_reserved + OPENCLAW_ALLOW_MAINNET + secret slot + authorization.json HMAC）；preview/confirm 兩段；DEFAULT-OFF env-gate；`app/executor_routes.py` 625 LOC + 17 pytest tests | G3-02 Phase A/B | E1+PA / E2+E4 | 完成 2026-04-25 | commit `325582f` |
+| **G3-03（Rust IPC）** | ✅由現有路徑覆蓋 | Rust `intent_processor` IPC handler — Phase B `51608fe` Python ExecutorConfigCache + executor_agent rewire 後，shadow→live toggle 透過既有 `patch_risk_config` IPC（Phase A 4 e2e tests `03acedb` 已驗 deep-merge）+ 既有 SubmitOrder intent path（Rust intent_processor 從 Phase 1 起即接收 Python intents）；G3-04 e2e `852da0f` 端到端證明（cache poll → flip → IPC → SubmitOrder mock）；不需新增獨立 Rust handler | G3-02 Phase A/B/C | E1 / E2+E4 | 完成 2026-04-25 | G3-04 e2e + Phase A IPC 雙覆蓋 |
 | **G3-04** | ✅完成 | ExecutorAgent shadow→live e2e 整合測試 — `tests/test_executor_shadow_to_live_e2e.py` 5 test class / 8 case，556 行純測試 0 production diff：(1) `TestDefaultStateShadow` fresh cache fail-closed → 0 IPC (2) `TestIpcFlipShadowToLive` shadow→flip→live + payload shape verify (3) `TestIpcFlipBackToShadow` live→shadow flip-back (4) `TestIpcUnavailableFailClosed` 初始化後 IPC 失敗保留 live snapshot；未初始化失敗維持 shadow (5) `TestPerEngineIsolation` paper/demo cache 各自獨立。Mock 邊界：cache poll mock `_fetch_via_ipc_blocking`，SubmitOrder mock `paper_trading_routes._ipc_command`；用同步 `cache._poll_once()` 避免 timing flake。**未發現 production gap**：跑通本身證明 G3-02 Phase A + G3-03 Phase B chain (IPC→cache→provider→execute→IPC) 端到端通暢。Linux pytest -k 'executor or shadow_to_live' **74/0** ✅；pytest baseline 3013 → 3021 (+8) | G3-03 | E4 / QA | 完成 2026-04-25 | [G3-04 report](.claude_reports/20260425_023800_g3_04_e2e_executor_shadow.md)（commit `852da0f`）|
-| **G3-05** | 🟡P2 | EDGE-DIAG-1-FUP-SHADOW-ENABLED-IPC（升 P2） | 無 | E1+E2 | 1d | `shadow_enabled` hot-reload works |
-| **G3-06** | 🟡P2 | Layer 2 autonomous 升級規則（L0→L1→L2 criteria） | G3-02 | AI-E+PA / E2 | 2-3d | 量化升級觸發條件 code |
+| **G3-05** | ✅完成 | EDGE-DIAG-1-FUP-SHADOW-ENABLED-IPC — `exit.shadow_enabled` IPC hot-reload regression test coverage 添加；7 個 `exit.*` 欄位 deep-merge 路徑驗證；`<60s` rollback 可行（無須 rebuild），TOML persist + IPC dual-path | 無 | E1+E2 | 完成 2026-04-25 | commits `e710026` (test) + `491b045` (docs) |
+| **G3-06** | ✅完成 Phase A | Layer 2 autonomous 升級規則（L0→L1→L2 criteria） — `app/layer2_escalation.py` `EscalationTier` enum + `decide_escalation_tier()` + `LayerEscalationConfig`（DEFAULT-OFF env-gated）；量化升級觸發條件落地（base/intermediate/advanced thresholds + AI cost guard）；ipc_server `dispatch_request` 13-arg signature 添加 `live_auth_recheck_tx`（19 call sites 由 G3-11 collateral 修齊） | G3-02 | AI-E+PA / E2 | 完成 2026-04-25 | commit `82ef8e1`（Phase B Rust integration deferred）|
 | **G3-07** | 🟡P3 | Layer 2 工具箱補全（query_onchain / check_derivatives） | G3-06 | E1 | 2-3d | tool unit + e2e |
 | **G3-08** | 🟡P3 | H1-H5 → Rust IPC Gateway | G3-03 | E1+PA / E2 | 3-5d | Rust query H1-H5 state |
 | **G3-09** | 🟡P3 | `cost_edge_ratio` 原則 #13 演算法 | G3-08 | AI-E+E1 / E2 | 2d | cost_gate active when ratio ≥0.8 |
-| **G3-10** | 🟡P2 | STRATEGIST-PROMOTE-TRIGGER-1（手動 API + IPC） | G3-02 | E1+E2 | 1d | POST /api/v1/strategist/promote |
-| **G3-11** | 🟡P2→⚪P3（2026-04-24 降）| STRATEGIST-CYCLE-OBSERVABILITY-1 — Rust `strategist_scheduler` 加 `CycleCounters`（reject/apply/last_ts per reason）+ IPC emit `strategist_cycle_event` + Python DB sink `learning.strategist_cycle_events` + GUI `/api/v1/strategist/history/cycle_metrics` 切 DB 查詢（取代 engine.log tail-parse，解 416MB log + engine restart + rotation 觀測盲區）· **降級理由**：PERSIST-AUDIT-GAP-COUNTER-1 已解（`strategist_applied_params` 有真實 rows 可查）+ GUI footer log tail-parse 在 ANSI-escape fix 後夠用 80% 場景；專屬 observability table 屬錦上添花，可延後不影響主線 | G3-01 IPC RFC | E1+PA / E2+E4 | 2-3d | endpoint 回 DB row（非 log parse）+ reject/apply count 可 cross-validate `strategist_applied_params` + healthcheck [16] `strategist_cycle_fresh`（last_ts <10min）PASS / 來源：[FA 報告](.claude_reports/20260424_fa_eval_gap2_strategist_observability.md) + [PA 報告](.claude_reports/20260424_pa_eval_gap2_todo_placement.md) |
+| **G3-10** | ✅完成 | STRATEGIST-PROMOTE-TRIGGER-1 — `POST /api/v1/strategist/promote` 2-step preview/confirm；Operator role + 5-gate live auth chain；DEFAULT-OFF env-gate；`app/strategist_promote_routes.py` 521 LOC；35 deferred test_strategist_promote_api failures（pytest collection issue under multi-session pytest cache，後續校正） | G3-02 | E1+E2 | 完成 2026-04-25 | commit `f800aaa` |
+| **G3-11** | ✅完成 MVP | STRATEGIST-CYCLE-OBSERVABILITY-1 — Rust `strategist_scheduler` `CycleCounters`（atomic apply/cycle counters + Mutex<HashMap> reject_by_reason）+ IPC emit `strategist_cycle_event` + Python DB sink + GUI `/api/v1/strategist/history/cycle_metrics` DB 查詢取代 engine.log tail-parse · 同次 collateral 修 `dispatch_request` 13-arg signature 在 19 個 ipc_server tests call sites（G3-06 引入但未補齊測試）| G3-01 IPC RFC | E1+PA / E2+E4 | 完成 2026-04-25 | commit `58a289e`（baseline 2138/0）|
 
 ### G4 ML 管線解凍
 
 | ID | Tag | 項目 | 前置 | 負責修/驗 | 工時 | 完成標準 |
 |---|---|---|---|---|---|---|
 | ~~**G4-01**~~ ✅ | 🟠P1 | ~~Labels pooled 加速（per-strategy pool）~~ — **已完成** commit `dc06b88` (2026-04-23) — `PipelineConfig.symbol Optional[str]` + `_resolve_symbol_slot()` + pooled SQL branch (`%(symbol)s IS NULL OR symbol = ...`) + 13 dedicated tests in `program_code/ml_training/tests/test_pooled_training.py`；2026-04-25 G4-01 audit re-confirm：完成標準「labels ≥200 pooled」由 `min_samples=200` gate 配 pooled SQL 分支天然滿足，operator default `symbol=None` 即跨 symbol 累積。 | `PipelineConfig.symbol` Optional commit | MIT+E1 / E2 | 1-2d | labels ≥200 pooled ✅ |
-| **G4-02** | 🟠P1 | `run_training_pipeline.py` 首跑 grid_trading | G4-01 | MIT / E4 | 4h | 首個 ONNX artifact + registry row |
-| **G4-03** | 🟡P2 | model_registry canary rules + auto-promote draft | G4-02 | E1+E2 | 2d | `/api/v1/ml/model_promote` route live |
+| **G4-02** | ✅完成 | `run_training_pipeline.py` 首跑 grid_trading — 首個 ONNX artifact + registry row 已於 2026-04-23 完成（INFRA-PREBUILD-1 Part B 階段一併產出）；2026-04-25 `2c920cb` 修正 `program_code/ml_training/run_training_pipeline.py` 13 個 `from ml_training.X` import 路徑為 `from program_code.ml_training.X` 解 module invocation `python3 -m program_code.ml_training.X` 失敗，retrain 路徑解阻 | G4-01 | MIT / E4 | 完成 2026-04-25 | commits `f2fbbda` (mark) + `2c970bb` (import fix) |
+| **G4-03** | ✅完成 Phase A | Canary auto-promote evaluator — `program_code/ml_training/canary_promoter.py` ~330 LOC（`CanaryDecision` enum + `CanaryThresholds` + 8 env var override + `auto_promote_eligible_models` scanner + `is_auto_promote_enabled` env gate）+ `helper_scripts/db/canary_promote_runner.py` ~150 LOC CLI（`--dry-run` default / `--apply` 需 `OPENCLAW_AUTO_PROMOTE_ENABLED=1` env / `--verbose` / `--dsn`）+ `program_code/ml_training/tests/test_canary_promoter.py` 完整測試 + runbook `docs/references/2026-04-25--g4_03_canary_promote_runbook.md` · 狀態機 shadow → promoting → production / retired / rejected · DEFAULT-OFF env-gate · Phase B 部署 cron driver / Brier 分數 / PSI drift / SIGHUP 留 deferred | G4-02 | E1+E2 | 完成 Phase A 2026-04-25 | commits `1164ede` (impl) + `01fe46c` (docs)，pytest 3056 |
 | **G4-04** | 🟡P2 | edge_estimator_scheduler healthcheck [13] | G1-01 | E1 / QA | 0.5d | cron 每 1h check mtime |
 | **G4-05** | 🟡P2 | `ExitConfig.shadow_enabled` flip ON + 24h 觀察 | G3-05 | PM+MIT / QA | passive 24h | healthcheck [8] decision_shadow_exits 有 row |
 
@@ -247,20 +250,25 @@ ssh trade-core "cd ~/BybitOpenClaw/srv && python3 helper_scripts/db/passive_wait
 |---|---|---|---|---|---|---|
 | **G7-01** | 🟡surface ready, router 未 wire | Kelly 分級 tier boundaries 參數化 — `KellyConfig.young_threshold` / `mature_threshold` 默認 50/200 + `validate()`（拒 0 / 逆轉）；`RiskConfig.kelly` mirror struct + TOML `[kelly]` 三環境補齊（demo/live/paper）；`kelly_sizer.rs:153-159` fractional-Kelly tier branch 改讀 config；+8 unit tests（kelly_sizer 4 + risk_config 4）；Linux release 2003/0 ✅ · **Caveat**：`set_kelly_config()` 在 router callsites 尚未 wire（FA L3 audit 標「未啟用」）→ 新 TOML 尚未 flow 到 runtime，defaults 保持當前行為；wiring 為後續任務（可能 part of G4-01 labels work） | 無 | QC+E1 / FA | 完成 surface 2026-04-25（wiring 未做）| [G7-01 report](.claude_reports/20260425_000414_g7_01_kelly_tier_config.md)（commits `42758e7` feature + `e4b63b4` test fix）|
 | **G7-02** | ✅完成 | EWMA Vol lambda per-timeframe 參數化 — 新 `EwmaVolConfig { default_lambda, lambdas: HashMap<String, f64> }`（預設 0.97 mirror G7-02 前 RiskMetrics 硬編碼）+ `validate()` 強制 (0.0, 1.0) 開區間 + `lambda_for_timeframe()` helper；接入 `RiskConfig.ewma_vol` + 3-env TOML `[ewma_vol]` 區段（demo/live/paper 預設 default_lambda=0.97 / lambdas={} 保留現行為）；`indicators::IndicatorEngine::compute_all_with_lambda` 接 config；5 unit tests（default / out-of-range / TOML round-trip / partial fallback / per-tf lookup）· Linux release **2023/0** ✅ · `--rebuild` 部署 engine alive 13.1s ✅ | 無 | QC+E1 | 完成 2026-04-25 | TOML configurable ✅ / 預設保現行為 / commit `6b7246d` |
-| **G7-03** | 🟠P1 | Hurst + Hysteresis 整合（6-period lag） | 無 | QC / FA+MIT | 2-3d | R/S analysis live |
+| **G7-03** | ✅完成 Phase A + Phase B 3/4 | Hurst exponent + Hysteresis regime detector — Phase A schema landing：`HurstConfig` 在 `risk_config_regime.rs`（new sibling，因 advanced.rs 已撞 1198/1200 cap）+ `HysteresisDetector` 6-period lag + R/S analysis live + 3-env TOML `[hurst]` 區段 + 不變量驗證 + unit tests · Phase B per-symbol HysteresisDetector cache + `RegimeLabel` migration（V026），`bb_breakout` / `ma_crossover` / `bb_reversion` 3 策略 wired，**`grid_trading` 遷移 deferred 為 G7-03-Phase-B-FUP-grid**（與 parallel session WIP merge 衝突避免）| 無 | QC / FA+MIT | 完成 Phase A + Phase B 3/4 2026-04-25 | commits `892955a` (Phase A) + `0cb133b` (Phase B) |
+| **G7-03-Phase-B-FUP-grid** | ⬜deferred | grid_trading per-symbol HysteresisDetector 遷移 — 等 parallel session 5 grid_trading WIP files（constructors.rs / mod.rs / params.rs / position_mgmt.rs / strategies/mod.rs）merge 後再啟動，避免 commit 衝突；Phase B 已驗證 cache pattern 在 3 策略 working | G7-03 Phase B + parallel WIP merge | E1 | 1-2d | 4/4 策略全 wired |
 | **G7-04** | ✅完成 Phase A | CUSUM 策略衰減監控 schema landing — 新 `CusumConfig { enabled, slack_k, threshold_h, min_observations, target_return_bps }`（Page/Montgomery convention，預設 dormant `enabled=false`、slack_k=0.5σ、threshold_h=4.0σ、min_obs=30）+ `validate()`（4 reject paths）+ 7 unit tests（defaults/4 reject/TOML round-trip/partial fallback）+ 3-env TOML `[cusum]` 區段；Linux 2030/0 ✅；**Phase A 純 schema**：runtime wiring 候選 σ-source `RiskConfig.ewma_vol`、consumer hook `dynamic_risk_sizer`/`strategy_orchestrator`，待 Phase B/C | 無 | QC+E1 | 完成 schema 2026-04-25 / wiring 待續 | [G7-04 report](.claude_reports/20260425_020449_g7_04_cusum_schema.md)（commit `1628cb6`）|
 | **G7-05** | 🟡passive wait | cost_gate grand_mean bind condition — G7-09 已 deploy（2026-04-24 23:41 CEST），開始累積 post-fix data；**當前狀態**（ssh verify 23:41）：grand_mean_bps=-9.80 / n_cells=62 / shrunk_bps>0 count=**0**；`>-50 bps` 條件已滿足，**`≥2 strategies shrunk>0` 未滿足**；預計 ≥1w post-fix fills（~2026-05-01+）後有足夠 maker/taker 混合樣本，屆時 (a) 校準閾值是否仍合理（artifact vs real edge） (b) 落地 cost_gate bind 判決 code（TBD：ExitConfig 新 flag 或 IPC patch）| G1-01 + G7-09 | QC+E1 / FA | 2-3h（post-data） | bind when grand_mean > -50 bps ∧ ≥2 strategies shrunk>0 + post-fix threshold validated |
 | **G7-06** | ✅完成 schema + impl（gated dormant）| Grid OU residual-based σ estimator — 新 `OuResidualSigma` struct 在 `strategies/grid_helpers.rs`（`theta` mean-reversion 速度 / `mu` 長期均值 / `sigma_hat` residual std / `n_observations`；`update(x_new)` rolling estimator + `estimate_from_window(slice)` batch；數學：OU 過程 `dx_t = θ(μ - x_t)dt + σ dW_t`，residuals `e_t = Δx_t - θ(μ - x_{t-1})` ~ N(0, σ²)，σ_hat = sqrt(Σe_t²/(n-1)) unbiased）+ `GridOuConfig { residual_window_size, fallback_sigma, use_residual_sigma }` 在 `risk_config_advanced.rs`（接 `RiskConfig.grid_ou` + 3-env TOML）· **Phase A gating**：預設 `use_residual_sigma=false` 保留現行為；翻 true 啟用 OU residual 估計；7 unit tests（recover within 5% on n=200 / trending series graceful no-NaN / window slice / lifecycle / n<5 None edge）· Linux release **2046/0** ✅ | 無 | QC / E1+E2 | 完成 2026-04-25 | commit `67a8261` |
 | **G7-07** | ✅完成（範圍縮減）| Slippage / confluence 硬編碼清理 — **Discovery**：「8 檔」TODO 描述過期；41 grep-match 中大多已 TOML 化（strategy `min_persistence_ms/weight_*/threshold_*/adx_floor` 在 `MaCrossover/BbReversion/BbBreakoutParams` G-SR-1 A0-c；`squeeze_bw/expansion_bw/volume_threshold` 在 `BbBreakoutParams`；FundingArb cost bps 在 `FundingArbParams` QC-H10；`MarketGate.slippage_max_bps` 在 `advanced::MarketGate`）。**實際 1 檔 4 hardcode 移**：`intent_processor/{mod,gates}.rs` → 新 `SlippageConfig { default_rate=5bps, tiers=Vec<SlippageTier>(5 desc), cost_gate_win_rate_floor=0.3, cost_gate_safety_multiplier=1.3 }` 接 `RiskConfig.slippage` + 3-env TOML `[slippage]` + 5 `[[slippage.tiers]]` + regression test 確認 default lookup bit-identical；9 unit tests；Linux 2039/0 ✅ | 無 | QC+E1 / FA | 完成 2026-04-25 | [G7-07 report](.claude_reports/20260425_021006_g7_07_slippage_confluence_toml.md)（commit `92e65af` + relocate `3bed899`）|
 | **G7-08** | ✅完成 484x speedup | outcome_backfiller SQL slow query — **Root cause**：`pending` CTE 對 `trading.decision_context_snapshots`（770k 行 / 1.6 GB）跑 **Parallel Seq Scan**，filter 後丟掉 208k row 才取 200。Hot cache 168ms / cold cache 1.5s（即 prod log 的 slow-statement WARN）。Kline 7 個 correlated sub-selects 早就用 TimescaleDB index scan，<2ms 不是病灶。**Fix**：`sql/migrations/V025__outcome_backfill_pending_index.sql` — 單一 partial index `idx_dcs_outcome_backfill_pending on (ts ASC) WHERE outcome_backfilled = FALSE AND last_price IS NOT NULL AND last_price > 0`。**EXPLAIN ANALYZE**：Pending CTE 1500ms cold → **0.39ms**；Full query 1500ms → **3.1ms**；Disk pages read 209,766 → 54；Index size 4 MB；Linux release **2046/0** ✅；Migration 雙跑 idempotent 通過；engine `--rebuild` 後 auto_migrate 補入 `_sqlx_migrations` row 25 | 無 | QC+E1 / FA | 完成 2026-04-25 | [G7-08 report](.claude_reports/20260425_024251_g7_08_outcome_backfiller_sql.md)（commit `743cfa9`）|
-| **G7-09** | ✅完成 | FIX-FEE-POSTONLY-1 — 修三處：(1) `intent_processor/mod.rs:1084` 新增 `fee_rate_for_tif(symbol, tif: Option<TimeInForce>)` helper，既有 `fee_rate_for_intent` delegate 進同一選擇點 (2) `event_consumer/loop_handlers.rs:405-447` hoist matched_key lookup 至 fee compute 前，取 `PendingOrder.time_in_force` 後用新 helper，race (Fill 先於 OrderUpdate) → TIF=None → taker fallback 保本 (3) `intent_processor/tests.rs` 加 3 unit tests（PostOnly=maker / GTC=taker / None=taker race safety）· Linux release cargo test **1995/0**（baseline 1992 + 3 new）· `--rebuild` 部署 engine PID 1376094 binary 23:41 CEST · **downstream cascade**：fee 列 post-fix 會出現 2bps maker 混 5.5bps taker → grand_mean_bps 會變，G7-05 bind 閾值需重校準（passive ~1w）· **historical 資料不可逆**：pre-872478a 所有 fills 鎖 5.5bps；baseline 分析需 split pre/post commit ts | G1-02 | E1+QC / E2+E4 | 完成 2026-04-24 | demo fills fee_rate 開始出現 maker 2bps 列（觀察中）· engine lib 1995 / 0 failed · commit `872478a` |
+| **G7-09** | ✅完成 | FIX-FEE-POSTONLY-1 — 修三處：(1) `intent_processor/mod.rs:1084` 新增 `fee_rate_for_tif(symbol, tif: Option<TimeInForce>)` helper (2) `event_consumer/loop_handlers.rs:405-447` hoist matched_key lookup 至 fee compute 前 (3) `intent_processor/tests.rs` 加 3 unit tests · Linux release cargo test **1995/0** · `--rebuild` 部署 engine PID 1376094 binary 23:41 CEST · downstream：fee 列 post-fix 會出現 2bps maker 混 5.5bps taker → G7-05 bind 閾值需重校準（passive ~1w） | G1-02 | E1+QC / E2+E4 | 完成 2026-04-24 | commit `872478a` |
+| **G7-09b** | ✅完成 | FIX-FEE-POSTONLY-1 follow-up audit — `trading.orders.order_type` mirror `PendingOrder` (audit honesty)；orders 表記錄真實下單 type 而非 INTENT 字串，便於 G1-04 fee analysis split pre/post G7-09 | G7-09 | E1+QC | 完成 2026-04-25 | commit `7f0e793` |
+| **G7-09c Phase 1** | ✅完成 | BBO-aware PostOnly maker price — 4 策略（ma_crossover / bb_reversion / bb_breakout / grid_trading）統一 PostOnly 入場 price 改為 BBO（best bid/offer）side，避免 cross-spread reject；Phase 2 funding_arb 待跟（背景）| G7-09 | E1 / E2 | 完成 2026-04-25 | commit `ac70862` |
 
 ### Wave 2 完成標準
 
-- [ ] G3-01~04 ExecutorAgent shadow→live e2e pass
-- [ ] G4-02 第一個 ONNX artifact 進 registry
-- [ ] G5-01~06 所有 Rust / Python 檔 <1200 行
-- [ ] G7 量化配置化完成
+- [x] G3-01~04 ExecutorAgent shadow→live e2e pass — Phase A IPC + Phase B cache + Phase C operator API + e2e tests 全綠（commits `16c97c1`/`03acedb`/`51608fe`/`325582f`/`852da0f`）
+- [x] G4-02 第一個 ONNX artifact 進 registry — 已於 2026-04-23 完成（INFRA-PREBUILD-1 Part B），import path fix `2c970bb` 解阻 retrain
+- [x] G4-03 canary auto-promote evaluator Phase A — `1164ede` + `01fe46c`（runbook + DEFAULT-OFF env-gate）
+- [~] G5-01~06 所有 Rust / Python 檔 <1200 行 — G5-02 `e0d02b2` / G5-04 `37172b0` / G5-05 `8523946` / G5-07 `913b536` 完成；G5-01 main.rs / G5-03 instrument_info.rs / G5-06 (5 檔) 仍 deferred
+- [x] G7 量化配置化完成 — 9/10（G7-01 surface ready / 02 / 03 Phase A+B 3/4 / 04 Phase A / 06 / 07 / 08 / 09 + 09b/09c Phase 1）；G7-05 passive wait Post-G7-09 數據 ~05-01+
+- [x] **雙 P0 RCA 修復**（額外完成）：G6-FUP-NEWS-HALT-DEDUP-1 + G6-FUP-TICK-PIPELINE-DEAD-1（commit `b980986`）解 engine "crashloop" 假象
 
 ---
 
