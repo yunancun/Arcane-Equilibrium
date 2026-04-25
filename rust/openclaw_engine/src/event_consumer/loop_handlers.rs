@@ -179,6 +179,33 @@ pub(super) fn handle_pending_registration(
         );
         // Emit Order row when exchange confirms Working state.
         // 訂單進入 Working 狀態時寫入 trading.orders。
+        //
+        // FIX-G7-09B-INTENT-LIMIT-DROP-1 (2026-04-25):
+        //   `PendingOrder.order_type` carries the lowercase `"market"` /
+        //   `"limit"` mirrored end-to-end from `OrderIntent.order_type` →
+        //   `OrderDispatchRequest.order_type` (per dispatch.rs:420). Prior
+        //   code hardcoded `"Market".into()` which (a) corrupted observability
+        //   (every audit row read "Market" even when the actual Bybit submit
+        //   was Limit + PostOnly) and (b) blocked downstream EDGE-P2-3 maker
+        //   fee analysis (`trading.orders` join can't tell Limit from Market).
+        //   Fix: map `po.order_type` to PascalCase to match Bybit's
+        //   `orderType` field and existing column convention; unknown values
+        //   fall back to the raw lowercased string (defensive, never silently
+        //   overrides — caller bug surfaces in PG instead of hiding behind a
+        //   "Market" mask).
+        // FIX-G7-09B-INTENT-LIMIT-DROP-1（2026-04-25）：
+        //   `PendingOrder.order_type` 為小寫 `"market"` / `"limit"`，由
+        //   `OrderIntent.order_type` → `OrderDispatchRequest.order_type` 端到端鏡射
+        //   （見 dispatch.rs:420）。先前硬寫 `"Market".into()`：
+        //   (a) 敗壞可觀察性：實際 Bybit 已送出 Limit+PostOnly，audit row 卻全為 "Market"；
+        //   (b) 阻斷 EDGE-P2-3 maker 費分析：trading.orders join 無法區分 Limit/Market。
+        //   修法：將 `po.order_type` 映成 PascalCase 對齊 Bybit `orderType` 與既有欄位習慣；
+        //   非已知值 fallback raw（防禦性，不再以 "Market" 遮蓋 caller bug）。
+        let order_type_pg = match po.order_type.to_ascii_lowercase().as_str() {
+            "market" => "Market".to_string(),
+            "limit" => "Limit".to_string(),
+            other => other.to_string(),
+        };
         if let Some(tx) = order_tx {
             let em = pipeline.effective_engine_mode().to_string();
             let _ = tx.try_send(crate::database::TradingMsg::Order {
@@ -186,7 +213,7 @@ pub(super) fn handle_pending_registration(
                 ts_ms: po.sent_ts_ms,
                 symbol: po.symbol.clone(),
                 side: if po.is_long { "Buy".into() } else { "Sell".into() },
-                order_type: "Market".into(),
+                order_type: order_type_pg,
                 qty: po.qty,
                 strategy_name: po.strategy.clone(),
                 is_close: po.is_close,

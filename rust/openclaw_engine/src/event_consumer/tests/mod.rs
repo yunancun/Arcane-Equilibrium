@@ -15,6 +15,11 @@ mod cross_engine_tests;
 mod exit_config_ipc_tests;
 mod governor_override_tests;
 mod handlers_paper_cmd_tests;
+// FIX-G7-09B-INTENT-LIMIT-DROP-1 (2026-04-25): pin trading.orders.order_type
+// honestly mirrors PendingOrder.order_type instead of hardcoded "Market".
+// FIX-G7-09B-INTENT-LIMIT-DROP-1（2026-04-25）：pin trading.orders.order_type
+// 誠實鏡射 PendingOrder.order_type，而非硬寫 "Market"。
+mod pending_registration_order_type_tests;
 mod reconciler_tests;
 mod submit_order_tests;
 
