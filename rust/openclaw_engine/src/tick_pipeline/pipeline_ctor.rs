@@ -122,6 +122,11 @@ impl TickPipeline {
             shadow_exit_tx: None,
             symbol_registry: None,
             retriage_last_evict_ms: HashMap::new(),
+            // G7-03 Phase B: empty per-symbol HysteresisDetector cache.
+            // When `risk.hurst.enabled = false` (default), the helper bypasses
+            // entry/insert so this map stays empty bit-identical to Phase A.
+            // G7-03 Phase B：空的 per-symbol HysteresisDetector 快取，預設 bypass。
+            hurst_detectors: HashMap::new(),
             // DYNAMIC-RISK-1: anchored on IntentProcessor's default p1_risk_pct (3%).
             // DYNAMIC-RISK-1：以 IntentProcessor 預設 p1_risk_pct (3%) 為錨。
             dynamic_risk_sizer: crate::dynamic_risk_sizer::DynamicRiskSizer::new(

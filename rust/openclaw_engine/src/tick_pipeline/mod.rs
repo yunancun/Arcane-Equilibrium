@@ -936,6 +936,19 @@ pub struct TickPipeline {
     /// DUST-EVICTION-GAP-1 / P1-8 FUP：每 symbol 最後一次重分流派 CloseSymbol 的
     /// 時間戳，用於速率限制（與 ORPHAN_CLOSE_DEDUP_MS 2 min 一致）。
     retriage_last_evict_ms: HashMap<String, u64>,
+    /// G7-03 Phase B: per-symbol HysteresisDetector cache. Lazily allocated on
+    /// first regime-label call for a symbol; lives for the pipeline's lifetime.
+    /// Each detector owns its own rolling history of recent Hurst observations
+    /// so the `lag` parameter actually applies (Phase A's stateless adapter
+    /// could not enforce hysteresis). Empty when `risk.hurst.enabled = false`
+    /// (the bypass path skips the entry/insert) so dormant runtime keeps the
+    /// map empty and bit-identical to Phase A. Symbols never seen on this
+    /// engine never appear here.
+    /// G7-03 Phase B：per-symbol `HysteresisDetector` 快取，懶分配；當
+    /// `risk.hurst.enabled = false` 時 bypass 路徑不會 `entry()`，map 維持空
+    /// 與 Phase A bit-identical。Phase B 啟用後每 symbol 維護自己的觀察歷史，
+    /// `lag` 真正生效。
+    hurst_detectors: HashMap<String, crate::regime::HysteresisDetector>,
     /// DYNAMIC-RISK-1: Per-engine Sharpe-aware sizer. Adjusts
     /// `IntentProcessor::p1_risk_pct` up/down after realized PnL closes.
     /// Disabled by default; enabled via `[risk.dynamic_sizing]` TOML block.

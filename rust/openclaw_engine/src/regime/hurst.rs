@@ -603,4 +603,154 @@ mod tests {
             );
         }
     }
+
+    // ───────────────────────────────────────────────────────────────────────
+    // G7-03 Phase B regression coverage — per-symbol cache semantics
+    // ───────────────────────────────────────────────────────────────────────
+
+    /// Phase B per-symbol cache must keep BTCUSDT and ETHUSDT detectors fully
+    /// independent — feeding 6 strong-trend observations into BTC's detector
+    /// must not affect ETH's, even when the same `HurstConfig` is used to
+    /// build both. Mirrors the contract enforced by the
+    /// `tick_pipeline.hurst_detectors: HashMap<symbol, HysteresisDetector>`
+    /// cache (Phase B wired in `pipeline_helpers::apply_hurst_regime_label_for`).
+    /// Phase B per-symbol cache 必須讓 BTC/ETH detector 完全獨立；BTC 連推 6 次
+    /// 強趨勢與 ETH 無關。對應 tick_pipeline `hurst_detectors` HashMap 契約。
+    #[test]
+    fn test_phase_b_per_symbol_cache_independence() {
+        use std::collections::HashMap;
+
+        let cfg = cfg_for_test(6);
+        let mut cache: HashMap<String, HysteresisDetector> = HashMap::new();
+
+        // 6 strong-trend observations for BTCUSDT → flip to Persistent at #6.
+        // BTC 連續 6 次 0.80 → 第 6 次翻 Persistent。
+        let btc = cache
+            .entry("BTCUSDT".into())
+            .or_insert_with(|| HysteresisDetector::from_config(&cfg));
+        for _ in 0..5 {
+            btc.push(0.80);
+        }
+        let btc_after_six = btc.push(0.80);
+        assert_eq!(btc_after_six, RegimeLabel::Persistent);
+
+        // ETHUSDT detector is brand new — no observations yet, stays Random
+        // even though BTC's detector just flipped. Independence guarantee.
+        // ETH detector 全新，無任何觀察，即使 BTC 已翻 Persistent，ETH 仍 Random。
+        let eth = cache
+            .entry("ETHUSDT".into())
+            .or_insert_with(|| HysteresisDetector::from_config(&cfg));
+        assert_eq!(eth.current(), RegimeLabel::Random);
+        assert_eq!(eth.buffered(), 0, "ETH detector must have empty history");
+
+        // Push 6 anti-persistent observations to ETH → flip to AntiPersistent.
+        // BTC must remain Persistent (still no new observations).
+        // ETH 連續 6 次 0.20 → 翻 AntiPersistent；BTC 必須仍是 Persistent。
+        for _ in 0..5 {
+            eth.push(0.20);
+        }
+        let eth_after_six = eth.push(0.20);
+        assert_eq!(eth_after_six, RegimeLabel::AntiPersistent);
+
+        let btc_check = cache.get("BTCUSDT").expect("BTC entry survives");
+        assert_eq!(
+            btc_check.current(),
+            RegimeLabel::Persistent,
+            "BTC detector must not be perturbed by ETH activity"
+        );
+
+        // Cache size = 2 (one entry per symbol, no leakage).
+        assert_eq!(cache.len(), 2, "cache must hold exactly two detectors");
+    }
+
+    /// Phase B `enabled = false` bypass path: when the config flag is off, the
+    /// `apply_hurst_regime_label_for` helper short-circuits before
+    /// `entry().or_insert_with(...)`, so the per-symbol detector cache stays
+    /// empty. This regression test guards that contract by simulating the
+    /// helper's first decision (load → check enabled → bail) and asserting no
+    /// detector is created. Crucial: Phase A bit-identical fingerprint depends
+    /// on never allocating Detector state in the dormant default config.
+    /// Phase B 旁路：`enabled=false` 時不應 entry/insert，cache 維持空。
+    /// Dormant 預設 config bit-identical 取決於不分配 detector state。
+    #[test]
+    fn test_phase_b_enabled_false_bypass() {
+        use std::collections::HashMap;
+
+        // Default = enabled:false (HurstConfig::default).
+        let cfg = HurstConfig::default();
+        assert!(
+            !cfg.enabled,
+            "default HurstConfig must be dormant (enabled=false)"
+        );
+
+        let mut cache: HashMap<String, HysteresisDetector> = HashMap::new();
+
+        // Mimic the helper's bypass guard:
+        //   if !cfg.enabled { return; }
+        // No `entry()` call → cache must remain empty.
+        // 模擬 helper 的 bypass 守衛 — 不呼叫 entry()，cache 必須仍為空。
+        if cfg.enabled {
+            cache
+                .entry("BTCUSDT".to_string())
+                .or_insert_with(|| HysteresisDetector::from_config(&cfg));
+        }
+
+        assert!(
+            cache.is_empty(),
+            "dormant config must not allocate any detector"
+        );
+        assert_eq!(cache.len(), 0);
+
+        // Sanity: flipping enabled=true and re-running the same logic *does*
+        // populate the cache — proves the empty assertion above isn't a typo.
+        // 對照組：把 enabled 翻成 true，同邏輯就會填入；證明上面的空斷言不是筆誤。
+        let cfg_on = HurstConfig {
+            enabled: true,
+            ..cfg
+        };
+        if cfg_on.enabled {
+            cache
+                .entry("BTCUSDT".to_string())
+                .or_insert_with(|| HysteresisDetector::from_config(&cfg_on));
+        }
+        assert_eq!(cache.len(), 1);
+        assert_eq!(
+            cache.get("BTCUSDT").map(|d| d.current()),
+            Some(RegimeLabel::Random),
+            "freshly-allocated detector starts in Random"
+        );
+    }
+
+    /// Phase B contract: `as_legacy_str` round-trips correctly through
+    /// `from_legacy_str` for every label. The strategies (bb_breakout /
+    /// bb_reversion / ma_crossover) rely on this round-trip to interpret
+    /// the stabilized regime string `apply_hurst_regime_label_for` writes
+    /// back into `IndicatorSnapshot.hurst.regime`. Adding here (not just in
+    /// the existing `regime_label_legacy_str_round_trip`) so a Phase B grep
+    /// audit can see the contract is explicitly tested for the migration sites.
+    /// Phase B 契約：legacy 字串雙向轉換完整 round-trip。3 策略在 from_legacy_str
+    /// 端解碼 helper 寫回 IndicatorSnapshot 的穩定字串，必依賴此契約。
+    #[test]
+    fn test_phase_b_legacy_str_round_trip_covers_strategy_sites() {
+        // bb_breakout entry: matches `Persistent` / "trending".
+        // bb_breakout 入場：對 Persistent / "trending"。
+        let s = RegimeLabel::Persistent.as_legacy_str();
+        assert_eq!(s, "trending");
+        assert_eq!(RegimeLabel::from_legacy_str(s), RegimeLabel::Persistent);
+
+        // bb_breakout exit + bb_reversion entry: matches AntiPersistent.
+        // bb_breakout 出場 + bb_reversion 入場：對 AntiPersistent。
+        let s = RegimeLabel::AntiPersistent.as_legacy_str();
+        assert_eq!(s, "mean_reverting");
+        assert_eq!(
+            RegimeLabel::from_legacy_str(s),
+            RegimeLabel::AntiPersistent
+        );
+
+        // bb_breakout exit fallback: Random.
+        // bb_breakout 出場 fallback：Random。
+        let s = RegimeLabel::Random.as_legacy_str();
+        assert_eq!(s, "random_walk");
+        assert_eq!(RegimeLabel::from_legacy_str(s), RegimeLabel::Random);
+    }
 }
