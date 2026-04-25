@@ -9,6 +9,10 @@ allowed-tools: Read, Grep, Glob, WebSearch
 > **優先序**：runtime RiskConfig TOML > Rust schema > CLAUDE.md > 治理 .md > memory > 本 skill
 > **衝突時向 PM / operator push back，不單方面執行 skill 內 SOP**
 
+> **S1 風控數字 SSOT**：position size / VaR / drawdown threshold 等所有風控數字以 `settings/risk_control_rules/risk_config_<env>.toml` 為 SSOT；config 不合理 → push back operator，**不信 memory 或 skill 內寫死值**。
+
+> **S6 P0/P1/P2 cross-ref**：三層風控定義見 `srv/docs/decisions/EX-01_..._V2.md` §2.1-§2.3；本 skill 引用屬語意重述。
+
 ## 何時觸發
 
 - QC 收到「策略數學體檢」「VaR/CVaR/Kelly 驗證」「白皮書草稿審查」「Alpha 研究方法論」

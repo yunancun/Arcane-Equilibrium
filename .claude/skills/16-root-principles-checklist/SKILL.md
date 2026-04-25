@@ -9,6 +9,10 @@ allowed-tools: Read, Grep, Glob
 > **優先序**：runtime RiskConfig TOML > Rust schema > CLAUDE.md > 治理 .md > memory > 本 skill
 > **衝突時向 PM / operator push back，不單方面執行 skill 內 SOP**
 
+> **S3 上層 drift 防線**：本 skill 16 條根原則為 DOC-01 V2 §5.1-§5.16 的 extract（**真 SSOT 是 `srv/docs/decisions/DOC-01_..._V2.md`，不是 CLAUDE.md §二**），原文修改後可能漂移，發現不一致以 DOC-01 原文為準。
+
+> **S6 P0/P1/P2 cross-ref**：三層風控定義見 `srv/docs/decisions/EX-01_..._V2.md` §2.1-§2.3；本 skill 引用屬語意重述。
+
 ## 何時觸發
 
 - CC 收到「合規審查」「16 條原則檢查」「硬邊界體檢」

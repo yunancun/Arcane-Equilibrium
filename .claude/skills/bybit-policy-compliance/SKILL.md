@@ -26,7 +26,10 @@ allowed-tools: Read, Grep, Glob, WebSearch
 ## 1. ToS / 用戶協議關鍵條款（須背）
 
 ### 1.1 地理禁區（Restricted Jurisdictions）
-Bybit 禁止以下地區的 user 開戶 / 交易（截至 2026-04，需定期校對最新公告）：
+
+> ⚠️ **本清單為 reference snapshot（2026-04）；Bybit 真實禁區動態變動，2024-2026 已多次調整**。**最終以 [Bybit 官方 ToS / Restricted Countries](https://www.bybit.com/en/help-center) 為準**；本 skill 不取代官方公告。涉及新地區 deployment / KYC 變動 → 立即查官方再決定。
+
+Bybit 禁止以下地區的 user 開戶 / 交易（snapshot 2026-04，**必須定期校對**）：
 - USA + territories（部分產品）
 - Mainland China
 - Singapore（部分產品 derivatives）

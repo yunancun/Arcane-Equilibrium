@@ -9,6 +9,8 @@ allowed-tools: Read, Grep, Glob, Edit, Write
 > **優先序**：runtime RiskConfig TOML > Rust schema > CLAUDE.md > 治理 .md > memory > 本 skill
 > **衝突時向 PM / operator push back，不單方面執行 skill 內 SOP**
 
+> **S3 上層 drift 防線**：本 skill 引用上層（CLAUDE.md / DOC-XX / SM-XX / EX-XX）為 extract；原文修改後可能漂移，發現不一致以原文為準。
+
 ## 何時觸發
 
 - TW 收到「補注釋」「文檔翻譯」「雙語對照修正」

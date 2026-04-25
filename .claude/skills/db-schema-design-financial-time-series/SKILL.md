@@ -172,18 +172,25 @@ CREATE TABLE learning.X (
 
 ## 6. PG 4-8GB Memory 限制下的優化
 
-### 6.1 work_mem 設定
+> ⚠️ **本段數值為 typical baseline，OpenClaw 真實 `postgresql.conf` 未 verified**（postgres 跑在 container，host sudo 找不到 postgres user）。**真實 verify 命令**：
+> ```bash
+> # 用 OpenClaw PG credential 連線 (找 settings/.env 或 env var)
+> psql "$DATABASE_URL" -c "SHOW work_mem; SHOW shared_buffers; SHOW max_connections; SHOW effective_cache_size;"
+> ```
+> 對應不上時以 `postgresql.conf` 為準，**不信本段建議值**。
+
+### 6.1 work_mem 設定（typical baseline）
 - query planner 用的 sort / hash 記憶體
-- OpenClaw PG 4-8GB → work_mem 設 32-64MB（per query）
+- OpenClaw PG 4-8GB → work_mem 建議 32-64MB（per query）
 - 太大 → 多並行 query 時 OOM
 
-### 6.2 shared_buffers
+### 6.2 shared_buffers（typical baseline）
 - 25% of 4-8GB = 1-2GB
 - 不要超 25%（OS file cache 也要空間）
 
 ### 6.3 Connection pooling
 - pgbouncer 必開（OpenClaw 多 worker）
-- max_connections 50 內
+- max_connections 50 內（待 verify）
 
 ### 6.4 Hypertable 自動 chunk drop
 ```sql

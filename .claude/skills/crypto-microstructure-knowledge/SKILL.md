@@ -9,6 +9,8 @@ allowed-tools: Read, Grep, Glob, WebSearch
 > **優先序**：runtime RiskConfig TOML > Rust schema > CLAUDE.md > 治理 .md > memory > 本 skill
 > **衝突時向 PM / operator push back，不單方面執行 skill 內 SOP**
 
+> **S6 P0/P1/P2 cross-ref**：三層風控定義見 `srv/docs/decisions/EX-01_..._V2.md` §2.1-§2.3；本 skill 引用屬語意重述。
+
 ## 何時觸發
 
 - QC 評估涉 funding / basis / liquidation 動態的策略
