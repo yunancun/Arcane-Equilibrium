@@ -28,7 +28,7 @@ use crate::exit_features::ExitConfig;
 mod advanced;
 pub use advanced::{
     AntiCluster, Correlation, DynamicStop, EdgePredictor, EdgePredictorFallback, Experimental,
-    MarketGate, RuntimeKnobs,
+    MarketGate, RuntimeKnobs, SlippageConfig, SlippageTier,
 };
 
 // ---------------------------------------------------------------------------
@@ -151,6 +151,16 @@ pub struct RiskConfig {
     /// 後續 follow-up 補 wiring。
     #[serde(default)]
     pub cusum: CusumConfig,
+    /// G7-07 (2026-04-24): Cost-gate slippage tiers + win-rate weighting knobs.
+    /// Replaces the hardcoded `SLIPPAGE_TIERS` / `DEFAULT_SLIPPAGE_RATE`
+    /// constants in `intent_processor::mod` and the literal `0.3` / `1.3`
+    /// in `cost_gate_{paper, moderate, live}`. Defaults preserve pre-G7-07
+    /// behaviour bit-identically. Hot-reloaded via `Arc<ArcSwap<RiskConfig>>`.
+    /// G7-07：成本門滑點分級 + 勝率加權 knob；替換 intent_processor 中
+    /// SLIPPAGE_TIERS / DEFAULT_SLIPPAGE_RATE 與 cost_gate_* 中的字面量
+    /// 0.3 / 1.3。預設保持 G7-07 前行為 bit-identical，可熱重載。
+    #[serde(default)]
+    pub slippage: SlippageConfig,
 }
 
 impl RiskConfig {
@@ -175,6 +185,7 @@ impl RiskConfig {
         self.executor.validate()?;
         self.ewma_vol.validate()?;
         self.cusum.validate()?;
+        self.slippage.validate()?;
 
         // Cross-sub-struct invariant: partial_tp levels must not exceed take_profit_max_pct.
         // 跨 sub-struct 不變量：partial_tp 各層不得超過 take_profit_max_pct。
