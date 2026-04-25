@@ -137,6 +137,7 @@ class ExecutorAgent(BaseAgent):
         paper_engine: Optional[Any] = None,
         audit_callback: Optional[Callable] = None,
         governance_hub: Optional[Any] = None,
+        shadow_mode_provider: Optional[Callable[[], bool]] = None,
     ):
         """
         Initialize ExecutorAgent with optional GovernanceHub for Decision Lease acquisition.
@@ -146,6 +147,18 @@ class ExecutorAgent(BaseAgent):
                         This enforces principle 3: AI output ≠ immediate command.
         governance_hub：若提供，執行訂單前會先調用 acquire_lease()。
                         這強制落實根原則 3：AI 輸出不等於即時命令。
+
+        shadow_mode_provider: G3-03 Phase B — zero-arg callable returning the current
+            ``shadow_mode`` flag (Rust ``RiskConfig.executor.shadow_mode`` via the cache
+            in ``executor_config_cache.py``). When ``None`` (default), the agent
+            fail-closes to ``shadow_mode=True`` (preserves test/standalone safety
+            and replaces the previously hardcoded ``_shadow_mode = True`` class
+            attribute, which violated CLAUDE.md §二 principle #3 — see RFC
+            ``docs/CCAgentWorkSpace/PA/workspace/reports/2026-04-24--g3_01_executor_agent_ipc_rfc.md``).
+        shadow_mode_provider：G3-03 Phase B — 零參 callable，每次呼叫回傳當前
+            ``shadow_mode`` 旗標（由 ``executor_config_cache.py`` 從 Rust IPC 拉取）。
+            ``None``（預設）時 agent fail-close 到 ``shadow_mode=True``（保留測試/獨立
+            使用安全性，並取代原本違反根原則 #3 的 ``_shadow_mode = True`` 硬編碼）。
         """
         super().__init__(
             role=AgentRole.EXECUTOR,
@@ -158,6 +171,15 @@ class ExecutorAgent(BaseAgent):
         # GovernanceHub for Decision Lease — principle 3 enforcement
         # GovernanceHub 用於 Decision Lease 申請，落實根原則 3
         self._governance_hub = governance_hub
+        # G3-03 Phase B: shadow_mode now sourced from a runtime provider (the
+        # Rust-IPC-backed cache). Replaces the hardcoded `_shadow_mode = True`
+        # class attribute. Fail-closed default when no provider is supplied
+        # (test fixtures / standalone use).
+        # G3-03 Phase B：shadow_mode 改為 runtime provider 提供（Rust IPC 快取）。
+        # 取代 ``_shadow_mode = True`` 類屬性硬編碼；無 provider 時 fail-closed。
+        self._shadow_mode_provider: Callable[[], bool] = (
+            shadow_mode_provider if shadow_mode_provider is not None else (lambda: True)
+        )
 
         # Conditional order callback (Batch 11: exchange stop-loss orders)
         # 条件单回调（Batch 11：交易所止损单）
@@ -475,11 +497,16 @@ class ExecutorAgent(BaseAgent):
 
     # ── R-06-v2: IPC Execution Bridge / IPC 執行橋接 ──
 
-    # Shadow mode: log intent but don't actually submit to Rust engine.
-    # Set to False to enable real IPC submission (Path A active trading).
-    # 影子模式：僅記錄 intent，不實際提交到 Rust 引擎。
-    # 設為 False 以啟用真實 IPC 提交（Path A 主動交易）。
-    _shadow_mode: bool = True
+    # G3-03 Phase B (2026-04-25): the historical class attribute
+    # ``_shadow_mode: bool = True`` has been removed. Shadow mode is now read
+    # at execution time via ``self._shadow_mode_provider()`` (set in __init__),
+    # which routes through the Rust-IPC-backed ``ExecutorConfigCache``
+    # (``executor_config_cache.py``). This closes CLAUDE.md §二 principle #3
+    # ("AI 輸出 ≠ 即時命令") — operator IPC flip + cache poll cycle yield
+    # < 60s shadow→live turnaround instead of restart-to-apply.
+    # G3-03 Phase B：``_shadow_mode = True`` 類屬性硬編碼已移除，改於執行時
+    # 透過 ``_shadow_mode_provider()`` 即時讀取（背後是 Rust IPC 快取）。
+    # 落實根原則 #3，operator IPC 切換 < 60s 生效，取代重啟才生效。
 
     def _execute_via_ipc(
         self,
@@ -509,7 +536,19 @@ class ExecutorAgent(BaseAgent):
         Fail-closed: IPC error → return failure report, never raises.
         失敗關閉：IPC 錯誤 → 返回失敗報告，不向上拋出。
         """
-        if self._shadow_mode:
+        # G3-03 Phase B: read shadow_mode via runtime provider (Rust IPC cache).
+        # If the provider raises, fail-closed to shadow=True (safest).
+        # G3-03 Phase B：透過 runtime provider 讀 shadow_mode；異常時 fail-closed。
+        try:
+            shadow_now = bool(self._shadow_mode_provider())
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "ExecutorAgent shadow_mode_provider raised %s — fail-closed to shadow=True "
+                "/ shadow_mode_provider 異常，fail-closed 為 True",
+                exc,
+            )
+            shadow_now = True
+        if shadow_now:
             # Shadow mode: log only, don't submit / 影子模式：僅記錄不提交
             logger.info(
                 "Executor IPC shadow: intent=%s %s %s qty=%.6f / "

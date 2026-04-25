@@ -410,6 +410,7 @@ state_models ← state_compiler ← state_store ← main_legacy ← main.py
 | `_<AGENT>_AUDIT_CB` / `_GOV_HUB_FOR_<AGENT>` × 5（Scout/Strategist/Guardian/Analyst/Executor） | strategy_wiring.py | 模組級，由 `agent_audit_bridge.make_agent_audit_callback(...)` 構造；各 agent ctor 注入 `audit_callback`（E5-FN-3 Analyst pilot + FN-3-FUP-a~d 4 agents 補接線）。ImportError 時 GOV_HUB=None → bridge fail-open 靜默丟事件。`agent_audit_bridge` 本身無狀態工廠（不持 singleton） |
 | `_scheduler` / `_scheduler_lock` | edge_estimator_scheduler.py | 內部懶加載 `start_scheduler()`（P1-7 B JS estimator，每小時 cycle）。QC-3 audit FUP 補登（2026-04-23） |
 | `_LEADER_LOCK_FD` / `_LEADER_LOCK_PATH` | edge_estimator_scheduler.py | 模組級全局；`_acquire_leader_lock()` 取得 flock fd 後寫入，OS 進程退出自動釋放（含 SIGKILL）。uvicorn --workers 4 leader election sentinel。測試用 `_reset_for_tests()` 釋放。EDGE-SCHEDULER-LEADER-1（2026-04-23 `f32629c`）|
+| `_CACHE_INSTANCE` / `_CACHE_LOCK` | executor_config_cache.py | 內部懶加載 `get_executor_config_cache()`；G3-03 Phase B（2026-04-25）。process-global ``ExecutorConfigCache`` 持 Rust ``RiskConfig.executor`` 子切片快照（背景 daemon thread 每 N 秒 IPC poll，預設 10s 由 `OPENCLAW_EXECUTOR_CACHE_POLL_SEC` 覆寫）；首次 IPC 成功前 fail-closed 預設 `shadow_mode=True`，IPC 暫時失敗保留前一個好 snapshot。`shadow_mode_provider()` lambda 注入 ``ExecutorAgent`` ctor 取代原 `_shadow_mode = True` 硬編碼（CLAUDE.md §二 原則 #3 fix）。`strategy_wiring.py:467` 區段 init + `start_polling()`。測試用 `_reset_for_tests()` 釋放 |
 
 新增 singleton 必須在此表登記。禁止子模塊創建未登記的全局可變狀態。
 

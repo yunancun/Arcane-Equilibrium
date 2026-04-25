@@ -448,6 +448,7 @@ except (ImportError, Exception) as e:
 # Batch 11：ExecutorAgent — 订单执行包装 + 执行质量反馈
 try:
     from .executor_agent import ExecutorAgent, ExecutorConfig
+    from .executor_config_cache import get_executor_config_cache
     from .multi_agent_framework import AgentRole as _AR11
 
     _GOV_HUB_FOR_EXECUTOR: Any = None
@@ -464,12 +465,32 @@ try:
     # 落實根原則 #8「交易可解釋」。fail-open：GOV_HUB 不可用時靜默丟棄，不阻塞 agent。
     _EXECUTOR_AUDIT_CB = make_agent_audit_callback(_GOV_HUB_FOR_EXECUTOR, "ExecutorAgent")
 
+    # ── G3-03 Phase B: ExecutorConfigCache wiring + shadow_mode_provider ──
+    # Rust IPC-backed cache of `RiskConfig.executor.shadow_mode`. Replaces the
+    # hardcoded `_shadow_mode = True` class attribute (CLAUDE.md §二 #3 fix).
+    # `start_polling()` is invoked here so the daemon thread runs alongside
+    # other lifecycle workers. Cache fail-closes to `shadow_mode=True` until
+    # the first IPC fetch succeeds (RFC §5.2 / principle #6).
+    # G3-03 Phase B：Rust IPC 快取接線 + shadow_mode_provider 注入。
+    # `start_polling` 與其他 lifecycle worker 一起啟動；首次 IPC 拉取前 fail-closed。
+    _EXECUTOR_CONFIG_CACHE = get_executor_config_cache()
+    try:
+        _EXECUTOR_CONFIG_CACHE.start_polling()
+    except Exception as _cache_exc:  # noqa: BLE001 — non-fatal, fail-closed default
+        logger.warning(
+            "ExecutorConfigCache.start_polling failed (non-fatal, "
+            "fail-closed shadow=True remains): %s "
+            "/ ExecutorConfigCache.start_polling 失敗（不致命，仍走 fail-closed shadow=True）：%s",
+            _cache_exc, _cache_exc,
+        )
+
     EXECUTOR_AGENT = ExecutorAgent(
         config=ExecutorConfig(),
         message_bus=MESSAGE_BUS,
         paper_engine=PAPER_ENGINE,
         governance_hub=_GOV_HUB_FOR_EXECUTOR,
         audit_callback=_EXECUTOR_AUDIT_CB,
+        shadow_mode_provider=_EXECUTOR_CONFIG_CACHE.shadow_mode_provider(),
     )
     EXECUTOR_AGENT.start()
     CONDUCTOR.register_agent(_AR11.EXECUTOR, resource_mode="local")
