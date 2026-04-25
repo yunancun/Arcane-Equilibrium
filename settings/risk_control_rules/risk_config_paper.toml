@@ -188,4 +188,20 @@ per_symbol_position_cap = {}
 default_lambda = 0.97
 lambdas = {}
 
+# G7-04 (2026-04-24) — CUSUM strategy decay monitor (Phase A: schema only).
+# Paper holds the same dormant default `enabled = false` for env symmetry while
+# Phase B+ wiring lands; operators may flip paper-side first to validate the
+# alarm path on synthetic noise without touching demo/live (3-env independence).
+# Numeric defaults match Page/Montgomery convention (0.5σ / 4σ / 30 obs / 0 bps);
+# validate() enforces 0 < slack_k < threshold_h, threshold_h ∈ (0, 100],
+# min_observations >= 5.
+# G7-04：Paper 維持 Phase A 靜默 enabled=false 與 live/demo 對齊；Phase B+ wiring
+# 後 paper 可率先翻 true 驗證警報路徑（3-env 隔離保 demo/live 不受污染）。
+[cusum]
+enabled = false
+slack_k = 0.5
+threshold_h = 4.0
+min_observations = 30
+target_return_bps = 0.0
+
 [experimental.flags]
