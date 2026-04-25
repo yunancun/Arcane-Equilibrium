@@ -1,6 +1,6 @@
 ---
 name: crypto-microstructure-knowledge
-description: Crypto perpetual / spot 微結構知識手冊 — Funding rate 動態、Liquidation cascade、Basis trading、Cross-CEX & CEX↔DEX 套利、Perpetual term structure、Execution optimization (TWAP/VWAP/Implementation Shortfall)、PostOnly/IOC fee 計算。QC + BB agent 合用。
+description: Crypto perpetual / spot 微結構知識手冊 — Funding rate 動態、Liquidation cascade、Basis trading、Perpetual term structure、Execution optimization (TWAP/VWAP/Implementation Shortfall)、PostOnly/IOC fee 計算。QC agent 主用（技術微結構視角）；BB agent 按需 cross-ref（policy 視角由 bybit-policy-compliance 主負）。
 allowed-tools: Read, Grep, Glob, WebSearch
 ---
 
@@ -131,7 +131,7 @@ allowed-tools: Read, Grep, Glob, WebSearch
 - Demo / paper=true（已 2026-04-21 部署）
 - Live=false（CLAUDE.md memory `project_track_p_runtime_live` 教訓：PostOnly 配置反向是 G1-05 fix 範疇）
 - 預期 fee 從 ~6.5 bps/side 降至 ~1 bps/side（drag 降 5.5 bps）
-- Maker fill rate 至少 ≥ 60% 才算成功
+- **Maker fill rate 建議起點 ≥ 60%（非治理硬規範）**：低於此值 PostOnly 反而吃 missed-trade opportunity cost；具體閾值依 strategy 進場頻率 + edge size 動態調整，由 QC 在執行成本評估時提替代
 
 ### 5.2 Execution benchmark
 

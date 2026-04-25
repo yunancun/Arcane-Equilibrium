@@ -18,6 +18,8 @@ allowed-tools: Read, Grep, Glob, Bash
 
 ## OpenClaw 已知敏感資產
 
+> ⚠️ **路徑為 reference snapshot**（env var 名 + slot 結構為當前約定）；env var 重新命名 / secret slot 結構調整後本表會漂移，**新代碼前 grep `$OPENCLAW_SECRETS_DIR` + `bybit_path_policy.py` 確認真實路徑**。
+
 | 資產 | 位置 | 嚴重 |
 |---|---|---|
 | Bybit API key/secret | `$OPENCLAW_SECRETS_DIR/secret_files/bybit/<slot>/api_key` + `api_secret` | CRITICAL |

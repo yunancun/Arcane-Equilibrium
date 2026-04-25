@@ -105,6 +105,12 @@ MIT 審計時若發現 V### 沒 Guard A → 列為 BLOCKER，回 E2 改。
 - **passive_wait_healthcheck**：cron 6h 跑 17 個 check
 - **5 strat × 25 symbol × 1m**：data row 量級高，hypertable + chunk 必須
 
+## Cross-Skill 互引（避免重述）
+
+- **C1.c feature pipeline 細節**：本 skill 看 pipeline 「writer/consumer/row/decision-impact」4 維度評級；**leakage 6 維度**（look-ahead / target / survivorship / cross-section / time-zone / resample boundary）+ **shift(1) compliance** 走 `feature-engineering-protocol`
+- **C1.h V### Guard A/B/C / hypertable schema / chunk / partial index**：本 skill 引用 schema 設計教訓（V023 silent-noop），但**真正 schema audit + retrofit SOP** 走 `db-schema-design-financial-time-series`
+- **CV 設計**：ML 訓練 CV / Purge / Embargo 走 `time-series-cv-protocol`（MIT）；策略 alpha 顯著性走 `walk-forward-validation-protocol`（QC）
+
 ## 輸出格式
 
 ```markdown

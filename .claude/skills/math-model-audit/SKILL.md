@@ -62,7 +62,7 @@ allowed-tools: Read, Grep, Glob, WebSearch
 - [ ] **Kelly fraction**：full Kelly 過激，用 fractional Kelly（0.25–0.5）；公式 `f* = (bp - q) / b` 正確使用 + 估 b（odds）+ p（win rate）
 - [ ] **VaR**：parametric vs historical 標明；crypto 用 historical（fat tail）；信心度 95% / 99% 雙列
 - [ ] **CVaR / ES**：tail loss expectation；新策略上 live 前必算
-- [ ] **Position sizing**：Operator 偏好 3% risk / trade · 25 symbols（memory `feedback_position_sizing.md`）+ 動態 qty
+- [ ] **Position sizing**：以 RiskConfig `[limits].per_trade_risk_pct`（base 0.1%）為 SSOT；memory `feedback_position_sizing.md` 寫的「3% risk / trade · 25 symbols」是 operator 設計意圖**但 config 為唯一 runtime 真值**，衝突信 config + push back operator（per S1 systemic）
 - [ ] **Drawdown bound**：max DD vs DD-tolerance 對齊
 - [ ] **Correlation / portfolio risk**：原則 16 監控關聯曝險，新 symbol 加入時計 ρ
 
@@ -88,6 +88,12 @@ allowed-tools: Read, Grep, Glob, WebSearch
 - **bb_breakout / squeeze 信號**：1m 尺度 bandwidth match（F1 確認過尺度錯配）
 - **PostOnly fee 降幅驗證**：≥1w demo 數據 + maker fill rate
 - **Phase 5 reframed**：所有活躍策略 gross edge 為負，新策略上線前必先過 demo 21d gross > 0
+
+## Cross-Skill 互引（避免重述）
+
+- **C1.j 設計 vs 審計視角**：本 skill = **審計**（黑名單 / 對抗反問 / 數字復算 / 樣本診斷）；**設計**（如何提出 alpha hypothesis、Kelly fractional 配置、portfolio risk budget 分配）走 `quant-strategy-design` + `portfolio-construction-protocol`
+- **C1.b 統計顯著性 PSR / DSR / multiple testing**：本 skill 列為 audit 維度 #2 但細節不重述；走 `walk-forward-validation-protocol`
+- **觸發順序提示**：`quant-strategy-design`（提案）→ `math-model-audit`（本 skill；數學審計）→ `walk-forward-validation-protocol`（驗證）三步走，遞進不可顛倒
 
 ## 反模式（見即 Reject）
 

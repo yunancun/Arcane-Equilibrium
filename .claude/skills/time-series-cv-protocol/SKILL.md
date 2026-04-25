@@ -76,7 +76,7 @@ train_resume = T' + embargo_periods
 | **Transformer** | ≥ 100k | 1m 級 ~半年才夠 |
 | **TCN / N-BEATS** | ≥ 50k | 1m ~3 個月 |
 
-當 P1-7 C labels 47 < 200 阈值 → **不訓練，只準備 pipeline**。
+當 P1-7 C labels 不足 §3 表閾值（具體進度動態查 `psql -c "SELECT count(*) FROM learning.exit_features WHERE engine_mode IN ('live','live_demo')"`）→ **不訓練，只準備 pipeline**。**禁寫死「47/200」等 snapshot 數字當決策依據** — 隨時間累積會失真。
 
 ## 4. CV split 設計實例
 
@@ -197,10 +197,16 @@ pkf = PurgedKFold(n_splits=5, samples_info_sets=label_end_ts, pct_embargo=0.01)
 
 - **engine_mode IN ('live', 'live_demo')**：training 過濾必含兩者
 - **exit_features atr_pct fix**（P0-13）：用 `kline_manager.get_ohlcv("1m",20) + indicators::atr(14)`
-- **P1-7 C labels 47/200**：訓練 pipeline ready 但資料不足，繼續累積
-- **`outcome_*` NULL → 1m timeframe fix**（commit `5e2981d`）：歷史 ~267k 行回填，重新 train 前 audit
+- **P1-7 C labels 累積中**：訓練 pipeline ready 但資料量隨時間變動（命令拿，不寫死）
+- **`outcome_*` NULL → 1m timeframe fix**（commit `5e2981d`）：歷史回填行數命令查（`SELECT count(*) FROM learning.exit_features WHERE outcome_pnl IS NOT NULL`），不寫死
 - **TimescaleDB hypertable**：support fast time-range query for CV split
-- **embargo recommended 1d**：1m × 1440 bars/day
+- **embargo recommended 1d 起跳**（**非治理硬規範**）：1m × 1440 bars/day；具體 embargo size 依 label horizon + autocorrelation 動態調整
+
+## Cross-Skill 互引（避免重述）
+
+- **C1.b QC 視角 = 策略 alpha 顯著性**（PSR / DSR / Bonferroni / PBO）走 `walk-forward-validation-protocol`；本 skill = MIT 視角，**ML 模型訓練 CV 設計**（sklearn / mlfinlab）
+- **C1.c feature 設計 + leakage**：feature-side 6 leakage 類型（look-ahead / target / survivorship 等）走 `feature-engineering-protocol`，本 skill 補 split-side leakage（purge / embargo）
+- **pipeline 成熟度評級**：本 skill CV 設計通過 ≠ pipeline live；走 `ml-pipeline-maturity-audit` 看 4 維度 + 5 階段
 
 ## 反模式（見即 Reject）
 

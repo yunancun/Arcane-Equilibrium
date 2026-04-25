@@ -156,7 +156,7 @@ CVaR(α) = E[L | L > VaR(α)]
 - crypto 特別適用（fat tail）
 
 ### 4.5 Stress Testing
-場景 list（OpenClaw 必須過）：
+場景 list（OpenClaw 建議起點）：
 1. 2020-03-12 BTC -50% / 24h
 2. 2021-05-19 LUNA collapse
 3. 2022-06 / 11 cascade（LUNA / FTX）
@@ -164,6 +164,8 @@ CVaR(α) = E[L | L > VaR(α)]
 5. Custom：BTC ±20% / day + funding extremes ± 0.5%
 
 每個場景算組合 PnL + drawdown + liquidation 風險。
+
+> ⚠️ **執行需求**：5 場景 stress test 需歷史 OHLCV（25 symbol × ≥ 1m × 對應日期窗口）+ funding rate snapshot；sub-agent 工具（Read / Grep / WebSearch）不直接生 backtest，須走 `helper_scripts/research/` 或協調 E1 跑 Python backtest。盲跑就 cite「stress test pass」= 違反 CLAUDE.md §八 對抗性驗證原則。
 
 ### 4.6 Risk Decomposition
 ```
@@ -269,11 +271,17 @@ OpenClaw 教訓：edge_estimator JSON 結構 + engine_mode 隔離（live vs live
 - **edge_estimator JSON**：strategy::symbol top-level（不是 cells{}）
 - **engine_mode IN ('live', 'live_demo')**：filter 必含兩者
 - **5 策略 negative gross edge**：當前所有活躍策略 gross 為負（CLAUDE.md §三 Phase 5 reframed），portfolio 暫無 alpha 可分配，主要工作 = 等 demo 21d 重評
-- **3% risk / trade · 25 symbols**：operator 既定（memory `feedback_position_sizing`）
+- **3% risk / trade · 25 symbols**：operator 既定（memory `feedback_position_sizing`），但 RiskConfig TOML `per_trade_risk_pct` 為 SSOT，衝突信 config
 - **funding_arb 0% budget**：G-2 結案 negative（memory `project_g2_funding_arb_monitor`）
 - **PostOnly fee 改善**：EDGE-P2-3 demo=true，Live 待 G1-05 fix
 - **CognitiveModulator confidence_floor**：drawdown 動態降倉的 OpenClaw 內建機制
 - **Live 階段監控基建**：edge_estimator_scheduler daemon + cron 6h `passive_wait_healthcheck`（17 check）
+
+## Cross-Skill 互引（避免重述）
+
+- **C1.i 執行成本 / fee**：本 skill 列 risk budget 與 portfolio 級 fee drag，**逐筆 fee 計算 + maker rebate / PostOnly mechanics 不重述** — 引 `crypto-microstructure-knowledge` §5「Execution Optimization」
+- **C1.j VaR / CVaR / Kelly**：本 skill 為 **設計視角**（如何分配、組合層級指標）；**驗證視角**（黑名單 / 對抗反問 / Look-ahead bias 偵測 / Sizing sanity check）引 `math-model-audit`
+- **C1.b Walk-forward / DSR / PSR**：策略 alpha 顯著性走 `walk-forward-validation-protocol`；本 skill 不重述 multiple testing 細節
 
 ## 反模式（見即 Reject）
 

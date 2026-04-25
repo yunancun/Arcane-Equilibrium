@@ -69,6 +69,19 @@ allowed-tools: Read, Grep, Glob
 - **memory 過期**：memory 提到的 file 已 rename / delete → CC 接手照引會誤判
 - **CHANGELOG 缺項**：commit 改 §三 但忘加 changelog 條 → 違反 §七
 
+## DOC「廢棄 → 新版」轉換 SOP（24.2 P1）
+
+當治理 DOC 重編號 / 拆分 / 合併（例：`DOC-04 V1` → `DOC-04 V2` 或 `DOC-04 → DOC-04A + DOC-04B`），R4 audit 步驟：
+
+1. **驗 SPECIFICATION_REGISTER.md 雙條**：舊版標 `Deprecated / superseded by <new>`，新版標 `Active`，**兩條都不能消失** — 過去引用點需追溯舊版內容
+2. **驗 DEPRECATED.md 補新條**：列舊 ID + 撤回日期 + 替代 ID + 「禁引」標記
+3. **掃所有引用**：`grep -rn 'DOC-04(?!\sV2)' srv/docs srv/CLAUDE.md srv/TODO.md` 找未升級引用點，逐個改為新 ID
+4. **memory 條目同步**：memory 引舊 DOC ID 的條目，**按 SOP 不直接刪**（保歷史線索），改加 `[已升級為 <new>]` 標記
+5. **archive 不動**：`docs/archive/` 內歷史 snapshot 用舊 ID 是**正確的**（凍結時間點），不改
+6. **產 R4 audit 報告**：列出所有 stale 引用點 + 修正狀態 + 殘留 known-orphan（如 archive）
+
+**判斷新舊**：當 sub-agent 看到同名 DOC 不同版本，**信 SPECIFICATION_REGISTER.md `Active` 標記 + 最大 V### 號**；無法判斷時 push back operator，**不單方面選舊版引用**。
+
 ## OpenClaw 特定核心檔對齊
 
 每次 R4 審必驗 6 對：

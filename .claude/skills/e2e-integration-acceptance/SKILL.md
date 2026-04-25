@@ -178,6 +178,11 @@ ssh trade-core "python3 helper_scripts/live/verify_authorization.py"
 - **§三 drift 規則**（G6-04）：runtime 數值 + 採集時間註明，7d 未驗即刪
 - **CLAUDE.md §三 vs runtime drift 防線**：採納前 source-of-truth 實測
 
+## Cross-Skill 互引（避免重述）
+
+- **C1.g E4 vs QA 角色界定**：本 skill 看「業務鏈完整 + 跨模塊一致 + 灰度趨勢 + Phase 6 hard gates」；**單元/整合/並發/SLA 壓測 baseline 細節**走 `regression-testing-protocol`。E4 過了 QA 才能跑，**不是同層**
+- **PR review 前置**：QA 之前 E2 對抗審查走 `pr-adversarial-review`，QA 不重做 code review
+
 ## 反模式（見即 BLOCKER）
 
 - E4 過了直接放行 QA（不跑業務鏈）
