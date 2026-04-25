@@ -13,6 +13,8 @@ allowed-tools: Read, Grep, Glob, WebSearch
 
 > **S6 P0/P1/P2 cross-ref**：三層風控定義見 `srv/docs/decisions/EX-01_..._V2.md` §2.1-§2.3；本 skill 引用屬語意重述。
 
+> **C1.a 觸發順序提示**：「Alpha 研究 / 新策略提案」可能與 `math-model-audit`（audit 視角）/ `walk-forward-validation-protocol`（validation 視角）同時 fire；建議順序 = **本 skill 設計階段 → math-model-audit 數學審計 → walk-forward 驗證**。三者並用而非取代。
+
 ## 何時觸發
 
 - QC 收到「新策略提案」「alpha hypothesis」「信號設計」「多源訊號融合」「策略升級規劃」
