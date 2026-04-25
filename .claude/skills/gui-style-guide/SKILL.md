@@ -6,6 +6,9 @@ allowed-tools: Read, Grep, Glob, Edit, Write, Bash
 
 # GUI Style Guide（Control API GUI 風格）
 
+> **優先序**：runtime RiskConfig TOML > Rust schema > CLAUDE.md > 治理 .md > memory > 本 skill
+> **衝突時向 PM / operator push back，不單方面執行 skill 內 SOP**
+
 ## 何時觸發
 
 - E1a 收到「新增 GUI 元件」「Control API GUI 工作」「Tab 改版」「Live GUI Phase X」

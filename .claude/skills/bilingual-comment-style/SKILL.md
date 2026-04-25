@@ -6,6 +6,9 @@ allowed-tools: Read, Grep, Glob, Edit, Write
 
 # Bilingual Comment Style（雙語注釋規範）
 
+> **優先序**：runtime RiskConfig TOML > Rust schema > CLAUDE.md > 治理 .md > memory > 本 skill
+> **衝突時向 PM / operator push back，不單方面執行 skill 內 SOP**
+
 ## 何時觸發
 
 - TW 收到「補注釋」「文檔翻譯」「雙語對照修正」

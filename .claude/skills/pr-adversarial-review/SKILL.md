@@ -6,6 +6,9 @@ allowed-tools: Read, Grep, Glob, Bash
 
 # PR Adversarial Review（對抗審核手冊）
 
+> **優先序**：runtime RiskConfig TOML > Rust schema > CLAUDE.md > 治理 .md > memory > 本 skill
+> **衝突時向 PM / operator push back，不單方面執行 skill 內 SOP**
+
 ## 何時觸發
 
 - E2 收到任何 E1 / E1a 改動 → 在 E4 回歸前必跑（強制工作鏈，CLAUDE.md §八）

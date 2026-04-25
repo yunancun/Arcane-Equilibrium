@@ -6,6 +6,9 @@ allowed-tools: Read, Grep, Glob, Bash
 
 # Data Drift Detection（資料漂移偵測手冊）
 
+> **優先序**：runtime RiskConfig TOML > Rust schema > CLAUDE.md > 治理 .md > memory > 本 skill
+> **衝突時向 PM / operator push back，不單方面執行 skill 內 SOP**
+
 ## 何時觸發
 
 - MIT 收到「Live 階段 ML 模型表現衰減」「為何 model accuracy 從 80% 掉到 60%」「regime 切換偵測」

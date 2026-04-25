@@ -6,6 +6,9 @@ allowed-tools: Read, Grep, Glob, Bash
 
 # Feature Engineering Protocol（特徵工程嚴謹性手冊）
 
+> **優先序**：runtime RiskConfig TOML > Rust schema > CLAUDE.md > 治理 .md > memory > 本 skill
+> **衝突時向 PM / operator push back，不單方面執行 skill 內 SOP**
+
 ## 何時觸發
 
 - MIT 收到「feature pipeline 設計」「ML 訓練 dataset 準備」「P1-7 C label 準備」「特徵不對勁、模型過擬合 RCA」

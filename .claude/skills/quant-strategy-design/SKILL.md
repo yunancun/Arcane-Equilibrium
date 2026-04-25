@@ -6,6 +6,9 @@ allowed-tools: Read, Grep, Glob, WebSearch
 
 # Quant Strategy Design（量化策略設計手冊）
 
+> **優先序**：runtime RiskConfig TOML > Rust schema > CLAUDE.md > 治理 .md > memory > 本 skill
+> **衝突時向 PM / operator push back，不單方面執行 skill 內 SOP**
+
 ## 何時觸發
 
 - QC 收到「新策略提案」「alpha hypothesis」「信號設計」「多源訊號融合」「策略升級規劃」

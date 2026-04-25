@@ -6,6 +6,9 @@ allowed-tools: Read, Grep, Glob, Bash
 
 # DB Schema Design for Financial Time Series（金融時序 DB schema 手冊）
 
+> **優先序**：runtime RiskConfig TOML > Rust schema > CLAUDE.md > 治理 .md > memory > 本 skill
+> **衝突時向 PM / operator push back，不單方面執行 skill 內 SOP**
+
 ## 何時觸發
 
 - MIT 收到「新 ML / trading 表設計」「migration V### 寫法」「hypertable / chunk 規劃」「為何 query 慢」

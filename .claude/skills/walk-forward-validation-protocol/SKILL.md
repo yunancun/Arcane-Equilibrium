@@ -6,6 +6,9 @@ allowed-tools: Read, Grep, Glob, Bash, WebSearch
 
 # Walk-Forward Validation Protocol（驗證 / 回測手冊）
 
+> **優先序**：runtime RiskConfig TOML > Rust schema > CLAUDE.md > 治理 .md > memory > 本 skill
+> **衝突時向 PM / operator push back，不單方面執行 skill 內 SOP**
+
 ## 何時觸發
 
 - QC 收到「策略上線前驗證」「Sharpe 顯著嗎」「參數 sweep 結果評審」「OOS 效能判斷」

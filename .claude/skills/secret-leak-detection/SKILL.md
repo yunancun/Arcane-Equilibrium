@@ -6,6 +6,9 @@ allowed-tools: Read, Grep, Glob, Bash
 
 # Secret Leak Detection（密鑰洩漏掃描）
 
+> **優先序**：runtime RiskConfig TOML > Rust schema > CLAUDE.md > 治理 .md > memory > 本 skill
+> **衝突時向 PM / operator push back，不單方面執行 skill 內 SOP**
+
 ## 何時觸發
 
 - E3 收到「密鑰洩漏掃描」「PR 前安全 gate」「commit history 體檢」
