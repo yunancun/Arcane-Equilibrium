@@ -80,6 +80,38 @@
     </div>
   </div>
 
+  <!-- Dust positions summary panel / 塵埃倉位匯總面板
+       Demo engine can carry the same orphan_frozen / DUST_FROZEN synthetic
+       owner labels as live (loadPositions() above already shows the inline
+       badge via _ocRenderOwnerStrategy). This panel is the cross-position
+       rollup: KPI count + per-row notional gap so operator can scan the whole
+       dust footprint without expanding tooltips one by one. Default collapsed.
+       Backend payload (`/api/v1/strategy/demo/positions`) already injects
+       `owner_strategy` / `frozen_reason` / `est_notional` / `min_notional`
+       — no backend change required.
+       Demo 引擎與 live 共用 orphan_frozen / DUST_FROZEN 合成 owner 標籤
+       （上方 loadPositions() 已 inline 顯示 badge）。本面板提供「跨倉位 dust
+       全貌」+ KPI count + 每列 notional 差距，operator 不必逐個展開 tooltip
+       即可掃完。預設摺疊。後端 payload 已 inject 所需欄位（0 後端動）。 -->
+  <div class="oc-card">
+    <details>
+      <summary style="cursor:pointer;font-weight:600;color:var(--text-dim)">&#x1FA99; 塵埃倉位匯總 / Dust Positions Summary (<span id="demoDustCount">0</span>)</summary>
+      <div id="demoDustPanel" style="margin-top:10px">
+        <p style="color:var(--text-dim);font-size:11px;margin:4px 0 8px 0">塵埃倉位：名義值低於 Bybit 最小交易額 · 引擎自動等待價格回升；需在 Bybit GUI 手動清。<br>Dust positions: notional below Bybit min; engine waits for price recovery, operator must clear manually on Bybit GUI.</p>
+        <div class="oc-table-wrap">
+          <table class="oc-table" id="demoDustTable">
+            <thead><tr>
+              <th>Symbol</th><th>Side</th><th>Qty</th><th>Mark</th>
+              <th>Est. Notional</th><th>Min Notional</th><th>Gap %</th><th>Owner Tag</th>
+            </tr></thead>
+            <tbody><!-- populated by loadPositions() / 由 loadPositions() 填入 --></tbody>
+          </table>
+        </div>
+        <p style="color:var(--text-dim);font-size:11px;margin:8px 0 0 0" id="demoDustFooter">— 無塵埃倉位 / No dust positions —</p>
+      </div>
+    </details>
+  </div>
+
   <!-- Active Orders / 活跃订单 -->
   <div class="oc-card">
     <h3>&#x1F4DD; 活跃订单 / Active Orders <span id="demo-order-counts" style="font-size:11px;color:var(--text-dim);font-weight:400"></span></h3>
@@ -221,6 +253,68 @@ function _ocRenderOwnerStrategy(strat, posData) {
   // fall through to escaped passthrough.
   // 真實策略名原樣輸出（已轉義）。
   return ocEsc(s);
+}
+
+// Render the dust-positions summary panel from a positions array. Filters rows
+// whose owner_strategy is `orphan_frozen` / `DUST_FROZEN` or whose
+// `frozen_reason === 'dust_below_min_notional'`. Reuses `_ocRenderOwnerStrategy`
+// for the Owner Tag column to keep badge styling consistent with the main
+// positions table. Empty / no-match arrays show "no dust" footer + empty body
+// without throwing. Counter in <details> summary updates so operators can see
+// dust count without expanding.
+//
+// 從 positions 陣列渲染塵埃倉位匯總面板。filter owner_strategy 為 orphan_frozen /
+// DUST_FROZEN 或 frozen_reason === 'dust_below_min_notional' 的列。Owner Tag
+// 欄重用 _ocRenderOwnerStrategy 確保 badge 樣式與主持倉表一致。空陣列 /
+// 無匹配時 footer 顯示「無塵埃倉位」、table body 留空，不拋錯。<details>
+// summary 的計數即時更新，operator 不展開即可知 dust 數量。
+function _renderDemoDustPanel(positions) {
+  const tbody = document.querySelector('#demoDustTable tbody');
+  const countEl = document.getElementById('demoDustCount');
+  const footer = document.getElementById('demoDustFooter');
+  if (!tbody || !countEl || !footer) return;
+  const arr = Array.isArray(positions) ? positions : [];
+  const dust = arr.filter(p => {
+    const owner = p && (p.owner_strategy || '');
+    return owner === 'orphan_frozen' || owner === 'DUST_FROZEN' ||
+           (p && p.frozen_reason === 'dust_below_min_notional');
+  });
+  countEl.textContent = String(dust.length);
+  if (dust.length === 0) {
+    tbody.innerHTML = '';
+    footer.style.display = '';
+    footer.textContent = '— 無塵埃倉位 / No dust positions —';
+    return;
+  }
+  footer.style.display = 'none';
+  tbody.innerHTML = dust.map(p => {
+    const sym = ocEsc(p.symbol || '--');
+    const side = ocEsc(p.side || '--');
+    const qty = ocEsc(String(p.size || p.qty || '--'));
+    const mark = ocEsc(String(p.markPrice || p.mark_price || '--'));
+    const est = parseFloat(p.est_notional);
+    const min = parseFloat(p.min_notional);
+    const estCell = Number.isFinite(est) ? '$' + est.toFixed(2) : '--';
+    const minCell = Number.isFinite(min) ? '$' + min.toFixed(2) : '--';
+    // Gap % = how far the position notional is below the exchange minimum.
+    // Higher = harder to recover via price drift alone.
+    // Gap % = 倉位名義值距交易所最小值的差距百分比。越高代表越難靠價格漂移自然恢復。
+    let gap = '--';
+    if (Number.isFinite(est) && Number.isFinite(min) && min > 0) {
+      gap = ((min - est) / min * 100).toFixed(1) + '%';
+    }
+    const owner = p.owner_strategy || '';
+    return '<tr>' +
+      '<td><strong>' + sym + '</strong></td>' +
+      '<td>' + side + '</td>' +
+      '<td>' + qty + '</td>' +
+      '<td>' + mark + '</td>' +
+      '<td>' + estCell + '</td>' +
+      '<td>' + minCell + '</td>' +
+      '<td>' + gap + '</td>' +
+      '<td style="font-size:11px">' + _ocRenderOwnerStrategy(owner, p) + '</td>' +
+      '</tr>';
+  }).join('');
 }
 
 // ─── Data Loading ─────────────────────────────────────────────
@@ -409,6 +503,9 @@ async function loadPositions() {
   positions = positions.filter(p => parseFloat(p.size || p.qty || 0) > 0);
   if (!positions.length) {
     ocSetHtml('demo-positions', '<tr class="empty-row"><td colspan="11">暂无持仓</td></tr>');
+    // Empty positions → empty dust panel (footer shows "no dust").
+    // 空持倉 → 空塵埃面板（footer 顯示「無塵埃倉位」）。
+    _renderDemoDustPanel([]);
     return;
   }
   // Derive symbol→strategy from the demo fills cache (latest fill per symbol).
@@ -459,6 +556,9 @@ async function loadPositions() {
     html += '</tr>';
   });
   ocSetHtml('demo-positions', html);
+  // Render dust-positions summary panel from same positions array.
+  // 從同一份 positions 陣列渲染塵埃倉位匯總面板。
+  _renderDemoDustPanel(positions);
 }
 
 async function loadDemoOrders() {
