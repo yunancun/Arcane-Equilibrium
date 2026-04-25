@@ -6,6 +6,9 @@ allowed-tools: Read, Grep, Glob, Bash
 
 # Token / Cost Analysis（AI 成本分析）
 
+> **優先序**：runtime RiskConfig TOML > Rust schema > CLAUDE.md > 治理 .md > memory > 本 skill
+> **衝突時向 PM / operator push back，不單方面執行 skill 內 SOP**
+
 ## 何時觸發
 
 - AI-E 收到「token 成本審計」「cost_edge_ratio 評估」「Layer 2 預算超標」

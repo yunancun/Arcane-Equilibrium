@@ -6,6 +6,9 @@ allowed-tools: Read, Grep, Glob, Bash
 
 # OWASP Top 10 Checklist（OpenClaw 專用）
 
+> **優先序**：runtime RiskConfig TOML > Rust schema > CLAUDE.md > 治理 .md > memory > 本 skill
+> **衝突時向 PM / operator push back，不單方面執行 skill 內 SOP**
+
 ## 何時觸發
 
 - E3 收到「安全審計」「OWASP 體檢」「PR pre-merge security gate」

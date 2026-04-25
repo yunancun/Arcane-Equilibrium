@@ -6,6 +6,9 @@ allowed-tools: Read, Grep, Glob, WebSearch
 
 # Math Model Audit（量化數學審計）
 
+> **優先序**：runtime RiskConfig TOML > Rust schema > CLAUDE.md > 治理 .md > memory > 本 skill
+> **衝突時向 PM / operator push back，不單方面執行 skill 內 SOP**
+
 ## 何時觸發
 
 - QC 收到「策略數學體檢」「VaR/CVaR/Kelly 驗證」「白皮書草稿審查」「Alpha 研究方法論」

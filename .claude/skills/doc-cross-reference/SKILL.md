@@ -6,6 +6,9 @@ allowed-tools: Read, Grep, Glob
 
 # Doc Cross-Reference（文件交叉引用審計）
 
+> **優先序**：runtime RiskConfig TOML > Rust schema > CLAUDE.md > 治理 .md > memory > 本 skill
+> **衝突時向 PM / operator push back，不單方面執行 skill 內 SOP**
+
 ## 何時觸發
 
 - R4 收到「文檔索引一致性」「DOC-XX 引用漂移」「歸檔後 §三 衛生」

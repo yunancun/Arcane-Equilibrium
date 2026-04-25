@@ -6,6 +6,9 @@ allowed-tools: Read, Grep, Glob, Bash
 
 # Performance Profiling（效能分析）
 
+> **優先序**：runtime RiskConfig TOML > Rust schema > CLAUDE.md > 治理 .md > memory > 本 skill
+> **衝突時向 PM / operator push back，不單方面執行 skill 內 SOP**
+
 ## 何時觸發
 
 - E5 收到「效能優化」「P95 latency 偏高」「記憶體 / CPU spike」「DB 慢查詢」

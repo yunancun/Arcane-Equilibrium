@@ -6,6 +6,9 @@ allowed-tools: Read, Grep, Glob, WebSearch
 
 # Time Series CV Protocol（時序 CV 設計手冊）
 
+> **優先序**：runtime RiskConfig TOML > Rust schema > CLAUDE.md > 治理 .md > memory > 本 skill
+> **衝突時向 PM / operator push back，不單方面執行 skill 內 SOP**
+
 ## 何時觸發
 
 - MIT 收到「ML training pipeline CV 設計」「sklearn TimeSeriesSplit 用法」「為何 OOS 退化」

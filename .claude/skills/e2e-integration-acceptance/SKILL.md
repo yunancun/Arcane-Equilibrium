@@ -6,6 +6,9 @@ allowed-tools: Read, Grep, Glob, Bash
 
 # E2E Integration Acceptance（端到端集成驗收手冊）
 
+> **優先序**：runtime RiskConfig TOML > Rust schema > CLAUDE.md > 治理 .md > memory > 本 skill
+> **衝突時向 PM / operator push back，不單方面執行 skill 內 SOP**
+
 ## 何時觸發
 
 - QA 收到「Wave 完成驗收」「Phase 結束 sign-off」「Paper → Live 前置」「重大架構改動後」

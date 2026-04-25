@@ -6,6 +6,9 @@ allowed-tools: Read, Grep, Glob
 
 # Spec Compliance（治理規範符合性審計）
 
+> **優先序**：runtime RiskConfig TOML > Rust schema > CLAUDE.md > 治理 .md > memory > 本 skill
+> **衝突時向 PM / operator push back，不單方面執行 skill 內 SOP**
+
 ## 何時觸發
 
 - FA 收到「審計此修改是否符合治理」「Gap 分析」「DOC-XX 是否被違反」
