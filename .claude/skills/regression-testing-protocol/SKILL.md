@@ -184,7 +184,12 @@ async def test_governance_concurrent_lease_request():
 - **跨語言浮點 1e-4 容差**：indicator 計算（ATR / BB / Sharpe）必驗
 - **SLA 硬限**：H0 Gate < 1ms / Tick path < 0.3ms / IPC < 5ms
 - **commit 即 push**（CLAUDE.md §七 git 自動化）
-- **failed 不可增**：17 pre-existing 是上限，新增 = BLOCKER
+- **failed 不可增**：pre-existing 數為上限（不在本表寫死，跑命令拿），新增 = BLOCKER
+
+## Cross-Skill 互引（避免重述）
+
+- **C1.g E4 vs QA 階段**：本 skill = E4 階段（Python pytest + Rust cargo test + SLA 壓測 + mock 審查 + 浮點 1e-4）；**業務鏈完整 + 跨模塊一致 + Phase 6 hard gates**走 `e2e-integration-acceptance`（QA 階段，E4 過了才跑）
+- **PR review 前置**：本 skill 跑前 E2 對抗審查走 `pr-adversarial-review`；E4 不做 code review
 
 ## 反模式（見即 BLOCKER）
 

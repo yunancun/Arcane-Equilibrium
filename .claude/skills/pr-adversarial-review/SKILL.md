@@ -65,6 +65,8 @@ allowed-tools: Read, Grep, Glob, Bash
 
 ## 2. CLAUDE.md §九 E2 既有 checklist（必跑）
 
+> ⚠️ **以 CLAUDE.md §九 原文為準**：本表為 2026-04-25 snapshot，§九 修改後本 skill 可能漂移；E2 audit 時若兩者不一致 = 信 §九 原文 + 通報 R4 sync skill。
+
 ```
 [ ] 改動範圍與 PA 方案一致
 [ ] 沒有 except:pass 或靜默吞異常
@@ -163,6 +165,13 @@ grep -E '(/home/ncyu|/Users/[^/]+)' <diff>
 - **Migration Guard A/B/C**：V023 silent-noop 教訓
 - **healthcheck 配對**：被動等待 TODO 必附 check
 - **commit 即 push**（CLAUDE.md §七 git 自動化）：E2 通過後 push 不滯留
+
+## Cross-Skill 互引（避免重述）
+
+- **§九 原文 + Bilingual comment 規範**：本 skill 8 條 §九 checklist 為 extract，原文以 CLAUDE.md §九 為準；雙語注釋細節走 `bilingual-comment-style`
+- **secret leak 偵測**：本 skill §1.4 leakage 列出 SQL/log/XSS 警報，但具體 grep pattern + Pattern A-G 走 `secret-leak-detection`
+- **OWASP 安全細節**：本 skill 看代碼層次的 race / shortcut / leakage；**完整 OWASP Top 10 attack surface audit**（A01-A10）走 `owasp-checklist`
+- **Migration Guard 細節**：V### Guard A/B/C 寫法 + idempotency 走 `db-schema-design-financial-time-series`
 
 ## 反模式（見即升級）
 

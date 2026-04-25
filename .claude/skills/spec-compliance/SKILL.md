@@ -1,6 +1,6 @@
 ---
 name: spec-compliance
-description: 對照 22 份 OpenClaw 治理文件做 Gap 分析；提交前/PR 審查/Wave 計劃合規性審查時使用。FA agent 主用。
+description: 對照 OpenClaw 治理文件做 Gap 分析（當前 22 份 .docx + .md，數量隨治理演進變動，以 SPECIFICATION_REGISTER.md 為準）；提交前/PR 審查/Wave 計劃合規性審查時使用。FA agent 主用。
 allowed-tools: Read, Grep, Glob
 ---
 
@@ -20,10 +20,22 @@ allowed-tools: Read, Grep, Glob
 
 ## 治理文件權威清單
 
+> ⚠️ **「22 份」非權威 SSOT**：operator 明示「治理文件本身不能代表最終權威，已多次修改」（SKILLS_TODO 9.3）；本 skill 引用數量為 2026-04-25 snapshot；最終以 `SPECIFICATION_REGISTER.md` 列出的 Active 條目為準。任何時候衝突 = 信 register + push back operator。
+
 掃描範圍 `srv/docs/governance_dev/`：
 - `SPECIFICATION_REGISTER.md` ← 所有 DOC-XX 的 SSOT（含 Active/Deprecated 狀態）
 - `COMPREHENSIVE_SPEC_REQUIREMENTS.md` ← 條文展開
 - `DEPRECATED.md` ← 已退役 DOC 黑名單，禁引
+
+### .docx → .md 同步 SOP（9.2 P3）
+
+22 份治理文件當前為 `.docx`（operator 維護源）+ `.md`（已轉檔給 sub-agent 讀）。**若 operator 修改 .docx 後**：
+1. 觸發人工執行 `helper_scripts/maintenance_scripts/governance_docx_to_md.py`（或等價腳本）重轉
+2. 比對前後 `.md` 差異，逐條標漂移點
+3. 更新 `SPECIFICATION_REGISTER.md` 若有新增 / 撤回 / 重編號
+4. 通知所有引 DOC-XX 的 skill / TODO 條目重 audit
+
+未做 step 1 = sub-agent 讀的 `.md` 與 operator 真實意圖漂移。未來可考慮 git pre-commit hook（commit `.docx` 時自動 re-render `.md`）。
 
 DOC-XX 速查（以 SPECIFICATION_REGISTER.md 為準，本表僅快速方向）：
 - DOC-01 Core Risk Doctrine（硬止損 §5.9 / position sizing / risk limits）

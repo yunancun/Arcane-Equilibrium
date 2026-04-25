@@ -46,7 +46,7 @@ SELECT create_hypertable('learning.exit_features', 'ts',
 - 過小 → 太多 chunk，metadata overhead
 - 過大 → query 慢、compression 效果差
 
-**OpenClaw 預設**：7 day chunk for 1m data，1 day chunk for tick data。
+**OpenClaw 建議起點**（**非治理硬規範**；具體 chunk size 隨資料量 + query pattern 動態調整，新表設計可由 MIT 提替代）：7 day chunk for 1m data，1 day chunk for tick data。
 
 ### 1.3 Compression
 ```sql
@@ -200,7 +200,9 @@ SELECT add_retention_policy('learning.tick_data', INTERVAL '90 days');
 
 ## 7. OpenClaw 5 strat × 25 symbol × 1m row 量級
 
-| 表 | 每 day rows | 每 month rows | 1y rows | hypertable? |
+> ⚠️ **下列 row 量為 schema 設計參考估計（非治理硬規範）**；真實 row 量隨策略激活率 / Phase 階段（Phase 5 reframed 後 grid/ma_crossover 策略 fill 大幅減少）/ tick density / retention policy 動態變動，**規劃 hypertable / chunk / index 前必跑** `SELECT count(*), max(ts) - min(ts) FROM <table>` 取真實數據。
+
+| 表 | 每 day rows（估計）| 每 month rows | 1y rows | hypertable? |
 |---|---|---|---|---|
 | `trading.fills` | ~5k | ~150k | ~1.8M | ✅ |
 | `learning.exit_features` | ~5k | ~150k | ~1.8M | ✅ |
@@ -231,6 +233,12 @@ SELECT add_retention_policy('learning.tick_data', INTERVAL '90 days');
 - **decision_outcomes 兩 bug 教訓**（memory `project_decision_outcomes_not_dead`）：(1) timeframe 字串不一致 (2) engine_mode INSERT 漏接
 - **PG 4-8GB constraint**：硬體 128GB 但 PG 占 < 8GB（LLM 占 54GB）
 - **passive_wait_healthcheck.py**：每 schema 變動加對應 check_X() function
+
+## Cross-Skill 互引（避免重述）
+
+- **C1.h ml-pipeline maturity / writer / consumer / decision-impact 4 維度**：本 skill 看 schema 設計（hypertable / partition / Guard）；**pipeline 狀態評級** + **stage（Foundation/Skeleton/Shadow/Canary/Production）** 走 `ml-pipeline-maturity-audit`
+- **feature pipeline / leakage**：feature column 設計後的 leakage 偵測（look-ahead / target / survivorship 6 類）走 `feature-engineering-protocol`
+- **CV 設計 / sample size**：對 hypertable 跑 ML 訓練的 train/test split 設計走 `time-series-cv-protocol`
 
 ## 反模式（見即 Reject）
 

@@ -164,6 +164,8 @@ OpenClaw operator KYC tier 影響：
 - 字典手冊 `docs/references/2026-04-04--bybit_api_reference.md` 同步更新
 - 新 endpoint 進入手冊前必走 BB review
 
+> ⚠️ **字典手冊也會漂移**：`docs/references/2026-04-04--bybit_api_reference.md` 為 OpenClaw 維護的內部 reference，但 Bybit 官方 changelog 變動後若未即時 sync 入手冊 → 手冊也是 snapshot。**最終以 Bybit 官方 changelog（`https://bybit-exchange.github.io/docs/changelog/v5`）+ 官方 API doc 為準**；手冊只是 mirror，不取代官方來源。
+
 ## 7. OpenClaw 特定政策 review 清單
 
 | Item | 檢查 | OpenClaw 當前狀態 |

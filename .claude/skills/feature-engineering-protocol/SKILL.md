@@ -162,9 +162,16 @@ WHERE c.symbol IS NULL;
 - **bb_breakout F3 RETRACT 教訓**：Donchian rolling.max() 含 current bar = leak（memory `feedback_indicator_lookahead_bias`）
 - **exit_features.atr_pct fix**（P0-13）：原 per-tick `compute_atr_pct` deprecated，改用 `kline_manager.get_ohlcv("1m",20) + indicators::atr(14)` 持倉期 Wilder's ATR
 - **engine_mode 過濾**：training 必含 'live' + 'live_demo'，paper 噪音不混
-- **outcome_backfiller fix**（commit `5e2981d`）：timeframe '1' → '1m'，補回 ~267k row 的 outcome_*
-- **P1-7 C labels 47/200**：當前 ML training set 樣本不足，feature engineering 即使做完也要等 labels 累積
+- **outcome_backfiller fix**（commit `5e2981d`）：timeframe '1' → '1m'，補回 outcome_*（具體 row 數動態查 `psql -c "SELECT count(*) FROM learning.exit_features WHERE outcome_pnl IS NOT NULL"`，不寫死）
+- **table 名版本標記**：本 skill 引用 `learning.exit_features` / `learning.bb_features` 為 2026-04-25 schema snapshot；schema 變動以 `audit_migrations.py` + `sql/migrations/` 最新 V### 為準
+- **P1-7 C labels 累積中**：當前 ML training set 樣本不足（具體進度 `SELECT count(*) FROM learning.exit_features WHERE engine_mode IN ('live','live_demo')`，不寫死數字），feature engineering 即使做完也要等 labels 累積到 §3 表閾值
 - **maker_fill_rate 是合法 ML feature**：EDGE-P2-3 PostOnly 部署後 fee model 變化，maker fill 是動態 feature
+
+## Cross-Skill 互引（避免重述）
+
+- **C1.c pipeline 成熟度評級**：本 skill 看單表 leakage（feature 設計層面）；**writer/consumer/row/decision-impact 4 維度評級 + Foundation/Skeleton/Shadow/Canary/Production 5 階段**走 `ml-pipeline-maturity-audit`
+- **C1.h schema 設計 + Guard A/B/C migration**：feature 對應 column 設計（hypertable / chunk / partial index）走 `db-schema-design-financial-time-series`
+- **CV 設計 / Purge / Embargo**：feature 訓練時的 train/test split 走 `time-series-cv-protocol`（MIT），與本 skill 的 leakage 偵測互為前後 — 本 skill 解 feature-side leakage，time-series-cv 解 split-side leakage
 
 ## 反模式（見即 Reject）
 
