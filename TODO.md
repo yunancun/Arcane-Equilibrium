@@ -392,11 +392,9 @@ ssh trade-core "cd ~/BybitOpenClaw/srv && python3 helper_scripts/db/passive_wait
 
 ---
 
-## 📊 Healthcheck 清單（15 + 新增 [13-15]）
+## 📊 Healthcheck 清單（`passive_wait_healthcheck.py` 已實裝）
 
 **CLAUDE.md §七 強制**：被動等待 TODO 必附 healthcheck · 每 6h cron 跑 · 連續 3 FAIL → 中止等待。
-
-### 現有（12 個，`passive_wait_healthcheck.py` 已實裝）
 
 | # | 項目 | SQL / 檢查 | 對應 Wave TODO |
 |---|---|---|---|
@@ -411,14 +409,9 @@ ssh trade-core "cd ~/BybitOpenClaw/srv && python3 helper_scripts/db/passive_wait
 | [10] | intents_writer_ratio | orders vs intents per-mode | — |
 | [11] | counterfactual_clean_window_growth | clean n ≥200 | EDGE-P3 auto-gate |
 | [12] | bb_breakout_post_deadlock_fix | fill count recover | G2-05 |
-
-### 新增（Wave 1 G6-02 補齊，3 個）
-
-| # | 項目 | SQL / 檢查 | 對應 Wave TODO |
-|---|---|---|---|
-| **[13]** | edge_estimator_scheduler_fresh | `edge_estimates.json` mtime <6h + cells ≥50 | G1-01 / G4-04 強制 |
-| **[14]** | exit_features_accumulation_rate | 週 row count 增長率 ≥ threshold | EDGE-P1b |
-| **[15]** | shadow_exit_agreement_phase2 | Python vs Rust decision agree rate ≥95% | EDGE-P2 flip |
+| [13] | edge_estimator_scheduler_fresh | `edge_estimates.json` mtime <6h + cells ≥50 | G1-01 / G4-04（G6-02 commit `a0a4981`）|
+| [14] | exit_features_accumulation_rate | 週 row count 增長率 ≥ threshold | EDGE-P1b（G6-02 commit `a0a4981`）|
+| [15] | shadow_exit_agreement_phase2 | Python vs Rust decision agree rate ≥95% | EDGE-P2 flip（G6-02 commit `a0a4981`）|
 
 ---
 
