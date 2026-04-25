@@ -49,6 +49,13 @@ fn ctx_oi(
         funding_rate: None,
         index_price: None,
         open_interest,
+        // G7-09c Phase 1: OI tests don't exercise BBO/tick_size — leave None so
+        // strategy falls back to legacy `last_price ± offset_bps` (matches
+        // pre-G7-09c behaviour for these specific tests).
+        // G7-09c Phase 1：OI 測試不涉及 BBO/tick_size，留 None 讓策略走 legacy fallback。
+        best_bid: None,
+        best_ask: None,
+        tick_size: None,
     }
 }
 
@@ -96,6 +103,11 @@ fn ctx_full_entry(
         funding_rate: None,
         index_price: None,
         open_interest,
+        // G7-09c Phase 1: OI tests don't exercise BBO/tick_size — leave None.
+        // G7-09c Phase 1：OI 測試不涉及 BBO/tick_size，留 None。
+        best_bid: None,
+        best_ask: None,
+        tick_size: None,
     }
 }
 

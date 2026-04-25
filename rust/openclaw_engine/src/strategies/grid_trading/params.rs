@@ -57,6 +57,22 @@ pub struct GridTradingParams {
     /// EDGE-P2-3 Phase 1B-3.1：PostOnly 掛單最長停留時間（毫秒）。消費端 clamp
     /// 至 `[15_000, 300_000]`。本批次僅埋線，1B-3.2 接入 sweep。
     pub maker_limit_timeout_ms: u64,
+    /// G7-09c Phase 1: number of ticks INSIDE the book at which the BBO-aware
+    /// PostOnly limit sits. `0` = exactly on best_bid/ask (still passive maker
+    /// per Bybit), `1` (default) = one tick away (more passive, safer against
+    /// single-tick book moves). `maker_price_offset_bps` is now the fallback-
+    /// only path used when BBO or tick_size unavailable.
+    /// G7-09c Phase 1：BBO-aware PostOnly 限價離 inside quote 的 tick 數。
+    /// 0 = 同 best_bid/ask（仍 passive maker），1（預設）= 退一 tick（更被動）。
+    /// `maker_price_offset_bps` 退化為僅 BBO 不可得時的 fallback offset。
+    #[serde(default = "default_maker_price_buffer_ticks")]
+    pub maker_price_buffer_ticks: u32,
+}
+
+/// G7-09c Phase 1: default buffer = 1 tick (one tick inside the inside quote).
+/// G7-09c Phase 1：預設 1 tick（退一 tick）。
+fn default_maker_price_buffer_ticks() -> u32 {
+    1
 }
 
 impl Default for GridTradingParams {
@@ -75,6 +91,9 @@ impl Default for GridTradingParams {
             use_maker_entry: DEFAULT_USE_MAKER_ENTRY,
             maker_price_offset_bps: DEFAULT_MAKER_OFFSET_BPS,
             maker_limit_timeout_ms: DEFAULT_MAKER_LIMIT_TIMEOUT_MS,
+            // G7-09c Phase 1: default 1 tick inside the inside quote.
+            // G7-09c Phase 1：預設退一 tick。
+            maker_price_buffer_ticks: 1,
         }
     }
 }
@@ -159,6 +178,13 @@ impl StrategyParams for GridTradingParams {
         }
         if self.max_cooldown_boost < 0.0 || self.max_cooldown_boost > 10.0 {
             return Err("max_cooldown_boost must be in [0, 10]".into());
+        }
+        // G7-09c Phase 1: bounded buffer to prevent operators / IPC writes
+        // from placing limits 1000+ ticks away (which would never fill on
+        // a quiet symbol). 10 ticks is a sane upper bound for major coins.
+        // G7-09c Phase 1：限定 buffer，防止 operator 或 IPC 設過大造成永不成交。
+        if self.maker_price_buffer_ticks > 10 {
+            return Err("maker_price_buffer_ticks must be <= 10".into());
         }
         Ok(())
     }

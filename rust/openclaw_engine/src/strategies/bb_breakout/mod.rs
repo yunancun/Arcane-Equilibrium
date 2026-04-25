@@ -18,7 +18,7 @@
 
 use std::collections::HashMap;
 
-use super::common::{PerSymbolState, TrendCooldown};
+use super::common::{compute_post_only_price, MakerPriceInputs, PerSymbolState, TrendCooldown};
 use super::confluence::{self, ConfluenceConfig, PersistenceTracker};
 use super::{Strategy, StrategyAction, StrategyParams};
 use crate::intent_processor::OrderIntent;
@@ -168,6 +168,10 @@ pub struct BbBreakout {
     /// EDGE-P2-3 Phase 2+: ms a resting PostOnly maker order may sit (clamped on assign).
     /// EDGE-P2-3 Phase 2+：PostOnly 掛單最長停留時間（毫秒；寫入時 clamp）。
     pub(crate) maker_limit_timeout_ms: u64,
+    /// G7-09c Phase 1: ticks INSIDE the inside quote for BBO-aware PostOnly.
+    /// See `BbBreakoutParams::maker_price_buffer_ticks` for semantics.
+    /// G7-09c Phase 1：BBO-aware PostOnly buffer，語義見 params。
+    pub(crate) maker_price_buffer_ticks: u32,
     // ── P1-11 (2): Donchian mode + score bonus ──
     // ── P1-11 (2)：Donchian 模式 + 評分加成 ──
     /// How Donchian breach combines with the BB-core 3-gate chain. Default
@@ -221,6 +225,9 @@ impl BbBreakout {
             use_maker_entry: false,
             maker_price_offset_bps: 1.0,
             maker_limit_timeout_ms: 45_000,
+            // G7-09c Phase 1: default 1 tick inside the inside quote.
+            // G7-09c Phase 1：預設退一 tick。
+            maker_price_buffer_ticks: 1,
             // P1-11 (2): Hard preserves bit-identical pre-P1-11 behaviour.
             // P1-11 (2)：`Hard` 保留 pre-P1-11 bit-identical 行為。
             donchian_mode: DonchianMode::Hard,
@@ -652,19 +659,30 @@ impl Strategy for BbBreakout {
                         let confluence_score = score.map(|s| s as f32);
                         let persistence_elapsed_ms =
                             self.persistence.elapsed_ms(sym, ctx.timestamp_ms);
-                        // EDGE-P2-3 Phase 2+: resolve entry order shape (Market vs PostOnly Limit).
-                        // Only new-open intents go maker; close path below stays Market (scope guard).
-                        // BUY offset below last_price; SELL offset above — PostOnly always rests passively.
-                        // EDGE-P2-3 Phase 2+：決定入場單型（Market 或 PostOnly Limit）。
-                        // 僅新開倉走 maker；平倉保持 Market。BUY 掛 last 下方、SELL 掛上方。
+                        // EDGE-P2-3 Phase 2+ + G7-09c Phase 1: resolve entry order shape.
+                        // G7-09c Phase 1 replaces legacy `last_price ± offset_bps` (RCA
+                        // `7f0e793` showed 100% PostOnly reject from crossing the book) with
+                        // strictly passive BBO-aware price; helper falls back to legacy when
+                        // BBO/tick_size unavailable and emits warn for observability.
+                        // EDGE-P2-3 Phase 2+ + G7-09c Phase 1：以 BBO-aware 嚴格被動價取代
+                        // 舊 `last_price ± offset_bps`（RCA 顯示舊算法 100% PostOnly 拒絕）；
+                        // BBO 不可得時 helper fallback 並 warn。
                         let (order_type, limit_price, time_in_force, maker_timeout_ms) =
                             if self.use_maker_entry {
-                                let offset = self.maker_price_offset_bps / 10_000.0;
-                                let limit = if is_long {
-                                    ctx.price * (1.0 - offset)
-                                } else {
-                                    ctx.price * (1.0 + offset)
+                                let inputs = MakerPriceInputs {
+                                    last_price: ctx.price,
+                                    best_bid: ctx.best_bid,
+                                    best_ask: ctx.best_ask,
+                                    tick_size: ctx.tick_size,
                                 };
+                                let limit = compute_post_only_price(
+                                    is_long,
+                                    inputs,
+                                    self.maker_price_offset_bps,
+                                    self.maker_price_buffer_ticks,
+                                    "bb_breakout",
+                                    ctx.symbol,
+                                );
                                 (
                                     "limit".to_string(),
                                     Some(limit),

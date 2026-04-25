@@ -49,6 +49,9 @@ impl MaCrossover {
         self.maker_limit_timeout_ms = crate::strategies::grid_trading::clamp_maker_limit_timeout_ms(
             params.maker_limit_timeout_ms,
         );
+        // G7-09c Phase 1: hot-reload BBO buffer (validate() bounds [0, 10]).
+        // G7-09c Phase 1：熱重載 BBO buffer（validate 範圍 [0, 10]）。
+        self.maker_price_buffer_ticks = params.maker_price_buffer_ticks;
         info!(strategy = "ma_crossover", "params updated / 參數已更新");
         Ok(())
     }
@@ -76,6 +79,9 @@ impl MaCrossover {
             use_maker_entry: self.use_maker_entry,
             maker_price_offset_bps: self.maker_price_offset_bps,
             maker_limit_timeout_ms: self.maker_limit_timeout_ms,
+            // G7-09c Phase 1: round-trip BBO buffer for IPC consumers.
+            // G7-09c Phase 1：BBO buffer 經 IPC 來回。
+            maker_price_buffer_ticks: self.maker_price_buffer_ticks,
         }
     }
 }

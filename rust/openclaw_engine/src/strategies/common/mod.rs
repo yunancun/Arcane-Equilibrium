@@ -14,9 +14,11 @@
 //!   仍留在各自模組。
 
 pub mod confidence_builder;
+pub mod maker_price;
 pub mod per_symbol_state;
 pub mod trend_cooldown;
 
 pub use confidence_builder::ConfidenceBuilder;
+pub use maker_price::{compute_post_only_price, MakerPriceInputs};
 pub use per_symbol_state::PerSymbolState;
 pub use trend_cooldown::TrendCooldown;

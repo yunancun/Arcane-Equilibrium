@@ -50,6 +50,9 @@ fn ctx_bb(pct_b: f64, rsi: f64, ts: u64) -> TickContext<'static> {
         funding_rate: None,
         index_price: None,
         open_interest: None,
+        best_bid: None,
+        best_ask: None,
+        tick_size: None,
     }
 }
 
@@ -82,10 +85,16 @@ fn test_exit_mean() {
 
 #[test]
 fn test_limit_order_long() {
-    // RC-07: use_limit=true, oversold entry produces limit order with correct price
-    // RC-07：use_limit=true，超賣入場產生正確限價的限價單
+    // RC-07 + G7-09c Phase 1: use_limit=true, oversold entry produces limit
+    // order with BBO-aware passive price. ctx_bb supplies no BBO → helper
+    // falls back to last_price ± offset_bps. Pre-G7-09c expected
+    // `bb_lower × (1 + offset)` (49_049); post-G7-09c with no BBO uses
+    // `last_price × (1 − offset)` = 50_000 × 0.999 = 49_950.
+    // RC-07 + G7-09c Phase 1：use_limit=true 在無 BBO 時走 fallback
+    // `last_price × (1 − offset)`，取代舊 `bb_lower × (1 + offset)` 公式
+    // （RCA `7f0e793` 顯示舊式跨 book → 100% PostOnly reject）。
     let mut s = BbReversion::new();
-    s.min_persistence_ms = 0; // disable persistence for unit tests
+    s.min_persistence_ms = 0;
     s.use_limit = true;
     s.limit_offset_bps = 10.0; // 10 bps = 0.1%
     let i = s.on_tick(&ctx_bb(-0.1, 25.0, 0));
@@ -96,11 +105,12 @@ fn test_limit_order_long() {
     };
     assert!(intent.is_long);
     assert_eq!(intent.order_type, "limit");
-    // limit_price = lower * (1 + 10/10000) = 49000 * 1.001 = 49049.0
-    let expected = 49000.0 * (1.0 + 10.0 / 10_000.0);
+    // G7-09c fallback: 50_000 × (1 − 10/10_000) = 49_950.
+    // G7-09c fallback：50_000 × 0.999 = 49_950。
+    let expected = 50_000.0 * (1.0 - 10.0 / 10_000.0);
     assert!(
         (intent.limit_price.unwrap() - expected).abs() < 1e-6,
-        "expected limit_price={}, got={}",
+        "G7-09c fallback expected limit_price={}, got={}",
         expected,
         intent.limit_price.unwrap()
     );
@@ -108,10 +118,14 @@ fn test_limit_order_long() {
 
 #[test]
 fn test_limit_order_short() {
-    // RC-07: use_limit=true, overbought entry produces limit order
-    // RC-07：use_limit=true，超買入場產生限價單
+    // RC-07 + G7-09c Phase 1: use_limit=true, overbought entry produces
+    // limit order with BBO-aware passive price. No BBO supplied → fallback
+    // path uses `last_price × (1 + offset)` = 50_000 × 1.001 = 50_050,
+    // replacing pre-G7-09c `upper × (1 − offset)` = 50_949.
+    // RC-07 + G7-09c Phase 1：無 BBO 時 fallback `last_price × (1 + offset)`
+    // 取代舊 `upper × (1 − offset)`。
     let mut s = BbReversion::new();
-    s.min_persistence_ms = 0; // disable persistence for unit tests
+    s.min_persistence_ms = 0;
     s.use_limit = true;
     s.limit_offset_bps = 10.0;
     let i = s.on_tick(&ctx_bb(1.1, 75.0, 0));
@@ -122,11 +136,12 @@ fn test_limit_order_short() {
     };
     assert!(!intent.is_long);
     assert_eq!(intent.order_type, "limit");
-    // limit_price = upper * (1 - 10/10000) = 51000 * 0.999 = 50949.0
-    let expected = 51000.0 * (1.0 - 10.0 / 10_000.0);
+    // G7-09c fallback: 50_000 × (1 + 10/10_000) = 50_050.
+    // G7-09c fallback：50_000 × 1.001 = 50_050。
+    let expected = 50_000.0 * (1.0 + 10.0 / 10_000.0);
     assert!(
         (intent.limit_price.unwrap() - expected).abs() < 1e-6,
-        "expected limit_price={}, got={}",
+        "G7-09c fallback expected limit_price={}, got={}",
         expected,
         intent.limit_price.unwrap()
     );
@@ -310,6 +325,9 @@ fn ctx_bb_with_funding(
         funding_rate,
         index_price: None,
         open_interest: None,
+        best_bid: None,
+        best_ask: None,
+        tick_size: None,
     }
 }
 
@@ -457,4 +475,163 @@ fn test_funding_rate_validate_bounds() {
     let mut p = BbReversionParams::default();
     p.funding_rate_boost = 0.3; // above max 0.2
     assert!(p.validate().is_err());
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// G7-09c Phase 1: BBO-aware PostOnly maker price tests for bb_reversion.
+// G7-09c Phase 1：bb_reversion BBO-aware PostOnly 限價測試。
+// ─────────────────────────────────────────────────────────────────────────
+//
+// NOTE: bb_reversion's `use_limit` is force-disabled by `update_params` (GAP-9
+// — paper engine has no limit-order matcher). These tests bypass `update_params`
+// by writing `s.use_limit = true` directly to verify the algorithm in isolation.
+// GAP-9 force-disable itself stays — it's Backlog A scope, NOT G7-09c scope.
+//
+// 注意：bb_reversion 的 `use_limit` 由 `update_params` 強制關閉（GAP-9 — paper
+// 引擎無限價撮合）。這些測試直接 `s.use_limit = true` 繞過 update_params 以
+// 隔離驗證算法。GAP-9 force-disable 維持，屬 Backlog A scope，不在 G7-09c。
+
+use crate::strategies::common::{compute_post_only_price, MakerPriceInputs};
+
+fn ctx_bb_with_bbo_g709c(
+    pct_b: f64,
+    rsi: f64,
+    ts: u64,
+    bid: f64,
+    ask: f64,
+    tick: f64,
+) -> TickContext<'static> {
+    use openclaw_core::indicators::HurstResult;
+    let ind = Box::leak(Box::new(IndicatorSnapshot {
+        bollinger: Some(BollingerResult {
+            upper: 51000.0,
+            middle: 50000.0,
+            lower: 49000.0,
+            bandwidth: 0.04,
+            percent_b: pct_b,
+        }),
+        rsi_14: Some(rsi),
+        adx: Some(AdxResult {
+            adx: 15.0,
+            plus_di: 20.0,
+            minus_di: 18.0,
+        }),
+        hurst: Some(HurstResult {
+            hurst: 0.35,
+            regime: "mean_reverting".into(),
+        }),
+        ..Default::default()
+    }));
+    TickContext {
+        symbol: "BTC",
+        price: 50_000.0,
+        timestamp_ms: ts,
+        indicators: Some(ind),
+        signals: &[],
+        h0_allowed: true,
+        funding_rate: None,
+        index_price: None,
+        open_interest: None,
+        best_bid: Some(bid),
+        best_ask: Some(ask),
+        tick_size: Some(tick),
+    }
+}
+
+/// G7-09c: bb_reversion long entry computes BBO-aware passive limit_price when
+/// use_limit is set directly (bypassing GAP-9 force-disable in update_params).
+/// G7-09c：bb_reversion 多頭直接 set use_limit=true 繞過 GAP-9，驗 BBO-aware 算法。
+#[test]
+fn test_g7_09c_bb_reversion_buy_uses_best_bid_passive() {
+    let mut s = BbReversion::new();
+    s.min_persistence_ms = 0;
+    s.use_limit = true; // bypass GAP-9 in update_params
+    s.maker_price_buffer_ticks = 1;
+    s.limit_offset_bps = 1.0;
+    let i = s.on_tick(&ctx_bb_with_bbo_g709c(-0.1, 25.0, 0, 49_999.5, 50_000.5, 0.1));
+    assert_eq!(i.len(), 1);
+    match &i[0] {
+        StrategyAction::Open(intent) => {
+            assert!(intent.is_long);
+            assert_eq!(intent.order_type, "limit");
+            let lp = intent.limit_price.expect("limit_price set");
+            // Expected: 49_999.5 - 1*0.1 = 49_999.4 (strictly below ask).
+            // 預期：49_999.5 - 0.1 = 49_999.4（嚴格低於 ask）。
+            assert!(
+                (lp - 49_999.4).abs() < 1e-6,
+                "G7-09c BUY limit got {lp}, expected 49_999.4"
+            );
+        }
+        other => panic!("expected Open, got {other:?}"),
+    }
+}
+
+/// G7-09c: bb_reversion short entry computes BBO-aware passive limit_price.
+/// G7-09c：bb_reversion 空頭驗 BBO-aware 算法。
+#[test]
+fn test_g7_09c_bb_reversion_sell_uses_best_ask_passive() {
+    let mut s = BbReversion::new();
+    s.min_persistence_ms = 0;
+    s.use_limit = true;
+    s.maker_price_buffer_ticks = 1;
+    s.limit_offset_bps = 1.0;
+    // percent_b > 1 + RSI overbought → SHORT.
+    // percent_b > 1 + RSI 超買 → 空頭。
+    let i = s.on_tick(&ctx_bb_with_bbo_g709c(1.1, 75.0, 0, 49_999.5, 50_000.5, 0.1));
+    assert_eq!(i.len(), 1);
+    match &i[0] {
+        StrategyAction::Open(intent) => {
+            assert!(!intent.is_long);
+            assert_eq!(intent.order_type, "limit");
+            let lp = intent.limit_price.expect("limit_price set");
+            // Expected: 50_000.5 + 1*0.1 = 50_000.6 (strictly above bid).
+            // 預期：50_000.5 + 0.1 = 50_000.6（嚴格高於 bid）。
+            assert!(
+                (lp - 50_000.6).abs() < 1e-6,
+                "G7-09c SELL limit got {lp}, expected 50_000.6"
+            );
+        }
+        other => panic!("expected Open, got {other:?}"),
+    }
+}
+
+/// G7-09c: bb_reversion params round-trip preserves maker_price_buffer_ticks.
+/// G7-09c：bb_reversion params 來回保留 maker_price_buffer_ticks。
+#[test]
+fn test_g7_09c_bb_reversion_params_roundtrip_buffer_ticks() {
+    let mut s = BbReversion::new();
+    let mut params = s.get_params();
+    assert_eq!(params.maker_price_buffer_ticks, 1, "default buffer = 1");
+    params.maker_price_buffer_ticks = 3;
+    s.update_params(params).expect("update_params");
+    let back = s.get_params();
+    assert_eq!(back.maker_price_buffer_ticks, 3, "round-trip preserved");
+    // Validate guard: buffer > 10 must reject.
+    // Validate 防護：buffer > 10 必拒。
+    let mut bad = s.get_params();
+    bad.maker_price_buffer_ticks = 11;
+    assert!(s.update_params(bad).is_err(), "buffer > 10 must fail validate");
+}
+
+/// G7-09c: helper smoke test invoked via bb_reversion module re-export path.
+/// G7-09c：透過 bb_reversion 模組路徑呼叫共享 helper 的 smoke test。
+#[test]
+fn test_g7_09c_bb_reversion_helper_fallback_when_no_bbo() {
+    // No BBO → fallback path uses last_price ± offset_bps, identical to
+    // pre-G7-09c bb_reversion behaviour. Confirms the helper is reachable
+    // from bb_reversion's import surface.
+    // 無 BBO → fallback 使用 last_price ± offset_bps，與 pre-G7-09c 一致；
+    // 同時確認 helper 從 bb_reversion 的 import 路徑可達。
+    let inputs = MakerPriceInputs {
+        last_price: 50_000.0,
+        best_bid: None,
+        best_ask: None,
+        tick_size: None,
+    };
+    let buy = compute_post_only_price(true, inputs, 1.0, 1, "bb_reversion", "BTCUSDT");
+    let sell = compute_post_only_price(false, inputs, 1.0, 1, "bb_reversion", "BTCUSDT");
+    // 1 bps offset → 50_000 × (1 ∓ 0.0001) = 49_995 / 50_005.
+    // 1 bps 偏移 → 49_995 / 50_005。
+    assert!((buy - 49_995.0).abs() < 1e-6, "fallback BUY got {buy}");
+    assert!((sell - 50_005.0).abs() < 1e-6, "fallback SELL got {sell}");
 }

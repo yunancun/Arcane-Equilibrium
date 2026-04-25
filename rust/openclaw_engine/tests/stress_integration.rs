@@ -45,6 +45,13 @@ fn make_ctx(
         funding_rate: None,
         index_price: None,
         open_interest: None,
+        // G7-09c Phase 1: stress test exercises tick volume not BBO; leave None
+        // so strategies fall back to legacy `last_price ± offset_bps` (matches
+        // pre-G7-09c stress baseline).
+        // G7-09c Phase 1：壓力測試不涉及 BBO，留 None 走 legacy fallback。
+        best_bid: None,
+        best_ask: None,
+        tick_size: None,
     }
 }
 

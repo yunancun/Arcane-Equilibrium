@@ -66,6 +66,9 @@ impl GridTrading {
             use_maker_entry: DEFAULT_USE_MAKER_ENTRY,
             maker_price_offset_bps: DEFAULT_MAKER_OFFSET_BPS,
             maker_limit_timeout_ms: DEFAULT_MAKER_LIMIT_TIMEOUT_MS,
+            // G7-09c Phase 1: default 1 tick inside the inside quote.
+            // G7-09c Phase 1：預設退一 tick。
+            maker_price_buffer_ticks: 1,
         }
     }
 
@@ -108,6 +111,9 @@ impl GridTrading {
             use_maker_entry: DEFAULT_USE_MAKER_ENTRY,
             maker_price_offset_bps: DEFAULT_MAKER_OFFSET_BPS,
             maker_limit_timeout_ms: DEFAULT_MAKER_LIMIT_TIMEOUT_MS,
+            // G7-09c Phase 1: default 1 tick inside the inside quote.
+            // G7-09c Phase 1：預設退一 tick。
+            maker_price_buffer_ticks: 1,
         }
     }
 
@@ -164,6 +170,9 @@ impl GridTrading {
             use_maker_entry: DEFAULT_USE_MAKER_ENTRY,
             maker_price_offset_bps: DEFAULT_MAKER_OFFSET_BPS,
             maker_limit_timeout_ms: DEFAULT_MAKER_LIMIT_TIMEOUT_MS,
+            // G7-09c Phase 1: default 1 tick inside the inside quote.
+            // G7-09c Phase 1：預設退一 tick。
+            maker_price_buffer_ticks: 1,
         }
     }
 
@@ -203,6 +212,9 @@ impl GridTrading {
         // 可直接讀取不必再 clamp。超界值屬 operator 誤配，採 clamp 不靜默失敗。
         self.maker_limit_timeout_ms =
             clamp_maker_limit_timeout_ms(params.maker_limit_timeout_ms);
+        // G7-09c Phase 1: hot-reload BBO buffer (validate() bounds [0,10]).
+        // G7-09c Phase 1：熱重載 BBO buffer，validate 範圍 [0,10]。
+        self.maker_price_buffer_ticks = params.maker_price_buffer_ticks;
         info!(
             strategy = "grid_trading",
             grid_count = self.grid_count,
@@ -226,6 +238,9 @@ impl GridTrading {
             use_maker_entry: self.use_maker_entry,
             maker_price_offset_bps: self.maker_price_offset_bps,
             maker_limit_timeout_ms: self.maker_limit_timeout_ms,
+            // G7-09c Phase 1: round-trip BBO buffer for IPC consumers.
+            // G7-09c Phase 1：BBO buffer 經 IPC 來回。
+            maker_price_buffer_ticks: self.maker_price_buffer_ticks,
         }
     }
 }

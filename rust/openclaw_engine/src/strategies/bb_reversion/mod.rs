@@ -23,7 +23,7 @@ mod tests;
 
 use std::collections::HashMap;
 
-use super::common::{PerSymbolState, TrendCooldown};
+use super::common::{compute_post_only_price, MakerPriceInputs, PerSymbolState, TrendCooldown};
 use super::confluence::{self, ConfluenceConfig, PersistenceTracker};
 use super::{Strategy, StrategyAction, StrategyParams};
 use crate::intent_processor::OrderIntent;
@@ -80,6 +80,14 @@ pub struct BbReversion {
     pub(crate) persistence: PersistenceTracker,
     pub min_persistence_ms: u64,
     pub min_notional_usd: f64,
+    /// G7-09c Phase 1: ticks INSIDE the inside quote for BBO-aware PostOnly.
+    /// See `BbReversionParams::maker_price_buffer_ticks` for semantics. Note
+    /// `use_limit` is currently force-disabled at line ~131 (GAP-9 — paper
+    /// engine has no limit-order matcher), so this field is plumbing-only
+    /// until GAP-9 lifts.
+    /// G7-09c Phase 1：BBO-aware PostOnly buffer，語義見 params。注意 `use_limit`
+    /// 在 ~131 行被 GAP-9 強制關閉，本欄位現為埋線。
+    pub(crate) maker_price_buffer_ticks: u32,
 }
 
 impl BbReversion {
@@ -108,6 +116,9 @@ impl BbReversion {
             persistence: PersistenceTracker::new(),
             min_persistence_ms: 180_000,
             min_notional_usd: 10.0,
+            // G7-09c Phase 1: default 1 tick inside the inside quote.
+            // G7-09c Phase 1：預設退一 tick。
+            maker_price_buffer_ticks: 1,
         }
     }
 
@@ -139,6 +150,10 @@ impl BbReversion {
         self.confluence_config = params.build_confluence_config();
         self.min_persistence_ms = params.min_persistence_ms;
         self.min_notional_usd = params.min_notional_usd;
+        // G7-09c Phase 1: hot-reload BBO buffer (validate() bounds [0, 10]).
+        // Plumbing-only until GAP-9 lifts (use_limit force-disabled above).
+        // G7-09c Phase 1：熱重載 BBO buffer（[0, 10]），GAP-9 解禁前為埋線。
+        self.maker_price_buffer_ticks = params.maker_price_buffer_ticks;
         info!(strategy = "bb_reversion", "params updated / 參數已更新");
         Ok(())
     }
@@ -166,6 +181,9 @@ impl BbReversion {
             confluence_threshold_no_trade: self.confluence_config.threshold_no_trade,
             confluence_threshold_light: self.confluence_config.threshold_light,
             confluence_threshold_full: self.confluence_config.threshold_full,
+            // G7-09c Phase 1: round-trip BBO buffer for IPC consumers.
+            // G7-09c Phase 1：BBO buffer 經 IPC 來回。
+            maker_price_buffer_ticks: self.maker_price_buffer_ticks,
         }
     }
 
@@ -186,12 +204,32 @@ impl BbReversion {
         confluence_score: Option<f32>,
         persistence_elapsed_ms: Option<u64>,
     ) -> OrderIntent {
+        // G7-09c Phase 1: when `use_limit` enabled (currently force-disabled by
+        // GAP-9 — see line ~131), use BBO-aware passive PostOnly price instead
+        // of legacy bb_lower/bb_upper × (1 ± limit_offset_bps/10_000) which
+        // crosses the book on Bybit (RCA `7f0e793`). bb_lower/bb_upper kept in
+        // sig for back-compat / future band-anchored variant. `use_limit`
+        // GAP-9 force-disable retained — see Backlog A for that scope.
+        // G7-09c Phase 1：當 `use_limit` 啟用時（目前 GAP-9 強制關閉），改用
+        // BBO-aware 被動 PostOnly 價，取代舊 bb_lower/bb_upper × (1 ± offset/萬)
+        // 公式（RCA 顯示舊式 100% 跨 book）；GAP-9 force-disable 不解禁，
+        // 屬 Backlog A scope。bb_lower/bb_upper 保留供未來 band-anchored 變體。
+        let _ = (bb_lower, bb_upper); // silence unused-on-cold-path warning
         let (order_type, limit_price) = if self.use_limit {
-            let price = if is_long {
-                bb_lower * (1.0 + self.limit_offset_bps / 10_000.0)
-            } else {
-                bb_upper * (1.0 - self.limit_offset_bps / 10_000.0)
+            let inputs = MakerPriceInputs {
+                last_price: ctx.price,
+                best_bid: ctx.best_bid,
+                best_ask: ctx.best_ask,
+                tick_size: ctx.tick_size,
             };
+            let price = compute_post_only_price(
+                is_long,
+                inputs,
+                self.limit_offset_bps,
+                self.maker_price_buffer_ticks,
+                "bb_reversion",
+                ctx.symbol,
+            );
             ("limit".to_string(), Some(price))
         } else {
             ("market".to_string(), None)

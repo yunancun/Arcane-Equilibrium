@@ -47,6 +47,9 @@ fn ctx_with(sma: f64, kama: f64, adx: f64, ts: u64) -> TickContext<'static> {
         funding_rate: None,
         index_price: None,
         open_interest: None,
+        best_bid: None,
+        best_ask: None,
+        tick_size: None,
     }
 }
 
@@ -87,6 +90,9 @@ fn ctx_with_hurst(
         funding_rate: None,
         index_price: None,
         open_interest: None,
+        best_bid: None,
+        best_ask: None,
+        tick_size: None,
     }
 }
 
@@ -123,6 +129,9 @@ fn ctx_with_sma50(
         funding_rate: None,
         index_price: None,
         open_interest: None,
+        best_bid: None,
+        best_ask: None,
+        tick_size: None,
     }
 }
 
@@ -438,6 +447,9 @@ fn test_conf_scale_applied_to_emit() {
         funding_rate: None,
         index_price: None,
         open_interest: None,
+        best_bid: None,
+        best_ask: None,
+        tick_size: None,
     };
     let mut s = MaCrossover::new();
     s.min_persistence_ms = 0; // disable persistence for unit tests

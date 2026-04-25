@@ -50,6 +50,9 @@ fn ctx_with(sma: f64, kama: f64, adx: f64, ts: u64) -> TickContext<'static> {
         funding_rate: None,
         index_price: None,
         open_interest: None,
+        best_bid: None,
+        best_ask: None,
+        tick_size: None,
     }
 }
 
@@ -84,6 +87,9 @@ fn ctx_with_er(sma: f64, kama: f64, adx: f64, ts: u64, er: f64) -> TickContext<'
         funding_rate: None,
         index_price: None,
         open_interest: None,
+        best_bid: None,
+        best_ask: None,
+        tick_size: None,
     }
 }
 
@@ -460,4 +466,109 @@ fn test_ma_crossover_update_params_roundtrips_maker_fields() {
     params_lo.maker_limit_timeout_ms = 1_000;
     s.update_params(params_lo).expect("update_params clamp lo");
     assert_eq!(s.get_params().maker_limit_timeout_ms, 15_000);
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// G7-09c Phase 1: BBO-aware PostOnly maker price tests for ma_crossover.
+// G7-09c Phase 1：ma_crossover BBO-aware PostOnly 限價測試。
+// ─────────────────────────────────────────────────────────────────────────
+
+/// Helper: ctx with explicit BBO + tick_size for G7-09c maker_price tests.
+/// 輔助：帶顯式 BBO + tick_size 的 ctx（G7-09c maker_price 測試用）。
+fn ctx_with_bbo_g709c(
+    sma: f64,
+    kama: f64,
+    adx: f64,
+    ts: u64,
+    last: f64,
+    bid: f64,
+    ask: f64,
+    tick: f64,
+) -> TickContext<'static> {
+    let ind = Box::leak(Box::new(IndicatorSnapshot {
+        sma_20: Some(sma),
+        kama: Some(KamaResult {
+            kama,
+            efficiency_ratio: 0.5,
+        }),
+        adx: Some(AdxResult {
+            adx,
+            plus_di: 25.0,
+            minus_di: 15.0,
+        }),
+        ..Default::default()
+    }));
+    TickContext {
+        symbol: "BTC",
+        price: last,
+        timestamp_ms: ts,
+        indicators: Some(ind),
+        signals: &[],
+        h0_allowed: true,
+        funding_rate: None,
+        index_price: None,
+        open_interest: None,
+        best_bid: Some(bid),
+        best_ask: Some(ask),
+        tick_size: Some(tick),
+    }
+}
+
+/// G7-09c: ma_crossover buy uses best_bid - buffer×tick when BBO present.
+/// G7-09c：ma_crossover 買單在 BBO 存在時使用 best_bid - buffer×tick。
+#[test]
+fn test_g7_09c_ma_buy_uses_best_bid_passive() {
+    let mut s = MaCrossover::new();
+    s.min_persistence_ms = 0;
+    s.use_maker_entry = true;
+    s.maker_price_buffer_ticks = 1;
+    s.maker_price_offset_bps = 1.0;
+    // sma=100 < kama=101 → BUY (long entry).
+    // sma=100 < kama=101 → 多頭入場。
+    let i = s.on_tick(&ctx_with_bbo_g709c(100.0, 101.0, 25.0, 0, 50_000.0, 49_999.5, 50_000.5, 0.1));
+    assert_eq!(i.len(), 1);
+    match &i[0] {
+        StrategyAction::Open(intent) => {
+            assert!(intent.is_long);
+            assert_eq!(intent.order_type, "limit");
+            assert_eq!(intent.time_in_force, Some(TimeInForce::PostOnly));
+            let lp = intent.limit_price.expect("limit_price set");
+            // Expected: 49_999.5 - 1*0.1 = 49_999.4 (strictly below ask 50_000.5).
+            // 預期：49_999.5 - 0.1 = 49_999.4（嚴格低於 ask）。
+            assert!(
+                (lp - 49_999.4).abs() < 1e-6,
+                "G7-09c BUY limit got {lp}, expected 49_999.4 (best_bid - buffer×tick)"
+            );
+        }
+        other => panic!("expected Open, got {other:?}"),
+    }
+}
+
+/// G7-09c: ma_crossover sell uses best_ask + buffer×tick when BBO present.
+/// G7-09c：ma_crossover 賣單在 BBO 存在時使用 best_ask + buffer×tick。
+#[test]
+fn test_g7_09c_ma_sell_uses_best_ask_passive() {
+    let mut s = MaCrossover::new();
+    s.min_persistence_ms = 0;
+    s.use_maker_entry = true;
+    s.maker_price_buffer_ticks = 1;
+    s.maker_price_offset_bps = 1.0;
+    // sma=101 > kama=100 → SELL (short entry).
+    // sma=101 > kama=100 → 空頭入場。
+    let i = s.on_tick(&ctx_with_bbo_g709c(101.0, 100.0, 25.0, 0, 50_000.0, 49_999.5, 50_000.5, 0.1));
+    assert_eq!(i.len(), 1);
+    match &i[0] {
+        StrategyAction::Open(intent) => {
+            assert!(!intent.is_long);
+            assert_eq!(intent.order_type, "limit");
+            let lp = intent.limit_price.expect("limit_price set");
+            // Expected: 50_000.5 + 1*0.1 = 50_000.6 (strictly above bid 49_999.5).
+            // 預期：50_000.5 + 0.1 = 50_000.6（嚴格高於 bid）。
+            assert!(
+                (lp - 50_000.6).abs() < 1e-6,
+                "G7-09c SELL limit got {lp}, expected 50_000.6 (best_ask + buffer×tick)"
+            );
+        }
+        other => panic!("expected Open, got {other:?}"),
+    }
 }
