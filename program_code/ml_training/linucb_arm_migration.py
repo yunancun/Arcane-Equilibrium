@@ -65,7 +65,7 @@ except ImportError:  # pragma: no cover
 
 # Import codec + schema hash from 4-05 trainer to guarantee byte alignment
 # 從 4-05 trainer 引入 BYTEA codec 與 schema hash，確保 byte 對齊
-from ml_training.linucb_trainer import (
+from program_code.ml_training.linucb_trainer import (
     _le_bytes_to_ndarray,
     _ndarray_to_le_bytes,
     compute_feature_schema_hash,

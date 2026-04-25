@@ -143,7 +143,7 @@ def train_scorer(
     try:
         if timestamps is not None and len(timestamps) == len(labels):
             # P1-4: CPCV-validated training path / CPCV 驗證訓練路徑
-            from ml_training.cpcv_validator import CPCVConfig, validate_cpcv
+            from program_code.ml_training.cpcv_validator import CPCVConfig, validate_cpcv
 
             def _lgb_fold_model(
                 X_tr: np.ndarray, y_tr: np.ndarray,

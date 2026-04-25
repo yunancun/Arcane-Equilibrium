@@ -23,7 +23,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
-from ml_training.quantile_trainer import (
+from program_code.ml_training.quantile_trainer import (
     QUANTILE_ALPHAS,
     QuantileTrainingConfig,
     QuantileTrainingResult,
