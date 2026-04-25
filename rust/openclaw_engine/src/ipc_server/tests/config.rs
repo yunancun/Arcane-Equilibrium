@@ -501,3 +501,120 @@ async fn test_g3_02_a2_patch_executor_routes_to_demo_engine() {
         "paper store must remain default true"
     );
 }
+
+// ────────────────────────────────────────────────────────────────────────
+// G3-05 EDGE-DIAG-1-FUP-SHADOW-ENABLED-IPC (2026-04-25):
+// Regression coverage for `RiskConfig.exit.shadow_enabled` IPC hot-reload.
+// Combine Layer Shadow exit observation pipeline (INFRA-PREBUILD-1 Part A,
+// commits 6226b38..74b678a, 2026-04-23) is gated by this flag. EDGE-P2
+// Phase 2+ shadow flip needs to be IPC-flippable without engine restart;
+// these tests prove the existing `patch_risk_config` deep-merge already
+// covers the exit.shadow_enabled field surface — no new IPC method or
+// handler required, just like G3-02 Phase A2 demonstrated for executor.*.
+// G3-05：exit.shadow_enabled IPC 熱重載 regression coverage；
+// patch_risk_config deep-merge 已涵蓋此欄位，無需新方法。
+// ────────────────────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn test_g3_05_patch_exit_shadow_enabled_via_patch_risk_config() {
+    // Default false → patch true → confirm read-back + version bump.
+    // 預設 false → patch true → 確認讀回 + version 升。
+    let config = make_test_config();
+    let dd = make_test_data_dir();
+    let (rs, ls, bs) = rc1_stores();
+    assert!(
+        !rs.as_ref().unwrap().paper.load().exit.shadow_enabled,
+        "default exit.shadow_enabled must be false"
+    );
+    let req = r#"{"jsonrpc":"2.0","method":"patch_risk_config","params":{"source":"operator","patch":{"exit":{"shadow_enabled":true}}},"id":9201}"#;
+    let resp = dispatch_request(
+        req,
+        &config,
+        &dd,
+        &EngineCommandChannels::default(),
+        &empty_budget_slot(),
+        &empty_teacher_slot(),
+        &rs,
+        &ls,
+        &bs,
+        &None,
+        &None,
+        &None,
+    )
+    .await;
+    assert!(resp.error.is_none(), "expected success: {resp:?}");
+    let r = resp.result.unwrap();
+    assert_eq!(r["ok"], true);
+    assert_eq!(r["version"], 1);
+    let snap = rs.as_ref().unwrap().paper.load();
+    assert!(
+        snap.exit.shadow_enabled,
+        "exit.shadow_enabled must be true after patch"
+    );
+}
+
+#[tokio::test]
+async fn test_g3_05_patch_exit_shadow_enabled_per_engine_routing() {
+    // engine="demo" routes to demo store only; paper untouched.
+    // engine="demo" 路由 demo 專屬；paper 不動。
+    let config = make_test_config();
+    let dd = make_test_data_dir();
+    let (rs, ls, bs) = rc1_stores();
+    let req = r#"{"jsonrpc":"2.0","method":"patch_risk_config","params":{"engine":"demo","source":"operator","patch":{"exit":{"shadow_enabled":true}}},"id":9202}"#;
+    let resp = dispatch_request(
+        req,
+        &config,
+        &dd,
+        &EngineCommandChannels::default(),
+        &empty_budget_slot(),
+        &empty_teacher_slot(),
+        &rs,
+        &ls,
+        &bs,
+        &None,
+        &None,
+        &None,
+    )
+    .await;
+    assert!(resp.error.is_none(), "expected success: {resp:?}");
+    let demo_snap = rs.as_ref().unwrap().demo.load();
+    assert!(demo_snap.exit.shadow_enabled, "demo flipped to true");
+    let paper_snap = rs.as_ref().unwrap().paper.load();
+    assert!(
+        !paper_snap.exit.shadow_enabled,
+        "paper store must remain default false"
+    );
+}
+
+#[tokio::test]
+async fn test_g3_05_patch_exit_shadow_enabled_invalid_type_rejected() {
+    // Non-bool (string "true") must reject → no version bump.
+    // 非 bool（字串 "true"）必拒，version 不升。
+    let config = make_test_config();
+    let dd = make_test_data_dir();
+    let (rs, ls, bs) = rc1_stores();
+    let original_version = rs.as_ref().unwrap().paper.version();
+    let req = r#"{"jsonrpc":"2.0","method":"patch_risk_config","params":{"patch":{"exit":{"shadow_enabled":"true"}}},"id":9203}"#;
+    let resp = dispatch_request(
+        req,
+        &config,
+        &dd,
+        &EngineCommandChannels::default(),
+        &empty_budget_slot(),
+        &empty_teacher_slot(),
+        &rs,
+        &ls,
+        &bs,
+        &None,
+        &None,
+        &None,
+    )
+    .await;
+    assert!(resp.error.is_some(), "non-bool must reject");
+    assert_eq!(rs.as_ref().unwrap().paper.version(), original_version);
+    let snap = rs.as_ref().unwrap().paper.load();
+    assert!(
+        !snap.exit.shadow_enabled,
+        "exit.shadow_enabled must remain default false"
+    );
+}
