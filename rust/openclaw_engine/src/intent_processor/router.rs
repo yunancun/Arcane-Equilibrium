@@ -260,8 +260,10 @@ impl IntentProcessor {
             // ─── Gate 3a · EDGE-P3-1 A4: ML edge-predictor gate (spec §7.3) ───
             // Runs ahead of JS shrinkage. No-op when features=None / predictor disabled.
             // EDGE-P3-1 A4：ML 預測器 gate。features=None 或 predictor 禁用時為 no-op。
-            let cost_bps =
-                2.0 * (self.fee_rate(&intent.symbol) + lookup_slippage(volume_24h)) * 10_000.0;
+            let cost_bps = 2.0
+                * (self.fee_rate(&intent.symbol)
+                    + lookup_slippage(&self.risk_config.slippage, volume_24h))
+                * 10_000.0;
             let ctx_id = context_id.unwrap_or("");
             match self.evaluate_predictor_gate(
                 intent,
@@ -646,7 +648,9 @@ impl IntentProcessor {
             // ─── Gate 3a · EDGE-P3-1 A4: ML edge-predictor gate (spec §7.3) ───
             // No-op when features=None / predictor disabled. Shadow-mode always falls through.
             // EDGE-P3-1 A4：ML 預測器 gate；features=None / predictor 禁用 / shadow 模式 → 回退。
-            let cost_bps = 2.0 * (fee_rate + lookup_slippage(volume_24h)) * 10_000.0;
+            let cost_bps =
+                2.0 * (fee_rate + lookup_slippage(&self.risk_config.slippage, volume_24h))
+                    * 10_000.0;
             let ctx_id = context_id.unwrap_or("");
             match self.evaluate_predictor_gate(
                 intent,

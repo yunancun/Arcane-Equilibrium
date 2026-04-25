@@ -22,7 +22,8 @@ impl IntentProcessor {
         volume_24h: f64,
     ) -> Option<IntentResult> {
         let fee_rate = self.fee_rate(symbol);
-        let slippage = lookup_slippage(volume_24h);
+        let slippage_cfg = &self.risk_config.slippage;
+        let slippage = lookup_slippage(slippage_cfg, volume_24h);
         // Round-trip cost in bps: (fee + slippage) × 2 legs × 10000
         // 來回成本 bps：(手續費 + 滑點) × 2 腿 × 10000
         let fee_bps = 2.0 * (fee_rate + slippage) * 10_000.0;
@@ -30,11 +31,14 @@ impl IntentProcessor {
         match self.edge_estimates.get_cell(strategy, symbol) {
             Some(cell) if cell.shrunk_bps > 0.0 => {
                 // Positive JS estimate: use it as EV signal with win_rate weighting.
+                // G7-07: floor + safety multiplier now read from
+                // `risk.slippage.cost_gate_{win_rate_floor, safety_multiplier}`.
                 // 正 JS 估計：作為 EV 信號，加入 win_rate 加權。
-                // Effective threshold: fee_bps / max(0.3, win_rate) × 1.3 (30% safety margin)
-                // Mirrors Python: min_move_pct = c_round / max(0.3, win_rate) × 1.3
-                let wr = cell.win_rate.clamp(0.3, 1.0);
-                let threshold_bps = fee_bps / wr * 1.3;
+                // G7-07：floor 與 safety multiplier 改讀 risk.slippage.* TOML。
+                let wr = cell
+                    .win_rate
+                    .clamp(slippage_cfg.cost_gate_win_rate_floor, 1.0);
+                let threshold_bps = fee_bps / wr * slippage_cfg.cost_gate_safety_multiplier;
                 if cell.shrunk_bps < threshold_bps {
                     return Some(IntentResult::rejected(
                         RejectionCode::CostGateJsPaper {
@@ -98,14 +102,18 @@ impl IntentProcessor {
         fee_rate: f64,
         volume_24h: f64,
     ) -> Option<ExchangeGateResult> {
-        let slippage = lookup_slippage(volume_24h);
+        let slippage_cfg = &self.risk_config.slippage;
+        let slippage = lookup_slippage(slippage_cfg, volume_24h);
         let fee_bps = 2.0 * (fee_rate + slippage) * 10_000.0;
         match self.edge_estimates.get_cell(strategy, symbol) {
             Some(cell) if cell.shrunk_bps > 0.0 => {
                 // Positive JS estimate: same threshold as live (win-rate weighted)
-                // 正 JS 估計：與 live 相同門檻（勝率加權）
-                let wr = cell.win_rate.clamp(0.3, 1.0);
-                let threshold_bps = fee_bps / wr * 1.3;
+                // G7-07: floor + safety multiplier from `risk.slippage.*`.
+                // 正 JS 估計：與 live 相同門檻（勝率加權）。G7-07：改讀 TOML。
+                let wr = cell
+                    .win_rate
+                    .clamp(slippage_cfg.cost_gate_win_rate_floor, 1.0);
+                let threshold_bps = fee_bps / wr * slippage_cfg.cost_gate_safety_multiplier;
                 if cell.shrunk_bps < threshold_bps {
                     return Some(ExchangeGateResult::rejected(
                         RejectionCode::CostGateJsDemoThreshold {
@@ -152,16 +160,20 @@ impl IntentProcessor {
         fee_rate: f64,
         volume_24h: f64,
     ) -> Option<ExchangeGateResult> {
-        let slippage = lookup_slippage(volume_24h);
+        let slippage_cfg = &self.risk_config.slippage;
+        let slippage = lookup_slippage(slippage_cfg, volume_24h);
         // Round-trip cost in bps including slippage
         // 包含滑點的來回成本 bps
         let fee_bps = 2.0 * (fee_rate + slippage) * 10_000.0;
         match self.edge_estimates.get_cell(strategy, symbol) {
             Some(cell) if cell.shrunk_bps > 0.0 => {
                 // Win-rate weighted threshold (aligned with Python cost_gate.py)
-                // 勝率加權門檻（對齊 Python cost_gate.py）
-                let wr = cell.win_rate.clamp(0.3, 1.0);
-                let threshold_bps = fee_bps / wr * 1.3;
+                // G7-07: floor + safety multiplier from `risk.slippage.*`.
+                // 勝率加權門檻（對齊 Python cost_gate.py）。G7-07：改讀 TOML。
+                let wr = cell
+                    .win_rate
+                    .clamp(slippage_cfg.cost_gate_win_rate_floor, 1.0);
+                let threshold_bps = fee_bps / wr * slippage_cfg.cost_gate_safety_multiplier;
                 if cell.shrunk_bps < threshold_bps {
                     return Some(ExchangeGateResult::rejected(
                         RejectionCode::CostGateJsLiveThreshold {

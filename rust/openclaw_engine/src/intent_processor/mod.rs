@@ -219,33 +219,36 @@ const DEFAULT_TAKER_FEE_RATE: f64 = 0.00055;
 /// Bybit USDT 永續默認 maker 費率，API 未提供時的回退值；與 AccountManager 常量對齊。
 const DEFAULT_MAKER_FEE_RATE: f64 = 0.0002;
 
-/// Default slippage rate when volume data is unavailable (5 bps).
-/// 無成交量數據時的默認滑點率（5 bps）。
-const DEFAULT_SLIPPAGE_RATE: f64 = 0.0005;
+/// G7-07: Default slippage rate fallback when volume data is unavailable, used
+/// only by `lookup_slippage_default()` test helper / legacy callers that don't
+/// have a `&RiskConfig` handy. Runtime slippage now flows through
+/// `RiskConfig.slippage.lookup_rate(volume_24h)` so operators can hot-reload
+/// the tier table from `risk_config*.toml`.
+/// G7-07：默認滑點率回退；僅供 test helper / 無 RiskConfig 的舊 caller 使用。
+/// 運行時滑點現由 `RiskConfig.slippage.lookup_rate(volume_24h)` 提供，可
+/// 從 `risk_config*.toml` 熱重載 tier 表。
+pub(crate) const DEFAULT_SLIPPAGE_RATE: f64 = 0.0005;
 
-/// Slippage tiers by 24h USD turnover — mirrors Python cost_gate.py SLIPPAGE_TIERS.
-/// 按 24h 成交額分級的滑點 — 對齊 Python cost_gate.py。
-/// (min_turnover_usd, slippage_rate)
-const SLIPPAGE_TIERS: [(f64, f64); 5] = [
-    (1_000_000_000.0, 0.0001), // >$1B: 1 bps (BTC/ETH)
-    (100_000_000.0, 0.0002),   // >$100M: 2 bps
-    (10_000_000.0, 0.0005),    // >$10M: 5 bps
-    (1_000_000.0, 0.0015),     // >$1M: 15 bps
-    (0.0, 0.0030),             // <$1M: 30 bps (illiquid alts)
-];
+/// G7-07: Look up slippage using the live `SlippageConfig` (TOML-backed).
+/// Pre-G7-07 callers used a free `lookup_slippage(volume_24h)` reading the
+/// hardcoded `SLIPPAGE_TIERS`. Now the tier table lives in
+/// `risk.slippage.tiers` and lookup goes through this thin wrapper to keep
+/// call-site diff minimal while making the table runtime-tunable.
+/// G7-07：經由 `SlippageConfig`（TOML 支援）查滑點。原 free fn 讀
+/// hardcoded `SLIPPAGE_TIERS`；現 tier 表存於 `risk.slippage.tiers`，
+/// 透過 thin wrapper 維持 call-site diff 最小。
+fn lookup_slippage(config: &crate::config::SlippageConfig, volume_24h: f64) -> f64 {
+    config.lookup_rate(volume_24h)
+}
 
-/// Look up slippage rate by 24h volume tier (mirrors Python _lookup_slippage).
-/// 根據 24h 成交量查找滑點率（對齊 Python 版本）。
-fn lookup_slippage(volume_24h: f64) -> f64 {
-    if volume_24h <= 0.0 {
-        return DEFAULT_SLIPPAGE_RATE;
-    }
-    for &(threshold, rate) in &SLIPPAGE_TIERS {
-        if volume_24h >= threshold {
-            return rate;
-        }
-    }
-    DEFAULT_SLIPPAGE_RATE
+/// G7-07 test/helper: legacy free-function lookup using default tiers. Kept so
+/// pre-G7-07 unit tests and any rare caller without a `RiskConfig` handle can
+/// still resolve a tier rate without constructing a config snapshot.
+/// G7-07 test/helper：用 default tiers 查滑點，供原始單測與少數無
+/// RiskConfig handle 的 caller 使用，免於額外構造 config snapshot。
+#[cfg(test)]
+pub(crate) fn lookup_slippage_default(volume_24h: f64) -> f64 {
+    crate::config::SlippageConfig::default().lookup_rate(volume_24h)
 }
 
 pub struct IntentProcessor {

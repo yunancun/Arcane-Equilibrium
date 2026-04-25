@@ -444,13 +444,17 @@ fn test_cost_gate_cold_start_allows_low_volatility_paper() {
 fn test_slippage_tier_lookup() {
     // Verify slippage tiers match Python cost_gate.py SLIPPAGE_TIERS.
     // 驗證滑點分級與 Python cost_gate.py 一致。
-    assert_eq!(lookup_slippage(2_000_000_000.0), 0.0001); // >$1B: 1 bps
-    assert_eq!(lookup_slippage(500_000_000.0), 0.0002); // >$100M: 2 bps
-    assert_eq!(lookup_slippage(50_000_000.0), 0.0005); // >$10M: 5 bps
-    assert_eq!(lookup_slippage(5_000_000.0), 0.0015); // >$1M: 15 bps
-    assert_eq!(lookup_slippage(100_000.0), 0.0030); // <$1M: 30 bps
-    assert_eq!(lookup_slippage(0.0), DEFAULT_SLIPPAGE_RATE);
-    assert_eq!(lookup_slippage(-1.0), DEFAULT_SLIPPAGE_RATE);
+    // G7-07: now resolved via `SlippageConfig::default()` (TOML-backed) — values
+    // unchanged so this regression guards default bit-identicality.
+    // G7-07：經 SlippageConfig::default() 解析（TOML 支援），值不變，本測作為
+    // default bit-identical 的回歸保險。
+    assert_eq!(lookup_slippage_default(2_000_000_000.0), 0.0001); // >$1B: 1 bps
+    assert_eq!(lookup_slippage_default(500_000_000.0), 0.0002); // >$100M: 2 bps
+    assert_eq!(lookup_slippage_default(50_000_000.0), 0.0005); // >$10M: 5 bps
+    assert_eq!(lookup_slippage_default(5_000_000.0), 0.0015); // >$1M: 15 bps
+    assert_eq!(lookup_slippage_default(100_000.0), 0.0030); // <$1M: 30 bps
+    assert_eq!(lookup_slippage_default(0.0), DEFAULT_SLIPPAGE_RATE);
+    assert_eq!(lookup_slippage_default(-1.0), DEFAULT_SLIPPAGE_RATE);
 }
 
 #[test]
