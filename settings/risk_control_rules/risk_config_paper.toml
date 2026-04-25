@@ -250,4 +250,21 @@ use_residual_sigma = false      # Phase A dormant; flip after Phase B wire-up
 residual_window_size = 200      # rolling window for residual σ̂
 fallback_sigma = 0.001          # 10 bps fallback when σ̂ degenerates
 
+# G7-03 (2026-04-24) — Hurst exponent + hysteresis regime detector (Phase A: schema only).
+# Wraps openclaw_core::indicators::volatility::hurst (R/S analysis) with a typed
+# RegimeLabel + HysteresisDetector (lag-based label stabilizer). Phase A: enabled
+# = false keeps `regime::hurst::hurst_label_for_symbol` returning None, so
+# runtime is bit-identical to pre-G7-03 behavior. Phase B wires the detector
+# into the tick pipeline / scanner. validate() enforces window>=16, lag∈[1,256],
+# 0 < antipersistent < persistent < 1, min_window>=2 and min_window*4<=window.
+# G7-03：Hurst + 滯回 regime 偵測器 schema；Phase A 預設 enabled=false 完全 no-op，
+# Phase B 接線後 operator 才翻 true。
+[hurst]
+enabled = false                 # Phase A dormant
+window_size = 128               # R/S total observation window
+min_window = 8                  # smallest sub-window (lag) for chunking
+hysteresis_lag = 6              # consecutive same-side observations before flip
+persistent_threshold = 0.55     # H > 0.55 → trending side
+antipersistent_threshold = 0.45 # H < 0.45 → mean-reverting side
+
 [experimental.flags]
