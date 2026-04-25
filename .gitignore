@@ -74,4 +74,8 @@ venvs/
 .smbdelete*
 .idea/
 .vscode/
-.claude/
+.claude/*
+!.claude/skills
+!.claude/skills/**
+!.claude/agents
+!.claude/agents/**
