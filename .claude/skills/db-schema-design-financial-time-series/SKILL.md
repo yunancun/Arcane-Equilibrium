@@ -198,18 +198,13 @@ SELECT add_retention_policy('learning.tick_data', INTERVAL '90 days');
 ```
 保留 90d，老資料自動 drop（節省空間 + 加速 query）。
 
-## 7. OpenClaw 5 strat × 25 symbol × 1m row 量級
+## 7. Row 量規劃 — 不在本 skill 寫死
 
-> ⚠️ **下列 row 量為 schema 設計參考估計（非治理硬規範）**；真實 row 量隨策略激活率 / Phase 階段（Phase 5 reframed 後 grid/ma_crossover 策略 fill 大幅減少）/ tick density / retention policy 動態變動，**規劃 hypertable / chunk / index 前必跑** `SELECT count(*), max(ts) - min(ts) FROM <table>` 取真實數據。
+策略激活率 / Phase 階段 / tick density / retention policy 共同決定真實 row 量。**本 skill 不寫死 OpenClaw 表估算**避免 sub-agent 引過期值決定 hypertable / chunk / index 規模。
 
-| 表 | 每 day rows（估計）| 每 month rows | 1y rows | hypertable? |
-|---|---|---|---|---|
-| `trading.fills` | ~5k | ~150k | ~1.8M | ✅ |
-| `learning.exit_features` | ~5k | ~150k | ~1.8M | ✅ |
-| `learning.bb_features` | ~36k (1m × 25 sym) | ~1M | ~13M | ✅ |
-| `learning.tick_data` | ~3.6M | ~108M | ~1.3B | ✅ + retention 90d |
-| `learning.edge_estimates` | ~187 cells refresh per cycle | ~4500/d if hourly | ~1.6M | regular table OK |
-| `learning.model_registry` | < 100 | < 1000 | < 10k | regular table |
+實際 row 量必跑 `SELECT count(*), max(ts) - min(ts), pg_size_pretty(pg_total_relation_size('learning.X')) FROM learning.X` 取真值。
+
+**通用規劃 framework**（不會 drift）：per-tick / per-bar / per-fill / per-event audit log → hypertable + 7d chunk（1m data）/ 1d chunk（tick data）；per-symbol / per-strategy 配置 / metadata → regular table；高量資料（>100M rows / yr）必加 retention policy（90d 起跳）+ compression 30d+。
 
 ## 8. 工作流（10 步 schema 審計）
 
@@ -224,15 +219,13 @@ SELECT add_retention_policy('learning.tick_data', INTERVAL '90 days');
 9. **Test idempotency**（migration 跑兩次）
 10. **audit_migrations.py** 驗 V### 序列完整
 
-## OpenClaw 特定核心
+## OpenClaw context — 不在本 skill 重述
 
-- **V023 / V019 / V021 silent-noop postmortem**：Guard A 必加（CLAUDE.md §七）
-- **V024 auto_migrate live**：`OPENCLAW_AUTO_MIGRATE=1` opt-in，refuse-to-start on ambiguous
-- **engine_mode 4 值**：paper / demo / live_demo / live；training filter `IN ('live','live_demo')`
-- **outcome_backfiller fix（`5e2981d`）**：timeframe '1' → '1m' + engine_mode INSERT
-- **decision_outcomes 兩 bug 教訓**（memory `project_decision_outcomes_not_dead`）：(1) timeframe 字串不一致 (2) engine_mode INSERT 漏接
-- **PG 4-8GB constraint**：硬體 128GB 但 PG 占 < 8GB（LLM 占 54GB）
-- **passive_wait_healthcheck.py**：每 schema 變動加對應 check_X() function
+OpenClaw 特定 snapshot（具體 V### migration 編號 / commit hash / RAM 配比 / 當前 healthcheck check 數）會 drift。本 skill 不重述。
+
+實際 context 必從 SSOT 拿（衝突信前者）：runtime TOML > Rust schema > CLAUDE.md §三/§四/§七 > `audit_migrations.py` 實測 > git log > memory（operator 明示未必可信）。
+
+**穩定不變的 schema rule**（架構級不變）：silent-noop postmortem 教訓 → 新 migration 必含 Guard A/B/C（CLAUDE.md §七）；engine_mode 4 值 paper/demo/live_demo/live；training filter `IN ('live','live_demo')`（不單 'live'）；schema 變動必同步加 healthcheck `check_X()` function。
 
 ## Cross-Skill 互引（避免重述）
 

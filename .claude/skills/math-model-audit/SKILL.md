@@ -81,13 +81,13 @@ allowed-tools: Read, Grep, Glob, WebSearch
 5. **對抗性反問** — 「樣本量翻倍 effect 變強還弱？」「換 OOS 還對嗎？」「fee + 1bps 結論還成立嗎？」
 6. **判定** — Approve / Conditional（待 N 條件）/ Reject + 替代方案
 
-## OpenClaw 特定核心
+## OpenClaw context — 不在本 skill 重述
 
-- **edge_estimator**：每 strategy::symbol 的 grand_mean / shrunk_bps，shrinkage prior 必合理（James-Stein 或 Bayesian shrinkage 而非 ad-hoc）
-- **cost_gate**：promotion 邊界 grand_mean > −50 bps 且 ≥2 策略 shrunk_bps > 0（CLAUDE.md §三 LEARNING-PIPELINE-DORMANT-1）
-- **bb_breakout / squeeze 信號**：1m 尺度 bandwidth match（F1 確認過尺度錯配）
-- **PostOnly fee 降幅驗證**：≥1w demo 數據 + maker fill rate
-- **Phase 5 reframed**：所有活躍策略 gross edge 為負，新策略上線前必先過 demo 21d gross > 0
+OpenClaw 特定 snapshot（cost_gate 當前閾值 / Phase 狀態 / specific bug 教訓如 bb_breakout F1 / EDGE-P2-3 部署細節 / TODO id）會 drift。本 skill 不重述。
+
+實際 context 必從 SSOT 拿（衝突信前者）：runtime TOML > Rust schema > CLAUDE.md §三 > TODO.md > `git log` > 治理 .md > memory（operator 明示未必可信）。
+
+**穩定不變的數學原則**（不會 drift）：edge_estimator shrinkage prior 必合理（James-Stein 或 Bayesian shrinkage 而非 ad-hoc）；cost_gate 設計需 strategy::symbol cell-level 統計顯著；新策略 audit 必含 demo OOS gross > 0 證據（不是 in-sample）。
 
 ## Cross-Skill 互引（避免重述）
 

@@ -166,17 +166,13 @@ ssh trade-core "python3 helper_scripts/live/verify_authorization.py"
 11. **CLAUDE.md §三 狀態描述對照**（drift 檢查）
 12. **report + sign-off**
 
-## OpenClaw 特定核心
+## OpenClaw context — 不在本 skill 重述
 
-- **強制工作鏈 E1→E2→E4→QA→PM**（CLAUDE.md §八）
-- **Phase 5 reframed**：所有活躍策略 gross edge 為負，Live 前最早 ~2026-05-23
-- **Demo 21d 時鐘**：從 2026-04-16 22:16 起算（CLAUDE.md §十）
-- **engine_mode 4 值**：paper / demo / live_demo / live
-- **engine_alive 不在 Mac**：Mac 端永遠 false 是預期，必走 ssh trade-core
-- **passive_wait_healthcheck.py 17 check**：cron 6h
-- **commit 即 push**（CLAUDE.md §七 git 自動化）
-- **§三 drift 規則**（G6-04）：runtime 數值 + 採集時間註明，7d 未驗即刪
-- **CLAUDE.md §三 vs runtime drift 防線**：採納前 source-of-truth 實測
+OpenClaw 特定 snapshot（Phase 5 reframed 細節 / Demo 21d 時鐘起點 / 預測 Live 日期 / 當前 healthcheck check 數 / G6-04 規則編號）會 drift。本 skill 不重述。
+
+實際 context 必從 SSOT 拿：runtime TOML > Rust schema > CLAUDE.md §三/§四/§十 > TODO.md > `git log` > 治理 .md > memory（最後）。
+
+**穩定不變的 governance / 平台 rule**（不會 drift）：強制工作鏈 E1→E2→E4→QA→PM 不可跳（CLAUDE.md §八）；engine_mode 4 值 paper/demo/live_demo/live；Mac 端 `engine_alive=false` 是預期（必走 `ssh trade-core` 取真值）；commit 即 push（CLAUDE.md §七）；§三 任何 runtime 數值採納前必 source-of-truth 實測。
 
 ## Cross-Skill 互引（避免重述）
 

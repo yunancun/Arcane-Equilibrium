@@ -109,24 +109,11 @@ WHERE hypertable_name = 'fills' ORDER BY range_end DESC LIMIT 10;
 4. **回歸測試** — cargo test + pytest 全綠
 5. **報告** — 改前/改後 P50 / P95 / P99 + RAM peak + binary size + 結論 PASS/FAIL
 
-## OpenClaw 特定熱點
+## OpenClaw context — 不在本 skill 列具體熱點路徑
 
-### Rust engine
-- `tick_pipeline/mod.rs`（已拆 1012 行 < 1200 硬上限）
-- `combine_layer::*` 雙倍 inference（shadow + production）
-- `ipc/*` socket 來回（Python ↔ Rust）
-- `kline_manager.get_ohlcv` 視窗滑動
+具體熱點檔案 / 行數 / 模組分布隨 commit 演進變動（refactor / split / rename 都會讓 cite 過期）。**本 skill 不寫死**避免 sub-agent 引過期路徑。
 
-### Python control_api
-- `main_legacy.py` 5 sibling routes 動態 reload
-- `strategy_wiring.py` 12+ singleton 初始化
-- asyncpg pool 飢餓（pool_size 設置）
-
-### PostgreSQL
-- `learning.exit_features`（hypertable，chunk size 優化）
-- `trading.fills`（V021 後加 exit_source 欄位 + partial index）
-- `learning.decision_shadow_exits`（A2 hypertable）
-- ML training pipeline：訓練讀大 query 必分頁
+實際熱點必跑 profiler 取真值：Rust `flamegraph` + `cargo bloat`；Python `py-spy top` + `memray`；PostgreSQL `pg_stat_statements` + `pg_stat_user_tables`（見 §三層工具鏈段）。從 profile 結果再決定優化目標 — **不從本 skill 預設熱點清單**。
 
 ## 紅旗（直接標 FAIL）
 

@@ -66,25 +66,18 @@ f_safe = f_frac × (1 − std(p)·z) / mean(p)
 - 高信心策略 → 高 budget
 - 新策略 / shadow 階段 → 低 budget
 
-### 2.3 OpenClaw 5 策略當前 risk budget（**建議起點，非治理硬規範**）
+### 2.3 Risk budget 分配 — 不在本 skill 寫死
 
-| 策略 | suggested budget | 理由 |
-|---|---|---|
-| grid_trading | 25% | edge 不明 + fee drag 大 |
-| ma_crossover | 20% | R:R 不對稱（CLAUDE.md §三 P1-10）|
-| bb_breakout | 15% | dormancy 修復後重新累積 |
-| bb_reversion | 15% | 同上 |
-| funding_arb | 0% | G-2 結案 negative；**保留 dormant slot 待 R-02 重評**（不刪）|
-| **未分配 buffer** | 25% | 緊急 + new strategy slot |
+OpenClaw 當前 5 策略名單 + 每策略 budget 隨 Phase / dormancy / R-02 重評變動。**本 skill 不寫死表格**避免 sub-agent 引過期數字當分配依據。
 
-合計 100%。
+實際分配 SSOT：`settings/risk_control_rules/risk_config_<env>.toml` `[per_strategy]` 段；策略激活狀態查 CLAUDE.md §三 + TODO.md。
 
-**修改流程**（對齊 DOC-01 §4.3 + §5.11）：
+**修改流程**（對齊 DOC-01 §4.3 + §5.11，原文為準）：
 - **P2 範圍內**（不觸 P0/P1 硬上限）→ Agent 自主調整（DOC-01 §5.11）
-- **觸 P0/P1 hard limit** → Operator 批准（DOC-01 §4.3 已定 5 項批准範圍）
-- 跨 strategy 分配建議經 QC + PM 審查（quant + project 視角），但**不是治理規定的硬流程**
+- **觸 P0/P1 hard limit** → Operator 批准（DOC-01 §4.3 已定的批准範圍）
+- 跨 strategy 分配建議經 QC + PM 審查（quant + project 視角），**非治理規定的硬流程**
 
-實際 RiskConfig `[per_strategy]` 段是治理的真實分配位置；本表為 reference，每次調整以 RiskConfig TOML 為準。
+**通用配置 framework**（不會 drift）：每策略 budget 以 conviction × edge half-life × downside skew 加權；buffer ≥ 20% 緊急 / new strategy slot；high-correlation cluster (ρ > 0.7) 視為 single factor 集中限制。
 
 ## 3. 相關性與因子分析
 
@@ -266,16 +259,13 @@ OpenClaw 教訓：edge_estimator JSON 結構 + engine_mode 隔離（live vs live
 9. **Performance attribution**（24h / 7d / 30d 拆解）
 10. **Realized vs expected edge gap**（cell-level 警報）
 
-## OpenClaw 特定核心
+## OpenClaw context — 不在本 skill 重述
 
-- **edge_estimator JSON**：strategy::symbol top-level（不是 cells{}）
-- **engine_mode IN ('live', 'live_demo')**：filter 必含兩者
-- **5 策略 negative gross edge**：當前所有活躍策略 gross 為負（CLAUDE.md §三 Phase 5 reframed），portfolio 暫無 alpha 可分配，主要工作 = 等 demo 21d 重評
-- **3% risk / trade · 25 symbols**：operator 既定（memory `feedback_position_sizing`），但 RiskConfig TOML `per_trade_risk_pct` 為 SSOT，衝突信 config
-- **funding_arb 0% budget**：G-2 結案 negative（memory `project_g2_funding_arb_monitor`）
-- **PostOnly fee 改善**：EDGE-P2-3 demo=true，Live 待 G1-05 fix
-- **CognitiveModulator confidence_floor**：drawdown 動態降倉的 OpenClaw 內建機制
-- **Live 階段監控基建**：edge_estimator_scheduler daemon + cron 6h `passive_wait_healthcheck`（17 check）
+OpenClaw 特定 snapshot（5 策略 gross edge 狀態 / Phase 5 reframed 細節 / funding_arb 結案 / EDGE-P2-3 部署 / G1-05 todo / healthcheck check 數）會 drift。本 skill 不重述以避免 sub-agent 引過期事實。
+
+實際 context 必從 SSOT 拿（衝突信前者）：runtime TOML > Rust schema > CLAUDE.md §三/§四 > TODO.md > `git log` > 治理 .md > memory（operator 明示未必可信）。
+
+**穩定不變的 schema rule**：edge_estimator JSON = `strategy::symbol` top-level key；`engine_mode IN ('live','live_demo')` filter 必含兩者；CognitiveModulator confidence_floor 是 OpenClaw 內建 drawdown 動態降倉機制（架構級不變）。
 
 ## Cross-Skill 互引（避免重述）
 

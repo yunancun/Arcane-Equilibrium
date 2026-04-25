@@ -166,20 +166,21 @@ OpenClaw operator KYC tier 影響：
 
 > ⚠️ **字典手冊也會漂移**：`docs/references/2026-04-04--bybit_api_reference.md` 為 OpenClaw 維護的內部 reference，但 Bybit 官方 changelog 變動後若未即時 sync 入手冊 → 手冊也是 snapshot。**最終以 Bybit 官方 changelog（`https://bybit-exchange.github.io/docs/changelog/v5`）+ 官方 API doc 為準**；手冊只是 mirror，不取代官方來源。
 
-## 7. OpenClaw 特定政策 review 清單
+## 7. Policy review 清單（空白模板，sub-agent 必查 SSOT 自行填）
 
-| Item | 檢查 | OpenClaw 當前狀態 |
+OpenClaw 當前的 policy compliance 狀態（KYC 地區 / API permission / IP whitelist / UTA endpoint / rate limit 用量 / broker rebate eligibility / listing/delisting）會隨 operator 配置 + Bybit 公告變動。**本 skill 不寫死狀態**。
+
+實際填表 SSOT：API key 配置查 Bybit account → API management；IP whitelist 查 production server IP；rate limit 30d 用量查 grep limit-hit log；listing/delisting 查 Bybit changelog last 30d。
+
+| Item | 檢查命令 / SSOT | 狀態 |
 |---|---|---|
-| 地理禁區 | operator KYC 地區 | （operator 確認）|
-| 禁止行為 | wash / spoofing | grid 過密下單需 audit |
-| API permission | withdraw 啟用？ | ❌ 必確認禁用 |
-| IP whitelist | production key 設置 | ✅ trade-core IP |
-| UTA 升級 | endpoint 變動同步 | ✅ BB-A1~A7 已修 |
-| Rate limit | 80% 警報 | demo 狀況需查 |
-| Broker rebate | volume threshold | 未達 |
-| Funding rate compliance | settle 規則同步 | ✅ 字典已記 |
-| Listing 公告 | 新 perp 加入 | weekly check |
-| Delisting | OpenClaw 25 symbol 中無 delist | 監控中 |
+| 地理禁區 | operator 確認 KYC 地區 + Bybit ToS 對照 | (sub-agent 填) |
+| API permission | Bybit API management UI | (確認 withdraw=false) |
+| IP whitelist | production server IP vs API key | (sub-agent 填) |
+| UTA endpoint sync | `docs/references/2026-04-04--bybit_api_reference.md` + Bybit changelog | (sub-agent 填) |
+| Rate limit | 30d log peak vs limit | (sub-agent 填) |
+| Broker rebate | 30d volume vs $10M threshold | (sub-agent 填) |
+| Listing/delisting | Bybit changelog last 30d | (sub-agent 填) |
 
 ## 8. 工作流（10 步政策 audit）
 
@@ -194,15 +195,13 @@ OpenClaw operator KYC tier 影響：
 9. **Broker rebate eligibility**（30d volume vs $10M）
 10. **產出 BB AUDIT report**
 
-## OpenClaw 特定核心
+## OpenClaw context — 不在本 skill 重述
 
-- **Bybit 為唯一交易所**（CLAUDE.md §一）：跨所策略 out of scope
-- **demo / paper / live_demo / live 4 環境**：每個環境合規規則微異（demo no-KYC、live KYC required）
-- **authorization.json HMAC**（CLAUDE.md §四）：Live gate 5；BB 不直接管簽名邏輯但須驗 ToS 對應
-- **OPENCLAW_ALLOW_MAINNET=1** 是 OpenClaw 內部 gate，不替代 Bybit KYC
-- **withdraw permission 永遠 false**：OpenClaw 只交易不出金（CLAUDE.md §四 隱含）
-- **EDGE-P2-3 PostOnly**：maker fee rebate 路徑啟用，不違 ToS（PostOnly 是合規行為）
-- **funding_arb（G-2 結案 negative）**：方向設計合 ToS，但 economic dead
+OpenClaw 特定 snapshot（EDGE-P2-3 部署 / funding_arb G-2 結案 / TODO id 引用）會 drift。本 skill 不重述。
+
+實際 context 必從 SSOT 拿：runtime TOML > Rust schema > CLAUDE.md §三/§四 > TODO.md > `git log` > 治理 .md > memory（最後）。
+
+**穩定不變的平台 + governance rule**（不會 drift）：Bybit 為唯一交易所（CLAUDE.md §一；跨所策略 out of scope）；demo/paper/live_demo/live 4 環境合規規則微異（demo no-KYC、live KYC required）；authorization.json HMAC 是 Live gate 5（CLAUDE.md §四）；`OPENCLAW_ALLOW_MAINNET=1` 是內部 gate 不替代 KYC；withdraw permission 永遠 false（架構級）；PostOnly 是合規行為（不違 ToS）。
 
 ## 反模式（見即升級）
 
