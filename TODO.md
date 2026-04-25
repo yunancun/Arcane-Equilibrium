@@ -1,13 +1,13 @@
 # OpenClaw TODO — 工作清單（v3 · 單一時間軸版）
 
-**最後更新**：2026-04-25 02:48 CEST（Wave 2 batch 9：G3-04 e2e + G7-08 SQL 完成；pytest **3021/0**；Linux **2046/0**；V025 partial index applied 1500ms→3.1ms；engine alive）
+**最後更新**：2026-04-25 03:05 CEST（Wave 2 batch 10：G3-02 Phase C 完整 5-gate operator API + G7-03 Hurst+Hysteresis Phase A；Linux **2085/0**；pytest **3038**；G3-02 全 phase 完成 → operator 隨時可 flip demo shadow_mode）
 **版本**：v3（Wave 線性版；廢除雙軌 P0-P4 章節，P0/P1/P2 降為每項 tag）
 **舊版歸檔**：v2 `docs/archive/2026-04-24--todo_v2_dual_axis_snapshot.md`（458 行，Wave+P 雙軌）· v1 `docs/archive/2026-04-24--todo_v1_refactor_snapshot.md`（328 行）· v0 `docs/archive/2026-04-24--todo_snapshot_pre_refactor.md`（700 行）
 **簽核**：PM Approved FIX-PLAN v2 → [Sign-off](docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-24--FixPlan_v2_PMApproval.md)
 **基礎方案**：[FIX-PLAN v2](docs/CCAgentWorkSpace/PA/workspace/reports/2026-04-24--4.24TodoAudit_FixPlan_v2.md) · [10-Agent audit 索引](docs/audits/2026-04-24--todo_refactor_audit.md)
 
 **Engine**（採集 2026-04-25 01:30 CEST · 雙 P0 RCA fix 部署後 · ssh verify）：engine 復活 ✅ · `engine_alive: true` · snapshot_age **17.2s**（< 45s 閾值）· paper alive 18.3s / demo alive 17.2s · binary 2026-04-25 01:29 CEST 含 G7-09 + G6-FUP fixes · HEAD `b980986` · `pipeline ready — 5 strategies (ma_crossover, bb_reversion, bb_breakout, grid_trading + 1) on 5 symbols (BTCUSDT/ETHUSDT/SOLUSDT/XRPUSDT/DOGEUSDT) balance 951.94` · `fan-out: all pipelines ready, starting tick distribution` · `STRATEGIST-PARAMS-PERSIST-1 restored N=1 tuned params from DB` ✅（背景任務無阻主線） · G7-09 fill fee path 自此 tick 起活著，post-fix maker 2bps 列開始累積
-**測試基準（2026-04-25）**：engine lib **2046 / 0 fail**（前述 + G7-06 7）· pytest **3021**（前 3013 + G3-04 e2e 8 new shadow→live tests）· DB migrations 25 applied（V025 partial idx）
+**測試基準（2026-04-25）**：engine lib **2085 / 0 fail**（前述 2046 + G7-03 33 + 隔壁 session G7-09b ~6）· pytest **3038**（前 3021 + G3-02 Phase C 17）· DB migrations 25 applied（V025 partial idx）
 **21d demo 時鐘**：起算 2026-04-16 22:16 → 解鎖 2026-05-07
 
 ---
@@ -16,7 +16,7 @@
 
 **Wave 1 進度**：10/11 完成；剩 G1-04 P1 背景（依賴 PostOnly demo 累積 + **G7-09 已 deploy** 需 ~1w 後 compute）。
 
-**Wave 2 進度**：16/若干 完成（前述 14 + G3-04 e2e ✅ + G7-08 SQL ✅）；G7-05 blocked on data（~05-01+）；G3-05~10 / G4-01~03 / G7-03 未開工。**G3-02 Phase C (operator IPC flip + auth) 已解鎖**（G3-04 e2e 證明 chain 端到端通暢，無 production gap）。
+**Wave 2 進度**：18/若干 完成（前述 16 + G3-02 Phase C ✅ + G7-03 ✅）；G7-05 blocked on data（~05-01+）；G3-05~10 / G4-01~03 未開工。**G3-02 全 Phase 完成**（A schema + B Python cache + C operator API 5-gate auth + e2e 證明 chain 通）→ operator `POST /api/v1/executor/shadow-toggle {engine:demo, shadow_mode:false}` 可翻 demo 進入真實下單模式（10s cache poll 後生效）。
 
 **本週 Top 4**（按順序）：
 
