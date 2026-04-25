@@ -120,10 +120,12 @@ allowed-tools: Read, Grep, Glob, WebSearch
 | **GTC limit** | Maker（成）/ Taker（cross spread）| 不主動 cross 即 maker |
 | **Reduce-only** | 同上 | 平倉用，避免反向開倉 |
 
-**Bybit fee tier**（spot/derivatives 各別）：
+**Bybit fee tier**（spot/derivatives 各別；**reference snapshot，verify 以 Bybit 官方 fee schedule 為準**）：
 - Tier 0：0.10% taker / 0.10% maker
 - Tier 1+：volume tier 越高 maker rebate 越多
 - VIP rebate 最高可達 −0.0050%（rebate）
+
+> 真實當前 fee：登入 Bybit account → API 查 `/v5/account/fee-rate` 或字典手冊 `docs/references/2026-04-04--bybit_api_reference.md`
 
 **OpenClaw EDGE-P2-3 PostOnly 部署細節**：
 - Demo / paper=true（已 2026-04-21 部署）

@@ -23,7 +23,7 @@ allowed-tools: Read, Grep, Glob, WebSearch
 
 ## ★ Alpha 8 來源 framework
 
-任何策略提案必須先指出 alpha 來源屬於哪一類。**無法歸類 = 沒有 edge，直接 Reject**：
+任何策略提案必須先指出 alpha 來源屬於哪一類。**無法歸類 = 高度疑似沒 edge，建議 Reject**（**8 來源 framework 為本 skill 整理，非治理硬規範；極端原創策略可由 QC 提議擴充分類，operator 批准後新增**）：
 
 | # | 來源類別 | crypto 例子 | 風險 |
 |---|---|---|---|
