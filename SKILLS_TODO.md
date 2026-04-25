@@ -3,15 +3,16 @@
 > Skill 安全審計結果（2026-04-25）+ 修復路徑。Audit 角色：對抗性 audit（**不是辯護者**）。
 > 24 個 OpenClaw custom skill 全部審完 × 26 項 checklist。
 >
-> **STATUS（2026-04-25 FINAL CLOSE-OUT — operator 指示「全部做掉做到完美」）**：
+> **STATUS（2026-04-25 FINAL CLOSE-OUT v2 — operator 第二輪 push back：「寧願沒有也不誤導」）**：
 > - **5 P0 done** ✅
 > - **~27 P1 done** ✅（含 systemic S1/S2/S3/S6 全部 + 個別 24 條 + cross-skill C1.a/C1.b 全部解）
-> - **22 P2 done** ✅（個別 13 + S4 寫死快照全部加 caveat + S5 cross-skill 全部互引 C1.c~C1.j）
+> - **22 P2 done** ✅（個別 13 + S4 寫死快照全部加 caveat / 後續刪 + S5 cross-skill 全部互引 C1.c~C1.j）
 > - **17 P3 done** ✅（風格 / 完整度 / 邊界澄清全部加 disclaimer 或驗證為 PASS-by-original）
 > - **9 cross-skill 互引段補齊** ✅（C1.a~C1.j 全部）
 > - **5 盲點處置完** ✅
+> - **🆕 C turn 2 OpenClaw snapshot trim pass** ✅（operator push back 後刪減）：12 個 skill 的「OpenClaw 特定核心」段、ml-pipeline 兩張 snapshot 表、portfolio §2.3 risk budget 表、performance-profiling §OpenClaw 特定熱點、bybit-policy §7 政策清單具體狀態、token-cost §特定關注、data-drift §6.2 model-specific drift signals、crypto-micro §1.3 funding_arb 過往實驗 + §2.4 RiskConfig 具體數值 + §5.1 PostOnly 部署快照 — 全部刪掉或抽象化為 SSOT pointer，避免 sub-agent 看見表格 / 數字 / commit hash 直接引用而誤導
 >
-> **76/76 finding 全部修復或標 PASS** — Audit 全結案。後續治理變動時對照 SOP（如 spec-compliance §「.docx → .md 同步 SOP」、doc-cross-reference §「DOC 廢棄→新版 SOP」）即可維持。
+> **76/76 finding 全部修復或標 PASS** — Audit 全結案。skill 現在純 framework / methodology / 穩定 governance rule，OpenClaw 特定 context 必由 sub-agent 從 SSOT（runtime TOML > Rust schema > CLAUDE.md > git log > memory）拿真值。後續治理變動時對照 SOP（如 spec-compliance §「.docx → .md 同步 SOP」、doc-cross-reference §「DOC 廢棄→新版 SOP」）即可維持。
 
 ## Executive Summary
 
@@ -545,7 +546,39 @@
 - `9e2559b` B turn 1 (S1/S3/S6 + 6 個別)
 - `3d7c9e3` B turn 2 (7 條 P1 disclaimer)
 - `bb366ac` B turn 3 (1 P1 + 5 P2 高 ROI)
-- `[本次]` C turn 1 FINAL (39 backlog 全清 + cross-skill 9 對)
+- `30b2250` C turn 1 (39 backlog 全清 + cross-skill 9 對)
+- `[本次]` **C turn 2 — OpenClaw snapshot trim pass**（operator push back v2「寧願沒有也不誤導」）：12 skill OpenClaw 特定段刪減 + 4 張 snapshot 表 + 多個 inline snapshot 點抽象化
+
+### C turn 2 變更明細（trim pass）
+
+| Skill | Trim 內容 |
+|---|---|
+| quant-strategy-design | OpenClaw 特定核心 6 bullets → SSOT pointer + 2 條穩定 schema rule |
+| walk-forward | OpenClaw 特定核心 7 bullets → SSOT pointer + 4 條穩定 ML/驗證 rule |
+| crypto-microstructure-knowledge | §7 OpenClaw 特定核心 6 bullets → SSOT pointer + 3 條穩定平台 rule；§1.3 funding_arb G-2 過去實驗結果改通用排查清單；§2.4 RiskConfig 具體值（15%/25%/60%/0.1%/9.9×/50×）改 schema field 引用；§5.1 PostOnly 部署快照改通用評估通則 |
+| portfolio-construction-protocol | §2.3 5 策略 risk budget 表整段刪 → 改 SSOT pointer + framework；OpenClaw 特定核心 8 bullets → SSOT pointer + 3 條穩定 rule |
+| ml-pipeline-maturity-audit | §「4 維度評級表」snapshot 4-row 改空白模板；§「OpenClaw 已知 ML pipeline 狀態」7-row 表整段刪 → SOP pointer；§OpenClaw 特定核心 6 bullets → SSOT pointer + 3 條穩定 rule；step 0 改 SSOT 取真值 |
+| db-schema | §7 OpenClaw row 量級 6-row 表整段刪 → framework；OpenClaw 特定核心 7 bullets → SSOT pointer + 4 條穩定 rule |
+| math-model | OpenClaw 特定核心 5 bullets → SSOT pointer + 3 條穩定數學原則 |
+| e2e | OpenClaw 特定核心 9 bullets → SSOT pointer + 5 條穩定 governance（強制工作鏈 / engine_mode 4 值 / Mac engine_alive=false / commit-push / source-of-truth 實測） |
+| feature-engineering | OpenClaw 特定核心 7 bullets → SSOT pointer + 4 條穩定 ML feature rule（shift(1) / live+live_demo / closed bar / ts < target） |
+| time-series-cv | OpenClaw 特定核心 6 bullets → SSOT pointer + 4 條穩定 CV rule（禁 KFold 等） |
+| data-drift | §6.2 OpenClaw model-specific drift 3 bullets → 通用模式；OpenClaw 特定核心 5 bullets → SSOT pointer + 3 條穩定 drift rule |
+| bybit-policy | §7 OpenClaw 政策 review 清單（10 row 含當前狀態）→ 空白模板（命令拿）；OpenClaw 特定核心 7 bullets → SSOT pointer + 6 條穩定平台/governance rule |
+| token-cost | §OpenClaw 特定關注 4 bullets → SSOT pointer + 1 條穩定 cost 衛生 rule |
+| performance-profiling | §OpenClaw 特定熱點（Rust 4 + Python 3 + PG 4）整段刪 → profiler 取真值通則 |
+| **regression-testing-protocol** | **不動**（OpenClaw 特定核心 9/9 全是穩定 governance / spec rule） |
+| **pr-adversarial-review** | **不動**（OpenClaw 特定核心 8/8 全是穩定 governance rule） |
+| **其餘 skill**（owasp / secret-leak / 16-root / spec / doc-cross-ref / bilingual / gui / ux） | **不動**（已 disclaimer + 內容多為穩定通則 / 模板） |
+
+**設計原則** — skill 現在純 framework + methodology + 穩定 governance rule；任何 OpenClaw 特定情境（5 策略名單 / Phase / commit / TOML 值 / row 量 / engine PID / memory 細節）一律從 SSOT 拿，不重述：
+1. **runtime TOML**（風控數值）
+2. **Rust schema** (`rust/openclaw_engine/src/config/risk_config.rs`)
+3. **CLAUDE.md §三/§四/§七/§十**
+4. **TODO.md**（活躍工作）
+5. **`git log`**（commit / 歷史）
+6. **治理 .md**（`srv/docs/decisions/` + `governance_dev/`）
+7. **memory**（最後且 operator 明示未必可信）
 
 ---
 

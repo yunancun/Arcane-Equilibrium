@@ -129,10 +129,11 @@ def psi(reference, current, bins=10):
 | Open Interest change | 每 5 min | > 20% in 1h → cascade event |
 | Cross-symbol correlation | 每 hour | > 0.9 spike → risk-off sync |
 
-### 6.2 OpenClaw model-specific drift
-- `bb_breakout` features：squeeze_bw / expansion_bw 分布變動 → regime shift
-- `exit_features.giveback_atr_norm`：分布變動 → ATR scale 是否再 broken
-- `edge_estimator` cells：grand_mean shift > 30 bps → 全策略需重評
+### 6.2 Model-specific drift（不在本 skill 列具體 OpenClaw feature）
+
+各 model / strategy 特定的 drift signal（feature 名稱 / 閾值 / regime shift trigger）會隨策略增刪 + feature engineering 演進變動。**本 skill 不寫死**避免 sub-agent 引過期 feature 名。
+
+**通用模式**（不會 drift）：對每個 production model 列出 top-3 high-importance features → 逐個算 PSI + KS p-value → 異常即 alert。具體 feature 列表必由 audit 開始時 grep `learning.X_features` schema + `feature_importance` query 取真值。
 
 ## 7. 工作流（10 步）
 
@@ -147,13 +148,13 @@ def psi(reference, current, bins=10):
 9. **Decision tree 觸發動作**
 10. **報告 + memory update**
 
-## OpenClaw 特定核心
+## OpenClaw context — 不在本 skill 重述
 
-- **engine_mode IN ('live', 'live_demo')**：reference 和 current 都必須這個 filter
-- **passive_wait_healthcheck.py**：drift check 應加為 check_data_drift_X()，cron 6h 跑
-- **edge_estimator schedule**：grand_mean 是 implicit drift indicator
-- **CognitiveModulator.confidence_floor**：drift 觸發後可動態抬高 floor 降倉
-- **Phase 5 reframed 策略 edge 為負**：當前 model 都還在 Skeleton/Foundation，drift 監控基建先建好但不急用
+OpenClaw 特定 snapshot（當前 Phase / 當前 model 階段 / TODO id）會 drift。本 skill 不重述。
+
+實際 context 必從 SSOT 拿：runtime TOML > Rust schema > CLAUDE.md §三 > TODO.md > `git log` > memory（最後）。
+
+**穩定不變的 drift rule**（不會 drift）：reference + current 兩個 window 都必 `engine_mode IN ('live','live_demo')` filter；drift check 必加 `passive_wait_healthcheck.py:check_data_drift_X()`（cron 6h）；CognitiveModulator confidence_floor 是動態降倉機制（架構級不變）。
 
 ## 反模式（見即 Reject）
 

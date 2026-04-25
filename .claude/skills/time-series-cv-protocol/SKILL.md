@@ -193,14 +193,13 @@ pkf = PurgedKFold(n_splits=5, samples_info_sets=label_end_ts, pct_embargo=0.01)
 9. **IS vs OOS gap**（用同期 train sample 算 IS）
 10. **CSCV / PBO**（K ≥ 10 model variants 時做）
 
-## OpenClaw 特定核心
+## OpenClaw context — 不在本 skill 重述
 
-- **engine_mode IN ('live', 'live_demo')**：training 過濾必含兩者
-- **exit_features atr_pct fix**（P0-13）：用 `kline_manager.get_ohlcv("1m",20) + indicators::atr(14)`
-- **P1-7 C labels 累積中**：訓練 pipeline ready 但資料量隨時間變動（命令拿，不寫死）
-- **`outcome_*` NULL → 1m timeframe fix**（commit `5e2981d`）：歷史回填行數命令查（`SELECT count(*) FROM learning.exit_features WHERE outcome_pnl IS NOT NULL`），不寫死
-- **TimescaleDB hypertable**：support fast time-range query for CV split
-- **embargo recommended 1d 起跳**（**非治理硬規範**）：1m × 1440 bars/day；具體 embargo size 依 label horizon + autocorrelation 動態調整
+OpenClaw 特定 snapshot（commit hash / 當前 P0-13 ATR fix / 當前 label count / TODO id 引用）會 drift。本 skill 不重述。
+
+實際 context 必從 SSOT 拿：runtime TOML > CLAUDE.md §三 > `audit_migrations.py` > `git log` > memory（最後）。Label count / row 量必跑 SQL（`SELECT count(*) FROM learning.exit_features WHERE engine_mode IN ('live','live_demo')`）。
+
+**穩定不變的 CV rule**（不會 drift）：時序資料禁用 `KFold`（會 shuffle）；training filter 必含 'live' + 'live_demo'（不混 paper）；TimescaleDB hypertable 支援快速 time-range query for split；embargo size 由 label horizon + autocorrelation 動態決定（不寫死數字）。
 
 ## Cross-Skill 互引（避免重述）
 

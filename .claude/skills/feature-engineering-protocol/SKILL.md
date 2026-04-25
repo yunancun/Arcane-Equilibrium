@@ -157,15 +157,13 @@ WHERE c.symbol IS NULL;
 6. **Cross-validation 驗 leakage 影響** — TimeSeriesSplit + purge + embargo（用 `time-series-cv-protocol` skill）
 7. **IS vs OOS Sharpe 差距** — > 50% 必 RCA leak
 
-## OpenClaw 特定核心
+## OpenClaw context — 不在本 skill 重述
 
-- **bb_breakout F3 RETRACT 教訓**：Donchian rolling.max() 含 current bar = leak（memory `feedback_indicator_lookahead_bias`）
-- **exit_features.atr_pct fix**（P0-13）：原 per-tick `compute_atr_pct` deprecated，改用 `kline_manager.get_ohlcv("1m",20) + indicators::atr(14)` 持倉期 Wilder's ATR
-- **engine_mode 過濾**：training 必含 'live' + 'live_demo'，paper 噪音不混
-- **outcome_backfiller fix**（commit `5e2981d`）：timeframe '1' → '1m'，補回 outcome_*（具體 row 數動態查 `psql -c "SELECT count(*) FROM learning.exit_features WHERE outcome_pnl IS NOT NULL"`，不寫死）
-- **table 名版本標記**：本 skill 引用 `learning.exit_features` / `learning.bb_features` 為 2026-04-25 schema snapshot；schema 變動以 `audit_migrations.py` + `sql/migrations/` 最新 V### 為準
-- **P1-7 C labels 累積中**：當前 ML training set 樣本不足（具體進度 `SELECT count(*) FROM learning.exit_features WHERE engine_mode IN ('live','live_demo')`，不寫死數字），feature engineering 即使做完也要等 labels 累積到 §3 表閾值
-- **maker_fill_rate 是合法 ML feature**：EDGE-P2-3 PostOnly 部署後 fee model 變化，maker fill 是動態 feature
+OpenClaw 特定 snapshot（commit hash / specific bug 教訓如 bb_breakout F3 / 當前 P0-13 ATR fix 細節 / EDGE-P2-3 部署 / 當前 label count）會 drift。本 skill 不重述。
+
+實際 context 必從 SSOT 拿：runtime TOML > Rust schema > CLAUDE.md §三 > `audit_migrations.py` 實測 > `git log` > 治理 .md > memory（最後）。table 名 / column / row 量必跑 SQL 取真值（`SELECT count(*) FROM learning.X WHERE engine_mode IN ('live','live_demo')`）。
+
+**穩定不變的 ML feature rule**（不會 drift）：training filter 必含 'live' + 'live_demo'（不混 paper）；任何 rolling stat 必加 `.shift(1)` leak-free（rolling.max() 含 current bar 是已知 measurement bias）；resample 後只用 closed bar（`isClosed=true`）；feature ts 必早於 target window start（不重疊）。
 
 ## Cross-Skill 互引（避免重述）
 

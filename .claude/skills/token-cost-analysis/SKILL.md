@@ -101,12 +101,13 @@ CLAUDE.md §五 H1-H5 治理層含 budget。AI-E 必驗：
 - [ ] 超 80% 警告 + 超 100% fail-closed
 - [ ] cap 修改有 audit log
 
-## OpenClaw 特定關注
+## OpenClaw context — 不在本 skill 重述
 
-- **Layer 2 自主推理循環（gap，TODO §G-1）**：上線前必先 cost projection
-- **Mac dev 用 LM Studio + Qwen3.6-35B**：本地審核成本 = 0，但要監 GPU/CPU 占用 vs 寫碼任務的 trade-off
-- **memory 增長**：context cache 留 5min，session 多時 cumulative input tokens 暴增 → cache_read_tokens 比例應 ≥ 50%
-- **Operator 月度賬單**：總成本 ÷ 月內 commit 數 = AI 對開發效率的單位成本
+OpenClaw 特定 snapshot（Layer 2 推理當前狀態 / 當前 LM Studio 模型版本 / TODO id 引用 / 月度賬單實值）會 drift。本 skill 不重述。
+
+實際 context 必從 SSOT 拿：runtime TOML / env > Anthropic console 月度賬單 > CLAUDE.md §三 > TODO.md > memory（最後）。
+
+**穩定不變的 cost 衛生 rule**：context cache TTL 5min（Anthropic 官方）→ session 內 `cache_read_tokens / total_input_tokens` 比例應 ≥ 50% 為健康；總成本 ÷ 月內 commit 數 = AI 對開發效率的單位成本（trend 分析）。
 
 ## 工作流（5 步）
 

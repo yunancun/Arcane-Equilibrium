@@ -137,14 +137,13 @@ OpenClaw 已用 1m kline，補方法：
 
 任一步 fail = pause 直到修。
 
-## OpenClaw 特定核心
+## OpenClaw context — 不在本 skill 重述
 
-- **Phase 5 reframed**：當前所有活躍策略 gross edge 為負（PNL-FIX-1/2 後揭露）。新策略上線標準：demo 21d gross > 0 + cost_edge_ratio < 0.5
-- **edge_estimator JSON 結構**：`strategy::symbol` top-level key，不是 `cells{}` nested（memory `project_edge_scheduler_stalled.md`）
-- **engine_mode IN ('live','live_demo')**：filter 必含兩者，歷史 43k live 條多為 LiveDemo（memory `project_engine_mode_tag_live_demo.md`）
-- **bb_breakout F3 RETRACT 教訓**：Donchian 含 current bar 是 measurement bias，必並列 `shift(1)`
-- **5 策略 fee drag**：grid 過交易、ma_crossover R:R 不對稱（CLAUDE.md §三 P1-10）— 新策略前先確認 fee model 不犯同樣錯
-- **PostOnly maker rebate**：EDGE-P2-3 部署後 fee ↓5.5 bps，新策略可考慮 PostOnly entry（但要驗 fill rate）
+OpenClaw 特定 snapshot（5 策略名單 / 當前 Phase / commit hash / TOML 值 / row 量 / engine PID / specific bug 教訓）隨開發演進變動，sub-agent 採納過期事實當決策依據 = 誤導。本 skill 不重述。
+
+實際 context 必從 SSOT 拿（衝突信前者）：runtime TOML > Rust schema > CLAUDE.md §三/§四 > TODO.md > `git log` > 治理 .md > memory（最後且 operator 明示未必可信）。
+
+**穩定不變的 schema rule**（不會 drift）：`engine_mode IN ('live','live_demo')` filter 必含兩者；edge_estimator JSON 結構 = `strategy::symbol` top-level key（不是 `cells{}` nested）。其餘 OpenClaw 特定情境必跑命令查 SSOT。
 
 ## 反模式（見即 Reject）
 
