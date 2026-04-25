@@ -43,7 +43,7 @@ pub(in crate::ipc_server) use governance::{
 };
 pub(in crate::ipc_server) use misc::{
     handle_get_active_symbols, handle_get_phase4_status, handle_get_scanner_status,
-    handle_get_state,
+    handle_get_state, handle_get_strategist_cycle_metrics,
 };
 pub(in crate::ipc_server) use risk::{
     handle_clear_consecutive_losses, handle_reset_drawdown_baseline, handle_risk_runtime_status,

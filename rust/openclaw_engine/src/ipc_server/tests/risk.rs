@@ -58,6 +58,7 @@ async fn test_rc1_get_risk_runtime_status_via_ipc() {
         &None,
         &None,
         &None,
+        &None,
     )
     .await;
     assert!(resp.error.is_none(), "error: {:?}", resp.error);
@@ -83,6 +84,7 @@ async fn test_rc1_clear_consecutive_losses_via_ipc() {
         },
         &empty_budget_slot(),
         &empty_teacher_slot(),
+        &None,
         &None,
         &None,
         &None,
@@ -165,6 +167,7 @@ async fn test_rc1b2_force_governor_tighter_via_ipc() {
         &None,
         &None,
         &None,
+        &None,
     )
     .await;
     assert!(resp.error.is_none(), "error: {:?}", resp.error);
@@ -194,6 +197,7 @@ async fn test_rc1b2_force_governor_tighter_missing_reason() {
         &None,
         &None,
         &None,
+        &None,
     )
     .await;
     assert!(resp.error.is_some());
@@ -215,6 +219,7 @@ async fn test_rc1b2_force_governor_looser_cooldown_rejection() {
         },
         &empty_budget_slot(),
         &empty_teacher_slot(),
+        &None,
         &None,
         &None,
         &None,
@@ -254,6 +259,7 @@ async fn test_rc1b2_force_governor_looser_success() {
         &None,
         &None,
         &None,
+        &None,
     )
     .await;
     assert!(resp.error.is_none(), "error: {:?}", resp.error);
@@ -274,6 +280,7 @@ async fn test_rc1_get_risk_runtime_status_no_channel() {
         &EngineCommandChannels::default(),
         &empty_budget_slot(),
         &empty_teacher_slot(),
+        &None,
         &None,
         &None,
         &None,

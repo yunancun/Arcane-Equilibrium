@@ -36,12 +36,118 @@ use crate::strategies::ParamRange;
 use crate::tick_pipeline::{PipelineCommand, PipelineKind};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
+
+/// G3-11 STRATEGIST-CYCLE-OBSERVABILITY-1 (2026-04-25, MVP slice).
+/// Thread-safe cycle counters: per-reason reject tally + apply count + last-ts.
+/// Exposed via IPC (`get_strategist_cycle_metrics`) so the GUI can replace the
+/// engine.log tail-parse fallback with a structured pull. Persistent DB sink
+/// (`learning.strategist_cycle_events`) is **deliberately deferred** — see
+/// TODO §G3-11 downgrade rationale: PERSIST-AUDIT-GAP-COUNTER-1 already gives
+/// `strategist_applied_params` rows for cross-validation, and an in-memory
+/// snapshot satisfies the 80% observability case without a new hypertable.
+///
+/// G3-11：執行緒安全的 cycle 計數器。reject 按 reason / apply 次數 / 最後時戳
+/// 都暴露給 IPC。DB sink 故意延後（理由見 TODO 降級）。
+#[derive(Debug, Default)]
+pub struct CycleCounters {
+    /// Total apply / 累計 apply 次數
+    apply_count: AtomicU64,
+    /// Total cycles attempted (regardless of outcome)
+    /// 累計 cycle 嘗試次數（無論結果）
+    cycle_count: AtomicU64,
+    /// Last time `evaluate_cycle` finished (Ok or Err) in epoch-ms.
+    /// 最後一次 evaluate_cycle 完成時的時戳（無論成敗）。
+    last_cycle_ts_ms: AtomicU64,
+    /// Last successful apply timestamp (epoch-ms). 0 if never applied.
+    /// 最後一次成功 apply 的時戳；從未 apply 為 0。
+    last_apply_ts_ms: AtomicU64,
+    /// Per-reason reject tally. Reasons are short stable strings
+    /// (`out_of_range`, `delta_exceeded`, `weight_sum`, `not_object`,
+    /// `ipc_failed`, `apply_failed`).
+    /// reject 按 reason 累計。reason 為短穩定字串。
+    reject_by_reason: Mutex<HashMap<String, u64>>,
+}
+
+impl CycleCounters {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Record a rejected recommendation by reason.
+    /// 按 reason 記錄一個被拒的建議。
+    pub fn record_reject(&self, reason: &str) {
+        let mut map = match self.reject_by_reason.lock() {
+            Ok(g) => g,
+            Err(p) => p.into_inner(), // poisoned — recover and continue
+        };
+        *map.entry(reason.to_string()).or_insert(0) += 1;
+    }
+
+    /// Record a successful apply (validated + sent through PipelineCommand).
+    /// 記錄一次成功 apply。
+    pub fn record_apply(&self, now_ms: u64) {
+        self.apply_count.fetch_add(1, Ordering::Relaxed);
+        self.last_apply_ts_ms.store(now_ms, Ordering::Relaxed);
+    }
+
+    /// Record cycle completion (Ok or Err) — updates `last_cycle_ts_ms` and
+    /// the cycle counter. Called once per `evaluate_cycle` regardless of
+    /// outcome so freshness checks (healthcheck `[16]`) work even when
+    /// the AI service is down.
+    /// 記錄 cycle 完成（無論成敗）— 健康檢查需要新鮮度即使 AI service 掛掉。
+    pub fn record_cycle_finish(&self, now_ms: u64) {
+        self.cycle_count.fetch_add(1, Ordering::Relaxed);
+        self.last_cycle_ts_ms.store(now_ms, Ordering::Relaxed);
+    }
+
+    /// Snapshot the current counter state into a serializable struct.
+    /// 把當前計數狀態快照成可序列化的 struct。
+    pub fn snapshot(&self) -> CycleCountersSnapshot {
+        let reject_map = match self.reject_by_reason.lock() {
+            Ok(g) => g.clone(),
+            Err(p) => p.into_inner().clone(),
+        };
+        CycleCountersSnapshot {
+            apply_count: self.apply_count.load(Ordering::Relaxed),
+            cycle_count: self.cycle_count.load(Ordering::Relaxed),
+            last_cycle_ts_ms: self.last_cycle_ts_ms.load(Ordering::Relaxed),
+            last_apply_ts_ms: self.last_apply_ts_ms.load(Ordering::Relaxed),
+            reject_by_reason: reject_map,
+        }
+    }
+}
+
+/// Serializable snapshot of `CycleCounters` returned by IPC
+/// `get_strategist_cycle_metrics`.
+/// CycleCounters 的可序列化快照，回給 IPC `get_strategist_cycle_metrics`。
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+pub struct CycleCountersSnapshot {
+    pub apply_count: u64,
+    pub cycle_count: u64,
+    pub last_cycle_ts_ms: u64,
+    pub last_apply_ts_ms: u64,
+    pub reject_by_reason: HashMap<String, u64>,
+}
+
+/// Reject-reason short tags. Stable strings — used as JSON keys + healthcheck
+/// matchers. Any new reason added in `validate_recommendation_with_reason`
+/// MUST also be listed here so consumers know the universe.
+/// reject reason 短標籤。穩定字串；新增 reason 也要更新此 list。
+pub const REJECT_REASONS: &[&str] = &[
+    "not_object",
+    "out_of_range",
+    "delta_exceeded",
+    "weight_sum",
+    "ipc_failed",
+    "apply_failed",
+];
 
 /// Maximum pairs to evaluate per cycle (R2 H-5: top-10, not all 96).
 /// 每輪評估的最大交易對數（R2 H-5：top-10，非全部 96）。
@@ -158,6 +264,11 @@ pub struct StrategistScheduler {
     /// Consecutive IPC failure counter for exponential backoff (R4-2).
     /// IPC 連續失敗計數器，用於指數退避。
     consecutive_failures: AtomicU32,
+    /// G3-11 STRATEGIST-CYCLE-OBSERVABILITY-1: per-reason reject + apply
+    /// counters exposed via IPC `get_strategist_cycle_metrics`. `Arc` so
+    /// IPC handlers can hold a clone independent of scheduler ownership.
+    /// G3-11：cycle 計數器；Arc 共享給 IPC handler。
+    cycle_counters: Arc<CycleCounters>,
     /// Cancellation token for graceful shutdown / 優雅關閉的取消令牌
     cancel: CancellationToken,
 }
@@ -195,8 +306,16 @@ impl StrategistScheduler {
             db_pool,
             risk_store: None,
             consecutive_failures: AtomicU32::new(0),
+            cycle_counters: Arc::new(CycleCounters::new()),
             cancel,
         }
+    }
+
+    /// G3-11: expose the shared `CycleCounters` Arc so the IPC server can
+    /// snapshot it without going through the pipeline command channel.
+    /// G3-11：曝露 CycleCounters Arc 給 IPC server；不走 pipeline cmd channel。
+    pub fn cycle_counters(&self) -> Arc<CycleCounters> {
+        Arc::clone(&self.cycle_counters)
     }
 
     /// STRATEGIST-TUNE-TARGET-CONFIG-1 (2026-04-25): Builder-style attach a
@@ -318,6 +437,16 @@ impl StrategistScheduler {
                     );
                 }
             }
+
+            // G3-11: stamp `last_cycle_ts_ms` on every iteration (Ok or Err)
+            // so healthcheck `[16] strategist_cycle_fresh` can detect a wedged
+            // scheduler even when AI service is down.
+            // G3-11：每輪（無論成敗）更新 last_cycle_ts_ms 給 healthcheck 觀察。
+            let now_ms = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis() as u64)
+                .unwrap_or(0);
+            self.cycle_counters.record_cycle_finish(now_ms);
         }
     }
 
@@ -390,6 +519,7 @@ impl StrategistScheduler {
                 None => {
                     // IPC failure — counted as cycle failure
                     // IPC 失敗 — 計為週期失敗
+                    self.cycle_counters.record_reject("ipc_failed");
                     return Err("AI service IPC failed for strategist_evaluate".into());
                 }
             };
@@ -397,9 +527,18 @@ impl StrategistScheduler {
             // 4. Validate recommendation against ranges, delta, weight sum.
             //    STRATEGIST-TUNE-TARGET-CONFIG-1: delta cap pulled from the
             //    RiskConfig store snapshot (or 0.30 fallback when no store wired).
+            //    G3-11: every reject path tags a stable reason → CycleCounters
+            //    `reject_by_reason` map → IPC `get_strategist_cycle_metrics`.
             // 4. 根據範圍、delta、權重總和驗證建議；delta cap 從 RiskConfig 取（缺 store=0.30）。
+            //    G3-11：每條拒絕路徑都打 stable reason tag 到 CycleCounters。
             let max_delta_pct = self.current_max_param_delta_pct();
-            if validate_recommendation(&response, &current_json, &ranges_json, max_delta_pct) {
+            match validate_recommendation_with_reason(
+                &response,
+                &current_json,
+                &ranges_json,
+                max_delta_pct,
+            ) {
+                Ok(()) => {
                 // 5. Apply via PipelineCommand
                 // 5. 通過 PipelineCommand 應用
                 if let Err(e) = self.apply_params(&pair.strategy_name, &response).await {
@@ -408,6 +547,7 @@ impl StrategistScheduler {
                         error = %e,
                         "param apply failed / 參數應用失敗"
                     );
+                    self.cycle_counters.record_reject("apply_failed");
                 } else {
                     info!(
                         strategy = %pair.strategy_name,
@@ -415,6 +555,11 @@ impl StrategistScheduler {
                         "strategist params applied / 策略師參數已應用"
                     );
                     applied += 1;
+                    let now_ms = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_millis() as u64)
+                        .unwrap_or(0);
+                    self.cycle_counters.record_apply(now_ms);
 
                     // STRATEGIST-PARAMS-PERSIST-1 (2026-04-23): write audit row
                     // so engine restart restores tuned params instead of reverting
@@ -439,12 +584,16 @@ impl StrategistScheduler {
                         );
                     }
                 }
-            } else {
-                debug!(
-                    strategy = %pair.strategy_name,
-                    symbol = %pair.symbol,
-                    "recommendation rejected by validation / 建議被驗證拒絕"
-                );
+                }
+                Err(reason) => {
+                    debug!(
+                        strategy = %pair.strategy_name,
+                        symbol = %pair.symbol,
+                        reason = reason,
+                        "recommendation rejected by validation / 建議被驗證拒絕"
+                    );
+                    self.cycle_counters.record_reject(reason);
+                }
             }
         }
 
@@ -642,11 +791,31 @@ pub fn validate_recommendation(
     param_ranges: &[ParamRange],
     max_delta_pct: f64,
 ) -> bool {
+    validate_recommendation_with_reason(
+        recommendation,
+        current_params,
+        param_ranges,
+        max_delta_pct,
+    )
+    .is_ok()
+}
+
+/// G3-11: validate variant returning the structured reject reason for
+/// CycleCounters tally. Reasons are stable short strings (see
+/// `REJECT_REASONS`). The boolean wrapper above keeps the legacy direct-call
+/// test signature stable.
+/// G3-11：返回結構化 reject reason 的驗證版本。reason 為穩定短字串。
+pub fn validate_recommendation_with_reason(
+    recommendation: &Value,
+    current_params: &Value,
+    param_ranges: &[ParamRange],
+    max_delta_pct: f64,
+) -> Result<(), &'static str> {
     let rec_obj = match recommendation.as_object() {
         Some(o) => o,
         None => {
             warn!("recommendation is not a JSON object / 建議不是 JSON 物件");
-            return false;
+            return Err("not_object");
         }
     };
 
@@ -682,7 +851,7 @@ pub fn validate_recommendation(
                 max = range.max,
                 "recommendation out of range / 建議超出範圍"
             );
-            return false;
+            return Err("out_of_range");
         }
 
         // Delta check (weight params exempt — R3-4)
@@ -704,7 +873,7 @@ pub fn validate_recommendation(
                         "delta exceeds configured cap (RiskConfig.strategist.max_param_delta_pct) \
                          / delta 超過配置上限"
                     );
-                    return false;
+                    return Err("delta_exceeded");
                 }
             }
         }
@@ -718,10 +887,10 @@ pub fn validate_recommendation(
             target = WEIGHT_SUM_TARGET,
             "weight sum out of tolerance / 權重總和超出容差"
         );
-        return false;
+        return Err("weight_sum");
     }
 
-    true
+    Ok(())
 }
 
 /// sqlx row type for fills aggregation query.
@@ -1412,4 +1581,190 @@ mod tests {
         );
     }
 
+    // ── G3-11 STRATEGIST-CYCLE-OBSERVABILITY-1 / CycleCounters tests ──
+    //
+    // Test matrix:
+    //   1. record_apply / record_reject / record_cycle_finish basic semantics
+    //   2. snapshot reflects the live counter values
+    //   3. concurrent record_reject across N threads tallies correctly
+    //   4. validate_recommendation_with_reason returns each stable reason
+    //   5. REJECT_REASONS list covers every error string emitted
+
+    #[test]
+    fn test_cycle_counters_record_apply_and_snapshot() {
+        let c = CycleCounters::new();
+        c.record_apply(1_700_000_000_000);
+        c.record_apply(1_700_000_001_000);
+        let snap = c.snapshot();
+        assert_eq!(snap.apply_count, 2);
+        assert_eq!(snap.last_apply_ts_ms, 1_700_000_001_000);
+        assert_eq!(snap.cycle_count, 0);
+        assert!(snap.reject_by_reason.is_empty());
+    }
+
+    #[test]
+    fn test_cycle_counters_record_reject_per_reason() {
+        let c = CycleCounters::new();
+        c.record_reject("out_of_range");
+        c.record_reject("out_of_range");
+        c.record_reject("delta_exceeded");
+        c.record_reject("ipc_failed");
+        let snap = c.snapshot();
+        assert_eq!(snap.apply_count, 0);
+        assert_eq!(snap.reject_by_reason.get("out_of_range").copied(), Some(2));
+        assert_eq!(snap.reject_by_reason.get("delta_exceeded").copied(), Some(1));
+        assert_eq!(snap.reject_by_reason.get("ipc_failed").copied(), Some(1));
+        assert_eq!(snap.reject_by_reason.get("weight_sum").copied(), None);
+    }
+
+    #[test]
+    fn test_cycle_counters_record_cycle_finish_freshness() {
+        let c = CycleCounters::new();
+        c.record_cycle_finish(1_700_000_000_000);
+        c.record_cycle_finish(1_700_000_000_500);
+        let snap = c.snapshot();
+        assert_eq!(snap.cycle_count, 2);
+        assert_eq!(snap.last_cycle_ts_ms, 1_700_000_000_500);
+        // Freshness path is independent of apply path (healthcheck [16] reads cycle ts).
+        // 即使從未 apply，cycle_finish 仍可前進 — healthcheck [16] 用此判活。
+        assert_eq!(snap.last_apply_ts_ms, 0);
+    }
+
+    #[test]
+    fn test_cycle_counters_concurrent_record_reject() {
+        // Spawn N threads × M increments → assert tally consistency.
+        // Catches the obvious mutex-lost-update + atomic ordering races.
+        // N 線程 × M 次累加 — 抓 mutex / atomic 更新遺失。
+        let c = Arc::new(CycleCounters::new());
+        let n_threads = 8;
+        let increments_per_thread = 250;
+        let mut handles = Vec::new();
+        for t in 0..n_threads {
+            let c2 = Arc::clone(&c);
+            handles.push(std::thread::spawn(move || {
+                for _ in 0..increments_per_thread {
+                    // Two reasons, alternating per thread parity, exercises
+                    // the HashMap entry-or-insert path under contention.
+                    if t % 2 == 0 {
+                        c2.record_reject("out_of_range");
+                    } else {
+                        c2.record_reject("delta_exceeded");
+                    }
+                    c2.record_apply(1_000);
+                }
+            }));
+        }
+        for h in handles {
+            h.join().unwrap();
+        }
+        let snap = c.snapshot();
+        let total = (n_threads * increments_per_thread) as u64;
+        assert_eq!(snap.apply_count, total, "apply_count must tally exactly");
+        let reject_total: u64 = snap.reject_by_reason.values().sum();
+        assert_eq!(reject_total, total, "reject sum must tally exactly");
+        // Half-half split per parity rule above.
+        assert_eq!(
+            snap.reject_by_reason.get("out_of_range").copied(),
+            Some(total / 2)
+        );
+        assert_eq!(
+            snap.reject_by_reason.get("delta_exceeded").copied(),
+            Some(total / 2)
+        );
+    }
+
+    #[test]
+    fn test_validate_recommendation_with_reason_returns_each_reason() {
+        // not_object
+        let ranges: Vec<ParamRange> = vec![];
+        assert_eq!(
+            validate_recommendation_with_reason(
+                &serde_json::json!("scalar"),
+                &serde_json::json!({}),
+                &ranges,
+                0.30,
+            ),
+            Err("not_object")
+        );
+
+        // out_of_range
+        let ranges_or = vec![ParamRange {
+            name: "cooldown_ms".into(),
+            min: 10000.0,
+            max: 120000.0,
+            step: Some(1000.0),
+            agent_adjustable: true,
+            db_persisted: true,
+        }];
+        assert_eq!(
+            validate_recommendation_with_reason(
+                &serde_json::json!({"cooldown_ms": 999_999.0}),
+                &serde_json::json!({"cooldown_ms": 50000.0}),
+                &ranges_or,
+                0.30,
+            ),
+            Err("out_of_range")
+        );
+
+        // delta_exceeded
+        assert_eq!(
+            validate_recommendation_with_reason(
+                &serde_json::json!({"cooldown_ms": 100_000.0}),
+                &serde_json::json!({"cooldown_ms": 50_000.0}),
+                &ranges_or,
+                0.30,
+            ),
+            Err("delta_exceeded")
+        );
+
+        // weight_sum
+        let ranges_w = vec![
+            ParamRange {
+                name: "weight_adx".into(),
+                min: 0.0,
+                max: 65.0,
+                step: Some(1.0),
+                agent_adjustable: true,
+                db_persisted: true,
+            },
+            ParamRange {
+                name: "weight_regime".into(),
+                min: 0.0,
+                max: 65.0,
+                step: Some(1.0),
+                agent_adjustable: true,
+                db_persisted: true,
+            },
+        ];
+        assert_eq!(
+            validate_recommendation_with_reason(
+                &serde_json::json!({"weight_adx": 10.0, "weight_regime": 10.0}),
+                &serde_json::json!({}),
+                &ranges_w,
+                0.30,
+            ),
+            Err("weight_sum")
+        );
+    }
+
+    #[test]
+    fn test_reject_reasons_list_covers_validate_branches() {
+        // Sanity guard: every reason emitted by the validator (and the runtime
+        // counters in evaluate_cycle) is enumerated in REJECT_REASONS so
+        // documentation + healthcheck matchers stay in sync.
+        // 完整性守護：list 必含所有 reason，避免新增分支忘記登記。
+        for r in &[
+            "not_object",
+            "out_of_range",
+            "delta_exceeded",
+            "weight_sum",
+            "ipc_failed",
+            "apply_failed",
+        ] {
+            assert!(
+                REJECT_REASONS.contains(r),
+                "REJECT_REASONS missing reason `{r}`"
+            );
+        }
+    }
 }

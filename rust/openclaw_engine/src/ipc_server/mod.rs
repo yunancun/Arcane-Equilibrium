@@ -86,6 +86,22 @@ pub type TeacherLoopSlot = Arc<RwLock<Option<TeacherLoopHandles>>>;
 /// None = 審計停用（啟動時 DB 不可用或 pool 尚未初始化）。
 pub type AuditPoolSlot = Arc<RwLock<Option<sqlx::PgPool>>>;
 
+/// G3-11 STRATEGIST-CYCLE-OBSERVABILITY-1 (2026-04-25): Late-injected slot
+/// for the StrategistScheduler `CycleCounters` Arc.
+///
+/// MODULE_NOTE (EN): The IpcServer's `run()` future is detached BEFORE
+///   `main_boot_tasks::spawn_strategist_scheduler` runs (scheduler depends
+///   on db_pool readiness which is sequenced after IPC server detach in
+///   main.rs). The slot is wrapped in `Arc<RwLock<Option<...>>>` so the
+///   scheduler's counters Arc can be late-written without restarting IPC.
+///   None = scheduler not yet spawned (Demo unbound) → IPC method returns
+///   `{"status":"scheduler_unavailable"}` (fail-soft).
+/// MODULE_NOTE (中)：IPC server `run()` 在 scheduler spawn 之前 detach；
+///   slot 用 `Arc<RwLock<Option<...>>>` 讓 main.rs 在 scheduler spawn 後
+///   late-inject。None = 未 spawn → IPC 回 scheduler_unavailable。
+pub type StrategistCountersSlot =
+    Arc<RwLock<Option<Arc<crate::strategist_scheduler::CycleCounters>>>>;
+
 // ---------------------------------------------------------------------------
 // LIVE-P2-1: Per-engine RiskConfig stores
 // LIVE-P2-1：每個引擎模式的 RiskConfig stores
@@ -291,6 +307,13 @@ pub struct IpcServer {
     /// Scanner IPC: SymbolRegistry for get_active_symbols / get_scanner_status.
     /// 掃描器 IPC：SymbolRegistry 供 get_active_symbols / get_scanner_status 使用。
     scanner_registry: Option<Arc<crate::scanner::registry::SymbolRegistry>>,
+    /// G3-11 STRATEGIST-CYCLE-OBSERVABILITY-1 (2026-04-25): shared
+    /// late-injected `CycleCounters` slot from `StrategistScheduler`.
+    /// IPC server detaches before scheduler spawn → must be a slot type so
+    /// `main.rs` can write the counters Arc post-detach via
+    /// `IpcServer::strategist_counters_slot()`.
+    /// G3-11：scheduler `CycleCounters` slot；IPC server detach 後由 main.rs 寫入。
+    strategist_counters: StrategistCountersSlot,
     /// PIPELINE-SLOT-1 Phase 3: fast-path wake-up to the Live auth watcher.
     /// Set in main.rs via [`IpcServer::set_live_auth_recheck_sender`] after
     /// `LiveAuthWatcher::new` returns its trigger handle. `None` when the
@@ -324,8 +347,19 @@ impl IpcServer {
             budget_store: None,
             audit_pool: Arc::new(RwLock::new(None)),
             scanner_registry: None,
+            strategist_counters: Arc::new(RwLock::new(None)),
             live_auth_recheck_tx: None,
         }
+    }
+
+    /// G3-11: get a clone of the `CycleCounters` slot for late injection
+    /// from main.rs once the StrategistScheduler is spawned. Mirrors the
+    /// `budget_tracker_slot` / `teacher_loop_slot` / `audit_pool_slot`
+    /// pattern. Caller does
+    /// `slot.write().await.replace(scheduler.cycle_counters())`.
+    /// G3-11：取得 CycleCounters slot handle 給 main.rs scheduler spawn 後注入。
+    pub fn strategist_counters_slot(&self) -> StrategistCountersSlot {
+        Arc::clone(&self.strategist_counters)
     }
 
     /// PIPELINE-SLOT-1 Phase 3: wire the Live auth watcher's trigger
@@ -464,9 +498,16 @@ impl IpcServer {
                             let budget_store = self.budget_store.clone();
                             let audit_pool = self.audit_pool.read().await.clone();
                             let scanner_reg = self.scanner_registry.clone();
+                            // G3-11: read the slot once per connection — Arc clone is cheap;
+                            // late-injected counters become visible automatically without
+                            // requiring an IPC server restart.
+                            // G3-11：每連線讀一次 slot；scheduler 後綁的 counters 自動可見，
+                            // IPC server 不需重啟。
+                            let strategist_counters =
+                                self.strategist_counters.read().await.clone();
                             let live_auth_recheck_tx = self.live_auth_recheck_tx.clone();
                             tokio::spawn(async move {
-                                handle_connection(stream, config, cancel, data_dir, cmd_channels, budget_slot, teacher_slot, risk_stores, learning_store, budget_store, audit_pool, scanner_reg, live_auth_recheck_tx).await;
+                                handle_connection(stream, config, cancel, data_dir, cmd_channels, budget_slot, teacher_slot, risk_stores, learning_store, budget_store, audit_pool, scanner_reg, strategist_counters, live_auth_recheck_tx).await;
                             });
                         }
                         Err(e) => {
@@ -522,6 +563,7 @@ async fn handle_connection(
     budget_store: Option<Arc<ConfigStore<BudgetConfig>>>,
     audit_pool: Option<sqlx::PgPool>,
     scanner_registry: Option<Arc<crate::scanner::registry::SymbolRegistry>>,
+    strategist_counters: Option<Arc<crate::strategist_scheduler::CycleCounters>>,
     live_auth_recheck_tx: Option<tokio::sync::mpsc::Sender<()>>,
 ) {
     let peer = format!("{:?}", stream.peer_addr());
@@ -624,7 +666,7 @@ async fn handle_connection(
             line_result = lines.next_line() => {
                 match line_result {
                     Ok(Some(line)) => {
-                        let response = dispatch_request(&line, &config, &data_dir, &cmd_channels, &budget_slot, &teacher_slot, &risk_stores, &learning_store, &budget_store, &audit_pool, &scanner_registry, &live_auth_recheck_tx).await;
+                        let response = dispatch_request(&line, &config, &data_dir, &cmd_channels, &budget_slot, &teacher_slot, &risk_stores, &learning_store, &budget_store, &audit_pool, &scanner_registry, &strategist_counters, &live_auth_recheck_tx).await;
                         let mut resp_bytes = serde_json::to_vec(&response)
                             .unwrap_or_else(|_| br#"{"jsonrpc":"2.0","error":{"code":-32603,"message":"serialization error"},"id":null}"#.to_vec());
                         resp_bytes.push(b'\n');
@@ -664,6 +706,7 @@ async fn dispatch_request(
     budget_store: &Option<Arc<ConfigStore<BudgetConfig>>>,
     audit_pool: &Option<sqlx::PgPool>,
     scanner_registry: &Option<Arc<crate::scanner::registry::SymbolRegistry>>,
+    strategist_counters: &Option<Arc<crate::strategist_scheduler::CycleCounters>>,
     live_auth_recheck_tx: &Option<tokio::sync::mpsc::Sender<()>>,
 ) -> JsonRpcResponse {
     let req: JsonRpcRequest = match serde_json::from_str(line) {
@@ -977,6 +1020,11 @@ async fn dispatch_request(
         // ── Scanner observability (IPC-SCAN-1) ──
         "get_active_symbols" => handle_get_active_symbols(id, scanner_registry),
         "get_scanner_status" => handle_get_scanner_status(id, scanner_registry),
+        // ── G3-11 STRATEGIST-CYCLE-OBSERVABILITY-1 (2026-04-25, MVP) ──
+        // 取代 GUI footer engine.log tail-parse 的結構化拉取面。
+        "get_strategist_cycle_metrics" => {
+            handle_get_strategist_cycle_metrics(id, strategist_counters)
+        }
         // ── PIPELINE-SLOT-1 Phase 3: Live auth watcher fast-path ──
         // PIPELINE-SLOT-1 Phase 3：Live 授權 watcher 快路徑喚醒
         "trigger_live_auth_recheck" => {

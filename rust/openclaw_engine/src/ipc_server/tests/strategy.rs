@@ -78,6 +78,7 @@ async fn test_get_param_ranges_via_ipc() {
         &None,
         &None,
         &None,
+        &None,
     )
     .await;
     assert!(resp.error.is_none(), "error: {:?}", resp.error);
@@ -103,6 +104,7 @@ async fn test_get_strategy_params_via_ipc() {
         },
         &empty_budget_slot(),
         &empty_teacher_slot(),
+        &None,
         &None,
         &None,
         &None,
@@ -143,6 +145,7 @@ async fn test_update_strategy_params_via_ipc() {
         &None,
         &None,
         &None,
+        &None,
     )
     .await;
     assert!(resp.error.is_none(), "error: {:?}", resp.error);
@@ -164,6 +167,7 @@ async fn test_update_strategy_params_nonexistent() {
         },
         &empty_budget_slot(),
         &empty_teacher_slot(),
+        &None,
         &None,
         &None,
         &None,
@@ -194,6 +198,7 @@ async fn test_update_strategy_params_missing_params() {
         },
         &empty_budget_slot(),
         &empty_teacher_slot(),
+        &None,
         &None,
         &None,
         &None,

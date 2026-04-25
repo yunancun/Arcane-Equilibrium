@@ -22,6 +22,7 @@ async fn test_get_paper_state_no_file() {
         &None,
         &None,
         &None,
+        &None,
     )
     .await;
     assert!(
@@ -42,6 +43,7 @@ async fn test_get_paper_state_with_snapshot() {
         &EngineCommandChannels::default(),
         &empty_budget_slot(),
         &empty_teacher_slot(),
+        &None,
         &None,
         &None,
         &None,
@@ -75,6 +77,7 @@ async fn test_get_latest_prices_with_snapshot() {
         &None,
         &None,
         &None,
+        &None,
     )
     .await;
     assert!(resp.error.is_none(), "error: {:?}", resp.error);
@@ -95,6 +98,7 @@ async fn test_get_tick_stats_with_snapshot() {
         &EngineCommandChannels::default(),
         &empty_budget_slot(),
         &empty_teacher_slot(),
+        &None,
         &None,
         &None,
         &None,

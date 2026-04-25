@@ -35,6 +35,7 @@ async fn test_dispatch_ping() {
         &None,
         &None,
         &None,
+        &None,
     )
     .await;
     assert!(resp.error.is_none());
@@ -57,6 +58,7 @@ async fn test_dispatch_get_state() {
         &EngineCommandChannels::default(),
         &empty_budget_slot(),
         &empty_teacher_slot(),
+        &None,
         &None,
         &None,
         &None,
@@ -95,6 +97,7 @@ async fn test_dispatch_method_not_found() {
         &None,
         &None,
         &None,
+        &None,
     )
     .await;
     assert!(resp.error.is_some());
@@ -113,6 +116,7 @@ async fn test_dispatch_invalid_json() {
         &EngineCommandChannels::default(),
         &empty_budget_slot(),
         &empty_teacher_slot(),
+        &None,
         &None,
         &None,
         &None,
@@ -143,6 +147,7 @@ async fn test_dispatch_missing_version() {
         &None,
         &None,
         &None,
+        &None,
     )
     .await;
     assert!(resp.error.is_some());
@@ -167,6 +172,7 @@ async fn test_dispatch_missing_method() {
         &None,
         &None,
         &None,
+        &None,
     )
     .await;
     assert!(resp.error.is_some());
@@ -185,6 +191,7 @@ async fn test_dispatch_reload_config() {
         &EngineCommandChannels::default(),
         &empty_budget_slot(),
         &empty_teacher_slot(),
+        &None,
         &None,
         &None,
         &None,

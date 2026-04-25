@@ -187,3 +187,51 @@ pub(in crate::ipc_server) fn handle_get_scanner_status(
         }),
     )
 }
+
+// ---------------------------------------------------------------------------
+// G3-11 STRATEGIST-CYCLE-OBSERVABILITY-1 / 策略師排程器 cycle 計數器 IPC
+// ---------------------------------------------------------------------------
+
+/// G3-11 (2026-04-25, MVP slice): return the StrategistScheduler cycle
+/// metrics snapshot — apply count, per-reason reject tally, last cycle ts,
+/// last apply ts. Replaces the GUI footer's engine.log tail-parse fallback
+/// with a structured pull. DB sink (`learning.strategist_cycle_events`) is
+/// deliberately deferred — see TODO §G3-11 downgrade rationale.
+///
+/// Fail-soft: returns `{"status":"scheduler_unavailable"}` when the
+/// scheduler isn't bound (Demo engine unbound / fresh boot path / unit
+/// tests not wiring counters).
+///
+/// G3-11：返回 scheduler cycle metrics 快照 — apply count + per-reason
+/// reject tally + last_ts。取代 GUI footer engine.log tail-parse fallback。
+/// Fail-soft：scheduler 未綁返回 status=scheduler_unavailable。
+pub(in crate::ipc_server) fn handle_get_strategist_cycle_metrics(
+    id: serde_json::Value,
+    counters: &Option<Arc<crate::strategist_scheduler::CycleCounters>>,
+) -> JsonRpcResponse {
+    let Some(c) = counters else {
+        return JsonRpcResponse::success(
+            id,
+            serde_json::json!({
+                "status": "scheduler_unavailable",
+                "apply_count": 0,
+                "cycle_count": 0,
+                "last_cycle_ts_ms": 0,
+                "last_apply_ts_ms": 0,
+                "reject_by_reason": {},
+            }),
+        );
+    };
+    let snap = c.snapshot();
+    JsonRpcResponse::success(
+        id,
+        serde_json::json!({
+            "status": "ok",
+            "apply_count": snap.apply_count,
+            "cycle_count": snap.cycle_count,
+            "last_cycle_ts_ms": snap.last_cycle_ts_ms,
+            "last_apply_ts_ms": snap.last_apply_ts_ms,
+            "reject_by_reason": snap.reject_by_reason,
+        }),
+    )
+}
