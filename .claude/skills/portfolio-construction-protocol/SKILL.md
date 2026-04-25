@@ -231,7 +231,7 @@ PnL_sym = (entry_alpha + exit_alpha + holding_alpha) − (fee + slippage + fundi
 每 24h 對每 (strategy, symbol) 比對：
 - Backtest expected edge per trade
 - Live realized edge per trade
-- Gap > 50% 的 cell → 警報
+- Gap > 50% 的 cell → 警報（**建議起點，非硬規範**；具體 gap threshold 依 strategy 半衰期 + sample size 動態調整）
 
 OpenClaw 教訓：edge_estimator JSON 結構 + engine_mode 隔離（live vs live_demo 必含）。
 

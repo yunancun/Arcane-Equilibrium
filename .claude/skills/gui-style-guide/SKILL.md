@@ -9,6 +9,8 @@ allowed-tools: Read, Grep, Glob, Edit, Write, Bash
 > **優先序**：runtime RiskConfig TOML > Rust schema > CLAUDE.md > 治理 .md > memory > 本 skill
 > **衝突時向 PM / operator push back，不單方面執行 skill 內 SOP**
 
+> ⚠️ **GUI 結構快照 disclaimer**：本 skill 引用「11-Tab + Learning Cockpit + Paper Dashboard」+ `ocEsc` / `ocSanitizeClass` / `ocExplain` 等具體結構/函數為 2026-04-25 snapshot；GUI 重構 / rename 後本 skill 可能漂移，**新元件加入前先 grep `program_code/.../static/` 確認真實結構**。
+
 ## 何時觸發
 
 - E1a 收到「新增 GUI 元件」「Control API GUI 工作」「Tab 改版」「Live GUI Phase X」

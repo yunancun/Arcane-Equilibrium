@@ -466,7 +466,30 @@
 
 ## 修復進度追蹤
 
-### 2026-04-25 P0 修理進度
+### 2026-04-25 全階段進度
+
+**Audit Total: 76 finding · Done: ~24 · Remaining: ~10 P1 + 27 P2 + 17 P3**
+
+| 階段 | 完成 | Commit |
+|---|---|---|
+| **P0 立即** | 5/5 ✅（5 個風控 skill 詞義反向 / 越位 / 捏造修正）| `35a1b62` |
+| **A — S2 systemic** | 1/1 ✅（24/24 全 skill 加優先序段）| `00acfad` |
+| **B turn 1 — S1/S3/S6 + 6 個別** | 10/10 ✅ | `9e2559b` |
+| **B turn 2 — C1.a/C1.b/個別 disclaimer** | 7/7 ✅（本 turn）| `[本次]` |
+| **剩餘 P1** | ~10 條（修法重複 marginal 改善）| 暫不修 |
+| **P2 / P3** | 44 條 cosmetic（寫死快照 / cross-skill 重述等）| **不修，留 known low-priority drift backlog**（operator 同意 2026-04-25）|
+
+### 盲點處置最終
+
+| # | 盲點 | 結論 |
+|---|---|---|
+| 1 | PG 真實設定 | **unverified**（postgres user 不在 host，跑 container；sudo fail）→ db-schema skill 加「verify 命令 + unclear」段 |
+| 2 | 過往報告數據 | **不查**（operator 確認雜音多）|
+| 3 | 5 vs 4 active 策略 | **全保留**（funding_arb 標 dormant）|
+| 4 | **觸發 fire 機率** | **unverified — 靜態無法測**；建議 operator 用 5-10 個 typical prompt 跑試實測；**全 24 skill 共有 known limitation：description fire 機率未經 runtime 驗證，需精確 fire control 用 @-mention 強制** |
+| 5 | 5 markdown 治理檔 | **不讀**（operator 確認過時）|
+
+### P0 修理（~~dispatched~~ done by 主 session）
 
 | # | 範圍 | 狀態 | 備註 |
 |---|---|---|---|

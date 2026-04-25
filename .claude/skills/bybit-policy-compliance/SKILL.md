@@ -83,7 +83,10 @@ OpenClaw operator KYC tier 影響：
 ## 3. API Rate Limit
 
 ### 3.1 General limits
-| 端點類型 | Default rate |
+
+> ⚠️ **以下數字為 reference snapshot；Bybit 真實 rate limit 動態變動**（VIP tier / broker partnership 會升）。**verify 命令**：`curl -s https://api.bybit.com/v5/market/time` 後看 response header `X-Bapi-Limit*`，或查 [Bybit Rate Limit doc](https://bybit-exchange.github.io/docs/v5/rate-limit)。本表為起步參考。
+
+| 端點類型 | Default rate (reference) |
 |---|---|
 | Public REST | 120 req / 5s per IP |
 | Private REST (auth) | 600 req / 5s per UID |

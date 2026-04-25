@@ -11,6 +11,8 @@ allowed-tools: Read, Grep, Glob, Bash, WebSearch
 
 > **S1 風控數字 SSOT**：策略 sizing / drawdown / position cap 等所有風控數字以 `settings/risk_control_rules/risk_config_<env>.toml` 為 SSOT；config 不合理 → push back operator，**不信 memory 或 skill 內寫死值**。
 
+> **C1.b cross-skill 邊界**：本 skill（QC）跟 `time-series-cv-protocol`（MIT）在 walk-forward / Purge / Embargo / CSCV 等技術細節有 ~50% 內容重疊。**同時觸發時職責分**：QC 主負策略 alpha 顯著性（PSR / DSR / 統計檢定 / 多重比較），MIT 主負 ML 模型訓練 CV 設計（sklearn / mlfinlab）。
+
 ## 何時觸發
 
 - QC 收到「策略上線前驗證」「Sharpe 顯著嗎」「參數 sweep 結果評審」「OOS 效能判斷」

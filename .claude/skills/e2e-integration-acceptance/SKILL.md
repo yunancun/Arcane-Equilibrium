@@ -28,10 +28,12 @@ allowed-tools: Read, Grep, Glob, Bash
 
 ## 1. CLAUDE.md §九 既有 E2E 驗收清單
 
+> ⚠️ **數字為 2026-04-25 snapshot**（治理端點 28/28、SLA <1ms 等可能演進）；以 CLAUDE.md §九 + §四 hard gates 原文為準，本表為 extract。
+
 ```
-[ ] 測試數超過基準線（無新增 failed）
-[ ] H0 Gate SLA 通過（<1ms）
-[ ] 治理端點 28/28 Operator 驗證完整
+[ ] 測試數超過基準線（無新增 failed）— 數字以最近 baseline run 為準
+[ ] H0 Gate SLA 通過（<1ms，verify: passive_wait_healthcheck check_h0_gate）
+[ ] 治理端點 28/28 Operator 驗證完整 — 實際數以 grep "/api/v1" + 實測為準
 [ ] paper_trading 完整流程：掃描 → 信號 → 審批 → 下單 → 止損
 [ ] GovernanceHub fail-closed 在 FREEZE 模式真實拒絕訂單
 [ ] 審計日誌完整（每筆訂單有 trace）
