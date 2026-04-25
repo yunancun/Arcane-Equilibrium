@@ -9,11 +9,15 @@ allowed-tools: Read, Grep, Glob, WebSearch
 > **優先序**：runtime RiskConfig TOML > Rust schema > CLAUDE.md > 治理 .md > memory > 本 skill
 > **衝突時向 PM / operator push back，不單方面執行 skill 內 SOP**
 
+> **S1 風控數字 SSOT**：position size / Kelly / risk_per_trade 等所有 sizing 數字以 `settings/risk_control_rules/risk_config_<env>.toml` 為 SSOT；config 不合理 → push back operator，**不信 memory 或 skill 內寫死值**。
+
+> **S6 P0/P1/P2 cross-ref**：三層風控定義見 `srv/docs/decisions/EX-01_..._V2.md` §2.1-§2.3；本 skill 引用屬語意重述。
+
 ## 何時觸發
 
 - QC 收到「新策略提案」「alpha hypothesis」「信號設計」「多源訊號融合」「策略升級規劃」
 - Operator 提出「我看到某 paper / 某 KOL 推薦 X 異常」要評估
-- 5 策略（grid / ma_crossover / bb_breakout / bb_reversion / funding_arb）edge 衰減後的接班候選
+- 5 策略 edge 衰減後的接班候選：grid / ma_crossover / bb_breakout / bb_reversion（4 active）+ funding_arb（**dormant — G-2 結案 negative，待 R-02 重評，slot 保留不刪**）
 
 ## ★ Alpha 8 來源 framework
 
@@ -46,12 +50,12 @@ half_life = ln(2) / λ   ， λ 從 PnL_t = PnL_0 · e^(-λt) 擬合
 ```
 
 **判讀**：
-- `< 1 day` → HFT 級，OpenClaw 棧（每 tick 跑、~ms 延遲）打不到
+- `< 1 day` → 訊號要求 sub-second reaction window，OpenClaw 1m kline + IPC ms 延遲抓不到衰減前的 entry/exit timing（**不是 latency 問題；是訊號生命週期跟我們 sampling rate 不匹配**）
 - `1-7 day` → 短期 alpha，需動態 regime gate
 - `7-30 day` → 中期 alpha，主流量化棧
 - `> 30 day` → 長期 factor，配置型而非交易型
 
-**OpenClaw 適用範圍**：1-30 day。短於 1d 不接（latency 不夠）；長於 30d 給配置層不給策略層。
+**OpenClaw 適用範圍**：1-30 day。短於 1d → 訊號 lifecycle vs 我們 1m sampling rate 不匹配，抓不到 reaction window；長於 30d 給配置層不給策略層。
 
 ## 信號融合與 IC/IR
 
@@ -121,12 +125,12 @@ OpenClaw 已用 1m kline，補方法：
 1. **Alpha 來源歸類**（8 來源 framework）— 答不出 = Reject
 2. **學術文獻 check**（已 published? graveyard 內?）
 3. **數學模型化**（公式 + 假設）
-4. **半衰期估算**（< 1d → 拒，OpenClaw 打不到）
-5. **資料準備**（demo 數據，engine_mode 隔離；feedback `demo_over_paper_for_edge`）
-6. **In-sample backtest**（leak-free shift(1)，注意 P1-11 F3 RETRACT 教訓）
+4. **資料準備**（demo 數據，engine_mode 隔離；feedback `demo_over_paper_for_edge`）
+5. **In-sample backtest**（leak-free shift(1)，注意 P1-11 F3 RETRACT 教訓）
+6. **半衰期估算**（從 in-sample backtest PnL fit λ；< 1d → 拒，OpenClaw 1m sampling 抓不到）
 7. **Walk-forward OOS**（用 `walk-forward-validation-protocol` skill）
 8. **成本驗證**（cost_edge_ratio < 0.5 → 過；用 `crypto-microstructure-knowledge` skill）
-9. **組合相容**（與現有 5 策略 ρ < 0.7；用 `portfolio-construction-protocol` skill）
+9. **組合相容**（與現有 active 策略 ρ < 0.7；用 `portfolio-construction-protocol` skill）
 10. **Demo 21d gross > 0**（CLAUDE.md §三 Phase 5 reframed 標準）
 
 任一步 fail = pause 直到修。

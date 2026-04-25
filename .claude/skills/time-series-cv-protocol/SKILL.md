@@ -21,6 +21,11 @@ allowed-tools: Read, Grep, Glob, WebSearch
 **時序資料禁用 KFold**（會 shuffle）：必用 TimeSeriesSplit 或 walk-forward。
 **Purge + Embargo 是必要不是 optional**：未加就是 leakage。
 
+> **C1.b cross-skill 邊界**：本 skill（MIT）跟 `walk-forward-validation-protocol`（QC）在 walk-forward / Purge / Embargo / CSCV 等技術細節有 ~50% 內容重疊。**同時觸發時職責分**：
+> - **MIT 主負**：ML 模型訓練 CV 設計（sklearn TimeSeriesSplit / mlfinlab PurgedKFold / sample size for ML model 類別）
+> - **QC 主負**：策略 alpha 顯著性（PSR / DSR / 統計檢定 / 多重比較修正）
+> - 同時引用兩者的 audit task 應由 PM 明確指派 owner，避免雙頭判斷。
+
 ## 1. CV 方法對照表
 
 | 方法 | 適用 | 缺點 | sklearn API |
