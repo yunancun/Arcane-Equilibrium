@@ -1196,3 +1196,102 @@ impl GridOuConfig {
         Ok(())
     }
 }
+
+// ---------------------------------------------------------------------------
+// StrategistConfig — Strategist param-tuner delta clamp (STRATEGIST-TUNE-TARGET-CONFIG-1)
+// 策略師調參 delta 上限（STRATEGIST-TUNE-TARGET-CONFIG-1）
+// ---------------------------------------------------------------------------
+
+/// STRATEGIST-TUNE-TARGET-CONFIG-1 (2026-04-25): Operator-tunable max delta clamp
+/// for the Rust StrategistScheduler param tuner.
+///
+/// `validate_recommendation` (in `strategist_scheduler::mod`) rejects any
+/// per-cycle parameter change whose `|new − cur| / |cur|` exceeds
+/// `max_param_delta_pct`. The pre-config hardcoded constant lived in
+/// `strategist_scheduler/mod.rs` as `MAX_PARAM_DELTA_PCT: f64 = 0.30`,
+/// requiring a Rust rebuild to retune. This struct lifts it into
+/// `RiskConfig.strategist` so operators flip via `<60s` IPC hot-reload through
+/// the existing `Arc<ArcSwap<RiskConfig>>` deep-merge path
+/// (`patch_risk_config`), matching G7-04 / G7-02 / G3-02 Phase-A patterns.
+///
+/// The default `0.30` (±30%) preserves the pre-extraction runtime exactly, so
+/// this landing has zero behavioural change until operators tune the TOML or
+/// patch IPC.
+///
+/// `validate()` rejects:
+/// - `≤ 0.0` (no headroom for tuning at all — clamp instantly rejects)
+/// - `≥ 1.0` (`100%` delta is wholesale replacement of the param, defeating
+///   the purpose of a sanity gate)
+/// - NaN / +∞ / −∞ (silent NaN comparisons would always reject — fail fast)
+///
+/// Per-param overrides (e.g. allow `weight_*` to flex 0.50 while
+/// `cooldown_ms` stays at 0.30) are deferred to a v2 follow-up to keep this
+/// landing scope-tight.
+///
+/// STRATEGIST-TUNE-TARGET-CONFIG-1：策略師調參 delta 硬上限可配置化。
+/// 預設 0.30（±30%）保留現行為，operator 可透過 IPC `patch_risk_config`
+/// `<60s` 熱重載；per-param 覆蓋（v2）本次延後不做。
+/// validate() 拒 ≤0.0 / ≥1.0 / NaN / Inf 以早期失敗。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StrategistConfig {
+    /// Maximum allowed delta for per-cycle parameter updates, expressed as a
+    /// fraction of the current value (`0.30` = ±30%).
+    ///
+    /// Weight-family params (`weight_adx` / `weight_regime` / `weight_volume`
+    /// / `weight_momentum`) are exempt from this clamp inside
+    /// `validate_recommendation` (the `weight_sum == 65 ± 0.1` invariant is
+    /// the relevant constraint there), so this knob only governs non-weight
+    /// scalar params (`cooldown_ms`, `adx_threshold`, etc.).
+    /// 每輪參數更新允許的最大 delta（current 值的比例，0.30=±30%）；
+    /// weight 系參數另循 weight_sum=65 約束，不受此限。
+    #[serde(default = "default_strategist_max_param_delta_pct")]
+    pub max_param_delta_pct: f64,
+}
+
+fn default_strategist_max_param_delta_pct() -> f64 {
+    // 0.30 — preserves the pre-config hardcoded `MAX_PARAM_DELTA_PCT` in
+    // `strategist_scheduler/mod.rs:48` bit-for-bit, so the schema landing
+    // ships with zero runtime delta.
+    // 0.30 — 與 strategist_scheduler/mod.rs:48 原硬編碼值對齊，schema
+    // 落地零行為差。
+    0.30
+}
+
+impl Default for StrategistConfig {
+    fn default() -> Self {
+        Self {
+            max_param_delta_pct: default_strategist_max_param_delta_pct(),
+        }
+    }
+}
+
+impl StrategistConfig {
+    /// STRATEGIST-TUNE-TARGET-CONFIG-1: Validate `max_param_delta_pct ∈ (0.0, 1.0)`
+    /// and finite. Fails fast at config-load time so a degenerate clamp can
+    /// never reach the hot path.
+    /// STRATEGIST-TUNE-TARGET-CONFIG-1：驗證 max_param_delta_pct ∈ (0.0, 1.0) 且有限。
+    pub fn validate(&self) -> Result<(), String> {
+        let v = self.max_param_delta_pct;
+        if !v.is_finite() {
+            return Err(format!(
+                "risk.strategist.max_param_delta_pct ({}) must be finite (no NaN/Inf)",
+                v
+            ));
+        }
+        if !(v > 0.0) {
+            return Err(format!(
+                "risk.strategist.max_param_delta_pct ({}) must be > 0.0 \
+                 (zero or negative clamp rejects every recommendation)",
+                v
+            ));
+        }
+        if !(v < 1.0) {
+            return Err(format!(
+                "risk.strategist.max_param_delta_pct ({}) must be < 1.0 \
+                 (>= 100% is wholesale replacement; defeats the sanity gate)",
+                v
+            ));
+        }
+        Ok(())
+    }
+}

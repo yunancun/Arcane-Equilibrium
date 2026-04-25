@@ -279,3 +279,16 @@ min_window = 8                  # smallest sub-window (lag) for chunking
 hysteresis_lag = 6              # consecutive same-side observations before flip
 persistent_threshold = 0.55     # H > 0.55 → trending side
 antipersistent_threshold = 0.45 # H < 0.45 → mean-reverting side
+
+
+# STRATEGIST-TUNE-TARGET-CONFIG-1 (2026-04-25) — StrategistScheduler param
+# tuner clamp. `max_param_delta_pct` caps `|new − cur| / |cur|` for non-weight
+# scalar params each cycle. Default `0.30` (±30%) preserves the previously
+# hardcoded `MAX_PARAM_DELTA_PCT` in strategist_scheduler/mod.rs bit-for-bit.
+# Operators may flip via TOML or IPC `patch_risk_config` (`<60s` hot-reload via
+# the existing deep-merge path). validate() enforces the open interval
+# `(0.0, 1.0)` and rejects NaN/Inf.
+# STRATEGIST-TUNE-TARGET-CONFIG-1：策略師調參 delta 上限；預設 0.30 與原硬編碼一致，
+# operator 可 IPC `<60s` 熱重載；validate() 強制 (0.0, 1.0) + 拒 NaN/Inf。
+[strategist]
+max_param_delta_pct = 0.30      # ±30% cap on per-cycle non-weight param delta
