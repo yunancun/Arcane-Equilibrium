@@ -364,14 +364,56 @@ Operator 在 Mac 並行跑 Qwen3.6-35B（LM Studio）做代碼審核。CC 每完
 
 **會話任務管理 6 步**（與 §六 TODO.md 強制規則同體，流程化版）：1) TODO.md 先寫 checkbox 計畫 → 2) 開工前 operator confirm（auto mode 跳過）→ 3) 逐步勾選進度 → 4) 每步高階摘要 → 5) TODO.md 結尾補 Review 章節 → 6) 任何糾正後寫入 `docs/lessons.md`。
 
-### 16 Agent 角色體系與強制工作鏈
+### 18 Agent 角色體系與強制工作鏈（2026-04-25 真實接線）
 
-**強制**：所有任務按角色派發，主會話 = PM+Conductor。完整角色定義/激活矩陣見 `docs/CLAUDE_REFERENCE.md`。
+**真實接線**：18 個 subagent definition 在 `.claude/agents/<NAME>.md`（git tracked，雙端 git 同步）。每個 agent 含 Anthropic 官方 frontmatter（`tools` / `disallowedTools` / `skills` 預載 / `color` / `model: inherit`）+ 啟動序列（讀 `docs/CCAgentWorkSpace/<NAME>/{profile,memory}.md` + 最新 report）+ 完成序列（追加 memory + 存 `workspace/reports/`）。CCAgentWorkSpace 仍是 SSOT，`.claude/agents/<NAME>.md` 是路由器；完整角色定義見各 `profile.md`，激活矩陣見 `docs/CLAUDE_REFERENCE.md`。
 
-**標準鏈**：PM+FA → PA 派發 → E1/E1a 並行 → **E2 代碼審查 → E4 測試回歸**（兩者絕不可跳）→ E5 優化（每 Phase/Wave/≥3 E1 任務強制）→ QA → PM 確認。E3/CC/A3/R4/TW 按需。
-**P0 快速通道**：PA → E1 並行（≤5）→ E2 → E4 → PM。
+**主會話 = PM + Conductor**（合一，**非** subagent）。Anthropic 限制：subagent 不能 spawn 另一 subagent — 派發鏈必須由主會話編排。
 
-**Bybit API 強制**：所有 Bybit 相關開發（REST/WS/IPC）先查字典手冊 `docs/references/2026-04-04--bybit_api_reference.md`，新增端點同步更新手冊，E2 必查。審計：`docs/audits/2026-04-04--bybit_api_infra_audit.md`。
+**18 Agent 速查**（typeahead `@<NAME>` 直呼）：
+
+| Tier | Agents |
+|---|---|
+| 管理層 | `@PM` `@FA` `@PA` |
+| 質量保證層 | `@CC` `@E2` `@E3` `@E4` `@E5` |
+| 執行層 | `@E1` `@E1a` |
+| 專項審查層 | `@A3` `@R4` `@TW` |
+| 分析顧問層 | `@AI-E` `@QA` `@QC` `@BB` `@MIT` |
+
+**Invocation 三種 pattern**（Anthropic 官方）：
+1. **Natural language 自動 delegate**：「讓 QC 看一下這個策略」→ Claude 主動 delegate（基於 description "Use proactively for..." 匹配）
+2. **`@-mention` 強制**：`@QC` → 100% trigger 該 agent，不交 Claude 判斷
+3. **Session-wide**：`claude --agent QC` → 整個 session 走該 agent system prompt + tool 限制
+
+**何時用哪個**：
+- **強制工作鏈**（不可跳過）→ **@-mention**：`@E1` 完 → `@E2` → `@E4` → `@QA` → PM Sign-off
+- **多角色 adversarial review**（重大決策） → **@-mention 並行**：`@QC` + `@FA` + `@CC` + `@PM`（memory `feedback_multi_role_strategic_review`）
+- **Routine 探索 / 分析** → **natural language**：「研究 ML pipeline 狀態」→ Claude 自動派 `@MIT`
+- **長時間單角色任務** → **`--agent`**：例如整個 session 跑 QC audit
+
+**標準工作鏈**（強制，memory `feedback_workflow_audit_chain`）：
+`PM` + `@FA` 規格 → `@PA` 派發 → `@E1` / `@E1a` 並行 → **`@E2` 代碼審查 → `@E4` 測試回歸**（兩者絕不可跳）→ `@E5` 優化（每 Phase / Wave / ≥3 E1 任務強制）→ `@QA` → PM 確認。`@E3` / `@CC` / `@A3` / `@R4` / `@TW` / `@BB` 按需插入。`@AI-E` 季度跑。`@QC` 新策略提案 / 數學審計必活。`@MIT` ML pipeline / DB schema 審計必活。
+**P0 快速通道**：`@PA` → `@E1`（≤5 並行）→ `@E2` → `@E4` → PM。可省 FA / E5 / E3 / CC，但 E2 + E4 永不跳。
+
+**動態 isolation 派工準則**（PM 編排時 per-invocation 決定，避免 branch 過多）：
+- 單實例 sub-agent 操作單檔 → **NOT** isolation（主 work tree）
+- 並行 ≥2 sub-agent 操作不重疊檔 → **NOT** isolation
+- 並行 ≥2 sub-agent 操作可能重疊檔 → 對重疊組加 `isolation: worktree` per-invocation
+- destructive 動作（git reset / 大量 rm / 跨檔重構）→ 加 isolation（即使單實例）
+- 純審查類（CC/QC/A3/R4/TW/E2 讀/E3/AI-E/PM/FA/PA/BB/MIT）→ **永不需要** isolation
+
+**Skill 預載 vs 按需 Read**：
+- **OpenClaw 24 個 custom skill** 在 `.claude/skills/<name>/SKILL.md`（git tracked）— agent frontmatter `skills:` 預載相關子集（自動注入 system prompt）
+- **K-Dense-AI 134 個 scientific skill** 在 `~/.claude/skills/k-dense-ai/scientific-skills/<name>/`（user-level，Mac + Linux 各自 clone 一次）— agent body 寫路徑供按需 Read（**非** always-on，避免 trigger 噪音）
+
+**雙端部署**（memory `project_18_agent_runtime_wired`）：
+- Master：`srv/.claude/{skills,agents}/`（git tracked，`.gitignore` 對 `.claude/*` ignore 但 `!.claude/skills/`、`!.claude/agents/` 例外；`settings.local.json` + `worktrees/` 仍 ignore）
+- Mac CC cwd `/Users/ncyu/Projects/TradeBot`：symlink `.claude/{skills,agents}` → `../srv/.claude/...`
+- Linux CC cwd `~/BybitOpenClaw/srv/`：直讀 srv/.claude/
+- 同步：Mac edit → `cd srv && git add + commit + push` → Linux `git pull --ff-only`
+- 新 session 起手 / 修改 agent definition 後：`/agents` 重 load 或 restart CC
+
+**Bybit API 強制**：所有 Bybit 相關開發（REST/WS/IPC）先查字典手冊 `docs/references/2026-04-04--bybit_api_reference.md`，新增端點同步更新手冊，`@E2` 必查；`@BB` 從 Bybit 立場 push back 違規設計。審計：`docs/audits/2026-04-04--bybit_api_infra_audit.md`。
 
 ---
 
