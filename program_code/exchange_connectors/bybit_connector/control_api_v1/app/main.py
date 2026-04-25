@@ -230,6 +230,17 @@ app.include_router(strategist_history_router)
 from .executor_routes import executor_router  # noqa: E402
 app.include_router(executor_router)
 
+# ── Strategist Promote Router / 策略師參數晉升路由（G3-10）──
+# Operator manual-promote API: lift a `learning.strategist_applied_params` row
+# from demo (or paper) into live (or paper) without waiting for the
+# AUTO-PROMOTE counter. Two-step confirm (preview → apply) mirrors live_session
+# operator workflows; auth gates reuse executor_routes' 5-gate live chain via
+# `_verify_live_gate`.
+# Operator 手動把 demo/paper 已穩定的策略參數晉升至 live/paper；兩步 confirm
+# (preview → apply)；live 套用沿用 executor_routes 的 5-gate 鏈。
+from .strategist_promote_routes import strategist_promote_router  # noqa: E402
+app.include_router(strategist_promote_router)
+
 # ── Startup Integrity Check / 啟動完整性驗證 ────────────────────────────────
 # Verify that non-optional critical dependencies were successfully injected at
 # module initialisation time.  H0_GATE is allowed to be None in degraded /
