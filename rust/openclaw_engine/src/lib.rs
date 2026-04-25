@@ -49,6 +49,7 @@ pub mod platform_client;
 pub mod position_manager;
 pub mod position_reconciler;
 pub mod position_risk_evaluator;
+pub mod regime;
 pub mod restart_kind;
 pub mod risk_checks;
 pub mod scanner;

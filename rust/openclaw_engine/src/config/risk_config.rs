@@ -32,6 +32,14 @@ pub use advanced::{
     SlippageConfig, SlippageTier,
 };
 
+// G7-03 (2026-04-24): Hurst + hysteresis regime detector schema lives in its
+// own sibling file (per §九 file-size discipline — `risk_config_advanced.rs`
+// already at ~1198 lines, 2 from the 1200-line cap).
+// G7-03：Hurst + hysteresis schema 在獨立 sibling 檔，符合 §九 行數規範。
+#[path = "risk_config_regime.rs"]
+pub mod regime_cfg;
+pub use regime_cfg::HurstConfig;
+
 // ---------------------------------------------------------------------------
 // Top-level / 頂層
 // ---------------------------------------------------------------------------
@@ -172,6 +180,18 @@ pub struct RiskConfig {
     /// 保留現行為（compute_ou_step 用原始 Δx stdev），Phase B 接 wire 後切換。
     #[serde(default)]
     pub grid_ou: GridOuConfig,
+    /// G7-03 (2026-04-24): Hurst exponent + hysteresis regime detector schema.
+    /// Wraps `openclaw_core::indicators::volatility::hurst` (single-source-of-
+    /// truth R/S analysis) with a typed `RegimeLabel` and a configurable
+    /// `HysteresisDetector` (lag-based label stabilizer). Phase A schema-only
+    /// landing: defaults `enabled = false` so `regime::hurst::hurst_label_for_symbol`
+    /// short-circuits to `None` and runtime is bit-identical to pre-G7-03.
+    /// Phase B will wire per-symbol `HysteresisDetector` cache into the tick
+    /// pipeline / scanner — operators flip `enabled = true` per environment.
+    /// Hot-reloaded via `Arc<ArcSwap<RiskConfig>>`.
+    /// G7-03：Hurst + 滯回 regime 偵測 schema；Phase A 預設 enabled=false 完全 no-op。
+    #[serde(default)]
+    pub hurst: HurstConfig,
 }
 
 impl RiskConfig {
@@ -198,6 +218,9 @@ impl RiskConfig {
         self.cusum.validate()?;
         self.slippage.validate()?;
         self.grid_ou.validate()?;
+        self.hurst
+            .validate()
+            .map_err(|e| format!("risk.hurst: {}", e))?;
 
         // Cross-sub-struct invariant: partial_tp levels must not exceed take_profit_max_pct.
         // 跨 sub-struct 不變量：partial_tp 各層不得超過 take_profit_max_pct。
