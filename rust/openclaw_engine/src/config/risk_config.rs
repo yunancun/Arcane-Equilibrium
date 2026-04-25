@@ -140,6 +140,17 @@ pub struct RiskConfig {
     /// G7-02：逐 timeframe EWMA Vol lambda；預設 0.97 保留 G7-02 前行為。
     #[serde(default)]
     pub ewma_vol: EwmaVolConfig,
+    /// G7-04 (2026-04-24): CUSUM strategy edge-decay monitor schema.
+    /// One-sided downward CUSUM control chart parameters
+    /// (`slack_k` deadband + `threshold_h` alarm boundary, both in σ units;
+    /// `min_observations` warm-up; `target_return_bps` reference level).
+    /// Phase A schema landing only: defaults `enabled = false` so this struct
+    /// is dormant and `dynamic_risk_sizer` / strategy disable hooks see no
+    /// behavioural change. Wiring deferred to a future G7-04 follow-up.
+    /// G7-04：CUSUM 策略衰減監控 schema；Phase A 預設 enabled=false 不接 runtime，
+    /// 後續 follow-up 補 wiring。
+    #[serde(default)]
+    pub cusum: CusumConfig,
 }
 
 impl RiskConfig {
@@ -163,6 +174,7 @@ impl RiskConfig {
         self.kelly.validate()?;
         self.executor.validate()?;
         self.ewma_vol.validate()?;
+        self.cusum.validate()?;
 
         // Cross-sub-struct invariant: partial_tp levels must not exceed take_profit_max_pct.
         // 跨 sub-struct 不變量：partial_tp 各層不得超過 take_profit_max_pct。
@@ -1184,6 +1196,183 @@ impl CostGate {
     }
 }
 
+
+// ---------------------------------------------------------------------------
+// CusumConfig — Strategy edge-decay CUSUM monitor schema (G7-04 Phase A)
+// 策略衰減 CUSUM 監控 schema（G7-04 Phase A）
+// ---------------------------------------------------------------------------
+
+/// G7-04 (2026-04-24): One-sided downward CUSUM (Cumulative Sum) control chart
+/// parameters for monitoring per-strategy edge decay.
+///
+/// CUSUM is a sequential change-point detector: it accumulates deviations from
+/// a target reference level and alarms when the cumulative sum exceeds a
+/// σ-scaled threshold. For trading-edge decay we want only the LOWER side
+/// (alarm when realized PnL drifts BELOW target, never above), so this struct
+/// encodes a one-sided downward CUSUM:
+///
+/// ```text
+///   S_t = max(0, S_{t-1} - (x_t - target_return_bps) - slack_k * σ)
+///   alarm when S_t > threshold_h * σ
+/// ```
+///
+/// where `σ` is an estimate of the per-trade PnL standard deviation (drawn
+/// from EWMA-vol or a similar hot-path source by the future runtime wiring).
+///
+/// Phase A scope: schema + TOML section + validation only. Defaults
+/// `enabled = false` keep this struct dormant — no `dynamic_risk_sizer` /
+/// strategy-disable hook fires while operators evaluate the schema. Wiring
+/// hookup is deferred to a future G7-04 follow-up (or to whichever G3-X
+/// task consumes the alarm signal first).
+///
+/// Defaults follow the standard quant-control-chart literature:
+/// - `slack_k = 0.5`: small drifts under 0.5σ are absorbed by the deadband.
+/// - `threshold_h = 4.0`: classic Page H-decision boundary (4–5σ band).
+/// - `min_observations = 30`: warm-up before evaluating; rejects spurious
+///   alarms on the first few trades.
+/// - `target_return_bps = 0.0`: breakeven net of fees (operators tune to
+///   per-strategy expected gross edge minus realized cost).
+///
+/// `validate()` enforces:
+/// - `slack_k > 0` (zero deadband collapses to instant alarm on any drift)
+/// - `slack_k < threshold_h` (otherwise σ-scaled threshold sits inside the
+///   deadband and an alarm is unreachable)
+/// - `threshold_h > 0` and `<= 100` (sanity ceiling — beyond ~10σ the chart
+///   is effectively never going to alarm; 100 is a generous upper bound)
+/// - `min_observations >= 5` (any smaller warm-up makes the σ estimate
+///   degenerate)
+///
+/// G7-04：單側下行 CUSUM 控制圖參數，用於監控策略 edge 衰減。
+/// Phase A 僅落 schema + TOML + validate，預設 enabled=false 保留現行為，
+/// runtime wiring 留給後續 follow-up。validate() 強制 slack_k < threshold_h。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CusumConfig {
+    /// Master enable flag. `false` (default, Phase A) keeps the monitor
+    /// dormant — no PnL accumulation, no alarms, no `dynamic_risk_sizer`
+    /// hook. Operators flip to `true` only after Phase B+ wires the
+    /// runtime consumer.
+    /// 主開關。Phase A 預設 false 完全靜默；Phase B+ runtime 接線後 operator 翻 true。
+    #[serde(default = "default_cusum_enabled")]
+    pub enabled: bool,
+    /// Deadband in σ units (typical 0.5σ). Drifts smaller than `slack_k * σ`
+    /// from `target_return_bps` do not accumulate, preventing false alarms
+    /// on routine sub-σ noise.
+    /// 死區（σ 倍數，典型 0.5σ）；小於 `slack_k * σ` 的偏移不累積避免雜訊誤警。
+    #[serde(default = "default_cusum_slack_k")]
+    pub slack_k: f64,
+    /// Alarm threshold in σ units (typical 4-5σ). When the running CUSUM
+    /// exceeds `threshold_h * σ`, the monitor flags an edge-decay alarm.
+    /// 警報閾值（σ 倍數，典型 4-5σ）；累積值超過後觸發 edge-decay 警報。
+    #[serde(default = "default_cusum_threshold_h")]
+    pub threshold_h: f64,
+    /// Minimum PnL observations required before evaluating the chart.
+    /// Prevents spurious alarms on the first handful of trades when the σ
+    /// estimate is still degenerate. Default 30 mirrors common quant-control
+    /// guidance for daily-trade granularity.
+    /// 評估前所需的最小 PnL 樣本數；預設 30 對齊日級交易控制圖經驗值。
+    #[serde(default = "default_cusum_min_observations")]
+    pub min_observations: u32,
+    /// Reference return level (basis points). `x_t - target_return_bps` is the
+    /// per-trade deviation accumulated by the chart. Default `0.0` = breakeven
+    /// net of fees; operators may bump to per-strategy expected gross edge
+    /// minus realized cost when wired in Phase B+.
+    /// 參考收益水平（bps）；累積偏差 = `x_t - target_return_bps`。預設 0.0 = 扣費打平。
+    #[serde(default = "default_cusum_target_return_bps")]
+    pub target_return_bps: f64,
+}
+
+fn default_cusum_enabled() -> bool {
+    // Phase A safe default: dormant. Flipping to `true` requires Phase B+
+    // runtime wiring (consumer + alarm sink) — schema-only landing has
+    // nothing to act on.
+    // Phase A 安全預設：靜默；翻 true 需 Phase B+ runtime wiring 完成。
+    false
+}
+
+fn default_cusum_slack_k() -> f64 {
+    // 0.5σ — standard one-sided CUSUM deadband (Montgomery, Statistical
+    // Quality Control). Catches sustained drifts > 0.5σ while ignoring
+    // sub-σ noise.
+    // 0.5σ — 標準單側 CUSUM 死區（Montgomery 統計品質管制慣例）。
+    0.5
+}
+
+fn default_cusum_threshold_h() -> f64 {
+    // 4.0σ — Page's H-decision boundary midpoint (4-5σ is the classic
+    // alarm band; 4.0 trades a slightly tighter fence for fewer false
+    // negatives at the cost of more false positives, which we offset
+    // with the `min_observations = 30` warm-up).
+    // 4.0σ — Page H-decision 經典中位（4-5σ 警報帶；min_observations=30 平衡假警報）。
+    4.0
+}
+
+fn default_cusum_min_observations() -> u32 {
+    // 30 — daily-trade granularity warm-up (≈ 1 trading month of samples)
+    // before the σ estimate stabilises and the chart becomes evaluable.
+    // 30 — 日級交易約 1 個月樣本，σ 估計穩定後才評估警報。
+    30
+}
+
+fn default_cusum_target_return_bps() -> f64 {
+    // 0.0 — breakeven net of fees. Operators tune this per-strategy in the
+    // future runtime wiring follow-up to encode the strategy's expected
+    // gross-minus-cost reference level.
+    // 0.0 — 扣費打平；後續 wiring 跟進時 operator 按策略 gross-cost 調整。
+    0.0
+}
+
+impl Default for CusumConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_cusum_enabled(),
+            slack_k: default_cusum_slack_k(),
+            threshold_h: default_cusum_threshold_h(),
+            min_observations: default_cusum_min_observations(),
+            target_return_bps: default_cusum_target_return_bps(),
+        }
+    }
+}
+
+impl CusumConfig {
+    /// G7-04: Validate that `0 < slack_k < threshold_h`, `threshold_h <= 100`,
+    /// and `min_observations >= 5`. Fails fast at config-load time so an
+    /// unreachable-alarm or degenerate-σ misconfiguration cannot leak into
+    /// the (future) hot path.
+    /// G7-04：驗證 0 < slack_k < threshold_h、threshold_h ≤ 100、min_observations ≥ 5。
+    pub fn validate(&self) -> Result<(), String> {
+        if !(self.slack_k > 0.0) {
+            return Err(format!(
+                "risk.cusum.slack_k ({}) must be > 0 (zero deadband collapses to instant alarm)",
+                self.slack_k
+            ));
+        }
+        if !(self.threshold_h > 0.0) {
+            return Err(format!(
+                "risk.cusum.threshold_h ({}) must be > 0",
+                self.threshold_h
+            ));
+        }
+        if self.threshold_h > 100.0 {
+            return Err(format!(
+                "risk.cusum.threshold_h ({}) must be <= 100 (sanity ceiling; beyond ~10σ the chart never alarms)",
+                self.threshold_h
+            ));
+        }
+        if !(self.slack_k < self.threshold_h) {
+            return Err(format!(
+                "risk.cusum.slack_k ({}) must be < threshold_h ({}) — otherwise σ-scaled threshold sits inside the deadband and no alarm is reachable",
+                self.slack_k, self.threshold_h
+            ));
+        }
+        if self.min_observations < 5 {
+            return Err(format!(
+                "risk.cusum.min_observations ({}) must be >= 5 (smaller warm-up makes σ estimate degenerate)",
+                self.min_observations
+            ));
+        }
+        Ok(())
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Tests — extracted to risk_config_tests.rs (FIX-08 file size)

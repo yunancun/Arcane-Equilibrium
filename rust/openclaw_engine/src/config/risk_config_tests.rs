@@ -714,3 +714,163 @@ fn test_g7_02_ewma_vol_lambda_for_timeframe_lookup() {
     assert!((cfg.lambda_for_timeframe("random") - 0.97).abs() < 1e-12);
     assert!((cfg.lambda_for_timeframe("") - 0.97).abs() < 1e-12);
 }
+
+// ----- G7-04 (2026-04-24): CusumConfig strategy edge-decay monitor schema -----
+
+#[test]
+fn test_g7_04_cusum_default_disabled_with_canonical_constants() {
+    // Phase A safe default: enabled=false (dormant) so no behavioural change
+    // until Phase B+ runtime wiring lands. Numeric defaults match canonical
+    // quant-control-chart literature: slack_k=0.5σ deadband, threshold_h=4σ
+    // alarm boundary, min_observations=30 warm-up, target_return_bps=0
+    // (breakeven net of fees).
+    // Phase A 預設靜默 enabled=false；數值預設對齊標準 CUSUM 文獻
+    // (slack_k=0.5σ, threshold_h=4σ, min_obs=30, target_return_bps=0)。
+    let cfg = RiskConfig::default();
+    assert!(!cfg.cusum.enabled, "Phase A default must be enabled=false");
+    assert!(
+        (cfg.cusum.slack_k - 0.5).abs() < 1e-12,
+        "default slack_k must be 0.5σ"
+    );
+    assert!(
+        (cfg.cusum.threshold_h - 4.0).abs() < 1e-12,
+        "default threshold_h must be 4.0σ"
+    );
+    assert_eq!(
+        cfg.cusum.min_observations, 30,
+        "default min_observations must be 30"
+    );
+    assert!(
+        (cfg.cusum.target_return_bps - 0.0).abs() < 1e-12,
+        "default target_return_bps must be 0.0 (breakeven net of fees)"
+    );
+    assert!(cfg.validate().is_ok(), "default cusum must validate");
+}
+
+#[test]
+fn test_g7_04_cusum_validate_rejects_nonpositive_slack_k() {
+    // slack_k <= 0 collapses the deadband to zero, which makes any non-zero
+    // drift instantly accumulate — degenerate; validate() must reject.
+    // slack_k <= 0 死區為零退化為任意偏移即累積；validate() 必須拒絕。
+    let mut cfg = RiskConfig::default();
+    cfg.cusum.slack_k = 0.0;
+    assert!(cfg.validate().is_err(), "slack_k == 0 must reject");
+    cfg.cusum.slack_k = -0.1;
+    assert!(cfg.validate().is_err(), "negative slack_k must reject");
+    cfg.cusum.slack_k = 0.5;
+    assert!(cfg.validate().is_ok(), "0.5 (default) must accept");
+}
+
+#[test]
+fn test_g7_04_cusum_validate_rejects_slack_k_ge_threshold_h() {
+    // slack_k >= threshold_h makes the σ-scaled threshold sit inside the
+    // deadband — no alarm is reachable. validate() must reject this
+    // configuration so the bug is caught at config-load time, not when an
+    // operator wonders why no alarm ever fires after Phase B+ wiring.
+    // slack_k >= threshold_h 警報閾值落入死區內無法觸發，必須在 config-load 時拒絕。
+    let mut cfg = RiskConfig::default();
+    cfg.cusum.slack_k = 4.0;
+    cfg.cusum.threshold_h = 4.0;
+    assert!(
+        cfg.validate().is_err(),
+        "slack_k == threshold_h must reject (no alarm room)"
+    );
+    cfg.cusum.slack_k = 5.0;
+    cfg.cusum.threshold_h = 4.0;
+    assert!(
+        cfg.validate().is_err(),
+        "slack_k > threshold_h must reject"
+    );
+    cfg.cusum.slack_k = 0.5;
+    cfg.cusum.threshold_h = 4.0;
+    assert!(cfg.validate().is_ok(), "slack_k < threshold_h must accept");
+}
+
+#[test]
+fn test_g7_04_cusum_validate_rejects_threshold_h_out_of_range() {
+    // threshold_h must be > 0 (alarm boundary at zero collapses to the
+    // deadband) and <= 100 (sanity ceiling — beyond ~10σ the chart is
+    // effectively unreachable). Both endpoints + negative + >100 reject.
+    // threshold_h 必為 (0, 100]；超界（含 ≤0、>100）皆必拒絕。
+    let mut cfg = RiskConfig::default();
+    cfg.cusum.threshold_h = 0.0;
+    assert!(cfg.validate().is_err(), "threshold_h == 0 must reject");
+    cfg.cusum.threshold_h = -1.0;
+    assert!(cfg.validate().is_err(), "negative threshold_h must reject");
+    cfg.cusum.threshold_h = 101.0;
+    assert!(
+        cfg.validate().is_err(),
+        "threshold_h > 100 must reject (sanity ceiling)"
+    );
+    cfg.cusum.threshold_h = 100.0;
+    assert!(
+        cfg.validate().is_ok(),
+        "threshold_h == 100 (boundary) must accept"
+    );
+    cfg.cusum.threshold_h = 4.0;
+    assert!(cfg.validate().is_ok(), "default 4.0 must accept");
+}
+
+#[test]
+fn test_g7_04_cusum_validate_rejects_min_observations_below_5() {
+    // min_observations < 5 makes the σ estimate degenerate (sub-handful of
+    // samples) — validate() must reject so the chart only evaluates after
+    // a meaningful warm-up.
+    // min_observations < 5 樣本不足 σ 估計失效；validate() 必須拒絕。
+    let mut cfg = RiskConfig::default();
+    cfg.cusum.min_observations = 0;
+    assert!(cfg.validate().is_err(), "min_observations == 0 must reject");
+    cfg.cusum.min_observations = 4;
+    assert!(cfg.validate().is_err(), "min_observations == 4 must reject");
+    cfg.cusum.min_observations = 5;
+    assert!(
+        cfg.validate().is_ok(),
+        "min_observations == 5 (boundary) must accept"
+    );
+    cfg.cusum.min_observations = 30;
+    assert!(cfg.validate().is_ok(), "default 30 must accept");
+}
+
+#[test]
+fn test_g7_04_cusum_toml_roundtrip_preserves_custom_values() {
+    // Custom CUSUM values must survive TOML round-trip unchanged so operator
+    // edits in [cusum] sections of risk_config_{demo,live,paper}.toml flow
+    // back through the Rust ConfigStore correctly.
+    // 自訂 cusum 值經 TOML round-trip 必須無損保留。
+    let mut cfg = RiskConfig::default();
+    cfg.cusum.enabled = true;
+    cfg.cusum.slack_k = 0.75;
+    cfg.cusum.threshold_h = 5.0;
+    cfg.cusum.min_observations = 60;
+    cfg.cusum.target_return_bps = -10.0;
+
+    let toml_str = toml::to_string(&cfg).unwrap();
+    let de: RiskConfig = toml::from_str(&toml_str).unwrap();
+
+    assert!(de.cusum.enabled);
+    assert!((de.cusum.slack_k - 0.75).abs() < 1e-12);
+    assert!((de.cusum.threshold_h - 5.0).abs() < 1e-12);
+    assert_eq!(de.cusum.min_observations, 60);
+    assert!((de.cusum.target_return_bps - (-10.0)).abs() < 1e-12);
+    assert!(de.validate().is_ok());
+}
+
+#[test]
+fn test_g7_04_cusum_partial_toml_falls_back_to_defaults() {
+    // [cusum] section absent → #[serde(default)] returns the canonical
+    // dormant defaults (enabled=false / 0.5 / 4.0 / 30 / 0.0), preserving
+    // the pre-G7-04 runtime behavior bit-for-bit.
+    // TOML 缺 [cusum] 區段時，#[serde(default)] 補回靜默預設保留 G7-04 前行為。
+    let toml_str = r#"
+        [meta]
+        version = 1
+        saved_ts_ms = 0
+    "#;
+    let cfg: RiskConfig = toml::from_str(toml_str).unwrap();
+    assert!(!cfg.cusum.enabled, "absent section must default to disabled");
+    assert!((cfg.cusum.slack_k - 0.5).abs() < 1e-12);
+    assert!((cfg.cusum.threshold_h - 4.0).abs() < 1e-12);
+    assert_eq!(cfg.cusum.min_observations, 30);
+    assert!((cfg.cusum.target_return_bps - 0.0).abs() < 1e-12);
+    assert!(cfg.validate().is_ok());
+}

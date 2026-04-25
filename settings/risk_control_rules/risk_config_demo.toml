@@ -197,3 +197,23 @@ per_symbol_position_cap = {}
 [ewma_vol]
 default_lambda = 0.97
 lambdas = {}
+
+# G7-04 (2026-04-24) — CUSUM strategy decay monitor (Phase A: schema only).
+# One-sided downward CUSUM control chart that accumulates per-trade PnL
+# deviations from `target_return_bps` and alarms when the cumulative sum
+# exceeds `threshold_h * σ`. Defaults follow Page/Montgomery convention:
+#   slack_k = 0.5σ deadband, threshold_h = 4σ alarm, min_observations = 30
+#   warm-up, target_return_bps = 0 (breakeven net of fees).
+# Phase A schema-only landing: `enabled = false` → fully dormant, no
+# `dynamic_risk_sizer` / strategy-disable hook fires. Wiring to the runtime
+# consumer is deferred to a future G7-04 follow-up.
+# validate() enforces 0 < slack_k < threshold_h, threshold_h ∈ (0, 100],
+# min_observations >= 5.
+# G7-04：CUSUM 策略衰減監控 schema；Phase A 預設靜默 enabled=false 不接 runtime，
+# 後續 follow-up 補 wiring。
+[cusum]
+enabled = false
+slack_k = 0.5
+threshold_h = 4.0
+min_observations = 30
+target_return_bps = 0.0

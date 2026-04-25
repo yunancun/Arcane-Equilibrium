@@ -187,4 +187,19 @@ per_symbol_position_cap = {}
 default_lambda = 0.97
 lambdas = {}
 
+# G7-04 (2026-04-24) — CUSUM strategy decay monitor (Phase A: schema only).
+# Live keeps the conservative dormant default `enabled = false` until Phase B+
+# wiring lands and the operator opts in via IPC. Numeric defaults match
+# risk_config_demo.toml (Page/Montgomery convention 0.5σ / 4σ / 30 obs / 0 bps);
+# see that file for the full rationale. validate() enforces 0 < slack_k <
+# threshold_h, threshold_h ∈ (0, 100], min_observations >= 5.
+# G7-04：Live 維持 Phase A 靜默預設 enabled=false 不接 runtime；後續 follow-up
+# 補 wiring。
+[cusum]
+enabled = false
+slack_k = 0.5
+threshold_h = 4.0
+min_observations = 30
+target_return_bps = 0.0
+
 [experimental.flags]
