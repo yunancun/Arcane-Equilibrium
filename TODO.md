@@ -42,7 +42,7 @@
    - G3-02/03/04 ExecutorAgent shadow→live toggle 實裝 + Rust IPC handler + e2e test（前置 G3-01 RFC ✅）
    - G5-02/04/05 剩餘拆分（live_session_routes.py 1449 / ai_service.py 1258 / bb_reversion.rs 1143）
    - G7-01/02/03/04 量化配置化（Kelly / EWMA / Hurst / CUSUM）
-   - G4-01 Labels pooled 加速（等 PipelineConfig.symbol Optional commit）
+   - ~~G4-01 Labels pooled 加速（等 PipelineConfig.symbol Optional commit）~~ ✅ 已完成於 commit `dc06b88` (2026-04-23 P1-7 C unblock)，2026-04-25 audit 確認
 
 **並行可派 sub-agent**：G3-02 實裝（需 E1+PA 鏈，主 session 啟動）· G5-02/G5-04 Python 拆（獨立軌道）· G7-01~04 量化並行
 
@@ -218,7 +218,7 @@ ssh trade-core "cd ~/BybitOpenClaw/srv && python3 helper_scripts/db/passive_wait
 
 | ID | Tag | 項目 | 前置 | 負責修/驗 | 工時 | 完成標準 |
 |---|---|---|---|---|---|---|
-| **G4-01** | 🟠P1 | Labels pooled 加速（per-strategy pool） | `PipelineConfig.symbol` Optional commit | MIT+E1 / E2 | 1-2d | labels ≥200 pooled |
+| ~~**G4-01**~~ ✅ | 🟠P1 | ~~Labels pooled 加速（per-strategy pool）~~ — **已完成** commit `dc06b88` (2026-04-23) — `PipelineConfig.symbol Optional[str]` + `_resolve_symbol_slot()` + pooled SQL branch (`%(symbol)s IS NULL OR symbol = ...`) + 13 dedicated tests in `program_code/ml_training/tests/test_pooled_training.py`；2026-04-25 G4-01 audit re-confirm：完成標準「labels ≥200 pooled」由 `min_samples=200` gate 配 pooled SQL 分支天然滿足，operator default `symbol=None` 即跨 symbol 累積。 | `PipelineConfig.symbol` Optional commit | MIT+E1 / E2 | 1-2d | labels ≥200 pooled ✅ |
 | **G4-02** | 🟠P1 | `run_training_pipeline.py` 首跑 grid_trading | G4-01 | MIT / E4 | 4h | 首個 ONNX artifact + registry row |
 | **G4-03** | 🟡P2 | model_registry canary rules + auto-promote draft | G4-02 | E1+E2 | 2d | `/api/v1/ml/model_promote` route live |
 | **G4-04** | 🟡P2 | edge_estimator_scheduler healthcheck [13] | G1-01 | E1 / QA | 0.5d | cron 每 1h check mtime |
