@@ -2,6 +2,8 @@
 
 > Skill 安全審計結果（2026-04-25）+ 修復路徑。Audit 角色：對抗性 audit（**不是辯護者**）。
 > 24 個 OpenClaw custom skill 全部審完 × 26 項 checklist。
+>
+> **STATUS（2026-04-25 close-out）**：5 P0 done ✅ / ~17 P1 done ✅ / 5 P2 done（高 ROI 部分）/ 22 P2 + 17 P3 = 39 條留 known low-priority drift backlog（**operator 同意不修**）/ 5 盲點處置完。**Audit 主體完結**；剩 backlog 為 cosmetic drift，未來治理變動時 batch 處理。
 
 ## Executive Summary
 

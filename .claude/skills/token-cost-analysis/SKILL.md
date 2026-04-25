@@ -11,6 +11,8 @@ allowed-tools: Read, Grep, Glob, Bash
 
 > **S3 上層 drift 防線**：本 skill 引用上層（CLAUDE.md / DOC-XX / SM-XX / EX-XX）為 extract；原文修改後可能漂移，發現不一致以原文為準。
 
+> ⚠️ **Cost limit / SLA 數字 disclaimer**：「每日 $2 硬上限」「L1 < 3s」「cost_edge_ratio ≥ 0.8」等具體數字以 **DOC-08 V1 + CLAUDE.md §二 原則 13** 原文為準；本 skill 為 extract，數字若有出入 → 以治理為準。
+
 ## 何時觸發
 
 - AI-E 收到「token 成本審計」「cost_edge_ratio 評估」「Layer 2 預算超標」

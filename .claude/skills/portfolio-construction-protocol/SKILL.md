@@ -117,7 +117,7 @@ return_i = α_i + β1·F_BTC + β2·F_sector + β3·F_macro + ε_i
 
 ### 3.5 OpenClaw 25 symbol 應用
 - 多半高相關（ρ > 0.6 vs BTC）
-- 「25 symbols 分散」實際上 PC1 主導 → 真實 effective N ≈ 5-8
+- 「25 symbols 分散」實際上 PC1 主導 → 真實 effective N **需實證 PCA**（heuristic 估計 ~5-8 但**未 verified**；具體值跑 PCA on 25 symbol returns 取 PC1 explained variance 倒推）
 - 設計時要算 effective number of bets，不能假設 N=25 獨立
 
 ## 4. 風險度量 / 風控數學深化
