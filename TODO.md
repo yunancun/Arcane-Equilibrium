@@ -1,6 +1,6 @@
 # OpenClaw TODO — 工作清單（v3 · 單一時間軸版）
 
-**最後更新**：2026-04-25 03:42 CEST（Wave 2 batch 12：G4-02 first ONNX 確認已 2026-04-23 落地（grid_trading demo q10/q50/q90 3 rows verdict=shadow_only），import path bug 修正解鎖 retrain；engine alive；Linux 仍 2094/0；pytest 3038）
+**最後更新**：2026-04-25 03:55 CEST（Wave 2 batch 12+13：G4-02 確認已落地 + G3-05 exit.shadow_enabled IPC regression coverage + ml_training import fix；Linux **2116/0**；pytest 3038）
 **版本**：v3（Wave 線性版；廢除雙軌 P0-P4 章節，P0/P1/P2 降為每項 tag）
 **舊版歸檔**：v2 `docs/archive/2026-04-24--todo_v2_dual_axis_snapshot.md`（458 行，Wave+P 雙軌）· v1 `docs/archive/2026-04-24--todo_v1_refactor_snapshot.md`（328 行）· v0 `docs/archive/2026-04-24--todo_snapshot_pre_refactor.md`（700 行）
 **簽核**：PM Approved FIX-PLAN v2 → [Sign-off](docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-24--FixPlan_v2_PMApproval.md)
@@ -16,7 +16,7 @@
 
 **Wave 1 進度**：10/11 完成；剩 G1-04 P1 背景（依賴 PostOnly demo 累積 + **G7-09 已 deploy** 需 ~1w 後 compute）。
 
-**Wave 2 進度**：22/若干 完成（前述 18 + G4-01 marker dc06b88 + G3-10 + G4-02 first ONNX 確認 + ml_training import fix 2c920cb）；隔壁 session 新增 STRATEGIST-TUNE-TARGET-CONFIG-1 + DUST-EVICTION GUI + g7-09c BBO maker price；G7-05 blocked on data（~05-01+）；G3-05/06/07/08/11 / G4-03 / G7-03 Phase B 未開工。**G3-02 全 Phase + G3-10 + G4-02 完成** → operator API 雙口（shadow-toggle + strategist promote）+ ML pipeline 隨時可重訓。
+**Wave 2 進度**：23/若干 完成（前述 22 + G3-05 exit.shadow_enabled IPC regression）；G7-05 blocked on data（~05-01+）；G3-06/07/08/11 / G4-03 / G7-03 Phase B 未開工。**G3-02 全 Phase + G3-10 + G4-02 + G3-05 完成** → operator API 雙口（shadow-toggle + strategist promote）+ ML pipeline 重訓 ready + EDGE-P2 Phase 2+ Combine Layer shadow flip <60s IPC。
 
 **本週 Top 4**（按順序）：
 
