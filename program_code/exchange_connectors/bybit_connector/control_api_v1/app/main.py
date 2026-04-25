@@ -220,6 +220,16 @@ app.include_router(ml_router)
 from .strategist_history_routes import strategist_history_router  # noqa: E402
 app.include_router(strategist_history_router)
 
+# ── Executor Router / 執行器控制路由（G3-02 Phase C）──
+# Operator-facing IPC bridge for ExecutorAgent shadow_mode flip; gated by the
+# existing 5-gate live chain when flipping live to non-shadow. Phase A (Rust
+# RiskConfig.executor schema + IPC) and Phase B (Python ExecutorConfigCache)
+# already landed; this router is the operator-control surface.
+# Operator 翻轉 ExecutorAgent shadow_mode 的 IPC 橋接；live + 解鎖方向會走完
+# 整 5-gate；demo / paper / 退回 shadow 僅 Operator 角色。
+from .executor_routes import executor_router  # noqa: E402
+app.include_router(executor_router)
+
 # ── Startup Integrity Check / 啟動完整性驗證 ────────────────────────────────
 # Verify that non-optional critical dependencies were successfully injected at
 # module initialisation time.  H0_GATE is allowed to be None in degraded /
