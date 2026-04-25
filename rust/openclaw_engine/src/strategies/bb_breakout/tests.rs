@@ -53,6 +53,9 @@ pub(super) fn ctx_ext(
         funding_rate: None,
         index_price: None,
         open_interest: None,
+        best_bid: None,
+        best_ask: None,
+        tick_size: None,
     }
 }
 
@@ -694,4 +697,111 @@ fn test_bb_breakout_update_params_roundtrips_maker_fields() {
     p_lo.maker_limit_timeout_ms = 1_000;
     s.update_params(p_lo).expect("valid params");
     assert_eq!(s.get_params().maker_limit_timeout_ms, 15_000);
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// G7-09c Phase 1: BBO-aware PostOnly maker price tests for bb_breakout.
+// G7-09c Phase 1：bb_breakout BBO-aware PostOnly 限價測試。
+// ─────────────────────────────────────────────────────────────────────────
+
+/// Helper: ctx_ext clone with BBO + tick_size populated.
+/// 輔助：在 ctx_ext 基礎上補齊 BBO + tick_size。
+fn ctx_with_bbo_g709c(
+    bw: f64,
+    pct_b: f64,
+    vol: f64,
+    ts: u64,
+    last: f64,
+    bid: f64,
+    ask: f64,
+    tick: f64,
+) -> TickContext<'static> {
+    let ind = Box::leak(Box::new(IndicatorSnapshot {
+        bollinger: Some(BollingerResult {
+            upper: 51000.0,
+            middle: 50000.0,
+            lower: 49000.0,
+            bandwidth: bw,
+            percent_b: pct_b,
+        }),
+        volume_ratio: Some(vol),
+        atr_14: None,
+        hurst: None,
+        ..Default::default()
+    }));
+    TickContext {
+        symbol: "BTC",
+        price: last,
+        timestamp_ms: ts,
+        indicators: Some(ind),
+        signals: &[],
+        h0_allowed: true,
+        funding_rate: None,
+        index_price: None,
+        open_interest: None,
+        best_bid: Some(bid),
+        best_ask: Some(ask),
+        tick_size: Some(tick),
+    }
+}
+
+/// G7-09c: bb_breakout buy (squeeze→expansion long) uses best_bid - buffer×tick.
+/// G7-09c：bb_breakout 買單（壓縮→擴張多頭）使用 best_bid - buffer×tick。
+#[test]
+fn test_g7_09c_bb_breakout_buy_uses_best_bid_passive() {
+    let mut s = BbBreakout::new();
+    s.min_persistence_ms = 0;
+    s.use_maker_entry = true;
+    s.maker_price_buffer_ticks = 1;
+    s.maker_price_offset_bps = 1.0;
+    // Squeeze first.
+    // 先壓縮。
+    s.on_tick(&ctx_with_bbo_g709c(0.01, 0.5, 1.0, 0, 50_000.0, 49_999.5, 50_000.5, 0.1));
+    // Expansion + high vol + percent_b > 1 → long breakout.
+    // 擴張 + 高量 + percent_b > 1 → 多頭突破。
+    let i = s.on_tick(&ctx_with_bbo_g709c(0.05, 1.1, 2.0, 700_000, 50_000.0, 49_999.5, 50_000.5, 0.1));
+    assert_eq!(i.len(), 1);
+    match &i[0] {
+        StrategyAction::Open(intent) => {
+            assert!(intent.is_long);
+            assert_eq!(intent.order_type, "limit");
+            assert_eq!(intent.time_in_force, Some(TimeInForce::PostOnly));
+            let lp = intent.limit_price.expect("limit_price set");
+            // Expected: 49_999.5 - 0.1 = 49_999.4.
+            assert!(
+                (lp - 49_999.4).abs() < 1e-6,
+                "G7-09c BUY limit got {lp}, expected 49_999.4"
+            );
+        }
+        other => panic!("expected Open, got {other:?}"),
+    }
+}
+
+/// G7-09c: bb_breakout sell (squeeze→expansion short) uses best_ask + buffer×tick.
+/// G7-09c：bb_breakout 賣單（壓縮→擴張空頭）使用 best_ask + buffer×tick。
+#[test]
+fn test_g7_09c_bb_breakout_sell_uses_best_ask_passive() {
+    let mut s = BbBreakout::new();
+    s.min_persistence_ms = 0;
+    s.use_maker_entry = true;
+    s.maker_price_buffer_ticks = 1;
+    s.maker_price_offset_bps = 1.0;
+    s.on_tick(&ctx_with_bbo_g709c(0.01, 0.5, 1.0, 0, 50_000.0, 49_999.5, 50_000.5, 0.1));
+    // Expansion + high vol + percent_b < 0 → short breakout.
+    // 擴張 + 高量 + percent_b < 0 → 空頭突破。
+    let i = s.on_tick(&ctx_with_bbo_g709c(0.05, -0.1, 2.0, 700_000, 50_000.0, 49_999.5, 50_000.5, 0.1));
+    assert_eq!(i.len(), 1);
+    match &i[0] {
+        StrategyAction::Open(intent) => {
+            assert!(!intent.is_long);
+            assert_eq!(intent.order_type, "limit");
+            let lp = intent.limit_price.expect("limit_price set");
+            // Expected: 50_000.5 + 0.1 = 50_000.6.
+            assert!(
+                (lp - 50_000.6).abs() < 1e-6,
+                "G7-09c SELL limit got {lp}, expected 50_000.6"
+            );
+        }
+        other => panic!("expected Open, got {other:?}"),
+    }
 }

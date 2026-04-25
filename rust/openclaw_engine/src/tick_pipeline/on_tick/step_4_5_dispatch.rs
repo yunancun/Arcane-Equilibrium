@@ -91,6 +91,33 @@ impl TickPipeline {
         let index_price = self.index_prices.get(sym).copied();
         let open_interest = self.open_interests.get(sym).copied();
 
+        // G7-09c Phase 1: surface BBO + tick_size to strategies so the maker
+        // PostOnly path can compute a strictly passive limit_price (best_bid -
+        // buffer×tick / best_ask + buffer×tick) instead of the legacy
+        // `last_price ± offset_bps` which RCA `7f0e793` proved cross the
+        // book 100% of the time on Bybit. `None` semantics: BBO None when WS
+        // hasn't delivered orderbook (PriceEvent default = 0.0 → mapped to
+        // None to match strategy fallback expectations); tick_size None when
+        // instrument_cache miss.
+        // G7-09c Phase 1：暴露 BBO 與 tick_size 給策略，讓 maker PostOnly 路徑
+        // 算嚴格被動限價。`PriceEvent.bid_price/ask_price` 預設 0.0 視為 None，
+        // 對齊策略 fallback 條件；tick_size 透過 instrument_cache 查得。
+        let best_bid = if event.bid_price > 0.0 {
+            Some(event.bid_price)
+        } else {
+            None
+        };
+        let best_ask = if event.ask_price > 0.0 {
+            Some(event.ask_price)
+        } else {
+            None
+        };
+        let tick_size = self
+            .instrument_cache
+            .as_ref()
+            .and_then(|c| c.get_tick_size(sym))
+            .filter(|t| *t > 0.0);
+
         let ctx = TickContext {
             symbol: sym,
             price: event.last_price,
@@ -101,6 +128,9 @@ impl TickPipeline {
             funding_rate,
             index_price,
             open_interest,
+            best_bid,
+            best_ask,
+            tick_size,
         };
 
         // NOTE: Current rejection rollback assumes each strategy emits at most 1 intent per tick.

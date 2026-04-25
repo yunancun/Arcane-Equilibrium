@@ -50,6 +50,23 @@ pub struct BbReversionParams {
     pub confluence_threshold_no_trade: f64,
     pub confluence_threshold_light: f64,
     pub confluence_threshold_full: f64,
+    /// G7-09c Phase 1: ticks INSIDE the inside quote at which the BBO-aware
+    /// PostOnly limit sits. Default 1 (one tick more passive than best_bid/ask).
+    /// `limit_offset_bps` becomes the fallback-only path when BBO or tick_size
+    /// unavailable. Bounded `[0, 10]` by `validate()`. Note: GAP-9 currently
+    /// force-disables `use_limit` in the runtime ctor (paper engine has no
+    /// limit-order matcher), so this field is plumbing-only until GAP-9 lifts.
+    /// G7-09c Phase 1：BBO-aware PostOnly 限價離 inside quote 的 tick 數，預設 1。
+    /// `limit_offset_bps` 退化為 BBO 不可得時的 fallback。`validate()` 限 `[0, 10]`。
+    /// 注意：GAP-9 在 runtime ctor 強制關閉 `use_limit`，本欄位現為埋線；GAP-9 解禁後生效。
+    #[serde(default = "default_maker_price_buffer_ticks_bbr")]
+    pub maker_price_buffer_ticks: u32,
+}
+
+/// G7-09c Phase 1: default buffer = 1 tick (one tick inside the inside quote).
+/// G7-09c Phase 1：預設 1 tick（退一 tick）。
+fn default_maker_price_buffer_ticks_bbr() -> u32 {
+    1
 }
 
 impl Default for BbReversionParams {
@@ -76,6 +93,9 @@ impl Default for BbReversionParams {
             confluence_threshold_no_trade: cc.threshold_no_trade,
             confluence_threshold_light: cc.threshold_light,
             confluence_threshold_full: cc.threshold_full,
+            // G7-09c Phase 1: default 1 tick inside the inside quote.
+            // G7-09c Phase 1：預設退一 tick。
+            maker_price_buffer_ticks: 1,
         }
     }
 }
@@ -262,6 +282,11 @@ impl StrategyParams for BbReversionParams {
         }
         if self.min_notional_usd < 1.0 {
             return Err("min_notional_usd must be >= 1.0".into());
+        }
+        // G7-09c Phase 1: bound BBO buffer (see field doc).
+        // G7-09c Phase 1：限定 BBO buffer，防 IPC 寫入過大。
+        if self.maker_price_buffer_ticks > 10 {
+            return Err("maker_price_buffer_ticks must be <= 10".into());
         }
         Ok(())
     }

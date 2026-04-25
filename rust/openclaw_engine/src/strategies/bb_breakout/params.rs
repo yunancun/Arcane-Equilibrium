@@ -177,6 +177,13 @@ pub struct BbBreakoutParams {
     /// event_consumer sweep cancels it. Clamped to [15_000, 300_000] on assign.
     /// EDGE-P2-3 Phase 2+：PostOnly 掛單最長停留時間(毫秒)，寫入時 clamp。
     pub maker_limit_timeout_ms: u64,
+    /// G7-09c Phase 1: ticks INSIDE the inside quote at which the BBO-aware
+    /// PostOnly limit sits. Default 1 (one tick more passive than best_bid/ask).
+    /// `maker_price_offset_bps` becomes the fallback-only path used when BBO
+    /// or tick_size are unavailable. Bounded `[0, 10]` by `validate()`.
+    /// G7-09c Phase 1：BBO-aware PostOnly 限價離 inside quote 的 tick 數，預設 1。
+    /// `maker_price_offset_bps` 退化為僅 BBO 不可得時的 fallback。`validate()` 限 `[0, 10]`。
+    pub maker_price_buffer_ticks: u32,
     /// P1-11 (2): how Donchian breach combines with the BB-core 3-gate chain.
     /// Default `Hard` → bit-identical to baseline. `Score` softens to confluence
     /// contribution, `Off` disables Donchian check entirely.
@@ -281,6 +288,9 @@ impl Default for BbBreakoutParams {
             use_maker_entry: false,
             maker_price_offset_bps: 1.0,
             maker_limit_timeout_ms: 45_000,
+            // G7-09c Phase 1: default 1 tick inside the inside quote.
+            // G7-09c Phase 1：預設退一 tick。
+            maker_price_buffer_ticks: 1,
             // P1-11 (2): Hard default preserves bit-identical pre-P1-11 behaviour.
             // Operators flip to Score / Off explicitly when A/B testing.
             // P1-11 (2)：`Hard` 預設保留 pre-P1-11 bit-identical；operator A/B 時顯式切換。
@@ -530,6 +540,11 @@ impl StrategyParams for BbBreakoutParams {
             || self.donchian_score_bonus > 0.5
         {
             return Err("donchian_score_bonus must be finite and within [0.0, 0.5]".into());
+        }
+        // G7-09c Phase 1: bound BBO buffer (see params doc).
+        // G7-09c Phase 1：限定 BBO buffer，防 IPC 寫入過大。
+        if self.maker_price_buffer_ticks > 10 {
+            return Err("maker_price_buffer_ticks must be <= 10".into());
         }
         Ok(())
     }

@@ -27,6 +27,7 @@
 use super::{compute_grid_confidence, GridHealth, GridTrading};
 use crate::intent_processor::OrderIntent;
 use crate::order_manager::TimeInForce;
+use crate::strategies::common::{compute_post_only_price, MakerPriceInputs};
 use crate::strategies::{grid_helpers, Strategy, StrategyAction};
 use crate::tick_pipeline::TickContext;
 
@@ -142,16 +143,35 @@ impl GridTrading {
             compute_grid_confidence(ctx.indicators) * self.conf_scale,
         );
 
-        // EDGE-P2-3 Phase 1a: resolve entry order shape (Market vs PostOnly Limit).
-        // Close path stays Market; only new-open intents use the maker path.
-        // BUY offset below last_price; SELL offset above — so PostOnly always rests passively.
-        // EDGE-P2-3 Phase 1a：決定入場單型（Market 或 PostOnly Limit）。平倉維持 Market；
-        // 僅新開倉意圖走 maker 路徑。BUY 掛 last 下方、SELL 掛 last 上方，確保被動側。
+        // EDGE-P2-3 Phase 1a + G7-09c Phase 1: resolve entry order shape
+        // (Market vs PostOnly Limit). Close path stays Market; only new-open
+        // intents use the maker path. G7-09c Phase 1 replaces the legacy
+        // `last_price ± offset_bps` formula (RCA `7f0e793` — 100% PostOnly
+        // reject due to crossing the book) with a strictly passive BBO-aware
+        // price (`best_bid - buffer×tick` / `best_ask + buffer×tick`). When
+        // BBO/tick_size unavailable, helper falls back to legacy + warns.
+        // EDGE-P2-3 Phase 1a + G7-09c Phase 1：決定入場單型。Close 維持 Market；
+        // G7-09c Phase 1 以 BBO-aware 嚴格被動價取代舊 `last_price ± offset_bps`
+        // 公式（RCA `7f0e793` 顯示舊公式 100% PostOnly 拒絕）；BBO 不可得時
+        // helper 回退至舊公式並 warn。
+        let maker_inputs = MakerPriceInputs {
+            last_price: ctx.price,
+            best_bid: ctx.best_bid,
+            best_ask: ctx.best_ask,
+            tick_size: ctx.tick_size,
+        };
         let maker_entry_for_buy = if self.use_maker_entry {
-            let offset = self.maker_price_offset_bps / 10_000.0;
+            let price = compute_post_only_price(
+                true,
+                maker_inputs,
+                self.maker_price_offset_bps,
+                self.maker_price_buffer_ticks,
+                "grid_trading",
+                ctx.symbol,
+            );
             (
                 "limit".to_string(),
-                Some(ctx.price * (1.0 - offset)),
+                Some(price),
                 Some(TimeInForce::PostOnly),
                 Some(self.maker_limit_timeout_ms),
             )
@@ -159,10 +179,17 @@ impl GridTrading {
             ("market".to_string(), None, None, None)
         };
         let maker_entry_for_sell = if self.use_maker_entry {
-            let offset = self.maker_price_offset_bps / 10_000.0;
+            let price = compute_post_only_price(
+                false,
+                maker_inputs,
+                self.maker_price_offset_bps,
+                self.maker_price_buffer_ticks,
+                "grid_trading",
+                ctx.symbol,
+            );
             (
                 "limit".to_string(),
-                Some(ctx.price * (1.0 + offset)),
+                Some(price),
                 Some(TimeInForce::PostOnly),
                 Some(self.maker_limit_timeout_ms),
             )

@@ -33,6 +33,9 @@ fn ctx(price: f64, ts: u64) -> TickContext<'static> {
         funding_rate: None,
         index_price: None,
         open_interest: None,
+        best_bid: None,
+        best_ask: None,
+        tick_size: None,
     }
 }
 
@@ -693,4 +696,121 @@ fn test_grid_update_params_roundtrips_maker_fields() {
     assert!(p2.use_maker_entry);
     assert!((p2.maker_price_offset_bps - 3.0).abs() < 1e-9);
     assert!(g.use_maker_entry);
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// G7-09c Phase 1: BBO-aware PostOnly maker price tests.
+// G7-09c Phase 1：BBO-aware PostOnly 限價測試。
+// ─────────────────────────────────────────────────────────────────────────
+
+/// Helper: ctx with explicit BBO + tick_size for G7-09c maker_price tests.
+/// 輔助：帶顯式 BBO + tick_size 的 ctx（G7-09c maker_price 測試用）。
+fn ctx_with_bbo(price: f64, ts: u64, bid: f64, ask: f64, tick: f64) -> TickContext<'static> {
+    TickContext {
+        symbol: "BTC",
+        price,
+        timestamp_ms: ts,
+        indicators: None,
+        signals: &[],
+        h0_allowed: true,
+        funding_rate: None,
+        index_price: None,
+        open_interest: None,
+        best_bid: Some(bid),
+        best_ask: Some(ask),
+        tick_size: Some(tick),
+    }
+}
+
+/// G7-09c: grid_trading buy uses best_bid - buffer×tick when BBO present.
+/// Use template_bounds (49_000, 51_000) so grid spacing = 200 → first-tick
+/// 50_500 vs second-tick 49_700 cross several lines downward.
+/// G7-09c：grid_trading 買單在 BBO 存在時使用 best_bid - buffer×tick。
+/// 用 template_bounds 確保穿越觸發。
+#[test]
+fn test_g7_09c_grid_buy_uses_best_bid_passive() {
+    let mut g = GridTrading::new(49_000.0, 51_000.0);
+    g.use_maker_entry = true;
+    g.maker_price_buffer_ticks = 1;
+    g.maker_price_offset_bps = 1.0; // fallback only — should not be exercised here
+    // First tick at 50_500 sets last_cross_idx; second tick at 49_700 crosses.
+    // 首 tick 50_500 設 last_cross_idx；第二 tick 49_700 跨越網格。
+    g.on_tick(&ctx_with_bbo(50_500.0, 0, 50_499.5, 50_500.5, 0.1));
+    let actions = g.on_tick(&ctx_with_bbo(49_700.0, 60_001, 49_699.9, 49_700.1, 0.1));
+    let mut found_buy_limit = false;
+    for action in &actions {
+        if let StrategyAction::Open(intent) = action {
+            if intent.is_long {
+                let price = intent.limit_price.expect("limit_price required for buy");
+                // Expected: 49_699.9 - 1*0.1 = 49_699.8 (strictly below ask).
+                // 預期：49_699.9 - 0.1 = 49_699.8（嚴格低於 ask）。
+                assert!(
+                    (price - 49_699.8).abs() < 1e-6,
+                    "buy limit got {price}, expected 49_699.8 (BBO-aware passive)",
+                );
+                assert_eq!(intent.time_in_force, Some(TimeInForce::PostOnly));
+                found_buy_limit = true;
+            }
+        }
+    }
+    assert!(found_buy_limit, "expected at least one BUY limit intent; got {actions:?}");
+}
+
+/// G7-09c: grid_trading sell uses best_ask + buffer×tick when BBO present.
+/// G7-09c：grid_trading 賣單在 BBO 存在時使用 best_ask + buffer×tick。
+#[test]
+fn test_g7_09c_grid_sell_uses_best_ask_passive() {
+    let mut g = GridTrading::new(49_000.0, 51_000.0);
+    g.use_maker_entry = true;
+    g.maker_price_buffer_ticks = 1;
+    g.maker_price_offset_bps = 1.0;
+    // First tick at 49_500 sets last_cross_idx; second tick at 50_300 crosses up.
+    // 首 tick 49_500 設 last_cross_idx；第二 tick 50_300 向上跨越。
+    g.on_tick(&ctx_with_bbo(49_500.0, 0, 49_499.5, 49_500.5, 0.1));
+    let actions = g.on_tick(&ctx_with_bbo(50_300.0, 60_001, 50_299.9, 50_300.1, 0.1));
+    let mut found_sell_limit = false;
+    for action in &actions {
+        if let StrategyAction::Open(intent) = action {
+            if !intent.is_long {
+                let price = intent.limit_price.expect("limit_price required for sell");
+                // Expected: 50_300.1 + 1*0.1 = 50_300.2 (strictly above bid).
+                // 預期：50_300.1 + 0.1 = 50_300.2（嚴格高於 bid）。
+                assert!(
+                    (price - 50_300.2).abs() < 1e-6,
+                    "sell limit got {price}, expected 50_300.2",
+                );
+                assert_eq!(intent.time_in_force, Some(TimeInForce::PostOnly));
+                found_sell_limit = true;
+            }
+        }
+    }
+    assert!(found_sell_limit, "expected at least one SELL limit intent; got {actions:?}");
+}
+
+/// G7-09c: grid_trading falls back to last_price ± offset_bps when BBO absent.
+/// G7-09c：BBO 不可得時 grid_trading 回退至 last_price ± offset_bps。
+#[test]
+fn test_g7_09c_grid_fallback_when_no_bbo() {
+    let mut g = GridTrading::new(49_000.0, 51_000.0);
+    g.use_maker_entry = true;
+    g.maker_price_buffer_ticks = 1;
+    g.maker_price_offset_bps = 5.0; // 5 bps fallback
+    g.on_tick(&ctx(50_500.0, 0)); // BBO=None
+    let actions = g.on_tick(&ctx(49_700.0, 60_001)); // BUY trigger, BBO=None
+    let mut found = false;
+    for action in &actions {
+        if let StrategyAction::Open(intent) = action {
+            if intent.is_long {
+                let price = intent.limit_price.expect("limit_price required");
+                // Fallback: 49_700.0 * (1 - 5/10_000) = 49_700.0 * 0.9995 = 49_675.15.
+                // Fallback：49_700.0 × 0.9995 = 49_675.15。
+                assert!(
+                    (price - 49_675.15).abs() < 1e-6,
+                    "fallback BUY price got {price}, expected 49_675.15",
+                );
+                found = true;
+            }
+        }
+    }
+    assert!(found, "expected fallback BUY intent; got {actions:?}");
 }

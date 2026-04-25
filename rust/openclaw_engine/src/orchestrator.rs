@@ -148,6 +148,9 @@ mod tests {
             funding_rate: None,
             index_price: None,
             open_interest: None,
+            best_bid: None,
+            best_ask: None,
+            tick_size: None,
         };
         assert!(orch.dispatch_tick(&ctx).is_empty());
     }
@@ -182,6 +185,9 @@ mod tests {
             funding_rate: None,
             index_price: None,
             open_interest: None,
+            best_bid: None,
+            best_ask: None,
+            tick_size: None,
         };
         assert_eq!(orch.dispatch_tick(&ctx).len(), 1);
     }
@@ -216,6 +222,9 @@ mod tests {
             funding_rate: None,
             index_price: None,
             open_interest: None,
+            best_bid: None,
+            best_ask: None,
+            tick_size: None,
         };
         assert!(orch.dispatch_tick(&ctx).is_empty());
     }

@@ -16,6 +16,7 @@
 
 use crate::intent_processor::OrderIntent;
 use crate::order_manager::TimeInForce;
+use crate::strategies::common::{compute_post_only_price, MakerPriceInputs};
 use crate::strategies::Strategy;
 use crate::tick_pipeline::TickContext;
 
@@ -50,18 +51,29 @@ impl MaCrossover {
     ) -> OrderIntent {
         let scaled =
             crate::tick_pipeline::on_tick_helpers::clamp_confidence(conf * self.conf_scale);
-        // EDGE-P2-3 Phase 2+: resolve entry order shape (Market vs PostOnly Limit).
-        // BUY offset below last_price; SELL offset above — PostOnly always rests passively.
-        // Close path (StrategyAction::Close) bypasses this helper entirely.
-        // EDGE-P2-3 Phase 2+：決定入場單型。BUY 掛 last 下方、SELL 掛上方；平倉走 Close variant 不經此。
+        // EDGE-P2-3 Phase 2+ + G7-09c Phase 1: resolve entry order shape
+        // (Market vs PostOnly Limit). G7-09c Phase 1 replaces legacy
+        // `last_price ± offset_bps` (RCA `7f0e793` showed 100% PostOnly reject)
+        // with strictly passive BBO-aware price; helper falls back to legacy
+        // when BBO/tick_size unavailable.
+        // EDGE-P2-3 Phase 2+ + G7-09c Phase 1：決定入場單型；G7-09c 以 BBO-aware
+        // 嚴格被動價取代舊 `last_price ± offset_bps`，BBO 不可得時 helper fallback。
         let (order_type, limit_price, time_in_force, maker_timeout_ms) =
             if self.use_maker_entry {
-                let offset = self.maker_price_offset_bps / 10_000.0;
-                let limit = if is_long {
-                    ctx.price * (1.0 - offset)
-                } else {
-                    ctx.price * (1.0 + offset)
+                let inputs = MakerPriceInputs {
+                    last_price: ctx.price,
+                    best_bid: ctx.best_bid,
+                    best_ask: ctx.best_ask,
+                    tick_size: ctx.tick_size,
                 };
+                let limit = compute_post_only_price(
+                    is_long,
+                    inputs,
+                    self.maker_price_offset_bps,
+                    self.maker_price_buffer_ticks,
+                    "ma_crossover",
+                    ctx.symbol,
+                );
                 (
                     "limit".to_string(),
                     Some(limit),

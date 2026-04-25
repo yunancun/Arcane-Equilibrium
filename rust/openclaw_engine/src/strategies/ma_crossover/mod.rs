@@ -73,6 +73,15 @@ pub struct MaCrossoverParams {
     /// Clamped to [15_000, 300_000] on assignment.
     /// EDGE-P2-3 Phase 2+：PostOnly 掛單最長停留時間（毫秒），寫入時 clamp。
     pub maker_limit_timeout_ms: u64,
+    /// G7-09c Phase 1: ticks INSIDE the inside quote at which the BBO-aware
+    /// PostOnly limit sits. Default 1 (one tick more passive than best_bid/ask).
+    /// `maker_price_offset_bps` is now the fallback-only path used when BBO or
+    /// tick_size are unavailable (cold-start / instrument cache miss). Bounded
+    /// `[0, 10]` by `validate()`.
+    /// G7-09c Phase 1：BBO-aware PostOnly 限價離 inside quote 的 tick 數，預設 1
+    /// （比 best_bid/ask 退一 tick 更被動）。`maker_price_offset_bps` 退化為
+    /// BBO 不可得時的 fallback offset。`validate()` 限制 `[0, 10]`。
+    pub maker_price_buffer_ticks: u32,
 }
 
 impl Default for MaCrossoverParams {
@@ -98,6 +107,9 @@ impl Default for MaCrossoverParams {
             use_maker_entry: false,
             maker_price_offset_bps: 1.0,
             maker_limit_timeout_ms: 45_000,
+            // G7-09c Phase 1: default 1 tick inside the inside quote.
+            // G7-09c Phase 1：預設退一 tick。
+            maker_price_buffer_ticks: 1,
         }
     }
 }
@@ -266,6 +278,13 @@ impl StrategyParams for MaCrossoverParams {
         if self.max_cooldown_boost < 0.0 || self.max_cooldown_boost > 10.0 {
             return Err("max_cooldown_boost must be in [0, 10]".into());
         }
+        // G7-09c Phase 1: bounded buffer to prevent operators / IPC writes
+        // from placing limits 1000+ ticks away (which would never fill on
+        // a quiet symbol). 10 ticks is a sane upper bound for major coins.
+        // G7-09c Phase 1：限定 buffer，防止 operator 或 IPC 設過大造成永不成交。
+        if self.maker_price_buffer_ticks > 10 {
+            return Err("maker_price_buffer_ticks must be <= 10".into());
+        }
         Ok(())
     }
 }
@@ -371,6 +390,10 @@ pub struct MaCrossover {
     pub(crate) maker_price_offset_bps: f64,
     /// EDGE-P2-3 Phase 2+: ms a resting PostOnly maker order may sit (clamped on assign).
     pub(crate) maker_limit_timeout_ms: u64,
+    /// G7-09c Phase 1: ticks INSIDE the inside quote for BBO-aware PostOnly.
+    /// See `MaCrossoverParams::maker_price_buffer_ticks` for semantics.
+    /// G7-09c Phase 1：BBO-aware PostOnly buffer，語義見 params。
+    pub(crate) maker_price_buffer_ticks: u32,
 }
 
 impl MaCrossover {
@@ -401,6 +424,9 @@ impl MaCrossover {
             use_maker_entry: false,
             maker_price_offset_bps: 1.0,
             maker_limit_timeout_ms: 45_000,
+            // G7-09c Phase 1: default 1 tick inside the inside quote.
+            // G7-09c Phase 1：預設退一 tick。
+            maker_price_buffer_ticks: 1,
         }
     }
 }

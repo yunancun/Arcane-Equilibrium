@@ -258,6 +258,12 @@ pub struct GridTrading {
     /// EDGE-P2-3 Phase 1B-3.1：PostOnly 掛單允許停留的最長毫秒數，超時後由
     /// event_consumer 取消。本批次僅資料欄位；1B-3.2 接入 sweep。
     pub(crate) maker_limit_timeout_ms: u64,
+    /// G7-09c Phase 1: ticks INSIDE the inside quote at which the BBO-aware
+    /// PostOnly limit sits. See `params.rs::maker_price_buffer_ticks`. Bounded
+    /// `[0, 10]` by `validate()`.
+    /// G7-09c Phase 1：BBO-aware PostOnly 限價離 inside quote 的 tick 數，
+    /// 範圍 `[0, 10]` 由 `validate()` 限制。
+    pub(crate) maker_price_buffer_ticks: u32,
 }
 
 // build_linear_levels, build_geometric_levels, build_levels moved to grid_helpers.rs (A0-a)

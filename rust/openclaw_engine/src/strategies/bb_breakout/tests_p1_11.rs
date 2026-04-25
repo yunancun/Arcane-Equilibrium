@@ -69,6 +69,9 @@ fn ctx_p1_11(
         funding_rate: None,
         index_price: None,
         open_interest: None,
+        best_bid: None,
+        best_ask: None,
+        tick_size: None,
     }
 }
 

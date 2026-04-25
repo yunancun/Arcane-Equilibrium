@@ -56,6 +56,9 @@ impl BbBreakout {
         self.maker_limit_timeout_ms = super::super::grid_trading::clamp_maker_limit_timeout_ms(
             params.maker_limit_timeout_ms,
         );
+        // G7-09c Phase 1: hot-reload BBO buffer (validate() bounds [0, 10]).
+        // G7-09c Phase 1：熱重載 BBO buffer（validate 範圍 [0, 10]）。
+        self.maker_price_buffer_ticks = params.maker_price_buffer_ticks;
         // P1-11 (2): hot-reload Donchian mode + score bonus. Mode flip takes
         // effect on the next tick (no stale state — evaluated fresh each tick).
         // Score bonus change propagates immediately under Score mode.
@@ -107,6 +110,9 @@ impl BbBreakout {
             use_maker_entry: self.use_maker_entry,
             maker_price_offset_bps: self.maker_price_offset_bps,
             maker_limit_timeout_ms: self.maker_limit_timeout_ms,
+            // G7-09c Phase 1: round-trip BBO buffer for Agent IPC consumers.
+            // G7-09c Phase 1：BBO buffer 經 IPC 來回。
+            maker_price_buffer_ticks: self.maker_price_buffer_ticks,
             // P1-11 (2): echo Donchian mode + score bonus for Agent round-trip.
             // P1-11 (2)：回傳 Donchian 模式 + 評分加成供 Agent 往返。
             donchian_mode: self.donchian_mode,

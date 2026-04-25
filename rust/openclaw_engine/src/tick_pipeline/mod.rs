@@ -639,6 +639,24 @@ pub struct TickContext<'a> {
     /// EDGE-P2-2：最新未平倉合約數（合約張數，來自 Bybit tickers）。
     /// 此處僅暴露原始值；差分窗口由各策略自行維護。
     pub open_interest: Option<f64>,
+    /// G7-09c Phase 1: Best bid from latest tick (orderbook L1, mirrored from
+    /// `PriceEvent.bid_price`). `None` until WS delivers the first orderbook /
+    /// trade event with non-zero bid; consumer maker-price helpers fall back
+    /// to `last_price ± offset_bps` when missing.
+    /// G7-09c Phase 1：最新 tick 的 best bid（鏡射自 `PriceEvent.bid_price`）。
+    /// WS 首次送出非零 bid 前為 None；下游 maker-price helper 缺失時回退至
+    /// `last_price ± offset_bps`。
+    pub best_bid: Option<f64>,
+    /// G7-09c Phase 1: Best ask from latest tick (orderbook L1, mirrored from
+    /// `PriceEvent.ask_price`).
+    /// G7-09c Phase 1：最新 tick 的 best ask（鏡射自 `PriceEvent.ask_price`）。
+    pub best_ask: Option<f64>,
+    /// G7-09c Phase 1: Symbol's tick_size from `instrument_info` cache. `None`
+    /// when the cache hasn't loaded the spec yet (cold-start) — consumers fall
+    /// back to bps-based offsets in that case.
+    /// G7-09c Phase 1：由 `instrument_info` 快取查得的 tick_size；冷啟動 cache
+    /// 未載入時為 None，consumer 走 bps 後備路徑。
+    pub tick_size: Option<f64>,
 }
 
 /// Tick statistics for monitoring / Tick 統計。
