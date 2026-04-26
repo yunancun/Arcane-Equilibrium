@@ -2,7 +2,7 @@
 //! Phase 3b PF-1：策略參數 IPC 測試。
 
 use super::super::*;
-use super::{empty_budget_slot, empty_teacher_slot, make_test_config, make_test_data_dir};
+use super::{empty_budget_slot, empty_h_state_cache_slot, empty_teacher_slot, make_test_config, make_test_data_dir};
 
 /// Helper: create a paper_cmd channel with a consumer that handles param commands.
 /// 輔助：創建帶有參數命令消費者的 paper_cmd 通道。
@@ -79,6 +79,8 @@ async fn test_get_param_ranges_via_ipc() {
         &None,
         &None,
         &None,
+        &empty_h_state_cache_slot(),
+        &None,
     )
     .await;
     assert!(resp.error.is_none(), "error: {:?}", resp.error);
@@ -110,6 +112,8 @@ async fn test_get_strategy_params_via_ipc() {
         &None,
         &None,
         &None,
+        &None,
+        &empty_h_state_cache_slot(),
         &None,
     )
     .await;
@@ -146,6 +150,8 @@ async fn test_update_strategy_params_via_ipc() {
         &None,
         &None,
         &None,
+        &empty_h_state_cache_slot(),
+        &None,
     )
     .await;
     assert!(resp.error.is_none(), "error: {:?}", resp.error);
@@ -173,6 +179,8 @@ async fn test_update_strategy_params_nonexistent() {
         &None,
         &None,
         &None,
+        &None,
+        &empty_h_state_cache_slot(),
         &None,
     )
     .await;
@@ -204,6 +212,8 @@ async fn test_update_strategy_params_missing_params() {
         &None,
         &None,
         &None,
+        &None,
+        &empty_h_state_cache_slot(),
         &None,
     )
     .await;

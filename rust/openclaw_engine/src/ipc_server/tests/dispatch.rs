@@ -2,7 +2,7 @@
 //! Dispatch / JSON-RPC 基本請求處理測試。
 
 use super::super::*;
-use super::{empty_budget_slot, empty_teacher_slot, make_test_config, make_test_data_dir};
+use super::{empty_budget_slot, empty_h_state_cache_slot, empty_teacher_slot, make_test_config, make_test_data_dir};
 
 #[tokio::test]
 async fn test_ipc_socket_permissions_0o600() {
@@ -36,6 +36,8 @@ async fn test_dispatch_ping() {
         &None,
         &None,
         &None,
+        &empty_h_state_cache_slot(),
+        &None,
     )
     .await;
     assert!(resp.error.is_none());
@@ -64,6 +66,8 @@ async fn test_dispatch_get_state() {
         &None,
         &None,
         &None,
+        &None,
+        &empty_h_state_cache_slot(),
         &None,
     )
     .await;
@@ -98,6 +102,8 @@ async fn test_dispatch_method_not_found() {
         &None,
         &None,
         &None,
+        &empty_h_state_cache_slot(),
+        &None,
     )
     .await;
     assert!(resp.error.is_some());
@@ -122,6 +128,8 @@ async fn test_dispatch_invalid_json() {
         &None,
         &None,
         &None,
+        &None,
+        &empty_h_state_cache_slot(),
         &None,
     )
     .await;
@@ -148,6 +156,8 @@ async fn test_dispatch_missing_version() {
         &None,
         &None,
         &None,
+        &empty_h_state_cache_slot(),
+        &None,
     )
     .await;
     assert!(resp.error.is_some());
@@ -173,6 +183,8 @@ async fn test_dispatch_missing_method() {
         &None,
         &None,
         &None,
+        &empty_h_state_cache_slot(),
+        &None,
     )
     .await;
     assert!(resp.error.is_some());
@@ -197,6 +209,8 @@ async fn test_dispatch_reload_config() {
         &None,
         &None,
         &None,
+        &None,
+        &empty_h_state_cache_slot(),
         &None,
     )
     .await;

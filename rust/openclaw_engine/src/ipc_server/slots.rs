@@ -88,3 +88,32 @@ pub type AuditPoolSlot = Arc<RwLock<Option<sqlx::PgPool>>>;
 ///   late-inject。None = 未 spawn → IPC 回 scheduler_unavailable。
 pub type StrategistCountersSlot =
     Arc<RwLock<Option<Arc<crate::strategist_scheduler::CycleCounters>>>>;
+
+/// G3-08 H State Gateway (2026-04-26, Phase 1): late-injected slot for the
+/// Rust-side cache of Python H1-H5 + 5-Agent state.
+///
+/// MODULE_NOTE (EN): The poller + cache are spawned only when the env-gate
+///   `OPENCLAW_H_STATE_GATEWAY=1` is set (DEFAULT-OFF). When disabled the
+///   slot stays `None` and the three IPC handlers (query_h_state_full /
+///   get_h_state_status / invalidate_h_state) return a structured
+///   `gateway_disabled` payload — never an error — so Python callers can
+///   render a grey-state without raising. The Rust hot path never reaches
+///   this slot in Phase 1; query is reserved for Phase 2-4 wiring.
+///
+///   Mirrors the G3-03 ExecutorConfigCache slot pattern but flow-direction
+///   is reversed: G3-08 has Python as SSOT and Rust pulls (G3-03 is the
+///   inverse — Rust SSOT, Python pulls).
+///
+///   See `h_state_cache::HStateCache` docstring for the full design.
+///
+/// MODULE_NOTE (中)：poller + cache 只在 env-gate
+///   `OPENCLAW_H_STATE_GATEWAY=1` 時 spawn（DEFAULT-OFF）。關閉時 slot 保持
+///   `None`，三個 IPC handler（query_h_state_full / get_h_state_status /
+///   invalidate_h_state）會回結構化 `gateway_disabled` payload — 不報錯 —
+///   讓 Python caller 顯示灰燈不 raise。Phase 1 Rust hot path 不讀此 slot；
+///   Phase 2-4 接線時才開放查詢。
+///
+///   鏡射 G3-03 ExecutorConfigCache slot pattern，但流向相反：G3-08 是
+///   Python 為 SSOT、Rust pull；G3-03 反之。完整設計詳
+///   `h_state_cache::HStateCache` docstring。
+pub type HStateCacheSlot = Arc<RwLock<Option<Arc<crate::h_state_cache::HStateCache>>>>;

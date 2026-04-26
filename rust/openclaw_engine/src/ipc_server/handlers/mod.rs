@@ -18,6 +18,7 @@
 mod budget;
 mod dynamic_risk;
 mod governance;
+mod h_state;
 mod misc;
 mod risk;
 mod strategy;
@@ -40,6 +41,9 @@ pub(in crate::ipc_server) use dynamic_risk::{
 pub(in crate::ipc_server) use governance::{
     handle_force_governor_looser, handle_force_governor_tighter,
     handle_set_system_mode_broadcast,
+};
+pub(in crate::ipc_server) use h_state::{
+    handle_get_h_state_status, handle_invalidate_h_state, handle_query_h_state_full,
 };
 pub(in crate::ipc_server) use misc::{
     handle_get_active_symbols, handle_get_phase4_status, handle_get_scanner_status,

@@ -79,6 +79,14 @@ pub(super) fn empty_teacher_slot() -> TeacherLoopSlot {
     Arc::new(RwLock::new(None))
 }
 
+/// G3-08 H State Gateway Phase 1: empty cache slot for tests that don't
+/// exercise the gateway path. Mirrors `empty_budget_slot` /
+/// `empty_teacher_slot`.
+/// G3-08 H State Gateway Phase 1：給未演練 gateway 路徑的測試使用的空 cache slot。
+pub(super) fn empty_h_state_cache_slot() -> HStateCacheSlot {
+    Arc::new(RwLock::new(None))
+}
+
 /// Write a test snapshot file to a temp dir, return the dir path.
 /// 寫入測試快照文件到臨時目錄，返回目錄路徑。
 pub(super) fn write_test_snapshot() -> (Arc<PathBuf>, tempfile::TempDir) {

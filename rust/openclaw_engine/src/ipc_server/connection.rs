@@ -30,9 +30,10 @@
 
 use super::dispatch::dispatch_request;
 use super::engine_routing::EngineCommandChannels;
-use super::slots::{BudgetTrackerSlot, TeacherLoopSlot};
+use super::slots::{BudgetTrackerSlot, HStateCacheSlot, TeacherLoopSlot};
 use super::PerEngineRiskStores;
 use crate::config::{BudgetConfig, ConfigManager, ConfigStore, LearningConfig};
+use crate::h_state_cache::poller::InvalidationSender;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -79,6 +80,8 @@ pub(super) async fn handle_connection(
     scanner_registry: Option<Arc<crate::scanner::registry::SymbolRegistry>>,
     strategist_counters: Option<Arc<crate::strategist_scheduler::CycleCounters>>,
     live_auth_recheck_tx: Option<tokio::sync::mpsc::Sender<()>>,
+    h_state_cache: HStateCacheSlot,
+    h_state_invalidation_tx: Option<InvalidationSender>,
 ) {
     let peer = format!("{:?}", stream.peer_addr());
     info!(peer = %peer, "client connected / 客戶端已連接");
@@ -180,7 +183,7 @@ pub(super) async fn handle_connection(
             line_result = lines.next_line() => {
                 match line_result {
                     Ok(Some(line)) => {
-                        let response = dispatch_request(&line, &config, &data_dir, &cmd_channels, &budget_slot, &teacher_slot, &risk_stores, &learning_store, &budget_store, &audit_pool, &scanner_registry, &strategist_counters, &live_auth_recheck_tx).await;
+                        let response = dispatch_request(&line, &config, &data_dir, &cmd_channels, &budget_slot, &teacher_slot, &risk_stores, &learning_store, &budget_store, &audit_pool, &scanner_registry, &strategist_counters, &live_auth_recheck_tx, &h_state_cache, &h_state_invalidation_tx).await;
                         let mut resp_bytes = serde_json::to_vec(&response)
                             .unwrap_or_else(|_| br#"{"jsonrpc":"2.0","error":{"code":-32603,"message":"serialization error"},"id":null}"#.to_vec());
                         resp_bytes.push(b'\n');
