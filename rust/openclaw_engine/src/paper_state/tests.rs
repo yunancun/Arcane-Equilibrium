@@ -1360,3 +1360,286 @@ fn p1_5_drawdown_breach_persists_across_apply_restored_counters_plus_checkpoint(
         "drawdown must be preserved across restart: got {dd}"
     );
 }
+
+// ─────────────────────────────────────────────────────────────────────────
+// EVICT-ON-DUST F3 (PA `2026-04-26--three_p0_fixes_design.md` §1)
+//
+// Test taxonomy:
+//   * T1 trigger      : reduce_position → sub-floor residue → evict
+//   * T2a trigger     : apply_fill opposite-direction partial → residue → evict
+//   * T2b trigger     : apply_fill same-direction accumulate (sanity, no-op)
+//   * T3/T4 sweep     : evict_all_dust on multi-position state
+//   * Boot reaper idempotent : two consecutive sweeps on same state → 0 second pass
+//   * ML hygiene      : evict path does NOT call apply_fill / charge_fee /
+//                       trade_count++ (no trading.fills row)
+//   * Fail-closed     : floor=0 disabled / floor=NaN disabled / price=0 skip
+// EVICT-ON-DUST F3 測試矩陣：T1/T2a/T2b 三 hot-path 觸發 + T3/T4 sweep + boot
+// reaper 冪等 + ML hygiene（不寫 trading.fills）+ 3 個 fail-closed 邊界。
+// ─────────────────────────────────────────────────────────────────────────
+
+#[test]
+fn evict_on_dust_t1_reduce_position_sub_floor_residue_evicts() {
+    // T1: reduce_position leaves a sub-floor residue → evict_if_dust runs
+    // post-mutation and removes the residue.
+    // T1：reduce_position 留下 sub-floor 殘餘 → 後置 evict_if_dust 移除。
+    let mut s = PaperState::new(10_000.0);
+    s.set_dust_floor_usd(1.0); // 1.0 USD floor (default)
+    // Open 1.0 unit @ 50_000.0 → notional = 50_000 USD (well above floor).
+    // 開 1.0 單位 @ 50000，名目 50000 USD（遠高於 floor）。
+    s.apply_fill("BTCUSDT", true, 1.0, 50_000.0, 0.0, 1_000, "test");
+    assert_eq!(s.position_count(), 1);
+    // Reduce by 0.999_999_999_98 leaving 2e-11 → notional = 2e-11 * 50000
+    // = 1e-6 (well below 1.0 USD floor) — T1 evict path should fire.
+    // 減 0.999_999_999_98 留下 2e-11 → 名目 1e-6 USD（遠低 1.0 USD floor）。
+    let pnl = s.reduce_position("BTCUSDT", 0.999_999_999_98, 50_000.0);
+    assert!(pnl.abs() < 1e-3, "no PnL on flat reduce, got {pnl}");
+    assert_eq!(
+        s.position_count(),
+        0,
+        "T1 evict_if_dust should remove sub-floor residue post-reduce"
+    );
+    assert_eq!(
+        s.dust_evictions_total(),
+        1,
+        "dust_evictions_total counter must increment on T1 fire"
+    );
+}
+
+#[test]
+fn evict_on_dust_t1_reduce_position_above_floor_does_not_evict() {
+    // T1 boundary: reduce leaves residue at exactly notional > floor → no evict.
+    // T1 邊界：reduce 後殘餘名目高於 floor → 不 evict。
+    let mut s = PaperState::new(10_000.0);
+    s.set_dust_floor_usd(1.0);
+    s.apply_fill("BTCUSDT", true, 1.0, 50_000.0, 0.0, 1_000, "test");
+    // Reduce to leave 0.0001 BTC * 50_000 = 5.0 USD (above 1.0 floor).
+    // 減後留 0.0001 * 50000 = 5.0 USD（高於 floor）。
+    let _ = s.reduce_position("BTCUSDT", 0.9999, 50_000.0);
+    assert_eq!(s.position_count(), 1, "above-floor residue must stay");
+    assert_eq!(
+        s.dust_evictions_total(),
+        0,
+        "no T1 fire when residue notional >= floor"
+    );
+}
+
+#[test]
+fn evict_on_dust_t2a_apply_fill_opposite_partial_residue_evicts() {
+    // T2a: apply_fill opposite-direction partial close leaves sub-floor residue.
+    // T2a：apply_fill 反向部分平倉殘餘 → evict。
+    let mut s = PaperState::new(10_000.0);
+    s.set_dust_floor_usd(1.0);
+    // Open long 1.0 @ 50000 (notional = 50000, well above floor).
+    s.apply_fill("BTCUSDT", true, 1.0, 50_000.0, 0.0, 1_000, "test");
+    // Reverse fill 0.999_999_999_98 — leaves 2e-11 at fill_price 50000 →
+    // notional = 1e-6 USD < 1 USD floor → T2a fires.
+    // 反向 0.999...98 → 殘餘名目 1e-6 USD < floor 1 USD → T2a 觸發。
+    s.apply_fill("BTCUSDT", false, 0.999_999_999_98, 50_000.0, 0.0, 2_000, "test");
+    assert_eq!(
+        s.position_count(),
+        0,
+        "T2a evict_if_dust must remove sub-floor residue post-apply_fill"
+    );
+    assert_eq!(s.dust_evictions_total(), 1, "T2a counter increment");
+}
+
+#[test]
+fn evict_on_dust_t2b_apply_fill_same_direction_accumulate_noop_on_normal_position() {
+    // T2b: same-direction accumulate on a normal position is notional-additive,
+    // result always above floor → no-op.
+    // T2b：同向加倉是名目相加，正常倉位永遠不會觸發 → no-op 驗證。
+    let mut s = PaperState::new(10_000.0);
+    s.set_dust_floor_usd(1.0);
+    s.apply_fill("BTCUSDT", true, 0.5, 50_000.0, 0.0, 1_000, "test");
+    s.apply_fill("BTCUSDT", true, 0.3, 50_000.0, 0.0, 2_000, "test");
+    assert_eq!(s.position_count(), 1);
+    let pos = s.get_position("BTCUSDT").unwrap();
+    assert!((pos.qty - 0.8).abs() < 1e-10);
+    assert_eq!(
+        s.dust_evictions_total(),
+        0,
+        "T2b must not fire on normal accumulate"
+    );
+}
+
+#[test]
+fn evict_on_dust_t3_t4_sweep_multi_symbol_partition() {
+    // T3/T4 sweep: multi-symbol state with mixed dust + non-dust positions.
+    // Sweep evicts ONLY the dust ones; non-dust untouched; counter += dust_count.
+    // T3/T4 sweep：多 symbol 含混合 dust + non-dust，只驅逐 dust，計數 += dust 數。
+    let mut s = PaperState::new(100_000.0);
+    s.set_dust_floor_usd(1.0);
+    // Use import_positions to inject the mix (bypasses the T2 hot-path evict
+    // so the sweep has something to do — this models the cross-restart
+    // resurrection scenario in PA §1.2.4).
+    // 用 import 直接注入，繞過 T2 hot-path（模擬跨重啟復活場景）。
+    s.import_positions(vec![
+        ("BTCUSDT".to_string(), true, 0.1, 50_000.0, 1_000),
+        ("ETHUSDT".to_string(), true, 1.0, 3_000.0, 1_001),
+        ("STRKUSDT".to_string(), true, 1.0e-6, 0.5, 1_002), // notional 5e-7
+        ("DOGEUSDT".to_string(), true, 1.0e-9, 0.1, 1_003), // notional 1e-10
+    ]);
+    s.set_latest_price("BTCUSDT", 50_000.0);
+    s.set_latest_price("ETHUSDT", 3_000.0);
+    s.set_latest_price("STRKUSDT", 0.5);
+    s.set_latest_price("DOGEUSDT", 0.1);
+    assert_eq!(s.position_count(), 4);
+    let evicted = s.evict_all_dust("test_t3_sweep");
+    assert_eq!(evicted, 2, "exactly 2 dust positions should be evicted");
+    assert_eq!(s.position_count(), 2, "non-dust positions remain");
+    assert!(s.get_position("BTCUSDT").is_some());
+    assert!(s.get_position("ETHUSDT").is_some());
+    assert!(s.get_position("STRKUSDT").is_none());
+    assert!(s.get_position("DOGEUSDT").is_none());
+    assert_eq!(s.dust_evictions_total(), 2);
+}
+
+#[test]
+fn evict_on_dust_t3_boot_reaper_idempotent() {
+    // PA §1.2.4 idempotency contract: re-running the boot reaper on the same
+    // paper_state (e.g. cross-restart double-load) returns 0 the second time
+    // because positions evicted on pass 1 are no longer present on pass 2.
+    // PA §1.2.4 冪等契約：同 paper_state 第二次跑 boot reaper → 0 evict
+    // （第一次已 remove 完）。
+    let mut s = PaperState::new(100_000.0);
+    s.set_dust_floor_usd(1.0);
+    s.import_positions(vec![
+        ("STRKUSDT".to_string(), true, 1.0e-6, 0.5, 1_000),
+        ("BTCUSDT".to_string(), true, 0.1, 50_000.0, 1_001),
+    ]);
+    let pass1 = s.evict_all_dust("test_pass1");
+    assert_eq!(pass1, 1, "pass 1 evicts 1 dust position");
+    assert_eq!(s.dust_evictions_total(), 1);
+    let pass2 = s.evict_all_dust("test_pass2");
+    assert_eq!(pass2, 0, "pass 2 must be no-op (idempotent)");
+    assert_eq!(s.dust_evictions_total(), 1, "counter must not double-count");
+    // BTCUSDT (non-dust) preserved across both passes.
+    assert!(s.get_position("BTCUSDT").is_some());
+}
+
+#[test]
+fn evict_on_dust_no_trading_fills_side_effect_ml_hygiene() {
+    // Critical PA §1.2.5 invariant: evict path does NOT mutate balance,
+    // total_fees, total_realized_pnl, or trade_count — these would translate
+    // into a trading.fills row downstream and pollute ML training data.
+    // PA §1.2.5 關鍵不變量：evict 不改 balance / total_fees / total_realized_pnl /
+    // trade_count，避免下游寫入 trading.fills 污染 ML 訓練。
+    let mut s = PaperState::new(10_000.0);
+    s.set_dust_floor_usd(1.0);
+    let initial_balance = s.balance();
+    let initial_total_fees = s.total_fees();
+    let initial_total_pnl = s.total_realized_pnl();
+    let initial_trade_count = s.trade_count();
+    s.import_positions(vec![("STRKUSDT".to_string(), true, 1.0e-6, 0.5, 1_000)]);
+    s.set_latest_price("STRKUSDT", 0.5);
+    let evicted = s.evict_all_dust("test_ml_hygiene");
+    assert_eq!(evicted, 1);
+    // The four ML-relevant counters MUST be untouched.
+    // 4 個 ML 關鍵計數器必須保持不變。
+    assert!(
+        (s.balance() - initial_balance).abs() < 1e-12,
+        "balance must not change on evict: was {}, now {}",
+        initial_balance,
+        s.balance()
+    );
+    assert!(
+        (s.total_fees() - initial_total_fees).abs() < 1e-12,
+        "total_fees must not change on evict"
+    );
+    assert!(
+        (s.total_realized_pnl() - initial_total_pnl).abs() < 1e-12,
+        "total_realized_pnl must not change on evict"
+    );
+    assert_eq!(
+        s.trade_count(),
+        initial_trade_count,
+        "trade_count must not change on evict (no round-trip)"
+    );
+    // Eviction counter is the ONLY counter that should bump.
+    // 唯一可變的是 dust_evictions_total。
+    assert_eq!(s.dust_evictions_total(), 1);
+}
+
+#[test]
+fn evict_on_dust_failclosed_floor_zero_disabled() {
+    // floor=0 disables the gate entirely (matches step_0 producer-side guard).
+    // floor=0 完全關閉閘（與 step_0 生產者端 guard 一致）。
+    let mut s = PaperState::new(10_000.0);
+    s.set_dust_floor_usd(0.0);
+    s.import_positions(vec![("STRKUSDT".to_string(), true, 1.0e-6, 0.5, 1_000)]);
+    s.set_latest_price("STRKUSDT", 0.5);
+    let evicted = s.evict_all_dust("test_disabled");
+    assert_eq!(evicted, 0, "floor=0 must disable the gate");
+    assert_eq!(s.position_count(), 1, "dust position must NOT be evicted");
+    assert_eq!(s.dust_evictions_total(), 0);
+}
+
+#[test]
+fn evict_on_dust_failclosed_floor_nan_coerced_to_disabled() {
+    // set_dust_floor_usd coerces non-finite floor → 0.0 → gate disabled.
+    // set_dust_floor_usd 將非有限值夾為 0.0 → 閘關閉。
+    let mut s = PaperState::new(10_000.0);
+    s.set_dust_floor_usd(f64::NAN);
+    assert_eq!(
+        s.dust_floor_usd(),
+        0.0,
+        "NaN floor must be coerced to 0.0 (fail-closed)"
+    );
+    s.import_positions(vec![("STRKUSDT".to_string(), true, 1.0e-6, 0.5, 1_000)]);
+    s.set_latest_price("STRKUSDT", 0.5);
+    let evicted = s.evict_all_dust("test_nan");
+    assert_eq!(evicted, 0);
+}
+
+#[test]
+fn evict_on_dust_failclosed_stale_price_skips_symbol() {
+    // latest_price <= 0 → evict_if_dust skips that symbol (preserves dust
+    // for next tick re-evaluation). This is the "poisoned price" safety net.
+    // latest_price <= 0 → evict_if_dust 跳過該 symbol（下一 tick 再 evaluate）。
+    let mut s = PaperState::new(10_000.0);
+    s.set_dust_floor_usd(1.0);
+    s.import_positions(vec![("STRKUSDT".to_string(), true, 1.0e-6, 0.5, 1_000)]);
+    // Override with 0.0 to simulate poisoned price.
+    // 用 0.0 覆蓋模擬污染價格。
+    s.set_latest_price("STRKUSDT", 0.0);
+    let evict = s.evict_if_dust("STRKUSDT", 0.0, "test_stale_price");
+    assert!(
+        evict.is_none(),
+        "stale price must skip evict (return None)"
+    );
+    assert_eq!(s.position_count(), 1, "position preserved on stale price");
+    assert_eq!(s.dust_evictions_total(), 0);
+}
+
+#[test]
+fn evict_on_dust_failclosed_missing_position_returns_none() {
+    // evict_if_dust on a non-existent symbol returns None silently.
+    // evict_if_dust 對不存在的 symbol 安全返回 None。
+    let mut s = PaperState::new(10_000.0);
+    s.set_dust_floor_usd(1.0);
+    let evict = s.evict_if_dust("NONEXISTENT", 1.0, "test_missing");
+    assert!(evict.is_none());
+    assert_eq!(s.dust_evictions_total(), 0);
+}
+
+#[test]
+fn evict_on_dust_set_dust_floor_clamps_negative() {
+    // Negative floor → coerced to 0.0 (gate disabled). Schema validation
+    // already rejects this in risk_config.rs:566 but defence-in-depth.
+    // 負 floor → 夾為 0.0（閘關閉）。risk_config.rs:566 已 schema 驗證，仍補
+    // 防禦性夾值。
+    let mut s = PaperState::new(10_000.0);
+    s.set_dust_floor_usd(-5.0);
+    assert_eq!(s.dust_floor_usd(), 0.0);
+}
+
+#[test]
+fn evict_on_dust_set_dust_floor_accepts_positive_finite() {
+    // Positive finite floor passes through unchanged.
+    // 正有限值原樣保留。
+    let mut s = PaperState::new(10_000.0);
+    s.set_dust_floor_usd(5.0);
+    assert!((s.dust_floor_usd() - 5.0).abs() < 1e-12);
+    s.set_dust_floor_usd(1.0);
+    assert!((s.dust_floor_usd() - 1.0).abs() < 1e-12);
+}
