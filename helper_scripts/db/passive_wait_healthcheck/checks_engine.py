@@ -541,7 +541,8 @@ def check_orders_fills_consistency(cur) -> tuple[str, str]:
     after the F4 backfill runs. We therefore filter out
     ``strategy_name LIKE 'unattributed:%'`` at the WHERE level — the exclusion
     is intentional and lossless: the F4 audit row already records the
-    discrepancy in its own dedicated channel (``learning.execution_orphans``).
+    discrepancy in trading.fills with ``strategy_name LIKE 'unattributed:%'``
+    (no separate orphan table).
 
     Three-state verdict:
       * FAIL: pairs_with_missing_orders > 5 (writer broken across multiple pairs)
@@ -568,8 +569,8 @@ def check_orders_fills_consistency(cur) -> tuple[str, str]:
     是 audit-by-design，本來就**沒有**對應 ``trading.orders`` row（我們沒
     本地 submit）。不排除則 F4 backfill 後每筆 audit fill 都被算成 missing
     order，產生假 FAIL。因此於 WHERE 加 ``strategy_name LIKE 'unattributed:%'``
-    過濾 — 排除是有意且無損：F4 audit row 已在自己的專屬通道
-    （``learning.execution_orphans``）記下落差。
+    過濾 — 排除是有意且無損：F4 audit row 已在 trading.fills 以
+    strategy_name LIKE 'unattributed:%' 標記保留（無獨立 orphan table）。
     """
     try:
         cur.connection.rollback()
