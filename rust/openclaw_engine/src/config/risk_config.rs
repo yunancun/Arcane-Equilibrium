@@ -374,6 +374,26 @@ pub struct GlobalLimits {
     /// 0.0 = 關閉過濾（還原修前行為）。
     #[serde(default = "default_ft_min_notional_ratio_of_entry")]
     pub ft_min_notional_ratio_of_entry: f64,
+
+    /// EXIT-FEATURES-WRITER-BUG-1-FIX (2026-04-26): absolute USD floor on the
+    /// current dust notional `qty * latest_price` below which fast_track
+    /// ReduceToHalf is skipped EVEN WHEN `entry_notional == 0.0` (legacy /
+    /// restored snapshot — the `ft_min_notional_ratio_of_entry` ratio gate fails
+    /// open in that branch because no baseline is available). Closes the
+    /// MICRO-PROFIT-FIX-1 fail-open hole that drove the STRKUSDT 37-halve dust
+    /// spiral observed 2026-04-26 (qty 0.05 → 7.3e-13 over 37 minutes). MIT
+    /// audit `2026-04-26--exit_features_writer_bug_audit.md` §4 RCA-A. Range
+    /// `[0.0, ∞)`; `0.0` disables the absolute floor (only the ratio gate
+    /// applies). Default `1.0 USD` — well below any realistic real position
+    /// notional yet large enough to dwarf dust residues whose `qty * price`
+    /// is sub-cent. Hot-reloadable via `patch_risk_config`.
+    /// EXIT-FEATURES-WRITER-BUG-1-FIX：fast_track ReduceToHalf 對「當前名目 USD 絕對值」
+    /// 低於此門檻的倉位直接 skip，**即使 entry_notional == 0**（舊快照無基準，
+    /// MICRO-PROFIT-FIX-1 ratio gate fail-open）。封住 STRKUSDT 37 次 dust spiral
+    /// 漏洞。`0.0` = 關閉絕對門檻（僅 ratio gate 生效）。預設 1 USD，遠低於真實
+    /// 倉位但遠高於 dust 殘留（sub-cent 級），可經 `patch_risk_config` 熱重載。
+    #[serde(default = "default_ft_dust_qty_floor_usd")]
+    pub ft_dust_qty_floor_usd: f64,
 }
 
 fn default_stop_loss_max_pct() -> f64 {
@@ -438,6 +458,17 @@ fn default_ft_min_notional_ratio_of_entry() -> f64 {
     0.25
 }
 
+fn default_ft_dust_qty_floor_usd() -> f64 {
+    // EXIT-FEATURES-WRITER-BUG-1-FIX: 1.0 USD is large enough to swallow dust
+    // residues (sub-cent qty * price) yet small enough to never block a real
+    // halving on a normal-sized position. Tunable per environment via TOML;
+    // operators wanting a more aggressive guard may bump to 5–10 USD without
+    // restart (hot-reloadable). 0.0 disables the absolute floor.
+    // EXIT-FEATURES-WRITER-BUG-1-FIX：1 USD — 足夠 dust 殘留（sub-cent）卻
+    // 不會擋正常倉位半倉。每環境 TOML 可調，0 = 關閉。
+    1.0
+}
+
 impl Default for GlobalLimits {
     fn default() -> Self {
         Self {
@@ -465,6 +496,7 @@ impl Default for GlobalLimits {
             guardian_modification_leverage_cap: default_guardian_modification_leverage_cap(),
             per_trade_risk_pct: default_per_trade_risk_pct(),
             ft_min_notional_ratio_of_entry: default_ft_min_notional_ratio_of_entry(),
+            ft_dust_qty_floor_usd: default_ft_dust_qty_floor_usd(),
         }
     }
 }
@@ -522,6 +554,20 @@ impl GlobalLimits {
         // MICRO-PROFIT-FIX-1：ft_min_notional_ratio_of_entry ∈ [0, 1]，0 = 關閉。
         if !(0.0..=1.0).contains(&self.ft_min_notional_ratio_of_entry) {
             return Err("risk.limits.ft_min_notional_ratio_of_entry must be in [0, 1]".into());
+        }
+        // EXIT-FEATURES-WRITER-BUG-1-FIX: ft_dust_qty_floor_usd ∈ [0, 100_000];
+        // 0 disables the absolute floor. Reject NaN and unreasonably large
+        // values that would block all halvings (effectively disabling
+        // fast_track). 100_000 USD is roughly $1B account × 0.01% per trade,
+        // far above any realistic guard.
+        // EXIT-FEATURES-WRITER-BUG-1-FIX：ft_dust_qty_floor_usd ∈ [0, 100000]；
+        // 0 = 關閉，拒絕 NaN 與過大值（會擋住所有半倉）。
+        if !self.ft_dust_qty_floor_usd.is_finite()
+            || !(0.0..=100_000.0).contains(&self.ft_dust_qty_floor_usd)
+        {
+            return Err(
+                "risk.limits.ft_dust_qty_floor_usd must be finite in [0, 100000]".into(),
+            );
         }
         Ok(())
     }

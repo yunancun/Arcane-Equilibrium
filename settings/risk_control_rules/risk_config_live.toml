@@ -27,6 +27,15 @@ guardian_modification_size_factor = 0.4
 guardian_modification_leverage_cap = 1.5
 per_trade_risk_pct = 0.05
 ft_min_notional_ratio_of_entry = 0.25
+# EXIT-FEATURES-WRITER-BUG-1-FIX (2026-04-26): absolute USD dust floor —
+# fast_track ReduceToHalf skips positions whose `qty * latest_price < this`
+# (USD), even when `entry_notional == 0` (legacy / restored snapshot — the
+# ratio gate above fail-opens in that branch). Default 1.0 USD swallows
+# sub-cent dust residues without blocking real positions. MIT audit
+# `2026-04-26--exit_features_writer_bug_audit.md` §4 RCA-A.
+# EXIT-FEATURES-WRITER-BUG-1-FIX：絕對 USD dust 門檻，封住 entry_notional 缺
+# 失時 ratio gate fail-open 的漏洞（STRKUSDT 37 次半倉 spiral 修補）。
+ft_dust_qty_floor_usd = 1.0
 
 [overrides]
 
