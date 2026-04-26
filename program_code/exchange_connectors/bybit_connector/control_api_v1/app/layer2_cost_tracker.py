@@ -234,7 +234,11 @@ class Layer2CostTracker:
         _, remaining = self.check_daily_budget()
         return min(adjusted, remaining)
 
-    # ── G3-08 Phase 3: H state snapshot accessor / H 狀態 snapshot 存取器 ──
+    # ── G3-08 Phase 3: H state snapshot accessors / H 狀態 snapshot 存取器 ──
+    # Sub-task 3-1 (commit 8cd257e): get_h2_snapshot (this section).
+    # Sub-task 3-3 (this commit):    get_h5_snapshot (sibling, lower in this section).
+    # Sub-task 3-1 (commit 8cd257e)：get_h2_snapshot（本區塊）。
+    # Sub-task 3-3 (本 commit)：     get_h5_snapshot（同區塊下方姊妹）。
 
     def get_h2_snapshot(self) -> dict[str, Any]:
         """Return a thread-safe snapshot of H2 budget state for h_state_cache exposure.
@@ -290,6 +294,89 @@ class Layer2CostTracker:
                 "adaptive_multiplier": float(self._adaptive.multiplier),
             }
 
+    def get_h5_snapshot(self) -> dict[str, Any]:
+        """Return a thread-safe snapshot of H5 cost stats for h_state_cache exposure.
+        回傳 H5 成本統計的線程安全 snapshot，供 h_state_cache 暴露使用。
+
+        Schema (PA design §5.2 H5CostStats parity, mirrors Rust struct
+        ``rust/openclaw_engine/src/h_state_cache/types.rs:167-178``, drops
+        2 metadata keys for hot-path):
+          - ai_spend_7d_usd:   float       — 7d AI 花費 (USD)
+          - paper_pnl_7d_usd:  float       — 7d Paper 模擬 PnL (USD)
+          - cost_edge_ratio:   Optional[float] — paper_pnl / ai_spend
+            (None when data_days < ADAPTIVE_MIN_DAYS, 樣本不足)
+          - data_days:         int         — 累積資料天數
+
+        Schema 對齊 PA design §5.2 H5CostStats（鏡射 Rust struct
+        ``rust/openclaw_engine/src/h_state_cache/types.rs:167-178``，丟棄
+        2 個 metadata key 走 hot-path）：
+          - ai_spend_7d_usd：7d AI 花費 (USD)
+          - paper_pnl_7d_usd：7d Paper 模擬 PnL (USD)
+          - cost_edge_ratio：paper_pnl / ai_spend（樣本不足回 None）
+          - data_days：累積資料天數
+
+        NOTE: ``get_cost_edge_ratio()`` returns 6 keys including
+        ``roi_basis`` / ``roi_disclaimer`` metadata strings (principle 10
+        cognitive honesty markers for the broader Cost Summary API).
+        Rust ``H5CostStats`` only解 4 fields per PA design §5.2 (forward-
+        compat — ``serde(default)`` lets Rust silently drop the 2 extra
+        keys if a future schema variant ships them on the wire). Here we
+        proactively filter at the Python boundary so the wire payload
+        carries exactly the 4 fields Rust expects, matching the H2
+        snapshot's "narrow projection" pattern (3 of N internal fields).
+        註：``get_cost_edge_ratio()`` 回 6 個 key（含 ``roi_basis`` /
+        ``roi_disclaimer`` metadata 字串，係更廣 Cost Summary API 的
+        原則 10 認知誠實標記）。Rust ``H5CostStats`` 依 PA design §5.2
+        只解 4 fields（forward-compat —— ``serde(default)`` 讓 Rust 在
+        未來 schema 變種帶這 2 key 時靜默丟）。此處我們主動在 Python
+        邊界過濾，wire payload 恰為 Rust 期望的 4 fields，對齊 H2
+        snapshot 的「窄投影」模式（N 個內部 field 投影 3 個）。
+
+        Pure-read: NO side effects, NO state mutation, NO IPC.
+        ``get_cost_edge_ratio()`` itself reads ``self._adaptive`` (a value
+        object, not lock-protected) — no lock acquired here because the
+        upstream ``recalculate_adaptive()`` writer always replaces
+        ``self._adaptive`` atomically under ``self._lock``, so any concurrent
+        read sees either the old or new whole snapshot, never a torn one.
+        Safe to call from any thread including the invalidator daemon
+        thread (Phase 3 env=1 path).
+        純讀取：無副作用、無狀態修改、無 IPC。``get_cost_edge_ratio()``
+        本身讀 ``self._adaptive``（值物件，非鎖保護）—— 此處不取鎖因為
+        上游 writer ``recalculate_adaptive()`` 始終在 ``self._lock`` 下
+        原子性替換 ``self._adaptive``，任一並發讀只見到舊或新的完整
+        snapshot，絕無 torn read。任何線程皆可呼叫，包含 invalidator
+        daemon thread（Phase 3 env=1 路徑）。
+
+        Returns:
+            dict with 4 keys per H5CostStats contract. ``cost_edge_ratio``
+            may be ``None`` when ``data_days < ADAPTIVE_MIN_DAYS`` (= 3,
+            see layer2_types.py:75) — Rust ``Option<f64>`` accepts ``null``
+            via serde JSON.
+            含 4 個 key 的 dict（對齊 H5CostStats contract）。
+            ``cost_edge_ratio`` 在 ``data_days < ADAPTIVE_MIN_DAYS``
+            （= 3，見 layer2_types.py:75）時為 ``None``；Rust
+            ``Option<f64>`` 透過 serde JSON 接受 ``null``。
+        """
+        # ``get_cost_edge_ratio()`` is itself pure-read on ``self._adaptive``;
+        # we wrap it to project to the 4-field hot-path schema, dropping the
+        # ``roi_basis`` / ``roi_disclaimer`` metadata markers (kept on the
+        # broader Cost Summary API for principle 10 disclosure).
+        # ``get_cost_edge_ratio()`` 本身對 ``self._adaptive`` 為純讀；
+        # 此處包裹它投影到 4-field hot-path schema，丟棄 ``roi_basis`` /
+        # ``roi_disclaimer`` 元資料標記（在更廣的 Cost Summary API 上保留，
+        # 履行原則 10 揭露義務）。
+        full = self.get_cost_edge_ratio()
+        return {
+            "ai_spend_7d_usd": float(full.get("ai_spend_7d_usd", 0.0)),
+            "paper_pnl_7d_usd": float(full.get("paper_pnl_7d_usd", 0.0)),
+            # ``cost_edge_ratio`` may be ``None`` (data_days < ADAPTIVE_MIN_DAYS).
+            # Rust ``Option<f64>`` accepts ``null`` over JSON wire.
+            # ``cost_edge_ratio`` 可能為 ``None``（樣本不足）；Rust
+            # ``Option<f64>`` 接受 JSON wire 上的 ``null``。
+            "cost_edge_ratio": full.get("cost_edge_ratio"),
+            "data_days": int(full.get("data_days", 0)),
+        }
+
     # ── Record Costs / 记录成本 ──
 
     def record_claude_cost(self, session: Layer2Session, input_tokens: int, output_tokens: int, model_tier: str) -> float:
@@ -321,6 +408,23 @@ class Layer2CostTracker:
         # （零負擔）。即使提示丟失，Rust poller（預設 10s）最終仍會撈到
         # 新 snapshot。
         _invalidate_h_state_async("h2.budget_consumed")
+        # G3-08 Phase 3 Sub-task 3-3: H5 cost_logging hint — same tracker,
+        # different lens. ``record_claude_cost`` mutates BOTH H2's budget
+        # ledger AND H5's 7-day AI spend rollup; emit a second hint so the
+        # Rust h_state_cache poller can refresh the H5 snapshot independently.
+        # Both hints share the same daemon-thread fire-and-forget infra
+        # (h_state_invalidator.invalidate_async), so the per-call cost is
+        # ~2 ephemeral threads (env=1) or strict no-op (env=0). Per PA RFC
+        # `2026-04-26--g3_08_phase3_subtask_split.md` §6 + §8.2 thread
+        # safety analysis.
+        # G3-08 Phase 3 Sub-task 3-3：H5 cost_logging 提示 —— 同一 tracker，
+        # 不同視角。``record_claude_cost`` 同時改變 H2 預算帳本與 H5 7d
+        # AI 花費彙總；發第二條提示讓 Rust h_state_cache poller 可獨立刷新
+        # H5 snapshot。兩條提示共用同套 daemon-thread fire-and-forget 基礎
+        # 設施（h_state_invalidator.invalidate_async），單次呼叫成本約
+        # ~2 個短生命週期 thread（env=1）或嚴格 no-op（env=0）。詳 PA RFC
+        # `2026-04-26--g3_08_phase3_subtask_split.md` §6 + §8.2 線程安全分析。
+        _invalidate_h_state_async("h5.claude_cost_recorded")
         return cost
 
     def record_search_cost(self, session: Layer2Session, provider: str, cost_usd: float) -> None:
@@ -328,6 +432,29 @@ class Layer2CostTracker:
         with self._lock:
             session.search_cost_usd = round(session.search_cost_usd + cost_usd, 6)
             self._add_daily_search_cost(cost_usd)
+        # G3-08 Phase 3 Sub-task 3-3: H5 cost_logging hint — Perplexity /
+        # search provider cost feeds the same 7-day AI spend rollup that H5
+        # exposes. ``ai_spend_7d`` aggregator (recalculate_adaptive line
+        # 471-479) sums ``daily_spend.<day>.total_usd`` which includes
+        # ``search_usd`` — so search cost mutates H5's effective view too.
+        # Hint reason ``h5.search_cost_recorded`` distinguishes from the
+        # ``h5.claude_cost_recorded`` hint; both fire-and-forget, env=0
+        # strict no-op. Sub-task 3-1 deliberately did NOT add this hook
+        # (search cost does not directly mutate the H2 daily-remaining
+        # ledger view — H2 reads ``check_daily_budget`` which uses
+        # ``today_total`` that includes search but the per-call hint
+        # bandwidth was scoped to Sub-task 3-1's H2 contract).
+        # G3-08 Phase 3 Sub-task 3-3：H5 cost_logging 提示 —— Perplexity /
+        # 搜尋供應商成本同樣灌入 H5 暴露的 7d AI 花費彙總。``ai_spend_7d``
+        # 聚合器（recalculate_adaptive line 471-479）合計
+        # ``daily_spend.<day>.total_usd`` 含 ``search_usd``，故搜尋成本
+        # 也改變 H5 的有效視圖。提示 reason ``h5.search_cost_recorded``
+        # 區別於 ``h5.claude_cost_recorded``；皆 fire-and-forget，env=0
+        # 嚴格 no-op。Sub-task 3-1 刻意未加此 hook（搜尋成本不直接改變
+        # H2 daily-remaining 帳本視圖 —— H2 讀 ``check_daily_budget`` 用
+        # ``today_total``（含 search），但 H2 contract 的 per-call 提示
+        # 頻寬已限縮在 Sub-task 3-1 範圍）。
+        _invalidate_h_state_async("h5.search_cost_recorded")
 
     def _add_daily_claude_cost(self, cost: float) -> None:
         raw = self._read_raw()

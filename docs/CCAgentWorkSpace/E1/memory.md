@@ -65,6 +65,7 @@ def acquire_lease(self, intent_id: str) -> bool:
 | 2026-04-26 | Tier 3 G9-02: WS unknown-handler force reconnect (DEFAULT-OFF env-gate) | `docs/CCAgentWorkSpace/E1/workspace/reports/2026-04-26--g9_02_ws_resilience.md` (commit `6990668`) |
 | 2026-04-26 | Tier 3 G3-07: Layer 2 toolbox query_onchain + check_derivatives | (no .md report — direct message per system reminder; commit `ac6c09a`) |
 | 2026-04-26 | Wave 2 G3-08 Phase 1 Sub-task B: Python h_state_invalidator + query_handler + reverse IPC route (commit `1c7b20e`, 35 pytest) | `.claude_reports/20260426_g3_08_phase1_subtask_b.md` (return text per system reminder) |
+| 2026-04-26 | Tier 8 Track 4 G3-08 Phase 3 Sub-task 3-3: H5 cost_logging integration — Phase 3 COMPLETE — G3-09 unblocked | direct message per system reminder; report inline |
 
 ### 2026-04-26 G3-08 Phase 1 Sub-task B 教訓
 
@@ -864,4 +865,45 @@ PA Phase 3 sub-task split design plan §5 — H4 validator stats 接 h_state_cac
 - **§九 1200 LOC 硬上限是真硬限**：第一輪實作 1234 LOC（超 34）→ 第二輪精簡 docstring 到 1206（超 6）→ 第三輪極致濃縮 bilingual 到 exactly 1200。bilingual comment skill 與 §九 物理上限會撞，此 case 的解決路徑 = (a) 濃縮重複 schema 描述（中英兩段擠成一段交織）(b) inline comment 從多行 block 縮成 trailing inline。Lesson：§九 警告 / 硬限觸發前 PA 必先標明（本 case PA §10.4 已標 ~1195 警告線），E1 落地若實際超必先 push back 不擅自混淆「skill 必要 vs §九 硬」優先序。
 - **`_safe_snapshot_self` vs `_safe_snapshot` 兩 helper sibling**：`_safe_snapshot(parent, attr_name, method_name)` 走 H1/H3/H2 sub-attribute pattern；`_safe_snapshot_self(target, method_name)` 走 H4 caller-side stats on target 自身 pattern。兩 helper 同一 module 形成 sibling pair 比 1 helper 加 optional `attr_name=None` 條件分支更清楚（**單一職責**勝於**多態 conditional**）。Lesson：snapshot accessor 設計時 SSOT 持有方式（owned sub-attr / injected sub-attr / caller-side）會傳遞到 helper 簽名差異，**3 種方式 = 3 種 helper 變體**或 1 helper + 多 caller pattern；本 case 選 2 helper + 3 callsite 是平衡點。
 - **H4 silent gap 修法 = 加 counter + invalidate hook 雙保險**：pre-G3-08 `validation_pass` 不計只計 fail，下游 observability 永遠看不到「pass count」即「H4 是否被頻繁通過」無法回答；**Phase 3 Sub-task 3-2 修 = 加 counter + 同步加 invalidate_async hint，雙保險**：(a) counter 給 snapshot 讀（拉模式）(b) invalidate hint 主動推給 Rust h_state_cache（推模式）。Lesson：silent gap 補 counter 時必同步補 invalidate hook 到對等失敗路徑（fail / pass 各 1 hint），避免「pass 計但 Rust 不知道有變化」次級 silent gap。
+- **報告檔位置**：直接傳給 parent agent（per system prompt 不寫 .md report 到 repo）。本 memory.md 條目 + commit msg 為完整跨 session 知識持久化。
+
+### 2026-04-26 Tier 8 Track 4 G3-08 Phase 3 Sub-task 3-3 H5 cost_logging（Phase 3 COMPLETE）
+
+**任務**：H5 cost_logging integration — 鏡 Phase 2 H1+H3 / Sub-task 3-1 H2 / 3-2 H4 pattern，加 H5 snapshot accessor + 雙 invalidate hook（claude + search）+ query_handler bucket。**G3-09 cost_edge_ratio 解阻**。
+
+### 改動範圍
+1. `layer2_cost_tracker.py`（803 → 930）：
+   - 新 `get_h5_snapshot()` method（投影 `get_cost_edge_ratio()` 6-key dict 為 4-field PA H5CostStats schema，丟 `roi_basis/roi_disclaimer` metadata）
+   - `record_claude_cost()` 加第二 hook `_invalidate_h_state_async("h5.claude_cost_recorded")`（在 Sub-task 3-1 的 `h2.budget_consumed` hook 後）
+   - `record_search_cost()` 加 hook `_invalidate_h_state_async("h5.search_cost_recorded")`（Sub-task 3-1 刻意未加，3-3 範圍）
+2. `h_state_query_handler.py`（558 → 636）：
+   - `_collect_h_snapshots` 加 `include_h5: bool = False` 參數，回 5-tuple `(h1, h3, h2, h4, h5)`
+   - `_collect_h_snapshots` H5 分支復用 `cost_tracker` 屬性（與 H2 同 SSOT），透過 `_safe_snapshot(strategist, "cost_tracker", "get_h5_snapshot")` 取 — Sub-task 3-1 deploy 缺 `get_h5_snapshot` method 時靜默 skip
+   - `build_h_state_full_response` 加 `include_h5` flag + `h5_dict` 寫入 `h_states["h5"]`
+   - MODULE_NOTE 升級「Phase 3 COMPLETE — 5 H buckets」+ G3-09 unblock 標明
+3. `tests/test_layer2.py`（948 → 1110）：
+   - 6 個新 H5 cases（schema / types / pure_read / drops_metadata / after_recalculate / cost_edge_ratio_None）
+   - 2 個新 dual-hint cases（`test_record_claude_cost_fires_h2_and_h5_invalidate` / `test_record_search_cost_fires_h5_invalidate`）
+   - 1 個更新 既有 search-cost test（從 `count==0` 改 `count==1` 含 H5 hint，不含 H2 hint）
+   - 1 個更新 既有 claude-cost test（從 `count==1` 改 `count==2`，斷言 H2 hint 在發出 reasons 中但不獨佔）
+4. `tests/test_h_state_query_handler.py`（942 → 1228）：
+   - `_FakeCostTracker` 加 opt-in `with_h5=False / h5_snapshot / h5_raises` 參數（鏡 Sub-task 3-2 with_h4 pattern）
+   - `TestH5CostLoggingIntegration` 4 cases（29-31 + 1 bonus method-missing test）
+   - `TestH5IncludeFilter` 3 cases（32-34 include filter / 5-bucket roundtrip / default-None）
+   - 1 個更新 `test_both_raise_drops_both_keys_version_zero` → `test_all_raise_drops_all_keys_version_zero` 升 5 桶皆 raise
+
+### 結果
+- pytest baseline shift（Mac，4 檔）：**196/196 pass**（test_layer2 82 + test_h_state_query_handler 52 + test_h_state_invalidator 21 + test_strategist_agent 41）；舊基準 + 16 新 H5 cases (8 layer2 + 7 query_handler + 1 collateral upgrade)；excl 12 fastapi unrelated baseline。
+- cargo lib：**2212/0 fail（Tier 7 baseline 不變）** — Phase 3 Sub-task 3-3 純 Python，Rust 0 修；h_state_cache module 17/17 pass。
+- Mac smoke env=0：PASS — version=0, h_states={}（dormant 完整）。
+- Mac smoke env=1：PASS — h_states.keys() = ['h1','h2','h3','h4','h5']，h5 = {'ai_spend_7d_usd':0.5, 'paper_pnl_7d_usd':1.0, 'cost_edge_ratio':2.0, 'data_days':5}（schema 4 fields ✓）。
+- layer2_cost_tracker.py 930 LOC（PA §10.4 預測 ~781，我的 verbose bilingual docstring 推到 930）— 超 §九 800 警告線（**未超 1200 hard limit**），E2 review 應評估是否壓縮注釋；warning 已 noted。
+
+### 教訓
+- **Sub-task 3-1 既有 test 必須同步 update**：`record_claude_cost` 加 H5 hook 後 Track 1 既有 `test_record_claude_cost_fires_h2_invalidate` 從 `count==1` 失敗變 `count==2`。修法不是改 implementation 退回單 hook，而是 update test 反映 Sub-task 3-3 的雙 hook 設計（`emitted_reasons` set check 而非 `args[0]` 唯一斷言）。Lesson：跨 sub-task 累積改動到同 callsite 時，前置 sub-task 的 test 必有「collateral update」需求；commit msg 必標明此 update 為 collateral 而非 regression。
+- **`with_h5=False` 默認對齊 Sub-task 3-2 with_h4 pattern**：保留「Sub-task 3-1 deploy 但 3-3 未 land」silent-skip 路徑覆蓋（test 32 `test_h5_dropped_when_get_h5_snapshot_method_missing`）。Lesson：multi-sub-task 累積 fixture 設計時，每個 opt-in 默認 off + 「前序 sub-task deploy」silent-skip test 一路保留，是 phased rollout 安全網的單元測試體現。
+- **layer2_cost_tracker.py 達 §九 800 警告線**：PA §10.4 已預警會接近，但我的 bilingual docstring 比 PA 估計更 verbose（thread-safety analysis / metadata drop rationale / SSOT lens 分析 / Sub-task 3-1 vs 3-3 分工註解）。Lesson：bilingual-comment skill 與 §九 LOC 限制可能撞 — 我選擇保留 verbose（930 < 1200 hard cap）以利未來 maintainer 理解 metadata drop 為何 / Sub-task 分工結構，但 E2 review 應決定是否壓縮注釋換更小 LOC。
+- **H5 SSOT 與 H2 SSOT 共用 cost_tracker 屬性**：Sub-task 3-3 設計上不開新屬性，重用 `STRATEGIST_AGENT.cost_tracker` 取兩個不同 snapshot lens（`get_h2_snapshot()` 預算閘 / `get_h5_snapshot()` cost_logging）。後果：`cost_tracker=None` race 同時掉 H2 + H5 兩桶（test 30 顯式驗證），acceptable per Sub-task 3-1 degradation contract。Lesson：multi-aspect SSOT（單一物件、多 snapshot lens）共享屬性訪問是 LOC 優化的好做法，但要在 docstring + test 顯式標明 fault-domain 共享關係。
+- **`get_h5_snapshot` 純讀無鎖**：與 `get_h2_snapshot` 取 `self._lock` 不同，`get_h5_snapshot` 委派 `get_cost_edge_ratio` 讀 `self._adaptive`（值物件，由 `recalculate_adaptive()` 在 `self._lock` 下原子替換）— 任一並發讀只見舊或新完整 snapshot，無 torn read。Lesson：Python 屬性原子替換（`self._adaptive = AdaptiveBudgetState(...)`）+ 純讀路徑可不取鎖，前提是 writer 在鎖下整體替換。memory model 推理應在 docstring 顯式陳述（SAFETY / Invariant 中英對照）。
+- **「cost_edge_ratio == None」測試覆蓋**：data_days < ADAPTIVE_MIN_DAYS=3 → ratio 為 None（即使 ai_spend / paper_pnl 數值齊全）。Rust `Option<f64>` 透過 serde JSON 接 null。test 6（`test_get_h5_snapshot_cost_edge_ratio_none_when_data_insufficient`）顯式驗證 null + 其他 3 個數值 field 仍可見。Lesson：Optional<T> 跨語言邊界（Python None ↔ Rust Option<T> via JSON null）是 forward-compat schema 設計常見模式，test 必涵蓋 null 案例避免 Rust 端 silent default-zero。
 - **報告檔位置**：直接傳給 parent agent（per system prompt 不寫 .md report 到 repo）。本 memory.md 條目 + commit msg 為完整跨 session 知識持久化。
