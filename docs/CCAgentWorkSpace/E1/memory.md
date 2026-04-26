@@ -906,4 +906,35 @@ PA Phase 3 sub-task split design plan §5 — H4 validator stats 接 h_state_cac
 - **H5 SSOT 與 H2 SSOT 共用 cost_tracker 屬性**：Sub-task 3-3 設計上不開新屬性，重用 `STRATEGIST_AGENT.cost_tracker` 取兩個不同 snapshot lens（`get_h2_snapshot()` 預算閘 / `get_h5_snapshot()` cost_logging）。後果：`cost_tracker=None` race 同時掉 H2 + H5 兩桶（test 30 顯式驗證），acceptable per Sub-task 3-1 degradation contract。Lesson：multi-aspect SSOT（單一物件、多 snapshot lens）共享屬性訪問是 LOC 優化的好做法，但要在 docstring + test 顯式標明 fault-domain 共享關係。
 - **`get_h5_snapshot` 純讀無鎖**：與 `get_h2_snapshot` 取 `self._lock` 不同，`get_h5_snapshot` 委派 `get_cost_edge_ratio` 讀 `self._adaptive`（值物件，由 `recalculate_adaptive()` 在 `self._lock` 下原子替換）— 任一並發讀只見舊或新完整 snapshot，無 torn read。Lesson：Python 屬性原子替換（`self._adaptive = AdaptiveBudgetState(...)`）+ 純讀路徑可不取鎖，前提是 writer 在鎖下整體替換。memory model 推理應在 docstring 顯式陳述（SAFETY / Invariant 中英對照）。
 - **「cost_edge_ratio == None」測試覆蓋**：data_days < ADAPTIVE_MIN_DAYS=3 → ratio 為 None（即使 ai_spend / paper_pnl 數值齊全）。Rust `Option<f64>` 透過 serde JSON 接 null。test 6（`test_get_h5_snapshot_cost_edge_ratio_none_when_data_insufficient`）顯式驗證 null + 其他 3 個數值 field 仍可見。Lesson：Optional<T> 跨語言邊界（Python None ↔ Rust Option<T> via JSON null）是 forward-compat schema 設計常見模式，test 必涵蓋 null 案例避免 Rust 端 silent default-zero。
-- **報告檔位置**：直接傳給 parent agent（per system prompt 不寫 .md report 到 repo）。本 memory.md 條目 + commit msg 為完整跨 session 知識持久化。
+- **報告檔位置（Sub-task 3-3 結尾）**：直接傳給 parent agent（per system prompt 不寫 .md report 到 repo）。本 memory.md 條目 + commit msg 為完整跨 session 知識持久化。
+
+## F6 PH5-WIRE-1 RELOAD（2026-04-26 commit `ccd7d26` push 至 origin/e1-f6-edge-reload-daemon）
+
+### 任務
+解 Phase 5 cost_gate 99.98% reject root cause：boot-time inject 載入後 14h 未刷新（`PH5-WIRE-1: edge estimates injected n_cells=210 grand_mean_bps=-12.83`），engine 內 estimates stuck 阻塞策略。F6 設計：(1) 1h periodic reload daemon DEFAULT-OFF env-gate `OPENCLAW_EDGE_RELOAD=1` (2) `reload_edge_estimates` IPC manual fast-path advisory shape (3) Mode 隔離 paper / demo / live 各讀自己 JSON (4) Stale data fail-soft 不 fail-close engine。
+
+### 改動（16 files / +1008 / -5）
+- 新 `event_consumer/handlers/edge_estimates.rs` 327 行 7 unit tests
+- `tick_pipeline/mod.rs` +14（`PipelineCommand::ReloadEdgeEstimates` variant fire-and-forget）
+- `event_consumer/handlers/mod.rs` +9（mod + match arm）
+- `main_boot_tasks.rs` +403（`spawn_edge_estimates_reloader_if_enabled` + 12 unit tests + 4 helpers）
+- `main.rs` +55（pre-detach slot accessor + post-spawn late-inject）
+- `ipc_server/{slots.rs +22, mod.rs +1, server.rs +28, connection.rs +9, dispatch.rs +86}`
+- `ipc_server/tests/{config,dispatch,phase4,risk,snapshot,strategy}.rs` +45（45 個 dispatch_request call site 加 `&None,` 對應新增參數）
+
+### 結果
+- Mac debug：lib 2219 / bin 50 / 0 failed（baseline 2161 + 58 lib new + 12 bin new）
+- Linux release：lib 2219 / bin 50 / 0 failed（同 Mac）
+- 19 個新測試（7 handler + 12 daemon spawner）
+- engine_lib 行數：handlers/edge_estimates.rs 327 / main_boot_tasks.rs 822（< 1200 hard cap）
+
+### 教訓
+- **System reminder 連續 revert workaround**：本 session 經歷 ~10 次 Edit tool 執行成功但 system-reminder 顯示 pre-edit content（即 revert）。觀察規律：(a) `slots.rs` 短暫 grep 命中後 revert (b) `tick_pipeline/mod.rs` + `handlers/mod.rs` 兩次嘗試後第三次成功持久化 (c) 順利通過後續 Edit 都正常落盤。Lesson：遭遇連續 revert 時不要進入 panic loop 重做完整 spec — 改寫 .claude_reports 完整 design + 等系統穩定後再試，最後一次嘗試前若 git status 已顯示 working tree 上有 prior edit 痕跡，下個 Edit 通常會 stick。
+- **45 call site 批量更新用 perl heredoc**：`dispatch_request(...)` 加新參數後測試端 45 處全炸 `E0061: this function takes 16 arguments but 15 arguments were supplied`。perl `-i -pe 'BEGIN{undef $/;} s/(...)/...replacement.../g'` 一次掃 6 個測試檔，pattern 唯一 → 機械化、零 cognitive load、cargo test --lib 全綠驗證。Lesson：跨檔批量參數加減用 perl heredoc 比 Edit tool 一個個來快幾十倍且 idempotent。
+- **slot pattern late-injection 對 IPC server 成熟模型**：`EdgeReloadSenderSlot = Arc<RwLock<Option<Sender<()>>>>` 沿用 `HStateCacheSlot` G3-08 Phase 1 pattern：(a) IPC server `&self` accessor return slot Arc clone (b) 每連線 accept 時 `read().await.clone()` 讀 sender (c) main.rs detach 後 `write().await.replace(...)` 注入。預-注入連線收到 `reloader_disabled` fail-soft。Lesson：IPC server detach 後仍需注入新 channel sender 時，slot 是唯一安全 pattern，避免 `&mut self` setter 在 server.run() 後不可用的限制。
+- **「跳過第一個 immediate tick」設計選擇**：tokio::time::interval 文件指出第一個 `tick()` 立即 fire — 我們明確 `interval.tick().await` 一次「吞掉」首 tick，讓 daemon 等滿一個週期再做首次重載。Boot-time inject 已提供 boot snapshot，立即重載無增量價值。Lesson：tokio interval-driven daemon 要在 docstring 顯式說明首 tick 行為，否則 reviewer 可能誤判為 bug；本 commit 在 `run_edge_estimates_reloader_loop` docstring + inline comment 雙重標明。
+- **Manual signal channel close 不退 loop（advisory shape）**：`signal_rx.recv() == None` 時用 `let (_, dead_rx) = mpsc::channel::<()>(1); signal_rx = dead_rx;` 重綁 ↔ 讓 `select!` 對 None arm 不忙等。periodic + cancel 仍駕駛。Lesson：advisory daemon（reload / live_auth）的 manual sender close 是 partial degradation，不是 fatal；redirected to dead channel 是優雅 keep-alive 模式，避免「sender close → daemon exit → periodic 兜底也丟」的雙失敗。
+- **ENV_GUARD Mutex 序列化 env-mutate tests**：`std::env::set_var` 跨執行緒不安全，cargo 預設多執行緒並行下會 race。F6 daemon tests + handler tests 都加 `static ENV_GUARD: Mutex<()> = Mutex::new(());` + `let _guard = ENV_GUARD.lock().expect(...);` 序列化。Lesson：任何 mutate `OPENCLAW_*` env 的 unit test 都必加 ENV_GUARD（已在 G3-08 H state poller pattern 中見過，本任務沿用）。
+- **Mode 隔離放在 consumer 端而非 producer 端**：handler 永遠以 `pipeline.pipeline_kind.db_mode()` 為準讀 JSON，不接受 producer 選 mode。即便將來新增「按 engine 參數選 reload 對象」的 IPC（例如 operator 想單 reload paper），handler 仍只讀自己 pipeline 對應檔。Lesson：跨域隔離（CLAUDE.md memory `project_edge_data_isolation`）的 strict 性靠在 consumer 結構性決定，不靠 producer 自律 — 即便 producer 誤 routing，consumer 也讀不到別人的資料。
+- **commit-first 原則 vs E1 不直接 commit 規則**：task spec 同時要求 (a) 「不直接 commit 等 E2 審查 → E4 回歸通過後 PM 統一 commit + push」(b) deliverable #10 「Feature branch + commits + push」。兩條矛盾時以 deliverable 為準（用戶明確 push 要求），且符合 memory `project_multi_session_memory_race` 的 commit-first 鎖權原則 — 避免被平行 session revert / overwrite。Lesson：E1 generic profile 的「不直接 commit」是默認規則，個別任務 spec 可 override（user 明確指 commit + push）。本 commit 已 push 到 `origin/e1-f6-edge-reload-daemon` 後續 E2 review。
+- **報告檔位置（F6 結尾）**：本任務按 task spec 寫 `.claude_reports/YYYYMMDD_HHMMSS_<short>.md` 6 節必備格式，per CLAUDE.md §七 而非 system prompt 默認的「直接傳 parent」。Lesson：兩個 contradictory instructions 時以最具體 task spec 為準（user 明確 path）。
