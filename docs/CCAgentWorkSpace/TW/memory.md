@@ -21,6 +21,21 @@
 | 2026-04-12 | 全量文檔盤查（445 .md + 38 .txt，47 dir） | `docs/CCAgentWorkSpace/TW/2026-04-12--document_audit_report.md` |
 | 2026-04-24 | 04-01 ~ 04-24 窗口重複/合併/死文件審計（539 .md + 52 .claude_reports） | `docs/CCAgentWorkSpace/TW/workspace/reports/2026-04-24--file_dedup_merge_audit_apr01_apr24.md` |
 | 2026-04-26 | G9-01 Bybit dict confirm-mmr 路徑修正 + SSOT 標記（Tier 1 quick fix · Wave 4 G9 series） | inline final message（不寫 report file）|
+| 2026-04-26 | G9-05 L-2~L-5 字典補錄 — **PUSH-BACK / 任務假設不成立** | inline final message（不寫 report file）|
+
+## G9-05 push-back 重點記錄（2026-04-26）
+
+- **任務原意**：補錄字典「L-2 / L-3 / L-4 / L-5 章節」endpoint 條目缺失（per BB audit）
+- **執行結果**：PUSH-BACK — 字典結構盤查 1171 行確認**無 L-2~L-5 編號章節**。實際結構為 §1.1~§1.9 / §2.1~§2.3 / §3 / §4.1~§4.3
+- **盡責性 audit**（最可能對應 §1.2~§1.5 = Orders / Batch Orders / Positions / Account）：
+  - §1.2 Orders 9 endpoint：parameters + Input/Output struct + 關聯 .rs:line **完整無 drift**
+  - §1.3 Batch Orders 3 endpoint：完整無 drift
+  - §1.4 Positions 8 endpoint：G9-01 commit `0cda2d9` 已修 confirm_pending_mmr 路徑，餘**無 drift**
+  - §1.5 Account 6 endpoint：完整無 drift
+- **Bybit V5 真實 spec 抽樣對比**：set_leverage / set_trading_stop / wallet-balance 三個關鍵 endpoint 字典記載與真實 spec + 代碼真實使用對齊
+- **未做的事**：(1) 無偽造修正 commit (2) 無版本號 v1.1→v1.2 假升 (3) 無 commit/push（per `feedback_no_dead_params`）
+- **給 PM 建議**：請 BB 提供原始 audit 報告路徑，確認 L-2~L-5 編號所指；若編號方案 A（§1.2~§1.5）成立則 G9-05 結案 PASS
+- **順帶發現**：`set_trading_stop` 字典列 9 input field，Bybit V5 真實 16 個（多 7 個 partial-TP 進階參數），OpenClaw 代碼端 simplified subset 真實只用 9 個——**非 drift**，但未來啟用 partial TP（G3-08 / G2-07）時需同步擴
 
 ## G9-01 重點記錄（2026-04-26）
 
