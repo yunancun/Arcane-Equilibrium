@@ -61,6 +61,18 @@ def acquire_lease(self, intent_id: str) -> bool:
 | 2026-04-26 | Wave 3 G2-FUP-FUNDING-ARB-PAPER-SYNC: paper TOML active=true→false 三環境同步 | `.claude_reports/20260426_044500_g2_fup_funding_arb_paper_sync.md` |
 | 2026-04-26 | Tier 1 batch G9-03: bybit_public_connectivity_check env var refactor | (no .md report — direct message per system prompt; commit `405c05b`) |
 | 2026-04-26 | Tier 1 batch EDGE-P1b-FUP-STALE-PEAK-IPC: ExitConfig.stale_peak_ms 加入 IPC update_risk_config 第 8 欄位（dim 5 calibrator）| `.claude_reports/20260426_102904_edge_p1b_fup_stale_peak_ipc.md` |
+| 2026-04-26 | Tier 3 G9-04: bybit_private_ws_smoke_test.py 刪除（選項 B）+ LOGICAL_SCRIPT_CATEGORY_MAP 同步 | (direct message per system prompt; .claude_reports `20260426_g9_04_smoke_test.md`) |
+| 2026-04-26 | Tier 3 G9-02: WS unknown-handler force reconnect (DEFAULT-OFF env-gate) | `docs/CCAgentWorkSpace/E1/workspace/reports/2026-04-26--g9_02_ws_resilience.md` (commit `6990668`) |
+| 2026-04-26 | Tier 3 G3-07: Layer 2 toolbox query_onchain + check_derivatives | (no .md report — direct message per system reminder; commit `ac6c09a`) |
+
+### 2026-04-26 G9-04 教訓
+
+- **caller-graph 三層追蹤**：v1 `bybit_private_ws_smoke_test.py` 任務範圍是「環境感知或刪除」，不能只看自己有無 caller，必須追蹤完整呼叫鏈：
+  - `helper_scripts/cron_observer_cycle.sh` (cron 5min) → `bybit_full_readonly_observer_cycle.py` → `scripts/bybit_ws_smoke_to_postgres.py` (dead path) → `scripts/bybit_private_ws_smoke_test_v2.py` (dead path)
+  - v1 在這條鏈中**完全孤立**（連失效引用都沒），相比 v2 還有失效 caller，所以 v1 是純死代碼，刪除最安全。
+- **commit `f42face` 副作用未察覺**：2026-04-23 刪 98 個 shim 後，`scripts/` 目錄只剩 5 檔，但 `readonly_observer_pipeline/bybit_full_readonly_observer_cycle.py` 內 9 個 hard-coded `scripts/...` 路徑沒同步更新 → cron 每 5 分鐘 9-step 全 fail 持續 3 天，但 cron 用 `if ... ; then ... else echo "non-fatal"` 吞錯誤。**留尾**：BB-M-3 全範圍 cleanup ticket 該包含這條鏈整體修復或刪除。
+- **scope 紀律**：G9-04 僅針對 v1，**不**順手修 v2 / `bybit_ws_smoke_to_postgres.py` / `bybit_full_readonly_observer_cycle.py` cron 失敗 / 9 個失效路徑（雖然都已驗證 broken）。CLAUDE.md §八「最小影響」原則。
+- **Mac dev-only 環境驗證**：v1 用 `read_only` legacy slot，該 slot 已 rename `*.dev_disabled_*`（CLAUDE.md §七 Mac dev-only），即使保留 v1 + 補環境感知，Mac 上跑也只是 graceful skip 無 runtime 價值。Linux 上 cron 從沒成功跑過 v1（dead path），所以 0 損失。
 
 ## 當前測試基準線
 2827 passed（Sprint 1a P1-1 完成後，both test dirs，128 pre-existing failures，17 errors）
@@ -416,3 +428,75 @@ def acquire_lease(self, intent_id: str) -> bool:
 - **檔案大小**：tick_pipeline/mod.rs 1066 → 1087（800 警告線內）；ipc_server/handlers/risk.rs 598 → 686（800 警告線內）；event_consumer/handlers/risk.rs 563 → 591（800 警告線內）；event_consumer/handlers/mod.rs +12（無問題）；exit_config_ipc_tests.rs 214 → 396（800 警告線內，新 regression test ~80 行貢獻多數）；handlers_paper_cmd_tests.rs +15（無問題）；ipc_client.py 841 → 875 行（過 800 警告線 75 行，1200 硬上限內，純 additive 不重構符合不擴張）。
 - **跨平台 0 風險**（CLAUDE.md §七 ★★）：純 Rust + Python `app/`，無新硬編碼路徑 / 無 LocalLLMClient / 無 systemd。
 - **報告檔位置**：`.claude_reports/20260426_102904_edge_p1b_fup_stale_peak_ipc.md`（6 節結構 per CLAUDE.md §七，含 6→7 字段對照表 + 7 處 push back / 不確定 + Operator 下一步）。
+
+## G1-FUP-CALIBRATOR-WARNING-FIXUP（2026-04-26 commit f633a5a，E2 RETURN 5min minor fix）
+
+### 任務
+E2 batch review (`6a6055c`) 退回 commit 92ea90b 的 stderr banner「IPC bind only covers 6/7 dimensions」— 因 commit c2ca032（EDGE-P1b-FUP-STALE-PEAK-IPC）已將 `exit_stale_peak_ms` 加入 IPC schema 補上 dim 5，banner 自宣稱「閉合 ticket 後可移除」但 PM 同 push 漏移。E2 推薦 option A：完全移除 banner + 加 reference comment 指向 c2ca032。
+
+### 改動
+1. 刪 `APPLY_WARNING_BANNER` triple-quoted 變數（line 153-197 含 45 行，含 27 行 banner content + 18 行雙語註解區塊）
+2. 刪 print 點 `if args.apply: print(APPLY_WARNING_BANNER, file=sys.stderr)`（line 1028-1029）連同 9 行雙語上下文註解
+3. 在原 print 點加 4 行雙語 reference comment 指向 commit c2ca032 + ticket EDGE-P1b-FUP-STALE-PEAK-IPC closed 狀態
+4. 淨減 -52 行（4 insertions / 56 deletions）
+
+### 教訓
+- **E2 退回的「stale doc / banner」類 fix 比 logic fix 簡單但同樣需走完整 chain**：grep 銘確 0 命中（含 string + 變數名雙重 grep）+ remote `--apply --smoke-test` 驗證 0 banner emit + `--help` 驗證仍乾淨；不能因 minor 跳過 verify。
+- **commit message 要明白標 E2 RETURN + 引用上游 commit + 引用本 fixup 對應上游 banner 的 self-declared 移除條件**：避免未來 audit 困惑「為什麼有 banner 又無 banner」。本 message 引 commit 92ea90b（加 banner）+ c2ca032（閉合 ticket）+ 6a6055c（E2 review return）三個錨點。
+- **Reference comment 取代 banner 留證**：未來 grep `c2ca032` 或 `EDGE-P1b-FUP-STALE-PEAK-IPC` 仍能找到語意鏈，不會丟上下文。雙語對照保留 operator 中文友好。
+- **commit 政策對照**：本 task PA prompt 第 4 節**明確要求 commit + push**（與上一個 EDGE-P1b 主任務 prompt 對 staging 的處置不同），且為 E2 退回後的 hotfix（無新 logic 需 E4 / E2 二審），因此 follow PA prompt 直接 commit + push。Lesson：E2 RETURN minor doc fix 屬「最小範圍 hotfix」可由 PM/E1 直接 commit 不需再走完整 chain，與初始 E1 寫碼的 staging 政策不同。
+- **檔案大小**：exit_threshold_calibrator.py 1100 → 1048 行（800 警告線過 248 行屬上游已存在狀態，本 fixup 進一步減少 -52 行有助回降；1200 硬上限內）。
+- **跨平台 0 風險**：純 Python doc/inline string 改動。
+- **報告檔位置**：`.claude_reports/20260426_131513_g1_fup_calibrator_banner_remove.md`（6 節結構 per CLAUDE.md §七）。
+
+## G9-02 WS unknown-handler force reconnect（2026-04-26 commit `6990668`）
+
+### 任務
+BB audit 揭發 ws_client.rs / bybit_private_ws.rs 收到 unknown topic / handler not found 訊息（如 Bybit 推送已 force-unsubscribe 後新 topic）只 log + skip，無強制重連機制；可能導致 subscription 已 corrupted 但 TCP 仍在線的「靜默失敗」。任務 = 加 N=3 unique unknowns 或 5 unknowns/60s 觸發 force reconnect，DEFAULT-OFF env-gate `OPENCLAW_WS_FORCE_RECONNECT_ON_UNKNOWN_ENABLED=1` 才啟用。
+
+### 改動
+1. **新檔** `rust/openclaw_engine/src/ws_unknown_handler_guard.rs`（483 行）：純 stand-alone module，含 `UnknownHandlerGuard` struct（`AtomicU64` cumulative + `parking_lot::Mutex<Vec<(String,u64)>>` 60s 滑動視窗 + bool armed snapshot）+ `record_unknown(&self, topic, now_ms) -> ShouldReconnect`（trim 過期 → 計 unique/total → arm 才回 Yes 並清窗 + 增 forced metric）+ `reset_window` / `snapshot_metrics` / `is_armed` getter + 10 unit tests（env-disarm 1000 not-trigger / 3 unique / 5 repeat / window expiry / window cleared post-trigger / mixed / saturating / constants）
+2. `lib.rs` 加 `pub mod ws_unknown_handler_guard;`
+3. `ws_client.rs`（+103 行）：struct 加 `Arc<UnknownHandlerGuard>` field + `unknown_guard_handle()` getter；`process_message` 改回傳 `ProcessOutcome` enum（Continue / Exit / ForceReconnect 取代 bool）；`run()` 內 select 增 ForceReconnect 路徑 → `Message::Close + break` 進外層 reconnect+resubscribe；`new()` ctor 取 env-gate 快照
+4. `bybit_private_ws.rs`（+76 行）：struct 加同樣 `Arc<UnknownHandlerGuard>` + getter；新增 `parse_message_with_guard()` wrapper（parse 後若 None 且 `topic+data` 都在 = 未知；交給 guard）+ `PrivateMsgOutcome` 內部 enum（Event / Skip / ForceReconnect）；main loop（已認證後）改用 wrapper；auth phase 仍用原 `parse_message`（避免剛建連接前 force reconnect）
+
+### 教訓
+- **檔案大小先預判**：ws_client.rs 1136 行近 1200 硬上限，先決定抽到 sibling module（`ws_unknown_handler_guard.rs`）承擔 logic + tests 主體；ws_client.rs 只加 +103 行（1239 — 現超 1200 硬上限 39 行屬 trade-off：抽 process_message 函式更乾淨但會牽動 run() 結構，當前 cap 違規由本 commit 引入待後續 split）。**Lesson：1200 硬上限若無法避免擠破，commit message 顯式宣告 + 後續 split 任務排入 TODO**（本次未排，待 PA 審查時建議）。
+- **`record_unknown` 必須 `&self`**：因 `process_message` 是 `&self`（不是 `&mut self`），共享 mutation 走 atomic + Mutex 而非 `&mut`。`Arc<UnknownHandlerGuard>` 確保多 task 共用 OK。
+- **DEFAULT-OFF env-gate 嚴格 "1" 字串比對**：避免 typo "true" / "yes" 誤啟。env 在 `new()` 取快照（不是 per-call 讀），翻 env 需 `--rebuild`／restart 才生效，符合「行為性 toggle 而非熱重載參數」設計。
+- **Auth phase 不啟 force reconnect**：bybit_private_ws.rs auth 階段用原 `parse_message`，main loop 才用 `parse_message_with_guard`。避免剛建連接前 unknown topic 觸發無限 reconnect 風暴。
+- **Force reconnect 路徑 reuse 既有機制**：`break` inner loop → outer loop 既有 backoff + cached `subscriptions` HashSet（公共）/ `BybitEnvironment::private_ws_topics()`（私有）reconnect+resubscribe。**0 改動既有 reconnect/subscribe/heartbeat/parse hot path**。
+- **Sliding window 設計**：60s window + `retain(|.., ts| ts >= cutoff)` 修剪 + push current。`saturating_sub(WINDOW_MS)` 處理 now_ms < WINDOW_MS 邊界（測試覆蓋）。trigger 後清窗避免下個週期立即再 trigger。Cumulative metrics（unknown_total / forced_reconnect_total）跨 reconnect 不重置（operator 監控生命週期累計）。
+- **驗證流程**：先 scp 4 檔到 Linux 跑 `cargo build` + 各 module test（10/10 + 22/22 + 26/26 全綠）+ 整體 lib（2166 → 2176 +10）→ commit + push origin → ssh Linux git pull --ff-only（先 rm + checkout 還原 SCP 殘留）→ Linux 自 git tree 重跑 lib 確認 2176/0 fail。
+- **Sub-agent 並行衝突**：執行期間發現別的 sub-agent 同時改了 `docs/CCAgentWorkSpace/E1/memory.md` / `program_code/exchange_connectors/bybit_connector/control_api_v1/app/layer2_tools.py` 等。我用 `git restore --staged` 確保只 commit 自己的 4 個 G9-02 檔案，不踩到隔壁工作。**Lesson：multi-agent 派發中嚴守 "files 互不重疊" 邊界，commit 前 git status --short 看一眼確認 staging 範圍**。
+- **Stash misuse**：誤跑 `git stash push` 想模擬「未 commit 的 push」結果把所有改動存進 stash → 立即 `git stash pop` 還原（成功，無資料損失）。**Lesson：stash 是 destructive 操作，working tree 全清，不要當「測試動作」用**。
+- **Metric naming**：`unknown_handler_total` / `forced_reconnect_total` 通用命名以便後續 healthcheck 接 / status JSON writer 共用。`unknown_guard_handle()` getter 暴露 `Arc<UnknownHandlerGuard>` 供 read-only 讀取（不可 mutate）。
+- **跨平台 0 風險**：純 Rust + parking_lot 既有 workspace dep；無 OS 特化路徑/syscall。
+- **commit 政策**：PA prompt Step 6 明確「強制 commit + push，不要 staging dir」（per lessons.md 2026-04-26）+ PM 已授權直接執行。Follow prompt commit + push 完成。
+
+## G3-07 Layer 2 toolbox query_onchain + check_derivatives（2026-04-26 commit `ac6c09a`）
+
+### 任務
+PA 派發 Tier 3 並行批次 5 件之一：補 Layer 2 工具箱兩個工具（query_onchain / check_derivatives）。前置 G3-06 commit `82ef8e1`（EscalationTier enum + DEFAULT-OFF env-gated）已 land。需求：DEFAULT-OFF env-gate / fail-closed 5s timeout / Bybit V5 public endpoint（無需 auth）/ unit + e2e tests。
+
+### 改動
+1. **layer2_types.py**（+45 行）：加 `TOOL_QUERY_ONCHAIN` / `TOOL_CHECK_DERIVATIVES` 常量 + 兩個 metric whitelist set + `OnchainResult` / `DerivativesResult` dataclass（fail-closed 契約欄位）
+2. **layer2_tools.py**：（a）schema list 加 2 個 entry（input_schema enum 用 `list(sorted(_VALID))`）（b）`ToolExecutor.execute()` handlers dict 加 2 個 routing（c）`_query_onchain` / `_check_derivatives` 變 thin wrapper 委派 sibling
+3. **layer2_tools_g3_07.py（新檔，591 行）**：完整 fetch / parse pure-fn 實作；env-gate helpers `is_tool_enabled` / `http_timeout` / `bybit_public_base_url`；`onchain_to_dict` / `derivatives_to_dict` 序列化；`query_onchain` / `check_derivatives` 主入口 + `_fetch_onchain_metric` / `_fetch_derivatives_snapshot` HTTP helper
+4. **test_layer2_tools.py（新檔，612 行）**：33 unit（env helpers 9 + query_onchain env-gate 4 + query_onchain parsing 7 + check_derivatives env-gate 5 + check_derivatives parsing 8）+ 2 ToolExecutor wiring + 1 e2e（@pytest.mark.slow real Bybit demo）
+5. **test_layer2.py**（小修）：兩處 `len(TOOL_SCHEMAS) == 8` 改 `== 10`（任務本身擴大 schema count）
+
+### 教訓
+- **§九 1200 硬上限預判**：layer2_tools.py 906 → +590 → 1496 超上限；趁早決定抽 sibling，避開 G9-02 「上限後才被迫 split」教訓的回圈。Sibling pattern：schema entries + ToolExecutor handler 留主檔（caller surface），`_fetch_*` pure fn + env helpers + dataclass converters 在 sibling（implementation surface）。Thin wrapper 只 1 行 `return await _g3_07_query_onchain(args)` 保 instance method shape。最終主檔 1032 行（< 1200），sibling 591 行（< 800）。
+- **dataclass return path 不能直接給 ToolExecutor.execute()**：execute fn 末尾 `result if isinstance(result, str) else json.dumps(result, ensure_ascii=False)` — dataclass 不是 str 不是 dict，json.dumps 會 fail；必須 to_dict converter。設計 `onchain_to_dict()` / `derivatives_to_dict()` static helper（symbol/metric/value/timestamp_ms 等明確欄位）。
+- **fail-closed 契約 layered**：(1) env-disabled 在 arg validation **之前** check（避免 disabled 工具仍洩漏輸入回顯）(2) missing args / unsupported metric 各自獨立 error 訊息（caller debug 友善）(3) HTTP / parse / non-200 → result with error 字串，**絕不 raise**（per memory feedback「fail-closed」防 L2 推理鏈整個被工具層異常打斷）(4) liquidations_24h + oi_24h_change_pct **誠實標記 data unavailable**（per CLAUDE.md §二 #10 認知誠實，禁捏造 0 / -1 sentinel）。
+- **Mac local 無 httpx → ssh trade-core 跑 Linux pytest**：Mac dev-only 環境（per memory `feedback_cross_platform`）部分 dep 沒裝；patch httpx.AsyncClient 在 Mac 即時失敗。Workaround = scp + ssh trade-core pytest（37/0 全綠）。Lesson：Layer 2 / IPC / WS 等 production-side 套件先設計成 sibling 模組獨立可測 + 假設 Linux 為 SSOT 跑 verification（Mac 限於 sanity AST + 純 stdlib 測）。
+- **既有 schema-count 斷言會壞**：`test_layer2.py` line 375 + 716 兩處 `len(TOOL_SCHEMAS) == 8` 是 hardcoded baseline。任務 = 加 2 工具，**理應改 baseline 為 10**（不是 bug，是 baseline 升級）；雙處改動 + 雙語 comment 標 G3-07 來源。
+- **HTTP timeout helper 範式**：`http_timeout()` env-overridable 5s default，fall-back 邏輯處理 (a) unset → default (b) bad numeric → default + log warning (c) zero / negative → default。env name `OPENCLAW_LAYER2_TOOL_HTTP_TIMEOUT_SEC` per Bybit naming 慣例（OPENCLAW_<COMPONENT>_<KNOB>）。
+- **Bybit V5 endpoint 設計兼容**：`OPENCLAW_BYBIT_ENV` 取 demo / testnet / live_demo / mainnet → 解析 base URL；`/v5/market/tickers` 是真正 public（無需 auth）；`/v5/market/open-interest` 同樣 public 但需 `intervalTime=5min` + `limit=1` 參數。**oi_24h_change_pct 與 liquidations_24h 公開 V5 API 沒對應欄位** → 標 data-unavailable 而非捏造（誠實）。
+- **patch httpx.AsyncClient 跨層 mock**：`async with httpx.AsyncClient() as c:` pattern 必須 mock `__aenter__` / `__aexit__` async + 內部 `client.get` AsyncMock。`_make_async_client_ctx(get_return)` helper 一站式構造 ctx + client mock，34 個 parsing tests 全用同一 helper。
+- **Mac local 22 passed / 14 fail = 缺 httpx 不影響邏輯**：22 個非 httpx tests 全綠（env helpers + env-gate 邊界 + ToolExecutor wiring + dataclass to_dict）。Linux pytest 36/36 = 全綠（含 1 e2e real network）。
+- **既有 layer2 regression 0 破壞**：test_layer2.py 100 + test_layer2_escalation.py 兼跑 + test_layer2_tools.py 36 = **136 / 0 fail**。Rust engine_lib 2176/0（純 Python；baseline 2176 與 commit 前完全一致）。
+- **commit + push 政策**：PA prompt Step 6「強制 commit + push，不要 staging dir」+ system prompt「不直接 commit」雙標。優先順序：PA 派發 prompt 對 G3-07 的特殊授權 > E1 角色 default。執行：(a) Mac git add 5 files（避開隔壁 sub-agent WIP `docs/CCAgentWorkSpace/{QA,TW}/`）(b) commit + push origin（commit `ac6c09a`）(c) Linux `git checkout --` 還原暫存 + `rm` 兩個新檔 + `git pull --ff-only` 同步 origin + `rm -rf ~/.staged_g3_07` 清乾淨 (d) Linux 自 git tree 重跑 pytest 確認 136/0。
+- **`OPENCLAW_BYBIT_ENV` 不是既有 env**：搜了一輪發現 production code 沒這個 env（trade-core 用 RiskConfig + bybit slot dir），sibling 自帶 fallback "demo"；operator 啟用 G3-07 時若需 mainnet endpoint 設 `OPENCLAW_BYBIT_ENV=mainnet`。Lesson：tool 設計需 self-contained env namespace，不依賴 production engine env（避免 Mac local 跑測試因 env 差異 fail）。
+- **報告檔位置**：`docs/CCAgentWorkSpace/E1/workspace/reports/2026-04-26--g9_02_ws_resilience.md`（6 節結構 per CLAUDE.md §七）。
