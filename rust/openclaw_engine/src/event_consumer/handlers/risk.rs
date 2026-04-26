@@ -227,6 +227,13 @@ pub(super) fn handle_update_risk_config(
     exit_giveback_base: Option<f64>,
     exit_giveback_slope: Option<f64>,
     exit_giveback_floor: Option<f64>,
+    // EDGE-P1b-FUP-STALE-PEAK-IPC (2026-04-26): dim 5 of EDGE-P1b T1
+    //   calibrator. Wire is `u64 ms` for parity with sibling *_ms fields;
+    //   the closure below casts to `i64` (validate() rejects negative).
+    // EDGE-P1b-FUP-STALE-PEAK-IPC（2026-04-26）：EDGE-P1b T1 calibrator
+    //   第 5 維度。Wire 為 `u64 ms` 對齊同伴 *_ms 欄位；下方 closure
+    //   cast 為 `i64`（validate() 拒負值）。
+    exit_stale_peak_ms: Option<u64>,
     pipeline: &mut TickPipeline,
     snapshot_writer: &mut DualStateWriter,
 ) {
@@ -379,7 +386,8 @@ pub(super) fn handle_update_risk_config(
         || exit_min_peak_atr_norm.is_some()
         || exit_giveback_base.is_some()
         || exit_giveback_slope.is_some()
-        || exit_giveback_floor.is_some();
+        || exit_giveback_floor.is_some()
+        || exit_stale_peak_ms.is_some();
     if has_exit_patch {
         match pipeline.risk_store() {
             Some(risk_store) => {
@@ -394,6 +402,13 @@ pub(super) fn handle_update_risk_config(
                 let p_gb_base = exit_giveback_base;
                 let p_gb_slope = exit_giveback_slope;
                 let p_gb_floor = exit_giveback_floor;
+                // EDGE-P1b-FUP-STALE-PEAK-IPC: copy u64 wire value; closure
+                //   below casts to schema i64. validate() rejects negative,
+                //   so any value > i64::MAX would already be caller error.
+                // EDGE-P1b-FUP-STALE-PEAK-IPC：複製 u64 wire 值；下方 closure
+                //   cast 為 schema i64。validate() 拒負值，超過 i64::MAX 屬
+                //   caller error。
+                let p_stale_peak_ms = exit_stale_peak_ms;
                 let outcome = risk_store.apply_patch(
                     crate::config::PatchSource::Operator,
                     |cfg| {
@@ -418,6 +433,17 @@ pub(super) fn handle_update_risk_config(
                         if let Some(v) = p_gb_floor {
                             cfg.exit.giveback_floor = v;
                         }
+                        // EDGE-P1b-FUP-STALE-PEAK-IPC: u64 ms → schema i64.
+                        //   validate() (exit_features/v2.rs) rejects < 0;
+                        //   any reasonable ms value is well within i64 range
+                        //   (default 60_000; i64::MAX ≈ 9.2e18 ms ≈ 290M yrs).
+                        // EDGE-P1b-FUP-STALE-PEAK-IPC：u64 ms → schema i64。
+                        //   validate()（exit_features/v2.rs）拒 < 0；任何
+                        //   合理 ms 值均遠小於 i64::MAX（預設 60_000；
+                        //   i64::MAX ≈ 9.2e18 ms ≈ 2.9 億年）。
+                        if let Some(v) = p_stale_peak_ms {
+                            cfg.exit.stale_peak_ms = v as i64;
+                        }
                     },
                     |cfg| cfg.validate(),
                 );
@@ -432,6 +458,7 @@ pub(super) fn handle_update_risk_config(
                             giveback_base = ?exit_giveback_base,
                             giveback_slope = ?exit_giveback_slope,
                             giveback_floor = ?exit_giveback_floor,
+                            stale_peak_ms = ?exit_stale_peak_ms,
                             "exit config updated via IPC / exit 配置已通過 IPC 更新"
                         );
                     }

@@ -1,20 +1,36 @@
 //! EDGE-DIAG-1-FUP-IPC: ExitConfig IPC hot-reload regression tests.
 //! EDGE-DIAG-1-FUP-IPC：ExitConfig IPC 熱重載回歸測試。
+//!
+//! EDGE-P1b-FUP-STALE-PEAK-IPC (2026-04-26): the IPC schema graduated from
+//!   7 to 8 `exit_*` fields when `stale_peak_ms` (dim 5 of EDGE-P1b T1
+//!   calibrator) was added. The first round-trip test below now exercises
+//!   `stale_peak_ms` as a no-op (None) field to keep the original
+//!   "absent-means-unchanged" guarantee; a dedicated round-trip test proves
+//!   the new field flows through the full IPC → consumer → ConfigStore path.
+//!   `shadow_enabled` remains the only true TOML-only ExitConfig field.
+//! EDGE-P1b-FUP-STALE-PEAK-IPC（2026-04-26）：`stale_peak_ms`（EDGE-P1b T1
+//!   calibrator 第 5 維度）加入後 IPC schema 由 7 → 8 個 `exit_*` 欄位。
+//!   下方第一個 round-trip 測試讓 `stale_peak_ms` 走 None 路徑保留原本
+//!   「未提供即不變」契約；新增專用 round-trip 測試證實新欄位完整流經 IPC
+//!   → consumer → ConfigStore 路徑。`shadow_enabled` 仍是唯一真正 TOML-only
+//!   的 ExitConfig 欄位。
 
 use super::{make_test_pipeline, make_test_writer};
 
-/// EN: Round-trip proof that all 7 `exit_*` fields on `UpdateRiskConfig` land
-///   atomically on `RiskConfig.exit` via `ConfigStore::apply_patch`, the
-///   version counter bumps, and fields NOT in the patch (`shadow_enabled` and
-///   `stale_peak_ms` — covered by the ExitConfig struct but outside the 7 IPC
-///   fields) keep their prior value. This guards against regressions that
-///   would silently drop some exit fields on the IPC → event_consumer hop,
-///   which was the entire reason EDGE-DIAG-1-FUP-IPC exists: pre-fix there
-///   was NO IPC path so ANY exit param change required TOML + rebuild.
-/// 中文：往返驗證 — `UpdateRiskConfig` 的 7 個 `exit_*` 欄位透過
+/// EN: Round-trip proof that all 7 percentile-derived `exit_*` fields on
+///   `UpdateRiskConfig` land atomically on `RiskConfig.exit` via
+///   `ConfigStore::apply_patch`, the version counter bumps, and fields NOT
+///   in the patch (`shadow_enabled` is TOML-only; `stale_peak_ms` is now
+///   IPC-wired but here kept as None) keep their prior value. This guards
+///   against regressions that would silently drop some exit fields on the
+///   IPC → event_consumer hop, which was the entire reason
+///   EDGE-DIAG-1-FUP-IPC exists: pre-fix there was NO IPC path so ANY exit
+///   param change required TOML + rebuild.
+/// 中文：往返驗證 — `UpdateRiskConfig` 的 7 個百分位 `exit_*` 欄位透過
 ///   `ConfigStore::apply_patch` 原子落入 `RiskConfig.exit`；版本號遞增；
-///   未在 patch 的欄位（`shadow_enabled` / `stale_peak_ms`）保持原值。
-///   防止日後 IPC → event_consumer 跳時靜默丟某些 exit 欄位的 regression。
+///   未在本 patch 的欄位（`shadow_enabled` 為 TOML-only；`stale_peak_ms`
+///   現已 IPC wire 但本測試傳 None）保持原值。防止日後 IPC →
+///   event_consumer 跳時靜默丟某些 exit 欄位的 regression。
 #[test]
 fn test_ipc_risk_update_apply_exit_fields_round_trip() {
     use crate::config::{ConfigStore, RiskConfig};
@@ -71,6 +87,14 @@ fn test_ipc_risk_update_apply_exit_fields_round_trip() {
             exit_giveback_base: Some(1.2),
             exit_giveback_slope: Some(0.25),
             exit_giveback_floor: Some(0.4),
+            // EDGE-P1b-FUP-STALE-PEAK-IPC: keep this patch on the 7
+            //   percentile fields only — None preserves the prior value so
+            //   the assertion below `after.exit.stale_peak_ms == base_*`
+            //   still proves "not in patch ⇒ unchanged".
+            // EDGE-P1b-FUP-STALE-PEAK-IPC：本 patch 僅動 7 個百分位欄位 —
+            //   傳 None 即保留原值，下方 `after.exit.stale_peak_ms ==
+            //   base_*` 仍能驗證「不在 patch 內 ⇒ 不變」契約。
+            exit_stale_peak_ms: None,
         },
         &mut pipeline,
         &mut writer,
@@ -112,11 +136,17 @@ fn test_ipc_risk_update_apply_exit_fields_round_trip() {
     // Non-patched fields unchanged. / 未被 patch 的欄位保持原值。
     assert_eq!(
         after.exit.shadow_enabled, base_shadow_enabled,
-        "shadow_enabled is outside the 7 IPC fields and must remain at prior value"
+        "shadow_enabled is TOML-only (binary toggle) and must remain at prior value"
     );
+    // EDGE-P1b-FUP-STALE-PEAK-IPC: stale_peak_ms is now IPC-wired but this
+    //   patch left it as None (= no change). Asserting unchanged proves the
+    //   IPC dispatch correctly ignores None inputs (no zero-value leak).
+    // EDGE-P1b-FUP-STALE-PEAK-IPC：stale_peak_ms 現已 IPC wire 但本 patch
+    //   傳 None（= 不變更）。斷言不變即證 IPC dispatch 正確忽略 None
+    //   輸入（不洩漏 0 值）。
     assert_eq!(
         after.exit.stale_peak_ms, base_stale_peak_ms,
-        "stale_peak_ms is outside the 7 IPC fields and must remain at prior value"
+        "stale_peak_ms None in patch must keep prior value (no zero-value leak from IPC dispatch)"
     );
 }
 
@@ -184,6 +214,13 @@ fn test_ipc_risk_update_exit_validation_rejects_invalid() {
             exit_giveback_base: Some(1.5), // valid-looking but must roll back
             exit_giveback_slope: None,
             exit_giveback_floor: None,
+            // EDGE-P1b-FUP-STALE-PEAK-IPC (2026-04-26): None — fail-closed
+            //   rollback guarantee covers all 8 fields; this validation test
+            //   focuses on the negative-min_hold_secs invariant.
+            // EDGE-P1b-FUP-STALE-PEAK-IPC（2026-04-26）：None — fail-closed
+            //   rollback 涵蓋全 8 欄位；本驗證測試專注 min_hold_secs 為負
+            //   的不變量。
+            exit_stale_peak_ms: None,
         },
         &mut pipeline,
         &mut writer,
@@ -210,5 +247,132 @@ fn test_ipc_risk_update_exit_validation_rejects_invalid() {
         risk_store.version(),
         version_before,
         "failed validate() must NOT bump ConfigStore version"
+    );
+}
+
+/// EDGE-P1b-FUP-STALE-PEAK-IPC (2026-04-26): regression test for the new
+///   `exit_stale_peak_ms` IPC field (dim 5 of EDGE-P1b T1 calibrator).
+///   Mirrors the 7-field round-trip pattern above but isolates the
+///   stale_peak_ms hop end-to-end:
+///
+///   1. Wire `exit_stale_peak_ms: Some(123_456_u64)` only — every
+///      percentile field stays None to prove the new field does NOT
+///      depend on the percentile bind path.
+///   2. Assert `risk_store.load().exit.stale_peak_ms == 123_456_i64`
+///      bit-exact — confirms u64 wire ⇒ i64 schema cast is lossless.
+///   3. Assert version counter bumps — confirms the new field passes
+///      `has_exit_patch` triage and reaches `apply_patch`.
+///   4. Assert percentile fields unchanged — confirms additive merge
+///      semantics (no co-mutation collateral).
+///   5. Assert `shadow_enabled` unchanged — confirms shadow_enabled
+///      is still TOML-only and not co-flipped by stale_peak_ms patch.
+///
+/// EDGE-P1b-FUP-STALE-PEAK-IPC（2026-04-26）：新增的 `exit_stale_peak_ms`
+///   IPC 欄位回歸測試（EDGE-P1b T1 calibrator 第 5 維度）。鏡射上方 7
+///   欄位 round-trip 模式但獨立驗證 stale_peak_ms 的端到端流程：
+///
+///   1. 僅 wire `exit_stale_peak_ms: Some(123_456_u64)` — 所有百分位欄位
+///      傳 None，證明新欄位不依賴百分位 bind 路徑。
+///   2. 斷言 `risk_store.load().exit.stale_peak_ms == 123_456_i64` 逐位元
+///      相符 — 確認 u64 wire ⇒ i64 schema cast 無損。
+///   3. 斷言版本號遞增 — 確認新欄位通過 `has_exit_patch` 篩選並抵達
+///      `apply_patch`。
+///   4. 斷言百分位欄位不變 — 確認 additive merge 語意（無共同變更副作用）。
+///   5. 斷言 `shadow_enabled` 不變 — 確認 shadow_enabled 仍為 TOML-only
+///      且不會被 stale_peak_ms patch 連帶翻轉。
+#[test]
+fn test_ipc_risk_update_apply_exit_stale_peak_ms_round_trip() {
+    use crate::config::{ConfigStore, RiskConfig};
+    use crate::tick_pipeline::PipelineCommand;
+    use std::sync::Arc;
+
+    let mut pipeline = make_test_pipeline();
+    let mut writer = make_test_writer();
+    let mut pending = std::collections::HashMap::new();
+
+    // Default config (validate-clean baseline).
+    // 預設配置（validate 乾淨基線）。
+    let base_cfg = RiskConfig::default();
+    let base_shadow_enabled = base_cfg.exit.shadow_enabled;
+    let base_missing = base_cfg.exit.missing_edge_fallback_bps;
+    let base_giveback_floor = base_cfg.exit.giveback_floor;
+    base_cfg.validate().expect("default cfg validates");
+    let risk_store = Arc::new(ConfigStore::new(base_cfg));
+    pipeline.set_risk_store(Arc::clone(&risk_store));
+    let version_before = risk_store.version();
+
+    // Patch ONLY exit_stale_peak_ms (123_456 ms — distinct from the 60_000
+    // default, large enough to be recognisably non-default in a debugger).
+    // 僅 patch exit_stale_peak_ms（123_456 ms — 與預設 60_000 不同，足夠
+    // 大讓 debugger 一眼識別非預設值）。
+    super::super::handlers::handle_paper_command(
+        PipelineCommand::UpdateRiskConfig {
+            hard_stop_pct: None,
+            trailing_stop_pct: None,
+            trailing_activation_pct: None,
+            time_stop_hours: None,
+            atr_multiplier: None,
+            take_profit_pct: None,
+            max_leverage: None,
+            max_drawdown_pct: None,
+            max_same_direction_positions: None,
+            p1_risk_pct: None,
+            h0_shadow_mode: None,
+            dynamic_stop_base_ratio: None,
+            dynamic_stop_cap_ratio: None,
+            trailing_min_rr_ratio: None,
+            cost_gate_min_confidence: None,
+            cost_gate_k_base: None,
+            cost_gate_k_medium: None,
+            cost_gate_k_small: None,
+            adx_trending_threshold: None,
+            boot_cooldown_ms: None,
+            signals_heartbeat_ms: None,
+            exit_missing_edge_fallback_bps: None,
+            exit_min_net_floor_bps: None,
+            exit_min_hold_secs: None,
+            exit_min_peak_atr_norm: None,
+            exit_giveback_base: None,
+            exit_giveback_slope: None,
+            exit_giveback_floor: None,
+            exit_stale_peak_ms: Some(123_456_u64),
+        },
+        &mut pipeline,
+        &mut writer,
+        &mut pending,
+    );
+
+    let after = risk_store.load();
+
+    // (1) New field landed bit-exact (u64 → i64 lossless cast).
+    // (1) 新欄位逐位元落入（u64 → i64 無損 cast）。
+    assert_eq!(
+        after.exit.stale_peak_ms, 123_456_i64,
+        "exit_stale_peak_ms u64 wire must round-trip to i64 schema bit-exact"
+    );
+
+    // (2) Version bumped — proves has_exit_patch triage saw the new field.
+    // (2) 版本號遞增 — 證 has_exit_patch 篩選看見新欄位。
+    assert!(
+        risk_store.version() > version_before,
+        "ConfigStore version must bump on stale_peak_ms-only patch"
+    );
+
+    // (3) Percentile-derived fields unchanged — additive merge guarantee.
+    // (3) 百分位推導欄位不變 — additive merge 保證。
+    assert_eq!(
+        after.exit.missing_edge_fallback_bps, base_missing,
+        "missing_edge_fallback_bps untouched by stale_peak_ms-only patch"
+    );
+    assert_eq!(
+        after.exit.giveback_floor, base_giveback_floor,
+        "giveback_floor untouched by stale_peak_ms-only patch"
+    );
+
+    // (4) shadow_enabled unchanged — still TOML-only after this FUP.
+    // (4) shadow_enabled 不變 — 本 FUP 後仍是 TOML-only。
+    assert_eq!(
+        after.exit.shadow_enabled, base_shadow_enabled,
+        "shadow_enabled stays TOML-only; stale_peak_ms patch must not co-flip it"
     );
 }

@@ -453,11 +453,37 @@ class EngineIPCClient:
         max_drawdown_pct: float | None = None,
         max_same_direction_positions: int | None = None,
         h0_shadow_mode: bool | None = None,
+        # EDGE-P1b-FUP-STALE-PEAK-IPC (2026-04-26): dim 5 of EDGE-P1b T1
+        #   calibrator (`time_since_peak_ms`) → `ExitConfig.stale_peak_ms`
+        #   (i64 ms in schema; wire is u64 ms for parity with sibling
+        #   `*_ms` IPC fields). Closes the asymmetry where this dim was
+        #   TOML-only and forced calibrator into a two-step bind path
+        #   (TOML edit + reload_risk_config IPC).
+        # EDGE-P1b-FUP-STALE-PEAK-IPC（2026-04-26）：EDGE-P1b T1 calibrator
+        #   第 5 維度（`time_since_peak_ms`）→ `ExitConfig.stale_peak_ms`
+        #   （schema i64 ms；wire u64 ms 對齊同伴 `*_ms` IPC 欄位）。
+        #   封閉先前 calibrator 必須走 TOML edit + reload_risk_config 兩步
+        #   bind 的不對稱。
+        exit_stale_peak_ms: int | None = None,
     ) -> dict[str, Any]:
         """
         Update risk config on Rust engine at runtime (GUI/Agent → IPC → Rust).
         運行時更新 Rust 引擎風控配置。所有參數可選，僅傳遞需要改變的。
         For Option<Option<f64>> fields (trailing/time/atr/tp): None=disable, float=set, _UNSET=no change.
+
+        Note (2026-04-26): the 7 `exit_*` percentile fields wired in Rust
+        IPC since EDGE-DIAG-1-FUP-IPC are NOT exposed on this typed wrapper —
+        callers wanting the percentile bind path (e.g.
+        `helper_scripts/research/exit_threshold_calibrator.py`) call
+        `self.call("update_risk_config", params=raw_dict)` directly with the
+        full set. Adding `exit_stale_peak_ms` here lays the groundwork for
+        `restore_exit_config_defaults` and future operator CLI bindings.
+        注（2026-04-26）：自 EDGE-DIAG-1-FUP-IPC 後 Rust IPC 已 wire 的 7 個
+        `exit_*` 百分位欄位**未**在本 typed wrapper 暴露 — 需走百分位 bind
+        路徑的 caller（如 `helper_scripts/research/exit_threshold_calibrator.py`）
+        直接 `self.call("update_risk_config", params=raw_dict)` 並提供完整
+        欄位集。本欄位先補上 `exit_stale_peak_ms` 為
+        `restore_exit_config_defaults` 與未來 operator CLI binding 鋪路。
         """
         _U = EngineIPCClient._UNSET
         params: dict[str, Any] = {}
@@ -482,6 +508,14 @@ class EngineIPCClient:
             params["max_same_direction_positions"] = max_same_direction_positions
         if h0_shadow_mode is not None:
             params["h0_shadow_mode"] = h0_shadow_mode
+        # EDGE-P1b-FUP-STALE-PEAK-IPC: forward stale_peak_ms only when caller
+        #   provided a value (None = "no change"). Rust IPC handler reads as
+        #   u64; consumer-side casts to schema i64 (validate() rejects < 0).
+        # EDGE-P1b-FUP-STALE-PEAK-IPC：caller 顯式傳值才 forward（None = 不變）。
+        #   Rust IPC handler 讀 u64；consumer 端 cast 為 schema i64
+        #   （validate() 拒 < 0）。
+        if exit_stale_peak_ms is not None:
+            params["exit_stale_peak_ms"] = exit_stale_peak_ms
         return await self.call("update_risk_config", params=params)
 
     # ─── Internal: connection helpers / 內部：連接輔助 ───────────────────────

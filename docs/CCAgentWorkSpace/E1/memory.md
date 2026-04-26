@@ -58,6 +58,9 @@ def acquire_lease(self, intent_id: str) -> bool:
 | 2026-04-26 | Wave 3 EDGE-P1b 4 子任務: calibrator + summary + restore IPC + healthcheck [14] 升級 | `docs/CCAgentWorkSpace/E1/workspace/reports/2026-04-26--edge_p1b_4_subtasks.md` |
 | 2026-04-26 | Wave 3 G2-03 4 子任務: StrategyOverride SL/TP schema + risk_checks runtime cap + 3 TOML schema + binding SOP shell | `docs/CCAgentWorkSpace/E1/workspace/reports/2026-04-26--g2_03_4_subtasks.md` |
 | 2026-04-26 | Wave 3 EDGE-P2-flip T2: healthcheck [15] per-strategy + shadow_disagreement_breakdown research tool | `.claude_reports/20260426_041300_edge_p2_flip_t2_landing.md` |
+| 2026-04-26 | Wave 3 G2-FUP-FUNDING-ARB-PAPER-SYNC: paper TOML active=true→false 三環境同步 | `.claude_reports/20260426_044500_g2_fup_funding_arb_paper_sync.md` |
+| 2026-04-26 | Tier 1 batch G9-03: bybit_public_connectivity_check env var refactor | (no .md report — direct message per system prompt; commit `405c05b`) |
+| 2026-04-26 | Tier 1 batch EDGE-P1b-FUP-STALE-PEAK-IPC: ExitConfig.stale_peak_ms 加入 IPC update_risk_config 第 8 欄位（dim 5 calibrator）| `.claude_reports/20260426_102904_edge_p1b_fup_stale_peak_ipc.md` |
 
 ## 當前測試基準線
 2827 passed（Sprint 1a P1-1 完成後，both test dirs，128 pre-existing failures，17 errors）
@@ -353,3 +356,63 @@ def acquire_lease(self, intent_id: str) -> bool:
   - **`READY_frac`** = ready_strategies_rows / this_week — 直接告訴 operator 「目前 cohort 多少比例已 calibrator-ready」。Linux 真實 DB 跑出 63%（grid_trading=282 已 READY，ma_crossover=146 GROWING）。
 
 - **檔案大小**：calibrator 1067 行（800-1200 警告區，但 SQL+math+render+CLI 整合為單檔合理）；summary 825 行（剛過 800 警告線）；risk.rs +332 行至 598 行（仍在 800 警告線下）；mod.rs 1251 行 — **既有檔已超 1200 硬上限**，本變動 +11 行（dispatch 路由），按「不擴張」嚴守不順手 split，留 E2 review 決定。
+
+### 2026-04-26 Wave 3 G2-FUP-FUNDING-ARB-PAPER-SYNC（P2，single TOML key 同步）
+
+- **Tier 1 quick fix 範式**（≤10min spec / 6min 實做）：純 TOML 編輯，無業務代碼 / 無測試 / 無 healthcheck / 無 IPC / 無 cargo build / 無 pytest；E1 commit 即 push（CLAUDE.md §七 強制鏈），不要求 deploy。
+- **memory `feedback_env_config_independence` 精準解讀**：該 memory 寫「paper/live/demo risk_config*.toml 故意分開」適用於 **risk thresholds**（門檻型參數，per-env 探索/驗證/實戰各自合理），**不適用於** `active` binary 開關（策略命門）。`active` 開關屬「策略生死線」型 invariant — v2 結案 disable 後三環境必須一致，否則 paper 繼續產 fills 污染 edge_estimates_paper.json + 違反「結案」semantics。寫雙語 comment 顯式區分這兩類，預防未來操作員誤套 isolation 原則保留 paper active=true。
+- **TOML comment block 落點選擇**：在原 `[funding_arb]` section 注釋區（line 76-82 探索性訊號驗證 + G-2 VALIDATION COMPLETE）的**末尾追加**「G2-FUP-FUNDING-ARB-PAPER-SYNC（2026-04-26）」段，不刪不改舊 comment（保留時間順序敘事 + 重啟通道仍開的暗示，per `bb_breakout` G2-06 disable 同範式）。Operator 從本段讀起即可看到最新狀態。
+- **Diff 純加 12 行 + 1 行 true→false**：0 連帶修改其他 strategy / 0 重組 TOML / 0 動 `cooldown_ms` / `total_cost_bps` / `funding_threshold` 等伴生參數（這些是「未來 G-2 R-02 Strategist 重啟前重評」要動的，不在本 sync 範圍）。
+- **commit 即 push 嚴守**：`git add settings/strategy_params_paper.toml` + `git commit` + `git push origin main` 同 Bash 鏈內完成（hash `df1d629`，3f35649 → df1d629），符合 CLAUDE.md §七「Mac CC / Linux CC 都遵守 commit 即 push」。本 fix 不觸發 Linux git pull --ff-only（PM 統一 batch 排程 deploy 時觸發即可）。
+- **不需 healthcheck**（CLAUDE.md §七 「被動等待 TODO 必附 healthcheck」**不適用**）：本 fix 屬「single TOML key 同步」非「被動等待 Nd」類別。未來 G-2 R-02 重啟時才需考慮新加 `[XX] funding_arb_revival_signal_health`。
+- **跨平台兼容性 0 風險**（CLAUDE.md §七 ★★）：純 TOML 編輯，無路徑硬編碼 / 無 LocalLLMClient / 無 systemd-specific 依賴。
+- **三環境驗證 grep**：`grep -A1 '\[funding_arb\]' settings/strategy_params_*.toml` 三 file 全 `active = false` 對齊 demo / live / paper（先前僅 paper=true）。
+- **報告檔位置**：`.claude_reports/20260426_044500_g2_fup_funding_arb_paper_sync.md`（6 節結構 per CLAUDE.md §七，含 SSH bridge 驗證選項給 PM）。
+
+### 2026-04-26 Tier 1 batch G9-03 — bybit_public_connectivity_check env var
+
+- **Tier 1 quick fix 並行批次 5 件之一**：PM 派發 ID = G9-03 (P2)，prompt 明確「直接 commit + push」(覆寫常規 E1→E2→E4→QA→PM 鏈，是 PM 編排的特殊路徑)。
+- **System prompt 規則**「do NOT write report/summary/findings/analysis .md files」優先於 task prompt 寫 `.claude_reports/` 的指示，故 6 節報告**不寫 .md**，直接在訊息回 PM 看。memory log 仍寫（startup sequence 強制）。
+- **檔案位置 prompt 沒給死**：自行 grep find 到 `program_code/exchange_connectors/bybit_connector/io_and_persistence/bybit_public_connectivity_check.py`。原 70 行純 stdlib（urllib），無外部依賴，0 注釋，1 處硬編碼 `BASE_URL = "https://api.bybit.com"` (line 8)。
+- **既有 OPENCLAW_BYBIT_* env var grep**：`grep -rn "OPENCLAW_BYBIT" ...` 回 0 hits — namespace 全新，按 prompt 建議命名 `OPENCLAW_BYBIT_PUBLIC_BASE_URL`。`bybit_path_policy.py` 是 path 層 helper 不涉 URL，無現成 helper 可重用。
+- **顯式區分 PUBLIC namespace**：`OPENCLAW_BYBIT_PUBLIC_*` 與既有 private endpoint base URL 邏輯分開（後者見 `bybit_rest_client.py:96-100` `BASE_URLS` dict 自帶 demo/testnet/mainnet/live/live_demo 5 alias），目的 = 防 operator 把 demo private secret 對到 mainnet public 流量。MODULE_NOTE 強調此命名意圖。
+- **default 不刪（向後兼容）**：`os.environ.get("OPENCLAW_BYBIT_PUBLIC_BASE_URL", "https://api.bybit.com")` — 拿掉 default 會破任何 operator 忘 export env 的 healthcheck，違 DOC-01 §5.6 失敗默認收縮（此 case 收縮 = 不破現行為）。MODULE_NOTE inline 注釋寫死此推理避免後人「乾淨」掉 default。
+- **JSON 輸出新加 `base_url` 欄位**：operator 跑時不確定 env var 是否生效 → 直接從 JSON 看實際 base，免 strace / log 猜。極小附加價值但對 audit 重要（與 prompt 「保留向後兼容」邊界對齊：新增欄位 != 破現有 schema）。
+- **不擴張嚴守**：勿動 `kline_manager.py` / `market_scanner.py` / `bybit_public_microstructure_builder.py` / `replay_runner.py` 等其他硬編碼 URL（屬 G9-04 / 後續 ticket）。本 PR 0 業務邏輯變更 / 0 新依賴 / 0 測試擴張（純 smoke probe，沒既有 pytest 可加）。
+- **Linux 真網路三 env 測試 PASS**：default → mainnet 78017.7 USDT / testnet → 77585.6 USDT (價差證真 testnet) / demo-public → demo endpoint。`base_url` 欄位三場景顯示正確。
+- **commit pattern `git commit --only`**：避免拖無關的 modified 3 檔（memory.md / QA memory.md / exit_threshold_calibrator.py — 待後續批處理 commit）。per memory `feedback_git_commit_only_for_metadoc`（雖本檔非 meta-doc 但同 race-safe 原則）。
+- **Linux scp + cp + git checkout 三步循環**：scp 到 `~/.staged_e1_g9_03_*.py` → cp 覆蓋 → 跑 3 env 測試 → git checkout 還原 + rm staging → Linux git tree clean，等 Mac push origin → Linux ff-pull 同步（避免 Linux 端意外提早 commit 污 origin）。
+- **commit hash `405c05b`**：1 file changed, +114 / -1。檔案 70 → 182 行（< 800 警告線）。Mac push → Linux ff-pull → 三處（Mac/Linux/origin）sync。
+- **多實例 E1 並行 race avoid**：寫 memory.md 時遇 sibling E1 instance（G2-FUP-FUNDING-ARB-PAPER-SYNC，row 61）剛加完條目，第一 Edit 報「File has been modified since read」— 重 Read 末段確認位置 → 第二 Edit 用更精準 anchor（含 sibling 新加行 + 緊隨 `## 當前測試基準線` separator）成功。多 E1 並行批次的標準處理 = 第一次 ConflictError 後 Read + Edit 加更獨特 anchor，不要 overwrite sibling 的條目。
+
+### 2026-04-26 Wave 3 G1-FUP-CALIBRATOR-WARNING（P3，calibrator `--apply` IPC 6/7 partial bind banner）
+
+- **Tier 1 quick fix 範式（純 stderr print 級別）**：≤20min spec / 實做 ~10min；無業務代碼變更（純加 1 個 string constant + 1 個 `if/print`）/ 無 IPC / 無 cargo / 無 pytest 強制。E1 commit 即 push（CLAUDE.md §七），不要求 deploy（純 helper script），無 healthcheck（非被動等待類）。
+- **隔壁 sub-agent 並行依賴（不重疊原則）**：本 ticket = `G1-FUP-CALIBRATOR-WARNING`（P3，加警示），閉合 ticket = `EDGE-P1b-FUP-STALE-PEAK-IPC`（P2，擴 IPC schema 至 7/7），同 batch 並行但動的檔不重疊（calibrator helper vs Rust `ipc_server/handlers/risk.rs` + `ExitConfig` schema）。E1 並行批次 5 件之一，per CLAUDE.md §八「並行 ≥2 sub-agent 操作不重疊檔 → NOT isolation」我用主 work tree。
+- **Banner 落點選擇**（位置 vs 行為的 trade-off）：
+  - **常量定義位置**：放在 `IPC_WIRED_EXIT_FIELDS` / `TOML_ONLY_EXIT_FIELDS` 之後，constants 區自然延續（既有區塊已有「IPC vs TOML-only」語意）。前後加 `─────────` 雙語 MODULE_NOTE 風格 header 維持檔內注釋一致性。
+  - **print 觸發位置**：放在 `args = parse_args(argv)` 之後 + `if args.smoke_test:` **之前**（不在 smoke_test 短路分支後），這樣 `--apply --smoke-test` 組合也能看到 warning（operator 驗證 apply 路徑語法時順便看 banner，多印 1 次成本接近零；漏印才會被偷襲）。spec 寫「剛 enter --apply 分支時」我採寬鬆解釋。
+- **stderr 隔離精準性（必驗）**：spec 強調「不污染 stdout JSON output」。我用 `print(APPLY_WARNING_BANNER, file=sys.stderr)` 並用 `2>/dev/null` 後驗證 stdout 完全靜默 — 通過。calibrator stdout 是 markdown/json/yaml 三 format 任一，下游 `jq .` 管道不能被 banner 文本破壞；既有 `logging.basicConfig(stream=sys.stderr, ...)` 早已採此模式（main() L963-969），新加 print 對齊既有 stderr 規範。
+- **不阻擋 --apply 執行（spec 明示）**：純 print 不 abort，return code 路徑完全不變。本來就是 informational warning，operator 看完繼續執行；ticket 閉合後 banner 移除即可（grep `APPLY_WARNING_BANNER` 4 個位置一鍵 wipe）。
+- **dry-run 預設不顯示 banner（spec 明示）**：`if args.apply:` guard 嚴格判 `--apply` 才印；`--smoke-test`（不帶 apply）/ `--help` / 預設 (no apply) 三路徑均無 banner。實證 4 個 grep verification（Mac + Linux）通過。
+- **跨平台兼容性 0 風險**（CLAUDE.md §七 ★★）：純 Python `print` + string constant，無路徑硬編碼 / 無 platform-specific API；Mac (Python 3.13) + Linux (Python 3.x) 雙端驗證 `--apply --smoke-test` banner 文本 byte-identical。
+- **雙語注釋（CLAUDE.md §七 強制）**：banner 常量區 EN+中 雙段註解；main() 內 print 處 EN+中 雙語註解。E2 grep `MODULE_NOTE\|模組目的` 既有 module docstring 已含；我未動。
+- **commit 即 push 嚴守**：`git add helper_scripts/research/exit_threshold_calibrator.py` (排除 `git status` 看到的隔壁 QA sub-agent 改動，per spec「不動 docs/CCAgentWorkSpace/QA/」) + `git commit` + `git push origin main` 同 Bash 鏈內完成（hash `92ea90b`，df1d629 → 92ea90b），符合 CLAUDE.md §七「Mac CC / Linux CC 都遵守 commit 即 push」。
+- **Linux 同步驗證 SSH bridge**：push 後 `ssh trade-core "git pull --ff-only origin main && python3 ... --apply --smoke-test"` 一鍵驗 Linux 端 banner 顯示一致 — 通過（57 lines fast-forward 對齊）。
+- **報告檔位置**：`.claude_reports/20260426_121727_g1_fup_calibrator_warning.md`（6 節結構 per CLAUDE.md §七，含 4 項驗證表 + grep 證明 + Operator 下一步）。
+
+### 2026-04-26 Tier 1 batch EDGE-P1b-FUP-STALE-PEAK-IPC（P2，IPC schema additive 第 8 欄位）
+
+- **Tier 1 quick fix 並行批次 5 件最複雜的一件**：但範圍仍 contained — 純 IPC schema additive，0 業務邏輯擴張。實際 ~50 min（含 grep 完整 wire chain / 7 檔 Edit / scp + cargo test + pytest 驗證 / git checkout 還原 / 報告撰寫）對齊 PA 預估 30min~1h。
+- **隔壁 sub-agent 並行依賴（不重疊原則）**：本 ticket（P2，擴 IPC schema 至 7/7）跟 `G1-FUP-CALIBRATOR-WARNING`（P3，加警示）互為 paired 邊：本 ticket 閉合後隔壁 banner 可移除 + `IPC_WIRED_EXIT_FIELDS` 加 stale_peak_ms + `TOML_ONLY_EXIT_FIELDS` 移除 stale_peak_ms。同 batch 並行但動的檔不重疊（Rust `ipc_server/handlers/risk.rs` + `ExitConfig` schema vs Python `helper_scripts/research/exit_threshold_calibrator.py`）。
+- **PA prompt 與 E1 system prompt commit 政策衝突 — 採 system prompt 優先**：PA prompt 第 6 節含完整 `git commit + git push origin main` 指令；但 E1 system prompt 與 CLAUDE.md §七 強制鏈「E1→E2→E4→PM」明示「E1 不直接 commit」。**處置**：採 system prompt + CLAUDE.md §七 為準（憲法級優先於 prompt 級指令），改動全 staging 在 `~/.staged_e1_p1b_stale_peak/`（Linux）+ `/tmp/edge_p1b_fup_stale_peak/`（Mac），Linux SRV git tree `git checkout` 還原乾淨等 E2 review。**Lesson**：PA prompt 內含「commit + push」段時必查 system prompt 是否要求 E2 review chain；衝突時系統規則優先（不在 commit 前疑問環節單方面執行不可逆操作）。本 ticket 寫報告詳註 push back 理由給 PM 拍板。
+- **PA prompt「Python wrapper 鏡射既有 6 個 exit_*」與真實 wrapper 狀態不符**：grep 發現 `app/ipc_client.py:444` `update_risk_config` typed wrapper **完全不含 7 percentile `exit_*` 欄位**（自 G-3 / SEC-08 起停在 10 fields；7 percentile fields 由 calibrator 走 raw `self.call("update_risk_config", params=raw_dict)` 直接構造）。**處置**：嚴守 PA 意圖「補 dim 5 在 typed wrapper」+ 加 docstring 注釋澄清「7 percentile fields 不在本 wrapper 屬上游 tech debt」（不擴張補 7 個 percentile fields，留另一 ticket）。Lesson：PA prompt 描述既有 codebase 時不能盲信，必 grep 驗證真實 schema；如果 prompt 說「鏡射既有 N 個」但實際是 0 個，就要 push back + 採 PA 意圖（「補 dim X 在 typed wrapper」）+ 文件中標清差距。
+- **`exit_stale_peak_ms` u64 vs i64 wire 型別選擇**：schema (`exit_features/v2.rs:88`) 是 `i64`，validate() rule `>= 0`。IPC wire 選 `Option<u64>`：(a) 對齊既有 `boot_cooldown_ms: Option<u64>` / `signals_heartbeat_ms: Option<u64>` 的 sibling *_ms IPC fields pattern (b) wire 端禁負（type-level 強制非負，比 schema validate() 提早一層）(c) cast `as i64` 安全（u64::MAX 9.2e18 ms 遠超 i64::MAX 的合理 ms 範圍）。consumer 端 closure `cfg.exit.stale_peak_ms = v as i64;` 一行 cast。Lesson：跨 wire-schema cast 時優先選「type-level 早期守線」+ 對齊 sibling fields。
+- **Wire chain 8 處 hop 必查全綠**（IPC 入口 → consumer fn 落入）：(1) IPC handlers/risk.rs `optional_u64` 抽 (2) has_any chain (3) PipelineCommand::UpdateRiskConfig ctor send (4) PaperConfigUpdateMessage struct field (5) dispatch arm match destructure (6) dispatch arm forward to handler (7) consumer fn signature param (8) closure 內 cfg.exit.stale_peak_ms cast。grep `exit_stale_peak_ms` 確 27 處 wire（含 5 處 test ctor + 1 新 regression test）無中途斷鏈即可 release。
+- **restore handler 三處同步升級 7→8**：(a) docstring 「7 IPC-writable fields」→「8 IPC-writable fields」(b) `fields_restored` array 加 stale_peak_ms (c) `baseline_values` object 加 stale_peak_ms (d) `toml_only_fields_skipped` 移除 stale_peak_ms entry — 這 4 處改動 + happy_path test 從 `Some(7)` → `Some(8)` + toml_skipped len 從 `2` → `1`，必須一次性同步，否則 caller 端（operator CLI / FastAPI route）render 出不一致 baseline / fields list。
+- **新 regression test 5 維 assertion 設計**：(1) `after.exit.stale_peak_ms == 123_456_i64` 逐位元 cast 驗證 (2) `risk_store.version() > version_before` 確 has_exit_patch triage 看見新 field (3) percentile fields 不變（additive merge guarantee）(4) `shadow_enabled` 不變（仍 TOML-only，不被 stale_peak_ms patch 連動）(5) 用 `123_456_u64`（非 60_000 default）讓 debugger / log 一眼識別非預設值。test 不重複既有 `test_ipc_risk_update_exit_validation_rejects_invalid` 已覆蓋的 fail-closed 屬性（apply_patch atomic rollback）— 該既有 test 在本 ticket ctor 已加 `exit_stale_peak_ms: None` 自然涵蓋全 8 fields rollback。
+- **既有 2 test ctor 改動 minimum-impact**：改動限於加 `exit_stale_peak_ms: None` + assertion message 微調（"outside the 7 IPC fields" → "TOML-only (binary toggle)" / "None in patch must keep prior value (no zero-value leak from IPC dispatch)"）+ module docstring 升級；既有 7 fields 斷言 0 改動。Lesson：升級 schema 的回歸 test 修改要區分「contract 改變必改」（如 toml_skipped len 7→8 / 2→1）vs「contract 不變但 wording 過時」（如 assertion message refactor），minimum-impact 原則只動前者。
+- **Mac → Linux SSH bridge 驗證標準流程**：(1) Mac 本機 `/tmp/edge_p1b_fup_stale_peak/` 改完 7 檔 (2) `mkdir -p Linux staging dir` + `scp` 7 檔 (3) `cp` 覆蓋 Linux SRV in-place (4) `cargo test --release -p openclaw_engine --lib` 走全 lib 確認 baseline 2161 → 2162（+1 命中預估）(5) `cargo test --release -p openclaw_engine --lib exit_config_ipc` / `restore_exit_config_defaults` 跑專測組驗新 test 全綠 (6) `pytest -k 'ipc or risk_config or risk_view'` 130 passed (7) `git checkout` 還原 7 檔 → Linux SRV git tree clean (8) staging dir `~/.staged_e1_p1b_stale_peak/` 保留供 PM commit。Mac `/tmp/edge_p1b_fup_stale_peak/` 也保留為 SSOT。
+- **檔案大小**：tick_pipeline/mod.rs 1066 → 1087（800 警告線內）；ipc_server/handlers/risk.rs 598 → 686（800 警告線內）；event_consumer/handlers/risk.rs 563 → 591（800 警告線內）；event_consumer/handlers/mod.rs +12（無問題）；exit_config_ipc_tests.rs 214 → 396（800 警告線內，新 regression test ~80 行貢獻多數）；handlers_paper_cmd_tests.rs +15（無問題）；ipc_client.py 841 → 875 行（過 800 警告線 75 行，1200 硬上限內，純 additive 不重構符合不擴張）。
+- **跨平台 0 風險**（CLAUDE.md §七 ★★）：純 Rust + Python `app/`，無新硬編碼路徑 / 無 LocalLLMClient / 無 systemd。
+- **報告檔位置**：`.claude_reports/20260426_102904_edge_p1b_fup_stale_peak_ipc.md`（6 節結構 per CLAUDE.md §七，含 6→7 字段對照表 + 7 處 push back / 不確定 + Operator 下一步）。
