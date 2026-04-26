@@ -30,6 +30,7 @@ pub mod execution_listener;
 pub mod exit_features;
 pub mod fast_track;
 pub mod feature_collector;
+pub mod h_state_cache;
 pub mod instrument_info;
 pub mod intent_processor;
 pub mod ipc_server;

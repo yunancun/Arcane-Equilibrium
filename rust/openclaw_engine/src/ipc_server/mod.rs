@@ -73,7 +73,8 @@ pub use engine_routing::{EngineCommandChannels, PerEngineRiskStores};
 pub use protocol::{IpcError, JsonRpcError, JsonRpcRequest, JsonRpcResponse};
 pub use server::IpcServer;
 pub use slots::{
-    AuditPoolSlot, BudgetTrackerSlot, StrategistCountersSlot, TeacherLoopHandles, TeacherLoopSlot,
+    AuditPoolSlot, BudgetTrackerSlot, HStateCacheSlot, StrategistCountersSlot, TeacherLoopHandles,
+    TeacherLoopSlot,
 };
 
 // Internal re-exports — each `handlers/*.rs` and `handlers_config.rs` file

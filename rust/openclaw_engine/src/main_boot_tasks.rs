@@ -16,7 +16,12 @@
 use crate::startup::ExchangePipelineBindings;
 use crate::tasks;
 use openclaw_engine::database::pool::DbPool;
-use openclaw_engine::ipc_server::PerEngineRiskStores;
+use openclaw_engine::h_state_cache::poller::{
+    make_invalidation_channel, spawn_h_state_poller, InvalidationSender, StubHStateFetcher,
+    DEFAULT_POLL_INTERVAL,
+};
+use openclaw_engine::h_state_cache::{is_gateway_enabled, HStateCache};
+use openclaw_engine::ipc_server::{HStateCacheSlot, PerEngineRiskStores};
 use openclaw_engine::scanner::registry::SymbolRegistry;
 use openclaw_engine::tick_pipeline::PipelineCommand;
 use std::sync::Arc;
@@ -320,4 +325,88 @@ pub(crate) async fn spawn_strategist_scheduler(
         "StrategistScheduler spawned — tune_target=Demo / 策略師排程器已啟動（調諧目標=Demo）",
     );
     Some(counters)
+}
+
+/// G3-08 H State Gateway Phase 1 (2026-04-26): conditionally spawn the
+/// `HStateCache` + 10s poller daemon, gated by `OPENCLAW_H_STATE_GATEWAY=1`.
+///
+/// EN: DEFAULT-OFF: when the env-gate is missing or any value other than
+///   `"1"` (strict comparison) this fn returns `None` immediately,
+///   allocating zero memory and spawning zero tasks. Production stays at
+///   the documented baseline (no IPC traffic, no thread overhead) until
+///   operator opts in.
+///
+///   When env=1: build the cache (Arc<HStateCache>), the watch-channel
+///   pair for invalidation hints, then spawn the periodic+invalidation
+///   poll daemon. Caller is responsible for wiring the returned cache
+///   Arc into `IpcServer::h_state_cache_slot()` and the sender into
+///   `IpcServer::set_h_state_invalidation_sender()`.
+///
+///   Phase 1 deliberately uses [`StubHStateFetcher`] which returns an
+///   empty `default()` snapshot (`version=0`). Sub-task B (parallel) +
+///   Sub-task C (later session) replace the stub with a real Python
+///   reverse-IPC client when their FastAPI route + handler land. Until
+///   then the env=1 path is observable end-to-end (cargo test green,
+///   IPC handlers live) but reads return empty data — exactly the
+///   Phase 1 acceptance criterion.
+///
+/// 中: DEFAULT-OFF：env-gate 未設或值不是嚴格 `"1"` 時直接回 `None`，
+///   不分配記憶體、不 spawn 任何 task。生產維持文件 baseline
+///   （0 IPC 流量 / 0 thread 額外負載）直到 operator opt-in。
+///
+///   env=1 時：建 cache（Arc<HStateCache>）、建 watch-channel pair（給
+///   invalidation hint）、spawn 週期 + invalidation 觸發的 poll daemon。
+///   呼叫者負責把回傳的 cache Arc 接到
+///   `IpcServer::h_state_cache_slot()`、把 sender 接到
+///   `IpcServer::set_h_state_invalidation_sender()`。
+///
+///   Phase 1 故意用 [`StubHStateFetcher`] 回空 `default()` snapshot
+///   （`version=0`）。Sub-task B（並行）+ Sub-task C（後續 session）等
+///   Python reverse-IPC FastAPI route + handler 落地後再替換為真實
+///   client。在那之前 env=1 路徑端到端可觀測（cargo test 綠 / IPC
+///   handler live），但讀回是空 dict — 即 Phase 1 驗收標準。
+pub(crate) fn spawn_h_state_poller_if_enabled(
+    cache_slot: &HStateCacheSlot,
+    cancel: &CancellationToken,
+) -> Option<InvalidationSender> {
+    if !is_gateway_enabled() {
+        // Zero-overhead path / 零負擔路徑
+        info!(
+            "h_state_gateway disabled (OPENCLAW_H_STATE_GATEWAY != \"1\"), poller not spawned \
+             / H State Gateway 未啟用，poller 未啟動",
+        );
+        return None;
+    }
+
+    let cache = HStateCache::new_arc();
+    let (inv_tx, inv_rx) = make_invalidation_channel();
+    // Phase 1 stub fetcher — Sub-task B/C replaces with real client.
+    // Phase 1 stub fetcher — Sub-task B/C 替換為真實 client。
+    let fetcher = Arc::new(StubHStateFetcher);
+
+    let _handle = spawn_h_state_poller(
+        Arc::clone(&cache),
+        fetcher,
+        DEFAULT_POLL_INTERVAL,
+        inv_rx,
+        cancel.clone(),
+    );
+
+    // Late-inject cache into the IPC slot so the three handlers
+    // (query_h_state_full / get_h_state_status / invalidate_h_state)
+    // pick it up automatically.
+    // 將 cache 延後注入 IPC slot，讓三個 handler 自動接到。
+    let cache_slot_clone = Arc::clone(cache_slot);
+    tokio::spawn(async move {
+        cache_slot_clone.write().await.replace(cache);
+    });
+
+    info!(
+        poll_interval_ms = DEFAULT_POLL_INTERVAL.as_millis() as u64,
+        fetcher = "stub (Phase 1)",
+        "h_state_gateway spawned (env=1) — Phase 1 stub fetcher returns empty snapshots \
+         / H State Gateway 已啟動（env=1）— Phase 1 stub fetcher 回空 snapshot",
+    );
+
+    Some(inv_tx)
 }
