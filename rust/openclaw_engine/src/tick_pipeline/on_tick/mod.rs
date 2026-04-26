@@ -78,6 +78,7 @@ mod step_6_risk_checks;
 pub(crate) use helpers::build_risk_close_tag;
 pub(crate) use helpers::compute_edge_estimates_file_age_secs;
 pub(crate) use helpers::emit_shadow_exit_observation;
+pub(crate) use helpers::is_partial_reduce_tag;
 pub(crate) use helpers::log_phys_lock_through_combine_layer;
 pub(crate) use helpers::strip_phys_lock_prefix;
 

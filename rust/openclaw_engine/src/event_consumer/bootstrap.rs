@@ -291,6 +291,29 @@ pub(super) async fn bootstrap_runtime(deps: EventConsumerDeps) -> BootstrappedRu
             "B-1 Phase 2: paper_state seeded from exchange snapshot \
              / 已用交易所快照種入 paper_state"
         );
+        // EXIT-FEATURES-WRITER-BUG-1-FIX (2026-04-26): defence-in-depth
+        // backfill of `entry_notional` after `import_positions`. Idempotent —
+        // touches only entries with `entry_notional <= 0.0 && qty > 0` (which
+        // `import_positions` should never produce since it sets
+        // `qty * entry_price` directly, but a Bybit REST snapshot returning
+        // `avg_price = 0` for a stale dust residue would slip the guard at
+        // line 48 and leave entry_notional == 0). Without this backfill the
+        // MICRO-PROFIT-FIX-1 ratio gate fail-opens for that position and the
+        // STRKUSDT-class 37-halve dust spiral resurrects on the next risk
+        // event. MIT audit `2026-04-26--exit_features_writer_bug_audit.md`
+        // §4 RCA-A path A3.
+        // EXIT-FEATURES-WRITER-BUG-1-FIX：import_positions 後 idempotent
+        // backfill entry_notional（防 Bybit REST avg_price=0 殘留 → 修補
+        // MICRO-PROFIT-FIX-1 ratio gate fail-open 漏洞）。
+        let migrated = pipeline.paper_state.migrate_legacy_entry_notional();
+        if migrated > 0 {
+            info!(
+                kind = %pipeline_kind,
+                migrated,
+                "EXIT-FEATURES-WRITER-BUG-1-FIX: backfilled entry_notional on \
+                 import (legacy/zero-avg_price residue) / 啟動時補齊 entry_notional"
+            );
+        }
     }
 
     // ORPHAN-ADOPT-1 FUP: swap paper_state's positions_mirror to the shared

@@ -214,9 +214,26 @@ impl TickPipeline {
             50,
         );
 
-        self.try_emit_exit_feature_row(symbol, qty, price, ts_ms, realized_pnl,
-                                       close_fee, fr, close_tag, exit_snapshot,
-                                       entry_context_id);
+        // EXIT-FEATURES-WRITER-BUG-1-FIX (2026-04-26): partial reduce paths
+        // (fast_track ReduceToHalf — the only one in the current taxonomy)
+        // leave the position OPEN; emitting an EF row here pollutes
+        // `learning.exit_features` with labels whose `realized_net_bps`
+        // reflects only the reduced portion, not the round-trip outcome.
+        // MIT audit `2026-04-26--exit_features_writer_bug_audit.md` §4
+        // RCA-B: 37 noise rows in 24h healthcheck window (Δ between
+        // exit_features_24h and close_fills_24h). The fill row in
+        // `trading.fills` is still written (operator visibility, PnL
+        // accounting); only the EF writer skips. Full closes
+        // (PHYS-LOCK / hard stop / trailing / time / TP / strategy exits)
+        // continue to emit normally.
+        // EXIT-FEATURES-WRITER-BUG-1-FIX：partial reduce 路徑（目前僅 fast_track
+        // ReduceToHalf）平倉後倉位仍 open，寫 EF 會污染 ML training set；
+        // MIT audit §4 RCA-B 驗證。fill 仍寫 trading.fills，只跳過 EF emit。
+        if !crate::tick_pipeline::on_tick::is_partial_reduce_tag(close_tag) {
+            self.try_emit_exit_feature_row(symbol, qty, price, ts_ms, realized_pnl,
+                                           close_fee, fr, close_tag, exit_snapshot,
+                                           entry_context_id);
+        }
     }
 
     /// EXIT-FEATURES-TABLE-1: emit one row to `learning.exit_features` per

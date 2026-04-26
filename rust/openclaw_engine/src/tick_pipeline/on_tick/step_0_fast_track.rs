@@ -290,6 +290,23 @@ impl TickPipeline {
                 .risk_config()
                 .limits
                 .ft_min_notional_ratio_of_entry;
+            // EXIT-FEATURES-WRITER-BUG-1-FIX (2026-04-26): absolute USD dust floor —
+            // closes the MICRO-PROFIT-FIX-1 fail-open hole when entry_notional is
+            // missing (legacy/restored snapshot). MIT audit
+            // `2026-04-26--exit_features_writer_bug_audit.md` §4 RCA-A: STRKUSDT
+            // 0.05-unit residue with `entry_notional == 0.0` triggered 37 halvings
+            // (60s apart) down to 7.3e-13, polluting `learning.exit_features`
+            // with 37 noise labels (close_fills 1:1 invariant violated by Δ37).
+            // Hot-reloadable; default 1 USD (well below any real position
+            // notional, well above sub-cent dust residues).
+            // EXIT-FEATURES-WRITER-BUG-1-FIX（2026-04-26）：絕對 USD dust 門檻，
+            // 修補 MICRO-PROFIT-FIX-1 在 entry_notional 缺失時 fail-open 的漏洞
+            // （MIT audit §4 RCA-A：STRKUSDT 37 次半倉 spiral，污染 EF 37 條 noise label）。
+            let ft_dust_qty_floor_usd = self
+                .intent_processor
+                .risk_config()
+                .limits
+                .ft_dust_qty_floor_usd;
 
             // Materialize per-position data up front so the notional-floor filter below
             // can freely read self.latest_prices without a concurrent self.paper_state borrow.
@@ -308,34 +325,85 @@ impl TickPipeline {
                 .map(|p| (p.symbol.clone(), p.is_long, p.qty, p.entry_notional))
                 .collect();
 
-            // MICRO-PROFIT-FIX-1: drop candidates already below the notional floor.
-            // Skipped when ratio is 0.0 (disabled) or entry_notional is 0.0 (legacy
-            // snapshot not yet migrated — fail-open so operator positions still halve).
-            // MICRO-PROFIT-FIX-1：剔除已低於底線的倉位；比率 0 或舊快照未遷移時 fail-open。
-            if ft_min_notional_ratio > 0.0 {
+            // MICRO-PROFIT-FIX-1 + EXIT-FEATURES-WRITER-BUG-1-FIX: layered
+            // dust filter. Each candidate must pass BOTH gates before being
+            // halved — failing either gate skips the position (stays at full
+            // qty until a real exit signal arrives or operator clears manually).
+            //
+            // Gate 1 — absolute USD floor (EXIT-FEATURES-WRITER-BUG-1-FIX):
+            //   `qty * latest_price < ft_dust_qty_floor_usd` → skip. Active in
+            //   ALL branches (including the `entry_notional == 0` legacy path
+            //   that previously fail-opened). This is the primary defence
+            //   against MIT-audited STRKUSDT 37-halve dust spiral.
+            //
+            // Gate 2 — ratio gate (MICRO-PROFIT-FIX-1):
+            //   `qty * latest_price < ratio * entry_notional` → skip. Inactive
+            //   when ratio == 0 (disabled) OR entry_notional <= 0 (no baseline
+            //   from which to derive a relative floor — Gate 1 already handles
+            //   the dust case). The ratio gate kills the 4-6× halving spiral
+            //   observed in demo by capping at "two halvings then stop".
+            //
+            // SAFETY / 不變量：
+            //   - `latest_price <= 0` (stale tick): both gates fall through,
+            //     position is left intact. Fast-track will re-evaluate on the
+            //     next tick once a fresh price arrives.
+            //   - `entry_notional <= 0` (legacy/restored snapshot): Gate 2 is
+            //     a no-op; Gate 1 alone decides. If qty * price > floor the
+            //     halving proceeds (pre-FIX behaviour preserved for genuine
+            //     legacy real positions); if not, dust is left frozen.
+            //
+            // MICRO-PROFIT-FIX-1 + EXIT-FEATURES-WRITER-BUG-1-FIX：分層 dust 過濾，
+            // 每個候選必須同時通過 Gate 1（絕對 USD 門檻）+ Gate 2（比率門檻）。
+            // 任一失敗即 skip（倉位保持原 qty 直到真正退場訊號或 operator 清理）。
+            // Gate 1 對 entry_notional == 0 legacy 倉位仍生效（封住 STRKUSDT 37 次
+            // dust spiral 漏洞）；Gate 2 在 entry_notional 缺失時 no-op，由 Gate 1 兜底。
+            if ft_dust_qty_floor_usd > 0.0 || ft_min_notional_ratio > 0.0 {
                 position_candidates.retain(|(sym, _, qty, entry_notional)| {
-                    if *entry_notional <= 0.0 {
-                        return true;
-                    }
                     let last_price = self.latest_prices.get(sym).copied().unwrap_or(0.0);
                     if last_price <= 0.0 {
+                        // Stale tick — leave position intact, re-evaluate next tick.
+                        // 過期 tick — 保留倉位，下 tick 重評估。
                         return true;
                     }
                     let current_notional = qty * last_price;
-                    let floor_notional = ft_min_notional_ratio * entry_notional;
-                    let keep = current_notional >= floor_notional;
-                    if !keep {
+
+                    // Gate 1: absolute USD dust floor (EXIT-FEATURES-WRITER-BUG-1-FIX).
+                    // Fires regardless of entry_notional state (closes the legacy
+                    // fail-open hole that drove the dust spiral).
+                    // Gate 1：絕對 USD dust 門檻（不看 entry_notional 是否有效）。
+                    if ft_dust_qty_floor_usd > 0.0 && current_notional < ft_dust_qty_floor_usd {
                         tracing::info!(
                             symbol = %sym,
                             current_notional,
-                            floor_notional,
+                            dust_floor_usd = ft_dust_qty_floor_usd,
                             entry_notional = *entry_notional,
-                            ratio = ft_min_notional_ratio,
-                            "MICRO-PROFIT-FIX-1: skip ReduceToHalf — notional below floor \
-                             / 已低於名義值底線，跳過半倉"
+                            "EXIT-FEATURES-WRITER-BUG-1-FIX: skip ReduceToHalf — dust \
+                             qty floor / 低於 dust 絕對門檻，跳過半倉"
                         );
+                        return false;
                     }
-                    keep
+
+                    // Gate 2: ratio gate (MICRO-PROFIT-FIX-1). Inactive on
+                    // `entry_notional <= 0` (no baseline) — Gate 1 already
+                    // handled the dust case; non-dust legacy real positions
+                    // fall through to fail-open here.
+                    // Gate 2：比率門檻；entry_notional <= 0 時 no-op（Gate 1 已處理 dust）。
+                    if ft_min_notional_ratio > 0.0 && *entry_notional > 0.0 {
+                        let floor_notional = ft_min_notional_ratio * entry_notional;
+                        if current_notional < floor_notional {
+                            tracing::info!(
+                                symbol = %sym,
+                                current_notional,
+                                floor_notional,
+                                entry_notional = *entry_notional,
+                                ratio = ft_min_notional_ratio,
+                                "MICRO-PROFIT-FIX-1: skip ReduceToHalf — notional \
+                                 below ratio floor / 已低於比率底線，跳過半倉"
+                            );
+                            return false;
+                        }
+                    }
+                    true
                 });
             }
 

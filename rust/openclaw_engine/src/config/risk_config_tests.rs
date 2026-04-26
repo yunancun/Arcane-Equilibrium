@@ -422,6 +422,109 @@ fn test_ft_min_notional_ratio_serialization_roundtrip() {
     assert!((de2.limits.ft_min_notional_ratio_of_entry - 0.4).abs() < f64::EPSILON);
 }
 
+// ---------------------------------------------------------------------------
+// EXIT-FEATURES-WRITER-BUG-1-FIX (2026-04-26): ft_dust_qty_floor_usd schema +
+// validate + serde tests. Pin default 1 USD, [0, 100_000] range, NaN reject,
+// and TOML roundtrip so future schema drift fails loudly. MIT audit
+// `2026-04-26--exit_features_writer_bug_audit.md` §4 RCA-A new knob.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_ft_dust_qty_floor_default_1_usd() {
+    // Default 1 USD — large enough to swallow sub-cent dust residues yet small
+    // enough to never block a real position halving. Pinned by both
+    // GlobalLimits::default() and full RiskConfig::default() round-trip.
+    // 預設 1 USD — 足夠捕捉 sub-cent dust 卻不擋真實倉位半倉。
+    let l = GlobalLimits::default();
+    assert!((l.ft_dust_qty_floor_usd - 1.0).abs() < f64::EPSILON);
+    let cfg = RiskConfig::default();
+    assert!((cfg.limits.ft_dust_qty_floor_usd - 1.0).abs() < f64::EPSILON);
+    assert!(cfg.validate().is_ok(), "default dust floor must validate");
+}
+
+#[test]
+fn test_ft_dust_qty_floor_out_of_range_rejected() {
+    // Range is [0, 100_000]. Negatives + above-cap + NaN must all reject.
+    // 範圍 [0, 100000]；負值 / 超上限 / NaN 一律拒絕。
+    let mut cfg = RiskConfig::default();
+    cfg.limits.ft_dust_qty_floor_usd = -0.01;
+    assert!(
+        cfg.validate().is_err(),
+        "negative dust floor must reject"
+    );
+    cfg.limits.ft_dust_qty_floor_usd = 100_000.01;
+    assert!(
+        cfg.validate().is_err(),
+        "above-cap dust floor must reject (operator typo guard)"
+    );
+    cfg.limits.ft_dust_qty_floor_usd = f64::NAN;
+    assert!(
+        cfg.validate().is_err(),
+        "NaN dust floor must reject (silent disable)"
+    );
+    cfg.limits.ft_dust_qty_floor_usd = f64::INFINITY;
+    assert!(
+        cfg.validate().is_err(),
+        "infinity dust floor must reject (operator typo guard)"
+    );
+}
+
+#[test]
+fn test_ft_dust_qty_floor_boundaries_accepted() {
+    // 0.0 (filter disabled) and 100_000 (maximum sane ceiling) inclusive-valid.
+    // 0.0（關閉）與 100000（合理上限）皆合法。
+    let mut cfg = RiskConfig::default();
+    cfg.limits.ft_dust_qty_floor_usd = 0.0;
+    assert!(
+        cfg.validate().is_ok(),
+        "0.0 dust floor must validate (filter disabled)"
+    );
+    cfg.limits.ft_dust_qty_floor_usd = 100_000.0;
+    assert!(
+        cfg.validate().is_ok(),
+        "100000 dust floor must validate (upper boundary)"
+    );
+}
+
+#[test]
+fn test_ft_dust_qty_floor_serialization_roundtrip() {
+    // TOML + JSON roundtrip — operator-edit TOML must persist faithfully and
+    // patch_risk_config IPC (JSON) must preserve the field bit-exactly.
+    // TOML + JSON 雙向往返 — operator 編輯與 IPC patch 都必須位元保真。
+    let mut cfg = RiskConfig::default();
+    cfg.limits.ft_dust_qty_floor_usd = 5.5;
+    let json = serde_json::to_string(&cfg).unwrap();
+    let de: RiskConfig = serde_json::from_str(&json).unwrap();
+    assert!((de.limits.ft_dust_qty_floor_usd - 5.5).abs() < f64::EPSILON);
+    let toml_str = toml::to_string(&cfg).unwrap();
+    let de2: RiskConfig = toml::from_str(&toml_str).unwrap();
+    assert!((de2.limits.ft_dust_qty_floor_usd - 5.5).abs() < f64::EPSILON);
+}
+
+#[test]
+fn test_ft_dust_qty_floor_legacy_toml_default_applied() {
+    // A legacy TOML missing `ft_dust_qty_floor_usd` (e.g. operator's existing
+    // `risk_config_*.toml` written before this commit) must deserialize with
+    // the field defaulted to 1.0 — operators on live config should NOT need to
+    // edit TOML manually for the fix to take effect.
+    // 舊版 TOML（本 commit 前的 `risk_config_*.toml`）缺欄位時必須 default 為
+    // 1.0，operator 不需手動編輯就能享受 fix。
+    let toml_str = r#"
+[meta]
+version = 1
+
+[limits]
+stop_loss_max_pct = 5.0
+ft_min_notional_ratio_of_entry = 0.25
+"#;
+    let cfg: RiskConfig = toml::from_str(toml_str).unwrap();
+    assert!(
+        (cfg.limits.ft_dust_qty_floor_usd - 1.0).abs() < f64::EPSILON,
+        "legacy TOML must inherit default 1.0 USD dust floor"
+    );
+    assert!(cfg.validate().is_ok());
+}
+
 // ----- G7-01 (2026-04-24): Kelly tier boundary TOML configurability -----
 
 #[test]

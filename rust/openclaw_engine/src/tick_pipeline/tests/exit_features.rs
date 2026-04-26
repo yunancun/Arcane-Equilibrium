@@ -541,3 +541,161 @@ fn test_try_emit_exit_feature_row_fail_soft() {
     );
     assert!(rx.try_recv().is_err(), "no row should be emitted when snap is None");
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// EXIT-FEATURES-WRITER-BUG-1-FIX (2026-04-26) — RCA-B: partial-reduce paths
+// (fast_track ReduceToHalf) must NOT emit ExitFeatureRow even when the
+// `exit_feature_tx` channel + `exit_snapshot` are both wired. Trading.fills
+// continues to receive the close fill (operator visibility, PnL accounting);
+// only the ML training label writer skips. MIT audit
+// `2026-04-26--exit_features_writer_bug_audit.md` §4 RCA-B mitigation.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// `risk_close:fast_track_reduce_half` is a partial reduce (position remains
+/// open after half-qty close). Writing an EF row here labels the partial
+/// reduce as if it were a round-trip exit, polluting the ML training set
+/// with `realized_net_bps` reflecting only the closed half. MIT audit RCA-B
+/// verified 37 noise rows in the STRKUSDT dust spiral 24h window.
+/// `risk_close:fast_track_reduce_half` 為部分減倉（倉位仍 open），EF 寫入會將
+/// 「半倉」誤標為 round-trip 退場，污染 ML 訓練；MIT audit RCA-B 驗證 37 條 noise。
+#[test]
+fn exit_features_writer_bug_fix_partial_reduce_skips_ef_emit() {
+    let mut p = TickPipeline::with_kind(&["BTCUSDT"], 10_000.0, PipelineKind::Paper);
+    p.intent_processor.set_fee_rate(0.00055);
+    let (tx_ef, mut rx_ef) = tokio::sync::mpsc::channel::<crate::database::ExitFeatureRow>(4);
+    let (tx_trade, mut rx_trade) = tokio::sync::mpsc::channel::<crate::database::TradingMsg>(4);
+    p.set_exit_feature_tx(tx_ef);
+    p.set_trading_channel(tx_trade);
+
+    // Open a real position then snapshot before partial reduce.
+    // 開倉並在部分減倉前取快照。
+    p.paper_state
+        .apply_fill("BTCUSDT", true, 0.2, 50_000.0, 5.5, 1_000, "ma_crossover");
+    let snap = p.paper_state.position_exit_snapshot("BTCUSDT");
+    assert!(snap.is_some(), "snap must exist before partial reduce");
+
+    // Emulate the fast_track ReduceToHalf path: half qty, position stays open.
+    // 模擬 fast_track ReduceToHalf：半倉，倉位仍 open。
+    let pnl = p.paper_state.reduce_position("BTCUSDT", 0.1, 51_000.0);
+    assert!(p.paper_state.get_position("BTCUSDT").is_some(),
+            "position must remain open after partial reduce (qty 0.1 / 0.2)");
+
+    p.emit_close_fill(
+        "BTCUSDT",
+        true,
+        0.1,
+        51_000.0,
+        2_000,
+        pnl,
+        "risk_close:fast_track_reduce_half",
+        "ctx-partial-reduce",
+        snap.as_ref(),
+    );
+
+    // RCA-B contract: ExitFeatureRow MUST NOT be emitted for partial reduce.
+    // RCA-B 契約：partial reduce 必不寫 EF。
+    assert!(
+        rx_ef.try_recv().is_err(),
+        "fast_track_reduce_half MUST NOT emit ExitFeatureRow — the position is \
+         still open and the partial PnL is not a round-trip outcome (MIT audit \
+         §4 RCA-B). This skip prevents the 37-row noise observed on STRKUSDT \
+         dust spiral."
+    );
+
+    // Trading.fills MUST still receive the fill — operator visibility / PnL
+    // accounting are independent of ML training label hygiene.
+    // trading.fills 必須仍寫入 — operator 可見度與 PnL 帳務不受 EF skip 影響。
+    let fill = rx_trade.try_recv().expect("Fill must still be enqueued");
+    assert!(matches!(fill, crate::database::TradingMsg::Fill { .. }),
+            "trading.fills must continue to record the close fill");
+}
+
+/// PHYS-LOCK full close MUST emit ExitFeatureRow as before — only partial
+/// reduce paths skip. Verifies the RCA-B fix did not over-blanket and silence
+/// legitimate full-close ML labels.
+/// PHYS-LOCK 全平必須仍寫 EF（只有 partial reduce skip）— 確保 RCA-B 修復未誤殺。
+#[test]
+fn exit_features_writer_bug_fix_phys_lock_full_close_still_emits_ef() {
+    let mut p = TickPipeline::with_kind(&["BTCUSDT"], 10_000.0, PipelineKind::Paper);
+    p.intent_processor.set_fee_rate(0.00055);
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<crate::database::ExitFeatureRow>(4);
+    p.set_exit_feature_tx(tx);
+
+    p.paper_state
+        .apply_fill("BTCUSDT", true, 0.1, 50_000.0, 2.75, 1_000, "ma_crossover");
+    let snap = p.paper_state.position_exit_snapshot("BTCUSDT");
+    let pnl = p
+        .paper_state
+        .close_position("BTCUSDT", 51_000.0, 2_000)
+        .unwrap();
+
+    p.emit_close_fill(
+        "BTCUSDT",
+        true,
+        0.1,
+        51_000.0,
+        2_000,
+        pnl,
+        "risk_close:phys_lock_gate4_giveback",
+        "ctx-phys-lock-full",
+        snap.as_ref(),
+    );
+
+    // PHYS-LOCK = full close (position removed) → EF MUST emit.
+    // PHYS-LOCK = 全平 → EF 必寫。
+    let row = rx.try_recv().expect(
+        "PHYS-LOCK full close MUST emit ExitFeatureRow — RCA-B fix only \
+         silences partial reduces, not legitimate round-trip exits",
+    );
+    assert_eq!(row.symbol, "BTCUSDT");
+    assert_eq!(
+        row.exit_source.as_deref(),
+        Some("Physical"),
+        "PHYS-LOCK exits map to Physical exit_source"
+    );
+}
+
+/// Additional close-tag taxonomy coverage: every full-close path must emit EF.
+/// Pins the contract that RCA-B's `is_partial_reduce_tag` does not over-match.
+/// 全平路徑全都必須繼續寫 EF — 固化 is_partial_reduce_tag 不會誤判。
+#[test]
+fn exit_features_writer_bug_fix_full_close_taxonomy_still_emits() {
+    use crate::bybit_rest_client::BybitEnvironment;
+    let _ = BybitEnvironment::Demo; // avoid unused-import warning
+    let close_tags = [
+        "risk_close:HARD STOP: pnl -6.00% <= -5.00%",
+        "risk_close:TRAILING STOP: peak 3.00% - current 1.00% = 2.00%",
+        "risk_close:TIME STOP: held 24.0h >= limit 24.0h",
+        "risk_close:TAKE PROFIT: pnl 5.00% >= 4.50%",
+        "risk_close:DRAWDOWN: session equity -2.50% <= -2.00%",
+        "risk_close:fast_track",            // CloseAll path (full close, NOT partial)
+        "risk_close:fast_track_close_all",  // alt CloseAll naming
+        "stop_trigger:hard_stop_atr",
+        "stop_trigger:trailing_10pct",
+        "strategy_close:ma_crossover_flip",
+    ];
+
+    for tag in close_tags {
+        let mut p = TickPipeline::with_kind(&["BTCUSDT"], 10_000.0, PipelineKind::Paper);
+        p.intent_processor.set_fee_rate(0.00055);
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<crate::database::ExitFeatureRow>(4);
+        p.set_exit_feature_tx(tx);
+
+        p.paper_state
+            .apply_fill("BTCUSDT", true, 0.1, 50_000.0, 2.75, 1_000, "ma_crossover");
+        let snap = p.paper_state.position_exit_snapshot("BTCUSDT");
+        let pnl = p
+            .paper_state
+            .close_position("BTCUSDT", 51_000.0, 2_000)
+            .unwrap();
+        p.emit_close_fill(
+            "BTCUSDT", true, 0.1, 51_000.0, 2_000, pnl,
+            tag, "ctx-full-close-coverage", snap.as_ref(),
+        );
+        assert!(
+            rx.try_recv().is_ok(),
+            "close_tag {tag:?} is a full-close path — EF emission MUST continue \
+             (RCA-B fix must not over-silence)"
+        );
+    }
+}

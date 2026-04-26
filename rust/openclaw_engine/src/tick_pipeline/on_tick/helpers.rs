@@ -44,6 +44,39 @@ pub(crate) fn build_risk_close_tag(reason: &str) -> String {
     }
 }
 
+/// EXIT-FEATURES-WRITER-BUG-1-FIX (2026-04-26): identify a close_tag whose
+/// underlying close action is a partial reduce (NOT a full position exit).
+/// Returns `true` for close_tags emitted by paths that call
+/// `paper_state.reduce_position` instead of removing the position outright.
+///
+/// Currently the sole partial-reduce path is fast-track ReduceToHalf
+/// (`risk_close:fast_track_reduce_half`). PHYS-LOCK / hard stop / trailing
+/// stop / time stop / take profit / drawdown / daily loss / consecutive loss
+/// / strategy exits all call `close_position*` (full close → position
+/// removed). When the taxonomy expands (e.g. ladder partial close), add
+/// the new tag here to keep the EF writer 1:1 invariant intact.
+///
+/// Why this exists: `learning.exit_features` is designed as a **post-close**
+/// label for ML training on round-trip outcomes. Writing an EF row when the
+/// position remains open (partial reduce) pollutes the training set with
+/// labels whose `realized_net_bps` reflects only the closed portion's PnL,
+/// not the full round-trip. MIT audit
+/// `2026-04-26--exit_features_writer_bug_audit.md` §4 RCA-B verified this
+/// produced 37 noise rows in the STRKUSDT dust spiral (close_fills 1:1
+/// invariant violated by Δ37 in the 24h healthcheck window).
+///
+/// EXIT-FEATURES-WRITER-BUG-1-FIX（2026-04-26）：辨識 close_tag 是否為 partial
+/// reduce（部分減倉、倉位仍 open），用以決定是否寫 EF row。EF 設計為「post-close
+/// 標籤」（ML training 用），partial reduce 寫入污染 training set；MIT audit
+/// §4 RCA-B 驗證 STRKUSDT dust spiral 37 條 noise label。當前唯一 partial reduce
+/// 路徑為 fast_track ReduceToHalf；新增 partial 路徑（如 ladder partial close）
+/// 須同步擴此 helper 以維持 close_fills 1:1 不變量。
+pub(crate) fn is_partial_reduce_tag(close_tag: &str) -> bool {
+    // 只認確切 tag — 避免誤判 PHYS-LOCK / strategy exit 等 full-close 路徑。
+    // Match exact tag — avoid false positives on PHYS-LOCK / strategy exits.
+    close_tag == "risk_close:fast_track_reduce_half"
+}
+
 /// T3 (`physical_micro_profit_lock`) 產生 `PhysicalDecision::Lock("phys_lock_xxx")`，
 /// `risk_checks.rs:242` 再用 `format!("risk_close:{}", reason)` 包成
 /// `RiskAction::ClosePosition("risk_close:phys_lock_xxx")`。此 helper 檢查
@@ -1178,5 +1211,105 @@ mod phys_lock_wrapper_tests {
                  once={once:?} twice={twice:?}"
             );
         }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // EXIT-FEATURES-WRITER-BUG-1-FIX (2026-04-26): is_partial_reduce_tag
+    // taxonomy tests. Pin the contract that ONLY fast_track ReduceToHalf is
+    // recognised as partial-reduce; every other close path (PHYS-LOCK / hard
+    // stop / trailing / time / TP / drawdown / strategy exits / etc.) must
+    // pass through as a full close so the EF writer continues to emit. MIT
+    // audit `2026-04-26--exit_features_writer_bug_audit.md` §4 RCA-B
+    // mitigation. If a future partial-reduce path is added (e.g. ladder
+    // partial close), expand `is_partial_reduce_tag` and add a new test row
+    // here.
+    // EXIT-FEATURES-WRITER-BUG-1-FIX：is_partial_reduce_tag 分類測試 — 固化
+    // 唯有 fast_track ReduceToHalf 視為 partial reduce 的契約；其他全 full
+    // close 路徑必通過（EF 繼續寫）。新增 partial reduce 路徑時須擴 helper
+    // + 加新測試 row。
+    // ─────────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn fast_track_reduce_half_is_recognised_as_partial_reduce() {
+        // The exact tag emit_close_fill receives from
+        // step_0_fast_track.rs:386 ReduceToHalf path.
+        // step_0_fast_track.rs:386 ReduceToHalf 路徑傳入的精確 tag。
+        assert!(
+            is_partial_reduce_tag("risk_close:fast_track_reduce_half"),
+            "fast_track ReduceToHalf MUST be recognised as partial reduce \
+             — otherwise dust spiral 37 EF noise rows resurrect"
+        );
+    }
+
+    #[test]
+    fn phys_lock_full_close_is_not_partial_reduce() {
+        // PHYS-LOCK fires close_position_at_market (full close, position
+        // removed). EF row must continue to be emitted.
+        // PHYS-LOCK 走 close_position_at_market（全平 → 移除倉位），EF 必寫。
+        for tag in [
+            "risk_close:phys_lock_gate4_giveback",
+            "risk_close:phys_lock_gate1_low_edge",
+            "risk_close:phys_lock_gate4_stale_roc_neg",
+        ] {
+            assert!(
+                !is_partial_reduce_tag(tag),
+                "PHYS-LOCK full close must NOT be classified as partial: {tag}"
+            );
+        }
+    }
+
+    #[test]
+    fn legacy_full_close_paths_are_not_partial_reduce() {
+        // Hard / trailing / time / TP / drawdown / consecutive-loss / daily-
+        // loss / strategy exits all reach emit_close_fill via close_position*
+        // helpers (full close). EF must continue to land for these.
+        // 硬止損 / 跟蹤 / 時間 / TP / 回撤 / 連虧 / 日損 / 策略退場全走
+        // close_position*（全平），EF 必須繼續落表。
+        for tag in [
+            "risk_close:HARD STOP: pnl -6.00% <= -5.00%",
+            "risk_close:TRAILING STOP: peak 3.00% - current 1.00% = 2.00% >= distance 1.50%",
+            "risk_close:TIME STOP: held 24.0h >= limit 24.0h",
+            "risk_close:TAKE PROFIT: pnl 5.00% >= 4.50%",
+            "risk_close:DRAWDOWN: session equity -2.50% <= -2.00%",
+            "risk_close:CONSECUTIVE LOSS: 3 in a row",
+            "risk_close:DAILY LOSS: -3.50% <= -3.00%",
+            "risk_close:fast_track",     // CloseAll path (full close)
+            "risk_close:fast_track_close_all",
+            "stop_trigger:hard_stop",
+            "strategy_close:ma_crossover_exit",
+            "",
+        ] {
+            assert!(
+                !is_partial_reduce_tag(tag),
+                "full-close path must NOT be classified as partial: {tag:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn partial_reduce_match_is_byte_exact() {
+        // Defensive: similar-but-not-equal strings must NOT match. Prevents
+        // a future "looks-like-partial" false positive from silencing legit
+        // full-close EF emissions (which would re-introduce the exact bug
+        // RCA-B was meant to fix from the opposite direction).
+        // 防禦性：類似但不相等的字串不可命中 — 避免未來「看起來像 partial」的
+        // false positive 反向打殘 full-close EF emission，反向重現 RCA-B。
+        assert!(!is_partial_reduce_tag("fast_track_reduce_half"), "missing prefix");
+        assert!(
+            !is_partial_reduce_tag("risk_close:fast_track_reduce_half "),
+            "trailing space must not match"
+        );
+        assert!(
+            !is_partial_reduce_tag("RISK_CLOSE:FAST_TRACK_REDUCE_HALF"),
+            "case-sensitive — uppercase must not match"
+        );
+        assert!(
+            !is_partial_reduce_tag("risk_close:fast_track_reduce_half_extra"),
+            "suffix must not match (substring guard)"
+        );
+        assert!(
+            !is_partial_reduce_tag("risk_close:fast_track"),
+            "fast_track CloseAll (full close) must not match"
+        );
     }
 }
