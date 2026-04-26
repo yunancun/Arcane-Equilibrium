@@ -1,15 +1,19 @@
 # OpenClaw TODO — 工作清單（v3 · 單一時間軸版）
 
-**最後更新**：2026-04-26 19:30 CEST（**Tier 9 完成 + G3-08 Phase 4 unblock + G3-09 Phase A unblock**：Tier 8 §8 推薦並行 + multi-session race 處置；3 task PASS / 0 退回 + 5 follow-up backlog；PA RFC `de699df` Strategist + cost_tracker split + RFC `642c34c` G3-09 cost_edge_advisor design + E1 PRIVATE-ATTR-FACADE Option D defer (`38f71c4` via git plumbing pattern)；T9-LOW-1 ratio direction lock-in PM ACCEPT (threshold = -0.5 negative operator-tunable)；58 commits 3f35649→63408e7；engine PID 2033577 未觸動；strategist_agent.py 仍 1200/1200；Multi-session race / branch chaos / git plumbing pattern 全 verified safe）
+**最後更新**：2026-04-27 01:30 CEST（**STRKUSDT P0 Wave merge 完成**：7 fix（F1 deploy `af48ee1` + F2-F7 6 PR）E2 雙輪 PASS / E4 combined regression 2252/0 兩遍同綠 / PM Sign-off APPROVED；6 PR merge `1dff948`/`5ac7a80`/`310ae29`/`31c8206`/`1341c01`/`1edc6fe` → origin/main `1edc6fe`；5 follow-up tickets backlog（STRK-FUP-LOOP-HANDLERS-SPLIT P2 + STRK-FUP-MEMORY-CONFLICT-RESOLVED P3 + STRK-FUP-BASELINE-UPDATE P3 + STRK-FUP-F7-CRON-CD-CHECK P3 + STRK-FUP-HEALTHCHECK-PRE-EXISTING P2）；2nd deploy 預備）
+
+**前次更新**：2026-04-26 19:30 CEST（Tier 9 完成 + G3-08 Phase 4 unblock + G3-09 Phase A unblock：Tier 8 §8 推薦並行 + multi-session race 處置；3 task PASS / 0 退回 + 5 follow-up backlog；PA RFC `de699df` Strategist + cost_tracker split + RFC `642c34c` G3-09 cost_edge_advisor design + E1 PRIVATE-ATTR-FACADE Option D defer (`38f71c4` via git plumbing pattern)；T9-LOW-1 ratio direction lock-in PM ACCEPT (threshold = -0.5 negative operator-tunable)；58 commits 3f35649→63408e7；engine PID 2033577 未觸動；strategist_agent.py 仍 1200/1200；Multi-session race / branch chaos / git plumbing pattern 全 verified safe）
 **版本**：v3（Wave 線性版；廢除雙軌 P0-P4 章節，P0/P1/P2 降為每項 tag）
 **舊版歸檔**：v2 `docs/archive/2026-04-24--todo_v2_dual_axis_snapshot.md`（458 行，Wave+P 雙軌）· v1 `docs/archive/2026-04-24--todo_v1_refactor_snapshot.md`（328 行）· v0 `docs/archive/2026-04-24--todo_snapshot_pre_refactor.md`（700 行）
 **簽核**：PM Approved FIX-PLAN v2 → [Sign-off](docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-24--FixPlan_v2_PMApproval.md) · **Wave 3 Final** → [Wave 3 Sign-off](docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-26--wave3_final_signoff.md)
 **基礎方案**：[FIX-PLAN v2](docs/CCAgentWorkSpace/PA/workspace/reports/2026-04-24--4.24TodoAudit_FixPlan_v2.md) · [10-Agent audit 索引](docs/audits/2026-04-24--todo_refactor_audit.md)
 
 **Engine**（採集 2026-04-26 04:30 CEST · Wave 3 W5 收尾 + rebuild 部署後 · ssh verify）：engine 復活 ✅ · `engine_alive: true` · snapshot 8.6s fresh · paper + demo 雙活 · binary 含 **Wave 1+2+3 全工**（G1-01/02/03/05/06 + G6-01/02/03/04/05 + G3-02/03/04/05/06/10/11 + G4-02/03 + G5-02/04/05/07 + G7-01~09 + grid G7-09c Phase 2 reject_cooldown + **W3 G2-06 disable + EDGE-P1b 4/4 + EDGE-P2-flip T1+T2+T3 + G2-03 4/4 + G2-FUP-IPC-LEGACY-MS-FIX**）· HEAD `df882ad`（origin synced）· news halt 30min TTL auto-clear active · tick pipeline boot deadlock fixed · STRATEGIST-PARAMS-PERSIST-1 restored ✅ · IPC HMAC sync path ms→s 修（legacy `sync_ipc_call:786`）
-**測試基準（2026-04-26）**：engine lib **2161 / 0 fail**（baseline 1980 → 2138 W2 → 2141 EDGE-P1b T3 IPC restore + 2161 G2-03 schema/runtime cap：11 schema + 8 runtime cap + 1 TOML round-trip）· pytest 含 W5 軌 2 IPC HMAC unit test 3 passed in 0.03s（Linux verified）· DB migrations 25 applied（V025 partial idx 484x speedup）
+**測試基準（2026-04-27 STRKUSDT P0 wave merge 後）**：engine lib **2252 / 0 fail**（baseline 2161 → 2212 G3-08 Phase 1A H state cache + Tier 8/9 commits + 51 → **2252** STRKUSDT P0 wave + 91：F2 +4 / F3 +13 / F4 +16 / F6 +7 / F4 bins +50 / Tier 8/9 buffer +51）· pytest 本 wave 新增 63（F4 7 + F5 17 + F7 39）· healthcheck 27 check（19 既有 + 8 新 [22]-[29] silent-regression sentinel）· DB migrations 25 applied（V025 partial idx 484x speedup）
+
+**前次基準（2026-04-26）**：engine lib 2161 / 0 fail（baseline 1980 → 2138 W2 → 2141 EDGE-P1b T3 IPC restore + 2161 G2-03 schema/runtime cap：11 schema + 8 runtime cap + 1 TOML round-trip）· pytest 含 W5 軌 2 IPC HMAC unit test 3 passed in 0.03s（Linux verified）· DB migrations 25 applied（V025 partial idx 484x speedup）
 **21d demo 時鐘**：起算 2026-04-16 22:16 → 解鎖 2026-05-07
-**Wave 3 healthcheck**：cron 6h 跑 **19 check**（[1-15] + [Xa] + [Xb] + [16] strategist_cycle + **[18] disabled_strategy_inventory** G2-06 加 2026-04-26）
+**Wave 3 healthcheck**：cron 6h 跑 **27 check**（19 既有 [1-15]+[Xa]+[Xb]+[16]+[18] + 8 新 STRKUSDT P0 wave F7 [22-29]：[22] trading_pipeline_silent_gap / [23] orders_fills_consistency（FUP-23 SQL exclude `unattributed:%`）/ [24] signals_writer_freshness / [25] dust_qty_distribution / [26] dust_spiral_noise_in_ef / [27] intents_counter_freeze / [28] phantom_fills_attribution / [29] reconciler_paper_state_divergence）
 
 ---
 
@@ -528,6 +532,11 @@ ssh trade-core "cd ~/BybitOpenClaw/srv && python3 helper_scripts/db/passive_wait
 | **T6-FUP-PA-MEMORY-INDEX-SYNC** | E2 Tier 6 LOW: PA Track 3 dust audit (`dd4d64a`) memory.md 索引條目未追加；PA 下次 audit 接手時補 | 下次 PA 接手 | 🟢LOW | PA 10min |
 | **TIER4-AI-SERVICE-DISPATCH-SPLIT** | E2 Tier 4 review LOW-2: `app/ai_service_dispatch.py` 868 進 §九 800 警告區（G3-08 Phase 1B 加 query_h_state_full handler 推升）；下次 G5 wave 對齊 | 下次 G5 wave | 🟢P3 | E5 0.5d |
 | **TIER4-MIT-AUDIT-GREP-SNIPPET** | E2 Tier 4 review LOW-3: MIT EXIT-FEATURES audit H1 reject 缺 grep snippet 證據（E2 已獨立驗證屬實，下次補完整 audit doc 嚴謹度） | 下次 audit | 🟢P3 | MIT 30min |
+| **STRK-FUP-LOOP-HANDLERS-SPLIT** | E4 Tier 9 STRKUSDT P0 wave push back #1：F2(-41) + F3(+25) + F4 抽 sibling 215 後 combined `loop_handlers.rs` 1212 行超 §九 1200 hard cap 12 行；下次 G5 wave 拆 status arm reaper 區段（L1160-1171）到 sibling，與 F4 `unattributed_emit.rs` pattern 一致 | 下次 G5 wave | 🟡P2 | E1 ~30min（per PM Sign-off `2026-04-27--strkusdt_p0_wave_signoff.md` §5.1）|
+| ~~**STRK-FUP-MEMORY-CONFLICT-RESOLVED**~~ | ✅ 完成 2026-04-27（merge F6 + F7 兩處 docs/CCAgentWorkSpace/E1/memory.md union conflict 採 `git merge -X theirs` 自動 resolve；audit trail 完整保留） | 完成 | ✅ | n/a |
+| ~~**STRK-FUP-BASELINE-UPDATE**~~ | ✅ 完成 2026-04-27（TODO L9-L10 + CLAUDE.md §十一 baseline 2161 → 2252 已更新，per PM Sign-off §5.3）| 完成 | ✅ | n/a |
+| **STRK-FUP-F7-CRON-CD-CHECK** | E4 Tier 9 STRKUSDT P0 wave push back #4：F7 cron wrapper `cd $BASE_DIR` 跑 stale main worktree runner；建議 cron wrapper 加 grep `[22]`-`[29]` 在 latest log 內自驗（防 wrapper 本身路徑漂移） | 下次 cron 維護 | 🟢P3 | E1 / operator ~15min（per PM Sign-off §5.4）|
+| **STRK-FUP-HEALTHCHECK-PRE-EXISTING** | F7 [22]-[29] 揭發 5 個 pre-existing healthcheck FAIL silent-dead pipelines：[3] exit_features_writer / [19] observer_pipeline / [23] orders_fills 6 pairs/11 dropped real / [24] signals_writer 179h stale / [26] dust_spiral_noise_in_ef 37 rows / [27] intents_counter_freeze；屬 PA Wave 4 / G3-08+ scope，非本 STRKUSDT P0 wave 引入 | F7 deploy 後 6-12h 觀察期完成 | 🟡P2 | PA design RFC + E1 1-3d/pipeline（per PM Sign-off §5.5）|
 
 ---
 
