@@ -31,6 +31,7 @@ from .checks_engine import (  # noqa: F401
     check_close_fills_24h,
     check_label_backfill_ratio,
     check_exit_features_writer,
+    check_paper_state_dust_inventory,
 )
 from .checks_ipc_edge import (  # noqa: F401
     check_phys_lock_runtime,
@@ -63,6 +64,7 @@ __all__ = [
     "check_close_fills_24h",
     "check_label_backfill_ratio",
     "check_exit_features_writer",
+    "check_paper_state_dust_inventory",
     # risk layer + shadow + freshness + registry
     "check_phys_lock_runtime",
     "check_micro_profit_fire",
