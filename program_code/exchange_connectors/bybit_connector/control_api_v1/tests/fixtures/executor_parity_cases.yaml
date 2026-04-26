@@ -1,0 +1,855 @@
+# G8-02 — Python↔Rust ExecutorAgent decision parity test cases.
+# G8-02 — Python↔Rust ExecutorAgent 決策一致性測試案例。
+#
+# Source-of-truth design (per PA RFC Q2 §95% case-level binary):
+#   - case_id    : unique tag (golden_NN / synthetic_NN)
+#   - source     : "golden" | "synthetic_handcrafted"
+#                  (E2 G8-02 review: previous name implied "real replay"
+#                  but these 40 cases are handcrafted YAML literals — no
+#                  seed, no generator, no PG snapshot from production
+#                  decision_outcomes. The case_id "_replay" suffix is
+#                  preserved as-is solely for stable test ids.)
+#                  (E2 G8-02 審查：原名暗示真 replay，但 40 case 皆為手寫
+#                  YAML 字面量，無種子、無生成器、無 production decision_outcomes
+#                  PG snapshot。case_id "_replay" 後綴保留僅為穩定 test id。)
+#   - description: human-readable purpose / 案例目的
+#   - config     : {shadow_mode, max_position_pct, per_symbol_position_cap}
+#                  Mirror of Rust RiskConfig.executor sub-slice schema
+#                  (rust/openclaw_engine/src/config/risk_config_advanced.rs:770).
+#   - intent     : {symbol, side, qty, current_position_qty}
+#                  Used by both Python ExecutorAgent.execute_order(...) and
+#                  the reference spec to derive an expected decision.
+#   - expected_decision: "submit" | "block_shadow"
+#                        (Wave-3 scope: only shadow_mode is wired in Python
+#                        ExecutorAgent + Rust schema. per_symbol_cap +
+#                        max_pct gates are deferred to G3-08; see
+#                        test_per_symbol_cap_parity_deferred for marker.)
+#   - expected_reason  : human-readable rationale
+#
+# Distribution (per PA RFC Q2 §70 case · ≥95% agree):
+#   - 30 golden fixtures        (handcrafted, every shadow_mode boundary covered)
+#   - 40 synthetic_handcrafted  (handcrafted YAML literals; deterministic by
+#                                 construction. Naming clarified per E2 G8-02
+#                                 review — was "synthetic replay", but these
+#                                 are NOT real replays.)
+#
+# Mock boundaries (per task spec §"實作要求"):
+#   - IPC channel: never spawned; cache._fetch_via_ipc_blocking is patched.
+#   - PG connection: never opened; synthetic replay uses fixture-injected
+#     decision_outcomes shape (no live SELECT).
+#   - Business logic NOT mocked: Python ExecutorAgent.execute_order() runs
+#     real, including the shadow_mode_provider lambda chain.
+
+cases:
+  # ─────────────────────────────────────────────────────────────────────
+  # Golden fixtures (30 case) — handcrafted boundary + center coverage
+  # 30 個手寫黃金案例 — 邊界 + 中心
+  # ─────────────────────────────────────────────────────────────────────
+
+  # Group A: shadow_mode=true → all intents must block_shadow (10 case)
+  # A 組：shadow_mode=true → 全部 intent 必 block_shadow
+  - case_id: golden_01_shadow_buy_basic
+    source: golden
+    description: shadow=true · simple buy · expected block_shadow
+    config:
+      shadow_mode: true
+      max_position_pct: 0.05
+      per_symbol_position_cap: {}
+    intent:
+      symbol: BTCUSDT
+      side: Buy
+      qty: 0.01
+      current_position_qty: 0.0
+    expected_decision: block_shadow
+    expected_reason: shadow_mode
+
+  - case_id: golden_02_shadow_sell_basic
+    source: golden
+    description: shadow=true · simple sell · expected block_shadow
+    config:
+      shadow_mode: true
+      max_position_pct: 0.05
+      per_symbol_position_cap: {}
+    intent:
+      symbol: ETHUSDT
+      side: Sell
+      qty: 0.5
+      current_position_qty: 1.0
+    expected_decision: block_shadow
+    expected_reason: shadow_mode
+
+  - case_id: golden_03_shadow_zero_qty
+    source: golden
+    description: shadow=true · zero qty (degenerate) · still block_shadow
+    config:
+      shadow_mode: true
+      max_position_pct: 0.05
+      per_symbol_position_cap: {}
+    intent:
+      symbol: SOLUSDT
+      side: Buy
+      qty: 0.0
+      current_position_qty: 0.0
+    expected_decision: block_shadow
+    expected_reason: shadow_mode
+
+  - case_id: golden_04_shadow_with_per_symbol_cap_set
+    source: golden
+    description: shadow=true · per_symbol cap set · shadow precedence
+    config:
+      shadow_mode: true
+      max_position_pct: 0.20
+      per_symbol_position_cap:
+        BTCUSDT: 0.10
+    intent:
+      symbol: BTCUSDT
+      side: Buy
+      qty: 0.05
+      current_position_qty: 0.0
+    expected_decision: block_shadow
+    expected_reason: shadow_mode
+
+  - case_id: golden_05_shadow_high_max_pct
+    source: golden
+    description: shadow=true · max_pct=1.0 (theoretical max) · still shadow
+    config:
+      shadow_mode: true
+      max_position_pct: 1.0
+      per_symbol_position_cap: {}
+    intent:
+      symbol: BTCUSDT
+      side: Buy
+      qty: 0.5
+      current_position_qty: 0.0
+    expected_decision: block_shadow
+    expected_reason: shadow_mode
+
+  - case_id: golden_06_shadow_zero_max_pct
+    source: golden
+    description: shadow=true · max_pct=0.0 (degenerate) · still shadow
+    config:
+      shadow_mode: true
+      max_position_pct: 0.0
+      per_symbol_position_cap: {}
+    intent:
+      symbol: BTCUSDT
+      side: Buy
+      qty: 0.01
+      current_position_qty: 0.0
+    expected_decision: block_shadow
+    expected_reason: shadow_mode
+
+  - case_id: golden_07_shadow_multi_symbol_cap
+    source: golden
+    description: shadow=true · multi-symbol caps configured · still shadow
+    config:
+      shadow_mode: true
+      max_position_pct: 0.10
+      per_symbol_position_cap:
+        BTCUSDT: 0.15
+        ETHUSDT: 0.20
+        SOLUSDT: 0.05
+    intent:
+      symbol: ETHUSDT
+      side: Sell
+      qty: 0.30
+      current_position_qty: 0.0
+    expected_decision: block_shadow
+    expected_reason: shadow_mode
+
+  - case_id: golden_08_shadow_unknown_symbol
+    source: golden
+    description: shadow=true · symbol not in cap map · uses default · still shadow
+    config:
+      shadow_mode: true
+      max_position_pct: 0.05
+      per_symbol_position_cap:
+        BTCUSDT: 0.10
+    intent:
+      symbol: AVAXUSDT
+      side: Buy
+      qty: 1.5
+      current_position_qty: 0.0
+    expected_decision: block_shadow
+    expected_reason: shadow_mode
+
+  - case_id: golden_09_shadow_against_existing_position
+    source: golden
+    description: shadow=true · sell against long · still shadow (not exit logic)
+    config:
+      shadow_mode: true
+      max_position_pct: 0.05
+      per_symbol_position_cap: {}
+    intent:
+      symbol: BTCUSDT
+      side: Sell
+      qty: 0.05
+      current_position_qty: 0.10
+    expected_decision: block_shadow
+    expected_reason: shadow_mode
+
+  - case_id: golden_10_shadow_extra_long_intent_id
+    source: golden
+    description: shadow=true · long intent_id sanity (no overflow)
+    config:
+      shadow_mode: true
+      max_position_pct: 0.05
+      per_symbol_position_cap: {}
+    intent:
+      symbol: BTCUSDT
+      side: Buy
+      qty: 0.01
+      current_position_qty: 0.0
+    expected_decision: block_shadow
+    expected_reason: shadow_mode
+
+  # Group B: shadow_mode=false → all intents must submit (10 case)
+  # B 組：shadow_mode=false → 全部 intent 必 submit
+  - case_id: golden_11_live_buy_basic
+    source: golden
+    description: shadow=false · simple buy · expected submit
+    config:
+      shadow_mode: false
+      max_position_pct: 0.05
+      per_symbol_position_cap: {}
+    intent:
+      symbol: BTCUSDT
+      side: Buy
+      qty: 0.01
+      current_position_qty: 0.0
+    expected_decision: submit
+    expected_reason: live_intent_passthrough
+
+  - case_id: golden_12_live_sell_basic
+    source: golden
+    description: shadow=false · simple sell · expected submit
+    config:
+      shadow_mode: false
+      max_position_pct: 0.05
+      per_symbol_position_cap: {}
+    intent:
+      symbol: ETHUSDT
+      side: Sell
+      qty: 0.5
+      current_position_qty: 1.0
+    expected_decision: submit
+    expected_reason: live_intent_passthrough
+
+  - case_id: golden_13_live_with_per_symbol_cap
+    source: golden
+    description: shadow=false · per_symbol cap configured but Python doesn't gate · submit
+    config:
+      shadow_mode: false
+      max_position_pct: 0.05
+      per_symbol_position_cap:
+        BTCUSDT: 0.10
+    intent:
+      symbol: BTCUSDT
+      side: Buy
+      qty: 0.05
+      current_position_qty: 0.0
+    expected_decision: submit
+    expected_reason: live_intent_passthrough
+
+  - case_id: golden_14_live_high_qty
+    source: golden
+    description: shadow=false · large qty · still submit (Rust gates downstream)
+    config:
+      shadow_mode: false
+      max_position_pct: 0.05
+      per_symbol_position_cap: {}
+    intent:
+      symbol: BTCUSDT
+      side: Buy
+      qty: 1.0
+      current_position_qty: 0.0
+    expected_decision: submit
+    expected_reason: live_intent_passthrough
+
+  - case_id: golden_15_live_zero_max_pct
+    source: golden
+    description: shadow=false · max_pct=0.0 (Python no-gate) · submit
+    config:
+      shadow_mode: false
+      max_position_pct: 0.0
+      per_symbol_position_cap: {}
+    intent:
+      symbol: BTCUSDT
+      side: Buy
+      qty: 0.01
+      current_position_qty: 0.0
+    expected_decision: submit
+    expected_reason: live_intent_passthrough
+
+  - case_id: golden_16_live_multi_symbol_caps
+    source: golden
+    description: shadow=false · multi-symbol caps · still submit
+    config:
+      shadow_mode: false
+      max_position_pct: 0.10
+      per_symbol_position_cap:
+        BTCUSDT: 0.15
+        ETHUSDT: 0.20
+        SOLUSDT: 0.05
+    intent:
+      symbol: SOLUSDT
+      side: Buy
+      qty: 5.0
+      current_position_qty: 2.0
+    expected_decision: submit
+    expected_reason: live_intent_passthrough
+
+  - case_id: golden_17_live_against_position
+    source: golden
+    description: shadow=false · sell against long · submit
+    config:
+      shadow_mode: false
+      max_position_pct: 0.05
+      per_symbol_position_cap: {}
+    intent:
+      symbol: BTCUSDT
+      side: Sell
+      qty: 0.05
+      current_position_qty: 0.10
+    expected_decision: submit
+    expected_reason: live_intent_passthrough
+
+  - case_id: golden_18_live_unknown_symbol
+    source: golden
+    description: shadow=false · symbol not in cap map · submit
+    config:
+      shadow_mode: false
+      max_position_pct: 0.05
+      per_symbol_position_cap:
+        BTCUSDT: 0.10
+    intent:
+      symbol: DOGEUSDT
+      side: Buy
+      qty: 1000.0
+      current_position_qty: 0.0
+    expected_decision: submit
+    expected_reason: live_intent_passthrough
+
+  - case_id: golden_19_live_borderline_qty
+    source: golden
+    description: shadow=false · qty exactly at cap · still submit (Python no gate)
+    config:
+      shadow_mode: false
+      max_position_pct: 0.05
+      per_symbol_position_cap:
+        BTCUSDT: 0.05
+    intent:
+      symbol: BTCUSDT
+      side: Buy
+      qty: 0.05
+      current_position_qty: 0.0
+    expected_decision: submit
+    expected_reason: live_intent_passthrough
+
+  - case_id: golden_20_live_borderline_above
+    source: golden
+    description: shadow=false · qty above cap · Python still submit (Rust catches)
+    config:
+      shadow_mode: false
+      max_position_pct: 0.05
+      per_symbol_position_cap:
+        BTCUSDT: 0.05
+    intent:
+      symbol: BTCUSDT
+      side: Buy
+      qty: 0.10
+      current_position_qty: 0.0
+    expected_decision: submit
+    expected_reason: live_intent_passthrough
+
+  # Group C: per_symbol_cap stress (5 case all shadow=true · cap interaction sanity)
+  # C 組：per_symbol_cap 壓力（shadow=true 主導，cap 表為 noise）
+  - case_id: golden_21_cap_at_limit_shadow
+    source: golden
+    description: shadow=true · qty exactly at per_symbol cap · still shadow
+    config:
+      shadow_mode: true
+      max_position_pct: 0.20
+      per_symbol_position_cap:
+        BTCUSDT: 0.10
+    intent:
+      symbol: BTCUSDT
+      side: Buy
+      qty: 0.10
+      current_position_qty: 0.0
+    expected_decision: block_shadow
+    expected_reason: shadow_mode
+
+  - case_id: golden_22_cap_over_by_one_shadow
+    source: golden
+    description: shadow=true · qty over cap by 0.01 · still shadow
+    config:
+      shadow_mode: true
+      max_position_pct: 0.20
+      per_symbol_position_cap:
+        BTCUSDT: 0.10
+    intent:
+      symbol: BTCUSDT
+      side: Buy
+      qty: 0.11
+      current_position_qty: 0.0
+    expected_decision: block_shadow
+    expected_reason: shadow_mode
+
+  - case_id: golden_23_cap_unset_symbol_shadow
+    source: golden
+    description: shadow=true · cap exists for BTC, intent ETH · still shadow
+    config:
+      shadow_mode: true
+      max_position_pct: 0.05
+      per_symbol_position_cap:
+        BTCUSDT: 0.20
+    intent:
+      symbol: ETHUSDT
+      side: Buy
+      qty: 0.50
+      current_position_qty: 0.0
+    expected_decision: block_shadow
+    expected_reason: shadow_mode
+
+  - case_id: golden_24_cap_empty_map_shadow
+    source: golden
+    description: shadow=true · cap map empty · uses max_pct · still shadow
+    config:
+      shadow_mode: true
+      max_position_pct: 0.05
+      per_symbol_position_cap: {}
+    intent:
+      symbol: BTCUSDT
+      side: Buy
+      qty: 0.04
+      current_position_qty: 0.0
+    expected_decision: block_shadow
+    expected_reason: shadow_mode
+
+  - case_id: golden_25_cap_zero_for_symbol_shadow
+    source: golden
+    description: shadow=true · cap=0 for symbol (effectively block) · shadow precedence
+    config:
+      shadow_mode: true
+      max_position_pct: 0.20
+      per_symbol_position_cap:
+        BTCUSDT: 0.0
+    intent:
+      symbol: BTCUSDT
+      side: Buy
+      qty: 0.01
+      current_position_qty: 0.0
+    expected_decision: block_shadow
+    expected_reason: shadow_mode
+
+  # Group D: max_pct stress (5 case all shadow=true · pct interaction sanity)
+  # D 組：max_pct 壓力（shadow=true 主導）
+  - case_id: golden_26_max_pct_001_shadow
+    source: golden
+    description: shadow=true · max_pct=0.001 (1bp) edge · still shadow
+    config:
+      shadow_mode: true
+      max_position_pct: 0.001
+      per_symbol_position_cap: {}
+    intent:
+      symbol: BTCUSDT
+      side: Buy
+      qty: 0.0001
+      current_position_qty: 0.0
+    expected_decision: block_shadow
+    expected_reason: shadow_mode
+
+  - case_id: golden_27_max_pct_50_shadow
+    source: golden
+    description: shadow=true · max_pct=0.5 (50%) · still shadow
+    config:
+      shadow_mode: true
+      max_position_pct: 0.5
+      per_symbol_position_cap: {}
+    intent:
+      symbol: BTCUSDT
+      side: Buy
+      qty: 0.40
+      current_position_qty: 0.0
+    expected_decision: block_shadow
+    expected_reason: shadow_mode
+
+  - case_id: golden_28_max_pct_100_shadow
+    source: golden
+    description: shadow=true · max_pct=1.0 (100%) · still shadow
+    config:
+      shadow_mode: true
+      max_position_pct: 1.0
+      per_symbol_position_cap: {}
+    intent:
+      symbol: BTCUSDT
+      side: Buy
+      qty: 1.0
+      current_position_qty: 0.0
+    expected_decision: block_shadow
+    expected_reason: shadow_mode
+
+  - case_id: golden_29_max_pct_with_above_qty_shadow
+    source: golden
+    description: shadow=true · qty 5x max_pct (would over) · still shadow
+    config:
+      shadow_mode: true
+      max_position_pct: 0.05
+      per_symbol_position_cap: {}
+    intent:
+      symbol: BTCUSDT
+      side: Buy
+      qty: 0.25
+      current_position_qty: 0.0
+    expected_decision: block_shadow
+    expected_reason: shadow_mode
+
+  - case_id: golden_30_max_pct_negative_protected_shadow
+    source: golden
+    description: shadow=true · max_pct=0.05 (default) borderline · still shadow
+    config:
+      shadow_mode: true
+      max_position_pct: 0.05
+      per_symbol_position_cap: {}
+    intent:
+      symbol: BTCUSDT
+      side: Sell
+      qty: 0.04
+      current_position_qty: 0.10
+    expected_decision: block_shadow
+    expected_reason: shadow_mode
+
+  # ─────────────────────────────────────────────────────────────────────
+  # Synthetic handcrafted (40 case) — handcrafted YAML literal cases.
+  # E2 G8-02 review: previously named "synthetic replay" but no seed /
+  # no generator / no PG snapshot replay involved — pure handcrafted
+  # boundary coverage. case_id keeps "_replay" suffix for grep stability.
+  # 40 個 synthetic_handcrafted 案例 — 純手寫 YAML 字面量。
+  # E2 G8-02 審查：原名「synthetic replay」誤導，本批 case 無種子、無生成器、
+  # 無 PG snapshot replay，皆為手寫邊界覆蓋；case_id 保留 "_replay" 後綴僅為
+  # grep 穩定。
+  # Distribution: 20 shadow=true (block_shadow expected) + 20 shadow=false (submit expected)
+  # 配比：20 shadow=true (預期 block_shadow) + 20 shadow=false (預期 submit)
+  # ─────────────────────────────────────────────────────────────────────
+
+  - case_id: synthetic_01_replay
+    source: synthetic_handcrafted
+    description: replay row · BTCUSDT shadow=true buy
+    config: { shadow_mode: true, max_position_pct: 0.05, per_symbol_position_cap: {} }
+    intent: { symbol: BTCUSDT, side: Buy, qty: 0.0123, current_position_qty: 0.0 }
+    expected_decision: block_shadow
+    expected_reason: shadow_mode
+
+  - case_id: synthetic_02_replay
+    source: synthetic_handcrafted
+    description: replay row · ETHUSDT shadow=true sell
+    config: { shadow_mode: true, max_position_pct: 0.10, per_symbol_position_cap: {} }
+    intent: { symbol: ETHUSDT, side: Sell, qty: 0.5500, current_position_qty: 0.5500 }
+    expected_decision: block_shadow
+    expected_reason: shadow_mode
+
+  - case_id: synthetic_03_replay
+    source: synthetic_handcrafted
+    description: replay row · SOLUSDT shadow=true buy with cap
+    config: { shadow_mode: true, max_position_pct: 0.05, per_symbol_position_cap: { SOLUSDT: 0.10 } }
+    intent: { symbol: SOLUSDT, side: Buy, qty: 2.5000, current_position_qty: 0.0 }
+    expected_decision: block_shadow
+    expected_reason: shadow_mode
+
+  - case_id: synthetic_04_replay
+    source: synthetic_handcrafted
+    description: replay row · AVAXUSDT shadow=true sell
+    config: { shadow_mode: true, max_position_pct: 0.05, per_symbol_position_cap: {} }
+    intent: { symbol: AVAXUSDT, side: Sell, qty: 1.0000, current_position_qty: 1.0000 }
+    expected_decision: block_shadow
+    expected_reason: shadow_mode
+
+  - case_id: synthetic_05_replay
+    source: synthetic_handcrafted
+    description: replay row · BTCUSDT shadow=true small qty
+    config: { shadow_mode: true, max_position_pct: 0.05, per_symbol_position_cap: {} }
+    intent: { symbol: BTCUSDT, side: Buy, qty: 0.0050, current_position_qty: 0.0 }
+    expected_decision: block_shadow
+    expected_reason: shadow_mode
+
+  - case_id: synthetic_06_replay
+    source: synthetic_handcrafted
+    description: replay row · ETHUSDT shadow=true large qty
+    config: { shadow_mode: true, max_position_pct: 0.20, per_symbol_position_cap: {} }
+    intent: { symbol: ETHUSDT, side: Buy, qty: 1.5000, current_position_qty: 0.0 }
+    expected_decision: block_shadow
+    expected_reason: shadow_mode
+
+  - case_id: synthetic_07_replay
+    source: synthetic_handcrafted
+    description: replay row · DOGEUSDT shadow=true partial
+    config: { shadow_mode: true, max_position_pct: 0.05, per_symbol_position_cap: {} }
+    intent: { symbol: DOGEUSDT, side: Sell, qty: 5000.0, current_position_qty: 10000.0 }
+    expected_decision: block_shadow
+    expected_reason: shadow_mode
+
+  - case_id: synthetic_08_replay
+    source: synthetic_handcrafted
+    description: replay row · LINKUSDT shadow=true with caps
+    config: { shadow_mode: true, max_position_pct: 0.10, per_symbol_position_cap: { LINKUSDT: 0.05 } }
+    intent: { symbol: LINKUSDT, side: Buy, qty: 10.0, current_position_qty: 0.0 }
+    expected_decision: block_shadow
+    expected_reason: shadow_mode
+
+  - case_id: synthetic_09_replay
+    source: synthetic_handcrafted
+    description: replay row · XRPUSDT shadow=true zero qty edge
+    config: { shadow_mode: true, max_position_pct: 0.05, per_symbol_position_cap: {} }
+    intent: { symbol: XRPUSDT, side: Buy, qty: 0.0001, current_position_qty: 0.0 }
+    expected_decision: block_shadow
+    expected_reason: shadow_mode
+
+  - case_id: synthetic_10_replay
+    source: synthetic_handcrafted
+    description: replay row · ADAUSDT shadow=true near cap
+    config: { shadow_mode: true, max_position_pct: 0.05, per_symbol_position_cap: { ADAUSDT: 0.04 } }
+    intent: { symbol: ADAUSDT, side: Buy, qty: 100.0, current_position_qty: 0.0 }
+    expected_decision: block_shadow
+    expected_reason: shadow_mode
+
+  - case_id: synthetic_11_replay
+    source: synthetic_handcrafted
+    description: replay row · BTCUSDT shadow=true close-out
+    config: { shadow_mode: true, max_position_pct: 0.05, per_symbol_position_cap: {} }
+    intent: { symbol: BTCUSDT, side: Sell, qty: 0.10, current_position_qty: 0.10 }
+    expected_decision: block_shadow
+    expected_reason: shadow_mode
+
+  - case_id: synthetic_12_replay
+    source: synthetic_handcrafted
+    description: replay row · ETHUSDT shadow=true scale-in
+    config: { shadow_mode: true, max_position_pct: 0.05, per_symbol_position_cap: {} }
+    intent: { symbol: ETHUSDT, side: Buy, qty: 0.20, current_position_qty: 0.30 }
+    expected_decision: block_shadow
+    expected_reason: shadow_mode
+
+  - case_id: synthetic_13_replay
+    source: synthetic_handcrafted
+    description: replay row · OPUSDT shadow=true alt
+    config: { shadow_mode: true, max_position_pct: 0.05, per_symbol_position_cap: {} }
+    intent: { symbol: OPUSDT, side: Sell, qty: 50.0, current_position_qty: 100.0 }
+    expected_decision: block_shadow
+    expected_reason: shadow_mode
+
+  - case_id: synthetic_14_replay
+    source: synthetic_handcrafted
+    description: replay row · ARBUSDT shadow=true alt
+    config: { shadow_mode: true, max_position_pct: 0.05, per_symbol_position_cap: { ARBUSDT: 0.10 } }
+    intent: { symbol: ARBUSDT, side: Buy, qty: 200.0, current_position_qty: 0.0 }
+    expected_decision: block_shadow
+    expected_reason: shadow_mode
+
+  - case_id: synthetic_15_replay
+    source: synthetic_handcrafted
+    description: replay row · MATICUSDT shadow=true alt
+    config: { shadow_mode: true, max_position_pct: 0.10, per_symbol_position_cap: {} }
+    intent: { symbol: MATICUSDT, side: Buy, qty: 1500.0, current_position_qty: 0.0 }
+    expected_decision: block_shadow
+    expected_reason: shadow_mode
+
+  - case_id: synthetic_16_replay
+    source: synthetic_handcrafted
+    description: replay row · ATOMUSDT shadow=true alt
+    config: { shadow_mode: true, max_position_pct: 0.05, per_symbol_position_cap: {} }
+    intent: { symbol: ATOMUSDT, side: Sell, qty: 30.0, current_position_qty: 50.0 }
+    expected_decision: block_shadow
+    expected_reason: shadow_mode
+
+  - case_id: synthetic_17_replay
+    source: synthetic_handcrafted
+    description: replay row · NEARUSDT shadow=true alt
+    config: { shadow_mode: true, max_position_pct: 0.05, per_symbol_position_cap: {} }
+    intent: { symbol: NEARUSDT, side: Buy, qty: 80.0, current_position_qty: 0.0 }
+    expected_decision: block_shadow
+    expected_reason: shadow_mode
+
+  - case_id: synthetic_18_replay
+    source: synthetic_handcrafted
+    description: replay row · APTUSDT shadow=true alt
+    config: { shadow_mode: true, max_position_pct: 0.05, per_symbol_position_cap: {} }
+    intent: { symbol: APTUSDT, side: Sell, qty: 25.0, current_position_qty: 25.0 }
+    expected_decision: block_shadow
+    expected_reason: shadow_mode
+
+  - case_id: synthetic_19_replay
+    source: synthetic_handcrafted
+    description: replay row · INJUSDT shadow=true alt
+    config: { shadow_mode: true, max_position_pct: 0.05, per_symbol_position_cap: {} }
+    intent: { symbol: INJUSDT, side: Buy, qty: 12.0, current_position_qty: 0.0 }
+    expected_decision: block_shadow
+    expected_reason: shadow_mode
+
+  - case_id: synthetic_20_replay
+    source: synthetic_handcrafted
+    description: replay row · TIAUSDT shadow=true alt
+    config: { shadow_mode: true, max_position_pct: 0.05, per_symbol_position_cap: {} }
+    intent: { symbol: TIAUSDT, side: Buy, qty: 60.0, current_position_qty: 0.0 }
+    expected_decision: block_shadow
+    expected_reason: shadow_mode
+
+  # 20 synthetic shadow=false (submit expected)
+  - case_id: synthetic_21_replay_live
+    source: synthetic_handcrafted
+    description: replay row · BTCUSDT shadow=false buy
+    config: { shadow_mode: false, max_position_pct: 0.05, per_symbol_position_cap: {} }
+    intent: { symbol: BTCUSDT, side: Buy, qty: 0.0150, current_position_qty: 0.0 }
+    expected_decision: submit
+    expected_reason: live_intent_passthrough
+
+  - case_id: synthetic_22_replay_live
+    source: synthetic_handcrafted
+    description: replay row · ETHUSDT shadow=false sell
+    config: { shadow_mode: false, max_position_pct: 0.10, per_symbol_position_cap: {} }
+    intent: { symbol: ETHUSDT, side: Sell, qty: 0.4500, current_position_qty: 0.5000 }
+    expected_decision: submit
+    expected_reason: live_intent_passthrough
+
+  - case_id: synthetic_23_replay_live
+    source: synthetic_handcrafted
+    description: replay row · SOLUSDT shadow=false buy with cap
+    config: { shadow_mode: false, max_position_pct: 0.05, per_symbol_position_cap: { SOLUSDT: 0.10 } }
+    intent: { symbol: SOLUSDT, side: Buy, qty: 3.0000, current_position_qty: 0.0 }
+    expected_decision: submit
+    expected_reason: live_intent_passthrough
+
+  - case_id: synthetic_24_replay_live
+    source: synthetic_handcrafted
+    description: replay row · AVAXUSDT shadow=false sell
+    config: { shadow_mode: false, max_position_pct: 0.05, per_symbol_position_cap: {} }
+    intent: { symbol: AVAXUSDT, side: Sell, qty: 1.5000, current_position_qty: 2.0000 }
+    expected_decision: submit
+    expected_reason: live_intent_passthrough
+
+  - case_id: synthetic_25_replay_live
+    source: synthetic_handcrafted
+    description: replay row · BTCUSDT shadow=false small
+    config: { shadow_mode: false, max_position_pct: 0.05, per_symbol_position_cap: {} }
+    intent: { symbol: BTCUSDT, side: Buy, qty: 0.0080, current_position_qty: 0.0 }
+    expected_decision: submit
+    expected_reason: live_intent_passthrough
+
+  - case_id: synthetic_26_replay_live
+    source: synthetic_handcrafted
+    description: replay row · ETHUSDT shadow=false large
+    config: { shadow_mode: false, max_position_pct: 0.20, per_symbol_position_cap: {} }
+    intent: { symbol: ETHUSDT, side: Buy, qty: 1.8000, current_position_qty: 0.0 }
+    expected_decision: submit
+    expected_reason: live_intent_passthrough
+
+  - case_id: synthetic_27_replay_live
+    source: synthetic_handcrafted
+    description: replay row · DOGEUSDT shadow=false partial
+    config: { shadow_mode: false, max_position_pct: 0.05, per_symbol_position_cap: {} }
+    intent: { symbol: DOGEUSDT, side: Sell, qty: 6000.0, current_position_qty: 12000.0 }
+    expected_decision: submit
+    expected_reason: live_intent_passthrough
+
+  - case_id: synthetic_28_replay_live
+    source: synthetic_handcrafted
+    description: replay row · LINKUSDT shadow=false with caps
+    config: { shadow_mode: false, max_position_pct: 0.10, per_symbol_position_cap: { LINKUSDT: 0.05 } }
+    intent: { symbol: LINKUSDT, side: Buy, qty: 12.0, current_position_qty: 0.0 }
+    expected_decision: submit
+    expected_reason: live_intent_passthrough
+
+  - case_id: synthetic_29_replay_live
+    source: synthetic_handcrafted
+    description: replay row · XRPUSDT shadow=false edge
+    config: { shadow_mode: false, max_position_pct: 0.05, per_symbol_position_cap: {} }
+    intent: { symbol: XRPUSDT, side: Buy, qty: 0.0010, current_position_qty: 0.0 }
+    expected_decision: submit
+    expected_reason: live_intent_passthrough
+
+  - case_id: synthetic_30_replay_live
+    source: synthetic_handcrafted
+    description: replay row · ADAUSDT shadow=false near cap
+    config: { shadow_mode: false, max_position_pct: 0.05, per_symbol_position_cap: { ADAUSDT: 0.04 } }
+    intent: { symbol: ADAUSDT, side: Buy, qty: 80.0, current_position_qty: 0.0 }
+    expected_decision: submit
+    expected_reason: live_intent_passthrough
+
+  - case_id: synthetic_31_replay_live
+    source: synthetic_handcrafted
+    description: replay row · BTCUSDT shadow=false close-out
+    config: { shadow_mode: false, max_position_pct: 0.05, per_symbol_position_cap: {} }
+    intent: { symbol: BTCUSDT, side: Sell, qty: 0.05, current_position_qty: 0.05 }
+    expected_decision: submit
+    expected_reason: live_intent_passthrough
+
+  - case_id: synthetic_32_replay_live
+    source: synthetic_handcrafted
+    description: replay row · ETHUSDT shadow=false scale-in
+    config: { shadow_mode: false, max_position_pct: 0.05, per_symbol_position_cap: {} }
+    intent: { symbol: ETHUSDT, side: Buy, qty: 0.18, current_position_qty: 0.25 }
+    expected_decision: submit
+    expected_reason: live_intent_passthrough
+
+  - case_id: synthetic_33_replay_live
+    source: synthetic_handcrafted
+    description: replay row · OPUSDT shadow=false alt
+    config: { shadow_mode: false, max_position_pct: 0.05, per_symbol_position_cap: {} }
+    intent: { symbol: OPUSDT, side: Sell, qty: 40.0, current_position_qty: 80.0 }
+    expected_decision: submit
+    expected_reason: live_intent_passthrough
+
+  - case_id: synthetic_34_replay_live
+    source: synthetic_handcrafted
+    description: replay row · ARBUSDT shadow=false alt
+    config: { shadow_mode: false, max_position_pct: 0.05, per_symbol_position_cap: { ARBUSDT: 0.10 } }
+    intent: { symbol: ARBUSDT, side: Buy, qty: 250.0, current_position_qty: 0.0 }
+    expected_decision: submit
+    expected_reason: live_intent_passthrough
+
+  - case_id: synthetic_35_replay_live
+    source: synthetic_handcrafted
+    description: replay row · MATICUSDT shadow=false alt
+    config: { shadow_mode: false, max_position_pct: 0.10, per_symbol_position_cap: {} }
+    intent: { symbol: MATICUSDT, side: Buy, qty: 2000.0, current_position_qty: 0.0 }
+    expected_decision: submit
+    expected_reason: live_intent_passthrough
+
+  - case_id: synthetic_36_replay_live
+    source: synthetic_handcrafted
+    description: replay row · ATOMUSDT shadow=false alt
+    config: { shadow_mode: false, max_position_pct: 0.05, per_symbol_position_cap: {} }
+    intent: { symbol: ATOMUSDT, side: Sell, qty: 25.0, current_position_qty: 60.0 }
+    expected_decision: submit
+    expected_reason: live_intent_passthrough
+
+  - case_id: synthetic_37_replay_live
+    source: synthetic_handcrafted
+    description: replay row · NEARUSDT shadow=false alt
+    config: { shadow_mode: false, max_position_pct: 0.05, per_symbol_position_cap: {} }
+    intent: { symbol: NEARUSDT, side: Buy, qty: 75.0, current_position_qty: 0.0 }
+    expected_decision: submit
+    expected_reason: live_intent_passthrough
+
+  - case_id: synthetic_38_replay_live
+    source: synthetic_handcrafted
+    description: replay row · APTUSDT shadow=false alt
+    config: { shadow_mode: false, max_position_pct: 0.05, per_symbol_position_cap: {} }
+    intent: { symbol: APTUSDT, side: Sell, qty: 20.0, current_position_qty: 30.0 }
+    expected_decision: submit
+    expected_reason: live_intent_passthrough
+
+  - case_id: synthetic_39_replay_live
+    source: synthetic_handcrafted
+    description: replay row · INJUSDT shadow=false alt
+    config: { shadow_mode: false, max_position_pct: 0.05, per_symbol_position_cap: {} }
+    intent: { symbol: INJUSDT, side: Buy, qty: 15.0, current_position_qty: 0.0 }
+    expected_decision: submit
+    expected_reason: live_intent_passthrough
+
+  - case_id: synthetic_40_replay_live
+    source: synthetic_handcrafted
+    description: replay row · TIAUSDT shadow=false alt
+    config: { shadow_mode: false, max_position_pct: 0.05, per_symbol_position_cap: {} }
+    intent: { symbol: TIAUSDT, side: Buy, qty: 65.0, current_position_qty: 0.0 }
+    expected_decision: submit
+    expected_reason: live_intent_passthrough
