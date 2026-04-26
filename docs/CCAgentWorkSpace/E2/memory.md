@@ -55,6 +55,7 @@
 | 2026-04-26 | Tier 6 batch review 4 commits (306b549..56104de) — T6.1 Track 1 4 LOW + T6.2 Track 2 H3 schema design + T6.3 Track 3 dust audit design | workspace/reports/2026-04-26--tier6_batch_review.md |
 | 2026-04-26 | Tier 7 batch review 3 commits (4b30f5e/8241133/c6ed0b3) — T7.1 Rust H3 schema align T7.2 healthcheck [21] dust inventory T7.3 PA Phase 3 sub-task split | workspace/reports/2026-04-26--tier7_batch_review.md |
 | 2026-04-26 | Tier 8 batch review 4 commits (8cd257e/cf39415/71faf4c/79a808a) — T8.1 Sub-task 3-1 H2 + T8.2 Sub-task 3-2 H4 silent gap + T8.3 RFC §7.4 amend | workspace/reports/2026-04-26--tier8_batch_review.md |
+| 2026-04-26 | Tier 8 Track 4 supplementary 1-commit review (d1a2252) — Sub-task 3-3 H5 cost_logging / Phase 3 COMPLETE / G3-09 unblock | workspace/reports/2026-04-26--tier8_track4_e2_review.md |
 
 ## 歷史審查關鍵發現（累積記憶）
 
@@ -307,3 +308,10 @@
 - **Track 3 PA push back 5-axis 獨立 SSOT 驗證 100% 站得住腳**：fill_engine.rs:220-243 restore 只 3 scalar counters / V018:30-39 paper_state_checkpoint 4 欄無倉位 / fill_engine.rs:44-75 import_positions 唯一倉位來源 / fill_engine.rs:377 reduce_position 1e-12 threshold (0.1 dust 不刪) / owner_attribution.rs:112 SYNTHETIC_OWNER_LABELS guard (Option C real-strategy flip 真實風險)
 - **Track 2 PA RFC schema mismatch 獨立驗證**：Rust H3RouteStats 7 fields + 0 hot-path consumer + Python 9 keys + cache_size = 10 + StrategistAgent 共用 L2 keys (Option A scope 風險 CONFIRMED)
 - **判定方法論教訓**：(a) sub-agent 主動 pivot 必查 PA prompt vs codebase grep 對照 + 屬「精準 framing」vs「修錯需求」(b) PA push back upstream 必 5 重 SSOT 獨立驗證，不依賴 PA 字面 (c) typed-wrapper guard 必三軸驗（field 是否真暴露 / 既有 fields 是否真有 guard / producer-side clamping 是否替代 wrapper guard）(d) PA workspace report commit 必查同 commit 內 PA memory.md 索引同步
+
+### 2026-04-26 Tier 8 Track 4 supplementary review (d1a2252) — Sub-task 3-3 H5 / Phase 3 COMPLETE — PASS-with-LOW
+- **結論**：Track 4 (`d1a2252`) PASS-with-LOW to E4 (1 LOW T8T4-LOW-1 §九 layer2_cost_tracker.py 930 LOC warning zone +130, headroom 270)
+- **驗證 metric**：Mac pytest **196/196 PASS** (independently re-run by E2: test_layer2 82 + test_h_state_query_handler 52 + test_h_state_invalidator 21 + test_strategist_agent 41); Rust H5CostStats schema 4 fields independently verified at types.rs:167-178 byte-identical
+- **7 PM-prompted adversarial points 全 verified PASS**：(A) 4-field schema parity (B) dual hook race-window safe by daemon-thread fire-and-forget + Rust handler 無 ordering contract + set test (C) cost_tracker SSOT 共享 H2+H5 同 drop by design (D) `with_h5=False` default-off pattern 三 sub-task 一致 (E) metadata drop 不破壞下游因 get_cost_edge_ratio 仍是 SSOT (F) search hook position 在 record_search_cost 末尾 + Sub-task 3-1 H2 contract 保留 (G) `test_all_raise_drops_all_keys_version_zero` rename 5 桶 invariant 升級正確
+- **lockless-read pattern 驗證**：`get_h5_snapshot` 不取 lock，鏈接 `get_cost_edge_ratio` 既有 lockless pattern；docstring 明確記錄契約「writer recalculate_adaptive 在 self._lock 下原子 replace whole self._adaptive reference」（line 588+636 grep verified） — CPython GIL 保證 attribute reference assignment 原子性
+- **判定方法論教訓**：(a) Single-commit Tier review template 適合「Tier batch 後晚到 cross-tier track」76s 時序差場景 (b) Dual invalidate hook 同 callsite 必 set comparison 反映無 ordering contract (c) Hot-path snapshot lockless-read pattern 適用 SSOT 持有 value-object 屬性 + writer 始終原子 replace whole reference 場景 (d) §九 800 warning line 應作 LOC 累積信號開 follow-up `G3-08-PHASE-4-COST-TRACKER-SPLIT` LOW with Strategist split — 不無視避免重演 strategist 1200 hard-cap 直撞教訓 (e) SSOT 共享 + degradation 一致性 by design 不退回，但 test 必顯式驗證共享 drop 路徑 (f) Metadata projection at Python boundary 是設計選擇 trade-off (Rust serde forward-compat 已容忍 unknown key, 但 pre-filter 帶來窄 wire payload + 清晰 schema contract)，design judgment acceptable
