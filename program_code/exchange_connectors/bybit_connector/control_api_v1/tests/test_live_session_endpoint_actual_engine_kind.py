@@ -32,6 +32,7 @@ A3 UX 審計揭發：Live 槽配置為 LiveDemo 但 Rust live 引擎未跑時，
 from __future__ import annotations
 
 import pytest
+from fastapi import HTTPException
 
 from app import live_session_account_routes as account_routes
 from app import live_session_routes as lsr
@@ -199,3 +200,115 @@ def test_phantom_guard_allows_demo_engine_with_configured_mainnet_slot(monkeypat
     # integrity-fail swap based on actual_engine_kind marker on ``status`` payload.
     # 後端守衛不擋（槽已配置）— 前端讀 status payload actual_engine_kind 自行 swap。
     assert account_routes._phantom_view_guard() is None
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# F5-RETURN/Issue-1 (HIGH) — Phantom-view WRITE guard (close-position
+#                            / close-all-positions) raises HTTPException(422)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+def test_phantom_guard_write_blocks_when_engine_not_live_and_slot_unconfigured(monkeypatch):
+    """
+    F5-RETURN/Issue-1 — write guard MUST raise HTTPException(422) when the
+    Live slot is unconfigured AND the engine is not Live. This is the curl-
+    bypass path: client-side guards in tab-live can be circumvented but the
+    server still refuses to drive the IPC → REST-fallback chain.
+
+    F5-RETURN/Issue-1 — Live 槽未配置且引擎非 live 時，write guard 必須拋
+    HTTPException(422)。對應 curl 繞過路徑：前端守衛可被繞過但 server 端拒絕。
+    """
+    monkeypatch.setattr(lsr, "_get_live_engine_kind", lambda: "demo")
+    monkeypatch.setattr(lsr, "_resolve_live_endpoint_label", lambda: "unconfigured")
+    with pytest.raises(HTTPException) as exc_info:
+        account_routes._phantom_view_guard_write()
+    assert exc_info.value.status_code == 422
+    detail = exc_info.value.detail
+    assert isinstance(detail, dict)
+    assert detail["error"] == "live_engine_not_configured"
+    assert detail["actual_engine_kind"] == "demo"
+    assert detail["actual_endpoint"] == "unconfigured"
+    # Bilingual message contains both Chinese and English / 雙語訊息
+    assert "Live engine not running" in detail["message"]
+    assert "Live 引擎未運行" in detail["message"]
+
+
+def test_phantom_guard_write_allows_livedemo_mode(monkeypatch):
+    """
+    F5-RETURN/Issue-1 — LiveDemo (engine=='live' AND endpoint=='live_demo')
+    is a legitimate Live operating mode per CLAUDE.md memory
+    `feedback_live_no_degradation_by_endpoint`. The Live pipeline genuinely
+    runs against api-demo with full Live-grade authorization (5-gate). The
+    write guard MUST NOT block this case — operators must be able to close
+    LiveDemo positions through the GUI.
+
+    F5-RETURN/Issue-1 — LiveDemo 是合法的 Live 運行模式（per memory），write
+    guard 必須放行；operator 必須能透過 GUI 平 LiveDemo 倉位。
+    """
+    monkeypatch.setattr(lsr, "_get_live_engine_kind", lambda: "live")
+    monkeypatch.setattr(lsr, "_resolve_live_endpoint_label", lambda: "live_demo")
+    # No exception raised → guard passes / 未拋例外 → guard 放行
+    assert account_routes._phantom_view_guard_write() is None
+
+
+def test_phantom_guard_write_allows_mainnet_live_engine(monkeypatch):
+    """
+    F5-RETURN/Issue-1 — Mainnet + Live engine is the canonical happy path.
+    Write guard MUST allow it through.
+
+    F5-RETURN/Issue-1 — Mainnet + Live 引擎是 canonical 通路，write guard 放行。
+    """
+    monkeypatch.setattr(lsr, "_get_live_engine_kind", lambda: "live")
+    monkeypatch.setattr(lsr, "_resolve_live_endpoint_label", lambda: "mainnet")
+    assert account_routes._phantom_view_guard_write() is None
+
+
+def test_phantom_guard_write_blocks_paper_engine_unconfigured_slot(monkeypatch):
+    """
+    F5-RETURN/Issue-1 — paper engine + unconfigured slot → block (worst case
+    for accidental demo-position closing if guard absent).
+    """
+    monkeypatch.setattr(lsr, "_get_live_engine_kind", lambda: "paper")
+    monkeypatch.setattr(lsr, "_resolve_live_endpoint_label", lambda: "unconfigured")
+    with pytest.raises(HTTPException) as exc_info:
+        account_routes._phantom_view_guard_write()
+    assert exc_info.value.status_code == 422
+    assert exc_info.value.detail["error"] == "live_engine_not_configured"
+    assert exc_info.value.detail["actual_engine_kind"] == "paper"
+
+
+def test_phantom_guard_write_blocks_unknown_engine_unconfigured_slot(monkeypatch):
+    """
+    F5-RETURN/Issue-1 — engine offline (kind=='unknown') + unconfigured slot →
+    block. The IPC connection would also fail in this case but the guard
+    short-circuits earlier with a cleaner 422 instead of leaking IPC errors.
+
+    F5-RETURN/Issue-1 — 引擎離線（kind=='unknown'）+ 槽未配置 → 擋。IPC 也會
+    失敗但 guard 先一步以更乾淨的 422 拒絕，不洩露 IPC 錯誤細節給呼叫方。
+    """
+    monkeypatch.setattr(lsr, "_get_live_engine_kind", lambda: "unknown")
+    monkeypatch.setattr(lsr, "_resolve_live_endpoint_label", lambda: "unconfigured")
+    with pytest.raises(HTTPException) as exc_info:
+        account_routes._phantom_view_guard_write()
+    assert exc_info.value.status_code == 422
+
+
+def test_phantom_guard_write_allows_demo_engine_mainnet_slot(monkeypatch):
+    """
+    F5-RETURN/Issue-1 — Mainnet slot configured but engine is demo. Per the
+    sibling read guard, this case is NOT blocked: the slot is technically
+    configured so we trust the operator's intent (they configured it for a
+    reason). However on the read side the frontend swaps to integrity-fail
+    view via actual_engine_kind!="live" marker; on the write side the Rust
+    pipeline also won't be live → IPC fail → REST fallback would close the
+    Mainnet position. This is acceptable behaviour per E2 design (the slot
+    is configured, the operator owns the risk). Test pins the guard's exact
+    condition (`engine != live AND endpoint == unconfigured`) — a stronger
+    write guard would be a follow-up if review demands.
+
+    F5-RETURN/Issue-1 — Mainnet 槽配置但引擎跑 demo。本 case guard 不擋（鏡像
+    讀 guard 條件），由 operator 自負風險。若需更嚴 write guard 屬 follow-up。
+    """
+    monkeypatch.setattr(lsr, "_get_live_engine_kind", lambda: "demo")
+    monkeypatch.setattr(lsr, "_resolve_live_endpoint_label", lambda: "mainnet")
+    assert account_routes._phantom_view_guard_write() is None

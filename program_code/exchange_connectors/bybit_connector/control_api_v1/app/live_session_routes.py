@@ -50,7 +50,9 @@ REFACTOR_NOTE (G5-02, 2026-04-24):
 
 import asyncio
 import logging
+import os
 import time
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
@@ -228,8 +230,8 @@ def _resolve_live_endpoint_label() -> str:
       以供 ``_live_response()`` 注入 actual_endpoint 欄位。
     """
     try:
-        import os
-        from pathlib import Path
+        # F5-RETURN (2026-04-26): imports moved to module top per E2 [R1-6] /
+        # F5-RETURN：依 E2 [R1-6] 規則將 import 移至模組頂層
         secrets_base = os.environ.get("OPENCLAW_SECRETS_DIR") or str(
             Path.home() / "BybitOpenClaw" / "secrets" / "secret_files" / "bybit"
         )

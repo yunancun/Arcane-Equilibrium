@@ -890,6 +890,24 @@ function _applyLiveActionGuards() {
   // 「全部平倉」按鈕在 Positions section header（無 id），用 onclick 字串查找。
   document.querySelectorAll('button[onclick="openCloseAllDialog()"]').forEach(b => writeActionBtns.push(b));
 
+  // F5-RETURN/Issue-2 (MEDIUM) — Individual-position close buttons in the
+  // Positions table are dynamically generated via innerHTML with onclick=
+  // "closeLivePosition('${sym}', ...)" (table row template, not held by id).
+  // Without this selector they bypass the action-guard entirely; an operator
+  // who saw the integrity-fail banner could still click a per-row close
+  // button while the engine is not Live → IPC fail → REST fallback uses the
+  // demo client → demo position gets closed. Use prefix-match (^=) because
+  // the onclick string is literally `closeLivePosition('SOLUSDT', '', '')`
+  // with the symbol embedded; substring `closeLivePosition` is unique to
+  // this writer and cannot collide with read paths.
+  // F5-RETURN/Issue-2（MEDIUM）— 個別倉位平倉按鈕由倉位表 row 模板用
+  // innerHTML 動態生成（onclick="closeLivePosition('${sym}', ...)"），無 id；
+  // 無此 selector 則繞過 action-guard：operator 看見 integrity-fail banner
+  // 仍能點 row 平倉按鈕 → IPC 失敗 → REST 降級用 demo client → 誤平 demo 倉位。
+  // 用 prefix-match (^=) 因 onclick 字串為 `closeLivePosition('SOLUSDT',...)`
+  // 含具體 symbol；substring `closeLivePosition` 為此 writer 獨有，無衝突。
+  document.querySelectorAll('button[onclick^="closeLivePosition"]').forEach(b => writeActionBtns.push(b));
+
   writeActionBtns.forEach(btn => {
     if (!btn) return;
     if (!okEngine) {
@@ -1176,6 +1194,16 @@ async function loadDashboardData() {
     if (arr.length === 0) {
       posBody.innerHTML = '<tr><td colspan="10" style="color:var(--text-dim);text-align:center;padding:16px">無持倉 / No positions</td></tr>';
     } else {
+      // F5-RETURN/Issue-2 — `closeLivePosition` row buttons are written via
+      //   innerHTML below; they don't exist when checkLiveEngineStatus() ran
+      //   _applyLiveActionGuards() earlier. Re-apply guards immediately after
+      //   the row template has been produced so prefix-match selector picks
+      //   them up. Without this, dynamic buttons stay enabled even under
+      //   integrity-fail / authority-not-granted state.
+      // F5-RETURN/Issue-2 — `closeLivePosition` row 按鈕由下方 innerHTML 寫入；
+      //   先前 checkLiveEngineStatus 跑 _applyLiveActionGuards 時尚未存在。row
+      //   模板生成後立即重跑 guard，selector 才能命中。否則 dynamic button
+      //   即使在 integrity-fail / authority-not-granted 下仍 enabled。
       posBody.innerHTML = arr.map(p => {
         // Bybit flat format (camelCase) + snake_case fallback
         // Bybit 扁平格式（camelCase）+ snake_case 兼容
@@ -1219,6 +1247,13 @@ async function loadDashboardData() {
           <td><button class="oc-btn oc-btn-danger" style="padding:2px 8px;font-size:10px" data-owner-strategy="${ownerAttr}" data-frozen-reason="${reasonAttr}" onclick="closeLivePosition('${sym}', this.dataset.ownerStrategy, this.dataset.frozenReason)">${btnLabel}</button></td>
         </tr>`;
       }).join('');
+      // F5-RETURN/Issue-2 — re-apply action guards now that row close-buttons
+      //   exist in the DOM. The selector `button[onclick^="closeLivePosition"]`
+      //   added in _applyLiveActionGuards() needs the buttons present, and
+      //   they are produced only after this innerHTML write.
+      // F5-RETURN/Issue-2 — row close-button 進 DOM 後重套 guard。
+      //   _applyLiveActionGuards() 中新增的 selector 只在 button 存在時生效。
+      _applyLiveActionGuards();
       // Net-of-fees identity applied to both Realized and Net PnL:
       //   displayed_realized = cumRealisedPnl_sum - engine_total_fees
       //   displayed_net      = unrealized + displayed_realized
