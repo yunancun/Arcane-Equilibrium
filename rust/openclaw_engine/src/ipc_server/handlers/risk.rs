@@ -98,6 +98,16 @@ pub(in crate::ipc_server) async fn handle_update_risk_config(
     let exit_giveback_base = optional_f64(params, "exit_giveback_base");
     let exit_giveback_slope = optional_f64(params, "exit_giveback_slope");
     let exit_giveback_floor = optional_f64(params, "exit_giveback_floor");
+    // EDGE-P1b-FUP-STALE-PEAK-IPC: dim 5 of EDGE-P1b T1 calibrator
+    //   (`time_since_peak_ms`) → `ExitConfig.stale_peak_ms` (i64 ms in
+    //   schema; wire is u64 ms for parity with `boot_cooldown_ms` /
+    //   `signals_heartbeat_ms`). Closes the pre-FUP asymmetry where this
+    //   field forced calibrator to TOML-edit + reload (PA RFC §2.2).
+    // EDGE-P1b-FUP-STALE-PEAK-IPC：EDGE-P1b T1 calibrator 第 5 維度
+    //   （`time_since_peak_ms`）→ `ExitConfig.stale_peak_ms`（schema 為
+    //   i64 ms；wire 為 u64 ms 對齊 `boot_cooldown_ms`/`signals_heartbeat_ms`）。
+    //   封閉先前需 TOML edit + reload 的不對稱（PA RFC §2.2）。
+    let exit_stale_peak_ms = optional_u64(params, "exit_stale_peak_ms");
 
     // At least one param must be provided / 至少需要一個參數
     let has_any = hard_stop_pct.is_some()
@@ -127,7 +137,8 @@ pub(in crate::ipc_server) async fn handle_update_risk_config(
         || exit_min_peak_atr_norm.is_some()
         || exit_giveback_base.is_some()
         || exit_giveback_slope.is_some()
-        || exit_giveback_floor.is_some();
+        || exit_giveback_floor.is_some()
+        || exit_stale_peak_ms.is_some();
     if !has_any {
         return JsonRpcResponse::error(
             id,
@@ -165,6 +176,7 @@ pub(in crate::ipc_server) async fn handle_update_risk_config(
         exit_giveback_base,
         exit_giveback_slope,
         exit_giveback_floor,
+        exit_stale_peak_ms,
     });
     JsonRpcResponse::success(id, serde_json::json!({ "updated": true }))
 }
@@ -275,20 +287,26 @@ pub(in crate::ipc_server) async fn handle_reset_drawdown_baseline(
 /// hardcoded baseline. Provides an emergency rollback path after a
 /// calibrator bind goes wrong (e.g. percentile drift locking the
 /// pipeline into too-tight thresholds with no operator-friendly path
-/// back). Sends `PipelineCommand::UpdateRiskConfig` with all 7
-/// IPC-writable `exit_*` fields set to `ExitConfig::default()` values;
-/// the consumer-side path is `risk_store.apply_patch()` with
-/// `RiskConfig::validate()` (atomic all-or-nothing — same contract as
-/// any other operator-driven exit hot-reload).
+/// back). Sends `PipelineCommand::UpdateRiskConfig` with all 8
+/// IPC-writable `exit_*` fields set to `ExitConfig::default()` values
+/// (7 percentile-derived fields + `stale_peak_ms` added by
+/// EDGE-P1b-FUP-STALE-PEAK-IPC 2026-04-26); the consumer-side path is
+/// `risk_store.apply_patch()` with `RiskConfig::validate()` (atomic
+/// all-or-nothing — same contract as any other operator-driven exit
+/// hot-reload).
 ///
-/// **Caveat — TOML-only fields**: `stale_peak_ms` and `shadow_enabled`
-/// are not IPC-wired (per `update_risk_config` 7-field shape). Restoring
-/// those requires a TOML edit on `risk_config_<engine>.toml` followed
-/// by a `reload_risk_config` IPC call. The response payload exposes
-/// this via the `toml_only_fields_skipped` array so the operator CLI /
-/// FastAPI route fronting this method can surface the asymmetry.
+/// **Caveat — TOML-only fields**: `shadow_enabled` is not IPC-wired
+/// (binary flag, single-step Phase 1a → Phase 2 decision; not part of
+/// the percentile bind path). Restoring it requires a TOML edit on
+/// `risk_config_<engine>.toml` followed by a `reload_risk_config` IPC
+/// call. The response payload exposes this via the
+/// `toml_only_fields_skipped` array so the operator CLI / FastAPI
+/// route fronting this method can surface the asymmetry. Pre
+/// EDGE-P1b-FUP-STALE-PEAK-IPC, `stale_peak_ms` was also TOML-only —
+/// it is now IPC-wired (dim 5 of EDGE-P1b T1 calibrator) and listed
+/// in `fields_restored`.
 ///
-/// **Why a new IPC method, not just `update_risk_config(7 default values)`**:
+/// **Why a new IPC method, not just `update_risk_config(8 default values)`**:
 /// (a) clarity at audit time (operator intent = "restore", not "patch");
 /// (b) avoids accidental mid-bind cancellation if calibrator is
 /// concurrently emitting a partial patch (this method always sends
@@ -298,18 +316,21 @@ pub(in crate::ipc_server) async fn handle_reset_drawdown_baseline(
 ///
 /// EDGE-P1b T3：將 `ExitConfig` 的 IPC 可寫子集恢復為硬編碼 baseline，提供
 /// calibrator 後緊急回滾路徑（避免百分位漂移將管線鎖在過緊閾值且 operator
-/// 無 friendly 退路）。發送 `PipelineCommand::UpdateRiskConfig`，把 7 個 IPC
-/// 可寫的 `exit_*` 欄位設為 `ExitConfig::default()` 值；consumer 端走
-/// `risk_store.apply_patch()` + `RiskConfig::validate()`（原子全或無契約，
-/// 與其他 operator 驅動的 exit 熱重載一致）。
+/// 無 friendly 退路）。發送 `PipelineCommand::UpdateRiskConfig`，把 8 個 IPC
+/// 可寫的 `exit_*` 欄位設為 `ExitConfig::default()` 值（7 個百分位欄位 +
+/// EDGE-P1b-FUP-STALE-PEAK-IPC 2026-04-26 新增的 `stale_peak_ms`）；
+/// consumer 端走 `risk_store.apply_patch()` + `RiskConfig::validate()`
+/// （原子全或無契約，與其他 operator 驅動的 exit 熱重載一致）。
 ///
-/// 注意（TOML-only 欄位）：`stale_peak_ms` / `shadow_enabled` 不在 IPC
-/// （per `update_risk_config` 7 欄位形狀），其恢復需編輯
+/// 注意（TOML-only 欄位）：`shadow_enabled` 不在 IPC（二元旗標，Phase 1a
+/// → Phase 2 單步決策；非百分位 bind 路徑），其恢復需編輯
 /// `risk_config_<engine>.toml` 並呼叫 `reload_risk_config` IPC；本回應在
 /// `toml_only_fields_skipped` 陣列暴露此差異，讓上游 operator CLI / FastAPI
-/// 路由能告知不對稱性。
+/// 路由能告知不對稱性。EDGE-P1b-FUP-STALE-PEAK-IPC 之前 `stale_peak_ms`
+/// 也屬 TOML-only，現已 IPC wire（EDGE-P1b T1 calibrator 第 5 維度），列在
+/// `fields_restored`。
 ///
-/// 為何另開新 IPC method 而非 `update_risk_config(7 default values)`：
+/// 為何另開新 IPC method 而非 `update_risk_config(8 default values)`：
 ///   (a) audit 時意圖明確（operator = "restore"，非 "patch"）
 ///   (b) 若 calibrator 同時發部分 patch，本 method 一律發完整集合避免半套狀態
 ///   (c) Phase B 自動化可在此 method 包額外 audit hook（按根原則 #8 寫
@@ -329,11 +350,14 @@ pub(in crate::ipc_server) async fn handle_restore_exit_config_defaults(
     // 從 `ExitConfig::default()` 取 baseline，確保 schema 演進時自動同步。
     let baseline = ExitConfig::default();
 
-    // 7 IPC-wired fields → wrapped in Option<f64> for UpdateRiskConfig wire.
-    // The dispatch in `event_consumer/handlers/risk.rs` writes only the
-    // fields wrapped in Some(_), so other risk params remain untouched.
-    // 7 個 IPC 可寫欄位包成 Option<f64>；dispatch 端只寫 Some(_) 包裝者，
-    // 其他風控參數不動。
+    // 8 IPC-wired fields → wrapped in Option<f64>/Option<u64> for
+    // UpdateRiskConfig wire (7 percentile-derived f64 + `stale_peak_ms`
+    // u64 added by EDGE-P1b-FUP-STALE-PEAK-IPC). The dispatch in
+    // `event_consumer/handlers/risk.rs` writes only the fields wrapped
+    // in Some(_), so other risk params remain untouched.
+    // 8 個 IPC 可寫欄位包成 Option<f64>/Option<u64>（7 個百分位 f64 +
+    // EDGE-P1b-FUP-STALE-PEAK-IPC 新增的 `stale_peak_ms` u64）；
+    // dispatch 端只寫 Some(_) 包裝者，其他風控參數不動。
     let exit_missing_edge_fallback_bps = Some(baseline.missing_edge_fallback_bps);
     let exit_min_net_floor_bps = Some(baseline.min_net_floor_bps);
     let exit_min_hold_secs = Some(baseline.min_hold_secs);
@@ -341,6 +365,13 @@ pub(in crate::ipc_server) async fn handle_restore_exit_config_defaults(
     let exit_giveback_base = Some(baseline.giveback_base);
     let exit_giveback_slope = Some(baseline.giveback_slope);
     let exit_giveback_floor = Some(baseline.giveback_floor);
+    // EDGE-P1b-FUP-STALE-PEAK-IPC: schema is `i64 ms` (validate() rejects
+    //   < 0); wire is `u64 ms` for parity with sibling *_ms fields. The
+    //   default is 60_000 ms (well within u64::MAX) so cast is lossless.
+    // EDGE-P1b-FUP-STALE-PEAK-IPC：schema 為 `i64 ms`（validate() 拒 < 0）；
+    //   wire 為 `u64 ms` 對齊同伴 *_ms 欄位。預設 60_000 ms（遠小於 u64::MAX）
+    //   故 cast 無損。
+    let exit_stale_peak_ms = Some(baseline.stale_peak_ms as u64);
 
     // Send a fully-Some `UpdateRiskConfig` with non-exit risk fields all
     // None. This relies on the `has_exit_patch` branch in event_consumer/
@@ -377,6 +408,7 @@ pub(in crate::ipc_server) async fn handle_restore_exit_config_defaults(
         exit_giveback_base,
         exit_giveback_slope,
         exit_giveback_floor,
+        exit_stale_peak_ms,
     }) {
         return JsonRpcResponse::error(id, ERR_INTERNAL, format!("channel send failed: {e}"));
     }
@@ -401,6 +433,7 @@ pub(in crate::ipc_server) async fn handle_restore_exit_config_defaults(
                 "giveback_base",
                 "giveback_slope",
                 "giveback_floor",
+                "stale_peak_ms",
             ],
             "baseline_values": {
                 "missing_edge_fallback_bps": baseline.missing_edge_fallback_bps,
@@ -410,13 +443,17 @@ pub(in crate::ipc_server) async fn handle_restore_exit_config_defaults(
                 "giveback_base": baseline.giveback_base,
                 "giveback_slope": baseline.giveback_slope,
                 "giveback_floor": baseline.giveback_floor,
+                "stale_peak_ms": baseline.stale_peak_ms,
             },
+            // EDGE-P1b-FUP-STALE-PEAK-IPC (2026-04-26): `stale_peak_ms` removed
+            //   from `toml_only_fields_skipped` — now IPC-wired (dim 5 of T1
+            //   calibrator). `shadow_enabled` remains TOML-only as a binary
+            //   Phase 1a → Phase 2 toggle outside the percentile bind path.
+            // EDGE-P1b-FUP-STALE-PEAK-IPC（2026-04-26）：`stale_peak_ms` 從
+            //   `toml_only_fields_skipped` 移除（已 IPC wire，T1 calibrator
+            //   第 5 維度）；`shadow_enabled` 仍為 TOML-only（Phase 1a → Phase
+            //   2 二元旗標，不在百分位 bind 路徑內）。
             "toml_only_fields_skipped": [
-                {
-                    "field": "stale_peak_ms",
-                    "baseline_value": baseline.stale_peak_ms,
-                    "reason": "not in update_risk_config IPC; edit risk_config_<engine>.toml + reload_risk_config",
-                },
                 {
                     "field": "shadow_enabled",
                     "baseline_value": baseline.shadow_enabled,
@@ -482,10 +519,16 @@ mod restore_exit_config_defaults_tests {
         let fields_restored = result
             .get("fields_restored")
             .expect("fields_restored must be in response");
+        // EDGE-P1b-FUP-STALE-PEAK-IPC (2026-04-26): bumped from 7 → 8 after
+        //   `stale_peak_ms` (dim 5 of EDGE-P1b T1 calibrator) graduated from
+        //   TOML-only to IPC-wired.
+        // EDGE-P1b-FUP-STALE-PEAK-IPC（2026-04-26）：`stale_peak_ms`
+        //   （EDGE-P1b T1 calibrator 第 5 維度）從 TOML-only 升為 IPC wire 後，
+        //   由 7 → 8。
         assert_eq!(
             fields_restored.as_array().map(|a| a.len()),
-            Some(7),
-            "must restore exactly 7 IPC-wired fields"
+            Some(8),
+            "must restore exactly 8 IPC-wired fields (7 percentile + stale_peak_ms)"
         );
 
         // Capture and inspect the actual UpdateRiskConfig sent.
@@ -503,12 +546,13 @@ mod restore_exit_config_defaults_tests {
                 exit_giveback_base,
                 exit_giveback_slope,
                 exit_giveback_floor,
+                exit_stale_peak_ms,
                 hard_stop_pct,
                 trailing_stop_pct,
                 ..
             } => {
-                // 7 exit fields must be Some(baseline_value) — bit-exact.
-                // 7 個 exit 欄位必為 Some(baseline)；逐位元比對。
+                // 8 exit fields must be Some(baseline_value) — bit-exact.
+                // 8 個 exit 欄位必為 Some(baseline)；逐位元比對。
                 assert_eq!(
                     exit_missing_edge_fallback_bps,
                     Some(baseline.missing_edge_fallback_bps)
@@ -519,6 +563,15 @@ mod restore_exit_config_defaults_tests {
                 assert_eq!(exit_giveback_base, Some(baseline.giveback_base));
                 assert_eq!(exit_giveback_slope, Some(baseline.giveback_slope));
                 assert_eq!(exit_giveback_floor, Some(baseline.giveback_floor));
+                // EDGE-P1b-FUP-STALE-PEAK-IPC: schema is `i64 ms`; wire is
+                //   `u64 ms` so cast back to i64 for the bit-exact compare.
+                // EDGE-P1b-FUP-STALE-PEAK-IPC：schema 為 `i64 ms`；wire 為
+                //   `u64 ms`，故 cast 回 i64 後逐位元比對。
+                assert_eq!(
+                    exit_stale_peak_ms,
+                    Some(baseline.stale_peak_ms as u64),
+                    "stale_peak_ms must be restored to schema i64 baseline cast as u64"
+                );
 
                 // Non-exit fields must be None (no spillover into other
                 // risk subsystems).
@@ -535,10 +588,16 @@ mod restore_exit_config_defaults_tests {
             .get("toml_only_fields_skipped")
             .and_then(|v| v.as_array())
             .expect("toml_only_fields_skipped must be a JSON array");
+        // EDGE-P1b-FUP-STALE-PEAK-IPC (2026-04-26): bumped from 2 → 1 after
+        //   `stale_peak_ms` graduated to IPC-wired; only `shadow_enabled`
+        //   remains TOML-only (binary Phase 1a/2 toggle).
+        // EDGE-P1b-FUP-STALE-PEAK-IPC（2026-04-26）：`stale_peak_ms` 升為 IPC
+        //   wire 後從 2 → 1，僅 `shadow_enabled` 仍為 TOML-only（Phase 1a/2
+        //   二元旗標）。
         assert_eq!(
             toml_skipped.len(),
-            2,
-            "must surface stale_peak_ms + shadow_enabled as skipped"
+            1,
+            "must surface only shadow_enabled as TOML-only skipped"
         );
 
         assert_eq!(resp.id, serde_json::json!(20001));

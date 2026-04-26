@@ -304,6 +304,27 @@ pub enum PipelineCommand {
         exit_giveback_base: Option<f64>,
         exit_giveback_slope: Option<f64>,
         exit_giveback_floor: Option<f64>,
+        // EDGE-P1b-FUP-STALE-PEAK-IPC (2026-04-26): EDGE-P1b T1 calibrator
+        //   computes 7 dimensions but the prior IPC schema only wired 6 ×
+        //   `exit_*` percentile fields above. Dim 5 (`time_since_peak_ms`)
+        //   maps to `ExitConfig.stale_peak_ms` (i64 ms) and was left as
+        //   TOML-only, forcing the calibrator to fall back to TOML-edit +
+        //   `reload_risk_config` for any percentile-driven bind — violating
+        //   PA RFC §2.2 «IPC patch path» design intent. This field closes
+        //   the asymmetry. `u64` chosen to mirror existing `*_ms`
+        //   companions (`boot_cooldown_ms`, `signals_heartbeat_ms`); the
+        //   consumer-side dispatch casts to `i64` (validate() rejects
+        //   negative) so any reasonable ms value is round-trip safe.
+        // EDGE-P1b-FUP-STALE-PEAK-IPC（2026-04-26）：EDGE-P1b T1 calibrator
+        //   計算 7 維度，但先前 IPC schema 僅 wire 上方 6 個 `exit_*` 百分位
+        //   欄位。維度 5（`time_since_peak_ms`）對應 `ExitConfig.stale_peak_ms`
+        //   （i64 ms），原為 TOML-only，導致 calibrator 任何百分位 bind 都
+        //   退回 TOML edit + `reload_risk_config` 路徑，違反 PA RFC §2.2
+        //   「IPC patch path」設計意圖。本欄位封閉此不對稱。型別選 `u64`
+        //   對齊既有 `*_ms` 同伴（`boot_cooldown_ms`/`signals_heartbeat_ms`）；
+        //   consumer 端 dispatch cast 為 `i64`（validate() 拒負值），任何
+        //   合理 ms 值皆可安全 round-trip。
+        exit_stale_peak_ms: Option<u64>,
     },
     /// ARCH-RC1 1C-3-B: Get Rust-native risk runtime status snapshot.
     /// Returns JSON: `{governor_tier, consecutive_losses_by_symbol, boot_cooldown_remaining_ms,

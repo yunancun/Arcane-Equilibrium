@@ -191,6 +191,13 @@ pub fn handle_paper_command(
             exit_giveback_base,
             exit_giveback_slope,
             exit_giveback_floor,
+            // EDGE-P1b-FUP-STALE-PEAK-IPC (2026-04-26): destructure dim 5
+            //   of EDGE-P1b T1 calibrator added by this FUP; forwarded to
+            //   handle_update_risk_config below.
+            // EDGE-P1b-FUP-STALE-PEAK-IPC（2026-04-26）：解構本 FUP 新加的
+            //   EDGE-P1b T1 calibrator 第 5 維度，forward 給下方
+            //   handle_update_risk_config。
+            exit_stale_peak_ms,
         } => risk::handle_update_risk_config(
             hard_stop_pct,
             trailing_stop_pct,
@@ -220,6 +227,11 @@ pub fn handle_paper_command(
             exit_giveback_base,
             exit_giveback_slope,
             exit_giveback_floor,
+            // EDGE-P1b-FUP-STALE-PEAK-IPC: pass through u64 ms wire to
+            //   handle_update_risk_config (cast to i64 inside closure).
+            // EDGE-P1b-FUP-STALE-PEAK-IPC：把 u64 ms wire 傳給
+            //   handle_update_risk_config（closure 內 cast 為 i64）。
+            exit_stale_peak_ms,
             pipeline,
             snapshot_writer,
         ),
