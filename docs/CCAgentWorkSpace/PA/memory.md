@@ -471,3 +471,21 @@ A push（pure push）/ B pull（pure pull）對比 A IPC 量 5000/min 爆炸 + P
 | 2026-04-26 | G3-08 H1-H5 → Rust IPC Gateway 設計（推 Option C 混合模型，4 phase wall-clock ~13.5d）| workspace/reports/2026-04-26--g3_08_h1_h5_ipc_gateway_design.md |
 
 ---
+
+## 2026-04-26 Tier 6 Track 2 — G3-08 H3 schema align A/B/C 決策
+
+- 觸發：E2 Tier 5 batch review T5.3-MED-1（H3 Python 10 keys vs Rust H3RouteStats 7 fields 0/7 對齊；Phase 3 接 real fetcher 前必修，silent regression 隱形地雷）
+- 報告：`workspace/reports/2026-04-26--g3_08_h3_schema_align_decision.md`
+- Recommend **Option B（Rust rename 對齊 Python + 加 3 缺欄）**：~25 LOC Rust 內部 vs A 的 ~50 LOC Python+test+GUI break vs C 的永久雙詞彙負債；Python 是 SSOT、Rust H3RouteStats 0 hot-path consumer 是黃金時間窗
+- 下次 session E1 ready-to-deploy（§7 prompt template + §8 Phase 3 dependency check）
+- Phase 3 unblock path：yes（H3 align 完即可派 H2/H4/H5 + RealHStateFetcher + Rust hot-path consumer 一波 ~3.5d）
+
+---
+
+## 2026-04-26 Tier 6 Track 3 — PAPER-STATE-DUST-RESTORE-AUDIT design
+
+推 **Option B**（保持現狀 + 加 healthcheck [19]）— restore_from_db 只還原 counter 不重建倉位；STRKUSDT dust 不來自 restore 是 runtime partial close 殘留；EXIT-FEATURES-FIX A1 fast_track Gate 1 USD floor 已從消費端徹底防 spiral；A 直 evict / C flip owner 對 live user 真實小單有誤刪/誤卡風險（cross-env hard fail）。Healthcheck [19] one-liner SQL：`SELECT COUNT(*) FILTER (WHERE realized_pnl=0) FROM trading.fills WHERE strategy_name LIKE 'risk_close:fast_track%' AND ts > now() - interval '1 hour' AND engine_mode IN ('demo','live','live_demo')` — 0 = PASS / 1-10 = WARN / >10 OR distinct_dust_symbols ≥3 = FAIL。
+
+報告：`workspace/reports/2026-04-26--paper_state_dust_restore_audit.md`
+
+---
