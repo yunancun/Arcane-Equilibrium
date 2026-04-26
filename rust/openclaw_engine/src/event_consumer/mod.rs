@@ -18,6 +18,11 @@ mod setup;
 #[cfg(test)]
 mod tests;
 mod types;
+// F4-RETURN Issue 1 (2026-04-26): split out of loop_handlers.rs to keep that
+// file under §九 1200-line hard ceiling.
+// F4-RETURN Issue 1（2026-04-26）：從 loop_handlers.rs 抽出，使其維持在
+// §九 1200 行硬上限以下。
+mod unattributed_emit;
 
 use types::STATUS_INTERVAL_SECS;
 pub use types::{EventConsumerDeps, ExchangeEvent, PendingOrder, SYMBOLS};
@@ -110,6 +115,9 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
 
             // ── EXT-1: Exchange events (fills/order updates) from ExecutionListener (Arm C) ──
             // ── EXT-1：來自執行監聽器的交易所事件（成交/訂單更新）（Arm C）──
+            // F4-RETURN Issue 2 (2026-04-26): handle_exchange_event is async —
+            // back-pressure for F4-1 audit emit. arm body is async context.
+            // F4-RETURN Issue 2（2026-04-26）：handle_exchange_event 改 async（背壓）。
             exchange_evt = async {
                 if let Some(ref mut rx) = exchange_event_rx { rx.recv().await } else { std::future::pending().await }
             } => {
@@ -119,7 +127,7 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
                     &mut snapshot_writer,
                     &mut state,
                     order_tx.as_ref(),
-                );
+                ).await;
             },
 
             // ── EXT-1: Pending order registration from dispatch task (Arm D) ──

@@ -84,8 +84,8 @@ fn test_engine_mode_filter_rejects_unknown() {
 // try_emit_unattributed_fill: positive cases / 正向測試
 // ─────────────────────────────────────────────────────────────────────────
 
-#[test]
-fn test_emit_for_live_engine_mode_writes_audit_row() {
+#[tokio::test]
+async fn test_emit_for_live_engine_mode_writes_audit_row() {
     let (tx, mut rx) = make_chan();
     let emitted = try_emit_unattributed_fill(
         "live",
@@ -98,7 +98,7 @@ fn test_emit_for_live_engine_mode_writes_audit_row() {
         2_500.0,
         -0.001,
         Some(&tx),
-    );
+    ).await;
     assert!(emitted, "live should emit audit row");
     let msg = rx.try_recv().expect("audit row queued to writer channel");
     match msg {
@@ -147,8 +147,8 @@ fn test_emit_for_live_engine_mode_writes_audit_row() {
     }
 }
 
-#[test]
-fn test_emit_for_live_demo_engine_mode_writes_audit_row() {
+#[tokio::test]
+async fn test_emit_for_live_demo_engine_mode_writes_audit_row() {
     let (tx, mut rx) = make_chan();
     let emitted = try_emit_unattributed_fill(
         "live_demo",
@@ -161,7 +161,7 @@ fn test_emit_for_live_demo_engine_mode_writes_audit_row() {
         0.085,
         0.0001,
         Some(&tx),
-    );
+    ).await;
     assert!(emitted, "live_demo should emit audit row");
     let msg = rx.try_recv().expect("audit row queued");
     if let crate::database::TradingMsg::Fill {
@@ -179,8 +179,8 @@ fn test_emit_for_live_demo_engine_mode_writes_audit_row() {
     }
 }
 
-#[test]
-fn test_emit_for_demo_engine_mode_writes_audit_row() {
+#[tokio::test]
+async fn test_emit_for_demo_engine_mode_writes_audit_row() {
     let (tx, mut rx) = make_chan();
     let emitted = try_emit_unattributed_fill(
         "demo",
@@ -193,7 +193,7 @@ fn test_emit_for_demo_engine_mode_writes_audit_row() {
         100.0,
         0.0055,
         Some(&tx),
-    );
+    ).await;
     assert!(emitted, "demo should emit audit row");
     let msg = rx.try_recv().expect("audit row queued");
     if let crate::database::TradingMsg::Fill {
@@ -210,8 +210,8 @@ fn test_emit_for_demo_engine_mode_writes_audit_row() {
 // try_emit_unattributed_fill: negative cases / 反向測試
 // ─────────────────────────────────────────────────────────────────────────
 
-#[test]
-fn test_no_emit_for_paper_engine_mode() {
+#[tokio::test]
+async fn test_no_emit_for_paper_engine_mode() {
     // Paper has no real WS. emit must be skipped even when channel is wired.
     // Paper 無真 WS。即使通道已接，仍必須跳過。
     let (tx, mut rx) = make_chan();
@@ -226,7 +226,7 @@ fn test_no_emit_for_paper_engine_mode() {
         50_000.0,
         0.0275,
         Some(&tx),
-    );
+    ).await;
     assert!(!emitted, "paper must NOT emit audit row");
     assert!(
         rx.try_recv().is_err(),
@@ -234,8 +234,8 @@ fn test_no_emit_for_paper_engine_mode() {
     );
 }
 
-#[test]
-fn test_no_emit_for_live_testnet_engine_mode() {
+#[tokio::test]
+async fn test_no_emit_for_live_testnet_engine_mode() {
     let (tx, mut rx) = make_chan();
     let emitted = try_emit_unattributed_fill(
         "live_testnet",
@@ -248,13 +248,13 @@ fn test_no_emit_for_live_testnet_engine_mode() {
         50_000.0,
         0.0275,
         Some(&tx),
-    );
+    ).await;
     assert!(!emitted, "live_testnet must NOT emit audit row");
     assert!(rx.try_recv().is_err());
 }
 
-#[test]
-fn test_no_emit_when_order_tx_is_none() {
+#[tokio::test]
+async fn test_no_emit_when_order_tx_is_none() {
     // None tx (test fixture / writer disabled) → fail-soft no-op.
     // None tx（測試 fixture / writer 停用）→ fail-soft no-op。
     let emitted = try_emit_unattributed_fill(
@@ -268,12 +268,12 @@ fn test_no_emit_when_order_tx_is_none() {
         2_500.0,
         0.0,
         None,
-    );
+    ).await;
     assert!(!emitted, "None tx → returns false (fail-soft)");
 }
 
-#[test]
-fn test_emit_idempotent_via_fill_id_prefix() {
+#[tokio::test]
+async fn test_emit_idempotent_via_fill_id_prefix() {
     // Two emits with same exec_id → both produce identical fill_id, both reach
     // the channel (PK conflict resolution handled at DB layer via ON CONFLICT
     // (fill_id, ts) DO NOTHING — see trading_writer.rs:332).
@@ -291,7 +291,7 @@ fn test_emit_idempotent_via_fill_id_prefix() {
         50_000.0,
         0.0,
         Some(&tx),
-    );
+    ).await;
     let emit2 = try_emit_unattributed_fill(
         "live",
         "exec-DUP",
@@ -303,7 +303,7 @@ fn test_emit_idempotent_via_fill_id_prefix() {
         50_000.0,
         0.0,
         Some(&tx),
-    );
+    ).await;
     assert!(emit1 && emit2, "both emits should succeed (channel not full)");
     let m1 = rx.try_recv().expect("first row");
     let m2 = rx.try_recv().expect("second row");
@@ -319,15 +319,28 @@ fn test_emit_idempotent_via_fill_id_prefix() {
     assert_eq!(id1, "unattrib-exec-DUP");
 }
 
-#[test]
-fn test_emit_when_channel_full_returns_false() {
-    // try_send fail-soft on saturation. Build a 1-cap channel, fill once, try
-    // again → second call returns false. Real production reconnect → re-emit
-    // covers the dropped row eventually.
-    // 通道飽和時 try_send fail-soft。建容量 1 通道，先填滿，第二次回傳 false。
-    // 生產環境 WS 重連會重發補齊。
-    let (tx, _rx_keep_open) = tokio::sync::mpsc::channel::<crate::database::TradingMsg>(1);
-    // Fill the only slot:
+#[tokio::test]
+async fn test_emit_back_pressure_blocks_then_succeeds_when_drained() {
+    // F4-RETURN Issue 2 (2026-04-26): semantics changed from try_send fail-soft
+    // to send().await back-pressure. Test design:
+    //   1. First emit fills the only channel slot.
+    //   2. Run two concurrent futures via tokio::join!:
+    //      (a) the second emit (which will block waiting for slot)
+    //      (b) a delayed drainer that frees the slot after 20ms
+    //      The emit must complete only after the drainer ran (proves blocking).
+    //   3. Wrap (2) in tokio::time::timeout(200ms) to fail-fast on regression
+    //      that silently drops the row (would return immediately not blocked).
+    //   4. Hold rx until end-of-test so channel never closes mid-test.
+    // F4-RETURN Issue 2（2026-04-26）：語意從 try_send fail-soft 變為
+    // send().await 背壓。設計：
+    //   1. 首發填滿唯一 slot。
+    //   2. tokio::join! 同時跑 (a) 第二發（會阻塞）+ (b) 20ms 後 drain。
+    //      第二發必須在 drainer 跑完後才完成（證明真阻塞）。
+    //   3. 200ms timeout fail-fast 防 regression 退回 silent drop。
+    //   4. rx 保留到測試末端，避免中途 channel 關閉。
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<crate::database::TradingMsg>(1);
+
+    // (1) Fill the only slot.
     let r1 = try_emit_unattributed_fill(
         "live",
         "exec-SAT-1",
@@ -339,25 +352,78 @@ fn test_emit_when_channel_full_returns_false() {
         50_000.0,
         0.0,
         Some(&tx),
-    );
+    )
+    .await;
     assert!(r1, "first emit fits");
-    let r2 = try_emit_unattributed_fill(
+
+    // (2) Race blocking emit against a delayed drain.
+    let drain_start = std::time::Instant::now();
+    let result = tokio::time::timeout(
+        std::time::Duration::from_millis(200),
+        async {
+            let drainer = async {
+                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+                let _ = rx.recv().await;
+            };
+            let emit = try_emit_unattributed_fill(
+                "live",
+                "exec-SAT-2",
+                1_700_000_007_001,
+                "ord-S2",
+                "BTCUSDT",
+                "Buy",
+                0.001,
+                50_000.0,
+                0.0,
+                Some(&tx),
+            );
+            let (_, r2) = tokio::join!(drainer, emit);
+            r2
+        },
+    )
+    .await
+    .expect("emit completes within 200ms after drain (back-pressure path)");
+    let elapsed = drain_start.elapsed();
+
+    assert!(result, "second emit succeeds after drain");
+    // Sanity check: emit must have waited at least ~15ms (drainer slept 20ms);
+    // if it returned immediately we'd be back to silent-drop semantics.
+    // Allow generous slack (15ms) for tokio scheduler jitter.
+    // 健全性：emit 必須至少等 ~15ms（drainer 睡 20ms）；若立即返回即 regression。
+    assert!(
+        elapsed >= std::time::Duration::from_millis(15),
+        "emit must have blocked while channel was full (elapsed={:?})",
+        elapsed
+    );
+}
+
+#[tokio::test]
+async fn test_emit_returns_false_when_channel_closed() {
+    // F4-RETURN Issue 2 (2026-04-26): when the receiver is dropped (channel
+    // closed), send().await returns Err and emit returns false. This is the
+    // graceful shutdown / never-spawned-writer case.
+    // F4-RETURN Issue 2（2026-04-26）：receiver 被 drop（通道關閉）時，
+    // send().await 回 Err，emit 回 false。涵蓋優雅關閉 / writer 未啟動情境。
+    let (tx, rx) = tokio::sync::mpsc::channel::<crate::database::TradingMsg>(1);
+    drop(rx); // close the channel
+    let r = try_emit_unattributed_fill(
         "live",
-        "exec-SAT-2",
-        1_700_000_007_001,
-        "ord-S2",
+        "exec-CLOSED",
+        1_700_000_007_500,
+        "ord-CLOSED",
         "BTCUSDT",
         "Buy",
         0.001,
         50_000.0,
         0.0,
         Some(&tx),
-    );
-    assert!(!r2, "second emit fails fail-soft (channel full)");
+    )
+    .await;
+    assert!(!r, "closed channel → false (not silent panic)");
 }
 
-#[test]
-fn test_emit_strategy_name_matches_ml_filter_prefix() {
+#[tokio::test]
+async fn test_emit_strategy_name_matches_ml_filter_prefix() {
     // ML pipeline filter is `WHERE strategy_name NOT LIKE 'unattributed:%'`.
     // Our string must begin with that prefix or the filter misses these rows
     // and they pollute training data.
@@ -375,7 +441,7 @@ fn test_emit_strategy_name_matches_ml_filter_prefix() {
         50_000.0,
         0.0,
         Some(&tx),
-    );
+    ).await;
     if let Some(crate::database::TradingMsg::Fill { strategy_name, .. }) = rx.try_recv().ok() {
         assert!(
             strategy_name.starts_with("unattributed:"),
