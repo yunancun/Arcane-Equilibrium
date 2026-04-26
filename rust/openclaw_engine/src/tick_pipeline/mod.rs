@@ -581,6 +581,17 @@ pub enum PipelineCommand {
         enabled: bool,
         response_tx: tokio::sync::oneshot::Sender<Result<String, String>>,
     },
+    /// PH5-WIRE-1 RELOAD (F6, 2026-04-26): re-load on-disk edge estimates
+    /// snapshot for this pipeline's mode and inject into IntentProcessor.
+    /// Fire-and-forget — no `response_tx`. Reload daemon
+    /// (`spawn_edge_estimates_reloader_if_enabled`) and `reload_edge_estimates`
+    /// IPC method both fan out this variant; each engine reads its own
+    /// mode-specific JSON. Mode isolation structurally enforced.
+    /// Fail-soft on empty / corrupt — engine retains prior snapshot.
+    /// PH5-WIRE-1 RELOAD（F6，2026-04-26）：重載本管線模式對應 edge estimates
+    /// 快照並注入 IntentProcessor。Fire-and-forget — 無 response_tx。
+    /// Mode 隔離結構性保證；空 / 損毀走 fail-soft 保留前份。
+    ReloadEdgeEstimates,
 }
 
 /// Server-side stop request dispatched from tick_pipeline to Bybit API (Item 1).

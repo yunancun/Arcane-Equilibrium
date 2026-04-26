@@ -65,6 +65,11 @@ pub(crate) async fn dispatch_request(
     live_auth_recheck_tx: &Option<tokio::sync::mpsc::Sender<()>>,
     h_state_cache: &HStateCacheSlot,
     h_state_invalidation_tx: &Option<InvalidationSender>,
+    // F6 PH5-WIRE-1 RELOAD (2026-04-26): manual reload trigger sender.
+    // None → IPC method `reload_edge_estimates` returns
+    // `{"accepted": false, "reason": "reloader_disabled"}`.
+    // F6：edge 重載手動 trigger sender。None 時 IPC method 回 reloader_disabled。
+    edge_reload_sender: &Option<tokio::sync::mpsc::Sender<()>>,
 ) -> JsonRpcResponse {
     let req: JsonRpcRequest = match serde_json::from_str(line) {
         Ok(r) => r,
@@ -398,6 +403,18 @@ pub(crate) async fn dispatch_request(
         "trigger_live_auth_recheck" => {
             handle_trigger_live_auth_recheck(id, live_auth_recheck_tx)
         }
+        // ── F6 PH5-WIRE-1 RELOAD (2026-04-26) ──
+        // Manual edge estimates reload trigger. Advisory fire-and-forget —
+        // never returns JSON-RPC error; reports state via accepted/reason
+        // payload (mirrors trigger_live_auth_recheck shape). Periodic 1h
+        // daemon (env-gated) keeps reloading regardless.
+        // F6 PH5-WIRE-1 RELOAD：手動觸發 edge 估計重載。Advisory fire-and-forget —
+        // 絕不回 JSON-RPC error，以 accepted / reason payload 表達狀態
+        // （對齊 trigger_live_auth_recheck shape）。週期 1h daemon（env-gated）
+        // 不論手動觸發是否抵達都繼續運行。
+        "reload_edge_estimates" => {
+            handle_reload_edge_estimates(id, edge_reload_sender)
+        }
         // ── G3-08 H State Gateway Phase 1 (2026-04-26) ──
         // Three reverse-IPC methods backed by `h_state_cache::HStateCache`,
         // gated by `OPENCLAW_H_STATE_GATEWAY=1` (DEFAULT-OFF). When the
@@ -519,6 +536,75 @@ fn handle_trigger_live_auth_recheck(
             serde_json::json!({
                 "accepted": false,
                 "reason": "watcher_closed"
+            }),
+        ),
+    }
+}
+
+/// F6 PH5-WIRE-1 RELOAD (2026-04-26): manual fast-path wake-up to the
+/// edge estimates reloader daemon.
+///
+/// Operator GUI / Python `edge_estimator_scheduler` post-write hook calls
+/// this method fire-and-forget after refreshing
+/// `settings/edge_estimates*.json` so engine reloads in <1s rather than
+/// waiting up to 1h for the periodic interval tick.
+///
+/// Response shape (JSON object):
+///   * `{"accepted": true}` — wake-up accepted (daemon will fan out
+///     `PipelineCommand::ReloadEdgeEstimates` to all bound pipelines)
+///   * `{"accepted": false, "reason": "coalesced"}` — pending trigger
+///     already queued in buffer-1 channel; existing wake-up will reload
+///   * `{"accepted": false, "reason": "reloader_closed"}` — daemon
+///     dropped its receiver (engine shutting down or daemon panicked)
+///   * `{"accepted": false, "reason": "reloader_disabled"}` — engine
+///     started without `OPENCLAW_EDGE_RELOAD=1` (DEFAULT-OFF) or no
+///     pipeline cmd_tx was bound at spawn time
+///
+/// Never returns a JSON-RPC error: this is advisory. Periodic 1h tick
+/// still converges regardless. Mirrors `handle_trigger_live_auth_recheck`
+/// shape (PIPELINE-SLOT-1 Phase 3).
+///
+/// F6 PH5-WIRE-1 RELOAD：edge 估計 reloader daemon 手動快路徑喚醒。
+///
+/// 回應（JSON object）：
+///   * `{"accepted": true}` — 喚醒已接受
+///   * `{"accepted": false, "reason": "coalesced"}` — buffer-1 已有排隊 trigger
+///   * `{"accepted": false, "reason": "reloader_closed"}` — daemon 已 drop receiver
+///   * `{"accepted": false, "reason": "reloader_disabled"}` — env=0 或 daemon 未 spawn
+///
+/// 絕不回 JSON-RPC error：advisory，週期 1h tick 不論手動 trigger 抵達都收斂。
+fn handle_reload_edge_estimates(
+    id: serde_json::Value,
+    edge_reload_sender: &Option<tokio::sync::mpsc::Sender<()>>,
+) -> JsonRpcResponse {
+    let Some(tx) = edge_reload_sender else {
+        return JsonRpcResponse::success(
+            id,
+            serde_json::json!({
+                "accepted": false,
+                "reason": "reloader_disabled"
+            }),
+        );
+    };
+    match tx.try_send(()) {
+        Ok(()) => JsonRpcResponse::success(
+            id,
+            serde_json::json!({
+                "accepted": true
+            }),
+        ),
+        Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => JsonRpcResponse::success(
+            id,
+            serde_json::json!({
+                "accepted": false,
+                "reason": "coalesced"
+            }),
+        ),
+        Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => JsonRpcResponse::success(
+            id,
+            serde_json::json!({
+                "accepted": false,
+                "reason": "reloader_closed"
             }),
         ),
     }

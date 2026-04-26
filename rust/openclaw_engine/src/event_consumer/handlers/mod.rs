@@ -22,6 +22,7 @@ use crate::persistence::DualStateWriter;
 use crate::tick_pipeline::{PipelineCommand, TickPipeline};
 use std::collections::HashMap;
 
+pub(crate) mod edge_estimates;
 pub(crate) mod edge_predictor;
 mod lifecycle;
 mod risk;
@@ -383,6 +384,14 @@ pub fn handle_paper_command(
             enabled,
             response_tx,
         } => risk::handle_set_dynamic_risk_enabled(enabled, response_tx, pipeline),
+        // ── F6 PH5-WIRE-1 RELOAD (2026-04-26): re-load edge estimates ──
+        // Fire-and-forget; loader is mode-aware (paper / demo / live each read
+        // their own JSON), fail-soft on missing/corrupt, no engine fail-close.
+        // Fire-and-forget；loader 依模式讀對應 JSON，缺失/損毀走 fail-soft，
+        // 引擎絕不 fail-close。
+        PipelineCommand::ReloadEdgeEstimates => {
+            let _ = edge_estimates::handle_reload_edge_estimates(pipeline);
+        }
     }
 }
 

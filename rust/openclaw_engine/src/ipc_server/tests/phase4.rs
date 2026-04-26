@@ -27,6 +27,7 @@ async fn test_get_phase4_status_returns_grey_initial() {
         &None,
         &empty_h_state_cache_slot(),
         &None,
+        &None,
     )
     .await;
     assert!(resp.error.is_none(), "phase4 status must succeed");
@@ -59,6 +60,7 @@ async fn test_get_phase4_status_response_schema() {
         &None,
         &None,
         &empty_h_state_cache_slot(),
+        &None,
         &None,
     )
     .await;
@@ -100,6 +102,7 @@ async fn test_dispatch_phase4_status() {
         &None,
         &None,
         &empty_h_state_cache_slot(),
+        &None,
         &None,
     )
     .await;

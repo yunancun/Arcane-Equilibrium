@@ -117,3 +117,25 @@ pub type StrategistCountersSlot =
 ///   Python 為 SSOT、Rust pull；G3-03 反之。完整設計詳
 ///   `h_state_cache::HStateCache` docstring。
 pub type HStateCacheSlot = Arc<RwLock<Option<Arc<crate::h_state_cache::HStateCache>>>>;
+
+/// F6 PH5-WIRE-1 RELOAD (2026-04-26): late-injected slot for the edge
+/// estimates reloader's manual-trigger sender. Wraps a buffer-1
+/// `tokio::sync::mpsc::Sender<()>` so multiple rapid IPC `reload_edge_estimates`
+/// requests coalesce into a single fan-out.
+///
+/// MODULE_NOTE (EN): The reloader daemon spawns AFTER the IPC server detaches
+///   (because all three pipeline `cmd_tx` must already exist for fan-out).
+///   Slot pattern allows main.rs to late-inject the sender without restarting
+///   IPC. The `reload_edge_estimates` IPC handler reads this slot per
+///   connection (cheap Arc clone), reports `reloader_disabled` when None
+///   (env=0 or no pipelines bound) and `accepted` / `coalesced` /
+///   `reloader_closed` when set — same advisory shape as
+///   `trigger_live_auth_recheck` (PIPELINE-SLOT-1 Phase 3).
+///
+/// MODULE_NOTE (中)：reloader daemon 在 IPC server detach 後 spawn（因為三條
+///   pipeline cmd_tx 必須先就緒）。Slot pattern 讓 main.rs 不擾動運行中
+///   IPC server 也能 late-inject sender。`reload_edge_estimates` IPC handler
+///   每連線讀此 slot，None 時（env=0 或無 pipeline 綁定）回 `reloader_disabled`，
+///   有值時依 `try_send` 結果回 `accepted` / `coalesced` / `reloader_closed`，
+///   對齊 `trigger_live_auth_recheck`（PIPELINE-SLOT-1 Phase 3）advisory shape。
+pub type EdgeReloadSenderSlot = Arc<RwLock<Option<tokio::sync::mpsc::Sender<()>>>>;
