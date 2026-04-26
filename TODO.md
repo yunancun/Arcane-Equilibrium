@@ -23,9 +23,9 @@
 
 **Next session ROI 排序**（PM Tier 6 §7 推薦）：
 1. **G3-08-PHASE-2-FUP-H3-SCHEMA-ALIGN E1 impl**（P1，~1.5h，per PA prompt template）— Rust H3RouteStats rename，解阻 Phase 3
-2. **PAPER-STATE-DUST-INVENTORY-MONITOR**（P3，~1h，PA Track 3 §7.4 ready-to-deploy SQL）
+2. ~~**PAPER-STATE-DUST-INVENTORY-MONITOR**~~ ✅ 完成 2026-04-26（Tier 7 Track 2，per PA Track 3 §7.4 ready-to-deploy SQL，supersedes MICRO-PROFIT-FIX-1-HEALTHCHECK）
 3. **G3-08 Phase 3 H2+H4+H5**（P1，~3.5d）— 解阻 G3-09 cost_edge_ratio
-4. **MICRO-PROFIT-FIX-1-HEALTHCHECK** + **T6-FUP-PA-MEMORY-INDEX-SYNC** + **T6-FUP-WARN-ZONE-FILES-SPLIT**（LOW polish）
+4. ~~**MICRO-PROFIT-FIX-1-HEALTHCHECK**~~ ✅ Superseded by **PAPER-STATE-DUST-INVENTORY-MONITOR** (Tier 7 Track 2) + **T6-FUP-PA-MEMORY-INDEX-SYNC** + **T6-FUP-WARN-ZONE-FILES-SPLIT**（LOW polish）
 
 詳：[Tier 6 Sign-off](docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-26--tier6_signoff.md)
 
@@ -499,7 +499,8 @@ ssh trade-core "cd ~/BybitOpenClaw/srv && python3 helper_scripts/db/passive_wait
 | **G3-08-PHASE-2-FUP-PRIVATE-ATTR-FACADE** | E2 Tier 5 MED-2: `h_state_query_handler` 直接讀 H1/H3 私有 attribute (contract 違規 runtime impact=0)；應改用 PUBLIC facade method | 下次 refactor | 🟡P2 | E1 1-2h |
 | ~~**PAPER-STATE-DUST-RESTORE-AUDIT**~~ | ✅ PA design 完成 2026-04-26 commit `dd4d64a`；rename **PAPER-STATE-DUST-INVENTORY-MONITOR** | PA Track 3 推 Option B (status quo + healthcheck [19] monitor only)；揭發 MIT §6 #1 前提部分錯（restore 不重建倉位，dust 是 runtime partial-close residue）；A/C 跨 env 不安全 | PA design 完成 | 🟢P3 | E1 ~1h healthcheck only (per PA Track 3 §7.4 ready-to-deploy SQL) |
 | **ML-TRAINING-DATA-HYGIENE-1** | MIT EXIT-FEATURES audit §6 follow-up #5：SQL 量化全期 `learning.exit_features` 中 dust spiral noise 比例（`exit_trigger_rule = 'fast_track_reduce_half' AND realized_net_bps == -5.5`）；如 > 5% 補回填 SQL 移除歷史 noise label；加 healthcheck 偵測 dust spiral 復發 | EXIT-FEATURES-WRITER-BUG-1-FIX | 🟡P2 | MIT + E1 1-2d |
-| **MICRO-PROFIT-FIX-1-HEALTHCHECK** | MIT audit §6 follow-up #6：`passive_wait_healthcheck` 加 dedicated check `[21] fast_track_dust_spiral_guard`：`SELECT COUNT(*) FROM trading.fills WHERE ts > now() - interval '1 hour' AND strategy_name = 'risk_close:fast_track_reduce_half' AND realized_pnl = 0` > 5 → FAIL；防 RCA-A 修復後 regression | G6 wave | 🟢P3 | E1 1h |
+| ~~**MICRO-PROFIT-FIX-1-HEALTHCHECK**~~ | ✅ Superseded by **PAPER-STATE-DUST-INVENTORY-MONITOR** (Tier 7 Track 2, 2026-04-26) — 新 `[21] paper_state_dust_inventory` SQL 更廣（`LIKE 'risk_close:fast_track%'` vs MIT exact `= 'risk_close:fast_track_reduce_half'`）+ 三態 PASS/WARN/FAIL verdict（vs MIT 二態 `> 5 → FAIL`）+ 加 `engine_mode IN ('demo','live','live_demo')` filter 排除 paper noise；MIT §6 #6 narrower spec 完全被涵蓋 | superseded | 🟢P3 | n/a |
+| ~~**PAPER-STATE-DUST-INVENTORY-MONITOR**~~ | ✅ 完成 2026-04-26 (Tier 7 Track 2) | E1 落地 PA Track 3 §7.4 ready-to-deploy SQL 為新 healthcheck `[21] paper_state_dust_inventory`：純 SELECT FROM trading.fills，三態 verdict（PASS/WARN/FAIL），supersede MICRO-PROFIT-FIX-1-HEALTHCHECK；14/14 unit tests 綠（`helper_scripts/db/test_paper_state_dust_inventory.py`），Mac smoke argparse description 顯示 21 checks + `[21]` 在 cursor block list；cross-env safe by design (per PA §8) | PA Track 3 audit `dd4d64a` | 🟢P3 | 完成 2026-04-26 | ✅ |
 | ~~**TIER4-OBSERVER-LOW-1**~~ | ✅ 完成 2026-04-26 commit `d8385e6` | aggregate-exit log 保留 OBSERVER_RC + BRIDGE_RC 完整對 (cron exit code 語意 byte-identical); Tier 6 Track 1 pivot | 完成 2026-04-26 | ✅ |
 | **T6-FUP-WARN-ZONE-FILES-SPLIT** | E2 Tier 6 LOW: `checks_derived.py` 869 + `ipc_client.py` 899 兩檔進 §九 800 警告區漸增（Tier 6 +52/+24）；對齊既有 sibling pattern split | 下次 G5 wave | 🟢LOW | E5 1d Wave 4 G5 |
 | **T6-FUP-PA-MEMORY-INDEX-SYNC** | E2 Tier 6 LOW: PA Track 3 dust audit (`dd4d64a`) memory.md 索引條目未追加；PA 下次 audit 接手時補 | 下次 PA 接手 | 🟢LOW | PA 10min |
@@ -529,6 +530,7 @@ ssh trade-core "cd ~/BybitOpenClaw/srv && python3 helper_scripts/db/passive_wait
 | [13] | edge_estimator_scheduler_fresh | `edge_estimates.json` mtime <6h + cells ≥50 | G1-01 / G4-04（G6-02 commit `a0a4981`）|
 | [14] | exit_features_accumulation_rate | 週 row count 增長率 ≥ threshold | EDGE-P1b（G6-02 commit `a0a4981`）|
 | [15] | shadow_exit_agreement_phase2 | Python vs Rust decision agree rate ≥95% | EDGE-P2 flip（G6-02 commit `a0a4981`）|
+| [21] | paper_state_dust_inventory | dust spiral guard SQL: `COUNT(*) FILTER (realized_pnl=0) FROM trading.fills WHERE strategy LIKE 'risk_close:fast_track%' AND last 1h AND engine_mode IN demo/live/live_demo`；三態 PASS/WARN/FAIL（0=PASS / 1-10 + <3 symbols=WARN / >10 OR ≥3 symbols=FAIL）| PAPER-STATE-DUST-INVENTORY-MONITOR (Tier 7 Track 2，supersedes MICRO-PROFIT-FIX-1-HEALTHCHECK)|
 
 ---
 

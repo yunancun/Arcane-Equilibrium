@@ -33,6 +33,7 @@ from .checks_engine import (
     check_close_fills_24h,
     check_label_backfill_ratio,
     check_exit_features_writer,
+    check_paper_state_dust_inventory,
 )
 from .checks_ipc_edge import (
     check_phys_lock_runtime,
@@ -66,16 +67,16 @@ from .checks_derived import (
 _RUNNER_DESCRIPTION = """Passive-wait pipeline healthcheck.
 被動等待管線健康檢查。
 
-Single-command check that 20 key runtime data pipelines are actually
+Single-command check that 21 key runtime data pipelines are actually
 producing data, versus silently failing under fail-open error handling.
-單命令檢查 20 個關鍵 runtime 資料管線實際有資料流入，
+單命令檢查 21 個關鍵 runtime 資料管線實際有資料流入，
 識破 fail-open 下的 silent failure。
 
-The 20 checks span DB pipelines + filesystem/observability sentinels:
-  [1]-[6][8]-[9][10][12][14][15] DB cursor                    (12 checks)
+The 21 checks span DB pipelines + filesystem/observability sentinels:
+  [1]-[6][8]-[9][10][12][14][15][21] DB cursor                 (13 checks)
   [Xa][Xb][7][11][13][16][18][19][20] filesystem / pure Python (8 checks)
-本 20 檢查 = 12 DB cursor + 8 純檔案 / Python：
-  [1][2][3][4][5][6][8][9][10][12][14][15][Xb] cursor 內
+本 21 檢查 = 13 DB cursor + 8 純檔案 / Python：
+  [1][2][3][4][5][6][8][9][10][12][14][15][Xb][21] cursor 內
   [Xa][7][13][11][16][18][19][20] cursor 外
 
 Exit codes:
@@ -86,21 +87,21 @@ Exit codes:
 
 
 def main() -> int:
-    """Entry point — runs all 20 checks and prints a structured report.
+    """Entry point — runs all 21 checks and prints a structured report.
 
     Order is significant — the cursor block runs DB-bound checks, then we
     close the connection before invoking filesystem-only checks. Every
     check returns ``(status, msg)`` (or ``(status, msg, extra)`` for [1]
     which yields the close_fills count used by [2]/[3]/[Xb]).
 
-    Counted rows (20): [1][2][3][4][5][6][8][9][10][12][Xb][14][15][7]
-    [13][11][Xa][16][18][19][20].
+    Counted rows (21): [1][2][3][4][5][6][8][9][10][12][Xb][14][15][21]
+    [7][13][11][Xa][16][18][19][20].
 
-    入口 — 跑全部 20 個 check 並印結構化報告。順序固定 — cursor 區塊跑
+    入口 — 跑全部 21 個 check 並印結構化報告。順序固定 — cursor 區塊跑
     DB 相關 check，conn.close() 之後再跑純檔案系統 check。每個 check 回
     ``(status, msg)``（[1] 額外回 close_fills，供 [2]/[3]/[Xb] 用）。
-    20 條清單：[1][2][3][4][5][6][8][9][10][12][Xb][14][15][7][13][11]
-    [Xa][16][18][19][20]。
+    21 條清單：[1][2][3][4][5][6][8][9][10][12][Xb][14][15][21][7]
+    [13][11][Xa][16][18][19][20]。
     """
     ap = argparse.ArgumentParser(description=_RUNNER_DESCRIPTION)
     ap.add_argument("--quiet", action="store_true", help="Only print non-PASS lines")
@@ -192,6 +193,28 @@ def main() -> int:
             # — EDGE-P2 Phase 2 品質閘（≥95% 嚴格）。Phase 1a 空表 PASS。
             s, m = check_shadow_exit_agreement_phase2(cur)
             results.append(("[15] shadow_exit_agreement_phase2", s, m))
+
+            # [21] PAPER-STATE-DUST-INVENTORY-MONITOR (2026-04-26 Tier 7
+            # Track 2): EXIT-FEATURES-WRITER-BUG-1-FIX (commits af48ee1 +
+            # 83456e5) silent regression sentinel. Pure SELECT FROM
+            # trading.fills counting last-1h `risk_close:fast_track%`
+            # fills with `realized_pnl=0` + distinct-symbol fan-out;
+            # three-state PASS/WARN/FAIL verdict per PA Track 3 §7.4
+            # ready-to-deploy SQL (commit dd4d64a). Supersedes the
+            # narrower MICRO-PROFIT-FIX-1-HEALTHCHECK backlog (MIT §6
+            # follow-up #6, exact strategy_name + binary verdict).
+            # Inside cursor block — pure SELECT, fail-soft on PG anomaly.
+            # [21] PAPER-STATE-DUST-INVENTORY-MONITOR（2026-04-26 Tier 7
+            # Track 2）：EXIT-FEATURES-WRITER-BUG-1-FIX（commits af48ee1 +
+            # 83456e5）silent regression 哨兵。純 SELECT FROM trading.fills
+            # 計算過去 1h `risk_close:fast_track%` 且 realized_pnl=0 的 fill
+            # 計數 + distinct symbol 擴散度；三態 PASS/WARN/FAIL verdict
+            # per PA Track 3 §7.4（commit dd4d64a）。Supersedes 較窄的
+            # MICRO-PROFIT-FIX-1-HEALTHCHECK backlog（MIT §6 #6，
+            # exact strategy_name + 二態）。在 cursor 區塊內跑 — 純 SELECT、
+            # PG anomaly 時 fail-soft。
+            s, m = check_paper_state_dust_inventory(cur)
+            results.append(("[21] paper_state_dust_inventory", s, m))
     finally:
         conn.close()
 
