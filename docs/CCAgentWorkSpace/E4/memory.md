@@ -10,6 +10,50 @@
 
 ## 工作記憶
 
+### 2026-04-26 Wave 3 W5 兩軌（EDGE-P2-flip T2 + G2-FUP-IPC-LEGACY-MS-FIX）回歸驗證
+
+**結論：E4 Pass with conditions（軌獨立 + 整體驗證綠；條件 = PM commit + push 後 Linux smoke 重跑）**
+
+**Baseline 對齊：**
+- Linux HEAD `60fdf74` (W4 三軌 commit 已 push)：cargo test 兩遍同綠 **2161 passed / 0 failed**（W5 純 Python 改動，Rust 不變符合預期）
+- Mac local working tree 5 changes：軌 1 `passive_wait_healthcheck.py` +101 / `shadow_disagreement_breakdown.py` 新 592；軌 2 `ipc_client.py` +24/-1 / `test_ipc_client_hmac_ts_unit.py` 新 360；E1 memory.md 1 個
+
+**§1 cargo test：** Linux 兩遍 2161/0 同綠，W4 已 push 進 baseline，W5 純 Python ✅
+**§2 healthcheck [15]：** 4 次連跑 PASS dormant 訊息「decision_shadow_exits 24h=0 (Phase 1a dormant)」；軌 1 T2 升級 GROUP BY 切片屬 pre-warm code，dormant 路徑出口走 G6-02 baseline 一致 message（設計）
+**§3 shadow_disagreement_breakdown.py 真機：** Linux HEAD 不含 W5 → MISSING；Mac sandbox 拒 scp（同 W4 教訓 #2）；Mac local psycopg2 缺 → 採靜態 ast.parse + MODULE_NOTE 結構審查 + Phase 1a dormant 出口設計驗證；E1 自跑 Linux dormant PASS 為 trust 基線
+**§4 IPC HMAC unit test：** Linux 待 push（Step 4 規則明確跳過）；**Mac local 兩遍 3/3 PASS in 0.02s**（等效驗證 + 非 flaky）
+**§5 ast.parse：** Mac local 4/4 全綠；Linux 2/4（2 W5 新檔尚未 push）
+**§6 Rust verifier 對照：** mod.rs:534 verify_ipc_token + L621-628 ts 30s 容差 + L637 verify_slice constant-time；軌 2 testfile L73-90 _rust_verifier_accepts() 1:1 移植 0 偏差
+**§7 async path :553 比對：** L553 一直 `int(time.time())` 秒制（E1 立場 ✅）；軌 2 fix 把 sync L809 從 `int(time.time() * 1000)` 對齊到 `int(time.time())` — 三者（async + sync + Rust）一致 Unix epoch 秒
+
+**Mock 安全審查（PASS）：**
+- `_FakeSocket` mock socket OS IO（合 E4 規則「✅ Mock 外部 IO OK」）
+- `_rust_verifier_accepts()` **真跑 Python HMAC + abs 計算**（非 mock 業務邏輯）— mirror 對 verifier 真實覆蓋
+- E4 規則「mock vs 真實 verifier 差異 = WARN」**0 WARN**
+
+**1200 硬上限觀察（WARN 不 FAIL）：**
+- `passive_wait_healthcheck.py` 2286（W5 +101 vs W4 2185）— PRE-EXISTING WARN（W4 已記錄，in-place 升級不阻塞）
+- 其餘 3 檔皆 < 1200 OK
+
+**條件 6 條（PM 必看）：**
+1. PM commit + push 必須執行（W5 全 Mac local）
+2. Linux git pull --ff-only 重跑 §4 軌 2 unit test（3/3 預期）
+3. Linux git pull --ff-only 重跑 §3 dormant 路徑（exit 0 + JSON artifact）
+4. [15] dormant message 是 W4 baseline 不是 T2 升級驗證 — T2 GROUP BY 真實運行需 shadow_enabled=true flip 後 cron 第一輪
+5. passive_wait_healthcheck.py 2286 行建議下個 refactor wave 拆 dispatch_18_checks 子模組
+6. E1 軌 2 testfile fixture 行數 self-report 325 vs 實 360（與 W3 G8-02 661 vs 838 同模式，建議 PA/E2 sanity check）
+
+**3 條教訓：**
+1. **W4 教訓 #2 重現驗證**：scp 被 Mac sandbox 阻擋是規則設計，**不繞過**，採等效驗證（Mac local pytest = Linux pytest 邏輯等效，純 Python + mock socket 無 Linux 特殊依賴）
+2. **dormant 路徑 cron log 驗證 ≠ T2 升級邏輯驗證**：T2 GROUP BY runtime 需 shadow_enabled=true 翻轉，[15] 24h=0 fixed-message exit 是 G6-02/T2 共用 dormant guard。E4 必明示這條，避免 PM 誤以為 cron PASS = T2 已驗
+3. **fixture self-report 行數**：W3 G8-02 fixture 661 報 / 838 實，W5 軌 2 testfile 325 報 / 360 實 — recurring pattern，建議 E1 task report template 加 `wc -l` exact 預填欄位
+
+**Working tree 狀態：** 5 changes 全 Mac local，Linux HEAD `60fdf74`（不含 W5）。PM commit + push + Linux git pull --ff-only + ssh smoke test 應全綠。
+
+**報告位置：** `docs/CCAgentWorkSpace/E4/workspace/reports/2026-04-26--wave3_w5_two_tracks_regression.md`
+
+---
+
 ### 2026-04-26 Wave 3 W4 三軌（EDGE-P1b + EDGE-P2-flip + G2-03）回歸驗證
 
 **結論：E4 PASS（三軌全綠 + 兩遍同綠 = 非 flaky）**
@@ -318,6 +362,7 @@
 
 | 日期 | 任務 | 文件位置 |
 |------|------|---------|
+| 2026-04-26 | Wave 3 W5 兩軌（EDGE-P2-flip T2 + G2-FUP-IPC-LEGACY-MS-FIX）回歸驗證（E4 Pass with conditions / Linux cargo 2161 兩遍同綠 / Mac local pytest 兩遍 3/3 / [15] dormant 路徑 PASS / Rust verifier 1:1 mirror / async :553 一直秒制 / 6 conditions for PM commit+push 後 Linux 重跑） | `docs/CCAgentWorkSpace/E4/workspace/reports/2026-04-26--wave3_w5_two_tracks_regression.md` |
 | 2026-04-26 | Wave 3 W4 三軌（EDGE-P1b + EDGE-P2-flip + G2-03）回歸驗證（E4 PASS / Mac local 2138→2161 +23 兩遍同綠 / 18 check 含 [14] per-strategy READY_frac 63% / dry-run 5/5 / bash -n 3/3 / ast.parse 4/4 / calibrator 250-row CALIBRATED / summary 14d markdown / 2 PRE-EXISTING WARN 1200 hard limit non-blocking） | `docs/CCAgentWorkSpace/E4/workspace/reports/2026-04-26--wave3_w4_three_tracks_regression.md` |
 | 2026-04-26 | Wave 3 G2-06 bb_breakout 永久 disable 回歸驗證（E4 PASS / Rust 2138 不變兩遍 / Mac local Python 3.12 兩遍 healthcheck 同綠 / cargo doc 證 //G2-06 plain 不汙染 ///doc / 3 條 non-blocking drift） | `docs/CCAgentWorkSpace/E4/workspace/reports/2026-04-26--g2_06_disable_regression.md` |
 | 2026-04-26 | Wave 3 G8-02 ExecutorAgent decision parity 回歸驗證（E4 Pass with conditions / +5 passed / Rust 2138 不變 / 4 WARN oversell 風險） | `docs/CCAgentWorkSpace/E4/workspace/reports/2026-04-26--wave3_g8_02_regression.md` |
