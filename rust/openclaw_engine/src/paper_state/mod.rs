@@ -150,6 +150,32 @@ pub struct PaperState {
     /// 壓入 `RestingLimitOrder.funding_rate_at_submit`。未見過的 symbol 回
     /// None → 壓 0.0、sweep funding drag guard 視為「未知 / 無偏差」。
     pub(super) funding_rates: HashMap<String, f64>,
+    /// EVICT-ON-DUST F3 (2026-04-26): cumulative count of phantom-dust
+    /// evictions since process start. Incremented by `evict_if_dust` (T1/T2)
+    /// and `evict_all_dust` (T3/T4); read via `dust_evictions_total()` for
+    /// status arm logging + healthcheck [20] runtime liveness. Reset to 0
+    /// on engine restart (process-local counter, not persisted to DB —
+    /// eviction events are observability-only and never enter ML training
+    /// data per PA §1.2.5).
+    /// EVICT-ON-DUST F3：自 process 啟動起累積的 dust 驅逐計數。由 T1/T2
+    /// （evict_if_dust）+ T3/T4（evict_all_dust）共寫；經
+    /// dust_evictions_total() 暴露給 status arm log 與 healthcheck [20]。
+    /// 重啟歸零、不持久化 DB（驅逐純為觀測事件，不進 ML 訓練資料）。
+    pub(super) dust_evictions_total: u64,
+    /// EVICT-ON-DUST F3 (2026-04-26): cached USD-denominated dust floor for
+    /// hot-path `apply_fill` / `reduce_position` post-mutation evict (T1/T2).
+    /// Mirrors `RiskConfig.limits.ft_dust_qty_floor_usd` (re-uses the af48ee1
+    /// schema — see PA §1.2.6 "选择: re-use ft_dust_qty_floor_usd"). Updated
+    /// by `set_dust_floor_usd()` whenever the upper-layer detects a
+    /// RiskConfig version bump (TickPipeline calls it from
+    /// `sync_risk_config_if_changed()` per `risk_config_version_seen`
+    /// pattern). `0.0` = gate disabled (matches step_0 producer-side guard).
+    /// EVICT-ON-DUST F3：USD 計價 dust floor 快取，供 hot-path 後置 evict
+    /// 使用（T1/T2）。鏡射 `RiskConfig.limits.ft_dust_qty_floor_usd`
+    /// （re-use af48ee1 既有 schema，見 PA §1.2.6 設計選擇）。由 TickPipeline
+    /// `sync_risk_config_if_changed()` 在 RiskConfig 版本變動時透過
+    /// `set_dust_floor_usd()` 刷入。`0.0` = 閘關閉。
+    pub(super) dust_floor_usd: f64,
 }
 
 impl PaperState {
@@ -173,6 +199,8 @@ impl PaperState {
             resting_limit_orders: HashMap::new(),
             maker_stats: MakerStats::default(),
             funding_rates: HashMap::new(),
+            dust_evictions_total: 0,
+            dust_floor_usd: 0.0,
         }
     }
 
