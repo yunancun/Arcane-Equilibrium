@@ -80,8 +80,20 @@ maker_limit_timeout_ms = 45000
 # G-2 VALIDATION COMPLETE（2026-04-14）：21 paper fills 累積後恢復默認參數。
 # 污染窗口：2026-04-14 17:33 ~ 21:32；edge_estimates_paper.json 此窗口 funding_arb 數據需排除。
 # G-2 VALIDATION COMPLETE (2026-04-14): reverted to defaults after 21 paper fills.
+#
+# G2-FUP-FUNDING-ARB-PAPER-SYNC（2026-04-26）：
+# 中：funding_arb v2 結案 NEGATIVE（n=13 / -36.76 bps / 0 勝率）→ 三環境統一 disable
+#     （demo/live/paper 對齊）。重啟需 G-2 R-02 Strategist 重評三參數
+#     （cost_bps_threshold / min_apr_pct / max_position_notional_usd）。
+#     memory feedback_env_config_independence 適用於風控閾值（risk thresholds），
+#     active binary 開關屬「策略命門」，三環境必須一致。
+# EN: funding_arb v2 closed NEGATIVE (n=13 / -36.76 bps / 0 win rate), unified
+#     disable across demo/live/paper. Reactivation requires G-2 R-02 Strategist
+#     re-evaluation of 3 params (cost_bps_threshold / min_apr_pct / max_position_notional_usd).
+#     env-isolation principle (feedback_env_config_independence) applies to risk
+#     thresholds, NOT to `active` binary kill switch — must be unified across envs.
 [funding_arb]
-active = true
+active = false
 cooldown_ms = 3600000
 total_cost_bps = 34.0
 expected_periods = 3.0
