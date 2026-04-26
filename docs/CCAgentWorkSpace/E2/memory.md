@@ -54,6 +54,7 @@
 | 2026-04-26 | Tier 5 batch review 7 commits (af48ee1..f2ed286) — T5.1 EXIT-FEATURES-FIX + T5.2 G3-08-PHASE-1C + T5.3 Phase 2 H1+H3 | workspace/reports/2026-04-26--tier5_batch_review.md |
 | 2026-04-26 | Tier 6 batch review 4 commits (306b549..56104de) — T6.1 Track 1 4 LOW + T6.2 Track 2 H3 schema design + T6.3 Track 3 dust audit design | workspace/reports/2026-04-26--tier6_batch_review.md |
 | 2026-04-26 | Tier 7 batch review 3 commits (4b30f5e/8241133/c6ed0b3) — T7.1 Rust H3 schema align T7.2 healthcheck [21] dust inventory T7.3 PA Phase 3 sub-task split | workspace/reports/2026-04-26--tier7_batch_review.md |
+| 2026-04-26 | Tier 8 batch review 4 commits (8cd257e/cf39415/71faf4c/79a808a) — T8.1 Sub-task 3-1 H2 + T8.2 Sub-task 3-2 H4 silent gap + T8.3 RFC §7.4 amend | workspace/reports/2026-04-26--tier8_batch_review.md |
 
 ## 歷史審查關鍵發現（累積記憶）
 
@@ -291,6 +292,14 @@
   - 凡 PA RFC pattern A/B/C 決策 E2 不否定設計判斷但驗證底層 claim：本 batch H4 silent gap + 1170 LOC 餘地 + file overlap 全 grep 驗證屬實 — claim-based decision 站得住腳 = PASS；若 claim 假（如「0 hot-path consumer」實際有）= 退回 PA 重 design
   - 凡 prompt template self-containedness 6 段式（前置驗證 + 文件 + 實作 + 完成標準 + commit msg + 一行回報）可作 E2 機械 check 標準 — 缺任一段 = LOW finding
   - 凡 schema parity test 用 BTreeSet 而非 list 是 order-independent 設計，未來 PA 推類似 mirror schema fix 必鏡此 pattern 否則重新 排序 fields 即破測
+
+### 2026-04-26 Tier 8 batch review (4 commits, 8cd257e/cf39415/71faf4c/79a808a) — 3 PASS / 0 RETURN / 1 MEDIUM + 1 LOW FUP
+
+- **結論**：T8.1 Sub-task 3-1 H2 (`8cd257e`+`cf39415`) PASS to E4 / T8.2 Sub-task 3-2 H4+silent gap (`71faf4c`) PASS-with-MEDIUM (T8-MED-1 strategist_agent.py == 1200 LOC §九 hard cap exact-touch) / T8.3 RFC §7.4 amend (`79a808a`) PASS-with-LOW (typo). Linux pytest 188/0 + cargo h_state_cache 17/0 baseline 不變 + production cron [21] LIVE PASS dust=0
+- **Multi-track absorb pattern verified**：Track 1 sub-agent claim「absorbed Track 2 in-flight H4 edits to h_state_query_handler.py + test_h_state_query_handler.py via git commit --only」獨立 cross-diff 驗 TRUE — Track 1 含 H4 wiring + Track 2 0 touch shared files = atomic merge 成功，未來 PM 派 2-track parallel on shared files 可採此 pattern
+- **§九 1200 hard cap exact-touch 判定為 MEDIUM 不 LOW**：strategist_agent.py wc -l = 1200（commit msg + memory + PA §10.4 三重 self-disclose），boundary itself 在 `>1200 reject` 標準下 OK，但任何 Phase 4 +1 LOC = silent violation；MUST 開 split ticket 作 Phase 4 hard pre-condition；bilingual readability 抽 1180-1200 + 945-970 spot-check NOT degraded（trim 1234→1206→1200 通過）
+- **Silent gap 雙保險修法 (counter + invalidate hint pair)**：Track 2 H4 從 PA-prompted `validation_pass` grep 0 hits → 13 hits（init dict + pass branch counter + pass branch invalidate_async + get_h4_snapshot + docstring）；fail/pass 兩路徑對稱加 hint，防次級 silent gap（counter 動但 Rust 不知變化）— 此 pattern 通用化推廣
+- **判定方法論教訓**：(a) sub-agent 「absorbed in-flight edits to shared files」強 claim 必 cross-diff 兩 commit 對照不接受 face value (b) §九 hard cap exact-touch 默認 MEDIUM-with-mandatory-split-FOLLOWUP，警示下次 +1 LOC silent violation (c) bilingual trim 在 §九 壓力下 spot-check 1-2 段 docstring + invariant + import 即可判 readability degraded vs not (d) silent gap fix 必 dual-pattern (counter + hint) 對稱補 fail/pass 兩路 (e) PA RFC amend §13 Deviation Log + 不重寫 §7.x in place 是非破壞性 SSOT drift correction template
 
 ### 2026-04-26 Tier 6 batch review (4 commits, 306b549..56104de) — 3 PASS / 0 RETURN / 2 FUP tickets
 - **結論**：T6.1 Track 1 (4 LOW + memory) PASS-with-LOW / T6.2 Track 2 H3 schema design PASS / T6.3 Track 3 dust audit design PASS-with-LOW。FUP：T6-FUP-WARN-ZONE-FILES-SPLIT (checks_derived 869 + ipc_client 899 兩檔進警告區漸增) + T6-FUP-PA-MEMORY-INDEX-SYNC (dd4d64a 缺 PA memory append)
