@@ -577,6 +577,13 @@ SELECT
 FROM trading.fills f
 WHERE f.ts >= %(since)s
   AND f.engine_mode = %(engine_mode)s
+  -- F4-2 (2026-04-26): exclude `unattributed:bybit_auto` audit rows so
+  -- Bybit auto-action fills (funding payment / dust scrub / auto-补单)
+  -- never enter counterfactual replay (would skew exit-quality stats with
+  -- realized_pnl=0 / unknown TIF noise).
+  -- F4-2（2026-04-26）：排除 `unattributed:bybit_auto` audit row，避免
+  -- Bybit 自主動作成交干擾退場品質統計（realized_pnl=0、TIF 未知）。
+  AND (f.strategy_name IS NULL OR f.strategy_name NOT LIKE 'unattributed:%%')
 ORDER BY f.symbol, f.ts ASC
 """
 

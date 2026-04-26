@@ -22,6 +22,9 @@ mod handlers_paper_cmd_tests;
 mod pending_registration_order_type_tests;
 mod reconciler_tests;
 mod submit_order_tests;
+// F4-1 (2026-04-26): unmatched WS fill audit emission tests.
+// F4-1（2026-04-26）：未匹配 WS 成交 audit 落地測試。
+mod unattributed_fill_tests;
 
 // ─────────────────────────────────────────────────────────────────────────
 // Util-level tests (clamp ranges + JSON envelope invariants) — stay at root.

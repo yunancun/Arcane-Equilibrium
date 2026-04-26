@@ -219,6 +219,14 @@ SELECT
 FROM trading.fills f
 WHERE f.ts >= %(since)s
   AND f.engine_mode = %(engine_mode)s
+  -- F4-2 (2026-04-26): exclude `unattributed:bybit_auto` audit rows so
+  -- Bybit auto-action fills (funding payment / dust scrub / auto-补单)
+  -- do not pollute realized-edge stats. Audit rows have realized_pnl=0
+  -- and unknown TIF → fee_rate=0 which would skew bps aggregates.
+  -- F4-2（2026-04-26）：排除 `unattributed:bybit_auto` audit row，避免
+  -- Bybit 自主動作（funding / dust scrub / auto-補單）污染已實現邊際統計。
+  -- Audit row realized_pnl=0、TIF 未知 fee_rate=0 會扭曲 bps 聚合。
+  AND (f.strategy_name IS NULL OR f.strategy_name NOT LIKE 'unattributed:%%')
 ORDER BY f.symbol, f.ts ASC
 """
 

@@ -111,6 +111,17 @@ def _get_conn(pg_url: Optional[str]):
 #   backfill-replay pattern (re-compute historical labels with funding included).
 # ============================================================
 _BACKFILL_INCLUDED_SQL = """
+-- F4-2 (2026-04-26): Every JOIN against trading.fills below filters
+-- `strategy_name NOT LIKE 'unattributed:%%'` so Bybit auto-action audit rows
+-- (funding payment / dust scrub / auto-补单) cannot leak into label generation.
+-- Audit rows have realized_pnl=0 and unique context_ids (`unattrib-{exec_id}-{ts}`)
+-- that never match a real decision_features row, so the EXISTS / JOIN already
+-- excludes them by definition; the explicit filter is defence-in-depth in case
+-- a future writer change reuses context_ids or relaxes invariants.
+-- F4-2（2026-04-26）：下方所有 JOIN trading.fills 皆加
+-- `strategy_name NOT LIKE 'unattributed:%%'` 過濾，確保 Bybit 自主動作 audit row
+-- 不混入 label 產生。Audit row 有獨特 context_id 不可能 JOIN 上真 decision_features，
+-- 顯式過濾為深層防護。
 WITH entries AS (
     SELECT l.context_id, l.strategy_name, l.ts AS entry_ts
     FROM learning.decision_features l
@@ -119,6 +130,9 @@ WITH entries AS (
       AND EXISTS (
           SELECT 1 FROM trading.fills f
           WHERE f.entry_context_id = l.context_id
+            -- F4-2: filter audit rows from existence check
+            -- F4-2：EXISTS 中亦排除 audit row
+            AND (f.strategy_name IS NULL OR f.strategy_name NOT LIKE 'unattributed:%%')
       )
     ORDER BY l.ts
     LIMIT %(batch_limit)s
@@ -134,6 +148,10 @@ entry_fills AS (
         FROM trading.fills
         WHERE context_id = e.context_id
           AND entry_context_id IS NULL  -- entry row, not a close
+          -- F4-2: belt-and-suspenders — audit rows have unique context_ids,
+          -- but reject by strategy_name as well in case of future drift.
+          -- F4-2：雙保險 — audit context_id 獨特，但同時依 strategy_name 排除。
+          AND (strategy_name IS NULL OR strategy_name NOT LIKE 'unattributed:%%')
         ORDER BY ts ASC
         LIMIT 1
     ) f ON TRUE
@@ -148,6 +166,9 @@ close_fills AS (
            f.strategy_name AS close_tag
     FROM entries e
     JOIN trading.fills f ON f.entry_context_id = e.context_id
+        -- F4-2: close fills must not be audit rows either.
+        -- F4-2：close fill 同樣排除 audit row。
+        AND (f.strategy_name IS NULL OR f.strategy_name NOT LIKE 'unattributed:%%')
 ),
 classified AS (
     SELECT *,
@@ -213,6 +234,9 @@ RETURNING d.context_id, l.strategy_name, l.split_flag
 # ----- 第二 pass：把 any_excluded 標籤也 mark 為 filled_at，避免下次重試 -----
 # ----- Pass 2: mark any_excluded rows as tried (prevent re-processing) -----
 _BACKFILL_EXCLUDED_SQL = """
+-- F4-2 (2026-04-26): see _BACKFILL_INCLUDED_SQL for rationale; mirror the
+-- `strategy_name NOT LIKE 'unattributed:%%'` filter on the close-side JOIN.
+-- F4-2（2026-04-26）：見 _BACKFILL_INCLUDED_SQL 註釋，close 側 JOIN 鏡射過濾。
 WITH excluded_entries AS (
     SELECT l.context_id,
            (array_agg(f.strategy_name ORDER BY f.ts DESC))[1] AS last_close_tag
@@ -221,6 +245,10 @@ WITH excluded_entries AS (
     WHERE l.label_filled_at IS NULL
       AND l.engine_mode = %(engine_mode)s
       AND f.strategy_name ~ '^(orphan_close:|adopted_close:|shadow_fill:)'
+      -- F4-2: audit rows excluded (defence-in-depth; audit context_ids never
+      -- match a real decision_features row, but filter explicitly).
+      -- F4-2：audit row 排除（深層防護；audit context_id 不會 JOIN 上真 row）。
+      AND f.strategy_name NOT LIKE 'unattributed:%%'
     GROUP BY l.context_id
     LIMIT %(batch_limit)s
 )
