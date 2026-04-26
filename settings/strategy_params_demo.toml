@@ -26,7 +26,11 @@ limit_offset_bps = 10.0
 conf_scale = 1.0
 
 [bb_breakout]
-active = true
+# G2-06 (2026-04-26): permanently disabled — 7d 0 fills + 1m bandwidth mis-scale
+# confirmed (P1-11 F1). Re-enable requires PA RFC + 5m timeframe upgrade.
+# G2-06 (2026-04-26): 永久停用 — 7d 0 fills + 1m bandwidth 結構性錯配
+# 確認（P1-11 F1）。重啟需 PA RFC + 升 5m timeframe。
+active = false
 cooldown_ms = 600000
 squeeze_bw = 0.02
 expansion_bw = 0.04

@@ -53,6 +53,7 @@ def acquire_lease(self, intent_id: str) -> bool:
 | 2026-04-26 | Wave 3 G2-02: ma_crossover counterfactual fee replay tool | `docs/CCAgentWorkSpace/E1/workspace/reports/2026-04-26--g2_02_ma_crossover_counterfactual_replay.md` |
 | 2026-04-26 | Wave 3 G8-02: Python↔Rust ExecutorAgent decision parity 70-case ≥95% | `docs/CCAgentWorkSpace/E1/workspace/reports/2026-04-26--g8_02_executor_decision_parity.md` |
 | 2026-04-26 | Wave 3 E2-FIX-1+2: G2-02 caveat + G8-02 synthetic_replay rename | `.claude_reports/20260426_021000_e2_finding_fix_g202_g802.md` |
+| 2026-04-26 | Wave 3 G2-06: bb_breakout 永久 disable 落地（4 子任務串行）| `docs/CCAgentWorkSpace/E1/workspace/reports/2026-04-26--g2_06_bb_breakout_disable_landing.md` |
 
 ## 當前測試基準線
 2827 passed（Sprint 1a P1-1 完成後，both test dirs，128 pre-existing failures，17 errors）
@@ -200,6 +201,16 @@ def acquire_lease(self, intent_id: str) -> bool:
 - **Linux pytest baseline 不變驗證**：scp 兩檔到 Linux .staged_e2_finding2/ → cp 覆蓋 in-place → pytest 跑綠（5 passed / 2 skipped / 0.39s · agree 70/70 100% · 新 tag `[G8-02 synthetic_handcrafted]`）。
 - **markdown _Note: 範例輸出**：用 importlib.util load module 後直接 call `aggregate_per_symbol_per_scenario(synthetic_rows, [2.0,5.5])` + `render_markdown(agg, min_per_symbol=1)` 截到末尾單行 caveat note；確認是 markdown table 之後、不破壞 csv/json renderer。
 - **不擴張原則嚴守**：本 PR 0 業務代碼 / 0 測試邏輯 / 0 SQL / 0 fixture 案例變更；純 doc + rename。
+
+### 2026-04-26 Wave 3 G2-06 — bb_breakout 永久 disable 落地
+
+- **TOML 三環境 isolation 仍同方向**（per memory `feedback_env_config_independence`）：三 config 故意分開但本次同方向 disable，每個 TOML 加同 6 行雙語 comment block（中英對照解釋為什麼 disable + 重啟條件 + RFC 引用）。E2 cross-check 點 = 三檔同方向不漏一個環境。
+- **healthcheck [12] 改判 fail-soft 路徑**：`_read_bb_breakout_active_from_toml()` 用 `tomllib` (Python 3.11+) 模仿既有 `_read_shadow_enabled_from_toml()` shape 回 `(value, diag)` tuple；TOML 讀失敗 fail-soft 回 `None` → [12] 走原 triage 邏輯（不會因 TOML race / parse error 整 pipeline 紅）。Mac local Python 3.10 版本 tomllib 不存在 → 走 fail-soft，因此用 `/opt/homebrew/bin/python3.12` 驗測；Linux production 是 Python 3.12。
+- **[18] disabled_strategy_inventory 永遠 PASS 設計**：純 observability，目的是讓未來 audit 不漏看 active=false 策略。除了 bb_breakout 還順帶顯示 funding_arb（先前 G-2 結案 disable 留下，符合 G6-04 drift 防線意圖）。tomllib 無法 import / TOML 不存在 / parse 錯誤 → 全 PASS skip（不 FAIL，純 observability 的本意）。
+- **CLAUDE.md §三 drift 防線**：把 P1-11 條目從「FIX-26-DEADLOCK-1 待 rebuild + dormant 處置中」更新到「G2-06 永久 disable 結案」狀態。同時加 2026-04-26 「Wave 3 第二/三波派發」條目到「已完成里程碑索引」表（涵蓋 G2-02 / G8-02 / G2-06 三個本日 PM 派發任務集）。
+- **TODO L133 同步**：先前過期的「Healthcheck [12] FAIL 結構性已確認非新 bug」描述改為「✅ G2-06 disable 結案」，避免 PM 下次接手看到「FAIL」造成混淆（[12] 從 FAIL 變 PASS skip）。
+- **deferred 註解非 #[deprecated]**：per PA RFC §6 「BbBreakoutProfile 保留為 future investment」，**不**加 `#[deprecated]` attribute（deprecated 會觸 build warning + 暗示「將來會刪」），用普通 comment block 解釋「為什麼保留 + 何時可重啟」即可。Rust comment block 在 `///` doc-comments 與 `#[derive]` 之間屬合法 orphan comment，不破壞 doc-attribute attachment。
+- **不直接 commit + scp 不需要**：所有改動純檔案編輯（無業務代碼 / 無測試 / 無 cargo build），等 E2 review → E4 regression → PM 統一 commit + push。Linux 端 ssh 驗證會看到舊 active=true 是預期（沒 push 還沒同步）— 真正的 healthcheck 驗證在 PM commit + push 後 cron 6h 跑下一輪。Mac 本地 grep + Python 3.12 驗證已足夠覆蓋 E1 落地正確性。
 
 ### 2026-04-26 Wave 3 G8-02 ExecutorAgent decision parity
 

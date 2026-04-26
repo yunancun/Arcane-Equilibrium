@@ -269,3 +269,71 @@ PM Wave 3 第二波派發 G2-06：bb_breakout 7d entries=0（healthcheck [12] FA
 | 2026-04-26 | G2-06 bb_breakout disposal RFC（推 C disable）| workspace/reports/2026-04-26--g2_06_bb_breakout_disposal_rfc.md |
 
 ---
+
+## 2026-04-26 Wave 3 第三波 — 3 C 級 RFC 補 spec
+
+### 觸發
+
+PM 第三波派發指令：FA Wave 3 spec readiness audit 評 EDGE-P1b / EDGE-P2-flip / G2-03 三項為 C 級（核心 spec 缺）。E1 不能開工至 RFC 補完。串行寫 3 RFC。
+
+### 報告路徑
+
+- `workspace/reports/2026-04-26--edge_p1b_7dim_bind_rfc.md`
+- `workspace/reports/2026-04-26--edge_p2_flip_sop_rfc.md`
+- `workspace/reports/2026-04-26--g2_03_option_b_rfc.md`
+
+### 3 RFC 核心結論（每個 1-2 句）
+
+1. **EDGE-P1b 7 維 bind**：7 維 confirm `est_net_bps / peak_pnl_pct / atr_pct / giveback_atr_norm / time_since_peak_ms / price_roc_short / entry_age_secs`（dim 6 ROC 此 bind 不消費，留 v3）；bind 路徑**不擴 ExitConfig schema**，改現有 5 字段（min_net_floor / min_peak_atr / giveback_base/floor / stale_peak_ms / min_hold_secs）為 percentile-derived；calibrator cron + manual approve（per memory `feedback_env_config_independence` 自動 IPC 寫風控值風險高）；per-strategy stratification + rolling 14d + 7d embargo + ≥200 rows/strategy；ETA ~5/10。
+
+2. **EDGE-P2-flip SOP**：flip 範圍是 **Combine Layer** `RiskConfig.exit.shadow_enabled`（**不是** ExecutorAgent shadow_mode，後者是 G3-02/G3-03）；acceptance = healthcheck [15] 24h agreement ≥95% + per-strategy 分層 ≥95%；推 IPC patch 直接 flip（非灰度，因 Combine 不影響真實決策）+ manual revert SOP（90s 內）；P1-10 並行 = passive 觀察 maker fee（不阻塞）；與 EX-04 / SM-02 物理隔離。
+
+3. **G2-03 Option B**：採 **B2 候選**（擴 `RiskConfig.per_strategy.StrategyOverride` 加 4 個 SL/TP override 字段），非 strategy params 也非 Strategy trait hook；3 道 enforce（validate / runtime cap / calibrator dry-run）守 P1 硬頂；G2-02 counterfactual → G2-03 binding **必 manual approve**（QC §Q2 預期 alpha 結構問題，自動 binding 會掩蓋根本問題）；G2-03 強制依賴 G2-02 完成；per-regime override 留 G2-03-FUP。
+
+### 派發架構建議（給 PM 第三波）
+
+| RFC | E1 子任務 | E1 instance | isolation | 工時 |
+|---|---|---|---|---|
+| EDGE-P1b | T1 calibrator + T2 summary + T3 IPC restore + T4 healthcheck 升級（4 sub）| Alpha + Beta（並行 2） | 主樹 | 3.5d |
+| EDGE-P2-flip | T1 dry-run smoke + T2 healthcheck per-strategy + T3 SOP wrappers（3 sub） | Alpha + Beta（並行 2） | 主樹 | 2.5d |
+| G2-03 Option B | T1 schema + T2 risk_checks + T3 TOML + T4 SOP wrapper（4 sub）| Alpha worktree + Beta 主樹 | T1+T2 isolation worktree | 3d |
+
+**啟動順序**：3 RFC schema 部分可並行（T1）；EDGE-P1b + EDGE-P2-flip 可立即派；G2-03 schema 可同步起，但**binding 必等 G2-02 結論**（~5/03+）。
+
+### 關鍵架構發現
+
+1. **MaCrossoverParams 完全無 SL/TP 字段** — 全部走 `RiskConfig.limits` + `RiskConfig.agent`，無 per-strategy 切片；G2-03 是真實 gap（不是 cosmetic）。對比 bb_breakout 已有 trailing_stop_atr_mult 但只控 trailing 距離。
+2. **ExitConfig 8 字段 IPC 已通** — `patch_risk_config` deep-merge 直寫 `exit.*` 任意字段（test_g3_05 證明），EDGE-P1b 不需新 IPC method
+3. **shadow_enabled 與 shadow_mode 不可混淆** — 兩者分屬 Combine Layer (close-path) vs ExecutorAgent (intent-path)，物理隔離；EDGE-P2-flip 只動前者
+4. **G3-03 Phase B 已將 ExecutorAgent `_shadow_mode` 從 hardcoded 改為 IPC provider**（`executor_agent.py:140-181`）— 對齊根原則 #3
+5. **per-strategy override 唯一 active 機制是 RiskConfig.per_strategy** — 其他 over-engineering 候選（Strategy trait sl_tp_advice / MaCrossoverParams 內加字段）違反 separation of concerns
+
+### 治理對照亮點
+
+- 3 RFC 全部不觸碰 §四 5 項 live 硬邊界
+- §5.7 學習 ≠ 改寫 Live：3 RFC 寫入路徑均經 IPC + manual approve
+- §5.4 策略不能繞過風控：G2-03 三道 enforce 確保 override ≤ P1 max
+- memory `feedback_risk_changes_scoped`：每個 RFC 範圍精準，不連帶改其他風控
+
+### 沒做的事（E1/E2 領域）
+
+- 沒寫 calibrator 實作代碼（T1）
+- 沒寫 risk_checks 接線代碼（T2）
+- 沒跑 cargo test / pytest
+- 沒 spawn sub-agent（主 agent 串行寫即可）
+
+### 教訓備忘
+
+- **shadow_enabled vs shadow_mode 字面相近但語意完全不同** — 未來任何 RFC 寫此類字段必先註明物理層次與控制平面
+- **「per-strategy 定制」3 候選層次** B1/B2/B3 各有 separation of concerns trade-off，B2 (RiskConfig.per_strategy 擴展) 最低架構債（與既有 G3-02 ExecutorConfig 模式對齊）
+- **manual approve > 自動 binding** 適用所有 W3 階段風控值寫入（calibrator / counterfactual / shadow flip）— 統一 SOP 模式
+
+### 報告索引追加
+
+| 日期 | 報告類型 | 文件位置 |
+|------|---------|---------|
+| 2026-04-26 | EDGE-P1b 7 維閾值 bind contract RFC | workspace/reports/2026-04-26--edge_p1b_7dim_bind_rfc.md |
+| 2026-04-26 | EDGE-P2-flip shadow→live SOP RFC | workspace/reports/2026-04-26--edge_p2_flip_sop_rfc.md |
+| 2026-04-26 | G2-03 ma_crossover SL/TP Option B RFC（推 B2 RiskConfig.per_strategy 擴展）| workspace/reports/2026-04-26--g2_03_option_b_rfc.md |
+
+---

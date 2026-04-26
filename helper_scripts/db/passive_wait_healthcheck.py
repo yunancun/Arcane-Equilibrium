@@ -54,6 +54,11 @@ Checks（each prints PASS / FAIL / WARN with a one-line explanation）:
                                           catches scheduler wedged / engine restart-without-rebind /
                                           AI service down causing exponential backoff to 4h.
                                           PASS when scheduler unbound (Demo missing — by design).
+  [18] disabled_strategy_inventory     — G2-06 new (2026-04-26): pure observability listing
+                                          strategies with [<name>].active=false in
+                                          strategy_params_demo.toml. CLAUDE.md §三 drift defense
+                                          (G6-04) — ensures disabled strategies stay visible so
+                                          future audits can't "forget" them. Always PASS.
   [Xa] leader_election_health          — G6-01 new: edge_estimator_scheduler flock file age +
                                           leader-PID liveness; catches stale-lock / dead-leader
                                           drift that masks scheduler silent-death (edge_estimates
@@ -605,15 +610,134 @@ def check_intents_writer_ratio(cur) -> tuple[str, str]:
     return ("PASS", summary)
 
 
+def _read_bb_breakout_active_from_toml() -> tuple[bool | None, str]:
+    """G2-06 (2026-04-26): parse `[bb_breakout].active` from
+    `settings/strategy_params_demo.toml`.
+
+    Returns ``(value, diagnostic)``. ``value`` is True/False on successful
+    parse + key lookup, ``None`` on any fail-soft condition (file missing /
+    parse error / key absent / non-bool). ``diagnostic`` carries the
+    human-readable reason for the ``None`` branch.
+
+    Mirrors `_read_shadow_enabled_from_toml` shape; uses Python 3.11+
+    ``tomllib`` (already used elsewhere in this codebase). No external
+    dependency added. Reads the **actual value** rather than mtime as a
+    state proxy — operator can hand-edit TOML and mtime would skew.
+
+    G2-06：讀 demo strategy_params TOML 的 `[bb_breakout].active` 真值，
+    fail-soft 回 ``None``。與 `_read_shadow_enabled_from_toml` 同形狀。
+    用 tomllib（3.11+，codebase 既有），刻意取真值而非 mtime。
+    """
+    try:
+        import tomllib  # type: ignore[import-not-found]
+    except ImportError:
+        return (None, "tomllib unavailable (Python <3.11?)")
+
+    base = Path(os.environ.get("OPENCLAW_BASE_DIR", str(Path.home() / "BybitOpenClaw/srv")))
+    toml_path = base / "settings" / "strategy_params_demo.toml"
+
+    if not toml_path.exists():
+        return (None, f"strategy_params_demo.toml not found at {toml_path}")
+
+    try:
+        with toml_path.open("rb") as f:
+            data = tomllib.load(f)
+    except Exception as e:
+        # Fail-soft: TOML parse error degrades to original triage logic.
+        # fail-soft：TOML parse 失敗則降級走原 triage。
+        return (None, f"TOML parse error: {e}")
+
+    section = data.get("bb_breakout")
+    if not isinstance(section, dict):
+        return (None, "[bb_breakout] section absent in strategy_params_demo.toml")
+
+    val = section.get("active")
+    if not isinstance(val, bool):
+        return (None, f"[bb_breakout].active missing or non-bool (got {val!r})")
+
+    return (val, "ok")
+
+
+def check_disabled_strategy_inventory() -> tuple[str, str]:
+    """[18] disabled-strategy inventory — pure observability, never FAIL.
+
+    G2-06 (2026-04-26): CLAUDE.md §三 drift防線 (G6-04). When a strategy is
+    disabled at TOML level (`active=false`), we want it to remain visible
+    in healthcheck output so future audits can't "forget" disabled
+    strategies. This check parses `settings/strategy_params_demo.toml`,
+    walks every `[<strategy>]` section, and lists those with
+    ``active=false``. Always returns PASS — purely informational.
+
+    Phase 1a / first-run note: when no strategies are disabled, the check
+    reports "no disabled strategies" + PASS (still useful as a
+    structural check that the TOML parse works at all).
+
+    [18] disabled 策略 inventory — 純觀察性，永遠不 FAIL。
+    G2-06（2026-04-26）：CLAUDE.md §三 drift 防線（G6-04）。策略 TOML
+    disable（active=false）時須在 healthcheck 輸出可見，避免未來 audit
+    「忘了還有這策略」誤撿。讀 demo TOML，列出 active=false 策略。
+    永遠 PASS（純記錄性）。
+    """
+    try:
+        import tomllib  # type: ignore[import-not-found]
+    except ImportError:
+        return ("PASS", "tomllib unavailable (Python <3.11?), inventory unavailable")
+
+    base = Path(os.environ.get("OPENCLAW_BASE_DIR", str(Path.home() / "BybitOpenClaw/srv")))
+    toml_path = base / "settings" / "strategy_params_demo.toml"
+
+    if not toml_path.exists():
+        return ("PASS", f"strategy_params_demo.toml not found at {toml_path} (skip)")
+
+    try:
+        with toml_path.open("rb") as f:
+            data = tomllib.load(f)
+    except Exception as e:
+        return ("PASS", f"TOML parse error (skip): {e}")
+
+    disabled: list[str] = []
+    active: list[str] = []
+    for name, section in data.items():
+        if not isinstance(section, dict):
+            continue
+        val = section.get("active")
+        if isinstance(val, bool):
+            if val is False:
+                disabled.append(name)
+            else:
+                active.append(name)
+
+    if not disabled:
+        return (
+            "PASS",
+            f"no disabled strategies (active count={len(active)}: {', '.join(sorted(active)) or '(none)'})",
+        )
+
+    return (
+        "PASS",
+        f"disabled strategies: {', '.join(sorted(disabled))} "
+        f"(active count={len(active)}: {', '.join(sorted(active)) or '(none)'})",
+    )
+
+
 def check_bb_breakout_post_deadlock_fix(cur) -> tuple[str, str]:
     """[12] bb_breakout post-FIX-26-DEADLOCK-1 fill rate — P1-11 (1) Phase 1.
+
+    G2-06 (2026-04-26): If `[bb_breakout].active=false` in
+    `settings/strategy_params_demo.toml` (per PA RFC `2026-04-26 G2-06`
+    permanent disable), this check returns PASS (skip) immediately —
+    silencing the FAIL noise so other dormancy checks remain visible.
+    Re-enabling the strategy (active=true) restores the original 3-state
+    triage logic without further code changes.
 
     Context: 2026-04-24 sweep + Rust commit ``bcc5401`` discovered + fixed
     `squeeze_detected_ms` permanent-deadlock bug. Pre-fix, bb_breakout had
     14d 0 fills (symbol-locked after first failed-entry expiry). Post-fix
-    + ``--rebuild`` deploy, bb_breakout should exit permanent-dormant.
+    + ``--rebuild`` deploy + multiple validation cycles still showed 0 fills,
+    confirming F1 1m bandwidth mis-scale is structural (not deadlock
+    residue). PA RFC 2026-04-26 chose option C (permanent disable).
 
-    Three-state triage:
+    Three-state triage (when active=true):
       - 7d entries (`strategy_name='bb_breakout'`, no risk_close prefix):
         - 0 over 7d post-deploy → FAIL (fix didn't work or thresholds still
           mis-scaled per F1; check engine binary rebuild + thresholds)
@@ -628,9 +752,23 @@ def check_bb_breakout_post_deadlock_fix(cur) -> tuple[str, str]:
     7d-window strategy fill count without deploy gating.
 
     [12] FIX-26-DEADLOCK-1 部署後 bb_breakout 是否真的脫離 permanent-dormant。
-    7d entry 數三態：0=FAIL（修沒生效或閾值還錯）/ 1-5=WARN（出 dormant 但極低）/
-    >=6=PASS（正常運作）。--rebuild 部署前此檢查預期 FAIL。
+    G2-06（2026-04-26）：若 demo TOML `[bb_breakout].active=false`（PA RFC
+    永久 disable）則直接 PASS 跳過，避免持續 FAIL 噪音蓋過真 alarm；TOML
+    flip 回 true 後自動恢復原三態邏輯，無需改碼。
+    7d entry 數三態（active=true 時）：0=FAIL（修沒生效或閾值還錯）/
+    1-5=WARN（出 dormant 但極低）/ >=6=PASS（正常運作）。
     """
+    # G2-06 (2026-04-26): TOML-driven disable skip — PA RFC permanent disable.
+    # Read demo strategy_params TOML; if [bb_breakout].active=false, skip.
+    # Fail-soft: any TOML read error falls through to original triage logic.
+    # G2-06：讀 demo TOML，active=false 則跳過；TOML 讀失敗 fail-soft 走原邏輯。
+    bb_active, _diag = _read_bb_breakout_active_from_toml()
+    if bb_active is False:
+        return (
+            "PASS",
+            "[12] bb_breakout disabled by G2-06 (active=false in TOML); fill check skipped",
+        )
+
     try:
         n_7d = _scalar(cur,
             "SELECT COUNT(*) FROM trading.fills "
@@ -1927,6 +2065,16 @@ def main() -> int:
     # （engine.log tail parse），抓 wedge 而 "params 沒動" 看不出來的盲點。
     s, m = check_strategist_cycle_fresh()
     results.append(("[16] strategist_cycle_fresh", s, m))
+
+    # [18] G2-06 (2026-04-26): disabled-strategy inventory — CLAUDE.md §三
+    # drift 防線 (G6-04). Pure observability, always PASS — lists strategies
+    # with [<name>].active=false in strategy_params_demo.toml so future
+    # audits can't forget about them.
+    # [18] G2-06（2026-04-26）：disabled 策略 inventory — CLAUDE.md §三 drift
+    # 防線（G6-04）。純記錄性，永遠 PASS — 列出 demo TOML 中 active=false
+    # 的策略，確保未來 audit 不會「忘了還有這策略」。
+    s, m = check_disabled_strategy_inventory()
+    results.append(("[18] disabled_strategy_inventory", s, m))
 
     # output
     any_fail = False

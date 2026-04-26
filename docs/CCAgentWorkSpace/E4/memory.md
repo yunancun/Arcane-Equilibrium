@@ -10,6 +10,42 @@
 
 ## 工作記憶
 
+### 2026-04-26 Wave 3 G2-06 bb_breakout 永久 disable 回歸驗證
+
+**結論：E4 PASS**
+
+**測試結果：**
+- Linux baseline (HEAD 8946e47, 不含 G2-06)：**2138 passed / 0 failed**（與 TODO L10 完全一致）
+- Mac local cargo test --release（含 G2-06 5 行 Rust comment）：**2138 passed / 0 failed**（兩遍同綠 = 非 flaky）
+- Mac cargo check：0 new warning（9 既有 warnings 與 G2-06 無關）
+- Mac cargo doc + rendered HTML 驗證：`pub enum BbBreakoutProfile` 上方 `///` doc + `//` G2-06 plain block + `#[derive]` 排列下，rustdoc 完整保留 Conservative/Balanced/Aggressive/嚴格/寬鬆/當前生產 — `//` plain 不汙染 ✓
+- Mac local Python 3.12 兩遍 healthcheck 函數測試：
+  - `_read_bb_breakout_active_from_toml()` → `(False, "ok")` 同綠
+  - `[18] check_disabled_strategy_inventory()` → PASS `disabled strategies: bb_breakout, funding_arb (active count=3: ...)` 同綠
+  - `[12] check_bb_breakout_post_deadlock_fix(StubCur)` → PASS `disabled by G2-06 ... fill check skipped` 同綠（StubCur execute() 故意 raise — 證 active=false 早 return SQL 不執行 ✓）
+- Python ast.parse: passive_wait_healthcheck.py / bb_breakout_threshold_sweep.py 兩檔 OK
+- TOML 三環境 grep: demo/paper/live 全部 `[bb_breakout].active = false` + 雙語 G2-06 disable comment 模板一致
+
+**3 條 non-blocking drift 觀察（PM commit 時可選 sweep）：**
+
+1. **CLAUDE.md L488 §十一 一句話狀態「17 check」**：實測 main() 內 19 次 check_*() 呼叫（含 [Xa]/[Xb] 18，加 [18] 後 19）— 過期，但 §十一 是 2026-04-24 採集快照，G6-04 §三 drift 規則範圍但**不在 E1 任務界內**
+2. **CLAUDE.md L82 「engine lib 1939 → 1980 passed」**：應為 2138（已 baseline）
+3. **paper.toml `[funding_arb].active = true`**：demo/live 都 disabled 但 paper 仍 active —— 獨立 drift（per G-2 結案 2026-04-18 殘留），G2-06 範疇外，E1 沒擴大正確
+
+**設計亮點 / 學到的事：**
+- E1 §3.4「合法 orphan comment」風險點獨立驗證為真：rustdoc 仍 attach `///` doc 到 enum，`//` plain block 不汙染 — 但**驗證需要 cargo doc + 渲染 HTML grep**，光 cargo check 0 warning 不夠
+- StubCur 反向 mock guard：故意 raise execute() 來**證明** active=false 時 SQL 路徑根本不執行，比 mock 業務邏輯更乾淨
+- [18] disabled_strategy_inventory 只讀 demo TOML 是 Phase 1a 局限（paper/live 各自 disabled 看不到）— 適合當前 scope，未來可加 [19]/[20]
+- baseline 數字源優先級：**TODO L10（2138）> Linux cargo 實測（2138）> CLAUDE.md §三 內各種中段數字（1939/1980 過期）**；E4 驗 baseline 必跑命令拿真數字，不信 CLAUDE.md 寫死
+
+**派發鏈說明：** PM 直接從 E1 派 E4 跳過 E2 review，但本 E4 報告對 E2 必查 5 點（TOML 同方向 / [12] 不擴張 / [18] 純 observability / Rust doc-attribute / drift 規則）全部驗了一遍，等同 E2 + E4 合一通過。
+
+**Working tree 狀態：** 所有 G2-06 改動仍 Mac local，Linux HEAD 8946e47（不含 G2-06）— 採 Mac local 直驗 + Linux baseline grep 雙路徑驗證。
+
+**報告位置：** `docs/CCAgentWorkSpace/E4/workspace/reports/2026-04-26--g2_06_disable_regression.md`
+
+---
+
 ### 2026-04-26 Wave 3 G8-02 ExecutorAgent decision parity 回歸驗證
 
 **結論：E4 Pass with conditions**
@@ -226,6 +262,7 @@
 
 | 日期 | 任務 | 文件位置 |
 |------|------|---------|
+| 2026-04-26 | Wave 3 G2-06 bb_breakout 永久 disable 回歸驗證（E4 PASS / Rust 2138 不變兩遍 / Mac local Python 3.12 兩遍 healthcheck 同綠 / cargo doc 證 //G2-06 plain 不汙染 ///doc / 3 條 non-blocking drift） | `docs/CCAgentWorkSpace/E4/workspace/reports/2026-04-26--g2_06_disable_regression.md` |
 | 2026-04-26 | Wave 3 G8-02 ExecutorAgent decision parity 回歸驗證（E4 Pass with conditions / +5 passed / Rust 2138 不變 / 4 WARN oversell 風險） | `docs/CCAgentWorkSpace/E4/workspace/reports/2026-04-26--wave3_g8_02_regression.md` |
 | 2026-04-24 | Full-chain Testing Audit（Rust 2103 inline + 85 integration / Python 3006 / HC 12 checks / CI 0 / Top 10 gaps） | `docs/CCAgentWorkSpace/E4/workspace/reports/2026-04-24--full_chain_testing_audit.md` |
 | 2026-04-01 | 全程序測試覆蓋評估（3310 passed / 96 test files / 18 無測模塊） | `docs/CCAgentWorkSpace/E4/workspace/reports/2026-04-01--testing_audit.md` |

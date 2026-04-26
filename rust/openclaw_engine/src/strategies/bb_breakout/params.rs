@@ -77,6 +77,11 @@ pub enum DonchianMode {
 ///   == default()`，測試固化。
 /// - `Aggressive`：最鬆 squeeze + 窄 gap + 最低 volume + 最短 persistence，信號多
 ///   但信心低；建議搭配 `DonchianMode::Score` 作 dormant 策略救援組合。
+//
+// G2-06 (2026-04-26): strategy permanently disabled at TOML level (active=false).
+// BbBreakoutProfile retained for future 5m timeframe RFC if PA approves.
+// G2-06（2026-04-26）：策略已於 TOML 層永久 disable（active=false）。
+// BbBreakoutProfile 保留為日後若 PA approve 升 5m timeframe 時可用。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum BbBreakoutProfile {
