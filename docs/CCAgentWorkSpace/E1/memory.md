@@ -500,3 +500,42 @@ PA 派發 Tier 3 並行批次 5 件之一：補 Layer 2 工具箱兩個工具（
 - **commit + push 政策**：PA prompt Step 6「強制 commit + push，不要 staging dir」+ system prompt「不直接 commit」雙標。優先順序：PA 派發 prompt 對 G3-07 的特殊授權 > E1 角色 default。執行：(a) Mac git add 5 files（避開隔壁 sub-agent WIP `docs/CCAgentWorkSpace/{QA,TW}/`）(b) commit + push origin（commit `ac6c09a`）(c) Linux `git checkout --` 還原暫存 + `rm` 兩個新檔 + `git pull --ff-only` 同步 origin + `rm -rf ~/.staged_g3_07` 清乾淨 (d) Linux 自 git tree 重跑 pytest 確認 136/0。
 - **`OPENCLAW_BYBIT_ENV` 不是既有 env**：搜了一輪發現 production code 沒這個 env（trade-core 用 RiskConfig + bybit slot dir），sibling 自帶 fallback "demo"；operator 啟用 G3-07 時若需 mainnet endpoint 設 `OPENCLAW_BYBIT_ENV=mainnet`。Lesson：tool 設計需 self-contained env namespace，不依賴 production engine env（避免 Mac local 跑測試因 env 差異 fail）。
 - **報告檔位置**：`docs/CCAgentWorkSpace/E1/workspace/reports/2026-04-26--g9_02_ws_resilience.md`（6 節結構 per CLAUDE.md §七）。
+
+## G3-08 Phase 1 Sub-task A — Rust h_state_cache + ipc_server handlers（2026-04-26 commit pending）
+
+### 任務
+PA design plan commit `7564d07`（959 行 SSOT）§4 Option C 混合模型 + §6 Rust 端結構 + §10.1 Phase 1 prompt template。範圍 = Sub-task A（Rust E1，可獨立並行 Sub-task B Python）：建 `h_state_cache/{mod,types,poller,tests}.rs` + `ipc_server/handlers/h_state.rs`（3 handler）+ slots/dispatch/server/connection 接線 + main_boot_tasks env-gated spawn。DEFAULT-OFF env-gate `OPENCLAW_H_STATE_GATEWAY=1` 嚴格字串比對。
+
+### 改動（4 新檔 + 6 改檔）
+1. **新檔 `h_state_cache/mod.rs`（255 行）**：HStateCache struct（parking_lot::RwLock<HStateSnapshot> + AtomicI64 fetched_at_ms + 3 個 AtomicU64 計數器）+ store_snapshot/snapshot/staleness_ms/is_stale/build_status methods + `is_gateway_enabled()` env helper + STALENESS_THRESHOLD_MS 常量（30s）+ unix_now_ms 工具
+2. **新檔 `h_state_cache/types.rs`（254 行）**：H1Stats / H2BudgetState / H3RouteStats / H4ValidationStats / H5CostStats / AgentState / HStateSnapshot / HStateStatus 8 個 serde struct，全 `#[serde(default)]` forward-compat；3 unit tests（forward-compat / empty dict / null vs number）
+3. **新檔 `h_state_cache/poller.rs`（384 行）**：HStateFetcher trait + StubHStateFetcher（Phase 1 回 default snapshot）+ FetchError enum + InvalidationSender/Receiver type alias（tokio::sync::watch）+ make_invalidation_channel + push_invalidation + spawn_h_state_poller + run_poller_loop + run_one_poll；4 unit tests（poll success / failure preserves last good / dedup channel collapses N pushes / loop initial tick + invalidation 額外 poll）
+4. **新檔 `h_state_cache/tests.rs`（209 行）**：8 unit tests（fresh_cache_is_stale / store_marks_fresh / older 30s 標 stale 但仍可讀 / build_status 計數 / gateway_enabled flag / DEFAULT-OFF strict 比對 / 8 並行 read + writer 不 panic / default state）+ ENV_TEST_LOCK mutex 序列化 env mutation
+5. **新檔 `ipc_server/handlers/h_state.rs`（323 行）**：3 handler（query_h_state_full / get_h_state_status / invalidate_h_state）+ gateway_disabled_response 共用 helper；6 unit tests（uninjected/injected × 3 method + 100-stress invalidate）
+6. **改 `lib.rs`**：加 `pub mod h_state_cache;`
+7. **改 `ipc_server/slots.rs`**：加 `HStateCacheSlot` type alias + 大段中英 MODULE_NOTE
+8. **改 `ipc_server/handlers/mod.rs`**：加 `mod h_state;` + `pub(in crate::ipc_server) use h_state::{...};`
+9. **改 `ipc_server/dispatch.rs`**（572→590 行 +18）：dispatch_request 簽名 +2 args（`&HStateCacheSlot` + `&Option<InvalidationSender>`）+ 3 method arms（query_h_state_full / get_h_state_status / invalidate_h_state）+ 雙語 inline comment
+10. **改 `ipc_server/server.rs`**（291→336 行 +45）：IpcServer struct +2 fields + `h_state_cache_slot()` getter + `set_h_state_invalidation_sender()` setter + run() accept loop +2 clone 進 handle_connection
+11. **改 `ipc_server/connection.rs`**（207→254 行 +47）：handle_connection 簽名 +2 args + dispatch_request call site +2 ref
+12. **改 `ipc_server/mod.rs`**：facade re-export 加 `HStateCacheSlot`
+13. **改 `main_boot_tasks.rs`**（323→412 行 +89）：新 `spawn_h_state_poller_if_enabled` fn — `is_gateway_enabled()` 短路 → 否則 build cache + invalidation channel + spawn StubHStateFetcher poller + tokio::spawn late-inject cache slot；返回 Option<InvalidationSender>
+14. **改 `main.rs`**（+22 行）：在 `ipc_server.run()` detach 前呼叫 `spawn_h_state_poller_if_enabled`，env=1 時 `set_h_state_invalidation_sender(tx)`
+15. **改 `ipc_server/tests/mod.rs`**：加 `empty_h_state_cache_slot()` fixture
+16. **改 6 個 tests/ sibling 檔**（dispatch.rs / config.rs / phase4.rs / risk.rs / snapshot.rs / strategy.rs）：45 個 dispatch_request call sites 機械加 `&empty_h_state_cache_slot(),\n&None,` 兩行（python script 一次到位，per-call 2 行 = 90 行 +）+ 6 個 use 行加 `empty_h_state_cache_slot`
+
+### 教訓
+- **PA design plan SSOT 必看**：959 行 design 全部讀完才開工。§5 IPC schema + §6 Rust 結構 + §10.1 Phase 1 acceptance（12+ tests / DEFAULT-OFF / cargo test 綠）= 必須對到的驗收線。design 推 DashMap 但項目沒 dashmap dep，改用既有 `parking_lot::RwLock<HashMap>` pattern（per main_pipelines.rs / paper_state/ 同款）— SLA p99 < 1μs 仍達標（design 估 < 100ns，parking_lot uncontended read 50-200ns），結構決策不偏離 §2 目標。
+- **45 個 test sites 機械擴 args**：dispatch_request 簽名加 2 args，每個 test call 末尾必須加對應 `&empty_h_state_cache_slot(),\n&None,`。手動編輯太慢；用 Python script 把 `        &None,\n    )` 替換為 `        &None,\n        &empty_h_state_cache_slot(),\n        &None,\n    )`，6 檔 45 處一次完成。**Lesson：dispatch_request signature 是 IPC server 的中心化測試契約，每改一次都會牽動 ~50 sites；下次若再加 slot 應考慮把 args 包進 struct（如 `DispatchDeps`），改 struct 不改簽名**。
+- **DEFAULT-OFF zero-overhead 雙路徑驗證**：env=0 路徑 (a) `is_gateway_enabled()` 早返 false (b) `spawn_h_state_poller_if_enabled` 早返 None — 不分配 Arc / 不 spawn task / slot 保 None / invalidation_tx 保 None / 3 個 IPC handler 看到 None 回 `gateway_disabled` payload（無 DB / 無 IPC roundtrip）；env=1 路徑 build cache + spawn poller + late-inject slot + register IPC handlers active。雙路徑都有 unit test 覆蓋（gateway_default_off_unless_env_strict_one + populated_slot tests）。
+- **嚴格 "1" 比對 vs 「true / yes」**：`std::env::var(ENV_GATEWAY_FLAG).as_deref() == Ok("1")` — `"true"` / `"yes"` / `"0"` / 未設皆視為關。test 明確驗 4 路徑（覆蓋 typo 風險）。
+- **Phase 1 stub fetcher 範式**：StubHStateFetcher 回 `Ok(default())`，env=1 路徑 immediately observable end-to-end（cargo test 綠 + IPC handler live）但讀回是 `version=0` 空 dict。Sub-task B/C 落地後替換為真實 EngineIPCClient reverse-IPC client 即可，Phase 1 邊界清晰。
+- **tokio::sync::watch 自然 dedup**：N 次 push 之間若 receiver 沒呼 `changed()`，後續 N-1 次 push 自動合併為 1 次通知（單槽語意）。比 mpsc 簡單可靠（不必調隊列深度），符合 PA §4.1 「30s 內 N 次 invalidation 合併為一次 poll」。
+- **Test 序列化 env mutation**：`gateway_default_off_unless_env_strict_one` 需要 set/unset env，但 cargo 並行跑測試 → race。用 process-wide `static ENV_TEST_LOCK: std::sync::Mutex<()>` 序列化此類測試 + 每分支 restore prev value，確保並行測試不互相污染。
+- **dispatch.rs 加 3 arm 仍在 §九 範圍**：572 → 590 行 +18，遠未撞 800 警告。再加新 IPC method 仍有充足空間。
+- **main_boot_tasks.rs 跨越 350 行**：323 → 412 +89 接 `spawn_h_state_poller_if_enabled` fn（含詳細雙語 docstring），仍 < 800。
+- **commit 政策**：PA 派發 prompt 第 6 節明確「per lessons.md 2026-04-26 直接 commit + push，不要 staging dir」；本任務在 isolation worktree 內，commit 後 push 到 origin，worktree harness 會自動 merge 回 main。E1 不直接 commit 是 default；PA 顯式授權則 follow PA。
+- **2198 lib tests 全綠**：baseline 2176（前 G9-02 後）→ +22 h_state tests = 2198 / 0 fail。0 既有測試破壞（45 sites 機械擴 args 確保契約一致）。
+- **pattern 鏡射 G3-03 但流向相反**：G3-03 ExecutorConfigCache（Rust SSOT，Python pull）vs G3-08 HStateCache（Python SSOT，Rust pull）。Cache + 10s poll + fail-closed default + graceful degrade 三件套通用；新增 push 通道（invalidate_h_state IPC）解 PA §4 識別的 Option A 全 push 量爆炸 / Option B 純 pull 撞 SLA 兩個極端。
+- **跨平台 0 風險**：純 Rust 用 std + tokio + serde + parking_lot 既有 workspace dep；無 OS 特化。env 判定 strict 字串比對（`OPENCLAW_H_STATE_GATEWAY=1`），Mac/Linux 行為一致。
+- **報告檔位置**：直接傳給 parent agent（per system prompt 不寫 .md report 到 repo）。

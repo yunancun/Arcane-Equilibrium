@@ -38,9 +38,10 @@ use super::handlers_config::{handle_get_config, handle_patch_config};
 use super::protocol::{
     JsonRpcRequest, JsonRpcResponse, ERR_INTERNAL, ERR_INVALID_REQUEST, ERR_METHOD_NOT_FOUND,
 };
-use super::slots::{BudgetTrackerSlot, TeacherLoopSlot};
+use super::slots::{BudgetTrackerSlot, HStateCacheSlot, TeacherLoopSlot};
 use super::PerEngineRiskStores;
 use crate::config::{BudgetConfig, ConfigManager, ConfigStore, LearningConfig, RiskConfig};
+use crate::h_state_cache::poller::InvalidationSender;
 use crate::tick_pipeline::{PipelineCommand, PipelineSnapshot};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -62,6 +63,8 @@ pub(crate) async fn dispatch_request(
     scanner_registry: &Option<Arc<crate::scanner::registry::SymbolRegistry>>,
     strategist_counters: &Option<Arc<crate::strategist_scheduler::CycleCounters>>,
     live_auth_recheck_tx: &Option<tokio::sync::mpsc::Sender<()>>,
+    h_state_cache: &HStateCacheSlot,
+    h_state_invalidation_tx: &Option<InvalidationSender>,
 ) -> JsonRpcResponse {
     let req: JsonRpcRequest = match serde_json::from_str(line) {
         Ok(r) => r,
@@ -394,6 +397,21 @@ pub(crate) async fn dispatch_request(
         // PIPELINE-SLOT-1 Phase 3：Live 授權 watcher 快路徑喚醒
         "trigger_live_auth_recheck" => {
             handle_trigger_live_auth_recheck(id, live_auth_recheck_tx)
+        }
+        // ── G3-08 H State Gateway Phase 1 (2026-04-26) ──
+        // Three reverse-IPC methods backed by `h_state_cache::HStateCache`,
+        // gated by `OPENCLAW_H_STATE_GATEWAY=1` (DEFAULT-OFF). When the
+        // env-gate is off, the cache slot stays None and all three
+        // handlers return a structured `gateway_disabled` payload rather
+        // than an error — Python callers render grey-state without raising.
+        // 三個反向 IPC method，由 `h_state_cache::HStateCache` 支撐，受
+        // `OPENCLAW_H_STATE_GATEWAY=1`（DEFAULT-OFF）控管。env-gate 關時
+        // cache slot 保持 None，三 handler 回結構化 `gateway_disabled`
+        // payload 而非 error — Python caller 顯示灰燈不 raise。
+        "query_h_state_full" => handle_query_h_state_full(id, h_state_cache).await,
+        "get_h_state_status" => handle_get_h_state_status(id, h_state_cache).await,
+        "invalidate_h_state" => {
+            handle_invalidate_h_state(id, &req.params, h_state_invalidation_tx).await
         }
         _ => JsonRpcResponse::error(
             id,

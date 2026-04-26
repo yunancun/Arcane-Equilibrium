@@ -523,6 +523,32 @@ async fn async_main(
     // below. Mirrors the late-injection pattern used by budget/teacher/audit.
     // G3-11：在 IPC server detach 前取 slot handle，scheduler spawn 後 late-inject counters。
     let strategist_counters_slot = ipc_server.strategist_counters_slot();
+
+    // G3-08 H State Gateway Phase 1 (2026-04-26): conditionally spawn the
+    // Rust-side cache + 10s poll daemon, gated by
+    // `OPENCLAW_H_STATE_GATEWAY=1` (DEFAULT-OFF). When env-gate is missing
+    // or any value other than "1", `spawn_h_state_poller_if_enabled`
+    // returns None and the slot stays uninjected — IPC handlers respond
+    // with `gateway_disabled` payload (zero overhead path).
+    //
+    // Must happen BEFORE `ipc_server.run()` detach because
+    // `set_h_state_invalidation_sender` requires `&mut self`.
+    //
+    // G3-08 H State Gateway Phase 1：條件 spawn cache + 10s poll daemon，
+    // 受 `OPENCLAW_H_STATE_GATEWAY=1`（DEFAULT-OFF）控管。env-gate 未設或
+    // 值不是 "1" 時 `spawn_h_state_poller_if_enabled` 回 None，slot 不被
+    // 注入 — IPC handler 回 `gateway_disabled` payload（零負擔路徑）。
+    //
+    // 必須在 `ipc_server.run()` detach 前完成，
+    // 因為 `set_h_state_invalidation_sender` 需要 `&mut self`。
+    let h_state_cache_slot_handle = ipc_server.h_state_cache_slot();
+    if let Some(h_state_inv_tx) = main_boot_tasks::spawn_h_state_poller_if_enabled(
+        &h_state_cache_slot_handle,
+        &cancel,
+    ) {
+        ipc_server.set_h_state_invalidation_sender(h_state_inv_tx);
+    }
+
     let ipc_handle = tokio::spawn(async move {
         if let Err(e) = ipc_server.run().await {
             error!(error = %e, "IPC server error / IPC 服務器錯誤");

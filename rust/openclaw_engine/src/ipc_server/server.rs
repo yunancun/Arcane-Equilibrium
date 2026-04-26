@@ -32,10 +32,11 @@ use super::connection::handle_connection;
 use super::engine_routing::EngineCommandChannels;
 use super::protocol::IpcError;
 use super::slots::{
-    AuditPoolSlot, BudgetTrackerSlot, StrategistCountersSlot, TeacherLoopSlot,
+    AuditPoolSlot, BudgetTrackerSlot, HStateCacheSlot, StrategistCountersSlot, TeacherLoopSlot,
 };
 use super::PerEngineRiskStores;
 use crate::config::{BudgetConfig, ConfigManager, ConfigStore, LearningConfig};
+use crate::h_state_cache::poller::InvalidationSender;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::net::UnixListener;
@@ -88,6 +89,19 @@ pub struct IpcServer {
     /// [`IpcServer::set_live_auth_recheck_sender`] 設定。無 Live 管線時
     /// 為 `None`。
     live_auth_recheck_tx: Option<tokio::sync::mpsc::Sender<()>>,
+    /// G3-08 H State Gateway Phase 1 (2026-04-26): late-injected slot for
+    /// the Rust-side cache of Python H1-H5 + 5-Agent state. Stays None
+    /// when `OPENCLAW_H_STATE_GATEWAY=1` is not set (DEFAULT-OFF).
+    /// G3-08 H State Gateway Phase 1：Python H1-H5 + 5-Agent state 的
+    /// Rust 端 cache slot。`OPENCLAW_H_STATE_GATEWAY=1` 未設時保持 None
+    /// （DEFAULT-OFF）。
+    h_state_cache: HStateCacheSlot,
+    /// G3-08 H State Gateway Phase 1: invalidation channel sender. Set by
+    /// main_boot_tasks at the same time the cache + poller are spawned;
+    /// stays None when env-gate is off.
+    /// G3-08 H State Gateway Phase 1：invalidation channel sender。在
+    /// main_boot_tasks spawn cache + poller 時一起 set；env-gate 關時為 None。
+    h_state_invalidation_tx: Option<InvalidationSender>,
 }
 
 impl IpcServer {
@@ -113,7 +127,30 @@ impl IpcServer {
             scanner_registry: None,
             strategist_counters: Arc::new(RwLock::new(None)),
             live_auth_recheck_tx: None,
+            h_state_cache: Arc::new(RwLock::new(None)),
+            h_state_invalidation_tx: None,
         }
+    }
+
+    /// G3-08 H State Gateway Phase 1 (2026-04-26): get a clone of the
+    /// `HStateCacheSlot` for late injection from
+    /// `main_boot_tasks::spawn_h_state_poller_if_enabled`. Mirrors the
+    /// `budget_tracker_slot` / `teacher_loop_slot` / `audit_pool_slot`
+    /// pattern.
+    /// G3-08：取 cache slot handle 給 main_boot_tasks 在 env-gate 通過後注入。
+    pub fn h_state_cache_slot(&self) -> HStateCacheSlot {
+        Arc::clone(&self.h_state_cache)
+    }
+
+    /// G3-08 H State Gateway Phase 1 (2026-04-26): wire the invalidation
+    /// channel sender so the `invalidate_h_state` IPC method can push
+    /// hints to the poller. Call after the poller is spawned (paired with
+    /// `h_state_cache_slot()` injection).
+    /// G3-08：接入 invalidation channel sender，讓 `invalidate_h_state`
+    /// IPC method 可推 hint 給 poller。在 poller spawn 後呼叫
+    ///（與 cache slot 注入配對）。
+    pub fn set_h_state_invalidation_sender(&mut self, tx: InvalidationSender) {
+        self.h_state_invalidation_tx = Some(tx);
     }
 
     /// G3-11: get a clone of the `CycleCounters` slot for late injection
@@ -270,8 +307,16 @@ impl IpcServer {
                             let strategist_counters =
                                 self.strategist_counters.read().await.clone();
                             let live_auth_recheck_tx = self.live_auth_recheck_tx.clone();
+                            // G3-08: clone Arc handle to the H State cache slot —
+                            // each connection sees late-injected cache automatically
+                            // without requiring an IPC restart (mirrors strategist
+                            // counters / budget tracker / teacher loop patterns).
+                            // G3-08：複製 H State cache slot 的 Arc handle。
+                            // 每連線自動看到延後注入的 cache，不需重啟 IPC。
+                            let h_state_cache = Arc::clone(&self.h_state_cache);
+                            let h_state_invalidation_tx = self.h_state_invalidation_tx.clone();
                             tokio::spawn(async move {
-                                handle_connection(stream, config, cancel, data_dir, cmd_channels, budget_slot, teacher_slot, risk_stores, learning_store, budget_store, audit_pool, scanner_reg, strategist_counters, live_auth_recheck_tx).await;
+                                handle_connection(stream, config, cancel, data_dir, cmd_channels, budget_slot, teacher_slot, risk_stores, learning_store, budget_store, audit_pool, scanner_reg, strategist_counters, live_auth_recheck_tx, h_state_cache, h_state_invalidation_tx).await;
                             });
                         }
                         Err(e) => {
