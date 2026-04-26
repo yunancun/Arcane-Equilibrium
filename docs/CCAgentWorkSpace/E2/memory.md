@@ -56,6 +56,7 @@
 | 2026-04-26 | Tier 7 batch review 3 commits (4b30f5e/8241133/c6ed0b3) — T7.1 Rust H3 schema align T7.2 healthcheck [21] dust inventory T7.3 PA Phase 3 sub-task split | workspace/reports/2026-04-26--tier7_batch_review.md |
 | 2026-04-26 | Tier 8 batch review 4 commits (8cd257e/cf39415/71faf4c/79a808a) — T8.1 Sub-task 3-1 H2 + T8.2 Sub-task 3-2 H4 silent gap + T8.3 RFC §7.4 amend | workspace/reports/2026-04-26--tier8_batch_review.md |
 | 2026-04-26 | Tier 8 Track 4 supplementary 1-commit review (d1a2252) — Sub-task 3-3 H5 cost_logging / Phase 3 COMPLETE / G3-09 unblock | workspace/reports/2026-04-26--tier8_track4_e2_review.md |
+| 2026-04-26 | Tier 9 batch review 4 commits (de699df/642c34c/ee2cbcd/38f71c4) — T1 Phase 4 split RFC + T2 G3-09 RFC + T3a PUSH-BACK + T3b Option D inline; 1 LOW (T9-LOW-1 ratio direction lock-in) | workspace/reports/2026-04-26--tier9_batch_review.md |
 
 ## 歷史審查關鍵發現（累積記憶）
 
