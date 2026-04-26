@@ -334,6 +334,34 @@ impl TickPipeline {
                                     None
                                 };
                                 if let Some(ref tx) = self.order_dispatch_tx {
+                                    // F2 CROSS-SYMBOL-PRICE-CONTAMINATION-1
+                                    // audit (2026-04-26): `event.last_price`
+                                    // is safe here because `intent.symbol` ==
+                                    // `ctx.symbol` == `event.symbol` for every
+                                    // open path (verified across all 5 strategies
+                                    // — bb_breakout / bb_reversion / ma_crossover
+                                    // / grid_trading / funding_arb — each builds
+                                    // intents with `symbol: ctx.symbol.to_string()`
+                                    // inside their `on_tick(&ctx)` body). The
+                                    // `debug_assert!(strategy_actions.len() <= 1)`
+                                    // above plus the disjoint-borrow constraint
+                                    // on `strategies_mut()` keep this invariant
+                                    // single-threaded and trivially auditable.
+                                    // If a future strategy ever emits an
+                                    // `Open(intent)` whose `intent.symbol` differs
+                                    // from `ctx.symbol`, the `debug_assert!` won't
+                                    // catch it — the maintainer MUST switch this
+                                    // dispatch to `paper_state.latest_price(&intent.
+                                    // symbol)` with the same fallback chain as
+                                    // `execute_position_close` (commands.rs:~617).
+                                    // F2 跨交易對價格污染審計（2026-04-26）：此處
+                                    // `event.last_price` 安全，因為 `intent.symbol`
+                                    // == `ctx.symbol` == `event.symbol`（所有 5
+                                    // 個策略 on_tick 內部 intent 的 symbol 都用
+                                    // ctx.symbol 設置）。未來若新增策略在 Open
+                                    // 動作生成跨 symbol 的 intent，必須改為
+                                    // `paper_state.latest_price(&intent.symbol)`
+                                    // 並對齊 execute_position_close 的 fallback。
                                     let _ = tx.send(OrderDispatchRequest {
                                         symbol: intent.symbol.clone(),
                                         is_long: intent.is_long,
@@ -625,6 +653,20 @@ impl TickPipeline {
                                     // Shadow order: mirror paper fill to Demo API
                                     if let Some(ref tx) = self.order_dispatch_tx {
                                         self.exchange_seq = self.exchange_seq.wrapping_add(1);
+                                        // F2 CROSS-SYMBOL-PRICE-CONTAMINATION-1
+                                        // audit (2026-04-26): `fill.fill_price`
+                                        // here is the paper fill simulator's
+                                        // own resolved price (paper_state.
+                                        // apply_intent → resolve close price
+                                        // from `latest_price(intent.symbol)`),
+                                        // so by construction it belongs to
+                                        // `intent.symbol`, not the outer tick.
+                                        // Safe — no fallback chain needed.
+                                        // F2 跨交易對價格污染審計（2026-04-26）：
+                                        // `fill.fill_price` 是 paper 模擬器
+                                        // 從 `latest_price(intent.symbol)`
+                                        // 算出的成交價，本質就屬 intent.symbol，
+                                        // 非外層 tick 的價，無需 fallback。
                                         let _ = tx.send(OrderDispatchRequest {
                                             symbol: intent.symbol.clone(),
                                             is_long: intent.is_long,
