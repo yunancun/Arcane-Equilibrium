@@ -56,6 +56,7 @@ from .checks_derived import (
     check_pipeline_triangulation,
     check_disabled_strategy_inventory,
     check_observer_pipeline_alive,
+    check_h_state_gateway_freshness,
 )
 
 
@@ -69,6 +70,13 @@ Single-command check that 20 key runtime data pipelines are actually
 producing data, versus silently failing under fail-open error handling.
 單命令檢查 20 個關鍵 runtime 資料管線實際有資料流入，
 識破 fail-open 下的 silent failure。
+
+The 20 checks span DB pipelines + filesystem/observability sentinels:
+  [1]-[6][8]-[9][10][12][14][15] DB cursor                    (12 checks)
+  [Xa][Xb][7][11][13][16][18][19][20] filesystem / pure Python (8 checks)
+本 20 檢查 = 12 DB cursor + 8 純檔案 / Python：
+  [1][2][3][4][5][6][8][9][10][12][14][15][Xb] cursor 內
+  [Xa][7][13][11][16][18][19][20] cursor 外
 
 Exit codes:
   0 = all checks PASS / only WARN
@@ -86,13 +94,13 @@ def main() -> int:
     which yields the close_fills count used by [2]/[3]/[Xb]).
 
     Counted rows (20): [1][2][3][4][5][6][8][9][10][12][Xb][14][15][7]
-    [13][11][Xa][16][18][19].
+    [13][11][Xa][16][18][19][20].
 
     入口 — 跑全部 20 個 check 並印結構化報告。順序固定 — cursor 區塊跑
     DB 相關 check，conn.close() 之後再跑純檔案系統 check。每個 check 回
     ``(status, msg)``（[1] 額外回 close_fills，供 [2]/[3]/[Xb] 用）。
     20 條清單：[1][2][3][4][5][6][8][9][10][12][Xb][14][15][7][13][11]
-    [Xa][16][18][19]。
+    [Xa][16][18][19][20]。
     """
     ap = argparse.ArgumentParser(description=_RUNNER_DESCRIPTION)
     ap.add_argument("--quiet", action="store_true", help="Only print non-PASS lines")
@@ -247,6 +255,20 @@ def main() -> int:
     # 不需 cursor。
     s, m = check_observer_pipeline_alive()
     results.append(("[19] observer_pipeline_alive", s, m))
+
+    # [20] G3-08 Phase 1C (2026-04-26): H-state gateway env-gate + IPC route
+    # + Phase 1 stub schema sentinel. DEFAULT-OFF env=0 → PASS-skip (Phase 1
+    # dormant by design); env=1 → verify route registered + plumbing modules
+    # importable + stub returns canonical empty shape. Pure-Python (grep
+    # source + importlib), no live IPC roundtrip — keeps healthcheck
+    # self-contained for cron / CI without HMAC secret coupling.
+    # [20] G3-08 Phase 1C（2026-04-26）：H 狀態橋接器 env-gate + IPC route
+    # + Phase 1 stub schema 哨兵。env=0 → PASS-skip（Phase 1 dormant by
+    # design）；env=1 → 驗證 route 已註冊 + 線路模組可匯入 + stub 回標準
+    # 空殼。純 Python（grep source + importlib），無 live IPC 來回，
+    # 讓 healthcheck 自足，cron/CI 不需 HMAC secret 即可跑。
+    s, m = check_h_state_gateway_freshness()
+    results.append(("[20] h_state_gateway_freshness", s, m))
 
     # output
     any_fail = False
