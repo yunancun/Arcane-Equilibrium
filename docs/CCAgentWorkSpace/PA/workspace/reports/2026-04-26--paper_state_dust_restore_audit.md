@@ -335,7 +335,7 @@ Hard rules
 
 ### 7.2 healthcheck [2X] SQL spec（one-liner copy-paste 版）
 
-> **Amend 2026-04-26**（per §13 Deviation Log）— 本節原 spec 含 `partial_reduce_real_count` 與 unfiltered `COUNT(DISTINCT symbol)`，已 amend 為 E1 Tier 7 commit `8241133` 落地版本（E2 評為 improvement not improved spec），與 production cron 一致。Slot 編號上線時實佔 **[21]**（[19] observer / [20] h_state_gateway 已被佔；本章節原寫 [19] 為 design-time placeholder）。
+> **Amend 2026-04-26**（per §13 Deviation Log）— 本節原 spec 含 `partial_reduce_real_count` 與 unfiltered `COUNT(DISTINCT symbol)`，已 amend 為 E1 Tier 7 commit `8241133` 落地版本（E2 評為 improvement not regression），與 production cron 一致。Slot 編號上線時實佔 **[21]**（[19] observer / [20] h_state_gateway 已被佔；本章節原寫 [19] 為 design-time placeholder）。
 
 ```sql
 SELECT

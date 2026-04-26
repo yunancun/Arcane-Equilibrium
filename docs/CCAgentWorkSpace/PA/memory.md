@@ -501,3 +501,127 @@ A push（pure push）/ B pull（pure pull）對比 A IPC 量 5000/min 爆炸 + P
 PM follow-up amend：`2026-04-26--paper_state_dust_restore_audit.md` §7.1 prompt SQL + §7.2 spec SQL 同步 E1 Tier 7 commit `8241133` 落地版本（drop `partial_reduce_real_count` + 加 `FILTER (WHERE realized_pnl = 0)` 到 `COUNT(DISTINCT symbol)`），加雙語 deviation 解釋；新增 §13 Deviation Log 紀錄此 amend 歷史 + slot 編號 [19]→[21] 修正。E2 Tier 7 batch review T7-LOW-1 評為 improvement not regression；Linux production cron 16:09 UTC LIVE PASS 確認。RFC §1-§6 + §8-§12 結論不變。
 
 ---
+
+## 2026-04-26 三 P0 fix design（接 STRKUSDT RCA 後 — F3 evict-on-dust / F4 unmatched WS fill drop / F6 edge reload）
+
+### 觸發
+
+PM operator 18:30 派發：af48ee1 涵蓋 STRKUSDT spiral 上游（Gate 1 USD floor + A3 backfill）但 E5 engine.log dive + MIT DB audit 揭發 3 個獨立 P0 bug — F3 phantom dust 殘留 evict-on-dust 缺、F4 trading.fills 7d 0 LIVE rows 但 engine.log 有真 LIVE WS fill、F6 edge_estimator scheduler 寫 hot 但 engine inject boot-only 14h 0 reload。要 read-only 設計（不寫實作碼）。
+
+### 報告路徑
+
+`workspace/reports/2026-04-26--three_p0_fixes_design.md`
+
+### 5 大關鍵架構發現
+
+1. **F4 RCA：trading_writer 無 engine_mode filter**（grep verified `database/trading_writer.rs:259-338` 無條件寫所有 mode）— 真正 drop 點在 **`event_consumer/loop_handlers.rs:555-560` 的 `else { warn!(); }` branch**。LIVE WS fill 全 unmatched（ExecutorAgent shadow_mode hardcoded → 0 SubmitOrder → 0 PendingOrder → 100% unmatched），fallback 路徑 silent return 無 emit `TradingMsg::Fill`。F4 設計：對 unmatched WS fill 落 `unattributed:bybit_auto` audit row（live/live_demo/demo only，paper 不接 WS），同步加 ML pipeline `WHERE strategy_name NOT LIKE 'unattributed:%'` 過濾防污染學習資料。
+
+2. **F6 RCA：PH5-WIRE-1 inject 確認 boot-only**（grep `set_edge_estimates` callsite = bootstrap.rs:586 唯一一處 + intent_processor/mod.rs:480 setter，**無 IPC reload arm**）。`settings/edge_estimates.json` mtime 22:30 28KB scheduler 確實熱寫，但 engine 02:28 boot 後沒 reload 路徑。F6 設計：mirror G3-08 `spawn_h_state_poller_if_enabled` pattern 加 `spawn_edge_estimates_reloader` daemon — 1h periodic + manual IPC `reload_edge_estimates` 雙路徑（advisory pattern 同 PIPELINE-SLOT-1 Phase 3 `trigger_live_auth_recheck`）。3 pipeline (paper/demo/live) 各自 IntentProcessor 需獨立 reload，mode 隔離（paper 讀 `_paper.json`，demo/live 讀 production）必嚴守。
+
+3. **F3 設計：USD-denominated evict-on-dust 4 觸發點 + 不寫 trading.fills**：
+   - T1 `reduce_position` 後 / T2 `apply_fill` 反向減倉 / 同向加倉殘餘 / T3 startup boot reaper（在 migrate_legacy_entry_notional 之後）/ T4 status interval 30s 守底 reaper
+   - re-use `RiskConfig.limits.ft_dust_qty_floor_usd`（af48ee1 已 land schema），不新增 schema
+   - **不寫 trading.fills**（避免污染 ML 學習資料 — `PAPER-STATE-DUST-RESTORE-AUDIT` §4 教訓對齊）；改 `tracing::warn!` 結構化 audit + `pipeline.stats.dust_evictions` counter
+   - paper_state 既有 dust_gate.rs（`triage_bybit_sync` + `DUST_FROZEN_STRATEGY`）是 **startup-time triage**，與 F3 runtime evict 互補不衝突
+
+4. **F3-3 與 F4-1 同檔不同 line block**（`event_consumer/loop_handlers.rs` line ~354 status arm vs line 555-560 unmatched else branch）— **必 isolation worktree** 派發避撞。Wave 1 5 個 E1 instance 並行（F3-1/F3-3/F4-1/F6-1/F4-3），3 個必 worktree。
+
+5. **派發 schedule wall-clock**：Wave 1（5 並行 ~2h）+ Wave 2（6 子任務並行 ~2h）+ Wave 3（E2 review + E4 regression 3.5h）= **7.5h 全鏈**。對比串行 23.5h 省 **16h**。
+
+### 推薦結論
+
+3 fix 全 P0 必與 af48ee1 一起 land。F6 是 cost_gate 99.98% reject **真正 root cause**（vs 之前 Phase 5 reframe 假設 strategy gross negative edge）— 部署後 cost_gate reject ratio 應顯著下降，配合 EDGE-DIAG-1 Phase 3 strategy-scoped fallback 雙管齊下。
+
+### 16 原則對照
+
+3 fix 全不觸碰 §四 5 項 live 硬邊界。F4 #6 fail-closed default + #7 ML filter 阻 unattrib 進訓練。F6 #9 災難保護（1h periodic + manual fallback 雙路徑）。F3 #5 生存強化 + #7 evict 不寫 ML 表。
+
+### 沒做的事（E1/E2 領域）
+
+- 沒寫任何實作碼（E1 領域全部留待派發）
+- 沒 spawn sub-agent（純 PA design 主 agent 串行讀+寫）
+- 沒擴範圍到 ExecutorAgent shadow→live 切換 / ML-TRAINING-DATA-HYGIENE-1 / Reconciler EX-04 對 drift 補正
+
+### 教訓備忘
+
+- **「文件 mtime 新」≠「engine 看到新值」**：F6 RCA 第一波若只看 JSON mtime fresh 會錯判；必驗 engine 內 inject callsite（grep `set_edge_estimates`）。runtime evidence 優於 file system evidence。
+- **「writer 沒 silent skip」≠「DB 有 row」**：F4 假設「writer skip live」是 trap；真正 drop 在更上游 `else { warn!(); }` branch。debug fill drop 必順鏈條從 `private_ws emit` → `event_consumer` → `apply_confirmed_fill` → `trading_writer` 全程查，不可只看 last hop。
+- **「dust evict via qty threshold」對 funding-accrued residue 無效**：`pos.qty < 1e-12` 對 STRKUSDT 7e-13 生效但對 `qty*price < 1.0 USD` 但 `qty > 1e-12` 的 sub-cent residue 失效。USD-denominated floor 是更穩健 invariant。
+- **`spawn_h_state_poller pattern` 是 reusable template**：spawn fn → main.rs spawn call → IPC notification → cancel_token shutdown。F6 reloader 0 創新沿用同 pattern。未來任何 background daemon 先 grep reference 而不是重新發明。
+- **多 fix 派發前必 dependency-graph 全攤開**：派發前 `git diff main...HEAD --name-only` 比對所有 fix 主檔，撞區必標 isolation worktree。F3-3 vs F4-1 同檔不同 line block 案例。
+
+### 報告索引追加
+
+| 日期 | 報告類型 | 文件位置 |
+|---|---|---|
+| 2026-04-26 | 3 P0 fix design（F3 evict-on-dust / F4 unmatched WS fill audit / F6 edge reload daemon）| workspace/reports/2026-04-26--three_p0_fixes_design.md |
+
+---
+
+## 2026-04-26 STRKUSDT dust spiral + Demo silent RCA
+
+### 觸發
+PM operator 18:10 報「Demo 引擎自 08:13:59 CEST 0 fills 連續 ~10h，但 watchdog alive=true；07:37→08:13 STRKUSDT 被 risk_close:fast_track_reduce_half 切半 38 次，qty 0.05→7.27e-13，price 全 0.04261」。要 4 問題答覆 + fix design。
+
+### 報告路徑
+`workspace/reports/2026-04-26--strkusdt_dust_spiral_rca.md`
+
+### 5 大關鍵發現
+
+1. **Operator 假設「reduce_half 走另一條 path」錯誤** — STRKUSDT 與 BTCUSDT 都走同一條 `step_0_fast_track` ReduceToHalf 分支（trigger_tag = `risk_close:fast_track_reduce_half` 寫死於 step_0_fast_track.rs:454，emit_close_fill + execute_position_close 兩 sink 共用此 tag）。差異是同一 ratio gate 對 STRKUSDT entry_notional=0 fail-open，對 BTCUSDT entry_notional=76.08 正常擋住。
+2. **MIT audit + commit `af48ee1` 已 land 完整 cohesive 1+2 RCA fix**（15:48 CEST）但運行 binary mtime 04:29（PID 2033577）**未含此 commit**。Fix 包含 (a) Gate 1 USD floor `ft_dust_qty_floor_usd: 1.0` (b) A3 `migrate_legacy_entry_notional()` defence-in-depth (c) B1 `is_partial_reduce_tag` 跳 EF emit。**部署 = `restart_all.sh --rebuild`** 即 done。
+3. **08:13 後 demo silent 不是 STRKUSDT 引起的次生災害** — 假設 A/B/C 全 REJECTED，假設 D 確認：spiral 結束後 BTCUSDT entry_notional 76.08 vs current 9.75 永久 ratio gate 擋（floor 19.02），ma_crossover 沒在發 strategy_close，新開倉 0 entries 是「策略選擇」+ regime 等獨立 question，**不是 engine 故障**。Engine 18:23 仍 print BTCUSDT MICRO-PROFIT-FIX-1 + 04:00/12:00/16:00 三次 funding WS fill = 整路徑 alive。
+4. **STRKUSDT entry_notional=0 的具體 path 不可確認** — log 顯示 startup avg_price=0.04261，import_positions line 67 應寫 entry_notional=0.004261，但 ratio gate 0 條 print 證明 entry_notional==0。MIT audit §6.1 已 acknowledge follow-up；不在 PA 範圍但 Gate 1 USD floor 對「path 為何」不依賴（fail-closed 永遠生效）。
+5. **paper_state ↔ Bybit drift 對賬 gap** — emit_close_fill 寫 trading.fills 37 條成功 + execute_position_close dispatch 全部被 Bybit min_notional=5.0 reject + dispatch.rs:395 `continue;` 無回滾邏輯。Reconciler EX-04 應 5min 偵測 paper_state qty 0.05→7e-13 vs Bybit 0.1 drift 但實際沒 trigger 降級。F2 follow-up audit。
+
+### 改動風險評級
+
+**部署既有 fix `af48ee1` = 低風險**：
+- 純 `--rebuild`，無 schema migration / 無 IPC service breakage / 無 DB write
+- 17 new tests 已綠（lib 12 + integration 5）
+- Hot-reloadable IPC `patch_risk_config` schema 兼容（new field `ft_dust_qty_floor_usd` 已 serde default + range validate）
+- Regression 風險低（real position 名義 ≥5 USD min，1 USD floor 不誤殺）
+
+### 派發架構建議
+
+**已不需派發**（fix 已 in-tree）—— 通知 PM operator 觸發 `restart_all.sh --rebuild`。
+
+但若 PM 仍需 follow-up，3 子任務（**MIT audit §6 acknowledged but not yet done**）：
+- F1 (0.5d) STRKUSDT entry_notional=0 path 深查 audit
+- F2 (0.5d) Reconciler EX-04 對 spiral 期間 drift 補正 path 驗證
+- F3 (0.5d) 加 `[19]` healthcheck dust spiral 偵測（MIT §6.6）
+
+**全 isolation 否**（純 audit + 1 healthcheck check），單 E1 串行 1.5d。
+
+### 16 原則對照
+
+- #6 失敗默認收縮：pre-fix ratio gate 對 entry_notional=0 fail-OPEN **違反**；af48ee1 Gate 1 修正 → 符合
+- 其他 15 條無觸碰
+
+### 沒做的事（E1/E2 領域）
+
+- 沒寫 fix patch（已存在於 `af48ee1`）
+- 沒派 sub-agent（純 PA RCA + design）
+- 沒跑 cargo test（已綠 lib 2210 / 0 failed per E1 report）
+- 沒擴範圍到 ML-TRAINING-DATA-HYGIENE-1 P2（隔壁 ticket）
+
+### 教訓備忘
+
+- **Operator 假設「另一條 path」需先驗 grep emit 點** — 本 RCA 一開始就用 grep `risk_close:fast_track_reduce_half` 找到 step_0_fast_track.rs:454+468 single emit 點，立刻證偽假設。任何「不同 strategy_name → 不同 path」假設先 grep 字串 source 而不是相信 reasoning。
+- **Binary mtime 是現場第一手證據** — MIT audit + commit + E1 fix report 三邊對齊 fix 已 done 但 `stat openclaw-engine` mtime 04:29 vs commit ts 15:48 證明 binary 未含 fix。runtime 證據優先於 git 證據。
+- **「engine silent」不等於「engine broken」** — engine.log tail 18:23 仍持續 print 非 spiral 相關訊息（BTCUSDT MICRO-PROFIT-FIX-1）= alive。「0 fills」可由「無新 strategy 信號」單純解釋，沒必要假設 wedged / 降級 / spiral 鎖死。silent 因果先驗「strategy signal layer 是否 emit」而不是先假設 hot-path lock。
+- **fail-OPEN guard pattern 是反 #6 設計** — `if entry_notional > 0.0 { ratio gate } else { pass through }` 是典型反模式：legacy/restored snapshot 的 zero-state 拿到無門檻通行。Fix pattern：Gate 1（絕對 floor）+ Gate 2（相對 ratio）都 active，相對門開不到的場景由絕對門兜底。
+
+### 報告索引追加
+
+| 日期 | 報告類型 | 文件位置 |
+|---|---|---|
+| 2026-04-26 | STRKUSDT dust spiral + Demo silent RCA + fix 形狀（ack `af48ee1` 已 land 待 deploy）| workspace/reports/2026-04-26--strkusdt_dust_spiral_rca.md |
+
+---
+
+## 2026-04-26 Tier 9 Track 2 — G3-09 cost_edge_ratio design RFC + T8-FUP typo fix
+
+Phase 3 H5 解阻後派發 G3-09 設計 + T8-FUP-RFC-TYPO-FIX 一次合 1 commit。Recommend integration = **新建 cost_edge_advisor 模組**（候選 4 vs intent_processor cost_gate 重疊 / combine_layer 違 Gate-4-only / phys_lock_v2 違 per-position semantic mismatch）。3 Phase rollout: A schema+advisory (4.5d) → B shadow dry-run (1.5d) → C live triggered gate (2.5d) 全鏈 8.5d。CLAUDE.md §二 #13「ratio ≥ 0.8」字面義與公式方向矛盾，採解釋 A 變體 = threshold 為負值（預設 -0.5 保守起點，operator-tunable）。「建議關倉」語意 = Phase C 阻新倉**不**強制關現有倉（fail-soft，避 false-positive 直接虧損）。env-gate `OPENCLAW_COST_EDGE_ADVISOR` + RiskConfig.cost_edge.enabled 雙保險。Phase 4 5-Agent state events 與本 RFC 並行可派（互不阻塞）。報告：`workspace/reports/2026-04-26--g3_09_cost_edge_ratio_design.md`。同 commit T8-FUP typo fix `paper_state_dust_restore_audit.md` §7.2 "improvement not improved spec" → "improvement not regression"（業務內容不變，1 字 amend）。
+
+---
