@@ -67,6 +67,17 @@ def acquire_lease(self, intent_id: str) -> bool:
 | 2026-04-26 | Wave 2 G3-08 Phase 1 Sub-task B: Python h_state_invalidator + query_handler + reverse IPC route (commit `1c7b20e`, 35 pytest) | `.claude_reports/20260426_g3_08_phase1_subtask_b.md` (return text per system reminder) |
 | 2026-04-26 | Tier 8 Track 4 G3-08 Phase 3 Sub-task 3-3: H5 cost_logging integration — Phase 3 COMPLETE — G3-09 unblocked | direct message per system reminder; report inline |
 | 2026-04-26 | Tier 9 Track 3 G3-08-PHASE-2-FUP-PRIVATE-ATTR-FACADE: audit + PUSH-BACK to PM (2 H1/H3 violations confirmed; strategist_agent.py 1200/1200 hard cap blocks 11 LOC facade addition; 3 options provided) | direct message per system reminder; report inline |
+| 2026-04-26 | F7-RECOVERY: 8 healthcheck silent-regression sentinels [22-29] + 38 unit tests（從 stash@{2} 恢復、test 檔重建、isolated worktree e1-f7-healthchecks-isolated）| `.claude_reports/20260426_234933_e1_f7_recovery_healthchecks.md` |
+
+### 2026-04-26 F7-RECOVERY 教訓
+
+- **stash@{2} apply pattern + F5 GUI 4 檔丟棄**：F7 完整 implementation 含 9 modified files（5 healthcheck package + 4 GUI），但 4 GUI 檔已被 F5 branch push 更新版本，stash 內為**過期版本**，必須 `git checkout --` 丟掉。`git stash apply` 不選擇性 — 它套全部，要再用 `checkout --` 篩。**規則：恢復 stash 前先比對 origin/<sibling-branch> 哪些檔已更新，apply 後立即 `git checkout --` 那些檔**。
+- **isolated worktree from main 而非從 dirty branch spawn**：操作員 prompt 指定 `git worktree add -b e1-f7-healthchecks-isolated ../worktree-e1-f7-isolated main` — **必從 main 而非當前 branch（e1-f6-edge-reload-daemon）spawn**。理由：避免 carry 進其他 task 的 unstaged work；isolated worktree 的目的就是純 baseline + 最小 scope 改動。
+- **MagicMock cursor 必含 `cur.connection.rollback()` mock**：所有 F7 check 第一條都是 `cur.connection.rollback()` 防禦式清髒 tx；test mock 不能只 set `fetchone.return_value`，還要 set `cur.connection = MagicMock()`。我寫了 `_make_cursor()` factory 統一處理，避免每個 test 重複。**Pattern：MagicMock 任意屬性訪問都生 stub child mock，但顯式 set 比依賴默認更可預測 + 方便日後 assertion**。
+- **fail-soft mock 雙列表 side_effect 技巧**：[26] dust_spiral_noise_in_ef 的 fail-soft test 需要「to_regclass 通過 + 第二個 SQL raise」。直接 `cur.execute.side_effect = lambda fn` 不能用 — MagicMock 如果你重 assign side_effect，原 mock counter 會 reset 不可預測。正確：`cur.execute.side_effect = [None, Exception("...")]` 雙元素列表 + `cur.fetchone.side_effect = [(True,)]` 單元素列表，兩個獨立 side_effect 各自順序消費。**規則：mock 要對「依序消費」明確 → 用 list；要對「固定值」用 return_value；要對「條件分支」才用 lambda**。
+- **F7 spec [29] deferred-no-ipc 的 placeholder 設計**：spec 明確「IPC 不存在則 SKIP，不 fail-open」— 但 `SKIP` 不是合法 status（只 PASS/WARN/FAIL）。我用 PASS + `[deferred-no-ipc]` 診斷前綴 → runner 仍輸出該行（operator 看見）+ exit code 不 flip + 將來 IPC handler 加後可 promote 為 grep-then-call probe 不變契約。**這是 fail-open 與 fail-closed 之間的「standby」狀態，需要顯式約定 — 不要默默改成 PASS**。
+- **檔案大小監控：檢查 1200 hard cap 即使是 stash apply 後**：stash@{2} apply 進 5 個 healthcheck 檔，新增 +965 行。我跑 `wc -l` 確認 `checks_strategy.py` 達 1154 行（接近 1200 但未越線）。**E2 必查項，不要 stash apply 完就跳過 size check**。
+- **multi-branch memory.md 衝突管理**：本 task 跨兩個 worktree（main e1-f6-edge-reload-daemon + isolated e1-f7-healthchecks-isolated）；memory.md 各自分流。在 isolated 改 memory.md 跟 F7 commit 一起 → e1-f7 branch 含本 task 條目；e1-f6 branch 已 commit `0bb71d4` 含 PH5 條目。PM 將來 merge 兩 branch 時會 conflict，手動 reorder 即可。**規則：isolated worktree task 的 memory.md 改動跟 isolated branch 走，不要混到 main worktree 的 dirty branch**。
 
 ### 2026-04-26 G3-08 Phase 1 Sub-task B 教訓
 
