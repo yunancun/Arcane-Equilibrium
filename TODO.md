@@ -130,7 +130,7 @@ ssh trade-core "cd ~/BybitOpenClaw/srv && python3 helper_scripts/db/passive_wait
 - ✅ **G6-01/02/04 完成**：healthcheck + cron 6h 全線。
 - ✅ **G6-03 V024 auto_migrate apply 成功（新驗）**：`_sqlx_migrations` row 24 `installed_on 2026-04-24 21:58:11.767039+02 success=t`，engine 啟動前 auto_migrate 完成（CLAUDE.md §七 Phase 2 opt-in 路徑）· Guard A DO block PASS（無 RAISE），V019/V020 legacy table + indexes shape 正確；`psql -f V024` 人工路徑也已備好（2026-04-24 21:35 CEST）。sqlx checksum mismatch 規避（V024 純新增，不改 V019/V020）。
 - 🟡 **G1-04 fee drag / R:R baseline — initial 3d window baseline 完成**：PostOnly intent dispatch 驗證成立（04-21 起 limit 佔比 0%→99%）；**7d fee_rate 均勻 taker 5.5bps（sd=0.000）pre/post 零差異**揭發 FIX-FEE-POSTONLY-1 bug（`loop_handlers.rs:408` 未用 `fee_rate_for_intent()`）；R:R per-strategy 聚合 P1-10 ma_reverse 0.45🔴 + grid_short 0.53🔴 + fast_track_reduce 0.48🔴 + phys_lock 3.91✅ + grid_long 1.55🟢 實證。**未結案，等 Wave 2 G7-09 FIX-FEE-POSTONLY-1 + 滿 1w 後（~04-28+）重 compute**。報告 [.claude_reports/20260424_230500_g1_04_initial_baseline.md](.claude_reports/20260424_230500_g1_04_initial_baseline.md)
-- 🔴 **Healthcheck [12] FAIL 結構性已確認非新 bug**：bb_breakout 7d entries=0 — FIX-26-DEADLOCK-1 (`bcc5401`+`63957ad`) **已在 binary**，排除部署嫌疑。**根因 = P1-11 F1 結構性 1m bandwidth 永不達 expansion_bw=0.04**，屬 bb_breakout profile/timeframe 不匹配範疇（Wave 2+3 G2-05/G2-06 profile 調整或 5m timeframe 範圍）。本 session 不修。
+- ✅ **Healthcheck [12] G2-06 disable 結案（2026-04-26）**：bb_breakout 結構性 dormancy 由 PA RFC 推 C 永久 disable + PM approve；TOML 三環境 `active=false` + [12] active=false → PASS skip + [18] disabled_strategy_inventory 新增（drift 防線 G6-04）；BbBreakoutProfile + sweep tool 保留為 future investment（per RFC §6 重啟條件 6 個月）。
 - ✅ **Engine rebuild + deploy 驗證**（2026-04-24 23:10 CEST `--rebuild` 成功）：新 binary 2026-04-24 23:09 · engine PID 1361203 · uvicorn PID 1361256（4 workers）· demo engine alive balance $951.94 · total_ticks 556302 · auto_migrate `seeded=0 applied=0`（V024 已 applied）· ExecutionListener / Private WS / position_reconciler / shadow_exit_writer / shadow_fill_writer 全啟動 · 含 Wave 1 全部代碼（G1-02/03/06 + V024 Guard A）。
 
 ### G1 Edge 危機根源修復
@@ -291,7 +291,7 @@ ssh trade-core "cd ~/BybitOpenClaw/srv && python3 helper_scripts/db/passive_wait
 | **G2-03** | 🟡P2 | ma_crossover SL/TP 策略層定制（Option B）— **待 PA RFC 補 spec**：(1) Option B 是「strategy_params.toml 加 sl_atr_mult / tp_atr_mult per-strategy」還是別的層？(2) G2-02 counterfactual → G2-03 binding 邏輯（自動 vs 手動）(3) P1 max 硬頂 vs 策略軟值 boundary | G2-02 驗收 + PA RFC | E1+FA / E2+E4 + PA | 2-3d + RFC 1-2d |
 | **G2-04** | 🔴P0 | **Grid disable 決策會**（若 PostOnly 後仍負 edge） | G2-01 + P0-3 輸入 | PM+FA 決策 | 1h 會議 |
 | **G2-05** | ✅完成（觸發 G2-06）| bb_breakout FIX-26-DEADLOCK-1 rebuild 驗證 — **2026-04-26 ssh healthcheck [12] verify**：FAIL 7d entries=0；FIX-26-DEADLOCK-1 已在 binary（22:34 + 01:30 多次 rebuild）排除 deadlock 殘留 → **結構性 dormancy CONFIRMED**，觸發 G2-06 | operator rebuild | MIT / QA [12] | 完成 2026-04-26 |
-| **G2-06** | 🟠P1 | bb_breakout 結構性 dormancy 處置 — **2026-04-26 multi-role audit 重定向**：(MIT/QC) 1m sweep 是 fitting frequency 錯，**升 5m 是結構級正確解** vs 直接 disable；(QC) 排序 C 推 disable 為主 + B 升 5m 為備援 + A 1m 重 sweep = replication crisis 紅旗禁。**先派 PA RFC 二選一決策**（disable 永久 vs 升 5m + recalibrate），決策後派 E1 落地 | G2-05 | PA RFC → QC+MIT+E1 / FA | RFC 1d + impl 2-3d | RFC 決策 → impl + healthcheck [12] PASS 連 3d 或正式 disable |
+| ~~**G2-06**~~ | ✅完成（disabled） | bb_breakout 結構性 dormancy 處置 — **2026-04-26 PA RFC `2026-04-26--g2_06_bb_breakout_disposal_rfc.md` 推 C 永久 disable** + PM approve；落地：(a) `[bb_breakout].active=false` 三環境 TOML（demo/paper/live） (b) healthcheck [12] active=false 時 PASS skip (c) 新增 [18] disabled_strategy_inventory（CLAUDE.md §三 G6-04 drift 防線）(d) BbBreakoutProfile + sweep tool 保留為 future investment（per §6 重啟條件）。MIT 推 5m / QC 推 C / PA 推 C dominated strategy 分析（B ROI 不利、F2 signals≠edge 未驗證、Wave 3 主軸擠壓）。重啟需新 PA RFC + 5m timeframe 升級。 | G2-05 | E1 / E2 / E4 | 完成 2026-04-26 | E1 Report `2026-04-26--g2_06_bb_breakout_disable_landing.md` |
 
 ### G8 測試 / Healthcheck 擴展（新增，QA+AI-E）
 
@@ -309,7 +309,7 @@ ssh trade-core "cd ~/BybitOpenClaw/srv && python3 helper_scripts/db/passive_wait
 - [ ] exit_features ≥1000 rows + 7 維 percentile 閾值 bind 到 RiskConfig.exit.*
 - [ ] G2-01 PostOnly 驗收：fee drop ≥60% 或決策策略下架
 - [ ] G2-02 ma R:R counterfactual 報告（**理論值 fee=2bps + realized 真實 1w post-G7-09**）對齊
-- [ ] bb_breakout PA RFC 結論（disable vs 升 5m）+ 落地 → healthcheck [12] PASS 連 3d 或正式 disable
+- [x] bb_breakout PA RFC 結論（disable vs 升 5m）+ 落地 → healthcheck [12] PASS 連 3d 或正式 disable — **完成 2026-04-26**：PA RFC 選 C 永久 disable，三環境 TOML `active=false` + healthcheck [12] disabled-skip + [18] inventory 新增
 
 ### Wave 3 開工時刻表（2026-04-26 PM 派發後 · 4-agent audit 整合）
 
@@ -394,6 +394,7 @@ ssh trade-core "cd ~/BybitOpenClaw/srv && python3 helper_scripts/db/passive_wait
 | # | 項目 | 觸發條件 | Tag | 備註 |
 |---|---|---|---|---|
 | **STRATEGIST-AUTO-PROMOTE** | 自動晉升規則 | P2-01 穩定後 | 🟡P3 | 默認關，可選 |
+| **G2-FUP-FUNDING-ARB-PAPER-SYNC** | paper TOML `[funding_arb].active=true` 與 demo/live 的 `active=false` 不一致（**E2 2026-04-26 G2-06 review 發現**：v1→v2 結案 NEGATIVE 過渡期 sync miss；`feedback_env_config_independence` 適用於風控閾值 vs `active` binary 開關，不擴 G2-06 scope 但獨立追） | 確認 design intent vs oversight | 🟡P2 | E1 5min 工時；改 paper TOML active=false + 雙語 comment |
 | **EDGE-P2 Phase B** | Liquidation signal | Phase A OI 驗收後 | 🟡P3 | OI 2026-04-20 已完 |
 | **EDGE-P2-3 Phase 2+** | live endpoint / funding_arb PostOnly | Phase 1b | 🟡P3 | ML integration 前置 |
 | **Phase 5 補強** | Symbol Embedding / Regime LSTM / JS+Scorer | P0-3 判決 | 🟢P3-P4 | 取決於 P0-3 outcome |
@@ -433,7 +434,8 @@ ssh trade-core "cd ~/BybitOpenClaw/srv && python3 helper_scripts/db/passive_wait
 | [9] | model_registry_freshness | train_date per slot | G4-03 |
 | [10] | intents_writer_ratio | orders vs intents per-mode | — |
 | [11] | counterfactual_clean_window_growth | clean n ≥200 | EDGE-P3 auto-gate |
-| [12] | bb_breakout_post_deadlock_fix | fill count recover | G2-05 |
+| [12] | bb_breakout_post_deadlock_fix | fill count recover (G2-06 disabled → PASS skip 2026-04-26) | G2-05 / G2-06 |
+| [18] | disabled_strategy_inventory | active=false strategies list (always PASS, drift防線 G6-04) | G2-06（2026-04-26）|
 | [13] | edge_estimator_scheduler_fresh | `edge_estimates.json` mtime <6h + cells ≥50 | G1-01 / G4-04（G6-02 commit `a0a4981`）|
 | [14] | exit_features_accumulation_rate | 週 row count 增長率 ≥ threshold | EDGE-P1b（G6-02 commit `a0a4981`）|
 | [15] | shadow_exit_agreement_phase2 | Python vs Rust decision agree rate ≥95% | EDGE-P2 flip（G6-02 commit `a0a4981`）|

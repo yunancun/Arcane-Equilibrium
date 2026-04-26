@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# G2-06 (2026-04-26): bb_breakout permanently disabled at TOML level.
+# This sweep tool retained for future 5m timeframe sweep if PA approves.
+# G2-06（2026-04-26）：bb_breakout 已於 TOML 層永久 disable。
+# 此 sweep 工具保留為日後若 PA approve 升 5m timeframe 時可用。
 """BB Breakout threshold sensitivity sweep — signal-level offline study.
 BB 突破閾值敏感度掃描 — 信號級離線研究。
 
