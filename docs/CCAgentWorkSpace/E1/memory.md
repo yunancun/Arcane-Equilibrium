@@ -550,6 +550,8 @@ PA design plan commit `7564d07`（959 行 SSOT）§4 Option C 混合模型 + §6
 - **2198 lib tests 全綠**：baseline 2176（前 G9-02 後）→ +22 h_state tests = 2198 / 0 fail。0 既有測試破壞（45 sites 機械擴 args 確保契約一致）。
 - **pattern 鏡射 G3-03 但流向相反**：G3-03 ExecutorConfigCache（Rust SSOT，Python pull）vs G3-08 HStateCache（Python SSOT，Rust pull）。Cache + 10s poll + fail-closed default + graceful degrade 三件套通用；新增 push 通道（invalidate_h_state IPC）解 PA §4 識別的 Option A 全 push 量爆炸 / Option B 純 pull 撞 SLA 兩個極端。
 - **跨平台 0 風險**：純 Rust 用 std + tokio + serde + parking_lot 既有 workspace dep；無 OS 特化。env 判定 strict 字串比對（`OPENCLAW_H_STATE_GATEWAY=1`），Mac/Linux 行為一致。
+- **報告檔位置**：直接傳給 parent agent（per system prompt 不寫 .md report 到 repo）。
+
 - **報告檔位置**：`.claude_reports/<ts>_g3_08_phase1_subtask_a.md`（per system prompt 指示，不寫 .md 報告檔到 repo - direct 傳給 parent agent）。
 
 ## OBSERVER-PIPELINE-POST-F42FACE-CLEANUP（2026-04-26 P2，silent-fail dead path purge）
