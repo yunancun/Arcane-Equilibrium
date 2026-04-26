@@ -120,6 +120,79 @@ def _phantom_view_guard() -> dict | None:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# F5-RETURN/Issue-1 (HIGH) — Phantom-view server-side WRITE guard
+# F5-RETURN/Issue-1（HIGH）— 寫入端 server-side 幽靈視圖守衛
+# ═══════════════════════════════════════════════════════════════════════════════
+def _phantom_view_guard_write() -> None:
+    """
+    Refuse Live WRITE operations (close-position / close-all-positions) when
+    the Live slot is structurally unconfigured AND the engine is not Live.
+
+    Why a separate sibling helper instead of reusing ``_phantom_view_guard``:
+      - Read endpoints return a 200 envelope with ``error`` markers because the
+        existing GUI relies on ocApi unwrap and shows a generic toast on non-200
+        — but it also reads the payload to swap views. Read path = soft refusal.
+      - Write endpoints have a different threat model (per E2 review 2026-04-26):
+        a curl POST that bypasses the client-side guard would, without this
+        guard, take the IPC path → IPC fails (live pipeline absent) → fall back
+        to ``_rest_close_position_reduce_only`` / ``_sweep_live_orphan_positions``
+        which use the demo client and would CLOSE DEMO POSITIONS. We must hard
+        refuse with HTTP 422 (semantic: "request well-formed but the live engine
+        prerequisite is unmet"). 422 conveys actionable signal to curl/scripts;
+        the GUI's ocApi will surface it as an error.
+
+    LiveDemo (engine=='live' AND endpoint=='live_demo') is a legitimate Live
+    operating mode (per CLAUDE.md memory ``feedback_live_no_degradation_by_endpoint``):
+    the Live pipeline genuinely runs against api-demo with full Live-grade
+    authorization (5-gate). It MUST be allowed through this guard. Visual
+    differentiation (orange theme) happens in the frontend only.
+
+    本守衛拒絕在 Live 槽未配置且引擎非 live 時執行 Live 寫操作（單倉平倉 /
+    全平倉）。為何獨立 sibling 而非重用 ``_phantom_view_guard``：
+      - 讀端點回 200 envelope 帶 ``error`` 標記，GUI 依 ocApi unwrap 然後讀
+        payload 切換視圖 — 軟拒絕。
+      - 寫端點不同：curl POST 繞過前端守衛後，若無此 guard，IPC 失敗 → 降級
+        REST close path 使用 demo client → 誤平 demo 倉位。必須硬拒 HTTP 422
+        （請求格式合法但 live 引擎前置條件未滿足），對 curl/script 提供 actionable
+        signal；GUI 的 ocApi 會以 error 形式呈現。
+
+    LiveDemo（engine=='live' 且 endpoint=='live_demo'）放行 — 該模式是合法的
+    Live 運行模式，5-gate 授權按 Live 嚴格標準（per memory），視覺差異（橙色
+    主題）由前端處理。
+
+    Raises:
+      HTTPException(422): live engine not configured / not running. Detail
+        envelope carries ``error`` / ``actual_engine_kind`` / ``actual_endpoint``
+        + bilingual ``message``. caller does not need to handle return value.
+
+    Returns:
+      None — proceed with the actual close handler.
+    """
+    actual_engine_kind = core._get_live_engine_kind()
+    actual_endpoint = core._resolve_live_endpoint_label()
+
+    # Block iff engine != live AND slot unconfigured (mirror read-side guard
+    # exact condition, so test fixtures stay aligned and there is no asymmetry
+    # that would let a Mainnet-slot configured demo engine accidentally pass).
+    # 條件鏡像讀端 guard，避免不對稱讓「Mainnet 槽配置 + demo 引擎」意外通過。
+    if actual_engine_kind != "live" and actual_endpoint == "unconfigured":
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error": "live_engine_not_configured",
+                "actual_engine_kind": actual_engine_kind,
+                "actual_endpoint": actual_endpoint,
+                "message": (
+                    "Live engine not running or unconfigured. Refusing write "
+                    "operation to prevent accidentally closing demo positions. "
+                    "/ Live 引擎未運行或未配置，拒絕寫操作，避免誤平 demo 倉位。"
+                ),
+            },
+        )
+    return None
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # Live account data — balance / positions / orders
 # 實盤帳戶數據端點 — 餘額 / 倉位 / 掛單
 #
@@ -377,6 +450,12 @@ async def post_live_close_position(
     Rust dispatches the reduce_only market order directly.
     """
     core._require_operator(actor)
+    # F5-RETURN/Issue-1 (HIGH) — server-side phantom-view WRITE guard.
+    # Refuses curl-bypass attempts that would otherwise drive the IPC →
+    # REST-fallback path with the demo client and close demo positions.
+    # F5-RETURN/Issue-1（HIGH）— 寫入端 server-side 幽靈視圖守衛，
+    # 阻擋 curl 繞過前端 → IPC 失敗 → REST 降級用 demo client 誤平 demo 倉位。
+    _phantom_view_guard_write()
     sym = symbol.upper()
 
     # Step 1: read-only lookup of exchange position to build hints for Rust.
@@ -467,6 +546,12 @@ async def post_live_close_all_positions(
     Requires Operator role.
     """
     core._require_operator(actor)
+    # F5-RETURN/Issue-1 (HIGH) — server-side phantom-view WRITE guard.
+    # Without it, curl bypass triggers IPC fail → REST orphan-sweep on demo
+    # client → mass-closes demo positions across all symbols.
+    # F5-RETURN/Issue-1（HIGH）— 寫入端 server-side 守衛；
+    # 缺此 guard 時 curl 繞過會觸 IPC 失敗 → REST 孤兒清掃用 demo client 全平 demo 倉位。
+    _phantom_view_guard_write()
     errors: list[str] = []
     rest_fallback_used = False
     try:
