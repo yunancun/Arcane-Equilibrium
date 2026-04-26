@@ -52,6 +52,7 @@
 | 2026-04-26 | Tier 3 batch review 5 commits (7564d07..31fa96c) + G9-05 PUSH-BACK | workspace/reports/2026-04-26--tier3_batch_review.md |
 | 2026-04-26 | Tier 4 batch review 6 commits (eb65e1e..4689fc8) + MIT EXIT-FEATURES-WRITER-BUG-1 audit + PM merge | workspace/reports/2026-04-26--tier4_batch_review.md |
 | 2026-04-26 | Tier 5 batch review 7 commits (af48ee1..f2ed286) — T5.1 EXIT-FEATURES-FIX + T5.2 G3-08-PHASE-1C + T5.3 Phase 2 H1+H3 | workspace/reports/2026-04-26--tier5_batch_review.md |
+| 2026-04-26 | Tier 6 batch review 4 commits (306b549..56104de) — T6.1 Track 1 4 LOW + T6.2 Track 2 H3 schema design + T6.3 Track 3 dust audit design | workspace/reports/2026-04-26--tier6_batch_review.md |
 
 ## 歷史審查關鍵發現（累積記憶）
 
@@ -275,3 +276,10 @@
   - 凡 H 狀態 cache fetcher 從 stub → real 的演化 — 必在 stub 階段建立 schema parity 測試（不只測 default）防 future Phase 接線時 silent drift；本批 PA 設計 forward-compat unknown fields drop 是雙刃劍
   - 凡 lazy-import 在 IPC handler 內必驗 3 個 invariants：(1) top-level import 不觸 circular（boot 序列死鎖）(2) ImportError + getattr None 多層 try/except 兜底 (3) never-raises contract 維持（IPC handler 對 caller 永不 propagate snapshot bug）
   - 凡 PM 派發 7 commits 中含 3 個獨立 task 必查 commit time-order：本批 5943337 (15:43) → af48ee1 (15:48, parent=deee78e) → 9120948 (15:58)；3 task sequential 不是 cohesive PR，避免 §C 範圍判定誤套用 cohesive 標準
+
+### 2026-04-26 Tier 6 batch review (4 commits, 306b549..56104de) — 3 PASS / 0 RETURN / 2 FUP tickets
+- **結論**：T6.1 Track 1 (4 LOW + memory) PASS-with-LOW / T6.2 Track 2 H3 schema design PASS / T6.3 Track 3 dust audit design PASS-with-LOW。FUP：T6-FUP-WARN-ZONE-FILES-SPLIT (checks_derived 869 + ipc_client 899 兩檔進警告區漸增) + T6-FUP-PA-MEMORY-INDEX-SYNC (dd4d64a 缺 PA memory append)
+- **Pivot 對抗驗證 2 條**：(1) TIER4-OBSERVER 「postmortem readability 改善 ≠ 修不存在 overshadow bug」獨立 grep tier4_L309 + cron exit code 語意 byte-identical 驗證 ✅ (2) EDGE-P1b-FUP-NEGATIVE-GUARD 「ipc_client.py 真無既有 7 guard pattern 可鏡射」獨立 grep `exit_` 確認只 `exit_stale_peak_ms` typed-wrapper 暴露（L474 doc 自證）+ grep calibrator producer-side clamping ≠ ipc_client guard，故是 **typed-wrapper 第一個** ✅
+- **Track 3 PA push back 5-axis 獨立 SSOT 驗證 100% 站得住腳**：fill_engine.rs:220-243 restore 只 3 scalar counters / V018:30-39 paper_state_checkpoint 4 欄無倉位 / fill_engine.rs:44-75 import_positions 唯一倉位來源 / fill_engine.rs:377 reduce_position 1e-12 threshold (0.1 dust 不刪) / owner_attribution.rs:112 SYNTHETIC_OWNER_LABELS guard (Option C real-strategy flip 真實風險)
+- **Track 2 PA RFC schema mismatch 獨立驗證**：Rust H3RouteStats 7 fields + 0 hot-path consumer + Python 9 keys + cache_size = 10 + StrategistAgent 共用 L2 keys (Option A scope 風險 CONFIRMED)
+- **判定方法論教訓**：(a) sub-agent 主動 pivot 必查 PA prompt vs codebase grep 對照 + 屬「精準 framing」vs「修錯需求」(b) PA push back upstream 必 5 重 SSOT 獨立驗證，不依賴 PA 字面 (c) typed-wrapper guard 必三軸驗（field 是否真暴露 / 既有 fields 是否真有 guard / producer-side clamping 是否替代 wrapper guard）(d) PA workspace report commit 必查同 commit 內 PA memory.md 索引同步
