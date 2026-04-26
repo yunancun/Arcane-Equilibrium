@@ -1,6 +1,6 @@
 # OpenClaw TODO — 工作清單（v3 · 單一時間軸版）
 
-**最後更新**：2026-04-26 04:30 CEST（**Wave 3 派發層面 100% 完成 + rebuild 部署成功**；Linux **2161/0**；6 commits c1142d2→df882ad；engine PID 2033577 / uvicorn 2033662 alive；post-rebuild 17 PASS / 1 WARN / 1 FAIL [16] fresh-boot expected）
+**最後更新**：2026-04-26 13:14 CEST（**Phase 1+2 Tier 1 + Tier 2 G5 wave 完成**；Linux **2166/0**；12 commits 3f35649→f633a5a；engine PID 2033577 alive 未觸動；healthcheck 17 PASS / 1 WARN [11] 96% / 1 FAIL [3] exit_features_writer pre-existing）
 **版本**：v3（Wave 線性版；廢除雙軌 P0-P4 章節，P0/P1/P2 降為每項 tag）
 **舊版歸檔**：v2 `docs/archive/2026-04-24--todo_v2_dual_axis_snapshot.md`（458 行，Wave+P 雙軌）· v1 `docs/archive/2026-04-24--todo_v1_refactor_snapshot.md`（328 行）· v0 `docs/archive/2026-04-24--todo_snapshot_pre_refactor.md`（700 行）
 **簽核**：PM Approved FIX-PLAN v2 → [Sign-off](docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-24--FixPlan_v2_PMApproval.md) · **Wave 3 Final** → [Wave 3 Sign-off](docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-26--wave3_final_signoff.md)
@@ -379,9 +379,9 @@ ssh trade-core "cd ~/BybitOpenClaw/srv && python3 helper_scripts/db/passive_wait
 
 | ID | Tag | 項目 | 前置 | 負責 | 工時 |
 |---|---|---|---|---|---|
-| **G9-01** | 🟡P2 | Bybit API 字典 confirm-mmr 路徑修正 + SSOT 標記 | 無 | BB+TW | 2h |
+| ~~**G9-01**~~ | ✅ 完成 2026-04-26 | Bybit API 字典 confirm-mmr 路徑修正 + SSOT 標記 — commit `0cda2d9`（PM 代 commit；TW + Rust grep 雙驗 `position_manager.rs:307-335` 已是 confirm-pending-mmr，純字典 drift fix）| — | TW (PM proxy) | 完成 |
 | **G9-02** | 🟡P2 | WS 容錯強化（handler not found 強制重連） | 無 | BB+E1 / E2 | 1-2h |
-| **G9-03** | 🟡P2 | `bybit_public_connectivity_check.py` 環境變數化 | 無 | BB+E1 / E2 | 1h |
+| ~~**G9-03**~~ | ✅ 完成 2026-04-26 | `bybit_public_connectivity_check.py` 環境變數化 — commit `405c05b`（OPENCLAW_BYBIT_PUBLIC_BASE_URL env var fallback default 保留；Linux 真網路三 env 驗證 mainnet/testnet/demo lastPrice 各異 PASS）| — | E1 | 完成 |
 | **G9-04** | 🟡P2 | `bybit_private_ws_smoke_test` 環境感知或刪除 | 無 | BB+E1+PM / E2 | 1-2h |
 | **G9-05** | 🟡P3 | L-2~5 字典補錄（參數名稱 / 缺失欄位） | 無 | BB+TW | 2-3h |
 
@@ -428,11 +428,11 @@ ssh trade-core "cd ~/BybitOpenClaw/srv && python3 helper_scripts/db/passive_wait
 | # | 項目 | 觸發條件 | Tag | 備註 |
 |---|---|---|---|---|
 | **STRATEGIST-AUTO-PROMOTE** | 自動晉升規則 | P2-01 穩定後 | 🟡P3 | 默認關，可選 |
-| **G2-FUP-FUNDING-ARB-PAPER-SYNC** | paper TOML `[funding_arb].active=true` 與 demo/live 的 `active=false` 不一致（**E2 2026-04-26 G2-06 review 發現**：v1→v2 結案 NEGATIVE 過渡期 sync miss；`feedback_env_config_independence` 適用於風控閾值 vs `active` binary 開關，不擴 G2-06 scope 但獨立追） | 確認 design intent vs oversight | 🟡P2 | E1 5min 工時；改 paper TOML active=false + 雙語 comment |
+| ~~**G2-FUP-FUNDING-ARB-PAPER-SYNC**~~ | ✅ 完成 2026-04-26 commit `df1d629` | paper TOML active=true→false + 雙語 G2-FUP comment block；三環境 grep 驗 demo/live/paper 全 active=false | 完成 2026-04-26 | ✅ |
 | ~~**G2-FUP-IPC-LEGACY-MS-FIX**~~ | ✅完成 W5 commit `9cfdd52` | `app/ipc_client.py:786` ms→s + 3 unit test PASS Linux verified | 完成 2026-04-26 | ✅ |
-| **EDGE-P1b-FUP-STALE-PEAK-IPC** | EDGE-P1b 7 維 IPC bind 真實只有 6/7 維（**FA 2026-04-26 H1 audit 揭發**）：`stale_peak_ms` (dim 5) + `shadow_enabled` 不在 IPC `update_risk_config` schema 7 個 `exit_*` 字段內 → calibrator 算 percentile 但無法純 IPC 寫入 dim 5，需 TOML edit + `reload_risk_config` 雙步驟（違 PA RFC §2.2「IPC patch 路徑」設計意圖）。修：擴 IPC schema + Rust handler + Python wrapper 加 `exit_stale_peak_ms` 字段 + unit test 驗 deep-merge | calibrator 真實啟用前 (~05-10) | 🟡P2 | E1 30min~1h；E1 在 EDGE-P1b T3 IPC restore handler 已留 `toml_only_fields_skipped` 暴露口；不阻 W3 sign-off，但 EDGE-P1b 真實啟用閉合 |
-| **G5-FUP-IPC-MOD-SPLIT** | `rust/openclaw_engine/src/ipc_server/mod.rs` 1262 行（W4 軌 1 +11 push 1251→1262，超 §九 1200 硬上限）；建議 dispatch_request 抽 sibling | E5 next wave | 🟡P2 | E5 1-2d 工時；不影響 W4 sign-off |
-| **G1-FUP-CALIBRATOR-WARNING** | `helper_scripts/research/exit_threshold_calibrator.py` `--apply` 路徑加 stdout warning banner 暴露 IPC 6/7 partial bind gap（`stale_peak_ms` + `shadow_enabled` 不在 IPC 7 字段需 TOML edit） | calibrator 真實啟用前 | 🟢P3 | E1 15min 工時 |
+| ~~**EDGE-P1b-FUP-STALE-PEAK-IPC**~~ | ✅ 完成 2026-04-26 commit `c2ca032` | exit_stale_peak_ms 第 8 維加入 IPC schema（鏡射既有 7 個 exit_* pattern）+ deep-merge regression test；cargo 2161→2162 + pytest 130/0；shadow_enabled 仍 TOML-only（單獨 P3 ticket）；PM apply staging→in-place 代 commit | 完成 2026-04-26 | ✅ |
+| ~~**G5-FUP-IPC-MOD-SPLIT**~~ | ✅ 完成 2026-04-26 commit `bd5ce56` | mod.rs 1251→138 行（89% reduction）+ 6 sibling（connection 251 / dispatch 572 / engine_routing 143 / protocol 105 / server 291 / slots 90）全 <800；hot-path patch_risk_config + EDGE-P1b 8 exit_* + HMAC verify_ipc_token byte-identical；4 verify_ipc_token unit tests +；Mac+Linux 2166/0 | 完成 2026-04-26 | ✅ |
+| ~~**G1-FUP-CALIBRATOR-WARNING**~~ | ✅ 完成 2026-04-26 commit `92ea90b` + fixup `f633a5a` | banner stderr print + 4 雙語 reference comment 替代（commit `c2ca032` close ticket 後 banner stale，E2 batch review RETURN，fixup option A 完全移除 banner）| 完成 2026-04-26 | ✅ |
 | **G2-03-FUP-CALLER-WIRE** | G2-03 `check_position_on_tick_with_override` 0 production caller（W4 軌 3 staging marker）；G2-02 counterfactual 結論定後派 E1 wire caller chain（step_6_risk_checks）真實啟用 SL/TP override | G2-02 完成 ~05-03 | 🟠P1 | E1 1d 工時；G2-03 schema 已 staging |
 | **EDGE-P2 Phase B** | Liquidation signal | Phase A OI 驗收後 | 🟡P3 | OI 2026-04-20 已完 |
 | **EDGE-P2-3 Phase 2+** | live endpoint / funding_arb PostOnly | Phase 1b | 🟡P3 | ML integration 前置 |
@@ -454,6 +454,16 @@ ssh trade-core "cd ~/BybitOpenClaw/srv && python3 helper_scripts/db/passive_wait
 | **STRATEGIST-PERSIST-AUDIT-GAP-COUNTER-1** | ✅ 2026-04-24 完成 · e2e 驗證通過 | — | ✅ | **RCA + 雙修完成**：(1) Python `_build_strategist_prompt` 預算 `allowed_range=[current*0.7, current*1.3]` 寫入 prompt + HARD RULES（commit `d8f5560`）讓 Ollama L1-9b 遵守 ±30% cap；(2) Python `_parse_strategist_response` 保留 int-ness 避免 `float(v)` 強轉把 `78000` cast 成 `78000.0` 打壞 Rust u64 serde（commit `e47b1e9`+ merge `5538e52`）。**e2e 驗收 runtime**：舊 prompt 3/3 cycle (UTC 20:03/20:08/20:13) 100% reject；新 prompt 3/3 cycle (20:18/20:23/20:29) LLM 遵守 cap 但 type bug apply failed；type-fix 後首 cycle (UTC 20:34:08) `strategist params applied strategy=grid_trading symbol=BLURUSDT`；`learning.strategist_applied_params` rows 0 → 1 首行落表。報告：[FA Gap 2 eval](.claude_reports/20260424_fa_eval_gap2_strategist_observability.md) + [PA Gap 2 eval](.claude_reports/20260424_pa_eval_gap2_todo_placement.md)。|
 | **STRATEGIST-TUNE-TARGET-CONFIG-1** | ✅ 2026-04-25 完成 | — | ✅ | `MAX_PARAM_DELTA_PCT` const 提取至 `RiskConfig.strategist.max_param_delta_pct`；新 `StrategistConfig` 子結構（`risk_config_advanced.rs`）+ `validate()`（拒 ≤0.0 / >=1.0 / NaN / Inf）+ 3-env TOML `[strategist]`（demo/live/paper 全 0.30 保留現行為）+ IPC `patch_risk_config` deep-merge auto-supports；consumer 改讀 `risk_config.strategist.max_param_delta_pct`，`validate_recommendation` free fn 從 3-arg → 4-arg（13 call sites 全更新）；7 schema tests（defaults/validate/TOML round-trip/partial fallback）+ 2 e2e behavior tests（不同 cap 餵不同 delta 驗 accept/reject）。Mac release **2094 / 0**（baseline 2085 + 9 新測）。Default 0.30 = 原 hardcoded value，runtime bit-identical · 等下次 `--rebuild` 才 live · ⚠️ `risk_config_advanced.rs` 1198→1299 行超 §九 1200 硬上限（既有 1198 已逼上限）→ 下次 G1-03 follow-up split · commit [`e388065`](https://github.com/yunancun/BybitOpenClaw/commit/e388065) |
 | **STRATEGIST-HISTORY GUI** | ✅ 2026-04-24 完成（含 cycle_metrics footer FUP） | — | ✅ | tab-strategy.html 折疊 sub-panel（summary KPI + 3 filter + list 50 行 + Diff/7d Effect 展開）+ 底部 `近 scheduler cycle 健康度` 指標（rejects / applies / last ts / 提示文案）· endpoint `/api/v1/strategist/history/cycle_metrics` engine log tail parse 提供 root cause 自助診斷 |
+| ~~**G5-08 PA design**~~ | ✅ 2026-04-26 commit `2063386` + memory `dbd4c2f` | strategist_scheduler/mod.rs 1770→Method A 4-sibling design plan（cycle_counters 250 / validation 220 / evaluate 370 / tests 250 + persist 446 不動 + mod.rs ~280）+ E1 prompt template；E1 工時估 5-6.5h 全鏈 | 完成 2026-04-26 | ✅ |
+| ~~**G5-09 tick_pipeline tests split**~~ | ✅ 2026-04-26 commits `a5b6f17` + `35b9d5f` | tick_pipeline/tests.rs 3524→11 sibling + mod.rs aggregator（max maker_kpi_hot_reload 652 < §九 800 警告）；126 tests 全 PASS（90 拆分 + 36 inline）；0 production touched；Linux release 2162/0 | 完成 2026-04-26 | ✅ |
+| ~~**G5-FUP-PASSIVE-HEALTH split**~~ | ✅ 2026-04-26 commit `cc4c2d2` | passive_wait_healthcheck.py 2294→9 modules Python package（max checks_strategy 1048 < §九 1200；shim 36 行保 cron path）；19 check cron PASS；SQL invariance 100%（29 SQL call sites pre/post 一致）| 完成 2026-04-26 | ✅ |
+| **G5-08 E1 implementation** | PA design plan ready (`2063386`)；按 Method A 4-sibling 落地 | 立即可派（無前置）| 🟠P1 | E1 5-6.5h 全鏈（含 E2 review + E4 regression）；下次 session 啟動；engine lib baseline 2166 預期升至 2166+ |
+| **EXIT-FEATURES-WRITER-BUG-1** | healthcheck [3] FAIL pre-existing：exit_features_24h=134 vs close_fills=97 (delta 37)；G5-FUP-PASSIVE-HEALTH split 揭發但 writer broken 非新 bug | 立即可派（writer 邏輯獨立）| 🟠P1 | MIT+E1 audit `learning.exit_features` writer join logic（trading.fills ↔ learning.exit_features dedup or batch insert 重複），2-3h |
+| **G2-FUP-FUNDING-ARB-PAPER-SYNC-LOW-1** (TW memory) | E2 batch review 揭發：TW memory.md 與 commit msg 不一致（次要） | 下次 TW 接手 | 🟢P3 | TW 5min |
+| **EDGE-P1b-FUP-NEGATIVE-GUARD** | E2 batch review 揭發：Python `ipc_client.py` patch_risk_config wrapper 缺 `exit_stale_peak_ms` negative value guard（既有 design pattern） | calibrator 真實啟用後 | 🟢P3 | E1 15min |
+| **G5-09-FUP-TYPO** | E2 batch review 揭發：commit `a5b6f17` commit msg test count 自身 typo（0 production 影響） | 下次 commit msg edit cycle | 🟢P3 | 5min |
+| **CHECKS-STRATEGY-SUBSPLIT** | E2 batch review 揭發：`passive_wait_healthcheck/checks_strategy.py` 1048 行 86% 利用率接近 §九 800 警告線；建議下個 G6-04 wave 拆 EDGE-P 系 | 下個 G6-04 維護 wave | 🟢P3 | E5 1d |
+| **VERIFY-IPC-TOKEN-EMPTY-SECRET** | E2 batch review 揭發：`verify_ipc_token` 缺 empty-secret edge test（既有 SEC-08 gap）| 下次 SEC audit wave | 🟢P3 | E1 30min |
 
 ---
 

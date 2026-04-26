@@ -261,3 +261,77 @@ PA 收到本報告 + 其他 9 agent 報告後，執行：
 ---
 
 **最後更新**：2026-04-24 CEST · PM complete
+
+---
+
+## 2026-04-26 Phase 1+2 Tier 1 quick fix + Tier 2 G5 refactor 並行 wave
+
+### Operator 指令
+Operator 接受 PM 在 TODO 分析中建議的「選項 B = Tier 1 五件 + Tier 2 G5 refactor 四件 並行派發」。PM 在 ground truth audit 後**重新定義 G5 範圍**（原 G5-01 main.rs 2062 / G5-03 instrument_info.rs 1975 已被 G1-03 commit `357a1e7` 完成，新 reframe G5-08/09/FUP-IPC/FUP-PASSIVE-HEALTH 4 件）。
+
+### 12 commits 完成（git range `3f35649..f633a5a`）
+
+**Tier 1 五件**：
+- `df1d629` G2-FUP-FUNDING-ARB-PAPER-SYNC（paper TOML active=false 對齊 demo/live）
+- `92ea90b` + fixup `f633a5a` G1-FUP-CALIBRATOR-WARNING（banner 加→stale→移除）
+- `405c05b` G9-03 connectivity_check 環境變數化
+- `0cda2d9` G9-01 Bybit dict confirm-mmr + SSOT 標記
+- `c2ca032` EDGE-P1b-FUP-STALE-PEAK-IPC（IPC schema 加 exit_stale_peak_ms 第 8 維）
+
+**Tier 2 G5 refactor 四件**：
+- `2063386` + `dbd4c2f` G5-08 PA design（Method A 4-sibling，E1 實作 5-6.5h **留下次 session**）
+- `a5b6f17` + `35b9d5f` G5-09 tick_pipeline/tests.rs split (3524→11 sibling, max 652)
+- `cc4c2d2` G5-FUP-PASSIVE-HEALTH split (2294→9 modules, max 1048)
+- `bd5ce56` G5-FUP-IPC-MOD-SPLIT (1251→138 + 6 sibling, 89% reduction)
+
+**E2 batch review + fixup**：
+- `6a6055c` E2 batch review (9 PASS / 1 RETURN / 5 LOW backlog)
+- `f633a5a` G1-FUP-CALIBRATOR-WARNING-FIXUP（PM accept 不需二輪 review）
+
+### Runtime ground truth（採集 2026-04-26 13:14 CEST · G6-04 §三 drift 規則）
+- engine lib **2166/0 fail**（baseline 2161 + 5：1 EDGE-P1b regression test + 4 verify_ipc_token tests + 1 既有絕對化）
+- pytest ipc/risk_config/risk_view **130/0**
+- healthcheck 19 check：**17 PASS / 1 WARN [11] 96% (192/200, ETA ~04-27) / 1 FAIL [3] exit_features_writer pre-existing**
+
+### PM 兩次代 commit 介入
+
+**A. G9-01 (commit 0cda2d9)**：TW 完成字典修正但誤判 system reminder 禁 commit，PM 代 commit + 同時 grep 驗證 Rust code `position_manager.rs:307-335` 已是正確 path（FIX-56/BB-A1 過往已修），G9-01 純字典 drift fix。
+
+**B. EDGE-P1b (commit c2ca032)**：E1 完成 7 檔修改 + cargo 2162 / pytest 130 PASS 但留 staging dir，PM 從 Mac staging cp 7 檔到 in-place + git add 個別檔（避開隔壁 sub-agent in-progress 的 passive_wait_healthcheck.py），commit + push + Linux ff-pull。
+
+### Time hazard：commit 6 makes commit 7 stale
+
+E2 揭發：commit 7 `92ea90b` 12:17 加的 banner 在 commit 6 `c2ca032` 12:36 加 IPC dim 5 後**已過時**。Banner 自身已預告「ticket closed → banner removable」但 PM 漏執行。fixup `f633a5a` 完成清理。**已寫入 lessons.md**「commit 依賴對 stale 風險」規則（建議模式 A/B/C）。
+
+### 教訓
+1. **Sub-agent prompt 必須明示「不要 staging dir，直接 commit + push」**（兩次代 commit = ~10min session waste）
+2. **「commit 完成 ≠ 任務完成」要明示在 prompt 完成標準**
+3. **時序依賴對 (commit B invalidates commit A doc)** 要在派發時識別 → 模式 A (合併 commit) / B (補 patch) / C (TODO 標記)
+4. **Ground truth audit before派發** 是 PM 必做（避免重做 G1-03 已完成的 G5-01/03）
+5. **派發前 fetch + 查 remote branch**（memory `feedback_fetch_before_dispatch`）配合 ground truth audit
+
+### Backlog 新增（→ TODO.md）
+
+**P1 待派**：
+- **G5-08 E1 實作**（5-6.5h，PA Method A 4-sibling，下次 session 啟動）
+- **EXIT-FEATURES-WRITER-BUG-1**（[3] FAIL pre-existing，writer 邏輯 audit）
+- **G2-03-FUP-CALLER-WIRE**（既有 backlog，等 G2-02 ~05-03）
+
+**P3 LOW 從 E2 batch review**：
+- 0cda2d9-LOW-1 TW memory drift
+- c2ca032-LOW-1 Python wrapper negative guard
+- a5b6f17-LOW-1 commit msg test count typo
+- cc4c2d2-LOW-1 checks_strategy.py 1048 行接近 §九 800 警告
+- bd5ce56-LOW-1 verify_ipc_token empty-secret edge test
+
+### Wave 3 影響
+**0** — 12 commits 全是 quick fix + refactor，不改業務邏輯，passive observation 主軸不變：EDGE-P3 ~04-30 / G2-02 ~05-03 / G2-01 ~05-07 / EDGE-P1b ~05-10 / P0-3 ~05-15 / Live ~2026-05-30。
+
+**EDGE-P1b ~05-10 calibrator 真實啟用前必須閉合的 IPC 6/7 partial bind 已在本 session 提前完成**（commit `c2ca032`），Wave 3 timing 健康。
+
+### 報告索引
+- Workspace report: `docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-26--phase1_2_signoff.md`
+- E2 batch review report: `docs/CCAgentWorkSpace/E2/workspace/reports/2026-04-26--phase1_2_batch_review.md`
+- PA G5-08 design plan: `docs/CCAgentWorkSpace/PA/workspace/reports/2026-04-26--g5_08_strategist_scheduler_split_plan.md`
+
+**最後更新**：2026-04-26 13:14 CEST · PM Phase 1+2 Sign-off DONE
