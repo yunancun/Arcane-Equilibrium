@@ -335,3 +335,63 @@ E2 揭發：commit 7 `92ea90b` 12:17 加的 banner 在 commit 6 `c2ca032` 12:36 
 - PA G5-08 design plan: `docs/CCAgentWorkSpace/PA/workspace/reports/2026-04-26--g5_08_strategist_scheduler_split_plan.md`
 
 **最後更新**：2026-04-26 13:14 CEST · PM Phase 1+2 Sign-off DONE
+
+---
+
+## 2026-04-26 Tier 3 — Wave 2 P3 收尾 + Wave 4 G9 series（接續選項 B）
+
+### Operator 指令
+Operator 接續 Phase 1+2 sign-off 後，要求「派發任務繼續完成 Tier 3 + 完工後更新 TODO」。
+
+### 6 commits 完成（git range `f2972b2..a5ef805`）
+
+**5 件 Tier 3 並行**：
+- `c7d7179` G9-04 smoke_test 選項 B 刪除 v1 (-164 lines, 0 caller verified)
+- `7564d07` G3-08 PA design H1-H5 → Rust IPC Gateway (Option C 混合模型, 959 行 plan, ~13.5d wall-clock Phase 1-4)
+- `6990668` G9-02 WS unknown-handler force reconnect (DEFAULT-OFF, +10 unit tests, ws_unknown_handler_guard.rs 483 行 sibling)
+- `ac6c09a` G3-07 Layer 2 toolbox query_onchain + check_derivatives (591 行 sibling + 36 unit tests)
+- `31fa96c` G3-07 E1 memory append
+- (G9-05 PUSH-BACK no commit — TW 驗證型完成 §1.2~1.5 真實無 drift)
+
+**E2 batch review**：
+- `a5ef805` 4 PASS + 1 PASS-with-MEDIUM + 1 PUSH-BACK CLOSE-PASS / 0 退回
+
+### Test baseline（2026-04-26 14:30 CEST）
+- engine lib **2176/0**（baseline 2166 +10：G9-02 unit tests）
+- pytest layer2 chain **136/0**
+
+### PM 編排成績
+- **預先 ground truth audit** 預判正確：G9-02 加邏輯果然推 ws_client.rs 過 1200（1136→1227，+91 over hard cap 27 行）→ MED-1 follow-up
+- **G3-08 派 PA design only** 判斷正確：3-5d 大工程不適合 1 session 跑 E1 實作
+- **lessons.md 規則應用成功**：5/5 sub-agent commit + push 直接執行；**0 PM 代 commit**（vs Phase 1+2 兩次代 commit）
+- **動態 isolation 派工準則**：5 件並行檔案無重疊，全 NOT isolation → 0 worktree race
+
+### 11 E2 審查點結論
+- G3-07: 6/6 ACCEPT
+- G9-02: 3 ACCEPT + 1 ACCEPT-with-FOLLOWUP (MED-1) + 1 OPEN-FOLLOW-UP
+- G9-05: CLOSE-PASS
+
+### Backlog 新增（6 ticket）
+**P1**：G3-08 Phase 1-4 E1 實作（~13.5d，PA design ready）
+**MED**：G9-02-FUP-WS-CLIENT-SPLIT（ws_client.rs 1227→<1200，E5 鏡射 G5-FUP-IPC pattern）
+**P2**：OBSERVER-PIPELINE-POST-F42FACE-CLEANUP（G9-04 揭發 cron 5min silent fail 3 天）
+**LOW**：G3-07-FUP-ENV-NAMESPACE / G3-07-FUP-PYTEST-MARK / G9-02-FUP-COOLDOWN
+
+### Wave 3 影響：**0**
+所有 Tier 3 改動 DEFAULT-OFF env-gated 或純 Python；不觸動 engine PID 2033577；passive observation 主軸不變（Live ~2026-05-30 ±7d）。
+
+### Wave progress
+- **Wave 2 G3 series**：7/9 完成（G3-07 ✅ 加入 + G3-08 PA design ✅；G3-09 等 G3-08 Phase 3 落地）
+- **Wave 4 G9 series**：4/5 完成（G9-01/03/04/05 ✅ + G9-02 ✅ + 1 FUP）
+
+### 教訓（→ lessons.md / 適用未來 PM 派發）
+1. **PM 預先 ground truth audit + 預判 followup** → 派發前明示「可能引發 X 問題」讓 sub-agent 揭發 in commit msg → MED-1 主動發現非事後 review fall-through
+2. **G3-08 派 PA design 而非 E1** → 大工程必經 design phase，PA design 含 prompt template = 下次 session 1 click ready
+3. **lessons.md 規則 (2026-04-26 同 session 寫的) 立即生效** → 0 PM 代 commit；驗證規則設計正確
+
+### 報告索引
+- Workspace report: `docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-26--tier3_signoff.md`
+- E2 batch review: `docs/CCAgentWorkSpace/E2/workspace/reports/2026-04-26--tier3_batch_review.md`
+- PA G3-08 design plan: `docs/CCAgentWorkSpace/PA/workspace/reports/2026-04-26--g3_08_h1_h5_ipc_gateway_design.md`
+
+**最後更新**：2026-04-26 14:30 CEST · PM Tier 3 Sign-off DONE
