@@ -287,6 +287,94 @@ class TestLayer2CostTracker:
         budget = cost_tracker.get_effective_session_budget(MODEL_OPUS)
         assert budget >= DEFAULT_SESSION_BUDGET_OPUS_USD or budget <= DEFAULT_DAILY_HARD_CAP_USD
 
+    # ── G3-08 Phase 3 Sub-task 3-1: H2 budget integration tests ──
+    # PA RFC `2026-04-26--g3_08_phase3_subtask_split.md` §4
+
+    def test_get_h2_snapshot_schema(self, cost_tracker):
+        """H2 snapshot returns 3 PA-spec fields (Rust H2BudgetState parity)."""
+        snap = cost_tracker.get_h2_snapshot()
+        assert isinstance(snap, dict)
+        # Schema parity with Rust H2BudgetState (rust/openclaw_engine/src/
+        # h_state_cache/types.rs:58-72): exactly 3 fields, no extra/missing.
+        assert set(snap.keys()) == {
+            "daily_remaining_usd",
+            "hard_cap_usd",
+            "adaptive_multiplier",
+        }
+
+    def test_get_h2_snapshot_types_and_initial_values(self, cost_tracker):
+        """All 3 H2 fields are float; initial values reflect default config."""
+        snap = cost_tracker.get_h2_snapshot()
+        # All values must be float (Rust H2BudgetState uses f64).
+        assert isinstance(snap["daily_remaining_usd"], float)
+        assert isinstance(snap["hard_cap_usd"], float)
+        assert isinstance(snap["adaptive_multiplier"], float)
+        # Default config: hard_cap = DEFAULT_DAILY_HARD_CAP_USD = 2.0;
+        # multiplier = 1.0 (neutral) until adaptive recalculation runs.
+        assert snap["hard_cap_usd"] == DEFAULT_DAILY_HARD_CAP_USD
+        assert snap["adaptive_multiplier"] == 1.0
+        # Fresh tracker → no spend → remaining ≈ hard_cap.
+        assert snap["daily_remaining_usd"] > 0
+        assert snap["daily_remaining_usd"] <= DEFAULT_DAILY_HARD_CAP_USD
+
+    def test_get_h2_snapshot_after_claude_cost_decreases_remaining(self, cost_tracker, session):
+        """Recording Claude cost reduces daily_remaining_usd."""
+        before = cost_tracker.get_h2_snapshot()
+        cost_tracker.record_claude_cost(
+            session, input_tokens=1000, output_tokens=500, model_tier=MODEL_SONNET,
+        )
+        after = cost_tracker.get_h2_snapshot()
+        # remaining_after = remaining_before - claude_cost
+        assert after["daily_remaining_usd"] < before["daily_remaining_usd"]
+        # hard_cap and multiplier are config — unchanged by recording.
+        assert after["hard_cap_usd"] == before["hard_cap_usd"]
+        assert after["adaptive_multiplier"] == before["adaptive_multiplier"]
+
+    def test_get_h2_snapshot_pure_read_no_state_mutation(self, cost_tracker):
+        """get_h2_snapshot must not mutate state (idempotent)."""
+        snap_a = cost_tracker.get_h2_snapshot()
+        snap_b = cost_tracker.get_h2_snapshot()
+        assert snap_a == snap_b
+        # Distinct dict objects (no aliasing).
+        assert snap_a is not snap_b
+
+    def test_get_h2_snapshot_remaining_clamped_at_zero(self, cost_tracker, session):
+        """daily_remaining_usd clamped at >= 0 even when over budget.
+
+        check_daily_budget() returns max(0.0, remaining); H2 snapshot wraps it.
+        """
+        # Exhaust budget with many expensive Opus calls.
+        for _ in range(50):
+            cost_tracker.record_claude_cost(
+                session, input_tokens=200000, output_tokens=100000, model_tier=MODEL_OPUS,
+            )
+        snap = cost_tracker.get_h2_snapshot()
+        assert snap["daily_remaining_usd"] >= 0.0
+
+    def test_record_claude_cost_fires_h2_invalidate(self, cost_tracker, session):
+        """record_claude_cost must fire ``invalidate_async("h2.budget_consumed")``.
+
+        Patch the module-level ``_invalidate_h_state_async`` import in
+        ``app.layer2_cost_tracker`` to count calls (avoiding daemon thread
+        spawn / IPC). Pattern mirrors test_h1_thought_gate.py:206-226.
+        """
+        with patch("app.layer2_cost_tracker._invalidate_h_state_async") as mock_inv:
+            cost_tracker.record_claude_cost(
+                session, input_tokens=1000, output_tokens=500, model_tier=MODEL_SONNET,
+            )
+            # Exactly one invalidate call per record_claude_cost.
+            assert mock_inv.call_count == 1
+            # Reason string is the wire contract for Rust h_state_cache.
+            assert mock_inv.call_args.args[0] == "h2.budget_consumed"
+
+    def test_record_search_cost_does_not_fire_h2_invalidate(self, cost_tracker, session):
+        """Sub-task 3-1 scope: only Claude cost fires h2 hint; search is 3-3 (H5)."""
+        with patch("app.layer2_cost_tracker._invalidate_h_state_async") as mock_inv:
+            cost_tracker.record_search_cost(session, "perplexity", 0.005)
+            # Sub-task 3-1 does NOT add invalidate to record_search_cost
+            # (Sub-task 3-3 will add an h5.search_cost_recorded hint).
+            assert mock_inv.call_count == 0
+
     def test_record_session(self, cost_tracker, session):
         session.state = SESSION_STATE_COMPLETED
         cost_tracker.record_session(session)
