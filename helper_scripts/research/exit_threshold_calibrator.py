@@ -151,53 +151,6 @@ TOML_ONLY_EXIT_FIELDS: frozenset[str] = frozenset({
 
 
 # ─────────────────────────────────────────────────────────────────────────
-# `--apply` IPC partial-bind warning banner (G1-FUP-CALIBRATOR-WARNING).
-# `--apply` IPC 部分覆蓋警示橫幅（G1-FUP-CALIBRATOR-WARNING）。
-# ─────────────────────────────────────────────────────────────────────────
-#
-# EN: Surface the IPC 6/7 partial bind gap to operator at `--apply` entry.
-#     The calibrator computes 7 dims but `update_risk_config` IPC schema
-#     only covers 6 dims (dim 5 `time_since_peak_ms` not wired); plus the
-#     `shadow_enabled` binary flag is also TOML-only. Banner removable
-#     once tracking ticket EDGE-P1b-FUP-STALE-PEAK-IPC closes the gap.
-#     Printed to stderr (not stdout) so JSON/markdown output stays pipe-clean.
-#
-# 中：在 `--apply` 入口曝露 IPC 6/7 部分覆蓋 gap 給 operator。calibrator
-#     算 7 維，但 `update_risk_config` IPC schema 只覆蓋 6 維（dim 5
-#     `time_since_peak_ms` 未接線）；此外 `shadow_enabled` binary flag
-#     也僅 TOML 可寫。閉合 ticket EDGE-P1b-FUP-STALE-PEAK-IPC 後本 banner
-#     可移除。Banner 走 stderr（不污染 stdout JSON/markdown 管道）。
-#
-APPLY_WARNING_BANNER = """
-================================================================================
-WARNING: IPC bind only covers 6/7 dimensions
-================================================================================
-7 dims computed by this calibrator:
-  1. est_net_bps
-  2. peak_pnl_pct
-  3. atr_pct
-  4. giveback_atr_norm
-  5. time_since_peak_ms          <-- IPC GAP (see below)
-  6. price_roc_short
-  7. entry_age_secs
-
-IPC schema (`update_risk_config`) 7 exit_* fields covers 6 dims only:
-  - stale_peak_ms (dim 5: time_since_peak_ms) NOT in IPC schema
-  - shadow_enabled (binary flag) NOT in IPC schema
-
-These 2 fields require TWO-STEP write:
-  1. Manual edit `settings/risk_config_demo.toml` [exit] section
-  2. Run reload_risk_config IPC OR engine --rebuild
-
-Tracking ticket: EDGE-P1b-FUP-STALE-PEAK-IPC (P2, scheduled before ~05-10
-calibrator real activation). Once closed, this banner can be removed.
-
-Reference: FA 2026-04-26 H1 audit, TODO.md L433.
-================================================================================
-"""
-
-
-# ─────────────────────────────────────────────────────────────────────────
 # SQL — read learning.exit_features for cohort + percentile compute.
 # SQL — 讀 learning.exit_features 為 cohort + 百分位計算。
 # ─────────────────────────────────────────────────────────────────────────
@@ -1018,15 +971,10 @@ def main(argv: list[str] | None = None) -> int:
 
     args = parse_args(argv)
 
-    # `--apply` IPC 6/7 partial bind warning (G1-FUP-CALIBRATOR-WARNING).
-    # Surface gap to operator at apply entry; dry-run path stays silent
-    # because dry-run never produces an IPC envelope. stderr keeps stdout
-    # pipe-clean for downstream markdown/json/yaml consumers.
-    # `--apply` IPC 6/7 部分覆蓋警示（G1-FUP-CALIBRATOR-WARNING）。在 apply
-    # 入口曝露 gap；dry-run 路徑不顯示（dry-run 不產 IPC 信封）。Banner 走
-    # stderr 維持 stdout 管道乾淨。
-    if args.apply:
-        print(APPLY_WARNING_BANNER, file=sys.stderr)
+    # IPC schema covers full 8/8 dimensions as of c2ca032
+    # (EDGE-P1b-FUP-STALE-PEAK-IPC closed; exit_stale_peak_ms now in IPC).
+    # IPC schema 自 c2ca032 起涵蓋全部 8/8 維度
+    # （EDGE-P1b-FUP-STALE-PEAK-IPC 已閉合，exit_stale_peak_ms 進入 IPC）。
 
     if args.smoke_test:
         return _smoke_test(args)
