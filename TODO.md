@@ -1,55 +1,60 @@
 # OpenClaw TODO — 工作清單（v3 · 單一時間軸版）
 
-**最後更新**：2026-04-25 20:30 CEST（Wave 2 batch 15：G7-03 Phase B + G3-06 + G3-11 三批並行完成；Linux **2138/0**；pytest 真實 baseline ≈ 2710+（previous 3056 為 Mac local，Linux 受限於 ipc_server tests 13-arg breakage 已被 G3-11 修復；deferred 35 G3-10 strategist_promote test failures 後續校正）；engine alive 8.4s）
+**最後更新**：2026-04-26 04:30 CEST（**Wave 3 派發層面 100% 完成 + rebuild 部署成功**；Linux **2161/0**；6 commits c1142d2→df882ad；engine PID 2033577 / uvicorn 2033662 alive；post-rebuild 17 PASS / 1 WARN / 1 FAIL [16] fresh-boot expected）
 **版本**：v3（Wave 線性版；廢除雙軌 P0-P4 章節，P0/P1/P2 降為每項 tag）
 **舊版歸檔**：v2 `docs/archive/2026-04-24--todo_v2_dual_axis_snapshot.md`（458 行，Wave+P 雙軌）· v1 `docs/archive/2026-04-24--todo_v1_refactor_snapshot.md`（328 行）· v0 `docs/archive/2026-04-24--todo_snapshot_pre_refactor.md`（700 行）
-**簽核**：PM Approved FIX-PLAN v2 → [Sign-off](docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-24--FixPlan_v2_PMApproval.md)
+**簽核**：PM Approved FIX-PLAN v2 → [Sign-off](docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-24--FixPlan_v2_PMApproval.md) · **Wave 3 Final** → [Wave 3 Sign-off](docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-26--wave3_final_signoff.md)
 **基礎方案**：[FIX-PLAN v2](docs/CCAgentWorkSpace/PA/workspace/reports/2026-04-24--4.24TodoAudit_FixPlan_v2.md) · [10-Agent audit 索引](docs/audits/2026-04-24--todo_refactor_audit.md)
 
-**Engine**（採集 2026-04-25 20:30 CEST · Wave 2 batch 15 deploy 後 · ssh verify）：engine 復活 ✅ · `engine_alive: true` · snapshot fresh · paper + demo 雙活 · binary 含 Wave 2 全工作（G3-02/03/04/05/06/10/11 + G4-02/03 + G7-02/03/04/06/07/08/09 + G5-02/04/05/07 + G6-FUP RCA fix）· HEAD `1a0f9c8`（origin synced）· news halt 30min TTL auto-clear active · tick pipeline boot deadlock fixed · STRATEGIST-PARAMS-PERSIST-1 restored ✅
-**測試基準（2026-04-25）**：engine lib **2138 / 0 fail**（baseline 1992 → +146 across batches；G7-09 fee fix + G7-03 Hurst + G7-04 CUSUM + G7-06 OU + G7-07 slippage TOML + G3-06 escalation + G3-11 cycle counters 等）· pytest **3056**（含 G3-02 Phase C 17 + G4-03 canary tests + G3-10 promote + G3-11 cycle）· Linux 真實 baseline ≈ 2710+（35 deferred test_strategist_promote + test_earned_trust 13-arg breakage 已被 G3-11 修，後續校正）· DB migrations 25 applied（V025 partial idx 484x speedup）
+**Engine**（採集 2026-04-26 04:30 CEST · Wave 3 W5 收尾 + rebuild 部署後 · ssh verify）：engine 復活 ✅ · `engine_alive: true` · snapshot 8.6s fresh · paper + demo 雙活 · binary 含 **Wave 1+2+3 全工**（G1-01/02/03/05/06 + G6-01/02/03/04/05 + G3-02/03/04/05/06/10/11 + G4-02/03 + G5-02/04/05/07 + G7-01~09 + grid G7-09c Phase 2 reject_cooldown + **W3 G2-06 disable + EDGE-P1b 4/4 + EDGE-P2-flip T1+T2+T3 + G2-03 4/4 + G2-FUP-IPC-LEGACY-MS-FIX**）· HEAD `df882ad`（origin synced）· news halt 30min TTL auto-clear active · tick pipeline boot deadlock fixed · STRATEGIST-PARAMS-PERSIST-1 restored ✅ · IPC HMAC sync path ms→s 修（legacy `sync_ipc_call:786`）
+**測試基準（2026-04-26）**：engine lib **2161 / 0 fail**（baseline 1980 → 2138 W2 → 2141 EDGE-P1b T3 IPC restore + 2161 G2-03 schema/runtime cap：11 schema + 8 runtime cap + 1 TOML round-trip）· pytest 含 W5 軌 2 IPC HMAC unit test 3 passed in 0.03s（Linux verified）· DB migrations 25 applied（V025 partial idx 484x speedup）
 **21d demo 時鐘**：起算 2026-04-16 22:16 → 解鎖 2026-05-07
+**Wave 3 healthcheck**：cron 6h 跑 **19 check**（[1-15] + [Xa] + [Xb] + [16] strategist_cycle + **[18] disabled_strategy_inventory** G2-06 加 2026-04-26）
 
 ---
 
-## 🎯 此刻該做什麼（2026-04-25 20:30 CEST · Wave 2 大致完成 · passive observation 階段）
+## 🎯 此刻該做什麼（2026-04-26 04:30 CEST · Wave 3 派發層面 100% 完成 + rebuild 部署成功 · passive observation 階段）
 
-**Wave 1**：10/11 完成；G1-04 等 Post-G7-09 fee 數據累積 ~04-28+。
+**Wave 1**：✅ 全完成（G1-01/02/03/05/06 + G6-01~05；2026-04-24 收尾）。
 
-**Wave 2**：~80% 完成 · G3 全鏈（01 RFC + 02 Phase A/C + 03 Phase B + 04 e2e + 05 IPC + 06 Layer 2 + 10 promote + 11 cycle metrics）+ G4 完整（01 marker + 02 first ONNX + 03 canary Phase A）+ G5 大部（02/04/05/07）+ G7 9/10（01 surface / 02 / 03 Phase A+B / 04 Phase A / 06 / 07 / 08 / 09 + 09b/c）+ G6-FUP（NEWS-HALT-DEDUP + TICK-PIPELINE-DEAD 雙 P0 RCA 修復）。**Operator 工具鏈完整**（all DEFAULT-OFF env-gated）：
-- `POST /api/v1/executor/shadow-toggle`（G3-02 Phase C `325582f`，5-gate live auth）
-- `POST /api/v1/strategist/promote`（G3-10 `f800aaa`，2-step preview/confirm）
-- `helper_scripts/db/canary_promote_runner.py`（G4-03 `1164ede`，--dry-run / --apply env-gated）
-- `/api/v1/strategist/history/cycle_metrics`（G3-11 `58a289e`，DB-backed CycleCounters）
-- LayerEscalationConfig L0→L1→L2 規則（G3-06 `82ef8e1`，escalation_tier evaluator）
+**Wave 2**：✅ 主軸完成（G3 全鏈 / G4 完整 / G5 大部 / G7 9/10 / G6-FUP 雙 P0 RCA）。剩餘 G3-07/08 P3 + G7-03-Phase-B-FUP-grid + G7-05 cost_gate bind passive wait。
 
-**剩餘 Wave 2 工作**（不阻塞主線）：
-- G3-07/08（P3 Layer 2 toolkit / H1-H5 Rust IPC Gateway）— Wave 3+
-- G7-03-Phase-B-FUP-grid（grid_trading Hurst migration）— deferred until parallel WIP merged
-- G7-05 cost_gate bind — passive wait Post-G7-09 ~05-01+ 數據累積
-- 35 deferred pytest failures（test_strategist_promote_api / test_earned_trust_engine）— 後續 audit collateral
+**Wave 3**：✅ **派發層面 100% 完成**（5 波 6 commits c1142d2→df882ad）：
+- W2（c1142d2 + 8946e47）：4-agent audit + G2-02 counterfactual + G8-02 parity + grid G7-09c Phase 2
+- W3（55801fe）：G2-06 bb_breakout disable 落地 + 3 PA RFC（EDGE-P1b/P2-flip/G2-03）
+- W4（60fdf74）：EDGE-P1b 4/4 + EDGE-P2-flip T1+T3 + G2-03 4/4 schema staging
+- W5（9cfdd52）：EDGE-P2-flip T2（healthcheck [15] per-strategy）+ G2-FUP-IPC-LEGACY-MS-FIX P1
+- Sign-off（df882ad）：PM Wave 3 Final Sign-off + CLAUDE.md §十一 update + rebuild 部署成功
 
-**本週 Top 3**（passive observation）：
+**Wave 3 全工 runtime 驗證**（post-rebuild healthcheck）：
+- ✅ [12] bb_breakout disabled by G2-06（active=false in TOML）; fill check skipped
+- ✅ [18] disabled inventory: bb_breakout, funding_arb (active count=3: bb_reversion, grid_trading, ma_crossover)
+- ✅ [14] per-strategy 切片: grid_trading=282[READY] / ma_crossover=146[GROWING] / bb_reversion=7[SPARSE] / orphan_frozen=3[SPARSE] (READY_frac=63%)
+- ✅ [15] Phase 1a dormant by design（shadow_enabled=false, agreement evaluation deferred）
+- ✅ IPC HMAC unit test Linux 3 passed in 0.03s（軌 2 100% legacy fail auth fix verified）
+- ⚠️ [11] WARN counterfactual 75% (150/200 ETA ~04-27 滿 200)
+- 🔴 [16] FAIL strategist_cycle_fresh fresh-boot expected（rebuild 後 1min healthcheck，每 5min cycle，6h cron 自然 PASS）
 
-1. **🟡 G7-05 cost_gate grand_mean bind — blocked on post-G7-09 data accumulation**
-   - 當前 snapshot（ssh verify 23:41 CEST · ~20h post-G7-09 deploy）：grand_mean_bps=**-9.80** · n_cells=62 · **shrunk_bps > 0 count = 0**
-   - `>-50 bps` 條件已滿足；`≥2 strategies shrunk>0` 未滿足（0/62）
-   - 等 ≥1w post-fix demo fills（~2026-05-01+）取真實分布後再校準閾值
-   - **不另派 sub-agent**：passive 觀察 + 後續 commit
+**剩餘 Wave 3 被動等待**（自然解鎖，無派發必要）：
+- ~04-27: EDGE-P3 [11] 滿 200 → ~04-30 連 3d PASS
+- ~05-01~05-03: G2-02 真實 1w post-G7-09 數據 → counterfactual 雙軌驗證
+- ~05-07: P0-2 21d demo 解鎖 + G2-01 PostOnly 驗收
+- ~05-10: EDGE-P1b per-strategy ≥200 rows → calibrator manual approve flow
+- ~05-15: P0-3 邊評決策會（PM + FA + PA + QC）
 
-2. **🟡 G1-04 fee drag / R:R baseline — G7-09 已 deploy，繼續累積等 ~04-28+**
-   - Post-G7-09 fee 列自 23:41 CEST 起應出現 maker 2bps（觀察中）
-   - ~04-28 滿 1w 時 compute：fee drop % + R:R per-strategy delta + shrunk_bps movements
+**4 follow-up tickets 狀態**（W4/W5 衍生 → Backlog）：
+- ✅ ~~G2-FUP-IPC-LEGACY-MS-FIX P1~~（W5 軌 2 修，Linux unit test verified）
+- 🟠 G2-03-FUP-CALLER-WIRE P1（等 G2-02 ~05-03 後派 wire caller chain）
+- 🟡 G5-FUP-IPC-MOD-SPLIT P2（`ipc_server/mod.rs` 1262 + `passive_wait_healthcheck.py` 2286 超 §九 1200）
+- 🟢 G1-FUP-CALIBRATOR-WARNING P3（calibrator `--apply` 加 stdout warning banner）
 
-3. **⚪ Wave 3 / Wave 4 啟動條件就緒**
-   - Wave 3 EDGE-DIAG Phase 3 等 healthcheck [11] 連 3d PASS（被動）
-   - Wave 4 P0-3 等 21d demo 解鎖（2026-05-07）+ G2 PostOnly 驗收
-   - Live 最早 ~2026-05-23，中位 ~2026-05-30
+**本週 Top 3**（passive observation，無主動派發）：
 
-**Wave 2 雙 P0 RCA 修復記錄（2026-04-25 01:30 CEST · commit `b980986`）**：
-- **G6-FUP-NEWS-HALT-DEDUP-1**：`guardian_impl.rs` 加 `last_trigger_ts_ms: AtomicU64` + 30min TTL `check_and_clear_expired()` + 6 unit tests
-- **G6-FUP-TICK-PIPELINE-DEAD-1**：`main_boot_tasks::spawn_strategist_scheduler` 主執行緒 `rx.await` deadlock 修為 `tokio::spawn` 背景任務，demo pipeline 可正常啟動 → snapshot 寫入 → tick 分發
-- 部署驗證：engine fresh boot 後 1s 內 snapshot 寫入；G7-09 fee fix 自此活著，G1-04 cutoff 重新可達
+1. **🟡 [16] strategist_cycle_fresh 6h 監控** — rebuild 後 fresh-boot expected，下個 cron tick 應 PASS；如真 wedged → P1 escalate
+2. **🟡 [11] counterfactual clean window 滿 200** — ETA ~04-27，rate 53rows/1d；連 3d PASS 後 EDGE-P3 解鎖
+3. **🟡 G7-05 cost_gate grand_mean bind** — Post-G7-09 ~05-01+ 數據累積後校準閾值（grand_mean=-9.80, shrunk_bps>0 count=0/62 等改善）
+
+**Live target**：~2026-05-30 中位 ±7d（PM W2 sign-off 不變）
 
 ---
 
@@ -278,18 +283,18 @@ ssh trade-core "cd ~/BybitOpenClaw/srv && python3 helper_scripts/db/passive_wait
 
 | ID | Tag | 項目 | 前置條件（必須 ALL 滿足） | 負責 | 工時 |
 |---|---|---|---|---|---|
-| **EDGE-P3** | 🟡P1 | strategy-scoped Gate 1 fallback 部署 | (a) clean bucket ≥200 rows pooled · (b) per-strategy bootstrap 95% CI lo >0 · ~~(c) orphan_frozen clean ≥20 rows~~ → **(c') 已修：orphan_adopted ≥20 rows**（MIT 2026-04-26 audit：`orphan_frozen` by design 是 dust quarantine label `dust_gate.rs:99-114` + `orphan_handler.rs:101 DUST_FROZEN_STRATEGY`，**no close dispatched** → 該 cohort 永不進 exit_features pipeline → 該條件永久 0 → Wave 3 永久 stalled。改為 `orphan_adopted` cohort 才有真實 close）· **(d) healthcheck [11] 連 3d PASS** | PM+FA+QC / E2 | 2d |
-| **EDGE-P1b** | 🟡P1 | `exit_features` 累積 ≥1w + 7 維閾值 bind（**MIT 2026-04-26 確認 7 維 = est_net_bps / peak_pnl_pct / atr_pct / giveback_atr_norm / time_since_peak_ms / price_roc_short / entry_age_secs**，per `V999__exit_features.sql:33-41`；bind = percentile → `RiskConfig.exit.*` thresholds，非 JS estimator → cost_gate（後者是 P1-14）；MIT 建議延至 5/10 達 per-strategy ≥200 rows） | W19 起算，預計 5/03 滿週 | PM+QC / E4 + PA RFC | passive 7d + RFC 2d |
-| **EDGE-P2-flip** | 🟡P2 | Track L shadow flip + P1-10 並行（**待 PA RFC 補 spec**：flip acceptance criteria（推測 healthcheck [15] ≥95% agree rate）+ flip 步驟 SOP + 回滾路徑 + "P1-10 並行" 範圍釐清） | EDGE-P1b + PA RFC | QC+PM / E2 + PA | passive 7d + RFC 1-2d |
+| **EDGE-P3** | 🟡P1 passive | strategy-scoped Gate 1 fallback 部署 | (a) clean bucket ≥200 rows pooled · (b) per-strategy bootstrap 95% CI lo >0 · ~~(c) orphan_frozen clean ≥20 rows~~ → **(c') 已修：orphan_adopted ≥20 rows**（MIT 2026-04-26 audit）· **(d) healthcheck [11] 連 3d PASS** — **2026-04-26 04:30 status**: [11] WARN 75% (150/200) ETA ~04-27 滿 200 → ~04-30 連 3d PASS 解鎖 | PM+FA+QC / E2 | 2d (passive) |
+| **EDGE-P1b** | ✅ schema landed / passive 等資料 | `exit_features` 累積 ≥1w + 7 維閾值 bind（7 維 confirm: est_net_bps / peak_pnl_pct / atr_pct / giveback_atr_norm / time_since_peak_ms / price_roc_short / entry_age_secs）— **2026-04-26 W4 軌 1 完成 schema landing**（PA RFC + E1 4/4 子任務）：(T1) calibrator `helper_scripts/research/exit_threshold_calibrator.py` 1067 行 dry-run 預設 + per-strategy stratification + cohort filter (T2) summary `exit_features_summary.py` 825 行 distribution + sample sufficiency (T3) IPC `restore_exit_config_defaults` Rust handler +332 行 + ipc_server dispatch (T4) healthcheck [14] per-strategy 切片升級。**等資料**：~05-10 達 per-strategy ≥200 rows（當前 grid 282 / ma 146）→ 派 calibrator manual approve flow（不自動 IPC 寫風控值）。Push back: stale_peak_ms + shadow_enabled 不在 IPC 7 字段 → 標 toml_only_fields_skipped。 | passive ≥1w + per-strategy ≥200 rows | PM+QC / E4 | 完成 schema 2026-04-26 + passive |
+| **EDGE-P2-flip** | ✅ tooling landed / passive 等 EDGE-P1b | Combine Layer shadow flip（**RFC 2026-04-26 confirmed flip 範圍 = `RiskConfig.exit.shadow_enabled`，非 ExecutorAgent shadow_mode**；acceptance = healthcheck [15] 24h ≥95% agreement + per-strategy ≥95%；IPC patch 直接 flip 非灰度；manual revert 90s SOP）— **2026-04-26 W4 軌 2 + W5 軌 1 完成 tooling**：(T1) `helper_scripts/canary/edge_p2_flip_dry_run.py` 829 行 5/5 pre-flight smoke (T2) healthcheck [15] per-strategy 切片升級 + `shadow_disagreement_breakdown.py` 592 行 disagreement_reason 分佈報告 (T3) `helper_scripts/operator/edge_p2_{flip,revert}.sh` paste-safe SOP shell。Mac + Linux 真機 dry-run 全 PASS。**等 EDGE-P1b** + manual operator approve flip 觸發。 | EDGE-P1b 完成 + healthcheck [15] 連 7d ≥95% agreement | QC+PM / E2 | 完成 tooling 2026-04-26 + passive |
 
 ### G2 策略驗證 + 決策
 
 | ID | Tag | 項目 | 前置 | 負責 | 工時 |
 |---|---|---|---|---|---|
-| **G2-01** | 🟠P1 | P1-10 PostOnly 1-2w 驗證（passive） | PostOnly demo 04-21 部署 | PM+QC+FA / E4 | passive ≥1w（04-21~05-07 出結果）|
-| **G2-02** | 🟠P1 | ma_crossover R:R 對稱性 counterfactual — **QC 2026-04-26 裁定**：G7-09 fee fix **不能救 R:R**（alpha 結構問題非 fee 結構），啟動採 (c) 並行：E1 立即寫 counterfactual code（用 `decision_outcomes` + `exit_features` 重算「若 fee=2bps 會如何」）+ passive 等 ~05-01 真實 1w demo G7-09 後數據 → ~05-03 雙軌驗證 | EDGE-P2 結果（並行寫碼可不等）| QC+FA / E2 + E1 code | 2-3d |
-| **G2-03** | 🟡P2 | ma_crossover SL/TP 策略層定制（Option B）— **待 PA RFC 補 spec**：(1) Option B 是「strategy_params.toml 加 sl_atr_mult / tp_atr_mult per-strategy」還是別的層？(2) G2-02 counterfactual → G2-03 binding 邏輯（自動 vs 手動）(3) P1 max 硬頂 vs 策略軟值 boundary | G2-02 驗收 + PA RFC | E1+FA / E2+E4 + PA | 2-3d + RFC 1-2d |
-| **G2-04** | 🔴P0 | **Grid disable 決策會**（若 PostOnly 後仍負 edge） | G2-01 + P0-3 輸入 | PM+FA 決策 | 1h 會議 |
+| **G2-01** | 🟠P1 passive | P1-10 PostOnly 1-2w 驗證 — passive ~05-07/08 出結果（fee drop ≥60% 或下架）；healthcheck [3] maker_fill_rate cron 監控中 | PostOnly demo 04-21 部署 | PM+QC+FA / E4 | passive ≥1w（04-21~05-07 出結果）|
+| **G2-02** | ✅ tool landed / passive 等資料 | ma_crossover R:R 對稱性 counterfactual — **2026-04-26 W2 完成 (c) 並行**：E1 寫 `helper_scripts/research/ma_crossover_counterfactual_replay.py` 822 行（從 trading.fills self-INNER-JOIN，realized_pnl GROSS，公式 cf_net_bps = (realized_pnl/notional*10000) - 2*scenario_fee_bps；含 partial-close caveat docstring）。E1 push back: PM SQL spec 7 欄位錯，採 V017 FILL-CONTEXT-LINKAGE-1 真實 schema。**等 ~05-01~05-03** 真實 1w post-G7-09 demo 數據 → ~05-03 跑 tool 雙軌驗證（理論值 fee=2bps + realized）→ G2-03-FUP-CALLER-WIRE 觸發 | tool ready / 等真實數據 | QC+FA / E2 | 完成 tool 2026-04-26 + passive |
+| **G2-03** | ✅ schema staging / 等 G2-02 binding | ma_crossover SL/TP 策略層定制 (Option B)— **2026-04-26 W4 軌 3 完成 schema landing（PA RFC §6 + E1 4/4 子任務 isolation 主樹）**：(T1) `risk_config_per_strategy.rs` 191 行 StrategyOverride 加 4 pct 字段（stop_loss_max_pct / take_profit_max_pct / trailing_activation_pct / trailing_distance_pct，per PA RFC §2.1 — pct 型，非 ATR/bps 混合 PM prompt 錯誤）+ validate (T2) `risk_checks.rs` +140 行 effective_*_max_pct helpers + check_position_on_tick_with_override（**0 production caller，schema-only landing**）(T3) 3 環境 TOML `[per_strategy.ma_crossover]` commented schema (T4) `g2_03_bind_ma_sltp.sh` 256 行 + `g2_03_bind_helper.py` 405 行 binding SOP shell wrapper。E2 staging marker 確認；E1 push back PM prompt schema spec drift（採 PA RFC 為準）。**衍生 G2-03-FUP-CALLER-WIRE P1**：等 G2-02 ~05-03 後派 wire caller chain（step_6_risk_checks）真實啟用 SL/TP override。 | schema 完成 / 等 G2-02 + G2-03-FUP wire | E1+FA / E2+E4 | 完成 schema 2026-04-26 + caller wire passive |
+| **G2-04** | 🔴P0 passive | **Grid disable 決策會**（若 PostOnly 後仍負 edge） | G2-01 + P0-3 輸入 | PM+FA 決策 | 1h 會議 (~05-08) |
 | **G2-05** | ✅完成（觸發 G2-06）| bb_breakout FIX-26-DEADLOCK-1 rebuild 驗證 — **2026-04-26 ssh healthcheck [12] verify**：FAIL 7d entries=0；FIX-26-DEADLOCK-1 已在 binary（22:34 + 01:30 多次 rebuild）排除 deadlock 殘留 → **結構性 dormancy CONFIRMED**，觸發 G2-06 | operator rebuild | MIT / QA [12] | 完成 2026-04-26 |
 | ~~**G2-06**~~ | ✅完成（disabled） | bb_breakout 結構性 dormancy 處置 — **2026-04-26 PA RFC `2026-04-26--g2_06_bb_breakout_disposal_rfc.md` 推 C 永久 disable** + PM approve；落地：(a) `[bb_breakout].active=false` 三環境 TOML（demo/paper/live） (b) healthcheck [12] active=false 時 PASS skip (c) 新增 [18] disabled_strategy_inventory（CLAUDE.md §三 G6-04 drift 防線）(d) BbBreakoutProfile + sweep tool 保留為 future investment（per §6 重啟條件）。MIT 推 5m / QC 推 C / PA 推 C dominated strategy 分析（B ROI 不利、F2 signals≠edge 未驗證、Wave 3 主軸擠壓）。重啟需新 PA RFC + 5m timeframe 升級。 | G2-05 | E1 / E2 / E4 | 完成 2026-04-26 | E1 Report `2026-04-26--g2_06_bb_breakout_disable_landing.md` |
 
@@ -297,31 +302,44 @@ ssh trade-core "cd ~/BybitOpenClaw/srv && python3 helper_scripts/db/passive_wait
 
 | ID | Tag | 項目 | 前置 | 負責 | 工時 |
 |---|---|---|---|---|---|
-| **G8-01** | 🟠P1 | e2e 認知自適應測試（80+ coverage）— **PA 2026-04-26 scope 重定義**：OpportunityTracker / DreamEngine **代碼不存在**（grep 0 命中，非 stub），完成標準改為 **CognitiveModulator ≥85% line cov + StrategistAgent 注入點 integration 綠**，後二者 deferred 待對應實作 | G3-04 ✅ | QA+E4 / E2 | 2-3d |
-| **G8-02** | 🟠P1 | Python↔Rust parity test（decision agree ≥95%）— **PA 2026-04-26 spec 補**：decision points 限 RiskConfig.executor 3 欄（shadow_mode / per_symbol_position_cap / max_position_pct）；70 case golden+replay 混合；**case-level binary ≥95%**（≥67/70 agree） | G3-03 ✅ | QA+E4 / E2 | 1-2d |
-| **G8-03** | 🟠P1 | 灰度驗收自動化（shadow metrics）— **FA 2026-04-26 補**："灰度" 流程未明確（staged rollout 機制 vs simple shadow→live flip），shadow metrics 列表（agree_rate / decision_lag / pnl_diff）需 QA 整理 | EDGE-P2 flip | QA / E2 | 2-3d |
-| ~~**G8-04**~~ | ⬇降 backlog | ~~healthcheck DAG 線性化（依賴清晰）~~ — **PA 2026-04-26 推薦降級**：當前 17 check 平鋪可讀、隱性依賴僅 2 層深、無假 PASS 觸發、Wave 3 完成標準應移除此項。**降 backlog 待 false PASS/FAIL 真出問題再啟** | — | QA | — |
+| **G8-01** | 🟠P1 deferred | e2e 認知自適應測試（80+ coverage）— PA scope 重定義：OpportunityTracker / DreamEngine 代碼不存在，標準改 CognitiveModulator ≥85% line cov + StrategistAgent integration；deferred 待 G3-08 H1-H5 → Rust IPC Gateway 後實作 | G3-04 ✅ + G3-08 | QA+E4 / E2 | 2-3d (post-G3-08) |
+| ~~**G8-02**~~ | ✅ 完成 2026-04-26 | Python↔Rust parity test（decision agree ≥95%）— **W2 完成（commit c1142d2）**：`tests/test_executor_decision_parity.py` 311 行 + `executor_parity_cases.yaml` 661 行 70 case (30 golden + 40 synthetic_handcrafted)；Linux pytest 5 passed / 2 skipped (G3-08 deferred)，agree=70/70 (100%)。E1 push back: PA 提的 3 decision points 中只 shadow_mode runtime wired (per_symbol_cap + max_pct G3-08 future work)，TestExecutorDecisionParityDeferred skip marker 標 gap。E2 揭發 synthetic_replay 命名誤導 → rename synthetic_handcrafted。 | G3-03 ✅ | QA+E4 / E2 | 完成 2026-04-26 |
+| **G8-03** | 🟠P1 deferred | 灰度驗收自動化（shadow metrics）— EDGE-P2 flip 後派；staged rollout vs simple flip / shadow metrics（agree_rate / decision_lag / pnl_diff） | EDGE-P2-flip 觸發後 | QA / E2 | 2-3d (post-EDGE-P2 flip) |
+| ~~**G8-04**~~ | ⬇降 backlog | ~~healthcheck DAG 線性化~~ — **PA 2026-04-26 降級**：17 check 平鋪可讀、無假 PASS 觸發；待 false PASS/FAIL 真出問題再啟 | — | QA | — |
 | **G8-05** | 🟡P2 | AI cost ROI 監控面板（from AI-E） | G3-09 | AI-E+E1a / QA | 1-2d |
 
-### Wave 3 完成標準
+### Wave 3 完成標準（**派發層面 5/5 ✅，被動等待自然解鎖**）
 
-- [ ] EDGE-P3 前 4 條件全滿足（**(c) 已修為 orphan_adopted ≥20**），Gate 1 fallback 部署
-- [ ] exit_features ≥1000 rows + 7 維 percentile 閾值 bind 到 RiskConfig.exit.*
-- [ ] G2-01 PostOnly 驗收：fee drop ≥60% 或決策策略下架
-- [ ] G2-02 ma R:R counterfactual 報告（**理論值 fee=2bps + realized 真實 1w post-G7-09**）對齊
-- [x] bb_breakout PA RFC 結論（disable vs 升 5m）+ 落地 → healthcheck [12] PASS 連 3d 或正式 disable — **完成 2026-04-26**：PA RFC 選 C 永久 disable，三環境 TOML `active=false` + healthcheck [12] disabled-skip + [18] inventory 新增
+- [x] **bb_breakout PA RFC 結論 + 落地** — ✅ G2-06 disable deployed（PA RFC 選 C 永久 disable，三環境 TOML active=false + [12] disabled-skip + [18] inventory）
+- [x] **G8-02 Python↔Rust parity test** — ✅ 70 case agree=70/70 (100%)（W2 commit c1142d2）
+- [x] **EDGE-P1b schema bind 工具鏈** — ✅ schema landed（calibrator + summary + IPC restore + healthcheck [14] per-strategy）等資料 ~05-10
+- [x] **EDGE-P2-flip tooling** — ✅ tooling landed（dry-run + SOP shell + healthcheck [15] per-strategy + breakdown tool）等 EDGE-P1b 觸發
+- [x] **G2-03 SL/TP Option B schema staging** — ✅ schema landed (StrategyOverride 4 pct + risk_checks helpers + 3 TOML + bind SOP)，等 G2-02 ~05-03 後 G2-03-FUP-CALLER-WIRE
+- [x] **G2-02 counterfactual tool** — ✅ tool landed，等真實 1w post-G7-09 ~05-01~05-03
+- [x] **G2-FUP-IPC-LEGACY-MS-FIX P1** — ✅ ipc_client.py:786 ms→s + 3 unit test PASS（W5 衍生 hotfix）
+- [ ] **EDGE-P3 4 條件全滿** — passive ~04-30 連 3d PASS（[11] 75% ETA ~04-27 滿 200）
+- [ ] **G2-01 PostOnly 驗收** — passive ~05-07/08
+- [ ] **G2-02 雙軌驗證** — passive ~05-01~05-03（理論值 + realized）
 
-### Wave 3 開工時刻表（2026-04-26 PM 派發後 · 4-agent audit 整合）
+### Wave 3 派發完成記錄（5 波 6 commits · 2026-04-26）
 
-**第二波派發**（5 軌並行，已派出）：
-1. ✅ PA G2-06 RFC（disable vs 5m 升級二選一）
-2. ✅ E1 G2-02 counterfactual code（QC 推 (c) 並行：寫碼 + passive 等數據）
-3. ✅ E1 G8-02 Py↔Rust parity test（70 case ≥95% binary）
-4. (待第三波) PA EDGE-P1b RFC（7 維 bind contract）
-5. (待第三波) PA EDGE-P2-flip RFC（flip SOP + 回滾）
-6. (待第三波) PA G2-03 RFC（Option B 層次界定）
+| 波 | commit | 內容 | 狀態 |
+|---|---|---|---|
+| W1（派發起點）| c1142d2 | 4-agent audit (PA/MIT/QC/FA) + W2 PM 派發整合 + G2-02 counterfactual + G8-02 parity + TODO EDGE-P3 (c) bug 修 + G8-04 降 backlog | ✅ |
+| W1.5（隔壁 session sync）| 8946e47 | grid_trading G7-09c Phase 2 reject_cooldown_ms（FIX-G7-09C-PHASE2-WIRE-1B3）+ 18-agent runtime memory 索引 | ✅ |
+| W3 | 55801fe | G2-06 bb_breakout disable 4 子任務（TOML + healthcheck [12]/[18] + meta-doc + Rust comment）+ PA 3 RFC（EDGE-P1b/P2-flip/G2-03）+ E2/E4 review | ✅ |
+| W4 | 60fdf74 | EDGE-P1b 4/4（calibrator + summary + IPC restore + healthcheck [14]）+ EDGE-P2-flip T1+T3（dry-run + SOP shell）+ G2-03 4/4（schema + risk_checks + TOML + bind SOP）+ E2/E4 review | ✅ |
+| W5 | 9cfdd52 | EDGE-P2-flip T2（healthcheck [15] per-strategy + breakdown tool）+ G2-FUP-IPC-LEGACY-MS-FIX P1（ipc_client.py:786 ms→s）+ E2/E4 review | ✅ |
+| Sign-off | df882ad | PM Wave 3 Final Sign-off + CLAUDE.md §十一 update + rebuild 部署成功記錄 | ✅ |
 
-**4-agent audit 報告索引**：
+### Rebuild 部署驗證（2026-04-26 04:29 CEST）
+- engine PID 2033577（restart_all --rebuild 完成；含 Wave 1+2+3 全工 + grid G7-09c Phase 2 + G2-06 disable + EDGE-P1b IPC + G2-03 schema + risk_checks helpers）
+- uvicorn PID 2033662（4 workers）
+- engine lib **2161 / 0 fail**（baseline 1980 → +181 across waves）
+- demo + paper 雙活，snapshot age 8.6s
+- post-rebuild healthcheck **17 PASS / 1 WARN / 1 FAIL**：[12] disabled / [18] inventory / [14] per-strategy / [15] dormant / [13] edge_estimator 全綠；[11] 75% passive；[16] fresh-boot expected（6h cron 自然 PASS）
+
+### 4-agent audit 報告索引：
 - PA：[2026-04-26--wave3_dispatch_research.md](docs/CCAgentWorkSpace/PA/workspace/reports/2026-04-26--wave3_dispatch_research.md)
 - MIT：[2026-04-26--wave3_data_audit.md](docs/CCAgentWorkSpace/MIT/workspace/reports/2026-04-26--wave3_data_audit.md)
 - QC：[2026-04-26--wave3_strategy_audit.md](docs/CCAgentWorkSpace/QC/workspace/reports/2026-04-26--wave3_strategy_audit.md)
