@@ -55,6 +55,7 @@ from .checks_derived import (
     check_leader_election_health,
     check_pipeline_triangulation,
     check_disabled_strategy_inventory,
+    check_observer_pipeline_alive,
 )
 
 
@@ -64,9 +65,9 @@ from .checks_derived import (
 _RUNNER_DESCRIPTION = """Passive-wait pipeline healthcheck.
 被動等待管線健康檢查。
 
-Single-command check that 17+ key runtime data pipelines are actually
+Single-command check that 20 key runtime data pipelines are actually
 producing data, versus silently failing under fail-open error handling.
-單命令檢查 17+ 個關鍵 runtime 資料管線實際有資料流入，
+單命令檢查 20 個關鍵 runtime 資料管線實際有資料流入，
 識破 fail-open 下的 silent failure。
 
 Exit codes:
@@ -77,16 +78,21 @@ Exit codes:
 
 
 def main() -> int:
-    """Entry point — runs all 19 checks and prints a structured report.
+    """Entry point — runs all 20 checks and prints a structured report.
 
     Order is significant — the cursor block runs DB-bound checks, then we
     close the connection before invoking filesystem-only checks. Every
     check returns ``(status, msg)`` (or ``(status, msg, extra)`` for [1]
     which yields the close_fills count used by [2]/[3]/[Xb]).
 
-    入口 — 跑全部 19 個 check 並印結構化報告。順序固定 — cursor 區塊跑
+    Counted rows (20): [1][2][3][4][5][6][8][9][10][12][Xb][14][15][7]
+    [13][11][Xa][16][18][19].
+
+    入口 — 跑全部 20 個 check 並印結構化報告。順序固定 — cursor 區塊跑
     DB 相關 check，conn.close() 之後再跑純檔案系統 check。每個 check 回
     ``(status, msg)``（[1] 額外回 close_fills，供 [2]/[3]/[Xb] 用）。
+    20 條清單：[1][2][3][4][5][6][8][9][10][12][Xb][14][15][7][13][11]
+    [Xa][16][18][19]。
     """
     ap = argparse.ArgumentParser(description=_RUNNER_DESCRIPTION)
     ap.add_argument("--quiet", action="store_true", help="Only print non-PASS lines")
@@ -229,6 +235,18 @@ def main() -> int:
     # 的策略，確保未來 audit 不會「忘了還有這策略」。
     s, m = check_disabled_strategy_inventory()
     results.append(("[18] disabled_strategy_inventory", s, m))
+
+    # [19] OBSERVER-PIPELINE-POST-F42FACE-CLEANUP (2026-04-26): observer
+    # cron freshness + ok ratio guard. Closes the silent-fail loophole
+    # behind G9-04 (commit c7d7179) where a noise wrapper swallowed
+    # 100% step failure for 3 days. Pure filesystem (mtime + JSON parse),
+    # so kept outside the cursor block.
+    # [19] OBSERVER-PIPELINE-POST-F42FACE-CLEANUP（2026-04-26）：observer
+    # cron 新鮮度 + ok 比率守衛，閉合 G9-04 揭發的 silent-fail 漏洞
+    # （noise wrapper 連續 3 天吞 100% step 失敗）。純檔案系統 check，
+    # 不需 cursor。
+    s, m = check_observer_pipeline_alive()
+    results.append(("[19] observer_pipeline_alive", s, m))
 
     # output
     any_fail = False
