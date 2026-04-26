@@ -1,5 +1,5 @@
 """
-G3-08 Phase 2/3 — h_state_query_handler unit tests (real H1+H2+H3+H4).
+G3-08 Phase 2/3 — h_state_query_handler unit tests (real H1+H2+H3+H4+H5).
 
 Phase 1 covered the empty-shell stub (version=0, empty buckets). Phase 2
 added:
@@ -27,6 +27,14 @@ Phase 3 Sub-task 3-2 adds (per PA RFC §5):
  26. env=1 + 4-bucket roundtrip include=["h1", "h2", "h3", "h4"] → all four keys.
  27. include=None default still picks up h4 bucket (parity with h1/h2/h3).
  28. _safe_snapshot_self returns None for missing / non-callable / non-dict / raise.
+
+Phase 3 Sub-task 3-3 adds (per PA RFC §6 — Phase 3 COMPLETE):
+ 29. env=1 + cost_tracker.get_h5_snapshot present → h_states has h5 with 4 PA-spec fields.
+ 30. env=1 + cost_tracker None → h5 key dropped (shares cost_tracker with H2 → both drop).
+ 31. env=1 + cost_tracker.get_h5_snapshot raises → h5 key dropped, others ok.
+ 32. env=1 + include=["h5"] → h_states has only h5.
+ 33. env=1 + 5-bucket roundtrip include=["h1","h2","h3","h4","h5"] → all five keys.
+ 34. include=None default still picks up h5 bucket (parity with h1/h2/h3/h4).
 
 Tests use a fake ``strategy_wiring.STRATEGIST_AGENT`` injected into
 ``sys.modules`` so we don't transitively boot the real agent stack.
@@ -102,16 +110,54 @@ class _FakeModelRouter:
 
 
 class _FakeCostTracker:
-    """Minimal stub matching Layer2CostTracker.get_h2_snapshot contract.
-    Schema mirrors Rust H2BudgetState (3 fields)."""
+    """Minimal stub matching Layer2CostTracker.get_h2_snapshot + get_h5_snapshot contracts.
 
-    def __init__(self, snapshot=None, raises=None):
+    Schema mirrors Rust H2BudgetState (3 fields) + H5CostStats (4 fields).
+
+    Phase 3 Sub-task 3-3 adds opt-in ``with_h5`` / ``h5_snapshot`` /
+    ``h5_raises`` to drive the cost_tracker.get_h5_snapshot accessor.
+    Default ``with_h5=False`` mirrors the silent-skip default — Phase 3
+    Sub-task 3-1 / 3-2 tests stay unaffected (they don't expect h5 in
+    h_states because their fixture skipped binding get_h5_snapshot).
+    Phase 3 Sub-task 3-3 加 opt-in ``with_h5`` 等參數。預設 with_h5=False
+    與靜默跳過預設對齊 —— Sub-task 3-1 / 3-2 既有測試（fixture 未綁
+    get_h5_snapshot，不期望 h5 在 h_states）不受影響。
+    """
+
+    def __init__(
+        self,
+        snapshot=None,
+        raises=None,
+        with_h5=False,
+        h5_snapshot=None,
+        h5_raises=None,
+    ):
         self._snapshot = snapshot if snapshot is not None else {
             "daily_remaining_usd": 1.75,
             "hard_cap_usd": 2.0,
             "adaptive_multiplier": 0.85,
         }
         self._raises = raises
+        # Phase 3 Sub-task 3-3 H5 stub state.
+        # Phase 3 Sub-task 3-3 H5 stub 狀態。
+        self._h5_snapshot = h5_snapshot if h5_snapshot is not None else {
+            "ai_spend_7d_usd": 0.42,
+            "paper_pnl_7d_usd": 0.84,
+            "cost_edge_ratio": 2.0,
+            "data_days": 5,
+        }
+        self._h5_raises = h5_raises
+        if with_h5:
+            # Bind get_h5_snapshot only when opted in — preserves Sub-task
+            # 3-1 / 3-2 test fixture semantics where get_h5_snapshot is
+            # absent and the silent-skip path triggers.
+            # 僅在 opt-in 時綁定 get_h5_snapshot —— 保留 Sub-task 3-1 / 3-2
+            # 測試 fixture 語意（get_h5_snapshot 缺席 + 靜默跳過路徑）。
+            def _get_h5(_self=self):
+                if _self._h5_raises is not None:
+                    raise _self._h5_raises
+                return _self._h5_snapshot
+            self.get_h5_snapshot = _get_h5
 
     def get_h2_snapshot(self):
         if self._raises is not None:
@@ -445,15 +491,27 @@ class TestSnapshotRaiseDropsKey(unittest.TestCase):
             else:
                 os.environ["OPENCLAW_H_STATE_GATEWAY"] = prev_env
 
-    def test_both_raise_drops_both_keys_version_zero(self):
-        """Phase 2 test extended for Phase 3: when ALL snapshot accessors raise
-        (H1+H2+H3+H4), h_states stays empty and version falls back to 0.
-        Originally Phase 2 only had H1+H3; Phase 3 Sub-task 3-1 (H2) and 3-2 (H4)
-        added bucket sources, so the "all-raise → empty" invariant now requires
-        all 4 to raise. Mirrors the original test intent under expanded coverage.
-        Phase 2 測試延伸到 Phase 3：所有 snapshot accessor（H1+H2+H3+H4）皆拋例外時，
-        h_states 仍空，version 退回 0。Phase 2 原僅 H1+H3；Sub-task 3-1（H2）+
-        3-2（H4）擴充來源後，「全 raise → 空」不變式需 4 桶皆 raise。
+    def test_all_raise_drops_all_keys_version_zero(self):
+        """Phase 2 test extended for Phase 3 COMPLETE: when ALL snapshot accessors
+        raise (H1+H2+H3+H4+H5), h_states stays empty and version falls back to 0.
+        Originally Phase 2 only had H1+H3; Phase 3 Sub-task 3-1 (H2), 3-2 (H4),
+        and 3-3 (H5) added bucket sources, so the "all-raise → empty" invariant
+        now requires all 5 to raise. Mirrors the original test intent under
+        full Phase 3 coverage.
+        Phase 2 測試延伸到 Phase 3 COMPLETE：所有 snapshot accessor
+        （H1+H2+H3+H4+H5）皆拋例外時，h_states 仍空，version 退回 0。
+        Phase 2 原僅 H1+H3；Sub-task 3-1（H2）+ 3-2（H4）+ 3-3（H5）
+        擴充來源後，「全 raise → 空」不變式需 5 桶皆 raise。
+
+        Note: Sub-task 3-3 H5 reuses cost_tracker (same as Sub-task 3-1 H2),
+        so a single ``cost_tracker`` instance with H2 raise + H5 raise drives
+        both buckets to drop. Test passes ``with_h5=True`` to bind the
+        get_h5_snapshot method on the cost_tracker stub, then uses h5_raises
+        to make it throw.
+        註：Sub-task 3-3 H5 復用 cost_tracker（與 Sub-task 3-1 H2 同），
+        故單一 ``cost_tracker`` 實例帶 H2 raise + H5 raise 即能讓兩桶都 drop。
+        測試傳 ``with_h5=True`` 在 cost_tracker stub 上綁 get_h5_snapshot 方法，
+        再用 h5_raises 讓它拋例外。
         """
         prev_env = os.environ.get("OPENCLAW_H_STATE_GATEWAY")
         os.environ["OPENCLAW_H_STATE_GATEWAY"] = "1"
@@ -461,14 +519,18 @@ class TestSnapshotRaiseDropsKey(unittest.TestCase):
             _FakeStrategist(
                 _FakeH1Gate(raises=RuntimeError("h1 boom")),
                 _FakeModelRouter(raises=RuntimeError("h3 boom")),
-                cost_tracker=_FakeCostTracker(raises=RuntimeError("h2 boom")),
+                cost_tracker=_FakeCostTracker(
+                    raises=RuntimeError("h2 boom"),
+                    with_h5=True,
+                    h5_raises=RuntimeError("h5 boom"),
+                ),
                 h4_raises=RuntimeError("h4 boom"),
             )
         )
         try:
             result = build_h_state_full_response()
-            # All raised → empty h_states + version stays at 0.
-            # 全 raise → h_states 空 + version 退回 0。
+            # All 5 raised → empty h_states + version stays at 0.
+            # 5 桶全 raise → h_states 空 + version 退回 0。
             self.assertEqual(result["h_states"], {})
             self.assertEqual(result["version"], 0)
         finally:
@@ -936,6 +998,230 @@ class TestSafeSnapshotSelfDefensive(unittest.TestCase):
 
         result = _safe_snapshot_self(_Stub(), "get_h4_snapshot")
         self.assertEqual(result, {"validation_fail": 1, "validation_pass": 2})
+
+
+# ── 29-34. Phase 3 Sub-task 3-3: H5 cost_logging integration (Phase 3 COMPLETE) ──
+
+
+class TestH5CostLoggingIntegration(unittest.TestCase):
+    """29-31. Phase 3 Sub-task 3-3: H5 bucket population + degradation paths.
+    PA RFC `2026-04-26--g3_08_phase3_subtask_split.md` §6.
+
+    H5 SSOT = same Layer2CostTracker as H2 (single tracker, two snapshot
+    lenses). Sub-task 3-3 reuses cost_tracker attribute, so a single
+    ``cost_tracker=None`` race drops both H2 and H5 buckets — acceptable
+    per Sub-task 3-1's degradation contract.
+    H5 SSOT 與 H2 同 Layer2CostTracker（單一 tracker，兩個 snapshot 視角）。
+    Sub-task 3-3 復用 cost_tracker 屬性，故單一 ``cost_tracker=None`` race
+    會同時丟 H2 與 H5 桶 —— 對齊 Sub-task 3-1 降級合約可接受。
+    """
+
+    def setUp(self):
+        self._prev_env = os.environ.get("OPENCLAW_H_STATE_GATEWAY")
+        os.environ["OPENCLAW_H_STATE_GATEWAY"] = "1"
+
+    def tearDown(self):
+        if self._prev_env is None:
+            os.environ.pop("OPENCLAW_H_STATE_GATEWAY", None)
+        else:
+            os.environ["OPENCLAW_H_STATE_GATEWAY"] = self._prev_env
+
+    def test_h5_populated_when_get_h5_snapshot_present(self):
+        """29. env=1 + cost_tracker.get_h5_snapshot wired → h5 bucket present.
+        Phase 3 COMPLETE: all 5 H buckets simultaneously populate.
+        Phase 3 COMPLETE：5 個 H 桶同時填入。
+        """
+        prev_sw = _install_fake_strategy_wiring(
+            _FakeStrategist(
+                _FakeH1Gate(),
+                _FakeModelRouter(),
+                cost_tracker=_FakeCostTracker(with_h5=True),
+                with_h4=True,
+            )
+        )
+        try:
+            result = build_h_state_full_response()
+            self.assertIn("h5", result["h_states"])
+            h5 = result["h_states"]["h5"]
+            # Schema parity with Rust H5CostStats (4 fields, drops the
+            # roi_basis / roi_disclaimer metadata markers).
+            # Schema 對齊 Rust H5CostStats（4 個 fields，丟棄 roi_basis /
+            # roi_disclaimer metadata 標記）。
+            self.assertEqual(set(h5.keys()), {
+                "ai_spend_7d_usd",
+                "paper_pnl_7d_usd",
+                "cost_edge_ratio",
+                "data_days",
+            })
+            self.assertEqual(h5["ai_spend_7d_usd"], 0.42)
+            self.assertEqual(h5["paper_pnl_7d_usd"], 0.84)
+            self.assertEqual(h5["cost_edge_ratio"], 2.0)
+            self.assertEqual(h5["data_days"], 5)
+            # Phase 3 COMPLETE: all 5 buckets populate together → version 1.
+            # Phase 3 COMPLETE：5 桶同時填入 → version 1。
+            self.assertEqual(result["version"], 1)
+            self.assertEqual(set(result["h_states"].keys()), {
+                "h1", "h2", "h3", "h4", "h5",
+            })
+        finally:
+            _restore_strategy_wiring(prev_sw)
+
+    def test_h5_dropped_when_cost_tracker_none(self):
+        """30. env=1 + cost_tracker=None → BOTH h2 AND h5 absent (shared SSOT).
+        H1+H3+H4 unaffected.
+        """
+        prev_sw = _install_fake_strategy_wiring(
+            _FakeStrategist(
+                _FakeH1Gate(),
+                _FakeModelRouter(),
+                cost_tracker=None,
+                with_h4=True,
+            )
+        )
+        try:
+            result = build_h_state_full_response()
+            # Both H2 and H5 dropped because they share cost_tracker SSOT.
+            # H2 與 H5 都丟，因共享 cost_tracker SSOT。
+            self.assertNotIn("h2", result["h_states"])
+            self.assertNotIn("h5", result["h_states"])
+            # H1+H3+H4 unaffected.
+            self.assertIn("h1", result["h_states"])
+            self.assertIn("h3", result["h_states"])
+            self.assertIn("h4", result["h_states"])
+            self.assertEqual(result["version"], 1)
+        finally:
+            _restore_strategy_wiring(prev_sw)
+
+    def test_h5_dropped_when_get_h5_snapshot_raises(self):
+        """31. env=1 + cost_tracker.get_h5_snapshot raises → h5 dropped, others ok.
+
+        Critically: H2 still populates because get_h2_snapshot is independent
+        of get_h5_snapshot (same tracker, different methods, only the H5
+        accessor raises).
+        關鍵：H2 仍填入，因 get_h2_snapshot 與 get_h5_snapshot 獨立（同一
+        tracker、不同方法，只 H5 accessor 拋例外）。
+        """
+        prev_sw = _install_fake_strategy_wiring(
+            _FakeStrategist(
+                _FakeH1Gate(),
+                _FakeModelRouter(),
+                cost_tracker=_FakeCostTracker(
+                    with_h5=True,
+                    h5_raises=RuntimeError("h5 boom"),
+                ),
+                with_h4=True,
+            )
+        )
+        try:
+            result = build_h_state_full_response()
+            self.assertNotIn("h5", result["h_states"])
+            # H1+H2+H3+H4 still populate; version stays at 1.
+            # H1+H2+H3+H4 仍填入；version 維持 1。
+            self.assertIn("h1", result["h_states"])
+            self.assertIn("h2", result["h_states"])
+            self.assertIn("h3", result["h_states"])
+            self.assertIn("h4", result["h_states"])
+            self.assertEqual(result["version"], 1)
+        finally:
+            _restore_strategy_wiring(prev_sw)
+
+    def test_h5_dropped_when_get_h5_snapshot_method_missing(self):
+        """Bonus: env=1 + cost_tracker exists but get_h5_snapshot method missing
+        → h5 absent (silent skip preserves never-raise contract).
+
+        Models the Sub-task 3-1 deploy scenario where cost_tracker exists
+        (H2 path works) but Sub-task 3-3 hasn't landed (get_h5_snapshot
+        method not yet defined) — the defensive _safe_snapshot helper
+        returns None silently.
+        模擬 Sub-task 3-1 部署但 3-3 未 land 的情境：cost_tracker 存在
+        （H2 路徑可運作），但 get_h5_snapshot 方法尚未定義 —— 防禦式
+        _safe_snapshot helper 靜默回 None。
+        """
+        prev_sw = _install_fake_strategy_wiring(
+            _FakeStrategist(
+                _FakeH1Gate(),
+                _FakeModelRouter(),
+                cost_tracker=_FakeCostTracker(),  # with_h5 default False → no method
+                with_h4=True,
+            )
+        )
+        try:
+            result = build_h_state_full_response()
+            self.assertNotIn("h5", result["h_states"])
+            # H2 still works (different method on same tracker).
+            # H2 仍可（同一 tracker 不同方法）。
+            self.assertIn("h2", result["h_states"])
+            self.assertEqual(result["version"], 1)
+        finally:
+            _restore_strategy_wiring(prev_sw)
+
+
+class TestH5IncludeFilter(unittest.TestCase):
+    """32-34. Phase 3 Sub-task 3-3: include filter honours h5 bucket selection."""
+
+    def setUp(self):
+        self._prev_env = os.environ.get("OPENCLAW_H_STATE_GATEWAY")
+        os.environ["OPENCLAW_H_STATE_GATEWAY"] = "1"
+        self._prev_sw = _install_fake_strategy_wiring(
+            _FakeStrategist(
+                _FakeH1Gate(),
+                _FakeModelRouter(),
+                cost_tracker=_FakeCostTracker(with_h5=True),
+                with_h4=True,
+            )
+        )
+
+    def tearDown(self):
+        _restore_strategy_wiring(self._prev_sw)
+        if self._prev_env is None:
+            os.environ.pop("OPENCLAW_H_STATE_GATEWAY", None)
+        else:
+            os.environ["OPENCLAW_H_STATE_GATEWAY"] = self._prev_env
+
+    def test_include_h5_only(self):
+        """32. include=["h5"] → h_states has only h5, version=1."""
+        result = build_h_state_full_response(include=["h5"])
+        self.assertIn("h5", result["h_states"])
+        self.assertNotIn("h1", result["h_states"])
+        self.assertNotIn("h2", result["h_states"])
+        self.assertNotIn("h3", result["h_states"])
+        self.assertNotIn("h4", result["h_states"])
+        self.assertEqual(result["version"], 1)
+
+    def test_5bucket_roundtrip_phase3_complete(self):
+        """33. include=["h1","h2","h3","h4","h5"] → all 5 buckets, version=1.
+
+        THE Phase 3 COMPLETE assertion — proves all 5 H buckets aggregate
+        in a single IPC roundtrip when env=1 + STRATEGIST_AGENT wired.
+        Phase 3 COMPLETE 斷言 —— 證明 env=1 + STRATEGIST_AGENT 接線時，
+        5 個 H 桶在單一 IPC roundtrip 內聚合。
+        """
+        result = build_h_state_full_response(
+            include=["h1", "h2", "h3", "h4", "h5"]
+        )
+        self.assertEqual(
+            set(result["h_states"].keys()),
+            {"h1", "h2", "h3", "h4", "h5"},
+        )
+        self.assertEqual(result["version"], 1)
+        # Spot-check H5 schema (the bucket added this Sub-task).
+        # 抽查 H5 schema（本 Sub-task 新增的桶）。
+        h5 = result["h_states"]["h5"]
+        self.assertIn("ai_spend_7d_usd", h5)
+        self.assertIn("paper_pnl_7d_usd", h5)
+        self.assertIn("cost_edge_ratio", h5)
+        self.assertIn("data_days", h5)
+
+    def test_include_default_none_includes_h5(self):
+        """34. include=None default still picks up h5 bucket (parity with h1-h4)."""
+        result = build_h_state_full_response(include=None)
+        self.assertIn("h5", result["h_states"])
+        # Phase 3 COMPLETE: default include picks up all 5 H buckets.
+        # Phase 3 COMPLETE：預設 include 選 5 個 H 桶。
+        self.assertEqual(
+            set(result["h_states"].keys()),
+            {"h1", "h2", "h3", "h4", "h5"},
+        )
 
 
 if __name__ == "__main__":

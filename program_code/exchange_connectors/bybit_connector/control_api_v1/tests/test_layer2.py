@@ -357,23 +357,202 @@ class TestLayer2CostTracker:
         Patch the module-level ``_invalidate_h_state_async`` import in
         ``app.layer2_cost_tracker`` to count calls (avoiding daemon thread
         spawn / IPC). Pattern mirrors test_h1_thought_gate.py:206-226.
+
+        Phase 3 Sub-task 3-3 update: ``record_claude_cost`` now also fires
+        ``h5.claude_cost_recorded`` after the H2 hint (same call site, two
+        hints — H2 + H5 are two lenses on the same Layer2CostTracker). This
+        Sub-task 3-1 test asserts H2 hint is among the emitted reasons,
+        without asserting exclusivity (the dedicated dual-hint test
+        ``test_record_claude_cost_fires_h2_and_h5_invalidate`` covers the
+        full Sub-task 3-3 contract).
+        Phase 3 Sub-task 3-3 更新：``record_claude_cost`` 在 H2 提示後加發
+        ``h5.claude_cost_recorded``（同呼叫點兩條提示 —— H2 + H5 是同一
+        Layer2CostTracker 的兩個視角）。本 Sub-task 3-1 測試斷言 H2 提示
+        在發出的 reasons 中，但不斷言獨佔（完整 Sub-task 3-3 dual-hint
+        contract 由 ``test_record_claude_cost_fires_h2_and_h5_invalidate``
+        測試涵蓋）。
         """
         with patch("app.layer2_cost_tracker._invalidate_h_state_async") as mock_inv:
             cost_tracker.record_claude_cost(
                 session, input_tokens=1000, output_tokens=500, model_tier=MODEL_SONNET,
             )
-            # Exactly one invalidate call per record_claude_cost.
-            assert mock_inv.call_count == 1
-            # Reason string is the wire contract for Rust h_state_cache.
-            assert mock_inv.call_args.args[0] == "h2.budget_consumed"
+            # Sub-task 3-3 added the h5 hint → call_count is now 2 (H2 + H5).
+            # Sub-task 3-3 加 h5 提示 → call_count 現為 2（H2 + H5）。
+            assert mock_inv.call_count == 2
+            # H2 hint must be present (Sub-task 3-1 contract).
+            # H2 提示必到（Sub-task 3-1 contract）。
+            emitted_reasons = [c.args[0] for c in mock_inv.call_args_list]
+            assert "h2.budget_consumed" in emitted_reasons
 
     def test_record_search_cost_does_not_fire_h2_invalidate(self, cost_tracker, session):
-        """Sub-task 3-1 scope: only Claude cost fires h2 hint; search is 3-3 (H5)."""
+        """Sub-task 3-1 scope: only Claude cost fires h2 hint; search is 3-3 (H5).
+
+        Phase 3 Sub-task 3-3 (this commit) updated record_search_cost to fire
+        ``h5.search_cost_recorded`` — so the call_count is now 1, but the SOLE
+        call is the H5 hint, NOT an H2 hint. Test asserts H2 is NOT in the
+        emitted reasons (Sub-task 3-1 contract preserved).
+        Phase 3 Sub-task 3-3（本 commit）更新 record_search_cost 發
+        ``h5.search_cost_recorded`` 提示 —— call_count 現為 1，但唯一這
+        條呼叫是 H5 提示而非 H2。測試斷言發出的 reasons 中**不含** H2
+        （Sub-task 3-1 contract 保留）。
+        """
         with patch("app.layer2_cost_tracker._invalidate_h_state_async") as mock_inv:
             cost_tracker.record_search_cost(session, "perplexity", 0.005)
-            # Sub-task 3-1 does NOT add invalidate to record_search_cost
-            # (Sub-task 3-3 will add an h5.search_cost_recorded hint).
-            assert mock_inv.call_count == 0
+            # Sub-task 3-3 added h5.search_cost_recorded → exactly 1 call now.
+            assert mock_inv.call_count == 1
+            # The single call must be the H5 hint, NOT an H2 hint
+            # (Sub-task 3-1 scope contract).
+            emitted_reasons = [c.args[0] for c in mock_inv.call_args_list]
+            assert "h5.search_cost_recorded" in emitted_reasons
+            assert all(not r.startswith("h2.") for r in emitted_reasons)
+
+    # ── G3-08 Phase 3 Sub-task 3-3: H5 cost_logging integration tests ──
+    # PA RFC `2026-04-26--g3_08_phase3_subtask_split.md` §6
+
+    def test_get_h5_snapshot_schema(self, cost_tracker):
+        """H5 snapshot returns 4 PA-spec fields (Rust H5CostStats parity)."""
+        snap = cost_tracker.get_h5_snapshot()
+        assert isinstance(snap, dict)
+        # Schema parity with Rust H5CostStats (rust/openclaw_engine/src/
+        # h_state_cache/types.rs:167-178): exactly 4 fields, no extra/missing.
+        # Notably DROPS the ``roi_basis`` / ``roi_disclaimer`` metadata
+        # markers that get_cost_edge_ratio() adds for the broader Cost
+        # Summary API (principle 10 disclosure markers; not part of the
+        # Rust hot-path schema).
+        # Schema 對齊 Rust H5CostStats：恰 4 個欄位，丟棄 get_cost_edge_ratio()
+        # 為更廣 Cost Summary API 加的 roi_basis/roi_disclaimer metadata 標記
+        # （原則 10 揭露用，非 Rust hot-path schema 一部分）。
+        assert set(snap.keys()) == {
+            "ai_spend_7d_usd",
+            "paper_pnl_7d_usd",
+            "cost_edge_ratio",
+            "data_days",
+        }
+
+    def test_get_h5_snapshot_types_and_initial_values(self, cost_tracker):
+        """H5 fields have correct types; initial values reflect fresh tracker."""
+        snap = cost_tracker.get_h5_snapshot()
+        # ai_spend_7d_usd / paper_pnl_7d_usd are float (Rust f64).
+        assert isinstance(snap["ai_spend_7d_usd"], float)
+        assert isinstance(snap["paper_pnl_7d_usd"], float)
+        # data_days is int (Rust u32).
+        assert isinstance(snap["data_days"], int)
+        # cost_edge_ratio is Optional[float] — None on fresh tracker
+        # because data_days < ADAPTIVE_MIN_DAYS (= 3).
+        # Rust mirror: Option<f64> via #[serde(default)].
+        assert snap["cost_edge_ratio"] is None
+        # Fresh tracker → no spend or PnL → both 0.0; data_days = 0.
+        assert snap["ai_spend_7d_usd"] == 0.0
+        assert snap["paper_pnl_7d_usd"] == 0.0
+        assert snap["data_days"] == 0
+
+    def test_get_h5_snapshot_pure_read_no_state_mutation(self, cost_tracker):
+        """get_h5_snapshot must not mutate state (idempotent + distinct dicts)."""
+        snap_a = cost_tracker.get_h5_snapshot()
+        snap_b = cost_tracker.get_h5_snapshot()
+        assert snap_a == snap_b
+        # Distinct dict objects (no aliasing) — caller mutation can't leak.
+        assert snap_a is not snap_b
+
+    def test_get_h5_snapshot_drops_metadata_keys_from_get_cost_edge_ratio(self, cost_tracker):
+        """H5 snapshot must NOT contain roi_basis or roi_disclaimer metadata.
+
+        get_cost_edge_ratio() returns 6 keys (4 numeric + 2 metadata strings
+        for principle 10 disclosure on the broader Cost Summary API).
+        get_h5_snapshot() must filter to just the 4 numeric Rust H5CostStats
+        fields — passing the metadata strings on the wire would force Rust
+        to use ``serde(default)`` to silently drop them, which works but
+        wastes wire bandwidth and obscures the schema contract.
+        get_h5_snapshot() 必須過濾為 Rust H5CostStats 期望的 4 個數值欄位 ——
+        wire 上帶 metadata 雖能由 Rust ``serde(default)`` 靜默丟，但浪費頻寬
+        且模糊 schema contract。
+        """
+        snap = cost_tracker.get_h5_snapshot()
+        assert "roi_basis" not in snap
+        assert "roi_disclaimer" not in snap
+        # Sanity: get_cost_edge_ratio() (the source) DOES include them.
+        full = cost_tracker.get_cost_edge_ratio()
+        assert "roi_basis" in full
+        assert "roi_disclaimer" in full
+
+    def test_get_h5_snapshot_after_recalculate_with_data(self, cost_tracker):
+        """When recalculate_adaptive populates _adaptive, H5 snapshot reflects it."""
+        # Manually inject 3+ days of synthetic data via _adaptive direct
+        # mutation (mirrors what recalculate_adaptive() would compute from
+        # a multi-day daily_spend record).
+        # 直接注入 ≥3 天合成資料（鏡射 recalculate_adaptive() 從多天
+        # daily_spend 紀錄會算出的結果）。
+        cost_tracker._adaptive.ai_spend_7d_usd = 1.5
+        cost_tracker._adaptive.paper_pnl_7d_usd = 3.0
+        cost_tracker._adaptive.data_days = 5
+        # NOTE: get_cost_edge_ratio uses live _adaptive (no recalc needed
+        # to surface these values via the snapshot).
+        snap = cost_tracker.get_h5_snapshot()
+        assert snap["ai_spend_7d_usd"] == 1.5
+        assert snap["paper_pnl_7d_usd"] == 3.0
+        assert snap["data_days"] == 5
+        # cost_edge_ratio = paper_pnl / ai_spend = 3.0 / 1.5 = 2.0
+        # (data_days >= ADAPTIVE_MIN_DAYS=3 → ratio computable).
+        assert snap["cost_edge_ratio"] == 2.0
+
+    def test_get_h5_snapshot_cost_edge_ratio_none_when_data_insufficient(self, cost_tracker):
+        """cost_edge_ratio is None when data_days < ADAPTIVE_MIN_DAYS (= 3)."""
+        # Inject spend but only 2 days — below threshold.
+        cost_tracker._adaptive.ai_spend_7d_usd = 0.5
+        cost_tracker._adaptive.paper_pnl_7d_usd = 1.0
+        cost_tracker._adaptive.data_days = 2
+        snap = cost_tracker.get_h5_snapshot()
+        # data_days < 3 → cost_edge_ratio collapses to None even if numbers
+        # would otherwise compute. Rust Option<f64> accepts null over JSON.
+        assert snap["cost_edge_ratio"] is None
+        # But the raw spend / pnl / data_days fields remain visible.
+        assert snap["ai_spend_7d_usd"] == 0.5
+        assert snap["paper_pnl_7d_usd"] == 1.0
+        assert snap["data_days"] == 2
+
+    def test_record_claude_cost_fires_h2_and_h5_invalidate(self, cost_tracker, session):
+        """record_claude_cost must fire BOTH h2 AND h5 invalidate hints (Sub-task 3-3).
+
+        Sub-task 3-1 added the h2 hint; Sub-task 3-3 (this commit) adds the
+        h5 hint to the same call site. The two hints share the same
+        daemon-thread fire-and-forget infra — ordering is not guaranteed
+        (call_args_list may be h2 first or h5 first depending on patch
+        invocation order), but both must be present.
+        Sub-task 3-1 加 h2 提示；Sub-task 3-3（本 commit）在同一呼叫點加
+        h5 提示。兩條提示共用同套 daemon-thread fire-and-forget 基礎設施
+        —— 順序不保證（h2 先或 h5 先取決於 patch 呼叫順序），但兩條都必到。
+        """
+        with patch("app.layer2_cost_tracker._invalidate_h_state_async") as mock_inv:
+            cost_tracker.record_claude_cost(
+                session, input_tokens=1000, output_tokens=500, model_tier=MODEL_SONNET,
+            )
+            # Exactly two invalidate calls per record_claude_cost.
+            assert mock_inv.call_count == 2
+            # Both reasons present (order-independent set check).
+            emitted_reasons = {c.args[0] for c in mock_inv.call_args_list}
+            assert emitted_reasons == {
+                "h2.budget_consumed",
+                "h5.claude_cost_recorded",
+            }
+
+    def test_record_search_cost_fires_h5_invalidate(self, cost_tracker, session):
+        """record_search_cost must fire h5.search_cost_recorded (Sub-task 3-3 NEW).
+
+        Search cost (Perplexity / WebPilot) feeds the same 7-day AI spend
+        rollup that H5 exposes via cost_edge_ratio — so we hint H5 to
+        refresh, separate from the h5.claude_cost_recorded hint emitted
+        by record_claude_cost. Sub-task 3-1 deliberately did NOT add an
+        h2 hint here (search cost was scoped to Sub-task 3-3 H5 contract).
+        搜尋成本（Perplexity / WebPilot）灌入 H5 透過 cost_edge_ratio
+        暴露的同一個 7d AI 花費彙總 —— 故發 H5 提示，與 record_claude_cost
+        發的 h5.claude_cost_recorded 區別。Sub-task 3-1 刻意未在此加 H2
+        提示（搜尋成本範圍限縮在 Sub-task 3-3 H5 contract）。
+        """
+        with patch("app.layer2_cost_tracker._invalidate_h_state_async") as mock_inv:
+            cost_tracker.record_search_cost(session, "perplexity", 0.005)
+            # Exactly one invalidate call (the H5 hint added in Sub-task 3-3).
+            assert mock_inv.call_count == 1
+            assert mock_inv.call_args.args[0] == "h5.search_cost_recorded"
 
     def test_record_session(self, cost_tracker, session):
         session.state = SESSION_STATE_COMPLETED
