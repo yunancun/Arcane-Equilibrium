@@ -1,6 +1,6 @@
 # OpenClaw TODO — 工作清單（v3 · 單一時間軸版）
 
-**最後更新**：2026-04-26 16:30 CEST（**Phase 1+2 + Tier 3+4+5 wave 完成**；Linux **2210/0** + integration 12/0；35 commits 3f35649→1209a9b；engine PID 2033577 alive 未觸動；EXIT-FEATURES-WRITER-BUG-1-FIX RCA-A/B cohesive PR + G3-08 Phase 1 全完 (A+B+C) + Phase 2 H1+H3 接入；E2 batch review 5+5+6+7 commits 全 PASS / 3 LOW + 4 follow-up backlog；pytest h_state chain 35→96/0；healthcheck 20/20 alive）
+**最後更新**：2026-04-26 16:55 CEST（**Tier 6 完成**：Tier 5 §8 推薦 1-3 並行執行；4 LOW backlog 全清 + PA 2 design ready-to-deploy；Linux **2210/0** + integration 12/0；40 commits 3f35649→e267b2d；engine PID 2033577 alive 未觸動（Tier 6 0 業務邏輯）；E1 兩個 sub-task pivot 經 E2 對抗驗證全 ACCEPT；PA Track 3 push back MIT §6 #1 經 5-axis SSOT 100% 站得住腳）
 **版本**：v3（Wave 線性版；廢除雙軌 P0-P4 章節，P0/P1/P2 降為每項 tag）
 **舊版歸檔**：v2 `docs/archive/2026-04-24--todo_v2_dual_axis_snapshot.md`（458 行，Wave+P 雙軌）· v1 `docs/archive/2026-04-24--todo_v1_refactor_snapshot.md`（328 行）· v0 `docs/archive/2026-04-24--todo_snapshot_pre_refactor.md`（700 行）
 **簽核**：PM Approved FIX-PLAN v2 → [Sign-off](docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-24--FixPlan_v2_PMApproval.md) · **Wave 3 Final** → [Wave 3 Sign-off](docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-26--wave3_final_signoff.md)
@@ -13,7 +13,25 @@
 
 ---
 
-## 🎯 此刻該做什麼（2026-04-26 04:30 CEST · Wave 3 派發層面 100% 完成 + rebuild 部署成功 · passive observation 階段）
+## 🎯 此刻該做什麼（2026-04-26 16:55 CEST · Tier 6 完成 + Wave 3 派發層面 100% · passive observation 階段）
+
+**Tier 6 派發成果**（5 commits f4c5bad→e267b2d，Tier 5 §8 推薦 ROI）：
+- ✅ Track 1 E1 quick wins batch：4 LOW (G3-08-PHASE-1C-FUP-CHECK20-SYNC + EDGE-P1b-FUP-NEGATIVE-GUARD + TIER4-OBSERVER-LOW-1 + G3-07-FUP-PYTEST-MARK) → commit `d8385e6` + memory `56104de`
+- ✅ Track 2 PA H3 schema A/B/C decision：commit `306b549` recommend Option B (Rust rename + 加 fields 對齊 Python)；解阻 Phase 3
+- ✅ Track 3 PA dust restore audit：commit `dd4d64a` recommend Option B (status quo + healthcheck [19] monitor)；揭發 MIT §6 #1 前提部分錯
+- ✅ E2 batch review：commit `e267b2d` 3 task PASS (2 with LOW) / 0 退回 / 2 follow-up
+
+**Next session ROI 排序**（PM Tier 6 §7 推薦）：
+1. **G3-08-PHASE-2-FUP-H3-SCHEMA-ALIGN E1 impl**（P1，~1.5h，per PA prompt template）— Rust H3RouteStats rename，解阻 Phase 3
+2. **PAPER-STATE-DUST-INVENTORY-MONITOR**（P3，~1h，PA Track 3 §7.4 ready-to-deploy SQL）
+3. **G3-08 Phase 3 H2+H4+H5**（P1，~3.5d）— 解阻 G3-09 cost_edge_ratio
+4. **MICRO-PROFIT-FIX-1-HEALTHCHECK** + **T6-FUP-PA-MEMORY-INDEX-SYNC** + **T6-FUP-WARN-ZONE-FILES-SPLIT**（LOW polish）
+
+詳：[Tier 6 Sign-off](docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-26--tier6_signoff.md)
+
+---
+
+## 🎯 Wave 3 status（2026-04-26 04:30 CEST · 派發層面 100% 完成 · passive observation）
 
 **Wave 1**：✅ 全完成（G1-01/02/03/05/06 + G6-01~05；2026-04-24 收尾）。
 
@@ -460,7 +478,7 @@ ssh trade-core "cd ~/BybitOpenClaw/srv && python3 helper_scripts/db/passive_wait
 | **G5-08 E1 implementation** | PA design plan ready (`2063386`)；按 Method A 4-sibling 落地 | 立即可派（無前置）| 🟠P1 | E1 5-6.5h 全鏈（含 E2 review + E4 regression）；下次 session 啟動；engine lib baseline 2166 預期升至 2166+ |
 | **EXIT-FEATURES-WRITER-BUG-1** | healthcheck [3] FAIL pre-existing：exit_features_24h=134 vs close_fills=97 (delta 37)；G5-FUP-PASSIVE-HEALTH split 揭發但 writer broken 非新 bug | 立即可派（writer 邏輯獨立）| 🟠P1 | MIT+E1 audit `learning.exit_features` writer join logic（trading.fills ↔ learning.exit_features dedup or batch insert 重複），2-3h |
 | **G2-FUP-FUNDING-ARB-PAPER-SYNC-LOW-1** (TW memory) | E2 batch review 揭發：TW memory.md 與 commit msg 不一致（次要） | 下次 TW 接手 | 🟢P3 | TW 5min |
-| **EDGE-P1b-FUP-NEGATIVE-GUARD** | E2 batch review 揭發：Python `ipc_client.py` patch_risk_config wrapper 缺 `exit_stale_peak_ms` negative value guard（既有 design pattern） | calibrator 真實啟用後 | 🟢P3 | E1 15min |
+| ~~**EDGE-P1b-FUP-NEGATIVE-GUARD**~~ | ✅ 完成 2026-04-26 commit `d8385e6` | `ipc_client.py update_risk_config` 加 `exit_stale_peak_ms` negative-value guard + 6 unit tests; Tier 6 Track 1 quick-win batch | 完成 2026-04-26 | ✅ |
 | **G5-09-FUP-TYPO** | E2 batch review 揭發：commit `a5b6f17` commit msg test count 自身 typo（0 production 影響） | 下次 commit msg edit cycle | 🟢P3 | 5min |
 | **CHECKS-STRATEGY-SUBSPLIT** | E2 batch review 揭發：`passive_wait_healthcheck/checks_strategy.py` 1048 行 86% 利用率接近 §九 800 警告線；建議下個 G6-04 wave 拆 EDGE-P 系 | 下個 G6-04 維護 wave | 🟢P3 | E5 1d |
 | **VERIFY-IPC-TOKEN-EMPTY-SECRET** | E2 batch review 揭發：`verify_ipc_token` 缺 empty-secret edge test（既有 SEC-08 gap）| 下次 SEC audit wave | 🟢P3 | E1 30min |
@@ -471,17 +489,20 @@ ssh trade-core "cd ~/BybitOpenClaw/srv && python3 helper_scripts/db/passive_wait
 | ~~**G9-02-FUP-WS-CLIENT-SPLIT**~~ | ✅ 完成 2026-04-26 commit `eb65e1e` | ws_client.rs 1227→6 sibling (max maker_kpi_hot_reload 不存在; max sibling parsers 355) + mod.rs 142 < 300 理想線 + 71% peak reduction；hot-path 5 條全 byte-identical (WS-TIMEOUT FA-1 risk #2 / subscribe HashSet O(1)+10-batch+500ms / process_message ShouldReconnect / BackoffConfig 雙路徑 / ForceReconnect close-frame)；cargo lib 2176/0 不變；E2 PASS | E2 MED-1 → 立即可派 | 完成 2026-04-26 | ✅ |
 | ~~**OBSERVER-PIPELINE-POST-F42FACE-CLEANUP**~~ | ✅ 完成 2026-04-26 commit `c53c3f9` | -228/+679 (9 files; 刪 v2 + dead caller `bybit_ws_smoke_to_postgres.py` + observer_cycle.py 9→8 path 修 + cron wrapper noise pattern 移除 + cron-time env var fix `export OPENCLAW_SRV_ROOT` + 新 healthcheck `[19] observer_pipeline_alive` 雙軸三態 + `OPENCLAW_OBSERVER_PIPELINE_OPTIONAL=1` opt-out)；**首次揭露 silent fail ok=1/5** (PM accept 真實狀態暴露)；E2 PASS-with-LOW (L-1 cosmetic BRIDGE_RC overshadow → TIER4-OBSERVER-LOW-1) | G9-04 揭發 | 完成 2026-04-26 | ✅ |
 | **G3-07-FUP-ENV-NAMESPACE** | E2 batch review LOW: `OPENCLAW_BYBIT_ENV` 新 namespace（G3-07 sibling 自帶 fallback "demo"）vs production file-based env 解析對齊 | 下次 batch | 🟢LOW | E1 1-2h |
-| **G3-07-FUP-PYTEST-MARK** | E2 batch review LOW: `tests/test_layer2_tools.py` e2e 真網路測試需註冊 pytest `slow` / `e2e` mark 防 CI 自動跑 | 下次 commit batch | 🟢LOW | E1 5min |
+| ~~**G3-07-FUP-PYTEST-MARK**~~ | ✅ 完成 2026-04-26 commit `d8385e6` | `conftest.py pytest_configure` 註冊 slow + e2e markers + `TestCheckDerivativesE2E` 加 e2e decorator; Tier 6 Track 1 | 完成 2026-04-26 | ✅ |
 | **G9-02-FUP-COOLDOWN** | E2 batch review OPEN-FOLLOW-UP: G9-02 force reconnect cooldown — 既有 `BackoffConfig` 3-60s 退避有基礎保護；DEFAULT-ON 後監控 1-2 週再決定是否加 cooldown | DEFAULT-ON 後 1-2 週 passive | 🟢LOW-PASSIVE | E1 1-2h（如需）|
 | ~~**EXIT-FEATURES-WRITER-BUG-1-FIX**~~ | ✅ 完成 2026-04-26 commits `af48ee1` + `83456e5` + `00a9679` | RCA-A: `step_0_fast_track.rs:315-340` layered Gate 1 (USD floor 1.0 USD) + Gate 2 (ratio gate when entry_notional>0) + bootstrap `migrate_legacy_entry_notional` (idempotent) + new `RiskConfig.limits.ft_dust_qty_floor_usd` schema · RCA-B: `is_partial_reduce_tag()` exact-match helper (`risk_close:fast_track_reduce_half`) + `emit_close_fill` gate before EF emit (trading.fills 仍寫只 EF skip) · engine lib 2198→**2210/0** (+12) + integration 12/0 + 17 new tests · MIT §5 對齊 (A1+A3+B1') · healthcheck [3] 預期 ~2026-04-27 07:37 後自然 PASS (24h grace period for 歷史 37 noise label age out) · E2 PASS-with-LOW (FUP: helpers.rs 1315 §九) | MIT audit ✅ | 完成 2026-04-26 | ✅ |
 | **EXIT-FEATURES-FIX-FUP-HELPERS-RS-SPLIT** | E2 Tier 5 LOW: `tick_pipeline/on_tick/helpers.rs` 1315 行 (EXIT-FEATURES-FIX 加 layered gate 推升)；下次 G5 wave 拆 sibling | 下次 G5 wave | 🟢LOW | E5 0.5d |
-| **G3-08-PHASE-1C-FUP-CHECK20-SYNC** | E2 Tier 5 LOW: [20] healthcheck expected value 升 `version=0→1` + `h_states_keys=0→2` (Phase 2 完成後既有 [20] PASS 文案需同步) | 下次 commit batch | 🟢LOW | E1 10min |
-| **G3-08-PHASE-2-FUP-H3-SCHEMA-ALIGN** | E2 Tier 5 MED-1: Python H3 keys (routing_decisions/l0_count/l1_count/l2_count/cost_total_usd) vs Rust H3RouteStats fields 不對齊；前置 Phase 3 接 real fetcher 必修 | G3-08 Phase 3 前置 | 🟠MED | PA design A/B/C decision + E1 30min |
+| ~~**G3-08-PHASE-1C-FUP-CHECK20-SYNC**~~ | ✅ 完成 2026-04-26 commit `d8385e6` | [20] healthcheck expected value 升 Phase 2（version=1 + h_states ⊇ {h1,h3}）+ set diff WARN 邏輯 Phase 3-4 friendly; Tier 6 Track 1 | 完成 2026-04-26 | ✅ |
+| ~~**G3-08-PHASE-2-FUP-H3-SCHEMA-ALIGN PA design**~~ | ✅ 完成 2026-04-26 commit `306b549` | PA Track 2 A/B/C decision; recommend Option B (Rust rename + 加 fields 對齊 Python，5/5 評分 vs A 1/5 / C 3/5)；E1 impl 留 P1 backlog；Phase 3 unblock path: yes | 完成 2026-04-26 | ✅ |
+| **G3-08-PHASE-2-FUP-H3-SCHEMA-ALIGN E1 impl** | PA design plan ready (`306b549`)；按 Option B 落 Rust `H3RouteStats` rename 7 fields + 加 3 fields 對齊 Python；解阻 Phase 3 接 real fetcher | PA design 完成 | 🟠P1 | E1 ~1.5h（per PA prompt template §7）|
 | **G3-08-PHASE-2-FUP-PRIVATE-ATTR-FACADE** | E2 Tier 5 MED-2: `h_state_query_handler` 直接讀 H1/H3 私有 attribute (contract 違規 runtime impact=0)；應改用 PUBLIC facade method | 下次 refactor | 🟡P2 | E1 1-2h |
-| **PAPER-STATE-DUST-RESTORE-AUDIT** | MIT EXIT-FEATURES audit §6 follow-up #1：`paper_state::restore_from_db` 為何 engine 重啟後沒清掉 0.1 dust（entry_notional=0 進入 fast_track ReduceToHalf spiral）— PA design audit + 是否 startup-time evict dust | EXIT-FEATURES-WRITER-BUG-1-FIX | 🟡P2 | PA + E1 0.5-1d |
+| ~~**PAPER-STATE-DUST-RESTORE-AUDIT**~~ | ✅ PA design 完成 2026-04-26 commit `dd4d64a`；rename **PAPER-STATE-DUST-INVENTORY-MONITOR** | PA Track 3 推 Option B (status quo + healthcheck [19] monitor only)；揭發 MIT §6 #1 前提部分錯（restore 不重建倉位，dust 是 runtime partial-close residue）；A/C 跨 env 不安全 | PA design 完成 | 🟢P3 | E1 ~1h healthcheck only (per PA Track 3 §7.4 ready-to-deploy SQL) |
 | **ML-TRAINING-DATA-HYGIENE-1** | MIT EXIT-FEATURES audit §6 follow-up #5：SQL 量化全期 `learning.exit_features` 中 dust spiral noise 比例（`exit_trigger_rule = 'fast_track_reduce_half' AND realized_net_bps == -5.5`）；如 > 5% 補回填 SQL 移除歷史 noise label；加 healthcheck 偵測 dust spiral 復發 | EXIT-FEATURES-WRITER-BUG-1-FIX | 🟡P2 | MIT + E1 1-2d |
 | **MICRO-PROFIT-FIX-1-HEALTHCHECK** | MIT audit §6 follow-up #6：`passive_wait_healthcheck` 加 dedicated check `[21] fast_track_dust_spiral_guard`：`SELECT COUNT(*) FROM trading.fills WHERE ts > now() - interval '1 hour' AND strategy_name = 'risk_close:fast_track_reduce_half' AND realized_pnl = 0` > 5 → FAIL；防 RCA-A 修復後 regression | G6 wave | 🟢P3 | E1 1h |
-| **TIER4-OBSERVER-LOW-1** | E2 Tier 4 review LOW-1: `cron_observer_cycle.sh:76-79` BRIDGE_RC overshadow at exit 是 cosmetic（不影響 cron exit code propagation 正確性），下次 wave polish | 下次 polish wave | 🟢P3 | E1 30min |
+| ~~**TIER4-OBSERVER-LOW-1**~~ | ✅ 完成 2026-04-26 commit `d8385e6` | aggregate-exit log 保留 OBSERVER_RC + BRIDGE_RC 完整對 (cron exit code 語意 byte-identical); Tier 6 Track 1 pivot | 完成 2026-04-26 | ✅ |
+| **T6-FUP-WARN-ZONE-FILES-SPLIT** | E2 Tier 6 LOW: `checks_derived.py` 869 + `ipc_client.py` 899 兩檔進 §九 800 警告區漸增（Tier 6 +52/+24）；對齊既有 sibling pattern split | 下次 G5 wave | 🟢LOW | E5 1d Wave 4 G5 |
+| **T6-FUP-PA-MEMORY-INDEX-SYNC** | E2 Tier 6 LOW: PA Track 3 dust audit (`dd4d64a`) memory.md 索引條目未追加；PA 下次 audit 接手時補 | 下次 PA 接手 | 🟢LOW | PA 10min |
 | **TIER4-AI-SERVICE-DISPATCH-SPLIT** | E2 Tier 4 review LOW-2: `app/ai_service_dispatch.py` 868 進 §九 800 警告區（G3-08 Phase 1B 加 query_h_state_full handler 推升）；下次 G5 wave 對齊 | 下次 G5 wave | 🟢P3 | E5 0.5d |
 | **TIER4-MIT-AUDIT-GREP-SNIPPET** | E2 Tier 4 review LOW-3: MIT EXIT-FEATURES audit H1 reject 缺 grep snippet 證據（E2 已獨立驗證屬實，下次補完整 audit doc 嚴謹度） | 下次 audit | 🟢P3 | MIT 30min |
 
