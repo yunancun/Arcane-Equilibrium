@@ -1,9 +1,24 @@
+<!-- ════════════════════════════════════════════════════════════════════
+     SSOT (Single Source of Truth) — 本字典為 OpenClaw Bybit API endpoint 唯一權威。
+     新代碼 / 修改 endpoint 必須先查本字典；發現代碼與字典不符，
+     更新字典 + commit 同次同步代碼。E2 PR 審查必查（CLAUDE.md §八 Bybit API 強制）。
+     Source verified against Bybit V5 API docs: https://bybit-exchange.github.io/docs/v5/intro
+     ════════════════════════════════════════════════════════════════════
+     SSOT — Authoritative dictionary for OpenClaw Bybit API endpoints.
+     New code / endpoint changes must reference this dictionary first;
+     drift between code and dictionary requires same-commit dictionary update.
+     E2 PR review must verify (CLAUDE.md §八 Bybit API mandate).
+     ════════════════════════════════════════════════════════════════════ -->
+
 # Bybit V5 API Reference / Bybit V5 API 字典手冊
 
 > OpenClaw Rust 引擎 Bybit API 層完整功能索引。
 > 每個條目：做什麼 → 怎麼調 → 輸入什麼 → 輸出什麼 → 程式在哪。
+>
+> **SSOT 規則 / SSOT Rule**：本檔為 Bybit endpoint 唯一字典；新增/修改端點時 **同 commit** 更新本檔。
+> This file is the single source of truth for Bybit endpoints; add/modify endpoints in same commit as dictionary update.
 
-**版本**: v1 | **日期**: 2026-04-04 | **審計**: BB+E5+PA 三輪通過
+**版本**: v1.1 | **日期**: 2026-04-04（SSOT 標記 + confirm-mmr 路徑修正：2026-04-26）| **審計**: BB+E5+PA 三輪通過 + TW G9-01 路徑修正
 
 ---
 
@@ -552,12 +567,13 @@ Client 創建：`PositionManager::new(client: Arc<BybitRestClient>)`
 #### confirm_pending_mmr
 - **服務**: 確認待定的維持保證金率（MMR）變更。當風險限額調整後，Bybit 要求用戶確認新的 MMR。替代已棄用的 `/v5/position/set-risk-limit`。
 - **調用**: `client.confirm_pending_mmr(category, symbol)`
-- **Bybit 路徑**: `POST /v5/position/confirm-mmr`
+- **Bybit 路徑**: `POST /v5/position/confirm-pending-mmr`
 - **Input**:
   - `category: OrderCategory`
   - `symbol: &str`
 - **Output**: `BybitResult<()>`
 - **關聯程式**: `position_manager.rs:327`
+- **注意 / Note（2026-04-26 TW G9-01 修正）**：Bybit 文檔頁 URL slug 是 `confirm-mmr`（https://bybit-exchange.github.io/docs/v5/position/confirm-mmr），但實際 endpoint path 為 `POST /v5/position/confirm-pending-mmr`（與 PyBit / CCXT / tiagosiebler bybit-api 等多個 client SDK 一致）。先前字典記載 `confirm-mmr` 為文檔 slug 誤抄；本次 G9-01 audit 對齊真實 endpoint。Bybit doc URL slug `confirm-mmr` is doc page identifier only; actual endpoint path is `POST /v5/position/confirm-pending-mmr` (verified against PyBit/CCXT/community SDKs). Previous dictionary entry was a copy-paste error from doc URL slug; G9-01 audit aligns to true endpoint.
 
 ---
 
@@ -1142,7 +1158,7 @@ pub struct ShadowOrderRequest {
 2. **默認環境 = Demo** — `BybitEnvironment::default()` 永遠是 Demo，不會意外打到主網。
 3. **execution.fast 是 mainnet-only** — Bybit demo 端點（`stream-demo.bybit.com`）支援的私有 topic 僅為 `order, execution, position, wallet, greeks`，**不包含 `execution.fast`**。對未知 topic 訂閱 Bybit 會回應 `success:true` 但永遠不推送資料 → `total_fills` 永遠為 0 且無任何錯誤訊息（2026-04-11 B-2 根因）。同樣不要同時訂閱 `execution` 和 `execution.fast`，會產生重複 fill 事件。topic 名為 `execution.fast`（含點），不是 `fast-execution`。**正確做法**：用 `BybitEnvironment::private_ws_topics()` 按環境選 topic — demo/testnet/live-demo → `execution`，mainnet → `execution.fast`。
 4. **110043 不是錯誤** — `set_leverage` 返回 110043 表示槓桿已設置，代碼視為成功。
-5. **confirm-mmr 替代 set-risk-limit** — 舊端點 `/v5/position/set-risk-limit` 已被 Bybit 移除。
+5. **confirm-pending-mmr 替代 set-risk-limit** — 舊端點 `/v5/position/set-risk-limit` 已被 Bybit 移除；現用 `POST /v5/position/confirm-pending-mmr` 確認 MMR 變更。注意 Bybit 文檔頁 URL slug 寫 `confirm-mmr`（https://bybit-exchange.github.io/docs/v5/position/confirm-mmr）但實際 endpoint path 是 `confirm-pending-mmr`，勿照 doc URL slug 抄成 endpoint。`/v5/position/confirm-pending-mmr` is the actual endpoint (Bybit doc URL slug `confirm-mmr` is doc-page identifier only, do not copy as endpoint path).
 6. **subscribe 批次大小** — Spot 每次最多 10 topics；Linear 無硬性限制（總字元上限 21,000）。代碼保守地分批 10 個。
 6b. **broken topic 毒化連接** — 訂閱不存在的 topic（如 liquidation/price-limit/adl-notice）返回 "handler not found"，會導致整個連接零數據。連接和心跳正常但無行情。已在 `29fc1ef` 移除。
 7. **DCP 必須配置** — 不配置 DCP 意味著斷連後掛單持續有效，風險極高。
