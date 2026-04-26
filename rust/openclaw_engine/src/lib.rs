@@ -57,6 +57,7 @@ pub mod strategies;
 pub mod strategist_scheduler;
 pub mod tick_pipeline;
 pub mod ws_client;
+pub mod ws_unknown_handler_guard;
 
 pub use openclaw_core;
 pub use openclaw_types;

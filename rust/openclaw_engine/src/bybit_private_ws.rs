@@ -13,7 +13,9 @@
 use crate::bybit_rest_client::BybitEnvironment;
 use crate::common::bybit_signer::sign_ws_auth;
 use crate::common::ws_backoff::BackoffConfig;
+use crate::ws_unknown_handler_guard::{ShouldReconnect, UnknownHandlerGuard};
 use futures_util::{SinkExt, StreamExt};
+use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite::Message;
@@ -245,6 +247,10 @@ pub struct BybitPrivateWs {
     cancel: CancellationToken,
     /// Channel to send parsed events / 發送解析事件的通道
     event_tx: mpsc::Sender<PrivateWsEvent>,
+    /// G9-02: unknown-topic guard with force-reconnect trigger (DEFAULT-OFF
+    /// via `OPENCLAW_WS_FORCE_RECONNECT_ON_UNKNOWN_ENABLED=1`).
+    /// G9-02：未知 topic 守衛 + 強制重連觸發（DEFAULT-OFF）。
+    unknown_guard: Arc<UnknownHandlerGuard>,
 }
 
 impl BybitPrivateWs {
@@ -263,7 +269,19 @@ impl BybitPrivateWs {
             environment: env,
             cancel,
             event_tx,
+            // G9-02: env-gate snapshot at construction; flip env requires
+            // `--rebuild` / restart for effect.
+            // G9-02：env-gate 在建構時取快照；改 env 需 `--rebuild` / 重啟生效。
+            unknown_guard: UnknownHandlerGuard::new_arc(),
         }
+    }
+
+    /// G9-02: clone the unknown-handler guard `Arc` for external metrics
+    /// readout (status JSON writer / healthcheck). Read-only consumers.
+    /// G9-02：複製未知 handler 守衛 `Arc`，供外部讀取 metrics（status JSON
+    /// writer / healthcheck）。Consumer 只讀。
+    pub fn unknown_guard_handle(&self) -> Arc<UnknownHandlerGuard> {
+        Arc::clone(&self.unknown_guard)
     }
 
     /// Main loop: connect, authenticate, subscribe, read messages, reconnect on failure.
@@ -404,10 +422,32 @@ impl BybitPrivateWs {
                                 msg = read.next() => {
                                     match msg {
                                         Some(Ok(Message::Text(text))) => {
-                                            if let Some(event) = self.parse_message(&text) {
-                                                if self.event_tx.send(event).await.is_err() {
-                                                    warn!("Event channel closed / 事件通道已關閉");
-                                                    return;
+                                            // G9-02: use guard-aware wrapper in main loop only;
+                                            // auth-phase parsing (above) keeps the original path
+                                            // since fresh connections must not force-reconnect
+                                            // before fully authed.
+                                            // G9-02：僅 main loop 用 guard-aware wrapper；
+                                            // auth 階段（前面）保留原路徑，避免剛建立的連線在
+                                            // 完成認證前就被強制重連。
+                                            match self.parse_message_with_guard(&text) {
+                                                PrivateMsgOutcome::Event(event) => {
+                                                    if self.event_tx.send(event).await.is_err() {
+                                                        warn!("Event channel closed / 事件通道已關閉");
+                                                        return;
+                                                    }
+                                                }
+                                                PrivateMsgOutcome::Skip => {}
+                                                PrivateMsgOutcome::ForceReconnect => {
+                                                    info!(
+                                                        "G9-02 private WS force reconnect requested — breaking inner loop / \
+                                                         G9-02 私有 WS 強制重連請求 — 中斷內層迴圈"
+                                                    );
+                                                    let _ = write.send(Message::Close(None)).await;
+                                                    let _ = self
+                                                        .event_tx
+                                                        .send(PrivateWsEvent::Disconnected)
+                                                        .await;
+                                                    break;
                                                 }
                                             }
                                         }
@@ -501,6 +541,89 @@ impl BybitPrivateWs {
     fn parse_message(&self, text: &str) -> Option<PrivateWsEvent> {
         parse_private_message(text)
     }
+
+    /// G9-02: parse + record unknown-topic wrapper.
+    /// G9-02：parse + 記錄未知 topic 包裝。
+    ///
+    /// EN: `parse_private_message` already returns `None` for both control
+    ///     messages AND unknown topics. To distinguish them we re-inspect
+    ///     the JSON for a `topic` key that did NOT match a known dispatcher
+    ///     branch. If found, the unknown-handler guard records it and may
+    ///     signal `ForceReconnect`. Adds <50µs per message in the steady
+    ///     state (already-parsed message; small JSON re-inspection).
+    /// 中文：`parse_private_message` 對控制訊息與未知 topic 都回 `None`。
+    ///     為了區分兩者，這裡用 `topic` key 重新檢查 JSON，若該 topic 沒匹配
+    ///     任何已知 dispatcher 分支，則交給未知 handler 守衛記錄並可能回傳
+    ///     `ForceReconnect`。穩態下每訊息 <50µs 額外開銷（訊息已 parse；
+    ///     僅輕量 JSON 再檢查）。
+    fn parse_message_with_guard(&self, text: &str) -> PrivateMsgOutcome {
+        let event_opt = parse_private_message(text);
+        if let Some(event) = event_opt {
+            return PrivateMsgOutcome::Event(event);
+        }
+        // event_opt is None: either control message (pong/subscribe) OR unknown topic.
+        // Distinguish via re-inspect; cheap because we already discarded the parse.
+        // event_opt 是 None：可能是控制訊息（pong / subscribe）或未知 topic。
+        // 這裡重新解析判別，cost 低（前面已捨棄 parse 結果）。
+        let parsed: serde_json::Value = match serde_json::from_str(text) {
+            Ok(v) => v,
+            Err(_) => return PrivateMsgOutcome::Skip,
+        };
+        // op-keyed control messages handled by parse_private_message → not unknown.
+        // op key 開頭的控制訊息已被 parse_private_message 處理 → 非未知 topic。
+        if parsed.get("op").is_some() {
+            return PrivateMsgOutcome::Skip;
+        }
+        // If this is data-shaped (has `topic` AND `data`) but the topic wasn't
+        // recognised → that's a "Unhandled private topic" case (line 633 of
+        // the standalone parser). For data-shaped without `topic`, treat as
+        // skip (malformed but not actionable for G9-02).
+        // 若為 data 形式（有 `topic` 與 `data`）但 topic 未被識別 → 屬「未處理
+        // 的私有主題」（standalone parser line 633）。data 形式但無 `topic` →
+        // skip（畸形但非 G9-02 適用範圍）。
+        let topic = match parsed.get("topic").and_then(|v| v.as_str()) {
+            Some(t) => t,
+            None => return PrivateMsgOutcome::Skip,
+        };
+        if parsed.get("data").is_none() {
+            return PrivateMsgOutcome::Skip;
+        }
+        // Topic was present but parser couldn't dispatch → treat as unknown.
+        // Topic 存在但 parser 無法 dispatch → 視為未知。
+        let decision = self.unknown_guard.record_unknown(topic, current_time_ms());
+        match decision {
+            ShouldReconnect::No => PrivateMsgOutcome::Skip,
+            ShouldReconnect::Yes => {
+                let (total, forced) = self.unknown_guard.snapshot_metrics();
+                warn!(
+                    topic = topic,
+                    unknown_total = total,
+                    forced_reconnect_total = forced,
+                    "G9-02 force reconnect on unknown private handler threshold reached / \
+                     G9-02 私有未知 handler 達閾值，強制重連"
+                );
+                PrivateMsgOutcome::ForceReconnect
+            }
+        }
+    }
+}
+
+/// Outcome of dispatching a private WS message.
+/// 派發單條私有 WS 訊息的結果。
+///
+/// EN: Internal helper enum — not exposed in the public API. Skip = control
+///     msg / non-actionable; Event = parsed payload to forward; ForceReconnect
+///     = G9-02 unknown-handler trigger fired.
+/// 中文：內部輔助 enum — 不在 public API。Skip = 控制訊息 / 無動作；Event =
+///     已 parse 的事件待轉發；ForceReconnect = G9-02 未知 handler 觸發。
+#[derive(Debug)]
+enum PrivateMsgOutcome {
+    /// Forward this event to the consumer / 將此事件轉發給消費者
+    Event(PrivateWsEvent),
+    /// Control message or no-op / 控制訊息或無動作
+    Skip,
+    /// G9-02: break inner loop and reconnect / G9-02：break 內層迴圈並重連
+    ForceReconnect,
 }
 
 // ---------------------------------------------------------------------------

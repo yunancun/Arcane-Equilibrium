@@ -10,6 +10,7 @@
 
 use crate::common::ws_backoff::BackoffConfig;
 use crate::config::ConfigManager;
+use crate::ws_unknown_handler_guard::{ShouldReconnect, UnknownHandlerGuard};
 use futures_util::{SinkExt, StreamExt};
 use openclaw_types::{PriceEvent, PriceEventKind};
 use std::collections::HashSet;
@@ -82,6 +83,15 @@ pub struct WsClient {
     subscriptions: HashSet<String>,
     /// Optional channel for runtime topic additions/removals (from ScannerRunner) / 運行時主題增減的可選通道
     topic_change_rx: Option<mpsc::UnboundedReceiver<WsTopicChange>>,
+    /// G9-02: unknown-topic guard with force-reconnect trigger (DEFAULT-OFF
+    /// via `OPENCLAW_WS_FORCE_RECONNECT_ON_UNKNOWN_ENABLED=1`). `Arc` so the
+    /// reference can be cloned for diagnostics / metrics readout while the
+    /// run loop owns one for `record_unknown()` calls.
+    /// G9-02：未知 topic 守衛 + 強制重連觸發（DEFAULT-OFF，透過環境變數
+    /// `OPENCLAW_WS_FORCE_RECONNECT_ON_UNKNOWN_ENABLED=1` arm）。`Arc` 包裝
+    /// 以便 metrics 讀取 / 診斷可 clone reference，而 run loop 持有一份呼叫
+    /// `record_unknown()`。
+    unknown_guard: Arc<UnknownHandlerGuard>,
 }
 
 /// Shared reconnect backoff policy (public-WS profile).
@@ -112,7 +122,23 @@ impl WsClient {
             cancel,
             subscriptions: HashSet::new(),
             topic_change_rx: None,
+            // G9-02: env-gate snapshot taken at construction time; flip the
+            // env var requires `--rebuild` or restart for effect (acceptable
+            // since this is a behavioural toggle, not a hot-reload knob).
+            // G9-02：env-gate 在建構時取快照；改 env 需 `--rebuild` 或重啟才生效
+            //（行為性 toggle，非熱重載參數，可接受）。
+            unknown_guard: UnknownHandlerGuard::new_arc(),
         }
+    }
+
+    /// G9-02: clone the unknown-handler guard `Arc` for external metrics
+    /// readout (e.g. healthcheck / status JSON writer). Consumers should
+    /// only call `snapshot_metrics()` and `is_armed()` — never mutate.
+    /// G9-02：複製未知 handler 守衛 `Arc`，供外部讀取 metrics（healthcheck /
+    /// status JSON writer）。Consumer 只應呼叫 `snapshot_metrics()` 與
+    /// `is_armed()`，不應 mutate。
+    pub fn unknown_guard_handle(&self) -> Arc<UnknownHandlerGuard> {
+        Arc::clone(&self.unknown_guard)
     }
 
     /// Add a startup subscription topic (called before run()).
@@ -279,11 +305,26 @@ impl WsClient {
                             msg = read.next() => {
                                 match msg {
                                     Some(Ok(Message::Text(text))) => {
-                                        if !self.process_message(&text).await {
-                                            // Event channel closed — engine shutting down (RE-2 fix)
-                                            // 事件通道已關閉 — 引擎正在關閉
-                                            log_state(WsState::Disconnected, 0);
-                                            return;
+                                        match self.process_message(&text).await {
+                                            ProcessOutcome::Continue => {}
+                                            ProcessOutcome::Exit => {
+                                                // Event channel closed — engine shutting down (RE-2 fix)
+                                                // 事件通道已關閉 — 引擎正在關閉
+                                                log_state(WsState::Disconnected, 0);
+                                                return;
+                                            }
+                                            ProcessOutcome::ForceReconnect => {
+                                                // G9-02: break inner loop → outer reconnect path
+                                                // re-runs subscribe with cached `subscriptions`.
+                                                // G9-02：break 內層迴圈 → 外層 reconnect 路徑
+                                                // 會用 cached subscriptions 重訂閱。
+                                                info!(
+                                                    "G9-02 force reconnect requested — breaking inner loop / \
+                                                     G9-02 強制重連請求 — 中斷內層迴圈"
+                                                );
+                                                let _ = write.send(Message::Close(None)).await;
+                                                break;
+                                            }
                                         }
                                     }
                                     Some(Ok(Message::Ping(data))) => {
@@ -345,24 +386,35 @@ impl WsClient {
     }
 
     /// Process a single text message from Bybit WS.
-    /// Returns false if event channel is closed (caller should exit).
     /// 處理來自 Bybit WS 的單條文本消息。
-    /// 返回 false 表示事件通道已關閉（調用方應退出）。
-    async fn process_message(&self, text: &str) -> bool {
+    ///
+    /// Returns:
+    ///   - `ProcessOutcome::Continue`: handled normally, keep reading.
+    ///   - `ProcessOutcome::Exit`: event channel closed, run loop should exit.
+    ///   - `ProcessOutcome::ForceReconnect`: G9-02 unknown-handler guard hit
+    ///     threshold and is armed → caller should break inner loop, falling
+    ///     into the existing reconnect path which resubscribes the cached
+    ///     `subscriptions` set.
+    /// 回傳：
+    ///   - `Continue`：正常處理，繼續讀取。
+    ///   - `Exit`：事件通道已關閉，run loop 應退出。
+    ///   - `ForceReconnect`：G9-02 未知 handler 守衛達閾值且已 arm → 呼叫端
+    ///     break 內層迴圈，進入既有 reconnect 路徑，重訂閱 cached subscriptions。
+    async fn process_message(&self, text: &str) -> ProcessOutcome {
         // Try to extract price data from various Bybit message formats.
         // 嘗試從各種 Bybit 消息格式中提取價格數據。
         let parsed: serde_json::Value = match serde_json::from_str(text) {
             Ok(v) => v,
             Err(e) => {
                 debug!(error = %e, "non-JSON WS message / 非 JSON WS 消息");
-                return true;
+                return ProcessOutcome::Continue;
             }
         };
 
         // Skip pong / subscription confirmations / 跳過 pong 和訂閱確認
         if parsed.get("op").is_some() || parsed.get("success").is_some() {
             debug!("control message: {}", text);
-            return true;
+            return ProcessOutcome::Continue;
         }
 
         // Bybit public data formats:
@@ -372,7 +424,7 @@ impl WsClient {
         let topic = parsed.get("topic").and_then(|t| t.as_str()).unwrap_or("");
         let raw_data = match parsed.get("data") {
             Some(d) => d,
-            None => return true,
+            None => return ProcessOutcome::Continue,
         };
 
         // Normalize to array: if data is a single object, wrap it / 統一為數組
@@ -383,7 +435,7 @@ impl WsClient {
             data_vec = vec![raw_data.clone()];
             &data_vec
         } else {
-            return true;
+            return ProcessOutcome::Continue;
         };
 
         // Route by topic prefix / 按主題前綴路由
@@ -414,18 +466,57 @@ impl WsClient {
                 .filter_map(|item| parse_adl_notice_item(item))
                 .collect()
         } else {
-            debug!(topic = topic, "unhandled topic / 未處理的主題");
-            return true;
+            // G9-02: track unknown topic; trigger force reconnect when armed
+            // and threshold met. `now_ms()` is the openclaw_core shared helper
+            // imported below at file-level (line ~437).
+            // G9-02：追蹤未知 topic；arm 且達閾值時觸發強制重連。
+            let decision = self.unknown_guard.record_unknown(topic, now_ms());
+            match decision {
+                ShouldReconnect::No => {
+                    debug!(topic = topic, "unhandled topic / 未處理的主題");
+                }
+                ShouldReconnect::Yes => {
+                    let (total, forced) = self.unknown_guard.snapshot_metrics();
+                    warn!(
+                        topic = topic,
+                        unknown_total = total,
+                        forced_reconnect_total = forced,
+                        "G9-02 force reconnect on unknown handler threshold reached / \
+                         G9-02 未知 handler 達閾值，強制重連"
+                    );
+                    return ProcessOutcome::ForceReconnect;
+                }
+            }
+            return ProcessOutcome::Continue;
         };
 
         for event in events {
             if self.event_tx.send(event).await.is_err() {
                 warn!("event channel closed / 事件通道已關閉");
-                return false;
+                return ProcessOutcome::Exit;
             }
         }
-        true
+        ProcessOutcome::Continue
     }
+}
+
+/// Outcome of processing a single WS message.
+/// 處理單條 WS 消息的結果。
+///
+/// EN: Replaces the original `bool` return so we can distinguish "exit run
+///     loop" (channel closed) from "force reconnect" (G9-02 unknown handler
+///     threshold) without overloading semantics.
+/// 中文：取代原本的 `bool` 回傳，讓「退出 run loop」（通道關閉）與「強制
+///     重連」（G9-02 未知 handler 達閾值）有不同語意，避免重載 bool。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ProcessOutcome {
+    /// Normal: keep reading next message / 正常：繼續讀取下一條訊息
+    Continue,
+    /// Event channel closed → caller should return from run() / 通道關閉 → 退出 run()
+    Exit,
+    /// G9-02 force reconnect: break inner loop, outer loop will reconnect+resubscribe
+    /// G9-02 強制重連：break 內層迴圈，外層會重連並重訂閱
+    ForceReconnect,
 }
 
 // ---------------------------------------------------------------------------
