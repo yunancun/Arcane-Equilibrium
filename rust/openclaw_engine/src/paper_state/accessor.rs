@@ -355,6 +355,44 @@ impl PaperState {
         self.funding_rates.insert(symbol.to_string(), rate);
     }
 
+    /// EVICT-ON-DUST F3 (2026-04-26): mirror `RiskConfig.limits.ft_dust_qty_floor_usd`
+    /// into PaperState so `apply_fill` / `reduce_position` post-mutation
+    /// evict (T1/T2) can read the live floor without an extra config
+    /// indirection on the hot path. Called by TickPipeline ctor + on every
+    /// RiskConfig version bump (`risk_config_version_seen` pattern).
+    /// `0.0` disables the gate (matches step_0 producer-side behaviour).
+    /// Non-finite or negative values are coerced to 0.0 (fail-closed): a
+    /// poisoned hot-reload cannot enable the gate with a NaN floor that
+    /// would always-evict every position.
+    /// EVICT-ON-DUST F3：將 `RiskConfig.limits.ft_dust_qty_floor_usd` 鏡射
+    /// 進 PaperState，避免 hot-path 多 1 層 config 跳轉。TickPipeline 構造時
+    /// 與 RiskConfig 版本變動時呼叫；0.0 = 閘關閉；非有限值或負值夾為 0.0
+    /// 防 always-evict。
+    pub fn set_dust_floor_usd(&mut self, floor: f64) {
+        self.dust_floor_usd = if floor.is_finite() && floor >= 0.0 {
+            floor
+        } else {
+            0.0
+        };
+    }
+
+    /// Read the cached USD-denominated dust floor. `0.0` = gate disabled.
+    /// 讀取 USD 計價 dust floor 快取；0.0 = 閘關閉。
+    pub fn dust_floor_usd(&self) -> f64 {
+        self.dust_floor_usd
+    }
+
+    /// EVICT-ON-DUST F3 (2026-04-26) observability accessor: read the
+    /// cumulative count of dust evictions since process start. Surfaces via
+    /// status arm log + healthcheck `[20]`. Reset to 0 on engine restart;
+    /// not persisted (eviction events are observability-only, not state).
+    /// EVICT-ON-DUST F3 觀測存取器：讀取自 process 啟動起累積的驅逐次數。
+    /// 透過 status arm log + healthcheck [20] 暴露；重啟歸零、不持久化
+    /// （evict 是觀測事件不是狀態）。
+    pub fn dust_evictions_total(&self) -> u64 {
+        self.dust_evictions_total
+    }
+
     /// Set Bybit Demo sync balance (Mode B). Call with None to disable sync mode.
     /// 設定 Bybit Demo 同步餘額（模式 B）。傳 None 關閉同步模式。
     pub fn set_bybit_sync_balance(&mut self, balance: Option<f64>) {
