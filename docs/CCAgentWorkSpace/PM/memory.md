@@ -609,3 +609,80 @@ Operator 接續 Tier 5 sign-off 後說「@PM 接手 todo」（generic 接手；P
 - E1 Track 1 inline lessons: `docs/CCAgentWorkSpace/E1/memory.md` 728 行附近 Tier 6 Track 1 entry
 
 **最後更新**：2026-04-26 16:55 CEST · PM Tier 6 Sign-off DONE
+
+---
+
+## 2026-04-26 Tier 7 — 「繼續完成 1-3」Tier 6 §7 推薦並行執行
+
+### Operator 指令
+Operator 接續 Tier 6 sign-off 後說「繼續完成 1-3」（PM Tier 6 §7 推薦 next session ROI 排序：H3 schema align E1 impl + dust inventory monitor + Phase 3 sub-task split）。
+
+### 5 commits 完成（git range `f782598..b6dbc24`，跨 QA `7e83159` 中間）
+
+**3 件 Tier 7 並行**：
+- T7.1 Track 1 E1 H3 schema align Rust impl：commit `4b30f5e` (1 file +167/-7, +2 schema parity tests)
+  - cargo lib 2210 → 2212；10/10 key 對齊；0 production consumer (E2 grep verified)；Python 0 改動
+- T7.2 Track 2 E1 healthcheck [21] dust inventory monitor：commit `8241133` (6 files +517/-24, 14 unit tests)
+  - **Linux cron 16:09 UTC LIVE PASS** `dust_spiral_count=0 — Gate 1 USD floor suppressing as designed`
+  - Supersedes MICRO-PROFIT-FIX-1-HEALTHCHECK (MIT §6 #6 narrower spec)
+- T7.3 Track 3 PA G3-08 Phase 3 sub-task split design：commit `c6ed0b3`
+  - Pattern B 推薦：3 sub-tasks (3-1 H2 並行 / 3-2 H4 並行 / 3-3 H5 串行)；ETA 3.5d
+  - 3 self-contained E1 prompt templates ready-to-deploy
+
+**E2 batch review**：commit `b6dbc24` 3 task PASS (1 with LOW = improvement) / 0 退回 / 1 optional follow-up
+
+**QA 期間 commit**：`7e83159` Wave 3 E2E acceptance report（隔壁 session 在 Tier 7 期間 commit；out of scope）
+
+### Test baseline（2026-04-26 ~17:30 CEST）
+- Track 1 cargo lib 2210→2212 (Mac+Linux green) + h_state_cache 17/0
+- Track 2 14/14 unit tests Mac+Linux + Linux production cron 16:09 LIVE PASS
+- Track 3 純 design 0 code touched
+
+### PM 編排成績
+- **3 sub-agent 並行派發**：100% 完成（檔案無重疊，全 NOT isolation per CLAUDE.md §八 dynamic dispatch rule）
+- **PM intervention 1**：Track 2 E1 sub-agent push 被 sandbox guardrail 擋（同 Tier 6 lesson），PM 補 push `8241133`；Track 1+3 sub-agent 直 push 0 PM intervention
+- **lessons.md 規則應用**：sub-agent push 卡時不 dangerouslyDisableSandbox（hard rule 明示）→ Track 2 E1 直接 inline report 回 PM 補；零 retry，零 race
+- **跨 session 協作健康**：QA 隔壁 session 自 commit `7e83159` 進來；PM Tier 7 全程不動 QA WIP（per `feedback_git_commit_only_for_metadoc`）；TODO.md W1 status flip 由本 sign-off commit 一併納入
+
+### E2 對抗驗證 4 個 strong claim 全 grep verified
+1. **Track 1 10-key alignment**：Python `_routing_stats` (model_router.py:114-124, 9 keys + cache_size line ~480) vs Rust H3RouteStats 10 fields → 1:1 對齊
+2. **Track 1 0 production consumer**：grep `H3RouteStats` 排除 tests/types.rs/mod.rs → 0；只有 `ipc_server/handlers/h_state.rs:69 "h3": snap.h3` opaque struct via serde
+3. **Track 1 Schema parity test 真有效**：BTreeSet<String> 比對 + 雙向 diff diagnostic message；未來 drift → test RED
+4. **Track 1 Python 0 改動**：`git show 4b30f5e --stat` 確認只動 1 file（Rust types.rs）
+
+### Track 3 PA 揭發 3 個 verified 問題
+1. **H4 silent gap**：grep 整個 `program_code/` 0 處 `validation_pass` 計數；Sub-task 3-2 必補
+2. **strategist_agent.py 觸 §九 1200 警戒**：1170 LOC + Sub-task 3-2 ~25 LOC = 1195 LOC（距硬上限 5 行）；Phase 4 Strategist sub-task 必先拆檔
+3. **H2 + H5 file overlap**：兩者都動 `layer2_cost_tracker.py:227 record_claude_cost`，**強制序列**（3-3 在 3-1 後派發）
+
+### Track 2 SQL deviation：improvement not regression
+- E1 加 `FILTER (WHERE realized_pnl=0)` 到 `COUNT(DISTINCT symbol)`（PA spec 為 unfiltered）
+- E1 drop `partial_reduce_real_count`（PA spec 多餘 column）
+- E2 評為 **improvement not regression**（更精確 dust spiral fan-out signal）→ T7-FUP-DUST-SQL-DEVIATION-DOC LOW backlog（PA 下次接手 amend RFC §7.4 reflect）
+
+### 教訓（→ memory）
+1. **Sub-agent push 卡 sandbox 模式穩定**：Tier 6 + Tier 7 連續兩次 E1 sub-agent push to main 被擋（PA / E2 sub-agent 卻能 push）；推測 sandbox rule 對 E1 比 PA / E2 嚴格。Workaround：sub-agent prompt 明示「push 卡時直接 inline report 回 PM 補」hard rule（已落地，本 Tier 7 1 次補 push 無 friction）
+2. **跨 session 協作三方健康**：Mac PM 主 session + 隔壁 QA session + sub-agent 並行；3 個 git source 同時動 origin/main，全程 0 conflict（fetch + git commit --only + 三端 ff-pull 嚴格遵守）
+3. **PA prompt template ROI 高**：Track 3 寫 3 個 self-contained E1 prompt template，下次 session PM 0 額外 context；單次 PA design 投資 ~1h 換來 next session 多個 sub-agent 並行的勻速派發；同 Tier 4 G3-08 Phase 1 PA design template lesson
+4. **healthcheck slot 編號 SOP**：[19] observer + [20] h_state_gateway + [21] dust inventory；下次 [22] 由派發前 grep `runner.py` cursor block 確認；slot 編號避免衝突的單一檢查命令: `grep -E "^\s*\[\d+\]" helper_scripts/db/passive_wait_healthcheck/runner.py`
+
+### Backlog 新增（1 follow-up + Phase 3 ready-to-deploy + 既有持續）
+
+**E2 推薦**：
+- **LOW**: T7-FUP-DUST-SQL-DEVIATION-DOC (PA 10min, amend RFC §7.4)
+
+**Phase 3 ready-to-deploy（PA prompt templates 已寫）**:
+- **G3-08-PHASE-3-SUB-TASK-3-1 H2 budget**（P1，~1.2d，§4）— 與 3-2 並行
+- **G3-08-PHASE-3-SUB-TASK-3-2 H4 validator**（P1，~1.0d，§5）— 與 3-1 並行；含 H4 silent gap fix
+- **G3-08-PHASE-3-SUB-TASK-3-3 H5 cost_logging**（P1，~1.3d，§6）— 強制 3-1 後（layer2_cost_tracker.py 同檔）；解阻 G3-09
+
+### Wave 3 影響：**0**
+所有 Tier 7 改動（Track 1 Rust struct rename 0 hot-path consumer + Track 2 healthcheck 0 mutation + Track 3 純 design）；不觸動 engine PID 2033577；passive observation 主軸不變（Live ~2026-05-30 ±7d）。
+Track 1 Rust 改動下次 `--rebuild` 才 live（無 dependency on Phase 3 派發前）。
+
+### 報告索引
+- Workspace report: `docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-26--tier7_signoff.md`
+- E2 batch review: `docs/CCAgentWorkSpace/E2/workspace/reports/2026-04-26--tier7_batch_review.md`
+- PA Track 3 Phase 3 split: `docs/CCAgentWorkSpace/PA/workspace/reports/2026-04-26--g3_08_phase3_subtask_split.md`（含 3 ready-to-deploy E1 prompt template）
+
+**最後更新**：2026-04-26 17:35 CEST · PM Tier 7 Sign-off DONE
