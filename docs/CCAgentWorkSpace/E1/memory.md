@@ -917,3 +917,46 @@ PA Phase 3 sub-task split design plan §5 — H4 validator stats 接 h_state_cac
 - **`get_h5_snapshot` 純讀無鎖**：與 `get_h2_snapshot` 取 `self._lock` 不同，`get_h5_snapshot` 委派 `get_cost_edge_ratio` 讀 `self._adaptive`（值物件，由 `recalculate_adaptive()` 在 `self._lock` 下原子替換）— 任一並發讀只見舊或新完整 snapshot，無 torn read。Lesson：Python 屬性原子替換（`self._adaptive = AdaptiveBudgetState(...)`）+ 純讀路徑可不取鎖，前提是 writer 在鎖下整體替換。memory model 推理應在 docstring 顯式陳述（SAFETY / Invariant 中英對照）。
 - **「cost_edge_ratio == None」測試覆蓋**：data_days < ADAPTIVE_MIN_DAYS=3 → ratio 為 None（即使 ai_spend / paper_pnl 數值齊全）。Rust `Option<f64>` 透過 serde JSON 接 null。test 6（`test_get_h5_snapshot_cost_edge_ratio_none_when_data_insufficient`）顯式驗證 null + 其他 3 個數值 field 仍可見。Lesson：Optional<T> 跨語言邊界（Python None ↔ Rust Option<T> via JSON null）是 forward-compat schema 設計常見模式，test 必涵蓋 null 案例避免 Rust 端 silent default-zero。
 - **報告檔位置**：直接傳給 parent agent（per system prompt 不寫 .md report 到 repo）。本 memory.md 條目 + commit msg 為完整跨 session 知識持久化。
+
+## F2 CROSS-SYMBOL-PRICE-CONTAMINATION-1（2026-04-26 P0，0.25d，e44755a feature branch e1-f2-cross-symbol-price）
+
+### 任務範圍
+- E5 engine.log dive 揭發：STRKUSDT dust spiral 期間（37 cycles），`OrderDispatchRequest.price` 用了 outer event 的 price（BTC ~$77995 / ETH ~$2327），不是 STRK 自己的 $0.04261。
+- 影響：(1) 41 條 phantom fill log 寫進 ETHUSDT/BTCUSDT/KATUSDT 名下 wrong-symbol attribution (2) min_notional gate 評估用錯 ref_price 騙過 gate (3) `event_consumer::loop_handlers::new fill` 統計 wrong symbol attribution。
+- 派發：feature branch `e1-f2-cross-symbol-price`（非 main），等 E2 + E4 review 後 PM merge。
+- 與並行 F5/F7 dust spiral primary fix `af48ee1`（隔壁 E1）獨立，文件不重疊。
+
+### 5 sites audit 結論（E5 標的 OrderDispatchRequest::price 全部 filler）
+| Site | Status | 原因 |
+|---|---|---|
+| `commands.rs:617` execute_position_close | **BUG** | caller 走多 path（fast_track / risk_check / halt_session / strategy_close）多以非 event.symbol 呼叫；event.last_price 為外層 tick → wrong symbol's price |
+| `commands.rs:707` ipc_close_all | OK | `price` 變數 (line 690) 已從 `paper_state.latest_price(&p.symbol).unwrap_or(p.entry_price)` 求得（補 NaN guard） |
+| `commands.rs:825` ipc_close_symbol | OK | `price` 來自 `paper_state.latest_price(symbol).unwrap_or(p.entry_price)`（補 NaN guard） |
+| `step_4_5_dispatch.rs:337` 策略入場新單 | OK + invariant audit comment | `intent.symbol == ctx.symbol == event.symbol` invariant（5 strategies 都用 `symbol: ctx.symbol.to_string()`），event.last_price 等同 intent.symbol's price |
+| `step_4_5_dispatch.rs:628` paper shadow open | OK + invariant audit comment | `fill.fill_price` 來自 paper_state.apply_intent 內部 resolved（屬 intent.symbol） |
+
+### 修復策略 — Option A（最小改動，§八「最小影響」）
+- `execute_position_close` 內部 resolve dispatch_price = `paper_state.latest_price(symbol).filter(finite&>0).or(entry_price.filter(finite&>0)).unwrap_or(event.last_price)`；6 個 caller signature 不動。
+- ipc_close_all / ipc_close_symbol 已對 (a) latest_price (b) entry_price 兩層 fallback；本 fix 加上 NaN/non-positive guard 對齊 P1-16 教訓 + 三 path 共用同一策略。
+- 4 處 OK site 加 audit comment 中英對照記錄 invariant + 「未來 invariant 破會推到必修」對偶條件，避免 silent regression。
+
+### 測試（4 新單測，dual_rail_dispatch.rs）
+- `test_execute_position_close_dispatch_price_matches_symbol_not_event` — 主場景（STRK 0.04261 vs outer BTC 77995）
+- `test_execute_position_close_falls_back_to_entry_price_when_no_latest` — NaN latest → entry_price fallback
+- `test_execute_position_close_last_resort_event_price_when_no_position` — 無 latest 無 position → event.last_price 末路
+- `test_ipc_close_all_dispatch_price_matches_each_symbol` — 4 symbols × 4 latest × 4 派發 端到端 invariant
+
+### 結果
+- Mac debug `cargo test -p openclaw_engine --lib` **2216 / 0 failed**（baseline 2161 + 4 new + 51 conditional ramp）
+- Linux release `cargo test --release -p openclaw_engine --lib` **2216 / 0 failed**
+- 11 dual_rail_dispatch 子測 100% pass（5 既有 + 1 P0-4 R1 + 1 P1-15 + 4 F2 new）
+- F2 與 P1-16 既有 per_symbol_price_pnl 測試**互補**而非重複：P1-16 守 emit_close_fill 的 TradingMsg::Fill paper 簿記；F2 守 OrderDispatchRequest 的 exchange 派發（dust spiral 揭發的 missing link）
+
+### 教訓
+- **「修一條 OrderDispatchRequest::price」要審所有同模式 site**：5 處 grep 出 1 BUG + 4 OK，OK 處仍要寫 audit comment 鎖 invariant；未來改 strategy 行為（e.g. 跨 symbol Open intent）時讓未來人能順著注釋找到必須改的 dispatch 點。E5 pinpoint「commands.rs:622 primary」是準確的（line 已隨我的注釋擴 → 變 622 後段 → 派發 site 在 671 附近），但仍走完 5 site audit 為治理留全紀錄。
+- **NaN guard 對齊 P1-16 教訓**：原 `unwrap_or(entry_price)` 對 latest_price=NaN 不防（NaN 會通過 `Some(NaN)` 然後 `unwrap_or` 不觸發 fallback），per_symbol_price_pnl 測試已示 NaN 是真實 case（orphan-adopted 倉位首 tick 前）；本 fix 三 path 統一加 `.filter(|p| p.is_finite() && *p > 0.0)`，OK site 順手 backport 同 guard 對齊 + 補上 audit comment。
+- **「最小影響」設計選 Option A**（fn 內 resolve）vs Option B（caller 顯式傳 price）：A 改 1 fn body / 6 caller 零變動 / signature 不動 / FILL-CONTEXT-LINKAGE-1 + 既有 P0-4 R1 / P1-15 測試零退化；B 要動 6 caller call signature + tests + downstream stub 全跑 — 不對等於本 bug 嚴重度。CLAUDE.md §八「最小影響」優先 A。
+- **commit-即-push 嚴守 + feature branch**：本任務 PA 明確指示**禁直接 push main**（feature branch 用 `git push -u origin e1-f2-cross-symbol-price` ✓），與「commit 即 push」並不衝突 — 不直接 push main 不代表不 push，是 push 到 feature branch 等 PM merge。Linux 端透過 `ssh trade-core "git fetch origin e1-f2-cross-symbol-price && git checkout e1-f2-cross-symbol-price"` 切換驗證 release test，跑完後切回 main 保持工作樹乾淨（PM merge 時直接走 origin/main）。
+- **不擴範圍嚴守**：發現工作樹有多個 unrelated 改動（healthcheck `checks_*.py` / live_session routes / console.html / tab-live.html）+ untracked Operator/PA report — 全部不 stage，只 `git add` 顯式 3 個 F2 Rust 檔。未來 sub-agent 觀察到 git status 內非自身檔不應「順手清」，是隔壁 session WIP。
+- **多 session worktree race（CRITICAL）**：本任務後段被「git status 突然顯示在不同 branch」事件多次襲擊（dust-evict / f6-edge-reload-daemon / e1-f2 之間反覆切換），代表主工作樹（`/Users/ncyu/Projects/TradeBot/srv`）被並行 sub-agents（F3 / F6 / F2）同時操作 + 切 branch race。對策：(a) memory.md 等 git-tracked meta-doc 改動務必 ssh trade-core 在 Linux 端做（Linux 端不在主工作樹 race 範圍）(b) 所有 git ref 操作前先 `git status` 驗證自己仍在預期 branch，否則 abort + 切 SSH (c) 不要假設「我剛 commit 完所以 working tree 還是我的」— 隔壁 sub-agent 隨時可以 checkout。本次 F2 commit `e44755a` 安全是因為 push 已完成 + origin/e1-f2 ref 持有 → memory commit 在 Linux 端透過 ssh 補。
+- **報告檔位置**：直接傳給 parent agent（per system prompt 不寫 .md report 到 repo）。本 memory.md 條目 + commit msg 為完整跨 session 知識持久化。

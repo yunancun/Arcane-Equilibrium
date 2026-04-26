@@ -588,8 +588,39 @@ impl TickPipeline {
     /// apply_confirmed_fill → trading.fills.strategy_name, so callers must pass the causal
     /// tag (e.g. "strategy_close:funding_arb_exit", "risk_close:fast_track"). P0-4 R1:
     /// previously hardcoded "risk_check" which collapsed three distinct trigger sources.
+    ///
+    /// F2 CROSS-SYMBOL-PRICE-CONTAMINATION-1 (2026-04-26): the dispatched
+    /// `OrderDispatchRequest.price` MUST resolve from `symbol`'s own latest
+    /// price ladder (paper_state.latest_price → entry_price → event.last_price
+    /// last-resort), NOT from `event.last_price` directly. The risk / fast_track
+    /// / strategy-close / halt-session callers iterate `paper_state.positions()`
+    /// and may close any position regardless of which symbol fired the current
+    /// tick (e.g. STRKUSDT dust-spiral fast_track ReduceToHalf evaluated under
+    /// an ETHUSDT/BTCUSDT/KATUSDT outer tick → previously stamped the outer
+    /// tick's price onto STRK's reduce-only OrderDispatchRequest, which
+    /// (a) corrupted `min_notional` ref_price evaluation, (b) wrote 41 phantom
+    /// downstream fill log rows under the wrong symbol's accounting bucket, and
+    /// (c) skewed `event_consumer::loop_handlers` "new fill" attribution. The
+    /// paper-side `emit_close_fill` rows were already protected by P1-16 + the
+    /// caller-side `close_position_at_symbol_market` resolution; this is the
+    /// final missing link covering the exchange dispatch. Fallback chain mirrors
+    /// `ipc_close_all` (line ~688) and `ipc_close_symbol` (line ~798) so all
+    /// three close paths agree on the same price-resolution policy.
+    ///
     /// RRC-1-C2 / R-03：執行平倉 — 派發到影子/交易所通道，並標記 pending 防止重複派發。
     /// `trigger_tag` 穿透至 trading.fills.strategy_name — caller 必須傳真實因果 tag。
+    /// F2 跨交易對價格污染修復（2026-04-26）：派發出去的
+    /// `OrderDispatchRequest.price` 必須由 `symbol` 自己的價格梯（paper_state.
+    /// latest_price → entry_price → event.last_price 末路 fallback）求得，**不**
+    /// 直接借用 `event.last_price`。風控/fast_track/策略平倉/halt 等 caller
+    /// 都會掃 `paper_state.positions()` 對非 event.symbol 倉位下手（例：STRKUSDT
+    /// dust spiral 在 ETH/BTC/KAT 外層 tick 下被 fast_track ReduceToHalf 半倉
+    /// → 修前把外層 tick 的價蓋進 STRK 平倉派發，造成 (a) min_notional gate
+    /// 用錯 ref_price (b) event_consumer 寫進錯 symbol 41 條 phantom fill 列
+    /// (c) 「new fill」歸因錯亂）。Paper 側 emit_close_fill 已由 P1-16 + caller
+    /// `close_position_at_symbol_market` 保護；本 fix 補齊 exchange 派發這條
+    /// 最後缺口。Fallback chain 對齊 ipc_close_all（line ~688）+ ipc_close_symbol
+    /// （line ~798），三條 close 路徑使用一致的 price-resolution 策略。
     pub(super) fn execute_position_close(
         &mut self,
         symbol: &str,
@@ -614,11 +645,31 @@ impl TickPipeline {
                 .get_entry_context_id(symbol)
                 .unwrap_or("")
                 .to_string();
+            // F2 CROSS-SYMBOL-PRICE-CONTAMINATION-1 (2026-04-26): resolve the
+            // dispatched `price` from `symbol`'s own ladder, not from the outer
+            // tick. NaN-aware: `latest_price` may carry NaN when an
+            // orphan-adopted position has never received a tick; treat NaN as
+            // missing (matches per_symbol_price_pnl::test_halt_session_uses_
+            // per_symbol_price_not_triggering_tick semantics).
+            // F2 跨交易對價格污染修復（2026-04-26）：派發價格依 `symbol` 自有
+            // 梯度求得，不沿用外層 tick。NaN-aware：latest_price 為 NaN 時視為
+            // 缺值（對齊 P1-16 halt_session 測試的 fallback 語義）。
+            let dispatch_price = self
+                .paper_state
+                .latest_price(symbol)
+                .filter(|p| p.is_finite() && *p > 0.0)
+                .or_else(|| {
+                    self.paper_state
+                        .get_position(symbol)
+                        .map(|p| p.entry_price)
+                        .filter(|p| p.is_finite() && *p > 0.0)
+                })
+                .unwrap_or(event.last_price);
             let _ = tx.send(OrderDispatchRequest {
                 symbol: symbol.to_string(),
                 is_long: !is_long,
                 qty,
-                price: event.last_price,
+                price: dispatch_price,
                 strategy: trigger_tag.to_string(),
                 paper_fill_ts: event.ts_ms,
                 is_close: true,
@@ -679,6 +730,14 @@ impl TickPipeline {
         if is_exchange {
             // Collect position snapshot first to avoid borrow conflict on self.
             // 先快照倉位，避免 borrow 衝突。
+            // F2 CROSS-SYMBOL-PRICE-CONTAMINATION-1 audit (2026-04-26):
+            // `price` resolved from each position's own `latest_price` →
+            // entry_price ladder; never borrows the IPC trigger's tick.
+            // OK — same fallback policy as `execute_position_close` and
+            // `ipc_close_symbol` after F2 fix.
+            // F2 跨交易對價格污染審計（2026-04-26）：每筆倉位的派發價依其
+            // 自身 latest_price → entry_price 求得，不借用觸發者的 tick。
+            // 與 execute_position_close / ipc_close_symbol 一致的策略。
             let positions: Vec<(String, bool, f64, f64)> = self
                 .paper_state
                 .positions()
@@ -688,6 +747,7 @@ impl TickPipeline {
                     let price = self
                         .paper_state
                         .latest_price(&p.symbol)
+                        .filter(|p| p.is_finite() && *p > 0.0)
                         .unwrap_or(p.entry_price);
                     (p.symbol.clone(), p.is_long, p.qty, price)
                 })
@@ -778,11 +838,21 @@ impl TickPipeline {
         if is_exchange {
             // Read position data before mutating self.exchange_seq.
             // 先讀倉位數據，再修改 self.exchange_seq。
+            // F2 CROSS-SYMBOL-PRICE-CONTAMINATION-1 audit (2026-04-26):
+            // `price` resolved from `symbol`'s own `latest_price` →
+            // entry_price ladder; orphan-hint branch falls back to
+            // latest_price-or-zero. NaN-aware filter aligns this path
+            // with `execute_position_close` and `ipc_close_all` so the
+            // three close paths share one price-resolution policy.
+            // F2 跨交易對價格污染審計（2026-04-26）：派發價依 `symbol` 自身
+            // latest_price → entry_price 階梯求得；orphan-hint 分支退到
+            // latest_price 或 0。NaN-aware filter 對齊三條 close 路徑。
             let pos_info = self.paper_state.get_position(symbol).and_then(|p| {
                 if p.qty > 0.0 {
                     let price = self
                         .paper_state
                         .latest_price(symbol)
+                        .filter(|p| p.is_finite() && *p > 0.0)
                         .unwrap_or(p.entry_price);
                     Some((p.is_long, p.qty, price))
                 } else {
@@ -795,7 +865,11 @@ impl TickPipeline {
                 Some(v) => v,
                 None => match (hint_is_long, hint_qty) {
                     (Some(il), Some(q)) if q > 0.0 => {
-                        let price = self.paper_state.latest_price(symbol).unwrap_or(0.0);
+                        let price = self
+                            .paper_state
+                            .latest_price(symbol)
+                            .filter(|p| p.is_finite() && *p > 0.0)
+                            .unwrap_or(0.0);
                         info!(
                             symbol,
                             is_long = il,
