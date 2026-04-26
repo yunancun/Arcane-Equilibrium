@@ -123,11 +123,18 @@ def extract_training_data(
         ctx_count = conn.execute(f"SELECT count(*) FROM read_parquet('{ctx_path}')").fetchone()[0]
 
         # Extract fills / 提取成交
+        # F4-2 (2026-04-26): exclude `unattributed:bybit_auto` audit rows so
+        # parquet ETL output never feeds Bybit auto-action fills (funding /
+        # dust scrub / auto-补单) into downstream training. Audit rows have
+        # realized_pnl=0 and unknown TIF → fee_rate=0 which would skew labels.
+        # F4-2（2026-04-26）：排除 `unattributed:bybit_auto` audit row，使
+        # parquet ETL 輸出不混入 Bybit 自主動作成交，避免污染下游訓練。
         fills_path = f"{_clean_dir}/fills_{start_str}_{end_str}.parquet"
         fills_query = f"""
             COPY (
                 SELECT * FROM pg.trading.fills
                 WHERE ts >= '{start_str}' AND ts < '{end_str}'
+                  AND (strategy_name IS NULL OR strategy_name NOT LIKE 'unattributed:%')
                 ORDER BY ts
             ) TO '{fills_path}' (FORMAT PARQUET, COMPRESSION ZSTD);
         """
