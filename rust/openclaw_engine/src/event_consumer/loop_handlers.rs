@@ -77,122 +77,12 @@ impl LoopState {
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// F4-1 (2026-04-26): unmatched-fill audit emitter.
-// F4-1（2026-04-26）：未匹配 WS 成交的 audit emitter。
-// ─────────────────────────────────────────────────────────────────────────────
-
-/// Engine modes that should emit an `unattributed:bybit_auto` audit row when an
-/// exchange WS fill arrives with no matching `PendingOrder`. Paper never gets
-/// real WS fills (it has no exchange binding) so it is excluded by design — the
-/// emit branch is also a defence-in-depth guard against future regression that
-/// might route paper into this code path. `live_testnet` is excluded because no
-/// real flow runs on testnet today and audit-row schema budget is reserved for
-/// the three production modes.
-/// 應落 `unattributed:bybit_auto` audit row 的 engine mode（未匹配 WS 成交時）。
-/// Paper 不接真 WS（無交易所綁定）依設計排除；emit 分支同時兼具防止未來 paper
-/// 誤走此路徑的深層守護。`live_testnet` 也排除（目前無真實流量）。
-#[inline]
-pub(super) fn engine_mode_emits_unattributed_audit(em: &str) -> bool {
-    matches!(em, "live" | "live_demo" | "demo")
-}
-
-/// F4-1 audit-row builder + try_send. Returns `true` when a row was queued to
-/// trading_writer; `false` when (a) engine_mode is paper / live_testnet (skip
-/// by design), (b) `order_tx` is `None` (writer disabled in test fixture), or
-/// (c) channel is full (try_send back-pressure — fail-soft, real WS reconnect
-/// will re-emit the same exec_id eventually; idempotent via fill_id PK).
-///
-/// Strategy_name is hard-coded to `"unattributed:bybit_auto"` so that ML
-/// pipelines can filter via `WHERE strategy_name NOT LIKE 'unattributed:%'`
-/// without per-source enumeration (future LIVE auto-actions inherit the same
-/// prefix). `entry_context_id = ""` → NULL in DB (per trading_writer L318);
-/// realized_pnl = 0 because we can't reconstruct an entry to compute PnL
-/// against. fee_rate = 0 because TimeInForce is unknown without PendingOrder.
-///
-/// fill_id is `unattrib-{exec_id}` so dedup against `seen_exec_set` (line 409)
-/// already prevents duplicate emit on WS reconnect; fill_id collision with
-/// any future legitimate fill_id is impossible because Bybit exec_id never
-/// starts with `unattrib-`.
-///
-/// F4-1 audit row 構造 + try_send。回傳 `true` 表已排入 trading_writer 佇列；
-/// `false` 表 (a) engine_mode 為 paper / live_testnet（依設計跳過）、(b) `order_tx`
-/// 為 None（測試 fixture 停用 writer）、(c) 通道已滿（try_send 反壓 — fail-soft，
-/// 真實 WS 重連最終會重發同 exec_id；fill_id PK 保證冪等）。
-///
-/// strategy_name 固定為 `"unattributed:bybit_auto"`，ML pipeline 用
-/// `WHERE strategy_name NOT LIKE 'unattributed:%'` 即可過濾，未來 LIVE
-/// 自主動作沿用相同前綴。entry_context_id="" → DB NULL（trading_writer L318
-/// 規則）；realized_pnl=0 因為無 entry 可計算 PnL；fee_rate=0 因 TimeInForce
-/// 在無 PendingOrder 下不可知。
-///
-/// fill_id 為 `unattrib-{exec_id}`，搭配 `seen_exec_set`（line 409）已避免
-/// WS 重連重發；與未來合法 fill_id 衝突不可能（Bybit exec_id 不會以
-/// `unattrib-` 起首）。
-#[allow(clippy::too_many_arguments)]
-pub(super) fn try_emit_unattributed_fill(
-    engine_mode: &str,
-    exec_id: &str,
-    exec_ts_ms: u64,
-    order_id: &str,
-    symbol: &str,
-    side: &str,
-    qty: f64,
-    price: f64,
-    fee: f64,
-    order_tx: Option<&tokio::sync::mpsc::Sender<crate::database::TradingMsg>>,
-) -> bool {
-    // Defence-in-depth filter: only live / live_demo / demo are eligible.
-    // Paper / live_testnet → skip (paper has no real WS by design).
-    // 深層防護過濾：僅 live / live_demo / demo 可落 audit。
-    // Paper / live_testnet → 跳過（paper 依設計無真 WS）。
-    if !engine_mode_emits_unattributed_audit(engine_mode) {
-        return false;
-    }
-    let tx = match order_tx {
-        Some(t) => t,
-        // None = test fixture or writer disabled — fail-soft no-op.
-        // None = 測試 fixture 或 writer 停用 — fail-soft no-op。
-        None => return false,
-    };
-    let msg = crate::database::TradingMsg::Fill {
-        // fill_id prefix `unattrib-` makes audit rows visually distinguishable
-        // and grep-friendly while preserving dedup via Bybit-globally-unique
-        // exec_id suffix. trading.fills PK is (fill_id, ts) so reuse is idempotent.
-        // fill_id 加 `unattrib-` 前綴：肉眼可辨、grep 易找；後綴 Bybit 全局
-        // 唯一 exec_id 保留 dedup；trading.fills PK (fill_id, ts) 重發冪等。
-        fill_id: format!("unattrib-{}", exec_id),
-        ts_ms: exec_ts_ms,
-        order_id: order_id.to_string(),
-        symbol: symbol.to_string(),
-        side: side.to_string(),
-        qty,
-        price,
-        fee,
-        // fee_rate unknown without PendingOrder TIF context; set 0.
-        // fee_rate 在缺少 PendingOrder TIF 上下文時不可知；設 0。
-        fee_rate: 0.0,
-        // realized_pnl=0 because there is no entry leg to compute against.
-        // Bybit funding payments are tracked separately via wallet ledger.
-        // realized_pnl=0 因無 entry leg 可計算對沖；funding 由錢包帳本另記。
-        realized_pnl: 0.0,
-        strategy_name: "unattributed:bybit_auto".to_string(),
-        // context_id is non-NULL fill scoped to this single audit emission.
-        // context_id 為非 NULL 的單筆 audit 範圍 ID。
-        context_id: format!("unattrib-{}-{}", exec_id, exec_ts_ms),
-        // Empty → trading_writer L318 maps to DB NULL (no entry linkage).
-        // 空字串 → trading_writer L318 對應 DB NULL（無 entry 關聯）。
-        entry_context_id: String::new(),
-        engine_mode: engine_mode.to_string(),
-        // exit_source NULL: this is not a Combine-Layer-routed exit fill.
-        // exit_source NULL：非 Combine Layer 路由的退場 fill。
-        exit_source: None,
-    };
-    // try_send drops on full channel (fail-soft). Real WS reconnect will
-    // re-emit; fill_id PK keeps DB idempotent.
-    // try_send 通道滿時丟棄（fail-soft）。WS 重連會重發；fill_id PK 保 DB 冪等。
-    tx.try_send(msg).is_ok()
-}
+// F4-RETURN Issue 1 (2026-04-26): F4-1 emitter moved to sibling
+// `unattributed_emit` (§九 1200-line ceiling); re-export preserves caller paths.
+// F4-RETURN Issue 1（2026-04-26）：F4-1 emitter 抽至 sibling 以守 §九 上限。
+pub(super) use super::unattributed_emit::{
+    engine_mode_emits_unattributed_audit, try_emit_unattributed_fill,
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Arm A: cross-engine cascade event (peer crash / circuit breaker trip).
@@ -512,7 +402,10 @@ pub(super) async fn handle_pipeline_command(
 /// arm — behaviourally equivalent.
 /// Arm C handler：分派單個 `ExchangeEvent`。原版 `continue` 語意改為 fn
 /// 內 early `return`，下個 select! 迭代自然進下一 arm，行為等價。
-pub(super) fn handle_exchange_event(
+// F4-RETURN Issue 2 (2026-04-26): async because F4-1 emitter uses send().await
+// for back-pressure. mod.rs Arm C is already async — propagation is just `.await`.
+// F4-RETURN Issue 2（2026-04-26）：async — F4-1 emitter 改 send().await 取背壓。
+pub(super) async fn handle_exchange_event(
     evt: Option<ExchangeEvent>,
     pipeline: &mut TickPipeline,
     snapshot_writer: &mut DualStateWriter,
@@ -670,30 +563,20 @@ pub(super) fn handle_exchange_event(
                     }
                 }
             } else {
-                // F4-1 (2026-04-26): unmatched WS fill audit row.
-                // Pre-fix: silent `warn!()` + drop. LIVE/LiveDemo Bybit auto-actions
-                // (funding payment / dust scrub / auto-补单) reach here because
-                // ExecutorAgent shadow_mode=true emits 0 SubmitOrder → 0
-                // PendingOrder → 100% unmatched. Result: 0 rows in trading.fills
-                // for live/live_demo over 7d while engine.log shows real fills.
-                // Fix: emit `unattributed:bybit_auto` audit row (live/live_demo/demo
-                // only — paper has no real WS so this branch is unreachable for
-                // paper; the engine_mode filter is a defence-in-depth guard).
-                // Audit rows have realized_pnl=0 / entry_context_id NULL and are
-                // excluded from ML training via `WHERE strategy_name NOT LIKE
-                // 'unattributed:%'` filter (F4-2). See PA design 2026-04-26 §2.
-                //
-                // F4-1（2026-04-26）：未匹配 WS 成交的 audit row。
-                // 修前：silent `warn!()` + drop。LIVE/LiveDemo Bybit 自主動作
-                // （funding payment / dust scrub / auto-补单）會走到這裡，原因是
-                // ExecutorAgent shadow_mode=true 不發 SubmitOrder → 0 PendingOrder
-                // → 100% 不匹配。結果：7 天內 trading.fills live/live_demo 0 行，
-                // 但 engine.log 顯示真實成交。
-                // 修：對 live/live_demo/demo 落 `unattributed:bybit_auto` audit row
-                // （paper 沒有真 WS 不會到此分支，engine_mode filter 為深層防護）。
-                // Audit row realized_pnl=0 / entry_context_id NULL，ML 訓練透過
-                // `WHERE strategy_name NOT LIKE 'unattributed:%'` 過濾排除（F4-2）。
+                // F4-1 (2026-04-26): unmatched WS fill → audit row instead of
+                // silent drop. Bybit auto-actions (funding / dust / 补单) land
+                // here because ExecutorAgent shadow_mode=true emits 0
+                // PendingOrder. Full design context + healthcheck [23] caveat
+                // see `unattributed_emit::MODULE_NOTE`. ML training filters via
+                // `WHERE strategy_name NOT LIKE 'unattributed:%'` (F4-2).
+                // F4-1（2026-04-26）：未匹配 WS 成交 → audit row 取代 silent drop。
+                // Bybit 自主動作（funding/dust/补单）因 ExecutorAgent shadow_mode
+                // 不發 PendingOrder 而落此。完整設計 + healthcheck [23] caveat 見
+                // `unattributed_emit::MODULE_NOTE`；ML 訓練以
+                // `strategy_name NOT LIKE 'unattributed:%'` 過濾（F4-2）。
                 let em = pipeline.effective_engine_mode();
+                // F4-RETURN Issue 2 (2026-04-26): .await — back-pressure handled
+                // normally; cap 4096 (tasks.rs:404), blocks only under DB lag.
                 let emitted = try_emit_unattributed_fill(
                     em,
                     &exec.exec_id,
@@ -705,7 +588,7 @@ pub(super) fn handle_exchange_event(
                     exec_price,
                     exec_fee,
                     order_tx,
-                );
+                ).await;
                 tracing::warn!(
                     symbol = %exec.symbol, side = %exec.side, exec_id = %exec.exec_id,
                     engine_mode = %em, audit_emitted = emitted,
