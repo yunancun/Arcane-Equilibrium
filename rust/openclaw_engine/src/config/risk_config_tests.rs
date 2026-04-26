@@ -1043,3 +1043,9 @@ fn test_strategist_config_partial_fallback() {
     );
     assert!(cfg2.validate().is_ok());
 }
+
+// G2-03 (2026-04-26) per-strategy override tests live in a dedicated sibling
+// to keep this file under §九 1200-line cap.
+// G2-03 每策略覆蓋測試在獨立 sibling，守 §九 1200 行上限。
+#[path = "risk_config_per_strategy_tests.rs"]
+mod g2_03_per_strategy_tests;

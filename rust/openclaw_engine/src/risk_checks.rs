@@ -16,9 +16,66 @@
 //!     BudgetConfig.attention_tax.cost_edge_max_ratio
 //!   - Risk checks are fail-closed — unknown state → reject
 
+use crate::config::risk_config::{GlobalLimits, StrategyOverride};
 use crate::config::RiskConfig;
 use crate::exit_features::{physical_micro_profit_lock_v2, ExitFeatures, PhysicalDecision};
 use openclaw_core::risk::{compute_dynamic_stop_pct, regime_multipliers};
+
+// ---------------------------------------------------------------------------
+// G2-03 (2026-04-26) — per-strategy SL/TP effective-value helpers
+// G2-03（2026-04-26）—— 每策略 SL/TP 有效值輔助函式
+// ---------------------------------------------------------------------------
+//
+// Per PA RFC §3.1 enforcement model:
+//   A. validate() rejects override > limits at IPC patch / TOML reload time
+//   B. THESE helpers clamp at runtime — even if a stale override survives the
+//      validate gate (race condition, future schema drift), runtime never
+//      lets a strategy loosen SL/TP beyond P1. Belt-and-suspenders.
+//   C. counterfactual_calibrator dry-run rejects before write (offline)
+//
+// PA RFC §3.1 三道防線：A. validate / B. 本 helper runtime clamp / C. calibrator
+// dry-run。本 helper 即使 stale override 漏網仍守住 P1 硬頂。
+//
+// All four override fields are Optional; None = fall-through to global limits/agent.
+// Helpers return f64 effective values that callers feed into the existing
+// risk_checks math without changing the SL/TP logic shape.
+
+/// G2-03 (2026-04-26): Effective stop-loss max pct for a position.
+/// Returns `min(override, limits.stop_loss_max_pct)` when override is Some,
+/// else `limits.stop_loss_max_pct`. The min() is defense line B (runtime cap).
+///
+/// G2-03：計算位置的有效 SL 上限。Some override 時取 min(override, P1)，
+/// 防 stale override 越過 P1（防線 B）；None 走 P1 全局值。
+#[inline]
+pub(crate) fn effective_sl_max_pct(
+    limits: &GlobalLimits,
+    per_strategy: Option<&StrategyOverride>,
+) -> f64 {
+    match per_strategy.and_then(|o| o.stop_loss_max_pct_override) {
+        // Defense line B: clamp override at limits even if validate let it through
+        // (NaN/Inf/over-cap edge cases). NaN > limits is false → falls through to
+        // limits via .min(), which is the conservative behaviour.
+        // 防線 B：若 override 漏網（NaN/Inf/超頂），用 min(override, limits) 強制夾。
+        Some(v) if v.is_finite() && v > 0.0 => v.min(limits.stop_loss_max_pct),
+        _ => limits.stop_loss_max_pct,
+    }
+}
+
+/// G2-03 (2026-04-26): Effective take-profit max pct for a position.
+/// Symmetric to `effective_sl_max_pct` — Some override clamped at limits, None
+/// falls back to global. Used by the take-profit-enforced gate where applicable.
+///
+/// G2-03：對稱於 effective_sl_max_pct，計算 TP 上限；Some 取 min(override, P1)。
+#[inline]
+pub(crate) fn effective_tp_max_pct(
+    limits: &GlobalLimits,
+    per_strategy: Option<&StrategyOverride>,
+) -> f64 {
+    match per_strategy.and_then(|o| o.take_profit_max_pct_override) {
+        Some(v) if v.is_finite() && v > 0.0 => v.min(limits.take_profit_max_pct),
+        _ => limits.take_profit_max_pct,
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Order admission / 訂單准入
@@ -158,6 +215,64 @@ pub fn check_position_on_tick(
     exit_features: Option<&ExitFeatures>,
     config: &RiskConfig,
 ) -> RiskAction {
+    // G2-03 (2026-04-26): backward-compat thin wrapper. Delegates to
+    // `check_position_on_tick_with_override(... per_strategy=None ...)` —
+    // bit-identical pre-G2-03 behaviour for all existing callers (tests,
+    // position_risk_evaluator chain, integration tests). New callers in
+    // step_6_risk_checks.rs use the *_with_override variant directly to
+    // thread per-strategy SL/TP overrides.
+    // G2-03：向後兼容包裝；既有 caller 與 G2-03 前位元一致，新 caller 走
+    // `_with_override` 直接傳 per_strategy。
+    check_position_on_tick_with_override(
+        pnl_pct,
+        peak_pnl_pct,
+        holding_hours,
+        cost_ratio,
+        regime,
+        atr_pct,
+        symbol,
+        entry_ts_ms,
+        consecutive_losses,
+        daily_loss_pct,
+        session_drawdown_pct,
+        cost_edge_max_ratio,
+        min_profit_to_close_pct,
+        exit_features,
+        None,
+        config,
+    )
+}
+
+/// G2-03 (2026-04-26): Tick-level position risk check with per-strategy SL/TP
+/// override support. Same priority order as `check_position_on_tick` but the
+/// hard-stop / dynamic-stop / take-profit / trailing gates use per-strategy
+/// effective values when `per_strategy` is `Some` — defense line B (runtime
+/// cap) is applied via `effective_sl_max_pct` / `effective_tp_max_pct`
+/// helpers, so even if a stale override survives validate() (defense line A),
+/// runtime never lets a strategy loosen SL/TP beyond P1.
+///
+/// G2-03：tick 級風控 + 每策略 SL/TP 覆蓋。priority 與原版相同；hard/dyn/TP/
+/// trailing 4 gate 用 effective 值，per_strategy=None 與 G2-03 前行為位元一致；
+/// per_strategy=Some 即使 override > limits 漏網仍夾於 P1（防線 B 守住硬頂）。
+#[allow(clippy::too_many_arguments)]
+pub fn check_position_on_tick_with_override(
+    pnl_pct: f64,
+    peak_pnl_pct: f64,
+    holding_hours: f64,
+    cost_ratio: f64,
+    regime: &str,
+    atr_pct: Option<f64>,
+    symbol: &str,
+    entry_ts_ms: u64,
+    consecutive_losses: u32,
+    daily_loss_pct: f64,
+    session_drawdown_pct: f64,
+    cost_edge_max_ratio: f64,
+    min_profit_to_close_pct: f64,
+    exit_features: Option<&ExitFeatures>,
+    per_strategy: Option<&StrategyOverride>,
+    config: &RiskConfig,
+) -> RiskAction {
     // Legacy COST EDGE inputs retained on ABI for T4; silence unused-param warnings.
     // T3：COST EDGE 相關參數保留 ABI，等 T4 接 ExitFeatures 真實值。
     let _ = (cost_ratio, cost_edge_max_ratio, min_profit_to_close_pct);
@@ -166,23 +281,45 @@ pub fn check_position_on_tick(
     let agent = &config.agent;
     let dyn_cfg = &config.dynamic_stop;
 
-    // 1. Hard stop
-    if pnl_pct <= -limits.stop_loss_max_pct {
+    // G2-03 (2026-04-26): compute effective SL/TP up front via helpers.
+    // None per_strategy (or override None) → bit-identical pre-G2-03.
+    // G2-03：先算 effective SL/TP；per_strategy=None 與 G2-03 前位元一致。
+    let effective_sl = effective_sl_max_pct(limits, per_strategy);
+    let effective_tp = effective_tp_max_pct(limits, per_strategy);
+
+    // G2-03: trailing activation/distance — per_strategy override Some + finite + > 0
+    // wins; else fall back to global agent values. Validates already enforced
+    // > 0 + finite at line A so the filter is defensive (line B coverage).
+    // G2-03：trailing 啟動/距離覆蓋；filter 為防線 B 防 stale override。
+    let effective_trailing_activation = per_strategy
+        .and_then(|o| o.trailing_activation_pct_override)
+        .filter(|v| v.is_finite() && *v > 0.0)
+        .unwrap_or(agent.trailing_activation_pct);
+    let effective_trailing_distance = per_strategy
+        .and_then(|o| o.trailing_distance_pct_override)
+        .filter(|v| v.is_finite() && *v > 0.0)
+        .unwrap_or(agent.trailing_distance_pct);
+
+    // 1. Hard stop — uses effective_sl (= min(override, limits) when Some).
+    // 1. 硬止損 — 用 effective_sl（Some 時取 min(override, limits)）。
+    if pnl_pct <= -effective_sl {
         return RiskAction::ClosePosition(format!(
             "HARD STOP: pnl {:.2}% <= -{:.2}%",
-            pnl_pct, limits.stop_loss_max_pct
+            pnl_pct, effective_sl
         ));
     }
 
-    // 2. Dynamic stop — pass atr_stop_mult from DynamicStop config (was hardcoded 1.5 in core).
-    // 動態止損 — 傳入 DynamicStop.atr_stop_mult（原本在 core 內寫死 1.5）。
+    // 2. Dynamic stop — uses effective_sl as the hard-stop ceiling fed into
+    //    compute_dynamic_stop_pct. atr_stop_mult/cap_ratio/base_ratio remain
+    //    global (per-strategy override of those is out of scope for G2-03).
+    // 2. 動態止損 — 用 effective_sl 作硬頂；ATR 倍數仍走全局 dyn_cfg。
     let dyn_stop = compute_dynamic_stop_pct(
-        limits.stop_loss_max_pct * dyn_cfg.base_ratio,
+        effective_sl * dyn_cfg.base_ratio,
         atr_pct,
         symbol,
         entry_ts_ms,
         regime,
-        limits.stop_loss_max_pct,
+        effective_sl,
         dyn_cfg.cap_ratio,
         dyn_cfg.atr_stop_mult,
     );
@@ -193,9 +330,10 @@ pub fn check_position_on_tick(
         ));
     }
 
-    // 3. Take profit (if enforced)
+    // 3. Take profit (if enforced) — uses effective_tp.
+    // 3. 止盈（如強制）— 使用 effective_tp。
     if limits.take_profit_enforced {
-        let tp_target = limits.take_profit_max_pct * rm.tp;
+        let tp_target = effective_tp * rm.tp;
         if pnl_pct >= tp_target {
             return RiskAction::ClosePosition(format!(
                 "TAKE PROFIT: pnl {:.2}% >= {:.2}% (regime={})",
@@ -204,15 +342,16 @@ pub fn check_position_on_tick(
         }
     }
 
-    // 4. Trailing stop
-    if agent.trailing_enabled && peak_pnl_pct >= agent.trailing_activation_pct {
+    // 4. Trailing stop — uses effective_trailing_activation / effective_trailing_distance.
+    // 4. 追蹤止損 — 使用每策略覆蓋值。
+    if agent.trailing_enabled && peak_pnl_pct >= effective_trailing_activation {
         let drawdown_from_peak = peak_pnl_pct - pnl_pct;
         let min_locked_profit = dyn_stop * dyn_cfg.trailing_min_rr;
-        if drawdown_from_peak >= agent.trailing_distance_pct && pnl_pct >= min_locked_profit {
+        if drawdown_from_peak >= effective_trailing_distance && pnl_pct >= min_locked_profit {
             return RiskAction::ClosePosition(format!(
                 "TRAILING STOP: peak {:.2}% - current {:.2}% = {:.2}% >= distance {:.2}% (locked {:.2}% >= floor {:.2}%)",
                 peak_pnl_pct, pnl_pct, drawdown_from_peak,
-                agent.trailing_distance_pct, pnl_pct, min_locked_profit
+                effective_trailing_distance, pnl_pct, min_locked_profit
             ));
         }
     }
@@ -872,3 +1011,10 @@ mod tests {
     // 覆蓋。
     // -----------------------------------------------------------------------
 }
+
+// G2-03 (2026-04-26) per-strategy override runtime tests live in a dedicated
+// sibling test file to keep this file under §九 1200-line cap.
+// G2-03 每策略覆蓋 runtime 測試在獨立 sibling，守 §九 1200 行上限。
+#[cfg(test)]
+#[path = "risk_checks_per_strategy_tests.rs"]
+mod g2_03_per_strategy_tests;

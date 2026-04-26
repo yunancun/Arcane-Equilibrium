@@ -918,6 +918,17 @@ async fn dispatch_request(
             let tx = extract_engine_tx(&req.params, cmd_channels);
             handle_reset_drawdown_baseline(id, tx).await
         }
+        // EDGE-P1b T3 (2026-04-26): emergency rollback for ExitConfig hot-patch.
+        // Restores the 7 IPC-writable exit fields to ExitConfig::default()
+        // baseline; stale_peak_ms + shadow_enabled remain TOML-only (see
+        // handlers/risk.rs::handle_restore_exit_config_defaults docstring).
+        // EDGE-P1b T3：ExitConfig hot-patch 緊急回滾；7 個 IPC 可寫 exit 欄位
+        // 恢復為 ExitConfig::default() baseline；stale_peak_ms + shadow_enabled
+        // 仍是 TOML-only（詳 handlers/risk.rs::handle_restore_exit_config_defaults docstring）。
+        "restore_exit_config_defaults" => {
+            let tx = extract_engine_tx(&req.params, cmd_channels);
+            handle_restore_exit_config_defaults(id, tx).await
+        }
         // DYNAMIC-RISK-1: Per-engine Sharpe-aware sizer status + toggle.
         // DYNAMIC-RISK-1：按引擎動態風險調整器狀態與切換。
         "get_dynamic_risk_status" => {

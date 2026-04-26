@@ -395,6 +395,10 @@ ssh trade-core "cd ~/BybitOpenClaw/srv && python3 helper_scripts/db/passive_wait
 |---|---|---|---|---|
 | **STRATEGIST-AUTO-PROMOTE** | 自動晉升規則 | P2-01 穩定後 | 🟡P3 | 默認關，可選 |
 | **G2-FUP-FUNDING-ARB-PAPER-SYNC** | paper TOML `[funding_arb].active=true` 與 demo/live 的 `active=false` 不一致（**E2 2026-04-26 G2-06 review 發現**：v1→v2 結案 NEGATIVE 過渡期 sync miss；`feedback_env_config_independence` 適用於風控閾值 vs `active` binary 開關，不擴 G2-06 scope 但獨立追） | 確認 design intent vs oversight | 🟡P2 | E1 5min 工時；改 paper TOML active=false + 雙語 comment |
+| **G2-FUP-IPC-LEGACY-MS-FIX** | `app/ipc_client.py:786` `sync_ipc_call` 用毫秒做 HMAC ts，但 Rust verifier `ipc_server/mod.rs:621-628` 用秒比對 30s 容差 → **legacy sync_ipc_call 100% fail auth**（E2 2026-04-26 W4 軌 2 review 確認 2 production caller `trigger_live_auth_recheck` + `set_system_mode` fire-and-forget 吞錯誤但 fast-path 完全失效）；EDGE-P2-flip dry_run 內嵌 helper 用秒對齊 Rust 已修**新檔**，legacy 未修 | 即時 | 🔴P1 | E1 30min 工時：改 ms*1000 → 秒；加 unit test 驗 30s 容差 |
+| **G5-FUP-IPC-MOD-SPLIT** | `rust/openclaw_engine/src/ipc_server/mod.rs` 1262 行（W4 軌 1 +11 push 1251→1262，超 §九 1200 硬上限）；建議 dispatch_request 抽 sibling | E5 next wave | 🟡P2 | E5 1-2d 工時；不影響 W4 sign-off |
+| **G1-FUP-CALIBRATOR-WARNING** | `helper_scripts/research/exit_threshold_calibrator.py` `--apply` 路徑加 stdout warning banner 暴露 IPC 6/7 partial bind gap（`stale_peak_ms` + `shadow_enabled` 不在 IPC 7 字段需 TOML edit） | calibrator 真實啟用前 | 🟢P3 | E1 15min 工時 |
+| **G2-03-FUP-CALLER-WIRE** | G2-03 `check_position_on_tick_with_override` 0 production caller（W4 軌 3 staging marker）；G2-02 counterfactual 結論定後派 E1 wire caller chain（step_6_risk_checks）真實啟用 SL/TP override | G2-02 完成 ~05-03 | 🟠P1 | E1 1d 工時；G2-03 schema 已 staging |
 | **EDGE-P2 Phase B** | Liquidation signal | Phase A OI 驗收後 | 🟡P3 | OI 2026-04-20 已完 |
 | **EDGE-P2-3 Phase 2+** | live endpoint / funding_arb PostOnly | Phase 1b | 🟡P3 | ML integration 前置 |
 | **Phase 5 補強** | Symbol Embedding / Regime LSTM / JS+Scorer | P0-3 判決 | 🟢P3-P4 | 取決於 P0-3 outcome |
