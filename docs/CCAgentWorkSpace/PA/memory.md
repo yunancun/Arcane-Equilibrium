@@ -400,3 +400,74 @@ E2 review 1-1.5h + E4 regression 1.5-2h = 全鏈 5-6.5h。
 | 2026-04-26 | G5-08 strategist_scheduler/mod.rs 拆分計劃（推 Method A 保守 4-sibling）| workspace/reports/2026-04-26--g5_08_strategist_scheduler_split_plan.md |
 
 ---
+
+## 2026-04-26 G3-08 H1-H5 → Rust IPC Gateway 設計（plan only）
+
+### 觸發
+
+PM 派發 G3-08（Wave 2 P3，TODO.md L223）。前置 G3-03 ExecutorConfigCache（commit `51608fe` 2026-04-25 ✅）。
+Layer 2 自主推理 + ExecutorAgent shadow→live 整合需要 Rust hot-path 看到 H1-H5 + 5-Agent state，當前 Python-only ~4552 行隔離。
+
+### 報告路徑
+
+`workspace/reports/2026-04-26--g3_08_h1_h5_ipc_gateway_design.md`（680 行）
+
+### 推薦結論
+
+**Option C 混合模型（cache + invalidation push）** — 鏡射 G3-03 ExecutorConfigCache pattern 但**反向**（Python SSOT，Rust pull）+ 新增 invalidation push 通道。
+
+A push（pure push）/ B pull（pure pull）對比 A IPC 量 5000/min 爆炸 + Python crash 立刻 stale；B 每 hot-path query 1-3ms breach SLA。C 混合：Rust 端 DashMap cache 10s daemon poll + invalidation hint 立刻觸發 ad-hoc poll → hot-path lookup ≤1ms p99 + IPC ~50/min 可控 + Python crash 沿用 last good。
+
+### 5 大關鍵架構發現
+
+1. **G3-03 pattern 反向重用**：G3-08 SSOT 是 Python（H1/H5 stats / Layer2 cost），Rust 端只讀；G3-03 SSOT 是 Rust（RiskConfig.executor），Python 端只讀。**鏡射 cache + poll + fail-closed default 三件套**但流向反 — 命名「鏡射 G3-03」實為反 pattern 反向擴展
+2. **DashMap atomic stats 已驗為 Rust hot-path 觀測標配**：commit G3-11 CycleCounters 已示範 5 個外部 callsite + atomic ordering pattern；G3-08 沿用避免 lock-based concurrent struct
+3. **Schema 演化用 HashMap<String, i64>** + `#[serde(default)]`：5-Agent stats 不固化 schema（rust struct 一改 Python 必跟，違 G6 漸進可逆），改用 forward-compat dynamic dict
+4. **multi-worker uvicorn race 是 Phase 1 接受不一致**：4 worker 各自 STRATEGIST_AGENT singleton 是 worker-local，query_h_state_full 看到隨機某 worker view；Phase 4+ 評估 leader-only flock pattern（沿襲 EDGE-SCHEDULER-LEADER-1 commit `f32629c`）
+5. **DEFAULT-OFF env-gate 是大範圍改動的必要保險**：G3-08 ~2180 LOC 若無 phase 切割易堵 Wave 2 主軸；env-gate 確保 wave 2 阻塞時可 unset 立即 zero overhead 不影響其他工作流
+
+### 派發架構建議
+
+| Phase | 子任務 | E1 instance | isolation | 全鏈工時 |
+|---|---|---|---|---|
+| Phase 1 | A Rust h_state_cache + B Python invalidator + C 接線 | E1-Alpha worktree（A）+ E1-Beta 主樹（B）+ 主 agent 串行（C） | A 必 isolation / B+C 主樹 | 4.5d |
+| Phase 2 | H1+H3 接（最高量 query） | E1 主樹 | 主樹 | 3d |
+| Phase 3 | H2+H4+H5 接（解阻 G3-09 cost_edge_ratio） | E1 主樹 | 主樹 | 3.5d |
+| Phase 4 | 5-Agent state events（解阻 G8-01） | E1 主樹 | 主樹 | 4d |
+
+合計 wall-clock ~13.5d（Phase 1 並行折扣後），LOC ~2180 全鏈。
+
+### Top 3 風險
+
+1. **IPC poll 競態**（10s daemon + invalidation hint 重疊）— 緩解：tokio::sync::watch dedup logic（30s 內 N 次合併為一次 poll）
+2. **multi-worker uvicorn 鎖競爭** — Phase 1-3 接受不一致（observability advisory），Phase 4+ 評估 leader-only schema
+3. **Schema drift（Python 加新字段 Rust 沒解）** — AgentState 用 HashMap<String, i64> 動態 schema + `#[serde(default)]` 新字段；release notes 記載 14d grace period
+
+### 治理對照亮點
+
+- 16 根原則 #1/#2/#3/#4/#5/#6/#7/#9/#10 全 ✅（純 observability，不繞 lease，fail-closed default + DEFAULT-OFF）
+- ★ 直接強化 #13 AI 成本感知（解阻 G3-09 cost_edge_ratio）+ #15 多 Agent 協作（5-Agent → Rust 觀測通道）
+- §四 5 項 live 硬邊界全不觸碰（H state 純讀、無 order 路徑、不影響 mainnet gate）
+
+### 沒做的事（E1/E2 領域）
+
+- 沒寫 Rust h_state_cache 任何實作代碼（Phase 1A 全留 E1）
+- 沒寫 Python invalidator 實作（spec + prompt template only）
+- 沒改 H1-H5 / 5-Agent 業務代碼（Phase 2-4 個別小改）
+- 沒跑 cargo test / pytest
+- 沒派 sub-agent（純 PA design，主 agent 串行讀+寫）
+- 沒擴範圍到 G3-09 cost_edge_ratio 演算法 / G8-01 認知 e2e（隔壁 ticket）
+
+### 教訓備忘
+
+- **「鏡射 G3-03 pattern」命名不嚴謹**：流向相反（Python vs Rust SSOT）但 cache + poll + fail-closed default 三件套通用 — 未來 IPC bridge design 第一句先確定 SSOT 在哪邊
+- **Phased rollout + DEFAULT-OFF env-gate** 是大範圍改動（~2000 LOC+）的必要保險：G3-08 4 phase 設計可單獨 rollback、不堵 wave 主軸、unset 立即 zero overhead
+- **forward-compat HashMap dynamic schema** 對 observability 字段是 dominated strategy：lock-step Rust+Python deploy 太貴；observability 字段不需強型別保證
+
+### 報告索引追加
+
+| 日期 | 報告類型 | 文件位置 |
+|---|---|---|
+| 2026-04-26 | G3-08 H1-H5 → Rust IPC Gateway 設計（推 Option C 混合模型，4 phase wall-clock ~13.5d）| workspace/reports/2026-04-26--g3_08_h1_h5_ipc_gateway_design.md |
+
+---
