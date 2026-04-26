@@ -72,22 +72,85 @@ pub struct H2BudgetState {
 }
 
 /// H3 ModelRouter route distribution / H3 路由分佈。
+///
+/// MODULE_NOTE (EN): Schema mirrors Python `model_router.get_h3_snapshot()`
+///   10 keys (the SSOT). Per PA RFC `2026-04-26--g3_08_h3_schema_align_decision.md`
+///   §6, Option B chosen (Rust rename to align Python) over Option A (Python
+///   rename) and Option C (serde rename adapter). Reason: Python is SSOT,
+///   Rust H3RouteStats had 0 hot-path consumer (grep verified), so smallest
+///   blast radius is renaming Rust internal struct (~25 LOC) vs touching
+///   Python ecosystem (~50 LOC including 30+ tests + StrategistAgent
+///   stats + GUI consumers).
+///
+///   All field names mirror Python `_routing_stats` dict keys
+///   (model_router.py:114-124) and snapshot keys (model_router.py:471-481).
+///   Field declaration order follows the Python snapshot dict for stable
+///   visual diff against SSOT.
+///
+///   Phase 3 affordability: when `RealHStateFetcher` (Phase 3 Sub-task A)
+///   replaces `StubHStateFetcher` and pulls Python's `get_h3_snapshot()`
+///   JSON via reverse-IPC `query_h_state_full`, serde will deserialize
+///   directly into this struct with zero adapter layer — every JSON key
+///   maps 1:1 to a Rust field.
+///
+/// MODULE_NOTE (中)：Schema 鏡射 Python `model_router.get_h3_snapshot()`
+///   10 個 key（SSOT）。依 PA RFC `2026-04-26--g3_08_h3_schema_align_decision.md`
+///   §6 採 Option B（Rust rename 對齊 Python），勝出 Option A（Python rename）
+///   與 Option C（serde rename adapter）。理由：Python 是 SSOT，Rust
+///   H3RouteStats 0 hot-path consumer（grep 驗證），改 Rust 內部 struct
+///   影響面（~25 LOC）遠小於改 Python（~50 LOC 含 30+ test +
+///   StrategistAgent stats + GUI consumers）。
+///
+///   欄位名稱與 Python `_routing_stats` dict（model_router.py:114-124）+
+///   snapshot dict（model_router.py:471-481）逐一對齊。欄位宣告順序跟
+///   Python snapshot dict，便於對 SSOT 做視覺 diff。
+///
+///   Phase 3 落地：Phase 3 Sub-task A 將 `StubHStateFetcher` 換成
+///   `RealHStateFetcher` 反向 IPC pull Python `get_h3_snapshot()` JSON
+///   時，serde 直接 deserialize 入此 struct，無需 adapter — 每個 JSON
+///   key 與 Rust field 1:1 對齊。
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct H3RouteStats {
+    /// Total invocations of `route()` since boot.
+    /// 啟動以來 `route()` 總呼叫次數。
     #[serde(default)]
-    pub l1_9b: u64,
+    pub total_routes: u64,
+    /// L1-9B tier count (complexity < 0.5, no upgrade).
+    /// L1-9B tier 計數（complexity < 0.5，無升級）。
     #[serde(default)]
-    pub l1_27b: u64,
+    pub l1_9b_count: u64,
+    /// L1-27B tier count (0.5 ≤ complexity < 0.8 / no upgrade / budget fallback).
+    /// L1-27B tier 計數（0.5 ≤ complexity < 0.8 / 無升級 / budget fallback）。
     #[serde(default)]
-    pub l1_5: u64,
+    pub l1_27b_count: u64,
+    /// L1.5 tier count (context-driven L1.5 upgrade).
+    /// L1.5 tier 計數（context 驅動 L1.5 升級）。
     #[serde(default)]
-    pub l2: u64,
+    pub l1_5_count: u64,
+    /// L2 tier count (context-driven L2 escalation).
+    /// L2 tier 計數（context 驅動 L2 升級）。
+    #[serde(default)]
+    pub l2_count: u64,
+    /// Budget-denied count (budget_checker rejected → fallback to l1_27b).
+    /// 預算拒絕次數（budget_checker rejected → fallback l1_27b）。
+    #[serde(default)]
+    pub budget_denied_count: u64,
+    /// L2 cache hit count from `check_l2_cache`.
+    /// L2 cache 命中次數（來自 `check_l2_cache`）。
+    #[serde(default)]
+    pub l2_cache_hit: u64,
+    /// L2 cache expired-eviction count from `check_l2_cache`.
+    /// L2 cache 過期清除次數（來自 `check_l2_cache`）。
+    #[serde(default)]
+    pub l2_cache_expired: u64,
+    /// L2 cache successful store count from `_store_l2_result`.
+    /// L2 cache 成功寫入次數（來自 `_store_l2_result`）。
+    #[serde(default)]
+    pub l2_cache_stored: u64,
+    /// Current `_l2_result_cache` size (live snapshot, not a counter).
+    /// 當前 `_l2_result_cache` 大小（即時 snapshot，非計數器）。
     #[serde(default)]
     pub cache_size: u64,
-    #[serde(default)]
-    pub cache_hit: u64,
-    #[serde(default)]
-    pub cache_expired: u64,
 }
 
 /// H4 validator stats / H4 驗證器 stats。
@@ -250,5 +313,102 @@ mod tests {
 
         let absent: H5CostStats = serde_json::from_value(serde_json::json!({})).unwrap();
         assert_eq!(absent.cost_edge_ratio, None);
+    }
+
+    /// G3-08-PHASE-2-FUP-H3-SCHEMA-ALIGN: Round-trip parse Python's
+    /// `model_router.get_h3_snapshot()` JSON dict — every one of the 10 keys
+    /// must deserialize into the corresponding Rust field with the exact
+    /// same value (no silent default-zero / no schema drift).
+    /// Per PA RFC `2026-04-26--g3_08_h3_schema_align_decision.md` §7.
+    ///
+    /// Round-trip parse Python `model_router.get_h3_snapshot()` JSON dict —
+    /// 10 個 key 必須 deserialize 進對應 Rust field 同值（無 silent default-zero /
+    /// 無 schema drift）。依 PA RFC §7。
+    #[test]
+    fn h3_route_stats_parses_python_schema() {
+        // This JSON literal mirrors exactly the dict returned by
+        // `model_router.py:get_h3_snapshot()` (model_router.py:471-481).
+        // 此 JSON literal 嚴格鏡射 model_router.py:471-481 的回傳 dict。
+        let python_json = serde_json::json!({
+            "total_routes": 100,
+            "l1_9b_count": 60,
+            "l1_27b_count": 25,
+            "l1_5_count": 10,
+            "l2_count": 5,
+            "budget_denied_count": 2,
+            "l2_cache_hit": 12,
+            "l2_cache_expired": 1,
+            "l2_cache_stored": 8,
+            "cache_size": 7,
+        });
+        let h3: H3RouteStats =
+            serde_json::from_value(python_json).expect("Python schema parse");
+        assert_eq!(h3.total_routes, 100);
+        assert_eq!(h3.l1_9b_count, 60);
+        assert_eq!(h3.l1_27b_count, 25);
+        assert_eq!(h3.l1_5_count, 10);
+        assert_eq!(h3.l2_count, 5);
+        assert_eq!(h3.budget_denied_count, 2);
+        assert_eq!(h3.l2_cache_hit, 12);
+        assert_eq!(h3.l2_cache_expired, 1);
+        assert_eq!(h3.l2_cache_stored, 8);
+        assert_eq!(h3.cache_size, 7);
+    }
+
+    /// Schema parity guard: Rust `H3RouteStats` field set must match Python
+    /// `model_router._routing_stats` keys + the live `cache_size` snapshot
+    /// key. Hard-coded Python key list — if Python adds / renames a key,
+    /// this test must be updated explicitly (forces conscious schema drift
+    /// review). Detects future drift before Phase 3 silent-default-zero.
+    ///
+    /// Schema parity 守門：Rust `H3RouteStats` 欄位集必須與 Python
+    /// `model_router._routing_stats` keys + 即時 `cache_size` snapshot key
+    /// 完全對齊。Python key list 硬編碼於此測試 — Python 加 / 改名必須同時
+    /// 更新此 list（強制有意識地審查 schema drift）。Phase 3 silent
+    /// default-zero 之前的防線。
+    #[test]
+    fn h3_route_stats_field_parity_with_python_keys() {
+        // SSOT: Python `model_router._routing_stats` dict keys
+        // (model_router.py:114-124) + live `cache_size` snapshot key
+        // injected at model_router.py:480.
+        // SSOT：Python `model_router._routing_stats` dict keys
+        // （model_router.py:114-124）+ snapshot 即時注入的 `cache_size`
+        // （model_router.py:480）。
+        let python_keys = [
+            "total_routes",
+            "l1_9b_count",
+            "l1_27b_count",
+            "l1_5_count",
+            "l2_count",
+            "budget_denied_count",
+            "l2_cache_hit",
+            "l2_cache_expired",
+            "l2_cache_stored",
+            "cache_size",
+        ];
+
+        // Round-trip default H3RouteStats → JSON → keys; serde uses
+        // Rust field names verbatim (no rename attr in Option B).
+        // Round-trip default H3RouteStats → JSON → keys；serde 用 Rust
+        // 欄位名（Option B 無 rename attr）。
+        let default_h3 = H3RouteStats::default();
+        let json_value = serde_json::to_value(&default_h3).expect("serialize default");
+        let rust_keys: std::collections::BTreeSet<String> = json_value
+            .as_object()
+            .expect("H3RouteStats serializes as object")
+            .keys()
+            .cloned()
+            .collect();
+        let python_keys_set: std::collections::BTreeSet<String> =
+            python_keys.iter().map(|s| s.to_string()).collect();
+
+        assert_eq!(
+            rust_keys, python_keys_set,
+            "H3RouteStats Rust field set must equal Python `_routing_stats` \
+             keys + cache_size. If you renamed / added / dropped a Rust \
+             field, also update Python model_router._routing_stats and the \
+             python_keys list in this test (and vice versa). Drift here = \
+             Phase 3 silent default-zero regression."
+        );
     }
 }
