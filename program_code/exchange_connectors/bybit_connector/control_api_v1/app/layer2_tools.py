@@ -38,19 +38,33 @@ from typing import Any
 
 from .local_llm_factory import get_local_llm_client
 from .layer2_types import (
+    DERIV_METRIC_FUNDING,
+    DERIV_METRIC_INDEX_PRICE,
+    DERIV_METRIC_MARK_PRICE,
+    DERIV_METRIC_NEXT_FUNDING_TS,
+    DERIV_METRIC_OI_24H_CHANGE_PCT,
+    DERIV_METRIC_VALID,
+    ONCHAIN_METRIC_FUNDING_RATE,
+    ONCHAIN_METRIC_LIQUIDATIONS_24H,
+    ONCHAIN_METRIC_OPEN_INTEREST,
+    ONCHAIN_METRIC_VALID,
     SEARCH_PROVIDER_LOCAL_LLM,
     SEARCH_PROVIDER_LOCAL_LLM_WEB,
     SEARCH_PROVIDER_PERPLEXITY,
     SEARCH_PROVIDER_WEBPILOT,
+    TOOL_CHECK_DERIVATIVES,
     TOOL_FETCH_URL,
     TOOL_GET_ACCOUNT_STATE,
     TOOL_GET_EXPERIENCE,
     TOOL_GET_MARKET_STATE,
     TOOL_GET_RECENT_DECISIONS,
+    TOOL_QUERY_ONCHAIN,
     TOOL_RECORD_INSIGHT,
     TOOL_SUBMIT_RECOMMENDATION,
     TOOL_WEB_SEARCH,
+    DerivativesResult,
     Insight,
+    OnchainResult,
     Recommendation,
     SearchProvider,
     SearchResponse,
@@ -58,6 +72,18 @@ from .layer2_types import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+# G3-07 (2026-04-26): query_onchain / check_derivatives implementations live
+# in sibling layer2_tools_g3_07.py (extracted to keep this file under §九 1200
+# hard cap). Re-exported here so external imports keep working.
+# G3-07（2026-04-26）：query_onchain / check_derivatives 實作在 sibling
+# layer2_tools_g3_07.py（為遵守 §九 1200 行硬上限抽出）；於此 re-export
+# 使外部 import 路徑不變。
+from .layer2_tools_g3_07 import (
+    check_derivatives as _g3_07_check_derivatives,
+    query_onchain as _g3_07_query_onchain,
+)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -281,6 +307,71 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
                 },
             },
             "required": ["category", "title", "detail"],
+        },
+    },
+    # ─────────────────────────────────────────────────────────
+    # G3-07 (2026-04-26): two new tools — DEFAULT-OFF env-gated.
+    # G3-07（2026-04-26）：兩個新工具 —— 預設關閉，需 env 啟用。
+    # ─────────────────────────────────────────────────────────
+    {
+        "name": TOOL_QUERY_ONCHAIN,
+        "description": (
+            "Query a single on-chain / derivatives market metric for a symbol "
+            "(funding_rate / open_interest / liquidations_24h). Sourced from Bybit V5 "
+            "public endpoints (no auth required). DEFAULT-OFF: must be enabled via "
+            "OPENCLAW_LAYER2_TOOL_QUERY_ONCHAIN_ENABLED=1. Returns OnchainResult with "
+            "fail-closed semantics — value=None + error string on any failure. "
+            "查詢單一 symbol 的 on-chain / 衍生品市場指標（資金費率 / 未平倉量 / 24h 強平量）。"
+            "資料來源 Bybit V5 公開端點（無需簽名）。預設關閉，需設 "
+            "OPENCLAW_LAYER2_TOOL_QUERY_ONCHAIN_ENABLED=1 啟用。失敗時 value=None + error 字串。"
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "symbol": {
+                    "type": "string",
+                    "description": "Trading symbol, e.g. BTCUSDT",
+                },
+                "metric": {
+                    "type": "string",
+                    "enum": list(sorted(ONCHAIN_METRIC_VALID)),
+                    "description": "Metric to fetch",
+                },
+            },
+            "required": ["symbol", "metric"],
+        },
+    },
+    {
+        "name": TOOL_CHECK_DERIVATIVES,
+        "description": (
+            "Fetch multiple Bybit V5 derivatives market metrics for a symbol "
+            "(mark_price / index_price / funding / next_funding_ts / oi_24h_change_pct). "
+            "Single round-trip via /v5/market/tickers public endpoint. DEFAULT-OFF: must "
+            "be enabled via OPENCLAW_LAYER2_TOOL_CHECK_DERIVATIVES_ENABLED=1. Returns "
+            "DerivativesResult; per-metric errors recorded in error_per_metric without "
+            "raising. "
+            "查詢 symbol 的多項 Bybit V5 衍生品市場指標（標記價 / 指數價 / 資金費率 / 下次資金費率時間 "
+            "/ 24h OI 變化百分比）。透過 /v5/market/tickers 公開端點單次往返。預設關閉，需設 "
+            "OPENCLAW_LAYER2_TOOL_CHECK_DERIVATIVES_ENABLED=1 啟用。"
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "symbol": {
+                    "type": "string",
+                    "description": "Trading symbol, e.g. BTCUSDT",
+                },
+                "metrics": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "enum": list(sorted(DERIV_METRIC_VALID)),
+                    },
+                    "description": "Metrics to fetch (subset of supported list)",
+                    "default": list(sorted(DERIV_METRIC_VALID)),
+                },
+            },
+            "required": ["symbol"],
         },
     },
 ]
@@ -630,6 +721,9 @@ class ToolExecutor:
             TOOL_FETCH_URL: self._fetch_url,
             TOOL_SUBMIT_RECOMMENDATION: self._submit_recommendation,
             TOOL_RECORD_INSIGHT: self._record_insight,
+            # G3-07 (2026-04-26) / G3-07（2026-04-26）
+            TOOL_QUERY_ONCHAIN: self._query_onchain,
+            TOOL_CHECK_DERIVATIVES: self._check_derivatives,
         }
         handler = handlers.get(tool_name)
         if handler is None:
@@ -904,3 +998,35 @@ class ToolExecutor:
             }
         except (KeyError, TypeError) as e:
             return {"error": f"Invalid insight: {e}"}
+
+    # ─────────────────────────────────────────────────────────
+    # G3-07 (2026-04-26) — query_onchain / check_derivatives handlers
+    # G3-07（2026-04-26）—— query_onchain / check_derivatives 處理器
+    #
+    # Thin wrappers; real implementation in layer2_tools_g3_07.py sibling
+    # (extracted to keep this file under §九 1200-line hard cap).
+    # 薄包裝；真實實作在 layer2_tools_g3_07.py sibling（為遵守 §九 1200 行
+    # 硬上限抽出）。
+    # ─────────────────────────────────────────────────────────
+
+
+    async def _query_onchain(self, args: dict[str, Any]) -> dict[str, Any]:
+        """
+        Thin wrapper — delegate to layer2_tools_g3_07 sibling.
+        薄包裝 —— 委派給 layer2_tools_g3_07 sibling。
+
+        Why: §九 1200-line hard cap forces extraction. Sibling owns full
+        validation / env-gate / HTTP / parse logic; this wrapper exists only
+        to keep ToolExecutor.execute() handler-dict happy (instance method).
+        為什麼：§九 1200 行硬上限強制抽出。Sibling 持有完整的 validate / env-gate
+        / HTTP / 解析邏輯；此包裝僅為了讓 ToolExecutor.execute() handler dict
+        能找到 instance method。
+        """
+        return await _g3_07_query_onchain(args)
+
+    async def _check_derivatives(self, args: dict[str, Any]) -> dict[str, Any]:
+        """
+        Thin wrapper — delegate to layer2_tools_g3_07 sibling.
+        薄包裝 —— 委派給 layer2_tools_g3_07 sibling。
+        """
+        return await _g3_07_check_derivatives(args)

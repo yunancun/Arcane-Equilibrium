@@ -372,7 +372,9 @@ class TestToolSchemas:
         assert TOOL_GET_MARKET_STATE in names
         assert TOOL_SUBMIT_RECOMMENDATION in names
         assert TOOL_WEB_SEARCH in names
-        assert len(TOOL_SCHEMAS) == 8
+        # G3-07 (2026-04-26): added query_onchain + check_derivatives → 10 tools.
+        # G3-07（2026-04-26）：新增 query_onchain + check_derivatives → 10 個工具。
+        assert len(TOOL_SCHEMAS) == 10
 
     def test_schemas_have_required_fields(self):
         for schema in TOOL_SCHEMAS:
@@ -713,7 +715,9 @@ class TestSafetyInvariants:
             Recommendation(action="buy")  # Missing required fields
 
     def test_tool_schemas_count(self):
-        assert len(TOOL_SCHEMAS) == 8
+        # G3-07 (2026-04-26): added query_onchain + check_derivatives → 10 tools.
+        # G3-07（2026-04-26）：新增 query_onchain + check_derivatives → 10 個工具。
+        assert len(TOOL_SCHEMAS) == 10
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
