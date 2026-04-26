@@ -1106,6 +1106,31 @@ pub(super) fn handle_tick_event(
             }
         }
 
+        // EVICT-ON-DUST T4 (PA §1.2.1): status interval reaper.
+        // Runs every status_interval (~30 s) — coalesces with the existing
+        // status report so we don't spawn a new tokio interval. Catches
+        // residue accumulated between hot-path T1/T2 firings: cross-restart
+        // dust, funding-payment accruals that didn't go through apply_fill,
+        // upsert_position_from_exchange WS reductions, and any code path
+        // that mutates `paper_state.positions` without calling evict_if_dust.
+        // Performance: O(N=positions). Status interval is 30 s by default →
+        // 0.033 calls/s. Safe well below per-tick limit (PA §1.5 review #2).
+        // Effect-free when dust_floor_usd <= 0 (gate disabled, pre-set_risk_store).
+        // EVICT-ON-DUST T4：status arm 30 s reaper，與 status report 同步觸發
+        // 不額外 spawn timer。專責守底跨重啟、funding 累計、WS upsert 等不走
+        // hot-path 的殘餘。性能 O(N)，~0.033 次/秒，遠低於 per-tick 限制。
+        // dust_floor<=0 時自動 no-op。
+        let t4_evicted = pipeline.paper_state.evict_all_dust("status_arm_reaper");
+        if t4_evicted > 0 {
+            tracing::info!(
+                evicted = t4_evicted,
+                dust_evictions_total = pipeline.paper_state.dust_evictions_total(),
+                dust_floor_usd = pipeline.paper_state.dust_floor_usd(),
+                "EVICT-ON-DUST T4 status reaper: phantom dust positions evicted \
+                 / status arm reaper：殭屍 dust 倉位已驅逐"
+            );
+        }
+
         state.last_status = Instant::now();
     }
 
