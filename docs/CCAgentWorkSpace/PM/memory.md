@@ -395,3 +395,68 @@ Operator 接續 Phase 1+2 sign-off 後，要求「派發任務繼續完成 Tier 
 - PA G3-08 design plan: `docs/CCAgentWorkSpace/PA/workspace/reports/2026-04-26--g3_08_h1_h5_ipc_gateway_design.md`
 
 **最後更新**：2026-04-26 14:30 CEST · PM Tier 3 Sign-off DONE
+
+---
+
+## 2026-04-26 Tier 4 — Operator 建議 1-4 並行執行（G3-08 Phase 1 + G9-02-FUP + EXIT audit + OBSERVER）
+
+### Operator 指令
+Operator 接續 Tier 3 sign-off 後說「按照你的建議繼續執行 1-4」（PM 在 Tier 3 sign-off §10 推薦 4 件 next session ROI 排序）。
+
+### 7 commits 完成（git range `da40a88..576a37e`）
+
+**5 件 Tier 4 並行**：
+- `eb65e1e` G9-02-FUP-WS-CLIENT-SPLIT (ws_client.rs 1227→6 sibling, max 355, 71% peak reduction)
+- `1c7b20e` G3-08 Phase 1 Sub-task B Python h_state_invalidator + query_handler + reverse IPC route (4 new files ~1040 lines, 35 unit tests)
+- `deac4bc` G3-08 Sub-task B docs (memory + workspace report)
+- `c53c3f9` OBSERVER-PIPELINE-POST-F42FACE-CLEANUP (-228/+679; 新 [19] healthcheck 首次揭露 silent fail ok=1/5)
+- `aa287c4` G3-08 Phase 1 Sub-task A Rust h_state_cache + ipc_server handlers (5 new files / 11 modified, 22 unit tests, isolation worktree)
+
+**PM merge + E2 review**：
+- `4689fc8` PM merge: Sub-task A from worktree (union resolve E1/memory.md conflict)
+- `576a37e` E2 batch review Tier 4 (6 PASS / 0 退回 / 3 LOW)
+
+### Test baseline（2026-04-26 ~15:30 CEST）
+- engine lib **2198/0**（baseline 2176 +22）
+- pytest h_state Mac+Linux **35/0**
+- healthcheck cron 19→20（[19] observer_pipeline_alive 加入）
+
+### PM 編排成績
+- **5 sub-agent 並行派發**（含 1 isolation worktree）：100% 完成
+- **PM merge worktree branch**：union resolve E1 memory conflict 成功，0 條目丟失，E2 ACCEPT
+- **lessons.md 規則應用**：5/5 sub-agent commit + push 直接執行；MIT 因 system reminder OVERRIDE 無法自寫 .md，PM 代落檔（**1 介入**）
+- **動態 isolation 派工**：Tier4.1a 用 worktree（Rust h_state_cache + main_boot_tasks 接線），其餘 4 件主樹（檔案無重疊）
+
+### MIT EXIT-FEATURES-WRITER-BUG-1 重大 RCA
+- **Smoking gun**：delta 37 = STRKUSDT dust spiral 37 個 `fast_track_reduce_half` 半倉 (`realized_pnl=0`)
+- **雙因 root cause**：
+  - RCA-A 主因：`step_0_fast_track.rs:317` MICRO-PROFIT-FIX-1 fail-open 對 legacy dust fail
+  - RCA-B 併發因：`pipeline_helpers.rs:217 try_emit_exit_feature_row` partial reduce 寫 EF（污染 ML training set 37 個 noise label）
+- **修復路徑**：cohesive 1+2 PR 由 E1 實作（路徑 3 healthcheck SQL fix 不單用）
+- **collateral**：ML training data hygiene 風險（歷史 EF 中 N% 是 dust noise）
+
+### Wave 進度
+- **Wave 2 G3 series**：8/9 完成（G3-08 Phase 1 Sub-task A+B 完成，PA design 在 Tier 3 完成；Sub-task C 留下次；G3-09 解阻 Phase 3 H5 接入）
+- **Wave 4 G9 series**：5/5 + G9-02-FUP 全完成
+
+### 教訓（→ lessons.md / 適用未來 PM）
+1. **Worktree harness 不自動 merge** — PM 必須手動跑 `git merge --no-ff origin/worktree-agent-...`，預先 plan E1 memory.md union resolve
+2. **MIT system reminder OVERRIDE** — MIT 無 Write tool 受限，必 inline 回報 + PM 代落檔；prompt 含「MIT 範圍 audit doc 也走直接 commit + push」可能無效（system reminder 蓋過）
+3. **5 sub-agent 並行 + 1 isolation worktree** = 高效率 + 0 衝突（檔案 disjoint pattern）
+4. **PA design plan reference** = sub-agent prompt 必含 §10 prompt template 路徑，sub-agent 自己 read SSOT 不必 PM paraphrase
+
+### Backlog 新增（9 ticket）
+**P1**：EXIT-FEATURES-WRITER-BUG-1-FIX（3-5h cohesive PR）+ G3-08 Phase 1 Sub-task C（0.5d）+ G3-08 Phase 2 H1+H3（3d next session）
+**P2**：PAPER-STATE-DUST-RESTORE-AUDIT（PA+E1）+ ML-TRAINING-DATA-HYGIENE-1（MIT+E1）
+**P3 LOW（從 E2 review + MIT follow-up）**：MICRO-PROFIT-FIX-1-HEALTHCHECK / TIER4-OBSERVER-LOW-1 (cron polish) / TIER4-AI-SERVICE-DISPATCH-SPLIT / TIER4-MIT-AUDIT-GREP-SNIPPET
+
+### Wave 3 影響：**0**
+所有 Tier 4 改動 DEFAULT-OFF env-gated 或純 Python；不觸動 engine PID 2033577；passive observation 主軸不變（Live ~2026-05-30 ±7d）。
+
+### 報告索引
+- Workspace report: `docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-26--tier4_signoff.md`
+- E2 batch review: `docs/CCAgentWorkSpace/E2/workspace/reports/2026-04-26--tier4_batch_review.md`
+- MIT audit (PM 代落): `docs/CCAgentWorkSpace/MIT/workspace/reports/2026-04-26--exit_features_writer_bug_audit.md`
+- PA G3-08 design: `docs/CCAgentWorkSpace/PA/workspace/reports/2026-04-26--g3_08_h1_h5_ipc_gateway_design.md`
+
+**最後更新**：2026-04-26 15:30 CEST · PM Tier 4 Sign-off DONE
