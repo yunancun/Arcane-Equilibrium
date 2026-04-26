@@ -154,7 +154,7 @@ class StrategistAgent(BaseAgent):
 
         # Delegate: H1 ThoughtGate — pre-AI deterministic gate
         # 委託：H1 思考閘門 — AI 調用前的確定性判斷
-        self._h1_gate = H1ThoughtGate(cost_tracker=cost_tracker)
+        self._h1_gate = H1ThoughtGate(cost_tracker=cost_tracker)  # rename hazard, see h_state_query_handler.py:356; G3-08-PHASE-4-STRATEGIST-SPLIT 修
 
         # Backward compat: expose _h1_cooldown via delegate
         # 向後兼容：通過委託暴露 _h1_cooldown
@@ -162,7 +162,7 @@ class StrategistAgent(BaseAgent):
 
         # Delegate: H3 ModelRouter — model tier routing + L2 cache
         # 委託：H3 模型路由 — 模型層選擇 + L2 快取管理
-        self._model_router = ModelRouter()
+        self._model_router = ModelRouter()  # rename hazard, see h_state_query_handler.py:358; G3-08-PHASE-4-STRATEGIST-SPLIT 修
 
         # Inject budget checker for L1.5/L2 routing / 注入預算檢查器用於 L1.5/L2 路由
         # Budget checker is injected externally via set_budget_manager()
