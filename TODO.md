@@ -1,6 +1,6 @@
 # OpenClaw TODO — 工作清單（v3 · 單一時間軸版）
 
-**最後更新**：2026-04-26 17:35 CEST（**Tier 7 完成**：Tier 6 §7 推薦 1-3 並行執行；H3 schema align Rust impl + dust inventory monitor + Phase 3 sub-task split；Linux **2212/0** + healthcheck [21] LIVE PASS；45 commits 3f35649→b6dbc24；engine PID 2033577 alive 未觸動（Tier 7 0 業務邏輯，Track 1 Rust 改下次 `--rebuild` 才 live）；E2 grep 4 個 strong claim 全 verified；Phase 3 H2/H4/H5 ready-to-deploy 3 E1 prompt templates）
+**最後更新**：2026-04-26 18:30 CEST（**Tier 8 完成 + G3-08 Phase 3 COMPLETE 里程碑**：Tier 7 §7 Phase 3 ready-to-deploy 推薦並行執行；4 sub-task (3-1 H2 + 3-2 H4 + 3-3 H5 + Track 3 RFC amend) 全綠；5 H buckets H1+H2+H3+H4+H5 全 wired；**G3-09 cost_edge_ratio 解阻**；Linux pytest layer2/h_state chain 96→136/0 (+40)；52 commits 3f35649→2e02afb；engine PID 2033577 未觸動（Tier 8 0 業務邏輯）；E2 7 adversarial points 全 PASS；Phase 4 ready 待 Strategist split (1200/1200 §九 hard cap)）
 **版本**：v3（Wave 線性版；廢除雙軌 P0-P4 章節，P0/P1/P2 降為每項 tag）
 **舊版歸檔**：v2 `docs/archive/2026-04-24--todo_v2_dual_axis_snapshot.md`（458 行，Wave+P 雙軌）· v1 `docs/archive/2026-04-24--todo_v1_refactor_snapshot.md`（328 行）· v0 `docs/archive/2026-04-24--todo_snapshot_pre_refactor.md`（700 行）
 **簽核**：PM Approved FIX-PLAN v2 → [Sign-off](docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-24--FixPlan_v2_PMApproval.md) · **Wave 3 Final** → [Wave 3 Sign-off](docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-26--wave3_final_signoff.md)
@@ -13,25 +13,30 @@
 
 ---
 
-## 🎯 此刻該做什麼（2026-04-26 17:35 CEST · Tier 7 完成 + Phase 3 ready-to-deploy · passive observation 階段）
+## 🎯 此刻該做什麼（2026-04-26 18:30 CEST · Tier 8 完成 + G3-08 Phase 3 COMPLETE · passive observation 階段）
 
-**Tier 7 派發成果**（5 commits f782598→b6dbc24，Tier 6 §7 推薦 1-3）：
-- ✅ Track 1 E1 H3 schema align Rust impl：commit `4b30f5e` (1 file +167/-7, +2 schema parity tests, cargo lib 2210→2212；10/10 key 對齊；0 production consumer；Python 0 改動)；**Phase 3 unblock**
-- ✅ Track 2 E1 healthcheck [21] dust inventory monitor：commit `8241133` (6 files +517/-24, 14 unit tests)；**Linux cron 16:09 UTC LIVE PASS** `dust_spiral_count=0 — Gate 1 USD floor suppressing as designed`；supersedes MICRO-PROFIT-FIX-1-HEALTHCHECK
-- ✅ Track 3 PA Phase 3 sub-task split design：commit `c6ed0b3` Pattern B (3 sub-tasks: 3-1 H2 並行 / 3-2 H4 並行 / 3-3 H5 串行)；ETA 3.5d；3 self-contained E1 prompt templates ready-to-deploy
-- ✅ E2 batch review：commit `b6dbc24` 3 task PASS (1 with LOW = improvement) / 0 退回 / 1 optional follow-up
+**Tier 8 派發成果**（7 commits 13412db→2e02afb，Tier 7 §7 Phase 3 ready-to-deploy + T7 follow-up）：
+- ✅ Track 1 E1 Sub-task 3-1 H2 budget：commit `8cd257e` + memory `cf39415` (4 Python files; pytest +12; multi-track absorb pattern absorbed Track 2 in-flight H4 edits to shared file)
+- ✅ Track 2 E1 Sub-task 3-2 H4 validator + silent gap fix：commit `71faf4c` (validation_pass counter 0→13 hits; **strategist_agent.py 1200/1200 §九 hard cap exact-touch**)
+- ✅ Track 3 PA T7-FUP-DUST-SQL-DEVIATION-DOC：commit `79a808a` (RFC §7.4 amend + §13 Deviation Log)
+- ✅ Track 4 E1 Sub-task 3-3 H5 cost_logging：commit `d1a2252` (5 files; pytest +15; **Phase 3 COMPLETE; G3-09 unblocked**; layer2_cost_tracker.py 930 LOC 警告區 +130)
+- ✅ E2 batch review Tracks 1-3：commit `84da817` (PASS / PASS-MED / PASS-LOW + 2 follow-up)
+- ✅ E2 Track 4 supplemental review：commit `2e02afb` (7 adversarial points all PASS + 1 follow-up)
 
-**Next session 立即可派 - Phase 3 並行**（PA prompt templates 已寫，下 PM 1-click 即派）：
-1. **Sub-task 3-1 H2 budget integration**（P1，~1.2d，per `2026-04-26--g3_08_phase3_subtask_split.md` §4）— 與 3-2 並行
-2. **Sub-task 3-2 H4 validator integration**（P1，~1.0d，§5）— 與 3-1 並行；含 H4 silent gap fix（補 validation_pass counter）
-3. **Sub-task 3-3 H5 cost_logging integration**（P1，~1.3d，§6）— 強制 3-1 後（layer2_cost_tracker.py 同檔）；解阻 G3-09 cost_edge_ratio
+**Phase 3 milestone**：5 H buckets H1+H2+H3+H4+H5 全 wired（Phase 1-3 全鏈完成）；G3-09 cost_edge_ratio 解阻；Phase 4 ready 待 Strategist split。
+
+**Next session 立即可派 - Phase 4 啟動前置**：
+1. **G3-08-PHASE-4-STRATEGIST-SPLIT**（MED，PA-led ≥0.5d）— **Phase 4 hard pre-condition**（strategist_agent.py 1200/1200 hard cap）
+2. **G3-08-PHASE-4-COST-TRACKER-SPLIT**（LOW）— plan ahead with Strategist split（layer2_cost_tracker.py 930 警告區）
+3. **G3-08-PHASE-4-5AGENT PA design RFC**（鏡 Phase 3 §6 prompt template，5 agents = 5 sub-tasks）
+4. **G3-09 cost_edge_ratio PA design RFC**（H5 解阻可開工）
 
 **Next session 並行 Wave 4 候選**：
-4. **G3-08-PHASE-2-FUP-PRIVATE-ATTR-FACADE**（P2，1-2h）— h_state_query_handler PUBLIC facade refactor
-5. **ML-TRAINING-DATA-HYGIENE-1**（MIT + E1，1-2d）— 歷史 EF noise 量化
-6. LOW polish (T7-FUP-DUST-SQL-DEVIATION-DOC + T6-FUP-WARN-ZONE-FILES-SPLIT + T6-FUP-PA-MEMORY-INDEX-SYNC + EXIT-FEATURES-FIX-FUP-HELPERS-RS-SPLIT)
+5. **G3-08-PHASE-2-FUP-PRIVATE-ATTR-FACADE**（P2，1-2h）— h_state_query_handler PUBLIC facade
+6. **ML-TRAINING-DATA-HYGIENE-1**（MIT + E1，1-2d）— 歷史 EF noise 量化
+7. LOW polish (T8-FUP-RFC-TYPO-FIX + T6-FUP-WARN-ZONE-FILES-SPLIT + T6-FUP-PA-MEMORY-INDEX-SYNC + EXIT-FEATURES-FIX-FUP-HELPERS-RS-SPLIT)
 
-詳：[Tier 7 Sign-off](docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-26--tier7_signoff.md)
+詳：[Tier 8 Sign-off](docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-26--tier8_signoff.md)
 
 ---
 
@@ -489,10 +494,12 @@ ssh trade-core "cd ~/BybitOpenClaw/srv && python3 helper_scripts/db/passive_wait
 | ~~**G3-08-PHASE-1C-WIRING**~~ | ✅ 完成 2026-04-26 commits `5943337` + `deee78e` | strategy_wiring.py condition spawn `_H_STATE_INVALIDATOR` (+82) + CLAUDE.md §九 +2 rows + 新 healthcheck `[20] check_h_state_gateway_freshness` 3-state verdict (env=0 PASS-skip / env=1 verify 3 invariants); G3-08 Phase 1 全完 (A+B+C); Mac+Linux 雙端綠 (35/35 pytest no regression); E2 PASS-with-LOW (FUP: [20] expected sync) | Phase 1A+B ✅ | 完成 2026-04-26 | ✅ |
 | ~~**G3-08-PHASE-2-H1-H3**~~ | ✅ 完成 2026-04-26 commits `9120948` + `f2ed286` | h1_thought_gate.py +149 (get_h1_snapshot + invalidate_async hook fire-and-forget) + model_router.py +169 (get_h3_snapshot + invalidate per-branch) + h_state_query_handler.py 改寫 (schema v0→v1 真實 H1+H3 stats); 新 +61 pytest tests (35→96/0); Strategist regression 69/69; Smoke env=0 empty + env=1 real 雙路徑驗證 PASS; E2 PASS-with-MEDIUM (T5.3-MED-1 H3 schema mismatch + MED-2 私有屬性穿透; runtime impact=0; 4 follow-up tickets) | G3-08 Phase 1A+B+C ✅ | 完成 2026-04-26 | ✅ |
 | ~~**G3-08-PHASE-3-H2-H4-H5 PA sub-task split**~~ | ✅ 完成 2026-04-26 commit `c6ed0b3` (PA Track 3) | Pattern B 推薦 3 sub-tasks (3-1 H2 並行 / 3-2 H4 並行 / 3-3 H5 串行)；ETA 3.5d wall-clock；3 self-contained E1 prompt templates ready-to-deploy；H4 silent gap + file overlap + strategist_agent §九 預警 全 E2 verified | G3-08-PHASE-2-H1-H3 ✅ | 完成 2026-04-26 | ✅ |
-| **G3-08-PHASE-3-SUB-TASK-3-1 H2 budget integration** | PA prompt template ready (`c6ed0b3` §4)；layer2_cost_tracker.py + Rust h_state_cache types.rs；可與 3-2 並行 | Track 1 H3 schema align ✅ | 🟠P1 | E1 ~1.2d（per PA prompt template §4）|
-| **G3-08-PHASE-3-SUB-TASK-3-2 H4 validator integration** | PA prompt template ready (`c6ed0b3` §5)；strategist_agent.py + Rust h_state_cache types.rs；含 H4 silent gap fix（補 validation_pass counter）；可與 3-1 並行；strategist_agent.py 1170+25=1195 LOC 觸 §九 1200 警戒 | Track 1 H3 schema align ✅ | 🟠P1 | E1 ~1.0d（per PA prompt template §5）|
-| **G3-08-PHASE-3-SUB-TASK-3-3 H5 cost_logging integration** | PA prompt template ready (`c6ed0b3` §6)；layer2_cost_tracker.py（與 3-1 同檔，須序列）；解阻 G3-09 cost_edge_ratio | Sub-task 3-1 完成 | 🟠P1 | E1 ~1.3d（per PA prompt template §6）|
-| **G3-08-PHASE-4-5AGENT** | Phase 4 5-Agent state events (Strategist/Guardian/Analyst/Executor/Scout)；4d wall-clock 全鏈；解阻 G8-01 認知自適應 e2e | G3-08-PHASE-3-H2-H4-H5 | 🟠P1 | E1 ~4d wall-clock 全鏈 |
+| ~~**G3-08-PHASE-3-SUB-TASK-3-1 H2 budget integration**~~ | ✅ 完成 2026-04-26 commit `8cd257e` + memory `cf39415` (Tier 8 Track 1) | 4 Python files; pytest +12; get_h2_snapshot 3 fields 對齊 Rust H2BudgetState; multi-track absorb pattern (吸收 Track 2 in-flight H4 edits to shared h_state_query_handler.py) | 完成 2026-04-26 | ✅ |
+| ~~**G3-08-PHASE-3-SUB-TASK-3-2 H4 validator integration**~~ | ✅ 完成 2026-04-26 commit `71faf4c` (Tier 8 Track 2) | 2 Python files (strategist_agent + test); pytest +13; H4 silent gap fix (validation_pass counter 0→13 hits); **strategist_agent.py 1200/1200 §九 hard cap exact-touch** → 開 G3-08-PHASE-4-STRATEGIST-SPLIT P1 backlog | 完成 2026-04-26 | ✅ |
+| ~~**G3-08-PHASE-3-SUB-TASK-3-3 H5 cost_logging integration**~~ | ✅ 完成 2026-04-26 commit `d1a2252` (Tier 8 Track 4) | 5 files; pytest +15; **Phase 3 COMPLETE** (5 H buckets 全 wired); **G3-09 cost_edge_ratio 解阻** (Rust DashMap lookup ≤1ms p99); layer2_cost_tracker.py 930 LOC §七 800 警告區 +130 → 開 G3-08-PHASE-4-COST-TRACKER-SPLIT LOW backlog | 完成 2026-04-26 | ✅ |
+| **G3-08-PHASE-4-STRATEGIST-SPLIT** | E2 Tier 8 MED: strategist_agent.py 1200/1200 §九 hard cap exact-touch (Track 2 commit msg + memory + PA §10.4 三重 self-disclose); **Phase 4 5-Agent Strategist sub-task hard pre-condition** | 立即可派（無前置）| 🟠MED | PA-led ≥0.5d (split RFC 含拆檔方案 + E1 prompt template) |
+| **G3-08-PHASE-4-COST-TRACKER-SPLIT** | E2 Tier 8 Track 4 LOW: layer2_cost_tracker.py 930 §七 800 警告區 +130 (未超 §九 1200); plan ahead with Strategist split | 與 Strategist split 同 wave | 🟢LOW | PA + E1 ≥0.5d |
+| **G3-08-PHASE-4-5AGENT** | Phase 4 5-Agent state events (Strategist/Guardian/Analyst/Executor/Scout)；4d wall-clock 全鏈；解阻 G8-01 認知自適應 e2e；鏡 Phase 3 per-module sub-task split pattern | **G3-08-PHASE-4-STRATEGIST-SPLIT 完成** | 🟠P1 | PA design RFC + E1 ~4d wall-clock 全鏈 |
 | ~~**G9-02-FUP-WS-CLIENT-SPLIT**~~ | ✅ 完成 2026-04-26 commit `eb65e1e` | ws_client.rs 1227→6 sibling (max maker_kpi_hot_reload 不存在; max sibling parsers 355) + mod.rs 142 < 300 理想線 + 71% peak reduction；hot-path 5 條全 byte-identical (WS-TIMEOUT FA-1 risk #2 / subscribe HashSet O(1)+10-batch+500ms / process_message ShouldReconnect / BackoffConfig 雙路徑 / ForceReconnect close-frame)；cargo lib 2176/0 不變；E2 PASS | E2 MED-1 → 立即可派 | 完成 2026-04-26 | ✅ |
 | ~~**OBSERVER-PIPELINE-POST-F42FACE-CLEANUP**~~ | ✅ 完成 2026-04-26 commit `c53c3f9` | -228/+679 (9 files; 刪 v2 + dead caller `bybit_ws_smoke_to_postgres.py` + observer_cycle.py 9→8 path 修 + cron wrapper noise pattern 移除 + cron-time env var fix `export OPENCLAW_SRV_ROOT` + 新 healthcheck `[19] observer_pipeline_alive` 雙軸三態 + `OPENCLAW_OBSERVER_PIPELINE_OPTIONAL=1` opt-out)；**首次揭露 silent fail ok=1/5** (PM accept 真實狀態暴露)；E2 PASS-with-LOW (L-1 cosmetic BRIDGE_RC overshadow → TIER4-OBSERVER-LOW-1) | G9-04 揭發 | 完成 2026-04-26 | ✅ |
 | **G3-07-FUP-ENV-NAMESPACE** | E2 batch review LOW: `OPENCLAW_BYBIT_ENV` 新 namespace（G3-07 sibling 自帶 fallback "demo"）vs production file-based env 解析對齊 | 下次 batch | 🟢LOW | E1 1-2h |
@@ -503,7 +510,8 @@ ssh trade-core "cd ~/BybitOpenClaw/srv && python3 helper_scripts/db/passive_wait
 | ~~**G3-08-PHASE-1C-FUP-CHECK20-SYNC**~~ | ✅ 完成 2026-04-26 commit `d8385e6` | [20] healthcheck expected value 升 Phase 2（version=1 + h_states ⊇ {h1,h3}）+ set diff WARN 邏輯 Phase 3-4 friendly; Tier 6 Track 1 | 完成 2026-04-26 | ✅ |
 | ~~**G3-08-PHASE-2-FUP-H3-SCHEMA-ALIGN PA design**~~ | ✅ 完成 2026-04-26 commit `306b549` | PA Track 2 A/B/C decision; recommend Option B (Rust rename + 加 fields 對齊 Python，5/5 評分 vs A 1/5 / C 3/5)；E1 impl 留 P1 backlog；Phase 3 unblock path: yes | 完成 2026-04-26 | ✅ |
 | ~~**G3-08-PHASE-2-FUP-H3-SCHEMA-ALIGN E1 impl**~~ | ✅ 完成 2026-04-26 commit `4b30f5e` (Tier 7 Track 1) | Rust H3RouteStats rename 6 + add 3 fields per PA Option B; cargo lib 2210→2212; +2 schema parity tests; 10/10 key 對齊 (E2 grep verified); 0 production consumer; Python 0 改動; **Phase 3 unblock** | 完成 2026-04-26 | ✅ |
-| **T7-FUP-DUST-SQL-DEVIATION-DOC** | E2 Tier 7 LOW: amend `2026-04-26--paper_state_dust_restore_audit.md` §7.4 反映 E1 SQL deviation as improved spec（FILTER on COUNT DISTINCT + drop partial_reduce_real_count）；E2 評為 improvement not regression | 下次 PA 接手 | 🟢LOW | PA 10min |
+| ~~**T7-FUP-DUST-SQL-DEVIATION-DOC**~~ | ✅ 完成 2026-04-26 commit `79a808a` (Tier 8 Track 3) | RFC §7.4 amend + §13 Deviation Log added；E1 SQL deviation 兩項 documented as improvement (FILTER on COUNT DISTINCT + drop partial_reduce_real_count) | 完成 2026-04-26 | ✅ |
+| **T8-FUP-RFC-TYPO-FIX** | E2 Tier 8 Track 3 LOW: RFC §7.4 amend 中發現的 typo（optional polish）| 下次 PA 接手 | 🟢LOW | PA ~2min |
 | **G3-08-PHASE-2-FUP-PRIVATE-ATTR-FACADE** | E2 Tier 5 MED-2: `h_state_query_handler` 直接讀 H1/H3 私有 attribute (contract 違規 runtime impact=0)；應改用 PUBLIC facade method | 下次 refactor | 🟡P2 | E1 1-2h |
 | ~~**PAPER-STATE-DUST-RESTORE-AUDIT** → **PAPER-STATE-DUST-INVENTORY-MONITOR**~~ | ✅ 全鏈完成 2026-04-26 (PA design `dd4d64a` + E1 impl Tier 7 Track 2 commit `8241133`) | new healthcheck `[21] paper_state_dust_inventory` 三態 verdict per PA §7.4; 14 unit tests Mac+Linux green; **Linux cron 16:09 UTC LIVE PASS** `dust_spiral_count=0 — Gate 1 USD floor suppressing as designed`; supersedes MICRO-PROFIT-FIX-1-HEALTHCHECK | 全鏈完成 | ✅ | n/a |
 | **ML-TRAINING-DATA-HYGIENE-1** | MIT EXIT-FEATURES audit §6 follow-up #5：SQL 量化全期 `learning.exit_features` 中 dust spiral noise 比例（`exit_trigger_rule = 'fast_track_reduce_half' AND realized_net_bps == -5.5`）；如 > 5% 補回填 SQL 移除歷史 noise label；加 healthcheck 偵測 dust spiral 復發 | EXIT-FEATURES-WRITER-BUG-1-FIX | 🟡P2 | MIT + E1 1-2d |
