@@ -48,6 +48,151 @@ logger = logging.getLogger(__name__)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# F5/A1 — Phantom-View Guard
+# F5/A1 — 幽靈視圖守衛
+# ═══════════════════════════════════════════════════════════════════════════════
+def _phantom_view_guard() -> dict | None:
+    """
+    Refuse to expose Live account data when the Live slot is structurally
+    unconfigured AND the engine is not in Live mode. Returns the response
+    payload that should be returned by the caller (or None to proceed).
+
+    Two LIVE-Tab states this protects against (per A3 audit, 2026-04-26):
+      a) Live slot api_key empty → ``_get_rust_client_safe()`` falls back to the
+         shared demo BybitClient (api-demo.bybit.com), which would otherwise
+         render real demo wallet/positions inside the purple "REAL FUNDS" view.
+      b) Live slot configured (mainnet OR live_demo) but Rust ``live`` engine
+         absent → ``_get_live_engine_kind()`` reports "demo"/"paper"; the
+         exchange data is technically real for that slot but it is NOT what
+         the Live engine is doing. Frontend must show a non-misleading view.
+
+    LiveDemo (slot api_key + bybit_endpoint=demo + Rust live engine running)
+    is NOT a phantom view: the Live pipeline genuinely uses api-demo as the
+    test bed (per CLAUDE.md memory `feedback_live_no_degradation_by_endpoint`).
+    We accept that case and let the frontend label it "LiveDemo · api-demo
+    endpoint" with an orange/silver theme.
+
+    本守衛拒絕在以下情境下暴露 Live 帳戶資料：
+      a) Live 槽 api_key 為空 → 客戶端回退到共享 demo client（api-demo.bybit.com），
+         否則紫色「真實資金」面板會渲染出 demo 錢包/倉位。
+      b) Live 槽已配置但 Rust ``live`` 引擎缺席 → engine_kind 退到 demo/paper；
+         交易所資料對該槽是真實的，但**並非 Live engine 正在做的事**，前端需顯示
+         不誤導視圖。
+
+    LiveDemo（槽 api_key + endpoint=demo + Rust live 引擎運行）**不是**幽靈視圖：
+    Live 管線確實在 api-demo 跑 live code path（per CLAUDE.md memory）。此情況
+    放行，前端用橙/銀主題標 "LiveDemo · api-demo endpoint"。
+
+    Returns:
+      None — proceed with normal handler logic
+      dict — caller should ``return`` this payload directly (HTTP 200 envelope
+             carrying ``actual_*`` markers, ``error``, and empty data so the
+             frontend reliably swaps to the warning view)
+
+    Why 200 instead of HTTPException(422): the existing GUI relies on
+    ``ocApi`` envelope unwrap and shows a generic toast on non-200; we want
+    the page-load flow to read the payload markers and swap views, so we
+    return a structured envelope with ``error`` key + ``actual_engine_kind``
+    + ``actual_endpoint``. Tests assert presence of these keys on the payload.
+
+    為何回 200 而非 422：現有 GUI 依賴 ocApi unwrap，非 200 會 toast 通用錯誤；
+    我們要讓 page-load 流程讀取 payload markers 來 swap 視圖，所以回結構化 envelope
+    含 ``error`` + ``actual_engine_kind`` + ``actual_endpoint``。Tests 斷言 keys 存在。
+    """
+    actual_engine_kind = core._get_live_engine_kind()
+    actual_endpoint = core._resolve_live_endpoint_label()
+
+    # Phantom view detected: engine not Live AND slot unconfigured
+    # 幽靈視圖：引擎非 live 且槽未配置
+    if actual_engine_kind != "live" and actual_endpoint == "unconfigured":
+        return core._live_response({
+            "available": False,
+            "error": "live_slot_not_configured",
+            "error_zh": "Live 槽未配置；GUI 拒絕顯示 demo data 偽裝 live",
+            "error_en": "Live slot not configured; GUI refuses to render demo data as live",
+            "list": [],
+            "positions": [],
+            "count": 0,
+            "actual_engine_kind": actual_engine_kind,
+            "actual_endpoint": actual_endpoint,
+        })
+    return None
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# F5-RETURN/Issue-1 (HIGH) — Phantom-view server-side WRITE guard
+# F5-RETURN/Issue-1（HIGH）— 寫入端 server-side 幽靈視圖守衛
+# ═══════════════════════════════════════════════════════════════════════════════
+def _phantom_view_guard_write() -> None:
+    """
+    Refuse Live WRITE operations (close-position / close-all-positions) when
+    the Live slot is structurally unconfigured AND the engine is not Live.
+
+    Why a separate sibling helper instead of reusing ``_phantom_view_guard``:
+      - Read endpoints return a 200 envelope with ``error`` markers because the
+        existing GUI relies on ocApi unwrap and shows a generic toast on non-200
+        — but it also reads the payload to swap views. Read path = soft refusal.
+      - Write endpoints have a different threat model (per E2 review 2026-04-26):
+        a curl POST that bypasses the client-side guard would, without this
+        guard, take the IPC path → IPC fails (live pipeline absent) → fall back
+        to ``_rest_close_position_reduce_only`` / ``_sweep_live_orphan_positions``
+        which use the demo client and would CLOSE DEMO POSITIONS. We must hard
+        refuse with HTTP 422 (semantic: "request well-formed but the live engine
+        prerequisite is unmet"). 422 conveys actionable signal to curl/scripts;
+        the GUI's ocApi will surface it as an error.
+
+    LiveDemo (engine=='live' AND endpoint=='live_demo') is a legitimate Live
+    operating mode (per CLAUDE.md memory ``feedback_live_no_degradation_by_endpoint``):
+    the Live pipeline genuinely runs against api-demo with full Live-grade
+    authorization (5-gate). It MUST be allowed through this guard. Visual
+    differentiation (orange theme) happens in the frontend only.
+
+    本守衛拒絕在 Live 槽未配置且引擎非 live 時執行 Live 寫操作（單倉平倉 /
+    全平倉）。為何獨立 sibling 而非重用 ``_phantom_view_guard``：
+      - 讀端點回 200 envelope 帶 ``error`` 標記，GUI 依 ocApi unwrap 然後讀
+        payload 切換視圖 — 軟拒絕。
+      - 寫端點不同：curl POST 繞過前端守衛後，若無此 guard，IPC 失敗 → 降級
+        REST close path 使用 demo client → 誤平 demo 倉位。必須硬拒 HTTP 422
+        （請求格式合法但 live 引擎前置條件未滿足），對 curl/script 提供 actionable
+        signal；GUI 的 ocApi 會以 error 形式呈現。
+
+    LiveDemo（engine=='live' 且 endpoint=='live_demo'）放行 — 該模式是合法的
+    Live 運行模式，5-gate 授權按 Live 嚴格標準（per memory），視覺差異（橙色
+    主題）由前端處理。
+
+    Raises:
+      HTTPException(422): live engine not configured / not running. Detail
+        envelope carries ``error`` / ``actual_engine_kind`` / ``actual_endpoint``
+        + bilingual ``message``. caller does not need to handle return value.
+
+    Returns:
+      None — proceed with the actual close handler.
+    """
+    actual_engine_kind = core._get_live_engine_kind()
+    actual_endpoint = core._resolve_live_endpoint_label()
+
+    # Block iff engine != live AND slot unconfigured (mirror read-side guard
+    # exact condition, so test fixtures stay aligned and there is no asymmetry
+    # that would let a Mainnet-slot configured demo engine accidentally pass).
+    # 條件鏡像讀端 guard，避免不對稱讓「Mainnet 槽配置 + demo 引擎」意外通過。
+    if actual_engine_kind != "live" and actual_endpoint == "unconfigured":
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error": "live_engine_not_configured",
+                "actual_engine_kind": actual_engine_kind,
+                "actual_endpoint": actual_endpoint,
+                "message": (
+                    "Live engine not running or unconfigured. Refusing write "
+                    "operation to prevent accidentally closing demo positions. "
+                    "/ Live 引擎未運行或未配置，拒絕寫操作，避免誤平 demo 倉位。"
+                ),
+            },
+        )
+    return None
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # Live account data — balance / positions / orders
 # 實盤帳戶數據端點 — 餘額 / 倉位 / 掛單
 #
@@ -70,6 +215,13 @@ async def get_live_balance(
     主路徑：httpx BybitClient 獲取真實 Bybit 帳戶餘額（demo 或 live key 均可）。
     降級：引擎內部餘額 + bybit_sync_balance。
     """
+    # F5/A1: refuse to render demo wallet under the Live "REAL FUNDS" view when
+    #        the Live slot is unconfigured and engine_kind is not 'live'.
+    # F5/A1：Live 槽未配置且引擎非 live 時拒絕用 demo wallet 偽裝「真實資金」視圖。
+    guard = _phantom_view_guard()
+    if guard is not None:
+        return guard
+
     # Attach per-engine session baseline (initial/peak/realized/fees) from
     # Rust paper_state so the GUI can display net-of-fees PnL identity
     # (equity - initial = realized - fees + unrealized). Best-effort: snapshot
@@ -126,6 +278,11 @@ async def get_live_positions(
     主路徑：httpx BybitClient 獲取真實 Bybit 倉位。
     降級：引擎追蹤倉位（內部狀態）。
     """
+    # F5/A1 phantom-view guard / F5/A1 幽靈視圖守衛
+    guard = _phantom_view_guard()
+    if guard is not None:
+        return guard
+
     rc = core._get_rust_client_safe()
     if rc is not None:
         try:
@@ -163,6 +320,11 @@ async def get_live_orders(
     主路徑：httpx BybitClient 獲取真實 Bybit 掛單。
     降級：從引擎倉位狀態派生 pending_close 訂單。
     """
+    # F5/A1 phantom-view guard / F5/A1 幽靈視圖守衛
+    guard = _phantom_view_guard()
+    if guard is not None:
+        return guard
+
     rc = core._get_rust_client_safe()
     if rc is not None:
         try:
@@ -201,6 +363,11 @@ async def get_live_fills(
     DB primary (realized_pnl) → Bybit API fallback → engine snapshot fallback.
     DB 為主（帶 realized_pnl）→ Bybit API 備援 → 引擎快照備援。
     """
+    # F5/A1 phantom-view guard / F5/A1 幽靈視圖守衛
+    guard = _phantom_view_guard()
+    if guard is not None:
+        return guard
+
     # DB path — engine-calculated realized_pnl, same pattern as demo/paper.
     # DB 路徑 — 引擎計算的 realized_pnl，與 demo/paper 相同模式。
     try:
@@ -283,6 +450,12 @@ async def post_live_close_position(
     Rust dispatches the reduce_only market order directly.
     """
     core._require_operator(actor)
+    # F5-RETURN/Issue-1 (HIGH) — server-side phantom-view WRITE guard.
+    # Refuses curl-bypass attempts that would otherwise drive the IPC →
+    # REST-fallback path with the demo client and close demo positions.
+    # F5-RETURN/Issue-1（HIGH）— 寫入端 server-side 幽靈視圖守衛，
+    # 阻擋 curl 繞過前端 → IPC 失敗 → REST 降級用 demo client 誤平 demo 倉位。
+    _phantom_view_guard_write()
     sym = symbol.upper()
 
     # Step 1: read-only lookup of exchange position to build hints for Rust.
@@ -373,6 +546,12 @@ async def post_live_close_all_positions(
     Requires Operator role.
     """
     core._require_operator(actor)
+    # F5-RETURN/Issue-1 (HIGH) — server-side phantom-view WRITE guard.
+    # Without it, curl bypass triggers IPC fail → REST orphan-sweep on demo
+    # client → mass-closes demo positions across all symbols.
+    # F5-RETURN/Issue-1（HIGH）— 寫入端 server-side 守衛；
+    # 缺此 guard 時 curl 繞過會觸 IPC 失敗 → REST 孤兒清掃用 demo client 全平 demo 倉位。
+    _phantom_view_guard_write()
     errors: list[str] = []
     rest_fallback_used = False
     try:
@@ -418,6 +597,11 @@ def get_live_metrics(
     actor: Any = Depends(base.current_actor),
 ) -> dict:
     """GET /api/v1/live/metrics — performance metrics from Rust engine (fills/positions/PnL). / 性能指標。"""
+    # F5/A1 phantom-view guard / F5/A1 幽靈視圖守衛
+    guard = _phantom_view_guard()
+    if guard is not None:
+        return guard
+
     from .paper_trading_metrics import compute_full_metrics
 
     rust = get_rust_reader()
