@@ -51,6 +51,7 @@
 | 2026-04-26 | Phase 1+2 batch review 10 commits (df1d629..bd5ce56) | workspace/reports/2026-04-26--phase1_2_batch_review.md |
 | 2026-04-26 | Tier 3 batch review 5 commits (7564d07..31fa96c) + G9-05 PUSH-BACK | workspace/reports/2026-04-26--tier3_batch_review.md |
 | 2026-04-26 | Tier 4 batch review 6 commits (eb65e1e..4689fc8) + MIT EXIT-FEATURES-WRITER-BUG-1 audit + PM merge | workspace/reports/2026-04-26--tier4_batch_review.md |
+| 2026-04-26 | Tier 5 batch review 7 commits (af48ee1..f2ed286) — T5.1 EXIT-FEATURES-FIX + T5.2 G3-08-PHASE-1C + T5.3 Phase 2 H1+H3 | workspace/reports/2026-04-26--tier5_batch_review.md |
 
 ## 歷史審查關鍵發現（累積記憶）
 
@@ -247,3 +248,30 @@
   - 凡 healthcheck 預設 FAIL vs PASS-skip 取捨 → silent-fail 修復場景必選預設 FAIL + operator 主動 opt-out（`OPENCLAW_*_OPTIONAL=1`），不選預設 PASS
   - 凡 MIT findings audit → 對 H1-H5 reject 結論必獨立 grep 證據鏈（不依賴 MIT 字面結論）；推 MIT 下次報告補 grep snippet 對齊 §7 smoking gun SQL 同等地位
   - 凡 hot-path byte-identical 改動 → 必獨立 grep 對照 5+ hot-path 在新 sibling 中的確切 line（非籠統「保留」），FA-1 / WS-TIMEOUT 等 risk-tagged 點順序語意特別需驗
+
+### 2026-04-26 Tier 5 batch review (7 commits, af48ee1..f2ed286) — 3 PASS / 0 RETURN / 3 FUP tickets
+
+- **結論**：T5.1 EXIT-FEATURES-FIX (3 commits) PASS / T5.2 G3-08-PHASE-1C (2 commits) PASS / T5.3 G3-08 Phase 2 H1+H3 (2 commits) PASS-with-FOLLOWUP；3 follow-up tickets 推薦 PM 開
+- **驗證 metric**：cargo lib `2210/0`（baseline 2198 + EXIT-FEATURES-FIX +12 unit tests）+ integration `12/0`；pytest `75/0`（H1/H3/h_state_query_handler）+ strategist regression `36/36`；healthcheck [20] env=0/env=1 smoke 兩態都驗
+- **8-Axis audit 結果**：A 跨平台 PASS（7/7 commits 0 hit）/ B 雙語 PASS（11/11 modified files ≥5 中 markers + MODULE_NOTE）/ C 範圍 PASS（3 task 各自獨立 sequential 不擴張）/ D SQL Guard PASS（無新 V###）/ E Hot-path PASS-with-FOLLOWUP / F Test PASS / G PA design PASS-with-MEDIUM（H3 schema mismatch dormant）/ H MIT audit PASS（A1+A3+B1' 對齊）
+- **EXIT-FEATURES-FIX RCA-A audit**：(a) Gate 1 USD floor active in ALL branches（封住 entry_notional==0 fail-open 漏洞）(b) Gate 2 ratio gate 仍對 entry_notional > 0 生效（保留 pre-FIX legacy real position）(c) ft_dust_qty_floor_usd schema validate [0, 100_000] + reject NaN/Inf（hot-reloadable via patch_risk_config）(d) bootstrap migrate_legacy_entry_notional idempotent（only entry_notional <= 0 && qty > 0）(e) stale tick fall-through（last_price <= 0.0 → return true 保留倉位下 tick 重評估）
+- **EXIT-FEATURES-FIX RCA-B audit**：(a) is_partial_reduce_tag exact-match 不誤判 PHYS-LOCK / strategy exit (b) emit_close_fill 仍寫 trading.fills（operator visibility + PnL 帳）只 EF skip (c) E1 採 B1' 變體（partial_reduce_tag exact match）比 MIT B1 (`realized_pnl == 0`) 更精準避誤封 break-even 邊界 case
+- **G3-08 Phase 1C audit**：condition spawn 模式對齊 G3-03 ExecutorConfigCache（資源流相反）/ DEFAULT-OFF env=0 zero overhead（嚴格 `=="1"` strict eq → singleton stays None → invalidate_async no-op）/ healthcheck [20] 三態 PASS/WARN/FAIL pure-Python no live IPC（對齊 [16] log-tail-parse 哲學）
+- **G3-08 Phase 2 H1+H3 audit**：H1/H3 invalidate_async hooks 在 public method exit fire-and-forget never-blocks / get_*_snapshot 純讀無副作用 / lazy-import strategy_wiring 避 bootstrap circular（worker boot 序列死鎖風險）/ _safe_snapshot defensive 防 snapshot raise / schema v0→v1 升級含 `version != 0 + h_states keys ≠ 0` 觸發
+- **MEDIUM Finding T5.3-MED-1 H3 schema mismatch (DORMANT)**：Python keys 0/7 match Rust H3RouteStats（Python `l1_9b_count` vs Rust `l1_9b`，Python `l2_cache_hit/expired/stored` vs Rust `cache_hit/expired`，Python 多 `total_routes/budget_denied_count/l2_cache_stored`）；runtime impact = 0（Rust 仍用 StubHStateFetcher）但 Phase 3+ 接 real fetcher 時 silent regression。建議 PM 開 G3-08-PHASE-2-FUP-H3-SCHEMA-ALIGN（30min, before Phase 3 lands real fetcher，PA-led design A/B/C decision）
+- **MEDIUM Finding T5.3-MED-2 私有屬性穿透 (CLAUDE.md §九 #8 violation)**：h_state_query_handler:247-249 用 `getattr(strategist, "_h1_gate")` + `getattr(strategist, "_model_router")` 直讀 StrategistAgent 私有屬性；PA §5.1 spec line 397-405 期望 PUBLIC facade `STRATEGIST_AGENT.get_h1_stats_snapshot() / get_h3_route_stats_snapshot()`；E1 跳過 facade layer。functional impact = 0（_safe_snapshot defensive）但 contract 違規（後續 strategist refactor 改名 `_h1_gate` → `_thought_gate` 會 silent break）。**PM 二選一**：(A) RETURN E1 加 facade method ~15min ; (B) ACCEPT-with-FOLLOWUP 開 G3-08-PHASE-2-FUP-PRIVATE-ATTR-FACADE (P2)
+- **LOW Finding T5.1-LOW-1 helpers.rs 1315 §九 violation**：pre-existing 1182 + af48ee1 +133；hot-path 抽 helper surgical 不可隨便拆，ACCEPT-with-FOLLOWUP 對齊 G9-02 ws_client.rs 1227 方法論（同樣是 hot-path 非線性堆積、sibling pattern 可拆 helpers/{tags.rs, phys_lock.rs, shadow.rs}）；PM 開 EXIT-FEATURES-FIX-FUP-HELPERS-RS-SPLIT (~0.5d, Wave 4 G5 refactor)
+- **LOW Finding T5.2-LOW-1 healthcheck [20] expected sync after 9120948**：5943337 期望 stub Phase 1 形狀（version=0 + h_states={}），9120948 升級為 version=1 + real H1+H3 snapshots when env=1 → [20] env=1 path 永遠 WARN「Phase 2-4 progress? update [20] expectations」。E1 寫的 WARN 邏輯吸收成功但 [20] expected 應同步更新；PM 開 G3-08-PHASE-1C-FUP-CHECK20-SYNC (~10min)
+- **LOW Finding T5.3-LOW-1 model_router redundant f-string**：`counter_key = f"l1_9b_count" if ... else f"l1_27b_count"...` 無 placeholder；功能等同 plain string 但 ruff PLF0901 / W1309 會報；E2 留給 PM 決定是否強制修
+- **PM merge ACCEPT 推薦選項 B**（T5.3 PASS-with-FOLLOWUP）：functional impact = 0 + lazy-import 避 bootstrap circular 設計合理 + 1822 行 + 61 tests 重派 review cycle 開銷大 + PA §5.1 命名與 follow-up 一併處理符合 G2-02 / G9-02 / OBSERVER 慣例
+- **判定方法論教訓**：
+  - 凡 RCA-A 修法 layered Gate 設計必驗 5 個 invariants：(1) Gate 1 active in ALL branches 包含 fail-open 漏洞 path (2) Gate 2 仍對 valid path 生效保留 pre-FIX 行為 (3) schema validate boundary（NaN/Inf/range）(4) bootstrap migrate idempotent（only touch broken state）(5) stale data fall-through safety
+  - 凡 RCA-B 修法「跳過特定 tag」必驗 3 個 invariants：(1) tag exact-match 無誤判其他 close path (2) downstream side-effects（trading.fills / PnL accounting）仍正常 (3) 改進 vs MIT 原 spec（如 B1 → B1' 用 tag 而非 PnL）邏輯更嚴謹
+  - 凡 condition spawn pattern 必驗 4 個 invariants：(1) DEFAULT-OFF env-gate strict eq vs loose eq（行為改動 strict / 唯讀工具 loose）(2) singleton 為 None 時 method early return zero overhead (3) reverse channel 無條件註冊 vs push channel env-gated (4) ImportError + Exception fail-closed 不 crash
+  - 凡 schema v0→v1 升級必對照 (a) Python 推送的 keys (b) Rust 接收的 fields (c) PA design plan 規定的 spec naming —— 三者 mismatch = silent regression latent；本批 H3 keys 0/7 match Rust H3RouteStats 是教科書級 schema drift hazard
+  - 凡「跨進程 IPC handler」呼叫 SSOT 進程內 component 必驗 (a) 公有 facade method 路徑 (b) PA spec naming convention (c) §九 私有屬性穿透禁忌；本批 h_state_query_handler 直讀 _h1_gate / _model_router 違 §九 #8 + 偏 PA §5.1 spec
+  - 凡「commit B 19min 內 invalidate commit A 期望值」（Tier 5 [20] expected sync 是繼 Phase 1+2 banner 後第二例）— PM 編排建議「同 push wave / commit B 完成手動補 commit A patch / commit A 加 TODO 標記」
+  - 凡 §九 1200 hard cap violation 必判 (a) sibling 已預抽且 hot-path surgical 不可拆 → ACCEPT-with-FOLLOWUP（如 helpers.rs 6 個 free fns 可拆 sibling）(b) 沒做 sibling 預抽且純線性堆積 → REQUIRE-FIX 退回；本批 helpers.rs 屬 (a) 對齊 G9-02 ws_client.rs 慣例
+  - 凡 H 狀態 cache fetcher 從 stub → real 的演化 — 必在 stub 階段建立 schema parity 測試（不只測 default）防 future Phase 接線時 silent drift；本批 PA 設計 forward-compat unknown fields drop 是雙刃劍
+  - 凡 lazy-import 在 IPC handler 內必驗 3 個 invariants：(1) top-level import 不觸 circular（boot 序列死鎖）(2) ImportError + getattr None 多層 try/except 兜底 (3) never-raises contract 維持（IPC handler 對 caller 永不 propagate snapshot bug）
+  - 凡 PM 派發 7 commits 中含 3 個獨立 task 必查 commit time-order：本批 5943337 (15:43) → af48ee1 (15:48, parent=deee78e) → 9120948 (15:58)；3 task sequential 不是 cohesive PR，避免 §C 範圍判定誤套用 cohesive 標準
