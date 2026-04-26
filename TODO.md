@@ -278,38 +278,55 @@ ssh trade-core "cd ~/BybitOpenClaw/srv && python3 helper_scripts/db/passive_wait
 
 | ID | Tag | 項目 | 前置條件（必須 ALL 滿足） | 負責 | 工時 |
 |---|---|---|---|---|---|
-| **EDGE-P3** | 🟡P1 | strategy-scoped Gate 1 fallback 部署 | (a) clean bucket ≥200 rows pooled · (b) per-strategy bootstrap 95% CI lo >0 · (c) orphan_frozen clean ≥20 rows · **(d) healthcheck [11] 連 3d PASS** | PM+FA+QC / E2 | 2d |
-| **EDGE-P1b** | 🟡P1 | `exit_features` 累積 ≥1w + 7 維閾值 bind | W19 起算，預計 5/03 滿週 | PM+QC / E4 | passive 7d |
-| **EDGE-P2-flip** | 🟡P2 | Track L shadow flip + P1-10 並行 | EDGE-P1b | QC+PM / E2 | passive 7d |
+| **EDGE-P3** | 🟡P1 | strategy-scoped Gate 1 fallback 部署 | (a) clean bucket ≥200 rows pooled · (b) per-strategy bootstrap 95% CI lo >0 · ~~(c) orphan_frozen clean ≥20 rows~~ → **(c') 已修：orphan_adopted ≥20 rows**（MIT 2026-04-26 audit：`orphan_frozen` by design 是 dust quarantine label `dust_gate.rs:99-114` + `orphan_handler.rs:101 DUST_FROZEN_STRATEGY`，**no close dispatched** → 該 cohort 永不進 exit_features pipeline → 該條件永久 0 → Wave 3 永久 stalled。改為 `orphan_adopted` cohort 才有真實 close）· **(d) healthcheck [11] 連 3d PASS** | PM+FA+QC / E2 | 2d |
+| **EDGE-P1b** | 🟡P1 | `exit_features` 累積 ≥1w + 7 維閾值 bind（**MIT 2026-04-26 確認 7 維 = est_net_bps / peak_pnl_pct / atr_pct / giveback_atr_norm / time_since_peak_ms / price_roc_short / entry_age_secs**，per `V999__exit_features.sql:33-41`；bind = percentile → `RiskConfig.exit.*` thresholds，非 JS estimator → cost_gate（後者是 P1-14）；MIT 建議延至 5/10 達 per-strategy ≥200 rows） | W19 起算，預計 5/03 滿週 | PM+QC / E4 + PA RFC | passive 7d + RFC 2d |
+| **EDGE-P2-flip** | 🟡P2 | Track L shadow flip + P1-10 並行（**待 PA RFC 補 spec**：flip acceptance criteria（推測 healthcheck [15] ≥95% agree rate）+ flip 步驟 SOP + 回滾路徑 + "P1-10 並行" 範圍釐清） | EDGE-P1b + PA RFC | QC+PM / E2 + PA | passive 7d + RFC 1-2d |
 
 ### G2 策略驗證 + 決策
 
 | ID | Tag | 項目 | 前置 | 負責 | 工時 |
 |---|---|---|---|---|---|
 | **G2-01** | 🟠P1 | P1-10 PostOnly 1-2w 驗證（passive） | PostOnly demo 04-21 部署 | PM+QC+FA / E4 | passive ≥1w（04-21~05-07 出結果）|
-| **G2-02** | 🟠P1 | ma_crossover R:R 對稱性 counterfactual | EDGE-P2 結果 | QC+FA / E2 | 2-3d |
-| **G2-03** | 🟡P2 | ma_crossover SL/TP 策略層定制（Option B） | G2-02 驗收 | E1+FA / E2+E4 | 2-3d |
+| **G2-02** | 🟠P1 | ma_crossover R:R 對稱性 counterfactual — **QC 2026-04-26 裁定**：G7-09 fee fix **不能救 R:R**（alpha 結構問題非 fee 結構），啟動採 (c) 並行：E1 立即寫 counterfactual code（用 `decision_outcomes` + `exit_features` 重算「若 fee=2bps 會如何」）+ passive 等 ~05-01 真實 1w demo G7-09 後數據 → ~05-03 雙軌驗證 | EDGE-P2 結果（並行寫碼可不等）| QC+FA / E2 + E1 code | 2-3d |
+| **G2-03** | 🟡P2 | ma_crossover SL/TP 策略層定制（Option B）— **待 PA RFC 補 spec**：(1) Option B 是「strategy_params.toml 加 sl_atr_mult / tp_atr_mult per-strategy」還是別的層？(2) G2-02 counterfactual → G2-03 binding 邏輯（自動 vs 手動）(3) P1 max 硬頂 vs 策略軟值 boundary | G2-02 驗收 + PA RFC | E1+FA / E2+E4 + PA | 2-3d + RFC 1-2d |
 | **G2-04** | 🔴P0 | **Grid disable 決策會**（若 PostOnly 後仍負 edge） | G2-01 + P0-3 輸入 | PM+FA 決策 | 1h 會議 |
-| **G2-05** | 🟠P1 | bb_breakout FIX-26-DEADLOCK-1 rebuild 驗證 | operator rebuild | MIT / QA [12] | 6h+ 觀察 |
-| **G2-06** | 🟠P1 | bb_breakout threshold 重 calibrate（G2-05 後 7d 仍 0 fills 觸發）— **觸發**：FIX-26-DEADLOCK-1 已在 binary（21:58）+ healthcheck [12] 仍 FAIL ≥7d → 結構性 1m bandwidth mis-scale 確認（squeeze_bw=0.03 100% 觸發 / expansion_bw=0.04 永不達），非 deadlock 殘留；**範圍**：(a) 用 P1-11 Phase 1 sweep 工具 `helper_scripts/research/bb_breakout_threshold_sweep.py` 重跑 1m 30d data 找正常 trigger rate（squeeze 5-15% / expansion 30-60%）的 bw 區間 (b) 評估升 5m timeframe 替代（profile mismatch 結構解決）(c) 用 `BbBreakoutProfile::Aggressive` enum 已有的 helper 落 TOML 而非 hardcode；**前置**：G2-05 結論為 dormancy 非 deadlock；**避免**：直接調 conservative profile（會掩蓋 root cause）| G2-05 | QC+MIT+E1 / FA | 2-3d | sweep report + TOML threshold update + healthcheck [12] PASS 連 3d |
+| **G2-05** | ✅完成（觸發 G2-06）| bb_breakout FIX-26-DEADLOCK-1 rebuild 驗證 — **2026-04-26 ssh healthcheck [12] verify**：FAIL 7d entries=0；FIX-26-DEADLOCK-1 已在 binary（22:34 + 01:30 多次 rebuild）排除 deadlock 殘留 → **結構性 dormancy CONFIRMED**，觸發 G2-06 | operator rebuild | MIT / QA [12] | 完成 2026-04-26 |
+| **G2-06** | 🟠P1 | bb_breakout 結構性 dormancy 處置 — **2026-04-26 multi-role audit 重定向**：(MIT/QC) 1m sweep 是 fitting frequency 錯，**升 5m 是結構級正確解** vs 直接 disable；(QC) 排序 C 推 disable 為主 + B 升 5m 為備援 + A 1m 重 sweep = replication crisis 紅旗禁。**先派 PA RFC 二選一決策**（disable 永久 vs 升 5m + recalibrate），決策後派 E1 落地 | G2-05 | PA RFC → QC+MIT+E1 / FA | RFC 1d + impl 2-3d | RFC 決策 → impl + healthcheck [12] PASS 連 3d 或正式 disable |
 
 ### G8 測試 / Healthcheck 擴展（新增，QA+AI-E）
 
 | ID | Tag | 項目 | 前置 | 負責 | 工時 |
 |---|---|---|---|---|---|
-| **G8-01** | 🟠P1 | e2e 認知自適應測試（80+ coverage） | G3-04 | QA+E4 / E2 | 2-3d |
-| **G8-02** | 🟠P1 | Python↔Rust parity test（decision agree ≥95%） | G3-03 | QA+E4 / E2 | 1-2d |
-| **G8-03** | 🟠P1 | 灰度驗收自動化（shadow metrics） | EDGE-P2 flip | QA / E2 | 2-3d |
-| **G8-04** | 🟡P2 | healthcheck DAG 線性化（依賴清晰） | G6-02 | QA | 1d |
+| **G8-01** | 🟠P1 | e2e 認知自適應測試（80+ coverage）— **PA 2026-04-26 scope 重定義**：OpportunityTracker / DreamEngine **代碼不存在**（grep 0 命中，非 stub），完成標準改為 **CognitiveModulator ≥85% line cov + StrategistAgent 注入點 integration 綠**，後二者 deferred 待對應實作 | G3-04 ✅ | QA+E4 / E2 | 2-3d |
+| **G8-02** | 🟠P1 | Python↔Rust parity test（decision agree ≥95%）— **PA 2026-04-26 spec 補**：decision points 限 RiskConfig.executor 3 欄（shadow_mode / per_symbol_position_cap / max_position_pct）；70 case golden+replay 混合；**case-level binary ≥95%**（≥67/70 agree） | G3-03 ✅ | QA+E4 / E2 | 1-2d |
+| **G8-03** | 🟠P1 | 灰度驗收自動化（shadow metrics）— **FA 2026-04-26 補**："灰度" 流程未明確（staged rollout 機制 vs simple shadow→live flip），shadow metrics 列表（agree_rate / decision_lag / pnl_diff）需 QA 整理 | EDGE-P2 flip | QA / E2 | 2-3d |
+| ~~**G8-04**~~ | ⬇降 backlog | ~~healthcheck DAG 線性化（依賴清晰）~~ — **PA 2026-04-26 推薦降級**：當前 17 check 平鋪可讀、隱性依賴僅 2 層深、無假 PASS 觸發、Wave 3 完成標準應移除此項。**降 backlog 待 false PASS/FAIL 真出問題再啟** | — | QA | — |
 | **G8-05** | 🟡P2 | AI cost ROI 監控面板（from AI-E） | G3-09 | AI-E+E1a / QA | 1-2d |
 
 ### Wave 3 完成標準
 
-- [ ] EDGE-P3 前 4 條件全滿足，Gate 1 fallback 部署
-- [ ] exit_features ≥1000 rows
+- [ ] EDGE-P3 前 4 條件全滿足（**(c) 已修為 orphan_adopted ≥20**），Gate 1 fallback 部署
+- [ ] exit_features ≥1000 rows + 7 維 percentile 閾值 bind 到 RiskConfig.exit.*
 - [ ] G2-01 PostOnly 驗收：fee drop ≥60% 或決策策略下架
-- [ ] G2-02 ma R:R ≤1.5× 或 SL/TP Option B 定制
-- [ ] bb_breakout 復活（fill count > 0）或正式 disable
+- [ ] G2-02 ma R:R counterfactual 報告（**理論值 fee=2bps + realized 真實 1w post-G7-09**）對齊
+- [ ] bb_breakout PA RFC 結論（disable vs 升 5m）+ 落地 → healthcheck [12] PASS 連 3d 或正式 disable
+
+### Wave 3 開工時刻表（2026-04-26 PM 派發後 · 4-agent audit 整合）
+
+**第二波派發**（5 軌並行，已派出）：
+1. ✅ PA G2-06 RFC（disable vs 5m 升級二選一）
+2. ✅ E1 G2-02 counterfactual code（QC 推 (c) 並行：寫碼 + passive 等數據）
+3. ✅ E1 G8-02 Py↔Rust parity test（70 case ≥95% binary）
+4. (待第三波) PA EDGE-P1b RFC（7 維 bind contract）
+5. (待第三波) PA EDGE-P2-flip RFC（flip SOP + 回滾）
+6. (待第三波) PA G2-03 RFC（Option B 層次界定）
+
+**4-agent audit 報告索引**：
+- PA：[2026-04-26--wave3_dispatch_research.md](docs/CCAgentWorkSpace/PA/workspace/reports/2026-04-26--wave3_dispatch_research.md)
+- MIT：[2026-04-26--wave3_data_audit.md](docs/CCAgentWorkSpace/MIT/workspace/reports/2026-04-26--wave3_data_audit.md)
+- QC：[2026-04-26--wave3_strategy_audit.md](docs/CCAgentWorkSpace/QC/workspace/reports/2026-04-26--wave3_strategy_audit.md)
+- FA：[2026-04-26--wave3_spec_readiness.md](docs/CCAgentWorkSpace/FA/workspace/reports/2026-04-26--wave3_spec_readiness.md)
+- PM 派發整合：[2026-04-26--wave3_dispatch_signoff.md](docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-26--wave3_dispatch_signoff.md)
 
 ---
 

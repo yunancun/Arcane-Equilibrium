@@ -10,6 +10,57 @@
 
 ## 工作記憶
 
+### 2026-04-26 Wave 3 G8-02 ExecutorAgent decision parity 回歸驗證
+
+**結論：E4 Pass with conditions**
+
+**測試結果：**
+- G8-02 testfile 獨立：5 passed / 2 skipped / agree=70/70 (100%) — 不 flaky（兩次同綠）
+- control_api_v1 子集 baseline：2749→**2754 passed**（+5），35 pre-existing failed 不變（與 G8-02 無關）
+- Rust engine lib：2138 / 0 fail 不變（G8-02 不動 Rust 代碼）
+
+**35 pre-existing failed root cause（與 G8-02 無關，建議 PM 開新 ticket）：**
+- `test_executor_shadow_toggle_api.py`（17）+ `test_strategist_promote_api.py`（18）
+- 獨立跑 → 全綠；與 G8-02 + 兩檔組合 40 個一起跑 → 全綠
+- 全量跑時 fail = test ordering pollution（推測 module-scope fixture 或 STORE / shadow_mode_provider singleton mutation）
+
+**4 大 WARN（PM 必須清楚理解，oversell 風險）：**
+
+1. **G8-02 是 Python runtime ↔ Rust schema spec parity，不是 Python ↔ Rust runtime parity**
+   - `_reference_decide()` 是純 Python function 寫的 schema intent
+   - 完全不打 Rust 引擎（無 cargo run / IPC dispatch / Rust deserialize 驗）
+   - testfile line 35-40 自己 honest 標明：「it is *not* a re-implementation of Rust runtime, **it *is* the schema's intent**」
+   - 真 Rust runtime parity 屬 G3-08
+
+2. **70 case 100% agree 是邏輯上的必然，非 statistical confidence**
+   - 兩邊都只判一個 bool（shadow_mode）
+   - max_position_pct / per_symbol_cap 全 case 不 gate（Wave-3 scope，golden_15 自承「Rust catches」）
+   - 95% binary threshold 寫進 test 是 future-proof（將來 shadow_mode 邏輯增複雜時的 regression 邊界）
+
+3. **「synthetic_replay」術語 misleading**
+   - 40 case 並非真實 `decision_outcomes` table dump
+   - 是 procedurally generated boundary cases（隨機 ~20 symbol，shadow_mode true/false 各半）
+   - PA RFC Q2 若定義廣義 synthetic OK，否則需與 PA 對齊
+
+4. **E1 fixture 行數 self-report 誤差**：報 661 / 實 838
+
+**Mock 邊界（PASS）：**
+- ExecutorConfigCache._inject_snapshot_for_tests() 繞 IPC socket — OK
+- paper_trading_routes._ipc_command 用 _IpcCallRecorder — OK
+- ExecutorAgent.execute_order() / _execute_via_ipc() / shadow_mode_provider lambda chain 全真跑 — OK
+- 不算 mock 業務邏輯
+
+**Conditions（PM 合併前釐清）：**
+1. close-out 報告 / TODO 條目加註 G8-02 不是真 runtime parity
+2. synthetic_replay 術語校準
+3. G3-08 必須補 cargo `tests/executor_parity_test.rs` 真 IPC dispatch
+4. 35 pre-existing failed test isolation 開新 ticket
+5. 教訓：fixture self-report 行數 PA/E2 必做 sanity check
+
+**報告位置：** `docs/CCAgentWorkSpace/E4/workspace/reports/2026-04-26--wave3_g8_02_regression.md`
+
+---
+
 ### 2026-04-24 全程序範圍測試檢驗（full-chain testing audit）
 
 **結論：A-（優秀）— 測試充分，但 CI 完全不存在 + 6 個 error-path 缺口阻塞 Live**
@@ -175,6 +226,7 @@
 
 | 日期 | 任務 | 文件位置 |
 |------|------|---------|
+| 2026-04-26 | Wave 3 G8-02 ExecutorAgent decision parity 回歸驗證（E4 Pass with conditions / +5 passed / Rust 2138 不變 / 4 WARN oversell 風險） | `docs/CCAgentWorkSpace/E4/workspace/reports/2026-04-26--wave3_g8_02_regression.md` |
 | 2026-04-24 | Full-chain Testing Audit（Rust 2103 inline + 85 integration / Python 3006 / HC 12 checks / CI 0 / Top 10 gaps） | `docs/CCAgentWorkSpace/E4/workspace/reports/2026-04-24--full_chain_testing_audit.md` |
 | 2026-04-01 | 全程序測試覆蓋評估（3310 passed / 96 test files / 18 無測模塊） | `docs/CCAgentWorkSpace/E4/workspace/reports/2026-04-01--testing_audit.md` |
 | 2026-03-31 | Wave 6 Sprint 1b 1B-1 Cooldown 聯動煙霧測試（5 tests，2624 passed） | `docs/CCAgentWorkSpace/E4/workspace/reports/2026-03-31--sprint1b_cooldown_smoketest.md` |
