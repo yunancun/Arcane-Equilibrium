@@ -9,6 +9,11 @@
 //!   槽位為 None 時 fail-soft 回傳 uninitialized。
 
 use super::super::*;
+// G5-FUP-IPC-MOD-SPLIT (2026-04-26): macros (`info!`) cannot be re-exported
+// from the `mod.rs` facade — re-imported here from `tracing` directly.
+// G5-FUP-IPC-MOD-SPLIT：macro（`info!`）無法從 `mod.rs` facade re-export，
+// 在此檔直接 import。
+use tracing::info;
 
 /// Phase 4.1: flip the Teacher consumer loop enabled flag (operator gate).
 /// Phase 4.1：翻轉 Teacher consumer loop enabled 旗標（operator 閘）。

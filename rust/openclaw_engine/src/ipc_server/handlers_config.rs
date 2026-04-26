@@ -2,6 +2,11 @@
 //! 統一 Config IPC 輔助 — 從 handlers.rs 提取（§九 1200 行硬上限）。
 
 use super::*;
+// G5-FUP-IPC-MOD-SPLIT (2026-04-26): macros (`info!` / `warn!`) cannot be
+// re-exported from the `mod.rs` facade — re-imported here from `tracing`.
+// G5-FUP-IPC-MOD-SPLIT：macro（`info!` / `warn!`）無法從 `mod.rs` facade
+// re-export，在此檔直接 import。
+use tracing::{info, warn};
 
 /// Recursively merge JSON `patch` into `base` (deep merge for objects, replace
 /// for scalars/arrays). Used by `patch_*_config` to compute the next config
