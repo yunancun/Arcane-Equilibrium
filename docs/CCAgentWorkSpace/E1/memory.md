@@ -66,7 +66,35 @@ def acquire_lease(self, intent_id: str) -> bool:
 | 2026-04-26 | Tier 3 G3-07: Layer 2 toolbox query_onchain + check_derivatives | (no .md report — direct message per system reminder; commit `ac6c09a`) |
 | 2026-04-26 | Wave 2 G3-08 Phase 1 Sub-task B: Python h_state_invalidator + query_handler + reverse IPC route (commit `1c7b20e`, 35 pytest) | `.claude_reports/20260426_g3_08_phase1_subtask_b.md` (return text per system reminder) |
 | 2026-04-26 | Tier 8 Track 4 G3-08 Phase 3 Sub-task 3-3: H5 cost_logging integration — Phase 3 COMPLETE — G3-09 unblocked | direct message per system reminder; report inline |
-| 2026-04-26 | Tier 9 Track 3 G3-08-PHASE-2-FUP-PRIVATE-ATTR-FACADE: audit + PUSH-BACK to PM (2 H1/H3 violations confirmed; strategist_agent.py 1200/1200 hard cap blocks 11 LOC facade addition; 3 options provided) | direct message per system reminder; report inline |
+| 2026-04-26 | F4 trading_writer LIVE WS fills audit + ML pipeline filter (3 子任務) | `docs/CCAgentWorkSpace/E1/workspace/reports/2026-04-26--f4_trading_writer_live.md` (branch `e1-f4-trading-writer-live-isolated`, commit `53973ef`) |
+| 2026-04-26 | F4-RETURN: 修 E2 第一輪 review 退回 3 issue（split unattributed_emit + send().await + healthcheck [23] note）| `.claude_reports/20260426_223017_e1_f4_return_fixes.md` (branch `e1-f4-trading-writer-live-isolated`, commit `db1c012`) |
+
+### 2026-04-26 F4 trading_writer LIVE WS audit + ML filter 教訓
+
+- **真正 drop 點不在 trading_writer**：grep verified `trading_writer.rs:259-338` 對 engine_mode 無 filter，無條件寫入 live/live_demo/demo/paper 任意 row。F4 假設「writer silent skip live」**錯誤**。真實 drop 在更上游 `event_consumer/loop_handlers.rs:555-560` 的 `else { warn!(); }` branch — 未匹配 PendingOrder 的 WS fill 在 else block 只 log warning + return，永不送 trading_writer。debug fill drop 必順鏈條從 `private_ws emit` → `event_consumer match arm` → `apply_confirmed_fill` → `trading_writer` 全程查（PA design §5 教訓 #2）。
+- **shared helper extraction for unit testability**：原本可以直接在 else branch 內 build TradingMsg::Fill + try_send，但這樣 hot-path code 與 logic 緊耦合難測。抽出 `pub(super) fn try_emit_unattributed_fill(...)` 接受純參數（engine_mode / exec_id / qty / price / fee / order_tx），回 bool — 完全 IO-free（除 try_send），單測直接 mock channel 即可 cover (a) admit/reject by engine_mode (b) None tx (c) channel saturation (d) 所有 payload 欄位正確。15 個 unit test 全在 mod.rs 同層的 sibling test file 跑（用 `super::super::loop_handlers::...` 引用，因 loop_handlers 是私 mod，外部不可直拉）。
+- **engine_mode allowlist 設計選擇**：PA design 指 emit for `live | live_demo | demo`，paper / live_testnet 排除。`live_testnet` 排除原因：今天無真實流量，audit-row schema budget 留給 3 個生產 mode；萬一未來 testnet 啟用，加一行 enum match 即可。`paper` 是 defence-in-depth — paper 沒有真 WS 綁定（`build_exchange_pipeline` 只對 demo/live 綁），理論上 else branch 對 paper 不可達；但加 explicit filter 保險，未來 paper 接 fake WS 不會誤 emit audit。
+- **fill_id prefix `unattrib-{exec_id}` 的 dedup 機制**：trading.fills PK = (fill_id, ts) + ON CONFLICT DO NOTHING。Bybit exec_id 全 Bybit 系統唯一（從不會以 `unattrib-` 起首），所以 (a) 重發冪等：WS 重連同 exec_id → 同 fill_id → DB skip (b) 不撞合法 fill_id：未來合法 fill 用 `format!("...")` 任意命名 patten，但都不會以 `unattrib-` 起首，所以 audit row 的 PK 與合法 row PK 不會衝突。同時 line 409 `seen_exec_set` HashSet 在 same process lifetime 內已抓 dedup，DB layer 是第二道防線。
+- **ML filter 不是 single-site change**：PA design 指 grep 全部 ML 模組找 `FROM trading.fills` / `FROM learning.exit_features`。實際 grep 結果：5 ML 訓練檔有 trading.fills 引用（realized_edge_stats / edge_label_backfill / parquet_etl / dl3_ab_runner stub / label_generator 純 docstring）。**audit/counterfactual_exit_audit.py** 是隔壁 audit 模組但同樣讀 trading.fills 計 PnL，必須加 filter 不是「ML 嚴格」就略過 — PA 強制範圍包含「污染學習資料」的所有 reader。helper_scripts/db/passive_wait_healthcheck/ 各 check 已 filter by specific `strategy_name LIKE` prefix（`risk_close:` / `bb_breakout` / `ma_crossover`），audit row 的 `unattributed:` 不會撞，**已自然安全**。同理 helper_scripts/research/ma_crossover_counterfactual_replay.py 已 filter `strategy_name = %s`（指定策略），audit 不會混入。helper_scripts/db/counterfactual_exit_replay.py / research/exit_features_summary / canary/edge_p2_flip_dry_run / canary/edge_p2_flip_dry_run **只查 learning.exit_features**（exit_feature_writer.rs 寫入路徑根本不接受未匹配 WS fill），自然安全。
+- **psycopg2 pyformat `%%` escape**：`%(name)s` paramstyle 中 SQL 字面量 `%` 必須寫成 `%%`，否則 psycopg2 嘗試找 `%(...)s` parameter 失敗。realized_edge_stats / edge_label_backfill / counterfactual_exit_audit 全用 pyformat → 全用 `%%`。parquet_etl 用 DuckDB f-string interp（單 `%` 不轉義），dl3_ab_runner 改 docstring（也用 `%%` 因為示意未來實作會走 psycopg2）。test 斷言用 `'unattributed:%%'` 字面 substring（含 escape）才能匹配。
+- **整合風格 mock test 防退化**：除了 SQL string 斷言（grep-stable 但語意弱），加一個 `test_realized_edge_stats_mock_excludes_unattributed_rows` 用 MagicMock cursor 餵 4 個合成 row（2 attributed pair + 2 unattributed），預過濾後（模擬 SQL filter）只剩 2 行 → mock cursor 回傳這 2 行 → `compute_edge_stats` 結果只有 ma_crossover/BTCUSDT cell，沒有 unattributed cell 洩漏。這個 test 證明資料流端到端沒有意外 path bypass 過濾。
+- **Mac dev 環境 numpy 缺失**：test_dl3_ab_runner.py 既有測試 `test_run_ab_test_sklearn_unavailable_fail_soft` 預期回 'sklearn unavailable' 但 Mac 上 numpy 也沒裝先 fail-soft 在 'numpy unavailable'。`git stash` + 重跑驗證為 pre-existing bug 與 F4 無關。Linux production 環境兩者都裝 → test 通過。
+- **isolated worktree 流程**：每次 multi-fix 並行（F3 / F4 / F6 三 P0 同檔 loop_handlers.rs 不同 line block）必用 git worktree 隔離 — `git worktree add -b <branch> <path> main` 從 main 為 base 建。本次 F4 worktree 真實 path 是 `/Users/ncyu/Projects/worktree-e1-f4-isolated`（從 srv cwd 看 `../..` 是 `Projects/`，初次以為在 `~/worktree-...` 找不到，git worktree list 確認真實路徑）。
+
+### 2026-04-26 F4-RETURN（E2 round-1 fixes）教訓
+
+- **§九 1200 行硬上限 buffer 規劃**：F4 第一輪 commit 53973ef 把 loop_handlers.rs 從 ~1190 推到 1304（加 ~115 行 unattributed code），E2 對抗性審查直接抓到 §九 violation。教訓：每次大塊新增前先 `wc -l` 預估，超 1100 即考慮 sibling split；事後補 split 的 cost = 1 整輪 review 退回 + 多一個 commit。F4-RETURN split unattributed_emit 後 1187 行（buffer 13），警告線 800 預留 ~387 行 future runway 仍嫌緊，下次大功能落地需更早動手抽 sibling。
+- **`pub(super) use` re-export 保住 caller import path**：抽 fn 至 sibling 後若不 re-export，所有 caller（line 697 + tests/）都得改 import path → 改動 surface 變大，E2 review 噪音多。標準作法：sibling 模組的 `pub(super) fn foo` + 原模組 `pub(super) use super::sibling::foo` → caller 用 `super::super::loop_handlers::foo` 仍能 access。test file 完全不需動 import line。
+- **`tx.send().await` 對 hot-path 的 trade-off**：原本想用「retain try_send + log warn + counter」（CLAUDE issue 2 的備選方案），因擔心 select! main loop 阻塞風險。但 PA + E2 共識選 send().await 取背壓 — production channel cap 4096（`tasks.rs:404`），實務不會滿；**如真的滿表示 trading_writer DB 端嚴重落後，silent drop 比阻塞更糟**（會掩蓋 DB 問題 + 失 audit row）。教訓：PA 已 weight 過 trade-off 的 issue 不要因「直覺 hot-path 不能 await」就打回備選；先實作主 fix，production 真的有阻塞再升級監控 counter。
+- **sync fn → async fn 升級 propagation 範圍**：把 `try_emit_unattributed_fill` 改 async 後，**唯一 caller** `handle_exchange_event` 也得改 async（sync fn 不能 await async fn）；`handle_exchange_event` 的唯一 caller `mod.rs::run_event_consumer` 內 select! arm body 本身已是 async block → 只需加 `.await`。傳染鏈最遠就到此。教訓：升級 async 前先 grep callers，確認傳染半徑只在「自然 async 環境」（select! arm / spawn / async closure），否則就要改備選 fail-soft。
+- **`#[test]` → `#[tokio::test]` 批量替換**：原 12 個 sync `#[test]` 中 9 個調用 `try_emit_unattributed_fill(...)` 必須改 `#[tokio::test]` async + 加 `.await`；6 個 filter-only 測試（只調用 `engine_mode_emits_unattributed_audit`）保留 sync。批量用 Python 腳本（state machine 找 `try_emit_unattributed_fill(` + 平衡 paren counter 找 `)` 結束位置 + 插入 `.await`）比 sed/手動可靠 — 因 fn 多行調用，sed 多行 regex 容易漏。
+- **`tokio::sync::mpsc::channel<T>(1)` cap=1 + 背壓測試陷阱**：第一版測試用 `tokio::spawn(drainer)` 然後 main task 連續 emit r2 + r3，drainer task 結束時 `rx` drop → channel 關閉 → r3 send.await 立即回 Err `false`。修法：drainer 改成同 task 的 `tokio::join!` 一起跑，rx 保留到 main task 末端不被提前 drop。測試設計 lessons：
+  1. 背壓測試要證**真阻塞**（measure elapsed 對 drainer sleep duration）+ **真 unblock**（drainer 走完 emit 必須完成）
+  2. 用 `tokio::time::timeout` wrap 防 regression 退回 silent-drop 時測試永遠卡（會 timeout fail）
+  3. sanity assertion `elapsed >= 15ms` 比 `>= 20ms` 留 5ms slack 給 scheduler jitter，CI 高負載下穩定
+- **multi-language commit msg 含 healthcheck cross-reference**：Issue 3 要求 commit msg 提及 healthcheck [23] 對 audit row 的 audit-by-design 影響，**僅靠 commit msg 不夠**（會被 git log 壓縮 + 看不到 grep）。三層保險：(a) commit msg body 提（搜 git log 找）(b) `unattributed_emit.rs` MODULE_NOTE 雙語提（grep `[23]` 找）(c) `try_emit_unattributed_fill` docstring 雙語提（hover 看 IDE 找）。下次有跨組件 cross-reference（healthcheck / migration / IPC / runtime config）必三層都鋪。
+- **commit msg 用 HEREDOC 跑 git commit -m 注意空行**：HEREDOC 開頭 `EOF` 後立即 newline，git 會把 commit msg 第一行當 subject、第二行起 body。subject ≤72 char 簡短；body 段落間空行區隔。本 commit msg 從 `F4-RETURN: split unattributed_emit + send().await + healthcheck [23] note`（subject 70 char）起，body 分 Issue 1/2/3 + Verification + Files 5 段，操作正常。
+- **Mac debug + Linux release double check baseline**：Mac debug `2228 passed`、Linux release `2228 passed` — 完全一致。但 `cargo test --release` 平均比 debug 慢編但測試本體跑得快（Linux trade-core 用 `~/.cargo/env` PATH 才能找 cargo binary，`source ~/.cargo/env || export PATH=...` 二選一兜底）。
 
 ### 2026-04-26 G3-08 Phase 1 Sub-task B 教訓
 
@@ -916,47 +944,86 @@ PA Phase 3 sub-task split design plan §5 — H4 validator stats 接 h_state_cac
 - **H5 SSOT 與 H2 SSOT 共用 cost_tracker 屬性**：Sub-task 3-3 設計上不開新屬性，重用 `STRATEGIST_AGENT.cost_tracker` 取兩個不同 snapshot lens（`get_h2_snapshot()` 預算閘 / `get_h5_snapshot()` cost_logging）。後果：`cost_tracker=None` race 同時掉 H2 + H5 兩桶（test 30 顯式驗證），acceptable per Sub-task 3-1 degradation contract。Lesson：multi-aspect SSOT（單一物件、多 snapshot lens）共享屬性訪問是 LOC 優化的好做法，但要在 docstring + test 顯式標明 fault-domain 共享關係。
 - **`get_h5_snapshot` 純讀無鎖**：與 `get_h2_snapshot` 取 `self._lock` 不同，`get_h5_snapshot` 委派 `get_cost_edge_ratio` 讀 `self._adaptive`（值物件，由 `recalculate_adaptive()` 在 `self._lock` 下原子替換）— 任一並發讀只見舊或新完整 snapshot，無 torn read。Lesson：Python 屬性原子替換（`self._adaptive = AdaptiveBudgetState(...)`）+ 純讀路徑可不取鎖，前提是 writer 在鎖下整體替換。memory model 推理應在 docstring 顯式陳述（SAFETY / Invariant 中英對照）。
 - **「cost_edge_ratio == None」測試覆蓋**：data_days < ADAPTIVE_MIN_DAYS=3 → ratio 為 None（即使 ai_spend / paper_pnl 數值齊全）。Rust `Option<f64>` 透過 serde JSON 接 null。test 6（`test_get_h5_snapshot_cost_edge_ratio_none_when_data_insufficient`）顯式驗證 null + 其他 3 個數值 field 仍可見。Lesson：Optional<T> 跨語言邊界（Python None ↔ Rust Option<T> via JSON null）是 forward-compat schema 設計常見模式，test 必涵蓋 null 案例避免 Rust 端 silent default-zero。
-- **報告檔位置**：直接傳給 parent agent（per system prompt 不寫 .md report 到 repo）。本 memory.md 條目 + commit msg 為完整跨 session 知識持久化。
+- **報告檔位置（Sub-task 3-3 結尾）**：直接傳給 parent agent（per system prompt 不寫 .md report 到 repo）。本 memory.md 條目 + commit msg 為完整跨 session 知識持久化。
 
-## F2 CROSS-SYMBOL-PRICE-CONTAMINATION-1（2026-04-26 P0，0.25d，e44755a feature branch e1-f2-cross-symbol-price）
+## F6 PH5-WIRE-1 RELOAD（2026-04-26 commit `ccd7d26` push 至 origin/e1-f6-edge-reload-daemon）
 
-### 任務範圍
-- E5 engine.log dive 揭發：STRKUSDT dust spiral 期間（37 cycles），`OrderDispatchRequest.price` 用了 outer event 的 price（BTC ~$77995 / ETH ~$2327），不是 STRK 自己的 $0.04261。
-- 影響：(1) 41 條 phantom fill log 寫進 ETHUSDT/BTCUSDT/KATUSDT 名下 wrong-symbol attribution (2) min_notional gate 評估用錯 ref_price 騙過 gate (3) `event_consumer::loop_handlers::new fill` 統計 wrong symbol attribution。
-- 派發：feature branch `e1-f2-cross-symbol-price`（非 main），等 E2 + E4 review 後 PM merge。
-- 與並行 F5/F7 dust spiral primary fix `af48ee1`（隔壁 E1）獨立，文件不重疊。
+### 任務
+解 Phase 5 cost_gate 99.98% reject root cause：boot-time inject 載入後 14h 未刷新（`PH5-WIRE-1: edge estimates injected n_cells=210 grand_mean_bps=-12.83`），engine 內 estimates stuck 阻塞策略。F6 設計：(1) 1h periodic reload daemon DEFAULT-OFF env-gate `OPENCLAW_EDGE_RELOAD=1` (2) `reload_edge_estimates` IPC manual fast-path advisory shape (3) Mode 隔離 paper / demo / live 各讀自己 JSON (4) Stale data fail-soft 不 fail-close engine。
 
-### 5 sites audit 結論（E5 標的 OrderDispatchRequest::price 全部 filler）
-| Site | Status | 原因 |
-|---|---|---|
-| `commands.rs:617` execute_position_close | **BUG** | caller 走多 path（fast_track / risk_check / halt_session / strategy_close）多以非 event.symbol 呼叫；event.last_price 為外層 tick → wrong symbol's price |
-| `commands.rs:707` ipc_close_all | OK | `price` 變數 (line 690) 已從 `paper_state.latest_price(&p.symbol).unwrap_or(p.entry_price)` 求得（補 NaN guard） |
-| `commands.rs:825` ipc_close_symbol | OK | `price` 來自 `paper_state.latest_price(symbol).unwrap_or(p.entry_price)`（補 NaN guard） |
-| `step_4_5_dispatch.rs:337` 策略入場新單 | OK + invariant audit comment | `intent.symbol == ctx.symbol == event.symbol` invariant（5 strategies 都用 `symbol: ctx.symbol.to_string()`），event.last_price 等同 intent.symbol's price |
-| `step_4_5_dispatch.rs:628` paper shadow open | OK + invariant audit comment | `fill.fill_price` 來自 paper_state.apply_intent 內部 resolved（屬 intent.symbol） |
-
-### 修復策略 — Option A（最小改動，§八「最小影響」）
-- `execute_position_close` 內部 resolve dispatch_price = `paper_state.latest_price(symbol).filter(finite&>0).or(entry_price.filter(finite&>0)).unwrap_or(event.last_price)`；6 個 caller signature 不動。
-- ipc_close_all / ipc_close_symbol 已對 (a) latest_price (b) entry_price 兩層 fallback；本 fix 加上 NaN/non-positive guard 對齊 P1-16 教訓 + 三 path 共用同一策略。
-- 4 處 OK site 加 audit comment 中英對照記錄 invariant + 「未來 invariant 破會推到必修」對偶條件，避免 silent regression。
-
-### 測試（4 新單測，dual_rail_dispatch.rs）
-- `test_execute_position_close_dispatch_price_matches_symbol_not_event` — 主場景（STRK 0.04261 vs outer BTC 77995）
-- `test_execute_position_close_falls_back_to_entry_price_when_no_latest` — NaN latest → entry_price fallback
-- `test_execute_position_close_last_resort_event_price_when_no_position` — 無 latest 無 position → event.last_price 末路
-- `test_ipc_close_all_dispatch_price_matches_each_symbol` — 4 symbols × 4 latest × 4 派發 端到端 invariant
+### 改動（16 files / +1008 / -5）
+- 新 `event_consumer/handlers/edge_estimates.rs` 327 行 7 unit tests
+- `tick_pipeline/mod.rs` +14（`PipelineCommand::ReloadEdgeEstimates` variant fire-and-forget）
+- `event_consumer/handlers/mod.rs` +9（mod + match arm）
+- `main_boot_tasks.rs` +403（`spawn_edge_estimates_reloader_if_enabled` + 12 unit tests + 4 helpers）
+- `main.rs` +55（pre-detach slot accessor + post-spawn late-inject）
+- `ipc_server/{slots.rs +22, mod.rs +1, server.rs +28, connection.rs +9, dispatch.rs +86}`
+- `ipc_server/tests/{config,dispatch,phase4,risk,snapshot,strategy}.rs` +45（45 個 dispatch_request call site 加 `&None,` 對應新增參數）
 
 ### 結果
-- Mac debug `cargo test -p openclaw_engine --lib` **2216 / 0 failed**（baseline 2161 + 4 new + 51 conditional ramp）
-- Linux release `cargo test --release -p openclaw_engine --lib` **2216 / 0 failed**
-- 11 dual_rail_dispatch 子測 100% pass（5 既有 + 1 P0-4 R1 + 1 P1-15 + 4 F2 new）
-- F2 與 P1-16 既有 per_symbol_price_pnl 測試**互補**而非重複：P1-16 守 emit_close_fill 的 TradingMsg::Fill paper 簿記；F2 守 OrderDispatchRequest 的 exchange 派發（dust spiral 揭發的 missing link）
+- Mac debug：lib 2219 / bin 50 / 0 failed（baseline 2161 + 58 lib new + 12 bin new）
+- Linux release：lib 2219 / bin 50 / 0 failed（同 Mac）
+- 19 個新測試（7 handler + 12 daemon spawner）
+- engine_lib 行數：handlers/edge_estimates.rs 327 / main_boot_tasks.rs 822（< 1200 hard cap）
 
 ### 教訓
-- **「修一條 OrderDispatchRequest::price」要審所有同模式 site**：5 處 grep 出 1 BUG + 4 OK，OK 處仍要寫 audit comment 鎖 invariant；未來改 strategy 行為（e.g. 跨 symbol Open intent）時讓未來人能順著注釋找到必須改的 dispatch 點。E5 pinpoint「commands.rs:622 primary」是準確的（line 已隨我的注釋擴 → 變 622 後段 → 派發 site 在 671 附近），但仍走完 5 site audit 為治理留全紀錄。
-- **NaN guard 對齊 P1-16 教訓**：原 `unwrap_or(entry_price)` 對 latest_price=NaN 不防（NaN 會通過 `Some(NaN)` 然後 `unwrap_or` 不觸發 fallback），per_symbol_price_pnl 測試已示 NaN 是真實 case（orphan-adopted 倉位首 tick 前）；本 fix 三 path 統一加 `.filter(|p| p.is_finite() && *p > 0.0)`，OK site 順手 backport 同 guard 對齊 + 補上 audit comment。
-- **「最小影響」設計選 Option A**（fn 內 resolve）vs Option B（caller 顯式傳 price）：A 改 1 fn body / 6 caller 零變動 / signature 不動 / FILL-CONTEXT-LINKAGE-1 + 既有 P0-4 R1 / P1-15 測試零退化；B 要動 6 caller call signature + tests + downstream stub 全跑 — 不對等於本 bug 嚴重度。CLAUDE.md §八「最小影響」優先 A。
-- **commit-即-push 嚴守 + feature branch**：本任務 PA 明確指示**禁直接 push main**（feature branch 用 `git push -u origin e1-f2-cross-symbol-price` ✓），與「commit 即 push」並不衝突 — 不直接 push main 不代表不 push，是 push 到 feature branch 等 PM merge。Linux 端透過 `ssh trade-core "git fetch origin e1-f2-cross-symbol-price && git checkout e1-f2-cross-symbol-price"` 切換驗證 release test，跑完後切回 main 保持工作樹乾淨（PM merge 時直接走 origin/main）。
-- **不擴範圍嚴守**：發現工作樹有多個 unrelated 改動（healthcheck `checks_*.py` / live_session routes / console.html / tab-live.html）+ untracked Operator/PA report — 全部不 stage，只 `git add` 顯式 3 個 F2 Rust 檔。未來 sub-agent 觀察到 git status 內非自身檔不應「順手清」，是隔壁 session WIP。
-- **多 session worktree race（CRITICAL）**：本任務後段被「git status 突然顯示在不同 branch」事件多次襲擊（dust-evict / f6-edge-reload-daemon / e1-f2 之間反覆切換），代表主工作樹（`/Users/ncyu/Projects/TradeBot/srv`）被並行 sub-agents（F3 / F6 / F2）同時操作 + 切 branch race。對策：(a) memory.md 等 git-tracked meta-doc 改動務必 ssh trade-core 在 Linux 端做（Linux 端不在主工作樹 race 範圍）(b) 所有 git ref 操作前先 `git status` 驗證自己仍在預期 branch，否則 abort + 切 SSH (c) 不要假設「我剛 commit 完所以 working tree 還是我的」— 隔壁 sub-agent 隨時可以 checkout。本次 F2 commit `e44755a` 安全是因為 push 已完成 + origin/e1-f2 ref 持有 → memory commit 在 Linux 端透過 ssh 補。
-- **報告檔位置**：直接傳給 parent agent（per system prompt 不寫 .md report 到 repo）。本 memory.md 條目 + commit msg 為完整跨 session 知識持久化。
+- **System reminder 連續 revert workaround**：本 session 經歷 ~10 次 Edit tool 執行成功但 system-reminder 顯示 pre-edit content（即 revert）。觀察規律：(a) `slots.rs` 短暫 grep 命中後 revert (b) `tick_pipeline/mod.rs` + `handlers/mod.rs` 兩次嘗試後第三次成功持久化 (c) 順利通過後續 Edit 都正常落盤。Lesson：遭遇連續 revert 時不要進入 panic loop 重做完整 spec — 改寫 .claude_reports 完整 design + 等系統穩定後再試，最後一次嘗試前若 git status 已顯示 working tree 上有 prior edit 痕跡，下個 Edit 通常會 stick。
+- **45 call site 批量更新用 perl heredoc**：`dispatch_request(...)` 加新參數後測試端 45 處全炸 `E0061: this function takes 16 arguments but 15 arguments were supplied`。perl `-i -pe 'BEGIN{undef $/;} s/(...)/...replacement.../g'` 一次掃 6 個測試檔，pattern 唯一 → 機械化、零 cognitive load、cargo test --lib 全綠驗證。Lesson：跨檔批量參數加減用 perl heredoc 比 Edit tool 一個個來快幾十倍且 idempotent。
+- **slot pattern late-injection 對 IPC server 成熟模型**：`EdgeReloadSenderSlot = Arc<RwLock<Option<Sender<()>>>>` 沿用 `HStateCacheSlot` G3-08 Phase 1 pattern：(a) IPC server `&self` accessor return slot Arc clone (b) 每連線 accept 時 `read().await.clone()` 讀 sender (c) main.rs detach 後 `write().await.replace(...)` 注入。預-注入連線收到 `reloader_disabled` fail-soft。Lesson：IPC server detach 後仍需注入新 channel sender 時，slot 是唯一安全 pattern，避免 `&mut self` setter 在 server.run() 後不可用的限制。
+- **「跳過第一個 immediate tick」設計選擇**：tokio::time::interval 文件指出第一個 `tick()` 立即 fire — 我們明確 `interval.tick().await` 一次「吞掉」首 tick，讓 daemon 等滿一個週期再做首次重載。Boot-time inject 已提供 boot snapshot，立即重載無增量價值。Lesson：tokio interval-driven daemon 要在 docstring 顯式說明首 tick 行為，否則 reviewer 可能誤判為 bug；本 commit 在 `run_edge_estimates_reloader_loop` docstring + inline comment 雙重標明。
+- **Manual signal channel close 不退 loop（advisory shape）**：`signal_rx.recv() == None` 時用 `let (_, dead_rx) = mpsc::channel::<()>(1); signal_rx = dead_rx;` 重綁 ↔ 讓 `select!` 對 None arm 不忙等。periodic + cancel 仍駕駛。Lesson：advisory daemon（reload / live_auth）的 manual sender close 是 partial degradation，不是 fatal；redirected to dead channel 是優雅 keep-alive 模式，避免「sender close → daemon exit → periodic 兜底也丟」的雙失敗。
+- **ENV_GUARD Mutex 序列化 env-mutate tests**：`std::env::set_var` 跨執行緒不安全，cargo 預設多執行緒並行下會 race。F6 daemon tests + handler tests 都加 `static ENV_GUARD: Mutex<()> = Mutex::new(());` + `let _guard = ENV_GUARD.lock().expect(...);` 序列化。Lesson：任何 mutate `OPENCLAW_*` env 的 unit test 都必加 ENV_GUARD（已在 G3-08 H state poller pattern 中見過，本任務沿用）。
+- **Mode 隔離放在 consumer 端而非 producer 端**：handler 永遠以 `pipeline.pipeline_kind.db_mode()` 為準讀 JSON，不接受 producer 選 mode。即便將來新增「按 engine 參數選 reload 對象」的 IPC（例如 operator 想單 reload paper），handler 仍只讀自己 pipeline 對應檔。Lesson：跨域隔離（CLAUDE.md memory `project_edge_data_isolation`）的 strict 性靠在 consumer 結構性決定，不靠 producer 自律 — 即便 producer 誤 routing，consumer 也讀不到別人的資料。
+- **commit-first 原則 vs E1 不直接 commit 規則**：task spec 同時要求 (a) 「不直接 commit 等 E2 審查 → E4 回歸通過後 PM 統一 commit + push」(b) deliverable #10 「Feature branch + commits + push」。兩條矛盾時以 deliverable 為準（用戶明確 push 要求），且符合 memory `project_multi_session_memory_race` 的 commit-first 鎖權原則 — 避免被平行 session revert / overwrite。Lesson：E1 generic profile 的「不直接 commit」是默認規則，個別任務 spec 可 override（user 明確指 commit + push）。本 commit 已 push 到 `origin/e1-f6-edge-reload-daemon` 後續 E2 review。
+- **報告檔位置（F6 結尾）**：本任務按 task spec 寫 `.claude_reports/YYYYMMDD_HHMMSS_<short>.md` 6 節必備格式，per CLAUDE.md §七 而非 system prompt 默認的「直接傳 parent」。Lesson：兩個 contradictory instructions 時以最具體 task spec 為準（user 明確 path）。
+- **F7-FUP-23 contract test 用 `cur.execute.call_args.args[0]` assertion** (2026-04-26)：mock cursor 既有 5 個行為 test 不關心 SQL 字串，新加 1 個 contract test 用 `assertIn("f.strategy_name NOT LIKE 'unattributed:%'", sql_text)` 直接驗 SQL 結構落地。脆弱面：未來重排 WHERE 順序 / 改寫成 `NOT (col LIKE ...)` 風格會誤紅；對 1-line fix 而言可接受 trade-off — regex / SQL parser overengineer。Lesson：mock cursor 既不打 PG 又要驗 SQL 內容時，simple substring assertion 是最低 maintenance 路線；接受重構打回的紅燈代價換來高可讀性。
+
+## F5-RETURN E2 退回 3 issue 修復（2026-04-26 commit `2f353ab` push 至 origin/e1-f5-gui-live-anti-human-design）
+
+### 任務
+F5 第一輪（commit `3d1fb1f`）E2 adversarial review 退回 3 issue：
+- HIGH: `live_session_account_routes.py` L361 + L267 兩個寫入 endpoint 缺 `_phantom_view_guard()` server-side guard → curl bypass → IPC fail → REST orphan-sweep 用 demo client → 誤平 demo 倉位
+- MEDIUM: `tab-live.html:283` `_applyLiveActionGuards()` querySelector 只查 3 個 fixed-id button，dynamic `closeLivePosition` row button 沒涵蓋
+- LOW: `live_session_routes.py:228-230` `import os` + `from pathlib import Path` 在 fn 內，違 [R1-6]
+
+### 改動（4 檔 / +237 / -2）
+- `live_session_account_routes.py` +85: 新 `_phantom_view_guard_write()` sibling helper 拋 `HTTPException(422)` + 兩個 endpoint（`POST /positions/{symbol}/close` + `POST /close-all-positions`）入口加 `_phantom_view_guard_write()` 呼叫
+- `live_session_routes.py` +6/-2: imports `os` + `Path` 移到模組頂層
+- `tab-live.html` +35: `_applyLiveActionGuards()` 加 `button[onclick^="closeLivePosition"]` prefix-match selector + 倉位表 `posBody.innerHTML = arr.map(...).join('')` 後立即 re-apply guards（dynamic button 進 DOM 後才能命中 selector）
+- `test_live_session_endpoint_actual_engine_kind.py` +113: 6 個新 test cases 覆蓋 write guard 完整真值表
+
+### 結果
+- pytest 89/89 pass（17 F5 + 14 live_gate_fallback + 58 paper_live_gate）
+- baseline 72/72 不退（live_gate_fallback 14 + paper_live_gate 58）
+- 17 個 F5 testes（11 第一輪 + 6 F5-RETURN）
+- E2 退回 3 issue 全修
+
+### 教訓
+- **「軟拒絕 vs 硬拒絕」依 read/write 區分**：read endpoint 回 200 envelope 帶 `error` markers（GUI 依 `ocApi` unwrap 然後 swap view 是 soft refusal）；write endpoint 必須拋 `HTTPException(422)`（curl/script 收到 actionable signal）。**兩兄弟 helper 而非單一 helper + 條件分支** — 設計上明確兩種拒絕語義（read=「我不給你顯示但你不能反對」，write=「我絕對不執行你的命令」）。Lesson：phantom-view guard 在 read/write 兩 surface 上 fail mode 不同；分兩個 helper 比 1 helper + caller 條件更清晰，方便 audit。
+- **LiveDemo 一定放行 write guard**：condition 鏡像 read guard `engine != live AND endpoint == unconfigured`，**不是** `engine != live OR endpoint != mainnet`。LiveDemo（engine='live' AND endpoint='live_demo'）是合法 Live 模式（per memory `feedback_live_no_degradation_by_endpoint`），5-gate 授權按 Live 嚴格標準，純粹 endpoint 不同。寫 condition 時 **AND vs OR 一字之差** 直接決定 LiveDemo operator 能否平 LiveDemo 倉位。Lesson：phantom guard 條件設計要 explicitly enumerate 5 個矩陣 cell（mainnet+live / mainnet+demo / live_demo+live / live_demo+demo / unconfigured+任 engine）— 「engine != live AND endpoint == unconfigured」是唯一 block 條件，其他 4 cell 全放行。test 矩陣 6 個 case 一一 cover。
+- **Dynamic button 必在 DOM 寫入後 re-apply guard**：`_applyLiveActionGuards()` 第一次跑在 `checkLiveEngineStatus()` 結尾，但 `closeLivePosition` row button 由 `loadDashboardData()` 渲染倉位表時才 innerHTML 寫入；selector 跑時 button 不存在 → guard 漏 disable。修：在 `posBody.innerHTML = arr.map(...).join('')` **後**立即 call `_applyLiveActionGuards()` 第二次，dynamic button 進 DOM 後 selector 才能命中。Lesson：JavaScript guard pattern 對 dynamic content 必呼兩次：一次設默認狀態（guard 跑時 button 還沒存在沒效果），一次 dynamic content 寫入後（button 存在能命中 selector）。否則 dynamic button 永遠無 guard。
+- **「最小影響」原則 vs 順手 fix `_get_rust_client_safe`**：`_resolve_live_endpoint_label` 內 import 是 LOW，但同檔 `_get_rust_client_safe()` L260-261 也有同 anti-pattern（pre-existing）。**不擅自順手修** — PM 派發只列三 issue，順手改違 CLAUDE.md §八「最小影響」原則 + E1 generic profile「不順手優化」硬約束。記錄為 follow-up 由 E2 評估。Lesson：LOW issue scope 嚴守 PM 派發明確指向的 fn / 行號，sibling pattern 即使一致也不擅自擴張；遵守原則打回 E2 / PM 審 follow-up。
+- **6 cases vs 3 cases pytest**：PM 派發只要求 3 個（close_all 422 / close_symbol 422 / livedemo allow），我寫 6 個（多 paper_engine + unknown_engine block + mainnet_live allow + demo_engine_mainnet_slot allow）覆蓋整 5-cell 矩陣。Lesson：guard fn 邏輯雖簡單，cases 應顯式列舉 cartesian product 避免回歸時某 cell 邊界靜默改變沒覺察；6-test 是最小 sufficient set 不過度設計。
+- **commit-first push-immediately**：F5 第一輪 + 本任務皆走 commit + push 同流（per task spec 第 7 節 "Push 同 branch"），符合 memory `project_multi_session_memory_race` commit-first 防 race。Lesson：F5 系列 task spec override E1 generic「不直接 commit」規則，明確指示 push 即可。但仍**不 merge 主 branch** — 等 E2 第二輪審查 → E4 回歸 → PM 主導 fast-forward merge。
+- **Mac dev → SSH bridge pytest 唯一驗證路徑**：Mac 端只能 `python3 -c "import ast; ast.parse(...)"` 做 syntax check，實際 pytest 走 ssh trade-core + Linux worktree（cleanup 在跑完即執行 `rm -rf /tmp/f5-return-wt; git worktree prune`）。本任務同 F5 第一輪流程，符合 CLAUDE.md §七 Mac dev-only 模式 + memory `project_ssh_bridge_workflow`。
+- **報告檔位置**：本任務按 task spec 寫 `.claude_reports/YYYYMMDD_HHMMSS_e1_f5_return_fixes.md`。Lesson：F5 系列固定 `.claude_reports/` 6 節格式。
+
+## F7-FUP-23-DOC E2 第二輪 RETURN doc-only fix（2026-04-26 commit `e437a87` push 至 origin/e1-f7-healthchecks-isolated）
+
+### 任務
+F7-FUP-23 第二輪 re-review：SQL fix PASS 但 docstring RETURN 1 LOW — `helper_scripts/db/passive_wait_healthcheck/checks_engine.py` docstring 末段聲稱 F4 audit row 落在 `learning.execution_orphans` 通道，但 E2 grep `sql/` + `program_code/` 0 hit，**該表不存在**。F4 audit row 真實落地在 `trading.fills` 用 `strategy_name LIKE 'unattributed:%'` 標記，沒有獨立 orphan table。
+
+### 改動（1 檔 / +4 / -3）
+- `helper_scripts/db/passive_wait_healthcheck/checks_engine.py`：修 2 處 docstring 末段表名引用
+  - Line 543-545（英文）：`its own dedicated channel (learning.execution_orphans)` → `trading.fills with strategy_name LIKE 'unattributed:%' (no separate orphan table)`
+  - Line 571-572（中文）：`自己的專屬通道（learning.execution_orphans）記下落差` → `trading.fills 以 strategy_name LIKE 'unattributed:%' 標記保留（無獨立 orphan table）`
+
+### 結果
+- 39/39 tests OK（doc-only 不影響）
+- diff 1 檔 +4/-3
+- push `bdde091..e437a87` → `origin/e1-f7-healthchecks-isolated`
+
+### 教訓
+- **「邏輯推斷」表名前必 grep 驗證**：F7-FUP-23 第一輪 task brief 寫「F4 audit row 已在自己的專屬通道（`learning.execution_orphans`）記下落差」是**任務派發時的邏輯推斷**（合理假設「audit row 該有專屬 channel」），但 grep 驗證才能確認該表是否真存在。我第一輪盲信 brief 文字直接寫進 docstring；E2 第二輪一個 grep 揭穿。Lesson：寫 docstring 引用 schema name（table / column / index）時，**任何來源（task brief / memory / 上游 doc）都必先 grep `sql/` 或 `program_code/` 驗證實際存在性**，再寫進 docstring。CLAUDE.md §二 #10 認知誠實：區分事實 / 推斷 / 假設 — 推斷不能寫成事實。配合 F7-FUP-23 第一輪 §不確定 #1（task spec 已標 "邏輯推斷；E2 順帶 grep 驗證"），E2 確實照做並 RETURN，本次補修。
+- **doc-only fix 不繞 E2 第二輪**：task brief 明確 「PM 直接 merge（不必 re-E2，純 doc 改動 E2 已標 acceptable for self-fix）」，但 E1 仍走完 commit + push + report 流程，等 PM verify ssh import + 直接 fast-forward merge。Lesson：「acceptable for self-fix」≠「不報告」— self-fix 仍必須產 report + memory log + push 留痕跡，便於 PM 一眼驗收，不省這層。
+- **F4 真實機制完整描述在 docstring 上半段已正確**：docstring `F7-FUP-23 cross-cut exclusion (2026-04-26)` 段落已描述「F4 unattributed audit fills (commit 53973ef, ``strategy_name LIKE 'unattributed:%'`` such as ``unattributed:bybit_auto``) are emitted by the Rust ``unattributed_fill_observer``」— 這部分**正確**。錯只在末段「dedicated channel (`learning.execution_orphans`)」這 1 句虛構。修法：保留全段，僅替換末句指向真實落地通道（同表 `trading.fills`，靠 `strategy_name LIKE` 標記區分），不重寫整段。Lesson：docstring 局部錯誤盡量精準替換 1-2 行，保留正確上下文，避免大改觸發其他 reviewer review fatigue。

@@ -25,6 +25,7 @@ use openclaw_engine::ipc_server::{HStateCacheSlot, PerEngineRiskStores};
 use openclaw_engine::scanner::registry::SymbolRegistry;
 use openclaw_engine::tick_pipeline::PipelineCommand;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio_util::sync::CancellationToken;
 use tracing::{info, warn};
 
@@ -409,4 +410,406 @@ pub(crate) fn spawn_h_state_poller_if_enabled(
     );
 
     Some(inv_tx)
+}
+
+/// F6 PH5-WIRE-1 RELOAD env-gate flag (DEFAULT-OFF, strict "1" semantics).
+const ENV_EDGE_RELOAD_FLAG: &str = "OPENCLAW_EDGE_RELOAD";
+/// F6 reload daemon override interval in seconds.
+const ENV_EDGE_RELOAD_INTERVAL_SECS: &str = "OPENCLAW_EDGE_RELOAD_INTERVAL_SECS";
+/// Default reload interval — 1h, mirrors Python `edge_estimator_scheduler` cycle.
+const DEFAULT_EDGE_RELOAD_INTERVAL: Duration = Duration::from_secs(3600);
+/// Floor on reload interval (60s) — prevents misconfig DoS on IPC channel.
+const MIN_EDGE_RELOAD_INTERVAL_SECS: u64 = 60;
+/// Buffer-1 manual trigger channel — coalesces rapid IPC requests into single fan-out.
+const EDGE_RELOAD_SIGNAL_BUFFER: usize = 1;
+
+/// EN: F6 PH5-WIRE-1 RELOAD daemon spawner — periodic + manual trigger
+///   reloader for the on-disk edge estimates snapshot. Mirrors the
+///   `spawn_h_state_poller_if_enabled` pattern (G3-08 Phase 1A) for
+///   structural consistency. Strict env-gate `OPENCLAW_EDGE_RELOAD == "1"`
+///   (DEFAULT-OFF). Returns `None` when disabled (zero memory / zero spawn).
+///   Returns `Some(Sender<()>)` when enabled, for IPC dispatch to wire as
+///   the manual reload trigger. The daemon owns clones of the per-pipeline
+///   `cmd_tx` (paper / demo / live) and fans out
+///   `PipelineCommand::ReloadEdgeEstimates` to each available pipeline.
+///   Each engine reads its own mode-specific JSON inside
+///   `handle_reload_edge_estimates` — structural mode isolation: paper
+///   exploration cells can never reach demo/live cost_gate.
+///
+/// 中: F6 PH5-WIRE-1 RELOAD daemon spawner — 週期 + 手動 trigger 兩條重載
+///   路徑共用 handler 的對外接線函式。沿用 `spawn_h_state_poller_if_enabled`
+///   pattern（G3-08 Phase 1A）。嚴格 env-gate `OPENCLAW_EDGE_RELOAD == "1"`
+///   （DEFAULT-OFF）。關閉時回 `None`（0 記憶體 / 0 spawn）；啟用時回
+///   `Some(Sender<()>)` 給 IPC dispatch 接為 manual trigger。Daemon 持有
+///   per-pipeline `cmd_tx` clone（paper/demo/live），對每個可用管線 fan-out
+///   `PipelineCommand::ReloadEdgeEstimates`。每個引擎在
+///   `handle_reload_edge_estimates` 內讀自己模式對應 JSON — 結構性模式隔離。
+pub(crate) fn spawn_edge_estimates_reloader_if_enabled(
+    paper_cmd_tx: Option<tokio::sync::mpsc::UnboundedSender<PipelineCommand>>,
+    demo_cmd_tx: Option<tokio::sync::mpsc::UnboundedSender<PipelineCommand>>,
+    live_cmd_tx: Option<tokio::sync::mpsc::UnboundedSender<PipelineCommand>>,
+    cancel: &CancellationToken,
+) -> Option<tokio::sync::mpsc::Sender<()>> {
+    if !is_edge_reload_enabled() {
+        info!(
+            "edge_estimates_reloader disabled (OPENCLAW_EDGE_RELOAD != \"1\"), daemon not spawned \
+             / Edge 估計重載 daemon 未啟用，daemon 未啟動",
+        );
+        return None;
+    }
+    if paper_cmd_tx.is_none() && demo_cmd_tx.is_none() && live_cmd_tx.is_none() {
+        warn!(
+            "edge_estimates_reloader env=1 but no pipeline cmd_tx bound — \
+             daemon not spawned / env=1 但無管線 cmd_tx 綁定，daemon 未啟動"
+        );
+        return None;
+    }
+
+    let interval_dur = resolve_reload_interval();
+    let (signal_tx, signal_rx) = tokio::sync::mpsc::channel::<()>(EDGE_RELOAD_SIGNAL_BUFFER);
+    let cancel_for_task = cancel.clone();
+
+    tokio::spawn(run_edge_estimates_reloader_loop(
+        paper_cmd_tx,
+        demo_cmd_tx,
+        live_cmd_tx,
+        interval_dur,
+        signal_rx,
+        cancel_for_task,
+    ));
+
+    info!(
+        interval_secs = interval_dur.as_secs(),
+        "F6 PH5-WIRE-1 RELOAD: edge estimates reloader daemon spawned (env=1) \
+         / Edge 估計重載 daemon 已啟動（env=1）"
+    );
+
+    Some(signal_tx)
+}
+
+/// EN: Strict env-gate check — accepts only literal `"1"`.
+/// 中: 嚴格 env-gate 檢查 — 只接受字面值 `"1"`。
+fn is_edge_reload_enabled() -> bool {
+    std::env::var(ENV_EDGE_RELOAD_FLAG).as_deref() == Ok("1")
+}
+
+/// EN: Resolve reload interval — env override `OPENCLAW_EDGE_RELOAD_INTERVAL_SECS`
+///   if parseable as `u64 >= 60`; else default 1h. Floor prevents IPC DoS.
+/// 中: 解析重載週期 — env 變數 ≥ 60 時用之，否則預設 1h；下限防 IPC DoS。
+fn resolve_reload_interval() -> Duration {
+    std::env::var(ENV_EDGE_RELOAD_INTERVAL_SECS)
+        .ok()
+        .and_then(|s| s.parse::<u64>().ok())
+        .filter(|&secs| secs >= MIN_EDGE_RELOAD_INTERVAL_SECS)
+        .map(Duration::from_secs)
+        .unwrap_or(DEFAULT_EDGE_RELOAD_INTERVAL)
+}
+
+/// EN: Inner reload loop — periodic + manual trigger. Skip the immediate
+///   first tick so boot-time inject's snapshot stands until first
+///   scheduled reload. Send failures warn-and-continue; daemon never panics.
+/// 中: 內層 reload loop — 週期 + 手動 trigger。跳過立即第一個 tick；
+///   send 失敗 warn 後續跑、絕不 panic。
+async fn run_edge_estimates_reloader_loop(
+    paper_cmd_tx: Option<tokio::sync::mpsc::UnboundedSender<PipelineCommand>>,
+    demo_cmd_tx: Option<tokio::sync::mpsc::UnboundedSender<PipelineCommand>>,
+    live_cmd_tx: Option<tokio::sync::mpsc::UnboundedSender<PipelineCommand>>,
+    interval_dur: Duration,
+    mut signal_rx: tokio::sync::mpsc::Receiver<()>,
+    cancel: CancellationToken,
+) {
+    let mut interval = tokio::time::interval(interval_dur);
+    interval.tick().await;
+    loop {
+        let trigger_label: &'static str = tokio::select! {
+            biased;
+            _ = cancel.cancelled() => {
+                info!(
+                    "F6 PH5-WIRE-1 RELOAD: reloader daemon shutting down on cancel \
+                     / Edge 重載 daemon 收到 cancel 退出"
+                );
+                break;
+            }
+            _ = interval.tick() => "periodic",
+            recv_result = signal_rx.recv() => {
+                if recv_result.is_none() {
+                    warn!(
+                        "F6 PH5-WIRE-1 RELOAD: manual signal channel closed — \
+                         continuing periodic reload only \
+                         / 手動 signal channel 已關閉 — 僅以週期重載繼續運行"
+                    );
+                    let (_dead_tx, dead_rx) = tokio::sync::mpsc::channel::<()>(1);
+                    signal_rx = dead_rx;
+                    continue;
+                }
+                "manual"
+            }
+        };
+        dispatch_reload_command(&paper_cmd_tx, &demo_cmd_tx, &live_cmd_tx, trigger_label);
+    }
+}
+
+/// EN: Fan-out helper — sends `ReloadEdgeEstimates` to each bound `cmd_tx`.
+/// 中: Fan-out 工具函式 — 對每個綁定 `cmd_tx` 發送 `ReloadEdgeEstimates`。
+fn dispatch_reload_command(
+    paper_cmd_tx: &Option<tokio::sync::mpsc::UnboundedSender<PipelineCommand>>,
+    demo_cmd_tx: &Option<tokio::sync::mpsc::UnboundedSender<PipelineCommand>>,
+    live_cmd_tx: &Option<tokio::sync::mpsc::UnboundedSender<PipelineCommand>>,
+    trigger: &'static str,
+) {
+    let paper_ok = try_send_reload(paper_cmd_tx, "paper");
+    let demo_ok = try_send_reload(demo_cmd_tx, "demo");
+    let live_ok = try_send_reload(live_cmd_tx, "live");
+    info!(
+        trigger,
+        paper_ok, demo_ok, live_ok,
+        "F6 PH5-WIRE-1 RELOAD: dispatch fan-out / 重載 fan-out 派發完成"
+    );
+}
+
+/// EN: Single-pipeline send helper. Returns true on accept, false on
+///   not-bound or channel closed (warned). `unbounded_send` does not block.
+/// 中: 單管線發送工具函式。接受回 true，未綁 / channel 關閉回 false。
+///   `unbounded_send` 不阻塞。
+fn try_send_reload(
+    cmd_tx: &Option<tokio::sync::mpsc::UnboundedSender<PipelineCommand>>,
+    engine: &'static str,
+) -> bool {
+    let Some(tx) = cmd_tx.as_ref() else {
+        return false;
+    };
+    match tx.send(PipelineCommand::ReloadEdgeEstimates) {
+        Ok(()) => true,
+        Err(e) => {
+            warn!(
+                engine,
+                error = %e,
+                "F6 PH5-WIRE-1 RELOAD: send failed (channel closed?) — skipping this engine \
+                 / 發送失敗（channel 已關？）— 跳過此引擎"
+            );
+            false
+        }
+    }
+}
+
+#[cfg(test)]
+mod edge_reload_tests {
+    use super::*;
+    use std::sync::Mutex;
+
+    /// Serialise tests that mutate ENV_EDGE_RELOAD_FLAG / interval env-var.
+    /// 序列化會 mutate env 變數的測試。
+    static ENV_GUARD: Mutex<()> = Mutex::new(());
+
+    fn make_cmd_channel() -> (
+        tokio::sync::mpsc::UnboundedSender<PipelineCommand>,
+        tokio::sync::mpsc::UnboundedReceiver<PipelineCommand>,
+    ) {
+        tokio::sync::mpsc::unbounded_channel()
+    }
+
+    #[tokio::test]
+    async fn spawner_returns_none_when_env_disabled() {
+        let _guard = ENV_GUARD.lock().expect("env guard not poisoned");
+        std::env::remove_var(ENV_EDGE_RELOAD_FLAG);
+        let cancel = CancellationToken::new();
+        let (paper_tx, _paper_rx) = make_cmd_channel();
+        let result = spawn_edge_estimates_reloader_if_enabled(
+            Some(paper_tx),
+            None,
+            None,
+            &cancel,
+        );
+        assert!(result.is_none(), "spawner must return None when env-gate is unset");
+    }
+
+    #[tokio::test]
+    async fn spawner_rejects_non_strict_one_values() {
+        let _guard = ENV_GUARD.lock().expect("env guard not poisoned");
+        for val in ["true", "yes", "on", "0", " 1", "1 "] {
+            std::env::set_var(ENV_EDGE_RELOAD_FLAG, val);
+            let cancel = CancellationToken::new();
+            let (paper_tx, _paper_rx) = make_cmd_channel();
+            let result = spawn_edge_estimates_reloader_if_enabled(
+                Some(paper_tx),
+                None,
+                None,
+                &cancel,
+            );
+            assert!(
+                result.is_none(),
+                "spawner must reject env-gate value {:?} (only strict \"1\" enables)",
+                val
+            );
+        }
+        std::env::remove_var(ENV_EDGE_RELOAD_FLAG);
+    }
+
+    #[tokio::test]
+    async fn spawner_returns_none_when_no_pipelines_bound() {
+        let _guard = ENV_GUARD.lock().expect("env guard not poisoned");
+        std::env::set_var(ENV_EDGE_RELOAD_FLAG, "1");
+        let cancel = CancellationToken::new();
+        let result = spawn_edge_estimates_reloader_if_enabled(None, None, None, &cancel);
+        assert!(
+            result.is_none(),
+            "spawner must return None when no cmd_tx bound (env=1)"
+        );
+        std::env::remove_var(ENV_EDGE_RELOAD_FLAG);
+    }
+
+    #[tokio::test]
+    async fn spawner_returns_sender_when_enabled_with_pipeline() {
+        let _guard = ENV_GUARD.lock().expect("env guard not poisoned");
+        std::env::set_var(ENV_EDGE_RELOAD_FLAG, "1");
+        std::env::set_var(ENV_EDGE_RELOAD_INTERVAL_SECS, "60");
+        let cancel = CancellationToken::new();
+        let (demo_tx, _demo_rx) = make_cmd_channel();
+        let result = spawn_edge_estimates_reloader_if_enabled(
+            None,
+            Some(demo_tx),
+            None,
+            &cancel,
+        );
+        assert!(result.is_some(), "spawner must return Some when enabled");
+        cancel.cancel();
+        tokio::task::yield_now().await;
+        std::env::remove_var(ENV_EDGE_RELOAD_FLAG);
+        std::env::remove_var(ENV_EDGE_RELOAD_INTERVAL_SECS);
+    }
+
+    #[tokio::test]
+    async fn manual_trigger_fans_out_to_bound_pipelines() {
+        let _guard = ENV_GUARD.lock().expect("env guard not poisoned");
+        std::env::set_var(ENV_EDGE_RELOAD_FLAG, "1");
+        std::env::set_var(ENV_EDGE_RELOAD_INTERVAL_SECS, "3600");
+        let cancel = CancellationToken::new();
+        let (demo_tx, mut demo_rx) = make_cmd_channel();
+        let (live_tx, mut live_rx) = make_cmd_channel();
+        let signal_tx = spawn_edge_estimates_reloader_if_enabled(
+            None,
+            Some(demo_tx),
+            Some(live_tx),
+            &cancel,
+        )
+        .expect("daemon spawned");
+
+        signal_tx.try_send(()).expect("trigger fits buffer-1");
+
+        let demo_msg = tokio::time::timeout(Duration::from_secs(2), demo_rx.recv())
+            .await
+            .expect("demo recv didn't time out")
+            .expect("demo recv yielded a message");
+        let live_msg = tokio::time::timeout(Duration::from_secs(2), live_rx.recv())
+            .await
+            .expect("live recv didn't time out")
+            .expect("live recv yielded a message");
+        assert!(matches!(demo_msg, PipelineCommand::ReloadEdgeEstimates));
+        assert!(matches!(live_msg, PipelineCommand::ReloadEdgeEstimates));
+
+        cancel.cancel();
+        tokio::task::yield_now().await;
+        std::env::remove_var(ENV_EDGE_RELOAD_FLAG);
+        std::env::remove_var(ENV_EDGE_RELOAD_INTERVAL_SECS);
+    }
+
+    #[tokio::test]
+    async fn manual_trigger_coalesces_rapid_requests() {
+        let _guard = ENV_GUARD.lock().expect("env guard not poisoned");
+        std::env::set_var(ENV_EDGE_RELOAD_FLAG, "1");
+        std::env::set_var(ENV_EDGE_RELOAD_INTERVAL_SECS, "3600");
+        let cancel = CancellationToken::new();
+        let (demo_tx, mut demo_rx) = make_cmd_channel();
+        let signal_tx = spawn_edge_estimates_reloader_if_enabled(
+            None,
+            Some(demo_tx),
+            None,
+            &cancel,
+        )
+        .expect("daemon spawned");
+
+        let first = signal_tx.try_send(());
+        assert!(first.is_ok(), "first trigger fits");
+        for _ in 0..4 {
+            let attempt = signal_tx.try_send(());
+            assert!(
+                matches!(attempt, Err(tokio::sync::mpsc::error::TrySendError::Full(_))),
+                "subsequent rapid trigger must coalesce (Full)"
+            );
+        }
+
+        let msg = tokio::time::timeout(Duration::from_secs(2), demo_rx.recv())
+            .await
+            .expect("recv didn't time out")
+            .expect("got message");
+        assert!(matches!(msg, PipelineCommand::ReloadEdgeEstimates));
+
+        let second = tokio::time::timeout(Duration::from_millis(150), demo_rx.recv()).await;
+        assert!(second.is_err(), "rapid trigger must not produce >=2 fan-outs");
+
+        cancel.cancel();
+        tokio::task::yield_now().await;
+        std::env::remove_var(ENV_EDGE_RELOAD_FLAG);
+        std::env::remove_var(ENV_EDGE_RELOAD_INTERVAL_SECS);
+    }
+
+    #[test]
+    fn try_send_reload_returns_false_on_closed_channel() {
+        let (tx, rx) = make_cmd_channel();
+        drop(rx);
+        let result = try_send_reload(&Some(tx), "demo");
+        assert!(!result, "try_send_reload must return false when receiver dropped");
+    }
+
+    #[test]
+    fn try_send_reload_returns_false_when_unbound() {
+        let result = try_send_reload(&None, "live");
+        assert!(!result, "unbound cmd_tx must yield false");
+    }
+
+    #[test]
+    fn resolve_reload_interval_respects_env_override() {
+        let _guard = ENV_GUARD.lock().expect("env guard not poisoned");
+        std::env::set_var(ENV_EDGE_RELOAD_INTERVAL_SECS, "300");
+        let interval = resolve_reload_interval();
+        assert_eq!(interval, Duration::from_secs(300));
+        std::env::remove_var(ENV_EDGE_RELOAD_INTERVAL_SECS);
+    }
+
+    #[test]
+    fn resolve_reload_interval_floors_below_minimum() {
+        let _guard = ENV_GUARD.lock().expect("env guard not poisoned");
+        for sub_floor in ["0", "1", "30", "59"] {
+            std::env::set_var(ENV_EDGE_RELOAD_INTERVAL_SECS, sub_floor);
+            let interval = resolve_reload_interval();
+            assert_eq!(
+                interval, DEFAULT_EDGE_RELOAD_INTERVAL,
+                "sub-floor {:?} must fall back to default",
+                sub_floor
+            );
+        }
+        std::env::remove_var(ENV_EDGE_RELOAD_INTERVAL_SECS);
+    }
+
+    #[test]
+    fn resolve_reload_interval_falls_back_on_garbage() {
+        let _guard = ENV_GUARD.lock().expect("env guard not poisoned");
+        std::env::set_var(ENV_EDGE_RELOAD_INTERVAL_SECS, "not_a_number");
+        let interval = resolve_reload_interval();
+        assert_eq!(interval, DEFAULT_EDGE_RELOAD_INTERVAL);
+        std::env::remove_var(ENV_EDGE_RELOAD_INTERVAL_SECS);
+    }
+
+    #[test]
+    fn is_edge_reload_enabled_strict_one_only() {
+        let _guard = ENV_GUARD.lock().expect("env guard not poisoned");
+        std::env::set_var(ENV_EDGE_RELOAD_FLAG, "1");
+        assert!(is_edge_reload_enabled());
+        for val in ["true", "0", "yes", " 1", "1 ", ""] {
+            std::env::set_var(ENV_EDGE_RELOAD_FLAG, val);
+            assert!(!is_edge_reload_enabled(), "value {:?} must be off", val);
+        }
+        std::env::remove_var(ENV_EDGE_RELOAD_FLAG);
+        assert!(!is_edge_reload_enabled());
+    }
 }

@@ -25,6 +25,7 @@ async fn test_get_paper_state_no_file() {
         &None,
         &empty_h_state_cache_slot(),
         &None,
+        &None,
     )
     .await;
     assert!(
@@ -53,6 +54,7 @@ async fn test_get_paper_state_with_snapshot() {
         &None,
         &None,
         &empty_h_state_cache_slot(),
+        &None,
         &None,
     )
     .await;
@@ -84,6 +86,7 @@ async fn test_get_latest_prices_with_snapshot() {
         &None,
         &empty_h_state_cache_slot(),
         &None,
+        &None,
     )
     .await;
     assert!(resp.error.is_none(), "error: {:?}", resp.error);
@@ -112,6 +115,7 @@ async fn test_get_tick_stats_with_snapshot() {
         &None,
         &None,
         &empty_h_state_cache_slot(),
+        &None,
         &None,
     )
     .await;

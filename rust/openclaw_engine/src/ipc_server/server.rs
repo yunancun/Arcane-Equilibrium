@@ -32,7 +32,8 @@ use super::connection::handle_connection;
 use super::engine_routing::EngineCommandChannels;
 use super::protocol::IpcError;
 use super::slots::{
-    AuditPoolSlot, BudgetTrackerSlot, HStateCacheSlot, StrategistCountersSlot, TeacherLoopSlot,
+    AuditPoolSlot, BudgetTrackerSlot, EdgeReloadSenderSlot, HStateCacheSlot,
+    StrategistCountersSlot, TeacherLoopSlot,
 };
 use super::PerEngineRiskStores;
 use crate::config::{BudgetConfig, ConfigManager, ConfigStore, LearningConfig};
@@ -102,6 +103,16 @@ pub struct IpcServer {
     /// G3-08 H State Gateway Phase 1：invalidation channel sender。在
     /// main_boot_tasks spawn cache + poller 時一起 set；env-gate 關時為 None。
     h_state_invalidation_tx: Option<InvalidationSender>,
+    /// F6 PH5-WIRE-1 RELOAD (2026-04-26): late-injected slot for edge
+    /// estimates reloader's manual-trigger sender. Stays None when reloader
+    /// daemon is not spawned (env=0 or no pipelines bound). The
+    /// `reload_edge_estimates` IPC handler reads this slot per connection
+    /// and reports `reloader_disabled` when None, otherwise advisory
+    /// `try_send` shape (`accepted` / `coalesced` / `reloader_closed`).
+    /// F6 PH5-WIRE-1 RELOAD：edge 重載 daemon manual trigger sender 延後
+    /// 注入 slot。daemon 未 spawn 時保持 None；IPC handler 讀此 slot，
+    /// None 時回 `reloader_disabled`，否則走 `try_send` advisory shape。
+    edge_reload_sender: EdgeReloadSenderSlot,
 }
 
 impl IpcServer {
@@ -129,7 +140,19 @@ impl IpcServer {
             live_auth_recheck_tx: None,
             h_state_cache: Arc::new(RwLock::new(None)),
             h_state_invalidation_tx: None,
+            edge_reload_sender: Arc::new(RwLock::new(None)),
         }
+    }
+
+    /// F6 PH5-WIRE-1 RELOAD (2026-04-26): get a clone of the edge reload
+    /// sender slot for late injection from main.rs once
+    /// `spawn_edge_estimates_reloader_if_enabled` returns its sender handle.
+    /// Mirrors `h_state_cache_slot` / `audit_pool_slot` accessor pattern.
+    /// F6 PH5-WIRE-1 RELOAD：取得 edge 重載 sender slot handle，供 main.rs
+    /// 在 `spawn_edge_estimates_reloader_if_enabled` 回傳 sender 後 late inject。
+    /// 對齊 `h_state_cache_slot` / `audit_pool_slot` 取 handle pattern。
+    pub fn edge_reload_sender_slot(&self) -> EdgeReloadSenderSlot {
+        Arc::clone(&self.edge_reload_sender)
     }
 
     /// G3-08 H State Gateway Phase 1 (2026-04-26): get a clone of the
@@ -315,8 +338,15 @@ impl IpcServer {
                             // 每連線自動看到延後注入的 cache，不需重啟 IPC。
                             let h_state_cache = Arc::clone(&self.h_state_cache);
                             let h_state_invalidation_tx = self.h_state_invalidation_tx.clone();
+                            // F6 PH5-WIRE-1 RELOAD: read slot once at accept time.
+                            // Late-injected sender becomes visible to subsequent
+                            // connections without IPC restart.
+                            // F6：每連線在 accept 時讀一次 slot；late-injected sender
+                            // 對後續連線自動可見、IPC 不需重啟。
+                            let edge_reload_sender =
+                                self.edge_reload_sender.read().await.clone();
                             tokio::spawn(async move {
-                                handle_connection(stream, config, cancel, data_dir, cmd_channels, budget_slot, teacher_slot, risk_stores, learning_store, budget_store, audit_pool, scanner_reg, strategist_counters, live_auth_recheck_tx, h_state_cache, h_state_invalidation_tx).await;
+                                handle_connection(stream, config, cancel, data_dir, cmd_channels, budget_slot, teacher_slot, risk_stores, learning_store, budget_store, audit_pool, scanner_reg, strategist_counters, live_auth_recheck_tx, h_state_cache, h_state_invalidation_tx, edge_reload_sender).await;
                             });
                         }
                         Err(e) => {
