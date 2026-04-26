@@ -1,22 +1,34 @@
 from __future__ import annotations
 
 """
-G3-08 Phase 2 — H-state aggregator (Python query handler, real H1+H3).
-G3-08 Phase 2 — H 狀態聚合器（Python 查詢處理器，真實 H1+H3）。
+G3-08 Phase 3 — H-state aggregator (Python query handler, real H1+H2+H3...).
+G3-08 Phase 3 — H 狀態聚合器（Python 查詢處理器，真實 H1+H2+H3…）。
 
 MODULE_NOTE (EN):
-  Phase 2 upgrade of the ``query_h_state_full`` reverse IPC handler. Replaces
-  the Phase 1 stub empty-shell with real H1 (ThoughtGate) + H3 (ModelRouter)
-  snapshots aggregated from the process-global ``STRATEGIST_AGENT`` singleton
-  (in ``strategy_wiring``). Phase 3 (H2+H4+H5 cost) and Phase 4 (5-Agent
-  state events) progressively populate the remaining buckets.
+  Phase 3 Sub-task 3-1 upgrade of the ``query_h_state_full`` reverse IPC
+  handler. Builds on Phase 2 (H1+H3) by adding H2 budget gate snapshot
+  pulled from the ``Layer2CostTracker`` instance reachable via
+  ``STRATEGIST_AGENT.cost_tracker`` (set by ``BaseAgent.__init__`` from
+  the wiring-time injection in ``strategy_wiring._COST_TRACKER_FOR_STRATEGIST``).
+  Phase 3 Sub-task 3-2 (H4) + 3-3 (H5) and Phase 4 (5-Agent state events)
+  progressively populate the remaining buckets.
 
-  Phase 2 design intent (per PA design §10.2 + §5.1 + §7.1):
-    - When H1 + H3 singletons are reachable AND env is enabled
-      (``OPENCLAW_H_STATE_GATEWAY == "1"``), populate ``h_states.h1``
-      and ``h_states.h3`` with the real snapshot dicts returned by
-      ``H1ThoughtGate.get_h1_snapshot()`` / ``ModelRouter.get_h3_snapshot()``.
-      Bump the schema ``version`` to 1.
+  Per PA RFC `2026-04-26--g3_08_phase3_subtask_split.md` §4:
+    - Sub-task 3-1 lands H2 only; 3-2 (H4) and 3-3 (H5) come in follow-up
+      commits. Pattern is additive — adding ``h2`` bucket does not affect
+      existing H1/H3 wiring or schema version semantics.
+    - Schema version stays at 1 throughout Phase 3 (additive bucket
+      population is forward-compat by design; only breaking shape changes
+      bump version per Phase 2 contract).
+
+  Phase 2/3 design intent (per PA design §10.2 + §5.1 + §7.1, Phase 3
+  per RFC `2026-04-26--g3_08_phase3_subtask_split.md` §4):
+    - When the H1 / H2 / H3 singletons are reachable AND env is enabled
+      (``OPENCLAW_H_STATE_GATEWAY == "1"``), populate ``h_states.h1``,
+      ``h_states.h2``, and ``h_states.h3`` with the real snapshot dicts
+      returned by ``H1ThoughtGate.get_h1_snapshot()`` /
+      ``Layer2CostTracker.get_h2_snapshot()`` /
+      ``ModelRouter.get_h3_snapshot()``. Bump the schema ``version`` to 1.
     - When env is disabled OR singletons not yet wired (e.g. partial
       Phase 1 deploy / unit-test fixture) → fall back to the canonical
       Phase 1 empty shell (version=0, empty buckets). This preserves
@@ -47,13 +59,14 @@ MODULE_NOTE (EN):
     - Pure read; multiple concurrent ``query_h_state_full`` IPC calls
       (e.g. Rust poller + GUI healthcheck) are safe.
 
-  Schema returned (PA §5.1 / §4.2.1, Phase 2 populated):
+  Schema returned (PA §5.1 / §4.2.1, Phase 3 Sub-task 3-1 populated):
 
       {
-        "version":       1,                   # Phase 2 (was 0 in Phase 1)
+        "version":       1,                   # Phase 2/3 (was 0 in Phase 1)
         "fetched_at_ms": <wall-clock ms>,
         "h_states":      {
           "h1": { ... real H1ThoughtGate snapshot ... },
+          "h2": { ... real Layer2CostTracker H2 snapshot ... },
           "h3": { ... real ModelRouter snapshot ... },
         },
         "agent_states":  { },                 # filled by Phase 4
@@ -76,16 +89,25 @@ MODULE_NOTE (EN):
       ``h_states``).
 
 MODULE_NOTE (中):
-  G3-08 Phase 2 升級。將 ``query_h_state_full`` reverse IPC handler 從
-  Phase 1 stub 空殼升級為真實 H1（ThoughtGate）+ H3（ModelRouter）snapshot；
-  從 ``strategy_wiring`` 的進程全域 ``STRATEGIST_AGENT`` singleton 透過
-  ``._h1_gate`` / ``._model_router`` 拉取真實視圖。Phase 3（H2+H4+H5 成本）
-  與 Phase 4（5-Agent 狀態事件）逐步填入剩餘桶。
+  G3-08 Phase 3 Sub-task 3-1 升級。在 Phase 2（H1+H3）基礎上新增 H2
+  預算閘 snapshot，從 ``STRATEGIST_AGENT.cost_tracker``（由
+  ``BaseAgent.__init__`` 接收 ``strategy_wiring._COST_TRACKER_FOR_STRATEGIST``
+  注入）的 ``Layer2CostTracker`` 實例拉取。Phase 3 Sub-task 3-2（H4）+
+  3-3（H5）與 Phase 4（5-Agent 狀態事件）逐步填入剩餘桶。
 
-  Phase 2 設計意圖（對齊 PA design §10.2 + §5.1 + §7.1）：
-    - H1 + H3 singleton 可達且 env 開啟（``OPENCLAW_H_STATE_GATEWAY == "1"``）
-      時，將 ``h_states.h1`` 與 ``h_states.h3`` 填入
+  依 PA RFC `2026-04-26--g3_08_phase3_subtask_split.md` §4：
+    - Sub-task 3-1 僅落 H2；3-2（H4）與 3-3（H5）後續 commit。pattern
+      為加性 — 新增 ``h2`` 桶不影響既有 H1/H3 接線或 schema 版本語意。
+    - schema 版本 Phase 3 全程維持 1（加性桶填補設計上 forward-compat；
+      只有破壞性形狀改動才升 version，per Phase 2 contract）。
+
+  Phase 2/3 設計意圖（對齊 PA design §10.2 + §5.1 + §7.1，Phase 3 per
+  RFC `2026-04-26--g3_08_phase3_subtask_split.md` §4）：
+    - H1 / H2 / H3 singleton 可達且 env 開啟
+      （``OPENCLAW_H_STATE_GATEWAY == "1"``）時，將 ``h_states.h1`` /
+      ``h_states.h2`` / ``h_states.h3`` 填入
       ``H1ThoughtGate.get_h1_snapshot()`` /
+      ``Layer2CostTracker.get_h2_snapshot()`` /
       ``ModelRouter.get_h3_snapshot()`` 的真實 snapshot dict；
       schema ``version`` 升至 1。
     - env 關閉或 singleton 尚未接線（如 Phase 1 部分部署 / unit-test fixture）
@@ -112,13 +134,14 @@ MODULE_NOTE (中):
     - 純讀取；並發 ``query_h_state_full`` IPC（如 Rust poller + GUI
       healthcheck）安全。
 
-  回傳 schema（PA §5.1 / §4.2.1，Phase 2 已填）：
+  回傳 schema（PA §5.1 / §4.2.1，Phase 3 Sub-task 3-1 已填）：
 
       {
-        "version":       1,                   # Phase 2（Phase 1 為 0）
+        "version":       1,                   # Phase 2/3（Phase 1 為 0）
         "fetched_at_ms": <wall-clock ms>,
         "h_states":      {
           "h1": { ... 真實 H1ThoughtGate snapshot ... },
+          "h2": { ... 真實 Layer2CostTracker H2 snapshot ... },
           "h3": { ... 真實 ModelRouter snapshot ... },
         },
         "agent_states":  { },                 # Phase 4 填入
@@ -182,26 +205,61 @@ def _is_gateway_enabled() -> bool:
 def _collect_h_snapshots(
     include_h1: bool,
     include_h3: bool,
-) -> tuple[Optional[dict[str, Any]], Optional[dict[str, Any]]]:
-    """Lazy-import strategy_wiring and pull H1+H3 snapshots.
-    延遲 import strategy_wiring 並拉取 H1+H3 snapshot。
+    include_h2: bool = False,
+    include_h4: bool = False,
+) -> tuple[
+    Optional[dict[str, Any]],
+    Optional[dict[str, Any]],
+    Optional[dict[str, Any]],
+    Optional[dict[str, Any]],
+]:
+    """Lazy-import strategy_wiring and pull H1+H2+H3+H4 snapshots.
+    延遲 import strategy_wiring 並拉取 H1+H2+H3+H4 snapshot。
 
-    Returns ``(h1_dict, h3_dict)``; either may be ``None`` when:
+    Phase 3 Sub-task 3-1: ``include_h2`` defaults to ``False`` to preserve
+    Phase 2 callers' tuple shape compatibility — but ``build_h_state_full_response``
+    always passes ``include_h2=True`` when env=1 + caller didn't filter
+    h2 out, so production deployments always exercise the H2 path.
+    Phase 3 Sub-task 3-2: ``include_h4`` likewise defaults to ``False``;
+    same flow as H2 in production. H4 SSOT shape differs (caller-side on
+    StrategistAgent itself, not a sub-attribute) — see ``include_h4`` block
+    below for ``_safe_snapshot_self`` rationale.
+    Phase 3 Sub-task 3-1：``include_h2`` 預設 ``False`` 維持 Phase 2 tuple 相容；
+    production 由 ``build_h_state_full_response`` 一律傳 ``True``。
+    Phase 3 Sub-task 3-2：``include_h4`` 同理；H4 SSOT 形狀不同（caller-side 在
+    StrategistAgent 自身、非子屬性），見下方 ``include_h4`` 區塊
+    ``_safe_snapshot_self`` 說明。
+
+    Returns ``(h1_dict, h3_dict, h2_dict, h4_dict)`` — H2 / H4 trail H1/H3
+    in tuple order to keep the Phase 2 positional contract for any caller
+    that pre-existed Phase 3. Any element may be ``None`` when:
       - the corresponding ``include_*`` flag is False, or
       - ``strategy_wiring`` is not importable (bootstrap not finished /
         test fixture / partial deploy), or
       - ``STRATEGIST_AGENT`` is not yet constructed, or
+      - for H2: ``STRATEGIST_AGENT.cost_tracker`` is ``None`` (e.g.
+        Layer2CostTracker init failed — see ``strategy_wiring.py:163-170``
+        ``_COST_TRACKER_FOR_STRATEGIST = None`` fail-open path), or
+      - for H4: ``STRATEGIST_AGENT.get_h4_snapshot`` is missing (Phase 2
+        deploy without Phase 3 Sub-task 3-2 land — silent skip preserves
+        the never-raise contract), or
       - the snapshot accessor itself raises (defensive: any
         ``Exception`` is logged at DEBUG and converted to ``None`` so
         the response stays well-formed).
 
     All exceptions silenced — this is a pure-read aggregator and must
     match the ``never-raises`` contract of ``build_h_state_full_response``.
-    回 ``(h1_dict, h3_dict)``；任一可能為 ``None`` 之原因：
+    回 ``(h1_dict, h3_dict, h2_dict, h4_dict)``（H2 / H4 在 tuple 末位以保
+    Phase 2 positional contract）；任一可能為 ``None`` 之原因：
       - 對應 ``include_*`` 旗標為 False；
       - ``strategy_wiring`` 不可匯入（bootstrap 未完成 / 測試 fixture /
         部分部署）；
       - ``STRATEGIST_AGENT`` 尚未建構；
+      - 針對 H2：``STRATEGIST_AGENT.cost_tracker`` 為 ``None``（如
+        Layer2CostTracker init 失敗 —— 見 ``strategy_wiring.py:163-170``
+        ``_COST_TRACKER_FOR_STRATEGIST = None`` fail-open 路徑）；
+      - 針對 H4：``STRATEGIST_AGENT.get_h4_snapshot`` 缺席（Phase 2 部署
+        但 Phase 3 Sub-task 3-2 未 land —— 靜默跳過保 never-raise 合約）；
       - snapshot accessor 自身拋例外（防禦：任何 ``Exception`` 於 DEBUG
         記錄並轉為 ``None``，回應仍 well-formed）。
     所有例外被吞 —— 本函式為純讀聚合器，須對齊
@@ -209,11 +267,13 @@ def _collect_h_snapshots(
     """
     h1_dict: Optional[dict[str, Any]] = None
     h3_dict: Optional[dict[str, Any]] = None
+    h2_dict: Optional[dict[str, Any]] = None
+    h4_dict: Optional[dict[str, Any]] = None
 
-    if not (include_h1 or include_h3):
-        # Caller filtered both out — short-circuit before paying import cost.
-        # caller 雙重過濾 — 短路省匯入成本。
-        return None, None
+    if not (include_h1 or include_h3 or include_h2 or include_h4):
+        # Caller filtered all out — short-circuit before paying import cost.
+        # caller 全部過濾 — 短路省匯入成本。
+        return None, None, None, None
 
     try:
         # Lazy import: strategy_wiring is heavy (instantiates many agents +
@@ -230,7 +290,7 @@ def _collect_h_snapshots(
             "/ strategy_wiring 不可匯入；退回空殼",
             exc,
         )
-        return None, None
+        return None, None, None, None
 
     strategist = getattr(_sw, "STRATEGIST_AGENT", None)
     if strategist is None:
@@ -241,14 +301,38 @@ def _collect_h_snapshots(
             "falling back to empty shell "
             "/ STRATEGIST_AGENT 尚未接線；退回空殼"
         )
-        return None, None
+        return None, None, None, None
 
     if include_h1:
         h1_dict = _safe_snapshot(strategist, "_h1_gate", "get_h1_snapshot")
     if include_h3:
         h3_dict = _safe_snapshot(strategist, "_model_router", "get_h3_snapshot")
+    if include_h2:
+        # H2 SSOT = Layer2CostTracker, accessed via STRATEGIST_AGENT.cost_tracker
+        # (set by BaseAgent.__init__ from the wiring-time injection in
+        # strategy_wiring._COST_TRACKER_FOR_STRATEGIST). Public attribute
+        # name `cost_tracker` (no underscore prefix) — distinct from the
+        # `_h1_gate` / `_model_router` private composition pattern used
+        # for H1/H3 because cost_tracker is shared/injected, not owned.
+        # H2 SSOT = Layer2CostTracker，透過 STRATEGIST_AGENT.cost_tracker
+        # 存取（由 BaseAgent.__init__ 接收 strategy_wiring 注入）。屬性名
+        # `cost_tracker`（無底線前綴）—— 與 H1/H3 用 `_h1_gate` / `_model_router`
+        # private composition pattern 不同，因 cost_tracker 為注入共享而非擁有。
+        h2_dict = _safe_snapshot(strategist, "cost_tracker", "get_h2_snapshot")
+    if include_h4:
+        # G3-08 Phase 3 Sub-task 3-2: H4 stats live on the strategist itself
+        # (caller-side counters _stats["h4_validation_*"]) because
+        # ``h4_validator.validate_ai_output`` is a stateless pure function.
+        # No nested attribute — pull directly via _safe_snapshot_self,
+        # distinct from H1/H3 (sub-attribute owned) and H2 (sub-attribute
+        # injected).
+        # G3-08 Phase 3 Sub-task 3-2：H4 stats 在 strategist 自身（caller-side
+        # 計數 _stats["h4_validation_*"]），因 ``h4_validator.validate_ai_output``
+        # 為 stateless 純函式。無巢狀屬性 —— 透過 _safe_snapshot_self 直接拉
+        # 取，與 H1/H3（擁有的子屬性）及 H2（注入的子屬性）皆不同。
+        h4_dict = _safe_snapshot_self(strategist, "get_h4_snapshot")
 
-    return h1_dict, h3_dict
+    return h1_dict, h3_dict, h2_dict, h4_dict
 
 
 def _safe_snapshot(
@@ -301,29 +385,76 @@ def _safe_snapshot(
         return None
 
 
+def _safe_snapshot_self(
+    target: Any,
+    method_name: str,
+) -> Optional[dict[str, Any]]:
+    """Defensively call ``target.<method_name>()`` (no nested attribute).
+    防禦式呼叫 ``target.<method_name>()``（無巢狀屬性）。
+
+    Sibling of ``_safe_snapshot`` for the H4 case where the snapshot
+    accessor lives directly on the target (e.g. ``StrategistAgent``)
+    instead of on a sub-attribute. H4 stats are caller-side because
+    ``h4_validator.validate_ai_output`` is stateless.
+
+    Returns the snapshot dict on success, ``None`` when the method is
+    missing / not callable / raises / returns non-dict. Same defensive
+    contract as ``_safe_snapshot``: never raises.
+
+    ``_safe_snapshot`` 的姊妹函式，給 H4 用（snapshot accessor 在 target
+    自身而非子屬性）。H4 stats 由 caller 維護，因 ``h4_validator`` 無狀態。
+    成功回 snapshot dict；方法缺失 / 不可呼叫 / 拋例外 / 回非 dict 皆回
+    ``None``。永不 raise，與 ``_safe_snapshot`` 同合約。
+    """
+    try:
+        method = getattr(target, method_name, None)
+        if method is None or not callable(method):
+            logger.debug(
+                "_safe_snapshot_self: %s.%s missing or non-callable "
+                "/ 方法缺失或不可呼叫",
+                type(target).__name__, method_name,
+            )
+            return None
+        result = method()
+        if not isinstance(result, dict):
+            logger.debug(
+                "_safe_snapshot_self: %s.%s returned non-dict %s; ignoring "
+                "/ 方法回傳非 dict，忽略",
+                type(target).__name__, method_name, type(result).__name__,
+            )
+            return None
+        return result
+    except Exception as exc:  # noqa: BLE001 — defensive
+        logger.debug(
+            "_safe_snapshot_self: %s.%s raised %s; falling back to None "
+            "/ 方法呼叫拋例外，退回 None",
+            type(target).__name__, method_name, exc,
+        )
+        return None
+
+
 def build_h_state_full_response(
     include: Optional[list[str]] = None,
 ) -> dict[str, Any]:
-    """Phase 2: return real H1+H3 snapshots aggregated from STRATEGIST_AGENT.
-    Phase 2：回傳從 STRATEGIST_AGENT 聚合的真實 H1+H3 snapshot。
+    """Phase 3: return real H1+H2+H3+H4 snapshots aggregated from STRATEGIST_AGENT.
+    Phase 3：回傳從 STRATEGIST_AGENT 聚合的真實 H1+H2+H3+H4 snapshot。
 
     Args:
         include: Optional bucket-filter, e.g. ``["h1"]`` or ``["h3"]`` or
-            ``["h1", "h3"]``. ``None`` (default) means "include all
+            ``["h1", "h3", "h4"]``. ``None`` (default) means "include all
             available buckets". Unknown bucket names are silently ignored
-            (Phase 3+ will add ``h2`` / ``h4`` / ``h5``; passing them in
-            Phase 2 is harmless).
-            可選的桶過濾，如 ``["h1"]`` / ``["h3"]`` / ``["h1", "h3"]``。
+            (Phase 3 Sub-task 3-3 will add ``h5``; passing it now is harmless).
+            可選的桶過濾，如 ``["h1"]`` / ``["h3"]`` / ``["h1", "h3", "h4"]``。
             ``None``（預設）= 包含所有可用桶。未知桶名靜默忽略
-            （Phase 3+ 會加 ``h2`` / ``h4`` / ``h5``；Phase 2 傳入無害）。
+            （Phase 3 Sub-task 3-3 會加 ``h5``；現在傳無害）。
 
     Returns:
         Dict with keys ``version`` / ``fetched_at_ms`` / ``h_states`` /
-        ``agent_states``. ``h_states`` populated with H1 + H3 dicts when
-        env=1 and STRATEGIST_AGENT wired; ``version`` is 1 in that case.
+        ``agent_states``. ``h_states`` populated with H1 + H2 + H3 + H4
+        dicts when env=1 and STRATEGIST_AGENT wired; ``version`` is 1.
         Otherwise empty buckets + ``version=0`` (Phase 1 fallback shape).
         含 ``version`` / ``fetched_at_ms`` / ``h_states`` / ``agent_states``
-        鍵的 dict。env=1 且 STRATEGIST_AGENT 接線時 ``h_states`` 含 H1+H3
+        鍵的 dict。env=1 且 STRATEGIST_AGENT 接線時 ``h_states`` 含 H1+H2+H3+H4
         dict、``version`` 為 1；否則空桶 + ``version=0``（Phase 1 fallback
         形狀）。
 
@@ -331,15 +462,14 @@ def build_h_state_full_response(
         - Pure-read function: no I/O, no env-write, no IPC. Singleton
           accessors only acquire local locks.
         - Always succeeds (cannot raise on any path).
-        - Phase 3 adds ``h2`` / ``h4`` / ``h5`` from
-          Layer2CostTracker + StrategistAgent stats; Phase 4 fills
+        - Phase 3 Sub-task 3-3 will add ``h5`` from
+          Layer2CostTracker.get_h5_snapshot; Phase 4 fills
           ``agent_states`` from the 5 agent singletons.
         - 純讀函式：無 I/O、無 env 寫入、無 IPC。Singleton accessor 僅取
           本地鎖。
         - 永遠成功（任何路徑皆不可能 raise）。
-        - Phase 3 從 Layer2CostTracker + StrategistAgent stats 加
-          ``h2`` / ``h4`` / ``h5``；Phase 4 從 5 個 agent singleton 填入
-          ``agent_states``。
+        - Phase 3 Sub-task 3-3 會從 Layer2CostTracker.get_h5_snapshot 加
+          ``h5``；Phase 4 從 5 個 agent singleton 填入 ``agent_states``。
     """
     # Wall-clock ms timestamp (PA §4.2.1 ``fetched_at_ms`` field).
     # wall-clock ms 時間戳（PA §4.2.1 ``fetched_at_ms``）。
@@ -363,9 +493,13 @@ def build_h_state_full_response(
     if include is None:
         include_h1 = True
         include_h3 = True
+        include_h2 = True
+        include_h4 = True
     else:
         include_h1 = "h1" in include
         include_h3 = "h3" in include
+        include_h2 = "h2" in include
+        include_h4 = "h4" in include
 
     # Phase 2 short-circuit: env disabled → empty shell to keep dispatch
     # path cheap. We could still try to populate (snapshots are env-
@@ -382,17 +516,23 @@ def build_h_state_full_response(
             _AGENT_BUCKET_KEY: {},
         }
 
-    # Aggregate snapshots (env enabled path). Either may return None on
+    # Aggregate snapshots (env enabled path). Any may return None on
     # singleton-not-wired race; we then drop that key from h_states.
     # 聚合 snapshot（env 開啟路徑）。任一在 singleton 未接線 race 下可能
     # 回 None；該 key 從 h_states 略掉。
-    h1_dict, h3_dict = _collect_h_snapshots(include_h1, include_h3)
+    h1_dict, h3_dict, h2_dict, h4_dict = _collect_h_snapshots(
+        include_h1, include_h3, include_h2, include_h4,
+    )
 
     h_states: dict[str, Any] = {}
     if h1_dict is not None:
         h_states["h1"] = h1_dict
+    if h2_dict is not None:
+        h_states["h2"] = h2_dict
     if h3_dict is not None:
         h_states["h3"] = h3_dict
+    if h4_dict is not None:
+        h_states["h4"] = h4_dict
 
     # Bump version when at least one bucket is real; stay at fallback
     # version when nothing populated (callers can detect "Phase 1 shape"

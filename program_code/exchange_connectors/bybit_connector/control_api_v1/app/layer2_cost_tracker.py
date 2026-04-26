@@ -47,6 +47,18 @@ from .layer2_types import (
     PricingTable,
 )
 
+# G3-08 Phase 3 Sub-task 3-1: H state cache invalidation hint channel.
+# When ``OPENCLAW_H_STATE_GATEWAY != "1"`` (default) ``invalidate_async`` is
+# a documented no-op (see h_state_invalidator.py MODULE_NOTE) — zero overhead
+# for callers in the Phase 1/2 dormant deployment. Phase 3+ env=1 deploys
+# upgrade this to a daemon-thread fire-and-forget IPC notification to Rust.
+# G3-08 Phase 3 Sub-task 3-1：H 狀態快取失效提示通道。
+# 當 ``OPENCLAW_H_STATE_GATEWAY != "1"``（預設）``invalidate_async`` 為
+# 文件化的 no-op（見 h_state_invalidator.py MODULE_NOTE）—— Phase 1/2 dormant
+# 部署下對 caller 零負擔。Phase 3+ env=1 部署時升級為 daemon thread
+# fire-and-forget IPC 通知 Rust。
+from .h_state_invalidator import invalidate_async as _invalidate_h_state_async
+
 logger = logging.getLogger(__name__)
 
 
@@ -222,6 +234,62 @@ class Layer2CostTracker:
         _, remaining = self.check_daily_budget()
         return min(adjusted, remaining)
 
+    # ── G3-08 Phase 3: H state snapshot accessor / H 狀態 snapshot 存取器 ──
+
+    def get_h2_snapshot(self) -> dict[str, Any]:
+        """Return a thread-safe snapshot of H2 budget state for h_state_cache exposure.
+        回傳 H2 預算閘狀態的線程安全 snapshot，供 h_state_cache 暴露使用。
+
+        Schema (PA design §5.2 H2BudgetState parity, mirrors Rust struct
+        ``rust/openclaw_engine/src/h_state_cache/types.rs:58-72``):
+          - daily_remaining_usd: float — 當日剩餘預算 (USD)，反映 hard_cap
+            與 adaptive effective budget 之較小者扣除已用後的可用額度
+          - hard_cap_usd:        float — 當日硬上限 (USD)，治理常數，
+            DOC-08 §4 規定不可突破
+          - adaptive_multiplier: float — 自適應倍率（≤ 1.0 = 收縮 / > 1.0
+            = 擴張）；由 7d ROI 推導，值 1.0 表中性
+
+        Schema 對齊 PA design §5.2 H2BudgetState（鏡射 Rust struct
+        ``rust/openclaw_engine/src/h_state_cache/types.rs:58-72``）：
+          - daily_remaining_usd：當日剩餘預算 (USD)
+          - hard_cap_usd：當日硬上限 (USD，治理常數)
+          - adaptive_multiplier：自適應倍率（≤ 1.0 收縮 / > 1.0 擴張）
+
+        Pure-read: NO side effects, NO state mutation, NO IPC. Acquires only
+        the existing ``self._lock`` (RLock) shared with budget readers; no
+        new lock introduced. Safe to call from any thread including the
+        invalidator daemon thread (Phase 3 env=1 path).
+        純讀取：無副作用、無狀態修改、無 IPC。僅取既有 ``self._lock``
+        （與其他預算讀者共用的 RLock），不新增鎖。任何線程皆可呼叫，
+        包含 invalidator daemon thread（Phase 3 env=1 路徑）。
+
+        Returns:
+            dict with 3 keys per H2BudgetState contract; all values are
+            ``float``. ``check_daily_budget()`` already accounts for the
+            ``adaptive_enabled`` toggle internally — when disabled the
+            returned ``daily_remaining_usd`` reflects ``hard_cap_usd``
+            minus today's spend (not the adaptive effective budget).
+            含 3 個 key 的 dict（對齊 H2BudgetState contract），值皆為
+            ``float``。``check_daily_budget()`` 已內部處理
+            ``adaptive_enabled`` 開關 — 關閉時回傳的
+            ``daily_remaining_usd`` 反映 ``hard_cap_usd`` 減今日花費
+            （而非 adaptive effective budget）。
+        """
+        with self._lock:
+            # ``check_daily_budget()`` returns ``(allowed: bool, remaining: float)``.
+            # We surface only ``remaining`` here; the ``allowed`` boolean is
+            # derivable downstream as ``remaining > 0`` and not part of
+            # H2BudgetState wire schema (Rust mirror omits it for simplicity).
+            # ``check_daily_budget()`` 回 ``(allowed, remaining)``。此處僅曝
+            # ``remaining``；``allowed`` 下游可由 ``remaining > 0`` 推得，且
+            # 非 H2BudgetState wire schema 一部分（Rust mirror 簡化未含）。
+            _allowed, remaining = self.check_daily_budget()
+            return {
+                "daily_remaining_usd": float(remaining),
+                "hard_cap_usd": float(self._config.daily_hard_cap_usd),
+                "adaptive_multiplier": float(self._adaptive.multiplier),
+            }
+
     # ── Record Costs / 记录成本 ──
 
     def record_claude_cost(self, session: Layer2Session, input_tokens: int, output_tokens: int, model_tier: str) -> float:
@@ -244,6 +312,15 @@ class Layer2CostTracker:
             provider="anthropic", model=model_tier,
             tokens_in=input_tokens, tokens_out=output_tokens,
         )
+        # G3-08 Phase 3 Sub-task 3-1: hint Rust h_state_cache that H2 state
+        # changed. Daemon-thread fire-and-forget; never blocks hot-path.
+        # env=0 → no-op (zero overhead). Even if hint drops, Rust poller
+        # (10s default) eventually picks up the new snapshot.
+        # G3-08 Phase 3 Sub-task 3-1：通知 Rust h_state_cache H2 狀態已變動。
+        # daemon thread fire-and-forget；永不阻塞 hot-path。env=0 → no-op
+        # （零負擔）。即使提示丟失，Rust poller（預設 10s）最終仍會撈到
+        # 新 snapshot。
+        _invalidate_h_state_async("h2.budget_consumed")
         return cost
 
     def record_search_cost(self, session: Layer2Session, provider: str, cost_usd: float) -> None:
