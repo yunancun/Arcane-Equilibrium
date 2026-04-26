@@ -61,6 +61,7 @@ async fn test_rc1_get_risk_runtime_status_via_ipc() {
         &None,
         &empty_h_state_cache_slot(),
         &None,
+        &None,
     )
     .await;
     assert!(resp.error.is_none(), "error: {:?}", resp.error);
@@ -94,6 +95,7 @@ async fn test_rc1_clear_consecutive_losses_via_ipc() {
         &None,
         &None,
         &empty_h_state_cache_slot(),
+        &None,
         &None,
     )
     .await;
@@ -174,6 +176,7 @@ async fn test_rc1b2_force_governor_tighter_via_ipc() {
         &None,
         &empty_h_state_cache_slot(),
         &None,
+        &None,
     )
     .await;
     assert!(resp.error.is_none(), "error: {:?}", resp.error);
@@ -206,6 +209,7 @@ async fn test_rc1b2_force_governor_tighter_missing_reason() {
         &None,
         &empty_h_state_cache_slot(),
         &None,
+        &None,
     )
     .await;
     assert!(resp.error.is_some());
@@ -235,6 +239,7 @@ async fn test_rc1b2_force_governor_looser_cooldown_rejection() {
         &None,
         &None,
         &empty_h_state_cache_slot(),
+        &None,
         &None,
     )
     .await;
@@ -272,6 +277,7 @@ async fn test_rc1b2_force_governor_looser_success() {
         &None,
         &empty_h_state_cache_slot(),
         &None,
+        &None,
     )
     .await;
     assert!(resp.error.is_none(), "error: {:?}", resp.error);
@@ -300,6 +306,7 @@ async fn test_rc1_get_risk_runtime_status_no_channel() {
         &None,
         &None,
         &empty_h_state_cache_slot(),
+        &None,
         &None,
     )
     .await;
