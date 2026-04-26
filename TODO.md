@@ -23,6 +23,8 @@
 - W2（c1142d2 + 8946e47）：4-agent audit + G2-02 counterfactual + G8-02 parity + grid G7-09c Phase 2
 - W3（55801fe）：G2-06 bb_breakout disable 落地 + 3 PA RFC（EDGE-P1b/P2-flip/G2-03）
 - W4（60fdf74）：EDGE-P1b 4/4 + EDGE-P2-flip T1+T3 + G2-03 4/4 schema staging
+  - ⚠️ **G2-03 schema-only landing**：`_with_override` **0 production caller**（per FA 2026-04-26 H2 audit）；`position_risk_evaluator.rs:117` + `step_6_risk_checks.rs:200` 仍呼 thin wrapper（per_strategy=None）→ ma_crossover SL/TP override 寫值對 production 路徑 **0 影響**；real binding 須 G2-02 ~05-03 結論 + **G2-03-FUP-CALLER-WIRE P1 派發**才生效（已在 Backlog L401）
+  - ⚠️ **EDGE-P1b 7 維 IPC bind 真實 6/7 維**：`stale_peak_ms` (dim 5) + `shadow_enabled` 不在 IPC `update_risk_config` 7 字段（per FA 2026-04-26 H1 audit）→ calibrator 算 percentile 但無法純 IPC 寫，需 TOML edit + reload_risk_config 雙步驟；新 backlog ticket **EDGE-P1b-FUP-STALE-PEAK-IPC** 追蹤閉合
 - W5（9cfdd52）：EDGE-P2-flip T2（healthcheck [15] per-strategy）+ G2-FUP-IPC-LEGACY-MS-FIX P1
 - Sign-off（df882ad）：PM Wave 3 Final Sign-off + CLAUDE.md §十一 update + rebuild 部署成功
 
@@ -45,6 +47,7 @@
 **4 follow-up tickets 狀態**（W4/W5 衍生 → Backlog）：
 - ✅ ~~G2-FUP-IPC-LEGACY-MS-FIX P1~~（W5 軌 2 修，Linux unit test verified）
 - 🟠 G2-03-FUP-CALLER-WIRE P1（等 G2-02 ~05-03 後派 wire caller chain）
+- 🟡 **EDGE-P1b-FUP-STALE-PEAK-IPC P2**（FA 2026-04-26 H1 audit 揭發）：擴 `update_risk_config` IPC schema 加 `exit_stale_peak_ms` 字段 → 閉合 calibrator → IPC 整鏈，避免 dim 5 雙步驟（TOML edit + reload）；E1 30min~1h；不阻 EDGE-P1b 派發層面 sign-off，但 **calibrator 真實啟用 (~05-10) 前必先閉合**
 - 🟡 G5-FUP-IPC-MOD-SPLIT P2（`ipc_server/mod.rs` 1262 + `passive_wait_healthcheck.py` 2286 超 §九 1200）
 - 🟢 G1-FUP-CALIBRATOR-WARNING P3（calibrator `--apply` 加 stdout warning banner）
 
@@ -396,14 +399,27 @@ ssh trade-core "cd ~/BybitOpenClaw/srv && python3 helper_scripts/db/passive_wait
 
 | 項目 | 類型 | 起算/結束 | 狀態 | Healthcheck | 若 FAIL |
 |---|---|---|---|---|---|
-| **P0-2** 21d demo 時鐘 | 時間被動 | 2026-04-16 → 2026-05-07 | 🟡 進行中 ~8d | [0] engine_alive + [1] 0 crash | 時鐘重置 |
-| **P1-10** PostOnly 1-2w 驗證 | 資料被動 | 2026-04-21 → 05-07/08 | 🟡 累積中 | [3] maker_fill_rate | 驗收失效→G2-04 決策 |
-| **EDGE-DIAG** exit_features 累積 | 資料被動 | 2026-04-19 → 04-26 滿週 | 🟡 累積中 | [14] exit_features_rate | 延後 Phase 1b |
-| **P1-7 C** labels pooled ≥200 | 資料被動 | 持續累積 | 🟡 47→200 ETA 3-5d | [10] label 速率 | G4-02 延後 |
-| **P1-8 FUP** DUST-EVICTION 觀察 | log 被動 | 2026-04-17 → 04-24 滿週 | 🟡 ~7d | dust log count | 觀察到新 pattern 才提案 |
-| **P1-11** bb_breakout rebuild 後觀察 | 部署被動 | 待 operator rebuild | ⬜ | [12] fill rate recover | 結構性 dormancy confirmed |
+| **P0-2** 21d demo 時鐘 | 時間被動 | 2026-04-16 → 2026-05-07 | 🟡 進行中 ~10d | [0] engine_alive + [1] 0 crash | 時鐘重置 |
+| **P1-10** PostOnly 1-2w 驗證（=G2-01）| 資料被動 | 2026-04-21 → 05-07/08 | 🟡 累積中 | [3] maker_fill_rate | 驗收失效→G2-04 決策 |
+| **EDGE-DIAG** exit_features 累積（=EDGE-P1b）| 資料被動 | 2026-04-19 → 05-10 per-strategy ≥200 | 🟡 grid 282 / ma 146 / bb_rev 7 | [14] per-strategy tier | 延後 Phase 1b bind |
+| **EDGE-P3** clean window ≥200 | 資料被動 | 2026-04-22 → ~04-30 連 3d PASS | 🟡 75% (150/200) ETA ~04-27 | [11] counterfactual_clean_window_growth | 延後 Gate 1 fallback |
+| **G2-02** ma_crossover 1w post-G7-09 demo | 資料被動 | 2026-04-25 → 05-03 | 🟡 累積中 | trading.fills 過去 1w fee_bps mix maker/taker | tool ready 等資料 |
+| **G2-03 binding** 等 G2-02 → G2-03-FUP-CALLER-WIRE | 條件被動 | G2-02 結論後 → ~05-03 | ⬜ | (G2-02 完成觸發) | schema-only staging 持續 |
+| **EDGE-P2-flip** 等 EDGE-P1b → operator manual flip | 條件被動 | EDGE-P1b 完成後 ~05-10+ | ⬜ | [15] shadow_exit_agreement_phase2 | tooling ready 等觸發 |
+| **P1-7 C** labels pooled ≥200 | 資料被動 | 持續累積 | 🟡 ETA 3-5d | [10] intents_writer_ratio | G4-02 延後 |
+| **P1-8 FUP** DUST-EVICTION 觀察 | log 被動 | 2026-04-17 → 04-24 滿週 | ✅ 滿週無 issue | dust log count | 觀察到新 pattern 才提案 |
+| ~~**P1-11** bb_breakout rebuild 後觀察~~ | ✅完成 → G2-06 disable | 2026-04-26 結案 | ✅ disabled | [12] PASS skip + [18] inventory | (永久 disable) |
 
 **規則（CLAUDE.md §七）**：任何背景項連續 3 次 healthcheck FAIL = 中止被動等待，轉人工介入。
+
+**Wave 3 被動解鎖時刻表**（事件驅動，per FA H2 audit 文案釐清）：
+- ~04-27: EDGE-P3 [11] 滿 200 → ~04-30 連 3d PASS → Gate 1 fallback 部署可行
+- ~05-03: G2-02 真實 1w post-G7-09 demo 數據 → counterfactual 雙軌驗證 → **觸發 G2-03-FUP-CALLER-WIRE 派發**（解鎖 G2-03 真實 binding）
+- ~05-07/08: P0-2 21d 解鎖 + G2-01 PostOnly 1-2w 驗收 → 若 fee drop ≥60% 通過，否則 G2-04 disable 決策會
+- ~05-10: EDGE-P1b per-strategy ≥200 rows → calibrator manual approve flow 派發（**含 EDGE-P1b-FUP-STALE-PEAK-IPC 必先閉合**才能純 IPC bind dim 5）
+- ~05-15: P0-3 邊評決策會（PM + FA + PA + QC）→ Phase 5 重啟 / 部分接線 / DUAL-TRACK 全力 三選一
+- ~05-22~05-30: LG-2/3/4/5 + Live gate check
+- **~2026-05-30 中位 ±7d**: Live target（PM W2 sign-off 不變）
 
 ---
 
@@ -413,7 +429,8 @@ ssh trade-core "cd ~/BybitOpenClaw/srv && python3 helper_scripts/db/passive_wait
 |---|---|---|---|---|
 | **STRATEGIST-AUTO-PROMOTE** | 自動晉升規則 | P2-01 穩定後 | 🟡P3 | 默認關，可選 |
 | **G2-FUP-FUNDING-ARB-PAPER-SYNC** | paper TOML `[funding_arb].active=true` 與 demo/live 的 `active=false` 不一致（**E2 2026-04-26 G2-06 review 發現**：v1→v2 結案 NEGATIVE 過渡期 sync miss；`feedback_env_config_independence` 適用於風控閾值 vs `active` binary 開關，不擴 G2-06 scope 但獨立追） | 確認 design intent vs oversight | 🟡P2 | E1 5min 工時；改 paper TOML active=false + 雙語 comment |
-| **G2-FUP-IPC-LEGACY-MS-FIX** | `app/ipc_client.py:786` `sync_ipc_call` 用毫秒做 HMAC ts，但 Rust verifier `ipc_server/mod.rs:621-628` 用秒比對 30s 容差 → **legacy sync_ipc_call 100% fail auth**（E2 2026-04-26 W4 軌 2 review 確認 2 production caller `trigger_live_auth_recheck` + `set_system_mode` fire-and-forget 吞錯誤但 fast-path 完全失效）；EDGE-P2-flip dry_run 內嵌 helper 用秒對齊 Rust 已修**新檔**，legacy 未修 | 即時 | 🔴P1 | E1 30min 工時：改 ms*1000 → 秒；加 unit test 驗 30s 容差 |
+| ~~**G2-FUP-IPC-LEGACY-MS-FIX**~~ | ✅完成 W5 commit `9cfdd52` | `app/ipc_client.py:786` ms→s + 3 unit test PASS Linux verified | 完成 2026-04-26 | ✅ |
+| **EDGE-P1b-FUP-STALE-PEAK-IPC** | EDGE-P1b 7 維 IPC bind 真實只有 6/7 維（**FA 2026-04-26 H1 audit 揭發**）：`stale_peak_ms` (dim 5) + `shadow_enabled` 不在 IPC `update_risk_config` schema 7 個 `exit_*` 字段內 → calibrator 算 percentile 但無法純 IPC 寫入 dim 5，需 TOML edit + `reload_risk_config` 雙步驟（違 PA RFC §2.2「IPC patch 路徑」設計意圖）。修：擴 IPC schema + Rust handler + Python wrapper 加 `exit_stale_peak_ms` 字段 + unit test 驗 deep-merge | calibrator 真實啟用前 (~05-10) | 🟡P2 | E1 30min~1h；E1 在 EDGE-P1b T3 IPC restore handler 已留 `toml_only_fields_skipped` 暴露口；不阻 W3 sign-off，但 EDGE-P1b 真實啟用閉合 |
 | **G5-FUP-IPC-MOD-SPLIT** | `rust/openclaw_engine/src/ipc_server/mod.rs` 1262 行（W4 軌 1 +11 push 1251→1262，超 §九 1200 硬上限）；建議 dispatch_request 抽 sibling | E5 next wave | 🟡P2 | E5 1-2d 工時；不影響 W4 sign-off |
 | **G1-FUP-CALIBRATOR-WARNING** | `helper_scripts/research/exit_threshold_calibrator.py` `--apply` 路徑加 stdout warning banner 暴露 IPC 6/7 partial bind gap（`stale_peak_ms` + `shadow_enabled` 不在 IPC 7 字段需 TOML edit） | calibrator 真實啟用前 | 🟢P3 | E1 15min 工時 |
 | **G2-03-FUP-CALLER-WIRE** | G2-03 `check_position_on_tick_with_override` 0 production caller（W4 軌 3 staging marker）；G2-02 counterfactual 結論定後派 E1 wire caller chain（step_6_risk_checks）真實啟用 SL/TP override | G2-02 完成 ~05-03 | 🟠P1 | E1 1d 工時；G2-03 schema 已 staging |
