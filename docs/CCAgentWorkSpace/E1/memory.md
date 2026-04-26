@@ -66,6 +66,7 @@ def acquire_lease(self, intent_id: str) -> bool:
 | 2026-04-26 | Tier 3 G3-07: Layer 2 toolbox query_onchain + check_derivatives | (no .md report — direct message per system reminder; commit `ac6c09a`) |
 | 2026-04-26 | Wave 2 G3-08 Phase 1 Sub-task B: Python h_state_invalidator + query_handler + reverse IPC route (commit `1c7b20e`, 35 pytest) | `.claude_reports/20260426_g3_08_phase1_subtask_b.md` (return text per system reminder) |
 | 2026-04-26 | Tier 8 Track 4 G3-08 Phase 3 Sub-task 3-3: H5 cost_logging integration — Phase 3 COMPLETE — G3-09 unblocked | direct message per system reminder; report inline |
+| 2026-04-26 | Tier 9 Track 3 G3-08-PHASE-2-FUP-PRIVATE-ATTR-FACADE: audit + PUSH-BACK to PM (2 H1/H3 violations confirmed; strategist_agent.py 1200/1200 hard cap blocks 11 LOC facade addition; 3 options provided) | direct message per system reminder; report inline |
 
 ### 2026-04-26 G3-08 Phase 1 Sub-task B 教訓
 
@@ -86,6 +87,15 @@ def acquire_lease(self, intent_id: str) -> bool:
 - **commit `f42face` 副作用未察覺**：2026-04-23 刪 98 個 shim 後，`scripts/` 目錄只剩 5 檔，但 `readonly_observer_pipeline/bybit_full_readonly_observer_cycle.py` 內 9 個 hard-coded `scripts/...` 路徑沒同步更新 → cron 每 5 分鐘 9-step 全 fail 持續 3 天，但 cron 用 `if ... ; then ... else echo "non-fatal"` 吞錯誤。**留尾**：BB-M-3 全範圍 cleanup ticket 該包含這條鏈整體修復或刪除。
 - **scope 紀律**：G9-04 僅針對 v1，**不**順手修 v2 / `bybit_ws_smoke_to_postgres.py` / `bybit_full_readonly_observer_cycle.py` cron 失敗 / 9 個失效路徑（雖然都已驗證 broken）。CLAUDE.md §八「最小影響」原則。
 - **Mac dev-only 環境驗證**：v1 用 `read_only` legacy slot，該 slot 已 rename `*.dev_disabled_*`（CLAUDE.md §七 Mac dev-only），即使保留 v1 + 補環境感知，Mac 上跑也只是 graceful skip 無 runtime 價值。Linux 上 cron 從沒成功跑過 v1（dead path），所以 0 損失。
+
+### 2026-04-26 Tier 9 Track 3 G3-08 Phase 2 FUP 教訓
+
+- **Audit 找到 2 H violations（H1+H3，與 E2 MED-2 一致），不是 0**：grep `_safe_snapshot(strategist, "_h1_gate", ...)` (line 356) + `_safe_snapshot(strategist, "_model_router", ...)` (line 358) 各 1 hit。`_safe_snapshot` 是 facade pattern wrapper 沒錯，但**第二參數傳的是私有屬性名**，仍有 rename risk（refactor 改 `_h1_gate`→`_thought_gate` 不知 query_handler 依賴）。Phase 3 H2/H4/H5 走 PUBLIC `cost_tracker` 屬性 + `_safe_snapshot_self` 直打 strategist method —— 這 3 桶**自然**滿足 facade contract，只 H1/H3 殘留。
+- **strategist_agent.py 已 1200/1200 hard cap**：CLAUDE.md §九「1200 行硬上限（不允許 merge）」。Brief 預警此 cap 為 PUSH-BACK 預設路徑之一。最低必要 facade LOC = 11（2 method × 4 LOC + 1 comment header + 2 blank sep）。Reclaim cosmetic comment（line 149-153 cost_tracker alias note 6 LOC）淨增 ~5 LOC = 1205 LOC，**仍超 cap**。
+- **不擅自跨範圍 reclaim**：CLAUDE.md §八「最小影響」原則 + E1 profile「不擴大 PA 給定的改動範圍」/「禁順手優化未要求代碼」。reclaim line 149-153 的 cost_tracker alias 雙語 explanatory note 屬於範圍外動作，且會引發 E2 對「為何刪註解」質疑。正確路徑 = PUSH-BACK PM 提供 3 個 option 由 PM 一句話決策。
+- **PUSH-BACK 應附完整 audit 證據 + 3 option 而非純 STOP**：PM 收到 PUSH-BACK 報告 = 直接決策、不需追加問題。Option 編排 = 「accept 1200+ + helpers.rs 1315 ACCEPT-with-FOLLOWUP 模式」/「結案 ticket 不動 strategist」/「split file ~0.5d Wave 4」三選一，覆蓋短中長三種風險偏好。
+- **比較 Tier 5 helpers.rs 1315 ACCEPT 模式**：E2 同份 batch review T5.1-LOW-1 已對 `on_tick/helpers.rs` 1315 行採「ACCEPT-with-FOLLOWUP 走 Wave 4 G5 split sibling」處置。先例存在，但 Python `.py` 文件性質與 Rust `.rs` mod sibling 拆檔成本不同（Python sibling import 需 strategist_agent 自身重組為 package）。
+- **「真正 facade」vs「facade pattern wrapper」分辨**：`_safe_snapshot` 雖是 PUBLIC 函式封裝 getattr exception handling，但傳 `"_h1_gate"` literal 等同 hardcode 私有屬性名 → facade contract 仍打破（rename `_h1_gate` 即 silently drop snapshot）。真正 facade = strategist 暴露 `get_h1_snapshot()` PUBLIC method，下游不知道 `_h1_gate` 存在。E2 MED-2 finding 精確區分了這兩者。
 
 ## 當前測試基準線
 2827 passed（Sprint 1a P1-1 完成後，both test dirs，128 pre-existing failures，17 errors）
