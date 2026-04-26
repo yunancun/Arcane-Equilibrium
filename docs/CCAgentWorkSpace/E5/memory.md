@@ -88,3 +88,46 @@
 
 **推薦開工**：立即 W0（不延遲；無前置依賴）
 
+### 2026-04-26 G5-09 tick_pipeline/tests.rs 拆分（commit `a5b6f17`）
+
+**Ticket**：G5-09（P1，新編號）— PM 2026-04-26 ground-truth audit 揪出 `tick_pipeline/tests.rs` 3524 行（§九 1200 上限的 194%，repo 最大檔）
+
+**Pattern**：套用 G5-07（commit `913b536`，event_consumer/tests.rs split）
+
+**結果**：
+- 拆 11 sibling + mod.rs 聚合，全 < 800（§九 警告線），最大 maker_kpi_hot_reload.rs 652 行
+- 0 production file touched（純測試重組）
+- 90 個 test fn 字節級保留（除 import path super:: → super::super::）
+- shared helpers `make_event` / `make_signal` 移到 mod.rs，sibling 透過 `super::make_event(...)` 引用
+- Linux release `cargo test --release -p openclaw_engine --lib` = **2162 passed / 0 failed**
+
+**Sibling 列表**：
+| Sibling | Lines | Tests |
+|---|---|---|
+| mod.rs | 52 | 0（only helpers）|
+| pipeline_kind_governance | 173 | 13 |
+| fanout_canary | 103 | 6 |
+| dual_rail_dispatch | 199 | 7 |
+| emit_close_fill | 507 | 11 |
+| signal_throttle | 221 | 12 |
+| risk_governance_hot_reload | 347 | 14 |
+| engine_event_snapshot | 150 | 11 |
+| per_symbol_price_pnl | 248 | 3 |
+| fast_track_reduce | 434 | 14 |
+| exit_features | 543 | 12 |
+| maker_kpi_hot_reload | 652 | 13 |
+
+**經驗教訓 / 教訓**：
+1. **`mod tests;` 自動找 `tests/` 目錄** — 原 `tick_pipeline/mod.rs:975-976` 的 `#[cfg(test)] mod tests;` 不需動，Rust 路徑優先級會自動解析為 `tests/mod.rs`（單檔 `tests.rs` 或目錄 `tests/mod.rs` 二擇一），不需要 production 接線改動
+2. **Sibling 內 import path = `super::super::xxx`** — 多一層因 sibling 在子目錄。如果未來需要去 helpers 複用 across siblings，放 mod.rs 即可，不要 sibling 互引（避免依賴方向蛛網）
+3. **`git add <directory>/` 是遞迴危險** — Mac local 有 untracked 隔壁 session 檔（`helper_scripts/db/passive_wait_healthcheck/`），`git add helper_scripts/...` 會誤把它們 staged。教訓：複雜 working tree 用 `git add <specific_files>` 而非 `git add <dir>/`，或先 `git status --short` 看清楚再 stage
+4. **Multi-session race 偵察**：完成後 `git fetch + git log origin/main` 看是否別 session 推了新 commit。Mac local 看到 `cc4c2d2`（healthcheck split）但 origin 沒有 = 隔壁 session 漏 push。E5 不擅自代推（CLAUDE.md 多 session memory race 教訓 = 不認識的改動禁碰）
+5. **G5-07 pattern 在 2.7× scale 上仍有效** — event_consumer 1298 vs tick_pipeline 3524 都 0 production touched，pattern scalable
+
+**剩餘 §九 violations 已知（非本次 scope）**：
+- `event_consumer/mod.rs::run_event_consumer` 1695 行單 async fn（P0，G5-07 split 後 mod.rs 仍含此巨型 fn）
+- `tick_pipeline/on_tick/helpers.rs` 1182 行（接近 1200 警告，非本次 scope）
+- 其餘 Rust 6 檔 ≥ 1200（per 2026-04-24 audit）
+
+**報告**：`docs/CCAgentWorkSpace/E5/workspace/reports/2026-04-26--g5_09_tick_pipeline_tests_split.md`
+
