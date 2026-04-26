@@ -337,3 +337,66 @@ PM 第三波派發指令：FA Wave 3 spec readiness audit 評 EDGE-P1b / EDGE-P2
 | 2026-04-26 | G2-03 ma_crossover SL/TP Option B RFC（推 B2 RiskConfig.per_strategy 擴展）| workspace/reports/2026-04-26--g2_03_option_b_rfc.md |
 
 ---
+
+## 2026-04-26 G5-08 strategist_scheduler/mod.rs 拆分計劃
+
+### 觸發
+
+PM 派發 G5-08（P1 Wave 2）：mod.rs 1770 行（§九 1200 hard cap 47% over）。
+最近 3 commit（G3-11 CycleCounters + TUNE-TARGET-CONFIG + PERSIST-AUDIT-GAP-COUNTER-1）
+累積 ~520 行膨脹回去。已有 sibling persist.rs 446 行（commit 4108849 first-pass 拆完後）。
+
+### 報告路徑
+
+`workspace/reports/2026-04-26--g5_08_strategist_scheduler_split_plan.md`（535 行）
+
+### 推薦結論
+
+**Method A（保守 4-sibling）**：
+- mod.rs ~280 行（header + const + StrategistScheduler ctor/getters/builder + 4 mod decl + 4 pub use）
+- cycle_counters.rs ~250（CycleCounters atomic 共享單元 + 5 tests）
+- validation.rs ~220（pure validate × 2 + 8 tests）
+- evaluate.rs ~370（impl: run_forever + evaluate_cycle + 4 helpers + PairMetrics + rank_by_deviation + PairMetricsRow）
+- tests.rs ~250（剩餘 13 tests + mk_deps）
+- persist.rs 446（不動）
+
+vs Method B（runtime.rs 大塊 + tests.rs 集中 620）— 拒因 tests.rs 接近 800 警告線 + sibling 結構不齊（runtime.rs 用 sibling-child-module，cycle_counters 純 type，pattern 雜）。
+
+### 5 大關鍵架構發現
+
+1. **既有 persist.rs 已是「first-pass 拆」的模型**：commit 4108849 把 mod.rs 從 1342→880，採 `impl StrategistScheduler { pub(super) async fn ... }` sibling-child-module pattern；G5-08 完全沿襲此模板，不創新 pattern
+2. **CycleCounters 是 IPC 共享 atomic struct**：ipc_server/mod.rs L103 + L566 + L709 + handlers/misc.rs L210 + main_boot_tasks L170/316 共 5 個外部 callsite，全走 `crate::strategist_scheduler::CycleCounters` path；拆檔 = pub use 維持 path 不動
+3. **G5-08 與 G5-FUP-IPC-MOD-SPLIT 完全獨立**：patch_risk_config handler 在 ipc_server/mod.rs 不在本檔；可同時派 2 個 E1（無 isolation 需求）
+4. **15 條熱路徑 invariant 全識別**：含 G3-11 cycle_counters Arc + atomic ordering / SCHED-CLOSE-FILTER-1 三條 NOT LIKE filter / FA-1 Demo-only debug_assert / PERSIST-AUDIT-GAP-COUNTER 的 i64 cast bug 規避 / 6 reject reason 字串 / mod.rs 9 條 pub path / run_forever pub async fn 等
+5. **31 tests 完整盤點 + 拆分後分布表**：cargo test --release baseline 31 PASS（與 PM 採集相符），分到 cycle_counters 5 / validation 8 / tests 13 / persist 5；任一 sibling test 名變動 = 必打回（healthcheck cron 監控可能讀名）
+
+### 派發架構建議
+
+| 子任務 | E1 instance | isolation | 工時 |
+|---|---|---|---|
+| G5-08 全 4 step（cycle_counters → validation → evaluate → tests）| 單實例串行 | 主樹 | 2.5-3h |
+| G5-FUP-IPC-MOD-SPLIT | 隔壁實例 | 主樹 | ~3-4h（推測）|
+| **可並行** | | | |
+
+E2 review 1-1.5h + E4 regression 1.5-2h = 全鏈 5-6.5h。
+
+### 沒做的事（E1/E2 領域）
+
+- 沒寫拆分代碼（4 step 全留 E1）
+- 沒實際移動檔案 / 跑 cargo build
+- 沒派 sub-agent（純 PA design 主 agent 串行讀+寫）
+- 沒擴範圍到 G5-09/10/11/13/FUP-IPC（隔壁 ticket）
+
+### 教訓備忘
+
+- **既有 first-pass 拆過的檔再次膨脹是常態** — persist.rs 拆完後 mod.rs 又被 G3-11 + TUNE-TARGET + PERSIST-AUDIT-GAP-COUNTER 三波加回 ~520 行；§九 拆分需 design 「未來 N 次新功能不撞警告線」的 buffer，A 方案全 sibling <450 留 350+ buffer 是這個考量
+- **拆分計劃必含「外部 caller path 全盤點」**：本 design 第一輪寫到 §1.4 才發現 main_boot_tasks 5 個 callsite + ipc_server 4 個 callsite + handlers/misc 1 個 callsite，全走 `pub use` re-export 必須維持；漏一條 = 下游 5 檔同時編譯掛
+- **既有 sibling 是最好的 reference 模板** — persist.rs 446 行（doc + use + impl extension + standalone fn + cfg(test) tests）就是教科書級的 sibling-child-module；G5-08 不需要重新發明，evaluate.rs/cycle_counters.rs/validation.rs/tests.rs 都套此模板
+
+### 報告索引追加
+
+| 日期 | 報告類型 | 文件位置 |
+|---|---|---|
+| 2026-04-26 | G5-08 strategist_scheduler/mod.rs 拆分計劃（推 Method A 保守 4-sibling）| workspace/reports/2026-04-26--g5_08_strategist_scheduler_split_plan.md |
+
+---
