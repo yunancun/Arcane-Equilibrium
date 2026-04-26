@@ -73,7 +73,24 @@ echo "[$TS] Cron cycle done"
 # from log_files/observer_cron.log mtime + tail.
 # 彙總 exit code：任一段非零 → wrapper 整體非零。cron + healthcheck [19]
 # 從 log_files/observer_cron.log 的 mtime + tail 讀此真值。
+#
+# TIER4-OBSERVER-LOW-1 (Tier 6 Track 1, 2026-04-26): preserve BRIDGE_RC in
+# the log line when OBSERVER also fails. Previously a both-fail scenario
+# would log only OBSERVER_RC and silently drop BRIDGE_RC because the early
+# `exit $OBSERVER_RC` skipped the final exit line — log triage couldn't
+# tell whether bridge ran or what happened. Cron exit code semantics are
+# unchanged (still propagates OBSERVER_RC when non-zero, BRIDGE_RC when
+# observer succeeded), but the log now surfaces the full RC pair so a
+# future operator / postmortem reading observer_cron.log sees both.
+# TIER4-OBSERVER-LOW-1（Tier 6 Track 1，2026-04-26）：observer 失敗時也
+# 在 log 行保留 BRIDGE_RC。先前雙段都失敗時只 log OBSERVER_RC 並默默丟
+# 掉 BRIDGE_RC（早 exit 跳過最後 exit 行），log triage 無法判斷 bridge
+# 是否跑或結果如何。cron exit code 語意不變（observer 失敗時 propagate
+# OBSERVER_RC，observer 成功時 propagate BRIDGE_RC），但 log 現在表面
+# 完整 RC 對給 future operator / postmortem 讀 observer_cron.log。
 if [[ $OBSERVER_RC -ne 0 ]]; then
+    echo "[$TS] Cron exit aggregation: OBSERVER_RC=$OBSERVER_RC BRIDGE_RC=$BRIDGE_RC → exit $OBSERVER_RC (observer failure dominates)"
     exit $OBSERVER_RC
 fi
+echo "[$TS] Cron exit aggregation: OBSERVER_RC=$OBSERVER_RC BRIDGE_RC=$BRIDGE_RC → exit $BRIDGE_RC"
 exit $BRIDGE_RC

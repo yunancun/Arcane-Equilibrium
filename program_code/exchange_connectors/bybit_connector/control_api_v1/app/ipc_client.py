@@ -514,7 +514,31 @@ class EngineIPCClient:
         # EDGE-P1b-FUP-STALE-PEAK-IPC：caller 顯式傳值才 forward（None = 不變）。
         #   Rust IPC handler 讀 u64；consumer 端 cast 為 schema i64
         #   （validate() 拒 < 0）。
+        #
+        # EDGE-P1b-FUP-NEGATIVE-GUARD (Tier 6 Track 1, 2026-04-26): Python-side
+        #   defensive guard mirrors the Rust validate() < 0 reject. Without
+        #   this, a caller passing -1 would be encoded as a valid u64 over the
+        #   wire (since `serde_json::from_value::<u64>` rejects negative i64
+        #   literals, the Rust handler would actually error out at deserialize
+        #   time — but the error surface is opaque "invalid type: negative
+        #   integer" rather than the precise "exit_stale_peak_ms must be ≥ 0").
+        #   Failing fast in Python gives the caller (operator CLI / agent self-
+        #   tune) a precise, actionable error before incurring an IPC roundtrip.
+        # EDGE-P1b-FUP-NEGATIVE-GUARD（Tier 6 Track 1，2026-04-26）：Python 端
+        #   防禦性 guard 鏡射 Rust validate() < 0 拒絕。無此 guard 時 caller 傳
+        #   -1 會以 u64 over-the-wire 編碼（serde_json::from_value::<u64> 反
+        #   序列化拒負 i64 字面量，Rust handler 確實會在 deserialize 階段報錯，
+        #   但錯誤面是 opaque「invalid type: negative integer」而非精確的
+        #   「exit_stale_peak_ms must be ≥ 0」）。Python 端先 fail-fast 給
+        #   caller（operator CLI / agent self-tune）精確可動的錯誤訊息，
+        #   且省下一次 IPC roundtrip。
         if exit_stale_peak_ms is not None:
+            if exit_stale_peak_ms < 0:
+                raise ValueError(
+                    f"exit_stale_peak_ms must be >= 0 (got {exit_stale_peak_ms}); "
+                    f"Rust ExitConfig.stale_peak_ms is i64 milliseconds and "
+                    f"validate() rejects negative values"
+                )
             params["exit_stale_peak_ms"] = exit_stale_peak_ms
         return await self.call("update_risk_config", params=params)
 
