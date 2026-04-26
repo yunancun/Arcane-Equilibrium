@@ -531,6 +531,18 @@ def check_orders_fills_consistency(cur) -> tuple[str, str]:
     orders_n (orders writer dropping rows for that pair), (b) total
     pairs in the window, (c) total missing orders aggregate.
 
+    F7-FUP-23 cross-cut exclusion (2026-04-26): F4 unattributed audit fills
+    (commit 53973ef, ``strategy_name LIKE 'unattributed:%'`` such as
+    ``unattributed:bybit_auto``) are emitted by the Rust ``unattributed_fill_observer``
+    when an external bybit_auto exec arrives without a matching local context.
+    These rows are audit-by-design and have NO corresponding ``trading.orders``
+    row (we never submitted the order locally). Without exclusion, every F4
+    audit fill counts as a missing order and fabricates a false-positive FAIL
+    after the F4 backfill runs. We therefore filter out
+    ``strategy_name LIKE 'unattributed:%'`` at the WHERE level — the exclusion
+    is intentional and lossless: the F4 audit row already records the
+    discrepancy in its own dedicated channel (``learning.execution_orphans``).
+
     Three-state verdict:
       * FAIL: pairs_with_missing_orders > 5 (writer broken across multiple pairs)
       * WARN: 1 <= pairs_with_missing_orders <= 5 (transient or single pair)
@@ -548,12 +560,26 @@ def check_orders_fills_consistency(cur) -> tuple[str, str]:
     GROUP BY (strategy_name, symbol)，計 fills_n vs orders_n。三態：FAIL（>5
     pair 漏寫，writer 跨多 pair 壞）/ WARN（1-5）/ PASS（0）。
     30-min 窗：orders outages 多 acute（重啟、schema 半套）→ 下次 6h cron 即抓。
+
+    F7-FUP-23 cross-cut 排除（2026-04-26）：F4 unattributed audit fill
+    （commit 53973ef，``strategy_name LIKE 'unattributed:%'`` 如
+    ``unattributed:bybit_auto``）由 Rust ``unattributed_fill_observer`` emit —
+    外部 bybit_auto exec 抵達但本地無對應 context 時的 audit 紀錄。這類 row
+    是 audit-by-design，本來就**沒有**對應 ``trading.orders`` row（我們沒
+    本地 submit）。不排除則 F4 backfill 後每筆 audit fill 都被算成 missing
+    order，產生假 FAIL。因此於 WHERE 加 ``strategy_name LIKE 'unattributed:%'``
+    過濾 — 排除是有意且無損：F4 audit row 已在自己的專屬通道
+    （``learning.execution_orphans``）記下落差。
     """
     try:
         cur.connection.rollback()
     except Exception:
         pass
 
+    # NOTE / 註：第 6 行 ``AND f.strategy_name NOT LIKE 'unattributed:%'`` 排除
+    # F4 unattributed audit fill（context_id=``unattrib-...`` audit-by-design，
+    # 本就無 ``trading.orders`` row）；不排除 = F4 backfill 後系統性 false-positive FAIL。
+    # F7-FUP-23 cross-cut fix — see docstring above for rationale.
     sql = (
         "WITH order_fill_pairs AS ( "
         "  SELECT f.strategy_name, f.symbol, "
@@ -563,6 +589,7 @@ def check_orders_fills_consistency(cur) -> tuple[str, str]:
         "  LEFT JOIN trading.orders o ON o.context_id = f.context_id "
         "  WHERE f.ts > now() - interval '30 minutes' "
         "    AND f.engine_mode IN ('demo', 'live', 'live_demo') "
+        "    AND f.strategy_name NOT LIKE 'unattributed:%' "
         "  GROUP BY 1, 2 "
         ") "
         "SELECT count(*) FILTER (WHERE fills_n > orders_n) AS pairs_with_missing_orders, "
