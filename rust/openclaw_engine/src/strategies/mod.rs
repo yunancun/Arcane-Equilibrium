@@ -41,6 +41,7 @@ pub use params::{
 pub use registry::StrategyFactory;
 
 use crate::intent_processor::OrderIntent;
+use crate::strategies::maker_rejection::MakerRejectionCategory;
 use crate::tick_pipeline::TickContext;
 use openclaw_core::execution::FillResult;
 
@@ -118,6 +119,33 @@ pub trait Strategy: Send {
     /// 策略發出的 Close 被跳過（paper_state 中未找到倉位）時調用。提前變更狀態的策略應覆蓋以回滾。
     fn on_close_skipped(&mut self, _symbol: &str) {
         // Default no-op / 默認無操作
+    }
+
+    /// EDGE-P2-3 Phase 1B-3 (FIX-G7-09C-PHASE2-WIRE-1B3): exchange-side
+    /// rejection reached this strategy. Distinct from `on_rejection`
+    /// (which is the *governance* pipeline saying "no") — this is Bybit
+    /// itself rejecting an order after structural acceptance, classified by
+    /// `MakerRejectionCategory`. Strategies should arm a per-symbol cooldown
+    /// so the same maker order does not get re-emitted in the next tick
+    /// while the book / account-level cause is still live.
+    /// Default no-op for strategies that do not yet implement maker-aware
+    /// retry control; PostOnly maker entries (G7-09c Phase 1) make this
+    /// callback meaningful for `grid_trading` first.
+    /// `category` is the classified Bybit reject reason (`PostOnlyCross`,
+    /// `TooManyPending`, `FokCancel`, `SelfCancel`, `Other(raw)`); strategy
+    /// may inspect to decide cooldown duration / suppression strategy.
+    /// EDGE-P2-3 Phase 1B-3：交易所端拒絕傳到本策略。與 `on_rejection`（治理
+    /// 管線拒絕）不同，這是 Bybit 在結構接受後拒絕下單，已分類為
+    /// `MakerRejectionCategory`。策略應設定該 symbol 的冷卻時間，避免下一
+    /// tick 重發同一 maker 單。預設 no-op；PostOnly 入場（G7-09c Phase 1）
+    /// 讓本 callback 對 `grid_trading` 首先有意義。
+    fn on_post_only_rejected(
+        &mut self,
+        _symbol: &str,
+        _ts_ms: i64,
+        _category: &MakerRejectionCategory,
+    ) {
+        // Default no-op / 預設無操作
     }
 
     // ── Phase 3a: Runtime parameter tuning API (AGT-1) ──

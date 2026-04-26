@@ -264,6 +264,16 @@ pub struct GridTrading {
     /// G7-09c Phase 1：BBO-aware PostOnly 限價離 inside quote 的 tick 數，
     /// 範圍 `[0, 10]` 由 `validate()` 限制。
     pub(crate) maker_price_buffer_ticks: u32,
+    /// G7-09c Phase 2 (FIX-G7-09C-PHASE2-WIRE-1B3): cooldown duration set
+    /// in `on_post_only_rejected` after Bybit rejects a PostOnly maker
+    /// entry. Bounded `[5_000, 600_000]` by `validate()`. Distinct from
+    /// `reject_backoff_ms` which fires on governance pipeline rejection.
+    /// Consumed by `signal.rs` via the existing
+    /// `reject_cooldown_until_ms.get(sym) < ctx.timestamp_ms` guard.
+    /// G7-09c Phase 2：交易所拒絕 PostOnly 後設冷卻時長，由
+    /// `on_post_only_rejected` 寫入既有 `reject_cooldown_until_ms` map；
+    /// `signal.rs` 早已 check 此 map，故接線一條鏈即生效。
+    pub(crate) reject_cooldown_ms: u64,
 }
 
 // build_linear_levels, build_geometric_levels, build_levels moved to grid_helpers.rs (A0-a)

@@ -67,12 +67,38 @@ pub struct GridTradingParams {
     /// `maker_price_offset_bps` 退化為僅 BBO 不可得時的 fallback offset。
     #[serde(default = "default_maker_price_buffer_ticks")]
     pub maker_price_buffer_ticks: u32,
+    /// G7-09c Phase 2 (FIX-G7-09C-PHASE2-WIRE-1B3): per-symbol cooldown set
+    /// after the exchange rejects a PostOnly maker entry (currently:
+    /// `EC_PostOnlyWillTakeLiquidity`, `EC_ReachMaxPendingOrders`,
+    /// `EC_CancelForNoFullFill`). Distinct from `reject_backoff_ms`
+    /// (which fires on *governance* pipeline rejection, default 30s) —
+    /// exchange-side rejects usually mean the BBO has shifted faster than
+    /// our quote, so we want a longer pause (default 60s) before re-emitting
+    /// a maker entry on the same symbol. Bounded `[5_000, 600_000]` by
+    /// `validate()` to prevent operator misconfiguration.
+    /// G7-09c Phase 2：交易所拒絕 PostOnly 入場後設置的逐 symbol 冷卻。
+    /// 與 `reject_backoff_ms`（治理拒絕，預設 30s）不同，交易所拒絕通常
+    /// 代表 BBO 比我方報價先動，需更長冷卻（預設 60s）。`validate()`
+    /// 限制 `[5_000, 600_000]`，防止 operator 誤配。
+    #[serde(default = "default_reject_cooldown_ms")]
+    pub reject_cooldown_ms: u64,
 }
 
 /// G7-09c Phase 1: default buffer = 1 tick (one tick inside the inside quote).
 /// G7-09c Phase 1：預設 1 tick（退一 tick）。
 fn default_maker_price_buffer_ticks() -> u32 {
     1
+}
+
+/// G7-09c Phase 2: default exchange-reject cooldown = 60s.
+/// QC-recommended baseline: ≈ 1× grid `cooldown_ms` (60s default). Long
+/// enough to outlast the typical micro-burst on Bybit perps that triggers
+/// `EC_PostOnlyWillTakeLiquidity`, short enough that a stable book recovers
+/// new entries within ~1 minute.
+/// G7-09c Phase 2：交易所拒絕後預設冷卻 = 60 秒。QC 建議基準：約等於
+/// grid `cooldown_ms`，可吸收典型 micro-burst，又不致過長。
+fn default_reject_cooldown_ms() -> u64 {
+    60_000
 }
 
 impl Default for GridTradingParams {
@@ -94,6 +120,9 @@ impl Default for GridTradingParams {
             // G7-09c Phase 1: default 1 tick inside the inside quote.
             // G7-09c Phase 1：預設退一 tick。
             maker_price_buffer_ticks: 1,
+            // G7-09c Phase 2: default 60s exchange-reject cooldown.
+            // G7-09c Phase 2：交易所拒絕預設冷卻 60 秒。
+            reject_cooldown_ms: 60_000,
         }
     }
 }
@@ -185,6 +214,16 @@ impl StrategyParams for GridTradingParams {
         // G7-09c Phase 1：限定 buffer，防止 operator 或 IPC 設過大造成永不成交。
         if self.maker_price_buffer_ticks > 10 {
             return Err("maker_price_buffer_ticks must be <= 10".into());
+        }
+        // G7-09c Phase 2 (FIX-G7-09C-PHASE2-WIRE-1B3): bound exchange-reject
+        // cooldown so operator misconfig cannot starve liquidity (e.g. 0ms
+        // disables the cooldown entirely, 24h pauses the strategy de-facto).
+        // 5s lower bound = at least one tick window; 600s upper bound =
+        // outlasts any expected micro-burst without permanently silencing.
+        // G7-09c Phase 2：限制 reject_cooldown_ms 範圍 [5s, 600s]，防止 0
+        // 失效或過大永久靜音。
+        if self.reject_cooldown_ms < 5_000 || self.reject_cooldown_ms > 600_000 {
+            return Err("reject_cooldown_ms must be in [5_000, 600_000] ms".into());
         }
         Ok(())
     }
