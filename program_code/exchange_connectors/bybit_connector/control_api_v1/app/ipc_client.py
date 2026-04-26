@@ -782,8 +782,31 @@ def sync_ipc_call(
                 sock.sendall(data)
 
             # Authenticate if secret configured / 如果配置了密鑰則進行認證
+            #
+            # G2-FUP-IPC-LEGACY-MS-FIX (2026-04-26):
+            # `ts` MUST be Unix epoch SECONDS (not milliseconds), to match the
+            # Rust verifier in `rust/openclaw_engine/src/ipc_server/mod.rs:621-628`
+            # which compares `|now_secs - ts|.abs() <= 30`. Earlier this path
+            # used `int(time.time() * 1000)` (milliseconds), causing every legacy
+            # `sync_ipc_call` to fail HMAC auth (skew ≈ 1.7e12 seconds → rejected
+            # as "auth token expired"). Production callers (`trigger_live_auth_recheck`,
+            # `set_system_mode`) fire-and-forget swallowed the error, so the bug
+            # was silent; the fast-path was 100% non-functional. This change
+            # aligns with the async `_authenticate()` path (line 553) and the
+            # canonical helper in `helper_scripts/canary/edge_p2_flip_dry_run.py`.
+            #
+            # G2-FUP-IPC-LEGACY-MS-FIX（2026-04-26）：
+            # `ts` 必須使用 Unix epoch 秒（非毫秒），以匹配 Rust verifier
+            # （`rust/openclaw_engine/src/ipc_server/mod.rs:621-628`）的
+            # `|now_secs - ts|.abs() <= 30` 比對邏輯。先前此處誤用
+            # `int(time.time() * 1000)`（毫秒），導致每次 legacy `sync_ipc_call`
+            # HMAC 驗證失敗（時間差 ≈ 1.7e12 秒 → 被判為「auth token expired」）。
+            # 兩個 production caller（`trigger_live_auth_recheck`、`set_system_mode`）
+            # 採 fire-and-forget 吞錯誤，故 bug 表面靜默；實際 fast-path 100% 失效。
+            # 本修復對齊 async `_authenticate()` 路徑（第 553 行）與
+            # `helper_scripts/canary/edge_p2_flip_dry_run.py` 內嵌 helper。
             if ipc_secret:
-                ts = int(time.time() * 1000)
+                ts = int(time.time())
                 token = _hmac_lib.new(
                     ipc_secret.encode("utf-8"),
                     str(ts).encode("utf-8"),

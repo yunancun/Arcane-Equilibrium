@@ -57,6 +57,7 @@ def acquire_lease(self, intent_id: str) -> bool:
 | 2026-04-26 | Wave 3 EDGE-P2-flip T1+T3: dry-run smoke test + flip/revert SOP shell wrapper | `docs/CCAgentWorkSpace/E1/workspace/reports/2026-04-26--edge_p2_flip_t1_t3_landing.md` |
 | 2026-04-26 | Wave 3 EDGE-P1b 4 子任務: calibrator + summary + restore IPC + healthcheck [14] 升級 | `docs/CCAgentWorkSpace/E1/workspace/reports/2026-04-26--edge_p1b_4_subtasks.md` |
 | 2026-04-26 | Wave 3 G2-03 4 子任務: StrategyOverride SL/TP schema + risk_checks runtime cap + 3 TOML schema + binding SOP shell | `docs/CCAgentWorkSpace/E1/workspace/reports/2026-04-26--g2_03_4_subtasks.md` |
+| 2026-04-26 | Wave 3 EDGE-P2-flip T2: healthcheck [15] per-strategy + shadow_disagreement_breakdown research tool | `.claude_reports/20260426_041300_edge_p2_flip_t2_landing.md` |
 
 ## 當前測試基準線
 2827 passed（Sprint 1a P1-1 完成後，both test dirs，128 pre-existing failures，17 errors）
@@ -238,6 +239,30 @@ def acquire_lease(self, intent_id: str) -> bool:
 - **Mac dry-run exit 2 路徑**：engine 不跑時偵測 socket 缺失立即 exit 2 並輸出 minimal markdown / JSON（不跑任何 check 也輸出可讀 stamp 給 caller）。Linux 真機 exit 0/1 區分 5 check FAIL。3 個 exit code（0/1/2）在 flip.sh STEP 1 dry-run 後**全部正確映射**到 abort / continue 決策。
 - **行數 829 略超 800 警告**：~36% 為強制雙語 MODULE_NOTE / docstring / inline 注釋（CLAUDE.md §七 強制），精煉違反規範保留即可。1200 硬上限內。
 - **mock_events 不可實作真合成**：(i) 會污染 production `learning.exit_features` 表，(ii) Rust mock injection 需改 production code 違反 0 業務代碼變更。`mock_events_target` 純資訊性 → JSON artifact 作 capacity hint。
+
+### 2026-04-26 Wave 3 EDGE-P2-flip T2（healthcheck [15] per-strategy + shadow_disagreement_breakdown）
+
+- **[15] dormant 路徑提早 return**：[14] T4 升級時 per-strategy 切片在 `total > 0` 才跑；本任務 [15] 同樣設計 — `total == 0` 走 Phase 1a dormant 早返「decision_shadow_exits 24h=0」訊息，**不**進 per-strategy 路徑（dormant 期 0 row 沒切片可做，per RFC §2.3 設計意圖）。Linux cron 跑驗 [15] 顯示 dormant 訊息正確、無錯誤。
+- **per-strategy WARN promotion vs FAIL**：per RFC §2.3 + PM prompt 明示「per-strategy < 95% → WARN（**不 FAIL**）」 — 整體 [15] status 仍由全局 ratio 主導，per-strategy 只升 WARN。實作時 `per_strategy_warn` flag 在 SPARSE 路徑（n<5）**不**設 True，避免低樣本 strategy 噪音蓋過真信號（與 EDGE-P1b T4 SPARSE 視為 informational 同模式）。
+- **per-strategy SQL 同 query 拿 total + agree_n**：避免兩次 GROUP BY race（單一 query 用 `COUNT(*) FILTER (WHERE disagreed = FALSE)` filter aggregate）；對應 [14] T4 的 single-GROUP-BY-with-tier pattern。
+- **per-strategy slice 失敗 fail-soft**：GROUP BY 出錯 → 全局 ratio 仍計算，message 加 `per_strategy=unavailable (err)`，[15] status 不致變 FAIL；同 [14] T4 設計。
+- **shadow_disagreement_breakdown 設計分工**：
+  - 兩 query：`TOTALS_SQL`（per (strategy, engine_mode) total + disagreed_n）+ `REASONS_SQL`（disagreed=TRUE 的 (strategy, reason) 計數）— 分開查避免複雜 CTE 又能一次拿全資料。
+  - `aggregate_breakdown()` pure fn 把兩 query 結果合成 envelope；單元可測（Mac 上 synthetic rows self-test 通過）。
+  - `sparse_threshold=5` 的 disagreed_n 守線：per-strategy disagreed < 5 時 reason 細節用 sentinel `(disagreed_n=N; <5, suppressed)` 取代，避免噪音；overall pooled distribution 永遠完整（防 sparse 完全遮蔽 reason 訊號）。
+  - `strategy_name = ANY(%s)` 精確比對（per RFC §9 #2）— 不用 `LIKE 'grid%'` 避免 grid_oddity / grid_helpers 撞名（同 G2-02 pattern）。
+- **JSON artifact 與 stdout 二者皆寫**：
+  - `--output-format markdown|json` 控制 stdout，但 JSON artifact 永遠寫到 `$OPENCLAW_DATA_DIR/shadow_disagreement_breakdown.json`（fallback `/tmp/openclaw`）；artifact 寫失敗 fail-soft（log warning 後繼續），不致命。
+  - `schema_version: "edge_p2_flip.shadow_disagreement_breakdown.v1"` 命名對齊 EDGE-P1b calibrator 的 `edge_p1b.calibrator.v1` 慣例，方便下游 cron / pipe 認 schema 升級。
+- **psycopg2 lazy import in `_open_conn()`**：與 G2-02 / EDGE-P1b T1 同模式 — 不在 import 層連 PG 才能 import-only 場景跑 self-test 不掛（unit test / smoke 不需真 DB）。
+- **stderr logging + stdout 純結果**：`logging.basicConfig(stream=sys.stderr)` 讓 markdown/json 可 pipe 到檔/管道，不被 INFO log 污染；同前 3 軌一致。
+- **Phase 1a dormant 路徑 exit 0**：當 24h rows = 0（shadow_enabled=false 預設）→ markdown 印 `**Phase 1a dormant** (...)` + log info + exit 0。Operator 隨時可跑無虛警，符合 PM prompt 「dormant 訊息（Phase 1a，shadow_enabled=false 預期）」。
+- **disagreement_reason 全 NULL → exit 1（schema drift signal）**：當 disagreed_rows > 0 但所有 overall_reason_distribution row 全是 `(null)` reason → log warning + exit 1。意圖：EDGE-P1b T1 calibrator 真實使用前若 V021 schema disagreement_reason 欄位被 writer 漏寫，本工具是第一個被叫到看 reason 分佈的工具，必須提早抓。
+- **Linux 真機驗證 dormant 路徑**：`OPENCLAW_DATABASE_URL=postgresql://redacted@127.0.0.1:5432/trading_ai` 後跑 `--engine-mode demo --lookback-hours 24` → totals_rows=0 + reasons_rows=0 + 寫 artifact 346 bytes + exit 0。168h lookback 同樣 dormant（Phase 1a 仍未啟動）。
+- **healthcheck cron 真機驗 [15]**：Linux scp 到 `~/.staged_e1_p2_t2/` → cp 覆蓋 → 跑 `passive_wait_healthcheck_cron.sh` → `[15] PASS — decision_shadow_exits 24h=0 (Phase 1a dormant; agreement evaluation deferred until shadow_enabled=true — see [8])`，與升級前訊息語意相同（dormant 期 per-strategy 不出，by design）。
+- **檔案大小**：shadow_disagreement_breakdown.py 592 行（< 800 警告線）；passive_wait_healthcheck.py 從 2185 → 2286 行（既有檔已超 1200 硬上限，本變動 +101 行屬「不擴張」順手不重構，留 E2 review 決定是否動 split）。
+- **scp + checkout 不污 git tree**：(a) Mac 端 SSOT 改動完成 (b) scp 到 Linux `~/.staged_e1_p2_t2/` 暫存區 (c) cp 覆蓋 in-place 跑 ast.parse + cron + tool 真機驗證 (d) 完成後 `git checkout` healthcheck 還原 + `rm` 新檔 + `rm -rf staged dir`。Linux git tree 確認 `干净的工作区` 與 `origin/main` 一致；等 PM 統一 commit。
+- **不擴張嚴守**：本 PR 0 業務代碼 / 0 測試擴張 / 0 SQL schema / 0 IPC / 0 Rust；純 healthcheck [15] message 升級 + 新 research tool。
 
 ### 2026-03-31 G-05
 - `governance_hub.acquire_lease()` 實際簽名為 `(intent_id, scope, ttl_seconds)`，任務規格中描述的 `requester` 參數不存在 → 實際使用 `scope="TRADE_ENTRY"` 正確對應規格意圖

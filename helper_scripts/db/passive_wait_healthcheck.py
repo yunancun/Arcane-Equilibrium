@@ -1901,7 +1901,8 @@ def check_strategist_cycle_fresh() -> tuple[str, str]:
 
 
 def check_shadow_exit_agreement_phase2(cur) -> tuple[str, str]:
-    """[15] G6-02 (2026-04-24): Combine Layer shadow exit Python↔Rust agreement.
+    """[15] G6-02 (2026-04-24) + EDGE-P2-flip T2 (2026-04-26): Combine Layer
+    shadow exit Python↔Rust agreement (overall + per-strategy slice).
 
     MODULE_NOTE (EN): EDGE-P2 passive-wait healthcheck — the EDGE-P2 "flip
     shadow_enabled=true and observe N days" TODO requires that the Combine
@@ -1919,29 +1920,67 @@ def check_shadow_exit_agreement_phase2(cur) -> tuple[str, str]:
     last 24h window. Phase 2 target ≥95% (this G6-02 check); existing [8]
     `check_shadow_exit_ratio` uses ≥60% as the soft entry-criterion floor.
 
-    Three-state output:
+    EDGE-P2-flip T2 (2026-04-26) addition — per-strategy slice in the message:
+      * Counts last-24h rows per `strategy_name` (no engine_mode filter,
+        same scope as the global agreement check). Uses GROUP BY for cohort
+        breakdown.
+      * Per-strategy agreement ratio (1 - disagreed/total) computed for
+        each active strategy.
+      * Status decision policy: per RFC §2.3 (PA recommendation, PM open
+        finding §11.1) — overall aggregate PASS still drives [15] status,
+        but any active strategy with ≥5 rows AND <95% agreement promotes
+        the result to WARN (NOT FAIL — fail-soft semantics).
+        Strategies with <5 rows are skipped from the WARN trigger (sample
+        too small to be reliable signal).
+      * GROUP BY semantics differ from [14]: [15] uses `strategy_name`
+        (exact match against `learning.decision_shadow_exits.strategy_name`
+        column, written by Rust shadow_exit_writer), NOT prefix-based slice
+        like [14] which uses `owner_strategy` LIKE prefix. Both 1-line
+        breakdown formats are similar but the underlying COHORT MATCH is
+        different: [14] groups dust_frozen / orphan_adopted / risk_close:*
+        prefixes; [15] groups concrete strategy names (grid_trading,
+        ma_crossover, bb_reversion, fast_track, etc.).
+      * Per-strategy slice failure (GROUP BY query error) is non-fatal —
+        the global agreement still computes, message gets a
+        `(per-strategy slice unavailable)` marker so operator knows context
+        is missing rather than silently truncated.
+      * Message tail format: `; per_strategy: name=N(P%) [TIER], ...`
+        where TIER = [PASS] (≥95% & n≥5) / [WARN] (<95% & n≥5) /
+        [SPARSE] (n<5).
+
+    Three-state output (UNCHANGED from G6-02 baseline status decision logic;
+    T2 adds per-strategy WARN promotion as documented above):
       - PASS: 24h rows = 0 (Phase 1a dormant — shadow_enabled=false; deferred
-        to [8]'s TOML-based triage), OR agreement ≥95%.
-      - WARN: 80% ≤ agreement < 95% (Phase 2 below target but above
-        intervention threshold; investigate disagreement_reason distribution).
-      - FAIL: agreement < 80% (Combine layer materially diverging from
-        Physical baseline; flip should be reverted, EDGE-P2 paused).
+        to [8]'s TOML-based triage), OR agreement ≥95% AND no per-strategy
+        WARN trigger.
+      - WARN: 80% ≤ overall agreement < 95% (Phase 2 below target but above
+        intervention threshold), OR overall ≥95% but ≥1 active strategy
+        (n≥5) <95% (per-strategy stratified divergence — RFC §2.3).
+      - FAIL: overall agreement < 80% (Combine layer materially diverging
+        from Physical baseline; flip should be reverted, EDGE-P2 paused).
 
     Distinction vs [8] `check_shadow_exit_ratio`:
       - [8]: Phase 2 entry guard. Asks "is shadow_enabled=true and writer
         firing?" + "is agreement ≥60% soft floor?". Checks the TOML state
         machine + writer liveness.
       - [15]: Phase 2 quality gate. Asks "given shadow is firing, is the
-        Combine agreement strict ≥95% target met?". No TOML check — relies
-        on row presence to indicate Phase 2 is actively underway.
+        Combine agreement strict ≥95% target met (overall + per-strategy)?".
+        No TOML check — relies on row presence to indicate Phase 2 is actively
+        underway.
 
-    [15] G6-02（2026-04-24）：Combine Layer shadow exit Python↔Rust 一致率守衛
-    （EDGE-P2 flip 期被動等待 ≥95% agreement TODO）。V021 schema 用
-    `disagreed BOOLEAN` 編碼一致性（FALSE=Combine 同 Physical baseline=Python ↔
-    Rust agree）。本 check 算 24h 窗口 1 - disagreed_ratio。Phase 2 目標 ≥95%。
+    [15] G6-02（2026-04-24）+ EDGE-P2-flip T2（2026-04-26）：Combine Layer
+    shadow exit Python↔Rust 一致率守衛（overall + per-strategy 切片）。
+    V021 schema 用 `disagreed BOOLEAN` 編碼一致性（FALSE=Combine 同 Physical
+    baseline=Python ↔ Rust agree）。本 check 算 24h 窗口 1 - disagreed_ratio。
+    Phase 2 目標 ≥95%。
+    T2 新增 per-strategy 切片：每策略 24h 行數 + 一致率，per RFC §2.3：
+      - 任一 active 策略（n≥5）<95% → 整體升 WARN（非 FAIL，fail-soft）
+      - 樣本 <5 之策略跳過 WARN trigger（樣本太小）
+      - tier 標籤：[PASS] (≥95% & n≥5) / [WARN] (<95% & n≥5) / [SPARSE] (n<5)
     與 [8] 區別：[8] 是入場守衛（TOML state + ≥60% 軟底線）；[15] 是品質閘
-    （strict ≥95% 目標）。三態：PASS（24h=0 Phase 1a dormant，或 ≥95%）/
-    WARN（80-95%）/ FAIL（<80% 且非空，Combine 材質性分歧 EDGE-P2 應回退）。
+    （strict ≥95% 目標 + per-strategy stratified）。三態：PASS（24h=0 Phase 1a
+    dormant，或 ≥95% 且無 per-strategy WARN）/ WARN（80-95%，或整體 ≥95% 但
+    任一活躍策略 <95%）/ FAIL（<80% 且非空，Combine 材質性分歧 EDGE-P2 應回退）。
     """
     # Defensive rollback: keep cursor clean.
     # 防禦式 rollback：保持 cursor 乾淨。
@@ -1987,6 +2026,66 @@ def check_shadow_exit_agreement_phase2(cur) -> tuple[str, str]:
                 "decision_shadow_exits 24h=0 (Phase 1a dormant; agreement "
                 "evaluation deferred until shadow_enabled=true — see [8])")
 
+    # EDGE-P2-flip T2 addition: per-strategy 24h slice (count + agreement).
+    # Failure of this query is non-fatal (the headline ratio still computes);
+    # we just emit a "(per-strategy slice unavailable)" marker so operator
+    # knows the additional context is missing rather than silently truncated.
+    # T2 新增：per-strategy 24h 切片（行數 + 一致率）。
+    # 此查詢失敗不致命（全局比仍計算）；標註 unavailable 提示 operator。
+    per_strategy_tail = ""
+    per_strategy_warn = False
+    try:
+        cur.execute(
+            "SELECT strategy_name, "
+            "  COUNT(*)::int AS n, "
+            "  COUNT(*) FILTER (WHERE disagreed = FALSE)::int AS agree_n "
+            "FROM learning.decision_shadow_exits "
+            "WHERE ts > now() - interval '24 hours' "
+            "GROUP BY strategy_name "
+            "ORDER BY n DESC, strategy_name ASC"
+        )
+        per_strategy_rows = cur.fetchall()
+    except Exception as e:
+        per_strategy_rows = None
+        per_strategy_tail = f"; per_strategy=unavailable ({e})"
+
+    if per_strategy_rows is not None:
+        # Tier thresholds match RFC §2.3:
+        #   [PASS]   n ≥ 5 AND agreement ≥ 95%
+        #   [WARN]   n ≥ 5 AND agreement <  95%  (triggers overall WARN promotion)
+        #   [SPARSE] n < 5  (sample too small — skip WARN trigger)
+        # 分檔閾值與 RFC §2.3 對齊。
+        sparse_threshold = 5
+        target_pct = 95.0
+        slice_parts: list[str] = []
+        for row in per_strategy_rows:
+            name = str(row[0] or "(null)")
+            n = int(row[1] or 0)
+            ag = int(row[2] or 0)
+            if n == 0:
+                # Cannot occur (GROUP BY won't yield zero-count rows) but
+                # defensive — treat as SPARSE to avoid div-by-zero.
+                # 防禦：GROUP BY 不會產 0 計數行，但仍守住 div-by-zero。
+                continue
+            pct = 100.0 * ag / n
+            if n < sparse_threshold:
+                tier = "[SPARSE]"
+            elif pct >= target_pct:
+                tier = "[PASS]"
+            else:
+                tier = "[WARN]"
+                per_strategy_warn = True  # overall promote → WARN per RFC §2.3
+            slice_parts.append(f"{name}={n}({pct:.1f}%){tier}")
+
+        if slice_parts:
+            per_strategy_tail = "; per_strategy: " + ", ".join(slice_parts)
+        else:
+            # total > 0 but per-strategy GROUP BY returned no rows — only possible
+            # if every row has NULL strategy_name. Surface as a debug note.
+            # total > 0 但 per-strategy 無行 — 唯一可能 strategy_name 全 NULL；
+            # 標註以利除錯。
+            per_strategy_tail = "; per_strategy: (all rows have NULL strategy_name?)"
+
     agree_pct = 100.0 * agree_n / total
     base = f"24h_total={total}, agree={agree_n} ({agree_pct:.1f}%)"
 
@@ -1996,21 +2095,31 @@ def check_shadow_exit_agreement_phase2(cur) -> tuple[str, str]:
         return ("FAIL",
                 base + " — agreement <80%; EDGE-P2 flip should be reverted "
                 "(set [exit].shadow_enabled=false in risk_config_demo.toml + "
-                "investigate disagreement_reason distribution)")
+                "investigate disagreement_reason distribution)" + per_strategy_tail)
 
     # WARN: below 95% strict target but above intervention threshold.
     # WARN：低於 95% 嚴格目標但高於介入門檻。
     if agree_pct < 95.0:
         return ("WARN",
                 base + " — Phase 2 target ≥95% not met; investigate "
-                "disagreement_reason breakdown via SQL: "
-                "SELECT disagreement_reason, COUNT(*) FROM "
-                "learning.decision_shadow_exits WHERE disagreed=TRUE AND "
-                "ts > now() - interval '24 hours' GROUP BY 1 ORDER BY 2 DESC")
+                "disagreement_reason breakdown via "
+                "helper_scripts/research/shadow_disagreement_breakdown.py"
+                + per_strategy_tail)
 
-    # PASS: ≥95% target met.
-    # PASS：≥95% 目標達成。
-    return ("PASS", base + " — Phase 2 ≥95% target met")
+    # T2 per-strategy stratified WARN: overall ≥95% but ≥1 active strategy
+    # (n ≥ 5) below 95% — RFC §2.3 fail-soft semantics.
+    # T2 per-strategy 升 WARN：整體達標但任一活躍策略未達標 — RFC §2.3 fail-soft。
+    if per_strategy_warn:
+        return ("WARN",
+                base + " — overall ≥95% but ≥1 strategy <95% (per-strategy "
+                "stratified divergence per RFC §2.3); investigate via "
+                "helper_scripts/research/shadow_disagreement_breakdown.py"
+                + per_strategy_tail)
+
+    # PASS: ≥95% target met (overall + every active strategy).
+    # PASS：≥95% 目標達成（整體 + 每個活躍策略）。
+    return ("PASS", base + " — Phase 2 ≥95% target met (overall + per-strategy)"
+            + per_strategy_tail)
 
 
 # ---- main ----
