@@ -152,7 +152,6 @@ Business-events 已迁至 `program_code/market_data_processor/bybit_business_eve
 - bybit_private_rest_preflight_guard.py
 - bybit_private_ws_listener.py
 - bybit_private_ws_listener_ctl.sh
-- bybit_private_ws_smoke_test.py
 - bybit_private_ws_smoke_test_v2.py
 - bybit_public_connectivity_check.py
 - bybit_public_connectivity_status_writer.py
