@@ -79,6 +79,47 @@
     background: rgba(56,139,253,0.12); border: 1px solid rgba(56,139,253,0.3);
     color: var(--blue); user-select: none; transition: background 0.15s; }
   .oc-curr-badge:hover { background: rgba(56,139,253,0.25); }
+
+  /* ── F5/A3 — Live Tab visual hardening ───────────────────────────
+     Live Tab 永遠醒目（即使 engine 未啟動 / Live 槽未配置 / LiveDemo 模式）。
+     紅+紫雙下劃線 + 「⚠ REAL FUNDS」徽章常駐，即使尚未進入 active live。
+     避免 operator 點錯 tab 在不知情下下單。
+     Make Live Tab visually distinct at all times — purple+red double underline
+     + "⚠ REAL FUNDS" badge persists even when not active, to avoid operator
+     accidentally placing trades while thinking they're on Demo. */
+  .tab[data-tab="live"] {
+    color: #f87171;
+    font-weight: 700;
+    border-bottom: 2px solid transparent;
+    box-shadow: inset 0 -4px 0 0 rgba(168,85,247,0.6);
+    padding-right: 4px;
+  }
+  .tab[data-tab="live"].active {
+    color: #f87171;
+    border-bottom-color: #f87171;
+    box-shadow: inset 0 -4px 0 0 rgba(168,85,247,0.85);
+  }
+  .tab[data-tab="live"]::after {
+    content: " ⚠ REAL FUNDS";
+    font-size: 9px;
+    font-weight: 700;
+    color: rgba(239,68,68,0.85);
+    margin-left: 6px;
+    letter-spacing: 0.4px;
+    background: rgba(239,68,68,0.12);
+    padding: 1px 5px;
+    border-radius: 3px;
+    border: 1px solid rgba(239,68,68,0.3);
+  }
+  /* Demo / Paper tabs — clearly distinct (no danger color) / 演示/模擬 Tab 顏色明確區分 */
+  .tab[data-tab="demo"] {
+    color: var(--blue);
+    box-shadow: inset 0 -4px 0 0 rgba(59,130,246,0.4);
+  }
+  .tab[data-tab="paper"] {
+    color: #34d399;
+    box-shadow: inset 0 -4px 0 0 rgba(34,197,94,0.4);
+  }
 </style>
 </head>
 <body>
@@ -129,7 +170,13 @@
         <div class="mc-sub" id="s-live-balance-detail"></div>
       </div>
       <div class="mc" id="live-pnl-section" style="opacity:0.5">
-        <div class="mc-label"><abbr title="Net Unrealized Profit & Loss / 未实现净损益">Net PnL</abbr></div>
+        <!-- F5/A2 — sidebar uses Live metrics endpoint (unrealized + realized − fees)
+                     same identity as tab-live "今日淨 PnL"; NO LONGER unrealized-only
+                     to prevent the inconsistent definition that confused operators.
+             F5/A2 — 側欄改用 /api/v1/live/metrics 與 tab-live「今日淨 PnL」對齊：
+                     unrealized + realized − fees。原本只顯示 unrealized 的定義不一致
+                     會讓 operator 一看側欄一看主面板對不上號。 -->
+        <div class="mc-label"><abbr title="淨 PnL = 未實現 + 已實現 − 手續費，與 Live Tab『今日淨 PnL』口徑一致 / Net PnL = unrealized + realized − fees, aligned with Live Tab definition">Net PnL · 淨</abbr></div>
         <div class="mc-val" id="s-live-pnl">--</div>
         <div class="mc-sub" id="s-live-pnl-detail"></div>
       </div>
@@ -351,60 +398,102 @@ async function refreshSidebar() {
   document.getElementById('live-balance-section').style.opacity = '1';
   document.getElementById('live-pnl-section').style.opacity = '1';
 
-  // Show system_mode + active engines from live session status
-  // 從 live session status 顯示 system_mode + 活躍引擎列表
+  // F5/A1+A2 — fetch session status + balance + metrics in one go.
+  //   session/status → mode label + actual_endpoint (LiveDemo / Mainnet / unconfigured)
+  //   balance        → equity / available / engine_total_fees
+  //   metrics        → realized_pnl identity (unrealized + realized − fees)
+  // F5/A1+A2：一次抓 status + balance + metrics。前者給 mode + endpoint 標籤，
+  // 後者算與 tab-live「今日淨 PnL」一致的口徑。
+  let sessionData = null, balData = null, metricsData = null;
   try {
-    const ls = await api('/api/v1/live/session/status');
-    const modeEl = document.getElementById('s-live-mode');
-    if (ls && ls.data) {
-      const d = ls.data;
-      const systemMode = d.system_mode || 'unknown';
-      const execAuth = d.execution_authority || 'not_granted';
-      const sessionState = (d.session && d.session.session_state) || 'offline';
-      const isLiveActive = sessionState === 'active' && execAuth === 'granted';
-      // Display system_mode with readable formatting / 以可讀格式顯示 system_mode
-      const modeLabel = systemMode.replace(/_/g, ' ');
-      const modeColor = {
-        live_reserved: '#a855f7',
-        demo_reserved: '#3b82f6',
-        shadow_only:   '#f59e0b',
-        observe_only:  '#6b7280',
-        design_only:   '#6b7280',
-      }[systemMode] || '';
-      modeEl.textContent = modeLabel;
-      modeEl.className = 'mc-val';
-      modeEl.style.color = modeColor;
-      // Show auth detail when session is active / 僅在 session active 時顯示 auth
-      document.getElementById('s-live-mode-detail').textContent =
-        isLiveActive ? 'auth: ' + execAuth : '';
-    } else {
-      modeEl.textContent = '--';
-      document.getElementById('s-live-mode-detail').textContent = '';
-    }
-  } catch(e) {
-    document.getElementById('s-live-mode').textContent = '--';
+    const [lsR, bR, mR] = await Promise.allSettled([
+      api('/api/v1/live/session/status'),
+      api('/api/v1/live/balance'),
+      api('/api/v1/live/metrics'),
+    ]);
+    sessionData = lsR.status === 'fulfilled' && lsR.value && lsR.value.data;
+    balData = bR.status === 'fulfilled' && bR.value && bR.value.data;
+    metricsData = mR.status === 'fulfilled' && mR.value && mR.value.data;
+  } catch(e) {}
+
+  // Show system_mode + endpoint label / 顯示 system_mode + endpoint 標籤
+  const modeEl = document.getElementById('s-live-mode');
+  if (sessionData) {
+    const systemMode = sessionData.system_mode || 'unknown';
+    const execAuth = sessionData.execution_authority || 'not_granted';
+    const sessionState = (sessionData.session && sessionData.session.session_state) || 'offline';
+    const actualEpt = sessionData.actual_endpoint || 'unconfigured';
+    const actualKind = sessionData.actual_engine_kind || sessionData.engine_kind || 'unknown';
+    const isLiveActive = sessionState === 'active' && execAuth === 'granted' && actualKind === 'live';
+    // F5/A1: include endpoint label so the sidebar can't misrepresent LiveDemo
+    //        as Mainnet (or unconfigured as either).
+    // F5/A1：mode 標籤含 endpoint 後綴避免誤標 LiveDemo / Mainnet / 未配置。
+    const epSuffix = actualEpt === 'mainnet' ? ' · Mainnet'
+                   : actualEpt === 'live_demo' ? ' · LiveDemo'
+                   : actualEpt === 'unconfigured' ? ' · 未配置' : '';
+    const modeLabel = systemMode.replace(/_/g, ' ') + epSuffix;
+    const modeColor = actualEpt === 'mainnet' ? '#f87171'
+                    : actualEpt === 'live_demo' ? '#f97316'
+                    : ({
+                        live_reserved: '#a855f7',
+                        demo_reserved: '#3b82f6',
+                        shadow_only:   '#f59e0b',
+                        observe_only:  '#6b7280',
+                        design_only:   '#6b7280',
+                      }[systemMode] || '');
+    modeEl.textContent = modeLabel;
+    modeEl.className = 'mc-val';
+    modeEl.style.color = modeColor;
+    document.getElementById('s-live-mode-detail').textContent =
+      isLiveActive ? 'auth: ' + execAuth :
+      actualKind !== 'live' ? 'engine: ' + actualKind : '';
+  } else {
+    modeEl.textContent = '--';
     document.getElementById('s-live-mode-detail').textContent = '';
   }
 
   // Live balance from /api/v1/live/balance (httpx BybitClient — real exchange data)
   // 實盤餘額來自 /api/v1/live/balance（httpx BybitClient — 真實交易所數據）
   try {
-    const bd = await api('/api/v1/live/balance');
-    if (bd && bd.data && bd.data.available !== false) {
-      const b = bd.data;
+    if (balData && balData.error === 'live_slot_not_configured') {
+      // F5/A1: refuse to display demo balance under the Live label
+      // F5/A1：拒絕在 Live 標籤下顯示 demo 帳戶
+      document.getElementById('s-live-balance').textContent = 'N/A';
+      document.getElementById('s-live-balance-detail').textContent = 'Live 槽未配置 / Live slot not configured';
+      const pnlEl = document.getElementById('s-live-pnl');
+      pnlEl.textContent = 'N/A';
+      pnlEl.className = 'mc-val';
+      document.getElementById('s-live-pnl-detail').textContent = '';
+    } else if (balData && balData.available !== false) {
+      const b = balData;
       const equity = parseFloat(b.total_equity || b.totalEquity || b.equity || 0);
       const available = parseFloat(b.total_available_balance || b.totalAvailableBalance || b.available_balance || 0);
       const unrealized = parseFloat(b.total_unrealised_pnl || b.totalPerpUPL || b.unrealized_pnl || 0);
+      const engineFees = parseFloat(b.engine_total_fees || 0) || 0;
 
       document.getElementById('s-live-balance').textContent = equity > 0 ? ocBalance(equity, 2) : '--';
       document.getElementById('s-live-balance-detail').textContent =
         available > 0 ? 'Available: ' + ocBalance(available, 2) : (b.source || 'connecting...');
 
+      // F5/A2 — Net PnL = unrealized + realized − fees (same identity as tab-live)
+      // F5/A2 — Net PnL = 未實現 + 已實現 − 手續費（與 Live Tab 一致）
+      let realized = 0;
+      if (metricsData && metricsData.error !== 'live_slot_not_configured') {
+        const tm = (metricsData.trade_metrics) || {};
+        const dm = (metricsData.dollar_metrics) || {};
+        realized = parseFloat(
+          dm.total_realized_pnl ?? tm.total_realized_pnl ?? metricsData.realized_pnl ?? 0
+        ) || 0;
+      }
+      const netPnl = unrealized + realized - engineFees;
       const pnlEl = document.getElementById('s-live-pnl');
-      pnlEl.textContent = unrealized !== 0 ? ocMoney(unrealized) : '--';
-      pnlEl.className = 'mc-val' + (unrealized > 0 ? ' green' : unrealized < 0 ? ' red' : '');
+      pnlEl.textContent = netPnl !== 0 ? ocMoney(netPnl) : '--';
+      pnlEl.className = 'mc-val' + (netPnl > 0 ? ' green' : netPnl < 0 ? ' red' : '');
+      // Show breakdown so operator sees why net differs from unrealized alone.
+      // 顯示拆解，讓 operator 一看就懂淨 PnL 與單獨 UPL 的差異來源。
       document.getElementById('s-live-pnl-detail').textContent =
-        unrealized !== 0 ? 'UPL (Unrealized PnL): ' + unrealized.toFixed(2) : 'UPL: --';
+        'UPL ' + unrealized.toFixed(2) + ' + Realized ' + realized.toFixed(2) +
+        ' − Fees ' + engineFees.toFixed(2);
     } else {
       document.getElementById('s-live-balance').textContent = '--';
       document.getElementById('s-live-balance-detail').textContent = 'connecting...';
