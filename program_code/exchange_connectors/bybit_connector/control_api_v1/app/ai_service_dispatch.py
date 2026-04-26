@@ -108,6 +108,16 @@ class AIService:
             "conductor_evaluate": self._handle_conductor,
             "scout_scan": self._handle_scout,
             "guardian_check": self._handle_guardian,
+            # G3-08 Phase 1 Sub-task B: reverse IPC route for Rust h_state_cache
+            # poller. Always registered (route reachable regardless of env-gate)
+            # — only the Python-side invalidator + Rust-side poller daemon are
+            # gated by ``OPENCLAW_H_STATE_GATEWAY``. Phase 1 returns an empty
+            # shell; Phase 2-4 progressively populate H1-H5 + 5-Agent stats.
+            # G3-08 Phase 1 Sub-task B：Rust h_state_cache poller 的 reverse IPC
+            # 路由。**永遠註冊**（route 不受 env 閘控可達）—— 只有 Python 端
+            # invalidator 與 Rust 端 poller daemon 受 ``OPENCLAW_H_STATE_GATEWAY``
+            # 閘控。Phase 1 回空殼；Phase 2-4 逐步填入 H1-H5 + 5-Agent 統計。
+            "query_h_state_full": self._handle_query_h_state_full,
         }
 
     # ─── Main dispatch / 主分派入口 ───
@@ -781,6 +791,51 @@ class AIService:
             if word in valid_levels:
                 return {"risk_level": word, "assessment": f"Classified as {word}"}
             return {"risk_level": fallback_severity, "assessment": f"Parse failed, fallback: {fallback_severity}"}
+
+    # ─── G3-08 Phase 1 Sub-task B: H-state reverse IPC handler ───
+    # G3-08 Phase 1 Sub-task B：H 狀態 reverse IPC 處理器
+
+    async def _handle_query_h_state_full(
+        self,
+        params: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Reverse IPC handler for Rust ``h_state_cache`` poller.
+        Rust ``h_state_cache`` poller 的 reverse IPC 處理器。
+
+        Phase 1 always returns the empty-shell shape from
+        :func:`h_state_query_handler.build_h_state_full_response`. Phase 2-4
+        populate progressively. The handler is registered unconditionally —
+        only the Python-side invalidator + Rust-side poller daemon are gated
+        by ``OPENCLAW_H_STATE_GATEWAY`` (per PA design §10.1 completion
+        criteria).
+
+        Phase 1 永遠回 :func:`h_state_query_handler.build_h_state_full_response`
+        定義的空殼結構；Phase 2-4 漸進填入。本 handler **無條件註冊**，
+        只有 Python 端 invalidator 與 Rust 端 poller daemon 受
+        ``OPENCLAW_H_STATE_GATEWAY`` 閘控（PA design §10.1 完成標準）。
+
+        Pure-function path — never raises. Lazy import of
+        ``h_state_query_handler`` to avoid bootstrap cycles in test fixtures.
+        純函式路徑，永不 raise。延遲匯入 ``h_state_query_handler`` 以避免
+        測試 fixture 中的 bootstrap 循環。
+        """
+        include = params.get("include") if isinstance(params, dict) else None
+        if include is not None and not isinstance(include, list):
+            # Defensive: ignore malformed ``include`` payloads. Don't raise —
+            # the Rust caller treats a stale/empty response as "skip this poll".
+            # 防禦：忽略畸形 ``include``；Rust 呼叫端視空/過時回應為「跳過此 poll」。
+            include = None
+        # Lazy import keeps this module importable even when the H-state
+        # query handler is absent (e.g. during partial Phase 1 deploy).
+        # 延遲匯入：即使 H 狀態查詢 handler 缺席（如 Phase 1 部分部署）
+        # 本模組仍可匯入。
+        from .h_state_query_handler import build_h_state_full_response  # noqa: PLC0415
+        result = build_h_state_full_response(include=include)
+        # AIService.dispatch wraps response with ``_elapsed_ms``; we just
+        # return the payload. Per PA §4.2.1 schema.
+        # AIService.dispatch 會包 ``_elapsed_ms``；此處只回 payload，對齊
+        # PA §4.2.1 schema。
+        return result
 
     # ─── Stats & introspection / 統計與自省 ───
 

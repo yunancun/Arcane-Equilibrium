@@ -82,6 +82,14 @@ HANDLER_TTLS: dict[str, float] = {
     "conductor_evaluate": 10.0,    # Orchestration / 編排決策
     "scout_scan": 10.0,            # Market scanning / 市場掃描
     "guardian_check": 5.0,         # Risk check (fastest) / 風控檢查（最快）
+    # G3-08 Phase 1 Sub-task B: H-state aggregator stub. Short TTL because the
+    # handler is a pure-function read (Phase 1 returns empty shell). Phase 2-4
+    # may revisit if singleton snapshot reads grow expensive, but should stay
+    # ≤ 1s to honour PA §G2 (≤ 5ms reverse-pull SLA).
+    # G3-08 Phase 1 Sub-task B：H 狀態聚合器 stub。短 TTL，因為 handler 為
+    # 純函式讀取（Phase 1 回空殼）。Phase 2-4 若 snapshot 讀取變昂貴再
+    # 評估，但應維持 ≤ 1s 以對齊 PA §G2（reverse-pull SLA ≤ 5ms）。
+    "query_h_state_full": 2.0,
 }
 
 # Socket path defaults / Socket 路徑默認值
