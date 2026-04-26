@@ -9,11 +9,14 @@ MODULE_NOTE (EN): Extracted from the original ``passive_wait_healthcheck.py``:
   * [14] check_exit_features_accumulation_rate   (lines 1593-1782)
   * [15] check_shadow_exit_agreement_phase2      (lines 1903-2122)
   * [16] check_strategist_cycle_fresh            (lines 1785-1900)
+  * [24] check_signals_writer_freshness           (added 2026-04-26 by F7
+    MIT DB audit — trading.signals dead-writer guard for 2026-04-19 style
+    silent regression)
 
 These all live on the strategy / scheduler axis: intent flow, EDGE-DIAG
 counterfactual gate, bb_breakout deadlock-fix verification, edge
 scheduler freshness, EDGE-P1b accumulation, EDGE-P2 agreement gate, and
-G3-11 strategist cycle liveness.
+G3-11 strategist cycle liveness, and signals writer freshness.
 
 SQL strings, exit-code semantics, output formatting are byte-identical
 to the pre-split version.
@@ -1046,3 +1049,106 @@ def check_shadow_exit_agreement_phase2(cur) -> tuple[str, str]:
     # PASS：≥95% 目標達成（整體 + 每個活躍策略）。
     return ("PASS", base + " — Phase 2 ≥95% target met (overall + per-strategy)"
             + per_strategy_tail)
+
+
+# ============================================================================
+# F7 (2026-04-26): MIT DB audit — strategy-side silent regression sentinel.
+# F7（2026-04-26）：MIT DB audit — 策略側 silent regression 哨兵。
+# ============================================================================
+
+
+def check_signals_writer_freshness(cur) -> tuple[str, str]:
+    """[24] trading.signals writer freshness — detect silent dead writer.
+
+    F7 MIT spec (2026-04-26). The ``trading.signals`` writer has been silent
+    since 2026-04-19 (7+ days at audit time) without any of the prior 19
+    checks alarming. The signal-flow side of the strategist pipeline is a
+    research / audit anchor — when the writer dies the table stops growing
+    silently while strategist evaluation appears healthy elsewhere ([10]
+    intents and [12] entries are different concerns).
+
+    SQL: ``EXTRACT(EPOCH FROM (now() - max(ts))) / 3600`` for hours_stale +
+    ``count(*) FILTER (WHERE ts > now() - interval '24 hours')`` for
+    rows_24h. NO engine_mode filter — signals writer activity is global
+    (the table is a research-anchor, not a per-engine ledger).
+
+    Three-state verdict:
+      * FAIL: hours_stale > 6h (writer dead, 6h cron tick should already see it)
+      * WARN: hours_stale 1-6h (drift; investigate)
+      * PASS: hours_stale < 1h (fresh)
+
+    Edge case: ``max(ts)`` over empty table → NULL → coerced to ``infinity``
+    sentinel → triggers FAIL with explicit "table never written to" message.
+    This is the steady-state fingerprint of the 2026-04-19 silent outage.
+
+    [24] trading.signals writer freshness — silent dead writer 偵測。
+    F7 MIT spec（2026-04-26）。trading.signals writer 自 2026-04-19 死寫 7+ 天
+    無任何 healthcheck 警報。signal flow 是研究/audit 錨點，writer 死時表悄悄
+    停止成長但 strategist 看起來正常（[10][12] 是不同關注點）。
+    SQL：max(ts) → hours_stale + 24h rows count，無 engine_mode 過濾（signals
+    為全局 research 錨）。三態：FAIL（>6h stale）/ WARN（1-6h）/ PASS（<1h）。
+    空表 max(ts)→NULL→infinity sentinel→FAIL 並顯式「table never written to」，
+    完全對齊 4/19 silent outage 指紋。
+    """
+    # Defensive rollback to keep cursor clean across checks.
+    # 防禦式 rollback 跨 check 保持 cursor 乾淨。
+    try:
+        cur.connection.rollback()
+    except Exception:
+        pass
+
+    # Table existence guard — signals is provisioned by V004; if a fresh DB
+    # never ran V004 (rare but possible in a clean dev box), surface that
+    # rather than crashing the cursor on UndefinedTable.
+    # 表存在性守衛 — signals 由 V004 建；新 DB 沒跑 V004 時顯式 FAIL，避免
+    # cursor 撞 UndefinedTable 全 check 連鎖崩。
+    try:
+        cur.execute("SELECT to_regclass('trading.signals') IS NOT NULL")
+        exists = cur.fetchone()[0]
+    except Exception as e:
+        return ("FAIL", f"signals table existence check failed: {e}")
+    if not exists:
+        return ("FAIL", "trading.signals missing — V004 not applied")
+
+    try:
+        cur.execute(
+            "SELECT EXTRACT(EPOCH FROM (now() - max(ts))) / 3600 AS hours_stale, "
+            "  count(*) FILTER (WHERE ts > now() - interval '24 hours') AS rows_24h "
+            "FROM trading.signals"
+        )
+        row = cur.fetchone()
+    except Exception as e:
+        return ("WARN", f"signals freshness query failed: {type(e).__name__}: {e}")
+
+    if row is None:
+        return ("WARN", "signals freshness query returned no row (PG anomaly)")
+
+    rows_24h = int(row[1] or 0)
+
+    # max(ts) over empty table → NULL. This is the 4/19-style silent
+    # dead-writer fingerprint we explicitly want to catch.
+    # 空表 max(ts)→NULL — 4/19 silent dead-writer 的明確指紋。
+    if row[0] is None:
+        return (
+            "FAIL",
+            f"trading.signals empty (24h_n={rows_24h}) — table never written to / "
+            f"writer dead since inception (per 2026-04-19 silent outage fingerprint)",
+        )
+
+    hours_stale = float(row[0])
+    base_msg = f"trading.signals: hours_stale={hours_stale:.2f}h, rows_24h={rows_24h}"
+
+    # Three-state verdict per MIT spec.
+    # MIT spec 三態 verdict。
+    if hours_stale > 6.0:
+        return (
+            "FAIL",
+            base_msg + " — writer dead >6h (matches 2026-04-19 silent outage; "
+            "RCA Rust signals_writer / strategist signal emit path)",
+        )
+    if hours_stale >= 1.0:
+        return (
+            "WARN",
+            base_msg + " — writer drift 1-6h; investigate before threshold escalates",
+        )
+    return ("PASS", base_msg + " — writer fresh (<1h)")

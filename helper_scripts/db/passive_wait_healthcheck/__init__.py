@@ -32,6 +32,13 @@ from .checks_engine import (  # noqa: F401
     check_label_backfill_ratio,
     check_exit_features_writer,
     check_paper_state_dust_inventory,
+    # F7 (2026-04-26) MIT+E5 silent-regression sentinels
+    check_trading_pipeline_silent_gap,
+    check_orders_fills_consistency,
+    check_dust_qty_distribution,
+    check_intents_counter_freeze,
+    check_phantom_fills_attribution,
+    check_reconciler_paper_state_divergence,
 )
 from .checks_ipc_edge import (  # noqa: F401
     check_phys_lock_runtime,
@@ -49,6 +56,8 @@ from .checks_strategy import (  # noqa: F401
     check_exit_features_accumulation_rate,
     check_shadow_exit_agreement_phase2,
     check_strategist_cycle_fresh,
+    # F7 (2026-04-26) MIT silent-regression sentinel
+    check_signals_writer_freshness,
 )
 from .checks_derived import (  # noqa: F401
     check_leader_election_health,
@@ -56,6 +65,8 @@ from .checks_derived import (  # noqa: F401
     check_disabled_strategy_inventory,
     check_observer_pipeline_alive,
     check_h_state_gateway_freshness,
+    # F7 (2026-04-26) ML hygiene derived sentinel
+    check_dust_spiral_noise_in_ef,
 )
 
 __all__ = [
@@ -65,6 +76,13 @@ __all__ = [
     "check_label_backfill_ratio",
     "check_exit_features_writer",
     "check_paper_state_dust_inventory",
+    # F7 engine flow MIT+E5
+    "check_trading_pipeline_silent_gap",
+    "check_orders_fills_consistency",
+    "check_dust_qty_distribution",
+    "check_intents_counter_freeze",
+    "check_phantom_fills_attribution",
+    "check_reconciler_paper_state_divergence",
     # risk layer + shadow + freshness + registry
     "check_phys_lock_runtime",
     "check_micro_profit_fire",
@@ -80,10 +98,14 @@ __all__ = [
     "check_exit_features_accumulation_rate",
     "check_shadow_exit_agreement_phase2",
     "check_strategist_cycle_fresh",
+    # F7 strategy MIT
+    "check_signals_writer_freshness",
     # derived / observability
     "check_leader_election_health",
     "check_pipeline_triangulation",
     "check_disabled_strategy_inventory",
     "check_observer_pipeline_alive",
     "check_h_state_gateway_freshness",
+    # F7 derived ML hygiene
+    "check_dust_spiral_noise_in_ef",
 ]
