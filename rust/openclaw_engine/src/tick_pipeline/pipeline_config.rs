@@ -131,6 +131,18 @@ impl TickPipeline {
         } else {
             self.paper_state.set_take_profit_pct(None);
         }
+        // EVICT-ON-DUST F3 (PA §1.2.6): mirror RiskConfig.limits.ft_dust_qty_floor_usd
+        // into paper_state so apply_fill / reduce_position post-mutation evict
+        // (T1/T2) reads the live floor without a fresh ConfigStore::load() on
+        // the hot path. Re-uses af48ee1 schema; no new field. Hot-reload picks
+        // up operator TOML edits via the same `risk_config_version_seen` path
+        // that drives every other Guardian / paper_state knob.
+        // EVICT-ON-DUST F3：將 ft_dust_qty_floor_usd 鏡射進 paper_state，
+        // hot-path 後置 evict 直接讀 self.dust_floor_usd 不再多 1 層
+        // ConfigStore 跳轉。沿用 af48ee1 既有 schema、無新欄位；operator TOML
+        // 變更走既有版本號熱重載通道，與其他 Guardian / paper_state 旋鈕一致。
+        self.paper_state
+            .set_dust_floor_usd(snap.limits.ft_dust_qty_floor_usd);
 
         // 5. ARCH-RC1 1C-2-F E-Merge-3: hot-reload RiskGovernorSm.thresholds
         //    from RiskConfig.cascade. Previously the 6-tier cascade state
