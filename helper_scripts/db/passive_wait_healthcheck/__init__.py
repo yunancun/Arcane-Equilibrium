@@ -54,6 +54,7 @@ from .checks_derived import (  # noqa: F401
     check_pipeline_triangulation,
     check_disabled_strategy_inventory,
     check_observer_pipeline_alive,
+    check_h_state_gateway_freshness,
 )
 
 __all__ = [
@@ -82,4 +83,5 @@ __all__ = [
     "check_pipeline_triangulation",
     "check_disabled_strategy_inventory",
     "check_observer_pipeline_alive",
+    "check_h_state_gateway_freshness",
 ]

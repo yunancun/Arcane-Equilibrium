@@ -9,27 +9,36 @@ MODULE_NOTE (EN): Extracted from the original ``passive_wait_healthcheck.py``:
     OBSERVER-PIPELINE-POST-F42FACE-CLEANUP — silent-fail guard for the
     bybit observer cron cycle that ran 100%-fail for 3 days while a
     noise wrapper swallowed every FAIL.)
+  * [20] check_h_state_gateway_freshness     (added 2026-04-26 by
+    G3-08 Phase 1C — DEFAULT-OFF env-gate sentinel; PASS-skips when
+    ``OPENCLAW_H_STATE_GATEWAY != "1"`` (Phase 1 dormant by design),
+    verifies IPC route + Phase 1 stub shape when env=1.)
 
-These four are derivative / cross-cutting checks that don't fit the
+These five are derivative / cross-cutting checks that don't fit the
 direct fill-flow / risk-layer / strategy-flow axes. [Xa] watches the
 edge-scheduler leader-lock; [Xb] cross-validates the fills/labels/intents
 scale ratios; [18] surfaces TOML-disabled strategies for §三 drift
 defense; [19] proves the bybit observer cron pipeline is actually
 producing fresh, non-error JSON (the kind of guard CLAUDE.md §七
 "被動等待 TODO 必附 healthcheck" mandates after 2026-04-22 silent-fail
-postmortems).
+postmortems); [20] proves the H-state Python→Rust hint channel + reverse
+IPC route are wired correctly, with strict env-gated PASS-skip when
+disabled (the canonical DEFAULT-OFF Phase 1 dormant state).
 
 SQL strings, exit-code semantics, output formatting are byte-identical
-to the pre-split version (except for the new [19] which is purely
-filesystem-driven — no DB cursor, no IPC).
+to the pre-split version (except for the new [19]/[20] which are purely
+filesystem-driven / pure-Python — no DB cursor, no live IPC roundtrip).
 
 MODULE_NOTE (中): 衍生 / 跨層觀察性 check：[Xa] 看 edge-scheduler leader-lock，
 [Xb] 三角驗證 fills/labels/intents 比例，[18] 列 TOML disabled 策略以防
 CLAUDE.md §三 drift，[19] 看 bybit observer cron cycle 是否實際產出
 新鮮且無錯的 JSON（OBSERVER-PIPELINE-POST-F42FACE-CLEANUP 2026-04-26 加
-— cron 連續 3 天 100% fail 被 noise wrapper 吞掉的反面教材）。
-SQL / exit code / 輸出格式與拆分前 byte-identical（[19] 為新增、純檔案
-系統 check，無 DB cursor / IPC）。
+— cron 連續 3 天 100% fail 被 noise wrapper 吞掉的反面教材），[20] 驗證
+H 狀態 Python→Rust 提示通道與 reverse IPC route 接線正確（嚴格 env=0 時
+PASS-skip 對齊 G3-08 Phase 1 dormant 設計、env=1 時驗 route 註冊 +
+Phase 1 stub schema）。
+SQL / exit code / 輸出格式與拆分前 byte-identical（[19][20] 為新增；
+[20] 純 Python import + module reflection，無 DB cursor、無 live IPC）。
 """
 
 from __future__ import annotations
@@ -592,3 +601,217 @@ def check_observer_pipeline_alive() -> tuple[str, str]:
         # operator triage。
         return ("WARN", base_msg + " — mtime drift (>1h since last cycle)")
     return ("PASS", base_msg)
+
+
+def check_h_state_gateway_freshness() -> tuple[str, str]:
+    """[20] G3-08 Phase 1C (2026-04-26): H-state gateway env-gate + IPC route + stub schema sentinel.
+
+    MODULE_NOTE (EN): G3-08 Phase 1C completion-criteria sentinel per PA design
+    plan §10.1 + 附錄 A. The H-state gateway is the Python → Rust observability
+    bridge (mirror of G3-03 ExecutorConfigCache pattern but flipped flow:
+    Python = SSOT, Python pushes ``invalidate_h_state`` hints, Rust ``h_state_cache``
+    poller pulls full snapshot via ``query_h_state_full`` reverse IPC). Phase 1
+    is plumbing-only: H1-H5 / 5-Agent producers stay silent; Phase 2-4 wire
+    the actual ``invalidate_async`` call sites + ``get_*_snapshot()`` methods.
+
+    Two-phase verdict (per PA §10.1 completion criteria):
+
+      A. **DEFAULT-OFF path (``OPENCLAW_H_STATE_GATEWAY != "1"``)**:
+         PASS-skip with explicit dormant note. This is the canonical Phase 1
+         resting state — the gateway should NOT be enabled in production
+         until Phase 4 lands the 5-Agent producers. PASS-skip is correct
+         (silent-fail guard would alarm if env crept back to "1" before all
+         producers are wired, but Phase 1 dormancy is by design).
+
+      B. **DEFAULT-ON path (``OPENCLAW_H_STATE_GATEWAY == "1"``)**:
+         Verify three Phase 1 invariants without making a live IPC roundtrip
+         (which would couple this script to the auth secret + main process
+         being up — too brittle for a 6h cron):
+           1. Reverse IPC route ``query_h_state_full`` is registered in
+              ``ai_service_dispatch.py`` (grep-based detection, byte-stable).
+           2. ``h_state_invalidator.py`` and ``h_state_query_handler.py``
+              modules import successfully (Phase 1 plumbing intact).
+           3. ``build_h_state_full_response()`` returns the canonical
+              Phase 1 stub shape (version=0, h_states={}, agent_states={}).
+         Three-state output:
+           - PASS: all 3 invariants hold.
+           - WARN: invariant 3 fails (schema drift; Phase 2-4 may have
+             populated buckets prematurely or stub regressed).
+           - FAIL: invariants 1 or 2 fail (route deregistered or modules
+             unimportable — gateway is actually broken).
+
+    Pure-function check: no live IPC, no DB cursor, no socket. We grep the
+    dispatch source on disk and import the two Python modules. This matches
+    the [16] strategist_cycle_fresh log-tail-parse philosophy: keep the
+    healthcheck self-contained so cron/CI can run it without HMAC secrets.
+
+    Cross-platform: pure ``Path.read_text()`` + ``importlib.import_module()``;
+    no Linux-only API. Works identically on Mac dev and Linux prod.
+
+    [20] G3-08 Phase 1C（2026-04-26）：H 狀態橋接器 env-gate + IPC route +
+    stub schema 哨兵。
+    對齊 PA design plan §10.1 完成標準與附錄 A。H 狀態橋接器是 Python →
+    Rust 可觀察性橋（鏡射 G3-03 ExecutorConfigCache pattern，但資料流相反：
+    Python=SSOT，Python 推 ``invalidate_h_state`` 提示，Rust ``h_state_cache``
+    poller 透過 ``query_h_state_full`` reverse IPC 拉完整 snapshot）。
+    Phase 1 純線路：H1-H5 / 5-Agent producer 保持靜默；Phase 2-4 才接實際
+    ``invalidate_async`` 呼叫點與 ``get_*_snapshot()`` 方法。
+
+    兩段判決（PA §10.1 完成標準）：
+      A. DEFAULT-OFF（``OPENCLAW_H_STATE_GATEWAY != "1"``）：PASS-skip 帶
+         dormant 說明 —— Phase 1 標準靜止狀態，正式環境 Phase 4 接完
+         producer 之前 NOT 啟用。
+      B. DEFAULT-ON（``OPENCLAW_H_STATE_GATEWAY == "1"``）：驗 3 個 Phase 1
+         不變量（不做 live IPC roundtrip 避免 6h cron 與 auth secret/主程序
+         耦合）：
+           1. ``ai_service_dispatch.py`` 中 ``query_h_state_full`` route 已註冊
+              （grep 偵測，byte-stable）
+           2. ``h_state_invalidator.py`` 與 ``h_state_query_handler.py`` 模組
+              可匯入（Phase 1 線路完好）
+           3. ``build_h_state_full_response()`` 回傳標準 Phase 1 stub
+              （version=0、h_states={}、agent_states={}）
+         三態：3 個全 hold = PASS；invariant 3 fail = WARN（schema drift）；
+         invariant 1 或 2 fail = FAIL（route 取消或模組無法 import = 真壞）。
+
+    純函式 check：無 live IPC、無 DB cursor、無 socket。grep 磁碟上的
+    dispatch source + import 兩個 Python 模組。對齊 [16] strategist_cycle_fresh
+    的 log-tail-parse 哲學 —— 讓 healthcheck 自足，cron/CI 不需 HMAC 即可跑。
+
+    跨平台：純 ``Path.read_text()`` + ``importlib.import_module()``；
+    無 Linux-only API。Mac dev 與 Linux prod 行為一致。
+    """
+    # Path A: env-gate disabled → PASS-skip (Phase 1 dormant by design).
+    # 路徑 A：env 關閉 → PASS-skip（Phase 1 dormant by design）。
+    env_val = os.environ.get("OPENCLAW_H_STATE_GATEWAY")
+    if env_val != "1":
+        env_repr = f"={env_val!r}" if env_val is not None else "=unset"
+        return (
+            "PASS",
+            f"OPENCLAW_H_STATE_GATEWAY{env_repr} (≠'1') — Phase 1 dormant "
+            "by design (per PA §10.1 completion criteria); skip",
+        )
+
+    # Path B: env-gate enabled → verify 3 Phase 1 invariants.
+    # 路徑 B：env 開啟 → 驗 3 個 Phase 1 不變量。
+
+    # Invariant 1: ``query_h_state_full`` route registered in dispatch source.
+    # We grep the source file rather than importing AIService to avoid
+    # spawning the heavy control-api boot path inside a 6h cron.
+    # 不變量 1：``query_h_state_full`` route 在 dispatch source 中已註冊。
+    # grep 源檔而非 import AIService，避免 6h cron 觸發重型 control-api 啟動。
+    base = os.environ.get("OPENCLAW_BASE_DIR") or os.environ.get(
+        "OPENCLAW_SRV_ROOT"
+    )
+    if not base:
+        # Production Linux fallback (mirrors check_observer_pipeline_alive).
+        # 生產 Linux fallback（對齊 check_observer_pipeline_alive）。
+        base = str(Path.home() / "BybitOpenClaw" / "srv")
+    dispatch_path = (
+        Path(base)
+        / "program_code"
+        / "exchange_connectors"
+        / "bybit_connector"
+        / "control_api_v1"
+        / "app"
+        / "ai_service_dispatch.py"
+    )
+
+    if not dispatch_path.exists():
+        return (
+            "FAIL",
+            f"ai_service_dispatch.py missing at {dispatch_path} — "
+            "Sub-task B did not deploy; gateway broken",
+        )
+
+    try:
+        dispatch_src = dispatch_path.read_text(encoding="utf-8")
+    except OSError as e:
+        # Filesystem race or permission glitch — WARN to avoid masking the
+        # real signal with a healthcheck-side IO error (mirrors [Xa]/[18]
+        # fail-soft pattern).
+        # 檔案系統競態或權限故障 —— WARN 避免 healthcheck-side IO 錯誤
+        # 遮蔽真實信號（對齊 [Xa]/[18] fail-soft pattern）。
+        return ("WARN", f"dispatch source read failed: {e}")
+
+    if '"query_h_state_full"' not in dispatch_src:
+        return (
+            "FAIL",
+            f"reverse IPC route 'query_h_state_full' missing from "
+            f"{dispatch_path.name} — Sub-task B regressed?",
+        )
+
+    # Invariant 2: Python plumbing modules importable.
+    # 不變量 2：Python 線路模組可匯入。
+    import importlib
+
+    h_modules = (
+        "program_code.exchange_connectors.bybit_connector."
+        "control_api_v1.app.h_state_invalidator",
+        "program_code.exchange_connectors.bybit_connector."
+        "control_api_v1.app.h_state_query_handler",
+    )
+    for mod_name in h_modules:
+        try:
+            importlib.import_module(mod_name)
+        except ImportError as e:
+            return (
+                "FAIL",
+                f"module import failed: {mod_name.rsplit('.', 1)[-1]}: {e}",
+            )
+        except Exception as e:  # noqa: BLE001 — surface unexpected raises
+            # Non-ImportError raises during module import are unusual but
+            # could indicate a circular import or syntax regression. Treat
+            # as FAIL because Phase 1 plumbing must remain importable.
+            # 非 ImportError 罕見 —— 可能循環匯入或語法 regression。
+            # FAIL 因為 Phase 1 線路必須可匯入。
+            return (
+                "FAIL",
+                f"module init failed: {mod_name.rsplit('.', 1)[-1]}: {e}",
+            )
+
+    # Invariant 3: Phase 1 stub returns canonical empty shape.
+    # 不變量 3：Phase 1 stub 回傳標準空殼。
+    try:
+        from program_code.exchange_connectors.bybit_connector.control_api_v1.app.h_state_query_handler import (  # noqa: E501
+            build_h_state_full_response,
+        )
+
+        resp = build_h_state_full_response()
+    except Exception as e:  # noqa: BLE001 — surface schema regression
+        return ("WARN", f"build_h_state_full_response() raised: {e}")
+
+    # Phase 1 invariant: version=0 + both buckets empty. WARN (not FAIL) if
+    # populated, since Phase 2-4 progressive deploy could legitimately fill
+    # buckets ahead of this check being updated.
+    # Phase 1 不變量：version=0 + 兩桶皆空。WARN（非 FAIL）若已填充，
+    # 因為 Phase 2-4 漸進部署可能合法在本 check 更新前先填桶。
+    if not isinstance(resp, dict):
+        return ("WARN", f"stub returned non-dict: {type(resp).__name__}")
+    version = resp.get("version")
+    h_states = resp.get("h_states")
+    agent_states = resp.get("agent_states")
+
+    if not isinstance(h_states, dict) or not isinstance(agent_states, dict):
+        return (
+            "WARN",
+            f"stub schema drift: h_states={type(h_states).__name__}, "
+            f"agent_states={type(agent_states).__name__} (expected dict)",
+        )
+
+    if version != 0 or h_states or agent_states:
+        # Buckets populated or version bumped — Phase 2-4 progressive deploy.
+        # WARN so operator notices and can update this check's expectations.
+        # 桶已填或 version bump — Phase 2-4 漸進部署。WARN 提示 operator
+        # 注意並更新本 check 的期望值。
+        return (
+            "WARN",
+            f"stub no longer Phase 1 shape (version={version}, "
+            f"h_states_keys={len(h_states)}, agent_states_keys={len(agent_states)}) "
+            "— Phase 2-4 progress? update [20] expectations",
+        )
+
+    return (
+        "PASS",
+        f"env=1 + route registered + modules importable + stub canonical "
+        f"(version=0, h_states={{}}, agent_states={{}})",
+    )
