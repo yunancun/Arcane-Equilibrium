@@ -289,6 +289,17 @@ impl PaperState {
                     self.positions_remove(symbol);
                 }
                 self.peak_balance = self.peak_balance.max(self.balance);
+                // EVICT-ON-DUST T2a (PA §1.2.1): opposite-direction partial
+                // close may have left a sub-floor residue (funding tick
+                // reducing 0.05 → 7e-13 was the STRKUSDT case). `fill_price`
+                // is the freshest market price for this symbol (we just set
+                // it via `set_latest_price` above), so use it as the notional
+                // ref. Falls through to no-op when the position was already
+                // removed by the `remaining <= 1e-12` branch above.
+                // EVICT-ON-DUST T2a：反向部分平倉殘餘檢查；fill_price 即剛 set
+                // 的最新價，作 notional 計算參考。完全平倉路徑 already-removed
+                // → no-op。
+                self.evict_if_dust(symbol, fill_price, "apply_fill_opposite_residue");
                 return pnl;
             } else {
                 // Same direction — accumulate (weighted average entry price)
@@ -309,6 +320,16 @@ impl PaperState {
                 // 減倉不動，讓 ft_min_notional_ratio_of_entry 以累積峰值為基準。
                 updated.entry_notional += qty * fill_price;
                 self.positions_insert(symbol.to_string(), updated);
+                // EVICT-ON-DUST T2b (PA §1.2.1): same-direction accumulate is
+                // notional-additive (qty + qty * fill_price both grow), so a
+                // sub-floor result is mathematically only possible when the
+                // pre-existing position was already dust AND the added qty is
+                // also dust-scale — extremely rare but covered for symmetry
+                // with T2a. Idempotent on non-dust positions (no-op).
+                // EVICT-ON-DUST T2b：同向加倉是名目相加（qty 增 + qty × price 增），
+                // 結果落 floor 之下需「先 dust + 加上的 qty 也 dust」極罕見；為與
+                // T2a 對稱保留檢查；非 dust 倉位等同 no-op。
+                self.evict_if_dust(symbol, fill_price, "apply_fill_same_dir_accumulate");
                 return 0.0;
             }
         }
@@ -363,6 +384,13 @@ impl PaperState {
     /// closes the entire position. Returns realized PnL for the reduced portion.
     /// FIX-03: Used by fast_track ReduceToHalf.
     /// 按 reduce_qty 減倉。若 reduce_qty >= 持倉量則全平。返回減倉部分的已實現損益。
+    ///
+    /// EVICT-ON-DUST T1 (PA §1.2.1): post-mutation `evict_if_dust(symbol, price)`
+    /// runs immediately after the reduce/close path settles balance/PnL. This
+    /// catches the canonical STRKUSDT-class spiral failure mode — repeated
+    /// halvings on an already-dust position that step_0's pre-spawn gate missed.
+    /// EVICT-ON-DUST T1：reduce/close 完成 balance/PnL 結算後立刻 evict_if_dust。
+    /// 封住 STRKUSDT 級 dust 螺旋（step_0 pre-spawn gate 漏掉的反覆 halving）。
     pub fn reduce_position(&mut self, symbol: &str, reduce_qty: f64, price: f64) -> f64 {
         if let Some(pos) = self.positions.get_mut(symbol) {
             let actual_reduce = reduce_qty.min(pos.qty);
@@ -380,6 +408,11 @@ impl PaperState {
                 self.trade_count += 1;
             }
             self.peak_balance = self.peak_balance.max(self.balance);
+            // EVICT-ON-DUST T1 (PA §1.2.1): runs after fully-closed branch
+            // (no-op on already-removed) and after partial-reduce branch
+            // (catches sub-floor residue post-halving).
+            // EVICT-ON-DUST T1：完全平倉路徑 no-op；部分減倉殘餘 → 即時 evict。
+            self.evict_if_dust(symbol, price, "reduce_position");
             pnl
         } else {
             0.0
@@ -475,6 +508,143 @@ impl PaperState {
                 }
             }
         }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // EVICT-ON-DUST runtime path (F3 / 2026-04-26)
+    // PA design `2026-04-26--three_p0_fixes_design.md` §1.
+    // ─────────────────────────────────────────────────────────────────────
+
+    /// EVICT-ON-DUST single-symbol gate. Returns the evicted USD notional if
+    /// the position's current notional (`qty * latest_price`) is below
+    /// `self.dust_floor_usd`; otherwise `None`. Idempotent (no-op if no
+    /// position for `symbol`). Caller is expected to invoke immediately
+    /// after a `reduce_position` / `apply_fill` mutation that may have left
+    /// a sub-floor residue (T1 / T2 triggers).
+    ///
+    /// Reads `self.dust_floor_usd` (mirror of
+    /// `RiskConfig.limits.ft_dust_qty_floor_usd` set via `set_dust_floor_usd`
+    /// at TickPipeline ctor + on every RiskConfig version bump) so callers
+    /// do not need to thread the floor through their signatures.
+    ///
+    /// Fail-closed:
+    ///   * `self.dust_floor_usd <= 0.0` (gate disabled) → returns `None`
+    ///   * `latest_price <= 0.0` or non-finite (stale tick) → returns `None`
+    ///   * Position absent → returns `None`
+    ///
+    /// Audit side-effect: emits a structured `tracing::warn!` line and
+    /// **does NOT write trading.fills** (ML training-data hygiene per PA
+    /// §1.2.5). Per-engine counter `dust_evictions_total` is incremented.
+    ///
+    /// EVICT-ON-DUST 單 symbol 閘：當 `qty × latest_price < self.dust_floor_usd`
+    /// 時就地驅逐並回傳被驅逐 USD 名目；否則 None。冪等。reduce / apply_fill
+    /// 後置呼叫（T1 / T2）。fail-closed：floor<=0 / 價格非有限 / 倉位缺失
+    /// → 全 no-op。寫 `tracing::warn!` audit + 累計計數，**不寫 trading.fills**。
+    pub(crate) fn evict_if_dust(
+        &mut self,
+        symbol: &str,
+        latest_price: f64,
+        trigger_point: &'static str,
+    ) -> Option<f64> {
+        let dust_floor_usd = self.dust_floor_usd;
+        if dust_floor_usd <= 0.0 || !dust_floor_usd.is_finite() {
+            return None;
+        }
+        if latest_price <= 0.0 || !latest_price.is_finite() {
+            return None;
+        }
+        let pos = self.positions.get(symbol)?;
+        let notional = pos.qty * latest_price;
+        if !notional.is_finite() || notional >= dust_floor_usd {
+            return None;
+        }
+        // Capture before remove() so audit fields read truthful values.
+        // 在 remove 前先讀取，audit 才能拿到正確值。
+        let evicted_qty = pos.qty;
+        let evicted_is_long = pos.is_long;
+        let evicted_owner = pos.owner_strategy.clone();
+        self.positions_remove(symbol);
+        self.dust_evictions_total = self.dust_evictions_total.saturating_add(1);
+        tracing::warn!(
+            symbol = %symbol,
+            evicted_notional_usd = notional,
+            dust_floor_usd,
+            trigger_point,
+            qty = evicted_qty,
+            is_long = evicted_is_long,
+            owner_strategy = %evicted_owner,
+            "EVICT-ON-DUST: phantom dust position evicted (no trading.fills row) \
+             / 殭屍 dust 倉位已驅逐（不寫 trading.fills）"
+        );
+        Some(notional)
+    }
+
+    /// EVICT-ON-DUST sweep: scan every position and evict any whose
+    /// `qty * latest_price` is below `self.dust_floor_usd`. Returns the
+    /// count of positions evicted. Used by T3 (boot reaper, post-migrate
+    /// one-shot) and T4 (loop_handlers.rs status arm reaper, ~30 s cadence).
+    /// The latest per-symbol price is read from `latest_prices`; a position
+    /// with no observed market price falls back to `entry_price` so the
+    /// boot reaper (which runs before the first market tick) can still
+    /// discharge legacy dust.
+    ///
+    /// **Performance**: O(N) over `positions`; called twice per minute at
+    /// most (T4 status interval is 30 s). MUST NOT be called from the
+    /// per-tick hot path — E2 should grep callsites and reject any
+    /// tick-rate invocation (PA §1.5 review point #2).
+    ///
+    /// EVICT-ON-DUST 全掃描：對所有倉位算名目，低於 floor 即驅逐，回傳驅逐數。
+    /// T3 + T4 共用。價格優先讀 latest_prices；無市場價回退 entry_price。
+    /// **性能限定**：O(N)，禁 per-tick hot path 呼叫。
+    pub fn evict_all_dust(&mut self, trigger_point: &'static str) -> usize {
+        let dust_floor_usd = self.dust_floor_usd;
+        if dust_floor_usd <= 0.0 || !dust_floor_usd.is_finite() {
+            return 0;
+        }
+        // Materialize candidates first so we don't mutate while iterating.
+        // 先物化候選 → 再 mutate；避免 HashMap 邊讀邊改 alias 衝突。
+        let candidates: Vec<(String, f64, f64, bool, String)> = self
+            .positions
+            .values()
+            .filter_map(|p| {
+                let price = self
+                    .latest_prices
+                    .get(&p.symbol)
+                    .copied()
+                    .unwrap_or(p.entry_price);
+                if price <= 0.0 || !price.is_finite() {
+                    return None;
+                }
+                let notional = p.qty * price;
+                if !notional.is_finite() || notional >= dust_floor_usd {
+                    return None;
+                }
+                Some((
+                    p.symbol.clone(),
+                    notional,
+                    p.qty,
+                    p.is_long,
+                    p.owner_strategy.clone(),
+                ))
+            })
+            .collect();
+        let count = candidates.len();
+        for (symbol, notional, qty, is_long, owner) in candidates {
+            tracing::warn!(
+                symbol = %symbol,
+                evicted_notional_usd = notional,
+                dust_floor_usd,
+                trigger_point,
+                qty,
+                is_long,
+                owner_strategy = %owner,
+                "EVICT-ON-DUST sweep: phantom dust position evicted (no trading.fills row) \
+                 / 殭屍 dust sweep 驅逐（不寫 trading.fills）"
+            );
+            self.positions_remove(&symbol);
+            self.dust_evictions_total = self.dust_evictions_total.saturating_add(1);
+        }
+        count
     }
 
     pub fn check_stops(&mut self, _price: f64, now_ms: u64) -> Vec<(String, StopTrigger)> {
