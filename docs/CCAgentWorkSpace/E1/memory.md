@@ -578,6 +578,35 @@ PA 派發 P2：G9-04 commit `c7d7179` 揭發 commit `f42face`（2026-04-23 刪 9
 - **避開隔壁 sub-agent WIP**：commit 前 git status 看到 `docs/CCAgentWorkSpace/{QA,MIT}/` + `docs/CCAgentWorkSpace/E1/workspace/reports/2026-04-26--g3_08_phase1_subtask_b.md` 已 staged sibling — 不動，per memory `feedback_subagent_first.md` + 任務 prompt 明示。`git add` 用 explicit file list 避免 `git add -A` 拖入。
 - **報告檔位置**：`docs/CCAgentWorkSpace/E1/workspace/reports/2026-04-26--observer_pipeline_post_f42face_cleanup.md`（6 節結構 per CLAUDE.md §七）。
 
+### 2026-04-26 EXIT-FEATURES-WRITER-BUG-1-FIX cohesive 1+2 RCA repair（P1，af48ee1+83456e5）
+
+- **MIT audit driven**：MIT 於 `docs/CCAgentWorkSpace/MIT/workspace/reports/2026-04-26--exit_features_writer_bug_audit.md` 完成 5 hypothesis 對比 + STRKUSDT 7d position lineage smoking gun + 雙因 RCA + 3 修復路徑。E1 不憑空推 RCA — 必先 Read MIT audit 全文（~150 行）再設計修法。
+- **雙因 root cause 並列（修一個不夠）**：
+  - **RCA-A 主因**：`step_0_fast_track.rs:317` MICRO-PROFIT-FIX-1 fail-open 對 `entry_notional == 0` legacy/restored dust 倉位失效 → fast_track ReduceToHalf 每 60s 半倉至 float epsilon（STRKUSDT 0.05 → 7.3e-13 over 37 minutes）
+  - **RCA-B 併發因**：`pipeline_helpers.rs:217 try_emit_exit_feature_row` 對 fast_track ReduceToHalf partial reduce 也寫 EF row → 污染 ML training set 37 noise label（healthcheck [3] `exit_features_24h vs close_fills_24h` delta 37）
+- **cohesive 1+2 PR per MIT §5 推薦**：避免「修一個還剩另一個」；E2 自然會質疑為何不只修 A — 因 EF semantics 病灶（partial reduce 不該寫「post-close 標籤」）獨立於 dust spiral，即使 dust 修了仍會寫污染 row。
+- **RCA-A 修法（layered Gate 1+2 取代 bare fail-open）**：
+  - Gate 1（新）= absolute USD floor `qty * last_price < ft_dust_qty_floor_usd` → skip；fires regardless of `entry_notional` state
+  - Gate 2（舊）= ratio gate `qty * last_price < ratio * entry_notional` → skip；inactive when `entry_notional <= 0`（無 baseline）
+  - 兩 Gate 任一觸發即 skip（fail-closed）；非 dust legacy 真實大倉走 Gate 2 inactive + Gate 1 不觸發 → 保留 fail-open 給操作員（防止整段過度封閉）
+- **schema config knob**：新 `GlobalLimits.ft_dust_qty_floor_usd: f64`（default 1.0 USD，range [0, 100_000]，NaN/Inf reject）。Default 1 USD 計算依據：Bybit min order notional 普遍 ≥ 5 USD（普通幣）→ 1 USD 為保守下界，sub-cent dust 必觸；live TOML 顯式 + demo/paper serde default 繼承（per existing pattern）。
+- **RCA-B 修法（taxonomy helper + emit_close_fill 早 return）**：
+  - `is_partial_reduce_tag(close_tag) -> bool` 在 `on_tick/helpers.rs`（pub(crate)）；當前唯一 partial reduce 路徑 = `"risk_close:fast_track_reduce_half"`
+  - `emit_close_fill` 在 `try_emit_exit_feature_row` 呼叫前 gate；trading.fills 仍寫（PnL 帳務不影響），只 EF skip
+  - **未來擴展契約**：新增 partial reduce 路徑（如 ladder partial close）→ 擴 helper + 加新測試 row（不需動 emit_close_fill）
+- **A3 defence-in-depth migrate_legacy_entry_notional**：在 `event_consumer/bootstrap.rs` import_positions 後追加 idempotent backfill；理論上 import_positions line 48 hard guard 不會放過 entry_price=0，但 Bybit REST 罕見 avg_price=0 殘留時兜底。實測 migrated 預期常為 0 — 屬 belt-and-braces 防護。
+- **regression guard 兼容 lesson**：`no_new_literal_risk_close_phys_lock_outside_helpers_rs` 守護 `"risk_close:phys_lock_"` bare literal 必經 `build_risk_close_tag()` helper（`exit_features.rs` 不在 allowlist）。Follow-up `83456e5` 將測試從 `phys_lock_gate4_giveback` 換 `halt_session_drawdown`（語意等價：任何 full-close 路徑都驗證 EF 不被誤殺）。**未來新測試添加 close_tag 前先** `grep "risk_close:phys_lock_"`，需要時用 `build_risk_close_tag("phys_lock_xxx")` 動態構造，或選擇非 phys_lock 的 full-close 替代 tag（如 halt_session_drawdown / HARD STOP）。
+- **17 new tests**（lib 12 + integration 5）：
+  - **helpers (4)**：fast_track_reduce_half 認 partial / phys_lock 不認 / legacy full-close 11 tags 不認 / byte-exact 邊界 5 字串
+  - **risk_config_tests (5)**：default 1.0 / range NaN+Inf+>cap+<0 reject / 兩端 boundary accept / JSON+TOML roundtrip / legacy TOML default
+  - **exit_features (3)**：partial reduce skip EF (RCA-B core) / full-close 仍寫 EF / 10 close_tag taxonomy 全綠
+  - **micro_profit_fix_integration (5)**：ft_dust_floor wiring / STRKUSDT scenario / real-position no-FP / legacy zero-baseline 雙場景 / migrate idempotent
+- **跨平台 + 治理**：每 fn / config field / test mod 中英對照雙語；無新硬編碼路徑 / 無新 singleton；helpers.rs 1215→1316（< 1200 sibling 拆分後規模）；exit_features.rs 543→691；step_0_fast_track.rs 516→547。
+- **healthcheck [3] 24h grace**：本 fix 阻止從本 commit 起的新 dust spiral，但歷史 24h window 的 37 條 noise EF rows 需自然 age out。預期 2026-04-27 07:37 CEST 後 healthcheck [3] 自然 PASS（前提：本 commit deploy 後無新 dust）。隔壁 `ML-TRAINING-DATA-HYGIENE-1` P2 ticket 處理歷史 cleanup 不在本範圍。
+- **commit-即-push 嚴守**：`af48ee1` push origin/main + `83456e5` follow-up push + `ssh trade-core "git pull --ff-only origin main"` synced；Linux release lib `2198 → 2210 / 0 failed`，micro_profit_fix_integration `12 / 0 failed`。Linux 端不需要 `--rebuild`（PM 統一排程）。
+- **不擴範圍嚴守**：(1) 不修 healthcheck SQL（MIT 路徑 3 不推薦）(2) 不動 ML training data backfill（隔壁 P2）(3) 不動 MICRO-PROFIT-FIX-1-HEALTHCHECK（隔壁 G6 wave）(4) 不動 docs/CCAgentWorkSpace/QA/（隔壁 session WIP — 即使 git status 看到 QA 改動也不 stage）(5) 不動 h1_thought_gate.py（operator G3-08 Phase 2 WIP）— `git add` 用顯式檔名 list 而非 `git add -A`。
+- **報告檔位置**：`.claude_reports/20260426_155130_exit_features_writer_bug_fix.md`（6 節結構 per CLAUDE.md §七）+ workspace report `docs/CCAgentWorkSpace/E1/workspace/reports/2026-04-26--exit_features_writer_bug_fix.md`
+
 ## G3-08 Phase 1 Sub-task C — Wiring + Healthcheck [20]（2026-04-26 P1，0.5d）
 
 ### 任務
