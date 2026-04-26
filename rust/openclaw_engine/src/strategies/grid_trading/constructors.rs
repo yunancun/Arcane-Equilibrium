@@ -69,6 +69,9 @@ impl GridTrading {
             // G7-09c Phase 1: default 1 tick inside the inside quote.
             // G7-09c Phase 1：預設退一 tick。
             maker_price_buffer_ticks: 1,
+            // G7-09c Phase 2: default 60s exchange-reject cooldown.
+            // G7-09c Phase 2：交易所拒絕預設冷卻 60 秒。
+            reject_cooldown_ms: 60_000,
         }
     }
 
@@ -114,6 +117,9 @@ impl GridTrading {
             // G7-09c Phase 1: default 1 tick inside the inside quote.
             // G7-09c Phase 1：預設退一 tick。
             maker_price_buffer_ticks: 1,
+            // G7-09c Phase 2: default 60s exchange-reject cooldown.
+            // G7-09c Phase 2：交易所拒絕預設冷卻 60 秒。
+            reject_cooldown_ms: 60_000,
         }
     }
 
@@ -173,6 +179,9 @@ impl GridTrading {
             // G7-09c Phase 1: default 1 tick inside the inside quote.
             // G7-09c Phase 1：預設退一 tick。
             maker_price_buffer_ticks: 1,
+            // G7-09c Phase 2: default 60s exchange-reject cooldown.
+            // G7-09c Phase 2：交易所拒絕預設冷卻 60 秒。
+            reject_cooldown_ms: 60_000,
         }
     }
 
@@ -215,6 +224,10 @@ impl GridTrading {
         // G7-09c Phase 1: hot-reload BBO buffer (validate() bounds [0,10]).
         // G7-09c Phase 1：熱重載 BBO buffer，validate 範圍 [0,10]。
         self.maker_price_buffer_ticks = params.maker_price_buffer_ticks;
+        // G7-09c Phase 2 (FIX-G7-09C-PHASE2-WIRE-1B3): hot-reload reject
+        // cooldown (validate() bounds [5_000, 600_000]).
+        // G7-09c Phase 2：熱重載 reject_cooldown_ms，validate 範圍 [5_000, 600_000]。
+        self.reject_cooldown_ms = params.reject_cooldown_ms;
         info!(
             strategy = "grid_trading",
             grid_count = self.grid_count,
@@ -241,6 +254,9 @@ impl GridTrading {
             // G7-09c Phase 1: round-trip BBO buffer for IPC consumers.
             // G7-09c Phase 1：BBO buffer 經 IPC 來回。
             maker_price_buffer_ticks: self.maker_price_buffer_ticks,
+            // G7-09c Phase 2: round-trip reject cooldown for IPC consumers.
+            // G7-09c Phase 2：reject_cooldown_ms 經 IPC 來回。
+            reject_cooldown_ms: self.reject_cooldown_ms,
         }
     }
 }

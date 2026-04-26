@@ -20,10 +20,11 @@
 //!   與拆前逐字節相同。
 
 use openclaw_core::indicators::IndicatorSnapshot;
-use tracing::info;
+use tracing::{info, warn};
 
 use super::GridTrading;
 use crate::intent_processor::OrderIntent;
+use crate::strategies::maker_rejection::MakerRejectionCategory;
 
 impl GridTrading {
     /// G-SR-1 A3: Compute trend-adjusted cooldown for a symbol.
@@ -151,5 +152,43 @@ impl GridTrading {
                 self.last_trade_ms.insert(sym.to_string(), ts);
             }
         }
+    }
+
+    /// EDGE-P2-3 Phase 1B-3 (FIX-G7-09C-PHASE2-WIRE-1B3): exchange rejected
+    /// our PostOnly maker entry — arm a per-symbol cooldown so `signal.rs`
+    /// (which already checks `reject_cooldown_until_ms.get(sym) < ts`) skips
+    /// re-emission for `reject_cooldown_ms` (default 60s, validate
+    /// `[5_000, 600_000]`). Saturating add guards against `i64::MAX` overflow
+    /// when `ts_ms` is near the type ceiling. Category is currently logged
+    /// for forensics but not branched on; future tuning may give
+    /// `TooManyPending` a longer multiplier (account-wide back-pressure).
+    /// EDGE-P2-3 Phase 1B-3：交易所拒絕後設冷卻；`signal.rs` 已 check
+    /// `reject_cooldown_until_ms`，接線一條鏈即生效。category 目前僅
+    /// 紀錄供鑑識，未來可對 `TooManyPending` 給更長 multiplier。
+    pub(super) fn on_post_only_rejected_impl(
+        &mut self,
+        symbol: &str,
+        ts_ms: i64,
+        category: &MakerRejectionCategory,
+    ) {
+        // Saturating add against i64 overflow; cooldown_ms always > 0.
+        // Saturating add 防 i64 溢出。
+        let cooldown_until_i64 = ts_ms.saturating_add(self.reject_cooldown_ms as i64);
+        // Cast to u64 for storage; values < 0 (impossible here) fall to 0
+        // — `signal.rs` then immediately skips the cooldown branch (correct).
+        // 存 u64；不可能為負，但 cast as u64 對負值會 wrap，故先 max(0)。
+        let cooldown_until_ms = cooldown_until_i64.max(0) as u64;
+        self.reject_cooldown_until_ms
+            .insert(symbol.to_string(), cooldown_until_ms);
+        warn!(
+            strategy = "grid_trading",
+            %symbol,
+            ts_ms,
+            cooldown_ms = self.reject_cooldown_ms,
+            cooldown_until_ms,
+            category = %category.label(),
+            "post-only rejected by exchange — armed reject cooldown \
+             / 交易所拒絕 PostOnly — 已設冷卻"
+        );
     }
 }
