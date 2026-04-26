@@ -808,6 +808,152 @@ class TestH4OutputValidation(unittest.TestCase):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# TestH4Snapshot
+# G3-08 Phase 3 Sub-task 3-2: H4 state snapshot accessor + validation_pass counter
+# G3-08 Phase 3 Sub-task 3-2：H4 狀態 snapshot 存取器 + validation_pass 計數
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestH4Snapshot(unittest.TestCase):
+    """G3-08 Phase 3 Sub-task 3-2: verify get_h4_snapshot() returns 2-field
+    dict (validation_fail / validation_pass) per PA design §5.2 H4ValidationStats
+    parity, and that validation_pass counter increments on H4 PASS path
+    (the silent gap pre-G3-08 that this sub-task fixes).
+
+    G3-08 Phase 3 Sub-task 3-2：驗證 get_h4_snapshot() 回傳 2-field dict
+    （validation_fail / validation_pass）對齊 PA design §5.2 H4ValidationStats，
+    並驗證 validation_pass 計數於 H4 PASS 路徑遞增（pre-G3-08 silent gap，
+    本 sub-task 修復）。
+    """
+
+    def _make_agent(self) -> "StrategistAgent":
+        """Minimal StrategistAgent for snapshot tests / 給 snapshot 測試用的最小 agent."""
+        from app.strategist_agent import StrategistAgent, StrategistConfig
+        config = StrategistConfig(shadow=True, min_relevance=0.1)
+        return StrategistAgent(config=config)
+
+    def _make_intel(self, symbol: str = "BTCUSDT") -> "IntelObject":
+        """Minimal IntelObject / 最小 IntelObject."""
+        return IntelObject(
+            source="test",
+            content="test signal",
+            symbols=[symbol],
+            data_quality=DataQualityLevel.FACT,
+            sentiment=SentimentScore.POSITIVE,
+            relevance_score=0.8,
+            freshness_seconds=5,
+            metadata={},
+        )
+
+    def test_get_h4_snapshot_initial_state(self):
+        """Fresh agent → both counters 0; schema has exactly 2 keys.
+        新建 agent → 兩計數皆 0；schema 恰 2 個 key。"""
+        agent = self._make_agent()
+        snap = agent.get_h4_snapshot()
+        # Schema parity with Rust H4ValidationStats (2 fields).
+        self.assertEqual(set(snap.keys()), {"validation_fail", "validation_pass"})
+        self.assertEqual(snap["validation_fail"], 0)
+        self.assertEqual(snap["validation_pass"], 0)
+        # Type check — Rust serde expects integer (u64).
+        self.assertIsInstance(snap["validation_fail"], int)
+        self.assertIsInstance(snap["validation_pass"], int)
+
+    def test_get_h4_snapshot_returns_independent_dicts(self):
+        """Multiple calls return independent dict objects (no aliasing).
+        多次呼叫回獨立 dict（無別名）。"""
+        agent = self._make_agent()
+        a = agent.get_h4_snapshot()
+        b = agent.get_h4_snapshot()
+        self.assertIsNot(a, b)
+        a["validation_pass"] = 999
+        # Mutating returned dict must not affect agent state.
+        # 變更回傳 dict 不可影響 agent 狀態。
+        self.assertEqual(b["validation_pass"], 0)
+        c = agent.get_h4_snapshot()
+        self.assertEqual(c["validation_pass"], 0)
+
+    def test_get_h4_snapshot_reflects_fail_increment(self):
+        """fail counter increments on H4 reject path (pre-G3-08 already worked).
+        fail 計數於 H4 拒絕路徑遞增（pre-G3-08 即可運作）。"""
+        from app.strategist_agent import StrategistAgent, StrategistConfig
+        config = StrategistConfig(shadow=True, min_relevance=0.1,
+                                  heuristic_min_relevance=0.1,
+                                  heuristic_min_freshness=300)
+        agent = StrategistAgent(config=config)
+
+        # Drive an H4 fail by feeding judge_edge a JSON without 'confidence'.
+        # 透過餵 judge_edge 缺 'confidence' 的 JSON 觸發 H4 fail。
+        mock_response = MagicMock()
+        mock_response.success = True
+        mock_response.text = '{"has_edge": true, "reason": "no confidence"}'
+        mock_ollama = MagicMock()
+        mock_ollama.is_available.return_value = True
+        mock_ollama.judge_edge.return_value = mock_response
+        agent._ollama = mock_ollama
+
+        agent._ai_evaluate(self._make_intel())
+
+        snap = agent.get_h4_snapshot()
+        self.assertEqual(snap["validation_fail"], 1,
+                         "validation_fail must increment on H4 rejection")
+        self.assertEqual(snap["validation_pass"], 0,
+                         "validation_pass must stay 0 on H4 rejection path")
+
+    def test_get_h4_snapshot_reflects_pass_increment(self):
+        """G3-08 Phase 3 Sub-task 3-2: validation_pass increments on H4 PASS.
+        G3-08 Phase 3 Sub-task 3-2：validation_pass 於 H4 通過路徑遞增。
+
+        This is the silent gap fix — pre-G3-08 the pass branch was uncounted,
+        so the snapshot would always show validation_pass=0 even after many
+        successful AI evaluations. After Sub-task 3-2 we MUST observe
+        validation_pass > 0 once an H4 PASS occurs.
+        本測試覆蓋 silent gap 修復 — pre-G3-08 pass 分支不計數，導致 snapshot
+        始終顯示 validation_pass=0 即便 AI 多次成功評估。Sub-task 3-2 後必觀察
+        validation_pass > 0 當 H4 PASS 發生。
+        """
+        from app.strategist_agent import StrategistAgent, StrategistConfig
+        config = StrategistConfig(shadow=True, min_relevance=0.1,
+                                  heuristic_min_relevance=0.1,
+                                  heuristic_min_freshness=300)
+        agent = StrategistAgent(config=config)
+
+        # Drive an H4 PASS by feeding judge_edge a valid output.
+        # 透過餵 judge_edge 合法輸出觸發 H4 PASS。
+        mock_response = MagicMock()
+        mock_response.success = True
+        mock_response.text = (
+            '{"has_edge": true, "confidence": 0.7, "reason": "valid eval"}'
+        )
+        mock_ollama = MagicMock()
+        mock_ollama.is_available.return_value = True
+        mock_ollama.judge_edge.return_value = mock_response
+        agent._ollama = mock_ollama
+
+        result = agent._ai_evaluate(self._make_intel())
+        self.assertEqual(result.source, "ai",
+                         "valid AI output must produce source='ai' result, not heuristic")
+
+        snap = agent.get_h4_snapshot()
+        self.assertEqual(snap["validation_pass"], 1,
+                         "validation_pass MUST increment on H4 PASS — Sub-task 3-2 silent gap fix")
+        self.assertEqual(snap["validation_fail"], 0,
+                         "validation_fail must stay 0 on H4 PASS path")
+
+    def test_h4_validation_pass_initialized_in_stats(self):
+        """_stats must have h4_validation_pass key at agent init time
+        (validates the _stats dict schema, not the runtime counter).
+        _stats 必須在 agent 初始化時已含 h4_validation_pass 鍵
+        （驗證 _stats dict schema，非執行時計數）。"""
+        agent = self._make_agent()
+        with agent._lock:
+            self.assertIn("h4_validation_pass", agent._stats)
+            self.assertEqual(agent._stats["h4_validation_pass"], 0)
+            # Also verify h4_validation_fail still present (no regression).
+            # 同時驗證 h4_validation_fail 仍在（無 regression）。
+            self.assertIn("h4_validation_fail", agent._stats)
+            self.assertEqual(agent._stats["h4_validation_fail"], 0)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # TestCostTrackerOllama
 # Sprint 5b-2/6: H5 CostLogger — record_ollama_call / get_cost_edge_ratio 測試
 # ═══════════════════════════════════════════════════════════════════════════════

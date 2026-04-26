@@ -825,3 +825,43 @@ H2 budget gate 接線到 Rust h_state_cache gateway。Pattern 鏡 Phase 2 (`9120
 - **`#[serde(default)]` forward-compat + 無 hot-path consumer 雙保險下 Rust 端 0 改的安全度**：types.rs 已備 H2BudgetState 3 fields（commit `aa287c4` Phase 1A），所有 field `#[serde(default)]`；h_state_cache poller 走 generic JSON parse；HStateSnapshot.h2 已 wire 在 lib。Phase 3 Sub-task 3-1 只需 Python 端產 3-field JSON dict，Rust 0 改 — 即 PA RFC §2.2 Pattern A 空 sub-task 觀察的反證（Pattern B 1 sub-task=1 模組整鏈 PROVEN）。Lesson：Phase 1A 把 schema 補齊 + forward-compat 設計到位 = Phase 3+ 落地超快（~80 LOC + ~88 test LOC = 1 session 舒適完成 H 模組整鏈）。
 - **Track 2 H4 默認破壞 Phase 2 test 是 lesson 但非 fix Track 2 責任**：Track 2 設 _FakeStrategist 默認 ALWAYS 提供 get_h4_snapshot（含真實 fail/pass 數）令舊 test 不再 default-empty。對的設計選擇是「默認提供 H4 snapshot」（更逼真，覆蓋更多 path），舊 test 該被擴展。Lesson：multi-track 並行下舊 test regression 不一定是 Track 2 bug — 可能 Track 2 設計改進帶出原先 test 過於依賴默認 fake stub 的隱含假設。修法是 test 升級對齊新現實，不是回退 Track 2 默認。
 - **報告檔位置**：直接回傳給 parent agent（system prompt 「Do NOT Write report/summary .md files」），不寫到 `.claude_reports/` / `workspace/reports/`。本 memory.md 條目 = 完整跨 session 知識持久化。
+
+## G3-08 PHASE 3 SUB-TASK 3-2 — H4 Validator Integration（2026-04-26 Tier 8 Track 2）
+
+### 任務
+PA Phase 3 sub-task split design plan §5 — H4 validator stats 接 h_state_cache gateway。鏡 Phase 2 H1+H3 + Track 1 H2 pattern；補 silent gap：caller-side `validation_pass` counter（pre-G3-08 只計 fail，pass 0）。
+
+### 改動（強制 §九 1200 LOC 硬上限下實作）
+1. `strategist_agent.py`（1170 → **1200 = exactly hard limit**）：
+   - `_stats["h4_validation_pass"]: 0` 補入 init dict；
+   - 既有 `validate_ai_output(result)` 路徑後新增 `_invalidate_h_state_async("h4.validation_fail")`；
+   - 新增 H4 PASS branch 計數 `_stats["h4_validation_pass"] += 1` + `_invalidate_h_state_async("h4.validation_pass")`；
+   - 新增 method `get_h4_snapshot()` 回 `{validation_fail: int, validation_pass: int}`（PA design §5.2 H4ValidationStats schema parity）；
+   - import `from .h_state_invalidator import invalidate_async as _invalidate_h_state_async`。
+2. `h_state_query_handler.py`（419 → 558，並行 Track 1 H2 land 後 share 同 file）：
+   - `_collect_h_snapshots` 加 `include_h4: bool = False` 參數，回 4-tuple `(h1, h3, h2, h4)`；
+   - `build_h_state_full_response` 加 `include_h4` flag 計算 + `h_states["h4"] = h4_dict` 桶；
+   - 新增 `_safe_snapshot_self(target, method_name)` helper（H4 SSOT 在 strategist 自身，無 nested attr，與 `_safe_snapshot` 區分）；
+   - docstring Phase 2/3 文案更新 + 4-bucket schema 標明。
+3. `test_h_state_query_handler.py`（684 → 942）：
+   - `_FakeStrategist` 加 opt-in `with_h4=False / h4_snapshot / h4_raises` 參數（默認 off 對齊 cost_tracker=None pattern）；
+   - `TestH4ValidatorIntegration` 3 cases（22-24 populated/missing/raises）；
+   - `TestH4IncludeFilter` 3 cases（25-27 include filter / 4-bucket roundtrip / default-none）；
+   - `TestSafeSnapshotSelfDefensive` 5 cases（28 missing/non-callable/non-dict/raises/valid）。
+4. `test_strategist_agent.py`（828 → 974）：
+   - `TestH4Snapshot` 5 cases — initial state / dict independence / fail increment / pass increment（silent gap fix 主測試）/ stats schema init。
+
+### 結果
+- pytest baseline shift：control_api_v1 我觸 4 檔 = **109/109 pass**（h_state_invalidator 23 + h_state_query_handler 45 + strategist_agent 41）；舊基準 + 13 新 H4 cases。
+- cargo lib：**2212/0 fail（Tier 7 baseline 不變）** — Phase 3 純 Python 改動，Rust 0 修。
+- Mac smoke env=0：PASS — version=0, h_states={}（dormant 完整）。
+- Mac smoke env=1：PASS — h_states.keys() = ['h1','h2','h3','h4'], h4 = {validation_fail:5, validation_pass:42}。
+- strategist_agent.py 1200 LOC = §九 1200 hard limit exactly（PA §10.4 已預警 ~1195，我嚴控 bilingual comment 到 1200 不超）。Phase 4 Strategist 必先拆檔屬 Phase 4 RFC scope。
+
+### 教訓（與隔壁 Track 1 H2 重疊但 Track 2 獨立）
+- **multi-track 並行下 share file 已 land 是好事**：開工時 origin 沒 Track 1 commit，我用標準 4 檔 edit；過程中 Track 1（commit `8cd257e`）merge 到 origin，shared `h_state_query_handler.py` + `test_h_state_query_handler.py` 含 H2 + 我之前的 H4 邊修邊保留 — Track 1 用 `git commit --only` 把 4 檔 H2-scope 進 commit 含我 in-flight H4，Track 2 commit 只剩 strategist_agent.py + test_strategist_agent.py 為「我獨有」差異。Lesson：multi-track collab + `git commit --only <files>` 確保 share file 不會被另一 track 覆蓋我的 in-flight 修，反而 atomic merge 兩 track 的「不同邏輯部分」到同 file。
+- **`with_h4=False` 默認對 vs 默認 on 兩派有人**：Track 1 在他自己 memory.md 預測 Track 2 會默認 on（更逼真覆蓋），但我選默認 off 對齊 `cost_tracker=None` pattern + 不破壞 Phase 2 既有 test 預期。兩設計皆 valid；**選默認 off 的關鍵理由 = 「Phase 2 deploy without 3-2 land」silent skip 路徑也是真實 production 場景值得 test**（測 23 涵蓋）。Lesson：multi-track 默認值衝突時優先選「擴展性更廣 + test 當前 baseline 不破」的方向；老 test 不擅自重寫。
+- **§九 1200 LOC 硬上限是真硬限**：第一輪實作 1234 LOC（超 34）→ 第二輪精簡 docstring 到 1206（超 6）→ 第三輪極致濃縮 bilingual 到 exactly 1200。bilingual comment skill 與 §九 物理上限會撞，此 case 的解決路徑 = (a) 濃縮重複 schema 描述（中英兩段擠成一段交織）(b) inline comment 從多行 block 縮成 trailing inline。Lesson：§九 警告 / 硬限觸發前 PA 必先標明（本 case PA §10.4 已標 ~1195 警告線），E1 落地若實際超必先 push back 不擅自混淆「skill 必要 vs §九 硬」優先序。
+- **`_safe_snapshot_self` vs `_safe_snapshot` 兩 helper sibling**：`_safe_snapshot(parent, attr_name, method_name)` 走 H1/H3/H2 sub-attribute pattern；`_safe_snapshot_self(target, method_name)` 走 H4 caller-side stats on target 自身 pattern。兩 helper 同一 module 形成 sibling pair 比 1 helper 加 optional `attr_name=None` 條件分支更清楚（**單一職責**勝於**多態 conditional**）。Lesson：snapshot accessor 設計時 SSOT 持有方式（owned sub-attr / injected sub-attr / caller-side）會傳遞到 helper 簽名差異，**3 種方式 = 3 種 helper 變體**或 1 helper + 多 caller pattern；本 case 選 2 helper + 3 callsite 是平衡點。
+- **H4 silent gap 修法 = 加 counter + invalidate hook 雙保險**：pre-G3-08 `validation_pass` 不計只計 fail，下游 observability 永遠看不到「pass count」即「H4 是否被頻繁通過」無法回答；**Phase 3 Sub-task 3-2 修 = 加 counter + 同步加 invalidate_async hint，雙保險**：(a) counter 給 snapshot 讀（拉模式）(b) invalidate hint 主動推給 Rust h_state_cache（推模式）。Lesson：silent gap 補 counter 時必同步補 invalidate hook 到對等失敗路徑（fail / pass 各 1 hint），避免「pass 計但 Rust 不知道有變化」次級 silent gap。
+- **報告檔位置**：直接傳給 parent agent（per system prompt 不寫 .md report 到 repo）。本 memory.md 條目 + commit msg 為完整跨 session 知識持久化。
