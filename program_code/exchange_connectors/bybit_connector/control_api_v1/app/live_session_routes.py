@@ -50,7 +50,9 @@ REFACTOR_NOTE (G5-02, 2026-04-24):
 
 import asyncio
 import logging
+import os
 import time
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
@@ -208,6 +210,43 @@ async def _ipc_command(method: str, params: dict | None = None) -> dict[str, Any
         ) from exc
 
 
+def _resolve_live_endpoint_label() -> str:
+    """
+    F5/A1 — Resolve which endpoint Live slot is bound to (without spawning a client).
+    F5/A1 — 解析 Live 槽綁定的 endpoint 標籤（不建立客戶端）。
+
+    Returns one of:
+      - "mainnet"     : Live slot has api_key + bybit_endpoint = mainnet (default)
+      - "live_demo"   : Live slot has api_key + bybit_endpoint = demo (LiveDemo)
+      - "unconfigured": Live slot has no api_key (fallback to demo slot client elsewhere)
+
+    本 helper 純讀檔判斷 Live 槽身份，不觸發 BybitClient 建構，提供給：
+    1. tab-live 前端做 visual differentiation（mainnet 紫紅 / live_demo 橙 / unconfigured 灰）
+    2. account routes 在「engine_kind != 'live' 且 endpoint == unconfigured」時回
+       phantom-view error envelope，避免 demo data 偽裝 live。
+
+    與 ``_get_rust_client_safe()`` 的關係：
+      ``_get_rust_client_safe()`` 內部隱含這個邏輯但沒輸出標籤；本 helper 把它顯式化
+      以供 ``_live_response()`` 注入 actual_endpoint 欄位。
+    """
+    try:
+        # F5-RETURN (2026-04-26): imports moved to module top per E2 [R1-6] /
+        # F5-RETURN：依 E2 [R1-6] 規則將 import 移至模組頂層
+        secrets_base = os.environ.get("OPENCLAW_SECRETS_DIR") or str(
+            Path.home() / "BybitOpenClaw" / "secrets" / "secret_files" / "bybit"
+        )
+        live_key_file = Path(secrets_base) / "live" / "api_key"
+        if live_key_file.exists() and live_key_file.read_text(encoding="utf-8").strip():
+            ep_file = Path(secrets_base) / "live" / "bybit_endpoint"
+            endpoint = (
+                ep_file.read_text(encoding="utf-8").strip() if ep_file.exists() else "mainnet"
+            )
+            return "live_demo" if endpoint == "demo" else "mainnet"
+        return "unconfigured"
+    except Exception:
+        return "unconfigured"
+
+
 def _get_rust_client_safe():
     """
     Return an httpx BybitClient using the live API key slot if configured, else demo.
@@ -246,14 +285,29 @@ def _live_response(data: dict[str, Any]) -> dict[str, Any]:
     """
     Wrap response with live-specific metadata markers.
     為 live session 回應添加元數據標記。
+
+    F5/A1 — Inject ``actual_engine_kind`` + ``actual_endpoint`` so the frontend
+    can decide between four Live visual modes:
+      1. engine_kind != 'live'        → integrity-fail view (warning swap)
+      2. endpoint == 'mainnet'        → Mainnet REAL-FUNDS purple/red theme
+      3. endpoint == 'live_demo'      → LiveDemo orange/silver theme
+      4. endpoint == 'unconfigured'   → demo-fallback warning (silver/gray)
+    Callers may override these by passing ``actual_engine_kind`` / ``actual_endpoint``
+    in ``data``; absent → resolved from helpers via setdefault.
+
+    F5/A1 — 注入 actual_engine_kind + actual_endpoint，讓前端能區分上述 4 種模式，
+    避免 LiveDemo / unconfigured 被誤渲染為 Mainnet「真實資金」紫色面板。
     """
-    return {
-        "data": {
-            **data,
-            "is_simulated": False,
-            "data_category": "live_exchange",
-        }
+    payload: dict[str, Any] = {
+        "is_simulated": False,
+        "data_category": "live_exchange",
     }
+    payload.update(data)
+    # Only auto-resolve if caller didn't supply (cheap default; helpers are pure read)
+    # 僅在 caller 未自行傳入時自動解析（helpers 純讀，成本低）
+    payload.setdefault("actual_engine_kind", _get_live_engine_kind())
+    payload.setdefault("actual_endpoint", _resolve_live_endpoint_label())
+    return {"data": payload}
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
