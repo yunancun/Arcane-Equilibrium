@@ -8,10 +8,11 @@ silent-regression sentinels added 2026-04-26. Mirrors
 sys.path.insert + ``MagicMock`` cursor) so it runs without pytest infra
 on Mac dev / Linux runtime / CI without a Postgres instance.
 
-Coverage matrix (38 tests across 8 checks):
+Coverage matrix (39 tests across 8 checks; [23] +1 F7-FUP-23 SQL contract):
 
     [22] trading_pipeline_silent_gap          (5 tests) — DCS cliff vs fills cliff
-    [23] orders_fills_consistency             (5 tests) — orders writer drop
+    [23] orders_fills_consistency             (6 tests) — orders writer drop +
+                                                          F7-FUP-23 unattributed audit exclude
     [24] signals_writer_freshness             (5 tests) — 4/19 silent outage fingerprint
     [25] dust_qty_distribution                (5 tests) — log10 sub-micro drift
     [26] dust_spiral_noise_in_ef              (5 tests) — ML training corpus hygiene
@@ -33,9 +34,10 @@ MODULE_NOTE (中): F7 [22]-[29] 8 個 silent-regression 哨兵
 sys.path.insert + MagicMock cursor）；無 pytest infra / 無 Postgres
 也能跑。
 
-Coverage matrix（合 38 tests / 8 check）：
+Coverage matrix（合 39 tests / 8 check；[23] +1 F7-FUP-23 SQL contract）：
     [22] trading_pipeline_silent_gap          5 tests — DCS cliff vs fills cliff
-    [23] orders_fills_consistency             5 tests — orders writer 漏寫
+    [23] orders_fills_consistency             6 tests — orders writer 漏寫 +
+                                                       F7-FUP-23 unattributed audit 排除
     [24] signals_writer_freshness             5 tests — 4/19 silent outage 指紋
     [25] dust_qty_distribution                5 tests — log10 sub-micro 漂移
     [26] dust_spiral_noise_in_ef              5 tests — ML 訓練語料 hygiene
@@ -258,6 +260,43 @@ class TestOrdersFillsConsistency(unittest.TestCase):
         status, msg = check_orders_fills_consistency(cur)
         self.assertEqual(status, "WARN")
         self.assertIn("orders_fills consistency query failed", msg)
+
+    def test_sql_excludes_f4_unattributed_audit_rows(self) -> None:
+        """F7-FUP-23: SQL must exclude F4 unattributed audit rows
+        (``strategy_name LIKE 'unattributed:%'``) — they are audit-by-design
+        with no corresponding ``trading.orders`` row, and would otherwise
+        fabricate a false-positive FAIL after the F4 backfill runs.
+
+        F7-FUP-23：SQL 必須排除 F4 unattributed audit row
+        （``strategy_name LIKE 'unattributed:%'``）— audit-by-design 無對應
+        ``trading.orders`` row，否則 F4 backfill 後會系統性產生假 FAIL。
+
+        Contract test: assert the literal NOT LIKE filter is wired into the
+        rendered SQL string captured by ``cur.execute.call_args``.
+        Contract test：抓 ``cur.execute.call_args`` 的 SQL 字串斷言含
+        NOT LIKE filter。"""
+        # Drive the check with a benign all-PASS row so we get past the
+        # rollback + execute and reach the post-execute assertions.
+        # 用 benign all-PASS row 餵 check 跑完 execute，再做 SQL contract 斷言。
+        cur = self._make_cursor_with_row(0, 5, 0)
+        status, _ = check_orders_fills_consistency(cur)
+        self.assertEqual(status, "PASS")
+
+        # Verify SQL contract: the ``strategy_name NOT LIKE 'unattributed:%'``
+        # clause must exist in the WHERE block.
+        # SQL 契約驗證：WHERE 區段必須含 ``strategy_name NOT LIKE 'unattributed:%'``。
+        cur.execute.assert_called_once()
+        sql_text = cur.execute.call_args.args[0]
+        self.assertIn(
+            "f.strategy_name NOT LIKE 'unattributed:%'",
+            sql_text,
+            msg=(
+                "F7-FUP-23 SQL contract violated — F4 unattributed audit rows "
+                "must be excluded from the orders ⊇ fills LEFT JOIN. "
+                "F7-FUP-23 SQL 契約違反 — F4 unattributed audit row 必須從 "
+                "orders ⊇ fills LEFT JOIN 排除。"
+            ),
+        )
 
 
 # =============================================================================
