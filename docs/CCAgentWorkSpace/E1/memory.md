@@ -641,3 +641,53 @@ PA design plan §10.1 step 7-8 + 附錄 A — Sub-task A (Rust h_state_cache, co
 - **跨平台 0 風險**：(a) 純 `os.environ.get` + `Path.read_text` + `importlib.import_module` 無 Linux-only API (b) base path 解析 OPENCLAW_BASE_DIR > OPENCLAW_SRV_ROOT > `~/BybitOpenClaw/srv` 三段 fallback 對齊 §六 env var 表 (c) Mac/Linux 行為一致（pytest 35/0 + healthcheck PASS 雙端均驗）(d) 無 LocalLLMClient 接觸（不調 LLM）(e) 無 systemd / launchd 依賴（純 in-process module + cron-runnable script）。Lesson：healthcheck 設計時 base path fallback 三段一定要寫齊（避免 Mac dev OPENCLAW_SRV_ROOT 未設誤判）。
 - **檔案大小**：strategy_wiring.py 933→1015（800 警告線上、§九 1200 硬上限以下，這檔本就是接線中樞，多接一個 singleton 屬合理）；checks_derived.py 593→830（800 警告線上，含 4 大 check 含詳細雙語 docstring 屬合理 — 已遠離 1200 硬上限）；其他檔 < 800。
 - **報告檔位置**：直接傳給 parent agent（per system prompt 「Do NOT Write report/summary/findings/analysis .md files. Return findings directly as your final assistant message」）。本 memory.md 條目 = 完整跨 session 知識持久化。
+
+## G3-08 Phase 2 — H1 ThoughtGate + H3 ModelRouter 接入（2026-04-26 P1，2-4h，commit `9120948`）
+
+### 任務
+PA design plan §10.2 Phase 2 prompt template — Phase 1 全 3 sub-task 完成（Rust h_state_cache `aa287c4` + Python invalidator/query_handler `1c7b20e` + Wiring/healthcheck `5943337`）後，Python 端把 H1 ThoughtGate + H3 ModelRouter 真實 stats 接入 `query_h_state_full` reverse IPC handler，把 Phase 1 stub 空殼升級為真實 H1+H3 snapshot；schema version 0 → 1。
+
+### 範圍（PA §10.2 fill in）
+- **修改 3 業務檔**：`h1_thought_gate.py` / `model_router.py` / `h_state_query_handler.py`（共 +1822 / -192）
+- **新建 2 test 檔**：`test_h1_thought_gate.py`（17 tests）+ `test_model_router.py`（22 tests）
+- **改寫 1 test 檔**：`test_h_state_query_handler.py`（11 → 22 tests，含 env=0 fallback / env=1 real / singleton 不接線 / snapshot 拋例外 / include filter / `_safe_snapshot` 防禦路徑）
+- 6 檔 commit `9120948` push origin/main + `ssh trade-core "git pull --ff-only origin main"` synced
+
+### 設計亮點
+
+**1. H1 invalidate hook 4 條 + 本地 stats counter**：每個 `check()` 分支（budget_skip / complexity_skip / cooldown_skip + ai_call_allowed pass）皆 `invalidate_async("h1.<reason>")` fire-and-forget；同時遞增 `_h1_local_stats: Dict[str, int]`（與 caller 注入的 stats 鏡射但歸 H1 自身擁有 — caller stats 為 StrategistAgent telemetry / 本地 stats 為 H 狀態 cache 暴露專用）。`get_h1_snapshot()` 純讀回 7 欄位含 `total_decisions / ai_calls_allowed / per-branch skip / cooldown_dict_size / budget_remaining_pct`。`budget_remaining_pct` 透過 `cost_tracker.check_daily_budget()` + `_config.daily_hard_cap_usd` 換算 0-100，clamp 上限避免溢出；tracker raise → fail-open 回 None（與既有 `_check_budget()` 對齊）。
+
+**2. H3 invalidate hook 6 條 + 路由分桶 stats**：
+- `route()` 出口拆 `_record_route(tier, budget_denied=)` helper：`l1_9b` / `l1_27b` / `l1_5` / `l2` 4 個 tier counter + `budget_denied_count` 獨立桶 + `total_routes` 總和；reason 字串 `h3.<tier>` 或 `h3.budget_denied`
+- `check_l2_cache` hit / expired branch 各加本地計數 + `h3.l2_cache_hit` / `h3.l2_cache_expired` invalidate；no-entry 路徑無計數 + 無 invalidate（避免高頻噪音）
+- `_store_l2_result` 成功插入後加 `l2_cache_stored` + `h3.l2_cache_stored` invalidate
+- `get_h3_snapshot()` 回 10 欄位：`total_routes / l1_*_count / l2_count / budget_denied_count / l2_cache_*` + `cache_size`（從 `_l2_result_cache` len）
+
+**3. h_state_query_handler Phase 2 升級**：
+- **延遲匯入 strategy_wiring**：`_collect_h_snapshots()` 函式體內 `from . import strategy_wiring as _sw`，避免 module top-level import 觸發 uvicorn worker boot circular。重要！strategy_wiring 自身 import h_state_invalidator + 多 agent 模組，top-level 匯入死鎖。
+- **`_safe_snapshot(parent, attr_name, method_name)` 防禦式 helper**：吞所有 `getattr` / `callable` / `result is dict` / 任何 method raise，回 None 而非 raise；維持 `build_h_state_full_response` 「永不 raise」契約。
+- **schema 雙態切換**：`h_states` 至少有一桶填入 → `version = 1`；`h_states` 空（env=0 / strategy_wiring 不可匯入 / STRATEGIST_AGENT 為 None / H1+H3 snapshot 都拋例外）→ `version = 0` (Phase 1 fallback shape)。caller 可廉價偵測 Phase 1 placeholder：`version == 0 and not h_states and not agent_states`。
+- **include filter 在 Phase 2 開始生效**：Phase 1 收參不過濾，Phase 2 對 `["h1"]` / `["h3"]` 各別過濾；未知 key（如 `["h2"]` Phase 3 才接）靜默忽略保 forward-compat。
+- **env-gate 短路**：env=0 不嘗試填桶，直接回 empty shell（不浪費 import + lookup）。對齊 PA §10.2 + §4.5 push/pull 通道 env-gate 對稱。
+
+### 驗證
+- **Mac pytest 96/0 全綠**（`test_h1_thought_gate.py` 17 + `test_model_router.py` 22 + `test_h_state_query_handler.py` 22 + `test_h_state_invalidator.py` 35 = 96，0.15s）
+- **Mac strategist regression 69/0 全綠**（`test_strategist_agent.py` + `test_strategist_audit_wiring.py` + `test_batch7_conductor_strategist.py`）
+- **Linux pytest 96/0 全綠 0.18s**（同 4 檔，Linux 端對齊）
+- **Linux strategist regression 69/0 全綠 0.15s**
+- **Linux smoke test 雙路徑驗證**：
+  - env=0 → `version=0 / h_states={} / agent_states={}`（Phase 1 fallback shape，不嘗試填桶）
+  - env=1 + 注入 fake STRATEGIST_AGENT（含 fake H1/H3 snapshot）→ `version=1 / h_states={"h1": {...real...}, "h3": {...real...}} / agent_states={}`，schema 與 PA §5.2 H1Stats / H3RouteStats 對齊
+- **不擴範圍嚴守**：(1) 不改 H1 / H3 / StrategistAgent 業務邏輯（純讀 self._stats / self._cooldown / self._l2_result_cache）(2) 不影響 advisory-only 行為（invalidate_async 永不阻塞 H1/H3 hot-path）(3) 不擴 H2/H4/H5（Phase 3 範疇）+ 不擴 5-Agent state events（Phase 4 範疇）(4) 不換 Rust h_state_cache 的 StubHStateFetcher（Sub-task C 設計仍用 stub on Rust 端，本 ticket 主軸是 Python 端 query_handler 改回真實數據）(5) 不動 docs/CCAgentWorkSpace/QA/（隔壁 session WIP — git status 顯示其改動但用 explicit path list staging 完全略過）
+
+### 教訓
+- **本地 stats vs caller-supplied stats 雙軌共存**：caller（StrategistAgent）注入 `stats: Dict[str, int]` 是既有 telemetry 路徑；H1/H3 為 H 狀態 cache 暴露目的另開 `_h1_local_stats / _routing_stats`，與 caller stats **同步遞增**（兩條程式都跑）。Lesson：別把 caller stats 直接當 snapshot 來源 — caller 是 transient telemetry，模組 self-state 才能跨 caller 上下文存活；snapshot 必歸模組自身擁有。
+- **lazy import 是 wiring-aware module 的硬約束**：`h_state_query_handler.py` 不能 top-level import `strategy_wiring`，因 strategy_wiring 自身 import h_state_invalidator + 多個 agent — uvicorn --workers 4 worker boot 序列下 top-level 匯入會 deadlock。改 inline import 即解。Lesson：任何「集中查詢/聚合多 singleton 的 handler」module 都該 inline import 各 singleton — 不要為了「乾淨」把 import 提到 module top。
+- **`_safe_snapshot` 防禦式 helper 必要**：snapshot accessor 自身可能在 schema drift / Phase 部分部署 / 後續演進中 raise；handler 必須吞所有 exception 維持「永不 raise」契約，否則一個 H1 snapshot 拋例外就讓 Rust poller `query_h_state_full` IPC 收到 error 回應，Rust 端 last-good fall-back 邏輯反而破功（Rust 拿到 error 不會用 last good）。Lesson：跨進程 IPC handler「乾淨 default」優於「精準 error」；本地 caller 可看 `version=0` 推斷部分填補狀況。
+- **schema version 設計：累進填桶非破壞性升 version**：Phase 1 = 0、Phase 2 = 1、Phase 3 / 4 仍維持 1（純 additive 加 H2/H4/H5/agents）；只有真正破壞 wire shape（如改 key 名 / 改型別）才升到 2。Lesson：version bump 訊號是「shape 變了」而非「填了新桶」；caller 用 `version` 判分支 / 用 `set(h_states.keys())` 判桶可用性。
+- **invalidate hook 應放 hot-path 出口而非業務內部**：H1 4 條 hook 全在 `check()` return 前；H3 6 條 hook 全在 `route()` / `check_l2_cache` / `_store_l2_result` 各 exit 前。**不**埋進 `_check_budget()` / `_check_cooldown()` 等私有 helper 內部 — 因 helper 可能未來被重構或多次呼叫（counter 重複爆增）。Lesson：observability 鉤子放公開方法 exit branch；私有 helper 只負責 pure logic + return 結果。
+- **`patch("app.h1_thought_gate._invalidate_h_state_async")` mock 模式**：sibling import `from .h_state_invalidator import invalidate_async as _invalidate_h_state_async` 後，從**呼叫端 module path** patch 才有效（`app.h1_thought_gate._invalidate_h_state_async`），不是從原模組 path（`app.h_state_invalidator.invalidate_async` mock 不到 H1 已 bind 的 reference）。Lesson：`from X import Y as Z` 後測試 patch 必走 `caller_module.Z`；patch 原 module 的 export 名只影響後續才 import 的人。
+- **既有 strategist test 不破 — 因為 `check()` 回傳語意 / stats key 名全保持**：所有「skip / pass 路徑」對外行為對齊 — `stats["h1_budget_skip"]` 等 caller-injected key 仍按舊路徑遞增；H1 / H3 自身的 local stats 是新增 attribute，未與既有 contract 衝突。Lesson：observability 擴展時必先 grep 既有 callers 對 stats dict / return value 的依賴；附加而非取代。
+- **commit 範圍嚴守 + multi-session 規避**：6 個 Phase 2 檔案明確 `git add` list；隔壁 QA session 的 `docs/CCAgentWorkSpace/QA/{memory.md,workspace/reports/...wave3_e2e_acceptance.md}` 全 unstaged。Lesson：multi-session 時 `git add -A` 永不該用；`git status` 三段交叉檢查（本 task 改了什麼 / status 顯示什麼 / staged what）後再 commit。
+- **Mac↔Linux smoke test 雙端齊跑 + tmp file 清乾淨**：smoke 用 ssh trade-core + heredoc 寫到 /tmp，跑完 `rm -f /tmp/...py`。Lesson：smoke test artifact 不留 /tmp 否則積累；tmp file path 帶 task-id 避撞（`/tmp/g3_08_phase2_smoke.py`）。
+- **報告檔位置**：直接回傳給 parent agent（per system prompt 強制「Do NOT Write report/summary .md files」），不寫到 `.claude_reports/`。本 memory.md 條目 = 完整跨 session 知識持久化。
