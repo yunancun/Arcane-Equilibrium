@@ -577,3 +577,38 @@ PA 派發 P2：G9-04 commit `c7d7179` 揭發 commit `f42face`（2026-04-23 刪 9
 - **commit 政策（PA override > E1 default）**：PA prompt step 5 明示「強制 commit + push，per lessons.md」覆蓋 system prompt + CLAUDE.md §七「E1→E2→E4→QA→PM」default。採 PA 顯式 override 與 G3-07 / G9-02 / EDGE-P1b-FUP-STALE-PEAK-IPC 同範式。staging 不需，commit 即 push 一氣呵成。
 - **避開隔壁 sub-agent WIP**：commit 前 git status 看到 `docs/CCAgentWorkSpace/{QA,MIT}/` + `docs/CCAgentWorkSpace/E1/workspace/reports/2026-04-26--g3_08_phase1_subtask_b.md` 已 staged sibling — 不動，per memory `feedback_subagent_first.md` + 任務 prompt 明示。`git add` 用 explicit file list 避免 `git add -A` 拖入。
 - **報告檔位置**：`docs/CCAgentWorkSpace/E1/workspace/reports/2026-04-26--observer_pipeline_post_f42face_cleanup.md`（6 節結構 per CLAUDE.md §七）。
+
+## G3-08 Phase 1 Sub-task C — Wiring + Healthcheck [20]（2026-04-26 P1，0.5d）
+
+### 任務
+PA design plan §10.1 step 7-8 + 附錄 A — Sub-task A (Rust h_state_cache, commit `aa287c4` + merge `4689fc8`) + Sub-task B (Python invalidator + query_handler, commits `1c7b20e` + `deac4bc`) 完成後，串行接線收尾：
+(1) `strategy_wiring.py` 加 condition spawn `_H_STATE_INVALIDATOR`（鏡射 G3-03 ExecutorConfigCache pattern 但流向相反）
+(2) `srv/CLAUDE.md` §九 singleton 表加 `_H_STATE_INVALIDATOR` + `HStateCacheSlot` 兩 row
+(3) 新 healthcheck `[20] check_h_state_gateway_freshness` 加入 `passive_wait_healthcheck/checks_derived.py`
+
+### 改動（5 檔 / +340 / -9 / commit `5943337`）
+1. **strategy_wiring.py**（933→1015 +82 行，§九 警戒下）：condition spawn `_H_STATE_INVALIDATOR` — 嚴格 `OPENCLAW_H_STATE_GATEWAY=="1"` 才 init；env=0 → singleton stays None / `invalidate_async()` no-op / 零負擔；fail-closed try/except 守 ImportError + 非預期 raise。對齊 G3-03 ExecutorConfigCache wiring 區段（`strategy_wiring.py:467` 區段相鄰），雙語 inline comment 說明流向反轉（Python=SSOT push，Rust pull）+ Phase 2-4 未接 producer 的 plumbing-only 設計。
+2. **CLAUDE.md §九 singleton 表 +2 row**：`_H_STATE_INVALIDATOR / _LOCK`（h_state_invalidator.py 創建，G3-08 Phase 1C condition spawn，fire-and-forget daemon thread + 私有 EngineIPCClient + asyncio.new_event_loop，3 層 try/except fail-closed）+ `HStateCacheSlot`（rust/openclaw_engine/src/ipc_server/slots.rs，late-injected slot pattern，env=0 None / env=1 Arc<HStateCache> + tokio daemon + DashMap shard lookup ≤1ms p99 + Python crash → Rust 沿用 last good snapshot fail-soft + AgentState.stats:HashMap forward-compat schema）。
+3. **checks_derived.py**（593→830 +237 行）加 `check_h_state_gateway_freshness`：(a) env=0 → PASS-skip "Phase 1 dormant by design (per PA §10.1 completion criteria); skip" (b) env=1 → 驗 3 個 Phase 1 不變量：1. `query_h_state_full` route 在 ai_service_dispatch.py 已註冊（grep 偵測 byte-stable），2. `h_state_invalidator` + `h_state_query_handler` 模組可匯入，3. `build_h_state_full_response()` 回 canonical Phase 1 stub（version=0, h_states={}, agent_states={}）。3 態：PASS / WARN（invariant 3 schema drift / Phase 2-4 progress） / FAIL（invariant 1/2 broken）。**純 Python check**（importlib + Path.read_text，無 live IPC roundtrip / 無 DB cursor）— 對齊 [16] strategist_cycle_fresh log-tail-parse 哲學，cron/CI 不需 HMAC 即可跑。MODULE_NOTE 雙語升級含 ticket 來源 + 兩段判決 + cross-platform 陳述。
+4. **runner.py**：(a) imports `check_h_state_gateway_freshness` (b) `_RUNNER_DESCRIPTION` 結構化 12+8 split（12 cursor-bound + 8 filesystem/pure-Python）+ 完整 20 row 列表（含新增 [20]）(c) `main()` docstring 19→20 + 完整 row list (d) [19] 之後 [20] invocation block 含雙語 inline comment 說明 PA design 引用 + DEFAULT-OFF 設計
+5. **__init__.py**：`from .checks_derived import check_h_state_gateway_freshness` + `__all__` 加入
+
+### 驗證
+- **Mac 雙路徑 smoke test 全綠**：env=unset → PASS-skip / env="1" → PASS（route registered + modules importable + canonical stub）/ env="true"（strict mismatch）→ PASS-skip
+- **35 既有 pytest 全綠**（h_state_invalidator 24 + h_state_query_handler 11 = 35/0 pass，無 regression）
+- **strategy_wiring.py syntax + h_state_invalidator init 路徑驗證**：env=1 init 構造 HStateInvalidator singleton；env=0 init 回 None
+- **Linux 接手驗證全綠**：env=0/env=1 各對應 PASS path；同組 35 pytest 0.12s 全綠
+- **完整 cron pipeline 整合驗證**：`bash helper_scripts/db/passive_wait_healthcheck_cron.sh` 末尾出現 `PASS [20] h_state_gateway_freshness OPENCLAW_H_STATE_GATEWAY=unset (≠'1') — Phase 1 dormant by design`
+
+### 教訓
+- **多 sub-task 串行收尾的接手驗證**：本 Sub-task C 接續 Sub-task A（worktree isolation 已 merge `4689fc8`）+ Sub-task B（主樹 `1c7b20e` + memory `deac4bc`）。開工前先 `git fetch && git status` + `git log --oneline -15` 確認兩 sub-task 已合併 / 接線檔已 in tree（`h_state_invalidator.py` 386 行 + `h_state_query_handler.py` 181 行 + `ai_service_dispatch.py:120` 已含 `query_h_state_full` route），不重複建構。Lesson：串行接線必先實測前序成果落地，不能靠 commit log 推測。
+- **隔壁 sub-agent WIP 避撞**：commit 前 `git status` 顯示 `docs/CCAgentWorkSpace/QA/{memory.md,workspace/reports/...wave3_e2e_acceptance.md}`（QA WIP）+ 6 個 Rust 檔 unstaged（疑似另 session 寫 G7-09 grid_trading 或類似）— **不動 / 不 add**。`git add` 用 explicit file list（5 個 G3-08 Phase 1C 目標檔）避免 `git add -A` 誤拖入。Lesson：multi-session 工作時 `git add -A` / `git add .` 是禁忌；明確 path list + `git status` 三步交叉驗證才安全（per memory `feedback_git_commit_only_for_metadoc`）。
+- **healthcheck 設計：本地驗證 vs IPC 實 roundtrip**：原 PA 附錄 A 範例呼 `ipc_call("get_h_state_status", {})` 走 live IPC，但實際接 6h cron 後與 HMAC auth secret + 主程序 alive 強耦合，cron 失敗源變 brittle。改採方法 C（純 Python 本地驗證）：grep `query_h_state_full` 字串在 dispatch source（最 cheap，byte-stable）+ importlib 兩個 plumbing 模組 + 純函式呼 `build_h_state_full_response()` 驗 stub schema。對齊 [16] strategist_cycle_fresh 的 log-tail-parse 哲學。Lesson：healthcheck **必自足**，不創造對主程序 / auth secret 的依賴鏈；live IPC 留給專用 e2e 測試或 GUI route 用。
+- **Phase 1 invariant 設計 3 段**：route 註冊（Sub-task B 線路在）+ 模組可匯入（Phase 1 plumbing intact）+ stub canonical shape（Phase 2-4 progressive deploy 之前不應變）。invariant 3 用 WARN 而非 FAIL 因 Phase 2-4 漸進部署可能合法填桶；invariant 1/2 用 FAIL 因為「reverse IPC 路由消失」或「模組 import 不過」就是真壞。Lesson：healthcheck 三態判定要看「regression 是否合法」— 可預期演進 = WARN，破壞性 regression = FAIL。
+- **CLAUDE.md §九 表項目精煉度**：執行表項長 1-2 段（含創建位置 / 觸發條件 / 行為語意 / 失敗模式 / 對齊既有 pattern 引用）— 鏡射 `_CACHE_INSTANCE / _CACHE_LOCK` 條目格式（G3-03 Phase B）。`HStateCacheSlot` 雖 Rust 端但加表是因為 PA prompt step 3 明示 + CLAUDE.md §七「禁止子模塊創建未登記的全局可變狀態」涵蓋 cross-language 狀態。Lesson：跨語言 state 也屬 §九 範圍；late-injected slot 配 env-gate 仍要登記。
+- **strategy_wiring.py wiring 位置**：放在 `Batch 11: ExecutorAgent` 之後 + `Batch 12: PaperLiveGate` 之前 — 與 G3-03 ExecutorConfigCache 區段（line 468-485）相鄰，方便未來 §九 audit 對照「兩 cache singleton 鏡射 pattern」。雙語 inline comment 顯式說「資料流相反」+ Phase 2-4 未接 producer + reverse IPC route 已在 Sub-task B 永遠註冊（disabled 只切 push 通道，pull 通道 always reachable）。Lesson：相關 singleton 接線 group 在一起（Batch 邊界內或相鄰），未來 wiring audit / refactor 半成本下降。
+- **commit 範圍嚴守**：5 檔 staged（CLAUDE.md / 4 healthcheck/wiring 檔），rust/ 6 檔 + QA WIP 全 unstaged（`git diff --cached --stat` 確認）。Lesson：每次 commit 先 `--cached --stat` 對 PA prompt 範圍 cross-check，再 push（per CLAUDE.md §七 commit 即 push）。
+- **commit 政策（PA override > E1 default）**：PA prompt step 5「強制執行 commit + push，per lessons.md」覆蓋 system prompt + CLAUDE.md §七「E1→E2→E4→QA→PM」default。採 PA 顯式 override 與 G3-07 / G9-02 / Sub-task A/B 同範式。
+- **跨平台 0 風險**：(a) 純 `os.environ.get` + `Path.read_text` + `importlib.import_module` 無 Linux-only API (b) base path 解析 OPENCLAW_BASE_DIR > OPENCLAW_SRV_ROOT > `~/BybitOpenClaw/srv` 三段 fallback 對齊 §六 env var 表 (c) Mac/Linux 行為一致（pytest 35/0 + healthcheck PASS 雙端均驗）(d) 無 LocalLLMClient 接觸（不調 LLM）(e) 無 systemd / launchd 依賴（純 in-process module + cron-runnable script）。Lesson：healthcheck 設計時 base path fallback 三段一定要寫齊（避免 Mac dev OPENCLAW_SRV_ROOT 未設誤判）。
+- **檔案大小**：strategy_wiring.py 933→1015（800 警告線上、§九 1200 硬上限以下，這檔本就是接線中樞，多接一個 singleton 屬合理）；checks_derived.py 593→830（800 警告線上，含 4 大 check 含詳細雙語 docstring 屬合理 — 已遠離 1200 硬上限）；其他檔 < 800。
+- **報告檔位置**：直接傳給 parent agent（per system prompt 「Do NOT Write report/summary/findings/analysis .md files. Return findings directly as your final assistant message」）。本 memory.md 條目 = 完整跨 session 知識持久化。
