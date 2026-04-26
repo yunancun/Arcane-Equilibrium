@@ -48,6 +48,78 @@ logger = logging.getLogger(__name__)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# F5/A1 — Phantom-View Guard
+# F5/A1 — 幽靈視圖守衛
+# ═══════════════════════════════════════════════════════════════════════════════
+def _phantom_view_guard() -> dict | None:
+    """
+    Refuse to expose Live account data when the Live slot is structurally
+    unconfigured AND the engine is not in Live mode. Returns the response
+    payload that should be returned by the caller (or None to proceed).
+
+    Two LIVE-Tab states this protects against (per A3 audit, 2026-04-26):
+      a) Live slot api_key empty → ``_get_rust_client_safe()`` falls back to the
+         shared demo BybitClient (api-demo.bybit.com), which would otherwise
+         render real demo wallet/positions inside the purple "REAL FUNDS" view.
+      b) Live slot configured (mainnet OR live_demo) but Rust ``live`` engine
+         absent → ``_get_live_engine_kind()`` reports "demo"/"paper"; the
+         exchange data is technically real for that slot but it is NOT what
+         the Live engine is doing. Frontend must show a non-misleading view.
+
+    LiveDemo (slot api_key + bybit_endpoint=demo + Rust live engine running)
+    is NOT a phantom view: the Live pipeline genuinely uses api-demo as the
+    test bed (per CLAUDE.md memory `feedback_live_no_degradation_by_endpoint`).
+    We accept that case and let the frontend label it "LiveDemo · api-demo
+    endpoint" with an orange/silver theme.
+
+    本守衛拒絕在以下情境下暴露 Live 帳戶資料：
+      a) Live 槽 api_key 為空 → 客戶端回退到共享 demo client（api-demo.bybit.com），
+         否則紫色「真實資金」面板會渲染出 demo 錢包/倉位。
+      b) Live 槽已配置但 Rust ``live`` 引擎缺席 → engine_kind 退到 demo/paper；
+         交易所資料對該槽是真實的，但**並非 Live engine 正在做的事**，前端需顯示
+         不誤導視圖。
+
+    LiveDemo（槽 api_key + endpoint=demo + Rust live 引擎運行）**不是**幽靈視圖：
+    Live 管線確實在 api-demo 跑 live code path（per CLAUDE.md memory）。此情況
+    放行，前端用橙/銀主題標 "LiveDemo · api-demo endpoint"。
+
+    Returns:
+      None — proceed with normal handler logic
+      dict — caller should ``return`` this payload directly (HTTP 200 envelope
+             carrying ``actual_*`` markers, ``error``, and empty data so the
+             frontend reliably swaps to the warning view)
+
+    Why 200 instead of HTTPException(422): the existing GUI relies on
+    ``ocApi`` envelope unwrap and shows a generic toast on non-200; we want
+    the page-load flow to read the payload markers and swap views, so we
+    return a structured envelope with ``error`` key + ``actual_engine_kind``
+    + ``actual_endpoint``. Tests assert presence of these keys on the payload.
+
+    為何回 200 而非 422：現有 GUI 依賴 ocApi unwrap，非 200 會 toast 通用錯誤；
+    我們要讓 page-load 流程讀取 payload markers 來 swap 視圖，所以回結構化 envelope
+    含 ``error`` + ``actual_engine_kind`` + ``actual_endpoint``。Tests 斷言 keys 存在。
+    """
+    actual_engine_kind = core._get_live_engine_kind()
+    actual_endpoint = core._resolve_live_endpoint_label()
+
+    # Phantom view detected: engine not Live AND slot unconfigured
+    # 幽靈視圖：引擎非 live 且槽未配置
+    if actual_engine_kind != "live" and actual_endpoint == "unconfigured":
+        return core._live_response({
+            "available": False,
+            "error": "live_slot_not_configured",
+            "error_zh": "Live 槽未配置；GUI 拒絕顯示 demo data 偽裝 live",
+            "error_en": "Live slot not configured; GUI refuses to render demo data as live",
+            "list": [],
+            "positions": [],
+            "count": 0,
+            "actual_engine_kind": actual_engine_kind,
+            "actual_endpoint": actual_endpoint,
+        })
+    return None
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # Live account data — balance / positions / orders
 # 實盤帳戶數據端點 — 餘額 / 倉位 / 掛單
 #
@@ -70,6 +142,13 @@ async def get_live_balance(
     主路徑：httpx BybitClient 獲取真實 Bybit 帳戶餘額（demo 或 live key 均可）。
     降級：引擎內部餘額 + bybit_sync_balance。
     """
+    # F5/A1: refuse to render demo wallet under the Live "REAL FUNDS" view when
+    #        the Live slot is unconfigured and engine_kind is not 'live'.
+    # F5/A1：Live 槽未配置且引擎非 live 時拒絕用 demo wallet 偽裝「真實資金」視圖。
+    guard = _phantom_view_guard()
+    if guard is not None:
+        return guard
+
     # Attach per-engine session baseline (initial/peak/realized/fees) from
     # Rust paper_state so the GUI can display net-of-fees PnL identity
     # (equity - initial = realized - fees + unrealized). Best-effort: snapshot
@@ -126,6 +205,11 @@ async def get_live_positions(
     主路徑：httpx BybitClient 獲取真實 Bybit 倉位。
     降級：引擎追蹤倉位（內部狀態）。
     """
+    # F5/A1 phantom-view guard / F5/A1 幽靈視圖守衛
+    guard = _phantom_view_guard()
+    if guard is not None:
+        return guard
+
     rc = core._get_rust_client_safe()
     if rc is not None:
         try:
@@ -163,6 +247,11 @@ async def get_live_orders(
     主路徑：httpx BybitClient 獲取真實 Bybit 掛單。
     降級：從引擎倉位狀態派生 pending_close 訂單。
     """
+    # F5/A1 phantom-view guard / F5/A1 幽靈視圖守衛
+    guard = _phantom_view_guard()
+    if guard is not None:
+        return guard
+
     rc = core._get_rust_client_safe()
     if rc is not None:
         try:
@@ -201,6 +290,11 @@ async def get_live_fills(
     DB primary (realized_pnl) → Bybit API fallback → engine snapshot fallback.
     DB 為主（帶 realized_pnl）→ Bybit API 備援 → 引擎快照備援。
     """
+    # F5/A1 phantom-view guard / F5/A1 幽靈視圖守衛
+    guard = _phantom_view_guard()
+    if guard is not None:
+        return guard
+
     # DB path — engine-calculated realized_pnl, same pattern as demo/paper.
     # DB 路徑 — 引擎計算的 realized_pnl，與 demo/paper 相同模式。
     try:
@@ -418,6 +512,11 @@ def get_live_metrics(
     actor: Any = Depends(base.current_actor),
 ) -> dict:
     """GET /api/v1/live/metrics — performance metrics from Rust engine (fills/positions/PnL). / 性能指標。"""
+    # F5/A1 phantom-view guard / F5/A1 幽靈視圖守衛
+    guard = _phantom_view_guard()
+    if guard is not None:
+        return guard
+
     from .paper_trading_metrics import compute_full_metrics
 
     rust = get_rust_reader()

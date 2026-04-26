@@ -135,6 +135,66 @@ html, body {
 /* Container padding / 容器內邊距 */
 .live-wrap { padding: 16px; max-width: 1200px; margin: 0 auto; }
 
+/* ── F5/A1 — Engine-kind / Endpoint visual modes ──────────────────────────
+   Three Live visual modes coexist (per A3 audit 2026-04-26):
+   1. Mainnet (REAL FUNDS) — purple+red double underline, REAL FUNDS badge
+   2. LiveDemo (api-demo endpoint) — orange/silver, "LiveDemo · api-demo" badge
+   3. Engine != live — gray integrity-fail view (no data rendered)
+   F5/A1 — engine_kind / endpoint 三態 UI 區分（避免 LiveDemo 套 Mainnet 紫「真實資金」） */
+.live-mode-mainnet .live-warn-bar {
+  border: 1px solid rgba(239,68,68,0.6) !important;
+  background: linear-gradient(135deg,rgba(168,85,247,0.12),rgba(239,68,68,0.08)) !important;
+  border-bottom: 3px double #f87171 !important;
+}
+.live-mode-livedemo .live-warn-bar {
+  background: rgba(249,115,22,0.07) !important;
+  border: 1px solid rgba(249,115,22,0.4) !important;
+}
+.live-mode-livedemo .live-control-bar {
+  border: 1px solid rgba(249,115,22,0.4) !important;
+}
+.live-mode-livedemo .live-card-group.live-accent {
+  border-color: rgba(249,115,22,0.3) !important;
+}
+.live-mode-livedemo .live-warn-bar strong { color: #f97316 !important; }
+.live-mode-mainnet .live-warn-bar strong { color: #f87171 !important; }
+
+/* Real-funds badge (Mainnet only) / 真實資金徽章（僅 Mainnet 顯示） */
+.real-funds-badge {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 3px 10px; border-radius: 4px;
+  background: rgba(239,68,68,0.18); border: 1px solid rgba(239,68,68,0.6);
+  color: #f87171; font-size: 11px; font-weight: 700; letter-spacing: 0.4px;
+  margin-left: 8px;
+}
+.live-demo-badge {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 3px 10px; border-radius: 4px;
+  background: rgba(249,115,22,0.18); border: 1px solid rgba(249,115,22,0.6);
+  color: #f97316; font-size: 11px; font-weight: 700; letter-spacing: 0.4px;
+  margin-left: 8px;
+}
+
+/* Integrity-fail view: engine_kind != 'live' / 完整性失效視圖 */
+.integrity-fail-view {
+  background: rgba(139,148,158,0.05);
+  border: 2px dashed rgba(139,148,158,0.4);
+  border-radius: 12px;
+  padding: 32px 24px;
+  margin: 16px;
+  text-align: center;
+}
+.integrity-fail-view h2 {
+  color: #94a3b8; font-size: 18px; font-weight: 700; margin-bottom: 12px;
+}
+.integrity-fail-view .ifv-detail {
+  color: var(--text-dim); font-size: 13px; line-height: 1.7;
+  max-width: 540px; margin: 0 auto;
+}
+.integrity-fail-view .ifv-divider {
+  border-top: 1px solid var(--border); margin: 16px auto; width: 60%;
+}
+
 /* ── Earned-Trust Tier bar / 贏得信任階梯欄 ────────────────── */
 .trust-bar {
   border-radius: 8px; padding: 10px 16px; margin-bottom: 14px;
@@ -160,18 +220,43 @@ html, body {
 </style>
 
 <!-- ══════════════════════════════════════════════════════════════
-     LIVE DASHBOARD — Live_Ready, always shown
-     實盤儀表板 — Live_Ready 狀態，直接顯示
+     F5/A1 — Integrity-fail view (shown when engine_kind != "live")
+     F5/A1 — 完整性失效視圖（engine_kind != "live" 時顯示）
+     ── This intentionally renders NO data; metrics from a non-Live engine
+        in the Live tab would be misleading (paper / demo numbers shown
+        as "Live"). Better to show nothing than fake-live numbers.
+     刻意不渲染任何資料；非 Live 引擎的數據放在 Live tab 會誤導
+     （paper/demo 數字以「Live」名義呈現）。寧可空白，不要假 live。
 ═══════════════════════════════════════════════════════════════ -->
-<div id="live-dashboard-view" class="live-dashboard">
+<div id="live-integrity-fail-view" class="integrity-fail-view" style="display:none">
+  <h2>&#x26A0;&#xFE0F; Live engine 未啟動 — 此 Tab 不顯示任何數據以避免誤導</h2>
+  <div class="ifv-detail">
+    Live engine is not running.<br>
+    This tab is intentionally blank to prevent misleading display of paper/demo
+    data under the Live identity.
+    <div class="ifv-divider"></div>
+    <div id="ifv-debug" style="font-size:11px;color:var(--text-dim);font-family:monospace"></div>
+    <div style="margin-top:14px;font-size:12px">
+      請至「總覽」或 SSH 至 trade-core 檢查 engine 狀態（PID + binary mtime）。<br>
+      Check engine state via "Overview" tab or <code>ssh trade-core</code>.
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════
+     LIVE DASHBOARD — shown when engine_kind == "live"
+     實盤儀表板 — engine_kind == "live" 時顯示
+═══════════════════════════════════════════════════════════════ -->
+<div id="live-dashboard-view" class="live-dashboard" style="display:none">
 <div class="live-wrap">
 
-  <!-- Purple warning banner / 紫色警示橫幅 -->
-  <div class="live-warn-bar">
+  <!-- F5/A1 — Mode banner (mainnet / live_demo) — JS sets innerHTML based on actual_endpoint -->
+  <!-- F5/A1 — 模式 banner（mainnet / live_demo），由 JS 依 actual_endpoint 動態設置 -->
+  <div class="live-warn-bar" id="live-mode-banner">
     <span class="warn-icon">&#x1F7E3;</span>
-    <div>
-      <strong style="color:#a855f7">Live 实盘模式啟用 — 所有訂單使用真實資金 / LIVE MODE — Real funds at risk</strong><br>
-      <span style="font-size:12px;color:var(--text-dim)">此頁面操作直接影響 Bybit Live 实盘 帳戶。請確保風控參數正確配置，謹慎操作。</span>
+    <div id="live-mode-banner-body">
+      <strong>Live 实盘模式啟用 / LIVE MODE</strong><br>
+      <span style="font-size:12px;color:var(--text-dim)">解析 endpoint 中... / Resolving endpoint...</span>
     </div>
   </div>
 
@@ -182,19 +267,20 @@ html, body {
       <div style="color:#a855f7;font-weight:600;margin-bottom:4px">Live 槽雙態說明 / Live Slot — Dual-State</div>
       <div style="font-size:12px;color:var(--text)">
         Live 槽可填入 Mainnet API 或 Live-Demo 虛擬 key（後者跑 Demo 服務器但走 Live 代碼路徑）。<br>
-        無論哪種填充，本 Tab 與風控均按 Live 最嚴標準：紫色主題 / 全局模式門禁 / 二次確認 / 完整風控棧。
+        無論哪種填充，本 Tab 與風控均按 Live 最嚴標準：全局模式門禁 / 二次確認 / 完整風控棧；視覺上 Mainnet=紫紅+REAL FUNDS、LiveDemo=橙+api-demo 標。
       </div>
       <div style="font-size:11px;color:var(--text-dim);margin-top:4px">
         The Live slot accepts either a Mainnet API key or a Live-Demo virtual key (Demo server, Live code path).
-        In both cases, this tab and all risk controls enforce the strictest Live standards.
+        Risk controls remain at strict Live standards regardless; visually Mainnet = purple/red + REAL FUNDS, LiveDemo = orange + api-demo badge.
       </div>
     </div>
   </div>
 
   <!-- Control bar / 控制欄 -->
   <div class="live-control-bar">
-    <span class="bar-title">&#x1F7E3; Live 实盘 Engine</span>
+    <span class="bar-title" id="live-engine-bar-title">&#x1F7E3; Live 实盘 Engine</span>
     <span id="live-engine-status" class="oc-chip oc-chip-neutral">--</span>
+    <span id="live-endpoint-badge" style="display:none"></span>
     <span id="live-contraction-badge" style="display:none"></span>
     <span id="live-engine-detail" style="font-size:12px;color:var(--text-dim)"></span>
     <span style="flex:1"></span>
@@ -671,12 +757,170 @@ async function submitFullReview() {
 }
 
 // ═══════════════════════════════════════════════════════════════
+// F5/A1 — Page-load integrity gate
+// F5/A1 — 頁面載入完整性閘
+// ───────────────────────────────────────────────────────────────
+// Runtime contract:
+//   - actual_engine_kind != "live"  → swap to integrity-fail view (no data)
+//   - actual_endpoint == "mainnet"  → REAL FUNDS purple+red double-line theme
+//   - actual_endpoint == "live_demo" → LiveDemo orange/silver theme
+//   - actual_endpoint == "unconfigured" → silver dashboard with caution banner
+//                                          (Live slot empty — using demo client)
+// 運行契約：上述四種狀態前端必區分；不能讓 LiveDemo / unconfigured 被當「真實資金」呈現。
+//
+// _liveModeState is the single source of truth read by other handlers
+// (e.g. button guards, watermark application, banner text).
+// _liveModeState 為單一事實來源，其他 handler（按鈕守衛、水印、banner）讀此判斷。
+// ═══════════════════════════════════════════════════════════════
+const _liveModeState = {
+  actual_engine_kind: 'unknown',  // 'live' | 'demo' | 'paper' | 'unknown'
+  actual_endpoint: 'unconfigured', // 'mainnet' | 'live_demo' | 'unconfigured'
+  execution_authority: 'not_granted',
+  session_state: 'offline',
+};
+
+/**
+ * Apply the resolved engine_kind / endpoint to the document body class so the
+ * CSS mode rules (.live-mode-mainnet / .live-mode-livedemo) take effect.
+ * Also flips visibility between dashboard view and integrity-fail view.
+ *
+ * 將解析出的 engine_kind / endpoint 套到 body class，啟用對應的 CSS 模式規則
+ * （.live-mode-mainnet / .live-mode-livedemo）；同時切換 dashboard view 與
+ * integrity-fail view 的可見性。
+ */
+function _applyLiveModeUI() {
+  const body = document.body;
+  body.classList.remove('live-mode-mainnet', 'live-mode-livedemo', 'live-mode-unconfigured');
+
+  const dash = document.getElementById('live-dashboard-view');
+  const fail = document.getElementById('live-integrity-fail-view');
+  const ifvDebug = document.getElementById('ifv-debug');
+
+  // Integrity-fail: engine_kind != 'live' → hide dashboard, show fail view
+  // 完整性失效：engine_kind != 'live' → 隱藏儀表板，顯示警示視圖
+  if (_liveModeState.actual_engine_kind !== 'live') {
+    if (dash) dash.style.display = 'none';
+    if (fail) fail.style.display = 'block';
+    if (ifvDebug) {
+      ifvDebug.textContent =
+        'actual_engine_kind: ' + _liveModeState.actual_engine_kind +
+        ' · actual_endpoint: ' + _liveModeState.actual_endpoint +
+        ' · session: ' + _liveModeState.session_state;
+    }
+    return;
+  }
+
+  // Live engine running — show dashboard with appropriate mode theme
+  // Live 引擎運行中 — 以對應主題顯示儀表板
+  if (dash) dash.style.display = 'block';
+  if (fail) fail.style.display = 'none';
+
+  if (_liveModeState.actual_endpoint === 'mainnet') {
+    body.classList.add('live-mode-mainnet');
+  } else if (_liveModeState.actual_endpoint === 'live_demo') {
+    body.classList.add('live-mode-livedemo');
+  } else {
+    body.classList.add('live-mode-unconfigured');
+  }
+
+  // Update mode banner text based on endpoint / 依 endpoint 更新 banner 文字
+  const banner = document.getElementById('live-mode-banner-body');
+  if (banner) {
+    if (_liveModeState.actual_endpoint === 'mainnet') {
+      banner.innerHTML =
+        '<strong>Live Mainnet — 真實資金 / REAL FUNDS at risk</strong>' +
+        '<span class="real-funds-badge">&#x26A0;&#xFE0F; REAL FUNDS · Mainnet</span><br>' +
+        '<span style="font-size:12px;color:var(--text-dim)">' +
+        '此頁面操作直接影響 Bybit Mainnet 帳戶。請確保風控參數正確配置，謹慎操作。</span>';
+    } else if (_liveModeState.actual_endpoint === 'live_demo') {
+      banner.innerHTML =
+        '<strong>LiveDemo · api-demo endpoint</strong>' +
+        '<span class="live-demo-badge">&#x1F7E0; LiveDemo · api-demo.bybit.com</span><br>' +
+        '<span style="font-size:12px;color:var(--text-dim)">' +
+        'Live 管線跑 demo 服務器（authorization / TTL / 風控按 Live 嚴格標準，不因 endpoint 降級）。' +
+        '本面板非 Mainnet「真實資金」，但 Operator 操作仍會影響 demo 帳戶歷史。</span>';
+    } else {
+      banner.innerHTML =
+        '<strong style="color:#94a3b8">Live 槽未配置 — 顯示資料來自 demo 槽</strong><br>' +
+        '<span style="font-size:12px;color:var(--text-dim)">' +
+        'Live slot is empty; data shown comes from the shared demo client. ' +
+        '請至 Settings 配置 Live API key 後再評估真實 live 行為。</span>';
+    }
+  }
+
+  // Endpoint badge in control bar / 控制欄 endpoint 徽章
+  const epBadge = document.getElementById('live-endpoint-badge');
+  if (epBadge) {
+    if (_liveModeState.actual_endpoint === 'mainnet') {
+      epBadge.style.display = '';
+      epBadge.className = 'real-funds-badge';
+      epBadge.textContent = 'Mainnet';
+    } else if (_liveModeState.actual_endpoint === 'live_demo') {
+      epBadge.style.display = '';
+      epBadge.className = 'live-demo-badge';
+      epBadge.textContent = 'LiveDemo';
+    } else {
+      epBadge.style.display = 'none';
+    }
+  }
+}
+
+/**
+ * F5/A4 — Apply client-side guards to all Live write-action buttons.
+ * Disable when: engine_kind != 'live' OR execution_authority != 'granted'.
+ *
+ * F5/A4 — 對所有 Live 寫操作按鈕套 client-side 守衛：
+ * engine_kind != 'live' 或 execution_authority != 'granted' 時 disable +
+ * 顯示 tooltip。後端仍是真正權威（Operator 角色 + Rust 5 重門控），
+ * 但 UI 層先擋避免誤點。
+ */
+function _applyLiveActionGuards() {
+  const okEngine = _liveModeState.actual_engine_kind === 'live';
+  const okAuth = _liveModeState.execution_authority === 'granted';
+  // btn-live-start gating handled inside checkLiveEngineStatus() (also depends
+  //   on session state); here we only handle stop / emergency / close-all path.
+  // btn-live-start 由 checkLiveEngineStatus() 處理（依賴 session state）；
+  // 此處只處理 stop / emergency / close-all。
+  const writeActionBtns = [
+    document.getElementById('btn-live-stop'),
+    document.getElementById('btn-emergency-stop'),
+  ];
+  // Close-all positions button is the small chip in the Positions header
+  // (not held by id). Query by onclick reference instead.
+  // 「全部平倉」按鈕在 Positions section header（無 id），用 onclick 字串查找。
+  document.querySelectorAll('button[onclick="openCloseAllDialog()"]').forEach(b => writeActionBtns.push(b));
+
+  writeActionBtns.forEach(btn => {
+    if (!btn) return;
+    if (!okEngine) {
+      btn.disabled = true;
+      btn.title = 'Live engine 未啟動 — 操作已禁用 / Live engine not running';
+    } else if (!okAuth) {
+      btn.disabled = true;
+      btn.title = 'execution_authority 未授予 — 請先 Renew / Authority not granted';
+    } else {
+      // Don't blanket-enable here; checkLiveEngineStatus() handles per-state logic
+      // 不一律 enable；checkLiveEngineStatus() 處理 per-state 邏輯
+      btn.title = '';
+    }
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════
 // Refresh page — reload dashboard + engine status
 // 刷新頁面 — 重新加載儀表板 + 引擎狀態
 // ═══════════════════════════════════════════════════════════════
 async function refreshPage() {
+  // F5/A1: read engine_kind / endpoint FIRST so dashboard never renders
+  //        demo data under a Live label (phantom view).
+  // F5/A1：先讀 engine_kind / endpoint，避免 demo data 套 Live 皮渲染（幽靈視圖）。
+  await checkLiveEngineStatus();
+  // If engine is not live, _applyLiveModeUI() already swapped to fail view —
+  // skip the data-loaders below to avoid 4 redundant fetches.
+  // 若引擎非 live，_applyLiveModeUI() 已切到失敗視圖 — 跳過 4 個資料載入避免冗餘 fetch。
+  if (_liveModeState.actual_engine_kind !== 'live') return;
+
   loadDashboardData();
-  checkLiveEngineStatus();
   loadLiveMetrics();
   loadTrustStatus();
   // Always keep the PnL trend chart fresh (cheap Bybit API call; fills table
@@ -806,7 +1050,29 @@ function _buildLiveStratMap(fills) {
   return m;
 }
 
+/**
+ * F5/A1 helper: detect phantom-view error envelope from any account endpoint.
+ * Returns true iff backend returned the structured "live_slot_not_configured"
+ * payload — caller should short-circuit and render an error row instead of
+ * extracting numeric fields (which would render as "--" anyway but the data
+ * dict still has zeros/empty arrays from the guard payload).
+ *
+ * F5/A1 helper：偵測任何 account endpoint 是否回了幽靈視圖錯誤 envelope。
+ * 後端結構化回了 live_slot_not_configured 時 caller 應短路渲染錯誤訊息，
+ * 不要走數字欄位 extract 路徑（即使 fields 都是 0/空陣列也不要顯示「--」假裝有資料）。
+ */
+function _isPhantomViewError(payload) {
+  return !!(payload && payload.error === 'live_slot_not_configured');
+}
+
 async function loadDashboardData() {
+  // F5/A1: if integrity-fail view is showing, skip data loaders entirely.
+  //        refreshPage() already handles this but loadDashboardData() may be
+  //        called from other paths (manual refresh button etc.) — defensive guard.
+  // F5/A1：integrity-fail view 顯示中時完全跳過資料載入。refreshPage() 已處理過，
+  // 此處再加一層防衛（loadDashboardData 可能被其他路徑呼叫）。
+  if (_liveModeState.actual_engine_kind !== 'live') return;
+
   // Load balance, positions, orders, fills in parallel. Fills are needed for
   // the symbol→strategy map used by Positions and Orders tables (strategy_name
   // is not on Bybit's position/order responses — it only lives on engine fills).
@@ -823,15 +1089,26 @@ async function loadDashboardData() {
   ]);
   try {
     const fd = fillsRes.status === 'fulfilled' && fillsRes.value && fillsRes.value.data;
-    const fArr = (fd && Array.isArray(fd.list)) ? fd.list : [];
-    _liveStratMap = _buildLiveStratMap(fArr);
+    if (_isPhantomViewError(fd)) {
+      _liveStratMap = {};
+    } else {
+      const fArr = (fd && Array.isArray(fd.list)) ? fd.list : [];
+      _liveStratMap = _buildLiveStratMap(fArr);
+    }
   } catch (_) { _liveStratMap = {}; }
 
   // Balance — from /api/v1/live/balance (httpx BybitClient → real exchange data)
   // 餘額 — 來自實盤端點（httpx BybitClient → 真實交易所帳戶資料）
   try {
     const balData = balRes.status === 'fulfilled' && balRes.value && balRes.value.data;
-    if (balData && balData.available !== false) {
+    if (_isPhantomViewError(balData)) {
+      // F5/A1: stamp metric cards with the structural error instead of '--'
+      // F5/A1：把結構性錯誤覆蓋到 metric card，不顯示 '--' 偽裝數據
+      ['live-equity', 'live-available', 'live-wallet-balance', 'live-margin-used'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) { el.textContent = 'N/A'; el.title = balData.error_zh || balData.error || ''; }
+      });
+    } else if (balData && balData.available !== false) {
       // httpx BybitClient returns snake_case; Bybit REST raw returns camelCase — handle both
       // httpx BybitClient 返回 snake_case；Bybit REST 原樣返回 camelCase — 兩者均相容
       const equity = parseFloat(
@@ -880,6 +1157,13 @@ async function loadDashboardData() {
   const posBody = document.getElementById('live-positions-body');
   try {
     const posData = posRes.status === 'fulfilled' && posRes.value && posRes.value.data;
+    if (_isPhantomViewError(posData)) {
+      // F5/A1 phantom-view short circuit / F5/A1 幽靈視圖短路
+      const msg = ocEsc(posData.error_zh || posData.error || 'Live slot not configured');
+      posBody.innerHTML = '<tr><td colspan="10" style="color:#f87171;text-align:center;padding:16px">⚠ ' + msg + '</td></tr>';
+      document.getElementById('live-position-count').textContent = 'N/A';
+      _renderLiveDustPanel([]);
+    } else {
     const arr = (posData && Array.isArray(posData.positions)) ? posData.positions : [];
     document.getElementById('live-position-count').textContent = arr.length;
     // Also update net PnL if we have realized data from fills
@@ -955,6 +1239,7 @@ async function loadDashboardData() {
         netEl.className = 'live-metric-val' + (netPnl > 0 ? ' pos' : netPnl < 0 ? ' neg' : ' neutral');
       }
     }
+    }  // end of !_isPhantomViewError(posData) branch / 非幽靈視圖分支結束
   } catch (_) {
     posBody.innerHTML = '<tr><td colspan="10" style="color:var(--text-dim);text-align:center">無法加載持倉數據</td></tr>';
   }
@@ -979,6 +1264,13 @@ async function loadDashboardData() {
   const ordBody = document.getElementById('live-orders-body');
   try {
     const ordData = ordRes.status === 'fulfilled' && ordRes.value && ordRes.value.data;
+    if (_isPhantomViewError(ordData)) {
+      // F5/A1 phantom-view short circuit / F5/A1 幽靈視圖短路
+      const msg = ocEsc(ordData.error_zh || ordData.error || 'Live slot not configured');
+      ordBody.innerHTML = '<tr><td colspan="7" style="color:#f87171;text-align:center;padding:16px">⚠ ' + msg + '</td></tr>';
+      document.getElementById('live-order-count').textContent = 'N/A';
+      return;
+    }
     const ordArr = (ordData && Array.isArray(ordData.list)) ? ordData.list : [];
     document.getElementById('live-order-count').textContent = ordArr.length;
     if (ordArr.length === 0) {
@@ -1022,7 +1314,6 @@ async function checkLiveEngineStatus() {
   const btnStart = document.getElementById('btn-live-start');
   const btnStop = document.getElementById('btn-live-stop');
   const btnEmg = document.getElementById('btn-emergency-stop');
-  if (!badge) return;
 
   const d = await ocApi('/api/v1/live/session/status');
   const data = (d && d.data) ? d.data : {};
@@ -1033,21 +1324,55 @@ async function checkLiveEngineStatus() {
   const contractionState = contraction.state || 'normal';
   const drawdownPct = contraction.drawdown_pct;
 
-  const stateLabels = {
-    active: 'Live 实盘 運行中', paused: '已暫停', stopped: '已停止',
-    offline: '引擎離線', unknown: '--',
-  };
+  // F5/A1: capture actual engine kind + endpoint label.
+  //        Backend (live_session_routes._live_response) injects these via
+  //        setdefault; older deployments may not have them yet — treat
+  //        absence as "unknown" so we fall back to the integrity-fail view
+  //        rather than blindly rendering with a wrong banner.
+  // F5/A1：抓取 actual_engine_kind + actual_endpoint。後端透過 setdefault 注入；
+  // 舊版部署可能沒有 — 缺欄位時當 'unknown'，退到 integrity-fail view 安全側。
+  _liveModeState.actual_engine_kind = data.actual_engine_kind || data.engine_kind || 'unknown';
+  _liveModeState.actual_endpoint = data.actual_endpoint || 'unconfigured';
+  _liveModeState.execution_authority = authority;
+  _liveModeState.session_state = sessionState;
+
+  // Apply mode UI early so the badge below shows up under the right theme
+  // 先套模式 UI，下方 badge 才能在正確主題下顯示
+  _applyLiveModeUI();
+
+  // If engine is not live, the dashboard view is hidden — skip badge work.
+  // 引擎非 live 時 dashboard 被隱藏，badge 不必再更新
+  if (_liveModeState.actual_engine_kind !== 'live') {
+    _applyLiveActionGuards();
+    return;
+  }
+
+  if (!badge) return;
+
+  // F5/A1: badge text reflects endpoint identity (Mainnet vs LiveDemo)
+  //        instead of always saying "Live 实盘 運行中 🟣" which misled
+  //        operators when the slot was actually demo-bound.
+  // F5/A1：徽章文字反映 endpoint 身份（Mainnet vs LiveDemo），不再永遠寫
+  // 「Live 实盘 運行中 🟣」誤導 — 槽是 demo 時就明確寫 LiveDemo。
   const isActive = sessionState === 'active';
   const isPausedOrStopped = sessionState === 'paused' || sessionState === 'stopped';
-
+  const epLabel = _liveModeState.actual_endpoint === 'mainnet' ? 'Mainnet'
+                : _liveModeState.actual_endpoint === 'live_demo' ? 'LiveDemo'
+                : '未配置';
+  const stateZh = isActive ? '運行中' : isPausedOrStopped
+                  ? (sessionState === 'paused' ? '已暫停' : '已停止')
+                  : '引擎離線';
   if (isActive) {
-    badge.textContent = 'Live 实盘 運行中 🟣';
+    badge.textContent = epLabel + ' ' + stateZh + (
+      _liveModeState.actual_endpoint === 'mainnet' ? ' 🟣' :
+      _liveModeState.actual_endpoint === 'live_demo' ? ' 🟠' : ''
+    );
     badge.className = 'oc-chip oc-chip-live';
   } else if (isPausedOrStopped) {
-    badge.textContent = stateLabels[sessionState] || sessionState;
+    badge.textContent = epLabel + ' ' + stateZh;
     badge.className = 'oc-chip oc-chip-warn';
   } else {
-    badge.textContent = stateLabels[sessionState] || sessionState;
+    badge.textContent = stateZh;
     badge.className = 'oc-chip oc-chip-neutral';
   }
 
@@ -1070,12 +1395,19 @@ async function checkLiveEngineStatus() {
 
   // Show system_mode + authority when active; mode only when idle
   // Active 時顯示 system_mode + authority；空閒時只顯示 mode
-  detail.textContent = isActive
-    ? `mode: ${systemMode.replace(/_/g, ' ')} | authority: ${authority}`
-    : `mode: ${systemMode.replace(/_/g, ' ')}`;
+  if (detail) {
+    detail.textContent = isActive
+      ? `mode: ${systemMode.replace(/_/g, ' ')} | authority: ${authority}`
+      : `mode: ${systemMode.replace(/_/g, ' ')}`;
+  }
   if (btnStart) btnStart.disabled = isActive || contractionState === 'halted';
   if (btnStop) btnStop.disabled = !isActive && !isPausedOrStopped;
   if (btnEmg) btnEmg.disabled = !data.engine_available;
+
+  // F5/A4 — apply uniform guards to all write-action buttons after individual
+  //         logic above, so phantom-view + auth-not-granted always wins.
+  // F5/A4 — 個別邏輯之後再統一套守衛，確保 phantom-view + auth 未授予永遠勝出。
+  _applyLiveActionGuards();
 }
 
 
@@ -1183,6 +1515,13 @@ async function loadLiveMetrics() {
     ocSetHtml('live-perf-metrics', '<div style="color:var(--text-dim);font-size:12px;padding:12px">暫無指標數據</div>');
     return;
   }
+  // F5/A1 phantom-view short circuit / F5/A1 幽靈視圖短路
+  if (_isPhantomViewError(d.data)) {
+    const msg = ocEsc(d.data.error_zh || d.data.error || 'Live slot not configured');
+    ocSetHtml('live-perf-metrics',
+      '<div style="color:#f87171;font-size:12px;padding:12px">⚠ ' + msg + '</div>');
+    return;
+  }
   const m = d.data;
   const tm = m.trade_metrics || {};
   const dm = m.drawdown_metrics || {};
@@ -1227,13 +1566,50 @@ function toggleFills() {
   }
 }
 
+/**
+ * F5/A5 — Format timestamp as "HH:mm UTC (local: HH:mm TZ)" dual stamp.
+ * Avoids timezone confusion when operator is in a different TZ from the server.
+ *
+ * F5/A5 — 時戳雙標「HH:mm UTC (local: HH:mm CEST)」，避免 operator 與 server
+ * 時區不同造成的誤判（A3 audit findings）。
+ */
+function _formatFillTime(tsMs) {
+  if (tsMs == null || tsMs === '--' || tsMs === '') return '--';
+  const num = Number(tsMs);
+  if (!Number.isFinite(num) || num <= 0) return '--';
+  const d = new Date(num);
+  const pad = n => String(n).padStart(2, '0');
+  const utcStr = pad(d.getUTCHours()) + ':' + pad(d.getUTCMinutes()) + ' UTC';
+  // Resolve a short TZ abbreviation (CEST, JST, EST, etc.) — best-effort;
+  // some browsers fall back to long form, which is fine — still unambiguous.
+  // 解析短時區縮寫（CEST / JST / EST 等），瀏覽器無短形式時用長形式仍清楚。
+  let tz = '';
+  try {
+    const parts = new Intl.DateTimeFormat(undefined, { timeZoneName: 'short' }).formatToParts(d);
+    const tzPart = parts.find(p => p.type === 'timeZoneName');
+    tz = tzPart ? tzPart.value : '';
+  } catch (_) {}
+  const localStr = pad(d.getHours()) + ':' + pad(d.getMinutes()) + (tz ? ' ' + tz : '');
+  return utcStr + ' (local: ' + localStr + ')';
+}
+
 async function loadFills() {
   const body = document.getElementById('live-fills-body');
   const badge = document.getElementById('fills-count-badge');
   body.innerHTML = '<tr><td colspan="8" style="color:var(--text-dim);text-align:center;padding:16px">加載中...</td></tr>';
   try {
     const d = await ocApi('/api/v1/live/fills');
-    const arr = (d && d.data && Array.isArray(d.data.list)) ? d.data.list : [];
+    const payload = d && d.data;
+    if (_isPhantomViewError(payload)) {
+      // F5/A1 phantom-view short circuit / F5/A1 幽靈視圖短路
+      const msg = ocEsc(payload.error_zh || payload.error || 'Live slot not configured');
+      body.innerHTML = '<tr><td colspan="8" style="color:#f87171;text-align:center;padding:16px">⚠ ' + msg + '</td></tr>';
+      if (badge) badge.textContent = '';
+      ocPnlTrend('live-pnl-line', 'live-pnl-label', [], 'live-pnl-zero');
+      _fillsLoaded = false;
+      return;
+    }
+    const arr = (payload && Array.isArray(payload.list)) ? payload.list : [];
     _fillsLoaded = true;
     if (badge) badge.textContent = arr.length ? arr.length + ' 筆' : '';
     if (arr.length === 0) {
@@ -1245,7 +1621,9 @@ async function loadFills() {
       // Bybit execution fields: execTime, symbol, side, execQty, execPrice, execFee, orderId, closedPnl
       // Bybit 成交字段：execTime, symbol, side, execQty, execPrice, execFee, orderId, closedPnl（平倉盈虧）
       const ts = f.execTime || f.exec_time || f.time || '--';
-      const timeStr = ts !== '--' ? new Date(Number(ts)).toLocaleTimeString() : '--';
+      // F5/A5: dual-stamp UTC + local instead of toLocaleTimeString() alone
+      // F5/A5：UTC + 當地雙時戳，取代原 toLocaleTimeString() 單時區
+      const timeStr = _formatFillTime(ts);
       const qty = f.execQty || f.exec_qty || f.qty || '--';
       const price = f.execPrice || f.exec_price || f.price || '--';
       const fee = f.execFee || f.exec_fee || '--';
