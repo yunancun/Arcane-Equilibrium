@@ -231,6 +231,10 @@ def fetch_training_dataset(
     Schema assumption (documented inline; revisit when wiring real Scorer):
     JOIN trading.fills f
       ON f.context_id = c.context_id
+     AND (f.strategy_name IS NULL OR f.strategy_name NOT LIKE 'unattributed:%%')
+        -- F4-2 (2026-04-26): future wiring MUST keep this filter; otherwise
+        -- Bybit auto-action audit rows pollute supervised labels.
+        -- F4-2（2026-04-26）：未來實作必保留此過濾，否則 audit row 污染標籤。
     LEFT JOIN learning.foundation_model_features fm
       ON fm.symbol = c.symbol AND fm.time = c.time
     WHERE c.time BETWEEN since AND until

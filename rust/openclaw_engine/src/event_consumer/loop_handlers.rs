@@ -77,6 +77,13 @@ impl LoopState {
     }
 }
 
+// F4-RETURN Issue 1 (2026-04-26): F4-1 emitter moved to sibling
+// `unattributed_emit` (§九 1200-line ceiling); re-export preserves caller paths.
+// F4-RETURN Issue 1（2026-04-26）：F4-1 emitter 抽至 sibling 以守 §九 上限。
+pub(super) use super::unattributed_emit::{
+    engine_mode_emits_unattributed_audit, try_emit_unattributed_fill,
+};
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Arm A: cross-engine cascade event (peer crash / circuit breaker trip).
 // Arm A：跨引擎級聯事件（對等管線崩潰 / 熔斷）。
@@ -395,7 +402,10 @@ pub(super) async fn handle_pipeline_command(
 /// arm — behaviourally equivalent.
 /// Arm C handler：分派單個 `ExchangeEvent`。原版 `continue` 語意改為 fn
 /// 內 early `return`，下個 select! 迭代自然進下一 arm，行為等價。
-pub(super) fn handle_exchange_event(
+// F4-RETURN Issue 2 (2026-04-26): async because F4-1 emitter uses send().await
+// for back-pressure. mod.rs Arm C is already async — propagation is just `.await`.
+// F4-RETURN Issue 2（2026-04-26）：async — F4-1 emitter 改 send().await 取背壓。
+pub(super) async fn handle_exchange_event(
     evt: Option<ExchangeEvent>,
     pipeline: &mut TickPipeline,
     snapshot_writer: &mut DualStateWriter,
@@ -553,9 +563,40 @@ pub(super) fn handle_exchange_event(
                     }
                 }
             } else {
+                // F4-1 (2026-04-26): unmatched WS fill → audit row instead of
+                // silent drop. Bybit auto-actions (funding / dust / 补单) land
+                // here because ExecutorAgent shadow_mode=true emits 0
+                // PendingOrder. Full design context + healthcheck [23] caveat
+                // see `unattributed_emit::MODULE_NOTE`. ML training filters via
+                // `WHERE strategy_name NOT LIKE 'unattributed:%'` (F4-2).
+                // F4-1（2026-04-26）：未匹配 WS 成交 → audit row 取代 silent drop。
+                // Bybit 自主動作（funding/dust/补单）因 ExecutorAgent shadow_mode
+                // 不發 PendingOrder 而落此。完整設計 + healthcheck [23] caveat 見
+                // `unattributed_emit::MODULE_NOTE`；ML 訓練以
+                // `strategy_name NOT LIKE 'unattributed:%'` 過濾（F4-2）。
+                let em = pipeline.effective_engine_mode();
+                // F4-RETURN Issue 2 (2026-04-26): .await — back-pressure handled
+                // normally; cap 4096 (tasks.rs:404), blocks only under DB lag.
+                let emitted = try_emit_unattributed_fill(
+                    em,
+                    &exec.exec_id,
+                    exec_ts,
+                    &exec.order_id,
+                    &exec.symbol,
+                    &exec.side,
+                    exec_qty,
+                    exec_price,
+                    exec_fee,
+                    order_tx,
+                ).await;
                 tracing::warn!(
-                    symbol = %exec.symbol, side = %exec.side,
-                    "exchange fill has no matching pending order / 交易所成交無匹配的待處理訂單"
+                    symbol = %exec.symbol, side = %exec.side, exec_id = %exec.exec_id,
+                    engine_mode = %em, audit_emitted = emitted,
+                    "F4-1: exchange fill has no matching pending order \
+                     — audit row {} / 交易所成交無匹配 pending order — \
+                     audit row {}",
+                    if emitted { "emitted" } else { "skipped (paper/test)" },
+                    if emitted { "已落" } else { "已跳過（paper/test）" }
                 );
             }
         }
