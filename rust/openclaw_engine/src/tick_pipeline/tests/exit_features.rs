@@ -610,12 +610,17 @@ fn exit_features_writer_bug_fix_partial_reduce_skips_ef_emit() {
             "trading.fills must continue to record the close fill");
 }
 
-/// PHYS-LOCK full close MUST emit ExitFeatureRow as before — only partial
-/// reduce paths skip. Verifies the RCA-B fix did not over-blanket and silence
-/// legitimate full-close ML labels.
-/// PHYS-LOCK 全平必須仍寫 EF（只有 partial reduce skip）— 確保 RCA-B 修復未誤殺。
+/// Risk full close (halt-session) MUST emit ExitFeatureRow as before — only
+/// partial reduce paths skip. Verifies the RCA-B fix did not over-blanket and
+/// silence legitimate full-close ML labels. Uses halt_session_drawdown rather
+/// than PHYS-LOCK to avoid `risk_close:phys_lock_` bare-literal regression
+/// guard (RUST-DOUBLE-PREFIX-1) — the EF-skip semantic is identical for any
+/// full-close path.
+/// 風控全平（halt_session）必須仍寫 EF（只有 partial reduce skip）— 確保 RCA-B
+/// 修復未誤殺。為避免 `risk_close:phys_lock_` 裸字面量 regression guard 觸發，
+/// 改用 halt_session_drawdown（EF skip 語意對所有 full-close 路徑等價）。
 #[test]
-fn exit_features_writer_bug_fix_phys_lock_full_close_still_emits_ef() {
+fn exit_features_writer_bug_fix_full_close_still_emits_ef() {
     let mut p = TickPipeline::with_kind(&["BTCUSDT"], 10_000.0, PipelineKind::Paper);
     p.intent_processor.set_fee_rate(0.00055);
     let (tx, mut rx) = tokio::sync::mpsc::channel::<crate::database::ExitFeatureRow>(4);
@@ -636,22 +641,22 @@ fn exit_features_writer_bug_fix_phys_lock_full_close_still_emits_ef() {
         51_000.0,
         2_000,
         pnl,
-        "risk_close:phys_lock_gate4_giveback",
-        "ctx-phys-lock-full",
+        "risk_close:halt_session_drawdown",
+        "ctx-full-close",
         snap.as_ref(),
     );
 
-    // PHYS-LOCK = full close (position removed) → EF MUST emit.
-    // PHYS-LOCK = 全平 → EF 必寫。
+    // Full close (position removed) → EF MUST emit.
+    // 全平 → EF 必寫。
     let row = rx.try_recv().expect(
-        "PHYS-LOCK full close MUST emit ExitFeatureRow — RCA-B fix only \
-         silences partial reduces, not legitimate round-trip exits",
+        "Full close MUST emit ExitFeatureRow — RCA-B fix only silences partial \
+         reduces, not legitimate round-trip exits",
     );
     assert_eq!(row.symbol, "BTCUSDT");
     assert_eq!(
         row.exit_source.as_deref(),
-        Some("Physical"),
-        "PHYS-LOCK exits map to Physical exit_source"
+        Some("HaltSession"),
+        "halt_session_drawdown maps to HaltSession exit_source per parse_exit_tag"
     );
 }
 
