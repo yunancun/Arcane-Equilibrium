@@ -12,7 +12,9 @@ MODULE_NOTE (EN): Extracted from the original ``passive_wait_healthcheck.py``:
   * [20] check_h_state_gateway_freshness     (added 2026-04-26 by
     G3-08 Phase 1C — DEFAULT-OFF env-gate sentinel; PASS-skips when
     ``OPENCLAW_H_STATE_GATEWAY != "1"`` (Phase 1 dormant by design),
-    verifies IPC route + Phase 1 stub shape when env=1.)
+    verifies IPC route + Phase 2 stub shape when env=1; Phase 2 sync
+    by G3-08-PHASE-1C-FUP-CHECK20-SYNC bumped expected version 0→1 +
+    h_states_keys 0→2 to reflect H1+H3 wiring (commits 9120948+f2ed286).)
 
 These five are derivative / cross-cutting checks that don't fit the
 direct fill-flow / risk-layer / strategy-flow axes. [Xa] watches the
@@ -604,39 +606,53 @@ def check_observer_pipeline_alive() -> tuple[str, str]:
 
 
 def check_h_state_gateway_freshness() -> tuple[str, str]:
-    """[20] G3-08 Phase 1C (2026-04-26): H-state gateway env-gate + IPC route + stub schema sentinel.
+    """[20] G3-08 Phase 2 (2026-04-26): H-state gateway env-gate + IPC route + stub schema sentinel.
 
-    MODULE_NOTE (EN): G3-08 Phase 1C completion-criteria sentinel per PA design
-    plan §10.1 + 附錄 A. The H-state gateway is the Python → Rust observability
-    bridge (mirror of G3-03 ExecutorConfigCache pattern but flipped flow:
-    Python = SSOT, Python pushes ``invalidate_h_state`` hints, Rust ``h_state_cache``
-    poller pulls full snapshot via ``query_h_state_full`` reverse IPC). Phase 1
-    is plumbing-only: H1-H5 / 5-Agent producers stay silent; Phase 2-4 wire
-    the actual ``invalidate_async`` call sites + ``get_*_snapshot()`` methods.
+    MODULE_NOTE (EN): G3-08 completion-criteria sentinel. The H-state gateway
+    is the Python → Rust observability bridge (mirror of G3-03
+    ExecutorConfigCache pattern but flipped flow: Python = SSOT, Python
+    pushes ``invalidate_h_state`` hints, Rust ``h_state_cache`` poller pulls
+    full snapshot via ``query_h_state_full`` reverse IPC).
 
-    Two-phase verdict (per PA §10.1 completion criteria):
+    History / 沿革：
+      * Phase 1C (initial PA design plan §10.1) — plumbing-only: H1-H5 /
+        5-Agent producers stay silent; expected ``version=0`` +
+        ``h_states={}`` (canonical Phase 1 stub).
+      * Phase 2 (commits ``9120948`` + ``f2ed286``, 2026-04-26) wired H1
+        ThoughtGate + H3 ModelRouter producers; ``query_h_state_full``
+        now returns ``version=1`` + ``h_states_keys=2`` (h1, h3).
+        This sentinel was bumped by ``G3-08-PHASE-1C-FUP-CHECK20-SYNC``
+        (Tier 6 Track 1) so PASS expectations track current Phase 2 wiring;
+        a regression to Phase 1 shape (version=0, empty h_states) now
+        surfaces as WARN/FAIL.
+
+    Two-phase verdict (per PA §10.1 + Phase 2 update):
 
       A. **DEFAULT-OFF path (``OPENCLAW_H_STATE_GATEWAY != "1"``)**:
-         PASS-skip with explicit dormant note. This is the canonical Phase 1
+         PASS-skip with explicit dormant note. This is the canonical
          resting state — the gateway should NOT be enabled in production
          until Phase 4 lands the 5-Agent producers. PASS-skip is correct
          (silent-fail guard would alarm if env crept back to "1" before all
-         producers are wired, but Phase 1 dormancy is by design).
+         producers are wired, but env=0 dormancy is by design).
 
       B. **DEFAULT-ON path (``OPENCLAW_H_STATE_GATEWAY == "1"``)**:
-         Verify three Phase 1 invariants without making a live IPC roundtrip
+         Verify three invariants without making a live IPC roundtrip
          (which would couple this script to the auth secret + main process
          being up — too brittle for a 6h cron):
            1. Reverse IPC route ``query_h_state_full`` is registered in
               ``ai_service_dispatch.py`` (grep-based detection, byte-stable).
            2. ``h_state_invalidator.py`` and ``h_state_query_handler.py``
-              modules import successfully (Phase 1 plumbing intact).
-           3. ``build_h_state_full_response()`` returns the canonical
-              Phase 1 stub shape (version=0, h_states={}, agent_states={}).
+              modules import successfully (plumbing intact).
+           3. ``build_h_state_full_response()`` returns the **Phase 2** stub
+              shape: ``version=1`` + ``h_states`` contains both ``h1`` +
+              ``h3`` keys (H1 ThoughtGate + H3 ModelRouter wired). Phase 3-4
+              progressive deploy may add ``h2/h4/h5`` + ``agent_states`` —
+              additive growth = PASS, regression to Phase 1 shape = WARN.
          Three-state output:
-           - PASS: all 3 invariants hold.
-           - WARN: invariant 3 fails (schema drift; Phase 2-4 may have
-             populated buckets prematurely or stub regressed).
+           - PASS: all 3 invariants hold (env=1 + route + modules + Phase 2
+             stub with at least h1+h3 buckets).
+           - WARN: invariant 3 fails (stub returned Phase 1 shape, missing
+             expected h1/h3 buckets, or schema drift in unexpected direction).
            - FAIL: invariants 1 or 2 fail (route deregistered or modules
              unimportable — gateway is actually broken).
 
@@ -648,30 +664,40 @@ def check_h_state_gateway_freshness() -> tuple[str, str]:
     Cross-platform: pure ``Path.read_text()`` + ``importlib.import_module()``;
     no Linux-only API. Works identically on Mac dev and Linux prod.
 
-    [20] G3-08 Phase 1C（2026-04-26）：H 狀態橋接器 env-gate + IPC route +
-    stub schema 哨兵。
-    對齊 PA design plan §10.1 完成標準與附錄 A。H 狀態橋接器是 Python →
-    Rust 可觀察性橋（鏡射 G3-03 ExecutorConfigCache pattern，但資料流相反：
-    Python=SSOT，Python 推 ``invalidate_h_state`` 提示，Rust ``h_state_cache``
-    poller 透過 ``query_h_state_full`` reverse IPC 拉完整 snapshot）。
-    Phase 1 純線路：H1-H5 / 5-Agent producer 保持靜默；Phase 2-4 才接實際
-    ``invalidate_async`` 呼叫點與 ``get_*_snapshot()`` 方法。
+    [20] G3-08 Phase 2（2026-04-26）：H 狀態橋接器 env-gate + IPC route +
+    Phase 2 stub schema 哨兵。
+    G3-08 完成標準哨兵。H 狀態橋接器是 Python → Rust 可觀察性橋
+    （鏡射 G3-03 ExecutorConfigCache pattern，但資料流相反：Python=SSOT，
+    Python 推 ``invalidate_h_state`` 提示，Rust ``h_state_cache`` poller
+    透過 ``query_h_state_full`` reverse IPC 拉完整 snapshot）。
 
-    兩段判決（PA §10.1 完成標準）：
+    沿革：
+      * Phase 1C（PA design plan §10.1 初版）—— 純線路：H1-H5 / 5-Agent
+        producer 靜默；expected ``version=0`` + ``h_states={}``。
+      * Phase 2（commits ``9120948`` + ``f2ed286``，2026-04-26）接 H1
+        ThoughtGate + H3 ModelRouter producer；``query_h_state_full`` 現
+        回傳 ``version=1`` + ``h_states_keys=2``（h1, h3）。本 sentinel
+        由 ``G3-08-PHASE-1C-FUP-CHECK20-SYNC``（Tier 6 Track 1）升級
+        以對齊 Phase 2 實際線路；regression 回 Phase 1 shape（version=0、
+        h_states 空）現會出 WARN/FAIL。
+
+    兩段判決（PA §10.1 + Phase 2 update）：
       A. DEFAULT-OFF（``OPENCLAW_H_STATE_GATEWAY != "1"``）：PASS-skip 帶
-         dormant 說明 —— Phase 1 標準靜止狀態，正式環境 Phase 4 接完
+         dormant 說明 —— 標準靜止狀態，正式環境 Phase 4 接完 5-Agent
          producer 之前 NOT 啟用。
-      B. DEFAULT-ON（``OPENCLAW_H_STATE_GATEWAY == "1"``）：驗 3 個 Phase 1
-         不變量（不做 live IPC roundtrip 避免 6h cron 與 auth secret/主程序
-         耦合）：
+      B. DEFAULT-ON（``OPENCLAW_H_STATE_GATEWAY == "1"``）：驗 3 個不變量
+         （不做 live IPC roundtrip 避免 6h cron 與 auth secret/主程序耦合）：
            1. ``ai_service_dispatch.py`` 中 ``query_h_state_full`` route 已註冊
               （grep 偵測，byte-stable）
            2. ``h_state_invalidator.py`` 與 ``h_state_query_handler.py`` 模組
-              可匯入（Phase 1 線路完好）
-           3. ``build_h_state_full_response()`` 回傳標準 Phase 1 stub
-              （version=0、h_states={}、agent_states={}）
-         三態：3 個全 hold = PASS；invariant 3 fail = WARN（schema drift）；
-         invariant 1 或 2 fail = FAIL（route 取消或模組無法 import = 真壞）。
+              可匯入（線路完好）
+           3. ``build_h_state_full_response()`` 回傳 **Phase 2** stub shape：
+              ``version=1`` + ``h_states`` 含 ``h1`` 與 ``h3`` 兩 key
+              （H1 ThoughtGate + H3 ModelRouter 已接）。Phase 3-4 漸進部署
+              可能加 ``h2/h4/h5`` + ``agent_states``，這類 additive 成長 = PASS；
+              regression 回 Phase 1 shape = WARN。
+         三態：3 個全 hold = PASS；invariant 3 fail = WARN；invariant 1 或 2
+         fail = FAIL。
 
     純函式 check：無 live IPC、無 DB cursor、無 socket。grep 磁碟上的
     dispatch source + import 兩個 Python 模組。對齊 [16] strategist_cycle_fresh
@@ -680,19 +706,19 @@ def check_h_state_gateway_freshness() -> tuple[str, str]:
     跨平台：純 ``Path.read_text()`` + ``importlib.import_module()``；
     無 Linux-only API。Mac dev 與 Linux prod 行為一致。
     """
-    # Path A: env-gate disabled → PASS-skip (Phase 1 dormant by design).
-    # 路徑 A：env 關閉 → PASS-skip（Phase 1 dormant by design）。
+    # Path A: env-gate disabled → PASS-skip (env=0 dormant by design).
+    # 路徑 A：env 關閉 → PASS-skip（env=0 dormant by design）。
     env_val = os.environ.get("OPENCLAW_H_STATE_GATEWAY")
     if env_val != "1":
         env_repr = f"={env_val!r}" if env_val is not None else "=unset"
         return (
             "PASS",
-            f"OPENCLAW_H_STATE_GATEWAY{env_repr} (≠'1') — Phase 1 dormant "
+            f"OPENCLAW_H_STATE_GATEWAY{env_repr} (≠'1') — env=0 dormant "
             "by design (per PA §10.1 completion criteria); skip",
         )
 
-    # Path B: env-gate enabled → verify 3 Phase 1 invariants.
-    # 路徑 B：env 開啟 → 驗 3 個 Phase 1 不變量。
+    # Path B: env-gate enabled → verify 3 invariants (Phase 2 expectations).
+    # 路徑 B：env 開啟 → 驗 3 個不變量（Phase 2 預期）。
 
     # Invariant 1: ``query_h_state_full`` route registered in dispatch source.
     # We grep the source file rather than importing AIService to avoid
@@ -780,11 +806,16 @@ def check_h_state_gateway_freshness() -> tuple[str, str]:
     except Exception as e:  # noqa: BLE001 — surface schema regression
         return ("WARN", f"build_h_state_full_response() raised: {e}")
 
-    # Phase 1 invariant: version=0 + both buckets empty. WARN (not FAIL) if
-    # populated, since Phase 2-4 progressive deploy could legitimately fill
-    # buckets ahead of this check being updated.
-    # Phase 1 不變量：version=0 + 兩桶皆空。WARN（非 FAIL）若已填充，
-    # 因為 Phase 2-4 漸進部署可能合法在本 check 更新前先填桶。
+    # Phase 2 invariant: version=1 + h_states contains at least {h1, h3}
+    # (H1 ThoughtGate + H3 ModelRouter wired by commits 9120948 + f2ed286,
+    # 2026-04-26). Phase 3-4 progressive deploy may add h2/h4/h5 + agent_states
+    # (additive growth = PASS). Regression to Phase 1 shape (version=0,
+    # empty h_states) = WARN — surfaces a real backwards drift.
+    # Phase 2 不變量：version=1 + h_states 至少含 {h1, h3}（H1 ThoughtGate +
+    # H3 ModelRouter 已接，commits 9120948 + f2ed286，2026-04-26）。Phase 3-4
+    # 漸進部署可能加 h2/h4/h5 + agent_states（additive 成長 = PASS）。
+    # Regression 回 Phase 1 shape（version=0、h_states 空）= WARN 反映真實
+    # 倒退漂移。
     if not isinstance(resp, dict):
         return ("WARN", f"stub returned non-dict: {type(resp).__name__}")
     version = resp.get("version")
@@ -798,20 +829,41 @@ def check_h_state_gateway_freshness() -> tuple[str, str]:
             f"agent_states={type(agent_states).__name__} (expected dict)",
         )
 
-    if version != 0 or h_states or agent_states:
-        # Buckets populated or version bumped — Phase 2-4 progressive deploy.
-        # WARN so operator notices and can update this check's expectations.
-        # 桶已填或 version bump — Phase 2-4 漸進部署。WARN 提示 operator
-        # 注意並更新本 check 的期望值。
+    # Phase 2 expectations: version == 1 and h_states ⊇ {h1, h3}.
+    # Phase 2 預期：version == 1 且 h_states ⊇ {h1, h3}。
+    expected_h_state_keys = {"h1", "h3"}
+    actual_h_state_keys = set(h_states.keys())
+    missing_h_state_keys = expected_h_state_keys - actual_h_state_keys
+
+    if version != 1 or missing_h_state_keys:
+        # Either version regressed to Phase 1 (version=0) or one of the
+        # H1/H3 producers stopped emitting. WARN so operator notices and
+        # can investigate the backwards drift before Wave 4 / Phase 3 lands.
+        # version 倒退回 Phase 1（version=0）或 H1/H3 producer 之一停 emit。
+        # WARN 提示 operator 注意，在 Wave 4 / Phase 3 落地前查 backwards drift。
         return (
             "WARN",
-            f"stub no longer Phase 1 shape (version={version}, "
-            f"h_states_keys={len(h_states)}, agent_states_keys={len(agent_states)}) "
-            "— Phase 2-4 progress? update [20] expectations",
+            f"stub regressed from Phase 2 shape (version={version}, "
+            f"h_states_keys={sorted(actual_h_state_keys)}, expected ⊇ "
+            f"{{'h1','h3'}}, missing={sorted(missing_h_state_keys)}, "
+            f"agent_states_keys={len(agent_states)}) "
+            "— H1/H3 producer regression? check Phase 2 wiring "
+            "(commits 9120948 + f2ed286)",
         )
 
+    extra_h_state_keys = actual_h_state_keys - expected_h_state_keys
+    extra_note = (
+        f", +Phase 3-4 keys={sorted(extra_h_state_keys)}"
+        if extra_h_state_keys
+        else ""
+    )
+    agent_note = (
+        f", +Phase 4 agent_states_keys={len(agent_states)}"
+        if agent_states
+        else ""
+    )
     return (
         "PASS",
-        f"env=1 + route registered + modules importable + stub canonical "
-        f"(version=0, h_states={{}}, agent_states={{}})",
+        f"env=1 + route registered + modules importable + stub Phase 2 shape "
+        f"(version=1, h_states⊇{{'h1','h3'}}{extra_note}{agent_note})",
     )

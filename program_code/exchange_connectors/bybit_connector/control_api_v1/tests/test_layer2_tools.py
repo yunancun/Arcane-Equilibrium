@@ -578,12 +578,29 @@ class TestToolExecutorWiring:
 
 
 @pytest.mark.slow
+@pytest.mark.e2e
 class TestCheckDerivativesE2E:
     """
     Real-network e2e against Bybit V5 public endpoints (demo). Skipped by default.
     對 Bybit V5 公開端點（demo）的真實網路 e2e 測試，預設跳過。
 
+    Marked with both `slow` and `e2e` (G3-07-FUP-PYTEST-MARK Tier 6 Track 1):
+      - `slow` — class-level: this is a long-running test
+      - `e2e`  — class-level: real network against Bybit (e2e implies slow)
+
+    `e2e` markers are registered in `conftest.py::pytest_configure`. Default
+    pytest runs (no `-m` filter) include this; CI should deselect with
+    `-m "not slow and not e2e"`.
+
+    `slow` 與 `e2e` 雙標籤（G3-07-FUP-PYTEST-MARK Tier 6 Track 1）：
+      - `slow` — class 級：長時間執行
+      - `e2e`  — class 級：對 Bybit 真實網路（e2e 暗示 slow）
+
+    `e2e` 標記在 `conftest.py::pytest_configure` 註冊。CI 預設 deselect
+    `-m "not slow and not e2e"`。
+
     Run with: pytest -m slow program_code/.../tests/test_layer2_tools.py
+              pytest -m e2e  program_code/.../tests/test_layer2_tools.py
     """
 
     def setup_method(self):

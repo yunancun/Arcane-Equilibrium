@@ -437,6 +437,49 @@ def patch_rust_reader_unavailable(rust_reader_unavailable, monkeypatch):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# PYTEST MARKER REGISTRATION / pytest 標記註冊
+# ═══════════════════════════════════════════════════════════════════════════════
+# G3-07-FUP-PYTEST-MARK (Tier 6 Track 1, 2026-04-26): register `slow` and
+# `e2e` markers so pytest doesn't emit `PytestUnknownMarkWarning` and CI
+# can deselect them by default with `-m "not slow and not e2e"`.
+#
+# Without registration `pytest --collect-only -m "slow or e2e"` still works
+# but pollutes warnings; with registration, mark-based selection is a
+# first-class contract and `pytest --strict-markers` can be enabled in CI.
+#
+# Tests in this tree use:
+#   - `@pytest.mark.slow`  — long-running OR optional dependencies
+#                            (e.g. real network, heavy fixtures)
+#   - `@pytest.mark.e2e`   — true end-to-end against external services
+#                            (subset of slow; e2e implies network/remote)
+#
+# Run only fast unit tests:    pytest -m "not slow and not e2e"
+# Run real-network e2e suite:  pytest -m "e2e"
+# Run all slow (incl. e2e):    pytest -m "slow"
+#
+# G3-07-FUP-PYTEST-MARK（Tier 6 Track 1，2026-04-26）：註冊 `slow` 與 `e2e`
+# 標記避免 pytest 噴 `PytestUnknownMarkWarning`，並讓 CI 預設 deselect。
+# 註冊後 mark-based selection 為一級契約，CI 可開 `--strict-markers`。
+# 本 tree 的標記用法：`slow` = 長跑或可選依賴；`e2e` = 真對外服務
+# （e2e 是 slow 子集；e2e 暗示網路/遠端）。
+def pytest_configure(config):
+    """Register custom pytest markers used across the control_api_v1 test tree.
+
+    在 control_api_v1 測試樹註冊自訂 pytest 標記。
+    """
+    config.addinivalue_line(
+        "markers",
+        "slow: long-running tests OR tests with optional / heavy dependencies "
+        "(deselect with '-m \"not slow\"')",
+    )
+    config.addinivalue_line(
+        "markers",
+        "e2e: true end-to-end tests against external services / real network "
+        "(subset of slow; deselect with '-m \"not e2e\"')",
+    )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # MODULE-LEVEL EXPORTS / 模块级导出
 # ═══════════════════════════════════════════════════════════════════════════════
 
