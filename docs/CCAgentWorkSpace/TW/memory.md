@@ -20,6 +20,18 @@
 |------|------|---------|
 | 2026-04-12 | 全量文檔盤查（445 .md + 38 .txt，47 dir） | `docs/CCAgentWorkSpace/TW/2026-04-12--document_audit_report.md` |
 | 2026-04-24 | 04-01 ~ 04-24 窗口重複/合併/死文件審計（539 .md + 52 .claude_reports） | `docs/CCAgentWorkSpace/TW/workspace/reports/2026-04-24--file_dedup_merge_audit_apr01_apr24.md` |
+| 2026-04-26 | G9-01 Bybit dict confirm-mmr 路徑修正 + SSOT 標記（Tier 1 quick fix · Wave 4 G9 series） | inline final message（不寫 report file）|
+
+## G9-01 重點記錄（2026-04-26）
+
+- **修正項**：
+  1. `POST /v5/position/confirm-mmr`（誤）→ `POST /v5/position/confirm-pending-mmr`（正）
+  2. 字典頭部加 SSOT 標記（HTML 注釋雙語 + visible blockquote SSOT 規則 + 版本號 v1→v1.1）
+  3. §4.3 已知陷阱第 5 條同步修正
+- **錯誤根因**：Bybit 文檔頁 URL slug `confirm-mmr` 與實際 endpoint path `confirm-pending-mmr` 不一致；先前字典抄了 doc URL slug 當 endpoint path。
+- **驗證來源**：(1) Bybit V5 docs URL 結構 (2) PyBit `_v5_position.py` (3) CCXT `bybit.py` (4) tiagosiebler `bybit-api/src/rest-client-v5.ts` 全部使用 `confirm-pending-mmr`
+- **未檢驗 code↔dict drift**：本次 TW 範圍只動字典；建議 PM 後續派 E1 grep `position_manager.rs:327` 確認 Rust 端真實使用 path（若也是 `confirm-mmr` 則 endpoint 在 Bybit 端會 404，需修代碼）
+- **影響面評估**：LiveDemo / Mainnet 才會打到此 endpoint；demo 環境若調風險限額也會用到。當前系統 demo 流量未觸發風險限額調整（從未見過 110xxx err code），bug 可能潛伏。
 
 ## 審計結論摘要（2026-04-24）
 
