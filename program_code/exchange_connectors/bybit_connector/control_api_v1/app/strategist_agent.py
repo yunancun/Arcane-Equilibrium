@@ -54,6 +54,9 @@ from typing import Any, Callable, Dict, List, Optional
 from .base_agent import BaseAgent
 from .h1_thought_gate import H1ThoughtGate
 from .h4_validator import validate_ai_output
+# G3-08 Phase 3 Sub-task 3-2 — H4 invalidation hint, env-gated no-op when off.
+# G3-08 Phase 3 Sub-task 3-2 — H4 失效提示，env 關閉時 no-op。
+from .h_state_invalidator import invalidate_async as _invalidate_h_state_async
 from .llm_call_wrapper import call_ollama_judge_edge, ollama_is_available
 from .model_router import ModelRouter
 from .multi_agent_framework import (
@@ -196,8 +199,11 @@ class StrategistAgent(BaseAgent):
             "h1_budget_skip": 0,
             "h1_complexity_skip": 0,
             "h1_cooldown_skip": 0,
-            # H4 output validation counter / H4 輸出驗證拒絕計數器
+            # H4 output validation counters / H4 輸出驗證計數器
+            # G3-08 Phase 3 Sub-task 3-2 補 validation_pass（pre-G3-08 silent gap）。
+            # G3-08 Phase 3 Sub-task 3-2 added validation_pass (pre-G3-08 silent gap).
             "h4_validation_fail": 0,
+            "h4_validation_pass": 0,
             # L1.5 evaluation counter / L1.5 評估計數器
             "l1_5_evaluations": 0,
             # H5 Ollama cost tracking counter / H5 Ollama 調用計數
@@ -949,7 +955,14 @@ class StrategistAgent(BaseAgent):
                 with self._lock:
                     self._stats["h4_validation_fail"] = self._stats.get("h4_validation_fail", 0) + 1
                     self._stats["heuristic_evaluations"] += 1
+                _invalidate_h_state_async("h4.validation_fail")  # G3-08 Phase 3 Sub-task 3-2
                 return _heuristic_evaluate(intel, self.config)
+
+            # G3-08 Phase 3 Sub-task 3-2 — H4 PASS: count + hint (was silent gap).
+            # G3-08 Phase 3 Sub-task 3-2 — H4 通過：補計數與提示（G3-08 前 silent gap）。
+            with self._lock:
+                self._stats["h4_validation_pass"] = self._stats.get("h4_validation_pass", 0) + 1
+            _invalidate_h_state_async("h4.validation_pass")
 
             has_edge = bool(result.get("has_edge", False))
             confidence = float(result.get("confidence", 0.0))
@@ -1163,6 +1176,23 @@ class StrategistAgent(BaseAgent):
         # L2 快取大小從 ModelRouter 的專用鎖讀取
         stats["l2_cache_size"] = self._model_router.cache_size
         return stats
+
+    # G3-08 Phase 3 Sub-task 3-2: H4 state snapshot for h_state_cache.
+    # G3-08 Phase 3 Sub-task 3-2：給 h_state_cache 用的 H4 狀態 snapshot。
+    def get_h4_snapshot(self) -> Dict[str, Any]:
+        """H4 validation stats snapshot / H4 驗證統計 snapshot.
+
+        Schema (PA design §5.2 H4ValidationStats parity): validation_fail (int,
+        rejected count / 拒絕次數), validation_pass (int, accepted count /
+        通過次數). H4 stats caller-side because h4_validator is stateless;
+        Phase 3 Sub-task 3-2 補 validation_pass（G3-08 前 silent gap）.
+        Pure-read, only acquires self._lock; safe from any thread / 任何線程安全.
+        """
+        with self._lock:
+            return {
+                "validation_fail": int(self._stats.get("h4_validation_fail", 0)),
+                "validation_pass": int(self._stats.get("h4_validation_pass", 0)),
+            }
 
     def get_recent_evaluations(self, limit: int = 20) -> List[Dict[str, Any]]:
         """Get recent edge evaluations for diagnostics / 獲取最近的 edge 評估用於診斷"""
