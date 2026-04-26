@@ -53,6 +53,7 @@
 | 2026-04-26 | Tier 4 batch review 6 commits (eb65e1e..4689fc8) + MIT EXIT-FEATURES-WRITER-BUG-1 audit + PM merge | workspace/reports/2026-04-26--tier4_batch_review.md |
 | 2026-04-26 | Tier 5 batch review 7 commits (af48ee1..f2ed286) — T5.1 EXIT-FEATURES-FIX + T5.2 G3-08-PHASE-1C + T5.3 Phase 2 H1+H3 | workspace/reports/2026-04-26--tier5_batch_review.md |
 | 2026-04-26 | Tier 6 batch review 4 commits (306b549..56104de) — T6.1 Track 1 4 LOW + T6.2 Track 2 H3 schema design + T6.3 Track 3 dust audit design | workspace/reports/2026-04-26--tier6_batch_review.md |
+| 2026-04-26 | Tier 7 batch review 3 commits (4b30f5e/8241133/c6ed0b3) — T7.1 Rust H3 schema align T7.2 healthcheck [21] dust inventory T7.3 PA Phase 3 sub-task split | workspace/reports/2026-04-26--tier7_batch_review.md |
 
 ## 歷史審查關鍵發現（累積記憶）
 
@@ -276,6 +277,20 @@
   - 凡 H 狀態 cache fetcher 從 stub → real 的演化 — 必在 stub 階段建立 schema parity 測試（不只測 default）防 future Phase 接線時 silent drift；本批 PA 設計 forward-compat unknown fields drop 是雙刃劍
   - 凡 lazy-import 在 IPC handler 內必驗 3 個 invariants：(1) top-level import 不觸 circular（boot 序列死鎖）(2) ImportError + getattr None 多層 try/except 兜底 (3) never-raises contract 維持（IPC handler 對 caller 永不 propagate snapshot bug）
   - 凡 PM 派發 7 commits 中含 3 個獨立 task 必查 commit time-order：本批 5943337 (15:43) → af48ee1 (15:48, parent=deee78e) → 9120948 (15:58)；3 task sequential 不是 cohesive PR，避免 §C 範圍判定誤套用 cohesive 標準
+
+### 2026-04-26 Tier 7 batch review (3 commits, 4b30f5e/8241133/c6ed0b3) — 3 PASS / 0 RETURN / 1 LOW FUP
+
+- **結論**：T7.1 Track 1 Rust H3RouteStats schema align (`4b30f5e`) PASS / T7.2 Track 2 healthcheck [21] dust inventory (`8241133`) PASS-with-LOW / T7.3 Track 3 PA Phase 3 sub-task split design (`c6ed0b3`) PASS。1 FUP optional（T7-FUP-DUST-SQL-DEVIATION-DOC，PA 10min 補 PA RFC §7.4 註記 E1 cleaner SQL）
+- **Track 1 4 強 claim 獨立驗證 100%**：(1) 10 keys aligned — 讀 `model_router.py:114-124` 9 stats keys + line 480 `cache_size` 注入 = 10 ✅ (2) 0 production hot-path consumer — `grep H3RouteStats rust/src/` 5 hits 全 internal + ipc h_state.rs:69 用 opaque struct via serde 無 field-name 依賴 ✅ (3) Schema parity test 真效 — BTreeSet 比對硬編碼 Python keys list，order-independent，drift 即 RED ✅ (4) Python 0 改動 — `git show --stat 4b30f5e` 1 file (types.rs) 167+/7- ✅。Linux cargo lib h_state_cache 17/0 (baseline 2195 + 17 = 2212)。閉合 E2 Tier 5 T5.3-MED-1
+- **Track 2 SQL 偏離 PA spec 但屬改善**：E1 在 `COUNT(DISTINCT symbol)` 加 `FILTER (WHERE realized_pnl=0)`（PA spec 沒）+ 棄 `partial_reduce_real_count` 欄。改善理由：filtered distinct 才真是 dust spiral fan-out signal（unfiltered 會被 partial_reduce_real 活動 inflate）。Linux production cron 16:09 UTC 印 `PASS [21] ... dust_spiral_count=0` LIVE 驗證。Slot [21] 唯一性 grep 確認（[17] 從未 assign，[16][18][19][20] 已佔）。三態 verdict 邊界 14 unit tests 覆蓋 1/10/11/2/3 + null + cursor None 完整無 off-by-one。Supersede note 在 docstring + TODO.md 4 處同步
+- **Track 3 PA Pattern B 決策論證 + 3 silent claim 獨立驗證**：(1) Pattern A 9-task α 全空 (Phase 1A 已建 schema) ✅ correct critique (2) Pattern C 4-task audit prelude 與 RFC §2.3 已併入的 H4 drift / H5 metadata 重複 ✅ correct judgment (3) H4 silent gap CONFIRMED — `grep validation_pass program_code/` 0 hits ✅ Sub-task 3-2 必補 (4) strategist_agent.py 1170 LOC + 25 = 1195 距 §九 1200 hard cap 5 line ✅ Phase 4 必先拆 (5) 3-1 + 3-3 file overlap CONFIRMED — `record_claude_cost layer2_cost_tracker.py:227` 是 H2 + H5 共同 hook 點 ✅ serial 強制正確 (6) Prompt template self-contained 抽 3-1 通讀 6 段式齊備
+- **判定方法論教訓**：
+  - 凡 sub-agent 自驗「0 production consumer」必獨立 grep 同範圍排除 def/test/re-export 確認；本 batch Track 1 + Tier 6 Track 2 兩次驗證皆成立 → pattern 收斂為「Rust mirror schema 在 Phase N stub 階段改 dormant struct 是黃金窗口」
+  - 凡 PA「ready-to-deploy SQL」E1 落地時改寫必逐 token diff，分清「invariant preserved 改善（如 filter 更精準）」vs「規範違反（如 verdict 邊界改）」；前者 LOW + 文件補 follow-up；後者 RETURN
+  - 凡 healthcheck 新增必驗 (a) Linux production cron 真跑通 (b) slot 編號 grep `__init__.py` 全 list 確認唯一 (c) supersede 既有 ticket 必 docstring + TODO.md 雙處留 audit trail
+  - 凡 PA RFC pattern A/B/C 決策 E2 不否定設計判斷但驗證底層 claim：本 batch H4 silent gap + 1170 LOC 餘地 + file overlap 全 grep 驗證屬實 — claim-based decision 站得住腳 = PASS；若 claim 假（如「0 hot-path consumer」實際有）= 退回 PA 重 design
+  - 凡 prompt template self-containedness 6 段式（前置驗證 + 文件 + 實作 + 完成標準 + commit msg + 一行回報）可作 E2 機械 check 標準 — 缺任一段 = LOW finding
+  - 凡 schema parity test 用 BTreeSet 而非 list 是 order-independent 設計，未來 PA 推類似 mirror schema fix 必鏡此 pattern 否則重新 排序 fields 即破測
 
 ### 2026-04-26 Tier 6 batch review (4 commits, 306b549..56104de) — 3 PASS / 0 RETURN / 2 FUP tickets
 - **結論**：T6.1 Track 1 (4 LOW + memory) PASS-with-LOW / T6.2 Track 2 H3 schema design PASS / T6.3 Track 3 dust audit design PASS-with-LOW。FUP：T6-FUP-WARN-ZONE-FILES-SPLIT (checks_derived 869 + ipc_client 899 兩檔進警告區漸增) + T6-FUP-PA-MEMORY-INDEX-SYNC (dd4d64a 缺 PA memory append)
