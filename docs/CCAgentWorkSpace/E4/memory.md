@@ -10,6 +10,62 @@
 
 ## 工作記憶
 
+### 2026-04-26 Wave 3 W4 三軌（EDGE-P1b + EDGE-P2-flip + G2-03）回歸驗證
+
+**結論：E4 PASS（三軌全綠 + 兩遍同綠 = 非 flaky）**
+
+**Baseline 對齊：**
+- Linux HEAD `55801fe` Rust release：**2138 passed / 0 failed**（不含三軌；Mac local working tree 21 changes 未 push）
+- Mac local cargo test --release（含三軌 +23 tests）：**2161 passed / 0 failed**（兩遍同綠；對齊 E1 報告 2161 數字）
+- 軌 1 +3（T3 IPC restore_exit_config_defaults handler tests）+ 軌 3 +20（防線 A 12 + 防線 B 8）= +23 ✅
+
+**§1 cargo test 驗證：**
+- 派發指定的 ssh Linux 跑 cargo PATH 缺失（ssh non-login shell 不載 ~/.cargo/env），workaround `source ~/.cargo/env` 後 Linux 端 baseline 2138 / 0 failed（HEAD 不含三軌符合預期）
+- Mac local 第一次 2138（cargo cache 給舊 binary） / 第二次 rebuild 2161 — 兩遍同綠
+- Sibling module 接線 grep：risk_checks.rs:1019 / risk_config.rs:579 / risk_config_tests.rs:1050 三 #[path] re-export 全在 cargo --lib 路徑
+
+**§2 healthcheck 18 check：**
+- 軌 1 [14] per-strategy 切片實測 deploy（cron log 03:02:15 CEST 跑出）：grid_trading=282[READY], ma_crossover=146[GROWING], bb_reversion=7[SPARSE], risk_close:fast_track_reduce_half=7[SPARSE], orphan_frozen=4[SPARSE] (READY_frac=63%)
+- READY 閾值 ≥200 = calibrator min（對齊 ✅）
+- SUMMARY 從 02:33 FAIL → 03:02 WARN（[12] G2-06 deploy 後 PASS；[11] 既有 WARN 與本軌無關）
+- 18 check 完整：[1]-[15] + [16] + [Xa]/[Xb] + [18] = 18 PASS/WARN（不含 FAIL）
+
+**§3 EDGE-P2-flip dry-run：**
+- ssh Linux 跑 helper 報「No such file or directory」（檔案仍 Mac local，不在 Linux HEAD）
+- artifact `/tmp/openclaw/edge_p2_flip_dry_run.json`（先前 E1 自跑留下）含 5/5 PASS：current_shadow_enabled=false / config_version=0 / IPC channel live / engine alive / revert payload symmetric
+
+**§4 shell bash -n：3/3 wrapper 全綠（edge_p2_flip.sh 283 / edge_p2_revert.sh 208 / g2_03_bind_ma_sltp.sh 256）**
+**§5 Python ast.parse：4/4 helper 全綠**
+**§6 calibrator + summary：**
+- calibrator smoke：synthetic 1-strategy 250-row → CALIBRATED（exit 0）
+- summary 14d demo（scp + Linux PG, trading_admin user）：per-strategy markdown report 完整（dim×percentile 6×10 + profit cohort 子表 + tier 標籤 + Notes 防誤用警示）
+
+**§7 1200 行硬上限驗（WARN 不 FAIL，per E4 規則 #3）：**
+- ipc_server/mod.rs：1251（軌 1 +11 PRE-EXISTING）— WARN
+- passive_wait_healthcheck.py：2185（軌 1 +99 PRE-EXISTING）— WARN
+- risk_config.rs：1071（軌 3 抽 sibling 後實減 6 行 vs 1077 baseline）— OK
+- risk_checks.rs：1020（軌 3 加 thin wrapper +140）— OK
+- 三 sibling 全在 800 警告線內（191 / 294 / 308）
+
+**6 條 push back / WARN 觀察（非阻塞）：**
+1. 三軌仍只在 Mac local working tree — PM 必須統一 commit + push
+2. ipc_server/mod.rs 1251 + passive_wait_healthcheck.py 2185 PRE-EXISTING — 建議 E5 refactor wave 拆 dispatch_request / check_*() 子模組
+3. 軌 1 §5.1 stale_peak_ms / shadow_enabled 不在 IPC（toml_only）— 建議 follow-up 擴 update_risk_config IPC
+4. 軌 2 §5.1 IPC HMAC ts unit legacy bug（app/ipc_client.py:786 毫秒 vs Rust 秒）— 建議 E5 修 legacy sync_ipc_call
+5. 軌 3 §5.3 step_6_risk_checks.rs 未升級為 _with_override — 屬 G2-03 binding 真實啟用 PR 範圍，schema-only 此本輪 OK
+6. summary 用 trading_admin user 連 PG（cron wrapper 範式）— 工具自身沒 wire DSN 構造路徑，需依賴外部 env
+
+**3 條教訓：**
+1. **派發鏈說明**：PM 直派 E1 → E4 跳過 E2，E4 須兼任 E2 必查 5 點 + E4 主驗 7 步驟（21 changes 全覆蓋）
+2. **檔案不在 Linux 的應對**：軌 2/6 派發指定 ssh Linux 跑但檔案還在 Mac → 替代路徑 = (a) 跑 Mac local cargo test 驗 Rust （b) scp + 設 OPENCLAW_DATABASE_URL + activate venv 跑 Python helper 真機（c) 從 artifact JSON 反推 dry-run pass 狀態
+3. **Linux PG user 注意**：`trading_admin`（per cron wrapper）非 `openclaw`；E4/E5 跑 ssh Linux SQL 工具須對齊 cron wrapper DSN 構造路徑
+
+**Working tree 狀態：** 三軌 21 changes（11 modified + 10 new + 3 reports） 全 Mac local，Linux HEAD 仍 `55801fe`（不含三軌）。PM commit + push + Linux git pull --ff-only + ssh cargo test 重驗應 2161 / 0 failed 同綠。
+
+**報告位置：** `docs/CCAgentWorkSpace/E4/workspace/reports/2026-04-26--wave3_w4_three_tracks_regression.md`
+
+---
+
 ### 2026-04-26 Wave 3 G2-06 bb_breakout 永久 disable 回歸驗證
 
 **結論：E4 PASS**
@@ -262,6 +318,7 @@
 
 | 日期 | 任務 | 文件位置 |
 |------|------|---------|
+| 2026-04-26 | Wave 3 W4 三軌（EDGE-P1b + EDGE-P2-flip + G2-03）回歸驗證（E4 PASS / Mac local 2138→2161 +23 兩遍同綠 / 18 check 含 [14] per-strategy READY_frac 63% / dry-run 5/5 / bash -n 3/3 / ast.parse 4/4 / calibrator 250-row CALIBRATED / summary 14d markdown / 2 PRE-EXISTING WARN 1200 hard limit non-blocking） | `docs/CCAgentWorkSpace/E4/workspace/reports/2026-04-26--wave3_w4_three_tracks_regression.md` |
 | 2026-04-26 | Wave 3 G2-06 bb_breakout 永久 disable 回歸驗證（E4 PASS / Rust 2138 不變兩遍 / Mac local Python 3.12 兩遍 healthcheck 同綠 / cargo doc 證 //G2-06 plain 不汙染 ///doc / 3 條 non-blocking drift） | `docs/CCAgentWorkSpace/E4/workspace/reports/2026-04-26--g2_06_disable_regression.md` |
 | 2026-04-26 | Wave 3 G8-02 ExecutorAgent decision parity 回歸驗證（E4 Pass with conditions / +5 passed / Rust 2138 不變 / 4 WARN oversell 風險） | `docs/CCAgentWorkSpace/E4/workspace/reports/2026-04-26--wave3_g8_02_regression.md` |
 | 2026-04-24 | Full-chain Testing Audit（Rust 2103 inline + 85 integration / Python 3006 / HC 12 checks / CI 0 / Top 10 gaps） | `docs/CCAgentWorkSpace/E4/workspace/reports/2026-04-24--full_chain_testing_audit.md` |

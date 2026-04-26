@@ -262,6 +262,22 @@ impl RiskConfig {
                     .into(),
             );
         }
+
+        // G2-03 (2026-04-26): per-strategy SL/TP overrides — defense line A.
+        // For every entry in per_strategy, validate the override fields don't
+        // loosen beyond P1 limits (and reject NaN/Inf/non-positive values).
+        // Per PA RFC §3.1: this is the primary enforcement; runtime cap (line B)
+        // and calibrator dry-run (line C) are belt-and-suspenders. Failure here
+        // means an IPC patch_risk_config / TOML reload is rejected — engine
+        // never sees a per_strategy override that would break P1 guarantees.
+        //
+        // G2-03（2026-04-26）：per_strategy SL/TP 覆蓋 —— 防線 A（主要防線）。
+        // 走 RFC §3.1，validate 階段拒「override > P1」，IPC/TOML 永不被接收；
+        // runtime cap 為兜底（防 race），calibrator dry-run 為離線安全網。
+        for (strategy_name, override_cfg) in &self.per_strategy {
+            override_cfg.validate_against_limits(strategy_name, &self.limits)?;
+        }
+
         Ok(())
     }
 }
@@ -552,39 +568,17 @@ pub struct CategoryOverride {
 // ---------------------------------------------------------------------------
 // StrategyOverride (per-strategy)
 // ---------------------------------------------------------------------------
-
-/// Per-strategy risk override. Indexed by strategy name in `RiskConfig.per_strategy`.
-/// 按策略名稱索引的策略級風控覆蓋。
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct StrategyOverride {
-    /// One-click pause/resume.
-    /// 一鍵暫停/恢復。
-    #[serde(default = "default_true")]
-    pub enabled: bool,
-    #[serde(default)]
-    pub position_size_max_pct: Option<f64>,
-    #[serde(default)]
-    pub max_concurrent_positions: Option<u32>,
-    #[serde(default)]
-    pub consec_loss_cooldown_count: Option<u32>,
-    #[serde(default)]
-    pub allowed_symbols: Option<Vec<String>>,
-    #[serde(default)]
-    pub blocked_symbols: Option<Vec<String>>,
-}
-
-impl Default for StrategyOverride {
-    fn default() -> Self {
-        Self {
-            enabled: true,
-            position_size_max_pct: None,
-            max_concurrent_positions: None,
-            consec_loss_cooldown_count: None,
-            allowed_symbols: None,
-            blocked_symbols: None,
-        }
-    }
-}
+//
+// G2-03 (2026-04-26) refactor: StrategyOverride struct + Default + impl
+// extracted to sibling `risk_config_per_strategy.rs` to keep this file under
+// CLAUDE.md §九 1200-line hard cap. `pub use` below preserves public API
+// path `crate::config::risk_config::StrategyOverride` for all callers.
+//
+// G2-03（2026-04-26）重構：StrategyOverride 抽至 sibling 守 §九 1200 行硬上限；
+// `pub use` 保留 `crate::config::risk_config::StrategyOverride` 公開 API 路徑。
+#[path = "risk_config_per_strategy.rs"]
+mod per_strategy;
+pub use per_strategy::StrategyOverride;
 
 pub(super) fn default_true() -> bool {
     true

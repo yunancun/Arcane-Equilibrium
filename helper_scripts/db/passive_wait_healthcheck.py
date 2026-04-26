@@ -1591,7 +1591,8 @@ def check_edge_estimator_scheduler_fresh() -> tuple[str, str]:
 
 
 def check_exit_features_accumulation_rate(cur) -> tuple[str, str]:
-    """[14] G6-02 (2026-04-24): learning.exit_features weekly accumulation rate.
+    """[14] G6-02 (2026-04-24) + EDGE-P1b T4 (2026-04-26): learning.exit_features
+    weekly accumulation rate + per-strategy breakdown for calibrator readiness.
 
     MODULE_NOTE (EN): EDGE-P1b passive-wait healthcheck — the EDGE-P1b TODO
     waits for `learning.exit_features` to accumulate enough rows for ML
@@ -1599,17 +1600,38 @@ def check_exit_features_accumulation_rate(cur) -> tuple[str, str]:
     silent writer regression (e.g. paper_state hook deletion, schema_hash
     mismatch causing INSERT to be silently swapped to a no-op) could leave the
     table flat for days while the TODO still says "passive wait". This check
-    compares this-week vs last-week row counts to catch acute decay.
+    compares this-week vs last-week row counts to catch acute decay AND
+    surfaces per-strategy 7d row counts so operator can see which strategies
+    are below the calibrator's 200-row threshold (RFC §3 EDGE-P1b T1
+    `--min-samples-per-strategy 200` default).
 
     Compared to [3] `check_exit_features_writer` which validates the 24h
     1:1 ratio with close_fills, [14] adds a week-over-week trend signal:
       - [3] asks "is the writer firing right now per fill?"
-      - [14] asks "is the writer's overall throughput consistent week to week?"
+      - [14] asks "is the writer's overall throughput consistent week to week
+              AND are individual strategies meeting the calibrator threshold?"
     Both can pass independently; both are needed because [3] catches per-fill
     misses (delta > 33% over 24h) and [14] catches longer-trend collapse
-    (close_fills also dropped, so per-fill ratio still looks fine).
+    (close_fills also dropped, so per-fill ratio still looks fine) and
+    per-strategy bind readiness.
 
-    Three-state output:
+    EDGE-P1b T4 (2026-04-26) addition — per-strategy slice in the message:
+      * Counts last-7d rows per `strategy_name` (NO engine_mode filter,
+        same scope as the global rate check).
+      * Tags each strategy with its sample tier:
+          [READY]   ≥200 (calibrator-min, can be bind candidate)
+          [GROWING] 50-199
+          [SPARSE]  1-49
+        Strategies with 0 rows are silently omitted (avoid noise — the
+        global headline already covers them via this_week/last_week).
+      * Cohort fraction = sum of [READY] strategies' rows / total this_week
+        (i.e. how much of the 7d cohort is calibrator-ready).
+      * Message tail format: `; per_strategy: name1=N1[TIER], name2=N2[TIER], ...`
+      * Status decision is UNCHANGED — global headline still drives PASS/WARN/FAIL;
+        per-strategy slice is informational, never the cause of WARN/FAIL by
+        itself (long-term goal — per RFC §2.4 fail-soft semantics).
+
+    Three-state output (UNCHANGED from G6-02 baseline):
       - PASS: this_week > 0 AND this_week ≥ last_week × 0.5 (no severe decay).
       - WARN: this_week > 0 AND this_week < last_week × 0.3 (severe decay).
       - FAIL: this_week == 0 (writer completely silent — EDGE-P1b assumption
@@ -1623,10 +1645,14 @@ def check_exit_features_accumulation_rate(cur) -> tuple[str, str]:
     all matter for ML training corpus. Operator can grep for engine_mode
     breakdown via direct SQL if a specific engine looks anomalous.
 
-    [14] G6-02（2026-04-24）：learning.exit_features 週環比累積速率守衛
-    （EDGE-P1b TODO 被動等待 ML 訓練樣本累積到 per-cell ≥200 labels）。
-    [3] 驗 24h per-fill 1:1 比率；[14] 補週環比趨勢信號。兩者互補：close_fills
-    同步下降時 [3] 仍 PASS 但 [14] 抓長趨勢崩潰。三態：PASS（>0 且 ≥0.5×上週）/
+    [14] G6-02（2026-04-24）+ EDGE-P1b T4（2026-04-26）：learning.exit_features
+    週環比累積速率 + per-strategy 切片（calibrator readiness 監控）。
+    EDGE-P1b TODO 被動等待 per-cell ≥200 labels；除全局週環比，T4 加 per-strategy
+    7d 行數以呈現哪些策略過/未過 calibrator 200-row 門檻（RFC §3 T1 預設）。
+    Per-strategy tier：[READY] ≥200 / [GROWING] 50-199 / [SPARSE] 1-49（0 行靜默忽略）；
+    cohort_frac = READY 策略行數 / this_week 總行數（calibrator 就緒比例）。
+    Status 決策不變：全局表頭仍主導 PASS/WARN/FAIL，per-strategy 切片為訊息資訊性
+    （長期目標，RFC §2.4 fail-soft 語意）。三態：PASS（>0 且 ≥0.5×上週）/
     WARN（<0.3×上週）/ FAIL（this_week=0，writer 完全靜默 EDGE-P1b 假設破裂）。
     """
     # Defensive rollback: keep cursor clean.
@@ -1663,6 +1689,60 @@ def check_exit_features_accumulation_rate(cur) -> tuple[str, str]:
     except Exception as e:
         return ("WARN", f"exit_features rate query failed: {e}")
 
+    # EDGE-P1b T4 addition: per-strategy 7d slice for calibrator readiness.
+    # Failure of this query is non-fatal (the headline ratio still computes);
+    # we just emit a "(per-strategy slice unavailable)" marker so operator
+    # knows the additional context is missing rather than silently truncated.
+    # EDGE-P1b T4 新增：per-strategy 7d 切片做 calibrator readiness 監控。
+    # 此查詢失敗不致命（全局比仍計算）；標註 unavailable 提示 operator。
+    per_strategy_tail = ""
+    try:
+        cur.execute(
+            "SELECT strategy_name, COUNT(*) AS n "
+            "FROM learning.exit_features "
+            "WHERE ts > now() - interval '7 days' "
+            "GROUP BY strategy_name "
+            "ORDER BY n DESC, strategy_name ASC"
+        )
+        per_strategy_rows = cur.fetchall()
+    except Exception as e:
+        per_strategy_rows = None
+        per_strategy_tail = f"; per_strategy=unavailable ({e})"
+
+    if per_strategy_rows is not None:
+        # Tier thresholds match RFC §3 calibrator min (200) + T2 summary tiers.
+        # 分檔閾值與 RFC §3 calibrator min（200）+ T2 summary tier 對齊。
+        ready_threshold = 200
+        growing_threshold = 50
+        ready_count = 0  # rows in READY strategies (numerator for cohort_frac)
+        slice_parts: list[str] = []
+        for row in per_strategy_rows:
+            name = str(row[0] or "(null)")
+            n = int(row[1] or 0)
+            if n == 0:
+                continue
+            if n >= ready_threshold:
+                tier = "[READY]"
+                ready_count += n
+            elif n >= growing_threshold:
+                tier = "[GROWING]"
+            else:
+                tier = "[SPARSE]"
+            slice_parts.append(f"{name}={n}{tier}")
+
+        if slice_parts:
+            cohort_frac = (ready_count / this_week) if this_week > 0 else 0.0
+            per_strategy_tail = (
+                "; per_strategy: " + ", ".join(slice_parts)
+                + f" (READY_frac={cohort_frac:.0%} of this_week)"
+            )
+        else:
+            # this_week > 0 but per-strategy GROUP BY returned no rows — impossible
+            # unless `strategy_name` is all NULL. Surface as a debug note.
+            # this_week > 0 但 per-strategy 無行 — 唯一可能 strategy_name 全 NULL；
+            # 標註以利除錯。
+            per_strategy_tail = "; per_strategy: (all rows have NULL strategy_name?)"
+
     base = f"this_week={this_week}, last_week={last_week}"
 
     # FAIL: completely silent — EDGE-P1b assumption broken.
@@ -1670,16 +1750,17 @@ def check_exit_features_accumulation_rate(cur) -> tuple[str, str]:
     if this_week == 0:
         if last_week == 0:
             return ("FAIL", base + " — writer dead ≥2 weeks (EDGE-P1b stalled; "
-                    "check exit_feature_writer.rs + paper_state hook)")
+                    "check exit_feature_writer.rs + paper_state hook)" + per_strategy_tail)
         return ("FAIL", base + " — writer went silent this week "
-                "(check exit_feature_writer.rs + Rust panic log)")
+                "(check exit_feature_writer.rs + Rust panic log)" + per_strategy_tail)
 
     # Special case: last_week == 0 but this_week > 0 → writer just started
     # or recovered from outage. Treat as PASS with note.
     # 特例：last_week=0 但 this_week>0 → writer 剛啟動或剛恢復。PASS + 註解。
     if last_week == 0:
         return ("PASS", base + " — writer recently activated "
-                "(no historical baseline; defer trend evaluation 1 more week)")
+                "(no historical baseline; defer trend evaluation 1 more week)"
+                + per_strategy_tail)
 
     ratio = this_week / last_week
 
@@ -1687,17 +1768,18 @@ def check_exit_features_accumulation_rate(cur) -> tuple[str, str]:
     # WARN：嚴重衰減（<30% 上週）。
     if ratio < 0.3:
         return ("WARN", base + f" (ratio={ratio:.2f}) — severe decay <30%; "
-                "EDGE-P1b accumulation stalled, investigate fill rate + writer health")
+                "EDGE-P1b accumulation stalled, investigate fill rate + writer health"
+                + per_strategy_tail)
 
     # WARN: moderate decay (30%-50% of last week).
     # WARN：中度衰減（30%-50% 上週）。
     if ratio < 0.5:
         return ("WARN", base + f" (ratio={ratio:.2f}) — moderate decay 30-50%; "
-                "monitor next-week trend")
+                "monitor next-week trend" + per_strategy_tail)
 
     # PASS: stable or growing.
     # PASS：穩定或成長。
-    return ("PASS", base + f" (ratio={ratio:.2f}) — accumulation healthy")
+    return ("PASS", base + f" (ratio={ratio:.2f}) — accumulation healthy" + per_strategy_tail)
 
 
 def check_strategist_cycle_fresh() -> tuple[str, str]:

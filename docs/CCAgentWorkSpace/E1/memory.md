@@ -54,6 +54,9 @@ def acquire_lease(self, intent_id: str) -> bool:
 | 2026-04-26 | Wave 3 G8-02: Python↔Rust ExecutorAgent decision parity 70-case ≥95% | `docs/CCAgentWorkSpace/E1/workspace/reports/2026-04-26--g8_02_executor_decision_parity.md` |
 | 2026-04-26 | Wave 3 E2-FIX-1+2: G2-02 caveat + G8-02 synthetic_replay rename | `.claude_reports/20260426_021000_e2_finding_fix_g202_g802.md` |
 | 2026-04-26 | Wave 3 G2-06: bb_breakout 永久 disable 落地（4 子任務串行）| `docs/CCAgentWorkSpace/E1/workspace/reports/2026-04-26--g2_06_bb_breakout_disable_landing.md` |
+| 2026-04-26 | Wave 3 EDGE-P2-flip T1+T3: dry-run smoke test + flip/revert SOP shell wrapper | `docs/CCAgentWorkSpace/E1/workspace/reports/2026-04-26--edge_p2_flip_t1_t3_landing.md` |
+| 2026-04-26 | Wave 3 EDGE-P1b 4 子任務: calibrator + summary + restore IPC + healthcheck [14] 升級 | `docs/CCAgentWorkSpace/E1/workspace/reports/2026-04-26--edge_p1b_4_subtasks.md` |
+| 2026-04-26 | Wave 3 G2-03 4 子任務: StrategyOverride SL/TP schema + risk_checks runtime cap + 3 TOML schema + binding SOP shell | `docs/CCAgentWorkSpace/E1/workspace/reports/2026-04-26--g2_03_4_subtasks.md` |
 
 ## 當前測試基準線
 2827 passed（Sprint 1a P1-1 完成後，both test dirs，128 pre-existing failures，17 errors）
@@ -224,9 +227,104 @@ def acquire_lease(self, intent_id: str) -> bool:
 - **Linux pytest 結果**：5 passed + 2 skipped / 0.36s（agree=70/70, 100.00%；threshold 95% PASS）。
 - **scp 而非 push**：E1 不直接 commit（CLAUDE.md §七 強制鏈），用 `scp` 把測試檔 + fixture 直接傳 Linux 跑驗證，git tree 維持 clean 待 E2 review。
 
+### 2026-04-26 Wave 3 EDGE-P2-flip T1+T3 — flip dry-run + SOP shell wrappers
+
+- **PA RFC `patch_risk_config { exit: { shadow_enabled: true } }` 真實可走**：generic deep-merge 路徑（`handle_patch_config` in `ipc_server/handlers_config.rs:72`）— JSON serialize 整個 RiskConfig → `json_merge` 遞歸合併 patch 物件 → deserialize 回 `RiskConfig` → `validate()`。`shadow_enabled` 雖**不在** 7 個 IPC `exit_*` 欄位內（per `event_consumer/tests/exit_config_ipc_tests.rs:34` 註解），但 generic deep-merge 完全可改任何 `pub` 欄位。實證：dry-run check (d) 跑唯讀 round-trip，看到 ExitConfig schema 含 `shadow_enabled: bool`，flip 路徑成立。
+- **IPC HMAC ts unit 不一致 bug 順手發現**：`app/ipc_client.py:786` `sync_ipc_call` 用 `int(time.time() * 1000)`（毫秒）做 HMAC ts，但 Rust verifier `ipc_server/mod.rs:621-628` 用 `now.as_secs() as i64`（秒）比對 30s 容差 — 數量級差 1000，**legacy sync_ipc_call 應 100% fail auth**（但因低頻被呼用未察覺）。E1 不擴張範圍**未修** legacy；dry-run 內嵌 `_sync_ipc_call` 用秒對齊 Rust，並加雙語 comment 標明刻意分歧。E2 拍板是否要順手修 legacy。
+- **OPENCLAW_IPC_SECRET 真實位置非 srv/settings**：`$HOME/BybitOpenClaw/secrets/environment_files/ipc_secret.txt`（per `restart_all.sh:31, 196`，env name 為 `OPENCLAW_SECRETS_ROOT` 預設 `$HOME/BybitOpenClaw/secrets`）。第一輪用 `$SRV_ROOT/settings` fallback 是錯，第二輪查 restart_all.sh 確認。flip.sh / revert.sh source env 邏輯已對齊 restart_all.sh 範式（idempotent — 已 export 不影響）。
+- **DB 連線範式對齊 healthcheck**：`_open_pg_conn()` 抽出 helper 用 `OPENCLAW_DATABASE_URL` 或 `POSTGRES_USER/PASSWORD/HOST/PORT/DB` env，與 `passive_wait_healthcheck.py:_get_conn` 1:1 對齊，operator 既有 systemd / cron 環境直接 work。
+- **Shell wrapper paste-safety 範式**：複雜 IPC 邏輯**不**寫在 shell heredoc / 多行 for；用 inline `python3 -c "..."` 委派，傳入 `OPENCLAW_BASE_DIR + OPENCLAW_IPC_SOCKET + PYTHONPATH` env，從 stdin import dry-run script 的 `_sync_ipc_call`。flip.sh 一個 inline Python block <30 行，shell 主體保持 paste-safe one-liner（per memory `feedback_shell_paste_safety`）。
+- **dry-run check (d) 設計**：構造 EXACT mutating patch payload 驗 JSON 結構，但實際只跑唯讀 `get_risk_config` round-trip。**絕不**真送 mutating patch（per RFC §3.4 dry-run constraint），真實 flip 只能透過 SOP wrapper 在 dry-run PASS + operator confirm 後執行。
+- **Mac dry-run exit 2 路徑**：engine 不跑時偵測 socket 缺失立即 exit 2 並輸出 minimal markdown / JSON（不跑任何 check 也輸出可讀 stamp 給 caller）。Linux 真機 exit 0/1 區分 5 check FAIL。3 個 exit code（0/1/2）在 flip.sh STEP 1 dry-run 後**全部正確映射**到 abort / continue 決策。
+- **行數 829 略超 800 警告**：~36% 為強制雙語 MODULE_NOTE / docstring / inline 注釋（CLAUDE.md §七 強制），精煉違反規範保留即可。1200 硬上限內。
+- **mock_events 不可實作真合成**：(i) 會污染 production `learning.exit_features` 表，(ii) Rust mock injection 需改 production code 違反 0 業務代碼變更。`mock_events_target` 純資訊性 → JSON artifact 作 capacity hint。
+
 ### 2026-03-31 G-05
 - `governance_hub.acquire_lease()` 實際簽名為 `(intent_id, scope, ttl_seconds)`，任務規格中描述的 `requester` 參數不存在 → 實際使用 `scope="TRADE_ENTRY"` 正確對應規格意圖
 - `governance_hub=None` 採用 fail-open（向後兼容）設計，`governance_hub` 存在但 `acquire_lease()` 返回 `None` 採用 fail-closed — 這兩層行為必須區分，測試 26 和 27 各自覆蓋
 - `phase2_strategy_routes.py` 中 `GOV_HUB` 從 `paper_trading_routes` 導入，使用 `_GOV_HUB_FOR_EXECUTOR` 本地別名防止與其他導入衝突
 - 測試基準從 2555 升至 2561（新增 6 個 G-05 tests，test_26~31）
 - 所有 17 個失敗均為預存在問題（test_batch10_learning_oms/test_ollama_integration/test_integration_phase11/test_learning_tier_gate），與本次改動無關
+
+### 2026-04-26 Wave 3 G2-03 4 子任務（StrategyOverride SL/TP schema + runtime cap + TOML + binding SOP）
+
+- **PA RFC §2.1 vs PM prompt schema mismatch（push back 紀錄但不暫停執行）**：
+  - PA RFC §2.1 寫 4 個 override 欄位：`stop_loss_max_pct_override` (pct) / `take_profit_max_pct_override` (pct) / `trailing_activation_pct_override` / `trailing_distance_pct_override`，全部 `Option<f64>`，pct 對應 P1 limits 的 pct
+  - PM prompt 改寫成 `sl_atr_mult` + `sl_max_bps_override` 4 字段（ATR 倍數 + bps 雙混合），與 RFC §2.1 schema 不一致；PM 也提到 "P1_HARD_SL_MAX_BPS / P1_HARD_TP_MAX_BPS constants" 但**不存在** — 真實對標是 `RiskConfig.limits.{stop_loss_max_pct, take_profit_max_pct}` (pct)
+  - **採取**：以 PA RFC §2.1 為準（PA 是 source-of-truth，發生分歧時源頭優先）；E1 只執行不擴張，不擅自選 PM 的 ATR mult + bps schema（屬語意擴張）
+  - **Lesson**：RFC vs 派發 prompt 不一致時必查源頭（PA RFC § 2.1 直接定 schema），記錄 push back 但繼續執行；不暫停。
+
+- **PA RFC §6.T2 函數名 `tick_risk_action` 不存在**：真實名 `check_position_on_tick`（見 risk_checks.rs:201），記錄 push back 但繼續執行（屬 RFC clerical error，函數名次要）。
+
+- **`StrategyOverride` 原無 validate hook**：grep `risk_config.rs` 完整 line 207 RiskConfig::validate，`per_strategy` HashMap 從未被遍歷驗證 —— G2-03 同時補上 validate hook（pre-G2-03 gap，順便 close）。新加 `validate_against_limits(&self, strategy_name, limits)` impl + RiskConfig::validate() loop。
+
+- **Position 已有 `owner_strategy: String`**（containers.rs:47, ORPHAN-ADOPT-1 Phase 2A 落）。原本擔心要新加欄位，但既有 schema 已 ready，T2 wire 路徑直通。**未實際接 step_6**（風險範圍最小化，T2 只落 fn signature 變化 + 新 fn `_with_override` + helper fns），caller chain 升級延後給 PM 統一決策（屬 G2-03 binding 真實需要）。
+
+- **檔案大小 §九 1200 硬上限觸發兩次**：
+  - **risk_config.rs**：1077 → 1217（+140 with new fields + validate impl + docstring）超 1200 → 抽 StrategyOverride 區塊到 sibling `risk_config_per_strategy.rs`（191 行），父檔回到 1071。`#[path = "risk_config_per_strategy.rs"] mod per_strategy; pub use per_strategy::StrategyOverride;` re-export 保留 `crate::config::risk_config::StrategyOverride` 公開 API 路徑。
+  - **risk_config_tests.rs**：1045 → 1319（+274 G2-03 tests）超 1200 → 抽 G2-03 12 tests 到 sibling `risk_config_per_strategy_tests.rs`（294 行），父檔回到 1051；`#[path] mod g2_03_per_strategy_tests` 在 `mod tests` **外**而非內（top-level test mod 於 cargo 等同 mod tests inner test）。
+  - **risk_checks.rs**：880 → 1279（+400 G2-03 helpers + new fn body + 8 runtime tests）超 1200 → 抽 G2-03 8 runtime tests 到 sibling `risk_checks_per_strategy_tests.rs`（308 行），父檔回到 1020。
+  - sibling test 不可直接拿 `mod tests` internal helpers（`default_config` / `COST_EDGE_DEFAULT` / `MIN_PROFIT_DEFAULT`）—— sibling 自帶 mirror 常量 + 自帶 `default_config()`，保 self-contained。
+
+- **risk_checks.rs `_with_override` 設計選擇**：保留既有 `check_position_on_tick(...)` ABI 不變，新加 `check_position_on_tick_with_override(... per_strategy: Option<&StrategyOverride>, config)` fn；既有 fn 變 thin wrapper（with `per_strategy=None`）。優點 = caller chain（position_risk_evaluator / step_6 / 4 既有 risk_checks tests / 4 evaluator tests / 3 g1_06 integration tests）0 改動，新功能 100% 可測；缺點 = 同檔 2 個 fn 看似重複，但 thin wrapper 只 18 行 pass-through 不影響 maintainability。
+
+- **`effective_sl_max_pct` / `effective_tp_max_pct` helpers**：核心 G2-03 防線 B 機制。設計 `match per_strategy.and_then(|o| o.stop_loss_max_pct_override) { Some(v) if v.is_finite() && v > 0.0 => v.min(limits), _ => limits, }`，三道防護：(1) `is_finite()` 拒 NaN/Inf；(2) `> 0.0` 拒 ≤ 0；(3) `.min(limits)` 拒 over-cap stale override。NaN > 5.0 是 false（IEEE 754）所以單純 `>` 守線不夠，**必須 `is_finite() && > 0`** 早期短路才 robust。
+
+- **trailing_*_override 不受 P1 cap 約束**：無「全局 trailing 上限」設定，trailing 是策略自由度（per memory `feedback_agent_autonomy`），G2-03 只要求 `> 0 + finite`，不 clamp。trailing 緊縮（distance 0.3 < default 0.8）反而是常見 binding 場景，與 SL/TP 「override 必 ≤ P1」對稱性不同。
+
+- **TOML 三環境 isolation 仍同方向**（per memory `feedback_env_config_independence`）：3 TOML schema 同步加 `[per_strategy.ma_crossover]` block + `enabled = true` + 4 行 commented-out override 欄位 + 雙語 comment block 解釋 binding 流程。**Live TOML** 加額外 comment 強調「binding 需 operator 獨立審查 + §四 硬邊界 gates 仍生效」（不可從 demo 抄值）。
+
+- **真實 TOML round-trip test**：`test_g2_03_real_toml_files_load_with_ma_crossover_section` 用 `env!("CARGO_MANIFEST_DIR")` 找 srv root + `fs::read_to_string` 讀 3 個真實 TOML → `toml::from_str::<RiskConfig>` + validate + 確認 ma_crossover present + 4 override None。catch 欄位拼寫 / section header 漂移；CARGO_MANIFEST_DIR 是穩定 env var（與 Mac/Linux 無關）。
+
+- **Shell wrapper paste-safety + helper Python 分工**：`g2_03_bind_ma_sltp.sh` 256 行純 paste-safe 流控（args parse / log / step orchestration），無 heredoc / 多行 for；複雜 IPC + JSON 邏輯抽 `g2_03_bind_helper.py`（405 行，3 子命令 diff/apply/verify），重用 `edge_p2_flip_dry_run._sync_ipc_call`（已對齊 Rust HMAC ts seconds 路徑，避開 legacy `sync_ipc_call` 毫秒 bug）。**HMAC ts unit 一致性**為前 2 軌（軌 2 EDGE-P2-flip）push back 揭發的 bug，本軌完全沿用避開的 helper，不在 legacy 修。
+
+- **--qc-report-path REQUIRED for apply（防忘）**：shell wrapper 強制 operator 提供 G2-02 counterfactual report path，apply 子命令會 fs::exists 驗證；diff 子命令可選（`default=None`）。binding SOP 流程：dry-run diff → operator 看 before/after JSON → "yes" + supply path → apply → 5s 等 hot-reload → verify 4 fields 匹配 → 完成。
+
+- **Mac local cargo test --release 全 lib 2161 passed / 0 failed**：baseline 2141 + 20 G2-03 tests（11 schema + 8 runtime + 1 real-TOML）= 2161；數字精確對齊。Sibling tests 經 `#[path] mod xxx` 載入後 cargo 自動發現，無 `Cargo.toml` 修改。
+
+- **未做的（保留給 binding 流程）**：
+  - step_6_risk_checks.rs 升級到 `_with_override` + 從 paper_state.position_exit_snapshot.owner_strategy 注入 → 留給 PM 決策（屬 G2-03 binding 真實啟用，不是 schema 落地）
+  - position_risk_evaluator::PositionRow 加 `owner_strategy: String` → 同上
+  - g1_06 integration tests update → caller chain 升級時一起改
+  - 我選擇 thin wrapper 模式 = caller chain 完全 0 改動，binding 啟用時再做（PM 可決定獨立 PR）。
+
+- **不擴張嚴守**：本 PR 0 業務代碼擴張至無 SL/TP override 的策略 / 0 改 P1 limits 預設值 / 0 改 §四 硬邊界 / 0 改 IPC handler / 0 修 legacy sync_ipc_call HMAC bug（軌 2 揭發，留 E2 / 後續批處理）。
+
+### 2026-04-26 Wave 3 EDGE-P1b 4 子任務（calibrator + summary + restore IPC + healthcheck [14] 升級）
+
+- **PA RFC §2.1 vs IPC handler 真實 schema mismatch（隱性 push back，但 PM 派發已含 caveat 故不暫停）**：
+  - PA RFC §2.1 列 6 個 ExitConfig percentile-derived bind 欄位（含 `stale_peak_ms`），但 `ipc_server/handlers/risk.rs:84-99` 只 wire 7 個 `exit_*`（`missing_edge_fallback_bps` / `min_net_floor_bps` / `min_hold_secs` / `min_peak_atr_norm` / `giveback_base` / `giveback_slope` / `giveback_floor`）— `stale_peak_ms` + `shadow_enabled` **不在 IPC**，需 TOML edit + `reload_risk_config` IPC。
+  - PM 派發已說「dry-run 預設 + 不直接 IPC 寫」，所以 calibrator 端只算 patch 不寫，**不阻塞**；但需在 docstring + JSON envelope 標 `toml_only_fields`，T3 restore 端 response 也要標 `toml_only_fields_skipped` 把 `stale_peak_ms` + `shadow_enabled` baseline 暴露給 caller，避免後續忘記。
+  - **Lesson**：PA RFC 寫的「bind 欄位列表」與 runtime IPC 形狀不一致時，先 cross-grep IPC handler，再決定 push back 暫停 vs 在 docstring 標 caveat 繼續執行（看 PM 規格是否已含 caveat）。
+
+- **T1 calibrator 設計關鍵**：
+  - `RFC §2.1 mapping table` 6 個欄位 + 1 derived（giveback_slope）：6 個直接 percentile / `giveback_slope = (base - floor) / max(min_peak_atr_norm, 1.0)`。
+  - `min_peak_atr_norm` 不直接 percentile 而是「`peak_pnl_pct p25 / atr_pct p25` 比例」（dim 2 / dim 3 合算）— 這是 RFC §2.1 表 row 2 「peak_pnl_pct/atr_pct p25」原意，不是「single dim p25」。
+  - `validate()` invariant 觸發點 — calibrator 需自己做 `clamp >= 0` / `floor > 0` / `floor <= base` 的 guard：違反 validate() 會被 `risk_store.apply_patch()` 全或無回滾，calibrator 提前 clamp + 在 derivation 記錄「rebound」備註，避免操作員拿到 patch 套不下去的尷尬。
+  - **stratification 用 strategy_name = ANY(%s) 精確比對**（per RFC §8 #2，不可 prefix 匹配 `grid_*`），psycopg2 自動把 list 轉 PG array。
+  - **percentile 計算用純 Python `linear` 插值**（無 NumPy 依賴）— 與 `numpy.percentile(values, pct)` 等價但無外部依賴，方便 cron 環境。
+  - **CLI args**：`--lookback-days 14` + `--embargo-days 7` 必驗 `embargo < lookback`；`--percentile-targets 90,95,99` 默認，但 calibrator 內部自動補算 p10/p25/p75（derivation 必需）— 不污染 user-visible 百分位但確保 patch 可生成。
+  - **stderr logging + stdout 純結果**：與 G2-02 ma_crossover_counterfactual_replay 一致，markdown/json/yaml 可直接 pipe。
+  - **`--apply` 仍是 dry-run**：只 emit JSON patch envelope；NO IPC write。`schema_version: "edge_p1b.calibrator.v1"` 為 future-proofing。
+
+- **T2 summary tool 設計**：
+  - 雙 cohort 分析（full + profit-only `realized_net_bps > 0`），讓 operator 看清「calibrator 真正能用的是 profit cohort」。
+  - **3 tier 標籤**：`strong-evidence`（≥1000）/ `ci-comfortable`（≥500）/ `calibrator-min`（≥200）/ `below-min`（<200）。tier 用 **profit cohort** 行數判定（calibrator 實際輸入），不用 full cohort（會誤導）。
+  - **3 個時間窗口計數**：24h / 7d / 14d 分別 query — 看 cohort 累積成長速率（per RFC §3 樣本估計）。
+  - 用 ddof=1 的樣本標準差（`var = sum((x-m)^2) / (n-1)`），與 `numpy.std(values, ddof=1)` 一致。
+
+- **T3 IPC method `restore_exit_config_defaults`**：
+  - **設計選擇**：用既有 `PipelineCommand::UpdateRiskConfig` 帶 7 個 default values（不開新 PipelineCommand variant） — 避免新 schema struct，consumer 端 `risk_store.apply_patch()` 已是原子 all-or-nothing 契約。
+  - **為何另開 IPC method 而非直接讓 caller 呼 `update_risk_config(7 default values)`**：(a) audit 時意圖明確（`restore` vs `patch`）(b) 一律發完整 7 欄位避免半套 (c) 未來 Phase B 自動化可加 audit hook（per Root Principle #8）。
+  - **Response payload 結構**：`fields_restored: [...]`（7 IPC-wired）+ `baseline_values: {...}`（每個的 default 值）+ `toml_only_fields_skipped: [{field, baseline_value, reason}]`（暴露 `stale_peak_ms` / `shadow_enabled` 不在 IPC 的不對稱）。
+  - **3 unit tests**：(1) happy path — 確認 7 exit fields 經通道為 Some(baseline) + 非 exit 為 None + response shape (2) error path — 缺 channel 回 ERR_INTERNAL "no paper command channel" (3) baseline 值 `f64::EPSILON` 比對 default fns，確保 `ExitConfig::default()` 沒漂移。
+  - **Linux release 驗證**：`cargo test --release -p openclaw_engine --lib` baseline 2138 → **2141** passed / 0 failed（+3 T3 tests）。
+  - **scp 方式驗 Linux 不污 git tree**：sub-script `~/.staged_e1_p1b_t3/` → cp 覆蓋 in-place → cargo test → 完成後 `git checkout` 三檔 revert。Linux git status clean 等 PM 統一 commit。
+
+- **T4 healthcheck [14] per-strategy 升級**：
+  - **保 1 行式語意契約**：仍是 `(status, message)` tuple，UI 仍打 `[14] PASS — message`；只在 message 尾巴加 `; per_strategy: name=N[TIER], ...`。Status 決策完全不變（避免破壞既有 cron summary 邏輯）。
+  - **Per-strategy 切片 fail-soft**：GROUP BY 查詢失敗 → 全局 ratio 仍計算，message 加 `per_strategy=unavailable (err)`，不致 [14] 變 FAIL。
+  - **Tier 閾值**：`[READY] ≥200` / `[GROWING] 50-199` / `[SPARSE] 1-49` / 0 行靜默忽略（避免噪音）。READY 對齊 calibrator min=200。
+  - **`READY_frac`** = ready_strategies_rows / this_week — 直接告訴 operator 「目前 cohort 多少比例已 calibrator-ready」。Linux 真實 DB 跑出 63%（grid_trading=282 已 READY，ma_crossover=146 GROWING）。
+
+- **檔案大小**：calibrator 1067 行（800-1200 警告區，但 SQL+math+render+CLI 整合為單檔合理）；summary 825 行（剛過 800 警告線）；risk.rs +332 行至 598 行（仍在 800 警告線下）；mod.rs 1251 行 — **既有檔已超 1200 硬上限**，本變動 +11 行（dispatch 路由），按「不擴張」嚴守不順手 split，留 E2 review 決定。

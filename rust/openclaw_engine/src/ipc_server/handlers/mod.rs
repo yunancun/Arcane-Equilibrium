@@ -46,8 +46,8 @@ pub(in crate::ipc_server) use misc::{
     handle_get_state, handle_get_strategist_cycle_metrics,
 };
 pub(in crate::ipc_server) use risk::{
-    handle_clear_consecutive_losses, handle_reset_drawdown_baseline, handle_risk_runtime_status,
-    handle_update_risk_config,
+    handle_clear_consecutive_losses, handle_reset_drawdown_baseline,
+    handle_restore_exit_config_defaults, handle_risk_runtime_status, handle_update_risk_config,
 };
 pub(in crate::ipc_server) use strategy::{
     handle_set_strategy_active, handle_strategy_param_cmd, handle_submit_paper_order,

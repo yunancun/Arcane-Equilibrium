@@ -32,6 +32,39 @@ ft_min_notional_ratio_of_entry = 0.25
 
 [per_strategy]
 
+# ─────────────────────────────────────────────────────────────────────────────
+# G2-03 (2026-04-26) — ma_crossover SL/TP per-strategy override schema (Option B2).
+# Schema landed per PA RFC `2026-04-26--g2_03_option_b_rfc.md` § 2.4 + § 6.T3.
+# All four override fields commented out — schema-only landing, NO binding values.
+# Binding deferred until G2-02 counterfactual replay produces a QC + FA approved
+# report (~2026-05-03), then operator runs `g2_03_bind_ma_sltp.sh` SOP wrapper.
+#
+# Live-specific notes:
+#   - Live binding requires INDEPENDENT operator approval per memory
+#     `feedback_env_config_independence`; never copy demo binding values blindly.
+#   - Live TOML reload still gated by §四 hard boundaries (live_reserved /
+#     authorization.json HMAC / OPENCLAW_ALLOW_MAINNET=1) — schema falls under
+#     P1 risk surface, not live-execution gates.
+#
+# Defense (PA RFC § 3.1):
+#   A. RiskConfig::validate() rejects override > limits at IPC patch / TOML reload
+#   B. risk_checks runtime cap clamps any survivor at limits (effective_*_max_pct)
+#   C. counterfactual_calibrator dry-run rejects before write (offline)
+#
+# G2-03（2026-04-26）—— ma_crossover SL/TP 每策略覆蓋 schema（Option B2）。
+# 落 schema 不落值；binding 等 G2-02 counterfactual 報告（~2026-05-03）+ QC/FA
+# review 後 operator 跑 g2_03_bind_ma_sltp.sh SOP 寫入。
+# Live 特性：binding 需 operator 獨立審查（feedback_env_config_independence），
+# 不可從 demo 抄；TOML reload 仍受 §四 硬邊界（live_reserved / authorization.json
+# HMAC / Mainnet env）控制。
+# ─────────────────────────────────────────────────────────────────────────────
+[per_strategy.ma_crossover]
+enabled = true
+# stop_loss_max_pct_override   = 2.5   # < limits.stop_loss_max_pct (must be ≤ P1)
+# take_profit_max_pct_override = 8.0   # < limits.take_profit_max_pct
+# trailing_activation_pct_override = 0.6
+# trailing_distance_pct_override   = 0.4
+
 [agent]
 trailing_enabled = true
 trailing_activation_pct = 0.5
