@@ -998,3 +998,23 @@ F5 第一輪（commit `3d1fb1f`）E2 adversarial review 退回 3 issue：
 - **commit-first push-immediately**：F5 第一輪 + 本任務皆走 commit + push 同流（per task spec 第 7 節 "Push 同 branch"），符合 memory `project_multi_session_memory_race` commit-first 防 race。Lesson：F5 系列 task spec override E1 generic「不直接 commit」規則，明確指示 push 即可。但仍**不 merge 主 branch** — 等 E2 第二輪審查 → E4 回歸 → PM 主導 fast-forward merge。
 - **Mac dev → SSH bridge pytest 唯一驗證路徑**：Mac 端只能 `python3 -c "import ast; ast.parse(...)"` 做 syntax check，實際 pytest 走 ssh trade-core + Linux worktree（cleanup 在跑完即執行 `rm -rf /tmp/f5-return-wt; git worktree prune`）。本任務同 F5 第一輪流程，符合 CLAUDE.md §七 Mac dev-only 模式 + memory `project_ssh_bridge_workflow`。
 - **報告檔位置**：本任務按 task spec 寫 `.claude_reports/YYYYMMDD_HHMMSS_e1_f5_return_fixes.md`。Lesson：F5 系列固定 `.claude_reports/` 6 節格式。
+
+## F7-FUP-23-DOC E2 第二輪 RETURN doc-only fix（2026-04-26 commit `e437a87` push 至 origin/e1-f7-healthchecks-isolated）
+
+### 任務
+F7-FUP-23 第二輪 re-review：SQL fix PASS 但 docstring RETURN 1 LOW — `helper_scripts/db/passive_wait_healthcheck/checks_engine.py` docstring 末段聲稱 F4 audit row 落在 `learning.execution_orphans` 通道，但 E2 grep `sql/` + `program_code/` 0 hit，**該表不存在**。F4 audit row 真實落地在 `trading.fills` 用 `strategy_name LIKE 'unattributed:%'` 標記，沒有獨立 orphan table。
+
+### 改動（1 檔 / +4 / -3）
+- `helper_scripts/db/passive_wait_healthcheck/checks_engine.py`：修 2 處 docstring 末段表名引用
+  - Line 543-545（英文）：`its own dedicated channel (learning.execution_orphans)` → `trading.fills with strategy_name LIKE 'unattributed:%' (no separate orphan table)`
+  - Line 571-572（中文）：`自己的專屬通道（learning.execution_orphans）記下落差` → `trading.fills 以 strategy_name LIKE 'unattributed:%' 標記保留（無獨立 orphan table）`
+
+### 結果
+- 39/39 tests OK（doc-only 不影響）
+- diff 1 檔 +4/-3
+- push `bdde091..e437a87` → `origin/e1-f7-healthchecks-isolated`
+
+### 教訓
+- **「邏輯推斷」表名前必 grep 驗證**：F7-FUP-23 第一輪 task brief 寫「F4 audit row 已在自己的專屬通道（`learning.execution_orphans`）記下落差」是**任務派發時的邏輯推斷**（合理假設「audit row 該有專屬 channel」），但 grep 驗證才能確認該表是否真存在。我第一輪盲信 brief 文字直接寫進 docstring；E2 第二輪一個 grep 揭穿。Lesson：寫 docstring 引用 schema name（table / column / index）時，**任何來源（task brief / memory / 上游 doc）都必先 grep `sql/` 或 `program_code/` 驗證實際存在性**，再寫進 docstring。CLAUDE.md §二 #10 認知誠實：區分事實 / 推斷 / 假設 — 推斷不能寫成事實。配合 F7-FUP-23 第一輪 §不確定 #1（task spec 已標 "邏輯推斷；E2 順帶 grep 驗證"），E2 確實照做並 RETURN，本次補修。
+- **doc-only fix 不繞 E2 第二輪**：task brief 明確 「PM 直接 merge（不必 re-E2，純 doc 改動 E2 已標 acceptable for self-fix）」，但 E1 仍走完 commit + push + report 流程，等 PM verify ssh import + 直接 fast-forward merge。Lesson：「acceptable for self-fix」≠「不報告」— self-fix 仍必須產 report + memory log + push 留痕跡，便於 PM 一眼驗收，不省這層。
+- **F4 真實機制完整描述在 docstring 上半段已正確**：docstring `F7-FUP-23 cross-cut exclusion (2026-04-26)` 段落已描述「F4 unattributed audit fills (commit 53973ef, ``strategy_name LIKE 'unattributed:%'`` such as ``unattributed:bybit_auto``) are emitted by the Rust ``unattributed_fill_observer``」— 這部分**正確**。錯只在末段「dedicated channel (`learning.execution_orphans`)」這 1 句虛構。修法：保留全段，僅替換末句指向真實落地通道（同表 `trading.fills`，靠 `strategy_name LIKE` 標記區分），不重寫整段。Lesson：docstring 局部錯誤盡量精準替換 1-2 行，保留正確上下文，避免大改觸發其他 reviewer review fatigue。
