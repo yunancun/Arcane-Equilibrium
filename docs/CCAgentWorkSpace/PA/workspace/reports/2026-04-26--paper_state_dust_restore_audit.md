@@ -280,11 +280,14 @@ def check_paper_state_dust_inventory():
     - 同期 fast_track_reduce_half qty < 1.0 USD 觸發次數 ≥ 5 → WARN
       （hint dust 累積過量，operator 可能需手動清 GUI）
     """
+    # NOTE (Amend 2026-04-26 per §13 Deviation Log): SQL 已落地為 E1 Tier 7
+    # commit `8241133` 版本（drop partial_reduce_real_count + 加 FILTER 到
+    # COUNT(DISTINCT symbol)；E2 評為 improvement not regression）。
+    # 完整 deviation 解釋見 §7.2。
     sql = '''
     SELECT
-      COUNT(*) FILTER (WHERE realized_pnl = 0) AS gate1_fired_count,
-      COUNT(*) FILTER (WHERE realized_pnl != 0) AS partial_reduce_real_count,
-      COUNT(DISTINCT symbol) AS distinct_dust_symbols
+      COUNT(*) FILTER (WHERE realized_pnl = 0) AS dust_spiral_count,
+      COUNT(DISTINCT symbol) FILTER (WHERE realized_pnl = 0) AS distinct_dust_symbols
     FROM trading.fills
     WHERE strategy_name LIKE 'risk_close:fast_track%'
       AND ts > now() - interval '1 hour'
@@ -330,27 +333,38 @@ Hard rules
 - ✅ git commit --only 隔絕 multi-session race
 ```
 
-### 7.2 healthcheck [2X] = [19] SQL spec（one-liner copy-paste 版）
+### 7.2 healthcheck [2X] SQL spec（one-liner copy-paste 版）
+
+> **Amend 2026-04-26**（per §13 Deviation Log）— 本節原 spec 含 `partial_reduce_real_count` 與 unfiltered `COUNT(DISTINCT symbol)`，已 amend 為 E1 Tier 7 commit `8241133` 落地版本（E2 評為 improvement not improved spec），與 production cron 一致。Slot 編號上線時實佔 **[21]**（[19] observer / [20] h_state_gateway 已被佔；本章節原寫 [19] 為 design-time placeholder）。
 
 ```sql
 SELECT
-  COUNT(*) FILTER (WHERE realized_pnl = 0) AS gate1_fired_count,
-  COUNT(*) FILTER (WHERE realized_pnl != 0) AS partial_reduce_real_count,
-  COUNT(DISTINCT symbol) AS distinct_dust_symbols
+  COUNT(*) FILTER (WHERE realized_pnl = 0) AS dust_spiral_count,
+  COUNT(DISTINCT symbol) FILTER (WHERE realized_pnl = 0) AS distinct_dust_symbols
 FROM trading.fills
 WHERE strategy_name LIKE 'risk_close:fast_track%'
   AND ts > now() - interval '1 hour'
   AND engine_mode IN ('demo','live','live_demo');
 ```
 
-**Classification**：
-- `gate1_fired_count = 0` AND `partial_reduce_real_count = 0` → **PASS**（無 dust spiral 也無 partial reduce 活動）
-- `gate1_fired_count > 0` AND `gate1_fired_count <= 10` → **WARN**（Gate 1 防護中，dust 存在但被堵住）
-- `gate1_fired_count > 10` OR `distinct_dust_symbols >= 3` → **FAIL**（Gate 1 兜不住或新 spiral path 出現）
+**兩項 deviation 與 PA 原 spec 對比**：
 
-**重要**：`gate1_fired_count` 是 EXIT-FEATURES-FIX A1 Gate 1 skip 後的 fill count；**這個數應該是 0**（fix 後 partial reduce 整個 skip EF emit + Gate 1 skip 本身**不寫 fill**）— 如果 > 0 表示 fix 不完整或 spiral 路徑復活。**0 = 健康**。
+1. **`COUNT(DISTINCT symbol)` 加 `FILTER (WHERE realized_pnl = 0)`**（PA 原 spec 為 unfiltered）
+   - **EN**: Restricting the distinct-symbol count to dust-path rows (`realized_pnl = 0`) gives a **truer dust-spiral fan-out signal**. The unfiltered version would inflate `distinct_dust_symbols` whenever a partial-reduce real close (`realized_pnl != 0`) happened to land on a separate symbol within the same 1h window — that symbol is *not* part of the dust spiral, only the partial-reduce path. Filtering aligns the metric semantically with the verdict goal: "how many distinct symbols are exhibiting Gate-1-suppressed dust activity right now".
+   - **中**：把 `distinct_dust_symbols` 限制在 dust 路徑（`realized_pnl = 0`）內，得到**更精確的 dust spiral fan-out 信號**。原 unfiltered 版本一旦同 1h 窗內有任意 symbol 出現 partial-reduce real close（`realized_pnl != 0`），該 symbol 也會計入 distinct_symbols — 但這 symbol *並非* dust spiral 一員，只是 partial-reduce path。加 FILTER 讓指標語意對齊 verdict 目標：「當前有多少 distinct symbol 正在出現 Gate-1 抑制的 dust 活動」。
 
-實際上 EXIT-FEATURES-FIX 後 trading.fills 不該再有 `risk_close:fast_track%` 且 `realized_pnl = 0` 的 row（partial reduce path 仍寫 fill 但 realized_pnl != 0；Gate 1 整個 skip 不下單也不寫 fill）。所以這個 count `> 0` 即異常 alarm，**靈敏度高**。
+2. **drop `partial_reduce_real_count` column**（PA 原 spec 多此 column）
+   - **EN**: This column is **outside the [21] check's business scope**. The check's verdict logic only consumes `dust_spiral_count` + `distinct_dust_symbols`; `partial_reduce_real_count` is informational telemetry that belongs to a separate observability slice (e.g. partial-reduce path health is owned by EXIT-FEATURES B1 + reconciler EX-04, not this dust sentinel). Keeping it here only adds query cost (one extra `FILTER` aggregate per cron tick) without informing any downstream branch. Drop respects single-responsibility.
+   - **中**：此 column **不在 [21] check 的業務邏輯範圍**內。Check 的 verdict 只消費 `dust_spiral_count` + `distinct_dust_symbols`；`partial_reduce_real_count` 屬於另一個 observability 切片的訊息（partial-reduce path 健康由 EXIT-FEATURES B1 + reconciler EX-04 負責，不是 dust 哨兵）。保留在此只增加 query cost（每次 cron tick 多一個 `FILTER` aggregate）而不影響任何 downstream 分支判斷。drop 符合 single-responsibility。
+
+**Classification**（thresholds 與 PA 原 spec 不變，只欄位名換）：
+- `dust_spiral_count = 0` → **PASS**（Gate 1 USD floor 工作中，無 spiral 跡象）
+- `1 <= dust_spiral_count <= 10` AND `distinct_dust_symbols < 3` → **WARN**（Gate 1 可能還抓住但有 dust path 活動）
+- `dust_spiral_count > 10` OR `distinct_dust_symbols >= 3` → **FAIL**（Gate 1 兜不住或新 spiral path 跨多 symbol 出現）
+
+**重要**：`dust_spiral_count` 是 EXIT-FEATURES-FIX A1 Gate 1 skip 後仍漏入 fills 的 row count；**穩態下應為 0**（fix 後 partial reduce 整個 skip EF emit + Gate 1 skip 本身**不寫 fill**）— 如果 > 0 表示 fix 不完整或 spiral 路徑復活。**0 = 健康**。
+
+實際上 EXIT-FEATURES-FIX 後 trading.fills 不該再有 `risk_close:fast_track%` 且 `realized_pnl = 0` 的 row（partial reduce path 仍寫 fill 但 realized_pnl != 0；Gate 1 整個 skip 不下單也不寫 fill）。所以這個 count `> 0` 即異常 alarm，**靈敏度高**。Linux production cron 16:09 UTC LIVE PASS 確認 0 spiral activity。
 
 ### 7.3 Healthcheck [19] cron 整合
 
@@ -440,3 +454,18 @@ def check_19_paper_state_dust_inventory():
 **PA 簽核**：findings sound + 3 option 全 evaluated / cross-env safety 矩陣完整 / Option B 證據鏈強 / Option A/C 拒絕理由具體 / E1 prompt + healthcheck SQL 可直接 copy-paste
 
 **PM 接收**：派 E1 加 healthcheck [19]（~1h），不啟動 paper_state 業務碼任何改動；TODO.md PAPER-STATE-DUST-RESTORE-AUDIT 改寫為 PAPER-STATE-DUST-INVENTORY-MONITOR；G2-strategy-dust-cleanup follow-up 列入 backlog（屬 strategy team）
+
+---
+
+## §13 Deviation Log（amend 歷史）
+
+> **目的**：紀錄此 RFC 落地後相對原 spec 的偏差，避免未來 reader 誤以為實裝錯。RFC §1-§6 + §8-§12 結論不變；只 §7.x 的 SQL 載體已 amend 為 E1 落地版本。
+
+| 日期 | Commit | Section | Deviation | E2 評語 | Source-of-truth |
+|---|---|---|---|---|---|
+| 2026-04-26 | E1 `8241133`（PAPER-STATE-DUST-INVENTORY-MONITOR healthcheck [21]）| §7.1 prompt SQL · §7.2 spec SQL | (A) `COUNT(DISTINCT symbol)` 加 `FILTER (WHERE realized_pnl = 0)`（PA 原 spec unfiltered） · (B) drop `partial_reduce_real_count` column | **Improvement not regression** — (A) 更精確 dust spiral fan-out signal、(B) drop 多餘 column 簡化邏輯（per E2 Tier 7 batch review T7-LOW-1 `b6dbc24`）| Linux production cron **2026-04-26 16:09 UTC LIVE PASS** `dust_spiral_count=0 — Gate 1 USD floor suppressing as designed` 確認 |
+| 2026-04-26 | T7-FUP-DUST-SQL-DEVIATION-DOC（本 amend）| §7.1 + §7.2 | 同步 RFC 為 SSOT；§7.2 加雙語 deviation 解釋；§7.1 prompt SQL block 加 NOTE 指向 §13 + §7.2 | n/a（doc-only amend）| 本 commit |
+
+**為何不重寫 §7.x**：保留原 PA design 推理過程（Option A/B/C 對比、cross-env safety 矩陣、Reject A/C 理由）作為 design-time decision artifact；§7 SQL 載體更新到落地版即可避免 production-vs-doc drift，且 verdict thresholds 完全不變（0=PASS / 1≤count≤10 AND distinct<3=WARN / >10 OR distinct≥3=FAIL）。
+
+**Slot 編號修正**：§7.1-§7.4 寫 [19] 為 design-time placeholder；上線時 [19] observer / [20] h_state_gateway 已被佔，E1 正確找下個空 slot 落地為 **[21]**（per PM Tier 7 sign-off `13412db` Track 2 §3.4）。本 amend 在 §7.2 開頭已加 inline note；§7.1 / §7.3 / §7.4 文本中的 [19] 視為 design 階段的編號意圖，runtime SSOT 是 [21]。

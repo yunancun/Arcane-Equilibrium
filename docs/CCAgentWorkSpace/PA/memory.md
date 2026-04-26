@@ -495,3 +495,9 @@ A push（pure push）/ B pull（pure pull）對比 A IPC 量 5000/min 爆炸 + P
 推 **Pattern B（per-H 模組整鏈，3 sub-task）** — Pattern A (9 sub-task) 過細空 α / Pattern C (4 sub-task with audit prelude) audit 已併入 RFC §2.3；3-1 H2 + 3-2 H4 並行（不同檔），3-3 H5 串行（同檔 layer2_cost_tracker 避雙修衝突）；ETA 3.5d wall-clock；H4 必補 `validation_pass` counter（Phase 3 前缺，stateless validator 的 stats 由 caller-strategist 維護）；strategist_agent.py 1170+~25=~1195 行接近 §九 1200 硬上限，Phase 4 Strategist sub-task 必先拆檔；Sub-task 3-3 完成 unblock G3-09 cost_edge_ratio + Phase 4 5-Agent 整鏈。報告：`workspace/reports/2026-04-26--g3_08_phase3_subtask_split.md`
 
 ---
+
+## 2026-04-26 Tier 8 Track 3 — T7-FUP-DUST-SQL-DEVIATION-DOC RFC §7.4 amend
+
+PM follow-up amend：`2026-04-26--paper_state_dust_restore_audit.md` §7.1 prompt SQL + §7.2 spec SQL 同步 E1 Tier 7 commit `8241133` 落地版本（drop `partial_reduce_real_count` + 加 `FILTER (WHERE realized_pnl = 0)` 到 `COUNT(DISTINCT symbol)`），加雙語 deviation 解釋；新增 §13 Deviation Log 紀錄此 amend 歷史 + slot 編號 [19]→[21] 修正。E2 Tier 7 batch review T7-LOW-1 評為 improvement not regression；Linux production cron 16:09 UTC LIVE PASS 確認。RFC §1-§6 + §8-§12 結論不變。
+
+---
