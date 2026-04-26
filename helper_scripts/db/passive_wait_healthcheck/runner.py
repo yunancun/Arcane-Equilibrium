@@ -34,6 +34,13 @@ from .checks_engine import (
     check_label_backfill_ratio,
     check_exit_features_writer,
     check_paper_state_dust_inventory,
+    # F7 (2026-04-26) MIT+E5 silent-regression sentinels
+    check_trading_pipeline_silent_gap,
+    check_orders_fills_consistency,
+    check_dust_qty_distribution,
+    check_intents_counter_freeze,
+    check_phantom_fills_attribution,
+    check_reconciler_paper_state_divergence,
 )
 from .checks_ipc_edge import (
     check_phys_lock_runtime,
@@ -51,6 +58,8 @@ from .checks_strategy import (
     check_exit_features_accumulation_rate,
     check_shadow_exit_agreement_phase2,
     check_strategist_cycle_fresh,
+    # F7 (2026-04-26) MIT silent-regression sentinel
+    check_signals_writer_freshness,
 )
 from .checks_derived import (
     check_leader_election_health,
@@ -58,26 +67,41 @@ from .checks_derived import (
     check_disabled_strategy_inventory,
     check_observer_pipeline_alive,
     check_h_state_gateway_freshness,
+    # F7 (2026-04-26) ML hygiene derived sentinel
+    check_dust_spiral_noise_in_ef,
 )
 
 
-# Module docstring used by argparse to show the original passive-wait
-# healthcheck description (kept identical to the pre-split file's __doc__).
-# argparse 用本字串顯示 description（與拆分前 __doc__ 一致）。
+# Module docstring used by argparse to show the passive-wait healthcheck
+# description (extended for F7 [22]-[29] additions; 30 total checks =
+# 28 numbered [1]-[29] minus [17] reserved + 2 lettered [Xa][Xb]).
+# argparse 用本字串顯示 description（F7 [22]-[29] 擴增；總計 30 個 check =
+# 28 numbered [1]-[29] 扣 [17] 保留 + 2 lettered [Xa][Xb]）。
 _RUNNER_DESCRIPTION = """Passive-wait pipeline healthcheck.
 被動等待管線健康檢查。
 
-Single-command check that 21 key runtime data pipelines are actually
+Single-command check that 30 key runtime data pipelines are actually
 producing data, versus silently failing under fail-open error handling.
-單命令檢查 21 個關鍵 runtime 資料管線實際有資料流入，
+單命令檢查 30 個關鍵 runtime 資料管線實際有資料流入，
 識破 fail-open 下的 silent failure。
 
-The 21 checks span DB pipelines + filesystem/observability sentinels:
-  [1]-[6][8]-[9][10][12][14][15][21] DB cursor                 (13 checks)
-  [Xa][Xb][7][11][13][16][18][19][20] filesystem / pure Python (8 checks)
-本 21 檢查 = 13 DB cursor + 8 純檔案 / Python：
-  [1][2][3][4][5][6][8][9][10][12][14][15][Xb][21] cursor 內
-  [Xa][7][13][11][16][18][19][20] cursor 外
+The 30 checks split between DB pipelines + filesystem/observability sentinels:
+  Cursor block (21 checks):
+    [1][2][3][4][5][6][8][9][10][12][Xb][14][15][21]      14 baseline
+    [22][23][24][25][26][27][28]                          7 F7 MIT+E5
+  Post-cursor (9 checks, filesystem / pure-Python):
+    [7][13][11][Xa][16][18][19][20]                       8 baseline
+    [29]                                                  1 F7 (no-IPC stub)
+
+F7 sentinels [22]-[29] added 2026-04-26 by MIT DB audit + E5 engine.log dive:
+  [22] trading_pipeline_silent_gap    (DCS active but fills cliff)
+  [23] orders_fills_consistency       (orders writer dropping rows)
+  [24] signals_writer_freshness       (4/19-style trading.signals dead writer)
+  [25] dust_qty_distribution          (sub-micro qty drift = dust spiral)
+  [26] dust_spiral_noise_in_ef        (ML hygiene; B1 regression)
+  [27] intents_counter_freeze         (intent counter wedge)
+  [28] phantom_fills_attribution      (risk_close + qty<1e-3 mis-attribute)
+  [29] reconciler_paper_state_divergence (deferred-no-ipc placeholder)
 
 Exit codes:
   0 = all checks PASS / only WARN
@@ -87,21 +111,26 @@ Exit codes:
 
 
 def main() -> int:
-    """Entry point — runs all 21 checks and prints a structured report.
+    """Entry point — runs all 30 checks and prints a structured report.
 
     Order is significant — the cursor block runs DB-bound checks, then we
     close the connection before invoking filesystem-only checks. Every
     check returns ``(status, msg)`` (or ``(status, msg, extra)`` for [1]
     which yields the close_fills count used by [2]/[3]/[Xb]).
 
-    Counted rows (21): [1][2][3][4][5][6][8][9][10][12][Xb][14][15][21]
-    [7][13][11][Xa][16][18][19][20].
+    Counted rows (30 total): cursor (21) + post-cursor (9):
+      cursor: [1][2][3][4][5][6][8][9][10][12][Xb][14][15][21]
+              [22][23][24][25][26][27][28]   (F7 [22]-[28] are MIT/E5)
+      post-cursor: [7][13][11][Xa][16][18][19][20]
+                   [29]   (F7 [29] is deferred-no-ipc stub)
 
-    入口 — 跑全部 21 個 check 並印結構化報告。順序固定 — cursor 區塊跑
+    入口 — 跑全部 30 個 check 並印結構化報告。順序固定 — cursor 區塊跑
     DB 相關 check，conn.close() 之後再跑純檔案系統 check。每個 check 回
     ``(status, msg)``（[1] 額外回 close_fills，供 [2]/[3]/[Xb] 用）。
-    21 條清單：[1][2][3][4][5][6][8][9][10][12][Xb][14][15][21][7]
-    [13][11][Xa][16][18][19][20]。
+    30 條清單（cursor 21 + post-cursor 9）：
+      cursor: [1][2][3][4][5][6][8][9][10][12][Xb][14][15][21]
+              [22][23][24][25][26][27][28]
+      post-cursor: [7][13][11][Xa][16][18][19][20] [29]
     """
     ap = argparse.ArgumentParser(description=_RUNNER_DESCRIPTION)
     ap.add_argument("--quiet", action="store_true", help="Only print non-PASS lines")
@@ -215,8 +244,75 @@ def main() -> int:
             # PG anomaly 時 fail-soft。
             s, m = check_paper_state_dust_inventory(cur)
             results.append(("[21] paper_state_dust_inventory", s, m))
+
+            # ================================================================
+            # F7 (2026-04-26): MIT DB audit + E5 engine.log dive — 8 new
+            # silent-regression sentinels (check ids [22]-[29]). Each catches
+            # a blind spot the prior 19 checks failed to alarm on. Pure SELECT
+            # / pure-Python; cursor lifecycle preserved (DB checks here, then
+            # filesystem checks after conn.close()). [29] is intentionally
+            # filesystem-Python only (no IPC) per spec.
+            # F7（2026-04-26）：MIT DB audit + E5 engine.log dive — 8 個
+            # silent regression 哨兵 [22]-[29]，每個對應前 19 check 漏抓的
+            # 盲點。純 SELECT / 純 Python，cursor 生命週期保持（DB 在 cursor
+            # 區塊內、filesystem 在 conn.close() 後）。[29] per spec 為純
+            # filesystem-Python（無 IPC）。
+            # ================================================================
+
+            # [22] trading_pipeline_silent_gap (MIT spec) — DCS active but
+            # downstream fills cliff. 5-layer UNION ALL inside cursor block.
+            # [22] DCS 活但下游 fill 死的 5 層 UNION ALL 對比，cursor 內。
+            s, m = check_trading_pipeline_silent_gap(cur)
+            results.append(("[22] trading_pipeline_silent_gap", s, m))
+
+            # [23] orders_fills_consistency (MIT spec) — orders writer drop
+            # detection (LEFT JOIN fills × orders 30min). Cursor only.
+            # [23] orders writer 漏寫偵測（LEFT JOIN fills × orders 30min）。
+            s, m = check_orders_fills_consistency(cur)
+            results.append(("[23] orders_fills_consistency", s, m))
+
+            # [24] signals_writer_freshness (MIT spec) — trading.signals dead
+            # writer (4/19 silent outage fingerprint). Cursor only.
+            # [24] trading.signals dead-writer (4/19 silent outage 指紋)。
+            s, m = check_signals_writer_freshness(cur)
+            results.append(("[24] signals_writer_freshness", s, m))
+
+            # [25] dust_qty_distribution (MIT spec) — fills.qty log10-bucket
+            # distribution drift toward sub-micro. Cursor only.
+            # [25] fills.qty 對數桶分布往 sub-micro 漂移偵測。
+            s, m = check_dust_qty_distribution(cur)
+            results.append(("[25] dust_qty_distribution", s, m))
+
+            # [26] dust_spiral_noise_in_ef (MIT spec / ML hygiene) — historical
+            # noise rows + B1 regression sentinel. Cursor only.
+            # [26] EF 中 dust spiral 雜訊（exit_trigger_rule + bps=-5.5 指紋）+
+            # B1 regression 哨兵。
+            s, m = check_dust_spiral_noise_in_ef(cur)
+            results.append(("[26] dust_spiral_noise_in_ef", s, m))
+
+            # [27] intents_counter_freeze (E5 spec) — intents counter not
+            # incrementing 30+ min, per-engine_mode rollup. Cursor only.
+            # [27] intents counter 30+ min 不前進，per-engine_mode 彙總。
+            s, m = check_intents_counter_freeze(cur)
+            results.append(("[27] intents_counter_freeze", s, m))
+
+            # [28] phantom_fills_attribution (E5 spec) — risk_close fills
+            # with sub-mililiter qty (mis-attribution fingerprint). Cursor only.
+            # [28] risk_close 子-mililiter qty fill — mis-attribution 指紋。
+            s, m = check_phantom_fills_attribution(cur)
+            results.append(("[28] phantom_fills_attribution", s, m))
     finally:
         conn.close()
+
+    # [29] reconciler_paper_state_divergence (E5 spec) — currently a
+    # deferred-no-ipc PASS placeholder; runs AFTER conn.close() because
+    # implementation is pure-Python (no DB cursor needed). Will become
+    # IPC-driven once Rust handler `get_reconciler_status` is exposed.
+    # [29] reconciler vs paper_state divergence — 當前為 deferred-no-ipc
+    # PASS placeholder，conn.close() 後跑（純 Python，無需 cursor）。
+    # Rust handler 加後升級為 IPC 驅動。
+    s, m = check_reconciler_paper_state_divergence()
+    results.append(("[29] reconciler_paper_state_divergence", s, m))
 
     # [7] filesystem check
     s, m = check_edge_estimates_freshness()
