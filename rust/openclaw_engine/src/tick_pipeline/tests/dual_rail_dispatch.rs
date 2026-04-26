@@ -197,3 +197,240 @@ fn test_ipc_close_symbol_dispatch_strategy_has_risk_close_prefix() {
     );
     assert!(req.is_close, "ipc_close_symbol dispatch must set is_close=true");
 }
+
+// ─── F2 CROSS-SYMBOL-PRICE-CONTAMINATION-1 regressions ───
+// 2026-04-26: STRKUSDT dust spiral RCA showed `OrderDispatchRequest.price`
+// borrowed the outer-tick (BTC ~$77995 / ETH ~$2327) price when fast_track
+// closed STRK ($0.04261). This polluted min_notional gate evaluation, wrote
+// 41 phantom fill log rows under wrong-symbol attribution, and skewed
+// `event_consumer::loop_handlers` "new fill" stats. The fix routes the
+// dispatched price through `paper_state.latest_price(symbol)` →
+// `entry_price` → `event.last_price` (last-resort) so every close path
+// stamps the correct symbol's price. Companion to per_symbol_price_pnl.rs's
+// P1-16 emit_close_fill regressions; those guard the paper bookkeeping
+// (TradingMsg::Fill), this guards the exchange dispatch (OrderDispatchRequest).
+//
+// 2026-04-26：STRKUSDT dust spiral RCA 揭發 `OrderDispatchRequest.price`
+// 在 fast_track 平倉時借用了外層 tick（BTC/ETH/KAT）的價格，污染 min_notional
+// gate、寫進錯誤 symbol 41 條 phantom fill 列、扭曲 event_consumer 的「new
+// fill」統計。修復路徑：派發價依 `paper_state.latest_price(symbol)` →
+// `entry_price` → `event.last_price`（末路）求得，三條 close 路徑一致。
+// 此處測試守 OrderDispatchRequest（exchange 派發層），與 per_symbol_price_pnl.rs
+// 的 P1-16 測試（守 TradingMsg::Fill paper 簿記）互補。
+
+/// F2 primary regression: `execute_position_close` MUST stamp `symbol`'s own
+/// `latest_price` onto `OrderDispatchRequest.price`, not the outer tick's price.
+/// Models the STRKUSDT dust-spiral case: outer tick = BTCUSDT @ $77,995, but
+/// the close fires for STRKUSDT (latest @ $0.04261). Dispatched price MUST be
+/// $0.04261, NEVER $77,995.
+/// F2 主場景回歸：execute_position_close 派發必須使用該交易對自己的
+/// latest_price，禁止借用外層 tick。重現 STRK dust spiral：外層 BTC tick
+/// $77,995 但平倉對象是 STRK ($0.04261)，派發價必須是 STRK 自己的 $0.04261。
+#[test]
+fn test_execute_position_close_dispatch_price_matches_symbol_not_event() {
+    let mut pipeline = TickPipeline::with_kind(
+        &["BTCUSDT", "ETHUSDT", "KATUSDT", "STRKUSDT"],
+        10_000.0,
+        PipelineKind::Demo,
+    );
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<OrderDispatchRequest>();
+    pipeline.set_shadow_channel(tx);
+
+    // Open STRKUSDT at $0.05; seed STRK's latest_price to $0.04261 (post-decay).
+    // Other symbols carry inflated mainstream prices. The outer tick simulates
+    // the moment fast_track ReduceToHalf evaluates STRK while the current tick
+    // belongs to BTCUSDT @ $77,995.
+    // 開 STRKUSDT 倉於 0.05，將其 latest_price 推到 0.04261；外層 tick 為 BTC
+    // 的 $77,995，模擬 fast_track ReduceToHalf 跨 symbol 評估的時刻。
+    pipeline
+        .paper_state
+        .apply_fill("STRKUSDT", true, 0.5, 0.05, 0.0, 1_000, "test");
+    pipeline.paper_state.set_latest_price("STRKUSDT", 0.04261);
+    pipeline.paper_state.set_latest_price("BTCUSDT", 77_995.0);
+    pipeline.paper_state.set_latest_price("ETHUSDT", 2_327.0);
+
+    let outer_event = super::make_event("BTCUSDT", 77_995.0, 1_700_000_000_000);
+
+    pipeline.execute_position_close(
+        "STRKUSDT",
+        true, // STRK long → close as Sell side
+        0.25,
+        &outer_event,
+        false, // shadow path: is_primary=false
+        "risk_close:fast_track_reduce_half",
+    );
+
+    let req = rx.try_recv().expect("OrderDispatchRequest must be sent");
+    assert_eq!(req.symbol, "STRKUSDT", "symbol must match the close target");
+    // Pre-fix: this assertion failed with 77_995.0 (BTC price). Post-fix the
+    // dispatch carries STRK's own $0.04261.
+    // 修前此斷言會以 77_995（BTC 價）失敗。修後派發攜帶 STRK 自己的 $0.04261。
+    assert!(
+        (req.price - 0.04261).abs() < 1e-9,
+        "F2 primary contract: dispatched price MUST be STRKUSDT's own $0.04261 latest_price, NOT the outer BTC tick $77,995 — got {}",
+        req.price
+    );
+    assert_ne!(
+        req.price, 77_995.0,
+        "dispatched price must NOT borrow outer tick's BTC price"
+    );
+    assert_ne!(
+        req.price, 2_327.0,
+        "dispatched price must NOT borrow ETHUSDT or any other unrelated symbol's price"
+    );
+    assert!(req.is_close, "execute_position_close must set is_close=true");
+}
+
+/// F2 fallback level 1: when `latest_price(symbol)` is absent or NaN, the
+/// dispatch must fall back to the position's entry_price (matches
+/// `ipc_close_all` / `ipc_close_symbol` policy), still NEVER the outer tick.
+/// F2 fallback 第一層：latest_price 缺失或 NaN 時，派發退回該倉位 entry_price，
+/// 仍**禁止**借用外層 tick。
+#[test]
+fn test_execute_position_close_falls_back_to_entry_price_when_no_latest() {
+    let mut pipeline = TickPipeline::with_kind(
+        &["BTCUSDT", "STRKUSDT"],
+        10_000.0,
+        PipelineKind::Demo,
+    );
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<OrderDispatchRequest>();
+    pipeline.set_shadow_channel(tx);
+
+    pipeline
+        .paper_state
+        .apply_fill("STRKUSDT", true, 0.5, 0.05, 0.0, 1_000, "test");
+    // Wipe STRK's latest_price (apply_fill seeds it). NaN simulates the
+    // orphan-adopted-pre-tick state from per_symbol_price_pnl P1-16.
+    // 強制清掉 STRK 的 latest_price（apply_fill 內部會設）；NAN 模擬「孤兒
+    // 倉位首 tick 前」的狀態。
+    pipeline.paper_state.set_latest_price("STRKUSDT", f64::NAN);
+
+    let outer_event = super::make_event("BTCUSDT", 77_995.0, 1_700_000_000_000);
+
+    pipeline.execute_position_close(
+        "STRKUSDT",
+        true,
+        0.25,
+        &outer_event,
+        false,
+        "risk_close:halt_session",
+    );
+
+    let req = rx.try_recv().expect("OrderDispatchRequest must be sent");
+    assert!(
+        (req.price - 0.05).abs() < 1e-9,
+        "F2 fallback L1: with NaN latest, dispatch MUST use STRK's entry_price 0.05, got {}",
+        req.price
+    );
+    assert_ne!(
+        req.price, 77_995.0,
+        "fallback must NOT borrow outer tick's BTC price"
+    );
+}
+
+/// F2 fallback level 2 (last resort): when neither `latest_price` nor a
+/// position is available (orphan symbol whose state was already evicted), the
+/// dispatch falls through to `event.last_price` rather than panicking. This
+/// is intentionally permissive — the alternative (zero or skip) would risk
+/// silently losing a close attempt. The first-line invariants above plus the
+/// caller patterns in production keep this path effectively unreachable;
+/// covering it here documents the intended last-resort semantics.
+/// F2 fallback 第二層（末路）：latest_price 缺、paper_state 也無倉時退到
+/// `event.last_price`。設計上故意允許，避免靜默丟失平倉。生產 caller 路徑
+/// 走不到，本測試僅文檔化末路語義。
+#[test]
+fn test_execute_position_close_last_resort_event_price_when_no_position() {
+    let mut pipeline = TickPipeline::with_kind(
+        &["BTCUSDT", "STRKUSDT"],
+        10_000.0,
+        PipelineKind::Demo,
+    );
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<OrderDispatchRequest>();
+    pipeline.set_shadow_channel(tx);
+
+    // No position opened for STRKUSDT → no latest_price seeded, no entry_price.
+    // 故意不開倉，觸發末路 fallback。
+    let outer_event = super::make_event("BTCUSDT", 77_995.0, 1_700_000_000_000);
+
+    pipeline.execute_position_close(
+        "STRKUSDT",
+        true,
+        0.25,
+        &outer_event,
+        false,
+        "risk_close:test_orphan",
+    );
+
+    let req = rx.try_recv().expect("OrderDispatchRequest must be sent");
+    // No latest, no entry — last-resort uses event.last_price. The point of
+    // this test is to lock the documented behaviour, not to claim it's ideal.
+    // 無 latest、無 entry → 末路用 event.last_price。
+    assert!(
+        (req.price - 77_995.0).abs() < 1e-9,
+        "F2 last-resort: with no latest and no position, dispatch falls back to event.last_price 77_995, got {}",
+        req.price
+    );
+}
+
+/// F2 ipc_close_all multi-symbol regression: each dispatched
+/// OrderDispatchRequest.price must match its own symbol's latest_price (or
+/// entry_price fallback), regardless of how many positions are open or what
+/// the IPC trigger ts is. Mirrors the dust-spiral scenario at scale: 4 open
+/// positions, 4 distinct latest_prices, 4 distinct dispatched prices.
+/// F2 ipc_close_all 多 symbol 回歸：每筆派發都用自己的 latest_price/entry_price，
+/// 不論倉位數量或 IPC 觸發時刻；放大版 dust spiral：4 倉、4 latest、4 派發價。
+#[test]
+fn test_ipc_close_all_dispatch_price_matches_each_symbol() {
+    let mut pipeline = TickPipeline::with_kind(
+        &["BTCUSDT", "ETHUSDT", "STRKUSDT", "DOGEUSDT"],
+        10_000.0,
+        PipelineKind::Demo,
+    );
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<OrderDispatchRequest>();
+    pipeline.set_shadow_channel(tx);
+
+    pipeline
+        .paper_state
+        .apply_fill("BTCUSDT", true, 0.01, 50_000.0, 0.0, 1_000, "test");
+    pipeline
+        .paper_state
+        .apply_fill("ETHUSDT", true, 0.10, 3_000.0, 0.0, 1_000, "test");
+    pipeline
+        .paper_state
+        .apply_fill("STRKUSDT", true, 0.50, 0.05, 0.0, 1_000, "test");
+    pipeline
+        .paper_state
+        .apply_fill("DOGEUSDT", true, 1_000.0, 0.20, 0.0, 1_000, "test");
+
+    pipeline.paper_state.set_latest_price("BTCUSDT", 50_500.0);
+    pipeline.paper_state.set_latest_price("ETHUSDT", 3_030.0);
+    pipeline.paper_state.set_latest_price("STRKUSDT", 0.04261);
+    pipeline.paper_state.set_latest_price("DOGEUSDT", 0.202);
+
+    let count = pipeline.ipc_close_all();
+    assert_eq!(count, 4, "ipc_close_all should report 4 closes");
+
+    let mut dispatch_by_symbol: std::collections::HashMap<String, f64> =
+        std::collections::HashMap::new();
+    while let Ok(req) = rx.try_recv() {
+        dispatch_by_symbol.insert(req.symbol.clone(), req.price);
+    }
+    assert_eq!(
+        dispatch_by_symbol.len(),
+        4,
+        "expected 4 OrderDispatchRequest emits, got {:?}",
+        dispatch_by_symbol
+    );
+
+    let btc = dispatch_by_symbol.get("BTCUSDT").copied().expect("BTC dispatch");
+    assert!((btc - 50_500.0).abs() < 1e-9, "BTC dispatched price wrong: {btc}");
+    let eth = dispatch_by_symbol.get("ETHUSDT").copied().expect("ETH dispatch");
+    assert!((eth - 3_030.0).abs() < 1e-9, "ETH dispatched price wrong: {eth}");
+    let strk = dispatch_by_symbol.get("STRKUSDT").copied().expect("STRK dispatch");
+    assert!(
+        (strk - 0.04261).abs() < 1e-9,
+        "STRK dispatched price wrong (must NOT be BTC's 50_500 or ETH's 3_030): {strk}"
+    );
+    let doge = dispatch_by_symbol.get("DOGEUSDT").copied().expect("DOGE dispatch");
+    assert!((doge - 0.202).abs() < 1e-9, "DOGE dispatched price wrong: {doge}");
+}
