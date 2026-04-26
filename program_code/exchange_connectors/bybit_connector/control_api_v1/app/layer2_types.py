@@ -96,6 +96,37 @@ TOOL_WEB_SEARCH = "web_search"
 TOOL_FETCH_URL = "fetch_url"
 TOOL_SUBMIT_RECOMMENDATION = "submit_recommendation"
 TOOL_RECORD_INSIGHT = "record_insight"
+# G3-07 (2026-04-26): two new tools for autonomous L2 reasoning over
+# on-chain & derivatives signals. Both DEFAULT-OFF env-gated.
+# G3-07（2026-04-26）：兩個新工具讓 L2 自主推理可查 on-chain 與衍生品訊號。預設關閉。
+TOOL_QUERY_ONCHAIN = "query_onchain"
+TOOL_CHECK_DERIVATIVES = "check_derivatives"
+
+# Onchain metric whitelist (G3-07)
+# Onchain 指標白名單（G3-07）
+ONCHAIN_METRIC_FUNDING_RATE = "funding_rate"
+ONCHAIN_METRIC_OPEN_INTEREST = "open_interest"
+ONCHAIN_METRIC_LIQUIDATIONS_24H = "liquidations_24h"
+ONCHAIN_METRIC_VALID: set[str] = {
+    ONCHAIN_METRIC_FUNDING_RATE,
+    ONCHAIN_METRIC_OPEN_INTEREST,
+    ONCHAIN_METRIC_LIQUIDATIONS_24H,
+}
+
+# Derivatives metric whitelist (G3-07)
+# 衍生品指標白名單（G3-07）
+DERIV_METRIC_MARK_PRICE = "mark_price"
+DERIV_METRIC_INDEX_PRICE = "index_price"
+DERIV_METRIC_FUNDING = "funding"
+DERIV_METRIC_NEXT_FUNDING_TS = "next_funding_ts"
+DERIV_METRIC_OI_24H_CHANGE_PCT = "oi_24h_change_pct"
+DERIV_METRIC_VALID: set[str] = {
+    DERIV_METRIC_MARK_PRICE,
+    DERIV_METRIC_INDEX_PRICE,
+    DERIV_METRIC_FUNDING,
+    DERIV_METRIC_NEXT_FUNDING_TS,
+    DERIV_METRIC_OI_24H_CHANGE_PCT,
+}
 
 # Max agent loop iterations / Agent 循环最大迭代次数
 MAX_AGENT_ITERATIONS = 15
@@ -194,6 +225,61 @@ class Insight:
     confidence: float = 0.0
     relevance_window: str = ""     # How long this insight is relevant
     source_tools: list[str] = field(default_factory=list)
+
+
+# ─────────────────────────────────────────────────────────
+# G3-07 (2026-04-26) — Layer 2 toolbox extension structures
+# G3-07（2026-04-26）—— Layer 2 工具箱擴充結構
+#
+# 設計意圖：on-chain 與衍生品訊號為 L2 自主推理輸入；新增 dataclass 把
+#   tool 回傳格式固化，避免 free-form dict 飄移。所有欄位都 fail-soft：
+#   失敗時 value=None + error 字串，呼叫端必須先檢查再用。
+# Design intent: on-chain & derivatives signals feed L2 autonomous reasoning;
+#   freezing the return shape via dataclass prevents free-form dict drift.
+#   Every field is fail-soft: on failure value=None + error string; callers
+#   must check before consuming.
+# ─────────────────────────────────────────────────────────
+
+@dataclass
+class OnchainResult:
+    """
+    Single on-chain metric snapshot for a symbol.
+    單一 symbol 的單一 on-chain 指標快照。
+
+    SAFETY / 不變量：
+    - `value` 為 None 時呼叫端必 fail-closed（不可當作 0 處理）
+    - `freshness_secs` 為 None 表示資料源未提供時戳（最差視為 stale）
+    - `error` 與 `value` 不可同時為非 None（互斥契約）
+    """
+    symbol: str
+    metric: str                          # one of ONCHAIN_METRIC_VALID
+    value: float | None = None           # numeric reading, None if unavailable
+    timestamp_ms: int | None = None      # source timestamp in ms (None = unknown)
+    data_source: str = ""                # provider name (e.g. "bybit_v5_public")
+    freshness_secs: int | None = None    # age of data in seconds (None = unknown)
+    error: str | None = None             # one of {"tool disabled by env",
+                                         #   "data unavailable", "metric not supported", ...}
+    is_simulated: bool = False           # always False for live API; True under test mocks
+
+
+@dataclass
+class DerivativesResult:
+    """
+    Bybit V5 derivatives market snapshot for a symbol.
+    Bybit V5 衍生品市場快照（單一 symbol）。
+
+    SAFETY / 不變量：
+    - 任何 metric 取不到 → `metrics[name] = None` + `error_per_metric[name]` 非空
+    - `error` 為全域錯誤（API timeout / disabled），此時 `metrics` 全 None
+    - 不對 None 做 sentinel coercion（不轉 0/-1），保留 None 強迫呼叫端判斷
+    """
+    symbol: str
+    metrics: dict[str, float | None] = field(default_factory=dict)
+    timestamp_ms: int | None = None      # query timestamp ms
+    data_source: str = ""                # provider name
+    error: str | None = None             # global error (None on partial success)
+    error_per_metric: dict[str, str] = field(default_factory=dict)
+    is_simulated: bool = False
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
