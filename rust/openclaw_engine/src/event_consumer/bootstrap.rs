@@ -552,6 +552,44 @@ pub(super) async fn bootstrap_runtime(deps: EventConsumerDeps) -> BootstrappedRu
         info!("pipeline wired to live BudgetConfig ConfigStore / 接入 BudgetConfig 熱重載");
     }
 
+    // EVICT-ON-DUST T3 (PA §1.2.1): boot reaper.
+    // Runs ONCE after `set_risk_store` (which mirrors
+    // `RiskConfig.limits.ft_dust_qty_floor_usd` into
+    // `paper_state.dust_floor_usd` via `apply_risk_snapshot` /
+    // `set_dust_floor_usd`). Discharges any historical sub-floor dust
+    // resurrected from the Bybit REST snapshot (e.g. STRKUSDT 7e-13 type
+    // residue, MIT audit `2026-04-26--exit_features_writer_bug_audit.md`).
+    // No market tick has arrived yet — `evict_all_dust` falls back to
+    // `entry_price` per its built-in stale-price contract.
+    //
+    // Idempotency: a process restart re-loading the same paper_state.json
+    // re-enters this code path; `evict_all_dust` returns 0 the second time
+    // because the symbol was removed on the first pass (HashMap::remove is
+    // idempotent — second remove returns None and skips counter increment).
+    //
+    // Reconciler interaction: evict does NOT trigger reconciler reseed.
+    // Natural 30 s reconciler cycle picks up missing-symbol state and stops
+    // monitoring (paper_state.positions{} is now truthful — Bybit-side dust,
+    // if still present, surfaces via reconciler's normal Orphan flow next
+    // cycle, which DUST_FROZEN_STRATEGY suppresses if below min_notional).
+    //
+    // EVICT-ON-DUST T3 boot reaper：於 set_risk_store 之後執行一次（apply_risk_snapshot
+    // 已將 ft_dust_qty_floor_usd 鏡射進 paper_state.dust_floor_usd）。清掉
+    // Bybit REST 快照復活的歷史 sub-floor dust（如 STRKUSDT 7e-13 殘餘）。
+    // 此時尚無市場 tick，`evict_all_dust` 內建以 entry_price 回退。
+    // 冪等：跨重啟對同 snapshot 第二輪 0 evict（HashMap::remove 冪等）。
+    // 不主動 trigger reconciler reseed；自然 30 s cycle 自行對齊。
+    let boot_evicted = pipeline.paper_state.evict_all_dust("boot_reaper");
+    if boot_evicted > 0 {
+        info!(
+            kind = %pipeline_kind,
+            evicted = boot_evicted,
+            dust_floor_usd = pipeline.paper_state.dust_floor_usd(),
+            "EVICT-ON-DUST T3 boot reaper: phantom dust positions evicted at startup \
+             / 啟動 boot reaper：殭屍 dust 倉位已驅逐"
+        );
+    }
+
     // PH5-WIRE-1: Load JS shrunk edge estimates from settings/edge_estimates.json.
     // Cold-start (file absent) → empty estimates → ATR×0.2 fallback remains active.
     // PH5-WIRE-1：從 settings/edge_estimates.json 加載 JS 收縮邊際估計。
