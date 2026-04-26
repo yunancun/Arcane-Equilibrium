@@ -549,6 +549,14 @@ async fn async_main(
         ipc_server.set_h_state_invalidation_sender(h_state_inv_tx);
     }
 
+    // F6 PH5-WIRE-1 RELOAD (2026-04-26): grab slot handle BEFORE IPC server
+    // detaches. main.rs late-injects the daemon's manual-trigger sender
+    // after the daemon is spawned (post-detach, pipelines must exist for
+    // fan-out). Mirrors `h_state_cache_slot` G3-08 Phase 1 pattern.
+    // F6：在 IPC server detach 前取 slot handle，main.rs 在 daemon spawn 後
+    // late-inject manual trigger sender。對齊 h_state_cache_slot G3-08 pattern。
+    let edge_reload_sender_slot_handle = ipc_server.edge_reload_sender_slot();
+
     let ipc_handle = tokio::spawn(async move {
         if let Err(e) = ipc_server.run().await {
             error!(error = %e, "IPC server error / IPC 服務器錯誤");
@@ -1046,6 +1054,53 @@ async fn async_main(
                 None
             }
         };
+
+    // ------------------------------------------------------------------
+    // F6 PH5-WIRE-1 RELOAD (2026-04-26): conditionally spawn the periodic +
+    // manual-trigger edge estimates reload daemon, gated by
+    // `OPENCLAW_EDGE_RELOAD=1` (DEFAULT-OFF, strict "1" semantics).
+    //
+    // Why here, after all pipelines spawned + before signal_loop?
+    //   * Each pipeline's `cmd_tx` is cloneable; constructed earlier — clones cheap.
+    //   * env=0 → spawner returns None (zero memory / zero spawn).
+    //   * Cancel-token shutdown propagates from engine-wide cancel; daemon
+    //     joins cleanly under existing main_shutdown ordered_shutdown.
+    //
+    // Returns Some(Sender<()>) only when env=1 AND >=1 pipeline cmd_tx is
+    // bound; else None and zero spawn (mirrors G3-08 H state poller pattern).
+    //
+    // F6 PH5-WIRE-1 RELOAD（2026-04-26）：條件 spawn 週期 + 手動 trigger
+    // 兩條重載 daemon，受 `OPENCLAW_EDGE_RELOAD=1`（DEFAULT-OFF，嚴格 "1" 語意）控管。
+    //   * 此處 spawn 因 cmd_tx 已就緒、env=0 時 spawner 回 None（0 spawn）。
+    //   * Cancel-token 由 engine-wide cancel 傳遞，現有 main_shutdown 自動 join。
+    //
+    // 啟用條件：env=1 **且** ≥1 管線 cmd_tx 綁定 → 回 Some；否則 None
+    // （對齊 G3-08 H state poller pattern）。
+    // 註：手動 IPC trigger 接線（IpcServer slot late-inject）於 FUP commit
+    //     接線（避免單次 commit 改太多檔）。本 commit 僅週期 1h reload 即可
+    //     解 Phase 5 99.98% reject root cause。
+    // ------------------------------------------------------------------
+    let edge_reload_signal_tx = main_boot_tasks::spawn_edge_estimates_reloader_if_enabled(
+        Some(paper_cmd_tx.clone()),
+        demo_cmd_tx.clone(),
+        live_cmd_tx.clone(),
+        &cancel,
+    );
+    if let Some(signal_tx) = edge_reload_signal_tx {
+        // Late-inject sender into IPC slot so subsequent `reload_edge_estimates`
+        // IPC requests are forwarded to the running daemon. Same pattern as
+        // strategist counters / budget tracker / h_state_cache.
+        // 將 sender 延後注入 IPC slot，後續 `reload_edge_estimates` IPC 請求
+        // 即可轉發到運行中 daemon。對齊 strategist counters / budget tracker /
+        // h_state_cache slot 注入 pattern。
+        edge_reload_sender_slot_handle.write().await.replace(signal_tx);
+        info!(
+            "F6 PH5-WIRE-1 RELOAD: reloader sender late-injected into IPC slot; \
+             manual `reload_edge_estimates` IPC method now live \
+             / 重載 sender 已 late-inject 至 IPC slot；\
+             手動 `reload_edge_estimates` IPC method live"
+        );
+    }
 
     info!(
         version = VERSION,

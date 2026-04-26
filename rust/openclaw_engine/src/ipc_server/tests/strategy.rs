@@ -81,6 +81,7 @@ async fn test_get_param_ranges_via_ipc() {
         &None,
         &empty_h_state_cache_slot(),
         &None,
+        &None,
     )
     .await;
     assert!(resp.error.is_none(), "error: {:?}", resp.error);
@@ -114,6 +115,7 @@ async fn test_get_strategy_params_via_ipc() {
         &None,
         &None,
         &empty_h_state_cache_slot(),
+        &None,
         &None,
     )
     .await;
@@ -152,6 +154,7 @@ async fn test_update_strategy_params_via_ipc() {
         &None,
         &empty_h_state_cache_slot(),
         &None,
+        &None,
     )
     .await;
     assert!(resp.error.is_none(), "error: {:?}", resp.error);
@@ -181,6 +184,7 @@ async fn test_update_strategy_params_nonexistent() {
         &None,
         &None,
         &empty_h_state_cache_slot(),
+        &None,
         &None,
     )
     .await;
@@ -214,6 +218,7 @@ async fn test_update_strategy_params_missing_params() {
         &None,
         &None,
         &empty_h_state_cache_slot(),
+        &None,
         &None,
     )
     .await;

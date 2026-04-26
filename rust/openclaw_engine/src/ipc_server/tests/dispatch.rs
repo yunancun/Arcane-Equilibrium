@@ -38,6 +38,7 @@ async fn test_dispatch_ping() {
         &None,
         &empty_h_state_cache_slot(),
         &None,
+        &None,
     )
     .await;
     assert!(resp.error.is_none());
@@ -68,6 +69,7 @@ async fn test_dispatch_get_state() {
         &None,
         &None,
         &empty_h_state_cache_slot(),
+        &None,
         &None,
     )
     .await;
@@ -104,6 +106,7 @@ async fn test_dispatch_method_not_found() {
         &None,
         &empty_h_state_cache_slot(),
         &None,
+        &None,
     )
     .await;
     assert!(resp.error.is_some());
@@ -130,6 +133,7 @@ async fn test_dispatch_invalid_json() {
         &None,
         &None,
         &empty_h_state_cache_slot(),
+        &None,
         &None,
     )
     .await;
@@ -158,6 +162,7 @@ async fn test_dispatch_missing_version() {
         &None,
         &empty_h_state_cache_slot(),
         &None,
+        &None,
     )
     .await;
     assert!(resp.error.is_some());
@@ -185,6 +190,7 @@ async fn test_dispatch_missing_method() {
         &None,
         &empty_h_state_cache_slot(),
         &None,
+        &None,
     )
     .await;
     assert!(resp.error.is_some());
@@ -211,6 +217,7 @@ async fn test_dispatch_reload_config() {
         &None,
         &None,
         &empty_h_state_cache_slot(),
+        &None,
         &None,
     )
     .await;

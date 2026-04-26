@@ -10,6 +10,71 @@
 
 ## 工作記憶
 
+### 2026-04-27 6 P0 PR Wave Combined Regression（F2/F3/F4/F5/F6/F7）
+
+**結論：E4 PASS — MERGE READY**
+
+**Baseline 校正：**
+- TODO L10 + CLAUDE.md §十一 寫的 2161 **已過期**（採集時間 2026-04-26，CLAUDE.md §九 G6-04 drift 規則）
+- 實測 origin/main HEAD `82bbe5e` cargo test --release lib = **2212 / 0 failed**（+51 vs 2161，含 G3-08 Phase 1A H state cache + Tier 8/9 commits）
+- E4 baseline 永遠跑命令拿即時值，**不信 docs 寫死數字**
+
+**Per-branch verification（baseline 2212 / 0）：**
+| Branch | HEAD | lib | bins | pytest | E2 quote match? |
+|---|---|---|---|---|---|
+| F2 | `faebe51` | 2216 (+4) | n/a | n/a | exact ✓ |
+| F3 | `8a2c42a` | 2225 (+13) | n/a | n/a | exact ✓ |
+| F4 | `db1c012` | 2228 (+16) | 38 | 7 (unattr filter) | lib exact ✓ |
+| F5 | `2f353ab` | n/a | n/a | 17 (live_session) | exact ✓ |
+| F6 | `337804e` (drift +1 doc commit) | 2219 (+7) | n/a | n/a | lib exact ✓ |
+| F7 | `e437a87` | n/a | n/a | 39 (test_f7_new_healthchecks) | exact ✓ |
+
+**Combined merged tree（順序 main→F2→F6→F3→F4→F7→F5）：**
+- 2 處 doc-only conflict in `docs/CCAgentWorkSpace/E1/memory.md`（F6 + F7 step），union-resolvable，無代碼撞區
+- F4 在 F3 後 merge 自動合併 `loop_handlers.rs`（F3 status arm @L1160 vs F4 unattributed_emit re-export @L83 不撞區）— E2 推薦順序奏效
+- Final cargo lib **2252 / 0 failed**（兩遍同綠 = 非 flaky）
+- Math: 2212 + 4 + 13 + 16 + 7 = 2252 完美對齊（無 test 互覆）
+
+**Healthcheck integration smoke（F7 8 新 [22-29]）：**
+- 27 check 全執行（19 既有 + 8 新）— 無 stack trace / SQL syntax error
+- Verdict 分佈：18 PASS / 2 WARN / 5 FAIL — 5 FAIL 是 healthcheck 正確發現 **pre-existing silent-dead pipelines**（與本 wave 6 PR 無關）：
+  - [3] exit_features_writer 37 delta、[19] observer_pipeline 1/5 ok、[23] orders_fills 6 pairs missing、[24] signals_writer 179h stale、[26] dust_spiral_noise 37 rows、[27] intents_freeze 30min
+- **F7-FUP-23 unattributed:% 排除生效**：DB 實測 `trading.fills WHERE strategy_name LIKE 'unattributed:%'` = 0 rows（engine 未 deploy F4），WHERE filter logic 已就位 → deploy F4 後仍排除無 false positive
+
+**Cross-cutting verification：**
+1. F3 status arm × F4 else branch（loop_handlers.rs cross-cut）— 不同 logical region，無撞區。Combined 1212 行 **超 §九 1200 hard cap 12 行**，建議下個 refactor wave 拆 status arm sibling（F4 unattributed_emit.rs 是 reference pattern）
+2. F4 audit row × F7 [23] 對齊：DB 0 unattributed rows，[23] WHERE filter exclude 已就位（`checks_engine.py:534-573`）
+3. F5 phantom guard 5 邊界齊（integrity-fail view + action-guard write button + body class 4 態 + manual refresh defensive + account endpoint phantom envelope read+write guard）
+4. Cross-language float 1e-4 容差驗證 N/A（6 PR 無 Rust↔Python 數值對接面）
+
+**Mock 安全審查（PASS）：**
+- F4 unattr filter mock psycopg cursor (IO 邊界 OK)
+- F5 mock auth state + slot binding (state OK)
+- F7 mock `cur.fetchone()/fetchall()` (純 IO row return OK)
+- F2/F3/F6 cargo unit tests 真結構無 mock
+- 0 mock 業務邏輯 / 計算函數 / IPC 協議
+
+**5 push back / WARN（不阻塞，PM 注意）：**
+1. `loop_handlers.rs` combined 1212 行超 cap 12 行（建議下 wave sibling 抽 status arm）
+2. doc-only conflicts in E1/memory.md（PM `sed` strip markers union-resolve safe）
+3. TODO L10 + §十一 baseline 過期（merge 同 commit 應更新至 2252）
+4. F7 cron wrapper `cd $BASE_DIR` 使 ephemeral worktree 看不到 [22-29]（merge 後 main worktree pull 即解；建議 follow-up 加 wrapper 自驗 grep 新 check id）
+5. 5 個真實 FAIL pre-existing silent-dead pipelines（建議 PM 開 ticket 屬 Wave 4 / G3-08+ 範圍）
+
+**Deploy 建議：**
+- 4 Rust PR (F2/F3/F4/F6) → `restart_all.sh --rebuild`（Linux operator 指令）
+- 2 Python PR (F5/F7) → uvicorn reload + cron 自然 pickup（無 rebuild 需求）
+- 一次性 PM merge 6 PR + push + operator `--rebuild` 即整批生效
+
+**3 條教訓：**
+1. **Cron wrapper cwd pitfall**：F7 sibling package split 後 wrapper `cd $BASE_DIR` 切到 main worktree → ephemeral worktree 看不到 [22-29]。E4 驗 cron-style script 必須繞過 wrapper 直 invoke 或臨時 patch BASE_DIR
+2. **Baseline drift detection**：TODO/CLAUDE.md 寫死數字過期 51 個 test（2161 vs 實測 2212），E4 必跑 cargo 拿即時值
+3. **Doc-only memory.md union pattern**：multi-PR 並行 E1/memory.md 是 doc race 不是代碼撞區，`sed -i '/^<<<<<<< HEAD$/,/^>>>>>>>/{/^<<<<<<< HEAD$\|^=======$\|^>>>>>>>/d;}' file` 自動 strip union-keep-both 是 safe pattern
+
+**報告位置：** `docs/CCAgentWorkSpace/E4/workspace/reports/2026-04-27--p0_wave_combined_regression.md`
+
+---
+
 ### 2026-04-26 Wave 3 W5 兩軌（EDGE-P2-flip T2 + G2-FUP-IPC-LEGACY-MS-FIX）回歸驗證
 
 **結論：E4 Pass with conditions（軌獨立 + 整體驗證綠；條件 = PM commit + push 後 Linux smoke 重跑）**
@@ -362,6 +427,7 @@
 
 | 日期 | 任務 | 文件位置 |
 |------|------|---------|
+| 2026-04-27 | 6 P0 PR Wave Combined Regression（F2/F3/F4/F5/F6/F7）— MERGE READY / baseline 校正 2161→2212 / Combined cargo lib 2252 兩遍同綠 / 27 healthcheck 8 新 [22-29] 全執行三態 verdict / 2 doc-only conflicts union-resolvable / 5 push back（1200 hard cap 12 / E1 memory.md merge / baseline drift / cron wrapper cwd / 5 真實 FAIL pre-existing） | `docs/CCAgentWorkSpace/E4/workspace/reports/2026-04-27--p0_wave_combined_regression.md` |
 | 2026-04-26 | Wave 3 W5 兩軌（EDGE-P2-flip T2 + G2-FUP-IPC-LEGACY-MS-FIX）回歸驗證（E4 Pass with conditions / Linux cargo 2161 兩遍同綠 / Mac local pytest 兩遍 3/3 / [15] dormant 路徑 PASS / Rust verifier 1:1 mirror / async :553 一直秒制 / 6 conditions for PM commit+push 後 Linux 重跑） | `docs/CCAgentWorkSpace/E4/workspace/reports/2026-04-26--wave3_w5_two_tracks_regression.md` |
 | 2026-04-26 | Wave 3 W4 三軌（EDGE-P1b + EDGE-P2-flip + G2-03）回歸驗證（E4 PASS / Mac local 2138→2161 +23 兩遍同綠 / 18 check 含 [14] per-strategy READY_frac 63% / dry-run 5/5 / bash -n 3/3 / ast.parse 4/4 / calibrator 250-row CALIBRATED / summary 14d markdown / 2 PRE-EXISTING WARN 1200 hard limit non-blocking） | `docs/CCAgentWorkSpace/E4/workspace/reports/2026-04-26--wave3_w4_three_tracks_regression.md` |
 | 2026-04-26 | Wave 3 G2-06 bb_breakout 永久 disable 回歸驗證（E4 PASS / Rust 2138 不變兩遍 / Mac local Python 3.12 兩遍 healthcheck 同綠 / cargo doc 證 //G2-06 plain 不汙染 ///doc / 3 條 non-blocking drift） | `docs/CCAgentWorkSpace/E4/workspace/reports/2026-04-26--g2_06_disable_regression.md` |

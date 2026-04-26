@@ -82,6 +82,12 @@ pub(super) async fn handle_connection(
     live_auth_recheck_tx: Option<tokio::sync::mpsc::Sender<()>>,
     h_state_cache: HStateCacheSlot,
     h_state_invalidation_tx: Option<InvalidationSender>,
+    // F6 PH5-WIRE-1 RELOAD (2026-04-26): manual-trigger sender for the
+    // edge estimates reloader daemon. Read from the slot once at accept
+    // time; None when daemon was not spawned (env=0 or no pipelines).
+    // F6：edge 重載 daemon 手動 trigger sender。Accept 時自 slot 讀一次；
+    // daemon 未 spawn 時為 None。
+    edge_reload_sender: Option<tokio::sync::mpsc::Sender<()>>,
 ) {
     let peer = format!("{:?}", stream.peer_addr());
     info!(peer = %peer, "client connected / 客戶端已連接");
@@ -183,7 +189,7 @@ pub(super) async fn handle_connection(
             line_result = lines.next_line() => {
                 match line_result {
                     Ok(Some(line)) => {
-                        let response = dispatch_request(&line, &config, &data_dir, &cmd_channels, &budget_slot, &teacher_slot, &risk_stores, &learning_store, &budget_store, &audit_pool, &scanner_registry, &strategist_counters, &live_auth_recheck_tx, &h_state_cache, &h_state_invalidation_tx).await;
+                        let response = dispatch_request(&line, &config, &data_dir, &cmd_channels, &budget_slot, &teacher_slot, &risk_stores, &learning_store, &budget_store, &audit_pool, &scanner_registry, &strategist_counters, &live_auth_recheck_tx, &h_state_cache, &h_state_invalidation_tx, &edge_reload_sender).await;
                         let mut resp_bytes = serde_json::to_vec(&response)
                             .unwrap_or_else(|_| br#"{"jsonrpc":"2.0","error":{"code":-32603,"message":"serialization error"},"id":null}"#.to_vec());
                         resp_bytes.push(b'\n');
