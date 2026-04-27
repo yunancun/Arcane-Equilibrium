@@ -355,8 +355,13 @@ class TestLayer2CostTracker:
         """record_claude_cost must fire ``invalidate_async("h2.budget_consumed")``.
 
         Patch the module-level ``_invalidate_h_state_async`` import in
-        ``app.layer2_cost_tracker`` to count calls (avoiding daemon thread
+        ``app.layer2_cost_recording`` to count calls (avoiding daemon thread
         spawn / IPC). Pattern mirrors test_h1_thought_gate.py:206-226.
+
+        G3-08 Phase 4 Method A: import was relocated from
+        ``app.layer2_cost_tracker`` to ``app.layer2_cost_recording`` when
+        ``record_claude_cost`` / ``record_search_cost`` moved to the
+        recording sibling (per RFC §7.3 patch path升級).
 
         Phase 3 Sub-task 3-3 update: ``record_claude_cost`` now also fires
         ``h5.claude_cost_recorded`` after the H2 hint (same call site, two
@@ -372,7 +377,16 @@ class TestLayer2CostTracker:
         contract 由 ``test_record_claude_cost_fires_h2_and_h5_invalidate``
         測試涵蓋）。
         """
-        with patch("app.layer2_cost_tracker._invalidate_h_state_async") as mock_inv:
+        # G3-08 Phase 4: patch path升級 from ``layer2_cost_tracker`` to
+        # ``layer2_cost_recording`` after Method A split moved
+        # ``record_claude_cost`` / ``record_search_cost`` (and their
+        # ``_invalidate_h_state_async`` import) into the recording sibling
+        # (per RFC §7.3).
+        # G3-08 Phase 4：Method A 拆分後，``record_claude_cost`` /
+        # ``record_search_cost``（連同 ``_invalidate_h_state_async`` import）
+        # 移至 recording sibling，patch path 升級為
+        # ``app.layer2_cost_recording`` (per RFC §7.3)。
+        with patch("app.layer2_cost_recording._invalidate_h_state_async") as mock_inv:
             cost_tracker.record_claude_cost(
                 session, input_tokens=1000, output_tokens=500, model_tier=MODEL_SONNET,
             )
@@ -396,7 +410,16 @@ class TestLayer2CostTracker:
         條呼叫是 H5 提示而非 H2。測試斷言發出的 reasons 中**不含** H2
         （Sub-task 3-1 contract 保留）。
         """
-        with patch("app.layer2_cost_tracker._invalidate_h_state_async") as mock_inv:
+        # G3-08 Phase 4: patch path升級 from ``layer2_cost_tracker`` to
+        # ``layer2_cost_recording`` after Method A split moved
+        # ``record_claude_cost`` / ``record_search_cost`` (and their
+        # ``_invalidate_h_state_async`` import) into the recording sibling
+        # (per RFC §7.3).
+        # G3-08 Phase 4：Method A 拆分後，``record_claude_cost`` /
+        # ``record_search_cost``（連同 ``_invalidate_h_state_async`` import）
+        # 移至 recording sibling，patch path 升級為
+        # ``app.layer2_cost_recording`` (per RFC §7.3)。
+        with patch("app.layer2_cost_recording._invalidate_h_state_async") as mock_inv:
             cost_tracker.record_search_cost(session, "perplexity", 0.005)
             # Sub-task 3-3 added h5.search_cost_recorded → exactly 1 call now.
             assert mock_inv.call_count == 1
@@ -522,7 +545,16 @@ class TestLayer2CostTracker:
         h5 提示。兩條提示共用同套 daemon-thread fire-and-forget 基礎設施
         —— 順序不保證（h2 先或 h5 先取決於 patch 呼叫順序），但兩條都必到。
         """
-        with patch("app.layer2_cost_tracker._invalidate_h_state_async") as mock_inv:
+        # G3-08 Phase 4: patch path升級 from ``layer2_cost_tracker`` to
+        # ``layer2_cost_recording`` after Method A split moved
+        # ``record_claude_cost`` / ``record_search_cost`` (and their
+        # ``_invalidate_h_state_async`` import) into the recording sibling
+        # (per RFC §7.3).
+        # G3-08 Phase 4：Method A 拆分後，``record_claude_cost`` /
+        # ``record_search_cost``（連同 ``_invalidate_h_state_async`` import）
+        # 移至 recording sibling，patch path 升級為
+        # ``app.layer2_cost_recording`` (per RFC §7.3)。
+        with patch("app.layer2_cost_recording._invalidate_h_state_async") as mock_inv:
             cost_tracker.record_claude_cost(
                 session, input_tokens=1000, output_tokens=500, model_tier=MODEL_SONNET,
             )
@@ -548,7 +580,16 @@ class TestLayer2CostTracker:
         發的 h5.claude_cost_recorded 區別。Sub-task 3-1 刻意未在此加 H2
         提示（搜尋成本範圍限縮在 Sub-task 3-3 H5 contract）。
         """
-        with patch("app.layer2_cost_tracker._invalidate_h_state_async") as mock_inv:
+        # G3-08 Phase 4: patch path升級 from ``layer2_cost_tracker`` to
+        # ``layer2_cost_recording`` after Method A split moved
+        # ``record_claude_cost`` / ``record_search_cost`` (and their
+        # ``_invalidate_h_state_async`` import) into the recording sibling
+        # (per RFC §7.3).
+        # G3-08 Phase 4：Method A 拆分後，``record_claude_cost`` /
+        # ``record_search_cost``（連同 ``_invalidate_h_state_async`` import）
+        # 移至 recording sibling，patch path 升級為
+        # ``app.layer2_cost_recording`` (per RFC §7.3)。
+        with patch("app.layer2_cost_recording._invalidate_h_state_async") as mock_inv:
             cost_tracker.record_search_cost(session, "perplexity", 0.005)
             # Exactly one invalidate call (the H5 hint added in Sub-task 3-3).
             assert mock_inv.call_count == 1
