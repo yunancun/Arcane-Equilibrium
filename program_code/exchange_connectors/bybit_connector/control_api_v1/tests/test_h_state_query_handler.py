@@ -244,13 +244,50 @@ class _FakeStrategist:
             self.get_strategist_snapshot = _get_strategist
 
 
-def _install_fake_strategy_wiring(strategist, guardian=None, analyst=None):
+class _FakeExecutor:
+    """Minimal stub mirroring strategy_wiring.EXECUTOR_AGENT shape.
+
+    G3-08 Phase 4 Sub-task 4-4: provides opt-in ``with_executor_snapshot`` /
+    ``executor_snapshot`` / ``executor_snapshot_raises`` so the round-trip
+    tests can exercise present / missing / raises paths without booting
+    the real ExecutorAgent stack.
+
+    G3-08 Phase 4 Sub-task 4-4：以 opt-in 方式提供 9 欄位 snapshot；
+    支持 missing / present / raises 三種降級路徑驗證。
+    """
+
+    def __init__(
+        self,
+        with_executor_snapshot=False,
+        executor_snapshot=None,
+        executor_snapshot_raises=None,
+    ):
+        self._executor_snapshot = executor_snapshot if executor_snapshot is not None else {
+            "intents_received": 11,
+            "intents_deduped": 1,
+            "executions_attempted": 8,
+            "executions_success": 6,
+            "executions_failed": 2,
+            "total_slippage_bps": 47,
+            "errors": 1,
+            "recent_intent_id_size": 3,
+            "shadow_mode": 1,
+        }
+        self._executor_snapshot_raises = executor_snapshot_raises
+        if with_executor_snapshot:
+            def _get_exec(_self=self):
+                if _self._executor_snapshot_raises is not None:
+                    raise _self._executor_snapshot_raises
+                return _self._executor_snapshot
+            self.get_executor_snapshot = _get_exec
+
+
+def _install_fake_strategy_wiring(strategist, guardian=None, analyst=None, executor=None):
     """Replace ``app.strategy_wiring`` in sys.modules with a stub.
 
-    G3-08 Phase 4 Sub-task 4-2 adds optional ``guardian`` kw; Sub-task 4-3
-    adds optional ``analyst`` kw. Defaults None preserve prior call-site
-    shapes (Sub-task 4-1 + Phase 1-3 single-arg calls keep working).
-    G3-08 Phase 4 Sub-task 4-2 增加 ``guardian`` 參數；4-3 增加 ``analyst``
+    G3-08 Phase 4 Sub-task 4-2/3/4 add optional ``guardian`` / ``analyst`` /
+    ``executor`` kw. Defaults None preserve prior call-site shapes.
+    G3-08 Phase 4 Sub-task 4-2/3/4 增加 ``guardian`` / ``analyst`` / ``executor``
     參數。預設 None 保持先前呼叫面向不變。
 
     Returns the previous module (or ``None``) so caller can restore.
@@ -262,8 +299,11 @@ def _install_fake_strategy_wiring(strategist, guardian=None, analyst=None):
         fake_mod.GUARDIAN_AGENT = guardian
     if analyst is not None:
         fake_mod.ANALYST_AGENT = analyst
+    if executor is not None:
+        fake_mod.EXECUTOR_AGENT = executor
     sys.modules["app.strategy_wiring"] = fake_mod
     return prev
+
 
 
 def _restore_strategy_wiring(prev):
@@ -2000,6 +2040,209 @@ class TestAnalystAgentStateIncludeFilter(unittest.TestCase):
         )
         self.assertEqual(result["h_states"], {})
         self.assertEqual(result["version"], 1)
+
+
+
+# ── G3-08 Phase 4 Sub-task 4-4 — Executor agent_state round-trip ──
+
+
+class TestExecutorAgentStateIntegration(unittest.TestCase):
+    """43-45. G3-08 Phase 4 Sub-task 4-4: agent_states.executor bucket
+    population + degradation paths.
+
+    Mirrors Sub-task 4-1 strategist pattern (snapshot accessor on the agent
+    itself). Per PA RFC §2.4 the schema has 9 fields, all int (Rust
+    ``AgentState.stats: HashMap<String, i64>`` parity).
+
+    G3-08 Phase 4 Sub-task 4-4：agent_states.executor 桶填入 + 降級路徑。
+    與 Sub-task 4-1 strategist 同模式（snapshot accessor 在 agent 自身）。
+    PA RFC §2.4 schema 為 9 欄位、皆 int（對齊 Rust ``HashMap<String, i64>``）。
+    """
+
+    _EXPECTED_EXECUTOR_FIELDS = {
+        "intents_received",
+        "intents_deduped",
+        "executions_attempted",
+        "executions_success",
+        "executions_failed",
+        "total_slippage_bps",
+        "errors",
+        "recent_intent_id_size",
+        "shadow_mode",
+    }
+
+    def setUp(self):
+        self._prev_env = os.environ.get("OPENCLAW_H_STATE_GATEWAY")
+        os.environ["OPENCLAW_H_STATE_GATEWAY"] = "1"
+
+    def tearDown(self):
+        if self._prev_env is None:
+            os.environ.pop("OPENCLAW_H_STATE_GATEWAY", None)
+        else:
+            os.environ["OPENCLAW_H_STATE_GATEWAY"] = self._prev_env
+
+    def test_executor_populated_when_get_executor_snapshot_present(self):
+        """43. env=1 + executor.get_executor_snapshot present →
+        agent_states.executor contains the 9-field snapshot.
+        """
+        prev_sw = _install_fake_strategy_wiring(
+            _FakeStrategist(
+                _FakeH1Gate(),
+                _FakeModelRouter(),
+                cost_tracker=_FakeCostTracker(),
+                with_h4=True,
+                with_strategist_snapshot=True,
+            ),
+            executor=_FakeExecutor(with_executor_snapshot=True),
+        )
+        try:
+            result = build_h_state_full_response()
+            self.assertIn("executor", result["agent_states"])
+            executor = result["agent_states"]["executor"]
+            self.assertEqual(
+                set(executor.keys()), self._EXPECTED_EXECUTOR_FIELDS
+            )
+            # Spot-check default fixture values.
+            self.assertEqual(executor["intents_received"], 11)
+            self.assertEqual(executor["executions_success"], 6)
+            self.assertEqual(executor["recent_intent_id_size"], 3)
+            self.assertEqual(executor["shadow_mode"], 1)
+            # All values must be int (Rust HashMap<String, i64> parity).
+            for k, v in executor.items():
+                self.assertIsInstance(v, int, f"{k} must be int")
+            self.assertEqual(result["version"], 1)
+            # Sub-task 4-1 strategist also still populated.
+            self.assertIn("strategist", result["agent_states"])
+        finally:
+            _restore_strategy_wiring(prev_sw)
+
+    def test_executor_dropped_when_get_executor_snapshot_missing(self):
+        """44. env=1 + executor lacks get_executor_snapshot → executor key
+        absent (silent skip preserves never-raise contract). Models a deploy
+        where Sub-task 4-4 hasn't landed yet.
+        """
+        prev_sw = _install_fake_strategy_wiring(
+            _FakeStrategist(
+                _FakeH1Gate(),
+                _FakeModelRouter(),
+                cost_tracker=_FakeCostTracker(),
+                with_h4=True,
+                with_strategist_snapshot=True,
+            ),
+            executor=_FakeExecutor(with_executor_snapshot=False),
+        )
+        try:
+            result = build_h_state_full_response()
+            self.assertNotIn("executor", result["agent_states"])
+            # Strategist bucket unaffected.
+            self.assertIn("strategist", result["agent_states"])
+            self.assertEqual(result["version"], 1)
+        finally:
+            _restore_strategy_wiring(prev_sw)
+
+    def test_executor_dropped_when_get_executor_snapshot_raises(self):
+        """45. env=1 + executor.get_executor_snapshot raises → executor key
+        dropped, strategist + H buckets unaffected.
+        """
+        prev_sw = _install_fake_strategy_wiring(
+            _FakeStrategist(
+                _FakeH1Gate(),
+                _FakeModelRouter(),
+                cost_tracker=_FakeCostTracker(),
+                with_h4=True,
+                with_strategist_snapshot=True,
+            ),
+            executor=_FakeExecutor(
+                with_executor_snapshot=True,
+                executor_snapshot_raises=RuntimeError("executor snap boom"),
+            ),
+        )
+        try:
+            result = build_h_state_full_response()
+            self.assertNotIn("executor", result["agent_states"])
+            # H buckets + strategist unaffected.
+            self.assertIn("h1", result["h_states"])
+            self.assertIn("strategist", result["agent_states"])
+            self.assertEqual(result["version"], 1)
+        finally:
+            _restore_strategy_wiring(prev_sw)
+
+
+class TestExecutorAgentStateIncludeFilter(unittest.TestCase):
+    """46-49. G3-08 Phase 4 Sub-task 4-4: include filter honours
+    ``executor`` bucket selection alongside strategist + H buckets.
+    """
+
+    def setUp(self):
+        self._prev_env = os.environ.get("OPENCLAW_H_STATE_GATEWAY")
+        os.environ["OPENCLAW_H_STATE_GATEWAY"] = "1"
+        self._prev_sw = _install_fake_strategy_wiring(
+            _FakeStrategist(
+                _FakeH1Gate(),
+                _FakeModelRouter(),
+                cost_tracker=_FakeCostTracker(with_h5=True),
+                with_h4=True,
+                with_strategist_snapshot=True,
+            ),
+            executor=_FakeExecutor(with_executor_snapshot=True),
+        )
+
+    def tearDown(self):
+        _restore_strategy_wiring(self._prev_sw)
+        if self._prev_env is None:
+            os.environ.pop("OPENCLAW_H_STATE_GATEWAY", None)
+        else:
+            os.environ["OPENCLAW_H_STATE_GATEWAY"] = self._prev_env
+
+    def test_include_executor_only(self):
+        """46. include=["executor"] → agent_states has only executor,
+        h_states empty, version=1.
+        """
+        result = build_h_state_full_response(include=["executor"])
+        self.assertIn("executor", result["agent_states"])
+        self.assertEqual(set(result["agent_states"].keys()), {"executor"})
+        self.assertEqual(result["h_states"], {})
+        self.assertEqual(result["version"], 1)
+
+    def test_include_default_none_includes_executor(self):
+        """47. include=None default still picks up executor bucket
+        (parity with strategist + H buckets default-on behaviour).
+        """
+        result = build_h_state_full_response(include=None)
+        self.assertIn("executor", result["agent_states"])
+        self.assertIn("strategist", result["agent_states"])
+        self.assertEqual(
+            set(result["h_states"].keys()),
+            {"h1", "h2", "h3", "h4", "h5"},
+        )
+
+    def test_include_h_buckets_only_drops_executor(self):
+        """48. include=["h1","h2","h3","h4","h5"] (no agent keys) →
+        agent_states empty even though executor accessor is wired.
+        """
+        result = build_h_state_full_response(
+            include=["h1", "h2", "h3", "h4", "h5"]
+        )
+        self.assertEqual(result["agent_states"], {})
+        self.assertEqual(
+            set(result["h_states"].keys()),
+            {"h1", "h2", "h3", "h4", "h5"},
+        )
+        self.assertEqual(result["version"], 1)
+
+    def test_mixed_include_strategist_and_executor(self):
+        """49. include=["strategist","executor"] → both agent keys, no h_states.
+        """
+        result = build_h_state_full_response(
+            include=["strategist", "executor"]
+        )
+        self.assertEqual(result["h_states"], {})
+        self.assertEqual(
+            set(result["agent_states"].keys()),
+            {"strategist", "executor"},
+        )
+        self.assertEqual(result["version"], 1)
+
 
 
 if __name__ == "__main__":

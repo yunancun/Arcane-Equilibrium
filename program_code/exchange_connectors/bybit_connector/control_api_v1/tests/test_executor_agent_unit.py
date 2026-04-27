@@ -11,7 +11,7 @@ ExecutorAgent Unit Tests — Order wrapping, execution quality metrics, error ha
 
 import time
 import unittest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import sys
 import os
@@ -312,6 +312,192 @@ class TestExecutionReport(unittest.TestCase):
         self.assertEqual(d["symbol"], "BTCUSDT")
         self.assertEqual(d["slippage_bps"], 1.67)
         self.assertTrue(d["success"])
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# G3-08 Phase 4 Sub-task 4-4 — Executor agent_state snapshot + invalidate hooks
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class TestExecutorSnapshot(unittest.TestCase):
+    """G3-08 Phase 4 Sub-task 4-4: verify get_executor_snapshot() returns
+    9-field dict per PA RFC §2.4, schema-parity with Rust
+    ``AgentState.stats: HashMap<String, i64>``.
+
+    G3-08 Phase 4 Sub-task 4-4：驗證 get_executor_snapshot() 回傳 9-field
+    dict（PA RFC §2.4），schema 對齊 Rust ``AgentState.stats``。
+    """
+
+    _EXPECTED_FIELDS = {
+        "intents_received",
+        "intents_deduped",
+        "executions_attempted",
+        "executions_success",
+        "executions_failed",
+        "total_slippage_bps",
+        "errors",
+        "recent_intent_id_size",
+        "shadow_mode",
+    }
+
+    def _make_agent(self, shadow_provider=None) -> ExecutorAgent:
+        """Minimal ExecutorAgent for snapshot tests / 給 snapshot 測試用的最小 agent."""
+        return ExecutorAgent(shadow_mode_provider=shadow_provider)
+
+    def test_get_executor_snapshot_initial_state(self):
+        """Fresh agent -> all 9 keys present; counter values 0; shadow_mode
+        defaults to 1 (provider absent -> fail-closed lambda returns True).
+        新建 agent -> 9 keys 全在；counter 為 0；shadow_mode 預設 1。"""
+        agent = self._make_agent()
+        snap = agent.get_executor_snapshot()
+        self.assertEqual(set(snap.keys()), self._EXPECTED_FIELDS)
+        for key in self._EXPECTED_FIELDS:
+            self.assertIsInstance(snap[key], int, f"{key} must be int")
+        self.assertEqual(snap["intents_received"], 0)
+        self.assertEqual(snap["executions_attempted"], 0)
+        self.assertEqual(snap["recent_intent_id_size"], 0)
+        # Default fail-closed provider returns True -> shadow_mode=1.
+        self.assertEqual(snap["shadow_mode"], 1)
+
+    def test_get_executor_snapshot_independent_dicts(self):
+        """Multiple calls return independent dict objects (no aliasing).
+        多次呼叫回獨立 dict（無別名）。"""
+        agent = self._make_agent()
+        a = agent.get_executor_snapshot()
+        b = agent.get_executor_snapshot()
+        self.assertIsNot(a, b)
+        a["intents_received"] = 999
+        self.assertEqual(b["intents_received"], 0)
+
+    def test_get_executor_snapshot_reflects_stats(self):
+        """Counters in self._stats must reflect in snapshot output.
+        self._stats 中的計數器必須反映於 snapshot 輸出。"""
+        agent = self._make_agent()
+        with agent._lock:
+            agent._stats["intents_received"] = 11
+            agent._stats["intents_deduped"] = 1
+            agent._stats["executions_attempted"] = 8
+            agent._stats["executions_success"] = 6
+            agent._stats["executions_failed"] = 2
+            # total_slippage_bps stored as float -- snapshot must cast to int.
+            agent._stats["total_slippage_bps"] = 47.93
+            agent._stats["errors"] = 1
+        snap = agent.get_executor_snapshot()
+        self.assertEqual(snap["intents_received"], 11)
+        self.assertEqual(snap["intents_deduped"], 1)
+        self.assertEqual(snap["executions_attempted"], 8)
+        self.assertEqual(snap["executions_success"], 6)
+        self.assertEqual(snap["executions_failed"], 2)
+        self.assertEqual(snap["errors"], 1)
+        # Float->int cast (Phase 4 invariant: HashMap<String, i64>).
+        self.assertEqual(snap["total_slippage_bps"], 47)
+        self.assertIsInstance(snap["total_slippage_bps"], int)
+
+    def test_get_executor_snapshot_recent_intent_id_size(self):
+        """recent_intent_id_size reflects len(self._recent_intent_ids).
+        recent_intent_id_size 反映 len(self._recent_intent_ids)。"""
+        agent = self._make_agent()
+        agent._recent_intent_ids["i_a"] = time.time()
+        agent._recent_intent_ids["i_b"] = time.time()
+        agent._recent_intent_ids["i_c"] = time.time()
+        snap = agent.get_executor_snapshot()
+        self.assertEqual(snap["recent_intent_id_size"], 3)
+
+    def test_get_executor_snapshot_shadow_mode_true(self):
+        """shadow_mode_provider returns True -> snapshot["shadow_mode"]=1.
+        shadow_mode_provider 回 True -> snapshot 為 1。"""
+        agent = self._make_agent(shadow_provider=lambda: True)
+        snap = agent.get_executor_snapshot()
+        self.assertEqual(snap["shadow_mode"], 1)
+        self.assertIsInstance(snap["shadow_mode"], int)
+
+    def test_get_executor_snapshot_shadow_mode_false(self):
+        """shadow_mode_provider returns False -> snapshot["shadow_mode"]=0.
+        shadow_mode_provider 回 False -> snapshot 為 0。"""
+        agent = self._make_agent(shadow_provider=lambda: False)
+        snap = agent.get_executor_snapshot()
+        self.assertEqual(snap["shadow_mode"], 0)
+        self.assertIsInstance(snap["shadow_mode"], int)
+
+    def test_get_executor_snapshot_shadow_provider_raises_fail_closed(self):
+        """shadow_mode_provider raises -> snapshot["shadow_mode"]=1
+        (fail-closed per CLAUDE.md §二 原則 #6).
+        provider 拋例外 -> snapshot 為 1（fail-closed，CLAUDE.md §二 原則 #6）。
+        """
+        def _raises():
+            raise RuntimeError("provider boom")
+        agent = self._make_agent(shadow_provider=_raises)
+        snap = agent.get_executor_snapshot()
+        self.assertEqual(snap["shadow_mode"], 1)
+        self.assertIsInstance(snap["shadow_mode"], int)
+
+    def test_invalidate_hook_present_on_success_path(self):
+        """G3-08 Phase 4 Sub-task 4-4: _handle_approved_intent must invoke
+        _invalidate_h_state_async("agent.executor.execution_complete") when
+        execute_order returns a successful report.
+        G3-08 Phase 4 Sub-task 4-4：execute_order 成功時須呼叫
+        _invalidate_h_state_async("agent.executor.execution_complete")。
+        """
+        engine = MagicMock()
+        engine.submit_order.return_value = {
+            "order": {"avg_fill_price": 60000.0, "filled_qty": 0.01},
+            "fills": [],
+            "rejected_reason": None,
+        }
+        agent = ExecutorAgent(paper_engine=engine)
+        agent.start()
+        msg = AgentMessage(
+            sender=AgentRole.STRATEGIST,
+            receiver=AgentRole.EXECUTOR,
+            message_type=MessageType.APPROVED_INTENT,
+            payload={
+                "intent_id": "i-success",
+                "symbol": "BTCUSDT",
+                "direction": "long",
+                "size": 0.01,
+            },
+        )
+        with patch("app.executor_agent._invalidate_h_state_async") as mock_inv:
+            agent.on_message(msg)
+        called_reasons = [c.args[0] for c in mock_inv.call_args_list if c.args]
+        self.assertIn(
+            "agent.executor.execution_complete", called_reasons,
+            "Expected agent.executor.execution_complete hint after success",
+        )
+
+    def test_invalidate_hook_present_on_failure_path(self):
+        """G3-08 Phase 4 Sub-task 4-4: _handle_approved_intent must invoke
+        _invalidate_h_state_async("agent.executor.execution_failed") when
+        execute_order returns a failed report (e.g. paper engine rejects).
+        G3-08 Phase 4 Sub-task 4-4：execute_order 失敗時須呼叫
+        _invalidate_h_state_async("agent.executor.execution_failed")。
+        """
+        engine = MagicMock()
+        engine.submit_order.return_value = {
+            "order": {},
+            "fills": [],
+            "rejected_reason": "risk_limit_exceeded",
+        }
+        agent = ExecutorAgent(paper_engine=engine)
+        agent.start()
+        msg = AgentMessage(
+            sender=AgentRole.STRATEGIST,
+            receiver=AgentRole.EXECUTOR,
+            message_type=MessageType.APPROVED_INTENT,
+            payload={
+                "intent_id": "i-fail",
+                "symbol": "BTCUSDT",
+                "direction": "long",
+                "size": 0.01,
+            },
+        )
+        with patch("app.executor_agent._invalidate_h_state_async") as mock_inv:
+            agent.on_message(msg)
+        called_reasons = [c.args[0] for c in mock_inv.call_args_list if c.args]
+        self.assertIn(
+            "agent.executor.execution_failed", called_reasons,
+            "Expected agent.executor.execution_failed hint after failure",
+        )
 
 
 if __name__ == "__main__":

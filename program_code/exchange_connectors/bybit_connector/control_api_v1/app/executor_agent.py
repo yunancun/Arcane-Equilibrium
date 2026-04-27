@@ -43,6 +43,11 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
 
 from .base_agent import BaseAgent
+# G3-08 Phase 4 Sub-task 4-4 — Executor agent_state invalidation hint.
+# env-gated no-op when OPENCLAW_H_STATE_GATEWAY != "1" (zero overhead).
+# G3-08 Phase 4 Sub-task 4-4 — Executor agent_state 失效提示。
+# OPENCLAW_H_STATE_GATEWAY != "1" 時 no-op，零負擔。
+from .h_state_invalidator import invalidate_async as _invalidate_h_state_async
 from .multi_agent_framework import (
     AgentMessage,
     AgentRole,
@@ -206,6 +211,64 @@ class ExecutorAgent(BaseAgent):
             "errors": 0,
         }
 
+    # ── G3-08 Phase 4 Sub-task 4-4: agent_state snapshot accessor ──
+
+    def get_executor_snapshot(self) -> Dict[str, Any]:
+        """Executor agent-state snapshot for h_state_cache (PA RFC §2.4, 9 fields).
+
+        Schema parity with Rust ``AgentState.stats: HashMap<String, i64>``:
+        all values are int (or bool→int). Pure-read, takes only ``self._lock``
+        for the stats / dedup buffer; safe from any thread.
+
+        Schema (PA RFC §2.4):
+          intents_received / intents_deduped / executions_attempted /
+          executions_success / executions_failed / total_slippage_bps (cast int) /
+          errors / recent_intent_id_size / shadow_mode (bool→int via
+          ``_shadow_mode_provider``).
+
+        NOTE — snapshot vs ConfigStore SSOT:
+          ``shadow_mode`` is pulled via ``self._shadow_mode_provider()`` (G3-03
+          ConfigStore lambda backed by Rust ``RiskConfig.executor.shadow_mode``).
+          That cache remains the single source of truth for the live flag —
+          this snapshot is a *read-through observation* for h_state_cache, not
+          a writable copy. Provider call is performed *outside* ``self._lock``
+          to avoid a possible deadlock with ``ExecutorConfigCache`` internal
+          lock; provider exception → fail-closed to ``shadow_mode=1`` per
+          CLAUDE.md §二 原則 #6.
+
+        snapshot 與 ConfigStore SSOT 區分：
+          ``shadow_mode`` 透過 ``self._shadow_mode_provider()``（G3-03 ConfigStore
+          lambda，背後是 Rust ``RiskConfig.executor.shadow_mode``）取；該 cache
+          仍為 live flag 的唯一真實來源 —— 本 snapshot 僅為 h_state_cache 的
+          *讀通觀察*，非可寫副本。provider 呼叫於 ``self._lock`` 外執行，
+          避免與 ``ExecutorConfigCache`` 內部 lock 死鎖；provider 例外
+          → fail-closed 為 ``shadow_mode=1``（CLAUDE.md §二 原則 #6）。
+        """
+        with self._lock:
+            snapshot: Dict[str, Any] = {
+                "intents_received": int(self._stats.get("intents_received", 0)),
+                "intents_deduped": int(self._stats.get("intents_deduped", 0)),
+                "executions_attempted": int(self._stats.get("executions_attempted", 0)),
+                "executions_success": int(self._stats.get("executions_success", 0)),
+                "executions_failed": int(self._stats.get("executions_failed", 0)),
+                # ``total_slippage_bps`` is float in self._stats; cast int for
+                # Rust HashMap<String, i64> parity (Phase 4 invariant).
+                # ``total_slippage_bps`` 在 _stats 為 float；轉 int 對齊 Rust。
+                "total_slippage_bps": int(self._stats.get("total_slippage_bps", 0.0)),
+                "errors": int(self._stats.get("errors", 0)),
+                "recent_intent_id_size": int(len(self._recent_intent_ids)),
+            }
+        # provider call OUTSIDE self._lock to avoid possible deadlock with
+        # ExecutorConfigCache internal lock (G3-03 Phase B).
+        # provider 呼叫於 self._lock 外，避與 ExecutorConfigCache 內部 lock 死鎖。
+        try:
+            snapshot["shadow_mode"] = int(bool(self._shadow_mode_provider()))
+        except Exception:  # noqa: BLE001 — defensive
+            # fail-closed: assume shadow on (safest) when provider raises.
+            # fail-closed：provider 拋例外時假設 shadow=on（最安全）。
+            snapshot["shadow_mode"] = 1
+        return snapshot
+
     # ── Lifecycle / 生命周期 ──
     # pause() inherited from BaseAgent. start/stop override to preserve info log.
     # pause() 繼承自 BaseAgent；start/stop 覆蓋以保留 info log。
@@ -305,6 +368,15 @@ class ExecutorAgent(BaseAgent):
             qty=size,
             metadata=payload.get("metadata", {}),
         )
+
+        # G3-08 Phase 4 Sub-task 4-4: invalidate h_state_cache hint after the
+        # execution settles (success or failure). env=0 → fire-and-forget no-op.
+        # G3-08 Phase 4 Sub-task 4-4：執行落地後（成功 / 失敗）發出
+        # h_state_cache 失效提示；env=0 為 no-op。
+        if report is not None and report.success:
+            _invalidate_h_state_async("agent.executor.execution_complete")
+        else:
+            _invalidate_h_state_async("agent.executor.execution_failed")
 
         # Send EXECUTION_REPORT to Analyst / 发送执行报告给 Analyst
         if self.bus and report:
