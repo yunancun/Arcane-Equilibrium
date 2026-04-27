@@ -23,13 +23,14 @@ mod tasks;
 
 use openclaw_engine::bybit_rest_client::{live_bybit_environment, BybitEnvironment};
 use openclaw_engine::config::{load_toml_or_default, ConfigManager, ConfigStore};
-use openclaw_engine::ipc_server::{IpcServer, PerEngineRiskStores};
+use openclaw_engine::ipc_server::{IpcServer, LiveCmdSenderSlot, PerEngineRiskStores};
 use openclaw_engine::market_data_client::MarketDataClient;
 use openclaw_engine::scanner::registry::SymbolRegistry;
 use openclaw_engine::scanner::runner::ScannerRunner;
 use openclaw_engine::scanner::ScannerConfig;
 use openclaw_engine::tick_pipeline::{EngineEvent, PipelineHealth, PipelineKind};
 use openclaw_types::PriceEvent;
+use parking_lot::{Mutex as ParkingMutex, RwLock as ParkingRwLock};
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
@@ -322,48 +323,19 @@ async fn async_main(
     // Paper 始終啟動。Demo/Live 依 API key 存在性獨立啟動。
     // ------------------------------------------------------------------
     let cfg_snapshot_pipelines = config.get();
-    // PIPELINE-SLOT-1 Phase 2: slots own each pipeline's cancel token and
-    // task handles. `try_spawn` derives a slot-scoped child from the engine-
-    // wide shutdown token, threads it into `build_exchange_pipeline`, and
-    // returns both the bindings and a clone of the child token. We store
-    // the child token next to each slot for later use:
-    //   * `live_slot_cancel` → threaded into the Live OS thread's
-    //     `live_cancel` AND into `live_deps.cancel` (EventConsumerDeps)
-    //     so the Phase-3 `LiveAuthWatcher`'s `live_slot.teardown()` cancels
-    //     the Live event-consumer main loop, not just the WS supervisor
-    //     / listener / balance-refresh tasks. Pre-Phase-2-fix wiring passed
-    //     the engine-wide `cancel` clone into `live_deps.cancel`, which
-    //     meant teardown left the event consumer running and still
-    //     dispatching orders — a skin-deep teardown. (E2 BLOCKER #1.)
-    //   * `demo_slot_cancel` → threaded into `demo_deps.cancel` for the
-    //     same reason — consistency + future safety if a demo-scoped
-    //     teardown path appears. Demo is never torn down mid-session in
-    //     Phase 2, so behaviour is unchanged on the happy path; binding
-    //     to the child is strictly more correct because cancelling the
-    //     engine-wide parent still cascades down to this child (tokio-util
-    //     CancellationToken contract), so SIGTERM still stops Demo cleanly.
-    //
-    // PIPELINE-SLOT-1 Phase 2：槽位擁有每條管線的 cancel token 與任務
-    // handle。`try_spawn` 從引擎級 shutdown token 派生槽位子 token，傳入
-    // `build_exchange_pipeline`，並回傳 bindings + 子 token clone。我們把
-    // 子 token 與 slot 一起保留備用：
-    //   * `live_slot_cancel` → 串進 Live OS 線程的 `live_cancel` **以及**
-    //     `live_deps.cancel`（EventConsumerDeps），讓 Phase 3 `LiveAuthWatcher` 的
-    //     `live_slot.teardown()` 也能取消 Live event-consumer 主迴圈，
-    //     不僅是 WS supervisor / listener / balance-refresh。修復前 wiring
-    //     把引擎級 `cancel` clone 給 `live_deps.cancel`，導致 teardown 後
-    //     event consumer 仍在跑、仍在下單 — 皮毛式 teardown。（E2 BLOCKER #1）
-    //   * `demo_slot_cancel` → 串進 `demo_deps.cancel`，理由同上（一致性
-    //     + 未來若出現 demo-scoped teardown 路徑時的安全性）。Phase 2
-    //     不會中途拆 Demo，happy path 行為不變；綁定子 token 仍嚴格更正確，
-    //     因為取消引擎級父 token 會連帶子 token（tokio-util 契約），
-    //     SIGTERM 依舊乾淨停 Demo。
+    // PIPELINE-SLOT-1 Phase 2: each slot owns a slot-scoped child cancel token
+    // (not engine-wide) so LiveAuthWatcher teardown cancels the event-consumer
+    // main loop without collateral damage to demo/paper.
+    // Phase 2：槽位持有 slot-scoped 子 token，teardown 只取消目標管線。
     let live_slot = Arc::new(pipeline_slot::PipelineSlot::new_empty(
         pipeline_slot::SlotKind::Live,
     ));
     let demo_slot = Arc::new(pipeline_slot::PipelineSlot::new_empty(
         pipeline_slot::SlotKind::Demo,
     ));
+    // Boot tries Live try_spawn; if authorized, direct spawn path follows.
+    // Watcher handles (None, None) + mid-session respawn. (2026-04-27 fix)
+    // Boot 嘗試 try_spawn；授權 → 直接 spawn；否則 watcher 接管。
     let (live_bindings, live_slot_cancel) = match live_slot
         .try_spawn(&pipeline_slot::SpawnConfig {
             kind: pipeline_slot::SlotKind::Live,
@@ -444,7 +416,8 @@ async fn async_main(
         std::env::var("OPENCLAW_DATA_DIR").unwrap_or_else(|_| "/tmp/openclaw".into());
 
     // 3E-ARCH: Independent command channels per pipeline.
-    // 3E-ARCH：每條管線獨立的命令通道。
+    // paper/demo: boot-time fixed. live: slot rotated by LiveAuthWatcher.
+    // 3E-ARCH：paper/demo boot 固定；live 改 slot 由 LiveAuthWatcher 輪替。
     let (paper_cmd_tx, paper_cmd_rx) = tokio::sync::mpsc::unbounded_channel();
     let (demo_cmd_tx, demo_cmd_rx) = if demo_bindings.is_some() {
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
@@ -452,8 +425,23 @@ async fn async_main(
     } else {
         (None, None)
     };
+    // Live command sender slot — populated by the watcher / boot closure
+    // path (see `live_pipeline_spawner` later). IPC + scanner / phase4
+    // reads via `EngineCommandChannels::live_snapshot()`.
+    // Live 命令 sender slot — watcher / boot closure 填入；IPC + scanner /
+    // phase4 經 `EngineCommandChannels::live_snapshot()` 讀取。
+    let live_cmd_slot: LiveCmdSenderSlot =
+        Arc::new(ParkingRwLock::new(None));
+
+    // Boot-time live command channel: Some if boot authorized, None otherwise.
+    // When Some, mirror into live_cmd_slot so IPC/scanner see boot sender.
+    // LIVE-RECONCILER-STALE-CMD-TX P1 TODO: reconcilers hold this by-value.
+    // Boot-time live 命令通道：授權 → Some（同時寫 slot）；否則 None。
     let (live_cmd_tx, live_cmd_rx) = if live_bindings.is_some() {
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        // Mirror into slot so IPC / scanner / phase4 see the same sender.
+        // 寫入 slot，IPC / scanner / phase4 即見。
+        *live_cmd_slot.write() = Some(tx.clone());
         (Some(tx), Some(rx))
     } else {
         (None, None)
@@ -468,9 +456,10 @@ async fn async_main(
         if let Some(ref tx) = demo_cmd_tx {
             channels.demo = Some(tx.clone());
         }
-        if let Some(ref tx) = live_cmd_tx {
-            channels.live = Some(tx.clone());
-        }
+        // live owned field stays None; live_slot below provides the
+        // dynamic snapshot path.
+        // owned `live` 留 None；live_slot 提供動態快照路徑。
+        channels.live_slot = Some(Arc::clone(&live_cmd_slot));
         channels
     });
     ipc_server.set_config_stores(
@@ -480,39 +469,14 @@ async fn async_main(
     );
     ipc_server.set_scanner_registry(Arc::clone(&symbol_registry));
 
-    // ------------------------------------------------------------------
-    // PIPELINE-SLOT-1 Phase 3: construct Live authorization watcher and
-    // wire its IPC trigger into the IPC server before `.run()` starts.
-    //
-    // Why here, before `ipc_server.run()` spawn?
-    //   * `set_live_auth_recheck_sender` must land before any connection
-    //     is accepted so the `trigger_live_auth_recheck` method can find
-    //     the sender — otherwise Python's first post-renew trigger after
-    //     boot would get `watcher_disabled`.
-    //   * The watcher itself uses `live_slot` + `config` + engine-wide
-    //     cancel token, all of which are ready by this point.
-    //
-    // The watcher replaces the Phase 2 5-min re-verify loop (removed
-    // below). It polls every 5 seconds, tears down on auth invalidation,
-    // AND respawns on renewal (gated by exponential backoff).
-    //
-    // PIPELINE-SLOT-1 Phase 3：構造 Live 授權 watcher 並在 `ipc_server.run()`
-    // spawn 前接入 IPC trigger。
-    //   * `set_live_auth_recheck_sender` 必須在接受任何連線前完成，否則
-    //     Python 開機後首次 post-renew trigger 會收到 `watcher_disabled`。
-    //   * Watcher 自身所需 `live_slot` + `config` + 引擎級 cancel token 此時已就緒。
-    //
-    // Watcher 取代 Phase 2 的 5 分鐘重驗 loop（下方已移除）。每 5 秒輪詢，
-    // 授權失效時 teardown，授權恢復時 respawn（經指數退避閘）。
-    // ------------------------------------------------------------------
-    let (live_auth_watcher, live_auth_trigger_handle) =
-        live_auth_watcher::LiveAuthWatcher::new(
-            Arc::clone(&live_slot) as Arc<dyn live_auth_watcher::SpawnOp>,
-            Arc::clone(&config),
-            live_bybit_environment(),
-            cancel.clone(),
-        );
+    // Two-stage watcher construction: pre-create IPC trigger handle now
+    // (must wire before IPC.run() accepts connections), assemble full watcher
+    // later (after writers/Arc bundle ready). See live_auth_watcher::pre_create_trigger.
+    // 兩階段 watcher：IPC handle 先接線；full watcher 待 writers 就緒後組裝。
+    let (live_auth_trigger_handle, live_auth_ipc_trigger_rx) =
+        live_auth_watcher::LiveAuthWatcher::pre_create_trigger();
     ipc_server.set_live_auth_recheck_sender(live_auth_trigger_handle.sender());
+    ipc_server.set_live_cmd_sender_slot(Arc::clone(&live_cmd_slot));
 
     let budget_tracker_slot = ipc_server.budget_tracker_slot();
     let teacher_loop_slot = ipc_server.teacher_loop_slot();
@@ -524,23 +488,10 @@ async fn async_main(
     // G3-11：在 IPC server detach 前取 slot handle，scheduler spawn 後 late-inject counters。
     let strategist_counters_slot = ipc_server.strategist_counters_slot();
 
-    // G3-08 H State Gateway Phase 1 (2026-04-26): conditionally spawn the
-    // Rust-side cache + 10s poll daemon, gated by
-    // `OPENCLAW_H_STATE_GATEWAY=1` (DEFAULT-OFF). When env-gate is missing
-    // or any value other than "1", `spawn_h_state_poller_if_enabled`
-    // returns None and the slot stays uninjected — IPC handlers respond
-    // with `gateway_disabled` payload (zero overhead path).
-    //
-    // Must happen BEFORE `ipc_server.run()` detach because
-    // `set_h_state_invalidation_sender` requires `&mut self`.
-    //
-    // G3-08 H State Gateway Phase 1：條件 spawn cache + 10s poll daemon，
-    // 受 `OPENCLAW_H_STATE_GATEWAY=1`（DEFAULT-OFF）控管。env-gate 未設或
-    // 值不是 "1" 時 `spawn_h_state_poller_if_enabled` 回 None，slot 不被
-    // 注入 — IPC handler 回 `gateway_disabled` payload（零負擔路徑）。
-    //
-    // 必須在 `ipc_server.run()` detach 前完成，
-    // 因為 `set_h_state_invalidation_sender` 需要 `&mut self`。
+    // G3-08 H State Gateway Phase 1 (2026-04-26): gated by
+    // OPENCLAW_H_STATE_GATEWAY=1 (DEFAULT-OFF). Must run before IPC detach
+    // because set_h_state_invalidation_sender requires &mut self.
+    // G3-08：受 OPENCLAW_H_STATE_GATEWAY=1 控管；IPC detach 前完成。
     let h_state_cache_slot_handle = ipc_server.h_state_cache_slot();
     if let Some(h_state_inv_tx) = main_boot_tasks::spawn_h_state_poller_if_enabled(
         &h_state_cache_slot_handle,
@@ -563,17 +514,15 @@ async fn async_main(
         }
     });
 
-    // Spawn the Live auth watcher task. Its `run()` future owns `self`,
-    // so we spawn it after `ipc_server.run()` is detached. The watcher
-    // exits cleanly when the engine-wide `cancel` token fires.
-    // 起 Live 授權 watcher 任務。`run()` future 持有 `self`，故在
-    // `ipc_server.run()` detach 後 spawn。引擎級 `cancel` token 觸發時乾淨退出。
-    let _live_auth_watcher_handle = tokio::spawn(live_auth_watcher.run());
-    info!(
-        env = ?live_bybit_environment(),
-        "PIPELINE-SLOT-1 Phase 3 Live auth watcher spawned (polls 5s, \
-         backoff 1s→60s) / Phase 3 Live 授權 watcher 已啟動（5s 輪詢，1s→60s 退避）"
-    );
+    // 2026-04-27 LIVE-AUTH-WATCHER-EVENT-CONSUMER-SPAWN: Live auth watcher
+    // spawn moved further below (after `live_pipeline_spawner` closure is
+    // constructed). The watcher receiver was pre-created at the top of
+    // this function via `pre_create_trigger`; the IPC handle has been
+    // wired since then.
+    //
+    // 2026-04-27：watcher spawn 下移（待 `live_pipeline_spawner` closure
+    // 組好）。Receiver 已於本函式上方 `pre_create_trigger` 預建，IPC
+    // handle 也已接好。
 
     // ------------------------------------------------------------------
     // 3E-ARCH shared REST client + instrument info + fee-rate tasks init —
@@ -639,12 +588,6 @@ async fn async_main(
         &current_ws_client_tx,
         event_tx.clone(),
     );
-
-    // 3E-ARCH: Private WS bindings are now inside ExchangePipelineBindings (D21).
-    // 私有 WS 綁定已在 ExchangePipelineBindings 內（D21）。
-
-    // 3E-ARCH: Private WS bindings are now inside ExchangePipelineBindings (D21).
-    // 私有 WS 綁定已在 ExchangePipelineBindings 內（D21）。
 
     // ------------------------------------------------------------------
     // Phase 1: Database pool + writer tasks
@@ -879,11 +822,22 @@ async fn async_main(
     } else {
         None
     };
-    let live_event_channel = if has_live {
-        Some(mpsc::channel::<Arc<PriceEvent>>(1024))
-    } else {
-        None
-    };
+    // 2026-04-27 LIVE-AUTH-WATCHER-EVENT-CONSUMER-SPAWN: live event channel
+    // is now fully slot-based. The closure (boot Some path + watcher
+    // respawn) builds a fresh channel each invocation, writes the sender
+    // into `live_event_slot`, and moves the receiver into the OS thread
+    // running `run_event_consumer`. Boot does NOT pre-build the channel
+    // here — fan-out reads the slot per-tick, so the slot starting empty
+    // (live_bindings None at boot) is exactly the "Live not yet up"
+    // semantic we want.
+    //
+    // 2026-04-27 修復：live event 通道完全 slot 化。Closure（boot Some 與
+    // watcher respawn）每次建新通道、寫 sender 入 `live_event_slot`、把
+    // receiver move 進跑 `run_event_consumer` 的 OS 線程。Boot 不在此處
+    // 預建通道 — fan-out 每 tick 讀 slot，slot 初始空（boot live_bindings
+    // None）正是「Live 尚未上線」語意。
+    let live_event_slot: main_fanout::LiveEventSenderSlot =
+        Arc::new(ParkingRwLock::new(None));
 
     // MAJOR-2: Ready barriers — tx goes to pipeline deps, rx goes to fan-out.
     let (paper_ready_tx, paper_ready_rx) = tokio::sync::oneshot::channel::<()>();
@@ -893,12 +847,21 @@ async fn async_main(
     } else {
         (None, None)
     };
-    let (live_ready_tx, live_ready_rx) = if has_live {
-        let (tx, rx) = tokio::sync::oneshot::channel::<()>();
-        (Some(tx), Some(rx))
-    } else {
-        (None, None)
-    };
+    // 2026-04-27 LIVE-AUTH-WATCHER-EVENT-CONSUMER-SPAWN: live ready barrier
+    // is built per-spawn inside the spawner closure (boot Some + watcher
+    // respawn share the closure). Fan-out is invoked with `None` for
+    // `live_ready_rx`; fan-out's barrier step skips the live arm and
+    // proceeds — paper / demo barriers still gate ordered init. The
+    // ready_tx the closure builds fires when the freshly-spawned event
+    // consumer initializes; nobody awaits it (we drop the rx) because
+    // fan-out is already running by then.
+    //
+    // 2026-04-27 修復：live ready barrier 由 spawner closure 每次 spawn 內建
+    // （boot Some 與 watcher respawn 共用 closure）。fan-out 以 `None`
+    // 接 `live_ready_rx`，barrier 步驟跳過 live arm；paper / demo barrier
+    // 仍守住有序初始化。Closure 內建 ready_tx 在 event consumer 初始化時
+    // fire，無人 await（rx 直接 drop）— 屆時 fan-out 早已運行。
+    let live_ready_rx: Option<tokio::sync::oneshot::Receiver<()>> = None;
 
     // BLOCKER-3 D15: Shared cross-engine global exposure atomic.
     let global_exposure_usdt = Arc::new(std::sync::atomic::AtomicU64::new(0));
@@ -925,7 +888,10 @@ async fn async_main(
         event_rx,
         paper_event_tx,
         demo_event_channel.as_ref().map(|(tx, _)| tx.clone()),
-        live_event_channel.as_ref().map(|(tx, _)| tx.clone()),
+        // 2026-04-27 LIVE-AUTH-WATCHER-EVENT-CONSUMER-SPAWN: live receiver
+        // is now a slot rotated by the watcher.
+        // 2026-04-27：live 接收端為 watcher 輪替的 slot。
+        Arc::clone(&live_event_slot),
         paper_ready_rx,
         demo_ready_rx,
         live_ready_rx,
@@ -1024,61 +990,140 @@ async fn async_main(
             }
         };
 
-    // PIPELINE-SLOT-1 Phase 2/3: same Option-pair invariant for Live.
-    // PIPELINE-SLOT-1 Phase 2/3：Live 同樣以 Option-pair 強制不變式。
-    let live_thread_handle: Option<std::thread::JoinHandle<()>> =
-        match (live_bindings, live_slot_cancel) {
-            (Some(live_b), Some(live_slot_cancel_token)) => {
-                let (_, live_event_rx) =
-                    live_event_channel.expect("live channel must exist");
-                Some(main_pipelines::spawn_live_pipeline(
-                    &spawn_ctx,
-                    &writers,
-                    main_pipelines::LiveChannels {
-                        bindings: live_b,
-                        slot_cancel: live_slot_cancel_token,
-                        event_rx: live_event_rx,
-                        cmd_tx: live_cmd_tx.clone(),
-                        cmd_rx: live_cmd_rx,
-                        ready_tx: live_ready_tx,
-                        positions_mirror: Arc::clone(&live_positions_mirror),
-                    },
-                ))
-            }
-            (None, None) => None,
-            (Some(_), None) | (None, Some(_)) => {
-                tracing::error!(
-                    "live bindings/slot-cancel pairing invariant violated — skipping Live spawn \
-                     / Live bindings/slot-cancel 配對不變式違反 — 跳過 Live 啟動"
-                );
-                None
-            }
+    // ------------------------------------------------------------------
+    // LIVE-AUTH-WATCHER-EVENT-CONSUMER-SPAWN (2026-04-27): spawner closure
+    // extracted to main_pipelines::build_live_pipeline_spawner (BLOCKER-1).
+    // Boot Some → direct spawn via spawn_ctx (reused, no duplication).
+    // Boot None / mid-session → LiveAuthWatcher decides_once.
+    // ------------------------------------------------------------------
+    let live_thread_handle_slot: live_auth_watcher::LiveThreadHandleSlot =
+        Arc::new(ParkingMutex::new(None));
+
+    // Build the live pipeline spawner via main_pipelines::build_live_pipeline_spawner.
+    // BLOCKER-1 (E2 round-2, 2026-04-27): extracted from async_main to bring
+    // main.rs under the §九 1200-line hard cap. The spawner closure is invoked
+    // by LiveAuthWatcher on every successful slot try_spawn.
+    //
+    // BLOCKER-1（E2 round-2，2026-04-27）：spawner closure 抽至
+    // main_pipelines::build_live_pipeline_spawner，讓 main.rs 回到 §九
+    // 1200 行硬上限以內。
+    let live_pipeline_spawner: live_auth_watcher::LivePipelineSpawner =
+        main_pipelines::build_live_pipeline_spawner(main_pipelines::LiveSpawnBundle {
+            config: Arc::clone(&config),
+            cancel: cancel.clone(),
+            instruments: shared_instruments.clone(),
+            shared_client: shared_client.clone(),
+            risk_stores: risk_stores.clone(),
+            budget_store: Arc::clone(&budget_store),
+            audit_pool: db_pool.get().cloned(),
+            symbol_registry: Arc::clone(&symbol_registry),
+            scanner_store: Arc::clone(&scanner_store),
+            shared_linucb_runtime: Arc::clone(&shared_linucb_runtime),
+            shared_news_snapshot: Arc::clone(&shared_news_snapshot),
+            shared_last_tick_ms: Arc::clone(&shared_last_tick_ms),
+            canary_handle: canary_handle.clone(),
+            per_engine_predictors: Arc::clone(&per_engine_predictors),
+            cross_engine_tx: cross_engine_tx.clone(),
+            global_exposure_usdt: Arc::clone(&global_exposure_usdt),
+            live_positions_mirror: Arc::clone(&live_positions_mirror),
+            live_cmd_slot: Arc::clone(&live_cmd_slot),
+            live_event_slot: Arc::clone(&live_event_slot),
+            has_demo,
+            market_tx: market_tx.clone(),
+            feature_tx: feature_tx.clone(),
+            trading_tx: trading_tx.clone(),
+            context_tx: context_tx.clone(),
+            decision_feature_tx: decision_feature_tx.clone(),
+            shadow_fill_tx: shadow_fill_tx.clone(),
+            exit_feature_tx: exit_feature_tx.clone(),
+            shadow_exit_tx: shadow_exit_tx.clone(),
+        });
+
+    // Boot Some: direct spawn using pre-built channels. Reuses the `spawn_ctx`
+    // + `writers` constructed above (BLOCKER-1 duplication eliminated per E2
+    // round-2). The pre-built channels are essential for reconcilers / scheduler
+    // that capture cmd_tx by-value at boot — they cannot be rotated through the
+    // spawner closure (LIVE-RECONCILER-STALE-CMD-TX P1 TODO).
+    //
+    // Boot None: watcher decides_once and spawns when authorization becomes valid.
+    //
+    // Boot Some：使用預建通道直接 spawn，重用上方 spawn_ctx + writers（BLOCKER-1
+    // 去重複，per E2 round-2）。預建通道供 reconciler / scheduler boot-time 值捕獲
+    // — 不能走 spawner closure 輪換（LIVE-RECONCILER-STALE-CMD-TX P1 TODO）。
+    // Boot None：watcher 在授權生效後決策並 spawn。
+    if let (Some(live_b), Some(live_slot_cancel_token)) = (live_bindings, live_slot_cancel) {
+        let (boot_live_event_tx, boot_live_event_rx) = mpsc::channel::<Arc<PriceEvent>>(1024);
+        *live_event_slot.write() = Some(boot_live_event_tx);
+        let (boot_live_ready_tx, _boot_live_ready_rx) = tokio::sync::oneshot::channel::<()>();
+        let live_channels = main_pipelines::LiveChannels {
+            bindings: live_b,
+            slot_cancel: live_slot_cancel_token,
+            event_rx: boot_live_event_rx,
+            cmd_tx: live_cmd_tx.clone(),
+            cmd_rx: live_cmd_rx,
+            ready_tx: Some(boot_live_ready_tx),
+            positions_mirror: Arc::clone(&live_positions_mirror),
         };
+        let handle = main_pipelines::spawn_live_pipeline(&spawn_ctx, &writers, live_channels);
+        *live_thread_handle_slot.lock() = Some(handle);
+        info!(
+            "boot-time Live pipeline spawned (direct path, reused spawn_ctx) \
+             / boot-time Live 管線已啟動（直接路徑，重用 spawn_ctx）"
+        );
+    } else {
+        info!(
+            "boot-time Live pipeline NOT spawned (no authorization at boot); \
+             LiveAuthWatcher will spawn via spawner closure when authorization becomes valid \
+             / boot 時無授權；watcher 於授權生效時經 spawner closure 啟動"
+        );
+    }
 
     // ------------------------------------------------------------------
-    // F6 PH5-WIRE-1 RELOAD (2026-04-26): conditionally spawn the periodic +
-    // manual-trigger edge estimates reload daemon, gated by
-    // `OPENCLAW_EDGE_RELOAD=1` (DEFAULT-OFF, strict "1" semantics).
+    // 2026-04-27 LIVE-AUTH-WATCHER-EVENT-CONSUMER-SPAWN: assemble the
+    // watcher with the spawner closure + thread-handle slot. The IPC
+    // trigger handle was wired earlier (before IPC server detached); we
+    // reuse the matching receiver here via `from_parts`.
+    // 2026-04-27：以 spawner closure + thread-handle slot 組裝 watcher。
+    // IPC trigger handle 上面已接，本處透過 `from_parts` 接 receiver。
+    // BLOCKER-2 (2026-04-27): pass live_cmd_slot and live_event_slot into
+    // the watcher so that teardown arm can clear them. This prevents the
+    // governance broadcast loop (set_system_mode) and fan-out from
+    // delivering commands/ticks to a dead pipeline after teardown.
     //
-    // Why here, after all pipelines spawned + before signal_loop?
-    //   * Each pipeline's `cmd_tx` is cloneable; constructed earlier — clones cheap.
-    //   * env=0 → spawner returns None (zero memory / zero spawn).
-    //   * Cancel-token shutdown propagates from engine-wide cancel; daemon
-    //     joins cleanly under existing main_shutdown ordered_shutdown.
-    //
-    // Returns Some(Sender<()>) only when env=1 AND >=1 pipeline cmd_tx is
-    // bound; else None and zero spawn (mirrors G3-08 H state poller pattern).
-    //
-    // F6 PH5-WIRE-1 RELOAD（2026-04-26）：條件 spawn 週期 + 手動 trigger
-    // 兩條重載 daemon，受 `OPENCLAW_EDGE_RELOAD=1`（DEFAULT-OFF，嚴格 "1" 語意）控管。
-    //   * 此處 spawn 因 cmd_tx 已就緒、env=0 時 spawner 回 None（0 spawn）。
-    //   * Cancel-token 由 engine-wide cancel 傳遞，現有 main_shutdown 自動 join。
-    //
-    // 啟用條件：env=1 **且** ≥1 管線 cmd_tx 綁定 → 回 Some；否則 None
-    // （對齊 G3-08 H state poller pattern）。
-    // 註：手動 IPC trigger 接線（IpcServer slot late-inject）於 FUP commit
-    //     接線（避免單次 commit 改太多檔）。本 commit 僅週期 1h reload 即可
-    //     解 Phase 5 99.98% reject root cause。
+    // BLOCKER-2（2026-04-27）：傳入 live_cmd_slot / live_event_slot，
+    // 讓 teardown arm 清空兩個 slot，防止 governance broadcast 迴圈
+    // 和 fan-out 在 teardown 後仍往死管線投命令 / tick。
+    let live_auth_watcher = live_auth_watcher::LiveAuthWatcher::from_parts(
+        Arc::clone(&live_slot) as Arc<dyn live_auth_watcher::SpawnOp>,
+        Arc::clone(&config),
+        live_bybit_environment(),
+        cancel.clone(),
+        live_auth_ipc_trigger_rx,
+        Some(Arc::clone(&live_pipeline_spawner)),
+        Some(Arc::clone(&live_thread_handle_slot)),
+        Some(Arc::clone(&live_cmd_slot)),
+        Some(Arc::clone(&live_event_slot)),
+    );
+
+    // Spawn the watcher run loop. From here on, mid-session authorization
+    // changes (renew / revoke) drive Live respawn / teardown via the
+    // closure path above.
+    // 啟動 watcher run loop。中途授權變化（renew / revoke）驅動 Live
+    // respawn / teardown 經上方 closure 路徑。
+    let _live_auth_watcher_handle = tokio::spawn(live_auth_watcher.run());
+    info!(
+        env = ?live_bybit_environment(),
+        boot_live_up = live_thread_handle_slot.lock().is_some(),
+        "PIPELINE-SLOT-1 Phase 3 + 2026-04-27 LIVE-AUTH-WATCHER-EVENT-CONSUMER-SPAWN \
+         watcher spawned (polls 5s, backoff 1s→60s; spawner closure injected) \
+         / watcher 已啟動（5s 輪詢，1s→60s 退避；spawner closure 已注入）"
+    );
+
+    // ------------------------------------------------------------------
+    // F6 PH5-WIRE-1 RELOAD (2026-04-26): edge estimates reload daemon,
+    // gated by OPENCLAW_EDGE_RELOAD=1 (DEFAULT-OFF). Returns Some(tx)
+    // when env=1; late-injects into IPC slot for manual reload trigger.
+    // F6：邊際估計重載 daemon，受 OPENCLAW_EDGE_RELOAD=1 控管。
     // ------------------------------------------------------------------
     let edge_reload_signal_tx = main_boot_tasks::spawn_edge_estimates_reloader_if_enabled(
         Some(paper_cmd_tx.clone()),
@@ -1112,31 +1157,13 @@ async fn async_main(
         "engine started / 引擎已啟動"
     );
 
-    // ------------------------------------------------------------------
-    // LIVE-GATE-BINDING-1 (2026-04-18) → PIPELINE-SLOT-1 Phase 3 (2026-04-19):
-    // periodic re-verify is now driven by `LiveAuthWatcher` (spawned above
-    // near `ipc_server.run()`). It polls authorization.json every 5s and —
-    // unlike the Phase 2 300s ticker it replaces — handles BOTH invalidation
-    // teardown AND operator-renew respawn, gated by an exponential backoff
-    // so a persistently-failing `build_exchange_pipeline` does not storm
-    // Bybit. IPC fast-path `trigger_live_auth_recheck` from Python's
-    // `/auth/renew` and `/auth/revoke` routes keeps TTR under 100ms.
-    //
-    // LIVE-GATE-BINDING-1 (2026-04-18) → PIPELINE-SLOT-1 Phase 3 (2026-04-19)：
-    // 定期重驗授權由 `LiveAuthWatcher`（上方 `ipc_server.run()` 附近 spawn）驅動。
-    // 5s 輪詢 authorization.json，與 Phase 2 300s ticker 的差異：**同時**處理
-    // 失效 teardown 與 operator renew respawn，並以指數退避閘防止持續失敗
-    // 敲死 Bybit。Python `/auth/renew`、`/auth/revoke` 路由經 IPC 快路徑
-    // `trigger_live_auth_recheck` 讓 TTR 壓在 100ms 內。
+    // LiveAuthWatcher (spawned above) drives periodic re-verify every 5s +
+    // immediate IPC fast-path; handles teardown AND respawn (LIVE-GATE-BINDING-1 +
+    // PIPELINE-SLOT-1 Phase 3, 2026-04-18/19). No explicit ticker here.
+    // LiveAuthWatcher 已在上方 spawn，負責 5s 輪詢 + IPC 快路徑觸發。
 
-    // ------------------------------------------------------------------
-    // Fix 4 (2026-04-14) tick-stale watchdog — extracted to `main_watchdog.rs`
-    // (G1-03 Wave 1). Polls shared_last_tick_ms every 30s; if a tick has ever
-    // arrived and no new tick for ≥120s, flushes stdout/stderr and triggers
-    // engine-wide cancel. Covers WS disconnect + event_consumer zombie cases.
-    // Fix 4 (2026-04-14) tick-stale watchdog — 已抽至 `main_watchdog.rs`
-    // （G1-03 Wave 1），每 30s 輪詢；曾收過 tick 且 ≥120s 無新 tick → cancel。
-    // ------------------------------------------------------------------
+    // Tick-stale watchdog — extracted to main_watchdog.rs (G1-03 Wave 1).
+    // tick-stale watchdog 已抽至 main_watchdog.rs。
     main_watchdog::spawn_tick_stale_watchdog(&shared_last_tick_ms, &cancel);
 
     // ------------------------------------------------------------------
@@ -1144,14 +1171,10 @@ async fn async_main(
     // ------------------------------------------------------------------
     signal_loop(&config, &cancel).await;
 
-    // ------------------------------------------------------------------
-    // MAJOR-3 ordered shutdown (Live → Demo → Paper) extracted to
-    // `main_shutdown.rs` (G1-03 Wave 1). Cancels engine-wide token, awaits
-    // slot teardowns (E2 MAJOR #3 deterministic join), drains handles under
-    // 10s timeout, removes IPC socket file.
-    // MAJOR-3 有序關閉（Live → Demo → Paper）已抽至 `main_shutdown.rs`
-    // （G1-03 Wave 1）：cancel + slot teardown + handle drain + socket cleanup。
-    // ------------------------------------------------------------------
+    // Ordered shutdown — extracted to main_shutdown.rs (G1-03 Wave 1).
+    // Take latest Live OS thread handle from watcher slot before join.
+    // 有序關閉已抽至 main_shutdown.rs；先從 watcher slot 取最新 handle。
+    let live_thread_handle = live_thread_handle_slot.lock().take();
     main_shutdown::run_ordered_shutdown(
         &config,
         &cancel,

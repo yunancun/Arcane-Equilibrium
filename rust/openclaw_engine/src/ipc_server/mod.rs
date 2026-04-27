@@ -69,7 +69,7 @@ mod tests;
 
 // Public API (consumed by main.rs / external crates).
 // 公開 API（main.rs 與外部 crate 使用）。
-pub use engine_routing::{EngineCommandChannels, PerEngineRiskStores};
+pub use engine_routing::{EngineCommandChannels, LiveCmdSenderSlot, PerEngineRiskStores};
 pub use protocol::{IpcError, JsonRpcError, JsonRpcRequest, JsonRpcResponse};
 pub use server::IpcServer;
 pub use slots::{
