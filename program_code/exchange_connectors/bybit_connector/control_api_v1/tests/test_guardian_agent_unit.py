@@ -487,5 +487,137 @@ class TestGuardianApprovedIntentEmission(unittest.TestCase):
         self.assertEqual(len(approved), 1, "Executor should receive APPROVED_INTENT")
 
 
+# ── G3-08 Phase 4 Sub-task 4-2: Guardian agent_state snapshot ──
+# G3-08 Phase 4 Sub-task 4-2：Guardian agent 狀態 snapshot
+
+
+class TestGuardianAgentStateSnapshot(unittest.TestCase):
+    """G3-08 Phase 4 Sub-task 4-2: get_guardian_snapshot() schema + thread safety.
+
+    PA RFC §2.2 — 8 fields, all int / bool→int (Rust HashMap<String, i64> parity).
+    PA RFC §2.2 — 8 欄位、皆 int / bool→int（Rust HashMap<String, i64> 對齊）。
+    """
+
+    _EXPECTED_FIELDS = {
+        "intents_reviewed",
+        "verdicts_approved",
+        "verdicts_rejected",
+        "verdicts_modified",
+        "events_assessed",
+        "errors",
+        "active_event_risks",
+        "verdict_log_size",
+    }
+
+    def _make_intent(self, symbol="BTCUSDT", direction="long", size=0.01, leverage=1.0):
+        return TradeIntent(
+            symbol=symbol,
+            strategy="test",
+            direction=direction,
+            size=size,
+            params={"leverage": leverage},
+            confidence=0.7,
+        )
+
+    def test_snapshot_zero_initial_state(self):
+        """Fresh GuardianAgent → all 8 fields present, all 0."""
+        agent = GuardianAgent()
+        snap = agent.get_guardian_snapshot()
+        self.assertEqual(set(snap.keys()), self._EXPECTED_FIELDS)
+        for k, v in snap.items():
+            self.assertIsInstance(v, int, f"{k} must be int")
+            self.assertEqual(v, 0, f"{k} must be 0 on fresh agent")
+
+    def test_snapshot_after_approved_review(self):
+        """APPROVED review increments intents_reviewed + verdicts_approved."""
+        agent = GuardianAgent(config=GuardianConfig())
+        agent.start()
+        verdict = agent.review_intent(self._make_intent())
+        self.assertEqual(verdict.result, RiskVerdictResult.APPROVED)
+        snap = agent.get_guardian_snapshot()
+        self.assertEqual(snap["intents_reviewed"], 1)
+        self.assertEqual(snap["verdicts_approved"], 1)
+        self.assertEqual(snap["verdicts_rejected"], 0)
+        self.assertEqual(snap["verdicts_modified"], 0)
+        self.assertEqual(snap["events_assessed"], 0)
+        self.assertEqual(snap["active_event_risks"], 0)
+        # verdict_log_size grew to 1.
+        self.assertEqual(snap["verdict_log_size"], 1)
+
+    def test_snapshot_after_rejected_review(self):
+        """REJECTED review increments verdicts_rejected (direction conflict)."""
+        agent = GuardianAgent(config=GuardianConfig())
+        agent.start()
+        agent.update_active_positions({
+            "test:BTCUSDT": {"symbol": "BTCUSDT", "side": "Sell"},
+        })
+        verdict = agent.review_intent(self._make_intent(direction="long"))
+        self.assertEqual(verdict.result, RiskVerdictResult.REJECTED)
+        snap = agent.get_guardian_snapshot()
+        self.assertEqual(snap["intents_reviewed"], 1)
+        self.assertEqual(snap["verdicts_rejected"], 1)
+        self.assertEqual(snap["verdicts_approved"], 0)
+        self.assertEqual(snap["verdict_log_size"], 1)
+
+    def test_snapshot_after_modified_review(self):
+        """MODIFIED review (over-leverage but not 2x cap) increments verdicts_modified."""
+        agent = GuardianAgent(config=GuardianConfig(max_leverage=5.0))
+        agent.start()
+        # leverage 7 > 5 cap but ≤ 5*2=10 → MODIFIED, not REJECTED.
+        verdict = agent.review_intent(self._make_intent(leverage=7.0))
+        self.assertEqual(verdict.result, RiskVerdictResult.MODIFIED)
+        snap = agent.get_guardian_snapshot()
+        self.assertEqual(snap["intents_reviewed"], 1)
+        self.assertEqual(snap["verdicts_modified"], 1)
+
+    def test_snapshot_active_event_risks_gauge(self):
+        """active_event_risks tracks len(self._active_event_risks) gauge."""
+        agent = GuardianAgent(config=GuardianConfig())
+        agent.start()
+        # Inject event risks directly.
+        agent._active_event_risks = [{"event_type": "x"}, {"event_type": "y"}]
+        snap = agent.get_guardian_snapshot()
+        self.assertEqual(snap["active_event_risks"], 2)
+
+    def test_snapshot_all_int_phase4_invariant(self):
+        """Phase 4 invariant: all values must be int (no float / str / bool)."""
+        agent = GuardianAgent(config=GuardianConfig())
+        agent.start()
+        agent.review_intent(self._make_intent())
+        snap = agent.get_guardian_snapshot()
+        for k, v in snap.items():
+            self.assertIsInstance(v, int, f"{k}={v!r} must be int (Phase 4 invariant)")
+            # bool is a subclass of int in Python — make sure bools aren't leaking.
+            self.assertNotIsInstance(v, bool, f"{k}={v!r} must NOT be bool (cast to int)")
+
+    def test_snapshot_thread_safety_acquires_lock(self):
+        """get_guardian_snapshot must acquire self._lock — assert by inspecting
+        that the call returns a dict snapshot even while another thread is
+        actively mutating _stats. Pragmatic smoke (not a full race assertion).
+        """
+        import threading
+        agent = GuardianAgent(config=GuardianConfig())
+        agent.start()
+        stop_flag = threading.Event()
+
+        def hammer():
+            while not stop_flag.is_set():
+                with agent._lock:
+                    agent._stats["intents_reviewed"] = agent._stats.get(
+                        "intents_reviewed", 0
+                    ) + 1
+
+        t = threading.Thread(target=hammer, daemon=True)
+        t.start()
+        try:
+            for _ in range(50):
+                snap = agent.get_guardian_snapshot()
+                self.assertEqual(set(snap.keys()), self._EXPECTED_FIELDS)
+                self.assertIsInstance(snap["intents_reviewed"], int)
+        finally:
+            stop_flag.set()
+            t.join(timeout=2.0)
+
+
 if __name__ == "__main__":
     unittest.main()

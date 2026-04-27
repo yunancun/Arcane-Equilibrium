@@ -244,14 +244,22 @@ class _FakeStrategist:
             self.get_strategist_snapshot = _get_strategist
 
 
-def _install_fake_strategy_wiring(strategist):
+def _install_fake_strategy_wiring(strategist, guardian=None):
     """Replace ``app.strategy_wiring`` in sys.modules with a stub.
+
+    G3-08 Phase 4 Sub-task 4-2 adds optional ``guardian`` arg; default
+    None preserves Sub-task 4-1 + Phase 1-3 call-site shapes (single-arg
+    calls keep working).
+    G3-08 Phase 4 Sub-task 4-2 增加可選 ``guardian`` 參數；預設 None 保持
+    Sub-task 4-1 + Phase 1-3 呼叫面向（單參數呼叫繼續運作）。
 
     Returns the previous module (or ``None``) so caller can restore.
     """
     prev = sys.modules.get("app.strategy_wiring")
     fake_mod = types.ModuleType("app.strategy_wiring")
     fake_mod.STRATEGIST_AGENT = strategist
+    if guardian is not None:
+        fake_mod.GUARDIAN_AGENT = guardian
     sys.modules["app.strategy_wiring"] = fake_mod
     return prev
 
@@ -1491,6 +1499,281 @@ class TestCollectAgentSnapshotsDefensive(unittest.TestCase):
         try:
             result = _collect_agent_snapshots(include_strategist=True)
             self.assertIsNone(result["strategist"])
+        finally:
+            if prev_sw is None:
+                sys.modules.pop("app.strategy_wiring", None)
+            else:
+                sys.modules["app.strategy_wiring"] = prev_sw
+
+
+# ── G3-08 Phase 4 Sub-task 4-2: Guardian agent_state integration ──
+# G3-08 Phase 4 Sub-task 4-2：Guardian agent_state 整合
+
+
+class _FakeGuardian:
+    """Minimal stub mirroring strategy_wiring.GUARDIAN_AGENT shape.
+
+    G3-08 Phase 4 Sub-task 4-2: ``with_guardian_snapshot=True`` binds an
+    instance method ``get_guardian_snapshot`` returning the 8-field dict
+    per PA RFC §2.2. Default ``with_guardian_snapshot=False`` opt-in
+    mirrors Strategist ``with_strategist_snapshot`` pattern, so any test
+    that injects a guardian without flipping the flag exercises the
+    "method absent → silent skip" degradation path.
+
+    G3-08 Phase 4 Sub-task 4-2：``with_guardian_snapshot=True`` 綁定一個
+    實例方法 ``get_guardian_snapshot``，回傳 PA RFC §2.2 的 8 欄位 dict。
+    預設 ``with_guardian_snapshot=False`` opt-in，與 Strategist
+    ``with_strategist_snapshot`` 同 pattern。
+    """
+
+    def __init__(
+        self,
+        with_guardian_snapshot=False,
+        guardian_snapshot=None,
+        guardian_snapshot_raises=None,
+    ):
+        self._guardian_snapshot = guardian_snapshot if guardian_snapshot is not None else {
+            "intents_reviewed": 13,
+            "verdicts_approved": 9,
+            "verdicts_rejected": 3,
+            "verdicts_modified": 1,
+            "events_assessed": 5,
+            "errors": 0,
+            "active_event_risks": 2,
+            "verdict_log_size": 13,
+        }
+        self._guardian_snapshot_raises = guardian_snapshot_raises
+        if with_guardian_snapshot:
+            def _get(_self=self):
+                if _self._guardian_snapshot_raises is not None:
+                    raise _self._guardian_snapshot_raises
+                return _self._guardian_snapshot
+            self.get_guardian_snapshot = _get
+
+
+class TestGuardianAgentStateIntegration(unittest.TestCase):
+    """43-46. G3-08 Phase 4 Sub-task 4-2: agent_states.guardian bucket
+    population + degradation paths. Mirrors Sub-task 4-1 strategist tests
+    (PA RFC §6.2). Per RFC §2.2 the schema has 8 fields, all int / bool→int
+    (Rust ``AgentState.stats: HashMap<String, i64>`` parity).
+
+    G3-08 Phase 4 Sub-task 4-2：agent_states.guardian 桶填入 + 降級路徑；
+    與 Sub-task 4-1 strategist 測試 mirror（PA RFC §6.2）。RFC §2.2 schema
+    為 8 欄位、皆 int / bool→int。
+    """
+
+    _EXPECTED_GUARDIAN_FIELDS = {
+        "intents_reviewed",
+        "verdicts_approved",
+        "verdicts_rejected",
+        "verdicts_modified",
+        "events_assessed",
+        "errors",
+        "active_event_risks",
+        "verdict_log_size",
+    }
+
+    def setUp(self):
+        self._prev_env = os.environ.get("OPENCLAW_H_STATE_GATEWAY")
+        os.environ["OPENCLAW_H_STATE_GATEWAY"] = "1"
+
+    def tearDown(self):
+        if self._prev_env is None:
+            os.environ.pop("OPENCLAW_H_STATE_GATEWAY", None)
+        else:
+            os.environ["OPENCLAW_H_STATE_GATEWAY"] = self._prev_env
+
+    def test_guardian_populated_when_get_guardian_snapshot_present(self):
+        """43. env=1 + guardian.get_guardian_snapshot present →
+        agent_states.guardian contains the 8-field snapshot.
+        """
+        prev_sw = _install_fake_strategy_wiring(
+            _FakeStrategist(
+                _FakeH1Gate(),
+                _FakeModelRouter(),
+                cost_tracker=_FakeCostTracker(),
+                with_h4=True,
+                with_strategist_snapshot=True,
+            ),
+            guardian=_FakeGuardian(with_guardian_snapshot=True),
+        )
+        try:
+            result = build_h_state_full_response()
+            self.assertIn("guardian", result["agent_states"])
+            guardian = result["agent_states"]["guardian"]
+            # Schema parity with Rust AgentState.stats (8 fields).
+            self.assertEqual(set(guardian.keys()), self._EXPECTED_GUARDIAN_FIELDS)
+            # Spot-check default fixture values.
+            self.assertEqual(guardian["intents_reviewed"], 13)
+            self.assertEqual(guardian["verdicts_approved"], 9)
+            self.assertEqual(guardian["active_event_risks"], 2)
+            # All values must be int (Rust HashMap<String, i64> parity).
+            for k, v in guardian.items():
+                self.assertIsInstance(v, int, f"{k} must be int")
+            # Strategist + Guardian both populated.
+            self.assertIn("strategist", result["agent_states"])
+            # Sub-task 4-2 fills strategist + guardian; 4-3/4/5 absent.
+            # Sub-task 4-2 填 strategist + guardian；4-3/4/5 對應 key 缺席。
+            self.assertNotIn("analyst", result["agent_states"])
+            self.assertNotIn("executor", result["agent_states"])
+            self.assertNotIn("scout", result["agent_states"])
+            self.assertEqual(result["version"], 1)
+        finally:
+            _restore_strategy_wiring(prev_sw)
+
+    def test_guardian_dropped_when_get_guardian_snapshot_missing(self):
+        """44. env=1 + guardian lacks get_guardian_snapshot → guardian
+        absent (silent skip preserves never-raise contract). Models the
+        Phase 4 partial-deploy scenario where Sub-task 4-2 hasn't landed.
+        """
+        prev_sw = _install_fake_strategy_wiring(
+            _FakeStrategist(
+                _FakeH1Gate(),
+                _FakeModelRouter(),
+                cost_tracker=_FakeCostTracker(),
+                with_h4=True,
+                with_strategist_snapshot=True,
+            ),
+            # with_guardian_snapshot default False → method absent
+            guardian=_FakeGuardian(),
+        )
+        try:
+            result = build_h_state_full_response()
+            self.assertNotIn("guardian", result["agent_states"])
+            # Strategist still present (Sub-task 4-1 unaffected).
+            self.assertIn("strategist", result["agent_states"])
+            self.assertEqual(result["version"], 1)
+        finally:
+            _restore_strategy_wiring(prev_sw)
+
+    def test_guardian_dropped_when_get_guardian_snapshot_raises(self):
+        """45. env=1 + guardian.get_guardian_snapshot raises → guardian
+        bucket dropped, others unaffected.
+        """
+        prev_sw = _install_fake_strategy_wiring(
+            _FakeStrategist(
+                _FakeH1Gate(),
+                _FakeModelRouter(),
+                cost_tracker=_FakeCostTracker(),
+                with_h4=True,
+                with_strategist_snapshot=True,
+            ),
+            guardian=_FakeGuardian(
+                with_guardian_snapshot=True,
+                guardian_snapshot_raises=RuntimeError("guardian snap boom"),
+            ),
+        )
+        try:
+            result = build_h_state_full_response()
+            self.assertNotIn("guardian", result["agent_states"])
+            # Strategist + H buckets unaffected.
+            self.assertIn("strategist", result["agent_states"])
+            self.assertIn("h1", result["h_states"])
+            self.assertIn("h4", result["h_states"])
+            self.assertEqual(result["version"], 1)
+        finally:
+            _restore_strategy_wiring(prev_sw)
+
+    def test_guardian_none_when_singleton_missing(self):
+        """46. env=1 + GUARDIAN_AGENT absent on strategy_wiring →
+        guardian bucket dropped (singleton-not-wired race).
+        """
+        prev_sw = _install_fake_strategy_wiring(
+            _FakeStrategist(
+                _FakeH1Gate(),
+                _FakeModelRouter(),
+                cost_tracker=_FakeCostTracker(),
+                with_h4=True,
+                with_strategist_snapshot=True,
+            ),
+            # guardian=None default → no GUARDIAN_AGENT attr on fake module
+        )
+        try:
+            result = build_h_state_full_response()
+            self.assertNotIn("guardian", result["agent_states"])
+            # Strategist present.
+            self.assertIn("strategist", result["agent_states"])
+        finally:
+            _restore_strategy_wiring(prev_sw)
+
+
+class TestGuardianAgentStateIncludeFilter(unittest.TestCase):
+    """47-49. G3-08 Phase 4 Sub-task 4-2: include filter honours
+    ``guardian`` bucket selection alongside ``strategist`` + H buckets.
+    """
+
+    def setUp(self):
+        self._prev_env = os.environ.get("OPENCLAW_H_STATE_GATEWAY")
+        os.environ["OPENCLAW_H_STATE_GATEWAY"] = "1"
+        self._prev_sw = _install_fake_strategy_wiring(
+            _FakeStrategist(
+                _FakeH1Gate(),
+                _FakeModelRouter(),
+                cost_tracker=_FakeCostTracker(with_h5=True),
+                with_h4=True,
+                with_strategist_snapshot=True,
+            ),
+            guardian=_FakeGuardian(with_guardian_snapshot=True),
+        )
+
+    def tearDown(self):
+        _restore_strategy_wiring(self._prev_sw)
+        if self._prev_env is None:
+            os.environ.pop("OPENCLAW_H_STATE_GATEWAY", None)
+        else:
+            os.environ["OPENCLAW_H_STATE_GATEWAY"] = self._prev_env
+
+    def test_include_guardian_only(self):
+        """47. include=["guardian"] → agent_states has only guardian,
+        h_states empty, version=1.
+        """
+        result = build_h_state_full_response(include=["guardian"])
+        self.assertIn("guardian", result["agent_states"])
+        self.assertEqual(set(result["agent_states"].keys()), {"guardian"})
+        self.assertEqual(result["h_states"], {})
+        self.assertEqual(result["version"], 1)
+
+    def test_include_default_none_includes_guardian(self):
+        """48. include=None default still picks up guardian bucket
+        (parity with strategist + H buckets default-on).
+        """
+        result = build_h_state_full_response(include=None)
+        self.assertIn("guardian", result["agent_states"])
+        self.assertIn("strategist", result["agent_states"])
+
+    def test_mixed_include_strategist_and_guardian(self):
+        """49. include=["strategist","guardian"] → both populate, h_states empty."""
+        result = build_h_state_full_response(include=["strategist", "guardian"])
+        self.assertEqual(
+            set(result["agent_states"].keys()),
+            {"strategist", "guardian"},
+        )
+        self.assertEqual(result["h_states"], {})
+        self.assertEqual(result["version"], 1)
+
+
+class TestCollectAgentSnapshotsGuardianDefensive(unittest.TestCase):
+    """50. Defensive paths for _collect_agent_snapshots Guardian arm —
+    ensures guardian-only flag yields skeleton when singleton missing.
+    """
+
+    def test_guardian_none_when_singleton_missing(self):
+        """50a. include_guardian=True + GUARDIAN_AGENT absent on fake module
+        → result["guardian"] is None (mirrors 42b for Strategist).
+        """
+        from app.h_state_query_handler import _collect_agent_snapshots
+        prev_sw = sys.modules.get("app.strategy_wiring")
+        bare = types.ModuleType("app.strategy_wiring")
+        # No GUARDIAN_AGENT attribute → getattr returns None.
+        sys.modules["app.strategy_wiring"] = bare
+        try:
+            result = _collect_agent_snapshots(include_guardian=True)
+            self.assertIsNone(result["guardian"])
+            # All other slots must remain None too.
+            self.assertIsNone(result["strategist"])
+            self.assertIsNone(result["analyst"])
+            self.assertIsNone(result["executor"])
+            self.assertIsNone(result["scout"])
         finally:
             if prev_sw is None:
                 sys.modules.pop("app.strategy_wiring", None)

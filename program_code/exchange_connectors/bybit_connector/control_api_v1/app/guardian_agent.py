@@ -42,6 +42,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
 
 from .base_agent import BaseAgent
+from .h_state_invalidator import invalidate_async as _invalidate_h_state_async
 from .llm_call_wrapper import call_ollama_classify, ollama_is_available
 from .multi_agent_framework import (
     AgentMessage,
@@ -484,6 +485,14 @@ class GuardianAgent(BaseAgent):
             logger.error("Failed to handle trade intent: %s / 处理交易意图失败: %s", e, e)
             with self._lock:
                 self._stats["errors"] += 1
+        # G3-08 Phase 4 Sub-task 4-2: hint outside _lock; env=0 no-op.
+        # Fire after every TRADE_INTENT review (success path or fail-closed
+        # error path) so h_state_cache observes verdict-counter mutations
+        # without waiting for the next 10s scheduled poll.
+        # G3-08 Phase 4 Sub-task 4-2：於鎖外送出失效提示；env=0 no-op。
+        # 任何 TRADE_INTENT review（成功/錯誤路徑）後皆 fire，使
+        # h_state_cache 不必等下次 10s 排程 poll 即可觀察到裁決計數變化。
+        _invalidate_h_state_async("agent.guardian.intent_reviewed")
 
     def _handle_event_alert(self, message: AgentMessage) -> None:
         """Handle EventAlert from Scout — assess risk using Qwen if available / 处理 Scout 事件告警"""
@@ -537,6 +546,13 @@ class GuardianAgent(BaseAgent):
                 logger.warning("SM-04 trigger failed: %s", e)
 
         self._audit("event_assessed", event_record)
+        # G3-08 Phase 4 Sub-task 4-2: hint outside _lock; env=0 no-op.
+        # Fire after EventAlert risk assessment so h_state_cache observes
+        # events_assessed / active_event_risks mutations promptly.
+        # G3-08 Phase 4 Sub-task 4-2：於鎖外送出失效提示；env=0 no-op。
+        # EventAlert 風險評估後 fire，使 h_state_cache 即時觀察到
+        # events_assessed / active_event_risks 變化。
+        _invalidate_h_state_async("agent.guardian.event_assessed")
 
     def _handle_risk_pattern(self, message: AgentMessage) -> None:
         """Handle risk pattern from Analyst / 处理 Analyst 风险模式"""
@@ -580,6 +596,34 @@ class GuardianAgent(BaseAgent):
                 "active_positions": len(self._active_positions) if self._active_positions else 0,
                 "active_event_risks": len(self._active_event_risks) if self._active_event_risks else 0,
                 **dict(self._stats),
+            }
+
+    # G3-08 Phase 4 Sub-task 4-2: Guardian agent_state snapshot accessor.
+    # G3-08 Phase 4 Sub-task 4-2：Guardian agent 狀態 snapshot 存取器。
+    def get_guardian_snapshot(self) -> Dict[str, Any]:
+        """Thread-safe agent-state snapshot for h_state_cache (PA RFC §2.2, 8 fields).
+        Schema parity with Rust ``AgentState.stats: HashMap<String, i64>``: all
+        values are int (gauges via ``len(...)`` are also int). Pure-read, takes
+        only ``self._lock``; safe from any thread.
+
+        H state cache 用 Guardian 狀態 snapshot（PA RFC §2.2，8 欄位）。
+        對齊 Rust ``AgentState.stats: HashMap<String, i64>``，皆 int
+        （透過 ``len(...)`` 計量的 gauge 亦為 int）。純讀、只取 ``self._lock``，
+        任何線程安全。
+
+        Phase 4 invariant: all fields are int or bool→int (no float / string).
+        Phase 4 不變量：所有欄位皆 int 或 bool→int（無 float / string）。
+        """
+        with self._lock:
+            return {
+                "intents_reviewed": int(self._stats.get("intents_reviewed", 0)),
+                "verdicts_approved": int(self._stats.get("verdicts_approved", 0)),
+                "verdicts_rejected": int(self._stats.get("verdicts_rejected", 0)),
+                "verdicts_modified": int(self._stats.get("verdicts_modified", 0)),
+                "events_assessed": int(self._stats.get("events_assessed", 0)),
+                "errors": int(self._stats.get("errors", 0)),
+                "active_event_risks": int(len(self._active_event_risks)),
+                "verdict_log_size": int(len(self._verdict_log)),
             }
 
     def get_recent_verdicts(self, limit: int = 20) -> List[Dict[str, Any]]:
