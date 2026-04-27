@@ -725,14 +725,9 @@ async function govRenewLiveAuth() {
     return;
   }
 
-  let d;
-  try {
-    d = await ocPost('/api/v1/live/auth/renew', { accepted_tier: tier, reason: reason });
-  } catch (e) {
-    // fail-closed: show error toast / fail-closed：顯示錯誤 toast
-    ocToast('✗ Renew 請求失敗 / Renew request failed', 'error');
-    return;
-  }
+  // ocPost() does not throw — errors return null; no try/catch needed
+  // ocPost() 不拋例外，錯誤回傳 null；不需要 try/catch
+  const d = await ocPost('/api/v1/live/auth/renew', { accepted_tier: tier, reason: reason });
 
   if (d && (d.ok || d.status === 'ok' || d.data)) {
     const tierLabel = GOV_TRUST_TIER_LABELS[tier] || ('T' + tier);
@@ -740,8 +735,8 @@ async function govRenewLiveAuth() {
     govLoadLiveAuthStatus();
   } else {
     const msg = (d && d.message) || (d && d.data && d.data.message) || 'Renewal failed / 續期失敗';
-    // XSS-safe: ocEsc wraps untrusted server string / ocEsc 包裝不可信的伺服器字串
-    ocToast('✗ ' + ocEsc(msg), 'error');
+    // ocToast uses textContent internally — no need for ocEsc / ocToast 內部使用 textContent，無需 ocEsc
+    ocToast('✗ ' + msg, 'error');
   }
 }
 
@@ -771,17 +766,12 @@ async function govRenewReview() {
     return;
   }
 
-  let d;
-  try {
-    d = await ocPost('/api/v1/live/auth/renew-review', {
-      review_notes: notes.trim(),
-      confirmed_tier: tier,
-    });
-  } catch (e) {
-    // fail-closed / fail-closed
-    ocToast('✗ Full review 提交失敗 / Full review submission failed', 'error');
-    return;
-  }
+  // ocPost() does not throw — errors return null; no try/catch needed
+  // ocPost() 不拋例外，錯誤回傳 null；不需要 try/catch
+  const d = await ocPost('/api/v1/live/auth/renew-review', {
+    review_notes: notes.trim(),
+    confirmed_tier: tier,
+  });
 
   if (d && (d.ok || d.status === 'ok' || d.data)) {
     const tierLabel = GOV_TRUST_TIER_LABELS[tier] || ('T' + tier);
@@ -789,8 +779,8 @@ async function govRenewReview() {
     govLoadLiveAuthStatus();
   } else {
     const msg = (d && d.message) || (d && d.data && d.data.message) || 'Review submission failed / 提交失敗';
-    // XSS-safe: ocEsc wraps untrusted server string / ocEsc 包裝不可信的伺服器字串
-    ocToast('✗ ' + ocEsc(msg), 'error');
+    // ocToast uses textContent internally — no need for ocEsc / ocToast 內部使用 textContent，無需 ocEsc
+    ocToast('✗ ' + msg, 'error');
   }
 }
 
