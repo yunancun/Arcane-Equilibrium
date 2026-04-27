@@ -188,7 +188,14 @@ def _build_prompt_context(agent: "StrategistAgent", intel: IntelObject) -> str:
     # 認知調製器狀態（若已連接）
     if agent._cognitive_modulator is not None:
         try:
-            cog_params = agent._cognitive_modulator.get_current_params()
+            # G8-01 W1 FIX-A：rename `get_current_params` → `get_all_params`
+            # （前者並非 CognitiveModulator 公開 API，AttributeError 被外層 try/except
+            # 靜默吞掉 → cognitive 欄位永遠缺失，違反 feedback_no_dead_params。）
+            # G8-01 W1 FIX-A: rename `get_current_params` → `get_all_params`
+            # (former is NOT a CognitiveModulator public API; the AttributeError
+            # was silently swallowed by the outer try/except, leaving the
+            # cognitive field permanently absent — violates feedback_no_dead_params.)
+            cog_params = agent._cognitive_modulator.get_all_params()
             context_dict["cognitive"] = {
                 "confidence_floor": round(cog_params.get("confidence_floor", 0.6), 3),
                 "qty_ceiling": round(cog_params.get("qty_ceiling", 1.0), 3),
