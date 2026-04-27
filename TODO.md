@@ -433,21 +433,19 @@ ssh trade-core "cd ~/BybitOpenClaw/srv && python3 helper_scripts/db/passive_wait
 
 | 項目 | 類型 | 起算/結束 | 狀態 | Healthcheck | 若 FAIL |
 |---|---|---|---|---|---|
-| **P0-2** 21d demo 時鐘 | 時間被動 | 2026-04-16 → 2026-05-07 | 🟡 進行中 ~10d | [0] engine_alive + [1] 0 crash | 時鐘重置 |
-| **P1-10** PostOnly 1-2w 驗證（=G2-01）| 資料被動 | 2026-04-21 → 05-07/08 | 🟡 累積中 | [3] maker_fill_rate | 驗收失效→G2-04 決策 |
-| **EDGE-DIAG** exit_features 累積（=EDGE-P1b）| 資料被動 | 2026-04-19 → 05-10 per-strategy ≥200 | 🟡 grid 282 / ma 146 / bb_rev 7 | [14] per-strategy tier | 延後 Phase 1b bind |
-| **EDGE-P3** clean window ≥200 | 資料被動 | 2026-04-22 → ~04-30 連 3d PASS | 🟡 75% (150/200) ETA ~04-27 | [11] counterfactual_clean_window_growth | 延後 Gate 1 fallback |
-| **G2-02** ma_crossover 1w post-G7-09 demo | 資料被動 | 2026-04-25 → 05-03 | 🟡 累積中 | trading.fills 過去 1w fee_bps mix maker/taker | tool ready 等資料 |
+| **P0-2** 21d demo 時鐘 | 時間被動 | 2026-04-16 → 2026-05-07 | 🟡 進行中 ~11d | [0] engine_alive + [1] 0 crash | 時鐘重置 |
+| **P1-10** PostOnly 1-2w 驗證（=G2-01）| 資料被動 | 2026-04-21 → 05-07/08 | 🟡 累積中 ~6d | [10] intents_writer_ratio + ad-hoc fills SQL（maker/taker fee_bps mix）；**G2-01-FUP-MAKER-FILL-CHECK P2**：dedicated maker_fill_rate check 缺實裝（先前 healthcheck list 誤標 [3]），結算前需補 | 驗收失效→G2-04 決策 |
+| **EDGE-DIAG** exit_features 累積（=EDGE-P1b）| 資料被動 | 2026-04-19 → 05-10 per-strategy ≥200 | 🟢 grid **304 [READY]** / 🟡 ma **153 [GROWING]** / bb_rev 7 [SPARSE]（04-27 12:00 cron）| [14] per-strategy tier | 延後 Phase 1b bind |
+| **EDGE-P3** clean window ≥200 | 資料被動 | 2026-04-22 → 連 3d PASS | 🟢 **226/200 (113%) ✅ 條件 (a) 達標 04-27**；剩 (d) 連 3d PASS ETA ~04-30 | [11] counterfactual_clean_window_growth | 延後 Gate 1 fallback |
+| **G2-02** ma_crossover 1w post-G7-09 demo | 資料被動 | 2026-04-25 → 05-03 | 🟡 累積中 ~2d | trading.fills 過去 1w fee_bps mix maker/taker | tool ready 等資料 |
 | **G2-03 binding** 等 G2-02 → G2-03-FUP-CALLER-WIRE | 條件被動 | G2-02 結論後 → ~05-03 | ⬜ | (G2-02 完成觸發) | schema-only staging 持續 |
 | **EDGE-P2-flip** 等 EDGE-P1b → operator manual flip | 條件被動 | EDGE-P1b 完成後 ~05-10+ | ⬜ | [15] shadow_exit_agreement_phase2 | tooling ready 等觸發 |
-| **P1-7 C** labels pooled ≥200 | 資料被動 | 持續累積 | 🟡 ETA 3-5d | [10] intents_writer_ratio | G4-02 延後 |
-| **P1-8 FUP** DUST-EVICTION 觀察 | log 被動 | 2026-04-17 → 04-24 滿週 | ✅ 滿週無 issue | dust log count | 觀察到新 pattern 才提案 |
-| ~~**P1-11** bb_breakout rebuild 後觀察~~ | ✅完成 → G2-06 disable | 2026-04-26 結案 | ✅ disabled | [12] PASS skip + [18] inventory | (永久 disable) |
+| **P1-7 C** labels pooled ≥200 | 資料被動 | 持續累積 | 🟢 grid **304** / 🟡 ma **153** ETA ~05-03 | [10] intents_writer_ratio + [14] per-strategy | G4-02 延後 |
 
 **規則（CLAUDE.md §七）**：任何背景項連續 3 次 healthcheck FAIL = 中止被動等待，轉人工介入。
 
 **Wave 3 被動解鎖時刻表**（事件驅動，per FA H2 audit 文案釐清）：
-- ~04-27: EDGE-P3 [11] 滿 200 → ~04-30 連 3d PASS → Gate 1 fallback 部署可行
+- **2026-04-27 ✅**: EDGE-P3 [11] **226/200 (113%) 達標**（04-27 12:00 cron verify）→ 連 3d PASS clock 起算 → ~04-30 ETA Gate 1 fallback 部署可行
 - ~05-03: G2-02 真實 1w post-G7-09 demo 數據 → counterfactual 雙軌驗證 → **觸發 G2-03-FUP-CALLER-WIRE 派發**（解鎖 G2-03 真實 binding）
 - ~05-07/08: P0-2 21d 解鎖 + G2-01 PostOnly 1-2w 驗收 → 若 fee drop ≥60% 通過，否則 G2-04 disable 決策會
 - ~05-10: EDGE-P1b per-strategy ≥200 rows → calibrator manual approve flow 派發（**含 EDGE-P1b-FUP-STALE-PEAK-IPC 必先閉合**才能純 IPC bind dim 5）
@@ -538,6 +536,7 @@ ssh trade-core "cd ~/BybitOpenClaw/srv && python3 helper_scripts/db/passive_wait
 | **STRK-FUP-F7-CRON-CD-CHECK** | E4 Tier 9 STRKUSDT P0 wave push back #4：F7 cron wrapper `cd $BASE_DIR` 跑 stale main worktree runner；建議 cron wrapper 加 grep `[22]`-`[29]` 在 latest log 內自驗（防 wrapper 本身路徑漂移） | 下次 cron 維護 | 🟢P3 | E1 / operator ~15min（per PM Sign-off §5.4）|
 | **STRK-FUP-HEALTHCHECK-PRE-EXISTING** | F7 [22]-[29] 揭發 5 個 pre-existing healthcheck FAIL silent-dead pipelines：[3] exit_features_writer / [19] observer_pipeline / [23] orders_fills 6 pairs/11 dropped real / [24] signals_writer 179h stale / [26] dust_spiral_noise_in_ef 37 rows / [27] intents_counter_freeze；屬 PA Wave 4 / G3-08+ scope，非本 STRKUSDT P0 wave 引入 | F7 deploy 後 6-12h 觀察期完成 | 🟡P2 | PA design RFC + E1 1-3d/pipeline（per PM Sign-off §5.5）|
 | **LIVE-RECONCILER-STALE-CMD-TX** | [P1][HIGH-1 E2 round-2 2026-04-27] watcher 中途 teardown+respawn 後，reconciler/scheduler 仍持有 boot-time cmd_tx（rx 已 drop），對 live 的命令靜默丟失（CloseAll/ReconcilePosition/UpdateStrategyParams）。Live 縮倉監控 5min 輪詢在 teardown+respawn 後對 live engine 失效，可能漏清 ghost positions。修法：reconciler/scheduler 改走 LiveCmdSenderSlot snapshot（同 watcher closure path）。Ticket: LIVE-AUTH-WATCHER-EVENT-CONSUMER-SPAWN follow-up。Prerequisite: 確認生產中是否出現過 teardown+respawn cycle（無則低緊急度）。| 待 Live 真實流量後評估優先級 | 🟠P1 | E1 ~1d（per E2 HIGH-1 round-2）|
+| **G2-01-FUP-MAKER-FILL-CHECK** | 2026-04-27 healthcheck list L553 漂移修復揭發：先前文檔標 `[3] maker_fill_rate → G2-01` 但 runtime [3] 是 `exit_features_writer`，maker_fill_rate dedicated check 從未實裝；G2-01 PostOnly 驗收 ~05-07/08 結算前須補一個 `check_maker_fill_rate(cur)`（SQL：trading.fills 過去 1w order_type='Limit' postOnly fill 比例 + per-strategy 切片，閾值 PostOnly fee drop ≥60% 等價條件）並 register 到 runner.py | G2-01 結算 ~05-07 前 | 🟡P2 | E1 + QC 2-3h（含 unit test + cron verify）|
 
 ---
 
@@ -545,24 +544,40 @@ ssh trade-core "cd ~/BybitOpenClaw/srv && python3 helper_scripts/db/passive_wait
 
 **CLAUDE.md §七 強制**：被動等待 TODO 必附 healthcheck · 每 6h cron 跑 · 連續 3 FAIL → 中止等待。
 
+**Runtime ground-truth**：28 check（[1]-[29] 略 [17] + [Xa]/[Xb]，無 [0]）。源於 `helper_scripts/db/passive_wait_healthcheck/runner.py`；**2026-04-27 對齊 cron 實裝**修掉一批 stale 映射（原列 [0] engine_alive / [1] engine_crash / [2] synthetic_owner_retriage / [3] maker_fill_rate / [4] IPC hotpatch / [8] decision_shadow_exits 全部不符 runtime，已修正）。
+
 | # | 項目 | SQL / 檢查 | 對應 Wave TODO |
 |---|---|---|---|
-| [0] | engine_alive | last 24h PID activity | P0-2 21d |
-| [1] | engine_crash count | COUNT last 24h | P0-2 21d |
-| [2] | synthetic_owner_retriage | row count growth | P1-6 |
-| [3] | maker_fill_rate | PostOnly fill rate | G2-01 |
-| [4] | IPC hotpatch | last applied ts <5min | G3-05 |
+| [1] | close_fills_24h | demo 24h close_fills 數量（≥10 PASS） | P0-2 21d engine 活性間接指標 |
+| [2] | label_backfill | labels_24h vs close_fills ratio + join_linkage | P1-7 C labels |
+| [3] | exit_features_writer | exit_features_24h vs close_fills delta（==0 PASS）| EDGE-P1b 寫入面 |
+| [4] | phys_lock_runtime | phys_lock_* fire 24h/7d count | TRACK-P-V2-SWAP-1 verify |
+| [5] | micro_profit_fire | RETIRED（306993e 後 v1 退役，residue 監控）| — |
+| [6] | trailing_stop_fire | TRAILING STOP fire 7d count | — |
 | [7] | edge_estimates_freshness | n_cells + mtime | G1-01 / G4-04 |
-| [8] | decision_shadow_exits | row count | G4-05 |
+| [8] | shadow_exits_24h | decision_shadow_exits row count（dormant by `shadow_enabled=false`）| EDGE-P2-flip 觸發前 baseline |
 | [9] | model_registry_freshness | train_date per slot | G4-03 |
-| [10] | intents_writer_ratio | orders vs intents per-mode | — |
+| [10] | intents_writer_ratio | orders vs intents per-mode | G2-01 / P1-7 C |
 | [11] | counterfactual_clean_window_growth | clean n ≥200 | EDGE-P3 auto-gate |
-| [12] | bb_breakout_post_deadlock_fix | fill count recover (G2-06 disabled → PASS skip 2026-04-26) | G2-05 / G2-06 |
-| [18] | disabled_strategy_inventory | active=false strategies list (always PASS, drift防線 G6-04) | G2-06（2026-04-26）|
+| [12] | bb_breakout_post_deadlock_fix | fill count recover（G2-06 disabled → PASS skip 2026-04-26）| G2-05 / G2-06 |
 | [13] | edge_estimator_scheduler_fresh | `edge_estimates.json` mtime <6h + cells ≥50 | G1-01 / G4-04（G6-02 commit `a0a4981`）|
-| [14] | exit_features_accumulation_rate | 週 row count 增長率 ≥ threshold | EDGE-P1b（G6-02 commit `a0a4981`）|
-| [15] | shadow_exit_agreement_phase2 | Python vs Rust decision agree rate ≥95% | EDGE-P2 flip（G6-02 commit `a0a4981`）|
-| [21] | paper_state_dust_inventory | dust spiral guard SQL: `COUNT(*) FILTER (realized_pnl=0) FROM trading.fills WHERE strategy LIKE 'risk_close:fast_track%' AND last 1h AND engine_mode IN demo/live/live_demo`；三態 PASS/WARN/FAIL（0=PASS / 1-10 + <3 symbols=WARN / >10 OR ≥3 symbols=FAIL）| PAPER-STATE-DUST-INVENTORY-MONITOR (Tier 7 Track 2，supersedes MICRO-PROFIT-FIX-1-HEALTHCHECK)|
+| [14] | exit_features_accumulation_rate | 週 row count + per-strategy tier（READY/GROWING/SPARSE）| EDGE-P1b / EDGE-DIAG（G6-02 `a0a4981`）|
+| [15] | shadow_exit_agreement_phase2 | Python vs Rust decision agree rate ≥95% | EDGE-P2 flip（G6-02 `a0a4981`）|
+| [16] | strategist_cycle_fresh | scheduler 4MB log tail cycle 活動 | G3-08 / Strategist runtime |
+| [18] | disabled_strategy_inventory | active=false strategies list（always PASS，drift防線 G6-04）| G2-06（2026-04-26）|
+| [19] | observer_pipeline_alive | observer cycle ok N/5 + age | OBSERVER-PIPELINE-POST-F42FACE-CLEANUP / STRK-FUP-HEALTHCHECK-PRE-EXISTING |
+| [20] | h_state_gateway_freshness | env=0 dormant skip / env=1 H state cache version + h_states 集合 | G3-08 Phase 1C / Phase 2+ |
+| [21] | paper_state_dust_inventory | `COUNT(*) FILTER realized_pnl=0 FROM trading.fills WHERE strategy LIKE 'risk_close:fast_track%' AND last 1h AND engine_mode IN demo/live/live_demo`；三態 PASS/WARN/FAIL（0=PASS / 1-10+<3sym=WARN / >10 OR ≥3sym=FAIL）| PAPER-STATE-DUST-INVENTORY-MONITOR（Tier 7 Track 2，supersedes MICRO-PROFIT-FIX-1-HEALTHCHECK）|
+| [22] | trading_pipeline_silent_gap | fills/intents/orders/risk_verdicts/DCS 多軸 staleness + 1h count | STRKUSDT P0 wave F7 |
+| [23] | orders_fills_consistency | 30min pairs_missing_orders / total_missing_orders（FUP-23 SQL exclude `unattributed:%`）| STRKUSDT P0 wave F7 + STRK-FUP-HEALTHCHECK-PRE-EXISTING |
+| [24] | signals_writer_freshness | trading.signals hours_stale + rows_24h | STRKUSDT P0 wave F7 + 2026-04-19 outage RCA |
+| [25] | dust_qty_distribution | 24h fills sub_micro vs normal bucket pct | STRKUSDT P0 wave F7 |
+| [26] | dust_spiral_noise_in_ef | learning.exit_features dust spiral noise total + 24h delta | STRKUSDT P0 wave F7 + EXIT-FEATURES-WRITER-BUG-1-FIX |
+| [27] | intents_counter_freeze | demo + live_demo + live intents 30min count + staleness | STRKUSDT P0 wave F7 |
+| [28] | phantom_fills_attribution | 1h risk_close + qty<1e-3 + pnl=0 fills | STRKUSDT P0 wave F7 |
+| [29] | reconciler_paper_state_divergence | reconciler vs paper_state divergence（deferred-no-ipc placeholder，等 Rust handler）| STRK-FUP-F7-CRON-CD-CHECK |
+| [Xa] | leader_election_health | edge_scheduler.leader.lock fd alive + lock_age | EDGE-SCHEDULER-LEADER-1（`f32629c`）|
+| [Xb] | pipeline_triangulation | close_fills/labels/intents 三角比 | G6-01 FUP cross-validation |
 
 ---
 
