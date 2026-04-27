@@ -788,3 +788,17 @@ ssh trade-core "cd ~/BybitOpenClaw/srv && python3 helper_scripts/db/passive_wait
 | 2026-03-31 | Sprint 5b-5 根原則 14 集成測試（Principle 14 Ollama Fallback，6 tests） | `docs/CCAgentWorkSpace/E4/workspace/reports/2026-03-31--sprint5b_p14_tests.md` |
 | 2026-03-31 | Sprint 5a 全量回歸（Position Sizing + Paper/Demo Sync） | `docs/CCAgentWorkSpace/E4/workspace/reports/2026-03-31--sprint5a_regression.md` |
 | 2026-03-31 | Sprint 0 全量回歸（G-05 + G-01） | `docs/CCAgentWorkSpace/E4/workspace/reports/2026-03-31--sprint0_regression.md` |
+
+## 2026-04-27 — Wave IV Linux full regression (PASS)
+- HEAD synced 6e466c8 → 7c32d1f (5 commits, ff-only, status clean)
+- Rust openclaw_engine --lib: **2290 / 0 fail** (baseline 2290 match), 2 runs same green
+- Rust --test test_cost_edge_advisor_daemon (G3-09 Phase A NEW): **6 / 0 fail**
+- Python pytest 7 target files: **263 / 0 fail** (Mac 163, Linux higher collection but no regression), 2 runs same green
+- Healthcheck passive_wait_healthcheck.py: 32 PASS / 0 FAIL / 1 WARN ([11] counterfactual ETA pre-existing)
+- New [30] cost_edge_advisor_status check: PASS (env=0 dormant by Phase A design)
+- 0 production code diff this wave (E4 task = run tests only)
+- Lessons / patterns:
+  - Linux ssh non-interactive PATH 不含 cargo → 必 `source ~/.cargo/env` 才能跑 cargo
+  - Linux git repo 在 `~/BybitOpenClaw/srv/` (not `~/BybitOpenClaw/`); venvs/ 只有 README + rust_build (no python venv); 用 system /usr/bin/python3
+  - Healthcheck 跑前必 `set -a; source secrets/environment_files/{basic_system_services,trading_services}.env; set +a`，否則 PG no password fail
+  - Mac 163 vs Linux 263 為 collection 差異（部分 parametrize 在 Mac 環境跳過），≥163 即達標非 regression
