@@ -436,3 +436,27 @@
 - **Lock 選型**：parking_lot::RwLock for advisor state（無 .await）+ tokio::sync::RwLock for IPC slot（async-safe）
 - **教訓**：E1 此次 self-report 完整度高，self-修正了 RFC slot drift（[22]→[30]）+ §九 1200 cap（advanced.rs 已 1297 → 另立 sibling），對抗審查 0 findings
 
+## 2026-04-27 d4bc9eb healthcheck+observer 4 fixes — RETURN to E1 (2 HIGH)
+
+- **改動**：[3] ratio threshold + [23] order_id JOIN + [24] paper-disabled-skip + [19] thin wrapper 內聯 4 stub + new shared helper
+- **2 HIGH findings**：
+  1. `checks_strategy.py` 1154 → **1201 行**，**1 行 over §九 1200 hard limit**（純 docstring 行可壓 1 行解決）
+  2. `[3] check_exit_features_writer` 50% 邊界落 WARN 不 FAIL → 低流量時段 writer 半死被降級 → cron 不 exit 1（runner.py L8 「only WARN = exit 0」）。Pre-fix delta 模型在 (close=10, EF=5) 報 FAIL；post-fix ratio=0.5 → WARN。修法：`ratio <= 0.5 → FAIL` 或加絕對 floor（混合 ratio + abs delta）
+- **2 MEDIUM（不擋）**：
+  1. Commit message 「byte-identical」**不準確** — 原 `.orig` 只 prod，新 helper demo+prod。Linux operator 只配 demo 時 retMsg 從 `api_key_not_configured` → `not_implemented`。下游 4 consumers 都只讀 `ok` boolean，**功能 OK** 但 commit 描述需修
+  2. [24] paper-snap-disabled-skip 缺 mtime guard：罕見情境（flip env + restart + paper crash before marker overwrite）會 mask 真 silent-dead
+- **對抗驗證點**：
+  - Verified Rust `flush_orders` 11-col INSERT 確實無 `context_id`，JOIN-FIX 結構正確
+  - Verified `4073875` 原 `.orig` schema 與新 helper 對比 → schema 一致但 secret-slot 邏輯擴展
+  - Verified `runner.py` exit-code 契約（WARN ≠ exit 1）
+  - Verified `cron_observer_cycle.sh:37` export `OPENCLAW_SRV_ROOT="$REPO"` → cron-time 路徑解析 OK
+  - Verified `main_pipelines.rs:147-228` paper-disable marker 是 one-shot startup write
+  - Grep'd 4 downstream retMsg consumers — 都只讀 `ok` boolean，無文字 match
+- **跨平台**：新代碼無 `/home/ncyu` `/Users/[^/]+` 命中；srv_root 三層 fallback 在 cron / Mac dev 都 OK（有 env var export / `OPENCLAW_BASE_DIR` 設定）
+- **雙語注釋**：MODULE_NOTE + docstring + inline 中英對照齊備
+- **教訓**：
+  1. **絕對 delta vs ratio threshold 互補**：absolute 抓「writer 無變動 / dead」場景強，ratio 抓「proportional drop」強。應 OR 結合（任一觸發即 FAIL）而非二選一。E1 的 ratio swap 在 burst-window 工作但暴露低流量 detection gap
+  2. **Boundary 嚴格性**：`< 0.5` vs `<= 0.5` 在 50% drop 的 detection 差異會導致 WARN/FAIL 翻轉，runner exit 0/1 翻轉，cron alarm 翻轉。新 healthcheck 邊界要 explicit 想 50% / 70% / 100% 三特殊點
+  3. **Commit message 精準度**：「byte-identical」這類強斷言要嚴審 — 本案 schema-identical / behavior-equivalent-for-downstream / retMsg-branch-changed 三層差異需區分
+  4. **新 file size grep**：1 行 over hard limit 也要打回 — 不能因「只差 1 行」放水，§九 標準是硬性
+

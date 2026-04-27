@@ -1,5 +1,47 @@
 # E4 Memory — 工作記憶
 
+## 工作記憶
+
+### 2026-04-27 OBSERVER-RESTORE-1 (`d4bc9eb`) healthcheck+observer 4 stale/FAIL 修 — E4 PASS
+
+**結論：E4 PASS — 0 regression / +5 new tests / 兩遍同綠**
+
+**Commit `d4bc9eb`** = 7 files changed (482+/62-), 純 Python：
+- `checks_engine.py` [3] threshold ratio-band rewrite + [23] orders⊇fills 改 JOIN order_id
+- `checks_strategy.py` [24] paper-only context-aware skip
+- 新 `_bybit_private_check_stub.py` 共享 helper（OBSERVER-RESTORE-1：`f42face` 刪 `.py.orig` stub 後 4 thin wrapper `execv` rc=2 連 8 天 silent-fail）
+- 4 wrapper rewrite 為 thin（account / positions / order_history / execution_history）
+
+**Baseline 比對（parent `26e42fa` vs `d4bc9eb`）：**
+| 引擎 | parent | d4bc9eb | delta |
+|---|---|---|---|
+| Linux pytest control_api_v1 | 2953p / 54f / 3s | 2953p / 54f / 3s | **0** ✓ |
+| Linux Rust cargo lib (release) | 2290p / 0f | 2290p / 0f | **0** ✓ |
+
+**+ E4 新測（`8df0a86` Mac local，未 push）：** `test_bybit_private_check_stub.py` 5 tests Linux 5/5 兩遍同綠 → 控制台 suite **2958p / 54f / 3s**（baseline+5）
+
+**4 wrapper subprocess 直跑：rc=0 each**（Linux 即時驗）
+
+**4 healthcheck 全 PASS：**
+- [3] `exit_features_writer` ratio 1.00（pre-fix: absolute-delta FAIL）
+- [19] `observer_pipeline_alive` ok=5/5 age=0.0h（pre-fix: 8 天 silent rc=2）
+- [23] `orders_fills_consistency` pairs_missing=0/6（pre-fix: LEFT JOIN context_id 都 NULL → 假 0）
+- [24] `signals_writer_freshness` paper disabled skip（pre-fix: 假 FAIL）
+
+**1 unrelated FAIL：** [27] `intents_counter_freeze` Rust trading_writer intent INSERT path — **不在 d4bc9eb scope**（parent 也 FAIL，本 commit 0 Rust diff）
+
+**Mock 安全：** 新 5 tests 用 `monkeypatch.setenv` + `tmp_path`，0 mock 業務邏輯（emit_stub 邏輯真跑）
+
+**1 條 WARN（不阻塞）：**
+- 5 tests pin 當前 `{**base, **payload_extra}` merge 順序行為（caller 可覆蓋 base schema）；future fix 改 `{**extra, **base}` 時須同步改本測試 + 4 wrapper rely 點
+
+**1 條教訓：**
+- E4 本地新增 test commit + push 被 harness 鎖（`Pushing directly to main bypasses PR review`）— operator 需手動 push `8df0a86`，但 Linux 已先 scp 驗 5/5 PASS，不阻塞 PM Sign-off
+
+**Report：** `docs/CCAgentWorkSpace/E4/workspace/reports/2026-04-27--healthcheck_observer_fix_regression.md`
+
+---
+
 ## 項目上下文（2026-04-01）
 
 - 當前 Phase：Phase 3 Batch 3A 完成
