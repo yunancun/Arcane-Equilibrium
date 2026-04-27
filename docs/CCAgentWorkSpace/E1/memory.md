@@ -1010,3 +1010,35 @@ F7-FUP-23 第二輪 re-review：SQL fix PASS 但 docstring RETURN 1 LOW — `hel
 - **「邏輯推斷」表名前必 grep 驗證**：F7-FUP-23 第一輪 task brief 寫「F4 audit row 已在自己的專屬通道（`learning.execution_orphans`）記下落差」是**任務派發時的邏輯推斷**（合理假設「audit row 該有專屬 channel」），但 grep 驗證才能確認該表是否真存在。我第一輪盲信 brief 文字直接寫進 docstring；E2 第二輪一個 grep 揭穿。Lesson：寫 docstring 引用 schema name（table / column / index）時，**任何來源（task brief / memory / 上游 doc）都必先 grep `sql/` 或 `program_code/` 驗證實際存在性**，再寫進 docstring。CLAUDE.md §二 #10 認知誠實：區分事實 / 推斷 / 假設 — 推斷不能寫成事實。配合 F7-FUP-23 第一輪 §不確定 #1（task spec 已標 "邏輯推斷；E2 順帶 grep 驗證"），E2 確實照做並 RETURN，本次補修。
 - **doc-only fix 不繞 E2 第二輪**：task brief 明確 「PM 直接 merge（不必 re-E2，純 doc 改動 E2 已標 acceptable for self-fix）」，但 E1 仍走完 commit + push + report 流程，等 PM verify ssh import + 直接 fast-forward merge。Lesson：「acceptable for self-fix」≠「不報告」— self-fix 仍必須產 report + memory log + push 留痕跡，便於 PM 一眼驗收，不省這層。
 - **F4 真實機制完整描述在 docstring 上半段已正確**：docstring `F7-FUP-23 cross-cut exclusion (2026-04-26)` 段落已描述「F4 unattributed audit fills (commit 53973ef, ``strategy_name LIKE 'unattributed:%'`` such as ``unattributed:bybit_auto``) are emitted by the Rust ``unattributed_fill_observer``」— 這部分**正確**。錯只在末段「dedicated channel (`learning.execution_orphans`)」這 1 句虛構。修法：保留全段，僅替換末句指向真實落地通道（同表 `trading.fills`，靠 `strategy_name LIKE` 標記區分），不重寫整段。Lesson：docstring 局部錯誤盡量精準替換 1-2 行，保留正確上下文，避免大改觸發其他 reviewer review fatigue。
+
+## LIVE-AUTH-WATCHER-EVENT-CONSUMER-SPAWN（2026-04-27 fix/live-auth-watcher-event-consumer-spawn）
+
+### 任務
+RCA 確認：8 天 silent regression — `pipeline_snapshot_live.json` 從 04-19 15:37 沒寫過。Boot 時 `(None, None) => None` match arm（`main.rs:1029-1056`）在 authorization.json 不存在時整段跳過 `spawn_live_pipeline`。Operator 中途 approve auth 後，`LiveAuthWatcher` 雖呼叫 `slot_op.try_spawn`（經 `build_exchange_pipeline` 起 WS supervisor / listener / balance refresh 3 task），但**從未 spawn 跑 `run_event_consumer` 的 OS 線程** — `state_writer` / `snapshot_writer` / `trading.fills` 寫入器的生產者。次生：8 天 Live `trading.fills` / `learning.exit_features` / `decision_features` / `shadow_fill` 0 row。
+
+### 修復方案 A（callback injection）
+1. **`SpawnOp` trait 簽名升級**：`try_spawn` 從 `Result<bool, _>` 改 `Result<Option<SpawnOutput>, _>`，讓 watcher 接到 bindings + slot_cancel_token 而非 bool。Mock 仍回 `Ok(None)` 表 build 失敗。
+2. **`LiveAuthWatcher` 加 4 個欄位**：`pipeline_spawner: Option<LivePipelineSpawner>` (Arc<dyn Fn(SpawnOutput) -> Result<thread::JoinHandle, String>>)、`thread_handle_slot: Option<LiveThreadHandleSlot>` (parking_lot::Mutex)。pre_create_trigger / from_parts 兩階段 ctor 解 chicken-and-egg（IPC `set_live_auth_recheck_sender` 須早於 closure 構造，後者依 writers / db_pool）。
+3. **`decide_once` respawn arm**：`Ok(Some(spawn_output))` 後若注入 spawner → 呼叫 closure，存 thread_handle 進 slot；spawner 回 Err → record_failure + slot teardown 避免半成品。注入 None 路徑保留 Phase 3 行為（單測）。
+4. **Teardown arm**：take 並 spawn_blocking join 舊 thread_handle，確保不孤兒 OS thread。
+5. **`run()` 啟動立即 `decide_once()`**：boot None 路徑下不必等 5s 首輪 poll。
+6. **`EngineCommandChannels.live_slot: Option<LiveCmdSenderSlot>`**（parking_lot::RwLock 包 Option<UnboundedSender>）— `live_snapshot()` / `select("live")` / `primary()` 改讀 slot snapshot；舊 owned `live` 欄位保留向下相容（測試 Default::default() 不破）。`EngineCommandChannels::select` / `extract_engine_tx` 簽名從 `&'a Option<...>` 改 `Option<UnboundedSender>` (Arc-clone 廉價)，dispatch.rs 19 callsites 改 `&tx`。
+7. **`main_fanout::spawn_fan_out`** 接收 `LiveEventSenderSlot` (parking_lot::RwLock) 取代舊 `Option<Sender>`，每 tick 讀 slot snapshot。
+8. **main.rs 兩條 path**：boot Some 直接 spawn_live_pipeline 維持 boot 預建 channel（reconciler / strategist scheduler 等 boot-time-fixed captures 兼容）；boot None / 中途走 closure。closure capture 19 個 Arc bundle（writers + spawn ctx 等價）。
+9. **`set_live_cmd_sender_slot`** 新 API；`pre_create_trigger` + `from_parts` 取代 `LiveAuthWatcher::new` + `set_live_auth_recheck_sender` 既有 pattern（兩階段）。
+
+### 結果
+- `cargo build --release -p openclaw_engine` PASS（21 lib warnings + 4 bin warnings 全 pre-existing）
+- `cargo test --lib` 2252/0 failed（baseline 維持）
+- `cargo test --bin openclaw-engine` 52/0 failed（含 7 既有 watcher tests + 2 新增 `watcher_with_spawner_handles_build_returned_none` / `watcher_without_spawner_keeps_handle_slot_empty`）
+- IPC 子系統 96/0 failed（EngineCommandChannels 改動不破測試）
+- 8 檔 +1330/-165
+- 跨平台 grep 0 hit
+- doctest 6 failed pre-existing 與本 ticket 無關
+
+### 教訓
+- **設計範圍邊界**：PA 期望全 dynamic（fan-out + IPC live cmd 都 slot），但 IPC server 已 detach 不可動 — 解法是 slot 注入 pattern + IPC server set_* 接線 + 簽名變更（`select` / `extract_engine_tx` 從 `&Option` → `Option`）。Lesson：watcher 中途 respawn 場景下「boot-time-fixed Option<Sender>」與「dynamic slot」必須抉擇；reconciler / strategist scheduler 走 boot-time captured 仍 OK（pre-existing limitation 不在本 ticket 範圍）；IPC / fan-out 改 slot；boot Some / boot None 兩條 path 並存。
+- **chicken-and-egg ctor**：watcher 需 IPC trigger 早接，spawner closure 須 writers / db_pool 都 Arc 後才能 capture。解法是 `pre_create_trigger() -> (handle, rx)` + `from_parts(slot_op, ..., rx, spawner, handle_slot)` 兩階段 ctor。Lesson：類似 IPC late-injection slot pattern（h_state_cache_slot 等），watcher 也適用 partial-ctor。
+- **`Fn` closure 不能 async**：closure 須 sync invoke（spawner 回 sync `thread::JoinHandle`）。`tokio::sync::RwLock` 不適用 — 改 `parking_lot::RwLock` 給 slot，臨界區極短（~1 µs）async / sync 共用安全（但需自證寫者短）。
+- **boot Some 不走 closure 的權衡**：closure 統一兩條 path 顯然優雅，但 boot 預建 cmd_tx / cmd_rx 給 reconciler / strategist scheduler 用，closure 重建 channel 會讓 reconciler 寫到無人讀的 channel（已被 closure 段忽視的）— 這是 reconciler boot-capture 的 limitation。決策：boot Some 直接 spawn_live_pipeline 路徑，watcher closure 只負責 boot None / 中途 respawn。Lesson：完美對齊兩條 path 不見得最優；既有 boot-capture 模式有 inertia，改它要動更多檔超本 ticket 範圍 — follow-up 工單做。
+- **Mac dev cargo test 路徑**：Mac 端 cargo build / test 成功，與 memory `project_dev_runtime_split` 不衝突 — Mac 是「dev / write code / RCA」階段，cargo build + cargo test 屬編譯驗證階段，allowed。實際 Linux runtime 部署仍須 ssh trade-core --rebuild。Lesson：Mac dev 階段「cargo test --release -p openclaw_engine` 是有效 unit test 驗證；只是不能跑真實 Bybit infra 整合測試（3 個 Demo slot rename 為 dev_disabled）。
