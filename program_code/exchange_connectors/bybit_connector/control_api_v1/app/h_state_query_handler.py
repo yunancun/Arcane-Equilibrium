@@ -522,10 +522,21 @@ def _collect_agent_snapshots(
                 analyst, "get_analyst_snapshot"
             )
 
-    # G3-08 Phase 4 Sub-task 4-4 / 4-5 will fill the remaining two
-    # buckets (Executor / Scout). Their arms land additively in this same
-    # function — no signature change required.
-    # Sub-task 4-4/5 會於本 function 加入 Executor / Scout arm；加性不改 signature。
+    if include_executor:
+        # G3-08 Phase 4 Sub-task 4-4: pull ExecutorAgent.get_executor_snapshot
+        # via _safe_snapshot_self — accessor lives on the agent itself
+        # (same pattern as Sub-task 4-1 strategist). 9 fields per PA RFC §2.4.
+        # G3-08 Phase 4 Sub-task 4-4：透過 _safe_snapshot_self 拉取
+        # ExecutorAgent.get_executor_snapshot — accessor 在 agent 自身
+        # （與 Sub-task 4-1 strategist 同模式），9 欄位（PA RFC §2.4）。
+        executor = getattr(_sw, "EXECUTOR_AGENT", None)
+        if executor is not None:
+            result["executor"] = _safe_snapshot_self(
+                executor, "get_executor_snapshot"
+            )
+
+    # G3-08 Phase 4 Sub-task 4-5 will fill the remaining bucket (Scout).
+    # Sub-task 4-5 會於本 function 加入 Scout arm；加性不改 signature。
 
     return result
 
