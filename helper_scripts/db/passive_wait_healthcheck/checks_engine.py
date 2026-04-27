@@ -214,7 +214,15 @@ def check_exit_features_writer(cur, close_fills: int) -> tuple[str, str]:
     """[3] EXIT-FEATURES-TABLE-1 Rust writer — expect ≈1:1 with close_fills.
 
     Threshold model upgraded 2026-04-27 from absolute-delta (``> max(3, n/3)``)
-    to ratio-band: ``min/max < 0.5 → FAIL``, ``< 0.7 → WARN``, ``≥ 0.7 → PASS``.
+    to ratio-band + absolute-floor hybrid:
+      * FAIL: ``ratio < 0.5`` (>50% drift) OR
+              ``close_fills >= 20 AND (close_fills - n) >= 10`` (low-flow
+              half-dead absolute floor — covers the case where ratio==0.5
+              boundary is hit at low volume, e.g. 10/20 close fills with
+              a half-dead writer; the pure ratio-band would mark it WARN
+              and silently let cron exit 0)
+      * WARN: ``ratio < 0.7`` (30-50% drift, monitor)
+      * PASS: ``ratio >= 0.7``
     Why: rolling 24h windows for the EF table and the ``[1]`` close_fills
     baseline (``realized_pnl != 0``) re-align differently when burst close
     events (e.g. fast_track dust spiral 37 fills in 9 min on 2026-04-26
@@ -223,16 +231,23 @@ def check_exit_features_writer(cur, close_fills: int) -> tuple[str, str]:
     while the writer was healthy — confirmed at 19:50 with EF=217 vs
     close=218 (delta=1). Ratio 0.5/0.7 gives ~30-50% drift tolerance for
     burst-window misalignment while still catching real >50% writer break.
+    Absolute floor catches the writer-half-dead-at-low-volume edge case
+    that pure ratio bands miss (E2 review HIGH-2 finding).
 
     [3] EXIT-FEATURES-TABLE-1 Rust writer — 與 close_fills 比率守衛。
-    2026-04-27 從絕對 delta (``> max(3, n/3)``) 升級為比率帶:
-    ``min/max < 0.5 → FAIL`` / ``< 0.7 → WARN`` / ``≥ 0.7 → PASS``。
+    2026-04-27 從絕對 delta (``> max(3, n/3)``) 升級為比率帶 + 絕對 floor 混合:
+      * FAIL：``ratio < 0.5``（>50% drift）OR ``close_fills >= 20 AND
+        (close_fills - n) >= 10``（低流量 half-dead 絕對 floor — 涵蓋
+        ratio==0.5 邊界低量場景，如 10/20 close fills 半死 writer，純
+        ratio band 會標 WARN 讓 cron 靜默 exit 0）
+      * WARN：``ratio < 0.7``（30-50% drift，monitor）
+      * PASS：``ratio >= 0.7``
     rolling 24h 窗 EF 表 vs ``[1]`` close_fills 基線 (``realized_pnl != 0``)
     在 burst close 事件 (如 04-26 08:04-08:13 fast_track dust 9 分 37 fill)
     跨窗口邊界時對齊不同;修復前 18:00 cron 反覆 transient-FAIL 於 delta=37
     (EF=91 vs close=54)，但 19:50 即顯示 EF=217 vs close=218 (delta=1)
     writer 健康。0.5/0.7 帶留 ~30-50% drift tolerance 吸收 burst 誤差，
-    同時抓 >50% 真 writer 斷。
+    絕對 floor 抓低流量 writer 半死 edge case（E2 review HIGH-2 修法）。
     """
     n = _scalar(cur,
         "SELECT COUNT(*) FROM learning.exit_features "
@@ -244,8 +259,14 @@ def check_exit_features_writer(cur, close_fills: int) -> tuple[str, str]:
     smaller = min(n, close_fills)
     ratio = (smaller / larger) if larger else 1.0
     base = f"exit_features_24h={n} vs close_fills={close_fills} (ratio {ratio:.2f})"
-    if ratio < 0.5:
-        return ("FAIL", base + " — writer broken (>50% drift)")
+    # Absolute floor: low-volume writer half-dead would yield ratio == 0.5
+    # (e.g. 10/20) which the pure ratio band marks WARN. Catch via shortfall
+    # threshold when baseline >= 20 and EF is short by >= 10 rows.
+    # 絕對 floor：低量 writer 半死產 ratio==0.5（如 10/20）純 ratio band 標
+    # WARN；當 close_fills >= 20 且 EF 短少 >= 10 行時直接 FAIL。
+    half_dead_floor = (close_fills >= 20) and ((close_fills - n) >= 10)
+    if ratio < 0.5 or half_dead_floor:
+        return ("FAIL", base + " — writer broken (>50% drift or low-flow half-dead floor)")
     if ratio < 0.7:
         return ("WARN", base + " — writer drift 30-50%, monitor (rolling-window race?)")
     return ("PASS", base)
