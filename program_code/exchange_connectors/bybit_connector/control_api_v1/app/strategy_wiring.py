@@ -444,6 +444,51 @@ except (ImportError, Exception) as e:
     ANALYST_AGENT = None
     logger.warning("Could not initialize AnalystAgent: %s", e)
 
+# ── G8-01-FUP-LOSSES-WIRING: Analyst → Strategist consecutive_losses bridge ──
+# Wires ``AnalystAgent.set_strategist_loss_callback`` so every analyzed trade
+# advances ``StrategistAgent._stats["consecutive_losses"]``, providing a real
+# (non-zero) input to ``tick_cognitive_modulator`` (RFC §3.1 acknowledged
+# limitation). Fail-open: missing agent / setter → log + skip; analyst's
+# call site already wraps the callback in try/except, so a wiring failure
+# here just leaves modulator on the legacy 0-input path (no regression).
+# G8-01-FUP-LOSSES-WIRING：Analyst → Strategist 連續虧損橋接。
+# 接線 ``AnalystAgent.set_strategist_loss_callback`` 使每筆已分析交易推進
+# ``StrategistAgent._stats["consecutive_losses"]``，為 ``tick_cognitive_modulator``
+# 提供真實非零輸入（解 RFC §3.1 acknowledged limitation）。
+# Fail-open：缺 agent / setter → log 後略過；analyst 端已用 try/except 包
+# callback，接線失敗只是 modulator 維持舊有 0-input 路徑（無回歸）。
+try:
+    if ANALYST_AGENT is not None and STRATEGIST_AGENT is not None:
+        # Use a small lambda to bind the live STRATEGIST_AGENT singleton.
+        # The closure captures the singleton, so subsequent reassignments
+        # of STRATEGIST_AGENT (none today) would NOT be picked up — acceptable
+        # because Strategist re-init would also re-run wiring.
+        # 用 lambda 綁定 live STRATEGIST_AGENT singleton。closure 捕獲後
+        # 重新賦值 STRATEGIST_AGENT（目前無）不會被反映，可接受 —— Strategist
+        # 重 init 也會重跑接線。
+        ANALYST_AGENT.set_strategist_loss_callback(
+            lambda net_pnl: STRATEGIST_AGENT.record_trade_outcome(net_pnl)
+        )
+        logger.info(
+            "G8-01-FUP-LOSSES-WIRING: Analyst → Strategist loss callback wired / "
+            "G8-01-FUP-LOSSES-WIRING：Analyst → Strategist 虧損 callback 已接線"
+        )
+    else:
+        logger.warning(
+            "G8-01-FUP-LOSSES-WIRING skipped (analyst=%s, strategist=%s) — "
+            "modulator will see consecutive_losses=0 / "
+            "G8-01-FUP-LOSSES-WIRING 略過（analyst=%s, strategist=%s）—— "
+            "modulator 將看到 consecutive_losses=0",
+            ANALYST_AGENT is not None, STRATEGIST_AGENT is not None,
+            ANALYST_AGENT is not None, STRATEGIST_AGENT is not None,
+        )
+except Exception as _losses_wire_exc:  # noqa: BLE001 — non-fatal, fail-open
+    logger.warning(
+        "G8-01-FUP-LOSSES-WIRING failed (non-fatal, fail-open): %s / "
+        "G8-01-FUP-LOSSES-WIRING 失敗（非致命，fail-open）：%s",
+        _losses_wire_exc, _losses_wire_exc,
+    )
+
 # ── Batch 11: ExecutorAgent — order execution wrapper + quality feedback ──
 # Batch 11：ExecutorAgent — 订单执行包装 + 执行质量反馈
 try:
