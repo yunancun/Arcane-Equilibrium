@@ -1,6 +1,7 @@
 # Memory Index
 
 ## Project context
+- [LIVE-AUTH-WATCHER fix (2026-04-27)](project_live_auth_watcher_event_consumer_spawn.md) — Live 8天 snapshot 停寫；watcher respawn 漏接 event_consumer；has_pipeline_spawner=true 驗；P1 stale-cmd-tx 待修
 - [OpenClaw 定位决策](project_openclaw_positioning.md) — OpenClaw Gateway=通信+運維層；Rust openclaw_engine=交易大腦；Python=API橋接+GUI only
 - [硬件與存儲基礎設施](project_hardware_constraints.md) — 128GB統一記憶體 LLM~54GB，PG只能用4-8GB，40TB NAS via 10GbE
 - [未來 Mac 部署目標](project_mac_deployment_target.md) — Apple Silicon Mac（預計 M5 Ultra/Max）；CI tuple `aarch64-apple-darwin` 必含，linux-arm64 非主路徑

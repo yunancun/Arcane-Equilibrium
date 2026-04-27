@@ -47,6 +47,7 @@ function updateBudgetDisplay(remaining) { ... }
 | 日期 | 任務 | 文件位置 |
 |------|------|---------|
 | 2026-04-26 | F5 GUI Live tab anti-human-design 修復（5 findings + 11 pytest） | `workspace/reports/2026-04-26--f5_gui_live_anti_human_design.md` |
+| 2026-04-27 | Live Auth Renew 控制項移至 Governance Hub，打破 locked tab 死鎖 | 主會話直接報告（無單獨 .md） |
 
 ## F5 教訓（2026-04-26）
 
@@ -61,6 +62,16 @@ Mac 沒裝 fastapi → pytest 必走 `ssh trade-core "python3 -m pytest ..."`。
 
 ### HTML 1659 行接近上限
 tab-live.html 1281 → 1659 行（+378 行）。靜態資源不受 §九 1200 硬上限，但下次再加應拆 JS 成 sibling 檔（`tab-live-handlers.js`）。
+
+### Live Auth 控制項搬移教訓（2026-04-27）
+
+**死鎖模式**：任何「只能在 X 操作，但 X 被鎖定後才需要操作」的設計都是 anti-human。解法永遠是把操作移到「永遠可達」的地方（本例：Governance Hub）。
+
+**兩個 trust-status-bar 的 ID 管理**：同一頁面存在兩個語意相同但位置不同的元素（integrity-fail view + dashboard view），必須用不同 ID 防止 `getElementById` 只取第一個。本例用 `trust-status-bar`（locked view）和 `trust-status-bar-dashboard`（dashboard view）區分，並透過 `_applyToBar(barId, ...)` helper 統一套用邏輯。
+
+**refreshPage() early return 陷阱**：engine 未啟動時 refreshPage() 會 early return，任何放在 early return 後面的 `loadXxx()` 都不會執行。需要「即使 engine 不在線也更新」的 UI 元素，必須在 early return **之前**呼叫其 load function。
+
+**Governance Hub 的 CSS class 借用**：`trust-tier-badge` CSS class 定義在 tab-live.html 的 `<style>` 區塊，tab-governance.html 用 `id="gov-trust-tier-badge"` 的元素借用此 class 會在 include 場景失效。本任務直接在 HTML 元素上用 inline style 複製視覺效果（padding/border-radius/font-size/font-weight），不依賴跨 tab CSS。
 
 ### 後端結構化 error envelope vs 422
 GUI `ocApi` 對 non-200 顯通用 toast，page-load 流程讀不到 markers swap views。改回 HTTP 200 + `{error: "live_slot_not_configured", actual_engine_kind, actual_endpoint, ...}` envelope 讓前端能結構化 short-circuit。**規律**：當需要前端依 error type 做 view-swap 而非單純 toast 時，用 200 envelope 而非 4xx HTTPException。
