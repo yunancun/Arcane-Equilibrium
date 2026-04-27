@@ -178,6 +178,47 @@
 
 </div>
 
+<!-- ═══ Live Auth / 實盤授權管理 ═══ -->
+<!-- Moved from tab-live.html — accessible even when Live engine is not running -->
+<!-- 從 tab-live.html 移入 — 即使 Live 引擎未啟動也可操作，打破鎖死循環 -->
+<div class="oc-card" id="live-auth-card">
+  <h3>&#x1F511; Live Auth / 實盤授權
+    <span style="font-size:11px;font-weight:400;color:var(--text-dim);margin-left:8px">（永遠可操作 / always accessible）</span>
+  </h3>
+  <div class="subtitle">管理 Earned-Trust 階梯授權；即使 Live engine 未啟動亦可在此 Renew</div>
+
+  <!-- Status row / 狀態列 -->
+  <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px;padding:10px 14px;
+    background:var(--bg);border:1px solid var(--border);border-radius:8px" id="gov-live-auth-status-row">
+    <span id="gov-trust-tier-badge" class="trust-tier-badge"
+      style="background:rgba(100,116,139,.2);color:#94a3b8;display:inline-block;padding:2px 8px;border-radius:4px;font-size:10px;font-weight:700">
+      --
+    </span>
+    <span id="gov-trust-expires-label" style="font-size:12px;color:var(--text-dim)">Expires in: --</span>
+    <span id="gov-trust-clean-days" style="font-size:12px;color:var(--text-dim)">Clean days: --</span>
+    <span id="gov-trust-auth-id" style="font-size:10px;color:var(--text-dim);font-family:monospace"></span>
+    <span id="gov-trust-review-flag" style="display:none;font-size:11px;color:#a855f7;font-weight:600">
+      &#x26A0;&#xFE0F; Full Review Required
+    </span>
+  </div>
+
+  <!-- Action buttons / 操作按鈕 -->
+  <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+    <button class="oc-btn oc-btn-primary" onclick="govRenewLiveAuth()"
+      style="background:rgba(168,85,247,.2);border-color:rgba(168,85,247,.6);color:#a855f7">
+      &#x1F511; Renew Live Auth / 續期
+    </button>
+    <button class="oc-btn" id="gov-btn-full-review" onclick="govRenewReview()"
+      style="display:none;background:rgba(168,85,247,.1);border-color:rgba(168,85,247,.4);color:#a855f7">
+      &#x1F50D; T3 Full Review
+    </button>
+    <button class="oc-btn" style="padding:2px 8px;font-size:11px" onclick="govLoadLiveAuthStatus()">
+      &#x1F504;
+    </button>
+    <span id="gov-live-auth-loading" style="display:none;font-size:11px;color:var(--text-dim)">載入中...</span>
+  </div>
+</div>
+
 <!-- ═══ Paper → Live Gate / 升级门禁 ═══ -->
 <div class="oc-card" id="paper-live-gate-card">
   <h3>&#x1F4CB; Paper 模拟 &#x2192; Live 实盘 Gate / 升级门禁</h3>
@@ -529,6 +570,236 @@ function updateQuickStatus(auth, risk, recon, learning) {
 }
 // Expose for governance-tab.js / 暴露给 governance-tab.js 使用
 window.updateQuickStatus = updateQuickStatus;
+
+// ═══════════════════════════════════════════════════════════════
+// === Live Auth section (moved from tab-live) ===
+// === 實盤授權區塊（從 tab-live 移入）===
+//
+// MODULE_NOTE
+// 目的：讓 operator 在 Live engine 未啟動時也能 Renew Live Auth，
+//       打破「沒有授權 → tab 鎖死 → 找不到 Renew → 無法授權」的死鎖。
+// Purpose: Allow operator to renew Live Auth even when Live engine is not
+//          running, breaking the deadlock where the Live tab is locked and
+//          the Renew button is unreachable.
+//
+// API 來源 / API source: GET /api/v1/live/auth/trust-status（與 tab-live 相同）
+//                        POST /api/v1/live/auth/renew
+//                        POST /api/v1/live/auth/renew-review
+// 輪詢間隔 / Poll interval: 30s
+// ═══════════════════════════════════════════════════════════════
+
+/**
+ * Tier label map for Earned-Trust system.
+ * Earned-Trust 系統的階梯標籤對照表。
+ */
+const GOV_TRUST_TIER_LABELS = {
+  0: 'T0 Entry',
+  1: 'T1 Provisional',
+  2: 'T2 Established',
+  3: 'T3 Trusted',
+};
+
+/**
+ * Tier color map: background + foreground CSS values.
+ * 階梯顏色對照表：背景與前景 CSS 值。
+ */
+const GOV_TRUST_TIER_COLORS = {
+  0: { bg: 'rgba(100,116,139,.2)',  fg: '#94a3b8' },
+  1: { bg: 'rgba(34,197,94,.15)',   fg: 'var(--green)' },
+  2: { bg: 'rgba(59,130,246,.15)',  fg: '#60a5fa' },
+  3: { bg: 'rgba(168,85,247,.15)', fg: '#a855f7' },
+};
+
+/**
+ * Load and render Live Auth status in Governance Hub.
+ * 在 Governance Hub 載入並渲染實盤授權狀態。
+ *
+ * Calls GET /api/v1/live/auth/trust-status — no dependency on live engine state.
+ * 呼叫 GET /api/v1/live/auth/trust-status — 不依賴 live engine 是否在線。
+ */
+async function govLoadLiveAuthStatus() {
+  const loadingEl = document.getElementById('gov-live-auth-loading');
+  if (loadingEl) loadingEl.style.display = '';
+
+  let d;
+  try {
+    const r = await ocApi('/api/v1/live/auth/trust-status');
+    d = r && r.data;
+  } catch (_) {
+    if (loadingEl) loadingEl.style.display = 'none';
+    return;
+  }
+  if (loadingEl) loadingEl.style.display = 'none';
+  if (!d) return;
+
+  const tier = d.current_tier ?? 0;
+  const colors = GOV_TRUST_TIER_COLORS[tier] || GOV_TRUST_TIER_COLORS[0];
+  const label = GOV_TRUST_TIER_LABELS[tier] || ('T' + tier);
+
+  // Tier badge / 階梯徽章
+  const badge = document.getElementById('gov-trust-tier-badge');
+  if (badge) {
+    badge.textContent = label;
+    badge.style.background = colors.bg;
+    badge.style.color = colors.fg;
+  }
+
+  // TTL countdown / 倒計時
+  // < 2h 標黃，expired 標紅 / < 2h yellow, expired red
+  const expiresEl = document.getElementById('gov-trust-expires-label');
+  if (expiresEl) {
+    const expiresMs = d.last_auth_expires_ts_ms;
+    if (expiresMs) {
+      const diffMs = expiresMs - Date.now();
+      if (diffMs <= 0) {
+        expiresEl.textContent = 'Expires in: EXPIRED';
+        expiresEl.style.color = 'var(--red)';
+      } else {
+        const h = Math.floor(diffMs / 3600000);
+        const m = Math.floor((diffMs % 3600000) / 60000);
+        expiresEl.textContent = 'Expires in: ' + h + 'h ' + m + 'm';
+        expiresEl.style.color = diffMs < 7200000 ? 'var(--yellow)' : 'var(--text-dim)';
+      }
+    } else {
+      expiresEl.textContent = 'Expires in: --';
+      expiresEl.style.color = 'var(--text-dim)';
+    }
+  }
+
+  // Clean days / 連續乾淨天數
+  const cleanEl = document.getElementById('gov-trust-clean-days');
+  if (cleanEl) {
+    const days = d.clean_days_in_tier ?? 0;
+    cleanEl.textContent = 'Clean days: ' + days.toFixed(1);
+  }
+
+  // Last auth ID (small print) / 上次授權 ID（小字）
+  const authIdEl = document.getElementById('gov-trust-auth-id');
+  if (authIdEl) {
+    const aid = d.last_auth_id || d.auth_id || '';
+    // XSS-safe: textContent only / 僅用 textContent，不插 HTML
+    authIdEl.textContent = aid ? 'auth_id: ' + aid : '';
+  }
+
+  // T3 Full Review flag / T3 全面審查旗標
+  const reviewFlag = document.getElementById('gov-trust-review-flag');
+  const reviewBtn  = document.getElementById('gov-btn-full-review');
+  const showReview = !!(d.requires_operator_review || d.requires_full_review);
+  if (reviewFlag) reviewFlag.style.display = showReview ? '' : 'none';
+  if (reviewBtn)  reviewBtn.style.display  = showReview ? '' : 'none';
+
+  // Status row border color by state / 狀態列邊框顏色依狀態
+  const row = document.getElementById('gov-live-auth-status-row');
+  if (row) {
+    if (d.expired || (d.last_auth_expires_ts_ms && (d.last_auth_expires_ts_ms - Date.now()) <= 0)) {
+      row.style.borderColor = 'rgba(239,68,68,0.5)';
+    } else if (d.near_expiry || showReview) {
+      row.style.borderColor = 'rgba(210,153,34,0.5)';
+    } else {
+      row.style.borderColor = 'var(--border)';
+    }
+  }
+}
+
+/**
+ * Renew Live Auth — prompt for optional reason, POST to /api/v1/live/auth/renew.
+ * 續期實盤授權 — 提示輸入可選原因，POST 至 /api/v1/live/auth/renew。
+ *
+ * No dependency on live engine being alive; works from Governance Hub at any time.
+ * 不依賴 live engine 是否在線；可從 Governance Hub 隨時執行。
+ */
+async function govRenewLiveAuth() {
+  // Prompt for reason (optional) / 提示輸入原因（可選）
+  const reason = prompt('Renewal reason (optional) / 續期原因（可選）：') || 'operator_renew';
+
+  // Show a tier picker via simple prompt fallback
+  // 用簡單 prompt 讓 operator 選擇階梯
+  const tierInput = prompt(
+    'Select tier / 選擇階梯:\n0 = T0 Entry (24h)\n1 = T1 Provisional (72h)\n2 = T2 Established (168h)\n3 = T3 Trusted (360h)\n\nEnter 0-3:',
+    '1'
+  );
+  if (tierInput === null) return;  // cancelled / 取消
+  const tier = parseInt(tierInput, 10);
+  if (isNaN(tier) || tier < 0 || tier > 3) {
+    ocToast('無效階梯，請輸入 0-3 / Invalid tier, enter 0-3', 'warn');
+    return;
+  }
+
+  let d;
+  try {
+    d = await ocPost('/api/v1/live/auth/renew', { accepted_tier: tier, reason: reason });
+  } catch (e) {
+    // fail-closed: show error toast / fail-closed：顯示錯誤 toast
+    ocToast('✗ Renew 請求失敗 / Renew request failed', 'error');
+    return;
+  }
+
+  if (d && (d.ok || d.status === 'ok' || d.data)) {
+    const tierLabel = GOV_TRUST_TIER_LABELS[tier] || ('T' + tier);
+    ocToast('✓ Auth renewed — ' + tierLabel, 'success');
+    govLoadLiveAuthStatus();
+  } else {
+    const msg = (d && d.message) || (d && d.data && d.data.message) || 'Renewal failed / 續期失敗';
+    // XSS-safe: ocEsc wraps untrusted server string / ocEsc 包裝不可信的伺服器字串
+    ocToast('✗ ' + ocEsc(msg), 'error');
+  }
+}
+
+/**
+ * Submit T3 Full Review (mandatory when T3 auto-renewal cap exhausted).
+ * 提交 T3 全面審查（T3 自動續期耗盡後強制執行）。
+ *
+ * Prompts for review notes + confirmed_tier, POSTs to /api/v1/live/auth/renew-review.
+ * 提示輸入審查備注和確認階梯，POST 至 /api/v1/live/auth/renew-review。
+ */
+async function govRenewReview() {
+  const notes = prompt('T3 Full Review — operator review notes (min 10 chars) / 審查備注（最少10字）：');
+  if (notes === null) return;  // cancelled / 取消
+  if (!notes || notes.trim().length < 10) {
+    ocToast('Review notes must be at least 10 characters / 審查備注最少10字', 'warn');
+    return;
+  }
+
+  const tierInput = prompt(
+    'Confirmed tier / 確認階梯:\n0 = T0 Entry\n1 = T1 Provisional\n2 = T2 Established\n3 = T3 Trusted\n\nEnter 0-3:',
+    '3'
+  );
+  if (tierInput === null) return;  // cancelled / 取消
+  const tier = parseInt(tierInput, 10);
+  if (isNaN(tier) || tier < 0 || tier > 3) {
+    ocToast('無效階梯，請輸入 0-3 / Invalid tier, enter 0-3', 'warn');
+    return;
+  }
+
+  let d;
+  try {
+    d = await ocPost('/api/v1/live/auth/renew-review', {
+      review_notes: notes.trim(),
+      confirmed_tier: tier,
+    });
+  } catch (e) {
+    // fail-closed / fail-closed
+    ocToast('✗ Full review 提交失敗 / Full review submission failed', 'error');
+    return;
+  }
+
+  if (d && (d.ok || d.status === 'ok' || d.data)) {
+    const tierLabel = GOV_TRUST_TIER_LABELS[tier] || ('T' + tier);
+    ocToast('✓ Full review accepted — restarting at ' + tierLabel, 'success');
+    govLoadLiveAuthStatus();
+  } else {
+    const msg = (d && d.message) || (d && d.data && d.data.message) || 'Review submission failed / 提交失敗';
+    // XSS-safe: ocEsc wraps untrusted server string / ocEsc 包裝不可信的伺服器字串
+    ocToast('✗ ' + ocEsc(msg), 'error');
+  }
+}
+
+// Poll Live Auth status every 30s — independent of engine state
+// 每 30s 輪詢實盤授權狀態 — 不依賴引擎狀態
+setInterval(govLoadLiveAuthStatus, 30000);
+
+// Initial load on tab open / tab 開啟時立即載入
+govLoadLiveAuthStatus();
 </script>
 
 <script src="/static/governance-tab.js"></script>
