@@ -29,7 +29,7 @@
 //! 於 G5-FUP-IPC-MOD-SPLIT（2026-04-26）從 `ipc_server/mod.rs` 拆出。
 
 use super::connection::handle_connection;
-use super::engine_routing::EngineCommandChannels;
+use super::engine_routing::{EngineCommandChannels, LiveCmdSenderSlot};
 use super::protocol::IpcError;
 use super::slots::{
     AuditPoolSlot, BudgetTrackerSlot, EdgeReloadSenderSlot, HStateCacheSlot,
@@ -204,6 +204,29 @@ impl IpcServer {
     /// `watcher_disabled` 狀態。
     pub fn set_live_auth_recheck_sender(&mut self, tx: tokio::sync::mpsc::Sender<()>) {
         self.live_auth_recheck_tx = Some(tx);
+    }
+
+    /// 2026-04-27 LIVE-AUTH-WATCHER-EVENT-CONSUMER-SPAWN: wire the live
+    /// command sender slot. The `LiveAuthWatcher` writes the latest live
+    /// `UnboundedSender<PipelineCommand>` into this slot on every
+    /// authorization-driven respawn / clears it on teardown. IPC handlers
+    /// read a per-request snapshot via `EngineCommandChannels::live_snapshot()`.
+    ///
+    /// Call after `IpcServer::new(... cmd_channels ...)` (which sees an
+    /// empty slot) and before `ipc_server.run()` starts accepting
+    /// connections. Idempotent — re-wiring is a no-op given Arc identity
+    /// equality.
+    ///
+    /// 2026-04-27：接入 live 命令 sender slot。`LiveAuthWatcher` 在每次
+    /// 授權驅動的 respawn 寫入最新 live `UnboundedSender<PipelineCommand>`、
+    /// 在 teardown 清空。IPC handler 經 `EngineCommandChannels::live_snapshot()`
+    /// 讀取每請求快照。
+    ///
+    /// 在 `IpcServer::new(... cmd_channels ...)`（空 slot）之後、
+    /// `ipc_server.run()` 接受連線之前呼叫。冪等 — 重複接線基於 Arc 身份相等
+    /// 為 no-op。
+    pub fn set_live_cmd_sender_slot(&mut self, slot: LiveCmdSenderSlot) {
+        self.cmd_channels.live_slot = Some(slot);
     }
 
     /// Scanner IPC: wire the SymbolRegistry so get_active_symbols / get_scanner_status work.

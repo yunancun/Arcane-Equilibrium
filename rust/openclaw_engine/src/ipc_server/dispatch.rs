@@ -185,15 +185,15 @@ pub(crate) async fn dispatch_request(
         // 3E-3：命令接受可選 `engine` 參數路由到正確管線，默認為主管線。
         "pause_paper" => {
             let tx = extract_engine_tx(&req.params, cmd_channels);
-            handle_paper_cmd(id, tx, PipelineCommand::Pause, "paused")
+            handle_paper_cmd(id, &tx, PipelineCommand::Pause, "paused")
         }
         "resume_paper" => {
             let tx = extract_engine_tx(&req.params, cmd_channels);
-            handle_paper_cmd(id, tx, PipelineCommand::Resume, "resumed")
+            handle_paper_cmd(id, &tx, PipelineCommand::Resume, "resumed")
         }
         "close_all_positions" => {
             let tx = extract_engine_tx(&req.params, cmd_channels);
-            handle_paper_cmd(id, tx, PipelineCommand::CloseAll, "close_all_sent")
+            handle_paper_cmd(id, &tx, PipelineCommand::CloseAll, "close_all_sent")
         }
         "close_position" => {
             let symbol = req
@@ -216,9 +216,7 @@ pub(crate) async fn dispatch_request(
             let hint_is_long = req.params.get("is_long").and_then(|v| v.as_bool());
             let hint_qty = req.params.get("qty").and_then(|v| v.as_f64());
             let tx = extract_engine_tx(&req.params, cmd_channels);
-            handle_paper_cmd(
-                id,
-                tx,
+            handle_paper_cmd(id, &tx,
                 PipelineCommand::CloseSymbol {
                     symbol,
                     hint_is_long,
@@ -234,9 +232,7 @@ pub(crate) async fn dispatch_request(
                 .and_then(|v| v.as_f64())
                 .unwrap_or(10_000.0);
             let tx = extract_engine_tx(&req.params, cmd_channels);
-            handle_paper_cmd(
-                id,
-                tx,
+            handle_paper_cmd(id, &tx,
                 PipelineCommand::Reset {
                     new_balance: balance,
                 },
@@ -246,28 +242,28 @@ pub(crate) async fn dispatch_request(
         // ── Phase 3b: Strategy parameter commands (Optuna → Rust) / 策略參數命令 ──
         "update_strategy_params" => {
             let tx = extract_engine_tx(&req.params, cmd_channels);
-            handle_strategy_param_cmd(id, tx, &req.params, StrategyParamOp::Update).await
+            handle_strategy_param_cmd(id, &tx, &req.params, StrategyParamOp::Update).await
         }
         "get_strategy_params" => {
             let tx = extract_engine_tx(&req.params, cmd_channels);
-            handle_strategy_param_cmd(id, tx, &req.params, StrategyParamOp::Get).await
+            handle_strategy_param_cmd(id, &tx, &req.params, StrategyParamOp::Get).await
         }
         "get_param_ranges" => {
             let tx = extract_engine_tx(&req.params, cmd_channels);
-            handle_strategy_param_cmd(id, tx, &req.params, StrategyParamOp::Ranges).await
+            handle_strategy_param_cmd(id, &tx, &req.params, StrategyParamOp::Ranges).await
         }
         "update_risk_config" => {
             let tx = extract_engine_tx(&req.params, cmd_channels);
-            handle_update_risk_config(id, tx, &req.params).await
+            handle_update_risk_config(id, &tx, &req.params).await
         }
         // ARCH-RC1 1C-3-B: Rust-native risk runtime status + safe counter clear
         "get_risk_runtime_status" => {
             let tx = extract_engine_tx(&req.params, cmd_channels);
-            handle_risk_runtime_status(id, tx).await
+            handle_risk_runtime_status(id, &tx).await
         }
         "clear_consecutive_losses" => {
             let tx = extract_engine_tx(&req.params, cmd_channels);
-            handle_clear_consecutive_losses(id, tx).await
+            handle_clear_consecutive_losses(id, &tx).await
         }
         // P1-5 A2: operator-driven drawdown baseline reset — the in-memory
         // path + DB DELETE runs in event_consumer/mod.rs ResetDrawdownBaseline
@@ -278,7 +274,7 @@ pub(crate) async fn dispatch_request(
         // 寫 change_audit_log（根原則 #8）。
         "reset_drawdown_baseline" => {
             let tx = extract_engine_tx(&req.params, cmd_channels);
-            handle_reset_drawdown_baseline(id, tx).await
+            handle_reset_drawdown_baseline(id, &tx).await
         }
         // EDGE-P1b T3 (2026-04-26): emergency rollback for ExitConfig hot-patch.
         // Restores the 7 IPC-writable exit fields to ExitConfig::default()
@@ -289,36 +285,36 @@ pub(crate) async fn dispatch_request(
         // 仍是 TOML-only（詳 handlers/risk.rs::handle_restore_exit_config_defaults docstring）。
         "restore_exit_config_defaults" => {
             let tx = extract_engine_tx(&req.params, cmd_channels);
-            handle_restore_exit_config_defaults(id, tx).await
+            handle_restore_exit_config_defaults(id, &tx).await
         }
         // DYNAMIC-RISK-1: Per-engine Sharpe-aware sizer status + toggle.
         // DYNAMIC-RISK-1：按引擎動態風險調整器狀態與切換。
         "get_dynamic_risk_status" => {
             let tx = extract_engine_tx(&req.params, cmd_channels);
-            handle_get_dynamic_risk_status(id, tx).await
+            handle_get_dynamic_risk_status(id, &tx).await
         }
         "set_dynamic_risk_enabled" => {
             let tx = extract_engine_tx(&req.params, cmd_channels);
-            handle_set_dynamic_risk_enabled(id, tx, &req.params).await
+            handle_set_dynamic_risk_enabled(id, &tx, &req.params).await
         }
         // ARCH-RC1 1C-3-B-2: governor manual override (operator escalation/de-escalation)
         "force_governor_tier_tighter" => {
             let tx = extract_engine_tx(&req.params, cmd_channels);
-            handle_force_governor_tighter(id, tx, &req.params, audit_pool).await
+            handle_force_governor_tighter(id, &tx, &req.params, audit_pool).await
         }
         "force_governor_tier_looser" => {
             let tx = extract_engine_tx(&req.params, cmd_channels);
-            handle_force_governor_looser(id, tx, &req.params, audit_pool).await
+            handle_force_governor_looser(id, &tx, &req.params, audit_pool).await
         }
         // ARCH-RC1 1C-3-F: External paper-side order submission (shadow_decision_builder etc.)
         "submit_paper_order" => {
             let tx = extract_engine_tx(&req.params, cmd_channels);
-            handle_submit_paper_order(id, tx, &req.params).await
+            handle_submit_paper_order(id, &tx, &req.params).await
         }
         // RRC-1-E2: Strategy activate/pause / 策略啟停
         "set_strategy_active" => {
             let tx = extract_engine_tx(&req.params, cmd_channels);
-            handle_set_strategy_active(id, tx, &req.params).await
+            handle_set_strategy_active(id, &tx, &req.params).await
         }
         // System mode sync from Python GUI / 從 Python GUI 同步系統模式
         // set_system_mode broadcasts to ALL pipelines (not engine-specific)

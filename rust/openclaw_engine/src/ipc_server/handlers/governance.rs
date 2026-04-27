@@ -259,18 +259,26 @@ pub(in crate::ipc_server) async fn handle_set_system_mode_broadcast(
     });
     // Fire-and-forget to other pipelines (they don't need response channels for broadcast)
     // 向其他管線 fire-and-forget（廣播不需要回應通道）
+    //
+    // 2026-04-27 LIVE-AUTH-WATCHER-EVENT-CONSUMER-SPAWN: read live via
+    // `live_snapshot()` (slot-aware) so a `LiveAuthWatcher`-rotated sender
+    // is reached. paper / demo remain owned-Option access — they never
+    // respawn mid-session.
+    // 2026-04-27：live 經 `live_snapshot()`（slot-aware）讀取，
+    // 取到 watcher 輪替的 sender；paper / demo 仍 owned-Option。
     let primary_label = cmd_channels.primary_label();
-    for (label, ch) in [
-        ("paper", &cmd_channels.paper),
-        ("demo", &cmd_channels.demo),
-        ("live", &cmd_channels.live),
+    let live_snapshot = cmd_channels.live_snapshot();
+    for (label, owned_ch) in [
+        ("paper", cmd_channels.paper.clone()),
+        ("demo", cmd_channels.demo.clone()),
+        ("live", live_snapshot.clone()),
     ] {
         // Skip the primary (already sent above) and None channels
         // 跳過主管線（已發送）和 None 通道
         if label == primary_label {
             continue;
         }
-        if let Some(tx) = ch {
+        if let Some(tx) = owned_ch {
             let (other_resp_tx, _other_resp_rx) = tokio::sync::oneshot::channel();
             let _ = tx.send(PipelineCommand::SetSystemMode {
                 mode: mode.clone(),

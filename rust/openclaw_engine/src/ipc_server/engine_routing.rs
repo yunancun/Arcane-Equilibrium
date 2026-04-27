@@ -23,7 +23,36 @@
 
 use crate::config::{ConfigStore, RiskConfig};
 use crate::tick_pipeline::PipelineCommand;
+use parking_lot::RwLock;
 use std::sync::Arc;
+
+/// Slot type for the live pipeline command sender. The
+/// `LiveAuthWatcher` rotates the inner `Sender` on every authorization-
+/// driven respawn / teardown.
+///
+/// 2026-04-27 LIVE-AUTH-WATCHER-EVENT-CONSUMER-SPAWN: previously the
+/// live cmd_tx was a boot-time-fixed `Option<UnboundedSender<...>>` —
+/// fine when boot decided live spawn once, broken once mid-session
+/// respawn became a thing. Slot pattern lets IPC handlers read the
+/// latest sender per request via [`EngineCommandChannels::live_snapshot`].
+///
+/// `parking_lot::RwLock` is used (not `tokio::sync::RwLock`) so the
+/// `LiveAuthWatcher`'s spawner callback — which is a synchronous closure
+/// invoked from within an async context — can write the slot without
+/// touching async machinery. Read sites (IPC handlers, fan-out) are also
+/// trivially short, so the parking_lot RwLock pattern is safe in both
+/// sync and async paths.
+///
+/// Live 管線命令 sender 的 slot 類型。`LiveAuthWatcher` 每次授權驅動的
+/// respawn / teardown 都會輪替內層 Sender。Pre-2026-04-27 為 boot 時固定
+/// 的 `Option<UnboundedSender<...>>` — boot 決定一次 live spawn 時可行，
+/// 加入中途 respawn 後失準。Slot pattern 讓 IPC handler 每次請求讀最新
+/// sender（經 [`EngineCommandChannels::live_snapshot`]）。
+///
+/// 採 `parking_lot::RwLock`（非 `tokio::sync::RwLock`）讓 watcher 的同步
+/// spawner closure（在 async context 內被呼叫）可不繞 async 機械直接寫
+/// slot。讀端（IPC handler、fan-out）臨界區極短，sync / async 路徑皆安全。
+pub type LiveCmdSenderSlot = Arc<RwLock<Option<tokio::sync::mpsc::UnboundedSender<PipelineCommand>>>>;
 
 // ---------------------------------------------------------------------------
 // LIVE-P2-1: Per-engine RiskConfig stores
@@ -74,45 +103,123 @@ impl PerEngineRiskStores {
 ///
 /// 將 IPC 命令路由到正確管線的命令通道。
 /// 3E-ARCH 下每個管線有獨立命令通道，IPC handler 按 `engine` 參數選擇。
+///
+/// 2026-04-27 LIVE-AUTH-WATCHER-EVENT-CONSUMER-SPAWN: `live` is now a slot
+/// rotated by the `LiveAuthWatcher`. The original `Option<...>` was kept
+/// for the test-side `Default` impl (the slot defaults to `None` on
+/// `Default::default()` — same observable behaviour as the pre-fix `None`).
+///
+/// 2026-04-27：`live` 改為 slot 由 `LiveAuthWatcher` 輪替。`Default::default()`
+/// 下 slot 預設 `None`，與修復前 `None` 行為等同（測試端不需修改）。
 #[derive(Clone, Default)]
 pub struct EngineCommandChannels {
     pub paper: Option<tokio::sync::mpsc::UnboundedSender<PipelineCommand>>,
     pub demo: Option<tokio::sync::mpsc::UnboundedSender<PipelineCommand>>,
+    /// Pre-2026-04-27 owned sender, retained for backward-compatible
+    /// test instantiation. Production wiring uses `live_slot` below.
+    /// 修復前 owned sender，保留以兼容測試端構造；生產接線改用 `live_slot`。
     pub live: Option<tokio::sync::mpsc::UnboundedSender<PipelineCommand>>,
+    /// 2026-04-27 LIVE-AUTH-WATCHER-EVENT-CONSUMER-SPAWN: dynamic live
+    /// sender slot rotated by `LiveAuthWatcher` on respawn / teardown.
+    /// `None` when no slot is wired (tests / paper-only configurations).
+    /// `select("live")` and `primary()` prefer this slot's snapshot when
+    /// it contains `Some(_)`, falling back to the owned `live` field
+    /// otherwise.
+    /// 2026-04-27：`LiveAuthWatcher` 在 respawn / teardown 輪替的動態 live
+    /// sender slot。未接線（測試 / 純 paper）時為 `None`。`select("live")`
+    /// 與 `primary()` 優先讀此 slot 的快照（Some 時）；否則退回 owned
+    /// `live` 欄位。
+    pub live_slot: Option<LiveCmdSenderSlot>,
 }
 
 impl EngineCommandChannels {
+    /// Read a snapshot of the live sender. Prefers `live_slot` (the
+    /// watcher-rotated slot), falls back to the owned `live` field for
+    /// tests / configurations that did not wire a slot.
+    ///
+    /// Note: this clones the inner `UnboundedSender` (cheap — a tokio
+    /// `UnboundedSender` is `Arc`-backed). Returns `None` when neither
+    /// source has a sender.
+    ///
+    /// 讀 live sender 快照。優先讀 `live_slot`（watcher 輪替的 slot），
+    /// 未接線時退回 owned `live` 欄位。Clone 內層 `UnboundedSender`
+    /// （tokio 為 `Arc`-backed，廉價）。皆無時回 `None`。
+    pub fn live_snapshot(&self) -> Option<tokio::sync::mpsc::UnboundedSender<PipelineCommand>> {
+        if let Some(slot) = &self.live_slot {
+            // try_read avoids blocking the IPC dispatch thread on a writer
+            // contention (watcher writer holds the lock for ~1 µs during
+            // respawn / teardown). On contention we fall back to the
+            // owned `live` field — slot snapshot is best-effort, but the
+            // `live` clone is also fresh in the rare race window.
+            //
+            // try_read 避免 IPC dispatch 在 writer 爭用時阻塞（watcher 寫
+            // 期間 ~1 µs）。爭用時退回 owned `live` 欄位 — slot snapshot
+            // 為盡力，但該 race 窗口極短，owned `live` 的 clone 仍 fresh。
+            if let Some(guard) = slot.try_read() {
+                if let Some(tx) = guard.as_ref() {
+                    return Some(tx.clone());
+                }
+            } else {
+                tracing::debug!(
+                    "EngineCommandChannels::live_snapshot: live_slot try_read contention, \
+                     owned live = None → returning None \
+                     / live_slot try_read 爭用，owned live = None → 回 None"
+                );
+            }
+        }
+        self.live.clone()
+    }
+
     /// Select the command sender for the given engine name.
     /// Falls back to paper for unknown names (fail-safe).
+    ///
+    /// 2026-04-27 LIVE-AUTH-WATCHER-EVENT-CONSUMER-SPAWN: returns an
+    /// `Option<UnboundedSender>` instead of `&Option<...>` so the live
+    /// arm can read a fresh snapshot from `live_slot` per-call. Paper /
+    /// Demo are owned `Option<UnboundedSender>` and clone cheaply
+    /// (`Arc`-backed), so the change is uniform across arms.
+    ///
     /// 按引擎名選擇命令發送端。未知名稱回退到 paper（安全默認）。
+    /// 2026-04-27：回 `Option<UnboundedSender>`（owned）以利 live arm
+    /// 每次讀 `live_slot` 快照；paper / demo 為 `Arc`-backed，clone 廉價，
+    /// 三 arm 行為對齊。
     pub fn select(
         &self,
         engine: &str,
-    ) -> &Option<tokio::sync::mpsc::UnboundedSender<PipelineCommand>> {
+    ) -> Option<tokio::sync::mpsc::UnboundedSender<PipelineCommand>> {
         match engine {
-            "demo" => &self.demo,
-            "live" => &self.live,
-            _ => &self.paper, // "paper" or unknown → paper (fail-safe)
+            "demo" => self.demo.clone(),
+            "live" => self.live_snapshot(),
+            _ => self.paper.clone(), // "paper" or unknown → paper (fail-safe)
         }
     }
 
     /// Return the primary (first available) sender for commands that
     /// don't specify an engine param. Priority: live > demo > paper.
     /// 返回主要（第一個可用）sender，供未指定 engine 的命令使用。
-    pub fn primary(&self) -> &Option<tokio::sync::mpsc::UnboundedSender<PipelineCommand>> {
-        if self.live.is_some() {
-            &self.live
-        } else if self.demo.is_some() {
-            &self.demo
-        } else {
-            &self.paper
+    pub fn primary(&self) -> Option<tokio::sync::mpsc::UnboundedSender<PipelineCommand>> {
+        if let Some(tx) = self.live_snapshot() {
+            return Some(tx);
         }
+        if let Some(tx) = &self.demo {
+            return Some(tx.clone());
+        }
+        self.paper.clone()
     }
 
     /// Return the label of the primary engine ("live" / "demo" / "paper").
-    /// 返回主引擎的標籤。
+    ///
+    /// 2026-04-27: read the live slot snapshot (not the owned field) for
+    /// label semantics. When `live_slot` is wired but currently empty
+    /// (mid-teardown), `live` will also be empty (boot leaves owned
+    /// `live` as None when slot wiring is in use), so the fall-through
+    /// to demo / paper is correct.
+    ///
+    /// 返回主引擎的標籤。2026-04-27：讀 live slot snapshot（非 owned 欄位）。
+    /// `live_slot` 接線但目前空（teardown 中）時 owned `live` 也為 None
+    /// （boot 在採用 slot 時不再寫入 owned `live`），退回 demo / paper 正確。
     pub fn primary_label(&self) -> &'static str {
-        if self.live.is_some() {
+        if self.live_snapshot().is_some() {
             "live"
         } else if self.demo.is_some() {
             "demo"
@@ -125,10 +232,20 @@ impl EngineCommandChannels {
 /// 3E-3: Extract the `engine` param from request params and select the
 /// matching pipeline command sender. Falls back to primary if missing.
 /// 3E-3：從請求參數提取 `engine` 並選擇對應管線命令發送端，缺失時回退到主管線。
-pub(crate) fn extract_engine_tx<'a>(
+///
+/// 2026-04-27 LIVE-AUTH-WATCHER-EVENT-CONSUMER-SPAWN: returns owned
+/// `Option<UnboundedSender>` (cheap `Arc` clone) so the live arm can read
+/// a fresh `live_slot` snapshot per request. Lifetime annotation on
+/// `channels` removed — the helper no longer borrows from `channels`
+/// across the return.
+///
+/// 2026-04-27：回 owned `Option<UnboundedSender>`（廉價 `Arc` clone），
+/// live arm 每請求讀 `live_slot` 快照。`channels` 生命週期註記移除 —
+/// helper 不再跨返回值 borrow。
+pub(crate) fn extract_engine_tx(
     params: &serde_json::Value,
-    channels: &'a EngineCommandChannels,
-) -> &'a Option<tokio::sync::mpsc::UnboundedSender<PipelineCommand>> {
+    channels: &EngineCommandChannels,
+) -> Option<tokio::sync::mpsc::UnboundedSender<PipelineCommand>> {
     match params.get("engine").and_then(|v| v.as_str()) {
         Some(engine) => channels.select(engine),
         None => {

@@ -47,6 +47,34 @@
 //!       mock that counts calls and returns deterministic errors without
 //!       spinning a real exchange pipeline.
 //!
+//!   2026-04-27 LIVE-AUTH-WATCHER-EVENT-CONSUMER-SPAWN fix:
+//!     RCA found `pipeline_snapshot_live.json` had not been written in 8
+//!     days because `(None, None)` boot match arm in `main.rs:1029` skipped
+//!     `spawn_live_pipeline` whenever `authorization.json` was absent at
+//!     boot. After operator renewed authorization mid-session the watcher
+//!     called `slot_op.try_spawn` (which only spawns the WS supervisor /
+//!     listener / balance-refresh tasks via `build_exchange_pipeline`), but
+//!     never spawned the Live OS thread that runs `run_event_consumer`.
+//!     That thread is the producer of `state_writer` / `snapshot_writer`
+//!     / `trading.fills` etc., so 8 days of Live had zero `live_state.json`
+//!     mtime updates and zero rows in `trading.fills` / `learning.exit_features`.
+//!
+//!     Fix: the watcher now optionally owns a `LivePipelineSpawner`
+//!     callback (constructed in `main.rs` so the closure can capture all
+//!     of `WriterSenders` / `PipelineSpawnContext` / `live_positions_mirror`
+//!     etc.). On a successful `slot_op.try_spawn` the watcher invokes the
+//!     callback with the `SpawnOutput { bindings, slot_cancel_token }` and
+//!     the closure performs the missing `spawn_live_pipeline` work,
+//!     returning the `std::thread::JoinHandle<()>` for the OS thread plus
+//!     a fresh tokio command channel and event channel registered into the
+//!     dynamic `live_cmd_slot` / `live_event_slot` (so fan-out + IPC route
+//!     newly-routed commands and ticks at zero overhead between teardowns).
+//!
+//!     Without a spawner injected (unit tests, IPC-only configurations) the
+//!     watcher behaves exactly as Phase 3 did — slot try_spawn alone — so
+//!     existing tests still hold. With a spawner injected, the OS thread
+//!     handle is captured into a shared slot the shutdown sequence reads.
+//!
 //! MODULE_NOTE (中):
 //!   Phase 2 加入 `PipelineSlot::teardown()`，讓授權撤銷只拆 Live。但 Phase 2
 //!   沒有 respawn 路徑 — 拆完後 Live 只能等整機重啟。main.rs 的 5 分鐘 loop
@@ -75,13 +103,40 @@
 //!       （~5ns ArcSwap 讀），確保 hot-reload 配置次次 respawn 生效。
 //!     * Watcher 持有 `SpawnOp` trait 物件，測試可注入計數/出錯的 mock，
 //!       無需真實交易所管線。
+//!
+//!   2026-04-27 LIVE-AUTH-WATCHER-EVENT-CONSUMER-SPAWN 修復：
+//!     RCA 發現 `pipeline_snapshot_live.json` 已 8 天未更新 — boot 時
+//!     `main.rs:1029` 的 `(None, None)` match arm 在 `authorization.json`
+//!     不存在時跳過 `spawn_live_pipeline`。Operator 中途 renew 後 watcher
+//!     雖呼叫 `slot_op.try_spawn`（只起 WS supervisor / listener /
+//!     balance-refresh，經 `build_exchange_pipeline`），但**從未** spawn 跑
+//!     `run_event_consumer` 的 Live OS 線程。該線程是 `state_writer` /
+//!     `snapshot_writer` / `trading.fills` 等等的生產者，所以 8 天 Live
+//!     `live_state.json` mtime 0 更新、`trading.fills` / `learning.exit_features`
+//!     0 row。
+//!
+//!     修復：watcher 多帶一個可選 `LivePipelineSpawner` callback（於
+//!     `main.rs` 構造，closure 可 capture `WriterSenders` /
+//!     `PipelineSpawnContext` / `live_positions_mirror` 等）。`slot_op.try_spawn`
+//!     成功後 watcher 把 `SpawnOutput { bindings, slot_cancel_token }` 交給
+//!     callback，由 callback 補齊缺失的 `spawn_live_pipeline` 工作，回傳
+//!     OS 線程的 `std::thread::JoinHandle<()>` + 新建 tokio 命令通道 +
+//!     新建事件通道並寫入動態 `live_cmd_slot` / `live_event_slot`（fan-out
+//!     + IPC 在 teardown 之間零負擔路由命令與 tick）。
+//!
+//!     未注入 spawner 時（單測、純 IPC 配置）watcher 行為完全等同 Phase 3 —
+//!     僅 slot try_spawn — 既有測試不破。注入後 OS 線程 handle 會寫入共享
+//!     slot 給 shutdown 序列讀取。
 
-use crate::pipeline_slot::{PipelineSlot, SlotKind, SpawnConfig, SpawnError, TeardownError};
+use crate::main_fanout::LiveEventSenderSlot;
+use crate::pipeline_slot::{PipelineSlot, SlotKind, SpawnConfig, SpawnError, SpawnOutput, TeardownError};
 use crate::spawn_backoff::SpawnBackoff;
 use async_trait::async_trait;
 use openclaw_engine::bybit_rest_client::BybitEnvironment;
 use openclaw_engine::config::ConfigManager;
+use openclaw_engine::ipc_server::LiveCmdSenderSlot;
 use openclaw_engine::live_authorization::{auth_error_kind, load_and_verify};
+use parking_lot::Mutex as ParkingMutex;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
@@ -124,26 +179,38 @@ pub const IPC_TRIGGER_CAPACITY: usize = 1;
 ///
 /// The production implementation below delegates to `PipelineSlot`.
 ///
+/// 2026-04-27 LIVE-AUTH-WATCHER-EVENT-CONSUMER-SPAWN: `try_spawn` now
+/// returns `Option<SpawnOutput>` instead of `bool` so the watcher can
+/// hand the bindings + slot child token to the optional pipeline spawner
+/// callback. `Ok(None)` keeps the same semantics as the previous
+/// `Ok(false)`: `build_exchange_pipeline` returned None.
+///
 /// Watcher 所需的槽位操作（spawn / teardown / is_spawned）。抽成 trait
 /// 讓單測注入計數與固定回應的 mock，不必啟動真實交易所管線（需 REST/WS
 /// 客戶端與 Bybit endpoint）。生產實作在下方委派 `PipelineSlot`。
+///
+/// 2026-04-27 修復：`try_spawn` 從回 `bool` 改回 `Option<SpawnOutput>`，
+/// watcher 能把 bindings + 子 token 交給可選 spawner callback。`Ok(None)`
+/// 沿用之前 `Ok(false)` 語意：`build_exchange_pipeline` 回 None。
 #[async_trait]
 pub trait SpawnOp: Send + Sync {
     /// True iff the slot is currently `Spawned`.
     /// 槽位當前是否為 `Spawned`。
     fn is_spawned(&self) -> bool;
 
-    /// Attempt to spawn the slot. Returns `Ok(true)` on success,
-    /// `Ok(false)` on `build_exchange_pipeline` returning None (structured
-    /// reason already logged inside), `Err` on programming errors
-    /// (`AlreadySpawned`).
+    /// Attempt to spawn the slot. Returns `Ok(Some(out))` on success
+    /// (caller owns the bindings + slot-scoped child token to thread
+    /// further), `Ok(None)` on `build_exchange_pipeline` returning None
+    /// (structured reason already logged inside), `Err` on programming
+    /// errors (`AlreadySpawned`).
     ///
-    /// 嘗試啟動槽位。成功 `Ok(true)`；`build_exchange_pipeline` 回 None 時
-    /// `Ok(false)`（原因已結構化 log）；程式錯誤（`AlreadySpawned`）`Err`。
+    /// 嘗試啟動槽位。成功 `Ok(Some(out))`（呼叫端取走 bindings + 槽位子
+    /// token 串下去）；`build_exchange_pipeline` 回 None 時 `Ok(None)`；
+    /// 程式錯誤（`AlreadySpawned`）`Err`。
     async fn try_spawn(
         &self,
         cfg: &SpawnConfig<'_>,
-    ) -> Result<bool, SpawnError>;
+    ) -> Result<Option<SpawnOutput>, SpawnError>;
 
     /// Teardown the slot. Idempotent on `Empty`.
     /// 拆槽位。對 `Empty` 為 no-op。
@@ -159,11 +226,8 @@ impl SpawnOp for PipelineSlot {
     async fn try_spawn(
         &self,
         cfg: &SpawnConfig<'_>,
-    ) -> Result<bool, SpawnError> {
-        match PipelineSlot::try_spawn(self, cfg).await? {
-            Some(_) => Ok(true),
-            None => Ok(false),
-        }
+    ) -> Result<Option<SpawnOutput>, SpawnError> {
+        PipelineSlot::try_spawn(self, cfg).await
     }
 
     async fn teardown(&self) -> Result<(), TeardownError> {
@@ -219,6 +283,58 @@ impl IpcTriggerHandle {
     }
 }
 
+/// Handle to the OS thread the spawner callback most recently produced.
+/// Shared between the watcher (writer) and the shutdown sequence (reader)
+/// so the engine-wide shutdown can `.join()` the live runtime thread
+/// instead of orphaning it. `parking_lot::Mutex` is used because the
+/// spawner callback (synchronous closure) writes the slot, and shutdown
+/// reads the slot at engine-stop time — both are extremely short
+/// critical sections.
+///
+/// 最近一次 spawner callback 產出的 OS 線程 handle。watcher 寫、shutdown
+/// 序列讀，讓 engine-wide shutdown 可 `.join()` Live runtime thread 而非
+/// 任其孤兒。`parking_lot::Mutex`：spawner callback（同步 closure）寫、
+/// shutdown 引擎停止時讀，臨界區極短。
+pub type LiveThreadHandleSlot = Arc<ParkingMutex<Option<std::thread::JoinHandle<()>>>>;
+
+/// Result type returned by a [`LivePipelineSpawner`] invocation.
+///
+/// `Ok(handle)` = spawner produced a viable Live OS thread; the watcher
+/// stores the handle for the shutdown sequence to join.
+///
+/// `Err(reason)` = spawner refused (e.g. fan-out / IPC slot was None at
+/// the time of invocation, indicating a programming error in main.rs).
+/// Treated as a spawn failure and engages the watcher backoff.
+///
+/// `LivePipelineSpawner` 回傳。`Ok(handle)` = spawner 成功，watcher 存 handle
+/// 供 shutdown 序列 join。`Err(reason)` = spawner 拒絕（例如 fan-out / IPC
+/// slot 該時為 None，main.rs 接線 bug），watcher 視為 spawn 失敗 + 啟動退避。
+pub type LivePipelineSpawnResult = Result<std::thread::JoinHandle<()>, String>;
+
+/// Callback invoked after a successful `slot_op.try_spawn` to perform the
+/// rest of the Live boot path that the slot abstraction itself does NOT
+/// cover — most importantly the OS thread that runs `run_event_consumer`
+/// (which is the producer of `state_writer` / `snapshot_writer` / the
+/// `trading.fills` writer). The watcher does not know how to construct
+/// `EventConsumerDeps` (~24 fields of writers, shared clients, predictors,
+/// etc.) so the closure is constructed in `main.rs::async_main` where all
+/// those `Arc`s are already in scope.
+///
+/// The callback is `Send + Sync` because the watcher runs on a tokio
+/// task and may be moved across worker threads. Fn (not FnMut / FnOnce)
+/// lets us invoke it on every successful respawn.
+///
+/// `slot_op.try_spawn` 成功後呼叫的 callback，補齊 slot 抽象**不**涵蓋的
+/// 其餘 Live 啟動路徑 — 重點是跑 `run_event_consumer` 的 OS 線程
+/// （`state_writer` / `snapshot_writer` / `trading.fills` 寫入器的生產者）。
+/// watcher 不知如何構造 `EventConsumerDeps`（~24 個 writer / 共享 client /
+/// predictor 等欄位），因此 closure 構造於 `main.rs::async_main` — 那邊所有
+/// `Arc` 都在 scope 內。
+///
+/// `Send + Sync` 因 watcher 跑在 tokio task，可能跨 worker thread 搬。
+/// Fn（非 FnMut / FnOnce）讓我們每次成功 respawn 都能呼叫。
+pub type LivePipelineSpawner = Arc<dyn Fn(SpawnOutput) -> LivePipelineSpawnResult + Send + Sync>;
+
 /// Live authorization watcher.
 ///
 /// Holds the Live slot, the engine config manager (for fresh
@@ -227,10 +343,24 @@ impl IpcTriggerHandle {
 /// `SpawnBackoff` for spawn-attempt rate limiting, and an IPC trigger
 /// receiver.
 ///
+/// 2026-04-27: optional `pipeline_spawner` + `thread_handle_slot` for
+/// the LIVE-AUTH-WATCHER-EVENT-CONSUMER-SPAWN fix. When `pipeline_spawner`
+/// is None the watcher behaves exactly as Phase 3 did (slot try_spawn /
+/// teardown only); when Some, every successful slot try_spawn is followed
+/// by a callback invocation that produces the OS thread running
+/// `run_event_consumer` and the handle is captured into
+/// `thread_handle_slot` for the shutdown sequence.
+///
 /// Live 授權 watcher。持有 Live 槽位、引擎配置管理器（每次 respawn
 /// 取新 `EngineBootstrap` 快照）、環境標籤、引擎級 shutdown token
 /// （SIGTERM 乾淨退出）、`SpawnBackoff`（限速 spawn 嘗試）、IPC
 /// 觸發 receiver。
+///
+/// 2026-04-27：`pipeline_spawner` + `thread_handle_slot` 為
+/// LIVE-AUTH-WATCHER-EVENT-CONSUMER-SPAWN 修復新增。`pipeline_spawner`
+/// 為 None 時 watcher 行為完全等同 Phase 3（只 slot try_spawn / teardown）；
+/// Some 時每次成功 try_spawn 後呼叫 callback 產出跑 `run_event_consumer`
+/// 的 OS 線程，handle 寫入 `thread_handle_slot` 供 shutdown 序列 join。
 pub struct LiveAuthWatcher {
     slot_op: Arc<dyn SpawnOp>,
     config: Arc<ConfigManager>,
@@ -239,6 +369,27 @@ pub struct LiveAuthWatcher {
     engine_shutdown: CancellationToken,
     backoff: SpawnBackoff,
     ipc_trigger: mpsc::Receiver<()>,
+    /// Optional callback for the second half of the Live boot path
+    /// (LIVE-AUTH-WATCHER-EVENT-CONSUMER-SPAWN, 2026-04-27). None in unit
+    /// tests + IPC-only configurations.
+    /// 可選 callback；單測 + 純 IPC 配置時為 None。
+    pipeline_spawner: Option<LivePipelineSpawner>,
+    /// Slot the watcher writes the latest OS thread handle into, so the
+    /// shutdown sequence can join it. None in unit tests where the spawner
+    /// callback is also None.
+    /// 寫入最近 OS 線程 handle 的 slot；shutdown 序列讀取後 join。單測
+    /// 無 spawner 時亦為 None。
+    thread_handle_slot: Option<LiveThreadHandleSlot>,
+    /// BLOCKER-2 (2026-04-27): live_cmd_slot and live_event_slot are cleared
+    /// on teardown so the governance broadcast loop and fan-out do not deliver
+    /// commands / ticks to a dead pipeline after a mid-session teardown.
+    /// None in unit tests (slots are owned by main.rs in production).
+    ///
+    /// BLOCKER-2（2026-04-27）：teardown 時清空兩個 slot，防止 governance
+    /// broadcast 迴圈和 fan-out 在 teardown 後仍往死管線投命令 / tick。
+    /// 單測中為 None（生產中由 main.rs 擁有）。
+    live_cmd_slot: Option<LiveCmdSenderSlot>,
+    live_event_slot: Option<LiveEventSenderSlot>,
 }
 
 impl LiveAuthWatcher {
@@ -249,10 +400,17 @@ impl LiveAuthWatcher {
     /// fresh `EngineBootstrap` snapshot on every respawn attempt
     /// (hot-reload propagates into Live respawns).
     ///
+    /// Pre-2026-04-27 callers (no event-consumer spawner) keep this
+    /// signature; new callers use [`Self::with_pipeline_spawner`].
+    ///
     /// 建構 watcher。回傳 `(Self, IpcTriggerHandle)`；handle 由 IPC
     /// dispatcher clone。`config` 為 `Arc<ConfigManager>`，每次
     /// respawn 抓新 `EngineBootstrap` 快照（hot-reload 於下次 Live
     /// respawn 生效）。
+    ///
+    /// 2026-04-27 前的呼叫端（無 event-consumer spawner）沿用此簽名；
+    /// 新呼叫端使用 [`Self::with_pipeline_spawner`]。
+    #[allow(dead_code)] // Public API: kept for tests + pre-2026-04-27 callers
     pub fn new(
         slot_op: Arc<dyn SpawnOp>,
         config: Arc<ConfigManager>,
@@ -272,6 +430,7 @@ impl LiveAuthWatcher {
 
     /// Tunable constructor — exposed for tests and future config wiring.
     /// 可調構造 — 供測試與未來 config 接線。
+    #[allow(dead_code)] // Public API: heavily used in unit tests; kept for binary callers that need timer overrides
     pub fn with_params(
         slot_op: Arc<dyn SpawnOp>,
         config: Arc<ConfigManager>,
@@ -291,9 +450,125 @@ impl LiveAuthWatcher {
                 engine_shutdown,
                 backoff: SpawnBackoff::new(backoff_base, backoff_max),
                 ipc_trigger: rx,
+                pipeline_spawner: None,
+                thread_handle_slot: None,
+                live_cmd_slot: None,
+                live_event_slot: None,
             },
             IpcTriggerHandle { tx },
         )
+    }
+
+    /// Construct the watcher with a `LivePipelineSpawner` callback so the
+    /// watcher drives the **full** Live boot path on respawn, not just
+    /// `slot_op.try_spawn`. Without the callback the OS thread that runs
+    /// `run_event_consumer` is never spawned (LIVE-AUTH-WATCHER-EVENT-
+    /// CONSUMER-SPAWN, 2026-04-27).
+    ///
+    /// `thread_handle_slot` is populated by the watcher every time the
+    /// spawner returns `Ok(handle)`; the engine-wide shutdown sequence
+    /// reads it to join the OS thread cleanly.
+    ///
+    /// Wraps [`Self::with_params`] for the timer + backoff knobs.
+    ///
+    /// 帶 `LivePipelineSpawner` callback 構造 watcher，讓 watcher 驅動
+    /// **完整**的 Live 啟動路徑 — 不僅 `slot_op.try_spawn`。沒有 callback
+    /// 時 `run_event_consumer` 的 OS 線程從未被 spawn（2026-04-27 修復）。
+    ///
+    /// `thread_handle_slot` 由 watcher 在 spawner 回 `Ok(handle)` 後寫入；
+    /// engine-wide shutdown 序列讀取並 join OS 線程。
+    ///
+    /// 包覆 [`Self::with_params`] 提供 timer + backoff 旋鈕。
+    #[allow(clippy::too_many_arguments)]
+    #[allow(dead_code)] // Public API: prod uses `from_parts` (two-stage); kept as a one-shot convenience constructor
+    pub fn with_pipeline_spawner(
+        slot_op: Arc<dyn SpawnOp>,
+        config: Arc<ConfigManager>,
+        env: BybitEnvironment,
+        engine_shutdown: CancellationToken,
+        pipeline_spawner: LivePipelineSpawner,
+        thread_handle_slot: LiveThreadHandleSlot,
+    ) -> (Self, IpcTriggerHandle) {
+        let (mut w, h) = Self::with_params(
+            slot_op,
+            config,
+            env,
+            engine_shutdown,
+            DEFAULT_POLL_INTERVAL,
+            DEFAULT_BACKOFF_BASE,
+            DEFAULT_BACKOFF_MAX,
+        );
+        w.pipeline_spawner = Some(pipeline_spawner);
+        w.thread_handle_slot = Some(thread_handle_slot);
+        (w, h)
+    }
+
+    /// 2026-04-27 LIVE-AUTH-WATCHER-EVENT-CONSUMER-SPAWN: pre-create the
+    /// IPC trigger handle so `main.rs` can wire the IPC server before all
+    /// the Arc dependencies needed by the spawner closure (writers,
+    /// instruments, etc.) are constructed. Returns the trigger handle
+    /// + the matching receiver to be threaded into a later
+    /// [`Self::from_parts`] call.
+    ///
+    /// Without this two-stage construction, watcher creation must happen
+    /// before IPC server detaches (so `set_live_auth_recheck_sender` can
+    /// land before `ipc_server.run()` accepts connections), but the
+    /// spawner closure can only be built after writers / db pool / etc.
+    /// have been created — which is post-IPC. The two-stage path
+    /// resolves the chicken-and-egg.
+    ///
+    /// 2026-04-27 修復：分兩階段構造 watcher。先建 IPC trigger handle 讓
+    /// `main.rs` 在 IPC server 接受連線前接線；spawner closure 等待 writers /
+    /// db_pool / 等等構造完才能組裝。後階段透過 [`Self::from_parts`] 完成。
+    pub fn pre_create_trigger() -> (IpcTriggerHandle, mpsc::Receiver<()>) {
+        let (tx, rx) = mpsc::channel::<()>(IPC_TRIGGER_CAPACITY);
+        (IpcTriggerHandle { tx }, rx)
+    }
+
+    /// 2026-04-27 LIVE-AUTH-WATCHER-EVENT-CONSUMER-SPAWN: assemble a fully-
+    /// configured watcher from a previously-extracted IPC trigger receiver
+    /// (see [`Self::pre_create_trigger`]) plus the spawner callback,
+    /// shared thread-handle slot, and the dynamic live cmd/event sender
+    /// slots so that teardown can clear them (BLOCKER-2).
+    ///
+    /// `live_cmd_slot` and `live_event_slot` are cleared during
+    /// [`decide_once`]'s teardown arm so the governance broadcast loop
+    /// (`set_system_mode`) and the fan-out loop do not deliver commands /
+    /// ticks to a dead pipeline after teardown. Without clearing, stale
+    /// senders accumulate until the next respawn overwrites them, causing
+    /// silent command loss in the ~seconds between teardown and respawn.
+    ///
+    /// 2026-04-27 修復：搭配 [`Self::pre_create_trigger`] 的後階段構造。
+    /// 接 receiver + spawner closure + 共享 thread-handle slot +
+    /// live_cmd_slot / live_event_slot（teardown 時清空，BLOCKER-2）。
+    /// teardown arm 清空兩個 slot，防止 governance broadcast 迴圈和
+    /// fan-out 在 teardown 後仍往死管線投命令 / tick。
+    /// `main.rs` 在 writers / Arc bundle 就緒後使用。
+    #[allow(clippy::too_many_arguments)]
+    pub fn from_parts(
+        slot_op: Arc<dyn SpawnOp>,
+        config: Arc<ConfigManager>,
+        env: BybitEnvironment,
+        engine_shutdown: CancellationToken,
+        ipc_trigger: mpsc::Receiver<()>,
+        pipeline_spawner: Option<LivePipelineSpawner>,
+        thread_handle_slot: Option<LiveThreadHandleSlot>,
+        live_cmd_slot: Option<LiveCmdSenderSlot>,
+        live_event_slot: Option<LiveEventSenderSlot>,
+    ) -> Self {
+        Self {
+            slot_op,
+            config,
+            env,
+            poll_interval: DEFAULT_POLL_INTERVAL,
+            engine_shutdown,
+            backoff: SpawnBackoff::new(DEFAULT_BACKOFF_BASE, DEFAULT_BACKOFF_MAX),
+            ipc_trigger,
+            pipeline_spawner,
+            thread_handle_slot,
+            live_cmd_slot,
+            live_event_slot,
+        }
     }
 
     /// Drive the state machine until `engine_shutdown` fires. This is
@@ -305,8 +580,19 @@ impl LiveAuthWatcher {
         info!(
             env = ?self.env,
             poll_interval_secs = self.poll_interval.as_secs(),
+            has_pipeline_spawner = self.pipeline_spawner.is_some(),
             "LiveAuthWatcher started / Live 授權 watcher 已啟動"
         );
+
+        // 2026-04-27 LIVE-AUTH-WATCHER-EVENT-CONSUMER-SPAWN: drive one
+        // immediate decision cycle on entry so a Live boot with valid
+        // authorization spawns the pipeline without waiting for the first
+        // 5s poll tick. Without this fast-path, the 8-day silent regression
+        // would persist for the first 5s after engine restart even after
+        // the fix.
+        // 啟動時立即跑一次決策，讓有效授權的 Live boot 不必等首個 5s 輪詢。
+        // 否則修復後 engine 重啟仍會殘留 5s 死期。
+        self.decide_once().await;
 
         loop {
             // Wait for either the engine to shut down, an IPC trigger to
@@ -437,17 +723,93 @@ impl LiveAuthWatcher {
                     cfg_snapshot: &cfg_snapshot,
                 };
                 match self.slot_op.try_spawn(&spawn_cfg).await {
-                    Ok(true) => {
-                        self.backoff.reset();
-                        info!(
-                            tier = %auth.tier,
-                            operator_id = %auth.operator_id,
-                            expires_at_ms = auth.expires_at_ms,
-                            "LiveAuthWatcher: Live slot respawned after auth became valid \
-                             / 授權恢復，Live 槽位已 respawn"
-                        );
+                    Ok(Some(spawn_output)) => {
+                        // 2026-04-27 LIVE-AUTH-WATCHER-EVENT-CONSUMER-SPAWN:
+                        // The slot has spawned WS supervisor / listener /
+                        // balance-refresh tasks. Now invoke the optional
+                        // pipeline spawner callback to spawn the OS thread
+                        // running `run_event_consumer` (which is the
+                        // producer of state_writer / snapshot_writer /
+                        // trading.fills writer). Without this callback the
+                        // pipeline is half-spawned: WS reads land in a
+                        // channel nobody consumes, snapshots never refresh.
+                        //
+                        // 2026-04-27 修復：slot 已 spawn WS supervisor /
+                        // listener / 餘額刷新任務。現在呼叫可選 pipeline
+                        // spawner callback 產出跑 `run_event_consumer` 的
+                        // OS 線程（state_writer / snapshot_writer /
+                        // trading.fills 寫入器的生產者）。沒有此 callback
+                        // 時管線是半成品 — WS 收到的資料進無人消費的通道，
+                        // snapshot 永不更新。
+                        match (&self.pipeline_spawner, &self.thread_handle_slot) {
+                            (Some(spawner), Some(handle_slot)) => {
+                                match spawner(spawn_output) {
+                                    Ok(thread_handle) => {
+                                        // Capture handle into shared slot
+                                        // for shutdown sequence to join.
+                                        // 寫入 shutdown 序列要 join 的 slot。
+                                        *handle_slot.lock() = Some(thread_handle);
+                                        self.backoff.reset();
+                                        info!(
+                                            tier = %auth.tier,
+                                            operator_id = %auth.operator_id,
+                                            expires_at_ms = auth.expires_at_ms,
+                                            "LiveAuthWatcher: Live slot + event_consumer thread respawned \
+                                             after auth became valid \
+                                             / 授權恢復，Live 槽位 + event_consumer 線程已 respawn"
+                                        );
+                                    }
+                                    Err(reason) => {
+                                        // Spawner refused. The slot is
+                                        // currently Spawned (slot_op did
+                                        // accept the spawn) but the OS
+                                        // thread is missing — engage backoff
+                                        // and tear down the slot to avoid
+                                        // a half-spawned state. The next
+                                        // decide_once will see slot Empty
+                                        // and try again under backoff.
+                                        //
+                                        // Spawner 拒絕。slot 已 Spawned 但
+                                        // OS 線程缺失 — 啟動退避並 teardown
+                                        // 槽位避免半成品狀態。下次
+                                        // decide_once 看到 Empty 會於退避
+                                        // 後重試。
+                                        self.backoff.record_failure();
+                                        warn!(
+                                            reason = %reason,
+                                            delay_until_ready_ms = self.backoff.current_delay_ms(),
+                                            "LiveAuthWatcher: pipeline spawner refused after slot spawn \
+                                             — tearing down slot to avoid half-spawned state \
+                                             / pipeline spawner 拒絕，teardown 避免半成品"
+                                        );
+                                        if let Err(te) = self.slot_op.teardown().await {
+                                            warn!(
+                                                error = %te,
+                                                "LiveAuthWatcher: teardown after spawner refusal returned \
+                                                 error (fail-soft) / spawner 拒絕後 teardown 出錯（fail-soft）"
+                                            );
+                                        }
+                                    }
+                                }
+                            }
+                            (None, _) | (_, None) => {
+                                // No spawner injected — fall back to Phase 3
+                                // behaviour (slot try_spawn alone). This is
+                                // the unit-test path and stays correct.
+                                // 無 spawner — 退回 Phase 3 行為（單測路徑）。
+                                self.backoff.reset();
+                                info!(
+                                    tier = %auth.tier,
+                                    operator_id = %auth.operator_id,
+                                    expires_at_ms = auth.expires_at_ms,
+                                    "LiveAuthWatcher: Live slot respawned after auth became valid \
+                                     (no pipeline spawner injected) \
+                                     / 授權恢復，Live 槽位已 respawn（未注入 spawner）"
+                                );
+                            }
+                        }
                     }
-                    Ok(false) => {
+                    Ok(None) => {
                         // `build_exchange_pipeline` returned None — the inner
                         // call already structured-logged the reason (missing
                         // credentials, REST init failure, etc.). Treat as a
@@ -511,6 +873,81 @@ impl LiveAuthWatcher {
                          / teardown 回錯（fail-soft）"
                     );
                 }
+                // 2026-04-27 LIVE-AUTH-WATCHER-EVENT-CONSUMER-SPAWN: take
+                // the previously-stored OS thread handle and join it on a
+                // detached blocking task so we don't block the watcher
+                // event loop. The slot teardown above already cancelled
+                // the slot-scoped child token, which the
+                // `run_event_consumer` main loop watches via
+                // `live_deps.cancel`, so the thread will exit shortly.
+                // We must not skip the join — orphaning a Live OS thread
+                // means a future respawn could end up with two OS threads
+                // both owning a `live_rt`.
+                //
+                // 2026-04-27 修復：取出先前存的 OS 線程 handle 並於分離 blocking
+                // 任務上 join，避免阻塞 watcher event loop。slot teardown 已取消
+                // 子 token，`run_event_consumer` 主迴圈經 `live_deps.cancel`
+                // 監看會盡快退出。不能跳過 join — 否則 Live OS 線程變孤兒，
+                // 下次 respawn 可能造成兩條都擁有 `live_rt` 的 OS 線程並存。
+                if let Some(slot) = &self.thread_handle_slot {
+                    let maybe_handle = slot.lock().take();
+                    if let Some(h) = maybe_handle {
+                        tokio::task::spawn_blocking(move || {
+                            if let Err(e) = h.join() {
+                                let msg = e
+                                    .downcast_ref::<&str>()
+                                    .copied()
+                                    .or_else(|| e.downcast_ref::<String>().map(|s| s.as_str()))
+                                    .unwrap_or("unknown panic");
+                                warn!(
+                                    panic = msg,
+                                    "LiveAuthWatcher: prior Live OS thread join panicked (fail-soft) \
+                                     / 先前 Live OS 線程 join panic（fail-soft）"
+                                );
+                            }
+                        });
+                    }
+                }
+                // BLOCKER-2 (2026-04-27): clear the live cmd and event sender
+                // slots after teardown so:
+                // (a) `set_system_mode` governance broadcast does not
+                //     fire-and-forget into a dead live tx after teardown — the
+                //     Sender is now `None` so `live_snapshot()` returns None
+                //     and the broadcast silently skips live (expected behaviour
+                //     during the gap between teardown and respawn).
+                // (b) fan-out no longer delivers ticks to the orphaned receiver
+                //     channel — the live event slot is None until the next
+                //     successful respawn populates it again.
+                //
+                // Invariant / 不變量: both slots are cleared atomically under
+                // the parking_lot write lock (~1 µs). The spawner closure
+                // overwrites them on the next successful respawn so no manual
+                // "restore" is needed.
+                //
+                // BLOCKER-2（2026-04-27）：teardown 後清空 live cmd + event slot：
+                // (a) governance broadcast `set_system_mode` 不再往死管線投命令
+                //     — `live_snapshot()` 回 None，broadcast 靜默跳過 live（符合
+                //     teardown 與 respawn 之間的預期行為）。
+                // (b) fan-out 不再往孤兒 receiver 投 tick — event slot 為 None
+                //     直到下次 respawn 填入。
+                //
+                // 不變量：兩個 slot 各自在 parking_lot 寫鎖下原子清空（~1 µs）。
+                // spawner closure 下次成功 respawn 時覆寫，無需手動「恢復」。
+                if let Some(cmd_slot) = &self.live_cmd_slot {
+                    *cmd_slot.write() = None;
+                    debug!(
+                        "LiveAuthWatcher: live_cmd_slot cleared after teardown \
+                         / teardown 後已清空 live_cmd_slot"
+                    );
+                }
+                if let Some(event_slot) = &self.live_event_slot {
+                    *event_slot.write() = None;
+                    debug!(
+                        "LiveAuthWatcher: live_event_slot cleared after teardown \
+                         / teardown 後已清空 live_event_slot"
+                    );
+                }
+
                 // Reset backoff so the next respawn attempt (after operator
                 // renews) is not gated by failures from a previous cycle.
                 // 重設退避，讓 operator renew 後 respawn 不受前一週期失敗影響。
@@ -522,436 +959,17 @@ impl LiveAuthWatcher {
 
 // ---------------------------------------------------------------------------
 // Tests / 測試
+// BLOCKER-1 (E2 round-2, 2026-04-27): tests extracted to
+// `live_auth_watcher_tests.rs` to bring this file under the 1200-line
+// hard cap (CLAUDE.md §九). The #[cfg(test)] module declaration below
+// re-exports the file so `cargo test --bin openclaw-engine` sees all tests.
+//
+// BLOCKER-1（E2 round-2，2026-04-27）：測試抽到 `live_auth_watcher_tests.rs`，
+// 讓本檔回到 1200 行硬上限以內（CLAUDE.md §九）。下方 #[cfg(test)] mod
+// 宣告讓 `cargo test --bin openclaw-engine` 仍能看到所有測試。
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use async_trait::async_trait;
-    use openclaw_engine::live_authorization::{
-        compute_signature, LiveAuthorization, SCHEMA_VERSION,
-    };
-    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-    use std::sync::Mutex as StdMutex;
+#[path = "live_auth_watcher_tests.rs"]
+mod tests;
 
-    const TEST_SECRET: &str = "phase3-test-ipc-secret-do-not-ship";
-
-    // ── mock SpawnOp ──────────────────────────────────────────────────
-    // Counts calls, flips is_spawned state, and returns user-scripted
-    // outcomes. All methods are `Send + Sync` since the watcher's
-    // `Arc<dyn SpawnOp>` field is erased behind a trait object.
-    // 計 call 數、切換 is_spawned 狀態、回指定結果。所有方法 Send+Sync，
-    // 配合 watcher 內的 `Arc<dyn SpawnOp>` trait 物件。
-
-    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    #[allow(dead_code)] // NotAvailable reserved for future scenarios; kept for symmetry.
-    enum ScriptedSpawn {
-        Ok,
-        BuildReturnedNone,
-        NotAvailable,
-        AlreadySpawned,
-    }
-
-    struct MockSlotOp {
-        spawned: AtomicBool,
-        spawn_calls: AtomicUsize,
-        teardown_calls: AtomicUsize,
-        /// Scripted sequence consumed front-to-back on each spawn; once
-        /// exhausted, the last entry repeats.
-        /// 每次 spawn 由前往後消耗；耗盡後最後一項重複。
-        script: StdMutex<Vec<ScriptedSpawn>>,
-    }
-
-    impl MockSlotOp {
-        fn new(script: Vec<ScriptedSpawn>) -> Arc<Self> {
-            Arc::new(Self {
-                spawned: AtomicBool::new(false),
-                spawn_calls: AtomicUsize::new(0),
-                teardown_calls: AtomicUsize::new(0),
-                script: StdMutex::new(script),
-            })
-        }
-        fn next_outcome(&self) -> ScriptedSpawn {
-            let mut guard = self.script.lock().unwrap();
-            if guard.len() > 1 {
-                guard.remove(0)
-            } else {
-                guard.first().copied().unwrap_or(ScriptedSpawn::Ok)
-            }
-        }
-    }
-
-    #[async_trait]
-    impl SpawnOp for MockSlotOp {
-        fn is_spawned(&self) -> bool {
-            self.spawned.load(Ordering::SeqCst)
-        }
-        async fn try_spawn(
-            &self,
-            _cfg: &SpawnConfig<'_>,
-        ) -> Result<bool, SpawnError> {
-            self.spawn_calls.fetch_add(1, Ordering::SeqCst);
-            match self.next_outcome() {
-                ScriptedSpawn::Ok => {
-                    self.spawned.store(true, Ordering::SeqCst);
-                    Ok(true)
-                }
-                ScriptedSpawn::BuildReturnedNone => Ok(false),
-                ScriptedSpawn::NotAvailable => Err(SpawnError::NotAvailable),
-                ScriptedSpawn::AlreadySpawned => Err(SpawnError::AlreadySpawned),
-            }
-        }
-        async fn teardown(&self) -> Result<(), TeardownError> {
-            self.teardown_calls.fetch_add(1, Ordering::SeqCst);
-            self.spawned.store(false, Ordering::SeqCst);
-            Ok(())
-        }
-    }
-
-    // ── auth file helper ─────────────────────────────────────────────
-    fn fresh_auth(now_ms: u64, ttl_ms: u64) -> LiveAuthorization {
-        let mut auth = LiveAuthorization {
-            version: SCHEMA_VERSION,
-            tier: "T0_ENTRY".into(),
-            issued_at_ms: now_ms,
-            expires_at_ms: now_ms + ttl_ms,
-            operator_id: "watcher_test".into(),
-            env_allowed: vec!["live_demo".into()],
-            sig: String::new(),
-        };
-        auth.sig = compute_signature(&auth, TEST_SECRET);
-        auth
-    }
-
-    /// Configure the process-wide env vars so `load_and_verify` reads
-    /// the authorization file under `secrets_dir/live/authorization.json`.
-    /// This is a test-only indirect — production reads the same env vars.
-    ///
-    /// **Env var contention**: many tests mutate `OPENCLAW_SECRETS_DIR` /
-    /// `OPENCLAW_IPC_SECRET`; running watcher tests together (or with
-    /// other live_authorization tests) under a single test binary risks
-    /// interleaving. We serialize watcher tests via a mutex below.
-    /// 許多測試改 `OPENCLAW_SECRETS_DIR` / `OPENCLAW_IPC_SECRET`；
-    /// 同一 test binary 並行會交錯。下方 mutex 串行。
-    fn set_test_env(secrets_dir: &std::path::Path) {
-        std::env::set_var("OPENCLAW_SECRETS_DIR", secrets_dir);
-        std::env::set_var("OPENCLAW_IPC_SECRET", TEST_SECRET);
-    }
-    fn clear_test_env() {
-        std::env::remove_var("OPENCLAW_SECRETS_DIR");
-        std::env::remove_var("OPENCLAW_IPC_SECRET");
-    }
-
-    // Serialize all watcher tests to avoid env-var contention between
-    // parallel tests in the same binary.
-    // 串行化所有 watcher 測試，避免同 binary 內並行爭 env var。
-    static ENV_GUARD: StdMutex<()> = StdMutex::new(());
-
-    fn drop_auth_file(secrets_dir: &std::path::Path, auth: &LiveAuthorization) {
-        let live_dir = secrets_dir.join("live");
-        std::fs::create_dir_all(&live_dir).unwrap();
-        let path = live_dir.join("authorization.json");
-        std::fs::write(path, serde_json::to_string_pretty(auth).unwrap()).unwrap();
-    }
-
-    fn remove_auth_file(secrets_dir: &std::path::Path) {
-        let path = secrets_dir.join("live").join("authorization.json");
-        let _ = std::fs::remove_file(path);
-    }
-
-    // Minimal ConfigManager for tests — just loads default EngineBootstrap.
-    // 測試用最小 ConfigManager — 只載入預設 EngineBootstrap。
-    fn test_config() -> Arc<ConfigManager> {
-        // ConfigManager::load(None) falls back to default on missing file.
-        Arc::new(ConfigManager::load(None).expect("load config (defaults ok)"))
-    }
-
-    fn now_ms() -> u64 {
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_millis() as u64)
-            .unwrap_or(0)
-    }
-
-    // ── tests ────────────────────────────────────────────────────────
-
-    #[tokio::test]
-    async fn watcher_respawns_when_auth_becomes_valid() {
-        let _guard = ENV_GUARD.lock().unwrap_or_else(|e| e.into_inner());
-        let tmp = tempfile::tempdir().unwrap();
-        set_test_env(tmp.path());
-        let shutdown = CancellationToken::new();
-
-        let mock = MockSlotOp::new(vec![ScriptedSpawn::Ok]);
-        let (watcher, handle) = LiveAuthWatcher::with_params(
-            Arc::clone(&mock) as Arc<dyn SpawnOp>,
-            test_config(),
-            BybitEnvironment::LiveDemo,
-            shutdown.clone(),
-            Duration::from_millis(50), // short poll for fast test
-            Duration::from_millis(10),
-            Duration::from_millis(100),
-        );
-
-        let watcher_task = tokio::spawn(watcher.run());
-
-        // Slot is Empty and no auth exists — watcher stays idle.
-        tokio::time::sleep(Duration::from_millis(80)).await;
-        assert_eq!(mock.spawn_calls.load(Ordering::SeqCst), 0);
-
-        // Drop a valid authorization file and poke the IPC trigger.
-        let auth = fresh_auth(now_ms(), 3600_000);
-        drop_auth_file(tmp.path(), &auth);
-        let _ = handle.trigger();
-
-        // Watcher should respawn on the trigger (fast-path, <50ms).
-        // watcher 應以 IPC 快路徑 respawn（<50ms）。
-        tokio::time::timeout(Duration::from_secs(2), async {
-            while mock.spawn_calls.load(Ordering::SeqCst) == 0 {
-                tokio::time::sleep(Duration::from_millis(5)).await;
-            }
-        })
-        .await
-        .expect("spawn must be attempted after trigger");
-
-        assert!(mock.is_spawned(), "slot must be Spawned after successful spawn");
-
-        shutdown.cancel();
-        let _ = watcher_task.await;
-        clear_test_env();
-        remove_auth_file(tmp.path());
-    }
-
-    #[tokio::test]
-    async fn watcher_tears_down_when_auth_invalidates() {
-        let _guard = ENV_GUARD.lock().unwrap_or_else(|e| e.into_inner());
-        let tmp = tempfile::tempdir().unwrap();
-        set_test_env(tmp.path());
-        let shutdown = CancellationToken::new();
-
-        // Seed: valid auth on disk, slot already Spawned (simulate post-renewal).
-        let auth = fresh_auth(now_ms(), 3600_000);
-        drop_auth_file(tmp.path(), &auth);
-        let mock = MockSlotOp::new(vec![ScriptedSpawn::Ok]);
-        mock.spawned.store(true, Ordering::SeqCst);
-
-        let (watcher, handle) = LiveAuthWatcher::with_params(
-            Arc::clone(&mock) as Arc<dyn SpawnOp>,
-            test_config(),
-            BybitEnvironment::LiveDemo,
-            shutdown.clone(),
-            Duration::from_millis(50),
-            Duration::from_millis(10),
-            Duration::from_millis(100),
-        );
-        let watcher_task = tokio::spawn(watcher.run());
-
-        // Yield so the watcher enters its loop. With valid auth + Spawned slot
-        // this is the happy path; no actions expected.
-        // 讓 watcher 進 loop。有效授權 + Spawned = 快樂路徑，無動作。
-        tokio::time::sleep(Duration::from_millis(80)).await;
-        assert_eq!(mock.teardown_calls.load(Ordering::SeqCst), 0);
-
-        // Remove auth file (simulates operator revoke) + trigger.
-        remove_auth_file(tmp.path());
-        let _ = handle.trigger();
-
-        tokio::time::timeout(Duration::from_secs(2), async {
-            while mock.teardown_calls.load(Ordering::SeqCst) == 0 {
-                tokio::time::sleep(Duration::from_millis(5)).await;
-            }
-        })
-        .await
-        .expect("teardown must be called after auth invalidates");
-
-        assert!(!mock.is_spawned(), "slot must be Empty after teardown");
-
-        shutdown.cancel();
-        let _ = watcher_task.await;
-        clear_test_env();
-    }
-
-    #[tokio::test]
-    async fn watcher_respects_backoff_on_spawn_failure() {
-        let _guard = ENV_GUARD.lock().unwrap_or_else(|e| e.into_inner());
-        let tmp = tempfile::tempdir().unwrap();
-        set_test_env(tmp.path());
-        let shutdown = CancellationToken::new();
-
-        // Auth valid, every spawn fails → backoff should throttle.
-        // 授權有效，但每次 spawn 失敗 → 退避節流。
-        let auth = fresh_auth(now_ms(), 3600_000);
-        drop_auth_file(tmp.path(), &auth);
-        let mock = MockSlotOp::new(vec![ScriptedSpawn::BuildReturnedNone]);
-
-        // Poll every 10ms, base backoff 100ms, max 500ms. In 250ms we
-        // expect 1 spawn (tick 0) + maybe 1 more after 100ms backoff
-        // expires (tick ~100+) + another after another 200ms doubling
-        // (tick ~300+). Certainly NOT 25 spawns (one per 10ms tick).
-        // 10ms 一 tick，退避 base=100ms / max=500ms；250ms 內預期 1~2 次
-        // spawn 嘗試，絕非 25 次（每 tick 一次）。
-        let (watcher, handle) = LiveAuthWatcher::with_params(
-            Arc::clone(&mock) as Arc<dyn SpawnOp>,
-            test_config(),
-            BybitEnvironment::LiveDemo,
-            shutdown.clone(),
-            Duration::from_millis(10),
-            Duration::from_millis(100),
-            Duration::from_millis(500),
-        );
-        let watcher_task = tokio::spawn(watcher.run());
-
-        // Kick with IPC trigger + let the watcher ride for 250ms.
-        let _ = handle.trigger();
-        tokio::time::sleep(Duration::from_millis(250)).await;
-
-        let calls = mock.spawn_calls.load(Ordering::SeqCst);
-        assert!(
-            calls >= 1,
-            "watcher must attempt at least one spawn; got {calls}"
-        );
-        assert!(
-            calls <= 5,
-            "backoff must throttle spawn attempts — got {calls} in 250ms \
-             (unthrottled would be ~25)"
-        );
-
-        shutdown.cancel();
-        let _ = watcher_task.await;
-        clear_test_env();
-        remove_auth_file(tmp.path());
-    }
-
-    #[tokio::test]
-    async fn watcher_breaks_on_engine_shutdown() {
-        let _guard = ENV_GUARD.lock().unwrap_or_else(|e| e.into_inner());
-        let tmp = tempfile::tempdir().unwrap();
-        set_test_env(tmp.path());
-        let shutdown = CancellationToken::new();
-
-        let mock = MockSlotOp::new(vec![ScriptedSpawn::Ok]);
-        let (watcher, _handle) = LiveAuthWatcher::with_params(
-            Arc::clone(&mock) as Arc<dyn SpawnOp>,
-            test_config(),
-            BybitEnvironment::LiveDemo,
-            shutdown.clone(),
-            Duration::from_secs(60), // long poll — shouldn't matter
-            Duration::from_secs(1),
-            Duration::from_secs(60),
-        );
-
-        let watcher_task = tokio::spawn(watcher.run());
-
-        // Cancel immediately.
-        shutdown.cancel();
-
-        tokio::time::timeout(Duration::from_secs(2), watcher_task)
-            .await
-            .expect("watcher must exit within 2s after shutdown")
-            .expect("watcher task must not panic");
-        clear_test_env();
-    }
-
-    #[tokio::test]
-    async fn ipc_trigger_coalesces_when_full() {
-        // Trigger twice in a row before the watcher consumes. First send
-        // must succeed, second must return Ok(false) (coalesced) — not an
-        // error. This exercises the `TrySendError::Full` arm.
-        // 連發兩次 trigger。第一次成功；第二次 Ok(false) 合併 — 不是錯誤。
-        let _guard = ENV_GUARD.lock().unwrap_or_else(|e| e.into_inner());
-        let tmp = tempfile::tempdir().unwrap();
-        set_test_env(tmp.path());
-        let shutdown = CancellationToken::new();
-        let mock = MockSlotOp::new(vec![ScriptedSpawn::Ok]);
-        // Long poll so the receiver doesn't drain before we probe.
-        // 長輪詢避免 receiver 先於 probe 消耗。
-        let (_watcher, handle) = LiveAuthWatcher::with_params(
-            Arc::clone(&mock) as Arc<dyn SpawnOp>,
-            test_config(),
-            BybitEnvironment::LiveDemo,
-            shutdown.clone(),
-            Duration::from_secs(60),
-            Duration::from_secs(1),
-            Duration::from_secs(60),
-        );
-
-        let first = handle.trigger().expect("first trigger must succeed");
-        assert!(first, "first trigger must be accepted");
-        let second = handle.trigger().expect("second trigger must be Ok (coalesced)");
-        assert!(!second, "second trigger in a row must coalesce (Ok(false))");
-
-        clear_test_env();
-    }
-
-    #[tokio::test]
-    async fn ipc_trigger_errors_when_watcher_dropped() {
-        // Drop the watcher (and its receiver) — next trigger must
-        // return Err(()) so callers can log loudly.
-        // drop watcher/receiver — 下次 trigger 回 Err(())，讓呼叫端大聲 log。
-        let _guard = ENV_GUARD.lock().unwrap_or_else(|e| e.into_inner());
-        let tmp = tempfile::tempdir().unwrap();
-        set_test_env(tmp.path());
-        let shutdown = CancellationToken::new();
-        let mock = MockSlotOp::new(vec![ScriptedSpawn::Ok]);
-
-        let (watcher, handle) = LiveAuthWatcher::with_params(
-            Arc::clone(&mock) as Arc<dyn SpawnOp>,
-            test_config(),
-            BybitEnvironment::LiveDemo,
-            shutdown.clone(),
-            Duration::from_secs(60),
-            Duration::from_secs(1),
-            Duration::from_secs(60),
-        );
-        drop(watcher);
-
-        // After drop, the Sender can observe Closed on try_send.
-        // drop 後 Sender 的 try_send 可觀察到 Closed。
-        let res = handle.trigger();
-        assert_eq!(res, Err(()), "trigger after watcher drop must return Err");
-
-        clear_test_env();
-    }
-
-    #[tokio::test]
-    async fn spawn_output_already_spawned_treated_as_success() {
-        // Scripted AlreadySpawned should be swallowed with debug log +
-        // backoff reset. No teardown should fire on this path.
-        // 腳本化 AlreadySpawned 應被 debug log 吞掉、重設退避，
-        // 不觸發 teardown。
-        let _guard = ENV_GUARD.lock().unwrap_or_else(|e| e.into_inner());
-        let tmp = tempfile::tempdir().unwrap();
-        set_test_env(tmp.path());
-        let shutdown = CancellationToken::new();
-
-        let auth = fresh_auth(now_ms(), 3600_000);
-        drop_auth_file(tmp.path(), &auth);
-
-        let mock = MockSlotOp::new(vec![ScriptedSpawn::AlreadySpawned]);
-        let (watcher, handle) = LiveAuthWatcher::with_params(
-            Arc::clone(&mock) as Arc<dyn SpawnOp>,
-            test_config(),
-            BybitEnvironment::LiveDemo,
-            shutdown.clone(),
-            Duration::from_millis(50),
-            Duration::from_millis(10),
-            Duration::from_millis(100),
-        );
-        let watcher_task = tokio::spawn(watcher.run());
-
-        let _ = handle.trigger();
-        tokio::time::timeout(Duration::from_secs(2), async {
-            while mock.spawn_calls.load(Ordering::SeqCst) == 0 {
-                tokio::time::sleep(Duration::from_millis(5)).await;
-            }
-        })
-        .await
-        .expect("spawn must be attempted");
-
-        assert_eq!(mock.teardown_calls.load(Ordering::SeqCst), 0);
-        shutdown.cancel();
-        let _ = watcher_task.await;
-        clear_test_env();
-        remove_auth_file(tmp.path());
-    }
-}

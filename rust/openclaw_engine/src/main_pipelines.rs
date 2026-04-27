@@ -23,6 +23,7 @@
 //!   呼叫點為單行。各 fn 回傳 `tokio::task::JoinHandle<()>`（Live 為獨立 OS
 //!   線程 `std::thread::JoinHandle<()>`），形狀與抽取前完全一致。
 
+use crate::main_fanout::LiveEventSenderSlot;
 use crate::run_pipeline_crash_only;
 use crate::startup::ExchangePipelineBindings;
 use openclaw_engine::bybit_rest_client::{live_bybit_environment, BybitEnvironment, BybitRestClient};
@@ -36,7 +37,7 @@ use openclaw_engine::edge_predictor::PerEnginePredictors;
 use openclaw_engine::event_consumer::{run_event_consumer, EventConsumerDeps};
 use openclaw_engine::feature_collector::FeatureSnapshot;
 use openclaw_engine::instrument_info::InstrumentInfoCache;
-use openclaw_engine::ipc_server::PerEngineRiskStores;
+use openclaw_engine::ipc_server::{LiveCmdSenderSlot, PerEngineRiskStores};
 use openclaw_engine::linucb::LinUcbRuntime;
 use openclaw_engine::news::NewsContextSnapshot;
 use openclaw_engine::scanner::registry::SymbolRegistry;
@@ -666,4 +667,185 @@ pub(crate) fn spawn_live_pipeline(
 
     info!("live pipeline spawned (dedicated OS thread) / Live 管線已啟動（獨立 OS 線程）");
     thread_handle
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// LiveSpawnBundle + build_live_pipeline_spawner
+// BLOCKER-1 (E2 round-2, 2026-04-27): extracted from main.rs::async_main
+// to bring main.rs under the 1200-line hard cap (CLAUDE.md §九).
+// The spawner closure captures ~19 Arcs; grouping them in a struct keeps
+// the function signature short (one bundle arg) while retaining the same
+// semantics as the inline closure in main.rs before this refactor.
+//
+// BLOCKER-1（E2 round-2，2026-04-27）：從 main.rs::async_main 抽出，
+// 讓 main.rs 回到 §九 1200 行硬上限以內。spawner closure 捕獲 ~19 個 Arc；
+// 打包進 struct 讓 fn 簽名精簡（單一 bundle 參數），語意完全不變。
+// ──────────────────────────────────────────────────────────────────────────
+
+/// Arc bundle captured by the live pipeline spawner closure.
+/// Extracted from `main.rs::async_main` (BLOCKER-1, E2 round-2, 2026-04-27).
+///
+/// `live_cmd_slot` and `live_event_slot` are populated by the spawner on each
+/// successful respawn so fan-out and IPC observe the fresh senders
+/// without engine restart.
+///
+/// Live pipeline spawner closure 捕獲的 Arc bundle。
+/// 從 `main.rs::async_main` 抽出（BLOCKER-1，E2 round-2，2026-04-27）。
+/// `live_cmd_slot` / `live_event_slot` 由 spawner 於每次成功 respawn 後
+/// 填入，讓 fan-out 和 IPC 無需重啟就能觀察到新 sender。
+pub(crate) struct LiveSpawnBundle {
+    pub config: Arc<ConfigManager>,
+    pub cancel: CancellationToken,
+    pub instruments: Option<Arc<InstrumentInfoCache>>,
+    pub shared_client: Option<Arc<BybitRestClient>>,
+    pub risk_stores: PerEngineRiskStores,
+    pub budget_store: Arc<ConfigStore<BudgetConfig>>,
+    pub audit_pool: Option<sqlx::PgPool>,
+    pub symbol_registry: Arc<SymbolRegistry>,
+    pub scanner_store: Arc<ConfigStore<ScannerConfig>>,
+    pub shared_linucb_runtime: Arc<LinUcbRuntime>,
+    pub shared_news_snapshot: Arc<openclaw_engine::news::NewsContextSnapshot>,
+    pub shared_last_tick_ms: Arc<std::sync::atomic::AtomicU64>,
+    pub canary_handle: CanaryWriterHandle,
+    pub per_engine_predictors: Arc<PerEnginePredictors>,
+    pub cross_engine_tx: broadcast::Sender<EngineEvent>,
+    pub global_exposure_usdt: Arc<std::sync::atomic::AtomicU64>,
+    pub live_positions_mirror: Arc<parking_lot::RwLock<std::collections::HashMap<String, bool>>>,
+    pub live_cmd_slot: LiveCmdSenderSlot,
+    pub live_event_slot: LiveEventSenderSlot,
+    pub has_demo: bool,
+    // Writer channel senders — cloned into each respawn cycle.
+    // 寫入 channel sender — 每次 respawn 週期各 clone 一份。
+    pub market_tx: Option<mpsc::Sender<MarketDataMsg>>,
+    pub feature_tx: Option<mpsc::Sender<FeatureSnapshot>>,
+    pub trading_tx: Option<mpsc::Sender<TradingMsg>>,
+    pub context_tx: Option<mpsc::Sender<DecisionContextMsg>>,
+    pub decision_feature_tx: Option<mpsc::Sender<DecisionFeatureMsg>>,
+    pub shadow_fill_tx: Option<mpsc::Sender<ShadowFillMsg>>,
+    pub exit_feature_tx: Option<mpsc::Sender<ExitFeatureRow>>,
+    pub shadow_exit_tx: Option<mpsc::Sender<ShadowExitMsg>>,
+}
+
+/// Build the `LivePipelineSpawner` closure from a `LiveSpawnBundle`.
+///
+/// Returns an `Arc<dyn Fn(SpawnOutput) -> LivePipelineSpawnResult + Send + Sync>`.
+/// Invoked by `LiveAuthWatcher` on every successful `slot_op.try_spawn`:
+///   * Builds fresh tokio cmd / event channels for this respawn cycle.
+///   * Writes new senders into `live_cmd_slot` / `live_event_slot` so
+///     fan-out + IPC + governance observe the rotation immediately.
+///   * Calls `spawn_live_pipeline` to boot the OS thread running
+///     `run_event_consumer` (state_writer / snapshot_writer / fills).
+///   * Returns the OS thread `JoinHandle` so shutdown can `.join()`.
+///
+/// Without this callback the pipeline is half-spawned: WS tasks are up but
+/// no OS thread consumes events → snapshots never refresh → 8-day silent
+/// regression (LIVE-AUTH-WATCHER-EVENT-CONSUMER-SPAWN, 2026-04-27).
+///
+/// BLOCKER-1 extraction: this fn was an inline closure in main.rs before
+/// 2026-04-27. Moved here to stay under the §九 1200-line hard cap.
+///
+/// Live pipeline spawner closure 構造器。
+///
+/// 回傳 `Arc<dyn Fn(SpawnOutput) -> LivePipelineSpawnResult + Send + Sync>`。
+/// 由 `LiveAuthWatcher` 在每次 `slot_op.try_spawn` 成功後呼叫：
+///   * 為此 respawn 週期建立新 tokio cmd / event 通道。
+///   * 新 sender 寫入 `live_cmd_slot` / `live_event_slot`，
+///     fan-out + IPC + governance 立即觀察到輪換。
+///   * 呼叫 `spawn_live_pipeline` 啟動跑 `run_event_consumer` 的 OS 線程
+///     （state_writer / snapshot_writer / fills 生產者）。
+///   * 回傳 OS 線程 `JoinHandle` 供 shutdown 序列 `.join()`。
+///
+/// BLOCKER-1 抽取：2026-04-27 前為 main.rs 的 inline closure；
+/// 移至此處以符合 §九 1200 行硬上限。
+pub(crate) fn build_live_pipeline_spawner(
+    b: LiveSpawnBundle,
+) -> crate::live_auth_watcher::LivePipelineSpawner {
+    // All fields are cloned cheaply (Arc / clone of primitive), so
+    // constructing the closure is ~1 µs.
+    // 所有欄位 Arc clone / 基本型別 copy，closure 構造 ~1 µs。
+    let config_c = b.config;
+    let cancel_c = b.cancel;
+    let instruments_c = b.instruments;
+    let shared_client_c = b.shared_client;
+    let risk_stores_c = b.risk_stores;
+    let budget_store_c = b.budget_store;
+    let audit_pool_c = b.audit_pool;
+    let symbol_registry_c = b.symbol_registry;
+    let scanner_store_c = b.scanner_store;
+    let linucb_c = b.shared_linucb_runtime;
+    let news_c = b.shared_news_snapshot;
+    let last_tick_ms_c = b.shared_last_tick_ms;
+    let canary_c = b.canary_handle;
+    let per_engine_predictors_c = b.per_engine_predictors;
+    let cross_engine_tx_c = b.cross_engine_tx;
+    let global_exposure_c = b.global_exposure_usdt;
+    let positions_mirror_c = b.live_positions_mirror;
+    let live_cmd_slot_c = b.live_cmd_slot;
+    let live_event_slot_c = b.live_event_slot;
+    let has_demo = b.has_demo;
+    let writers_c_market = b.market_tx;
+    let writers_c_feature = b.feature_tx;
+    let writers_c_trading = b.trading_tx;
+    let writers_c_context = b.context_tx;
+    let writers_c_decision_feature = b.decision_feature_tx;
+    let writers_c_shadow_fill = b.shadow_fill_tx;
+    let writers_c_exit_feature = b.exit_feature_tx;
+    let writers_c_shadow_exit = b.shadow_exit_tx;
+
+    Arc::new(move |spawn_output: crate::pipeline_slot::SpawnOutput| -> crate::live_auth_watcher::LivePipelineSpawnResult {
+        // Build fresh channels for this spawn cycle.
+        // 為本輪 spawn 建立新通道。
+        let (new_cmd_tx, new_cmd_rx) = tokio::sync::mpsc::unbounded_channel();
+        let (new_event_tx, new_event_rx) = mpsc::channel::<Arc<PriceEvent>>(1024);
+        let (new_ready_tx, _new_ready_rx) = tokio::sync::oneshot::channel::<()>();
+
+        // Write fresh senders into slots so fan-out / IPC / scanner / phase4 /
+        // set_system_mode observe the new pair on the next read (~1 µs write).
+        // 寫入 slot 讓 fan-out / IPC / scanner / phase4 / set_system_mode
+        // 下次讀取見到新 pair（~1 µs 寫鎖）。
+        *live_cmd_slot_c.write() = Some(new_cmd_tx.clone());
+        *live_event_slot_c.write() = Some(new_event_tx);
+
+        let writers = WriterSenders {
+            market_tx: writers_c_market.clone(),
+            feature_tx: writers_c_feature.clone(),
+            trading_tx: writers_c_trading.clone(),
+            context_tx: writers_c_context.clone(),
+            decision_feature_tx: writers_c_decision_feature.clone(),
+            shadow_fill_tx: writers_c_shadow_fill.clone(),
+            exit_feature_tx: writers_c_exit_feature.clone(),
+            shadow_exit_tx: writers_c_shadow_exit.clone(),
+        };
+        let ctx = PipelineSpawnContext {
+            config: &config_c,
+            cancel: &cancel_c,
+            instruments: &instruments_c,
+            shared_client: &shared_client_c,
+            risk_stores: &risk_stores_c,
+            budget_store: &budget_store_c,
+            audit_pool: audit_pool_c.clone(),
+            symbol_registry: &symbol_registry_c,
+            scanner_store: &scanner_store_c,
+            shared_linucb_runtime: &linucb_c,
+            shared_news_snapshot: &news_c,
+            shared_last_tick_ms: &last_tick_ms_c,
+            canary_handle: &canary_c,
+            per_engine_predictors: &per_engine_predictors_c,
+            cross_engine_tx: &cross_engine_tx_c,
+            global_exposure_usdt: &global_exposure_c,
+            has_live: true,
+            has_demo,
+        };
+        let live_channels = LiveChannels {
+            bindings: spawn_output.bindings,
+            slot_cancel: spawn_output.slot_cancel_token,
+            event_rx: new_event_rx,
+            cmd_tx: Some(new_cmd_tx),
+            cmd_rx: Some(new_cmd_rx),
+            ready_tx: Some(new_ready_tx),
+            positions_mirror: Arc::clone(&positions_mirror_c),
+        };
+        let thread_handle = spawn_live_pipeline(&ctx, &writers, live_channels);
+        Ok(thread_handle)
+    })
 }
