@@ -1231,3 +1231,85 @@ existing) — 對齊 RFC 要求的「24+」最小門檻 ×1.7。Cargo lib baseli
 - IPC handler 對 None slot 回 `Uninitialized` shape（不 error）— Python caller
   branch on `status` field 即可
 
+
+---
+
+## 2026-04-27 · G3-08 Phase 4 Sub-task 4-2 Guardian agent_state（worktree commit pending）
+
+**Operator 派發任務（RE-DISPATCH v2，因 4-1 已 land）**：把 GuardianAgent 接入 Phase 4 framework。
+
+**改動**：
+- `app/guardian_agent.py` 587→631（+44）：import `h_state_invalidator.invalidate_async` + 新 method `get_guardian_snapshot()` 8 fields per PA RFC §2.2 + 兩個鎖外 fire-and-forget hooks（`agent.guardian.intent_reviewed` / `agent.guardian.event_assessed`）
+- `app/h_state_query_handler.py` 772→785（+13）：僅加 `include_guardian` arm（10 行）+ 2 處 docstring 同步；**不重寫 framework**（4-1 已建立）
+- `tests/test_h_state_query_handler.py` +12 新 test
+- `tests/test_guardian_agent_unit.py` +7 新 test
+
+**驗證**：
+- pytest 104/0 grade（h_state +12 / guardian unit +7 = +19 new）
+- 84/0 sanity（strategist + batch8_guardian + guardian_audit_wiring）
+- env=0 zero-overhead 已 Python 直驗 `invalidate_async("test")=None`
+
+**教訓**：
+1. 4-1 commit `c8a4a55` 提供完整 reference；嚴格 mirror（schema、test class 命名、`with_<agent>_snapshot` opt-in flag pattern）省下決策成本
+2. PA RFC `with_guardian_snapshot` opt-in default False = 鎖死「Phase 1-3 既有測試不受影響」契約；`_install_fake_strategy_wiring(strategist, guardian=None)` 加 keyword 而非 positional 避免向後 break
+3. `verdict_log_size` 與 `active_event_risks` 是 gauge（`int(len(...))`）— 對應 Strategist 的 `pending_intents` gauge — Phase 4 invariant 強制 cast int 後 `assertNotIsInstance(v, bool)` 額外驗 bool/int 邊界
+4. h_state hint 鎖外 fire（per Strategist 4-1 commit `c8a4a55` 標準）— 鎖內 fire 會 daemon thread + asyncio.new_event_loop() 拿不到 lock release 時機
+5. h_state_query_handler.py docstring 必須同步（4-1 寫「Sub-task 4-2/3/4/5 will fill...」, 本 sub-task 改成「4-2 lands guardian; 4-3/4/5 will fill...」），E2 必查
+
+**報告**：`.claude_reports/20260427_203346_g3_08_phase4_2_guardian.md`
+**待**：E2 review → E4 regression → PM Sign-off → commit
+
+---
+
+## 2026-04-27 G3-08 Phase 4 Sub-task 4-4 — Executor agent_state 接線
+
+**任務**：PA G3-08 Phase 4 Sub-task 4-4（5 個 sub-task 中第 4 個）— 把
+`ExecutorAgent` agent_state 接線到 Rust h_state_cache gateway，鏡 Sub-task 4-1
+strategist pattern + Sub-task 4-2 guardian pattern。Base = `00682ef`（含 4-1 commit
+`c8a4a55`）。
+
+**改動**：
+1. `app/executor_agent.py`：+72 LOC（1 import + 1 method `get_executor_snapshot`
+   + 2 hook 在 `_handle_approved_intent` after `execute_order` returns，
+   `agent.executor.execution_complete` / `agent.executor.execution_failed`）
+2. `app/h_state_query_handler.py`：+13 LOC（只加 `include_executor:` arm，
+   不重寫 framework；docstring `Sub-task 4-2/3/4/5` 改成 `4-2/3/5`）
+3. `tests/test_executor_agent_unit.py`：+9 新 test in `TestExecutorSnapshot`
+   class（initial / independent dicts / stats reflect / recent_intent_id_size
+   gauge / shadow_mode True / shadow_mode False / provider raises fail-closed
+   / hook success / hook failure）— 23 total（14 baseline + 9 new）
+4. `tests/test_h_state_query_handler.py`：+7 新 test（3 Integration +
+   4 IncludeFilter）+ 新 `_FakeExecutor` class + `_install_fake_strategy_wiring`
+   接受 `executor=` keyword — 68 total（61 baseline + 7 new）
+
+**LOC**：executor_agent.py 669 → 741（< 800 warning，54 LOC 餘裕）；
+h_state_query_handler.py 772 → 785（仍 < 800）。
+
+**驗證**：
+- pytest 23/0 executor_agent_unit + 68/0 h_state_query_handler + 48/0 strategist
+  = **139/0** combined
+- 66/0 + 7 skipped 鄰近 executor 測試（audit_wiring / config_cache / decision_parity）
+  pre-existing skips 與我無關
+- pre-existing test_executor_shadow_to_live_e2e fastapi import 失敗 = Mac dev-only
+  modeling，與本 sub-task 無關
+
+**教訓**：
+1. **Edit / Write tool 在 worktree 環境下出現 silent fail**：所有 Edit 報 success
+   但 disk 不更新，git status clean，wc 不變；Read 工具 cache 顯示 phantom 內容。
+   解法：用 `python3 << 'PYEOF' ... open(path, 'w') ... PYEOF` 直寫 + grep 校驗。
+   每改一個檔後立即 `grep -c` 驗證，不可信 Read 自報 OK。
+2. PA spec「success path / failed path」其實是 `report.success` 二分 — 不是
+   `_handle_approved_intent` 的早 return（empty payload / dedup / invalid），那些
+   是「rejection」非「failed execution」。把 hook 放在 `execute_order` return 後
+   一處 if/else 比兩個獨立分支簡潔。
+3. `total_slippage_bps` 在 `_stats` 是 float（`+= slippage_bps`），snapshot 必
+   `int(...)` cast 對齊 Rust HashMap<String, i64>。Phase 4 invariant。
+4. shadow_mode 經 `self._shadow_mode_provider()` 取，**鎖外**呼叫避與
+   `ExecutorConfigCache` 內部 lock 死鎖（G3-03 Phase B 文檔已標）。provider
+   raise → fail-closed 為 1（CLAUDE.md §二 #6）—— 額外加 unit test cover。
+5. `_FakeExecutor` 加 default-False `with_executor_snapshot` opt-in
+   pattern（mirror Sub-task 4-1 `with_strategist_snapshot`）— 三降級路徑
+   present / missing / raises 都覆蓋。
+
+**報告**：`docs/CCAgentWorkSpace/E1/workspace/reports/2026-04-27--g3_08_phase4_4_executor.md`
+**待**：E2 review → E4 regression → PM Sign-off → commit
