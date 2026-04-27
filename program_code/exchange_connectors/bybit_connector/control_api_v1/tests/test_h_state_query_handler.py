@@ -282,13 +282,47 @@ class _FakeExecutor:
             self.get_executor_snapshot = _get_exec
 
 
-def _install_fake_strategy_wiring(strategist, guardian=None, analyst=None, executor=None):
+class _FakeScout:
+    """Minimal stub mirroring strategy_wiring.SCOUT_AGENT shape.
+
+    Phase 4 Sub-task 4-5: caller-side ``get_scout_snapshot`` accessor lives
+    on the agent itself (mirrors StrategistAgent Sub-task 4-1 pattern).
+    Default ``with_scout_snapshot=False`` makes the method absent — used to
+    test Sub-task 4-2/3/4 deploy scenarios where 4-5 hasn't landed yet.
+    Phase 4 Sub-task 4-5：caller-side ``get_scout_snapshot`` 存取器在 agent
+    自身（對齊 Strategist Sub-task 4-1）。預設 ``with_scout_snapshot=False``
+    使方法缺席，用於測 Sub-task 4-2/3/4 部署但 4-5 未 land 情境。
+    """
+
+    def __init__(
+        self,
+        with_scout_snapshot=False,
+        scout_snapshot=None,
+        scout_snapshot_raises=None,
+    ):
+        self._scout_snapshot = scout_snapshot if scout_snapshot is not None else {
+            "intel_produced": 13,
+            "alerts_produced": 5,
+            "scans_completed": 21,
+            "intel_log_size": 7,
+            "alert_log_size": 3,
+        }
+        self._scout_snapshot_raises = scout_snapshot_raises
+        if with_scout_snapshot:
+            def _get(_self=self):
+                if _self._scout_snapshot_raises is not None:
+                    raise _self._scout_snapshot_raises
+                return _self._scout_snapshot
+            self.get_scout_snapshot = _get
+
+
+def _install_fake_strategy_wiring(strategist, guardian=None, analyst=None, executor=None, scout=None):
     """Replace ``app.strategy_wiring`` in sys.modules with a stub.
 
-    G3-08 Phase 4 Sub-task 4-2/3/4 add optional ``guardian`` / ``analyst`` /
-    ``executor`` kw. Defaults None preserve prior call-site shapes.
-    G3-08 Phase 4 Sub-task 4-2/3/4 增加 ``guardian`` / ``analyst`` / ``executor``
-    參數。預設 None 保持先前呼叫面向不變。
+    G3-08 Phase 4 Sub-task 4-2/3/4/5 add optional ``guardian`` / ``analyst`` /
+    ``executor`` / ``scout`` kw. Defaults None preserve prior call-site shapes.
+    G3-08 Phase 4 Sub-task 4-2/3/4/5 增加 ``guardian`` / ``analyst`` /
+    ``executor`` / ``scout`` 參數。預設 None 保持先前呼叫面向不變。
 
     Returns the previous module (or ``None``) so caller can restore.
     """
@@ -301,6 +335,8 @@ def _install_fake_strategy_wiring(strategist, guardian=None, analyst=None, execu
         fake_mod.ANALYST_AGENT = analyst
     if executor is not None:
         fake_mod.EXECUTOR_AGENT = executor
+    if scout is not None:
+        fake_mod.SCOUT_AGENT = scout
     sys.modules["app.strategy_wiring"] = fake_mod
     return prev
 
@@ -2242,6 +2278,287 @@ class TestExecutorAgentStateIncludeFilter(unittest.TestCase):
             {"strategist", "executor"},
         )
         self.assertEqual(result["version"], 1)
+
+
+
+
+# ── 43-47. Phase 4 Sub-task 4-5: Scout agent_state integration ──
+
+
+class TestScoutAgentStateIntegration(unittest.TestCase):
+    """43-45. G3-08 Phase 4 Sub-task 4-5: agent_states.scout bucket
+    population + degradation paths.
+
+    Mirrors StrategistAgent Sub-task 4-1 caller-side pattern (snapshot
+    accessor on the agent itself). PA RFC §2.5 schema: 5 fields, all int
+    (Rust ``AgentState.stats: HashMap<String, i64>`` parity).
+
+    G3-08 Phase 4 Sub-task 4-5：agent_states.scout 桶填入 + 降級路徑；
+    對齊 Strategist Sub-task 4-1 caller-side pattern。PA RFC §2.5 schema 為
+    5 欄位、皆 int（對齊 Rust ``AgentState.stats: HashMap<String, i64>``）。
+    """
+
+    _EXPECTED_SCOUT_FIELDS = {
+        "intel_produced",
+        "alerts_produced",
+        "scans_completed",
+        "intel_log_size",
+        "alert_log_size",
+    }
+
+    def setUp(self):
+        self._prev_env = os.environ.get("OPENCLAW_H_STATE_GATEWAY")
+        os.environ["OPENCLAW_H_STATE_GATEWAY"] = "1"
+
+    def tearDown(self):
+        if self._prev_env is None:
+            os.environ.pop("OPENCLAW_H_STATE_GATEWAY", None)
+        else:
+            os.environ["OPENCLAW_H_STATE_GATEWAY"] = self._prev_env
+
+    def test_scout_populated_when_get_scout_snapshot_present(self):
+        """43. env=1 + scout.get_scout_snapshot present → agent_states.scout
+        contains the 5-field snapshot. Verifies PA RFC §2.5 schema parity.
+        """
+        prev_sw = _install_fake_strategy_wiring(
+            _FakeStrategist(
+                _FakeH1Gate(),
+                _FakeModelRouter(),
+                cost_tracker=_FakeCostTracker(),
+            ),
+            scout=_FakeScout(with_scout_snapshot=True),
+        )
+        try:
+            result = build_h_state_full_response()
+            self.assertIn("scout", result["agent_states"])
+            scout = result["agent_states"]["scout"]
+            # Schema parity with Rust AgentState.stats (5 fields).
+            self.assertEqual(set(scout.keys()), self._EXPECTED_SCOUT_FIELDS)
+            # Spot-check default fixture values.
+            self.assertEqual(scout["intel_produced"], 13)
+            self.assertEqual(scout["alerts_produced"], 5)
+            self.assertEqual(scout["scans_completed"], 21)
+            self.assertEqual(scout["intel_log_size"], 7)
+            self.assertEqual(scout["alert_log_size"], 3)
+            # All values must be int (Rust HashMap<String, i64> parity).
+            for k, v in scout.items():
+                self.assertIsInstance(v, int, f"{k} must be int")
+                # Phase 4 invariant: not bool (bool is subclass of int but
+                # Rust schema demands i64; surface any boolean creep).
+                self.assertNotIsInstance(v, bool, f"{k} must not be bool")
+            self.assertEqual(result["version"], 1)
+        finally:
+            _restore_strategy_wiring(prev_sw)
+
+    def test_scout_dropped_when_get_scout_snapshot_missing(self):
+        """44. env=1 + scout lacks get_scout_snapshot → scout absent (silent
+        skip preserves never-raise contract). Models the Sub-task 4-2/3/4
+        deploy scenario where 4-5 hasn't landed yet.
+        """
+        prev_sw = _install_fake_strategy_wiring(
+            _FakeStrategist(
+                _FakeH1Gate(),
+                _FakeModelRouter(),
+                cost_tracker=_FakeCostTracker(),
+            ),
+            scout=_FakeScout(with_scout_snapshot=False),
+        )
+        try:
+            result = build_h_state_full_response()
+            self.assertNotIn("scout", result["agent_states"])
+            # H buckets unaffected.
+            self.assertIn("h1", result["h_states"])
+        finally:
+            _restore_strategy_wiring(prev_sw)
+
+    def test_scout_dropped_when_get_scout_snapshot_raises(self):
+        """45. env=1 + scout.get_scout_snapshot raises → scout bucket dropped,
+        H buckets unaffected.
+        """
+        prev_sw = _install_fake_strategy_wiring(
+            _FakeStrategist(
+                _FakeH1Gate(),
+                _FakeModelRouter(),
+                cost_tracker=_FakeCostTracker(),
+            ),
+            scout=_FakeScout(
+                with_scout_snapshot=True,
+                scout_snapshot_raises=RuntimeError("scout snap boom"),
+            ),
+        )
+        try:
+            result = build_h_state_full_response()
+            self.assertNotIn("scout", result["agent_states"])
+            self.assertIn("h1", result["h_states"])
+            self.assertEqual(result["version"], 1)
+        finally:
+            _restore_strategy_wiring(prev_sw)
+
+
+class TestScoutAgentStateIncludeFilter(unittest.TestCase):
+    """46. G3-08 Phase 4 Sub-task 4-5: include filter honours ``scout``
+    bucket selection alongside H buckets.
+    """
+
+    def setUp(self):
+        self._prev_env = os.environ.get("OPENCLAW_H_STATE_GATEWAY")
+        os.environ["OPENCLAW_H_STATE_GATEWAY"] = "1"
+        self._prev_sw = _install_fake_strategy_wiring(
+            _FakeStrategist(
+                _FakeH1Gate(),
+                _FakeModelRouter(),
+                cost_tracker=_FakeCostTracker(with_h5=True),
+                with_h4=True,
+                with_strategist_snapshot=True,
+            ),
+            scout=_FakeScout(with_scout_snapshot=True),
+        )
+
+    def tearDown(self):
+        _restore_strategy_wiring(self._prev_sw)
+        if self._prev_env is None:
+            os.environ.pop("OPENCLAW_H_STATE_GATEWAY", None)
+        else:
+            os.environ["OPENCLAW_H_STATE_GATEWAY"] = self._prev_env
+
+    def test_include_scout_only(self):
+        """46. include=["scout"] → agent_states has only scout, h_states empty."""
+        result = build_h_state_full_response(include=["scout"])
+        self.assertEqual(result["h_states"], {})
+        self.assertEqual(set(result["agent_states"].keys()), {"scout"})
+        self.assertEqual(result["version"], 1)
+
+
+class TestPhase4FullEnvelopeRoundtrip(unittest.TestCase):
+    """47. Phase 4 envelope completion regression test —
+    include=None default with all 5 H singletons + Strategist + Scout
+    wired must yield 5 H buckets + 2 agent buckets (until 4-2/3/4 land);
+    once 4-2/3/4 land this test should be extended to assert all 5 agent
+    buckets. Until then, the test guards against an agent-state DROP
+    regression (e.g. Phase 4 wire shape silently breaking).
+
+    47. Phase 4 信封完整度回歸測試 — include=None 預設時 5 個 H singleton
+    + Strategist + Scout 接線必須回 5 H 桶 + 2 agent 桶（4-2/3/4 land 前）；
+    一旦 4-2/3/4 land 應擴展為斷言全 5 agent 桶。在此之前用以防止 agent-state
+    桶被誤丟（例：Phase 4 wire shape 默默壞掉）的回歸守門。
+    """
+
+    def setUp(self):
+        self._prev_env = os.environ.get("OPENCLAW_H_STATE_GATEWAY")
+        os.environ["OPENCLAW_H_STATE_GATEWAY"] = "1"
+        self._prev_sw = _install_fake_strategy_wiring(
+            _FakeStrategist(
+                _FakeH1Gate(),
+                _FakeModelRouter(),
+                cost_tracker=_FakeCostTracker(with_h5=True),
+                with_h4=True,
+                with_strategist_snapshot=True,
+            ),
+            scout=_FakeScout(with_scout_snapshot=True),
+        )
+
+    def tearDown(self):
+        _restore_strategy_wiring(self._prev_sw)
+        if self._prev_env is None:
+            os.environ.pop("OPENCLAW_H_STATE_GATEWAY", None)
+        else:
+            os.environ["OPENCLAW_H_STATE_GATEWAY"] = self._prev_env
+
+    def test_default_include_yields_5h_plus_strategist_scout(self):
+        """47a. include=None → 5 H buckets all populated + agent_states
+        contains both strategist and scout (4-2/3/4 unfilled keys absent).
+        """
+        result = build_h_state_full_response()
+        # 5 H buckets all populated.
+        self.assertEqual(
+            set(result["h_states"].keys()),
+            {"h1", "h2", "h3", "h4", "h5"},
+        )
+        # 2 of 5 agent buckets populated (Sub-tasks 4-1 + 4-5 landed).
+        self.assertIn("strategist", result["agent_states"])
+        self.assertIn("scout", result["agent_states"])
+        self.assertNotIn("guardian", result["agent_states"])
+        self.assertNotIn("analyst", result["agent_states"])
+        self.assertNotIn("executor", result["agent_states"])
+        self.assertEqual(result["version"], 1)
+        # Sub-tasks 4-1 / 4-5 schema field counts.
+        self.assertEqual(len(result["agent_states"]["strategist"]), 11)
+        self.assertEqual(len(result["agent_states"]["scout"]), 5)
+
+    def test_explicit_include_full_envelope(self):
+        """47b. include=["h1","h2","h3","h4","h5","strategist","scout"]
+        → 7 buckets all populated explicitly.
+        """
+        result = build_h_state_full_response(
+            include=["h1", "h2", "h3", "h4", "h5", "strategist", "scout"]
+        )
+        self.assertEqual(
+            set(result["h_states"].keys()),
+            {"h1", "h2", "h3", "h4", "h5"},
+        )
+        self.assertEqual(
+            set(result["agent_states"].keys()),
+            {"strategist", "scout"},
+        )
+        self.assertEqual(result["version"], 1)
+
+
+class TestScoutInstanceSnapshot(unittest.TestCase):
+    """48. Real ScoutAgent.get_scout_snapshot end-to-end: instantiate a real
+    ScoutAgent, drive its public APIs (produce_intel / produce_event_alert /
+    record_scan), and verify the snapshot reflects the counter + gauge
+    movement. Validates Phase 4 invariant (all int) on a real instance —
+    not just the fake stub.
+    48. 真實 ScoutAgent.get_scout_snapshot 端對端測試：實例化真實
+    ScoutAgent，驅動其公開 API 並驗 snapshot 反映 counter + gauge 變化。
+    在真實實例上驗 Phase 4 不變式（皆 int），非僅 fake stub。
+    """
+
+    def test_real_scout_snapshot_reflects_state_changes(self):
+        from app.multi_agent_framework import ScoutAgent
+        scout = ScoutAgent()
+        # Initial snapshot — all zeros.
+        snap0 = scout.get_scout_snapshot()
+        self.assertEqual(snap0["intel_produced"], 0)
+        self.assertEqual(snap0["alerts_produced"], 0)
+        self.assertEqual(snap0["scans_completed"], 0)
+        self.assertEqual(snap0["intel_log_size"], 0)
+        self.assertEqual(snap0["alert_log_size"], 0)
+        # Phase 4 invariant: all int (not bool, not float).
+        for k, v in snap0.items():
+            self.assertIsInstance(v, int, f"{k} must be int")
+            self.assertNotIsInstance(v, bool, f"{k} must not be bool")
+        # Drive state changes.
+        scout.produce_intel(
+            source="test",
+            content="hello",
+            symbols=["BTCUSDT"],
+            relevance_score=0.1,  # below threshold so no bus send needed
+        )
+        scout.produce_intel(
+            source="test",
+            content="hello2",
+            symbols=["BTCUSDT"],
+            relevance_score=0.1,
+        )
+        scout.produce_event_alert(
+            event_type="token_unlock",
+            severity="low",
+            affected_symbols=["BTCUSDT"],
+        )
+        scout.record_scan()
+        scout.record_scan()
+        scout.record_scan()
+        snap1 = scout.get_scout_snapshot()
+        self.assertEqual(snap1["intel_produced"], 2)
+        self.assertEqual(snap1["alerts_produced"], 1)
+        self.assertEqual(snap1["scans_completed"], 3)
+        # Gauges reflect deque length.
+        self.assertEqual(snap1["intel_log_size"], 2)
+        self.assertEqual(snap1["alert_log_size"], 1)
+        for k, v in snap1.items():
+            self.assertIsInstance(v, int, f"{k} must be int")
+            self.assertNotIsInstance(v, bool, f"{k} must not be bool")
 
 
 

@@ -535,8 +535,26 @@ def _collect_agent_snapshots(
                 executor, "get_executor_snapshot"
             )
 
-    # G3-08 Phase 4 Sub-task 4-5 will fill the remaining bucket (Scout).
-    # Sub-task 4-5 會於本 function 加入 Scout arm；加性不改 signature。
+    if include_scout:
+        # G3-08 Phase 4 Sub-task 4-5: pull ScoutAgent.get_scout_snapshot via
+        # _safe_snapshot_self — same caller-side pattern as Sub-task 4-1
+        # (accessor on the agent itself). ScoutAgent class lives in
+        # multi_agent_framework.py (not in a dedicated scout_agent.py module);
+        # see G3-08-FUP-MAF-SPLIT for the future split-out backlog ticket
+        # (per PA RFC §5.1 — defer to keep Sub-task 4-5 surface area minimal).
+        # G3-08 Phase 4 Sub-task 4-5：透過 _safe_snapshot_self 拉取
+        # ScoutAgent.get_scout_snapshot — 與 Sub-task 4-1 相同 caller-side
+        # pattern（accessor 在 agent 自身）。ScoutAgent 類仍在
+        # multi_agent_framework.py（無獨立 scout_agent.py）；拆分為未來工作
+        # G3-08-FUP-MAF-SPLIT（依 PA RFC §5.1 — 維持 Sub-task 4-5 最小修改面）。
+        scout = getattr(_sw, "SCOUT_AGENT", None)
+        if scout is not None:
+            result["scout"] = _safe_snapshot_self(
+                scout, "get_scout_snapshot"
+            )
+
+    # G3-08 Phase 4 COMPLETE — 5 agents (strategist/guardian/analyst/executor/scout)
+    # all wired. Phase 4 完整 = 5 個 agent 均已接線。
 
     return result
 

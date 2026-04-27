@@ -36,6 +36,13 @@ from dataclasses import dataclass, field
 from enum import Enum, IntEnum
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
+# G3-08 Phase 4 Sub-task 4-5: ScoutAgent state-change events push
+# ``invalidate_h_state`` notifications to Rust h_state_cache; when env=0
+# the singleton is no-op (zero overhead). Mirrors Strategist Sub-task 4-1.
+# G3-08 Phase 4 Sub-task 4-5：ScoutAgent 狀態事件推送 invalidate_h_state
+# 至 Rust；env=0 時 singleton 為 no-op（零負擔）。對齊 Strategist Sub-task 4-1。
+from .h_state_invalidator import invalidate_async as _invalidate_h_state_async
+
 logger = logging.getLogger(__name__)
 
 # ─────────────────────────────────────────────
@@ -485,6 +492,10 @@ class ScoutAgent(BaseAgent):
             )
             self.bus.send(msg)
 
+        # G3-08 Phase 4 Sub-task 4-5: intel_produced + intel_log_size moved.
+        # G3-08 Phase 4 Sub-task 4-5：intel_produced 與 intel_log_size 同步遞增。
+        _invalidate_h_state_async("agent.scout.intel_produced")
+
         return intel
 
     def produce_event_alert(
@@ -535,12 +546,30 @@ class ScoutAgent(BaseAgent):
             )
             self.bus.send(msg)
 
+        # G3-08 Phase 4 Sub-task 4-5: alerts_produced + alert_log_size moved.
+        # PA RFC §6.5 names this trigger ``alert_produced`` even though the
+        # producer fn is ``produce_event_alert``.
+        # G3-08 Phase 4 Sub-task 4-5：alerts_produced 與 alert_log_size 同步
+        # 遞增。RFC §6.5 trigger 命名為 ``alert_produced``（雖函式為 produce_event_alert）。
+        _invalidate_h_state_async("agent.scout.alert_produced")
+
         return alert
 
     def record_scan(self) -> None:
-        """Record that a news/market scan cycle completed."""
+        """Record that a news/market scan cycle completed.
+        記錄一次新聞/市場掃描週期已完成。
+
+        G3-08 Phase 4 Sub-task 4-5: emits ``agent.scout.scan_completed``.
+        PA RFC §6.5 prompt referenced ``_complete_scan`` as a placeholder
+        name; the actual fn is ``record_scan`` (disposition logged in
+        commit + E1 report).
+        G3-08 Phase 4 Sub-task 4-5：發送 ``agent.scout.scan_completed``。
+        RFC §6.5 prompt 用 ``_complete_scan`` 占位；實際函式為 ``record_scan``
+        （差異記於 commit 與 E1 報告）。
+        """
         with self._lock:
             self._stats["scans_completed"] += 1
+        _invalidate_h_state_async("agent.scout.scan_completed")
 
     def get_recent_intel(self, limit: int = 20) -> List[IntelObject]:
         with self._lock:
@@ -556,6 +585,30 @@ class ScoutAgent(BaseAgent):
                 "role": AgentRole.SCOUT.value,
                 "state": self.state.value,
                 **dict(self._stats),
+            }
+
+    # G3-08 Phase 4 Sub-task 4-5: Scout agent_state snapshot accessor.
+    # G3-08 Phase 4 Sub-task 4-5：Scout agent 狀態 snapshot 存取器。
+    def get_scout_snapshot(self) -> Dict[str, Any]:
+        """Thread-safe agent-state snapshot for h_state_cache (PA RFC §2.5, 5 fields).
+        Schema parity with Rust ``AgentState.stats: HashMap<String, i64>``: all
+        values are int. Mirrors Strategist Sub-task 4-1 caller-side pattern.
+        H state cache 用 Scout 狀態 snapshot（PA RFC §2.5，5 欄位），皆 int；
+        對齊 Strategist Sub-task 4-1 caller-side pattern。
+
+        Schema (PA RFC §2.5): intel_produced / alerts_produced /
+        scans_completed (counters) + intel_log_size / alert_log_size (gauges).
+        Phase 4 invariant: every value is ``int`` so Rust
+        ``HashMap<String, i64>`` deserialiser accepts without coercion.
+        Schema：3 計數器 + 2 gauge；Phase 4 不變式 — 所有值為 int。
+        """
+        with self._lock:
+            return {
+                "intel_produced": int(self._stats.get("intel_produced", 0)),
+                "alerts_produced": int(self._stats.get("alerts_produced", 0)),
+                "scans_completed": int(self._stats.get("scans_completed", 0)),
+                "intel_log_size": int(len(self._intel_log)),
+                "alert_log_size": int(len(self._alert_log)),
             }
 
 
