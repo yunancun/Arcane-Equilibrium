@@ -211,17 +211,44 @@ def check_label_backfill_ratio(cur, close_fills: int) -> tuple[str, str]:
 
 
 def check_exit_features_writer(cur, close_fills: int) -> tuple[str, str]:
-    """[3] EXIT-FEATURES-TABLE-1 Rust writer — expect 1:1 with close_fills."""
+    """[3] EXIT-FEATURES-TABLE-1 Rust writer — expect ≈1:1 with close_fills.
+
+    Threshold model upgraded 2026-04-27 from absolute-delta (``> max(3, n/3)``)
+    to ratio-band: ``min/max < 0.5 → FAIL``, ``< 0.7 → WARN``, ``≥ 0.7 → PASS``.
+    Why: rolling 24h windows for the EF table and the ``[1]`` close_fills
+    baseline (``realized_pnl != 0``) re-align differently when burst close
+    events (e.g. fast_track dust spiral 37 fills in 9 min on 2026-04-26
+    08:04-08:13) cross the window boundary at 6h cron tick. Pre-fix the
+    18:00 cron repeatedly transient-FAILed at delta=37 (EF=91 vs close=54)
+    while the writer was healthy — confirmed at 19:50 with EF=217 vs
+    close=218 (delta=1). Ratio 0.5/0.7 gives ~30-50% drift tolerance for
+    burst-window misalignment while still catching real >50% writer break.
+
+    [3] EXIT-FEATURES-TABLE-1 Rust writer — 與 close_fills 比率守衛。
+    2026-04-27 從絕對 delta (``> max(3, n/3)``) 升級為比率帶:
+    ``min/max < 0.5 → FAIL`` / ``< 0.7 → WARN`` / ``≥ 0.7 → PASS``。
+    rolling 24h 窗 EF 表 vs ``[1]`` close_fills 基線 (``realized_pnl != 0``)
+    在 burst close 事件 (如 04-26 08:04-08:13 fast_track dust 9 分 37 fill)
+    跨窗口邊界時對齊不同;修復前 18:00 cron 反覆 transient-FAIL 於 delta=37
+    (EF=91 vs close=54)，但 19:50 即顯示 EF=217 vs close=218 (delta=1)
+    writer 健康。0.5/0.7 帶留 ~30-50% drift tolerance 吸收 burst 誤差，
+    同時抓 >50% 真 writer 斷。
+    """
     n = _scalar(cur,
         "SELECT COUNT(*) FROM learning.exit_features "
         "WHERE ts > now() - interval '24 hours' AND engine_mode = 'demo'"
     )
     if close_fills == 0:
         return ("WARN", f"no close_fills baseline, exit_features={n} unscoreable")
-    delta = abs(n - close_fills)
-    if delta > max(3, close_fills // 3):
-        return ("FAIL", f"exit_features_24h={n} vs close_fills={close_fills} (delta {delta}) — writer broken")
-    return ("PASS", f"exit_features_24h={n} vs close_fills={close_fills} (delta {delta})")
+    larger = max(n, close_fills)
+    smaller = min(n, close_fills)
+    ratio = (smaller / larger) if larger else 1.0
+    base = f"exit_features_24h={n} vs close_fills={close_fills} (ratio {ratio:.2f})"
+    if ratio < 0.5:
+        return ("FAIL", base + " — writer broken (>50% drift)")
+    if ratio < 0.7:
+        return ("WARN", base + " — writer drift 30-50%, monitor (rolling-window race?)")
+    return ("PASS", base)
 
 
 def check_paper_state_dust_inventory(cur) -> tuple[str, str]:
@@ -544,6 +571,23 @@ def check_orders_fills_consistency(cur) -> tuple[str, str]:
     discrepancy in trading.fills with ``strategy_name LIKE 'unattributed:%'``
     (no separate orphan table).
 
+    JOIN-KEY-FIX (2026-04-27): JOIN was previously ``o.context_id = f.context_id``
+    which silently produced ``orders_n = 0`` for every pair because the Rust
+    ``flush_orders`` writer (trading_writer.rs:472-505) does NOT include
+    ``context_id`` in its INSERT column list — only ``ts, order_id, symbol,
+    side, order_type, qty, strategy_name, category, is_paper, status,
+    engine_mode``. Every ``trading.orders`` row therefore has empty/default
+    ``context_id`` and the LEFT JOIN never matched anything that fills had
+    populated. Verified against 30-min sample on 2026-04-27 19:30: 8 pairs
+    had fills with ``context_id`` like ``ctx-demo-DOGEUSDT-1777314540000`` +
+    ``order_id`` like ``oc_1777314540000_453``, and the matching orders rows
+    had identical ``order_id`` but ``context_id=''``. Switched JOIN to
+    ``o.order_id = f.order_id`` — orders writer always populates
+    ``order_id`` (it's the dedup PK alongside ``ts``), so the new JOIN is
+    the canonical reliable key. ``context_id`` may be backfilled into
+    ``trading.orders`` in a future Rust writer refactor; until then, this
+    healthcheck must JOIN on the key the writer actually persists.
+
     Three-state verdict:
       * FAIL: pairs_with_missing_orders > 5 (writer broken across multiple pairs)
       * WARN: 1 <= pairs_with_missing_orders <= 5 (transient or single pair)
@@ -577,17 +621,24 @@ def check_orders_fills_consistency(cur) -> tuple[str, str]:
     except Exception:
         pass
 
-    # NOTE / 註：第 6 行 ``AND f.strategy_name NOT LIKE 'unattributed:%'`` 排除
+    # NOTE / 註：``AND f.strategy_name NOT LIKE 'unattributed:%'`` 排除
     # F4 unattributed audit fill（context_id=``unattrib-...`` audit-by-design，
     # 本就無 ``trading.orders`` row）；不排除 = F4 backfill 後系統性 false-positive FAIL。
     # F7-FUP-23 cross-cut fix — see docstring above for rationale.
+    #
+    # JOIN-KEY-FIX (2026-04-27): JOIN on ``order_id`` (always populated by
+    # Rust trading_writer flush_orders) instead of ``context_id`` (which is
+    # not in the orders INSERT column list — see flush_orders trading_writer.rs:
+    # 472-505). Pre-fix: every pair reported orders_n=0 → systemic false-FAIL.
+    # 改 JOIN ``order_id`` 因 Rust ``flush_orders`` 從未寫入 ``context_id``
+    # 欄位（只 INSERT 11 欄無 context_id），使用 ``order_id`` 為穩定 join key。
     sql = (
         "WITH order_fill_pairs AS ( "
         "  SELECT f.strategy_name, f.symbol, "
-        "    count(DISTINCT f.context_id) AS fills_n, "
+        "    count(DISTINCT f.order_id) AS fills_n, "
         "    count(DISTINCT o.order_id) AS orders_n "
         "  FROM trading.fills f "
-        "  LEFT JOIN trading.orders o ON o.context_id = f.context_id "
+        "  LEFT JOIN trading.orders o ON o.order_id = f.order_id "
         "  WHERE f.ts > now() - interval '30 minutes' "
         "    AND f.engine_mode IN ('demo', 'live', 'live_demo') "
         "    AND f.strategy_name NOT LIKE 'unattributed:%' "
