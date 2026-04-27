@@ -2,6 +2,32 @@
 
 ## 工作記憶
 
+### 2026-04-27 G3-09 Phase A daemon integration test (Phase B prerequisite) — E4 PASS
+
+**任務**：補 PA RFC `2026-04-27--g3_09_phase_b_shadow_dryrun_design.md` §6.1 R-B4 + §R-B10 揭示的缺口 — Phase A 32 unit tests 全直驅 `evaluate()` pure fn + 5 IPC handler tests 手動 populate slot，**0 個 daemon-level 整合測試**證明 daemon 真在跑 → Phase B observation 無 ground truth。
+
+**成果**：新檔 `rust/openclaw_engine/tests/test_cost_edge_advisor_daemon.rs` 6 tests (~440 LOC，純測試 0 production diff)，Mac --release 2.09s 兩遍同綠 (2/2 non-flaky)。
+
+**4 大證明 + 1 bonus**：
+1. `daemon_spawn_advances_state_off_uninitialized` — daemon spawn 100ms cadence 1s 內 state 從 Uninitialized → Ok 且 ratio/data_days/threshold/last_eval_ms 全 echo H5+RiskConfig
+2. `ipc_handler_returns_live_state_after_daemon_writes` — Trigger ratio (-0.8) 場景下 advisor.state() 回 status=Trigger / ratio=-0.8 / ai_spend=10.0 / paper_pnl=-8.0 / data_days=7 / triggered_at_ms>0 全來自 daemon-written，非 `uninitialized()` stub
+3. `dual_safeguard_env_gate_off_skips_daemon` — env-gate 嚴格 "1" 比對：unset/"0"/"true"/" 1 "（含空白）全 false，僅 "1" true；env 改動經 process-wide `OnceLock<Mutex<()>>` 序列化避 OS-level env race
+4. `dual_safeguard_risk_config_disabled_short_circuits` — env=1 + H5=Trigger ratio (-0.8) 但 RiskConfig.cost_edge.enabled=false → daemon body 內 `evaluate()` Step 1 short-circuit Disabled，ratio=None（不 echo H5 because short-circuit 在 H5 read 前），threshold echo for audit
+5. `daemon_evaluate_cadence_within_tolerance` — 200ms × 10 cycle，mean cadence error ≤10%（task spec），per-cycle jitter 硬上限 50%（5× tolerance 容 CI scheduler outlier）
+6. **bonus** `daemon_cancellation_drains_within_one_second` — 長 poll interval (10s sleep) 中觸發 cancel，daemon 1s 內 join cleanly（驗 mod.rs:188 「cancellation-safe sub-second shutdown」宣告）
+
+**關鍵設計選擇**：
+- 用 `tokio::test(flavor = "multi_thread", worker_threads = 2)` 確保 daemon 真拿獨立 worker（single-threaded runtime 會序列化 daemon 與 assertion，defeat integration）
+- 用 100ms / 200ms poll interval 加速測試（vs 預設 10s），仍走真實 spawn → tokio::select! → tokio::time::sleep 路徑（非 mock）
+- 透過 daemon 自己的 `last_eval_ms` epoch ms 算 cycle delta，這是 consumer 視角的 cadence（非 wall-clock 觀察者視角）
+- 直呼 inner `spawn_cost_edge_advisor()` 而非 `spawn_cost_edge_advisor_if_enabled()` 隔離「第二保險」(RiskConfig flag)，避免 env-gate 並發污染
+
+**baseline**：lib 2290/0 兩遍同綠不變（純整合測試，獨立 test target）。整合 test target 35 + 6 = 41 tests 全綠。
+
+**0 production diff 確認**：`git diff --stat` 顯示僅 `docs/CCAgentWorkSpace/PA/memory.md` 79 行（sibling agent，非本任務）；新檔在 untracked 區。
+
+**教訓**：Phase A E1 self-report 5.4 標 daemon integration 屬「E4 regression scope」 — 但 Phase A E4 report 第 §5 mock 審查直接判 `Phase A daemon 邏輯 ... runtime 行為，本 E4 不啟動 spawn` = N/A，沒補 daemon 級測試就放行。後 PA 寫 Phase B RFC 才察覺 R-B4 = 「無 ground truth」缺口必須回頭補。**規則**：advisor / daemon / 任何「spawn 後背景運轉」模組，single E1 完工不能跳「至少 1 個整合測試證明 daemon 真寫入觀察點」這條。
+
 ### 2026-04-27 OBSERVER-RESTORE-1 (`d4bc9eb`) healthcheck+observer 4 stale/FAIL 修 — E4 PASS
 
 **結論：E4 PASS — 0 regression / +5 new tests / 兩遍同綠**
@@ -748,6 +774,7 @@ ssh trade-core "cd ~/BybitOpenClaw/srv && python3 helper_scripts/db/passive_wait
 
 | 日期 | 任務 | 文件位置 |
 |------|------|---------|
+| 2026-04-27 | G3-09 Phase A daemon integration test (Phase B prerequisite, 純測試 0 production diff) — 6 tests 兩遍同綠 / 4 大證明 daemon spawn+IPC live+雙保險+cadence + 1 bonus cancellation drain / lib baseline 2290/0 不變 | `docs/CCAgentWorkSpace/E4/workspace/reports/2026-04-27--g3_09_phase_a_daemon_integration_test.md` |
 | 2026-04-27 | 6 P0 PR Wave Combined Regression（F2/F3/F4/F5/F6/F7）— MERGE READY / baseline 校正 2161→2212 / Combined cargo lib 2252 兩遍同綠 / 27 healthcheck 8 新 [22-29] 全執行三態 verdict / 2 doc-only conflicts union-resolvable / 5 push back（1200 hard cap 12 / E1 memory.md merge / baseline drift / cron wrapper cwd / 5 真實 FAIL pre-existing） | `docs/CCAgentWorkSpace/E4/workspace/reports/2026-04-27--p0_wave_combined_regression.md` |
 | 2026-04-26 | Wave 3 W5 兩軌（EDGE-P2-flip T2 + G2-FUP-IPC-LEGACY-MS-FIX）回歸驗證（E4 Pass with conditions / Linux cargo 2161 兩遍同綠 / Mac local pytest 兩遍 3/3 / [15] dormant 路徑 PASS / Rust verifier 1:1 mirror / async :553 一直秒制 / 6 conditions for PM commit+push 後 Linux 重跑） | `docs/CCAgentWorkSpace/E4/workspace/reports/2026-04-26--wave3_w5_two_tracks_regression.md` |
 | 2026-04-26 | Wave 3 W4 三軌（EDGE-P1b + EDGE-P2-flip + G2-03）回歸驗證（E4 PASS / Mac local 2138→2161 +23 兩遍同綠 / 18 check 含 [14] per-strategy READY_frac 63% / dry-run 5/5 / bash -n 3/3 / ast.parse 4/4 / calibrator 250-row CALIBRATED / summary 14d markdown / 2 PRE-EXISTING WARN 1200 hard limit non-blocking） | `docs/CCAgentWorkSpace/E4/workspace/reports/2026-04-26--wave3_w4_three_tracks_regression.md` |
