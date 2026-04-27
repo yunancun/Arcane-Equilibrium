@@ -1042,3 +1042,64 @@ RCA 確認：8 天 silent regression — `pipeline_snapshot_live.json` 從 04-19
 - **`Fn` closure 不能 async**：closure 須 sync invoke（spawner 回 sync `thread::JoinHandle`）。`tokio::sync::RwLock` 不適用 — 改 `parking_lot::RwLock` 給 slot，臨界區極短（~1 µs）async / sync 共用安全（但需自證寫者短）。
 - **boot Some 不走 closure 的權衡**：closure 統一兩條 path 顯然優雅，但 boot 預建 cmd_tx / cmd_rx 給 reconciler / strategist scheduler 用，closure 重建 channel 會讓 reconciler 寫到無人讀的 channel（已被 closure 段忽視的）— 這是 reconciler boot-capture 的 limitation。決策：boot Some 直接 spawn_live_pipeline 路徑，watcher closure 只負責 boot None / 中途 respawn。Lesson：完美對齊兩條 path 不見得最優；既有 boot-capture 模式有 inertia，改它要動更多檔超本 ticket 範圍 — follow-up 工單做。
 - **Mac dev cargo test 路徑**：Mac 端 cargo build / test 成功，與 memory `project_dev_runtime_split` 不衝突 — Mac 是「dev / write code / RCA」階段，cargo build + cargo test 屬編譯驗證階段，allowed。實際 Linux runtime 部署仍須 ssh trade-core --rebuild。Lesson：Mac dev 階段「cargo test --release -p openclaw_engine` 是有效 unit test 驗證；只是不能跑真實 Bybit infra 整合測試（3 個 Demo slot rename 為 dev_disabled）。
+
+## 2026-04-27 · G3-08 Phase 4 — Layer2CostTracker 4-sibling Split
+
+PM Tier 8 sign-off `e5f1b2d` follow-up #2：Layer2CostTracker `app/layer2_cost_tracker.py`
+930 LOC 已超 §七 800；G3-09 cost_edge_ratio 預期再 +50-100 LOC，6 個月內必撞 §九 1200。
+按 PA RFC §6.4 採 **Method A**（module-level fn + tracker 注入第一參數 + 1-line delegator）
+拆 1 主檔 → 1 主檔 + 3 sibling，主檔 **930 → 540 LOC**（well under 800，~260 LOC headroom
+G3-09 + Phase 4-5 snapshot）。
+
+**4 file change**：
+- 主檔 `layer2_cost_tracker.py`：540 LOC facade，14 method 委派（1-line delegator）。保留
+  ctor / persistence / daily budget / session / pricing / config / cost summary /
+  ollama_stats / check_*。
+- NEW `layer2_cost_recording.py` 405 LOC：9 cost-write fn（含 `_invalidate_h_state_async`
+  import 遷此）。
+- NEW `layer2_adaptive.py` 207 LOC：3 fn，docstring 註明為 G3-09 future hook 落點。
+- NEW `layer2_h_state_snapshots.py` 190 LOC：H2/H5 wire-shape 投影，53+82 LOC docstring +
+  Rust struct line ref 完整保留。
+
+**測試 patch path 升級** `app.layer2_cost_tracker._invalidate_h_state_async` →
+`app.layer2_cost_recording._invalidate_h_state_async` 4 site（line 384/417/552/587）+
+1 docstring；test 邏輯不動。`test_h_state_query_handler.py` 0 site 無需動。
+
+**Mac dev 驗證**：196/196 cost-tracker-relevant test 全綠（test_layer2 82 + h_state 52 +
+escalation 21 + strategist 41）。12 個 TestLayer2Routes deselected（Mac fastapi 缺失既有 env
+gap，與本拆分無關）。
+
+### Lesson — Method A pattern 對 stateful class
+Method A（module-level fn + class instance 第一參數注入 + 1-line delegator）對 stateful
+class（持 lock / 持久化 state）拆分是合適選擇：
+- **不破 SSOT**：Layer2CostTracker class 本身仍是 STRATEGIST_AGENT.cost_tracker singleton；
+  external import path `from .layer2_cost_tracker import Layer2CostTracker` 不變，下游
+  3 callsite（layer2_engine / layer2_routes / strategy_wiring）+ tests 全部不需動。
+- **不破 lock contract**：sibling fn `with tracker._lock:` 走原 RLock；reentrant 安全
+  （`record_session` → `_increment_daily_session_count` → sibling 是同 thread 多次取鎖）。
+- **不破 emit order**：`record_claude_cost` 雙 H state hint（h2.budget_consumed →
+  h5.claude_cost_recorded）emit order 1:1 保留 — Sub-task 3-3 RFC §6 + §8.2 thread safety
+  contract 不可破。
+- **不破 fire-and-forget**：`_sync_to_rust_budget` 動態 import threading + asyncio +
+  EngineIPCClient 保留，daemon thread fire-and-forget pattern bit-for-bit。
+- **TYPE_CHECKING 防循環**：3 個 sibling 用 `if TYPE_CHECKING: from .layer2_cost_tracker
+  import Layer2CostTracker`，runtime 不執行 → import 循環避免。
+- **Test patch path 升級必 grep verify**：patch target 是 module-level binding；symbol
+  搬家後對應 patch path 必 follow，否則 silent pass 風險（mock 不生效但 test 看似綠）。
+  4 site 全升級 + docstring 同步。
+
+### Lesson — sibling 拆檔 LOC budget
+- 主檔留 ~50% headroom 給 future feature（本 case 540 / 800 → 32% headroom，G3-09 +50-100
+  LOC 後仍 ~600 / 800 = 75%）。
+- 3 sibling 分別專注「寫入 / 演算 / 快照」三職能；命名 `_recording` / `_adaptive` /
+  `_h_state_snapshots` 避免歧義。
+- sibling 不互相 import（recording 不引 adaptive，adaptive 不引 h_state_snapshots）—
+  全部回主檔 SSOT 集合，避免 sibling 間耦合擴大。
+
+### 開放問題（留給後續）
+- 主檔仍餘 540 LOC；若 Phase 5 cost_summary / pricing 也擴張，可再拆 `layer2_pricing.py`
+  + `layer2_cost_summary.py` 兩 sibling（PA RFC §11 future fan-out 預留）。
+- `_sync_to_rust_budget` 內部仍 dynamic import threading / asyncio — 雖 prompt 高風險警告
+  #1 規定「保持 hot-path 行為一致」，長期看可考慮 pre-import + `asyncio.run` 改 thread-pool
+  pattern；屬 G3-08 Phase 5 範圍非本 ticket。
+- G3-09 cost_edge_ratio threshold check 落點在 `layer2_adaptive.py`，docstring 已預留 hook。

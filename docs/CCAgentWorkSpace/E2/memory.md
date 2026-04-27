@@ -59,6 +59,7 @@
 | 2026-04-26 | Rust P0 Wave 4-PR adversarial review (F2/F3/F4/F6) — 直接 final message 回 PA/PM（system prompt 限制不寫 .md report）| inline final message · 3 PASS / 1 RETURN（F4）|
 | 2026-04-26 | Python P0 Wave 2-PR review (F5 GUI + F7 healthchecks) — F5 RETURN 1 HIGH/1 MEDIUM/1 LOW + F7 PASS-with 1 MEDIUM cross-cut + 2 LOW + 1 size warning | workspace/reports/2026-04-26--python_p0_wave_review.md |
 | 2026-04-27 | live-auth-watcher-event-consumer-spawn Round-2 review (working tree) — APPROVE_WITH_NITS · main.rs=1194 緊靠 1200 ⚠️ LOW | inline final message |
+| 2026-04-27 | Live Auth Renew 移至 Governance Hub (97bab9a) — APPROVE_WITH_NITS · 1 MEDIUM（ocEsc+textContent 雙重 escape pre-existing）+ 1 MEDIUM（tab-live.html 1598 行 pre-existing）+ 1 LOW（try/catch dead code）+ 1 ⚠️ 809 行警告 | inline final message |
 
 ## 歷史審查關鍵發現（累積記憶）
 
@@ -370,3 +371,48 @@
 - **F7 file size 1154 / 1200 close to cap**：`checks_strategy.py` 距硬限 46 行；下次新 check 加進去會超。建議 follow-up `F7-FUP-CHECKS-STRATEGY-SPLIT` ticket 預計畫 split timing，避免重蹈 strategist 1200 exact-touch 教訓
 
 - **判定方法論教訓**：(a) GUI fake-success eliminate PR 必同時驗 GET (read) + POST (write) 兩面，前端 disable 按鈕不是真 guard 因 dev tools / dynamic re-render 可繞 (b) `closeLiveOnePosition` / `closeLivePosition` 雙函數命名近似但 callsite 不同 → client-guard 用 querySelector onclick string 必窮舉所有 onclick attribute 反例 (c) phantom guard 雙重判據（engine != live AND slot unconfigured）邊界邏輯 5 種狀態（mainnet/live_demo/unconfigured × engine in {live/demo/paper/unknown}）需各一 test case 完整覆蓋 (d) MIT spec 寫死的 magic number constant（如 -5.5）E2 必驗其推導鏈是否耦合於當前實作 invariant；耦合即 brittle (e) F4 + F7 並行落地時 cross-cutting 互動必驗：strategy_name pattern + context_id NULL 行為 + LEFT JOIN 結果 三軸交叉 (f) per-symbol invariant（如 min_qty）的通用閾值 [28] 1e-3 = fast triage acceptable，但 docstring 必說明 coverage 邊界 + sister check 接力
+
+## 2026-04-27 · G3-08 Phase 4 Strategist split (commit 6fac0ca) review
+
+- Verdict: PASS_WITH_NITS
+- 主檔 1200 → 792 (well under 800), 3 sibling 369/224/169
+- _handle_intel / _produce_intents / __init__ byte-identical (verified by `diff` empty)
+- 16 method body 搬出 + 16 1-line delegator + 4 sibling re-export blocks all `# noqa: F401`
+- 0 except:pass, 0 f-string in logger, 0 hardcoded paths, 0 module-level mutable state
+- Sibling fns 接 `agent: StrategistAgent` 第一參，access `agent._lock` / `agent._stats` / `agent.cost_tracker` / `agent._truth_registry` 等 instance attrs all map 1:1
+- Tests: 41/41 strategist_agent + 59/59 audit_wiring/truth_source/h_chain pass on Mac
+- 所有 re-export alias smoke-importable，class method `_ai_evaluate` 等仍存（delegator）
+- 無 Rust / TODO / CLAUDE / memory / helper_scripts touched
+- 設計 nit (NIT-1)：`_handle_intel` 仍 197 LOC，下次 §九 警告可考慮拆 dispatch helper（不阻擋本次 merge）
+- Lessons:
+  * Method-as-fn split via `agent: StrategistAgent` 第一參數是低風險 refactor pattern
+  * BWD compat 層 = class delegator + module re-export 雙重保護
+  * 必查驗 `_handle_intel` byte-identical（orchestrator 不變動）+ instance attr `agent._evaluate_edge = MagicMock(...)` patch path 仍生效
+
+## 2026-04-27 · G3-08 Phase 4 cost_tracker split (commit 73c1f3d) review
+
+- Verdict: PASS_WITH_NITS → E4
+- LOC: layer2_cost_tracker.py 930→540 (well under §九 800 警告); 3 NEW sibling 405/207/190 all <800
+- RFC estimate vs actual drift: sibling 480→802 (+322, +67%) — NOT padding, RFC formula 漏估雙語 MODULE_NOTE (~135) + delegator docstring (~60) + 既存 inline rationale 平搬 (~120)
+- 5 sample verbose docstrings 全部 trace 到 pre-split source (git blame 73c1f3d^), E1 0 行新 padding
+- PA RFC §10 三條高風險警告全部 1:1 落地：
+  * #1 `_sync_to_rust_budget` daemon thread (lazy `import threading` + nested `import asyncio` + `daemon=True`) bit-for-bit
+  * #2 `record_claude_cost` dual hint emit order (h2.budget_consumed → h5.claude_cost_recorded) preserved
+  * #3 test patch path 4 site (line 389/422/557/592) `app.layer2_cost_recording._invalidate_h_state_async` 升級
+- Test grep verify：`app.layer2_cost_tracker._invalidate_h_state_async` 0 site, `app.layer2_cost_recording._invalidate_h_state_async` 4 site
+- 196/196 test_layer2 cost-tracker + h_state_query_handler + escalation + strategist 全綠（Mac 12 TestLayer2Routes errors = pre-existing fastapi env gap，pre-split 同樣 fail，與本拆分無關）
+- 0 module-level mutable state in 3 sibling, 0 new singleton needed in §九 表
+- 0 Rust / TOML / CLAUDE.md / TODO / memory touch
+- 14 delegator confirmed (count of `_recording_sibling.` / `_adaptive_sibling.` / `_h_state_sibling.` calls in main = 14)
+- Smoke: `Layer2CostTracker(state_file=tmp).get_h2_snapshot()` end-to-end 綠
+- NITs (3, all cosmetic):
+  * NIT-1: commit message bullet「3 noqa: F401 re-export blocks」實際 code 0 此種 block — 不需要（class method delegator 已 resolve）
+  * NIT-2: E1 report 「+412 LOC 純為 MODULE_NOTE / docstring」不夠精準（~120 行為既存 inline rationale 平搬，非新 doc）
+  * NIT-3: `layer2_cost_recording.py:55-58` 注釋「升級」用詞暗示 backward-compat 但實際 old path 已物理不存在
+- §九 #8 「沒有私有屬性穿透 ._xxx」: ⚠️ Method A by design 走 `tracker._lock / _adaptive / _read_raw / _write_raw / _today_key / _save / _ollama_stats / _config / _pricing` 等 ~10 種底線屬性。Acceptable per RFC §6.4（sibling fn 本質 = 同類擴展，非外部模組穿透）
+- Lessons:
+  * Method A (module-level fn + tracker 注入第一參) 風險最低的拆分 pattern；sibling 走 private API 是設計選擇非 §九 #8 違反
+  * RFC LOC 估算 formula 應修：`business_LOC × (1 + 0.6) + 30 per sibling MODULE_NOTE` ≈ 實際；下次 PA 拆分 estimation 採此公式減少 +50-70% drift assertion
+  * 「commit message 說有 X 個 Y / 實際 0 個」屬 NIT 不退 E1（amend 政策禁止，且 X 對行為無影響）；PM 知曉即可
+  * 「pre-split 既存 inline rationale 1:1 搬移」E2 必查 git blame 確認非 E1 新 padding，避免 retract 既有設計文件化資產
+  * Daemon thread `_sync_to_rust_budget` lazy `import threading` + nested `import asyncio` 是刻意設計（避 module-import 期 thread spawn）；拆分後必 1:1 對齊不可優化為頂層 import
