@@ -1089,7 +1089,54 @@ def check_signals_writer_freshness(cur) -> tuple[str, str]:
     為全局 research 錨）。三態：FAIL（>6h stale）/ WARN（1-6h）/ PASS（<1h）。
     空表 max(ts)→NULL→infinity sentinel→FAIL 並顯式「table never written to」，
     完全對齊 4/19 silent outage 指紋。
+
+    PAPER-DISABLED-SKIP (2026-04-27): The Rust step_3_signals.rs:137 path
+    persists ``trading.signals`` rows ONLY when ``!self.pipeline_kind.
+    is_exchange()`` (Signal Diamond V015 design — paper-pipeline-only to
+    avoid triple-write of identical signal_ids by demo+live+paper). When
+    PAPER-DISABLE-1 (2026-04-16) is in effect (``OPENCLAW_ENABLE_PAPER!=1``,
+    paper pipeline drained, ``pipeline_snapshot_paper.json.disabled=true``),
+    the signals writer dormancy is by-design — there is no producer.
+    The 2026-04-19 last row is the residual paper run before the disable
+    took effect on this engine PID. Auto-skip when paper is disabled to
+    avoid false-positive FAIL while the pipeline is intentionally dormant;
+    fall through to normal staleness check when paper is enabled.
+
+    PAPER-DISABLED-SKIP（2026-04-27）：Rust step_3_signals.rs:137 寫入
+    ``trading.signals`` 限 ``!is_exchange()`` 路徑（Signal Diamond V015 —
+    paper-only 避免 demo+live+paper 三重寫相同 signal_id）。PAPER-DISABLE-1
+    （2026-04-16）後 paper pipeline drained（``pipeline_snapshot_paper.json
+    .disabled=true``），signals writer 無 producer 為 by-design dormant，
+    2026-04-19 最後 row 是 disable 生效前殘留 paper run。Paper disabled 時
+    auto-skip 避 false-positive FAIL；paper enabled 時 fall through 跑原檢。
     """
+    # PAPER-DISABLED-SKIP: Signal Diamond V015 makes signals writer paper-
+    # only; when paper pipeline is disabled (PAPER-DISABLE-1, 2026-04-16),
+    # writer dormancy is by-design. Read pipeline_snapshot_paper.json
+    # ``disabled`` flag from runtime data dir as the canonical truth (env
+    # vars don't propagate reliably to cron subprocess). Failure to read
+    # the snapshot = fall through to normal check (fail-open, by spec).
+    # Signal Diamond V015 → signals writer 為 paper-only；paper disabled 時
+    # writer 休眠為 by-design。讀 pipeline_snapshot_paper.json 的 disabled
+    # 旗標為真理源（env var 不可靠跨 cron subprocess 傳遞）。讀失敗 = fall
+    # through 跑原檢（fail-open，符合 spec）。
+    data_dir = os.environ.get("OPENCLAW_DATA_DIR", "/tmp/openclaw")
+    paper_snap_path = Path(data_dir) / "pipeline_snapshot_paper.json"
+    if paper_snap_path.exists():
+        try:
+            snap = json.loads(paper_snap_path.read_text(encoding="utf-8"))
+            if snap.get("disabled") is True:
+                reason = snap.get("disabled_reason", "unknown")
+                return (
+                    "PASS",
+                    f"trading.signals writer is paper-only (Signal Diamond V015); "
+                    f"paper disabled by-design ({reason}) — skip",
+                )
+        except Exception:
+            # Fall through to original staleness check.
+            # 讀取失敗 → 走原本 staleness check 路徑。
+            pass
+
     # Defensive rollback to keep cursor clean across checks.
     # 防禦式 rollback 跨 check 保持 cursor 乾淨。
     try:
