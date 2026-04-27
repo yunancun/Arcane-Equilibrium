@@ -100,6 +100,7 @@ from .strategist_cognitive import (  # noqa: F401 — re-export for tests / patc
     clear_emergency_mode as _sc_clear_emergency_mode,
     handle_fast_channel as _sc_handle_fast_channel,
     set_cognitive_modulator as _sc_set_cognitive_modulator,
+    tick_cognitive_modulator as _sc_tick_cognitive_modulator,
 )
 from .strategist_edge_eval import (  # noqa: F401 — re-export for tests / patches
     _ai_evaluate as _se_ai_evaluate,
@@ -126,6 +127,15 @@ from .strategist_weights import (  # noqa: F401 — re-export for tests / patche
 from .utils.time_utils import now_ms
 
 logger = logging.getLogger(__name__)
+
+
+# G8-01 W1 FIX-B (PA RFC §3.1 Option γ)：CognitiveModulator tick 頻率。
+# Strategist intel 流量約 ~5/min（per RFC §10），N=10 → 每 ~2 min 一次 update。
+# 既保留 modulator EMA 平滑時效（α=0.3 → ~3-4 cycle 收斂），又避免 hot path 壓力。
+# G8-01 W1 FIX-B (PA RFC §3.1 Option γ): CognitiveModulator tick cadence.
+# Strategist intel volume ~5/min (per RFC §10); N=10 → ~one update every 2 min.
+# Preserves modulator EMA convergence (α=0.3 → ~3-4 cycles) without hot-path cost.
+_COGNITIVE_TICK_INTERVAL = 10
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -341,6 +351,21 @@ class StrategistAgent(BaseAgent):
 
         with self._lock:
             self._stats["intel_received"] += 1
+            _intel_count = self._stats["intel_received"]
+
+        # G8-01 W1 FIX-B (PA RFC §3.1 Option γ)：
+        # 每 N=10 個 intel 觸發一次 CognitiveModulator tick — 解 BUG-B（
+        # production 0 caller，modulator 永遠卡在 ctor base value）。
+        # 放在 intel_received 增量之後、任何 return 之前，確保 unconditional fire；
+        # tick 自身 fail-soft（exception 只 warn 不污染 hot path）。
+        # G8-01 W1 FIX-B (PA RFC §3.1 Option γ):
+        # Tick CognitiveModulator every N=10 intel events — fixes BUG-B
+        # (zero production callers leaving modulator stuck at ctor base values).
+        # Placed after intel_received increment and before any early return so
+        # firing is unconditional; the tick itself is fail-soft (exceptions
+        # only warn-log, never poison the hot path).
+        if _intel_count % _COGNITIVE_TICK_INTERVAL == 0:
+            _sc_tick_cognitive_modulator(self)
 
         payload = message.payload
         if not payload:

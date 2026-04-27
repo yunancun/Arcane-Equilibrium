@@ -157,7 +157,14 @@ def _apply_cognitive_modulation(
         return (agent.config.min_confidence, 1.0)
 
     try:
-        params = agent._cognitive_modulator.get_current_params()
+        # G8-01 W1 FIX-A：rename `get_current_params` → `get_all_params`
+        # （前者並非 CognitiveModulator 公開 API，AttributeError 被下方 except 靜默吞掉
+        # → conf_floor / qty_ceil 永遠回退 default，違反 feedback_no_dead_params。）
+        # G8-01 W1 FIX-A: rename `get_current_params` → `get_all_params`
+        # (former is NOT a CognitiveModulator public API; the AttributeError was
+        # silently swallowed by the except below, returning defaults forever —
+        # violates feedback_no_dead_params.)
+        params = agent._cognitive_modulator.get_all_params()
         conf_floor = params.get("confidence_floor", agent.config.min_confidence)
         qty_ceil = params.get("qty_ceiling", 1.0)
         return (conf_floor, qty_ceil)
@@ -167,3 +174,105 @@ def _apply_cognitive_modulation(
             "認知調製器錯誤，使用默認值: %s", e, e,
         )
         return (agent.config.min_confidence, 1.0)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CognitiveModulator periodic tick / 認知調製器週期性 tick
+# G8-01 W1 FIX-B (Option γ per PA RFC §3.1)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def tick_cognitive_modulator(agent: "StrategistAgent") -> None:
+    """
+    Drive a single CognitiveModulator.update(...) cycle from current Strategist state.
+    從當前 Strategist 狀態驅動一次 CognitiveModulator.update(...) 週期。
+
+    Background / 背景:
+      Pre-G8-01, ``CognitiveModulator.update(...)`` had **zero** production callers.
+      The modulator stayed permanently at ctor base values (confidence_floor=0.60,
+      qty_ceiling=1.0, update_count=0), turning the wired-but-dormant chain into
+      dead code. PA RFC §3.1 picked Option γ: caller-side tick from
+      ``StrategistAgent._handle_intel`` post-loop, every N intel events.
+      G8-01 前 ``CognitiveModulator.update(...)`` production caller 數 = 0，modulator
+      永遠卡在 ctor base value（confidence_floor=0.60 / qty_ceiling=1.0 /
+      update_count=0），整鏈成為 dead code。PA RFC §3.1 採 Option γ：caller-side tick
+      由 ``StrategistAgent._handle_intel`` loop 結尾每 N 個 intel 觸發。
+
+    Inputs sourced from agent (best-effort, fail-soft) /
+    輸入從 agent 抓取（盡力而為、fail-soft）:
+      - ``consecutive_losses``：``agent._stats.get("consecutive_losses", 0)``
+        — pre-G8-01 stat 不存在 → 0；FUP G8-01-FUP-LOSSES-WIRING 接 fill-result event。
+        Pre-G8-01 the stat does not exist → 0; FUP wires fill-result event.
+      - ``weekly_net_pnl``：``agent.cost_tracker.get_h5_snapshot().get("paper_net_pnl_7d", 0.0)``
+        — cost_tracker 可為 None（test / fail-open）→ fallback 0.0。
+        cost_tracker may be None (test / fail-open) → fallback 0.0.
+      - ``regret_data`` / ``dream_data``：placeholder ``{}`` until OpportunityTracker /
+        DreamEngine wired (out of G8-01 scope per PM 2026-04-26 reframe).
+
+    Hard boundaries / 硬邊界 (CLAUDE.md §四):
+      - Pure read-only on agent.cost_tracker; no IPC / no DB write.
+        對 agent.cost_tracker 純唯讀；不發 IPC、不寫 DB。
+      - Wrapped in broad try/except + logger.warning (fail-closed per principle #6) —
+        modulator update is best-effort; failure must not poison handle_intel hot path.
+        外層 try/except + warning 記錄（原則 #6 fail-closed）— modulator update 屬
+        best-effort，失敗不可污染 handle_intel hot path。
+      - No state mutation on the agent itself — only modulator internal EMA / counters
+        advance, which are queried later via ``_apply_cognitive_modulation``.
+        不變更 agent 本身狀態 — 僅 modulator 內部 EMA / counter 前進，稍後由
+        ``_apply_cognitive_modulation`` 查詢使用。
+
+    Args:
+        agent: Live StrategistAgent instance (must have ``_cognitive_modulator`` /
+               ``_stats`` / ``cost_tracker`` attrs; None ``_cognitive_modulator``
+               makes this a fast no-op).
+               活的 StrategistAgent instance（必有 ``_cognitive_modulator`` /
+               ``_stats`` / ``cost_tracker`` 屬性；``_cognitive_modulator=None`` 則快速 no-op）。
+    """
+    modulator = getattr(agent, "_cognitive_modulator", None)
+    if modulator is None:
+        # No modulator wired — fast no-op (matches _apply_cognitive_modulation bypass).
+        # 未注入 modulator — 快速 no-op（與 _apply_cognitive_modulation bypass 對稱）。
+        return
+
+    try:
+        # consec_losses：StrategistAgent 內部統計，未來由 fill-result event 反饋接線。
+        # consec_losses: StrategistAgent internal stat, future fill-result event wiring.
+        try:
+            consec_losses = int(agent._stats.get("consecutive_losses", 0))
+        except Exception:
+            consec_losses = 0
+
+        # weekly_pnl：H5 SSOT 的 7d paper net PnL（cost_tracker 為 None 時 fallback 0.0）。
+        # weekly_pnl: H5 SSOT 7d paper net PnL (fallback 0.0 when cost_tracker is None).
+        weekly_pnl = 0.0
+        cost_tracker = getattr(agent, "cost_tracker", None)
+        if cost_tracker is not None:
+            try:
+                snapshot_fn = getattr(cost_tracker, "get_h5_snapshot", None)
+                if snapshot_fn is not None:
+                    snap = snapshot_fn() or {}
+                    weekly_pnl = float(snap.get("paper_net_pnl_7d", 0.0))
+            except Exception as snap_exc:
+                logger.debug(
+                    "cost_tracker.get_h5_snapshot failed in cognitive tick "
+                    "(non-fatal): %s / cost_tracker.get_h5_snapshot 失敗（非致命）：%s",
+                    snap_exc, snap_exc,
+                )
+
+        # Drive one EMA-smoothed update cycle. regret/dream remain placeholders until
+        # OpportunityTracker / DreamEngine production wiring lands (out of G8-01 scope).
+        # 驅動一個 EMA 平滑更新週期。regret/dream 維持 placeholder，待 OpportunityTracker /
+        # DreamEngine production 接線（不在 G8-01 scope）。
+        modulator.update(
+            consecutive_losses=consec_losses,
+            weekly_net_pnl=weekly_pnl,
+            regret_data={},
+            dream_data={},
+        )
+    except Exception as exc:
+        # Fail-closed (principle #6): modulator failure must not poison hot path.
+        # Fail-closed（原則 #6）：modulator 失敗不可污染 hot path。
+        logger.warning(
+            "tick_cognitive_modulator failed (non-fatal): %s / "
+            "認知調製 tick 失敗（非致命）：%s",
+            exc, exc,
+        )
