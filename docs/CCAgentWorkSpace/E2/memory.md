@@ -511,3 +511,25 @@
 3. **E1 偏離 PA 並寫明於 commit + 報告 §5.1** 是正確流程；E2 應驗 (a) 偏離真有必要 (b) functionally 對 (c) 替代是否更簡單；本案 (a)(b) yes，(c) 有但 acceptable to ship → PASS_WITH_NITS 而非 RETURN
 4. **「0 production change」refactor 必驗**：3 hint emit + 5-field schema + class identity 三項 bit-identical 全 grep + reproduce 比對
 5. **0 LOC 警告線雙標**：scout_agent 297 < 800 ok；maf 966 仍在 800-1200 警告區但本 PR 改善 -224 方向正確 → 不阻擋
+
+## 2026-04-28 G3-09-PHASE-B-FUP-STICKY-TS sticky `triggered_at_ms` review (worktree-aeb618f)
+
+PA single-shot fix to plug an INFO-level Phase A drift (advisor.rs docstring claimed sticky behavior that mod.rs daemon never implemented), prep-gate before Phase B Wave 1. Verdict: **PASS to E4 / 0 finding**.
+
+### 重點
+1. **4-arm exhaustive match `(prev, new)` audit**：對任何 7-variant `CostEdgeAdvisorStatus` 組合做窮舉 — `(Trigger,Trigger)` preserve / `(_,Trigger)` record / `(Trigger,_)` clear / `_` no-op；rust 編譯器 exhaustiveness check 過 = 0 silent fallthrough。Disabled/Stale/Anomaly/WarmUp 等罕見 prev/new 全在 wildcard arm 覆蓋。
+2. **Race window**：sticky + prev_status 都 task-local（daemon spawned future 內 `let mut`），單 owner，無共享 → 0 race；`evaluate() → sticky enforce → store_state` 順序保證 IPC 讀者不會看到 status/triggered_at_ms 不一致 torn state。
+3. **Pure fn 不變**：advisor.rs diff 僅 docstring 改動，evaluate() 簽名 / 邏輯 / arithmetic 零變動 → src/cost_edge_advisor/tests.rs 32 case 自動綠（lib 2290/0 baseline 維持）。
+4. **Test 設計嚴謹**：sticky 第二 test 用 `last_eval_ms` 嚴格遞增證實「真觀察到 ≥3 個不同 cycle」（防同 snapshot 採樣 3 次的偽證），triggered_at_ms 跨 cycle bit-equal 才 assert sticky 性質。第一 test wall-clock 視窗 `[before_spawn_ms, after_first_ms]` 緊但合理。
+5. **Daemon-restart limitation**：sticky state 不持久化，restart → episode boundary 重設；PA §8 已自承 acceptable，因為長期 audit 屬 Phase B Wave 1 V026 INSERT path scope。
+
+### Mac 實測
+- `cargo test --release -p openclaw_engine --test test_cost_edge_advisor_daemon` → **8/0**（6→8，+2 sticky tests both green）
+- `cargo test --release -p openclaw_engine --lib` → **2290/0**（baseline 不變）
+- `grep /home/ncyu /Users/[a-zA-Z]+` 4 modified files → 0 hit
+- File size：mod.rs 317 / advisor.rs 176 / types.rs 292，全 << 800 警戒線
+
+### 套用模式
+- **「PA 三角合一」prep-gate review**：PA 自設計 + 自寫碼 + 自寫測試 + 自跑驗證 → E2 主要驗 (a) 4-arm 完整性 (b) race window (c) test 對抗性 (d) baseline 不變；本 case 4 項全綠 → 0 finding PASS。
+- **「sticky semantics」 review pattern**：永遠驗「pure fn 對首次正確 / daemon 對連續 sticky / exit 必清零」三段；任何違反語意命名（field 名為「entry time」實際每 cycle 跳動）是 BLOCKER 級 design defect 而非 INFO，本 case 從 INFO 升 prep-gate 處理是正確判斷。
+- **Sub-agent 寫 ≤80 LOC sticky 邏輯 + ≥2 unit test**：對 task-local 變數 + 純 fn boundary clean 的 prep-gate 適用；若涉跨 thread shared state 必須再加 race / lock review。

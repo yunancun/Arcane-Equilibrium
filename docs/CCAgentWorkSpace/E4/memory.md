@@ -802,3 +802,12 @@ ssh trade-core "cd ~/BybitOpenClaw/srv && python3 helper_scripts/db/passive_wait
   - Linux git repo 在 `~/BybitOpenClaw/srv/` (not `~/BybitOpenClaw/`); venvs/ 只有 README + rust_build (no python venv); 用 system /usr/bin/python3
   - Healthcheck 跑前必 `set -a; source secrets/environment_files/{basic_system_services,trading_services}.env; set +a`，否則 PG no password fail
   - Mac 163 vs Linux 263 為 collection 差異（部分 parametrize 在 Mac 環境跳過），≥163 即達標非 regression
+
+## 2026-04-28 · G3-09-PHASE-B-FUP-SPAWN-TEST P3 — spawn-decision integration test
+
+- 派工：Phase B Wave 0 補哨兵；E2 INFO → P3 backlog；新增 ≥2 案例證 spawn-decision wrapper 行為。
+- 結構發現：spawn_cost_edge_advisor_if_enabled 在 binary crate (src/main_boot_tasks.rs, pub(crate))；integration test 在 tests/ 不能直呼。
+- 解法：用 wrapper 完全相同的 lib-public primitive 重現 (is_advisor_env_enabled + spawn_cost_edge_advisor + late-inject + state())；新增 ipc_handler_status_string helper 鏡射 handler 行 33-44 行為。
+- 新增 3 案例 (Case A env unset slot=None IPC=Uninitialized / B env=1 risk=false slot=Some IPC=Disabled / C env=1 risk=true slot=Some IPC=OK)；env mutex 序列化避 race。
+- Mac --release: test_cost_edge_advisor_daemon 6 → 9 cases 兩遍同綠 (2.10s/2.09s)；lib baseline 2290/0 不變。
+- 教訓：bin-only fn 的 spawn-decision integration test 需 wrapper-equivalent 重現策略，而非真的呼叫 wrapper（後者需 wrapper 升 pub 或測試移到 src/）。

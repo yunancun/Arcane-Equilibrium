@@ -799,3 +799,37 @@ W2 unit cov ≥85%（22 case，零 mock）+ W3 integration ≥5 case（7 留 buf
 ### 教訓（lessons.md candidate）
 
 「Phase 計畫的 line item 落地時要拆 trade-impact vs observability」— RFC §7.2 把 shadow IntentProcessor 與「觀察 advisor 行為」混在 Phase B 1.5d，落到具體實作才發現前者實質是 Phase C 一半工作量。下次寫 PA RFC §7.x 工時估算前，用「trade impact」 vs 「pure observability」做 binary 切，工時不混算。
+
+---
+
+## 2026-04-28 — G8-01-FUP-LOSSES-WIRING（P2 prep-gate for W2/W3）
+
+**Topic**：Wire `_stats["consecutive_losses"]` from trade outcome callback so `tick_cognitive_modulator` 真正收到非零輸入；解 RFC `2026-04-27--g8_01_cognitive_e2e_design.md` §3.1 acknowledged limitation。
+
+**模式**：3-合一（PA design + 直派 E1 + sanity test，主會話授權）。Scope 嚴格 bounded — 不碰 W2/W3、regret/dream placeholder、Rust IPC。
+
+### 決策摘要
+
+- **Wiring 模式**：Hybrid Option 1（in-process callback path）
+  - Analyst gains `set_strategist_loss_callback(Callable[[float], None])`，於 `analyze_trade` 內 fail-open invoke。
+  - Strategist gains `record_trade_outcome(net_pnl)` + `_stats["consecutive_losses"]` + `_stats["trade_outcomes_observed"]`。
+  - `strategy_wiring.py` 在 Batch-10 Analyst 重 init 後綁 lambda。
+- **Reject Option 2**（新 MessageType）— 擴 ALLOWED_FLOWS 矩陣，無功能優勢。
+- **Reject Option 3**（Rust IPC）— 違反 Python-as-SSOT-for-Strategist-stats、touch IPC schema 出 P2 scope。
+- **Reject Option 4**（subscribe ROUND_TRIP_COMPLETE）— 現場 0 producer（DEAD-PY-2 後 `pipeline_bridge.py` 已刪），會繼續 dead。
+- **Breakeven (net_pnl==0) 視為 loss**：per Principle #5（生存>利潤）+ #13（成本-edge 感知）—— fee-eaten trade 耗資本無 edge，正是 modulator 該調製場景。
+
+### 重要現場發現（archived dead path）
+
+- `MessageType.ROUND_TRIP_COMPLETE` 於 `multi_agent_framework.py:63` 仍定義，AnalystAgent.on_message 仍 dispatch，但 **Python production 0 producer**（`pipeline_bridge._emit_round_trip` 隨 DEAD-PY-2 已刪）；`WIRING_AUDIT_SUMMARY.txt:74`/`L1_01_TRADE_ATTRIBUTION_FIX_SUMMARY.md` 等審計引用全 stale。
+- 真實 live trade-outcome 入口 = Rust → IPC `analyst_evaluate(analysis_type="round_trip")` → `AIService._handle_analyst()` (`ai_service_dispatch.py:478`) → `analyst.analyze_trade(record)`。Hook 點選對。
+
+### 數字
+
+- 改動：3 files, +194 LOC business code（analyst +70 / strategist +79 / wiring +45）。
+- 測試：1 new file, 8 test cases, ~330 LOC test code。Mac pytest 8/8 + W1 6/6 + 相關套件 157/157 全綠。
+- §九 警告：strategist_agent.py 854→933（>800 警告線、<1200 硬上限）— 不本 FUP 拆，留 G3-08 Phase 5 未來處理。
+
+### 教訓（lessons.md candidate）
+
+**「派工前必先 grep『有沒有真實 producer』」**：原 spec 提的 Option 1（Strategist 直接訂 Fill 事件）+ Option 2（Analyst broadcast trade_outcome_processed）若不先 grep `MessageType.ROUND_TRIP_COMPLETE` 的真實 producer，可能設計出「訂閱 dead event 的 PR」浪費一輪 E1 工時。本 FUP 第一步 grep 一次就避開，省下 ~2-3 day rework。應該變成 PA RFC §2 (架構評估) 強制 checklist 一條：「列出 trigger event 的 production producer 與 mtime / 過去 7d 觸發次數」。
