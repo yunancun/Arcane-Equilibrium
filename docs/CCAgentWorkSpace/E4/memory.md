@@ -10,6 +10,33 @@
 
 ## 工作記憶
 
+### 2026-04-27 Live Auth Watcher event_consumer respawn fix 回歸驗證
+
+**結論：E4 PASS — 準備好 commit + push + rebuild**
+
+**Baseline：** Mac lib 2252 / 0 failed（與 Combined Wave 同一 commit；Linux main branch 已同步 2252 / 0）
+
+**兩遍測試結果（非 flaky 確認）：**
+| Run | lib | bin |
+|---|---|---|
+| 第一遍 | 2252 / 0 failed | 53 / 0 failed |
+| 第二遍 | 2252 / 0 failed | 53 / 0 failed |
+
+**6 項驗證全 PASS：**
+1. Mac lib 2252 / 0 ≥ baseline 2252 ✓
+2. Mac bin 53 / 0 ≥ baseline 53 ✓
+3. Linux baseline lib 2252 / 0（main branch，feature branch 尚未 push，Linux 端確認基線健在）✓
+4. happy path test `spawner_callback_invoked_and_handle_slot_populated_on_ok_some` 存在於 `live_auth_watcher_tests.rs:746` ✓（bin tests 中可見執行）
+5. `live_auth_watcher.rs` 975 行 < 1200 ✓；`main_pipelines.rs` 851 行 < 1200 ✓；`main.rs` 1194 行（介於 800 警告線與 1200 硬上限之間，WARN 不 FAIL）✓
+6. 硬編碼路徑 0 hit ✓
+
+**1 條 WARN（非阻塞）：**
+- `main.rs` 1194 行，接近 §九 1200 硬上限（差 6 行），建議下個 refactor wave 拆分，本 PR 範圍內不超限 OK
+
+**2 條教訓：**
+1. **bin tests 跑出 live_auth_watcher tests**：happy path test 是 bin-level integration test（`--bin openclaw-engine`），而非 `--lib`；E4 驗新測試存在性須同時查 lib + bin 兩個 binary 的輸出。
+2. **Linux baseline 與 Mac feature branch 同為 2252**：feature branch 改動（E1 加 1 個 happy path test）已讓 Mac bin 從 52→53，lib 因新 test 在 bin 而非 lib 路徑故不變。兩端 baseline 對齊無 delta。
+
 ### 2026-04-27 6 P0 PR Wave Combined Regression（F2/F3/F4/F5/F6/F7）
 
 **結論：E4 PASS — MERGE READY**
