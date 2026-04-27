@@ -954,6 +954,165 @@ class TestH4Snapshot(unittest.TestCase):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# TestStrategistSnapshot
+# G3-08 Phase 4 Sub-task 4-1: Strategist agent_state snapshot accessor (11 fields)
+# G3-08 Phase 4 Sub-task 4-1：Strategist agent 狀態 snapshot 存取器（11 欄位）
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class TestStrategistSnapshot(unittest.TestCase):
+    """G3-08 Phase 4 Sub-task 4-1: verify get_strategist_snapshot() returns
+    11-field dict per PA RFC §2.1, schema-parity with Rust
+    ``AgentState.stats: HashMap<String, i64>``.
+
+    G3-08 Phase 4 Sub-task 4-1：驗證 get_strategist_snapshot() 回傳 11-field
+    dict（PA RFC §2.1），schema 對齊 Rust ``AgentState.stats``。
+    """
+
+    _EXPECTED_FIELDS = {
+        "intel_received",
+        "intel_evaluated",
+        "intents_produced",
+        "intents_shadow_logged",
+        "evaluations_rejected",
+        "ai_evaluations",
+        "heuristic_evaluations",
+        "errors",
+        "pending_intents",
+        "emergency_mode_active",
+        "cognitive_modulator_connected",
+    }
+
+    def _make_agent(self) -> "StrategistAgent":
+        """Minimal StrategistAgent for snapshot tests / 給 snapshot 測試用的最小 agent."""
+        config = StrategistConfig(shadow=True, min_relevance=0.1)
+        return StrategistAgent(config=config)
+
+    def test_get_strategist_snapshot_initial_state(self):
+        """Fresh agent → all 11 counters 0; schema has exactly 11 keys.
+        新建 agent → 11 counters 皆 0；schema 恰 11 個 key。"""
+        agent = self._make_agent()
+        snap = agent.get_strategist_snapshot()
+        self.assertEqual(set(snap.keys()), self._EXPECTED_FIELDS)
+        for key in self._EXPECTED_FIELDS:
+            self.assertEqual(snap[key], 0, f"{key} must be 0 on fresh agent")
+            # All values must be int (Rust HashMap<String, i64> parity).
+            self.assertIsInstance(snap[key], int, f"{key} must be int")
+
+    def test_get_strategist_snapshot_returns_independent_dicts(self):
+        """Multiple calls return independent dict objects (no aliasing).
+        多次呼叫回獨立 dict（無別名）。"""
+        agent = self._make_agent()
+        a = agent.get_strategist_snapshot()
+        b = agent.get_strategist_snapshot()
+        self.assertIsNot(a, b)
+        a["intel_received"] = 999
+        self.assertEqual(b["intel_received"], 0)
+        c = agent.get_strategist_snapshot()
+        self.assertEqual(c["intel_received"], 0)
+
+    def test_get_strategist_snapshot_reflects_stats_increments(self):
+        """Counters in self._stats must reflect in snapshot output.
+        self._stats 中的計數器必須反映於 snapshot 輸出。"""
+        agent = self._make_agent()
+        with agent._lock:
+            agent._stats["intel_received"] = 7
+            agent._stats["intel_evaluated"] = 5
+            agent._stats["intents_produced"] = 3
+            agent._stats["evaluations_rejected"] = 2
+            agent._stats["ai_evaluations"] = 4
+            agent._stats["heuristic_evaluations"] = 1
+            agent._stats["errors"] = 0
+            agent._stats["intents_shadow_logged"] = 6
+        snap = agent.get_strategist_snapshot()
+        self.assertEqual(snap["intel_received"], 7)
+        self.assertEqual(snap["intel_evaluated"], 5)
+        self.assertEqual(snap["intents_produced"], 3)
+        self.assertEqual(snap["evaluations_rejected"], 2)
+        self.assertEqual(snap["ai_evaluations"], 4)
+        self.assertEqual(snap["heuristic_evaluations"], 1)
+        self.assertEqual(snap["intents_shadow_logged"], 6)
+
+    def test_get_strategist_snapshot_pending_intents_gauge(self):
+        """pending_intents reflects len(self._pending_intents).
+        pending_intents 反映 len(self._pending_intents)。"""
+        agent = self._make_agent()
+        # Simulate pending intents by appending raw items (test patches buffer).
+        # 模擬待處理 intents：直接 append（測試 patch 緩衝區）。
+        agent._pending_intents.extend(["i1", "i2", "i3"])  # type: ignore[list-item]
+        snap = agent.get_strategist_snapshot()
+        self.assertEqual(snap["pending_intents"], 3)
+
+    def test_get_strategist_snapshot_emergency_mode_bool_to_int(self):
+        """emergency_mode_active is 0 when off, 1 when set; always int.
+        emergency_mode_active：關閉=0、開啟=1；恆為 int。"""
+        agent = self._make_agent()
+        snap_off = agent.get_strategist_snapshot()
+        self.assertEqual(snap_off["emergency_mode_active"], 0)
+        self.assertIsInstance(snap_off["emergency_mode_active"], int)
+
+        agent._emergency_mode.set()
+        snap_on = agent.get_strategist_snapshot()
+        self.assertEqual(snap_on["emergency_mode_active"], 1)
+        self.assertIsInstance(snap_on["emergency_mode_active"], int)
+
+    def test_get_strategist_snapshot_cognitive_modulator_bool_to_int(self):
+        """cognitive_modulator_connected is 0 when None, 1 when set; always int.
+        cognitive_modulator_connected：None=0、注入=1；恆為 int。"""
+        agent = self._make_agent()
+        snap_off = agent.get_strategist_snapshot()
+        self.assertEqual(snap_off["cognitive_modulator_connected"], 0)
+        self.assertIsInstance(snap_off["cognitive_modulator_connected"], int)
+
+        agent._cognitive_modulator = MagicMock()
+        snap_on = agent.get_strategist_snapshot()
+        self.assertEqual(snap_on["cognitive_modulator_connected"], 1)
+        self.assertIsInstance(snap_on["cognitive_modulator_connected"], int)
+
+    def test_invalidate_hooks_present_on_intel_path(self):
+        """G3-08 Phase 4 Sub-task 4-1: _handle_intel must invoke
+        _invalidate_h_state_async("agent.strategist.intel_handled") after
+        intel processing. env=0 keeps it a no-op so we patch and observe.
+        G3-08 Phase 4 Sub-task 4-1：_handle_intel 處理完成後須呼叫
+        _invalidate_h_state_async("agent.strategist.intel_handled")；env=0
+        為 no-op 故以 patch 觀察。
+        """
+        agent = self._make_agent()
+        intel_msg = AgentMessage(
+            sender=AgentRole.SCOUT,
+            receiver=AgentRole.STRATEGIST,
+            message_type=MessageType.INTEL_OBJECT,
+            priority=3,
+            payload={
+                "intel_id": "test-intel-1",
+                "source": "test",
+                "timestamp_ms": 0,  # ancient → reject path still ok for hook test
+                "freshness_seconds": 1,
+                "data_quality": "fact",
+                "sentiment": "positive",
+                "relevance_score": 0.9,
+                "content": "test",
+                "symbols": ["BTCUSDT"],
+                "metadata": {},
+            },
+        )
+        # Intel age is computed from now - timestamp_ms; we want intel_evaluated
+        # to increment to ensure the hook is reached, so use a fresh timestamp.
+        # intel age 由 now - timestamp_ms 計算；確保 intel_evaluated 遞增以
+        # 觸達 hook，須用近期 timestamp。
+        from app.utils.time_utils import now_ms
+        intel_msg.payload["timestamp_ms"] = now_ms()
+
+        with patch("app.strategist_agent._invalidate_h_state_async") as mock_inv:
+            agent._handle_intel(intel_msg)
+        # Look for at least one call with "agent.strategist.intel_handled".
+        # 至少一次呼叫帶 "agent.strategist.intel_handled"。
+        called_reasons = [c.args[0] for c in mock_inv.call_args_list if c.args]
+        self.assertIn("agent.strategist.intel_handled", called_reasons,
+                      "Expected agent.strategist.intel_handled hint after _handle_intel")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # TestCostTrackerOllama
 # Sprint 5b-2/6: H5 CostLogger — record_ollama_call / get_cost_edge_ratio 測試
 # ═══════════════════════════════════════════════════════════════════════════════

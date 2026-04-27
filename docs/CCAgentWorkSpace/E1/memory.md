@@ -1103,3 +1103,73 @@ class（持 lock / 持久化 state）拆分是合適選擇：
   #1 規定「保持 hot-path 行為一致」，長期看可考慮 pre-import + `asyncio.run` 改 thread-pool
   pattern；屬 G3-08 Phase 5 範圍非本 ticket。
 - G3-09 cost_edge_ratio threshold check 落點在 `layer2_adaptive.py`，docstring 已預留 hook。
+
+---
+
+## 2026-04-27 G3-08 Phase 4 Sub-task 4-1：Strategist agent_state events
+
+### 任務
+G3-08 Phase 4 拆 5 sub-task（per agent 1 個）。本 4-1 = Strategist agent state
+接線到 Rust h_state_cache gateway，Pattern 鏡 Phase 3 H bucket。STRATEGIST-SPLIT
+（commit `afce487` / 6fac0ca）已 land 為前置硬依賴。
+
+### 改動範圍（純 Python，0 Rust）
+- **`app/strategist_agent.py`** (792 → **829 LOC**):
+  - 新增 `from .h_state_invalidator import invalidate_async as _invalidate_h_state_async`
+    （Phase 3 sibling `strategist_edge_eval.py` 已有同 import；本檔新增以給主檔
+    orchestrator 進入點 _handle_intel / _produce_intents 用，避免跨模組呼叫）
+  - 新增 `get_strategist_snapshot()` method — 11 fields per PA RFC §2.1（Rust
+    `AgentState.stats: HashMap<String, i64>` parity；全 int 或 bool→int）
+  - `_handle_intel()` 結尾（在 `intel_evaluated += 1` 之後、log_eval 之前）+
+    `_invalidate_h_state_async("agent.strategist.intel_handled")`
+  - `_produce_intents()` for-loop 之外、function 結尾 +
+    `_invalidate_h_state_async("agent.strategist.intent_produced")`
+  - 兩 hook 皆於 self._lock 之外觸發（per High-risk warning #1）
+- **`app/h_state_query_handler.py`** (636 → **772 LOC**):
+  - 新增 `_collect_agent_snapshots(include_strategist, include_guardian, include_analyst,
+    include_executor, include_scout)` 採 PA RFC §3.2 **Option B**（回 dict，加性
+    forward-compat）。本 sub-task 只填 strategist key，其他 4 留 None
+  - `build_h_state_full_response()` 加 5 個 `include_*` agent flag + `agent_states` bucket
+    population；version bump 規則升級為「`h_states` OR `agent_states` 任一為真即升 1」
+- **`tests/test_strategist_agent.py`**: +7 tests（TestStrategistSnapshot class — 11-field
+  schema + bool→int + pending_intents gauge + invalidate hook MagicMock 觀察）
+- **`tests/test_h_state_query_handler.py`**: +9 tests（TestStrategistAgentStateIntegration
+  3 + TestStrategistAgentStateIncludeFilter 4 + TestCollectAgentSnapshotsDefensive 2）+
+  `_FakeStrategist` 加 `with_strategist_snapshot` opt-in
+- **本地 pytest 驗證**：48/0 strategist + 61/0 query_handler + 99/0 strategist-importing
+  全綠（Mac dev-only，含 +16 新測）
+
+### LOC 警告（向 PM 提示）
+- `strategist_agent.py` 最終 **829 LOC**，**超 §七 800 警告線 29 LOC**（distance 約 4%）。
+- prompt 完成標準寫「如超 800 必停下報 PM」嚴於 §七「800 = E2 標記、1200 = 不可 merge」。
+- 我已壓縮注釋（移除冗餘 docstring 細節）但 11-field dict literal + 必要的雙語 module-level
+  注釋無法再縮。
+- PA RFC §5.1 估「710 + 60 = 770」基於假設 split 後主檔 710 LOC，但實際 split commit
+  `6fac0ca` 落地時主檔已 792 LOC（estimate 偏低 82 LOC）。
+- **建議 PM/PA**：(a) 接受 800–830 範圍視為 §七 警告線臨界、E2 review 加註備案；或 (b)
+  下一輪 Wave 排 G3-08-FUP-STRATEGIST-DELEGATOR-SLIM（把 16 個 1-line backward-compat
+  delegators 拆到 sibling stub，主檔降至 ~750 LOC）。本 sub-task 不做以避擴大範圍。
+
+### Pattern 教訓
+1. **Hook 須於 lock 外觸發**：High-risk warning #1 提示「中段加會 race condition with
+   `with self._lock` block」。實作時把 `_invalidate_h_state_async()` 放在 `with self._lock:`
+   block 之外（之後）；hook 函式內部本身為 fire-and-forget daemon thread，rely on lock
+   會 deadlock daemon。
+2. **Per-batch hook 而非 per-symbol**：`_produce_intents` for-loop 處理多 symbol；hook
+   放 loop 外、function 結尾，每 intel 一次提示，避 multi-symbol intel 對 daemon
+   spawn rate >50/sec（per Phase 1 risk 8.2）。
+3. **Option B（dict 回值）優於 tuple**：per PA RFC §3.2 — 5-tuple 已醜，加 5 agent 變 10-tuple
+   無法維護。Sub-task 4-2/3/4/5 加 arm 為 dict 加 key，零 caller signature break。
+4. **`_safe_snapshot_self` 復用**：H4 caller-side pattern 已有，Sub-task 4-1 直用，
+   無需新 helper。Sub-task 4-2/3/4/5 同樣以此 helper 取 agent SSOT。
+5. **opt-in fixture pattern**：`_FakeStrategist(with_strategist_snapshot=True)` 沿襲
+   `with_h4` / `with_h5` 模式 — 預設 False 確保 Phase 1-3 既有 ~50 tests 不受影響。
+
+### 開放項
+- Sub-task 4-2（Guardian）/ 4-3（Analyst）/ 4-4（Executor）/ 4-5（Scout）並行可
+  dispatch — 主檔不衝突；`_collect_agent_snapshots` arm 為加性 dict op，後 commit
+  rebase 自動合併。
+- Analyst 主檔 pre-Sub-task-4-3 已 834 LOC（已過 §七 800），4-3 land 後 ~860；
+  PA RFC §5.1 已建議 backlog G3-08-FUP-ANALYST-SPLIT（與本 4-1 LOC 警告同類問題）。
+- multi_agent_framework.py 1137 + 4-5 預估 +27 = 1164，距 §九 1200 hard cap 僅 36
+  LOC headroom；PA RFC 已建議 G3-08-FUP-MAF-SPLIT 把 ScoutAgent 拆獨立檔。
