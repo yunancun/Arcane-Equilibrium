@@ -22,6 +22,7 @@
 | 2026-04-24 | 04-01 ~ 04-24 窗口重複/合併/死文件審計（539 .md + 52 .claude_reports） | `docs/CCAgentWorkSpace/TW/workspace/reports/2026-04-24--file_dedup_merge_audit_apr01_apr24.md` |
 | 2026-04-26 | G9-01 Bybit dict confirm-mmr 路徑修正 + SSOT 標記（Tier 1 quick fix · Wave 4 G9 series） | inline final message（不寫 report file）|
 | 2026-04-26 | G9-05 L-2~L-5 字典補錄 — **PUSH-BACK / 任務假設不成立** | inline final message（不寫 report file）|
+| 2026-04-27 | LIVE-AUTH-WATCHER-EVENT-CONSUMER-SPAWN 工程日誌（P0 Silent Regression · 8d event_consumer missing） | `docs/worklogs/2026-04-27--live_auth_watcher_event_consumer_spawn_fix.md` |
 
 ## G9-05 push-back 重點記錄（2026-04-26）
 
