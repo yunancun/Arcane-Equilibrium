@@ -413,16 +413,16 @@ def _collect_agent_snapshots(
     """Lazy-import strategy_wiring and pull 5-Agent state snapshots.
     延遲 import strategy_wiring 並拉取 5-Agent 狀態 snapshot。
 
-    G3-08 Phase 4 Sub-task 4-1 lands the ``strategist`` key; subsequent
-    Sub-tasks 4-2 / 4-3 / 4-4 / 4-5 incrementally fill ``guardian`` /
-    ``analyst`` / ``executor`` / ``scout``. Pattern (PA RFC §3.2 Option B):
-    return ``dict[str, Optional[dict]]`` rather than a tuple so that adding
-    a sub-task arm is purely additive — no caller signature break across
-    the multi-agent merge wave.
-    G3-08 Phase 4 Sub-task 4-1 落 ``strategist`` 鍵；後續 4-2/3/4/5 sub-task
-    依序填 ``guardian`` / ``analyst`` / ``executor`` / ``scout``。Pattern
-    （PA RFC §3.2 Option B）：回 ``dict`` 而非 tuple，新增 sub-task arm 為
-    純加性，跨 sub-task 合併不破壞 caller signature。
+    G3-08 Phase 4 Sub-task 4-1 lands the ``strategist`` key; Sub-task 4-2
+    lands ``guardian``; subsequent Sub-tasks 4-3 / 4-4 / 4-5 incrementally
+    fill ``analyst`` / ``executor`` / ``scout``. Pattern (PA RFC §3.2
+    Option B): return ``dict[str, Optional[dict]]`` rather than a tuple so
+    that adding a sub-task arm is purely additive — no caller signature
+    break across the multi-agent merge wave.
+    G3-08 Phase 4 Sub-task 4-1 落 ``strategist`` 鍵；Sub-task 4-2 落
+    ``guardian``；後續 4-3/4/5 依序填 ``analyst`` / ``executor`` /
+    ``scout``。Pattern（PA RFC §3.2 Option B）：回 ``dict`` 而非 tuple，
+    新增 sub-task arm 為純加性，跨 sub-task 合併不破壞 caller signature。
 
     Returns dict with five canonical agent keys; ``None`` value when:
       - the corresponding ``include_*`` flag is False, or
@@ -492,11 +492,24 @@ def _collect_agent_snapshots(
                 strategist, "get_strategist_snapshot"
             )
 
-    # G3-08 Phase 4 Sub-task 4-2 / 4-3 / 4-4 / 4-5 will fill the remaining
-    # four buckets (Guardian / Analyst / Executor / Scout). Their arms land
+    if include_guardian:
+        # G3-08 Phase 4 Sub-task 4-2: pull GuardianAgent.get_guardian_snapshot
+        # via _safe_snapshot_self — accessor lives on the agent itself
+        # (same SSOT pattern as Strategist 4-1).
+        # G3-08 Phase 4 Sub-task 4-2：透過 _safe_snapshot_self 拉取
+        # GuardianAgent.get_guardian_snapshot — accessor 在 agent 自身
+        # （與 Strategist 4-1 同 SSOT pattern）。
+        guardian = getattr(_sw, "GUARDIAN_AGENT", None)
+        if guardian is not None:
+            result["guardian"] = _safe_snapshot_self(
+                guardian, "get_guardian_snapshot"
+            )
+
+    # G3-08 Phase 4 Sub-task 4-3 / 4-4 / 4-5 will fill the remaining
+    # three buckets (Analyst / Executor / Scout). Their arms land
     # additively in this same function — no signature change required.
-    # Sub-task 4-2/3/4/5 會於本 function 加入 Guardian / Analyst / Executor /
-    # Scout arm；加性不改 signature。
+    # Sub-task 4-3/4/5 會於本 function 加入 Analyst / Executor / Scout
+    # arm；加性不改 signature。
 
     return result
 
@@ -669,12 +682,12 @@ def build_h_state_full_response(
         include_h4 = True
         include_h5 = True
         # G3-08 Phase 4: default include selects every available agent bucket;
-        # Sub-task 4-1 fills strategist now, 4-2/3/4/5 fill the rest. Until
-        # those land the unfilled keys silently degrade to None and are
-        # dropped from agent_states (same shape as H bucket missing).
+        # Sub-task 4-1 fills strategist, 4-2 fills guardian, 4-3/4/5 fill the
+        # rest. Until those land the unfilled keys silently degrade to None
+        # and are dropped from agent_states (same shape as H bucket missing).
         # G3-08 Phase 4：預設 include 涵蓋全部 agent 桶；Sub-task 4-1 填
-        # strategist，其他 4 個由後續 sub-task 填，未 land 前靜默退化為 None
-        # 並從 agent_states 丟出（與 H 桶缺席同形狀）。
+        # strategist，4-2 填 guardian，其他 3 個由後續 sub-task 填，未 land
+        # 前靜默退化為 None 並從 agent_states 丟出（與 H 桶缺席同形狀）。
         include_strategist = True
         include_guardian = True
         include_analyst = True
@@ -727,11 +740,11 @@ def build_h_state_full_response(
     if h5_dict is not None:
         h_states["h5"] = h5_dict
 
-    # G3-08 Phase 4 Sub-task 4-1: aggregate 5-Agent state snapshots.
+    # G3-08 Phase 4 Sub-task 4-1/4-2: aggregate 5-Agent state snapshots.
     # Returns a dict keyed by canonical agent name; ``None`` value signals
     # "not available" (sub-task not yet landed / singleton not wired /
     # accessor raised) and is dropped from the wire response below.
-    # G3-08 Phase 4 Sub-task 4-1：聚合 5-Agent 狀態 snapshot。
+    # G3-08 Phase 4 Sub-task 4-1/4-2：聚合 5-Agent 狀態 snapshot。
     # dict key = canonical agent name；``None`` 表示「不可得」（sub-task
     # 未 land / singleton 未接線 / accessor 拋例外），下方從 wire response 丟出。
     agent_dict_map = _collect_agent_snapshots(
