@@ -300,5 +300,110 @@ class TestAnalystMessageHandling(unittest.TestCase):
         self.assertEqual(agent.get_stats()["trades_analyzed"], 1)
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# TestAnalystSnapshot
+# G3-08 Phase 4 Sub-task 4-3: Analyst agent_state snapshot accessor (5 fields)
+# G3-08 Phase 4 Sub-task 4-3：Analyst agent 狀態 snapshot 存取器（5 欄位）
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class TestAnalystSnapshot(unittest.TestCase):
+    """G3-08 Phase 4 Sub-task 4-3: verify get_analyst_snapshot() returns
+    5-field dict per PA RFC §2.3, schema-parity with Rust
+    ``AgentState.stats: HashMap<String, i64>``.
+
+    G3-08 Phase 4 Sub-task 4-3：驗證 get_analyst_snapshot() 回傳 5-field
+    dict（PA RFC §2.3），schema 對齊 Rust ``AgentState.stats``。
+    """
+
+    _EXPECTED_FIELDS = {
+        "trades_analyzed",
+        "l1_updates",
+        "l2_analyses",
+        "errors",
+        "experiment_ledger_connected",
+    }
+
+    def test_get_analyst_snapshot_initial_state(self):
+        """Fresh agent → all 5 counters 0; schema has exactly 5 keys.
+        新建 agent → 5 counters 皆 0；schema 恰 5 個 key。"""
+        agent = AnalystAgent()
+        snap = agent.get_analyst_snapshot()
+        self.assertEqual(set(snap.keys()), self._EXPECTED_FIELDS)
+        for key in self._EXPECTED_FIELDS:
+            self.assertEqual(snap[key], 0, f"{key} must be 0 on fresh agent")
+            # All values must be int (Rust HashMap<String, i64> parity).
+            self.assertIsInstance(snap[key], int, f"{key} must be int")
+
+    def test_get_analyst_snapshot_returns_independent_dicts(self):
+        """Multiple calls return independent dict objects (no aliasing).
+        多次呼叫回獨立 dict（無別名）。"""
+        agent = AnalystAgent()
+        a = agent.get_analyst_snapshot()
+        b = agent.get_analyst_snapshot()
+        self.assertIsNot(a, b)
+        a["trades_analyzed"] = 999
+        self.assertEqual(b["trades_analyzed"], 0)
+        c = agent.get_analyst_snapshot()
+        self.assertEqual(c["trades_analyzed"], 0)
+
+    def test_get_analyst_snapshot_reflects_stats_increments(self):
+        """analyze_trade() must bump trades_analyzed + l1_updates in snapshot.
+        analyze_trade() 必須讓 snapshot 中 trades_analyzed + l1_updates 遞增。"""
+        agent = AnalystAgent()
+        agent.start()
+        record = TradeRecord(
+            trade_id="t-snap-1",
+            symbol="BTCUSDT",
+            strategy="grid_trading",
+            direction="long",
+            entry_price=60000.0,
+            exit_price=60100.0,
+            pnl=0.001,
+            hold_ms=1000,
+            regime="trending",
+            timestamp_ms=int(time.time() * 1000),
+        )
+        agent.analyze_trade(record)
+        snap = agent.get_analyst_snapshot()
+        self.assertEqual(snap["trades_analyzed"], 1)
+        self.assertEqual(snap["l1_updates"], 1)
+        self.assertEqual(snap["errors"], 0)
+
+    def test_get_analyst_snapshot_experiment_ledger_flag(self):
+        """experiment_ledger_connected reflects whether set_experiment_ledger
+        injected a non-None ledger; bool→int (0 or 1).
+        experiment_ledger_connected 反映 set_experiment_ledger 是否注入非 None
+        ledger；bool→int（0 或 1）。"""
+        agent = AnalystAgent()
+        # No ledger injected → 0.
+        self.assertEqual(agent.get_analyst_snapshot()["experiment_ledger_connected"], 0)
+        # Inject a stub ledger → 1.
+        agent.set_experiment_ledger(MagicMock())
+        snap = agent.get_analyst_snapshot()
+        self.assertEqual(snap["experiment_ledger_connected"], 1)
+        self.assertIsInstance(snap["experiment_ledger_connected"], int)
+        # Reset to None → back to 0.
+        agent.set_experiment_ledger(None)
+        self.assertEqual(agent.get_analyst_snapshot()["experiment_ledger_connected"], 0)
+
+    def test_get_analyst_snapshot_error_path_increments_errors(self):
+        """_handle_round_trip exception path bumps errors counter; snapshot
+        observable in same metric. _handle_round_trip 例外路徑遞增 errors。"""
+        agent = AnalystAgent()
+        agent.start()
+        # Malformed payload: entry_price is non-numeric → float() raises.
+        msg = AgentMessage(
+            sender=AgentRole.EXECUTOR,
+            receiver=AgentRole.ANALYST,
+            message_type=MessageType.ROUND_TRIP_COMPLETE,
+            payload={"trade_id": "bad", "entry_price": "not_a_number"},
+        )
+        agent.on_message(msg)
+        snap = agent.get_analyst_snapshot()
+        self.assertEqual(snap["errors"], 1)
+        self.assertEqual(snap["trades_analyzed"], 0)
+
+
 if __name__ == "__main__":
     unittest.main()
