@@ -15,6 +15,20 @@ MODULE_NOTE (中文):
   §14.1 重構：H1 ThoughtGate / H3 ModelRouter / H4 Validator 已拆分到同目錄獨立模組，
   本文件僅保留編排邏輯（orchestrator）和策略偏好/regime 權重管理。
 
+  G3-08 Phase 4 重構（2026-04-26）：
+    本檔再拆 16 method 至 3 sibling 以維持 §九 800 行警告線：
+      - strategist_edge_eval.py：6 fn（_evaluate_edge / _ai_evaluate /
+        _evaluate_edge_l1_5 / _build_prompt_context / _process_knowledge_update /
+        _build_route_context）
+      - strategist_weights.py：6 fn（set_budget_manager / set_truth_registry /
+        _apply_pattern_insight / get_strategy_weight / _apply_regime_weights /
+        _apply_l2_weight_update）
+      - strategist_cognitive.py：4 fn（handle_fast_channel / clear_emergency_mode /
+        set_cognitive_modulator / _apply_cognitive_modulation）
+    全部 16 method 在本檔保留為 1-line delegator，向後兼容所有 callsite + test
+    patch path。主檔保留 ctor / class attrs / 生命週期 / 消息處理 / _handle_intel
+    編排 / _produce_intents / status accessors / 既有 BWD compat（H1/H4/H3 stubs）。
+
   安全不變量：
   - system_mode = read_only 不變
   - fail-closed：異常時默認拒絕
@@ -34,6 +48,16 @@ MODULE_NOTE (English):
   same-directory modules. This file is now a thin orchestrator plus strategy
   preference / regime weight management.
 
+  G3-08 Phase 4 refactor (2026-04-26):
+    Further split 16 methods into 3 siblings to keep §九 800-line warning line:
+      - strategist_edge_eval.py: 6 fn (edge evaluation + prompt construction)
+      - strategist_weights.py: 6 fn (weight management + dependency injection)
+      - strategist_cognitive.py: 4 fn (V2 fast channel + cognitive modulator)
+    All 16 methods preserved here as 1-line delegators for backward compatibility
+    with every callsite + test patch path. Main file keeps ctor / class attrs /
+    lifecycle / message handlers / _handle_intel orchestration / _produce_intents /
+    status accessors / existing BWD compat (H1/H4/H3 stubs).
+
   Safety invariants:
   - system_mode = read_only (unchanged)
   - fail-closed: reject by default on error
@@ -43,10 +67,8 @@ MODULE_NOTE (English):
 
 from __future__ import annotations
 
-import json
 import logging
 import threading
-import time
 import uuid
 import warnings
 from typing import Any, Callable, Dict, List, Optional
@@ -56,8 +78,6 @@ from .h1_thought_gate import H1ThoughtGate
 from .h4_validator import validate_ai_output
 # G3-08 Phase 3 Sub-task 3-2 — H4 invalidation hint, env-gated no-op when off.
 # G3-08 Phase 3 Sub-task 3-2 — H4 失效提示，env 關閉時 no-op。
-from .h_state_invalidator import invalidate_async as _invalidate_h_state_async
-from .llm_call_wrapper import call_ollama_judge_edge, ollama_is_available
 from .model_router import ModelRouter
 from .multi_agent_framework import (
     AgentMessage,
@@ -69,12 +89,35 @@ from .multi_agent_framework import (
     MessageType,
     TradeIntent,
 )
-from .strategist_fast_channel import build_emergency_intents
+# G3-08 Phase 4 — sibling re-exports for backward compatibility.
+# G3-08 Phase 4 — sibling 重新導出以維持向後兼容。
+from .strategist_cognitive import (  # noqa: F401 — re-export for tests / patches
+    _apply_cognitive_modulation as _sc_apply_cognitive_modulation,
+    clear_emergency_mode as _sc_clear_emergency_mode,
+    handle_fast_channel as _sc_handle_fast_channel,
+    set_cognitive_modulator as _sc_set_cognitive_modulator,
+)
+from .strategist_edge_eval import (  # noqa: F401 — re-export for tests / patches
+    _ai_evaluate as _se_ai_evaluate,
+    _build_prompt_context as _se_build_prompt_context,
+    _build_route_context as _se_build_route_context,
+    _evaluate_edge as _se_evaluate_edge,
+    _evaluate_edge_l1_5 as _se_evaluate_edge_l1_5,
+    _process_knowledge_update as _se_process_knowledge_update,
+)
 from .strategist_models import (  # noqa: F401 — re-export for backward compatibility
     EdgeEvaluation,
     StrategistConfig,
     _heuristic_evaluate,
     _parse_sentiment,
+)
+from .strategist_weights import (  # noqa: F401 — re-export for tests / patches
+    _apply_l2_weight_update as _sw_apply_l2_weight_update,
+    _apply_pattern_insight as _sw_apply_pattern_insight,
+    _apply_regime_weights as _sw_apply_regime_weights,
+    get_strategy_weight as _sw_get_strategy_weight,
+    set_budget_manager as _sw_set_budget_manager,
+    set_truth_registry as _sw_set_truth_registry,
 )
 from .utils.time_utils import now_ms
 
@@ -104,10 +147,12 @@ class StrategistAgent(BaseAgent):
     - H1ThoughtGate: pre-AI deterministic gate (budget/complexity/cooldown)
     - ModelRouter: H3 model tier routing + L2 background evaluation + L2 cache
     - h4_validator.validate_ai_output: H4 AI output structure validation
+    - strategist_edge_eval / strategist_weights / strategist_cognitive (G3-08 Phase 4)
     委託模組：
     - H1ThoughtGate：AI 前確定性閘門（預算/複雜度/冷卻期）
     - ModelRouter：H3 模型層路由 + L2 後台評估 + L2 快取
     - h4_validator.validate_ai_output：H4 AI 輸出結構驗證
+    - strategist_edge_eval / strategist_weights / strategist_cognitive（G3-08 Phase 4）
     """
 
     # E5-P1-4: class-level role so BaseAgent sees correct value pre-__init__.
@@ -574,435 +619,68 @@ class StrategistAgent(BaseAgent):
             logger.info("StrategistAgent shadow mode OFF / 策略師影子模式關閉")
         self._audit("directive_received", message.payload)
 
+    # ──────────────────────────────────────────────────────────────────────
+    # Sibling delegators (G3-08 Phase 4)
+    # Sibling 委託器（G3-08 Phase 4）
+    # ──────────────────────────────────────────────────────────────────────
+    # All 16 method bodies live in 3 sibling modules:
+    #   strategist_edge_eval.py / strategist_weights.py / strategist_cognitive.py
+    # Methods below preserve original signatures so all callsites + test patch
+    # paths via app.strategist_agent.* keep working.
+    # 所有 16 method body 移至 3 個 sibling 模組，本檔保留原 signature 1-line
+    # delegator，向後兼容所有 callsite + test patch path。
+
     # ── Truth Registry + Strategy Preference Weights ──
 
     def set_budget_manager(self, budget_manager: Any) -> None:
-        """
-        Inject APIBudgetManager for L1.5/L2 budget checking.
-        注入 APIBudgetManager 用於 L1.5/L2 預算檢查。
-
-        Wires up a lambda budget_checker into ModelRouter so that route()
-        can gate L1.5/L2 upgrades based on remaining API budget.
-        將 lambda 預算檢查器接入 ModelRouter，使 route() 可根據剩餘
-        API 預算閘控 L1.5/L2 升級。
-        """
-        self._budget_manager = budget_manager
-        self._model_router.set_budget_checker(
-            lambda tier: budget_manager.can_call(tier)
-        )
-        logger.info("APIBudgetManager injected into StrategistAgent / API 預算管理器已注入")
+        """Backward-compatible delegator to strategist_weights / 向後兼容委託"""
+        return _sw_set_budget_manager(self, budget_manager)
 
     def set_truth_registry(self, registry: Any) -> None:
-        """
-        Inject TruthSourceRegistry for pattern-driven strategy weight updates.
-        注入知識登記表，供模式洞察更新策略偏好權重使用。
-
-        Principle 7: registry only influences recommendation weights,
-        never modifies strategy parameters or risk thresholds directly.
-        原則 7：登記表只影響建議權重，不直接修改策略參數或風控閾值。
-        """
-        self._truth_registry = registry
+        """Backward-compatible delegator to strategist_weights / 向後兼容委託"""
+        return _sw_set_truth_registry(self, registry)
 
     def _apply_pattern_insight(self, insight_payload: dict) -> None:
-        """
-        Apply pattern insight to update strategy preference weights.
-        將模式洞察應用到策略偏好權重更新。
-
-        Queries active claims from registry, adjusts weights by ±0.1 × confidence,
-        clamped to [0.2, 2.0]. Fail-open: any error → log warning, leave weights unchanged.
-        從登記表查詢有效聲明，按 ±0.1×信度調整權重，限幅 [0.2, 2.0]。
-        失敗開放：任何異常 → 記錄警告，不改變現有權重。
-        """
-        if self._truth_registry is None:
-            return
-        try:
-            claims = self._truth_registry.get_active_claims(
-                regime=None, min_confidence=0.5
-            )
-            for claim in claims:
-                strategy = claim.applies_to_strategy
-                if strategy == "all":
-                    continue
-                current = self._strategy_preference_weights.get(strategy, 1.0)
-                delta = 0.1 * claim.confidence
-                if "losing" in claim.pattern_text.lower():
-                    delta = -delta
-                new_weight = max(0.2, min(2.0, current + delta))
-                self._strategy_preference_weights[strategy] = new_weight
-        except Exception as e:
-            logger.warning("_apply_pattern_insight failed (fail-open): %s", e)
+        """Backward-compatible delegator to strategist_weights / 向後兼容委託"""
+        return _sw_apply_pattern_insight(self, insight_payload)
 
     def get_strategy_weight(self, strategy_name: str) -> float:
-        """
-        0A-1: Return the current preference weight for a strategy.
-        返回某策略的當前偏好權重。
-
-        Used by PipelineBridge to apply learning feedback to strategy signals.
-        Normalizes strategy name for lookup (strips symbol suffix, lowercases).
-        供 PipelineBridge 在策略信號上應用學習反饋。
-        對策略名稱標準化（去除 symbol 後綴，小寫化）。
-
-        Args:
-            strategy_name: Strategy identifier (e.g. "MACrossover_BTCUSDT" or "ma_crossover").
-
-        Returns:
-            Weight in [0.2, 2.0]. Default 1.0 (neutral) if no pattern data.
-        """
-        # Normalize: strip symbol suffix (e.g. "MACrossover_BTCUSDT" → "macrossover")
-        # 標準化：去除 symbol 後綴
-        base_name = strategy_name.split("_")[0].lower() if strategy_name else ""
-        # Also try common name mappings / 嘗試常見名稱映射
-        name_variants = [
-            strategy_name,
-            base_name,
-            strategy_name.lower(),
-        ]
-        with self._lock:
-            for variant in name_variants:
-                w = self._strategy_preference_weights.get(variant)
-                if w is not None:
-                    return w
-        return 1.0
+        """Backward-compatible delegator to strategist_weights / 向後兼容委託"""
+        return _sw_get_strategy_weight(self, strategy_name)
 
     def _apply_regime_weights(self, regime: str) -> None:
-        """
-        C4: Apply regime-aware strategy preference multipliers.
-        C4: 應用 regime 感知策略偏好倍率。
-
-        Resets all weights to 1.0 then applies new regime multipliers to prevent
-        oscillation drift from repeated multiply→clamp cycles.
-        重置所有權重為 1.0 再應用新 regime 倍率，防止反覆 multiply→clamp 漂移。
-        """
-        self._current_regime = regime
-        prefs = self._REGIME_STRATEGY_PREFERENCES.get(regime, {})
-        if not prefs:
-            return
-
-        try:
-            with self._lock:
-                for key in self._strategy_preference_weights:
-                    self._strategy_preference_weights[key] = 1.0
-                for strategy_name, multiplier in prefs.items():
-                    new_weight = max(0.2, min(2.0, multiplier))
-                    self._strategy_preference_weights[strategy_name] = new_weight
-            logger.debug(
-                "C4: Regime weights applied for regime=%s: %s / "
-                "Regime 權重已應用：regime=%s",
-                regime, prefs, regime,
-            )
-        except Exception as e:
-            logger.warning("_apply_regime_weights failed (fail-open): %s", e)
+        """Backward-compatible delegator to strategist_weights / 向後兼容委託"""
+        return _sw_apply_regime_weights(self, regime)
 
     def _apply_l2_weight_update(self, intel: Any, evaluation: EdgeEvaluation) -> None:
-        """
-        Update strategy preference weights based on high-confidence L2 evaluation.
-        根據高信心 L2 評估更新策略偏好權重。
+        """Backward-compatible delegator to strategist_weights / 向後兼容委託"""
+        return _sw_apply_l2_weight_update(self, intel, evaluation)
 
-        Called by ModelRouter as weight_update_fn callback when L2 result has
-        has_edge=True and confidence >= 0.6. Weight adjustment ±0.15, clamped [0.2, 2.0].
-        由 ModelRouter 作為 weight_update_fn 回調調用。權重調整 ±0.15，限幅 [0.2, 2.0]。
-        """
-        try:
-            for symbol in getattr(intel, "symbols", []):
-                strategy_key = f"ai_{symbol}"
-                with self._lock:
-                    current = self._strategy_preference_weights.get(strategy_key, 1.0)
-                    delta = 0.15 * evaluation.confidence if evaluation.has_edge else -0.1
-                    new_weight = max(0.2, min(2.0, current + delta))
-                    self._strategy_preference_weights[strategy_key] = new_weight
-                    self._stats["l2_cache_weight_applied"] += 1
-                logger.debug(
-                    "L2 weight update for %s: %.2f → %.2f (delta=%.3f) / "
-                    "L2 權重更新：%.2f → %.2f",
-                    strategy_key, current, new_weight, delta, current, new_weight,
-                )
-        except Exception as e:
-            logger.warning("_apply_l2_weight_update failed (fail-open): %s", e)
-
-    # ── Route Context + L1.5 Evaluation / 路由上下文 + L1.5 評估 ──
+    # ── Route Context + Edge Evaluation + Prompt + L1.5 ──
 
     def _build_route_context(self, intel: Any) -> dict:
-        """
-        Build context dict for ModelRouter L1.5/L2 upgrade decisions.
-        構建上下文字典用於 ModelRouter L1.5/L2 升級判斷。
-
-        Extracts relevant fields from intel metadata so ModelRouter
-        can decide whether to upgrade from L1 to L1.5 or L2.
-        從 intel metadata 提取相關欄位，供 ModelRouter 判斷是否
-        從 L1 升級到 L1.5 或 L2。
-
-        Returns:
-            dict with keys matching ModelRouter.route() context spec
-        """
-        metadata = intel.metadata if isinstance(intel.metadata, dict) else {}
-        return {
-            "confidence": getattr(intel, "relevance_score", 0.5),
-            "amount_pct": metadata.get("position_pct", 0.0),
-            "cusum_triggered": metadata.get("cusum_triggered", False),
-            "daily_vol_pct": metadata.get("daily_vol_pct", 0.0),
-            "is_new_symbol": metadata.get("is_new_symbol", False),
-            "weekly_pnl_pct": metadata.get("weekly_pnl_pct", 0.0),
-            "param_sharpe_change_pct": metadata.get("param_sharpe_change_pct", 0.0),
-        }
+        """Backward-compatible delegator to strategist_edge_eval / 向後兼容委託"""
+        return _se_build_route_context(self, intel)
 
     def _evaluate_edge_l1_5(self, intel: Any) -> EdgeEvaluation:
-        """L1.5 eval with Claude→TSR closed loop (3-3). / L1.5 Claude→TSR 閉環（3-3）。"""
-        try:
-            with self._lock:
-                self._last_knowledge_update = None
-            evaluation = self._evaluate_edge(intel)
-            with self._lock:
-                ku = self._last_knowledge_update
-                self._last_knowledge_update = None
-            if ku and self._truth_registry:
-                self._process_knowledge_update(ku, source="cloud_api")
-            if self._budget_manager:
-                try:
-                    self._budget_manager.record_call("l1_5", 0.02)
-                except Exception:
-                    pass
-            return evaluation
-        except Exception as e:
-            logger.warning("L1.5 eval failed, fallback to L1: %s", e)
-            return self._evaluate_edge(intel)
+        """Backward-compatible delegator to strategist_edge_eval / 向後兼容委託"""
+        return _se_evaluate_edge_l1_5(self, intel)
 
     def _process_knowledge_update(self, knowledge_update: Any, source: str = "cloud_api") -> None:
-        """Write knowledge_update to TSR (3-3). Principle 10: AI=INFERENCE, caps: cloud 0.90, ai 0.85.
-        將 knowledge_update 寫入 TSR（3-3）。原則 10：AI=推斷。上限：cloud 0.90, ai 0.85。"""
-        if not self._truth_registry:
-            return
-        items = knowledge_update if isinstance(knowledge_update, list) else [knowledge_update]
-        cap = 0.90 if source == "cloud_api" else 0.85
-        written = 0
-        for item in items:
-            if not isinstance(item, dict):
-                continue
-            pattern = item.get("pattern", item.get("claim", ""))[:200]  # Security: cap length / 安全：截斷長度
-            if not pattern:
-                continue
-            try:
-                conf = min(float(item.get("confidence", 0.5)), cap)
-                obs_count = max(1, min(10000, int(item.get("observation_count", 1))))  # Clamp 1-10000
-                self._truth_registry.register_claim(
-                    pattern_text=pattern, evidence_source="ai",
-                    observation_count=obs_count,
-                    confidence=conf, applies_to_regime=item.get("regime", "all"),
-                    applies_to_strategy=item.get("strategy", "all"),
-                )
-                written += 1
-                logger.info("TSR write: '%s' (conf=%.2f, src=%s)", pattern[:50], conf, source)
-            except Exception as exc:
-                logger.warning("TSR write failed: %s", exc)
-        if written:
-            self._audit("knowledge_update", {"count": written, "source": source})
-
-    # ── Prompt Construction / Prompt 構建 ──
+        """Backward-compatible delegator to strategist_edge_eval / 向後兼容委託"""
+        return _se_process_knowledge_update(self, knowledge_update, source)
 
     def _build_prompt_context(self, intel: IntelObject) -> str:
-        """
-        V2: Build structured JSON prompt context for Ollama evaluation.
-        V2：構建結構化 JSON prompt 上下文供 Ollama 評估。
-
-        Includes cognitive modulator state and dream engine insights
-        when available, per Cognitive Adaptation Spec §6.2.
-        包含認知調製器狀態和蒙特卡洛洞察（若可用），
-        依據認知自適應 SPEC §6.2。
-
-        Returns:
-            JSON-formatted context string prefixed with evaluation instruction
-            帶評估指令前綴的 JSON 格式上下文字串
-        """
-        # Base intel context / 基礎情報上下文
-        context_dict: dict = {
-            "symbols": intel.symbols,
-            "source": intel.source,
-            "sentiment": intel.sentiment.value if hasattr(intel.sentiment, "value") else str(intel.sentiment),
-            "relevance": round(intel.relevance_score, 2),
-            "data_quality": intel.data_quality.value if hasattr(intel.data_quality, "value") else str(intel.data_quality),
-            "freshness_s": intel.freshness_seconds,
-            "content": intel.content[:500],
-            "regime": self._current_regime,
-        }
-
-        # V2: CognitiveModulator state (if connected)
-        # 認知調製器狀態（若已連接）
-        if self._cognitive_modulator is not None:
-            try:
-                cog_params = self._cognitive_modulator.get_current_params()
-                context_dict["cognitive"] = {
-                    "confidence_floor": round(cog_params.get("confidence_floor", 0.6), 3),
-                    "qty_ceiling": round(cog_params.get("qty_ceiling", 1.0), 3),
-                    "stoploss_multiplier": round(cog_params.get("stoploss_multiplier", 1.0), 3),
-                }
-            except Exception:
-                pass  # No cognitive data available — skip silently / 無認知數據，靜默跳過
-
-        # V2: DreamEngine insights (if available via cognitive modulator)
-        # 蒙特卡洛洞察（若可用）
-        if self._cognitive_modulator is not None:
-            try:
-                dream_data = getattr(self._cognitive_modulator, "last_dream_summary", None)
-                if dream_data and isinstance(dream_data, dict):
-                    context_dict["dream_insights"] = {
-                        "suggested_params": dream_data.get("suggested_params"),
-                        "confidence": dream_data.get("confidence"),
-                    }
-            except Exception:
-                pass  # No dream data — skip silently / 無蒙特卡洛數據，靜默跳過
-
-        # 3-3: Include high-confidence TSR claims in prompt (closed loop)
-        # 3-3：在 prompt 中包含高信度 TSR 聲明（閉環）
-        if self._truth_registry:
-            try:
-                active = self._truth_registry.get_active_claims(min_confidence=0.5)
-                if active:
-                    context_dict["tsr_claims"] = [
-                        {"pattern": c.pattern_text, "confidence": c.confidence,
-                         "level": c.cognitive_level.value if hasattr(c.cognitive_level, "value") else str(c.cognitive_level)}
-                        for c in active[:5]
-                    ]
-            except Exception:
-                pass  # TSR query failure is non-critical / TSR 查詢失敗非關鍵
-
-        # Format as structured text for LLM / 格式化為 LLM 的結構化文本
-        try:
-            context_json = json.dumps(context_dict, ensure_ascii=False, separators=(",", ":"))
-        except (TypeError, ValueError):
-            # Fallback to plain text if JSON serialization fails
-            # JSON 序列化失敗時回退到純文字
-            return (
-                f"Symbol(s): {', '.join(intel.symbols)}\n"
-                f"Source: {intel.source}\n"
-                f"Sentiment: {context_dict['sentiment']}\n"
-                f"Relevance: {context_dict['relevance']}\n"
-                f"Content: {intel.content[:500]}"
-            )
-
-        # Prefix with evaluation instruction for judge_edge()
-        # 為 judge_edge() 加上評估指令前綴
-        return (
-            "Evaluate this trading signal. Respond in JSON: "
-            '{"has_edge":bool,"confidence":0-1,"reason":"..."}. '
-            "Consider cognitive state if present.\n\n"
-            + context_json
-        )
-
-    # ── Edge Evaluation / Edge 評估 ──
+        """Backward-compatible delegator to strategist_edge_eval / 向後兼容委託"""
+        return _se_build_prompt_context(self, intel)
 
     def _evaluate_edge(self, intel: IntelObject) -> EdgeEvaluation:
-        """
-        Evaluate whether intel contains a tradeable edge.
-        評估情報是否包含可交易優勢。
-
-        Strategy: 1. Try Ollama/Qwen 3.5 judge_edge() first
-        2. If unavailable/error → fallback to local heuristic
-        3. Never return has_edge=True without evaluation (fail-closed)
-        """
-        # E5-P1-4: Ollama availability check routed via llm_call_wrapper.
-        # E5-P1-4：Ollama 可用性檢查統一走 llm_call_wrapper。
-        if ollama_is_available(self._ollama):
-            try:
-                return self._ai_evaluate(intel)
-            except Exception as e:
-                logger.warning("AI evaluation failed, falling back to heuristic: %s / AI 評估失敗: %s", e, e)
-                with self._lock:
-                    self._stats["errors"] += 1
-
-        with self._lock:
-            self._stats["heuristic_evaluations"] += 1
-        return _heuristic_evaluate(intel, self.config)
+        """Backward-compatible delegator to strategist_edge_eval / 向後兼容委託"""
+        return _se_evaluate_edge(self, intel)
 
     def _ai_evaluate(self, intel: IntelObject) -> EdgeEvaluation:
-        """
-        Evaluate edge using Qwen 3.5 via judge_edge().
-        使用 Qwen 3.5 的 judge_edge() 評估 edge。
-        """
-        start = time.time()
-
-        # V2: Use structured JSON prompt with cognitive/dream fields
-        # V2：使用含認知/蒙特卡洛欄位的結構化 JSON prompt
-        context = self._build_prompt_context(intel)
-
-        # E5-P1-4: routed via llm_call_wrapper.call_ollama_judge_edge
-        # (thin pass-through — identical call semantics, preserves fail-closed).
-        # E5-P1-4：通過 llm_call_wrapper.call_ollama_judge_edge（語義完全等同）。
-        response = call_ollama_judge_edge(self._ollama, context)
-        latency_ms = (time.time() - start) * 1000
-
-        with self._lock:
-            self._stats["ai_evaluations"] += 1
-
-        if not response.success:
-            logger.warning("judge_edge returned unsuccessful: %s / judge_edge 返回失敗", response.error)
-            with self._lock:
-                self._stats["heuristic_evaluations"] += 1
-            return _heuristic_evaluate(intel, self.config)
-
-        # Parse JSON response / 解析 JSON 響應
-        try:
-            text = response.text.strip()
-            if text.startswith("```"):
-                text = text.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
-            result = json.loads(text)
-
-            # H4: Validate AI output structure — delegate to h4_validator module
-            # H4 輸出驗證 — 委託給 h4_validator 模組
-            if not validate_ai_output(result):
-                logger.warning(
-                    "H4 validation failed for AI output, "
-                    "falling back to heuristic / H4 驗證失敗，降級到啟發式"
-                )
-                with self._lock:
-                    self._stats["h4_validation_fail"] = self._stats.get("h4_validation_fail", 0) + 1
-                    self._stats["heuristic_evaluations"] += 1
-                _invalidate_h_state_async("h4.validation_fail")  # G3-08 Phase 3 Sub-task 3-2
-                return _heuristic_evaluate(intel, self.config)
-
-            # G3-08 Phase 3 Sub-task 3-2 — H4 PASS: count + hint (was silent gap).
-            # G3-08 Phase 3 Sub-task 3-2 — H4 通過：補計數與提示（G3-08 前 silent gap）。
-            with self._lock:
-                self._stats["h4_validation_pass"] = self._stats.get("h4_validation_pass", 0) + 1
-            _invalidate_h_state_async("h4.validation_pass")
-
-            has_edge = bool(result.get("has_edge", False))
-            confidence = float(result.get("confidence", 0.0))
-            reason = str(result.get("reason", "AI evaluation"))
-
-            # 3-3: Stash knowledge_update for L1.5 TSR write-back
-            # 3-3：暫存 knowledge_update 供 L1.5 寫回 TSR
-            ku = result.get("knowledge_update")
-            if ku:
-                with self._lock:
-                    self._last_knowledge_update = ku
-
-            # H5: Record Ollama call for cost/resource awareness (principle 13)
-            # H5 成本感知：記錄 Ollama 調用（根原則 13）
-            if self.cost_tracker is not None:
-                try:
-                    record_fn = getattr(self.cost_tracker, "record_call", None)
-                    if record_fn is not None:
-                        record_fn(provider="ollama", model="l1_9b", duration_ms=latency_ms, cost_usd=0.0)
-                    with self._lock:
-                        self._stats["ollama_calls_tracked"] += 1
-                except Exception:
-                    logger.warning("cost_tracker.record_call failed, non-fatal / 成本記錄失敗，非致命")
-
-            return EdgeEvaluation(
-                has_edge=has_edge,
-                confidence=confidence,
-                reason=reason,
-                source="ai",
-                latency_ms=latency_ms,
-            )
-        except (json.JSONDecodeError, KeyError, TypeError) as e:
-            logger.warning("Failed to parse judge_edge response: %s / 解析 judge_edge 響應失敗: %s", e, e)
-            return EdgeEvaluation(
-                has_edge=False,
-                confidence=0.0,
-                reason=f"AI response parse error: {e}",
-                source="ai_parse_error",
-                latency_ms=latency_ms,
-            )
+        """Backward-compatible delegator to strategist_edge_eval / 向後兼容委託"""
+        return _se_ai_evaluate(self, intel)
 
     # ── Intent Collection (DEPRECATED) / Intent 收集（已廢棄）──
 
@@ -1021,7 +699,7 @@ class StrategistAgent(BaseAgent):
         )
         return []
 
-    # ── Backward-compatible H1/H4 method stubs ──
+    # ── Backward-compatible H1/H4/H3 method stubs ──
     # These thin wrappers preserve the old method signatures for any external callers.
     # 這些薄包裝保留舊方法簽名，供任何外部調用者使用。
 
@@ -1047,109 +725,23 @@ class StrategistAgent(BaseAgent):
         route_context = self._build_route_context(intel)
         return self._model_router.route(complexity, context=route_context)
 
-    # ── V2: Dual-track Fast Channel / 雙軌快速通道 ──
+    # ── V2: Dual-track Fast Channel + Cognitive Modulator ──
 
     def handle_fast_channel(self, trigger: str, symbols: list[str] | None = None) -> List[TradeIntent]:
-        """
-        V2 Fast channel: deterministic risk-driven actions (<10ms).
-        V2 快速通道：確定性風控驅動的行動（<10ms）。
-
-        Triggers: risk_governor >= DEFENSIVE -> reduce_all / close_all / flash_crash
-        觸發條件：risk_governor >= DEFENSIVE -> 減倉/全平/閃崩保護
-
-        Sets _emergency_mode flag to block normal channel, then generates
-        pre-defined intents. Normal channel checks this flag before emitting.
-        設置 _emergency_mode 標誌阻斷正常通道，然後生成預定義 intent。
-        正常通道在發射前檢查此標誌。
-
-        Args:
-            trigger: Action type — "reduce_all" / "close_all" / "flash_crash"
-            symbols: Specific symbols to act on (None = all)
-
-        Returns:
-            List of emergency TradeIntents
-        """
-        # Set emergency mode — blocks normal channel
-        # 設置緊急模式 — 阻斷正常通道
-        self._emergency_mode.set()
-
-        with self._lock:
-            # Clear normal channel queue (stale intents are dangerous during emergency)
-            # 清空正常通道隊列（緊急時期過期 intent 是危險的）
-            self._normal_queue.clear()
-
-            # Delegate intent construction to extracted module
-            # 委託提取的模組構建 intent
-            target_symbols = symbols or []
-            emergency_intents = build_emergency_intents(
-                trigger=trigger,
-                symbols=target_symbols,
-                TradeIntent=TradeIntent,
-            )
-
-            self._pending_intents.extend(emergency_intents)
-            self._stats["intents_produced"] += len(emergency_intents)
-
-            logger.warning(
-                "Fast channel triggered: %s, %d intents generated / "
-                "快速通道觸發：%s，生成 %d 個 intent",
-                trigger, len(emergency_intents), trigger, len(emergency_intents),
-            )
-
-            return emergency_intents
+        """Backward-compatible delegator to strategist_cognitive / 向後兼容委託"""
+        return _sc_handle_fast_channel(self, trigger, symbols)
 
     def clear_emergency_mode(self) -> None:
-        """
-        V2: Clear emergency mode after fast channel actions are processed.
-        V2：快速通道行動處理完畢後清除緊急模式。
-
-        Normal channel resumes accepting signals after this call.
-        此調用後正常通道恢復接收信號。
-        """
-        self._emergency_mode.clear()
-        logger.info("Emergency mode cleared, normal channel resumed / 緊急模式清除，正常通道恢復")
-
-    # ── V2: CognitiveModulator Integration / 認知調製器整合 ──
+        """Backward-compatible delegator to strategist_cognitive / 向後兼容委託"""
+        return _sc_clear_emergency_mode(self)
 
     def set_cognitive_modulator(self, modulator: Any) -> None:
-        """
-        V2: Inject CognitiveModulator for decision threshold adjustment.
-        V2：注入 CognitiveModulator 用於決策門檻調整。
-
-        Principle: cognitive modulation != capability restriction (see root principle derivative).
-        原則：認知調製 != 能力限制（見根原則衍生準則）。
-        """
-        self._cognitive_modulator = modulator
-        logger.info(
-            "CognitiveModulator injected into StrategistAgent / "
-            "認知調製器已注入 StrategistAgent"
-        )
+        """Backward-compatible delegator to strategist_cognitive / 向後兼容委託"""
+        return _sc_set_cognitive_modulator(self, modulator)
 
     def _apply_cognitive_modulation(self, confidence: float) -> tuple[float, float]:
-        """
-        V2: Apply CognitiveModulator thresholds to confidence and qty.
-        V2：應用認知門檻調製到信心和倉位。
-
-        Returns (adjusted_min_confidence, qty_ceiling_multiplier).
-        返回 (調整後最低信心門檻, 倉位上限乘數)。
-
-        If no modulator is injected, returns default config values (bypass).
-        若未注入調製器，返回默認配置值（跳過）。
-        """
-        if self._cognitive_modulator is None:
-            return (self.config.min_confidence, 1.0)
-
-        try:
-            params = self._cognitive_modulator.get_current_params()
-            conf_floor = params.get("confidence_floor", self.config.min_confidence)
-            qty_ceil = params.get("qty_ceiling", 1.0)
-            return (conf_floor, qty_ceil)
-        except Exception as e:
-            logger.warning(
-                "CognitiveModulator error, using defaults: %s / "
-                "認知調製器錯誤，使用默認值: %s", e, e,
-            )
-            return (self.config.min_confidence, 1.0)
+        """Backward-compatible delegator to strategist_cognitive / 向後兼容委託"""
+        return _sc_apply_cognitive_modulation(self, confidence)
 
     # ── Audit / 審計 ──
     # _audit() inherited from BaseAgent (prefixes event with role.value = "strategist").
