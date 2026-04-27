@@ -238,6 +238,22 @@ class AnalystAgent(BaseAgent):
             "errors": 0,
         }
 
+        # G8-01-FUP-LOSSES-WIRING: optional callback fired on every analyzed
+        # trade so downstream consumers (StrategistAgent) can update local
+        # ``_stats["consecutive_losses"]`` for CognitiveModulator input.
+        # Signature: ``Callable[[float], None]`` — receives ``record.net_pnl``
+        # (PnL minus fees) per analyzed round-trip; positive resets, non-positive
+        # increments. Strict fail-open: any exception is logged-and-swallowed
+        # so analyst hot path is never poisoned (Principle #6 fail-closed,
+        # but fail-open here means: bypass downstream wiring, never crash).
+        # G8-01-FUP-LOSSES-WIRING：每筆已分析交易觸發的可選 callback，供下游消費者
+        # （StrategistAgent）更新自身 ``_stats["consecutive_losses"]`` 作為
+        # CognitiveModulator 的輸入。簽名 ``Callable[[float], None]`` —— 接收
+        # ``record.net_pnl``（PnL 扣費後）；正值 reset、非正值遞增。嚴格 fail-open：
+        # 任何例外 log+吞下，永不污染 analyst hot path（原則 #6 fail-closed，
+        # 此處 fail-open 指：略過下游接線、絕不崩潰）。
+        self._strategist_loss_callback: Optional[Callable[[float], None]] = None
+
     # ── Lifecycle / 生命周期 ──
     # pause() inherited from BaseAgent. start/stop override to preserve info log.
     # pause() 繼承自 BaseAgent；start/stop 覆蓋以保留 info log。
@@ -349,6 +365,26 @@ class AnalystAgent(BaseAgent):
             else:
                 rs["losses"] += 1
 
+        # G8-01-FUP-LOSSES-WIRING: notify Strategist of trade outcome so it can
+        # advance ``_stats["consecutive_losses"]`` for next CognitiveModulator
+        # tick. Fail-open: any exception is logged-then-swallowed; analyst hot
+        # path must not be disrupted by downstream consumer failures.
+        # Use ``record.net_pnl`` (PnL minus fees) — pure profitability after
+        # transaction costs — to mirror what a human trader would call a "win".
+        # G8-01-FUP-LOSSES-WIRING：通知 Strategist 該筆交易結果，使其能更新
+        # ``_stats["consecutive_losses"]`` 供下次 CognitiveModulator tick 使用。
+        # Fail-open：任何例外被 log 吞下，下游消費者失敗不阻塞 analyst hot path。
+        # 用 ``record.net_pnl``（扣費後 PnL）—— 對齊人類交易者「真正獲利」的語意。
+        if self._strategist_loss_callback is not None:
+            try:
+                self._strategist_loss_callback(record.net_pnl)
+            except Exception as cb_exc:
+                logger.warning(
+                    "strategist_loss_callback raised (non-fatal, fail-open): %s / "
+                    "strategist_loss_callback 拋出例外（非致命，fail-open）：%s",
+                    cb_exc, cb_exc,
+                )
+
         # Compute metrics / 计算指标
         metrics = self.compute_strategy_metrics(record.strategy)
 
@@ -440,6 +476,40 @@ class AnalystAgent(BaseAgent):
                     "total_pnl": round(stats["total_pnl"], 6),
                 }
             return result
+
+    def set_strategist_loss_callback(
+        self,
+        callback: Optional[Callable[[float], None]],
+    ) -> None:
+        """
+        G8-01-FUP-LOSSES-WIRING: inject Strategist consecutive-loss-tracking hook.
+        G8-01-FUP-LOSSES-WIRING：注入 Strategist 連續虧損追蹤鉤子。
+
+        After every ``analyze_trade(record)`` invocation Analyst calls this
+        callback with ``record.net_pnl`` (post-fee PnL). The downstream consumer
+        is expected to update ``StrategistAgent._stats["consecutive_losses"]``
+        — incrementing on net_pnl <= 0, resetting to 0 on net_pnl > 0 — so the
+        next ``tick_cognitive_modulator`` cycle observes a non-zero input
+        (closes G8-01 RFC §3.1 acknowledged limitation).
+
+        每次 ``analyze_trade(record)`` 之後，Analyst 以 ``record.net_pnl``（扣費
+        後 PnL）呼叫此 callback。下游消費者（StrategistAgent）負責更新自身
+        ``_stats["consecutive_losses"]`` —— net_pnl <= 0 時遞增、net_pnl > 0 時
+        歸零，使下次 ``tick_cognitive_modulator`` cycle 取得非零輸入（解 G8-01
+        RFC §3.1 acknowledged limitation）。
+
+        Args:
+            callback: ``Callable[[float], None]`` taking the trade's net_pnl,
+                or ``None`` to clear a previously installed callback.
+                ``Callable[[float], None]`` 接受該筆交易 net_pnl，或 ``None``
+                以清除先前安裝的 callback。
+
+        Fail-open: callback exceptions are caught at the call site (analyze_trade)
+        and logged-then-swallowed; analyst hot path is never disrupted.
+        Fail-open：callback 例外於呼叫點（analyze_trade）捕獲後 log 吞下，
+        analyst hot path 永不中斷。
+        """
+        self._strategist_loss_callback = callback
 
     def set_truth_registry(self, registry: Any) -> None:
         """

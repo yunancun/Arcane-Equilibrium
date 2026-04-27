@@ -254,6 +254,21 @@ class StrategistAgent(BaseAgent):
             "heuristic_evaluations": 0,
             "evaluations_rejected": 0,
             "errors": 0,
+            # G8-01-FUP-LOSSES-WIRING: consecutive-loss counter consumed by
+            # ``tick_cognitive_modulator``. Updated by ``record_trade_outcome()``
+            # via Analyst → Strategist callback path (set in strategy_wiring.py).
+            # Pre-FUP this key was missing → modulator always saw 0 → modulator
+            # state stuck at base values (RFC §3.1 acknowledged limitation).
+            # G8-01-FUP-LOSSES-WIRING：``tick_cognitive_modulator`` 消費的連續虧損
+            # 計數器，由 ``record_trade_outcome()`` 透過 Analyst → Strategist
+            # callback 路徑更新（接線於 strategy_wiring.py）。FUP 前此 key 不存在
+            # → modulator 永遠看到 0 → state 卡 base value（RFC §3.1 acknowledged）。
+            "consecutive_losses": 0,
+            # G8-01-FUP-LOSSES-WIRING: total trade outcomes observed (wins + losses).
+            # Diagnostic only — proves the callback actually fired.
+            # G8-01-FUP-LOSSES-WIRING：已觀察的總交易結果數（贏 + 輸）。
+            # 純診斷用 —— 證明 callback 確實有觸發。
+            "trade_outcomes_observed": 0,
             # H1 ThoughtGate skip counters / H1 思考閘門跳過計數器
             "h1_budget_skip": 0,
             "h1_complexity_skip": 0,
@@ -774,6 +789,70 @@ class StrategistAgent(BaseAgent):
     def set_cognitive_modulator(self, modulator: Any) -> None:
         """Backward-compatible delegator to strategist_cognitive / 向後兼容委託"""
         return _sc_set_cognitive_modulator(self, modulator)
+
+    # G8-01-FUP-LOSSES-WIRING: trade outcome ingress for CognitiveModulator
+    # consecutive_losses input. Wired in strategy_wiring.py to AnalystAgent's
+    # ``set_strategist_loss_callback`` so every IPC-driven trade analysis
+    # advances the counter. Direct method (not a delegator) because the entire
+    # surface is small and stat-only — no logic worth extracting.
+    # G8-01-FUP-LOSSES-WIRING：CognitiveModulator consecutive_losses 輸入的
+    # 交易結果入口。strategy_wiring.py 中接到 AnalystAgent 的
+    # ``set_strategist_loss_callback``，使每筆 IPC 觸發的 trade analysis 都
+    # 推進此計數器。直接方法（非 delegator），因 surface 小且純統計，無需拆分。
+    def record_trade_outcome(self, net_pnl: float) -> None:
+        """
+        Update ``_stats["consecutive_losses"]`` from a single round-trip outcome.
+        以單筆交易結果更新 ``_stats["consecutive_losses"]``。
+
+        Semantics / 語意：
+          - net_pnl >  0  → win  → reset ``consecutive_losses`` to 0
+                            勝 → 歸零
+          - net_pnl <= 0  → loss / breakeven → increment by 1
+                            輸 / 平手 → +1
+
+        Breakeven (net_pnl == 0) treated as loss — fee-eaten trades drained
+        capital without edge, which is what CognitiveModulator should react to
+        (Principle #5 survival > profit; #13 cost-edge awareness).
+
+        平手 (net_pnl == 0) 視為輸 —— 被 fee 吃掉的交易雖無虧損但耗資本未產生
+        edge，正是 CognitiveModulator 該調製的場景（原則 #5 生存 > 利潤、
+        #13 成本-edge 感知）。
+
+        Thread-safe: takes ``self._lock`` for the read-modify-write on _stats.
+        Idempotent on the same outcome only if caller dedupes upstream — this
+        method intentionally has NO trade_id memory; it's a pure counter ingress.
+
+        線程安全：對 _stats 的 read-modify-write 取 ``self._lock``。同一筆 outcome
+        的冪等性由上游 caller 負責去重 —— 本方法刻意不記憶 trade_id，純計數入口。
+
+        Args:
+            net_pnl: Post-fee PnL of the round-trip (USD or instrument quote unit).
+                     Round-trip 扣費後 PnL（USD 或合約計價單位）。
+        """
+        try:
+            with self._lock:
+                self._stats["trade_outcomes_observed"] = (
+                    self._stats.get("trade_outcomes_observed", 0) + 1
+                )
+                if net_pnl > 0:
+                    self._stats["consecutive_losses"] = 0
+                else:
+                    self._stats["consecutive_losses"] = (
+                        self._stats.get("consecutive_losses", 0) + 1
+                    )
+        except Exception as exc:
+            # Fail-open: stat tracking failure must NOT propagate up the
+            # Analyst→Strategist callback chain (Analyst already wraps us in
+            # try/except, but defense-in-depth — never let a stats dict bug
+            # disrupt trade analysis).
+            # Fail-open：統計失敗絕不向 Analyst→Strategist callback chain 傳播
+            # （Analyst 已包 try/except，此處 defense-in-depth —— 不讓統計 dict
+            # bug 干擾交易分析）。
+            logger.warning(
+                "record_trade_outcome failed (non-fatal): %s / "
+                "record_trade_outcome 失敗（非致命）：%s",
+                exc, exc,
+            )
 
     def _apply_cognitive_modulation(self, confidence: float) -> tuple[float, float]:
         """Backward-compatible delegator to strategist_cognitive / 向後兼容委託"""
