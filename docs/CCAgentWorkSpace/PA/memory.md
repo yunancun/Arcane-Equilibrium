@@ -625,3 +625,98 @@ PM operator 18:10 報「Demo 引擎自 08:13:59 CEST 0 fills 連續 ~10h，但 w
 Phase 3 H5 解阻後派發 G3-09 設計 + T8-FUP-RFC-TYPO-FIX 一次合 1 commit。Recommend integration = **新建 cost_edge_advisor 模組**（候選 4 vs intent_processor cost_gate 重疊 / combine_layer 違 Gate-4-only / phys_lock_v2 違 per-position semantic mismatch）。3 Phase rollout: A schema+advisory (4.5d) → B shadow dry-run (1.5d) → C live triggered gate (2.5d) 全鏈 8.5d。CLAUDE.md §二 #13「ratio ≥ 0.8」字面義與公式方向矛盾，採解釋 A 變體 = threshold 為負值（預設 -0.5 保守起點，operator-tunable）。「建議關倉」語意 = Phase C 阻新倉**不**強制關現有倉（fail-soft，避 false-positive 直接虧損）。env-gate `OPENCLAW_COST_EDGE_ADVISOR` + RiskConfig.cost_edge.enabled 雙保險。Phase 4 5-Agent state events 與本 RFC 並行可派（互不阻塞）。報告：`workspace/reports/2026-04-26--g3_09_cost_edge_ratio_design.md`。同 commit T8-FUP typo fix `paper_state_dust_restore_audit.md` §7.2 "improvement not improved spec" → "improvement not regression"（業務內容不變，1 字 amend）。
 
 ---
+
+## 2026-04-27 G3-08 Phase 4 5-Agent state events design RFC
+
+### 觸發
+
+PM Tier 8 sign-off `e5f1b2d` next-step：Phase 1+2+3 完成（H1-H5 5-bucket live），Phase 4 = 5-Agent (Strategist/Guardian/Analyst/Executor/Scout) state events 接入 Rust h_state_cache。Strategist sub-task hard pre-condition = G3-08-PHASE-4-STRATEGIST-SPLIT 並行進行中，其他 4 agent 主檔 LOC < 800 無拆檔阻塞。
+
+### 報告路徑
+
+`workspace/reports/2026-04-27--g3_08_phase4_5agent_design_rfc.md`（1415 行）
+
+### 推薦結論
+
+**Pattern B 5 sub-task per-agent**（鏡 Phase 3 Pattern B per-H 模組）：
+- 4-1 Strategist (~60 LOC) — hard pre-cond STRATEGIST-SPLIT
+- 4-2 Guardian (~35 LOC) — 並行
+- 4-3 Analyst (~26 LOC) — 並行（§七 警告）
+- 4-4 Executor (~36 LOC) — 並行（shadow_mode wire 注意）
+- 4-5 Scout (~27 LOC) — 並行（§九 接近）
+
+ETA 全鏈 **3.75d 並行版**（≤ PA design §11.1 估 4d），順序 5d。
+
+### 5 大關鍵架構發現
+
+1. **query_handler 升級採 Option B 拆兩個 collector**（vs A 同函式擴展 10 參數 / 10-tuple）：`_collect_h_snapshots` Phase 3 簽名不變 + 新增 `_collect_agent_snapshots` 返回 dict 而非 tuple → Phase 5 加 agent 不破壞 caller（forward-compat 模板）
+
+2. **Phase 4 invariant：所有 snapshot 字段必為 int 或 bool→int**（不准 float / string）對齊 Rust `AgentState.stats: HashMap<String, i64>`。Executor `total_slippage_bps` (float)、cognitive/emergency bool / shadow_mode 必 cast int。Phase 5+ 若需 float（如延遲 ms） → 新增 `gauges: HashMap<String, f64>` 兄弟字段不混入 stats
+
+3. **Sub-task 4-4 Executor `_shadow_mode_provider()` call 必在 self._lock 之外**（避 G3-03 ExecutorConfigCache 內部 lock + self._lock 死鎖）+ provider raise 必 fail-closed = 1（shadow on，CLAUDE.md §二 原則 #6）。snapshot vs ConfigStore SSOT 物理層次區分必寫進 docstring（避未來開發者誤改方向破壞 G3-03 契約）
+
+4. **2 條 Backlog FUP 必排**：
+   - **G3-08-FUP-ANALYST-SPLIT**：Analyst 主檔 834 LOC（pre-Phase-4 即超 §七 800 警告線），Phase 4 4-3 land 後 ~860；下 wave 拆檔目標 ~480 LOC（鏡 Phase 4 split RFC §6.4 Method A）
+   - **G3-08-FUP-MAF-SPLIT**：multi_agent_framework.py 1137 LOC + 27 = ~1164 距 §九 1200 hard cap 僅 36 LOC headroom；下 wave 拆 ScoutAgent (~183 LOC) 出獨立 `scout_agent.py`（建議 P1 優先級避 Phase 5 觸 §九）
+
+5. **healthcheck [20] expected set 漸進式 rollout 是 5 sub-task 並行的關鍵**：每 sub-task 必同 commit 升級 healthcheck（baseline 5 H bucket → Sub-task 4-N land 後 += {對應 agent slot} → 4-5 land 後 expected = 10 bucket）；半途部署 set diff 非空且非全空 → WARN（容忍 missing slot），全空 → PASS。E2 review 必查每 sub-task healthcheck 同步升級
+
+### 派發架構建議（PM Phase 4 wave）
+
+| Sub-task | E1 instance | isolation | 依賴 | ETA |
+|---|---|---|---|---|
+| 4-1 Strategist | E1-Alpha worktree | YES | STRATEGIST-SPLIT 必先 land | 1d |
+| 4-2 Guardian | E1-Beta 主樹 | NO | 4-1 land 後（_collect_agent_snapshots dict skeleton） | 0.75d 並行 |
+| 4-3 Analyst | E1-Gamma 主樹 | NO | 同上 | 0.75d 並行 |
+| 4-4 Executor | E1-Delta 主樹 | NO | 同上 + G3-03 ConfigStore | 0.75d 並行 |
+| 4-5 Scout | E1-Epsilon 主樹 | NO | 同上 | 0.75d 並行 |
+
+**multi-track absorb pattern**（per Phase 3 commit 8cd257e 經驗）：4-1 落主樹 → PM merge → 4-2/3/4/5 同步 fetch → 4 個 E1 並行 worktree → PM 序貫 merge 4 個 commit。`_collect_agent_snapshots` h_state_query_handler.py 共改但每 sub-task 加自己的 `if include_<agent>:` 區塊（互不重疊 dict literal）→ 後 commit `git pull --rebase` 自動合併。
+
+### Top 風險
+
+1. **R1 4 並行 sub-task 同改 h_state_query_handler.py 衝突**（中機率/中影響）→ absorb pattern + per-arm if 區塊隔離
+2. **R3 Analyst / multi_agent_framework.py 過 §七 警告線**（高機率/低影響）→ 警告線非 hard cap 不阻塞，Backlog FUP 排下 wave
+3. **R4 Executor `_shadow_mode_provider()` 與 self._lock 死鎖**（低機率/高影響）→ 4-4 prompt §高風險警告強制 provider call 在 self._lock 外
+4. **R6 strategy_wiring SCOUT_AGENT singleton 名稱**（中機率/中影響）→ 4-5 prompt 前置 grep 步驟強制驗證
+
+### 治理對照亮點
+
+- 16 根原則 #1-#10 全 ✅（純 observability extension）
+- ⭐ #13 AI 成本感知：Strategist `ai_evaluations` + Analyst `l2_analyses` 解阻 G3-09 cost_edge_advisor 跨維度判斷
+- ⭐⭐ #15 多 Agent 協作：Phase 4 直接強化（5-Agent → Rust 觀測通道全 wired）
+- §四 5 項 live 硬邊界全零觸碰
+- §九 Singleton table 不需更新（重用 Phase 1C `_H_STATE_INVALIDATOR`）
+- §七 文件大小：2 警告（Analyst / multi_agent_framework）→ Backlog FUP
+
+### unblock 下游
+
+- **G8-01 認知自適應 e2e 測試**：Phase 4 4-1 + 4-3 提供 `cognitive_modulator_connected` + `experiment_ledger_connected` Rust fixture 端 ≤1ms p99 即時驗證 wire 接通
+- **G3-09 cost_edge_advisor**：Rust hot-path `query_agent_state(cache, "strategist", "ai_evaluations")` + `query_agent_state(cache, "analyst", "l2_analyses")` + `query_h_state(cache, "h5", "cost_edge_ratio")` 三條合判，cost_edge_advisor 規則 = `if cost_edge_ratio >= 0.8 AND ai_evaluations_per_min > 5 AND l2_analyses_per_min > 1: advise(REDUCE_POSITION_SIZING)`
+- **未來 GUI 6-pane dashboard**：H1-H5 + 5-Agent 同 IPC pull
+
+### 沒做的事（E1/E2 領域）
+
+- 沒寫 5 sub-task 任何實作代碼（純 design + 5 prompt template）
+- 沒派 sub-agent（純 PA 主 agent 串行讀+寫）
+- 沒跑 cargo test / pytest
+- 沒驗 STRATEGIST-SPLIT 是否已 land（next session PM 派發前驗）
+- 沒擴範圍到 G3-09 cost_edge_advisor 演算法 / G8-01 認知 e2e
+- 沒實際拆 Analyst / multi_agent_framework.py（屬 Backlog FUP）
+
+### 教訓備忘
+
+1. **Phase 4 比 Phase 3 並行性更高**（5 不同主檔 vs Phase 3 共享 layer2_cost_tracker.py），但仍需 absorb pattern（PM 序貫 merge h_state_query_handler.py 共改）
+2. **Phase 4 split RFC 預留 90 LOC headroom 是 plan-ahead 投資**：4-1 用 60 LOC + Phase 5 預留 30 LOC 仍 < 800（per RFC §11.4）。**未來大型 cross-cutting 工作前必先評估各影響檔的 §七/§九 headroom**，提前 split 是最便宜的解法
+3. **snapshot vs config cache 物理層次區分**（Sub-task 4-4 Executor 案例）是未來凡 Rust ConfigStore + Python observation 雙資料流共存的標準模式：prompt template 必明確標記方向（read vs write、SSOT vs mirror、cache vs state）
+4. **bool→int cast 規則** + **dict-not-tuple collector return value** 兩個 forward-compat 設計原則，Phase 5+ 模板可直接套用
+5. **multi_agent_framework.py 1137 LOC 是 Phase 1+2+3 合計擴展副作用**：5 個 agent class 集中一檔的歷史包袱，Phase 4 揭發 §九 距離只剩 36 LOC headroom — ScoutAgent 拆檔（FUP-MAF-SPLIT）優先級提升至 P1
+6. **healthcheck expected set 漸進式 rollout** 是 N sub-task 並行的關鍵：每 sub-task 必同 commit 升級，避免半途部署持續 FAIL；rollback 時 expected set 也 reverse
+
+### 報告索引追加
+
+| 日期 | 報告類型 | 文件位置 |
+|---|---|---|
+| 2026-04-27 | G3-08 Phase 4 5-Agent state events design RFC（推 Pattern B 5 sub-task / ETA 3.75d 並行 / 2 Backlog FUP filed）| workspace/reports/2026-04-27--g3_08_phase4_5agent_design_rfc.md |
+
+---

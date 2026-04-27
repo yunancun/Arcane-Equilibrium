@@ -10,6 +10,92 @@
 
 ## 工作記憶
 
+### 2026-04-27 G3-08 Phase 4 cost_tracker split 回歸驗證
+
+**結論：E4 PASS — PM 可 merge + push（純 Python，Linux 不需 --rebuild）**
+
+**Baseline 對齊：**
+- Worktree HEAD `73c1f3d`（Track A `worktree-agent-af8001f13a3d3940b`，未 push origin，PA→E1→E2→E4→PM merge chain）
+- origin/main HEAD `12832ca`（pre-merge baseline）
+- Linux cargo lib **2252 / 0 failed**（與 CLAUDE.md §十一 一致；本 PR 純 Python 0 Rust diff = 預期）
+
+**改動 LOC：**
+| 檔案 | 預期 | 實測 | §九 |
+|---|---|---|---|
+| layer2_cost_tracker.py | 540 (was 930) | 540 | ✅ <800 |
+| layer2_cost_recording.py (NEW) | 405 | 405 | ✅ <800 |
+| layer2_adaptive.py (NEW) | 207 | 207 | ✅ <800 |
+| layer2_h_state_snapshots.py (NEW) | 190 | 190 | ✅ <800 |
+
+**4 必要 suite 兩遍同綠（test_layer2 + test_h_state_query_handler + test_layer2_escalation + test_strategist_agent）：**
+| Run | passed | errors |
+|---|---|---|
+| 1st | 196 | 12（pre-existing fastapi env gap）|
+| 2nd | 196 | 12（identical）|
+
+**Broader -k "layer2 or cost or h_state or strategist"：** 303 passed / 16 fail / 41 collection error。**全 pre-existing httpx + fastapi Mac dev-only env gap**（origin/main 同 3 個 broader-scan failing test files = 28 fail，本 worktree = 16 fail，net new = **0**）。CLAUDE.md §七 Mac dev-only fail-by-design。
+
+**Patch path verify（E4 task §F）：**
+- OLD `app.layer2_cost_tracker._invalidate_h_state_async`: **0 hits** ✓
+- NEW `app.layer2_cost_recording._invalidate_h_state_async`: **4 hits** at `tests/test_layer2.py:389/422/557/592` ✓
+- E1 commit message 寫 line 384/417/552/587 — 實 389/422/557/592（off-by-~5 doc drift）
+
+**Mock 審查（PASS）：**
+- 4 patch sites 全 mock `_invalidate_h_state_async`（IPC fire-and-forget boundary OK）
+- 0 mock 業務邏輯 / cost 計算 / cost_edge_ratio 數學
+- 14 method delegators 真跑 `_recording_sibling.<fn>(*args)` — 由 `record_ollama_call` deprecation warning trail 證 delegator path 真實執行
+
+**浮點 / SLA：** N/A（純 file structure refactor，無 indicator / hot-path）
+
+**3 條 WARN（不阻塞）：**
+1. Mac 缺 fastapi/httpx → 12+16+41 errors 全 pre-existing；建議 `pip install fastapi httpx`
+2. E1 commit message line numbers off-by-~5（doc drift only）
+3. 純 Python refactor，0 Rust diff，Linux cargo baseline 2252/0 不變
+
+**1 條教訓：**
+1. **Patch path migration 驗證模板**：未來 file split refactor 涉及 monkey-patch 重新接線時，E4 必跑 grep verify (a) 0 old hits (b) ≥N new hits 對應 E1 self-report — 比單純 pytest pass 多一道 contract check 護欄。本次 4/4 sites OK。
+
+**報告：** `.claude_reports/20260427_151551_e4_regression_cost_tracker_split.md` + `docs/CCAgentWorkSpace/E4/workspace/reports/2026-04-27--cost_tracker_split_regression.md`
+
+---
+
+### 2026-04-27 G3-08 Phase 4 Strategist split 回歸驗證
+
+**結論：E4 PASS — PM 可 merge worktree → main + push（純 Python，Linux 不需 --rebuild）**
+
+**Baseline：** Linux cargo lib **2252 / 0 failed**（兩遍同綠 = 非 flaky；對齊 STRKUSDT P0 wave 後 baseline）。純 Python 0 Rust diff，Linux 端跑 main HEAD `1edc6fe` baseline 等同跑本次 Track A Rust 變化。
+
+**改動 LOC 對齊 E1 self-report：**
+| 檔案 | 預期 | 實測 | <800 §九 警告 | <1200 hard cap |
+|---|---|---|---|---|
+| strategist_agent.py | 792 (was 1200) | 792 | ⚠️ 差 8 行 | ✅ |
+| strategist_edge_eval.py (NEW) | 369 | 369 | ✅ | ✅ |
+| strategist_weights.py (NEW) | 224 | 224 | ✅ | ✅ |
+| strategist_cognitive.py (NEW) | 169 | 169 | ✅ | ✅ |
+
+**4 必要 suite 兩遍同綠：**
+| Suite | Run 1 | Run 2 |
+|---|---|---|
+| test_strategist_agent.py + test_strategist_audit_wiring.py + test_h_state_query_handler.py + test_batch7_conductor_strategist.py | 126/0 | 126/0 |
+
+**Broader strategist/h_state/layer2 grep：** 301 passed / 15 fail / 30 error（全 fastapi+httpx 缺套件 Mac dev-only pre-existing；base commit `0611de0` checkout 同 fail 已驗，CLAUDE.md §七 Mac dev-only fail-by-design）
+
+**Mock 安全：** PASS — 純 file structure refactor 0 mock 變動，public API + ctor signatures + import paths 維持原貌
+
+**浮點 / SLA：** N/A（無 indicator / hot-path 改動）
+
+**3 條 WARN（不阻塞）：**
+1. strategist_agent.py 792 接近 §九 800 警告線（差 8 行）
+2. 30 fastapi/httpx Mac dev-only pre-existing
+3. 5 `record_ollama_call` DeprecationWarning pre-existing
+
+**1 條教訓：**
+1. **Mac dev-only pre-existing 識別三步驟**（≤2min disambiguate）：(a) grep `ModuleNotFoundError` 看是否套件缺；(b) `git checkout <pre-base> -- <split-file>` 跑同 test 驗 base 是否同 fail；(c) 引用 CLAUDE.md §七 Mac dev-only — 用此流程驗 15 fail + 30 error 全 pre-existing
+
+**報告：** `.claude_reports/20260427_151252_e4_regression_strategist_split.md` + `docs/CCAgentWorkSpace/E4/workspace/reports/2026-04-27--strategist_split_regression.md`
+
+---
+
 ### 2026-04-27 Live Auth Watcher event_consumer respawn fix 回歸驗證
 
 **結論：E4 PASS — 準備好 commit + push + rebuild**
