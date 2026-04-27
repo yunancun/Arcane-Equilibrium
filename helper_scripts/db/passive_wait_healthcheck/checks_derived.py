@@ -875,6 +875,178 @@ def check_h_state_gateway_freshness() -> tuple[str, str]:
 
 
 # ============================================================================
+# G3-09 Phase A (2026-04-27): cost_edge_advisor sentinel.
+# G3-09 Phase A：cost_edge_advisor 哨兵。
+# ============================================================================
+
+
+def check_cost_edge_advisor_status() -> tuple[str, str]:
+    """[30] G3-09 Phase A (2026-04-27): cost_edge_advisor env-gate + RiskConfig
+    flag sentinel.
+
+    MODULE_NOTE (EN): G3-09 completion-criteria sentinel. The cost_edge_advisor
+    is the Rust-side AI cost awareness module (CLAUDE.md §二 原則 #13:
+    "AI 資源成本感知 — 每次 AI 調用計費，cost_edge_ratio ≥ 0.8 → 建議關倉").
+    Phase A landing is advisory only — daemon polls H5 snapshot every 10s,
+    evaluates `paper_pnl_7d_usd / ai_spend_7d_usd <= trigger_threshold`, and
+    emits transition logs/audit; no IntentProcessor wiring (Phase B/C scope).
+
+    Two-phase verdict (matches PA RFC §6.2):
+
+      A. **DEFAULT-OFF path (``OPENCLAW_COST_EDGE_ADVISOR != "1"``)**:
+         PASS-skip with explicit dormant note. Phase A advisor stays off in
+         production until operator explicitly opts in (mirrors G3-08 H State
+         Gateway pattern; both default off, both flipped together once H5
+         snapshot accumulation provides meaningful ratio).
+
+      B. **DEFAULT-ON path (``OPENCLAW_COST_EDGE_ADVISOR == "1"``)**:
+         Verify two invariants without making a live IPC roundtrip (avoids
+         cron coupling to HMAC secret + main process being up — mirrors
+         [20] check_h_state_gateway_freshness philosophy):
+           1. Active risk_config TOML (demo, the canonical advisor source per
+              PA RFC §8.2) parses cleanly and contains a ``[cost_edge]``
+              section with ``enabled`` (bool) + ``trigger_threshold``
+              (numeric in [-100, 100]).
+           2. The Rust ``cost_edge_advisor`` module's three sibling files exist
+              on disk: ``mod.rs`` / ``types.rs`` / ``advisor.rs`` —
+              regression to deleted module (rare but possible from refactor
+              accident) surfaces as FAIL.
+         Three-state output:
+           - PASS: env=1 + TOML section present + module files exist.
+           - WARN: TOML missing ``[cost_edge]`` section (advisor will run with
+                   default values — non-fatal but operator should add).
+           - FAIL: TOML parse error / module files missing / threshold out of
+                   range.
+
+    Pure-function check: pure ``Path.read_text()`` + ``tomllib.loads``;
+    no live IPC, no DB cursor, no socket. Cross-platform: works identically
+    on Mac dev and Linux prod.
+
+    [30] G3-09 Phase A（2026-04-27）：cost_edge_advisor env-gate + RiskConfig
+    flag 哨兵。（NOTE：PA RFC §6.2 原寫 slot [22]，F7 已佔用 → 本實作改 [30]。）
+
+    G3-09 完成標準哨兵。cost_edge_advisor 是 Rust 端 AI 成本感知模組
+    （CLAUDE.md §二 原則 #13）。Phase A 純 advisory — daemon 每 10s 讀 H5、
+    比對 `paper_pnl_7d / ai_spend_7d <= trigger_threshold`、轉換時 log+audit；
+    不接 IntentProcessor（Phase B/C 範圍）。
+
+    兩段判決（PA RFC §6.2）：
+      A. DEFAULT-OFF（``OPENCLAW_COST_EDGE_ADVISOR != "1"``）→ PASS-skip。
+      B. DEFAULT-ON（``OPENCLAW_COST_EDGE_ADVISOR == "1"``）→ 驗 2 個不變量
+         （不做 live IPC 避 6h cron 與 HMAC/main 耦合，對齊 [20] 哲學）：
+           1. demo TOML（advisor canonical source per RFC §8.2）可解析且含
+              ``[cost_edge]`` 區塊 + ``enabled`` (bool) + ``trigger_threshold``
+              (數值 ∈ [-100, 100])。
+           2. Rust ``cost_edge_advisor`` 模組三 sibling 檔仍存在
+              （mod.rs/types.rs/advisor.rs）— refactor 誤刪會 FAIL。
+         三態：env=1+TOML+module 全綠 = PASS；TOML 缺 section = WARN（advisor
+         走預設值 fail-soft）；TOML 解析錯誤 / module 缺 / threshold 超界 = FAIL。
+
+    純函式 check：`Path.read_text` + `tomllib.loads`，無 live IPC / DB / socket。
+    Mac dev 與 Linux prod 行為一致。
+    """
+    # Path A: env-gate disabled → PASS-skip (env=0 dormant by design).
+    # 路徑 A：env=0 → PASS-skip（dormant by design）。
+    env_val = os.environ.get("OPENCLAW_COST_EDGE_ADVISOR")
+    if env_val != "1":
+        env_repr = f"={env_val!r}" if env_val is not None else "=unset"
+        return (
+            "PASS",
+            f"OPENCLAW_COST_EDGE_ADVISOR{env_repr} (≠'1') — env=0 dormant "
+            "by design (Phase A: 0 trade impact even when activated); skip",
+        )
+
+    # Path B: env-gate enabled → verify 2 invariants (Phase A expectations).
+    # 路徑 B：env=1 → 驗 2 不變量（Phase A 預期）。
+
+    # Invariant 1: demo TOML parses + has [cost_edge] section with valid fields.
+    # 不變量 1：demo TOML 可解析且 [cost_edge] 區塊欄位合法。
+    try:
+        import tomllib  # type: ignore[import-not-found]
+    except ImportError:
+        return ("WARN", "tomllib unavailable (Python <3.11?) — cannot verify [cost_edge]")
+
+    base = os.environ.get("OPENCLAW_BASE_DIR") or os.environ.get("OPENCLAW_SRV_ROOT")
+    if not base:
+        # Production Linux fallback (mirrors check_observer_pipeline_alive).
+        # 生產 Linux fallback（對齊 check_observer_pipeline_alive）。
+        base = str(Path.home() / "BybitOpenClaw" / "srv")
+    toml_path = Path(base) / "settings" / "risk_control_rules" / "risk_config_demo.toml"
+
+    if not toml_path.exists():
+        return (
+            "FAIL",
+            f"risk_config_demo.toml missing at {toml_path} — "
+            "advisor canonical source absent",
+        )
+
+    try:
+        with toml_path.open("rb") as f:
+            data = tomllib.load(f)
+    except OSError as e:
+        return ("WARN", f"TOML read failed (filesystem race?): {e}")
+    except Exception as e:  # noqa: BLE001 — surface parse error
+        return ("FAIL", f"TOML parse error: {e}")
+
+    section = data.get("cost_edge")
+    if section is None:
+        return (
+            "WARN",
+            f"[cost_edge] section absent in {toml_path.name} — advisor will use "
+            "RiskConfig defaults (enabled=false, threshold=-0.5); operator "
+            "should add explicit section per G3-09 Phase A docs",
+        )
+    if not isinstance(section, dict):
+        return ("FAIL", f"[cost_edge] not a table: {type(section).__name__}")
+
+    enabled = section.get("enabled")
+    threshold = section.get("trigger_threshold")
+    if not isinstance(enabled, bool):
+        return (
+            "FAIL",
+            f"[cost_edge].enabled missing or non-bool (got {enabled!r})",
+        )
+    if not isinstance(threshold, (int, float)):
+        return (
+            "FAIL",
+            f"[cost_edge].trigger_threshold missing or non-numeric "
+            f"(got {threshold!r})",
+        )
+    threshold_f = float(threshold)
+    if not (-100.0 <= threshold_f <= 100.0):
+        return (
+            "FAIL",
+            f"[cost_edge].trigger_threshold ({threshold_f}) out of range "
+            "[-100.0, 100.0] — advisor would silent-disable (would never "
+            "trigger / always trigger)",
+        )
+
+    # Invariant 2: Rust cost_edge_advisor module sibling files exist.
+    # 不變量 2：Rust cost_edge_advisor 模組三 sibling 檔存在。
+    advisor_dir = (
+        Path(base) / "rust" / "openclaw_engine" / "src" / "cost_edge_advisor"
+    )
+    required_files = ("mod.rs", "types.rs", "advisor.rs")
+    missing = [
+        name for name in required_files if not (advisor_dir / name).exists()
+    ]
+    if missing:
+        return (
+            "FAIL",
+            f"cost_edge_advisor module files missing: {missing} at "
+            f"{advisor_dir} — refactor regression?",
+        )
+
+    # All invariants pass.
+    # 全部不變量過。
+    return (
+        "PASS",
+        f"env=1 + [cost_edge].enabled={enabled} threshold={threshold_f} "
+        f"+ module files present (Phase A advisory only)",
+    )
+
+
+# ============================================================================
 # F7 (2026-04-26): MIT DB audit + ML-TRAINING-DATA-HYGIENE-1 derived sentinel.
 # F7（2026-04-26）：MIT DB audit + ML-TRAINING-DATA-HYGIENE-1 衍生哨兵。
 # ============================================================================

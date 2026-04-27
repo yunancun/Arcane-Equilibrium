@@ -40,6 +40,16 @@ pub use advanced::{
 pub mod regime_cfg;
 pub use regime_cfg::HurstConfig;
 
+// G3-09 Phase A (2026-04-27): cost_edge_advisor schema lives in its own
+// sibling file (`risk_config_advanced.rs` at 1297 lines, well over the §九
+// 1200 hard cap; piling more onto it compounds the violation). Pattern
+// mirrors `risk_config_regime.rs` (HurstConfig sibling).
+// G3-09 Phase A：cost_edge schema 落在獨立 sibling 檔，避免再壓縮已超標
+// 的 advanced 檔；對齊 regime_cfg sibling 拆分模式。
+#[path = "risk_config_cost_edge.rs"]
+pub mod cost_edge_cfg;
+pub use cost_edge_cfg::CostEdgeConfig;
+
 // ---------------------------------------------------------------------------
 // Top-level / 頂層
 // ---------------------------------------------------------------------------
@@ -202,6 +212,16 @@ pub struct RiskConfig {
     /// 與原硬編碼一致，operator 可 IPC 熱重載；v2 再做 per-param。
     #[serde(default)]
     pub strategist: StrategistConfig,
+    /// G3-09 Phase A (2026-04-27): cost_edge_advisor schema. Lifts CLAUDE.md §二
+    /// 原則 #13 「AI 資源成本感知」into ConfigStore as a hot-reloadable field.
+    /// Phase A defaults: `enabled = false` (dormant) + `trigger_threshold = -0.5`
+    /// (per PM Tier 9 T9-LOW-1 lock-in). Phase A landing has zero runtime impact
+    /// (advisor evaluation cycle returns Disabled when enabled=false). Phase B
+    /// (shadow dry-run) + Phase C (gate 新倉) flip the flag and wire IntentProcessor.
+    /// G3-09 Phase A：cost_edge_advisor schema 落地。預設 `enabled=false`（dormant）
+    /// + `trigger_threshold=-0.5`（PM Tier 9 lock-in）；Phase A runtime 零影響。
+    #[serde(default)]
+    pub cost_edge: CostEdgeConfig,
 }
 
 impl RiskConfig {
@@ -232,6 +252,7 @@ impl RiskConfig {
             .validate()
             .map_err(|e| format!("risk.hurst: {}", e))?;
         self.strategist.validate()?;
+        self.cost_edge.validate()?;
 
         // Cross-sub-struct invariant: partial_tp levels must not exceed take_profit_max_pct.
         // 跨 sub-struct 不變量：partial_tp 各層不得超過 take_profit_max_pct。

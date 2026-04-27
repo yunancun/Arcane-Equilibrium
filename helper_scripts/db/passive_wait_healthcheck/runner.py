@@ -69,6 +69,8 @@ from .checks_derived import (
     check_h_state_gateway_freshness,
     # F7 (2026-04-26) ML hygiene derived sentinel
     check_dust_spiral_noise_in_ef,
+    # G3-09 Phase A (2026-04-27) cost_edge_advisor sentinel
+    check_cost_edge_advisor_status,
 )
 
 
@@ -388,6 +390,23 @@ def main() -> int:
     # 讓 healthcheck 自足，cron/CI 不需 HMAC secret 即可跑。
     s, m = check_h_state_gateway_freshness()
     results.append(("[20] h_state_gateway_freshness", s, m))
+
+    # [30] G3-09 Phase A (2026-04-27): cost_edge_advisor env-gate +
+    # RiskConfig flag sentinel. DEFAULT-OFF env=0 → PASS-skip (Phase A
+    # dormant by design); env=1 → verify [cost_edge] TOML section + Rust
+    # module sibling files. Pure-Python (TOML parse + Path.exists), no
+    # live IPC roundtrip — keeps healthcheck self-contained for cron / CI
+    # without HMAC secret coupling. Slot [22] was taken by F7
+    # `trading_pipeline_silent_gap`; G3-09 Phase A claims slot [30].
+    # NOTE: PA RFC §6.2 originally proposed slot [22] (drafted before F7);
+    # adjusted to [30] post-F7 landing. PA RFC text supersedes via this
+    # implementation note.
+    # [30] G3-09 Phase A：cost_edge_advisor env-gate + RiskConfig flag 哨兵。
+    # env=0 → PASS-skip（Phase A dormant by design）；env=1 → 驗 [cost_edge]
+    # TOML 區塊 + Rust 模組 sibling 檔。純 Python，無 live IPC，cron/CI 自足。
+    # NOTE：PA RFC §6.2 原寫 [22]（F7 上線前），F7 已佔用 → 本實作改 [30]。
+    s, m = check_cost_edge_advisor_status()
+    results.append(("[30] cost_edge_advisor_status", s, m))
 
     # output
     any_fail = False

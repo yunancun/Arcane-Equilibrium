@@ -118,6 +118,28 @@ pub type StrategistCountersSlot =
 ///   `h_state_cache::HStateCache` docstring。
 pub type HStateCacheSlot = Arc<RwLock<Option<Arc<crate::h_state_cache::HStateCache>>>>;
 
+/// G3-09 Phase A (2026-04-27): late-injected slot for the cost_edge_advisor
+/// `Arc<CostEdgeAdvisor>`.
+///
+/// MODULE_NOTE (EN): Spawned only when env-gate
+///   `OPENCLAW_COST_EDGE_ADVISOR=1` is set (DEFAULT-OFF). When disabled the
+///   slot stays `None` and the IPC handler `get_cost_edge_advisor_status`
+///   returns a structured `advisor_disabled` payload — never an error — so
+///   Python callers (healthcheck [22], GUI) can render dormant state without
+///   raising. Phase A advisory only — no hot-path consumer reads this slot.
+///
+///   Mirrors the G3-08 `HStateCacheSlot` pattern (env-gate + late-inject).
+///
+/// MODULE_NOTE (中)：advisor 只在 env-gate `OPENCLAW_COST_EDGE_ADVISOR=1` 時
+///   spawn（DEFAULT-OFF）。關閉時 slot 維持 `None`，IPC handler
+///   `get_cost_edge_advisor_status` 回結構化 `advisor_disabled` payload —
+///   不報錯 — 讓 Python caller（healthcheck [22] / GUI）顯示 dormant
+///   不 raise。Phase A 純 advisory，hot-path 不讀此 slot。
+///
+///   鏡射 G3-08 `HStateCacheSlot` pattern（env-gate + late-inject）。
+pub type CostEdgeAdvisorSlot =
+    Arc<RwLock<Option<Arc<crate::cost_edge_advisor::CostEdgeAdvisor>>>>;
+
 /// F6 PH5-WIRE-1 RELOAD (2026-04-26): late-injected slot for the edge
 /// estimates reloader's manual-trigger sender. Wraps a buffer-1
 /// `tokio::sync::mpsc::Sender<()>` so multiple rapid IPC `reload_edge_estimates`

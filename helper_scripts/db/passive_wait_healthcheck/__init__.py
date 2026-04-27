@@ -67,6 +67,8 @@ from .checks_derived import (  # noqa: F401
     check_h_state_gateway_freshness,
     # F7 (2026-04-26) ML hygiene derived sentinel
     check_dust_spiral_noise_in_ef,
+    # G3-09 Phase A (2026-04-27) cost_edge_advisor sentinel
+    check_cost_edge_advisor_status,
 )
 
 __all__ = [
@@ -108,4 +110,6 @@ __all__ = [
     "check_h_state_gateway_freshness",
     # F7 derived ML hygiene
     "check_dust_spiral_noise_in_ef",
+    # G3-09 Phase A cost_edge_advisor
+    "check_cost_edge_advisor_status",
 ]

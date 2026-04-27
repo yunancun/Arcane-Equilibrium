@@ -500,6 +500,20 @@ async fn async_main(
         ipc_server.set_h_state_invalidation_sender(h_state_inv_tx);
     }
 
+    // G3-09 Phase A cost_edge_advisor (2026-04-27): gated by
+    // OPENCLAW_COST_EDGE_ADVISOR=1 (DEFAULT-OFF). Phase A advisory only —
+    // 0 trade impact / no IntentProcessor wiring. Spawn AFTER
+    // h_state_cache_slot handle so daemon can wait on slot population.
+    // G3-09 Phase A：受 OPENCLAW_COST_EDGE_ADVISOR=1 控管；Phase A 純 advisory，
+    // 不影響交易，需在 h_state_cache_slot 取得後 spawn。
+    let cost_edge_advisor_slot_handle = ipc_server.cost_edge_advisor_slot();
+    main_boot_tasks::spawn_cost_edge_advisor_if_enabled(
+        &cost_edge_advisor_slot_handle,
+        &h_state_cache_slot_handle,
+        &risk_stores,
+        &cancel,
+    );
+
     // F6 PH5-WIRE-1 RELOAD (2026-04-26): grab slot handle BEFORE IPC server
     // detaches. main.rs late-injects the daemon's manual-trigger sender
     // after the daemon is spawned (post-detach, pipelines must exist for

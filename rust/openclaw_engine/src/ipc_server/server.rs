@@ -32,7 +32,7 @@ use super::connection::handle_connection;
 use super::engine_routing::{EngineCommandChannels, LiveCmdSenderSlot};
 use super::protocol::IpcError;
 use super::slots::{
-    AuditPoolSlot, BudgetTrackerSlot, EdgeReloadSenderSlot, HStateCacheSlot,
+    AuditPoolSlot, BudgetTrackerSlot, CostEdgeAdvisorSlot, EdgeReloadSenderSlot, HStateCacheSlot,
     StrategistCountersSlot, TeacherLoopSlot,
 };
 use super::PerEngineRiskStores;
@@ -113,6 +113,11 @@ pub struct IpcServer {
     /// 注入 slot。daemon 未 spawn 時保持 None；IPC handler 讀此 slot，
     /// None 時回 `reloader_disabled`，否則走 `try_send` advisory shape。
     edge_reload_sender: EdgeReloadSenderSlot,
+    /// G3-09 Phase A (2026-04-27): late-injected slot for the cost_edge_advisor
+    /// `Arc<CostEdgeAdvisor>`. Stays None when env-gate
+    /// `OPENCLAW_COST_EDGE_ADVISOR=1` is not set (DEFAULT-OFF).
+    /// G3-09 Phase A：cost_edge_advisor slot；env-gate 未設時保持 None。
+    cost_edge_advisor: CostEdgeAdvisorSlot,
 }
 
 impl IpcServer {
@@ -141,7 +146,18 @@ impl IpcServer {
             h_state_cache: Arc::new(RwLock::new(None)),
             h_state_invalidation_tx: None,
             edge_reload_sender: Arc::new(RwLock::new(None)),
+            cost_edge_advisor: Arc::new(RwLock::new(None)),
         }
+    }
+
+    /// G3-09 Phase A (2026-04-27): get a clone of the
+    /// `CostEdgeAdvisorSlot` for late injection from
+    /// `main_boot_tasks::spawn_cost_edge_advisor_if_enabled`. Mirrors the
+    /// `h_state_cache_slot` G3-08 pattern — env-gate is checked at spawn
+    /// time, IPC handler reads slot per connection.
+    /// G3-09 Phase A：取 advisor slot handle 給 main_boot_tasks 在 env-gate 通過後注入。
+    pub fn cost_edge_advisor_slot(&self) -> CostEdgeAdvisorSlot {
+        Arc::clone(&self.cost_edge_advisor)
     }
 
     /// F6 PH5-WIRE-1 RELOAD (2026-04-26): get a clone of the edge reload
@@ -368,8 +384,14 @@ impl IpcServer {
                             // 對後續連線自動可見、IPC 不需重啟。
                             let edge_reload_sender =
                                 self.edge_reload_sender.read().await.clone();
+                            // G3-09 Phase A: clone Arc handle to advisor slot —
+                            // each connection sees late-injected advisor automatically
+                            // without IPC restart (same pattern as h_state_cache).
+                            // G3-09 Phase A：複製 advisor slot Arc handle，每連線
+                            // 自動看到 late-injected advisor 不需重啟 IPC。
+                            let cost_edge_advisor_slot = Arc::clone(&self.cost_edge_advisor);
                             tokio::spawn(async move {
-                                handle_connection(stream, config, cancel, data_dir, cmd_channels, budget_slot, teacher_slot, risk_stores, learning_store, budget_store, audit_pool, scanner_reg, strategist_counters, live_auth_recheck_tx, h_state_cache, h_state_invalidation_tx, edge_reload_sender).await;
+                                handle_connection(stream, config, cancel, data_dir, cmd_channels, budget_slot, teacher_slot, risk_stores, learning_store, budget_store, audit_pool, scanner_reg, strategist_counters, live_auth_recheck_tx, h_state_cache, h_state_invalidation_tx, edge_reload_sender, cost_edge_advisor_slot).await;
                             });
                         }
                         Err(e) => {

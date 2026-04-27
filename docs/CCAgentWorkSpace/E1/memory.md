@@ -1173,3 +1173,61 @@ G3-08 Phase 4 拆 5 sub-task（per agent 1 個）。本 4-1 = Strategist agent s
   PA RFC §5.1 已建議 backlog G3-08-FUP-ANALYST-SPLIT（與本 4-1 LOC 警告同類問題）。
 - multi_agent_framework.py 1137 + 4-5 預估 +27 = 1164，距 §九 1200 hard cap 僅 36
   LOC headroom；PA RFC 已建議 G3-08-FUP-MAF-SPLIT 把 ScoutAgent 拆獨立檔。
+
+## 2026-04-27 — G3-09 Phase A cost_edge_advisor schema + advisory only
+
+**Task** (Tier 9 Track 2, PA RFC `2026-04-26--g3_09_cost_edge_ratio_design.md` §11):
+落地 CLAUDE.md §二 #13「AI 資源成本感知」Rust hot-path module — Phase A schema
++ daemon advisory only（純 log/audit，0 trade impact，不接 IntentProcessor）。
+
+**Architecture**:
+- 新模組 `rust/openclaw_engine/src/cost_edge_advisor/{mod.rs, types.rs, advisor.rs, tests.rs}`
+  （260 + 287 + 158 + 433 = 1138 LOC，全 < §九 1200）
+- 新 schema `rust/openclaw_engine/src/config/risk_config_cost_edge.rs`（236 LOC）— 不放 advanced.rs
+  因 advanced.rs 已 1297 行超 §九 cap；對齊 `risk_config_regime.rs` HurstConfig sibling pattern
+- 新 IPC handler `ipc_server/handlers/cost_edge_advisor.rs`（164 LOC）— 1 method
+  `get_cost_edge_advisor_status` advisory-shape，對齊 `h_state.rs` gateway_disabled 模式
+- 新 slot type `CostEdgeAdvisorSlot` in `slots.rs` — 鏡射 `HStateCacheSlot` late-inject pattern
+- 新 healthcheck `[30]` in `checks_derived.py` — env=0 PASS-skip / env=1 驗 demo TOML
+  `[cost_edge]` + Rust module sibling files；slot ID 從 RFC §6.2 原 `[22]` 改 `[30]`
+  因 F7 已佔 `[22]`（trading_pipeline_silent_gap）
+
+**核心契約**:
+- env-gate `OPENCLAW_COST_EDGE_ADVISOR=1` + `RiskConfig.cost_edge.enabled=true` 雙保險
+  （RFC §9.2；對齊 G3-08 `OPENCLAW_H_STATE_GATEWAY` pattern）
+- 預設 `enabled=false` + `trigger_threshold=-0.5`（PM Tier 9 T9-LOW-1 lock-in）
+- Live TOML 用更保守 `-0.3`（vs demo/paper `-0.5`）
+- 7 status state machine: Uninitialized / Disabled / WarmUp / OK / Trigger / Stale / Anomaly
+- evaluate() pure fn O(1) — 不依賴 prev state；daemon 持有 transition history
+- ratio direction：`ratio <= threshold` trigger（per RFC §2.4 變體 A — PM ACCEPT）
+- daemon poll 10s（對齊 H state cache poller 節奏避 race）
+- 對交易完全唯讀：no IntentProcessor wiring / no close trigger / no RiskConfig write
+
+**測試**: cargo test --lib 共 +43 test（32 advisor + 5 IPC handler + 5 schema + 1
+existing) — 對齊 RFC 要求的「24+」最小門檻 ×1.7。Cargo lib baseline 2252 → 2290。
+
+**踩到的坑**:
+1. `advanced.rs` 已 1297 行（§九 1200 cap 超 8%），加新 sub-struct 必另立 sibling
+   → 用 `risk_config_cost_edge.rs` + `#[path]` mod 對齊 regime_cfg pattern
+2. `crate::common::time` 不存在 — `unix_now_ms` 只在 `h_state_cache::mod.rs` `pub(crate)`；
+   局部複製到 advisor mod 做 self-contained，避免污染 common namespace
+3. Cargo 預設並行 test 跑，env var mutation 跨 test race（兩個 env-gate test 互相清
+   彼此寫的值）→ 合併成單一 `#[test]` body + `Mutex` 序列化
+4. `RiskConfig` 的權威 hot-reload 容器是 `Arc<ConfigStore<RiskConfig>>` 而非
+   `Arc<ArcSwap<RiskConfig>>`；ConfigStore 內部用 ArcSwap 但 API 是 `.load() -> Arc<T>`
+5. 測試 fixture：45 個既有 `dispatch_request` test call sites 都需加新 advisor slot 參數
+   → Python regex 自動化加參＋手動 fix 縮排（4-sp indent → 8-sp）
+6. healthcheck slot ID `[22]` 已被 F7 佔用 — 我事前讀過 runner.py docstring 發現
+   用 `[30]`（`[1-29]+[Xa][Xb]=30 → next=[30]`）
+7. healthcheck 採用「pure-Python：TOML parse + Path.exists」對齊 `[20] check_h_state`
+   philosophy — 不做 live IPC roundtrip 避免 6h cron 與 HMAC secret + main process
+   耦合（pytest 模擬時 Mac py3.10 無 tomllib → WARN fallback 仍工作；Linux 3.12 PASS）
+
+**關鍵互動點（給 E2 review focus）**:
+- main.rs spawn 順序：必須在 `set_config_stores` + `spawn_h_state_poller_if_enabled`
+  **之後**才呼 `spawn_cost_edge_advisor_if_enabled`（advisor 需 risk_stores + h_state slot）
+- daemon 內部用 `tokio::time::sleep` poll-while-wait pattern 等 h_state_cache slot
+  populated（最多 10s），逾時 warn-and-not-spawn（fail-soft）
+- IPC handler 對 None slot 回 `Uninitialized` shape（不 error）— Python caller
+  branch on `status` field 即可
+

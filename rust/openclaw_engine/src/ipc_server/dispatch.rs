@@ -38,7 +38,7 @@ use super::handlers_config::{handle_get_config, handle_patch_config};
 use super::protocol::{
     JsonRpcRequest, JsonRpcResponse, ERR_INTERNAL, ERR_INVALID_REQUEST, ERR_METHOD_NOT_FOUND,
 };
-use super::slots::{BudgetTrackerSlot, HStateCacheSlot, TeacherLoopSlot};
+use super::slots::{BudgetTrackerSlot, CostEdgeAdvisorSlot, HStateCacheSlot, TeacherLoopSlot};
 use super::PerEngineRiskStores;
 use crate::config::{BudgetConfig, ConfigManager, ConfigStore, LearningConfig, RiskConfig};
 use crate::h_state_cache::poller::InvalidationSender;
@@ -70,6 +70,11 @@ pub(crate) async fn dispatch_request(
     // `{"accepted": false, "reason": "reloader_disabled"}`.
     // F6：edge 重載手動 trigger sender。None 時 IPC method 回 reloader_disabled。
     edge_reload_sender: &Option<tokio::sync::mpsc::Sender<()>>,
+    // G3-09 Phase A (2026-04-27): cost_edge_advisor slot. None when env=0
+    // or pre-injection — IPC handler returns advisor_disabled payload.
+    // G3-09 Phase A：cost_edge_advisor slot。None = env=0 / 未注入 → handler
+    // 回 advisor_disabled payload。
+    cost_edge_advisor_slot: &CostEdgeAdvisorSlot,
 ) -> JsonRpcResponse {
     let req: JsonRpcRequest = match serde_json::from_str(line) {
         Ok(r) => r,
@@ -425,6 +430,17 @@ pub(crate) async fn dispatch_request(
         "get_h_state_status" => handle_get_h_state_status(id, h_state_cache).await,
         "invalidate_h_state" => {
             handle_invalidate_h_state(id, &req.params, h_state_invalidation_tx).await
+        }
+        // ── G3-09 Phase A cost_edge_advisor (2026-04-27) ──
+        // Single read-only IPC handler for advisor status. Gated by
+        // `OPENCLAW_COST_EDGE_ADVISOR=1` (DEFAULT-OFF). When env-gate is off
+        // the slot stays None and handler returns structured
+        // `Uninitialized` payload (mirrors `gateway_disabled` shape).
+        // G3-09 Phase A：cost_edge_advisor 唯讀 status IPC。受
+        // `OPENCLAW_COST_EDGE_ADVISOR=1`（DEFAULT-OFF）控管。env-gate 關時
+        // slot 為 None，handler 回 `Uninitialized` payload。
+        "get_cost_edge_advisor_status" => {
+            handle_get_cost_edge_advisor_status(id, cost_edge_advisor_slot).await
         }
         _ => JsonRpcResponse::error(
             id,

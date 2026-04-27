@@ -10,6 +10,45 @@
 
 ## 工作記憶
 
+### 2026-04-27 G3-08 Phase 4 Sub-task 4-1 Strategist agent_state events 回歸驗證
+
+**結論：E4 PASS — PM 可 merge + push（純 Python，0 Rust diff，Linux 不需 --rebuild）**
+
+**Commit：** `c8a4a55`（Mac local ahead origin/main `c077e8c` by 1，未 push 待 PM merge chain）
+
+**4 必要 suite 兩遍同綠：** 142/0 → 142/0（test_strategist_agent + test_h_state_query_handler + test_strategist_audit_wiring + test_batch7_conductor_strategist；含 +7 TestStrategistSnapshot + +9 across 3 new TestCase = +16 new tests vs E1 self-report）
+
+**Linux cargo lib 兩遍同綠：** 2252/0 → 2252/0（對齊 STRKUSDT P0 wave merge 後 baseline；純 Python 0 Rust diff = 預期）
+
+**Stash isolation 模式（首次正式記錄）：** G3-09 Phase A 並行 agent ab0c139a1cd84908c Rust in-flight（25 modified + 3 new cost_edge_advisor/）必須 `git stash push -u -- rust/` 隔離；不隔離則 cargo 編譯失敗 / false negative。完成後 `git stash pop` 還原無衝突。**列入 E4 SOP**：multi-agent in-flight 場景每次必跑。
+
+**F-section grep verify（patch path migration 5/5 PASS）：**
+- `if inv is None` env-gate short-circuit: 1 hit @ h_state_invalidator.py:347 ✓
+- `def get_strategist_snapshot` 主檔 1 site @ strategist_agent.py:802 / sibling 0 hit ✓
+- `_collect_agent_snapshots` def @ h_state_query_handler.py:406 + caller @ :737 ✓
+- agent_state hook 中英對照 comments @ strategist_agent.py:79/82/800 ✓
+
+**Mock 審查（PASS）：**
+- 4 必要 suite mock 範圍合 §五.5.1（IPC fire-and-forget boundary / time / ai_service.get_ollama_client）
+- 0 mock 業務邏輯 / snapshot 計算
+- TestSafeSnapshotDefensive 系列驗 fail-closed（method missing / non-callable / non-dict / raises → returns None）符合 §二 原則 #6
+
+**浮點 / SLA：** N/A（snapshot accessor + dict aggregation 無 indicator 計算 / hot-path）
+
+**Broader -k "strategist or h_state or layer2"：** 29 collection errors 全 `ModuleNotFoundError: fastapi` Mac dev-only pre-existing（與 cost_tracker_split / strategist_split 同 pattern，CLAUDE.md §七）。0 net new fail。
+
+**3 條 WARN（不阻塞）：**
+1. strategist_agent.py 829 LOC ⚠️ §九 警告線（800 警告 / 1200 hard cap），下個 refactor wave 可抽 50-100 行降回 < 800
+2. c8a4a55 未 push origin（Mac local ahead by 1）— PM merge chain 完成後再 push
+3. E2 LOW/NIT 5 條本 E4 階段不修（PM 決定是否進 G3-08 Phase 4 follow-up）
+
+**1 條教訓（已升 SOP）：**
+- **Stash isolation 模式**：multi-agent in-flight 場景，E4 跑 Linux cargo 前必 `git stash push -u -- rust/` 隔離隔壁 agent 半成品 Rust，完成後 pop 還原。本次 G3-09 Phase A in-flight 25 mod + 3 new 完美隔離。未來凡 Mac 主樹同時有 Rust 子樹 unstaged 改動時必跑此模式。
+
+**報告：** `docs/CCAgentWorkSpace/E4/workspace/reports/2026-04-27--g3_08_phase4_1_strategist_agent_state_regression.md`
+
+---
+
 ### 2026-04-27 G3-08 Phase 4 cost_tracker split 回歸驗證
 
 **結論：E4 PASS — PM 可 merge + push（純 Python，Linux 不需 --rebuild）**
