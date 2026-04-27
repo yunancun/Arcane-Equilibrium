@@ -833,3 +833,36 @@ W2 unit cov ≥85%（22 case，零 mock）+ W3 integration ≥5 case（7 留 buf
 ### 教訓（lessons.md candidate）
 
 **「派工前必先 grep『有沒有真實 producer』」**：原 spec 提的 Option 1（Strategist 直接訂 Fill 事件）+ Option 2（Analyst broadcast trade_outcome_processed）若不先 grep `MessageType.ROUND_TRIP_COMPLETE` 的真實 producer，可能設計出「訂閱 dead event 的 PR」浪費一輪 E1 工時。本 FUP 第一步 grep 一次就避開，省下 ~2-3 day rework。應該變成 PA RFC §2 (架構評估) 強制 checklist 一條：「列出 trigger event 的 production producer 與 mtime / 過去 7d 觸發次數」。
+
+---
+
+## 2026-04-28 G8-01-FUP-REGRET-DREAM-WIRING — ESCALATE (concept dead)
+
+### 結論
+
+**不寫碼，escalate 主會話**：`OpportunityTracker` + `DreamEngine` 兩個 producer 已於 2026-04-12 RC-11 Cat A 刪除（~1003 LOC，`docs/archive/2026-04-12--changelog_archive_pre_0408.md:575`）。Production 0 caller / 0 class def / 0 import；只剩 docstring placeholder + Rust roadmap `R02-9 core/dream.rs`（未動工）+ V1.1+R1 SPEC（`docs/references/2026-04-03--agent_cognitive_adaptation_spec_v1_draft.md`，~577 LOC class 設計仍可 reference）。CognitiveModulator `_compute_stoploss_mult` + `direction` 分支結構性不可達；任何 placeholder 都不影響 modulator 行為。
+
+### Wiring 模式選擇
+
+**Path B/C 否決，選 escalate**（per task §3 escalation rule）。3 個推薦 option 留主會話 + operator 判斷：
+- **Option A**：刪除 placeholder 參數 + dream branch（~30 LOC，最小 scope）
+- **Option B**：依 SPEC 重做 OpportunityTracker + DreamEngine（~600 LOC + tests，3-5d，需新 PA RFC）
+- **Option C（PA 推）**：保留接線、加 explicit defer doc + 開 ticket `G8-01-FUP-REGRET-DREAM-DEFERRED P3` 等 R02-9 / 新 wave；零 LOC、honest
+
+### Modulator update() 真實 signature
+
+`update(*, consecutive_losses: int=0, weekly_net_pnl: float=0.0, regret_data: dict|None=None, dream_data: dict|None=None) -> dict`。Schema：`regret_data["net_regret_direction"]` ∈ `{"overtrading","undertrading","balanced"}`；`dream_data["global"]["stoploss_multiplier"]` + `["confidence"]`（>0.6 才生效）。**LOSSES-WIRING 對 update() signature 的假設成立** — `update()` 確實接這 4 個 kwarg，無需改 modulator API。
+
+### 6 個 candidate proxy 全部 fail
+
+(a) H4 missed-opp / (b) Analyst trade outcome / (c) H1 reject log / Scout exploratory / ML registry canary / epsilon-greedy schedule — 6 個 task §2 列舉的潛在源 grep + semantic 比對全 fail：H1 reject ≠ skipped opportunity 虛擬 PnL（spec §3.5 定義）；ML registry 是模型晉升 lifecycle 不是策略 MC 模擬；Scout 無 epsilon-greedy state machine。**任何 fabricated heuristic 都會違反原則 #10 認知誠實 + `feedback_no_dead_params`**。
+
+### 數字
+
+- 改動：0 files, 0 LOC business code（純 escalate 報告）。
+- 測試：W1 6/6 + LOSSES 8/8 = 14/14 baseline 全綠（worktree HEAD `e106c5d`）。
+- §九 file-size：unchanged。
+
+### 教訓（lessons.md candidate）
+
+**「P2 prep-gate scope 不容忍 fabricated heuristic」**：當 spec'd producer 已被刪、roadmap 未動工，正確回應是 escalate 三選一決策（remove / re-implement / defer），不是「想個 proxy 餵 placeholder」假裝有 wiring。後者是 `feedback_no_dead_params` + 原則 #10 的反模式 — 看似閉環但 `_compute_*` 分支永遠不可達真實 outcome。本 escalation 同模式 LOSSES-WIRING 的「先 grep producer」紀律：**spec docstring ≠ live producer**，`OpportunityTracker.get_regret_summary()` 之類 docstring claim 必須當第一可疑點 grep。

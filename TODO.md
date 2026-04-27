@@ -27,10 +27,10 @@
 - ✅ **G3-09-FUP spawn-test** (commit `22c57dc`) — 3 cases wrapper-reproduction pattern；0 production diff
 - ✅ Linux 2290 cargo / 11 daemon test / 199 pytest / 27 PASS healthcheck 全綠
 
-**Wave B 三主軸 NOW ACTIONABLE**（依賴鏈全清）：
+**Wave B 三主軸 NOW ACTIONABLE**（依賴鏈全清；REGRET-DREAM 經 PA escalation 確認 dead concept defer P3，W2/W3 接受 deferred-unreachable branches）：
 1. **G3-09 Phase B impl Wave 1** (~1.5d E1 per Phase B RFC §6) — V026 hypertable + INSERT path + healthcheck [30] frequency check；prereq 全 done（daemon test + sticky + spawn-test）
-2. **G8-01 W2 ≥85% line cov** (~1.5d E1-Beta per PA RFC §3.2) — 22 case suite；LOSSES-WIRING 後 modulator inputs 真實，cov 反映 reachable code
-3. **G8-01 W3 integration ≥5 case** (~1.5d E1-Gamma per PA RFC §3.3) — StrategistAgent integration；可與 W2 並行
+2. **G8-01 W2 ≥85% line cov** (~1.5d E1-Beta per PA RFC §3.2) — 22 case suite；LOSSES-WIRING 後 consecutive_losses 真實 wired；regret_data + dream_data 永遠 None branches 加 `# pragma: no cover` 或 cov 報告 exclude
+3. **G8-01 W3 integration ≥5 case** (~1.5d E1-Gamma per PA RFC §3.3) — StrategistAgent integration；scenario 限 consecutive_losses + h_state inputs 路徑（避用 regret/dream 場景）；可與 W2 並行
 
 **Next session 立即可派候選**：
 - Wave B 上述 3 主軸（推薦並行派發，類似 Wave A 模式）
@@ -551,7 +551,8 @@ ssh trade-core "cd ~/BybitOpenClaw/srv && python3 helper_scripts/db/passive_wait
 | **G3-08-FUP-MAF-SPLIT-CLEANUP** | 🟢P3 — E2 PASS_WITH_NITS：(a) bottom-of-file eager re-export 替代 PEP 562 評估（更乾淨 patten，PA mirror 失敗的根因分析）(b) scout_agent.py docstring 中英版 drift 聲稱 noqa F401 但實際 PEP 562（`__getattr__`）— 需同步雙語 (c) SCOUT_AGENT singleton CLAUDE.md §九 表登記（pre-existing 漏） | 下次 refactor wave | 🟢P3 | PA design 0.5d + E1 ~1h |
 | **G3-09-DAEMON-TEST-SPLIT** | 🟢P3 — E2 spawn-test LOW-1：tests/test_cost_edge_advisor_daemon.rs 1159 LOC > 800 警告（未過 1200 硬上限）；E2 推薦拆 3 檔（test_cost_edge_advisor_daemon_proofs.rs Proof 1-5 / test_cost_edge_advisor_daemon_dual_safeguard.rs / test_cost_edge_advisor_spawn_decision.rs Case A/B/C） | 下次 refactor wave | 🟢P3 | E1 ~1h |
 | **G3-09-FUP-CASE-D-H5-WAIT** | 🟢P3 — E2 spawn-test LOW-2：spawn_cost_edge_advisor_if_enabled wrapper L500-522 H5 slot wait loop（10s timeout NOT spawn + warn log path）未 cover；補 `fup_case_d_h_state_slot_never_populated_warn` test | Phase B Wave 1+ | 🟢P3 | E4 ~1h |
-| **G8-01-FUP-REGRET-DREAM-WIRING** | 🟡P2 — LOSSES-WIRING 只解 consecutive_losses；regret/dream `{}` placeholder 仍需 wire；W2 ≥85% cov + W3 integration ≥5 case 整合測試前期需求（否則 modulator EMA 邏輯仍部分卡 base） | W2/W3 派發前 | 🟡P2 | PA design 0.5d + E1 ~1d |
+| ~~**G8-01-FUP-REGRET-DREAM-WIRING**~~ | ✅ **ESCALATED → Option C deferred** 2026-04-28 PA report `docs/CCAgentWorkSpace/PA/workspace/reports/2026-04-28--g8_01_fup_regret_dream_wiring.md` | PA grep 揭：**regret/dream concept 完全 dead**。歷史 `OpportunityTracker` (~262 LOC per V1.1+R1 SPEC §3) + `DreamEngine` (~315 LOC per §4) 兩個 producer 在 2026-04-12 RC-11 dead code 清理時刪除（1003 LOC removed, archive `2026-04-12--changelog_archive_pre_0408.md:575`）。`modulator.update()` 真實 signature 確認接 `regret_data: dict\|None=None` + `dream_data: dict\|None=None`（LOSSES-WIRING 假設正確）但 caller 永遠傳 None。6 candidate proxies (H4 missed-opp / Analyst trade outcome / H1 reject log / Scout explore / ML registry / epsilon-greedy) 全 fail semantic match。PA 推 Option C：defer + open new P3 ticket（避免破壞 V1.1 SPEC API + 不擴 scope）。0 production diff. **W2 ≥85% cov 影響**：regret/dream-only branches 屬 deferred-unreachable，W2 派發時需告知 cov 計算 exclude（或加 `# pragma: no cover`） | 完成 2026-04-28 | ✅ Escalated |
+| **G8-01-FUP-REGRET-DREAM-DEFERRED** | 🟢P3 — 替代 P2 LOSSES-FUP，per PA Option C：未來重新實作 OpportunityTracker + DreamEngine（per existing V1.1+R1 SPEC `docs/references/2026-04-03--agent_cognitive_adaptation_spec_v1_draft.md` §3 + §4）需新 PA RFC（~3-5d 含 ~600 LOC 含 tests）；OR 接受 modulator 在 regret/dream 維度永遠 base value（ROI 評估）；OR 看 Rust roadmap R02-9 `core/dream.rs` `docs/rust_migration/02--core_upper.md:68` 是否優先 | 長期未定 | 🟢P3 | PA RFC + E1+E2+E4 ~3-5d (if pursued) |
 | **G3-09-PA-DOCSTRING-CLARIFY** | 🟢P4 — E2 LOSSES-WIRING LOW-1：`strategy_wiring.py:457-461` lambda capture comment "would NOT be picked up" 技術不準（Python free-var 動態查找實際 WOULD pick up reassignment）；功能無誤但 docstring 清晰度差 | 下次接手 LOSSES 時順手修 | 🟢P4 | E1 ~10min |
 | **G3-08-FUP-ANALYST-SPLIT** | 🟡P2 — Sub-task 4-3 self-flagged：analyst_agent.py 874/800 over warning +74（pre-Phase-4 即 834 已超）；拆 sibling per RFC §5.1 模式（鏡 Strategist split / cost_tracker split） | 下次 G5 wave 對齊 | 🟡P2 | PA design + E1 ~1d |
 | **G3-08-FUP-HSQ-SPLIT** | 🟡P2 — Phase 4 cumulative：post-merge h_state_query_handler.py 已超 §七 800 警告線；+5 agent arms 後預估接近 900 LOC；拆 sibling pattern (e.g. `h_state_collectors.py` 含 `_collect_h_snapshots` + `_collect_agent_snapshots`) | 下次 G5 wave 對齊 | 🟡P2 | PA design + E1 ~1d |
