@@ -505,11 +505,27 @@ def _collect_agent_snapshots(
                 guardian, "get_guardian_snapshot"
             )
 
-    # G3-08 Phase 4 Sub-task 4-3 / 4-4 / 4-5 will fill the remaining
-    # three buckets (Analyst / Executor / Scout). Their arms land
-    # additively in this same function — no signature change required.
-    # Sub-task 4-3/4/5 會於本 function 加入 Analyst / Executor / Scout
-    # arm；加性不改 signature。
+    if include_analyst:
+        # G3-08 Phase 4 Sub-task 4-3: pull AnalystAgent.get_analyst_snapshot
+        # via _safe_snapshot_self — accessor on agent self (same pattern as 4-1).
+        # ANALYST_AGENT may be ``None`` when strategy_wiring partial-init failed
+        # (see strategy_wiring.py:444 fallback); result["analyst"] stays None
+        # and is dropped from agent_states by the caller's comprehension.
+        # G3-08 Phase 4 Sub-task 4-3：透過 _safe_snapshot_self 拉取
+        # AnalystAgent.get_analyst_snapshot — accessor 在 agent 自身（與 4-1 同模式）。
+        # ANALYST_AGENT 在 strategy_wiring 部分初始化失敗時為 ``None``
+        # （見 strategy_wiring.py:444 fallback），此時 result["analyst"] 留 None，
+        # caller 的 dict comprehension 將其丟出。
+        analyst = getattr(_sw, "ANALYST_AGENT", None)
+        if analyst is not None:
+            result["analyst"] = _safe_snapshot_self(
+                analyst, "get_analyst_snapshot"
+            )
+
+    # G3-08 Phase 4 Sub-task 4-4 / 4-5 will fill the remaining two
+    # buckets (Executor / Scout). Their arms land additively in this same
+    # function — no signature change required.
+    # Sub-task 4-4/5 會於本 function 加入 Executor / Scout arm；加性不改 signature。
 
     return result
 

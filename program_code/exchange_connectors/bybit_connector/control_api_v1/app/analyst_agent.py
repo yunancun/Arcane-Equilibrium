@@ -45,6 +45,11 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
 
 from .base_agent import BaseAgent
+# G3-08 Phase 4 Sub-task 4-3 — Analyst agent_state invalidation hint
+# (env-gated no-op when OPENCLAW_H_STATE_GATEWAY != "1").
+# G3-08 Phase 4 Sub-task 4-3 — Analyst agent_state 失效提示
+# （env=非 "1" 時為 no-op）。
+from .h_state_invalidator import invalidate_async as _invalidate_h_state_async
 from .llm_call_wrapper import call_ollama_generate, ollama_is_available
 from .multi_agent_framework import (
     AgentMessage,
@@ -288,6 +293,14 @@ class AnalystAgent(BaseAgent):
             logger.error("Failed to handle round trip: %s / 处理交易回合失败: %s", e, e)
             with self._lock:
                 self._stats["errors"] += 1
+        # G3-08 Phase 4 Sub-task 4-3: emit invalidation hint outside the lock;
+        # env=0 → no-op (zero overhead). Always fired (success or error path)
+        # because both bump observable counters (trades_analyzed/l1_updates on
+        # success; errors on exception) which Rust h_state_cache should refresh.
+        # G3-08 Phase 4 Sub-task 4-3：於鎖外送出失效提示；env=0 為 no-op（零負擔）。
+        # 成功與錯誤兩條路徑都送（成功遞增 trades_analyzed/l1_updates；錯誤遞增
+        # errors），均為 Rust h_state_cache 應刷新的觀測量。
+        _invalidate_h_state_async("agent.analyst.round_trip_analyzed")
 
     def _handle_execution_report(self, message: AgentMessage) -> None:
         """Process execution report (for quality metrics) / 处理执行报告"""
@@ -814,6 +827,33 @@ class AnalystAgent(BaseAgent):
     # _audit() 繼承自 BaseAgent（前綴為 role.value = "analyst"）。
 
     # ── Status / 状态 ──
+
+    # G3-08 Phase 4 Sub-task 4-3: Analyst agent_state snapshot accessor.
+    # G3-08 Phase 4 Sub-task 4-3：Analyst agent 狀態 snapshot 存取器。
+    def get_analyst_snapshot(self) -> Dict[str, Any]:
+        """Thread-safe agent-state snapshot for h_state_cache (PA RFC §2.3, 5 fields).
+        Schema parity with Rust ``AgentState.stats: HashMap<String, i64>``: all
+        values are int or bool→int (no float / string). Pure-read, takes only
+        self._lock; safe from any thread.
+
+        H state cache 用 Analyst 狀態 snapshot（PA RFC §2.3，5 欄位）。
+        對齊 Rust ``AgentState.stats: HashMap<String, i64>``，皆 int 或 bool→int。
+        純讀、只取 self._lock，任何線程安全。
+
+        Phase 4 invariant: ``experiment_ledger_connected`` reports whether a
+        ledger has been injected (``set_experiment_ledger``), not whether the
+        ledger is healthy — health belongs to a separate snapshot.
+        Phase 4 不變量：``experiment_ledger_connected`` 僅表示是否有注入 ledger
+        （``set_experiment_ledger``），不代表 ledger 是否健康；健康狀態另循 snapshot。
+        """
+        with self._lock:
+            return {
+                "trades_analyzed": int(self._stats.get("trades_analyzed", 0)),
+                "l1_updates": int(self._stats.get("l1_updates", 0)),
+                "l2_analyses": int(self._stats.get("l2_analyses", 0)),
+                "errors": int(self._stats.get("errors", 0)),
+                "experiment_ledger_connected": int(self._experiment_ledger is not None),
+            }
 
     def get_stats(self) -> Dict[str, Any]:
         with self._lock:
