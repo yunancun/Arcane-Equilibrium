@@ -403,6 +403,104 @@ def _collect_h_snapshots(
     return h1_dict, h3_dict, h2_dict, h4_dict, h5_dict
 
 
+def _collect_agent_snapshots(
+    include_strategist: bool = False,
+    include_guardian: bool = False,
+    include_analyst: bool = False,
+    include_executor: bool = False,
+    include_scout: bool = False,
+) -> dict[str, Optional[dict[str, Any]]]:
+    """Lazy-import strategy_wiring and pull 5-Agent state snapshots.
+    延遲 import strategy_wiring 並拉取 5-Agent 狀態 snapshot。
+
+    G3-08 Phase 4 Sub-task 4-1 lands the ``strategist`` key; subsequent
+    Sub-tasks 4-2 / 4-3 / 4-4 / 4-5 incrementally fill ``guardian`` /
+    ``analyst`` / ``executor`` / ``scout``. Pattern (PA RFC §3.2 Option B):
+    return ``dict[str, Optional[dict]]`` rather than a tuple so that adding
+    a sub-task arm is purely additive — no caller signature break across
+    the multi-agent merge wave.
+    G3-08 Phase 4 Sub-task 4-1 落 ``strategist`` 鍵；後續 4-2/3/4/5 sub-task
+    依序填 ``guardian`` / ``analyst`` / ``executor`` / ``scout``。Pattern
+    （PA RFC §3.2 Option B）：回 ``dict`` 而非 tuple，新增 sub-task arm 為
+    純加性，跨 sub-task 合併不破壞 caller signature。
+
+    Returns dict with five canonical agent keys; ``None`` value when:
+      - the corresponding ``include_*`` flag is False, or
+      - ``strategy_wiring`` is not importable (bootstrap not finished /
+        test fixture / partial deploy), or
+      - the singleton (e.g. ``STRATEGIST_AGENT``) is not yet wired, or
+      - the snapshot accessor (e.g. ``get_strategist_snapshot``) is missing
+        (sub-task not yet landed — silent skip preserves never-raise contract), or
+      - the accessor itself raises (defensive: any ``Exception`` is logged
+        at DEBUG and converted to ``None`` so the response stays well-formed).
+
+    All exceptions silenced — pure-read aggregator, must match the
+    ``never-raises`` contract of ``build_h_state_full_response``.
+    回傳含 5 個 canonical agent key 的 dict；某 key 為 ``None`` 之原因：
+      - 對應 ``include_*`` 旗標為 False；
+      - ``strategy_wiring`` 不可匯入；
+      - singleton（如 ``STRATEGIST_AGENT``）尚未接線；
+      - snapshot accessor（如 ``get_strategist_snapshot``）缺席（對應
+        sub-task 未 land — 靜默跳過保 never-raise 合約）；
+      - accessor 拋例外（防禦：DEBUG 記錄、轉為 ``None``）。
+    所有例外被吞 —— 對齊 ``build_h_state_full_response`` never-raise 合約。
+    """
+    result: dict[str, Optional[dict[str, Any]]] = {
+        "strategist": None,
+        "guardian": None,
+        "analyst": None,
+        "executor": None,
+        "scout": None,
+    }
+
+    if not (
+        include_strategist
+        or include_guardian
+        or include_analyst
+        or include_executor
+        or include_scout
+    ):
+        # Caller filtered all out — short-circuit before paying import cost.
+        # caller 全部過濾 — 短路省匯入成本。
+        return result
+
+    try:
+        # Lazy import: same rationale as _collect_h_snapshots — strategy_wiring
+        # is heavy and must not boot transitively at module top.
+        # 延遲匯入：與 _collect_h_snapshots 同理，strategy_wiring 重，
+        # 不可在模組頂層傳遞性匯入。
+        from . import strategy_wiring as _sw  # noqa: PLC0415
+    except Exception as exc:  # noqa: BLE001 — broad: any import-time failure
+        logger.debug(
+            "_collect_agent_snapshots: strategy_wiring not importable; "
+            "falling back to empty result. Reason: %s "
+            "/ strategy_wiring 不可匯入；退回空 dict",
+            exc,
+        )
+        return result
+
+    if include_strategist:
+        # G3-08 Phase 4 Sub-task 4-1: pull StrategistAgent.get_strategist_snapshot
+        # via _safe_snapshot_self (sibling of _safe_snapshot) — accessor lives
+        # on the agent itself, not a sub-attribute (mirrors H4 SSOT pattern).
+        # G3-08 Phase 4 Sub-task 4-1：透過 _safe_snapshot_self 拉取
+        # StrategistAgent.get_strategist_snapshot — accessor 在 agent 自身
+        # 而非子屬性（與 H4 SSOT pattern 同模式）。
+        strategist = getattr(_sw, "STRATEGIST_AGENT", None)
+        if strategist is not None:
+            result["strategist"] = _safe_snapshot_self(
+                strategist, "get_strategist_snapshot"
+            )
+
+    # G3-08 Phase 4 Sub-task 4-2 / 4-3 / 4-4 / 4-5 will fill the remaining
+    # four buckets (Guardian / Analyst / Executor / Scout). Their arms land
+    # additively in this same function — no signature change required.
+    # Sub-task 4-2/3/4/5 會於本 function 加入 Guardian / Analyst / Executor /
+    # Scout arm；加性不改 signature。
+
+    return result
+
+
 def _safe_snapshot(
     parent: Any,
     attr_name: str,
@@ -570,12 +668,29 @@ def build_h_state_full_response(
         include_h2 = True
         include_h4 = True
         include_h5 = True
+        # G3-08 Phase 4: default include selects every available agent bucket;
+        # Sub-task 4-1 fills strategist now, 4-2/3/4/5 fill the rest. Until
+        # those land the unfilled keys silently degrade to None and are
+        # dropped from agent_states (same shape as H bucket missing).
+        # G3-08 Phase 4：預設 include 涵蓋全部 agent 桶；Sub-task 4-1 填
+        # strategist，其他 4 個由後續 sub-task 填，未 land 前靜默退化為 None
+        # 並從 agent_states 丟出（與 H 桶缺席同形狀）。
+        include_strategist = True
+        include_guardian = True
+        include_analyst = True
+        include_executor = True
+        include_scout = True
     else:
         include_h1 = "h1" in include
         include_h3 = "h3" in include
         include_h2 = "h2" in include
         include_h4 = "h4" in include
         include_h5 = "h5" in include
+        include_strategist = "strategist" in include
+        include_guardian = "guardian" in include
+        include_analyst = "analyst" in include
+        include_executor = "executor" in include
+        include_scout = "scout" in include
 
     # Phase 2 short-circuit: env disabled → empty shell to keep dispatch
     # path cheap. We could still try to populate (snapshots are env-
@@ -612,13 +727,34 @@ def build_h_state_full_response(
     if h5_dict is not None:
         h_states["h5"] = h5_dict
 
+    # G3-08 Phase 4 Sub-task 4-1: aggregate 5-Agent state snapshots.
+    # Returns a dict keyed by canonical agent name; ``None`` value signals
+    # "not available" (sub-task not yet landed / singleton not wired /
+    # accessor raised) and is dropped from the wire response below.
+    # G3-08 Phase 4 Sub-task 4-1：聚合 5-Agent 狀態 snapshot。
+    # dict key = canonical agent name；``None`` 表示「不可得」（sub-task
+    # 未 land / singleton 未接線 / accessor 拋例外），下方從 wire response 丟出。
+    agent_dict_map = _collect_agent_snapshots(
+        include_strategist=include_strategist,
+        include_guardian=include_guardian,
+        include_analyst=include_analyst,
+        include_executor=include_executor,
+        include_scout=include_scout,
+    )
+    agent_states: dict[str, Any] = {
+        k: v for k, v in agent_dict_map.items() if v is not None
+    }
+
     # Bump version when at least one bucket is real; stay at fallback
     # version when nothing populated (callers can detect "Phase 1 shape"
     # cheaply: ``version == 0 and not h_states and not agent_states``).
-    # 至少一桶為真實時升 version；空殼時維持 fallback version（caller
-    # 可廉價偵測 Phase 1 形狀：``version == 0 and not h_states and not
-    # agent_states``）。
-    if h_states:
+    # G3-08 Phase 4: agent_states now also counts toward "real" so a
+    # standalone agent_states (e.g. include=["strategist"] only) lifts
+    # version to 1 even with empty h_states.
+    # 至少一桶為真實時升 version；空殼時維持 fallback version。
+    # G3-08 Phase 4：agent_states 也計入「真實」，故僅含 agent_states
+    # （例：include=["strategist"]）也會將 version 升至 1。
+    if h_states or agent_states:
         version = _PHASE2_VERSION
     else:
         version = _PHASE1_FALLBACK_VERSION
@@ -627,7 +763,7 @@ def build_h_state_full_response(
         "version": version,
         "fetched_at_ms": fetched_at_ms,
         _H_BUCKET_KEY: h_states,
-        _AGENT_BUCKET_KEY: {},  # Phase 4 fills this bucket / Phase 4 填入
+        _AGENT_BUCKET_KEY: agent_states,
     }
 
 

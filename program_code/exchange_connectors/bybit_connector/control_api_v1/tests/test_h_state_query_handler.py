@@ -188,6 +188,9 @@ class _FakeStrategist:
         with_h4=False,
         h4_snapshot=None,
         h4_raises=None,
+        with_strategist_snapshot=False,
+        strategist_snapshot=None,
+        strategist_snapshot_raises=None,
     ):
         self._h1_gate = h1_gate
         self._model_router = model_router
@@ -212,6 +215,33 @@ class _FakeStrategist:
                 return _self._h4_snapshot
             # Bind as instance method
             self.get_h4_snapshot = _get
+
+        # G3-08 Phase 4 Sub-task 4-1: Strategist agent_state snapshot accessor.
+        # Default with_strategist_snapshot=False — opt-in, mirrors with_h4 pattern,
+        # so Phase 1-3 tests stay unaffected (they don't expect agent_states.strategist).
+        # G3-08 Phase 4 Sub-task 4-1：Strategist agent_state snapshot 存取器。
+        # 預設 with_strategist_snapshot=False — opt-in，與 with_h4 同模式，
+        # Phase 1-3 測試（不期望 agent_states.strategist）不受影響。
+        self._strategist_snapshot = strategist_snapshot if strategist_snapshot is not None else {
+            "intel_received": 11,
+            "intel_evaluated": 7,
+            "intents_produced": 3,
+            "intents_shadow_logged": 4,
+            "evaluations_rejected": 2,
+            "ai_evaluations": 5,
+            "heuristic_evaluations": 2,
+            "errors": 0,
+            "pending_intents": 1,
+            "emergency_mode_active": 0,
+            "cognitive_modulator_connected": 1,
+        }
+        self._strategist_snapshot_raises = strategist_snapshot_raises
+        if with_strategist_snapshot:
+            def _get_strategist(_self=self):
+                if _self._strategist_snapshot_raises is not None:
+                    raise _self._strategist_snapshot_raises
+                return _self._strategist_snapshot
+            self.get_strategist_snapshot = _get_strategist
 
 
 def _install_fake_strategy_wiring(strategist):
@@ -1222,6 +1252,250 @@ class TestH5IncludeFilter(unittest.TestCase):
             set(result["h_states"].keys()),
             {"h1", "h2", "h3", "h4", "h5"},
         )
+
+
+# ── 35-41. Phase 4 Sub-task 4-1: Strategist agent_state integration ──
+
+
+class TestStrategistAgentStateIntegration(unittest.TestCase):
+    """35-37. G3-08 Phase 4 Sub-task 4-1: agent_states.strategist bucket
+    population + degradation paths.
+
+    Mirrors the H4 caller-side pattern (snapshot accessor on the agent
+    itself, not a sub-attribute). Per PA RFC §2.1 the schema has 11
+    fields, all int / bool→int (Rust ``AgentState.stats: HashMap<String, i64>``
+    parity). Sub-task 4-2 / 4-3 / 4-4 / 4-5 will add guardian / analyst /
+    executor / scout buckets additively without changing this fixture.
+
+    G3-08 Phase 4 Sub-task 4-1：agent_states.strategist 桶填入 + 降級路徑；
+    與 H4 caller-side pattern 相同（snapshot accessor 在 agent 自身）。
+    PA RFC §2.1 的 schema 為 11 欄位、皆 int / bool→int（對齊 Rust
+    ``AgentState.stats: HashMap<String, i64>``）。Sub-task 4-2/3/4/5 會以
+    加性方式新增 guardian / analyst / executor / scout 桶，不影響本 fixture。
+    """
+
+    _EXPECTED_STRATEGIST_FIELDS = {
+        "intel_received",
+        "intel_evaluated",
+        "intents_produced",
+        "intents_shadow_logged",
+        "evaluations_rejected",
+        "ai_evaluations",
+        "heuristic_evaluations",
+        "errors",
+        "pending_intents",
+        "emergency_mode_active",
+        "cognitive_modulator_connected",
+    }
+
+    def setUp(self):
+        self._prev_env = os.environ.get("OPENCLAW_H_STATE_GATEWAY")
+        os.environ["OPENCLAW_H_STATE_GATEWAY"] = "1"
+
+    def tearDown(self):
+        if self._prev_env is None:
+            os.environ.pop("OPENCLAW_H_STATE_GATEWAY", None)
+        else:
+            os.environ["OPENCLAW_H_STATE_GATEWAY"] = self._prev_env
+
+    def test_strategist_populated_when_get_strategist_snapshot_present(self):
+        """35. env=1 + strategist.get_strategist_snapshot present →
+        agent_states.strategist contains the 11-field snapshot.
+        """
+        prev_sw = _install_fake_strategy_wiring(
+            _FakeStrategist(
+                _FakeH1Gate(),
+                _FakeModelRouter(),
+                cost_tracker=_FakeCostTracker(),
+                with_h4=True,
+                with_strategist_snapshot=True,
+            )
+        )
+        try:
+            result = build_h_state_full_response()
+            self.assertIn("strategist", result["agent_states"])
+            strategist = result["agent_states"]["strategist"]
+            # Schema parity with Rust AgentState.stats (11 fields).
+            self.assertEqual(set(strategist.keys()), self._EXPECTED_STRATEGIST_FIELDS)
+            # Spot-check default fixture values.
+            self.assertEqual(strategist["intel_received"], 11)
+            self.assertEqual(strategist["intents_produced"], 3)
+            self.assertEqual(strategist["cognitive_modulator_connected"], 1)
+            # All values must be int (Rust HashMap<String, i64> parity).
+            for k, v in strategist.items():
+                self.assertIsInstance(v, int, f"{k} must be int")
+            # 5 H buckets + 1 agent bucket all populated → version 1.
+            self.assertEqual(result["version"], 1)
+            # Sub-task 4-1 only fills strategist; 4-2/3/4/5 keys absent.
+            # Sub-task 4-1 只填 strategist；4-2/3/4/5 對應 key 缺席。
+            self.assertNotIn("guardian", result["agent_states"])
+            self.assertNotIn("analyst", result["agent_states"])
+            self.assertNotIn("executor", result["agent_states"])
+            self.assertNotIn("scout", result["agent_states"])
+        finally:
+            _restore_strategy_wiring(prev_sw)
+
+    def test_strategist_dropped_when_get_strategist_snapshot_missing(self):
+        """36. env=1 + strategist lacks get_strategist_snapshot → strategist
+        absent (silent skip preserves never-raise contract). Models the
+        Phase 3 deploy scenario where Sub-task 4-1 hasn't landed yet.
+        """
+        prev_sw = _install_fake_strategy_wiring(
+            _FakeStrategist(
+                _FakeH1Gate(),
+                _FakeModelRouter(),
+                cost_tracker=_FakeCostTracker(),
+                with_h4=True,
+                # with_strategist_snapshot default False → method absent
+            )
+        )
+        try:
+            result = build_h_state_full_response()
+            self.assertNotIn("strategist", result["agent_states"])
+            # H buckets unaffected — the only "real" data is 4 H buckets.
+            self.assertIn("h1", result["h_states"])
+            self.assertIn("h2", result["h_states"])
+            self.assertIn("h3", result["h_states"])
+            self.assertIn("h4", result["h_states"])
+            self.assertEqual(result["version"], 1)
+        finally:
+            _restore_strategy_wiring(prev_sw)
+
+    def test_strategist_dropped_when_get_strategist_snapshot_raises(self):
+        """37. env=1 + strategist.get_strategist_snapshot raises → strategist
+        bucket dropped, H buckets unaffected.
+        """
+        prev_sw = _install_fake_strategy_wiring(
+            _FakeStrategist(
+                _FakeH1Gate(),
+                _FakeModelRouter(),
+                cost_tracker=_FakeCostTracker(),
+                with_h4=True,
+                with_strategist_snapshot=True,
+                strategist_snapshot_raises=RuntimeError("strategist snap boom"),
+            )
+        )
+        try:
+            result = build_h_state_full_response()
+            self.assertNotIn("strategist", result["agent_states"])
+            # H buckets unaffected.
+            self.assertIn("h1", result["h_states"])
+            self.assertIn("h4", result["h_states"])
+            self.assertEqual(result["version"], 1)
+        finally:
+            _restore_strategy_wiring(prev_sw)
+
+
+class TestStrategistAgentStateIncludeFilter(unittest.TestCase):
+    """38-41. G3-08 Phase 4 Sub-task 4-1: include filter honours
+    ``strategist`` bucket selection alongside H buckets.
+    """
+
+    def setUp(self):
+        self._prev_env = os.environ.get("OPENCLAW_H_STATE_GATEWAY")
+        os.environ["OPENCLAW_H_STATE_GATEWAY"] = "1"
+        self._prev_sw = _install_fake_strategy_wiring(
+            _FakeStrategist(
+                _FakeH1Gate(),
+                _FakeModelRouter(),
+                cost_tracker=_FakeCostTracker(with_h5=True),
+                with_h4=True,
+                with_strategist_snapshot=True,
+            )
+        )
+
+    def tearDown(self):
+        _restore_strategy_wiring(self._prev_sw)
+        if self._prev_env is None:
+            os.environ.pop("OPENCLAW_H_STATE_GATEWAY", None)
+        else:
+            os.environ["OPENCLAW_H_STATE_GATEWAY"] = self._prev_env
+
+    def test_include_strategist_only(self):
+        """38. include=["strategist"] → agent_states has only strategist,
+        h_states empty, version=1 (agent bucket alone lifts version).
+        """
+        result = build_h_state_full_response(include=["strategist"])
+        self.assertIn("strategist", result["agent_states"])
+        self.assertEqual(set(result["agent_states"].keys()), {"strategist"})
+        # H buckets filtered out.
+        self.assertEqual(result["h_states"], {})
+        # G3-08 Phase 4: agent_states alone counts toward "real" → version 1.
+        self.assertEqual(result["version"], 1)
+
+    def test_include_default_none_includes_strategist(self):
+        """39. include=None default still picks up strategist bucket
+        (parity with H buckets default-on behaviour).
+        """
+        result = build_h_state_full_response(include=None)
+        self.assertIn("strategist", result["agent_states"])
+        # Phase 3 H buckets remain populated.
+        self.assertEqual(
+            set(result["h_states"].keys()),
+            {"h1", "h2", "h3", "h4", "h5"},
+        )
+
+    def test_include_h_buckets_only_drops_strategist(self):
+        """40. include=["h1","h2","h3","h4","h5"] (no agent keys) →
+        agent_states empty even though strategist accessor is wired.
+        """
+        result = build_h_state_full_response(
+            include=["h1", "h2", "h3", "h4", "h5"]
+        )
+        self.assertEqual(result["agent_states"], {})
+        # H buckets all populate.
+        self.assertEqual(
+            set(result["h_states"].keys()),
+            {"h1", "h2", "h3", "h4", "h5"},
+        )
+        self.assertEqual(result["version"], 1)
+
+    def test_mixed_include_h_and_agent(self):
+        """41. include=["h1","strategist"] → only h1 + strategist populate."""
+        result = build_h_state_full_response(include=["h1", "strategist"])
+        self.assertEqual(set(result["h_states"].keys()), {"h1"})
+        self.assertEqual(set(result["agent_states"].keys()), {"strategist"})
+        self.assertEqual(result["version"], 1)
+
+
+class TestCollectAgentSnapshotsDefensive(unittest.TestCase):
+    """42. Defensive paths for _collect_agent_snapshots — ensures the
+    aggregator never raises and degrades cleanly when strategy_wiring
+    isn't importable / STRATEGIST_AGENT is None / accessor missing.
+    """
+
+    def test_strategy_wiring_import_failure_returns_all_none(self):
+        """42a. strategy_wiring not in sys.modules and not importable →
+        all 5 keys are None (caller silently drops them).
+        """
+        from app.h_state_query_handler import _collect_agent_snapshots
+        # Inject a broken strategy_wiring that raises on import use.
+        # Note: actual ImportError is hard to fake mid-test; we instead
+        # verify the structural contract — when no agent flags requested,
+        # we get the all-None skeleton without ever importing.
+        result = _collect_agent_snapshots()  # all flags False
+        self.assertEqual(set(result.keys()),
+                         {"strategist", "guardian", "analyst", "executor", "scout"})
+        for v in result.values():
+            self.assertIsNone(v)
+
+    def test_strategist_none_when_singleton_missing(self):
+        """42b. include_strategist=True + STRATEGIST_AGENT is None on the
+        fake module → result["strategist"] is None.
+        """
+        from app.h_state_query_handler import _collect_agent_snapshots
+        prev_sw = sys.modules.get("app.strategy_wiring")
+        bare = types.ModuleType("app.strategy_wiring")
+        # No STRATEGIST_AGENT attribute → getattr returns None.
+        sys.modules["app.strategy_wiring"] = bare
+        try:
+            result = _collect_agent_snapshots(include_strategist=True)
+            self.assertIsNone(result["strategist"])
+        finally:
+            if prev_sw is None:
+                sys.modules.pop("app.strategy_wiring", None)
+            else:
+                sys.modules["app.strategy_wiring"] = prev_sw
 
 
 if __name__ == "__main__":

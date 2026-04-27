@@ -76,8 +76,12 @@ from typing import Any, Callable, Dict, List, Optional
 from .base_agent import BaseAgent
 from .h1_thought_gate import H1ThoughtGate
 from .h4_validator import validate_ai_output
-# G3-08 Phase 3 Sub-task 3-2 — H4 invalidation hint, env-gated no-op when off.
-# G3-08 Phase 3 Sub-task 3-2 — H4 失效提示，env 關閉時 no-op。
+# G3-08 Phase 4 Sub-task 4-1 — Strategist agent_state invalidation hint
+# (also reused by Phase 3 Sub-task 3-2 H4 path in strategist_edge_eval).
+# env-gated no-op when OPENCLAW_H_STATE_GATEWAY != "1".
+# G3-08 Phase 4 Sub-task 4-1 — Strategist agent_state 失效提示
+# （Phase 3 Sub-task 3-2 H4 路徑於 strategist_edge_eval 也用）。env=非 "1" 時 no-op。
+from .h_state_invalidator import invalidate_async as _invalidate_h_state_async
 from .model_router import ModelRouter
 from .multi_agent_framework import (
     AgentMessage,
@@ -476,6 +480,9 @@ class StrategistAgent(BaseAgent):
 
         with self._lock:
             self._stats["intel_evaluated"] += 1
+        # G3-08 Phase 4 Sub-task 4-1: hint outside _lock; env=0 no-op.
+        # G3-08 Phase 4 Sub-task 4-1：於鎖外送出失效提示；env=0 no-op。
+        _invalidate_h_state_async("agent.strategist.intel_handled")
 
         # Log evaluation / 記錄評估
         eval_record = {
@@ -594,6 +601,10 @@ class StrategistAgent(BaseAgent):
                     adjusted_confidence, evaluation.confidence, weight,
                     adjusted_confidence,
                 )
+
+        # G3-08 Phase 4 Sub-task 4-1: hint once per intel batch (post-loop, no _lock).
+        # G3-08 Phase 4 Sub-task 4-1：每筆 intel 一次，loop 外、鎖外；env=0 no-op。
+        _invalidate_h_state_async("agent.strategist.intent_produced")
 
     # ── Risk / Pattern / Directive Handlers ──
 
@@ -784,6 +795,32 @@ class StrategistAgent(BaseAgent):
             return {
                 "validation_fail": int(self._stats.get("h4_validation_fail", 0)),
                 "validation_pass": int(self._stats.get("h4_validation_pass", 0)),
+            }
+
+    # G3-08 Phase 4 Sub-task 4-1: Strategist agent_state snapshot accessor.
+    # G3-08 Phase 4 Sub-task 4-1：Strategist agent 狀態 snapshot 存取器。
+    def get_strategist_snapshot(self) -> Dict[str, Any]:
+        """Thread-safe agent-state snapshot for h_state_cache (PA RFC §2.1, 11 fields).
+        Schema parity with Rust ``AgentState.stats: HashMap<String, i64>``: all
+        values are int or bool→int (no float / string). Pure-read, takes only
+        self._lock; safe from any thread.
+        H state cache 用 Strategist 狀態 snapshot（PA RFC §2.1，11 欄位）。
+        對齊 Rust ``AgentState.stats: HashMap<String, i64>``，皆 int 或 bool→int。
+        純讀、只取 self._lock，任何線程安全。
+        """
+        with self._lock:
+            return {
+                "intel_received": int(self._stats.get("intel_received", 0)),
+                "intel_evaluated": int(self._stats.get("intel_evaluated", 0)),
+                "intents_produced": int(self._stats.get("intents_produced", 0)),
+                "intents_shadow_logged": int(self._stats.get("intents_shadow_logged", 0)),
+                "evaluations_rejected": int(self._stats.get("evaluations_rejected", 0)),
+                "ai_evaluations": int(self._stats.get("ai_evaluations", 0)),
+                "heuristic_evaluations": int(self._stats.get("heuristic_evaluations", 0)),
+                "errors": int(self._stats.get("errors", 0)),
+                "pending_intents": int(len(self._pending_intents)),
+                "emergency_mode_active": int(bool(self._emergency_mode.is_set())),
+                "cognitive_modulator_connected": int(self._cognitive_modulator is not None),
             }
 
     def get_recent_evaluations(self, limit: int = 20) -> List[Dict[str, Any]]:
