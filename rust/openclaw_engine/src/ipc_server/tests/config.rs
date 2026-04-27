@@ -2,7 +2,7 @@
 //! ARCH-RC1 1C-2-C / LIVE-P2-1：統一 Config IPC 端點測試。
 
 use super::super::*;
-use super::{empty_budget_slot, empty_h_state_cache_slot, empty_teacher_slot, make_test_config, make_test_data_dir};
+use super::{empty_budget_slot, empty_cost_edge_advisor_slot, empty_h_state_cache_slot, empty_teacher_slot, make_test_config, make_test_data_dir};
 
 /// Build test stores: all three risk engines + learning + budget.
 /// 構建測試 stores：三個風控引擎 + learning + budget。
@@ -46,6 +46,7 @@ async fn test_rc1_get_risk_config_returns_snapshot_and_version() {
         &empty_h_state_cache_slot(),
         &None,
         &None,
+        &empty_cost_edge_advisor_slot(),
     )
     .await;
     assert!(resp.error.is_none(), "expected success: {resp:?}");
@@ -78,6 +79,7 @@ async fn test_rc1_patch_risk_config_bumps_version_and_updates() {
         &empty_h_state_cache_slot(),
         &None,
         &None,
+        &empty_cost_edge_advisor_slot(),
     )
     .await;
     assert!(resp.error.is_none(), "expected success: {resp:?}");
@@ -116,6 +118,7 @@ async fn test_rc1_patch_risk_config_validation_failure_rolls_back() {
         &empty_h_state_cache_slot(),
         &None,
         &None,
+        &empty_cost_edge_advisor_slot(),
     )
     .await;
     assert!(resp.error.is_some(), "expected validation error");
@@ -149,6 +152,7 @@ async fn test_rc1_patch_missing_patch_field_errors() {
         &empty_h_state_cache_slot(),
         &None,
         &None,
+        &empty_cost_edge_advisor_slot(),
     )
     .await;
     assert!(resp.error.is_some());
@@ -179,6 +183,7 @@ async fn test_rc1_patch_learning_and_budget_configs_round_trip() {
         &empty_h_state_cache_slot(),
         &None,
         &None,
+        &empty_cost_edge_advisor_slot(),
     )
     .await;
     assert!(resp.error.is_none(), "patch_learning_config: {resp:?}");
@@ -200,6 +205,7 @@ async fn test_rc1_patch_learning_and_budget_configs_round_trip() {
         &empty_h_state_cache_slot(),
         &None,
         &None,
+        &empty_cost_edge_advisor_slot(),
     )
     .await;
     assert!(resp.error.is_none());
@@ -224,6 +230,7 @@ async fn test_rc1_patch_learning_and_budget_configs_round_trip() {
         &empty_h_state_cache_slot(),
         &None,
         &None,
+        &empty_cost_edge_advisor_slot(),
     )
     .await;
     assert!(resp.error.is_none(), "patch_budget_config: {resp:?}");
@@ -252,6 +259,7 @@ async fn test_rc1_get_config_without_store_errors() {
         &empty_h_state_cache_slot(),
         &None,
         &None,
+        &empty_cost_edge_advisor_slot(),
     )
     .await;
     assert!(resp.error.is_some());
@@ -286,6 +294,7 @@ async fn test_p2_patch_risk_config_engine_routing() {
         &empty_h_state_cache_slot(),
         &None,
         &None,
+        &empty_cost_edge_advisor_slot(),
     )
     .await;
     assert!(resp.error.is_none(), "expected success: {resp:?}");
@@ -338,6 +347,7 @@ async fn test_p2_get_risk_config_engine_selection() {
         &empty_h_state_cache_slot(),
         &None,
         &None,
+        &empty_cost_edge_advisor_slot(),
     )
     .await;
     // Now GET demo config — should show version=1.
@@ -360,6 +370,7 @@ async fn test_p2_get_risk_config_engine_selection() {
         &empty_h_state_cache_slot(),
         &None,
         &None,
+        &empty_cost_edge_advisor_slot(),
     )
     .await;
     assert!(resp.error.is_none(), "expected success: {resp:?}");
@@ -384,6 +395,7 @@ async fn test_p2_get_risk_config_engine_selection() {
         &empty_h_state_cache_slot(),
         &None,
         &None,
+        &empty_cost_edge_advisor_slot(),
     )
     .await;
     let r2 = resp2.result.unwrap();
@@ -438,6 +450,7 @@ async fn test_g3_02_a2_patch_executor_shadow_mode_via_patch_risk_config() {
         &empty_h_state_cache_slot(),
         &None,
         &None,
+        &empty_cost_edge_advisor_slot(),
     )
     .await;
     assert!(resp.error.is_none(), "expected success: {resp:?}");
@@ -481,6 +494,7 @@ async fn test_g3_02_a2_patch_executor_max_position_pct() {
         &empty_h_state_cache_slot(),
         &None,
         &None,
+        &empty_cost_edge_advisor_slot(),
     )
     .await;
     assert!(resp.error.is_none(), "expected success: {resp:?}");
@@ -518,6 +532,7 @@ async fn test_g3_02_a2_patch_executor_invalid_max_position_pct_rolls_back() {
         &empty_h_state_cache_slot(),
         &None,
         &None,
+        &empty_cost_edge_advisor_slot(),
     )
     .await;
     assert!(resp.error.is_some(), "expected validation error");
@@ -553,6 +568,7 @@ async fn test_g3_02_a2_patch_executor_routes_to_demo_engine() {
         &empty_h_state_cache_slot(),
         &None,
         &None,
+        &empty_cost_edge_advisor_slot(),
     )
     .await;
     assert!(resp.error.is_none(), "expected success: {resp:?}");
@@ -608,6 +624,7 @@ async fn test_g3_05_patch_exit_shadow_enabled_via_patch_risk_config() {
         &empty_h_state_cache_slot(),
         &None,
         &None,
+        &empty_cost_edge_advisor_slot(),
     )
     .await;
     assert!(resp.error.is_none(), "expected success: {resp:?}");
@@ -646,6 +663,7 @@ async fn test_g3_05_patch_exit_shadow_enabled_per_engine_routing() {
         &empty_h_state_cache_slot(),
         &None,
         &None,
+        &empty_cost_edge_advisor_slot(),
     )
     .await;
     assert!(resp.error.is_none(), "expected success: {resp:?}");
@@ -684,6 +702,7 @@ async fn test_g3_05_patch_exit_shadow_enabled_invalid_type_rejected() {
         &empty_h_state_cache_slot(),
         &None,
         &None,
+        &empty_cost_edge_advisor_slot(),
     )
     .await;
     assert!(resp.error.is_some(), "non-bool must reject");

@@ -2,7 +2,7 @@
 //! Phase 4 (4-00) 儀表板骨架測試。
 
 use super::super::*;
-use super::{empty_budget_slot, empty_h_state_cache_slot, empty_teacher_slot, make_test_config, make_test_data_dir};
+use super::{empty_budget_slot, empty_cost_edge_advisor_slot, empty_h_state_cache_slot, empty_teacher_slot, make_test_config, make_test_data_dir};
 
 /// Initial Phase 4 status — all four modules should report "grey".
 /// 初始 Phase 4 狀態 — 四個模組應全部回報 "grey"。
@@ -28,6 +28,7 @@ async fn test_get_phase4_status_returns_grey_initial() {
         &empty_h_state_cache_slot(),
         &None,
         &None,
+        &empty_cost_edge_advisor_slot(),
     )
     .await;
     assert!(resp.error.is_none(), "phase4 status must succeed");
@@ -62,6 +63,7 @@ async fn test_get_phase4_status_response_schema() {
         &empty_h_state_cache_slot(),
         &None,
         &None,
+        &empty_cost_edge_advisor_slot(),
     )
     .await;
     assert!(resp.error.is_none());
@@ -104,6 +106,7 @@ async fn test_dispatch_phase4_status() {
         &empty_h_state_cache_slot(),
         &None,
         &None,
+        &empty_cost_edge_advisor_slot(),
     )
     .await;
     assert_eq!(resp.id, serde_json::json!(4002));

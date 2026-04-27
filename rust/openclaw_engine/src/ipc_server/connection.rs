@@ -30,7 +30,7 @@
 
 use super::dispatch::dispatch_request;
 use super::engine_routing::EngineCommandChannels;
-use super::slots::{BudgetTrackerSlot, HStateCacheSlot, TeacherLoopSlot};
+use super::slots::{BudgetTrackerSlot, CostEdgeAdvisorSlot, HStateCacheSlot, TeacherLoopSlot};
 use super::PerEngineRiskStores;
 use crate::config::{BudgetConfig, ConfigManager, ConfigStore, LearningConfig};
 use crate::h_state_cache::poller::InvalidationSender;
@@ -88,6 +88,12 @@ pub(super) async fn handle_connection(
     // F6：edge 重載 daemon 手動 trigger sender。Accept 時自 slot 讀一次；
     // daemon 未 spawn 時為 None。
     edge_reload_sender: Option<tokio::sync::mpsc::Sender<()>>,
+    // G3-09 Phase A (2026-04-27): cost_edge_advisor slot. Connection-level
+    // Arc clone; advisor late-injected by main_boot_tasks. None until
+    // spawn_cost_edge_advisor_if_enabled wires it (env=0 keeps it None).
+    // G3-09 Phase A：cost_edge_advisor slot；advisor 由 main_boot_tasks
+    // 在 env-gate 通過後 late-inject。
+    cost_edge_advisor_slot: CostEdgeAdvisorSlot,
 ) {
     let peer = format!("{:?}", stream.peer_addr());
     info!(peer = %peer, "client connected / 客戶端已連接");
@@ -189,7 +195,7 @@ pub(super) async fn handle_connection(
             line_result = lines.next_line() => {
                 match line_result {
                     Ok(Some(line)) => {
-                        let response = dispatch_request(&line, &config, &data_dir, &cmd_channels, &budget_slot, &teacher_slot, &risk_stores, &learning_store, &budget_store, &audit_pool, &scanner_registry, &strategist_counters, &live_auth_recheck_tx, &h_state_cache, &h_state_invalidation_tx, &edge_reload_sender).await;
+                        let response = dispatch_request(&line, &config, &data_dir, &cmd_channels, &budget_slot, &teacher_slot, &risk_stores, &learning_store, &budget_store, &audit_pool, &scanner_registry, &strategist_counters, &live_auth_recheck_tx, &h_state_cache, &h_state_invalidation_tx, &edge_reload_sender, &cost_edge_advisor_slot).await;
                         let mut resp_bytes = serde_json::to_vec(&response)
                             .unwrap_or_else(|_| br#"{"jsonrpc":"2.0","error":{"code":-32603,"message":"serialization error"},"id":null}"#.to_vec());
                         resp_bytes.push(b'\n');

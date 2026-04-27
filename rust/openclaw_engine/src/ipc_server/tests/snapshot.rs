@@ -2,7 +2,7 @@
 //! R06-A：快照文件讀取 IPC 測試。
 
 use super::super::*;
-use super::{empty_budget_slot, empty_h_state_cache_slot, empty_teacher_slot, make_test_config, make_test_data_dir, write_test_snapshot};
+use super::{empty_budget_slot, empty_cost_edge_advisor_slot, empty_h_state_cache_slot, empty_teacher_slot, make_test_config, make_test_data_dir, write_test_snapshot};
 
 #[tokio::test]
 async fn test_get_paper_state_no_file() {
@@ -26,6 +26,7 @@ async fn test_get_paper_state_no_file() {
         &empty_h_state_cache_slot(),
         &None,
         &None,
+        &empty_cost_edge_advisor_slot(),
     )
     .await;
     assert!(
@@ -56,6 +57,7 @@ async fn test_get_paper_state_with_snapshot() {
         &empty_h_state_cache_slot(),
         &None,
         &None,
+        &empty_cost_edge_advisor_slot(),
     )
     .await;
     assert!(resp.error.is_none(), "error: {:?}", resp.error);
@@ -87,6 +89,7 @@ async fn test_get_latest_prices_with_snapshot() {
         &empty_h_state_cache_slot(),
         &None,
         &None,
+        &empty_cost_edge_advisor_slot(),
     )
     .await;
     assert!(resp.error.is_none(), "error: {:?}", resp.error);
@@ -117,6 +120,7 @@ async fn test_get_tick_stats_with_snapshot() {
         &empty_h_state_cache_slot(),
         &None,
         &None,
+        &empty_cost_edge_advisor_slot(),
     )
     .await;
     assert!(resp.error.is_none(), "error: {:?}", resp.error);

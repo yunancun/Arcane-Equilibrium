@@ -15,13 +15,18 @@
 
 use crate::startup::ExchangePipelineBindings;
 use crate::tasks;
+use openclaw_engine::config::{ConfigStore, RiskConfig};
+use openclaw_engine::cost_edge_advisor::{
+    is_advisor_env_enabled, spawn_cost_edge_advisor, CostEdgeAdvisor,
+    DEFAULT_POLL_INTERVAL as COST_EDGE_DEFAULT_POLL_INTERVAL,
+};
 use openclaw_engine::database::pool::DbPool;
 use openclaw_engine::h_state_cache::poller::{
     make_invalidation_channel, spawn_h_state_poller, InvalidationSender, StubHStateFetcher,
     DEFAULT_POLL_INTERVAL,
 };
 use openclaw_engine::h_state_cache::{is_gateway_enabled, HStateCache};
-use openclaw_engine::ipc_server::{HStateCacheSlot, PerEngineRiskStores};
+use openclaw_engine::ipc_server::{CostEdgeAdvisorSlot, HStateCacheSlot, PerEngineRiskStores};
 use openclaw_engine::scanner::registry::SymbolRegistry;
 use openclaw_engine::tick_pipeline::PipelineCommand;
 use std::sync::Arc;
@@ -410,6 +415,130 @@ pub(crate) fn spawn_h_state_poller_if_enabled(
     );
 
     Some(inv_tx)
+}
+
+/// G3-09 Phase A (2026-04-27): conditionally spawn the cost_edge_advisor
+/// daemon, gated by `OPENCLAW_COST_EDGE_ADVISOR=1`.
+///
+/// EN: DEFAULT-OFF: when env var missing or any value other than `"1"`
+///   (strict comparison) this fn returns immediately, allocating zero
+///   memory and spawning zero tasks. Mirrors `spawn_h_state_poller_if_enabled`
+///   pattern for structural consistency.
+///
+///   When env=1: build `Arc<CostEdgeAdvisor>` (initial Uninitialized state),
+///   late-inject into `IpcServer::cost_edge_advisor_slot()`, then spawn the
+///   periodic poll daemon. Daemon polls H state cache every 10s + evaluates
+///   threshold + emits transition logs.
+///
+///   Dual safeguard (PA RFC §9.2): even when env=1, daemon respects
+///   `RiskConfig.cost_edge.enabled` flag — when false, advisor enters
+///   Disabled state and short-circuits H state read.
+///
+///   The daemon takes a clone of the demo `Arc<ConfigStore<RiskConfig>>`
+///   per PA RFC §8 (cross-env config independence; demo is the canonical
+///   read source for ratio because demo is the main edge accumulation per
+///   memory `feedback_demo_over_paper_for_edge`). Phase B/C may extend to
+///   per-env advisors.
+///
+/// 中：DEFAULT-OFF：env 未設或非 `"1"` 時立即回 `None`，0 記憶體 0 task。
+///   對齊 `spawn_h_state_poller_if_enabled` pattern。env=1 時建
+///   `Arc<CostEdgeAdvisor>`、late-inject 到 IpcServer slot，spawn 每 10s
+///   poll daemon。雙保險（RFC §9.2）：env=1 仍須 `RiskConfig.cost_edge.enabled
+///   = true` 才完整 evaluate；false 走 Disabled short-circuit。
+///   Daemon 取 demo `ConfigStore<RiskConfig>` clone（RFC §8 cross-env 獨立；
+///   demo 為 ratio canonical read source，per memory
+///   `feedback_demo_over_paper_for_edge`）。Phase B/C 可擴 per-env advisor。
+pub(crate) fn spawn_cost_edge_advisor_if_enabled(
+    advisor_slot: &CostEdgeAdvisorSlot,
+    h_state_cache_slot: &HStateCacheSlot,
+    risk_stores: &PerEngineRiskStores,
+    cancel: &CancellationToken,
+) {
+    if !is_advisor_env_enabled() {
+        // Zero-overhead path / 零負擔路徑
+        info!(
+            "cost_edge_advisor disabled (OPENCLAW_COST_EDGE_ADVISOR != \"1\"), daemon not spawned \
+             / cost_edge_advisor 未啟用，daemon 未啟動",
+        );
+        return;
+    }
+
+    // Daemon needs an Arc<HStateCache>. Read the slot synchronously at boot
+    // time — when env-gate G3-09 is on we expect G3-08 H State Gateway also
+    // on (cost_edge_advisor is meaningless without H5 snapshot data).
+    // Daemon 需 Arc<HStateCache>。Boot 時同步讀 slot — G3-09 env-gate 開時
+    // 預期 G3-08 H State Gateway 也開（advisor 沒 H5 資料就無意義）。
+    let h_state_cache_slot_clone = Arc::clone(h_state_cache_slot);
+    let advisor = CostEdgeAdvisor::new_arc();
+    let advisor_clone = Arc::clone(&advisor);
+    let advisor_slot_clone = Arc::clone(advisor_slot);
+
+    // Demo store is the canonical risk source per PA RFC §8 (memory
+    // `feedback_demo_over_paper_for_edge` — demo is the main edge
+    // accumulation environment, paper is exploration noise).
+    // Demo store 為 canonical risk source（RFC §8 + memory：demo 為主 edge
+    // 累積、paper 為探索噪音）。
+    let risk_demo: Arc<ConfigStore<RiskConfig>> = Arc::clone(&risk_stores.demo);
+
+    let cancel_for_task = cancel.clone();
+
+    // Two-stage spawn: (1) inject advisor handle into IPC slot so handler
+    // can read state immediately (returns Uninitialized until first poll
+    // cycle stores OK/Trigger/...). (2) spawn the daemon, but ONLY after
+    // h_state_cache slot is populated (poll await loop).
+    // 兩階段 spawn：(1) 注入 advisor handle 到 IPC slot（首輪 poll 前
+    // handler 讀回 Uninitialized）；(2) spawn daemon，但需等 h_state_cache
+    // slot 寫入完成。
+    tokio::spawn(async move {
+        // Step (1): inject advisor handle into IPC slot.
+        // 步驟 (1)：注入 advisor handle 到 IPC slot。
+        advisor_slot_clone
+            .write()
+            .await
+            .replace(Arc::clone(&advisor_clone));
+
+        // Step (2): wait for h_state_cache slot to be populated by
+        // spawn_h_state_poller_if_enabled. Poll every 100ms up to 10s.
+        // 步驟 (2)：等 h_state_cache slot 由 spawn_h_state_poller_if_enabled
+        // 寫入；100ms poll 一次最多 10s。
+        let h_state_cache = {
+            let mut attempts = 0u32;
+            loop {
+                if let Some(c) = h_state_cache_slot_clone.read().await.as_ref() {
+                    break Arc::clone(c);
+                }
+                attempts += 1;
+                if attempts > 100 {
+                    warn!(
+                        "cost_edge_advisor: h_state_cache_slot never populated after 10s; \
+                         daemon NOT spawned (G3-08 env-gate likely off; G3-09 advisor \
+                         needs H5 snapshot to function) \
+                         / cost_edge_advisor: h_state_cache 10s 內未注入；daemon 未 spawn"
+                    );
+                    return;
+                }
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+        };
+
+        // Step (3): spawn the daemon now that all dependencies are ready.
+        // 步驟 (3)：依賴全到位後 spawn daemon。
+        let _handle = spawn_cost_edge_advisor(
+            advisor_clone,
+            h_state_cache,
+            risk_demo,
+            COST_EDGE_DEFAULT_POLL_INTERVAL,
+            cancel_for_task,
+        );
+
+        info!(
+            poll_interval_ms = COST_EDGE_DEFAULT_POLL_INTERVAL.as_millis() as u64,
+            phase = "A_advisory",
+            "cost_edge_advisor spawned (env=1) — Phase A advisory only \
+             (no IntentProcessor wiring) / cost_edge_advisor 已啟動（env=1）— \
+             Phase A 純 advisory（不接 IntentProcessor）"
+        );
+    });
 }
 
 /// F6 PH5-WIRE-1 RELOAD env-gate flag (DEFAULT-OFF, strict "1" semantics).

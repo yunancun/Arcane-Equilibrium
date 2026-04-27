@@ -320,3 +320,16 @@ antipersistent_threshold = 0.45 # H < 0.45 → mean-reverting side
 max_param_delta_pct = 0.30      # ±30% cap on per-cycle non-weight param delta
 
 [experimental.flags]
+
+# G3-09 Phase A (2026-04-27) — cost_edge_advisor schema (advisory only).
+# See risk_config_demo.toml for full background. LIVE-specific tuning:
+# `trigger_threshold = -0.3` is more conservative than demo/paper `-0.5` —
+# real-money environment has lower tolerance for AI cost vs PnL drift.
+# Phase A landing remains advisory only (no IntentProcessor wiring); Phase C
+# operator unlock requires ≥7d demo Phase B shadow data review per RFC §8.3.
+# G3-09 Phase A：cost_edge_advisor schema（純 advisory）— Live 環境用更保守
+# threshold `-0.3`（vs demo/paper `-0.5`）；Phase A 不接 IntentProcessor，
+# Phase C unlock 需 ≥7d demo Phase B shadow 資料審核（RFC §8.3）。
+[cost_edge]
+enabled = false                 # Phase A dormant — env-gate + flag dual safeguard
+trigger_threshold = -0.3        # Live more conservative than demo/paper (-0.5)

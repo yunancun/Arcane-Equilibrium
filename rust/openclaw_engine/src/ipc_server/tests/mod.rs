@@ -87,6 +87,13 @@ pub(super) fn empty_h_state_cache_slot() -> HStateCacheSlot {
     Arc::new(RwLock::new(None))
 }
 
+/// G3-09 Phase A: empty cost_edge_advisor slot for tests that don't
+/// exercise the advisor path. Mirrors `empty_h_state_cache_slot`.
+/// G3-09 Phase A：給未演練 advisor 路徑的測試使用的空 advisor slot。
+pub(super) fn empty_cost_edge_advisor_slot() -> CostEdgeAdvisorSlot {
+    Arc::new(RwLock::new(None))
+}
+
 /// Write a test snapshot file to a temp dir, return the dir path.
 /// 寫入測試快照文件到臨時目錄，返回目錄路徑。
 pub(super) fn write_test_snapshot() -> (Arc<PathBuf>, tempfile::TempDir) {

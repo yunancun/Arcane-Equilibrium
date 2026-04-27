@@ -16,6 +16,7 @@
 //!   維持在兄弟模組 `handlers_config` 不變。
 
 mod budget;
+mod cost_edge_advisor;
 mod dynamic_risk;
 mod governance;
 mod h_state;
@@ -35,6 +36,7 @@ mod teacher;
 pub(in crate::ipc_server) use budget::{
     handle_get_ai_budget_status, handle_record_ai_usage, handle_update_ai_budget_config,
 };
+pub(in crate::ipc_server) use cost_edge_advisor::handle_get_cost_edge_advisor_status;
 pub(in crate::ipc_server) use dynamic_risk::{
     handle_get_dynamic_risk_status, handle_set_dynamic_risk_enabled,
 };

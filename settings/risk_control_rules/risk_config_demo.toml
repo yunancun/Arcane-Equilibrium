@@ -322,3 +322,23 @@ antipersistent_threshold = 0.45 # H < 0.45 → mean-reverting side
 # operator 可 IPC `<60s` 熱重載；validate() 強制 (0.0, 1.0) + 拒 NaN/Inf。
 [strategist]
 max_param_delta_pct = 0.30      # ±30% cap on per-cycle non-weight param delta
+
+# G3-09 Phase A (2026-04-27) — cost_edge_advisor schema (advisory only).
+# Lifts CLAUDE.md §二 原則 #13 「AI 資源成本感知 — 每次 AI 調用計費，
+# cost_edge_ratio ≥ 0.8 → 建議關倉」into Rust ConfigStore. Phase A defaults:
+# `enabled = false` (advisor dormant — env=1 + enabled=true to activate);
+# `trigger_threshold = -0.5` (per PM Tier 9 T9-LOW-1 lock-in: ratio ≤ -0.5
+# means paper PnL loss reaches 50% of AI spend — clearly burning, not noise).
+# Phase A landing: 0 trade impact / no IntentProcessor wiring / advisory only
+# (status logged + audit emitted on transition; no close trigger). Phase B
+# (shadow dry-run) + Phase C (gate 新倉) deferred to follow-up sub-tasks.
+# Cross-env: per memory `feedback_env_config_independence`, demo/paper/live
+# threshold may evolve independently — DO NOT consolidate. Live TOML uses
+# more conservative `-0.3` (smaller tolerance for AI burn).
+# G3-09 Phase A：cost_edge_advisor schema（純 advisory）。CLAUDE.md §二 #13
+# 「AI 成本感知」升為 Rust ConfigStore 一級欄位。預設 `enabled=false`（dormant，
+# env=1 + flag=true 才啟動）+ `trigger_threshold=-0.5`（PM lock-in：paper 虧損達
+# AI 花費 50%）。Phase A 0 trade impact / 不接 IntentProcessor / 純 advisory。
+[cost_edge]
+enabled = false                 # Phase A dormant — env-gate + flag dual safeguard
+trigger_threshold = -0.5        # ratio <= -0.5 trigger（PM Tier 9 T9-LOW-1 lock-in）

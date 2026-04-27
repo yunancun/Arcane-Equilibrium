@@ -19,6 +19,7 @@ pub mod claude_teacher;
 pub mod combine_layer;
 pub mod common;
 pub mod config;
+pub mod cost_edge_advisor;
 pub mod database;
 pub mod decision_context_producer;
 pub mod drawdown_revoke;
