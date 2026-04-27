@@ -61,6 +61,7 @@
 | 2026-04-27 | live-auth-watcher-event-consumer-spawn Round-2 review (working tree) — APPROVE_WITH_NITS · main.rs=1194 緊靠 1200 ⚠️ LOW | inline final message |
 | 2026-04-27 | Live Auth Renew 移至 Governance Hub (97bab9a) — APPROVE_WITH_NITS · 1 MEDIUM（ocEsc+textContent 雙重 escape pre-existing）+ 1 MEDIUM（tab-live.html 1598 行 pre-existing）+ 1 LOW（try/catch dead code）+ 1 ⚠️ 809 行警告 | inline final message |
 | 2026-04-27 | G3-08 Phase 4 Wave II batch 4-2/3/4/5 batch review (e1157ae/b8951ab/d99a0da/eee0f7b) — 4 PASS_WITH_NITS · sequential merge confirmed conflict（h_state_query_handler.py + test_h_state_query_handler.py 同位置 textual conflict，純機械 3-way 解；無語意衝突）· framework signature 4 commits 完全一致（5-key skeleton 不變）· schema parity Rust HashMap<String,i64> 全綠（int + bool→int + len cast）· 1 MEDIUM（4-5 multi_agent_framework.py 1190/1200 hard cap edge，FUP-MAF-SPLIT 必先 file 才能再動該檔）· 1 LOW（4-3 analyst empty-payload 早 return 後 invalidate 仍 fire — harmless no-op when env=0）· 1 LOW（4-4 executor dedup/error 早 return bumps 觀察計數但 skip invalidate；10s 排程 poll 兜底，RFC 設計範圍內）· 4-4 Edit/Write silent-fail caveat 已驗 disk == commit blob 無 phantom content · cross-platform / f-string / except 吞例外 / 雙語 注釋 / Bybit API / Migration Guard 全綠 | inline final message |
+| 2026-04-27 | G8-01 W1 CognitiveModulator dead-path fix（worktree-agent-a5d05003010f9c38c, working tree） — PASS to E4 · 1 LOW informational（strategist_agent.py 854>800 pre-existing 推近）+ 1 LOW style（cognitive.py:240 內層冗餘 try）· PA RFC §6 三點全綠（grep 0 殘留 / test_strategist_agent.py 48 全綠 / state 不洩漏）· BUG-A rename clean + regression guard test 加分 · BUG-B caller=0→1 結構修接 hot path（unconditional pre-return 驗證）· regret/dream `{}` placeholder + consecutive_losses=0 屬 PA 明示 acknowledged limitation（FUP-LOSSES-WIRING + W2/W3 deferred）· 6/6 新測 + 96/96 既有 strategist 套件全綠 | workspace/reports/2026-04-27--g8_01_w1_review.md |
 
 ## 歷史審查關鍵發現（累積記憶）
 
@@ -460,3 +461,53 @@
   3. **Commit message 精準度**：「byte-identical」這類強斷言要嚴審 — 本案 schema-identical / behavior-equivalent-for-downstream / retMsg-branch-changed 三層差異需區分
   4. **新 file size grep**：1 行 over hard limit 也要打回 — 不能因「只差 1 行」放水，§九 標準是硬性
 
+### 2026-04-27 G8-01 W1 CognitiveModulator dead-path fix（worktree-agent-a5d05003010f9c38c）
+- **結論**：PASS to E4（1 LOW informational, nothing blocking）
+- **改動**：4 檔（strategist_edge_eval.py +9/-2 / strategist_cognitive.py +111/-2 / strategist_agent.py +25 / test_strategist_cognitive_w1_fix.py +255 NEW）
+- **驗證重點**：
+  1. **PA RFC §6 #1 GREP** `get_current_params` production 0 殘留（命中位點都是 promote_routes 同名 dict key + comment + test docstring，與 modulator API 無關）
+  2. **PA RFC §6 #2 regression** test_strategist_agent.py 48 全綠（PA 預期 41，drift 但全綠）；strategist 整套 96 全綠
+  3. **PA RFC §6 #3 state 不洩漏** W1 test 用 `_make_strategist()` 工廠每 case fresh，不依 module-level singleton
+  4. **BUG-B 接 hot path** 正確：tick 在 `with self._lock` 取 `_intel_count` 之後（atomic snapshot），早於 5 個 early return；emergency_mode 例外屬合理設計
+  5. **fail-soft test** 直驗 RuntimeError 不污染 hot path 且 stats 仍累積
+  6. **N=10 magic number** 命名常量 + 雙語注釋 cadence rationale，符合 modulator EMA(α=0.3) 收斂節奏
+- **PA-acknowledged limitation**：regret/dream `{}` placeholder + `_stats["consecutive_losses"]` 未 init → modulator 結構性 ++ 但行為仍卡 base value；W1 = 結構修非完全 live，FUP-LOSSES-WIRING + W2/W3 deferred 為 PA RFC §3.1 / §10 明文
+- **教訓**：
+  1. **rename fix 必有 regression guard test**：rename 後外層 try/except 仍會 mask 未來 regression；E1 加 `test_get_all_params_does_not_raise()` 是好實踐，未來其他 rename fix 應仿
+  2. **「結構修 vs 行為 live」要明確區分**：BUG-B 從 caller=0 修到 caller=1 是結構修，但若 input 全 0 → modulator 邏輯仍 dead 分支；E2 必查 PA RFC 是否明示 acknowledge 此 limitation 並標 FUP，明示則 PASS，未明示則 RETURN
+  3. **私有屬性穿透 sibling-pattern 例外**：`agent._cognitive_modulator` / `agent._stats` 屬同套件 sibling 模組對 agent 內部的合法穿透（pre-existing pattern）；§九「無私有屬性穿透」對此類同套件 sibling helper 不應一刀切
+  4. **PA RFC §6 must-check + 對抗反問結合**：PA 給的 3 點 + E2 自己想的 7 點對抗反問互補，避免單靠 PA 漏審；本次「regret/dream {} 是否承認 limitation」「N=10 是否合理」「emergency_mode 例外是否漏 fire」3 點對抗反問 PA 沒列但都成立
+  5. **854 行 pre-existing > 800 警告**：W1 +25 推近邊界但非主因，記 LOW informational + FUP backlog 留 G5 處理，不退回單個 fix；硬性是 1200，不是 800
+
+
+## G3-08-FUP-MAF-SPLIT review · 2026-04-27 commit b8b5150
+
+**Subject**: ScoutAgent class 從 multi_agent_framework.py (1190 LOC) 抽到 scout_agent.py (NEW 297) — pure location-only refactor。
+
+**Verdict**: PASS_WITH_NITS to E4
+
+**6 套 286 tests E2 reproduce 全綠**（test_scout_integration 38 + audit_wiring/maf/h_state_query 169 + strategist/conductor 79）。
+
+**核心 review 點 — PEP 562 lazy `__getattr__` re-export 偏離 PA RFC**：
+1. **PA RFC §3 假設 eager `from .scout_agent import ScoutAgent  # noqa: F401` 即可**（mirror `6fac0ca` strategist split），但 strategist case **不 re-export 回 maf**（test 直接 `from app.strategist_agent import StrategistAgent`），故 strategist 沒有 cycle 場景；ScoutAgent 案是新場景（class 搬出 + 仍要 maf re-export 回去 + scout_agent module-load 期需 maf 8 個內部符號），E1 實測撞循環 import 改用 PEP 562 module-level `__getattr__` lazy re-export
+2. **更乾淨替代** = bottom-of-file eager import（放在 maf 檔尾 line 966 後）— maf body 從未引用 ScoutAgent class（grep 證），eager 在檔尾觸發 scout_agent module-load 時 maf body 已執行完。E1 沒嘗試此方案，PA RFC §3 也未指明 import 位置。當 INFO 級記 P3 backlog `G3-08-FUP-MAF-SPLIT-CLEANUP`，不退回
+3. **PEP 562 副作用**：(a) `dir(maf)` 首次 lookup 後 cache 進 globals → IDE/Pylance type narrowing 部分降級 (b) 對 mypy 0.910+ OK，對舊 IDE 可能漏 auto-complete (c) docstring drift：scout_agent MODULE_NOTE 中英版聲稱 "noqa: F401 re-export" 但實際 maf 用 PEP 562 → 讀者 grep 找 noqa 將 mismatch 真實機制
+
+**驗證手法（複用模板）**：
+- `python3 -c "from app.maf import X; from app import sub_module; assert X is sub_module.X"` 驗 identity
+- `pickle.dumps/loads` round-trip 驗 class qualname 不破
+- `dir(maf)` 驗 cache 行為
+- 全 6 套 pytest reproduce
+- grep 3 hint emit 字串 bit-identical
+
+**Findings 分級**：
+- LOW NIT × 2：docstring drift 聲稱 noqa F401 ≠ 實際 PEP 562；unused `logger` import（pre-existing 風格）
+- INFO × 2：bottom-of-file eager 替代方案；SCOUT_AGENT pre-existing 未在 §九 singleton 表登記
+- 0 CRITICAL / 0 HIGH / 0 MEDIUM
+
+**review 心得**：
+1. **「PA RFC mirror 過往模式」需查依賴方向**：mirror `6fac0ca` 假設失效因 strategist 與 scout 兩 case 依賴方向不同；PA RFC 未做依賴方向 cross-check
+2. **PEP 562 lazy re-export 是合法但 over-magic 解法**：除非 enable Python 3.7+ 與 type checker 友好性是硬需求，否則 bottom-of-file eager 更 idiomatic
+3. **E1 偏離 PA 並寫明於 commit + 報告 §5.1** 是正確流程；E2 應驗 (a) 偏離真有必要 (b) functionally 對 (c) 替代是否更簡單；本案 (a)(b) yes，(c) 有但 acceptable to ship → PASS_WITH_NITS 而非 RETURN
+4. **「0 production change」refactor 必驗**：3 hint emit + 5-field schema + class identity 三項 bit-identical 全 grep + reproduce 比對
+5. **0 LOC 警告線雙標**：scout_agent 297 < 800 ok；maf 966 仍在 800-1200 警告區但本 PR 改善 -224 方向正確 → 不阻擋

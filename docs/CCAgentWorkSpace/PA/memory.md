@@ -720,3 +720,82 @@ ETA 全鏈 **3.75d 並行版**（≤ PA design §11.1 估 4d），順序 5d。
 | 2026-04-27 | G3-08 Phase 4 5-Agent state events design RFC（推 Pattern B 5 sub-task / ETA 3.75d 並行 / 2 Backlog FUP filed）| workspace/reports/2026-04-27--g3_08_phase4_5agent_design_rfc.md |
 
 ---
+
+---
+
+## 2026-04-27 G8-01 認知自適應 e2e RFC
+
+### 核心發現
+
+`CognitiveModulator` (193 LOC) live-wired in `strategy_wiring.py:407-409` 但**邏輯 dead**：
+- **BUG-A**：caller `strategist_cognitive.py:160` + `strategist_edge_eval.py:191` 呼 `modulator.get_current_params()`，**該方法不存在**（modulator 只有 `get_all_params`），try/except 靜默吞 → 永遠回 default `(min_confidence, 1.0)`
+- **BUG-B**：`modulator.update(...)` production code 0 caller（grep 證），permanent 卡 base value (`confidence_floor=0.60`/`qty_ceiling=1.0`/`update_count=0`)
+
+### 設計決策
+
+不直接派 E4 寫測試（會測 dead code），先派 E1-Alpha W1 production fix：
+- FIX-A：rename `get_current_params` → `get_all_params`（2 處）
+- FIX-B：`strategist_cognitive.py` 新增 `tick_cognitive_modulator(agent)` helper + `strategist_agent.handle_intel()` 末尾每 N=10 次 tick（Option γ）
+
+W2 unit cov ≥85%（22 case，零 mock）+ W3 integration ≥5 case（7 留 buffer）並行。
+
+### namespace 確認
+
+- `local_model_tools/cognitive_modulator.py` = class (193 LOC)
+- `control_api_v1/app/strategist_cognitive.py` = sibling helper (169 LOC, 4 functions, no class)
+- 兩者語意分離無 confusion
+
+### ETA
+
+3-3.5d wall-clock（W1 1d → W2/W3 並行 1.5d → E2/E4/QA 1d）
+
+### 報告路徑
+
+`docs/CCAgentWorkSpace/PA/workspace/reports/2026-04-27--g8_01_cognitive_e2e_design.md`
+
+### 教訓（lessons.md candidate）
+
+「test coverage 不等於 live behavior」— G8-01 原 spec「≥85% line cov」若無人發現 BUG-A+B，可能達標但測的全是 dead code。**Coverage RFC 派發前必先 grep call sites + 驗 method-name parity**。屬 `feedback_no_dead_params` 的 corollary。
+
+---
+
+## 2026-04-27 G3-09 Phase B shadow dry-run RFC（cost_edge_advisor 觀察期）
+
+**RFC**：`docs/CCAgentWorkSpace/PA/workspace/reports/2026-04-27--g3_09_phase_b_shadow_dryrun_design.md`
+
+**Phase B 重定義（vs RFC §7.2 原計畫）**：
+- RFC §7.2 line 511 寫「IntentProcessor 加 would_reject_intent shadow check」— 違反 Phase B「0 trade impact」原則（即使 pure fn 也改 hot path 形狀且必須 cost_gate 並排 audit）
+- 本 Phase B 把「shadow IntentProcessor」整塊移 Phase C，退回純 advisor observability（觀察 advisor 自己的 evaluate cadence + ratio distribution + status transitions）
+- 1.5d 工時與工作量匹配後保持
+
+**範圍**（in/out 嚴格切）：
+- IN：持久化 evaluate cycle 採樣（V026 hypertable）+ IPC schema 增 4 欄（counter rolling 24h）+ healthcheck [30] 升級從 schema 哨兵 → trigger frequency sanity + observation deliverable
+- OUT：IntentProcessor changes / shadow_reject_count / RiskConfig.cost_edge_gate_enabled / per-strategy ratio（屬 Phase C 或 Phase D）
+
+**Phase A FUP 升級**：`G3-09-PHASE-A-DAEMON-INTEGRATION-TEST` 從 P3 升 **P1**，列 Phase B Wave 0 prerequisite — Phase B observation 沒 daemon 整合測試 = 無 ground truth
+
+**避 decision_outcomes 2 bug**：
+- `engine_mode` NOT NULL CHECK + INSERT 路徑顯式 bind（避「100% paper」bug）
+- 不存 timeframe（Phase B 不依賴 K 線）+ 全欄位 NOT NULL/explicit DEFAULT
+- V026 加 Guard A/B（per CLAUDE.md §七 SQL migration 規範）
+
+**Sanity range**（per RFC §2.2）：
+- evaluations_24h ≥ 8000 healthy / < 4000 FAIL（10s cycle × 24h × 95% uptime baseline）
+- triggers_24h 0-10 healthy / 11-50 WARN noise / >50 FAIL spam
+- triggers_per_hour peak ≤ 5 healthy / 6-20 WARN / >20 FAIL
+- dead gate detection at 7d：0 trigger + ratio 全離 threshold ≥0.3 → WARN calibrate
+
+**Down-sample 1/min**：daemon 每 10s evaluate 但 INSERT 1/min（24h 1440 row/day），transition row 不 down-sample（保 burst 100% 紀錄）
+
+**新 Rust 程式碼量**：~180 LOC（mod.rs +120 + types.rs +30 + handler +30）+ V026 SQL +120 + Python healthcheck +80 + observation tooling +150 — **不算純 observability tooling**
+
+**派發**：Wave 0 prerequisite (FUP daemon integration test ~2h) → Wave 1 (Rust+SQL+Py 1d) → Wave 2 E2 (0.25d) → Wave 3 E4 (0.25d) → Wave 4 PM Sign-off → Wave 5+6 passive observation → Wave 7 Phase C GO/NO-GO
+
+**E2 必查 3 點**：
+1. daemon INSERT 不阻 evaluate cycle（tokio::spawn fire-and-forget）
+2. down-sample boundary 1/min 嚴格 + transition 不 down-sample
+3. counter rolling 24h 沒 leak（VecDeque pop_front while ts < cutoff）
+
+### 教訓（lessons.md candidate）
+
+「Phase 計畫的 line item 落地時要拆 trade-impact vs observability」— RFC §7.2 把 shadow IntentProcessor 與「觀察 advisor 行為」混在 Phase B 1.5d，落到具體實作才發現前者實質是 Phase C 一半工作量。下次寫 PA RFC §7.x 工時估算前，用「trade impact」 vs 「pure observability」做 binary 切，工時不混算。

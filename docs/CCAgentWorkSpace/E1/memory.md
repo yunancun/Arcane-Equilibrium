@@ -1313,3 +1313,34 @@ h_state_query_handler.py 772 → 785（仍 < 800）。
 
 **報告**：`docs/CCAgentWorkSpace/E1/workspace/reports/2026-04-27--g3_08_phase4_4_executor.md`
 **待**：E2 review → E4 regression → PM Sign-off → commit
+
+---
+
+## 2026-04-27 G3-08-FUP-MAF-SPLIT P1 — ScoutAgent Extraction
+
+**Commit**：`b8b5150`（待 E2 → E4 → PM 統一 push）
+**Range**：`multi_agent_framework.py` 1190 → 966（-224，§九 1200 硬上限餘裕從 10 → 234）+ `scout_agent.py` NEW 297；2 file change，0 strategy_wiring.py / 0 test 改動。
+
+**教訓 1（重要）**：**「parent 模組 re-export 子模組 class」必發生 module-load-time 循環 import**，當且僅當子模組需從 parent import enum/dataclass。
+- Strategist split (`6fac0ca`) 模式 = sibling 從 maf 拉，sibling 自己 re-export 給更下游（單向，無循環）。
+- ScoutAgent 模式 = parent maf 必須 re-export 子（因 `scout_routes.py` 等 import maf 拿 ScoutAgent）→ 雙向 → cycle。
+- PA RFC §3 預設 eager `from .scout_agent import ScoutAgent` 在 maf 內 → 第一次 `python -c 'from .scout_agent import ScoutAgent'` 即 ImportError partial init。
+- 解：**PEP 562 module-level `def __getattr__(name)`** 做 lazy re-export，外部首次 attribute lookup 才 import 子模組（此時 maf body 已 evaluate 完）。Python 3.7+ 標準，無外部依賴；`globals()[name] = value` cache 後 subsequent lookup 走 fast path。
+
+**教訓 2**：sibling 模式選擇前必先 grep 確認 import 方向 — 「誰是 SSOT」決定 re-export 哪邊放。
+- 看 `grep -n "from .multi_agent_framework import" *.py` 即知所有下游期待從 maf 拿 → maf 必 re-export → 必走 lazy 解。
+- PA RFC 提到 mirror `6fac0ca` 是錯類比；實際更接近「pure subclass extraction」需新處理模式。
+
+**教訓 3**：worktree 自動 isolation 在 PA 給定絕對路徑時失效 — PA 給的 path 直指主樹 `/Users/ncyu/Projects/TradeBot/srv/program_code/...`，所有 Edit/Write 都改主樹（cwd worktree 只是 git 狀態隔離），需手動 `git add <specific files>` 避免吸收隔壁 session 的 WIP（如本次 PA memory.md 修改不屬我的 commit，已只 stage 2 個目標檔）。對齊 memory `feedback_git_commit_only_for_metadoc`。
+
+**教訓 4**：PA RFC §11 self-contained prompt template 與 E1 完成序列「不直接 commit」衝突時 → 遵循 PA RFC（commit only，不 push）；PM 統一 push 在 E2 + E4 + Sign-off 後。
+
+**驗證**：
+- `from app.scout_agent import ScoutAgent` 與 `from app.multi_agent_framework import ScoutAgent` identity check ✅
+- 6 套 pytest（test_scout_integration / test_scout_audit_wiring / test_multi_agent_framework / test_h_state_query_handler / test_strategist_agent / test_batch7_conductor_strategist）286 passed / 0 failed
+- 3 invalidate hint emit 字串保留 bit-identical
+- `get_scout_snapshot` 5-field schema 保留 bit-identical
+- 0 硬邊界觸碰，0 production behavior 變更
+
+**報告**：`docs/CCAgentWorkSpace/E1/workspace/reports/2026-04-27--g3_08_fup_maf_split_impl.md`
+**待**：E2 review（重點：PEP 562 解法是否認可 / 雙語 docstring drift / 行為不變）→ E4 regression → PM Sign-off + push
