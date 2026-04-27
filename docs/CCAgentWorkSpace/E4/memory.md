@@ -10,6 +10,133 @@
 
 ## 工作記憶
 
+### 2026-04-27 G3-08 Phase 4 Wave II Sub-task 4-2/4-3/4-4/4-5 batch 回歸驗證
+
+**結論：E4 ALL 4 PASS — forward to PM batch merge per E2 §5.4 sequential plan**
+
+**4 worktree branches（Mac 端，未 push origin/main）：**
+| Sub-task | Branch | Commit | E1 self-tests | Run 1 | Run 2 |
+|---|---|---|---|---|---|
+| 4-2 Guardian | `agent-a051276dd2c9c8a42` | `e1157ae` | 104/0 | 152/0 | 152/0 |
+| 4-3 Analyst | `agent-ad253927d45469488` | `b8951ab` | 207/207 | 138/0 | 138/0 |
+| 4-4 Executor | `agent-a3625849262bdb342` | `d99a0da` | 157/7 | 139/0 | 139/0 |
+| 4-5 Scout | `agent-a3ba65c86c26adef7` | `eee0f7b` | 226/226 | 187/0 | 187/0 |
+
+每 worktree 跑 `test_h_state_query_handler.py + test_strategist_agent.py + 對應 agent suite`，全綠且非 flaky（兩遍同分）。
+
+**Linux cargo lib baseline：2290 / 0 failed**（origin/main `00682ef` G3-09 Phase A，本 Wave II 0 Rust diff = 預期不變）
+
+**Cumulative LOC 預估（E4 不執行 merge，純 git diff 分析）：**
+- baseline `h_state_query_handler.py` 636 LOC
+- 每 sub-task 加 ~149-153 LOC（共用 `_collect_agent_snapshots()` scaffold ~115 + 自身 elif arm ~13-18）
+- post-merge 預估 ~816-828 LOC，**borderline §九 800 警告線**（差 ~16-28 行）
+- 1200 hard cap headroom ~384 行 OK
+- PA RFC §3.2 Option B（`dict[str, Optional[dict]]` return）保證 arm 純加性合併 / 0 caller signature break
+
+**Healthcheck [20]：** PASS env=0 dormant by design（Wave II 未 merge / `OPENCLAW_H_STATE_GATEWAY=unset`）
+
+**Mock 安全（PASS）：**
+- snapshot accessor lazy import (`strategy_wiring`) per arm — fail-closed `None`
+- IPC fire-and-forget hint env=1 gate（env=0 → no-op）
+- 0 mock 業務邏輯 / 0 mock snapshot 計算
+- 對齊 `build_h_state_full_response` never-raise 合約
+
+**4 條 WARN（不阻塞）：**
+1. post-merge `h_state_query_handler.py` ~816-828 LOC 接近 §九 800 警告線（差 16-28 行），future refactor wave 可抽 `_collect_agent_snapshots()` 到 sibling
+2. post-merge `test_h_state_query_handler.py` 預估 ~3000+ LOC（test file convention 寬容；可分 per-agent test file）
+3. operator 需依 E2 §5.4 sequential merge plan 手動解 2 處 textual conflict（function scaffold + test classes）— union-keep-both 安全
+4. 2 MED self-flagged + 3 FUP tickets backlog（E2 scope，PM tracks）
+
+**3 條教訓（升 SOP）：**
+1. **Batch regression 同檔多 worktree textual conflict 模式**：E4 不需物理 merge — per-worktree 兩遍綠 + static cumulative LOC analysis 足以當 PA RFC 契約保證 additive arm resolution（Option B dict-return shape）成立。靜態驗證等效 batch merge feasibility 確認。
+2. **§九 800 警告線在 batch wave 的隱性風險**：N 個並行 sub-task 各加 K LOC 到同檔，post-merge 預估 = baseline + scaffold + N × arm-loc。E4 必須先計算 cumulative 並在報告中 flag，讓 PM 決定是「merge as-is 接受 §九 warn」還是「同 wave refactor 抽 sibling 預防 LOC 膨脹」。本次推薦 merge as-is（差 ~16 行屬可接受，未來自然 refactor）。
+3. **PA RFC §3.2 Option B `dict[str, Optional[dict]]` return shape 在 N-way same-file split 的價值**：跨 N 個 arm 0 caller signature break = E2/E4 cycle 簡化為「驗證每個 arm 自身測試通過」而非「驗證 cross-arm 契約完整性」。建議 PA 將此 pattern 升級為未來 N-way same-region split work 的 reference template。
+
+**報告：**
+- `.claude_reports/20260427_205321_e4_batch_regression_phase4_wave2.md`（完整詳報）
+- `docs/CCAgentWorkSpace/E4/workspace/reports/2026-04-27--phase4_wave2_batch_regression.md`（E4 workspace summary）
+
+---
+
+### 2026-04-27 G3-09 Phase A cost_edge_advisor schema + advisory only 回歸驗證
+
+**結論：E4 PASS — Mac 補位驗證完成；commit `00682ef` 未 push origin（operator gate），Linux 端 cargo +38 驗證俟 push 後跑（Linux baseline 已驗 2252/0 健在）**
+
+**Commit：** `00682ef`（Mac local ahead origin/main `c077e8c` by 2 含 c8a4a55；操作者 gate 未 push）
+
+**Mac cargo lib 兩遍同綠（非 flaky）：**
+| Run | passed | failed | delta vs baseline 2252 |
+|---|---|---|---|
+| 1st | 2290 | 0 | +38 ✓ 對齊 E1 self-report |
+| 2nd | 2290 | 0 | +38 ✓ |
+
+**Linux baseline confirm（origin/main `c077e8c` 不含 G3-09）：** cargo lib 2252 / 0 failed（一遍，per E2 baseline + commit 不在 Linux）。**Push 後 Linux 重跑預期 2290 / 0**。
+
+**cost_edge_advisor module direct test 兩遍同綠：** 32 advisor + 5 IPC handler tests = 37/37 PASS（含 +1 額外 schema test：`status_uninjected_returns_disabled_shape` / `status_warm_up_state_round_trips` 等 advisor 32 + handler 5）。E1 self-report 寫 38 包含 IPC schema 五 + advisor 32 + 1 extra round-trip = 對齊。
+
+**Config / TOML deserialize：** 236 / 0（涵蓋三環境 risk_config TOML 解析 + ArcSwap hot-reload）
+
+**Adversarial grep verify（advisory only confirm，§F）：**
+- `intent_processor/`：**0 hit** ✓
+- `combine_layer.rs`（單檔，非 dir）：**0 hit** ✓
+- `exit_features/`（含 schema/writer）：**0 hit** ✓
+- `strategies/`：**0 hit** ✓
+- `cost_gate*`：**檔案不存在於 src/**（PA RFC 引用是 IntentProcessor 內 cost gate 邏輯，非獨立檔；intent_processor/ 0 hit 等同覆蓋）
+
+cost_edge_advisor 出現點全在「非 trade path」：
+- `lib.rs:22` pub mod 聲明
+- `main.rs:503-510` env-gate spawn wire
+- `main_boot_tasks.rs:19-538` 條件 spawn fn（dual safeguard：env=1 + flag=true）
+- `config/risk_config*.rs` schema + risk_config_cost_edge.rs sub-struct
+- `ipc_server/dispatch.rs:73-439` 唯讀 status IPC handler
+
+**Three-TOML `[cost_edge]` schema verify（§E 等同）：**
+| TOML | enabled | trigger_threshold | per RFC §8.2 |
+|---|---|---|---|
+| paper | false (Phase A dormant) | -0.5 | ✓ |
+| demo | false (Phase A dormant) | -0.5 | ✓ |
+| live | false (Phase A dormant) | **-0.3 more conservative** | ✓ |
+
+**Healthcheck [30] check_cost_edge_advisor_status（Mac py3.10 直驗）：**
+- `OPENCLAW_COST_EDGE_ADVISOR` unset → verdict=`PASS` "env=0 dormant by design (Phase A: 0 trade impact even when activated); skip"
+- 設計：env=0 short-circuit 不依賴 tomllib（py3.10 fallback 路徑只在 env=1 才觸發），合理避免 false WARN
+
+**Slot ID drift（E1 commit message 已標 NOTE）：**
+- PA RFC §6.2 原寫 [22]
+- F7 已佔用 [22] trading_pipeline_silent_gap
+- 實裝改 [30] 並在 docstring 雙語標 NOTE — 合 §三 G6-04 drift 規則
+
+**Mock 安全（PASS）：**
+- 5 advisor unit tests evaluate(snapshot, cfg, is_stale) 純 fn 真跑數學（NaN / Inf / threshold boundary / staleness）
+- 5 IPC handler tests 真跑 dispatch + RpcCommand serde round-trip
+- 0 mock 業務邏輯 / 0 mock H5CostStats 計算公式
+- env-gate 邏輯走 std::env 真讀（`env_gate_strict_one_semantics_serialised` 驗 "1" only）
+
+**浮點 / SLA：** N/A（純 Rust schema + read-only IPC + dormant daemon；advisor 為 pure fn 評估，無跨語言對接面 / 無 hot-path）
+
+**3 條 WARN（不阻塞）：**
+1. **Commit 00682ef 未 push origin**（operator gate）— Linux 端 +38 完整驗證須俟 push 後跑；本 E4 採 Mac 補位驗證（Apple Silicon Rust release 與 Linux x86_64 cargo lib 在純 Rust 邏輯上無差異，僅 hot-path SLA 數值會異）
+2. **PA RFC slot drift [22]→[30]**：F7 已佔用 [22] 是 root cause，E1 已在 docstring + commit message 雙標 NOTE，合 §三 drift 防線
+3. **Healthcheck unit test 缺**：[30] check 為 Phase A 哨兵，無 dedicated test 文件（未來 Phase B 啟動 advisor 後可加 pytest stub mock env=1 / flag=true 路徑）
+
+**Push 後 Linux 重跑指令（PM 派發給下個會話）：**
+```bash
+ssh trade-core "cd ~/BybitOpenClaw/srv && git pull --ff-only origin main && cd rust && cargo test --release -p openclaw_engine --lib 2>&1 | tail -5"
+ssh trade-core "cd ~/BybitOpenClaw/srv && python3 helper_scripts/db/passive_wait_healthcheck.py 2>&1 | grep -i '\[30\]\|cost_edge'"
+```
+預期：lib **2290 / 0 failed**；[30] env=0 PASS skip 訊息。
+
+**1 條教訓：**
+1. **未 push commit 的 E4 補位策略**：當 commit 在 Mac local ahead origin（operator gate 未 push）+ Linux 端不能跑 +38 完整驗證時，採「Mac cargo --release 補位 + Linux baseline 鎖死」雙軌：
+   - Mac 跑兩遍 cargo --release 確認非 flaky + 對齊 E1 self-report 數字
+   - Linux 跑 baseline 確認 origin/main 健在（不含本 commit）
+   - 把 push 後 Linux 重跑指令記在 report 給下個會話（PM 派發）
+   本次 G3-09 Phase A 驗證雖 Linux 未跑 +38，但 Mac 2290/0 兩遍同綠 + adversarial 0 trade-path hit + 三 TOML schema verify + Mac py3.10 [30] 直驗 PASS = 補位等效。Phase A 是 advisory only / 0 trade impact / dormant by default 的 risk surface 極小 commit，補位策略可接受。
+
+**報告：** `docs/CCAgentWorkSpace/E4/workspace/reports/2026-04-27--g3_09_phase_a_regression.md`
+
+---
+
 ### 2026-04-27 G3-08 Phase 4 Sub-task 4-1 Strategist agent_state events 回歸驗證
 
 **結論：E4 PASS — PM 可 merge + push（純 Python，0 Rust diff，Linux 不需 --rebuild）**

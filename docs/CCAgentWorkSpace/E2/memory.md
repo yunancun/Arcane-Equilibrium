@@ -60,6 +60,7 @@
 | 2026-04-26 | Python P0 Wave 2-PR review (F5 GUI + F7 healthchecks) — F5 RETURN 1 HIGH/1 MEDIUM/1 LOW + F7 PASS-with 1 MEDIUM cross-cut + 2 LOW + 1 size warning | workspace/reports/2026-04-26--python_p0_wave_review.md |
 | 2026-04-27 | live-auth-watcher-event-consumer-spawn Round-2 review (working tree) — APPROVE_WITH_NITS · main.rs=1194 緊靠 1200 ⚠️ LOW | inline final message |
 | 2026-04-27 | Live Auth Renew 移至 Governance Hub (97bab9a) — APPROVE_WITH_NITS · 1 MEDIUM（ocEsc+textContent 雙重 escape pre-existing）+ 1 MEDIUM（tab-live.html 1598 行 pre-existing）+ 1 LOW（try/catch dead code）+ 1 ⚠️ 809 行警告 | inline final message |
+| 2026-04-27 | G3-08 Phase 4 Wave II batch 4-2/3/4/5 batch review (e1157ae/b8951ab/d99a0da/eee0f7b) — 4 PASS_WITH_NITS · sequential merge confirmed conflict（h_state_query_handler.py + test_h_state_query_handler.py 同位置 textual conflict，純機械 3-way 解；無語意衝突）· framework signature 4 commits 完全一致（5-key skeleton 不變）· schema parity Rust HashMap<String,i64> 全綠（int + bool→int + len cast）· 1 MEDIUM（4-5 multi_agent_framework.py 1190/1200 hard cap edge，FUP-MAF-SPLIT 必先 file 才能再動該檔）· 1 LOW（4-3 analyst empty-payload 早 return 後 invalidate 仍 fire — harmless no-op when env=0）· 1 LOW（4-4 executor dedup/error 早 return bumps 觀察計數但 skip invalidate；10s 排程 poll 兜底，RFC 設計範圍內）· 4-4 Edit/Write silent-fail caveat 已驗 disk == commit blob 無 phantom content · cross-platform / f-string / except 吞例外 / 雙語 注釋 / Bybit API / Migration Guard 全綠 | inline final message |
 
 ## 歷史審查關鍵發現（累積記憶）
 
@@ -416,3 +417,22 @@
   * 「commit message 說有 X 個 Y / 實際 0 個」屬 NIT 不退 E1（amend 政策禁止，且 X 對行為無影響）；PM 知曉即可
   * 「pre-split 既存 inline rationale 1:1 搬移」E2 必查 git blame 確認非 E1 新 padding，避免 retract 既有設計文件化資產
   * Daemon thread `_sync_to_rust_budget` lazy `import threading` + nested `import asyncio` 是刻意設計（避 module-import 期 thread spawn）；拆分後必 1:1 對齊不可優化為頂層 import
+
+## 2026-04-27 G3-09 Phase A cost_edge_advisor — PASS to E4
+
+- **Commit**：00682ef · **Verdict**：PASS to E4（0 finding）
+- **3 主審判點全綠**：
+  1. advisory-only 0 trade impact：grep 確認 `cost_edge_advisor` 不在 intent_processor / cost_gate / combine_layer / exits / strategies 任何 trade path 出現；只在 lib.rs / main.rs / main_boot_tasks.rs / ipc_server/{slots,server,connection,dispatch,mod}.rs / handlers/{mod,cost_edge_advisor}.rs 出現
+  2. threshold direction = -0.5 + `r <= threshold` trigger（PM Tier 9 T9-LOW-1 + PA RFC §2.4 variant A）已落 advisor.rs:106 + risk_config_cost_edge.rs:113 + 三 TOML
+  3. slot [30] 唯一性：[22]-[29] 全占（F7 wave），[30] free → 已配
+- **8 條 §九 checklist + 9 條 OpenClaw 特殊 全綠**
+- **Cross-platform**：grep `/home/ncyu|/Users/[^/]+` 0 命中
+- **檔案大小**：max 433 行（tests.rs），全 <800 警示線
+- **雙語注釋**：所有新 mod / fn / struct / variant 中英對照 OK
+- **Compile**：cargo check 1.74s clean / cost_edge tests 43 / 0 fail
+- **Schema integration**：`RiskConfig.validate()` 接 `cost_edge.validate()` OK
+- **Ordering**：set_config_stores → spawn_h_state_poller → spawn_cost_edge_advisor 依序，h_state_cache_slot 已 populated
+- **Audit emit**：transition only（prev_status != new_status），非每 cycle 重複 emit
+- **Lock 選型**：parking_lot::RwLock for advisor state（無 .await）+ tokio::sync::RwLock for IPC slot（async-safe）
+- **教訓**：E1 此次 self-report 完整度高，self-修正了 RFC slot drift（[22]→[30]）+ §九 1200 cap（advanced.rs 已 1297 → 另立 sibling），對抗審查 0 findings
+
