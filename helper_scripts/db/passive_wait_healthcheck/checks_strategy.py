@@ -1110,16 +1110,13 @@ def check_signals_writer_freshness(cur) -> tuple[str, str]:
     2026-04-19 最後 row 是 disable 生效前殘留 paper run。Paper disabled 時
     auto-skip 避 false-positive FAIL；paper enabled 時 fall through 跑原檢。
     """
-    # PAPER-DISABLED-SKIP: Signal Diamond V015 makes signals writer paper-
-    # only; when paper pipeline is disabled (PAPER-DISABLE-1, 2026-04-16),
-    # writer dormancy is by-design. Read pipeline_snapshot_paper.json
-    # ``disabled`` flag from runtime data dir as the canonical truth (env
-    # vars don't propagate reliably to cron subprocess). Failure to read
-    # the snapshot = fall through to normal check (fail-open, by spec).
-    # Signal Diamond V015 → signals writer 為 paper-only；paper disabled 時
-    # writer 休眠為 by-design。讀 pipeline_snapshot_paper.json 的 disabled
-    # 旗標為真理源（env var 不可靠跨 cron subprocess 傳遞）。讀失敗 = fall
-    # through 跑原檢（fail-open，符合 spec）。
+    # PAPER-DISABLED-SKIP: Signal Diamond V015 = signals writer paper-only;
+    # paper disabled (PAPER-DISABLE-1, 2026-04-16) → dormant by-design.
+    # Read pipeline_snapshot_paper.json ``disabled`` flag (env vars don't
+    # propagate reliably to cron subprocess); read fail = fall through.
+    # Signal Diamond V015 → signals 為 paper-only；paper disabled 時休眠為
+    # by-design。讀 snapshot disabled 旗標（env var 跨 cron 不可靠）；
+    # 讀失敗 fall-through 跑原檢（fail-open，符合 spec）。
     data_dir = os.environ.get("OPENCLAW_DATA_DIR", "/tmp/openclaw")
     paper_snap_path = Path(data_dir) / "pipeline_snapshot_paper.json"
     if paper_snap_path.exists():
