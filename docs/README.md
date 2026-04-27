@@ -294,6 +294,7 @@ YYYY-MM-DD--HHmm--功能描述.扩展名
 | `2026-04-13--daily_summary.md` | ★★★ 2026-04-13 日匯總：R-06-v2 Agent Value Delivery（Executor shadow IPC / Analyst→DB→Strategist feedback / Guardian rejection / Conductor real health）· 1124 Rust + 2852 Python |
 | `2026-04-14--engine_self_healing.md` | ENGINE-HEAL 4 Fix：panic hook + crash-only + WS stale self-cancel + watchdog 4 道保險（尚未合併至 daily_summary）|
 | `2026-04-14--qol_1_and_qol_3_delivery.md` | QoL-1（paper_state restore_from_db）+ QoL-3（PyO3 雙 venv 部署）交付（尚未合併至 daily_summary）|
+| `2026-04-27--live_auth_watcher_event_consumer_spawn_fix.md` | ★★ P0 Silent Regression：LiveAuthWatcher respawn 路徑遺漏 `spawn_live_pipeline` → event_consumer 8 天未 spawn（2252 tests）· commits 588d207 / 0fa41b1 / merge 1fac9b1 |
 
 > 2026-04-14 worklog audit：所有舊碎片已合併至當日 `daily_summary.md` 並刪除；`2026-04-08--arch_rc1_1c_history_archive.md` 已移至 `docs/archive/`。
 
