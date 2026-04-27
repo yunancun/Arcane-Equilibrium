@@ -2,6 +2,38 @@
 
 ## 工作記憶
 
+### 2026-04-28 Wave A prep-gate trio Linux full regression (commits `aced662`+`9303a3b`+`22c57dc`+`528805d`) — E4 PASS
+
+**對象**：Wave A prep-gate trio 4 commits 已 push origin/main `82347a5..528805d`
+- `aced662` G8-01-FUP-LOSSES-WIRING (Python: analyst + strategist + strategy_wiring + new test 8 cases)
+- `9303a3b` G3-09-FUP sticky_triggered_at_ms (Rust: mod.rs daemon body + advisor.rs doc + types.rs + 2 sticky tests)
+- `22c57dc` G3-09-FUP spawn-test (Rust: 3 cases A/B/C in test_cost_edge_advisor_daemon.rs)
+- `528805d` cross-agent memory updates
+
+**Linux baseline 全綠 (兩遍同綠 non-flaky)：**
+
+| 引擎 | passed | failed | baseline | delta |
+|---|---|---|---|---|
+| Rust cargo lib (release) | **2290** | 0 | 2290 | 0 |
+| Rust daemon integration test | **11** | 0 | 6 (Phase A) | +5 (sticky+spawn FUP) |
+| Python pytest combined Wave A | **199** | 0 | Mac 86 | +113 (Linux collects more) |
+| Healthcheck | 27 PASS / 1 WARN [11] / 0 FAIL | — | — | WARN [11] pre-existing per-existing observation pacing |
+
+**驗證**：
+1. Sync `cd ~/BybitOpenClaw/srv && git fetch && git reset --hard origin/main` → HEAD `528805d` ✓
+2. cargo lib `--release` 0.52s × 2 兩遍 2290/0 — sticky-ts 改 mod.rs daemon body 屬 production code 但 Phase A advisory-only 路徑 0 行為變化（E2 已驗），lib 不變
+3. cargo `--test test_cost_edge_advisor_daemon` 2.09s × 2 兩遍 11/0 — daemon test target = baseline 6 + 5 new (2 sticky from 9303a3b + 3 case A/B/C from 22c57dc) 完美對齊
+4. pytest combined 7-suite 0.29s × 2 兩遍 199/0 — Mac 86 vs Linux 199 因 Linux 環境 collect 更多 case（fastapi 等 Mac dev_disabled 套件齊全）；E2 報 PA 預測「Mac 8 fastapi pre-existing failures」Linux 0 fail 確認屬 Mac dev-only env
+5. Healthcheck full sweep 27 PASS — `phys_lock_runtime` 7d=456 / `edge_estimates` 100% populated 231/231 / `bb_breakout disabled by G2-06` confirmed / `cost_edge_advisor_status` env=0 dormant by design (Phase A: 0 trade impact 預期)
+
+**Mock 安全 / Mock 審查**：N/A（純跑既有測試 + 0 production diff）
+
+**WARN [11] 解讀**：`counterfactual_clean_window_growth` post-P013-clean n_rows=226/200 (113%), rate=95rows/2d, ETA ~0d at current rate — 即將 PASS，與 Wave A 改動無因果（pre-existing observation pacing rule，過 200 rows 後 healthcheck 仍 WARN 直到 cron next sweep 重評）
+
+**0 regression / 0 production diff in this E4 run**（純跑測試）
+
+**教訓**：Wave A 是「PA 派發 prep-gate」3 commits 整合 — 都是小範圍補強：(a) G8-01 LOSSES-WIRING 補 W1 cognitive modulator consecutive_losses (b) G3-09 sticky_triggered_at_ms 補 daemon 內 contiguous trigger 跨 evaluate cycle 持久化 (c) G3-09 spawn-test 補 PA RFC §6.1 R-B4 揭示的「daemon spawn fn 級整合測試 0 個」缺口。三者都是 Phase B prerequisite，本身不觸 live 或 hot path，但對下游 Phase B observation 必要。
+
 ### 2026-04-27 G3-09 Phase A daemon integration test (Phase B prerequisite) — E4 PASS
 
 **任務**：補 PA RFC `2026-04-27--g3_09_phase_b_shadow_dryrun_design.md` §6.1 R-B4 + §R-B10 揭示的缺口 — Phase A 32 unit tests 全直驅 `evaluate()` pure fn + 5 IPC handler tests 手動 populate slot，**0 個 daemon-level 整合測試**證明 daemon 真在跑 → Phase B observation 無 ground truth。
