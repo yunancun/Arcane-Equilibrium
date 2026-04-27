@@ -806,7 +806,7 @@ def check_dust_qty_distribution(cur) -> tuple[str, str]:
 
 
 def check_intents_counter_freeze(cur) -> tuple[str, str]:
-    """[27] trading.intents counter freeze — alarm if no new intent in 30 min.
+    """[27] trading.intents counter freeze — alarm only if no Guardian activity either.
 
     F7 E5 spec (2026-04-26). Detects "intents counter doesn't increment in
     30 min during weekday market hours when engine=demo AND positions > 0".
@@ -823,25 +823,59 @@ def check_intents_counter_freeze(cur) -> tuple[str, str]:
     against a coarse threshold (>30 min + intents_30min=0 = FAIL) and only
     on demo / live / live_demo (paper opt-in is excluded).
 
+    GUARDIAN-CROSS-CHECK (2026-04-27, follow-up to d4bc9eb scope):
+    Originally a frozen intents counter alone was sufficient for FAIL, but
+    that produced a false-positive on live_demo during the §三 Phase 5
+    edge-crisis state: ``cost_gate(JS-demo)`` rejecting ~99.99% of
+    Guardian verdicts (negative-edge or below fee threshold), Approval
+    rate ~1/hour. live_demo verdicts table sees 40k-178k Rejected/hour
+    while intents (Approved-only) sees 1-11/hour, easily crossing 30-min
+    "frozen" without any pipeline issue. Real pipeline wedge would freeze
+    Guardian too (verdicts=0). Cross-check: FAIL only when both intents=0
+    AND verdicts < 100 in the same 30-min window. When verdicts >= 100
+    but intents=0, classify as WARN with explicit "cost_gate fully
+    blocking (edge crisis by-design)" annotation — Guardian alive,
+    cost_gate doing its job, not a silent-fail.
+
     Three-state verdict:
       * FAIL: minutes_since_last_intent > 30 AND intents_30min = 0
-              (counter frozen + nothing in window)
+              AND verdicts_30min < 100 (Guardian also frozen — real wedge)
+      * WARN: minutes_since_last_intent > 30 AND intents_30min = 0
+              AND verdicts_30min >= 100 (cost_gate fully blocking,
+              Guardian alive — by-design edge-crisis state)
       * WARN: minutes_since_last_intent 15-30 AND intents_30min = 0
-              (early-warning: counter not incrementing)
-      * PASS: < 15 OR intents_30min > 0
+              (early-warning: counter not incrementing, regardless of
+              Guardian state)
+      * PASS: minutes_since < 15 OR intents_30min > 0
               (counter live or recent activity)
 
     Per-engine_mode rollup: each mode evaluated independently; composite
     status = worst across modes (FAIL > WARN > PASS).
 
-    [27] trading.intents counter freeze — 30 min 內無新 intent 警報。
+    [27] trading.intents counter freeze — 30 min 無 intent 且 Guardian 同時凍才報警。
     F7 E5 spec（2026-04-26）。偵測「demo 有持倉時 intents counter 30 min
     不前進」— strategist 仍評估但 intent persistence 靜默斷掉的指紋。
     spec 簡化：positions>0 cross-query 移除，SQL 直接錨 trading.intents
     per engine_mode 的 minutes_since_last_intent + intents_30min。
     持倉真 0 時 demo 自然閒置不應 FAIL，故用 30 min coarse 閾值 + intents_30min=0
-    雙條件，避開閒置誤殺。三態：FAIL（>30min+intents_30min=0）/ WARN
-    （15-30min+intents_30min=0）/ PASS。per-engine_mode 彙總，最差勝。
+    雙條件，避開閒置誤殺。
+
+    GUARDIAN-CROSS-CHECK（2026-04-27，d4bc9eb scope follow-up）：
+    原本 intents counter 凍 30 min 即 FAIL，但 §三 Phase 5 edge-crisis
+    狀態下 live_demo 的 ``cost_gate(JS-demo)`` 阻擋 ~99.99% Guardian
+    verdicts（負 edge 或低於 fee threshold），Approval rate ~1/hour。
+    live_demo 的 verdicts 表每小時 4-17 萬 Rejected vs intents 1-11/hour，
+    輕易越過 30-min「凍結」門檻但 pipeline 並無 issue。真實 wedge 必伴隨
+    Guardian 也凍（verdicts=0）。Cross-check: 僅 intents=0 + verdicts<100
+    雙 0 才 FAIL；verdicts>=100 + intents=0 改判 WARN 並標 "cost_gate
+    fully blocking (edge crisis by-design)"，Guardian 活著、cost_gate 工作中。
+
+    三態：
+      * FAIL: stale>30min + intents_30min=0 + verdicts_30min<100（雙凍 = 真 wedge）
+      * WARN: stale>30min + intents_30min=0 + verdicts_30min>=100（cost_gate 全擋 by-design）
+      * WARN: stale 15-30min + intents_30min=0（早期警告，無論 Guardian 狀態）
+      * PASS: stale<15min 或 intents_30min>0（counter 活或近期活動）
+    per-engine_mode 彙總，最差勝。
     """
     try:
         cur.connection.rollback()
@@ -854,6 +888,12 @@ def check_intents_counter_freeze(cur) -> tuple[str, str]:
     # live_demo / live。
     modes = ("demo", "live_demo", "live")
     per_mode: list[tuple[str, str, str]] = []  # (mode, status, short_msg)
+    # Guardian-cross-check threshold: 100 verdicts/30min is loose enough that
+    # even a 99% throughput collapse from 40k/h normal still clears it.
+    # Real wedge fingerprint = verdicts also drops to ~0.
+    # Guardian 交叉門檻：100 verdicts/30min 寬鬆到正常 4 萬/h 跌 99% 仍過得了；
+    # 真實 wedge = verdicts 也跌到 ~0。
+    VERDICTS_LIVENESS_THRESHOLD = 100
     try:
         for mode in modes:
             cur.execute(
@@ -878,12 +918,82 @@ def check_intents_counter_freeze(cur) -> tuple[str, str]:
             minutes_since = float(row[0])
             intents_30min = int(row[1] or 0)
             seg = f"{mode}: stale={minutes_since:.1f}m, 30min_n={intents_30min}"
-            if minutes_since > 30.0 and intents_30min == 0:
-                per_mode.append((mode, "FAIL", seg + " — counter frozen >30min"))
-            elif 15.0 <= minutes_since <= 30.0 and intents_30min == 0:
-                per_mode.append((mode, "WARN", seg + " — counter not incrementing 15-30min"))
-            else:
+            # Fast-path PASS: any recent intent activity → no need to query
+            # verdicts for this mode (avoid extra DB round-trip).
+            # 快速 PASS：近期有 intent 活動 → 無需查 verdicts（省 DB round-trip）。
+            if minutes_since <= 15.0 or intents_30min > 0:
                 per_mode.append((mode, "PASS", seg))
+                continue
+            # Slow path: intents counter looks frozen — cross-check Guardian
+            # verdicts liveness in the same window before declaring wedge.
+            # 慢路徑：intents counter 看似凍 — 宣告 wedge 前先查 Guardian
+            # verdicts 在同窗口的活性。
+            verdicts_30min = 0
+            try:
+                cur.execute(
+                    "SELECT count(*) FROM trading.risk_verdicts "
+                    "WHERE engine_mode = %s AND ts > now() - interval '30 minutes'",
+                    (mode,),
+                )
+                v_row = cur.fetchone()
+                verdicts_30min = int(v_row[0] or 0) if v_row else 0
+            except Exception:
+                # Verdicts probe failed — fall through to legacy intent-only
+                # FAIL/WARN logic so we don't silently downgrade a real wedge.
+                # verdicts 查失敗 → 退回原 intent-only 邏輯，避免靜默降級真 wedge。
+                verdicts_30min = -1
+            seg_with_v = (
+                f"{seg}, verdicts_30min={verdicts_30min}"
+                if verdicts_30min >= 0
+                else f"{seg}, verdicts_probe_failed"
+            )
+            if minutes_since > 30.0:
+                if 0 <= verdicts_30min < VERDICTS_LIVENESS_THRESHOLD:
+                    # Both intents AND verdicts frozen → real wedge.
+                    # intents + verdicts 雙凍 → 真 wedge。
+                    per_mode.append(
+                        (
+                            mode,
+                            "FAIL",
+                            seg_with_v
+                            + " — counter frozen >30min + Guardian also frozen (verdicts<100)",
+                        )
+                    )
+                elif verdicts_30min >= VERDICTS_LIVENESS_THRESHOLD:
+                    # Guardian alive but intents=0 = cost_gate fully blocking.
+                    # By-design during edge crisis (§三 Phase 5 PAUSED).
+                    # Guardian 活但 intents=0 = cost_gate 全擋；§三 Phase 5
+                    # PAUSED edge-crisis 期間 by-design。
+                    per_mode.append(
+                        (
+                            mode,
+                            "WARN",
+                            seg_with_v
+                            + " — cost_gate fully blocking (edge crisis by-design); Guardian alive",
+                        )
+                    )
+                else:
+                    # verdicts_probe_failed branch — fall back to intent-only.
+                    # verdicts_probe_failed 分支 → 退回 intent-only 判斷。
+                    per_mode.append(
+                        (
+                            mode,
+                            "FAIL",
+                            seg_with_v
+                            + " — counter frozen >30min (verdicts probe failed; conservative FAIL)",
+                        )
+                    )
+            else:
+                # 15 <= minutes_since <= 30, intents_30min == 0.
+                # Early-warning band — verdicts state informational only.
+                # 15-30min 早期警告帶 — verdicts 狀態僅 informational。
+                per_mode.append(
+                    (
+                        mode,
+                        "WARN",
+                        seg_with_v + " — counter not incrementing 15-30min",
+                    )
+                )
     except Exception as e:
         return ("WARN", f"intents counter freeze query failed: {type(e).__name__}: {e}")
 
@@ -896,7 +1006,7 @@ def check_intents_counter_freeze(cur) -> tuple[str, str]:
             "RCA Rust trading_writer intent INSERT + DCS evaluation path",
         )
     if "WARN" in statuses:
-        return ("WARN", summary + " — early warning")
+        return ("WARN", summary)
     return ("PASS", summary)
 
 
