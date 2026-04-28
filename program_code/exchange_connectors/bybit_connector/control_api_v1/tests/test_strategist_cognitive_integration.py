@@ -349,17 +349,44 @@ class TestS3FaultInjectionModulatorImportError(unittest.TestCase):
         }
         set_cognitive_modulator(agent, bad)
 
-        # Feed exactly _COGNITIVE_TICK_INTERVAL intel — must not raise.
-        # 投遞剛好 _COGNITIVE_TICK_INTERVAL 個 intel —— 不可 raise。
+        # E2 M-1 (2026-04-28): explicit tick invocation — do NOT rely on
+        # ``_handle_intel`` mod-N triggering. The W1 fix (commit aca7ee3)
+        # uses N=10 magic number; if a future PA RFC changes N to 0 / None
+        # / non-divisor, the implicit-trigger loop would silently 0-fire
+        # and ``assertGreaterEqual(bad.update.call_count, 1)`` would FAIL
+        # for the wrong reason. Explicit ``tick_cognitive_modulator(agent)``
+        # call decouples this assertion from the interval magic.
+        # E2 M-1（2026-04-28）：顯式 tick 呼叫 —— 不依賴 ``_handle_intel`` mod-N
+        # 觸發。W1 修補（commit aca7ee3）用 N=10 magic number；未來 PA RFC
+        # 若改 N=0/None/非除數，隱式觸發迴圈會 silent 0-fire，
+        # ``assertGreaterEqual(bad.update.call_count, 1)`` 會因錯誤理由 FAIL。
+        # 顯式 ``tick_cognitive_modulator(agent)`` 解耦此 assertion 與 interval magic。
+        try:
+            tick_cognitive_modulator(agent)
+        except Exception as exc:  # pragma: no cover — fail-soft guard
+            self.fail(f"tick_cognitive_modulator surfaced modulator exception: {exc}")
+
+        # Direct tick invocation must have attempted ``update`` exactly once
+        # and the exception must have been swallowed (fail-soft).
+        # 直接 tick 呼叫必恰好嘗試 update 一次，例外必被吞掉（fail-soft）。
+        self.assertEqual(
+            bad.update.call_count, 1,
+            "tick_cognitive_modulator must attempt modulator.update exactly "
+            "once per call / 每次呼叫必恰好嘗試 modulator.update 一次",
+        )
+
+        # Sub-case: also verify the implicit hot-path (``_handle_intel`` ×N)
+        # remains fail-soft — covers the orchestration wiring without
+        # asserting tick *count* (which would re-couple to N).
+        # 子案：再驗證隱式 hot-path（``_handle_intel`` ×N）保持 fail-soft —
+        # 涵蓋編排接線但不斷言 tick 次數（否則又耦合到 N）。
+        bad.update.reset_mock()
         for _ in range(_COGNITIVE_TICK_INTERVAL):
             try:
                 agent._handle_intel(_make_intel_message())
             except Exception as exc:  # pragma: no cover — fail-soft guard
                 self.fail(f"_handle_intel surfaced modulator exception: {exc}")
 
-        # Tick was attempted at least once (proves wiring + fail-soft).
-        # tick 至少嘗試 1 次（證接線 + fail-soft）。
-        self.assertGreaterEqual(bad.update.call_count, 1)
         # intel_received accounting unaffected by modulator failure.
         # intel_received 統計不受 modulator 失敗影響。
         self.assertEqual(
@@ -443,23 +470,53 @@ class TestS5HStateEnvelopeRoundTrip(unittest.TestCase):
         for _ in range(3):
             agent._handle_intel(_make_intel_message())
 
-        # Stub ``app.strategy_wiring`` in sys.modules with a tiny shim that
-        # exposes only the attribute names the envelope builder reads
-        # (STRATEGIST_AGENT). The real strategy_wiring drags in fastapi +
-        # all 5 agents on import, which is heavy and fails on Mac dev (no
-        # fastapi installed). Stub-then-restore keeps lazy-import semantics
-        # without polluting the real module-level singleton across tests.
-        # 用 sys.modules 灌入 ``app.strategy_wiring`` 的小 shim，只暴露
-        # envelope builder 讀取的屬性 (STRATEGIST_AGENT)。真實 strategy_wiring
-        # 匯入時會拉 fastapi + 所有 5-Agent，重且 Mac dev 環境無 fastapi 而失敗。
-        # Stub-then-restore 保留 lazy-import 語意又不污染跨 test 的真實 singleton。
+        # Replace ``app.strategy_wiring`` with a tiny shim that exposes only
+        # the attributes the envelope builder reads (STRATEGIST_AGENT). The
+        # real strategy_wiring drags in fastapi + all 5 agents on import, which
+        # is heavy and fails on Mac dev (no fastapi). The handler resolves the
+        # module via ``from . import strategy_wiring as _sw`` inside
+        # ``_collect_h_snapshots`` / ``_collect_agent_snapshots`` — Python's
+        # ``from PKG import SUB`` semantic is ``getattr(PKG, "SUB")`` first,
+        # which in turn returns the attribute on ``app`` that was bound on the
+        # very first import of ``app.strategy_wiring``. Patching only
+        # ``sys.modules["app.strategy_wiring"]`` therefore has **zero effect**
+        # if any sibling test (e.g. test_phase2_strategy_routes_coverage.py)
+        # already imported ``app.strategy_wiring`` earlier in the same session
+        # — its attribute on ``app`` keeps pointing at the real module.
+        # E2 review 2026-04-28 H-1 caught this Heisenbug; the fix here patches
+        # **both** ``sys.modules`` (covers the never-imported case) and
+        # ``app.strategy_wiring`` package attribute (covers the post-import
+        # case). All restored in finally so we do not poison sibling tests.
+        # 用一個只暴露 envelope builder 所需屬性 (STRATEGIST_AGENT) 的 shim 替換
+        # ``app.strategy_wiring``。真實 strategy_wiring 匯入時會拉 fastapi +
+        # 所有 5-Agent，重且 Mac dev 環境會 fail。Handler 在 ``_collect_*``
+        # 內部以 ``from . import strategy_wiring as _sw`` 解析模組——Python
+        # ``from PKG import SUB`` 語意先 ``getattr(PKG, "SUB")``，回傳的是
+        # 第一次匯入 ``app.strategy_wiring`` 時綁定到 ``app`` 上的屬性。因此
+        # 只覆蓋 ``sys.modules["app.strategy_wiring"]`` **完全沒效果**——只要
+        # 任何 sibling test（例如 test_phase2_strategy_routes_coverage.py）
+        # 在同一 session 較早 import 過 ``app.strategy_wiring``，``app`` 上的
+        # 屬性會繼續指向真實模組。E2 review 2026-04-28 H-1 抓到這個 Heisenbug；
+        # 此修法同時 patch ``sys.modules``（涵蓋從未 import 過）與
+        # ``app.strategy_wiring`` 套件屬性（涵蓋已 import 過）。finally
+        # 全部還原避免污染 sibling test。
+        import app
         from app import h_state_query_handler
 
         sw_module_name = "app.strategy_wiring"
         sw_stub = type(sys)("app.strategy_wiring")
         sw_stub.STRATEGIST_AGENT = agent
-        original_sw = sys.modules.get(sw_module_name)
+
+        original_sw_in_modules = sys.modules.get(sw_module_name)
+        original_sw_attr_present = hasattr(app, "strategy_wiring")
+        original_sw_attr = getattr(app, "strategy_wiring", None)
+
         sys.modules[sw_module_name] = sw_stub
+        # Critical: bind on parent package so ``from . import strategy_wiring``
+        # → ``getattr(app, "strategy_wiring")`` returns our stub.
+        # 關鍵：綁到 parent package 上，``from . import strategy_wiring`` 走
+        # ``getattr(app, "strategy_wiring")`` 才會回我們的 stub。
+        app.strategy_wiring = sw_stub  # type: ignore[attr-defined]
 
         try:
             with patch.dict(
@@ -467,12 +524,21 @@ class TestS5HStateEnvelopeRoundTrip(unittest.TestCase):
             ):
                 response = h_state_query_handler.build_h_state_full_response()
         finally:
-            # Restore prior module state — none = remove our stub entirely.
-            # 還原先前模組狀態 — 原本 None 時整個移除我們的 stub。
-            if original_sw is None:
+            # Restore prior module + attribute state in reverse order.
+            # 反序還原先前模組與屬性狀態。
+            if original_sw_attr_present:
+                app.strategy_wiring = original_sw_attr  # type: ignore[attr-defined]
+            else:
+                # Was never bound — remove our injection.
+                # 原本沒綁 — 移除我們的注入。
+                try:
+                    delattr(app, "strategy_wiring")
+                except AttributeError:
+                    pass
+            if original_sw_in_modules is None:
                 sys.modules.pop(sw_module_name, None)
             else:
-                sys.modules[sw_module_name] = original_sw
+                sys.modules[sw_module_name] = original_sw_in_modules
 
         # Schema invariants: top-level keys present.
         # schema 不變量：top-level key 齊備。
@@ -490,8 +556,21 @@ class TestS5HStateEnvelopeRoundTrip(unittest.TestCase):
         strat_state = agent_states["strategist"]
         self.assertEqual(strat_state["cognitive_modulator_connected"], 1)
         # intel_received reflected on the wire (post 3 _handle_intel calls).
-        # intel_received 在 wire 上反映（3 次 _handle_intel 後）。
-        self.assertGreaterEqual(strat_state["intel_received"], 3)
+        # E2 L-1 (2026-04-28): with H-1 fix, intel_received==3 is the unique
+        # marker proving the envelope reads our test agent — production
+        # STRATEGIST_AGENT singleton would have a different (likely 0) value
+        # from its own intel pipeline. Strict equality (not >=) catches the
+        # false-positive case where the stub never took effect.
+        # E2 L-1（2026-04-28）：H-1 修後，intel_received==3 是證明 envelope 讀到
+        # 我們測試 agent 的唯一 marker —— production STRATEGIST_AGENT singleton
+        # 會有不同值（多半 0）。用嚴格等號（非 >=）抓「stub 未生效」的偽通過。
+        self.assertEqual(
+            strat_state["intel_received"], 3,
+            "envelope must read test agent's intel_received (=3), not "
+            "production singleton's; stub patching failed if this mismatches "
+            "/ envelope 必須讀測試 agent 的 intel_received (=3)，不是 production "
+            "singleton 的；不符即代表 stub 未生效",
+        )
 
 
 class TestS6LossesStreakAdvancesModulatorState(unittest.TestCase):
