@@ -95,7 +95,12 @@ CREATE TABLE IF NOT EXISTS learning.cost_edge_advisor_log (
     -- 時間 / engine 身份（下方複合主鍵）
     ts_ms              BIGINT  NOT NULL,
     engine_mode        TEXT    NOT NULL
-        CHECK (engine_mode IN ('paper','demo','live','live_demo')),
+        -- Production accepts 4 valid engine modes; test fixtures use
+        -- 'test_*' prefix for isolation per-PID (see persistence test).
+        -- 生產接 4 個 valid engine mode；測試 fixture 用 'test_*' 前綴
+        -- 隔離 per-PID（見 test_cost_edge_advisor_persistence.rs）。
+        CHECK (engine_mode IN ('paper','demo','live','live_demo')
+               OR engine_mode LIKE 'test\_%' ESCAPE '\'),
 
     -- Advisor verdict (CostEdgeAdvisorStatus::as_str() output)
     -- Advisor 判決（CostEdgeAdvisorStatus::as_str() 字串輸出）
@@ -187,9 +192,39 @@ SELECT create_hypertable(
 -- ------------------------------------------------------------
 -- 30-day retention — Phase B observation window allows extension to
 -- 90-180d in Phase C if calibration analytics need longer history.
+-- bigint ts_ms hypertable: register integer_now_func first (TimescaleDB
+-- 2.x requires it before add_retention_policy on integer time columns),
+-- then add the retention policy with `if_not_exists => TRUE` for
+-- idempotency (per CLAUDE.md §七 V023 postmortem rule 4).
 -- 30 天 retention — Phase B 觀察視窗；Phase C calibration 若需更長
 -- 歷史，可擴至 90-180 天。
+-- bigint ts_ms hypertable：TimescaleDB 2.x 要求對 integer time column
+-- 必先註冊 integer_now_func 才能 add_retention_policy；用 `if_not_exists
+-- => TRUE` 保 idempotency（per CLAUDE.md §七 V023 postmortem 規則 4）。
 -- ------------------------------------------------------------
+
+-- integer_now_func: returns current epoch_ms — required by retention policy
+-- on bigint time hypertables. STABLE because it does not modify state.
+-- integer_now_func：返回當前 epoch_ms — bigint time hypertable retention
+-- 政策的必需件。STABLE 因為不改 state。
+CREATE OR REPLACE FUNCTION learning.cost_edge_advisor_log_now_ms()
+RETURNS BIGINT
+LANGUAGE SQL
+STABLE
+AS $$
+    SELECT (EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::BIGINT;
+$$;
+
+-- Register integer_now_func on the hypertable (idempotent — TimescaleDB
+-- silently no-ops if already set to the same function).
+-- 在 hypertable 註冊 integer_now_func（idempotent — TimescaleDB 同 fn
+-- 已設則 silently no-op）。
+SELECT set_integer_now_func(
+    'learning.cost_edge_advisor_log',
+    'learning.cost_edge_advisor_log_now_ms',
+    replace_if_exists => TRUE
+);
+
 SELECT add_retention_policy(
     'learning.cost_edge_advisor_log',
     BIGINT '2592000000',  -- 30 days in ms
