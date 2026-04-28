@@ -641,6 +641,14 @@ impl IntentProcessor {
                     "cost_gate fail-closed: ATR unavailable (SEC-11) / 成本門禁因 ATR 不可用拒絕");
                 return ExchangeGateResult::rejected(RejectionCode::CostGateAtrUnavailable.format());
             }
+            if let Some(reason) = self.fee_rate_staleness_rejection(now_ms) {
+                tracing::warn!(
+                    symbol = %intent.symbol,
+                    reason = %reason,
+                    "cost_gate fail-closed: fee rates stale / 成本門禁因費率過期拒絕"
+                );
+                return ExchangeGateResult::rejected(reason);
+            }
             // EDGE-P2-3 Phase 1a: PostOnly intents pay maker fee in the cost gate.
             let fee_rate = self.fee_rate_for_intent(&intent.symbol, intent);
             let volume_24h = paper_state.latest_turnover(&intent.symbol).unwrap_or(0.0);

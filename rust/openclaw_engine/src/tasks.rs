@@ -20,15 +20,16 @@ use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
 
-/// Spawn periodic fee rate refresh (every 6h) + staleness monitor (alarm if >12h).
-/// 啟動定期費率刷新（每 6h）和新鮮度監控（>12h 告警）。
+/// Spawn periodic fee rate refresh (every 1h) + staleness monitor (alarm if >2h).
+/// 啟動定期費率刷新（每 1h）和新鮮度監控（>2h 告警）。
 pub(crate) fn spawn_fee_rate_tasks(
     acct: &Arc<AccountManager>,
     client: &Arc<BybitRestClient>,
     cancel: &CancellationToken,
 ) {
-    // Periodic refresh: re-fetch fee rates every 6h to track VIP-tier changes.
-    // 每 6 小時刷新費率，追蹤 VIP 變動；接 cancel token 優雅退出。
+    // Periodic refresh: re-fetch fee rates hourly so the 2h cost-gate staleness
+    // guard has room for one missed refresh before failing closed.
+    // 每小時刷新費率；2h 成本門過期保護可容忍一次刷新失敗。
     // E5-P1-5 adoption: use shared spawn_cancellable_interval helper; cancel
     //                   log message preserved byte-for-byte.
     // E5-P1-5 採用：使用共享的 spawn_cancellable_interval；cancel log 完全保留。
@@ -37,7 +38,7 @@ pub(crate) fn spawn_fee_rate_tasks(
         let client_refresh = Arc::clone(client);
         let _ = spawn_cancellable_interval(
             "fee_rate_refresh",
-            std::time::Duration::from_secs(6 * 3600),
+            std::time::Duration::from_secs(3600),
             Some("fee_rate refresh task stopping (cancel) / 費率刷新任務停止"),
             cancel.clone(),
             move || {
@@ -45,10 +46,9 @@ pub(crate) fn spawn_fee_rate_tasks(
                 let client = Arc::clone(&client_refresh);
                 async move {
                     match acct.refresh_fee_rates(&*client, "linear").await {
-                        Ok(count) => info!(
-                            symbols = count,
-                            "fee rates refreshed (6h) / 費率已刷新"
-                        ),
+                        Ok(count) => {
+                            info!(symbols = count, "fee rates refreshed (1h) / 費率已刷新")
+                        }
                         Err(e) => {
                             warn!(error = %e, "fee rate refresh failed / 費率刷新失敗")
                         }
@@ -58,8 +58,9 @@ pub(crate) fn spawn_fee_rate_tasks(
         );
     }
 
-    // Staleness monitor: alarm if fee rates haven't refreshed in >12h
-    // 費率新鮮度監控：>12h 未刷新告警
+    // Staleness monitor: alarm if fee rates haven't refreshed in >2h.
+    // The exchange cost gate also rejects while stale; this log makes it visible.
+    // 費率新鮮度監控：>2h 未刷新告警；exchange 成本門也會拒絕。
     {
         let acct_mon = Arc::clone(acct);
         let cancel_mon = cancel.clone();
@@ -77,10 +78,10 @@ pub(crate) fn spawn_fee_rate_tasks(
                             .unwrap_or_default()
                             .as_millis() as u64;
                         let age_h = (now.saturating_sub(last)) as f64 / 3_600_000.0;
-                        if age_h > 12.0 {
+                        if age_h > 2.0 {
                             warn!(
                                 age_hours = format!("{:.1}", age_h),
-                                "fee rates STALE >12h — refresh task may be dead / 費率過期"
+                                "fee rates STALE >2h — cost gate will fail closed / 費率過期，成本門將 fail-closed"
                             );
                         }
                     }

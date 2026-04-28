@@ -574,6 +574,14 @@ pub(super) async fn handle_exchange_event(
                     if fully_filled {
                         tracing::info!(order_link_id = %key, "pending order fully filled, removing / 待處理訂單完全成交，移除");
                         state.pending_orders.remove(&key);
+                    } else if pending_sweep::tighten_postonly_entry_after_partial(po, exec_ts) {
+                        tracing::info!(
+                            order_link_id = %key,
+                            filled_qty = po.cum_filled_qty,
+                            total_qty = po.qty,
+                            maker_timeout_ms = po.maker_timeout_ms.unwrap_or_default(),
+                            "PostOnly entry partially filled — shortened remaining maker timeout / PostOnly entry 部分成交，縮短剩餘掛單等待"
+                        );
                     }
                 }
             } else {
