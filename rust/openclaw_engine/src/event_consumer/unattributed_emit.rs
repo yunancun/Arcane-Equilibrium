@@ -182,6 +182,12 @@ pub(super) async fn try_emit_unattributed_fill(
         // fee_rate unknown without PendingOrder TIF context; set 0.
         // fee_rate 在缺少 PendingOrder TIF 上下文時不可知；設 0。
         fee_rate: 0.0,
+        reference_price: None,
+        reference_ts_ms: None,
+        reference_source: None,
+        slippage_bps: None,
+        liquidity_role: Some("unknown".to_string()),
+        fill_latency_ms: None,
         // realized_pnl=0 because there is no entry leg to compute against.
         // Bybit auto-actions (funding payment / dust scrub) are tracked
         // separately via wallet ledger; this audit row only marks the WS

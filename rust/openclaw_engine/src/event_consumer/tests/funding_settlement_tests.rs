@@ -31,6 +31,7 @@ fn make_funding_exec(exec_id: &str, amount: &str) -> ExecutionUpdate {
             "execFee": amount,
             "feeCurrency": "USDT"
         }),
+        ..Default::default()
     }
 }
 

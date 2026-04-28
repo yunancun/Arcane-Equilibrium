@@ -29,6 +29,53 @@ use super::types::{ExchangeEvent, PendingOrder};
 use crate::persistence::{AuditWriter, DualStateWriter, StateWriter};
 use crate::tick_pipeline::{EngineEvent, PipelineCommand, PipelineKind, TickPipeline};
 
+fn fill_liquidity_role(
+    is_maker: bool,
+    tif: Option<crate::order_manager::TimeInForce>,
+) -> &'static str {
+    if is_maker || matches!(tif, Some(crate::order_manager::TimeInForce::PostOnly)) {
+        "maker"
+    } else {
+        "taker"
+    }
+}
+
+fn adverse_slippage_bps(is_buy: bool, fill_price: f64, reference_price: Option<f64>) -> Option<f64> {
+    let reference_price = reference_price?;
+    if reference_price <= 0.0 || !reference_price.is_finite() || !fill_price.is_finite() {
+        return None;
+    }
+    let signed = if is_buy {
+        (fill_price - reference_price) / reference_price
+    } else {
+        (reference_price - fill_price) / reference_price
+    };
+    Some(signed * 10_000.0)
+}
+
+#[cfg(test)]
+mod execution_slippage_tests {
+    use super::*;
+
+    #[test]
+    fn adverse_slippage_is_positive_when_buy_fills_above_reference() {
+        let bps = adverse_slippage_bps(true, 100.10, Some(100.0)).unwrap();
+        assert!((bps - 10.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn adverse_slippage_is_positive_when_sell_fills_below_reference() {
+        let bps = adverse_slippage_bps(false, 99.90, Some(100.0)).unwrap();
+        assert!((bps - 10.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn postonly_fill_is_maker_even_when_exchange_flag_missing() {
+        let role = fill_liquidity_role(false, Some(crate::order_manager::TimeInForce::PostOnly));
+        assert_eq!(role, "maker");
+    }
+}
+
 /// Loop-internal mutable state owned by `run_event_consumer` between bootstrap
 /// and the select! loop. Passed by `&mut` into each arm handler so borrows are
 /// scoped per-call (avoids holding multiple mut borrows across arms).
@@ -481,6 +528,15 @@ pub(super) async fn handle_exchange_event(
                 .as_ref()
                 .and_then(|k| state.pending_orders.get(k))
                 .and_then(|po| po.time_in_force);
+            let fallback_fee_rate = pipeline
+                .intent_processor
+                .fee_rate_for_tif(&exec.symbol, matched_tif);
+            let fee_rate_used = exec
+                .fee_rate
+                .parse::<f64>()
+                .ok()
+                .filter(|v| v.is_finite() && *v >= 0.0)
+                .unwrap_or(fallback_fee_rate);
 
             // FIX-19: execution.fast topic omits execFee/feeRate fields.
             // When the field is empty or unparseable, estimate fee from
@@ -496,16 +552,13 @@ pub(super) async fn handle_exchange_event(
             let exec_fee: f64 = {
                 let parsed = exec.exec_fee.parse::<f64>().unwrap_or(0.0);
                 if parsed == 0.0 && exec_qty > 0.0 && exec_price > 0.0 {
-                    let fee_rate = pipeline
-                        .intent_processor
-                        .fee_rate_for_tif(&exec.symbol, matched_tif);
-                    let estimated = exec_qty * exec_price * fee_rate;
+                    let estimated = exec_qty * exec_price * fee_rate_used;
                     if estimated > 0.0 {
                         tracing::debug!(
                             exec_id = %exec.exec_id,
                             symbol = %exec.symbol,
                             notional = exec_qty * exec_price,
-                            fee_rate,
+                            fee_rate = fee_rate_used,
                             tif_known = matched_tif.is_some(),
                             estimated_fee = estimated,
                             "FIX-19b: execFee missing, estimated from TIF-aware rate \
@@ -532,6 +585,18 @@ pub(super) async fn handle_exchange_event(
             if let Some(key) = matched_key {
                 if let Some(po) = state.pending_orders.get_mut(&key) {
                     po.cum_filled_qty += exec_qty;
+                    let liquidity_role = fill_liquidity_role(exec.is_maker, matched_tif);
+                    let slippage_bps = if liquidity_role == "taker" {
+                        adverse_slippage_bps(po.is_long, exec_price, po.reference_price)
+                    } else {
+                        None
+                    };
+                    let fill_latency_ms = if exec_ts > 0 {
+                        Some(exec_ts.saturating_sub(po.sent_ts_ms))
+                    } else {
+                        None
+                    };
+                    let reference_source = po.reference_source.clone();
                     // FILL-CONTEXT-LINKAGE-1: thread signal-time context_id
                     // from PendingOrder into apply_confirmed_fill so
                     // trading.fills.entry_context_id matches
@@ -550,6 +615,13 @@ pub(super) async fn handle_exchange_event(
                         &po.strategy,
                         &po.context_id,
                         &po.order_link_id,
+                        Some(fee_rate_used),
+                        po.reference_price,
+                        po.reference_ts_ms,
+                        reference_source.as_deref(),
+                        slippage_bps,
+                        Some(liquidity_role),
+                        fill_latency_ms,
                     );
                     snapshot_writer.force_write(&pipeline.snapshot());
 
@@ -574,6 +646,14 @@ pub(super) async fn handle_exchange_event(
                     if fully_filled {
                         tracing::info!(order_link_id = %key, "pending order fully filled, removing / 待處理訂單完全成交，移除");
                         state.pending_orders.remove(&key);
+                    } else if pending_sweep::tighten_postonly_entry_after_partial(po, exec_ts) {
+                        tracing::info!(
+                            order_link_id = %key,
+                            filled_qty = po.cum_filled_qty,
+                            total_qty = po.qty,
+                            maker_timeout_ms = po.maker_timeout_ms.unwrap_or_default(),
+                            "PostOnly entry partially filled — shortened remaining maker timeout / PostOnly entry 部分成交，縮短剩餘掛單等待"
+                        );
                     }
                 }
             } else {
@@ -900,23 +980,24 @@ pub(super) fn handle_tick_event(
     // EXT-1 + EDGE-P2-3 Phase 1B-3.2: Sweep timed-out pending orders (every 5s).
     // Branch by TimeInForce:
     //   - PostOnly maker: once elapsed >= po.maker_timeout_ms (default 45s),
-    //     spawn non-blocking REST cancel via orderLinkId + remove tracker row.
+    //     spawn non-blocking REST cancel via orderLinkId and keep the tracker
+    //     row until WS cancel ack/fill or cancel-ack grace expiry.
     //   - Market (legacy): 5s soft warn / 60s hard remove (unchanged).
-    // Tracker row removal after cancel is intentional — if a race fills the
-    // order between our sweep and Bybit's cancel processing, the existing
-    // legacy hard-remove semantics apply (unmatched WS fill goes through the
-    // position reconciler). A stricter "wait-for-cancel-ack then remove"
-    // pattern is deferred to an FUP.
+    // Tracker row retention after cancel is intentional — if a race fills the
+    // order between our sweep and Bybit's cancel processing, the fill still
+    // gets the original strategy/context instead of falling into unmatched
+    // audit. OrderUpdate Cancelled/Rejected or grace expiry removes the row.
     // EDGE-P2-3 Phase 1B-3.2：超時 pending order 掃描（每 5s）。
-    //   - PostOnly 掛單：elapsed >= maker_timeout_ms（預設 45s）→ 非阻塞 REST 取消 + 移除。
+    //   - PostOnly 掛單：elapsed >= maker_timeout_ms（預設 45s）→ 非阻塞 REST 取消，
+    //     保留 tracker 至 WS cancel ack/fill 或 grace 到期。
     //   - Market（舊行為）：5s 軟警告 / 60s 硬移除，不變。
     if !state.pending_orders.is_empty() && state.last_pending_check.elapsed() >= pending_timeout {
         let now_ms = openclaw_core::now_ms();
         let mut maker_to_cancel: Vec<(String, String, u64, u64)> = Vec::new();
         let mut legacy_to_remove: Vec<String> = Vec::new();
         for (key, po) in state.pending_orders.iter() {
-            let elapsed = now_ms.saturating_sub(po.sent_ts_ms);
-            match classify_pending_sweep(po, elapsed) {
+            let elapsed = pending_sweep::pending_elapsed_ms(po, now_ms);
+            match classify_pending_sweep(po, now_ms) {
                 PendingSweepAction::MakerTimeoutCancel => {
                     let deadline_ms = po.maker_timeout_ms.unwrap_or(45_000);
                     maker_to_cancel.push((
@@ -925,6 +1006,17 @@ pub(super) fn handle_tick_event(
                         elapsed,
                         deadline_ms,
                     ));
+                }
+                PendingSweepAction::MakerCancelGraceExpired => {
+                    tracing::error!(
+                        order_link_id = %key,
+                        symbol = %po.symbol,
+                        elapsed_ms = elapsed,
+                        cancel_requested_ts_ms = po.cancel_requested_ts_ms.unwrap_or_default(),
+                        grace_ms = pending_sweep::MAKER_CANCEL_ACK_GRACE_MS,
+                        "PostOnly maker cancel ack grace expired — removing stale tracker / PostOnly 取消回報 grace 到期，移除過期追蹤"
+                    );
+                    legacy_to_remove.push(key.clone());
                 }
                 PendingSweepAction::LegacyHardRemove => {
                     tracing::error!(
@@ -950,6 +1042,7 @@ pub(super) fn handle_tick_event(
         }
         // Dispatch non-blocking cancels for timed-out PostOnly makers.
         // 非阻塞派發超時 PostOnly 掛單取消。
+        let mut maker_cancel_dispatched: Vec<String> = Vec::new();
         for (link_id, symbol, elapsed, deadline_ms) in &maker_to_cancel {
             tracing::warn!(
                 order_link_id = %link_id,
@@ -966,15 +1059,27 @@ pub(super) fn handle_tick_event(
                 tokio::spawn(async move {
                     pending_sweep::cancel_resting_maker_order(c, sym, lid).await;
                 });
+                maker_cancel_dispatched.push(link_id.clone());
+            } else {
+                tracing::error!(
+                    order_link_id = %link_id,
+                    symbol = %symbol,
+                    "PostOnly maker timed out but no REST client is available — removing tracker / PostOnly 超時但無 REST client，移除追蹤"
+                );
+                legacy_to_remove.push(link_id.clone());
             }
         }
-        // Remove maker rows we just dispatched cancels for.
-        // 移除剛派發取消的 maker 訂單記錄。
-        for (link_id, _, _, _) in &maker_to_cancel {
-            state.pending_orders.remove(link_id);
+        // Mark maker rows we just dispatched cancels for. Keep them in the
+        // tracker so racing fills before the WS cancel ack still match context.
+        // 標記剛派發 cancel 的 maker 訂單；保留 tracker 讓 ack 前 race 成交仍能匹配。
+        for link_id in &maker_cancel_dispatched {
+            if let Some(po) = state.pending_orders.get_mut(link_id) {
+                po.cancel_requested_ts_ms = Some(now_ms);
+            }
         }
-        // Remove legacy Market hard-timeout rows.
-        // 移除舊 Market 硬超時記錄。
+        // Remove legacy Market hard-timeout rows and maker rows whose cancel
+        // ack grace expired.
+        // 移除舊 Market 硬超時，以及 cancel ack grace 到期的 maker 追蹤。
         for key in &legacy_to_remove {
             state.pending_orders.remove(key);
         }

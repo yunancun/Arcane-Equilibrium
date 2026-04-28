@@ -44,6 +44,22 @@ EXCLUDED_TAG_PREFIXES = ("orphan_close:", "adopted_close:", "shadow_fill:")
 # 過期標籤告警默認天數（§8.2 · 7 日）
 DEFAULT_STALE_DAYS = 7
 
+VALID_ENGINE_MODES = ("paper", "demo", "live", "live_demo")
+
+
+def engine_mode_scope(engine_mode: str) -> tuple[str, ...]:
+    """Return DB engine_mode values to backfill for a requested mode.
+
+    LiveDemo rows are emitted by the Live pipeline when it is bound to Bybit's
+    demo endpoint. A request for `live` must therefore include `live_demo` or
+    the labeler silently starves the Live training path.
+    """
+    if engine_mode not in VALID_ENGINE_MODES:
+        raise ValueError(f"invalid engine_mode: {engine_mode!r}")
+    if engine_mode == "live":
+        return ("live", "live_demo")
+    return (engine_mode,)
+
 
 @dataclass
 class BackfillResult:
@@ -98,17 +114,13 @@ def _get_conn(pg_url: Optional[str]):
 #   3. `close_fills`: close rows pointing back via entry_context_id.
 #   4. `classified`: tag each close as excluded or included.
 #   5. `per_entry`: aggregate fills; BOOL_OR for any_excluded taint.
-#   6. `labels`: compute realized_net_edge_bps (gross − entry_fee − close_fee)
+#   6. `funding_by_entry`: join attributed funding settlements over entry→close lifecycle.
+#   7. `labels`: compute realized_net_edge_bps (gross + funding − entry_fee − close_fee)
 #      normalized by entry notional; distinguish grid VWAP vs non-grid blend.
-#   7. UPDATE split into two passes:
+#   8. UPDATE split into two passes:
 #      a) included → write label + split_flag + filled_at
 #      b) any_excluded → write close_tag + filled_at, keep label=NULL
 #         (future runs skip via WHERE label_filled_at IS NULL).
-#
-# NOTE: funding_accrued_bps is NOT included here (§4.1 open item).
-#   Requires JOIN to market.funding_rates + time-window integration per fill.
-#   Left as structured TODO — ML-MIT Stage 2 may demand it for funding_arb,
-#   backfill-replay pattern (re-compute historical labels with funding included).
 # ============================================================
 _BACKFILL_INCLUDED_SQL = """
 -- F4-2 (2026-04-26): Every JOIN against trading.fills below filters
@@ -123,10 +135,14 @@ _BACKFILL_INCLUDED_SQL = """
 -- 不混入 label 產生。Audit row 有獨特 context_id 不可能 JOIN 上真 decision_features，
 -- 顯式過濾為深層防護。
 WITH entries AS (
-    SELECT l.context_id, l.strategy_name, l.ts AS entry_ts
+    SELECT l.context_id,
+           l.strategy_name,
+           l.symbol,
+           l.engine_mode,
+           l.ts AS entry_ts
     FROM learning.decision_features l
     WHERE l.label_filled_at IS NULL
-      AND l.engine_mode = %(engine_mode)s
+      AND l.engine_mode = ANY(%(engine_modes)s)
       AND EXISTS (
           SELECT 1 FROM trading.fills f
           WHERE f.entry_context_id = l.context_id
@@ -163,7 +179,8 @@ close_fills AS (
            f.price        AS close_price,
            f.fee          AS close_fee,
            f.realized_pnl AS gross_pnl,
-           f.strategy_name AS close_tag
+           f.strategy_name AS close_tag,
+           f.ts            AS close_ts
     FROM entries e
     JOIN trading.fills f ON f.entry_context_id = e.context_id
         -- F4-2: close fills must not be audit rows either.
@@ -187,9 +204,23 @@ per_entry AS (
            SUM(gross_pnl)          AS total_gross_pnl,
            SUM(close_fee)          AS total_close_fee,
            SUM(close_qty * close_price) / NULLIF(SUM(close_qty), 0) AS vwap_exit,
+           MAX(close_ts)           AS last_close_ts,
            BOOL_OR(is_excluded)    AS any_excluded
     FROM classified
     GROUP BY context_id, strategy_name
+),
+funding_by_entry AS (
+    SELECT e.context_id,
+           COALESCE(SUM(fs.amount), 0.0) AS total_funding_pnl
+    FROM entries e
+    JOIN per_entry p ON p.context_id = e.context_id
+    LEFT JOIN trading.funding_settlements fs
+      ON fs.symbol = e.symbol
+     AND fs.engine_mode = e.engine_mode
+     AND fs.strategy_name = e.strategy_name
+     AND fs.ts >= e.entry_ts
+     AND fs.ts <= p.last_close_ts
+    GROUP BY e.context_id
 ),
 labels AS (
     SELECT e.context_id,
@@ -200,13 +231,15 @@ labels AS (
            p.last_close_tag,
            p.close_count,
            p.total_gross_pnl,
+           COALESCE(fb.total_funding_pnl, 0.0) AS total_funding_pnl,
            p.total_close_fee,
            p.vwap_exit,
            p.total_close_qty,
            p.any_excluded,
            CASE
                WHEN ef.entry_price > 0 AND ef.entry_qty > 0 THEN
-                   (p.total_gross_pnl - ef.entry_fee - p.total_close_fee)
+                   (p.total_gross_pnl + COALESCE(fb.total_funding_pnl, 0.0)
+                    - ef.entry_fee - p.total_close_fee)
                    / (ef.entry_price * ef.entry_qty) * 10000.0
                ELSE NULL
            END AS label_net_edge_bps,
@@ -218,6 +251,7 @@ labels AS (
     FROM entries e
     JOIN entry_fills ef ON ef.context_id = e.context_id
     JOIN per_entry   p  ON p.context_id  = e.context_id
+    LEFT JOIN funding_by_entry fb ON fb.context_id = e.context_id
 )
 UPDATE learning.decision_features d
 SET label_net_edge_bps = l.label_net_edge_bps,
@@ -243,7 +277,7 @@ WITH excluded_entries AS (
     FROM learning.decision_features l
     JOIN trading.fills f ON f.entry_context_id = l.context_id
     WHERE l.label_filled_at IS NULL
-      AND l.engine_mode = %(engine_mode)s
+      AND l.engine_mode = ANY(%(engine_modes)s)
       AND f.strategy_name ~ '^(orphan_close:|adopted_close:|shadow_fill:)'
       -- F4-2: audit rows excluded (defence-in-depth; audit context_ids never
       -- match a real decision_features row, but filter explicitly).
@@ -273,14 +307,14 @@ def backfill_labels(
 
     Args:
         pg_url:      DSN override (else env vars / 優先環境變量)
-        engine_mode: 'paper' | 'demo' | 'live'
+        engine_mode: 'paper' | 'demo' | 'live' | 'live_demo'. `live` widens to
+            `('live','live_demo')`; explicit `live_demo` remains exact.
         batch_limit: max rows per pass (two passes: included + excluded)
         dry_run:     if True, ROLLBACK instead of COMMIT
 
     Returns BackfillResult summary.
     """
-    if engine_mode not in ("paper", "demo", "live", "live_demo"):
-        raise ValueError(f"invalid engine_mode: {engine_mode!r}")
+    engine_modes = list(engine_mode_scope(engine_mode))
 
     result = BackfillResult()
 
@@ -290,7 +324,7 @@ def backfill_labels(
             # Pass 1: included (with labels)
             cur.execute(
                 _BACKFILL_INCLUDED_SQL,
-                {"engine_mode": engine_mode, "batch_limit": batch_limit},
+                {"engine_modes": engine_modes, "batch_limit": batch_limit},
             )
             included_rows = cur.fetchall()
             for _ctx, strat, split_flag in included_rows:
@@ -303,7 +337,7 @@ def backfill_labels(
             # Pass 2: excluded (mark tried, keep label NULL)
             cur.execute(
                 _BACKFILL_EXCLUDED_SQL,
-                {"engine_mode": engine_mode, "batch_limit": batch_limit},
+                {"engine_modes": engine_modes, "batch_limit": batch_limit},
             )
             excluded_rows = cur.fetchall()
             result.excluded_count = len(excluded_rows)
@@ -346,7 +380,7 @@ SELECT engine_mode,
 FROM learning.decision_features
 WHERE label_filled_at IS NULL
   AND ts < now() - (%(max_age_days)s || ' days')::interval
-  AND (%(engine_mode)s IS NULL OR engine_mode = %(engine_mode)s)
+  AND (%(engine_mode_all)s OR engine_mode = ANY(%(engine_modes)s))
 GROUP BY engine_mode, strategy_name
 ORDER BY stale_rows DESC
 """
@@ -362,12 +396,17 @@ def check_stale_labels(
 
     Returns list of {engine_mode, strategy_name, stale_rows, oldest_ts, newest_ts}.
     """
+    engine_modes = list(engine_mode_scope(engine_mode)) if engine_mode is not None else []
     conn = _get_conn(pg_url)
     try:
         with conn.cursor() as cur:
             cur.execute(
                 _STALE_LABELS_SQL,
-                {"max_age_days": max_age_days, "engine_mode": engine_mode},
+                {
+                    "max_age_days": max_age_days,
+                    "engine_mode_all": engine_mode is None,
+                    "engine_modes": engine_modes,
+                },
             )
             rows = cur.fetchall()
     finally:

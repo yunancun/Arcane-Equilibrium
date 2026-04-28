@@ -24,6 +24,7 @@ from program_code.ml_training.edge_label_backfill import (
     EXCLUDED_TAG_PREFIXES,
     backfill_labels,
     check_stale_labels,
+    engine_mode_scope,
     fill_rate_summary,
 )
 
@@ -33,8 +34,9 @@ from program_code.ml_training.edge_label_backfill import (
 # per SQL query (matched by substring of the statement text).
 # ============================================================
 class _FakeCursor:
-    def __init__(self, responses: dict[str, list[tuple]]):
+    def __init__(self, responses: dict[str, list[tuple]], execute_calls: list[tuple[str, dict | None]]):
         self._responses = responses
+        self._execute_calls = execute_calls
         self._last_rows: list[tuple] = []
 
     def __enter__(self):
@@ -44,6 +46,7 @@ class _FakeCursor:
         return False
 
     def execute(self, sql: str, params: dict | None = None):
+        self._execute_calls.append((sql, params))
         for key, rows in self._responses.items():
             if key in sql:
                 self._last_rows = list(rows)
@@ -57,12 +60,13 @@ class _FakeCursor:
 class _FakeConn:
     def __init__(self, responses: dict[str, list[tuple]]):
         self._responses = responses
+        self.execute_calls: list[tuple[str, dict | None]] = []
         self.committed = False
         self.rolled_back = False
         self.closed = False
 
     def cursor(self):
-        return _FakeCursor(self._responses)
+        return _FakeCursor(self._responses, self.execute_calls)
 
     def commit(self):
         self.committed = True
@@ -95,6 +99,12 @@ def test_excluded_tag_prefixes_contract():
     assert "orphan_close:" in EXCLUDED_TAG_PREFIXES
     assert "adopted_close:" in EXCLUDED_TAG_PREFIXES
     assert "shadow_fill:" in EXCLUDED_TAG_PREFIXES
+
+
+def test_engine_mode_scope_live_includes_live_demo():
+    assert engine_mode_scope("live") == ("live", "live_demo")
+    assert engine_mode_scope("live_demo") == ("live_demo",)
+    assert engine_mode_scope("demo") == ("demo",)
 
 
 def test_backfill_result_default_empty():
@@ -168,6 +178,22 @@ def test_backfill_labels_dry_run_rolls_back():
     assert conn.committed is False
 
 
+def test_backfill_labels_live_scope_params_include_live_demo():
+    responses = {
+        "WITH entries AS": [("ctx-1", "ma_crossover", False)],
+    }
+    with _patch_conn(responses) as conn:
+        result = backfill_labels(engine_mode="live", dry_run=True)
+
+    assert result.filled_count == 1
+    scopes = [
+        params["engine_modes"]
+        for _sql, params in conn.execute_calls
+        if params and "engine_modes" in params
+    ]
+    assert scopes == [["live", "live_demo"], ["live", "live_demo"]]
+
+
 def test_backfill_labels_invalid_engine_mode():
     with pytest.raises(ValueError, match="invalid engine_mode"):
         backfill_labels(engine_mode="mainnet")
@@ -194,7 +220,7 @@ def test_backfill_labels_rollback_on_exception():
 
     class ExplodingConn(_FakeConn):
         def cursor(self):
-            return ExplodingCursor({})
+            return ExplodingCursor({}, self.execute_calls)
 
     fake = ExplodingConn({})
     with mock.patch(
@@ -276,15 +302,21 @@ def test_sql_templates_contain_expected_clauses():
 
     # Pass 1 must use composite columns from V017
     assert "label_net_edge_bps" in m._BACKFILL_INCLUDED_SQL
+    assert "engine_mode = ANY(%(engine_modes)s)" in m._BACKFILL_INCLUDED_SQL
     assert "label_split_flag"   in m._BACKFILL_INCLUDED_SQL
     assert "label_filled_at"    in m._BACKFILL_INCLUDED_SQL
     assert "entry_context_id"   in m._BACKFILL_INCLUDED_SQL
     # Grid carve-out (§4.3)
     assert "grid_trading"       in m._BACKFILL_INCLUDED_SQL
+    # Funding settlements must be joined into net edge, not left as a TODO.
+    assert "trading.funding_settlements" in m._BACKFILL_INCLUDED_SQL
+    assert "total_funding_pnl" in m._BACKFILL_INCLUDED_SQL
+    assert "+ COALESCE(fb.total_funding_pnl, 0.0)" in m._BACKFILL_INCLUDED_SQL
 
     # Pass 2 must match the 3 excluded prefixes (§4.2)
     for prefix in ("orphan_close:", "adopted_close:", "shadow_fill:"):
         assert prefix in m._BACKFILL_EXCLUDED_SQL
+    assert "engine_mode = ANY(%(engine_modes)s)" in m._BACKFILL_EXCLUDED_SQL
 
     # Stale-label SQL must filter on label_filled_at NULL
     assert "label_filled_at IS NULL" in m._STALE_LABELS_SQL

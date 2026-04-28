@@ -175,6 +175,12 @@ class RoundTripRecord:
     entry_ts: datetime
     exit_ts: Optional[datetime]
     notional_usd: float       # entry notional / 入場名義金額
+    # Funding settlement PnL attributed over this entry lifecycle.
+    # 歸因到此 entry 生命週期的 funding settlement PnL。
+    funding_pnl_usd: float = 0.0
+    funding_bps: float = 0.0
+    bps_denominator_usd: float = 0.0
+    entry_context_id: str = ""
 
 
 @dataclass
@@ -190,6 +196,7 @@ class EdgeStats:
     std_net_bps: float             # sample std dev / 樣本標準差 bps
     mean_gross_bps: float          # mean gross edge (before fees) / 均值毛邊際 bps
     mean_fee_bps: float            # mean total fee (entry + exit) / 均值手續費 bps
+    mean_funding_bps: float = 0.0  # mean attributed funding / 均值歸因 funding bps
     # Raw per-observation values (for JS shrinkage input)
     # 原始觀測值（供 JS 收縮輸入）
     raw_bps_list: list[float] = field(default_factory=list)
@@ -198,6 +205,9 @@ class EdgeStats:
     win_rate: float = 0.0          # fraction of round-trips with positive net PnL / 盈利往返佔比
     avg_win_bps: float = 0.0       # mean net_pnl_bps for winning trades / 盈利交易均值 bps
     avg_loss_bps: float = 0.0      # mean net_pnl_bps for losing trades / 虧損交易均值 bps
+    # Time-stamped records used by the validation layer for walk-forward OOS checks.
+    # 帶時間戳的原始往返記錄，供驗證層做 walk-forward OOS 檢查。
+    raw_records: list[RoundTripRecord] = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -214,6 +224,8 @@ SELECT
     f.price,
     f.fee,
     f.realized_pnl,
+    f.context_id,
+    f.entry_context_id,
     f.is_paper,
     f.engine_mode
 FROM trading.fills f
@@ -228,6 +240,21 @@ WHERE f.ts >= %(since)s
   -- Audit row realized_pnl=0、TIF 未知 fee_rate=0 會扭曲 bps 聚合。
   AND (f.strategy_name IS NULL OR f.strategy_name NOT LIKE 'unattributed:%%')
 ORDER BY f.symbol, f.ts ASC
+"""
+
+_FUNDING_QUERY = """
+SELECT
+    fs.ts,
+    fs.symbol,
+    COALESCE(fs.strategy_name, 'unknown') AS strategy_name,
+    fs.amount,
+    fs.engine_mode
+FROM trading.funding_settlements fs
+WHERE fs.ts >= %(since)s
+  AND fs.engine_mode = %(engine_mode)s
+  AND fs.strategy_name IS NOT NULL
+  AND fs.strategy_name NOT LIKE 'unattributed:%%'
+ORDER BY fs.symbol, fs.strategy_name, fs.ts ASC
 """
 
 
@@ -296,6 +323,7 @@ def _pair_round_trips(fills: list[dict]) -> list[RoundTripRecord]:
                     "entry_price": price,
                     "entry_fee": fee,
                     "ts": ts,
+                    "context_id": fill.get("context_id") or "",
                 })
             else:
                 # Exit fill — match against oldest entry (FIFO)
@@ -376,6 +404,8 @@ def _pair_round_trips(fills: list[dict]) -> list[RoundTripRecord]:
                                 entry_ts=entry["ts"],
                                 exit_ts=ts,
                                 notional_usd=entry_notional,
+                                bps_denominator_usd=denom_bps,
+                                entry_context_id=entry.get("context_id", ""),
                             )
                             records.append(rec)
 
@@ -386,6 +416,88 @@ def _pair_round_trips(fills: list[dict]) -> list[RoundTripRecord]:
                         open_entries.pop(0)
 
     return records
+
+
+def _as_aware_utc(ts: datetime) -> datetime:
+    """Normalize DB timestamps for comparisons. / 正規化 DB timestamp 以便比較。"""
+    if ts.tzinfo is None:
+        return ts.replace(tzinfo=timezone.utc)
+    return ts.astimezone(timezone.utc)
+
+
+def _attach_funding_to_records(records: list[RoundTripRecord], funding_rows: list[dict]) -> None:
+    """
+    Add attributed funding settlements to round-trip net PnL in-place.
+
+    Funding rows are strategy/symbol level settlements. The live paper_state
+    supports one owner strategy per symbol position, so grouping by entry
+    context prevents double-counting split exits from the same position.
+    將已歸因 funding settlement 加回 round-trip net PnL（原地修改）。
+    """
+    if not records or not funding_rows:
+        return
+
+    settlements: dict[tuple[str, str], list[dict]] = {}
+    for row in funding_rows:
+        symbol = row.get("symbol")
+        strategy = row.get("strategy_name")
+        if not symbol or not strategy:
+            continue
+        try:
+            amount = float(row.get("amount") or 0.0)
+        except (TypeError, ValueError):
+            continue
+        if amount == 0.0:
+            continue
+        ts = row.get("ts")
+        if not isinstance(ts, datetime):
+            continue
+        settlements.setdefault((strategy, symbol), []).append({
+            "ts": _as_aware_utc(ts),
+            "amount": amount,
+        })
+
+    grouped: dict[tuple[str, str, str], list[RoundTripRecord]] = {}
+    for idx, rec in enumerate(records):
+        entry_key = rec.entry_context_id or f"legacy:{idx}"
+        grouped.setdefault((rec.strategy_name, rec.symbol, entry_key), []).append(rec)
+
+    for (strategy, symbol, _entry_key), recs in grouped.items():
+        rows = settlements.get((strategy, symbol), [])
+        if not rows:
+            continue
+        start = min(_as_aware_utc(r.entry_ts) for r in recs)
+        exits = [r.exit_ts for r in recs if r.exit_ts is not None]
+        if not exits:
+            continue
+        end = max(_as_aware_utc(ts) for ts in exits)
+        for row in rows:
+            settlement_ts = row["ts"]
+            if not (start <= settlement_ts <= end):
+                continue
+
+            active_recs = [
+                r for r in recs
+                if r.exit_ts is not None
+                and _as_aware_utc(r.entry_ts) <= settlement_ts <= _as_aware_utc(r.exit_ts)
+            ]
+            weights = [max(r.notional_usd, 0.0) for r in active_recs]
+            weight_sum = sum(weights)
+            if weight_sum <= 0.0:
+                continue
+
+            for rec, weight in zip(active_recs, weights):
+                allocation = row["amount"] * (weight / weight_sum)
+                denom = rec.bps_denominator_usd if rec.bps_denominator_usd > 0.0 else rec.notional_usd
+                funding_bps = _bps(allocation, denom)
+                rec.funding_pnl_usd += allocation
+                rec.funding_bps += funding_bps
+                rec.net_pnl_bps = _winsorize_bps(
+                    rec.net_pnl_bps + funding_bps,
+                    "net_pnl_bps",
+                    rec.strategy_name,
+                    rec.symbol,
+                )
 
 
 def compute_edge_stats(
@@ -435,6 +547,9 @@ def compute_edge_stats(
             cur.execute(_FILLS_QUERY, {"since": since, "engine_mode": engine_mode})
             cols = [d[0] for d in cur.description]
             fills = [dict(zip(cols, row)) for row in cur.fetchall()]
+            cur.execute(_FUNDING_QUERY, {"since": since, "engine_mode": engine_mode})
+            funding_cols = [d[0] for d in cur.description]
+            funding_rows = [dict(zip(funding_cols, row)) for row in cur.fetchall()]
     finally:
         conn.close()
 
@@ -444,9 +559,14 @@ def compute_edge_stats(
         rolling_since.isoformat(),
         min_observation_ts.isoformat() if min_observation_ts is not None else "None",
     )
+    logger.info(
+        "Fetched %d attributed %s funding settlements since %s",
+        len(funding_rows), engine_mode, since.isoformat(),
+    )
 
     # Pair into round-trips
     records = _pair_round_trips(fills)
+    _attach_funding_to_records(records, funding_rows)
     logger.info("Paired %d round-trip records", len(records))
 
     # Aggregate by (strategy, symbol)
@@ -467,11 +587,13 @@ def compute_edge_stats(
         net_bps = [r.net_pnl_bps for r in recs]
         gross_bps = [r.gross_pnl_bps for r in recs]
         fee_bps = [r.entry_fee_bps + r.exit_fee_bps for r in recs]
+        funding_bps = [r.funding_bps for r in recs]
 
         n = len(net_bps)
         mean_net = sum(net_bps) / n
         mean_gross = sum(gross_bps) / n
         mean_fee = sum(fee_bps) / n
+        mean_funding = sum(funding_bps) / n
 
         # Sample standard deviation / 樣本標準差
         if n >= 2:
@@ -496,14 +618,16 @@ def compute_edge_stats(
             std_net_bps=std_net,
             mean_gross_bps=mean_gross,
             mean_fee_bps=mean_fee,
+            mean_funding_bps=mean_funding,
             raw_bps_list=net_bps,
             win_rate=win_rate,
             avg_win_bps=avg_win,
             avg_loss_bps=avg_loss,
+            raw_records=list(recs),
         )
         logger.info(
-            "  (%s, %s): n=%d mean_net=%.2f bps std=%.2f bps fee=%.2f bps win_rate=%.2f",
-            strategy, symbol, n, mean_net, std_net, mean_fee, win_rate,
+            "  (%s, %s): n=%d mean_net=%.2f bps std=%.2f bps fee=%.2f bps funding=%.2f bps win_rate=%.2f",
+            strategy, symbol, n, mean_net, std_net, mean_fee, mean_funding, win_rate,
         )
 
     return stats

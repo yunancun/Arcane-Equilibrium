@@ -69,6 +69,10 @@ fn baseline_pending_order(order_type: &str, tif: Option<TimeInForce>) -> Pending
         order_type: order_type.to_string(),
         time_in_force: tif,
         maker_timeout_ms: tif.and(Some(45_000)),
+        reference_price: None,
+        reference_ts_ms: None,
+        reference_source: None,
+        cancel_requested_ts_ms: None,
     }
 }
 

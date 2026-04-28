@@ -269,6 +269,12 @@ impl TickPipeline {
                 price: fill.fill_price,
                 fee: fill.fee,
                 fee_rate: self.intent_processor.fee_rate(symbol),
+                reference_price: None,
+                reference_ts_ms: None,
+                reference_source: None,
+                slippage_bps: None,
+                liquidity_role: None,
+                fill_latency_ms: None,
                 realized_pnl,
                 strategy_name: strategy.to_string(),
                 context_id,
@@ -436,6 +442,13 @@ impl TickPipeline {
         strategy: &str,
         signal_context_id: &str,
         order_link_id: &str,
+        fee_rate_override: Option<f64>,
+        reference_price: Option<f64>,
+        reference_ts_ms: Option<u64>,
+        reference_source: Option<&str>,
+        slippage_bps: Option<f64>,
+        liquidity_role: Option<&str>,
+        fill_latency_ms: Option<u64>,
     ) {
         // EDGE-P3-1 R2: snapshot was_open + existing entry_context_id BEFORE apply_fill.
         // Exchange-confirmed fills can be open/close/accumulate; thread id on close fills.
@@ -508,7 +521,9 @@ impl TickPipeline {
 
         if let Some(ref tx) = self.trading_tx {
             let em = self.effective_engine_mode();
-            let fr = self.intent_processor.fee_rate(symbol);
+            let fr = fee_rate_override
+                .filter(|v| v.is_finite() && *v >= 0.0)
+                .unwrap_or_else(|| self.intent_processor.fee_rate(symbol));
             // EDGE-P3-1 R2: close fills carry the pre-close entry's id; opens stay empty.
             // EDGE-P3-1 R2：平倉 fill 帶 entry_context_id；開倉/加倉留空。
             let fill_entry_ctx = if realized_pnl != 0.0 {
@@ -537,6 +552,12 @@ impl TickPipeline {
                 price: fill_price,
                 fee,
                 fee_rate: fr,
+                reference_price,
+                reference_ts_ms,
+                reference_source: reference_source.map(str::to_string),
+                slippage_bps,
+                liquidity_role: liquidity_role.map(str::to_string),
+                fill_latency_ms,
                 realized_pnl,
                 strategy_name: strategy.to_string(),
                 context_id: fill_ctx_id,
@@ -560,7 +581,9 @@ impl TickPipeline {
         // fail-soft（tx/snap 缺一即 no-op，對交易無影響）。entry_context_id
         // 沿用前述 existing_entry_ctx，與其他 close 路徑對齊。
         if realized_pnl != 0.0 {
-            let fr = self.intent_processor.fee_rate(symbol);
+            let fr = fee_rate_override
+                .filter(|v| v.is_finite() && *v >= 0.0)
+                .unwrap_or_else(|| self.intent_processor.fee_rate(symbol));
             self.try_emit_exit_feature_row(
                 symbol,
                 qty,
@@ -684,6 +707,17 @@ impl TickPipeline {
                 // Close path stays Market (EDGE-P2-3 Phase 1a entry-only scope).
                 // 平倉維持 Market（EDGE-P2-3 Phase 1a 僅入場走 maker 路徑）。
                 maker_timeout_ms: None,
+                reference_price: Some(dispatch_price).filter(|p| p.is_finite() && *p > 0.0),
+                reference_ts_ms: if dispatch_price.is_finite() && dispatch_price > 0.0 {
+                    Some(event.ts_ms)
+                } else {
+                    None
+                },
+                reference_source: if dispatch_price.is_finite() && dispatch_price > 0.0 {
+                    Some("dispatch_last_fallback".to_string())
+                } else {
+                    None
+                },
             });
             if is_primary {
                 self.pending_close_symbols.insert(symbol.to_string());
@@ -783,6 +817,17 @@ impl TickPipeline {
                         // ipc_close_all goes Market (no maker sweep needed).
                         // ipc_close_all 走 Market，不需 maker sweep。
                         maker_timeout_ms: None,
+                        reference_price: Some(price).filter(|p| p.is_finite() && *p > 0.0),
+                        reference_ts_ms: if price.is_finite() && price > 0.0 {
+                            Some(ts_ms)
+                        } else {
+                            None
+                        },
+                        reference_source: if price.is_finite() && price > 0.0 {
+                            Some("dispatch_last_fallback".to_string())
+                        } else {
+                            None
+                        },
                     });
                     self.pending_close_symbols.insert(symbol);
                 }
@@ -915,6 +960,17 @@ impl TickPipeline {
                     // Per-symbol IPC close goes Market.
                     // 單幣種 IPC 平倉走 Market。
                     maker_timeout_ms: None,
+                    reference_price: Some(price).filter(|p| p.is_finite() && *p > 0.0),
+                    reference_ts_ms: if price.is_finite() && price > 0.0 {
+                        Some(ts_ms)
+                    } else {
+                        None
+                    },
+                    reference_source: if price.is_finite() && price > 0.0 {
+                        Some("dispatch_last_fallback".to_string())
+                    } else {
+                        None
+                    },
                 });
                 self.pending_close_symbols.insert(symbol.to_string());
                 true

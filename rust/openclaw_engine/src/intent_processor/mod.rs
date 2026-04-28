@@ -205,9 +205,9 @@ impl ExchangeGateResult {
 
 /// Intent processor with guardian checks.
 /// 帶守護者檢查的意圖處理器。
-/// Default P1 risk cap (2% of balance per trade).
-/// 默認 P1 風險上限（每筆交易餘額的 2%）。
-const DEFAULT_P1_RISK_PCT: f64 = 0.02;
+/// Default P1 risk cap (3% of balance per trade).
+/// 默認 P1 風險上限（每筆交易餘額的 3%）。
+const DEFAULT_P1_RISK_PCT: f64 = 0.03;
 
 /// Bybit USDT perp default taker fee (0.055%) — fallback when API rate not available.
 /// Bybit USDT 永續合約默認 taker 費率，API 未提供時的回退值。
@@ -228,6 +228,10 @@ const DEFAULT_MAKER_FEE_RATE: f64 = 0.0002;
 /// 運行時滑點現由 `RiskConfig.slippage.lookup_rate(volume_24h)` 提供，可
 /// 從 `risk_config*.toml` 熱重載 tier 表。
 pub(crate) const DEFAULT_SLIPPAGE_RATE: f64 = 0.0005;
+
+/// Maximum age for API-fetched fee rates before exchange cost gates fail closed.
+/// API 費率最大可接受年齡；超過後 exchange 成本門 fail-closed。
+pub(crate) const MAX_FEE_RATE_STALENESS_MS: u64 = 2 * 60 * 60 * 1000;
 
 /// G7-07: Look up slippage using the live `SlippageConfig` (TOML-backed).
 /// Pre-G7-07 callers used a free `lookup_slippage(volume_24h)` reading the
@@ -266,8 +270,8 @@ pub struct IntentProcessor {
     /// Phase 2b: Per-symbol trade stats for Kelly calculation.
     /// Phase 2b：每交易對的交易統計，用於 Kelly 計算。
     trade_stats: std::collections::HashMap<String, crate::ml::kelly_sizer::TradeStats>,
-    /// P1 risk cap percentage (configurable, default 2%).
-    /// P1 風險上限百分比（可配置，默認 2%）。
+    /// P1 risk cap percentage (configurable, default 3%).
+    /// P1 風險上限百分比（可配置，默認 3%）。
     p1_risk_pct: f64,
     /// RRC-1-B4: Risk config for check_order_allowed Gate 0 (ARCH-RC1 unified).
     /// RRC-1-B4：風控配置，用於 Gate 0 訂單准入檢查。
@@ -527,7 +531,7 @@ impl IntentProcessor {
         self.last_arm_selection.as_ref()
     }
 
-    /// Set P1 risk cap percentage (e.g. 0.02 = 2%, 0.05 = 5%).
+    /// Set P1 risk cap percentage (e.g. 0.03 = 3%, 0.05 = 5%).
     /// 設定 P1 風險上限百分比。
     pub fn set_p1_risk_pct(&mut self, pct: f64) {
         self.p1_risk_pct = pct.clamp(0.001, 0.20); // Min 0.1%, max 20%
@@ -764,6 +768,31 @@ impl IntentProcessor {
         am: std::sync::Arc<crate::account_manager::AccountManager>,
     ) {
         self.account_manager = Some(am);
+    }
+
+    pub(crate) fn fee_rate_staleness_rejection(&self, now_ms: u64) -> Option<String> {
+        let am = self.account_manager.as_ref()?;
+        let last = am.last_fee_refresh_ms();
+        if last == 0 {
+            return Some("cost_gate: fee rates unavailable (cold boot, fail-closed)".to_string());
+        }
+        let now = if now_ms > 0 {
+            now_ms
+        } else {
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis() as u64
+        };
+        let age_ms = now.saturating_sub(last);
+        if age_ms > MAX_FEE_RATE_STALENESS_MS {
+            Some(format!(
+                "cost_gate: fee rates stale age_ms={} > max_ms={} (fail-closed)",
+                age_ms, MAX_FEE_RATE_STALENESS_MS
+            ))
+        } else {
+            None
+        }
     }
 
     /// EDGE-P3-1 A4: Wire the per-engine EdgePredictorStore. None → gate skipped.
@@ -1086,6 +1115,27 @@ impl IntentProcessor {
     /// EDGE-P2-3 Phase 1a：依 TIF 選擇 maker/taker 費率。PostOnly→maker，其餘→taker。
     pub fn fee_rate_for_intent(&self, symbol: &str, intent: &OrderIntent) -> f64 {
         self.fee_rate_for_tif(symbol, intent.time_in_force)
+    }
+
+    /// Estimate slippage for cost gates. PostOnly maker orders rest on the book,
+    /// so do not add the taker-style turnover slippage tier on top of maker
+    /// fees; maker execution quality is tracked separately by MakerKpi.
+    /// 成本門滑點估計。PostOnly maker 掛單不再疊加 taker-style turnover 滑點；
+    /// maker 執作品質由 MakerKpi 另行監控。
+    pub(crate) fn slippage_rate_for_intent(&self, intent: &OrderIntent, volume_24h: f64) -> f64 {
+        self.slippage_rate_for_tif(intent.time_in_force, volume_24h)
+    }
+
+    pub(crate) fn slippage_rate_for_tif(
+        &self,
+        tif: Option<crate::order_manager::TimeInForce>,
+        volume_24h: f64,
+    ) -> f64 {
+        if matches!(tif, Some(crate::order_manager::TimeInForce::PostOnly)) {
+            0.0
+        } else {
+            lookup_slippage(&self.risk_config.slippage, volume_24h)
+        }
     }
 
     /// Pick maker vs taker fee from a raw TimeInForce. Used on the fill path

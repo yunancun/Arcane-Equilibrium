@@ -71,7 +71,7 @@ fn test_approved_with_auth() {
     gov.grant_paper_authorization(None).unwrap();
     let mut state = PaperState::new(10_000.0);
     state.set_latest_price("BTC", 50000.0);
-    // PH5-WIRE-0: ATR=2000 so EV=2000×0.7×0.004×0.2=$1.12 >> k×fee=1.5×$0.22=$0.33
+    // PH5-WIRE-0: ATR=2000 so EV=2000×0.7×0.006×0.2=$1.68 >> k×fee=1.5×$0.33=$0.50
     // (ATR raised from 500 to clear the 0.2 cold-start dampening factor)
     let result = proc.process(
         &make_intent("BTC", true),
@@ -86,10 +86,10 @@ fn test_approved_with_auth() {
 
 #[test]
 fn test_position_sizing_caps_qty() {
-    // P1 cap: 2% of 10,000 / 50,000 = 0.004 BTC
-    // Intent qty 0.01 should be reduced to 0.004.
-    // P1 上限：10,000 * 2% / 50,000 = 0.004 BTC；意圖 qty 0.01 縮小為 0.004。
-    // PH5-WIRE-0: ATR=2000 so EV=2000×0.7×0.004×0.2=$1.12 >> k×fee=$0.33
+    // P1 cap: 3% of 10,000 / 50,000 = 0.006 BTC
+    // Intent qty 0.01 should be reduced to 0.006.
+    // P1 上限：10,000 * 3% / 50,000 = 0.006 BTC；意圖 qty 0.01 縮小為 0.006。
+    // PH5-WIRE-0: ATR=2000 so EV=2000×0.7×0.006×0.2=$1.68 >> k×fee=$0.50
     let proc = IntentProcessor::new();
     let mut gov = GovernanceCore::new();
     gov.grant_paper_authorization(None).unwrap();
@@ -105,10 +105,10 @@ fn test_position_sizing_caps_qty() {
     );
     assert!(result.submitted);
     let fill = result.fill.unwrap();
-    // fill.fill_qty should be 0.004 (= 10000 * 0.02 / 50000), not 0.01
+    // fill.fill_qty should be 0.006 (= 10000 * 0.03 / 50000), not 0.01
     assert!(
-        (fill.fill_qty - 0.004).abs() < 1e-9,
-        "Expected qty ~0.004 from P1 sizing, got {}",
+        (fill.fill_qty - 0.006).abs() < 1e-9,
+        "Expected qty ~0.006 from P1 sizing, got {}",
         fill.fill_qty
     );
 }
@@ -118,7 +118,7 @@ fn test_position_sizing_tiny_balance() {
     // With tiny balance, P1 calc gives very small qty — no artificial floor.
     // 餘額極小時，P1 計算給出極小 qty — 無人為下限。
     // PH5-WIRE-0: need ATR=2000 to clear cost_gate with dampening 0.2 at tiny notional.
-    // final_qty=0.00004, notional=$2 → k=3.0, fee=$0.0022, need EV=2000×0.7×0.00004×0.2=$0.0112>$0.0066
+    // final_qty=0.00006, notional=$3 → k=3.0, fee=$0.0033, need EV=2000×0.7×0.00006×0.2=$0.0168>$0.0099
     let proc = IntentProcessor::new();
     let mut gov = GovernanceCore::new();
     gov.grant_paper_authorization(None).unwrap();
@@ -134,10 +134,10 @@ fn test_position_sizing_tiny_balance() {
     );
     assert!(result.submitted);
     let fill = result.fill.unwrap();
-    // P1 calc: 100 * 0.02 / 50000 = 0.00004 — used directly, no MIN_QTY floor.
+    // P1 calc: 100 * 0.03 / 50000 = 0.00006 — used directly, no MIN_QTY floor.
     assert!(
-        (fill.fill_qty - 0.00004).abs() < 1e-9,
-        "Expected P1-sized qty 0.00004, got {}",
+        (fill.fill_qty - 0.00006).abs() < 1e-9,
+        "Expected P1-sized qty 0.00006, got {}",
         fill.fill_qty
     );
 }
@@ -151,7 +151,7 @@ fn test_position_sizing_small_intent_unchanged() {
     gov.grant_paper_authorization(None).unwrap();
     let mut state = PaperState::new(1_000_000.0); // large balance
     state.set_latest_price("ETH", 3_000.0);
-    // P1 cap: 1,000,000 * 0.02 / 3000 = 6.67; intent qty=0.01 is smaller
+    // P1 cap: 1,000,000 * 0.03 / 3000 = 10.0; intent qty=0.01 is smaller
     let intent = make_intent("ETH", true); // qty=0.01
     let result = proc.process(&intent, &gov, &state, 500.0, GovernanceProfile::Exploration);
     assert!(result.submitted);
@@ -186,10 +186,10 @@ fn test_fup8_phase2_approved_qty_exposed_on_success() {
         GovernanceProfile::Exploration,
     );
     assert!(result.submitted, "intent must pass gates");
-    // P1 cap at 2%: 10000 * 0.02 / 50000 = 0.004 BTC
+    // P1 cap at 3%: 10000 * 0.03 / 50000 = 0.006 BTC
     assert!(
-        (result.approved_qty - 0.004).abs() < 1e-9,
-        "approved_qty should be P1-capped (0.004), got {}",
+        (result.approved_qty - 0.006).abs() < 1e-9,
+        "approved_qty should be P1-capped (0.006), got {}",
         result.approved_qty
     );
     assert!(
@@ -635,6 +635,46 @@ fn test_cost_gate_moderate_cold_start_allows() {
     );
 }
 
+#[test]
+fn test_fee_rate_staleness_rejects_cold_boot_account_manager() {
+    let mut proc = IntentProcessor::new();
+    let acct = std::sync::Arc::new(crate::account_manager::AccountManager::new());
+    proc.set_account_manager(acct);
+
+    let reason = proc
+        .fee_rate_staleness_rejection(1_000)
+        .expect("never-refreshed account manager must fail closed");
+
+    assert!(reason.starts_with("cost_gate: fee rates unavailable"));
+}
+
+#[test]
+fn test_fee_rate_staleness_rejects_after_two_hours() {
+    let mut proc = IntentProcessor::new();
+    let acct = std::sync::Arc::new(crate::account_manager::AccountManager::new());
+    acct.set_last_fee_refresh_ms_for_test(1_000);
+    proc.set_account_manager(acct);
+
+    let now = 1_000 + MAX_FEE_RATE_STALENESS_MS + 1;
+    let reason = proc
+        .fee_rate_staleness_rejection(now)
+        .expect("stale fee rates must fail closed");
+
+    assert!(reason.contains("fee rates stale"));
+}
+
+#[test]
+fn test_fee_rate_staleness_allows_fresh_rates() {
+    let mut proc = IntentProcessor::new();
+    let acct = std::sync::Arc::new(crate::account_manager::AccountManager::new());
+    acct.set_last_fee_refresh_ms_for_test(1_000);
+    proc.set_account_manager(acct);
+
+    let now = 1_000 + MAX_FEE_RATE_STALENESS_MS;
+
+    assert!(proc.fee_rate_staleness_rejection(now).is_none());
+}
+
 // ── EDGE-DIAG-2 (2026-04-28) low-sample exploration branch ──
 // EDGE-DIAG-2（2026-04-28）：低樣本探索分支
 
@@ -707,6 +747,36 @@ fn test_cost_gate_live_low_sample_negative_still_fails_closed() {
         "live: low-sample negative must still fail-closed (no min_n exemption)"
     );
     assert!(result.unwrap().rejected_reason.unwrap().contains("live"));
+}
+
+#[test]
+fn test_cost_gate_live_postonly_cost_excludes_taker_slippage() {
+    let mut proc = IntentProcessor::new();
+    let json = r#"{"grid_trading::BTCUSDT": {"shrunk_bps": 10.0, "win_rate": 1.0, "n": 100, "std_bps": 2.0}}"#;
+    let estimates = crate::edge_estimates::EdgeEstimates::load_from_str(json).unwrap();
+    proc.set_edge_estimates(estimates);
+
+    let postonly_cost = proc.cost_gate_live_with_slippage(
+        "grid_trading",
+        "BTCUSDT",
+        0.0002, // maker fee
+        0.0,    // PostOnly maker path: no taker-style slippage tier
+    );
+    let taker_slippage_cost = proc.cost_gate_live_with_slippage(
+        "grid_trading",
+        "BTCUSDT",
+        0.00055,
+        0.0030,
+    );
+
+    assert!(
+        postonly_cost.is_none(),
+        "10 bps edge should pass maker-only cost"
+    );
+    assert!(
+        taker_slippage_cost.is_some(),
+        "same edge should fail when taker slippage is included"
+    );
 }
 
 #[test]
@@ -1778,6 +1848,28 @@ mod predictor_wiring_tests {
         intent.time_in_force = Some(TimeInForce::GTC);
         let rate = proc.fee_rate_for_intent(&intent.symbol, &intent);
         assert!((rate - 0.00055).abs() < 1e-12);
+    }
+
+    #[test]
+    fn test_slippage_rate_for_intent_postonly_is_zero() {
+        use crate::order_manager::TimeInForce;
+        let proc = IntentProcessor::new();
+        let mut intent = super::make_intent("BTCUSDT", true);
+        intent.time_in_force = Some(TimeInForce::PostOnly);
+
+        let slippage = proc.slippage_rate_for_intent(&intent, 0.0);
+
+        assert_eq!(slippage, 0.0);
+    }
+
+    #[test]
+    fn test_slippage_rate_for_intent_market_uses_tier() {
+        let proc = IntentProcessor::new();
+        let intent = super::make_intent("BTCUSDT", true);
+
+        let slippage = proc.slippage_rate_for_intent(&intent, 2_000_000_000.0);
+
+        assert_eq!(slippage, 0.0001);
     }
 
     // ── FIX-FEE-POSTONLY-1 (G7-09): fee_rate_for_tif fill-path helper ──

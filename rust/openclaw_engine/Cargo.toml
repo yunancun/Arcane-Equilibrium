@@ -83,3 +83,7 @@ edge_predictor_ort = ["dep:ort"]
 [[bin]]
 name = "openclaw-engine"
 path = "src/main.rs"
+
+[[bench]]
+name = "hot_path_baseline"
+harness = false
