@@ -18,6 +18,8 @@ MODULE_NOTE (中文):
   4. _build_prompt_context — 結構化 JSON prompt（含 cognitive / dream / TSR）
   5. _process_knowledge_update — TSR 寫回（cap 0.85/0.90）
   6. _build_route_context — 路由上下文構建（L1.5/L2 升級判斷）
+  7. _produce_intents — TradeIntent 構建+派發（含 strategy preference weight 套用，
+                        G3-08 Phase 4 P3 lift 自 strategist_agent.py）
 
 MODULE_NOTE (English):
   StrategistAgent sibling carrying pure helper functions for edge evaluation and
@@ -37,6 +39,8 @@ MODULE_NOTE (English):
   4. _build_prompt_context — structured JSON prompt (cognitive/dream/TSR)
   5. _process_knowledge_update — TSR write-back (cap 0.85/0.90)
   6. _build_route_context — routing context for L1.5/L2 upgrade decisions
+  7. _produce_intents — TradeIntent build + dispatch (strategy preference weight,
+                        lifted from strategist_agent.py in G3-08 Phase 4 P3)
 
 Hard boundaries (CLAUDE.md §四):
   - max_retries=0 / fail-closed unchanged. AI failure → heuristic fallback.
@@ -53,7 +57,13 @@ from typing import TYPE_CHECKING, Any
 from .h4_validator import validate_ai_output
 from .h_state_invalidator import invalidate_async as _invalidate_h_state_async
 from .llm_call_wrapper import call_ollama_judge_edge, ollama_is_available
-from .multi_agent_framework import IntelObject
+from .multi_agent_framework import (
+    AgentMessage,
+    AgentRole,
+    IntelObject,
+    MessageType,
+    TradeIntent,
+)
 from .strategist_models import EdgeEvaluation, _heuristic_evaluate
 
 if TYPE_CHECKING:  # pragma: no cover — type-checker only / 僅型別檢查
@@ -374,3 +384,105 @@ def _ai_evaluate(agent: "StrategistAgent", intel: IntelObject) -> EdgeEvaluation
             source="ai_parse_error",
             latency_ms=latency_ms,
         )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Intent production / TradeIntent 構建與派發
+# G3-08 Phase 4 P3 (2026-04-28) — lift from strategist_agent.py to keep main
+# file under §九 800-line warning. Pure location refactor; behavior preserved
+# bit-for-bit (strategy preference weight clamp / shadow log gating /
+# MessageBus dispatch / audit event names + payload / h_state hint).
+# G3-08 Phase 4 P3（2026-04-28）— 從 strategist_agent.py 移出以維持主檔在
+# §九 800 行警告線之下。純位置重構，行為完全保留（策略偏好權重套用 / shadow
+# 日誌 gating / MessageBus 派發 / 審計事件名 + payload / h_state 提示）。
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _produce_intents(
+    agent: "StrategistAgent",
+    intel: IntelObject,
+    evaluation: EdgeEvaluation,
+) -> None:
+    """
+    Build and dispatch TradeIntent for each symbol in the intel.
+    為情報中的每個幣種構建並分發 TradeIntent。
+
+    Applies strategy preference weights and dispatches via MessageBus or shadow log.
+    應用策略偏好權重，通過 MessageBus 或影子日誌分發。
+    """
+    # Local import to avoid circular import at module load time.
+    # 函數內 import，避免模組載入期循環引入。
+    from .multi_agent_framework import SentimentScore
+
+    direction = "long" if intel.sentiment == SentimentScore.POSITIVE else "short"
+
+    for symbol in intel.symbols:
+        # Apply strategy preference weight (Principle 12: continuous evolution).
+        # 應用策略偏好權重（原則 12：持續進化）。
+        strategy_key = f"{evaluation.source}_{symbol}" if evaluation.source else symbol
+        weight = agent._strategy_preference_weights.get(strategy_key, None)
+        if weight is None:
+            source_key = "strategist_ai" if evaluation.source == "ai" else "strategist_heuristic"
+            weight = agent._strategy_preference_weights.get(source_key, 1.0)
+        adjusted_confidence = min(1.0, evaluation.confidence * weight)
+        if adjusted_confidence != evaluation.confidence:
+            logger.debug(
+                "Strategy weight applied for %s: %.2f × %.2f = %.2f / "
+                "策略偏好權重已應用：原始置信度 %.2f × 權重 %.2f = 調整後 %.2f",
+                symbol, evaluation.confidence, weight, adjusted_confidence,
+                evaluation.confidence, weight, adjusted_confidence,
+            )
+
+        intent = TradeIntent(
+            symbol=symbol,
+            strategy="strategist_ai" if evaluation.source == "ai" else "strategist_heuristic",
+            direction=direction,
+            size=agent.config.default_size,
+            confidence=adjusted_confidence,
+            thesis=f"Scout intel: {intel.content[:100]}",
+            invalidation_condition=f"Edge confidence drops below {agent.config.min_confidence}",
+            data_quality=intel.data_quality,
+            metadata={
+                "intel_id": intel.intel_id,
+                "evaluation_source": evaluation.source,
+                "evaluation_reason": evaluation.reason,
+                "raw_confidence": evaluation.confidence,
+                "strategy_weight": weight,
+                "shadow": agent.config.shadow,
+            },
+        )
+
+        if agent.config.shadow:
+            with agent._lock:
+                agent._stats["intents_shadow_logged"] += 1
+            agent._audit("shadow_intent", intent.to_dict())
+            logger.info(
+                "SHADOW intent: %s %s %s conf=%.2f (raw=%.2f weight=%.2f) / "
+                "影子 intent: %s %s 調整置信度=%.2f",
+                symbol, direction, evaluation.source,
+                adjusted_confidence, evaluation.confidence, weight,
+                symbol, direction, adjusted_confidence,
+            )
+        else:
+            with agent._lock:
+                agent._stats["intents_produced"] += 1
+            if agent.bus:
+                msg = AgentMessage(
+                    sender=AgentRole.STRATEGIST,
+                    receiver=AgentRole.GUARDIAN,
+                    message_type=MessageType.TRADE_INTENT,
+                    priority=3,
+                    payload=intent.to_dict(),
+                )
+                agent.bus.send(msg)
+            agent._audit("intent_produced", intent.to_dict())
+            logger.info(
+                "TradeIntent produced: %s %s %s conf=%.2f (raw=%.2f weight=%.2f) / "
+                "TradeIntent 已產出：調整置信度=%.2f",
+                symbol, direction, evaluation.source,
+                adjusted_confidence, evaluation.confidence, weight,
+                adjusted_confidence,
+            )
+
+    # G3-08 Phase 4 Sub-task 4-1: hint once per intel batch (post-loop, no _lock).
+    # G3-08 Phase 4 Sub-task 4-1：每筆 intel 一次，loop 外、鎖外；env=0 no-op。
+    _invalidate_h_state_async("agent.strategist.intent_produced")
