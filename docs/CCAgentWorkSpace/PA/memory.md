@@ -799,3 +799,56 @@ W2 unit cov ≥85%（22 case，零 mock）+ W3 integration ≥5 case（7 留 buf
 ### 教訓（lessons.md candidate）
 
 「Phase 計畫的 line item 落地時要拆 trade-impact vs observability」— RFC §7.2 把 shadow IntentProcessor 與「觀察 advisor 行為」混在 Phase B 1.5d，落到具體實作才發現前者實質是 Phase C 一半工作量。下次寫 PA RFC §7.x 工時估算前，用「trade impact」 vs 「pure observability」做 binary 切，工時不混算。
+
+---
+
+## 2026-04-28 G3-09-PHASE-B-FUP-STICKY-TS（sticky `triggered_at_ms`）
+
+**RFC / 報告**：`docs/CCAgentWorkSpace/PA/workspace/reports/2026-04-28--g3_09_phase_b_fup_sticky_ts.md`
+
+### 任務性質
+
+E2 Phase A daemon test review (`2026-04-27--g3_09_daemon_test_review.md`) INFO finding 升 P2 prep-gate — `advisor.rs:114-120` 註解聲稱 daemon 會 sticky 覆寫 `triggered_at_ms`，但 `mod.rs` daemon body 0 此邏輯，每 cycle 蓋掉。Phase B Shadow 若 dedup / once-per-trigger 邏輯依賴 sticky 時戳會出 bug，所以列為 Phase B Wave 1 派發前 prep-gate。
+
+主會話授權 PA 三角合一執行（PA design + 自寫 ≤80 LOC Rust + 自寫 ≥2 unit test），不擴 scope。
+
+### 設計決策
+
+選 **A（daemon enforce sticky）** vs B（doc-only 對齊現行非 sticky 行為）：
+- A 案 30 LOC daemon 改 + 25 LOC docstring + 175 LOC test = 在 80 LOC 上限內
+- 避免 Phase B Wave 1 又要踩雷自己維護 sticky state（重複工作）
+- `triggered_at_ms` 命名語意是「進入時間」，非 sticky 行為違反命名
+- daemon-local `let mut sticky_triggered_at_ms: i64 = 0;` 0 共享 state、0 race、0 額外 lock
+- `evaluate()` 純 fn 簽名/行為/測試全保留 — 32 既存 unit case 不動
+
+### 核心邏輯（mod.rs 4-arm match）
+
+```rust
+match (&prev_status, &new_state.status) {
+    (Trigger, Trigger) => new_state.triggered_at_ms = sticky_triggered_at_ms,  // sticky preserve
+    (_, Trigger)       => sticky_triggered_at_ms = new_state.triggered_at_ms,  // entering: capture now_ms
+    (Trigger, _)       => sticky_triggered_at_ms = 0,                          // exit: clear
+    _                  => {}                                                   // non-Trigger ↔ non-Trigger
+}
+```
+
+### 驗收
+
+- cargo build release tests clean
+- daemon integration test **6/0 → 8/0**（+2 sticky test）
+- lib test **2290 / 0 不變**
+- Phase A advisory-only 路徑 0 production behavior change（IPC consumer healthcheck `[30]` schema 哨兵不依賴此欄語意）
+
+### Phase B Wave 1 對接
+
+`triggered_at_ms`（contiguous Trigger 區段進入時戳）與 Phase B RFC `last_trigger_ms`（24h rolling 內最後 Trigger transition）語意正交但不衝突 — Wave 1 可直接讀 `triggered_at_ms` 取「episode 進入時間」，不需自維護 sticky state。Wave 1 工時估 1d 不變。
+
+### 教訓（lessons.md candidate）
+
+「pure fn 表達 stateful semantic 時必有 caller 接 sticky/transition 對手戲」— `evaluate()` 永遠回 `now_ms` 對 first entry 正確，但對 contiguous run 錯。caller (daemon) 必須補 sticky enforcement。如果 doc 與實作其中一邊放鬆，另一邊就成 silent bug 種子。**規則**：pure fn doc 寫「caller 會 X」就必須有 caller 那邊的 enforce + regression test，否則 doc 砍掉等同實作。
+
+### 報告索引追加
+
+| 日期 | 報告類型 | 文件位置 |
+|---|---|---|
+| 2026-04-28 | G3-09-PHASE-B-FUP-STICKY-TS sticky `triggered_at_ms` 設計+落地+驗收 | workspace/reports/2026-04-28--g3_09_phase_b_fup_sticky_ts.md |

@@ -19,12 +19,15 @@
 //!   while annotating the staleness; this is purely advisory and does
 //!   NOT influence trading.
 //!
-//!   The transition timestamp (`triggered_at_ms`) is computed by the
-//!   caller (daemon) because evaluate() is pure and has no notion of
-//!   "previous state" — the daemon owns that history. The daemon passes
-//!   either `now_ms` (entering Trigger from non-Trigger) or the previous
-//!   Trigger's timestamp (Trigger→Trigger sticky) as `transition_at_ms`
-//!   into the Trigger constructor.
+//!   The transition timestamp (`triggered_at_ms`) is owned by the daemon
+//!   because evaluate() is pure and has no notion of "previous state".
+//!   `evaluate()` always returns `triggered_at_ms = now_ms` for any Trigger
+//!   state (correct for the first entry); the daemon then enforces sticky
+//!   semantics (mod.rs ~L240) by **overwriting** the field with the
+//!   previously stored `triggered_at_ms` on contiguous Trigger→Trigger
+//!   cycles, leaving it as `now_ms` only on the entering transition.
+//!   `triggered_at_ms` therefore reflects "when did this contiguous Trigger
+//!   episode begin" — not "last time evaluate ran".
 //!
 //! MODULE_NOTE (中)：`evaluate()` 為純 fn — 無 I/O、無全域狀態，確定性映射
 //!   `(snapshot, cfg, is_stale, now_ms) → state`。Daemon（mod.rs）每 10s
@@ -41,9 +44,13 @@
 //!   Stale case 刻意 echo `prev_ratio`：observability（healthcheck [22]）可
 //!   報「上次值＋現在 stale」；純 advisory，不影響交易。
 //!
-//!   `triggered_at_ms` 由 daemon 算（pure fn 無 prev state 概念，由 daemon
-//!   持有歷史）；daemon 在進入 Trigger 時傳 `now_ms`，Trigger→Trigger sticky
-//!   時傳前一次 Trigger 的時戳。
+//!   `triggered_at_ms` 由 daemon 持有（pure fn 無 prev state 概念）。
+//!   `evaluate()` 對任何 Trigger 狀態永遠回 `triggered_at_ms = now_ms`
+//!   （首次進入時正確）；daemon 在 mod.rs 約 L240 強制 sticky 語意：
+//!   contiguous Trigger→Trigger cycle 時 **覆寫**為前次儲存的
+//!   `triggered_at_ms`，僅 entering transition 保留 `now_ms`。
+//!   因此 `triggered_at_ms` 反映「此連續 Trigger 區段何時開始」而非
+//!   「上次 evaluate 何時跑」。
 
 use super::types::{CostEdgeAdvisorState, CostEdgeAdvisorStatus};
 use crate::config::CostEdgeConfig;
@@ -111,12 +118,23 @@ pub fn evaluate(
                 snapshot.h5.ai_spend_7d_usd,
                 snapshot.h5.paper_pnl_7d_usd,
                 now_ms,
-                // Daemon override: when this is the entering Trigger
-                // transition, daemon will overwrite triggered_at_ms via
-                // a follow-up `store_state` cycle. Pure fn cannot know;
-                // we default to now_ms which is correct for fresh trigger.
-                // Daemon 進入 Trigger 時會 overwrite triggered_at_ms；
-                // pure fn 無法知，預設 now_ms（首次進 Trigger 即正確）。
+                // Daemon override (sticky semantics, mod.rs ~L240):
+                //   - On non-Trigger → Trigger transition the daemon keeps
+                //     this `now_ms` value (correct fresh entry timestamp).
+                //   - On contiguous Trigger → Trigger cycles the daemon
+                //     overwrites this with the previously stored
+                //     `triggered_at_ms` so the entry timestamp survives
+                //     repeated evaluate() calls.
+                // Pure fn has no notion of "previous status", so it always
+                // returns `now_ms`; the daemon owns the sticky history.
+                // Daemon override（sticky 語意，mod.rs 約 L240）：
+                //   - non-Trigger → Trigger 進入時 daemon 沿用本 `now_ms`
+                //     （正確的首次進入時戳）。
+                //   - 連續 Trigger → Trigger cycle 時 daemon 用前一次儲存的
+                //     `triggered_at_ms` 覆寫，使進入時戳不被反覆 evaluate()
+                //     蓋掉。
+                // Pure fn 無 prev status 概念，故永遠回 `now_ms`；sticky 歷史
+                // 由 daemon 持有。
                 now_ms,
             )
         }
