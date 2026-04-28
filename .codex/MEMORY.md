@@ -82,6 +82,8 @@ Current known topology at setup time:
 - `TODO.md` stays the primary execution timeline
 - Codex memory should be explicit and file-backed, not assumed to persist across sessions
 - Linux deploy actions may be performed from Mac through `ssh trade-core`
+- Codex role mirror is deployed in `.codex/agents/`
+- Shared skill SSOT remains `.claude/skills/*/SKILL.md`, indexed by `.codex/skills/INDEX.md`
 
 ## Notes for future sessions
 

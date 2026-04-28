@@ -10,6 +10,8 @@ Purpose:
 Recommended layout:
 - `MEMORY.md` - stable Codex memory and operating rules
 - `WORKLOG.md` - rolling notes for recent Codex work
+- `agents/` - Codex role mirror of the Claude agent roster
+- `skills/` - Codex index over the shared Claude skill corpus
 - `reports/` - longer Codex analyses when needed
 - `archive/` - retired notes that should stay searchable
 
