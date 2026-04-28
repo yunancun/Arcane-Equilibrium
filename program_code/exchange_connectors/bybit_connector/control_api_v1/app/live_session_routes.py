@@ -37,7 +37,7 @@ REFACTOR_NOTE (G5-02, 2026-04-24):
   拆至 2 個 sibling 純結構搬遷（0 邏輯變更）：
   - ``live_session_endpoints.py``       — 7 個 session 生命週期 + execution_authority
   - ``live_session_account_routes.py``  — 7 個 account data + close handlers
-  本檔保留所有 state / globals / 共用 helpers / LIVE-GATE-FALLBACK helpers /
+  本檔保留所有 state / globals / 共用 helpers / LIVE-BOUNDARY-FREEZE helpers /
   router instance / contraction monitor，並在底部 import sibling 觸發
   ``@live_router.<verb>`` 裝飾器把 routes 掛回同一個 router。
 
@@ -568,19 +568,19 @@ async def _live_contraction_monitor() -> None:
             )
 
 
-# ── LIVE-GATE-FALLBACK-1 ───────────────────────────────────────────────────
-# When LIVE-GATE-BINDING-1 refuses the Live pipeline (missing/invalid
-# authorization.json), Rust never registers `channels.live` → every
-# close_position/close_all_positions IPC returns this exact error string.
-# We detect it and fall back to a REST-only reduce_only close, so operators
-# can still close existing live positions when authorization is unavailable.
-# Rationale: root principle #6「失敗默認收縮」— closing must stay possible.
+# ── LIVE-BOUNDARY-FREEZE-1 ──────────────────────────────────────────────────
+# Direct Python REST live close fallback is disabled. When LiveAuthWatcher has
+# no live command channel, the operator must restore the signed live_reserved
+# control plane and close through Rust IPC. This keeps every live mutation on
+# one auditable write boundary.
 #
-# LIVE-GATE-FALLBACK-1：當 Live pipeline 因授權缺失被 LIVE-GATE-BINDING-1 拒絕
-# 啟動時，Rust 不會註冊 `channels.live`，所有指向 live 的平倉 IPC 都返回此字串。
-# 偵測到時降級走 REST reduce_only 市價單，不經 IPC。
-# 依據：根原則 #6「失敗默認收縮」— 授權失效時仍必須能平現有倉位。
+# LIVE-BOUNDARY-FREEZE-1：禁用 Python REST live 降級平倉。Live 命令通道不存在時，
+# operator 必須先恢復 signed live_reserved 控制面，再經 Rust IPC 平倉。
 _CHANNEL_NOT_CONFIGURED_MARKER = "paper command channel not configured"
+_LIVE_REST_FALLBACK_DISABLED_DETAIL = (
+    "Direct REST live close fallback is disabled. Renew signed Live authorization "
+    "with Global Mode exactly live_reserved, then close through the Rust live pipeline."
+)
 
 
 def _is_live_channel_unavailable_error(exc: BaseException) -> bool:
@@ -592,58 +592,14 @@ def _rest_close_position_reduce_only(
     rc: Any, symbol: str, qty: float, is_long: bool
 ) -> dict:
     """
-    LIVE-GATE-FALLBACK-1: REST-only reduce_only close path.
+    Deprecated Batch-A boundary guard.
 
-    Called when the Live IPC channel is unavailable (Live pipeline refused
-    to spawn).  Issues a reduce_only Market order directly via BybitClient —
-    bypassing the Rust engine entirely.  Only used for closing; never opens.
-
-    LIVE-GATE-FALLBACK-1：REST-only reduce_only 平倉路徑。
-    Live IPC channel 不可用時調用（Live pipeline 拒絕啟動）。
-    直接透過 BybitClient 發 reduce_only 市價單，完全繞過引擎。只用於平倉。
-
-    Raises on Bybit REST failure; caller must catch + record.
-    REST 失敗時拋異常，由 caller 捕獲並記錄。
+    This function used to place reduce-only market orders directly through
+    BybitClient when the Live IPC channel was unavailable. Keeping that path
+    would allow Python to mutate live exchange state outside the signed Rust
+    pipeline, so the helper now fails closed for all callers.
     """
-    # Bybit: long → Sell to close; short → Buy to close.
-    side = "Sell" if is_long else "Buy"
-    # Fresh BybitClient starts with an empty InstrumentInfoCache — round_qty
-    # returns None → raw qty → Bybit rejects with retCode=10001. Warm the
-    # cache once per client before the first rounding attempt.
-    # 新建的 BybitClient 合約緩存是空的，round_qty 回 None → 送 raw qty →
-    # Bybit 用 retCode=10001 拒單。首次取整前先把緩存熱起來。
-    try:
-        if hasattr(rc, "instrument_count") and rc.instrument_count() == 0:
-            rc.refresh_instruments("linear")
-    except Exception as ri_exc:
-        logger.warning(
-            "LIVE-GATE-FALLBACK-1: refresh_instruments failed for %s — "
-            "proceeding with raw qty / 刷新合約規格失敗，改送 raw qty: %s",
-            symbol, ri_exc,
-        )
-    # Align qty to instrument step size — else Bybit returns retCode=10001.
-    # 對齊 instrument step size，否則 Bybit 返回 retCode=10001。
-    qty_aligned = qty
-    try:
-        qty_aligned = float(rc.round_qty(symbol, qty))
-    except Exception as rq_exc:
-        logger.debug("round_qty failed for %s — using raw qty: %s", symbol, rq_exc)
-    result = rc.place_order(
-        symbol=symbol,
-        side=side,
-        order_type="Market",
-        qty=qty_aligned,
-        category="linear",
-        reduce_only=True,
-    )
-    return {
-        "rest_closed": True,
-        "symbol": symbol,
-        "side": side,
-        "qty": qty_aligned,
-        "order_id": result.get("order_id") if isinstance(result, dict) else None,
-        "order_link_id": result.get("order_link_id") if isinstance(result, dict) else None,
-    }
+    raise HTTPException(status_code=409, detail=_LIVE_REST_FALLBACK_DISABLED_DETAIL)
 
 
 async def _sweep_live_orphan_positions(errors: list[str]) -> dict:
@@ -654,17 +610,13 @@ async def _sweep_live_orphan_positions(errors: list[str]) -> dict:
     on the exchange but not in paper_state are silently skipped.  This sweep
     queries the exchange and issues a close_position IPC for each open position.
 
-    LIVE-GATE-FALLBACK-1: if the IPC error indicates the Live command channel
-    was never registered (authorization gate refused pipeline spawn), fall back
-    to a REST-only reduce_only Market order.  Any other IPC error is recorded
-    as-is (no REST fallback — we must not mask real problems).
+    If the IPC error indicates the Live command channel was never registered,
+    record the blocked close. Do not fall back to Python REST writes.
 
     IPC close_all 只遍歷 paper_state，交易所有但 paper_state 沒有的「孤兒倉位」
     會被跳過。本函數通過 Live API key 查詢交易所持倉，逐一發 close_position IPC。
 
-    LIVE-GATE-FALLBACK-1：若 IPC 錯誤表示 Live 命令通道從未註冊（授權 gate 拒絕
-    啟動管線），降級到 REST-only reduce_only 市價單。其他 IPC 錯誤原樣記錄，
-    不降級（避免遮蔽真實問題）。
+    Live 命令通道不存在時只記錄阻斷，不降級到 Python REST 寫入。
     """
     rc = _get_rust_client_safe()
     if rc is None:
@@ -683,7 +635,7 @@ async def _sweep_live_orphan_positions(errors: list[str]) -> dict:
         return {"swept": 0}
 
     swept_ipc = 0
-    swept_rest = 0
+    blocked_no_channel = 0
     for p in open_positions:
         sym = p.get("symbol", "")
         size = float(p.get("size") or p.get("qty") or 0)
@@ -704,30 +656,25 @@ async def _sweep_live_orphan_positions(errors: list[str]) -> dict:
                 sym, size, is_long,
             )
         except Exception as exc:
-            # LIVE-GATE-FALLBACK-1：Live pipeline 未授權啟動 → channel 不存在 → 降級 REST。
             if _is_live_channel_unavailable_error(exc):
-                try:
-                    _rest_close_position_reduce_only(rc, sym, size, is_long)
-                    swept_rest += 1
-                    logger.warning(
-                        "Live orphan sweep: close_position %s qty=%.4f is_long=%s "
-                        "(REST fallback — live pipeline not authorized) / REST 降級平倉",
-                        sym, size, is_long,
-                    )
-                except Exception as rest_exc:
-                    logger.warning(
-                        "Live orphan sweep: REST fallback %s failed: %s", sym, rest_exc,
-                    )
-                    errors.append(f"orphan_{sym}_rest: {rest_exc}")
+                blocked_no_channel += 1
+                logger.error(
+                    "Live orphan sweep BLOCKED: close_position %s qty=%.4f is_long=%s "
+                    "has no live IPC channel; REST fallback disabled",
+                    sym,
+                    size,
+                    is_long,
+                )
+                errors.append(f"orphan_{sym}_live_channel_unavailable")
             else:
                 logger.warning("Live orphan sweep: close_position %s failed: %s", sym, exc)
                 errors.append(f"orphan_{sym}: {exc}")
 
-    result: dict = {"swept": swept_ipc + swept_rest, "found": len(open_positions)}
-    if swept_rest > 0:
-        result["rest_fallback"] = True
+    result: dict = {"swept": swept_ipc, "found": len(open_positions)}
+    if blocked_no_channel > 0:
+        result["blocked_no_live_channel"] = blocked_no_channel
+        result["rest_fallback_disabled"] = True
         result["swept_via_ipc"] = swept_ipc
-        result["swept_via_rest"] = swept_rest
     return result
 
 

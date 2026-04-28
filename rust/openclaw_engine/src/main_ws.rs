@@ -93,9 +93,7 @@ pub(crate) fn spawn_ws_supervisor(
                 registry_for_supervisor
                     .snapshot()
                     .into_iter()
-                    .flat_map(|sym| {
-                        vec![format!("kline.1.{sym}"), format!("publicTrade.{sym}")]
-                    })
+                    .flat_map(|sym| vec![format!("kline.1.{sym}"), format!("publicTrade.{sym}")])
                     .collect()
             };
 

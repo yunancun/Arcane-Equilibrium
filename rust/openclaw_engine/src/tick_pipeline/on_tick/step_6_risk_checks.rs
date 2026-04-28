@@ -110,11 +110,7 @@ impl TickPipeline {
                 let atr_pct = self
                     .kline_manager
                     .get_ohlcv(&p.symbol, "1m", Some(20))
-                    .and_then(|o| {
-                        openclaw_core::indicators::atr(
-                            &o.high, &o.low, &o.close, 14,
-                        )
-                    })
+                    .and_then(|o| openclaw_core::indicators::atr(&o.high, &o.low, &o.close, 14))
                     .map(|r| r.atr_percent);
                 crate::position_risk_evaluator::PositionRow {
                     symbol: p.symbol.clone(),
@@ -329,8 +325,7 @@ impl TickPipeline {
                                 // 快照與 engine_mode 先抓為 owned，emit 前 drop
                                 // `&self.paper_state` 借用；engine_mode 為 &'static。
                                 let engine_mode = self.effective_engine_mode();
-                                let snap_opt =
-                                    self.paper_state.position_exit_snapshot(symbol);
+                                let snap_opt = self.paper_state.position_exit_snapshot(symbol);
                                 if let Some(snap) = snap_opt {
                                     let side_i16: i16 = if snap.is_long { 1 } else { -1 };
                                     // INFRA-PREBUILD-1 L1-1 (2026-04-23):
@@ -352,15 +347,13 @@ impl TickPipeline {
                                     let base_dir = std::env::var("OPENCLAW_BASE_DIR")
                                         .map(std::path::PathBuf::from)
                                         .unwrap_or_else(|_| {
-                                            std::env::current_dir().unwrap_or_else(|_| {
-                                                std::path::PathBuf::from(".")
-                                            })
+                                            std::env::current_dir()
+                                                .unwrap_or_else(|_| std::path::PathBuf::from("."))
                                         });
-                                    let cell_age_secs =
-                                        super::compute_edge_estimates_file_age_secs(
-                                            engine_mode,
-                                            &base_dir,
-                                        );
+                                    let cell_age_secs = super::compute_edge_estimates_file_age_secs(
+                                        engine_mode,
+                                        &base_dir,
+                                    );
                                     super::emit_shadow_exit_observation(
                                         &snap.entry_context_id,
                                         event.ts_ms as i64,
@@ -387,7 +380,9 @@ impl TickPipeline {
                         // RUST-DOUBLE-PREFIX-1: use pre-computed `close_tag` (single
                         // `risk_close:` prefix). See comment block above.
                         // RUST-DOUBLE-PREFIX-1：使用上方已計算好的 `close_tag`（單前綴）。
-                        self.execute_position_close(symbol, *is_long, *qty, event, true, &close_tag);
+                        self.execute_position_close(
+                            symbol, *is_long, *qty, event, true, &close_tag,
+                        );
                     } else {
                         warn!(symbol = %symbol, reason = %reason, "risk close (paper) / 風控平倉（紙盤）");
                         if *pnl_pct < 0.0 {
@@ -430,7 +425,9 @@ impl TickPipeline {
                         self.stats.total_stops += 1;
                         // RUST-DOUBLE-PREFIX-1: single outbound tag, single prefix.
                         // RUST-DOUBLE-PREFIX-1：單一出口 tag，單前綴。
-                        self.execute_position_close(symbol, *is_long, *qty, event, false, &close_tag);
+                        self.execute_position_close(
+                            symbol, *is_long, *qty, event, false, &close_tag,
+                        );
                     }
                 }
                 RiskAction::HaltSession(reason) => {
@@ -451,10 +448,9 @@ impl TickPipeline {
                     // G1-06（根原則 #5/#6）：Live drawdown halt 同步刪除
                     // authorization.json，避免靜默 unpause；Demo/Paper 與
                     // daily-loss 不觸發。失敗也不阻塞下方關倉迴圈。
-                    if let Some(decision) = crate::drawdown_revoke::should_revoke(
-                        &reason,
-                        self.pipeline_kind,
-                    ) {
+                    if let Some(decision) =
+                        crate::drawdown_revoke::should_revoke(&reason, self.pipeline_kind)
+                    {
                         let outcome = crate::drawdown_revoke::revoke_live_authorization(&decision);
                         info!(
                             outcome = outcome.kind_str(),
@@ -495,9 +491,18 @@ impl TickPipeline {
                         // EXIT-FEATURES-TABLE-1: snapshot BEFORE close.
                         // EXIT-FEATURES-TABLE-1：先取快照再平倉。
                         let snap = self.paper_state.position_exit_snapshot(sym);
-                        if let Some((_il, _q, close_px, pnl)) =
+                        let close_result = if is_exchange_mode {
+                            self.close_position_after_exchange_dispatch(
+                                sym,
+                                *il,
+                                *q,
+                                event,
+                                "risk_close:halt_session",
+                            )
+                        } else {
                             self.close_position_at_symbol_market(sym, event.ts_ms)
-                        {
+                        };
+                        if let Some((_il, _q, close_px, pnl)) = close_result {
                             self.emit_close_fill(
                                 sym,
                                 *il,
@@ -509,16 +514,18 @@ impl TickPipeline {
                                 &ectx,
                                 snap.as_ref(),
                             );
+                            if !is_exchange_mode {
+                                self.execute_position_close(
+                                    sym,
+                                    *il,
+                                    *q,
+                                    event,
+                                    false,
+                                    "risk_close:halt_session",
+                                );
+                            }
                         }
                         self.stats.total_stops += 1;
-                        self.execute_position_close(
-                            sym,
-                            *il,
-                            *q,
-                            event,
-                            is_exchange_mode,
-                            "risk_close:halt_session",
-                        );
                     }
                     break;
                 }

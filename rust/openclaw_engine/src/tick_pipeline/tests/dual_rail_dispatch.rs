@@ -191,7 +191,10 @@ fn test_ipc_close_symbol_dispatch_strategy_has_risk_close_prefix() {
     // trigger the orphan-close dispatch branch (commands.rs line ~660).
     // paper_state 無倉，靠 hints 走孤兒平倉分支。
     let fired = pipeline.ipc_close_symbol("BTCUSDT", Some(true), Some(0.1));
-    assert!(fired, "ipc_close_symbol must dispatch when hints are provided");
+    assert!(
+        fired,
+        "ipc_close_symbol must dispatch when hints are provided"
+    );
 
     let req = rx.try_recv().expect("OrderDispatchRequest must be sent");
     assert!(
@@ -204,7 +207,10 @@ fn test_ipc_close_symbol_dispatch_strategy_has_risk_close_prefix() {
         "strategy must preserve 'ipc_close_symbol' suffix for dispatch traceability, got {}",
         req.strategy
     );
-    assert!(req.is_close, "ipc_close_symbol dispatch must set is_close=true");
+    assert!(
+        req.is_close,
+        "ipc_close_symbol dispatch must set is_close=true"
+    );
 }
 
 // ─── F2 CROSS-SYMBOL-PRICE-CONTAMINATION-1 regressions ───
@@ -287,7 +293,10 @@ fn test_execute_position_close_dispatch_price_matches_symbol_not_event() {
         req.price, 2_327.0,
         "dispatched price must NOT borrow ETHUSDT or any other unrelated symbol's price"
     );
-    assert!(req.is_close, "execute_position_close must set is_close=true");
+    assert!(
+        req.is_close,
+        "execute_position_close must set is_close=true"
+    );
 }
 
 /// F2 fallback level 1: when `latest_price(symbol)` is absent or NaN, the
@@ -297,11 +306,8 @@ fn test_execute_position_close_dispatch_price_matches_symbol_not_event() {
 /// 仍**禁止**借用外層 tick。
 #[test]
 fn test_execute_position_close_falls_back_to_entry_price_when_no_latest() {
-    let mut pipeline = TickPipeline::with_kind(
-        &["BTCUSDT", "STRKUSDT"],
-        10_000.0,
-        PipelineKind::Demo,
-    );
+    let mut pipeline =
+        TickPipeline::with_kind(&["BTCUSDT", "STRKUSDT"], 10_000.0, PipelineKind::Demo);
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<OrderDispatchRequest>();
     pipeline.set_shadow_channel(tx);
 
@@ -349,11 +355,8 @@ fn test_execute_position_close_falls_back_to_entry_price_when_no_latest() {
 /// 走不到，本測試僅文檔化末路語義。
 #[test]
 fn test_execute_position_close_last_resort_event_price_when_no_position() {
-    let mut pipeline = TickPipeline::with_kind(
-        &["BTCUSDT", "STRKUSDT"],
-        10_000.0,
-        PipelineKind::Demo,
-    );
+    let mut pipeline =
+        TickPipeline::with_kind(&["BTCUSDT", "STRKUSDT"], 10_000.0, PipelineKind::Demo);
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<OrderDispatchRequest>();
     pipeline.set_shadow_channel(tx);
 
@@ -431,15 +434,111 @@ fn test_ipc_close_all_dispatch_price_matches_each_symbol() {
         dispatch_by_symbol
     );
 
-    let btc = dispatch_by_symbol.get("BTCUSDT").copied().expect("BTC dispatch");
-    assert!((btc - 50_500.0).abs() < 1e-9, "BTC dispatched price wrong: {btc}");
-    let eth = dispatch_by_symbol.get("ETHUSDT").copied().expect("ETH dispatch");
-    assert!((eth - 3_030.0).abs() < 1e-9, "ETH dispatched price wrong: {eth}");
-    let strk = dispatch_by_symbol.get("STRKUSDT").copied().expect("STRK dispatch");
+    let btc = dispatch_by_symbol
+        .get("BTCUSDT")
+        .copied()
+        .expect("BTC dispatch");
+    assert!(
+        (btc - 50_500.0).abs() < 1e-9,
+        "BTC dispatched price wrong: {btc}"
+    );
+    let eth = dispatch_by_symbol
+        .get("ETHUSDT")
+        .copied()
+        .expect("ETH dispatch");
+    assert!(
+        (eth - 3_030.0).abs() < 1e-9,
+        "ETH dispatched price wrong: {eth}"
+    );
+    let strk = dispatch_by_symbol
+        .get("STRKUSDT")
+        .copied()
+        .expect("STRK dispatch");
     assert!(
         (strk - 0.04261).abs() < 1e-9,
         "STRK dispatched price wrong (must NOT be BTC's 50_500 or ETH's 3_030): {strk}"
     );
-    let doge = dispatch_by_symbol.get("DOGEUSDT").copied().expect("DOGE dispatch");
-    assert!((doge - 0.202).abs() < 1e-9, "DOGE dispatched price wrong: {doge}");
+    let doge = dispatch_by_symbol
+        .get("DOGEUSDT")
+        .copied()
+        .expect("DOGE dispatch");
+    assert!(
+        (doge - 0.202).abs() < 1e-9,
+        "DOGE dispatched price wrong: {doge}"
+    );
+}
+
+/// RC-001: exchange close paths must enqueue the reduce-only close before
+/// flattening local state. If the dispatch channel is closed, the close is
+/// terminally blocked for this tick: no local flat mark and no pending_close.
+#[test]
+fn test_exchange_close_send_failure_does_not_flatten_or_mark_pending() {
+    let mut pipeline = TickPipeline::with_kind(&["BTCUSDT"], 10_000.0, PipelineKind::Demo);
+    let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<OrderDispatchRequest>();
+    drop(rx);
+    pipeline.set_shadow_channel(tx);
+    pipeline
+        .paper_state
+        .apply_fill("BTCUSDT", true, 0.1, 50_000.0, 0.0, 1_000, "test");
+    pipeline.paper_state.set_latest_price("BTCUSDT", 49_500.0);
+
+    let event = super::make_event("BTCUSDT", 49_500.0, 1_700_000_000_000);
+    let result = pipeline.close_position_after_exchange_dispatch(
+        "BTCUSDT",
+        true,
+        0.1,
+        &event,
+        "risk_close:fast_track",
+    );
+
+    assert!(
+        result.is_none(),
+        "closed dispatch channel must block local flatten"
+    );
+    assert!(
+        pipeline.paper_state.get_position("BTCUSDT").is_some(),
+        "local position must remain open when enqueue fails"
+    );
+    assert!(
+        !pipeline.pending_close_symbols.contains("BTCUSDT"),
+        "pending_close must only be inserted after send succeeds"
+    );
+}
+
+#[test]
+fn test_exchange_close_success_enqueues_before_local_flatten() {
+    let mut pipeline = TickPipeline::with_kind(&["BTCUSDT"], 10_000.0, PipelineKind::Demo);
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<OrderDispatchRequest>();
+    pipeline.set_shadow_channel(tx);
+    pipeline
+        .paper_state
+        .apply_fill("BTCUSDT", true, 0.1, 50_000.0, 0.0, 1_000, "test");
+    pipeline.paper_state.set_latest_price("BTCUSDT", 49_500.0);
+
+    let event = super::make_event("BTCUSDT", 49_500.0, 1_700_000_000_000);
+    let result = pipeline.close_position_after_exchange_dispatch(
+        "BTCUSDT",
+        true,
+        0.1,
+        &event,
+        "risk_close:fast_track",
+    );
+
+    assert!(
+        result.is_some(),
+        "successful enqueue should allow local flatten"
+    );
+    let req = rx
+        .try_recv()
+        .expect("reduce-only close dispatch must be enqueued first");
+    assert_eq!(req.symbol, "BTCUSDT");
+    assert!(req.is_close);
+    assert!(
+        pipeline.paper_state.get_position("BTCUSDT").is_none(),
+        "local position may only be flat after enqueue succeeds"
+    );
+    assert!(
+        pipeline.pending_close_symbols.contains("BTCUSDT"),
+        "pending_close must be set after successful primary enqueue"
+    );
 }

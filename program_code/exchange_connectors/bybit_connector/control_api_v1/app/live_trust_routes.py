@@ -53,16 +53,17 @@ logger = logging.getLogger(__name__)
 # verifies HMAC, is not expired, and whitelists the current bybit_endpoint.
 # The canonical payload layout MUST match
 # `rust/openclaw_engine/src/live_authorization.rs::canonical_payload`:
-#   version|tier|issued_at_ms|expires_at_ms|operator_id|env_allowed_sorted_csv
+#   version|tier|issued_at_ms|expires_at_ms|operator_id|approved_system_mode|env_allowed_sorted_csv
 #
 # LiveDemo is held to the same bar as Mainnet by design — the point of
 # LiveDemo is to exercise the Live gate before real money. (See memory
 # `feedback_live_no_degradation_by_endpoint.md`.)
 
-_AUTHORIZATION_SCHEMA_VERSION = 1
+_AUTHORIZATION_SCHEMA_VERSION = 2
 _AUTHORIZATION_FILENAME = "authorization.json"
 _ENV_LIVE_DEMO = "live_demo"
 _ENV_MAINNET = "mainnet"
+_REQUIRED_LIVE_GLOBAL_MODE = "live_reserved"
 
 # Canonical tier-name mapping used on the wire. Must stay stable — Rust logs
 # this string for audit. Matches `TrustTier.name` (e.g. TrustTier.T0_ENTRY.name).
@@ -110,6 +111,7 @@ def _canonical_authorization_payload(
     issued_at_ms: int,
     expires_at_ms: int,
     operator_id: str,
+    approved_system_mode: str,
     env_allowed: list[str],
 ) -> str:
     """
@@ -117,7 +119,10 @@ def _canonical_authorization_payload(
     exactly (pipe-separated, env_allowed sorted+deduped ASCII-ascending).
     """
     envs_sorted = sorted(set(env_allowed))
-    return f"{version}|{tier}|{issued_at_ms}|{expires_at_ms}|{operator_id}|{','.join(envs_sorted)}"
+    return (
+        f"{version}|{tier}|{issued_at_ms}|{expires_at_ms}|{operator_id}|"
+        f"{approved_system_mode}|{','.join(envs_sorted)}"
+    )
 
 
 def _sign_authorization_payload(payload: str, ipc_secret: str) -> str:
@@ -157,10 +162,50 @@ def _atomic_write_json(path: Path, data: dict[str, Any]) -> None:
         raise
 
 
+def _require_live_reserved_global_mode(actor_id: str, action: str) -> str:
+    """
+    Fail closed unless the control-plane global mode is exactly live_reserved.
+    Substring checks are not sufficient for signed live authorization.
+    """
+    try:
+        from .live_session_routes import _get_global_mode_state
+        global_mode = _get_global_mode_state()
+    except Exception as exc:
+        logger.warning(
+            "Live auth %s BLOCKED: failed to read global mode actor=%s error=%s",
+            action,
+            actor_id,
+            exc,
+        )
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Live authorization blocked: global mode is unreadable. "
+                "Switch Global Mode to live_reserved and retry."
+            ),
+        ) from exc
+    if global_mode != _REQUIRED_LIVE_GLOBAL_MODE:
+        logger.warning(
+            "Live auth %s BLOCKED: global_mode=%s actor=%s",
+            action,
+            global_mode,
+            actor_id,
+        )
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Live authorization blocked: global_mode={global_mode!r}. "
+                "Switch Global Mode to live_reserved before renewing Live authorization."
+            ),
+        )
+    return global_mode
+
+
 def _write_signed_live_authorization(
     operator_id: str,
     tier: int,
     expires_at_ms: int,
+    approved_system_mode: str = _REQUIRED_LIVE_GLOBAL_MODE,
 ) -> dict[str, Any]:
     """
     Sign and persist the Earned-Trust authorization record that the Rust
@@ -191,6 +236,7 @@ def _write_signed_live_authorization(
         issued_at_ms=issued_at_ms,
         expires_at_ms=expires_at_ms,
         operator_id=operator_id,
+        approved_system_mode=approved_system_mode,
         env_allowed=env_allowed,
     )
     sig = _sign_authorization_payload(payload, ipc_secret)
@@ -201,6 +247,7 @@ def _write_signed_live_authorization(
         "issued_at_ms": issued_at_ms,
         "expires_at_ms": expires_at_ms,
         "operator_id": operator_id,
+        "approved_system_mode": approved_system_mode,
         "env_allowed": env_allowed,
         "sig": sig,
     }
@@ -656,6 +703,7 @@ def post_live_renew(
     """
     _require_operator(actor)
     actor_id = getattr(actor, "actor_id", "operator")
+    approved_system_mode = _require_live_reserved_global_mode(actor_id, "renew")
     engine = get_trust_engine()
 
     # Check if mandatory review is required / 檢查是否需要強制審查
@@ -712,6 +760,7 @@ def post_live_renew(
             operator_id=actor_id,
             tier=final_tier,
             expires_at_ms=expires_at_ms,
+            approved_system_mode=approved_system_mode,
         )
     except Exception as exc:
         logger.error(
@@ -774,6 +823,7 @@ def post_live_renew_review(
     """
     _require_operator(actor)
     actor_id = getattr(actor, "actor_id", "operator")
+    approved_system_mode = _require_live_reserved_global_mode(actor_id, "renew-review")
     engine = get_trust_engine()
 
     final_tier = body.confirmed_tier
@@ -803,6 +853,7 @@ def post_live_renew_review(
             operator_id=actor_id,
             tier=final_tier,
             expires_at_ms=expires_at_ms,
+            approved_system_mode=approved_system_mode,
         )
     except Exception as exc:
         logger.error(

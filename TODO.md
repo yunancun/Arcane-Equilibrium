@@ -31,6 +31,14 @@
 
 ## 🎯 此刻該做什麼（2026-04-28 12:30 CEST · Post-Wave-H 2 operator FUP + drift fix 完 · 等 Phase C / Phase B observation bundled · 等下次 `--rebuild --keep-auth` 套用 fee-postonly-2）
 
+**新主線：62-finding full audit remediation**（operator 2026-04-28 指示：接手剛完成 audit，後續全數修理 62 findings）：
+- 權威 audit：`docs/audit/final_record_zh.md` + `docs/audit/final_summary.md`
+- PM 排期：`docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-28--audit_62_findings_remediation_schedule.md`
+- 總量：62 findings（P1=29 / P2=29 / P3=4 / P0=0），但含 live-release blockers
+- 批次順序：Batch A Live write boundary freeze → Batch B Critical auth/secrets/API exposure → Batch C Trading record durability → Batch D Risk/config fail-closed → Batch E Operator/runtime ownership → Batch F ML/agent autonomy readiness
+- PM gate：Batch A 必須先做；每個 implementation batch 必經 `PM -> PA -> E1/E1a -> E2 -> E4 -> QA -> PM`，涉及 live/auth/security 加 `CC/E3/BB` gate；不得用單一大 patch 關 62 條
+- Preflight：開工前先處理 branch/worktree ownership、Linux watchdog paper stale drift、建立 62-ID tracking matrix、保存 Linux regression baseline
+
 **Post-Wave-H operator hotfixes**（3 commits `cdc2699` + `20baabe` + `85a4e2d`）：
 - ✅ **EDGE-DIAG-2-FUP fee-postonly-2** (`cdc2699`) — Rust strategy-open Fill 改用 TIF-aware `fee_rate_for_intent`；DB column drift 修；其他 fee_rate(symbol) 5 close-path call sites 驗安全；**待 `--rebuild --keep-auth` deploy**
 - ✅ **`restart_all.sh --keep-auth` flag** (`20baabe`) — authorization.json 跨 planned deploy 保留；crash/watchdog/systemd 路徑不變；§四 Gate #5 hot-rate verify 5 min re-check 不變
@@ -709,7 +717,7 @@ ssh trade-core "cd ~/BybitOpenClaw/srv && python3 helper_scripts/db/passive_wait
 | ~~**STRK-FUP-BASELINE-UPDATE**~~ | ✅ 完成 2026-04-27（TODO L9-L10 + CLAUDE.md §十一 baseline 2161 → 2252 已更新，per PM Sign-off §5.3）| 完成 | ✅ | n/a |
 | **STRK-FUP-F7-CRON-CD-CHECK** | E4 Tier 9 STRKUSDT P0 wave push back #4：F7 cron wrapper `cd $BASE_DIR` 跑 stale main worktree runner；建議 cron wrapper 加 grep `[22]`-`[29]` 在 latest log 內自驗（防 wrapper 本身路徑漂移） | 下次 cron 維護 | 🟢P3 | E1 / operator ~15min（per PM Sign-off §5.4）|
 | **STRK-FUP-HEALTHCHECK-PRE-EXISTING** | F7 [22]-[29] 揭發 5 個 pre-existing healthcheck FAIL silent-dead pipelines：[3] exit_features_writer / [19] observer_pipeline / [23] orders_fills 6 pairs/11 dropped real / [24] signals_writer 179h stale / [26] dust_spiral_noise_in_ef 37 rows / [27] intents_counter_freeze；屬 PA Wave 4 / G3-08+ scope，非本 STRKUSDT P0 wave 引入 | F7 deploy 後 6-12h 觀察期完成 | 🟡P2 | PA design RFC + E1 1-3d/pipeline（per PM Sign-off §5.5）|
-| **LIVE-RECONCILER-STALE-CMD-TX** | [P1][HIGH-1 E2 round-2 2026-04-27] watcher 中途 teardown+respawn 後，reconciler/scheduler 仍持有 boot-time cmd_tx（rx 已 drop），對 live 的命令靜默丟失（CloseAll/ReconcilePosition/UpdateStrategyParams）。Live 縮倉監控 5min 輪詢在 teardown+respawn 後對 live engine 失效，可能漏清 ghost positions。修法：reconciler/scheduler 改走 LiveCmdSenderSlot snapshot（同 watcher closure path）。Ticket: LIVE-AUTH-WATCHER-EVENT-CONSUMER-SPAWN follow-up。Prerequisite: 確認生產中是否出現過 teardown+respawn cycle（無則低緊急度）。| 待 Live 真實流量後評估優先級 | 🟠P1 | E1 ~1d（per E2 HIGH-1 round-2）|
+| ~~**LIVE-RECONCILER-STALE-CMD-TX**~~ | ✅ 完成 2026-04-28 Batch A / SW-002：reconciler 改用 per-dispatch `LiveCmdSenderSlot` snapshot；strategist promote 加 `with_promote_cmd_slot()` 動態讀 watcher-rotated live sender；edge reload 原 slot-aware path 保持並由 release tests 驗證。| Batch A fixed | ✅ | 驗證見 `docs/audit/remediation_tracking.md` Batch A Verification Notes |
 | **G2-01-FUP-MAKER-FILL-CHECK** | 2026-04-27 healthcheck list L553 漂移修復揭發：先前文檔標 `[3] maker_fill_rate → G2-01` 但 runtime [3] 是 `exit_features_writer`，maker_fill_rate dedicated check 從未實裝；G2-01 PostOnly 驗收 ~05-07/08 結算前須補一個 `check_maker_fill_rate(cur)`（SQL：trading.fills 過去 1w order_type='Limit' postOnly fill 比例 + per-strategy 切片，閾值 PostOnly fee drop ≥60% 等價條件）並 register 到 runner.py | G2-01 結算 ~05-07 前 | 🟡P2 | E1 + QC 2-3h（含 unit test + cron verify）|
 
 ---

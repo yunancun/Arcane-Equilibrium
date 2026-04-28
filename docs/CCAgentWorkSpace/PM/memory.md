@@ -258,6 +258,25 @@ PA 收到本報告 + 其他 9 agent 報告後，執行：
 
 最終目標：新 TODO.md merge 入 main 之前，PA sign-off ✅
 
+## 2026-04-28 62-finding Full Audit Remediation 接手
+
+Operator 指示：接手剛完成的 full audit，後續要把全部 62 個 finding 全部修掉。
+
+權威來源：
+- `docs/audit/final_record_zh.md`
+- `docs/audit/final_summary.md`
+- `docs/audit/remediation_groups.md`
+- `docs/audit/audit.md`
+
+PM 排期輸出：
+- `docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-28--audit_62_findings_remediation_schedule.md`
+
+PM 決策：
+- 62 條不可用單一大 patch 處理，必須分 Batch A-F。
+- Batch A `Live write boundary freeze` 是第一批，先於 auth/secrets、DB durability、risk fail-closed、operator runtime、ML autonomy。
+- 每個 implementation batch 必經 E2 + E4；live/auth/security 批次加 CC/E3/BB gate。
+- 開工 preflight 必須先釐清 dirty worktree ownership、Linux watchdog paper stale drift、建立 62-ID tracking matrix、保存 Linux regression baseline。
+
 ---
 
 **最後更新**：2026-04-24 CEST · PM complete
@@ -859,3 +878,27 @@ Operator 接續 Tier 8 sign-off 後說「繼續派」。PM 按 Tier 8 §8 推薦
 - PA Track 2 design: `docs/CCAgentWorkSpace/PA/workspace/reports/2026-04-26--g3_09_cost_edge_ratio_design.md`
 
 **最後更新**：2026-04-26 19:30 CEST · PM Tier 9 Sign-off DONE · G3-08 Phase 4 unblock + G3-09 Phase A unblock
+
+## 2026-04-28 Batch A — Live Write Boundary Freeze
+
+### Scope
+- Fixed Batch A audit findings: LP-001, OE-007, OS-001, RC-001, SW-002.
+- Tracking ledger: `docs/audit/remediation_tracking.md`.
+- Signoff report: `docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-28--batch_a_live_boundary_freeze_signoff.md`.
+
+### Result
+- Live auth schema upgraded to v2 with signed `approved_system_mode=live_reserved`.
+- Python renew/review, executor shadow-toggle, and strategist promote live gates now require exact `global_mode_state == "live_reserved"`.
+- Python live REST fallback and shell direct mainnet flatten are disabled/fail-closed.
+- Rust emergency close dispatches reduce-only exchange close before local flatten in demo/live.
+- Reconciler and strategist promote now use dynamic `LiveCmdSenderSlot` snapshots after LiveAuthWatcher respawn.
+
+### Verification
+- Python targeted suite: 69 passed.
+- Rust release targeted suite: live_authorization 18 passed; dual_rail_dispatch 13 passed; strategist_scheduler 26 passed; edge_reload 13 passed; live_auth_watcher 10 passed.
+- E2 adversarial re-review accepted after executor auth verifier v2 drift fix.
+- E4 regression verifier PASS.
+
+### Deployment
+- No deploy/restart performed.
+- Linux `trade-core` preflight drift remains separate: `engine_alive=true`, `demo/live=true`, `paper=false`.

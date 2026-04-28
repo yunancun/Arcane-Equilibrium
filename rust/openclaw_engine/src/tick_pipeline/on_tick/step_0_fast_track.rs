@@ -22,8 +22,7 @@ use openclaw_types::PriceEventKind;
 use tracing::info;
 
 use super::super::on_tick_helpers::{
-    ft_reduce_cooldown_expired, push_capped, sigma_scaled_reduce_cooldown_ms,
-    FT_REDUCE_COOLDOWN_MS,
+    ft_reduce_cooldown_expired, push_capped, sigma_scaled_reduce_cooldown_ms, FT_REDUCE_COOLDOWN_MS,
 };
 use super::super::*;
 
@@ -538,7 +537,11 @@ impl TickPipeline {
             // symbol — applying it to all symbols inflated PnL by 1000-10000x in
             // the 2026-04-12 anomaly).
             // PNL-FIX-1：每個倉位必須以該交易對自己的最新價平倉，禁止使用 event.last_price。
+            let is_exchange_mode = self.pipeline_kind.is_exchange();
             for sym in symbols {
+                if is_exchange_mode && self.pending_close_symbols.contains(&sym) {
+                    continue;
+                }
                 // EDGE-P3-1 R2: capture entry_context_id BEFORE close_position_at_symbol_market
                 // removes the position. Empty string when unknown → NULL in DB.
                 // EDGE-P3-1 R2：關倉前先捕獲 entry_context_id。
@@ -551,9 +554,25 @@ impl TickPipeline {
                 // (full close → position removed after).
                 // EXIT-FEATURES-TABLE-1：先取快照再平倉（full close 後倉位已移除）。
                 let snap = self.paper_state.position_exit_snapshot(&sym);
-                if let Some((il, q, px, pnl)) =
+                let close_result = if is_exchange_mode {
+                    let Some((is_long, qty)) = self
+                        .paper_state
+                        .get_position(&sym)
+                        .map(|p| (p.is_long, p.qty))
+                    else {
+                        continue;
+                    };
+                    self.close_position_after_exchange_dispatch(
+                        &sym,
+                        is_long,
+                        qty,
+                        event,
+                        "risk_close:fast_track",
+                    )
+                } else {
                     self.close_position_at_symbol_market(&sym, event.ts_ms)
-                {
+                };
+                if let Some((il, q, px, pnl)) = close_result {
                     self.emit_close_fill(
                         &sym,
                         il,

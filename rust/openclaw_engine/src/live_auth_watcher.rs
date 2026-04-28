@@ -129,7 +129,9 @@
 //!     slot 給 shutdown 序列讀取。
 
 use crate::main_fanout::LiveEventSenderSlot;
-use crate::pipeline_slot::{PipelineSlot, SlotKind, SpawnConfig, SpawnError, SpawnOutput, TeardownError};
+use crate::pipeline_slot::{
+    PipelineSlot, SlotKind, SpawnConfig, SpawnError, SpawnOutput, TeardownError,
+};
 use crate::spawn_backoff::SpawnBackoff;
 use async_trait::async_trait;
 use openclaw_engine::bybit_rest_client::BybitEnvironment;
@@ -207,10 +209,7 @@ pub trait SpawnOp: Send + Sync {
     /// 嘗試啟動槽位。成功 `Ok(Some(out))`（呼叫端取走 bindings + 槽位子
     /// token 串下去）；`build_exchange_pipeline` 回 None 時 `Ok(None)`；
     /// 程式錯誤（`AlreadySpawned`）`Err`。
-    async fn try_spawn(
-        &self,
-        cfg: &SpawnConfig<'_>,
-    ) -> Result<Option<SpawnOutput>, SpawnError>;
+    async fn try_spawn(&self, cfg: &SpawnConfig<'_>) -> Result<Option<SpawnOutput>, SpawnError>;
 
     /// Teardown the slot. Idempotent on `Empty`.
     /// 拆槽位。對 `Empty` 為 no-op。
@@ -223,10 +222,7 @@ impl SpawnOp for PipelineSlot {
         PipelineSlot::is_spawned(self)
     }
 
-    async fn try_spawn(
-        &self,
-        cfg: &SpawnConfig<'_>,
-    ) -> Result<Option<SpawnOutput>, SpawnError> {
+    async fn try_spawn(&self, cfg: &SpawnConfig<'_>) -> Result<Option<SpawnOutput>, SpawnError> {
         PipelineSlot::try_spawn(self, cfg).await
     }
 
@@ -972,4 +968,3 @@ impl LiveAuthWatcher {
 #[cfg(test)]
 #[path = "live_auth_watcher_tests.rs"]
 mod tests;
-

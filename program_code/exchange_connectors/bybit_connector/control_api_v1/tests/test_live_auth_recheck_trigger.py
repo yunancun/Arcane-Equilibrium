@@ -289,11 +289,17 @@ def _patch_common_renew_path(monkeypatch, engine: _FakeEngine):
     monkeypatch.setattr(
         ltr,
         "_write_signed_live_authorization",
-        lambda operator_id, tier, expires_at_ms: {
+        lambda operator_id, tier, expires_at_ms, approved_system_mode="live_reserved": {
             "tier": "T0_ENTRY",
             "expires_at_ms": expires_at_ms,
             "operator_id": operator_id,
+            "approved_system_mode": approved_system_mode,
         },
+    )
+    monkeypatch.setattr(
+        ltr,
+        "_require_live_reserved_global_mode",
+        lambda actor_id, action: "live_reserved",
     )
 
     # live_session_routes._grant_execution_authority_internal is best-effort
@@ -342,6 +348,40 @@ def test_trigger_called_after_successful_renew(monkeypatch):
     # Trust engine was notified and execution-authority grant attempted.
     # 信任引擎被通知，execution authority grant 已嘗試。
     assert len(engine.on_renew_calls) == 1
+
+
+def test_renew_blocks_before_signing_when_global_mode_not_live_reserved(monkeypatch):
+    engine = _FakeEngine(requires_review=False)
+    _patch_common_renew_path(monkeypatch, engine)
+
+    sign_mock = MagicMock()
+    trigger_mock = MagicMock()
+    grant_mock = MagicMock()
+    monkeypatch.setattr(ltr, "_write_signed_live_authorization", sign_mock)
+    monkeypatch.setattr(ltr, "_trigger_live_auth_recheck_fire_and_forget", trigger_mock)
+    monkeypatch.setattr(
+        ltr,
+        "_require_live_reserved_global_mode",
+        lambda actor_id, action: (_ for _ in ()).throw(
+            ltr.HTTPException(status_code=409, detail="global_mode='demo_reserved'")
+        ),
+    )
+
+    import sys
+    sys.modules["app.live_session_routes"]._grant_execution_authority_internal = grant_mock
+
+    with pytest.raises(ltr.HTTPException) as excinfo:
+        ltr.post_live_renew(
+            body=ltr.RenewBody(),
+            request=MagicMock(),
+            authorization=None,
+            actor=_FakeActor(),
+        )
+
+    assert excinfo.value.status_code == 409
+    sign_mock.assert_not_called()
+    trigger_mock.assert_not_called()
+    grant_mock.assert_not_called()
 
 
 def test_trigger_called_after_successful_revoke(monkeypatch):
@@ -419,6 +459,38 @@ def test_trigger_called_after_successful_renew_review(monkeypatch):
         f"expected exactly 1 trigger call from /auth/renew-review, "
         f"got {trigger_mock.call_count}"
     )
+
+
+def test_renew_review_blocks_before_signing_when_global_mode_not_live_reserved(monkeypatch):
+    engine = _FakeEngine(requires_review=True)
+    _patch_common_renew_path(monkeypatch, engine)
+
+    sign_mock = MagicMock()
+    trigger_mock = MagicMock()
+    monkeypatch.setattr(ltr, "_write_signed_live_authorization", sign_mock)
+    monkeypatch.setattr(ltr, "_trigger_live_auth_recheck_fire_and_forget", trigger_mock)
+    monkeypatch.setattr(
+        ltr,
+        "_require_live_reserved_global_mode",
+        lambda actor_id, action: (_ for _ in ()).throw(
+            ltr.HTTPException(status_code=409, detail="global_mode='observe_only'")
+        ),
+    )
+
+    with pytest.raises(ltr.HTTPException) as excinfo:
+        ltr.post_live_renew_review(
+            body=ltr.FullReviewBody(
+                review_notes="full review should be blocked before signing",
+                confirmed_tier=1,
+            ),
+            request=MagicMock(),
+            authorization=None,
+            actor=_FakeActor(),
+        )
+
+    assert excinfo.value.status_code == 409
+    sign_mock.assert_not_called()
+    trigger_mock.assert_not_called()
 
 
 def test_trigger_failure_does_not_break_http_response(monkeypatch):

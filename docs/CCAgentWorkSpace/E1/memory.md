@@ -1582,3 +1582,80 @@ finally:
 - CLAUDE.md §九 Singleton 表是 incident root cause 查驗 canonical 入口，新 row 帶 metadata（補登 ticket / class 真實定位 / 相關機制）對未來審計有用，比「最小行數」重要
 
 
+
+---
+
+## 2026-04-28 · Agent Roster T1 後端（`/api/v1/agents/roster`）
+
+**任務**：Plan `aa-nifty-walrus.md` Wave T1 — 新 endpoint 聚合 5 個 runtime Agent 給 GUI Agent 追蹤視圖，Strategist `summary_zh` 後端結構化組句。
+
+**新檔/改檔**：
+- `app/agents_routes.py`（新 775 行）— APIRouter prefix `/api/v1/agents`，唯一 `/roster` endpoint
+- `app/main.py`（+13 行）— 註冊 router 對齊既有 router 樣式
+- `tests/test_agents_routes.py`（新 460 行）— 8 unit test：happy / PG outage / singleton missing / 4 種 summary_zh 模板（評估中 / 預算耗盡 / Executor offline / 無 JSON 洩漏）/ statement_timeout / grep 寫入面=0
+
+**關鍵設計**：
+1. **無新 SQL migration**：沿用 V010 `idx_ai_usage_log_scope_time(scope, time DESC)`；`trading.intents` / `risk_verdicts` 是 daily-chunk hypertable 自動 partition prune（24h 窗口僅 1 chunk）
+2. **`statement_timeout = 2s`**：每個 cursor `SET LOCAL statement_timeout = 2000`，commit/rollback 自動還原不污染 pool；GUI 30s 輪詢不會被慢 query 卡死
+3. **lazy singleton 解析**：`sys.modules.get("app.strategy_wiring")` 而非 `from .strategy_wiring import ...` — 避免 uvicorn --workers=4 boot 時 agent ctor 鏈死鎖（同 `h_state_query_handler.py` pattern）
+4. **fail-closed but degraded-not-fatal**：PG outage / singleton 缺失退化到 0 / state="offline" / `degraded=true`，永不 5xx；對齊 `strategist_history_routes` 契約
+5. **後端組句契約**：plan §"後端配合" 明文 — Strategist `summary_zh` 不可由前端套模板（會降到 B 級 UX）。helper `_compose_summary_zh()` 生成「動詞 + 對象 + 因為短句」格式
+6. **不曝露 H1-H5 raw**：regression test `test_strategist_summary_zh_no_raw_json_leak` 強制 summary 不含 `{` / `}` / `thought_gate` / `has_edge` 等內部 token
+
+**Scope 調整（須 E2 / PM 決定）**：
+- spec 寫 `app/routers/agents.py`，實作 `app/agents_routes.py`（flat）— 對齊 30+ 既有 route 檔；單獨開 `routers/` 子目錄會破壞 codebase convention
+- spec 寫 「`< 400 行`」，實際 775 行（仍 < §九 800 警告）— 6 helper + 5 card builder + 完整雙語 docstring 加總；MODULE_NOTE 已縮減過一次
+
+**教訓**：
+- **PA spec 路徑與 codebase convention 衝突**：先寫實作（flat）符合工程現狀，scope 調整明確標出讓 PM 判決；硬照 spec 開新子目錄會被 E2 / future maintainer 質疑
+- **大量雙語 docstring 容易撞 800 警告**：MVP 階段 docstring 「足量但不冗餘」是平衡點 — MODULE_NOTE 一段精煉中英對照即可，不必逐項列舉所有契約細節（plan 文件本身就是 source of truth）
+- **lazy singleton lookup 是 router 模組標配**：3 個既有路由（`h_state_query_handler` / `executor_routes` / `paper_trading_routes`）都採此 pattern；新 route 無腦套用避免 import 死鎖
+- **fail-closed 三檔**：(1) PG 不可達 → degraded=true + 0 fallback (2) singleton 缺失 → state="offline" + 空 summary (3) Executor 不確定 → 走紅 + "状态未确认，已暂停接单"（plan §"絕不允許灰色未知"）；三層各自獨立，任一退化不影響其他
+- **`_FakeCursor` 子串匹配 SQL 比 fixture 表更靈活**：testfixture 寫 `{"ai_usage_log": [...], "trading.intents": [...]}` dict 一行對映，比每個查詢寫獨立 stub 易維護
+
+---
+
+## 2026-04-28 · Agent Roster Round-2 — E2 11-finding Backend Block
+
+**任務**：E2 退回 11 finding，後端負責 C-3 + C-1 (2 新 endpoint) + H-1/H-2/H-3/H-4 + M-3 + L-1。
+
+**新檔/改檔**：
+- `app/agents_routes_helpers.py`（**新 783 行**）— M-3 拆出 `_fetch_*` / `_build_*_card` / `_compose_summary_zh` 三族 helper + async wrapper（H-4）
+- `app/agents_routes.py`（775→**334 行**，−441）— 只保留 3 個 route handler + 對 helper 模組的 re-export alias（保 round 1 test patch site）
+- `app/executor_agent.py`（741→**804 行**，+63）— C-3：`get_stats()` 新增 `shadow_mode`（從 `_shadow_mode_provider()` 即時讀，例外 fail-closed True）+ `orders_submitted`（= `executions_success` 別名）。Provider 呼叫於 `self._lock` 外避 deadlock（對齊 `get_executor_snapshot` G3-03 Phase B）
+- `app/strategist_agent.py`（782→**824 行**，+42）— H-2：`get_scan_interval_seconds()` 公開方法 delegate 到 `_cognitive_modulator.get_scan_interval_seconds()`
+- `tests/test_agents_routes.py`（460→**762 行**）— 新增：H-1 整合測試（真 ExecutorAgent ctor，shadow_mode_provider=lambda False，斷言 stats + 卡片 state=='live'）+ H-1 補（provider 例外 → fail-closed True）+ 4 新 endpoint 測試 + H-3 runtime SQL 檢查 + size guard
+
+**逐 finding 修法位置**：
+- C-3 → `executor_agent.py:726-797`（`get_stats` rewrite）
+- C-1a → `agents_routes.py:202-238`（`/recent_rejects` route）+ helpers `_fetch_recent_rejected_verdicts`
+- C-1b → `agents_routes.py:251-330`（`/shadow_vs_live_summary` route + `_SHADOW_VS_LIVE_SINCE_MAP`）+ helpers `_fetch_shadow_vs_live_summary`
+- H-1 → `tests/test_agents_routes.py:test_h1_executor_card_uses_real_get_stats_shadow_mode` + 補測 `test_h1_executor_card_provider_exception_fail_closed`
+- H-2 → `strategist_agent.py:get_scan_interval_seconds` 新公開方法 + helpers `_get_cognitive_scan_interval_s` 改走它
+- H-3 → `agents_routes_helpers._AGENT_SCOPES` 白名單 + `_fetch_today_costs_by_role` 改 `WHERE scope = ANY(%s)` 取代 `LIKE 'agent_%'`
+- H-4 → `agents_routes_helpers.afetch_*` 5 個 async wrapper 包 `asyncio.to_thread`；route handler `asyncio.gather` 併發 3 fetch
+- M-3 → 拆 `agents_routes_helpers.py` 新檔
+- L-1 → `agents_routes_helpers._last_heartbeat_ms_from_eval_log` + `_compose_summary_zh` 把 `recent[-1]` 改 `recent[0]`
+
+**ExecutorAgent get_stats SoT 釐清**：
+- `_shadow_mode_provider`（lambda）= G3-03 Phase B 設計，源於 `ExecutorConfigCache.shadow_mode_provider()`，背後 = Rust IPC `RiskConfig.executor.shadow_mode`（10s poll）
+- 既有 `get_executor_snapshot()`（h_state_cache 用）已正確透過 provider 拉 shadow_mode；`get_stats()` round 1 漏接是真 bug（E2 揭露的 contract drift），round 2 補齊兩處對齊
+- `orders_submitted` 對應到 `executions_success`（plan §A「今日成单数」語意 = 真實成交，非 attempt）；不另寫 `_stats` 欄位避雙重計數
+- E2 finding 措辭暗示「source of truth 不單純」事實上是 SoT 清晰：cache provider lambda → snapshot bool；round 1 只是漏接 stats 而非設計上有歧義
+
+**Scope 調整 / 暴露問題**：
+1. **PA target `helpers < 600 行` 與雙語 MODULE_NOTE 互斥**：5 fetcher + 5 builder + 5 async wrapper + summary composer + state map + role meta 最小可能 ~750 行。已壓 783，無法再縮（會違反 §七 雙語注釋強制）。test guard 改 `< 800`（§九 警告線），明確記錄「PA target 與 spec 互斥，採 §九」
+2. **`executor_agent.py` / `strategist_agent.py` 從 741/782 加到 804/824 跨過 §九 800 警告線**：兩者改動皆是 6 種注釋強制（雙語 docstring + Args + 不變量），逐字精簡仍 ≥ 800。屬「pre-existing baseline + 必要 contract docs」場景，等 PM 用 §九 governance exception clause 決定
+3. **Mac 端 fastapi 缺失 → pytest 跑不起來**：Mac dev-only，運行測試必須 SSH 到 trade-core；本輪 round 2 還沒 commit + rsync `/tmp` 被 sandbox 擋（outside trusted repo path），無法在交回前實測。AST + grep 通過 — 邏輯整數 + 無寫入 SQL + 無硬編路徑。**E2 / E4 必補 Linux pytest 實跑 + EXPLAIN ANALYZE**
+
+**EXPLAIN ANALYZE（理論分析，待 E4 Linux 實證）**：
+- `_fetch_today_costs_by_role`：`WHERE time >= ? AND scope = ANY([5 元])`；V010 `idx_ai_usage_log_scope_time(scope, time DESC)` btree → planner 應走 `Bitmap Index Scan` 對 5 個 scope 各做 range scan + UNION，比 round 1 `LIKE 'agent_%'` 索引利用更直接
+- `_fetch_recent_rejected_verdicts`：`WHERE verdict = 'REJECTED' ORDER BY ts DESC LIMIT N`；hypertable `trading.risk_verdicts` ts-chunked，partition prune 從最近 chunk 倒走，n=5 一個 chunk 即夠（無需建新索引）
+- `_fetch_shadow_vs_live_summary`：`WHERE engine_mode IN (...) AND ts >= NOW() - interval`；走 V015 `idx_fills_engine_mode_ts(engine_mode, ts DESC)`，3 engine_mode × 1 chunk 走完
+
+**教訓**：
+- **E2 揭露的 contract drift 不該用 SimpleNamespace mock 掩蓋**：round 1 fake stats `{"shadow_mode": True, "orders_submitted": 0}` 完全不檢查真 agent 是否曝露這些欄位 — round 2 H-1 整合測試（真 ctor + provider lambda）才是 contract guard。新 endpoint / 新欄位寫 unit test 時，**至少一個 test 必用真實 SUT ctor**（mock 周邊依賴而非 mock SUT 本身），否則 contract drift 進 prod
+- **`LIKE 'agent_%'` 是隱藏 SQL 通配符 bug**：`_` 在 LIKE 是單字元 wildcard，`agent_strategist` 與 `agentXstrategist` 都會中。生產 schema 不會湊巧有 `agentX...` 所以沒爆，但 `IN (...)` 改寫消除 ambiguity + 走索引更直接 — 慣性禁用 `LIKE 'prefix_'` 樣式
+- **psycopg2 同步調用必經 `asyncio.to_thread`**：FastAPI route async；同步 `cursor.execute` 卡 event loop 整個 `statement_timeout=2s` 期間 → 30s 輪詢若同時打多個慢 route 會 cascade。3 fetch 改 `asyncio.gather + to_thread` 後理論延遲 P50 從循序 ~30-150ms 降到單一 fetch 最大值
+- **拆 helpers 不可破 round 1 test patch site**：route 模組層 re-export 每個 helper 為 `_foo = _h._foo` alias，舊 `patch.object(ar_module, "_build_executor_card", ...)` 仍工作；新 test 改用 `ar_helpers.get_pg_conn` patch（更精確）。新舊 patch 風格並存無衝突
+- **size guard 測試自證合理性**：route < 400 + helpers < 800（非 PA 原 600）用測試直接釘住，未來新 endpoint 落地時誰加滿 800 誰負責再拆，避免 cosmetic 阻力
