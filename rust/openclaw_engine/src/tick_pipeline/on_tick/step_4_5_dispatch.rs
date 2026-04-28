@@ -30,6 +30,25 @@ use super::super::on_tick_helpers::{
 };
 use super::super::*;
 
+fn execution_reference(
+    is_buy: bool,
+    best_bid: Option<f64>,
+    best_ask: Option<f64>,
+    fallback_price: f64,
+) -> (Option<f64>, Option<String>) {
+    let bbo = if is_buy { best_ask } else { best_bid };
+    if let Some(price) = bbo.filter(|v| v.is_finite() && *v > 0.0) {
+        (Some(price), Some("bbo_same_side".to_string()))
+    } else if fallback_price.is_finite() && fallback_price > 0.0 {
+        (
+            Some(fallback_price),
+            Some("dispatch_last_fallback".to_string()),
+        )
+    } else {
+        (None, None)
+    }
+}
+
 impl TickPipeline {
     /// Execute Step 4 (strategy dispatch) + Step 5 (intent processing with
     /// rejection / fill callbacks) + maker-sweep + deferred-close execution
@@ -362,6 +381,13 @@ impl TickPipeline {
                                     // 動作生成跨 symbol 的 intent，必須改為
                                     // `paper_state.latest_price(&intent.symbol)`
                                     // 並對齊 execute_position_close 的 fallback。
+                                    let (reference_price, reference_source) =
+                                        execution_reference(
+                                            intent.is_long,
+                                            best_bid,
+                                            best_ask,
+                                            event.last_price,
+                                        );
                                     let _ = tx.send(OrderDispatchRequest {
                                         symbol: intent.symbol.clone(),
                                         is_long: intent.is_long,
@@ -389,6 +415,9 @@ impl TickPipeline {
                                         // for the PostOnly resting-order sweep.
                                         // EDGE-P2-3 Phase 1B-3.2：轉發 PostOnly sweep 逾時。
                                         maker_timeout_ms: intent.maker_timeout_ms,
+                                        reference_price,
+                                        reference_ts_ms: reference_price.map(|_| event.ts_ms),
+                                        reference_source,
                                     });
                                     // FUP-RACE: proactively mark mirror so reconciler
                                     // won't orphan-close this position before the WS
@@ -634,6 +663,12 @@ impl TickPipeline {
                                             fee_rate: self
                                                 .intent_processor
                                                 .fee_rate_for_intent(&intent.symbol, intent),
+                                            reference_price: None,
+                                            reference_ts_ms: None,
+                                            reference_source: None,
+                                            slippage_bps: None,
+                                            liquidity_role: Some("paper_sim".into()),
+                                            fill_latency_ms: None,
                                             realized_pnl,
                                             strategy_name: intent.strategy.clone(),
                                             context_id: make_context_id(
@@ -684,6 +719,13 @@ impl TickPipeline {
                                         // 從 `latest_price(intent.symbol)`
                                         // 算出的成交價，本質就屬 intent.symbol，
                                         // 非外層 tick 的價，無需 fallback。
+                                        let (reference_price, reference_source) =
+                                            execution_reference(
+                                                intent.is_long,
+                                                best_bid,
+                                                best_ask,
+                                                event.last_price,
+                                            );
                                         let _ = tx.send(OrderDispatchRequest {
                                             symbol: intent.symbol.clone(),
                                             is_long: intent.is_long,
@@ -716,6 +758,9 @@ impl TickPipeline {
                                             // Shadow 為 fire-and-forget；is_primary=false 不註冊
                                             // PendingOrder，sweep 永不觸及。仍帶值保持結構一致。
                                             maker_timeout_ms: intent.maker_timeout_ms,
+                                            reference_price,
+                                            reference_ts_ms: reference_price.map(|_| event.ts_ms),
+                                            reference_source,
                                         });
                                     }
                                 }
@@ -845,6 +890,12 @@ impl TickPipeline {
                                 price: fill_price,
                                 fee,
                                 fee_rate: maker_fee_rate,
+                                reference_price: None,
+                                reference_ts_ms: None,
+                                reference_source: None,
+                                slippage_bps: None,
+                                liquidity_role: Some("paper_sim".into()),
+                                fill_latency_ms: None,
                                 realized_pnl,
                                 strategy_name: order.strategy.clone(),
                                 // Maker fill context = order's enqueue-time id;

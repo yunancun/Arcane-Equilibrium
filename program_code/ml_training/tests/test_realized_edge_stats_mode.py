@@ -15,6 +15,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from program_code.ml_training import realized_edge_stats
+from program_code.ml_training.realized_edge_stats import RoundTripRecord
 
 
 def _make_empty_conn() -> MagicMock:
@@ -169,3 +170,102 @@ def test_min_observation_ts_naive_treated_as_utc():
         )
     used = captured["since"]
     assert used.tzinfo is not None, "since must be tz-aware after normalization"
+
+
+def test_attach_funding_to_records_updates_net_bps_without_double_counting_splits():
+    entry_ts = datetime(2026, 4, 28, 8, 0, tzinfo=timezone.utc)
+    exit_ts = datetime(2026, 4, 28, 10, 0, tzinfo=timezone.utc)
+    records = [
+        RoundTripRecord(
+            strategy_name="funding_arb",
+            symbol="BTCUSDT",
+            gross_pnl_bps=0.0,
+            entry_fee_bps=1.0,
+            exit_fee_bps=1.0,
+            net_pnl_bps=-2.0,
+            entry_ts=entry_ts,
+            exit_ts=exit_ts,
+            notional_usd=100.0,
+            bps_denominator_usd=100.0,
+            entry_context_id="ctx-1",
+        ),
+        RoundTripRecord(
+            strategy_name="funding_arb",
+            symbol="BTCUSDT",
+            gross_pnl_bps=0.0,
+            entry_fee_bps=1.0,
+            exit_fee_bps=1.0,
+            net_pnl_bps=-2.0,
+            entry_ts=entry_ts,
+            exit_ts=exit_ts,
+            notional_usd=300.0,
+            bps_denominator_usd=300.0,
+            entry_context_id="ctx-1",
+        ),
+    ]
+
+    realized_edge_stats._attach_funding_to_records(
+        records,
+        [
+            {
+                "ts": datetime(2026, 4, 28, 9, 0, tzinfo=timezone.utc),
+                "symbol": "BTCUSDT",
+                "strategy_name": "funding_arb",
+                "amount": 4.0,
+            }
+        ],
+    )
+
+    assert sum(r.funding_pnl_usd for r in records) == 4.0
+    assert records[0].funding_pnl_usd == 1.0
+    assert records[1].funding_pnl_usd == 3.0
+    assert records[0].net_pnl_bps == 98.0
+    assert records[1].net_pnl_bps == 98.0
+
+
+def test_attach_funding_to_records_excludes_split_closed_before_settlement():
+    entry_ts = datetime(2026, 4, 28, 8, 0, tzinfo=timezone.utc)
+    records = [
+        RoundTripRecord(
+            strategy_name="funding_arb",
+            symbol="BTCUSDT",
+            gross_pnl_bps=0.0,
+            entry_fee_bps=0.0,
+            exit_fee_bps=0.0,
+            net_pnl_bps=0.0,
+            entry_ts=entry_ts,
+            exit_ts=datetime(2026, 4, 28, 8, 30, tzinfo=timezone.utc),
+            notional_usd=100.0,
+            bps_denominator_usd=100.0,
+            entry_context_id="ctx-2",
+        ),
+        RoundTripRecord(
+            strategy_name="funding_arb",
+            symbol="BTCUSDT",
+            gross_pnl_bps=0.0,
+            entry_fee_bps=0.0,
+            exit_fee_bps=0.0,
+            net_pnl_bps=0.0,
+            entry_ts=entry_ts,
+            exit_ts=datetime(2026, 4, 28, 10, 0, tzinfo=timezone.utc),
+            notional_usd=300.0,
+            bps_denominator_usd=300.0,
+            entry_context_id="ctx-2",
+        ),
+    ]
+
+    realized_edge_stats._attach_funding_to_records(
+        records,
+        [
+            {
+                "ts": datetime(2026, 4, 28, 9, 0, tzinfo=timezone.utc),
+                "symbol": "BTCUSDT",
+                "strategy_name": "funding_arb",
+                "amount": 3.0,
+            }
+        ],
+    )
+
+    assert records[0].funding_pnl_usd == 0.0
+    assert records[1].funding_pnl_usd == 3.0
+    assert records[1].net_pnl_bps == 100.0

@@ -31,6 +31,9 @@ fn test_dual_rail_shadow_order_has_sl_fields() {
         limit_price: None,
         time_in_force: None,
         maker_timeout_ms: None,
+        reference_price: None,
+        reference_ts_ms: None,
+        reference_source: None,
     };
     assert_eq!(req.stop_loss, Some(49000.0));
     assert_eq!(req.take_profit, Some(52000.0));
@@ -78,6 +81,9 @@ fn test_dual_rail_close_orders_no_broker_sl() {
         limit_price: None,
         time_in_force: None,
         maker_timeout_ms: None,
+        reference_price: None,
+        reference_ts_ms: None,
+        reference_source: None,
     };
     assert!(req.stop_loss.is_none());
     assert!(req.is_close);
@@ -105,6 +111,9 @@ fn test_dual_rail_paper_shadow_skips_broker_sl() {
         limit_price: None,
         time_in_force: None,
         maker_timeout_ms: None,
+        reference_price: None,
+        reference_ts_ms: None,
+        reference_source: None,
     };
     assert!(!req.is_primary);
     assert!(req.stop_loss.is_none());

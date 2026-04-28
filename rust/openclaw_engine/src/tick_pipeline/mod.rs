@@ -647,6 +647,12 @@ pub struct OrderDispatchRequest {
     /// EDGE-P2-3 Phase 1B-3.2：鏡射 OrderIntent.maker_timeout_ms。僅 PostOnly
     /// 帶值。event_consumer sweep 依此判斷何時以 orderLinkId 取消掛單。
     pub maker_timeout_ms: Option<u64>,
+    /// Dispatch-time execution reference for slippage attribution. For taker
+    /// orders this should be same-side BBO; fallback sources are tagged.
+    /// slippage 歸因用的送單時刻參考價；taker 優先同側 BBO。
+    pub reference_price: Option<f64>,
+    pub reference_ts_ms: Option<u64>,
+    pub reference_source: Option<String>,
 }
 
 /// Tick context passed to strategies — borrows from on_tick scope to avoid cloning.

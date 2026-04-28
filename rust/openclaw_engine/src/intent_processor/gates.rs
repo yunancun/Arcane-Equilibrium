@@ -19,11 +19,10 @@ impl IntentProcessor {
         _conf: f64,
         _qty: f64,
         _price: f64,
-        volume_24h: f64,
+        fee_rate: f64,
+        slippage: f64,
     ) -> Option<IntentResult> {
-        let fee_rate = self.fee_rate(symbol);
         let slippage_cfg = &self.risk_config.slippage;
-        let slippage = lookup_slippage(slippage_cfg, volume_24h);
         // Round-trip cost in bps: (fee + slippage) × 2 legs × 10000
         // 來回成本 bps：(手續費 + 滑點) × 2 腿 × 10000
         let fee_bps = 2.0 * (fee_rate + slippage) * 10_000.0;
@@ -105,6 +104,7 @@ impl IntentProcessor {
     /// 策略無法累積 fills 逃脫負 edge 桶。統計穩健（n ≥ min_n）保持原行為：
     /// 正 → 門檻檢查；負 → 阻擋；冷啟動（無格子） → 放行並警告。Live 路徑仍嚴格
     /// （CLAUDE.md §四 operator 政策：demo 放寬 / live 收緊）。
+    #[cfg(test)]
     pub(super) fn cost_gate_moderate(
         &self,
         strategy: &str,
@@ -112,8 +112,18 @@ impl IntentProcessor {
         fee_rate: f64,
         volume_24h: f64,
     ) -> Option<ExchangeGateResult> {
+        let slippage = lookup_slippage(&self.risk_config.slippage, volume_24h);
+        self.cost_gate_moderate_with_slippage(strategy, symbol, fee_rate, slippage)
+    }
+
+    pub(super) fn cost_gate_moderate_with_slippage(
+        &self,
+        strategy: &str,
+        symbol: &str,
+        fee_rate: f64,
+        slippage: f64,
+    ) -> Option<ExchangeGateResult> {
         let slippage_cfg = &self.risk_config.slippage;
-        let slippage = lookup_slippage(slippage_cfg, volume_24h);
         let fee_bps = 2.0 * (fee_rate + slippage) * 10_000.0;
         let min_n = slippage_cfg.cost_gate_min_n_trades_for_block;
         match self.edge_estimates.get_cell(strategy, symbol) {
@@ -178,6 +188,7 @@ impl IntentProcessor {
     /// Returns Some(rejected) on block, None on pass.
     /// PH5-WIRE-1：Live 模式成本門——嚴格要求正 JS 估計。
     /// 負/無估計 → 失敗關閉（根原則 #5：生存 > 利潤）。
+    #[cfg(test)]
     pub(super) fn cost_gate_live(
         &self,
         strategy: &str,
@@ -185,8 +196,18 @@ impl IntentProcessor {
         fee_rate: f64,
         volume_24h: f64,
     ) -> Option<ExchangeGateResult> {
+        let slippage = lookup_slippage(&self.risk_config.slippage, volume_24h);
+        self.cost_gate_live_with_slippage(strategy, symbol, fee_rate, slippage)
+    }
+
+    pub(super) fn cost_gate_live_with_slippage(
+        &self,
+        strategy: &str,
+        symbol: &str,
+        fee_rate: f64,
+        slippage: f64,
+    ) -> Option<ExchangeGateResult> {
         let slippage_cfg = &self.risk_config.slippage;
-        let slippage = lookup_slippage(slippage_cfg, volume_24h);
         // Round-trip cost in bps including slippage
         // 包含滑點的來回成本 bps
         let fee_bps = 2.0 * (fee_rate + slippage) * 10_000.0;

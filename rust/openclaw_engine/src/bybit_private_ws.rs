@@ -151,6 +151,9 @@ pub struct ExecutionUpdate {
     /// Parent order ID / 所屬訂單 ID
     #[serde(default)]
     pub order_id: String,
+    /// Client-side order link ID / 客戶端訂單連結 ID
+    #[serde(default)]
+    pub order_link_id: String,
     /// Trading symbol / 交易對
     #[serde(default)]
     pub symbol: String,
@@ -163,6 +166,15 @@ pub struct ExecutionUpdate {
     /// Execution quantity / 成交數量
     #[serde(default)]
     pub exec_qty: String,
+    /// Parent order price / 父訂單價格
+    #[serde(default)]
+    pub order_price: String,
+    /// Parent order quantity / 父訂單數量
+    #[serde(default)]
+    pub order_qty: String,
+    /// Parent order type: "Market", "Limit" / 父訂單類型
+    #[serde(default)]
+    pub order_type: String,
     /// Execution fee / 成交手續費
     #[serde(default)]
     pub exec_fee: String,
@@ -181,9 +193,18 @@ pub struct ExecutionUpdate {
     /// Execution type: "Trade", "Funding" / 成交類型
     #[serde(default)]
     pub exec_type: String,
+    /// Profit and loss for this close execution / 此平倉成交盈虧
+    #[serde(default)]
+    pub exec_pnl: String,
     /// Execution timestamp / 成交時間戳
     #[serde(default)]
     pub exec_time: String,
+    /// Whether this execution was maker liquidity / 是否為 maker 成交
+    #[serde(default)]
+    pub is_maker: bool,
+    /// Cross sequence / 交叉序列號
+    #[serde(default)]
+    pub seq: i64,
     /// Raw execution payload for fields Bybit adds before this parser is updated.
     /// 原始 execution payload，用於保留 Bybit 新增但 parser 尚未顯式建模的欄位。
     #[serde(
@@ -456,10 +477,12 @@ impl BybitPrivateWs {
                                             // auth 階段（前面）保留原路徑，避免剛建立的連線在
                                             // 完成認證前就被強制重連。
                                             match self.parse_message_with_guard(&text) {
-                                                PrivateMsgOutcome::Event(event) => {
-                                                    if self.event_tx.send(event).await.is_err() {
-                                                        warn!("Event channel closed / 事件通道已關閉");
-                                                        return;
+                                                PrivateMsgOutcome::Events(events) => {
+                                                    for event in events {
+                                                        if self.event_tx.send(event).await.is_err() {
+                                                            warn!("Event channel closed / 事件通道已關閉");
+                                                            return;
+                                                        }
                                                     }
                                                 }
                                                 PrivateMsgOutcome::Skip => {}
@@ -583,9 +606,9 @@ impl BybitPrivateWs {
     ///     `ForceReconnect`。穩態下每訊息 <50µs 額外開銷（訊息已 parse；
     ///     僅輕量 JSON 再檢查）。
     fn parse_message_with_guard(&self, text: &str) -> PrivateMsgOutcome {
-        let event_opt = parse_private_message(text);
-        if let Some(event) = event_opt {
-            return PrivateMsgOutcome::Event(event);
+        let event_opt = parse_private_messages(text);
+        if let Some(events) = event_opt {
+            return PrivateMsgOutcome::Events(events);
         }
         // event_opt is None: either control message (pong/subscribe) OR unknown topic.
         // Distinguish via re-inspect; cheap because we already discarded the parse.
@@ -644,8 +667,8 @@ impl BybitPrivateWs {
 ///     已 parse 的事件待轉發；ForceReconnect = G9-02 未知 handler 觸發。
 #[derive(Debug)]
 enum PrivateMsgOutcome {
-    /// Forward this event to the consumer / 將此事件轉發給消費者
-    Event(PrivateWsEvent),
+    /// Forward these events to the consumer / 將這些事件轉發給消費者
+    Events(Vec<PrivateWsEvent>),
     /// Control message or no-op / 控制訊息或無動作
     Skip,
     /// G9-02: break inner loop and reconnect / G9-02：break 內層迴圈並重連
@@ -657,9 +680,15 @@ enum PrivateMsgOutcome {
 // 獨立消息解析器（無需 WS 連接即可測試）
 // ---------------------------------------------------------------------------
 
-/// Parse a Bybit private WS message into a PrivateWsEvent.
-/// 將 Bybit 私有 WS 消息解析為 PrivateWsEvent。
+/// Parse a Bybit private WS message into the first PrivateWsEvent.
+/// 將 Bybit 私有 WS 消息解析為第一個 PrivateWsEvent。
 fn parse_private_message(text: &str) -> Option<PrivateWsEvent> {
+    parse_private_messages(text).and_then(|events| events.into_iter().next())
+}
+
+/// Parse a Bybit private WS message into all contained events.
+/// 將 Bybit 私有 WS 消息解析為其中全部事件。
+fn parse_private_messages(text: &str) -> Option<Vec<PrivateWsEvent>> {
     let parsed: serde_json::Value = serde_json::from_str(text).ok()?;
 
     // Auth response: {"op":"auth","success":true,"ret_msg":""}
@@ -671,14 +700,14 @@ fn parse_private_message(text: &str) -> Option<PrivateWsEvent> {
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false);
             if success {
-                return Some(PrivateWsEvent::AuthSuccess);
+                return Some(vec![PrivateWsEvent::AuthSuccess]);
             } else {
                 let msg = parsed
                     .get("ret_msg")
                     .and_then(|v| v.as_str())
                     .unwrap_or("unknown error")
                     .to_string();
-                return Some(PrivateWsEvent::AuthFailed(msg));
+                return Some(vec![PrivateWsEvent::AuthFailed(msg)]);
             }
         }
         // Pong: skip silently / Pong: 靜默跳過
@@ -722,40 +751,58 @@ fn parse_private_message(text: &str) -> Option<PrivateWsEvent> {
 
     match topic {
         "order" => {
-            // Parse first item (Bybit sends array, usually 1 element)
-            // 解析第一個項目（Bybit 發送陣列，通常 1 個元素）
+            let mut events = Vec::new();
             for item in data {
                 if let Ok(update) = serde_json::from_value::<OrderUpdate>(item.clone()) {
-                    return Some(PrivateWsEvent::Order(update));
+                    events.push(PrivateWsEvent::Order(update));
                 }
             }
-            None
+            if events.is_empty() {
+                None
+            } else {
+                Some(events)
+            }
         }
         "execution" => {
+            let mut events = Vec::new();
             for item in data {
                 if let Some(update) = parse_execution_update(item) {
-                    return Some(PrivateWsEvent::Execution(update));
+                    events.push(PrivateWsEvent::Execution(update));
                 }
             }
-            None
+            if events.is_empty() {
+                None
+            } else {
+                Some(events)
+            }
         }
         "position" => {
+            let mut events = Vec::new();
             for item in data {
                 if let Ok(update) = serde_json::from_value::<PositionUpdate>(item.clone()) {
-                    return Some(PrivateWsEvent::Position(update));
+                    events.push(PrivateWsEvent::Position(update));
                 }
             }
-            None
+            if events.is_empty() {
+                None
+            } else {
+                Some(events)
+            }
         }
         "wallet" => {
             // Wallet has nested structure: data[0].coin = [...]
             // 錢包有嵌套結構
+            let mut events = Vec::new();
             for item in data {
                 if let Ok(update) = serde_json::from_value::<WalletUpdate>(item.clone()) {
-                    return Some(PrivateWsEvent::Wallet(update));
+                    events.push(PrivateWsEvent::Wallet(update));
                 }
             }
-            None
+            if events.is_empty() {
+                None
+            } else {
+                Some(events)
+            }
         }
         "execution.fast" => {
             // Same payload as `execution` but lower latency (~50ms vs ~300ms).
@@ -764,19 +811,24 @@ fn parse_private_message(text: &str) -> Option<PrivateWsEvent> {
             // 與 execution 相同 payload 但延遲更低（~50ms vs ~300ms）。
             // V5 execution.fast 欄位較少（無 execFee/execValue/feeRate），
             // ExecutionUpdate 用 serde default，缺失欄位解析為空字串。
+            let mut events = Vec::new();
             for item in data {
                 if let Some(update) = parse_execution_update(item) {
-                    return Some(PrivateWsEvent::Execution(update));
+                    events.push(PrivateWsEvent::Execution(update));
                 }
             }
-            None
+            if events.is_empty() {
+                None
+            } else {
+                Some(events)
+            }
         }
         "dcp" => {
             // DCP triggered: Bybit auto-cancelled orders due to prior disconnect.
             // NOT a connection loss — the current WS is alive; orders were cancelled.
             // DCP 觸發：Bybit 因之前的斷連自動取消了訂單。不是連接斷開。
             info!("DCP triggered — orders may have been cancelled / DCP 觸發 — 訂單可能已被取消");
-            Some(PrivateWsEvent::DcpTriggered)
+            Some(vec![PrivateWsEvent::DcpTriggered])
         }
         _ => {
             debug!(topic = topic, "Unhandled private topic / 未處理的私有主題");
@@ -961,6 +1013,46 @@ mod tests {
                 assert_eq!(exec.raw["execValue"], "1750.25");
             }
             _ => panic!("Expected Execution event"),
+        }
+    }
+
+    #[test]
+    fn test_parse_execution_message_preserves_multiple_fills() {
+        let msg = r#"{
+            "topic": "execution",
+            "data": [
+                {
+                    "execId": "exec-001",
+                    "orderId": "order-1",
+                    "symbol": "ETHUSDT",
+                    "side": "Sell",
+                    "execPrice": "3500.50",
+                    "execQty": "0.2",
+                    "execType": "Trade",
+                    "execTime": "1700000001000"
+                },
+                {
+                    "execId": "exec-002",
+                    "orderId": "order-1",
+                    "symbol": "ETHUSDT",
+                    "side": "Sell",
+                    "execPrice": "3500.25",
+                    "execQty": "0.3",
+                    "execType": "Trade",
+                    "execTime": "1700000001001"
+                }
+            ]
+        }"#;
+        let events = parse_private_messages(msg).unwrap();
+        assert_eq!(events.len(), 2);
+        match (&events[0], &events[1]) {
+            (PrivateWsEvent::Execution(first), PrivateWsEvent::Execution(second)) => {
+                assert_eq!(first.exec_id, "exec-001");
+                assert_eq!(first.exec_qty, "0.2");
+                assert_eq!(second.exec_id, "exec-002");
+                assert_eq!(second.exec_qty, "0.3");
+            }
+            _ => panic!("Expected two Execution events"),
         }
     }
 

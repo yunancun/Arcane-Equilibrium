@@ -19,7 +19,10 @@ use std::path::Path;
 #[derive(Debug, Clone)]
 pub struct CellEstimate {
     /// James-Stein shrunk realized edge in basis points.
-    /// James-Stein 收縮實現邊際（bps）。
+    /// Runtime edge in basis points. This prefers JSON `runtime_bps`, which
+    /// zeros unvalidated positive edge, and falls back to legacy `shrunk_bps`.
+    /// 運行時邊際（bps）。優先讀 JSON `runtime_bps`（未驗證正 edge 歸零），
+    /// 舊格式則回退到 `shrunk_bps`。
     pub shrunk_bps: f64,
     /// Win rate (shrunk or raw), clamped to [0, 1]. Default 0.5.
     /// 勝率（收縮或原始），限制在 [0, 1]。默認 0.5。
@@ -30,6 +33,12 @@ pub struct CellEstimate {
     /// Standard deviation of realized edge in bps. 0 if unavailable.
     /// 實現邊際標準差（bps）。不可用時為 0。
     pub std_bps: f64,
+    /// Whether the producing estimator marked this cell as validated.
+    /// 產生端 estimator 是否標記此格通過驗證。
+    pub validation_passed: bool,
+    /// Human-readable validation rejection/pass reason.
+    /// 驗證通過/拒絕原因。
+    pub validation_reason: String,
 }
 
 /// Shrunk realized-edge estimates per (strategy, symbol) cell.
@@ -79,7 +88,11 @@ impl EdgeEstimates {
             if key.starts_with('_') {
                 continue;
             }
-            if let Some(bps) = val.get("shrunk_bps").and_then(|v| v.as_f64()) {
+            if let Some(bps) = val
+                .get("runtime_bps")
+                .or_else(|| val.get("shrunk_bps"))
+                .and_then(|v| v.as_f64())
+            {
                 let win_rate = val
                     .get("win_rate_shrunk")
                     .or_else(|| val.get("win_rate"))
@@ -88,6 +101,15 @@ impl EdgeEstimates {
                     .clamp(0.0, 1.0);
                 let n_trades = val.get("n").and_then(|v| v.as_u64()).unwrap_or(0);
                 let std_bps = val.get("std_bps").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                let validation_passed = val
+                    .get("validation_passed")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
+                let validation_reason = val
+                    .get("validation_reason")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
                 data.insert(
                     key.clone(),
                     CellEstimate {
@@ -95,6 +117,8 @@ impl EdgeEstimates {
                         win_rate,
                         n_trades,
                         std_bps,
+                        validation_passed,
+                        validation_reason,
                     },
                 );
             }
@@ -135,7 +159,11 @@ impl EdgeEstimates {
             if key.starts_with('_') {
                 continue;
             }
-            if let Some(bps) = val.get("shrunk_bps").and_then(|v| v.as_f64()) {
+            if let Some(bps) = val
+                .get("runtime_bps")
+                .or_else(|| val.get("shrunk_bps"))
+                .and_then(|v| v.as_f64())
+            {
                 let win_rate = val
                     .get("win_rate_shrunk")
                     .or_else(|| val.get("win_rate"))
@@ -144,6 +172,15 @@ impl EdgeEstimates {
                     .clamp(0.0, 1.0);
                 let n_trades = val.get("n").and_then(|v| v.as_u64()).unwrap_or(0);
                 let std_bps = val.get("std_bps").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                let validation_passed = val
+                    .get("validation_passed")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
+                let validation_reason = val
+                    .get("validation_reason")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
                 data.insert(
                     key.clone(),
                     CellEstimate {
@@ -151,6 +188,8 @@ impl EdgeEstimates {
                         win_rate,
                         n_trades,
                         std_bps,
+                        validation_passed,
+                        validation_reason,
                     },
                 );
             }
@@ -361,6 +400,24 @@ mod tests {
         let json = r#"{"strat::SYM": {"win_rate": 0.6, "n": 10}}"#;
         let e = EdgeEstimates::load_from_str(json).unwrap();
         assert_eq!(e.n_cells(), 0); // no shrunk_bps → not inserted
+    }
+
+    #[test]
+    fn test_runtime_bps_overrides_positive_shrunk_bps() {
+        let json = r#"{
+            "strat::SYM": {
+                "shrunk_bps": 12.0,
+                "runtime_bps": 0.0,
+                "validation_passed": false,
+                "validation_reason": "insufficient_oos_samples",
+                "n": 3
+            }
+        }"#;
+        let e = EdgeEstimates::load_from_str(json).unwrap();
+        let cell = e.get_cell("strat", "SYM").unwrap();
+        assert!((cell.shrunk_bps - 0.0).abs() < 1e-10);
+        assert!(!cell.validation_passed);
+        assert_eq!(cell.validation_reason, "insufficient_oos_samples");
     }
 
     #[test]
