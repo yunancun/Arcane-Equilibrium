@@ -1344,3 +1344,158 @@ h_state_query_handler.py 772 → 785（仍 < 800）。
 
 **報告**：`docs/CCAgentWorkSpace/E1/workspace/reports/2026-04-27--g3_08_fup_maf_split_impl.md`
 **待**：E2 review（重點：PEP 562 解法是否認可 / 雙語 docstring drift / 行為不變）→ E4 regression → PM Sign-off + push
+
+---
+
+## 2026-04-28 — G8-01 W2 CognitiveModulator unit cov 22-case suite (Mac, worktree `agent-af6ccceae93986103`)
+
+**任務**：PA RFC §3.2 22-case unit coverage suite，目標 ≥85% line cov on `program_code/local_model_tools/cognitive_modulator.py`，零 production diff，純測試。
+
+**結果**：
+- 新增 `test_cognitive_modulator_coverage.py`（396 LOC，22 case → 26 collected items；case 20 / 22 拆 sub-test）
+- **100% line cov**（86 / 86 stmts）— 上回 85% 目標 15-point
+- 40 / 40 combined regression（W1 6 + LOSSES 8 + W2 26）pass in 0.06s on Mac darwin / Python 3.12.13
+- 零 production diff（`git status` 只有新測試 + `.coverage` data file）
+
+**關鍵設計**：
+- regret/dream branches **未用** `# pragma: no cover` 或 `omit` exclusion — 這些 branches 雖 production caller 永遠傳 `{}`（producer `OpportunityTracker` / `DreamEngine` RC-11 dead concept），但 `update(...)` API 本身仍開放這些 kwargs，unit test 視為「API 契約測試」直呼即可達 100% cov
+- 不修 production 也不加 pragma 的好處：未來若 RFC Option B 重實作 producer，這 22 case 自動成為 regression baseline 不需改
+- 零 mock 策略：CognitiveModulator pure-Python no IO no IPC no thread → 真實 instance 直呼最乾淨
+- 雙語 MODULE_NOTE + 22 個 class-level docstring 中英對照齊備（per `bilingual-comment-style`）
+
+**驗收**：
+- Mac cov 100% — Linux 端待 E4 確認（純 Python 預期 platform-identical）
+- W1 / LOSSES 既有測試 0 regression
+- 報告 `docs/CCAgentWorkSpace/E1/workspace/reports/2026-04-28--g8_01_w2_cov_impl.md`
+
+**待**：E2 review → E4 Linux 雙端綠 → 主會話 commit + push（W3 留給 E1-Gamma 並行任務）
+
+**教訓**：
+- pytest --cov 必用 dotted module path（`program_code.local_model_tools.cognitive_modulator`），不是 file path（`program_code/local_model_tools/cognitive_modulator`）— 後者觸發 `module-not-imported` warning + 0 data collected
+- 任務 brief 描述 exclusion 機制時，先確認 production code 是否真需要修；許多「測 dead branch」的需求其實能透過直呼 public API 達成，不需任何 exclusion config
+- Mac venv `mac_dev` 預設無 `coverage` / `pytest-cov`，跑 cov 前需 `pip install`（不入 requirements 屬 dev-only）
+
+---
+
+## 2026-04-28 — G8-01 W3 StrategistAgent integration ≥5 case 完成
+
+**任務**：依 PA RFC §3.3 落地 StrategistAgent × CognitiveModulator 整合測試 7 scenario / 8 test method。範圍限制：只走 production live 路徑（consecutive_losses + h_state envelope），**不**用 regret/dream（dead per `cf34e96`）；純 integration，不寫 W2 ≥85% cov 套件；0 production diff。
+
+**worktree HEAD**：`571da6a`（base `cf34e96`）
+**新檔**：`program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_strategist_cognitive_integration.py` (+623 行)
+**Mac pytest**：8/8 (新檔) + 167/167 regression (W1 fix + strategist + h_state suites) — **0 regression**
+
+**7 scenario**：(1) threshold adapt → reweight rejection (2) scan_interval EMA drift+recovery (3) modulator raise fail-soft (2 sub-case：get_all_params + tick.update) (4) H5 -500 → floor up + ceiling down (5) envelope round-trip (env=1) (6) LOSSES streak end-to-end (7) full happy-path 5 步串接
+
+**關鍵教訓**：
+1. **agent worktree 中執行 Write 時，絕對路徑要指向 worktree root，不要指 `/Users/ncyu/Projects/TradeBot/srv/...`** — 後者會寫入主 srv tree 而非 worktree。發生於本任務初寫，後 `mv` 修。下次先 `pwd` 確認 cwd 後再用相對路徑或 worktree 絕對路徑。
+2. **Mac dev 無 fastapi → real `app.strategy_wiring` lazy import 會 ModuleNotFoundError 炸 envelope test**。原 PA RFC §3.3 推薦 `monkeypatch agent._cognitive_modulator`，實際解法：**sys.modules stub-then-restore** `app.strategy_wiring`（小 shim 只暴露 `STRATEGIST_AGENT` attr），既不污染 cross-test singleton，又 Mac+Linux 雙端通用（Linux 有 fastapi 也走相同 stub 不副作用）。寫法見報告 §5.1。
+3. **EMA 斷言用單調而非絕對值** — α=0.3 漸近收斂，`assertGreater(after, before)` 比 `assertAlmostEqual(after, target, places=2)` 穩，避免日後 `_EMA_ALPHA` 微調連帶 break test。
+4. **W3 task spec scope 解讀**：派單明列 7 scenario（含 case #6 re-injection / #7 disabled mode parity），但兩者已在 W1 sanity test 覆蓋；本檔換成 LOSSES + happy-path 串接更貼合「W1 + LOSSES 整合」task 文字。E2 看到別誤判 spec drift。
+5. **`StrategistConfig.shadow=True` + `OllamaClient=None` 為最小 hot-path 配置**：避免 MessageBus / ExecutorAgent 接線複雜度，又能跑 `_handle_intel` 編排 + heuristic evaluation + cognitive modulation 全鏈。
+
+**待**：E2 grep + 對抗審查 → E4 Linux 雙端 175/175 → PM 統一 commit + push（worktree commit 不會自動進 main）。
+
+---
+
+## 2026-04-28 G3-09 Phase B Wave 1 — cost_edge_advisor INSERT path + IPC schema + V026 + healthcheck upgrade
+
+**背景**：PA RFC `2026-04-27--g3_09_phase_b_shadow_dryrun_design.md` Phase B Wave 1 派發；Phase A 已 land（`00682ef`），sticky FUP 已 land（base HEAD `cf34e96`）。任務 = INSERT path + 4 IPC fields + V026 hypertable + healthcheck [30] upgrade + observation tooling。
+
+**5 大 deliverable 落地**：
+1. `sql/migrations/V026__cost_edge_advisor_log.sql` (243 LOC) — Guard A + Guard B + create_hypertable + 30d retention + 3 indexes（per RFC §2.4）
+2. `sql/migrations/tests/test_v026_guards.sql` (306 LOC) — 6 fixture cases（pass/fail/no-op × Guard A/B + idempotency proxy）
+3. Rust types.rs (+79 LOC) — 4 新 fields `evaluations_24h / triggers_24h / last_trigger_ms / dryrun_observation_window_ms` 全 `#[serde(default)]` forward-compat
+4. Rust mod.rs (+343 LOC) — `EvalCounters` rolling 24h struct + `CostEdgeAdvisorLogRow::build` pure fn + `insert_advisor_log_row` fire-and-forget + 新 entrypoint `spawn_cost_edge_advisor_with_persistence` + 原 5-arg `spawn_cost_edge_advisor` 變 backward-compat shim
+5. Python healthcheck [30] upgrade（+163 LOC）+ observation report tool（511 LOC）
+
+**關鍵設計決策**：
+1. **Backward-compat shim 保留 5-arg `spawn_cost_edge_advisor`** — 11 個 daemon 整合測試零修改通過（11/0 不變）；新 7-arg `spawn_cost_edge_advisor_with_persistence` 是 Phase B 落地版本，main_boot_tasks.rs 切過去
+2. **DbPool late-injection slot pattern**（鏡射 G3-08 HStateCacheSlot）：spawn_cost_edge_advisor_if_enabled 在 main.rs L510 被呼叫，但 db_pool 在 L612 才建；新增 `CostEdgeAdvisorDbSlot = Arc<RwLock<Option<Arc<DbPool>>>>` 預建後 late-inject。Daemon 內 30s poll 上限，超時則無 persistence 仍 spawn（counter 仍 in-memory tick）
+3. **EvalCounters trim 必 loop 至 empty/cutoff**（per RFC §12.3 #3 嚴審）— `while front.is_some_and(|&ts| ts < cutoff) pop_front`；非單次 pop（cycle 間隙會堆積多筆）。寫了 unit test `eval_counters_trim_drops_entries_older_than_24h` 鎖死
+4. **Phase B 寫 `phase: "B_shadow"` 而非 RFC 的字串連續性註解** — IPC handler / daemon log / 預設 IPC stub 全切 `B_shadow`，Phase A consumer 透過 `#[serde(default)]` 不會 panic
+5. **healthcheck [30] cur 參數為 Optional**：`check_cost_edge_advisor_status(cur=None)` — 無 cur 時行為等於 Phase A（Inv 1+2 only），有 cur 時加 Inv 3+4。Runner 移到 cursor block 內傳 cur，向後兼容 Mac dev 環境
+6. **engine_mode hardcode "demo"** — RFC §6.1 R-B9 規定 advisor 在 spawn 時 bind 不變；advisor 走 `risk_stores.demo` 故 engine_mode 自然是 "demo"
+7. **down-sample boundary**：transition row 永遠 INSERT，cycle row 至少 60s 間距；`should_insert = is_transition || (now - last_insert >= 60_000)`
+8. **integration test 走 OPENCLAW_TEST_PG 模式**（鏡射 migrations_test.rs）：env 未設則跳過，CI 無 PG 仍綠；env 有則建/沿用 V026 表（不呼叫 create_hypertable，純表 INSERT 驗證即可）
+
+**驗收結果**：
+- cargo lib **2299 / 0 failed**（baseline 2290 + 4 EvalCounters test + 4 LogRow build test + 1 const test = 9 新）
+- cargo --test test_cost_edge_advisor_daemon **11 / 0 不變**（backward-compat shim 保住）
+- cargo --test test_cost_edge_advisor_persistence **2 通過**（OPENCLAW_TEST_PG 未設自動跳過）
+- Mac Python 3.10 healthcheck 環境 env=0 PASS-skip 驗證通過；env=1 因 tomllib < 3.11 走 WARN（pure-Python 預期行為）
+- observation report tool render_markdown pure fn smoke 通過
+
+**新 singleton / type 登記建議 (PM 入 §九 表)**：
+- `CostEdgeAdvisorDbSlot` (rust/openclaw_engine/src/main_boot_tasks.rs) - late-inject DbPool slot；spawn_cost_edge_advisor_if_enabled 受影響 main.rs L510 預建 + L612 後 write
+
+**Phase B 後續 Wave**（不在本 E1 範圍）：E2 review → E4 Linux regression → PM 部署 → 觀察期 ≥48h Tier 1 早期信號 → ≥7d Tier 2 完整 acceptance → PA deliverable → PM Phase C GO/NO-GO
+
+**關鍵教訓**：
+1. **base HEAD `cf34e96` 已含 sticky FUP** — task spec 寫「commits af66ac1 + 9303a3b sticky + 22c57dc spawn-test」其實在 base 之前；不需要再實作 sticky，可直接 INSERT path
+2. **DbPool slot pattern 非 hardcoded reorder**：原本想把 spawn_cost_edge_advisor_if_enabled 從 L510 移到 db_pool 之後，但牽動 ipc_server slot ordering 風險高；slot late-inject 是更乾淨的解（已在 G3-08 H State Gateway 證明 pattern）
+3. **cursor block 內 [30] 移位**：原 Phase A check 在 conn.close 之後（filesystem only）；Phase B 加 DB query 必須移入 cursor block。runner.py 兩處改：cursor 內加 `check_cost_edge_advisor_status(cur)`，cursor 外刪原 call、加註解指向新位置
+4. **DatabaseConfig 不在 config 模組** — 在 `openclaw_engine::database::DatabaseConfig`；初稿 `use openclaw_engine::config::DatabaseConfig` 編譯失敗；fix `use openclaw_engine::database::DatabaseConfig`
+
+**待**：E2 grep + 對抗審查（重點：daemon INSERT 不阻 evaluate / down-sample boundary 嚴格 / counter 24h trim 不漏 leak）→ E4 Linux 雙端 2299/2299 + 11/11 daemon test + V026 idempotency `psql -f V026 -f V026` 雙跑無 RAISE → PM 統一 commit + push + Linux deploy
+
+---
+
+## 2026-04-28 · G8-01 W3 Integration · E2 RETURN fix（H-1 + M-1 + L-1）
+
+**任務**：修 E2 review (`571da6a` worktree-agent-a4d9d240343d85fff base) RETURN 的 1 HIGH + 1 MED + 1 LOW；report `srv/.claude/worktrees/agent-a4d9d240343d85fff/docs/CCAgentWorkSpace/E1/workspace/reports/2026-04-28--g8_01_w3_integration_e2_return_fix.md`
+
+**核心教訓 — Python `from PKG import SUB` 的 sys.modules 陷阱**（值得跨 session 記）：
+
+`from PKG import SUB` semantic 不是 `sys.modules["PKG.SUB"]` lookup，而是：
+1. 確保 `PKG` 已載入
+2. `getattr(PKG, "SUB")` — 第一次 import 子模組時 CPython 會把 SUB 模組綁到 PKG namespace 為屬性
+3. 若 step 2 AttributeError → fallback `import PKG.SUB` then `getattr(PKG, "SUB")`
+
+**陷阱**：寫 test 想 stub `app.strategy_wiring`，只覆蓋 `sys.modules["app.strategy_wiring"] = stub` **無效**——只要任何 sibling test（同 session 字典序更早）已 import 過 `app.strategy_wiring`，`app` package namespace 上的 `strategy_wiring` 屬性已綁實 module；後續 `getattr(app, "strategy_wiring")` 一律回實 module，不查 sys.modules。
+
+**正確修法**（dual patch + finally 反序還原）：
+```python
+import app
+sys.modules["app.strategy_wiring"] = sw_stub
+app.strategy_wiring = sw_stub          # ← 關鍵
+try:
+    ...
+finally:
+    # 反序還原 + 處理 "原本沒綁過" 的 case
+    if attr_was_present:
+        app.strategy_wiring = original_attr
+    else:
+        delattr(app, "strategy_wiring")  # 否則殘留汙染下一個 test
+    if mod_was_in_modules is None:
+        sys.modules.pop(...)
+    else:
+        sys.modules[...] = original_mod
+```
+
+**Heisenbug 特徵**：隔離跑 PASS（首次 import 走 sys.modules path），同 session 跑 sibling test 後 FAIL。Linux full regression（test 字典序）穩定觸發；Mac 隔離跑 false signal。
+
+**防 false-positive assertion**：原測試 `assertGreaterEqual(intel_received, 3)` 在 stub 失效時讀到 production singleton 仍可能 ≥3 而綠燈。改 strict `assertEqual(intel_received, 3)` + 唯一性註解 — production singleton 不會剛好 3。
+
+**M-1 教訓 — magic number divisibility 假設脆性**：W1 commit `aca7ee3` 用 `_COGNITIVE_TICK_INTERVAL=10` magic number 觸發 tick；測試寫「投 N 個 intel → 必觸 ≥1 tick」會在 N 改動（0/None/非除數）時 silent 0-fire 而 fail with wrong reason。fix = 顯式 `tick_cognitive_modulator(agent)` 呼叫主 assertion，保留隱式 hot-path 為 sub-case（不斷言 count）。
+
+**驗收**：隔離 8/8 + 同 session 51/51（E2 揭關鍵 KPI）+ W1+LOSSES 14/14 + Strategist 50/50 + 全 6 檔 115/115 PASS。0 production diff。
+
+---
+
+## 2026-04-28 · G3-09 Phase B Wave 1 E2 Return Fix（worktree-agent-a9002481353677810）
+
+**3 mandatory fix（全完成）**：
+1. **HIGH-1**：`checks_derived.py` 1304 → 990（≤ 1200 hard cap）。`check_cost_edge_advisor_status` (~321 行含 banner) 抽至新 sibling `checks_cost_edge.py` (370 行 ≤ 800)。pattern = 既有 checks_engine/strategy/ipc_edge 拆分。`check_h_state_gateway_freshness` **不一起搬**（per E2 spec "E1 自決，建議只搬一條 avoid scope"）。
+2. **MED-1**：CLAUDE.md §九 singleton 表加 `CostEdgeAdvisorDbSlot` row（鏡 `HStateCacheSlot` 模式）— Rust `Arc<tokio::sync::RwLock<Option<Arc<DbPool>>>>` late-injected slot；30s populate-timeout；slot=None → fallback in-memory；engine restart 自動清。
+3. **LOW-2 (選 A)**：runner.py DB connect fail 路徑由「直接 return 2」改為「先 `check_cost_edge_advisor_status(cur=None)` fallback、印結果再 return 2」。理由：env=1 sentinel 在 DB-down 時仍生效 = §二 原則 #6 失敗默認收縮 + 原則 #8 可審計。
+
+**驗收**：cargo lib **2299/0**（baseline 不變）· cargo daemon test_cost_edge_advisor_daemon **11/0**（baseline 不變）· pytest helper_scripts/db **45 passed / 8 baseline failed**（git stash 驗證 8 fails 為既有 pre-existing TestSignalsWriterFreshness + TestIntentsCounterFreeze，與 cost_edge 無關）· smoke import OK · env=0 + DB-down → `[30] PASS-skip via fallback` 直觀驗 LOW-2 工作。
+
+**教訓**：
+- **sibling 拆分時 import path 同步**：拆 `check_cost_edge_advisor_status` 必同步改 `__init__.py` + `runner.py` 兩處 import；漏一處會 ImportError 連動所有測試掛。
+- **DB-down 自我隔離 sentinel 設計**：原 Phase A 「filesystem-only outside cursor」設計即使 DB connect 失敗仍能跑，是 anti-fragile；Phase B 為加 DB freshness Inv 3+4 把整個 check 移入 cursor 反而把 env-gate sentinel 也綁到 DB 上 — 修法不是擋 Phase B Inv 3+4，而是在 DB-fail 路徑加 explicit fallback 讓 sentinel 兩條路都跑。
+- **跨 Python 版本相容**：本機 Python 3.10 無 `tomllib` → env=1 fallback 直接 WARN (`tomllib unavailable`)；fn 內已有 `try: import tomllib except ImportError: return WARN` 兜底，跨平台行為一致。
+- **scope 紀律**：E2 推薦 `check_h_state_gateway_freshness` 也搬 — 拒。spec 明確「E1 自決，建議只搬一條」+ 既有檔已 < 1200 行就達標，多搬一條反而擴大 PR 表面積增加 review 風險。
+
+**驗收結果摘要**：3/3 mandatory PASS · 0 production logic diff（純 doc + 純 sibling 重構 + 1 fail-soft fallback）· cargo + pytest + smoke 全綠（pytest 8 baseline fail 為既有，與本 PR 無關）。

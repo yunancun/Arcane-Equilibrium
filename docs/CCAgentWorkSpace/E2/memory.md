@@ -62,6 +62,7 @@
 | 2026-04-27 | Live Auth Renew 移至 Governance Hub (97bab9a) — APPROVE_WITH_NITS · 1 MEDIUM（ocEsc+textContent 雙重 escape pre-existing）+ 1 MEDIUM（tab-live.html 1598 行 pre-existing）+ 1 LOW（try/catch dead code）+ 1 ⚠️ 809 行警告 | inline final message |
 | 2026-04-27 | G3-08 Phase 4 Wave II batch 4-2/3/4/5 batch review (e1157ae/b8951ab/d99a0da/eee0f7b) — 4 PASS_WITH_NITS · sequential merge confirmed conflict（h_state_query_handler.py + test_h_state_query_handler.py 同位置 textual conflict，純機械 3-way 解；無語意衝突）· framework signature 4 commits 完全一致（5-key skeleton 不變）· schema parity Rust HashMap<String,i64> 全綠（int + bool→int + len cast）· 1 MEDIUM（4-5 multi_agent_framework.py 1190/1200 hard cap edge，FUP-MAF-SPLIT 必先 file 才能再動該檔）· 1 LOW（4-3 analyst empty-payload 早 return 後 invalidate 仍 fire — harmless no-op when env=0）· 1 LOW（4-4 executor dedup/error 早 return bumps 觀察計數但 skip invalidate；10s 排程 poll 兜底，RFC 設計範圍內）· 4-4 Edit/Write silent-fail caveat 已驗 disk == commit blob 無 phantom content · cross-platform / f-string / except 吞例外 / 雙語 注釋 / Bybit API / Migration Guard 全綠 | inline final message |
 | 2026-04-27 | G8-01 W1 CognitiveModulator dead-path fix（worktree-agent-a5d05003010f9c38c, working tree） — PASS to E4 · 1 LOW informational（strategist_agent.py 854>800 pre-existing 推近）+ 1 LOW style（cognitive.py:240 內層冗餘 try）· PA RFC §6 三點全綠（grep 0 殘留 / test_strategist_agent.py 48 全綠 / state 不洩漏）· BUG-A rename clean + regression guard test 加分 · BUG-B caller=0→1 結構修接 hot path（unconditional pre-return 驗證）· regret/dream `{}` placeholder + consecutive_losses=0 屬 PA 明示 acknowledged limitation（FUP-LOSSES-WIRING + W2/W3 deferred）· 6/6 新測 + 96/96 既有 strategist 套件全綠 | workspace/reports/2026-04-27--g8_01_w1_review.md |
+| 2026-04-28 | G8-01 W3 StrategistAgent x CognitiveModulator integration 7-scenario（worktree-agent-a4d9d240343d85fff, commit 571da6a） — **RETURN to E1** · 1 HIGH（S5 sys.modules stub 因 `from . import strategy_wiring` 走 parent-package attribute 而失效；test order-dependent Heisenbug；同 session phase2_strategy_routes 先載入後 S5 fail，Mac/Linux 一致；實測 1 failed, 50 passed）+ 1 MEDIUM（S3-B 隱式依賴 `_COGNITIVE_TICK_INTERVAL` 模 0；改顯式 tick 呼叫）+ 2 LOW（S5 version=1 lucky-pass / 私有 _stats 穿透）· 5/7 scenario 真整合、1 脆、1 broken · 隔離 8/8 PASS 但全 regression order 必然失敗（E1 self-test 為 happy-path Mac in-isolation） · REGRET/DREAM 0 hit ✅ + patch.object(sw) 0 hit ✅ + 跨平台 path 0 hit ✅ + 雙語注釋完整 ✅ · 修法建議：`unittest.mock.patch("app.h_state_query_handler.strategy_wiring", sw_stub)` importer-side patch | workspace/reports/2026-04-28--g8_01_w3_integration_review.md |
 
 ## 歷史審查關鍵發現（累積記憶）
 
@@ -533,3 +534,119 @@ PA single-shot fix to plug an INFO-level Phase A drift (advisor.rs docstring cla
 - **「PA 三角合一」prep-gate review**：PA 自設計 + 自寫碼 + 自寫測試 + 自跑驗證 → E2 主要驗 (a) 4-arm 完整性 (b) race window (c) test 對抗性 (d) baseline 不變；本 case 4 項全綠 → 0 finding PASS。
 - **「sticky semantics」 review pattern**：永遠驗「pure fn 對首次正確 / daemon 對連續 sticky / exit 必清零」三段；任何違反語意命名（field 名為「entry time」實際每 cycle 跳動）是 BLOCKER 級 design defect 而非 INFO，本 case 從 INFO 升 prep-gate 處理是正確判斷。
 - **Sub-agent 寫 ≤80 LOC sticky 邏輯 + ≥2 unit test**：對 task-local 變數 + 純 fn boundary clean 的 prep-gate 適用；若涉跨 thread shared state 必須再加 race / lock review。
+
+### 2026-04-28 G3-09 Phase B Wave 1 大規模實作 review
+- **Worktree**: agent-a9002481353677810 (uncommitted)
+- **Verdict**: RETURN to E1 (1 HIGH + 2 MEDIUM + 2 LOW)
+- **Scope**: 4 新檔（V026 243 + test_v026_guards 306 + test_persistence 338 + observation_report 511）+ 8 修改（mod.rs 317→652 / types 79+ / ipc handler 40+ / main.rs 1208→1230 / main_boot_tasks 944→1015 / checks_derived.py 1153→1304 / runner.py 43+）
+- **Tests**: cargo lib **2299/0** ✅ (Phase A baseline 2290 + 9 new) · daemon **11/0** ✅ (5-arg shim works)
+- **HIGH-1**: `helper_scripts/db/passive_wait_healthcheck/checks_derived.py` 1304 行越過 §九 1200 硬上限。pre-existing 1153 接近警告線、本 PR +151 推爆。E2 必須拒 merge 直到拆檔。
+- **MED-1**: `rust/openclaw_engine/src/main.rs` 1230 行。pre-existing 1208 已超限；本 PR +22 加深違規。E1 self-flag 待後續 split。
+- **MED-2**: `CostEdgeAdvisorDbSlot` singleton 未登記 §九 表（E1 self-flag 但未補）。CLAUDE.md §九 強制：「新增 singleton 必須在此表登記。禁止子模塊創建未登記的全局可變狀態」。
+- **LOW-1**: `main_boot_tasks.rs` 1015 行（>800 警告線；pre-existing 944 + 71 new）。
+- **LOW-2**: runner.py 將 [30] check 從 cursor 外移入 cursor 內 → DB 不可達時整個 [30] 不跑（先前 env=1 sentinel 仍跑 file-only）。輕微 sentinel coverage 倒退。
+- **PASS 點**: V026 Guard A/B 完整對齊 V023/V021 template；6-case test fixture 含 pass/fail/no-op；tokio::spawn fire-and-forget INSERT 不阻 daemon loop；4 IPC fields `#[serde(default)]` forward-compat；engine_mode 正確 bind spawn time；`entered_trigger` matches! 邏輯與既有 sticky logic 互動正確；雙語注釋齊備；跨平台 grep 0 hit；Rust unsafe 0 / unwrap 0；2299/2299 lib 全綠。
+
+---
+
+## 2026-04-28 · G8-01 W2 CognitiveModulator coverage review
+
+### Verdict
+**PASS to E4** · 0 CRITICAL/HIGH/MEDIUM · 1 LOW (optional docstring annotation)
+報告：`srv/.claude/worktrees/agent-af6ccceae93986103/docs/CCAgentWorkSpace/E2/workspace/reports/2026-04-28--g8_01_w2_cov_review.md`
+
+### 對象
+E1 worktree 未 commit · branch `worktree-agent-af6ccceae93986103` · base `cf34e96`
+- ADD: `tests/test_cognitive_modulator_coverage.py` 514 LOC / 22 case (26 collected)
+- 0 production diff confirmed (`git diff cf34e96 -- cognitive_modulator.py` empty)
+- Mac 自驗 cov 100% / 86 stmts · W1+LOSSES+W2 = 40/40 PASS in 0.05s
+
+### 核心對抗判斷 — 「100% line cov 是 false confidence 嗎？」
+**結論：不是 false confidence，但讀者必須理解「cov ≠ behavior coverage」**。
+- 證據鏈：`tick_cognitive_modulator` (`strategist_cognitive.py:265-270`) production caller 永遠傳 `regret_data={}` / `dream_data={}`
+- 因此 modulator regret/dream 分支（lines 119-123, 147-155 部分）在 production hot-path **結構性不可達**
+- W2 直呼 `update(...)` 餵 schema 達 100%
+- E1 framing「API contract test，非 production behavior assertion」**正確**：dead 的是 producers (`OpportunityTracker`/`DreamEngine` RC-11 deleted)，不是 modulator API 簽名
+- 與 `feedback_no_dead_params` 不衝突：`update()` 簽名仍 active production API，kwargs 是合法輸入空間
+- E1 MODULE_NOTE + REGRET-DREAM escalation 文件鏈完整 → 符合原則 #10 認知誠實
+
+### 為何不退回要求加 # pragma: no cover
+- E1 reasoning 正確：加 pragma 反而更糟 — Option B 重實作後失去 regression baseline
+- 100% cov 自然達標 = 維持彈性；docstring 反模式說明 = 認知透明
+- 屬「主動避免過度設計」（CLAUDE.md §八 工作流 5）
+
+### 22 → 26 sub-test drift 評估
+- PA RFC §3.2 列「≥18 case」表格 22 entry，E1 落 26 collected items
+- Case 20 拆 2（_clamp 直接 + runtime stay-in-bounds）
+- Case 22 拆 4（4 個 getter 各自 contract）
+- **非 spec drift**，屬合理細化（getter contract 本質就 4 個獨立 invariant）
+
+### Mirror antipattern 評估
+- Cases 4-11/13/15-18 用 `expected = α*target + (1-α)*BASE` 同形 production EMA 公式
+- 屬輕度 mirror — 若 α/(1-α) bug-flip test 同步 flip
+- 但**非 pure mirror**：Cases 5（cap=5）/9（[R1-5] ignore）/11（worst-case min）/18（min of two）測概念 invariant
+- 用 hardcoded 魔數會在 `_EMA_ALPHA` tuning 時 brittle
+- 接受 trade-off · 建議（不阻 merge）：W3 加「EMA 方向 sanity」oracle test
+
+### 套用模式
+- **「100% line cov 不一定 = behavior coverage」review pattern**：production caller grep 必跑（驗 dead-code branch 是否被 cov 數字「裝飾」）— 本 case grep 揭露 regret/dream 永遠不可達
+- **「dead branch contract test」判定法則**：
+  1. branch 在 production caller 傳 placeholder → unreachable
+  2. 但 API 簽名仍 active → 屬 contract test 合理場景
+  3. E1/PA 文件鏈必明確聲明「currently dormant in hot path」→ 認知誠實
+  4. 三項俱全 = 可接受 100% cov；不全 → 退回要求 pragma 或補真實 caller
+- **PA 文件鏈 cross-check**：本 case PA RFC + REGRET-DREAM escalation 雙報告 + Option C defer + Option B backlog 票完整 → 不需另闢調查
+- **「冷數字」防線**：cov 100% / 22 case / 0 fail 都是 SALT 數字；E2 必補：grep production caller / 抽 case docstring 邊界一致性 / 對抗反問「未來重實作會 trap 嗎」
+
+## 2026-04-28 — G3-09 Phase B Wave 1 E2-return fix re-review · PASS to E4
+
+worktree `agent-a9002481353677810` · base HEAD `cf34e96` · branch `worktree-agent-a9002481353677810`
+
+### 3 fix all PASS
+- **HIGH-1**: `checks_derived.py` 1304→990 (≤1200 ✅) + new sibling `checks_cost_edge.py` 370 LOC (≤800 ✅). `check_h_state_gateway_freshness` + `check_dust_spiral_noise_in_ef` 留 derived 是 E1 自決 per E2 spec，避 scope creep。`__init__.py` __all__ + import 對的；runner.py 兩處 import (cursor + db-down fallback) 全對。
+- **MED-1**: `CostEdgeAdvisorDbSlot` 登入 CLAUDE.md §九 表 line 459，鏡 `HStateCacheSlot` row pattern；attribution 含 §二 原則 #6+#8。grep 1 hit 唯一。
+- **LOW-2 (option A)**: runner.py:153-176 DB-fail except 區塊正確呼 `check_cost_edge_advisor_status(cur=None)`（Phase A pure-fs 路徑）；inner try/except 包 sentinel call 防雙層 raise；exit code 2 contract 不變。Phase A invariants 1+2 在 `if cur is None` 早返之前評估，env=1 fail 不會被 mask。
+
+### 對抗反問 8 條全 PASS
+- 0 production behavior change（Rust 711 行 delta 是 pre-existing Wave 1，fix 不碰）
+- 規格一致（5 files exactly）
+- pytest 45 passed / 8 fail = pre-existing TestSignalsWriterFreshness + TestIntentsCounterFreeze（git stash 驗證 baseline）
+- §九 + OpenClaw 9 條 0 新違規
+- MODULE_NOTE 雙語齊（6+ hits in checks_cost_edge.py）
+- 跨平台 grep 0 hardcoded path
+
+### 教訓 / 反模式提醒
+- **檢查 fix-only diff 範圍**：`git diff <base>` 可能顯示 fix-only + prior unstaged baseline 全部，要看 mtime + git log 區分。本次 Rust 711 行屬 prior Wave 1，fix 真正只動 5 Python+docs。
+- **option A vs option B for healthcheck cursor regression**：選 A (DB-down fallback) 比 B (出 cursor 區塊) 更乾淨 — 既保 cursor lifecycle 又補 fallback path。E1 選對。
+- **Phase A early-return 順序**：Phase B 加 cur 參數時，Phase A invariants 必須在 `if cur is None` 之前；本 fix 正確（line 142-216 在 line 228 之前）。
+
+
+---
+
+## 2026-04-28 · G8-01 W3 integration E2-return re-review (PASS to E4)
+
+**Worktree**: `srv/.claude/worktrees/agent-a4d9d240343d85fff` HEAD `571da6a` + 1 file working tree fix
+**Verdict**: PASS to E4 (條件：E1 commit + push)
+
+**Confirm 上輪 finding 全收**：
+- H-1（S5 sys.modules stub never effective）：fix 改雙 patch (sys.modules + app.strategy_wiring attr) + finally 反序還原 + 嚴格 `assertEqual(intel_received, 3)`
+- M-1（S3-B 隱式 N=10 magic）：fix 用 explicit `tick_cognitive_modulator(agent)` 解耦
+- L-1（S5 唯一性）：fix 用 strict eq 真防 H-1 復發
+
+**自驗實證**：
+- 51/51 same-session forward + reverse + 5 重跑同綠 (0.28s 穩定)
+- isolated S5 PASS · pair S5→h_state 91/91 PASS（finally 還原 atomic）
+- Baseline 36 failed → post-fix 35 failed = **+1 pass / -1 fail / 0 new regression**
+- 0 production diff
+- 702 LoC < 800 警告
+
+**對抗反問捕獲**：
+- 「Linux 跑 H-1 預期？」E2 預測同 Mac 51/51（CPython `from PKG import SUB` getattr semantic 跨平台一致），SSH 一鍵驗證
+- 「commit chain 是否真 append？」⚠️ E1 fix **未 commit**（working tree only），E2 退回要求 append 新 commit，禁 amend `571da6a`
+
+**E2 教訓 / 反模式提醒**：
+1. **同 session pollution 對比的正確姿勢** — 跑 baseline (`git stash`) vs post-fix 兩遍同樣 file 集合，比 delta = 0 才證 0 new regression。E1 報告「6 檔 115/115 PASS」實際只有部分 scope，正確值 162/197 (35 pre-existing pollution from sibling tests)。**E2 必驗實際 file count + math**。
+2. **Heisenbug from Python parent-package attribute** — `sys.modules["app.X"]` patch 對 `from app import X` 從**第二次** import 起無效（CPython 走 `getattr(app, "X")`）。test isolation 用 sys.modules patch 必同時 patch parent attribute；finally 反序還原避免污染 sibling。下次見 sibling test 偶發 fail/pass = 第一個 hypothesis。
+3. **commit append vs amend safety** — 在 auto mode + multi-session 下 amend 會破壞前 commit；append 新 commit 是 safe default。E2 退回時必 explicit 指明「新 commit append + 禁 amend」。
+4. **Pre-existing failure 怎麼處理** — fix 只負責不新增 regression，不負責修 pre-existing。但要 document + 開新 ticket，不可吞。本次 35 個 sibling singleton pollution → ticket `STRATEGIST-SINGLETON-POLLUTION`。
+
