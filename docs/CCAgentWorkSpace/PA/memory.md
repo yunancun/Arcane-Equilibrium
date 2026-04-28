@@ -1,5 +1,17 @@
 # PA Memory — 工作記憶
 
+## MAIN-RS-PRE-EXISTING-CLEANUP P2（2026-04-28）
+
+**結論**：main.rs 1210 → **1158 LOC**（§九 1200 hard cap 進入合規），新 sibling `main_scanner_init.rs`（170 LOC）抽出 Scanner D4 pre-init（config + registry + edge estimates + relay channel + tokio relay task spawn）。Pure refactor 0 production behavior change，cargo build 綠 + lib 2308/0 + cost_edge_advisor 11/0 + 2/0。Wave E `cost_edge_advisor_boot` split 後遺留的 governance ambiguity（E2 PB1 MED-1）解除。
+
+**設計選擇**：5 候選中選 Scanner pre-init（67 LOC、最自包含、避開 cost_edge_advisor_boot scope）。Sibling 命名 `main_scanner_init.rs` 對齊既定 main_* sibling pattern（boot_tasks / pipelines / fanout / ws / watchdog / shutdown / instruments）。
+
+**保留 grep stability**：`scanner_store` / `symbol_registry` / `scanner_edge_estimates` / `scanner_ws_tx` / `current_ws_client_tx` 五原變數名透過 destructure pattern 維持，下游 5 個 site 零改動。
+
+**教訓**：`pub(crate) struct + pub(crate) fn` sibling pattern 對 main.rs 1200 cap 維護優於把工作擠回既有 sibling — Wave E 用 cost_edge_advisor_boot 已做對的事，本 P2 同 pattern 完成第二個 sibling。下次小改若再撞 cap，相同 pattern 可重複套（main_phase4_init / main_db_init 等候選仍在）。
+
+詳：`docs/CCAgentWorkSpace/PA/workspace/reports/2026-04-28--main_rs_pre_existing_cleanup.md`
+
 ## 架構狀態快照（2026-03-31）
 
 ### 關鍵模塊狀態
@@ -962,3 +974,83 @@ W2 unit cov ≥85%（22 case，零 mock）+ W3 integration ≥5 case（7 留 buf
 
 ### 報告路徑
 📄 `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-04-28--singleton_sibling_fix_executor_promote.md`
+
+---
+
+## 2026-04-28 G3-08-FUP-ANALYST-SPLIT P2 — analyst_agent.py 拆分
+
+### 背景
+Wave A LOSSES-WIRING (`aced662`) 加 +70 LOC 至 `analyst_agent.py` (874→944)，超過 §九 800 警告線。
+
+### 設計
+2 sibling 抽出（鏡 Strategist split / cost_edge_advisor_boot 範式）：
+- `analyst_records.py`（142 LOC）：純 dataclass — `TradeRecord` / `PatternInsight` / `AnalystConfig`
+- `analyst_pattern_claims.py`（264 LOC）：純函式 helpers — `KNOWN_STRATEGIES` / `extract_strategy_from_pattern` / `register_pattern_claims` / `record_pattern_observations`
+
+### 結果
+- `analyst_agent.py`：**944 → 781 LOC**（-17.3%，達 ≤800 首選目標）
+- 0 production behavior change
+- BWD-compat 4 機制：re-export + class-level alias + staticmethod delegator + instance method delegator
+- LOSSES-WIRING callback 接線完整保留（Wave A `aced662` 不破）
+- Mac pytest：spec 主測試 22/22 + 擴展回歸 146/146 + 廣度 166/166 全綠
+
+### 教訓
+- **Pattern claim helpers 完全 stateless**：原 instance method 看似緊耦 self，實際只讀 `len(self._records)` snapshot + 注入物件 → 可完全提為 module-level free fn，傳 keyword args 即可。Strategist split 已驗範式，此次 100% 重複利用。
+- **Class-level frozenset 屬性**：移為 module-level `KNOWN_STRATEGIES` 常量 + class-level `_KNOWN_STRATEGIES = KNOWN_STRATEGIES` 別名，identity check `is` 通過，零 BWD 破壞。
+- **Dataclass re-export 用 `__all__`**：明示 `from app.analyst_agent import TradeRecord` 等 import path 是 public API，未來若再拆分務必保此 re-export。
+
+### 報告路徑
+📄 `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-04-28--g3_08_fup_analyst_split.md`
+
+## 2026-04-28 G3-08-FUP-HSQ-SPLIT P2 — h_state_query_handler.py sibling extraction
+
+### 觸發
+Wave E SINGLETON fix（commit `b579dae`）+33 LOC dual `sys.modules.get` pattern → handler 826→**859 LOC** 觸 CLAUDE.md §九 800 LOC 警告線。E2 SINGLETON review LOW-1 升 ticket。
+
+### 抽法（PA + E1 + sanity test 三角合一）
+新 sibling `app/h_state_collectors.py` 547 LOC（per E2 推薦 + cost_edge_advisor_boot.py split pattern）；handler 859 → **452 LOC**（首選 ≤800 47% under）。
+
+抽 4 函式：`_collect_h_snapshots` / `_collect_agent_snapshots` / `_safe_snapshot` / `_safe_snapshot_self`（+ Wave E `sys.modules.get` 完整 28 行雙語 rationale 原子搬移）。
+保留：`build_h_state_full_response` envelope + schema 常數 + `_is_gateway_enabled` env-gate + 完整 MODULE_NOTE。
+
+### Re-export 策略（delegator）
+handler 頂部 `from .h_state_collectors import _collect_agent_snapshots, _collect_h_snapshots, _safe_snapshot, _safe_snapshot_self  # noqa: F401`。所有既有 `from app.h_state_query_handler import _safe_snapshot[_self] / _collect_agent_snapshots`（test_h_state_query_handler.py 共 ~50+ patch sites）零修改透明工作。
+
+### 驗證鏈
+- `test_h_state_query_handler.py` alone: **90/90 PASS**
+- `test_api_contract.py + test_h_state_query_handler.py` same-session: **108/108 PASS**（critical SINGLETON fix integrity — `_install_fake_strategy_wiring` dual patch 機制不破）
+- W1+W2+W3 + Strategist 8 檔 regression: **234/234 PASS** 零退化
+
+### 關鍵教訓
+- **SINGLETON `sys.modules.get` 字串 literal**：`"app.strategy_wiring"` 這行字串是 fixture-vs-real-module 區分的唯一 anchor，移檔時 1 個 char drift 就會導致 35 個測試讀到 real STRATEGIST_AGENT (zero stats) 而非 fake；新 sibling 內 collector 兩函式各 1 處共 2 字串 literal 必須與原檔字字相符。
+- **`noqa: F401` 註記不可省**：handler re-export 4 個 underscore-prefixed symbol 是給下游 test patch site 用，非自身使用；Python style checker 預設會誤報 unused，加 noqa 防 CI 紅。
+- **CLAUDE.md §九 800/1200 雙閾值的 sibling extract pattern**：本次第 N 度驗證 — handler 從 859 切到 452 + sibling 547 是「兩半都遠低於 800」的乾淨例；若再加 H6 / 第 6 agent 自然在 sibling 內擴張、handler 仍維持 ≤500。下下次若 sibling 自身觸 800 → 按 H-buckets vs 5-Agent 二度拆。
+
+### 報告路徑
+📄 `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-04-28--g3_08_fup_hsq_split.md`
+
+---
+
+## 2026-04-28 PA+E1 G3-09-DAEMON-TEST-SPLIT P3 合一完成
+
+### 任務範圍
+- 拆 `test_cost_edge_advisor_daemon.rs` 1159 LOC > §九 800 警告線
+- 三角合一：PA design + E1 寫碼 + sanity test
+- 邊界：嚴格 test file split only，0 production code 改
+
+### 結論（5+3+3=11 切分）
+- **proofs.rs (534 LOC, 5 tests)**：Proof 1, 2, 3a, 4, 5 — daemon 核心活性 + cadence + cancel
+- **dual_safeguard.rs (380 LOC, 3 tests)**：Proof 3b + sticky #1 + sticky #2 — RiskConfig 短路 + 時戳語意
+- **spawn_decision.rs (485 LOC, 3 tests)**：FUP Case A/B/C — wrapper-decision parity
+- 全 ≤ 800 LOC ✓ · Total 11/0 不變 · lib 2308/0（spec 寫 2299，sibling +9）· persistence 2/0 不變
+- 共用 helper 採 **inline 重複** vs `tests/common/mod.rs` — 3 個小 helper × 3 檔 = 120 LOC overhead 可接受
+
+### 教訓
+- **Cargo `tests/*.rs` 獨立 binary env race 邊界**：跨 binary process 間 env 不共享，**`OnceLock<Mutex<()>>` 各檔自持是安全的**（無需共用 mutex instance）。糾正任務 spec 中「同 mutex instance 防 race」隱含假設 — 對單 binary 內 parallel test 為真，跨 binary 無意義
+- **Test split module-level docstring 必須改寫**：新檔明確標 wave 中位置 + 互相 cross-reference 其他兩檔，避免 future maintainer 不知為何被拆
+- **Inline helper 重複 vs tests/common/**：3 個小 helper × 3 檔 = 120 LOC overhead 可接受時 inline 比 Cargo subdir trick 簡單。閾值大概 5+ 檔或 helper > 200 LOC 才值得抽 common module
+- **Lib test count drift 不是 regression**：spec 2299 vs actual 2308 — sibling session 在 spec 寫好後加 +9 lib test。判 regression 看 `0 failed` 而非 count number
+- **PA+E1 合一適用情境**：純 test split + 0 production diff + 規格邏輯極清晰 — 跳過獨立 E1 派發省時，PA 自寫 Cargo binary 隔離分析 + 直接落地
+
+### 報告路徑
+📄 `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-04-28--g3_09_daemon_test_split.md`
