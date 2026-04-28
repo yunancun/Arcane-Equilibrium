@@ -908,23 +908,24 @@ pub(super) fn handle_tick_event(
     // EXT-1 + EDGE-P2-3 Phase 1B-3.2: Sweep timed-out pending orders (every 5s).
     // Branch by TimeInForce:
     //   - PostOnly maker: once elapsed >= po.maker_timeout_ms (default 45s),
-    //     spawn non-blocking REST cancel via orderLinkId + remove tracker row.
+    //     spawn non-blocking REST cancel via orderLinkId and keep the tracker
+    //     row until WS cancel ack/fill or cancel-ack grace expiry.
     //   - Market (legacy): 5s soft warn / 60s hard remove (unchanged).
-    // Tracker row removal after cancel is intentional — if a race fills the
-    // order between our sweep and Bybit's cancel processing, the existing
-    // legacy hard-remove semantics apply (unmatched WS fill goes through the
-    // position reconciler). A stricter "wait-for-cancel-ack then remove"
-    // pattern is deferred to an FUP.
+    // Tracker row retention after cancel is intentional — if a race fills the
+    // order between our sweep and Bybit's cancel processing, the fill still
+    // gets the original strategy/context instead of falling into unmatched
+    // audit. OrderUpdate Cancelled/Rejected or grace expiry removes the row.
     // EDGE-P2-3 Phase 1B-3.2：超時 pending order 掃描（每 5s）。
-    //   - PostOnly 掛單：elapsed >= maker_timeout_ms（預設 45s）→ 非阻塞 REST 取消 + 移除。
+    //   - PostOnly 掛單：elapsed >= maker_timeout_ms（預設 45s）→ 非阻塞 REST 取消，
+    //     保留 tracker 至 WS cancel ack/fill 或 grace 到期。
     //   - Market（舊行為）：5s 軟警告 / 60s 硬移除，不變。
     if !state.pending_orders.is_empty() && state.last_pending_check.elapsed() >= pending_timeout {
         let now_ms = openclaw_core::now_ms();
         let mut maker_to_cancel: Vec<(String, String, u64, u64)> = Vec::new();
         let mut legacy_to_remove: Vec<String> = Vec::new();
         for (key, po) in state.pending_orders.iter() {
-            let elapsed = now_ms.saturating_sub(po.sent_ts_ms);
-            match classify_pending_sweep(po, elapsed) {
+            let elapsed = pending_sweep::pending_elapsed_ms(po, now_ms);
+            match classify_pending_sweep(po, now_ms) {
                 PendingSweepAction::MakerTimeoutCancel => {
                     let deadline_ms = po.maker_timeout_ms.unwrap_or(45_000);
                     maker_to_cancel.push((
@@ -933,6 +934,17 @@ pub(super) fn handle_tick_event(
                         elapsed,
                         deadline_ms,
                     ));
+                }
+                PendingSweepAction::MakerCancelGraceExpired => {
+                    tracing::error!(
+                        order_link_id = %key,
+                        symbol = %po.symbol,
+                        elapsed_ms = elapsed,
+                        cancel_requested_ts_ms = po.cancel_requested_ts_ms.unwrap_or_default(),
+                        grace_ms = pending_sweep::MAKER_CANCEL_ACK_GRACE_MS,
+                        "PostOnly maker cancel ack grace expired — removing stale tracker / PostOnly 取消回報 grace 到期，移除過期追蹤"
+                    );
+                    legacy_to_remove.push(key.clone());
                 }
                 PendingSweepAction::LegacyHardRemove => {
                     tracing::error!(
@@ -958,6 +970,7 @@ pub(super) fn handle_tick_event(
         }
         // Dispatch non-blocking cancels for timed-out PostOnly makers.
         // 非阻塞派發超時 PostOnly 掛單取消。
+        let mut maker_cancel_dispatched: Vec<String> = Vec::new();
         for (link_id, symbol, elapsed, deadline_ms) in &maker_to_cancel {
             tracing::warn!(
                 order_link_id = %link_id,
@@ -974,15 +987,27 @@ pub(super) fn handle_tick_event(
                 tokio::spawn(async move {
                     pending_sweep::cancel_resting_maker_order(c, sym, lid).await;
                 });
+                maker_cancel_dispatched.push(link_id.clone());
+            } else {
+                tracing::error!(
+                    order_link_id = %link_id,
+                    symbol = %symbol,
+                    "PostOnly maker timed out but no REST client is available — removing tracker / PostOnly 超時但無 REST client，移除追蹤"
+                );
+                legacy_to_remove.push(link_id.clone());
             }
         }
-        // Remove maker rows we just dispatched cancels for.
-        // 移除剛派發取消的 maker 訂單記錄。
-        for (link_id, _, _, _) in &maker_to_cancel {
-            state.pending_orders.remove(link_id);
+        // Mark maker rows we just dispatched cancels for. Keep them in the
+        // tracker so racing fills before the WS cancel ack still match context.
+        // 標記剛派發 cancel 的 maker 訂單；保留 tracker 讓 ack 前 race 成交仍能匹配。
+        for link_id in &maker_cancel_dispatched {
+            if let Some(po) = state.pending_orders.get_mut(link_id) {
+                po.cancel_requested_ts_ms = Some(now_ms);
+            }
         }
-        // Remove legacy Market hard-timeout rows.
-        // 移除舊 Market 硬超時記錄。
+        // Remove legacy Market hard-timeout rows and maker rows whose cancel
+        // ack grace expired.
+        // 移除舊 Market 硬超時，以及 cancel ack grace 到期的 maker 追蹤。
         for key in &legacy_to_remove {
             state.pending_orders.remove(key);
         }

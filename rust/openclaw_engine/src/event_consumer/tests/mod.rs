@@ -109,6 +109,7 @@ fn test_pending_order_clone_preserves_state() {
         order_type: "market".into(),
         time_in_force: None,
         maker_timeout_ms: None,
+        cancel_requested_ts_ms: None,
     };
     let cloned = po.clone();
     assert_eq!(cloned.order_link_id, "oc_1");

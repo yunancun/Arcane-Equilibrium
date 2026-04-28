@@ -422,6 +422,7 @@ pub(super) fn spawn_order_dispatch(
                     // EDGE-P2-3 Phase 1B-3.2: per-order maker sweep timeout.
                     // EDGE-P2-3 Phase 1B-3.2：每單 maker sweep 逾時。
                     maker_timeout_ms: req.maker_timeout_ms,
+                    cancel_requested_ts_ms: None,
                 });
             }
             let side = if req.is_long {

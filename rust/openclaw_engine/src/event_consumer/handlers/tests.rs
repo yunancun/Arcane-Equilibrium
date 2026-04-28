@@ -89,6 +89,7 @@ fn test_reset_clears_all_state() {
             order_type: "market".into(),
             time_in_force: None,
             maker_timeout_ms: None,
+            cancel_requested_ts_ms: None,
         },
     );
     handle_paper_command(
