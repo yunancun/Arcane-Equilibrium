@@ -152,7 +152,7 @@ impl IpcServer {
 
     /// G3-09 Phase A (2026-04-27): get a clone of the
     /// `CostEdgeAdvisorSlot` for late injection from
-    /// `main_boot_tasks::spawn_cost_edge_advisor_if_enabled`. Mirrors the
+    /// `cost_edge_advisor_boot::spawn_cost_edge_advisor_if_enabled`. Mirrors the
     /// `h_state_cache_slot` G3-08 pattern — env-gate is checked at spawn
     /// time, IPC handler reads slot per connection.
     /// G3-09 Phase A：取 advisor slot handle 給 main_boot_tasks 在 env-gate 通過後注入。

@@ -810,7 +810,7 @@ async fn daemon_cancellation_drains_within_one_second() {
 //
 // MODULE_NOTE (EN): Proofs 1-5 above directly drive `spawn_cost_edge_advisor`
 //   (the inner spawn). They prove the daemon is correct *if invoked*, but
-//   they bypass `main_boot_tasks::spawn_cost_edge_advisor_if_enabled` —
+//   they bypass `cost_edge_advisor_boot::spawn_cost_edge_advisor_if_enabled` —
 //   the bin-side decision wrapper that gates spawn on env + populates the
 //   IPC `CostEdgeAdvisorSlot`. E2 review report
 //   `2026-04-27--g3_09_daemon_test_review.md` raised this as INFO and PA
@@ -818,7 +818,7 @@ async fn daemon_cancellation_drains_within_one_second() {
 //   close the protection surface.
 //
 //   `spawn_cost_edge_advisor_if_enabled` lives in the binary crate
-//   (`src/main_boot_tasks.rs`, `pub(crate)`) so integration tests in `tests/`
+//   (`src/cost_edge_advisor_boot.rs`, `pub(crate)`) so integration tests in `tests/`
 //   cannot call it directly. Cases A/B/C below replicate the wrapper's
 //   decision logic *exactly* (using the same lib-public primitives the
 //   wrapper uses: `is_advisor_env_enabled` + `spawn_cost_edge_advisor` +
@@ -833,7 +833,7 @@ async fn daemon_cancellation_drains_within_one_second() {
 //       (handler line 44).
 //
 // MODULE_NOTE (中)：Proof 1-5 直驅內層 `spawn_cost_edge_advisor`，證 daemon 被
-//   呼叫後正確，但繞過 `main_boot_tasks::spawn_cost_edge_advisor_if_enabled`
+//   呼叫後正確，但繞過 `cost_edge_advisor_boot::spawn_cost_edge_advisor_if_enabled`
 //   bin-side 決策包裝（env-gate + slot 注入）。E2 review 列 INFO，PA 升 P3
 //   backlog；Phase B Wave 0 需 spawn-decision parity 才完整保護面。
 //
