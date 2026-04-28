@@ -1,12 +1,14 @@
-//! Trading lifecycle writer — batch INSERT signals/intents/fills/positions/verdicts/orders to PG.
-//! 交易生命週期寫入器 — 批量 INSERT 信號/意圖/成交/持倉/風控裁定/訂單到 PG。
+//! Trading lifecycle writer — batch INSERT signals/intents/fills/funding/positions/verdicts/orders to PG.
+//! 交易生命週期寫入器 — 批量 INSERT 信號/意圖/成交/資金費/持倉/風控裁定/訂單到 PG。
 //!
 //! MODULE_NOTE (EN): Async consumer for TradingMsg channel. Routes by variant type
-//!   and batch-inserts to 7 trading.* tables (signals, intents, fills, position_snapshots,
-//!   risk_verdicts, orders, order_state_changes).
+//!   and batch-inserts to 8 trading.* tables (signals, intents, fills,
+//!   funding_settlements, position_snapshots, risk_verdicts, orders,
+//!   order_state_changes).
 //!   Same pattern as market_writer: QueryBuilder::push_values + NaN sanitization.
 //! MODULE_NOTE (中): TradingMsg 通道的異步消費者。按變體類型路由，
-//!   批量插入到 7 個 trading.* 表（含 risk_verdicts + orders + order_state_changes）。
+//!   批量插入到 8 個 trading.* 表（含 funding_settlements / risk_verdicts /
+//!   orders / order_state_changes）。
 //!   與 market_writer 相同模式。
 
 use super::batch_insert::batch_insert_chunked;
@@ -29,6 +31,7 @@ pub async fn run_trading_writer(
     let mut signal_buf: Vec<TradingMsg> = Vec::with_capacity(32);
     let mut intent_buf: Vec<TradingMsg> = Vec::with_capacity(16);
     let mut fill_buf: Vec<TradingMsg> = Vec::with_capacity(16);
+    let mut funding_buf: Vec<TradingMsg> = Vec::with_capacity(16);
     let mut pos_buf: Vec<TradingMsg> = Vec::with_capacity(16);
     let mut verdict_buf: Vec<TradingMsg> = Vec::with_capacity(16);
     let mut order_buf: Vec<TradingMsg> = Vec::with_capacity(16);
@@ -49,7 +52,8 @@ pub async fn run_trading_writer(
             _ = flush_timer.tick() => {
                 if pool.is_available() {
                     flush_all(&pool, &mut signal_buf, &mut intent_buf, &mut fill_buf,
-                              &mut pos_buf, &mut verdict_buf, &mut order_buf, &mut state_change_buf).await;
+                              &mut funding_buf, &mut pos_buf, &mut verdict_buf,
+                              &mut order_buf, &mut state_change_buf).await;
                 }
             }
             msg = rx.recv() => {
@@ -58,6 +62,7 @@ pub async fn run_trading_writer(
                         TradingMsg::Signal { .. } => signal_buf.push(m),
                         TradingMsg::Intent { .. } => intent_buf.push(m),
                         TradingMsg::Fill { .. } => fill_buf.push(m),
+                        TradingMsg::FundingSettlement { .. } => funding_buf.push(m),
                         TradingMsg::PositionSnapshot { .. } => pos_buf.push(m),
                         TradingMsg::RiskVerdict { .. } => verdict_buf.push(m),
                         TradingMsg::Order { .. } => order_buf.push(m),
@@ -75,6 +80,7 @@ pub async fn run_trading_writer(
             &mut signal_buf,
             &mut intent_buf,
             &mut fill_buf,
+            &mut funding_buf,
             &mut pos_buf,
             &mut verdict_buf,
             &mut order_buf,
@@ -92,6 +98,7 @@ async fn flush_all(
     signals: &mut Vec<TradingMsg>,
     intents: &mut Vec<TradingMsg>,
     fills: &mut Vec<TradingMsg>,
+    funding: &mut Vec<TradingMsg>,
     positions: &mut Vec<TradingMsg>,
     verdicts: &mut Vec<TradingMsg>,
     orders: &mut Vec<TradingMsg>,
@@ -111,6 +118,11 @@ async fn flush_all(
         async {
             if !fills.is_empty() {
                 flush_fills(pool, fills).await;
+            }
+        },
+        async {
+            if !funding.is_empty() {
+                flush_funding_settlements(pool, funding).await;
             }
         },
         async {
@@ -143,6 +155,7 @@ async fn flush_all(
 const SIGNAL_COLS: usize = 8;
 const INTENT_COLS: usize = 12; // includes details JSONB
 const FILL_COLS: usize = 16; // includes exit_source (V021, INFRA-PREBUILD-1 A)
+const FUNDING_SETTLEMENT_COLS: usize = 13; // includes raw JSONB
 const POSITION_COLS: usize = 9;
 const VERDICT_COLS: usize = 9; // ts + 7 + engine_mode (flattened reason + JSONB details)
 const ORDER_COLS: usize = 11;
@@ -330,6 +343,68 @@ async fn flush_fills(pool: &DbPool, buf: &mut Vec<TradingMsg>) {
                 }
             });
             qb.push(" ON CONFLICT (fill_id, ts) DO NOTHING");
+            qb
+        },
+    )
+    .await;
+    buf.clear();
+}
+
+async fn flush_funding_settlements(pool: &DbPool, buf: &mut Vec<TradingMsg>) {
+    let pg = match pool.get() {
+        Some(p) => p,
+        None => {
+            buf.clear();
+            return;
+        }
+    };
+    batch_insert_chunked(
+        pg,
+        pool,
+        "trading.funding_settlements",
+        buf.as_slice(),
+        FUNDING_SETTLEMENT_COLS,
+        |chunk| {
+            let mut qb: QueryBuilder<Postgres> = QueryBuilder::new(
+                "INSERT INTO trading.funding_settlements \
+                 (ts, settlement_id, exec_id, symbol, side, amount, fee_currency, \
+                  exec_value, exec_price, exec_qty, strategy_name, engine_mode, raw) ",
+            );
+            qb.push_values(chunk.iter(), |mut b, msg| {
+                if let TradingMsg::FundingSettlement {
+                    settlement_id,
+                    ts_ms,
+                    exec_id,
+                    symbol,
+                    side,
+                    amount,
+                    fee_currency,
+                    exec_value,
+                    exec_price,
+                    exec_qty,
+                    strategy_name,
+                    engine_mode,
+                    raw,
+                } = msg
+                {
+                    b.push_bind(
+                        chrono::DateTime::from_timestamp_millis(*ts_ms as i64).unwrap_or_default(),
+                    );
+                    b.push_bind(settlement_id.as_str());
+                    b.push_bind(exec_id.as_str());
+                    b.push_bind(symbol.as_str());
+                    b.push_bind(side.as_str());
+                    b.push_bind(sanitize_f64_or_zero(*amount));
+                    b.push_bind(fee_currency.as_str());
+                    b.push_bind(sanitize_f64_or_zero(*exec_value));
+                    b.push_bind(sanitize_f64_or_zero(*exec_price));
+                    b.push_bind(sanitize_f64_or_zero(*exec_qty));
+                    b.push_bind(strategy_name.as_str());
+                    b.push_bind(engine_mode.as_str());
+                    b.push_bind(raw.clone());
+                }
+            });
+            qb.push(" ON CONFLICT (settlement_id, ts) DO NOTHING");
             qb
         },
     )
@@ -599,6 +674,23 @@ mod tests {
             exit_source: None,
         };
         assert!(matches!(fill, TradingMsg::Fill { .. }));
+
+        let funding = TradingMsg::FundingSettlement {
+            settlement_id: "funding-f1".into(),
+            ts_ms: 0,
+            exec_id: "f1".into(),
+            symbol: "BTC".into(),
+            side: "Sell".into(),
+            amount: 1.25,
+            fee_currency: "USDT".into(),
+            exec_value: 100.0,
+            exec_price: 100.0,
+            exec_qty: 1.0,
+            strategy_name: "funding_arb".into(),
+            engine_mode: "demo".into(),
+            raw: None,
+        };
+        assert!(matches!(funding, TradingMsg::FundingSettlement { .. }));
     }
 
     #[test]
@@ -624,6 +716,10 @@ mod tests {
             "fills batch would exceed PG limit"
         );
         assert!(
+            chunk_rows_for_columns(FUNDING_SETTLEMENT_COLS) * FUNDING_SETTLEMENT_COLS <= 65535,
+            "funding settlements batch would exceed PG limit"
+        );
+        assert!(
             chunk_rows_for_columns(POSITION_COLS) * POSITION_COLS <= 65535,
             "positions batch would exceed PG limit"
         );
@@ -646,6 +742,7 @@ mod tests {
         let mut sigs = Vec::new();
         let mut intents = Vec::new();
         let mut fills = Vec::new();
+        let mut funding = Vec::new();
         let mut positions = Vec::new();
 
         let msgs: Vec<TradingMsg> = vec![
@@ -690,6 +787,21 @@ mod tests {
                 engine_mode: "paper".into(),
                 exit_source: None,
             },
+            TradingMsg::FundingSettlement {
+                settlement_id: "funding-f1".into(),
+                ts_ms: 0,
+                exec_id: "f1".into(),
+                symbol: "BTC".into(),
+                side: "Sell".into(),
+                amount: 1.25,
+                fee_currency: "USDT".into(),
+                exec_value: 100.0,
+                exec_price: 100.0,
+                exec_qty: 1.0,
+                strategy_name: "funding_arb".into(),
+                engine_mode: "demo".into(),
+                raw: None,
+            },
             TradingMsg::PositionSnapshot {
                 ts_ms: 0,
                 symbol: "BTC".into(),
@@ -710,6 +822,7 @@ mod tests {
                 TradingMsg::Signal { .. } => sigs.push(m),
                 TradingMsg::Intent { .. } => intents.push(m),
                 TradingMsg::Fill { .. } => fills.push(m),
+                TradingMsg::FundingSettlement { .. } => funding.push(m),
                 TradingMsg::PositionSnapshot { .. } => positions.push(m),
                 TradingMsg::RiskVerdict { .. } => verdicts.push(m),
                 TradingMsg::Order { .. } => orders.push(m),
@@ -720,6 +833,7 @@ mod tests {
         assert_eq!(sigs.len(), 1);
         assert_eq!(intents.len(), 1);
         assert_eq!(fills.len(), 1);
+        assert_eq!(funding.len(), 1);
         assert_eq!(positions.len(), 1);
         assert_eq!(verdicts.len(), 0);
         assert_eq!(orders.len(), 0);

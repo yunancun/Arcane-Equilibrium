@@ -207,6 +207,21 @@ pub fn donchian(high: &[f64], low: &[f64], close: &[f64], period: usize) -> Opti
     })
 }
 
+/// Donchian Channel over the `period` bars preceding the current bar.
+/// 當前 K 線之前 `period` 根 K 線的唐奇安通道。
+pub fn donchian_prior(
+    high: &[f64],
+    low: &[f64],
+    close: &[f64],
+    period: usize,
+) -> Option<DonchianResult> {
+    let n = high.len().min(low.len()).min(close.len());
+    if period == 0 || n <= period {
+        return None;
+    }
+    donchian(&high[..n - 1], &low[..n - 1], &close[..n - 1], period)
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // Tests / 測試
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -304,5 +319,16 @@ mod tests {
     fn test_donchian_insufficient() {
         assert!(donchian(&[1.0], &[0.5], &[0.8], 3).is_none());
         assert!(donchian(&[], &[], &[], 1).is_none());
+    }
+
+    #[test]
+    fn test_donchian_prior_excludes_current_bar() {
+        let high = [10.0, 11.0, 12.0, 999.0];
+        let low = [8.0, 7.5, 7.0, -999.0];
+        let close = [9.0, 10.0, 11.0, 500.0];
+        let r = donchian_prior(&high, &low, &close, 3).unwrap();
+        assert!((r.upper - 12.0).abs() < 1e-10);
+        assert!((r.lower - 7.0).abs() < 1e-10);
+        assert!(donchian_prior(&high[..3], &low[..3], &close[..3], 3).is_none());
     }
 }

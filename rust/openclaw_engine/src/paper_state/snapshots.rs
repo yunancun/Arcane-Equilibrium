@@ -35,6 +35,8 @@ pub struct PaperStateSnapshot {
     pub peak_balance: f64,
     pub total_realized_pnl: f64,
     pub total_fees: f64,
+    #[serde(default)]
+    pub total_funding_pnl: f64,
     pub trade_count: u32,
     pub positions: Vec<PositionSnapshot>,
     /// Bybit Demo sync balance for comparison (None = custom mode).
@@ -78,6 +80,7 @@ impl PaperState {
             peak_balance: self.peak_balance,
             total_realized_pnl: self.total_realized_pnl,
             total_fees: self.total_fees,
+            total_funding_pnl: self.total_funding_pnl,
             trade_count: self.trade_count,
             positions,
             bybit_sync_balance: self.bybit_sync_balance,

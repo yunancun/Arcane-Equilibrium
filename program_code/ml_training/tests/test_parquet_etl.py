@@ -210,6 +210,41 @@ def test_edge_p3_feature_names_match_rust_canonical_order():
     assert EDGE_P3_FEATURE_NAMES[-1] == "is_funding_settlement_window"
 
 
+def test_export_accepts_live_demo_engine_mode(monkeypatch):
+    """LiveDemo export must not be rejected by the engine_mode allow-list.
+    LiveDemo 匯出不得被 engine_mode 白名單拒絕。"""
+    import program_code.ml_training.parquet_etl as mod
+
+    class _FakeConn:
+        def __init__(self):
+            self.queries: list[str] = []
+
+        def execute(self, query):
+            self.queries.append(str(query))
+            return self
+
+        def fetchone(self):
+            return [0]
+
+        def close(self):
+            pass
+
+    fake = _FakeConn()
+    monkeypatch.setattr(duckdb, "connect", lambda: fake)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        result = mod.export_decision_features_parquet(
+            pg_url="postgresql://redacted@localhost/openclaw",
+            output_dir=tmp,
+            engine_mode="live_demo",
+        )
+
+    assert result["success"] is True
+    assert result["engine_mode"] == "live_demo"
+    assert "decision_features_live_demo_" in result["output_path"]
+    assert any("engine_mode = 'live_demo'" in q for q in fake.queries)
+
+
 def test_load_training_data_rejects_without_psycopg2(monkeypatch):
     """Clean RuntimeError when psycopg2 is missing; no silent numpy return.
     缺 psycopg2 時拋 RuntimeError，不得靜默回空 numpy。"""

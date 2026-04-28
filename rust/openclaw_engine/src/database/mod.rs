@@ -344,6 +344,23 @@ pub enum TradingMsg {
         /// 恆為 "Physical"（ml_opt=None）。
         exit_source: Option<String>,
     },
+    /// Funding settlement from exchange execution stream.
+    /// 交易所 execution stream 推送的資金費結算。
+    FundingSettlement {
+        settlement_id: String,
+        ts_ms: u64,
+        exec_id: String,
+        symbol: String,
+        side: String,
+        amount: f64,
+        fee_currency: String,
+        exec_value: f64,
+        exec_price: f64,
+        exec_qty: f64,
+        strategy_name: String,
+        engine_mode: String,
+        raw: Option<serde_json::Value>,
+    },
     /// Position snapshot after fill / 成交後持倉快照
     PositionSnapshot {
         ts_ms: u64,

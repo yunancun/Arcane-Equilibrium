@@ -35,7 +35,9 @@ mod volume;
 // Re-export all indicator functions and result types.
 // 重新導出所有指標函數和結果類型。
 pub use momentum::{adx, rsi, stochastic, AdxResult, StochResult};
-pub use trend::{donchian, ema, kama, macd, sma, DonchianResult, KamaResult, MacdResult};
+pub use trend::{
+    donchian, donchian_prior, ema, kama, macd, sma, DonchianResult, KamaResult, MacdResult,
+};
 pub use volatility::{
     atr, bollinger, ewma_vol, hurst, AtrResult, BollingerResult, EwmaVolResult, HurstResult,
 };
@@ -145,7 +147,7 @@ impl IndicatorEngine {
             ),
             ewma_vol: ewma_vol(close, ewma_lambda),
             volume_ratio: volume_ratio(volume, 20),
-            donchian: donchian(high, low, close, 20),
+            donchian: donchian_prior(high, low, close, 20),
         }
     }
 }

@@ -193,7 +193,23 @@ impl PaperState {
         // of intra-run peaks to reconstruct).
         // 餘額 = 初始 + 已實現 - 手續費，讓啟動後的權益曲線與逐筆重放
         // apply_fill() 等價。peak_balance 同步抬升，避免剛還原就出現虛假回撤。
-        let restored_balance = self._initial_balance + self.total_realized_pnl - self.total_fees;
+        let restored_balance =
+            self._initial_balance + self.total_realized_pnl + self.total_funding_pnl
+                - self.total_fees;
+        self.balance = restored_balance;
+        self.peak_balance = self.peak_balance.max(restored_balance);
+    }
+
+    /// QoL-1 extension: restore cumulative funding settlements from the ledger.
+    /// QoL-1 擴展：從資金費 ledger 還原累計 funding PnL。
+    pub fn apply_restored_funding_pnl(&mut self, total_funding_pnl_sum: f64) {
+        if !total_funding_pnl_sum.is_finite() {
+            return;
+        }
+        self.total_funding_pnl = total_funding_pnl_sum;
+        let restored_balance =
+            self._initial_balance + self.total_realized_pnl + self.total_funding_pnl
+                - self.total_fees;
         self.balance = restored_balance;
         self.peak_balance = self.peak_balance.max(restored_balance);
     }
@@ -239,6 +255,17 @@ impl PaperState {
         .await?;
 
         self.apply_restored_counters(row.0, row.1, row.2);
+
+        let funding_row: (f64,) = sqlx::query_as(
+            "SELECT COALESCE(SUM(amount), 0)::float8 \
+             FROM trading.funding_settlements \
+             WHERE engine_mode = $1",
+        )
+        .bind(engine_mode)
+        .fetch_one(pool)
+        .await?;
+
+        self.apply_restored_funding_pnl(funding_row.0);
         Ok(())
     }
 

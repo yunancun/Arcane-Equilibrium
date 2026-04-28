@@ -107,6 +107,7 @@ pub(super) fn write_test_snapshot() -> (Arc<PathBuf>, tempfile::TempDir) {
             peak_balance: 10000.0,
             total_realized_pnl: -500.0,
             total_fees: 12.5,
+            total_funding_pnl: 0.0,
             trade_count: 3,
             positions: vec![crate::paper_state::PositionSnapshot {
                 position: crate::paper_state::PaperPosition {

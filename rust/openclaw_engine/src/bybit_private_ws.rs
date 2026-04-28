@@ -78,6 +78,12 @@ pub enum PrivateWsEvent {
     Disconnected,
 }
 
+fn parse_execution_update(item: &serde_json::Value) -> Option<ExecutionUpdate> {
+    let mut update = serde_json::from_value::<ExecutionUpdate>(item.clone()).ok()?;
+    update.raw = item.clone();
+    Some(update)
+}
+
 /// Order status update from Bybit private WS.
 /// Bybit 私有 WS 的訂單狀態更新。
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -136,7 +142,7 @@ pub struct OrderUpdate {
 
 /// Execution/fill update from Bybit private WS.
 /// Bybit 私有 WS 的成交更新。
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExecutionUpdate {
     /// Execution ID / 成交 ID
@@ -160,12 +166,32 @@ pub struct ExecutionUpdate {
     /// Execution fee / 成交手續費
     #[serde(default)]
     pub exec_fee: String,
+    /// Execution value / 成交名義值
+    #[serde(default)]
+    pub exec_value: String,
+    /// Fee rate / 手續費率
+    #[serde(default)]
+    pub fee_rate: String,
+    /// Fee currency / 手續費幣種
+    #[serde(default)]
+    pub fee_currency: String,
+    /// Closed size / 平倉數量
+    #[serde(default)]
+    pub closed_size: String,
     /// Execution type: "Trade", "Funding" / 成交類型
     #[serde(default)]
     pub exec_type: String,
     /// Execution timestamp / 成交時間戳
     #[serde(default)]
     pub exec_time: String,
+    /// Raw execution payload for fields Bybit adds before this parser is updated.
+    /// 原始 execution payload，用於保留 Bybit 新增但 parser 尚未顯式建模的欄位。
+    #[serde(
+        default,
+        skip_deserializing,
+        skip_serializing_if = "serde_json::Value::is_null"
+    )]
+    pub raw: serde_json::Value,
 }
 
 /// Position update from Bybit private WS.
@@ -707,7 +733,7 @@ fn parse_private_message(text: &str) -> Option<PrivateWsEvent> {
         }
         "execution" => {
             for item in data {
-                if let Ok(update) = serde_json::from_value::<ExecutionUpdate>(item.clone()) {
+                if let Some(update) = parse_execution_update(item) {
                     return Some(PrivateWsEvent::Execution(update));
                 }
             }
@@ -739,7 +765,7 @@ fn parse_private_message(text: &str) -> Option<PrivateWsEvent> {
             // V5 execution.fast 欄位較少（無 execFee/execValue/feeRate），
             // ExecutionUpdate 用 serde default，缺失欄位解析為空字串。
             for item in data {
-                if let Ok(update) = serde_json::from_value::<ExecutionUpdate>(item.clone()) {
+                if let Some(update) = parse_execution_update(item) {
                     return Some(PrivateWsEvent::Execution(update));
                 }
             }
@@ -912,6 +938,10 @@ mod tests {
                 "execPrice": "3500.50",
                 "execQty": "0.5",
                 "execFee": "0.875125",
+                "execValue": "1750.25",
+                "feeRate": "0.0005",
+                "feeCurrency": "USDT",
+                "closedSize": "0.5",
                 "execType": "Trade",
                 "execTime": "1700000001000"
             }]
@@ -923,7 +953,12 @@ mod tests {
                 assert_eq!(exec.symbol, "ETHUSDT");
                 assert_eq!(exec.exec_price, "3500.50");
                 assert_eq!(exec.exec_fee, "0.875125");
+                assert_eq!(exec.exec_value, "1750.25");
+                assert_eq!(exec.fee_rate, "0.0005");
+                assert_eq!(exec.fee_currency, "USDT");
+                assert_eq!(exec.closed_size, "0.5");
                 assert_eq!(exec.exec_type, "Trade");
+                assert_eq!(exec.raw["execValue"], "1750.25");
             }
             _ => panic!("Expected Execution event"),
         }

@@ -193,6 +193,7 @@ pub(crate) fn spawn_paper_pipeline(
                 "peak_balance": paper.initial_balance,
                 "total_realized_pnl": 0.0,
                 "total_fees": 0.0,
+                "total_funding_pnl": 0.0,
                 "trade_count": 0,
                 "positions": [],
             });

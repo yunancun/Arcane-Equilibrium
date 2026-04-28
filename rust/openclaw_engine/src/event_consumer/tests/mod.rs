@@ -13,6 +13,7 @@
 // ── 按類別拆分的子模組（G5-07 拆分） ──
 mod cross_engine_tests;
 mod exit_config_ipc_tests;
+mod funding_settlement_tests;
 mod governor_override_tests;
 mod handlers_paper_cmd_tests;
 // FIX-G7-09B-INTENT-LIMIT-DROP-1 (2026-04-25): pin trading.orders.order_type
