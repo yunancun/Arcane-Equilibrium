@@ -603,7 +603,7 @@ fn test_governance_core_new_with_profile_production_fail_closed() {
 fn test_cost_gate_moderate_positive_edge_passes() {
     let mut proc = IntentProcessor::new();
     // Build estimates with a high positive edge (50 bps > any realistic threshold)
-    let json = r#"{"ma_crossover::BTCUSDT": {"shrunk_bps": 50.0, "win_rate": 0.6, "n_trades": 100, "std_bps": 5.0}}"#;
+    let json = r#"{"ma_crossover::BTCUSDT": {"shrunk_bps": 50.0, "win_rate": 0.6, "n": 100, "std_bps": 5.0}}"#;
     let estimates = crate::edge_estimates::EdgeEstimates::load_from_str(json).unwrap();
     proc.set_edge_estimates(estimates);
     let result = proc.cost_gate_moderate("ma_crossover", "BTCUSDT", 0.00055, 1_000_000_000.0);
@@ -613,7 +613,7 @@ fn test_cost_gate_moderate_positive_edge_passes() {
 #[test]
 fn test_cost_gate_moderate_negative_edge_blocks() {
     let mut proc = IntentProcessor::new();
-    let json = r#"{"ma_crossover::BTCUSDT": {"shrunk_bps": -5.0, "win_rate": 0.4, "n_trades": 50, "std_bps": 2.0}}"#;
+    let json = r#"{"ma_crossover::BTCUSDT": {"shrunk_bps": -5.0, "win_rate": 0.4, "n": 50, "std_bps": 2.0}}"#;
     let estimates = crate::edge_estimates::EdgeEstimates::load_from_str(json).unwrap();
     proc.set_edge_estimates(estimates);
     let result = proc.cost_gate_moderate("ma_crossover", "BTCUSDT", 0.00055, 1_000_000_000.0);
@@ -645,7 +645,7 @@ fn test_cost_gate_moderate_low_sample_negative_routes_to_exploration() {
     // accumulate fills toward statistically robust estimates.
     // EDGE-DIAG-2：低樣本（n<30）負 shrunk_bps 不阻擋，走探索模式。
     let mut proc = IntentProcessor::new();
-    let json = r#"{"ma_crossover::BTCUSDT": {"shrunk_bps": -50.0, "win_rate": 0.3, "n_trades": 6, "std_bps": 5.0}}"#;
+    let json = r#"{"ma_crossover::BTCUSDT": {"shrunk_bps": -50.0, "win_rate": 0.3, "n": 6, "std_bps": 5.0}}"#;
     let estimates = crate::edge_estimates::EdgeEstimates::load_from_str(json).unwrap();
     proc.set_edge_estimates(estimates);
     let result = proc.cost_gate_moderate("ma_crossover", "BTCUSDT", 0.00055, 1_000_000_000.0);
@@ -663,7 +663,7 @@ fn test_cost_gate_moderate_low_sample_positive_below_threshold_routes_to_explora
     // EDGE-DIAG-2 對稱：低樣本正 shrunk_bps 即便未達門檻也走探索模式。
     let mut proc = IntentProcessor::new();
     // win_rate 0.4 + fee_bps ≈ 13 → threshold ≈ 13/0.4*1.3 ≈ 42 bps; shrunk 5 bps fails it.
-    let json = r#"{"ma_crossover::BTCUSDT": {"shrunk_bps": 5.0, "win_rate": 0.4, "n_trades": 10, "std_bps": 5.0}}"#;
+    let json = r#"{"ma_crossover::BTCUSDT": {"shrunk_bps": 5.0, "win_rate": 0.4, "n": 10, "std_bps": 5.0}}"#;
     let estimates = crate::edge_estimates::EdgeEstimates::load_from_str(json).unwrap();
     proc.set_edge_estimates(estimates);
     let result = proc.cost_gate_moderate("ma_crossover", "BTCUSDT", 0.00055, 1_000_000_000.0);
@@ -680,7 +680,7 @@ fn test_cost_gate_moderate_n_at_threshold_negative_still_blocks() {
     // Boundary chosen as `cell.n_trades < min_n` (strict less than).
     // EDGE-DIAG-2 邊界：n_trades 恰等於 min_n 視為足夠穩健，仍阻擋負估計。
     let mut proc = IntentProcessor::new();
-    let json = r#"{"ma_crossover::BTCUSDT": {"shrunk_bps": -10.0, "win_rate": 0.4, "n_trades": 30, "std_bps": 3.0}}"#;
+    let json = r#"{"ma_crossover::BTCUSDT": {"shrunk_bps": -10.0, "win_rate": 0.4, "n": 30, "std_bps": 3.0}}"#;
     let estimates = crate::edge_estimates::EdgeEstimates::load_from_str(json).unwrap();
     proc.set_edge_estimates(estimates);
     let result = proc.cost_gate_moderate("ma_crossover", "BTCUSDT", 0.00055, 1_000_000_000.0);
@@ -698,7 +698,7 @@ fn test_cost_gate_live_low_sample_negative_still_fails_closed() {
     // EDGE-DIAG-2 不變量：demo 放寬不可滲透到 cost_gate_live。
     // Live 路徑無視 n_trades 嚴格 fail-closed（CLAUDE.md §四 / 根原則 #5）。
     let mut proc = IntentProcessor::new();
-    let json = r#"{"ma_crossover::BTCUSDT": {"shrunk_bps": -5.0, "win_rate": 0.4, "n_trades": 3, "std_bps": 2.0}}"#;
+    let json = r#"{"ma_crossover::BTCUSDT": {"shrunk_bps": -5.0, "win_rate": 0.4, "n": 3, "std_bps": 2.0}}"#;
     let estimates = crate::edge_estimates::EdgeEstimates::load_from_str(json).unwrap();
     proc.set_edge_estimates(estimates);
     let result = proc.cost_gate_live("ma_crossover", "BTCUSDT", 0.00055, 1_000_000_000.0);
@@ -716,7 +716,7 @@ fn test_cost_gate_moderate_high_sample_negative_still_blocks() {
     // about ignoring noise, NOT ignoring real losses.
     // EDGE-DIAG-2：高樣本穩健負估計仍阻擋（"demo 放寬"是忽略噪音，不是忽略真虧損）。
     let mut proc = IntentProcessor::new();
-    let json = r#"{"ma_crossover::BTCUSDT": {"shrunk_bps": -25.0, "win_rate": 0.35, "n_trades": 200, "std_bps": 2.0}}"#;
+    let json = r#"{"ma_crossover::BTCUSDT": {"shrunk_bps": -25.0, "win_rate": 0.35, "n": 200, "std_bps": 2.0}}"#;
     let estimates = crate::edge_estimates::EdgeEstimates::load_from_str(json).unwrap();
     proc.set_edge_estimates(estimates);
     let result = proc.cost_gate_moderate("ma_crossover", "BTCUSDT", 0.00055, 1_000_000_000.0);
