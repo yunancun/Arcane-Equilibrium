@@ -17,6 +17,7 @@ Meaning:
 
 Important boundary:
 - this is a **project operating rule stored in the repo**
+- it is enforced here through `AGENTS.md` at the git root plus the `.codex/` rule files
 - it is not a guarantee that the Codex product itself will globally auto-switch personas outside this project context
 
 ## PM boot sequence
@@ -27,8 +28,9 @@ At session start, PM should read in this order:
 2. `TODO.md`
 3. `.codex/MEMORY.md`
 4. `.codex/agents/PM.md`
-5. On demand: `.codex/DEPLOYMENT.md`, `.codex/skills/INDEX.md`
-6. On demand only: `OPENCLAW_INVENTORY_CONSOLIDATED.md`
+5. `.codex/SUBAGENT_EXECUTION_RULES.md`
+6. On demand: `.codex/DEPLOYMENT.md`, `.codex/skills/INDEX.md`
+7. On demand only: `OPENCLAW_INVENTORY_CONSOLIDATED.md`
 
 ## PM responsibilities
 
@@ -52,6 +54,18 @@ Use sub-agents when:
 - tasks are independent and can run in parallel
 - implementation and review should be separated
 - a narrow specialist role reduces confusion
+
+## Required role binding
+
+Every delegated task must declare:
+- bound role
+- codex type
+- ownership
+- deliverable
+
+Use the role form `ROLE(codex_type)` in updates and summaries.
+
+Do not use only temporary runtime labels such as `worker 1` as the authoritative identity.
 
 ## Codex type mapping
 
@@ -109,4 +123,5 @@ Deploy requests should still start with `PM`, even if the final action is operat
 If PM changes the operating pattern:
 - update `.codex/MEMORY.md`
 - update this file
+- update `.codex/SUBAGENT_EXECUTION_RULES.md`
 - append `.codex/WORKLOG.md`
