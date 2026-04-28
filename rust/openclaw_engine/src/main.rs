@@ -14,6 +14,7 @@ mod main_boot_tasks;
 mod main_fanout;
 mod main_instruments;
 mod main_pipelines;
+mod main_scanner_init;
 mod main_shutdown;
 mod main_watchdog;
 mod main_ws;
@@ -23,12 +24,10 @@ mod startup;
 mod tasks;
 
 use openclaw_engine::bybit_rest_client::{live_bybit_environment, BybitEnvironment};
-use openclaw_engine::config::{load_toml_or_default, ConfigManager, ConfigStore};
+use openclaw_engine::config::{ConfigManager, ConfigStore};
 use openclaw_engine::ipc_server::{IpcServer, LiveCmdSenderSlot, PerEngineRiskStores};
 use openclaw_engine::market_data_client::MarketDataClient;
-use openclaw_engine::scanner::registry::SymbolRegistry;
 use openclaw_engine::scanner::runner::ScannerRunner;
-use openclaw_engine::scanner::ScannerConfig;
 use openclaw_engine::tick_pipeline::{EngineEvent, PipelineHealth, PipelineKind};
 use openclaw_types::PriceEvent;
 use parking_lot::{Mutex as ParkingMutex, RwLock as ParkingRwLock};
@@ -245,72 +244,21 @@ async fn async_main(
     let cancel = CancellationToken::new();
 
     // ------------------------------------------------------------------
-    // Scanner D4: Load ScannerConfig + build SymbolRegistry
-    // 掃描器 D4：加載 ScannerConfig + 構建 SymbolRegistry
+    // Scanner D4: pre-init extracted to `main_scanner_init.rs` (MAIN-RS-PRE-
+    //   EXISTING-CLEANUP P2, 2026-04-28). Loads ScannerConfig (fail-soft →
+    //   defaults), builds ConfigStore + SymbolRegistry seeded with pinned
+    //   symbols, loads EdgeEstimates, sets up persistent ScannerRunner→
+    //   WsClient relay channel + spawns relay task.
+    // 掃描器 D4：前置初始化已抽至 `main_scanner_init.rs`（MAIN-RS-PRE-
+    //   EXISTING-CLEANUP P2，2026-04-28）。詳見該 sibling 模組。
     // ------------------------------------------------------------------
-    let scanner_config_path = {
-        let base = std::env::var("OPENCLAW_RISK_CONFIG_DIR")
-            .map(std::path::PathBuf::from)
-            .unwrap_or_else(|_| std::path::PathBuf::from("settings/risk_control_rules"));
-        std::env::var("OPENCLAW_SCANNER_CONFIG")
-            .map(std::path::PathBuf::from)
-            .unwrap_or_else(|_| base.join("scanner_config.toml"))
-    };
-    let scanner_cfg: ScannerConfig =
-        load_toml_or_default(&scanner_config_path, |c: &ScannerConfig| c.validate())
-            .unwrap_or_else(|e| {
-                warn!(error = %e, "scanner config load failed, using defaults / 掃描器配置加載失敗，使用默認值");
-                ScannerConfig::default()
-            });
-    info!(
-        max_symbols = scanner_cfg.universe.max_symbols,
-        pinned = ?scanner_cfg.universe.pinned_symbols,
-        interval_secs = scanner_cfg.scheduling.scan_interval_secs,
-        "scanner config loaded / 掃描器配置已加載"
-    );
-    let scanner_store: Arc<ConfigStore<ScannerConfig>> =
-        Arc::new(ConfigStore::new(scanner_cfg).with_toml_persist(scanner_config_path));
-    let pinned_syms = scanner_store.load().universe.pinned_symbols.clone();
-    let symbol_registry = Arc::new(SymbolRegistry::new(
-        pinned_syms.clone(), // initial_symbols = pinned (pre-scanner state)
-        pinned_syms,         // pinned (never removed by anti-churn)
-    ));
-
-    // Scanner D4: Load EdgeEstimates for scanner scorer.
-    // 掃描器 D4：為掃描器評分器加載邊際估計。
-    let scanner_edge_estimates = {
-        let base = std::env::var("OPENCLAW_BASE_DIR")
-            .map(std::path::PathBuf::from)
-            .unwrap_or_else(|_| std::path::PathBuf::from("."));
-        let estimates =
-            openclaw_engine::edge_estimates::EdgeEstimates::load_from_env_or_default(&base);
-        Arc::new(parking_lot::RwLock::new(estimates))
-    };
-
-    // Scanner D4: Relay channel — ScannerRunner sends to a persistent channel;
-    // a relay task forwards to the current WsClient's sender (refreshed on each restart).
-    // 掃描器 D4：中繼通道 — ScannerRunner 發送到持久通道；
-    // 中繼任務將消息轉發到當前 WsClient 的發送端（每次重啟時刷新）。
-    let (scanner_ws_tx, mut scanner_ws_rx) =
-        tokio::sync::mpsc::unbounded_channel::<openclaw_engine::ws_client::WsTopicChange>();
-    let current_ws_client_tx: Arc<
-        tokio::sync::Mutex<
-            Option<tokio::sync::mpsc::UnboundedSender<openclaw_engine::ws_client::WsTopicChange>>,
-        >,
-    > = Arc::new(tokio::sync::Mutex::new(None));
-    {
-        let relay_arc = Arc::clone(&current_ws_client_tx);
-        tokio::spawn(async move {
-            while let Some(change) = scanner_ws_rx.recv().await {
-                let guard = relay_arc.lock().await;
-                if let Some(tx) = guard.as_ref() {
-                    let _ = tx.send(change);
-                } else {
-                    tracing::debug!("[scanner relay] WsClient not ready — topic change dropped, will retry on next scan");
-                }
-            }
-        });
-    }
+    let main_scanner_init::ScannerInitBundle {
+        scanner_store,
+        symbol_registry,
+        edge_estimates: scanner_edge_estimates,
+        ws_topic_change_tx: scanner_ws_tx,
+        current_ws_client_tx,
+    } = main_scanner_init::init_scanner();
 
     // ------------------------------------------------------------------
     // Price event channel / 價格事件通道
