@@ -17,6 +17,7 @@ Current expectation:
 ## Default startup context
 
 Read these first for project state:
+- `AGENTS.md`
 - `CLAUDE.md`
 - `TODO.md`
 - `.codex/MEMORY.md`
@@ -82,6 +83,7 @@ Current known topology at setup time:
 ## Durable decisions from setup session
 
 - `.codex/` is the Codex-owned repo-synced workspace
+- `AGENTS.md` at the git root is the Codex auto-load entry file for this repository
 - `CLAUDE.md` stays the project constitution / runtime summary
 - `TODO.md` stays the primary execution timeline
 - Codex memory should be explicit and file-backed, not assumed to persist across sessions
@@ -91,6 +93,9 @@ Current known topology at setup time:
 - default project entry role is `PM`
 - PM is responsible for initial triage and role dispatch
 - dispatch protocol is documented in `.codex/AGENT_DISPATCH_PROTOCOL.md`
+- sub-agent role binding and anti-anonymous dispatch rules are documented in `.codex/SUBAGENT_EXECUTION_RULES.md`
+- temporary runtime nicknames are never the authoritative role identity
+- operator needs judgment and pushback; if risk or contradiction is detected, stop and report first
 
 ## Notes for future sessions
 

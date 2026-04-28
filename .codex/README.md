@@ -8,9 +8,11 @@ Purpose:
 - Stay safe for git sync: no secrets, no runtime dumps, no local-only machine paths unless clearly documented
 
 Recommended layout:
+- `../AGENTS.md` - git-root auto-load entry rules for new Codex sessions
 - `MEMORY.md` - stable Codex memory and operating rules
 - `WORKLOG.md` - rolling notes for recent Codex work
 - `AGENT_DISPATCH_PROTOCOL.md` - PM-first session and delegation rules
+- `SUBAGENT_EXECUTION_RULES.md` - mandatory role binding and anti-anonymous dispatch rules
 - `agents/` - Codex role mirror of the Claude agent roster
 - `skills/` - Codex index over the shared Claude skill corpus
 - `reports/` - longer Codex analyses when needed
@@ -25,3 +27,4 @@ Ground rules:
 Persistence note:
 - Codex does not rely on a repo-local hidden memory store that is automatically shared across sessions
 - For this project, durable/shared Codex memory should be written into files under this directory
+- New Codex sessions should be guided first by `AGENTS.md` at the git root, then by the files here
