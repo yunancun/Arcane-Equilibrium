@@ -47,6 +47,9 @@ from .checks_ipc_edge import (  # noqa: F401
     check_edge_estimates_freshness,
     check_shadow_exit_ratio,
     check_model_registry_freshness,
+    # EDGE-DIAG-2 (2026-04-28) demo cost_gate strategy diversity sentinel
+    # EDGE-DIAG-2（2026-04-28）demo cost_gate 策略多樣性哨兵
+    check_edge_diag_2_strategy_diversity,
 )
 from .checks_strategy import (  # noqa: F401
     check_intents_writer_ratio,
@@ -98,6 +101,7 @@ __all__ = [
     "check_edge_estimates_freshness",
     "check_shadow_exit_ratio",
     "check_model_registry_freshness",
+    "check_edge_diag_2_strategy_diversity",
     # strategy / scheduler
     "check_intents_writer_ratio",
     "check_counterfactual_clean_window_growth",
