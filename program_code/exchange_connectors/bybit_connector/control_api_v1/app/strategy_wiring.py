@@ -550,87 +550,14 @@ except (ImportError, Exception) as e:
     EXECUTOR_AGENT = None
     logger.warning("Could not initialize ExecutorAgent: %s / 无法初始化 ExecutorAgent: %s", e, e)
 
-# ── G3-08 Phase 1C: H State Gateway invalidator (DEFAULT-OFF, env-gated) ──
-# G3-08 Phase 1C: H 狀態橋接器失效通知（DEFAULT-OFF，env 閘控）
-#
-# Mirrors the G3-03 ExecutorConfigCache wiring pattern but flips the data
-# flow: instead of Python pulling Rust config, Python pushes fire-and-forget
-# invalidation hints to nudge the Rust ``h_state_cache`` poller (Phase 1A,
-# commit ``aa287c4``) into an immediate ad-hoc poll after H1-H5 / 5-Agent
-# state changes. Phase 1 is plumbing-only — H1-H5 / 5-Agent producers stay
-# silent; Phase 2-4 wire ``invalidate_async`` call sites.
-#
-# Spawn condition: strict ``OPENCLAW_H_STATE_GATEWAY == "1"`` (per PA design
-# §4.5 + §8.1). Anything else → singleton stays None, ``invalidate_async()``
-# is no-op, zero overhead. The reverse IPC route ``query_h_state_full`` is
-# already registered unconditionally in ``ai_service_dispatch.py``
-# (Sub-task B), so disabling the gateway only stops the push channel — the
-# pull channel is always reachable, returning the empty Phase 1 stub shape.
-#
-# 鏡射 G3-03 ExecutorConfigCache 接線模式但資料流相反：Python 不再拉 Rust
-# config，而是推送 fire-and-forget 失效提示，觸發 Rust ``h_state_cache``
-# poller（Phase 1A，commit ``aa287c4``）在 H1-H5 / 5-Agent 狀態變化後
-# 立即執行 ad-hoc poll。Phase 1 純線路 —— H1-H5 / 5-Agent producer 保持靜默；
-# Phase 2-4 才接 ``invalidate_async`` 呼叫點。
-#
-# Spawn 條件：嚴格 ``OPENCLAW_H_STATE_GATEWAY == "1"``（PA design §4.5 + §8.1）。
-# 非 "1" 則 singleton 維持 None、``invalidate_async()`` 為 no-op、零負擔。
-# Reverse IPC route ``query_h_state_full`` 在 Sub-task B 已於
-# ``ai_service_dispatch.py`` 無條件註冊，因此關閉 gateway 只切斷 push 通道 ——
-# pull 通道永遠可達，回 Phase 1 stub 空殼。
-try:
-    from .h_state_invalidator import (
-        init_h_state_invalidator,
-        is_gateway_enabled as _h_state_gateway_enabled,
-    )
-
-    if _h_state_gateway_enabled():
-        # Constructs the process-global singleton (idempotent). Subsequent
-        # ``invalidate_async(reason)`` calls (Phase 2-4) become live IPC
-        # notifications. Failure here is non-fatal: ``init_h_state_invalidator``
-        # already swallows env-gate misconfig; only an unexpected internal
-        # raise (e.g. resource exhaustion at module import) would land us in
-        # the except block.
-        # 建構進程全域 singleton（冪等）。日後 Phase 2-4 的
-        # ``invalidate_async(reason)`` 呼叫變為實際 IPC 通知。本 try 塊失敗
-        # 為非致命：init_h_state_invalidator 內部已吞 env-gate 誤設；只有
-        # 模組匯入期極端資源耗盡才會落入 except。
-        _H_STATE_INVALIDATOR = init_h_state_invalidator()
-        if _H_STATE_INVALIDATOR is not None:
-            logger.info(
-                "G3-08 Phase 1C: HStateInvalidator initialised "
-                "(env=OPENCLAW_H_STATE_GATEWAY=1) / "
-                "G3-08 Phase 1C：HStateInvalidator 已初始化"
-            )
-        else:
-            # Race: env flipped between is_gateway_enabled() and init call.
-            # Treat as disabled; no log spam.
-            # 競態：is_gateway_enabled() 與 init 之間 env 翻轉，視同關閉。
-            logger.debug(
-                "G3-08 Phase 1C: env flipped during init; HStateInvalidator "
-                "left unset (no-op) / env 在 init 期間翻轉，singleton 未設"
-            )
-    else:
-        # DEFAULT-OFF path — singleton intentionally stays None. Skip the
-        # info log to avoid every uvicorn worker spamming startup output.
-        # DEFAULT-OFF 路徑 — singleton 故意維持 None；避免每個 uvicorn
-        # worker 啟動都 spam log。
-        _H_STATE_INVALIDATOR = None
-except (ImportError, Exception) as _h_state_exc:  # noqa: BLE001 — non-fatal
-    # Fail-closed: ImportError or unexpected raise → no invalidator + no
-    # crash. Strategy-wiring continues; the only consequence is Phase 2-4
-    # state changes won't trigger ad-hoc polls (Rust 10s scheduled poll
-    # still works, so observability degrades by ≤10s, not catastrophically).
-    # Fail-closed：ImportError 或非預期例外 → 無 invalidator 且不崩潰。
-    # strategy_wiring 繼續；唯一後果是 Phase 2-4 的狀態變化不觸發 ad-hoc
-    # poll（Rust 10s 排程 poll 仍生效，可觀察性最多劣化 ≤10s 非災難性）。
-    _H_STATE_INVALIDATOR = None
-    logger.warning(
-        "G3-08 Phase 1C: HStateInvalidator init failed (non-fatal, "
-        "scheduled poll still works): %s / 初始化失敗（非致命，"
-        "排程 poll 仍生效）：%s",
-        _h_state_exc, _h_state_exc,
-    )
+# ── G3-08 Phase 1C: H State Gateway invalidator ──
+# Wiring extracted to ``strategy_wiring_h_state.py`` per STRATEGY-WIRING-SPLIT P2
+# (2026-04-28). Re-import keeps ``app.strategy_wiring._H_STATE_INVALIDATOR``
+# attribute live for sys.modules-based introspection.
+# 接線抽出至 ``strategy_wiring_h_state.py``（STRATEGY-WIRING-SPLIT P2，
+# 2026-04-28）；re-import 保 ``app.strategy_wiring._H_STATE_INVALIDATOR``
+# 屬性供 sys.modules 反射查找。
+from .strategy_wiring_h_state import _H_STATE_INVALIDATOR  # noqa: F401
 
 # ── Batch 12: PaperLiveGate instantiation (Paper→Live gate conditions) ──
 # Batch 12：PaperLiveGate 实例化（纸盘→实盘闸门条件）
@@ -703,231 +630,28 @@ except Exception as e:
 # Demo 連接器接線已移除。Demo 帳戶數據讀取改用 httpx BybitClient。
 DEMO_SYNC = None
 
-# ── Market Scanner + Strategy Auto-Deployer (autonomous opportunity discovery) ──
-# 市场扫描器 + 策略自动部署器（自主发现交易机会）
-try:
-    from local_model_tools.market_scanner import MarketScanner
-    from local_model_tools.strategy_auto_deployer import StrategyAutoDeployer
+# ── Market Scanner + AutoDeployer + ScoutWorker + Auto-Observation + scout_routes ──
+# Wiring extracted to ``strategy_wiring_scanner.py`` per STRATEGY-WIRING-SPLIT P2
+# (2026-04-28). Module-level singletons (``MARKET_SCANNER`` / ``AUTO_DEPLOYER`` /
+# ``_SCOUT_WORKER``) are bound back here to preserve grep stability — downstream
+# ``from .strategy_wiring import MARKET_SCANNER, AUTO_DEPLOYER`` callers
+# (strategy_read_routes / strategy_write_routes) and ``getattr(_sw, ...)``
+# introspection (h_state_collectors) are unaffected.
+# 接線抽出至 ``strategy_wiring_scanner.py``（STRATEGY-WIRING-SPLIT P2，
+# 2026-04-28）；module-level singleton 在此 bind 回來以保 grep 穩定 ——
+# 下游 ``from .strategy_wiring import ...`` 與 ``getattr(_sw, ...)`` 不破。
+from .strategy_wiring_scanner import wire_market_scanner_and_workers as _wire_scanner
 
-    # Lazy dispatcher reference: resolves at call time so it works even if
-    # market feed starts after the auto-deployer is created.
-    # 惰性 dispatcher 引用：调用时才解析，无论行情流何时启动均有效。
-    from . import paper_trading_routes as _ptr
-
-    MARKET_SCANNER = MarketScanner(max_symbols=25, categories=["linear", "spot"])
-    AUTO_DEPLOYER = StrategyAutoDeployer(
-        orchestrator=ORCHESTRATOR,
-        kline_manager=KLINE_MANAGER,
-        paper_engine=PAPER_ENGINE,
-        max_symbols=30,            # 25 linear + 5 spot reserved
-        risk_per_trade_pct=3.0,    # Risk 3% of balance per trade (max loss per trade)
-        min_qty_usdt=20.0,         # Minimum $20 per trade
-        max_qty_pct=18.0,          # Max 18% of balance per single trade (90% of 20% risk limit, 10% headroom)
-
-        pinned_symbols=["BTCUSDT", "ETHUSDT"],  # Always monitor + attempt to trade (learning/evolution)
-        reserved_slots={"spot": 5},  # 5 slots reserved for spot — linear can't squeeze them out
-    )
-    MARKET_SCANNER.register_on_scan(AUTO_DEPLOYER.on_scan_results)
-    MARKET_SCANNER.start()
-
-    # DEAD-PY-2: PipelineBridge removed — auto-deployer runs without bridge reference.
-    # DEAD-PY-2：PipelineBridge 已移除 — 自動部署器不再持有橋接器引用。
-
-    # 0A-5: Inject BacktestEngine into auto-deployer for pre-deployment validation.
-    # 0A-5：注入 BacktestEngine 到自動部署器，供部署前回測驗證使用。
-    try:
-        from .backtest_routes import get_backtest_engine as _get_bt_engine
-        _bt_engine = _get_bt_engine()
-        AUTO_DEPLOYER.set_backtest_engine(_bt_engine, min_sharpe=0.0)
-        logger.info(
-            "0A-5: BacktestEngine injected into auto-deployer / "
-            "BacktestEngine 已注入自動部署器供部署前驗證"
-        )
-    except Exception as _bt_wire_err:
-        logger.warning(
-            "0A-5: Could not wire BacktestEngine to auto-deployer (fail-open): %s",
-            _bt_wire_err,
-        )
-
-    # 0A-2: Inject auto-deployer into evolution_routes for B13 auto-apply on evolution completion.
-    # 0A-2：注入自動部署器到 evolution_routes，使進化完成後自動應用最優參數（B13 閉環）。
-    # Paper/demo mode: no confirmation needed (per Operator decision in Batch 9).
-    # Paper/demo 模式：免確認（依 Batch 9 Operator 決策）。
-    try:
-        from . import evolution_routes as _evolution_routes
-        _evolution_routes.set_auto_deployer(AUTO_DEPLOYER)
-        logger.info(
-            "0A-2: Auto-deployer injected into evolution_routes for B13 auto-apply / "
-            "自動部署器已注入 evolution_routes 供 B13 進化結果自動應用"
-        )
-    except Exception as _evo_wire_err:
-        logger.warning(
-            "0A-2: Could not wire auto-deployer to evolution_routes (fail-open): %s",
-            _evo_wire_err,
-        )
-
-    logger.info("Market scanner + auto-deployer started / 市场扫描器+自动部署器已启动")
-except Exception as e:
-    MARKET_SCANNER = None
-    AUTO_DEPLOYER = None
-    logger.warning("Market scanner not available: %s", e)
-
-# ── ScoutWorker: 30-minute periodic intel injection into Strategist chain ──
-# ScoutWorker：每 30 分鐘定時掃描並通過 ScoutAgent → MessageBus 向策略師注入情報
-# This complements MarketScanner's own 5-minute loop (which feeds AUTO_DEPLOYER).
-# ScoutWorker 補充 MarketScanner 自身的 5 分鐘循環（後者只饋送 AUTO_DEPLOYER）。
-# ScoutWorker covers the Scout→Strategist intel pipeline for AI-driven analysis.
-# ScoutWorker 覆蓋 Scout→策略師情報管線，供 AI 驅動的策略分析使用。
-_SCOUT_WORKER = None
-try:
-    from .scout_worker import ScoutWorker as _ScoutWorkerClass
-
-    def _make_scout_scan_fn():
-        """
-        Build a scan function that runs one full scan and injects intel via ScoutAgent.
-        構建掃描函數：執行一次完整掃描，並通過 ScoutAgent.produce_intel() 注入情報。
-
-        Uses module-level MARKET_SCANNER and SCOUT_AGENT captured at init time.
-        捕獲模塊級別的 MARKET_SCANNER 和 SCOUT_AGENT，在初始化時綁定。
-
-        Returns None if either dependency is unavailable (fail-open for scout intel).
-        若任一依賴不可用，返回 None（情報注入 fail-open，不影響主程序）。
-        """
-        _ms = MARKET_SCANNER
-        _sa = SCOUT_AGENT
-        if _ms is None or _sa is None:
-            return None
-
-        def _scan_and_produce_intel() -> None:
-            """
-            Execute one scan cycle and push top opportunities as Scout intel.
-            執行一次掃描週期，將頂部機會推送為 Scout 情報供策略師分析。
-
-            Fail-open: exceptions are caught in ScoutWorker._run_loop(), so
-            this function only needs to raise on genuine failures.
-            Fail-open：ScoutWorker._run_loop() 已捕獲異常，此函數只需在真正失敗時拋出。
-            """
-            opportunities = _ms.scan()
-            if not opportunities:
-                logger.debug(
-                    "ScoutWorker: scan returned no opportunities / 掃描未返回機會，跳過情報注入"
-                )
-                return
-            # Take top-5 opportunities by score to avoid intel flooding.
-            # 取評分最高的前 5 個機會，避免情報洪泛策略師消息隊列。
-            top = sorted(opportunities, key=lambda o: getattr(o, "score", 0.0), reverse=True)[:5]
-            symbols = [getattr(o, "symbol", str(o)) for o in top]
-            summary = ", ".join(
-                f"{getattr(o, 'symbol', '?')}({getattr(o, 'score', 0.0):.2f})"
-                for o in top
-            )
-            _sa.produce_intel(
-                source="ScoutWorker",
-                content=f"30-min periodic scan top opportunities: {summary}",
-                symbols=symbols,
-                relevance_score=0.6,
-                freshness_seconds=0,
-                metadata={"trigger": "scout_worker_30min", "total_opportunities": len(opportunities)},
-            )
-            logger.info(
-                "ScoutWorker: intel produced for %d symbols (top 5 of %d opportunities) "
-                "/ ScoutWorker：已為 %d 個幣種生成情報（%d 個機會中的前 5）",
-                len(symbols), len(opportunities), len(symbols), len(opportunities),
-            )
-
-        return _scan_and_produce_intel
-
-    _scout_scan_fn = _make_scout_scan_fn()
-    if _scout_scan_fn is not None:
-        _SCOUT_WORKER = _ScoutWorkerClass(scan_fn=_scout_scan_fn)
-        _SCOUT_WORKER.start()
-        logger.info(
-            "ScoutWorker initialized and started (30-min intel injection) "
-            "/ ScoutWorker 已初始化並啟動（30 分鐘情報注入）"
-        )
-    else:
-        logger.warning(
-            "ScoutWorker not started: MARKET_SCANNER or SCOUT_AGENT unavailable "
-            "/ ScoutWorker 未啟動：MARKET_SCANNER 或 SCOUT_AGENT 不可用"
-        )
-except Exception as _scout_worker_exc:
-    # Scout intel injection failure is non-fatal; main pipeline continues.
-    # Scout 情報注入失敗不影響主程序；繼續運行。
-    logger.warning(
-        "ScoutWorker initialization failed (non-fatal): %s "
-        "/ ScoutWorker 初始化失敗（非致命）：%s",
-        type(_scout_worker_exc).__name__,
-        _scout_worker_exc,
-    )
-    _SCOUT_WORKER = None
-
-# --- Wire ScoutAgent + MessageBus into scout_routes ---
-try:
-    from . import scout_routes
-    scout_routes.set_scout_agent(SCOUT_AGENT)
-    scout_routes.set_message_bus(MESSAGE_BUS)
-    # Batch 9: Wire PerceptionPlane into scout_routes for cognitive level marking
-    # Batch 9：将感知平面接入 scout 路由用于认知级别标记
-    try:
-        from .paper_trading_routes import PERCEPTION_PLANE as _PP_FOR_SCOUT
-        if _PP_FOR_SCOUT is not None:
-            scout_routes.set_perception_plane(_PP_FOR_SCOUT)
-    except ImportError:
-        pass
-    logger.info("ScoutAgent + MessageBus (+ PerceptionPlane) wired to scout_routes / Scout 代理 + 消息总线（+ 感知平面）已接入 scout 路由")
-except Exception as e:
-    logger.warning("Could not wire scout_routes: %s", e)
-
-
-# ── E1: Auto-Observation Writer (writes observations after each round-trip trade) ──
-# E1：自动观察写入器（每轮交易结束后写入观察）
-try:
-    import time as _time_mod
-    from . import main_legacy as _ml
-
-    def _write_auto_observation(
-        symbol: str,
-        strategy_name: str,
-        close_pnl: float,
-        hold_ms: int,
-        regime: str,
-    ) -> None:
-        """Write a trading observation to the learning state after each round-trip."""
-        try:
-            outcome = "win" if close_pnl > 0 else ("loss" if close_pnl < 0 else "breakeven")
-            hold_h = hold_ms / 3_600_000
-            obs_text = (
-                f"[Auto] {strategy_name} on {symbol}: {outcome} "
-                f"PnL={close_pnl:+.4f} USDT, hold={hold_h:.2f}h, regime={regime}"
-            )
-
-            def mutator(state):
-                import uuid
-                ts = int(_time_mod.time() * 1000)
-                record = {
-                    "observation_id": f"auto:{uuid.uuid4().hex[:12]}",
-                    "observation_ts_ms": ts,
-                    "observation_type": "trade_outcome",
-                    "confidence_level": "fact",
-                    "title": f"Trade: {strategy_name}/{symbol} → {outcome}",
-                    "detail": obs_text,
-                    "related_hypothesis_id": None,
-                    "tags": ["auto", "trade", strategy_name, symbol, outcome, regime],
-                }
-                ls = state.setdefault("learning_state", {})
-                ls.setdefault("observation_summary", {}).setdefault("last_observation_ts_ms", None)
-                ls["observation_summary"]["last_observation_ts_ms"] = ts
-                ls.setdefault("records", {}).setdefault("observations", []).append(record)
-                return state
-
-            _ml.STORE.mutate(mutator)
-        except Exception:
-            pass  # non-fatal, best-effort
-
-    # DEAD-PY-2: observation writer no longer injected into PipelineBridge (PIPELINE_BRIDGE = None).
-    pass
-except Exception as _e1_e:
-    logger.info("Auto-observation writer not wired: %s", _e1_e)
+_scanner_result = _wire_scanner(
+    orchestrator=ORCHESTRATOR,
+    kline_manager=KLINE_MANAGER,
+    paper_engine=PAPER_ENGINE,
+    scout_agent=SCOUT_AGENT,
+    message_bus=MESSAGE_BUS,
+)
+MARKET_SCANNER = _scanner_result.market_scanner
+AUTO_DEPLOYER = _scanner_result.auto_deployer
+_SCOUT_WORKER = _scanner_result.scout_worker
 
 
 # ── Auto-start market feed based on global mode ──
