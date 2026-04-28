@@ -248,6 +248,18 @@ app.include_router(executor_router)
 from .strategist_promote_routes import strategist_promote_router  # noqa: E402
 app.include_router(strategist_promote_router)
 
+# ── Agent Roster Router / Agent 追蹤視圖路由（Plan aa-nifty-walrus T1）──
+# Read-only aggregator for the 5 runtime agents (Scout/Strategist/Guardian/
+# Executor/Analyst). Backs the GUI Learning Cockpit "AI 团队工作台" sub-section.
+# Composes Strategist `summary_zh` server-side so the GUI never templates raw
+# JSON (UX A-grade contract per plan §"後端配合"). Pure read; no new SQL
+# migration (uses V010 `(scope, time DESC)` index on `learning.ai_usage_log`).
+# 只讀聚合 5 個 runtime Agent 給 Learning Cockpit "AI 团队工作台" 子分頁。
+# Strategist summary_zh 後端組句（plan §"後端配合" UX A 級合約）；無新 SQL
+# migration（沿用 V010 既有索引）。純讀，0 寫入面。
+from .agents_routes import agents_router  # noqa: E402
+app.include_router(agents_router)
+
 # ── Startup Integrity Check / 啟動完整性驗證 ────────────────────────────────
 # Verify that non-optional critical dependencies were successfully injected at
 # module initialisation time.  H0_GATE is allowed to be None in degraded /
