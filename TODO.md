@@ -1,6 +1,8 @@
 # OpenClaw TODO — 工作清單（v3 · 單一時間軸版）
 
-**最後更新**：2026-04-28 CEST（**🎉 Wave A Prep-Gate Trio COMPLETE — sticky-ts + LOSSES-WIRING + spawn-test**：5 commits `82347a5..a6bf090` pushed origin/main；Linux post-merge cargo lib **2290 / 0** + 新 daemon test **11/0**（base 6 + sticky 2 + spawn 3）+ pytest **199/0** + healthcheck **27 PASS / 1 WARN [11] pre-existing / 0 FAIL**；**G3-09-FUP sticky_triggered_at_ms 結案**（commit `9303a3b`：mod.rs daemon body 4-arm match enforce sticky；解 advisor.rs:114-120 doc/code drift；Phase B Shadow dedup 安全）；**G8-01-FUP-LOSSES-WIRING 結案**（commit `aced662`：Hybrid Option 1 Analyst→Strategist callback；wire `_stats["consecutive_losses"]`；breakeven `<= 0` per PM decision align `feedback_micro_profit_fix_intent`；W1 結構修轉行為修）；**G3-09-PHASE-B-FUP-SPAWN-TEST 結案**（commit `22c57dc`：3 cases A/B/C wrapper-reproduction pattern + bilingual MODULE_NOTE line-anchor parity；0 production diff）；4 新 FUP filed（G3-09-DAEMON-TEST-SPLIT P3 / G3-09-FUP-CASE-D-H5-WAIT P3 / G8-01-FUP-REGRET-DREAM-WIRING P2 / G3-09-PA-DOCSTRING-CLARIFY P4）；**G3-09 Phase B impl Wave 1 + G8-01 W2 + W3 三主軸 NOW ACTIONABLE**；Sign-off `docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-28--wave_a_prep_gate_signoff.md`）
+**最後更新**：2026-04-28 CEST 晚（**🎉 Wave B COMPLETE — G3-09 Phase B Wave 1 + G8-01 W2 100% cov + W3 7 scenarios**：10 commits `cf34e96..dbe2477` pushed origin/main（含 1 hotfix round 解 2 Linux-only BLOCKERs）；Linux re-regression cargo lib **2299/0** + daemon **11/0** + persistence Linux PG **2/0** + V026 idempotency **1st OK + 2nd/3rd 0 RAISE** + W3 same-session **51/51** forward+reverse + pytest **141/0** + healthcheck **32 PASS / 1 WARN [11] / 0 FAIL** + V026 Guard **6/6**；**G3-09 Phase B Wave 1 結案**（commit `31761a6` impl + `00db240` hotfix：V026 hypertable + 4 indexes + Guard A/B + 30d retention with integer_now_func + Rust mod.rs daemon INSERT path tokio::spawn fire-and-forget + DbSlot late-inject pattern + healthcheck split + observation tooling ~2293 LOC + 5-arg backward-compat shim）；**G8-01 W2 結案**（commit `99ac0b4`：100% line cov 86/86 stmts，22 case → 26 sub-tests，PA RFC §3.2 設計達標 +15 points）；**G8-01 W3 結案**（commit `4a5b1d6`：7 integration scenarios + H-1 critical fix sys.modules stub → importer-side `unittest.mock.patch("app.h_state_query_handler.strategy_wiring", ...)` dual-patch + finally restore + strict ==3 assertion，51/51 same-session reproducible）；**G8-01-FUP-REGRET-DREAM ESCALATED**（commit `cf34e96`：concept 完全 dead，OpportunityTracker/DreamEngine RC-11 deleted，PA Option C defer，新 P3 G8-01-FUP-REGRET-DREAM-DEFERRED ticket）；3 新 FUP filed（G3-09-FUP-MAIN-RS-SPLIT P3 / G3-09-FUP-MAIN-BOOT-TASKS-SPLIT P2 / STRATEGIST-SINGLETON-POLLUTION P3）；7 ticket 結案；**G3-09 Phase B observation period + Phase C gate 設計 + G8-01 modulator behavior baseline 全 NOW ACTIONABLE**；Sign-off `docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-28--wave_b_signoff.md`）
+
+**前次更新**：2026-04-28 CEST 早（Wave A Prep-Gate Trio COMPLETE — sticky-ts + LOSSES-WIRING + spawn-test，5 commits `82347a5..a6bf090`，Sign-off `docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-28--wave_a_prep_gate_signoff.md`）
 
 **前次更新**：2026-04-27 23:55 CEST（Three-Axes Wave COMPLETE — MAF-SPLIT P1 + G8-01 W1 + G3-09 daemon test，5 commits `6e466c8..7c32d1f`，Sign-off `docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-27--three_axes_wave_signoff.md`）
 
@@ -19,7 +21,30 @@
 
 ---
 
-## 🎯 此刻該做什麼（2026-04-28 CEST · 🎉 Wave A Prep-Gate COMPLETE · NOW ACTIONABLE: G3-09 Phase B impl + G8-01 W2 + W3）
+## 🎯 此刻該做什麼（2026-04-28 CEST 晚 · 🎉 Wave B COMPLETE · NOW ACTIONABLE: Phase B observation + Phase C gate + engine deploy）
+
+**Wave B 結案**（10 commits `cf34e96..dbe2477` pushed origin/main）：
+- ✅ **G3-09 Phase B Wave 1** (commits `31761a6` + `00db240` hotfix) — V026 hypertable + Rust INSERT path + DbSlot late-inject + healthcheck split + observation tooling ~2293 LOC；TimescaleDB 2.x integer_now_func 規範到位；Linux V026 idempotency RESTORED
+- ✅ **G8-01 W2 100% cov** (commit `99ac0b4`) — 86/86 stmts，PA RFC §3.2 22 case → 26 sub-tests
+- ✅ **G8-01 W3 7 integration scenarios** (commit `4a5b1d6`) — H-1 critical fix sys.modules stub → importer-side patch；51/51 same-session reproducible
+- ✅ **G8-01-FUP-REGRET-DREAM ESCALATED** (commit `cf34e96`) — concept dead，Option C defer
+- ✅ Linux re-regression cargo lib **2299/0** + daemon **11/0** + persistence Linux PG **2/0** + V026 idempotency 0 RAISE + W3 51/51 + pytest **141/0** + healthcheck **32 PASS / 1 WARN / 0 FAIL** + V026 Guard **6/6**
+
+**NOW ACTIONABLE**（依賴鏈全清）：
+1. **G3-09 Phase B observation period** — env=1 + RiskConfig.cost_edge.enabled=true → daemon 寫 V026 rows / healthcheck [30] frequency sanity active；建議 ≥48h 連續觀察 + per-strategy trigger 分布 sanity
+2. **G3-09 Phase C gate 新倉** — Phase B 觀察數據 + sticky timestamp + INSERT path 護欄全到位，可派 PA Phase C RFC（per Phase B RFC §7.3 路線圖）
+3. **engine deploy** — Phase B Wave 1 advisory only / 0 trade impact，可待下次 cron `--rebuild` 一併 deploy（不需立即重啟 engine PID）
+
+**Next session 立即可派候選**：
+1. **G3-09 Phase C PA RFC**（PA design ~1d，per Phase B RFC §7.3）— intent gate 設計 + 新倉 reject 邏輯
+2. **engine `--rebuild` deploy**（operator 手動 ssh trade-core "bash helper_scripts/restart_all.sh --rebuild"）— 可在 Phase C impl 前先把 Wave A+B 全 binary 進 runtime
+3. **Wave B 3 follow-up FUP**：G3-09-FUP-MAIN-RS-SPLIT P3 / G3-09-FUP-MAIN-BOOT-TASKS-SPLIT P2 / STRATEGIST-SINGLETON-POLLUTION P3
+
+詳：[Wave B Sign-off](docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-28--wave_b_signoff.md)
+
+---
+
+## 🎯 上一波（保留供查 · 2026-04-28 CEST · 🎉 Wave A Prep-Gate COMPLETE · NOW ACTIONABLE: G3-09 Phase B impl + G8-01 W2 + W3）
 
 **Wave A Prep-Gate 結案**（5 commits `82347a5..a6bf090` pushed origin/main）：
 - ✅ **G3-09-FUP sticky_triggered_at_ms** (commit `9303a3b`) — daemon enforce 4-arm sticky；Phase B Shadow dedup 安全
