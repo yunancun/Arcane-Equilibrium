@@ -56,6 +56,8 @@ EDGE_P3_FEATURE_NAMES = (
     "is_funding_settlement_window",
 )
 
+VALID_ENGINE_MODES = ("paper", "demo", "live", "live_demo")
+
 
 def extract_training_data(
     pg_url: Optional[str] = None,
@@ -425,7 +427,7 @@ def load_training_data(
             per call). Named `strategy_type` to match the existing
             `run_training_pipeline.PipelineConfig.strategy_type` field.
         dsn: PG DSN override; falls back to env vars.
-        engine_mode: "paper" | "demo" | "live". Default "demo" per §8.2.
+        engine_mode: "paper" | "demo" | "live" | "live_demo". Default "demo" per §8.2.
         max_age_days: trailing-window size (90d default, covers 12 weeks
             of fills — enough for LGBM quantile training per strategy).
 
@@ -538,7 +540,7 @@ def export_decision_features_parquet(
         assert _DATE_RE.match(start_str) and _DATE_RE.match(end_str), "date format violation"
 
         # SEC-B02: engine_mode constrained to literal set; no injection surface.
-        if engine_mode not in ("paper", "demo", "live"):
+        if engine_mode not in VALID_ENGINE_MODES:
             return {"success": False, "error": f"invalid engine_mode: {engine_mode!r}"}
 
         conn = duckdb.connect()

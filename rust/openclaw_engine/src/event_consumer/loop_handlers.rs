@@ -22,6 +22,7 @@ use std::ops::ControlFlow;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use super::funding_settlement::{apply_and_emit_funding_settlement, is_funding_execution};
 use super::handlers;
 use super::pending_sweep::{self, classify_pending_sweep, PendingSweepAction};
 use super::types::{ExchangeEvent, PendingOrder};
@@ -431,6 +432,19 @@ pub(super) async fn handle_exchange_event(
             let exec_qty: f64 = exec.exec_qty.parse().unwrap_or(0.0);
             let exec_price: f64 = exec.exec_price.parse().unwrap_or(0.0);
             let exec_ts: u64 = exec.exec_time.parse().unwrap_or(0);
+
+            if is_funding_execution(&exec) {
+                let emitted = apply_and_emit_funding_settlement(pipeline, &exec, order_tx).await;
+                snapshot_writer.force_write(&pipeline.snapshot());
+                tracing::info!(
+                    exec_id = %exec.exec_id,
+                    symbol = %exec.symbol,
+                    engine_mode = %pipeline.effective_engine_mode(),
+                    ledger_emitted = emitted,
+                    "funding settlement applied / 資金費結算已套用"
+                );
+                return;
+            }
 
             // P0-1 fix: Match fill via order_id → order_link_id mapping.
             // OrderUpdate populates the mapping, Fill uses it.
@@ -842,6 +856,7 @@ pub(super) fn handle_tick_event(
             "balance": snap.balance,
             "positions": snap.positions.len(),
             "realized_pnl": snap.total_realized_pnl,
+            "funding_pnl": snap.total_funding_pnl,
         }));
         tracing::info!(
             symbol = %ev.symbol,

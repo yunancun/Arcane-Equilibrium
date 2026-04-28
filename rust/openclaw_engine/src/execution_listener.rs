@@ -315,6 +315,7 @@ mod tests {
                 exec_fee: "0.01".into(),
                 exec_type: "Trade".into(),
                 exec_time: "1700000000000".into(),
+                ..Default::default()
             }))
             .await
             .unwrap();
@@ -449,6 +450,7 @@ mod tests {
             exec_fee: "0.1".into(),
             exec_type: "Trade".into(),
             exec_time: "1700000000000".into(),
+            ..Default::default()
         }))
         .await
         .unwrap();
@@ -500,6 +502,7 @@ mod tests {
             exec_fee: "0.1".into(),
             exec_type: "Trade".into(),
             exec_time: "1700000000000".into(),
+            ..Default::default()
         }))
         .await
         .unwrap();

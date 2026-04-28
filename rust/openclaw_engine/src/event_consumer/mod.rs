@@ -9,6 +9,7 @@
 
 mod bootstrap;
 mod dispatch;
+mod funding_settlement;
 mod governor_cooldown;
 pub mod handlers;
 mod loop_handlers;

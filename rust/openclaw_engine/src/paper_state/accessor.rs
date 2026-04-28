@@ -459,6 +459,12 @@ impl PaperState {
         self.total_realized_pnl
     }
 
+    /// Read total cumulative funding settlement PnL.
+    /// 讀取累計資金費結算損益。
+    pub fn total_funding_pnl(&self) -> f64 {
+        self.total_funding_pnl
+    }
+
     /// Read total round-trip count (= number of close fills applied).
     /// 讀取完成的 round-trip 數（= 已套用的平倉成交數）。
     pub fn trade_count(&self) -> u32 {
@@ -480,5 +486,17 @@ impl PaperState {
         }
         self.balance -= fee;
         self.total_fees += fee;
+    }
+
+    /// Apply a signed funding settlement amount to account equity.
+    /// 將帶正負號的資金費結算套用到帳戶權益。
+    pub fn apply_funding_settlement(&mut self, amount: f64) -> bool {
+        if !amount.is_finite() || amount == 0.0 {
+            return false;
+        }
+        self.balance += amount;
+        self.total_funding_pnl += amount;
+        self.peak_balance = self.peak_balance.max(self.balance);
+        true
     }
 }

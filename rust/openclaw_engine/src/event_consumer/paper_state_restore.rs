@@ -69,9 +69,10 @@ pub(crate) async fn restore_paper_counters(
                 engine_mode = em,
                 total_realized_pnl = pipeline.paper_state.total_realized_pnl(),
                 total_fees = pipeline.paper_state.total_fees(),
+                total_funding_pnl = pipeline.paper_state.total_funding_pnl(),
                 trade_count = pipeline.paper_state.trade_count(),
-                "QoL-1: paper_state counters restored from trading.fills \
-                 / 已從 trading.fills 還原 paper_state 累計指標"
+                "QoL-1: paper_state counters restored from trading.fills + funding ledger \
+                 / 已從 trading.fills + funding ledger 還原 paper_state 累計指標"
             );
         }
         Err(e) => {
