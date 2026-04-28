@@ -200,6 +200,19 @@ pub fn spawn_cost_edge_advisor(
         );
 
         let mut prev_status = CostEdgeAdvisorStatus::Uninitialized;
+        // Sticky timestamp of the *current* contiguous Trigger run. `0` when
+        // we are not currently in Trigger. Set to `now_ms` on the OK→Trigger
+        // (or any non-Trigger → Trigger) transition, preserved across
+        // subsequent Trigger→Trigger evaluate cycles, cleared on
+        // Trigger→non-Trigger transition. Pure-fn `evaluate()` cannot know
+        // the previous status — the daemon owns this history (see
+        // advisor.rs §"`triggered_at_ms`" docstring).
+        // 當前連續 Trigger 區段的 sticky 時戳。非 Trigger 時為 `0`；
+        // 任意 non-Trigger → Trigger 時設為 `now_ms`，後續 Trigger→Trigger
+        // 評估保留不變，Trigger → non-Trigger 時清零。Pure fn 無 prev
+        // status 概念，由 daemon 持有此歷史（見 advisor.rs §triggered_at_ms
+        // docstring）。
+        let mut sticky_triggered_at_ms: i64 = 0;
 
         loop {
             tokio::select! {
@@ -215,7 +228,50 @@ pub fn spawn_cost_edge_advisor(
                     let snapshot = h_state_cache.snapshot();
                     let is_stale = h_state_cache.is_stale();
 
-                    let new_state = advisor::evaluate(&snapshot, cfg, is_stale, unix_now_ms());
+                    let mut new_state = advisor::evaluate(&snapshot, cfg, is_stale, unix_now_ms());
+
+                    // Sticky `triggered_at_ms` enforcement (G3-09-PHASE-B-FUP
+                    // 2026-04-28). `evaluate()` is pure and always returns
+                    // `triggered_at_ms = now_ms` for any Trigger state — that
+                    // is correct for the *first* Trigger but would
+                    // overwrite the entry timestamp on every subsequent
+                    // Trigger→Trigger cycle. Phase B observation, dedup
+                    // analytics, and the `last_trigger_ms` rolling counter
+                    // all rely on the sticky semantics ("when did this
+                    // Trigger episode begin"), so the daemon overrides
+                    // `triggered_at_ms` here to preserve the original
+                    // entry timestamp across contiguous Trigger cycles.
+                    // Sticky `triggered_at_ms` 強制（G3-09-PHASE-B-FUP，
+                    // 2026-04-28）。`evaluate()` 為 pure fn，Trigger 永遠回
+                    // `triggered_at_ms = now_ms` — 首次進 Trigger 正確，但連續
+                    // Trigger→Trigger 會每 cycle 蓋掉「進入時間」。Phase B
+                    // observation / dedup analytics / `last_trigger_ms` rolling
+                    // counter 全依賴 sticky 語意（「此 Trigger 區段何時開始」），
+                    // daemon 在此覆寫 `triggered_at_ms` 保留 contiguous Trigger
+                    // 區段的原始進入時戳。
+                    match (&prev_status, &new_state.status) {
+                        // Continuing Trigger run — preserve original entry timestamp.
+                        // 持續 Trigger 區段 — 保留原進入時戳。
+                        (CostEdgeAdvisorStatus::Trigger, CostEdgeAdvisorStatus::Trigger) => {
+                            new_state.triggered_at_ms = sticky_triggered_at_ms;
+                        }
+                        // Entering Trigger from any other state — record entry timestamp.
+                        // 從其他狀態進入 Trigger — 記錄進入時戳。
+                        (_, CostEdgeAdvisorStatus::Trigger) => {
+                            sticky_triggered_at_ms = new_state.triggered_at_ms;
+                        }
+                        // Leaving Trigger — clear sticky timestamp so the next entry
+                        // captures a fresh `now_ms` (state factories already set
+                        // `triggered_at_ms = 0` for non-Trigger variants).
+                        // 離開 Trigger — 清零 sticky；下次進入會抓新 `now_ms`
+                        // （state factory 對 non-Trigger 變體已預設 0）。
+                        (CostEdgeAdvisorStatus::Trigger, _) => {
+                            sticky_triggered_at_ms = 0;
+                        }
+                        // Non-Trigger → non-Trigger — no-op for sticky timestamp.
+                        // 非 Trigger → 非 Trigger — sticky 不動。
+                        _ => {}
+                    }
 
                     // Emit transition log on any status change. Trigger
                     // events get a richer warn-level log carrying ratio +
@@ -233,6 +289,7 @@ pub fn spawn_cost_edge_advisor(
                                     data_days = new_state.data_days,
                                     ai_spend_7d_usd = new_state.ai_spend_7d_usd,
                                     paper_pnl_7d_usd = new_state.paper_pnl_7d_usd,
+                                    triggered_at_ms = new_state.triggered_at_ms,
                                     phase = "A_advisory",
                                     "cost_edge_advisor TRIGGER (Phase A advisory only — \
                                      no trade impact) / cost_edge_advisor 觸發 \

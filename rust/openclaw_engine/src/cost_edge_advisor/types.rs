@@ -134,11 +134,16 @@ pub struct CostEdgeAdvisorState {
     /// Unix ms when this state was computed (advisor-side).
     /// 此 state 在 advisor 端計算時的 unix 毫秒。
     pub last_eval_ms: i64,
-    /// Unix ms when status first entered the current `Trigger` state.
-    /// `0` when status is not `Trigger` (or transition timestamp unknown
-    /// at evaluation time — daemon backfills on transition).
-    /// 進入當前 `Trigger` 狀態的 unix 毫秒；非 Trigger 時為 `0`。Daemon 在
-    /// 狀態轉換時 backfill。
+    /// Unix ms when status first entered the current contiguous `Trigger`
+    /// run (sticky across Trigger→Trigger cycles). `0` when status is not
+    /// `Trigger`. Daemon enforces stickiness in mod.rs ~L240: pure
+    /// `evaluate()` always returns `now_ms`; daemon overwrites with the
+    /// previously stored timestamp on Trigger→Trigger cycles, preserves
+    /// `now_ms` on the entering transition, and resets to `0` on exit.
+    /// 進入當前 contiguous `Trigger` 區段的 unix 毫秒（Trigger→Trigger sticky）；
+    /// 非 Trigger 時為 `0`。Daemon 在 mod.rs 約 L240 強制 sticky：pure
+    /// `evaluate()` 永遠回 `now_ms`，daemon 於 Trigger→Trigger 覆寫為前次儲存值，
+    /// 進入時保留 `now_ms`，退出時清 `0`。
     pub triggered_at_ms: i64,
 }
 
