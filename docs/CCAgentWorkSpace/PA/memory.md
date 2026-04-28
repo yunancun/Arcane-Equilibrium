@@ -924,3 +924,41 @@ W2 unit cov ≥85%（22 case，零 mock）+ W3 integration ≥5 case（7 留 buf
 
 ### 報告路徑
 📄 `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-04-28--strategist_singleton_pollution_investigation.md`
+
+---
+
+## 2026-04-28 PA+E1 SINGLETON-SIBLING fix (executor + strategist) 合一完成
+
+### 任務範圍
+- 2 ticket：SINGLETON-POLLUTION-EXECUTOR-SHADOW-TOGGLE-API P3 (17 fail) + STRATEGIST-PROMOTE-API P3 (18 fail)
+- 主會話授權「PA design + 直接 E1 寫碼 + sanity test」三角合一
+- 邊界：嚴禁碰第 3 個 ticket (test_phase2_routes P4 Mac-only)；若 root cause 非 sibling-pollution → escalate
+
+### 結論
+- **17→0 + 18→0 = 35 fail 全消** ✅
+- **同 sibling-pollution family（同 polluter `test_api_contract::build_client`），但 root cause 與 W3 SINGLETON 不同**：
+  - W3：`from PKG import SUB` attribute precedence (h_state_query)
+  - 本 wave：**FastAPI `Depends(base.current_actor)` route-build-time freeze callable**，reload main_legacy 後 `current_actor` 變新 fn obj，但 router 內 frozen 仍是舊 → `dependency_overrides` 對不上 → 401
+- **Fix = Option A only（test fixture）**：`_make_app` 內 `importlib.reload(executor_routes / strategist_promote_routes)` 重建 router 使 Depends 重新 freeze
+- **Option B 不適用**：production code 改 Depends 會破壞 FastAPI introspection — Depends freeze 是設計語意，非 bug
+- 0 production code 改動，2 test 檔 +42 -4 line
+
+### 驗證
+- 隔離跑：35/35 PASS
+- Same-session（含 polluter）：53/53 PASS（test_api_contract 18 + executor 17 + strategist 18）
+- 完整 control_api_v1：38 fail → 3 fail（剩 phase2_routes 3 個 out-of-scope per ticket bound）
+- W1+W2+W3+SINGLETON regression（h_state + cognitive_integration + api_contract）：116/116 PASS
+
+### 教訓
+- **「Sibling-pollution family」不是單一機制** — 同 polluter (importlib.reload) 可觸發**多種**下游模式（attribute precedence、Depends freeze、可能還有更多未發現），future fix 不可預設「同 W3 fix pattern」即可
+- **FastAPI Depends + importlib.reload 是已知陷阱**：`Depends(callable)` 在 route 建構期解 callable obj reference，後續 reload 換新 obj 不會傳遞給 frozen Depends
+- **Test fixture pattern 必備**：任何 `_make_app(...)` style helper 凡 `app.dependency_overrides[base.X]`，若 sibling 可能 reload base，必先 reload route module 重建 router
+- **PA+E1 合一適用情境**：root cause 簡單 + 改動 isolated test 端 + 已有 W3 fix 範本 — 跳過獨立 E1 派發省時，但**仍要驗 baseline 與規劃 fix option 對齊**才動手
+
+### Follow-up（主會話）
+- Commit + push 兩 test 檔 + 本報告
+- Linux ssh trade-core 端再驗 53 PASS
+- 補 memory `feedback_fastapi_depends_reload_freeze.md`（跨 session 偏好）
+
+### 報告路徑
+📄 `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-04-28--singleton_sibling_fix_executor_promote.md`
