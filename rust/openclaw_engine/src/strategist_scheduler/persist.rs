@@ -139,17 +139,16 @@ pub async fn load_latest_applied_params(
     // STRATEGIST-PERSIST-TIE-BREAK-1（V020）：加 `id DESC` tie-break，
     // 並發同 ms 寫入時取 id 最大者（最晚寫入），確定性勝出。
     // DISTINCT ON 配合索引取每組最新 1 row。
-    let rows: Vec<(String, serde_json::Value)> =
-        sqlx::query_as::<_, (String, serde_json::Value)>(
-            "SELECT DISTINCT ON (engine_mode, strategy_name) \
+    let rows: Vec<(String, serde_json::Value)> = sqlx::query_as::<_, (String, serde_json::Value)>(
+        "SELECT DISTINCT ON (engine_mode, strategy_name) \
                 strategy_name, params_json \
              FROM learning.strategist_applied_params \
              WHERE engine_mode = $1 \
              ORDER BY engine_mode, strategy_name, applied_at_ms DESC, id DESC",
-        )
-        .bind(engine_mode)
-        .fetch_all(pool)
-        .await?;
+    )
+    .bind(engine_mode)
+    .fetch_all(pool)
+    .await?;
 
     let out: Vec<(String, String)> = rows
         .into_iter()
@@ -223,14 +222,7 @@ mod tests {
         // 模擬 DB 停擺：persist 必須回 Ok(())，不然會觸發 retry 噴 log。
         let (ai, pool, cancel) = mk_deps();
         let (tune_tx, _tune_rx) = tokio::sync::mpsc::unbounded_channel();
-        let sched = StrategistScheduler::new(
-            ai,
-            tune_tx,
-            PipelineKind::Demo,
-            None,
-            pool,
-            cancel,
-        );
+        let sched = StrategistScheduler::new(ai, tune_tx, PipelineKind::Demo, None, pool, cancel);
 
         let prev = serde_json::json!({"cooldown_ms": 50000.0});
         let applied = serde_json::json!({"cooldown_ms": 55000.0});
@@ -315,8 +307,7 @@ mod tests {
              'applied_at_ms DESC' — DESC 方向是拿「最新」 applied_at_ms 的關鍵"
         );
         assert!(
-            PERSIST_SRC
-                .contains("ORDER BY engine_mode, strategy_name, applied_at_ms DESC"),
+            PERSIST_SRC.contains("ORDER BY engine_mode, strategy_name, applied_at_ms DESC"),
             "load_latest_applied_params SQL ORDER BY must exactly match \
              DISTINCT ON target columns + applied_at_ms DESC tiebreak — \
              ORDER BY 前綴必須同 DISTINCT ON 目標欄，最後以 applied_at_ms DESC \

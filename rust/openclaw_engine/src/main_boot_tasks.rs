@@ -15,14 +15,13 @@
 
 use crate::startup::ExchangePipelineBindings;
 use crate::tasks;
-use openclaw_engine::config::{ConfigStore, RiskConfig};
 use openclaw_engine::database::pool::DbPool;
 use openclaw_engine::h_state_cache::poller::{
     make_invalidation_channel, spawn_h_state_poller, InvalidationSender, StubHStateFetcher,
     DEFAULT_POLL_INTERVAL,
 };
 use openclaw_engine::h_state_cache::{is_gateway_enabled, HStateCache};
-use openclaw_engine::ipc_server::{HStateCacheSlot, PerEngineRiskStores};
+use openclaw_engine::ipc_server::{HStateCacheSlot, LiveCmdSenderSlot, PerEngineRiskStores};
 use openclaw_engine::scanner::registry::SymbolRegistry;
 use openclaw_engine::tick_pipeline::PipelineCommand;
 use std::sync::Arc;
@@ -78,7 +77,7 @@ pub(crate) fn spawn_position_reconcilers(
     shared_instruments: &Option<Arc<openclaw_engine::instrument_info::InstrumentInfoCache>>,
     live_bindings: &Option<ExchangePipelineBindings>,
     demo_bindings: &Option<ExchangePipelineBindings>,
-    live_cmd_tx: &Option<tokio::sync::mpsc::UnboundedSender<PipelineCommand>>,
+    live_cmd_slot: &LiveCmdSenderSlot,
     demo_cmd_tx: &Option<tokio::sync::mpsc::UnboundedSender<PipelineCommand>>,
     mirrors: &PositionsMirrors,
 ) {
@@ -104,19 +103,20 @@ pub(crate) fn spawn_position_reconcilers(
     };
 
     if let Some(ref live_b) = live_bindings {
-        if let Some(ref tx) = live_cmd_tx {
-            tasks::spawn_position_reconciler(
-                &live_b.rest_client,
-                db_pool,
-                cancel,
-                tx.clone(),
-                shared_instruments,
-                &live_b.risk_level,
-                live_b.env,
-                Some(build_orphan_cfg("live")),
-            );
-            info!("position_reconciler spawned for Live / Live 持倉對帳器已啟動");
-        }
+        let slot = Arc::clone(live_cmd_slot);
+        let cmd_tx_provider: openclaw_engine::position_reconciler::ReconcilerCommandTxProvider =
+            Arc::new(move || slot.read().as_ref().cloned());
+        tasks::spawn_position_reconciler_with_cmd_provider(
+            &live_b.rest_client,
+            db_pool,
+            cancel,
+            cmd_tx_provider,
+            shared_instruments,
+            &live_b.risk_level,
+            live_b.env,
+            Some(build_orphan_cfg("live")),
+        );
+        info!("position_reconciler spawned for Live / Live 持倉對帳器已啟動");
     }
     if let Some(ref demo_b) = demo_bindings {
         if let Some(ref tx) = demo_cmd_tx {
@@ -172,7 +172,7 @@ pub(crate) async fn spawn_strategist_scheduler(
     db_pool: &Arc<DbPool>,
     cancel: &CancellationToken,
     demo_cmd_tx: &Option<tokio::sync::mpsc::UnboundedSender<PipelineCommand>>,
-    live_cmd_tx: &Option<tokio::sync::mpsc::UnboundedSender<PipelineCommand>>,
+    live_cmd_slot: &LiveCmdSenderSlot,
     risk_stores: &PerEngineRiskStores,
 ) -> Option<Arc<openclaw_engine::strategist_scheduler::CycleCounters>> {
     let Some(demo_tx) = demo_cmd_tx.as_ref() else {
@@ -215,23 +215,22 @@ pub(crate) async fn spawn_strategist_scheduler(
     // 改為：DB 載入在主執行緒（小查詢，毫秒級），IPC 派送 + 等待回應改丟
     // tokio::spawn，不阻塞主執行緒推進到 pipeline spawn。
     let demo_mode = openclaw_engine::tick_pipeline::PipelineKind::Demo.db_mode();
-    let restored = match openclaw_engine::strategist_scheduler::load_latest_applied_params(
-        db_pool, demo_mode,
-    )
-    .await
-    {
-        Ok(rows) => rows,
-        Err(e) => {
-            warn!(
-                error = %e,
-                engine_mode = %demo_mode,
-                "STRATEGIST-PARAMS-PERSIST-1: restore query failed (fail-soft, \
-                 continuing with TOML baseline) \
-                 / 恢復查詢失敗（容錯跳過，使用 TOML baseline 啟動）"
-            );
-            Vec::new()
-        }
-    };
+    let restored =
+        match openclaw_engine::strategist_scheduler::load_latest_applied_params(db_pool, demo_mode)
+            .await
+        {
+            Ok(rows) => rows,
+            Err(e) => {
+                warn!(
+                    error = %e,
+                    engine_mode = %demo_mode,
+                    "STRATEGIST-PARAMS-PERSIST-1: restore query failed (fail-soft, \
+                     continuing with TOML baseline) \
+                     / 恢復查詢失敗（容錯跳過，使用 TOML baseline 啟動）"
+                );
+                Vec::new()
+            }
+        };
 
     if restored.is_empty() {
         info!(
@@ -308,10 +307,11 @@ pub(crate) async fn spawn_strategist_scheduler(
             ai_client,
             demo_tx.clone(),
             openclaw_engine::tick_pipeline::PipelineKind::Demo,
-            live_cmd_tx.clone(),
+            None,
             Arc::clone(db_pool),
             cancel.clone(),
         )
+        .with_promote_cmd_slot(Arc::clone(live_cmd_slot))
         .with_risk_store(Arc::clone(&risk_stores.demo)),
     );
     // G3-11 STRATEGIST-CYCLE-OBSERVABILITY-1 (2026-04-25): grab the shared
@@ -322,8 +322,9 @@ pub(crate) async fn spawn_strategist_scheduler(
     // G3-11：在 scheduler move 進 run_forever 前抓 CycleCounters Arc，給 IPC server 讀。
     let counters = scheduler.cycle_counters();
     tokio::spawn(scheduler.run_forever());
+    let has_live_promote = live_cmd_slot.read().as_ref().is_some();
     info!(
-        has_live_promote = live_cmd_tx.is_some(),
+        has_live_promote,
         "StrategistScheduler spawned — tune_target=Demo / 策略師排程器已啟動（調諧目標=Demo）",
     );
     Some(counters)
@@ -448,7 +449,7 @@ const EDGE_RELOAD_SIGNAL_BUFFER: usize = 1;
 pub(crate) fn spawn_edge_estimates_reloader_if_enabled(
     paper_cmd_tx: Option<tokio::sync::mpsc::UnboundedSender<PipelineCommand>>,
     demo_cmd_tx: Option<tokio::sync::mpsc::UnboundedSender<PipelineCommand>>,
-    live_cmd_tx: Option<tokio::sync::mpsc::UnboundedSender<PipelineCommand>>,
+    live_cmd_slot: Option<LiveCmdSenderSlot>,
     cancel: &CancellationToken,
 ) -> Option<tokio::sync::mpsc::Sender<()>> {
     if !is_edge_reload_enabled() {
@@ -458,7 +459,7 @@ pub(crate) fn spawn_edge_estimates_reloader_if_enabled(
         );
         return None;
     }
-    if paper_cmd_tx.is_none() && demo_cmd_tx.is_none() && live_cmd_tx.is_none() {
+    if paper_cmd_tx.is_none() && demo_cmd_tx.is_none() && live_cmd_slot.is_none() {
         warn!(
             "edge_estimates_reloader env=1 but no pipeline cmd_tx bound — \
              daemon not spawned / env=1 但無管線 cmd_tx 綁定，daemon 未啟動"
@@ -473,7 +474,7 @@ pub(crate) fn spawn_edge_estimates_reloader_if_enabled(
     tokio::spawn(run_edge_estimates_reloader_loop(
         paper_cmd_tx,
         demo_cmd_tx,
-        live_cmd_tx,
+        live_cmd_slot,
         interval_dur,
         signal_rx,
         cancel_for_task,
@@ -514,7 +515,7 @@ fn resolve_reload_interval() -> Duration {
 async fn run_edge_estimates_reloader_loop(
     paper_cmd_tx: Option<tokio::sync::mpsc::UnboundedSender<PipelineCommand>>,
     demo_cmd_tx: Option<tokio::sync::mpsc::UnboundedSender<PipelineCommand>>,
-    live_cmd_tx: Option<tokio::sync::mpsc::UnboundedSender<PipelineCommand>>,
+    live_cmd_slot: Option<LiveCmdSenderSlot>,
     interval_dur: Duration,
     mut signal_rx: tokio::sync::mpsc::Receiver<()>,
     cancel: CancellationToken,
@@ -546,7 +547,7 @@ async fn run_edge_estimates_reloader_loop(
                 "manual"
             }
         };
-        dispatch_reload_command(&paper_cmd_tx, &demo_cmd_tx, &live_cmd_tx, trigger_label);
+        dispatch_reload_command(&paper_cmd_tx, &demo_cmd_tx, &live_cmd_slot, trigger_label);
     }
 }
 
@@ -555,17 +556,27 @@ async fn run_edge_estimates_reloader_loop(
 fn dispatch_reload_command(
     paper_cmd_tx: &Option<tokio::sync::mpsc::UnboundedSender<PipelineCommand>>,
     demo_cmd_tx: &Option<tokio::sync::mpsc::UnboundedSender<PipelineCommand>>,
-    live_cmd_tx: &Option<tokio::sync::mpsc::UnboundedSender<PipelineCommand>>,
+    live_cmd_slot: &Option<LiveCmdSenderSlot>,
     trigger: &'static str,
 ) {
     let paper_ok = try_send_reload(paper_cmd_tx, "paper");
     let demo_ok = try_send_reload(demo_cmd_tx, "demo");
-    let live_ok = try_send_reload(live_cmd_tx, "live");
+    let live_ok = try_send_reload_from_slot(live_cmd_slot);
     info!(
         trigger,
-        paper_ok, demo_ok, live_ok,
+        paper_ok,
+        demo_ok,
+        live_ok,
         "F6 PH5-WIRE-1 RELOAD: dispatch fan-out / 重載 fan-out 派發完成"
     );
+}
+
+fn try_send_reload_from_slot(live_cmd_slot: &Option<LiveCmdSenderSlot>) -> bool {
+    let Some(slot) = live_cmd_slot.as_ref() else {
+        return false;
+    };
+    let tx = slot.read().clone();
+    try_send_reload(&tx, "live")
 }
 
 /// EN: Single-pipeline send helper. Returns true on accept, false on
@@ -615,13 +626,11 @@ mod edge_reload_tests {
         std::env::remove_var(ENV_EDGE_RELOAD_FLAG);
         let cancel = CancellationToken::new();
         let (paper_tx, _paper_rx) = make_cmd_channel();
-        let result = spawn_edge_estimates_reloader_if_enabled(
-            Some(paper_tx),
-            None,
-            None,
-            &cancel,
+        let result = spawn_edge_estimates_reloader_if_enabled(Some(paper_tx), None, None, &cancel);
+        assert!(
+            result.is_none(),
+            "spawner must return None when env-gate is unset"
         );
-        assert!(result.is_none(), "spawner must return None when env-gate is unset");
     }
 
     #[tokio::test]
@@ -631,12 +640,8 @@ mod edge_reload_tests {
             std::env::set_var(ENV_EDGE_RELOAD_FLAG, val);
             let cancel = CancellationToken::new();
             let (paper_tx, _paper_rx) = make_cmd_channel();
-            let result = spawn_edge_estimates_reloader_if_enabled(
-                Some(paper_tx),
-                None,
-                None,
-                &cancel,
-            );
+            let result =
+                spawn_edge_estimates_reloader_if_enabled(Some(paper_tx), None, None, &cancel);
             assert!(
                 result.is_none(),
                 "spawner must reject env-gate value {:?} (only strict \"1\" enables)",
@@ -666,12 +671,7 @@ mod edge_reload_tests {
         std::env::set_var(ENV_EDGE_RELOAD_INTERVAL_SECS, "60");
         let cancel = CancellationToken::new();
         let (demo_tx, _demo_rx) = make_cmd_channel();
-        let result = spawn_edge_estimates_reloader_if_enabled(
-            None,
-            Some(demo_tx),
-            None,
-            &cancel,
-        );
+        let result = spawn_edge_estimates_reloader_if_enabled(None, Some(demo_tx), None, &cancel);
         assert!(result.is_some(), "spawner must return Some when enabled");
         cancel.cancel();
         tokio::task::yield_now().await;
@@ -687,13 +687,10 @@ mod edge_reload_tests {
         let cancel = CancellationToken::new();
         let (demo_tx, mut demo_rx) = make_cmd_channel();
         let (live_tx, mut live_rx) = make_cmd_channel();
-        let signal_tx = spawn_edge_estimates_reloader_if_enabled(
-            None,
-            Some(demo_tx),
-            Some(live_tx),
-            &cancel,
-        )
-        .expect("daemon spawned");
+        let live_slot: LiveCmdSenderSlot = Arc::new(parking_lot::RwLock::new(Some(live_tx)));
+        let signal_tx =
+            spawn_edge_estimates_reloader_if_enabled(None, Some(demo_tx), Some(live_slot), &cancel)
+                .expect("daemon spawned");
 
         signal_tx.try_send(()).expect("trigger fits buffer-1");
 
@@ -715,26 +712,63 @@ mod edge_reload_tests {
     }
 
     #[tokio::test]
+    async fn manual_trigger_reads_live_slot_dynamically() {
+        let _guard = ENV_GUARD.lock().expect("env guard not poisoned");
+        std::env::set_var(ENV_EDGE_RELOAD_FLAG, "1");
+        std::env::set_var(ENV_EDGE_RELOAD_INTERVAL_SECS, "3600");
+        let cancel = CancellationToken::new();
+        let (paper_tx, mut paper_rx) = make_cmd_channel();
+        let live_slot: LiveCmdSenderSlot = Arc::new(parking_lot::RwLock::new(None));
+        let signal_tx = spawn_edge_estimates_reloader_if_enabled(
+            Some(paper_tx),
+            None,
+            Some(Arc::clone(&live_slot)),
+            &cancel,
+        )
+        .expect("daemon spawned");
+
+        let (live_tx, mut live_rx) = make_cmd_channel();
+        *live_slot.write() = Some(live_tx);
+
+        signal_tx.try_send(()).expect("trigger fits buffer-1");
+
+        let paper_msg = tokio::time::timeout(Duration::from_secs(2), paper_rx.recv())
+            .await
+            .expect("paper recv didn't time out")
+            .expect("paper recv yielded a message");
+        let live_msg = tokio::time::timeout(Duration::from_secs(2), live_rx.recv())
+            .await
+            .expect("live recv didn't time out")
+            .expect("live recv yielded a message");
+        assert!(matches!(paper_msg, PipelineCommand::ReloadEdgeEstimates));
+        assert!(matches!(live_msg, PipelineCommand::ReloadEdgeEstimates));
+
+        cancel.cancel();
+        tokio::task::yield_now().await;
+        std::env::remove_var(ENV_EDGE_RELOAD_FLAG);
+        std::env::remove_var(ENV_EDGE_RELOAD_INTERVAL_SECS);
+    }
+
+    #[tokio::test]
     async fn manual_trigger_coalesces_rapid_requests() {
         let _guard = ENV_GUARD.lock().expect("env guard not poisoned");
         std::env::set_var(ENV_EDGE_RELOAD_FLAG, "1");
         std::env::set_var(ENV_EDGE_RELOAD_INTERVAL_SECS, "3600");
         let cancel = CancellationToken::new();
         let (demo_tx, mut demo_rx) = make_cmd_channel();
-        let signal_tx = spawn_edge_estimates_reloader_if_enabled(
-            None,
-            Some(demo_tx),
-            None,
-            &cancel,
-        )
-        .expect("daemon spawned");
+        let signal_tx =
+            spawn_edge_estimates_reloader_if_enabled(None, Some(demo_tx), None, &cancel)
+                .expect("daemon spawned");
 
         let first = signal_tx.try_send(());
         assert!(first.is_ok(), "first trigger fits");
         for _ in 0..4 {
             let attempt = signal_tx.try_send(());
             assert!(
-                matches!(attempt, Err(tokio::sync::mpsc::error::TrySendError::Full(_))),
+                matches!(
+                    attempt,
+                    Err(tokio::sync::mpsc::error::TrySendError::Full(_))
+                ),
                 "subsequent rapid trigger must coalesce (Full)"
             );
         }
@@ -746,7 +780,10 @@ mod edge_reload_tests {
         assert!(matches!(msg, PipelineCommand::ReloadEdgeEstimates));
 
         let second = tokio::time::timeout(Duration::from_millis(150), demo_rx.recv()).await;
-        assert!(second.is_err(), "rapid trigger must not produce >=2 fan-outs");
+        assert!(
+            second.is_err(),
+            "rapid trigger must not produce >=2 fan-outs"
+        );
 
         cancel.cancel();
         tokio::task::yield_now().await;
@@ -759,7 +796,10 @@ mod edge_reload_tests {
         let (tx, rx) = make_cmd_channel();
         drop(rx);
         let result = try_send_reload(&Some(tx), "demo");
-        assert!(!result, "try_send_reload must return false when receiver dropped");
+        assert!(
+            !result,
+            "try_send_reload must return false when receiver dropped"
+        );
     }
 
     #[test]

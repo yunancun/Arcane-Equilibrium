@@ -169,6 +169,8 @@ def _build_signed_authorization(
     operator_id: str = "test-op",
     env_allowed: list[str] | None = None,
     tier: str = "T0_ENTRY",
+    version: int = 2,
+    approved_system_mode: str = "live_reserved",
     issued_at_ms: int | None = None,
 ) -> dict[str, Any]:
     """Build a signed authorization.json record (matches Rust canonical_payload)."""
@@ -177,14 +179,21 @@ def _build_signed_authorization(
     if issued_at_ms is None:
         issued_at_ms = int(time.time() * 1000)
     envs_sorted = sorted(set(env_allowed))
-    payload = f"1|{tier}|{issued_at_ms}|{expires_at_ms}|{operator_id}|{','.join(envs_sorted)}"
+    if version == 1:
+        payload = f"{version}|{tier}|{issued_at_ms}|{expires_at_ms}|{operator_id}|{','.join(envs_sorted)}"
+    else:
+        payload = (
+            f"{version}|{tier}|{issued_at_ms}|{expires_at_ms}|{operator_id}|"
+            f"{approved_system_mode}|{','.join(envs_sorted)}"
+        )
     sig = hmac.new(secret.encode("utf-8"), payload.encode("utf-8"), hashlib.sha256).hexdigest()
     return {
-        "version": 1,
+        "version": version,
         "tier": tier,
         "issued_at_ms": issued_at_ms,
         "expires_at_ms": expires_at_ms,
         "operator_id": operator_id,
+        **({} if version == 1 else {"approved_system_mode": approved_system_mode}),
         "env_allowed": env_allowed,
         "sig": sig,
     }

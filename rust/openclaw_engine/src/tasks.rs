@@ -589,6 +589,34 @@ pub(crate) fn spawn_position_reconciler(
     bybit_env: BybitEnvironment,
     orphan_handler_config: Option<openclaw_engine::position_reconciler::OrphanHandlerConfig>,
 ) {
+    let cmd_tx_provider: openclaw_engine::position_reconciler::ReconcilerCommandTxProvider =
+        Arc::new(move || Some(reconciler_cmd_tx.clone()));
+    spawn_position_reconciler_with_cmd_provider(
+        shared_client,
+        db_pool,
+        cancel,
+        cmd_tx_provider,
+        shared_instruments,
+        shared_risk_level,
+        bybit_env,
+        orphan_handler_config,
+    );
+}
+
+/// Spawn position reconciler with a per-dispatch command sender provider.
+/// Live uses this variant so the reconciler follows LiveAuthWatcher respawns.
+/// 使用每次分發前取 snapshot 的 command sender provider 啟動對帳器；Live 以此
+/// 跟隨 LiveAuthWatcher respawn 後的新 sender。
+pub(crate) fn spawn_position_reconciler_with_cmd_provider(
+    shared_client: &Arc<BybitRestClient>,
+    db_pool: &Arc<DbPool>,
+    cancel: &CancellationToken,
+    reconciler_cmd_tx_provider: openclaw_engine::position_reconciler::ReconcilerCommandTxProvider,
+    shared_instruments: &Option<Arc<openclaw_engine::instrument_info::InstrumentInfoCache>>,
+    shared_risk_level: &Arc<std::sync::atomic::AtomicU8>,
+    bybit_env: BybitEnvironment,
+    orphan_handler_config: Option<openclaw_engine::position_reconciler::OrphanHandlerConfig>,
+) {
     use openclaw_engine::position_manager::PositionManager;
     use openclaw_engine::position_reconciler::run_position_reconciler;
 
@@ -622,7 +650,7 @@ pub(crate) fn spawn_position_reconciler(
         pos_mgr,
         reconciler_audit_pool,
         reconciler_cancel,
-        reconciler_cmd_tx,
+        reconciler_cmd_tx_provider,
         reconciler_instruments,
         get_risk_level,
         reconciler_label,

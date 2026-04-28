@@ -652,7 +652,7 @@ impl TickPipeline {
         event: &PriceEvent,
         is_primary: bool,
         trigger_tag: &str,
-    ) {
+    ) -> bool {
         if let Some(ref tx) = self.order_dispatch_tx {
             self.exchange_seq = self.exchange_seq.wrapping_add(1);
             let prefix = if is_primary { "oc_risk" } else { "sh_risk" };
@@ -688,7 +688,7 @@ impl TickPipeline {
                         .filter(|p| p.is_finite() && *p > 0.0)
                 })
                 .unwrap_or(event.last_price);
-            let _ = tx.send(OrderDispatchRequest {
+            let request = OrderDispatchRequest {
                 symbol: symbol.to_string(),
                 is_long: !is_long,
                 qty,
@@ -718,11 +718,58 @@ impl TickPipeline {
                 } else {
                     None
                 },
-            });
+            };
+            match tx.send(request) {
+                Ok(()) => {
+                    if is_primary {
+                        self.pending_close_symbols.insert(symbol.to_string());
+                    }
+                    true
+                }
+                Err(e) => {
+                    tracing::error!(
+                        symbol,
+                        trigger_tag,
+                        error = %e,
+                        "close dispatch enqueue failed — local flatten blocked \
+                         / 平倉派發入隊失敗 — 阻止本地平倉"
+                    );
+                    false
+                }
+            }
+        } else {
             if is_primary {
-                self.pending_close_symbols.insert(symbol.to_string());
+                tracing::warn!(
+                    symbol,
+                    trigger_tag,
+                    "close dispatch requested but order_dispatch_tx is unbound \
+                     / 平倉派發請求缺少 order_dispatch_tx"
+                );
+            }
+            false
+        }
+    }
+
+    /// Dispatch a primary reduce-only close before local flattening in
+    /// exchange mode. Returns `None` when the enqueue fails or a close is
+    /// already pending, so callers must not mark the local position flat.
+    pub(super) fn close_position_after_exchange_dispatch(
+        &mut self,
+        symbol: &str,
+        is_long: bool,
+        qty: f64,
+        event: &PriceEvent,
+        trigger_tag: &str,
+    ) -> Option<(bool, f64, f64, f64)> {
+        if self.pipeline_kind.is_exchange() {
+            if self.pending_close_symbols.contains(symbol) {
+                return None;
+            }
+            if !self.execute_position_close(symbol, is_long, qty, event, true, trigger_tag) {
+                return None;
             }
         }
+        self.close_position_at_symbol_market(symbol, event.ts_ms)
     }
 
     /// R-02: Reconcile pending_close_symbols against actual open positions.
@@ -786,7 +833,7 @@ impl TickPipeline {
                     (p.symbol.clone(), p.is_long, p.qty, price)
                 })
                 .collect();
-            let count = positions.len();
+            let mut count = 0usize;
             for (symbol, is_long, qty, price) in positions {
                 if let Some(ref tx) = self.order_dispatch_tx {
                     self.exchange_seq = self.exchange_seq.wrapping_add(1);
@@ -798,7 +845,7 @@ impl TickPipeline {
                         .get_entry_context_id(&symbol)
                         .unwrap_or("")
                         .to_string();
-                    let _ = tx.send(OrderDispatchRequest {
+                    let request = OrderDispatchRequest {
                         symbol: symbol.clone(),
                         is_long: !is_long, // opposite side to close / 相反方向平倉
                         qty,
@@ -828,8 +875,21 @@ impl TickPipeline {
                         } else {
                             None
                         },
-                    });
-                    self.pending_close_symbols.insert(symbol);
+                    };
+                    match tx.send(request) {
+                        Ok(()) => {
+                            self.pending_close_symbols.insert(symbol);
+                            count += 1;
+                        }
+                        Err(e) => {
+                            tracing::error!(
+                                symbol,
+                                error = %e,
+                                "ipc_close_all dispatch enqueue failed — pending_close not set \
+                                 / ipc_close_all 派發入隊失敗 — 不設定 pending_close"
+                            );
+                        }
+                    }
                 }
             }
             count
@@ -941,7 +1001,7 @@ impl TickPipeline {
                     .get_entry_context_id(symbol)
                     .unwrap_or("")
                     .to_string();
-                let _ = tx.send(OrderDispatchRequest {
+                let request = OrderDispatchRequest {
                     symbol: symbol.to_string(),
                     is_long: !is_long, // opposite side to close / 相反方向平倉
                     qty,
@@ -971,9 +1031,22 @@ impl TickPipeline {
                     } else {
                         None
                     },
-                });
-                self.pending_close_symbols.insert(symbol.to_string());
-                true
+                };
+                match tx.send(request) {
+                    Ok(()) => {
+                        self.pending_close_symbols.insert(symbol.to_string());
+                        true
+                    }
+                    Err(e) => {
+                        tracing::error!(
+                            symbol,
+                            error = %e,
+                            "ipc_close_symbol dispatch enqueue failed — pending_close not set \
+                             / ipc_close_symbol 派發入隊失敗 — 不設定 pending_close"
+                        );
+                        false
+                    }
+                }
             } else {
                 false
             }
@@ -1012,9 +1085,16 @@ impl TickPipeline {
                         let fr = self.intent_processor.fee_rate(symbol);
                         let close_fee = close_qty * close_price * fr;
                         self.try_emit_exit_feature_row(
-                            symbol, close_qty, close_price, ts_ms, pnl,
-                            close_fee, fr, "risk_close:ipc_close_symbol",
-                            snap.as_ref(), &entry_ctx,
+                            symbol,
+                            close_qty,
+                            close_price,
+                            ts_ms,
+                            pnl,
+                            close_fee,
+                            fr,
+                            "risk_close:ipc_close_symbol",
+                            snap.as_ref(),
+                            &entry_ctx,
                         );
                     }
                     true

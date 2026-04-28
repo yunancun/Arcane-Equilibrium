@@ -841,7 +841,6 @@ pub(crate) async fn build_exchange_pipeline(
     ))
 }
 
-
 /// Listen for OS signals: SIGHUP → reload, SIGTERM/SIGINT → shutdown.
 /// 監聽 OS 信號：SIGHUP → 重載，SIGTERM/SIGINT → 關閉。
 pub(crate) async fn signal_loop(config: &Arc<ConfigManager>, cancel: &CancellationToken) {

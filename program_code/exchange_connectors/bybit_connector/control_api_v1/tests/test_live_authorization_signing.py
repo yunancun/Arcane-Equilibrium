@@ -44,34 +44,37 @@ def _canonical_reference(
     issued: int,
     expires: int,
     op: str,
+    approved_system_mode: str,
     envs: list[str],
 ) -> str:
     """Independent re-implementation to guard against drift."""
     envs_sorted = sorted(set(envs))
-    return f"{version}|{tier}|{issued}|{expires}|{op}|{','.join(envs_sorted)}"
+    return f"{version}|{tier}|{issued}|{expires}|{op}|{approved_system_mode}|{','.join(envs_sorted)}"
 
 
 def test_canonical_payload_matches_spec():
     """Python canonical format must stay byte-for-byte compatible with Rust."""
     payload = ltr._canonical_authorization_payload(
-        version=1,
+        version=2,
         tier="T0_ENTRY",
         issued_at_ms=1_700_000_000_000,
         expires_at_ms=1_700_000_000_000 + 24 * 3600 * 1000,
         operator_id="ncyu",
+        approved_system_mode="live_reserved",
         env_allowed=["live_demo"],
     )
-    assert payload == "1|T0_ENTRY|1700000000000|1700086400000|ncyu|live_demo"
+    assert payload == "2|T0_ENTRY|1700000000000|1700086400000|ncyu|live_reserved|live_demo"
 
 
 def test_canonical_payload_sorts_and_dedups_envs():
     """Rust sorts+dedups env_allowed before signing — Python must do the same."""
     payload = ltr._canonical_authorization_payload(
-        version=1,
+        version=2,
         tier="T2_ESTABLISHED",
         issued_at_ms=1,
         expires_at_ms=2,
         operator_id="op",
+        approved_system_mode="live_reserved",
         env_allowed=["mainnet", "live_demo", "live_demo"],
     )
     assert payload.endswith("|live_demo,mainnet")
@@ -80,7 +83,7 @@ def test_canonical_payload_sorts_and_dedups_envs():
 
 def test_signature_matches_manual_hmac():
     """Reference-check the HMAC output."""
-    payload = "1|T0_ENTRY|1|2|op|live_demo"
+    payload = "2|T0_ENTRY|1|2|op|live_reserved|live_demo"
     expected = hmac.new(
         TEST_SECRET.encode(), payload.encode(), hashlib.sha256
     ).hexdigest()
@@ -108,10 +111,11 @@ def test_write_signed_live_authorization_creates_file(secrets_tmp: Path):
 
     # File contents round-trip + signature verifies
     loaded = json.loads(path.read_text())
-    assert loaded["version"] == 1
+    assert loaded["version"] == 2
     assert loaded["tier"] == "T0_ENTRY"
     assert loaded["expires_at_ms"] == expires
     assert loaded["operator_id"] == "ncyu"
+    assert loaded["approved_system_mode"] == "live_reserved"
     assert loaded["env_allowed"] == ["live_demo"]
     # Returned record matches on-disk
     assert loaded == record
@@ -122,6 +126,7 @@ def test_write_signed_live_authorization_creates_file(secrets_tmp: Path):
         issued_at_ms=loaded["issued_at_ms"],
         expires_at_ms=loaded["expires_at_ms"],
         operator_id=loaded["operator_id"],
+        approved_system_mode=loaded["approved_system_mode"],
         env_allowed=loaded["env_allowed"],
     )
     expected_sig = hmac.new(

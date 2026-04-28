@@ -59,8 +59,16 @@ use openclaw_core::sm::risk_gov::RiskLevel;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
+use tokio::sync::mpsc::UnboundedSender;
 use tokio_util::sync::CancellationToken;
 use tracing::{info, warn};
+
+/// Provides a fresh command sender snapshot when the reconciler is about to
+/// dispatch an action. Live uses this to follow the watcher-rotated sender slot.
+/// 在對帳器即將分發動作時提供最新 command sender snapshot；Live 以此跟隨
+/// watcher 輪替的 sender slot。
+pub type ReconcilerCommandTxProvider =
+    Arc<dyn Fn() -> Option<UnboundedSender<crate::tick_pipeline::PipelineCommand>> + Send + Sync>;
 
 /// Reconciler polling interval — 30s per user spec (B2).
 /// 對帳輪詢間隔 — 30 秒（B2 用戶決定）。
@@ -354,7 +362,7 @@ pub async fn run_position_reconciler(
     pos_mgr: Arc<PositionManager>,
     audit_pool: Option<sqlx::PgPool>,
     cancel: CancellationToken,
-    cmd_tx: tokio::sync::mpsc::UnboundedSender<crate::tick_pipeline::PipelineCommand>,
+    cmd_tx_provider: ReconcilerCommandTxProvider,
     instrument_cache: Option<Arc<InstrumentInfoCache>>,
     get_risk_level: impl Fn() -> RiskLevel + Send + 'static,
     engine_label: String,
@@ -420,7 +428,19 @@ pub async fn run_position_reconciler(
                         if let Some(action) = check_rest_failure_escalation(
                             &mut rc_state, current_level, now,
                         ) {
-                            let sent = dispatch_action(&action, &cmd_tx, &audit_pool, &engine_label);
+                            let sent = match (cmd_tx_provider.as_ref())() {
+                                Some(cmd_tx) => {
+                                    dispatch_action(&action, &cmd_tx, &audit_pool, &engine_label)
+                                }
+                                None => {
+                                    warn!(
+                                        engine = %engine_label,
+                                        "position_reconciler action blocked: command channel unavailable \
+                                         / 對帳器動作阻擋：命令通道不可用"
+                                    );
+                                    false
+                                }
+                            };
                             if sent && rc_state.pre_escalation_level.is_none() {
                                 rc_state.pre_escalation_level = Some(current_level);
                             }
@@ -491,37 +511,50 @@ pub async fn run_position_reconciler(
 
                         // -- ORPHAN-ADOPT-1 Phase 1: intercept Orphan drifts --
                         // -- ORPHAN-ADOPT-1 Phase 1：攔截孤兒漂移 --
-                        if let Some(ref oh_cfg) = orphan_handler_config {
-                            drifts = process_orphans(
-                                drifts,
-                                &raw_positions,
-                                oh_cfg,
-                                current_level,
-                                &cmd_tx,
-                                &audit_pool,
-                                &engine_label,
-                                &mut rc_state,
-                                now,
-                            );
-                        }
+                        match (cmd_tx_provider.as_ref())() {
+                            Some(cmd_tx) => {
+                                if let Some(ref oh_cfg) = orphan_handler_config {
+                                    drifts = process_orphans(
+                                        drifts,
+                                        &raw_positions,
+                                        oh_cfg,
+                                        current_level,
+                                        &cmd_tx,
+                                        &audit_pool,
+                                        &engine_label,
+                                        &mut rc_state,
+                                        now,
+                                    );
+                                }
 
-                        // -- Phase 6: evaluate and dispatch actions (orphans already handled) --
-                        let actions = evaluate_actions(
-                            &mut rc_state, current_level, &drifts, now,
-                        );
-                        for action in &actions {
-                            let sent = dispatch_action(action, &cmd_tx, &audit_pool, &engine_label);
-                            // Set pre_escalation_level only after successful channel send.
-                            // This prevents recording a floor for commands that failed to dispatch.
-                            // 只在成功送入通道後設置 pre_escalation_level，
-                            // 避免為未成功分發的命令記錄恢復 floor。
-                            if sent {
-                                if let ReconcilerAction::Escalate { .. } = action {
-                                    if rc_state.pre_escalation_level.is_none() {
-                                        rc_state.pre_escalation_level = Some(current_level);
+                                // -- Phase 6: evaluate and dispatch actions (orphans already handled) --
+                                let actions = evaluate_actions(
+                                    &mut rc_state, current_level, &drifts, now,
+                                );
+                                for action in &actions {
+                                    let sent = dispatch_action(action, &cmd_tx, &audit_pool, &engine_label);
+                                    // Set pre_escalation_level only after successful channel send.
+                                    // This prevents recording a floor for commands that failed to dispatch.
+                                    // 只在成功送入通道後設置 pre_escalation_level，
+                                    // 避免為未成功分發的命令記錄恢復 floor。
+                                    if sent {
+                                        if let ReconcilerAction::Escalate { .. } = action {
+                                            if rc_state.pre_escalation_level.is_none() {
+                                                rc_state.pre_escalation_level = Some(current_level);
+                                            }
+                                        }
                                     }
                                 }
                             }
+                            None if !drifts.is_empty() => {
+                                warn!(
+                                    engine = %engine_label,
+                                    drift_count = drifts.len(),
+                                    "position_reconciler drift actions blocked: command channel unavailable \
+                                     / 對帳器漂移動作阻擋：命令通道不可用"
+                                );
+                            }
+                            None => {}
                         }
 
                         // Update baseline

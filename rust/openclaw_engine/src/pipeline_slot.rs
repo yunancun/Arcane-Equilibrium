@@ -631,7 +631,10 @@ mod tests {
             .expect("teardown must complete within 2s")
             .expect("teardown must be Ok");
 
-        assert!(exited.load(Ordering::SeqCst), "watcher task must have observed cancel");
+        assert!(
+            exited.load(Ordering::SeqCst),
+            "watcher task must have observed cancel"
+        );
         assert!(!slot.is_spawned(), "state must be Empty after teardown");
         assert!(child.is_cancelled(), "child token must be cancelled");
         assert!(!parent.is_cancelled(), "parent token must NOT be cancelled");
