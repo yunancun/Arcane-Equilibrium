@@ -54,7 +54,24 @@ pub(in crate::ipc_server) async fn handle_get_cost_edge_advisor_status(
             "last_eval_ms": state.last_eval_ms,
             "triggered_at_ms": state.triggered_at_ms,
             "env_enabled": is_advisor_env_enabled(),
-            "phase": "A_advisory",
+            // Phase B advancement: phase string flips to "B_shadow" so
+            // downstream consumers (healthcheck [30] Phase B impl, GUI)
+            // can branch on advisor maturity. The `phase` slot is
+            // forward-compat — Phase C will write "C_gated".
+            // Phase B 推進：phase 字串翻 "B_shadow"，下游 consumer
+            // （healthcheck [30] Phase B 版、GUI）可依此判斷 advisor 成熟度。
+            "phase": "B_shadow",
+            // Phase B (G3-09 2026-04-28) observability counters maintained
+            // by the daemon. `last_trigger_ms` survives Trigger exit (vs
+            // `triggered_at_ms` which resets to 0); `dryrun_observation_window_ms`
+            // tells consumers how warm the rolling counters are.
+            // Phase B observability 計數，由 daemon 維護。`last_trigger_ms`
+            // 在退出 Trigger 後仍保留（vs `triggered_at_ms` 清 0）；
+            // `dryrun_observation_window_ms` 告訴 consumer rolling counter 已熱多久。
+            "evaluations_24h": state.evaluations_24h,
+            "triggers_24h": state.triggers_24h,
+            "last_trigger_ms": state.last_trigger_ms,
+            "dryrun_observation_window_ms": state.dryrun_observation_window_ms,
         }),
     )
 }
@@ -75,7 +92,16 @@ fn advisor_disabled_response(id: serde_json::Value, note: &str) -> JsonRpcRespon
             "last_eval_ms": 0,
             "triggered_at_ms": 0,
             "env_enabled": false,
-            "phase": "A_advisory",
+            // Phase B disabled stub mirrors live shape `phase: "B_shadow"`
+            // so consumers branch identically. All Phase B counters are 0
+            // because the daemon never spawned.
+            // Phase B disabled stub 鏡射 live shape `phase: "B_shadow"`
+            // 讓 consumer 分支一致；Phase B 計數全 0（daemon 未 spawn）。
+            "phase": "B_shadow",
+            "evaluations_24h": 0,
+            "triggers_24h": 0,
+            "last_trigger_ms": 0,
+            "dryrun_observation_window_ms": 0,
             "note": note,
         }),
     )
@@ -107,7 +133,15 @@ mod tests {
         let r = resp.result.expect("result");
         assert_eq!(r["status"], "Uninitialized");
         assert_eq!(r["env_enabled"], false);
-        assert_eq!(r["phase"], "A_advisory");
+        // Phase B (G3-09 2026-04-28): phase string flipped from "A_advisory"
+        // to "B_shadow". 4 new observability counters are all 0 in disabled stub.
+        // Phase B（G3-09 2026-04-28）：phase 字串從 "A_advisory" 翻 "B_shadow"；
+        // disabled stub 下 4 新 observability counter 全 0。
+        assert_eq!(r["phase"], "B_shadow");
+        assert_eq!(r["evaluations_24h"].as_u64(), Some(0));
+        assert_eq!(r["triggers_24h"].as_u64(), Some(0));
+        assert_eq!(r["last_trigger_ms"].as_i64(), Some(0));
+        assert_eq!(r["dryrun_observation_window_ms"].as_i64(), Some(0));
         assert!(r["note"].as_str().is_some());
     }
 
