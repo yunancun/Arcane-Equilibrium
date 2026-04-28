@@ -124,4 +124,5 @@ If PM changes the operating pattern:
 - update `.codex/MEMORY.md`
 - update this file
 - update `.codex/SUBAGENT_EXECUTION_RULES.md`
+- update `.codex/DISPATCH_LEDGER.md` when the dispatch pattern or role usage is materially relevant
 - append `.codex/WORKLOG.md`

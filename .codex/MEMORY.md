@@ -21,6 +21,7 @@ Read these first for project state:
 - `CLAUDE.md`
 - `TODO.md`
 - `.codex/MEMORY.md`
+- `.codex/agents/PM.md`
 
 Default entry role for this repository:
 - `PM`
@@ -94,6 +95,7 @@ Current known topology at setup time:
 - PM is responsible for initial triage and role dispatch
 - dispatch protocol is documented in `.codex/AGENT_DISPATCH_PROTOCOL.md`
 - sub-agent role binding and anti-anonymous dispatch rules are documented in `.codex/SUBAGENT_EXECUTION_RULES.md`
+- meaningful dispatches should be logged in `.codex/DISPATCH_LEDGER.md`
 - temporary runtime nicknames are never the authoritative role identity
 - operator needs judgment and pushback; if risk or contradiction is detected, stop and report first
 

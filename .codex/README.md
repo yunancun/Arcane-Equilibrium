@@ -11,6 +11,7 @@ Recommended layout:
 - `../AGENTS.md` - git-root auto-load entry rules for new Codex sessions
 - `MEMORY.md` - stable Codex memory and operating rules
 - `WORKLOG.md` - rolling notes for recent Codex work
+- `DISPATCH_LEDGER.md` - durable record of meaningful PM-first dispatch chains
 - `AGENT_DISPATCH_PROTOCOL.md` - PM-first session and delegation rules
 - `SUBAGENT_EXECUTION_RULES.md` - mandatory role binding and anti-anonymous dispatch rules
 - `agents/` - Codex role mirror of the Claude agent roster
