@@ -376,10 +376,10 @@ pub struct GlobalLimits {
     pub guardian_modification_size_factor: f64,
     #[serde(default = "default_guardian_modification_leverage_cap")]
     pub guardian_modification_leverage_cap: f64,
-    /// Per-trade risk cap as a fraction of equity (0.02 = 2%). Used by
+    /// Per-trade risk cap as a fraction of equity (0.03 = 3%). Used by
     /// IntentProcessor Gate 2.6 to size positions: max_qty = balance × pct / price.
     /// Hot-reloaded via patch_risk_config; previously hard-coded as DEFAULT_P1_RISK_PCT.
-    /// 單筆風險上限（佔餘額比例，0.02 = 2%）。IntentProcessor Gate 2.6 用此計算
+    /// 單筆風險上限（佔餘額比例，0.03 = 3%）。IntentProcessor Gate 2.6 用此計算
     /// 上限：max_qty = balance × pct / price。經 patch_risk_config 熱重載；先前寫死。
     #[serde(default = "default_per_trade_risk_pct")]
     pub per_trade_risk_pct: f64,
@@ -469,7 +469,7 @@ fn default_guardian_modification_leverage_cap() -> f64 {
     2.0
 }
 fn default_per_trade_risk_pct() -> f64 {
-    0.02
+    0.03
 }
 fn default_ft_min_notional_ratio_of_entry() -> f64 {
     // MICRO-PROFIT-FIX-1: 0.25 maps to "two halvings then stop" — a 4th halve

@@ -22,6 +22,7 @@ fn test_default_limits_match_python_legacy() {
     assert_eq!(l.session_drawdown_max_pct, 15.0);
     assert_eq!(l.daily_loss_max_pct, 5.0);
     assert_eq!(l.holding_hours_max, 72.0);
+    assert_eq!(l.per_trade_risk_pct, 0.03);
 }
 
 #[test]
