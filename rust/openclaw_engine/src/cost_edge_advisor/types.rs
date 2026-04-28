@@ -145,6 +145,53 @@ pub struct CostEdgeAdvisorState {
     /// `evaluate()` 永遠回 `now_ms`，daemon 於 Trigger→Trigger 覆寫為前次儲存值，
     /// 進入時保留 `now_ms`，退出時清 `0`。
     pub triggered_at_ms: i64,
+
+    // ------------------------------------------------------------------
+    // Phase B (G3-09 2026-04-28) observability fields. All maintained by
+    // the daemon (mod.rs) — pure `evaluate()` ignores them. `#[serde(default)]`
+    // ensures Phase A consumers (healthcheck [30] schema-sentinel build,
+    // GUI cards predating Phase B) deserialise without panic.
+    // Phase B (G3-09 2026-04-28) observability 欄位。全由 daemon (mod.rs)
+    // 維護；pure `evaluate()` 不碰。`#[serde(default)]` 讓 Phase A consumer
+    // （healthcheck [30] schema-sentinel 版本、Phase B 前的 GUI card）
+    // 反序列化不 panic。
+    // ------------------------------------------------------------------
+    /// Rolling count of `evaluate()` cycles in the trailing 24h window.
+    /// Daemon maintains a `VecDeque<i64>` and prunes entries older than
+    /// `now - 86_400_000` on each cycle. Reset to 0 on engine restart
+    /// (in-memory only) — healthcheck reads DB freshness for absolute
+    /// liveness; this counter is for IPC convenience.
+    /// 24h rolling 內 `evaluate()` cycle 計數。Daemon 維護 `VecDeque<i64>`
+    /// 每 cycle 修剪 `now - 86_400_000` 之前的項目。Engine restart 時 in-memory
+    /// 重置（healthcheck 讀 DB 取絕對 liveness，本計數器供 IPC 方便讀取）。
+    #[serde(default)]
+    pub evaluations_24h: u64,
+
+    /// Rolling count of non-Trigger → Trigger transitions in the trailing
+    /// 24h window (entry events, not contiguous-Trigger cycles).
+    /// 24h rolling 內 non-Trigger → Trigger transition 計數（進入事件，非
+    /// 連續 Trigger cycle）。
+    #[serde(default)]
+    pub triggers_24h: u64,
+
+    /// Unix ms of the most recent Trigger transition observed by the daemon.
+    /// Survives Trigger → non-Trigger exits (unlike `triggered_at_ms` which
+    /// resets to 0 on exit), giving observation tools a stable "last burn"
+    /// timestamp. `0` when daemon has never seen a Trigger transition.
+    /// Daemon 觀察到的最近 Trigger transition 的 unix 毫秒。Trigger → 非 Trigger
+    /// 退出後仍保留（vs `triggered_at_ms` 清 0），提供觀察工具穩定的「最後一次
+    /// 燒錢」時戳。Daemon 從未見 Trigger transition 時為 0。
+    #[serde(default)]
+    pub last_trigger_ms: i64,
+
+    /// `now_ms - daemon_start_ms` — how long the current daemon process
+    /// has been observing. Helps healthcheck judge "rolling 24h counter
+    /// trustworthy?" (window < 1h → counters are warm-up, expect low values).
+    /// `now_ms - daemon_start_ms` — 當前 daemon process 觀察時長。協助
+    /// healthcheck 判定「rolling 24h counter 可信度」（窗口 < 1h → counter
+    /// 還在 warm-up，數值偏低正常）。
+    #[serde(default)]
+    pub dryrun_observation_window_ms: i64,
 }
 
 impl CostEdgeAdvisorState {
@@ -161,6 +208,12 @@ impl CostEdgeAdvisorState {
             paper_pnl_7d_usd: 0.0,
             last_eval_ms: 0,
             triggered_at_ms: 0,
+            // Phase B observability counters — daemon-owned, factory always 0.
+            // Phase B observability 計數 — daemon 維護，factory 固定 0。
+            evaluations_24h: 0,
+            triggers_24h: 0,
+            last_trigger_ms: 0,
+            dryrun_observation_window_ms: 0,
         }
     }
 
@@ -179,6 +232,12 @@ impl CostEdgeAdvisorState {
             paper_pnl_7d_usd: 0.0,
             last_eval_ms,
             triggered_at_ms: 0,
+            // Phase B counters are daemon-owned; factory constructors set 0.
+            // Phase B 計數器由 daemon 維護；factory 建構固定 0。
+            evaluations_24h: 0,
+            triggers_24h: 0,
+            last_trigger_ms: 0,
+            dryrun_observation_window_ms: 0,
         }
     }
 
@@ -196,6 +255,10 @@ impl CostEdgeAdvisorState {
             paper_pnl_7d_usd: 0.0,
             last_eval_ms,
             triggered_at_ms: 0,
+            evaluations_24h: 0,
+            triggers_24h: 0,
+            last_trigger_ms: 0,
+            dryrun_observation_window_ms: 0,
         }
     }
 
@@ -218,6 +281,10 @@ impl CostEdgeAdvisorState {
             paper_pnl_7d_usd,
             last_eval_ms,
             triggered_at_ms: 0,
+            evaluations_24h: 0,
+            triggers_24h: 0,
+            last_trigger_ms: 0,
+            dryrun_observation_window_ms: 0,
         }
     }
 
@@ -245,6 +312,10 @@ impl CostEdgeAdvisorState {
             paper_pnl_7d_usd,
             last_eval_ms,
             triggered_at_ms,
+            evaluations_24h: 0,
+            triggers_24h: 0,
+            last_trigger_ms: 0,
+            dryrun_observation_window_ms: 0,
         }
     }
 
@@ -260,6 +331,10 @@ impl CostEdgeAdvisorState {
             paper_pnl_7d_usd: 0.0,
             last_eval_ms,
             triggered_at_ms: 0,
+            evaluations_24h: 0,
+            triggers_24h: 0,
+            last_trigger_ms: 0,
+            dryrun_observation_window_ms: 0,
         }
     }
 
@@ -281,6 +356,10 @@ impl CostEdgeAdvisorState {
             paper_pnl_7d_usd: 0.0,
             last_eval_ms,
             triggered_at_ms: 0,
+            evaluations_24h: 0,
+            triggers_24h: 0,
+            last_trigger_ms: 0,
+            dryrun_observation_window_ms: 0,
         }
     }
 }

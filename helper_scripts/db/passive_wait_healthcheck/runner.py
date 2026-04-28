@@ -69,7 +69,13 @@ from .checks_derived import (
     check_h_state_gateway_freshness,
     # F7 (2026-04-26) ML hygiene derived sentinel
     check_dust_spiral_noise_in_ef,
-    # G3-09 Phase A (2026-04-27) cost_edge_advisor sentinel
+)
+from .checks_cost_edge import (
+    # G3-09 Phase A (2026-04-27) → Phase B (2026-04-28) cost_edge_advisor sentinel
+    # — extracted into sibling by HIGH-1 fix (2026-04-28) so checks_derived.py
+    # stays under CLAUDE.md §九 1200-line hard cap.
+    # G3-09 Phase A → Phase B cost_edge_advisor 哨兵 — HIGH-1 fix 抽至 sibling，
+    # 維持 checks_derived.py 1200 行硬上限。
     check_cost_edge_advisor_status,
 )
 
@@ -145,7 +151,28 @@ def main() -> int:
     try:
         conn = _get_conn()
     except Exception as e:
+        # LOW-2 fix (2026-04-28, G3-09 Phase B Wave 1):
+        # Phase A `[30]` was a filesystem-only sentinel that ran even when
+        # DB connect failed. Phase B's in-cursor placement broke that —
+        # DB unreachable would silently skip the env=1 invariant check.
+        # Run the env-gate sentinel one more time with cur=None so the
+        # OPENCLAW_COST_EDGE_ADVISOR=1 invariants (TOML + module files)
+        # still fire even when DB is down. Pure filesystem path inside
+        # check_cost_edge_advisor_status (Phase A code path); returns
+        # PASS-skip when env != "1" so DB-down doesn't manufacture noise.
+        # LOW-2 fix（2026-04-28，G3-09 Phase B Wave 1）：
+        # Phase A [30] 為純檔案系統哨兵，DB connect 失敗時仍會跑。Phase B
+        # 移入 cursor 區塊後，DB 不通就會靜默跳過 env=1 不變量驗證。
+        # 此處以 cur=None 再呼叫 env-gate 哨兵，確保
+        # OPENCLAW_COST_EDGE_ADVISOR=1 的 TOML + module 檔不變量在 DB 不通時
+        # 仍生效。check_cost_edge_advisor_status Phase A 路徑為純檔案系統；
+        # env != "1" 時回 PASS-skip，避免 DB-down 製造雜訊。
         print(f"[FATAL] DB connect failed: {e}")
+        try:
+            s, m = check_cost_edge_advisor_status(cur=None)
+            print(f"{s:4s} [30] cost_edge_advisor_status (db-down fallback) {m}")
+        except Exception as ce:  # noqa: BLE001 — keep DB-fail exit path robust
+            print(f"WARN [30] cost_edge_advisor_status (db-down fallback) sentinel raised: {ce}")
         return 2
 
     results: list[tuple[str, str, str]] = []  # (check_name, status, msg)
@@ -303,6 +330,26 @@ def main() -> int:
             # [28] risk_close 子-mililiter qty fill — mis-attribution 指紋。
             s, m = check_phantom_fills_attribution(cur)
             results.append(("[28] phantom_fills_attribution", s, m))
+
+            # [30] G3-09 Phase B (2026-04-28): cost_edge_advisor env-gate +
+            # RiskConfig flag + (env=1) DB freshness/trigger frequency sanity.
+            # DEFAULT-OFF env=0 → PASS-skip; env=1 → verify [cost_edge] TOML
+            # section + Rust module sibling files (Phase A invariants 1+2),
+            # then Phase B Inv 3 (1h INSERT count) + Inv 4 (trigger frequency
+            # bounds + dead-gate detection at 7d window). Moved INSIDE cursor
+            # block by Phase B Wave 1 — Phase A version was filesystem-only
+            # outside cursor; Phase B needs DB queries against
+            # learning.cost_edge_advisor_log (V026 hypertable).
+            # NOTE: PA RFC §6.2 originally proposed slot [22] (drafted before
+            # F7); adjusted to [30] post-F7 landing. Slot remains [30].
+            # [30] G3-09 Phase B（2026-04-28）：cost_edge_advisor env-gate +
+            # RiskConfig flag + （env=1 時）DB 新鮮度 / Trigger 頻率合理性檢查。
+            # env=0 → PASS-skip；env=1 → 驗 Phase A Inv 1+2（TOML + module 檔），
+            # 再 Phase B Inv 3（1h INSERT 數）+ Inv 4（trigger 頻率邊界 + 7d 視窗
+            # dead-gate 偵測）。Phase B Wave 1 將本 check 移至 cursor 區塊內 —
+            # Phase A 版本在 cursor 外純 filesystem；Phase B 需查 V026 表。
+            s, m = check_cost_edge_advisor_status(cur)
+            results.append(("[30] cost_edge_advisor_status", s, m))
     finally:
         conn.close()
 
@@ -391,22 +438,13 @@ def main() -> int:
     s, m = check_h_state_gateway_freshness()
     results.append(("[20] h_state_gateway_freshness", s, m))
 
-    # [30] G3-09 Phase A (2026-04-27): cost_edge_advisor env-gate +
-    # RiskConfig flag sentinel. DEFAULT-OFF env=0 → PASS-skip (Phase A
-    # dormant by design); env=1 → verify [cost_edge] TOML section + Rust
-    # module sibling files. Pure-Python (TOML parse + Path.exists), no
-    # live IPC roundtrip — keeps healthcheck self-contained for cron / CI
-    # without HMAC secret coupling. Slot [22] was taken by F7
-    # `trading_pipeline_silent_gap`; G3-09 Phase A claims slot [30].
-    # NOTE: PA RFC §6.2 originally proposed slot [22] (drafted before F7);
-    # adjusted to [30] post-F7 landing. PA RFC text supersedes via this
-    # implementation note.
-    # [30] G3-09 Phase A：cost_edge_advisor env-gate + RiskConfig flag 哨兵。
-    # env=0 → PASS-skip（Phase A dormant by design）；env=1 → 驗 [cost_edge]
-    # TOML 區塊 + Rust 模組 sibling 檔。純 Python，無 live IPC，cron/CI 自足。
-    # NOTE：PA RFC §6.2 原寫 [22]（F7 上線前），F7 已佔用 → 本實作改 [30]。
-    s, m = check_cost_edge_advisor_status()
-    results.append(("[30] cost_edge_advisor_status", s, m))
+    # NOTE: [30] cost_edge_advisor_status moved INSIDE the cursor block by
+    # G3-09 Phase B Wave 1 (2026-04-28). Phase A version was filesystem-only
+    # and ran outside cursor; Phase B adds Inv 3 + Inv 4 which need DB
+    # queries against learning.cost_edge_advisor_log. See cursor block above.
+    # NOTE：[30] cost_edge_advisor_status 已由 G3-09 Phase B Wave 1（2026-04-28）
+    # 移至 cursor 區塊內。Phase A 版本純 filesystem 在 cursor 外；Phase B
+    # Inv 3+4 需查 learning.cost_edge_advisor_log，故移入。詳上方 cursor 區塊。
 
     # output
     any_fail = False

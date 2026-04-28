@@ -67,7 +67,13 @@ from .checks_derived import (  # noqa: F401
     check_h_state_gateway_freshness,
     # F7 (2026-04-26) ML hygiene derived sentinel
     check_dust_spiral_noise_in_ef,
-    # G3-09 Phase A (2026-04-27) cost_edge_advisor sentinel
+)
+from .checks_cost_edge import (  # noqa: F401
+    # G3-09 Phase A (2026-04-27) → Phase B (2026-04-28) cost_edge_advisor sentinel
+    # extracted from checks_derived.py by HIGH-1 fix to keep checks_derived.py
+    # under CLAUDE.md §九 1200-line hard cap.
+    # G3-09 Phase A → Phase B cost_edge_advisor 哨兵；HIGH-1 fix 從 checks_derived
+    # 抽出維持 1200 行硬上限。
     check_cost_edge_advisor_status,
 )
 
