@@ -67,6 +67,10 @@
 ## References
 - [Remote Access 配置](reference_remote_access.md) — Tailscale: Trading GUI / OpenClaw URLs
 - [重啟腳本](reference_restart_script.md) — `bash helper_scripts/restart_all.sh` 一鍵重啟引擎+API
+- [外部整合工具入口 (2026-04-29)](reference_external_tools.md) — Linear / Notion / Coupler / Drive workspace ID + bootstrap 編號；完整 SOP 在 CLAUDE.md §十二
 - ARCH-RC1 統一 Config 契約（3-Config + StrategyParams，ArcSwap 熱重載）→ `docs/references/2026-04-15--arch_rc1_unified_config_contract.md`（2026-04-15 遷出記憶庫）
+
+## External tool authority
+- [外部工具權威邊界 (2026-04-29)](feedback_external_tool_authority.md) — Linear/Notion/Coupler/Drive 全是 mirror-only；git `srv/` 永遠是 source of truth；衝突以 git 為準
 
 > Archived stale memories moved to `archive/` (Phase 1-era / completed migrations / superseded plans / merged originals).

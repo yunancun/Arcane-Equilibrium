@@ -503,3 +503,61 @@ state_models ← state_compiler ← state_store ← main_legacy ← main.py
 
 > 前次狀態（pre-EDGE-DIAG-2 deploy）：截至 2026-04-27 01:30 CEST：**STRKUSDT P0 Wave merge 完成**（HEAD `1edc6fe`） · engine PID 2033577（pre-merge binary 2026-04-26 04:29，**待 2nd deploy 套用 6 PR 改動**）· uvicorn PID 2033662 · STRKUSDT P0 Wave 7 fix（F1 deploy `af48ee1` + F2-F7 6 PR）merge 順序 F2 → F6 → F3 → F4 → F7 → F5；6 merge commits `1dff948`/`5ac7a80`/`310ae29`/`31c8206`/`1341c01`/`1edc6fe`；E4 combined regression 2252 / 0 failed；cron 6h 27 check（[1-15]+[Xa]+[Xb]+[16]+[18]+[22-29]）；STRKUSDT dust spiral RCA 三層 root entry_notional=0 fail-open + Gate 2 cross-symbol price contamination + 41 phantom fill。詳 STRKUSDT P0 wave Sign-off `docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-27--strkusdt_p0_wave_signoff.md`。
 
+---
+
+## 十二、外部整合工具映射（Linear / Notion / Coupler.io / Google Drive）
+
+**核心原則**：**git `srv/` 是唯一 source of truth**。外部工具僅為 *view layer*、*artifact store* 或 *ETL output*，永不擁有交易參數 / 代碼 / 政策的權威。任何衝突一律以 git 為準。
+
+### 工具職責（2026-04-29 整合）
+
+| 工具 | 角色 | 觸發條件 | 權威 |
+|---|---|---|---|
+| `srv/` git | Source of truth | 每次 commit | **AUTHORITATIVE** for 代碼 / CLAUDE.md / TODO.md / memory / docs |
+| **Linear** | Operator-friendly remediation tracker | Wave / Batch sign-off；新 finding | **Authoritative** for batch-level status — 鏡像 `docs/audit/remediation_tracking.md` |
+| **Notion** | 對外索引（reports / sign-offs / RFCs） | Wave / Batch sign-off；新 RFC / audit | **Mirror only** — 1-line 條目連回 git |
+| **Coupler.io** | ETL: PG / Linear → Sheets / BigQuery | Operator on-demand 查詢 | **Read-only output** — 永不寫回 PG |
+| **Google Drive** | Off-repo binary artifact 存放 | 需對外分享 PDF / screenshot | **Artifact only** — 非 doc repo |
+
+### Bootstrap 入口（2026-04-29 建立）
+
+- **Linear**：team `NCYu` · project [`OpenClaw 62-Finding Remediation`](https://linear.app/ncyu/project/openclaw-62-finding-remediation-de1bc8f68e42) · 6 milestones (Batch A-F) · 7 labels (P1/P2/P3/live-release-blocker/backlog/time-driven/edge-diag) · 12 issues (`NCY-5..16`)
+- **Notion**：[OpenClaw — Operator Hub](https://www.notion.so/350dcd3b1eff81038de2d10874ae0fe4) + 4 sub-pages (Sign-Offs Index / PA RFC Index / Audit Reports Index / External-Tool Workflow)
+- **Coupler.io**：connected, no active dataflow（按需啟用）
+- **Google Drive**：connected, no curated content（按需使用）
+
+### SOP（按角色）
+
+#### PM（主會話 / Conductor）
+1. Wave / Batch Sign-off git commit landed 之後：
+   - 更新對應 Linear 父 issue（description checklist + status flip）
+   - Notion *Sign-Offs Index* 加 1-line 條目（git 路徑 + 一句驗證摘要）
+2. **不要**為每個 task 在 Linear 建 issue；只 mainline-tracked findings + active backlog + time-driven items
+3. **不要**把 TODO.md 全鏡像 Linear；只篩 62-finding mainline + active backlog + 有 cutoff 的條目
+
+#### PA agent
+1. RFC 寫入 `docs/CCAgentWorkSpace/PA/workspace/reports/`
+2. PM approve 後請主會話加 Notion *PA RFC Index* 條目
+3. **不要**直接寫 Linear
+
+#### 審計 agents（E3 / FA / QC / MIT 等）
+1. Audit 寫入 `docs/audits/` 或 `.claude_reports/`
+2. 接受後請主會話加 Notion *Audit Reports Index* 條目
+3. 若產生新 finding，向 PM 提案 Linear issue（不要直接建）
+
+### 嚴禁事項
+
+- **Don't** 把 Linear / Notion 當有否決權；它們鏡像，git 決策
+- **Don't** 把 TODO.md → Linear 自動同步；策展鏡像 only
+- **Don't** 在任何外部工具發布 secrets / API keys / authorization tokens
+- **Don't** 用 Coupler.io 寫入 PG；PG 寫入由 `srv/sql/` migration + Rust trading_writer 獨家治理
+- **Don't** 未經 operator 授權發布 runtime engine state（PID / snapshot freshness / fill rates）到 Notion / Drive；trading runtime state 屬敏感資訊
+
+### 與 §六.六 SSH bridge 工作流關係
+
+Mac CC = SSOT，可寫 Linear / Notion / git；Linux runtime 透過 `ssh trade-core` 觸發；Linear / Notion 寫入仍從 Mac 主會話發起，避免 dual-session race。**Multi-session race 守則**（`feedback_git_commit_only_for_metadoc.md`）對 CLAUDE.md / TODO.md / memory 仍適用：用 `git commit --only <file>`，不要被 Linear 寫入打斷 git index 一致性。
+
+### 詳細 SOP
+
+完整 workflow 文件：[Notion External-Tool Workflow](https://www.notion.so/350dcd3b1eff8122a033d01823988db0)（也是 Notion mirror 自身規範的部分）。
+
