@@ -1,6 +1,8 @@
 # OpenClaw TODO — 工作清單（v3 · 單一時間軸版）
 
-**最後更新**：2026-04-28 CEST 深夜（**🎉 Wave E COMPLETE — cost_edge_advisor_boot split + Phase C PA RFC + SINGLETON-POLLUTION fix**：8 commits `decf712..3788498` pushed origin/main；Linux re-regression cargo lib **2299/0** + daemon **11/0** + persistence Linux PG **2/0** + SINGLETON **35→0 fail Linux reproducible**（90/90 isolated + 108/108 same-session）+ W3+W2+W1+LOSSES **48/48** + healthcheck **32 PASS / 2 WARN [11]+[23] pre-existing / 0 FAIL** + 全 baseline **3075 passed / 35 fail Linux**（vs Mac 38，-3 sub-baseline 同 family pre-existing）；**G3-09-FUP cost_edge_advisor_boot split 結案**（commit `2f88c40` + `8bebf69` doc-drift fix：解 MAIN-RS-SPLIT P3 + MAIN-BOOT-TASKS-SPLIT P2 兩 ticket，main.rs 1230→1210 / main_boot_tasks 1015→816 / 新 sibling 279）；**G3-09 Phase C PA RFC 完成**（commit `90d1a2e`：Gate 1.7 / 只阻新倉 / triple default-off / V026 reuse / 3 waves / 4 alt rejected）；**STRATEGIST-SINGLETON-POLLUTION 結案**（commit `12f2732` PA bisect investigation + `b579dae` E1 fix Option B+A：production sys.modules.get 雙 site + test fixture dual-patch sentinel atomic restore，35→0 fail）；6 新 FUP filed（MAIN-RS-PRE-EXISTING-CLEANUP P2 / CLAUDE-MD-SECTION-9-HARD-CAP-EXCEPTION-CLAUSE P3 / SINGLETON-POLLUTION-EXECUTOR-SHADOW-TOGGLE-API P3 / SINGLETON-POLLUTION-STRATEGIST-PROMOTE-API P3 / SINGLETON-POLLUTION-PHASE2-ROUTES P4 / G8-01-W2-FILESIZE-WATCH P4）；4 ticket 結案；**G3-09 Phase C Wave 1 impl + Phase B observation deploy 全 NOW ACTIONABLE**；Sign-off `docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-28--wave_e_signoff.md`）
+**最後更新**：2026-04-28 CEST 深夜（**🎉 Wave F COMPLETE — engine `--rebuild` deploy + SINGLETON sibling fix（executor + promote）**：3 commits `739af3c..22e8482` pushed origin/main；**(3) SINGLETON sibling fix 結案** commit `cff6959`：35→0 fail (executor 17 + promote 18) / Mac 38→3 (phase2 Mac-only out-of-scope) / **Linux 35→0 fail / 3098 passed!**（baseline 比 Mac 還乾淨）/ 同 polluter NOVEL 不同機制（FastAPI Depends route-build-time freeze ≠ W3 sys.modules attr precedence）/ Option A only test fixture importlib.reload routes / 0 production diff / E2 retroactive PASS_WITH_NITS / 新 memory rule `feedback_fastapi_depends_reload_freeze.md` 防未來新測 file 重蹈；**(2) Engine deploy** Linux git pull `00aa18a..739af3c` + `restart_all.sh --rebuild` engine PID **3579476** binary mtime **04:13** paper+demo+live alive / healthcheck [30] PASS dormant by design（含 Wave A+B+E 全工 + V026 hotfix + cost_edge_advisor_boot split + SINGLETON fix 全進 runtime，但 Phase B observation period 暫不啟用）/ **operator decision (C)：cost_edge.enabled=true flip + OPENCLAW_COST_EDGE_ADVISOR=1 env 暫不啟用，等 Phase C Wave 1 一起 bundled deploy**；2 ticket 結案；Sign-off `docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-28--wave_f_partial_signoff.md`）
+
+**前次更新**：2026-04-28 CEST 深夜（Wave E COMPLETE — cost_edge_advisor_boot split + Phase C PA RFC + SINGLETON-POLLUTION fix，8 commits `decf712..3788498`，Sign-off `docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-28--wave_e_signoff.md`）
 
 **前次更新**：2026-04-28 CEST 晚（Wave B COMPLETE — G3-09 Phase B Wave 1 + G8-01 W2 + W3，10 commits `cf34e96..dbe2477`，含 1 hotfix round；Sign-off `docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-28--wave_b_signoff.md`）
 
@@ -23,26 +25,28 @@
 
 ---
 
-## 🎯 此刻該做什麼（2026-04-28 CEST 深夜 · 🎉 Wave E COMPLETE · NOW ACTIONABLE: G3-09 Phase C Wave 1 impl + Phase B observation deploy）
+## 🎯 此刻該做什麼（2026-04-28 CEST 深夜 · 🎉 Wave F COMPLETE · 等 Phase C Wave 1 派發 + Phase B observation 一起 bundled deploy）
 
-**Wave E 結案**（8 commits `decf712..3788498`）：
-- ✅ **cost_edge_advisor_boot split** (commits `2f88c40` + `8bebf69` doc-drift) — 解 MAIN-RS-SPLIT + MAIN-BOOT-TASKS-SPLIT 兩 ticket，新 sibling 279 LOC
-- ✅ **G3-09 Phase C PA RFC** (commit `90d1a2e`) — Gate 1.7 IntentProcessor / 只阻新倉 / triple default-off / V026 reuse / 3 waves
-- ✅ **SINGLETON-POLLUTION fix** (commits `12f2732` PA + `b579dae` E1 Option B+A) — 35→0 fail / CPython sys.modules.get 解 from-PKG-import-SUB attribute precedence trap
-- ✅ Linux re-regression 全綠 + SINGLETON 35→0 reproducibility CONFIRMED
+**Wave F 結案**（3 commits `739af3c..22e8482`）：
+- ✅ **(3) SINGLETON sibling fix** (commit `cff6959`) — 35→0 fail (executor_shadow_toggle 17 + strategist_promote 18) / FastAPI Depends route-build-time freeze NOVEL 機制 / Option A only `importlib.reload(route_module)` / Mac 38→3 (phase2 Mac-only) / **Linux 35→0 fail 3098 passed**
+- ✅ **(2) Engine `--rebuild` deploy** — Linux engine PID **3579476** binary mtime **04:13**（含 Wave A+B+E 全工進 runtime）/ paper+demo+live alive / healthcheck [30] PASS dormant by design
+- ✅ **memory rule** `feedback_fastapi_depends_reload_freeze.md` 防未來新測 file 重蹈
+- ⏸ **Phase B observation flag flip** operator decision (C)：暫不啟用，等 Phase C Wave 1 一起 bundled deploy
 
-**NOW ACTIONABLE**（依賴鏈全清）：
-1. **G3-09 Phase C Wave 1 impl** (~2d E1 per Phase C RFC `90d1a2e` §11) — Rust IntentProcessor Gate 1.7 + 只阻新倉 + V026 GATE_REJECT log row
-   - **Recommend**: 等 Phase B observation period ≥48h 數據（~2026-04-30/-05-01）後再 launch，per Phase B RFC §7.3 路線圖
-2. **G3-09 Phase B observation deploy** — operator `ssh trade-core "bash helper_scripts/restart_all.sh --rebuild"` 把 Wave A+B+E binary 進 runtime；advisory only / 0 trade impact
-3. **38 baseline pre-existing fail** — 套 Option B+A pattern（per SINGLETON fix範本）解：SINGLETON-POLLUTION-EXECUTOR-SHADOW-TOGGLE-API + STRATEGIST-PROMOTE-API（17+18 fail）
+**NOW ACTIONABLE**（時間驅動 / 等候 / 餘工）：
+1. **G3-09 Phase C Wave 1 impl** — operator 已指示「Phase C 暫保留，等時間長一些再看」（per Wave E session）；PA RFC `90d1a2e` §11 self-contained E1 prompt ready，operator 何時批 launch 即派 E1
+2. **Phase B observation period** — bundled with Phase C Wave 1 launch（operator decision (C)），同時 flip 3 env TOML cost_edge.enabled=true + set OPENCLAW_COST_EDGE_ADVISOR=1
+3. **9 backlog tickets** 等下次 maintenance wave：MAIN-RS-PRE-EXISTING-CLEANUP P2 / CLAUDE-MD-SECTION-9-HARD-CAP-EXCEPTION-CLAUSE P3 / SINGLETON-POLLUTION-PHASE2-ROUTES P4 (Mac-only) / G8-01-FUP-REGRET-DREAM-DEFERRED P3 / G3-08-FUP-MAF-SPLIT-CLEANUP P3 / G3-09-DAEMON-TEST-SPLIT P3 / G3-09-FUP-CASE-D-H5-WAIT P3 / G3-09-PA-DOCSTRING-CLARIFY P4 / G8-01-W2-FILESIZE-WATCH P4
 
 **Next session 立即可派候選**：
-1. **Phase B observation deploy + Phase C Wave 1**（並行：deploy 等 cron / impl PA RFC ready）
-2. **38 baseline cleanup**（PA RFC + E1 並行解兩個 sibling-pollution-family ticket，~1d）
-3. **MAIN-RS-PRE-EXISTING-CLEANUP P2**（找 main.rs 內 ≥10 LOC 可抽段降至 ≤1200，~1-2h）
+1. **Phase C Wave 1 impl**（operator approve 即派；PA RFC ready）
+2. **MAIN-RS-PRE-EXISTING-CLEANUP P2**（main.rs 1210 → ≤1200，PA find ≥10 LOC 可抽段，~1-2h）
+3. **CLAUDE-MD §九 hard cap exception clause P3**（governance ambiguity 規則修訂）
 
-詳：[Wave E Sign-off](docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-28--wave_e_signoff.md)
+**Time-driven**（passive observation 候選）：
+- **G1-04-FUP-FINAL-COMPUTE P1**（QC+FA, ~05-02 cutoff）— G7-09 fix 7d post-deploy 後 final R:R / fee_rate baseline
+
+詳：[Wave F partial Sign-off](docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-28--wave_f_partial_signoff.md)
 
 ---
 
