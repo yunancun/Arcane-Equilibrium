@@ -44,10 +44,14 @@ impl TickPipeline {
             // Hard block: stops only / 硬阻斷：僅處理止損
             warn!(symbol = %sym, reason = %h0_result.reason,
                 "H0 BLOCKED — stops only / H0 阻斷 — 僅止損");
+            let is_exchange_mode = self.pipeline_kind.is_exchange();
             // PNL-FIX-1: triggers may fire on positions whose symbol ≠ event.symbol;
             // close each at its own symbol's latest price (see fast_track block).
             // PNL-FIX-1：被觸發的倉位 symbol 可能 ≠ event.symbol，必須各自用自己的最新價平倉。
             for (sym, trigger) in &self.paper_state.check_stops(event.last_price, event.ts_ms) {
+                if is_exchange_mode && self.pending_close_symbols.contains(sym) {
+                    continue;
+                }
                 let ectx = self
                     .paper_state
                     .get_entry_context_id(sym)
@@ -56,9 +60,20 @@ impl TickPipeline {
                 // EXIT-FEATURES-TABLE-1: snapshot BEFORE close (full close path).
                 // EXIT-FEATURES-TABLE-1：先取快照再平倉（full close 後倉位已移除）。
                 let snap = self.paper_state.position_exit_snapshot(sym);
-                if let Some((il, q, px, pnl)) =
+                let close_result = if is_exchange_mode {
+                    let Some((is_long, qty)) = self
+                        .paper_state
+                        .get_position(sym)
+                        .map(|p| (p.is_long, p.qty))
+                    else {
+                        continue;
+                    };
+                    let tag = format!("stop_trigger:{}", trigger.reason);
+                    self.close_position_after_exchange_dispatch(sym, is_long, qty, event, &tag)
+                } else {
                     self.close_position_at_symbol_market(sym, event.ts_ms)
-                {
+                };
+                if let Some((il, q, px, pnl)) = close_result {
                     let tag = format!("stop_trigger:{}", trigger.reason);
                     self.emit_close_fill(
                         sym,
@@ -75,13 +90,7 @@ impl TickPipeline {
                 self.stats.total_stops += 1;
             }
             let dur = tick_start.elapsed().as_micros() as u64;
-            return ControlFlow::Break(self.maybe_canary_record(
-                event,
-                None,
-                vec![],
-                vec![],
-                dur,
-            ));
+            return ControlFlow::Break(self.maybe_canary_record(event, None, vec![], vec![], dur));
         }
         if !h0_result.reason.is_empty() {
             debug!(symbol = %sym, reason = %h0_result.reason,

@@ -36,7 +36,7 @@ type HmacSha256 = Hmac<Sha256>;
 /// Schema version for `authorization.json`. Bump when the canonical signing
 /// payload layout changes.
 /// `authorization.json` schema 版本。簽名載荷布局變更時遞增。
-pub const SCHEMA_VERSION: u32 = 1;
+pub const SCHEMA_VERSION: u32 = 2;
 
 /// Filename inside `secret_files/bybit/live/`.
 pub const AUTHORIZATION_FILENAME: &str = "authorization.json";
@@ -45,6 +45,8 @@ pub const AUTHORIZATION_FILENAME: &str = "authorization.json";
 pub const ENV_LIVE_DEMO: &str = "live_demo";
 /// Mainnet endpoint label used in `env_allowed`.
 pub const ENV_MAINNET: &str = "mainnet";
+/// Only approved Python system mode that may authorize the Rust Live pipeline.
+pub const APPROVED_SYSTEM_MODE_LIVE_RESERVED: &str = "live_reserved";
 
 /// Earned-Trust authorization record signed by the Python control API and
 /// consumed by the Rust engine. The `sig` field is hex HMAC-SHA256 over the
@@ -65,6 +67,11 @@ pub struct LiveAuthorization {
     pub expires_at_ms: u64,
     /// Operator account id that approved the renewal.
     pub operator_id: String,
+    /// Python system mode approved at signing time. Rust only accepts
+    /// `"live_reserved"` so a stale/non-live control-plane approval cannot
+    /// start or keep Live running.
+    #[serde(default)]
+    pub approved_system_mode: String,
     /// Allowed endpoint labels (`"live_demo"` / `"mainnet"`). Canonical form
     /// for signing is this list sorted ASCII-ascending with no duplicates.
     pub env_allowed: Vec<String>,
@@ -119,6 +126,8 @@ pub enum AuthError {
     /// Current endpoint label is not in `env_allowed`. Example: mainnet not
     /// yet approved but `bybit_endpoint` flipped to `mainnet`.
     EnvNotAllowed { env: String, allowed: Vec<String> },
+    /// `approved_system_mode` is missing or is not exactly `"live_reserved"`.
+    ApprovedSystemModeNotLiveReserved { got: Option<String> },
     /// Attempted to gate an environment that is not eligible for Live pipeline
     /// (Demo/Testnet). Programming error — should never happen at runtime.
     UnsupportedEnv { env: String },
@@ -178,6 +187,12 @@ impl std::fmt::Display for AuthError {
                  / 授權不允許當前 endpoint",
                 allowed
             ),
+            Self::ApprovedSystemModeNotLiveReserved { got } => write!(
+                f,
+                "live authorization approved_system_mode must be live_reserved \
+                 (got {:?}) / 授權 approved_system_mode 必須為 live_reserved",
+                got
+            ),
             Self::UnsupportedEnv { env } => write!(
                 f,
                 "env {env} is not eligible for Live pipeline (Demo/Testnet \
@@ -203,6 +218,9 @@ pub fn auth_error_kind(err: &AuthError) -> &'static str {
         AuthError::BadSignature => "bad_signature",
         AuthError::Expired { .. } => "expired",
         AuthError::EnvNotAllowed { .. } => "env_not_allowed",
+        AuthError::ApprovedSystemModeNotLiveReserved { .. } => {
+            "approved_system_mode_not_live_reserved"
+        }
         AuthError::UnsupportedEnv { .. } => "unsupported_env",
     }
 }
@@ -232,7 +250,7 @@ pub fn authorization_path() -> Option<PathBuf> {
 /// Build the canonical payload that is HMAC-signed. Python and Rust MUST
 /// agree on this format byte-for-byte.
 ///
-/// Format (pipe-separated): `version|tier|issued_at_ms|expires_at_ms|operator_id|env_allowed_sorted_csv`
+/// Format (pipe-separated): `version|tier|issued_at_ms|expires_at_ms|operator_id|approved_system_mode|env_allowed_sorted_csv`
 ///
 /// `env_allowed_sorted_csv` is ASCII-ascending sorted + comma-joined, with
 /// duplicates removed. This lets Python write the list in any order and both
@@ -242,12 +260,13 @@ pub fn canonical_payload(auth: &LiveAuthorization) -> String {
     envs.sort();
     envs.dedup();
     format!(
-        "{}|{}|{}|{}|{}|{}",
+        "{}|{}|{}|{}|{}|{}|{}",
         auth.version,
         auth.tier,
         auth.issued_at_ms,
         auth.expires_at_ms,
         auth.operator_id,
+        auth.approved_system_mode,
         envs.join(","),
     )
 }
@@ -291,6 +310,15 @@ pub fn verify_in_memory(
             got: auth.version,
             expected: SCHEMA_VERSION,
         });
+    }
+
+    if auth.approved_system_mode != APPROVED_SYSTEM_MODE_LIVE_RESERVED {
+        let got = if auth.approved_system_mode.is_empty() {
+            None
+        } else {
+            Some(auth.approved_system_mode.clone())
+        };
+        return Err(AuthError::ApprovedSystemModeNotLiveReserved { got });
     }
 
     let expected_sig = compute_signature(auth, ipc_secret);
@@ -369,6 +397,7 @@ mod tests {
             issued_at_ms: now_ms,
             expires_at_ms: now_ms + 24 * 3600 * 1000,
             operator_id: "ncyu".into(),
+            approved_system_mode: APPROVED_SYSTEM_MODE_LIVE_RESERVED.into(),
             env_allowed: vec!["live_demo".into()],
             sig: String::new(),
         };
@@ -379,11 +408,12 @@ mod tests {
     #[test]
     fn canonical_payload_sorts_and_dedups_envs() {
         let auth = LiveAuthorization {
-            version: 1,
+            version: SCHEMA_VERSION,
             tier: "T1_PROVISIONAL".into(),
             issued_at_ms: 1_700_000_000_000,
             expires_at_ms: 1_700_000_000_000 + 3600_000,
             operator_id: "op".into(),
+            approved_system_mode: APPROVED_SYSTEM_MODE_LIVE_RESERVED.into(),
             // Intentionally unsorted + duplicated
             env_allowed: vec!["mainnet".into(), "live_demo".into(), "live_demo".into()],
             sig: "".into(),
@@ -425,6 +455,7 @@ mod tests {
             issued_at_ms: now,
             expires_at_ms: now + 168 * 3600 * 1000,
             operator_id: "ncyu".into(),
+            approved_system_mode: APPROVED_SYSTEM_MODE_LIVE_RESERVED.into(),
             env_allowed: vec!["mainnet".into(), "live_demo".into()],
             sig: String::new(),
         };
@@ -512,8 +543,66 @@ mod tests {
             err,
             AuthError::UnsupportedVersion {
                 got: 99,
-                expected: 1
+                expected: SCHEMA_VERSION
             }
+        ));
+    }
+
+    #[test]
+    fn v1_authorization_rejected_before_signature() {
+        let now = 1_700_000_000_000;
+        let mut auth = fresh_auth(now);
+        auth.version = 1;
+        auth.sig = compute_signature(&auth, TEST_SECRET);
+        let err =
+            verify_in_memory(&auth, BybitEnvironment::LiveDemo, now, TEST_SECRET).unwrap_err();
+        assert!(matches!(
+            err,
+            AuthError::UnsupportedVersion {
+                got: 1,
+                expected: SCHEMA_VERSION
+            }
+        ));
+    }
+
+    #[test]
+    fn missing_approved_system_mode_rejected_with_specific_variant() {
+        let now = 1_700_000_000_000;
+        let raw = format!(
+            r#"{{
+                "version": {},
+                "tier": "T0_ENTRY",
+                "issued_at_ms": {},
+                "expires_at_ms": {},
+                "operator_id": "ncyu",
+                "env_allowed": ["live_demo"],
+                "sig": ""
+            }}"#,
+            SCHEMA_VERSION,
+            now,
+            now + 3600_000
+        );
+        let auth: LiveAuthorization = serde_json::from_str(&raw).expect("default missing mode");
+        let err =
+            verify_in_memory(&auth, BybitEnvironment::LiveDemo, now, TEST_SECRET).unwrap_err();
+        assert!(matches!(
+            err,
+            AuthError::ApprovedSystemModeNotLiveReserved { got: None }
+        ));
+    }
+
+    #[test]
+    fn non_live_reserved_approved_system_mode_rejected_with_specific_variant() {
+        let now = 1_700_000_000_000;
+        let mut auth = fresh_auth(now);
+        auth.approved_system_mode = "demo_reserved".into();
+        auth.sig = compute_signature(&auth, TEST_SECRET);
+        let err =
+            verify_in_memory(&auth, BybitEnvironment::LiveDemo, now, TEST_SECRET).unwrap_err();
+        assert!(matches!(
+            err,
+            AuthError::ApprovedSystemModeNotLiveReserved { got: Some(mode) }
+                if mode == "demo_reserved"
         ));
     }
 
@@ -538,11 +627,12 @@ mod tests {
         // sorts before hashing so the signature stays stable.
         let now = 1_700_000_000_000;
         let mut a = LiveAuthorization {
-            version: 1,
+            version: SCHEMA_VERSION,
             tier: "T2_ESTABLISHED".into(),
             issued_at_ms: now,
             expires_at_ms: now + 3600_000,
             operator_id: "op".into(),
+            approved_system_mode: APPROVED_SYSTEM_MODE_LIVE_RESERVED.into(),
             env_allowed: vec!["live_demo".into(), "mainnet".into()],
             sig: String::new(),
         };
@@ -615,6 +705,10 @@ mod tests {
                 allowed: vec![]
             }),
             "env_not_allowed"
+        );
+        assert_eq!(
+            auth_error_kind(&AuthError::ApprovedSystemModeNotLiveReserved { got: None }),
+            "approved_system_mode_not_live_reserved"
         );
     }
 }

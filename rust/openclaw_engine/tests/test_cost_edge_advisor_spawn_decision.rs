@@ -313,10 +313,7 @@ async fn fup_case_b_env_set_risk_disabled_slot_some_ipc_disabled() {
 
     // Step (1) — slot late-inject (wrapper lines 495-498).
     // 步驟 (1) — slot 注入（wrapper 行 495-498）。
-    advisor_slot
-        .write()
-        .await
-        .replace(Arc::clone(&advisor));
+    advisor_slot.write().await.replace(Arc::clone(&advisor));
 
     // Step (2) — spawn daemon (wrapper lines 526-532).
     // 步驟 (2) — spawn daemon（wrapper 行 526-532）。
@@ -405,10 +402,7 @@ async fn fup_case_c_env_set_risk_enabled_slot_some_ipc_live_state() {
     let risk = risk_config_advisor_enabled();
     let advisor = CostEdgeAdvisor::new_arc();
 
-    advisor_slot
-        .write()
-        .await
-        .replace(Arc::clone(&advisor));
+    advisor_slot.write().await.replace(Arc::clone(&advisor));
 
     let handle = spawn_cost_edge_advisor(
         Arc::clone(&advisor),

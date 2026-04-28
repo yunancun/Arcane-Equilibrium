@@ -26,7 +26,9 @@
 use crate::main_fanout::LiveEventSenderSlot;
 use crate::run_pipeline_crash_only;
 use crate::startup::ExchangePipelineBindings;
-use openclaw_engine::bybit_rest_client::{live_bybit_environment, BybitEnvironment, BybitRestClient};
+use openclaw_engine::bybit_rest_client::{
+    live_bybit_environment, BybitEnvironment, BybitRestClient,
+};
 use openclaw_engine::canary_writer::CanaryWriterHandle;
 use openclaw_engine::config::{BudgetConfig, ConfigManager, ConfigStore};
 use openclaw_engine::database::{
@@ -42,9 +44,7 @@ use openclaw_engine::linucb::LinUcbRuntime;
 use openclaw_engine::news::NewsContextSnapshot;
 use openclaw_engine::scanner::registry::SymbolRegistry;
 use openclaw_engine::scanner::ScannerConfig;
-use openclaw_engine::tick_pipeline::{
-    EngineEvent, PipelineCommand, PipelineHealth, PipelineKind,
-};
+use openclaw_engine::tick_pipeline::{EngineEvent, PipelineCommand, PipelineHealth, PipelineKind};
 use openclaw_types::PriceEvent;
 use std::sync::Arc;
 use tokio::sync::{broadcast, mpsc, oneshot};

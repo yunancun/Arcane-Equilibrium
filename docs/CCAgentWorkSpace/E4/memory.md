@@ -2,6 +2,46 @@
 
 ## 工作記憶
 
+### 2026-04-28 Wave H 3-way active warn cleanup splits + 2 inline fixes Linux full regression — **E4 PASS**
+
+**HEAD**: `0a50c6c` (Wave H 6 commits `dbba235..0a50c6c` post-EDGE-DIAG-2 deploy)
+
+**Verdict**: **PASS** — Wave H 純 Python refactor + docs (0 Rust src diff, 0 trade impact, no engine rebuild)
+
+| Suite | passed | failed | baseline | delta |
+|---|---|---|---|---|
+| Rust lib (release) | **2308** | 0 | 2308 | 0 ✓ |
+| Rust daemon split sum (3 files: dual_safeguard 3 + proofs 5 + spawn_decision 3) | **11** | 0 | 11 | 0 ✓ |
+| Rust persistence (Linux real PG) | **2** | 0 | 2 | 0 ✓ |
+| HSQ same-session 1st (api_contract + h_state_query) | **108** | 0 | 108 (post-Wave-G HSQ-SPLIT) | 0 ✓ |
+| HSQ same-session 2nd (flaky verify) | **108** | 0 | 108 | 0 ✓ (non-flaky) |
+| Strategist regression (8 files) | **133** | 0 | 133 | 0 ✓ |
+| Scout (integration + audit_wiring) | **46** | 0 | 46 | 0 ✓ |
+| Analyst (agent_unit) | **22** | 0 | 22 | 0 ✓ |
+| Full control_api_v1 baseline | **3117** | 0 (3 skipped) | ≥3117 | 0 ✓ |
+| Healthcheck full sweep | 30 PASS / 2 FAIL pre-existing | — | — | OK |
+
+**Wave H 對象**：(1) `54b9add` §九 pre-existing baseline exception clause (2) `6d657c1` STRATEGY-WIRING-SPLIT P2 strategy_wiring 1060→784 + 2 sibling (h_state 133 + scanner 338) (3) `5928576` STRATEGIST-DELEGATOR-SLIM P3 strategist 933→782 + 25 delegators lift (4) `bd48672` MAF-SPLIT-CLEANUP §九 SCOUT_AGENT row + docstring (5) `eb6f9e2` cross-agent memory (6) `0a50c6c` PA lambda capture comment fix.
+
+**重要驗證**：HSQ same-session 108/108 reproducible 兩遍 → confirms STRATEGY-WIRING-SPLIT P2 (1060→784 + 2 sibling) 對 H state singleton lifecycle **0 影響**（singleton attribute grep stability via re-export 維持）。
+
+**Pre-existing FAIL clarification**（per CLAUDE.md §九 exception clause）：
+- `[12] bb_breakout_post_deadlock_fix` — G2-06 disable + EDGE-DIAG-2 demo override known issue
+- `[27] intents_counter_freeze` — Rust trading_writer intent INSERT path wedge (P1 documented，parent commit 也 FAIL)
+- 兩 FAIL 在 Wave H 之前的 multiple E4 reports (2026-04-26 起) 持續記載；Wave H 0 Rust diff 不可能引入
+
+**Engine rebuild**: NOT triggered. Engine PID 3626554 binary mtime 2026-04-28 05:28 (EDGE-DIAG-2 deploy 不變). Wave H 純 Python + docs, LiveDemo runtime 不退化.
+
+**操作 notes for next E4**：
+1. Linux pytest path = `/home/ncyu/.local/bin/pytest`（venvs/ 只含 rust_build, 無 Python venv）
+2. test_strategist*/test_scout*/test_analyst* 全在 `program_code/exchange_connectors/bybit_connector/control_api_v1/tests/` 不在 srv root `tests/`
+3. Healthcheck 用 `bash helper_scripts/db/passive_wait_healthcheck.sh` 不要 `python3 -m runner`（後者 PG 密碼/env 載入會失敗）
+4. cargo test --test 多 file flag 要拆，不能合 (`--test a --test b` 才會跑 b，純 `cargo test --test a` 只會跑 a)
+
+報告：`docs/CCAgentWorkSpace/E4/workspace/reports/2026-04-28--wave_h_linux_full_regression.md`
+
+---
+
 ### 2026-04-28 Wave B Hotfix `00db240` Linux re-regression — **E4 PASS**
 
 **對象**：commit `00db240` (V026 retention policy fn + CHECK constraint test fixture acceptance)，HEAD `16a30e5`
@@ -970,3 +1010,39 @@ ssh trade-core "cd ~/BybitOpenClaw/srv && python3 helper_scripts/db/passive_wait
 ### 非 `--rebuild` 部署決定
 - Wave G 全部是 file-size split / 0 production behavior change → task brief 明確不需 `--rebuild`，engine PID 沿用 pre-merge binary
 - LiveDemo runtime 未退化（healthcheck [22] trading_pipeline_silent_gap 全 fresh stale=0.x m）
+
+
+## 2026-04-28 — Agent Tracker MVP feature branch regression PASS（plan aa-nifty-walrus round 2）
+
+**HEAD**: `feature/agent-tracker-mvp` `d1c6911`（feature `ab12207` E1 9 files + `d1c6911` E4 test fix）
+**Verdict**: **APPROVED FOR PM SIGN-OFF**
+
+### KPIs
+- 21/21 PASS（plan 預期 12，E1 落地了 21 — 含 8 round-1 + 2 H-1 ExecutorAgent ctor integration + 1 H-3 invariant + file-size guard + 9 額外覆蓋 PG outage / limit validation / SQL filter / engine_mode union / since fallback / fail-closed provider exception 等）
+- 全 control_api_v1: **3138/0** (vs Wave H baseline 3117 = +21 = 新增 21 個 agent tracker test，0 既有 fail) — non-flaky 跑 3 次同綠
+- 3 endpoint smoke (Linux temp uvicorn port 18001 + Bearer api_token): roster 200 / recent_rejects 200 / shadow_vs_live_summary 200，body shape 對 plan §F
+- p99 latency: 121ms < SLA 500ms（30s plan refresh，餘量充足）
+- 不變量 grep: SQL writes 0（除 docstring 政策自證）/ JS POST 0（同上）/ hardcoded paths 0 / file size 5/5 under limit (334/783/804/824/954)
+- 3 SQL EXPLAIN ANALYZE: ai_usage_log 空表（idx_ai_usage_log_scope_time 存在）/ risk_verdicts ChunkAppend + Index Scan idx_verdicts_verdict 0.1ms / fills hypertable ChunkAppend + 1-chunk Seq Scan 1.5ms（單 chunk 1330 rows 太小，cost-based seq 比 index 快）
+- 0 Rust diff，0 engine impact，無需 --rebuild
+
+### Round 2 自我修復案例（test 寫法 bug）
+- E1 提交的 21 test 中**初次跑** 2 fail（test_h3_no_like_agent_underscore_anywhere + test_grep_no_write_paths）
+- 失敗根因：**naive substring grep on raw source** 在自證 docstring（"INSERT/UPDATE/DELETE = 0 in this file" / "LIKE 'agent_%' forbidden"）+ inline comment `# post-update` 中誤觸
+- E4 profile 允許「test 本身寫錯，可以直接修 test」— **不是業務代碼 bug**，所以本人改 test 不退 E1
+- 修復：加 `_strip_comments_and_docstrings()` helper（tokenize + ast）：(1) 移所有 `#` comment (2) 移所有 module/class/function body 的 bare-string `Expr` statement
+- 關鍵巧思：handles `from __future__ import annotations` + module-note pattern（PEP 257 不會 bless 為 docstring，因為它不是第一條 statement，但作者實際當 docstring 用 — 所以 strip 邏輯不能依賴 PEP 257，要直接掃 `body[*]`）
+- 驗證：保留所有非 bare-string literal（`"""SELECT ..."""` SQL 模板仍在），未來如有真實 INSERT SQL 進 helpers/routes 仍會 trip invariant
+- 教訓：寫 invariant grep test 時，**自證式 docstring + comment 是常見 false-positive 陷阱**，必須用 ast/tokenize strip 而非 raw `in src`
+
+### Linux 部署門路（feature branch flow）
+- Mac 不能跑 fastapi pytest（user 已驗），feature branch flow：Mac commit 9 file → push origin → ssh trade-core fetch + checkout feature → pytest runs OK
+- Linux trade-core 跑現有 main branch uvicorn (PID 4162909, port 8000)，feature branch 程式碼**未進** running uvicorn（main HEAD `4abea3c` ≠ feature `d1c6911`）
+- Smoke test 要啟臨時 uvicorn (port 18001 single-worker) 才能驗 endpoint —— 完成後需 `pkill -9 -f 18001` 清理
+- Auth: `Authorization: Bearer <token>` from `srv/program_code/exchange_connectors/bybit_connector/control_api_v1/.secrets/api_token`
+- main branch uvicorn 不會收到 feature branch routes，所以 PM merge feature → main → 必跑 `restart_all.sh --keep-auth` 重啟 uvicorn（不需 --rebuild Rust，0 Rust diff）
+
+### EXPLAIN ANALYZE on dev sandbox 的 gotcha
+- ai_usage_log dev sandbox **0 row** → planner 折成 `One-Time Filter: false`，無法直接證明索引被選
+- 緩解：(1) drop time prune 看 hypertable plan 形態 (2) 確認索引存在（pg_indexes 比對） (3) 信賴 production data shape 後 cost-based switch 自動發生
+- 對 hypertable 小 chunk 內部 Seq Scan（1330 rows 1 chunk）= **正常** — partition prune 在 ChunkAppend layer 已生效，單 chunk 內 PG planner 認為 seq < random index access 是 cost-based 正確選擇

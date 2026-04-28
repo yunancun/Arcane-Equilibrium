@@ -21,7 +21,8 @@ MODULE_NOTE (EN):
             2. live_reserved global mode
             3. OPENCLAW_ALLOW_MAINNET=1 env (Mainnet only — bybit_endpoint=mainnet)
             4. live secret slot has api_key + api_secret
-            5. authorization.json HMAC valid + unexpired + env_allowed match
+      5. authorization.json schema v2 + approved_system_mode=live_reserved +
+         HMAC valid + unexpired + env_allowed match
         - if shadow_mode=false AND engine=demo: just Operator role
         - any → shadow_mode=true (retreat): just Operator role (cheap retreat per §六 #6)
         - paper engine: Operator role only (paper is opt-in via env per
@@ -186,8 +187,8 @@ def _verify_live_gate(actor: Any) -> None:
       4. secret slot has api_key + api_secret — read from
          $OPENCLAW_SECRETS_DIR/live/api_key + api_secret
       5. authorization.json valid — read from $OPENCLAW_SECRETS_DIR/live/
-         authorization.json; check HMAC + expiry + env_allowed match against
-         current bybit_endpoint label
+         authorization.json; check schema/mode + HMAC + expiry + env_allowed
+         match against current bybit_endpoint label
 
     First failing gate raises 403 with `gate_failed` naming the specific
     gate. Operator can resolve by setting env / writing keys / running
@@ -205,7 +206,7 @@ def _verify_live_gate(actor: Any) -> None:
     # 延遲匯入避免循環匯入。
     from .live_session_routes import _get_global_mode_state
     global_mode = _get_global_mode_state()
-    if "live" not in global_mode:
+    if global_mode != "live_reserved":
         logger.warning(
             "executor.shadow-toggle live gate FAIL gate=live_reserved actor=%s mode=%s",
             getattr(actor, "actor_id", "?"), global_mode,
@@ -286,7 +287,7 @@ def _current_bybit_endpoint_label() -> str:
 
 
 def _verify_authorization_json_or_raise(slot_dir: Path, endpoint_label: str, actor: Any) -> None:
-    """Verify authorization.json HMAC + expiry + env_allowed.
+    """Verify authorization.json schema + HMAC + expiry + env_allowed.
 
     Reuses the canonical-payload + sign helpers from live_trust_routes (lazy
     import) — same code path as `_write_signed_live_authorization` produces.
@@ -295,11 +296,12 @@ def _verify_authorization_json_or_raise(slot_dir: Path, endpoint_label: str, act
     Failure reasons are surfaced as distinct `gate_failed` values:
       - authorization_missing  : file does not exist
       - authorization_malformed: parse / required-field error
+      - authorization_schema   : unsupported schema version / mode
       - authorization_signature: HMAC mismatch
       - authorization_expired  : expires_at_ms < now
       - authorization_env_mismatch : current bybit_endpoint not in env_allowed
 
-    驗證 authorization.json 簽名 + 期效 + env_allowed；失敗原因細分回報。
+    驗證 authorization.json schema + 簽名 + 期效 + env_allowed；失敗原因細分回報。
     """
     import hashlib
     import hmac as _hmac
@@ -336,6 +338,30 @@ def _verify_authorization_json_or_raise(slot_dir: Path, endpoint_label: str, act
             f"authorization.json parse error: {exc}",
         )
 
+    from . import live_trust_routes as ltr
+
+    if version != ltr._AUTHORIZATION_SCHEMA_VERSION:
+        logger.warning(
+            "executor.shadow-toggle live gate FAIL gate=authorization_schema actor=%s version=%s",
+            getattr(actor, "actor_id", "?"), version,
+        )
+        raise _gate_failure(
+            "authorization_schema",
+            f"authorization.json version={version} unsupported; "
+            f"expected {ltr._AUTHORIZATION_SCHEMA_VERSION}. Run /api/v1/live/auth/renew.",
+        )
+    approved_system_mode = str(record.get("approved_system_mode", ""))
+    if approved_system_mode != ltr._REQUIRED_LIVE_GLOBAL_MODE:
+        logger.warning(
+            "executor.shadow-toggle live gate FAIL gate=authorization_schema actor=%s approved_system_mode=%s",
+            getattr(actor, "actor_id", "?"), approved_system_mode,
+        )
+        raise _gate_failure(
+            "authorization_schema",
+            "authorization.json approved_system_mode must be live_reserved. "
+            "Run /api/v1/live/auth/renew while Global Mode is live_reserved.",
+        )
+
     # HMAC verify — must match Rust compute_signature + Python _sign_authorization_payload.
     # HMAC 驗證 — 必須對齊 Rust 與 Python 既有實作。
     ipc_secret = os.environ.get("OPENCLAW_IPC_SECRET", "").strip()
@@ -352,7 +378,15 @@ def _verify_authorization_json_or_raise(slot_dir: Path, endpoint_label: str, act
             "OPENCLAW_IPC_SECRET unset — cannot verify HMAC; set in engine env.",
         )
     envs_sorted = sorted(set(env_allowed))
-    payload = f"{version}|{tier}|{issued_at_ms}|{expires_at_ms}|{operator_id}|{','.join(envs_sorted)}"
+    payload = ltr._canonical_authorization_payload(
+        version=version,
+        tier=tier,
+        issued_at_ms=issued_at_ms,
+        expires_at_ms=expires_at_ms,
+        operator_id=operator_id,
+        approved_system_mode=approved_system_mode,
+        env_allowed=envs_sorted,
+    )
     sig_expected = _hmac.new(
         ipc_secret.encode("utf-8"), payload.encode("utf-8"), hashlib.sha256
     ).hexdigest()

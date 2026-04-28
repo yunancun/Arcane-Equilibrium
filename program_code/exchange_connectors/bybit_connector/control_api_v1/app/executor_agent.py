@@ -724,17 +724,80 @@ class ExecutorAgent(BaseAgent):
     # ── Status / 状态 ──
 
     def get_stats(self) -> Dict[str, Any]:
+        """Return the live ExecutorAgent stats snapshot / 回傳即時統計快照。
+
+        Plan ``aa-nifty-walrus.md`` UX A-grade contract requires the route
+        layer to render shadow vs live with three-layer visual isolation
+        (card bg + banner + number unit). To satisfy that contract this
+        snapshot must expose two non-``_stats`` fields the route layer
+        relies on:
+
+        * ``shadow_mode`` — bool, derived live from
+          ``self._shadow_mode_provider()`` (G3-03 Phase B Rust IPC cache
+          backed by ``ExecutorConfigCache``). Provider exception →
+          fail-closed ``True`` (mirrors ``get_executor_snapshot`` policy
+          and CLAUDE.md §二 原則 #6 "失敗默認收縮").
+        * ``orders_submitted`` — int, an alias for ``executions_success``
+          (the count of intents that *actually traded*, not merely
+          attempted; plan §A copy "今日成单数" maps to fills, not
+          attempts). Aliased rather than added to ``_stats`` to avoid
+          double-counting on dashboards that also read
+          ``executions_success`` directly.
+
+        Both fields land *after* the ``**self._stats`` spread so the
+        original keys remain stable. Provider call is performed *outside*
+        ``self._lock`` to avoid deadlock with ``ExecutorConfigCache``
+        internal lock (same rule as ``get_executor_snapshot`` since G3-03
+        Phase B).
+
+        plan ``aa-nifty-walrus.md`` UX A 級合約要求路由層以三層視覺隔離
+        渲染 shadow / live（卡片底色 + banner + 數字單位）。為履行合約，
+        本快照必須額外曝露兩個非 ``_stats`` 欄位：
+
+        * ``shadow_mode`` — bool；透過 ``self._shadow_mode_provider()``
+          即時讀取（G3-03 Phase B 的 Rust IPC 快取，背後是
+          ``ExecutorConfigCache``）。provider 例外 → fail-closed 為
+          ``True``（對齊 ``get_executor_snapshot`` 策略與 CLAUDE.md §二
+          原則 #6「失敗默認收縮」）。
+        * ``orders_submitted`` — int；``executions_success`` 的別名（plan
+          §A「今日成单数」應指實際成交，非嘗試；故對應到
+          ``executions_success``）。以別名方式輸出，不另寫進 ``_stats``，
+          避免 dashboard 雙重讀取造成計數翻倍。
+
+        兩欄位皆置於 ``**self._stats`` 展開之後，原 key 順序保持穩定。
+        provider 呼叫於 ``self._lock`` 外執行，以避免與
+        ``ExecutorConfigCache`` 內部 lock 死鎖（G3-03 Phase B 原則）。
+        """
         with self._lock:
             avg_slippage = 0.0
             if self._stats["executions_success"] > 0:
                 avg_slippage = self._stats["total_slippage_bps"] / self._stats["executions_success"]
-            return {
+            executions_success = int(self._stats.get("executions_success", 0))
+            base = {
                 "role": AgentRole.EXECUTOR.value,
                 "state": self.state.value,
                 "total_reports": len(self._reports),
                 "avg_slippage_bps": round(avg_slippage, 2),
                 **dict(self._stats),
             }
+        # Provider call OUTSIDE self._lock to avoid deadlock with
+        # ExecutorConfigCache internal lock (G3-03 Phase B contract; mirrors
+        # get_executor_snapshot()).
+        # provider 呼叫於 self._lock 外，避與 ExecutorConfigCache 內部 lock 死鎖
+        # （G3-03 Phase B 契約；對齊 get_executor_snapshot()）。
+        try:
+            shadow_mode_bool = bool(self._shadow_mode_provider())
+        except Exception:  # noqa: BLE001 — defensive
+            # fail-closed: shadow=on is the safest assumption when provider
+            # raises; matches CLAUDE.md §二 原則 #6.
+            # fail-closed：provider 拋例外時假設 shadow=on（最安全）。
+            shadow_mode_bool = True
+        base["shadow_mode"] = shadow_mode_bool
+        # ``orders_submitted`` is the count of *fills produced*, not attempts —
+        # plan §A copy「今日成单数」maps to executions_success (real trades).
+        # ``orders_submitted`` 是真實成交數，對應 executions_success，非 attempt。
+        base["orders_submitted"] = executions_success
+        return base
 
     def get_recent_reports(self, limit: int = 20) -> List[Dict[str, Any]]:
         with self._lock:

@@ -139,10 +139,11 @@ async def post_live_session_start(
     # Require Operator role — primary gate / 要求 Operator 角色 — 主門控
     core._require_operator(actor)
 
-    # Gate: global_mode_state must include 'live' (i.e. live_reserved or live_enabled)
-    # 門控：global_mode_state 必須含 'live'（即 live_reserved 或 live_enabled）
+    # Gate: global_mode_state must be exactly live_reserved. Substring checks
+    # can accept unintended future modes and are not a live write boundary.
+    # 門控：global_mode_state 必須精確等於 live_reserved。
     global_mode = core._get_global_mode_state()
-    if "live" not in global_mode:
+    if global_mode != "live_reserved":
         logger.warning(
             "Live session start BLOCKED: global_mode=%s (not live_reserved) — actor=%s",
             global_mode, getattr(actor, "actor_id", "?"),
@@ -256,7 +257,6 @@ async def post_live_session_stop(
 
     errors: list[str] = []
     rust_online = get_rust_reader().is_available()
-    rest_fallback_used = False
 
     # Close all live positions via IPC (engine handles exchange order cancellation in live mode)
     # 通過 IPC 平倉（live 模式下引擎同時處理交易所掛單取消）
@@ -267,33 +267,52 @@ async def post_live_session_stop(
             close_result = await core._ipc_command("close_all_positions", {"engine": "live"})
         except Exception as exc:
             if core._is_live_channel_unavailable_error(exc):
-                # LIVE-GATE-FALLBACK-1：Live pipeline 未授權啟動 → channel 不存在 → REST 降級清理。
-                logger.warning(
-                    "LIVE-GATE-FALLBACK-1 (live stop): IPC close_all channel unavailable "
-                    "— REST orphan sweep will close exchange positions / 降級至 REST 清倉"
+                logger.error(
+                    "live session stop close BLOCKED: live IPC channel unavailable; REST fallback disabled"
                 )
-                close_result = {"skipped": True, "reason": "live_pipeline_not_authorized"}
-                rest_fallback_used = True
+                close_result = {
+                    "skipped": True,
+                    "reason": "live_pipeline_not_authorized",
+                    "rest_fallback_disabled": True,
+                }
+                errors.append("live_channel_unavailable")
             else:
                 errors.append(f"close_positions: {exc}")
                 logger.error("IPC close_all_positions failed (live stop): %s", exc)
-        # Orphan sweep: close exchange positions not tracked in paper_state.
-        # 孤兒清掃：平掉交易所有但 paper_state 沒有的倉位。
-        orphan_result = await core._sweep_live_orphan_positions(errors)
-        if orphan_result.get("rest_fallback"):
-            rest_fallback_used = True
+        if not close_result.get("rest_fallback_disabled"):
+            # Orphan sweep: close exchange positions not tracked in paper_state.
+            # 孤兒清掃：平掉交易所有但 paper_state 沒有的倉位。
+            orphan_result = await core._sweep_live_orphan_positions(errors)
+        else:
+            orphan_result = {
+                "skipped": True,
+                "reason": core._LIVE_REST_FALLBACK_DISABLED_DETAIL,
+            }
     else:
         close_result = orphan_result = {"skipped": True, "reason": "engine_offline"}
 
     logger.warning(
-        "⚠ LIVE SESSION STOPPED — positions closed — rest_fallback=%s — errors=%s — actor=%s",
-        rest_fallback_used, errors or None, getattr(actor, "actor_id", "?"),
+        "⚠ LIVE SESSION STOPPED — close requested — errors=%s — actor=%s",
+        errors or None, getattr(actor, "actor_id", "?"),
     )
+    if close_result.get("rest_fallback_disabled"):
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "live_pipeline_not_authorized",
+                "message": core._LIVE_REST_FALLBACK_DISABLED_DETAIL,
+                "rest_fallback": False,
+                "close_result": close_result,
+                "orphan_sweep": orphan_result,
+                "session_authority_revoked": True,
+                "errors": errors if errors else None,
+            },
+        )
     return core._live_response({
-        "message": "Live session stopped — positions closed / 實盤 session 已停止 — 倉位已平",
-        "source": "rust_engine_with_rest_fallback" if rest_fallback_used else "rust_engine",
-        "rest_fallback": rest_fallback_used,
-        "reason": "live_pipeline_not_authorized" if rest_fallback_used else None,
+        "message": "Live session stopped — close requested / 實盤 session 已停止 — 已請求平倉",
+        "source": "rust_engine",
+        "rest_fallback": False,
+        "reason": None,
         "close_result": close_result,
         "orphan_sweep": orphan_result,
         "errors": errors if errors else None,

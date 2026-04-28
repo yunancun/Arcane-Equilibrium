@@ -32,6 +32,7 @@ pub use persist::load_latest_applied_params;
 use crate::ai_service_client::AiServiceClient;
 use crate::config::risk_config::RiskConfig;
 use crate::config::store::ConfigStore;
+use crate::ipc_server::LiveCmdSenderSlot;
 use crate::strategies::ParamRange;
 use crate::tick_pipeline::{PipelineCommand, PipelineKind};
 use serde::{Deserialize, Serialize};
@@ -217,7 +218,7 @@ impl PairMetrics {
 ///   - `tune_cmd_tx` + `tune_target`：scheduler 學習 + 應用的目標引擎，
 ///     當前恆為 Demo（`PipelineKind::Demo`）；若 main.rs 發現 demo 未綁定則
 ///     根本不 spawn scheduler（單行 log 退場，不走此結構）
-///   - `promote_cmd_tx`：Live 促升目標 channel（Live 未綁 → None）；
+///   - `promote_cmd_tx` / slot：Live 促升目標 channel（Live 未綁 → None）；
 ///     配合 `promote_params_to_live()` method — **此 PR 不自動調用**，
 ///     Phase 5 IPC 觸發器 + 促升 criteria 接上即可使用
 ///   - SQL 加 `WHERE engine_mode = $tune_target.db_mode()` 對齊 tune 目標，
@@ -231,7 +232,7 @@ impl PairMetrics {
 /// 修：scheduler demo-primary（符 Phase 5+ Demo→Live 促升路線）：
 ///   - tune_cmd_tx + tune_target 當前固定 Demo，main.rs 若 demo 未綁則
 ///     scheduler 整個不 spawn
-///   - promote_cmd_tx 是 Live 促升 channel（本 PR 僅 stub `promote_params_to_live()`，
+///   - promote_cmd_tx / slot 是 Live 促升 channel（本 PR 僅 stub `promote_params_to_live()`，
 ///     Phase 5 加 IPC 觸發器 + criteria）
 ///   - SQL 加 engine_mode filter 對齊 tune target
 pub struct StrategistScheduler {
@@ -250,6 +251,10 @@ pub struct StrategistScheduler {
     /// Live 促升命令 channel。Live 引擎未綁（authorization.json 未簽）時為 None。
     /// 有值時啟用 `promote_params_to_live()` — 本 PR 不自動調用，Phase 5+ 接觸發器。
     promote_cmd_tx: Option<UnboundedSender<PipelineCommand>>,
+    /// Dynamic Live-promotion sender slot. Production wires this so promotion
+    /// follows LiveAuthWatcher respawn/teardown instead of a boot-time sender.
+    /// 動態 Live 促升 sender slot；生產路徑用它跟隨 LiveAuthWatcher 輪替。
+    promote_cmd_slot: Option<LiveCmdSenderSlot>,
     /// Database pool for fills query / 用於 fills 查詢的資料庫連接池
     db_pool: Arc<crate::database::pool::DbPool>,
     /// STRATEGIST-TUNE-TARGET-CONFIG-1 (2026-04-25): Optional RiskConfig store
@@ -296,13 +301,15 @@ impl StrategistScheduler {
             matches!(tune_target, PipelineKind::Demo | PipelineKind::Live),
             "StrategistScheduler tune_target must be Demo or Live, got {:?} \
              / tune_target 只能是 Demo 或 Live，拒絕 {:?}",
-            tune_target, tune_target,
+            tune_target,
+            tune_target,
         );
         Self {
             ai_client,
             tune_cmd_tx,
             tune_target,
             promote_cmd_tx,
+            promote_cmd_slot: None,
             db_pool,
             risk_store: None,
             consecutive_failures: AtomicU32::new(0),
@@ -333,6 +340,16 @@ impl StrategistScheduler {
         self
     }
 
+    /// Attach a watcher-rotated Live command sender slot for promotions.
+    /// Production uses this to avoid dispatching into a stale boot-time Live
+    /// command sender after authorization-driven respawn.
+    /// 接入 watcher 輪替的 Live command sender slot，避免授權驅動 respawn 後仍
+    /// 發送到啟動時舊 sender。
+    pub fn with_promote_cmd_slot(mut self, promote_cmd_slot: LiveCmdSenderSlot) -> Self {
+        self.promote_cmd_slot = Some(promote_cmd_slot);
+        self
+    }
+
     /// STRATEGIST-TUNE-TARGET-CONFIG-1: Snapshot the current `max_param_delta_pct`
     /// from the wired `RiskConfig` store, or fall back to `DEFAULT_MAX_PARAM_DELTA_PCT`
     /// when no store is wired. Hot-path safe (single ArcSwap load).
@@ -355,7 +372,23 @@ impl StrategistScheduler {
     /// is not bound at startup (authorization.json unsigned).
     /// Live 促升 channel 是否接線。Live 引擎未綁時為 false。
     pub fn has_promote_channel(&self) -> bool {
-        self.promote_cmd_tx.is_some()
+        self.promote_cmd_snapshot().is_some()
+    }
+
+    fn promote_cmd_snapshot(&self) -> Option<UnboundedSender<PipelineCommand>> {
+        if let Some(slot) = &self.promote_cmd_slot {
+            if let Some(guard) = slot.try_read() {
+                if let Some(tx) = guard.as_ref() {
+                    return Some(tx.clone());
+                }
+            } else {
+                debug!(
+                    "StrategistScheduler::promote_cmd_snapshot: live slot read contention \
+                     / live slot 讀取爭用"
+                );
+            }
+        }
+        self.promote_cmd_tx.clone()
     }
 
     /// Promote validated params from the tune target (Demo) to Live.
@@ -367,7 +400,7 @@ impl StrategistScheduler {
     /// This method exists so that wiring becomes additive, not structural.
     ///
     /// Returns `Err` if:
-    ///   - `promote_cmd_tx` is `None` (Live engine not bound)
+    ///   - no Live promote sender is currently available (Live engine not bound)
     ///   - Send fails (Live engine's cmd channel closed — reports up)
     ///   - UpdateStrategyParams handler returns error (strategy unknown / invalid params)
     ///
@@ -380,9 +413,9 @@ impl StrategistScheduler {
         strategy_name: &str,
         params_json: &str,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        let live_tx = self.promote_cmd_tx.as_ref().ok_or(
-            "promote_params_to_live: Live engine not bound (promote_cmd_tx is None) \
-             / promote_params_to_live：Live 引擎未綁定"
+        let live_tx = self.promote_cmd_snapshot().ok_or(
+            "promote_params_to_live: Live engine not bound (promote command sender unavailable) \
+             / promote_params_to_live：Live 引擎未綁定",
         )?;
         let (tx, rx) = tokio::sync::oneshot::channel();
         live_tx.send(PipelineCommand::UpdateStrategyParams {
@@ -539,51 +572,51 @@ impl StrategistScheduler {
                 max_delta_pct,
             ) {
                 Ok(()) => {
-                // 5. Apply via PipelineCommand
-                // 5. 通過 PipelineCommand 應用
-                if let Err(e) = self.apply_params(&pair.strategy_name, &response).await {
-                    warn!(
-                        strategy = %pair.strategy_name,
-                        error = %e,
-                        "param apply failed / 參數應用失敗"
-                    );
-                    self.cycle_counters.record_reject("apply_failed");
-                } else {
-                    info!(
-                        strategy = %pair.strategy_name,
-                        symbol = %pair.symbol,
-                        "strategist params applied / 策略師參數已應用"
-                    );
-                    applied += 1;
-                    let now_ms = std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .map(|d| d.as_millis() as u64)
-                        .unwrap_or(0);
-                    self.cycle_counters.record_apply(now_ms);
-
-                    // STRATEGIST-PARAMS-PERSIST-1 (2026-04-23): write audit row
-                    // so engine restart restores tuned params instead of reverting
-                    // to TOML baseline. Fail-soft: DB error → warn log + continue
-                    // (tuning cycle still succeeded in-memory).
-                    // STRATEGIST-PARAMS-PERSIST-1：寫 audit row，engine restart
-                    // 恢復調諧參數而非 TOML baseline。Fail-soft：DB 錯誤僅 warn log，
-                    // 不影響內存 tuning cycle。
-                    if let Err(e) = self
-                        .persist_applied_params(
-                            &pair.strategy_name,
-                            &current_json,
-                            &response,
-                            "top_deviation_pair",
-                        )
-                        .await
-                    {
+                    // 5. Apply via PipelineCommand
+                    // 5. 通過 PipelineCommand 應用
+                    if let Err(e) = self.apply_params(&pair.strategy_name, &response).await {
                         warn!(
                             strategy = %pair.strategy_name,
                             error = %e,
-                            "persist_applied_params failed (fail-soft) / 持久化失敗（容錯跳過）"
+                            "param apply failed / 參數應用失敗"
                         );
+                        self.cycle_counters.record_reject("apply_failed");
+                    } else {
+                        info!(
+                            strategy = %pair.strategy_name,
+                            symbol = %pair.symbol,
+                            "strategist params applied / 策略師參數已應用"
+                        );
+                        applied += 1;
+                        let now_ms = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .map(|d| d.as_millis() as u64)
+                            .unwrap_or(0);
+                        self.cycle_counters.record_apply(now_ms);
+
+                        // STRATEGIST-PARAMS-PERSIST-1 (2026-04-23): write audit row
+                        // so engine restart restores tuned params instead of reverting
+                        // to TOML baseline. Fail-soft: DB error → warn log + continue
+                        // (tuning cycle still succeeded in-memory).
+                        // STRATEGIST-PARAMS-PERSIST-1：寫 audit row，engine restart
+                        // 恢復調諧參數而非 TOML baseline。Fail-soft：DB 錯誤僅 warn log，
+                        // 不影響內存 tuning cycle。
+                        if let Err(e) = self
+                            .persist_applied_params(
+                                &pair.strategy_name,
+                                &current_json,
+                                &response,
+                                "top_deviation_pair",
+                            )
+                            .await
+                        {
+                            warn!(
+                                strategy = %pair.strategy_name,
+                                error = %e,
+                                "persist_applied_params failed (fail-soft) / 持久化失敗（容錯跳過）"
+                            );
+                        }
                     }
-                }
                 }
                 Err(reason) => {
                     debug!(
@@ -743,15 +776,15 @@ impl StrategistScheduler {
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let params_json = serde_json::to_string(recommendation)?;
         let (tx, rx) = tokio::sync::oneshot::channel();
-        self.tune_cmd_tx.send(PipelineCommand::UpdateStrategyParams {
-            strategy_name: strategy_name.to_string(),
-            params_json,
-            response_tx: tx,
-        })?;
+        self.tune_cmd_tx
+            .send(PipelineCommand::UpdateStrategyParams {
+                strategy_name: strategy_name.to_string(),
+                params_json,
+                response_tx: tx,
+            })?;
         rx.await??;
         Ok(())
     }
-
 }
 
 /// Rank pairs by deviation score, descending (worst-performing first).
@@ -791,13 +824,8 @@ pub fn validate_recommendation(
     param_ranges: &[ParamRange],
     max_delta_pct: f64,
 ) -> bool {
-    validate_recommendation_with_reason(
-        recommendation,
-        current_params,
-        param_ranges,
-        max_delta_pct,
-    )
-    .is_ok()
+    validate_recommendation_with_reason(recommendation, current_params, param_ranges, max_delta_pct)
+        .is_ok()
 }
 
 /// G3-11: validate variant returning the structured reject reason for
@@ -976,7 +1004,12 @@ mod tests {
                 db_persisted: true,
             },
         ];
-        assert!(validate_recommendation(&rec, &current, &ranges, DEFAULT_MAX_PARAM_DELTA_PCT));
+        assert!(validate_recommendation(
+            &rec,
+            &current,
+            &ranges,
+            DEFAULT_MAX_PARAM_DELTA_PCT
+        ));
     }
 
     #[test]
@@ -995,7 +1028,12 @@ mod tests {
             agent_adjustable: true,
             db_persisted: true,
         }];
-        assert!(!validate_recommendation(&rec, &current, &ranges, DEFAULT_MAX_PARAM_DELTA_PCT));
+        assert!(!validate_recommendation(
+            &rec,
+            &current,
+            &ranges,
+            DEFAULT_MAX_PARAM_DELTA_PCT
+        ));
     }
 
     #[test]
@@ -1014,7 +1052,12 @@ mod tests {
             agent_adjustable: true,
             db_persisted: true,
         }];
-        assert!(!validate_recommendation(&rec, &current, &ranges, DEFAULT_MAX_PARAM_DELTA_PCT));
+        assert!(!validate_recommendation(
+            &rec,
+            &current,
+            &ranges,
+            DEFAULT_MAX_PARAM_DELTA_PCT
+        ));
     }
 
     #[test]
@@ -1067,7 +1110,12 @@ mod tests {
                 db_persisted: true,
             },
         ];
-        assert!(validate_recommendation(&rec, &current, &ranges, DEFAULT_MAX_PARAM_DELTA_PCT));
+        assert!(validate_recommendation(
+            &rec,
+            &current,
+            &ranges,
+            DEFAULT_MAX_PARAM_DELTA_PCT
+        ));
     }
 
     #[test]
@@ -1113,7 +1161,12 @@ mod tests {
                 db_persisted: true,
             },
         ];
-        assert!(!validate_recommendation(&rec, &current, &ranges, DEFAULT_MAX_PARAM_DELTA_PCT));
+        assert!(!validate_recommendation(
+            &rec,
+            &current,
+            &ranges,
+            DEFAULT_MAX_PARAM_DELTA_PCT
+        ));
     }
 
     #[test]
@@ -1146,7 +1199,12 @@ mod tests {
                 db_persisted: true,
             },
         ];
-        assert!(validate_recommendation(&rec, &current, &ranges, DEFAULT_MAX_PARAM_DELTA_PCT));
+        assert!(validate_recommendation(
+            &rec,
+            &current,
+            &ranges,
+            DEFAULT_MAX_PARAM_DELTA_PCT
+        ));
     }
 
     #[test]
@@ -1162,7 +1220,12 @@ mod tests {
             agent_adjustable: true,
             db_persisted: true,
         }];
-        assert!(validate_recommendation(&rec, &current, &ranges, DEFAULT_MAX_PARAM_DELTA_PCT));
+        assert!(validate_recommendation(
+            &rec,
+            &current,
+            &ranges,
+            DEFAULT_MAX_PARAM_DELTA_PCT
+        ));
     }
 
     #[test]
@@ -1173,14 +1236,7 @@ mod tests {
         let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
         let pool = Arc::new(crate::database::pool::DbPool::disconnected());
         let cancel = CancellationToken::new();
-        let sched = StrategistScheduler::new(
-            ai,
-            tx,
-            PipelineKind::Demo,
-            None,
-            pool,
-            cancel,
-        );
+        let sched = StrategistScheduler::new(ai, tx, PipelineKind::Demo, None, pool, cancel);
 
         assert_eq!(sched.current_interval(), Duration::from_secs(300));
         sched.consecutive_failures.store(1, Ordering::Relaxed);
@@ -1223,14 +1279,7 @@ mod tests {
         // ctor 防禦性 panic 拒絕。
         let (ai, pool, cancel) = mk_deps();
         let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
-        let _ = StrategistScheduler::new(
-            ai,
-            tx,
-            PipelineKind::Paper,
-            None,
-            pool,
-            cancel,
-        );
+        let _ = StrategistScheduler::new(ai, tx, PipelineKind::Paper, None, pool, cancel);
     }
 
     #[test]
@@ -1240,14 +1289,7 @@ mod tests {
         // 標準部署：Demo tune，Live 未接（authorization.json 未簽）。
         let (ai, pool, cancel) = mk_deps();
         let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
-        let sched = StrategistScheduler::new(
-            ai,
-            tx,
-            PipelineKind::Demo,
-            None,
-            pool,
-            cancel,
-        );
+        let sched = StrategistScheduler::new(ai, tx, PipelineKind::Demo, None, pool, cancel);
         assert_eq!(sched.tune_target(), PipelineKind::Demo);
         assert!(!sched.has_promote_channel());
     }
@@ -1259,16 +1301,54 @@ mod tests {
         let (ai, pool, cancel) = mk_deps();
         let (tune_tx, _tune_rx) = tokio::sync::mpsc::unbounded_channel();
         let (live_tx, _live_rx) = tokio::sync::mpsc::unbounded_channel();
-        let sched = StrategistScheduler::new(
-            ai,
-            tune_tx,
-            PipelineKind::Demo,
-            Some(live_tx),
-            pool,
-            cancel,
-        );
+        let sched =
+            StrategistScheduler::new(ai, tune_tx, PipelineKind::Demo, Some(live_tx), pool, cancel);
         assert_eq!(sched.tune_target(), PipelineKind::Demo);
         assert!(sched.has_promote_channel());
+    }
+
+    #[tokio::test]
+    async fn test_promote_params_to_live_reads_latest_slot_sender() {
+        // Production wires a LiveAuthWatcher-rotated slot, not a boot-time
+        // fixed sender. Verify promote dispatch uses the current slot value.
+        // 生產路徑接 LiveAuthWatcher 輪替 slot；驗證促升發送讀取最新 slot。
+        let (ai, pool, cancel) = mk_deps();
+        let (tune_tx, _tune_rx) = tokio::sync::mpsc::unbounded_channel();
+        let (old_live_tx, mut old_live_rx) =
+            tokio::sync::mpsc::unbounded_channel::<PipelineCommand>();
+        let (new_live_tx, mut new_live_rx) =
+            tokio::sync::mpsc::unbounded_channel::<PipelineCommand>();
+        let slot: LiveCmdSenderSlot = Arc::new(parking_lot::RwLock::new(Some(old_live_tx)));
+        let sched = StrategistScheduler::new(ai, tune_tx, PipelineKind::Demo, None, pool, cancel)
+            .with_promote_cmd_slot(Arc::clone(&slot));
+        *slot.write() = Some(new_live_tx);
+
+        let handler = tokio::spawn(async move {
+            let mut seen_strategy: Option<String> = None;
+            if let Some(PipelineCommand::UpdateStrategyParams {
+                strategy_name,
+                response_tx,
+                ..
+            }) = new_live_rx.recv().await
+            {
+                seen_strategy = Some(strategy_name);
+                let _ = response_tx.send(Ok("ok".to_string()));
+            }
+            seen_strategy
+        });
+
+        let result = sched
+            .promote_params_to_live("slot_rotated_strategy", r#"{"x":1}"#)
+            .await;
+        assert!(result.is_ok(), "expected Ok, got: {:?}", result.err());
+        assert!(
+            old_live_rx.try_recv().is_err(),
+            "stale boot sender must not receive promote command"
+        );
+        assert_eq!(
+            handler.await.expect("handler panicked").as_deref(),
+            Some("slot_rotated_strategy")
+        );
     }
 
     #[tokio::test]
@@ -1278,14 +1358,7 @@ mod tests {
         // 無促升 channel 時應回 Err，不 panic、不 block。
         let (ai, pool, cancel) = mk_deps();
         let (tune_tx, _tune_rx) = tokio::sync::mpsc::unbounded_channel();
-        let sched = StrategistScheduler::new(
-            ai,
-            tune_tx,
-            PipelineKind::Demo,
-            None,
-            pool,
-            cancel,
-        );
+        let sched = StrategistScheduler::new(ai, tune_tx, PipelineKind::Demo, None, pool, cancel);
         let result = sched
             .promote_params_to_live("grid_trading", r#"{"cooldown_ms":60000}"#)
             .await;
@@ -1307,16 +1380,9 @@ mod tests {
         // 接線後驗證：(a) 命令形狀正確 (b) 等待 oneshot 回應後回 Ok。
         let (ai, pool, cancel) = mk_deps();
         let (tune_tx, _tune_rx) = tokio::sync::mpsc::unbounded_channel();
-        let (live_tx, mut live_rx) =
-            tokio::sync::mpsc::unbounded_channel::<PipelineCommand>();
-        let sched = StrategistScheduler::new(
-            ai,
-            tune_tx,
-            PipelineKind::Demo,
-            Some(live_tx),
-            pool,
-            cancel,
-        );
+        let (live_tx, mut live_rx) = tokio::sync::mpsc::unbounded_channel::<PipelineCommand>();
+        let sched =
+            StrategistScheduler::new(ai, tune_tx, PipelineKind::Demo, Some(live_tx), pool, cancel);
 
         // Spawn a stub handler that responds with Ok("ok") to any
         // UpdateStrategyParams command on the Live channel.
@@ -1357,9 +1423,12 @@ mod tests {
     // E4-4 audit FUP：pin db_mode 返回值，防 snake_case 漂移致 SQL 空跑。
     #[test]
     fn test_pipeline_kind_db_mode_demo_is_lowercase_snake() {
-        assert_eq!(PipelineKind::Demo.db_mode(), "demo",
+        assert_eq!(
+            PipelineKind::Demo.db_mode(),
+            "demo",
             "SQL filter in gather_strategy_metrics depends on db_mode() \
-             returning lowercase 'demo' — see STRATEGIST-SCHED-CHANNEL-PAPER-ORPHAN-1");
+             returning lowercase 'demo' — see STRATEGIST-SCHED-CHANNEL-PAPER-ORPHAN-1"
+        );
         // For completeness — these are the currently expected values for all
         // three variants; if anyone changes db_mode() this test trips too.
         // 完整性：另兩個 variant 也 pin。任何人動 db_mode() 都會紅。
@@ -1373,16 +1442,9 @@ mod tests {
         // Handler 回 Err → promote 應傳播。
         let (ai, pool, cancel) = mk_deps();
         let (tune_tx, _tune_rx) = tokio::sync::mpsc::unbounded_channel();
-        let (live_tx, mut live_rx) =
-            tokio::sync::mpsc::unbounded_channel::<PipelineCommand>();
-        let sched = StrategistScheduler::new(
-            ai,
-            tune_tx,
-            PipelineKind::Demo,
-            Some(live_tx),
-            pool,
-            cancel,
-        );
+        let (live_tx, mut live_rx) = tokio::sync::mpsc::unbounded_channel::<PipelineCommand>();
+        let sched =
+            StrategistScheduler::new(ai, tune_tx, PipelineKind::Demo, Some(live_tx), pool, cancel);
 
         tokio::spawn(async move {
             if let Some(cmd) = live_rx.recv().await {
@@ -1392,9 +1454,7 @@ mod tests {
             }
         });
 
-        let result = sched
-            .promote_params_to_live("unknown_strategy", "{}")
-            .await;
+        let result = sched.promote_params_to_live("unknown_strategy", "{}").await;
         assert!(result.is_err());
     }
 
@@ -1459,12 +1519,8 @@ mod tests {
 
         let current = serde_json::json!({"cooldown_ms": 50_000.0});
         let rec_15pct = serde_json::json!({"cooldown_ms": 57_500.0}); // +15%
-        let pass_15pct_at_010 = validate_recommendation(
-            &rec_15pct,
-            &current,
-            &ranges,
-            snapshot_tight,
-        );
+        let pass_15pct_at_010 =
+            validate_recommendation(&rec_15pct, &current, &ranges, snapshot_tight);
         assert!(
             !pass_15pct_at_010,
             "+15% delta must be REJECTED when max_param_delta_pct=0.10 \
@@ -1475,12 +1531,8 @@ mod tests {
         // proving scenario 1 actually depends on the configured value
         // (not some unrelated gate).
         // 健全性：同一 +15% 在 0.30 預設下必通過，證明場景 1 拒絕的確由 clamp 驅動。
-        let pass_15pct_at_default = validate_recommendation(
-            &rec_15pct,
-            &current,
-            &ranges,
-            DEFAULT_MAX_PARAM_DELTA_PCT,
-        );
+        let pass_15pct_at_default =
+            validate_recommendation(&rec_15pct, &current, &ranges, DEFAULT_MAX_PARAM_DELTA_PCT);
         assert!(
             pass_15pct_at_default,
             "+15% delta must PASS at legacy 0.30 (clamp difference must be observable)"
@@ -1497,12 +1549,8 @@ mod tests {
         );
 
         let rec_40pct = serde_json::json!({"cooldown_ms": 70_000.0}); // +40%
-        let pass_40pct_at_050 = validate_recommendation(
-            &rec_40pct,
-            &current,
-            &ranges,
-            snapshot_loose,
-        );
+        let pass_40pct_at_050 =
+            validate_recommendation(&rec_40pct, &current, &ranges, snapshot_loose);
         assert!(
             pass_40pct_at_050,
             "+40% delta must be ACCEPTED when max_param_delta_pct=0.50 \
@@ -1512,12 +1560,8 @@ mod tests {
         // Symmetric sanity: same +40% must FAIL at the legacy 0.30, so
         // scenario 2 acceptance is genuinely caused by the relaxed clamp.
         // 對稱健全性：+40% 在 0.30 預設下必拒，證明場景 2 通過確由 clamp 放寬驅動。
-        let pass_40pct_at_default = validate_recommendation(
-            &rec_40pct,
-            &current,
-            &ranges,
-            DEFAULT_MAX_PARAM_DELTA_PCT,
-        );
+        let pass_40pct_at_default =
+            validate_recommendation(&rec_40pct, &current, &ranges, DEFAULT_MAX_PARAM_DELTA_PCT);
         assert!(
             !pass_40pct_at_default,
             "+40% delta must FAIL at legacy 0.30 (clamp difference must be observable)"
@@ -1612,7 +1656,10 @@ mod tests {
         let snap = c.snapshot();
         assert_eq!(snap.apply_count, 0);
         assert_eq!(snap.reject_by_reason.get("out_of_range").copied(), Some(2));
-        assert_eq!(snap.reject_by_reason.get("delta_exceeded").copied(), Some(1));
+        assert_eq!(
+            snap.reject_by_reason.get("delta_exceeded").copied(),
+            Some(1)
+        );
         assert_eq!(snap.reject_by_reason.get("ipc_failed").copied(), Some(1));
         assert_eq!(snap.reject_by_reason.get("weight_sum").copied(), None);
     }

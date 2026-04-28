@@ -173,9 +173,9 @@ fn reconcile_lifts_peak_on_exchange_gain() {
 #[test]
 fn risk_checks_emits_session_drawdown_halt() {
     let cfg = RiskConfig::default(); // session_drawdown_max_pct = 15.0 by default
-    // Set an open position with no PnL/time/cost trigger so only Priority 7
-    // (session drawdown) can fire. We pass a drawdown above the threshold.
-    // 設置無 PnL / 時間 / 成本觸發的持倉，只讓 Priority 7（session drawdown）能觸發。
+                                     // Set an open position with no PnL/time/cost trigger so only Priority 7
+                                     // (session drawdown) can fire. We pass a drawdown above the threshold.
+                                     // 設置無 PnL / 時間 / 成本觸發的持倉，只讓 Priority 7（session drawdown）能觸發。
     let action = check_position_on_tick(
         /* pnl_pct */ 0.0,
         /* peak_pnl_pct */ 0.0,
@@ -206,7 +206,11 @@ fn risk_checks_emits_session_drawdown_halt() {
             // the exact float formatting (Rust default), just confirm both
             // numbers are present so a future format change is loud.
             // 不固定浮點格式，但確認兩個數字都出現。
-            assert!(reason.contains("15.50"), "actual drawdown should appear: {}", reason);
+            assert!(
+                reason.contains("15.50"),
+                "actual drawdown should appear: {}",
+                reason
+            );
             assert!(reason.contains("15.00"), "limit should appear: {}", reason);
         }
         other => panic!("expected HaltSession on session drawdown, got {:?}", other),
@@ -262,8 +266,21 @@ fn live_balance_sync_drives_drawdown_revoke_end_to_end() {
     // 步驟 2 — risk_checks 必須產出 SESSION DRAWDOWN 的 HaltSession。
     let cfg = RiskConfig::default();
     let action = check_position_on_tick(
-        0.0, 0.0, 0.0, 0.0, "neutral", Some(1.0), "BTCUSDT", 0, 0, 0.0,
-        dd_pct, 0.2, 0.3, None, &cfg,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        "neutral",
+        Some(1.0),
+        "BTCUSDT",
+        0,
+        0,
+        0.0,
+        dd_pct,
+        0.2,
+        0.3,
+        None,
+        &cfg,
     );
     let reason = match action {
         RiskAction::HaltSession(r) => r,
@@ -331,8 +348,21 @@ fn demo_balance_sync_halts_but_does_not_revoke() {
     // Demo 仍會 HaltSession 平倉，但 should_revoke 必須拒絕。
     let cfg = RiskConfig::default();
     let action = check_position_on_tick(
-        0.0, 0.0, 0.0, 0.0, "neutral", Some(1.0), "BTCUSDT", 0, 0, 0.0,
-        dd_pct, 0.2, 0.3, None, &cfg,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        "neutral",
+        Some(1.0),
+        "BTCUSDT",
+        0,
+        0,
+        0.0,
+        dd_pct,
+        0.2,
+        0.3,
+        None,
+        &cfg,
     );
     let reason = match action {
         RiskAction::HaltSession(r) => r,

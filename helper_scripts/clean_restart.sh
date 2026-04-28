@@ -2,12 +2,12 @@
 # clean_restart.sh — 乾淨重啟腳本
 #
 # MODULE_NOTE (EN): Full clean-reset of the trading stack. Stops engine+API,
-#   flattens every exchange position (demo + optional live) via the httpx
+#   flattens demo exchange positions via the httpx
 #   BybitClient, archives runtime state + damaged DB tables, verifies the Rust
 #   binary is current (rebuilds if source is newer), then restarts engine +
 #   API and validates via watchdog. Re-opens Paper/Demo/Live engines cleanly.
 # MODULE_NOTE (中): 交易棧完整乾淨重設。停止引擎+API，透過 httpx BybitClient
-#   清空所有交易所持倉（demo + 可選 live），歸檔運行期狀態 + 污染 DB 表，
+#   清空 demo 交易所持倉，歸檔運行期狀態 + 污染 DB 表，
 #   驗證 Rust 二進制為最新（若源碼更新則重編），重啟引擎+API 並以 watchdog
 #   驗證。乾淨地重新啟動 Paper/Demo/Live 三引擎。
 #
@@ -19,8 +19,8 @@
 #   --mark-damaged        Archive DB fills/intents/orders/risk_verdicts to
 #                         damaged_<ts> tables and truncate the originals.
 #                         Without this flag, DB tables are left untouched.
-#   --include-live        Also flatten mainnet positions (requires
-#                         OPENCLAW_ALLOW_MAINNET=1 and live credentials)
+#   --include-live        Deprecated: direct mainnet REST flatten is disabled;
+#                         use the signed live_reserved Rust control plane.
 #   --skip-build-check    Skip source-vs-binary freshness comparison
 #   --skip-flatten        Skip exchange flatten (use when positions already 0)
 #   --help                Show this help and exit
@@ -162,19 +162,10 @@ else
     }
 
     if [ "$INCLUDE_LIVE" -eq 1 ]; then
-        if [ "${OPENCLAW_ALLOW_MAINNET:-0}" != "1" ]; then
-            warn "--include-live set but OPENCLAW_ALLOW_MAINNET != 1, skipping live"
-        else
-            echo "  [mainnet] flattening..."
-            OPENCLAW_ALLOW_MAINNET=1 "$API_VENV/bin/python3" \
-                helper_scripts/clean_restart_flatten.py \
-                --env mainnet $FLATTEN_ARGS || {
-                err "mainnet flatten failed (exit=$?)"
-                exit 1
-            }
-        fi
+        warn "--include-live requested, but direct mainnet REST flatten is disabled"
+        warn "restore signed live_reserved authorization and close through the Rust live pipeline"
     else
-        echo "  [mainnet] skipped (pass --include-live to enable)"
+        echo "  [mainnet] skipped (direct REST flatten disabled)"
     fi
     ok "exchange flatten complete"
 fi

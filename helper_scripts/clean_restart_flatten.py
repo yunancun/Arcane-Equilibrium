@@ -12,7 +12,10 @@ MODULE_NOTE (中): 使用 httpx 版 BybitClient（PYO3-ELIMINATE-1 Phase 2 後�
 
 Usage:
     python3 clean_restart_flatten.py --env demo [--yes] [--dry-run]
-    python3 clean_restart_flatten.py --env mainnet --yes   # live flatten
+    python3 clean_restart_flatten.py --env mainnet --dry-run
+
+Mainnet mutation is intentionally disabled here. Live closes must go through
+the signed live_reserved Rust control plane.
 """
 
 from __future__ import annotations
@@ -29,6 +32,14 @@ def main() -> int:
     ap.add_argument("--yes", action="store_true", help="Skip confirmation")
     ap.add_argument("--dry-run", action="store_true", help="Report only")
     args = ap.parse_args()
+
+    if args.env == "mainnet" and not args.dry_run:
+        print(
+            "[ERR] Direct mainnet REST flatten is disabled. "
+            "Use the signed live_reserved Rust control plane for live closes.",
+            file=sys.stderr,
+        )
+        return 7
 
     # ── Import Python BybitClient (PYO3-ELIMINATE-1 Phase 2) ────────────
     # ── 使用純 Python httpx 版 BybitClient（已從 PyO3 遷移）
