@@ -32,3 +32,8 @@ YYYY-MM-DD HH:MM TZ
 - added git-root `AGENTS.md` so new Codex sessions can auto-load repository-specific PM-first rules
 - added `.codex/SUBAGENT_EXECUTION_RULES.md` to require repo-role binding for every delegated task
 - hardened reporting rule: temporary runtime nicknames are not authoritative; summaries must use `ROLE(codex_type)`
+
+2026-04-28 22:20 CEST
+- added `.codex/DISPATCH_LEDGER.md` for durable PM-first chain records
+- promoted `.codex/agents/PM.md` into the mandatory boot order in `AGENTS.md`
+- tightened the startup chain so PM role definition is loaded before delegation decisions
