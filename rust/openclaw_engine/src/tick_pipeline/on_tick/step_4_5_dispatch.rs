@@ -614,9 +614,26 @@ impl TickPipeline {
                                             qty: fill.fill_qty,
                                             price: fill.fill_price,
                                             fee: fill.fee,
+                                            // FIX-FEE-POSTONLY-2 (EDGE-DIAG-2-FUP, 2026-04-28):
+                                            // Strategy-open fill on the IPC-emit path was the last
+                                            // remaining call site writing TIF-agnostic taker fee_rate
+                                            // to trading.fills. Verified via SQL: 24h 367 demo+live_demo
+                                            // entry fills had fee_rate=0.00055 (taker) for 100% of rows
+                                            // even though ma_crossover implied fee bps from fee/notional
+                                            // was 3.25 bps (~50% maker fills working). Switched to
+                                            // fee_rate_for_intent (TIF-aware: PostOnly→maker, else
+                                            // taker) so the DB column reflects the actual rate the
+                                            // exchange charged. Companion to the 2026-04-23
+                                            // event_consumer/loop_handlers.rs:487 fix; same pattern.
+                                            // FIX-FEE-POSTONLY-2（EDGE-DIAG-2-FUP，2026-04-28）：
+                                            // 策略開倉 fill 是最後一個寫 TIF-agnostic taker fee_rate
+                                            // 進 trading.fills 的呼叫點。實證 24h 367 entry fills
+                                            // fee_rate=0.00055 100%（taker）即便 ma_crossover 實際
+                                            // implied 3.25 bps（約 50% maker）。改 fee_rate_for_intent
+                                            // 對齊 loop_handlers.rs:487 的同模式修復。
                                             fee_rate: self
                                                 .intent_processor
-                                                .fee_rate(&intent.symbol),
+                                                .fee_rate_for_intent(&intent.symbol, intent),
                                             realized_pnl,
                                             strategy_name: intent.strategy.clone(),
                                             context_id: make_context_id(
