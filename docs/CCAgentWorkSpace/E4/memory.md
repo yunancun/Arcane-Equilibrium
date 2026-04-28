@@ -948,3 +948,25 @@ ssh trade-core "cd ~/BybitOpenClaw/srv && python3 helper_scripts/db/passive_wait
   - Linux ssh non-interactive PATH 不含 cargo → 必 `source ~/.cargo/env` 才能跑 cargo。
   - Mac↔Linux 全量 baseline 差異 3 不算 regression — pollution 邊界跨 OS 微差正常，看絕對 fail 名單同源即可。
 
+
+## 2026-04-28 — Wave G Linux full regression PASS（4-way file-size cleanup splits）
+
+**HEAD**: `3b0a0d7` (5 commits `8a5973f..3b0a0d7`: MAIN-RS / ANALYST / HSQ / DAEMON-TEST splits + memory log)
+**Verdict**: PASS
+
+### KPIs
+- Rust lib **2308/0** | daemon split sum **11/0** (proofs 5 + dual_safeguard 3 + spawn_decision 3) | persistence Linux PG **2/0**
+- HSQ same-session **forward 108/108 + reverse 108/108** ✅ — SINGLETON `sys.modules.get` integrity post-G3-08-FUP-HSQ-SPLIT critical invariant **VERIFIED** (Mac 因 fastapi gap E2 無法 self-verify，Linux 確認過)
+- ANALYST 22/22 + W1+W2+W3+LOSSES+SINGLETON 83/83
+- Full control_api_v1 baseline **3117/0** 兩遍同綠 (60.74s + 62.65s) ✅ 非 flaky
+- Healthcheck 25 PASS / 2 FAIL pre-existing ([12] bb_breakout deploy-pending + [27] intent freeze pipeline wedge)；非本 wave 引入
+
+### Linux sync 教訓
+- ff-only pull 被 Linux working tree 3 個 untracked split test 檔擋住（先前 session 部分復現後未 commit；origin 後續入庫同名檔）
+- 解法：先 `diff <(cat untracked) <(git show origin/main:path)` byte-identical → `rm` untracked 三檔 → `git pull --ff-only` 帶入相同內容
+- 無資料損失（incoming bytes 一樣），最小破壞路徑，不違反 auto-mode 安全準則
+- Pattern：未來如遇 ff-only 衝突且 untracked 與 incoming byte-identical，可直接 rm；diff 不一致則必 stash + report
+
+### 非 `--rebuild` 部署決定
+- Wave G 全部是 file-size split / 0 production behavior change → task brief 明確不需 `--rebuild`，engine PID 沿用 pre-merge binary
+- LiveDemo runtime 未退化（healthcheck [22] trading_pipeline_silent_gap 全 fresh stale=0.x m）

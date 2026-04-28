@@ -1559,3 +1559,26 @@ finally:
 - E4 ssh trade-core 跑 Linux 端 90 passed 確認跨平台
 - 可選新 ticket：`test_strategist_promote_api.py` 18 fail / `test_executor_shadow_toggle_api.py` 17 fail 同 root cause family 可同樣 Option B + A 修
 
+## G3-08-FUP-MAF-SPLIT-CLEANUP P3 — docstring drift + singleton 補登（2026-04-28）
+
+**範圍**：純文字 fix (b)+(c) only；(a) bottom-of-file eager re-export 評估**不 impl**（留 follow-up，需 PA mini-RFC）
+
+**改動**：
+- `scout_agent.py` MODULE_NOTE 中英雙語 (L9-L20 中 + L27-L37 英)：聲稱錯的「noqa: F401 re-export」改為真實 PEP 562 `__getattr__` lazy re-export，並補 maf 行範圍引用 + 循環依賴 rationale + E1 prior impl 報告 §5.1 偏離指針。**297 → 309 (+12)**（純 docstring 擴張，非「+0 line」期望，但仍 < 800 警告）
+- `CLAUDE.md` §九 Singleton 表新增 SCOUT_AGENT row（在 KLINE_MANAGER row 之下）— `strategy_wiring.py:143` 建構＋start + `scout_routes.py:61` mutable handle by `set_scout_agent()`；row 含「補登 ticket / class 真實定位 / re-export 機制」metadata（496 → 504）
+
+**驗收**：Mac pytest test_scout_integration + test_scout_audit_wiring **46/46 PASS in 0.06s**；`grep CLAUDE.md SCOUT_AGENT` = 1 hit；0 production code change（純 docstring + table edit）
+
+**(a) 評估結論**（per ticket 邊界 = 評估 only 不 impl）：
+- bottom-of-file eager re-export **確實比 PEP 562 更乾淨**（0 magic / IDE 友好 / type-checker 完整解析）
+- E2 review §5 已驗證 scout_agent 所需 8 個 maf 符號全在 maf 前段（line 1-360），檔尾 eager 不會觸發 partial-maf cycle
+- 但 ROI 低：當前 PEP 562 functional 對 + E2 結論 LOW NIT 非 blocker；切換是 cosmetic
+- **推薦但不 impl**：建議新 ticket `G3-08-FUP-MAF-SPLIT-CLEANUP-A P4`（cosmetic, deferred），需 PA 寫 mini-RFC 含 (1) maf 全檔 grep `ScoutAgent\|ScoutConfig` 驗 0 body 引用 (2) 切換步驟 + 1-line rollback (3) 6 套 test 全綠 + 4 項對抗驗證
+
+**教訓**：
+- 任何「文檔聲稱機制 X 但代碼用機制 Y」屬 docstring drift，必同步雙語修；E2 LOW NIT 也別積壓（後續 maintainer grep `noqa: F401` 找不到實際機制就會走進兔子洞）
+- (a) 類「設計替代方案」E1 嚴格不擅自 impl — 即使 ROI 算出值得，仍需 PA design + PM approve 走完強制鏈才能動 production code
+- LOC drift 期望（如「+0 line / 純 docstring fix」）與「資訊完整性」trade-off 時，E1 評估「資訊完整 + 雙語對稱」優先；若 E2 認為冗可裁剪
+- CLAUDE.md §九 Singleton 表是 incident root cause 查驗 canonical 入口，新 row 帶 metadata（補登 ticket / class 真實定位 / 相關機制）對未來審計有用，比「最小行數」重要
+
+
