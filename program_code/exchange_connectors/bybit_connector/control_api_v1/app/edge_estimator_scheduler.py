@@ -62,16 +62,49 @@ class EdgeEstimatorScheduler:
 
     DEFAULT_MODES = ("demo", "live_demo")
     DEFAULT_DAYS = 7  # rolling window matches P1-15/17 cleanup horizon
+    # EDGE-DIAG-2 (2026-04-28): hard cutoff to exclude fills written by engine
+    # binaries with known data-quality bugs that bias realized-edge estimates:
+    #   - 2026-04-21 20:44 CEST EDGE-P2-3 PostOnly maker entry deploy (ma+bb)
+    #   - 2026-04-22 ~20:55 CEST P0-13 ATR scale fix + Track-P V2 SWAP deploy
+    # 2026-04-22 21:00:00 UTC = 2026-04-22 23:00 CEST — picks the safer side
+    # of both fixes. Override via OPENCLAW_EDGE_MIN_OBSERVATION_TS env var
+    # (ISO-8601, e.g. "2026-04-25T00:00:00Z") if operator needs a different
+    # floor (e.g., after a future strategy-changing deploy).
+    # EDGE-DIAG-2（2026-04-28）：硬下限，排除有已知資料品質 bug 的引擎 binary
+    # 寫入的 fills（會偏差實現邊際估計）：
+    #   - 2026-04-21 20:44 CEST EDGE-P2-3 PostOnly maker entry 部署（ma+bb）
+    #   - 2026-04-22 ~20:55 CEST P0-13 ATR scale 修復 + Track-P V2 SWAP 部署
+    # 2026-04-22 21:00:00 UTC 取兩個 fix 都已生效之後的安全側。
+    # 可由環境變數 OPENCLAW_EDGE_MIN_OBSERVATION_TS（ISO-8601）覆寫。
+    DEFAULT_MIN_OBSERVATION_TS_ISO = "2026-04-22T21:00:00+00:00"
 
     def __init__(
         self,
         modes: tuple[str, ...] = DEFAULT_MODES,
         interval_s: float = 3600.0,
         days_back: int = DEFAULT_DAYS,
+        min_observation_ts: Optional[datetime.datetime] = None,
     ) -> None:
         self._modes = modes
         self._interval_s = interval_s
         self._days_back = days_back
+        # EDGE-DIAG-2: resolve cutoff with precedence ctor > env > class default.
+        # EDGE-DIAG-2：cutoff 解析順序 ctor > env > class default。
+        if min_observation_ts is None:
+            env_iso = os.environ.get("OPENCLAW_EDGE_MIN_OBSERVATION_TS")
+            iso = env_iso if env_iso else self.DEFAULT_MIN_OBSERVATION_TS_ISO
+            try:
+                min_observation_ts = datetime.datetime.fromisoformat(iso)
+            except ValueError:
+                logger.warning(
+                    "EdgeEstimatorScheduler: invalid OPENCLAW_EDGE_MIN_OBSERVATION_TS=%r — disabling cutoff "
+                    "/ 無效 OPENCLAW_EDGE_MIN_OBSERVATION_TS=%r — 停用 cutoff",
+                    iso, iso,
+                )
+                min_observation_ts = None
+        if min_observation_ts is not None and min_observation_ts.tzinfo is None:
+            min_observation_ts = min_observation_ts.replace(tzinfo=datetime.timezone.utc)
+        self._min_observation_ts: Optional[datetime.datetime] = min_observation_ts
         self._lock = threading.Lock()
         self._started: bool = False
         # Thread-safe stats / 線程安全統計
@@ -163,6 +196,10 @@ class EdgeEstimatorScheduler:
                 "modes": list(self._modes),
                 "interval_s": self._interval_s,
                 "days_back": self._days_back,
+                "min_observation_ts": (
+                    self._min_observation_ts.isoformat()
+                    if self._min_observation_ts else None
+                ),
                 "last_results": dict(self._last_results),
             }
 
@@ -462,6 +499,7 @@ class EdgeEstimatorScheduler:
         results = run_james_stein(
             days_back=self._days_back,
             engine_mode=mode,
+            min_observation_ts=self._min_observation_ts,
             # snapshot_path=None → mode-aware default (settings/edge_estimates*.json)
         )
 
@@ -629,6 +667,7 @@ def start_scheduler(
     modes: tuple[str, ...] = EdgeEstimatorScheduler.DEFAULT_MODES,
     interval_s: float = 3600.0,
     days_back: int = EdgeEstimatorScheduler.DEFAULT_DAYS,
+    min_observation_ts: Optional[datetime.datetime] = None,
 ) -> Optional[EdgeEstimatorScheduler]:
     """
     Idempotent global start, gated by EDGE-SCHEDULER-LEADER-1 election.
@@ -668,6 +707,7 @@ def start_scheduler(
                     modes=modes,
                     interval_s=interval_s,
                     days_back=days_back,
+                    min_observation_ts=min_observation_ts,
                 )
     _scheduler.start()
     return _scheduler

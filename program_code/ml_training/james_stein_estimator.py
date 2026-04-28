@@ -220,10 +220,11 @@ def run_james_stein(
     min_samples: int = 3,
     snapshot_path: Optional[str] = None,
     engine_mode: str = "demo",
+    min_observation_ts: Optional[datetime] = None,
 ) -> dict[tuple[str, str], dict]:
     """
     Full pipeline: query fills → compute edge stats → JS shrinkage → write to PG + JSON.
-    完整管線：查詢成交 → 計算邊際統計 → JS 收縮 �� 寫入 PG + JSON。
+    完整管線：查詢成交 → 計算邊際統計 → JS 收縮 → 寫入 PG + JSON。
 
     Args:
         engine_mode: 'demo' (default, used by cost_gate for demo/live), 'paper' (for draft strategy
@@ -231,6 +232,11 @@ def run_james_stein(
                      separately to prevent paper exploration noise from polluting production estimates.
                      'demo'（默認，cost_gate 使用）、'paper'（僅供草案策略評估）或 'live'。
                      Demo 與 paper edge 分別計算存儲，防止 paper 探索噪音污染生產估計。
+        min_observation_ts: EDGE-DIAG-2 (2026-04-28) — pass-through to compute_edge_stats;
+                            hard floor on fill `ts` to exclude fills written by engine binaries
+                            with known data-quality bugs.
+                            EDGE-DIAG-2（2026-04-28）— 透傳到 compute_edge_stats；
+                            對 fill `ts` 加硬下限，排除有已知資料 bug 的 binary 期間 fills。
 
     Returns:
         Dict mapping (strategy_name, symbol) → {raw_bps, shrunk_bps, B_factor, n}.
@@ -238,7 +244,8 @@ def run_james_stein(
     from .realized_edge_stats import compute_edge_stats
 
     stats = compute_edge_stats(days_back=days_back, min_samples=min_samples,
-                               engine_mode=engine_mode)
+                               engine_mode=engine_mode,
+                               min_observation_ts=min_observation_ts)
 
     if not stats:
         logger.warning("No edge stats available — aborting JS estimation.")

@@ -92,9 +92,19 @@ impl IntentProcessor {
     }
 
     /// 3E-2a: Demo mode cost gate — moderate strictness (between exploration and strict).
-    /// Positive JS estimate → apply threshold; negative → block; cold-start → allow with warning.
-    /// 3E-2a：Demo 模式成本門——中等嚴格（介於探索和嚴格之間）。
-    /// 正 JS 估計 → 應用門檻；負 → 阻擋；冷啟動 → 放行並警告。
+    /// EDGE-DIAG-2 (2026-04-28): low-sample cells (n_trades < cost_gate_min_n_trades_for_block,
+    /// default 30) bypass the JS estimate entirely and route to exploration mode — the
+    /// estimate is noise-dominated and blocking on it creates a dead-loop where strategies
+    /// cannot accumulate fills to escape the negative-edge bucket. Statistically robust cells
+    /// (n >= min_n) keep the original behavior: positive → threshold check; negative → block;
+    /// cold-start (no cell) → allow with warning. Live path stays strict per
+    /// CLAUDE.md §四 operator policy: demo loose, live strict.
+    /// 3E-2a：Demo 模式成本門——中等嚴格。
+    /// EDGE-DIAG-2（2026-04-28）：低樣本（n_trades < cost_gate_min_n_trades_for_block，
+    /// 預設 30）跳過 JS 估計直接走探索模式——估計值噪音主導，據此阻擋會造成死循環，
+    /// 策略無法累積 fills 逃脫負 edge 桶。統計穩健（n ≥ min_n）保持原行為：
+    /// 正 → 門檻檢查；負 → 阻擋；冷啟動（無格子） → 放行並警告。Live 路徑仍嚴格
+    /// （CLAUDE.md §四 operator 政策：demo 放寬 / live 收緊）。
     pub(super) fn cost_gate_moderate(
         &self,
         strategy: &str,
@@ -105,7 +115,22 @@ impl IntentProcessor {
         let slippage_cfg = &self.risk_config.slippage;
         let slippage = lookup_slippage(slippage_cfg, volume_24h);
         let fee_bps = 2.0 * (fee_rate + slippage) * 10_000.0;
+        let min_n = slippage_cfg.cost_gate_min_n_trades_for_block;
         match self.edge_estimates.get_cell(strategy, symbol) {
+            Some(cell) if cell.n_trades < min_n => {
+                // EDGE-DIAG-2: low-sample cell — treat as noise; route to exploration mode.
+                // EDGE-DIAG-2：低樣本 cell — 視為噪音；路由到探索模式。
+                tracing::info!(
+                    strategy,
+                    symbol,
+                    estimated_edge_bps = cell.shrunk_bps,
+                    win_rate = cell.win_rate,
+                    n_trades = cell.n_trades,
+                    min_n_for_block = min_n,
+                    "cost_gate(JS-demo): low sample — exploration mode / 低樣本探索模式"
+                );
+                None
+            }
             Some(cell) if cell.shrunk_bps > 0.0 => {
                 // Positive JS estimate: same threshold as live (win-rate weighted)
                 // G7-07: floor + safety multiplier from `risk.slippage.*`.
@@ -128,8 +153,8 @@ impl IntentProcessor {
                 None // pass
             }
             Some(cell) => {
-                // Negative JS estimate: block (unlike paper exploration which allows)
-                // 負 JS 估計：阻擋（不同於 paper 探索模式允許）
+                // Statistically robust (n >= min_n) negative JS estimate → block.
+                // 統計穩健（n ≥ min_n）的負 JS 估計 → 阻擋。
                 Some(ExchangeGateResult::rejected(
                     RejectionCode::CostGateJsDemoNegative {
                         estimated_bps: cell.shrunk_bps,

@@ -441,6 +441,20 @@ pub struct SlippageConfig {
     /// Validate 限制 [1, 5]。
     #[serde(default = "default_cost_gate_safety_multiplier")]
     pub cost_gate_safety_multiplier: f64,
+    /// Minimum `n_trades` required for `cost_gate_moderate` (demo path) to BLOCK
+    /// on a negative shrunk_bps. Below this threshold the JS estimate is treated
+    /// as noise-dominated and the gate switches to exploration mode (allow + log)
+    /// so demo can keep accumulating data toward statistically robust estimates.
+    /// Live path (`cost_gate_live`) is unaffected — it remains strict per
+    /// CLAUDE.md §四 (operator policy: demo loose, live strict).
+    /// Default 30 (≈ CLT threshold). Validated 1 ≤ x ≤ 1000.
+    /// 拒絕負 shrunk_bps 前要求的最小 n_trades（demo cost_gate_moderate 路徑）。
+    /// 低於此值則 JS 估計被視為噪音主導，gate 切換到探索模式（放行+log），
+    /// 讓 demo 累積資料以達到統計穩健估計。Live 路徑不受影響，仍保持嚴格
+    /// （CLAUDE.md §四 operator 政策：demo 放寬 / live 收緊）。
+    /// 預設 30（≈ CLT 門檻）。Validate 限制 [1, 1000]。
+    #[serde(default = "default_cost_gate_min_n_trades_for_block")]
+    pub cost_gate_min_n_trades_for_block: u64,
 }
 
 /// One row of the slippage volume-tier table.
@@ -494,6 +508,10 @@ fn default_cost_gate_safety_multiplier() -> f64 {
     1.3
 }
 
+fn default_cost_gate_min_n_trades_for_block() -> u64 {
+    30
+}
+
 impl Default for SlippageConfig {
     fn default() -> Self {
         Self {
@@ -501,6 +519,7 @@ impl Default for SlippageConfig {
             tiers: default_slippage_tiers(),
             cost_gate_win_rate_floor: default_cost_gate_win_rate_floor(),
             cost_gate_safety_multiplier: default_cost_gate_safety_multiplier(),
+            cost_gate_min_n_trades_for_block: default_cost_gate_min_n_trades_for_block(),
         }
     }
 }
@@ -521,6 +540,11 @@ impl SlippageConfig {
         }
         if !(1.0..=5.0).contains(&self.cost_gate_safety_multiplier) {
             return Err("risk.slippage.cost_gate_safety_multiplier must be in [1, 5]".into());
+        }
+        if !(1..=1000).contains(&self.cost_gate_min_n_trades_for_block) {
+            return Err(
+                "risk.slippage.cost_gate_min_n_trades_for_block must be in [1, 1000]".into(),
+            );
         }
         // Tiers: validate each row, plus descending min_turnover_usd ordering.
         let mut prev_floor: Option<f64> = None;
@@ -629,6 +653,49 @@ mod tests {
     }
 
     #[test]
+    fn slippage_config_default_min_n_trades_is_30() {
+        // EDGE-DIAG-2 (2026-04-28): pin the documented default so future drift
+        // is caught — operator policy refers to "n>=30" CLT threshold.
+        // EDGE-DIAG-2：釘住預設 30，避免未來漂移；operator 政策參考 n>=30 CLT。
+        assert_eq!(
+            SlippageConfig::default().cost_gate_min_n_trades_for_block,
+            30
+        );
+    }
+
+    #[test]
+    fn slippage_config_rejects_min_n_trades_zero() {
+        // EDGE-DIAG-2: 0 would mean "block every estimate immediately" which
+        // negates the purpose of n-trades stratification. Reject.
+        // EDGE-DIAG-2：0 等於「立即阻擋所有估計」，違反分層用意，拒絕。
+        let mut cfg = SlippageConfig::default();
+        cfg.cost_gate_min_n_trades_for_block = 0;
+        assert!(cfg.validate().is_err());
+    }
+
+    #[test]
+    fn slippage_config_rejects_min_n_trades_too_high() {
+        // EDGE-DIAG-2: > 1000 would mean "essentially never block" — likely a
+        // typo or unit confusion (e.g., trader meant "1000 fills" but config
+        // accepts u64). Cap at 1000 to surface the mistake.
+        // EDGE-DIAG-2：>1000 等於「實際上永不阻擋」，疑似 typo；硬上限 1000。
+        let mut cfg = SlippageConfig::default();
+        cfg.cost_gate_min_n_trades_for_block = 5000;
+        assert!(cfg.validate().is_err());
+    }
+
+    #[test]
+    fn slippage_config_accepts_min_n_trades_boundary_values() {
+        // Boundary check: 1 (minimum) and 1000 (maximum) must both validate.
+        // 邊界：最小 1、最大 1000 皆須通過 validate。
+        let mut cfg = SlippageConfig::default();
+        cfg.cost_gate_min_n_trades_for_block = 1;
+        assert!(cfg.validate().is_ok());
+        cfg.cost_gate_min_n_trades_for_block = 1000;
+        assert!(cfg.validate().is_ok());
+    }
+
+    #[test]
     fn slippage_config_rejects_unsorted_tiers() {
         // Tier table must be descending by min_turnover_usd; ascending = reject.
         // tier 表必須以 min_turnover_usd 降序；升序 → 拒絕。
@@ -660,6 +727,7 @@ mod tests {
             }],
             cost_gate_win_rate_floor: 0.4,
             cost_gate_safety_multiplier: 1.5,
+            cost_gate_min_n_trades_for_block: 30,
         };
         assert!(cfg.validate().is_ok());
         assert_eq!(cfg.lookup_rate(1_000_000.0), 0.0008); // hits the only tier
