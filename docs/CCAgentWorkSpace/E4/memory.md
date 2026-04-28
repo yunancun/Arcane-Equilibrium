@@ -2,6 +2,58 @@
 
 ## 工作記憶
 
+### 2026-04-28 Wave B (G3-09 Phase B Wave 1 + G8-01 W2 + W3) Linux full regression `cf34e96..d1fd1cf` — **E4 FAIL**
+
+**對象**：4 commits (`31761a6` Phase B Wave 1 V026+INSERT+healthcheck split+DbSlot late-inject ~2293 LOC / `99ac0b4` G8-01-W2 CognitiveModulator 22-case / `4a5b1d6` G8-01-W3 strategist cognitive integration 7 scenarios / `d1fd1cf` cross-agent memory)
+
+**Verdict**: **FAIL — 退 E1**（2 BLOCKERs Linux-only，Mac auto-skip 漏抓）
+
+| 引擎 | passed | failed | baseline | delta |
+|---|---|---|---|---|
+| Rust cargo lib (release) | **2299** | 0 | 2290 | +9 ✓ (兩遍 0.52s 同綠) |
+| Rust daemon test | **11** | 0 | 6 (Phase A) | +5 ✓ (兩遍 2.06s/2.07s 同綠) |
+| **Rust persistence test** | **0** | **2** | new | **BLOCKER #2** |
+| W3 same-session (51 cases) | **51** | 0 | n/a | ✓ (兩遍 0.52s/0.58s) — H-1 fix Linux reproducible CONFIRMED |
+| Pytest combined 7-suite | **141** | 0 | Mac 141 | match ✓ (兩遍 0.71s/0.67s) |
+| **V026 idempotency** | — | — | — | **BLOCKER #1** (1st apply ERROR + 2nd apply same ERROR) |
+| Healthcheck full sweep | 31 PASS / 1 WARN [11] / 0 FAIL | — | — | [30] cost_edge_advisor_status PASS / [8] shadow_exits dormant ok |
+
+**BLOCKER #1 — V026 retention policy bug** (P0 production migration broken on Linux)：
+- File `srv/sql/migrations/V026__cost_edge_advisor_log.sql` 行 192-198：`add_retention_policy('learning.cost_edge_advisor_log', BIGINT '2592000000', if_not_exists => TRUE)` 在 TimescaleDB 2.26 上 ERROR — `bigint` ts_ms hypertable 缺 `integer_now_func`
+- 1st apply: 表 + hypertable 創建後 ERROR aborted；Linux PG 留下 partial state（表 OK / 0 rows / 無 retention）
+- 2nd apply: `IF NOT EXISTS` Guard A NOTICE-skip 表 + hypertable，但 retention policy 行再次 ERROR — **Idempotency BROKEN**，違反 CLAUDE.md §七 規則 4
+- 影響：`linux_bootstrap_db.sh` 無法套用 V026；`OPENCLAW_AUTO_MIGRATE=1` engine 拒絕啟動
+- E1 fix path A 推薦：先 `set_integer_now_func()` 註冊再 `add_retention_policy(BIGINT ...)`；或改 `drop_created_before => INTERVAL '30 days'`
+
+**BLOCKER #2 — 持久化測試 vs V026 CHECK constraint 衝突** (P1 test infrastructure)：
+- File `srv/rust/openclaw_engine/tests/test_cost_edge_advisor_persistence.rs:184,261` 用 `format!("test_persist_{}", pid)` 隔離 tag，但 V026 CHECK `engine_mode IN ('paper','demo','live','live_demo')` 拒絕
+- 直接 `psql INSERT ... 'test_e4_diag' ...` 確認 ERROR `cost_edge_advisor_log_engine_mode_check`；Rust 側 `tokio::spawn(insert_advisor_log_row)` fire-and-forget 將 ERROR 吞為 warn!，測試見 0 rows panic
+- 生產路徑不受影響（engine_mode 永遠 4 prod 值之一）— 純 test-vs-schema design conflict
+- E1 fix path A 推薦：CHECK 放寬 `OR engine_mode LIKE 'test_%'`；或測試改用 prod value + ts_ms range cleanup
+
+**驗證流程**：
+1. `git reset --hard origin/main` Linux HEAD `d1fd1cf` ✓
+2. cargo lib `--release` 兩遍 2299/0 — Phase B Wave 1 lib-side (+9: EvalCounters/CostEdgeAdvisorLogRow/sticky/CHECK envelope) 全綠
+3. cargo daemon test 兩遍 11/0 — Wave A baseline 6 + Wave B sticky×2 + spawn-test×3 = 11 完美對齊
+4. cargo persistence test → 2/2 FAIL → BLOCKER #2 RCA via direct psql INSERT
+5. `bash helper_scripts/linux_bootstrap_db.sh --apply V026` 1st → ERROR line 197 → BLOCKER #1
+6. 2nd apply → 同 ERROR → idempotency BROKEN
+7. pytest W3 51-case 兩遍 51/0 0.52s/0.58s — H-1 fix Linux reproducible
+8. pytest 7-suite combined 兩遍 141/0 0.71s/0.67s — Mac 141 vs Linux 141 perfect match
+9. healthcheck 32 check 全跑 → 31 PASS / 1 WARN [11] (pre-existing 226/200 113%) / 0 FAIL，含 [30] PASS DB-down fallback verified
+
+**綠色項目（confirm Phase B observation foundation working）**：
+- 5-Agent rust path 全綠（cargo lib + daemon + W3 + combined 7-suite 全 0 fail）
+- Phase B Wave 1 advisory observability 0 trade impact 確認（healthcheck [30] env=0 dormant + [8] shadow_exits 0 row）
+- ExecutorAgent shadow_mode dormant 確認（[16] strategist scheduler not started by design）
+
+**Mac vs Linux 盲點教訓**：
+1. **Mac PG bypass blind spot**：Mac `OPENCLAW_TEST_PG` 未設 → persistence test auto-skip → V026 retention bug + test-vs-CHECK conflict 雙雙隱藏。PA RFC §6 R-B7 顯式要求 Linux 驗，否則 Wave B 在 Mac 全綠卻 Linux deploy 卡死。**規則強化**：任何 V*.sql migration 動到 TimescaleDB hypertable retention/compression/integer_now 必 Linux-validated（`linux_bootstrap_db.sh --apply` 兩遍）才能 PM Sign-off，不論 Mac 結果。
+2. **Fire-and-forget INSERT 吞測試訊號**：`tokio::spawn(insert_advisor_log_row)` 解耦 DB I/O 與 daemon cadence（生產 design 正確 per RFC §6.1 R-B1）但 CHECK / FK / 權限 ERROR 全 warn-only — 測試 panic 見 "0 rows" 無線索。**建議**：persistence-style integration test 應先跑 sentinel 直接 INSERT 驗 schema 相容性才信任 async daemon path。
+3. **CHECK constraint + isolation-tag 測試 = anti-pattern**：test code `format!("test_persist_{}", pid)` 隔離但 schema CHECK whitelist 拒絕。schema 必須允許 `test_*` prefix OR 測試必用 prod value + 替代隔離（ts_ms range/獨立 column）。**新增 PA / E2 checklist**：任何新 V*.sql with CHECK 必列目前 test isolation pattern 並確認相容。
+
+**Report**: `srv/docs/CCAgentWorkSpace/E4/workspace/reports/2026-04-28--wave_b_linux_full_regression.md`
+
 ### 2026-04-28 Wave A prep-gate trio Linux full regression (commits `aced662`+`9303a3b`+`22c57dc`+`528805d`) — E4 PASS
 
 **對象**：Wave A prep-gate trio 4 commits 已 push origin/main `82347a5..528805d`
