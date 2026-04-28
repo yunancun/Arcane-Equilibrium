@@ -900,30 +900,57 @@ async def post_demo_session_stop(
     rust_online = get_rust_reader().is_available()
     close_result: dict = {}
     pause_result: dict = {}
+    cancel_orders_result: dict = {}
+    orphan_result: dict = {}
+    verify_result: dict = {}
     if rust_online:
-        try:
-            close_result = await _ipc_command("close_all_positions", {"engine": "demo"})
-        except Exception as e:
-            errors.append(f"demo_close: {e}")
-            logger.error("IPC close_all_positions (demo) failed: %s", e)
-        # Orphan sweep: close any exchange positions not tracked in paper_state.
-        # ipc_close_all only covers paper_state — orphan positions on the exchange
-        # (e.g. FARTCOINUSDT opened externally or after paper_state reset) are missed.
-        # 孤兒清掃：平掉交易所有但 paper_state 沒有的倉位。
-        orphan_result = await _sweep_demo_orphan_positions(errors)
+        # Phase 0 — Pause demo dispatch FIRST so no new orders are placed
+        # during cancel + close. Demo session stop is allowed to pause the
+        # pipeline (unlike Live which keeps the pipeline up).
+        # 先暫停策略派發，避免 cancel/close 流程中再產生新單。
         try:
             pause_result = await _ipc_command("pause_paper", {"engine": "demo"})
         except Exception as e:
             errors.append(f"demo_pause: {e}")
             logger.error("IPC pause_paper (demo) failed: %s", e)
+        # Phase 1 — Cancel all pending orders (limits / TP / SL / conditional)
+        # via REST settleCoin scope BEFORE close_all to avoid TP/SL triggering
+        # during the close-position window.
+        # 第一步：先全帳戶取消掛單，避免平倉途中 TP/SL 條件單觸發。
+        cancel_orders_result = _sweep_demo_orphan_orders(errors)
+        # Phase 2 — Close tracked positions via IPC (Rust paper_state iter).
+        # 第二步：通過 IPC 平倉 paper_state 追蹤的持倉。
+        try:
+            close_result = await _ipc_command("close_all_positions", {"engine": "demo"})
+        except Exception as e:
+            errors.append(f"demo_close: {e}")
+            logger.error("IPC close_all_positions (demo) failed: %s", e)
+        # Phase 3 — Orphan position sweep: positions that exist on Bybit but
+        # not in paper_state (e.g. opened externally) are caught here.
+        # 第三步：孤兒倉位清掃，平掉交易所有但 paper_state 沒有的倉位。
+        orphan_result = await _sweep_demo_orphan_positions(errors)
+        # Phase 4 — Verify Bybit account fully clean (positions=0 AND orders=0).
+        # Polls until clean or timeout (~30s default). Residual = explicit error
+        # so GUI/operator sees what survived rather than silent partial-stop.
+        # 第四步：輪詢確認 Bybit 帳戶完全乾淨。30s 內未清乾淨 → 顯式回報殘留。
+        verify_result = await _verify_account_clean(_get_rust_client(), env_label="demo")
+        if not verify_result.get("clean"):
+            errors.append(
+                f"demo_verify_residual: positions={verify_result.get('residual_positions')} "
+                f"orders={verify_result.get('residual_orders')}"
+            )
     else:
         close_result = pause_result = orphan_result = {"skipped": True, "reason": "engine_offline"}
+        cancel_orders_result = {"skipped": True, "reason": "engine_offline"}
+        verify_result = {"skipped": True, "reason": "engine_offline"}
     return _envelope({
-        "message": "Demo engine stopped — positions closed / Demo 引擎已停止，倉位已平",
+        "message": "Demo engine stopped — orders cancelled + positions closed / Demo 引擎已停止，掛單已取消、倉位已平",
         "source": "rust_engine",
+        "cancel_orders": cancel_orders_result,
         "demo_close": close_result,
         "orphan_sweep": orphan_result,
         "demo_pause": pause_result,
+        "verify": verify_result,
         "errors": errors if errors else None,
         "session": {"session_state": "stopped"},
     })
