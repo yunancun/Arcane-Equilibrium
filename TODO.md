@@ -1,6 +1,8 @@
 # OpenClaw TODO — 工作清單（v3 · 單一時間軸版）
 
-**最後更新**：2026-04-28 CEST 深夜（**🎉 Wave G COMPLETE — 4-way file size cleanup splits**：5 commits `8a5973f..3b0a0d7` pushed origin/main；**§九 1200 hard cap active violations 全清**（main.rs 1210→1158 +42 headroom）；4+1 ticket 結案：MAIN-RS-PRE-EXISTING-CLEANUP P2 (`54e468a`) / G3-08-FUP-ANALYST-SPLIT P2 (`68c31af`) / G3-08-FUP-HSQ-SPLIT P2 (`72e12e8`) / G3-09-DAEMON-TEST-SPLIT P3 (`6a2145e`) + G8-01-W2-FILESIZE-WATCH P4 (HSQ split 順帶解 859→452)；4 並行 PA+E1 合一 + 4 並行 E2 review (1 PASS 0 finding + 3 PASS_WITH_NIT)；**Linux full regression cargo lib 2308/0** + 3 daemon test split **11/0** (proofs 5 + dual_safeguard 3 + spawn_decision 3, sum unchanged) + persistence Linux PG **2/0** + HSQ same-session **forward 108/108 + reverse 108/108** (SINGLETON post-split integrity CRITICAL invariant verified) + ANALYST 22/22 + W1+W2+W3+LOSSES+SINGLETON 83/83 + **全 control_api_v1 baseline 3117/0 二輪 non-flaky** (Wave F-3 baseline 3098 + edge-diag-2 +19) / healthcheck 25 PASS / 2 FAIL ([12]+[27] both pre-existing baseline noise per E4)；0 P0/P1 regression / 0 hard boundary 觸碰；0 新 FUP filed (純 cleanup wave)；Sign-off `docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-28--wave_g_signoff.md`）
+**最後更新**：2026-04-28 CEST 深夜（**🎉 Wave H COMPLETE — 3-way active warn cleanup splits + 2 inline governance/docstring fixes**：6 commits `dbba235..0a50c6c` pushed origin/main（含 operator edge-diag-2 prior `dbba235`）；**§九 800 warn active violations 從 4 縮至 1**（餘 main_boot_tasks.rs 816 marginal）；5 ticket 結案：STRATEGY-WIRING-SPLIT P2 (`6d657c1` new ticket: 1060→784 + 2 sibling) / STRATEGIST-DELEGATOR-SLIM P3 (`5928576`: 933→782 + 25 delegators lift + 2 body migration) / G3-08-FUP-MAF-SPLIT-CLEANUP P3 (`bd48672` (b)+(c)) / CLAUDE-MD-SECTION-9-HARD-CAP-EXCEPTION-CLAUSE P3 (`54b9add` governance closure) / G3-09-PA-DOCSTRING-CLARIFY P4 (`0a50c6c` lambda comment correction)；2 新 deferred tickets: G3-08-FUP-MAF-SPLIT-CLEANUP-A P4 (cosmetic) / G3-08-PHASE-4-STRATEGIST-SPLIT-FUP-FACADE LOW (risk-aware defer：strategist 剛 delegator slim, two-front change risk 避免)；3 並行 PA+E1 合一 + 1 inline + 1 inline post-merge；**Linux full regression cargo lib 2308/0** + 3 daemon test split **11/0** + persistence Linux PG **2/0** + HSQ same-session **forward 108/108 + reverse 108/108 non-flaky** (CRITICAL: STRATEGY-WIRING-SPLIT 對 H state 0 影響) + Strategist 8 檔 133/0 + Scout 46/0 + Analyst 22/0 + **全 control_api_v1 baseline 3117/0 (3 skipped)** + healthcheck 30 PASS + 2 pre-existing FAIL ([12]+[27] accepted per §九 exception clause)；0 P0/P1 regression / 0 hard boundary 觸碰 / engine NOT rebuilt (純 Python+doc 0 trade impact)；Sign-off `docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-28--wave_h_signoff.md`）
+
+**前次更新**：2026-04-28 CEST 深夜（Wave G COMPLETE — 4-way file size cleanup splits，5 commits `8a5973f..3b0a0d7`，§九 1200 hard cap active violations 全清；Sign-off `docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-28--wave_g_signoff.md`）
 
 **前次更新**：2026-04-28 CEST 深夜（Wave F COMPLETE — engine `--rebuild` deploy + SINGLETON sibling fix executor+promote，3 commits `739af3c..22e8482`，operator decision (C) defer Phase B observation；Sign-off `docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-28--wave_f_partial_signoff.md`）
 
@@ -27,7 +29,38 @@
 
 ---
 
-## 🎯 此刻該做什麼（2026-04-28 CEST 深夜 · 🎉 Wave G COMPLETE · §九 hard cap active violations 全清 · 等 Phase C / Phase B observation bundled）
+## 🎯 此刻該做什麼（2026-04-28 CEST 深夜 · 🎉 Wave H COMPLETE · §九 800 warn active violations 從 4 縮至 1 · 等 Phase C / Phase B observation bundled）
+
+**Wave H 結案**（6 commits `dbba235..0a50c6c`）：
+- ✅ **STRATEGY-WIRING-SPLIT P2** (new) (`6d657c1`) — strategy_wiring 1060→784 + 2 sibling (h_state 133 + scanner 338)
+- ✅ **STRATEGIST-DELEGATOR-SLIM P3** (`5928576`) — strategist_agent 933→782 + 25 delegators lift + 2 body migration
+- ✅ **G3-08-FUP-MAF-SPLIT-CLEANUP P3** (b)+(c) (`bd48672`) — scout docstring + SCOUT_AGENT §九 row
+- ✅ **CLAUDE-MD-§九-EXCEPTION-CLAUSE P3** (`54b9add`) — governance amendment closure
+- ✅ **G3-09-PA-DOCSTRING-CLARIFY P4** (`0a50c6c`) — lambda capture comment correction
+- ✅ Linux full regression cargo 2308/0 + daemon split 11/0 + persistence 2/0 + HSQ same-session 108/108 二輪 + 全 baseline 3117/0 + healthcheck 30 PASS / 2 pre-existing FAIL
+
+**§九 800 warn active violations**：剩 1（main_boot_tasks.rs 816 marginal acceptable）— 從 Wave G 後 4 縮至 1 ✅
+
+**§九 1200 hard cap active violations**：**0** ✅（Wave G achievement maintained）
+
+**NOW ACTIONABLE**（時間驅動 / 等候 / 餘工）：
+1. **G3-09 Phase C Wave 1 impl** — operator 「等時間長一些再看」；PA RFC `90d1a2e` ready
+2. **Phase B observation period launch** — bundled with Phase C (operator decision (C))
+3. **5 backlog tickets** 等下次 maintenance wave：
+   - G3-08-FUP-MAF-SPLIT-CLEANUP-A P4 (new, cosmetic eager re-export)
+   - G3-08-PHASE-4-STRATEGIST-SPLIT-FUP-FACADE LOW (deferred, post-strategist-split risk)
+   - SINGLETON-POLLUTION-PHASE2-ROUTES P4 (Mac-only)
+   - G8-01-FUP-REGRET-DREAM-DEFERRED P3 (long-term)
+   - G3-09-FUP-CASE-D-H5-WAIT P3
+   - G3-08-FUP-EXECUTOR-EARLY-RETURN-LOW1 P4
+
+**Time-driven**: G1-04-FUP-FINAL-COMPUTE P1 (~05-02 cutoff)
+
+詳：[Wave H Sign-off](docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-28--wave_h_signoff.md)
+
+---
+
+## 🎯 上一波（保留供查 · 2026-04-28 CEST 深夜 · 🎉 Wave G COMPLETE · §九 hard cap active violations 全清 · 等 Phase C / Phase B observation bundled）
 
 **Wave G 結案**（5 commits `8a5973f..3b0a0d7`）：
 - ✅ **MAIN-RS-PRE-EXISTING-CLEANUP P2** (`54e468a`) — main.rs 1210→1158 + scanner_init.rs 170 + §九 hard cap +42 headroom
