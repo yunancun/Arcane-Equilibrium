@@ -1499,3 +1499,25 @@ finally:
 - **scope 紀律**：E2 推薦 `check_h_state_gateway_freshness` 也搬 — 拒。spec 明確「E1 自決，建議只搬一條」+ 既有檔已 < 1200 行就達標，多搬一條反而擴大 PR 表面積增加 review 風險。
 
 **驗收結果摘要**：3/3 mandatory PASS · 0 production logic diff（純 doc + 純 sibling 重構 + 1 fail-soft fallback）· cargo + pytest + smoke 全綠（pytest 8 baseline fail 為既有，與本 PR 無關）。
+
+---
+
+## 2026-04-28 · G3-09-FUP-MAIN-RS-SPLIT P3 + G3-09-FUP-MAIN-BOOT-TASKS-SPLIT P2 combined（worktree-agent-aea08120caa242fd2）
+
+**任務**：E2 Phase B Wave 1 review (`adbc92e`) 揪出兩個 file size violation。MED-2 (P3) `main.rs` 1230 > 1200 hard cap；LOW-1 (P2) `main_boot_tasks.rs` 1015 > 800 warn。E2 推薦 fix 一致：抽 `cost_edge_advisor_db_pool_slot` plumbing + `spawn_cost_edge_advisor_if_enabled` → 新 sibling `cost_edge_advisor_boot.rs`（**不**入 `cost_edge_advisor::boot` 保 sibling pattern 避免 boot-time deps 進 engine library crate）。
+
+**實作**：
+- 新檔 `rust/openclaw_engine/src/cost_edge_advisor_boot.rs` (279 LOC) — `pub type CostEdgeAdvisorDbSlot` + `create_db_pool_slot()` helper + `inject_db_pool()` async helper + `spawn_cost_edge_advisor_if_enabled()` 全 body 逐字保留。MODULE_NOTE 雙語 + 4 docstring 雙語對照。
+- `main.rs` 1230 → **1210**：`mod cost_edge_advisor_boot;` 註冊 + 接 sibling 三 helper（22 LOC + 5 LOC late-inject 區塊 → 11 LOC + 2 LOC）。
+- `main_boot_tasks.rs` 1015 → **816**：移除 type alias + spawn fn（187 LOC）+ 2 個不再使用的 import（`cost_edge_advisor::*` + `CostEdgeAdvisorSlot`）。
+
+**驗收**：cargo build OK（4 pre-existing warnings，0 新 warning from sibling）· lib **2299/0**（baseline 不變）· daemon **11/0**（baseline 不變）· persistence **2/0**（Mac 實跑通過，未 skip）· 0 production behavior diff（spawn fn body 逐字相同；inject_db_pool 內部就是 `*slot.write().await = Some(Arc::clone(pool))`）。
+
+**未達標項 + 教訓**：
+- **main.rs 1210 仍 10 LOC 超 1200 硬上限**：PA RFC 預估 drop ~220 LOC 與實際可抽範圍嚴重偏離（>20%）。實際 Wave 1 在 main.rs 加的 wiring 只 22 LOC（Wave 1 真實 footprint），pre-existing 8 LOC 已過上限 — 沒 220 LOC 的可抽出量。已將可抽範圍最大化（type alias / spawn fn / 2 helper）。進一步降低須觸碰非 Wave 1 / 非 cost_edge_advisor 的 unrelated 區塊，**已超出 ticket scope**（E1 規則「不擴大 PA 給定的改動範圍」）。觸發 boundary「LOC 預估偏離 >20% → 回報主會話」，已在報告 §6.A 詳述。
+- **教訓 — PA RFC LOC 預估宜先核 baseline**：PA 假設 main.rs 可從 1230 → 1010 表示假設能抽 220 LOC，但 main.rs:507-525 範圍只 22 LOC，預估明顯失準。E1 在執行前應先用 `wc -l` + `git blame` 對比 PA spec 的 line range，發現 LOC 預估與可抽範圍量級不符即回報。本次抽完才發現偏離 >20%，事後告知 PM。
+- **教訓 — sibling pattern 為何 vs sub-module pattern**：本次刻意選 `crate::cost_edge_advisor_boot` (sibling) 而非 `cost_edge_advisor::boot` (sub-module) 因為 boot-time 需要 `ipc_server::CostEdgeAdvisorSlot / HStateCacheSlot / PerEngineRiskStores` (engine binary 層 type)，若放進 `cost_edge_advisor` library 模組會把 binary-only deps 拉進 library crate 製造循環。Sibling 模組保 library 純 algorithm。已在新檔 MODULE_NOTE 中文 + EN 雙語註明 design rationale。
+- **教訓 — async helper 比 inline 直寫值得抽**：原本 `*slot.write().await = Some(Arc::clone(&db_pool))` 一行；抽成 `inject_db_pool(slot, pool).await` 多 +1 LOC 接線但 +9 LOC 在 sibling 加 doc — 看似不值。但有兩個價值：(1) 主 main.rs 13 LOC 註解 + 1 LOC 邏輯 → 2 LOC 註解 + 1 LOC 邏輯，淨 -10 LOC（main.rs 是 hard cap 焦點）(2) helper 把語意打上名字，比 inline write 更有可讀性 — `inject_db_pool` 一看便知用途。
+- **教訓 — singleton 表更新留 follow-up 而非自做**：CLAUDE.md §九 `CostEdgeAdvisorDbSlot` 出處需從 `main_boot_tasks.rs` 改為 `cost_edge_advisor_boot.rs`。本次刻意 **不** 修 CLAUDE.md，避 scope creep；已在報告 §5 + §7 標示為 PM commit 時順手更新。
+
+**驗收結果摘要**：build + lib + daemon + persistence 全綠 · main.rs 仍 1210（10 LOC 超）需 PM 決定 follow-up · main_boot_tasks.rs 達 PA acceptable target ≤865（816）但仍 16 LOC 超 800 警告線。

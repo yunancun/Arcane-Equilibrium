@@ -866,3 +866,61 @@ W2 unit cov ≥85%（22 case，零 mock）+ W3 integration ≥5 case（7 留 buf
 ### 教訓（lessons.md candidate）
 
 **「P2 prep-gate scope 不容忍 fabricated heuristic」**：當 spec'd producer 已被刪、roadmap 未動工，正確回應是 escalate 三選一決策（remove / re-implement / defer），不是「想個 proxy 餵 placeholder」假裝有 wiring。後者是 `feedback_no_dead_params` + 原則 #10 的反模式 — 看似閉環但 `_compute_*` 分支永遠不可達真實 outcome。本 escalation 同模式 LOSSES-WIRING 的「先 grep producer」紀律：**spec docstring ≠ live producer**，`OpportunityTracker.get_regret_summary()` 之類 docstring claim 必須當第一可疑點 grep。
+
+## 2026-04-28 — G3-09 Phase C Intent Gate RFC
+
+- **報告**: `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-04-28--g3_09_phase_c_intent_gate_design.md`
+- **HEAD**: `decf712`
+- **預決策**:
+  - Gate 注入點 = Rust IntentProcessor Gate 1.7（在 1.6 negative-balance 後、Guardian 2 前）
+  - **Reject 只阻新倉**（is_reducing=true 完全跳過）— 嚴守 CLAUDE.md §二 #5 生存>利潤反向防線
+  - 三層 default-off safeguard：env=1 + cost_edge.enabled=true + cost_edge.gate_enabled=true
+  - Dedup window 60s 控 V026 INSERT 頻率；reject decision 本身不受 dedup 影響
+  - Per-strategy `cost_edge_threshold_override` + `cost_edge_exempt` 給 emergency exit 路徑
+  - 重用 Phase B V026 hypertable，`transition_from='GATE_REJECT:<strategy>'` 字面前綴標記
+  - **Python ExecutorAgent 0 改動** — 既有 `rejected_reason` 處理 generic
+- **拒絕的替代設計**:
+  - Alt 1 Python ExecutorAgent 注入 — 漏 Rust 內部 strategy 直發 path（100% intent 必須 Rust 注入）
+  - Alt 2 Guardian 內注入 — 違反 SRP + 跨 crate circular dep 風險
+  - Alt 3 IPC submit_intent handler 注入 — 漏 tick_pipeline 內部 process path + audit shape 不一致
+  - Alt 4 強制關現有倉 — 違反 #5 生存>利潤 + #11 Agent 自主權
+- **Wave 拆分**: Wave 1 Rust gate (~2d, 不可並行) → Wave 2 Python metric (~1d, 與 W1 並行) → Wave 3 Linux deploy + 7d observation
+- **Top 3 風險**:
+  - R-C1 False-positive reject 平倉 — 複用 Gate 2.7 `is_reducing` pattern + unit test 釘死
+  - R-C5 Live mainnet 提早啟用 — TOML default false + Phase A RFC §8.3 Operator checklist
+  - R-C6 系統凍結 — IPC 60s rollback + healthcheck WARN + per-strategy exempt
+- **副作用識別**:
+  - V026 重用 `transition_from` field 增 `'GATE_REJECT:<strategy>'` 語意（下游 query LIKE 'GATE_REJECT:%'）
+  - RejectionCode enum 新 variant → exhaustive match compiler-enforced E2 catch
+  - IntentProcessor 持 `Option<Arc<CostEdgeAdvisor>>` setter pattern 同 risk_config snapshot
+- **教訓**:
+  - Phase B RFC R-B6 標的「shadow IntentProcessor would_reject」直接整合到 Phase C binding gate，跳過獨立 shadow stage（理由：Phase B observation 已提供等價證據；多 phase 過長 operator UX 差）
+  - Gate 注入點選擇強耦合「單一寫入口」原則 — 任何漏 Rust 內部 path 的設計都先排除
+
+---
+
+## 2026-04-28 PA STRATEGIST-SINGLETON-POLLUTION P3 RFC 完成
+
+### 投查結論
+- **35 fail in `test_h_state_query_handler.py`** — bisect 確認 polluter 為 `test_api_contract.py:16` `build_client()` 的 `importlib.reload(main_legacy)` + `importlib.reload(main)`
+- **Root cause 不是 singleton state pollution**，是 **CPython `from PKG import SUB` attribute precedence**：
+  1. test_api_contract reload main → transitive import strategy_wiring → Python 設 `app.__dict__["strategy_wiring"] = <real module>`
+  2. test_h_state 的 `_install_fake_strategy_wiring` 只 patch `sys.modules`，未 patch `app.strategy_wiring` attribute
+  3. `_collect_h_snapshots()` 內 `from . import strategy_wiring as _sw` 解析到 attribute（真模組），fake bypass
+- **Reproducibility**: Python REPL 直驗 attribute precedence 機制；35 fail 在 `pytest control_api_v1/tests/` 100% 重現；Mac/Linux 跨平台一致
+
+### Fix 推薦
+- **Option B + A 合**（治本 + defense-in-depth）
+  - B (production): `h_state_query_handler.py:334` `from . import strategy_wiring as _sw` → `_sw = sys.modules.get("app.strategy_wiring")`
+  - A (test fixture): `_install_fake_strategy_wiring` 同時 patch `app.strategy_wiring` attribute
+- 不推 Option C (autouse fixture overkill) / Option D (pytest-forked 新依賴 + CI 開銷)
+- ETA: E1 1.5-2h + E2 0.5h
+
+### 教訓
+- **「Singleton pollution」命名陷阱**：實際是 module-level import path 污染，與 singleton 物件狀態無關 — 命名引導排錯方向錯誤
+- **CPython `from PKG import SUB` 規範**：先讀 `PKG.__dict__["SUB"]` 再落 `sys.modules` → test fixture 必須雙端 patch（W3 fix 已示範但只修一處測試端，未推到 h_state）
+- **Bisect 法則**：alphabetical pytest collection + 二分法 30 秒內定位 polluter；future similar issue 可標準化此流程
+- **Test fixture audit**：`_install_fake_X` / `_restore_X` helpers 凡 patch `sys.modules[<pkg>.<sub>]` 必同時 patch `<pkg>.<sub>` attribute，否則 `from . import <sub>` 形 import 會繞過
+
+### 報告路徑
+📄 `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-04-28--strategist_singleton_pollution_investigation.md`
