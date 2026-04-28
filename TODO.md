@@ -1,6 +1,8 @@
 # OpenClaw TODO — 工作清單（v3 · 單一時間軸版）
 
-**最後更新**：2026-04-28 CEST 晚（**🎉 Wave B COMPLETE — G3-09 Phase B Wave 1 + G8-01 W2 100% cov + W3 7 scenarios**：10 commits `cf34e96..dbe2477` pushed origin/main（含 1 hotfix round 解 2 Linux-only BLOCKERs）；Linux re-regression cargo lib **2299/0** + daemon **11/0** + persistence Linux PG **2/0** + V026 idempotency **1st OK + 2nd/3rd 0 RAISE** + W3 same-session **51/51** forward+reverse + pytest **141/0** + healthcheck **32 PASS / 1 WARN [11] / 0 FAIL** + V026 Guard **6/6**；**G3-09 Phase B Wave 1 結案**（commit `31761a6` impl + `00db240` hotfix：V026 hypertable + 4 indexes + Guard A/B + 30d retention with integer_now_func + Rust mod.rs daemon INSERT path tokio::spawn fire-and-forget + DbSlot late-inject pattern + healthcheck split + observation tooling ~2293 LOC + 5-arg backward-compat shim）；**G8-01 W2 結案**（commit `99ac0b4`：100% line cov 86/86 stmts，22 case → 26 sub-tests，PA RFC §3.2 設計達標 +15 points）；**G8-01 W3 結案**（commit `4a5b1d6`：7 integration scenarios + H-1 critical fix sys.modules stub → importer-side `unittest.mock.patch("app.h_state_query_handler.strategy_wiring", ...)` dual-patch + finally restore + strict ==3 assertion，51/51 same-session reproducible）；**G8-01-FUP-REGRET-DREAM ESCALATED**（commit `cf34e96`：concept 完全 dead，OpportunityTracker/DreamEngine RC-11 deleted，PA Option C defer，新 P3 G8-01-FUP-REGRET-DREAM-DEFERRED ticket）；3 新 FUP filed（G3-09-FUP-MAIN-RS-SPLIT P3 / G3-09-FUP-MAIN-BOOT-TASKS-SPLIT P2 / STRATEGIST-SINGLETON-POLLUTION P3）；7 ticket 結案；**G3-09 Phase B observation period + Phase C gate 設計 + G8-01 modulator behavior baseline 全 NOW ACTIONABLE**；Sign-off `docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-28--wave_b_signoff.md`）
+**最後更新**：2026-04-28 CEST 深夜（**🎉 Wave E COMPLETE — cost_edge_advisor_boot split + Phase C PA RFC + SINGLETON-POLLUTION fix**：8 commits `decf712..3788498` pushed origin/main；Linux re-regression cargo lib **2299/0** + daemon **11/0** + persistence Linux PG **2/0** + SINGLETON **35→0 fail Linux reproducible**（90/90 isolated + 108/108 same-session）+ W3+W2+W1+LOSSES **48/48** + healthcheck **32 PASS / 2 WARN [11]+[23] pre-existing / 0 FAIL** + 全 baseline **3075 passed / 35 fail Linux**（vs Mac 38，-3 sub-baseline 同 family pre-existing）；**G3-09-FUP cost_edge_advisor_boot split 結案**（commit `2f88c40` + `8bebf69` doc-drift fix：解 MAIN-RS-SPLIT P3 + MAIN-BOOT-TASKS-SPLIT P2 兩 ticket，main.rs 1230→1210 / main_boot_tasks 1015→816 / 新 sibling 279）；**G3-09 Phase C PA RFC 完成**（commit `90d1a2e`：Gate 1.7 / 只阻新倉 / triple default-off / V026 reuse / 3 waves / 4 alt rejected）；**STRATEGIST-SINGLETON-POLLUTION 結案**（commit `12f2732` PA bisect investigation + `b579dae` E1 fix Option B+A：production sys.modules.get 雙 site + test fixture dual-patch sentinel atomic restore，35→0 fail）；6 新 FUP filed（MAIN-RS-PRE-EXISTING-CLEANUP P2 / CLAUDE-MD-SECTION-9-HARD-CAP-EXCEPTION-CLAUSE P3 / SINGLETON-POLLUTION-EXECUTOR-SHADOW-TOGGLE-API P3 / SINGLETON-POLLUTION-STRATEGIST-PROMOTE-API P3 / SINGLETON-POLLUTION-PHASE2-ROUTES P4 / G8-01-W2-FILESIZE-WATCH P4）；4 ticket 結案；**G3-09 Phase C Wave 1 impl + Phase B observation deploy 全 NOW ACTIONABLE**；Sign-off `docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-28--wave_e_signoff.md`）
+
+**前次更新**：2026-04-28 CEST 晚（Wave B COMPLETE — G3-09 Phase B Wave 1 + G8-01 W2 + W3，10 commits `cf34e96..dbe2477`，含 1 hotfix round；Sign-off `docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-28--wave_b_signoff.md`）
 
 **前次更新**：2026-04-28 CEST 早（Wave A Prep-Gate Trio COMPLETE — sticky-ts + LOSSES-WIRING + spawn-test，5 commits `82347a5..a6bf090`，Sign-off `docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-28--wave_a_prep_gate_signoff.md`）
 
@@ -21,7 +23,30 @@
 
 ---
 
-## 🎯 此刻該做什麼（2026-04-28 CEST 晚 · 🎉 Wave B COMPLETE · NOW ACTIONABLE: Phase B observation + Phase C gate + engine deploy）
+## 🎯 此刻該做什麼（2026-04-28 CEST 深夜 · 🎉 Wave E COMPLETE · NOW ACTIONABLE: G3-09 Phase C Wave 1 impl + Phase B observation deploy）
+
+**Wave E 結案**（8 commits `decf712..3788498`）：
+- ✅ **cost_edge_advisor_boot split** (commits `2f88c40` + `8bebf69` doc-drift) — 解 MAIN-RS-SPLIT + MAIN-BOOT-TASKS-SPLIT 兩 ticket，新 sibling 279 LOC
+- ✅ **G3-09 Phase C PA RFC** (commit `90d1a2e`) — Gate 1.7 IntentProcessor / 只阻新倉 / triple default-off / V026 reuse / 3 waves
+- ✅ **SINGLETON-POLLUTION fix** (commits `12f2732` PA + `b579dae` E1 Option B+A) — 35→0 fail / CPython sys.modules.get 解 from-PKG-import-SUB attribute precedence trap
+- ✅ Linux re-regression 全綠 + SINGLETON 35→0 reproducibility CONFIRMED
+
+**NOW ACTIONABLE**（依賴鏈全清）：
+1. **G3-09 Phase C Wave 1 impl** (~2d E1 per Phase C RFC `90d1a2e` §11) — Rust IntentProcessor Gate 1.7 + 只阻新倉 + V026 GATE_REJECT log row
+   - **Recommend**: 等 Phase B observation period ≥48h 數據（~2026-04-30/-05-01）後再 launch，per Phase B RFC §7.3 路線圖
+2. **G3-09 Phase B observation deploy** — operator `ssh trade-core "bash helper_scripts/restart_all.sh --rebuild"` 把 Wave A+B+E binary 進 runtime；advisory only / 0 trade impact
+3. **38 baseline pre-existing fail** — 套 Option B+A pattern（per SINGLETON fix範本）解：SINGLETON-POLLUTION-EXECUTOR-SHADOW-TOGGLE-API + STRATEGIST-PROMOTE-API（17+18 fail）
+
+**Next session 立即可派候選**：
+1. **Phase B observation deploy + Phase C Wave 1**（並行：deploy 等 cron / impl PA RFC ready）
+2. **38 baseline cleanup**（PA RFC + E1 並行解兩個 sibling-pollution-family ticket，~1d）
+3. **MAIN-RS-PRE-EXISTING-CLEANUP P2**（找 main.rs 內 ≥10 LOC 可抽段降至 ≤1200，~1-2h）
+
+詳：[Wave E Sign-off](docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-28--wave_e_signoff.md)
+
+---
+
+## 🎯 上一波（保留供查 · 2026-04-28 CEST 晚 · 🎉 Wave B COMPLETE · NOW ACTIONABLE: Phase B observation + Phase C gate + engine deploy）
 
 **Wave B 結案**（10 commits `cf34e96..dbe2477` pushed origin/main）：
 - ✅ **G3-09 Phase B Wave 1** (commits `31761a6` + `00db240` hotfix) — V026 hypertable + Rust INSERT path + DbSlot late-inject + healthcheck split + observation tooling ~2293 LOC；TimescaleDB 2.x integer_now_func 規範到位；Linux V026 idempotency RESTORED
