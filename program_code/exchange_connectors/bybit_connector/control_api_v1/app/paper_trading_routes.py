@@ -19,6 +19,7 @@ MODULE_NOTE (English):
   All responses carry is_simulated=True and data_category=paper_simulated markers.
 """
 
+import asyncio
 import json
 import logging
 import os
@@ -299,6 +300,69 @@ async def post_session_resume(
         raise HTTPException(status_code=502, detail=f"IPC command failed: {e}")
 
 
+async def _verify_paper_state_clean(
+    engine: str,
+    *,
+    max_attempts: int | None = None,
+    interval_sec: float | None = None,
+) -> dict:
+    """Poll engine snapshot until paper_state.positions is empty for `engine`.
+
+    Paper / paper-mode demo lives entirely in Rust paper_state — there are
+    no Bybit orders to cancel. After IPC close_all_positions, Rust clears
+    the positions hashmap; we just confirm the snapshot reflects that.
+
+    Paper / paper 模式下持倉只在 Rust paper_state 內，無 Bybit 掛單需取消；
+    本 helper 只確認 IPC close_all_positions 後快照中持倉=0。
+
+    Returns {clean, attempts, elapsed_sec, residual_positions?, residual_position_symbols?}.
+    """
+    cap = max(1, int(max_attempts if max_attempts is not None
+                     else os.environ.get("OPENCLAW_STOP_VERIFY_MAX_ATTEMPTS", "30")))
+    interval = max(0.1, float(interval_sec if interval_sec is not None
+                              else os.environ.get("OPENCLAW_STOP_VERIFY_INTERVAL_SEC", "0.3")))
+    rust = get_rust_reader()
+    if not rust.is_available():
+        return {"clean": False, "skipped": True, "reason": "engine_offline"}
+    last_open: list[dict] = []
+    started = asyncio.get_event_loop().time()
+    for attempt in range(1, cap + 1):
+        snap = rust.get_paper_state(engine=engine)
+        positions = (snap or {}).get("positions") or []
+        # Snapshot stores Vec<PositionSnapshot> with nested `position.qty`.
+        # 快照 positions 是 Vec<PositionSnapshot>，qty 在巢狀的 position 子物件。
+        last_open = []
+        for entry in positions:
+            if not isinstance(entry, dict):
+                continue
+            pos = entry.get("position") if isinstance(entry.get("position"), dict) else entry
+            qty = float(pos.get("qty") or pos.get("size") or 0)
+            if qty > 0:
+                last_open.append(pos)
+        if not last_open:
+            elapsed = asyncio.get_event_loop().time() - started
+            return {
+                "clean": True,
+                "attempts": attempt,
+                "elapsed_sec": round(elapsed, 2),
+            }
+        if attempt < cap:
+            await asyncio.sleep(interval)
+    elapsed = asyncio.get_event_loop().time() - started
+    syms = sorted({str(p.get("symbol") or "") for p in last_open if p.get("symbol")})
+    logger.error(
+        "Paper-mode (%s) verify NOT-CLEAN after %d attempts (%.2fs): residual=%d symbols=%s",
+        engine, cap, elapsed, len(last_open), syms,
+    )
+    return {
+        "clean": False,
+        "attempts": cap,
+        "elapsed_sec": round(elapsed, 2),
+        "residual_positions": len(last_open),
+        "residual_position_symbols": syms,
+    }
+
+
 @paper_router.post("/session/stop")
 async def post_session_stop(
     actor: base.AuthenticatedActor = Depends(base.current_actor),
@@ -307,6 +371,10 @@ async def post_session_stop(
     Does NOT affect Demo engine.  Use /session/stop-all to stop both engines.
     僅停止 Paper 引擎 — 平倉、暫停策略分派。不影響 Demo 引擎。
     雙引擎聯停請用 /session/stop-all。
+
+    Paper engine has no Bybit orders to cancel — all state lives in
+    paper_state. Verify polls the engine snapshot until positions=0.
+    Paper 引擎無 Bybit 掛單需取消，狀態全在 paper_state 中；verify 輪詢快照確認持倉=0。
     """
     errors: list[str] = []
     global _USER_STOPPED
@@ -314,25 +382,35 @@ async def post_session_stop(
     rust_online = get_rust_reader().is_available()
     close_result: dict = {}
     pause_result: dict = {}
+    verify_result: dict = {}
     if rust_online:
-        try:
-            close_result = await _ipc_command("close_all_positions", {"engine": "paper"})
-        except Exception as e:
-            errors.append(f"paper_close: {e}")
-            logger.error("IPC close_all_positions (paper) failed: %s", e)
+        # Pause first to stop new strategy dispatch, then close, then verify.
+        # 先暫停策略派發、再平倉、再確認。
         try:
             pause_result = await _ipc_command("pause_paper", {"engine": "paper"})
         except Exception as e:
             errors.append(f"paper_pause: {e}")
             logger.error("IPC pause_paper (paper) failed: %s", e)
+        try:
+            close_result = await _ipc_command("close_all_positions", {"engine": "paper"})
+        except Exception as e:
+            errors.append(f"paper_close: {e}")
+            logger.error("IPC close_all_positions (paper) failed: %s", e)
+        verify_result = await _verify_paper_state_clean("paper")
+        if not verify_result.get("clean") and not verify_result.get("skipped"):
+            errors.append(
+                f"paper_verify_residual: positions={verify_result.get('residual_positions')}"
+            )
     else:
         close_result = pause_result = {"skipped": True, "reason": "engine_offline"}
+        verify_result = {"skipped": True, "reason": "engine_offline"}
         logger.info("Rust engine offline — skipping IPC (already stopped)")
     return _paper_response({
         "message": "Paper engine stopped — positions closed / Paper 引擎已停止，倉位已平",
         "source": "rust_engine",
         "paper_close": close_result,
         "paper_pause": pause_result,
+        "verify": verify_result,
         "errors": errors if errors else None,
         "session": {"session_state": "stopped", "session_id": "rust_engine"},
     })

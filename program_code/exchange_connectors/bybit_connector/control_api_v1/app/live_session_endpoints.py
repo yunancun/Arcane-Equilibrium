@@ -258,11 +258,21 @@ async def post_live_session_stop(
     errors: list[str] = []
     rust_online = get_rust_reader().is_available()
 
-    # Close all live positions via IPC (engine handles exchange order cancellation in live mode)
-    # 通過 IPC 平倉（live 模式下引擎同時處理交易所掛單取消）
+    cancel_orders_result: dict = {}
     close_result: dict = {}
     orphan_result: dict = {}
+    verify_result: dict = {}
     if rust_online:
+        # Phase 1 — Cancel all pending USDT linear orders via REST cancel-all
+        # (live slot, settleCoin=USDT) BEFORE close. This kills any limit /
+        # conditional / TP-SL order on the account so close-position market
+        # orders cannot race a triggering TP/SL fill.
+        # execution_authority is already revoked above, so the engine cannot
+        # place new orders during this window.
+        # 第一步：先全帳戶取消掛單。execution_authority 已撤銷，引擎此時不會下新單。
+        cancel_orders_result = core._sweep_live_orphan_orders(errors)
+        # Phase 2 — Close tracked positions via IPC.
+        # 第二步：通過 IPC 平倉 paper_state 追蹤的持倉。
         try:
             close_result = await core._ipc_command("close_all_positions", {"engine": "live"})
         except Exception as exc:
@@ -279,17 +289,38 @@ async def post_live_session_stop(
             else:
                 errors.append(f"close_positions: {exc}")
                 logger.error("IPC close_all_positions failed (live stop): %s", exc)
+        # Phase 3 — Orphan position sweep (positions on exchange but not in paper_state).
+        # 第三步：孤兒倉位清掃（交易所有但 paper_state 沒有）。
         if not close_result.get("rest_fallback_disabled"):
-            # Orphan sweep: close exchange positions not tracked in paper_state.
-            # 孤兒清掃：平掉交易所有但 paper_state 沒有的倉位。
             orphan_result = await core._sweep_live_orphan_positions(errors)
         else:
             orphan_result = {
                 "skipped": True,
                 "reason": core._LIVE_REST_FALLBACK_DISABLED_DETAIL,
             }
+        # Phase 4 — Verify Bybit account fully clean (positions=0 AND orders=0).
+        # Polls REST until clean or timeout (~30s default). Residual = surfaced
+        # in errors[] + verify field so operator sees explicit residual symbols.
+        # 第四步：輪詢 REST 確認 Bybit 帳戶完全乾淨；殘留時顯式回報 symbol 清單。
+        if not close_result.get("rest_fallback_disabled"):
+            from .strategy_ai_routes import _verify_account_clean  # noqa: PLC0415
+            verify_result = await _verify_account_clean(
+                core._get_rust_client_safe(), env_label="live",
+            )
+            if not verify_result.get("clean"):
+                errors.append(
+                    f"live_verify_residual: positions={verify_result.get('residual_positions')} "
+                    f"orders={verify_result.get('residual_orders')}"
+                )
+        else:
+            verify_result = {
+                "skipped": True,
+                "reason": core._LIVE_REST_FALLBACK_DISABLED_DETAIL,
+            }
     else:
+        cancel_orders_result = {"skipped": True, "reason": "engine_offline"}
         close_result = orphan_result = {"skipped": True, "reason": "engine_offline"}
+        verify_result = {"skipped": True, "reason": "engine_offline"}
 
     logger.warning(
         "⚠ LIVE SESSION STOPPED — close requested — errors=%s — actor=%s",
@@ -302,19 +333,23 @@ async def post_live_session_stop(
                 "error": "live_pipeline_not_authorized",
                 "message": core._LIVE_REST_FALLBACK_DISABLED_DETAIL,
                 "rest_fallback": False,
+                "cancel_orders": cancel_orders_result,
                 "close_result": close_result,
                 "orphan_sweep": orphan_result,
+                "verify": verify_result,
                 "session_authority_revoked": True,
                 "errors": errors if errors else None,
             },
         )
     return core._live_response({
-        "message": "Live session stopped — close requested / 實盤 session 已停止 — 已請求平倉",
+        "message": "Live session stopped — orders cancelled + positions closed / 實盤 session 已停止 — 掛單已取消、倉位已平",
         "source": "rust_engine",
         "rest_fallback": False,
         "reason": None,
+        "cancel_orders": cancel_orders_result,
         "close_result": close_result,
         "orphan_sweep": orphan_result,
+        "verify": verify_result,
         "errors": errors if errors else None,
         "session": {"session_state": "stopped", "session_id": "rust_engine_live"},
     })
