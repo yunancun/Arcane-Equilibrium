@@ -29,6 +29,53 @@ use super::types::{ExchangeEvent, PendingOrder};
 use crate::persistence::{AuditWriter, DualStateWriter, StateWriter};
 use crate::tick_pipeline::{EngineEvent, PipelineCommand, PipelineKind, TickPipeline};
 
+fn fill_liquidity_role(
+    is_maker: bool,
+    tif: Option<crate::order_manager::TimeInForce>,
+) -> &'static str {
+    if is_maker || matches!(tif, Some(crate::order_manager::TimeInForce::PostOnly)) {
+        "maker"
+    } else {
+        "taker"
+    }
+}
+
+fn adverse_slippage_bps(is_buy: bool, fill_price: f64, reference_price: Option<f64>) -> Option<f64> {
+    let reference_price = reference_price?;
+    if reference_price <= 0.0 || !reference_price.is_finite() || !fill_price.is_finite() {
+        return None;
+    }
+    let signed = if is_buy {
+        (fill_price - reference_price) / reference_price
+    } else {
+        (reference_price - fill_price) / reference_price
+    };
+    Some(signed * 10_000.0)
+}
+
+#[cfg(test)]
+mod execution_slippage_tests {
+    use super::*;
+
+    #[test]
+    fn adverse_slippage_is_positive_when_buy_fills_above_reference() {
+        let bps = adverse_slippage_bps(true, 100.10, Some(100.0)).unwrap();
+        assert!((bps - 10.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn adverse_slippage_is_positive_when_sell_fills_below_reference() {
+        let bps = adverse_slippage_bps(false, 99.90, Some(100.0)).unwrap();
+        assert!((bps - 10.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn postonly_fill_is_maker_even_when_exchange_flag_missing() {
+        let role = fill_liquidity_role(false, Some(crate::order_manager::TimeInForce::PostOnly));
+        assert_eq!(role, "maker");
+    }
+}
+
 /// Loop-internal mutable state owned by `run_event_consumer` between bootstrap
 /// and the select! loop. Passed by `&mut` into each arm handler so borrows are
 /// scoped per-call (avoids holding multiple mut borrows across arms).
@@ -538,6 +585,18 @@ pub(super) async fn handle_exchange_event(
             if let Some(key) = matched_key {
                 if let Some(po) = state.pending_orders.get_mut(&key) {
                     po.cum_filled_qty += exec_qty;
+                    let liquidity_role = fill_liquidity_role(exec.is_maker, matched_tif);
+                    let slippage_bps = if liquidity_role == "taker" {
+                        adverse_slippage_bps(po.is_long, exec_price, po.reference_price)
+                    } else {
+                        None
+                    };
+                    let fill_latency_ms = if exec_ts > 0 {
+                        Some(exec_ts.saturating_sub(po.sent_ts_ms))
+                    } else {
+                        None
+                    };
+                    let reference_source = po.reference_source.clone();
                     // FILL-CONTEXT-LINKAGE-1: thread signal-time context_id
                     // from PendingOrder into apply_confirmed_fill so
                     // trading.fills.entry_context_id matches
@@ -557,6 +616,12 @@ pub(super) async fn handle_exchange_event(
                         &po.context_id,
                         &po.order_link_id,
                         Some(fee_rate_used),
+                        po.reference_price,
+                        po.reference_ts_ms,
+                        reference_source.as_deref(),
+                        slippage_bps,
+                        Some(liquidity_role),
+                        fill_latency_ms,
                     );
                     snapshot_writer.force_write(&pipeline.snapshot());
 

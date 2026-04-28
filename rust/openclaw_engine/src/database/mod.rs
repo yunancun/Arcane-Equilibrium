@@ -314,6 +314,25 @@ pub enum TradingMsg {
         /// Effective taker fee rate at execution time (Bybit per-symbol).
         /// 成交時的有效 taker 費率（Bybit per-symbol）。
         fee_rate: f64,
+        /// Dispatch-time execution reference price. For taker orders this is
+        /// same-side BBO (Buy→ask, Sell→bid); fallback sources are tagged.
+        /// 送單時刻執行參考價。taker 使用同側 BBO；fallback 以 source 標記。
+        reference_price: Option<f64>,
+        /// Timestamp of the reference price in milliseconds.
+        /// 參考價時間戳（毫秒）。
+        reference_ts_ms: Option<u64>,
+        /// Reference source, e.g. "bbo_same_side" or "dispatch_last_fallback".
+        /// 參考價來源。
+        reference_source: Option<String>,
+        /// Signed adverse execution slippage in bps. Positive is worse.
+        /// 有符號 adverse execution slippage（bps），正值代表更差。
+        slippage_bps: Option<f64>,
+        /// Liquidity role of this fill: maker/taker/unknown/paper_sim.
+        /// 成交流動性角色。
+        liquidity_role: Option<String>,
+        /// Time between order registration and execution update.
+        /// 從訂單註冊到成交推送的延遲。
+        fill_latency_ms: Option<u64>,
         realized_pnl: f64,
         strategy_name: String,
         context_id: String,

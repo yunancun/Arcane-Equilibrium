@@ -187,6 +187,12 @@ fn apply_confirmed_fill_preserves_signal_context_id() {
         signal_id,
         "oc_test_1",
         None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
     );
 
     // paper_state must show the signal-time id verbatim — not the exec-time
@@ -223,6 +229,7 @@ fn apply_confirmed_fill_falls_back_when_signal_id_empty() {
 
     pipeline.apply_confirmed_fill(
         "BTCUSDT", true, 1.0, 100.0, 0.1, 2_000, "grid", "", "oc_test_2", None,
+        None, None, None, None, None, None,
     );
 
     // Fallback path recomputes with em="demo", symbol="BTCUSDT", ts_ms=2000.
@@ -273,6 +280,12 @@ fn apply_confirmed_fill_emits_exit_feature_row_on_close() {
         "ctx-demo-BTCUSDT-1000",
         "oc_open_1",
         None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
     );
     assert!(
         rx.try_recv().is_err(),
@@ -297,6 +310,12 @@ fn apply_confirmed_fill_emits_exit_feature_row_on_close() {
         "strategy_close:take_profit",
         "", // close fill: signal id not threaded; exec-time fallback OK
         "oc_close_1",
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
         None,
     );
 
@@ -339,18 +358,35 @@ fn apply_confirmed_fill_exit_feature_fail_soft_when_tx_missing() {
     pipeline.apply_confirmed_fill(
         "BTCUSDT", true, 0.1, 50_000.0, 2.75, 1_000, "ma_crossover",
         "ctx-demo-BTCUSDT-1000", "oc_open_2", Some(0.0002),
+        Some(50_001.0), Some(990), Some("bbo_same_side"), Some(-0.2), Some("taker"), Some(10),
     );
     pipeline.apply_confirmed_fill(
         "BTCUSDT", false, 0.1, 51_000.0, 2.81, 2_000,
         "strategy_close:take_profit", "", "oc_close_2", None,
+        None, None, None, None, None, None,
     );
 
     // Both Fills still flow through trading_tx (open + close).
     // 開倉與平倉 Fill 都應正常寫入 trading_tx。
     let open_fill = trx.try_recv().expect("open Fill must be enqueued");
     match open_fill {
-        crate::database::TradingMsg::Fill { fee_rate, .. } => {
+        crate::database::TradingMsg::Fill {
+            fee_rate,
+            reference_price,
+            reference_ts_ms,
+            reference_source,
+            slippage_bps,
+            liquidity_role,
+            fill_latency_ms,
+            ..
+        } => {
             assert!((fee_rate - 0.0002).abs() < 1e-12);
+            assert_eq!(reference_price, Some(50_001.0));
+            assert_eq!(reference_ts_ms, Some(990));
+            assert_eq!(reference_source.as_deref(), Some("bbo_same_side"));
+            assert_eq!(slippage_bps, Some(-0.2));
+            assert_eq!(liquidity_role.as_deref(), Some("taker"));
+            assert_eq!(fill_latency_ms, Some(10));
         }
         _ => panic!("open Fill must be enqueued"),
     }

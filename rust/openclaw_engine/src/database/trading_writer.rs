@@ -154,7 +154,7 @@ async fn flush_all(
 // 每表欄位數 — `batch_insert` 以此集中推算 chunk_rows，取代先前各表硬編碼常數。
 const SIGNAL_COLS: usize = 8;
 const INTENT_COLS: usize = 12; // includes details JSONB
-const FILL_COLS: usize = 16; // includes exit_source (V021, INFRA-PREBUILD-1 A)
+const FILL_COLS: usize = 22; // includes execution reference/slippage (V028)
 const FUNDING_SETTLEMENT_COLS: usize = 13; // includes raw JSONB
 const POSITION_COLS: usize = 9;
 const VERDICT_COLS: usize = 9; // ts + 7 + engine_mode (flattened reason + JSONB details)
@@ -285,7 +285,7 @@ async fn flush_fills(pool: &DbPool, buf: &mut Vec<TradingMsg>) {
         FILL_COLS,
         |chunk| {
             let mut qb: QueryBuilder<Postgres> = QueryBuilder::new(
-                "INSERT INTO trading.fills (ts, fill_id, order_id, symbol, side, qty, price, fee, fee_rate, realized_pnl, is_paper, strategy_name, context_id, entry_context_id, engine_mode, exit_source) "
+                "INSERT INTO trading.fills (ts, fill_id, order_id, symbol, side, qty, price, fee, fee_rate, reference_price, reference_ts_ms, reference_source, slippage_bps, liquidity_role, fill_latency_ms, realized_pnl, is_paper, strategy_name, context_id, entry_context_id, engine_mode, exit_source) "
             );
             qb.push_values(chunk.iter(), |mut b, msg| {
                 if let TradingMsg::Fill {
@@ -298,6 +298,12 @@ async fn flush_fills(pool: &DbPool, buf: &mut Vec<TradingMsg>) {
                     price,
                     fee,
                     fee_rate,
+                    reference_price,
+                    reference_ts_ms,
+                    reference_source,
+                    slippage_bps,
+                    liquidity_role,
+                    fill_latency_ms,
                     realized_pnl,
                     strategy_name,
                     context_id,
@@ -317,6 +323,12 @@ async fn flush_fills(pool: &DbPool, buf: &mut Vec<TradingMsg>) {
                     b.push_bind(sanitize_f64_or_zero(*price) as f32);
                     b.push_bind(sanitize_f64_or_zero(*fee) as f32);
                     b.push_bind(sanitize_f64_or_zero(*fee_rate) as f32);
+                    b.push_bind(reference_price.as_ref().and_then(|v| sanitize_f64(*v)));
+                    b.push_bind(reference_ts_ms.map(|v| v as i64));
+                    b.push_bind(reference_source.as_deref());
+                    b.push_bind(slippage_bps.as_ref().and_then(|v| sanitize_f64(*v)));
+                    b.push_bind(liquidity_role.as_deref());
+                    b.push_bind(fill_latency_ms.map(|v| v as i64));
                     b.push_bind(sanitize_f64_or_zero(*realized_pnl) as f32);
                     // DEPRECATED: is_paper derived from engine_mode (compat with Grafana).
                     // 已棄用：is_paper 由 engine_mode 派生（兼容 Grafana）。
@@ -666,6 +678,12 @@ mod tests {
             price: 50000.0,
             fee: 2.75,
             fee_rate: 0.00055,
+            reference_price: None,
+            reference_ts_ms: None,
+            reference_source: None,
+            slippage_bps: None,
+            liquidity_role: None,
+            fill_latency_ms: None,
             realized_pnl: 0.0,
             strategy_name: "ma".into(),
             context_id: "c1".into(),
@@ -780,6 +798,12 @@ mod tests {
                 price: 50000.0,
                 fee: 2.75,
                 fee_rate: 0.00055,
+                reference_price: None,
+                reference_ts_ms: None,
+                reference_source: None,
+                slippage_bps: None,
+                liquidity_role: None,
+                fill_latency_ms: None,
                 realized_pnl: 0.0,
                 strategy_name: "ma".into(),
                 context_id: "c1".into(),

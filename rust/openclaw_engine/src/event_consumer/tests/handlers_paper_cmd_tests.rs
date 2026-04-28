@@ -68,6 +68,9 @@ fn test_handle_reset_clears_state_and_pending() {
             order_type: "market".into(),
             time_in_force: None,
             maker_timeout_ms: None,
+            reference_price: None,
+            reference_ts_ms: None,
+            reference_source: None,
             cancel_requested_ts_ms: None,
         },
     );
