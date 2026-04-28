@@ -30,7 +30,21 @@ conf_scale = 1.0
 # confirmed (P1-11 F1). Re-enable requires PA RFC + 5m timeframe upgrade.
 # G2-06 (2026-04-26): 永久停用 — 7d 0 fills + 1m bandwidth 結構性錯配
 # 確認（P1-11 F1）。重啟需 PA RFC + 升 5m timeframe。
-active = false
+#
+# EDGE-DIAG-2 (2026-04-28): operator override of G2-06 — re-enable on demo only
+# (live stays false in strategy_params_live.toml). Rationale: ML / agent layer
+# needs *some* historical data per strategy when it comes online; a permanently
+# disabled strategy = permanent blind spot in the learning pipeline. Re-enable
+# is no-op until 5m timeframe migration or threshold tuning makes the 1m
+# bandwidth fire — but flipping active=true now means: (a) when params do get
+# tuned, no second deploy needed; (b) audit visibility for any signal that DOES
+# fire (so we can confirm whether FIX-26-DEADLOCK-1 unblocked anything at all).
+# Live remains active=false until a positive demo edge signal materializes.
+# EDGE-DIAG-2（2026-04-28）：operator 覆蓋 G2-06 — 僅 demo 重啟
+# （live 仍 false）。理由：ML / agent 上線時每個策略都需要歷史資料；永久 disable
+# = learning pipeline 永久盲區。1m bandwidth 結構性問題仍在，僅在 demo 探索
+# 路徑下保留可觀察性，不消耗 live 風險。
+active = true
 cooldown_ms = 600000
 squeeze_bw = 0.02
 expansion_bw = 0.04
@@ -91,8 +105,19 @@ maker_limit_timeout_ms = 45000
 # total_cost_bps. Audit: docs/audits/2026-04-17--g2_funding_arb_clean_edge_v2.md
 # 停用 2026-04-18：G-2 v2 判決 NEGATIVE EDGE（n=13，0/13 勝率，-36.76 bps）。
 # 待 R-02 Strategist 重評入場/退場/成本三參數配對後再啟。
+#
+# EDGE-DIAG-2 (2026-04-28): operator override — re-enable on demo only (live
+# stays false in strategy_params_live.toml). G-2 verdict was n=13 — far below
+# CLT threshold (n>=30). Verdict is statistically weak; treating it as
+# permanent kills the only funding-rate strategy slot. Demo accumulates fresh
+# data (with EDGE-DIAG-2 cost_gate min-n stratify, the cell will route to
+# exploration mode below n=30). Live re-enable only after a fresh demo edge
+# evaluation with n>=30 + post-EDGE-DIAG-2-cutoff fills shows positive shrunk_bps.
+# EDGE-DIAG-2（2026-04-28）：operator 覆蓋 — 僅 demo 重啟（live 仍 false）。
+# 原 G-2 判決 n=13 遠低於 CLT 門檻；當「永久」處理會殺掉唯一 funding-rate 策略槽。
+# Demo 重新累積資料（n<30 自動走探索路徑）；live 待 n>=30 + 新資料正 edge 才議。
 [funding_arb]
-active = false
+active = true
 cooldown_ms = 3600000
 total_cost_bps = 34.0
 expected_periods = 3.0

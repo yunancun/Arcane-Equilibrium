@@ -392,6 +392,7 @@ def compute_edge_stats(
     days_back: int = 30,
     min_samples: int = 3,
     engine_mode: str = "demo",
+    min_observation_ts: Optional[datetime] = None,
 ) -> dict[tuple[str, str], EdgeStats]:
     """
     Query fills for a specific engine_mode and compute per-(strategy, symbol) realized edge stats.
@@ -402,6 +403,16 @@ def compute_edge_stats(
         min_samples: Minimum round-trips per cell for a valid estimate. / 有效估計的最小往返數。
         engine_mode: 'demo', 'paper', or 'live'. Defaults to 'demo' to avoid paper data pollution.
                      'demo'、'paper' 或 'live'。默認 'demo' 以避免 paper 數據污染。
+        min_observation_ts: EDGE-DIAG-2 (2026-04-28) — hard floor on fill `ts`, applied
+                            on top of `days_back`. Use to exclude fills written by
+                            engine binaries containing known data-quality bugs (e.g.,
+                            P0-13 ATR scale, pre-PostOnly fee accounting). Effective
+                            cutoff = max(now-days_back, min_observation_ts).
+                            EDGE-DIAG-2（2026-04-28）— 對 fill `ts` 加硬下限，
+                            疊在 days_back 之上。用於排除已知資料品質 bug
+                            （如 P0-13 ATR scale、PostOnly 部署前的 fee 計算）
+                            時期由壞 binary 寫入的 fills。
+                            生效 cutoff = max(now-days_back, min_observation_ts)。
 
     Returns:
         Dict mapping (strategy_name, symbol) → EdgeStats.
@@ -411,7 +422,15 @@ def compute_edge_stats(
 
     conn = _get_db_conn()
     try:
-        since = datetime.now(tz=timezone.utc) - timedelta(days=days_back)
+        rolling_since = datetime.now(tz=timezone.utc) - timedelta(days=days_back)
+        # EDGE-DIAG-2: apply hard cutoff if supplied; effective since = max(rolling, hard).
+        # EDGE-DIAG-2：若提供硬下限則取兩者較晚者為實際 since。
+        if min_observation_ts is not None:
+            if min_observation_ts.tzinfo is None:
+                min_observation_ts = min_observation_ts.replace(tzinfo=timezone.utc)
+            since = max(rolling_since, min_observation_ts)
+        else:
+            since = rolling_since
         with conn.cursor() as cur:
             cur.execute(_FILLS_QUERY, {"since": since, "engine_mode": engine_mode})
             cols = [d[0] for d in cur.description]
@@ -419,7 +438,12 @@ def compute_edge_stats(
     finally:
         conn.close()
 
-    logger.info("Fetched %d %s fills since %s", len(fills), engine_mode, since.date())
+    logger.info(
+        "Fetched %d %s fills since %s (rolling=%s, min_observation=%s)",
+        len(fills), engine_mode, since.isoformat(),
+        rolling_since.isoformat(),
+        min_observation_ts.isoformat() if min_observation_ts is not None else "None",
+    )
 
     # Pair into round-trips
     records = _pair_round_trips(fills)
