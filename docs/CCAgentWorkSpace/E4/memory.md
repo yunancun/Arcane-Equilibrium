@@ -2,6 +2,39 @@
 
 ## 工作記憶
 
+### 2026-04-28 Wave B Hotfix `00db240` Linux re-regression — **E4 PASS**
+
+**對象**：commit `00db240` (V026 retention policy fn + CHECK constraint test fixture acceptance)，HEAD `16a30e5`
+
+**Verdict**: **PASS** — 兩 BLOCKERs 完全 resolved
+
+| Suite | passed | failed | baseline | delta |
+|---|---|---|---|---|
+| Rust lib (release) | **2299** | 0 | 2299 | 0 ✓ |
+| Rust daemon test | **11** | 0 | 11 | 0 ✓ |
+| Rust persistence (Linux real PG) | **2** | 0 | new (recovered 0/2) | +2 ✓ |
+| V026 idempotency (3 runs) | NOTICE-only, 0 RAISE | — | new | ✓ BLOCKER #1 RESOLVED |
+| V026 Guard test fixture | 6/6 PASS | 0 | new | ✓ |
+| Healthcheck full sweep | 32 (PASS+WARN+FAIL) | 0 FAIL | — | 1 WARN [11] pre-existing |
+
+**BLOCKER #1 RESOLVED** — V026 加 `learning.cost_edge_advisor_log_now_ms()` STABLE fn (returns `(extract(epoch from now())*1000)::bigint`) + `set_integer_now_func(replace_if_exists=>TRUE)` + `add_retention_policy(if_not_exists=>TRUE)`，3 連跑 0 RAISE 全 NOTICE skip = idempotency 完全恢復，符合 CLAUDE.md §七 規則 4。
+
+**BLOCKER #2 RESOLVED** — V026 CHECK constraint 加 `OR engine_mode LIKE 'test\_%' ESCAPE '\'`（生產 4 mode `paper/demo/live/live_demo` 不變，test fixture `test_*` 接受），Linux 真 PG persistence test 2/0 fail 通過。
+
+**Linux PG cleanup** — `helper_scripts/db/cleanup_v026_partial_state.sh` 一次性 DROP CASCADE 清 1st-apply ERROR 殘留 partial state，DROP TABLE OK + DROP FUNCTION skip（function 從未被創建，1st-apply ERROR 在 retention policy 行就 abort）= clean state 確認。
+
+**V026 artifacts verified（postgres）**：table + hypertable + STABLE function + retention policy job_id=1025 (`Retention Policy [1025]`) 全 4 項 present。
+
+**教訓**：
+1. Mac auto-skip（`OPENCLAW_TEST_PG` 未設）會漏抓 Linux real-PG 的 schema-level bug — Mac dev 須在 hotfix 前 documented limitation 「我已驗 SQL 純 fix 不影響 Rust，但 Linux PG schema 落地需 Linux E4 真驗」，**不可單方面宣布 fix**
+2. SSH 連 Linux PG 須用 `localhost` 不是 `127.0.0.1`（pg_hba.conf md5 規則差異）；passive_wait_healthcheck 預設 `127.0.0.1` 沒密碼會 connect fail，需 `OPENCLAW_DATABASE_URL='postgresql://redacted@localhost:5432/trading_ai'` 顯式覆寫
+3. 密碼含 shell metachar (`(`, `)`) 在 URI 內須 literal-quote 包外層 bash single-quote 防解析，但內部 `(` 仍可在 PG URI 解析（不需 percent-encode）
+4. TimescaleDB `add_retention_policy(BIGINT)` on `bigint` ts column 一定要先 `set_integer_now_func()` — 是 framework 慣例不是 bug，但 CLAUDE.md §七 SQL guard 規則 4 idempotency 強制兩跑通過 = 防線發揮作用，事前若 Linux 試跑就會抓到
+
+**Report**: `srv/docs/CCAgentWorkSpace/E4/workspace/reports/2026-04-28--wave_b_hotfix_linux_re_regression.md`
+
+---
+
 ### 2026-04-28 Wave B (G3-09 Phase B Wave 1 + G8-01 W2 + W3) Linux full regression `cf34e96..d1fd1cf` — **E4 FAIL**
 
 **對象**：4 commits (`31761a6` Phase B Wave 1 V026+INSERT+healthcheck split+DbSlot late-inject ~2293 LOC / `99ac0b4` G8-01-W2 CognitiveModulator 22-case / `4a5b1d6` G8-01-W3 strategist cognitive integration 7 scenarios / `d1fd1cf` cross-agent memory)
