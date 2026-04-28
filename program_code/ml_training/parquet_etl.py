@@ -59,6 +59,20 @@ EDGE_P3_FEATURE_NAMES = (
 VALID_ENGINE_MODES = ("paper", "demo", "live", "live_demo")
 
 
+def engine_mode_scope(engine_mode: str) -> tuple[str, ...]:
+    """Return DB engine_mode values to query for a requested training mode.
+
+    LiveDemo writes `engine_mode='live_demo'` even though it exercises the Live
+    pipeline. A request for `live` therefore has to include both real mainnet
+    rows and LiveDemo rows; explicit `live_demo` remains exact.
+    """
+    if engine_mode not in VALID_ENGINE_MODES:
+        raise ValueError(f"invalid engine_mode: {engine_mode!r}")
+    if engine_mode == "live":
+        return ("live", "live_demo")
+    return (engine_mode,)
+
+
 def extract_training_data(
     pg_url: Optional[str] = None,
     output_dir: str = DEFAULT_OUTPUT_DIR,
@@ -395,7 +409,7 @@ SELECT
     strategy_name
 FROM learning.decision_features
 WHERE label_net_edge_bps IS NOT NULL
-  AND engine_mode = %(engine_mode)s
+  AND engine_mode = ANY(%(engine_modes)s)
   AND (%(strategy_name)s IS NULL OR strategy_name = %(strategy_name)s)
   AND (%(symbol)s IS NULL OR symbol = %(symbol)s)
   AND ts >= now() - (%(max_age_days)s || ' days')::interval
@@ -427,7 +441,9 @@ def load_training_data(
             per call). Named `strategy_type` to match the existing
             `run_training_pipeline.PipelineConfig.strategy_type` field.
         dsn: PG DSN override; falls back to env vars.
-        engine_mode: "paper" | "demo" | "live" | "live_demo". Default "demo" per §8.2.
+        engine_mode: "paper" | "demo" | "live" | "live_demo". `live` widens
+            to `('live','live_demo')`; explicit `live_demo` remains exact.
+            Default "demo" per §8.2.
         max_age_days: trailing-window size (90d default, covers 12 weeks
             of fills — enough for LGBM quantile training per strategy).
 
@@ -443,13 +459,14 @@ def load_training_data(
     except ImportError as e:
         raise RuntimeError("numpy not installed — pip install numpy") from e
 
+    engine_modes = list(engine_mode_scope(engine_mode))
     conn = _get_pg_conn(dsn)
     try:
         with conn.cursor() as cur:
             cur.execute(
                 _LOAD_TRAINING_DATA_SQL,
                 {
-                    "engine_mode": engine_mode,
+                    "engine_modes": engine_modes,
                     "strategy_name": strategy_type,
                     "symbol": symbol,
                     "max_age_days": max_age_days,
@@ -462,8 +479,8 @@ def load_training_data(
     feature_names = list(EDGE_P3_FEATURE_NAMES)
     if not rows:
         logger.info(
-            "load_training_data: 0 labeled rows (engine_mode=%s strategy=%s symbol=%s)",
-            engine_mode, strategy_type, symbol,
+            "load_training_data: 0 labeled rows (engine_mode=%s scope=%s strategy=%s symbol=%s)",
+            engine_mode, engine_modes, strategy_type, symbol,
         )
         empty_f = np.empty((0, len(feature_names)), dtype=np.float32)
         empty_y = np.empty((0,), dtype=np.float32)
@@ -540,8 +557,11 @@ def export_decision_features_parquet(
         assert _DATE_RE.match(start_str) and _DATE_RE.match(end_str), "date format violation"
 
         # SEC-B02: engine_mode constrained to literal set; no injection surface.
-        if engine_mode not in VALID_ENGINE_MODES:
+        try:
+            engine_modes = engine_mode_scope(engine_mode)
+        except ValueError:
             return {"success": False, "error": f"invalid engine_mode: {engine_mode!r}"}
+        engine_mode_filter = ", ".join(f"'{m}'" for m in engine_modes)
 
         conn = duckdb.connect()
         conn.execute("INSTALL postgres; LOAD postgres;")
@@ -554,7 +574,7 @@ def export_decision_features_parquet(
         query = f"""
             COPY (
                 SELECT * FROM pg.learning.decision_features
-                WHERE engine_mode = '{engine_mode}'
+                WHERE engine_mode IN ({engine_mode_filter})
                   AND ts >= '{start_str}' AND ts < '{end_str}'
                   {label_filter}
                 ORDER BY ts

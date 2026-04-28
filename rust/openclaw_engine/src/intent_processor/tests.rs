@@ -635,6 +635,46 @@ fn test_cost_gate_moderate_cold_start_allows() {
     );
 }
 
+#[test]
+fn test_fee_rate_staleness_rejects_cold_boot_account_manager() {
+    let mut proc = IntentProcessor::new();
+    let acct = std::sync::Arc::new(crate::account_manager::AccountManager::new());
+    proc.set_account_manager(acct);
+
+    let reason = proc
+        .fee_rate_staleness_rejection(1_000)
+        .expect("never-refreshed account manager must fail closed");
+
+    assert!(reason.starts_with("cost_gate: fee rates unavailable"));
+}
+
+#[test]
+fn test_fee_rate_staleness_rejects_after_two_hours() {
+    let mut proc = IntentProcessor::new();
+    let acct = std::sync::Arc::new(crate::account_manager::AccountManager::new());
+    acct.set_last_fee_refresh_ms_for_test(1_000);
+    proc.set_account_manager(acct);
+
+    let now = 1_000 + MAX_FEE_RATE_STALENESS_MS + 1;
+    let reason = proc
+        .fee_rate_staleness_rejection(now)
+        .expect("stale fee rates must fail closed");
+
+    assert!(reason.contains("fee rates stale"));
+}
+
+#[test]
+fn test_fee_rate_staleness_allows_fresh_rates() {
+    let mut proc = IntentProcessor::new();
+    let acct = std::sync::Arc::new(crate::account_manager::AccountManager::new());
+    acct.set_last_fee_refresh_ms_for_test(1_000);
+    proc.set_account_manager(acct);
+
+    let now = 1_000 + MAX_FEE_RATE_STALENESS_MS;
+
+    assert!(proc.fee_rate_staleness_rejection(now).is_none());
+}
+
 // ── EDGE-DIAG-2 (2026-04-28) low-sample exploration branch ──
 // EDGE-DIAG-2（2026-04-28）：低樣本探索分支
 

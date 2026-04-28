@@ -229,6 +229,10 @@ const DEFAULT_MAKER_FEE_RATE: f64 = 0.0002;
 /// 從 `risk_config*.toml` 熱重載 tier 表。
 pub(crate) const DEFAULT_SLIPPAGE_RATE: f64 = 0.0005;
 
+/// Maximum age for API-fetched fee rates before exchange cost gates fail closed.
+/// API 費率最大可接受年齡；超過後 exchange 成本門 fail-closed。
+pub(crate) const MAX_FEE_RATE_STALENESS_MS: u64 = 2 * 60 * 60 * 1000;
+
 /// G7-07: Look up slippage using the live `SlippageConfig` (TOML-backed).
 /// Pre-G7-07 callers used a free `lookup_slippage(volume_24h)` reading the
 /// hardcoded `SLIPPAGE_TIERS`. Now the tier table lives in
@@ -764,6 +768,31 @@ impl IntentProcessor {
         am: std::sync::Arc<crate::account_manager::AccountManager>,
     ) {
         self.account_manager = Some(am);
+    }
+
+    pub(crate) fn fee_rate_staleness_rejection(&self, now_ms: u64) -> Option<String> {
+        let am = self.account_manager.as_ref()?;
+        let last = am.last_fee_refresh_ms();
+        if last == 0 {
+            return Some("cost_gate: fee rates unavailable (cold boot, fail-closed)".to_string());
+        }
+        let now = if now_ms > 0 {
+            now_ms
+        } else {
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis() as u64
+        };
+        let age_ms = now.saturating_sub(last);
+        if age_ms > MAX_FEE_RATE_STALENESS_MS {
+            Some(format!(
+                "cost_gate: fee rates stale age_ms={} > max_ms={} (fail-closed)",
+                age_ms, MAX_FEE_RATE_STALENESS_MS
+            ))
+        } else {
+            None
+        }
     }
 
     /// EDGE-P3-1 A4: Wire the per-engine EdgePredictorStore. None → gate skipped.

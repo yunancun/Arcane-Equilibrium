@@ -242,7 +242,40 @@ def test_export_accepts_live_demo_engine_mode(monkeypatch):
     assert result["success"] is True
     assert result["engine_mode"] == "live_demo"
     assert "decision_features_live_demo_" in result["output_path"]
-    assert any("engine_mode = 'live_demo'" in q for q in fake.queries)
+    assert any("engine_mode IN ('live_demo')" in q for q in fake.queries)
+
+
+def test_export_live_engine_mode_includes_live_demo(monkeypatch):
+    """A live export includes LiveDemo rows because they exercise the Live pipeline.
+    live 匯出需納入 LiveDemo 行，因其走 Live pipeline。"""
+    import program_code.ml_training.parquet_etl as mod
+
+    class _FakeConn:
+        def __init__(self):
+            self.queries: list[str] = []
+
+        def execute(self, query):
+            self.queries.append(str(query))
+            return self
+
+        def fetchone(self):
+            return [0]
+
+        def close(self):
+            pass
+
+    fake = _FakeConn()
+    monkeypatch.setattr(duckdb, "connect", lambda: fake)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        result = mod.export_decision_features_parquet(
+            pg_url="postgresql://user:pass@localhost/openclaw",
+            output_dir=tmp,
+            engine_mode="live",
+        )
+
+    assert result["success"] is True
+    assert any("engine_mode IN ('live', 'live_demo')" in q for q in fake.queries)
 
 
 def test_load_training_data_rejects_without_psycopg2(monkeypatch):
@@ -297,6 +330,37 @@ def test_load_training_data_empty_returns_canonical_shape(monkeypatch):
     assert labels.dtype == np.float32
     assert timestamps.dtype == np.int64
     assert names == list(mod.EDGE_P3_FEATURE_NAMES)
+
+
+def test_load_training_data_live_scope_params_include_live_demo(monkeypatch):
+    """`engine_mode=live` must query both live and live_demo rows.
+    `engine_mode=live` 必須同時查 live 與 live_demo。"""
+    pytest.importorskip("numpy")
+    import program_code.ml_training.parquet_etl as mod
+
+    execute_params: list[dict] = []
+
+    class _FakeCursor:
+        def __enter__(self):
+            return self
+        def __exit__(self, *a):
+            return False
+        def execute(self, _sql, params):
+            execute_params.append(params)
+        def fetchall(self):
+            return []
+
+    class _FakeConn:
+        def cursor(self):
+            return _FakeCursor()
+        def close(self):
+            pass
+
+    monkeypatch.setattr(mod, "_get_pg_conn", lambda dsn: _FakeConn())
+
+    mod.load_training_data(engine_mode="live")
+
+    assert execute_params[0]["engine_modes"] == ["live", "live_demo"]
 
 
 def test_load_training_data_expands_jsonb(monkeypatch):

@@ -44,6 +44,22 @@ EXCLUDED_TAG_PREFIXES = ("orphan_close:", "adopted_close:", "shadow_fill:")
 # 過期標籤告警默認天數（§8.2 · 7 日）
 DEFAULT_STALE_DAYS = 7
 
+VALID_ENGINE_MODES = ("paper", "demo", "live", "live_demo")
+
+
+def engine_mode_scope(engine_mode: str) -> tuple[str, ...]:
+    """Return DB engine_mode values to backfill for a requested mode.
+
+    LiveDemo rows are emitted by the Live pipeline when it is bound to Bybit's
+    demo endpoint. A request for `live` must therefore include `live_demo` or
+    the labeler silently starves the Live training path.
+    """
+    if engine_mode not in VALID_ENGINE_MODES:
+        raise ValueError(f"invalid engine_mode: {engine_mode!r}")
+    if engine_mode == "live":
+        return ("live", "live_demo")
+    return (engine_mode,)
+
 
 @dataclass
 class BackfillResult:
@@ -126,7 +142,7 @@ WITH entries AS (
     SELECT l.context_id, l.strategy_name, l.ts AS entry_ts
     FROM learning.decision_features l
     WHERE l.label_filled_at IS NULL
-      AND l.engine_mode = %(engine_mode)s
+      AND l.engine_mode = ANY(%(engine_modes)s)
       AND EXISTS (
           SELECT 1 FROM trading.fills f
           WHERE f.entry_context_id = l.context_id
@@ -243,7 +259,7 @@ WITH excluded_entries AS (
     FROM learning.decision_features l
     JOIN trading.fills f ON f.entry_context_id = l.context_id
     WHERE l.label_filled_at IS NULL
-      AND l.engine_mode = %(engine_mode)s
+      AND l.engine_mode = ANY(%(engine_modes)s)
       AND f.strategy_name ~ '^(orphan_close:|adopted_close:|shadow_fill:)'
       -- F4-2: audit rows excluded (defence-in-depth; audit context_ids never
       -- match a real decision_features row, but filter explicitly).
@@ -273,14 +289,14 @@ def backfill_labels(
 
     Args:
         pg_url:      DSN override (else env vars / 優先環境變量)
-        engine_mode: 'paper' | 'demo' | 'live'
+        engine_mode: 'paper' | 'demo' | 'live' | 'live_demo'. `live` widens to
+            `('live','live_demo')`; explicit `live_demo` remains exact.
         batch_limit: max rows per pass (two passes: included + excluded)
         dry_run:     if True, ROLLBACK instead of COMMIT
 
     Returns BackfillResult summary.
     """
-    if engine_mode not in ("paper", "demo", "live", "live_demo"):
-        raise ValueError(f"invalid engine_mode: {engine_mode!r}")
+    engine_modes = list(engine_mode_scope(engine_mode))
 
     result = BackfillResult()
 
@@ -290,7 +306,7 @@ def backfill_labels(
             # Pass 1: included (with labels)
             cur.execute(
                 _BACKFILL_INCLUDED_SQL,
-                {"engine_mode": engine_mode, "batch_limit": batch_limit},
+                {"engine_modes": engine_modes, "batch_limit": batch_limit},
             )
             included_rows = cur.fetchall()
             for _ctx, strat, split_flag in included_rows:
@@ -303,7 +319,7 @@ def backfill_labels(
             # Pass 2: excluded (mark tried, keep label NULL)
             cur.execute(
                 _BACKFILL_EXCLUDED_SQL,
-                {"engine_mode": engine_mode, "batch_limit": batch_limit},
+                {"engine_modes": engine_modes, "batch_limit": batch_limit},
             )
             excluded_rows = cur.fetchall()
             result.excluded_count = len(excluded_rows)
@@ -346,7 +362,7 @@ SELECT engine_mode,
 FROM learning.decision_features
 WHERE label_filled_at IS NULL
   AND ts < now() - (%(max_age_days)s || ' days')::interval
-  AND (%(engine_mode)s IS NULL OR engine_mode = %(engine_mode)s)
+  AND (%(engine_mode_all)s OR engine_mode = ANY(%(engine_modes)s))
 GROUP BY engine_mode, strategy_name
 ORDER BY stale_rows DESC
 """
@@ -362,12 +378,17 @@ def check_stale_labels(
 
     Returns list of {engine_mode, strategy_name, stale_rows, oldest_ts, newest_ts}.
     """
+    engine_modes = list(engine_mode_scope(engine_mode)) if engine_mode is not None else []
     conn = _get_conn(pg_url)
     try:
         with conn.cursor() as cur:
             cur.execute(
                 _STALE_LABELS_SQL,
-                {"max_age_days": max_age_days, "engine_mode": engine_mode},
+                {
+                    "max_age_days": max_age_days,
+                    "engine_mode_all": engine_mode is None,
+                    "engine_modes": engine_modes,
+                },
             )
             rows = cur.fetchall()
     finally:

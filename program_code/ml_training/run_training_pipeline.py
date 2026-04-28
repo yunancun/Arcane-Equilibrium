@@ -208,12 +208,13 @@ def _pooled_symbol_breakdown(
     """
     if config.dry_run:
         return []
-    from program_code.ml_training.parquet_etl import _get_pg_conn
+    from program_code.ml_training.parquet_etl import _get_pg_conn, engine_mode_scope
+    engine_modes = list(engine_mode_scope(engine_mode))
     sql = """
     SELECT symbol, COUNT(*) AS labeled
     FROM learning.decision_features
     WHERE label_net_edge_bps IS NOT NULL
-      AND engine_mode = %(engine_mode)s
+      AND engine_mode = ANY(%(engine_modes)s)
       AND (%(strategy_name)s IS NULL OR strategy_name = %(strategy_name)s)
       AND ts >= now() - (%(max_age_days)s || ' days')::interval
     GROUP BY symbol
@@ -223,7 +224,7 @@ def _pooled_symbol_breakdown(
     try:
         with conn.cursor() as cur:
             cur.execute(sql, {
-                "engine_mode": engine_mode,
+                "engine_modes": engine_modes,
                 "strategy_name": config.strategy_type,
                 "max_age_days": max_age_days,
             })

@@ -12,6 +12,13 @@
 use super::PendingOrder;
 use tracing::{info, warn};
 
+/// After a PostOnly entry partially fills, do not let the remaining stale quote
+/// sit for the full maker timeout. Give it a short grace window, then the
+/// existing sweep cancels by orderLinkId and the strategy can re-evaluate.
+/// PostOnly entry 部分成交後，不再讓剩餘掛單等完整 maker timeout；
+/// 給短暫 grace，之後沿用 sweep 取消並讓策略重新評估。
+pub(crate) const PARTIAL_FILL_REMAINDER_GRACE_MS: u64 = 5_000;
+
 /// EDGE-P2-3 Phase 1B-3.2: Sweep classification for a pending order at `elapsed_ms`.
 /// Pure function so the Market vs PostOnly branching is unit-testable.
 /// EDGE-P2-3 Phase 1B-3.2：pending order 超時掃描的純函數分類器，便於單元測試。
@@ -43,6 +50,26 @@ pub(crate) fn classify_pending_sweep(po: &PendingOrder, elapsed_ms: u64) -> Pend
     } else {
         PendingSweepAction::Keep
     }
+}
+
+pub(crate) fn tighten_postonly_entry_after_partial(po: &mut PendingOrder, exec_ts_ms: u64) -> bool {
+    if po.is_close
+        || po.time_in_force != Some(crate::order_manager::TimeInForce::PostOnly)
+        || po.cum_filled_qty <= 0.0
+        || po.cum_filled_qty >= po.qty * 0.999
+    {
+        return false;
+    }
+
+    po.maker_timeout_ms = Some(
+        po.maker_timeout_ms
+            .unwrap_or(PARTIAL_FILL_REMAINDER_GRACE_MS)
+            .min(PARTIAL_FILL_REMAINDER_GRACE_MS),
+    );
+    if exec_ts_ms > 0 {
+        po.sent_ts_ms = exec_ts_ms;
+    }
+    true
 }
 
 /// EDGE-P2-3 Phase 1B-3.2: Non-blocking REST cancel for a timed-out PostOnly
@@ -152,10 +179,7 @@ mod tests {
         // 0s: freshly submitted, nothing to do.
         assert_eq!(classify_pending_sweep(&po, 0), PendingSweepAction::Keep);
         // 5s exact: boundary — legacy condition is `elapsed > 5000`, so 5000 still keeps.
-        assert_eq!(
-            classify_pending_sweep(&po, 5_000),
-            PendingSweepAction::Keep
-        );
+        assert_eq!(classify_pending_sweep(&po, 5_000), PendingSweepAction::Keep);
     }
 
     #[test]
@@ -265,6 +289,48 @@ mod tests {
             classify_pending_sweep(&po_zero, 1),
             PendingSweepAction::MakerTimeoutCancel
         );
+    }
+
+    #[test]
+    fn test_tighten_postonly_entry_after_partial_sets_short_grace() {
+        let mut po = make_postonly_pending(Some(45_000));
+        po.qty = 1.0;
+        po.cum_filled_qty = 0.25;
+
+        assert!(tighten_postonly_entry_after_partial(&mut po, 12_345));
+        assert_eq!(po.maker_timeout_ms, Some(PARTIAL_FILL_REMAINDER_GRACE_MS));
+        assert_eq!(po.sent_ts_ms, 12_345);
+    }
+
+    #[test]
+    fn test_tighten_postonly_after_partial_does_not_extend_shorter_timeout() {
+        let mut po = make_postonly_pending(Some(2_000));
+        po.qty = 1.0;
+        po.cum_filled_qty = 0.25;
+
+        assert!(tighten_postonly_entry_after_partial(&mut po, 12_345));
+        assert_eq!(po.maker_timeout_ms, Some(2_000));
+    }
+
+    #[test]
+    fn test_tighten_postonly_after_partial_skips_close_orders() {
+        let mut po = make_postonly_pending(Some(45_000));
+        po.qty = 1.0;
+        po.cum_filled_qty = 0.25;
+        po.is_close = true;
+
+        assert!(!tighten_postonly_entry_after_partial(&mut po, 12_345));
+        assert_eq!(po.maker_timeout_ms, Some(45_000));
+    }
+
+    #[test]
+    fn test_tighten_postonly_after_partial_skips_fully_filled() {
+        let mut po = make_postonly_pending(Some(45_000));
+        po.qty = 1.0;
+        po.cum_filled_qty = 1.0;
+
+        assert!(!tighten_postonly_entry_after_partial(&mut po, 12_345));
+        assert_eq!(po.maker_timeout_ms, Some(45_000));
     }
 
     #[test]

@@ -172,6 +172,12 @@ impl AccountManager {
             .load(std::sync::atomic::Ordering::Relaxed)
     }
 
+    #[cfg(test)]
+    pub(crate) fn set_last_fee_refresh_ms_for_test(&self, ts_ms: u64) {
+        self.last_fee_refresh_ms
+            .store(ts_ms, std::sync::atomic::Ordering::Relaxed);
+    }
+
     // -----------------------------------------------------------------------
     // Wallet balance / 錢包餘額
     // -----------------------------------------------------------------------
