@@ -1117,6 +1117,27 @@ impl IntentProcessor {
         self.fee_rate_for_tif(symbol, intent.time_in_force)
     }
 
+    /// Estimate slippage for cost gates. PostOnly maker orders rest on the book,
+    /// so do not add the taker-style turnover slippage tier on top of maker
+    /// fees; maker execution quality is tracked separately by MakerKpi.
+    /// 成本門滑點估計。PostOnly maker 掛單不再疊加 taker-style turnover 滑點；
+    /// maker 執作品質由 MakerKpi 另行監控。
+    pub(crate) fn slippage_rate_for_intent(&self, intent: &OrderIntent, volume_24h: f64) -> f64 {
+        self.slippage_rate_for_tif(intent.time_in_force, volume_24h)
+    }
+
+    pub(crate) fn slippage_rate_for_tif(
+        &self,
+        tif: Option<crate::order_manager::TimeInForce>,
+        volume_24h: f64,
+    ) -> f64 {
+        if matches!(tif, Some(crate::order_manager::TimeInForce::PostOnly)) {
+            0.0
+        } else {
+            lookup_slippage(&self.risk_config.slippage, volume_24h)
+        }
+    }
+
     /// Pick maker vs taker fee from a raw TimeInForce. Used on the fill path
     /// (`event_consumer/loop_handlers.rs`) where only `&PendingOrder` is
     /// available, not `&OrderIntent`. `None` falls back to taker: a Bybit Fill

@@ -750,6 +750,36 @@ fn test_cost_gate_live_low_sample_negative_still_fails_closed() {
 }
 
 #[test]
+fn test_cost_gate_live_postonly_cost_excludes_taker_slippage() {
+    let mut proc = IntentProcessor::new();
+    let json = r#"{"grid_trading::BTCUSDT": {"shrunk_bps": 10.0, "win_rate": 1.0, "n": 100, "std_bps": 2.0}}"#;
+    let estimates = crate::edge_estimates::EdgeEstimates::load_from_str(json).unwrap();
+    proc.set_edge_estimates(estimates);
+
+    let postonly_cost = proc.cost_gate_live_with_slippage(
+        "grid_trading",
+        "BTCUSDT",
+        0.0002, // maker fee
+        0.0,    // PostOnly maker path: no taker-style slippage tier
+    );
+    let taker_slippage_cost = proc.cost_gate_live_with_slippage(
+        "grid_trading",
+        "BTCUSDT",
+        0.00055,
+        0.0030,
+    );
+
+    assert!(
+        postonly_cost.is_none(),
+        "10 bps edge should pass maker-only cost"
+    );
+    assert!(
+        taker_slippage_cost.is_some(),
+        "same edge should fail when taker slippage is included"
+    );
+}
+
+#[test]
 fn test_cost_gate_moderate_high_sample_negative_still_blocks() {
     // EDGE-DIAG-2 regression guard for existing behavior: a robust negative
     // estimate (n >> 30) keeps blocking — operator's "demo loose" rule is
@@ -1818,6 +1848,28 @@ mod predictor_wiring_tests {
         intent.time_in_force = Some(TimeInForce::GTC);
         let rate = proc.fee_rate_for_intent(&intent.symbol, &intent);
         assert!((rate - 0.00055).abs() < 1e-12);
+    }
+
+    #[test]
+    fn test_slippage_rate_for_intent_postonly_is_zero() {
+        use crate::order_manager::TimeInForce;
+        let proc = IntentProcessor::new();
+        let mut intent = super::make_intent("BTCUSDT", true);
+        intent.time_in_force = Some(TimeInForce::PostOnly);
+
+        let slippage = proc.slippage_rate_for_intent(&intent, 0.0);
+
+        assert_eq!(slippage, 0.0);
+    }
+
+    #[test]
+    fn test_slippage_rate_for_intent_market_uses_tier() {
+        let proc = IntentProcessor::new();
+        let intent = super::make_intent("BTCUSDT", true);
+
+        let slippage = proc.slippage_rate_for_intent(&intent, 2_000_000_000.0);
+
+        assert_eq!(slippage, 0.0001);
     }
 
     // ── FIX-FEE-POSTONLY-1 (G7-09): fee_rate_for_tif fill-path helper ──
