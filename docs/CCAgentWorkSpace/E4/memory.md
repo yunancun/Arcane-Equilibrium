@@ -928,3 +928,23 @@ ssh trade-core "cd ~/BybitOpenClaw/srv && python3 helper_scripts/db/passive_wait
 - 新增 3 案例 (Case A env unset slot=None IPC=Uninitialized / B env=1 risk=false slot=Some IPC=Disabled / C env=1 risk=true slot=Some IPC=OK)；env mutex 序列化避 race。
 - Mac --release: test_cost_edge_advisor_daemon 6 → 9 cases 兩遍同綠 (2.10s/2.09s)；lib baseline 2290/0 不變。
 - 教訓：bin-only fn 的 spawn-decision integration test 需 wrapper-equivalent 重現策略，而非真的呼叫 wrapper（後者需 wrapper 升 pub 或測試移到 src/）。
+
+## 2026-04-28 · WAVE-E Linux full regression — `decf712..00aa18a` 7 commits (PASS)
+
+- 任務：Wave E + E' 純 doc + test fix + small refactor，Mac 已驗，Linux 對齊驗收。
+- HEAD synced `16a30e5..00aa18a` ff-only (no rebuild needed — 0 trade impact).
+- Rust release (Linux real PG): lib **2299/0** + daemon **11/0** + persistence **2/0** baseline 全綠 0 delta；cargo cache hit 各 <2.5s。
+- SINGLETON-POLLUTION fix Linux 35→0 reproducibility CONFIRMED：
+  - isolated `test_h_state_query_handler.py` **90/90** (2 runs same green)
+  - same-session `test_api_contract + test_h_state_query_handler` **108/108**
+  - CPython sys.modules semantic 跨平台一致預測成立
+- W3+W2+W1+LOSSES 4 檔合計 **48/48** PASS。
+- Healthcheck **32 PASS / 0 FAIL / 2 WARN**（[11] counterfactual ETA 0d、[23] orders_fills 1/20 single-pair anomaly，均 pre-existing non-blocking）。
+- 全 control_api_v1 baseline: Linux **3075 passed / 35 failed**（vs Mac 38 fail）— Linux 比 Mac 少 3 fail（h_state pollution edge 在 Linux 表現更穩，**非 regression**）。35 fail 全 PA RFC 已標 pre-existing sibling-pollution family（17 executor_shadow_toggle + 18 strategist_promote）。
+- 教訓：
+  - Linux 環境 `~/BybitOpenClaw/` 是 srv subdir 的父目錄；git repo 在 `~/BybitOpenClaw/srv/`。
+  - Linux pytest 用 `/usr/bin/python3` (Python 3.12 + pytest 9.0.2)，`venvs/` 只有 README + rust_build。
+  - Healthcheck `passive_wait_healthcheck/runner.py` 用 relative import → 必 `python3 -m helper_scripts.db.passive_wait_healthcheck.runner` 不能 `python3 path/to/runner.py`。
+  - Linux ssh non-interactive PATH 不含 cargo → 必 `source ~/.cargo/env` 才能跑 cargo。
+  - Mac↔Linux 全量 baseline 差異 3 不算 regression — pollution 邊界跨 OS 微差正常，看絕對 fail 名單同源即可。
+
