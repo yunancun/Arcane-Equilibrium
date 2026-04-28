@@ -1,6 +1,8 @@
 # OpenClaw TODO — 工作清單（v3 · 單一時間軸版）
 
-**最後更新**：2026-04-28 CEST 深夜（**🎉 Wave F COMPLETE — engine `--rebuild` deploy + SINGLETON sibling fix（executor + promote）**：3 commits `739af3c..22e8482` pushed origin/main；**(3) SINGLETON sibling fix 結案** commit `cff6959`：35→0 fail (executor 17 + promote 18) / Mac 38→3 (phase2 Mac-only out-of-scope) / **Linux 35→0 fail / 3098 passed!**（baseline 比 Mac 還乾淨）/ 同 polluter NOVEL 不同機制（FastAPI Depends route-build-time freeze ≠ W3 sys.modules attr precedence）/ Option A only test fixture importlib.reload routes / 0 production diff / E2 retroactive PASS_WITH_NITS / 新 memory rule `feedback_fastapi_depends_reload_freeze.md` 防未來新測 file 重蹈；**(2) Engine deploy** Linux git pull `00aa18a..739af3c` + `restart_all.sh --rebuild` engine PID **3579476** binary mtime **04:13** paper+demo+live alive / healthcheck [30] PASS dormant by design（含 Wave A+B+E 全工 + V026 hotfix + cost_edge_advisor_boot split + SINGLETON fix 全進 runtime，但 Phase B observation period 暫不啟用）/ **operator decision (C)：cost_edge.enabled=true flip + OPENCLAW_COST_EDGE_ADVISOR=1 env 暫不啟用，等 Phase C Wave 1 一起 bundled deploy**；2 ticket 結案；Sign-off `docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-28--wave_f_partial_signoff.md`）
+**最後更新**：2026-04-28 CEST 深夜（**🎉 Wave G COMPLETE — 4-way file size cleanup splits**：5 commits `8a5973f..3b0a0d7` pushed origin/main；**§九 1200 hard cap active violations 全清**（main.rs 1210→1158 +42 headroom）；4+1 ticket 結案：MAIN-RS-PRE-EXISTING-CLEANUP P2 (`54e468a`) / G3-08-FUP-ANALYST-SPLIT P2 (`68c31af`) / G3-08-FUP-HSQ-SPLIT P2 (`72e12e8`) / G3-09-DAEMON-TEST-SPLIT P3 (`6a2145e`) + G8-01-W2-FILESIZE-WATCH P4 (HSQ split 順帶解 859→452)；4 並行 PA+E1 合一 + 4 並行 E2 review (1 PASS 0 finding + 3 PASS_WITH_NIT)；**Linux full regression cargo lib 2308/0** + 3 daemon test split **11/0** (proofs 5 + dual_safeguard 3 + spawn_decision 3, sum unchanged) + persistence Linux PG **2/0** + HSQ same-session **forward 108/108 + reverse 108/108** (SINGLETON post-split integrity CRITICAL invariant verified) + ANALYST 22/22 + W1+W2+W3+LOSSES+SINGLETON 83/83 + **全 control_api_v1 baseline 3117/0 二輪 non-flaky** (Wave F-3 baseline 3098 + edge-diag-2 +19) / healthcheck 25 PASS / 2 FAIL ([12]+[27] both pre-existing baseline noise per E4)；0 P0/P1 regression / 0 hard boundary 觸碰；0 新 FUP filed (純 cleanup wave)；Sign-off `docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-28--wave_g_signoff.md`）
+
+**前次更新**：2026-04-28 CEST 深夜（Wave F COMPLETE — engine `--rebuild` deploy + SINGLETON sibling fix executor+promote，3 commits `739af3c..22e8482`，operator decision (C) defer Phase B observation；Sign-off `docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-28--wave_f_partial_signoff.md`）
 
 **前次更新**：2026-04-28 CEST 深夜（Wave E COMPLETE — cost_edge_advisor_boot split + Phase C PA RFC + SINGLETON-POLLUTION fix，8 commits `decf712..3788498`，Sign-off `docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-28--wave_e_signoff.md`）
 
@@ -25,7 +27,31 @@
 
 ---
 
-## 🎯 此刻該做什麼（2026-04-28 CEST 深夜 · 🎉 Wave F COMPLETE · 等 Phase C Wave 1 派發 + Phase B observation 一起 bundled deploy）
+## 🎯 此刻該做什麼（2026-04-28 CEST 深夜 · 🎉 Wave G COMPLETE · §九 hard cap active violations 全清 · 等 Phase C / Phase B observation bundled）
+
+**Wave G 結案**（5 commits `8a5973f..3b0a0d7`）：
+- ✅ **MAIN-RS-PRE-EXISTING-CLEANUP P2** (`54e468a`) — main.rs 1210→1158 + scanner_init.rs 170 + §九 hard cap +42 headroom
+- ✅ **G3-08-FUP-ANALYST-SPLIT P2** (`68c31af`) — analyst_agent 944→781 + 2 sibling (records 142 + pattern_claims 264)
+- ✅ **G3-08-FUP-HSQ-SPLIT P2** (`72e12e8`) — h_state_query_handler 859→452 + collectors 547 (SINGLETON 整合)
+- ✅ **G3-09-DAEMON-TEST-SPLIT P3** (`6a2145e`) — daemon test 1159→3 file (534+380+485)
+- ✅ Linux full regression cargo 2308/0 + daemon split 11/0 + persistence 2/0 + HSQ same-session forward+reverse 108/108 + 全 baseline 3117/0 二輪 non-flaky
+
+**§九 hard cap active violations**：**0** ✅（previously: main.rs 1210）
+
+**NOW ACTIONABLE**（時間驅動 / 等候 / 餘工）：
+1. **G3-09 Phase C Wave 1 impl** — operator 「等時間長一些再看」；PA RFC `90d1a2e` ready
+2. **Phase B observation period** — bundled with Phase C launch (operator decision (C))
+3. **8 backlog tickets** 等下次 maintenance wave：CLAUDE-MD-SECTION-9-HARD-CAP-EXCEPTION-CLAUSE P3 / SINGLETON-POLLUTION-PHASE2-ROUTES P4 (Mac-only) / G8-01-FUP-REGRET-DREAM-DEFERRED P3 / G3-08-FUP-MAF-SPLIT-CLEANUP P3 / G3-09-FUP-CASE-D-H5-WAIT P3 / G3-09-PA-DOCSTRING-CLARIFY P4 / G3-08-FUP-STRATEGIST-DELEGATOR-SLIM P3 / G3-08-FUP-EXECUTOR-EARLY-RETURN-LOW1 P4
+
+**Active warn (>800)** 餘 strategist_agent.py 933 / strategy_wiring.py 1060 / main_boot_tasks.rs 816 — 下次 wave 候選
+
+**Time-driven**: G1-04-FUP-FINAL-COMPUTE P1 (~05-02 cutoff) — G7-09 fix 7d post-deploy R:R baseline
+
+詳：[Wave G Sign-off](docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-28--wave_g_signoff.md)
+
+---
+
+## 🎯 上一波（保留供查 · 2026-04-28 CEST 深夜 · 🎉 Wave F COMPLETE · 等 Phase C Wave 1 派發 + Phase B observation 一起 bundled deploy）
 
 **Wave F 結案**（3 commits `739af3c..22e8482`）：
 - ✅ **(3) SINGLETON sibling fix** (commit `cff6959`) — 35→0 fail (executor_shadow_toggle 17 + strategist_promote 18) / FastAPI Depends route-build-time freeze NOVEL 機制 / Option A only `importlib.reload(route_module)` / Mac 38→3 (phase2 Mac-only) / **Linux 35→0 fail 3098 passed**
