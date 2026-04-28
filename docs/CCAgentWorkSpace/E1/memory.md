@@ -1521,3 +1521,41 @@ finally:
 - **教訓 — singleton 表更新留 follow-up 而非自做**：CLAUDE.md §九 `CostEdgeAdvisorDbSlot` 出處需從 `main_boot_tasks.rs` 改為 `cost_edge_advisor_boot.rs`。本次刻意 **不** 修 CLAUDE.md，避 scope creep；已在報告 §5 + §7 標示為 PM commit 時順手更新。
 
 **驗收結果摘要**：build + lib + daemon + persistence 全綠 · main.rs 仍 1210（10 LOC 超）需 PM 決定 follow-up · main_boot_tasks.rs 達 PA acceptable target ≤865（816）但仍 16 LOC 超 800 警告線。
+
+---
+
+## 2026-04-28 · STRATEGIST-SINGLETON-POLLUTION P3 fix（Option B + A combined）
+
+**派發**：PM → E1（worktree=main repo working tree）
+**RFC**：PA `2026-04-28--strategist_singleton_pollution_investigation.md`
+**Scope**：2 file，~100 line diff（Option B 2 處 production + Option A 1 處 test fixture）
+**Verdict**：35 → 0 fail in test_h_state_query_handler.py · W3 8/8 PASS · W2/W1/LOSSES 40/40 PASS · 0 regression。
+
+**Root cause**（PA RFC 已揪）：CPython `from PKG import SUB` attribute precedence。`test_api_contract.py:16` 的 `importlib.reload(main_legacy)+importlib.reload(main)` 透過 transitive import 將真 `app.strategy_wiring` 永久綁到 `app` package attribute。test fixture 只 patch `sys.modules` 不 patch attr → handler 內 `from . import strategy_wiring as _sw` 走 attribute precedence 解析回真 STRATEGIST_AGENT，fake 失效，35 assertion 全 fail。
+
+**修法**：
+- **Option B（production，主修）**：`h_state_query_handler.py` 兩處 `from . import strategy_wiring as _sw` 改 `_sw = sys.modules.get("app.strategy_wiring")` + 對應 None fallback log。覆蓋 `_collect_h_snapshots` (line ~327) 與 `_collect_agent_snapshots` (line ~490) 兩處 — RFC 只列 line 334 一處，但 grep 後發現第二處同 pattern；不修會留 55 個 agent_snapshots 測試漏網。
+- **Option A（test fixture，defense-in-depth）**：`_install_fake_strategy_wiring` 加 `app.strategy_wiring` package attribute patch，回 tuple `(prev_in_modules, prev_attr)`；`_restore_strategy_wiring` atomic 反序，含 sentinel `_SW_ATTR_MISSING` 區分「原無屬性」vs「原綁 None」。鏡 W3 fix `a2b660d` dual-patch pattern。Backward-compat 接受舊單值 prev。
+
+**教訓 — RFC 指 line N 但同檔可能有 sibling 同 pattern**：PA RFC §7 模板只指 `h_state_query_handler.py:334`，但實際 `from . import strategy_wiring` grep 在同檔有兩處（_collect_h_snapshots + _collect_agent_snapshots）。修第一處後若立即跑測試會發現 agent state 系列測試（TestStrategistAgentStateIntegration / TestGuardianAgentStateIntegration / TestAnalystAgentStateIntegration / TestExecutorAgentStateIntegration / TestScoutAgentStateIntegration / TestPhase4FullEnvelopeRoundtrip）仍失敗 — 它們走 `_collect_agent_snapshots` 路徑。E1 規則「不擴大 PA 給定的改動範圍」應理解為「不擴 ticket scope」而非「機械只改 RFC 指的那一行」；同 root cause family 同檔 sibling 應一併修，否則 fix 只解一半。
+
+**教訓 — `_install_fake_strategy_wiring` 改 signature 風險**：return shape 從單值 module 改 tuple；本檔 `_restore_strategy_wiring` 已 backward-compat 接舊單值（`isinstance(prev, tuple) and len(prev) == 2` 判別），但 grep 確認本 helper 只本檔內呼叫，無外部 caller。若是 cross-file 共享 helper，改 signature 須先 grep 所有 caller。
+
+**教訓 — sentinel `object()` vs `None` 區分**：`getattr(_app_pkg, "strategy_wiring", None)` 看似自然但會把「原無屬性」與「原綁 None」混成一個狀態，restore 時走錯路徑。用 `_SW_ATTR_MISSING = object()` sentinel 才能精確 round-trip。所有「原 X 可為 None 又可為 missing」的 helper restore 都應用 sentinel pattern。
+
+**教訓 — 同 session 跑 vs 隔離跑 reproducibility 必驗**：Mac 上隔離跑 90/90 PASS 後，必再跑 `pytest test_api_contract.py test_h_state_query_handler.py`（含 polluter）才能證明 fix 對 root cause 真有效。如果只跑隔離測試會誤以為 fix 已生效，但實際 sibling pollution 仍在。本次 baseline 35 fail 是同 session 場景才出現，fix 驗收必鏡此場景。
+
+**教訓 — 完整 suite 跑時 baseline 變化要解釋**：跑全 control_api_v1 套件，pre-fix 55 fail（35 h_state + 17 executor_shadow + 3 phase2_routes per RFC §2.1）；post-fix 38 fail（18 strategist_promote + 17 executor_shadow + 3 phase2_routes）。看似引入 18 新 fail 實則 PA RFC §2.1 漏列 `test_strategist_promote_api.py`。`git stash && pytest test_strategist_promote_api.py` → 18 passed 確認 promote_api 屬同 sibling-pollution family pre-existing fail，非本 fix 引入。**驗收 baseline 必須交叉驗證 RFC 數字** — 不要盲信 RFC 列的 fail 集合。
+
+**驗收結果摘要**：
+- 隔離 h_state：90 passed in 0.05s ✅
+- 同 session（含 polluter）：108 passed in 1.45s ✅（35 fail → 0 fail）
+- W3 regression：8/8 PASS in 0.02s ✅
+- W2+W1+LOSSES regression：40/40 PASS in 0.04s ✅
+- 全 control_api_v1 套件：38 fail（17 executor_shadow + 18 strategist_promote + 3 phase2_routes 全 PA scope-out + pre-existing 同 family）
+
+**Operator follow-up 建議**：
+- E2 review 重點：sys.modules.get runtime 等價承諾 + dual-patch sentinel atomic 還原
+- E4 ssh trade-core 跑 Linux 端 90 passed 確認跨平台
+- 可選新 ticket：`test_strategist_promote_api.py` 18 fail / `test_executor_shadow_toggle_api.py` 17 fail 同 root cause family 可同樣 Option B + A 修
+
