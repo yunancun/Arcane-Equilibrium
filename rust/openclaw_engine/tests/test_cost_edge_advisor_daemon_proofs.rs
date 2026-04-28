@@ -99,6 +99,17 @@ fn risk_config_advisor_enabled() -> Arc<ConfigStore<RiskConfig>> {
     Arc::new(ConfigStore::new(cfg))
 }
 
+/// Build a fresh RiskConfig with `cost_edge.enabled=false` (dual safeguard
+/// negative path). Used to prove RiskConfig flag gates the daemon even when
+/// env=1.
+/// 建 RiskConfig：cost_edge.enabled=false（雙保險負向路徑）。
+fn risk_config_advisor_disabled_in_config() -> Arc<ConfigStore<RiskConfig>> {
+    let mut cfg = RiskConfig::default();
+    cfg.cost_edge.enabled = false;
+    cfg.cost_edge.trigger_threshold = -0.5;
+    Arc::new(ConfigStore::new(cfg))
+}
+
 /// Build an H state cache with a fresh OK snapshot (ratio above threshold,
 /// data_days >= 3 to escape WarmUp). Stale flag is naturally false because
 /// we just stored.
@@ -489,6 +500,216 @@ async fn daemon_evaluate_cadence_within_tolerance() {
 }
 
 // ---------------------------------------------------------------------------
+// Sticky `triggered_at_ms` proofs (G3-09-PHASE-B-FUP-STICKY-TS, 2026-04-28).
+//
+// Pure `evaluate()` always returns `triggered_at_ms = now_ms` for any
+// Trigger state — that is correct only on the entering transition. The
+// daemon (mod.rs ~L240) enforces sticky semantics by overwriting the
+// field with the previously stored entry timestamp on contiguous
+// Trigger→Trigger cycles. Phase B observation, dedup analytics, and the
+// `last_trigger_ms` rolling counter all depend on this. The two tests
+// below cover the two essential properties: (a) the first entry captures
+// `now_ms`, and (b) successive cycles preserve the original timestamp
+// (stickiness) across multiple polls.
+// 純 `evaluate()` 對任何 Trigger 永遠回 `triggered_at_ms = now_ms`，僅 entering
+// transition 正確。Daemon（mod.rs 約 L240）強制 sticky：contiguous
+// Trigger→Trigger 覆寫為前次儲存值。Phase B observation / dedup analytics /
+// `last_trigger_ms` rolling counter 全依賴此。下方兩 test 覆蓋兩個核心性質：
+// (a) 首次進入抓 `now_ms`、(b) 後續 cycle 跨多 poll 保留原時戳（sticky）。
+// ---------------------------------------------------------------------------
+
+/// Build an H state cache populated with a Trigger snapshot whose
+/// `fetched_at_ms` is set to a fixed past value so the freshness window
+/// stays inside the cache's stale threshold for the duration of the test.
+/// Used by the sticky-timestamp tests so multiple daemon cycles all see
+/// the same Trigger ratio without a snapshot mutation in between.
+/// 建一個含 Trigger snapshot 的 H state cache，`fetched_at_ms` 設為固定值
+/// 確保測試期間 cache 不變 stale。Sticky 時戳測試用，讓 daemon 多輪 cycle
+/// 看到同一 Trigger ratio。
+fn h_state_cache_with_persistent_trigger() -> Arc<HStateCache> {
+    let cache = HStateCache::new_arc();
+    let store_ms = now_ms();
+    let snap = HStateSnapshot {
+        version: 1,
+        fetched_at_ms: store_ms,
+        h5: H5CostStats {
+            ai_spend_7d_usd: 12.0,
+            paper_pnl_7d_usd: -9.0,
+            cost_edge_ratio: Some(-0.75), // <= -0.5 threshold → Trigger
+            data_days: 7,
+        },
+        ..Default::default()
+    };
+    cache.store_snapshot(snap, store_ms);
+    cache
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn sticky_triggered_at_ms_records_first_entry_into_trigger() {
+    // Cover property (a): the very first Trigger cycle stamps
+    // `triggered_at_ms` with the daemon's current `now_ms` and propagates
+    // it through `store_state`. Without sticky enforcement this would
+    // already pass (since `evaluate()` returns `now_ms`); this test exists
+    // as the regression guard against a future "always zero" or
+    // "always epoch 0" mistake when refactoring sticky logic.
+    // 覆蓋性質 (a)：首次進 Trigger cycle 把 `triggered_at_ms` 設為 daemon
+    // 當下 `now_ms` 並透過 `store_state` 暴露。無 sticky 邏輯本測試也會綠
+    // （evaluate 本就回 now_ms），存在價值是 sticky 重構時防退化（避免
+    // 未來改成「永遠 0」或「永遠 epoch 0」）。
+
+    let advisor = CostEdgeAdvisor::new_arc();
+    let cache = h_state_cache_with_persistent_trigger();
+    let risk = risk_config_advisor_enabled();
+    let cancel = CancellationToken::new();
+
+    let before_spawn_ms = now_ms();
+
+    let handle = spawn_cost_edge_advisor(
+        Arc::clone(&advisor),
+        Arc::clone(&cache),
+        Arc::clone(&risk),
+        Duration::from_millis(100),
+        cancel.clone(),
+    );
+
+    // Wait up to 1s for daemon to write the first Trigger state.
+    // 等最多 1s 給 daemon 寫入首個 Trigger state。
+    let deadline = Instant::now() + Duration::from_secs(1);
+    while Instant::now() < deadline {
+        if advisor.state().status == CostEdgeAdvisorStatus::Trigger {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+
+    let first_state = advisor.state();
+    let after_first_ms = now_ms();
+
+    cancel.cancel();
+    let _ = handle.await;
+
+    assert_eq!(
+        first_state.status,
+        CostEdgeAdvisorStatus::Trigger,
+        "first poll should land on Trigger (got {:?})",
+        first_state.status
+    );
+    // The entry timestamp must be a real epoch ms inside [before_spawn_ms,
+    // after_first_ms] — proving daemon stamped it from `now_ms` at the
+    // entering transition, not left it as `0` and not pulled from a stale
+    // future/past clock.
+    // 進入時戳必為合理 epoch ms 落在 [before_spawn_ms, after_first_ms] —
+    // 證明 daemon 於進入 transition 從 `now_ms` 寫入，不是 `0`、也非
+    // 未來/過去離譜時鐘。
+    assert!(
+        first_state.triggered_at_ms >= before_spawn_ms
+            && first_state.triggered_at_ms <= after_first_ms,
+        "triggered_at_ms ({}) should be within spawn window [{}, {}] — \
+         daemon must stamp now_ms at the entering Trigger transition",
+        first_state.triggered_at_ms,
+        before_spawn_ms,
+        after_first_ms
+    );
+    assert!(
+        first_state.triggered_at_ms > 0,
+        "triggered_at_ms must be a positive epoch ms (got {})",
+        first_state.triggered_at_ms
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn sticky_triggered_at_ms_preserved_across_contiguous_trigger_cycles() {
+    // Cover property (b): once in a Trigger run, subsequent Trigger→Trigger
+    // cycles MUST keep the original entry `triggered_at_ms` even though
+    // `evaluate()` returns a fresh `now_ms` every cycle, AND `last_eval_ms`
+    // continues to advance. Without daemon sticky enforcement the field
+    // would tick forward each cycle, breaking Phase B `last_trigger_ms`
+    // rolling counter and any future dedup logic that fires "once per
+    // Trigger episode".
+    // 覆蓋性質 (b)：進 Trigger run 後，後續 Trigger→Trigger cycle 必須保留
+    // 原進入 `triggered_at_ms` 不變，即使 `evaluate()` 每 cycle 回新
+    // `now_ms` 且 `last_eval_ms` 持續推進。無 daemon sticky 強制此欄會每
+    // cycle 跟著走，破壞 Phase B `last_trigger_ms` 與任何「per-episode
+    // 一次」dedup 邏輯。
+
+    let advisor = CostEdgeAdvisor::new_arc();
+    let cache = h_state_cache_with_persistent_trigger();
+    let risk = risk_config_advisor_enabled();
+    let cancel = CancellationToken::new();
+
+    // Use 100ms cadence so we can collect ≥3 Trigger cycles within ~500ms.
+    // 100ms cadence 讓我們在 ~500ms 內收 ≥3 個 Trigger cycle。
+    const POLL_MS: u64 = 100;
+    let handle = spawn_cost_edge_advisor(
+        Arc::clone(&advisor),
+        Arc::clone(&cache),
+        Arc::clone(&risk),
+        Duration::from_millis(POLL_MS),
+        cancel.clone(),
+    );
+
+    // Capture distinct Trigger cycles by tracking advancing `last_eval_ms`.
+    // 用推進的 `last_eval_ms` 抓不同 Trigger cycle。
+    let mut trigger_samples: Vec<(i64, i64)> = Vec::with_capacity(3); // (last_eval_ms, triggered_at_ms)
+    let mut last_seen_eval_ms: i64 = 0;
+    let hard_deadline = Instant::now() + Duration::from_millis(POLL_MS * 12); // ~1.2s ceiling
+
+    while trigger_samples.len() < 3 && Instant::now() < hard_deadline {
+        let s = advisor.state();
+        if s.status == CostEdgeAdvisorStatus::Trigger && s.last_eval_ms > last_seen_eval_ms {
+            trigger_samples.push((s.last_eval_ms, s.triggered_at_ms));
+            last_seen_eval_ms = s.last_eval_ms;
+        }
+        tokio::time::sleep(Duration::from_millis(POLL_MS / 5)).await;
+    }
+
+    cancel.cancel();
+    let _ = handle.await;
+
+    assert!(
+        trigger_samples.len() >= 3,
+        "expected ≥3 distinct Trigger cycles within hard deadline; \
+         got {} samples (samples={:?})",
+        trigger_samples.len(),
+        trigger_samples
+    );
+
+    // (b1) `last_eval_ms` must advance across cycles — proves we really
+    // observed multiple distinct daemon cycles, not the same snapshot
+    // sampled three times.
+    // (b1) `last_eval_ms` 跨 cycle 必推進 — 證明我們真觀察到多輪不同 daemon
+    // cycle 而非同一 snapshot 採樣 3 次。
+    for w in trigger_samples.windows(2) {
+        assert!(
+            w[1].0 > w[0].0,
+            "last_eval_ms must advance across Trigger cycles; \
+             got identical or regressing sequence {:?}",
+            trigger_samples
+        );
+    }
+
+    // (b2) `triggered_at_ms` MUST be identical across all cycles in this
+    // contiguous Trigger run — this is THE sticky-semantics guarantee.
+    // (b2) `triggered_at_ms` 在此 contiguous Trigger run 跨所有 cycle 必相同 —
+    // 此即 sticky 語意核心保證。
+    let first_triggered_at = trigger_samples[0].1;
+    for (idx, (eval_ms, triggered_at)) in trigger_samples.iter().enumerate() {
+        assert_eq!(
+            *triggered_at, first_triggered_at,
+            "triggered_at_ms must be sticky across contiguous Trigger cycles; \
+             cycle {} has triggered_at_ms={} but cycle 0 had {} \
+             (eval_ms={}; full samples={:?})",
+            idx, triggered_at, first_triggered_at, eval_ms, trigger_samples
+        );
+    }
+    assert!(
+        first_triggered_at > 0,
+        "first triggered_at_ms must be positive epoch ms (got {})",
+        first_triggered_at
+    );
+}
+
+// ---------------------------------------------------------------------------
 // Proof 5: cancel.cancel() drains daemon promptly (sub-second shutdown).
 // 證明 5：cancel.cancel() 觸發 daemon sub-second shutdown。
 // ---------------------------------------------------------------------------
@@ -719,10 +940,7 @@ async fn fup_case_b_env_set_risk_disabled_slot_some_ipc_disabled() {
 
     // Step (1) — slot late-inject (wrapper lines 495-498).
     // 步驟 (1) — slot 注入（wrapper 行 495-498）。
-    advisor_slot
-        .write()
-        .await
-        .replace(Arc::clone(&advisor));
+    advisor_slot.write().await.replace(Arc::clone(&advisor));
 
     // Step (2) — spawn daemon (wrapper lines 526-532).
     // 步驟 (2) — spawn daemon（wrapper 行 526-532）。
@@ -811,10 +1029,7 @@ async fn fup_case_c_env_set_risk_enabled_slot_some_ipc_live_state() {
     let risk = risk_config_advisor_enabled();
     let advisor = CostEdgeAdvisor::new_arc();
 
-    advisor_slot
-        .write()
-        .await
-        .replace(Arc::clone(&advisor));
+    advisor_slot.write().await.replace(Arc::clone(&advisor));
 
     let handle = spawn_cost_edge_advisor(
         Arc::clone(&advisor),

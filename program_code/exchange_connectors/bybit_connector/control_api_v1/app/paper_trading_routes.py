@@ -434,26 +434,12 @@ async def post_session_stop_all(
     close_result: dict = {}
     demo_close_result: dict = {}
     pause_result: dict = {}
+    demo_cancel_orders: dict = {}
+    paper_verify: dict = {}
+    demo_verify: dict = {}
     if rust_online:
-        try:
-            close_result = await _ipc_command("close_all_positions", {"engine": "paper"})
-        except Exception as e:
-            errors.append(f"paper_close: {e}")
-            logger.error("IPC close_all_positions (paper) failed: %s", e)
-        try:
-            demo_close_result = await _ipc_command("close_all_positions", {"engine": "demo"})
-        except Exception as e:
-            # Demo engine may not be running — not a hard error / Demo 未運行時不算錯誤
-            logger.info("IPC close_all_positions (demo) skipped or failed: %s", e)
-        # Orphan sweep: catch exchange positions not tracked in paper_state.
-        # Lazy import to avoid circular dependency with strategy_ai_routes.
-        # 孤兒清掃：懶加載 strategy_ai_routes 避免循環導入。
-        try:
-            from .strategy_ai_routes import _sweep_demo_orphan_positions  # noqa: PLC0415
-            orphan_result = await _sweep_demo_orphan_positions(errors)
-            demo_close_result = {**demo_close_result, "orphan_sweep": orphan_result}
-        except Exception as e:
-            logger.info("Orphan sweep skipped (non-fatal): %s", e)
+        # ── Phase 0: Pause both pipelines first to stop new dispatch.
+        # 先雙引擎暫停，避免後續流程中產生新單。
         try:
             pause_result = await _ipc_command("pause_paper", {"engine": "paper"})
         except Exception as e:
@@ -463,15 +449,68 @@ async def post_session_stop_all(
             await _ipc_command("pause_paper", {"engine": "demo"})
         except Exception as e:
             logger.info("IPC pause_paper (demo) skipped or failed: %s", e)
+        # ── Phase 1: Demo cancel-all (REST settleCoin=USDT, single call covers
+        # entire account regardless of strategy symbol set). Paper has no
+        # Bybit orders so this branch is demo-only.
+        # 第一步：Demo 全帳戶 cancel-all（settleCoin=USDT）。Paper 無 Bybit 掛單跳過。
+        try:
+            from .strategy_ai_routes import _sweep_demo_orphan_orders  # noqa: PLC0415
+            demo_cancel_orders = await _sweep_demo_orphan_orders(errors)
+        except Exception as e:
+            logger.info("Demo cancel-all skipped (non-fatal): %s", e)
+            demo_cancel_orders = {"skipped": True, "reason": str(e)}
+        # ── Phase 2: Close positions for both engines.
+        # 第二步：雙引擎平倉。
+        try:
+            close_result = await _ipc_command("close_all_positions", {"engine": "paper"})
+        except Exception as e:
+            errors.append(f"paper_close: {e}")
+            logger.error("IPC close_all_positions (paper) failed: %s", e)
+        try:
+            demo_close_result = await _ipc_command("close_all_positions", {"engine": "demo"})
+        except Exception as e:
+            logger.info("IPC close_all_positions (demo) skipped or failed: %s", e)
+        # ── Phase 3: Demo orphan position sweep (positions on exchange not in paper_state).
+        # 第三步：Demo 孤兒倉位清掃。
+        try:
+            from .strategy_ai_routes import _sweep_demo_orphan_positions  # noqa: PLC0415
+            orphan_result = await _sweep_demo_orphan_positions(errors)
+            demo_close_result = {**demo_close_result, "orphan_sweep": orphan_result}
+        except Exception as e:
+            logger.info("Orphan sweep skipped (non-fatal): %s", e)
+        # ── Phase 4: Verify both engines fully clean.
+        # Paper: poll paper_state snapshot until positions=0.
+        # Demo: poll Bybit REST until positions=0 AND orders=0.
+        # 第四步：雙引擎 verify 確認清乾淨。
+        paper_verify = await _verify_paper_state_clean("paper")
+        if not paper_verify.get("clean") and not paper_verify.get("skipped"):
+            errors.append(
+                f"paper_verify_residual: positions={paper_verify.get('residual_positions')}"
+            )
+        try:
+            from .strategy_ai_routes import _verify_account_clean, _get_rust_client  # noqa: PLC0415
+            demo_verify = await _verify_account_clean(_get_rust_client(), env_label="demo")
+            if not demo_verify.get("clean") and not demo_verify.get("skipped"):
+                errors.append(
+                    f"demo_verify_residual: positions={demo_verify.get('residual_positions')} "
+                    f"orders={demo_verify.get('residual_orders')}"
+                )
+        except Exception as e:
+            logger.info("Demo verify skipped (non-fatal): %s", e)
+            demo_verify = {"skipped": True, "reason": str(e)}
     else:
         close_result = demo_close_result = pause_result = {"skipped": True, "reason": "engine_offline"}
+        demo_cancel_orders = paper_verify = demo_verify = {"skipped": True, "reason": "engine_offline"}
         logger.info("Rust engine offline — skipping IPC (already stopped)")
     return _paper_response({
-        "message": "Both engines stopped — all positions closed / 雙引擎已停止，所有倉位已平",
+        "message": "Both engines stopped — orders cancelled + positions closed / 雙引擎已停止，掛單已取消、倉位已平",
         "source": "rust_engine",
+        "demo_cancel_orders": demo_cancel_orders,
         "paper_close": close_result,
         "demo_close": demo_close_result,
         "paper_pause": pause_result,
+        "paper_verify": paper_verify,
+        "demo_verify": demo_verify,
         "errors": errors if errors else None,
         "session": {"session_state": "stopped", "session_id": "rust_engine"},
     })

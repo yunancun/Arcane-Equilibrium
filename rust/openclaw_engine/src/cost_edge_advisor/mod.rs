@@ -229,11 +229,7 @@ impl EvalCounters {
         // a cycle gap could leave many stale entries waiting).
         // 從前端不斷 pop，直到空或 front >= cutoff（**非**只 pop 一次 —
         // cycle 間隙可能堆積多個 stale 項目）。
-        while self
-            .eval_timestamps
-            .front()
-            .is_some_and(|&ts| ts < cutoff)
-        {
+        while self.eval_timestamps.front().is_some_and(|&ts| ts < cutoff) {
             self.eval_timestamps.pop_front();
         }
     }
