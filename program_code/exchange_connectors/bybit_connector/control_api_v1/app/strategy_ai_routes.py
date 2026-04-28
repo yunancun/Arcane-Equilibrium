@@ -11,7 +11,9 @@ Python BybitDemoConnector 降級路徑已移除 — 純 Python httpx BybitClient
 """
 from __future__ import annotations
 
+import asyncio
 import logging
+import os
 from typing import Any
 
 from fastapi import Depends, HTTPException
@@ -651,6 +653,170 @@ async def _sweep_demo_orphan_positions(errors: list[str]) -> dict:
             logger.warning("Orphan sweep: close_position %s failed: %s", sym, exc)
 
     return {"swept": swept, "found": len(open_positions)}
+
+
+# ---------------------------------------------------------------------------
+# Stop-path order cancellation + verification
+# 停止路徑掛單取消 + 確認清乾淨
+#
+# 為什麼分兩步：先「全帳戶取消掛單」再「平倉」。否則平倉觸發前若有 reduce-only TP/SL
+# 條件單同步活躍，可能造成競態（一邊平倉、另一邊條件單觸發）。先取消可消除此風險。
+# Why two phases: cancel-all FIRST, then close positions. Otherwise reduce-only
+# TP/SL conditional orders may race the close-position market orders.
+# ---------------------------------------------------------------------------
+
+
+def _sweep_orphan_orders(rc: Any, env_label: str, errors: list[str]) -> dict:
+    """Cancel **all** USDT linear orders in one REST call (settleCoin scope).
+
+    Not bounded to the strategy's active symbol set — calls Bybit's
+    /v5/order/cancel-all with settleCoin=USDT so every pending limit /
+    conditional / TP-SL on the account is cleared. Used by Stop pipelines
+    (live + demo) to ensure no order survives stop.
+
+    一次 REST 清掃 settleCoin=USDT 範圍內所有掛單，**不**依策略 symbol 集合迭代 —
+    避免「停止後 25 個 symbol 外仍有殘留掛單」的盲區。
+
+    Returns {cancelled, found_unknown_count, sample_symbols} or
+    {skipped, reason} on failure.
+    """
+    if rc is None:
+        return {"skipped": True, "reason": "rust_client_unavailable"}
+    # Snapshot active orders pre-cancel for audit trail / 快照取消前的活躍掛單供審計
+    pre_orders: list = []
+    try:
+        pre_orders = rc.get_active_orders("linear") or []
+    except Exception as exc:
+        # Query failure is non-fatal — still attempt the cancel-all call.
+        # 查詢失敗不致命 — 仍嘗試 cancel-all。
+        logger.warning("%s order sweep: get_active_orders failed: %s", env_label, exc)
+        errors.append(f"order_sweep_query_{env_label}: {exc}")
+    try:
+        cancelled = rc.cancel_all_orders("linear", settle_coin="USDT")
+    except Exception as exc:
+        logger.warning("%s order sweep: cancel-all failed: %s", env_label, exc)
+        errors.append(f"order_sweep_{env_label}: {exc}")
+        return {"skipped": True, "reason": str(exc), "found": len(pre_orders)}
+    cancelled_n = len(cancelled) if isinstance(cancelled, list) else 0
+    found_n = len(pre_orders)
+    sample_symbols = sorted({
+        str(o.get("symbol") or "")
+        for o in pre_orders
+        if isinstance(o, dict) and o.get("symbol")
+    })
+    logger.warning(
+        "%s order sweep: cancel-all cleared %d orders (found %d active pre-cancel; symbols=%s)",
+        env_label, cancelled_n, found_n, sample_symbols[:10],
+    )
+    return {
+        "cancelled": cancelled_n,
+        "found": found_n,
+        "symbols": sample_symbols,
+    }
+
+
+async def _sweep_demo_orphan_orders(errors: list[str]) -> dict:
+    """Demo-side wrapper around _sweep_orphan_orders using demo BybitClient.
+    Demo 側 wrapper，用 demo BybitClient 走全帳戶 cancel-all。
+    """
+    return _sweep_orphan_orders(_get_rust_client(), "demo", errors)
+
+
+def _verify_clean_max_attempts() -> int:
+    """Max polling attempts before declaring residual state. Default 30 (~30s).
+    最大輪詢次數，預設 30 (~30s)。env OPENCLAW_STOP_VERIFY_MAX_ATTEMPTS 可覆寫。
+    """
+    try:
+        return max(1, int(os.environ.get("OPENCLAW_STOP_VERIFY_MAX_ATTEMPTS", "30")))
+    except Exception:
+        return 30
+
+
+def _verify_clean_interval_sec() -> float:
+    """Polling interval in seconds. Default 1.0s.
+    輪詢間隔，預設 1.0s。env OPENCLAW_STOP_VERIFY_INTERVAL_SEC 可覆寫。
+    """
+    try:
+        return max(0.1, float(os.environ.get("OPENCLAW_STOP_VERIFY_INTERVAL_SEC", "1.0")))
+    except Exception:
+        return 1.0
+
+
+async def _verify_account_clean(
+    rc: Any,
+    *,
+    env_label: str,
+    max_attempts: int | None = None,
+    interval_sec: float | None = None,
+) -> dict:
+    """Poll Bybit until positions=0 AND open_orders=0, or max attempts.
+
+    輪詢 Bybit REST 直到「持倉=0 且掛單=0」或達到上限。**重點：上限是時間上限**，
+    不是 symbol 數上限 — 任何 symbol 的殘留都會讓本輪 verify 失敗。
+
+    Returns:
+        {"clean": True, "attempts": N, "elapsed_sec": ...}
+        OR {"clean": False, "attempts": max, "residual_positions": N,
+            "residual_orders": N, "residual_position_symbols": [...],
+            "residual_order_symbols": [...], "elapsed_sec": ...}
+    """
+    if rc is None:
+        return {"clean": False, "skipped": True, "reason": "rust_client_unavailable"}
+    attempts_cap = max_attempts if max_attempts is not None else _verify_clean_max_attempts()
+    interval = interval_sec if interval_sec is not None else _verify_clean_interval_sec()
+    last_positions: list = []
+    last_orders: list = []
+    started = asyncio.get_event_loop().time()
+    for attempt in range(1, attempts_cap + 1):
+        try:
+            positions = rc.get_positions("linear") or []
+            orders = rc.get_active_orders("linear") or []
+        except Exception as exc:
+            logger.warning(
+                "%s verify poll attempt %d exception: %s", env_label, attempt, exc,
+            )
+            await asyncio.sleep(interval)
+            continue
+        last_positions = [
+            p for p in positions
+            if isinstance(p, dict)
+            and float(p.get("size") or p.get("qty") or 0) > 0
+        ]
+        last_orders = [o for o in orders if isinstance(o, dict)]
+        if not last_positions and not last_orders:
+            elapsed = asyncio.get_event_loop().time() - started
+            logger.warning(
+                "%s verify CLEAN at attempt %d (elapsed=%.2fs)",
+                env_label, attempt, elapsed,
+            )
+            return {
+                "clean": True,
+                "attempts": attempt,
+                "elapsed_sec": round(elapsed, 2),
+            }
+        # Wait one tick before re-querying / 下一輪前等待
+        if attempt < attempts_cap:
+            await asyncio.sleep(interval)
+    elapsed = asyncio.get_event_loop().time() - started
+    pos_syms = sorted({
+        str(p.get("symbol") or "") for p in last_positions if p.get("symbol")
+    })
+    ord_syms = sorted({
+        str(o.get("symbol") or "") for o in last_orders if o.get("symbol")
+    })
+    logger.error(
+        "%s verify NOT-CLEAN after %d attempts (%.2fs): residual_positions=%d residual_orders=%d",
+        env_label, attempts_cap, elapsed, len(last_positions), len(last_orders),
+    )
+    return {
+        "clean": False,
+        "attempts": attempts_cap,
+        "elapsed_sec": round(elapsed, 2),
+        "residual_positions": len(last_positions),
+        "residual_orders": len(last_orders),
+        "residual_position_symbols": pos_syms,
+        "residual_order_symbols": ord_syms,
+    }
 
 
 @phase2_router.post("/demo/session/start")
