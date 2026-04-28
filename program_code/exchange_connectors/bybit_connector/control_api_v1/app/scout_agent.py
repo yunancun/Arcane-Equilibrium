@@ -7,9 +7,15 @@ MODULE_NOTE (中文):
   不能修改風控參數（只通知 Guardian 重大事件）、不能直接呼叫交易所 API。
 
   G3-08-FUP-MAF-SPLIT 從 multi_agent_framework.py 抽出，維持原有所有接口；
-  透過主檔 noqa: F401 re-export 保證向後相容（test / scout_routes /
-  strategy_wiring legacy caller 等 ``from .multi_agent_framework import ScoutAgent``
-  路徑不受影響）。模式對齊 6fac0ca (strategist split) 與 73c1f3d (cost_tracker split)。
+  透過主檔 PEP 562 module-level ``__getattr__`` lazy re-export 保證向後相容
+  （見 ``multi_agent_framework.py`` 第 ~365-390 行；首次 attribute lookup
+  才 import scout_agent 並 cache 進 globals，避開 maf module body 尚未執行完
+  即觸發 scout_agent module-load → partial maf import 的循環依賴風險）。
+  test / scout_routes / strategy_wiring legacy caller 等
+  ``from .multi_agent_framework import ScoutAgent`` 路徑不受影響。
+  模式對齊 6fac0ca (strategist split) 與 73c1f3d (cost_tracker split)；
+  此處 maf 端 PEP 562 偏離 PA RFC §3 之 ``noqa: F401`` eager re-export，
+  詳 E1 落地報告 ``2026-04-27--g3_08_fup_maf_split_impl.md`` §5.1。
 
 MODULE_NOTE (English):
   ScoutAgent + ScoutConfig — the "eyes and ears" of the 5-agent system (EX-06 §3).
@@ -21,10 +27,16 @@ MODULE_NOTE (English):
   exchange API for trading.
 
   Extracted from multi_agent_framework.py per G3-08-FUP-MAF-SPLIT; all interfaces
-  preserved; backward compatibility via noqa: F401 re-export in main file (test,
-  scout_routes, strategy_wiring legacy callers ``from .multi_agent_framework
-  import ScoutAgent`` continue to resolve). Mirrors 6fac0ca (strategist split)
-  and 73c1f3d (cost_tracker split) patterns.
+  preserved; backward compatibility via PEP 562 module-level ``__getattr__``
+  lazy re-export in main file (see ``multi_agent_framework.py`` lines ~365-390;
+  scout_agent is imported only on first attribute lookup and cached into
+  globals, avoiding the circular-dependency risk of loading scout_agent before
+  maf's module body has finished executing). test / scout_routes /
+  strategy_wiring legacy callers ``from .multi_agent_framework import
+  ScoutAgent`` continue to resolve transparently. Mirrors 6fac0ca (strategist
+  split) and 73c1f3d (cost_tracker split) patterns; the maf-side PEP 562
+  deviates from PA RFC §3 (``noqa: F401`` eager re-export) — see E1 impl
+  report ``2026-04-27--g3_08_fup_maf_split_impl.md`` §5.1 for rationale.
 """
 
 from __future__ import annotations
