@@ -7,16 +7,26 @@
 #   refreshes the openclaw-engine binary (PyO3-ELIMINATE-1 Phase 3 removed the
 #   PyO3 cdylib — --rebuild is now a single-artifact cargo build).
 #
-# Usage: bash helper_scripts/restart_all.sh [scope] [--rebuild]
+# Usage: bash helper_scripts/restart_all.sh [scope] [--rebuild] [--keep-auth]
 #   scope: --engine-only | --api-only | (none = both)
 #   --rebuild: rebuild openclaw-engine binary before starting services
 #              (exits if build fails)
+#   --keep-auth: skip writing the `last_shutdown_kind=manual` sentinel so the
+#              engine on next boot does NOT clear `authorization.json`. Use for
+#              planned deploys / hotfixes where operator has already approved
+#              live and does not want to re-approve after every restart.
+#              Default behaviour (sentinel written) is per CLAUDE.md §四 Gate
+#              #5 design: operator-initiated restart = security event = force
+#              re-approve. `--keep-auth` is a deliberate ergonomic opt-out.
+#              Crash / watchdog / systemd auto-restart paths never run this
+#              shell, so they always preserve auth regardless of this flag.
 #
 # 使用範例：
 #   bash helper_scripts/restart_all.sh                     # 重啟引擎+API
-#   bash helper_scripts/restart_all.sh --rebuild           # 先 rebuild 再重啟
+#   bash helper_scripts/restart_all.sh --rebuild           # 先 rebuild 再重啟（清 auth）
+#   bash helper_scripts/restart_all.sh --rebuild --keep-auth  # rebuild 不清 auth（部署常用）
 #   bash helper_scripts/restart_all.sh --api-only          # 只重啟 API
-#   bash helper_scripts/restart_all.sh --engine-only --rebuild  # 先 rebuild 再只重啟引擎
+#   bash helper_scripts/restart_all.sh --engine-only --rebuild  # rebuild 只重啟引擎
 
 set -e
 cd "$(dirname "$0")/.."
@@ -46,11 +56,21 @@ API_VENV="${OPENCLAW_API_VENV:-.venv}"
 # Accept --rebuild in any position; SCOPE is the remaining positional.
 # 接受 --rebuild 出現在任意位置；SCOPE 為剩餘的位置參數。
 REBUILD=0
+KEEP_AUTH=0
 SCOPE="all"
 for arg in "$@"; do
     case "$arg" in
         --rebuild)
             REBUILD=1
+            ;;
+        --keep-auth)
+            # EDGE-DIAG-2-FUP (2026-04-28): bypass the manual-restart auth wipe
+            # so planned deploys / hotfixes don't force operator to re-approve
+            # live every time. Default is still WIPE (CLAUDE.md §四 Gate #5).
+            # EDGE-DIAG-2-FUP（2026-04-28）：跳過 manual-restart 的 auth 清除，
+            # 讓計劃性部署 / hotfix 不再強迫每次重啟都重批 live。
+            # 預設仍為清除（CLAUDE.md §四 Gate #5）。
+            KEEP_AUTH=1
             ;;
         --engine-only|--api-only)
             SCOPE="$arg"
@@ -60,7 +80,7 @@ for arg in "$@"; do
             ;;
         *)
             echo "Unknown argument: $arg" >&2
-            echo "Usage: bash helper_scripts/restart_all.sh [--engine-only|--api-only] [--rebuild]" >&2
+            echo "Usage: bash helper_scripts/restart_all.sh [--engine-only|--api-only] [--rebuild] [--keep-auth]" >&2
             exit 1
             ;;
     esac
@@ -122,6 +142,21 @@ write_restart_sentinel() {
     # Live。崩潰 / watchdog / systemd 自動重啟都不跑本 shell，授權留存 —
     # 這是正確行為：引擎只是死了一下，應回到已批准 session。
     # 原子寫入：tmp + mv，避免半寫入狀態被讀到。
+    #
+    # EDGE-DIAG-2-FUP (2026-04-28): operator may pass --keep-auth to skip the
+    # sentinel write for planned deploys / hotfixes. Default unchanged.
+    # EDGE-DIAG-2-FUP（2026-04-28）：--keep-auth 跳過寫入；預設行為不變。
+    if [[ "$KEEP_AUTH" -eq 1 ]]; then
+        echo ">>> --keep-auth: skipping sentinel write (authorization.json will survive this restart)"
+        # Defensive: if a stale `last_shutdown_kind=manual` sentinel exists
+        # from a previous restart that didn't use --keep-auth, the engine on
+        # next boot would still consume it and wipe auth. Pre-emptively
+        # remove any pre-existing sentinel so --keep-auth's promise holds.
+        # 防禦性：先前 restart 留下的 manual sentinel 仍會被新 engine 讀並擦
+        # auth；--keep-auth 必須先清掉殘留 sentinel 才能兌現「auth 保留」承諾。
+        rm -f "${PWD}/settings/runtime/last_shutdown_kind" 2>/dev/null || true
+        return 0
+    fi
     local settings_runtime="${PWD}/settings/runtime"
     mkdir -p "$settings_runtime" 2>/dev/null || true
     if [[ ! -d "$settings_runtime" ]]; then
