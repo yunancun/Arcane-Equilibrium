@@ -74,3 +74,5 @@ Significant dispatches should be summarized in `.codex/WORKLOG.md` with:
 - task
 - dispatch chain
 - key result or blocker
+
+When the dispatch itself is operationally important or defines a reusable pattern, also add an entry to `.codex/DISPATCH_LEDGER.md`.

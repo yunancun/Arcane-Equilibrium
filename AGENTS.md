@@ -15,8 +15,9 @@ At the start of every new session, read these files in order:
 1. `CLAUDE.md`
 2. `TODO.md`
 3. `.codex/MEMORY.md`
-4. `.codex/AGENT_DISPATCH_PROTOCOL.md`
-5. `.codex/SUBAGENT_EXECUTION_RULES.md`
+4. `.codex/agents/PM.md`
+5. `.codex/AGENT_DISPATCH_PROTOCOL.md`
+6. `.codex/SUBAGENT_EXECUTION_RULES.md`
 
 Read `OPENCLAW_INVENTORY_CONSOLIDATED.md` only on demand for deep history, RCA, or old design decisions.
 
