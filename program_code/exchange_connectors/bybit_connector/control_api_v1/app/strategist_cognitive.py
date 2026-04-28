@@ -14,6 +14,9 @@ MODULE_NOTE (中文):
   2. clear_emergency_mode — 緊急模式清除，正常通道恢復
   3. set_cognitive_modulator — CognitiveModulator 注入（決策門檻調整來源）
   4. _apply_cognitive_modulation — 將 (confidence_floor, qty_ceiling) 套用到 confidence
+  5. tick_cognitive_modulator — 週期性推進 modulator state（W1 FIX-B 既有）
+  6. record_trade_outcome — LOSSES-WIRING consecutive_losses 計數器更新
+                           （G3-08 Phase 4 P3 lift 自 strategist_agent.py）
 
 MODULE_NOTE (English):
   StrategistAgent sibling carrying 4 methods around "V2 dual-track fast channel"
@@ -27,6 +30,9 @@ MODULE_NOTE (English):
   2. clear_emergency_mode — clear emergency mode, normal channel resumes
   3. set_cognitive_modulator — inject CognitiveModulator (decision-threshold source)
   4. _apply_cognitive_modulation — apply (confidence_floor, qty_ceiling) to confidence
+  5. tick_cognitive_modulator — periodic modulator state advance (existing W1 FIX-B)
+  6. record_trade_outcome — LOSSES-WIRING consecutive_losses counter update
+                           (lifted from strategist_agent.py in G3-08 Phase 4 P3)
 
 Hard boundaries (CLAUDE.md §四):
   - 緊急模式為 fail-closed 邊界（emergency mode is a fail-closed boundary）— 觸發後
@@ -274,5 +280,70 @@ def tick_cognitive_modulator(agent: "StrategistAgent") -> None:
         logger.warning(
             "tick_cognitive_modulator failed (non-fatal): %s / "
             "認知調製 tick 失敗（非致命）：%s",
+            exc, exc,
+        )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# LOSSES-WIRING trade outcome ingress / 交易結果計數入口
+# G8-01-FUP-LOSSES-WIRING (Wave A `aced662`) — counter feeding tick_cognitive_modulator
+# G3-08 Phase 4 P3 (2026-04-28) — lift body from strategist_agent.py to keep main
+# file under §九 800-line warning. Pure location refactor; behavior bit-identical.
+# G3-08 Phase 4 P3（2026-04-28）— 從 strategist_agent.py 移出以維持主檔 §九 800 行
+# 警告線之下。純位置重構，行為位元級一致。
+# ─────────────────────────────────────────────────────────────────────────────
+
+def record_trade_outcome(agent: "StrategistAgent", net_pnl: float) -> None:
+    """
+    Update ``agent._stats["consecutive_losses"]`` from a single round-trip outcome.
+    以單筆交易結果更新 ``agent._stats["consecutive_losses"]``。
+
+    Semantics / 語意：
+      - net_pnl >  0  → win  → reset ``consecutive_losses`` to 0
+                        勝 → 歸零
+      - net_pnl <= 0  → loss / breakeven → increment by 1
+                        輸 / 平手 → +1
+
+    Breakeven (net_pnl == 0) treated as loss — fee-eaten trades drained capital
+    without edge, which is what CognitiveModulator should react to (Principle #5
+    survival > profit; #13 cost-edge awareness).
+
+    平手 (net_pnl == 0) 視為輸 —— 被 fee 吃掉的交易雖無虧損但耗資本未產生 edge，
+    正是 CognitiveModulator 該調製的場景（原則 #5 生存 > 利潤、#13 成本-edge 感知）。
+
+    Thread-safe: takes ``agent._lock`` for the read-modify-write on _stats.
+    Idempotent on the same outcome only if caller dedupes upstream — this method
+    intentionally has NO trade_id memory; it's a pure counter ingress.
+
+    線程安全：對 _stats 的 read-modify-write 取 ``agent._lock``。同一筆 outcome 的
+    冪等性由上游 caller 負責去重 —— 本方法刻意不記憶 trade_id，純計數入口。
+
+    Args:
+        agent:  Live StrategistAgent instance.
+        net_pnl: Post-fee PnL of the round-trip (USD or instrument quote unit).
+                 Round-trip 扣費後 PnL（USD 或合約計價單位）。
+    """
+    try:
+        with agent._lock:
+            agent._stats["trade_outcomes_observed"] = (
+                agent._stats.get("trade_outcomes_observed", 0) + 1
+            )
+            if net_pnl > 0:
+                agent._stats["consecutive_losses"] = 0
+            else:
+                agent._stats["consecutive_losses"] = (
+                    agent._stats.get("consecutive_losses", 0) + 1
+                )
+    except Exception as exc:
+        # Fail-open: stat tracking failure must NOT propagate up the
+        # Analyst→Strategist callback chain (Analyst already wraps us in
+        # try/except, but defense-in-depth — never let a stats dict bug
+        # disrupt trade analysis).
+        # Fail-open：統計失敗絕不向 Analyst→Strategist callback chain 傳播
+        # （Analyst 已包 try/except，此處 defense-in-depth —— 不讓統計 dict
+        # bug 干擾交易分析）。
+        logger.warning(
+            "record_trade_outcome failed (non-fatal): %s / "
+            "record_trade_outcome 失敗（非致命）：%s",
             exc, exc,
         )

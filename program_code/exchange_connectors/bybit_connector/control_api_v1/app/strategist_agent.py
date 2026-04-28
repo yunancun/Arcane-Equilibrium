@@ -29,6 +29,19 @@ MODULE_NOTE (中文):
     patch path。主檔保留 ctor / class attrs / 生命週期 / 消息處理 / _handle_intel
     編排 / _produce_intents / status accessors / 既有 BWD compat（H1/H4/H3 stubs）。
 
+  G3-08 Phase 4 P3（2026-04-28）：
+    主檔 933 → ≤800 LOC slim — 在不破 BWD compat 前提下：
+      (a) 16 個既有 delegator 壓縮為單行 def（去 docstring，header 區段已說明）;
+      (b) 多搬 2 個方法 body 至 sibling 並各保 1-line delegator：
+          - ``_produce_intents`` body → strategist_edge_eval.py（intent 構建+派發）;
+          - ``record_trade_outcome`` body → strategist_cognitive.py（LOSSES-WIRING
+            counter，與 tick_cognitive_modulator 共處同檔，語意凝聚度高）;
+      (c) ``_handle_intel`` 5 個 early-return 點補 ``_invalidate_h_state_async``
+          hint（E2 4-1 NIT-1 LOW），讓 h_state cache 對 intel 拒絕事件保鮮。
+    BWD compat：``agent._produce_intents`` / ``agent.record_trade_outcome`` 仍為
+    bound method（test ``MagicMock(wraps=agent.method)`` 無感）；``patch(
+    "app.strategist_agent.X")`` patch path 因 re-export 完整保留。
+
   安全不變量：
   - system_mode = read_only 不變
   - fail-closed：異常時默認拒絕
@@ -99,6 +112,7 @@ from .strategist_cognitive import (  # noqa: F401 — re-export for tests / patc
     _apply_cognitive_modulation as _sc_apply_cognitive_modulation,
     clear_emergency_mode as _sc_clear_emergency_mode,
     handle_fast_channel as _sc_handle_fast_channel,
+    record_trade_outcome as _sc_record_trade_outcome,
     set_cognitive_modulator as _sc_set_cognitive_modulator,
     tick_cognitive_modulator as _sc_tick_cognitive_modulator,
 )
@@ -109,6 +123,7 @@ from .strategist_edge_eval import (  # noqa: F401 — re-export for tests / patc
     _evaluate_edge as _se_evaluate_edge,
     _evaluate_edge_l1_5 as _se_evaluate_edge_l1_5,
     _process_knowledge_update as _se_process_knowledge_update,
+    _produce_intents as _se_produce_intents,
 )
 from .strategist_models import (  # noqa: F401 — re-export for backward compatibility
     EdgeEvaluation,
@@ -354,6 +369,12 @@ class StrategistAgent(BaseAgent):
 
         Orchestration only — delegates H1/H3/H4 to extracted modules.
         僅做編排 — H1/H3/H4 委託給拆分模組。
+
+        G3-08 Phase 4 P3 (E2 4-1 NIT-1 LOW): every early-return point also fires
+        a no-op-when-disabled h_state hint, so the cache reflects rejection
+        events (relevance/age/parse-failure) — not just successful evaluations.
+        G3-08 Phase 4 P3（E2 4-1 NIT-1 LOW）：每個 early-return 點同步發出失效
+        提示（env=0 時 no-op），使 h_state cache 對拒絕事件保鮮，而非只反映成功路徑。
         """
         # V2: Emergency mode check — discard normal channel intents during emergency
         # 緊急模式檢查 — 緊急時期丟棄正常通道 intent
@@ -362,6 +383,7 @@ class StrategistAgent(BaseAgent):
                 "Normal channel intel discarded (emergency mode active) / "
                 "正常通道情報已丟棄（緊急模式）"
             )
+            _invalidate_h_state_async("agent.strategist.emergency_discard")
             return
 
         with self._lock:
@@ -385,6 +407,7 @@ class StrategistAgent(BaseAgent):
         payload = message.payload
         if not payload:
             logger.warning("Empty intel payload / 空情報負載")
+            _invalidate_h_state_async("agent.strategist.empty_payload")
             return
 
         # Reconstruct IntelObject from payload / 從負載重建 IntelObject
@@ -405,6 +428,7 @@ class StrategistAgent(BaseAgent):
             logger.error("Failed to parse IntelObject: %s / 解析 IntelObject 失敗: %s", e, e)
             with self._lock:
                 self._stats["errors"] += 1
+            _invalidate_h_state_async("agent.strategist.parse_error")
             return
 
         # C4: Apply regime-aware strategy weights if regime info is available in metadata.
@@ -417,12 +441,14 @@ class StrategistAgent(BaseAgent):
         if intel.relevance_score < self.config.min_relevance:
             logger.debug("Intel below relevance threshold: %.2f < %.2f",
                          intel.relevance_score, self.config.min_relevance)
+            _invalidate_h_state_async("agent.strategist.relevance_skip")
             return
 
         # Check age / 檢查年齡
         age_seconds = max(0, (now_ms() - intel.timestamp_ms) / 1000)
         if age_seconds > self.config.max_intel_age_seconds:
             logger.debug("Intel too old: %.0fs > %ds", age_seconds, self.config.max_intel_age_seconds)
+            _invalidate_h_state_async("agent.strategist.age_skip")
             return
 
         # ── L2 cache check: use previous L2 background result if available ──
@@ -564,87 +590,8 @@ class StrategistAgent(BaseAgent):
         self._produce_intents(intel, evaluation)
 
     def _produce_intents(self, intel: IntelObject, evaluation: EdgeEvaluation) -> None:
-        """
-        Build and dispatch TradeIntent for each symbol in the intel.
-        為情報中的每個幣種構建並分發 TradeIntent。
-
-        Applies strategy preference weights and dispatches via MessageBus or shadow log.
-        應用策略偏好權重，通過 MessageBus 或影子日誌分發。
-        """
-        from .multi_agent_framework import SentimentScore
-        direction = "long" if intel.sentiment == SentimentScore.POSITIVE else "short"
-
-        for symbol in intel.symbols:
-            # Apply strategy preference weight (Principle 12: continuous evolution)
-            # 應用策略偏好權重（原則 12：持續進化）
-            strategy_key = f"{evaluation.source}_{symbol}" if evaluation.source else symbol
-            weight = self._strategy_preference_weights.get(strategy_key, None)
-            if weight is None:
-                source_key = "strategist_ai" if evaluation.source == "ai" else "strategist_heuristic"
-                weight = self._strategy_preference_weights.get(source_key, 1.0)
-            adjusted_confidence = min(1.0, evaluation.confidence * weight)
-            if adjusted_confidence != evaluation.confidence:
-                logger.debug(
-                    "Strategy weight applied for %s: %.2f × %.2f = %.2f / "
-                    "策略偏好權重已應用：原始置信度 %.2f × 權重 %.2f = 調整後 %.2f",
-                    symbol, evaluation.confidence, weight, adjusted_confidence,
-                    evaluation.confidence, weight, adjusted_confidence,
-                )
-
-            intent = TradeIntent(
-                symbol=symbol,
-                strategy="strategist_ai" if evaluation.source == "ai" else "strategist_heuristic",
-                direction=direction,
-                size=self.config.default_size,
-                confidence=adjusted_confidence,
-                thesis=f"Scout intel: {intel.content[:100]}",
-                invalidation_condition=f"Edge confidence drops below {self.config.min_confidence}",
-                data_quality=intel.data_quality,
-                metadata={
-                    "intel_id": intel.intel_id,
-                    "evaluation_source": evaluation.source,
-                    "evaluation_reason": evaluation.reason,
-                    "raw_confidence": evaluation.confidence,
-                    "strategy_weight": weight,
-                    "shadow": self.config.shadow,
-                },
-            )
-
-            if self.config.shadow:
-                with self._lock:
-                    self._stats["intents_shadow_logged"] += 1
-                self._audit("shadow_intent", intent.to_dict())
-                logger.info(
-                    "SHADOW intent: %s %s %s conf=%.2f (raw=%.2f weight=%.2f) / "
-                    "影子 intent: %s %s 調整置信度=%.2f",
-                    symbol, direction, evaluation.source,
-                    adjusted_confidence, evaluation.confidence, weight,
-                    symbol, direction, adjusted_confidence,
-                )
-            else:
-                with self._lock:
-                    self._stats["intents_produced"] += 1
-                if self.bus:
-                    msg = AgentMessage(
-                        sender=AgentRole.STRATEGIST,
-                        receiver=AgentRole.GUARDIAN,
-                        message_type=MessageType.TRADE_INTENT,
-                        priority=3,
-                        payload=intent.to_dict(),
-                    )
-                    self.bus.send(msg)
-                self._audit("intent_produced", intent.to_dict())
-                logger.info(
-                    "TradeIntent produced: %s %s %s conf=%.2f (raw=%.2f weight=%.2f) / "
-                    "TradeIntent 已產出：調整置信度=%.2f",
-                    symbol, direction, evaluation.source,
-                    adjusted_confidence, evaluation.confidence, weight,
-                    adjusted_confidence,
-                )
-
-        # G3-08 Phase 4 Sub-task 4-1: hint once per intel batch (post-loop, no _lock).
-        # G3-08 Phase 4 Sub-task 4-1：每筆 intel 一次，loop 外、鎖外；env=0 no-op。
-        _invalidate_h_state_async("agent.strategist.intent_produced")
+        """Backward-compatible delegator to strategist_edge_eval / 向後兼容委託"""
+        return _se_produce_intents(self, intel, evaluation)
 
     # ── Risk / Pattern / Directive Handlers ──
 
@@ -671,67 +618,46 @@ class StrategistAgent(BaseAgent):
         self._audit("directive_received", message.payload)
 
     # ──────────────────────────────────────────────────────────────────────
-    # Sibling delegators (G3-08 Phase 4)
-    # Sibling 委託器（G3-08 Phase 4）
+    # Sibling delegators (G3-08 Phase 4 + Phase 4 P3 LOC slim)
+    # Sibling 委託器（G3-08 Phase 4 + Phase 4 P3 LOC 瘦身）
     # ──────────────────────────────────────────────────────────────────────
-    # All 16 method bodies live in 3 sibling modules:
+    # 18 method bodies live in 3 sibling modules:
     #   strategist_edge_eval.py / strategist_weights.py / strategist_cognitive.py
-    # Methods below preserve original signatures so all callsites + test patch
-    # paths via app.strategist_agent.* keep working.
-    # 所有 16 method body 移至 3 個 sibling 模組，本檔保留原 signature 1-line
-    # delegator，向後兼容所有 callsite + test patch path。
+    # Methods below preserve original bound-method signatures so:
+    #   1. callsite ``self.method(...)`` paths inside _handle_intel keep working;
+    #   2. test patch ``agent.method = MagicMock(wraps=agent.method)`` keeps
+    #      finding a real bound method to wrap (instance lookup falls through
+    #      to class attr, which is the delegator below);
+    #   3. ``patch("app.strategist_agent.X")`` keeps resolving via re-exports
+    #      at module load (see top-of-file ``from .strategist_X import …``).
+    # G3-08 Phase 4 P3 (2026-04-28): compressed each delegator to 1-line
+    # ``def … return …`` (header + per-sibling docstring already explain
+    # responsibilities — the delegator itself is mechanical glue).
+    #
+    # 18 method body 移至 3 sibling 模組，本檔保留原 bound-method signature 為：
+    #   1. _handle_intel 內 ``self.method(...)`` callsite 持續可用；
+    #   2. test ``agent.method = MagicMock(wraps=agent.method)`` 仍能找到真實
+    #      bound method 來 wrap（instance lookup fallback 到 class attr，即下
+    #      方的 delegator）；
+    #   3. ``patch("app.strategist_agent.X")`` 透過頂部 re-export 解析。
+    # G3-08 Phase 4 P3（2026-04-28）：每個 delegator 壓縮為單行 def，header 與
+    # sibling 自身的 docstring 已說明職責，delegator 本身只是機械 glue。
 
-    # ── Truth Registry + Strategy Preference Weights ──
+    # ── Truth Registry + Strategy Preference Weights → strategist_weights ──
+    def set_budget_manager(self, budget_manager: Any) -> None: return _sw_set_budget_manager(self, budget_manager)  # noqa: E704
+    def set_truth_registry(self, registry: Any) -> None: return _sw_set_truth_registry(self, registry)  # noqa: E704
+    def _apply_pattern_insight(self, insight_payload: dict) -> None: return _sw_apply_pattern_insight(self, insight_payload)  # noqa: E704
+    def get_strategy_weight(self, strategy_name: str) -> float: return _sw_get_strategy_weight(self, strategy_name)  # noqa: E704
+    def _apply_regime_weights(self, regime: str) -> None: return _sw_apply_regime_weights(self, regime)  # noqa: E704
+    def _apply_l2_weight_update(self, intel: Any, evaluation: EdgeEvaluation) -> None: return _sw_apply_l2_weight_update(self, intel, evaluation)  # noqa: E704
 
-    def set_budget_manager(self, budget_manager: Any) -> None:
-        """Backward-compatible delegator to strategist_weights / 向後兼容委託"""
-        return _sw_set_budget_manager(self, budget_manager)
-
-    def set_truth_registry(self, registry: Any) -> None:
-        """Backward-compatible delegator to strategist_weights / 向後兼容委託"""
-        return _sw_set_truth_registry(self, registry)
-
-    def _apply_pattern_insight(self, insight_payload: dict) -> None:
-        """Backward-compatible delegator to strategist_weights / 向後兼容委託"""
-        return _sw_apply_pattern_insight(self, insight_payload)
-
-    def get_strategy_weight(self, strategy_name: str) -> float:
-        """Backward-compatible delegator to strategist_weights / 向後兼容委託"""
-        return _sw_get_strategy_weight(self, strategy_name)
-
-    def _apply_regime_weights(self, regime: str) -> None:
-        """Backward-compatible delegator to strategist_weights / 向後兼容委託"""
-        return _sw_apply_regime_weights(self, regime)
-
-    def _apply_l2_weight_update(self, intel: Any, evaluation: EdgeEvaluation) -> None:
-        """Backward-compatible delegator to strategist_weights / 向後兼容委託"""
-        return _sw_apply_l2_weight_update(self, intel, evaluation)
-
-    # ── Route Context + Edge Evaluation + Prompt + L1.5 ──
-
-    def _build_route_context(self, intel: Any) -> dict:
-        """Backward-compatible delegator to strategist_edge_eval / 向後兼容委託"""
-        return _se_build_route_context(self, intel)
-
-    def _evaluate_edge_l1_5(self, intel: Any) -> EdgeEvaluation:
-        """Backward-compatible delegator to strategist_edge_eval / 向後兼容委託"""
-        return _se_evaluate_edge_l1_5(self, intel)
-
-    def _process_knowledge_update(self, knowledge_update: Any, source: str = "cloud_api") -> None:
-        """Backward-compatible delegator to strategist_edge_eval / 向後兼容委託"""
-        return _se_process_knowledge_update(self, knowledge_update, source)
-
-    def _build_prompt_context(self, intel: IntelObject) -> str:
-        """Backward-compatible delegator to strategist_edge_eval / 向後兼容委託"""
-        return _se_build_prompt_context(self, intel)
-
-    def _evaluate_edge(self, intel: IntelObject) -> EdgeEvaluation:
-        """Backward-compatible delegator to strategist_edge_eval / 向後兼容委託"""
-        return _se_evaluate_edge(self, intel)
-
-    def _ai_evaluate(self, intel: IntelObject) -> EdgeEvaluation:
-        """Backward-compatible delegator to strategist_edge_eval / 向後兼容委託"""
-        return _se_ai_evaluate(self, intel)
+    # ── Route Context + Edge Evaluation + Prompt + L1.5 → strategist_edge_eval ──
+    def _build_route_context(self, intel: Any) -> dict: return _se_build_route_context(self, intel)  # noqa: E704
+    def _evaluate_edge_l1_5(self, intel: Any) -> EdgeEvaluation: return _se_evaluate_edge_l1_5(self, intel)  # noqa: E704
+    def _process_knowledge_update(self, knowledge_update: Any, source: str = "cloud_api") -> None: return _se_process_knowledge_update(self, knowledge_update, source)  # noqa: E704
+    def _build_prompt_context(self, intel: IntelObject) -> str: return _se_build_prompt_context(self, intel)  # noqa: E704
+    def _evaluate_edge(self, intel: IntelObject) -> EdgeEvaluation: return _se_evaluate_edge(self, intel)  # noqa: E704
+    def _ai_evaluate(self, intel: IntelObject) -> EdgeEvaluation: return _se_ai_evaluate(self, intel)  # noqa: E704
 
     # ── Intent Collection (DEPRECATED) / Intent 收集（已廢棄）──
 
@@ -750,113 +676,36 @@ class StrategistAgent(BaseAgent):
         )
         return []
 
-    # ── Backward-compatible H1/H4/H3 method stubs ──
-    # These thin wrappers preserve the old method signatures for any external callers.
-    # 這些薄包裝保留舊方法簽名，供任何外部調用者使用。
-
-    def _h1_check_budget(self) -> bool:
-        """Backward-compatible delegator to H1ThoughtGate / 向後兼容委託"""
-        return self._h1_gate._check_budget()
-
-    def _h1_complexity_score(self, intel: Any) -> float:
-        """Backward-compatible delegator to H1ThoughtGate / 向後兼容委託"""
-        return self._h1_gate.complexity_score(intel)
-
-    def _h1_check_cooldown(self, intel: Any) -> bool:
-        """Backward-compatible delegator to H1ThoughtGate / 向後兼容委託"""
-        return self._h1_gate._check_cooldown(intel)
-
-    def _validate_ai_output(self, parsed: dict) -> bool:
-        """Backward-compatible delegator to h4_validator / 向後兼容委託"""
-        return validate_ai_output(parsed)
+    # ── Backward-compatible H1/H4/H3 method stubs (compressed delegators) ──
+    # 1-line wrappers preserving original method signatures for external callers.
+    # 1-line 包裝保留原方法簽名，供任何外部調用者使用。
+    def _h1_check_budget(self) -> bool: return self._h1_gate._check_budget()  # noqa: E704
+    def _h1_complexity_score(self, intel: Any) -> float: return self._h1_gate.complexity_score(intel)  # noqa: E704
+    def _h1_check_cooldown(self, intel: Any) -> bool: return self._h1_gate._check_cooldown(intel)  # noqa: E704
+    def _validate_ai_output(self, parsed: dict) -> bool: return validate_ai_output(parsed)  # noqa: E704
 
     def _h3_route_model(self, intel: Any) -> str:
-        """Backward-compatible delegator to ModelRouter / 向後兼容委託"""
+        # H3 path needs both complexity + route_context; not a 1-line glue.
+        # H3 路徑需 complexity + route_context 兩步，非單純 1-line glue。
         complexity = self._h1_gate.complexity_score(intel)
         route_context = self._build_route_context(intel)
         return self._model_router.route(complexity, context=route_context)
 
-    # ── V2: Dual-track Fast Channel + Cognitive Modulator ──
+    # ── V2: Dual-track Fast Channel + Cognitive Modulator → strategist_cognitive ──
+    def handle_fast_channel(self, trigger: str, symbols: list[str] | None = None) -> List[TradeIntent]: return _sc_handle_fast_channel(self, trigger, symbols)  # noqa: E704
+    def clear_emergency_mode(self) -> None: return _sc_clear_emergency_mode(self)  # noqa: E704
+    def set_cognitive_modulator(self, modulator: Any) -> None: return _sc_set_cognitive_modulator(self, modulator)  # noqa: E704
+    def _apply_cognitive_modulation(self, confidence: float) -> tuple[float, float]: return _sc_apply_cognitive_modulation(self, confidence)  # noqa: E704
 
-    def handle_fast_channel(self, trigger: str, symbols: list[str] | None = None) -> List[TradeIntent]:
-        """Backward-compatible delegator to strategist_cognitive / 向後兼容委託"""
-        return _sc_handle_fast_channel(self, trigger, symbols)
-
-    def clear_emergency_mode(self) -> None:
-        """Backward-compatible delegator to strategist_cognitive / 向後兼容委託"""
-        return _sc_clear_emergency_mode(self)
-
-    def set_cognitive_modulator(self, modulator: Any) -> None:
-        """Backward-compatible delegator to strategist_cognitive / 向後兼容委託"""
-        return _sc_set_cognitive_modulator(self, modulator)
-
-    # G8-01-FUP-LOSSES-WIRING: trade outcome ingress for CognitiveModulator
-    # consecutive_losses input. Wired in strategy_wiring.py to AnalystAgent's
-    # ``set_strategist_loss_callback`` so every IPC-driven trade analysis
-    # advances the counter. Direct method (not a delegator) because the entire
-    # surface is small and stat-only — no logic worth extracting.
-    # G8-01-FUP-LOSSES-WIRING：CognitiveModulator consecutive_losses 輸入的
-    # 交易結果入口。strategy_wiring.py 中接到 AnalystAgent 的
-    # ``set_strategist_loss_callback``，使每筆 IPC 觸發的 trade analysis 都
-    # 推進此計數器。直接方法（非 delegator），因 surface 小且純統計，無需拆分。
-    def record_trade_outcome(self, net_pnl: float) -> None:
-        """
-        Update ``_stats["consecutive_losses"]`` from a single round-trip outcome.
-        以單筆交易結果更新 ``_stats["consecutive_losses"]``。
-
-        Semantics / 語意：
-          - net_pnl >  0  → win  → reset ``consecutive_losses`` to 0
-                            勝 → 歸零
-          - net_pnl <= 0  → loss / breakeven → increment by 1
-                            輸 / 平手 → +1
-
-        Breakeven (net_pnl == 0) treated as loss — fee-eaten trades drained
-        capital without edge, which is what CognitiveModulator should react to
-        (Principle #5 survival > profit; #13 cost-edge awareness).
-
-        平手 (net_pnl == 0) 視為輸 —— 被 fee 吃掉的交易雖無虧損但耗資本未產生
-        edge，正是 CognitiveModulator 該調製的場景（原則 #5 生存 > 利潤、
-        #13 成本-edge 感知）。
-
-        Thread-safe: takes ``self._lock`` for the read-modify-write on _stats.
-        Idempotent on the same outcome only if caller dedupes upstream — this
-        method intentionally has NO trade_id memory; it's a pure counter ingress.
-
-        線程安全：對 _stats 的 read-modify-write 取 ``self._lock``。同一筆 outcome
-        的冪等性由上游 caller 負責去重 —— 本方法刻意不記憶 trade_id，純計數入口。
-
-        Args:
-            net_pnl: Post-fee PnL of the round-trip (USD or instrument quote unit).
-                     Round-trip 扣費後 PnL（USD 或合約計價單位）。
-        """
-        try:
-            with self._lock:
-                self._stats["trade_outcomes_observed"] = (
-                    self._stats.get("trade_outcomes_observed", 0) + 1
-                )
-                if net_pnl > 0:
-                    self._stats["consecutive_losses"] = 0
-                else:
-                    self._stats["consecutive_losses"] = (
-                        self._stats.get("consecutive_losses", 0) + 1
-                    )
-        except Exception as exc:
-            # Fail-open: stat tracking failure must NOT propagate up the
-            # Analyst→Strategist callback chain (Analyst already wraps us in
-            # try/except, but defense-in-depth — never let a stats dict bug
-            # disrupt trade analysis).
-            # Fail-open：統計失敗絕不向 Analyst→Strategist callback chain 傳播
-            # （Analyst 已包 try/except，此處 defense-in-depth —— 不讓統計 dict
-            # bug 干擾交易分析）。
-            logger.warning(
-                "record_trade_outcome failed (non-fatal): %s / "
-                "record_trade_outcome 失敗（非致命）：%s",
-                exc, exc,
-            )
-
-    def _apply_cognitive_modulation(self, confidence: float) -> tuple[float, float]:
-        """Backward-compatible delegator to strategist_cognitive / 向後兼容委託"""
-        return _sc_apply_cognitive_modulation(self, confidence)
+    # G8-01-FUP-LOSSES-WIRING: trade outcome ingress for CognitiveModulator's
+    # consecutive_losses input — wired in strategy_wiring.py to
+    # AnalystAgent.set_strategist_loss_callback so every IPC-driven trade
+    # analysis advances the counter. Body lifted to strategist_cognitive.py in
+    # G3-08 Phase 4 P3 to keep main file under §九 800-line warning.
+    # G8-01-FUP-LOSSES-WIRING：CognitiveModulator consecutive_losses 輸入入口，
+    # strategy_wiring.py 接 AnalystAgent.set_strategist_loss_callback。Body 於
+    # G3-08 Phase 4 P3 移至 strategist_cognitive.py（§九 800 行警告線）。
+    def record_trade_outcome(self, net_pnl: float) -> None: return _sc_record_trade_outcome(self, net_pnl)  # noqa: E704
 
     # ── Audit / 審計 ──
     # _audit() inherited from BaseAgent (prefixes event with role.value = "strategist").
