@@ -197,6 +197,7 @@ MODULE_NOTE (中):
 
 import logging
 import os
+import sys
 import time
 from typing import Any, Optional
 
@@ -324,20 +325,42 @@ def _collect_h_snapshots(
         # caller 全部過濾 — 短路省匯入成本。
         return None, None, None, None, None
 
-    try:
-        # Lazy import: strategy_wiring is heavy (instantiates many agents +
-        # singletons at import time). Importing here ensures unit tests that
-        # only touch this module don't transitively boot the whole agent
-        # stack.
-        # 延遲匯入：strategy_wiring 重（匯入時實例化多個 agent + singleton）。
-        # 此處延遲匯入確保只測本模組的 unit test 不會傳遞性啟動整個 agent stack。
-        from . import strategy_wiring as _sw  # noqa: PLC0415
-    except Exception as exc:  # noqa: BLE001 — broad: any import-time failure
+    # G3-08-PHASE-FUP-IMPORT-PATH-LEAK (2026-04-28 PA RFC Option B):
+    # Resolve strategy_wiring via ``sys.modules.get`` instead of
+    # ``from . import strategy_wiring as _sw``. Background: CPython
+    # ``from PKG import SUB`` semantic does ``getattr(PKG, "SUB")`` first
+    # and only falls back to ``sys.modules["PKG.SUB"]`` if the attribute
+    # is missing. Once any sibling test (e.g. test_api_contract.py:16
+    # ``importlib.reload(main_legacy) + importlib.reload(main)``)
+    # transitively imports strategy_wiring, the ``app.strategy_wiring``
+    # attribute on the parent ``app`` package is permanently bound to the
+    # real module. Subsequent fixtures that patch only
+    # ``sys.modules["app.strategy_wiring"]`` therefore have ZERO effect on
+    # this lookup → 35 ``test_h_state_query_handler.py`` assertions read
+    # the real STRATEGIST_AGENT (zero stats) instead of the fake.
+    # ``sys.modules.get`` bypasses the attribute precedence entirely.
+    # Runtime semantics are equivalent: at uvicorn boot the wiring import
+    # populates both ``sys.modules`` AND the package attribute in lock-step
+    # → live lookup hits the real module via either path. Fail-soft path
+    # below already covers the lookup-miss case.
+    # G3-08-PHASE-FUP-IMPORT-PATH-LEAK（2026-04-28 PA RFC Option B）：
+    # 改用 ``sys.modules.get`` 取代 ``from . import strategy_wiring``。
+    # 背景：CPython ``from PKG import SUB`` 語意先 ``getattr(PKG, "SUB")``，
+    # 缺才落 ``sys.modules["PKG.SUB"]``。任何 sibling test
+    # （例 test_api_contract.py:16 ``importlib.reload(main_legacy/main)``）
+    # 透過 transitive import 將 ``app.strategy_wiring`` 屬性永久綁到真模組
+    # 後，僅 patch ``sys.modules["app.strategy_wiring"]`` 的 fixture 對此查找
+    # 完全無效 → 35 個 ``test_h_state_query_handler.py`` assertion 讀到真
+    # STRATEGIST_AGENT（all-zero stats），fake 失效。``sys.modules.get`` 完全
+    # 繞過屬性優先序。Runtime 語意等價：uvicorn boot 時 wiring import 會同步
+    # 填入 ``sys.modules`` 與 package attribute，live lookup 走任一路徑都
+    # 命中真模組。下方 fail-soft path 已覆蓋 lookup-miss 案例。
+    _sw = sys.modules.get("app.strategy_wiring")
+    if _sw is None:
         logger.debug(
-            "_collect_h_snapshots: strategy_wiring not importable; "
-            "falling back to empty shell. Reason: %s "
-            "/ strategy_wiring 不可匯入；退回空殼",
-            exc,
+            "_collect_h_snapshots: app.strategy_wiring not in sys.modules; "
+            "falling back to empty shell "
+            "/ sys.modules 缺 app.strategy_wiring；退回空殼"
         )
         return None, None, None, None, None
 
@@ -464,18 +487,24 @@ def _collect_agent_snapshots(
         # caller 全部過濾 — 短路省匯入成本。
         return result
 
-    try:
-        # Lazy import: same rationale as _collect_h_snapshots — strategy_wiring
-        # is heavy and must not boot transitively at module top.
-        # 延遲匯入：與 _collect_h_snapshots 同理，strategy_wiring 重，
-        # 不可在模組頂層傳遞性匯入。
-        from . import strategy_wiring as _sw  # noqa: PLC0415
-    except Exception as exc:  # noqa: BLE001 — broad: any import-time failure
+    # G3-08-PHASE-FUP-IMPORT-PATH-LEAK (2026-04-28 PA RFC Option B):
+    # Same sys.modules.get rationale as _collect_h_snapshots above —
+    # bypass CPython ``from PKG import SUB`` attribute precedence so test
+    # fixtures patching only ``sys.modules["app.strategy_wiring"]`` take
+    # effect. Runtime semantics equivalent (sys.modules + package attr
+    # populated in lock-step at uvicorn boot); fail-soft path covers miss.
+    # G3-08-PHASE-FUP-IMPORT-PATH-LEAK（2026-04-28 PA RFC Option B）：
+    # 同 _collect_h_snapshots — 用 sys.modules.get 繞過 CPython
+    # ``from PKG import SUB`` 屬性優先序，讓僅 patch
+    # ``sys.modules["app.strategy_wiring"]`` 的 fixture 生效。Runtime
+    # 語意等價（uvicorn boot 時 sys.modules + package attr 同步填入）；
+    # fail-soft path 已覆蓋 miss。
+    _sw = sys.modules.get("app.strategy_wiring")
+    if _sw is None:
         logger.debug(
-            "_collect_agent_snapshots: strategy_wiring not importable; "
-            "falling back to empty result. Reason: %s "
-            "/ strategy_wiring 不可匯入；退回空 dict",
-            exc,
+            "_collect_agent_snapshots: app.strategy_wiring not in sys.modules; "
+            "falling back to empty result "
+            "/ sys.modules 缺 app.strategy_wiring；退回空 dict"
         )
         return result
 

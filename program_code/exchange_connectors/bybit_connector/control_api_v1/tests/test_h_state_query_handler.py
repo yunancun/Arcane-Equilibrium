@@ -316,6 +316,9 @@ class _FakeScout:
             self.get_scout_snapshot = _get
 
 
+_SW_ATTR_MISSING = object()  # sentinel for "no attribute on app pkg" / 標記 app 上原無屬性
+
+
 def _install_fake_strategy_wiring(strategist, guardian=None, analyst=None, executor=None, scout=None):
     """Replace ``app.strategy_wiring`` in sys.modules with a stub.
 
@@ -324,9 +327,38 @@ def _install_fake_strategy_wiring(strategist, guardian=None, analyst=None, execu
     G3-08 Phase 4 Sub-task 4-2/3/4/5 增加 ``guardian`` / ``analyst`` /
     ``executor`` / ``scout`` 參數。預設 None 保持先前呼叫面向不變。
 
-    Returns the previous module (or ``None``) so caller can restore.
+    G3-08-PHASE-FUP-IMPORT-PATH-LEAK (2026-04-28 PA RFC Option A):
+    Patch BOTH ``sys.modules["app.strategy_wiring"]`` AND the
+    ``app.strategy_wiring`` package attribute. Background: CPython
+    ``from PKG import SUB`` semantic does ``getattr(PKG, "SUB")`` first;
+    once ``test_api_contract.py:16`` calls
+    ``importlib.reload(main_legacy)+importlib.reload(main)``, the real
+    ``app.strategy_wiring`` module gets bound to the ``app`` package
+    attribute permanently. Patching only sys.modules has zero effect on
+    callers that resolve via ``from . import strategy_wiring``. We mirror
+    the W3 fix dual-patch pattern (commit ``a2b660d``) so the fake is
+    visible regardless of how the production code resolves the module.
+    Note: production-side Option B (sys.modules.get in
+    ``h_state_query_handler.py``) is the primary fix — Option A here is
+    defense-in-depth for any future production code that still uses
+    ``from . import``.
+    G3-08-PHASE-FUP-IMPORT-PATH-LEAK（2026-04-28 PA RFC Option A）：
+    同時 patch ``sys.modules["app.strategy_wiring"]`` 與
+    ``app.strategy_wiring`` 套件屬性。背景：CPython ``from PKG import SUB``
+    語意先 ``getattr(PKG, "SUB")``；一旦 ``test_api_contract.py:16`` 呼叫
+    ``importlib.reload(main_legacy)+importlib.reload(main)``，真
+    ``app.strategy_wiring`` 模組會永久綁到 ``app`` 套件屬性。僅 patch
+    sys.modules 對走 ``from . import strategy_wiring`` 的 caller 完全無效。
+    鏡 W3 fix 雙 patch pattern（commit ``a2b660d``），確保 fake 對所有
+    解析路徑都可見。注意：production 端 Option B（``h_state_query_handler.py``
+    內 sys.modules.get）是主修；本處 Option A 為 defense-in-depth，防未來
+    新 production code 仍走 ``from . import``。
+
+    Returns ``(prev_in_modules, prev_attr_or_sentinel)`` so caller can
+    restore both states atomically.
+    回傳 ``(prev_in_modules, prev_attr_or_sentinel)`` 供 caller 原子還原。
     """
-    prev = sys.modules.get("app.strategy_wiring")
+    prev_in_modules = sys.modules.get("app.strategy_wiring")
     fake_mod = types.ModuleType("app.strategy_wiring")
     fake_mod.STRATEGIST_AGENT = strategist
     if guardian is not None:
@@ -338,15 +370,52 @@ def _install_fake_strategy_wiring(strategist, guardian=None, analyst=None, execu
     if scout is not None:
         fake_mod.SCOUT_AGENT = scout
     sys.modules["app.strategy_wiring"] = fake_mod
-    return prev
+
+    # Dual-patch: also bind on parent ``app`` package attribute so
+    # ``from . import strategy_wiring`` resolves to our stub. Capture
+    # prior attr state via sentinel (None is a valid value).
+    # 雙 patch：同時綁到 ``app`` 套件屬性，確保 ``from . import strategy_wiring``
+    # 解析到我們的 stub。用 sentinel 記原屬性狀態（None 為合法值）。
+    import app as _app_pkg  # noqa: PLC0415 — local import keeps top minimal
+    prev_attr = getattr(_app_pkg, "strategy_wiring", _SW_ATTR_MISSING)
+    _app_pkg.strategy_wiring = fake_mod  # type: ignore[attr-defined]
+
+    return (prev_in_modules, prev_attr)
 
 
 
 def _restore_strategy_wiring(prev):
-    if prev is None:
+    """Reverse :func:`_install_fake_strategy_wiring` for both sys.modules and
+    the ``app.strategy_wiring`` attribute.
+
+    Backward-compat: also accepts the legacy ``prev`` shape (a single module
+    or ``None``) for any caller still using the pre-Option-A signature.
+    向後相容：同時接受舊 ``prev`` 形狀（單一 module 或 ``None``）以兼容
+    尚未升級 Option A 的呼叫端。
+    """
+    if isinstance(prev, tuple) and len(prev) == 2:
+        prev_in_modules, prev_attr = prev
+    else:  # legacy single-value form / 舊單值形式
+        prev_in_modules, prev_attr = prev, _SW_ATTR_MISSING
+
+    # Restore sys.modules first / 先還原 sys.modules
+    if prev_in_modules is None:
         sys.modules.pop("app.strategy_wiring", None)
     else:
-        sys.modules["app.strategy_wiring"] = prev
+        sys.modules["app.strategy_wiring"] = prev_in_modules
+
+    # Restore parent package attribute / 還原父套件屬性
+    import app as _app_pkg  # noqa: PLC0415
+    if prev_attr is _SW_ATTR_MISSING:
+        # No attribute existed before — remove our injection.
+        # 原本沒屬性 — 移除我們的注入。
+        if hasattr(_app_pkg, "strategy_wiring"):
+            try:
+                delattr(_app_pkg, "strategy_wiring")
+            except AttributeError:
+                pass
+    else:
+        _app_pkg.strategy_wiring = prev_attr  # type: ignore[attr-defined]
 
 
 # ── 1-4. Phase 1 fallback — empty-shell shape (env=0) ──
