@@ -917,7 +917,7 @@ async def post_demo_session_stop(
         # via REST settleCoin scope BEFORE close_all to avoid TP/SL triggering
         # during the close-position window.
         # 第一步：先全帳戶取消掛單，避免平倉途中 TP/SL 條件單觸發。
-        cancel_orders_result = _sweep_demo_orphan_orders(errors)
+        cancel_orders_result = await _sweep_demo_orphan_orders(errors)
         # Phase 2 — Close tracked positions via IPC (Rust paper_state iter).
         # 第二步：通過 IPC 平倉 paper_state 追蹤的持倉。
         try:
