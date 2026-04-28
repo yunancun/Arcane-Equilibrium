@@ -210,11 +210,17 @@ fn exit_features_writer_bug_fix_ft_dust_floor_wiring() {
     // 範圍 [0, 100000]；NaN/Inf 拒絕。
     let mut bad = RiskConfig::default();
     bad.limits.ft_dust_qty_floor_usd = -0.01;
-    assert!(bad.validate().is_err(), "negative dust floor must be rejected");
+    assert!(
+        bad.validate().is_err(),
+        "negative dust floor must be rejected"
+    );
     bad.limits.ft_dust_qty_floor_usd = 100_000.01;
     assert!(bad.validate().is_err(), "above-cap dust floor must reject");
     bad.limits.ft_dust_qty_floor_usd = f64::NAN;
-    assert!(bad.validate().is_err(), "NaN must reject (silent disable guard)");
+    assert!(
+        bad.validate().is_err(),
+        "NaN must reject (silent disable guard)"
+    );
     bad.limits.ft_dust_qty_floor_usd = 0.0;
     assert!(bad.validate().is_ok(), "0.0 (disabled) must validate");
     bad.limits.ft_dust_qty_floor_usd = 100_000.0;

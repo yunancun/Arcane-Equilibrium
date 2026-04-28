@@ -33,11 +33,11 @@
 //!   behavior 變化。為將 `main.rs` 壓在 §九 1200 行硬上限下（1230 → ~1010）+
 //!   讓 `main_boot_tasks.rs` 回到 §九 800 行 warn 線附近（1015 → ~865）。
 
+use openclaw_engine::config::{ConfigStore, RiskConfig};
 use openclaw_engine::cost_edge_advisor::{
     is_advisor_env_enabled, spawn_cost_edge_advisor_with_persistence, CostEdgeAdvisor,
     DEFAULT_POLL_INTERVAL as COST_EDGE_DEFAULT_POLL_INTERVAL,
 };
-use openclaw_engine::config::{ConfigStore, RiskConfig};
 use openclaw_engine::database::pool::DbPool;
 use openclaw_engine::ipc_server::{CostEdgeAdvisorSlot, HStateCacheSlot, PerEngineRiskStores};
 use std::sync::Arc;

@@ -18,7 +18,8 @@
 #
 # Options:
 #   --yes                 Skip all interactive confirmations
-#   --include-live        Also flatten mainnet positions (OPENCLAW_ALLOW_MAINNET=1)
+#   --include-live        Deprecated: direct mainnet REST flatten is disabled;
+#                         use the signed live_reserved Rust control plane.
 #   --skip-flatten        Skip exchange flatten (when positions already 0)
 #   --skip-build-check    Skip source-vs-binary freshness check
 #   --help                Show this help and exit
@@ -136,14 +137,8 @@ else
         --env demo $FLATTEN_ARGS || { err "demo flatten failed"; rm -f "$MAINT_FLAG"; exit 1; }
 
     if [ "$INCLUDE_LIVE" -eq 1 ]; then
-        if [ "${OPENCLAW_ALLOW_MAINNET:-0}" != "1" ]; then
-            warn "--include-live set but OPENCLAW_ALLOW_MAINNET != 1, skipping live"
-        else
-            echo "  [mainnet] flattening..."
-            OPENCLAW_ALLOW_MAINNET=1 "$API_VENV/bin/python3" \
-                helper_scripts/clean_restart_flatten.py --env mainnet $FLATTEN_ARGS || {
-                err "mainnet flatten failed"; rm -f "$MAINT_FLAG"; exit 1; }
-        fi
+        warn "--include-live requested, but direct mainnet REST flatten is disabled"
+        warn "restore signed live_reserved authorization and close through the Rust live pipeline"
     fi
     ok "exchange flatten complete"
 fi

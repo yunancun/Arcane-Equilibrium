@@ -780,3 +780,45 @@ class StrategistAgent(BaseAgent):
         """Get recent edge evaluations for diagnostics / 獲取最近的 edge 評估用於診斷"""
         with self._lock:
             return list(self._eval_log[-limit:])
+
+    # ── Public scan-interval accessor (H-2) / 公開掃描間隔存取器（H-2）──
+
+    def get_scan_interval_seconds(self) -> int:
+        """Return the current EMA-smoothed scan interval in seconds.
+        回傳目前 EMA 平滑後的 scan_interval（秒）。
+
+        Public delegate to ``self._cognitive_modulator.get_scan_interval_seconds()``
+        introduced for plan ``aa-nifty-walrus.md`` Wave T1: external readers
+        (e.g. ``agents_routes.py``) MUST go through this method instead of
+        reaching into the private ``_cognitive_modulator`` attribute directly
+        (E2 round-2 finding H-2). Behaviour:
+
+        * ``_cognitive_modulator`` not yet injected (cold-start before
+          ``set_cognitive_modulator`` runs) → return ``60`` (the
+          ``CognitiveModulator`` default base value, kept in lock-step with
+          ``_DEFAULT_SCAN_INTERVAL_S`` in ``agents_routes_helpers``).
+        * Modulator raises (defensive) → return ``60`` (fail-closed; do not
+          let a heart-beat math glitch crash a read-only GUI poll).
+
+        為 plan ``aa-nifty-walrus.md`` Wave T1 新增的對外存取器。其他模組
+        （例如 ``agents_routes.py``）讀 scan_interval **必須**走此方法，
+        不可直接用 ``_cognitive_modulator`` 私有屬性（E2 round-2 H-2）。
+        行為：未注入或例外 → 回 60（CognitiveModulator 預設 base，
+        與 ``agents_routes_helpers._DEFAULT_SCAN_INTERVAL_S`` 對齊）。
+        """
+        modulator = self._cognitive_modulator
+        if modulator is None:
+            # Cold start: agent constructed but cognitive_modulator not yet
+            # injected (set_cognitive_modulator runs later in strategy_wiring).
+            # 冷啟：agent 已建構但 cognitive_modulator 尚未注入。
+            return 60
+        try:
+            interval = modulator.get_scan_interval_seconds()
+        except Exception:  # noqa: BLE001 — defensive
+            # Modulator raised — fall back to base default rather than
+            # propagating to a read-only GUI route (CLAUDE.md §二 原則 #6).
+            # modulator 例外 — 回後備值，避傳到 read-only GUI route。
+            return 60
+        if not isinstance(interval, (int, float)):
+            return 60
+        return max(int(interval), 1)

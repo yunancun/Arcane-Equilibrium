@@ -173,6 +173,8 @@ def _build_signed_authorization(
     operator_id: str = "test-op",
     env_allowed: list[str] | None = None,
     tier: str = "T0_ENTRY",
+    version: int = 2,
+    approved_system_mode: str = "live_reserved",
     issued_at_ms: int | None = None,
 ) -> dict[str, Any]:
     """Build a signed authorization.json record (matches Rust canonical_payload).
@@ -182,14 +184,21 @@ def _build_signed_authorization(
     if issued_at_ms is None:
         issued_at_ms = int(time.time() * 1000)
     envs_sorted = sorted(set(env_allowed))
-    payload = f"1|{tier}|{issued_at_ms}|{expires_at_ms}|{operator_id}|{','.join(envs_sorted)}"
+    if version == 1:
+        payload = f"{version}|{tier}|{issued_at_ms}|{expires_at_ms}|{operator_id}|{','.join(envs_sorted)}"
+    else:
+        payload = (
+            f"{version}|{tier}|{issued_at_ms}|{expires_at_ms}|{operator_id}|"
+            f"{approved_system_mode}|{','.join(envs_sorted)}"
+        )
     sig = hmac.new(secret.encode("utf-8"), payload.encode("utf-8"), hashlib.sha256).hexdigest()
     return {
-        "version": 1,
+        "version": version,
         "tier": tier,
         "issued_at_ms": issued_at_ms,
         "expires_at_ms": expires_at_ms,
         "operator_id": operator_id,
+        **({} if version == 1 else {"approved_system_mode": approved_system_mode}),
         "env_allowed": env_allowed,
         "sig": sig,
     }
@@ -361,10 +370,20 @@ class TestLiveShadowToLiveGateChain(unittest.TestCase):
         )
 
     def test_live_flip_no_global_mode_403_live_reserved(self) -> None:
-        """Gate 2 fail: global_mode_state lacks 'live'."""
+        """Gate 2 fail: global_mode_state is not exactly live_reserved."""
         with patch(
             "app.live_session_routes._get_global_mode_state",
             return_value="paper_only",
+        ):
+            resp = self._post()
+        self.assertEqual(resp.status_code, 403)
+        self.assertEqual(resp.json()["detail"]["gate_failed"], "live_reserved")
+
+    def test_live_flip_live_substring_mode_403_live_reserved(self) -> None:
+        """Gate 2 must reject live-ish modes such as live_demo."""
+        with patch(
+            "app.live_session_routes._get_global_mode_state",
+            return_value="live_demo",
         ):
             resp = self._post()
         self.assertEqual(resp.status_code, 403)
@@ -420,6 +439,64 @@ class TestLiveShadowToLiveGateChain(unittest.TestCase):
                 resp = self._post()
         self.assertEqual(resp.status_code, 403)
         self.assertEqual(resp.json()["detail"]["gate_failed"], "authorization_expired")
+
+    def test_live_flip_v1_authorization_403_authorization_schema(self) -> None:
+        """Gate 5 fail: stale v1 authorization must not satisfy Python gate."""
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            secret = "test-secret"
+            future_ms = int(time.time() * 1000) + 24 * 3600 * 1000
+            record = _build_signed_authorization(
+                secret=secret,
+                expires_at_ms=future_ms,
+                env_allowed=["live_demo"],
+                version=1,
+            )
+            secrets_root = _write_secret_slot(
+                tmp_path,
+                bybit_endpoint="demo",
+                authorization_record=record,
+            )
+            with patch.dict(os.environ, {
+                "OPENCLAW_SECRETS_DIR": str(secrets_root),
+                "OPENCLAW_IPC_SECRET": secret,
+            }), patch(
+                "app.live_session_routes._get_global_mode_state",
+                return_value="live_reserved",
+            ):
+                resp = self._post()
+        self.assertEqual(resp.status_code, 403)
+        self.assertEqual(resp.json()["detail"]["gate_failed"], "authorization_schema")
+
+    def test_live_flip_wrong_authorized_mode_403_authorization_schema(self) -> None:
+        """Gate 5 fail: schema v2 auth must bind approved_system_mode=live_reserved."""
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            secret = "test-secret"
+            future_ms = int(time.time() * 1000) + 24 * 3600 * 1000
+            record = _build_signed_authorization(
+                secret=secret,
+                expires_at_ms=future_ms,
+                env_allowed=["live_demo"],
+                approved_system_mode="demo_reserved",
+            )
+            secrets_root = _write_secret_slot(
+                tmp_path,
+                bybit_endpoint="demo",
+                authorization_record=record,
+            )
+            with patch.dict(os.environ, {
+                "OPENCLAW_SECRETS_DIR": str(secrets_root),
+                "OPENCLAW_IPC_SECRET": secret,
+            }), patch(
+                "app.live_session_routes._get_global_mode_state",
+                return_value="live_reserved",
+            ):
+                resp = self._post()
+        self.assertEqual(resp.status_code, 403)
+        self.assertEqual(resp.json()["detail"]["gate_failed"], "authorization_schema")
 
     def test_live_flip_no_mainnet_env_403_mainnet_env(self) -> None:
         """Gate 3 fail: bybit_endpoint=mainnet but OPENCLAW_ALLOW_MAINNET unset."""

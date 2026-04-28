@@ -70,9 +70,7 @@ pub(crate) struct ScannerInitBundle {
         tokio::sync::mpsc::UnboundedSender<openclaw_engine::ws_client::WsTopicChange>,
     pub current_ws_client_tx: Arc<
         tokio::sync::Mutex<
-            Option<
-                tokio::sync::mpsc::UnboundedSender<openclaw_engine::ws_client::WsTopicChange>,
-            >,
+            Option<tokio::sync::mpsc::UnboundedSender<openclaw_engine::ws_client::WsTopicChange>>,
         >,
     >,
 }

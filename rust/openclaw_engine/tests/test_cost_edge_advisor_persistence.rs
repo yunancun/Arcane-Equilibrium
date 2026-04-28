@@ -32,11 +32,11 @@
 //!        row 用 `transition_from` 區分。
 
 use openclaw_engine::config::{ConfigStore, RiskConfig};
-use openclaw_engine::database::DatabaseConfig;
 use openclaw_engine::cost_edge_advisor::{
     spawn_cost_edge_advisor_with_persistence, CostEdgeAdvisor, CostEdgeAdvisorStatus,
 };
 use openclaw_engine::database::pool::DbPool;
+use openclaw_engine::database::DatabaseConfig;
 use openclaw_engine::h_state_cache::{H5CostStats, HStateCache, HStateSnapshot};
 
 use sqlx::postgres::{PgPool, PgPoolOptions};
@@ -166,9 +166,7 @@ fn h_state_cache_with_ok_ratio() -> Arc<HStateCache> {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn daemon_persists_cycle_row_when_pool_provided() {
     let Some(pg) = maybe_pg_pool().await else {
-        eprintln!(
-            "[test_cost_edge_advisor_persistence] skipped — OPENCLAW_TEST_PG not set"
-        );
+        eprintln!("[test_cost_edge_advisor_persistence] skipped — OPENCLAW_TEST_PG not set");
         return;
     };
     if let Err(e) = ensure_v026_table(&pg).await {

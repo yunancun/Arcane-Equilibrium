@@ -379,8 +379,7 @@ async fn async_main(
     // reads via `EngineCommandChannels::live_snapshot()`.
     // Live 命令 sender slot — watcher / boot closure 填入；IPC + scanner /
     // phase4 經 `EngineCommandChannels::live_snapshot()` 讀取。
-    let live_cmd_slot: LiveCmdSenderSlot =
-        Arc::new(ParkingRwLock::new(None));
+    let live_cmd_slot: LiveCmdSenderSlot = Arc::new(ParkingRwLock::new(None));
 
     // Boot-time live command channel: Some if boot authorized, None otherwise.
     // When Some, mirror into live_cmd_slot so IPC/scanner see boot sender.
@@ -442,10 +441,9 @@ async fn async_main(
     // because set_h_state_invalidation_sender requires &mut self.
     // G3-08：受 OPENCLAW_H_STATE_GATEWAY=1 控管；IPC detach 前完成。
     let h_state_cache_slot_handle = ipc_server.h_state_cache_slot();
-    if let Some(h_state_inv_tx) = main_boot_tasks::spawn_h_state_poller_if_enabled(
-        &h_state_cache_slot_handle,
-        &cancel,
-    ) {
+    if let Some(h_state_inv_tx) =
+        main_boot_tasks::spawn_h_state_poller_if_enabled(&h_state_cache_slot_handle, &cancel)
+    {
         ipc_server.set_h_state_invalidation_sender(h_state_inv_tx);
     }
 
@@ -697,7 +695,7 @@ async fn async_main(
         &shared_instruments,
         &live_bindings,
         &demo_bindings,
-        &live_cmd_tx,
+        &live_cmd_slot,
         &demo_cmd_tx,
         &positions_mirrors,
     );
@@ -720,7 +718,7 @@ async fn async_main(
         &db_pool,
         &cancel,
         &demo_cmd_tx,
-        &live_cmd_tx,
+        &live_cmd_slot,
         &risk_stores,
     )
     .await;
@@ -800,8 +798,7 @@ async fn async_main(
     // receiver move 進跑 `run_event_consumer` 的 OS 線程。Boot 不在此處
     // 預建通道 — fan-out 每 tick 讀 slot，slot 初始空（boot live_bindings
     // None）正是「Live 尚未上線」語意。
-    let live_event_slot: main_fanout::LiveEventSenderSlot =
-        Arc::new(ParkingRwLock::new(None));
+    let live_event_slot: main_fanout::LiveEventSenderSlot = Arc::new(ParkingRwLock::new(None));
 
     // MAJOR-2: Ready barriers — tx goes to pipeline deps, rx goes to fan-out.
     let (paper_ready_tx, paper_ready_rx) = tokio::sync::oneshot::channel::<()>();
@@ -925,34 +922,32 @@ async fn async_main(
     // handled defensively (log + skip, never panic).
     // PIPELINE-SLOT-1 Phase 2（E2 BLOCKER #1 修復）：以 tuple 配對 demo bindings
     // 與 slot cancel；結構不變式保證「同時 Some 或同時 None」。
-    let demo_handle: Option<tokio::task::JoinHandle<()>> =
-        match (demo_bindings, demo_slot_cancel) {
-            (Some(demo_b), Some(demo_slot_cancel_token)) => {
-                let (_, demo_event_rx) =
-                    demo_event_channel.expect("demo channel must exist");
-                Some(main_pipelines::spawn_demo_pipeline(
-                    &spawn_ctx,
-                    &writers,
-                    main_pipelines::DemoChannels {
-                        bindings: demo_b,
-                        slot_cancel: demo_slot_cancel_token,
-                        event_rx: demo_event_rx,
-                        cmd_tx: demo_cmd_tx.clone(),
-                        cmd_rx: demo_cmd_rx,
-                        ready_tx: demo_ready_tx,
-                        positions_mirror: Arc::clone(&demo_positions_mirror),
-                    },
-                ))
-            }
-            (None, None) => None,
-            (Some(_), None) | (None, Some(_)) => {
-                tracing::error!(
-                    "demo bindings/slot-cancel pairing invariant violated — skipping Demo spawn \
+    let demo_handle: Option<tokio::task::JoinHandle<()>> = match (demo_bindings, demo_slot_cancel) {
+        (Some(demo_b), Some(demo_slot_cancel_token)) => {
+            let (_, demo_event_rx) = demo_event_channel.expect("demo channel must exist");
+            Some(main_pipelines::spawn_demo_pipeline(
+                &spawn_ctx,
+                &writers,
+                main_pipelines::DemoChannels {
+                    bindings: demo_b,
+                    slot_cancel: demo_slot_cancel_token,
+                    event_rx: demo_event_rx,
+                    cmd_tx: demo_cmd_tx.clone(),
+                    cmd_rx: demo_cmd_rx,
+                    ready_tx: demo_ready_tx,
+                    positions_mirror: Arc::clone(&demo_positions_mirror),
+                },
+            ))
+        }
+        (None, None) => None,
+        (Some(_), None) | (None, Some(_)) => {
+            tracing::error!(
+                "demo bindings/slot-cancel pairing invariant violated — skipping Demo spawn \
                      / Demo bindings/slot-cancel 配對不變式違反 — 跳過 Demo 啟動"
-                );
-                None
-            }
-        };
+            );
+            None
+        }
+    };
 
     // ------------------------------------------------------------------
     // LIVE-AUTH-WATCHER-EVENT-CONSUMER-SPAWN (2026-04-27): spawner closure
@@ -1092,7 +1087,7 @@ async fn async_main(
     let edge_reload_signal_tx = main_boot_tasks::spawn_edge_estimates_reloader_if_enabled(
         Some(paper_cmd_tx.clone()),
         demo_cmd_tx.clone(),
-        live_cmd_tx.clone(),
+        Some(Arc::clone(&live_cmd_slot)),
         &cancel,
     );
     if let Some(signal_tx) = edge_reload_signal_tx {
@@ -1102,7 +1097,10 @@ async fn async_main(
         // 將 sender 延後注入 IPC slot，後續 `reload_edge_estimates` IPC 請求
         // 即可轉發到運行中 daemon。對齊 strategist counters / budget tracker /
         // h_state_cache slot 注入 pattern。
-        edge_reload_sender_slot_handle.write().await.replace(signal_tx);
+        edge_reload_sender_slot_handle
+            .write()
+            .await
+            .replace(signal_tx);
         info!(
             "F6 PH5-WIRE-1 RELOAD: reloader sender late-injected into IPC slot; \
              manual `reload_edge_estimates` IPC method now live \

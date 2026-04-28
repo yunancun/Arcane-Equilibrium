@@ -1,0 +1,311 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Agent Tracker Contract Test (Round 2)</title>
+<!--
+  test_agent_tracker_contract.html — frontend contract fixture for
+  agent-tracker.js (round 2)
+
+  目的 (中):
+    用 mock fetch 替换 ocApi 底层的 window.fetch，按 round 2 后端契约
+    返回 6 个 endpoint 的真实 schema response，跑 5 个 loader，断言：
+      1. 三态切换正确（loading→data，error 时切 error）
+      2. 各区块 DOM 渲染不抛异常
+      3. 关键文案出现（中文短句、$金额格式、bps、风控等级 chip）
+      4. 信任后端字段：shadow_mode null → "状态未确认" 警语
+
+  Purpose (EN):
+    Mock window.fetch to feed real round 2 backend schemas; run 5 loaders
+    in agent-tracker.js; assert DOM render does not throw + key
+    user-facing text appears in correct blocks. Pure browser-runnable;
+    no jest / vitest dependency.
+
+  使用方式 (Usage):
+    1. 启动 control_api uvicorn (or any static server serving the static/ dir)
+    2. 浏览器打开 /tests/static/test_agent_tracker_contract.html
+    3. 看 #test-results 区块，PASS 全绿即过；FAIL 行显示具体差异
+    4. 也可在 DevTools Console 看每个 case 的 console.log
+
+  限制 (Caveats):
+    - 不依赖 pytest / playwright（项目目前无前端测试框架）
+    - 是 smoke 级断言，不是 full unit test；有强 case 不通过应升级为 jest
+    - L-3 finding (E2 round 2 retro): 「如果前端没既有测试框架就跳过 L-3
+      但留 TODO 註解（不阻塞）」— 留此 fixture 作为最低线交付。
+
+  TODO (future):
+    - 将本 fixture 重构为 vitest 或 jsdom-based pytest 测试，进 CI
+    - 增加 contract negative test (endpoint 200 但 body 不符 schema)
+-->
+<style>
+  body { font-family: monospace; background: #0d1117; color: #c9d1d9; padding: 20px; }
+  .case { padding: 8px 0; border-bottom: 1px solid #21262d; }
+  .pass { color: #3fb950; }
+  .fail { color: #f85149; font-weight: bold; }
+  .info { color: #79c0ff; }
+  pre { background: #161b22; padding: 8px; border-radius: 4px; max-height: 300px; overflow: auto; font-size: 11px; }
+
+  /* 主样式 partial copy from common.js / tab-learning.html — 只为让 oc-chip 等渲染不光秃 */
+  :root { --red:#f85149; --green:#3fb950; --yellow:#d29922; --blue:#388bfd; --accent:#388bfd; --text:#c9d1d9; --text-dim:#8b949e; --border:#30363d; --card-bg:#0d1117; }
+  .oc-card { background: #161b22; border: 1px solid var(--border); border-radius: 8px; padding: 12px; margin: 8px 0; }
+  .oc-chip { display: inline-flex; padding: 2px 8px; border-radius: 999px; font-size: 11px; border: 1px solid; }
+  .oc-chip-good { background: rgba(63,185,80,0.12); border-color: rgba(63,185,80,0.25); color: var(--green); }
+  .oc-chip-warn { background: rgba(210,153,34,0.12); border-color: rgba(210,153,34,0.25); color: var(--yellow); }
+  .oc-chip-bad  { background: rgba(248,81,73,0.12); border-color: rgba(248,81,73,0.25); color: var(--red); }
+  .oc-chip-neutral { background: rgba(139,148,158,0.1); border-color: rgba(139,148,158,0.2); color: var(--text-dim); }
+  .oc-chip-info { background: rgba(56,139,253,0.12); border-color: rgba(56,139,253,0.25); color: var(--blue); }
+  .oc-chip-live { background: rgba(248, 81, 73, 0.22); border: 1px solid var(--red); color: #ffa198; }
+</style>
+</head>
+<body>
+<h1>Agent Tracker Contract Test (Round 2)</h1>
+<div id="test-results"></div>
+
+<!-- Mock containers / 把 agent-tracker 5 区块的 DOM scaffold 都建出来 -->
+<div style="display:none">
+  <!-- roster -->
+  <div id="agent-roster-loading"></div><div id="agent-roster-empty"></div>
+  <div id="agent-roster-error"></div><div id="agent-roster-data"></div>
+  <!-- feed -->
+  <div id="agent-feed-loading"></div><div id="agent-feed-empty"></div>
+  <div id="agent-feed-error"></div><div id="agent-feed-data"></div>
+  <!-- shadow-live -->
+  <div id="agent-shadow-live-loading"></div><div id="agent-shadow-live-empty"></div>
+  <div id="agent-shadow-live-error"></div><div id="agent-shadow-live-data"></div>
+  <!-- governance -->
+  <div id="agent-governance-loading"></div><div id="agent-governance-empty"></div>
+  <div id="agent-governance-error"></div><div id="agent-governance-data"></div>
+  <!-- budget -->
+  <div id="agent-budget-loading"></div><div id="agent-budget-empty"></div>
+  <div id="agent-budget-error"></div><div id="agent-budget-data"></div>
+</div>
+
+<script>
+// ─── Minimal common.js stubs (just what agent-tracker.js needs) ──────────────
+// Real common.js depends on cookie auth + login redirect; tests stub these.
+
+function ocEsc(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+function ocChip(text, type) {
+  return '<span class="oc-chip oc-chip-' + (type || 'neutral') + '">' + ocEsc(text) + '</span>';
+}
+function ocSetHtml(id, html) { var el = document.getElementById(id); if (el) el.innerHTML = html; }
+function ocMoney(v) { var n = Number(v); return (n >= 0 ? '+$' : '-$') + Math.abs(n).toFixed(2); }
+function ocPnlClass(v) { return Number(v) >= 0 ? 'oc-pnl-pos' : 'oc-pnl-neg'; }
+
+// ─── Mock fetch ──────────────────────────────────────────────────────────────
+// 6 endpoints round 2 expects; agent-tracker.js calls each.
+
+const MOCKS = {
+  '/api/v1/agents/roster': {
+    ok: true,
+    data: {
+      ts: new Date().toISOString(),
+      scan_interval_s: 60,
+      degraded: false,
+      reason: null,
+      agents: [
+        { role:'scout', label_zh:'侦察员', label_en:'Scout', emoji:'🔭',
+          state:'active', state_label_zh:'巡逻中',
+          summary_zh:'正在扫描 25 个 symbol 的新机会',
+          last_heartbeat_ts: new Date(Date.now()-30000).toISOString(),
+          today_decisions: 12, today_cost_usd: 0.34 },
+        { role:'strategist', label_zh:'策略师', label_en:'Strategist', emoji:'♟️',
+          state:'thinking', state_label_zh:'思考中',
+          summary_zh:'正在评估 BTCUSDT 多单，因为最近 30 分钟成交量放大',
+          last_heartbeat_ts: new Date(Date.now()-15000).toISOString(),
+          today_decisions: 8, today_cost_usd: 1.23 },
+        { role:'guardian', label_zh:'守门员', label_en:'Guardian', emoji:'🛡️',
+          state:'guarding',
+          summary_zh:'守门中，已批准 6 / 拒绝 2',
+          last_heartbeat_ts: new Date(Date.now()-10000).toISOString(),
+          today_decisions: 8, today_cost_usd: 0.0 },
+        // Executor LIVE — shadow_mode=false → 红呼吸 + "真实成单" label
+        { role:'executor', label_zh:'执行员', label_en:'Executor', emoji:'🧤',
+          state:'live', shadow_mode:false, engine_mode:'live_demo',
+          summary_zh:'真仓执行 — 已下 11 笔单',
+          last_heartbeat_ts: new Date(Date.now()-5000).toISOString(),
+          today_orders: 11, today_cost_usd: 0.0 },
+        { role:'analyst', label_zh:'分析师', label_en:'Analyst', emoji:'🔍',
+          state:'reviewing',
+          summary_zh:'正在复盘最近 23 笔成交',
+          last_heartbeat_ts: new Date(Date.now()-60000).toISOString(),
+          today_decisions: 23, today_cost_usd: 0.45 },
+      ]
+    }
+  },
+  '/api/v1/strategist/history?engine=demo&limit=10': {
+    ok: true,
+    data: {
+      rows: [
+        { id: 1, engine_mode:'demo', strategy_name:'ma_crossover',
+          applied_at: new Date(Date.now()-180000).toISOString(),
+          applied_at_ms: Date.now()-180000,
+          source:'auto_apply', reason:'30m fast EMA cross',
+          prev_params_json:{}, params_json:{} },
+        { id: 2, engine_mode:'demo', strategy_name:'grid_trading',
+          applied_at: new Date(Date.now()-600000).toISOString(),
+          applied_at_ms: Date.now()-600000,
+          source:'manual_promote', reason:'shadow→live promote',
+          prev_params_json:{}, params_json:{} },
+      ],
+      limit: 10, offset: 0, degraded: false, reason: null
+    }
+  },
+  '/api/v1/edge/shadow_fills?engine=demo&limit=10': {
+    ok: true,
+    data: {
+      rows: [
+        { ts: new Date(Date.now()-120000).toISOString(),
+          strategy_name:'ma_crossover', symbol:'BTCUSDT', side:'BUY', qty:0.001 },
+      ],
+      degraded: false, reason: null
+    }
+  },
+  '/api/v1/agents/shadow_vs_live_summary?since=24h': {
+    ok: true,
+    data: {
+      demo:      { count: 12, total_pnl_usd: 3.45, avg_slippage_bps: 1.2 },
+      live_demo: { count: 11, total_pnl_usd: 2.98, avg_slippage_bps: 1.5 },
+      diff:      { fill_rate_delta_pct: -8.3, slippage_delta_bps: 0.3 }
+    }
+  },
+  '/api/v1/governance/leases': {
+    ok: true,
+    data: {
+      leases: [
+        { lease_id:'abc12345', symbol:'BTCUSDT',
+          expires_at: new Date(Date.now()+45000).toISOString() }
+      ]
+    }
+  },
+  '/api/v1/agents/recent_rejects?limit=5': {
+    ok: true,
+    data: {
+      rows: [
+        { ts: new Date(Date.now()-15000).toISOString(),
+          symbol:'BTCUSDT', reason:'风险预算不够', risk_level:'P1' },
+        { ts: new Date(Date.now()-90000).toISOString(),
+          symbol:'ETHUSDT', reason:'相关曝险超限', risk_level:'P0' },
+      ]
+    }
+  },
+  '/api/v1/paper/layer2/cost': {
+    ok: true,
+    data: {
+      today:  { total_usd: 1.23, by_layer: { L1: 0.5, L2: 0.73 } },
+      budget: { daily_hard_cap_usd: 5.00, remaining_usd: 3.77 }
+    }
+  },
+};
+
+// Override window.fetch to serve MOCKS / 接管 fetch 返回模拟 schema
+const _originalFetch = window.fetch;
+window.fetch = async function(path, opts) {
+  const body = MOCKS[path];
+  if (body == null) {
+    return new Response(JSON.stringify({ ok:false, error:'no_mock' }),
+      { status: 404, headers: { 'Content-Type':'application/json' } });
+  }
+  return new Response(JSON.stringify(body),
+    { status: 200, headers: { 'Content-Type':'application/json' } });
+};
+
+// Stub AbortSignal.timeout for older browsers (agent-tracker doesn't use, but
+// common.js' real ocApi does — our test ocApi shim replaces it though)
+async function ocApi(path) {
+  const r = await fetch(path);
+  if (!r.ok) return null;
+  return r.json();
+}
+
+// ─── Test runner ─────────────────────────────────────────────────────────────
+const results = [];
+function record(name, ok, detail) {
+  results.push({ name: name, ok: ok, detail: detail || '' });
+  const div = document.getElementById('test-results');
+  div.insertAdjacentHTML('beforeend',
+    '<div class="case"><span class="' + (ok?'pass':'fail') + '">'
+    + (ok?'PASS':'FAIL') + '</span> · ' + ocEsc(name)
+    + (detail ? '<pre>' + ocEsc(detail) + '</pre>' : '') + '</div>');
+}
+
+function assertContains(name, container, needle) {
+  const el = document.getElementById(container);
+  const html = el ? el.innerHTML : '';
+  const hit = html.indexOf(needle) >= 0;
+  record(name, hit, hit ? '' : 'expected substring "' + needle + '" not found in #' + container);
+}
+function assertNotContains(name, container, needle) {
+  const el = document.getElementById(container);
+  const html = el ? el.innerHTML : '';
+  const hit = html.indexOf(needle) >= 0;
+  record(name, !hit, !hit ? '' : 'unexpected substring "' + needle + '" found in #' + container);
+}
+
+</script>
+
+<!-- Load real agent-tracker.js (the system under test) -->
+<script src="/static/js/agent-tracker.js"></script>
+
+<script>
+// ─── Run tests ───────────────────────────────────────────────────────────────
+(async function main() {
+  // 1. Roster — Executor live state, shadow vs unknown rendering
+  await loadAgentRoster();
+  assertContains('Roster: 5 cards rendered',         'agent-roster-data', '侦察员');
+  assertContains('Roster: Executor LIVE banner',     'agent-roster-data', '真仓执行中');
+  assertContains('Roster: Executor uses today_orders label "真实成单"', 'agent-roster-data', '真实成单');
+  assertNotContains('Roster: no shadow banner on live executor', 'agent-roster-data', '影子模式 — 所有动作仅模拟');
+
+  // 2. Feed — strategist history rows + shadow_fill merged
+  await loadAgentFeed();
+  assertContains('Feed: strategist row for ma_crossover', 'agent-feed-data', 'ma_crossover');
+  assertContains('Feed: source label translated to 中文', 'agent-feed-data', '自动套用');
+  assertContains('Feed: manual_promote translated',       'agent-feed-data', '手动晋升');
+  assertContains('Feed: shadow_fill row symbol',          'agent-feed-data', 'BTCUSDT');
+
+  // 3. Shadow vs Live — new endpoint schema rendering
+  await loadShadowLiveDiff();
+  assertContains('S/L: demo count "模拟意图 12 笔"',  'agent-shadow-live-data', '模拟意图 12 笔');
+  assertContains('S/L: live_demo count "真实成单 11 笔"', 'agent-shadow-live-data', '真实成单 11 笔');
+  assertContains('S/L: diff fill_rate visible',       'agent-shadow-live-data', '成交率差异');
+  assertContains('S/L: slippage diff visible',        'agent-shadow-live-data', '滑点差异');
+
+  // 4. Governance — recent_rejects new endpoint
+  await loadAgentGovernance();
+  assertContains('Gov: lease abc12345 visible',        'agent-governance-data', 'abc12345');
+  assertContains('Gov: reject reason 风险预算不够',   'agent-governance-data', '风险预算不够');
+  assertContains('Gov: P0 chip rendered',              'agent-governance-data', 'oc-chip-bad');
+  assertContains('Gov: P1 chip rendered',              'agent-governance-data', 'oc-chip-warn');
+  assertContains('Gov: 被守门员擋下 prefix',          'agent-governance-data', '被守门员擋下');
+
+  // 5. Budget — nested schema (today.total_usd / budget.daily_hard_cap_usd)
+  await loadAgentBudget();
+  assertContains('Budget: spent $1.23',     'agent-budget-data', '$1.23');
+  assertContains('Budget: cap $5.00',       'agent-budget-data', '$5.00');
+  assertContains('Budget: remaining $3.77', 'agent-budget-data', '$3.77');
+
+  // 6. Trust shadow_mode=null → unknown red banner
+  // Override roster mock to test fail-loud path
+  MOCKS['/api/v1/agents/roster'].data.agents[3].shadow_mode = null;
+  MOCKS['/api/v1/agents/roster'].data.agents[3].state = 'live';  // backend shouldn't lie but if it does...
+  await loadAgentRoster();
+  assertContains('Roster: null shadow_mode → 状态未确认 banner',
+    'agent-roster-data', '后端未回报 shadow_mode 字段');
+  assertContains('Roster: null shadow_mode → 暂停接单 phrasing',
+    'agent-roster-data', '已暂停接单');
+
+  // Summary
+  const passed = results.filter(r => r.ok).length;
+  const total = results.length;
+  document.getElementById('test-results').insertAdjacentHTML('afterbegin',
+    '<h2 class="' + (passed === total ? 'pass' : 'fail') + '">'
+    + passed + ' / ' + total + ' PASS</h2>');
+})();
+</script>
+</body>
+</html>

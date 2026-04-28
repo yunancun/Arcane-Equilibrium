@@ -484,30 +484,20 @@ async def post_live_close_position(
     if hint_qty is not None and hint_qty > 0:
         ipc_params["qty"] = hint_qty
 
-    rest_fallback_used = False
     try:
         result = await core._ipc_command("close_position", ipc_params)
     except Exception as exc:
-        if core._is_live_channel_unavailable_error(exc) and rc is not None \
-                and hint_qty is not None and hint_qty > 0 and hint_is_long is not None:
-            # LIVE-GATE-FALLBACK-1：Live pipeline 未授權 → REST reduce_only 降級。
-            # 需要 hints 俱全才能降級（qty/is_long 缺一不可，避免誤下方向）。
-            try:
-                result = core._rest_close_position_reduce_only(rc, sym, hint_qty, hint_is_long)
-                rest_fallback_used = True
-                logger.warning(
-                    "LIVE-GATE-FALLBACK-1: close_position %s qty=%.4f is_long=%s "
-                    "(REST fallback — live pipeline not authorized)",
-                    sym, hint_qty, hint_is_long,
-                )
-            except Exception as rest_exc:
-                logger.error(
-                    "LIVE-GATE-FALLBACK-1 REST fallback failed for %s: %s", sym, rest_exc,
-                )
-                raise HTTPException(status_code=502, detail=f"REST fallback error: {rest_exc}")
-        else:
-            logger.error("IPC close_position failed for %s: %s", sym, exc)
-            raise HTTPException(status_code=502, detail=f"IPC error: {exc}")
+        if core._is_live_channel_unavailable_error(exc):
+            logger.error(
+                "live close BLOCKED for %s: live IPC channel unavailable; REST fallback disabled",
+                sym,
+            )
+            raise HTTPException(
+                status_code=409,
+                detail=core._LIVE_REST_FALLBACK_DISABLED_DETAIL,
+            ) from exc
+        logger.error("IPC close_position failed for %s: %s", sym, exc)
+        raise HTTPException(status_code=502, detail=f"IPC error: {exc}")
 
     # If no exchange position AND paper IPC also found nothing, return 404.
     # 交易所和紙盤都沒倉，回 404（避免謊報 closed=True）。
@@ -518,15 +508,15 @@ async def post_live_close_position(
         )
 
     logger.warning(
-        "⚠ close_position %s hint_is_long=%s hint_qty=%s rest_fallback=%s — actor=%s",
-        sym, hint_is_long, hint_qty, rest_fallback_used, getattr(actor, "actor_id", "?"),
+        "⚠ close_position %s hint_is_long=%s hint_qty=%s — actor=%s",
+        sym, hint_is_long, hint_qty, getattr(actor, "actor_id", "?"),
     )
     return core._live_response({
         "symbol": sym,
         "closed": True,
-        "source": "rust_engine_with_rest_fallback" if rest_fallback_used else "rust_engine",
-        "rest_fallback": rest_fallback_used,
-        "reason": "live_pipeline_not_authorized" if rest_fallback_used else None,
+        "source": "rust_engine",
+        "rest_fallback": False,
+        "reason": None,
         "ipc": result,
     })
 
@@ -553,20 +543,17 @@ async def post_live_close_all_positions(
     # 缺此 guard 時 curl 繞過會觸 IPC 失敗 → REST 孤兒清掃用 demo client 全平 demo 倉位。
     _phantom_view_guard_write()
     errors: list[str] = []
-    rest_fallback_used = False
     try:
         result = await core._ipc_command("close_all_positions", {"engine": "live"})
     except Exception as exc:
         if core._is_live_channel_unavailable_error(exc):
-            # LIVE-GATE-FALLBACK-1：Live pipeline 未授權啟動，IPC channel 不存在。
-            # paper_state live 槽也一定是空的（pipeline 沒跑），所以直接靠孤兒清掃 REST 降級平倉。
-            logger.warning(
-                "LIVE-GATE-FALLBACK-1: IPC close_all_positions channel unavailable "
-                "(live pipeline not authorized) — falling back to REST orphan sweep / "
-                "Live 命令通道不可用（管線未授權）— 降級至 REST 孤兒清掃"
+            logger.error(
+                "close_all_positions BLOCKED: live IPC channel unavailable; REST fallback disabled"
             )
-            result = {"skipped": True, "reason": "live_pipeline_not_authorized"}
-            rest_fallback_used = True
+            raise HTTPException(
+                status_code=409,
+                detail=core._LIVE_REST_FALLBACK_DISABLED_DETAIL,
+            ) from exc
         else:
             logger.error("IPC close_all_positions failed: %s", exc)
             errors.append(f"ipc_close_all: {exc}")
@@ -575,17 +562,15 @@ async def post_live_close_all_positions(
     # IPC close_all only iterates paper_state — orphan positions are silently skipped.
     # 孤兒清掃：IPC close_all 只遍歷 paper_state，交易所孤兒倉位會被跳過，此處補掃。
     orphan_result = await core._sweep_live_orphan_positions(errors)
-    if orphan_result.get("rest_fallback"):
-        rest_fallback_used = True
     logger.warning(
-        "⚠ close-all-positions (manual, session continues, rest_fallback=%s) — actor=%s",
-        rest_fallback_used, getattr(actor, "actor_id", "?"),
+        "⚠ close-all-positions (manual, session continues) — actor=%s",
+        getattr(actor, "actor_id", "?"),
     )
     return core._live_response({
         "message": "All positions closed — session continues / 已平掉所有倉位，session 繼續運行",
-        "source": "rust_engine_with_rest_fallback" if rest_fallback_used else "rust_engine",
-        "rest_fallback": rest_fallback_used,
-        "reason": "live_pipeline_not_authorized" if rest_fallback_used else None,
+        "source": "rust_engine",
+        "rest_fallback": False,
+        "reason": None,
         "close_result": result,
         "orphan_sweep": orphan_result,
         "errors": errors if errors else None,

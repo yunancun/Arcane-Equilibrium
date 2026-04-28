@@ -12,14 +12,14 @@
 // ---------------------------------------------------------------------------
 
 use super::*;
+use crate::startup::{ExchangePipelineBindings, PrivateWsBindings};
 use async_trait::async_trait;
 use openclaw_engine::account_manager::AccountManager;
 use openclaw_engine::bybit_rest_client::{BybitEnvironment, BybitRestClient};
 use openclaw_engine::event_consumer::ExchangeEvent;
 use openclaw_engine::live_authorization::{
-    compute_signature, LiveAuthorization, SCHEMA_VERSION,
+    compute_signature, LiveAuthorization, APPROVED_SYSTEM_MODE_LIVE_RESERVED, SCHEMA_VERSION,
 };
-use crate::startup::{ExchangePipelineBindings, PrivateWsBindings};
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering};
 use std::sync::Mutex as StdMutex;
 
@@ -127,10 +127,7 @@ impl SpawnOp for MockSlotOp {
     fn is_spawned(&self) -> bool {
         self.spawned.load(Ordering::SeqCst)
     }
-    async fn try_spawn(
-        &self,
-        _cfg: &SpawnConfig<'_>,
-    ) -> Result<Option<SpawnOutput>, SpawnError> {
+    async fn try_spawn(&self, _cfg: &SpawnConfig<'_>) -> Result<Option<SpawnOutput>, SpawnError> {
         self.spawn_calls.fetch_add(1, Ordering::SeqCst);
         match self.next_outcome() {
             ScriptedSpawn::Ok => {
@@ -169,6 +166,7 @@ fn fresh_auth(now_ms: u64, ttl_ms: u64) -> LiveAuthorization {
         issued_at_ms: now_ms,
         expires_at_ms: now_ms + ttl_ms,
         operator_id: "watcher_test".into(),
+        approved_system_mode: APPROVED_SYSTEM_MODE_LIVE_RESERVED.into(),
         env_allowed: vec!["live_demo".into()],
         sig: String::new(),
     };
@@ -267,7 +265,10 @@ async fn watcher_respawns_when_auth_becomes_valid() {
     .await
     .expect("spawn must be attempted after trigger");
 
-    assert!(mock.is_spawned(), "slot must be Spawned after successful spawn");
+    assert!(
+        mock.is_spawned(),
+        "slot must be Spawned after successful spawn"
+    );
 
     shutdown.cancel();
     let _ = watcher_task.await;
@@ -430,7 +431,9 @@ async fn ipc_trigger_coalesces_when_full() {
 
     let first = handle.trigger().expect("first trigger must succeed");
     assert!(first, "first trigger must be accepted");
-    let second = handle.trigger().expect("second trigger must be Ok (coalesced)");
+    let second = handle
+        .trigger()
+        .expect("second trigger must be Ok (coalesced)");
     assert!(!second, "second trigger in a row must coalesce (Ok(false))");
 
     clear_test_env();
@@ -535,10 +538,7 @@ impl SpawnOp for SpawnerExerciseMock {
     fn is_spawned(&self) -> bool {
         self.spawned.load(Ordering::SeqCst)
     }
-    async fn try_spawn(
-        &self,
-        cfg: &SpawnConfig<'_>,
-    ) -> Result<Option<SpawnOutput>, SpawnError> {
+    async fn try_spawn(&self, cfg: &SpawnConfig<'_>) -> Result<Option<SpawnOutput>, SpawnError> {
         self.spawn_calls.fetch_add(1, Ordering::SeqCst);
         self.spawned.store(true, Ordering::SeqCst);
         // Ok(None) keeps SpawnOutput construction off the test path —
@@ -591,10 +591,7 @@ impl SpawnOp for HappyPathSpawnMock {
     fn is_spawned(&self) -> bool {
         self.spawned.load(Ordering::SeqCst)
     }
-    async fn try_spawn(
-        &self,
-        cfg: &SpawnConfig<'_>,
-    ) -> Result<Option<SpawnOutput>, SpawnError> {
+    async fn try_spawn(&self, cfg: &SpawnConfig<'_>) -> Result<Option<SpawnOutput>, SpawnError> {
         self.spawn_calls.fetch_add(1, Ordering::SeqCst);
         self.spawned.store(true, Ordering::SeqCst);
         // HIGH-2 (E2 round-2): return Ok(Some(SpawnOutput)) using the
@@ -633,12 +630,13 @@ async fn watcher_with_spawner_handles_build_returned_none() {
     let mock = SpawnerExerciseMock::new();
     let spawner_calls = Arc::new(AtomicUsize::new(0));
     let calls_for_closure = Arc::clone(&spawner_calls);
-    let spawner: LivePipelineSpawner = Arc::new(move |_out: SpawnOutput| -> LivePipelineSpawnResult {
-        calls_for_closure.fetch_add(1, Ordering::SeqCst);
-        // Spawn a no-op OS thread so the handle is real.
-        // 啟動空 OS 線程，handle 真實。
-        Ok(std::thread::spawn(|| ()))
-    });
+    let spawner: LivePipelineSpawner =
+        Arc::new(move |_out: SpawnOutput| -> LivePipelineSpawnResult {
+            calls_for_closure.fetch_add(1, Ordering::SeqCst);
+            // Spawn a no-op OS thread so the handle is real.
+            // 啟動空 OS 線程，handle 真實。
+            Ok(std::thread::spawn(|| ()))
+        });
     let handle_slot: LiveThreadHandleSlot = Arc::new(ParkingMutex::new(None));
 
     let (watcher, trigger) = LiveAuthWatcher::with_pipeline_spawner(
@@ -665,7 +663,10 @@ async fn watcher_with_spawner_handles_build_returned_none() {
     // on the missing-bindings path.
     // mock 回 Ok(None) → spawner 不被叫；watcher 走 backoff 失敗路徑。
     assert_eq!(spawner_calls.load(Ordering::SeqCst), 0);
-    assert!(handle_slot.lock().is_none(), "no thread handle on Ok(None) path");
+    assert!(
+        handle_slot.lock().is_none(),
+        "no thread handle on Ok(None) path"
+    );
 
     shutdown.cancel();
     let _ = watcher_task.await;
@@ -762,12 +763,13 @@ async fn spawner_callback_invoked_and_handle_slot_populated_on_ok_some() {
     let call_count_c = Arc::clone(&spawner_call_count);
     let handle_slot: LiveThreadHandleSlot = Arc::new(ParkingMutex::new(None));
 
-    let spawner: LivePipelineSpawner = Arc::new(move |_out: SpawnOutput| -> LivePipelineSpawnResult {
-        call_count_c.fetch_add(1, Ordering::SeqCst);
-        // Spawn a no-op OS thread so the JoinHandle is real.
-        // 啟動空 OS 線程，JoinHandle 真實。
-        Ok(std::thread::spawn(|| ()))
-    });
+    let spawner: LivePipelineSpawner =
+        Arc::new(move |_out: SpawnOutput| -> LivePipelineSpawnResult {
+            call_count_c.fetch_add(1, Ordering::SeqCst);
+            // Spawn a no-op OS thread so the JoinHandle is real.
+            // 啟動空 OS 線程，JoinHandle 真實。
+            Ok(std::thread::spawn(|| ()))
+        });
 
     let (watcher, trigger) = LiveAuthWatcher::with_pipeline_spawner(
         Arc::clone(&mock) as Arc<dyn SpawnOp>,

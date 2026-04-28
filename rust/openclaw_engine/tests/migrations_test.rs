@@ -14,9 +14,8 @@
 //!   DB，測試會 drop tracking table 並可能套用 V001+ 建立完整 schema 樹。
 
 use openclaw_engine::database::migrations::{
-    ensure_legacy_seeded, list_applied_versions, load_migrations_from_dir,
-    truncate_tracking_table, MigrationRunner, MigrationsError, RunOutcome, AUTO_MIGRATE_ENV_VAR,
-    MIGRATIONS_DIR_REL,
+    ensure_legacy_seeded, list_applied_versions, load_migrations_from_dir, truncate_tracking_table,
+    MigrationRunner, MigrationsError, RunOutcome, AUTO_MIGRATE_ENV_VAR, MIGRATIONS_DIR_REL,
 };
 use sqlx::postgres::PgPool;
 use sqlx::Executor;
@@ -211,7 +210,11 @@ async fn ambiguous_state_is_rejected() {
 // ─────────────────────────────────────────────────────────────────
 #[tokio::test]
 async fn fresh_db_applies_all_migrations_end_to_end() {
-    if std::env::var("OPENCLAW_TEST_PG_DESTRUCTIVE").ok().as_deref() != Some("1") {
+    if std::env::var("OPENCLAW_TEST_PG_DESTRUCTIVE")
+        .ok()
+        .as_deref()
+        != Some("1")
+    {
         eprintln!("SKIP: OPENCLAW_TEST_PG_DESTRUCTIVE not set (destructive test)");
         return;
     }
