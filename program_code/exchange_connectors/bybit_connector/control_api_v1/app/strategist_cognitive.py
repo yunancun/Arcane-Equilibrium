@@ -282,8 +282,6 @@ def tick_cognitive_modulator(agent: "StrategistAgent") -> None:
             "認知調製 tick 失敗（非致命）：%s",
             exc, exc,
         )
-
-
 # ─────────────────────────────────────────────────────────────────────────────
 # LOSSES-WIRING trade outcome ingress / 交易結果計數入口
 # G8-01-FUP-LOSSES-WIRING (Wave A `aced662`) — counter feeding tick_cognitive_modulator
