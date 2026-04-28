@@ -507,11 +507,21 @@ async fn async_main(
     // G3-09 Phase A：受 OPENCLAW_COST_EDGE_ADVISOR=1 控管；Phase A 純 advisory，
     // 不影響交易，需在 h_state_cache_slot 取得後 spawn。
     let cost_edge_advisor_slot_handle = ipc_server.cost_edge_advisor_slot();
+    // G3-09 Phase B (2026-04-28): pre-create the DbPool slot for late-inject
+    // by main.rs after `DbPool::connect` completes (~line 612 below). The
+    // daemon polls this slot for up to 30s; if still empty it spawns
+    // without persistence (counters in-memory only).
+    // G3-09 Phase B：預建 DbPool slot 給 main.rs 在 `DbPool::connect` 完成
+    // （約 line 612 下方）late-inject。Daemon poll slot 至多 30s；仍空則
+    // 不啟 persistence spawn（counter in-memory only）。
+    let cost_edge_advisor_db_pool_slot: main_boot_tasks::CostEdgeAdvisorDbSlot =
+        Arc::new(tokio::sync::RwLock::new(None));
     main_boot_tasks::spawn_cost_edge_advisor_if_enabled(
         &cost_edge_advisor_slot_handle,
         &h_state_cache_slot_handle,
         &risk_stores,
         &cancel,
+        &cost_edge_advisor_db_pool_slot,
     );
 
     // F6 PH5-WIRE-1 RELOAD (2026-04-26): grab slot handle BEFORE IPC server
@@ -610,6 +620,18 @@ async fn async_main(
     let cfg_snap_db = config.get();
     let db_pool =
         Arc::new(openclaw_engine::database::pool::DbPool::connect(&cfg_snap_db.database).await);
+
+    // G3-09 Phase B (2026-04-28): late-inject DbPool handle into the
+    // cost_edge_advisor daemon's slot. Daemon is already spawned (line ~510)
+    // and will pick up the handle within ~100ms (its inner poll cadence).
+    // We always inject (even when DbPool is unavailable / paper mode) — the
+    // daemon's INSERT path internally checks `pool.get()` and silently skips
+    // when None, so injection is unconditional + safe.
+    // G3-09 Phase B：將 DbPool handle late-inject 到 cost_edge_advisor daemon 的
+    // slot；daemon 已 spawn（line ~510），將在 ~100ms 內（內部 poll 週期）取到
+    // handle。無條件注入（即便 paper 模式 DbPool 不可用）— daemon INSERT path
+    // 內部檢查 `pool.get()` 為 None 時靜默跳過，故注入恆無害。
+    *cost_edge_advisor_db_pool_slot.write().await = Some(Arc::clone(&db_pool));
 
     // Phase 2 (2026-04-24 V023 postmortem): opt-in auto-migrate.
     // Default OFF; set OPENCLAW_AUTO_MIGRATE=1 to run `sql/migrations/V*.sql`

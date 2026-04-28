@@ -17,10 +17,18 @@ use crate::startup::ExchangePipelineBindings;
 use crate::tasks;
 use openclaw_engine::config::{ConfigStore, RiskConfig};
 use openclaw_engine::cost_edge_advisor::{
-    is_advisor_env_enabled, spawn_cost_edge_advisor, CostEdgeAdvisor,
+    is_advisor_env_enabled, spawn_cost_edge_advisor_with_persistence, CostEdgeAdvisor,
     DEFAULT_POLL_INTERVAL as COST_EDGE_DEFAULT_POLL_INTERVAL,
 };
 use openclaw_engine::database::pool::DbPool;
+// Phase B (G3-09 2026-04-28): late-injected DbPool slot type for the
+// cost_edge_advisor daemon. Mirrors `HStateCacheSlot` pattern — daemon
+// polls the slot at spawn time and proceeds with persistence only once
+// main.rs writes the pool handle.
+// Phase B：cost_edge_advisor daemon 用的 late-injected DbPool slot type。
+// 對齊 `HStateCacheSlot` pattern — daemon 於 spawn 時 poll slot，main.rs
+// 寫入 pool handle 後 daemon 才啟動 persistence。
+pub type CostEdgeAdvisorDbSlot = Arc<tokio::sync::RwLock<Option<Arc<DbPool>>>>;
 use openclaw_engine::h_state_cache::poller::{
     make_invalidation_channel, spawn_h_state_poller, InvalidationSender, StubHStateFetcher,
     DEFAULT_POLL_INTERVAL,
@@ -453,6 +461,15 @@ pub(crate) fn spawn_cost_edge_advisor_if_enabled(
     h_state_cache_slot: &HStateCacheSlot,
     risk_stores: &PerEngineRiskStores,
     cancel: &CancellationToken,
+    // Phase B (G3-09 2026-04-28): late-injected DbPool slot. main.rs
+    // pre-creates the slot, calls this fn (which spawns a poller task),
+    // then writes the pool handle once `DbPool::connect` returns. The
+    // daemon's INSERT path activates as soon as the slot is populated;
+    // up to that point the cycle counters still tick (in-memory only).
+    // Phase B：late-injected DbPool slot。main.rs 預建 slot，呼叫本 fn
+    // （spawn 一個 poller task），DbPool 連線完寫入 slot；slot 寫入後
+    // daemon INSERT path 啟動，在此之前 counter 仍 in-memory tick。
+    db_pool_slot: &CostEdgeAdvisorDbSlot,
 ) {
     if !is_advisor_env_enabled() {
         // Zero-overhead path / 零負擔路徑
@@ -469,6 +486,7 @@ pub(crate) fn spawn_cost_edge_advisor_if_enabled(
     // Daemon 需 Arc<HStateCache>。Boot 時同步讀 slot — G3-09 env-gate 開時
     // 預期 G3-08 H State Gateway 也開（advisor 沒 H5 資料就無意義）。
     let h_state_cache_slot_clone = Arc::clone(h_state_cache_slot);
+    let db_pool_slot_clone = Arc::clone(db_pool_slot);
     let advisor = CostEdgeAdvisor::new_arc();
     let advisor_clone = Arc::clone(&advisor);
     let advisor_slot_clone = Arc::clone(advisor_slot);
@@ -521,22 +539,75 @@ pub(crate) fn spawn_cost_edge_advisor_if_enabled(
             }
         };
 
+        // Phase B (G3-09 2026-04-28) Step (2.5): wait up to 30s for the
+        // DbPool slot to populate. main.rs creates the pool ~lines below
+        // 510 (between IPC server detach and writer-task init); 30s is
+        // a generous bound that allows for slow PG handshake without
+        // blocking the daemon spawn forever. If the slot stays empty
+        // (DbPool not configured / paper mode without DB), spawn the
+        // daemon **without** persistence — counters still maintained.
+        // Phase B Step (2.5)：最多等 30s 給 DbPool slot 寫入。main.rs 建 pool
+        // 在 line 510 下方（IPC server detach 與 writer-task init 之間）；
+        // 30s 寬鬆讓 PG handshake 慢時不無限 block daemon spawn。slot 一直
+        // 空（DbPool 未配 / paper 無 DB）時 daemon **不啟用** persistence
+        // 仍 spawn，counter 仍維護。
+        let db_pool: Option<Arc<DbPool>> = {
+            let mut attempts = 0u32;
+            loop {
+                if let Some(pool) = db_pool_slot_clone.read().await.as_ref() {
+                    break Some(Arc::clone(pool));
+                }
+                attempts += 1;
+                if attempts > 300 {
+                    // 30s elapsed (300 × 100ms) — proceed without persistence.
+                    // 超過 30s — 不啟用 persistence 直接 spawn。
+                    warn!(
+                        "cost_edge_advisor: db_pool_slot not populated after 30s; \
+                         spawning daemon WITHOUT learning.cost_edge_advisor_log \
+                         persistence (Phase B observability degrades to in-memory \
+                         counters only) / cost_edge_advisor: db_pool_slot 30s 內未注入；\
+                         daemon 不啟用 persistence 直接 spawn（Phase B observability 降級為\
+                         記憶體 counter only）"
+                    );
+                    break None;
+                }
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+        };
+
+        // Determine engine_mode label from the demo store binding (advisor
+        // is per-engine via demo store; "demo" is the canonical choice
+        // unless operator explicitly switches). Stamped into every INSERT
+        // row so ratio histograms split correctly per environment.
+        // 從 demo store binding 推 engine_mode 標籤（advisor 以 demo store
+        // per-engine；除非 operator 顯式切換，"demo" 為 canonical 選擇）。
+        // 蓋章到每筆 INSERT row 讓 ratio histogram 跨環境正確切分。
+        // RFC §6.1 R-B9：advisor 在 spawn 時 bind engine_mode；mid-run 不變。
+        let engine_mode = "demo".to_string();
+
         // Step (3): spawn the daemon now that all dependencies are ready.
         // 步驟 (3)：依賴全到位後 spawn daemon。
-        let _handle = spawn_cost_edge_advisor(
+        let _handle = spawn_cost_edge_advisor_with_persistence(
             advisor_clone,
             h_state_cache,
             risk_demo,
             COST_EDGE_DEFAULT_POLL_INTERVAL,
             cancel_for_task,
+            db_pool,
+            engine_mode,
         );
 
         info!(
             poll_interval_ms = COST_EDGE_DEFAULT_POLL_INTERVAL.as_millis() as u64,
-            phase = "A_advisory",
-            "cost_edge_advisor spawned (env=1) — Phase A advisory only \
+            // Phase tag advanced from "A_advisory" → "B_shadow" by Phase B
+            // Wave 1 land. Still 0 trade impact — Phase B is observation only;
+            // Phase C will do shadow IntentProcessor reject check.
+            // Phase 標籤隨 Phase B Wave 1 推進到 "B_shadow"；仍 0 trade impact —
+            // Phase B 純觀察，Phase C 才做 shadow IntentProcessor reject 檢查。
+            phase = "B_shadow",
+            "cost_edge_advisor spawned (env=1) — Phase B observation only \
              (no IntentProcessor wiring) / cost_edge_advisor 已啟動（env=1）— \
-             Phase A 純 advisory（不接 IntentProcessor）"
+             Phase B 純觀察（不接 IntentProcessor）"
         );
     });
 }
