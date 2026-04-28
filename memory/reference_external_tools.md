@@ -39,6 +39,21 @@ type: reference
 - Use cases: PDF audit 對外分享 / screenshot 長期歸檔 / 第三方 binary 暫存
 - 嚴禁：repo 鏡像（git 是 source of truth）
 
-## MotherDuck 註
+## Declined / on-hold tools
 
-Operator 2026-04-29 提及添加 MotherDuck，但當下載入的 MCP server 為 Google Drive（4f87d4f7）。MotherDuck MCP 若有獨立 ID 未列出，需 operator 手動再啟。本 memory 標 Drive 為實際連接的，非 MotherDuck。
+### MotherDuck — DECLINED 2026-04-29
+
+MCP id `4e73f78d-e980-4585-8586-5f2763080a09` 確認連接，但 operator 評估後 **放棄啟用**。理由：
+
+1. **本機性能吊打 Free Plan**：Linux trade-core 128 GB unified mem，本機 DuckDB / Polars 直接讀 PG 比 Pulse Duckling（最小 compute）+ 10 CU-hours/月 上限快得多
+2. **single-operator project**：MotherDuck 「5 users / share dive」協作紅利拿不到
+3. **多一條 ETL = 多一個 silent drift 點**：類似 `decision_outcomes` timeframe 字串格式 100% NULL 的教訓，沒必要為「browser 看數據」邊際收益新增 drift surface
+
+**替代方案**（若需冷分析湖）：本機 DuckDB + `postgres_scanner` extension，免雲端 / 免 ETL / 免 CU limit。
+
+**重新評估 trigger**（出現任一才需重啟此決策）：
+- Operator 需要手機 / 出差時 browser 看 OpenClaw dashboard
+- 需對外人（顧問 / 學術合作者）share 數據（MotherDuck share link 比 ssh access 安全）
+- PG 真的卡死且本機 DuckDB 不可行
+
+Operator 仍可從 Claude Code `/plugin` 主動解除 MotherDuck connector 釋出 slot。本 memory 標 declined 即足夠 — 未來 sub-agent 看到 MCP 列表中的 MotherDuck，按本條 ref 跳過評估即可。
