@@ -112,7 +112,10 @@ def _inject_sync_label_proxy_cells(
                 continue
             snapshot[proxy_key] = {
                 "shrunk_bps": round(grand_mean_bps, 4),
+                "runtime_bps": round(min(grand_mean_bps, 0.0), 4),
                 "n": 0,
+                "validation_passed": False,
+                "validation_reason": "proxy_cell_no_direct_observations",
                 "_proxy_from": "grand_mean",
             }
             added += 1
@@ -241,6 +244,11 @@ def run_james_stein(
     Returns:
         Dict mapping (strategy_name, symbol) → {raw_bps, shrunk_bps, B_factor, n}.
     """
+    from .edge_estimate_validation import (
+        ValidationConfig,
+        ValidationResult,
+        validate_edge_stats,
+    )
     from .realized_edge_stats import compute_edge_stats
 
     stats = compute_edge_stats(days_back=days_back, min_samples=min_samples,
@@ -250,6 +258,18 @@ def run_james_stein(
     if not stats:
         logger.warning("No edge stats available — aborting JS estimation.")
         return {}
+
+    validation_config = ValidationConfig.for_engine_mode(engine_mode)
+    validation_stats = compute_edge_stats(
+        days_back=validation_config.validation_history_days,
+        min_samples=1,
+        engine_mode=engine_mode,
+        min_observation_ts=min_observation_ts,
+    )
+    validation_results, validation_summary = validate_edge_stats(
+        validation_stats,
+        validation_config,
+    )
 
     # ── Build per-cell arrays ──
     keys = list(stats.keys())
@@ -283,11 +303,28 @@ def run_james_stein(
     for i, k in enumerate(keys):
         (strategy, symbol) = k
         es = stats[k]
+        validation = validation_results.get(k) or ValidationResult(
+            validation_passed=False,
+            validation_reason="missing_validation_history",
+            wf_windows=0,
+            oos_n=0,
+            oos_mean_bps=0.0,
+            oos_sharpe=0.0,
+            psr=0.0,
+            dsr=0.0,
+            p_value_raw=1.0,
+            p_value_bonferroni=1.0,
+            m_tests=max(len(validation_stats), 1),
+        )
+        runtime_bps = shrunk_values[i]
+        if not validation.validation_passed and runtime_bps > 0.0:
+            runtime_bps = 0.0
         results[k] = {
             "strategy_name": strategy,
             "symbol": symbol,
             "raw_bps": raw_values[i],
             "shrunk_bps": shrunk_values[i],
+            "runtime_bps": runtime_bps,
             "grand_mean_bps": grand_mean,
             "shrinkage_factor_B": B_global,
             "n_observations": es.n,
@@ -296,6 +333,7 @@ def run_james_stein(
             "win_rate": es.win_rate,
             "avg_win_bps": es.avg_win_bps,
             "avg_loss_bps": es.avg_loss_bps,
+            **validation.to_json_dict(),
         }
 
     logger.info(
@@ -355,7 +393,12 @@ def run_james_stein(
         # Demo: srv/settings/edge_estimates.json (backward-compatible, Rust reads this)
         # Paper: srv/settings/edge_estimates_paper.json (isolated from production)
 
-    _write_json_snapshot(results, snapshot_path)
+    _write_json_snapshot(
+        results,
+        snapshot_path,
+        validation_config=validation_config.to_dict(),
+        validation_summary=validation_summary,
+    )
 
     return results
 
@@ -448,6 +491,8 @@ def _write_to_postgres(results: dict[tuple[str, str], dict]) -> None:
 def _write_json_snapshot(
     results: dict[tuple[str, str], dict],
     path: str,
+    validation_config: Optional[dict] = None,
+    validation_summary: Optional[dict] = None,
 ) -> None:
     """
     Write a compact JSON snapshot for Rust cost_gate hot-reload (PH5-WIRE-1).
@@ -469,17 +514,25 @@ def _write_json_snapshot(
     )
     snapshot: dict = {
         "_meta": {
+            "schema_version": 2,
             "updated_at": now_iso,
             "n_cells": len(results),
             "grand_mean_bps": grand_mean_bps,
         }
     }
+    if validation_config is not None:
+        snapshot["_meta"]["validation_config"] = validation_config
+    if validation_summary is not None:
+        snapshot["_meta"]["validation_summary"] = validation_summary
     for (strategy, symbol), r in results.items():
         key = f"{strategy}::{symbol}"
         snapshot[key] = {
             # Primary signal for Rust cost_gate (WIRE-1): shrunk realized edge bps.
             # Rust cost_gate 主信號（WIRE-1）：收縮實現邊際 bps。
             "shrunk_bps": round(r["shrunk_bps"], 4),
+            # Runtime signal: positive edge is zeroed unless validation passed.
+            # 運行時信號：未通過驗證的正 edge 會被歸零。
+            "runtime_bps": round(r.get("runtime_bps", r["shrunk_bps"]), 4),
             "raw_bps": round(r["raw_bps"], 4),
             "n": r["n_observations"],
             "B": round(r["shrinkage_factor_B"], 4),
@@ -491,6 +544,21 @@ def _write_json_snapshot(
             "avg_loss_bps_shrunk": round(r.get("avg_loss_bps_shrunk", r.get("avg_loss_bps", 0.0)), 4),
             "combined_ev_bps": round(r.get("combined_ev_bps", r["shrunk_bps"]), 4),
         }
+        for field in (
+            "validation_passed",
+            "validation_reason",
+            "wf_windows",
+            "oos_n",
+            "oos_mean_bps",
+            "oos_sharpe",
+            "psr",
+            "dsr",
+            "p_value_raw",
+            "p_value_bonferroni",
+            "m_tests",
+        ):
+            if field in r:
+                snapshot[key][field] = r[field]
 
     # P0-14 Option B: inject sync-label proxy cells (grand_mean prior).
     # P0-14 Option B：注入 sync-label 代理格子（全域均值先驗）。

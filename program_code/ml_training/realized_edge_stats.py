@@ -198,6 +198,9 @@ class EdgeStats:
     win_rate: float = 0.0          # fraction of round-trips with positive net PnL / 盈利往返佔比
     avg_win_bps: float = 0.0       # mean net_pnl_bps for winning trades / 盈利交易均值 bps
     avg_loss_bps: float = 0.0      # mean net_pnl_bps for losing trades / 虧損交易均值 bps
+    # Time-stamped records used by the validation layer for walk-forward OOS checks.
+    # 帶時間戳的原始往返記錄，供驗證層做 walk-forward OOS 檢查。
+    raw_records: list[RoundTripRecord] = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -500,6 +503,7 @@ def compute_edge_stats(
             win_rate=win_rate,
             avg_win_bps=avg_win,
             avg_loss_bps=avg_loss,
+            raw_records=list(recs),
         )
         logger.info(
             "  (%s, %s): n=%d mean_net=%.2f bps std=%.2f bps fee=%.2f bps win_rate=%.2f",

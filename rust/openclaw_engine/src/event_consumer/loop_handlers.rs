@@ -481,6 +481,15 @@ pub(super) async fn handle_exchange_event(
                 .as_ref()
                 .and_then(|k| state.pending_orders.get(k))
                 .and_then(|po| po.time_in_force);
+            let fallback_fee_rate = pipeline
+                .intent_processor
+                .fee_rate_for_tif(&exec.symbol, matched_tif);
+            let fee_rate_used = exec
+                .fee_rate
+                .parse::<f64>()
+                .ok()
+                .filter(|v| v.is_finite() && *v >= 0.0)
+                .unwrap_or(fallback_fee_rate);
 
             // FIX-19: execution.fast topic omits execFee/feeRate fields.
             // When the field is empty or unparseable, estimate fee from
@@ -496,16 +505,13 @@ pub(super) async fn handle_exchange_event(
             let exec_fee: f64 = {
                 let parsed = exec.exec_fee.parse::<f64>().unwrap_or(0.0);
                 if parsed == 0.0 && exec_qty > 0.0 && exec_price > 0.0 {
-                    let fee_rate = pipeline
-                        .intent_processor
-                        .fee_rate_for_tif(&exec.symbol, matched_tif);
-                    let estimated = exec_qty * exec_price * fee_rate;
+                    let estimated = exec_qty * exec_price * fee_rate_used;
                     if estimated > 0.0 {
                         tracing::debug!(
                             exec_id = %exec.exec_id,
                             symbol = %exec.symbol,
                             notional = exec_qty * exec_price,
-                            fee_rate,
+                            fee_rate = fee_rate_used,
                             tif_known = matched_tif.is_some(),
                             estimated_fee = estimated,
                             "FIX-19b: execFee missing, estimated from TIF-aware rate \
@@ -550,6 +556,7 @@ pub(super) async fn handle_exchange_event(
                         &po.strategy,
                         &po.context_id,
                         &po.order_link_id,
+                        Some(fee_rate_used),
                     );
                     snapshot_writer.force_write(&pipeline.snapshot());
 
