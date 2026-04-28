@@ -71,7 +71,7 @@ fn test_approved_with_auth() {
     gov.grant_paper_authorization(None).unwrap();
     let mut state = PaperState::new(10_000.0);
     state.set_latest_price("BTC", 50000.0);
-    // PH5-WIRE-0: ATR=2000 so EV=2000×0.7×0.004×0.2=$1.12 >> k×fee=1.5×$0.22=$0.33
+    // PH5-WIRE-0: ATR=2000 so EV=2000×0.7×0.006×0.2=$1.68 >> k×fee=1.5×$0.33=$0.50
     // (ATR raised from 500 to clear the 0.2 cold-start dampening factor)
     let result = proc.process(
         &make_intent("BTC", true),
@@ -86,10 +86,10 @@ fn test_approved_with_auth() {
 
 #[test]
 fn test_position_sizing_caps_qty() {
-    // P1 cap: 2% of 10,000 / 50,000 = 0.004 BTC
-    // Intent qty 0.01 should be reduced to 0.004.
-    // P1 上限：10,000 * 2% / 50,000 = 0.004 BTC；意圖 qty 0.01 縮小為 0.004。
-    // PH5-WIRE-0: ATR=2000 so EV=2000×0.7×0.004×0.2=$1.12 >> k×fee=$0.33
+    // P1 cap: 3% of 10,000 / 50,000 = 0.006 BTC
+    // Intent qty 0.01 should be reduced to 0.006.
+    // P1 上限：10,000 * 3% / 50,000 = 0.006 BTC；意圖 qty 0.01 縮小為 0.006。
+    // PH5-WIRE-0: ATR=2000 so EV=2000×0.7×0.006×0.2=$1.68 >> k×fee=$0.50
     let proc = IntentProcessor::new();
     let mut gov = GovernanceCore::new();
     gov.grant_paper_authorization(None).unwrap();
@@ -105,10 +105,10 @@ fn test_position_sizing_caps_qty() {
     );
     assert!(result.submitted);
     let fill = result.fill.unwrap();
-    // fill.fill_qty should be 0.004 (= 10000 * 0.02 / 50000), not 0.01
+    // fill.fill_qty should be 0.006 (= 10000 * 0.03 / 50000), not 0.01
     assert!(
-        (fill.fill_qty - 0.004).abs() < 1e-9,
-        "Expected qty ~0.004 from P1 sizing, got {}",
+        (fill.fill_qty - 0.006).abs() < 1e-9,
+        "Expected qty ~0.006 from P1 sizing, got {}",
         fill.fill_qty
     );
 }
@@ -118,7 +118,7 @@ fn test_position_sizing_tiny_balance() {
     // With tiny balance, P1 calc gives very small qty — no artificial floor.
     // 餘額極小時，P1 計算給出極小 qty — 無人為下限。
     // PH5-WIRE-0: need ATR=2000 to clear cost_gate with dampening 0.2 at tiny notional.
-    // final_qty=0.00004, notional=$2 → k=3.0, fee=$0.0022, need EV=2000×0.7×0.00004×0.2=$0.0112>$0.0066
+    // final_qty=0.00006, notional=$3 → k=3.0, fee=$0.0033, need EV=2000×0.7×0.00006×0.2=$0.0168>$0.0099
     let proc = IntentProcessor::new();
     let mut gov = GovernanceCore::new();
     gov.grant_paper_authorization(None).unwrap();
@@ -134,10 +134,10 @@ fn test_position_sizing_tiny_balance() {
     );
     assert!(result.submitted);
     let fill = result.fill.unwrap();
-    // P1 calc: 100 * 0.02 / 50000 = 0.00004 — used directly, no MIN_QTY floor.
+    // P1 calc: 100 * 0.03 / 50000 = 0.00006 — used directly, no MIN_QTY floor.
     assert!(
-        (fill.fill_qty - 0.00004).abs() < 1e-9,
-        "Expected P1-sized qty 0.00004, got {}",
+        (fill.fill_qty - 0.00006).abs() < 1e-9,
+        "Expected P1-sized qty 0.00006, got {}",
         fill.fill_qty
     );
 }
@@ -151,7 +151,7 @@ fn test_position_sizing_small_intent_unchanged() {
     gov.grant_paper_authorization(None).unwrap();
     let mut state = PaperState::new(1_000_000.0); // large balance
     state.set_latest_price("ETH", 3_000.0);
-    // P1 cap: 1,000,000 * 0.02 / 3000 = 6.67; intent qty=0.01 is smaller
+    // P1 cap: 1,000,000 * 0.03 / 3000 = 10.0; intent qty=0.01 is smaller
     let intent = make_intent("ETH", true); // qty=0.01
     let result = proc.process(&intent, &gov, &state, 500.0, GovernanceProfile::Exploration);
     assert!(result.submitted);
@@ -186,10 +186,10 @@ fn test_fup8_phase2_approved_qty_exposed_on_success() {
         GovernanceProfile::Exploration,
     );
     assert!(result.submitted, "intent must pass gates");
-    // P1 cap at 2%: 10000 * 0.02 / 50000 = 0.004 BTC
+    // P1 cap at 3%: 10000 * 0.03 / 50000 = 0.006 BTC
     assert!(
-        (result.approved_qty - 0.004).abs() < 1e-9,
-        "approved_qty should be P1-capped (0.004), got {}",
+        (result.approved_qty - 0.006).abs() < 1e-9,
+        "approved_qty should be P1-capped (0.006), got {}",
         result.approved_qty
     );
     assert!(

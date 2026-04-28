@@ -205,9 +205,9 @@ impl ExchangeGateResult {
 
 /// Intent processor with guardian checks.
 /// 帶守護者檢查的意圖處理器。
-/// Default P1 risk cap (2% of balance per trade).
-/// 默認 P1 風險上限（每筆交易餘額的 2%）。
-const DEFAULT_P1_RISK_PCT: f64 = 0.02;
+/// Default P1 risk cap (3% of balance per trade).
+/// 默認 P1 風險上限（每筆交易餘額的 3%）。
+const DEFAULT_P1_RISK_PCT: f64 = 0.03;
 
 /// Bybit USDT perp default taker fee (0.055%) — fallback when API rate not available.
 /// Bybit USDT 永續合約默認 taker 費率，API 未提供時的回退值。
@@ -270,8 +270,8 @@ pub struct IntentProcessor {
     /// Phase 2b: Per-symbol trade stats for Kelly calculation.
     /// Phase 2b：每交易對的交易統計，用於 Kelly 計算。
     trade_stats: std::collections::HashMap<String, crate::ml::kelly_sizer::TradeStats>,
-    /// P1 risk cap percentage (configurable, default 2%).
-    /// P1 風險上限百分比（可配置，默認 2%）。
+    /// P1 risk cap percentage (configurable, default 3%).
+    /// P1 風險上限百分比（可配置，默認 3%）。
     p1_risk_pct: f64,
     /// RRC-1-B4: Risk config for check_order_allowed Gate 0 (ARCH-RC1 unified).
     /// RRC-1-B4：風控配置，用於 Gate 0 訂單准入檢查。
@@ -531,7 +531,7 @@ impl IntentProcessor {
         self.last_arm_selection.as_ref()
     }
 
-    /// Set P1 risk cap percentage (e.g. 0.02 = 2%, 0.05 = 5%).
+    /// Set P1 risk cap percentage (e.g. 0.03 = 3%, 0.05 = 5%).
     /// 設定 P1 風險上限百分比。
     pub fn set_p1_risk_pct(&mut self, pct: f64) {
         self.p1_risk_pct = pct.clamp(0.001, 0.20); // Min 0.1%, max 20%
