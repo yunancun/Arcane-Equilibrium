@@ -1,5 +1,30 @@
 # PA Memory — 工作記憶
 
+## STRATEGY-WIRING-SPLIT P2（2026-04-28）
+
+**結論**：`strategy_wiring.py` 1060 → **784 LOC**（≤800 進入合規），抽 2 sibling：
+`strategy_wiring_h_state.py` 133 LOC（H State Invalidator G3-08 Phase 1C，純 leaf top-level）+
+`strategy_wiring_scanner.py` 338 LOC（MarketScanner/AutoDeployer/ScoutWorker/scout_routes/Auto-Observation 5 子塊，函數 `wire_market_scanner_and_workers(deps)` 模式）。Pure refactor 0 production behavior change。
+
+**Mac pytest**：143/143 PASS（6 critical wiring suites）+ 25 module-attr smoke 全綠。
+
+**設計選擇**：
+1. H state cluster 用 **top-level executable** 模式（無 deps，純 env 驅動），strategy_wiring.py `from .strategy_wiring_h_state import _H_STATE_INVALIDATOR` re-import 保 grep 穩定
+2. Scanner cluster 用 **函數 + ScannerWiringResult dataclass** 模式（需 ORCHESTRATOR/KLINE/PAPER_ENGINE/SCOUT_AGENT/MESSAGE_BUS 注入避循環 import），strategy_wiring.py 在原 init 順序位置呼叫並 bind 回 module attribute（`MARKET_SCANNER = _scanner_result.market_scanner` 等）
+3. 5-Agent ~440 LOC 塊**故意不抽** — init order 鼓互交織（cognitive_modulator / LOSSES-WIRING lambda / ExecutorConfigCache / 5 audit_callback wires），P2 scope 邊界「strategy_wiring.py only」嚴守
+
+**保 grep 穩定鍵**：
+- `app.strategy_wiring.MARKET_SCANNER` / `AUTO_DEPLOYER` 屬性查找不破（strategy_read_routes / strategy_write_routes `from ... import` + h_state_collectors `getattr(_sw, ...)` + tests `sys.modules` patch）
+- `app.strategy_wiring._H_STATE_INVALIDATOR` 屬性 sys.modules 反射不破
+
+**保不變量**：W1 cognitive ticking + G8-01-FUP-LOSSES-WIRING lambda（Analyst→Strategist callback）+ ExecutorConfigCache shadow_mode_provider + 5 audit_callback wires + TruthSourceRegistry inject + DEAD-PY-2 paths（PIPELINE_BRIDGE=None / Auto-observation no-op pass / DEMO_CONNECTOR=None）。
+
+**CLAUDE.md §九 同步**：`_H_STATE_INVALIDATOR` row 467 wire site updated `strategy_wiring.py:535` → `strategy_wiring_h_state.py` + re-import 註；新增 `MARKET_SCANNER / AUTO_DEPLOYER / _SCOUT_WORKER` row 顯式登記（前為「12+」隱含覆蓋）。Wave E cost_edge_advisor_boot row 補登先例延續。
+
+**教訓**：sibling-by-function-call 與 sibling-by-top-level-import 兩種 pattern 視 dependency 取捨 — 純 env/讀文件 leaf 用 top-level、需注入 singleton 用函數。Wave E + main_scanner_init + 本次 strategy_wiring split 三個案例累積形成 Python 端 sibling 拆分標準作業：1) leaf cluster 優先 2) caller surface (sys.modules / getattr / from-import) 全盤點 3) singleton bind-back 維持屬性 grep 4) §九 row 同步避 drift。
+
+詳：`docs/CCAgentWorkSpace/PA/workspace/reports/2026-04-28--strategy_wiring_split.md`
+
 ## MAIN-RS-PRE-EXISTING-CLEANUP P2（2026-04-28）
 
 **結論**：main.rs 1210 → **1158 LOC**（§九 1200 hard cap 進入合規），新 sibling `main_scanner_init.rs`（170 LOC）抽出 Scanner D4 pre-init（config + registry + edge estimates + relay channel + tokio relay task spawn）。Pure refactor 0 production behavior change，cargo build 綠 + lib 2308/0 + cost_edge_advisor 11/0 + 2/0。Wave E `cost_edge_advisor_boot` split 後遺留的 governance ambiguity（E2 PB1 MED-1）解除。
@@ -1054,3 +1079,34 @@ handler 頂部 `from .h_state_collectors import _collect_agent_snapshots, _colle
 
 ### 報告路徑
 📄 `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-04-28--g3_09_daemon_test_split.md`
+
+---
+
+## 2026-04-28 — G3-08-FUP-STRATEGIST-DELEGATOR-SLIM P3
+
+### 任務
+- 主會話派 PA+E1 合一執行 strategist_agent.py 933 LOC > §九 800 警告線瘦身
+- 三角合一：PA design + 直接 lift body + 自寫 sanity test，worktree pattern 不 commit
+
+### 結論（782 LOC，達 ≤800 首選）
+- **strategist_agent.py 933 → 782**（-151 / -16.2%）
+- 25 method delegator 壓 1-line（16 sibling + 4 H1/H4 + 4 cognitive + record_trade_outcome）
+- 2 method body lift：`_produce_intents` (~80 LOC) → strategist_edge_eval.py / `record_trade_outcome` (~55 LOC) → strategist_cognitive.py
+- E2 4-1 NIT-1 LOW 附帶：`_handle_intel` 5 early-return 補 `_invalidate_h_state_async` hint
+- pytest spec 6 檔 98/98 ✅ / 廣度 251/251 ✅ / 0 production behavior change
+
+### 關鍵技術發現：sibling stub 模式不能完全 lift class method
+- **Spec 原建議**「sibling fn + module-level re-export」**對 method-level test patch 失敗**
+- 22 處 test 用 `agent.method = MagicMock(wraps=agent.method)` — 純 module re-export 不創建 class attr → instance lookup `AttributeError`
+- **正解**：class-level `def` 必留作 1-line delegator；瘦身靠「壓縮 def 形式」+「搬大 body」雙軌
+- 範例 anti-pattern：直接 `from .x import _evaluate_edge` 後刪 class method → `agent._evaluate_edge` 取不到 callable wraps
+
+### 教訓
+- **Test patch 模式 `MagicMock(wraps=agent.method)` 是 BWD-compat 硬性 contract**：判斷 spec 「lift to module-level」是否可行，必先 grep `agent\.<method>\s*=\s*MagicMock` / `wraps=agent\.<method>`，命中即必保 class-level def
+- **`# noqa: E704` 1-line def 是 LOC slim 合法工具**：E5 既有規範允許薄 delegator 此用法（pycodestyle E704 = statement on same line as def），標 noqa 比拆兩行省一半 LOC，header 區段 docstring 解釋意圖即可
+- **Body lift 選 sibling 看 producer/consumer 凝聚度**：`_produce_intents` 依 `evaluation` → 進 strategist_edge_eval（與 producer 同檔）；`record_trade_outcome` 寫 `consecutive_losses` → 進 strategist_cognitive（與 consumer `tick_cognitive_modulator` 同檔）。**不要照「方法名前綴」分類，看資料流向**
+- **Early-return hint 補完是純診斷利好**：env=0 時 0 負擔；env=1 時讓 Rust h_state cache 對「intel_received++ 但被拒絕」事件保鮮，避免 `intel_received` 動了 stats stale 的誤導。E2 NIT 級 LOW 推薦本 wave 一起做 ROI 高
+- **PA+E1 合一適用情境再驗證**：worktree pattern + 純 refactor + 規格清晰 + 既有 sibling 已存在（不需設計新 sibling 結構）— 跳過獨立 E1 派發省時。本 ticket 是 Phase 4 後的「再瘦身」，技術風險已被前 wave 探明
+
+### 報告路徑
+📄 `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-04-28--g3_08_fup_strategist_delegator_slim.md`
