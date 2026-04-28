@@ -308,6 +308,10 @@ def test_sql_templates_contain_expected_clauses():
     assert "entry_context_id"   in m._BACKFILL_INCLUDED_SQL
     # Grid carve-out (§4.3)
     assert "grid_trading"       in m._BACKFILL_INCLUDED_SQL
+    # Funding settlements must be joined into net edge, not left as a TODO.
+    assert "trading.funding_settlements" in m._BACKFILL_INCLUDED_SQL
+    assert "total_funding_pnl" in m._BACKFILL_INCLUDED_SQL
+    assert "+ COALESCE(fb.total_funding_pnl, 0.0)" in m._BACKFILL_INCLUDED_SQL
 
     # Pass 2 must match the 3 excluded prefixes (§4.2)
     for prefix in ("orphan_close:", "adopted_close:", "shadow_fill:"):

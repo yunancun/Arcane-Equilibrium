@@ -91,6 +91,11 @@ pub struct PendingOrder {
     /// EDGE-P2-3 Phase 1B-3.2：每單 maker 掛單逾時（毫秒）。僅 PostOnly 帶值；
     /// 逾時後 sweep 以 orderLinkId 取消。Market 為 None（沿用 60s 硬移除）。
     pub maker_timeout_ms: Option<u64>,
+    /// Dispatch-time reference used for execution slippage attribution.
+    /// execution slippage 歸因用的送單時刻參考。
+    pub reference_price: Option<f64>,
+    pub reference_ts_ms: Option<u64>,
+    pub reference_source: Option<String>,
     /// Timestamp when a maker-timeout cancel request was dispatched. While this
     /// is Some, keep the row so a racing fill before the WS cancel ack can still
     /// match the original context. Removed on order Cancelled/Rejected/Filled or

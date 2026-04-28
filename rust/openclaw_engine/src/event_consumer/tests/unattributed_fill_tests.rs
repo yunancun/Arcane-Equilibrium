@@ -118,6 +118,8 @@ async fn test_emit_for_live_engine_mode_writes_audit_row() {
             entry_context_id,
             engine_mode,
             exit_source,
+            liquidity_role,
+            ..
         } => {
             assert_eq!(fill_id, "unattrib-exec-AAA");
             assert_eq!(ts_ms, 1_700_000_000_000);
@@ -142,6 +144,7 @@ async fn test_emit_for_live_engine_mode_writes_audit_row() {
                 exit_source.is_none(),
                 "not a Combine-Layer-routed exit fill"
             );
+            assert_eq!(liquidity_role.as_deref(), Some("unknown"));
         }
         _ => panic!("expected TradingMsg::Fill, got other variant"),
     }
