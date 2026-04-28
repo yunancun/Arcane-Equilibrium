@@ -459,13 +459,16 @@ except (ImportError, Exception) as e:
 # callback，接線失敗只是 modulator 維持舊有 0-input 路徑（無回歸）。
 try:
     if ANALYST_AGENT is not None and STRATEGIST_AGENT is not None:
-        # Use a small lambda to bind the live STRATEGIST_AGENT singleton.
-        # The closure captures the singleton, so subsequent reassignments
-        # of STRATEGIST_AGENT (none today) would NOT be picked up — acceptable
-        # because Strategist re-init would also re-run wiring.
-        # 用 lambda 綁定 live STRATEGIST_AGENT singleton。closure 捕獲後
-        # 重新賦值 STRATEGIST_AGENT（目前無）不會被反映，可接受 —— Strategist
-        # 重 init 也會重跑接線。
+        # The lambda body resolves STRATEGIST_AGENT via Python's free-variable
+        # lookup (module global), so reassignments of STRATEGIST_AGENT WOULD
+        # be picked up dynamically at call time. No reassignment exists today
+        # (Strategist re-init would re-run this wiring anyway), so the
+        # behavior is equivalent in practice — the prior comment claiming
+        # "would NOT be picked up" was technically inaccurate.
+        # lambda 內 STRATEGIST_AGENT 走 Python free-variable lookup（模組全局），
+        # 因此若 STRATEGIST_AGENT 重新賦值，下次呼叫會動態反映。今日無 reassign
+        # 路徑（Strategist re-init 也會重跑 wiring），實際行為等價。先前注解
+        # 「would NOT be picked up」技術上不準（per E2 LOSSES-WIRING LOW-1）。
         ANALYST_AGENT.set_strategist_loss_callback(
             lambda net_pnl: STRATEGIST_AGENT.record_trade_outcome(net_pnl)
         )
