@@ -105,9 +105,29 @@ def _viewer_actor() -> _FakeActor:
 
 def _make_app(actor: _FakeActor) -> FastAPI:
     """Build a minimal FastAPI app with executor_router + actor override.
-    建構最小 FastAPI app：只掛 executor_router，並覆寫 current_actor。"""
+    建構最小 FastAPI app：只掛 executor_router，並覆寫 current_actor。
+
+    SINGLETON-POLLUTION-EXECUTOR-SHADOW-TOGGLE-API fix (Option A, test fixture):
+      Sibling `test_api_contract.py::build_client` runs `importlib.reload(main_legacy)`
+      which rebinds `main_legacy.current_actor` to a *new* function object. The
+      original `executor_routes.executor_router` was built before the reload,
+      so its `Depends(base.current_actor)` holds the *old* callable. Without
+      mitigation, `dependency_overrides[base.current_actor]` (which after reload
+      resolves to the *new* callable) fails to match → override silently bypassed
+      → 401 unauthorized instead of expected 400/200.
+
+      Fix: reload `executor_routes` itself inside `_make_app` so the router is
+      rebuilt against whatever `main_legacy.current_actor` is currently bound,
+      and the test-side `base.current_actor` lookup matches.
+      鏡 W3 SINGLETON Option A pattern（test fixture defense-in-depth），不動
+      production code（route 建構期 freeze Depends 是 FastAPI 標準語意）。
+    """
+    import importlib
+    from app import executor_routes as _executor_routes_mod
+    importlib.reload(_executor_routes_mod)
+
     app = FastAPI()
-    app.include_router(executor_routes.executor_router)
+    app.include_router(_executor_routes_mod.executor_router)
 
     # Override main_legacy.current_actor — the route uses Depends(base.current_actor).
     # 覆寫 main_legacy.current_actor — route 透過 Depends(base.current_actor) 使用。

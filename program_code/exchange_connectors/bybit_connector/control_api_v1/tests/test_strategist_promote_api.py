@@ -78,9 +78,27 @@ def _viewer_actor() -> _FakeActor:
 
 def _make_app(actor: _FakeActor) -> FastAPI:
     """Build a minimal FastAPI app with strategist_promote_router + actor override.
-    建構最小 FastAPI app：只掛 strategist_promote_router，並覆寫 current_actor。"""
+    建構最小 FastAPI app：只掛 strategist_promote_router，並覆寫 current_actor。
+
+    STRATEGIST-PROMOTE-API singleton-pollution fix (Option A, test fixture):
+      Sibling `test_api_contract.py::build_client` runs `importlib.reload(main_legacy)`
+      which rebinds `main_legacy.current_actor` to a new function object. The
+      original `strategist_promote_routes.strategist_promote_router` was built
+      before the reload, so its `Depends(base.current_actor)` holds the old
+      callable. Without mitigation, `dependency_overrides[base.current_actor]`
+      fails to match → 401 unauthorized instead of expected 200/400/403.
+
+      Fix: reload `strategist_promote_routes` itself inside `_make_app` so the
+      router rebuilds its `Depends` against the current `main_legacy.current_actor`.
+      鏡 W3 SINGLETON Option A pattern（test fixture defense-in-depth）；不動
+      production code（route 建構期 freeze Depends 是 FastAPI 標準語意）。
+    """
+    import importlib
+    from app import strategist_promote_routes as _sp_mod
+    importlib.reload(_sp_mod)
+
     app = FastAPI()
-    app.include_router(strategist_promote_routes.strategist_promote_router)
+    app.include_router(_sp_mod.strategist_promote_router)
 
     from app import main_legacy as base
     app.dependency_overrides[base.current_actor] = lambda: actor
