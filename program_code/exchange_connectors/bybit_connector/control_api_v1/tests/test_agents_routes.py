@@ -28,15 +28,114 @@ MODULE_NOTE (中): /api/v1/agents/{roster|recent_rejects|shadow_vs_live_summary}
 
 from __future__ import annotations
 
+import io
 import os
 import sys
 import time
+import tokenize
 import types
 from contextlib import contextmanager
 from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
+
+
+def _strip_comments_and_docstrings(src: str) -> str:
+    """Strip ``#`` comments + module/class/function docstrings from Python source
+    / 移除 Python 源碼的 ``#`` comment 與 module/class/function level docstring。
+
+    Preserves all *non-docstring* string literals (e.g. SQL templates) so
+    that real ``INSERT``/``UPDATE``/``DELETE`` SQL literals still trip the
+    invariant — only policy-self-references inside docstrings are filtered.
+    保留所有非 docstring 的字串字面值（e.g. SQL 模板），讓真實的
+    ``INSERT``/``UPDATE``/``DELETE`` 寫入 SQL 仍會觸發 invariant；只過濾
+    docstring 中的政策自證引用。
+
+    Used by ``test_h3_no_like_agent_underscore_anywhere`` and
+    ``test_grep_no_write_paths``.
+    """
+    import ast
+
+    # 1) Strip # comments via tokenize (line-aware so we keep formatting roughly).
+    no_comments_lines: list[str] = []
+    try:
+        tokens = list(tokenize.generate_tokens(io.StringIO(src).readline))
+        # Build mapping line_no -> set(comment col ranges) to slice out.
+        comment_spans: dict[int, list[tuple[int, int]]] = {}
+        for tok in tokens:
+            if tok.type == tokenize.COMMENT:
+                ln = tok.start[0]
+                comment_spans.setdefault(ln, []).append(
+                    (tok.start[1], tok.end[1])
+                )
+        for idx, line in enumerate(src.splitlines(keepends=True), start=1):
+            if idx in comment_spans:
+                # Strip the comment portion (from first comment col onward).
+                first_col = min(c[0] for c in comment_spans[idx])
+                no_comments_lines.append(line[:first_col].rstrip() + "\n")
+            else:
+                no_comments_lines.append(line)
+        no_comments = "".join(no_comments_lines)
+    except tokenize.TokenizeError:
+        no_comments = src
+
+    # 2) Parse AST; replace all module/class/function docstring nodes with empty.
+    try:
+        tree = ast.parse(no_comments)
+    except SyntaxError:
+        # If un-parseable, just return comment-stripped version.
+        return no_comments
+
+    docstring_locs: list[tuple[int, int, int, int]] = []  # (lineno, col, endline, endcol)
+
+    def _record_bare_string_exprs(node: ast.AST) -> None:
+        """Record every bare-string expression statement in node.body.
+
+        PEP 257 only blesses the *first* statement as a module docstring,
+        but our codebase routinely writes ``from __future__ import …`` first
+        and then a triple-quoted string as the human-readable module note.
+        We treat ALL bare-string expression statements at module/function/
+        class scope as documentation. Real string literals used inside
+        expressions / function calls / SQL templates are unaffected (they
+        are ``ast.Constant`` children of other nodes, not direct
+        ``Expr`` statements in ``.body``).
+        """
+        body = getattr(node, "body", None) or []
+        for stmt in body:
+            if (
+                isinstance(stmt, ast.Expr)
+                and isinstance(stmt.value, ast.Constant)
+                and isinstance(stmt.value.value, str)
+            ):
+                docstring_locs.append(
+                    (
+                        stmt.lineno,
+                        stmt.col_offset,
+                        stmt.end_lineno or stmt.lineno,
+                        stmt.end_col_offset or 0,
+                    )
+                )
+
+    _record_bare_string_exprs(tree)
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            _record_bare_string_exprs(node)
+
+    # Remove docstring spans by slicing source lines.
+    lines = no_comments.splitlines(keepends=True)
+    # Sort descending so removals don't shift earlier indices.
+    for ln, col, end_ln, end_col in sorted(docstring_locs, key=lambda t: -t[0]):
+        if ln == end_ln:
+            li = ln - 1
+            lines[li] = lines[li][:col] + '""' + lines[li][end_col:]
+        else:
+            li_start = ln - 1
+            li_end = end_ln - 1
+            lines[li_start] = lines[li_start][:col] + '""\n'
+            for i in range(li_start + 1, li_end + 1):
+                lines[i] = "\n" if i < li_end else lines[i][end_col:]
+    return "".join(lines)
 
 _test_dir = os.path.dirname(os.path.abspath(__file__))
 _control_api_dir = os.path.dirname(_test_dir)
@@ -464,10 +563,16 @@ def test_h3_no_like_agent_underscore_anywhere(client: TestClient) -> None:
 
     SQL 通配符 ``_`` 會誤中 ``agentX...`` 行，且 LIKE 模式對 V010
     ``idx_ai_usage_log_scope_time(scope, time DESC)`` 索引利用差。
-    本測試掃 helper 模組原始碼 + runtime 執行的 SQL，雙保險證 LIKE 已絕跡。
+    本測試掃 helper 模組原始碼（剝 comment + docstring 後）+ runtime 執行的 SQL，
+    雙保險證 LIKE 已絕跡。docstring 中提及 ``LIKE 'agent_'`` 作為政策說明
+    不算違規。
     """
-    # 1) Module-level static check: no LIKE 'agent_...' literal.
-    src = open(ar_helpers.__file__, encoding="utf-8").read()
+    # 1) Module-level static check: no LIKE 'agent_...' literal in *executable* code.
+    #    Strip comments + triple-quoted strings (docstrings, multi-line SQL templates
+    #    that already passed sql-injection review) so policy-doc references don't
+    #    self-trigger. 移除 comment 與 triple-quote 字串以免自我引用觸發。
+    src_raw = open(ar_helpers.__file__, encoding="utf-8").read()
+    src = _strip_comments_and_docstrings(src_raw)
     assert "LIKE 'agent_" not in src, "agents_routes_helpers still uses LIKE 'agent_'"
 
     # 2) Runtime check: capture SQL strings that hit the helper cursor.
@@ -736,9 +841,12 @@ def test_grep_no_write_paths() -> None:
     """硬規則：agents_routes.py + agents_routes_helpers.py 不得含 INSERT / UPDATE / DELETE。
 
     plan §"約束 1" 純讀契約。M-3 拆檔後 helpers 也要查。
+    docstring / comment 中為了政策自證提及這些 token 不算違規 — 只查
+    *可執行代碼* 的 SQL 字面值。
     """
     for module in (ar_module, ar_helpers):
-        src = open(module.__file__, encoding="utf-8").read()
+        src_raw = open(module.__file__, encoding="utf-8").read()
+        src = _strip_comments_and_docstrings(src_raw)
         forbidden = [" INSERT ", " UPDATE ", " DELETE "]
         for token in forbidden:
             assert token not in src.upper(), (
