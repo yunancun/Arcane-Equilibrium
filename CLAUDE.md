@@ -505,59 +505,61 @@ state_models ← state_compiler ← state_store ← main_legacy ← main.py
 
 ---
 
-## 十二、外部整合工具映射（Linear / Notion / Coupler.io / Google Drive）
+## 十二、外部整合工具映射（**Linear-only active** posture）
 
-**核心原則**：**git `srv/` 是唯一 source of truth**。外部工具僅為 *view layer*、*artifact store* 或 *ETL output*，永不擁有交易參數 / 代碼 / 政策的權威。任何衝突一律以 git 為準。
+**核心原則**：**git `srv/` 是唯一 source of truth**。外部工具僅為 *view layer*、*artifact store*，永不擁有交易參數 / 代碼 / 政策的權威。任何衝突一律以 git 為準。
 
-### 工具職責（2026-04-29 整合）
+**Posture（2026-04-29 operator 簡化決定）**：**Linear 是唯一 active workflow tool**。其他工具不融入工作流（不寫 SOP gate、不要求每 Wave 更新）。
 
-| 工具 | 角色 | 觸發條件 | 權威 |
+### 工具狀態表（2026-04-29 終版）
+
+| 工具 | 狀態 | 用途 | 維護要求 |
 |---|---|---|---|
-| `srv/` git | Source of truth | 每次 commit | **AUTHORITATIVE** for 代碼 / CLAUDE.md / TODO.md / memory / docs |
-| **Linear** | Operator-friendly remediation tracker | Wave / Batch sign-off；新 finding | **Authoritative** for batch-level status — 鏡像 `docs/audit/remediation_tracking.md` |
-| **Notion** | 對外索引（reports / sign-offs / RFCs） | Wave / Batch sign-off；新 RFC / audit | **Mirror only** — 1-line 條目連回 git |
-| **Coupler.io** | ETL: PG / Linear → Sheets / BigQuery | Operator on-demand 查詢 | **Read-only output** — 永不寫回 PG |
-| **Google Drive** | Off-repo binary artifact 存放 | 需對外分享 PDF / screenshot | **Artifact only** — 非 doc repo |
+| `srv/` git | **Source of truth** | 代碼 / CLAUDE.md / TODO.md / memory / docs | 每 commit 強制 |
+| **Linear** | **🟢 ACTIVE** | 62-finding remediation tracker | Wave/Batch Sign-off 後主會話更新對應父 issue |
+| **Notion** | **❄️ FROZEN**（保留但不維護） | 2026-04-29 bootstrap 快照（5 pages） | **不要更新** — operator 決定不融入工作流 |
+| **Google Drive** | **🟡 PASSIVE** | 按需 binary artifact（PDF / screenshot） | 0 SOP；只在 operator 明確要求才用 |
+| **Coupler.io** | **❌ DECLINED** | — | 不啟用 dataflow；連接器 slot 留著零成本 |
+| **MotherDuck** | **❌ DECLINED** | — | 同上（已移除 connector） |
+| **Slack** | **❌ DECLINED**（may revisit pre-live ~2026-05-15） | — | 不 authenticate；live 前 2 週評估純 alert channel |
 
-### Bootstrap 入口（2026-04-29 建立）
+### Bootstrap 入口
 
 - **Linear**：team `NCYu` · project [`OpenClaw 62-Finding Remediation`](https://linear.app/ncyu/project/openclaw-62-finding-remediation-de1bc8f68e42) · 6 milestones (Batch A-F) · 7 labels (P1/P2/P3/live-release-blocker/backlog/time-driven/edge-diag) · 12 issues (`NCY-5..16`)
-- **Notion**：[OpenClaw — Operator Hub](https://www.notion.so/350dcd3b1eff81038de2d10874ae0fe4) + 4 sub-pages (Sign-Offs Index / PA RFC Index / Audit Reports Index / External-Tool Workflow)
-- **Coupler.io**：connected, no active dataflow（按需啟用）
-- **Google Drive**：connected, no curated content（按需使用）
+- **Notion (frozen)**：[OpenClaw — Operator Hub](https://www.notion.so/350dcd3b1eff81038de2d10874ae0fe4) — 5 pages 為 2026-04-29 快照，內容保留但**不再同步**；任何看到的條目需以 git 為準
 
-### SOP（按角色）
+### SOP（簡化版）
 
 #### PM（主會話 / Conductor）
 1. Wave / Batch Sign-off git commit landed 之後：
    - 更新對應 Linear 父 issue（description checklist + status flip）
-   - Notion *Sign-Offs Index* 加 1-line 條目（git 路徑 + 一句驗證摘要）
-2. **不要**為每個 task 在 Linear 建 issue；只 mainline-tracked findings + active backlog + time-driven items
-3. **不要**把 TODO.md 全鏡像 Linear；只篩 62-finding mainline + active backlog + 有 cutoff 的條目
+   - **Notion 不更新**（凍結快照）
+2. 新 finding：判斷是否屬 mainline（62-finding / time-driven / 重要 backlog），是則建 Linear issue；否則只進 TODO.md
+3. **不要**把 TODO.md 全鏡像 Linear；只篩 mainline / time-driven cutoff items
 
-#### PA agent
-1. RFC 寫入 `docs/CCAgentWorkSpace/PA/workspace/reports/`
-2. PM approve 後請主會話加 Notion *PA RFC Index* 條目
-3. **不要**直接寫 Linear
-
-#### 審計 agents（E3 / FA / QC / MIT 等）
-1. Audit 寫入 `docs/audits/` 或 `.claude_reports/`
-2. 接受後請主會話加 Notion *Audit Reports Index* 條目
-3. 若產生新 finding，向 PM 提案 Linear issue（不要直接建）
+#### PA / 審計 agents
+1. RFC / audit 寫入 `docs/CCAgentWorkSpace/.../reports/` 或 `docs/audits/` / `.claude_reports/`
+2. **不要**寫 Notion（凍結）；**不要**直接寫 Linear（PM 提案）
+3. 若產生新 finding 上 mainline，向 PM 提案 Linear issue
 
 ### 嚴禁事項
 
 - **Don't** 把 Linear / Notion 當有否決權；它們鏡像，git 決策
-- **Don't** 把 TODO.md → Linear 自動同步；策展鏡像 only
+- **Don't** 自動同步 TODO.md → Linear；策展鏡像 only
 - **Don't** 在任何外部工具發布 secrets / API keys / authorization tokens
-- **Don't** 用 Coupler.io 寫入 PG；PG 寫入由 `srv/sql/` migration + Rust trading_writer 獨家治理
-- **Don't** 未經 operator 授權發布 runtime engine state（PID / snapshot freshness / fill rates）到 Notion / Drive；trading runtime state 屬敏感資訊
+- **Don't** 啟用 Coupler.io dataflow（已 declined；本機 DuckDB / psql 替代）
+- **Don't** authenticate Slack（已 declined to live -2w）
+- **Don't** 未經 operator 授權發布 runtime engine state（PID / snapshot freshness / fill rates）到任何外部工具
 
 ### 與 §六.六 SSH bridge 工作流關係
 
-Mac CC = SSOT，可寫 Linear / Notion / git；Linux runtime 透過 `ssh trade-core` 觸發；Linear / Notion 寫入仍從 Mac 主會話發起，避免 dual-session race。**Multi-session race 守則**（`feedback_git_commit_only_for_metadoc.md`）對 CLAUDE.md / TODO.md / memory 仍適用：用 `git commit --only <file>`，不要被 Linear 寫入打斷 git index 一致性。
+Mac CC = SSOT，可寫 Linear / git；Linux runtime 透過 `ssh trade-core` 觸發；Linear 寫入從 Mac 主會話發起。**Multi-session race 守則**（`feedback_git_commit_only_for_metadoc.md`）對 CLAUDE.md / TODO.md / memory 仍適用：用 `git commit --only <file>`。
 
-### 詳細 SOP
+### 重新評估觸發點
 
-完整 workflow 文件：[Notion External-Tool Workflow](https://www.notion.so/350dcd3b1eff8122a033d01823988db0)（也是 Notion mirror 自身規範的部分）。
+只有以下情況才考慮重啟已 declined 的工具，不要主動評估：
+- **Coupler.io**：本機 DuckDB / psql 真的不可行
+- **Slack**：approaching live trading（~2026-05-15）需 mobile alert channel
+- **MotherDuck**：見 `memory/reference_external_tools.md` §Declined
+- **Notion**：operator 主動要求重新融入（單方面解凍）
 
