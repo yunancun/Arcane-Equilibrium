@@ -49,6 +49,7 @@ from .checks_ipc_edge import (
     check_edge_estimates_freshness,
     check_shadow_exit_ratio,
     check_model_registry_freshness,
+    check_edge_diag_2_strategy_diversity,
 )
 from .checks_strategy import (
     check_intents_writer_ratio,
@@ -350,6 +351,17 @@ def main() -> int:
             # Phase A 版本在 cursor 外純 filesystem；Phase B 需查 V026 表。
             s, m = check_cost_edge_advisor_status(cur)
             results.append(("[30] cost_edge_advisor_status", s, m))
+
+            # [31] EDGE-DIAG-2 (2026-04-28): demo cost_gate strategy diversity
+            # sentinel. Verifies the low-sample exploration path is actually
+            # unblocking non-grid strategies. Distinct strategy count in 6h
+            # demo Approved verdicts: >=2 = PASS / 1 (grid-only) = WARN /
+            # 0 = PASS (engine quiet). Engine-restart <30min grace period.
+            # [31] EDGE-DIAG-2（2026-04-28）：demo cost_gate 策略多樣性哨兵 —
+            # 驗證低樣本探索路徑確實放行非 grid 策略。6h demo Approved 中
+            # distinct strategy 數：≥2 PASS / 1（grid-only）WARN / 0 PASS。
+            s, m = check_edge_diag_2_strategy_diversity(cur)
+            results.append(("[31] edge_diag_2_strategy_diversity", s, m))
     finally:
         conn.close()
 

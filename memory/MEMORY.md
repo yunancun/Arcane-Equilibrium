@@ -39,6 +39,7 @@
 - [風險參數修改必須限定範圍](feedback_risk_changes_scoped.md) — 只改被要求的參數，不連帶重設
 - [關閉 Adaptive Thinking](feedback_disable_adaptive_thinking.md) — 不使用延伸思考模式，直接輸出，Operator 明確要求
 - [Edge 分析用 demo 不用 paper](feedback_demo_over_paper_for_edge.md) — 累積/驗證/edge 估計取 demo fills；paper 失真無參考價值
+- [Demo 放寬 / Live 收緊政策 (2026-04-28)](feedback_demo_loose_live_strict_policy.md) — Demo 是學習資料源可放寬 cost_gate；Live 永遠 fail-closed；核心是「平衡虧損與盈利」非「一味保守」；EDGE-DIAG-2 確立決策啟發式 + 反模式
 - [MICRO-PROFIT-FIX-1 設計意圖](feedback_micro_profit_fix_intent.md) — 語意應為「有微利就套（net>0）」，不是「cost_edge_ratio gate 下是否套現」
 - [LiveDemo 不因 endpoint 降級](feedback_live_no_degradation_by_endpoint.md) — LiveDemo 是 Live 管線走 demo endpoint，目的是測 live 可靠性；authorization/TTL/風控門控須按 Live 嚴格標準，不得降級
 - [中文輸出偏好](feedback_chinese_output.md) — 面向 operator 的對話輸出以中文為主（2026-04-15）；英文只留技術名詞/代碼/commit

@@ -458,6 +458,7 @@ state_models ← state_compiler ← state_store ← main_legacy ← main.py
 | `LeaseTTLConfigManager._instance` | lease_ttl_config.py | `LeaseTTLConfigManager.get_instance()` |
 | `_BYBIT_CLIENT` / `_BYBIT_CLIENT_AVAILABLE` | strategy_ai_routes.py | 內部懶加載 `_get_rust_client()`（PYO3-ELIMINATE-1 Phase 2 後指向 `app.bybit_rest_client.BybitClient` 純 httpx；函數名為 grep-stability 保留） |
 | `KLINE_MANAGER` / `INDICATOR_ENGINE` / `SIGNAL_ENGINE` / `ORCHESTRATOR` 等 12+ | strategy_wiring.py | 模組級全局，import 時初始化 |
+| `SCOUT_AGENT` | strategy_wiring.py:143（建構＋start）；scout_routes.py:61（mutable handle，由 `set_scout_agent()` 寫入） | 模組級全局，import 時初始化；外部直接 `from .strategy_wiring import SCOUT_AGENT` 或經 scout_routes 模組屬性。G3-08-FUP-MAF-SPLIT-CLEANUP P3 補登（pre-existing gap，2026-04-28；class 定義於 `scout_agent.py`，maf 經 PEP 562 `__getattr__` lazy re-export 維持向後相容） |
 | `_SHARED_IPC_SLOTS` / `_SHARED_SLOT_LOCK` | ipc_dispatch.py | 內部懶加載 `get_or_connect_shared_client(slot_key)`（E5-P1-5） |
 | `_<AGENT>_AUDIT_CB` / `_GOV_HUB_FOR_<AGENT>` × 5（Scout/Strategist/Guardian/Analyst/Executor） | strategy_wiring.py | 模組級，由 `agent_audit_bridge.make_agent_audit_callback(...)` 構造；各 agent ctor 注入 `audit_callback`（E5-FN-3 Analyst pilot + FN-3-FUP-a~d 4 agents 補接線）。ImportError 時 GOV_HUB=None → bridge fail-open 靜默丟事件。`agent_audit_bridge` 本身無狀態工廠（不持 singleton） |
 | `_scheduler` / `_scheduler_lock` | edge_estimator_scheduler.py | 內部懶加載 `start_scheduler()`（P1-7 B JS estimator，每小時 cycle）。QC-3 audit FUP 補登（2026-04-23） |

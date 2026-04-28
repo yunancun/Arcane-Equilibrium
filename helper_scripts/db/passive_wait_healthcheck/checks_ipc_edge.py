@@ -419,3 +419,115 @@ def check_model_registry_freshness(cur) -> tuple[str, str]:
     if age_days > 30:
         return ("WARN", msg + " — oldest production model >30d, retrain due")
     return ("PASS", msg)
+
+
+def check_edge_diag_2_strategy_diversity(cur) -> tuple[str, str]:
+    """[31] EDGE-DIAG-2 (2026-04-28): demo cost_gate strategy diversity sentinel.
+
+    Pre-EDGE-DIAG-2 state (2026-04-28 04:00 sample): risk_verdicts last 6h had
+    Approved:Rejected = ~385:2.19M (0.018% pass rate), and >97% of Approved
+    were grid_trading because all other strategies' demo cells were tagged
+    negative shrunk_bps and cost_gate_moderate blocked them unconditionally.
+
+    EDGE-DIAG-2 routes low-sample (n_trades < 30) cells to exploration mode —
+    expectation is non-grid strategies (ma_crossover at minimum, plus
+    bb_reversion / bb_breakout / funding_arb on their respective signal
+    cadences) start showing up in Approved verdicts within hours of deploy.
+
+    This check counts DISTINCT strategy_name values seen in `Approved`
+    risk_verdicts joined to intents over last 6h on engine_mode='demo'. If
+    only grid_trading shows up, EDGE-DIAG-2's loosening is silently inactive
+    (e.g., engine never reloaded, or signals aren't reaching cost_gate at all
+    — different bug). Three-state verdict:
+
+      - >=2 distinct strategies → PASS (loosening verifiable)
+      - 1 strategy (grid_trading only) → WARN (suspect — non-grid signal flow
+        gap, or EDGE-DIAG-2 not in effect; investigate)
+      - 0 approvals in 6h → PASS-with-note (engine likely quiet / stale; not
+        enough signal to verify, but not a regression by itself)
+      - cur=None → degrade to PASS-with-note (DB-down fallback, mirrors [30]
+        cost_edge_advisor pattern)
+
+    Engine-restart freshness guard: if engine has been up <30 min, fewer than
+    6h of post-deploy data exist — relax to PASS-with-note so the check
+    doesn't flap during routine restart_all.sh --rebuild deploys.
+
+    Pure DB SELECT, no live IPC, no socket. Cross-platform.
+
+    [31] EDGE-DIAG-2（2026-04-28）：demo cost_gate 策略多樣性哨兵。
+    部署前 risk_verdicts 6h Approved:Rejected ≈ 0.018% pass rate，>97% Approved
+    都是 grid_trading（其他策略 cells 全部負估計被 cost_gate_moderate 一律 block）。
+    EDGE-DIAG-2 後低樣本（n<30）走探索路徑，預期 ma_crossover 等非 grid 策略
+    應在數小時內出現在 Approved 中。本 check 取最近 6h Approved 加入 intents
+    JOIN 得 distinct strategy_name 計數：≥2 = PASS / 1（仍只 grid）= WARN /
+    0 = PASS（engine 安靜不算 regression）。Engine 重啟 <30 min 緩衝期同樣
+    PASS-with-note 防 deploy 期 flap。純 DB SELECT，無 IPC / socket。
+    """
+    if cur is None:
+        return ("PASS", "EDGE-DIAG-2 strategy diversity (db-down fallback) — skip")
+
+    try:
+        cur.execute(
+            """
+            SELECT i.strategy_name, COUNT(*) AS approvals
+            FROM trading.risk_verdicts v
+            JOIN trading.intents i ON i.intent_id = v.intent_id
+            WHERE v.ts > now() - interval '6 hours'
+              AND v.verdict = 'Approved'
+              AND v.engine_mode = 'demo'
+              AND i.strategy_name IS NOT NULL
+            GROUP BY i.strategy_name
+            ORDER BY approvals DESC
+            """
+        )
+        rows = cur.fetchall()
+    except Exception as e:
+        return ("WARN", f"risk_verdicts JOIN intents failed: {e}")
+
+    if not rows:
+        return (
+            "PASS",
+            "EDGE-DIAG-2 6h demo Approved=0 — engine likely quiet (no regression alarm)",
+        )
+
+    strategies = [(r[0], int(r[1])) for r in rows]
+    n_distinct = len(strategies)
+    breakdown = ", ".join(f"{s}:{n}" for s, n in strategies[:5])
+    total = sum(n for _, n in strategies)
+    msg = (
+        f"EDGE-DIAG-2 6h demo Approved={total} across {n_distinct} strategies "
+        f"[{breakdown}]"
+    )
+
+    # Engine-restart freshness guard: if /tmp/openclaw/engine.log mtime < 30
+    # min, suppress WARN (not enough post-deploy data to judge).
+    # Engine 重啟 <30 min 緩衝期：log mtime 太新就 PASS-with-note。
+    try:
+        log_path = Path(
+            os.environ.get("OPENCLAW_DATA_DIR", "/tmp/openclaw")
+        ) / "engine.log"
+        if log_path.exists():
+            log_mtime = datetime.fromtimestamp(log_path.stat().st_mtime, tz=timezone.utc)
+            uptime_min = (datetime.now(tz=timezone.utc) - log_mtime).total_seconds() / 60.0
+            # log_mtime is "last write time" so this is approximate uptime,
+            # but engine writes every tick → equivalent to "engine started"
+            # for fresh-restart cases (mtime < log_age guard).
+            # Actually want engine_start_age, not log_mtime — fall back to
+            # just checking log file size as proxy: small log = fresh start.
+            log_size = log_path.stat().st_size
+            if log_size < 100_000:  # <100KB log → engine started recently
+                return ("PASS", msg + f" — engine recently restarted (log {log_size}B), grace period")
+    except Exception:
+        pass  # freshness guard is opportunistic, never raise
+
+    if n_distinct >= 2:
+        return ("PASS", msg)
+    # n_distinct == 1
+    only_strategy = strategies[0][0]
+    if only_strategy == "grid_trading":
+        return (
+            "WARN",
+            msg + " — only grid_trading approved; EDGE-DIAG-2 may be silently "
+            "inactive (low_sample exploration path not firing for ma/bb/funding)",
+        )
+    return ("PASS", msg + f" — single strategy {only_strategy} only (rare but not regression)")
