@@ -256,14 +256,13 @@ impl IntentProcessor {
                 return IntentResult::rejected(RejectionCode::CostGateAtrUnavailable.format());
             }
             let volume_24h = paper_state.latest_turnover(&intent.symbol).unwrap_or(0.0);
+            let fee_rate = self.fee_rate_for_intent(&intent.symbol, intent);
+            let slippage_rate = self.slippage_rate_for_intent(intent, volume_24h);
 
             // ─── Gate 3a · EDGE-P3-1 A4: ML edge-predictor gate (spec §7.3) ───
             // Runs ahead of JS shrinkage. No-op when features=None / predictor disabled.
             // EDGE-P3-1 A4：ML 預測器 gate。features=None 或 predictor 禁用時為 no-op。
-            let cost_bps = 2.0
-                * (self.fee_rate(&intent.symbol)
-                    + lookup_slippage(&self.risk_config.slippage, volume_24h))
-                * 10_000.0;
+            let cost_bps = 2.0 * (fee_rate + slippage_rate) * 10_000.0;
             let ctx_id = context_id.unwrap_or("");
             match self.evaluate_predictor_gate(
                 intent,
@@ -288,7 +287,8 @@ impl IntentProcessor {
                         intent.confidence,
                         final_qty,
                         price,
-                        volume_24h,
+                        fee_rate,
+                        slippage_rate,
                     ) {
                         // r already carries synthetic VerdictInfo (P0-6 permanent fix).
                         let _ = vi.take();
@@ -652,13 +652,12 @@ impl IntentProcessor {
             // EDGE-P2-3 Phase 1a: PostOnly intents pay maker fee in the cost gate.
             let fee_rate = self.fee_rate_for_intent(&intent.symbol, intent);
             let volume_24h = paper_state.latest_turnover(&intent.symbol).unwrap_or(0.0);
+            let slippage_rate = self.slippage_rate_for_intent(intent, volume_24h);
 
             // ─── Gate 3a · EDGE-P3-1 A4: ML edge-predictor gate (spec §7.3) ───
             // No-op when features=None / predictor disabled. Shadow-mode always falls through.
             // EDGE-P3-1 A4：ML 預測器 gate；features=None / predictor 禁用 / shadow 模式 → 回退。
-            let cost_bps =
-                2.0 * (fee_rate + lookup_slippage(&self.risk_config.slippage, volume_24h))
-                    * 10_000.0;
+            let cost_bps = 2.0 * (fee_rate + slippage_rate) * 10_000.0;
             let ctx_id = context_id.unwrap_or("");
             match self.evaluate_predictor_gate(
                 intent,
@@ -680,17 +679,17 @@ impl IntentProcessor {
                     // Production (Live) → strict: fail-closed without positive estimate
                     // 按 profile 選擇 cost gate：Validation 中等，Production 嚴格
                     let gate_result = match profile {
-                        GovernanceProfile::Validation => self.cost_gate_moderate(
+                        GovernanceProfile::Validation => self.cost_gate_moderate_with_slippage(
                             &intent.strategy,
                             &intent.symbol,
                             fee_rate,
-                            volume_24h,
+                            slippage_rate,
                         ),
-                        GovernanceProfile::Production => self.cost_gate_live(
+                        GovernanceProfile::Production => self.cost_gate_live_with_slippage(
                             &intent.strategy,
                             &intent.symbol,
                             fee_rate,
-                            volume_24h,
+                            slippage_rate,
                         ),
                         GovernanceProfile::Exploration => None,
                     };
