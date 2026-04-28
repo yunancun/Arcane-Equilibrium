@@ -12,7 +12,7 @@
 //!     - modify any config (read-only on RiskConfig)
 //!
 //!   Phase A integration points (per PA RFC `2026-04-26--g3_09_cost_edge_ratio_design.md`):
-//!     1. `main_boot_tasks::spawn_cost_edge_advisor_if_enabled` — env-gate +
+//!     1. `cost_edge_advisor_boot::spawn_cost_edge_advisor_if_enabled` — env-gate +
 //!        RiskConfig flag dual safeguard (per §9.1-9.2 of RFC).
 //!     2. IPC handler `get_cost_edge_advisor_status` — exposes status snapshot
 //!        for healthcheck [22] + GUI consumption.
@@ -48,7 +48,7 @@
 //!   唯讀）。
 //!
 //!   Phase A 整合點（PA RFC `2026-04-26--g3_09_cost_edge_ratio_design.md`）：
-//!     1. `main_boot_tasks::spawn_cost_edge_advisor_if_enabled` — env-gate +
+//!     1. `cost_edge_advisor_boot::spawn_cost_edge_advisor_if_enabled` — env-gate +
 //!        RiskConfig flag 雙保險（RFC §9.1-9.2）。
 //!     2. IPC handler `get_cost_edge_advisor_status` — 暴露 status snapshot 給
 //!        healthcheck [22] + GUI。
