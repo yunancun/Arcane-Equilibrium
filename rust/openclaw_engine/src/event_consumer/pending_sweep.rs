@@ -18,6 +18,13 @@ use tracing::{info, warn};
 /// PostOnly entry 部分成交後，不再讓剩餘掛單等完整 maker timeout；
 /// 給短暫 grace，之後沿用 sweep 取消並讓策略重新評估。
 pub(crate) const PARTIAL_FILL_REMAINDER_GRACE_MS: u64 = 5_000;
+/// Keep a maker pending row after dispatching cancel so racing fills that
+/// arrive before the WS cancel ack can still match order context. If neither
+/// fill nor cancel ack arrives inside this window, drop the tracker row to
+/// avoid unbounded stale state.
+/// 派發 maker cancel 後保留 pending row，讓 cancel ack 前 race 到的成交仍能匹配；
+/// 若 grace 內無成交/取消回報，才丟棄 tracker，避免狀態無界累積。
+pub(crate) const MAKER_CANCEL_ACK_GRACE_MS: u64 = 60_000;
 
 /// EDGE-P2-3 Phase 1B-3.2: Sweep classification for a pending order at `elapsed_ms`.
 /// Pure function so the Market vs PostOnly branching is unit-testable.
@@ -30,13 +37,29 @@ pub(crate) enum PendingSweepAction {
     LegacySoftWarn,
     /// Market legacy: hard remove (elapsed > 60s) / Market 硬移除
     LegacyHardRemove,
-    /// PostOnly maker: spawn REST cancel + remove (elapsed ≥ maker_timeout_ms)
-    /// PostOnly 掛單超時：派發 REST 取消並移除記錄
+    /// PostOnly maker: spawn REST cancel + mark in-flight (elapsed ≥ maker_timeout_ms)
+    /// PostOnly 掛單超時：派發 REST 取消並標記 cancel in-flight
     MakerTimeoutCancel,
+    /// PostOnly maker: cancel was already requested, but no fill/cancel ack
+    /// arrived within the grace window; remove the stale tracker row.
+    /// PostOnly 掛單已請求取消，但 grace 內無成交/取消回報；移除過期 tracker。
+    MakerCancelGraceExpired,
 }
 
-pub(crate) fn classify_pending_sweep(po: &PendingOrder, elapsed_ms: u64) -> PendingSweepAction {
+pub(crate) fn pending_elapsed_ms(po: &PendingOrder, now_ms: u64) -> u64 {
+    now_ms.saturating_sub(po.sent_ts_ms)
+}
+
+pub(crate) fn classify_pending_sweep(po: &PendingOrder, now_ms: u64) -> PendingSweepAction {
+    let elapsed_ms = pending_elapsed_ms(po, now_ms);
     if po.time_in_force == Some(crate::order_manager::TimeInForce::PostOnly) {
+        if let Some(cancel_ts) = po.cancel_requested_ts_ms {
+            return if now_ms.saturating_sub(cancel_ts) >= MAKER_CANCEL_ACK_GRACE_MS {
+                PendingSweepAction::MakerCancelGraceExpired
+            } else {
+                PendingSweepAction::Keep
+            };
+        }
         let deadline_ms = po.maker_timeout_ms.unwrap_or(45_000);
         if elapsed_ms >= deadline_ms {
             PendingSweepAction::MakerTimeoutCancel
@@ -153,6 +176,7 @@ mod tests {
             order_type: "market".into(),
             time_in_force: None,
             maker_timeout_ms: None,
+            cancel_requested_ts_ms: None,
         }
     }
 
@@ -170,6 +194,7 @@ mod tests {
             order_type: "limit".into(),
             time_in_force: Some(crate::order_manager::TimeInForce::PostOnly),
             maker_timeout_ms,
+            cancel_requested_ts_ms: None,
         }
     }
 
@@ -266,12 +291,38 @@ mod tests {
             classify_pending_sweep(&po_60s, 60_000),
             PendingSweepAction::MakerTimeoutCancel
         );
-        // Even far past Market's 60s window, PostOnly stays on MakerTimeoutCancel
-        // (cancel dispatch is terminal — next sweep won't see this row anyway).
-        // 即便遠超 Market 60s，PostOnly 永遠走 MakerTimeoutCancel。
+        // Even far past Market's 60s window, a PostOnly row that has not yet
+        // had cancel dispatched stays on MakerTimeoutCancel.
+        // 即便遠超 Market 60s，尚未派發 cancel 的 PostOnly 仍走 MakerTimeoutCancel。
         assert_eq!(
             classify_pending_sweep(&po_60s, 120_000),
             PendingSweepAction::MakerTimeoutCancel
+        );
+    }
+
+    #[test]
+    fn test_classify_postonly_cancel_inflight_keeps_during_ack_grace() {
+        let mut po = make_postonly_pending(Some(45_000));
+        po.cancel_requested_ts_ms = Some(45_000);
+
+        assert_eq!(
+            classify_pending_sweep(&po, 45_000),
+            PendingSweepAction::Keep
+        );
+        assert_eq!(
+            classify_pending_sweep(&po, 45_000 + MAKER_CANCEL_ACK_GRACE_MS - 1),
+            PendingSweepAction::Keep
+        );
+    }
+
+    #[test]
+    fn test_classify_postonly_cancel_inflight_expires_after_ack_grace() {
+        let mut po = make_postonly_pending(Some(45_000));
+        po.cancel_requested_ts_ms = Some(45_000);
+
+        assert_eq!(
+            classify_pending_sweep(&po, 45_000 + MAKER_CANCEL_ACK_GRACE_MS),
+            PendingSweepAction::MakerCancelGraceExpired
         );
     }
 
