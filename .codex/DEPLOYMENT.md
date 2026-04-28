@@ -25,6 +25,12 @@ Codex does not use the same repo-local first-class agent registry format as Clau
 3. Skill index for Codex lives in `.codex/skills/INDEX.md`
 4. Comparative inventory report lives in `.codex/reports/`
 
+## Default project role
+
+For this repository, the default Codex entry role is `PM`.
+
+That means new sessions should begin in planning / orchestration mode, then dispatch to other roles as needed.
+
 ## Dispatch model
 
 When a Codex sub-agent is needed:
@@ -36,6 +42,9 @@ When a Codex sub-agent is needed:
    - `worker` for implementation / test-writing / doc-writing
    - `explorer` for narrow read-only codebase investigation
    - `default` for broad audits, design, synthesis, or mixed repo + web work
+
+See also:
+- `.codex/AGENT_DISPATCH_PROTOCOL.md`
 
 ## Important differences vs Claude Code
 
