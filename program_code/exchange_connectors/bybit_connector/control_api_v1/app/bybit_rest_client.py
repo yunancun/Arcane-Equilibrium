@@ -676,6 +676,51 @@ class BybitClient:
         return _order_response_dual_shape(result if isinstance(result, dict) else {})
 
     # ------------------------------------------------------------------
+    # Cancel all orders — POST /v5/order/cancel-all
+    # 一次性取消所有掛單
+    # ------------------------------------------------------------------
+
+    def cancel_all_orders(
+        self,
+        category: str = "linear",
+        symbol: Optional[str] = None,
+        settle_coin: Optional[str] = "USDT",
+        base_coin: Optional[str] = None,
+    ) -> list[dict[str, Any]]:
+        """Cancel all active orders in scope (one HTTP call, not per-symbol).
+        一次取消範圍內所有活躍掛單（單次 HTTP，**不**依 symbol 迭代）。
+
+        Bybit V5 requires one of: symbol / baseCoin / settleCoin.
+        Linear default: settleCoin=USDT — clears every USDT linear order in
+        the account in a single request, regardless of symbol count. This is
+        deliberately not bounded to the active strategy symbol set so a Stop
+        action genuinely flattens the book.
+
+        Bybit V5 規則：symbol / baseCoin / settleCoin 三選一。Linear 預設 settleCoin=USDT，
+        單次清掉帳戶內所有 USDT linear 掛單，不受策略 symbol 數量限制 — Stop 真正清掃
+        全帳戶，不只 25 個策略 symbol。
+
+        Returns the list of cancelled orders (each has orderId + orderLinkId).
+        """
+        body: dict[str, Any] = {"category": category}
+        if symbol:
+            body["symbol"] = symbol
+        elif base_coin:
+            body["baseCoin"] = base_coin
+        elif settle_coin:
+            body["settleCoin"] = settle_coin
+        else:
+            raise BybitError(
+                "cancel_all_orders requires one of symbol / baseCoin / settleCoin"
+            )
+        payload = self._post("/v5/order/cancel-all", body)
+        result = payload.get("result") or {}
+        items = result.get("list") or [] if isinstance(result, dict) else []
+        return [
+            _order_response_dual_shape(it) for it in items if isinstance(it, dict)
+        ]
+
+    # ------------------------------------------------------------------
     # Executions — GET /v5/execution/list
     # 成交記錄
     # ------------------------------------------------------------------
