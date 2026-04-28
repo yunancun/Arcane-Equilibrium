@@ -61,7 +61,7 @@ class EdgeEstimatorScheduler:
     """
 
     DEFAULT_MODES = ("demo", "live_demo")
-    DEFAULT_DAYS = 7  # rolling window matches P1-15/17 cleanup horizon
+    DEFAULT_DAYS = 30  # keep recent estimates, validation uses 180d history internally
     # EDGE-DIAG-2 (2026-04-28): hard cutoff to exclude fills written by engine
     # binaries with known data-quality bugs that bias realized-edge estimates:
     #   - 2026-04-21 20:44 CEST EDGE-P2-3 PostOnly maker entry deploy (ma+bb)

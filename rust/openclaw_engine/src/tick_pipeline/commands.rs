@@ -436,6 +436,7 @@ impl TickPipeline {
         strategy: &str,
         signal_context_id: &str,
         order_link_id: &str,
+        fee_rate_override: Option<f64>,
     ) {
         // EDGE-P3-1 R2: snapshot was_open + existing entry_context_id BEFORE apply_fill.
         // Exchange-confirmed fills can be open/close/accumulate; thread id on close fills.
@@ -508,7 +509,9 @@ impl TickPipeline {
 
         if let Some(ref tx) = self.trading_tx {
             let em = self.effective_engine_mode();
-            let fr = self.intent_processor.fee_rate(symbol);
+            let fr = fee_rate_override
+                .filter(|v| v.is_finite() && *v >= 0.0)
+                .unwrap_or_else(|| self.intent_processor.fee_rate(symbol));
             // EDGE-P3-1 R2: close fills carry the pre-close entry's id; opens stay empty.
             // EDGE-P3-1 R2：平倉 fill 帶 entry_context_id；開倉/加倉留空。
             let fill_entry_ctx = if realized_pnl != 0.0 {
@@ -560,7 +563,9 @@ impl TickPipeline {
         // fail-soft（tx/snap 缺一即 no-op，對交易無影響）。entry_context_id
         // 沿用前述 existing_entry_ctx，與其他 close 路徑對齊。
         if realized_pnl != 0.0 {
-            let fr = self.intent_processor.fee_rate(symbol);
+            let fr = fee_rate_override
+                .filter(|v| v.is_finite() && *v >= 0.0)
+                .unwrap_or_else(|| self.intent_processor.fee_rate(symbol));
             self.try_emit_exit_feature_row(
                 symbol,
                 qty,
