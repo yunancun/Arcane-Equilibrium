@@ -22,3 +22,8 @@ YYYY-MM-DD HH:MM TZ
 - deployed Codex-side role mirror in `.codex/agents/`
 - kept Claude skill corpus as shared SSOT and indexed it in `.codex/skills/INDEX.md`
 - wrote comparison and deployment notes in `.codex/DEPLOYMENT.md` and `.codex/reports/`
+
+2026-04-28 13:35 CEST
+- added `.codex/AGENT_DISPATCH_PROTOCOL.md`
+- set repository default Codex entry role to `PM`
+- documented PM-first boot and dispatch chains for implementation, audit, quant, and deploy work

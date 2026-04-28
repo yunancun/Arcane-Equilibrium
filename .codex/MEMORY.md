@@ -19,6 +19,10 @@ Current expectation:
 Read these first for project state:
 - `CLAUDE.md`
 - `TODO.md`
+- `.codex/MEMORY.md`
+
+Default entry role for this repository:
+- `PM`
 
 Read on demand for deep history or RCA:
 - `OPENCLAW_INVENTORY_CONSOLIDATED.md`
@@ -84,6 +88,9 @@ Current known topology at setup time:
 - Linux deploy actions may be performed from Mac through `ssh trade-core`
 - Codex role mirror is deployed in `.codex/agents/`
 - Shared skill SSOT remains `.claude/skills/*/SKILL.md`, indexed by `.codex/skills/INDEX.md`
+- default project entry role is `PM`
+- PM is responsible for initial triage and role dispatch
+- dispatch protocol is documented in `.codex/AGENT_DISPATCH_PROTOCOL.md`
 
 ## Notes for future sessions
 
