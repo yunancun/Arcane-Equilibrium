@@ -17,6 +17,14 @@ MODULE_NOTE (中文):
   - fail-closed：错误时停止分析但不影响交易
   - 所有结果写入审计
 
+  G3-08-FUP-ANALYST-SPLIT P2（2026-04-28）拆分：
+  - ``analyst_records.py``：純 dataclass（TradeRecord / PatternInsight / AnalystConfig）
+  - ``analyst_pattern_claims.py``：模式聲明登記 helpers（_register_pattern_claims /
+    _record_pattern_observations / _extract_strategy_from_pattern 邏輯）
+  - 本檔保留 AnalystAgent class + lifecycle + L1 + L2 + 接線 callbacks，
+    所有公共符號（TradeRecord/PatternInsight/AnalystConfig/AnalystAgent）re-export
+    維持 ``from app.analyst_agent import ...`` 路徑 100% BWD-compat。
+
 MODULE_NOTE (English):
   AnalystAgent is the "analyst" in the 5-Agent system.
   Responsibilities:
@@ -30,20 +38,40 @@ MODULE_NOTE (English):
   - Read-only analysis, never produces trade instructions
   - fail-closed: errors stop analysis but don't affect trading
   - All results audited
+
+  G3-08-FUP-ANALYST-SPLIT P2 (2026-04-28) split:
+  - ``analyst_records.py``: pure dataclasses (TradeRecord / PatternInsight / AnalystConfig)
+  - ``analyst_pattern_claims.py``: pattern claim registration helpers
+    (logic from _register_pattern_claims / _record_pattern_observations /
+    _extract_strategy_from_pattern)
+  - This file retains AnalystAgent class + lifecycle + L1 + L2 + wiring
+    callbacks. All public symbols (TradeRecord/PatternInsight/AnalystConfig/
+    AnalystAgent) are re-exported so ``from app.analyst_agent import ...``
+    paths remain 100% BWD-compat.
 """
 
 from __future__ import annotations
 
 import json
 import logging
-import os
-import threading
 import time
 import uuid
 from collections import defaultdict
-from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
 
+from .analyst_pattern_claims import (
+    KNOWN_STRATEGIES,
+    extract_strategy_from_pattern,
+    record_pattern_observations,
+    register_pattern_claims,
+)
+# G3-08-FUP-ANALYST-SPLIT P2: dataclasses moved to analyst_records sibling.
+# Re-exported below for BWD-compat (tests + strategy_wiring.py rely on
+# ``from app.analyst_agent import TradeRecord/PatternInsight/AnalystConfig``).
+# G3-08-FUP-ANALYST-SPLIT P2：dataclass 已搬到 analyst_records sibling，
+# 此處 re-export 保 BWD-compat（test + strategy_wiring.py 使用
+# ``from app.analyst_agent import TradeRecord/PatternInsight/AnalystConfig``）。
+from .analyst_records import AnalystConfig, PatternInsight, TradeRecord
 from .base_agent import BaseAgent
 # G3-08 Phase 4 Sub-task 4-3 — Analyst agent_state invalidation hint
 # (env-gated no-op when OPENCLAW_H_STATE_GATEWAY != "1").
@@ -61,103 +89,13 @@ from .multi_agent_framework import (
 
 logger = logging.getLogger(__name__)
 
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# Data Structures / 数据结构
-# ═══════════════════════════════════════════════════════════════════════════════
-
-@dataclass
-class TradeRecord:
-    """
-    A completed round-trip trade record / 已完成的交易回合记录
-
-    U-05: Added fees_paid and param_snapshot for accurate cost attribution
-    and parameter auditing (Principle 8 auditability).
-    U-05：新增 fees_paid 和 param_snapshot 用于精确成本归因和参数审计（原则 8）。
-    """
-    trade_id: str = ""
-    symbol: str = ""
-    strategy: str = ""
-    direction: str = ""
-    entry_price: float = 0.0
-    exit_price: float = 0.0
-    pnl: float = 0.0
-    hold_ms: int = 0
-    regime: str = "unknown"
-    timestamp_ms: int = 0
-    # U-05: Real round-trip fees (entry_fee + close_fee) / 真实 round-trip 费用
-    fees_paid: float = 0.0
-    # U-05: Dynamic parameters snapshot at entry time / 开仓时动态参数快照
-    param_snapshot: Dict[str, Any] = field(default_factory=dict)
-
-    @property
-    def is_win(self) -> bool:
-        return self.pnl > 0
-
-    @property
-    def net_pnl(self) -> float:
-        """PnL after fees / 扣除费用后的净盈亏"""
-        return self.pnl - self.fees_paid
-
-    def to_dict(self) -> Dict[str, Any]:
-        return {
-            "trade_id": self.trade_id,
-            "symbol": self.symbol,
-            "strategy": self.strategy,
-            "direction": self.direction,
-            "entry_price": self.entry_price,
-            "exit_price": self.exit_price,
-            "pnl": self.pnl,
-            "hold_ms": self.hold_ms,
-            "regime": self.regime,
-            "timestamp_ms": self.timestamp_ms,
-            "is_win": self.is_win,
-            # U-05: Include fees and param_snapshot in serialized output.
-            # U-05：在序列化输出中包含费用和参数快照。
-            "fees_paid": self.fees_paid,
-            "net_pnl": self.net_pnl,
-            "param_snapshot": self.param_snapshot,
-        }
-
-
-@dataclass
-class PatternInsight:
-    """L2 pattern discovery result / L2 模式发现结果"""
-    insight_id: str = field(default_factory=lambda: f"insight_{uuid.uuid4().hex[:12]}")
-    timestamp_ms: int = field(default_factory=lambda: int(time.time() * 1000))
-    observations_count: int = 0
-    winning_patterns: List[str] = field(default_factory=list)
-    losing_patterns: List[str] = field(default_factory=list)
-    regime_strategy_matrix: Dict[str, Dict[str, float]] = field(default_factory=dict)
-    source: str = "unknown"  # "ai" or "statistical"
-    metadata: Dict[str, Any] = field(default_factory=dict)
-
-    def to_dict(self) -> Dict[str, Any]:
-        return {
-            "insight_id": self.insight_id,
-            "timestamp_ms": self.timestamp_ms,
-            "observations_count": self.observations_count,
-            "winning_patterns": self.winning_patterns,
-            "losing_patterns": self.losing_patterns,
-            "regime_strategy_matrix": self.regime_strategy_matrix,
-            "source": self.source,
-            "metadata": self.metadata,
-        }
-
-
-@dataclass
-class AnalystConfig:
-    """Configuration for AnalystAgent / AnalystAgent 配置"""
-    # L2 trigger: minimum observations before pattern analysis / L2 触发：最小观察数
-    # 0A-6: lowered from 50 to 20 for faster L2 pattern discovery feedback loop
-    # 0A-6：从 50 降至 20，加速 L2 模式发现反馈闭环（可通过 ANALYST_L2_MIN_OBS 覆盖）
-    l2_min_observations: int = int(os.environ.get("ANALYST_L2_MIN_OBS", "20"))
-    # Rolling window for metrics / 滚动窗口大小
-    rolling_window: int = 50
-    # Strategy ranking minimum trades / 策略排名最小交易数
-    min_trades_for_ranking: int = 10
-    # Maximum trade records to keep in memory / 内存中保留的最大交易记录数
-    max_records: int = 5000
+# Public re-exports for BWD-compat / 公開符號 re-export 保 BWD-compat
+__all__ = [
+    "AnalystAgent",
+    "AnalystConfig",
+    "PatternInsight",
+    "TradeRecord",
+]
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -178,6 +116,14 @@ class AnalystAgent(BaseAgent):
     """
 
     role = AgentRole.ANALYST
+
+    # G3-08-FUP-ANALYST-SPLIT P2: keep class-level attribute alias for
+    # callers that read ``AnalystAgent._KNOWN_STRATEGIES`` directly. Source of
+    # truth lives in ``analyst_pattern_claims.KNOWN_STRATEGIES``.
+    # G3-08-FUP-ANALYST-SPLIT P2：保留 class-level 屬性別名供讀取
+    # ``AnalystAgent._KNOWN_STRATEGIES`` 的呼叫者；真值在
+    # ``analyst_pattern_claims.KNOWN_STRATEGIES``。
+    _KNOWN_STRATEGIES = KNOWN_STRATEGIES
 
     def __init__(
         self,
@@ -534,163 +480,54 @@ class AnalystAgent(BaseAgent):
         """
         self._experiment_ledger = ledger
 
-    # 已知策略名稱清單，供從 pattern_text 中提取策略名使用
-    # Known strategy names used to extract applies_to_strategy from pattern_text
-    _KNOWN_STRATEGIES = frozenset([
-        "ma_crossover", "grid", "bb_reversion", "bb_breakout", "funding_arb",
-    ])
-
     @staticmethod
     def _extract_strategy_from_pattern(pattern_text: str) -> str:
         """
-        Extract a strategy key from pattern text for use as applies_to_strategy.
-        從 pattern 文字中提取策略 key，作為 applies_to_strategy 使用。
-
-        Priority:
-          1. If a known strategy name appears in the text, return it directly.
-          2. Otherwise, derive a stable slug from the first 40 chars of pattern_text.
-             This ensures registration still happens (total_registered > 0) while
-             never injecting "all" which is silently skipped by StrategistAgent.
-
-        優先順序：
-          1. 如果文字包含已知策略名，直接返回。
-          2. 否則，從 pattern_text 前 40 字元衍生穩定 slug，確保聲明能被登記。
-             絕不回退到 "all"，因為 StrategistAgent._apply_pattern_insight() 明確跳過
-             applies_to_strategy=="all" 的聲明，會導致所有聲明靜默丟失。
-
-        StrategistAgent._strategy_preference_weights 使用 .get(strategy, 1.0) 回退，
-        因此未知的 slug key 完全安全，不會崩潰。
-        StrategistAgent uses .get(strategy, 1.0) fallback, so an unknown slug key
-        is completely safe and won't cause any errors.
+        BWD-compat staticmethod delegator to ``analyst_pattern_claims.extract_strategy_from_pattern``.
+        See sibling module for full docstring (G3-08-FUP-ANALYST-SPLIT P2 split).
+        BWD-compat 靜態方法委派至 ``analyst_pattern_claims.extract_strategy_from_pattern``，
+        詳細文檔見 sibling 模組（G3-08-FUP-ANALYST-SPLIT P2 拆分）。
         """
-        lower = pattern_text.lower()
-        # 優先：從已知策略名中匹配 / Priority: match against known strategy names
-        for strategy in AnalystAgent._KNOWN_STRATEGIES:
-            if strategy in lower:
-                return strategy
-        # 回退：從前 40 字元衍生穩定 slug（去掉空格/特殊字元，轉小寫）
-        # Fallback: derive a stable slug from first 40 chars (strip spaces/special chars, lowercase)
-        import re as _re
-        slug = _re.sub(r"[^a-z0-9_]", "_", lower[:40]).strip("_")
-        # 確保 slug 非空且不等於 "all" / Ensure slug is non-empty and not "all"
-        return slug if slug and slug != "all" else "generic_pattern"
+        return extract_strategy_from_pattern(pattern_text)
 
     def _register_pattern_claims(self, insight: Any) -> None:
         """
-        Register winning/losing patterns from insight into TruthSourceRegistry.
-        將洞察中的贏/輸模式登記到知識登記表。
+        Delegate to ``analyst_pattern_claims.register_pattern_claims``.
+        委派至 ``analyst_pattern_claims.register_pattern_claims``。
 
-        - winning_patterns: registered with confidence derived from observation count.
-          贏模式：置信度由觀察數推算。
-        - losing_patterns: registered with inverted confidence (fixed 0.4) and
-          "losing: " prefix so StrategistAgent can identify them as negative signals.
-          輸模式：反轉置信度（固定 0.4），加 "losing: " 前綴，讓 StrategistAgent 識別為負向信號。
-        - applies_to_strategy is extracted via _extract_strategy_from_pattern(); this method
-          never returns "all" to avoid silent skip in StrategistAgent._apply_pattern_insight().
-          applies_to_strategy 通過 _extract_strategy_from_pattern() 提取，
-          該方法永不返回 "all"，避免 StrategistAgent 靜默跳過所有聲明。
-
-        Fail-open: any error → log warning, never raises.
-        失敗開放：任何異常 → 記錄警告，不向上拋出。
+        Wraps with current ``len(self._records)`` snapshot + injected
+        ``_truth_registry`` / ``_experiment_ledger``; identical fail-open
+        semantics to original implementation (G3-08-FUP-ANALYST-SPLIT P2).
+        以當前 ``len(self._records)`` snapshot + 注入的
+        ``_truth_registry`` / ``_experiment_ledger`` 包裝呼叫；fail-open 語意
+        與原始實作完全一致（G3-08-FUP-ANALYST-SPLIT P2）。
         """
-        try:
-            n_obs = len(self._records)
-            # 置信度上限 0.85（原則 7：AI 輸出永遠不是 FACT）
-            # Confidence capped at 0.85 (Principle 7: AI output is never FACT)
-            win_confidence = min(0.85, 0.5 + n_obs * 0.001)
-
-            # ── 贏模式登記到 TruthSourceRegistry / Register winning patterns to TruthSourceRegistry ──
-            # registry 未注入時跳過此區塊，但後面的 ExperimentLedger 記錄仍會執行
-            # Skip this block when registry is not injected; ExperimentLedger recording still runs
-            if self._truth_registry is not None:
-                for pattern_text in (getattr(insight, "winning_patterns", None) or []):
-                    pt_str = str(pattern_text)
-                    # 提取策略 key；_extract_strategy_from_pattern 永不返回 "all"
-                    # Extract strategy key; _extract_strategy_from_pattern never returns "all"
-                    strategy = self._extract_strategy_from_pattern(pt_str)
-                    self._truth_registry.register_claim(
-                        pattern_text=pt_str,
-                        evidence_source="ai",
-                        observation_count=n_obs,
-                        confidence=win_confidence,
-                        applies_to_regime="all",
-                        applies_to_strategy=strategy,
-                    )
-
-            # 向 ExperimentLedger 記錄贏模式觀測（fail-open，獨立於 truth_registry）
-            # Record winning pattern observations to ExperimentLedger (fail-open, independent of truth_registry)
-            if self._experiment_ledger is not None:
-                self._record_pattern_observations(insight, is_winning=True)
-
-            # ── 輸模式登記到 TruthSourceRegistry / Register losing patterns to TruthSourceRegistry ──
-            # 置信度反轉：輸模式固定使用低置信度 0.4，讓 StrategistAgent 降低對應策略偏好
-            # Confidence inverted: losing patterns use fixed low confidence 0.4
-            # so StrategistAgent reduces preference for those strategies
-            losing_confidence = 0.4
-            if self._truth_registry is not None:
-                for pattern_text in (getattr(insight, "losing_patterns", None) or []):
-                    pt_str = str(pattern_text)
-                    # 提取策略 key，不使用 "all"
-                    # Extract strategy key, never "all"
-                    strategy = self._extract_strategy_from_pattern(pt_str)
-                    # 加 "losing: " 前綴，讓 StrategistAgent._apply_pattern_insight() 識別為負向信號
-                    # Prefix with "losing: " so StrategistAgent identifies it as a negative signal
-                    self._truth_registry.register_claim(
-                        pattern_text=f"losing: {pt_str}",
-                        evidence_source="ai",
-                        observation_count=n_obs,
-                        confidence=losing_confidence,
-                        applies_to_regime="all",
-                        applies_to_strategy=strategy,
-                    )
-
-            # 向 ExperimentLedger 記錄輸模式觀測（fail-open，獨立於 truth_registry）
-            # Record losing pattern observations to ExperimentLedger (fail-open, independent of truth_registry)
-            if self._experiment_ledger is not None:
-                self._record_pattern_observations(insight, is_winning=False)
-
-        except Exception as e:
-            logger.warning("_register_pattern_claims failed (fail-open): %s", e)
+        register_pattern_claims(
+            insight=insight,
+            n_obs=len(self._records),
+            truth_registry=self._truth_registry,
+            experiment_ledger=self._experiment_ledger,
+            logger=logger,
+        )
 
     def _record_pattern_observations(self, insight: Any, is_winning: bool) -> None:
         """
-        根據分析結果向 ExperimentLedger 記錄觀測。
-        Record pattern analysis observations to ExperimentLedger.
-
-        winning patterns → outcome="supporting"
-        losing patterns  → outcome="refuting"
-
-        fail-open：單條失敗不傳播，繼續記錄其餘假設。
-        fail-open: single failure does not propagate; continue recording other hypotheses.
-
-        原則 7：本方法僅操作學習平面（ExperimentLedger），不影響交易決策。
-        Principle 7: This method only operates on the learning plane (ExperimentLedger),
-        and does not affect trading decisions.
-
-        Args:
-            insight: PatternInsight object from L2 analysis / L2 分析產生的模式洞察對象
-            is_winning: True for winning patterns (supporting), False for losing (refuting)
-                        True 表示贏模式（支持），False 表示輸模式（反駁）
+        BWD-compat instance delegator to ``analyst_pattern_claims.record_pattern_observations``.
+        Caller chain: ``register_pattern_claims`` already invokes the helper
+        directly, so this thin wrapper exists only for any external test that
+        may patch / call the original instance method.
+        BWD-compat 實例委派至 ``analyst_pattern_claims.record_pattern_observations``。
+        呼叫鏈：``register_pattern_claims`` 已直接呼叫 helper，此薄 wrapper
+        僅供可能 patch / 呼叫原始 instance method 的外部測試使用。
         """
-        # 根據贏/輸確定 outcome 字串 / Determine outcome string based on win/loss
-        outcome = "supporting" if is_winning else "refuting"
-        try:
-            # 取所有活躍假設（PENDING / RUNNING 狀態）/ Get all active (non-concluded) hypotheses
-            all_hyps = self._experiment_ledger.get_all_hypotheses()
-            for hyp in all_hyps:
-                # 只對尚未結案的假設記錄觀測 / Only record for non-concluded hypotheses
-                if hyp.status.value in ("PENDING", "RUNNING"):
-                    try:
-                        self._experiment_ledger.record_observation(hyp.hypothesis_id, outcome)
-                    except Exception as e:
-                        # fail-open：跳過此假設，繼續處理其餘 / fail-open: skip this hypothesis
-                        logger.debug(
-                            "ExperimentLedger record_observation skipped hyp=%s: %s",
-                            hyp.hypothesis_id, e,
-                        )
-        except Exception as e:
-            # fail-open：不阻塞分析路徑 / fail-open: do not block the analysis path
-            logger.warning("_record_pattern_observations failed (fail-open): %s", e)
+        if self._experiment_ledger is None:
+            return
+        record_pattern_observations(
+            experiment_ledger=self._experiment_ledger,
+            insight=insight,
+            is_winning=is_winning,
+            logger=logger,
+        )
 
     # ── L2: AI Pattern Discovery / L2：AI 模式发现 ──
 
