@@ -1,6 +1,6 @@
 # OpenClaw TODO — 工作清單（v3 · 單一時間軸版）
 
-**最後更新**：2026-04-28 CEST 深夜（**🎉 Wave H COMPLETE — 3-way active warn cleanup splits + 2 inline governance/docstring fixes**：6 commits `dbba235..0a50c6c` pushed origin/main（含 operator edge-diag-2 prior `dbba235`）；**§九 800 warn active violations 從 4 縮至 1**（餘 main_boot_tasks.rs 816 marginal）；5 ticket 結案：STRATEGY-WIRING-SPLIT P2 (`6d657c1` new ticket: 1060→784 + 2 sibling) / STRATEGIST-DELEGATOR-SLIM P3 (`5928576`: 933→782 + 25 delegators lift + 2 body migration) / G3-08-FUP-MAF-SPLIT-CLEANUP P3 (`bd48672` (b)+(c)) / CLAUDE-MD-SECTION-9-HARD-CAP-EXCEPTION-CLAUSE P3 (`54b9add` governance closure) / G3-09-PA-DOCSTRING-CLARIFY P4 (`0a50c6c` lambda comment correction)；2 新 deferred tickets: G3-08-FUP-MAF-SPLIT-CLEANUP-A P4 (cosmetic) / G3-08-PHASE-4-STRATEGIST-SPLIT-FUP-FACADE LOW (risk-aware defer：strategist 剛 delegator slim, two-front change risk 避免)；3 並行 PA+E1 合一 + 1 inline + 1 inline post-merge；**Linux full regression cargo lib 2308/0** + 3 daemon test split **11/0** + persistence Linux PG **2/0** + HSQ same-session **forward 108/108 + reverse 108/108 non-flaky** (CRITICAL: STRATEGY-WIRING-SPLIT 對 H state 0 影響) + Strategist 8 檔 133/0 + Scout 46/0 + Analyst 22/0 + **全 control_api_v1 baseline 3117/0 (3 skipped)** + healthcheck 30 PASS + 2 pre-existing FAIL ([12]+[27] accepted per §九 exception clause)；0 P0/P1 regression / 0 hard boundary 觸碰 / engine NOT rebuilt (純 Python+doc 0 trade impact)；Sign-off `docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-28--wave_h_signoff.md`）
+**最後更新**：2026-04-28 12:30 CEST（**Post-Wave-H 2 operator FUP + CLAUDE.md drift fix**：3 commits `cdc2699` + `20baabe` + `85a4e2d` pushed origin/main — (1) `cdc2699` fee-postonly-2 Rust fix `step_4_5_dispatch.rs:617` strategy-open Fill 改用 `fee_rate_for_intent(symbol, intent)` TIF-aware（先前 100% 寫 taker；actual `fee` 已正確；JS estimator 不受影響；**未進 runtime engine PID 3626554，下次 `--rebuild --keep-auth` 套用**）(2) `20baabe` `restart_all.sh --keep-auth` 旗標保 authorization.json 跨 planned deploy（crash/watchdog 路徑不變仍 force re-approve；§四 Gate #5 5 min re-verify 不變）(3) `85a4e2d` CLAUDE.md drift fix — EDGE-DIAG-2 follow-up (i)+(iii) 標 ✅（healthcheck `[31]` + memory 兩項 deploy commit `8a5973f` 內已隨檔交付，drift 是 PM Sign-off 初稿沒勾完）。HEAD `85a4e2d` origin synced。**前次更新**：2026-04-28 CEST 深夜（**🎉 Wave H COMPLETE — 3-way active warn cleanup splits + 2 inline governance/docstring fixes**：6 commits `dbba235..0a50c6c` pushed origin/main（含 operator edge-diag-2 prior `dbba235`）；**§九 800 warn active violations 從 4 縮至 1**（餘 main_boot_tasks.rs 816 marginal）；5 ticket 結案：STRATEGY-WIRING-SPLIT P2 (`6d657c1` new ticket: 1060→784 + 2 sibling) / STRATEGIST-DELEGATOR-SLIM P3 (`5928576`: 933→782 + 25 delegators lift + 2 body migration) / G3-08-FUP-MAF-SPLIT-CLEANUP P3 (`bd48672` (b)+(c)) / CLAUDE-MD-SECTION-9-HARD-CAP-EXCEPTION-CLAUSE P3 (`54b9add` governance closure) / G3-09-PA-DOCSTRING-CLARIFY P4 (`0a50c6c` lambda comment correction)；2 新 deferred tickets: G3-08-FUP-MAF-SPLIT-CLEANUP-A P4 (cosmetic) / G3-08-PHASE-4-STRATEGIST-SPLIT-FUP-FACADE LOW (risk-aware defer：strategist 剛 delegator slim, two-front change risk 避免)；3 並行 PA+E1 合一 + 1 inline + 1 inline post-merge；**Linux full regression cargo lib 2308/0** + 3 daemon test split **11/0** + persistence Linux PG **2/0** + HSQ same-session **forward 108/108 + reverse 108/108 non-flaky** (CRITICAL: STRATEGY-WIRING-SPLIT 對 H state 0 影響) + Strategist 8 檔 133/0 + Scout 46/0 + Analyst 22/0 + **全 control_api_v1 baseline 3117/0 (3 skipped)** + healthcheck 30 PASS + 2 pre-existing FAIL ([12]+[27] accepted per §九 exception clause)；0 P0/P1 regression / 0 hard boundary 觸碰 / engine NOT rebuilt (純 Python+doc 0 trade impact)；Sign-off `docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-28--wave_h_signoff.md`）
 
 **前次更新**：2026-04-28 CEST 深夜（Wave G COMPLETE — 4-way file size cleanup splits，5 commits `8a5973f..3b0a0d7`，§九 1200 hard cap active violations 全清；Sign-off `docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-28--wave_g_signoff.md`）
 
@@ -29,7 +29,12 @@
 
 ---
 
-## 🎯 此刻該做什麼（2026-04-28 CEST 深夜 · 🎉 Wave H COMPLETE · §九 800 warn active violations 從 4 縮至 1 · 等 Phase C / Phase B observation bundled）
+## 🎯 此刻該做什麼（2026-04-28 12:30 CEST · Post-Wave-H 2 operator FUP + drift fix 完 · 等 Phase C / Phase B observation bundled · 等下次 `--rebuild --keep-auth` 套用 fee-postonly-2）
+
+**Post-Wave-H operator hotfixes**（3 commits `cdc2699` + `20baabe` + `85a4e2d`）：
+- ✅ **EDGE-DIAG-2-FUP fee-postonly-2** (`cdc2699`) — Rust strategy-open Fill 改用 TIF-aware `fee_rate_for_intent`；DB column drift 修；其他 fee_rate(symbol) 5 close-path call sites 驗安全；**待 `--rebuild --keep-auth` deploy**
+- ✅ **`restart_all.sh --keep-auth` flag** (`20baabe`) — authorization.json 跨 planned deploy 保留；crash/watchdog/systemd 路徑不變；§四 Gate #5 hot-rate verify 5 min re-check 不變
+- ✅ **CLAUDE.md EDGE-DIAG-2 drift fix** (`85a4e2d`) — healthcheck `[31]` + `feedback_demo_loose_live_strict_policy.md` 兩項早在 `8a5973f` 隨檔交付，drift 是 PM Sign-off 漏勾
 
 **Wave H 結案**（6 commits `dbba235..0a50c6c`）：
 - ✅ **STRATEGY-WIRING-SPLIT P2** (new) (`6d657c1`) — strategy_wiring 1060→784 + 2 sibling (h_state 133 + scanner 338)
@@ -44,9 +49,10 @@
 **§九 1200 hard cap active violations**：**0** ✅（Wave G achievement maintained）
 
 **NOW ACTIONABLE**（時間驅動 / 等候 / 餘工）：
-1. **G3-09 Phase C Wave 1 impl** — operator 「等時間長一些再看」；PA RFC `90d1a2e` ready
-2. **Phase B observation period launch** — bundled with Phase C (operator decision (C))
-3. **5 backlog tickets** 等下次 maintenance wave：
+1. **next `--rebuild --keep-auth` deploy** — 套用 `cdc2699` fee-postonly-2 Rust fix 進 runtime（純 DB column 失真修，0 trade impact，bundled with Phase C launch 也可）；可順便驗 `--keep-auth` 旗標 GUI re-approve 不再被觸發
+2. **G3-09 Phase C Wave 1 impl** — operator 「等時間長一些再看」；PA RFC `90d1a2e` ready
+3. **Phase B observation period launch** — bundled with Phase C (operator decision (C))
+4. **6 backlog tickets** 等下次 maintenance wave：
    - G3-08-FUP-MAF-SPLIT-CLEANUP-A P4 (new, cosmetic eager re-export)
    - G3-08-PHASE-4-STRATEGIST-SPLIT-FUP-FACADE LOW (deferred, post-strategist-split risk)
    - SINGLETON-POLLUTION-PHASE2-ROUTES P4 (Mac-only)
@@ -55,6 +61,8 @@
    - G3-08-FUP-EXECUTOR-EARLY-RETURN-LOW1 P4
 
 **Time-driven**: G1-04-FUP-FINAL-COMPUTE P1 (~05-02 cutoff)
+
+**EDGE-DIAG-2 留尾被動**: (ii) PostOnly maker fill rate 待 ≥1w demo 資料驗（cdc2699 deploy 後 `trading.fills.fee_rate` 也會反映正確 TIF，兩條訊號互驗） (iv) demo bb_breakout 1m bandwidth 結構性問題等下次 sweep / 升 5m timeframe
 
 詳：[Wave H Sign-off](docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-28--wave_h_signoff.md)
 
