@@ -100,6 +100,13 @@ Primary active-state sources:
 - `CLAUDE.md`
 - `TODO.md`
 
+Current strategy-edge packet:
+- `STRATEGY-EDGE-REPAIR-2026-04-29` is the active trading-strategy follow-up after commits `bd9ae2a` and `f0d21b9`
+- primary metric for strategy improvement is post-fee `net_bps_after_fee`; PNL and winrate remain secondary references only
+- post-fix sample window starts at `2026-04-29 12:27:53 CEST`, when live strategy params were reloaded with maker-entry enabled
+- do not respond to the current losses by adding more risk layers by default; focus on execution fee reduction, maker fill quality, grid regime/spacing repairs, robust negative symbol disable decisions, and MA whipsaw/R:R improvements
+- relevant runtime sentinels: `[32] maker_entry_intent_drift` for intent shape and `[33] maker_fill_rate` for fee-drop / maker-like settlement
+
 Claude memory sources used for alignment:
 - `memory/MEMORY.md`
 - `memory/README.md`
