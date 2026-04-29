@@ -78,9 +78,16 @@ prepare_runtime_secret_files() {
 
 is_openclaw_api_pid() {
     local pid="$1"
-    local cmd
+    local cmd cwd
     cmd="$(ps -p "$pid" -o command= 2>/dev/null || true)"
-    [[ "$cmd" == *"uvicorn"* && "$cmd" == *"app.main:app"* && "$cmd" == *"control_api_v1"* ]]
+    cwd="$(readlink "/proc/$pid/cwd" 2>/dev/null || true)"
+
+    if [[ "$cmd" == *"uvicorn"* && "$cmd" == *"app.main:app"* ]]; then
+        [[ "$cmd" == *"control_api_v1"* || "$cwd" == "$API_WORKDIR" ]]
+        return
+    fi
+
+    [[ "$cwd" == "$API_WORKDIR" && "$cmd" == *"python"* && "$cmd" == *"multiprocessing-fork"* ]]
 }
 
 stop_api_safe() {

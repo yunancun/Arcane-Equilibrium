@@ -28,6 +28,7 @@ REPO_ROOT="$(pwd)"
 DATA_DIR="${OPENCLAW_DATA_DIR:-/tmp/openclaw}"
 ENGINE_BIN_REL="rust/target/release/openclaw-engine"
 ENGINE_BIN_ABS="$REPO_ROOT/$ENGINE_BIN_REL"
+API_WORKDIR="$REPO_ROOT/program_code/exchange_connectors/bybit_connector/control_api_v1"
 
 SCOPE="${1:-all}"
 case "$SCOPE" in
@@ -114,9 +115,16 @@ stop_engine() {
 
 is_openclaw_api_pid() {
     local pid="$1"
-    local cmd
+    local cmd cwd
     cmd="$(ps -p "$pid" -o command= 2>/dev/null || true)"
-    [[ "$cmd" == *"uvicorn"* && "$cmd" == *"app.main:app"* && "$cmd" == *"control_api_v1"* ]]
+    cwd="$(readlink "/proc/$pid/cwd" 2>/dev/null || true)"
+
+    if [[ "$cmd" == *"uvicorn"* && "$cmd" == *"app.main:app"* ]]; then
+        [[ "$cmd" == *"control_api_v1"* || "$cwd" == "$API_WORKDIR" ]]
+        return
+    fi
+
+    [[ "$cwd" == "$API_WORKDIR" && "$cmd" == *"python"* && "$cmd" == *"multiprocessing-fork"* ]]
 }
 
 stop_api() {
