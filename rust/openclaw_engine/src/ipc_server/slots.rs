@@ -137,8 +137,7 @@ pub type HStateCacheSlot = Arc<RwLock<Option<Arc<crate::h_state_cache::HStateCac
 ///   不 raise。Phase A 純 advisory，hot-path 不讀此 slot。
 ///
 ///   鏡射 G3-08 `HStateCacheSlot` pattern（env-gate + late-inject）。
-pub type CostEdgeAdvisorSlot =
-    Arc<RwLock<Option<Arc<crate::cost_edge_advisor::CostEdgeAdvisor>>>>;
+pub type CostEdgeAdvisorSlot = Arc<RwLock<Option<Arc<crate::cost_edge_advisor::CostEdgeAdvisor>>>>;
 
 /// F6 PH5-WIRE-1 RELOAD (2026-04-26): late-injected slot for the edge
 /// estimates reloader's manual-trigger sender. Wraps a buffer-1

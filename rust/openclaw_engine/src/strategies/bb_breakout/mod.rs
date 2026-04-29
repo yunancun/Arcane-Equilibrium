@@ -623,10 +623,8 @@ impl Strategy for BbBreakout {
                         // score=None（上游合流停用）時不憑 OI 偽造 score。
                         // FUP：需 `|d| > oi_min_delta_pct` 才套 bonus；預設 0.0 保留 pre-FUP 行為。
                         let score = if self.enable_oi_signal {
-                            let delta_opt = self
-                                .symbols
-                                .get(sym)
-                                .and_then(|s| s.compute_oi_delta_pct());
+                            let delta_opt =
+                                self.symbols.get(sym).and_then(|s| s.compute_oi_delta_pct());
                             match (score, delta_opt) {
                                 (Some(s), Some(d)) if d.abs() > self.oi_min_delta_pct => {
                                     let confirms = (d > 0.0 && is_long) || (d < 0.0 && !is_long);
@@ -674,11 +672,11 @@ impl Strategy for BbBreakout {
                         // EDGE-P2-3 Phase 2+ + G7-09c Phase 1: resolve entry order shape.
                         // G7-09c Phase 1 replaces legacy `last_price ± offset_bps` (RCA
                         // `7f0e793` showed 100% PostOnly reject from crossing the book) with
-                        // strictly passive BBO-aware price; helper falls back to legacy when
-                        // BBO/tick_size unavailable and emits warn for observability.
+                        // strictly passive BBO-aware price; if no safe maker price exists, skip
+                        // the entry and keep squeeze state alive for the next valid tick.
                         // EDGE-P2-3 Phase 2+ + G7-09c Phase 1：以 BBO-aware 嚴格被動價取代
                         // 舊 `last_price ± offset_bps`（RCA 顯示舊算法 100% PostOnly 拒絕）；
-                        // BBO 不可得時 helper fallback 並 warn。
+                        // 無安全 maker 價時跳過本次入場並保留 squeeze state 供下一 tick。
                         let (order_type, limit_price, time_in_force, maker_timeout_ms) =
                             if self.use_maker_entry {
                                 let inputs = MakerPriceInputs {
@@ -687,14 +685,16 @@ impl Strategy for BbBreakout {
                                     best_ask: ctx.best_ask,
                                     tick_size: ctx.tick_size,
                                 };
-                                let limit = compute_post_only_price(
+                                let Some(limit) = compute_post_only_price(
                                     is_long,
                                     inputs,
                                     self.maker_price_offset_bps,
                                     self.maker_price_buffer_ticks,
                                     "bb_breakout",
                                     ctx.symbol,
-                                );
+                                ) else {
+                                    return intents;
+                                };
                                 (
                                     "limit".to_string(),
                                     Some(limit),

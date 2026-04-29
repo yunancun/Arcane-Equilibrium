@@ -82,6 +82,7 @@ from .checks_cost_edge import (
 from .checks_execution import (
     check_maker_fill_rate,
     check_maker_entry_intent_drift,
+    check_intent_signal_attribution,
 )
 
 
@@ -102,7 +103,7 @@ The checks split between DB pipelines + filesystem/observability sentinels:
   Cursor block:
     [1][2][3][4][5][6][8][9][10][12][Xb][14][15][21]      14 baseline
     [22][23][24][25][26][27][28]                          7 F7 MIT+E5
-    [30][31][32][33]                                      cost/execution sentinels
+    [30][31][32][33][34]                                  cost/execution sentinels
   Post-cursor (filesystem / pure-Python):
     [7][13][11][Xa][16][18][19][20]                       8 baseline
     [29]                                                  1 F7 (no-IPC stub)
@@ -122,6 +123,7 @@ Execution / cost sentinels added after F7:
   [31] edge_diag_2_strategy_diversity
   [32] maker_entry_intent_drift
   [33] maker_fill_rate              (G2-01 PostOnly fee-drop monitor)
+  [34] intent_signal_attribution    (strategy signal_id join chain)
 
 Exit codes:
   0 = all checks PASS / only WARN
@@ -140,8 +142,8 @@ def main() -> int:
 
     Counted rows are documented by ID, not by fragile total:
       cursor: [1][2][3][4][5][6][8][9][10][12][Xb][14][15][21]
-              [22][23][24][25][26][27][28] [30][31][32][33]
-              (F7 [22]-[28] are MIT/E5; [30]-[33] are post-F7)
+              [22][23][24][25][26][27][28] [30][31][32][33][34]
+              (F7 [22]-[28] are MIT/E5; [30]-[34] are post-F7)
       post-cursor: [7][13][11][Xa][16][18][19][20]
                    [29]   (F7 [29] is deferred-no-ipc stub)
 
@@ -150,7 +152,7 @@ def main() -> int:
     ``(status, msg)``（[1] 額外回 close_fills，供 [2]/[3]/[Xb] 用）。
     清單依 ID 記錄，避免總數 drift：
       cursor: [1][2][3][4][5][6][8][9][10][12][Xb][14][15][21]
-              [22][23][24][25][26][27][28] [30][31][32][33]
+              [22][23][24][25][26][27][28] [30][31][32][33][34]
       post-cursor: [7][13][11][Xa][16][18][19][20] [29]
     """
     ap = argparse.ArgumentParser(description=_RUNNER_DESCRIPTION)
@@ -392,6 +394,14 @@ def main() -> int:
             # 僅作 Limit 診斷，因目前 Rust orders writer 未持久化 TIF。
             s, m = check_maker_fill_rate(cur)
             results.append(("[33] maker_fill_rate", s, m))
+
+            # [34] Intent attribution chain: exchange intents must carry a
+            # non-empty signal_id that joins to trading.signals on the same
+            # context_id. Catches demo/live_demo signal_id regressions.
+            # [34] Intent 歸因鏈：exchange intents 必須帶非空 signal_id 且能
+            # join 到同 context_id 的 trading.signals。
+            s, m = check_intent_signal_attribution(cur)
+            results.append(("[34] intent_signal_attribution", s, m))
     finally:
         conn.close()
 

@@ -444,6 +444,19 @@ pub enum TradingMsg {
         /// Engine mode: "paper", "demo", or "live" / 引擎模式
         engine_mode: String,
     },
+    /// Scanner cycle snapshot for audit attribution.
+    /// Scanner 掃描週期快照，用於審計與交易歸因。
+    ScannerSnapshot {
+        scan_id: String,
+        ts_ms: u64,
+        active_symbols: Vec<String>,
+        added: Vec<String>,
+        removed: Vec<String>,
+        rejected_count: i64,
+        scan_duration_ms: i64,
+        candidates: serde_json::Value,
+        config: serde_json::Value,
+    },
 }
 
 static TRADING_WRITER_DROP_TOTAL: AtomicU64 = AtomicU64::new(0);

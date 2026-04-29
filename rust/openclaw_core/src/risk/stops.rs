@@ -125,7 +125,8 @@ mod tests {
         // ATR = 3.0%, base = 1.5%, cap = 5.0 * 0.8 = 4.0
         // atr_stop = 3.0 * 1.5 = 4.5, capped to 4.0
         // effective = max(1.5, 4.0) = 4.0
-        let stop = compute_dynamic_stop_pct(1.5, Some(3.0), "BTCUSDT", 1000, "trending", 5.0, 0.8, 1.5);
+        let stop =
+            compute_dynamic_stop_pct(1.5, Some(3.0), "BTCUSDT", 1000, "trending", 5.0, 0.8, 1.5);
         // With anti-cluster offset, result should be near 4.0
         assert!(stop > 3.0 && stop < 5.0, "stop={stop}, expected ~4.0");
     }
@@ -148,7 +149,8 @@ mod tests {
     fn test_dynamic_stop_atr_below_base() {
         // ATR very low → atr_stop < base → use base
         // base=3.0, atr=0.5, mult=1.5 → atr_stop=0.75, effective=max(3.0, 0.75)=3.0
-        let stop = compute_dynamic_stop_pct(3.0, Some(0.5), "BTCUSDT", 1000, "trending", 5.0, 0.8, 1.5);
+        let stop =
+            compute_dynamic_stop_pct(3.0, Some(0.5), "BTCUSDT", 1000, "trending", 5.0, 0.8, 1.5);
         assert!(stop > 2.0 && stop < 4.0, "stop={stop}, expected ~3.0");
     }
 
@@ -159,8 +161,10 @@ mod tests {
         // ATR=1.5%, base=3.0%, cap=4.0%
         //   mult=1.0: atr_stop=1.5 < base → effective=3.0
         //   mult=2.5: atr_stop=3.75 > base → effective=3.75
-        let stop_tight = compute_dynamic_stop_pct(3.0, Some(1.5), "BTCUSDT", 1000, "trending", 5.0, 0.8, 1.0);
-        let stop_wide  = compute_dynamic_stop_pct(3.0, Some(1.5), "BTCUSDT", 1000, "trending", 5.0, 0.8, 2.5);
+        let stop_tight =
+            compute_dynamic_stop_pct(3.0, Some(1.5), "BTCUSDT", 1000, "trending", 5.0, 0.8, 1.0);
+        let stop_wide =
+            compute_dynamic_stop_pct(3.0, Some(1.5), "BTCUSDT", 1000, "trending", 5.0, 0.8, 2.5);
         assert!(
             stop_wide > stop_tight,
             "wider atr_stop_mult should produce larger stop: wide={stop_wide:.4} tight={stop_tight:.4}"

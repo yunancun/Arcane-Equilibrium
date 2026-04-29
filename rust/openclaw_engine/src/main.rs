@@ -511,31 +511,6 @@ async fn async_main(
     .await;
 
     // ------------------------------------------------------------------
-    // Scanner D4: Spawn ScannerRunner (requires market REST client)
-    // 掃描器 D4：啟動 ScannerRunner（需要市場 REST 客戶端）
-    // ------------------------------------------------------------------
-    // 3E-ARCH: Scanner broadcasts AddSymbol/RemoveSymbol to ALL pipelines.
-    // 掃描器向所有管線廣播 AddSymbol/RemoveSymbol。
-    if let Some(ref client) = shared_client {
-        // Build a fan-out sender that sends to all pipeline cmd channels.
-        let scanner_cmd_tx = paper_cmd_tx.clone();
-        let market_client = Arc::new(MarketDataClient::new(Arc::clone(client)));
-        let runner = ScannerRunner::new(
-            Arc::clone(&symbol_registry),
-            market_client,
-            Arc::clone(&scanner_edge_estimates),
-            Arc::clone(&scanner_store),
-            scanner_ws_tx,
-            scanner_cmd_tx,
-            cancel.clone(),
-        );
-        tokio::spawn(runner.run());
-        info!("ScannerRunner spawned / 掃描器已啟動");
-    } else {
-        warn!("ScannerRunner skipped: no REST client (pinned symbols only) / 掃描器跳過：無 REST 客戶端（僅固定交易對）");
-    }
-
-    // ------------------------------------------------------------------
     // Public WS supervisor — extracted to `main_ws.rs` (G1-03 Wave 1).
     // Builds subscription list (extended vs minimal) from
     // symbol_registry + config.enable_extended_ws, spawns RE-2 supervisor
@@ -675,6 +650,32 @@ async fn async_main(
         &shared_last_tick_ms,
     )
     .await;
+
+    // ------------------------------------------------------------------
+    // Scanner D4: Spawn ScannerRunner (requires market REST client + DB writer)
+    // 掃描器 D4：啟動 ScannerRunner（需要市場 REST 客戶端 + DB writer）
+    // ------------------------------------------------------------------
+    // 3E-ARCH: Scanner broadcasts AddSymbol/RemoveSymbol to ALL pipelines and
+    // persists each scan snapshot for strategy-intent attribution.
+    // 掃描器向所有管線廣播 AddSymbol/RemoveSymbol，並持久化每次 scan snapshot。
+    if let Some(ref client) = shared_client {
+        let scanner_cmd_tx = paper_cmd_tx.clone();
+        let market_client = Arc::new(MarketDataClient::new(Arc::clone(client)));
+        let runner = ScannerRunner::new(
+            Arc::clone(&symbol_registry),
+            market_client,
+            Arc::clone(&scanner_edge_estimates),
+            Arc::clone(&scanner_store),
+            scanner_ws_tx,
+            scanner_cmd_tx,
+            trading_tx.clone(),
+            cancel.clone(),
+        );
+        tokio::spawn(runner.run());
+        info!("ScannerRunner spawned / 掃描器已啟動");
+    } else {
+        warn!("ScannerRunner skipped: no REST client (pinned symbols only) / 掃描器跳過：無 REST 客戶端（僅固定交易對）");
+    }
 
     // ------------------------------------------------------------------
     // Phase 6 + D23 per-exchange position reconciler — extracted to

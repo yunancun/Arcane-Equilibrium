@@ -138,7 +138,10 @@ mod tests {
     fn test_next_delay_byte_identical_to_legacy() {
         let cfg = BackoffConfig::ws_public_default(3_000);
         // attempt 1: 3000 * 2^1 = 6000
-        assert_eq!(cfg.next_delay_with_base(3_000, 1), Duration::from_millis(6_000));
+        assert_eq!(
+            cfg.next_delay_with_base(3_000, 1),
+            Duration::from_millis(6_000)
+        );
         // attempt 5: 3000 * 2^5 = 96000 → capped at 60000
         assert_eq!(
             cfg.next_delay_with_base(3_000, 5),

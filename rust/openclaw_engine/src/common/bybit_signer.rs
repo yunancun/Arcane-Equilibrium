@@ -99,7 +99,9 @@ mod tests {
         let sig = hmac_sha256_hex("secret", "payload");
         assert_eq!(sig.len(), 64);
         // All chars are lowercase hex / 所有字元為小寫 hex
-        assert!(sig.chars().all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()));
+        assert!(sig
+            .chars()
+            .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()));
     }
 
     /// EN: Deterministic — identical inputs produce identical output.
@@ -132,10 +134,7 @@ mod tests {
         let secret = "TESTSECRET456";
 
         // Expected is computed by the same primitive — proves round-trip.
-        let expected = hmac_sha256_hex(
-            secret,
-            &format!("{}{}{}{}", ts, key, recv, params),
-        );
+        let expected = hmac_sha256_hex(secret, &format!("{}{}{}{}", ts, key, recv, params));
         let actual = sign_rest_v5(secret, ts, key, recv, params);
         assert_eq!(actual, expected);
         assert_eq!(actual.len(), 64);
@@ -145,7 +144,10 @@ mod tests {
     /// 中文: ws_auth_payload 符合 `GET/realtime{expires}` 契約。
     #[test]
     fn test_ws_auth_payload_format() {
-        assert_eq!(ws_auth_payload(1_700_000_010_000), "GET/realtime1700000010000");
+        assert_eq!(
+            ws_auth_payload(1_700_000_010_000),
+            "GET/realtime1700000010000"
+        );
     }
 
     /// EN: sign_ws_auth matches pre-extraction private-WS signing (byte-for-byte

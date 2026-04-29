@@ -221,7 +221,9 @@ pub(crate) async fn dispatch_request(
             let hint_is_long = req.params.get("is_long").and_then(|v| v.as_bool());
             let hint_qty = req.params.get("qty").and_then(|v| v.as_f64());
             let tx = extract_engine_tx(&req.params, cmd_channels);
-            handle_paper_cmd(id, &tx,
+            handle_paper_cmd(
+                id,
+                &tx,
                 PipelineCommand::CloseSymbol {
                     symbol,
                     hint_is_long,
@@ -237,7 +239,9 @@ pub(crate) async fn dispatch_request(
                 .and_then(|v| v.as_f64())
                 .unwrap_or(10_000.0);
             let tx = extract_engine_tx(&req.params, cmd_channels);
-            handle_paper_cmd(id, &tx,
+            handle_paper_cmd(
+                id,
+                &tx,
                 PipelineCommand::Reset {
                     new_balance: balance,
                 },
@@ -401,9 +405,7 @@ pub(crate) async fn dispatch_request(
         }
         // ── PIPELINE-SLOT-1 Phase 3: Live auth watcher fast-path ──
         // PIPELINE-SLOT-1 Phase 3：Live 授權 watcher 快路徑喚醒
-        "trigger_live_auth_recheck" => {
-            handle_trigger_live_auth_recheck(id, live_auth_recheck_tx)
-        }
+        "trigger_live_auth_recheck" => handle_trigger_live_auth_recheck(id, live_auth_recheck_tx),
         // ── F6 PH5-WIRE-1 RELOAD (2026-04-26) ──
         // Manual edge estimates reload trigger. Advisory fire-and-forget —
         // never returns JSON-RPC error; reports state via accepted/reason
@@ -413,9 +415,7 @@ pub(crate) async fn dispatch_request(
         // 絕不回 JSON-RPC error，以 accepted / reason payload 表達狀態
         // （對齊 trigger_live_auth_recheck shape）。週期 1h daemon（env-gated）
         // 不論手動觸發是否抵達都繼續運行。
-        "reload_edge_estimates" => {
-            handle_reload_edge_estimates(id, edge_reload_sender)
-        }
+        "reload_edge_estimates" => handle_reload_edge_estimates(id, edge_reload_sender),
         // ── G3-08 H State Gateway Phase 1 (2026-04-26) ──
         // Three reverse-IPC methods backed by `h_state_cache::HStateCache`,
         // gated by `OPENCLAW_H_STATE_GATEWAY=1` (DEFAULT-OFF). When the

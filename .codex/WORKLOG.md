@@ -94,3 +94,9 @@ YYYY-MM-DD HH:MM TZ
 - compared Claude memory sources (`memory/MEMORY.md`, `memory/README.md`, `docs/CCAgentWorkSpace/PM/memory.md`, `.claude/agents/PM.md`) against Codex memory
 - rewrote `.codex/MEMORY.md` into a compact index-style operating memory aligned to the Claude workflow rather than copying Claude content verbatim
 - preserved compacted 2026-04-29 detailed batch/redeploy notes in `.codex/archive/2026-04-29--pre-compaction-memory-snapshot.md`
+
+2026-04-29 17:36 CEST
+- implemented `STRATEGY-EDGE-REPAIR-2026-04-29` locally: demo/live_demo/live strategy intents now carry a real `signal_id`/`context_id` attribution chain via a persisted strategy signal
+- fixed fee-rate stale root long-term by spawning fee refresh/re-seed tasks per exchange binding AccountManager instead of only the highest-priority shared binding
+- added scanner scan snapshots, configurable scanner `edge_routing`, robust-negative exploration-only routing, grid `blocked_symbols`, and strict maker entry skip on unsafe BBO/tick_size
+- added passive healthcheck `[34] intent_signal_attribution` and tests; verification: Rust lib 2361/0, scanner 61/0, DB writer 3/0, fast_track_reduce 16/0, maker_price 10/0, `cargo check --bins`, `cargo check openclaw_core`, Python maker/attribution pytest 9/0, and `git diff --check`

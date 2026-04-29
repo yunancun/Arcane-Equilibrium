@@ -139,7 +139,11 @@ impl GovernanceCore {
                 None, // no TTL — permanent until session ends
             );
             let _ = core.auth.submit_for_approval(idx);
-            let _ = core.auth.approve(idx, &format!("system_{label}_auto"), &format!("{label} mode auto-approved (GovernanceProfile)"));
+            let _ = core.auth.approve(
+                idx,
+                &format!("system_{label}_auto"),
+                &format!("{label} mode auto-approved (GovernanceProfile)"),
+            );
             core.update_mode();
         }
         core

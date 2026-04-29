@@ -20,6 +20,7 @@
 //!   6. 為新增的交易對觸發 kline bootstrap
 //!   7. 睡眠 scan_interval_secs
 
+use crate::database::{try_send_trading_msg, TradingMsg};
 use crate::edge_estimates::EdgeEstimates;
 use crate::market_data_client::MarketDataClient;
 use crate::scanner::config::ScannerConfig;
@@ -57,6 +58,7 @@ pub struct ScannerRunner {
     scanner_config: Arc<crate::config::ConfigStore<ScannerConfig>>,
     ws_tx: mpsc::UnboundedSender<WsTopicChange>,
     pipeline_cmd_tx: mpsc::UnboundedSender<PipelineCommand>,
+    trading_tx: Option<mpsc::Sender<TradingMsg>>,
     cancel: CancellationToken,
 }
 
@@ -71,6 +73,7 @@ impl ScannerRunner {
         scanner_config: Arc<crate::config::ConfigStore<ScannerConfig>>,
         ws_tx: mpsc::UnboundedSender<WsTopicChange>,
         pipeline_cmd_tx: mpsc::UnboundedSender<PipelineCommand>,
+        trading_tx: Option<mpsc::Sender<TradingMsg>>,
         cancel: CancellationToken,
     ) -> Self {
         Self {
@@ -80,6 +83,7 @@ impl ScannerRunner {
             scanner_config,
             ws_tx,
             pipeline_cmd_tx,
+            trading_tx,
             cancel,
         }
     }
@@ -141,7 +145,13 @@ impl ScannerRunner {
                 tickers
                     .iter()
                     .filter_map(|t| {
-                        score_ticker(t, btc_change_pct, &estimates_guard, &config.hard_filters)
+                        score_ticker(
+                            t,
+                            btc_change_pct,
+                            &estimates_guard,
+                            &config.hard_filters,
+                            &config.edge_routing,
+                        )
                     })
                     .collect()
             }; // estimates_guard dropped here
@@ -200,6 +210,7 @@ impl ScannerRunner {
 
             let scan_result = ScanResult {
                 scan_ts_ms: now_ms,
+                scan_id: format!("scan-{now_ms}"),
                 active_symbols: active_symbols.clone(),
                 added: added.clone(),
                 removed: removed.clone(),
@@ -207,6 +218,28 @@ impl ScannerRunner {
                 rejected_count,
                 scan_duration_ms,
             };
+            if let Some(ref tx) = self.trading_tx {
+                let candidates = serde_json::to_value(&scan_result.candidates)
+                    .unwrap_or_else(|_| serde_json::json!({"serialization_error": "candidates"}));
+                let config_json = serde_json::to_value(&*config).unwrap_or_else(
+                    |_| serde_json::json!({"serialization_error": "scanner_config"}),
+                );
+                let _ = try_send_trading_msg(
+                    tx,
+                    TradingMsg::ScannerSnapshot {
+                        scan_id: scan_result.scan_id.clone(),
+                        ts_ms: scan_result.scan_ts_ms,
+                        active_symbols: scan_result.active_symbols.clone(),
+                        added: scan_result.added.clone(),
+                        removed: scan_result.removed.clone(),
+                        rejected_count: scan_result.rejected_count as i64,
+                        scan_duration_ms: scan_result.scan_duration_ms as i64,
+                        candidates,
+                        config: config_json,
+                    },
+                    "scanner_snapshot",
+                );
+            }
             self.registry.store_last_scan(scan_result);
 
             info!(
@@ -307,6 +340,7 @@ mod tests {
             scanner_config: Arc::new(crate::config::ConfigStore::new(ScannerConfig::default())),
             ws_tx,
             pipeline_cmd_tx: cmd_tx,
+            trading_tx: None,
             cancel: CancellationToken::new(),
         };
         let result = runner.query_open_positions().await;

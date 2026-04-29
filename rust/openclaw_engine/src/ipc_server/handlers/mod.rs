@@ -41,8 +41,7 @@ pub(in crate::ipc_server) use dynamic_risk::{
     handle_get_dynamic_risk_status, handle_set_dynamic_risk_enabled,
 };
 pub(in crate::ipc_server) use governance::{
-    handle_force_governor_looser, handle_force_governor_tighter,
-    handle_set_system_mode_broadcast,
+    handle_force_governor_looser, handle_force_governor_tighter, handle_set_system_mode_broadcast,
 };
 pub(in crate::ipc_server) use h_state::{
     handle_get_h_state_status, handle_invalidate_h_state, handle_query_h_state_full,

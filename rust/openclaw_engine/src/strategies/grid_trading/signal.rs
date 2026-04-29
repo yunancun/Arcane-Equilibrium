@@ -30,8 +30,39 @@ use crate::order_manager::TimeInForce;
 use crate::strategies::common::{compute_post_only_price, MakerPriceInputs};
 use crate::strategies::{grid_helpers, Strategy, StrategyAction};
 use crate::tick_pipeline::TickContext;
+use tracing::debug;
 
 impl GridTrading {
+    fn resolve_entry_order(
+        &self,
+        ctx: &TickContext<'_>,
+        is_long: bool,
+    ) -> Option<(String, Option<f64>, Option<TimeInForce>, Option<u64>)> {
+        if !self.use_maker_entry {
+            return Some(("market".to_string(), None, None, None));
+        }
+        let maker_inputs = MakerPriceInputs {
+            last_price: ctx.price,
+            best_bid: ctx.best_bid,
+            best_ask: ctx.best_ask,
+            tick_size: ctx.tick_size,
+        };
+        let price = compute_post_only_price(
+            is_long,
+            maker_inputs,
+            self.maker_price_offset_bps,
+            self.maker_price_buffer_ticks,
+            "grid_trading",
+            ctx.symbol,
+        )?;
+        Some((
+            "limit".to_string(),
+            Some(price),
+            Some(TimeInForce::PostOnly),
+            Some(self.maker_limit_timeout_ms),
+        ))
+    }
+
     pub(super) fn on_tick_impl(&mut self, ctx: &TickContext<'_>) -> Vec<StrategyAction> {
         let sym = ctx.symbol;
 
@@ -123,12 +154,33 @@ impl GridTrading {
         }
 
         let prev_idx = self.last_cross_idx.get(sym).copied().unwrap_or(idx);
+        let cur_inventory = self.net_inventory.get(sym).copied().unwrap_or(0.0);
+        let is_down_cross = idx < prev_idx;
+        let is_up_cross = idx > prev_idx;
+        let would_open =
+            (is_down_cross && cur_inventory >= 0.0) || (is_up_cross && cur_inventory <= 0.0);
+        if would_open && self.blocked_symbols.contains(sym) {
+            debug!(
+                strategy = "grid_trading",
+                symbol = sym,
+                "grid new entry skipped: symbol in blocked_symbols / grid 新開倉跳過：symbol 在 blocked_symbols"
+            );
+            return vec![];
+        }
+        let entry_order = if would_open {
+            let is_long = is_down_cross;
+            self.resolve_entry_order(ctx, is_long)
+        } else {
+            None
+        };
+        if would_open && entry_order.is_none() {
+            return vec![];
+        }
 
         // RC-04: Snapshot per-symbol state before any mutation for rejection rollback.
         // RC-04：在任何變更前快照該幣種狀態，供拒絕回滾使用。
         self.prev_cross_idx
             .insert(sym.to_string(), self.last_cross_idx.get(sym).copied());
-        let cur_inventory = self.net_inventory.get(sym).copied().unwrap_or(0.0);
         self.prev_inventory.insert(sym.to_string(), cur_inventory);
         self.prev_last_trade_ms.insert(sym.to_string(), last_ms);
 
@@ -143,81 +195,10 @@ impl GridTrading {
             compute_grid_confidence(ctx.indicators) * self.conf_scale,
         );
 
-        // EDGE-P2-3 Phase 1a + G7-09c Phase 1: resolve entry order shape
-        // (Market vs PostOnly Limit). Close path stays Market; only new-open
-        // intents use the maker path. G7-09c Phase 1 replaces the legacy
-        // `last_price ± offset_bps` formula (RCA `7f0e793` — 100% PostOnly
-        // reject due to crossing the book) with a strictly passive BBO-aware
-        // price (`best_bid - buffer×tick` / `best_ask + buffer×tick`). When
-        // BBO/tick_size unavailable, helper falls back to legacy + warns.
-        // EDGE-P2-3 Phase 1a + G7-09c Phase 1：決定入場單型。Close 維持 Market；
-        // G7-09c Phase 1 以 BBO-aware 嚴格被動價取代舊 `last_price ± offset_bps`
-        // 公式（RCA `7f0e793` 顯示舊公式 100% PostOnly 拒絕）；BBO 不可得時
-        // helper 回退至舊公式並 warn。
-        let maker_inputs = MakerPriceInputs {
-            last_price: ctx.price,
-            best_bid: ctx.best_bid,
-            best_ask: ctx.best_ask,
-            tick_size: ctx.tick_size,
-        };
-        let maker_entry_for_buy = if self.use_maker_entry {
-            let price = compute_post_only_price(
-                true,
-                maker_inputs,
-                self.maker_price_offset_bps,
-                self.maker_price_buffer_ticks,
-                "grid_trading",
-                ctx.symbol,
-            );
-            (
-                "limit".to_string(),
-                Some(price),
-                Some(TimeInForce::PostOnly),
-                Some(self.maker_limit_timeout_ms),
-            )
-        } else {
-            ("market".to_string(), None, None, None)
-        };
-        let maker_entry_for_sell = if self.use_maker_entry {
-            let price = compute_post_only_price(
-                false,
-                maker_inputs,
-                self.maker_price_offset_bps,
-                self.maker_price_buffer_ticks,
-                "grid_trading",
-                ctx.symbol,
-            );
-            (
-                "limit".to_string(),
-                Some(price),
-                Some(TimeInForce::PostOnly),
-                Some(self.maker_limit_timeout_ms),
-            )
-        } else {
-            ("market".to_string(), None, None, None)
-        };
-
         if idx < prev_idx {
             // Price crossed down → buy. If net_inventory < 0 (short), this closes short → Close.
             // Otherwise it's a new long → Open.
             // 價格下穿 → 買入。若 net_inventory < 0（空倉），為平空 → Close；否則新多 → Open。
-            let (order_type, limit_price, time_in_force, maker_timeout_ms) =
-                maker_entry_for_buy;
-            let intent = OrderIntent {
-                symbol: ctx.symbol.to_string(),
-                is_long: true,
-                qty: self.qty_per_grid,
-                confidence: conf,
-                strategy: self.name().into(),
-                order_type,
-                limit_price,
-                // Grid has no confluence/persistence; builder fills 0.0.
-                // Grid 無 confluence/persistence；builder 填 0。
-                confluence_score: None,
-                persistence_elapsed_ms: None,
-                time_in_force,
-                maker_timeout_ms,
-            };
             if cur_inventory < 0.0 {
                 intents.push(StrategyAction::Close {
                     symbol: ctx.symbol.to_string(),
@@ -225,6 +206,23 @@ impl GridTrading {
                     reason: "grid_close_short".into(),
                 });
             } else {
+                let (order_type, limit_price, time_in_force, maker_timeout_ms) =
+                    entry_order.expect("entry_order precomputed for grid buy open");
+                let intent = OrderIntent {
+                    symbol: ctx.symbol.to_string(),
+                    is_long: true,
+                    qty: self.qty_per_grid,
+                    confidence: conf,
+                    strategy: self.name().into(),
+                    order_type,
+                    limit_price,
+                    // Grid has no confluence/persistence; builder fills 0.0.
+                    // Grid 無 confluence/persistence；builder 填 0。
+                    confluence_score: None,
+                    persistence_elapsed_ms: None,
+                    time_in_force,
+                    maker_timeout_ms,
+                };
                 intents.push(StrategyAction::Open(intent));
                 *self.net_inventory.entry(sym.to_string()).or_insert(0.0) += self.qty_per_grid;
             }
@@ -233,23 +231,6 @@ impl GridTrading {
             // Price crossed up → sell. If net_inventory > 0 (long), this closes long → Close.
             // Otherwise it's a new short → Open.
             // 價格上穿 → 賣出。若 net_inventory > 0（多倉），為平多 → Close；否則新空 → Open。
-            let (order_type, limit_price, time_in_force, maker_timeout_ms) =
-                maker_entry_for_sell;
-            let intent = OrderIntent {
-                symbol: ctx.symbol.to_string(),
-                is_long: false,
-                qty: self.qty_per_grid,
-                confidence: conf,
-                strategy: self.name().into(),
-                order_type,
-                limit_price,
-                // Grid has no confluence/persistence; builder fills 0.0.
-                // Grid 無 confluence/persistence；builder 填 0。
-                confluence_score: None,
-                persistence_elapsed_ms: None,
-                time_in_force,
-                maker_timeout_ms,
-            };
             if cur_inventory > 0.0 {
                 intents.push(StrategyAction::Close {
                     symbol: ctx.symbol.to_string(),
@@ -257,6 +238,23 @@ impl GridTrading {
                     reason: "grid_close_long".into(),
                 });
             } else {
+                let (order_type, limit_price, time_in_force, maker_timeout_ms) =
+                    entry_order.expect("entry_order precomputed for grid sell open");
+                let intent = OrderIntent {
+                    symbol: ctx.symbol.to_string(),
+                    is_long: false,
+                    qty: self.qty_per_grid,
+                    confidence: conf,
+                    strategy: self.name().into(),
+                    order_type,
+                    limit_price,
+                    // Grid has no confluence/persistence; builder fills 0.0.
+                    // Grid 無 confluence/persistence；builder 填 0。
+                    confluence_score: None,
+                    persistence_elapsed_ms: None,
+                    time_in_force,
+                    maker_timeout_ms,
+                };
                 intents.push(StrategyAction::Open(intent));
                 *self.net_inventory.entry(sym.to_string()).or_insert(0.0) -= self.qty_per_grid;
             }

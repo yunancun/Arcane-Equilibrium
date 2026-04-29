@@ -59,7 +59,8 @@ pub const STATUS_FILENAME: &str = "bybit_private_ws_listener_status_latest.json"
 /// path without config change.
 /// 相對於 `OPENCLAW_SRV_ROOT` / `OPENCLAW_BASE_DIR` 的子路徑，對齊 Python
 /// 硬編碼位置，observer 無需改 config。
-pub const STATUS_SUBDIR: &str = "docker_projects/trading_services/connector_logs/bybit/ws_persistent";
+pub const STATUS_SUBDIR: &str =
+    "docker_projects/trading_services/connector_logs/bybit/ws_persistent";
 
 // ---------------------------------------------------------------------------
 // PrivateWsStatus / 私有 WS 狀態結構
@@ -175,7 +176,9 @@ pub fn resolve_status_path_from_env() -> PathBuf {
         .ok()
         .or_else(|| std::env::var("OPENCLAW_BASE_DIR").ok())
         .unwrap_or_else(|| ".".to_string());
-    PathBuf::from(root).join(STATUS_SUBDIR).join(STATUS_FILENAME)
+    PathBuf::from(root)
+        .join(STATUS_SUBDIR)
+        .join(STATUS_FILENAME)
 }
 
 /// Pure variant of `resolve_status_path_from_env` for tests — takes the
@@ -351,7 +354,9 @@ mod tests {
         stats.total_balance_updates.store(2, Ordering::Relaxed);
         stats.total_auth_successes.store(1, Ordering::Relaxed);
         stats.total_disconnects.store(0, Ordering::Relaxed);
-        stats.last_event_ts.store(1_700_000_000_000, Ordering::Relaxed);
+        stats
+            .last_event_ts
+            .store(1_700_000_000_000, Ordering::Relaxed);
 
         let status = snapshot_status(
             &stats,
@@ -495,7 +500,10 @@ mod tests {
         write_status_atomic(&path, &status).await.unwrap();
 
         let tmp_path = path.with_extension("json.tmp");
-        assert!(!tmp_path.exists(), "tmp file should be renamed, not left behind");
+        assert!(
+            !tmp_path.exists(),
+            "tmp file should be renamed, not left behind"
+        );
     }
 
     /// Writer task performs a final `running=false` write on cancel, so
@@ -519,8 +527,9 @@ mod tests {
 
         let cancel_clone = cancel.clone();
         let stats_clone = Arc::clone(&stats);
-        let handle =
-            tokio::spawn(async move { run_private_ws_status_writer(stats_clone, config, cancel_clone).await });
+        let handle = tokio::spawn(async move {
+            run_private_ws_status_writer(stats_clone, config, cancel_clone).await
+        });
 
         // Give the task a moment to start, then cancel.
         // 給任務啟動的時間後再 cancel。
@@ -530,7 +539,10 @@ mod tests {
 
         // Final write happened with running=false.
         // 終止寫入已發生且 running=false。
-        assert!(path.exists(), "writer should have written at least once on cancel");
+        assert!(
+            path.exists(),
+            "writer should have written at least once on cancel"
+        );
         let contents = tokio::fs::read_to_string(&path).await.unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&contents).unwrap();
         assert_eq!(parsed["running"], false);
@@ -559,8 +571,9 @@ mod tests {
 
         let cancel_clone = cancel.clone();
         let stats_clone = Arc::clone(&stats);
-        let handle =
-            tokio::spawn(async move { run_private_ws_status_writer(stats_clone, config, cancel_clone).await });
+        let handle = tokio::spawn(async move {
+            run_private_ws_status_writer(stats_clone, config, cancel_clone).await
+        });
 
         // Wait long enough for ≥2 ticks at 20 ms interval.
         // 等待 ≥2 次 20ms tick。
@@ -590,7 +603,10 @@ mod tests {
         let cfg = WriterConfig::from_env("demo".to_string(), "url".to_string(), vec![]);
         assert!(cfg.output_path.starts_with("/tmp/writer_cfg_srv_root"));
         assert!(cfg.output_path.ends_with(STATUS_FILENAME));
-        assert_eq!(cfg.interval, Duration::from_secs(DEFAULT_WRITE_INTERVAL_SEC));
+        assert_eq!(
+            cfg.interval,
+            Duration::from_secs(DEFAULT_WRITE_INTERVAL_SEC)
+        );
 
         // Restore original state / 還原原始 env 狀態。
         match prior_srv {

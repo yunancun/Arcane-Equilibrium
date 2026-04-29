@@ -49,10 +49,9 @@ fn ctx_oi(
         funding_rate: None,
         index_price: None,
         open_interest,
-        // G7-09c Phase 1: OI tests don't exercise BBO/tick_size — leave None so
-        // strategy falls back to legacy `last_price ± offset_bps` (matches
-        // pre-G7-09c behaviour for these specific tests).
-        // G7-09c Phase 1：OI 測試不涉及 BBO/tick_size，留 None 讓策略走 legacy fallback。
+        // G7-09c Phase 1: OI tests don't exercise maker entries; maker mode
+        // stays disabled, so BBO/tick_size remain irrelevant here.
+        // G7-09c Phase 1：OI 測試不涉及 maker 入場；maker 關閉時 BBO/tick_size 無關。
         best_bid: None,
         best_ask: None,
         tick_size: None,
@@ -128,8 +127,8 @@ fn state_with_oi(samples: &[(u64, f64)]) -> BbBreakoutPerSymbolState {
 fn test_oi_buffer_fills_and_evicts() {
     let mut s = BbBreakout::new();
     s.oi_buffer_window_ms = 60_000; // 60s rolling window
-    // Feed 10 samples every 12s → span = 108s > 60s window.
-    // 每 12s 入一筆，共 10 筆，跨 108s > 60s 窗口。
+                                    // Feed 10 samples every 12s → span = 108s > 60s window.
+                                    // 每 12s 入一筆，共 10 筆，跨 108s > 60s 窗口。
     for i in 0..10u64 {
         let ts = i * 12_000;
         // Use squeeze-neutral bandwidth; this exercises the buffer path only.
@@ -203,7 +202,14 @@ fn test_confluence_bonus_disabled_by_default() {
 
     // Feed mid-tick with OI climb (only affects buffer, not score, because flag=false).
     // 中途加入 OI 上升樣本（flag=false 時不應影響 score）。
-    with_oi.on_tick(&ctx_full_entry(0.02, 0.5, 1.0, 300_000, 50000.0, Some(110.0)));
+    with_oi.on_tick(&ctx_full_entry(
+        0.02,
+        0.5,
+        1.0,
+        300_000,
+        50000.0,
+        Some(110.0),
+    ));
 
     // Breakout tick (long).
     // 突破 tick（多頭）。
@@ -263,8 +269,22 @@ fn test_confluence_bonus_applied_when_flag_on() {
     flat.on_tick(&ctx_full_entry(0.01, 0.5, 1.0, 0, 50000.0, Some(100.0)));
     // Mid tick — rising climbs, flat holds.
     // 中段：rising 上升，flat 不變。
-    rising.on_tick(&ctx_full_entry(0.02, 0.5, 1.0, 300_000, 50000.0, Some(110.0)));
-    flat.on_tick(&ctx_full_entry(0.02, 0.5, 1.0, 300_000, 50000.0, Some(100.0)));
+    rising.on_tick(&ctx_full_entry(
+        0.02,
+        0.5,
+        1.0,
+        300_000,
+        50000.0,
+        Some(110.0),
+    ));
+    flat.on_tick(&ctx_full_entry(
+        0.02,
+        0.5,
+        1.0,
+        300_000,
+        50000.0,
+        Some(100.0),
+    ));
     // Breakout long on both.
     // 突破多頭。
     let i_rising = rising.on_tick(&ctx_full_entry(
@@ -325,8 +345,22 @@ fn test_confluence_penalty_on_divergence() {
     falling.on_tick(&ctx_full_entry(0.01, 0.5, 1.0, 0, 50000.0, Some(100.0)));
     flat.on_tick(&ctx_full_entry(0.01, 0.5, 1.0, 0, 50000.0, Some(100.0)));
     // Mid: falling drops, flat holds.
-    falling.on_tick(&ctx_full_entry(0.02, 0.5, 1.0, 300_000, 50000.0, Some(95.0)));
-    flat.on_tick(&ctx_full_entry(0.02, 0.5, 1.0, 300_000, 50000.0, Some(100.0)));
+    falling.on_tick(&ctx_full_entry(
+        0.02,
+        0.5,
+        1.0,
+        300_000,
+        50000.0,
+        Some(95.0),
+    ));
+    flat.on_tick(&ctx_full_entry(
+        0.02,
+        0.5,
+        1.0,
+        300_000,
+        50000.0,
+        Some(100.0),
+    ));
     // Breakout long on both.
     let i_falling = falling.on_tick(&ctx_full_entry(
         0.05,
@@ -458,7 +492,14 @@ fn test_on_rejection_preserves_oi_buffer() {
     // Seed squeeze → OI sample #1.
     s.on_tick(&ctx_full_entry(0.01, 0.5, 1.0, 0, 50000.0, Some(100.0)));
     // Mid tick → OI sample #2 (change of state pushes).
-    s.on_tick(&ctx_full_entry(0.02, 0.5, 1.0, 10_000, 50000.0, Some(105.0)));
+    s.on_tick(&ctx_full_entry(
+        0.02,
+        0.5,
+        1.0,
+        10_000,
+        50000.0,
+        Some(105.0),
+    ));
     // Breakout tick → emits Open intent + stashes prev_state snapshot.
     let actions = s.on_tick(&ctx_full_entry(
         0.05,
@@ -480,7 +521,11 @@ fn test_on_rejection_preserves_oi_buffer() {
     let intent = make_open_intent("BTC");
     s.on_rejection(&intent, "test rejection");
 
-    let buf_after = &s.symbols.get("BTC").expect("symbol still tracked").oi_buffer;
+    let buf_after = &s
+        .symbols
+        .get("BTC")
+        .expect("symbol still tracked")
+        .oi_buffer;
     assert_eq!(
         buf_after.len(),
         buf_len_before,
@@ -520,8 +565,22 @@ fn test_oi_min_delta_pct_below_threshold_no_effect() {
     flat.on_tick(&ctx_full_entry(0.01, 0.5, 1.0, 0, 50000.0, Some(100.0)));
     // Mid-tick: guarded rises 2% (< floor); flat stays.
     // 中段：guarded 上升 2%（< 地板）；flat 不動。
-    guarded.on_tick(&ctx_full_entry(0.02, 0.5, 1.0, 300_000, 50000.0, Some(102.0)));
-    flat.on_tick(&ctx_full_entry(0.02, 0.5, 1.0, 300_000, 50000.0, Some(100.0)));
+    guarded.on_tick(&ctx_full_entry(
+        0.02,
+        0.5,
+        1.0,
+        300_000,
+        50000.0,
+        Some(102.0),
+    ));
+    flat.on_tick(&ctx_full_entry(
+        0.02,
+        0.5,
+        1.0,
+        300_000,
+        50000.0,
+        Some(100.0),
+    ));
     // Breakout long.
     let i_g = guarded.on_tick(&ctx_full_entry(
         0.05,
@@ -562,10 +621,7 @@ fn test_oi_min_delta_pct_below_threshold_no_effect() {
 fn test_oi_window_upper_bound_validation() {
     let mut p = BbBreakoutParams::default();
     p.oi_buffer_window_ms = 600_001;
-    assert!(
-        p.validate().is_err(),
-        "window > 600_000ms must fail"
-    );
+    assert!(p.validate().is_err(), "window > 600_000ms must fail");
     p.oi_buffer_window_ms = 600_000;
     assert!(p.validate().is_ok(), "exact upper bound must pass");
 }

@@ -247,9 +247,14 @@ impl MakerStats {
             self.aggregate.filled_partial += 1;
             self.entry(symbol).filled_partial += 1;
         }
-        if let Some(net_bps) =
-            compute_net_edge_bps(is_long, mid_price_at_submit, mid_price_at_fill, qty, fill_price, fee)
-        {
+        if let Some(net_bps) = compute_net_edge_bps(
+            is_long,
+            mid_price_at_submit,
+            mid_price_at_fill,
+            qty,
+            fill_price,
+            fee,
+        ) {
             // 1B-5 FUP-3: Kahan-compensated add on both scopes. The helper
             // mutates `sum_net_edge_bps` + `sum_kahan_c` together.
             // 1B-5 FUP-3：兩個 scope 皆走 Kahan 補償加法。
@@ -835,7 +840,17 @@ mod tests {
         // zero both halves so no compensation bits survive reset.
         // default() 必須同時清零 sum + compensation，避免殘留。
         let mut s = MakerStats::default();
-        s.record_fill("BTCUSDT", true, 100.0, 101.0, 1.0, 101.0, 0.0, true, NOW_MS_FRESH);
+        s.record_fill(
+            "BTCUSDT",
+            true,
+            100.0,
+            101.0,
+            1.0,
+            101.0,
+            0.0,
+            true,
+            NOW_MS_FRESH,
+        );
         assert!(s.aggregate.sum_net_edge_bps != 0.0);
         // Reset by replacement (mimics FUP-1 clear path).
         s = MakerStats::default();
@@ -848,7 +863,10 @@ mod tests {
         let mut s = MakerStats::default();
         s.record_fill("BTCUSDT", true, 100.0, 100.0, 1.0, 100.0, 0.0, true, 42_000);
         assert_eq!(s.aggregate.last_terminal_ms, 42_000);
-        assert_eq!(s.per_symbol.get("BTCUSDT").unwrap().last_terminal_ms, 42_000);
+        assert_eq!(
+            s.per_symbol.get("BTCUSDT").unwrap().last_terminal_ms,
+            42_000
+        );
     }
 
     #[test]
@@ -856,7 +874,10 @@ mod tests {
         let mut s = MakerStats::default();
         s.record_timeout("BTCUSDT", 77_000);
         assert_eq!(s.aggregate.last_terminal_ms, 77_000);
-        assert_eq!(s.per_symbol.get("BTCUSDT").unwrap().last_terminal_ms, 77_000);
+        assert_eq!(
+            s.per_symbol.get("BTCUSDT").unwrap().last_terminal_ms,
+            77_000
+        );
     }
 
     // ────────────────────────────────────────────────────────────────
@@ -878,9 +899,29 @@ mod tests {
     fn record_fill_full_vs_partial_counters() {
         let mut s = MakerStats::default();
         // true_cross=true → filled_full
-        s.record_fill("BTCUSDT", true, 100.0, 100.0, 1.0, 100.0, 0.0, true, NOW_MS_FRESH);
+        s.record_fill(
+            "BTCUSDT",
+            true,
+            100.0,
+            100.0,
+            1.0,
+            100.0,
+            0.0,
+            true,
+            NOW_MS_FRESH,
+        );
         // true_cross=false → filled_partial
-        s.record_fill("BTCUSDT", true, 100.0, 100.0, 1.0, 100.0, 0.0, false, NOW_MS_FRESH);
+        s.record_fill(
+            "BTCUSDT",
+            true,
+            100.0,
+            100.0,
+            1.0,
+            100.0,
+            0.0,
+            false,
+            NOW_MS_FRESH,
+        );
         assert_eq!(s.aggregate.filled_full, 1);
         assert_eq!(s.aggregate.filled_partial, 1);
         assert_eq!(s.per_symbol.get("BTCUSDT").unwrap().filled_full, 1);
@@ -892,23 +933,66 @@ mod tests {
         let mut s = MakerStats::default();
         // Valid submit mid → sum += net_edge_bps (= 0 in this case since
         // mid_fill == mid_submit and fee = 0).
-        s.record_fill("BTCUSDT", true, 100.0, 100.0, 1.0, 100.0, 0.0, true, NOW_MS_FRESH);
+        s.record_fill(
+            "BTCUSDT",
+            true,
+            100.0,
+            100.0,
+            1.0,
+            100.0,
+            0.0,
+            true,
+            NOW_MS_FRESH,
+        );
         assert_eq!(s.aggregate.sum_net_edge_bps, 0.0);
         assert_eq!(s.aggregate.filled_full, 1);
 
         // Unknown submit mid (0.0) → count the fill but skip sum.
-        s.record_fill("BTCUSDT", true, 0.0, 100.0, 1.0, 100.0, 0.0, true, NOW_MS_FRESH);
+        s.record_fill(
+            "BTCUSDT",
+            true,
+            0.0,
+            100.0,
+            1.0,
+            100.0,
+            0.0,
+            true,
+            NOW_MS_FRESH,
+        );
         assert_eq!(s.aggregate.filled_full, 2);
-        assert_eq!(s.aggregate.sum_net_edge_bps, 0.0, "bootstrap tick must not poison sum");
+        assert_eq!(
+            s.aggregate.sum_net_edge_bps, 0.0,
+            "bootstrap tick must not poison sum"
+        );
     }
 
     #[test]
     fn record_fill_accumulates_signed_edge() {
         let mut s = MakerStats::default();
         // Long favorable: mid 100 → 101 = +100 bps, fee=0 → net=+100
-        s.record_fill("BTCUSDT", true, 100.0, 101.0, 1.0, 101.0, 0.0, true, NOW_MS_FRESH);
+        s.record_fill(
+            "BTCUSDT",
+            true,
+            100.0,
+            101.0,
+            1.0,
+            101.0,
+            0.0,
+            true,
+            NOW_MS_FRESH,
+        );
         // Short favorable: mid 100 → 99 = +100 bps (signed), fee=0 → net=+100
-        s.record_fill("BTCUSDT", false, 100.0, 99.0, 1.0, 99.0, 0.0, true, NOW_MS_FRESH);
+        s.record_fill(
+            "BTCUSDT",
+            false,
+            100.0,
+            99.0,
+            1.0,
+            99.0,
+            0.0,
+            true,
+            NOW_MS_FRESH,
+        );
         assert!((s.aggregate.sum_net_edge_bps - 200.0).abs() < 1e-6);
         // Per-symbol should mirror aggregate (only 1 symbol active).
         let per = s.per_symbol.get("BTCUSDT").unwrap();
@@ -943,7 +1027,17 @@ mod tests {
         let mut s = MakerStats::default();
         // Build healthy aggregate on a different symbol.
         for _ in 0..18 {
-            s.record_fill("BTCUSDT", true, 100.0, 100.0, 1.0, 100.0, 0.0, true, NOW_MS_FRESH);
+            s.record_fill(
+                "BTCUSDT",
+                true,
+                100.0,
+                100.0,
+                1.0,
+                100.0,
+                0.0,
+                true,
+                NOW_MS_FRESH,
+            );
         }
         for _ in 0..2 {
             s.record_timeout("BTCUSDT", NOW_MS_FRESH);
@@ -962,14 +1056,34 @@ mod tests {
         // Aggregate mixes two symbols into Healthy, but BTCUSDT alone is bad.
         // BTCUSDT: 2 fills / 18 timeouts → fill_rate 0.1 (Degraded)
         for _ in 0..2 {
-            s.record_fill("BTCUSDT", true, 100.0, 100.0, 1.0, 100.0, 0.0, true, NOW_MS_FRESH);
+            s.record_fill(
+                "BTCUSDT",
+                true,
+                100.0,
+                100.0,
+                1.0,
+                100.0,
+                0.0,
+                true,
+                NOW_MS_FRESH,
+            );
         }
         for _ in 0..18 {
             s.record_timeout("BTCUSDT", NOW_MS_FRESH);
         }
         // ETHUSDT: 30 fills / 0 timeouts → fill_rate 1.0 (Healthy)
         for _ in 0..30 {
-            s.record_fill("ETHUSDT", true, 100.0, 100.0, 1.0, 100.0, 0.0, true, NOW_MS_FRESH);
+            s.record_fill(
+                "ETHUSDT",
+                true,
+                100.0,
+                100.0,
+                1.0,
+                100.0,
+                0.0,
+                true,
+                NOW_MS_FRESH,
+            );
         }
         let cfg = cfg_default();
         // BTCUSDT has 20 terminal samples → its own counters decide → Degraded.
@@ -991,7 +1105,17 @@ mod tests {
         let mut s = MakerStats::default();
         // Aggregate healthy via ETHUSDT (20 fills, 0 timeouts).
         for _ in 0..20 {
-            s.record_fill("ETHUSDT", true, 100.0, 100.0, 1.0, 100.0, 0.0, true, NOW_MS_FRESH);
+            s.record_fill(
+                "ETHUSDT",
+                true,
+                100.0,
+                100.0,
+                1.0,
+                100.0,
+                0.0,
+                true,
+                NOW_MS_FRESH,
+            );
         }
         // BTCUSDT only has 1 timeout → terminal_samples=1 < 20 → fallback.
         s.record_timeout("BTCUSDT", NOW_MS_FRESH);

@@ -2,7 +2,10 @@
 //! ARCH-RC1 1C-3-B：風控 runtime 狀態 + 連續虧損清除 + governor 等級覆寫測試。
 
 use super::super::*;
-use super::{empty_budget_slot, empty_cost_edge_advisor_slot, empty_h_state_cache_slot, empty_teacher_slot, make_test_config, make_test_data_dir};
+use super::{
+    empty_budget_slot, empty_cost_edge_advisor_slot, empty_h_state_cache_slot, empty_teacher_slot,
+    make_test_config, make_test_data_dir,
+};
 
 /// ARCH-RC1 1C-3-B helper: spawn a fake event-consumer that answers
 /// `GetRiskRuntimeStatus` with a synthetic JSON snapshot and

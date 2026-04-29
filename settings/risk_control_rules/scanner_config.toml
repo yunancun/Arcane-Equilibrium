@@ -30,3 +30,14 @@ max_high_beta_symbols = 8   # max symbols with BTC beta > threshold
 max_per_strategy = 8
 max_per_sector = 4
 high_beta_threshold = 0.8
+
+[edge_routing]
+# Edge-first routing. Defaults preserve the original bonus formula for normal
+# cells, but cap mature negative cells out of the main scanner route.
+bonus_weight = 0.5
+bonus_min = -30.0
+bonus_max = 10.0
+unexplored_bonus = 2.0
+robust_negative_min_trades = 30
+robust_negative_bps_threshold = 0.0
+robust_negative_score_cap = 35.0

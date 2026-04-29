@@ -109,7 +109,8 @@ fn test_g2_03_runtime_sl_override_tightens_hard_stop() {
 
     // With override: -3% triggers (<=  -2.0 effective) HARD STOP.
     // 有 override：-3% 觸發 HARD STOP。
-    let action_with = call_tick_with_override(-3.0, 0.0, 1.0, "trending", Some(0.0), Some(&so), &cfg);
+    let action_with =
+        call_tick_with_override(-3.0, 0.0, 1.0, "trending", Some(0.0), Some(&so), &cfg);
     assert!(
         matches!(action_with, RiskAction::ClosePosition(ref r) if r.contains("HARD STOP")
             && r.contains("-2.00")),
@@ -225,7 +226,8 @@ fn test_g2_03_runtime_partial_override_only_sl() {
 
     // TP: 25% pnl trending → P1 20% * 1.5 = 30% target → hold (no TP override).
     // TP：25% pnl，P1 target 30%，無 override 仍 hold。
-    let action_tp = call_tick_with_override(25.0, 25.0, 1.0, "trending", Some(1.0), Some(&so), &cfg);
+    let action_tp =
+        call_tick_with_override(25.0, 25.0, 1.0, "trending", Some(1.0), Some(&so), &cfg);
     assert!(
         !matches!(action_tp, RiskAction::ClosePosition(ref r) if r.contains("TAKE PROFIT")),
         "partial override (SL only) must not affect TP gate, got {:?}",
@@ -245,8 +247,7 @@ fn test_g2_03_runtime_trailing_override_tightens() {
     let mut so = StrategyOverride::default();
     so.trailing_distance_pct_override = Some(0.3);
 
-    let action =
-        call_tick_with_override(2.5, 3.0, 1.0, "trending", Some(0.5), Some(&so), &cfg);
+    let action = call_tick_with_override(2.5, 3.0, 1.0, "trending", Some(0.5), Some(&so), &cfg);
     assert!(
         matches!(action, RiskAction::ClosePosition(ref r) if r.contains("TRAILING STOP")),
         "tighter trailing_distance override must fire trailing, got {:?}",

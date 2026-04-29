@@ -341,8 +341,7 @@ mod tests {
             "l2_cache_stored": 8,
             "cache_size": 7,
         });
-        let h3: H3RouteStats =
-            serde_json::from_value(python_json).expect("Python schema parse");
+        let h3: H3RouteStats = serde_json::from_value(python_json).expect("Python schema parse");
         assert_eq!(h3.total_routes, 100);
         assert_eq!(h3.l1_9b_count, 60);
         assert_eq!(h3.l1_27b_count, 25);

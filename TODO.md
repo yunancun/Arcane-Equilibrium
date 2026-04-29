@@ -1,6 +1,6 @@
 # OpenClaw TODO — 工作清單（v3 · 單一時間軸版）
 
-**最新狀態快照**（2026-04-29 12:38 CEST · maker-fill healthcheck + cron self-check deployed · healthcheck WARN）：62-finding remediation Batch A-F 全部完成、push、Linux rebuild/redeploy；最新 commits `030ef2d` + `0e9e257` + `f0d21b9` + `af9d552` 已推送並在 Linux fast-forward；`restart_all.sh --rebuild --keep-auth` 已部署最新 runtime，engine PID **447123** + API PID **447192**，watchdog `engine_alive=true`。`passive_wait_healthcheck.py` 實測 SUMMARY WARN：`[32] maker_entry_intent_drift` cleared（post-restart limit-only），新增 `[33] maker_fill_rate` WARN 暴露 G2-01 真實狀態（7d fee_drop **1.8%** vs target ≥60%，maker_like **29/1402 = 2.1%**，limit_order_rows **15.5%**）；仍有 WARN `[12]`（bb_breakout 7d entries=1，低量）+ `[11]`（clean-window nonfatal）。Cron wrapper 手動驗證 exit=0，log 末尾 `[OK] F7 cron self-check saw [22]-[29] in current run`。
+**最新狀態快照**（2026-04-29 17:36 CEST · Strategy Edge Repair checkpoint · Linux deploy pending）：62-finding remediation Batch A-F 全部完成、push、Linux rebuild/redeploy；最新 deployed runtime 仍是 `af9d552`，engine PID **447123** + API PID **447192**。本輪 Strategy Edge Repair 已在 Mac repo 完成：demo/live_demo strategy intents 補上 `signal_id` attribution anchor、scanner snapshots + edge route metadata 落庫、fee refresh 改為 per exchange binding、maker fallback 改 skip、scanner `edge_routing` 可配置、grid robust-negative `blocked_symbols` + bb_breakout demo threshold 調整；新增 `[34] intent_signal_attribution` healthcheck。Linux runtime 需 pull 本 checkpoint 後用 `restart_all.sh --rebuild --keep-auth` 套用。
 
 **歸檔索引**（已結案敘述歸檔，不再放 TODO 頭部）：
 - 62-finding Batch A-F：see [`docs/archive/2026-04-29--62finding-batch-A-to-F.md`](docs/archive/2026-04-29--62finding-batch-A-to-F.md) （commits `bc3fa70` + `6539e4e` + `5db4e29` PUSHED）
@@ -15,9 +15,9 @@
 
 **Runtime（2026-04-29 12:38 CEST · ssh verify）**：runtime code commit `af9d552` · engine PID **447123** + API PID **447192** · watchdog `engine_alive=true` · demo/live snapshots fresh · API auth enforced (401 unauth) · post-deploy healthcheck WARN `[12]`+`[33]`+`[11]`；`[22]`/`[27]` cleared after fee-refresh fix；`[32]` cleared after bd9ae2a rebuild + restart-aware window；cron wrapper self-check `[22]`-`[29]` PASS。
 
-**測試基準（2026-04-29 healthcheck follow-up 後）**：Linux healthcheck unit **66/0** · targeted engine partial-merge test **1/0** · healthcheck runtime **34 checks**（numbered [1]-[33] skip [17] + [Xa]/[Xb]；無 [0]）· DB migrations 25 applied
+**測試基準（2026-04-29 Strategy Edge Repair 後）**：Mac Rust lib **2361/0** · scanner subset **61/0** · DB writer **3/0** · tick attribution helper **16/0** · maker_price **10/0** · `cargo check --bins` PASS · `cargo check openclaw_core` PASS · Python maker/attribution pytest **9/0** · `git diff --check` PASS · healthcheck runtime **35 checks**（numbered [1]-[34] skip [17] + [Xa]/[Xb]；無 [0]）· DB migrations 26 expected after V030
 **21d demo 時鐘**：起算 2026-04-16 22:16 → 解鎖 2026-05-07
-**Wave 3 healthcheck**：cron 6h 目前跑 34 checks（numbered [1]-[33] skip [17] + [Xa]/[Xb]；含 F7 [22]-[29]、cost/execution [30]-[33]）
+**Wave 3 healthcheck**：cron 6h 目前跑 35 checks（numbered [1]-[34] skip [17] + [Xa]/[Xb]；含 F7 [22]-[29]、cost/execution [30]-[34]）
 
 ---
 
@@ -42,7 +42,7 @@
 **§九 governance 戰況**：800 warn active violations 剩 1（main_boot_tasks.rs 816 marginal acceptable，Wave G→H 已從 4 縮至 1）· 1200 hard cap active violations **0** ✅（Wave G achievement maintained）
 
 **NOW ACTIONABLE**（時間驅動 / 等候 / 餘工）：
-1. **STRATEGY-EDGE-REPAIR-2026-04-29（策略虧損主線包）** — 以 post-fee `net_bps_after_fee` 為主指標，PNL / winrate 僅作參考；修後樣本從 **2026-04-29 12:27:53 CEST** live maker-entry reload 後切分。子任務：A) 追 `[33]` post-fix maker_like / fee_drop / PostOnly reject-rate；B) 修 maker pricing fallback（BBO/tick_size 缺失時 reprice/skip，不退回 taker Market）；C) grid robust negative cells 做 regime gate / volatility+spread spacing / G2-04 disable 候選；D) MA 用 net bps 評估 whipsaw、reverse exit、hold-time 對 R:R 的改善；E) 2026-05-07/08 做 G2-01 settlement verdict，若 fee_drop 仍遠低 ≥60%，進策略調參/disable 決策。**注意**：operator 明確要求不要把此輪虧損處理變成繼續加風控，優先改策略與執行 edge。
+1. **STRATEGY-EDGE-REPAIR-2026-04-29（策略虧損主線包）** — implementation complete; Linux deploy pending. 以 post-fee `net_bps_after_fee` 為主指標，PNL / winrate 僅作參考；修後樣本從 **2026-04-29 12:27:53 CEST** live maker-entry reload 後切分。已落地：A) `[34] intent_signal_attribution` + strategy signal anchor 修 demo/live_demo attribution chain；B) fee refresh per exchange binding，解決 shared priority 導致 demo/live_demo stale；C) maker pricing BBO/tick_size 缺失 skip，不退回 taker Market；D) scanner `edge_routing` 可配置，成熟負 edge 降 exploration-only/score cap，低樣本保留探索；E) scanner snapshots + intent scanner metadata 落庫，查 scanner 是否誤導有資料鏈；F) grid robust-negative `blocked_symbols` + bb_breakout demo volume threshold 1.2。後續只追 `[33]` maker_like / fee_drop / reject-rate 和 2026-05-07/08 G2-01 settlement，不把此輪虧損處理變成繼續加風控。
 2. **G2-01 PostOnly follow-through** — `[33] maker_fill_rate` 已實裝並 cron 監控；目前 7d fee_drop **1.8%** / maker_like **2.1%**，遠低 ≥60% 目標，05-07/08 結算若未改善需進 G2-04 disable/策略調整決策。
 3. **Fee-refresh RCA follow-through** — `[22]` cleared after `bdd3177` deploy；下一個自然驗證點是首個 1h periodic refresh log 出現 `conservative defaults re-seeded`，且 >2h 不再出現 fee-rate staleness cost_gate self-lock。
 4. **bb_breakout Phase 2 threshold tuning** — `[12]` 目前 WARN：7d entries=1，已脫離永久 dormant 但仍低量；1m bandwidth 結構性問題仍待 sweep / 升 5m timeframe。
@@ -603,7 +603,7 @@ ssh trade-core "cd ~/BybitOpenClaw/srv && python3 helper_scripts/db/passive_wait
 
 **CLAUDE.md §七 強制**：被動等待 TODO 必附 healthcheck · 每 6h cron 跑 · 連續 3 FAIL → 中止等待。
 
-**Runtime ground-truth**：34 checks（numbered [1]-[33] 略 [17] + [Xa]/[Xb]，無 [0]）。源於 `helper_scripts/db/passive_wait_healthcheck/runner.py`；**2026-04-29 對齊 cron 實裝**：新增 [32] maker_entry_intent_drift + [33] maker_fill_rate；修掉舊 stale 映射（原列 [0] engine_alive / [1] engine_crash / [2] synthetic_owner_retriage / [3] maker_fill_rate / [4] IPC hotpatch / [8] decision_shadow_exits 全部不符 runtime）。
+**Runtime ground-truth**：35 checks（numbered [1]-[34] 略 [17] + [Xa]/[Xb]，無 [0]）。源於 `helper_scripts/db/passive_wait_healthcheck/runner.py`；**2026-04-29 對齊 cron 實裝**：新增 [32] maker_entry_intent_drift + [33] maker_fill_rate + [34] intent_signal_attribution；修掉舊 stale 映射（原列 [0] engine_alive / [1] engine_crash / [2] synthetic_owner_retriage / [3] maker_fill_rate / [4] IPC hotpatch / [8] decision_shadow_exits 全部不符 runtime）。
 
 | # | 項目 | SQL / 檢查 | 對應 Wave TODO |
 |---|---|---|---|
@@ -639,6 +639,7 @@ ssh trade-core "cd ~/BybitOpenClaw/srv && python3 helper_scripts/db/passive_wait
 | [31] | edge_diag_2_strategy_diversity | 6h demo Approved strategy diversity（非 grid exploration 是否有流量）| EDGE-DIAG-2 |
 | [32] | maker_entry_intent_drift | demo maker-enabled strategies recent entry intents 不得為 market；restart-aware window | PostOnly execution-shape drift / G2-01 guard |
 | [33] | maker_fill_rate | 7d demo/live_demo entry fills fee_drop（5.5bps taker→2.0bps maker target ≥60%）+ per-strategy slices | G2-01-FUP-MAKER-FILL-CHECK |
+| [34] | intent_signal_attribution | 30min demo/live_demo/live strategy intents 必須有 non-empty `signal_id` 並 join 到 `trading.signals`，且 context_id 一致 | STRATEGY-EDGE-REPAIR-2026-04-29 |
 | [Xa] | leader_election_health | edge_scheduler.leader.lock fd alive + lock_age | EDGE-SCHEDULER-LEADER-1（`f32629c`）|
 | [Xb] | pipeline_triangulation | close_fills/labels/intents 三角比 | G6-01 FUP cross-validation |
 

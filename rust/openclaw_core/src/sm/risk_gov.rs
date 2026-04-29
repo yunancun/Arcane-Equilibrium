@@ -270,7 +270,13 @@ fn lookup_rule(from: RiskLevel, to: RiskLevel) -> Option<TransitionRule> {
     use RiskInitiator::*;
     use RiskLevel::*;
 
-    const AUTO: &[RiskInitiator] = &[RiskGovernor, Operator, IncidentPolicy, HealthMonitor, Reconciler];
+    const AUTO: &[RiskInitiator] = &[
+        RiskGovernor,
+        Operator,
+        IncidentPolicy,
+        HealthMonitor,
+        Reconciler,
+    ];
     const OP_GOV: &[RiskInitiator] = &[Operator, RiskGovernor, Reconciler];
     const OP_ONLY: &[RiskInitiator] = &[Operator];
 
@@ -894,7 +900,8 @@ mod tests {
     fn test_reconciler_de_escalate_cautious_to_normal() {
         let mut sm = RiskGovernorSm::new();
         sm.thresholds.min_hold_time_ms = 0;
-        sm.reconciler_escalate_to(RiskLevel::Cautious, "drift").unwrap();
+        sm.reconciler_escalate_to(RiskLevel::Cautious, "drift")
+            .unwrap();
         sm.reconciler_de_escalate_to(RiskLevel::Normal, "30 clean cycles")
             .unwrap();
         assert_eq!(sm.level, RiskLevel::Normal);

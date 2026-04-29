@@ -107,6 +107,15 @@ pub(crate) fn make_signal_id(source: &str, ts_ms: u64) -> String {
     format!("sig-{}-{}", source, ts_ms)
 }
 #[inline]
+pub(crate) fn make_strategy_signal_id(
+    em: &str,
+    strategy: &str,
+    symbol: &str,
+    ts_ms: u64,
+) -> String {
+    format!("sig-{}-{}-{}-{}", em, strategy, symbol, ts_ms)
+}
+#[inline]
 pub(crate) fn make_fill_id(em: &str, symbol: &str, ts_ms: u64) -> String {
     format!("fill-{}-{}-{}", em, symbol, ts_ms)
 }
@@ -199,6 +208,55 @@ pub(crate) fn risk_score_level(score: f64) -> Option<&'static str> {
     }
 }
 
+/// Scanner-side audit metadata attached to strategy intents.
+/// Scanner 側審計 metadata，隨策略 intent 寫入 details。
+#[derive(Debug, Clone)]
+pub(crate) struct IntentScannerContext {
+    pub scan_id: String,
+    pub best_strategy: String,
+    pub edge_bps: Option<f64>,
+    pub edge_n: u32,
+    pub edge_status: String,
+    pub route_mode: String,
+    pub final_score: f64,
+    pub raw_score: f64,
+}
+
+/// Persist a strategy-generated signal used as the attribution anchor for a
+/// concrete open intent. This is separate from Step 3 market-observation
+/// signals, which remain paper-only under Signal Diamond V015.
+/// 持久化「策略已準備開倉」信號，作為具體 intent 的歸因錨點；不同於 Step 3
+/// market-observation signal（仍依 Signal Diamond V015 只由 paper 寫）。
+#[inline]
+pub(crate) fn persist_strategy_signal(
+    trading_tx: &Option<tokio::sync::mpsc::Sender<crate::database::TradingMsg>>,
+    signal_id: &str,
+    context_id: &str,
+    ts_ms: u64,
+    intent: &crate::intent_processor::OrderIntent,
+) {
+    if let Some(ref tx) = trading_tx {
+        let _ = crate::database::try_send_trading_msg(
+            tx,
+            crate::database::TradingMsg::Signal {
+                signal_id: signal_id.to_string(),
+                ts_ms,
+                symbol: intent.symbol.clone(),
+                strategy_name: intent.strategy.clone(),
+                timeframe: "1m".to_string(),
+                signal_type: if intent.is_long {
+                    "OpenLong".to_string()
+                } else {
+                    "OpenShort".to_string()
+                },
+                strength: intent.confidence,
+                context_id: context_id.to_string(),
+            },
+            "strategy_signal",
+        );
+    }
+}
+
 /// Persist an approved intent to the trading writer channel.
 /// 將已批准的意圖持久化到交易寫入器通道。
 #[inline]
@@ -206,10 +264,13 @@ pub(crate) fn persist_intent(
     trading_tx: &Option<tokio::sync::mpsc::Sender<crate::database::TradingMsg>>,
     em: &str,
     ts_ms: u64,
+    signal_id: &str,
+    context_id: &str,
     intent: &crate::intent_processor::OrderIntent,
     approved_qty: f64,
     price: f64,
     engine_mode: &str,
+    scanner: Option<&IntentScannerContext>,
 ) {
     if let Some(ref tx) = trading_tx {
         // FUP-8: populate details so trading.intents.details stops being 100% NULL.
@@ -228,20 +289,35 @@ pub(crate) fn persist_intent(
         // 哨兵旗標（Phase 2 後的安全網）：on_tick 路徑兩側 caller 都已傳入 sized qty，
         // 正常流程此檢查不會觸發；保留以防 IPC 路徑 & 未來新 caller 遺漏 sizing。
         let is_sentinel = approved_qty >= 1e9;
+        let scanner_details = scanner.map(|s| {
+            serde_json::json!({
+                "scan_id": s.scan_id,
+                "best_strategy": s.best_strategy,
+                "edge_bps": s.edge_bps,
+                "edge_n": s.edge_n,
+                "edge_status": s.edge_status,
+                "route_mode": s.route_mode,
+                "final_score": s.final_score,
+                "raw_score": s.raw_score,
+            })
+        });
         let details = serde_json::json!({
             "strategy": intent.strategy,
             "confidence": intent.confidence,
             "submitted_qty": if is_sentinel { serde_json::Value::Null } else { serde_json::json!(approved_qty) },
             "is_sentinel": is_sentinel,
             "is_long": intent.is_long,
+            "signal_id": signal_id,
+            "context_id": context_id,
+            "scanner": scanner_details,
         });
         let _ = crate::database::try_send_trading_msg(
             tx,
             crate::database::TradingMsg::Intent {
                 intent_id: make_intent_id(em, &intent.symbol, ts_ms),
                 ts_ms,
-                signal_id: String::new(),
-                context_id: make_context_id(em, &intent.symbol, ts_ms),
+                signal_id: signal_id.to_string(),
+                context_id: context_id.to_string(),
                 symbol: intent.symbol.clone(),
                 side: if intent.is_long {
                     "Buy".into()

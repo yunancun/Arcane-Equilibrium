@@ -407,10 +407,13 @@ fn test_persist_intent_helper_emits_trading_msg_intent_with_engine_mode() {
         &Some(tx),
         "live_demo",
         1_700_000_000_123,
+        "sig-live_demo-ma_crossover-ETHUSDT-1700000000123",
+        "ctx-live_demo-ETHUSDT-1700000000123",
         &intent,
         0.045, // post-rounding final_qty (NOT the 1e9 sentinel)
         2_500.0,
         "live_demo",
+        None,
     );
 
     let msg = rx.try_recv().expect("Intent must be enqueued");

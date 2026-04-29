@@ -228,7 +228,7 @@ mod tests {
         let mut p = make_position(true, 100.0, 1000);
         assert_eq!(p.max_favorable_pnl_pct, 0.0);
         assert_eq!(p.peak_reached_ts_ms, 1000); // init = entry_ts_ms
-        // adverse first: 99 → long -1%, no update, peak stays at entry
+                                                // adverse first: 99 → long -1%, no update, peak stays at entry
         assert!(!p.refresh_max_favorable(99.0, 2000));
         assert_eq!(p.max_favorable_pnl_pct, 0.0);
         assert_eq!(p.peak_reached_ts_ms, 1000);

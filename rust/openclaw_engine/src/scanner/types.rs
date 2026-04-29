@@ -85,6 +85,15 @@ pub struct ScoredSymbol {
     pub edge_bonus: f64,
     /// Number of fill samples for the best strategy estimate (0 = unexplored) / 最佳策略估計的成交樣本數（0 = 未探索）
     pub edge_n: u32,
+    /// Runtime edge estimate in bps for the best strategy, if available.
+    /// 最佳策略的 runtime edge bps，未知時為 None。
+    pub edge_bps: Option<f64>,
+    /// Scanner edge classification: unexplored / known / robust_negative.
+    /// scanner edge 分類：unexplored / known / robust_negative。
+    pub edge_status: String,
+    /// Route mode derived from edge: exploration / main / exploration_only.
+    /// edge 推導的路由模式：exploration / main / exploration_only。
+    pub route_mode: String,
 
     // Correlation / diversification / 相關性 / 分散
     /// BTC beta proxy (None if BTC barely moved) / BTC beta 代理（BTC 幾乎不動時為 None）
@@ -99,6 +108,9 @@ pub struct ScoredSymbol {
 pub struct ScanResult {
     /// Unix timestamp (ms) when the scan completed / 掃描完成時的 Unix 時間戳（毫秒）
     pub scan_ts_ms: u64,
+    /// Stable identifier for this scan snapshot.
+    /// 本次掃描快照的穩定 ID。
+    pub scan_id: String,
     /// Currently active symbols after this scan / 本次掃描後的當前活躍交易對
     pub active_symbols: Vec<String>,
     /// Symbols added in this cycle / 本次週期新增的交易對

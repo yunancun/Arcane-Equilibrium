@@ -506,7 +506,11 @@ impl PaperState {
     ) -> Vec<RestingFillEvent> {
         // Fast path: no queue for this symbol → nothing to do.
         // 快速路徑：本 symbol 無掛單 → 直接返回。
-        if self.resting_limit_orders.get(symbol).map_or(true, |q| q.is_empty()) {
+        if self
+            .resting_limit_orders
+            .get(symbol)
+            .map_or(true, |q| q.is_empty())
+        {
             return Vec::new();
         }
 
@@ -530,8 +534,13 @@ impl PaperState {
             /// 1B-4.3：本輪 funding drag 否決的 FillPartial 碰觸。最終狀態同
             /// Keep（訂單留在隊列）但另行計數供觀察 guard 觸發頻率。
             FundingDragSkip,
-            Fill { order: RestingLimitOrder, true_cross: bool },
-            Timeout { order: RestingLimitOrder },
+            Fill {
+                order: RestingLimitOrder,
+                true_cross: bool,
+            },
+            Timeout {
+                order: RestingLimitOrder,
+            },
         }
         let decisions: Vec<Decision> = {
             let q = self
@@ -539,32 +548,34 @@ impl PaperState {
                 .get(symbol)
                 .expect("queue existence checked by fast-path");
             q.iter()
-                .map(|o| match classify_resting_order_raw(o, tick_price, now_ms) {
-                    RestingSweepAction::Keep => Decision::Keep,
-                    RestingSweepAction::Timeout => Decision::Timeout { order: o.clone() },
-                    RestingSweepAction::FillFull => Decision::Fill {
-                        order: o.clone(),
-                        true_cross: true,
-                    },
-                    RestingSweepAction::FillPartial => {
-                        // 1B-4.3 bias guard #3: adverse funding → defer (Skip).
-                        // 1B-4.3：逆向 funding → 延後成交（Skip）。
-                        if funding_drag_adverse(
-                            o.funding_rate_at_submit,
-                            o.is_long,
-                            funding_drag_threshold,
-                        ) {
-                            Decision::FundingDragSkip
-                        } else if resting_partial_fill_heads(&o.order_link_id) {
-                            Decision::Fill {
-                                order: o.clone(),
-                                true_cross: false,
+                .map(
+                    |o| match classify_resting_order_raw(o, tick_price, now_ms) {
+                        RestingSweepAction::Keep => Decision::Keep,
+                        RestingSweepAction::Timeout => Decision::Timeout { order: o.clone() },
+                        RestingSweepAction::FillFull => Decision::Fill {
+                            order: o.clone(),
+                            true_cross: true,
+                        },
+                        RestingSweepAction::FillPartial => {
+                            // 1B-4.3 bias guard #3: adverse funding → defer (Skip).
+                            // 1B-4.3：逆向 funding → 延後成交（Skip）。
+                            if funding_drag_adverse(
+                                o.funding_rate_at_submit,
+                                o.is_long,
+                                funding_drag_threshold,
+                            ) {
+                                Decision::FundingDragSkip
+                            } else if resting_partial_fill_heads(&o.order_link_id) {
+                                Decision::Fill {
+                                    order: o.clone(),
+                                    true_cross: false,
+                                }
+                            } else {
+                                Decision::Keep
                             }
-                        } else {
-                            Decision::Keep
                         }
-                    }
-                })
+                    },
+                )
                 .collect()
         };
 

@@ -496,7 +496,10 @@ fn test_oi_params_update_hot_reloads() {
     let mut s = BbBreakout::new();
     // Baseline defaults — document the pre-EDGE-P2-2 bit-identical floor.
     // 預設值—記錄 pre-EDGE-P2-2 bit-identical 基線。
-    assert!(!s.enable_oi_signal, "default enable_oi_signal must be false");
+    assert!(
+        !s.enable_oi_signal,
+        "default enable_oi_signal must be false"
+    );
     assert_eq!(
         s.oi_buffer_window_ms, 60_000,
         "default oi_buffer_window_ms must be 60_000"
@@ -593,9 +596,8 @@ fn test_bb_breakout_market_entry_when_maker_disabled() {
     }
 }
 
-/// Long breakout with maker enabled emits PostOnly Limit below last_price.
-/// Offset 2 bps → limit = price * (1 - 2/10_000). Bit-exact.
-/// 多頭突破且 maker 啟用 → PostOnly Limit 掛在 last_price 下方（2 bps）。
+/// Long breakout with maker enabled emits BBO-derived PostOnly Limit.
+/// 多頭突破且 maker 啟用 → 發 BBO-derived PostOnly Limit。
 #[test]
 fn test_bb_breakout_buy_postonly_below_last_price() {
     let mut s = BbBreakout::new();
@@ -605,8 +607,12 @@ fn test_bb_breakout_buy_postonly_below_last_price() {
     s.maker_limit_timeout_ms = 45_000;
     // Long setup: pctb=1.1 > 1.0 -> is_long
     // 多頭設置：pctb=1.1 > 1.0 → is_long
-    s.on_tick(&ctx(0.01, 0.5, 1.0, 0));
-    let i = s.on_tick(&ctx(0.05, 1.1, 2.0, 700_000));
+    s.on_tick(&ctx_with_bbo_g709c(
+        0.01, 0.5, 1.0, 0, 50_000.0, 49_999.5, 50_000.5, 0.1,
+    ));
+    let i = s.on_tick(&ctx_with_bbo_g709c(
+        0.05, 1.1, 2.0, 700_000, 50_000.0, 49_999.5, 50_000.5, 0.1,
+    ));
     assert_eq!(i.len(), 1);
     match &i[0] {
         StrategyAction::Open(intent) => {
@@ -615,10 +621,10 @@ fn test_bb_breakout_buy_postonly_below_last_price() {
             assert_eq!(intent.time_in_force, Some(TimeInForce::PostOnly));
             assert_eq!(intent.maker_timeout_ms, Some(45_000));
             let lp = intent.limit_price.expect("limit_price set");
-            let expected = 50000.0 * (1.0 - 2.0 / 10_000.0);
+            let expected = 49_999.4;
             assert!(
                 (lp - expected).abs() < 1e-9,
-                "buy PostOnly must be below last_price: got {lp}, expected {expected}"
+                "buy PostOnly must use best_bid-buffer: got {lp}, expected {expected}"
             );
             assert!(lp < 50000.0, "buy limit must rest below last_price");
         }
@@ -626,8 +632,8 @@ fn test_bb_breakout_buy_postonly_below_last_price() {
     }
 }
 
-/// Short breakout with maker enabled emits PostOnly Limit above last_price.
-/// 空頭突破且 maker 啟用 → PostOnly Limit 掛在 last_price 上方。
+/// Short breakout with maker enabled emits BBO-derived PostOnly Limit.
+/// 空頭突破且 maker 啟用 → 發 BBO-derived PostOnly Limit。
 #[test]
 fn test_bb_breakout_sell_postonly_above_last_price() {
     let mut s = BbBreakout::new();
@@ -637,8 +643,12 @@ fn test_bb_breakout_sell_postonly_above_last_price() {
     s.maker_limit_timeout_ms = 45_000;
     // Short setup: pctb=-0.1 < 0.0 -> is_short
     // 空頭設置：pctb=-0.1 < 0.0 → is_short
-    s.on_tick(&ctx(0.01, 0.5, 1.0, 0));
-    let i = s.on_tick(&ctx(0.05, -0.1, 2.0, 700_000));
+    s.on_tick(&ctx_with_bbo_g709c(
+        0.01, 0.5, 1.0, 0, 50_000.0, 49_999.5, 50_000.5, 0.1,
+    ));
+    let i = s.on_tick(&ctx_with_bbo_g709c(
+        0.05, -0.1, 2.0, 700_000, 50_000.0, 49_999.5, 50_000.5, 0.1,
+    ));
     assert_eq!(i.len(), 1);
     match &i[0] {
         StrategyAction::Open(intent) => {
@@ -647,10 +657,10 @@ fn test_bb_breakout_sell_postonly_above_last_price() {
             assert_eq!(intent.time_in_force, Some(TimeInForce::PostOnly));
             assert_eq!(intent.maker_timeout_ms, Some(45_000));
             let lp = intent.limit_price.expect("limit_price set");
-            let expected = 50000.0 * (1.0 + 2.0 / 10_000.0);
+            let expected = 50_000.6;
             assert!(
                 (lp - expected).abs() < 1e-9,
-                "sell PostOnly must be above last_price: got {lp}, expected {expected}"
+                "sell PostOnly must use best_ask+buffer: got {lp}, expected {expected}"
             );
             assert!(lp > 50000.0, "sell limit must rest above last_price");
         }
@@ -756,10 +766,14 @@ fn test_g7_09c_bb_breakout_buy_uses_best_bid_passive() {
     s.maker_price_offset_bps = 1.0;
     // Squeeze first.
     // 先壓縮。
-    s.on_tick(&ctx_with_bbo_g709c(0.01, 0.5, 1.0, 0, 50_000.0, 49_999.5, 50_000.5, 0.1));
+    s.on_tick(&ctx_with_bbo_g709c(
+        0.01, 0.5, 1.0, 0, 50_000.0, 49_999.5, 50_000.5, 0.1,
+    ));
     // Expansion + high vol + percent_b > 1 → long breakout.
     // 擴張 + 高量 + percent_b > 1 → 多頭突破。
-    let i = s.on_tick(&ctx_with_bbo_g709c(0.05, 1.1, 2.0, 700_000, 50_000.0, 49_999.5, 50_000.5, 0.1));
+    let i = s.on_tick(&ctx_with_bbo_g709c(
+        0.05, 1.1, 2.0, 700_000, 50_000.0, 49_999.5, 50_000.5, 0.1,
+    ));
     assert_eq!(i.len(), 1);
     match &i[0] {
         StrategyAction::Open(intent) => {
@@ -786,10 +800,14 @@ fn test_g7_09c_bb_breakout_sell_uses_best_ask_passive() {
     s.use_maker_entry = true;
     s.maker_price_buffer_ticks = 1;
     s.maker_price_offset_bps = 1.0;
-    s.on_tick(&ctx_with_bbo_g709c(0.01, 0.5, 1.0, 0, 50_000.0, 49_999.5, 50_000.5, 0.1));
+    s.on_tick(&ctx_with_bbo_g709c(
+        0.01, 0.5, 1.0, 0, 50_000.0, 49_999.5, 50_000.5, 0.1,
+    ));
     // Expansion + high vol + percent_b < 0 → short breakout.
     // 擴張 + 高量 + percent_b < 0 → 空頭突破。
-    let i = s.on_tick(&ctx_with_bbo_g709c(0.05, -0.1, 2.0, 700_000, 50_000.0, 49_999.5, 50_000.5, 0.1));
+    let i = s.on_tick(&ctx_with_bbo_g709c(
+        0.05, -0.1, 2.0, 700_000, 50_000.0, 49_999.5, 50_000.5, 0.1,
+    ));
     assert_eq!(i.len(), 1);
     match &i[0] {
         StrategyAction::Open(intent) => {

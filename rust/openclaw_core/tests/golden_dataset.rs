@@ -223,7 +223,8 @@ fn test_all_indicators_compute_on_synthetic_data() {
 
     // ─── Hurst(10, 50) ───
     // QC tolerance: ±0.05 (R/S inherent variance) / QC 容差: ±0.05（R/S 固有方差）
-    let hurst_result = hurst(&close, 10, 50, 0.60, 0.40).expect("Hurst(10,50) should compute with 200 bars");
+    let hurst_result =
+        hurst(&close, 10, 50, 0.60, 0.40).expect("Hurst(10,50) should compute with 200 bars");
     assert!(
         hurst_result.hurst > 0.0 && hurst_result.hurst < 1.5,
         "Hurst exponent should be in (0, 1.5), got {}",

@@ -364,8 +364,10 @@ mod tests {
         // best 50500 = +1% (below activation at +2% = 51000) → no trail
         let pos = long_pos(50000.0, 50500.0);
         // pre-fix bug: trail_price would be 50500*0.98=49490, and price 49400 would fire
-        assert!(check_trailing_stop(&config, &pos, 49400.0).is_none(),
-            "trailing must not fire below activation threshold (regression guard)");
+        assert!(
+            check_trailing_stop(&config, &pos, 49400.0).is_none(),
+            "trailing must not fire below activation threshold (regression guard)"
+        );
     }
 
     #[test]
@@ -408,8 +410,10 @@ mod tests {
         };
         let pos = long_pos(100.0, 103.0); // just hit activation
         let trail_price_at_activation = 103.0 * 0.98;
-        assert!(trail_price_at_activation > 100.0,
-            "activation > trail_pct guarantees profit at trail moment");
+        assert!(
+            trail_price_at_activation > 100.0,
+            "activation > trail_pct guarantees profit at trail moment"
+        );
         // triggered slightly below trail_price
         let r = check_trailing_stop(&config, &pos, trail_price_at_activation - 0.01);
         assert!(r.is_some());
@@ -429,7 +433,10 @@ mod tests {
         // best = entry + $0.01 → gate passes; trail_price = 100.01 * 0.98 ≈ 98.01 (below entry!)
         let pos = long_pos(100.0, 100.01);
         let r = check_trailing_stop(&config, &pos, 98.00);
-        assert!(r.is_some(), "activation=0 lets trail fire on any tiny uptick");
+        assert!(
+            r.is_some(),
+            "activation=0 lets trail fire on any tiny uptick"
+        );
         assert_eq!(r.unwrap().stop_type, StopType::Trailing);
     }
 
@@ -449,7 +456,10 @@ mod tests {
         // best at -5% exactly → activation met, trail_price = 95 * 1.02 = 96.9
         let pos2 = short_pos(100.0, 95.0);
         let trail_price = 95.0 * 1.02;
-        assert!(trail_price < 100.0, "activation > trail_pct locks short-side profit");
+        assert!(
+            trail_price < 100.0,
+            "activation > trail_pct locks short-side profit"
+        );
         let r = check_trailing_stop(&config, &pos2, trail_price + 0.01);
         assert!(r.is_some());
         assert_eq!(r.unwrap().stop_type, StopType::Trailing);

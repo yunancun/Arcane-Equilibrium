@@ -149,8 +149,8 @@ mod tests {
     use super::*;
     // End-to-end feed tests reach into the v2 consumer in the sibling module.
     // End-to-end feed tests 需呼叫兄弟模組 v2 consumer。
-    use super::super::v2::{physical_micro_profit_lock_v2, ExitConfig};
     use super::super::core::PhysicalDecision;
+    use super::super::v2::{physical_micro_profit_lock_v2, ExitConfig};
 
     /// Minimal snapshot helper for builder tests. Side + entry_ts_ms +
     /// peak_reached_ts_ms + entry_price + max_favorable_pnl_pct cover the
@@ -189,10 +189,10 @@ mod tests {
         let f = build_exit_features_for_tick(
             &snap,
             103.0,
-            Some(1.5),            // atr_pct
-            Some(-0.0012),        // price_roc_short
-            Some(12.5),           // est_net_bps
-            1_010_000,            // ts_ms
+            Some(1.5),     // atr_pct
+            Some(-0.0012), // price_roc_short
+            Some(12.5),    // est_net_bps
+            1_010_000,     // ts_ms
         );
         assert_eq!(f.est_net_bps, Some(12.5));
         assert_eq!(f.peak_pnl_pct, 4.0);
@@ -333,11 +333,11 @@ mod tests {
         let snap = mk_snap(true, 100.0, 2.5, 0, 60_000);
         let features = build_exit_features_for_tick(
             &snap,
-            101.2,          // +1.2% current
-            Some(1.0),      // atr_pct
-            Some(-0.001),   // price_roc_short (negative, doesn't matter here)
-            Some(10.0),     // est_net_bps > 5.0 floor
-            120_000,        // ts_ms = entry_ts + 120s
+            101.2,        // +1.2% current
+            Some(1.0),    // atr_pct
+            Some(-0.001), // price_roc_short (negative, doesn't matter here)
+            Some(10.0),   // est_net_bps > 5.0 floor
+            120_000,      // ts_ms = entry_ts + 120s
         );
         assert_eq!(
             physical_micro_profit_lock_v2(&features, &cfg),

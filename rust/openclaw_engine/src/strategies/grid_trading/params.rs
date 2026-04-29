@@ -60,11 +60,11 @@ pub struct GridTradingParams {
     /// G7-09c Phase 1: number of ticks INSIDE the book at which the BBO-aware
     /// PostOnly limit sits. `0` = exactly on best_bid/ask (still passive maker
     /// per Bybit), `1` (default) = one tick away (more passive, safer against
-    /// single-tick book moves). `maker_price_offset_bps` is now the fallback-
-    /// only path used when BBO or tick_size unavailable.
+    /// single-tick book moves). If BBO or tick_size is unavailable, maker
+    /// entries are skipped instead of falling back to last_price.
     /// G7-09c Phase 1：BBO-aware PostOnly 限價離 inside quote 的 tick 數。
     /// 0 = 同 best_bid/ask（仍 passive maker），1（預設）= 退一 tick（更被動）。
-    /// `maker_price_offset_bps` 退化為僅 BBO 不可得時的 fallback offset。
+    /// BBO 或 tick_size 不可得時跳過 maker 入場，不再 fallback 到 last_price。
     #[serde(default = "default_maker_price_buffer_ticks")]
     pub maker_price_buffer_ticks: u32,
     /// G7-09c Phase 2 (FIX-G7-09C-PHASE2-WIRE-1B3): per-symbol cooldown set
@@ -82,6 +82,11 @@ pub struct GridTradingParams {
     /// 限制 `[5_000, 600_000]`，防止 operator 誤配。
     #[serde(default = "default_reject_cooldown_ms")]
     pub reject_cooldown_ms: u64,
+    /// G2-04: Optional symbol list where grid_trading should not emit new entries.
+    /// Existing positions are still allowed to close via the normal close path.
+    /// G2-04：可選逐 symbol 禁止 grid 新開倉清單；既有倉位仍可正常平倉。
+    #[serde(default)]
+    pub blocked_symbols: Vec<String>,
 }
 
 /// G7-09c Phase 1: default buffer = 1 tick (one tick inside the inside quote).
@@ -123,6 +128,7 @@ impl Default for GridTradingParams {
             // G7-09c Phase 2: default 60s exchange-reject cooldown.
             // G7-09c Phase 2：交易所拒絕預設冷卻 60 秒。
             reject_cooldown_ms: 60_000,
+            blocked_symbols: Vec::new(),
         }
     }
 }

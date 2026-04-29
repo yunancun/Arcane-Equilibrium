@@ -13,7 +13,7 @@
 
 use crate::edge_estimates::EdgeEstimates;
 use crate::market_data_client::types::TickerInfo;
-use crate::scanner::config::{CorrelationLimits, HardFilters};
+use crate::scanner::config::{CorrelationLimits, EdgeRoutingConfig, HardFilters};
 use crate::scanner::sectors::{base_from_usdt_symbol, symbol_sector, STABLECOIN_BASES};
 use crate::scanner::types::{ScoredSymbol, StrategyCategory};
 use std::collections::HashMap;
@@ -235,32 +235,64 @@ pub fn compute_fitness(mc: &MarketConditions) -> FitnessScores {
 
 // ─── Edge feedback ────────────────────────────────────────────────────────────
 
-/// Apply edge bonus from JS shrinkage estimates.
-/// Returns (bonus, edge_n).
-/// - If estimate exists: bonus = clamp(shrunk_bps * 0.5, -30, 10), n = 1 (present)
-/// - If not yet explored: bonus = +2.0 exploration credit, n = 0. Lowered from +5 (M-5 fix):
-///   +5 could push low-quality new listings above established symbols with real edge data.
-/// 從 JS 收縮估計施加邊際獎勵。返回 (bonus, edge_n)。
-/// - 若估計存在：bonus = clamp(shrunk_bps * 0.5, -30, 10)，n = 1（存在）
-/// - 若尚未探索：bonus = +2.0 探索加分，n = 0。從 +5 降低（M-5 修復）：
-///   +5 可能把低質量新幣分數推超有真實 edge 數據的成熟幣。
+#[derive(Debug, Clone, PartialEq)]
+pub struct EdgeFeedback {
+    pub final_score: f64,
+    pub bonus: f64,
+    pub n: u32,
+    pub edge_bps: Option<f64>,
+    pub edge_status: &'static str,
+    pub route_mode: &'static str,
+}
+
+/// Apply edge feedback from runtime estimates.
+/// Normal known cells preserve the previous formula by default:
+/// `bonus = clamp(runtime_bps * 0.5, -30, 10)`. Mature negative cells are
+/// capped out of the main route so scanner fitness cannot keep routing symbols
+/// that the realized net edge already rejected.
+/// 套用 runtime edge 回饋。正常 known cell 預設保持舊公式；成熟負 edge cell
+/// 會被 cap 出主路由，避免 scanner raw fitness 誤導策略。
 pub fn apply_edge_bonus(
     raw: f64,
     best_strategy: StrategyCategory,
     symbol: &str,
     estimates: &EdgeEstimates,
-) -> (f64, f64, u32) {
+    config: &EdgeRoutingConfig,
+) -> EdgeFeedback {
     let strategy_key = best_strategy.as_estimate_key();
-    match estimates.get(strategy_key, symbol) {
-        Some(shrunk_bps) => {
-            let bonus = (shrunk_bps * 0.5).clamp(-30.0, 10.0);
-            let final_score = (raw + bonus).clamp(0.0, 100.0);
-            (final_score, bonus, 1)
+    match estimates.get_cell(strategy_key, symbol) {
+        Some(cell) => {
+            let bonus =
+                (cell.shrunk_bps * config.bonus_weight).clamp(config.bonus_min, config.bonus_max);
+            let mut final_score = (raw + bonus).clamp(0.0, 100.0);
+            let robust_negative = cell.n_trades >= u64::from(config.robust_negative_min_trades)
+                && cell.shrunk_bps < config.robust_negative_bps_threshold;
+            let (edge_status, route_mode) = if robust_negative {
+                final_score = final_score.min(config.robust_negative_score_cap);
+                ("robust_negative", "exploration_only")
+            } else {
+                ("known", "main")
+            };
+            EdgeFeedback {
+                final_score,
+                bonus,
+                n: cell.n_trades.min(u64::from(u32::MAX)) as u32,
+                edge_bps: Some(cell.shrunk_bps),
+                edge_status,
+                route_mode,
+            }
         }
         None => {
             // Unexplored symbol — give exploration credit / 未探索交易對 — 給予探索加分
-            let final_score = (raw + 2.0).clamp(0.0, 100.0);
-            (final_score, 2.0, 0)
+            let final_score = (raw + config.unexplored_bonus).clamp(0.0, 100.0);
+            EdgeFeedback {
+                final_score,
+                bonus: config.unexplored_bonus,
+                n: 0,
+                edge_bps: None,
+                edge_status: "unexplored",
+                route_mode: "exploration",
+            }
         }
     }
 }
@@ -369,6 +401,7 @@ pub fn score_ticker(
     btc_change_pct: f64,
     estimates: &EdgeEstimates,
     hard_filter_config: &HardFilters,
+    edge_routing_config: &EdgeRoutingConfig,
 ) -> Option<ScoredSymbol> {
     // Apply hard filters first / 首先應用硬過濾器
     apply_hard_filters(ticker, hard_filter_config)?;
@@ -378,8 +411,13 @@ pub fn score_ticker(
 
     let mc = compute_market_conditions(ticker);
     let fitness = compute_fitness(&mc);
-    let (final_score, edge_bonus, edge_n) =
-        apply_edge_bonus(fitness.raw, fitness.best, &ticker.symbol, estimates);
+    let edge = apply_edge_bonus(
+        fitness.raw,
+        fitness.best,
+        &ticker.symbol,
+        estimates,
+        edge_routing_config,
+    );
 
     // BTC change_pct already in percentage points (dir_pct * 100 from ticker)
     // Bybit's price24hPcnt is a ratio; mc.dir_pct is already in %, so we need
@@ -393,7 +431,7 @@ pub fn score_ticker(
 
     Some(ScoredSymbol {
         symbol: ticker.symbol.clone(),
-        final_score,
+        final_score: edge.final_score,
         raw_score: fitness.raw,
         best_strategy: fitness.best,
         f_ma: fitness.f_ma,
@@ -405,8 +443,11 @@ pub fn score_ticker(
         range_pct: mc.range_pct,
         fr_bps: mc.fr_bps,
         turnover_24h: mc.turnover_24h,
-        edge_bonus,
-        edge_n,
+        edge_bonus: edge.bonus,
+        edge_n: edge.n,
+        edge_bps: edge.edge_bps,
+        edge_status: edge.edge_status.to_string(),
+        route_mode: edge.route_mode.to_string(),
         beta_proxy: bp,
         sector,
     })
@@ -419,7 +460,7 @@ mod tests {
     use super::*;
     use crate::edge_estimates::EdgeEstimates;
     use crate::market_data_client::types::TickerInfo;
-    use crate::scanner::config::{CorrelationLimits, HardFilters};
+    use crate::scanner::config::{CorrelationLimits, EdgeRoutingConfig, HardFilters};
 
     fn make_ticker(
         symbol: &str,
@@ -734,15 +775,38 @@ mod tests {
         // from crowding out symbols with real edge data.
         // M-5 修復：探索加分從 +5 降至 +2，防止新幣擠排有真實 edge 數據的交易對。
         let estimates = EdgeEstimates::default();
-        let (final_score, bonus, n) = apply_edge_bonus(
+        let edge = apply_edge_bonus(
             50.0,
             StrategyCategory::MaCrossover,
             "NEWCOINUSDT",
             &estimates,
+            &EdgeRoutingConfig::default(),
         );
-        assert_eq!(n, 0);
-        assert!((bonus - 2.0).abs() < 1e-10);
-        assert!((final_score - 52.0).abs() < 1e-10);
+        assert_eq!(edge.n, 0);
+        assert_eq!(edge.edge_status, "unexplored");
+        assert_eq!(edge.route_mode, "exploration");
+        assert!((edge.bonus - 2.0).abs() < 1e-10);
+        assert!((edge.final_score - 52.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_edge_bonus_caps_mature_negative_cells() {
+        let estimates = EdgeEstimates::load_from_str(
+            r#"{"grid_trading::DOGEUSDT":{"runtime_bps":-12.0,"n":31}}"#,
+        )
+        .unwrap();
+        let edge = apply_edge_bonus(
+            95.0,
+            StrategyCategory::GridTrading,
+            "DOGEUSDT",
+            &estimates,
+            &EdgeRoutingConfig::default(),
+        );
+        assert_eq!(edge.n, 31);
+        assert_eq!(edge.edge_bps, Some(-12.0));
+        assert_eq!(edge.edge_status, "robust_negative");
+        assert_eq!(edge.route_mode, "exploration_only");
+        assert!((edge.final_score - 35.0).abs() < 1e-10);
     }
 
     // ── beta_proxy tests ───────────────────────────────────────────────────────
@@ -805,6 +869,9 @@ mod tests {
                 turnover_24h: 60_000_000.0,
                 edge_bonus: 5.0,
                 edge_n: 0,
+                edge_bps: None,
+                edge_status: "unexplored".to_string(),
+                route_mode: "exploration".to_string(),
                 beta_proxy: Some(0.5),
                 sector: "meme".to_string(),
             })
@@ -838,6 +905,9 @@ mod tests {
                 turnover_24h: 60_000_000.0,
                 edge_bonus: 5.0,
                 edge_n: 0,
+                edge_bps: None,
+                edge_status: "unexplored".to_string(),
+                route_mode: "exploration".to_string(),
                 beta_proxy: Some(0.5),
                 sector: format!("sector_{}", i % 5),
             })
@@ -869,6 +939,9 @@ mod tests {
                 turnover_24h: 1_000_000_000.0,
                 edge_bonus: 5.0,
                 edge_n: 0,
+                edge_bps: None,
+                edge_status: "unexplored".to_string(),
+                route_mode: "exploration".to_string(),
                 beta_proxy: Some(1.0),
                 sector: "l1_infra".to_string(),
             },
@@ -888,6 +961,9 @@ mod tests {
                 turnover_24h: 200_000_000.0,
                 edge_bonus: 5.0,
                 edge_n: 0,
+                edge_bps: None,
+                edge_status: "unexplored".to_string(),
+                route_mode: "exploration".to_string(),
                 beta_proxy: Some(1.2),
                 sector: "l1_infra".to_string(),
             },

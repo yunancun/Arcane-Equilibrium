@@ -57,9 +57,9 @@ pub mod v2;
 // additions/removals diff-friendly and to surface the external API surface
 // in one glance at the top of this file.
 // 向後相容 re-export：外部繼續以 `crate::exit_features::…` 訪問，與拆分前一致。
+pub use crate::exit_features::builder::build_exit_features_for_tick;
 pub use crate::exit_features::core::{ExitFeatures, PhysicalDecision};
 pub use crate::exit_features::v2::{physical_micro_profit_lock_v2, ExitConfig};
-pub use crate::exit_features::builder::build_exit_features_for_tick;
 
 // `non_linear_giveback_fn` stays `pub(crate)` — only v2 tests + the lock fn
 // itself reach for it, no external consumer. Re-export intentionally omitted

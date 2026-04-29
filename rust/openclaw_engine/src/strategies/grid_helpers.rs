@@ -451,10 +451,15 @@ mod tests {
         // True OU with σ = 0.5 over n=200 samples, dt=1.0 (so per-step σ=0.5).
         // Check the residual estimator recovers σ within 5%.
         // 已知 σ = 0.5 的 OU 過程，n=200，檢查殘差估計器 5% 內回收。
-        let prices = simulate_ou(200, 100.0, /*theta*/ 0.4, /*mu*/ 100.0, 0.5, 1.0, 0xC0FFEE);
+        let prices = simulate_ou(
+            200, 100.0, /*theta*/ 0.4, /*mu*/ 100.0, 0.5, 1.0, 0xC0FFEE,
+        );
         let est = OuResidualSigma::estimate_from_window(&prices);
         assert_eq!(est.n_observations, 200);
-        assert!(est.sigma_hat.is_finite(), "σ̂ should be finite for valid OU data");
+        assert!(
+            est.sigma_hat.is_finite(),
+            "σ̂ should be finite for valid OU data"
+        );
         let rel_err = (est.sigma_hat - 0.5).abs() / 0.5;
         assert!(
             rel_err < 0.10,
@@ -463,9 +468,17 @@ mod tests {
             rel_err * 100.0
         );
         // θ̂ should be positive for genuine mean-reversion / θ̂ 應為正
-        assert!(est.theta > 0.0, "θ̂ should be positive for OU data, got {}", est.theta);
+        assert!(
+            est.theta > 0.0,
+            "θ̂ should be positive for OU data, got {}",
+            est.theta
+        );
         // μ̂ should be near 100 (long-run mean) / μ̂ 應接近 100
-        assert!((est.mu - 100.0).abs() < 1.0, "μ̂ = {} too far from true μ = 100", est.mu);
+        assert!(
+            (est.mu - 100.0).abs() < 1.0,
+            "μ̂ = {} too far from true μ = 100",
+            est.mu
+        );
     }
 
     #[test]
@@ -476,12 +489,23 @@ mod tests {
         // 純線性趨勢：σ̂ 應為有限小值（線性擬合下殘差很小），不應 NaN/panic。
         let prices: Vec<f64> = (0..100).map(|i| 100.0 + (i as f64) * 2.0).collect();
         let est = OuResidualSigma::estimate_from_window(&prices);
-        assert!(est.sigma_hat.is_finite(), "σ̂ should be finite for trending data, got {}", est.sigma_hat);
+        assert!(
+            est.sigma_hat.is_finite(),
+            "σ̂ should be finite for trending data, got {}",
+            est.sigma_hat
+        );
         // Strict trend — residual σ̂ should be very small (numerical noise).
         // 嚴格線性 — 殘差應為數值雜訊量級。
-        assert!(est.sigma_hat < 1e-6, "σ̂ for pure linear trend should be ~0, got {}", est.sigma_hat);
+        assert!(
+            est.sigma_hat < 1e-6,
+            "σ̂ for pure linear trend should be ~0, got {}",
+            est.sigma_hat
+        );
         // θ̂ clamped to 0 (b ≥ 0 path) / θ̂ 被 clamp 到 0
-        assert_eq!(est.theta, 0.0, "θ̂ for non-mean-reverting trend should clamp to 0");
+        assert_eq!(
+            est.theta, 0.0,
+            "θ̂ for non-mean-reverting trend should clamp to 0"
+        );
     }
 
     #[test]
@@ -531,7 +555,11 @@ mod tests {
         // n < MIN_SAMPLES + 1 → degenerate placeholder (σ̂ = NaN).
         // 樣本不足 → NaN 退化值。
         let est = OuResidualSigma::estimate_from_window(&[1.0, 2.0, 3.0]);
-        assert!(est.sigma_hat.is_nan(), "expected NaN for n=3, got {}", est.sigma_hat);
+        assert!(
+            est.sigma_hat.is_nan(),
+            "expected NaN for n=3, got {}",
+            est.sigma_hat
+        );
         assert_eq!(est.n_observations, 3);
         // Empty seed / 空種子
         let empty = OuResidualSigma::empty();
@@ -559,7 +587,12 @@ mod tests {
         let est = OuResidualSigma::estimate_from_window(&prices);
         // Raw-Δx σ as a baseline / 原始 Δx σ 作為基準
         let n_dx = prices.len() - 1;
-        let raw_sigma = (prices.windows(2).map(|w| (w[1] - w[0]).powi(2)).sum::<f64>() / n_dx as f64).sqrt();
+        let raw_sigma = (prices
+            .windows(2)
+            .map(|w| (w[1] - w[0]).powi(2))
+            .sum::<f64>()
+            / n_dx as f64)
+            .sqrt();
         assert!(est.sigma_hat.is_finite());
         assert!(raw_sigma > 0.0);
         // For genuinely mean-reverting data with non-trivial θ, residual σ̂

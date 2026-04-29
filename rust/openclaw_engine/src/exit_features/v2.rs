@@ -302,10 +302,7 @@ pub(crate) fn non_linear_giveback_fn(peak_atr_norm: f64, cfg: &ExitConfig) -> f6
 /// reason 字串沿用既有 `phys_lock_*` 前綴，與 `risk_checks.rs` 舊版相容，
 /// 方便下一波直接替換 Priority 6 而不破 `parse_exit_tag`。
 /// Pure fn — 無 I/O、除回傳 reason `String` 外零分配。
-pub fn physical_micro_profit_lock_v2(
-    f: &ExitFeatures,
-    cfg: &ExitConfig,
-) -> PhysicalDecision {
+pub fn physical_micro_profit_lock_v2(f: &ExitFeatures, cfg: &ExitConfig) -> PhysicalDecision {
     // Gate 1: est_net_bps floor — conservative Hold when edge insufficient.
     // P0-14 Option A: when `est_net_bps` is None (sync-label / proxy-miss),
     // substitute `missing_edge_fallback_bps` as a weak prior; default is a
@@ -385,14 +382,14 @@ mod tests {
     /// 構造 v2 全通 ExitFeatures；Gate 4a/4b 均未觸發。
     pub(super) fn mk_pass_features() -> ExitFeatures {
         ExitFeatures {
-            est_net_bps: Some(50.0),          // >> 5.0 floor
-            peak_pnl_pct: 2.0,                // 2% peak
+            est_net_bps: Some(50.0), // >> 5.0 floor
+            peak_pnl_pct: 2.0,       // 2% peak
             current_pnl_pct: 1.5,
-            atr_pct: Some(1.0),               // 1% ATR → peak_atr_norm=2.0
-            giveback_atr_norm: Some(0.0),     // zero giveback
-            time_since_peak_ms: Some(0),      // peak just now
-            price_roc_short: Some(0.01),      // positive (rising)
-            entry_age_secs: Some(120.0),      // > 30s min_hold
+            atr_pct: Some(1.0),           // 1% ATR → peak_atr_norm=2.0
+            giveback_atr_norm: Some(0.0), // zero giveback
+            time_since_peak_ms: Some(0),  // peak just now
+            price_roc_short: Some(0.01),  // positive (rising)
+            entry_age_secs: Some(120.0),  // > 30s min_hold
         }
     }
 
@@ -434,8 +431,8 @@ mod tests {
     fn test_v2_gate2_fresh_entry_holds() {
         let cfg = ExitConfig::default();
         let mut f = mk_pass_features();
-        f.entry_age_secs = Some(5.0);       // < 30s
-        f.giveback_atr_norm = Some(10.0);   // would fire 4a otherwise
+        f.entry_age_secs = Some(5.0); // < 30s
+        f.giveback_atr_norm = Some(10.0); // would fire 4a otherwise
         assert_eq!(
             physical_micro_profit_lock_v2(&f, &cfg),
             PhysicalDecision::Hold
@@ -448,11 +445,11 @@ mod tests {
     fn test_v2_gate2_exactly_at_min_hold_passes() {
         let cfg = ExitConfig::default();
         let mut f = mk_pass_features();
-        f.entry_age_secs = Some(30.0);      // == 30s; `<` test → false → passes
-        f.giveback_atr_norm = Some(10.0);   // far above threshold → fire 4a
-        // With age exactly at bound, gate 2 passes → gate 4a fires because
-        // giveback=10 >> threshold. If gate 2 wrongly blocked, we'd see Hold.
-        // 若 gate 2 誤擋，此處會回 Hold；實際應因 gate 4a 觸發 Lock。
+        f.entry_age_secs = Some(30.0); // == 30s; `<` test → false → passes
+        f.giveback_atr_norm = Some(10.0); // far above threshold → fire 4a
+                                          // With age exactly at bound, gate 2 passes → gate 4a fires because
+                                          // giveback=10 >> threshold. If gate 2 wrongly blocked, we'd see Hold.
+                                          // 若 gate 2 誤擋，此處會回 Hold；實際應因 gate 4a 觸發 Lock。
         assert_eq!(
             physical_micro_profit_lock_v2(&f, &cfg),
             PhysicalDecision::Lock("phys_lock_gate4_giveback".to_string())
@@ -469,8 +466,8 @@ mod tests {
         // cfg default: min_peak_atr_norm=0.5, atr=1.0 → required peak=0.5
         // cfg 預設：min_peak_atr_norm=0.5，atr=1.0，需 peak >= 0.5
         let mut f = mk_pass_features();
-        f.peak_pnl_pct = 0.3;              // 0.3% < 0.5% required
-        f.giveback_atr_norm = Some(10.0);  // would fire 4a otherwise
+        f.peak_pnl_pct = 0.3; // 0.3% < 0.5% required
+        f.giveback_atr_norm = Some(10.0); // would fire 4a otherwise
         assert_eq!(
             physical_micro_profit_lock_v2(&f, &cfg),
             PhysicalDecision::Hold
@@ -503,8 +500,8 @@ mod tests {
     fn test_v2_gate4b_stale_and_decaying_locks() {
         let cfg = ExitConfig::default();
         let mut f = mk_pass_features();
-        f.time_since_peak_ms = Some(120_000);   // >> 60_000
-        f.price_roc_short = Some(-0.005);       // decaying
+        f.time_since_peak_ms = Some(120_000); // >> 60_000
+        f.price_roc_short = Some(-0.005); // decaying
         assert_eq!(
             physical_micro_profit_lock_v2(&f, &cfg),
             PhysicalDecision::Lock("phys_lock_gate4_stale_roc_neg".to_string())
@@ -517,8 +514,8 @@ mod tests {
     fn test_v2_gate4b_stale_but_positive_roc_holds() {
         let cfg = ExitConfig::default();
         let mut f = mk_pass_features();
-        f.time_since_peak_ms = Some(120_000);   // stale
-        f.price_roc_short = Some(0.008);        // rising
+        f.time_since_peak_ms = Some(120_000); // stale
+        f.price_roc_short = Some(0.008); // rising
         assert_eq!(
             physical_micro_profit_lock_v2(&f, &cfg),
             PhysicalDecision::Hold
@@ -535,9 +532,9 @@ mod tests {
     fn test_v2_spike_wick_giveback_fires_4a_not_4b() {
         let cfg = ExitConfig::default();
         let mut f = mk_pass_features();
-        f.time_since_peak_ms = Some(100);       // very recent peak
-        f.giveback_atr_norm = Some(1.5);        // large giveback
-        f.price_roc_short = Some(0.0);          // flat — 4b disarmed
+        f.time_since_peak_ms = Some(100); // very recent peak
+        f.giveback_atr_norm = Some(1.5); // large giveback
+        f.price_roc_short = Some(0.0); // flat — 4b disarmed
         let decision = physical_micro_profit_lock_v2(&f, &cfg);
         // Must fire 4a (giveback path), not 4b (stale+decaying).
         // 必須觸 4a 而非 4b。
@@ -555,8 +552,8 @@ mod tests {
     fn test_v2_long_winner_small_giveback_holds() {
         let cfg = ExitConfig::default();
         let mut f = mk_pass_features();
-        f.peak_pnl_pct = 3.0;                   // peak_atr_norm = 3.0
-        f.giveback_atr_norm = Some(0.2);        // threshold = max(1-0.45, 0.3) = 0.55
+        f.peak_pnl_pct = 3.0; // peak_atr_norm = 3.0
+        f.giveback_atr_norm = Some(0.2); // threshold = max(1-0.45, 0.3) = 0.55
         f.time_since_peak_ms = Some(0);
         f.price_roc_short = Some(0.0);
         assert_eq!(
@@ -777,11 +774,11 @@ mod tests {
     fn test_v2_gate_ordering_gate1_beats_later_holds() {
         let cfg = ExitConfig::default();
         let mut f = mk_pass_features();
-        f.est_net_bps = Some(0.5);          // below floor → Gate 1 Hold
-        f.entry_age_secs = Some(1.0);       // would Hold at Gate 2 too
-        f.atr_pct = None;                   // would Hold at Gate 3 too
-        // Gate 1 short-circuits → Hold (without touching gates 2/3/4).
-        // Gate 1 短路 → Hold（不碰 Gate 2/3/4）。
+        f.est_net_bps = Some(0.5); // below floor → Gate 1 Hold
+        f.entry_age_secs = Some(1.0); // would Hold at Gate 2 too
+        f.atr_pct = None; // would Hold at Gate 3 too
+                          // Gate 1 short-circuits → Hold (without touching gates 2/3/4).
+                          // Gate 1 短路 → Hold（不碰 Gate 2/3/4）。
         assert_eq!(
             physical_micro_profit_lock_v2(&f, &cfg),
             PhysicalDecision::Hold
@@ -796,7 +793,7 @@ mod tests {
     fn test_v2_gate4b_stale_boundary_equal_locks() {
         let cfg = ExitConfig::default();
         let mut f = mk_pass_features();
-        f.time_since_peak_ms = Some(60_000);  // == default stale_peak_ms
+        f.time_since_peak_ms = Some(60_000); // == default stale_peak_ms
         f.price_roc_short = Some(-0.001);
         assert_eq!(
             physical_micro_profit_lock_v2(&f, &cfg),
@@ -854,9 +851,9 @@ mod tests {
         };
         let mut f = mk_pass_features();
         f.est_net_bps = None; // Gate 1 falls back to 20 bps > 5 floor → pass
-        // If Gate 1 still short-circuited Hold on None, we'd not reach Gate
-        // 4a. Confirm we pass Gate 1 by arming Gate 4a and asserting Lock.
-        // 透過武裝 Gate 4a 反向證明 Gate 1 未短路 Hold — 若仍 Hold 則退化。
+                              // If Gate 1 still short-circuited Hold on None, we'd not reach Gate
+                              // 4a. Confirm we pass Gate 1 by arming Gate 4a and asserting Lock.
+                              // 透過武裝 Gate 4a 反向證明 Gate 1 未短路 Hold — 若仍 Hold 則退化。
         f.giveback_atr_norm = Some(0.75); // threshold @ peak_atr_norm=2 is 0.7
         assert_eq!(
             physical_micro_profit_lock_v2(&f, &cfg),
@@ -878,11 +875,11 @@ mod tests {
     fn test_v2_gate1_hold_then_gate4_trailing_locks() {
         let cfg = ExitConfig::default();
         let f = ExitFeatures {
-            est_net_bps: Some(10.0),           // 10 bps > 5.0 floor → pass Gate 1
+            est_net_bps: Some(10.0), // 10 bps > 5.0 floor → pass Gate 1
             peak_pnl_pct: 2.5,
             current_pnl_pct: 1.2,
-            atr_pct: Some(1.0),                 // peak_atr_norm = 2.5 > 0.5 min
-            giveback_atr_norm: Some(1.3),       // > threshold @ peak_atr_norm=2.5 which is max(1.0-0.15*2.5, 0.3)=0.625
+            atr_pct: Some(1.0),           // peak_atr_norm = 2.5 > 0.5 min
+            giveback_atr_norm: Some(1.3), // > threshold @ peak_atr_norm=2.5 which is max(1.0-0.15*2.5, 0.3)=0.625
             time_since_peak_ms: Some(5_000),
             price_roc_short: Some(-0.001),
             entry_age_secs: Some(120.0),

@@ -197,9 +197,7 @@ impl SingleSymbolFetcher for BybitRestClient {
             Err(_) => {
                 return Err(BybitApiError::Business {
                     ret_code: -1,
-                    ret_msg: format!(
-                        "ensure_symbol timeout after 2s for {symbol} / 2s 超時"
-                    ),
+                    ret_msg: format!("ensure_symbol timeout after 2s for {symbol} / 2s 超時"),
                     response: serde_json::json!({"timeout_ms": 2000, "symbol": symbol}),
                 });
             }
@@ -343,8 +341,7 @@ impl InstrumentInfoCache {
 
             // Build params — always include category + limit; cursor only if non-empty.
             // 構建 params — category + limit 必帶；cursor 非空才帶。
-            let mut params: Vec<(&str, &str)> =
-                vec![("category", category), ("limit", PAGE_LIMIT)];
+            let mut params: Vec<(&str, &str)> = vec![("category", category), ("limit", PAGE_LIMIT)];
             if !cursor.is_empty() {
                 params.push(("cursor", cursor.as_str()));
             }

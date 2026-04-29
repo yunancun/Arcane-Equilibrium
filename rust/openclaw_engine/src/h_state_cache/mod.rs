@@ -162,8 +162,7 @@ impl HStateCache {
         // 反向不會發生（無 torn-data 風險）。
         self.poll_successes.fetch_add(1, Ordering::Relaxed);
         *self.snapshot.write() = new_snap;
-        self.fetched_at_ms
-            .store(fetched_at_ms, Ordering::Release);
+        self.fetched_at_ms.store(fetched_at_ms, Ordering::Release);
     }
 
     /// Bump attempts counter (called BEFORE poll body, regardless of outcome).
