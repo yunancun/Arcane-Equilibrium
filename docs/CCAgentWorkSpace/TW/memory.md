@@ -24,6 +24,18 @@
 | 2026-04-26 | G9-05 L-2~L-5 字典補錄 — **PUSH-BACK / 任務假設不成立** | inline final message（不寫 report file）|
 | 2026-04-27 | LIVE-AUTH-WATCHER-EVENT-CONSUMER-SPAWN 工程日誌（P0 Silent Regression · 8d event_consumer missing） | `docs/worklogs/2026-04-27--live_auth_watcher_event_consumer_spawn_fix.md` |
 | 2026-04-29 | 62-finding Batch A-F + STRKUSDT P0 wave 歸檔（TODO.md 頭部敘述瘦身）| `docs/archive/2026-04-29--62finding-batch-A-to-F.md` + `docs/archive/2026-04-29--strkusdt-p0-wave.md` |
+| 2026-04-29 | TODO.md Stage 2A refactor — 頭部敘述 + Wave 索引化 | inline final message（不寫 report file）|
+
+## 2026-04-29 TODO.md Stage 2A refactor 重點
+
+- **任務**：operator Stage 1 已交付 4 archive 檔（commit `002b36e`），Stage 2A 縮 TODO.md 從 817 行至盡量低。
+- **產出**：TODO.md 817 → **678 行**（-139 行 / -17%）；目標 ≤400 未達——主膨脹源（頭部 update chain 14 條 + 6 個 Wave 巢狀敘述）已按指示替換為 4 條 archive 索引 + 1 個 H2 「上波索引」+ 8 條 Sign-off 報告路徑列表。剩餘 678 行屬「結構性 reference」（Wave 1-4 任務表 ~250 / Backlog 表 ~100 / Healthcheck ~40 / 依賴圖 + Wave 時序 + 工作流 + 接手三連 + 已完成歸檔 ~80），operator 指示明確保留。
+- **關鍵替換**：(1) Line 1~50 多輪「最新更新」+「前次更新」chain → 替換為「最新狀態快照」3 行 + 4 條 archive 索引 link (2) Line 73~202 6 個「上一波（保留供查）」section（Wave G/F/B/A Prep-Gate/Three-Axes/Phase 4）→ 替換為單一 H2「🗂️ 上波索引」+ 8 條 H3 列表（Wave 名 + Sign-off 路徑） (3) Line 16~21 Engine/測試基準大段 → 縮為 Runtime 1 行 + 測試基準 1 行 + healthcheck 1 行
+- **特別處理**：G3-03 Phase B row 加註「`shadow_mode_provider` live at `program_code/.../executor_agent.py:145-186`」+「per G3-03 Phase B implementation」（per operator 指示），原 row 已標 ✅ 不需 toggle。
+- **保留不動**（per operator 指示）：Wave 3 status / 依賴關係圖 / 接手三連檢查 / Wave 時序里程碑 / Wave 1 W17/18 子段（G1-01~06 + G6-01~05 全表）/ Wave 2 G3/G4/G5/G6-FUP/G7 全表 / Wave 3 EDGE-DIAG/G2/G8 全表 / Wave 4 P0-3/LG/G9 表 / 背景線程表 / Backlog 表 / Healthcheck 清單 / 已完成歸檔索引 / 工作流速查。
+- **驗收項**：(1) 行數 678 < 817 ✅ 但未達 ≤400 目標（結構性 reference 不可動）(2) 4 個 archive index link 全可解析（含 pre-trim snapshot）✅ (3) ExecutorAgent shadow_mode hardcoded annotation 已加 ✅ (4) post-deploy healthcheck status 保留 ✅ (5) HEAD `b0ef335` + engine PID 161957 + API PID 162029 runtime 確認保留 ✅
+- **未動**：CLAUDE.md / archive 檔 / memory/ 任何 user-level 檔 / 其他 docs / 業務邏輯代碼。
+- **commit**：本 agent 無 Bash tool，無法執行 `git commit --only TODO.md`；TODO.md 已修改但未 commit，請主會話以 operator 指示的 commit message 執行。
 
 ## 2026-04-29 歸檔記錄重點
 
