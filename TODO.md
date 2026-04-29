@@ -1,41 +1,23 @@
 # OpenClaw TODO — 工作清單（v3 · 單一時間軸版）
 
-**最新更新**：2026-04-29 CEST（**62-finding remediation Batch A-F DEPLOYED，post-deploy healthcheck NOT green**：A-F 全 62 findings 已完成修復/簽核/tracking，主修復 commit `bc3fa70` + 文檔同步 `6539e4e` + restart ownership hotfix `5db4e29` 均已推送並 fast-forward 到 Linux `trade-core`；`restart_all.sh --rebuild --keep-auth` 已在 Linux 完成 rebuild/redeploy（需顯式 `PATH="$HOME/.cargo/bin:$PATH"`），新 runtime：engine PID **161957** (`openclaw-engine`)，API master PID **162029** + 4 workers，API `:8000` 已由新 control API venv 佔用且無 address-in-use。驗證：`bash -n` lifecycle scripts OK / Batch E runtime ownership pytest **10 passed** / watchdog `engine_alive=true` + demo snapshot fresh / direct unauth `/openclaw/health` 與 `/api/v1/system/health` 回 401（auth enforced）/ GUI-origin API logs 200 OK。**不能宣稱 full green**：最新 `passive_wait_healthcheck.sh --quiet` 仍 FAIL `[12] bb_breakout_post_deadlock_fix` + FAIL `[22] trading_pipeline_silent_gap`，WARN `[27] intents_counter_freeze`；先前暫態 `[16] strategist_cycle_fresh` 已清，`[31] edge_diag_2_strategy_diversity` 在最新重跑未再出現。Live pipeline 依設計拒絕啟動：`authorization.json` schema v1 vs expected v2，需 Operator 透過 `/api/v1/live/auth/renew` 或 renew-review 重新簽署；未繞過 live gate。剩餘 release gaps：live PG integration、real ONNX artifact e2e、LinUCB live boot smoke、以及 `[22]` silent-gap / fee-rate cold-boot cost_gate fail-closed RCA。）
+**最新狀態快照**（2026-04-29 CEST · post-deploy healthcheck NOT green）：62-finding remediation Batch A-F 全部完成、push、Linux rebuild/redeploy；HEAD `b0ef335` synced，runtime engine PID **161957** + API PID **162029**，watchdog `engine_alive=true`，但 `passive_wait_healthcheck.sh --quiet` 仍 FAIL `[12]` + `[22]`，WARN `[27]`；Live pipeline 拒絕啟動是預期 gate（authorization schema v1 vs v2，需 Operator 經 `/api/v1/live/auth/renew` 重簽）。
 
-**前次更新**：2026-04-29 CEST（**Batch A-E gap reassessment COMPLETE, A-E green locally, not deployed**：隔壁 review 中 D/E tracking open 為 stale；A fixture drift、`RC-005`, `RC-006`, `OS-003`, `OS-006` 為真 gap 並已修。驗證：A-E Python targeted **128 passed** / Rust full lib **2355 passed** / `cargo check -p openclaw_engine` OK / `cargo build --release -p openclaw_engine` OK / Batch D+E static **18 passed** / `bash -n` + broad-kill/heredoc static scan OK / `git diff --check` OK。報告 `docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-29--batch_a_e_gap_reassessment.md`；未 deploy/restart/commit/push。）
+**歸檔索引**（已結案敘述歸檔，不再放 TODO 頭部）：
+- 62-finding Batch A-F：see [`docs/archive/2026-04-29--62finding-batch-A-to-F.md`](docs/archive/2026-04-29--62finding-batch-A-to-F.md) （commits `bc3fa70` + `6539e4e` + `5db4e29` PUSHED）
+- STRKUSDT P0 Wave：see [`docs/archive/2026-04-29--strkusdt-p0-wave.md`](docs/archive/2026-04-29--strkusdt-p0-wave.md) （F1 `af48ee1` + F2-F7 6 PR PUSHED）
+- Wave A-H 完整敘述：see [`docs/archive/2026-04-29--wave-A-to-H-narrative.md`](docs/archive/2026-04-29--wave-A-to-H-narrative.md) （Three-Axes / Wave A Prep-Gate / Wave B / Wave E / Wave F / Wave G / Wave H 全部 commit + Sign-off path 對應表）
+- Pre-trim TODO snapshot（817 行原文）：see [`docs/archive/2026-04-29--TODO-pre-trim-snapshot.md`](docs/archive/2026-04-29--TODO-pre-trim-snapshot.md)
 
-**前次更新**：2026-04-29 03:45 CEST（**62-finding remediation Batch F F0 PREWORK COMPLETE，later superseded by Batch F sign-off**：完成 `MLM-001..005`, `SADF-001`, `SADF-004..006`, `LP-003` 的 scope matrix、dirty-file collision map、workstream split、acceptance gates、verification plan；報告 `docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-29--batch_f_ml_agent_autonomy_prework.md`）
-
-**前次更新**：2026-04-29 03:30 CEST（**62-finding remediation Batch D COMPLETE locally, not deployed**：8/8 findings fixed in working tree：`RC-002`, `RC-004`, `RC-005`, `RC-006`, `SADF-002`, `SADF-003`, `LP-002`, `OE-006`；H0 periodic risk snapshot preserves cooldown/kill-switch, demo/live risk config missing fail-closed startup, governor tier constraints enforced at admission, legacy `update_risk_config` now covered by follow-up applied-ack fix, mixed strategy param update atomicity, demo/live strategy params load fail-closed all-inactive, clean/fresh restart package ID corrected to `openclaw_engine`, close dispatch real 500ms attempt-timeout budget；verification: Batch D static pytest **8 passed**, Rust targeted tests **9 passed**, `cargo check -p openclaw_engine` OK with existing warnings；sign-off `docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-29--batch_d_risk_config_fail_closed_signoff.md`）
-
-**前次更新**：2026-04-29 01:20 CEST（**62-finding remediation Batch B COMPLETE locally, not deployed**：14/14 findings fixed in working tree：`DAPI-001..006`, `RC-003`, `SC-001..007`；shared operator+scope gates landed for high-risk writes, server-side audit actor, dashboard/model/DB auth+redaction, `/openclaw` proxy header allowlist, placeholder token/password fail-closed, Grafana credential+loopback hardening, file-backed DB/IPC runtime secrets, pgpass/curl-config operator script hardening；verification: targeted Python pytest **47 passed**, py_compile OK, bash/plist/compose OK, `cargo check -p openclaw_engine` OK with existing warnings, static secret sweep OK；`cargo fmt --all --check` still blocked by pre-existing repo-wide Rust formatting drift; sign-off `docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-29--batch_b_critical_auth_secrets_api_signoff.md`）
-
-**最後更新**：2026-04-28 12:30 CEST（**Post-Wave-H 2 operator FUP + CLAUDE.md drift fix**：3 commits `cdc2699` + `20baabe` + `85a4e2d` pushed origin/main — (1) `cdc2699` fee-postonly-2 Rust fix `step_4_5_dispatch.rs:617` strategy-open Fill 改用 `fee_rate_for_intent(symbol, intent)` TIF-aware（先前 100% 寫 taker；actual `fee` 已正確；JS estimator 不受影響；**未進 runtime engine PID 3626554，下次 `--rebuild --keep-auth` 套用**）(2) `20baabe` `restart_all.sh --keep-auth` 旗標保 authorization.json 跨 planned deploy（crash/watchdog 路徑不變仍 force re-approve；§四 Gate #5 5 min re-verify 不變）(3) `85a4e2d` CLAUDE.md drift fix — EDGE-DIAG-2 follow-up (i)+(iii) 標 ✅（healthcheck `[31]` + memory 兩項 deploy commit `8a5973f` 內已隨檔交付，drift 是 PM Sign-off 初稿沒勾完）。HEAD `85a4e2d` origin synced。**前次更新**：2026-04-28 CEST 深夜（**🎉 Wave H COMPLETE — 3-way active warn cleanup splits + 2 inline governance/docstring fixes**：6 commits `dbba235..0a50c6c` pushed origin/main（含 operator edge-diag-2 prior `dbba235`）；**§九 800 warn active violations 從 4 縮至 1**（餘 main_boot_tasks.rs 816 marginal）；5 ticket 結案：STRATEGY-WIRING-SPLIT P2 (`6d657c1` new ticket: 1060→784 + 2 sibling) / STRATEGIST-DELEGATOR-SLIM P3 (`5928576`: 933→782 + 25 delegators lift + 2 body migration) / G3-08-FUP-MAF-SPLIT-CLEANUP P3 (`bd48672` (b)+(c)) / CLAUDE-MD-SECTION-9-HARD-CAP-EXCEPTION-CLAUSE P3 (`54b9add` governance closure) / G3-09-PA-DOCSTRING-CLARIFY P4 (`0a50c6c` lambda comment correction)；2 新 deferred tickets: G3-08-FUP-MAF-SPLIT-CLEANUP-A P4 (cosmetic) / G3-08-PHASE-4-STRATEGIST-SPLIT-FUP-FACADE LOW (risk-aware defer：strategist 剛 delegator slim, two-front change risk 避免)；3 並行 PA+E1 合一 + 1 inline + 1 inline post-merge；**Linux full regression cargo lib 2308/0** + 3 daemon test split **11/0** + persistence Linux PG **2/0** + HSQ same-session **forward 108/108 + reverse 108/108 non-flaky** (CRITICAL: STRATEGY-WIRING-SPLIT 對 H state 0 影響) + Strategist 8 檔 133/0 + Scout 46/0 + Analyst 22/0 + **全 control_api_v1 baseline 3117/0 (3 skipped)** + healthcheck 30 PASS + 2 pre-existing FAIL ([12]+[27] accepted per §九 exception clause)；0 P0/P1 regression / 0 hard boundary 觸碰 / engine NOT rebuilt (純 Python+doc 0 trade impact)；Sign-off `docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-28--wave_h_signoff.md`）
-
-**前次更新**：2026-04-28 CEST 深夜（Wave G COMPLETE — 4-way file size cleanup splits，5 commits `8a5973f..3b0a0d7`，§九 1200 hard cap active violations 全清；Sign-off `docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-28--wave_g_signoff.md`）
-
-**前次更新**：2026-04-28 CEST 深夜（Wave F COMPLETE — engine `--rebuild` deploy + SINGLETON sibling fix executor+promote，3 commits `739af3c..22e8482`，operator decision (C) defer Phase B observation；Sign-off `docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-28--wave_f_partial_signoff.md`）
-
-**前次更新**：2026-04-28 CEST 深夜（Wave E COMPLETE — cost_edge_advisor_boot split + Phase C PA RFC + SINGLETON-POLLUTION fix，8 commits `decf712..3788498`，Sign-off `docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-28--wave_e_signoff.md`）
-
-**前次更新**：2026-04-28 CEST 晚（Wave B COMPLETE — G3-09 Phase B Wave 1 + G8-01 W2 + W3，10 commits `cf34e96..dbe2477`，含 1 hotfix round；Sign-off `docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-28--wave_b_signoff.md`）
-
-**前次更新**：2026-04-28 CEST 早（Wave A Prep-Gate Trio COMPLETE — sticky-ts + LOSSES-WIRING + spawn-test，5 commits `82347a5..a6bf090`，Sign-off `docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-28--wave_a_prep_gate_signoff.md`）
-
-**前次更新**：2026-04-27 23:55 CEST（Three-Axes Wave COMPLETE — MAF-SPLIT P1 + G8-01 W1 + G3-09 daemon test，5 commits `6e466c8..7c32d1f`，Sign-off `docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-27--three_axes_wave_signoff.md`）
-
-**前次更新**：2026-04-27 21:30 CEST（**🎉 G3-08 Phase 4 5-Agent state events COMPLETE + G3-09 Phase A cost_edge_advisor land** — 6 commits + 5 sequential merges：Wave I-a `c8a4a55` (4-1 Strategist) + Wave I-b `00682ef` (G3-09 Phase A) + Wave II `8144b51` (4-2 Guardian merge) + `1d55c99` (4-3 Analyst cherry-pick) + `64fae22` (4-4 Executor cherry-pick) + `b67b0a8` (4-5 Scout)；origin/main `4cefb57..b67b0a8` pushed；Linux post-merge regression cargo lib **2290 / 0 failed** + pytest **289 / 0**；env=1 + `/api/v1/h_state/full` 回 **10-bucket envelope** (5 H + 5 Agent)；E2 batch PASS_WITH_NITS / E4 batch PASS / 8 FUP backlog tickets filed；解阻 G8-01 認知自適應 e2e + G3-09 Phase B/C；Sign-off `docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-27--phase4_complete_signoff.md`）
 **版本**：v3（Wave 線性版；廢除雙軌 P0-P4 章節，P0/P1/P2 降為每項 tag）
 **舊版歸檔**：v2 `docs/archive/2026-04-24--todo_v2_dual_axis_snapshot.md`（458 行，Wave+P 雙軌）· v1 `docs/archive/2026-04-24--todo_v1_refactor_snapshot.md`（328 行）· v0 `docs/archive/2026-04-24--todo_snapshot_pre_refactor.md`（700 行）
 **簽核**：PM Approved FIX-PLAN v2 → [Sign-off](docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-24--FixPlan_v2_PMApproval.md) · **Wave 3 Final** → [Wave 3 Sign-off](docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-26--wave3_final_signoff.md)
 **基礎方案**：[FIX-PLAN v2](docs/CCAgentWorkSpace/PA/workspace/reports/2026-04-24--4.24TodoAudit_FixPlan_v2.md) · [10-Agent audit 索引](docs/audits/2026-04-24--todo_refactor_audit.md)
 
-**Engine**（採集 2026-04-26 04:30 CEST · Wave 3 W5 收尾 + rebuild 部署後 · ssh verify）：engine 復活 ✅ · `engine_alive: true` · snapshot 8.6s fresh · paper + demo 雙活 · binary 含 **Wave 1+2+3 全工**（G1-01/02/03/05/06 + G6-01/02/03/04/05 + G3-02/03/04/05/06/10/11 + G4-02/03 + G5-02/04/05/07 + G7-01~09 + grid G7-09c Phase 2 reject_cooldown + **W3 G2-06 disable + EDGE-P1b 4/4 + EDGE-P2-flip T1+T2+T3 + G2-03 4/4 + G2-FUP-IPC-LEGACY-MS-FIX**）· HEAD `df882ad`（origin synced）· news halt 30min TTL auto-clear active · tick pipeline boot deadlock fixed · STRATEGIST-PARAMS-PERSIST-1 restored ✅ · IPC HMAC sync path ms→s 修（legacy `sync_ipc_call:786`）
-**測試基準（2026-04-27 Phase 4 + G3-09 Phase A merge 後）**：engine lib **2290 / 0 fail**（baseline 2252 → **2290** G3-09 Phase A cost_edge_advisor +38 tests：32 advisor unit + 5 IPC handler + 5 schema + 1 existing；Phase 4 Wave II 5 sub-task 純 Python 0 Rust diff）· Linux pytest Phase 4 全鏈 **289/0**（test_h_state_query_handler 110 + test_strategist_agent 41 + test_guardian_agent_unit 27 + test_analyst_agent_unit 22 + test_executor_agent_unit 31 + test_multi_agent_framework 58）· healthcheck 28 check（19 既有 + 8 STRKUSDT P0 wave [22]-[29] + 新 [30] cost_edge_advisor_status）· DB migrations 25 applied
+**Runtime（2026-04-29 CEST · ssh verify）**：HEAD `b0ef335` · engine PID **161957** + API PID **162029** · watchdog `engine_alive=true` · demo snapshot fresh · API auth enforced (401 unauth) · post-deploy healthcheck FAIL `[12]`+`[22]` / WARN `[27]`；Live pipeline rejected by design（authorization schema v1 vs v2，需 API renew）
 
-**前次基準（2026-04-27 STRKUSDT P0 wave merge 後）**：engine lib **2252 / 0 fail**（baseline 2161 → 2212 G3-08 Phase 1A + Tier 8/9 + 51 → **2252** STRKUSDT P0 wave + 91：F2 +4 / F3 +13 / F4 +16 / F6 +7 / F4 bins +50 / Tier 8/9 buffer +51）· pytest 本 wave 新增 63（F4 7 + F5 17 + F7 39）· healthcheck 27 check（19 既有 + 8 新 [22]-[29] silent-regression sentinel）
+**測試基準（2026-04-27 Phase 4 + G3-09 Phase A merge 後）**：engine lib **2290 / 0 fail** · Linux pytest Phase 4 全鏈 **289/0** · healthcheck 28 check（19 既有 + [22]-[29] STRKUSDT P0 wave + [30] cost_edge_advisor_status）· DB migrations 25 applied
 **21d demo 時鐘**：起算 2026-04-16 22:16 → 解鎖 2026-05-07
-**Wave 3 healthcheck**：cron 6h 跑 **27 check**（19 既有 [1-15]+[Xa]+[Xb]+[16]+[18] + 8 新 STRKUSDT P0 wave F7 [22-29]：[22] trading_pipeline_silent_gap / [23] orders_fills_consistency（FUP-23 SQL exclude `unattributed:%`）/ [24] signals_writer_freshness / [25] dust_qty_distribution / [26] dust_spiral_noise_in_ef / [27] intents_counter_freeze / [28] phantom_fills_attribution / [29] reconciler_paper_state_divergence）
+**Wave 3 healthcheck**：cron 6h 跑 27 check（19 既有 [1-15]+[Xa]+[Xb]+[16]+[18] + 8 STRKUSDT P0 wave F7 [22-29]：[22] trading_pipeline_silent_gap / [23] orders_fills_consistency / [24] signals_writer_freshness / [25] dust_qty_distribution / [26] dust_spiral_noise_in_ef / [27] intents_counter_freeze / [28] phantom_fills_attribution / [29] reconciler_paper_state_divergence）
 
 ---
 
@@ -57,17 +39,7 @@
 - ✅ **`restart_all.sh --keep-auth` flag** (`20baabe`) — authorization.json 跨 planned deploy 保留；crash/watchdog/systemd 路徑不變；§四 Gate #5 hot-rate verify 5 min re-check 不變
 - ✅ **CLAUDE.md EDGE-DIAG-2 drift fix** (`85a4e2d`) — healthcheck `[31]` + `feedback_demo_loose_live_strict_policy.md` 兩項早在 `8a5973f` 隨檔交付，drift 是 PM Sign-off 漏勾
 
-**Wave H 結案**（6 commits `dbba235..0a50c6c`）：
-- ✅ **STRATEGY-WIRING-SPLIT P2** (new) (`6d657c1`) — strategy_wiring 1060→784 + 2 sibling (h_state 133 + scanner 338)
-- ✅ **STRATEGIST-DELEGATOR-SLIM P3** (`5928576`) — strategist_agent 933→782 + 25 delegators lift + 2 body migration
-- ✅ **G3-08-FUP-MAF-SPLIT-CLEANUP P3** (b)+(c) (`bd48672`) — scout docstring + SCOUT_AGENT §九 row
-- ✅ **CLAUDE-MD-§九-EXCEPTION-CLAUSE P3** (`54b9add`) — governance amendment closure
-- ✅ **G3-09-PA-DOCSTRING-CLARIFY P4** (`0a50c6c`) — lambda capture comment correction
-- ✅ Linux full regression cargo 2308/0 + daemon split 11/0 + persistence 2/0 + HSQ same-session 108/108 二輪 + 全 baseline 3117/0 + healthcheck 30 PASS / 2 pre-existing FAIL
-
-**§九 800 warn active violations**：剩 1（main_boot_tasks.rs 816 marginal acceptable）— 從 Wave G 後 4 縮至 1 ✅
-
-**§九 1200 hard cap active violations**：**0** ✅（Wave G achievement maintained）
+**§九 governance 戰況**：800 warn active violations 剩 1（main_boot_tasks.rs 816 marginal acceptable，Wave G→H 已從 4 縮至 1）· 1200 hard cap active violations **0** ✅（Wave G achievement maintained）
 
 **NOW ACTIONABLE**（時間驅動 / 等候 / 餘工）：
 1. **Post-deploy RCA gate** — 先處理 healthcheck `[22] trading_pipeline_silent_gap`（risk verdicts/DCS alive，但 fills/intents/orders stale；engine log 顯示 fee rates unavailable cold-boot fail-closed），再重跑 passive healthcheck；不可把目前狀態標為 full green。
@@ -90,132 +62,20 @@
 
 ---
 
-## 🎯 上一波（保留供查 · 2026-04-28 CEST 深夜 · 🎉 Wave G COMPLETE · §九 hard cap active violations 全清 · 等 Phase C / Phase B observation bundled）
+## 🗂️ 上波索引（已歸檔 · 完整敘述見 archive）
 
-**Wave G 結案**（5 commits `8a5973f..3b0a0d7`）：
-- ✅ **MAIN-RS-PRE-EXISTING-CLEANUP P2** (`54e468a`) — main.rs 1210→1158 + scanner_init.rs 170 + §九 hard cap +42 headroom
-- ✅ **G3-08-FUP-ANALYST-SPLIT P2** (`68c31af`) — analyst_agent 944→781 + 2 sibling (records 142 + pattern_claims 264)
-- ✅ **G3-08-FUP-HSQ-SPLIT P2** (`72e12e8`) — h_state_query_handler 859→452 + collectors 547 (SINGLETON 整合)
-- ✅ **G3-09-DAEMON-TEST-SPLIT P3** (`6a2145e`) — daemon test 1159→3 file (534+380+485)
-- ✅ Linux full regression cargo 2308/0 + daemon split 11/0 + persistence 2/0 + HSQ same-session forward+reverse 108/108 + 全 baseline 3117/0 二輪 non-flaky
+完整敘述（commits + Sign-off + commit message + post-Wave-H operator hotfixes）見 [`docs/archive/2026-04-29--wave-A-to-H-narrative.md`](docs/archive/2026-04-29--wave-A-to-H-narrative.md)。下方僅留 Wave 名 + Sign-off 報告路徑供查找：
 
-**§九 hard cap active violations**：**0** ✅（previously: main.rs 1210）
+### 各 Wave PM Sign-off 報告路徑
 
-**NOW ACTIONABLE**（時間驅動 / 等候 / 餘工）：
-1. **G3-09 Phase C Wave 1 impl** — operator 「等時間長一些再看」；PA RFC `90d1a2e` ready
-2. **Phase B observation period** — bundled with Phase C launch (operator decision (C))
-3. **8 backlog tickets** 等下次 maintenance wave：CLAUDE-MD-SECTION-9-HARD-CAP-EXCEPTION-CLAUSE P3 / SINGLETON-POLLUTION-PHASE2-ROUTES P4 (Mac-only) / G8-01-FUP-REGRET-DREAM-DEFERRED P3 / G3-08-FUP-MAF-SPLIT-CLEANUP P3 / G3-09-FUP-CASE-D-H5-WAIT P3 / G3-09-PA-DOCSTRING-CLARIFY P4 / G3-08-FUP-STRATEGIST-DELEGATOR-SLIM P3 / G3-08-FUP-EXECUTOR-EARLY-RETURN-LOW1 P4
-
-**Active warn (>800)** 餘 strategist_agent.py 933 / strategy_wiring.py 1060 / main_boot_tasks.rs 816 — 下次 wave 候選
-
-**Time-driven**: G1-04-FUP-FINAL-COMPUTE P1 (~05-02 cutoff) — G7-09 fix 7d post-deploy R:R baseline
-
-詳：[Wave G Sign-off](docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-28--wave_g_signoff.md)
-
----
-
-## 🎯 上一波（保留供查 · 2026-04-28 CEST 深夜 · 🎉 Wave F COMPLETE · 等 Phase C Wave 1 派發 + Phase B observation 一起 bundled deploy）
-
-**Wave F 結案**（3 commits `739af3c..22e8482`）：
-- ✅ **(3) SINGLETON sibling fix** (commit `cff6959`) — 35→0 fail (executor_shadow_toggle 17 + strategist_promote 18) / FastAPI Depends route-build-time freeze NOVEL 機制 / Option A only `importlib.reload(route_module)` / Mac 38→3 (phase2 Mac-only) / **Linux 35→0 fail 3098 passed**
-- ✅ **(2) Engine `--rebuild` deploy** — Linux engine PID **3579476** binary mtime **04:13**（含 Wave A+B+E 全工進 runtime）/ paper+demo+live alive / healthcheck [30] PASS dormant by design
-- ✅ **memory rule** `feedback_fastapi_depends_reload_freeze.md` 防未來新測 file 重蹈
-- ⏸ **Phase B observation flag flip** operator decision (C)：暫不啟用，等 Phase C Wave 1 一起 bundled deploy
-
-**NOW ACTIONABLE**（時間驅動 / 等候 / 餘工）：
-1. **G3-09 Phase C Wave 1 impl** — operator 已指示「Phase C 暫保留，等時間長一些再看」（per Wave E session）；PA RFC `90d1a2e` §11 self-contained E1 prompt ready，operator 何時批 launch 即派 E1
-2. **Phase B observation period** — bundled with Phase C Wave 1 launch（operator decision (C)），同時 flip 3 env TOML cost_edge.enabled=true + set OPENCLAW_COST_EDGE_ADVISOR=1
-3. **9 backlog tickets** 等下次 maintenance wave：MAIN-RS-PRE-EXISTING-CLEANUP P2 / CLAUDE-MD-SECTION-9-HARD-CAP-EXCEPTION-CLAUSE P3 / SINGLETON-POLLUTION-PHASE2-ROUTES P4 (Mac-only) / G8-01-FUP-REGRET-DREAM-DEFERRED P3 / G3-08-FUP-MAF-SPLIT-CLEANUP P3 / G3-09-DAEMON-TEST-SPLIT P3 / G3-09-FUP-CASE-D-H5-WAIT P3 / G3-09-PA-DOCSTRING-CLARIFY P4 / G8-01-W2-FILESIZE-WATCH P4
-
-**Next session 立即可派候選**：
-1. **Phase C Wave 1 impl**（operator approve 即派；PA RFC ready）
-2. **MAIN-RS-PRE-EXISTING-CLEANUP P2**（main.rs 1210 → ≤1200，PA find ≥10 LOC 可抽段，~1-2h）
-3. **CLAUDE-MD §九 hard cap exception clause P3**（governance ambiguity 規則修訂）
-
-**Time-driven**（passive observation 候選）：
-- **G1-04-FUP-FINAL-COMPUTE P1**（QC+FA, ~05-02 cutoff）— G7-09 fix 7d post-deploy 後 final R:R / fee_rate baseline
-
-詳：[Wave F partial Sign-off](docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-28--wave_f_partial_signoff.md)
-
----
-
-## 🎯 上一波（保留供查 · 2026-04-28 CEST 晚 · 🎉 Wave B COMPLETE · NOW ACTIONABLE: Phase B observation + Phase C gate + engine deploy）
-
-**Wave B 結案**（10 commits `cf34e96..dbe2477` pushed origin/main）：
-- ✅ **G3-09 Phase B Wave 1** (commits `31761a6` + `00db240` hotfix) — V026 hypertable + Rust INSERT path + DbSlot late-inject + healthcheck split + observation tooling ~2293 LOC；TimescaleDB 2.x integer_now_func 規範到位；Linux V026 idempotency RESTORED
-- ✅ **G8-01 W2 100% cov** (commit `99ac0b4`) — 86/86 stmts，PA RFC §3.2 22 case → 26 sub-tests
-- ✅ **G8-01 W3 7 integration scenarios** (commit `4a5b1d6`) — H-1 critical fix sys.modules stub → importer-side patch；51/51 same-session reproducible
-- ✅ **G8-01-FUP-REGRET-DREAM ESCALATED** (commit `cf34e96`) — concept dead，Option C defer
-- ✅ Linux re-regression cargo lib **2299/0** + daemon **11/0** + persistence Linux PG **2/0** + V026 idempotency 0 RAISE + W3 51/51 + pytest **141/0** + healthcheck **32 PASS / 1 WARN / 0 FAIL** + V026 Guard **6/6**
-
-**NOW ACTIONABLE**（依賴鏈全清）：
-1. **G3-09 Phase B observation period** — env=1 + RiskConfig.cost_edge.enabled=true → daemon 寫 V026 rows / healthcheck [30] frequency sanity active；建議 ≥48h 連續觀察 + per-strategy trigger 分布 sanity
-2. **G3-09 Phase C gate 新倉** — Phase B 觀察數據 + sticky timestamp + INSERT path 護欄全到位，可派 PA Phase C RFC（per Phase B RFC §7.3 路線圖）
-3. **engine deploy** — Phase B Wave 1 advisory only / 0 trade impact，可待下次 cron `--rebuild` 一併 deploy（不需立即重啟 engine PID）
-
-**Next session 立即可派候選**：
-1. **G3-09 Phase C PA RFC**（PA design ~1d，per Phase B RFC §7.3）— intent gate 設計 + 新倉 reject 邏輯
-2. **engine `--rebuild` deploy**（operator 手動 ssh trade-core "bash helper_scripts/restart_all.sh --rebuild"）— 可在 Phase C impl 前先把 Wave A+B 全 binary 進 runtime
-3. **Wave B 3 follow-up FUP**：G3-09-FUP-MAIN-RS-SPLIT P3 / G3-09-FUP-MAIN-BOOT-TASKS-SPLIT P2 / STRATEGIST-SINGLETON-POLLUTION P3
-
-詳：[Wave B Sign-off](docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-28--wave_b_signoff.md)
-
----
-
-## 🎯 上一波（保留供查 · 2026-04-28 CEST · 🎉 Wave A Prep-Gate COMPLETE · NOW ACTIONABLE: G3-09 Phase B impl + G8-01 W2 + W3）
-
-**Wave A Prep-Gate 結案**（5 commits `82347a5..a6bf090` pushed origin/main）：
-- ✅ **G3-09-FUP sticky_triggered_at_ms** (commit `9303a3b`) — daemon enforce 4-arm sticky；Phase B Shadow dedup 安全
-- ✅ **G8-01-FUP-LOSSES-WIRING** (commit `aced662`) — Analyst→Strategist callback wire `_stats["consecutive_losses"]`；breakeven `<= 0` per PM
-- ✅ **G3-09-FUP spawn-test** (commit `22c57dc`) — 3 cases wrapper-reproduction pattern；0 production diff
-- ✅ Linux 2290 cargo / 11 daemon test / 199 pytest / 27 PASS healthcheck 全綠
-
-**Wave B 三主軸 NOW ACTIONABLE**（依賴鏈全清；REGRET-DREAM 經 PA escalation 確認 dead concept defer P3，W2/W3 接受 deferred-unreachable branches）：
-1. **G3-09 Phase B impl Wave 1** (~1.5d E1 per Phase B RFC §6) — V026 hypertable + INSERT path + healthcheck [30] frequency check；prereq 全 done（daemon test + sticky + spawn-test）
-2. **G8-01 W2 ≥85% line cov** (~1.5d E1-Beta per PA RFC §3.2) — 22 case suite；LOSSES-WIRING 後 consecutive_losses 真實 wired；regret_data + dream_data 永遠 None branches 加 `# pragma: no cover` 或 cov 報告 exclude
-3. **G8-01 W3 integration ≥5 case** (~1.5d E1-Gamma per PA RFC §3.3) — StrategistAgent integration；scenario 限 consecutive_losses + h_state inputs 路徑（避用 regret/dream 場景）；可與 W2 並行
-
-**Next session 立即可派候選**：
-- Wave B 上述 3 主軸（推薦並行派發，類似 Wave A 模式）
-- 或 **G8-01-FUP-REGRET-DREAM-WIRING P2**（W2/W3 整合測試前期需求；只解 consecutive_losses 不夠）
-- 或 **ML-TRAINING-DATA-HYGIENE-1**（MIT + E1，並行候選）
-
-詳：[Wave A Sign-off](docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-28--wave_a_prep_gate_signoff.md)
-
----
-
-## 🎯 上一波（保留供查 · 2026-04-27 23:55 CEST · 🎉 Three-Axes Wave COMPLETE · 解阻 G3-09 Phase B impl + G8-01 W2/W3）
-
-**Three-Axes Wave 結案**（5 commits `6e466c8..7c32d1f` pushed origin/main，per PM Sign-off `2026-04-27--three_axes_wave_signoff.md`）：
-- ✅ **G3-08-FUP-MAF-SPLIT P1**（commits `b8b5150` impl + `d190acb` docs）— multi_agent_framework.py 1190 → **966**，hard cap 1200 餘裕從 10 → 234；scout_agent.py NEW 297；PEP 562 lazy re-export 解循環 import；0 strategy_wiring / 0 test 改；E2 PASS_WITH_NITS（2 LOW NIT + 2 INFO）
-- ✅ **G8-01 W1 CognitiveModulator dead-path fix**（commit `aca7ee3`）— BUG-A 修 `get_current_params()` → `get_all_params()`（2 caller）+ BUG-B 修 `_handle_intel` 每 N=10 intel 呼 `tick_cognitive_modulator`（`update_count` 從 permanent 0 → ≥1）；6 new sanity tests；W2 ≥85% cov + W3 integration ≥5 case PA RFC deferred；E2 PASS to E4
-- ✅ **G3-09 daemon integration test**（commit `af66ac1`，升 P3→P1 prereq）— `test_cost_edge_advisor_daemon.rs` NEW 593 LOC / 6 cases / 5 proofs（daemon spawn / Trigger 轉換 / env-gate strict "1" / RiskConfig dual safeguard / 100ms cadence ≤10% mean error / cancel drain <1s）；0 production diff；Phase B Wave 0 prereq 達成；E2 PASS（2 INFO observations → Phase B FUP）
-- ✅ Linux post-merge cargo lib **2290 / 0** + 新 daemon test **6 / 0** + pytest 7-target **263 / 0** + healthcheck **32 PASS / 1 WARN**（[11] pre-existing 被動等待 ETA）
-- ✅ 6 FUP backlog tickets filed（詳 Backlog 章節）
-
-**Three-Axes Wave unblock 路徑 NOW LIVE**：
-- **G3-09 cost_edge_advisor Phase B impl**（shadow dry-run）— daemon integration test prereq 達成，可派 E1 Wave 1（V026 + INSERT path + healthcheck [30] upgrade per Phase B RFC §6）
-- **G8-01 W2 CognitiveModulator ≥85% line cov**（22 case suite per PA RFC §3.2）— W1 dead-path 修復後可派 E1-Beta
-- **G8-01 W3 StrategistAgent integration ≥5 case**（per PA RFC §3.3）— 與 W2 並行
-- **後續觸 maf 的 PR** — hard cap 餘裕從 10 → 234，下一輪可放心動
-
-**Next session 立即可派候選**：
-1. **G3-09 Phase B impl Wave 1**（PA Phase B RFC §6 已備，~1.5d E1）— V026 hypertable + INSERT path + healthcheck [30] frequency check
-2. **G8-01 W2 + W3 並行**（PA RFC §3.2/§3.3 已備，~1.5d E1-Beta + E1-Gamma）— ≥85% cov + integration ≥5 case
-3. **G8-01-FUP-LOSSES-WIRING**（PA RFC acknowledged limitation）— wire `_stats["consecutive_losses"]` from trade outcome callback
-4. **ML-TRAINING-DATA-HYGIENE-1**（MIT + E1，1-2d）— 歷史 EF noise 量化（並行候選）
-
-**Passive observation 候選**（時間驅動，不需立即派）：
-- **G1-04-FUP-FINAL-COMPUTE P1**（QC+FA, ~2-3h post-data，~05-02 cutoff）— G7-09 fix 滿 1w post-deploy 後 QC re-compute fee drop + R:R baseline；驗 maker_pct + grid_long 0.06 R:R 是否持續惡化 + ma_reverse 結構性問題；G2-01/G2-04 決策輸入
-
-**LOW polish 候選**（Wave 4 / G5 wave 對齊）：
-5. **G3-08-FUP-ANALYST-SPLIT P2** + **G3-08-FUP-HSQ-SPLIT P2**（拆 sibling 模式）
-6. **G3-08-FUP-STRATEGIST-DELEGATOR-SLIM P3** + **G3-08-FUP-EXECUTOR-EARLY-RETURN-LOW1 P4**（純優化）
-7. **G3-09-PHASE-A-PA-RFC-SLOT-UPDATE P3** + **G3-09-PHASE-A-DAEMON-INTEGRATION-TEST P3**（PA / E1 補哨兵）
-8. **G3-08-PHASE-4-STRATEGIST-SPLIT-FUP-FACADE**（LOW，~30min）— PUBLIC facade method + replace string literal
-9. **T6-FUP-WARN-ZONE-FILES-SPLIT** + **T6-FUP-PA-MEMORY-INDEX-SYNC** + **EXIT-FEATURES-FIX-FUP-HELPERS-RS-SPLIT**
-
-詳：[Phase 4 Sign-off](docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-27--phase4_complete_signoff.md) · [Tier 9 Sign-off](docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-26--tier9_signoff.md)
+- **Wave H**（2026-04-28 深夜 · 6 commits `dbba235..0a50c6c` · 3-way active warn cleanup splits + 2 inline fixes）— [Sign-off](docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-28--wave_h_signoff.md)
+- **Wave G**（2026-04-28 深夜 · 5 commits `8a5973f..3b0a0d7` · 4-way file size cleanup splits · §九 1200 hard cap 全清）— [Sign-off](docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-28--wave_g_signoff.md)
+- **Wave F**（2026-04-28 深夜 · 3 commits `739af3c..22e8482` · engine `--rebuild` deploy + SINGLETON sibling fix · operator decision (C) defer Phase B observation）— [Sign-off](docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-28--wave_f_partial_signoff.md)
+- **Wave E**（2026-04-28 深夜 · 8 commits `decf712..3788498` · cost_edge_advisor_boot split + Phase C PA RFC + SINGLETON-POLLUTION fix）— [Sign-off](docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-28--wave_e_signoff.md)
+- **Wave B**（2026-04-28 晚 · 10 commits `cf34e96..dbe2477` · G3-09 Phase B Wave 1 + G8-01 W2 + W3，含 1 hotfix round）— [Sign-off](docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-28--wave_b_signoff.md)
+- **Wave A Prep-Gate Trio**（2026-04-28 早 · 5 commits `82347a5..a6bf090` · sticky-ts + LOSSES-WIRING + spawn-test）— [Sign-off](docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-28--wave_a_prep_gate_signoff.md)
+- **Three-Axes Wave**（2026-04-27 23:55 · 5 commits `6e466c8..7c32d1f` · MAF-SPLIT P1 + G8-01 W1 + G3-09 daemon test）— [Sign-off](docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-27--three_axes_wave_signoff.md)
+- **Phase 4 5-Agent state events + G3-09 Phase A**（2026-04-27 21:30 · 6 commits + 5 sequential merges `c8a4a55..b67b0a8` · env=1 H_state 10-bucket envelope live · 解阻 G8-01 + G3-09 Phase B/C）— [Sign-off](docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-27--phase4_complete_signoff.md)
 
 ---
 
@@ -420,7 +280,7 @@ ssh trade-core "cd ~/BybitOpenClaw/srv && python3 helper_scripts/db/passive_wait
 |---|---|---|---|---|---|---|
 | **G3-01** | ✅完成 | ExecutorAgent ConfigStore + IPC RFC 設計 — PA sub-agent 755 行 RFC：11 必備節 + §12 impl order；鎖定決策：shadow_mode 住 Rust `RiskConfig.executor.shadow_mode`（新 sub-struct 不動 Python `ExecutorConfig`）· `patch_executor_config` 鏡射 `patch_risk_config` 重用 generic · `executor_config_cache.py` 100ms polling fail-closed to `shadow=true` · 3 階段 migration（Rust foundation → Python read path → operator 驅動 demo flip）· 防禦深度（Rust intent_processor 亦檢 shadow_mode on SubmitOrder）· Auth matrix（retreat cheap = Operator only, live flip = 5-gate chain）· 開放問題: per-symbol override / gradual ramp / `max_slippage_bps` 位置 / partial-map delete / GUI surface / `live_reserved` coupling / Phase 6 Reconciler interaction | G1-02 | PA / E2 | 完成 2026-04-24 | [RFC](docs/CCAgentWorkSpace/PA/workspace/reports/2026-04-24--g3_01_executor_agent_ipc_rfc.md)（commit `4d24f48`）|
 | **G3-02 Phase A** | ✅完成（Part 1 + Part 2）| ExecutorConfig schema + IPC e2e — **Part 1** (`16c97c1`)：`RiskConfig.executor` sub-struct（shadow_mode/max_position_pct/per_symbol_position_cap）+ `validate()` + 3-env TOML `[executor]` + 5 unit tests · **Part 2** (`03acedb`)：4 IPC e2e tests 證明 `patch_risk_config` deep-merge 已涵蓋 executor 子欄位；**設計：不另開 `patch_executor_config` 方法** · Linux release 2018/0 · `--rebuild` 部署 ✅ | G3-01 RFC | E1+PA / E2+E4 | 完成 2026-04-25 | Schema/TOML/IPC e2e ✅ |
-| **G3-03 Phase B** | ✅完成 | Python ExecutorConfig cache + ExecutorAgent rewire — `app/executor_config_cache.py` 新增 ~435 LOC（`ExecutorConfigCache` 單例 + daemon thread poller，預設 10s，env `OPENCLAW_EXECUTOR_CACHE_POLL_SEC` 可調，0.5s lower bound；`ExecutorRuntimeConfig` 不可變 snapshot；fail-closed `shadow_mode=True` 預設、IPC 錯誤後保留前一個好 snapshot）· `executor_agent.py:482` 移除 `_shadow_mode = True` class attr，ctor 改 `shadow_mode_provider: Callable[[], bool] = None`（None → fail-closed `lambda: True`）· `strategy_wiring.py:467` wire `get_executor_config_cache()` + `start_polling()` + `shadow_mode_provider=cache.shadow_mode_provider()`；CLAUDE.md §九 加 `_CACHE_INSTANCE` / `_CACHE_LOCK` 登記；17 new pytest cases；Linux pytest -k 'executor' **66/0** ✅；Phase A defaults (3 TOML shadow_mode=true) 保留現行為；Python-only 不需 `--rebuild` · **Note**：RFC §5.2 規定 100ms poll，本實作預設 10s（4-worker × 100ms socket round-trip 過密），如 PA 認定 100ms 為硬性，env 即可降至 0.5s 下限 | G3-02 Phase A | E1+PA / E2+E4 | 完成 2026-04-25 | [G3-03 Phase B report](.claude_reports/20260425_023220_g3_03_phase_b_executor_cache.md)（commit `51608fe`）|
+| **G3-03 Phase B** | ✅完成 | Python ExecutorConfig cache + ExecutorAgent rewire — `app/executor_config_cache.py` 新增 ~435 LOC（`ExecutorConfigCache` 單例 + daemon thread poller，預設 10s，env `OPENCLAW_EXECUTOR_CACHE_POLL_SEC` 可調，0.5s lower bound；`ExecutorRuntimeConfig` 不可變 snapshot；fail-closed `shadow_mode=True` 預設、IPC 錯誤後保留前一個好 snapshot）· **`shadow_mode_provider` live at `program_code/exchange_connectors/bybit_connector/control_api_v1/app/executor_agent.py:145-186`**，取代原 hardcoded `_shadow_mode = True` class attr（CLAUDE.md §二 原則 #3 fix · per G3-03 Phase B implementation） — ctor 改 `shadow_mode_provider: Callable[[], bool] = None`（None → fail-closed `lambda: True`）· `strategy_wiring.py:467` wire `get_executor_config_cache()` + `start_polling()` + `shadow_mode_provider=cache.shadow_mode_provider()`；CLAUDE.md §九 加 `_CACHE_INSTANCE` / `_CACHE_LOCK` 登記；17 new pytest cases；Linux pytest -k 'executor' **66/0** ✅；Phase A defaults (3 TOML shadow_mode=true) 保留現行為；Python-only 不需 `--rebuild` · **Note**：RFC §5.2 規定 100ms poll，本實作預設 10s（4-worker × 100ms socket round-trip 過密），如 PA 認定 100ms 為硬性，env 即可降至 0.5s 下限 | G3-02 Phase A | E1+PA / E2+E4 | 完成 2026-04-25 | [G3-03 Phase B report](.claude_reports/20260425_023220_g3_03_phase_b_executor_cache.md)（commit `51608fe`）|
 | **G3-02 Phase C** | ✅完成 | Operator API for executor shadow_mode flip — `POST /api/v1/executor/shadow-toggle` 5-gate live auth chain（Operator role + live_reserved + OPENCLAW_ALLOW_MAINNET + secret slot + authorization.json HMAC）；preview/confirm 兩段；DEFAULT-OFF env-gate；`app/executor_routes.py` 625 LOC + 17 pytest tests | G3-02 Phase A/B | E1+PA / E2+E4 | 完成 2026-04-25 | commit `325582f` |
 | **G3-03（Rust IPC）** | ✅由現有路徑覆蓋 | Rust `intent_processor` IPC handler — Phase B `51608fe` Python ExecutorConfigCache + executor_agent rewire 後，shadow→live toggle 透過既有 `patch_risk_config` IPC（Phase A 4 e2e tests `03acedb` 已驗 deep-merge）+ 既有 SubmitOrder intent path（Rust intent_processor 從 Phase 1 起即接收 Python intents）；G3-04 e2e `852da0f` 端到端證明（cache poll → flip → IPC → SubmitOrder mock）；不需新增獨立 Rust handler | G3-02 Phase A/B/C | E1 / E2+E4 | 完成 2026-04-25 | G3-04 e2e + Phase A IPC 雙覆蓋 |
 | **G3-04** | ✅完成 | ExecutorAgent shadow→live e2e 整合測試 — `tests/test_executor_shadow_to_live_e2e.py` 5 test class / 8 case，556 行純測試 0 production diff：(1) `TestDefaultStateShadow` fresh cache fail-closed → 0 IPC (2) `TestIpcFlipShadowToLive` shadow→flip→live + payload shape verify (3) `TestIpcFlipBackToShadow` live→shadow flip-back (4) `TestIpcUnavailableFailClosed` 初始化後 IPC 失敗保留 live snapshot；未初始化失敗維持 shadow (5) `TestPerEngineIsolation` paper/demo cache 各自獨立。Mock 邊界：cache poll mock `_fetch_via_ipc_blocking`，SubmitOrder mock `paper_trading_routes._ipc_command`；用同步 `cache._poll_once()` 避免 timing flake。**未發現 production gap**：跑通本身證明 G3-02 Phase A + G3-03 Phase B chain (IPC→cache→provider→execute→IPC) 端到端通暢。Linux pytest -k 'executor or shadow_to_live' **74/0** ✅；pytest baseline 3013 → 3021 (+8) | G3-03 | E4 / QA | 完成 2026-04-25 | [G3-04 report](.claude_reports/20260425_023800_g3_04_e2e_executor_shadow.md)（commit `852da0f`）|
