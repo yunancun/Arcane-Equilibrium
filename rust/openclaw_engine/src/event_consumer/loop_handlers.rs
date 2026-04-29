@@ -288,6 +288,7 @@ pub(super) fn handle_pending_registration(
             "limit" => "Limit".to_string(),
             other => other.to_string(),
         };
+        let time_in_force_pg = po.time_in_force.map(|tif| tif.as_str().to_string());
         if let Some(tx) = order_tx {
             let em = pipeline.effective_engine_mode().to_string();
             let _ = crate::database::try_send_trading_msg(
@@ -302,6 +303,7 @@ pub(super) fn handle_pending_registration(
                         "Sell".into()
                     },
                     order_type: order_type_pg,
+                    time_in_force: time_in_force_pg,
                     qty: po.qty,
                     strategy_name: po.strategy.clone(),
                     is_close: po.is_close,

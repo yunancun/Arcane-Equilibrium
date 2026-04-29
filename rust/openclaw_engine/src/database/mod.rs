@@ -405,6 +405,8 @@ pub enum TradingMsg {
         side: String,
         /// "Market" or "Limit" / 市價或限價
         order_type: String,
+        /// Bybit timeInForce, e.g. "GTC" / "PostOnly" / Bybit timeInForce。
+        time_in_force: Option<String>,
         qty: f64,
         strategy_name: String,
         /// True if this is a close/reduce order / 是否為平倉單

@@ -443,13 +443,96 @@ def _already_applied(cur: Any, fingerprint: str, cfg: DemoApplierConfig) -> bool
               FROM learning.mlde_param_applications
              WHERE ts >= now() - (%s::int || ' hours')::interval
                AND payload->>'fingerprint' = %s
-               AND status IN ('applied', 'dry_run')
+               AND status IN ('applied', 'dry_run', 'skipped')
         )
         """,
         (cfg.dedupe_hours, fingerprint),
     )
     row = cur.fetchone()
     return bool(row and row[0])
+
+def _noop_audit_payload(cur: Any, cfg: DemoApplierConfig) -> dict[str, Any]:
+    cur.execute(
+        """
+        SELECT
+            count(*) FILTER (
+                WHERE ts >= now() - (%s::int || ' hours')::interval
+            )::int AS lookback_recommendations,
+            count(*) FILTER (
+                WHERE ts >= now() - (%s::int || ' hours')::interval
+                  AND engine_mode = %s
+            )::int AS demo_recommendations,
+            count(*) FILTER (
+                WHERE ts >= now() - (%s::int || ' hours')::interval
+                  AND engine_mode = %s
+                  AND NOT applied
+                  AND COALESCE(confidence, 0.0) >= %s
+                  AND COALESCE(sample_count, 0) >= %s
+            )::int AS eligible_recommendations
+        FROM learning.mlde_shadow_recommendations
+        """,
+        (
+            cfg.lookback_hours,
+            cfg.lookback_hours,
+            cfg.engine_mode,
+            cfg.lookback_hours,
+            cfg.engine_mode,
+            cfg.min_confidence,
+            cfg.min_samples,
+        ),
+    )
+    row = cur.fetchone() or (0, 0, 0)
+    return {
+        "reason": "no_eligible_recommendations",
+        "lookback_hours": cfg.lookback_hours,
+        "engine_mode": cfg.engine_mode,
+        "min_confidence": cfg.min_confidence,
+        "min_samples": cfg.min_samples,
+        "max_recommendations": cfg.max_recommendations,
+        "lookback_recommendations": int(row[0] or 0),
+        "demo_recommendations": int(row[1] or 0),
+        "eligible_recommendations": int(row[2] or 0),
+    }
+
+def _record_noop_audit(cur: Any, cfg: DemoApplierConfig) -> dict[str, Any]:
+    payload = _noop_audit_payload(cur, cfg)
+    fp = _fingerprint(
+        "applier_noop",
+        "mlde_demo_applier",
+        {
+            "engine_mode": cfg.engine_mode,
+            "min_confidence": cfg.min_confidence,
+            "min_samples": cfg.min_samples,
+            "lookback_recommendations": payload["lookback_recommendations"],
+            "demo_recommendations": payload["demo_recommendations"],
+            "eligible_recommendations": payload["eligible_recommendations"],
+        },
+    )
+    if _already_applied(cur, fp, cfg):
+        return {
+            "status": "skipped",
+            "reason": "no_eligible_recommendations_deduped",
+            "target": "mlde_demo_applier",
+        }
+    _record_application(
+        cur,
+        row={"engine_mode": cfg.engine_mode, "id": None},
+        application_type="strategy_params",
+        target_name="mlde_demo_applier",
+        patch={},
+        prev_snapshot={},
+        ipc_response={},
+        status="skipped",
+        reason="no_eligible_recommendations",
+        requires_governance=False,
+        payload={**payload, "fingerprint": fp},
+    )
+    return {
+        "status": "skipped",
+        "reason": "no_eligible_recommendations",
+        "target": "mlde_demo_applier",
+        "eligible_recommendations": payload["eligible_recommendations"],
+    }
 
 def _record_application(
     cur: Any,
@@ -715,6 +798,12 @@ async def _run_async(
         with conn.cursor() as cur:
             rows = _fetch_pending(cur, cfg)
             summary["seen"] = len(rows)
+            if not rows:
+                result = _record_noop_audit(cur, cfg)
+                summary["skipped"] += 1
+                summary["details"].append(result)
+                conn.commit()
+                return summary
             for row in rows:
                 try:
                     result = await _apply_one(cur, row, cfg, ipc_call)

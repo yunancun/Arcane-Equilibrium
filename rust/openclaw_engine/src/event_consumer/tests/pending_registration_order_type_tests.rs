@@ -39,17 +39,26 @@ fn make_loop_state() -> super::super::loop_handlers::LoopState {
 }
 
 /// Drain the channel, find the first `TradingMsg::Order`, and return its
-/// `order_type` field. Panics if no Order msg is present (caller must have
-/// dispatched something).
-/// 抽乾 channel，回傳第一個 `TradingMsg::Order` 的 `order_type`。
+/// `order_type` + `time_in_force` fields. Panics if no Order msg is present
+/// (caller must have dispatched something).
+/// 抽乾 channel，回傳第一個 `TradingMsg::Order` 的 `order_type` + `time_in_force`。
 /// 若無 Order msg 直接 panic（呼叫方應確認已派發）。
-fn first_order_type(rx: &mut mpsc::Receiver<TradingMsg>) -> String {
+fn first_order_shape(rx: &mut mpsc::Receiver<TradingMsg>) -> (String, Option<String>) {
     while let Ok(msg) = rx.try_recv() {
-        if let TradingMsg::Order { order_type, .. } = msg {
-            return order_type;
+        if let TradingMsg::Order {
+            order_type,
+            time_in_force,
+            ..
+        } = msg
+        {
+            return (order_type, time_in_force);
         }
     }
     panic!("no TradingMsg::Order observed on channel / channel 上未見 Order msg");
+}
+
+fn first_order_type(rx: &mut mpsc::Receiver<TradingMsg>) -> String {
+    first_order_shape(rx).0
 }
 
 fn first_order_state_change(
@@ -114,12 +123,13 @@ fn test_handle_pending_registration_limit_postonly_emits_limit_audit_row() {
         Some(&tx),
     );
 
-    let order_type = first_order_type(&mut rx);
+    let (order_type, time_in_force) = first_order_shape(&mut rx);
     assert_eq!(
         order_type, "Limit",
         "intent.order_type=limit + TIF=PostOnly must emit \"Limit\" audit row \
          (FIX-G7-09B regression — pre-fix hardcoded \"Market\" masked maker submits)"
     );
+    assert_eq!(time_in_force.as_deref(), Some("PostOnly"));
 }
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -140,12 +150,13 @@ fn test_handle_pending_registration_market_emits_market_audit_row() {
         Some(&tx),
     );
 
-    let order_type = first_order_type(&mut rx);
+    let (order_type, time_in_force) = first_order_shape(&mut rx);
     assert_eq!(
         order_type, "Market",
         "intent.order_type=market must emit \"Market\" audit row \
          (legacy/baseline path — fix must not regress Market dispatches)"
     );
+    assert_eq!(time_in_force, None);
 }
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -171,8 +182,9 @@ fn test_handle_pending_registration_limit_with_gtc_emits_limit_audit_row() {
         Some(&tx),
     );
 
-    let order_type = first_order_type(&mut rx);
+    let (order_type, time_in_force) = first_order_shape(&mut rx);
     assert_eq!(order_type, "Limit");
+    assert_eq!(time_in_force.as_deref(), Some("GTC"));
 }
 
 #[test]

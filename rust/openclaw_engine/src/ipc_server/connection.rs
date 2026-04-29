@@ -52,6 +52,9 @@ fn verify_ipc_token(secret: &str, ts: i64, token: &str) -> bool {
     use sha2::Sha256;
     type HmacSha256 = Hmac<Sha256>;
 
+    if secret.is_empty() {
+        return false;
+    }
     let Ok(mut mac) = HmacSha256::new_from_slice(secret.as_bytes()) else {
         return false;
     };
@@ -262,5 +265,18 @@ mod tests {
         let token = hex::encode(mac.finalize().into_bytes());
         // Verify with a different secret / 用不同 secret 驗證
         assert!(!verify_ipc_token("wrong_secret", ts, &token));
+    }
+
+    #[test]
+    fn verify_ipc_token_rejects_empty_secret_even_with_matching_token() {
+        use hmac::{Hmac, Mac};
+        use sha2::Sha256;
+        type HmacSha256 = Hmac<Sha256>;
+        let ts: i64 = 1700000000;
+        let mut mac = HmacSha256::new_from_slice(b"").unwrap();
+        mac.update(ts.to_string().as_bytes());
+        let token = hex::encode(mac.finalize().into_bytes());
+
+        assert!(!verify_ipc_token("", ts, &token));
     }
 }

@@ -167,7 +167,7 @@ const FILL_COLS: usize = 22; // includes execution reference/slippage (V028)
 const FUNDING_SETTLEMENT_COLS: usize = 13; // includes raw JSONB
 const POSITION_COLS: usize = 9;
 const VERDICT_COLS: usize = 12; // includes risk_level/check arrays + details
-const ORDER_COLS: usize = 11;
+const ORDER_COLS: usize = 12;
 const STATE_CHANGE_COLS: usize = 8;
 const SCANNER_SNAPSHOT_COLS: usize = 9;
 
@@ -623,7 +623,7 @@ async fn flush_orders(pool: &DbPool, buf: &mut Vec<TradingMsg>) {
         |chunk| {
             let mut qb: QueryBuilder<Postgres> = QueryBuilder::new(
                 "INSERT INTO trading.orders \
-                 (ts, order_id, symbol, side, order_type, qty, strategy_name, \
+                 (ts, order_id, symbol, side, order_type, time_in_force, qty, strategy_name, \
                   category, is_paper, status, engine_mode) ",
             );
             qb.push_values(chunk.iter(), |mut b, msg| {
@@ -633,6 +633,7 @@ async fn flush_orders(pool: &DbPool, buf: &mut Vec<TradingMsg>) {
                     symbol,
                     side,
                     order_type,
+                    time_in_force,
                     qty,
                     strategy_name,
                     is_close: _,
@@ -646,6 +647,7 @@ async fn flush_orders(pool: &DbPool, buf: &mut Vec<TradingMsg>) {
                     b.push_bind(symbol.as_str());
                     b.push_bind(side.as_str());
                     b.push_bind(order_type.as_str());
+                    b.push_bind(time_in_force.as_deref());
                     b.push_bind(sanitize_f64_or_zero(*qty) as f32);
                     b.push_bind(strategy_name.as_str());
                     b.push_bind("linear"); // Bybit USDT perp default / USDT 永續默認
