@@ -982,3 +982,19 @@ Operator 接續 Tier 8 sign-off 後說「繼續派」。PM 按 Tier 8 §8 推薦
 - Not full-green: latest passive healthcheck still FAILs `[12]` and `[22]`, and WARNs `[27]`; `[31]` no longer appeared in the latest rerun.
 - Live pipeline is intentionally blocked until schema-v2 auth renewal.
 - Do not say production-ready until `[22] trading_pipeline_silent_gap` / fee-rate cold-boot cost_gate fail-closed is investigated and passive healthcheck is rerun clean or explicitly accepted.
+
+## 2026-04-29 W1-T2 Attribution Gap Close
+
+### Result
+- Operator asked to verify the prior STRATEGY-NAME-ATTRIBUTION / `[38]` findings and fix the remaining gaps. PM executed locally without sub-agents.
+- Producer-side W1-T2 is complete in `5895579` + hotfix `854cae1`: close emitters now write normalized `strategy_name` and `exit_reason`; zero-PnL close-prefix IPC/manual rows are covered.
+- Linux `trade-core` deployed `854cae1` with `restart_all.sh --rebuild --keep-auth`; engine PID `779344`, API PID `779449`, watchdog healthy.
+
+### Runtime
+- `[38] grid_trading_lifecycle_drift` still FAILs by design and is now confirmed as a real grid behavior signal, not a dead monitor.
+- `[39] strategy_name_cardinality_drift` is WARN after deploy: 1h distinct strategy_name=7; 24h distinct=22 while legacy rows age out.
+- Existing WARNs `[12]`, `[33]`, and `[11]` remain separate.
+
+### Boundary
+- No live/demo risk config changes, no strategy shutdown, and no live authorization relaxation were performed.
+- Next action is an operator/risk-policy decision on live_demo grid behavior, not more attribution plumbing.
