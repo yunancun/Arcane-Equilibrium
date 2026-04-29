@@ -156,3 +156,49 @@ def _read_shadow_enabled_from_toml() -> tuple[bool | None, str]:
         return (None, f"[exit].shadow_enabled missing or non-bool (got {val!r})")
 
     return (val, "ok")
+
+
+def _engine_process_age_minutes() -> tuple[float | None, str]:
+    """Best-effort age of the newest running openclaw-engine process.
+    盡力取得最新 openclaw-engine 進程年齡（分鐘）。
+    """
+    if os.name == "nt":
+        return (None, "process age unavailable on nt")
+    proc = Path("/proc")
+    if not proc.exists():
+        return (None, "/proc unavailable")
+    try:
+        import subprocess
+
+        out = subprocess.check_output(
+            ["pgrep", "-x", "openclaw-engine"],
+            text=True,
+            timeout=1.0,
+        )
+        pids = [int(x) for x in out.split() if x.strip().isdigit()]
+    except Exception as exc:
+        return (None, f"pgrep failed: {type(exc).__name__}")
+    if not pids:
+        return (None, "openclaw-engine not running")
+
+    try:
+        uptime_s = float((proc / "uptime").read_text().split()[0])
+        ticks_per_s = os.sysconf("SC_CLK_TCK")
+    except Exception as exc:
+        return (None, f"uptime/sysconf failed: {type(exc).__name__}")
+
+    ages: list[float] = []
+    for pid in pids:
+        try:
+            stat = (proc / str(pid) / "stat").read_text()
+            # Field 2 is "(comm)" and can contain spaces. Split after it;
+            # field 22 (starttime) becomes index 19 in the remaining fields.
+            # 第 2 欄 "(comm)" 可能含空格；從其後切開，欄 22 starttime 對應剩餘欄 index 19。
+            fields = stat.rsplit(") ", 1)[1].split()
+            start_ticks = int(fields[19])
+            ages.append(max(0.0, (uptime_s - (start_ticks / ticks_per_s)) / 60.0))
+        except Exception:
+            continue
+    if not ages:
+        return (None, "could not parse /proc pid stat")
+    return (min(ages), "ok")

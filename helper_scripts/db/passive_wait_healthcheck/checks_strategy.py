@@ -38,6 +38,7 @@ from pathlib import Path
 
 from .db import _scalar
 from .shared import (
+    _engine_process_age_minutes,
     _read_bb_breakout_active_from_toml,
     _read_bb_breakout_config_from_toml,
 )
@@ -864,6 +865,11 @@ def check_strategist_cycle_fresh() -> tuple[str, str]:
             return ("PASS",
                     "StrategistScheduler not started in tail — Demo unbound or fresh boot "
                     "(by design per project_strategist_scheduler_paper_orphan)")
+        engine_age_min, _engine_age_diag = _engine_process_age_minutes()
+        if engine_age_min is not None and engine_age_min < 10.0:
+            return ("PASS",
+                    f"scheduler started; engine restarted {engine_age_min:.1f}m ago, "
+                    "first 5-min cycle pending")
         return ("FAIL",
                 "scheduler started but no cycle activity in 4MB tail — wedged?")
 
