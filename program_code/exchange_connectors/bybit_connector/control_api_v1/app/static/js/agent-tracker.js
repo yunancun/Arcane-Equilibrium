@@ -572,28 +572,41 @@ async function loadAgentFeed() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Block E — Shadow vs Live diff / 影子 vs 真仓对比
+// Block E — Demo engine vs LiveDemo engine fills diff / Demo 引擎 vs LiveDemo 引擎成交对比
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Load + render shadow vs live executor summary using the new round 2 endpoint.
+ * Load + render Demo engine vs LiveDemo engine fills summary.
  * 拉 /api/v1/agents/shadow_vs_live_summary 渲染对比数字；60s 刷新。
  *
+ * 语义说明 / Semantic note:
+ *   后端 SQL 抓 trading.fills WHERE engine_mode IN ('demo','live','live_demo') —
+ *   两边都是真实送单到 Bybit demo endpoint 的成交，差别在于 risk_config 引擎：
+ *     - demo column: engine_mode='demo'，使用 risk_config_demo.toml
+ *     - live_demo column: engine_mode='live_demo'，Live 管线走 demo endpoint，
+ *       使用 risk_config_live.toml（CLAUDE.md §三 engine_mode_tag_live_demo）
+ *   不要把这卡当成 ExecutorAgent shadow_mode（_shadow_mode=True 写到
+ *   learning.decision_shadow_* 是另一回事，与本卡无关）。
+ *
+ *   Backend SQL filters trading.fills by engine_mode tag. Both sides are real fills
+ *   submitted to Bybit demo endpoint. Difference is which risk_config TOML the engine
+ *   pipeline reads. Unrelated to ExecutorAgent _shadow_mode (which logs intents to
+ *   learning.decision_shadow_* without dispatching to Rust).
+ *
+ * 后端 endpoint URL 保留为 /api/v1/agents/shadow_vs_live_summary（backward compat）—
+ * 后端将新增 alias，前端这里不动 URL。
+ * Endpoint URL retained for backward compat; backend will add alias.
+ *
  * Round 2 修复（C-1 a）：
- *   - 改呼新 endpoint /api/v1/agents/shadow_vs_live_summary?since=24h
  *   - schema：{demo:{count, total_pnl_usd, avg_slippage_bps},
  *             live_demo:{count, total_pnl_usd, avg_slippage_bps},
  *             diff:{fill_rate_delta_pct, slippage_delta_bps}}
- *   - 不再 fallback 旧的 shadow_count / count / n / total_pnl 字段 — fail-loud
+ *   - 不 fallback 旧字段 — fail-loud；missing → empty state
  *
- * Round 2 fix (C-1 a):
- *   - Hit new endpoint /api/v1/agents/shadow_vs_live_summary?since=24h
- *   - Drop legacy fallback chain — trust schema; missing fields → empty state
- *
- * 文案（per task brief）：
- *   - 影子（demo）卡：「模拟意图 N 笔 · 模拟 PnL +$X.XX」
- *   - 真仓（live_demo）卡：「真实成单 N 笔 · 真实 PnL +$X.XX」
- *   - 中央 diff 行：fill_rate_delta_pct (≥10% 红) + slippage_delta_bps
+ * 文案：
+ *   - Demo 引擎卡：「Demo 成交 N 笔 · Demo PnL +$X.XX」
+ *   - LiveDemo 引擎卡：「LiveDemo 成交 N 笔 · LiveDemo PnL +$X.XX」
+ *   - 中央 diff 行（Demo vs LiveDemo）：fill_rate_delta_pct (≥10% 红) + slippage_delta_bps
  */
 async function loadShadowLiveDiff() {
   const mySeq = ++_pollSeq.shadowLive;
@@ -630,18 +643,20 @@ async function loadShadowLiveDiff() {
   let html = '<div style="display:flex;flex-direction:column;gap:10px">';
   html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">';
 
-  // Shadow column (demo intent)
+  // Demo engine column (engine_mode='demo' fills) / Demo 引擎成交栏
+  // Real fills to Bybit demo endpoint; uses risk_config_demo.toml.
+  // 真实成交到 Bybit demo endpoint；使用 risk_config_demo.toml。
   html += '<div style="background:linear-gradient(135deg, #0d1f3d, #1a2f5c);'
     + 'border:1px solid #1a2f5c;border-radius:8px;padding:12px">';
-  html += '<div style="font-size:13px;font-weight:600;margin-bottom:8px">🌙 '
-    + withTip("shadow", "影子（demo intent）") + '</div>';
+  html += '<div style="font-size:13px;font-weight:600;margin-bottom:8px">🟦 '
+    + withTip("shadow", "Demo 引擎成交") + '</div>';
   html += '<div style="font-size:11px;color:var(--text-dim);margin-bottom:6px">'
-    + '只记录意图、不送真单 / Logged intent only</div>';
-  html += '<div style="font-size:18px;font-weight:700">模拟意图 '
+    + 'Demo engine real fills（Bybit demo endpoint，使用 risk_config_demo.toml）</div>';
+  html += '<div style="font-size:18px;font-weight:700">Demo 成交 '
     + demoCount + ' 笔</div>';
   if (demoPnl != null) {
     const cls = ocPnlClass(demoPnl);
-    html += '<div class="' + cls + '" style="font-size:14px;margin-top:4px">模拟 PnL '
+    html += '<div class="' + cls + '" style="font-size:14px;margin-top:4px">Demo PnL '
       + ocMoney(demoPnl) + '</div>';
   }
   if (demoSlip != null) {
@@ -650,20 +665,22 @@ async function loadShadowLiveDiff() {
   }
   html += '</div>';
 
-  // Live column (live_demo realized)
+  // LiveDemo engine column (engine_mode='live_demo' fills) / LiveDemo 引擎成交栏
+  // Live pipeline routed to Bybit demo endpoint; uses risk_config_live.toml.
+  // Live 管线走 demo endpoint；使用 risk_config_live.toml（CLAUDE.md §三 engine_mode_tag_live_demo）。
   const liveBg = liveCount > 0
     ? "background:linear-gradient(135deg, #3d0d0d, #5c1a1a);border:1px solid var(--red);"
     : "background:rgba(13,17,23,0.4);border:1px dashed var(--border);";
   html += '<div style="' + liveBg + 'border-radius:8px;padding:12px">';
-  html += '<div style="font-size:13px;font-weight:600;margin-bottom:8px">🔴 真仓（live_demo realized）</div>';
+  html += '<div style="font-size:13px;font-weight:600;margin-bottom:8px">🔴 LiveDemo 引擎成交</div>';
   html += '<div style="font-size:11px;color:var(--text-dim);margin-bottom:6px">'
-    + '真实成单到交易所 / Real fills via demo endpoint</div>';
+    + 'Live 管线走 demo endpoint（使用 risk_config_live.toml）</div>';
   if (liveCount > 0) {
-    html += '<div style="font-size:18px;font-weight:700">真实成单 '
+    html += '<div style="font-size:18px;font-weight:700">LiveDemo 成交 '
       + liveCount + ' 笔</div>';
     if (livePnl != null) {
       const cls = ocPnlClass(livePnl);
-      html += '<div class="' + cls + '" style="font-size:14px;margin-top:4px">真实 PnL '
+      html += '<div class="' + cls + '" style="font-size:14px;margin-top:4px">LiveDemo PnL '
         + ocMoney(livePnl) + '</div>';
     }
     if (liveSlip != null) {
@@ -671,9 +688,9 @@ async function loadShadowLiveDiff() {
         + '平均滑点 ' + Number(liveSlip).toFixed(2) + ' bps</div>';
     }
   } else {
-    html += '<div style="font-size:14px;color:var(--text-dim)">— 暂无真仓流量 —</div>';
+    html += '<div style="font-size:14px;color:var(--text-dim)">— 此时段无 LiveDemo 成交 —</div>';
     html += '<div style="font-size:11px;color:var(--text-dim);margin-top:4px">'
-      + 'Executor 默认在影子模式</div>';
+      + '流量稀疏 / 引擎运行中（pipeline 状态请看 System tab）</div>';
   }
   html += '</div>';
   html += '</div>';  // end 2-column grid
@@ -690,14 +707,14 @@ async function loadShadowLiveDiff() {
       + 'gap:8px;flex-wrap:wrap;font-size:12px">';
     if (fillDelta != null) {
       const sign = Number(fillDelta) >= 0 ? "+" : "";
-      html += '<div>成交率差异：<strong style="color:' + fillColor + '">'
+      html += '<div>成交率差异（Demo vs LiveDemo）：<strong style="color:' + fillColor + '">'
         + sign + Number(fillDelta).toFixed(1) + '%</strong>'
         + (fillRed ? ' <span style="color:var(--red);font-size:11px">⚠ 偏离 ≥10%</span>' : '')
         + '</div>';
     }
     if (slipDelta != null) {
       const sign = Number(slipDelta) >= 0 ? "+" : "";
-      html += '<div>滑点差异：<strong style="color:var(--text)">'
+      html += '<div>滑点差异（Demo vs LiveDemo）：<strong style="color:var(--text)">'
         + sign + Number(slipDelta).toFixed(2) + ' bps</strong></div>';
     }
     html += '</div>';

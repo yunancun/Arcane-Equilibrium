@@ -49,6 +49,7 @@ function updateBudgetDisplay(remaining) { ... }
 | 2026-04-26 | F5 GUI Live tab anti-human-design 修復（5 findings + 11 pytest） | `workspace/reports/2026-04-26--f5_gui_live_anti_human_design.md` |
 | 2026-04-27 | Live Auth Renew 控制項移至 Governance Hub，打破 locked tab 死鎖 | 主會話直接報告（無單獨 .md） |
 | 2026-04-28 | Agent Tracker MVP（AI 团队工作台）— tab-learning.html 加 5 区块 + agent-tracker.js 722 行 | 主會話直接報告（無單獨 .md） |
+| 2026-04-29 | Learning tab 区块 E「影子 vs 真仓」误导文案修正 → 「Demo 引擎 vs LiveDemo 引擎成交」 | `.claude_reports/20260429_191942_e1a_gui_shadow_vs_live_text_fix.md` |
 
 ## F5 教訓（2026-04-26）
 
@@ -116,3 +117,17 @@ M-2 finding：fast 連點 / refresh 重疊發 race 寫舊 response 進 DOM。Abo
 
 ### L-3 contract test fixture 用純瀏覽器可跑的 mock-fetch
 專案無前端測試框架 (vitest/jest/jsdom)；E2 round 2 retro 容許「跳 L-3 但留 TODO」。我選最低線交付：`tests/static/test_agent_tracker_contract.html` 純 mock window.fetch + 手寫 record/assertContains，瀏覽器打開即跑、無依賴。比 0 fixture 強，比 jest 弱；TODO 註明未來若上 jest/vitest 應升級。
+
+## Shadow-vs-Live 文案误导修正教训（2026-04-29）
+
+### Endpoint URL ≠ semantic accuracy
+`/api/v1/agents/shadow_vs_live_summary` URL 用「shadow」「live」字眼，但后端 SQL 实际抓 `engine_mode IN ('demo','live','live_demo')` — 两边都是真实 fills，差别只在 risk_config TOML 引擎。Round 2 endpoint 命名时若选 `engine_mode_fills_summary` 就不会有此误导；但既然已上 endpoint 不可改 URL，**前端必须靠文案 + docstring + HTML 注释三层冗余把语义说清楚**，不依赖 URL/字段名 self-documenting。**规律**：endpoint URL 用了易误导的 metaphor（shadow/live/dark/light）时，GUI 文案必加 explicit 解释「这里说的 X 是 Y 概念，不是 Z 概念」，否则下次 maintainer / operator 又会被字面意思误导。
+
+### 不动 endpoint URL 也能彻底修文案
+Task 边界明确「不动 endpoint URL，等 E1 backend alias 解耦」。前端文案修正零依赖后端，这是好的解耦设计 — GUI 文案治理可独立 ship，不被 backend 部署排程卡。本次修改：(a) HTML 区块标题 (b) HTML 注释扩展（解释 engine_mode 概念）(c) JS docstring 重写 (d) Demo column 4 处文案 (e) LiveDemo column 5 处文案 (f) 中央 diff 2 处文案 — 全部静态字符串字面值替换，无控制流变更，retro break risk 极低。**规律**：当后端 endpoint URL 误导但已 ship，前端文案修正可作为「先治标」短期手段，让 user 立即免误导；后端 alias 是「再治本」的中期工程。
+
+### ExecutorAgent shadow ≠ engine_mode shadow
+Block E 卡和 Roster A 卡两个「shadow」概念完全不同：(1) Roster A 的 ExecutorAgent `_shadow_mode=True` — Python 进程内决策只 log 不发 SubmitOrder IPC 到 Rust（设计避免 Path A/B 双发倉位冲突，executor_agent.py:382）。(2) Block E 的「shadow」其实是 demo engine_mode 标签，跟 Python ExecutorAgent 完全无关。误用同一个词「shadow」是 round 1 命名失败遗留 — Round 2 修正只能从 Block E 这边拆分（Roster A 仍叫 shadow_mode 因为代码字段就叫这个）。**规律**：同一 GUI 页面同时显示两个不同概念但都用「shadow」时，必须至少一边换名字消除冲突（本次：Block E 「shadow」→「Demo 引擎」） + 在两边的注释/tooltip 显式说明「这里的 shadow 不是另一个 shadow」。
+
+### Tip / Tooltip 跨区块作用域要 grep 验证
+Task brief 提到 line 259-260 的 explain-agent-tracker tip 描述「5 位 AI 员工... 谁还在影子模式」— 看起来像描述 Block E 的 shadow，实际通过 grep `$('explain-agent-tracker')` 的元素位置验证：tip 挂在 `<section id="agent-tracker">` 顶部「AI 团队工作台」标题下方，作用域是整个 section（覆盖 Roster A + 4 个其他卡），主要描述 Roster A 的 ExecutorAgent shadow 概念（「谁还在影子模式（只观察）、谁开始动真钱」对应 Roster 卡的 isExecutor isLive 分支）。**规律**：改文案前必须 `grep '$(\'explain-X\')'` 找到该 explainer 的渲染位置 + 上下文卡片，确认作用域；不能光看 tip 内容字面就断定它服务哪个卡。本次按 task brief 不改 line 259-260 是正确决策。

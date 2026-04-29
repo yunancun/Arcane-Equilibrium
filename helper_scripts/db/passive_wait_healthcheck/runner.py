@@ -86,6 +86,11 @@ from .checks_execution import (
     check_mlde_learning_data_contract,
     check_mlde_shadow_recommendations,
     check_mlde_demo_applier,
+    # [38] (2026-04-29) MIT data-drift-detection: grid_trading single-position
+    # lifecycle drift demo vs live_demo, passive 7d.
+    # [38]（2026-04-29）MIT 資料漂移偵測：grid_trading 單倉 lifecycle 漂移
+    # demo vs live_demo，被動 7d 觀察。
+    check_grid_trading_lifecycle_drift,
 )
 
 
@@ -106,7 +111,7 @@ The checks split between DB pipelines + filesystem/observability sentinels:
   Cursor block:
     [1][2][3][4][5][6][8][9][10][12][Xb][14][15][21]      14 baseline
     [22][23][24][25][26][27][28]                          7 F7 MIT+E5
-    [30][31][32][33][34][35][36][37]                      cost/execution/MLDE sentinels
+    [30][31][32][33][34][35][36][37][38]                  cost/execution/MLDE/lifecycle sentinels
   Post-cursor (filesystem / pure-Python):
     [7][13][11][Xa][16][18][19][20]                       8 baseline
     [29]                                                  1 F7 (no-IPC stub)
@@ -125,11 +130,12 @@ Execution / cost sentinels added after F7:
   [30] cost_edge_advisor_status
   [31] edge_diag_2_strategy_diversity
   [32] maker_entry_intent_drift
-  [33] maker_fill_rate              (G2-01 PostOnly fee-drop monitor)
-  [34] intent_signal_attribution    (strategy signal_id join chain)
-  [35] mlde_learning_data_contract  (attributed post-fee training rows)
-  [36] mlde_shadow_recommendations  (advisory/live lease boundary)
-  [37] mlde_demo_applier            (demo autonomy audit + live lease boundary)
+  [33] maker_fill_rate                 (G2-01 PostOnly fee-drop monitor)
+  [34] intent_signal_attribution       (strategy signal_id join chain)
+  [35] mlde_learning_data_contract     (attributed post-fee training rows)
+  [36] mlde_shadow_recommendations     (advisory/live lease boundary)
+  [37] mlde_demo_applier               (demo autonomy audit + live lease boundary)
+  [38] grid_trading_lifecycle_drift    (MIT 2026-04-29 demo vs live_demo passive 7d)
 
 Exit codes:
   0 = all checks PASS / only WARN
@@ -148,8 +154,9 @@ def main() -> int:
 
     Counted rows are documented by ID, not by fragile total:
       cursor: [1][2][3][4][5][6][8][9][10][12][Xb][14][15][21]
-              [22][23][24][25][26][27][28] [30][31][32][33][34][35][36][37]
-              (F7 [22]-[28] are MIT/E5; [30]-[37] are post-F7/MLDE)
+              [22][23][24][25][26][27][28] [30][31][32][33][34][35][36][37][38]
+              (F7 [22]-[28] are MIT/E5; [30]-[37] are post-F7/MLDE;
+               [38] is MIT 2026-04-29 grid lifecycle drift)
       post-cursor: [7][13][11][Xa][16][18][19][20]
                    [29]   (F7 [29] is deferred-no-ipc stub)
 
@@ -158,7 +165,7 @@ def main() -> int:
     ``(status, msg)``（[1] 額外回 close_fills，供 [2]/[3]/[Xb] 用）。
     清單依 ID 記錄，避免總數 drift：
       cursor: [1][2][3][4][5][6][8][9][10][12][Xb][14][15][21]
-              [22][23][24][25][26][27][28] [30][31][32][33][34][35][36]
+              [22][23][24][25][26][27][28] [30][31][32][33][34][35][36][37][38]
       post-cursor: [7][13][11][Xa][16][18][19][20] [29]
     """
     ap = argparse.ArgumentParser(description=_RUNNER_DESCRIPTION)
@@ -430,6 +437,18 @@ def main() -> int:
             # 仍需 Decision Lease。
             s, m = check_mlde_demo_applier(cur)
             results.append(("[37] mlde_demo_applier", s, m))
+
+            # [38] grid_trading lifecycle drift between demo / live_demo
+            # (MIT 2026-04-29). Passive 7d observation per CLAUDE.md §七
+            # requirement; PASS until clear evidence of grid out-of-control
+            # behavior in live_demo. Three indicators tagged independently
+            # (lifetime ratio / fee burn / re-entry rate); final verdict =
+            # max severity. DB unreachable / 0 rows → WARN/PASS, never FAIL.
+            # [38] grid_trading demo vs live_demo lifecycle 漂移；被動 7d
+            # 觀察。三指標獨立標記（lifetime / fee burn / re-entry），最終
+            # verdict 取最高嚴重度。低活動期 PASS-with-note 不假警報。
+            s, m = check_grid_trading_lifecycle_drift(cur)
+            results.append(("[38] grid_trading_lifecycle_drift", s, m))
     finally:
         conn.close()
 

@@ -722,6 +722,120 @@ def test_shadow_vs_live_summary_unknown_since_falls_back_24h(client: TestClient)
     assert resp.json()["data"]["since_hours"] == 24
 
 
+# ─── /engine_mode_fills_summary alias route tests (C-1b 2026-04-29) ───────
+#
+# Design intent / 設計目的：
+#   The legacy URL ``/shadow_vs_live_summary`` is operator-misleading
+#   (它實際聚合 ``trading.fills`` 按 ``engine_mode`` 切桶，跟「影子」毫無
+#   關係). The canonical URL ``/engine_mode_fills_summary`` was added
+#   2026-04-29 (no behavioural change — same handler body). Legacy URL is
+#   kept so the Learning tab GUI / contract tests / API doc links keep
+#   working. These tests pin the alias contract:
+#     1. New URL is registered (no 404).
+#     2. New URL returns the SAME payload as the legacy URL given the same
+#        ``since`` query — proving the shared handler is wired correctly.
+#   They are intentionally minimal (we don't re-test SQL UNION / PG outage
+#   paths covered by the legacy ``test_shadow_vs_live_summary_*`` group).
+#
+#   舊 URL ``/shadow_vs_live_summary`` 命名誤導 operator（實際聚合
+#   ``trading.fills`` 按 ``engine_mode`` 切桶）。正名 URL
+#   ``/engine_mode_fills_summary`` 於 2026-04-29 新增（行為零變更，共用
+#   handler body）。舊 URL 為 backward compat 保留供 GUI / 契約測試 /
+#   API 文檔。本組測試釘住 alias 契約：
+#     1. 新 URL 已登記（不回 404）
+#     2. 新 URL 在同 ``since`` 下回傳 payload 與舊 URL 完全一致
+#   刻意只寫核心兩條 alias 契約，不重測 legacy ``test_shadow_vs_live_summary_*``
+#   已覆蓋的 SQL UNION / PG outage 等行為（避免重複維護）。
+
+
+def test_engine_mode_fills_summary_route_registered(client: TestClient) -> None:
+    """Alias：新 URL 已登記（不回 404，純 routing 契約）。"""
+    fake_sw = _make_fake_strategy_wiring()
+    with _patched_singletons(fake_sw), _pg_unavailable():
+        resp = client.get("/api/v1/agents/engine_mode_fills_summary?since=24h")
+    # 200 即代表 route 已登記 + handler body 跑完（PG outage path 已被
+    # legacy 測試覆蓋；本測試只證新 URL 不是 404）。
+    assert resp.status_code == 200, (
+        f"alias route should be registered; got {resp.status_code}: {resp.text}"
+    )
+    body = resp.json()
+    assert body["ok"] is True
+    assert "data" in body
+
+
+def test_engine_mode_fills_summary_alias_returns_same_payload_as_legacy(
+    client: TestClient,
+) -> None:
+    """Alias：相同 ``since_hours`` 下，新 URL 與舊 URL 回 payload 完全等價。
+
+    Pins the contract that both routes share the SAME handler body — any
+    future divergence (e.g. accidentally fetching different data, or a
+    typo in the alias delegate) will fail this test loudly.
+    釘住兩 route 共用 handler body 的契約 —— 未來任何 diverge（誤抓不同
+    資料 / alias delegate 出錯）會立刻被本測試抓到。
+    """
+    scripts = {
+        # Real-fills bucket aggregate. Use distinguishable numbers so that
+        # if either route mistakenly returns a different shape the assertion
+        # diff is obvious.
+        # 用可辨識數字以便 diff 出錯時對齊清楚。
+        "trading.fills": [
+            ("demo", 100, 12.5, 4.3),
+            ("live_demo", 80, 9.8, 5.7),
+        ],
+    }
+    fake_sw = _make_fake_strategy_wiring()
+
+    # Run both URLs back-to-back under the SAME pg-fake context so the
+    # underlying SQL fetch sees identical scripted rows. We rebuild the
+    # context twice (one per call) because the fake cursor's _last_rows is
+    # mutated per execute(); both calls run the same SQL and get the same
+    # scripted rowset.
+    # 兩 URL 連跑共用同一 PG fake context；fake cursor 在 execute() 後
+    # 重置 _last_rows，兩次呼叫取得相同 scripted rowset。
+    with _patched_singletons(fake_sw), _pg_returns(scripts):
+        resp_canonical = client.get(
+            "/api/v1/agents/engine_mode_fills_summary?since=24h"
+        )
+        resp_legacy = client.get(
+            "/api/v1/agents/shadow_vs_live_summary?since=24h"
+        )
+
+    assert resp_canonical.status_code == 200
+    assert resp_legacy.status_code == 200
+
+    body_canonical = resp_canonical.json()
+    body_legacy = resp_legacy.json()
+
+    # Whole-payload equivalence: ok / data / is_simulated / data_category.
+    # 全 payload 等價：ok / data / is_simulated / data_category。
+    assert body_canonical == body_legacy, (
+        "alias route must return the SAME payload as legacy route given "
+        "identical since_hours; payload divergence indicates the shared "
+        "handler is not correctly wired.\n"
+        f"canonical={body_canonical!r}\nlegacy={body_legacy!r}"
+    )
+
+    # Sanity-check the payload itself looks right (not both equal to {}
+    # or to an error envelope) — guards against the test passing because
+    # both routes are equally broken.
+    # 防雙錯：兩 URL 不能都回空 dict 或 error envelope，本檢查確認 payload
+    # 真實合理才算等價。
+    assert body_canonical["ok"] is True
+    data = body_canonical["data"]
+    assert data["since"] == "24h"
+    assert data["since_hours"] == 24
+    assert data["demo"]["count"] == 100
+    assert data["live_demo"]["count"] == 80
+    # data_category stays "agents_shadow_vs_live" on BOTH routes per the
+    # alias spec (downstream consumer back-compat).
+    # data_category 兩 route 皆保 "agents_shadow_vs_live"（per alias 設計，
+    # 下游 consumer back-compat）。
+    assert data["degraded"] is False
+    assert body_canonical["data_category"] == "agents_shadow_vs_live"
+    assert body_legacy["data_category"] == "agents_shadow_vs_live"
+
+
 # ─── H-1: integration test with real ExecutorAgent ────────────────────────
 
 

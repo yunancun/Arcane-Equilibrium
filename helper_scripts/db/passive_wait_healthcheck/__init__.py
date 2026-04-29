@@ -86,6 +86,12 @@ from .checks_execution import (  # noqa: F401
     check_mlde_learning_data_contract,
     check_mlde_shadow_recommendations,
     check_mlde_demo_applier,
+    # [38] (2026-04-29) MIT data-drift-detection: grid_trading single-position
+    # lifecycle drift demo vs live_demo (passive 7d observation per CLAUDE.md
+    # §七 「被動等待 TODO 必附 healthcheck」).
+    # [38]（2026-04-29）MIT 資料漂移偵測：grid_trading 單倉 lifecycle
+    # demo vs live_demo 漂移哨兵（被動 7d，CLAUDE.md §七 規定）。
+    check_grid_trading_lifecycle_drift,
 )
 
 __all__ = [
@@ -137,4 +143,6 @@ __all__ = [
     "check_mlde_learning_data_contract",
     "check_mlde_shadow_recommendations",
     "check_mlde_demo_applier",
+    # [38] grid_trading lifecycle drift (MIT 2026-04-29)
+    "check_grid_trading_lifecycle_drift",
 ]
