@@ -2,7 +2,7 @@
 
 Date: 2026-04-29 17:54 CEST
 Owner: Codex
-Status: Local implementation verified; Linux deploy pending.
+Status: Implemented, pushed, Linux deployed at commit `53bff07`.
 
 ## Scope
 
@@ -35,10 +35,23 @@ User requested the recommended items 1-6:
 
 ## Deploy Checks
 
-After Linux rebuild/restart, verify:
+Linux rebuild/restart:
+
+- Commit: `53bff07`
+- Engine PID: `620724`
+- API PID: `620851`
+
+Verified:
 
 - Startup logs contain two fee bindings:
   - `engine=demo env=Demo`
   - `engine=live env=LiveDemo` when live demo is authorized.
-- First hourly refresh logs conservative default reseed for every demo endpoint binding, not only `LiveDemo`.
-- `helper_scripts/db/passive_wait_healthcheck.py` no longer reports `[27]` as fee-staleness-driven.
+- Post-restart risk verdict query from `2026-04-29 15:59:22Z` showed no fee-stale rejections; remaining rejects were ATR unavailable or JS negative edge.
+- `helper_scripts/db/passive_wait_healthcheck.py` reports `[27] intents_counter_freeze` as PASS.
+- `trading.signals` recovered after restart and `[24] signals_writer_freshness` reports PASS.
+- Post-restart exchange intents had `empty_signal_id=0`.
+
+Still pending natural observation:
+
+- First hourly refresh should log conservative default reseed for every demo endpoint binding, not only `LiveDemo`.
+- `[34] intent_signal_attribution` still FAILs on the 30-minute rolling window because it includes pre-restart empty-signal rows; it should clear after the old rows age out if post-restart attribution remains clean.
