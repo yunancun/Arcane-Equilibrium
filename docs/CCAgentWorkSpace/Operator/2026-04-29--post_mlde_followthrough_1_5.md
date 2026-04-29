@@ -2,6 +2,8 @@
 
 Date: 2026-04-29 19:26 CEST
 
+Deploy update: commit `a3659d7` is pushed and deployed on Linux via `restart_all.sh --rebuild --keep-auth`. Engine PID `691042`; API PID `691117`.
+
 ## Result
 
 - `[37] mlde_demo_applier`: fixed the false WARN path by writing a deduped `skipped/no_eligible_recommendations` audit row when the applier runs but has no eligible recommendation.
@@ -17,5 +19,7 @@ Date: 2026-04-29 19:26 CEST
 - Rust IPC token tests: 5 passed.
 - Rust pending-registration order shape tests: 8 passed.
 - Rust intent persistence tests: 2 passed.
+- Full Rust lib regression: 2365 passed.
+- Post-deploy healthcheck: SUMMARY WARN remains `[12]`, `[33]`, `[11]`; `[37]` cleared. `[33]` `postonly_order_rows` is now accumulating.
 
 No live autonomy boundary was loosened.
