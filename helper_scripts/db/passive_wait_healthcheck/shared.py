@@ -26,6 +26,54 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import Any
+
+
+def _read_bb_breakout_config_from_toml() -> tuple[dict[str, Any] | None, str]:
+    """Parse `[bb_breakout]` from `settings/strategy_params_demo.toml`.
+    從 `settings/strategy_params_demo.toml` 讀取 `[bb_breakout]` section。
+
+    Returns ``(section, diagnostic)``. ``section`` is the parsed dict on
+    successful parse + key lookup, ``None`` on any fail-soft condition
+    (file missing / parse error / section absent). ``diagnostic`` carries the
+    human-readable reason for the ``None`` branch.
+
+    Mirrors `_read_shadow_enabled_from_toml` shape; uses Python 3.11+
+    ``tomllib`` (already used elsewhere in this codebase). No external
+    dependency added. Reads the **actual value** rather than mtime as a
+    state proxy — operator can hand-edit TOML and mtime would skew.
+
+    G2-06：讀 demo strategy_params TOML 的 `[bb_breakout].active` 真值，
+    fail-soft 回 ``None``。與 `_read_shadow_enabled_from_toml` 同形狀。
+    用 tomllib（3.11+，codebase 既有），刻意取真值而非 mtime。
+    """
+    try:
+        import tomllib  # type: ignore[import-not-found]
+    except ImportError:
+        try:
+            import tomli as tomllib  # type: ignore[import-not-found,no-redef]
+        except ImportError:
+            return (None, "tomllib/tomli unavailable")
+
+    base = Path(os.environ.get("OPENCLAW_BASE_DIR", str(Path.home() / "BybitOpenClaw/srv")))
+    toml_path = base / "settings" / "strategy_params_demo.toml"
+
+    if not toml_path.exists():
+        return (None, f"strategy_params_demo.toml not found at {toml_path}")
+
+    try:
+        with toml_path.open("rb") as f:
+            data = tomllib.load(f)
+    except Exception as e:
+        # Fail-soft: TOML parse error degrades to original triage logic.
+        # fail-soft：TOML parse 失敗則降級走原 triage。
+        return (None, f"TOML parse error: {e}")
+
+    section = data.get("bb_breakout")
+    if not isinstance(section, dict):
+        return (None, "[bb_breakout] section absent in strategy_params_demo.toml")
+
+    return (section, "ok")
 
 
 def _read_bb_breakout_active_from_toml() -> tuple[bool | None, str]:
@@ -46,28 +94,9 @@ def _read_bb_breakout_active_from_toml() -> tuple[bool | None, str]:
     fail-soft 回 ``None``。與 `_read_shadow_enabled_from_toml` 同形狀。
     用 tomllib（3.11+，codebase 既有），刻意取真值而非 mtime。
     """
-    try:
-        import tomllib  # type: ignore[import-not-found]
-    except ImportError:
-        return (None, "tomllib unavailable (Python <3.11?)")
-
-    base = Path(os.environ.get("OPENCLAW_BASE_DIR", str(Path.home() / "BybitOpenClaw/srv")))
-    toml_path = base / "settings" / "strategy_params_demo.toml"
-
-    if not toml_path.exists():
-        return (None, f"strategy_params_demo.toml not found at {toml_path}")
-
-    try:
-        with toml_path.open("rb") as f:
-            data = tomllib.load(f)
-    except Exception as e:
-        # Fail-soft: TOML parse error degrades to original triage logic.
-        # fail-soft：TOML parse 失敗則降級走原 triage。
-        return (None, f"TOML parse error: {e}")
-
-    section = data.get("bb_breakout")
-    if not isinstance(section, dict):
-        return (None, "[bb_breakout] section absent in strategy_params_demo.toml")
+    section, diag = _read_bb_breakout_config_from_toml()
+    if section is None:
+        return (None, diag)
 
     val = section.get("active")
     if not isinstance(val, bool):
