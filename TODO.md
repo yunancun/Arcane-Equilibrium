@@ -42,13 +42,14 @@
 **§九 governance 戰況**：800 warn active violations 剩 1（main_boot_tasks.rs 816 marginal acceptable，Wave G→H 已從 4 縮至 1）· 1200 hard cap active violations **0** ✅（Wave G achievement maintained）
 
 **NOW ACTIONABLE**（時間驅動 / 等候 / 餘工）：
-1. **G2-01 PostOnly follow-through** — `[33] maker_fill_rate` 已實裝並 cron 監控；目前 7d fee_drop **1.2%** / maker_like **1.5%**，遠低 ≥60% 目標，05-07/08 結算若未改善需進 G2-04 disable/策略調整決策。
-2. **Fee-refresh RCA follow-through** — `[22]` cleared after `bdd3177` deploy；下一個自然驗證點是首個 1h periodic refresh log 出現 `conservative defaults re-seeded`，且 >2h 不再出現 fee-rate staleness cost_gate self-lock。
-3. **bb_breakout Phase 2 threshold tuning** — `[12]` 目前 WARN：7d entries=1，已脫離永久 dormant 但仍低量；1m bandwidth 結構性問題仍待 sweep / 升 5m timeframe。
-4. **Live auth renewal** — 若要恢復 LiveDemo/live pipeline，Operator 需經 API renew schema v2 授權；這是 Batch A live gate 強化後的預期行為。
-5. **G3-09 Phase C Wave 1 impl** — operator 「等時間長一些再看」；PA RFC `90d1a2e` ready
-6. **Phase B observation period launch** — bundled with Phase C (operator decision (C))
-7. **6 backlog tickets** 等下次 maintenance wave：
+1. **STRATEGY-EDGE-REPAIR-2026-04-29（策略虧損主線包）** — 以 post-fee `net_bps_after_fee` 為主指標，PNL / winrate 僅作參考；修後樣本從 **2026-04-29 12:27:53 CEST** live maker-entry reload 後切分。子任務：A) 追 `[33]` post-fix maker_like / fee_drop / PostOnly reject-rate；B) 修 maker pricing fallback（BBO/tick_size 缺失時 reprice/skip，不退回 taker Market）；C) grid robust negative cells 做 regime gate / volatility+spread spacing / G2-04 disable 候選；D) MA 用 net bps 評估 whipsaw、reverse exit、hold-time 對 R:R 的改善；E) 2026-05-07/08 做 G2-01 settlement verdict，若 fee_drop 仍遠低 ≥60%，進策略調參/disable 決策。**注意**：operator 明確要求不要把此輪虧損處理變成繼續加風控，優先改策略與執行 edge。
+2. **G2-01 PostOnly follow-through** — `[33] maker_fill_rate` 已實裝並 cron 監控；目前 7d fee_drop **1.2%** / maker_like **1.5%**，遠低 ≥60% 目標，05-07/08 結算若未改善需進 G2-04 disable/策略調整決策。
+3. **Fee-refresh RCA follow-through** — `[22]` cleared after `bdd3177` deploy；下一個自然驗證點是首個 1h periodic refresh log 出現 `conservative defaults re-seeded`，且 >2h 不再出現 fee-rate staleness cost_gate self-lock。
+4. **bb_breakout Phase 2 threshold tuning** — `[12]` 目前 WARN：7d entries=1，已脫離永久 dormant 但仍低量；1m bandwidth 結構性問題仍待 sweep / 升 5m timeframe。
+5. **Live auth renewal** — 若要恢復 LiveDemo/live pipeline，Operator 需經 API renew schema v2 授權；這是 Batch A live gate 強化後的預期行為。
+6. **G3-09 Phase C Wave 1 impl** — operator 「等時間長一些再看」；PA RFC `90d1a2e` ready
+7. **Phase B observation period launch** — bundled with Phase C (operator decision (C))
+8. **6 backlog tickets** 等下次 maintenance wave：
    - G3-08-FUP-MAF-SPLIT-CLEANUP-A P4 (new, cosmetic eager re-export)
    - G3-08-PHASE-4-STRATEGIST-SPLIT-FUP-FACADE LOW (deferred, post-strategist-split risk)
    - SINGLETON-POLLUTION-PHASE2-ROUTES P4 (Mac-only)
