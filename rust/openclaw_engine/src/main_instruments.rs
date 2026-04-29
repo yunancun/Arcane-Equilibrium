@@ -69,6 +69,10 @@ pub(crate) async fn init_shared_clients_and_instruments(
         .as_ref()
         .map(|b| Arc::clone(&b.rest_client))
         .or_else(|| demo_bindings.as_ref().map(|b| Arc::clone(&b.rest_client)));
+    let shared_env = live_bindings
+        .as_ref()
+        .map(|b| b.env)
+        .or_else(|| demo_bindings.as_ref().map(|b| b.env));
 
     let shared_account_manager: Option<Arc<AccountManager>> = live_bindings
         .as_ref()
@@ -144,8 +148,8 @@ pub(crate) async fn init_shared_clients_and_instruments(
         }
 
         // Spawn fee rate refresh + staleness monitor using shared client's account manager.
-        if let Some(ref acct) = shared_account_manager {
-            tasks::spawn_fee_rate_tasks(acct, client, cancel);
+        if let (Some(acct), Some(env)) = (shared_account_manager.as_ref(), shared_env) {
+            tasks::spawn_fee_rate_tasks(acct, client, env, cancel);
         }
     } else {
         info!(
