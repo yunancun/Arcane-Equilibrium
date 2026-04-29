@@ -304,6 +304,15 @@ class EdgeEstimatorScheduler:
 
                 summary = self._run_one_mode(mode)
                 summary["backfill"] = backfill_summary
+                try:
+                    summary["mlde"] = self._run_mlde_unblock(mode)
+                except Exception as mlde_exc:  # noqa: BLE001 - fail-open scheduler add-on
+                    summary["mlde"] = {"error": str(mlde_exc)}
+                    logger.warning(
+                        "EdgeEstimatorScheduler[%s]: mode=%s MLDE unblock failed (fail-open): %s "
+                        "/ JS 排程器[%s]：mode=%s MLDE 啟用任務失敗（fail-open）：%s",
+                        reason, mode, mlde_exc, reason, mode, mlde_exc,
+                    )
                 results[mode] = summary
                 logger.info(
                     "EdgeEstimatorScheduler[%s]: mode=%s n_cells=%d grand_mean_bps=%.2f reason=%s "
@@ -515,6 +524,74 @@ class EdgeEstimatorScheduler:
         first_row = next(iter(results.values()))
         grand_mean = float(first_row.get("grand_mean_bps", first_row.get("grand_mean", 0.0)))
         return {"n_cells": n, "grand_mean_bps": grand_mean}
+
+    def _run_mlde_unblock(self, mode: str) -> dict:
+        """Run read-only/shadow MLDE producers after labels are fresh.
+
+        This writes learning state/advisory rows only. It never mutates trading
+        parameters and never submits orders. LinUCB has a single DB state table,
+        so it is trained once per cycle on demo+live_demo rather than overwritten
+        separately for each scheduler mode.
+        """
+        dsn = get_secret_value("OPENCLAW_DATABASE_URL")
+        if not dsn:
+            return {"skipped": "no_database_url"}
+
+        out: dict[str, object] = {}
+        if mode == self._modes[0]:
+            try:
+                from ml_training.linucb_trainer import (  # noqa: PLC0415
+                    CANONICAL_FEATURE_NAMES_V1,
+                    LinUcbTrainConfig,
+                    train_all_arms,
+                )
+
+                linucb_mode = os.environ.get("OPENCLAW_MLDE_LINUCB_ENGINE_MODE", "demo_live_demo")
+                reward_scale = float(os.environ.get("OPENCLAW_MLDE_LINUCB_REWARD_SCALE_BPS", "100.0"))
+                cfg = LinUcbTrainConfig(
+                    feature_names=list(CANONICAL_FEATURE_NAMES_V1),
+                    engine_mode=linucb_mode,
+                    reward_scale_bps=reward_scale,
+                    observation_source="mlde_edge_training_rows",
+                )
+                train_results = train_all_arms(dsn, cfg)
+                out["linucb"] = {
+                    "engine_mode": linucb_mode,
+                    "arms": len(train_results),
+                    "total_pulls": sum(r.n_pulls_after for r in train_results),
+                    "converged_arms": sum(1 for r in train_results if r.converged),
+                }
+            except Exception as exc:  # noqa: BLE001
+                out["linucb"] = {"error": str(exc)}
+
+        try:
+            from ml_training.mlde_shadow_advisor import (  # noqa: PLC0415
+                config_from_env as shadow_config_from_env,
+                generate_shadow_recommendations,
+            )
+
+            out["ml_shadow"] = generate_shadow_recommendations(
+                dsn,
+                shadow_config_from_env(engine_mode=mode),
+            )
+        except Exception as exc:  # noqa: BLE001
+            out["ml_shadow"] = {"error": str(exc)}
+
+        try:
+            from local_model_tools.dream_engine import persist_dream_insights  # noqa: PLC0415
+
+            out["dream_engine"] = persist_dream_insights(dsn, engine_mode=mode)
+        except Exception as exc:  # noqa: BLE001
+            out["dream_engine"] = {"error": str(exc)}
+
+        try:
+            from local_model_tools.opportunity_tracker import persist_regret_summary  # noqa: PLC0415
+
+            out["opportunity_tracker"] = persist_regret_summary(dsn, engine_mode=mode)
+        except Exception as exc:  # noqa: BLE001
+            out["opportunity_tracker"] = {"error": str(exc)}
+
+        return out
 
 
 _scheduler: Optional[EdgeEstimatorScheduler] = None

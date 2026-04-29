@@ -83,6 +83,8 @@ from .checks_execution import (  # noqa: F401
     check_maker_fill_rate,
     check_maker_entry_intent_drift,
     check_intent_signal_attribution,
+    check_mlde_learning_data_contract,
+    check_mlde_shadow_recommendations,
 )
 
 __all__ = [
@@ -131,4 +133,6 @@ __all__ = [
     "check_maker_entry_intent_drift",
     "check_maker_fill_rate",
     "check_intent_signal_attribution",
+    "check_mlde_learning_data_contract",
+    "check_mlde_shadow_recommendations",
 ]

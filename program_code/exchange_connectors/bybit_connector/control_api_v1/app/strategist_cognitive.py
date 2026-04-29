@@ -45,6 +45,7 @@ Hard boundaries (CLAUDE.md §四):
 from __future__ import annotations
 
 import logging
+import os
 from typing import TYPE_CHECKING, Any, List
 
 from .multi_agent_framework import TradeIntent
@@ -182,6 +183,47 @@ def _apply_cognitive_modulation(
         return (agent.config.min_confidence, 1.0)
 
 
+def _load_mlde_cognitive_inputs() -> tuple[dict[str, Any], dict[str, Any]]:
+    """Load read-only MLDE regret/dream inputs for CognitiveModulator.
+
+    This helper is fail-soft and advisory-only. It never writes DB, never emits
+    IPC, and returns empty inputs if the DB/env/producers are unavailable.
+    """
+    if os.environ.get("OPENCLAW_MLDE_COGNITIVE_ENABLED", "1").strip().lower() in {"0", "false", "no"}:
+        return ({}, {})
+    engine_mode = os.environ.get("OPENCLAW_MLDE_COGNITIVE_ENGINE_MODE", "demo")
+    regret_data: dict[str, Any] = {}
+    dream_data: dict[str, Any] = {}
+
+    try:
+        try:
+            from program_code.local_model_tools.opportunity_tracker import (  # type: ignore
+                get_recent_regret_summary,
+            )
+        except ImportError:
+            from local_model_tools.opportunity_tracker import get_recent_regret_summary  # type: ignore
+        loaded = get_recent_regret_summary(engine_mode=engine_mode)
+        if isinstance(loaded, dict):
+            regret_data = loaded
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("MLDE OpportunityTracker input unavailable: %s", exc)
+
+    try:
+        try:
+            from program_code.local_model_tools.dream_engine import (  # type: ignore
+                get_latest_dream_summary,
+            )
+        except ImportError:
+            from local_model_tools.dream_engine import get_latest_dream_summary  # type: ignore
+        loaded = get_latest_dream_summary(engine_mode=engine_mode)
+        if isinstance(loaded, dict):
+            dream_data = loaded
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("MLDE DreamEngine input unavailable: %s", exc)
+
+    return (regret_data, dream_data)
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # CognitiveModulator periodic tick / 認知調製器週期性 tick
 # G8-01 W1 FIX-B (Option γ per PA RFC §3.1)
@@ -211,8 +253,8 @@ def tick_cognitive_modulator(agent: "StrategistAgent") -> None:
       - ``weekly_net_pnl``：``agent.cost_tracker.get_h5_snapshot().get("paper_net_pnl_7d", 0.0)``
         — cost_tracker 可為 None（test / fail-open）→ fallback 0.0。
         cost_tracker may be None (test / fail-open) → fallback 0.0.
-      - ``regret_data`` / ``dream_data``：placeholder ``{}`` until OpportunityTracker /
-        DreamEngine wired (out of G8-01 scope per PM 2026-04-26 reframe).
+      - ``regret_data`` / ``dream_data``：read-only MLDE producers. If DB/env is
+        unavailable, they degrade to ``{}``.
 
     Hard boundaries / 硬邊界 (CLAUDE.md §四):
       - Pure read-only on agent.cost_tracker; no IPC / no DB write.
@@ -264,15 +306,16 @@ def tick_cognitive_modulator(agent: "StrategistAgent") -> None:
                     snap_exc, snap_exc,
                 )
 
-        # Drive one EMA-smoothed update cycle. regret/dream remain placeholders until
-        # OpportunityTracker / DreamEngine production wiring lands (out of G8-01 scope).
-        # 驅動一個 EMA 平滑更新週期。regret/dream 維持 placeholder，待 OpportunityTracker /
-        # DreamEngine production 接線（不在 G8-01 scope）。
+        regret_data, dream_data = _load_mlde_cognitive_inputs()
+
+        # Drive one EMA-smoothed update cycle. MLDE inputs are advisory/read-only
+        # and degrade to empty dicts when unavailable.
+        # 驅動一個 EMA 平滑更新週期。MLDE input 僅 advisory/read-only，不可用時退化為空 dict。
         modulator.update(
             consecutive_losses=consec_losses,
             weekly_net_pnl=weekly_pnl,
-            regret_data={},
-            dream_data={},
+            regret_data=regret_data,
+            dream_data=dream_data,
         )
     except Exception as exc:
         # Fail-closed (principle #6): modulator failure must not poison hot path.

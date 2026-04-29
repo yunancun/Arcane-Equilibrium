@@ -44,6 +44,21 @@ except ImportError:  # pragma: no cover — DB only required for live path
 logger = logging.getLogger(__name__)
 
 
+CANONICAL_FEATURE_NAMES_V1 = [
+    "atr_pct",
+    "rsi_14",
+    "bb_bandwidth",
+    "hurst_h",
+    "adx",
+    "vol_ratio",
+    "time_of_day_sin",
+    "time_of_day_cos",
+]
+
+VALID_ENGINE_MODES = ("paper", "demo", "live", "live_demo", "demo_live_demo")
+VALID_OBSERVATION_SOURCES = ("mlde_edge_training_rows", "legacy_decision_context")
+
+
 # ---------------------------------------------------------------------------
 # Config & result dataclasses / 配置與結果資料類
 # ---------------------------------------------------------------------------
@@ -67,17 +82,32 @@ class LinUcbTrainConfig:
         min_samples_per_arm: convergence floor; arms below this are still
             persisted but flagged converged=False.
             收斂下限；少於此數的 arm 仍會寫入但 converged=False。
-        reward_column: which decision_outcomes column to use as r_t.
-            作為 r_t 的 decision_outcomes 欄位名。
+        reward_column: legacy decision_outcomes column to use as r_t when
+            observation_source="legacy_decision_context".
+            legacy 模式下作為 r_t 的 decision_outcomes 欄位名。
+        observation_source: default uses V031 learning.mlde_edge_training_rows,
+            which requires valid signal/context attribution and post-fee reward.
+            默認使用 V031 view，要求歸因鏈與扣費後 reward。
+        engine_mode: training lane. "live" includes live_demo for historical
+            live-pipeline demo rows; explicit "live_demo" remains exact.
+            訓練模式；live 會包含 live_demo，demo_live_demo 會包含 demo+live_demo。
+        reward_scale_bps: converts net_bps_after_fee into a stable reward unit.
+            默認 100 bps = 1.0，後續 agent 可調。
+        max_age_days: optional recent-window bound for V031 view rows.
+            可調近期窗口；None 表示不按天數截斷。
     """
 
     arm_space_version: str = "v1_15"
     context_dim: int = 8
     lambda_ridge: float = 1.0
-    feature_names: list[str] = field(default_factory=list)
+    feature_names: list[str] = field(default_factory=lambda: list(CANONICAL_FEATURE_NAMES_V1))
     cpcv_embargo_hours: int = 24
     min_samples_per_arm: int = 10
     reward_column: str = "outcome_1h"
+    observation_source: str = "mlde_edge_training_rows"
+    engine_mode: str = "demo"
+    reward_scale_bps: float = 100.0
+    max_age_days: Optional[int] = 90
 
 
 @dataclass
@@ -177,6 +207,29 @@ def train_arm(
     return A, b, n_pulls, cum_reward
 
 
+def engine_mode_scope(engine_mode: str) -> tuple[str, ...]:
+    """Return DB engine modes for one requested training lane.
+    回傳單一訓練 lane 對應的 DB engine_mode 集合。
+    """
+    if engine_mode not in VALID_ENGINE_MODES:
+        raise ValueError(f"invalid engine_mode: {engine_mode!r}")
+    if engine_mode == "live":
+        return ("live", "live_demo")
+    if engine_mode == "demo_live_demo":
+        return ("demo", "live_demo")
+    return (engine_mode,)
+
+
+def _scale_reward_bps(net_bps_after_fee: float, reward_scale_bps: float) -> float:
+    """Convert bps reward into LinUCB numeric reward units.
+    將 bps reward 轉為 LinUCB 使用的數值單位。
+    """
+    scale = float(reward_scale_bps)
+    if scale <= 0.0:
+        raise ValueError("reward_scale_bps must be > 0")
+    return float(net_bps_after_fee) / scale
+
+
 # ---------------------------------------------------------------------------
 # PG IO — psycopg2 fetch + upsert
 # PG IO — psycopg2 讀取與 upsert
@@ -188,38 +241,67 @@ def fetch_arm_observations(
     arm_id: str,
     since_ts_ms: Optional[int],
     reward_column: str = "outcome_1h",
+    *,
+    observation_source: str = "mlde_edge_training_rows",
+    engine_mode: str = "demo",
+    reward_scale_bps: float = 100.0,
+    max_age_days: Optional[int] = 90,
 ) -> list[tuple[list[float], float]]:
     """Fetch (context_features, reward) tuples for a single arm.
     為單個 arm 取出 (context_features, reward) 三元組。
 
-    Joins `trading.decision_context_snapshots` to `trading.decision_outcomes`
-    on context_id to access realized return. Only rows with non-null reward
-    are returned. `indicators_snapshot` is JSONB; the caller is responsible
-    for storing it as a flat float list keyed under "features".
-    JOIN `trading.decision_context_snapshots` 與 `trading.decision_outcomes`
-    取得已實現回報；僅返回 reward 非 null 的 row。`indicators_snapshot` 為
-    JSONB，呼叫端需確保以扁平 float 列表存於 "features" 鍵。
+    Default path reads V031 `learning.mlde_edge_training_rows`, requiring an
+    intact attribution chain and using post-fee `net_bps_after_fee` as reward.
+    The legacy path is retained for diagnostics only.
+    默認讀 V031 view，要求完整歸因鏈，reward 使用扣費後 `net_bps_after_fee`；
+    legacy path 僅保留作診斷。
     """
     if psycopg2 is None:
         raise RuntimeError("psycopg2 not installed / psycopg2 未安裝")
+    if observation_source not in VALID_OBSERVATION_SOURCES:
+        raise ValueError(f"invalid observation_source: {observation_source!r}")
 
-    # reward_column comes from trusted config, but still validate to prevent
-    # SQL injection. / reward_column 來自信任 config，仍做白名單過濾防注入。
-    allowed_cols = {"outcome_1m", "outcome_5m", "outcome_1h", "outcome_4h", "outcome_24h"}
-    if reward_column not in allowed_cols:
-        raise ValueError(f"reward_column not in allow-list: {reward_column}")
-
-    sql = f"""
-        SELECT s.indicators_snapshot, o.{reward_column}
-          FROM trading.decision_context_snapshots s
-          JOIN trading.decision_outcomes o ON o.context_id = s.context_id
-         WHERE s.linucb_arm_id = %s
-           AND o.{reward_column} IS NOT NULL
-           AND (%s::BIGINT IS NULL OR s.ts >= to_timestamp(%s / 1000.0))
-    """
     out: list[tuple[list[float], float]] = []
-    with psycopg2.connect(dsn) as conn:  # pragma: no cover — live path
+    with psycopg2.connect(dsn, connect_timeout=2) as conn:  # pragma: no cover — live path
         with conn.cursor() as cur:
+            if observation_source == "mlde_edge_training_rows":
+                engine_modes = list(engine_mode_scope(engine_mode))
+                sql = """
+                    SELECT context_features, net_bps_after_fee
+                      FROM learning.mlde_edge_training_rows
+                     WHERE linucb_arm_id = %s
+                       AND engine_mode = ANY(%s)
+                       AND attribution_chain_ok
+                       AND net_bps_after_fee IS NOT NULL
+                       AND jsonb_typeof(context_features) = 'array'
+                       AND jsonb_array_length(context_features) = 8
+                       AND (%s::BIGINT IS NULL OR ts >= to_timestamp(%s / 1000.0))
+                       AND (%s::INT IS NULL OR ts >= now() - (%s::INT || ' days')::interval)
+                     ORDER BY ts ASC
+                """
+                cur.execute(
+                    sql,
+                    (arm_id, engine_modes, since_ts_ms, since_ts_ms, max_age_days, max_age_days),
+                )
+                for features, reward_bps in cur.fetchall():
+                    if features is None or reward_bps is None:
+                        continue
+                    out.append((list(features), _scale_reward_bps(float(reward_bps), reward_scale_bps)))
+                return out
+
+            # reward_column comes from trusted config, but still validate to
+            # prevent SQL injection. / reward_column 來自信任 config，仍做白名單。
+            allowed_cols = {"outcome_1m", "outcome_5m", "outcome_1h", "outcome_4h", "outcome_24h"}
+            if reward_column not in allowed_cols:
+                raise ValueError(f"reward_column not in allow-list: {reward_column}")
+            sql = f"""
+                SELECT s.indicators_snapshot, o.{reward_column}
+                  FROM trading.decision_context_snapshots s
+                  JOIN trading.decision_outcomes o ON o.context_id = s.context_id
+                 WHERE s.linucb_arm_id = %s
+                   AND o.{reward_column} IS NOT NULL
+                   AND (%s::BIGINT IS NULL OR s.ts >= to_timestamp(%s / 1000.0))
+            """
             cur.execute(sql, (arm_id, since_ts_ms, since_ts_ms))
             for indicators, reward in cur.fetchall():
                 if indicators is None or reward is None:
@@ -269,7 +351,7 @@ def upsert_arm_state(
             feature_schema_hash = EXCLUDED.feature_schema_hash,
             last_updated_ts = NOW()
     """
-    with psycopg2.connect(dsn) as conn:  # pragma: no cover — live path
+    with psycopg2.connect(dsn, connect_timeout=2) as conn:  # pragma: no cover — live path
         with conn.cursor() as cur:
             cur.execute(
                 sql,
@@ -319,7 +401,16 @@ def train_all_arms(dsn: str, cfg: LinUcbTrainConfig) -> list[TrainResult]:
 
     for arm_id in arm_ids:
         try:
-            obs = fetch_arm_observations(dsn, arm_id, since_ts_ms=None, reward_column=cfg.reward_column)
+            obs = fetch_arm_observations(
+                dsn,
+                arm_id,
+                since_ts_ms=None,
+                reward_column=cfg.reward_column,
+                observation_source=cfg.observation_source,
+                engine_mode=cfg.engine_mode,
+                reward_scale_bps=cfg.reward_scale_bps,
+                max_age_days=cfg.max_age_days,
+            )
         except Exception as exc:  # pragma: no cover — DB error path
             logger.error("fetch_arm_observations failed arm=%s err=%s", arm_id, exc)
             continue

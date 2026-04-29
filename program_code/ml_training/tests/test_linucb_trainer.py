@@ -17,11 +17,14 @@ import numpy as np
 import pytest
 
 from ml_training.linucb_trainer import (
+    CANONICAL_FEATURE_NAMES_V1,
     LinUcbTrainConfig,
     TrainResult,
     _le_bytes_to_ndarray,
     _ndarray_to_le_bytes,
+    _scale_reward_bps,
     compute_feature_schema_hash,
+    engine_mode_scope,
     enumerate_v1_15_arm_ids,
     train_arm,
 )
@@ -75,6 +78,25 @@ def test_compute_feature_schema_hash_empty_list():
     # sha256("") prefix / 空輸入也應穩定
     h = compute_feature_schema_hash([])
     assert h == "sha256:" + hashlib.sha256(b"").hexdigest()[:16]
+
+
+def test_default_feature_names_match_rust_linucb_runtime_order():
+    cfg = LinUcbTrainConfig()
+    assert cfg.feature_names == CANONICAL_FEATURE_NAMES_V1
+    assert cfg.context_dim == len(CANONICAL_FEATURE_NAMES_V1)
+
+
+def test_engine_mode_scope_demo_live_demo_combines_training_lanes():
+    assert engine_mode_scope("demo_live_demo") == ("demo", "live_demo")
+    assert engine_mode_scope("live") == ("live", "live_demo")
+    assert engine_mode_scope("live_demo") == ("live_demo",)
+
+
+def test_scale_reward_bps_uses_configurable_denominator():
+    assert _scale_reward_bps(25.0, 100.0) == pytest.approx(0.25)
+    assert _scale_reward_bps(-10.0, 50.0) == pytest.approx(-0.2)
+    with pytest.raises(ValueError):
+        _scale_reward_bps(1.0, 0.0)
 
 
 # ---------------------------------------------------------------------------
