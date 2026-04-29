@@ -65,7 +65,12 @@ active = true
 # P1-10 AUDIT 2026-04-20: explicit cooldown surfaces the serde default that was
 # previously silent (E5-P2-4 "TOML 不可達漏洞" hygiene follow-up). Matches demo/paper.
 cooldown_ms = 60000
-grid_levels = 10
+# GRID-LIFECYCLE-DRIFT RFC (2026-04-29): live_demo showed grid close churn
+# (`strategy_close:grid_close_*`) with re_entry_rate=0.72. Reduce level density
+# first; keep strategy active and close/reduce paths untouched.
+# GRID-LIFECYCLE-DRIFT RFC：live_demo 出現 grid close churn，先降低網格密度；
+# 保留策略啟用與平倉 / 減倉路徑。
+grid_levels = 7
 spacing_mode = "linear"
 health_check_interval = 200
 max_out_of_range = 50
@@ -84,6 +89,24 @@ maker_price_offset_bps = 1.0
 # EDGE-P2-3 Phase 1B-3.1: resting PostOnly Limit sweep timeout (ms).
 # EDGE-P2-3 Phase 1B-3.1：掛中 PostOnly Limit 逾時清理（毫秒）。
 maker_limit_timeout_ms = 45000
+# GRID-LIFECYCLE-DRIFT RFC (2026-04-29): mirror demo's robust-negative cells
+# (n>=30, shrunk_bps<0) into live_demo. This blocks NEW grid entries only;
+# existing positions can still close/reduce normally.
+# GRID-LIFECYCLE-DRIFT RFC：同步 demo robust-negative cells 到 live_demo；
+# 僅阻擋新 grid 入場，既有倉位仍可平倉 / 減倉。
+blocked_symbols = [
+  "BSBUSDT",
+  "PRLUSDT",
+  "ZBTUSDT",
+  "FARTCOINUSDT",
+  "SOLUSDT",
+  "DOGEUSDT",
+  "GALAUSDT",
+  "ENAUSDT",
+  "AAVEUSDT",
+  "ORCAUSDT",
+  "PENGUUSDT",
+]
 
 # OC-5: FundingArb — inactive for live until paper/demo validated.
 # OC-5：FundingArb — live 暫不啟用，待紙盤/模擬盤驗證通過。
