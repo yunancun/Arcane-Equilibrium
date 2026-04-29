@@ -16,6 +16,7 @@ import hashlib
 import numpy as np
 import pytest
 
+import ml_training.linucb_trainer as linucb_trainer
 from ml_training.linucb_trainer import (
     CANONICAL_FEATURE_NAMES_V1,
     LinUcbTrainConfig,
@@ -27,6 +28,7 @@ from ml_training.linucb_trainer import (
     engine_mode_scope,
     enumerate_v1_15_arm_ids,
     train_arm,
+    upsert_arm_state,
 )
 
 
@@ -253,6 +255,66 @@ def test_train_result_dataclass_fields_present():
     assert r.n_pulls_after == 42
     assert r.cumulative_reward == pytest.approx(1.23)
     assert r.converged is True
+
+
+def test_upsert_arm_state_persists_cumulative_reward(monkeypatch):
+    calls = []
+
+    class FakeCursor:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def execute(self, sql, params):
+            calls.append((sql, params))
+
+    class FakeConn:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def cursor(self):
+            return FakeCursor()
+
+        def commit(self):
+            pass
+
+    class FakePsycopg2:
+        @staticmethod
+        def Binary(value):
+            return value
+
+        @staticmethod
+        def connect(dsn, connect_timeout=2):
+            assert dsn == "postgresql://unit-test"
+            assert connect_timeout == 2
+            return FakeConn()
+
+    monkeypatch.setattr(linucb_trainer, "psycopg2", FakePsycopg2)
+
+    A = np.eye(2, dtype=np.float64)
+    b = np.array([0.5, -0.25], dtype=np.float64)
+    upsert_arm_state(
+        "postgresql://unit-test",
+        "trending__ma_crossover",
+        "v1_15",
+        "sha256:test",
+        A,
+        b,
+        3,
+        1.25,
+    )
+
+    assert len(calls) == 1
+    sql, params = calls[0]
+    assert "cumulative_reward" in sql
+    assert "cumulative_reward = EXCLUDED.cumulative_reward" in sql
+    assert params[6] == pytest.approx(1.25)
+    assert params[7] == "sha256:test"
 
 
 def test_enumerate_v1_15_returns_15_unique_ids():
