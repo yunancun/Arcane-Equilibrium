@@ -264,6 +264,7 @@ class EdgeEstimatorScheduler:
         land in `learning.decision_features.label_net_edge_bps` this cycle.
         fail-open: error is caught by caller; JS still runs.
         在 JS 估計前先跑 label backfill，讓本輪取得最新 labels；失敗時交由呼叫者處理（fail-open）。"""
+        self._ensure_pg_env_from_database_url()
         from ml_training.edge_label_backfill import backfill_labels  # noqa: PLC0415
         r = backfill_labels(engine_mode=mode, batch_limit=5000, dry_run=False)
         return {
