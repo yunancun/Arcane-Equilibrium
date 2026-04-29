@@ -256,6 +256,10 @@ impl TickPipeline {
                 "submitted_qty": if is_sentinel { serde_json::Value::Null } else { serde_json::json!(qty) },
                 "is_sentinel": is_sentinel,
                 "is_long": is_long,
+                "limit_price": intent.limit_price,
+                "time_in_force": intent.time_in_force.map(|tif| tif.as_str()),
+                "post_only": matches!(intent.time_in_force, Some(crate::order_manager::TimeInForce::PostOnly)),
+                "maker_timeout_ms": intent.maker_timeout_ms,
                 "source": "command",
             });
             crate::database::try_send_trading_msg(

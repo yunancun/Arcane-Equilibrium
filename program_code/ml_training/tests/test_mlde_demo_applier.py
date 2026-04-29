@@ -4,10 +4,25 @@ import pytest
 
 from ml_training.mlde_demo_applier import (
     DemoApplierConfig,
+    _already_applied,
+    _noop_audit_payload,
+    _record_noop_audit,
     build_risk_patch,
     build_strategy_patch,
     should_create_live_candidate,
 )
+
+
+class _Cursor:
+    def __init__(self, rows):
+        self.rows = list(rows)
+        self.executed = []
+
+    def execute(self, sql, params=()):
+        self.executed.append((sql, params))
+
+    def fetchone(self):
+        return self.rows.pop(0)
 
 
 def test_grid_dream_spacing_maps_to_bounded_runtime_params():
@@ -104,3 +119,82 @@ def test_live_candidate_requires_strong_demo_evidence():
         {"expected_net_bps": 7.0, "confidence": 0.6, "sample_count": 40},
         cfg,
     )
+
+
+def test_noop_audit_payload_reports_threshold_context():
+    cfg = DemoApplierConfig(
+        lookback_hours=72,
+        min_confidence=0.4,
+        min_samples=8,
+        max_recommendations=12,
+    )
+    cur = _Cursor([(10, 4, 0)])
+
+    payload = _noop_audit_payload(cur, cfg)
+
+    assert payload["reason"] == "no_eligible_recommendations"
+    assert payload["lookback_hours"] == 72
+    assert payload["min_confidence"] == pytest.approx(0.4)
+    assert payload["min_samples"] == 8
+    assert payload["max_recommendations"] == 12
+    assert payload["lookback_recommendations"] == 10
+    assert payload["demo_recommendations"] == 4
+    assert payload["eligible_recommendations"] == 0
+
+
+def test_record_noop_audit_writes_deduped_skipped_row(monkeypatch):
+    cfg = DemoApplierConfig()
+    cur = _Cursor([(3, 3, 0)])
+    recorded = {}
+
+    monkeypatch.setattr(
+        "ml_training.mlde_demo_applier._already_applied",
+        lambda _cur, _fp, _cfg: False,
+    )
+
+    def fake_record_application(cur, **kwargs):
+        recorded.update(kwargs)
+        return 123
+
+    monkeypatch.setattr(
+        "ml_training.mlde_demo_applier._record_application",
+        fake_record_application,
+    )
+
+    result = _record_noop_audit(cur, cfg)
+
+    assert result == {
+        "status": "skipped",
+        "reason": "no_eligible_recommendations",
+        "target": "mlde_demo_applier",
+        "eligible_recommendations": 0,
+    }
+    assert recorded["application_type"] == "strategy_params"
+    assert recorded["target_name"] == "mlde_demo_applier"
+    assert recorded["status"] == "skipped"
+    assert recorded["reason"] == "no_eligible_recommendations"
+    assert recorded["payload"]["fingerprint"]
+
+
+def test_record_noop_audit_dedupes_recent_fingerprint(monkeypatch):
+    cfg = DemoApplierConfig()
+    cur = _Cursor([(3, 3, 0)])
+    monkeypatch.setattr(
+        "ml_training.mlde_demo_applier._already_applied",
+        lambda _cur, _fp, _cfg: True,
+    )
+
+    result = _record_noop_audit(cur, cfg)
+
+    assert result["status"] == "skipped"
+    assert result["reason"] == "no_eligible_recommendations_deduped"
+
+
+def test_already_applied_dedupe_includes_skipped_rows():
+    cfg = DemoApplierConfig()
+    cur = _Cursor([(False,)])
+
+    assert not _already_applied(cur, "abc", cfg)
+
+    sql = cur.executed[0][0]
+    assert "status IN ('applied', 'dry_run', 'skipped')" in sql

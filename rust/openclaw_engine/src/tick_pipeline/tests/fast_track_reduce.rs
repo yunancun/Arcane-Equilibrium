@@ -438,3 +438,54 @@ fn test_persist_intent_helper_emits_trading_msg_intent_with_engine_mode() {
         other => panic!("expected TradingMsg::Intent, got {:?}", other),
     }
 }
+
+#[test]
+fn test_persist_intent_helper_records_maker_entry_details() {
+    use crate::intent_processor::OrderIntent;
+    use crate::order_manager::TimeInForce;
+
+    let intent = OrderIntent {
+        symbol: "BTCUSDT".into(),
+        is_long: true,
+        qty: 0.25,
+        confidence: 0.91,
+        strategy: "grid_trading".into(),
+        order_type: "limit".into(),
+        limit_price: Some(49_995.0),
+        confluence_score: None,
+        persistence_elapsed_ms: None,
+        time_in_force: Some(TimeInForce::PostOnly),
+        maker_timeout_ms: Some(45_000),
+    };
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<crate::database::TradingMsg>(8);
+
+    super::super::on_tick_helpers::persist_intent(
+        &Some(tx),
+        "demo",
+        1_700_000_000_456,
+        "sig-demo-grid_trading-BTCUSDT-1700000000456",
+        "ctx-demo-BTCUSDT-1700000000456",
+        &intent,
+        0.25,
+        49_995.0,
+        "demo",
+        None,
+    );
+
+    let msg = rx.try_recv().expect("Intent must be enqueued");
+    match msg {
+        crate::database::TradingMsg::Intent {
+            order_type,
+            details,
+            ..
+        } => {
+            assert_eq!(order_type, "limit");
+            let details = details.expect("maker metadata must be persisted");
+            assert_eq!(details["time_in_force"].as_str(), Some("PostOnly"));
+            assert_eq!(details["post_only"].as_bool(), Some(true));
+            assert_eq!(details["maker_timeout_ms"].as_u64(), Some(45_000));
+            assert_eq!(details["limit_price"].as_f64(), Some(49_995.0));
+        }
+        other => panic!("expected TradingMsg::Intent, got {:?}", other),
+    }
+}
