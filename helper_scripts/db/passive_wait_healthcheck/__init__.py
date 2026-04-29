@@ -92,6 +92,13 @@ from .checks_execution import (  # noqa: F401
     # [38]（2026-04-29）MIT 資料漂移偵測：grid_trading 單倉 lifecycle
     # demo vs live_demo 漂移哨兵（被動 7d，CLAUDE.md §七 規定）。
     check_grid_trading_lifecycle_drift,
+    # [39] (2026-04-29) PA W1-T4 strategy_name attribution cleanup — cardinality
+    # regression detector for trading.fills.strategy_name (post-W1-T2 expect ≤7
+    # enum values; FAIL when dynamic format!() regression re-inflates cardinality).
+    # [39]（2026-04-29）PA W1-T4 strategy_name attribution 清理 — cardinality
+    # regression 偵測（W1-T2 後預期 ≤7 enum value；dynamic format regression
+    # 復發即 FAIL）。
+    check_strategy_name_cardinality_drift,
 )
 
 __all__ = [
@@ -145,4 +152,6 @@ __all__ = [
     "check_mlde_demo_applier",
     # [38] grid_trading lifecycle drift (MIT 2026-04-29)
     "check_grid_trading_lifecycle_drift",
+    # [39] strategy_name cardinality drift (PA W1-T4 2026-04-29)
+    "check_strategy_name_cardinality_drift",
 ]

@@ -969,3 +969,72 @@ LIMIT 8
         base_msg
         + " — below G2-01 PostOnly fee-drop target; keep passive monitor until settlement",
     )
+
+
+# ============================================================================
+# [39] cardinality regression detector for trading.fills.strategy_name.
+# 2026-04-29 — PA §6.1 W1-T4 strategy_name attribution cleanup wave.
+# Pre-2026-04-29 close path emitted dynamic format!() into strategy_name
+# (`risk_close:TRAILING STOP: peak X - current Y = ...`) creating 25+ distinct
+# values per 24h. Post-fix should normalize to ≤7 enum values:
+# ma_crossover / bb_reversion / bb_breakout / grid_trading / funding_arb /
+# unattributed:bybit_auto / risk_close:halt_session / risk_close:phys_lock_*.
+#
+# 若新 emit 點漏改、cardinality 重新爆炸 → cron 自動 catch。
+# ============================================================================
+
+STRATEGY_NAME_CARDINALITY_WARN = 10
+STRATEGY_NAME_CARDINALITY_FAIL = 20
+
+
+def check_strategy_name_cardinality_drift(cur) -> tuple[str, str]:
+    """[39] cardinality regression detector for trading.fills.strategy_name.
+
+    Background: Pre-W1-T2 close-path emit dynamic format!() into strategy_name,
+    creating 25+ distinct values per 24h. Post-W1-T2 normalized to ≤7 enum-like
+    values. If a new emit point regresses to dynamic strategy_name, cron will
+    catch it before downstream consumers (ML pipeline / agent-tracker / 7d edge
+    effect endpoint) get polluted.
+
+    [39] cardinality regression detector — strategy_name 規範化監控。修前
+    close path 寫 dynamic format 進 strategy_name 造成 24h 25+ distinct；
+    修後應收斂 ≤7 enum-like value。新 emit 點若 regress 寫 dynamic，本
+    healthcheck 6h cron 自動 catch 防 ML pipeline / agent-tracker / 7d edge
+    effect 端點被污染。
+    """
+    try:
+        cur.connection.rollback()
+    except Exception:
+        pass
+
+    try:
+        cur.execute(
+            """
+            SELECT COUNT(DISTINCT strategy_name)
+            FROM trading.fills
+            WHERE ts > now() - interval '24 hours'
+              AND engine_mode IN ('demo', 'live_demo', 'live')
+            """
+        )
+        row = cur.fetchone()
+    except Exception as exc:  # noqa: BLE001
+        return ("WARN", f"cardinality query failed: {type(exc).__name__}: {exc}")
+
+    n_distinct = int(row[0]) if row and row[0] is not None else 0
+
+    if n_distinct > STRATEGY_NAME_CARDINALITY_FAIL:
+        return (
+            "FAIL",
+            f"24h distinct strategy_name = {n_distinct} > {STRATEGY_NAME_CARDINALITY_FAIL} — "
+            f"emit point regression! W1-T2 normalization broken"
+        )
+    if n_distinct > STRATEGY_NAME_CARDINALITY_WARN:
+        return (
+            "WARN",
+            f"24h distinct strategy_name = {n_distinct} > {STRATEGY_NAME_CARDINALITY_WARN} — "
+            f"possible regression / new strategy added"
+        )
+    return (
+        "PASS",
+        f"24h distinct strategy_name = {n_distinct} (≤{STRATEGY_NAME_CARDINALITY_WARN} expected)"
+    )

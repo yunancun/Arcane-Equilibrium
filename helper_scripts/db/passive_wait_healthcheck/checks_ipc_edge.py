@@ -117,12 +117,29 @@ def check_micro_profit_fire(cur) -> tuple[str, str]:
 
 
 def check_trailing_stop_fire(cur) -> tuple[str, str]:
-    """[6] TRAILING STOP fire rate — expect ≥1 per 7d."""
+    """[6] TRAILING STOP fire rate — expect ≥1 per 7d.
+
+    W1-T4 dual-syntax migration (2026-04-29): post-W1-T2 strategy_name 收斂為
+    5 enum (ma_crossover / bb_reversion / bb_breakout / grid_trading /
+    funding_arb)；TRAILING STOP 動態 trace 移至新 column ``exit_reason``。
+    歷史 ~263k row 仍是舊格式（``risk_close:TRAILING STOP: peak X% ...``
+    寫進 strategy_name），新 row 走 ``exit_reason LIKE 'TRAILING STOP%'``。
+    雙語法 7d window 後歷史 row 過期可降回單路徑（純 ``exit_reason`` 查詢）。
+    See PA report 2026-04-29 §6.2.
+
+    W1-T4 dual-syntax 遷移（2026-04-29）：W1-T2 後 strategy_name 規範為 5 enum，
+    TRAILING STOP trace 改寫到新欄 ``exit_reason``。歷史 ~263k row 仍走 LIKE
+    ``strategy_name``，新 row 走 ``exit_reason``。7d window 後歷史過期可單路徑化。
+    """
+    # Dual-syntax: legacy historical rows match strategy_name LIKE; new
+    # post-W1-T2 rows match exit_reason LIKE. Both paths OR'd.
+    # 雙語法：歷史 row 走 strategy_name LIKE；W1-T2 後新 row 走 exit_reason LIKE。
     n_7d = _scalar(cur,
         "SELECT COUNT(*) FROM trading.fills "
         "WHERE ts > now() - interval '7 days' "
         "AND engine_mode = 'demo' "
-        "AND strategy_name LIKE 'risk_close:TRAILING STOP%'"
+        "AND (strategy_name LIKE 'risk_close:TRAILING STOP%' "
+        "     OR exit_reason LIKE 'TRAILING STOP%')"
     )
     if n_7d == 0:
         return ("FAIL", f"TRAILING STOP 7d=0 — 所有倉位的 peak 都 < activation_pct?")

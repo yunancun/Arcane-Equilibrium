@@ -91,6 +91,11 @@ from .checks_execution import (
     # [38]（2026-04-29）MIT 資料漂移偵測：grid_trading 單倉 lifecycle 漂移
     # demo vs live_demo，被動 7d 觀察。
     check_grid_trading_lifecycle_drift,
+    # [39] (2026-04-29) PA W1-T4 — cardinality regression detector for
+    # trading.fills.strategy_name (post-W1-T2 normalization sentinel).
+    # [39]（2026-04-29）PA W1-T4 — trading.fills.strategy_name cardinality
+    # regression 偵測（W1-T2 規範化哨兵）。
+    check_strategy_name_cardinality_drift,
 )
 
 
@@ -111,7 +116,7 @@ The checks split between DB pipelines + filesystem/observability sentinels:
   Cursor block:
     [1][2][3][4][5][6][8][9][10][12][Xb][14][15][21]      14 baseline
     [22][23][24][25][26][27][28]                          7 F7 MIT+E5
-    [30][31][32][33][34][35][36][37][38]                  cost/execution/MLDE/lifecycle sentinels
+    [30][31][32][33][34][35][36][37][38][39]              cost/execution/MLDE/lifecycle/cardinality
   Post-cursor (filesystem / pure-Python):
     [7][13][11][Xa][16][18][19][20]                       8 baseline
     [29]                                                  1 F7 (no-IPC stub)
@@ -136,6 +141,7 @@ Execution / cost sentinels added after F7:
   [36] mlde_shadow_recommendations     (advisory/live lease boundary)
   [37] mlde_demo_applier               (demo autonomy audit + live lease boundary)
   [38] grid_trading_lifecycle_drift    (MIT 2026-04-29 demo vs live_demo passive 7d)
+  [39] strategy_name_cardinality_drift (PA W1-T4 2026-04-29 post-normalization sentinel)
 
 Exit codes:
   0 = all checks PASS / only WARN
@@ -154,9 +160,10 @@ def main() -> int:
 
     Counted rows are documented by ID, not by fragile total:
       cursor: [1][2][3][4][5][6][8][9][10][12][Xb][14][15][21]
-              [22][23][24][25][26][27][28] [30][31][32][33][34][35][36][37][38]
+              [22][23][24][25][26][27][28] [30][31][32][33][34][35][36][37][38][39]
               (F7 [22]-[28] are MIT/E5; [30]-[37] are post-F7/MLDE;
-               [38] is MIT 2026-04-29 grid lifecycle drift)
+               [38] is MIT 2026-04-29 grid lifecycle drift;
+               [39] is PA W1-T4 2026-04-29 strategy_name cardinality drift)
       post-cursor: [7][13][11][Xa][16][18][19][20]
                    [29]   (F7 [29] is deferred-no-ipc stub)
 
@@ -165,7 +172,7 @@ def main() -> int:
     ``(status, msg)``（[1] 額外回 close_fills，供 [2]/[3]/[Xb] 用）。
     清單依 ID 記錄，避免總數 drift：
       cursor: [1][2][3][4][5][6][8][9][10][12][Xb][14][15][21]
-              [22][23][24][25][26][27][28] [30][31][32][33][34][35][36][37][38]
+              [22][23][24][25][26][27][28] [30][31][32][33][34][35][36][37][38][39]
       post-cursor: [7][13][11][Xa][16][18][19][20] [29]
     """
     ap = argparse.ArgumentParser(description=_RUNNER_DESCRIPTION)
@@ -449,6 +456,25 @@ def main() -> int:
             # verdict 取最高嚴重度。低活動期 PASS-with-note 不假警報。
             s, m = check_grid_trading_lifecycle_drift(cur)
             results.append(("[38] grid_trading_lifecycle_drift", s, m))
+
+            # [39] PA W1-T4 (2026-04-29) strategy_name cardinality regression.
+            # Pre-W1-T2 close path emitted dynamic format!() into strategy_name
+            # creating 25+ distinct values per 24h. Post-W1-T2 normalized to ≤7
+            # enum-like values. FAIL when 24h distinct > 20 = emit point regressed
+            # to dynamic strategy_name. cron 6h auto-catches before downstream ML
+            # pipeline / agent-tracker / 7d edge effect endpoint get polluted.
+            # First-run verdict (W1-T2 not yet deployed): FAIL — historical 24h
+            # window still shows ~25 distinct dynamic format strings; expected to
+            # drop to PASS within 24h after W1-T2 + restart_all --rebuild.
+            # [39] PA W1-T4（2026-04-29）strategy_name cardinality regression
+            # 偵測。修前 close path 寫 dynamic format 進 strategy_name 造成 24h
+            # 25+ distinct；W1-T2 後規範化 ≤7 enum-like value。24h distinct >20
+            # 即 FAIL（emit 點 regress）。cron 6h auto-catch 防 ML pipeline /
+            # agent-tracker / 7d edge effect 端點污染。首跑 verdict（W1-T2 未
+            # deploy）：FAIL — 歷史 24h window 仍含 25 個 dynamic format 字串；
+            # W1-T2 + --rebuild 後 24h 內降回 PASS。
+            s, m = check_strategy_name_cardinality_drift(cur)
+            results.append(("[39] strategy_name_cardinality_drift", s, m))
     finally:
         conn.close()
 

@@ -519,15 +519,30 @@ async function loadAgentFeed() {
   }
   if (fillsOk) {
     // shadow_fills_routes.py returns {data: {rows: [...], ...}}
+    // W1-T3 (PA 2026-04-29 strategy_name attribution cleanup §1.2 GUI passthrough):
+    //   strategy_name will normalise to one of 5 enum values
+    //   (ma_crossover/bb_reversion/bb_breakout/grid_trading/funding_arb) once
+    //   W1-T2 lands; close-path detail moves to a sibling `exit_reason` field.
+    //   Render `<strategy> (<exit_reason>)` when reason present, otherwise just
+    //   the strategy. Both fields go through ocEsc downstream (see entries.slice
+    //   render block below) so untrusted free-text exit_reason is XSS-safe.
+    // W1-T3：strategy_name 正規化後 close path 細節落在 exit_reason；
+    //   有 reason 顯示 `<strategy> (<reason>)`，否則僅顯示 strategy。
+    //   兩個欄位都經 ocEsc 渲染 → free-text exit_reason XSS 安全。
     const fillsPayload = fillsR.value.data || fillsR.value;
     const rows = fillsPayload.rows || [];
     rows.forEach((f) => {
+      const stratLabel = (f.strategy_name || f.strategy || "");
+      const exitReason = f.exit_reason || "";
+      const stratAndReason = exitReason
+        ? stratLabel + " (" + exitReason + ")"
+        : stratLabel;
       entries.push({
         type: "shadow_fill",
         ts: f.ts || f.created_at,
         outcome: "影子成交",
         symbol: f.symbol || "",
-        summary: (f.strategy_name || f.strategy || "") + " · " + (f.side || "")
+        summary: stratAndReason + " · " + (f.side || "")
           + " · qty " + (f.qty != null ? f.qty : "--"),
       });
     });
