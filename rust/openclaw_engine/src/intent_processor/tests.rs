@@ -817,6 +817,37 @@ fn test_fee_rate_staleness_rejects_after_two_hours() {
 }
 
 #[test]
+fn test_fee_rate_staleness_allows_demo_cached_defaults_after_two_hours() {
+    let mut proc = IntentProcessor::new();
+    proc.set_endpoint_env(crate::bybit_rest_client::BybitEnvironment::Demo);
+    let acct = std::sync::Arc::new(crate::account_manager::AccountManager::new());
+    acct.seed_default_fee_rates(["BTCUSDT", "ETHUSDT"]);
+    acct.set_last_fee_refresh_ms_for_test(1_000);
+    proc.set_account_manager(acct);
+
+    let now = 1_000 + MAX_FEE_RATE_STALENESS_MS + 1;
+
+    assert!(proc.fee_rate_staleness_rejection(now).is_none());
+}
+
+#[test]
+fn test_fee_rate_staleness_mainnet_cached_rates_still_fail_closed() {
+    let mut proc = IntentProcessor::new();
+    proc.set_endpoint_env(crate::bybit_rest_client::BybitEnvironment::Mainnet);
+    let acct = std::sync::Arc::new(crate::account_manager::AccountManager::new());
+    acct.seed_default_fee_rates(["BTCUSDT", "ETHUSDT"]);
+    acct.set_last_fee_refresh_ms_for_test(1_000);
+    proc.set_account_manager(acct);
+
+    let now = 1_000 + MAX_FEE_RATE_STALENESS_MS + 1;
+    let reason = proc
+        .fee_rate_staleness_rejection(now)
+        .expect("mainnet stale cached rates must fail closed");
+
+    assert!(reason.contains("fee rates stale"));
+}
+
+#[test]
 fn test_fee_rate_staleness_allows_fresh_rates() {
     let mut proc = IntentProcessor::new();
     let acct = std::sync::Arc::new(crate::account_manager::AccountManager::new());

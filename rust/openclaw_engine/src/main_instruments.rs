@@ -144,16 +144,31 @@ pub(crate) async fn init_shared_clients_and_instruments(
             }
         }
 
-        // Fee freshness is per AccountManager. Do not bind this to the shared
-        // highest-priority client; otherwise Demo can stale when LiveDemo is
-        // present (or vice versa) because each pipeline owns a distinct fee cache.
-        // 費率新鮮度屬於各自 AccountManager，不能只掛最高優先級 shared client。
+        // Fee freshness is per AccountManager. Use one group task that iterates
+        // every exchange binding each hour; this makes Demo/LiveDemo refresh
+        // coverage visible in one log path and prevents one binding from
+        // silently staling while the other keeps refreshing.
+        // 費率新鮮度屬於各自 AccountManager。使用單一 group task 每小時逐一刷新
+        // 所有交易所綁定，讓 Demo/LiveDemo 覆蓋度在同一路徑可見，避免單一綁定
+        // 靜默過期而另一條仍刷新。
+        let mut fee_bindings = Vec::new();
         if let Some(ref b) = demo_bindings {
-            tasks::spawn_fee_rate_tasks(&b.account_manager, &b.rest_client, b.env, cancel);
+            fee_bindings.push(tasks::FeeRateTaskBinding::new(
+                "demo",
+                b.env,
+                &b.account_manager,
+                &b.rest_client,
+            ));
         }
         if let Some(ref b) = live_bindings {
-            tasks::spawn_fee_rate_tasks(&b.account_manager, &b.rest_client, b.env, cancel);
+            fee_bindings.push(tasks::FeeRateTaskBinding::new(
+                "live",
+                b.env,
+                &b.account_manager,
+                &b.rest_client,
+            ));
         }
+        tasks::spawn_fee_rate_tasks(fee_bindings, cancel);
     } else {
         info!(
             "no exchange clients — skipping instrument/fee setup / 無交易所客戶端，跳過品種/費率設定"

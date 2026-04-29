@@ -172,6 +172,12 @@ impl AccountManager {
             .load(std::sync::atomic::Ordering::Relaxed)
     }
 
+    /// Number of cached per-symbol fee rates.
+    /// 已緩存的逐 symbol 費率數量。
+    pub fn fee_rate_count(&self) -> usize {
+        self.fee_rates.read().len()
+    }
+
     #[cfg(test)]
     pub(crate) fn set_last_fee_refresh_ms_for_test(&self, ts_ms: u64) {
         self.last_fee_refresh_ms

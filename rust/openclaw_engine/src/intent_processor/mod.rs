@@ -786,6 +786,21 @@ impl IntentProcessor {
         };
         let age_ms = now.saturating_sub(last);
         if age_ms > MAX_FEE_RATE_STALENESS_MS {
+            // Bybit demo endpoints do not support `/v5/account/fee-rate`.
+            // Once conservative defaults exist in cache, treat that explicit
+            // model as usable instead of freezing Demo/LiveDemo on timestamp
+            // age; mainnet remains strict.
+            if matches!(
+                self.endpoint_env,
+                Some(
+                    crate::bybit_rest_client::BybitEnvironment::Demo
+                        | crate::bybit_rest_client::BybitEnvironment::LiveDemo
+                )
+            ) && am.fee_rate_count() > 0
+            {
+                return None;
+            }
+
             Some(format!(
                 "cost_gate: fee rates stale age_ms={} > max_ms={} (fail-closed)",
                 age_ms, MAX_FEE_RATE_STALENESS_MS
