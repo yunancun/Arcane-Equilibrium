@@ -2,12 +2,49 @@ from __future__ import annotations
 
 import pytest
 
-from ml_training.mlde_shadow_advisor import ShadowAdvisorConfig, build_recommendations
-from program_code.local_model_tools.dream_engine import DreamConfig, build_dream_summary
+from ml_training.mlde_shadow_advisor import (
+    ShadowAdvisorConfig,
+    build_recommendations,
+    config_from_env as shadow_config_from_env,
+)
+from program_code.local_model_tools.dream_engine import (
+    DreamConfig,
+    build_dream_summary,
+    config_from_env as dream_config_from_env,
+)
 from program_code.local_model_tools.opportunity_tracker import (
     OpportunityConfig,
     summarize_rejected_outcomes,
 )
+
+
+def test_mlde_shadow_and_dream_use_demo_only_lower_default(monkeypatch):
+    for key in (
+        "OPENCLAW_MLDE_SHADOW_MIN_SAMPLES",
+        "OPENCLAW_MLDE_SHADOW_MIN_SAMPLES_DEMO",
+        "OPENCLAW_MLDE_SHADOW_MIN_SAMPLES_LIVE_DEMO",
+        "OPENCLAW_MLDE_DREAM_MIN_SAMPLES",
+        "OPENCLAW_MLDE_DREAM_MIN_SAMPLES_DEMO",
+        "OPENCLAW_MLDE_DREAM_MIN_SAMPLES_LIVE_DEMO",
+    ):
+        monkeypatch.delenv(key, raising=False)
+
+    assert shadow_config_from_env("demo").min_samples == 3
+    assert shadow_config_from_env("live_demo").min_samples == 5
+    assert dream_config_from_env("demo").min_samples == 3
+    assert dream_config_from_env("live_demo").min_samples == 5
+
+
+def test_mode_specific_min_samples_env_overrides_generic(monkeypatch):
+    monkeypatch.setenv("OPENCLAW_MLDE_SHADOW_MIN_SAMPLES", "5")
+    monkeypatch.setenv("OPENCLAW_MLDE_SHADOW_MIN_SAMPLES_DEMO", "2")
+    monkeypatch.setenv("OPENCLAW_MLDE_DREAM_MIN_SAMPLES", "5")
+    monkeypatch.setenv("OPENCLAW_MLDE_DREAM_MIN_SAMPLES_DEMO", "2")
+
+    assert shadow_config_from_env("demo").min_samples == 2
+    assert shadow_config_from_env("live_demo").min_samples == 5
+    assert dream_config_from_env("demo").min_samples == 2
+    assert dream_config_from_env("live_demo").min_samples == 5
 
 
 def test_shadow_advisor_builds_rank_and_veto_recommendations():

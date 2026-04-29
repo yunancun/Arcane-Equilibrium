@@ -59,6 +59,7 @@ def config_from_env(engine_mode: str = "demo") -> ShadowAdvisorConfig:
 
     Agents can tune these without code edits:
       OPENCLAW_MLDE_SHADOW_LOOKBACK_HOURS
+      OPENCLAW_MLDE_SHADOW_MIN_SAMPLES_<ENGINE_MODE>
       OPENCLAW_MLDE_SHADOW_MIN_SAMPLES
       OPENCLAW_MLDE_SHADOW_POSITIVE_RANK_BPS
       OPENCLAW_MLDE_SHADOW_NEGATIVE_VETO_BPS
@@ -78,10 +79,23 @@ def config_from_env(engine_mode: str = "demo") -> ShadowAdvisorConfig:
         except ValueError:
             return default
 
+    def _mode_key(name: str) -> str:
+        return f"{name}_{engine_mode.upper().replace('-', '_')}"
+
+    def _mode_int(name: str, default: int) -> int:
+        mode_name = _mode_key(name)
+        if mode_name in os.environ:
+            return _int(mode_name, default)
+        return _int(name, default)
+
+    min_samples_default = 3 if engine_mode == "demo" else 5
     return ShadowAdvisorConfig(
         engine_mode=engine_mode,
         lookback_hours=max(1, _int("OPENCLAW_MLDE_SHADOW_LOOKBACK_HOURS", 168)),
-        min_samples=max(1, _int("OPENCLAW_MLDE_SHADOW_MIN_SAMPLES", 5)),
+        min_samples=max(
+            1,
+            _mode_int("OPENCLAW_MLDE_SHADOW_MIN_SAMPLES", min_samples_default),
+        ),
         positive_rank_bps=_float("OPENCLAW_MLDE_SHADOW_POSITIVE_RANK_BPS", 2.0),
         negative_veto_bps=_float("OPENCLAW_MLDE_SHADOW_NEGATIVE_VETO_BPS", -2.0),
         confidence_cap=max(0.05, min(1.0, _float("OPENCLAW_MLDE_SHADOW_CONFIDENCE_CAP", 0.85))),

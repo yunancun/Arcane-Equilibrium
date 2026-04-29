@@ -321,7 +321,7 @@ def upsert_arm_state(
     A,
     b,
     n_pulls: int,
-    cumulative_reward: float,  # noqa: ARG001 — kept for API symmetry / API 對稱保留
+    cumulative_reward: float,
 ) -> None:
     """Upsert sufficient statistics into learning.linucb_state.
     將充分統計量 upsert 進 learning.linucb_state。
@@ -341,13 +341,14 @@ def upsert_arm_state(
     sql = """
         INSERT INTO learning.linucb_state
             (arm_id, arm_space_version, a_matrix, b_vector,
-             context_dim, n_pulls, feature_schema_hash, last_updated_ts)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, NOW())
+             context_dim, n_pulls, cumulative_reward, feature_schema_hash, last_updated_ts)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, NOW())
         ON CONFLICT (arm_id, arm_space_version) DO UPDATE SET
             a_matrix = EXCLUDED.a_matrix,
             b_vector = EXCLUDED.b_vector,
             context_dim = EXCLUDED.context_dim,
             n_pulls = EXCLUDED.n_pulls,
+            cumulative_reward = EXCLUDED.cumulative_reward,
             feature_schema_hash = EXCLUDED.feature_schema_hash,
             last_updated_ts = NOW()
     """
@@ -362,6 +363,7 @@ def upsert_arm_state(
                     psycopg2.Binary(b_bytes),
                     dim,
                     int(n_pulls),
+                    float(cumulative_reward),
                     schema_hash,
                 ),
             )

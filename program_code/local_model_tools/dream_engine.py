@@ -49,10 +49,23 @@ def config_from_env(engine_mode: str = "demo") -> DreamConfig:
         except ValueError:
             return default
 
+    def _mode_key(name: str) -> str:
+        return f"{name}_{engine_mode.upper().replace('-', '_')}"
+
+    def _mode_int(name: str, default: int) -> int:
+        mode_name = _mode_key(name)
+        if mode_name in os.environ:
+            return _int(mode_name, default)
+        return _int(name, default)
+
+    min_samples_default = 3 if engine_mode == "demo" else 5
     return DreamConfig(
         engine_mode=engine_mode,
         lookback_hours=max(1, _int("OPENCLAW_MLDE_DREAM_LOOKBACK_HOURS", 168)),
-        min_samples=max(1, _int("OPENCLAW_MLDE_DREAM_MIN_SAMPLES", 5)),
+        min_samples=max(
+            1,
+            _mode_int("OPENCLAW_MLDE_DREAM_MIN_SAMPLES", min_samples_default),
+        ),
         negative_edge_bps=_float("OPENCLAW_MLDE_DREAM_NEGATIVE_EDGE_BPS", -2.0),
         max_insights=max(1, _int("OPENCLAW_MLDE_DREAM_MAX_INSIGHTS", 12)),
         ttl_s=max(5.0, _float("OPENCLAW_MLDE_DREAM_TTL_S", 300.0)),
