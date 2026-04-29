@@ -79,3 +79,8 @@ YYYY-MM-DD HH:MM TZ
 - closed ML/autonomy readiness gaps: feature-definition hash enforcement, model trio serving unit, ETL schema/hash filters, full-close label finality, LinUCB arm/state loop, Teacher Demo routing, observation-only metadata, `boost_arm` unsupported, Strategist Live fail-fast, Paper opt-in script
 - verification: Python py_compile OK, `bash -n start_paper_trading.sh` OK, `cargo check -p openclaw_engine` OK with existing warnings, ML targeted pytest 78 passed/7 skipped, Rust targeted tests 47 passed
 - no deploy/restart/commit/push; remaining production gaps are live PG integration, real ONNX artifact e2e, LinUCB live boot smoke, and full A-F deployment smoke
+
+2026-04-29 CEST
+- added a hard Codex rule that commit operations must use subject + body description, and push operations must be reported with branch, SHA, and description
+- recorded the rule in `AGENTS.md`, `.codex/MEMORY.md`, and `.codex/DEPLOYMENT.md`
+- future sync reports should no longer omit commit/push description context

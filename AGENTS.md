@@ -75,6 +75,14 @@ Always distinguish fact, inference, and assumption.
 
 Durable Codex operating memory lives in repo files, not hidden chat state.
 
+## Commit and push rule
+
+Every commit and push must carry an explicit description.
+
+Interpretation for this repository:
+- every `git commit` should use a subject plus a body description, not a subject-only message
+- every `git push` should be reported back to the operator with branch, commit SHA, and a short description of what was pushed
+
 If this operating model changes, update:
 - `.codex/MEMORY.md`
 - `.codex/AGENT_DISPATCH_PROTOCOL.md`
