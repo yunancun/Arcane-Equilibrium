@@ -1,6 +1,6 @@
 # OpenClaw TODO — 工作清單（v3 · 單一時間軸版）
 
-**最新狀態快照**（2026-04-29 CEST · post-deploy healthcheck NOT green）：62-finding remediation Batch A-F 全部完成、push、Linux rebuild/redeploy；HEAD `b0ef335` synced，runtime engine PID **161957** + API PID **162029**，watchdog `engine_alive=true`，但 `passive_wait_healthcheck.sh --quiet` 仍 FAIL `[12]` + `[22]`，WARN `[27]`；Live pipeline 拒絕啟動是預期 gate（authorization schema v1 vs v2，需 Operator 經 `/api/v1/live/auth/renew` 重簽）。
+**最新狀態快照**（2026-04-29 CEST · fee-refresh RCA fix deployed · healthcheck WARN）：62-finding remediation Batch A-F 全部完成、push、Linux rebuild/redeploy；Mac ahead commits 已推送並在 Linux fast-forward；fee-rate periodic re-seed 修復 `bdd3177` 已部署，runtime engine PID **401632** + API PID **401700**，watchdog `engine_alive=true`。`passive_wait_healthcheck.sh --quiet` 已從 FAIL 降為 WARN：`[22] trading_pipeline_silent_gap` + `[27] intents_counter_freeze` cleared，剩 WARN `[12]`（bb_breakout 7d entries=1，低量）+ `[11]`（clean-window nonfatal）；Live pipeline 拒絕啟動仍是預期 gate（authorization schema v1 vs v2，需 Operator 經 `/api/v1/live/auth/renew` 重簽）。
 
 **歸檔索引**（已結案敘述歸檔，不再放 TODO 頭部）：
 - 62-finding Batch A-F：see [`docs/archive/2026-04-29--62finding-batch-A-to-F.md`](docs/archive/2026-04-29--62finding-batch-A-to-F.md) （commits `bc3fa70` + `6539e4e` + `5db4e29` PUSHED）
@@ -13,7 +13,7 @@
 **簽核**：PM Approved FIX-PLAN v2 → [Sign-off](docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-24--FixPlan_v2_PMApproval.md) · **Wave 3 Final** → [Wave 3 Sign-off](docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-26--wave3_final_signoff.md)
 **基礎方案**：[FIX-PLAN v2](docs/CCAgentWorkSpace/PA/workspace/reports/2026-04-24--4.24TodoAudit_FixPlan_v2.md) · [10-Agent audit 索引](docs/audits/2026-04-24--todo_refactor_audit.md)
 
-**Runtime（2026-04-29 CEST · ssh verify）**：HEAD `b0ef335` · engine PID **161957** + API PID **162029** · watchdog `engine_alive=true` · demo snapshot fresh · API auth enforced (401 unauth) · post-deploy healthcheck FAIL `[12]`+`[22]` / WARN `[27]`；Live pipeline rejected by design（authorization schema v1 vs v2，需 API renew）
+**Runtime（2026-04-29 CEST · ssh verify）**：HEAD `bdd3177` · engine PID **401632** + API PID **401700** · watchdog `engine_alive=true` · demo/live snapshots fresh · API auth enforced (401 unauth) · post-deploy healthcheck WARN `[12]`+`[11]` only；`[22]`/`[27]` cleared after fee-refresh fix；Live pipeline rejected by design（authorization schema v1 vs v2，需 API renew）
 
 **測試基準（2026-04-27 Phase 4 + G3-09 Phase A merge 後）**：engine lib **2290 / 0 fail** · Linux pytest Phase 4 全鏈 **289/0** · healthcheck 28 check（19 既有 + [22]-[29] STRKUSDT P0 wave + [30] cost_edge_advisor_status）· DB migrations 25 applied
 **21d demo 時鐘**：起算 2026-04-16 22:16 → 解鎖 2026-05-07
@@ -21,32 +21,33 @@
 
 ---
 
-## 🎯 此刻該做什麼（2026-04-29 CEST · 62-finding remediation A-F deployed · post-deploy healthcheck red）
+## 🎯 此刻該做什麼（2026-04-29 CEST · 62-finding remediation A-F deployed · fee-refresh RCA fixed）
 
 **新主線：62-finding full audit remediation**（operator 2026-04-28 指示：接手剛完成 audit，後續全數修理 62 findings）：
 - 權威 audit：`docs/audit/final_record_zh.md` + `docs/audit/final_summary.md`
 - PM 排期：`docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-28--audit_62_findings_remediation_schedule.md`
 - 總量：62 findings（P1=29 / P2=29 / P3=4 / P0=0），但含 live-release blockers
 - 批次順序：Batch A Live write boundary freeze ✅ committed/pushed/deployed → Batch B Critical auth/secrets/API exposure ✅ committed/pushed/deployed → Batch C Trading record durability ✅ committed/pushed/deployed → Batch D Risk/config fail-closed ✅ committed/pushed/deployed → Batch E Operator/runtime ownership ✅ committed/pushed/deployed → Batch F ML/agent autonomy readiness ✅ committed/pushed/deployed
-- Linux deploy 實況：`5db4e29` restart ownership hotfix 後，`restart_all.sh --rebuild --keep-auth` 成功重建；engine PID **161957**，API PID **162029**，watchdog `engine_alive=true` + demo fresh。
-- Post-deploy gate：**BLOCKED for full-green sign-off**，最新 `passive_wait_healthcheck.sh --quiet` 仍 FAIL `[12]` + `[22]`，WARN `[27]`；`[16]` 啟動暫態已清，`[31]` 在最新重跑未再出現。下一步應先做 `[22] trading_pipeline_silent_gap` / fee-rate cold-boot cost_gate fail-closed RCA，再判斷 `[12]` 是否仍屬既有 bb_breakout backlog。
+- Linux deploy 實況：`bdd3177` fee-refresh fix 後，`restart_all.sh --rebuild --keep-auth` 成功重建；engine PID **401632**，API PID **401700**，watchdog `engine_alive=true` + demo/live snapshots fresh。
+- Post-deploy gate：`[22] trading_pipeline_silent_gap` RCA 已處理並部署；root cause = demo/LiveDemo fee-rate endpoint unsupported response 只在 startup seed default，週期刷新失敗後沒有 re-seed，2h staleness window 後 cost_gate fail-closed。`bdd3177` 在 periodic refresh 遇 demo unsupported response 時重新注入保守 fee defaults（mainnet/testnet 與非 demo error 不放寬）。最新 `passive_wait_healthcheck.sh --quiet`：SUMMARY WARN，僅 WARN `[12]` + `[11]`；`[22]` + `[27]` 已清。
 - Live gate：live pipeline 拒絕啟動是預期保護，原因為 signed authorization schema v1 vs expected v2；需 Operator 經 `/api/v1/live/auth/renew` 或 renew-review 重新簽署，不可手寫 `authorization.json`。
 - PM gate：Batch A 必須先做；每個 implementation batch 必經 `PM -> PA -> E1/E1a -> E2 -> E4 -> QA -> PM`，涉及 live/auth/security 加 `CC/E3/BB` gate；不得用單一大 patch 關 62 條
 - Preflight：開工前先處理 branch/worktree ownership、Linux watchdog paper stale drift、建立 62-ID tracking matrix、保存 Linux regression baseline
 
 **Post-Wave-H operator hotfixes**（3 commits `cdc2699` + `20baabe` + `85a4e2d`）：
-- ✅ **EDGE-DIAG-2-FUP fee-postonly-2** (`cdc2699`) — Rust strategy-open Fill 改用 TIF-aware `fee_rate_for_intent`；DB column drift 修；其他 fee_rate(symbol) 5 close-path call sites 驗安全；**待 `--rebuild --keep-auth` deploy**
+- ✅ **EDGE-DIAG-2-FUP fee-postonly-2** (`cdc2699`) — Rust strategy-open Fill 改用 TIF-aware `fee_rate_for_intent`；DB column drift 修；其他 fee_rate(symbol) 5 close-path call sites 驗安全；已隨 `bdd3177` `--rebuild --keep-auth` deploy
 - ✅ **`restart_all.sh --keep-auth` flag** (`20baabe`) — authorization.json 跨 planned deploy 保留；crash/watchdog/systemd 路徑不變；§四 Gate #5 hot-rate verify 5 min re-check 不變
 - ✅ **CLAUDE.md EDGE-DIAG-2 drift fix** (`85a4e2d`) — healthcheck `[31]` + `feedback_demo_loose_live_strict_policy.md` 兩項早在 `8a5973f` 隨檔交付，drift 是 PM Sign-off 漏勾
 
 **§九 governance 戰況**：800 warn active violations 剩 1（main_boot_tasks.rs 816 marginal acceptable，Wave G→H 已從 4 縮至 1）· 1200 hard cap active violations **0** ✅（Wave G achievement maintained）
 
 **NOW ACTIONABLE**（時間驅動 / 等候 / 餘工）：
-1. **Post-deploy RCA gate** — 先處理 healthcheck `[22] trading_pipeline_silent_gap`（risk verdicts/DCS alive，但 fills/intents/orders stale；engine log 顯示 fee rates unavailable cold-boot fail-closed），再重跑 passive healthcheck；不可把目前狀態標為 full green。
-2. **Live auth renewal** — 若要恢復 LiveDemo/live pipeline，Operator 需經 API renew schema v2 授權；這是 Batch A live gate 強化後的預期行為。
-3. **G3-09 Phase C Wave 1 impl** — operator 「等時間長一些再看」；PA RFC `90d1a2e` ready
-4. **Phase B observation period launch** — bundled with Phase C (operator decision (C))
-5. **6 backlog tickets** 等下次 maintenance wave：
+1. **Fee-refresh RCA follow-through** — `[22]` cleared after `bdd3177` deploy；下一個自然驗證點是首個 1h periodic refresh log 出現 `conservative defaults re-seeded`，且 >2h 不再出現 fee-rate staleness cost_gate self-lock。
+2. **bb_breakout Phase 2 threshold tuning** — `[12]` 目前 WARN：7d entries=1，已脫離永久 dormant 但仍低量；1m bandwidth 結構性問題仍待 sweep / 升 5m timeframe。
+3. **Live auth renewal** — 若要恢復 LiveDemo/live pipeline，Operator 需經 API renew schema v2 授權；這是 Batch A live gate 強化後的預期行為。
+4. **G3-09 Phase C Wave 1 impl** — operator 「等時間長一些再看」；PA RFC `90d1a2e` ready
+5. **Phase B observation period launch** — bundled with Phase C (operator decision (C))
+6. **6 backlog tickets** 等下次 maintenance wave：
    - G3-08-FUP-MAF-SPLIT-CLEANUP-A P4 (new, cosmetic eager re-export)
    - G3-08-PHASE-4-STRATEGIST-SPLIT-FUP-FACADE LOW (deferred, post-strategist-split risk)
    - SINGLETON-POLLUTION-PHASE2-ROUTES P4 (Mac-only)
@@ -624,7 +625,7 @@ ssh trade-core "cd ~/BybitOpenClaw/srv && python3 helper_scripts/db/passive_wait
 | [19] | observer_pipeline_alive | observer cycle ok N/5 + age | OBSERVER-PIPELINE-POST-F42FACE-CLEANUP / STRK-FUP-HEALTHCHECK-PRE-EXISTING |
 | [20] | h_state_gateway_freshness | env=0 dormant skip / env=1 H state cache version + h_states 集合 | G3-08 Phase 1C / Phase 2+ |
 | [21] | paper_state_dust_inventory | `COUNT(*) FILTER realized_pnl=0 FROM trading.fills WHERE strategy LIKE 'risk_close:fast_track%' AND last 1h AND engine_mode IN demo/live/live_demo`；三態 PASS/WARN/FAIL（0=PASS / 1-10+<3sym=WARN / >10 OR ≥3sym=FAIL）| PAPER-STATE-DUST-INVENTORY-MONITOR（Tier 7 Track 2，supersedes MICRO-PROFIT-FIX-1-HEALTHCHECK）|
-| [22] | trading_pipeline_silent_gap | fills/intents/orders/risk_verdicts/DCS 多軸 staleness + 1h count | STRKUSDT P0 wave F7 |
+| [22] | trading_pipeline_silent_gap | fills/intents/orders/risk_verdicts/DCS 多軸 staleness + 1h count；2026-04-29 `bdd3177` RCA fix deployed（demo fee periodic re-seed）| STRKUSDT P0 wave F7 |
 | [23] | orders_fills_consistency | 30min pairs_missing_orders / total_missing_orders（FUP-23 SQL exclude `unattributed:%`）| STRKUSDT P0 wave F7 + STRK-FUP-HEALTHCHECK-PRE-EXISTING |
 | [24] | signals_writer_freshness | trading.signals hours_stale + rows_24h | STRKUSDT P0 wave F7 + 2026-04-19 outage RCA |
 | [25] | dust_qty_distribution | 24h fills sub_micro vs normal bucket pct | STRKUSDT P0 wave F7 |
