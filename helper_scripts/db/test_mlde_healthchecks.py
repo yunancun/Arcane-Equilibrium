@@ -54,7 +54,7 @@ class TestMldeLearningDataContract(unittest.TestCase):
         )
         self.assertEqual(status, "PASS")
         self.assertIn("missing_ids=70", msg)
-        self.assertIn("recent_90m total=5", msg)
+        self.assertIn("recent_30m total=5", msg)
 
     def test_recent_missing_ids_fail(self) -> None:
         status, msg = check_mlde_learning_data_contract(

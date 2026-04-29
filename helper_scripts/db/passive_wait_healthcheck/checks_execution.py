@@ -137,11 +137,11 @@ def check_mlde_learning_data_contract(cur) -> tuple[str, str]:
     except Exception as exc:  # noqa: BLE001
         return ("WARN", f"MLDE training contract query failed: {type(exc).__name__}: {exc}")
 
-    recent_minutes = 90
+    recent_minutes = 30
     try:
-        recent_minutes = int(os.environ.get("OPENCLAW_MLDE_ATTRIBUTION_RECENT_MINUTES", "90"))
+        recent_minutes = int(os.environ.get("OPENCLAW_MLDE_ATTRIBUTION_RECENT_MINUTES", "30"))
     except ValueError:
-        recent_minutes = 90
+        recent_minutes = 30
     recent_minutes = max(5, min(24 * 60, recent_minutes))
     try:
         cur.execute(
