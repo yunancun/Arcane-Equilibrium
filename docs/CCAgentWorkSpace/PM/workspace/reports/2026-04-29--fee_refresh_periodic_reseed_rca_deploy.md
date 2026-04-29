@@ -41,7 +41,7 @@
 
 ## 6. Post-deploy Status
 
-- `engine_watchdog.py --status`: `engine_alive=true`, demo/live/paper snapshots fresh.
+- `engine_watchdog.py --status`: immediate post-restart showed `engine_alive=true` with paper/demo/live fresh; final read after docs sync still showed `engine_alive=true` with demo/live fresh, while paper sub-status was stale (~406s). Passive gate was unaffected.
 - Engine log confirms startup conservative fee defaults seeded for both `LiveDemo` and `Demo`.
 - `passive_wait_healthcheck.sh --quiet` at 2026-04-29T09:35:30Z:
   - SUMMARY: WARN.
