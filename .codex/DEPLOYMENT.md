@@ -70,3 +70,9 @@ If Claude agent definitions evolve:
 1. Update the relevant `.codex/agents/*.md`
 2. Update `.codex/skills/INDEX.md` if skill ownership changes
 3. Append a short note to `.codex/WORKLOG.md`
+
+## Commit / push reporting rule
+
+- Use commit messages with both a subject and a body description
+- After each push, report the branch, commit SHA, and a short description to the operator
+- Treat subject-only commit messages as incomplete for this repository

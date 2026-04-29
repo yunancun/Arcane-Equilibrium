@@ -67,6 +67,8 @@ Typical commands:
 - sync them through git like normal source files
 - do not mix `.codex` sync commits with unrelated local edits unless explicitly requested
 - before deploy, verify local/remote HEAD and working tree state
+- every commit must include a subject plus a body description
+- every push must be reported with branch, SHA, and a short description of the pushed scope
 
 Current known topology at setup time:
 - Mac repo path: `/Users/ncyu/Projects/TradeBot/srv`
@@ -98,6 +100,7 @@ Current known topology at setup time:
 - meaningful dispatches should be logged in `.codex/DISPATCH_LEDGER.md`
 - temporary runtime nicknames are never the authoritative role identity
 - operator needs judgment and pushback; if risk or contradiction is detected, stop and report first
+- commit/push operations must include explicit description discipline; push itself has no native description field, so the description must exist in the commit body and the operator-facing push report
 
 ## Notes for future sessions
 
