@@ -683,6 +683,8 @@ class StrategistAgent(BaseAgent):
     def _h1_complexity_score(self, intel: Any) -> float: return self._h1_gate.complexity_score(intel)  # noqa: E704
     def _h1_check_cooldown(self, intel: Any) -> bool: return self._h1_gate._check_cooldown(intel)  # noqa: E704
     def _validate_ai_output(self, parsed: dict) -> bool: return validate_ai_output(parsed)  # noqa: E704
+    def get_h1_snapshot(self) -> Dict[str, Any]: return self._h1_gate.get_h1_snapshot()  # noqa: E704
+    def get_h3_snapshot(self) -> Dict[str, Any]: return self._model_router.get_h3_snapshot()  # noqa: E704
 
     def _h3_route_model(self, intel: Any) -> str:
         # H3 path needs both complexity + route_context; not a 1-line glue.

@@ -9,6 +9,7 @@
 
 mod bootstrap;
 mod dispatch;
+mod execution_fill_helpers;
 mod funding_settlement;
 mod governor_cooldown;
 pub mod handlers;
@@ -16,6 +17,7 @@ mod loop_handlers;
 mod paper_state_restore;
 mod pending_sweep;
 mod setup;
+mod status_report;
 #[cfg(test)]
 mod tests;
 mod types;

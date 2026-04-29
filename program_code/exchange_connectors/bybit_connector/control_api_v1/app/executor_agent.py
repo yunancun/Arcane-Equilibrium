@@ -334,6 +334,7 @@ class ExecutorAgent(BaseAgent):
         payload = message.payload
         if not payload:
             logger.warning("Empty approved intent payload / 空的批准 intent 负载")
+            _invalidate_h_state_async("agent.executor.intent_empty")
             return
 
         intent_id = payload.get("intent_id", "unknown")
@@ -351,12 +352,14 @@ class ExecutorAgent(BaseAgent):
                 "/ 去重：intent_id=%s 在窗口內已執行，跳過",
                 intent_id, intent_id,
             )
+            _invalidate_h_state_async("agent.executor.intent_deduped")
             return
 
         if not symbol or not direction or size <= 0:
             logger.warning("Invalid approved intent: symbol=%s dir=%s size=%s", symbol, direction, size)
             with self._lock:
                 self._stats["errors"] += 1
+            _invalidate_h_state_async("agent.executor.intent_invalid")
             return
 
         side = "Buy" if direction == "long" else "Sell"

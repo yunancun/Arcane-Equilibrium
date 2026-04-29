@@ -243,6 +243,12 @@ class _FakeStrategist:
                 return _self._strategist_snapshot
             self.get_strategist_snapshot = _get_strategist
 
+    def get_h1_snapshot(self):
+        return self._h1_gate.get_h1_snapshot()
+
+    def get_h3_snapshot(self):
+        return self._model_router.get_h3_snapshot()
+
 
 class _FakeExecutor:
     """Minimal stub mirroring strategy_wiring.EXECUTOR_AGENT shape.
