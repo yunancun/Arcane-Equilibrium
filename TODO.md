@@ -13,7 +13,7 @@
 **簽核**：PM Approved FIX-PLAN v2 → [Sign-off](docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-24--FixPlan_v2_PMApproval.md) · **Wave 3 Final** → [Wave 3 Sign-off](docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-26--wave3_final_signoff.md)
 **基礎方案**：[FIX-PLAN v2](docs/CCAgentWorkSpace/PA/workspace/reports/2026-04-24--4.24TodoAudit_FixPlan_v2.md) · [10-Agent audit 索引](docs/audits/2026-04-24--todo_refactor_audit.md)
 
-**Runtime（2026-04-29 CEST · ssh verify）**：HEAD `bdd3177` · engine PID **401632** + API PID **401700** · watchdog `engine_alive=true` · demo/live snapshots fresh · API auth enforced (401 unauth) · post-deploy healthcheck WARN `[12]`+`[11]` only；`[22]`/`[27]` cleared after fee-refresh fix；Live pipeline rejected by design（authorization schema v1 vs v2，需 API renew）
+**Runtime（2026-04-29 CEST · ssh verify）**：runtime code commit `bdd3177` · engine PID **401632** + API PID **401700** · watchdog `engine_alive=true` · demo/live snapshots fresh · API auth enforced (401 unauth) · post-deploy healthcheck WARN `[12]`+`[11]` only；`[22]`/`[27]` cleared after fee-refresh fix；Live pipeline rejected by design（authorization schema v1 vs v2，需 API renew）
 
 **測試基準（2026-04-27 Phase 4 + G3-09 Phase A merge 後）**：engine lib **2290 / 0 fail** · Linux pytest Phase 4 全鏈 **289/0** · healthcheck 28 check（19 既有 + [22]-[29] STRKUSDT P0 wave + [30] cost_edge_advisor_status）· DB migrations 25 applied
 **21d demo 時鐘**：起算 2026-04-16 22:16 → 解鎖 2026-05-07
