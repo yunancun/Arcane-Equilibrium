@@ -85,6 +85,7 @@ from .checks_execution import (  # noqa: F401
     check_intent_signal_attribution,
     check_mlde_learning_data_contract,
     check_mlde_shadow_recommendations,
+    check_mlde_demo_applier,
 )
 
 __all__ = [
@@ -135,4 +136,5 @@ __all__ = [
     "check_intent_signal_attribution",
     "check_mlde_learning_data_contract",
     "check_mlde_shadow_recommendations",
+    "check_mlde_demo_applier",
 ]

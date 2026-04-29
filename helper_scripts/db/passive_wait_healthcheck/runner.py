@@ -85,6 +85,7 @@ from .checks_execution import (
     check_intent_signal_attribution,
     check_mlde_learning_data_contract,
     check_mlde_shadow_recommendations,
+    check_mlde_demo_applier,
 )
 
 
@@ -105,7 +106,7 @@ The checks split between DB pipelines + filesystem/observability sentinels:
   Cursor block:
     [1][2][3][4][5][6][8][9][10][12][Xb][14][15][21]      14 baseline
     [22][23][24][25][26][27][28]                          7 F7 MIT+E5
-    [30][31][32][33][34][35][36]                          cost/execution/MLDE sentinels
+    [30][31][32][33][34][35][36][37]                      cost/execution/MLDE sentinels
   Post-cursor (filesystem / pure-Python):
     [7][13][11][Xa][16][18][19][20]                       8 baseline
     [29]                                                  1 F7 (no-IPC stub)
@@ -128,6 +129,7 @@ Execution / cost sentinels added after F7:
   [34] intent_signal_attribution    (strategy signal_id join chain)
   [35] mlde_learning_data_contract  (attributed post-fee training rows)
   [36] mlde_shadow_recommendations  (advisory/live lease boundary)
+  [37] mlde_demo_applier            (demo autonomy audit + live lease boundary)
 
 Exit codes:
   0 = all checks PASS / only WARN
@@ -146,8 +148,8 @@ def main() -> int:
 
     Counted rows are documented by ID, not by fragile total:
       cursor: [1][2][3][4][5][6][8][9][10][12][Xb][14][15][21]
-              [22][23][24][25][26][27][28] [30][31][32][33][34][35][36]
-              (F7 [22]-[28] are MIT/E5; [30]-[36] are post-F7/MLDE)
+              [22][23][24][25][26][27][28] [30][31][32][33][34][35][36][37]
+              (F7 [22]-[28] are MIT/E5; [30]-[37] are post-F7/MLDE)
       post-cursor: [7][13][11][Xa][16][18][19][20]
                    [29]   (F7 [29] is deferred-no-ipc stub)
 
@@ -421,6 +423,13 @@ def main() -> int:
             # applied row 必須有 Decision Lease。
             s, m = check_mlde_shadow_recommendations(cur)
             results.append(("[36] mlde_shadow_recommendations", s, m))
+
+            # [37] MLDE demo autonomous applier: demo may apply bounded
+            # strategy/risk changes, while live/live_demo remains lease-gated.
+            # [37] MLDE demo 自主調參：demo 可 bounded apply，live/live_demo
+            # 仍需 Decision Lease。
+            s, m = check_mlde_demo_applier(cur)
+            results.append(("[37] mlde_demo_applier", s, m))
     finally:
         conn.close()
 

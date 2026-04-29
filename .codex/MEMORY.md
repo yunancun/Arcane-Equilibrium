@@ -118,6 +118,14 @@ ML/Dream edge-unblock policy:
   - ML shadow advisor emits advisory `rank`/`veto`; DreamEngine and OpportunityTracker provide read-only inputs to CognitiveModulator
   - healthchecks `[35]` and `[36]` cover the learning data contract and advisory/live lease boundary
   - completion report: `docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-29--ml_dream_edge_unblock_completion.md`
+- as of `2026-04-29 18:45 CEST`, demo MLDE autonomy is implemented:
+  - V032 adds `learning.mlde_param_applications` as the audit log for demo parameter applications and governed live candidates
+  - `ml_training.mlde_demo_applier` consumes `learning.mlde_shadow_recommendations` and only auto-applies bounded changes to `engine_mode=demo`
+  - strategy changes use Rust IPC `get_strategy_params` / `get_param_ranges` / `update_strategy_params`; risk and leverage changes use `get_risk_config` / `patch_risk_config(engine=demo, source=agent)`
+  - all sample/confidence/delta/promotion thresholds are env-tunable defaults, not hard-coded live policy
+  - live/live_demo rows are never auto-applied by this applier; strong demo evidence emits a `requires_governance=true` live `experiment_plan` candidate only
+  - healthcheck `[37]` covers the demo applier audit table and the live Decision Lease boundary
+  - report: `docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-29--mlde_demo_autonomous_applier.md`
 - Rust active LinUCB arm-space remains `v1_15`; richer `mlde_arm_id` exists for shadow/advisory analysis, and switching runtime active arm-space is a separate future migration
 
 Claude memory sources used for alignment:

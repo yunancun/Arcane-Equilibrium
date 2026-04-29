@@ -538,7 +538,7 @@ class EdgeEstimatorScheduler:
             return {"skipped": "no_database_url"}
 
         out: dict[str, object] = {}
-        if mode == self._modes[0]:
+        if mode == "demo":
             try:
                 from ml_training.linucb_trainer import (  # noqa: PLC0415
                     CANONICAL_FEATURE_NAMES_V1,
@@ -590,6 +590,20 @@ class EdgeEstimatorScheduler:
             out["opportunity_tracker"] = persist_regret_summary(dsn, engine_mode=mode)
         except Exception as exc:  # noqa: BLE001
             out["opportunity_tracker"] = {"error": str(exc)}
+
+        if mode == "demo":
+            try:
+                from ml_training.mlde_demo_applier import (  # noqa: PLC0415
+                    config_from_env as demo_applier_config_from_env,
+                    run_mlde_demo_applier,
+                )
+
+                out["demo_applier"] = run_mlde_demo_applier(
+                    dsn,
+                    demo_applier_config_from_env(),
+                )
+            except Exception as exc:  # noqa: BLE001
+                out["demo_applier"] = {"error": str(exc)}
 
         return out
 

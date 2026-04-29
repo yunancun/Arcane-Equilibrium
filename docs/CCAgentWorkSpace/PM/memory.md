@@ -7,6 +7,15 @@
 - 系統模式：demo_only，live_execution_allowed = false
 - 完成里程碑：Wave 0-5 全部完成（Sprint 0+5a+5b + Wave 5a Position Sizing + Wave 5b Paper/Demo 同步）
 
+## 項目狀態快照（2026-04-29）
+
+- ML/Dream policy：正 edge 是 promotion gate，不是 training gate。
+- Demo autonomy：V032 `learning.mlde_param_applications` + `ml_training.mlde_demo_applier` 已落地，scheduler 只在 `engine_mode=demo` 自主 bounded apply。
+- 可調面：strategy params 走 Rust `get_strategy_params` / `get_param_ranges` / `update_strategy_params`；risk/leverage 走 `get_risk_config` / `patch_risk_config(engine=demo, source=agent)`。
+- Live 邊界：live/live_demo 不自動 apply；strong demo evidence 只寫 `requires_governance=true` 的 live `experiment_plan` candidate，仍需 GovernanceHub + Decision Lease + live gates。
+- Healthcheck：`[35] mlde_learning_data_contract`、`[36] mlde_shadow_recommendations`、`[37] mlde_demo_applier`。
+- 報告：`workspace/reports/2026-04-29--mlde_demo_autonomous_applier.md`。
+
 ## 決策記憶
 
 ### 關於 M-of-N 簽名
