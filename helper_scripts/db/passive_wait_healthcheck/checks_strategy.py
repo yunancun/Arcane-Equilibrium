@@ -43,6 +43,8 @@ from .shared import (
     _read_bb_breakout_config_from_toml,
 )
 
+_ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
+
 
 def _bb_breakout_rescue_config_summary() -> tuple[bool, str]:
     """Return whether demo bb_breakout has the post-F1 rescue gate profile.
@@ -821,6 +823,7 @@ def check_strategist_cycle_fresh() -> tuple[str, str]:
             tail = f.read().decode("utf-8", errors="replace")
     except Exception as exc:  # pragma: no cover - filesystem race
         return ("WARN", f"engine.log read failed: {exc}")
+    tail = _ANSI_ESCAPE_RE.sub("", tail)
 
     # Look for the most recent scheduler activity log. The Rust side emits:
     #   "StrategistScheduler started"  — once per spawn
@@ -828,15 +831,30 @@ def check_strategist_cycle_fresh() -> tuple[str, str]:
     #   "StrategistScheduler cycle failed"   — every failed cycle
     #   "StrategistScheduler cancelled"      — shutdown
     # Pre-deploy of G3-11 the apply path emits "strategist params applied".
-    # Match the broad family so we work pre/post G3-11 rebuild.
-    # 比對所有 scheduler 活動行；廣域 match 讓 pre/post G3-11 部署都能用。
+    # Reject-only cycles may only emit validation WARNs before the counters are
+    # stamped; count those as activity so a healthy "all rejected" cycle is not
+    # misclassified as a scheduler wedge.
+    # reject-only cycle 可能只留下 validation WARN；也算作活動，避免健康的「全部
+    # 被拒」cycle 被誤判成 scheduler wedge。
     started = "StrategistScheduler started" in tail or "策略師排程器已啟動" in tail
     activity_markers = (
         "StrategistScheduler cycle complete",
         "StrategistScheduler cycle failed",
         "strategist params applied",
+        "recommendation is not a JSON object",
+        "recommendation out of range",
+        "delta exceeds configured cap",
+        "weight sum out of tolerance",
+        "param apply failed",
+        "recommendation rejected by validation",
         "evaluated_cycle",  # debug-level marker
         "策略師參數已應用",  # zh apply
+        "建議不是 JSON 物件",
+        "建議超出範圍",
+        "delta 超過配置上限",
+        "權重總和超出容差",
+        "參數應用失敗",
+        "建議被驗證拒絕",
     )
 
     # Find the latest matching log timestamp. Engine.log uses tracing's
