@@ -308,6 +308,11 @@ impl TickPipeline {
                     // INFRA-PREBUILD-1 A 部：外部 / IPC close 不走 Combine Layer，
                     // exit_source 保持 NULL。
                     exit_source: None,
+                    // V033 (2026-04-29) W1-T1: external fill emit point — exit_reason
+                    // stays None until W1-T2 plumbs `helpers::build_close_tags(...)` here.
+                    // V033（2026-04-29）W1-T1：external fill emit 點 — exit_reason
+                    // 暫保 None，待 W1-T2 接 build_close_tags(...) 注入動態 reason。
+                    exit_reason: None,
                 },
                 "external_fill",
             );
@@ -598,6 +603,11 @@ impl TickPipeline {
                     // INFRA-PREBUILD-1 Part A: exchange-confirmed fill path — exit_source NULL.
                     // INFRA-PREBUILD-1 A 部：交易所確認 fill 不經 Combine Layer。
                     exit_source: None,
+                    // V033 (2026-04-29) W1-T1: confirmed-fill emit point — exit_reason
+                    // None until W1-T2 plumbs build_close_tags here.
+                    // V033（2026-04-29）W1-T1：confirmed-fill emit 點 — exit_reason
+                    // 暫 None，W1-T2 接 build_close_tags 後注入。
+                    exit_reason: None,
                 },
                 "confirmed_fill",
             );

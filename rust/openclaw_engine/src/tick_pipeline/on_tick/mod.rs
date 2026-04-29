@@ -63,6 +63,7 @@ use std::ops::ControlFlow;
 use std::time::Instant;
 
 mod helpers;
+mod helpers_close_tags;
 mod step_0_5_h0_gate;
 mod step_0_fast_track;
 mod step_1_2_klines_indicators;
@@ -75,6 +76,16 @@ mod step_6_risk_checks;
 // Keep each symbol on its own `pub use` line for diff-friendly audits.
 // 向後相容 re-export：外部繼續以 `crate::tick_pipeline::on_tick::…` 訪問，
 // 與拆分前一致；每個符號單獨一行以利 diff 審計。
+//
+// HELPERS-CLOSE-TAGS-SPLIT (2026-04-29): `build_close_tags` lives in the
+// sibling `helpers_close_tags.rs` to keep `helpers.rs` ≤ 1411 LOC pre-existing
+// baseline (CLAUDE.md §九 1200 hard cap + "baseline + 5 LOC" exception).
+// Re-exported here so call sites continue to use
+// `crate::tick_pipeline::on_tick::build_close_tags` unchanged.
+// HELPERS-CLOSE-TAGS-SPLIT（2026-04-29）：`build_close_tags` 拆至
+// sibling `helpers_close_tags.rs`，`helpers.rs` 維持 1411 LOC baseline；
+// 此處 re-export 保 caller 路徑 grep 穩定。
+pub(crate) use helpers_close_tags::build_close_tags;
 pub(crate) use helpers::build_risk_close_tag;
 pub(crate) use helpers::compute_edge_estimates_file_age_secs;
 pub(crate) use helpers::emit_shadow_exit_observation;

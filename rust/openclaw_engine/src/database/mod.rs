@@ -365,6 +365,27 @@ pub enum TradingMsg {
         /// "Disabled"，與 V021 fills CHECK 字典對齊。Phase 1a PHYS-LOCK 路徑
         /// 恆為 "Physical"（ml_opt=None）。
         exit_source: Option<String>,
+        /// V033 (2026-04-29) — Free-text close reason. Companion field to
+        /// `strategy_name` which is now restricted to 5 entry-strategy enum
+        /// values (ma_crossover/bb_reversion/bb_breakout/grid_trading/funding_arb)
+        /// + system paths (unattributed:bybit_auto / risk_close:halt_session).
+        ///
+        /// - Entry path → `None` (always; entry fills carry no exit semantics).
+        /// - Close path → `Some(reason)` populated by
+        ///   `helpers::build_close_tags(entry_strategy, reason)` and equivalent
+        ///   call sites (W1-T2: 16 emit points). Examples: "TRAILING STOP: peak
+        ///   8.46% - current 6.46% = ...", "phys_lock_gate4_giveback",
+        ///   "ma_reverse_cross", "fast_track".
+        ///
+        /// W1-T1 (this commit): field is added and threaded through the writer;
+        /// emit points still write `None` until W1-T2 lands.
+        ///
+        /// V033（2026-04-29）— 自由文字退場原因。strategy_name 同步收斂為
+        /// 5 個入場策略 enum 名 + 系統路徑。entry path 永 None；close path 由
+        /// `helpers::build_close_tags(entry_strategy, reason)` 等 16 個 emit
+        /// 點產出（W1-T2 落地）。本 commit (W1-T1) 先加欄位+鋪線，emit 點
+        /// 仍寫 None。
+        exit_reason: Option<String>,
     },
     /// Funding settlement from exchange execution stream.
     /// 交易所 execution stream 推送的資金費結算。

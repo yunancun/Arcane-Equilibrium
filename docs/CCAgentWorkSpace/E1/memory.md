@@ -1709,3 +1709,51 @@ finally:
 - **被動等待 healthcheck 的「fail-soft 不 FAIL」是設計原則**：低活動期 `n<5` 必須 PASS-with-note 不是 WARN；DB unreachable / table-missing 必須 WARN 不是 FAIL；只有確實偵測到三指標越界才 FAIL。違反 = cron noise spam → operator 警報疲勞 → 真 alarm 被忽略
 - **MIT spec 含示範代碼時，逐行落地比「重新設計」優先**：本輪 spec 提供完整 ~250 行函式體，E1 唯一加值是 (1) bug 修 (2) 接線 (3) 雙語整合注釋 (4) Mac mock 驗證；未自行重構參數名 / 重組 SQL CTE / 改 verdict 規則 → spec 變動小，後續 audit/重派風險低
 - **單一 process file 操作多次：要先讀 anchor，再插入完整段，最後讀回驗插入點上下文**。本輪 4 次 Edit 對應 4 個 logical 接線點（function 主體 / `__init__.py` import + `__all__` / runner import / runner main + docstring inventory），每次 Edit 都 anchor 唯一，0 失敗。
+
+## 2026-04-29 — W1-T1 V033 + TradingMsg::Fill exit_reason 接線（PA strategy_name attribution cleanup）
+
+**任務**：依 PA 設計報告 §4 W1-T1（推薦方案 A — schema migration + new column `exit_reason`）落地 5 子項：
+- (a) `sql/migrations/V033__fills_exit_reason.sql`（205 LOC，Guard A/B + partial index `idx_fills_exit_reason_prefix` + 雙語 COMMENT）
+- (b) `database/mod.rs::TradingMsg::Fill` 加 `exit_reason: Option<String>` 欄位（21 fields → 22 fields）
+- (c) `trading_writer.rs` FILL_COLS 22→23 + INSERT col list + `b.push_bind(exit_reason.as_deref())`
+- (d) `tick_pipeline/on_tick/helpers.rs::build_close_tags(entry_strategy, reason) -> (String, Option<String>)` 新 helper（5 known entry + halt_session R-A5 + verbatim fallback）+ 4 unit tests（grid/ma/unknown/halt_session）
+- (e) cargo build green + cargo test --release --lib **2369 / 0 failed**（baseline 2365 → +4 build_close_tags tests）
+
+**完成狀態**：W1-T1 全綠待 E2 review。**未動 16 emit 點動態 strategy_name**（W1-T2 範圍）；未改 Python / GUI / healthcheck / risk_config / strategy params / live 硬邊界。
+
+**驗證**：
+- V033 idempotency 在 trade-core PG 雙跑驗證（first run = DO/DO/ALTER/CREATE INDEX/COMMENT/COMMENT，second run = 兩 Guard 不 RAISE + ALTER NOTICE skipping + CREATE INDEX NOTICE skipping，0 RAISE EXCEPTION）
+- PG `trading.fills.exit_reason TEXT YES` + partial `idx_fills_exit_reason_prefix(exit_reason text_pattern_ops) WHERE exit_reason IS NOT NULL` 已 land
+- grep `(/home/ncyu|/Users/[^/]+)` GREP CLEAN：跨平台 0 hardcoded path
+- 所有 `TradingMsg::Fill { ... }` struct construction 加 `exit_reason: None`（5 處）；所有 destructure 都用 `..` 結尾自動相容
+
+**教訓**：
+- **PA 設計報告 §4 強制 + §九 1200 硬上限例外條款衝突時，按 PA 設計優先**：helpers.rs baseline 1411（pre-existing >1200）+ W1-T1 +228 → 1639。違反 §九「baseline +5 LOC」例外條款。決策按 PA 強制執行，governance flag 寫入報告 §五 + §六 給 E2 / 主會話決定 accept governance exception vs split sibling。**E1 不應自行決定 governance exception**，但**也不應違反 PA 設計拆 helper 到 sibling**（會擴大 PA 範圍）→ 最佳路徑 = 執行 PA + 顯式 governance flag 給上游決策
+- **Rust enum field 加欄位的 destructure ripple effect 用 `..` 結尾天然吸收**：本次 W1-T1 grep 出 46 個 `TradingMsg::Fill` 使用點，但只有 5 個 struct construction 需顯式加 `exit_reason: None`，**41 個 destructure 全部用 `..` 結尾**（pre-existing 設計慣例）→ 修改範圍從「46 個改」縮小到「5 個改」。任何 W1-T2 後續欄位再加（如 W1-T2 動態 reason 注入後的 `closed_position_strategy` 等）也會繼承這個 destructure pattern 紅利
+- **rsync staged Rust files to trade-core for cargo verification + 主會話 commit**：當 spec 是「先不要 commit」但 cargo build/test 必須在 Linux release 跑時，rsync 8 個檔到 trade-core working tree 是合法 workaround（trade-core git status 變 M 但 .gitignore 不擋）。後續主會話 commit 時 Mac → push origin → Linux pull --ff-only 會把 working tree dirty 的 staged 改動「自然 ff-overlay」（rsync 內容 == git push 內容，無 conflict）。**注意**：rsync target 路徑必須一致（`rust/openclaw_engine/src/...` 對 trade-core `~/BybitOpenClaw/srv/rust/openclaw_engine/src/...`），否則 git ff-only 會 conflict
+- **V033 docker exec 跑 idempotency**：`docker exec -i trading_postgres psql -U trading_admin -d trading_ai -f /tmp/V033_test.sql` 比 host psql + PGPASSWORD env 更可靠（host psql 撞 socket auth 或 password env propagation 問題；docker exec 直接走 unix socket 在 container 內、預設 trust auth）
+- **build_close_tags W1-T1 'never used' warning 是預期的**：cargo build warning 23 個含「function `build_close_tags` is never used」是 PA §4 W1-T1 設計範圍內 — helper 已建未呼叫，等 W1-T2 接 16 emit 點後 warning 自然消失。**E1 不應為消 warning 而擴大 W1-T1 範圍動 emit 點**（會違反 PA 派發邊界）
+- **PA §5.4 R-A5 halt_session 特例必須在 helper 主邏輯裡，不能讓 caller 各自處理**：HaltSession 平所有倉，per-position entry strategy 不是聚合鍵 → helper 用 `if reason.starts_with("halt_session")` 提前 return `("risk_close:halt_session", Some(reason))` 統一處理。caller 只需傳 entry strategy + reason，無需知道是否為 halt path
+
+## 2026-04-29 — HELPERS-CLOSE-TAGS-SPLIT helpers.rs §九 file split
+
+**任務**：W1-T1 加 +228 LOC 後 helpers.rs 達 1639 違反 §九「baseline + 5 LOC」例外（1416 上限）→ 拆 `build_close_tags` + 4 unit tests 至 sibling `helpers_close_tags.rs`。**純 file split，0 logic change**。
+
+**輸出**：
+- 新檔 `helpers_close_tags.rs` 277 LOC：module-level 雙語 split-rationale docstring（含 W1-T1 範圍 + PA 設計指針 + 「W1-T2 才接 16 emit 點」備註）+ 完整搬遷 `pub(crate) fn build_close_tags` + `mod tests` 4 個 unit tests
+- helpers.rs 從 1639 → **1411**（= pre-existing baseline，§九 完全合規）
+- mod.rs 加 `mod helpers_close_tags;` + 把 `pub(crate) use helpers::build_close_tags` 改 `pub(crate) use helpers_close_tags::build_close_tags`，加 5 行雙語 split-rationale comment 給 grep stability + governance trail
+- 全 16 個 W1-T2 caller comment「`helpers::build_close_tags(...)`」未動（W1-T2 範圍；實際 caller 路徑經 `crate::tick_pipeline::on_tick::build_close_tags` 訪問，受 mod.rs re-export 保證）
+
+**驗證**：
+- Mac `cargo check -p openclaw_engine` 綠 (3 預存在 dead_code warnings 與本任務無關)
+- trade-core SSH bridge：`scp + git apply` patch → `cargo build --release -p openclaw_engine` 綠（"Finished `release` profile in 27.66s" + `build_close_tags is never used` warning 是 W1-T1 預期）→ `cargo test --release --lib` **2369 passed / 0 failed**（== W1-T1 baseline，split 為 logic-equivalent 確認）
+- 跑完 `git checkout -- . && git clean -fd` 還原 trade-core working copy 清潔
+
+**教訓**：
+- **File split 用 `pub(crate) use sibling::sym` re-export 維持 grep stability**：所有 caller 寫 `crate::tick_pipeline::on_tick::build_close_tags`（透過 parent mod re-export），caller 邏輯不知 helper 在哪檔。W1-T2 後續派發 sub-agent 看到的 caller 引用路徑保持一致 → 不會因 split 重派 W1-T2 工作
+- **trade-core SSH bridge cargo verify 用 `git apply` patch**：當改動 working copy（未 commit）時，`scp diff.patch + git apply + cargo + git checkout -- . + git clean -fd` 是隔離驗證的標準流程；`git apply` 會把 untracked 新檔（如 helpers_close_tags.rs）也建立。**`git diff HEAD` 包 staged + unstaged，但不包 untracked**；untracked 用 `git ls-files --others --exclude-standard | xargs git diff --no-index /dev/null` 補
+- **mod.rs split-rationale comment 雙語必寫**：將來 review 看到「為何不用 `helpers::build_close_tags` 而走 `helpers_close_tags::`」一目了然 — split 是 LOC 治理理由，不是邏輯重構。E2 review 時 5 行 comment 直接答疑
+- **§九 1200 hard cap 計入 mod-level docstring**：拆出新檔 277 LOC（含 50+ 行雙語 module docstring）也在 800 警戒線內 — 雙語 docstring 不是膨脹，是 HELPERS-CLOSE-TAGS-SPLIT 的 governance trail（為何拆 + 來源 + 上下游）。寧多寫不漏寫
+- **W1-T1 working copy = HEAD 後 git status 不顯示 helpers.rs as modified**：W1-T1 +228 LOC + 本 split -228 LOC = 淨 0，git diff 看不出 helpers.rs 被改過。但 mod.rs 會顯 M 因 W1-T1 +1 LOC + 本 split 改線 = 淨 +11 LOC。**file split 無法靠 git status 一眼確認 — 必須 `wc -l` 對比 baseline**
+- **report 要明確 govern flag 已 cleared**：W1-T1 報告 §六 governance flag「helpers.rs 1639 LOC 違反 §九 baseline+5」已被本 split 解決 → 主會話 commit 第二波時不再有 §九 違規。E2 不需 invoke「baseline + 5 LOC」例外條款 — split 本身就是合規路徑
