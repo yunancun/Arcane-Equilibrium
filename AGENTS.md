@@ -83,6 +83,20 @@ Interpretation for this repository:
 - every `git commit` should use a subject plus a body description, not a subject-only message
 - every `git push` should be reported back to the operator with branch, commit SHA, and a short description of what was pushed
 
+## Commit cadence rule
+
+Do not accumulate a large dirty worktree across multiple independent batches when a clean checkpoint already exists.
+
+Default rule for this repository:
+- commit each independently validated batch, wave, or fix-set once its targeted checks are green
+- prefer one coherent commit per green checkpoint instead of one large catch-all commit at the very end
+- push when a checkpoint is ready for operator review, cross-machine sync, or deploy
+
+Allowed exception:
+- if multiple edits are tightly coupled and any intermediate commit would be broken, misleading, or fail required checks, keep them local until the first coherent green checkpoint
+
+If commit is intentionally delayed across multiple scopes, say so explicitly in commentary and explain why.
+
 If this operating model changes, update:
 - `.codex/MEMORY.md`
 - `.codex/AGENT_DISPATCH_PROTOCOL.md`

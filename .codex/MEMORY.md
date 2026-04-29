@@ -69,6 +69,8 @@ Typical commands:
 - before deploy, verify local/remote HEAD and working tree state
 - every commit must include a subject plus a body description
 - every push must be reported with branch, SHA, and a short description of the pushed scope
+- do not leave multiple independent green batches in one large dirty worktree by default
+- commit each validated batch or checkpoint once its targeted verification is green, unless the scopes are still tightly coupled
 
 Current known topology at setup time:
 - Mac repo path: `/Users/ncyu/Projects/TradeBot/srv`
@@ -101,6 +103,7 @@ Current known topology at setup time:
 - temporary runtime nicknames are never the authoritative role identity
 - operator needs judgment and pushback; if risk or contradiction is detected, stop and report first
 - commit/push operations must include explicit description discipline; push itself has no native description field, so the description must exist in the commit body and the operator-facing push report
+- if commit is intentionally delayed, the reason should be stated explicitly to the operator
 
 ## Notes for future sessions
 
