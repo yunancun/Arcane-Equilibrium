@@ -89,6 +89,116 @@ def check_intent_signal_attribution(cur) -> tuple[str, str]:
     return ("PASS", base + " — attribution chain linked")
 
 
+def check_mlde_learning_data_contract(cur) -> tuple[str, str]:
+    """[35] ML/Dream training rows must be attributed and post-fee labeled."""
+    try:
+        cur.connection.rollback()
+    except Exception:
+        pass
+
+    try:
+        cur.execute("SELECT to_regclass('learning.mlde_edge_training_rows') IS NOT NULL")
+        row = cur.fetchone()
+    except Exception as exc:  # noqa: BLE001
+        return ("FAIL", f"MLDE training view existence check failed: {exc}")
+    if not row or not row[0]:
+        return ("FAIL", "learning.mlde_edge_training_rows missing — V031 not applied")
+
+    try:
+        cur.execute(
+            """
+            SELECT
+                count(*)::int AS total,
+                count(*) FILTER (WHERE attribution_chain_ok)::int AS attributed,
+                count(*) FILTER (
+                    WHERE attribution_chain_ok
+                      AND net_bps_after_fee IS NOT NULL
+                      AND linucb_arm_id IS NOT NULL
+                      AND jsonb_typeof(context_features) = 'array'
+                      AND jsonb_array_length(context_features) = 8
+                )::int AS linucb_ready,
+                count(*) FILTER (
+                    WHERE signal_id IS NULL OR signal_id = ''
+                       OR context_id IS NULL OR context_id = ''
+                )::int AS missing_ids,
+                count(*) FILTER (WHERE net_bps_after_fee IS NULL)::int AS missing_reward
+            FROM learning.mlde_edge_training_rows
+            WHERE ts > now() - interval '7 days'
+              AND engine_mode IN ('demo', 'live_demo')
+            """
+        )
+        total, attributed, linucb_ready, missing_ids, missing_reward = cur.fetchone()
+    except Exception as exc:  # noqa: BLE001
+        return ("WARN", f"MLDE training contract query failed: {type(exc).__name__}: {exc}")
+
+    total = _as_int(total)
+    attributed = _as_int(attributed)
+    linucb_ready = _as_int(linucb_ready)
+    missing_ids = _as_int(missing_ids)
+    missing_reward = _as_int(missing_reward)
+    base = (
+        f"7d demo/live_demo MLDE rows total={total}, attributed={attributed}, "
+        f"linucb_ready={linucb_ready}, missing_ids={missing_ids}, missing_reward={missing_reward}"
+    )
+    if total == 0:
+        return ("WARN", base + " — no post-V031 MLDE training rows yet")
+    if missing_ids > 0:
+        return ("FAIL", base + " — attribution ids missing; scanner→signal→intent chain regressed")
+    if linucb_ready == 0:
+        return ("WARN", base + " — no LinUCB-ready post-fee rows yet")
+    return ("PASS", base + " — learning data contract usable")
+
+
+def check_mlde_shadow_recommendations(cur) -> tuple[str, str]:
+    """[36] ML/Dream advisory table exists and live applied rows need leases."""
+    try:
+        cur.connection.rollback()
+    except Exception:
+        pass
+
+    try:
+        cur.execute("SELECT to_regclass('learning.mlde_shadow_recommendations') IS NOT NULL")
+        row = cur.fetchone()
+    except Exception as exc:  # noqa: BLE001
+        return ("FAIL", f"MLDE advisory table existence check failed: {exc}")
+    if not row or not row[0]:
+        return ("FAIL", "learning.mlde_shadow_recommendations missing — V031 not applied")
+
+    try:
+        cur.execute(
+            """
+            SELECT
+                count(*) FILTER (WHERE ts > now() - interval '24 hours')::int AS recent,
+                count(DISTINCT source) FILTER (WHERE ts > now() - interval '24 hours')::int AS sources,
+                count(*) FILTER (
+                    WHERE engine_mode IN ('live', 'live_demo')
+                      AND applied
+                      AND COALESCE(decision_lease_id, '') = ''
+                )::int AS live_applied_without_lease
+            FROM learning.mlde_shadow_recommendations
+            """
+        )
+        recent, sources, live_applied_without_lease = cur.fetchone()
+    except Exception as exc:  # noqa: BLE001
+        return ("WARN", f"MLDE advisory query failed: {type(exc).__name__}: {exc}")
+
+    recent = _as_int(recent)
+    sources = _as_int(sources)
+    live_applied_without_lease = _as_int(live_applied_without_lease)
+    base = (
+        f"24h MLDE advisory rows={recent}, sources={sources}, "
+        f"live_applied_without_lease={live_applied_without_lease}"
+    )
+    if live_applied_without_lease > 0:
+        return (
+            "FAIL",
+            base + " — live/live_demo applied advisory row lacks Decision Lease",
+        )
+    if recent == 0:
+        return ("WARN", base + " — no recent MLDE shadow/advisory outputs yet")
+    return ("PASS", base + " — advisory-only boundary intact")
+
+
 def _load_strategy_params(kind: str) -> tuple[dict[str, Any] | None, str]:
     """Load ``settings/strategy_params_<kind>.toml`` fail-soft.
     讀取指定 kind 的 strategy params TOML；失敗時回診斷，不拋例外。

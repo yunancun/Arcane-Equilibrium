@@ -112,7 +112,13 @@ ML/Dream edge-unblock policy:
 - as of `2026-04-29 17:51 CEST`, positive edge is a promotion gate, not a training gate
 - demo may run ML / LinUCB / DreamEngine / OpportunityTracker in read-only, shadow, counterfactual, and bounded demo A/B modes to repair edge
 - live autonomous trading or live parameter mutation from ML/Dream/agents must pass GovernanceHub approval, Decision Lease, and the existing live gates
-- current work order is MLDE-0..6 in `TODO.md`: GovernanceHub live boundary, Learning Data Contract, LinUCB intent-arm/reward loop, ML shadow scorer, Dream/Opportunity read-only producers, demo A/B advisory path, then live promotion contract
+- as of `2026-04-29 18:16 CEST`, local MLDE implementation is complete:
+  - V031 adds `learning.mlde_edge_training_rows` and `learning.mlde_shadow_recommendations`
+  - LinUCB trainer reads valid attribution + post-fee `net_bps_after_fee`; scheduler trains shared state once per cycle on default `demo_live_demo`
+  - ML shadow advisor emits advisory `rank`/`veto`; DreamEngine and OpportunityTracker provide read-only inputs to CognitiveModulator
+  - healthchecks `[35]` and `[36]` cover the learning data contract and advisory/live lease boundary
+  - completion report: `docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-29--ml_dream_edge_unblock_completion.md`
+- Rust active LinUCB arm-space remains `v1_15`; richer `mlde_arm_id` exists for shadow/advisory analysis, and switching runtime active arm-space is a separate future migration
 
 Claude memory sources used for alignment:
 - `memory/MEMORY.md`

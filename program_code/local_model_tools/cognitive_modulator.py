@@ -65,6 +65,8 @@ class CognitiveModulator:
         self._stoploss_mult = _BASE_STOPLOSS_MULT
         self._scan_interval = float(_BASE_SCAN_INTERVAL)
         self._update_count = 0
+        self.last_regret_summary: dict[str, Any] = {}
+        self.last_dream_summary: dict[str, Any] = {}
 
     def update(
         self,
@@ -89,6 +91,8 @@ class CognitiveModulator:
         """
         rd = regret_data or {}
         dd = dream_data or {}
+        self.last_regret_summary = dict(rd)
+        self.last_dream_summary = dict(dd)
         self._update_count += 1
 
         # ── Confidence floor / 信心下限 ──

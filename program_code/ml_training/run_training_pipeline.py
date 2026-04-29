@@ -500,7 +500,7 @@ if __name__ == "__main__":  # pragma: no cover
         ),
     )
     ap.add_argument("--output", default=DEFAULT_MODEL_DIR)
-    ap.add_argument("--engine-mode", default="demo", choices=("paper", "demo", "live"))
+    ap.add_argument("--engine-mode", default="demo", choices=("paper", "demo", "live", "live_demo"))
     ap.add_argument("--use-quantile-predictor", action="store_true",
                     help="Route to EDGE-P3-1 Stage 2 quantile trio path")
     args = ap.parse_args()
