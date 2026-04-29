@@ -31,21 +31,22 @@ AI Agent 自动交易系统 — 自主扫描 650+ 交易对，智能部署策略
 
 ---
 
-## 当前状态 (2026-04-24 · **Live_Ready ⚠️** · TODO 10-Agent Audit 重構完成)
+## 当前状态 (2026-04-29 · **Live_Ready ⚠️** · 62-finding remediation Batch A-F deployed · 治理文件減肥完成)
 
-**最新更新**：10 個獨立 Agent（PM/FA/PA/CC/QC/QA/AI-E/MIT/E5/BB）並行 audit → PA FIX-PLAN（45 findings/6 工作組 G1-G6/4 wave）→ PM Sign-off Approved → 舊 TODO 700 行歸檔、新 TODO 328 行（精煉 53%，每條帶 audit 指針）
-- audit 索引：`docs/audits/2026-04-24--todo_refactor_audit.md`
-- FIX-PLAN：`docs/CCAgentWorkSpace/PA/workspace/reports/2026-04-24--4.24TodoAudit_FixPlan.md`
-- PM Sign-off：`docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-24--FixPlan_PMApproval.md`
-- 舊 TODO 歸檔：`docs/archive/2026-04-24--todo_snapshot_pre_refactor.md`
-- 新 TODO（按 Wave 1-4 組織）：`TODO.md`
+**最新更新**：62-finding remediation Batch A-F 全部 fixed/sign-off/PUSHED/Linux deployed（commits `bc3fa70` + `6539e4e` + `5db4e29`，6 batch × 62 findings × Linear NCY-5..10 milestone 對應）；2026-04-29 治理文件減肥 Stage 0-2 完成（TODO.md 817→678 / CLAUDE.md §三 5 個過期 paragraph 歸檔到 archive）；post-deploy healthcheck 大幅改善（fix `cfb1e7d` demo fee cold-boot + `c0902d9` post-restart passive wait grace 後，原 FAIL `[12]+[22]` / WARN `[27]` 已 PASS，僅剩 `[16] strategist_cycle_fresh` 需 RCA）
+- 治理 trim 歸檔索引：`docs/archive/2026-04-29--62finding-batch-A-to-F.md` · `docs/archive/2026-04-29--strkusdt-p0-wave.md` · `docs/archive/2026-04-29--wave-A-to-H-narrative.md` · `docs/archive/2026-04-29--claude_md_section3_pre_04_27_detail.md`
+- Batch F PM Sign-off：`docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-29--batch_f_ml_agent_autonomy_signoff.md`
+- 62-finding tracking ledger：`docs/audit/remediation_tracking.md`
+- TODO（按 Wave 1-4 + Batch + Backlog 組織）：`TODO.md`
 
-**3 大 Verified 發現**（讀代碼驗證）：
-1. `settings/edge_estimates.json` 僅 **1 cell**（vs CLAUDE.md 宣稱 162），`edge_estimator_scheduler` 4 天未運行
-2. PostOnly 配置 demo=false/live=true **反向**（違反原則 #6）
-3. `executor_agent.py:482` `_shadow_mode=True` hardcoded（違反原則 #3，AI→Rust 執行鏈斷路）
+**Runtime（2026-04-29 CEST · ssh verify）**：HEAD `b0ef335` synced（pre-trim） · engine PID **161957** alive · API uvicorn PID **162029** + 4 workers · engine_watchdog PID 3450754 · openclaw-gateway PID 3973441 · watchdog `engine_alive=true` + demo snapshot fresh · API auth enforced（401 unauth）· post-deploy healthcheck FAIL `[16]`（其餘 27 PASS）· Live pipeline 拒啟動是預期 gate（authorization schema v1 vs v2，需 Operator 經 `/api/v1/live/auth/renew` 重簽，不可手寫）
 
-**主路徑**：Wave 1 G1 scheduler+fn 拆（W17/18）→ Wave 2 G3 AI 接線+G5 refactor+G4 ML（W19）→ Wave 3 EDGE-DIAG Phase 3+Phase 1b（W20-W23）→ Wave 4 LG-2/3/4/5+P0-3 決策（W23-W24）→ Live（最早 ~2026-05-23）
+**已驗證的修復事實**：
+1. ExecutorAgent shadow_mode hardcoded ✅ 已修（G3-03 Phase B `shadow_mode_provider` live at `program_code/.../executor_agent.py:145-186`，取代 hardcoded `_shadow_mode = True`）
+2. edge_estimator_scheduler ✅ 已修（commits `f32629c`+`abc85c0`，2026-04-24；現 187 cells / 59 updated/cycle / mtime <30min）
+3. PostOnly demo/live 反向 ✅ 已修（EDGE-DIAG-2 + Wave A-H series）
+
+**下一步主路徑**：(1) `[16] strategist_cycle_fresh` RCA（強 1）→ (2) Live auth renewal（operator 動作）→ (3) G1-04-FUP ~05-02 1w accumulated re-compute → (4) G2-01 PostOnly ~05-07 1-2w 驗收 → (5) Phase C Wave 1 派發（operator gated）→ Live（最早 ~2026-05-23）
 
 
 ```
@@ -59,9 +60,10 @@ Live 门控:    5 项全绿才上真实 live（LIVE-GUARD-1 + LIVE-GATE-BINDING-
               (5) Python Operator 角色 auth
 execution_authority: Rust 端仅为 P0/P1 denylist 字符串常量（claude_teacher/applier.rs:226）
                      非真实授权逻辑，"auto_granted_on_start" 为 Python 概念
-测试:         Rust engine lib 1791 passed / 0 failed · bin 38 · core 392 · e2e 35
-              reconciler_e2e 19 · micro_profit_fix_integration 7
-              Python control_api 2866 passed (0 fail · 14 skipped) · ml_training 238 passed
+测试:         Rust engine lib 2290 passed / 0 failed（Phase 4 + G3-09 Phase A merge 後 baseline，2026-04-27）
+              · core 403 · e2e 35 · reconciler_e2e 19
+              Python control_api 3117 passed (0 fail · 3 skipped) · ml_training 238 passed
+              healthcheck 28 check（19 既有 + STRKUSDT P0 wave [22-29] + EDGE-DIAG-2 [30] + [31]）
 API 路由:     209 /api/v1 + 11 non-api（2026-04-16 audit 实测）
 代码:         ~62,000 行（Python ~40k + Rust ~22k）
 单一引擎:     Rust openclaw_engine = paper / demo / live 三模式唯一引擎
@@ -105,13 +107,14 @@ Layer 2:      L0 确定性 → L1 Ollama 9B/27B → L2 Claude API
               Signal Diamond Phase 1-4 ✅（归档：docs/references/2026-04-10--signal_diamond_db_todo.md）
 Bybit API:    64 REST + 8 WS + 5 Private WS + 8 IPC
 
-下一步（按顺序）:
-  1) restart_all.sh --rebuild 整合部署 EDGE-P2-2 + E5-FN + FILL-CONTEXT + EXIT-FEATURES + E5-P1/P2
-  2) E5-FN-3-FUP：Strategist/Guardian/Executor/Scout audit_callback wiring
-  3) P0-6 intent write gap / P0-7 order submit gap
-  4) P0-2 LG-1 21d demo 观察期 → P0-3 edge 重评
-  5) P1-7 LEARNING-PIPELINE-DORMANT-1（不阻 live 但阻 Phase 5 edge 收敛）
-  6) LG-4/5 Live Gate + 真实 Live：换入 mainnet API key（最早 ~2026-05-23 W24 末）
+下一步（2026-04-29 PM 排序）:
+  1) [16] strategist_cycle_fresh RCA（healthcheck 唯一 FAIL，其餘 27 PASS）
+  2) Live auth renewal（operator 動作 — `/api/v1/live/auth/renew` 重簽 schema v2）
+  3) G1-04-FUP ~05-02：1w accumulated 後 QC re-compute fee drop + R:R baseline
+  4) G2-01 PostOnly 1-2w 驗收 ~05-07/08：fee drop ≥60% 或 G2-04 disable 決策
+  5) G2-02 ma_crossover counterfactual ~05-03：tool ready，passive 1w demo data 後跑雙軌
+  6) Phase C Wave 1 impl（PA RFC `90d1a2e` ready，operator gated）
+  7) LG-4/5 Live Gate + 真实 Live：换入 mainnet API key（最早 ~2026-05-23 W24 末）
 ```
 
 **亮点**：ARCH-RC1 统一 Config 4 IPC 写入面 + 5 engines 热重载（端到端 e2e `4780b04`）· Python 风控/纸盘双退场 · Guardian = RiskConfig 纯派生视图 · 单一 Rust 引擎 · V014 audit · L3 12 路审计完成 · EXT-1 Exchange-as-Truth · 5 Agent · Rust tick <100μs · PYO3-ELIMINATE-1 完成（纯 Python httpx Bybit 桥，无 cdylib 跨平台耦合）· Telegram+Webhook 双通道告警
