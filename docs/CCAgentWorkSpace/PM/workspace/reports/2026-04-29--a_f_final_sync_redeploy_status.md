@@ -39,9 +39,8 @@ CONDITIONAL / NOT FULL GREEN.
 - FAIL `[12] bb_breakout_post_deadlock_fix`
 - FAIL `[22] trading_pipeline_silent_gap`
 - WARN `[27] intents_counter_freeze`
-- WARN `[31] edge_diag_2_strategy_diversity`
 
-The earlier startup-transient `[16] strategist_cycle_fresh` cleared after the first 5-minute cycle.
+The earlier startup-transient `[16] strategist_cycle_fresh` cleared after the first 5-minute cycle. `[31] edge_diag_2_strategy_diversity` appeared in an earlier rerun but did not appear in the latest rerun.
 
 Live pipeline refusal is expected after Batch A auth hardening: existing signed authorization is schema v1, while the engine expects schema v2. Operator must renew through `/api/v1/live/auth/renew` or renew-review. Do not hand-write `authorization.json`.
 

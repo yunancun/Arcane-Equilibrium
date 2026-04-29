@@ -970,6 +970,6 @@ Operator 接續 Tier 8 sign-off 後說「繼續派」。PM 按 Tier 8 §8 推薦
 - API port `8000` is bound by the new control API venv; unauthenticated direct health probes return 401, so auth is enforced.
 
 ### PM Verdict
-- Not full-green: passive healthcheck still FAILs `[12]` and `[22]`, WARNs `[27]` and `[31]`.
+- Not full-green: latest passive healthcheck still FAILs `[12]` and `[22]`, and WARNs `[27]`; `[31]` no longer appeared in the latest rerun.
 - Live pipeline is intentionally blocked until schema-v2 auth renewal.
 - Do not say production-ready until `[22] trading_pipeline_silent_gap` / fee-rate cold-boot cost_gate fail-closed is investigated and passive healthcheck is rerun clean or explicitly accepted.
