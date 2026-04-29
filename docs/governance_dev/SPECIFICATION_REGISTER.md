@@ -1,8 +1,8 @@
 # Governance Specification Register / 治理規範註冊表
 
 **Project:** OpenClaw / Bybit
-**Last Updated:** 2026-03-30
-**Maintained By:** R4 (Document Auditor)
+**Last Updated:** 2026-04-29
+**Maintained By:** R4 (Document Auditor) · TW catch-up（2026-04-29）
 
 ---
 
@@ -43,12 +43,77 @@
 
 ---
 
+## Reference Documents (REF) / 參考規格文件（2026-04 補登）
+
+> **REF-XX**：屬「規格性質」的長期參考文件（架構契約 / 設計規範 / 跨語言邊界 / Agent 行為規範）。
+> 與 SM/EX/DOC 不同處：REF 通常為跨多模組的協調規格，無單一 implementing module。
+> 路徑：`docs/references/` 或 `docs/architecture/`，所有檔遵循 `YYYY-MM-DD--<topic>.md` 命名。
+
+| Code | Name | Path | Status | Description |
+|------|------|------|--------|-------------|
+| REF-01 | ARCH-RC1 Unified Config Contract | docs/references/2026-04-15--arch_rc1_unified_config_contract.md | ✅ Active | 3-Config + StrategyParams Rust 權威 / ArcSwap 熱重載 / 4 IPC 寫入面（2026-04-07 定稿） |
+| REF-02 | Rust Migration V3-FINAL | docs/references/2026-04-03--rust_migration_v3_final.md | ✅ Active | Rust 遷移正式執行依據：32,500 行 / 14 週路線圖 / 分級浮點容差 / 四層測試（五角色三輪審查 21 修正） |
+| REF-03 | Agent Cognitive Adaptation Spec V1 | docs/references/2026-04-03--agent_cognitive_adaptation_spec_v1_draft.md | 🟡 Draft | CognitiveModulator + OpportunityTracker + DreamEngine（五角色審查通過，Phase 1 並行組 B；CLAUDE.md §二 衍生「認知調製 ≠ 能力限制」實施準則） |
+| REF-04 | ML/DL Learning Architecture V0.4 | docs/references/2026-04-03--ml_dl_learning_architecture_v0.4.md | ✅ Active | Teacher-Student + LightGBM + Optuna + 3 DL 場景（三方審查完成） |
+| REF-05 | Bybit V5 API Reference (SSOT) | docs/references/2026-04-04--bybit_api_reference.md | ✅ Active | REST/WS 全端點速查 · V5 API 分類覆蓋 · 開發必讀（SSOT 標記 v1.1，2026-04-26 G9-01 路徑修正後） |
+| REF-06 | Comprehensive Audit Template V1 | docs/references/2026-04-04--comprehensive_audit_template_v1.md | ✅ Active | L1/L2/L3 三級審計流程 · 5 路並行 9 角色 + DL/DB 專項 |
+| REF-07 | Execution Plan V1 (Fusion Plan) | docs/references/2026-04-04--execution_plan_v1.md | ✅ Active | DB + ML/DL + 新聞 Agent 20 週路線圖 · Phase 0-6 詳細規格 |
+| REF-08 | Math Implementation Notes | docs/references/2026-04-06--math_implementation_notes.md | ✅ Active | 數學實現方案彙編：LinUCB/風控公式/統計檢定/校準/shrinkage |
+| REF-09 | Phase 4 Execution Plan V2 | docs/references/2026-04-06--phase4_execution_plan_v2.md | ✅ Active | 融合方案執行計劃 V2：Phase 4 更新版排期 |
+| REF-10 | ARCH-RC1 1C-3 Scope | docs/references/2026-04-07--arch_rc1_1c3_scope.md | ✅ Active | ARCH-RC1 1C-3 範圍定義 |
+| REF-11 | ARCH-RC1 1C-3A Gap Analysis | docs/references/2026-04-07--arch_rc1_1c3a_gap_analysis.md | ✅ Active | ARCH-RC1 1C-3A 缺口分析 |
+| REF-12 | ARCH-RC1 1C-3C Reconciliation | docs/references/2026-04-07--arch_rc1_1c3c_recon.md | ✅ Active | ARCH-RC1 1C-3C 對賬設計 |
+| REF-13 | Signal Diamond DB TODO | docs/references/2026-04-10--signal_diamond_db_todo.md | ✅ Active | 多引擎數據分離 5 Phase 規劃（Phase 1-4 ✅，Phase 5 待實施） |
+| REF-14 | 3E-ARCH Three-Engine Parallel Plan V4 | docs/references/2026-04-11--three_engine_parallel_arch_plan.md | ✅ Active | 三引擎並行架構遷移計劃 v4：26 設計決策 · PM+PA+FA 三角色（已完成） |
+| REF-15 | 3E-ARCH Session Execution Plan | docs/references/2026-04-11--3e_arch_session_execution_plan.md | ✅ Active | 3E-ARCH Session 執行計劃：8 工作日排期（已完成） |
+| REF-16 | Dust-Frozen Position Manual Clear SOP | docs/references/2026-04-20--dust_frozen_position_manual_clear_procedure.md | ✅ Active | DUST-EVICTION-GAP-1 P1-8 設計背景 · Bybit GUI 三路線 · Live 前 pre-flight checklist |
+| REF-17 | Cross-Platform Redeploy Dependencies | docs/references/2026-04-20--cross_platform_redeploy_dependencies.md | ✅ Active | Linux→macOS（Apple Silicon）冷裝清單 · brew/rustup/pip 步驟 · systemd↔launchd 差異 · HMAC 憑證重簽陷阱 |
+| REF-18 | Model Canary Promotion Rules (Draft) | docs/references/2026-04-23--model_canary_promotion_rules_draft.md | 🟡 Draft | INFRA-PREBUILD-1 Part B Model Registry canary 狀態機 + Phase 晉升閾值 + Operator playbook（Phase 4 auto-promote cron 延後） |
+
+### Architecture Specifications
+
+| Code | Name | Path | Status | Description |
+|------|------|------|--------|-------------|
+| ARCH-01 | Data Storage Architecture V1 | docs/architecture/DATA_STORAGE_ARCHITECTURE_V1.md | ✅ Active | PG + TimescaleDB · 8 Schema · 存儲精簡 97%（5.6→0.17 GB/day）· 冷存儲 NAS 策略 |
+
+---
+
+## Audit Catalog (AUDIT) / 審計報告目錄（2026-04 補登）
+
+> **AUDIT-XX**：重大審計報告索引。涵蓋多角色聯合審計、合規審查、安全審計、ARCH 審查。
+> register 不重複內容，僅追蹤審計與規範條目（SM/EX/DOC/REF）的對應關係，便於後續引用。
+> 路徑：`docs/audits/`，所有檔遵循 `YYYY-MM-DD--<topic>.md` 命名。
+
+| Code | Name | Path | Date | Cross-Reference |
+|------|------|------|------|------------------|
+| AUDIT-01 | Bilingual Comment Audit | docs/audits/2026-03-30--bilingual_comment_audit_report.md | 2026-03-30 | CLAUDE.md §七 雙語注釋規範 |
+| AUDIT-02 | Bybit V5 API Infrastructure Audit | docs/audits/2026-04-04--bybit_api_infra_audit.md | 2026-04-04 | REF-05 / BB+E5 聯合審核 |
+| AUDIT-03 | L3 Consolidated Remediation Report | docs/audits/2026-04-06--consolidated_remediation_report.md | 2026-04-06 | L3 414 findings → 63 tracker · 11 工作包 · R0-R3 整改記錄 |
+| AUDIT-04 | E3 R6 Directive Applier Security Audit | docs/audits/2026-04-07--e3_r6_directive_applier_security_audit.md | 2026-04-07 | Phase 4 前置安全審查 |
+| AUDIT-05 | Phase 4 Final Sign-off Audit | docs/audits/2026-04-07--phase4_final_signoff_audit.md | 2026-04-07 | Phase 4 最終驗收審計報告 |
+| AUDIT-06 | E2 Review ARCH-RC1 1C-3 BBC | docs/audits/2026-04-08--e2_review_1c3_bbc.md | 2026-04-08 | REF-10 / ARCH-RC1 1C-3 Build-Before-Commit 驗收 |
+| AUDIT-07 | DB R/W + ML Pipeline Full Audit | docs/audits/2026-04-09--db_rw_ml_pipeline_full_audit.md | 2026-04-09 | Signal Diamond Phase 1 前置 |
+| AUDIT-08 | 3E-ARCH E2 Multi-Role Review | docs/audits/2026-04-11--3e_arch_e2_multi_role_review.md | 2026-04-11 | REF-14 / REF-15 · 9 角色並行 Phase A-F 全修驗證 |
+| AUDIT-09 | 3E-ARCH Phase G Re-audit | docs/audits/2026-04-11--3e_arch_phase_g_reaudit.md | 2026-04-11 | REF-14 · 9/9 PASS — 0 BLOCKER |
+| AUDIT-10 | Full Program Chain Audit | docs/audits/2026-04-12--full_program_chain_audit.md | 2026-04-12 | 12 角色合併 · 58 findings（8 P0 · 17 P1 · 28 P2 · 5 P3） |
+| AUDIT-11 | Full Audit Fix Plan (PM Confirmed) | docs/audits/2026-04-12--full_audit_fix_plan_pm_confirmed.md | 2026-04-12 | AUDIT-10 配套 · P0~P3 分級修復排期 + PM 簽核 |
+| AUDIT-12 | TODO Refactor Audit (10-Agent) | docs/audits/2026-04-24--todo_refactor_audit.md | 2026-04-24 | 10 Agent 獨立 audit · PA FIX-PLAN（45 findings / 6 工作組 / 4 Wave）· PM Sign-off |
+
+> **註**：早期審計（2026-04-05 L3 12 角色報告）位於 `docs/audits/2026-04-05--l3_comprehensive/` 子目錄；
+> Phase 治理審計位於 `docs/governance_dev/audits/`（如 `2026-03-31--gap_analysis_287_specs.md`）。
+> 各 Agent workspace audit 位於 `docs/CCAgentWorkSpace/<Agent>/workspace/reports/`，不在本表內。
+
+---
+
 ## Specification Numbering Rules / 編號規則
 
 - **SM-XX**: State Machine specifications (core governance automata)
 - **EX-XX**: Exchange specifications (trading operations and integration)
 - **DOC-XX**: Organization document specifications (policies and procedures)
-- **§** notation: Section references within a spec (e.g., "DOC-01 §5.9")
+- **REF-XX**: Reference specifications (architecture contracts, design specs, cross-language boundaries; 2026-04 新增類別)
+- **ARCH-XX**: Architecture specifications (system-level design documents; 2026-04 新增類別)
+- **AUDIT-XX**: Audit catalog (major audit reports cross-referenced to SM/EX/DOC/REF; 2026-04 新增類別)
+- **§** notation: Section references within a spec (e.g., "DOC-01 §5.9", "REF-01 §3")
 
 ---
 
@@ -56,22 +121,35 @@
 
 | Metric | Count |
 |--------|-------|
-| Active specifications | 16 |
+| Active SM/EX/DOC specifications | 16 |
 | Reserved specifications | 2 (SM-03, EX-03) |
+| Active REF specifications | 18 |
+| Active ARCH specifications | 1 |
+| Active AUDIT entries (2026-04) | 12 |
 | Total code references | 335+ |
 | Implementing modules | 22 |
-| Test coverage | 1,566 tests |
+| Test coverage | 2,308+ Rust lib tests + Python pytest（持續增加） |
 
 ---
 
 ## How to Add New Specifications / 如何新增規範
 
-1. Assign next available code in appropriate category (SM/EX/DOC)
-2. Create implementation module following naming convention (lowercase_snake_case)
-3. Add spec code references in code comments (e.g., `# Per SM-XX §Y`)
+1. Assign next available code in appropriate category (SM/EX/DOC/REF/ARCH/AUDIT)
+2. Create implementation module / document following naming convention
+   - Code modules：`lowercase_snake_case.py` / `.rs`
+   - Documents：`YYYY-MM-DD--<topic>.md`（中文描述優先）
+3. Add spec code references in code comments (e.g., `# Per SM-XX §Y` / `// REF-XX`)
 4. Create test file with matching name (test_module_name.py)
-5. Add changelog entry in `docs/governance_dev/phase{N}_*/changelogs/`
-6. Update this register
+5. Add changelog entry in `docs/governance_dev/phase{N}_*/changelogs/` 或 `docs/CLAUDE_CHANGELOG.md`
+6. Update this register **and** `docs/README.md` 索引
+
+---
+
+## Catch-up History / 補登歷史
+
+| 日期 | 動作 | 範圍 |
+|------|------|------|
+| 2026-04-29 | TW catch-up（4 月補登） | 新增 REF-01~18（18 條 reference 規格）+ ARCH-01（架構規格）+ AUDIT-01~12（12 條主要審計索引）。新增 3 個編號類別：REF / ARCH / AUDIT。`Last Updated` 由 2026-03-30 → 2026-04-29。詳見 commit message 與 `docs/CCAgentWorkSpace/TW/memory.md` 同日記錄。 |
 
 ---
 
