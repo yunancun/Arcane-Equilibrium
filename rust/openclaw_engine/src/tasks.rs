@@ -23,14 +23,48 @@ use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
 
+/// One AccountManager + REST client that needs periodic fee freshness.
+/// 一個需要週期費率刷新保鮮的 AccountManager + REST client。
+#[derive(Clone)]
+pub(crate) struct FeeRateTaskBinding {
+    engine: &'static str,
+    env: BybitEnvironment,
+    acct: Arc<AccountManager>,
+    client: Arc<BybitRestClient>,
+}
+
+impl FeeRateTaskBinding {
+    pub(crate) fn new(
+        engine: &'static str,
+        env: BybitEnvironment,
+        acct: &Arc<AccountManager>,
+        client: &Arc<BybitRestClient>,
+    ) -> Self {
+        Self {
+            engine,
+            env,
+            acct: Arc::clone(acct),
+            client: Arc::clone(client),
+        }
+    }
+}
+
 /// Spawn periodic fee rate refresh (every 1h) + staleness monitor (alarm if >2h).
 /// 啟動定期費率刷新（每 1h）和新鮮度監控（>2h 告警）。
-pub(crate) fn spawn_fee_rate_tasks(
-    acct: &Arc<AccountManager>,
-    client: &Arc<BybitRestClient>,
-    env: BybitEnvironment,
-    cancel: &CancellationToken,
-) {
+pub(crate) fn spawn_fee_rate_tasks(bindings: Vec<FeeRateTaskBinding>, cancel: &CancellationToken) {
+    if bindings.is_empty() {
+        info!("no exchange fee-rate bindings — skipping fee freshness tasks / 無交易所費率綁定，跳過費率保鮮任務");
+        return;
+    }
+
+    for b in &bindings {
+        info!(
+            engine = b.engine,
+            env = ?b.env,
+            "fee-rate freshness binding registered / 費率保鮮綁定已註冊"
+        );
+    }
+
     // Periodic refresh: re-fetch fee rates hourly so the 2h cost-gate staleness
     // guard has room for one missed refresh before failing closed.
     // 每小時刷新費率；2h 成本門過期保護可容忍一次刷新失敗。
@@ -38,35 +72,17 @@ pub(crate) fn spawn_fee_rate_tasks(
     //                   log message preserved byte-for-byte.
     // E5-P1-5 採用：使用共享的 spawn_cancellable_interval；cancel log 完全保留。
     {
-        let acct_refresh = Arc::clone(acct);
-        let client_refresh = Arc::clone(client);
+        let bindings_refresh = bindings.clone();
         let _ = spawn_cancellable_interval(
             "fee_rate_refresh",
             std::time::Duration::from_secs(3600),
             Some("fee_rate refresh task stopping (cancel) / 費率刷新任務停止"),
             cancel.clone(),
             move || {
-                let acct = Arc::clone(&acct_refresh);
-                let client = Arc::clone(&client_refresh);
+                let bindings = bindings_refresh.clone();
                 async move {
-                    match acct.refresh_fee_rates(&*client, "linear").await {
-                        Ok(count) => {
-                            info!(symbols = count, "fee rates refreshed (1h) / 費率已刷新")
-                        }
-                        Err(e) => {
-                            if is_demo_fee_endpoint_unsupported(env, &e) {
-                                let count = acct.seed_default_fee_rates(SYMBOLS.iter().copied());
-                                warn!(
-                                    env = ?env,
-                                    error = %e,
-                                    symbols = count,
-                                    "fee-rate endpoint unavailable on demo endpoint; conservative defaults re-seeded \
-                                     / demo 費率端點不可用，已重新注入保守預設費率"
-                                );
-                            } else {
-                                warn!(error = %e, "fee rate refresh failed / 費率刷新失敗")
-                            }
-                        }
+                    for binding in bindings {
+                        refresh_fee_rate_binding(&binding).await;
                     }
                 }
             },
@@ -77,7 +93,7 @@ pub(crate) fn spawn_fee_rate_tasks(
     // The exchange cost gate also rejects while stale; this log makes it visible.
     // 費率新鮮度監控：>2h 未刷新告警；exchange 成本門也會拒絕。
     {
-        let acct_mon = Arc::clone(acct);
+        let bindings_mon = bindings.clone();
         let cancel_mon = cancel.clone();
         tokio::spawn(async move {
             let mut tick = tokio::time::interval(std::time::Duration::from_secs(15 * 60));
@@ -86,23 +102,64 @@ pub(crate) fn spawn_fee_rate_tasks(
                 tokio::select! {
                     _ = cancel_mon.cancelled() => break,
                     _ = tick.tick() => {
-                        let last = acct_mon.last_fee_refresh_ms();
-                        if last == 0 { continue; }
                         let now = std::time::SystemTime::now()
                             .duration_since(std::time::UNIX_EPOCH)
                             .unwrap_or_default()
                             .as_millis() as u64;
-                        let age_h = (now.saturating_sub(last)) as f64 / 3_600_000.0;
-                        if age_h > 2.0 {
-                            warn!(
-                                age_hours = format!("{:.1}", age_h),
-                                "fee rates STALE >2h — cost gate will fail closed / 費率過期，成本門將 fail-closed"
-                            );
+                        for binding in &bindings_mon {
+                            let last = binding.acct.last_fee_refresh_ms();
+                            if last == 0 { continue; }
+                            let age_h = (now.saturating_sub(last)) as f64 / 3_600_000.0;
+                            if age_h > 2.0 {
+                                warn!(
+                                    engine = binding.engine,
+                                    env = ?binding.env,
+                                    age_hours = format!("{:.1}", age_h),
+                                    "fee rates STALE >2h — cost gate will fail closed / 費率過期，成本門將 fail-closed"
+                                );
+                            }
                         }
                     }
                 }
             }
         });
+    }
+}
+
+async fn refresh_fee_rate_binding(binding: &FeeRateTaskBinding) {
+    match binding
+        .acct
+        .refresh_fee_rates(&*binding.client, "linear")
+        .await
+    {
+        Ok(count) => {
+            info!(
+                engine = binding.engine,
+                env = ?binding.env,
+                symbols = count,
+                "fee rates refreshed (1h) / 費率已刷新"
+            )
+        }
+        Err(e) => {
+            if is_demo_fee_endpoint_unsupported(binding.env, &e) {
+                let count = binding.acct.seed_default_fee_rates(SYMBOLS.iter().copied());
+                warn!(
+                    engine = binding.engine,
+                    env = ?binding.env,
+                    error = %e,
+                    symbols = count,
+                    "fee-rate endpoint unavailable on demo endpoint; conservative defaults re-seeded \
+                     / demo 費率端點不可用，已重新注入保守預設費率"
+                );
+            } else {
+                warn!(
+                    engine = binding.engine,
+                    env = ?binding.env,
+                    error = %e,
+                    "fee rate refresh failed / 費率刷新失敗"
+                )
+            }
+        }
     }
 }
 
@@ -821,5 +878,21 @@ mod tests {
             BybitEnvironment::Demo,
             &wrong_msg
         ));
+    }
+
+    #[test]
+    fn test_fee_rate_task_binding_preserves_target_identity() {
+        let acct = Arc::new(AccountManager::new());
+        let client = Arc::new(
+            BybitRestClient::new(BybitEnvironment::Demo, None, None)
+                .expect("demo client without credentials should construct"),
+        );
+
+        let binding = FeeRateTaskBinding::new("demo", BybitEnvironment::Demo, &acct, &client);
+
+        assert_eq!(binding.engine, "demo");
+        assert_eq!(binding.env, BybitEnvironment::Demo);
+        assert!(Arc::ptr_eq(&binding.acct, &acct));
+        assert!(Arc::ptr_eq(&binding.client, &client));
     }
 }
