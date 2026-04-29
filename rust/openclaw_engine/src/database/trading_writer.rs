@@ -163,7 +163,7 @@ async fn flush_all(
 // 每表欄位數 — `batch_insert` 以此集中推算 chunk_rows，取代先前各表硬編碼常數。
 const SIGNAL_COLS: usize = 8;
 const INTENT_COLS: usize = 12; // includes details JSONB
-const FILL_COLS: usize = 22; // includes execution reference/slippage (V028)
+const FILL_COLS: usize = 23; // V033 adds exit_reason (was 22 with V028 reference/slippage)
 const FUNDING_SETTLEMENT_COLS: usize = 13; // includes raw JSONB
 const POSITION_COLS: usize = 9;
 const VERDICT_COLS: usize = 12; // includes risk_level/check arrays + details
@@ -323,8 +323,13 @@ async fn flush_fills(pool: &DbPool, buf: &mut Vec<TradingMsg>) {
         buf.as_slice(),
         FILL_COLS,
         |chunk| {
+            // V033 (2026-04-29): exit_reason added as column 23. strategy_name
+            // is now an enum-like aggregation key; exit_reason carries the
+            // free-text close trace previously dumped into strategy_name.
+            // V033（2026-04-29）：exit_reason 為第 23 欄；strategy_name 收斂為
+            // enum-like 聚合鍵，自由文字退場原因改寫入 exit_reason。
             let mut qb: QueryBuilder<Postgres> = QueryBuilder::new(
-                "INSERT INTO trading.fills (ts, fill_id, order_id, symbol, side, qty, price, fee, fee_rate, reference_price, reference_ts_ms, reference_source, slippage_bps, liquidity_role, fill_latency_ms, realized_pnl, is_paper, strategy_name, context_id, entry_context_id, engine_mode, exit_source) "
+                "INSERT INTO trading.fills (ts, fill_id, order_id, symbol, side, qty, price, fee, fee_rate, reference_price, reference_ts_ms, reference_source, slippage_bps, liquidity_role, fill_latency_ms, realized_pnl, is_paper, strategy_name, context_id, entry_context_id, engine_mode, exit_source, exit_reason) "
             );
             qb.push_values(chunk.iter(), |mut b, msg| {
                 if let TradingMsg::Fill {
@@ -349,6 +354,7 @@ async fn flush_fills(pool: &DbPool, buf: &mut Vec<TradingMsg>) {
                     entry_context_id,
                     engine_mode,
                     exit_source,
+                    exit_reason,
                 } = msg
                 {
                     b.push_bind(
@@ -391,6 +397,15 @@ async fn flush_fills(pool: &DbPool, buf: &mut Vec<TradingMsg>) {
                     // INFRA-PREBUILD-1 A 部：Combine Layer ExitSource 標籤。
                     // None → NULL（開倉 fill 或非 Combine 退場如 HARD STOP）。
                     b.push_bind(exit_source.as_deref());
+                    // V033 (2026-04-29): free-text close reason. Entry fills
+                    // → None → NULL. Close fills produced via
+                    // `helpers::build_close_tags(entry_strategy, reason)` (W1-T2)
+                    // bind Some(reason). W1-T1 emit sites still write None
+                    // until W1-T2 rewrites the 16 close-emit call sites.
+                    // V033（2026-04-29）：自由文字退場原因。entry fill → None
+                    // → NULL；close fill 由 W1-T2 改寫的 16 個 emit 點透過
+                    // build_close_tags 產出 Some(reason)；W1-T1 emit 點暫寫 None。
+                    b.push_bind(exit_reason.as_deref());
                 }
             });
             qb.push(" ON CONFLICT (fill_id, ts) DO NOTHING");
@@ -826,6 +841,9 @@ mod tests {
             entry_context_id: String::new(),
             engine_mode: "paper".into(),
             exit_source: None,
+            // V033 (2026-04-29): entry path → None (no exit semantics).
+            // V033（2026-04-29）：entry path → None（無退場語意）。
+            exit_reason: None,
         };
         assert!(matches!(fill, TradingMsg::Fill { .. }));
 
@@ -951,6 +969,9 @@ mod tests {
                 entry_context_id: String::new(),
                 engine_mode: "paper".into(),
                 exit_source: None,
+                // V033 (2026-04-29): entry path → None.
+                // V033（2026-04-29）：entry path → None。
+                exit_reason: None,
             },
             TradingMsg::FundingSettlement {
                 settlement_id: "funding-f1".into(),

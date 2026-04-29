@@ -595,7 +595,27 @@ def check_grid_trading_lifecycle_drift(cur) -> tuple[str, str]:
         return ("WARN", "trading.fills missing — pre-migration state, skip")
 
     # Indicator A: lifetime drift (per engine_mode median).
-    # 指標 A：每 engine_mode 中位 lifetime 漂移。
+    # Pairing strategy (2026-04-29 MIT follow-up audit):
+    # - Entry side: strategy_name = 'grid_trading' (the producer label).
+    # - Close side: strategy_name LIKE 'strategy_close:grid_close%' OR
+    #   'risk_close:%' — OpenClaw close-fill convention writes a prefix
+    #   tag, NOT the originating strategy name.
+    # - JOIN key: entry_context_id (V017, 98.8% wire-health 7d).
+    # - We deliberately do NOT filter on trading.fills.exit_source: that
+    #   column is V021 schema-only — the Rust writer paths
+    #   (commands.rs:307/310/598/600 + step_6_risk_checks.rs:226 TODO)
+    #   all send None, so the previous `coalesce(exit_source,'')<>''`
+    #   filter dropped 100% of rows → silent-dead PASS.
+    #
+    # 指標 A：每 engine_mode 中位 lifetime 漂移。配對策略（2026-04-29 MIT
+    # follow-up audit）：entry 為 strategy_name='grid_trading'；close 為
+    # strategy_name LIKE 'strategy_close:grid_close%' 或 'risk_close:%'
+    # （OpenClaw close prefix convention，不是原 strategy 名）；JOIN key 為
+    # entry_context_id (V017，7d 98.8% wire 健康)。**不**用 exit_source
+    # 過濾，因為 trading.fills.exit_source 是 V021 schema-only 留白 column
+    # （Rust writer 全送 None — commands.rs:307/310/598/600 +
+    # step_6_risk_checks.rs:226 TODO never landed），先前 filter 等於
+    # 去掉 100% row → PASS skip silent-dead。
     lifecycle_cte = """
 WITH entries AS (
   SELECT f.engine_mode, f.symbol, f.side,
@@ -605,7 +625,6 @@ WITH entries AS (
   WHERE f.ts > now() - interval '24 hours'
     AND f.engine_mode IN ('demo', 'live_demo')
     AND f.strategy_name = 'grid_trading'
-    AND coalesce(f.exit_source, '') = ''
 ),
 closes AS (
   SELECT f.entry_context_id AS entry_cid, f.ts AS exit_ts,
@@ -618,7 +637,8 @@ closes AS (
     AND f.engine_mode IN ('demo', 'live_demo')
     AND f.entry_context_id IS NOT NULL
     AND f.entry_context_id <> ''
-    AND coalesce(f.exit_source, '') <> ''
+    AND (f.strategy_name LIKE 'strategy_close:grid_close%'
+         OR f.strategy_name LIKE 'risk_close:%')
 ),
 first_close AS (SELECT * FROM closes WHERE rn = 1),
 lifecycles AS (

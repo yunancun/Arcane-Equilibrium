@@ -728,6 +728,9 @@ impl TickPipeline {
                                                 // INFRA-PREBUILD-1 Part A: strategy open fill.
                                                 // INFRA-PREBUILD-1 A 部：策略開倉 fill。
                                                 exit_source: None,
+                                                // V033 (2026-04-29): entry path → exit_reason None.
+                                                // V033（2026-04-29）：entry path → exit_reason None。
+                                                exit_reason: None,
                                             },
                                             "strategy_open_fill",
                                         );
@@ -968,6 +971,9 @@ impl TickPipeline {
                                     // INFRA-PREBUILD-1 Part A: PostOnly maker fill (open).
                                     // INFRA-PREBUILD-1 A 部：PostOnly maker 成交（開倉）。
                                     exit_source: None,
+                                    // V033 (2026-04-29): entry path (PostOnly maker open) → None.
+                                    // V033（2026-04-29）：entry path（PostOnly maker 開倉）→ None。
+                                    exit_reason: None,
                                 },
                                 "resting_maker_fill",
                             );

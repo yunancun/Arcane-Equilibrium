@@ -197,6 +197,16 @@ impl TickPipeline {
                     entry_context_id: entry_context_id.to_string(),
                     engine_mode: em.to_string(),
                     exit_source,
+                    // V033 (2026-04-29) W1-T1: emit_close_fill is the canonical close
+                    // emission helper called from risk_checks / strategy exits / fast_track.
+                    // exit_reason stays None until W1-T2 threads `helpers::build_close_tags`
+                    // through the 16 caller sites and passes the reason here as a sibling
+                    // arg next to close_tag.
+                    // V033（2026-04-29）W1-T1：emit_close_fill 為 risk_checks / strategy exit /
+                    // fast_track 等 caller 的 close emit canonical helper；exit_reason 暫保
+                    // None，待 W1-T2 在 16 caller 點接 build_close_tags 後與 close_tag
+                    // 並列傳入。
+                    exit_reason: None,
                 },
                 "close_fill",
             );
