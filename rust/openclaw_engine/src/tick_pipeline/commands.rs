@@ -245,6 +245,16 @@ impl TickPipeline {
         if let Some(ref tx) = self.trading_tx {
             let em = self.effective_engine_mode();
             let context_id = make_context_id(em, symbol, now_ms);
+            let (fill_strategy_name, fill_exit_reason) = if realized_pnl != 0.0 {
+                crate::tick_pipeline::on_tick::build_close_tags_from_legacy(
+                    strategy,
+                    pre_fill_snapshot
+                        .as_ref()
+                        .map(|snap| snap.owner_strategy.as_str()),
+                )
+            } else {
+                (strategy.to_string(), None)
+            };
             // FUP-8: populate details (see on_tick_helpers::persist_intent).
             // Sentinel guard mirrors on_tick_helpers — IPC command path shouldn't
             // normally carry 1e9 but stay consistent for downstream analysts.
@@ -299,7 +309,7 @@ impl TickPipeline {
                     liquidity_role: None,
                     fill_latency_ms: None,
                     realized_pnl,
-                    strategy_name: strategy.to_string(),
+                    strategy_name: fill_strategy_name,
                     context_id,
                     entry_context_id: fill_entry_ctx.clone(),
                     engine_mode: em.to_string(),
@@ -308,11 +318,11 @@ impl TickPipeline {
                     // INFRA-PREBUILD-1 A 部：外部 / IPC close 不走 Combine Layer，
                     // exit_source 保持 NULL。
                     exit_source: None,
-                    // V033 (2026-04-29) W1-T1: external fill emit point — exit_reason
-                    // stays None until W1-T2 plumbs `helpers::build_close_tags(...)` here.
-                    // V033（2026-04-29）W1-T1：external fill emit 點 — exit_reason
-                    // 暫保 None，待 W1-T2 接 build_close_tags(...) 注入動態 reason。
-                    exit_reason: None,
+                    // V033 W1-T2: external close fills use the same legacy-tag
+                    // normalizer as the canonical close helper.
+                    // V033 W1-T2：外部 close fill 與 canonical close helper
+                    // 共用 legacy-tag 正規化。
+                    exit_reason: fill_exit_reason,
                 },
                 "external_fill",
             );
@@ -577,6 +587,16 @@ impl TickPipeline {
                 .filter(|id| !id.trim().is_empty())
                 .map(|id| format!("bybit-{id}"))
                 .unwrap_or_else(|| make_fill_id(em, symbol, ts_ms));
+            let (fill_strategy_name, fill_exit_reason) = if realized_pnl != 0.0 {
+                crate::tick_pipeline::on_tick::build_close_tags_from_legacy(
+                    strategy,
+                    pre_close_snapshot
+                        .as_ref()
+                        .map(|snap| snap.owner_strategy.as_str()),
+                )
+            } else {
+                (strategy.to_string(), None)
+            };
             let _ = crate::database::try_send_trading_msg(
                 tx,
                 crate::database::TradingMsg::Fill {
@@ -596,18 +616,18 @@ impl TickPipeline {
                     liquidity_role: liquidity_role.map(str::to_string),
                     fill_latency_ms,
                     realized_pnl,
-                    strategy_name: strategy.to_string(),
+                    strategy_name: fill_strategy_name,
                     context_id: fill_ctx_id,
                     entry_context_id: fill_entry_ctx,
                     engine_mode: em.to_string(),
                     // INFRA-PREBUILD-1 Part A: exchange-confirmed fill path — exit_source NULL.
                     // INFRA-PREBUILD-1 A 部：交易所確認 fill 不經 Combine Layer。
                     exit_source: None,
-                    // V033 (2026-04-29) W1-T1: confirmed-fill emit point — exit_reason
-                    // None until W1-T2 plumbs build_close_tags here.
-                    // V033（2026-04-29）W1-T1：confirmed-fill emit 點 — exit_reason
-                    // 暫 None，W1-T2 接 build_close_tags 後注入。
-                    exit_reason: None,
+                    // V033 W1-T2: confirmed close fills carry normalized
+                    // strategy_name plus free-text exit_reason.
+                    // V033 W1-T2：交易所確認 close fill 寫 normalized
+                    // strategy_name 與 free-text exit_reason。
+                    exit_reason: fill_exit_reason,
                 },
                 "confirmed_fill",
             );

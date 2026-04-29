@@ -597,9 +597,9 @@ def check_grid_trading_lifecycle_drift(cur) -> tuple[str, str]:
     # Indicator A: lifetime drift (per engine_mode median).
     # Pairing strategy (2026-04-29 MIT follow-up audit):
     # - Entry side: strategy_name = 'grid_trading' (the producer label).
-    # - Close side: strategy_name LIKE 'strategy_close:grid_close%' OR
-    #   'risk_close:%' — OpenClaw close-fill convention writes a prefix
-    #   tag, NOT the originating strategy name.
+    # - Close side: legacy rows match strategy_name close prefixes; post-W1-T2
+    #   rows match exit_reason IS NOT NULL. The JOIN to the grid entry's
+    #   context_id keeps this scoped to grid positions.
     # - JOIN key: entry_context_id (V017, 98.8% wire-health 7d).
     # - We deliberately do NOT filter on trading.fills.exit_source: that
     #   column is V021 schema-only — the Rust writer paths
@@ -608,10 +608,9 @@ def check_grid_trading_lifecycle_drift(cur) -> tuple[str, str]:
     #   filter dropped 100% of rows → silent-dead PASS.
     #
     # 指標 A：每 engine_mode 中位 lifetime 漂移。配對策略（2026-04-29 MIT
-    # follow-up audit）：entry 為 strategy_name='grid_trading'；close 為
-    # strategy_name LIKE 'strategy_close:grid_close%' 或 'risk_close:%'
-    # （OpenClaw close prefix convention，不是原 strategy 名）；JOIN key 為
-    # entry_context_id (V017，7d 98.8% wire 健康)。**不**用 exit_source
+    # follow-up audit）：entry 為 strategy_name='grid_trading'；close 兼容
+    # legacy strategy_name close prefix 與 W1-T2 後 exit_reason IS NOT NULL。
+    # JOIN key 為 entry_context_id (V017，7d 98.8% wire 健康)。**不**用 exit_source
     # 過濾，因為 trading.fills.exit_source 是 V021 schema-only 留白 column
     # （Rust writer 全送 None — commands.rs:307/310/598/600 +
     # step_6_risk_checks.rs:226 TODO never landed），先前 filter 等於
@@ -638,7 +637,8 @@ closes AS (
     AND f.entry_context_id IS NOT NULL
     AND f.entry_context_id <> ''
     AND (f.strategy_name LIKE 'strategy_close:grid_close%'
-         OR f.strategy_name LIKE 'risk_close:%')
+         OR f.strategy_name LIKE 'risk_close:%'
+         OR f.exit_reason IS NOT NULL)
 ),
 first_close AS (SELECT * FROM closes WHERE rn = 1),
 lifecycles AS (
@@ -1010,7 +1010,13 @@ def check_strategy_name_cardinality_drift(cur) -> tuple[str, str]:
     try:
         cur.execute(
             """
-            SELECT COUNT(DISTINCT strategy_name)
+            SELECT
+              COUNT(DISTINCT strategy_name) FILTER (
+                WHERE ts > now() - interval '1 hour'
+              ) AS n_1h,
+              COUNT(DISTINCT strategy_name) FILTER (
+                WHERE ts > now() - interval '24 hours'
+              ) AS n_24h
             FROM trading.fills
             WHERE ts > now() - interval '24 hours'
               AND engine_mode IN ('demo', 'live_demo', 'live')
@@ -1020,21 +1026,35 @@ def check_strategy_name_cardinality_drift(cur) -> tuple[str, str]:
     except Exception as exc:  # noqa: BLE001
         return ("WARN", f"cardinality query failed: {type(exc).__name__}: {exc}")
 
-    n_distinct = int(row[0]) if row and row[0] is not None else 0
+    n_1h = int(row[0]) if row and row[0] is not None else 0
+    n_24h = int(row[1]) if row and row[1] is not None else 0
 
-    if n_distinct > STRATEGY_NAME_CARDINALITY_FAIL:
+    # W1-T2 rollover: the 24h window naturally contains pre-normalization
+    # legacy close tags for one day after deploy. Hard-fail the recent 1h
+    # window; keep 24h excess as WARN until old rows age out.
+    # W1-T2 rollover：部署後 24h 視窗會自然混入舊 close tag。用 1h 作硬
+    # FAIL；24h 超標先 WARN，待舊資料自然過期。
+    if n_1h > STRATEGY_NAME_CARDINALITY_FAIL:
         return (
             "FAIL",
-            f"24h distinct strategy_name = {n_distinct} > {STRATEGY_NAME_CARDINALITY_FAIL} — "
-            f"emit point regression! W1-T2 normalization broken"
+            f"1h distinct strategy_name = {n_1h} > {STRATEGY_NAME_CARDINALITY_FAIL} — "
+            f"recent emit point regression; W1-T2 normalization not holding "
+            f"(24h={n_24h})"
         )
-    if n_distinct > STRATEGY_NAME_CARDINALITY_WARN:
+    if n_1h > STRATEGY_NAME_CARDINALITY_WARN:
         return (
             "WARN",
-            f"24h distinct strategy_name = {n_distinct} > {STRATEGY_NAME_CARDINALITY_WARN} — "
-            f"possible regression / new strategy added"
+            f"1h distinct strategy_name = {n_1h} > {STRATEGY_NAME_CARDINALITY_WARN} — "
+            f"possible recent regression / new strategy added (24h={n_24h})"
+        )
+    if n_24h > STRATEGY_NAME_CARDINALITY_FAIL:
+        return (
+            "WARN",
+            f"1h distinct strategy_name = {n_1h}; 24h distinct={n_24h} > "
+            f"{STRATEGY_NAME_CARDINALITY_FAIL} — legacy pre-W1-T2 rows may still be aging out"
         )
     return (
         "PASS",
-        f"24h distinct strategy_name = {n_distinct} (≤{STRATEGY_NAME_CARDINALITY_WARN} expected)"
+        f"1h distinct strategy_name = {n_1h}, 24h distinct={n_24h} "
+        f"(recent ≤{STRATEGY_NAME_CARDINALITY_WARN} expected)"
     )
