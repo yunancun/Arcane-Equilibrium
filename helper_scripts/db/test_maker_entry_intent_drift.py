@@ -78,6 +78,31 @@ use_maker_entry = true
         self.assertEqual(status, "PASS")
         self.assertIn("no entry intents", msg)
 
+    def test_fresh_restart_limits_query_window(self) -> None:
+        toml = """
+[grid_trading]
+active = true
+use_maker_entry = true
+"""
+        with tempfile.TemporaryDirectory() as tmp:
+            settings = Path(tmp) / "settings"
+            settings.mkdir(parents=True)
+            (settings / "strategy_params_demo.toml").write_text(
+                toml, encoding="utf-8"
+            )
+            cur = _make_cursor([])
+            with patch.dict(os.environ, {"OPENCLAW_BASE_DIR": tmp}, clear=False):
+                with patch(
+                    "helper_scripts.db.passive_wait_healthcheck.checks_execution."
+                    "_engine_process_age_minutes",
+                    return_value=(5.0, "ok"),
+                ):
+                    status, msg = check_maker_entry_intent_drift(cur)
+
+        self.assertEqual(status, "PASS")
+        self.assertIn("5.0m post-restart", msg)
+        self.assertEqual(cur.execute.call_args.args[1][0], 5.0)
+
     def test_missing_toml_warns(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             with patch.dict(os.environ, {"OPENCLAW_BASE_DIR": tmp}, clear=False):
