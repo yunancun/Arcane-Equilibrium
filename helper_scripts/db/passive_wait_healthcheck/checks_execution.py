@@ -12,6 +12,12 @@ import os
 from pathlib import Path
 from typing import Any
 
+MAKER_FEE_RATE = 0.00020
+TAKER_FEE_RATE = 0.00055
+MAKER_FEE_CUTOFF = (MAKER_FEE_RATE + TAKER_FEE_RATE) / 2.0
+MAKER_FEE_DROP_TARGET_PCT = 60.0
+MAKER_FILL_MIN_SAMPLE = 30
+
 
 def _load_demo_strategy_params() -> tuple[dict[str, Any] | None, str]:
     """Load ``settings/strategy_params_demo.toml`` fail-soft.
@@ -138,3 +144,172 @@ def check_maker_entry_intent_drift(cur) -> tuple[str, str]:
             + " — check StrategyParams partial-merge / persisted replay drift",
         )
     return ("PASS", "maker-entry intent shape ok — " + "; ".join(parts))
+
+
+def _as_int(value: Any) -> int:
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _as_float(value: Any, default: float = 0.0) -> float:
+    try:
+        if value is None:
+            return default
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _fee_drop_pct(avg_fee_rate: float) -> float:
+    fee_span = TAKER_FEE_RATE - MAKER_FEE_RATE
+    if fee_span <= 0.0:
+        return 0.0
+    pct = (TAKER_FEE_RATE - avg_fee_rate) / fee_span * 100.0
+    return max(0.0, min(100.0, pct))
+
+
+def _format_strategy_slices(rows: list[tuple[Any, ...]]) -> str:
+    parts: list[str] = []
+    for row in rows[:8]:
+        name = str(row[0] or "unknown")
+        total = _as_int(row[1])
+        maker_like = _as_int(row[2])
+        avg_fee_rate = _as_float(row[3], TAKER_FEE_RATE)
+        maker_pct = maker_like / total * 100.0 if total else 0.0
+        fee_drop = _fee_drop_pct(avg_fee_rate)
+        parts.append(
+            f"{name}: n={total}, maker_like={maker_pct:.1f}%, "
+            f"avg_fee={avg_fee_rate * 10_000:.2f}bps, fee_drop={fee_drop:.1f}%"
+        )
+    return "; ".join(parts) if parts else "no per-strategy rows"
+
+
+_MAKER_FILL_CTE = """
+WITH entry_fills AS (
+    SELECT
+        f.strategy_name,
+        lower(coalesce(f.liquidity_role, '')) AS liquidity_role,
+        lower(coalesce(o.order_type, '')) AS order_type,
+        lower(coalesce(o.time_in_force, '')) AS time_in_force,
+        coalesce(nullif(f.fee_rate, 0), %s)::float8 AS effective_fee_rate,
+        CASE
+            WHEN lower(coalesce(f.liquidity_role, '')) = 'maker'
+              OR coalesce(nullif(f.fee_rate, 0), %s) <= %s
+            THEN 1
+            ELSE 0
+        END AS maker_like
+    FROM trading.fills f
+    LEFT JOIN trading.orders o
+      ON o.order_id = f.order_id
+     AND o.ts > now() - interval '8 days'
+    WHERE f.ts > now() - interval '7 days'
+      AND f.engine_mode IN ('demo', 'live_demo')
+      AND coalesce(f.strategy_name, '') <> ''
+      AND f.strategy_name NOT LIKE 'risk_close:%%'
+      AND f.strategy_name NOT LIKE 'strategy_close:%%'
+      AND f.strategy_name NOT LIKE 'ipc_close%%'
+      AND f.strategy_name NOT LIKE 'unattributed:%%'
+      AND coalesce(f.exit_source, '') = ''
+)
+"""
+
+
+def check_maker_fill_rate(cur) -> tuple[str, str]:
+    """[33] G2-01 PostOnly maker-fill / fee-drop monitor.
+
+    G2-01 validates whether PostOnly demo execution actually reduces fees.
+    Earlier docs mistakenly mapped this to [3], but [3] is the
+    exit_features writer check. This dedicated check measures the last 7d of
+    demo/live_demo entry fills, joins orders only for limit diagnostics, and
+    scores acceptance on effective fee-drop from taker 5.5bps toward maker
+    2.0bps. ``trading.orders.time_in_force`` is not written by the current
+    Rust order writer, so fee_rate/liquidity_role are the runtime truth.
+
+    [33] G2-01 PostOnly maker 成交 / fee-drop 監控。過去文件曾誤標 [3]，
+    但 [3] 實際是 exit_features writer；此處用 7d demo/live_demo 入場 fill
+    的有效 fee_rate 驗證 5.5bps taker → 2.0bps maker 的降費幅度。
+    """
+    try:
+        cur.connection.rollback()
+    except Exception:
+        pass
+
+    params = (TAKER_FEE_RATE, TAKER_FEE_RATE, MAKER_FEE_CUTOFF)
+    summary_sql = (
+        _MAKER_FILL_CTE
+        + """
+SELECT
+    count(*)::int AS total_fills,
+    coalesce(sum(maker_like), 0)::int AS maker_like_fills,
+    avg(effective_fee_rate)::float8 AS avg_fee_rate,
+    count(*) FILTER (WHERE order_type = 'limit')::int AS limit_order_fills,
+    count(*) FILTER (WHERE time_in_force = 'postonly')::int AS postonly_order_fills
+FROM entry_fills
+"""
+    )
+    strategy_sql = (
+        _MAKER_FILL_CTE
+        + """
+SELECT
+    strategy_name,
+    count(*)::int AS total_fills,
+    coalesce(sum(maker_like), 0)::int AS maker_like_fills,
+    avg(effective_fee_rate)::float8 AS avg_fee_rate
+FROM entry_fills
+GROUP BY strategy_name
+ORDER BY total_fills DESC, strategy_name
+LIMIT 8
+"""
+    )
+
+    try:
+        cur.execute(summary_sql, params)
+        row = cur.fetchone()
+        cur.execute(strategy_sql, params)
+        strategy_rows = cur.fetchall()
+    except Exception as exc:  # noqa: BLE001 — healthcheck fail-soft
+        return ("WARN", f"maker fill-rate query failed: {type(exc).__name__}: {exc}")
+
+    if row is None:
+        return ("WARN", "maker fill-rate query returned no row (PG / cursor anomaly)")
+
+    total = _as_int(row[0])
+    maker_like = _as_int(row[1])
+    avg_fee_rate = _as_float(row[2], TAKER_FEE_RATE)
+    limit_rows = _as_int(row[3])
+    postonly_rows = _as_int(row[4])
+
+    if total == 0:
+        return (
+            "PASS",
+            "7d demo/live_demo entry_fills=0 — no G2-01 maker-fill sample yet",
+        )
+
+    maker_pct = maker_like / total * 100.0
+    fee_drop = _fee_drop_pct(avg_fee_rate)
+    limit_pct = limit_rows / total * 100.0
+    postonly_pct = postonly_rows / total * 100.0
+    base_msg = (
+        f"7d demo/live_demo entry_fills={total}, "
+        f"avg_fee={avg_fee_rate * 10_000:.2f}bps, "
+        f"fee_drop={fee_drop:.1f}% target>={MAKER_FEE_DROP_TARGET_PCT:.0f}%, "
+        f"maker_like={maker_like}/{total} ({maker_pct:.1f}%), "
+        f"limit_order_rows={limit_rows} ({limit_pct:.1f}%), "
+        f"postonly_order_rows={postonly_rows} ({postonly_pct:.1f}%); "
+        f"by_strategy: {_format_strategy_slices(list(strategy_rows or []))}"
+    )
+
+    if total < MAKER_FILL_MIN_SAMPLE:
+        return (
+            "WARN",
+            base_msg + f" — insufficient sample (<{MAKER_FILL_MIN_SAMPLE})",
+        )
+    if fee_drop >= MAKER_FEE_DROP_TARGET_PCT:
+        return ("PASS", base_msg)
+    return (
+        "WARN",
+        base_msg
+        + " — below G2-01 PostOnly fee-drop target; keep passive monitor until settlement",
+    )
