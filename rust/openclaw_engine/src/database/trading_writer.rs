@@ -398,13 +398,11 @@ async fn flush_fills(pool: &DbPool, buf: &mut Vec<TradingMsg>) {
                     // None → NULL（開倉 fill 或非 Combine 退場如 HARD STOP）。
                     b.push_bind(exit_source.as_deref());
                     // V033 (2026-04-29): free-text close reason. Entry fills
-                    // → None → NULL. Close fills produced via
-                    // `helpers::build_close_tags(entry_strategy, reason)` (W1-T2)
-                    // bind Some(reason). W1-T1 emit sites still write None
-                    // until W1-T2 rewrites the 16 close-emit call sites.
+                    // → None → NULL. Close fills produced via the W1-T2
+                    // close-tag normalizer bind Some(reason).
                     // V033（2026-04-29）：自由文字退場原因。entry fill → None
-                    // → NULL；close fill 由 W1-T2 改寫的 16 個 emit 點透過
-                    // build_close_tags 產出 Some(reason)；W1-T1 emit 點暫寫 None。
+                    // → NULL；close fill 由 W1-T2 close-tag normalizer 產出
+                    // Some(reason)。
                     b.push_bind(exit_reason.as_deref());
                 }
             });

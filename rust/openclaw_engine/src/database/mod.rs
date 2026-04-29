@@ -377,13 +377,12 @@ pub enum TradingMsg {
         ///   8.46% - current 6.46% = ...", "phys_lock_gate4_giveback",
         ///   "ma_reverse_cross", "fast_track".
         ///
-        /// W1-T1 (this commit): field is added and threaded through the writer;
-        /// emit points still write `None` until W1-T2 lands.
+        /// W1-T2: close emitters normalize legacy close tags through
+        /// `build_close_tags_from_legacy`; entry fills still write `None`.
         ///
         /// V033（2026-04-29）— 自由文字退場原因。strategy_name 同步收斂為
         /// 5 個入場策略 enum 名 + 系統路徑。entry path 永 None；close path 由
-        /// `helpers::build_close_tags(entry_strategy, reason)` 等 16 個 emit
-        /// 點產出（W1-T2 落地）。本 commit (W1-T1) 先加欄位+鋪線，emit 點
+        /// `build_close_tags_from_legacy` 等 close emitter 產出；entry fill
         /// 仍寫 None。
         exit_reason: Option<String>,
     },

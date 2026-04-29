@@ -83,13 +83,13 @@
 </div>
 
 <!-- ═══ AI 团队工作台 / AI Crew Dashboard ═══ -->
-<!-- 5 位 AI 员工今天在干什么、花了多少钱、谁已经在动真钱 -->
+<!-- 5 位 AI 员工今天在干什么、花了多少钱、谁进入执行链路 -->
 <!-- Aggregates 5-Agent state + cost + shadow vs live + activity feed + governance -->
 <section id="agent-tracker">
   <div class="oc-card">
     <h3>&#x1F916; AI 团队工作台 / AI Crew Dashboard
       <span class="subtitle" style="font-size:12px;color:var(--text-dim);font-weight:normal;display:block;margin-top:2px">
-        你的 5 位 AI 员工今天在干什么、花了多少钱、谁已经在动真钱
+        你的 5 位 AI 员工今天在干什么、花了多少钱、谁进入执行链路
       </span>
     </h3>
     <div id="explain-agent-tracker"></div>
@@ -269,8 +269,8 @@ $('explain-netpnl').innerHTML = ocExplain(
 );
 
 $('explain-agent-tracker').innerHTML = ocExplain(
-  '这里能一眼看到 5 位 AI 员工今天在干什么、花了多少钱、谁还在影子模式（只观察）、谁开始动真钱。',
-  '5 位 Agent 各司其职：Scout 巡逻找机会、Strategist 评估策略、Guardian 守门控风险、Analyst 复盘归因、Executor 真正执行。Executor 是唯一会真实下单的 Agent — 默认在影子模式（shadow mode），只记录决策不送单到交易所；切到真仓需要 operator 手动批准。本仪表盘纯只读，不能在这里切换 shadow→live。'
+  '这里能一眼看到 5 位 AI 员工今天在干什么、花了多少钱、执行链路是否进入受控送单状态。',
+  '5 位 Agent 各司其职：Scout 巡逻找机会、Strategist 评估策略、Guardian 守门控风险、Analyst 复盘归因、Executor 负责执行入口。执行权限由 engine_mode、RiskConfig、Decision Lease 与 live 授权门控共同决定；LiveDemo 是 demo endpoint 上的 live-grade 管线，不等于真实主网资金。本仪表盘纯只读，不能在这里切换执行权限。'
 );
 
 $('explain-autoscan').innerHTML = ocExplain(

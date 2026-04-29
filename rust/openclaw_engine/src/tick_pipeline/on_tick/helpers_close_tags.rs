@@ -7,21 +7,19 @@
 //! (CLAUDE.md §九). Adding `build_close_tags` + 4 unit tests in W1-T1 brought
 //! it to 1639 LOC, exceeding the 1200-line hard cap and the §九 pre-existing
 //! "baseline + 5 LOC" exception clause (1416 LOC ceiling). To stay compliant
-//! without altering logic, the new W1-T1 helper and its tests are siblings in
-//! this dedicated file. **No logic change** — pure file split. The function
-//! signature and contract are bit-identical to the W1-T1 implementation; the
-//! parent `mod.rs` re-exports `build_close_tags` so call sites continue to
-//! reach it via `crate::tick_pipeline::on_tick::build_close_tags` unchanged.
+//! without altering logic, the W1-T1 helper and its tests live in this
+//! dedicated file. W1-T2 then added the legacy-tag normalizer in the same
+//! sibling module; the parent `mod.rs` re-exports
+//! `build_close_tags_from_legacy` for close emitters.
 //!
 //! ## 拆檔理由（HELPERS-CLOSE-TAGS-SPLIT，2026-04-29）
 //!
 //! `helpers.rs` baseline 1411 LOC 已逾 800 行警戒線（CLAUDE.md §九）。W1-T1
 //! 加入 `build_close_tags` + 4 unit tests 後達 1639 LOC，越過 1200 行硬上限
 //! 與「baseline + 5 LOC」例外條款上限 1416。為維持合規且 **不改 logic**，將
-//! W1-T1 新 helper 與其 tests 拆至本 sibling 檔案；函數簽名與契約與 W1-T1
-//! 實作 bit-identical。父 `mod.rs` 透過 `pub(crate) use` re-export
-//! `build_close_tags`，所有 caller 仍以 `crate::tick_pipeline::on_tick::
-//! build_close_tags` 訪問，路徑不變。
+//! W1-T1 helper 與其 tests 拆至本 sibling 檔案；W1-T2 後同檔新增 legacy-tag
+//! normalizer。父 `mod.rs` 透過 `pub(crate) use` re-export
+//! `build_close_tags_from_legacy` 供 close emitter 呼叫。
 //!
 //! ## Upstream design / 上游設計
 //!
@@ -32,16 +30,16 @@
 //! (Guard A/B + partial index `idx_fills_exit_reason_prefix`) and the
 //! `TradingMsg::Fill::exit_reason` field added in `database/mod.rs`.
 //!
-//! ## W1-T1 scope note / W1-T1 範圍備註
+//! ## W1-T2 integration note / W1-T2 接入備註
 //!
-//! `build_close_tags` is added but **NOT YET CALLED**. W1-T2 of the design
-//! report will plumb it through the 16 close-emit call sites (funding_arb_exit
-//! / risk_checks 6 / step_4_5_dispatch 2 / step_0_fast_track 4 / commands 2 /
-//! step_4_5_dispatch strategy_close 2). Until W1-T2, every close fill still
-//! receives `exit_reason=None` and the legacy `build_risk_close_tag` path
-//! remains in service.
+//! Close emitters now call `build_close_tags_from_legacy`, which converts the
+//! pre-existing `strategy_close:*` / `risk_close:*` tags into the V033
+//! `(strategy_name, exit_reason)` DB contract. The legacy close tag still feeds
+//! in-memory recent fills and exit-feature classification.
 //!
-//! W1-T1 僅建函數本身；W1-T2 才接 16 個 close emit 點。
+//! close emitter 現已呼叫 `build_close_tags_from_legacy`，將既有
+//! `strategy_close:*` / `risk_close:*` tag 轉為 V033 DB 契約；legacy close
+//! tag 仍保留給 recent fills 與 exit-feature 分類。
 
 /// V033 (2026-04-29) — strategy attribution cleanup (W1-T1 of PA design report
 /// `2026-04-29--strategy_name_attribution_cleanup_design.md`).
@@ -77,12 +75,10 @@
 /// constructs the Fill row directly with `strategy_name="unattributed:bybit_auto"`
 /// and `exit_reason=None`. See `event_consumer/unattributed_emit.rs:168`.
 ///
-/// **W1-T1 scope note**: this helper is added but NOT YET CALLED. W1-T2 of the
-/// design report will plumb it through the 16 close-emit call sites
-/// (funding_arb_exit / risk_checks 6 paths / step_4_5_dispatch 2 / step_0_fast_track
-/// 4 / commands 2 / step_4_5_dispatch strategy_close 2). Until W1-T2, every
-/// close fill still receives `exit_reason=None` and the legacy build_risk_close_tag
-/// path remains in service.
+/// W1-T2 integration: close emitters call
+/// `build_close_tags_from_legacy(close_tag, owner_strategy)` below. This lower
+/// helper remains the strict constructor for already-normalized
+/// `(entry_strategy, reason)` inputs.
 ///
 /// V033（2026-04-29）— 策略歸因清理（PA 設計報告 W1-T1）。
 /// 建構 close fill 的 (strategy_name, exit_reason) pair，將先前被當作 trace
@@ -99,12 +95,10 @@
 ///
 /// 特例：unattributed:bybit_auto 不走此 helper（見 unattributed_emit.rs:168）。
 ///
-/// W1-T1 範圍：本 helper 已建但未被呼叫；W1-T2 才會把 16 個 close emit 點
-/// 接入。
-pub(crate) fn build_close_tags(
-    entry_strategy: &str,
-    reason: &str,
-) -> (String, Option<String>) {
+/// W1-T2 接入：close emitter 呼叫下方
+/// `build_close_tags_from_legacy(close_tag, owner_strategy)`；本 helper 保持為
+/// 已正規化 `(entry_strategy, reason)` input 的嚴格 constructor。
+pub(crate) fn build_close_tags(entry_strategy: &str, reason: &str) -> (String, Option<String>) {
     // 5 known entry-path strategies (rust/openclaw_engine/src/strategies/{ma_crossover,
     // bb_reversion, bb_breakout, grid_trading, funding_arb}.rs::name()). Listed
     // explicitly rather than via .contains() so a typo at any caller site
@@ -135,10 +129,7 @@ pub(crate) fn build_close_tags(
     // Known 5 entry strategies → emit canonical lowercase enum value.
     // 已知 5 入場策略 → 輸出 canonical lowercase enum 值。
     if KNOWN_ENTRY_STRATEGIES.contains(&entry_strategy) {
-        return (
-            entry_strategy.to_string(),
-            Some(reason.to_string()),
-        );
+        return (entry_strategy.to_string(), Some(reason.to_string()));
     }
 
     // Defensive fallback: unknown entry_strategy. Pass through verbatim so the
@@ -147,10 +138,62 @@ pub(crate) fn build_close_tags(
     // within 24h.
     // 防衛性 fallback：未知 entry_strategy verbatim passthrough，healthcheck [38]
     // 24h cardinality drift 檢測會 catch regression。
-    (
-        entry_strategy.to_string(),
-        Some(reason.to_string()),
-    )
+    (entry_strategy.to_string(), Some(reason.to_string()))
+}
+
+/// Convert the pre-W1-T2 close tag shape into the V033 two-field DB contract.
+///
+/// Legacy close paths still call the common emitters with tags such as
+/// `strategy_close:grid_close_long`, `risk_close:TRAILING STOP ...`, or
+/// `risk_close:fast_track`. This helper strips the legacy envelope into
+/// `exit_reason`, then uses the pre-close owner strategy when available to
+/// produce the normalized `strategy_name`.
+///
+/// When no owner snapshot is available, strategy-driven reasons are inferred
+/// from their stable reason prefix; unknown risk/manual paths preserve the
+/// legacy tag as `strategy_name` while still writing `exit_reason`, so we never
+/// silently lose attribution.
+///
+/// 將 W1-T2 前的 close tag 形狀轉成 V033 兩欄契約。舊路徑仍傳入
+/// `strategy_close:*` / `risk_close:*`；本 helper 將 envelope 拆到
+/// `exit_reason`，並優先用平倉前 position owner strategy 作正規化
+/// `strategy_name`。缺 owner 時只對穩定策略退場 reason 做推斷；未知手動 /
+/// 風控路徑保留舊 tag 作 attribution，同時仍寫 exit_reason。
+pub(crate) fn build_close_tags_from_legacy(
+    close_tag: &str,
+    owner_strategy: Option<&str>,
+) -> (String, Option<String>) {
+    let reason = close_reason_from_legacy_tag(close_tag);
+    let entry_strategy = owner_strategy
+        .filter(|s| !s.trim().is_empty())
+        .or_else(|| infer_entry_strategy_from_reason(reason))
+        .unwrap_or(close_tag);
+    build_close_tags(entry_strategy, reason)
+}
+
+fn close_reason_from_legacy_tag(close_tag: &str) -> &str {
+    close_tag
+        .strip_prefix("strategy_close:")
+        .or_else(|| close_tag.strip_prefix("risk_close:"))
+        .or_else(|| close_tag.strip_prefix("stop_trigger:"))
+        .or_else(|| close_tag.strip_prefix("ipc_close:"))
+        .unwrap_or(close_tag)
+}
+
+fn infer_entry_strategy_from_reason(reason: &str) -> Option<&'static str> {
+    if reason.starts_with("grid_close_") {
+        Some("grid_trading")
+    } else if reason == "ma_reverse_cross" {
+        Some("ma_crossover")
+    } else if reason == "bb_mean_revert" {
+        Some("bb_reversion")
+    } else if matches!(reason, "trailing_stop" | "pctb_revert" | "bw_squeeze") {
+        Some("bb_breakout")
+    } else if reason.starts_with("funding_arb_exit") {
+        Some("funding_arb")
+    } else {
+        None
+    }
 }
 
 #[cfg(test)]
@@ -202,7 +245,10 @@ mod tests {
         let dyn_reason =
             "TRAILING STOP: peak 8.46% - current 6.46% = 2.00% >= distance 2.00% (locked 6.46% >= floor 5.78%)";
         let (sn3, er3) = build_close_tags("ma_crossover", dyn_reason);
-        assert_eq!(sn3, "ma_crossover", "dynamic reason must not pollute strategy_name");
+        assert_eq!(
+            sn3, "ma_crossover",
+            "dynamic reason must not pollute strategy_name"
+        );
         assert_eq!(er3.as_deref(), Some(dyn_reason));
     }
 
@@ -273,5 +319,54 @@ mod tests {
         let (sn3, er3) = build_close_tags("bb_breakout", "halt_session");
         assert_eq!(sn3, "risk_close:halt_session");
         assert_eq!(er3.as_deref(), Some("halt_session"));
+    }
+
+    #[test]
+    fn test_build_close_tags_from_legacy_uses_owner_strategy() {
+        let (sn, er) = build_close_tags_from_legacy(
+            "risk_close:TRAILING STOP: peak 8.46% - current 6.46%",
+            Some("grid_trading"),
+        );
+        assert_eq!(sn, "grid_trading");
+        assert_eq!(
+            er.as_deref(),
+            Some("TRAILING STOP: peak 8.46% - current 6.46%"),
+            "legacy risk_close envelope must move to exit_reason"
+        );
+    }
+
+    #[test]
+    fn test_build_close_tags_from_legacy_infers_strategy_reason() {
+        let (sn, er) = build_close_tags_from_legacy("strategy_close:grid_close_long", None);
+        assert_eq!(sn, "grid_trading");
+        assert_eq!(er.as_deref(), Some("grid_close_long"));
+
+        let (sn2, er2) = build_close_tags_from_legacy("strategy_close:ma_reverse_cross", None);
+        assert_eq!(sn2, "ma_crossover");
+        assert_eq!(er2.as_deref(), Some("ma_reverse_cross"));
+
+        let (sn3, er3) = build_close_tags_from_legacy(
+            "strategy_close:funding_arb_exit: rate=-0.001 basis=0.500%",
+            None,
+        );
+        assert_eq!(sn3, "funding_arb");
+        assert_eq!(
+            er3.as_deref(),
+            Some("funding_arb_exit: rate=-0.001 basis=0.500%")
+        );
+    }
+
+    #[test]
+    fn test_build_close_tags_from_legacy_halt_and_unknown() {
+        let (sn, er) = build_close_tags_from_legacy("risk_close:halt_session", None);
+        assert_eq!(sn, "risk_close:halt_session");
+        assert_eq!(er.as_deref(), Some("halt_session"));
+
+        let (sn2, er2) = build_close_tags_from_legacy("risk_close:ipc_close_symbol", None);
+        assert_eq!(
+            sn2, "risk_close:ipc_close_symbol",
+            "unknown no-owner risk paths preserve legacy attribution"
+        );
+        assert_eq!(er2.as_deref(), Some("ipc_close_symbol"));
     }
 }

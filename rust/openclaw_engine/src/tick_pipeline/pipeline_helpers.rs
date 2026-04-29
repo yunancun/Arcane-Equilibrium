@@ -170,6 +170,11 @@ impl TickPipeline {
             } else {
                 None
             };
+        let (db_strategy_name, db_exit_reason) =
+            crate::tick_pipeline::on_tick::build_close_tags_from_legacy(
+                close_tag,
+                exit_snapshot.map(|snap| snap.owner_strategy.as_str()),
+            );
         if let Some(ref tx) = self.trading_tx {
             // Fill side reflects the closing direction (opposite of position side).
             let close_side = if is_long { "Sell" } else { "Buy" };
@@ -192,21 +197,19 @@ impl TickPipeline {
                     liquidity_role: Some("paper_sim".into()),
                     fill_latency_ms: None,
                     realized_pnl,
-                    strategy_name: close_tag.to_string(),
+                    strategy_name: db_strategy_name,
                     context_id: on_tick_helpers::make_context_id(em, symbol, ts_ms),
                     entry_context_id: entry_context_id.to_string(),
                     engine_mode: em.to_string(),
                     exit_source,
-                    // V033 (2026-04-29) W1-T1: emit_close_fill is the canonical close
-                    // emission helper called from risk_checks / strategy exits / fast_track.
-                    // exit_reason stays None until W1-T2 threads `helpers::build_close_tags`
-                    // through the 16 caller sites and passes the reason here as a sibling
-                    // arg next to close_tag.
-                    // V033（2026-04-29）W1-T1：emit_close_fill 為 risk_checks / strategy exit /
-                    // fast_track 等 caller 的 close emit canonical helper；exit_reason 暫保
-                    // None，待 W1-T2 在 16 caller 點接 build_close_tags 後與 close_tag
-                    // 並列傳入。
-                    exit_reason: None,
+                    // V033 W1-T2: normalize legacy close_tag into
+                    // (entry-strategy enum, exit_reason). The pre-close
+                    // snapshot carries owner_strategy; close_tag remains the
+                    // Track-P/exit-feature taxonomy input below.
+                    // V033 W1-T2：將 legacy close_tag 正規化為
+                    // (入場策略 enum, exit_reason)。pre-close snapshot 提供
+                    // owner_strategy；close_tag 仍供下方 exit_features 分類。
+                    exit_reason: db_exit_reason,
                 },
                 "close_fill",
             );

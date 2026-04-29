@@ -81,17 +81,17 @@ mod step_6_risk_checks;
 // sibling `helpers_close_tags.rs` to keep `helpers.rs` ≤ 1411 LOC pre-existing
 // baseline (CLAUDE.md §九 1200 hard cap + "baseline + 5 LOC" exception).
 // Re-exported here so call sites continue to use
-// `crate::tick_pipeline::on_tick::build_close_tags` unchanged.
+// `crate::tick_pipeline::on_tick::build_close_tags_from_legacy` unchanged.
 // HELPERS-CLOSE-TAGS-SPLIT（2026-04-29）：`build_close_tags` 拆至
 // sibling `helpers_close_tags.rs`，`helpers.rs` 維持 1411 LOC baseline；
 // 此處 re-export 保 caller 路徑 grep 穩定。
-pub(crate) use helpers_close_tags::build_close_tags;
 pub(crate) use helpers::build_risk_close_tag;
 pub(crate) use helpers::compute_edge_estimates_file_age_secs;
 pub(crate) use helpers::emit_shadow_exit_observation;
 pub(crate) use helpers::is_partial_reduce_tag;
 pub(crate) use helpers::log_phys_lock_through_combine_layer;
 pub(crate) use helpers::strip_phys_lock_prefix;
+pub(crate) use helpers_close_tags::build_close_tags_from_legacy;
 
 impl TickPipeline {
     /// Process a single price event through the full pipeline.

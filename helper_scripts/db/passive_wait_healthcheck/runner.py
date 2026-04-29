@@ -145,7 +145,7 @@ Execution / cost sentinels added after F7:
 
 Exit codes:
   0 = all checks PASS / only WARN
-  1 = ≥1 check FAIL (pipeline silent-dead or anomalous)
+  1 = ≥1 check FAIL (silent-dead, drift, or anomalous)
   2 = DB connection error
 """
 
@@ -585,7 +585,7 @@ def main() -> int:
 
     print("=" * 70)
     if any_fail:
-        print("SUMMARY: FAIL — ≥1 pipeline silent-dead，查 docs/worklogs/2026-04-22--passive_wait_silent_fail_audit.md")
+        print("SUMMARY: FAIL — ≥1 healthcheck failed（silent-dead / drift / regression）；先看上方 FAIL 行定位")
         return 1
     if any_warn:
         print("SUMMARY: WARN — 非致命但需關注")
