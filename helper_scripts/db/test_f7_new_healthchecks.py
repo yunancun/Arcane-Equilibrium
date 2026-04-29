@@ -111,6 +111,20 @@ def _make_cursor() -> MagicMock:
 class TestTradingPipelineSilentGap(unittest.TestCase):
     """三態 verdict + schema-drift fail-soft for [22]."""
 
+    def setUp(self) -> None:
+        """Disable runtime fresh-restart grace in unit tests.
+        單元測試固定關閉現場 runtime fresh-restart grace。"""
+        self._engine_age_patch = patch(
+            "helper_scripts.db.passive_wait_healthcheck.checks_engine._engine_process_age_minutes",
+            return_value=(None, "unit-test"),
+        )
+        self._engine_age_patch.start()
+
+    def tearDown(self) -> None:
+        """Restore engine-age helper patch.
+        還原 engine-age helper patch。"""
+        self._engine_age_patch.stop()
+
     @staticmethod
     def _make_cursor_with_layers(
         fills_stale: float | None,
@@ -533,6 +547,20 @@ class TestDustSpiralNoiseInEf(unittest.TestCase):
 
 class TestIntentsCounterFreeze(unittest.TestCase):
     """三態 verdict + never-produced + multi-mode worst-wins for [27]."""
+
+    def setUp(self) -> None:
+        """Disable runtime fresh-restart grace in unit tests.
+        單元測試固定關閉現場 runtime fresh-restart grace。"""
+        self._engine_age_patch = patch(
+            "helper_scripts.db.passive_wait_healthcheck.checks_engine._engine_process_age_minutes",
+            return_value=(None, "unit-test"),
+        )
+        self._engine_age_patch.start()
+
+    def tearDown(self) -> None:
+        """Restore engine-age helper patch.
+        還原 engine-age helper patch。"""
+        self._engine_age_patch.stop()
 
     def _make_cursor_with_modes(
         self,
