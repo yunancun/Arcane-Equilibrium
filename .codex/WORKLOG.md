@@ -89,3 +89,8 @@ YYYY-MM-DD HH:MM TZ
 - added a hard Codex commit cadence rule: do not keep multiple independent green batches in one large dirty worktree by default
 - repository rule now prefers one coherent commit per validated checkpoint, with delayed commit allowed only when scopes are still tightly coupled
 - future commentary must explain any intentional delay in commit timing
+
+2026-04-29 CEST
+- compared Claude memory sources (`memory/MEMORY.md`, `memory/README.md`, `docs/CCAgentWorkSpace/PM/memory.md`, `.claude/agents/PM.md`) against Codex memory
+- rewrote `.codex/MEMORY.md` into a compact index-style operating memory aligned to the Claude workflow rather than copying Claude content verbatim
+- preserved compacted 2026-04-29 detailed batch/redeploy notes in `.codex/archive/2026-04-29--pre-compaction-memory-snapshot.md`
