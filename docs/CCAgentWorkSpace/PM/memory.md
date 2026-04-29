@@ -998,3 +998,17 @@ Operator 接續 Tier 8 sign-off 後說「繼續派」。PM 按 Tier 8 §8 推薦
 ### Boundary
 - No live/demo risk config changes, no strategy shutdown, and no live authorization relaxation were performed.
 - Next action is an operator/risk-policy decision on live_demo grid behavior, not more attribution plumbing.
+
+## 2026-04-29 Grid Risk Policy First Wave
+
+### Result
+- Operator approved the PA RFC first wave. Commit `6fdcc91` changed only `settings/strategy_params_live.toml`: `grid_trading.grid_levels` 10→7 and copied demo robust-negative `blocked_symbols` into live/live_demo.
+- Linux deployed with `restart_all.sh --rebuild --keep-auth`; engine PID `794012`, API PID `794081`.
+
+### Verification
+- Rust targeted tests passed: strategy params 15/0, grid blocked-symbol 1/0, load_strategy_params 1/0.
+- Post-deploy watchdog fresh; `[22]` PASS; order/fill consistency PASS; maker-entry intent shape PASS.
+- `[38]` remains FAIL immediately after deploy due to 24h window; use 6h/24h from `6fdcc91` restart for acceptance.
+
+### Boundary
+- Did not change trailing, partial TP, live authorization, or grid active state.
