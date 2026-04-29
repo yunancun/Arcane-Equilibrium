@@ -79,26 +79,30 @@ from .checks_cost_edge import (
     # 維持 checks_derived.py 1200 行硬上限。
     check_cost_edge_advisor_status,
 )
+from .checks_execution import (
+    check_maker_entry_intent_drift,
+)
 
 
 # Module docstring used by argparse to show the passive-wait healthcheck
-# description (extended for F7 [22]-[29] additions; 30 total checks =
-# 28 numbered [1]-[29] minus [17] reserved + 2 lettered [Xa][Xb]).
-# argparse 用本字串顯示 description（F7 [22]-[29] 擴增；總計 30 個 check =
-# 28 numbered [1]-[29] 扣 [17] 保留 + 2 lettered [Xa][Xb]）。
+# description. The runner is the runtime source of truth, so keep the exact
+# check IDs here instead of a fragile total count.
+# argparse 用本字串顯示 description。runner 是 runtime source of truth，因此
+# 這裡維護實際 check ID，不維護容易 drift 的總數。
 _RUNNER_DESCRIPTION = """Passive-wait pipeline healthcheck.
 被動等待管線健康檢查。
 
-Single-command check that 30 key runtime data pipelines are actually
-producing data, versus silently failing under fail-open error handling.
-單命令檢查 30 個關鍵 runtime 資料管線實際有資料流入，
-識破 fail-open 下的 silent failure。
+Single-command check that key runtime data pipelines are actually producing
+data, versus silently failing under fail-open error handling.
+單命令檢查關鍵 runtime 資料管線實際有資料流入，識破 fail-open 下的
+silent failure。
 
-The 30 checks split between DB pipelines + filesystem/observability sentinels:
-  Cursor block (21 checks):
+The checks split between DB pipelines + filesystem/observability sentinels:
+  Cursor block:
     [1][2][3][4][5][6][8][9][10][12][Xb][14][15][21]      14 baseline
     [22][23][24][25][26][27][28]                          7 F7 MIT+E5
-  Post-cursor (9 checks, filesystem / pure-Python):
+    [30][31][32]                                          cost/execution sentinels
+  Post-cursor (filesystem / pure-Python):
     [7][13][11][Xa][16][18][19][20]                       8 baseline
     [29]                                                  1 F7 (no-IPC stub)
 
@@ -112,6 +116,11 @@ F7 sentinels [22]-[29] added 2026-04-26 by MIT DB audit + E5 engine.log dive:
   [28] phantom_fills_attribution      (risk_close + qty<1e-3 mis-attribute)
   [29] reconciler_paper_state_divergence (deferred-no-ipc placeholder)
 
+Execution / cost sentinels added after F7:
+  [30] cost_edge_advisor_status
+  [31] edge_diag_2_strategy_diversity
+  [32] maker_entry_intent_drift
+
 Exit codes:
   0 = all checks PASS / only WARN
   1 = ≥1 check FAIL (pipeline silent-dead or anomalous)
@@ -120,25 +129,26 @@ Exit codes:
 
 
 def main() -> int:
-    """Entry point — runs all 30 checks and prints a structured report.
+    """Entry point — runs all registered checks and prints a structured report.
 
     Order is significant — the cursor block runs DB-bound checks, then we
     close the connection before invoking filesystem-only checks. Every
     check returns ``(status, msg)`` (or ``(status, msg, extra)`` for [1]
     which yields the close_fills count used by [2]/[3]/[Xb]).
 
-    Counted rows (30 total): cursor (21) + post-cursor (9):
+    Counted rows are documented by ID, not by fragile total:
       cursor: [1][2][3][4][5][6][8][9][10][12][Xb][14][15][21]
-              [22][23][24][25][26][27][28]   (F7 [22]-[28] are MIT/E5)
+              [22][23][24][25][26][27][28] [30][31][32]
+              (F7 [22]-[28] are MIT/E5; [30]-[32] are post-F7)
       post-cursor: [7][13][11][Xa][16][18][19][20]
                    [29]   (F7 [29] is deferred-no-ipc stub)
 
-    入口 — 跑全部 30 個 check 並印結構化報告。順序固定 — cursor 區塊跑
+    入口 — 跑全部註冊 check 並印結構化報告。順序固定 — cursor 區塊跑
     DB 相關 check，conn.close() 之後再跑純檔案系統 check。每個 check 回
     ``(status, msg)``（[1] 額外回 close_fills，供 [2]/[3]/[Xb] 用）。
-    30 條清單（cursor 21 + post-cursor 9）：
+    清單依 ID 記錄，避免總數 drift：
       cursor: [1][2][3][4][5][6][8][9][10][12][Xb][14][15][21]
-              [22][23][24][25][26][27][28]
+              [22][23][24][25][26][27][28] [30][31][32]
       post-cursor: [7][13][11][Xa][16][18][19][20] [29]
     """
     ap = argparse.ArgumentParser(description=_RUNNER_DESCRIPTION)
@@ -362,6 +372,14 @@ def main() -> int:
             # distinct strategy 數：≥2 PASS / 1（grid-only）WARN / 0 PASS。
             s, m = check_edge_diag_2_strategy_diversity(cur)
             results.append(("[31] edge_diag_2_strategy_diversity", s, m))
+
+            # [32] Runtime execution-shape drift: demo TOML maker-entry intent
+            # must match recent entry intents. Uses trading.intents instead of
+            # orders so intentional Market closes do not contaminate the check.
+            # [32] 執行形態漂移：demo TOML maker-entry 設定須反映在近期入場
+            # intents。使用 intents，避免 Market 平倉污染 orders 判讀。
+            s, m = check_maker_entry_intent_drift(cur)
+            results.append(("[32] maker_entry_intent_drift", s, m))
     finally:
         conn.close()
 

@@ -263,6 +263,74 @@ fn test_conf_scale_not_partially_applied_when_typed_validation_fails() {
     );
 }
 
+/// EN: Partial UpdateStrategyParams must merge onto the current params instead
+/// of deserializing missing fields from defaults.
+/// 中文：partial 參數更新必須覆蓋到當前參數上，不能讓缺失欄位回 default。
+#[test]
+fn test_update_strategy_params_partial_merge_preserves_grid_maker_fields() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut pipeline = TickPipeline::new(&["BTCUSDT"]);
+    for strategy in crate::strategies::StrategyFactory::create_all() {
+        pipeline.orchestrator.register(strategy);
+    }
+    let mut writer = make_writer(dir.path());
+    let mut pending = HashMap::new();
+
+    let current_json = pipeline
+        .orchestrator
+        .find_strategy_mut("grid_trading")
+        .expect("grid_trading present")
+        .get_params_json();
+    let mut current: serde_json::Value =
+        serde_json::from_str(&current_json).expect("grid params JSON");
+    current["use_maker_entry"] = serde_json::Value::Bool(true);
+    current["maker_price_offset_bps"] = serde_json::json!(2.0);
+    current["maker_limit_timeout_ms"] = serde_json::json!(45_000);
+    current["cooldown_ms"] = serde_json::json!(180_000);
+
+    let (tx1, rx1) = tokio::sync::oneshot::channel();
+    handle_paper_command(
+        PipelineCommand::UpdateStrategyParams {
+            strategy_name: "grid_trading".into(),
+            params_json: current.to_string(),
+            response_tx: tx1,
+        },
+        &mut pipeline,
+        &mut writer,
+        &mut pending,
+    );
+    rx1.blocking_recv()
+        .expect("response sent")
+        .expect("full update succeeds");
+
+    let (tx2, rx2) = tokio::sync::oneshot::channel();
+    handle_paper_command(
+        PipelineCommand::UpdateStrategyParams {
+            strategy_name: "grid_trading".into(),
+            params_json: r#"{"cooldown_ms":240000}"#.into(),
+            response_tx: tx2,
+        },
+        &mut pipeline,
+        &mut writer,
+        &mut pending,
+    );
+    rx2.blocking_recv()
+        .expect("response sent")
+        .expect("partial update succeeds");
+
+    let after_json = pipeline
+        .orchestrator
+        .find_strategy_mut("grid_trading")
+        .expect("grid_trading present")
+        .get_params_json();
+    let after: serde_json::Value = serde_json::from_str(&after_json).expect("grid params JSON");
+
+    assert_eq!(after["cooldown_ms"], serde_json::json!(240_000));
+    assert_eq!(after["use_maker_entry"], serde_json::Value::Bool(true));
+    assert_eq!(after["maker_price_offset_bps"], serde_json::json!(2.0));
+    assert_eq!(after["maker_limit_timeout_ms"], serde_json::json!(45_000));
+}
+
 // ── EDGE-P3-1 Stage 0 handlers ─────────────────────────────────────
 
 /// EN: SetEdgePredictorShadow returns Err when no store is wired.

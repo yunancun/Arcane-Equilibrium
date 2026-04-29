@@ -79,6 +79,9 @@ from .checks_cost_edge import (  # noqa: F401
     # 抽出維持 1200 行硬上限。
     check_cost_edge_advisor_status,
 )
+from .checks_execution import (  # noqa: F401
+    check_maker_entry_intent_drift,
+)
 
 __all__ = [
     "main",
@@ -122,4 +125,6 @@ __all__ = [
     "check_dust_spiral_noise_in_ef",
     # G3-09 Phase A cost_edge_advisor
     "check_cost_edge_advisor_status",
+    # execution-shape drift
+    "check_maker_entry_intent_drift",
 ]

@@ -14,6 +14,33 @@ use crate::persistence::DualStateWriter;
 use crate::tick_pipeline::TickPipeline;
 use tracing::info;
 
+fn merge_strategy_params_json(current_json: &str, incoming_json: &str) -> Result<String, String> {
+    let mut current: serde_json::Value = serde_json::from_str(current_json)
+        .map_err(|e| format!("current params JSON invalid: {e}"))?;
+    let incoming: serde_json::Value =
+        serde_json::from_str(incoming_json).map_err(|e| format!("params JSON invalid: {e}"))?;
+
+    match (&mut current, incoming) {
+        (serde_json::Value::Object(current_map), serde_json::Value::Object(incoming_map)) => {
+            for (key, value) in incoming_map {
+                current_map.insert(key, value);
+            }
+            Ok(current.to_string())
+        }
+        (_, other) => Err(format!(
+            "params JSON must be an object, got {}",
+            match other {
+                serde_json::Value::Null => "null",
+                serde_json::Value::Bool(_) => "bool",
+                serde_json::Value::Number(_) => "number",
+                serde_json::Value::String(_) => "string",
+                serde_json::Value::Array(_) => "array",
+                serde_json::Value::Object(_) => "object",
+            }
+        )),
+    }
+}
+
 /// Phase 3b · CONF-D · EN: Update one strategy's typed parameters via IPC.
 ///   Pre-processes the JSON to extract optional `conf_scale`; typed
 ///   `update_params_json` is validated/applied first, then `conf_scale` is
@@ -49,7 +76,17 @@ pub(super) fn handle_update_strategy_params(
             // skip the typed update to avoid unnecessary churn / parse errors.
             let need_typed_update = effective_json != "{}" || conf_scale_opt.is_none();
             if need_typed_update {
-                match strategy.update_params_json(&effective_json) {
+                let merged_json = match merge_strategy_params_json(
+                    &strategy.get_params_json(),
+                    &effective_json,
+                ) {
+                    Ok(json) => json,
+                    Err(e) => {
+                        let _ = response_tx.send(Err(format!("validation failed: {e}")));
+                        return;
+                    }
+                };
+                match strategy.update_params_json(&merged_json) {
                     Ok(()) => {
                         if let Some(scale) = conf_scale_opt {
                             strategy.set_conf_scale(scale);
