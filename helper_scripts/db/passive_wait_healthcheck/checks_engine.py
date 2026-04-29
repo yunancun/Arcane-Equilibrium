@@ -75,6 +75,7 @@ PG 不可達 fail-soft）。
 from __future__ import annotations
 
 from .db import _scalar
+from .shared import _engine_process_age_minutes
 
 
 # ---- individual checks ----
@@ -543,10 +544,18 @@ def check_trading_pipeline_silent_gap(cur) -> tuple[str, str]:
         else:
             parts.append(f"{name}: stale={m:.1f}m, 1h={r}")
     base_msg = " | ".join(parts)
+    engine_age_min, _engine_age_diag = _engine_process_age_minutes()
 
     # Verdict per MIT spec.
     # MIT spec verdict。
     if dcs_rows_1h > 100 and fills_stale > 60:
+        if engine_age_min is not None and engine_age_min < 60.0:
+            return (
+                "PASS",
+                base_msg
+                + f" — engine restarted {engine_age_min:.1f}m ago; "
+                + "1h cliff window still includes pre-restart data, baseline pending",
+            )
         return (
             "FAIL",
             base_msg
@@ -894,6 +903,7 @@ def check_intents_counter_freeze(cur) -> tuple[str, str]:
     # Guardian 交叉門檻：100 verdicts/30min 寬鬆到正常 4 萬/h 跌 99% 仍過得了；
     # 真實 wedge = verdicts 也跌到 ~0。
     VERDICTS_LIVENESS_THRESHOLD = 100
+    engine_age_min, _engine_age_diag = _engine_process_age_minutes()
     try:
         for mode in modes:
             cur.execute(
@@ -924,6 +934,16 @@ def check_intents_counter_freeze(cur) -> tuple[str, str]:
             if minutes_since <= 15.0 or intents_30min > 0:
                 per_mode.append((mode, "PASS", seg))
                 continue
+            if engine_age_min is not None and engine_age_min < 30.0:
+                per_mode.append(
+                    (
+                        mode,
+                        "PASS",
+                        f"{seg} — engine restarted {engine_age_min:.1f}m ago; "
+                        "intent counter baseline pending",
+                    )
+                )
+                continue
             # Slow path: intents counter looks frozen — cross-check Guardian
             # verdicts liveness in the same window before declaring wedge.
             # 慢路徑：intents counter 看似凍 — 宣告 wedge 前先查 Guardian
@@ -942,11 +962,31 @@ def check_intents_counter_freeze(cur) -> tuple[str, str]:
                 # FAIL/WARN logic so we don't silently downgrade a real wedge.
                 # verdicts 查失敗 → 退回原 intent-only 邏輯，避免靜默降級真 wedge。
                 verdicts_30min = -1
+            dcs_30min = 0
+            try:
+                cur.execute(
+                    "SELECT count(*) FROM trading.decision_context_snapshots "
+                    "WHERE engine_mode = %s AND ts > now() - interval '30 minutes'",
+                    (mode,),
+                )
+                d_row = cur.fetchone()
+                dcs_30min = int(d_row[0] or 0) if d_row else 0
+            except Exception:
+                dcs_30min = -1
             seg_with_v = (
-                f"{seg}, verdicts_30min={verdicts_30min}"
+                f"{seg}, verdicts_30min={verdicts_30min}, dcs_30min={dcs_30min}"
                 if verdicts_30min >= 0
                 else f"{seg}, verdicts_probe_failed"
             )
+            if verdicts_30min == 0 and dcs_30min == 0:
+                per_mode.append(
+                    (
+                        mode,
+                        "PASS",
+                        seg_with_v + " — mode inactive in 30min window",
+                    )
+                )
+                continue
             if minutes_since > 30.0:
                 if 0 <= verdicts_30min < VERDICTS_LIVENESS_THRESHOLD:
                     # Both intents AND verdicts frozen → real wedge.
