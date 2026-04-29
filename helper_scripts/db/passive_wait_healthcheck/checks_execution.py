@@ -21,9 +21,9 @@ MAKER_FEE_DROP_TARGET_PCT = 60.0
 MAKER_FILL_MIN_SAMPLE = 30
 
 
-def _load_demo_strategy_params() -> tuple[dict[str, Any] | None, str]:
-    """Load ``settings/strategy_params_demo.toml`` fail-soft.
-    讀取 demo strategy params TOML；失敗時回診斷，不拋例外。
+def _load_strategy_params(kind: str) -> tuple[dict[str, Any] | None, str]:
+    """Load ``settings/strategy_params_<kind>.toml`` fail-soft.
+    讀取指定 kind 的 strategy params TOML；失敗時回診斷，不拋例外。
     """
     try:
         import tomllib  # type: ignore[import-not-found]
@@ -34,9 +34,9 @@ def _load_demo_strategy_params() -> tuple[dict[str, Any] | None, str]:
             return (None, "tomllib/tomli unavailable")
 
     base = Path(os.environ.get("OPENCLAW_BASE_DIR", str(Path.home() / "BybitOpenClaw/srv")))
-    toml_path = base / "settings" / "strategy_params_demo.toml"
+    toml_path = base / "settings" / f"strategy_params_{kind}.toml"
     if not toml_path.exists():
-        return (None, f"strategy_params_demo.toml not found at {toml_path}")
+        return (None, f"strategy_params_{kind}.toml not found at {toml_path}")
 
     try:
         with toml_path.open("rb") as f:
@@ -44,15 +44,15 @@ def _load_demo_strategy_params() -> tuple[dict[str, Any] | None, str]:
     except Exception as exc:  # noqa: BLE001 — healthcheck fail-soft
         return (None, f"TOML parse error: {exc}")
     if not isinstance(data, dict):
-        return (None, "strategy_params_demo.toml did not parse to a table")
+        return (None, f"strategy_params_{kind}.toml did not parse to a table")
     return (data, "ok")
 
 
-def _maker_enabled_demo_strategies() -> tuple[list[str], str]:
-    """Return active demo strategies that intend maker entries.
-    回傳 demo TOML 中 active 且 use_maker_entry=true 的策略。
+def _maker_enabled_strategies(kind: str) -> tuple[list[str], str]:
+    """Return active strategies that intend maker entries for one TOML kind.
+    回傳指定 TOML 中 active 且 use_maker_entry=true 的策略。
     """
-    data, diag = _load_demo_strategy_params()
+    data, diag = _load_strategy_params(kind)
     if data is None:
         return ([], diag)
 
@@ -67,28 +67,55 @@ def _maker_enabled_demo_strategies() -> tuple[list[str], str]:
     return (sorted(strategies), "ok")
 
 
-def check_maker_entry_intent_drift(cur) -> tuple[str, str]:
-    """[32] Demo maker-entry intent drift.
+def _maker_entry_expectations() -> tuple[list[tuple[str, str, str]], list[str]]:
+    """Build expected ``(health_mode, engine_mode, strategy_name)`` rows.
+    建立應該使用 maker entry 的 health_mode / engine_mode / strategy 清單。
+    """
+    expectations: list[tuple[str, str, str]] = []
+    diagnostics: list[str] = []
 
-    If demo TOML says a strategy should use maker entries, its recent entry
-    intents should not be ``order_type='market'``. This checks
+    demo_strategies, demo_diag = _maker_enabled_strategies("demo")
+    if demo_diag != "ok":
+        diagnostics.append(f"demo: {demo_diag}")
+    for strategy in demo_strategies:
+        expectations.append(("demo", "demo", strategy))
+
+    live_strategies, live_diag = _maker_enabled_strategies("live")
+    if live_diag != "ok":
+        diagnostics.append(f"live: {live_diag}")
+    for strategy in live_strategies:
+        # Runtime DB writes may tag the live exchange pipeline as live_demo
+        # while IPC/TOML still route through PipelineKind::Live.
+        # runtime DB 可能把 live exchange pipeline 標為 live_demo，但 IPC/TOML
+        # 仍走 PipelineKind::Live；這裡同時覆蓋三種常見標籤。
+        for engine_mode in ("live", "live_demo", "live_testnet"):
+            expectations.append(("live", engine_mode, strategy))
+
+    return (expectations, diagnostics)
+
+
+def check_maker_entry_intent_drift(cur) -> tuple[str, str]:
+    """[32] Maker-entry intent drift across demo and live-demo exchange paths.
+
+    If demo/live TOML says a strategy should use maker entries, its recent
+    entry intents should not be ``order_type='market'``. This checks
     ``trading.intents`` rather than ``trading.orders`` because close orders are
     intentionally Market and the orders table does not persist ``is_close``.
 
-    [32] Demo maker 入場 intent 漂移。若 demo TOML 指定 maker entry，近期
-    入場 intent 不應仍為 market。使用 trading.intents 而非 orders，因為
-    平倉本來就是 Market，orders 表也沒有 is_close 可安全過濾。
+    [32] maker 入場 intent 漂移。若 demo/live TOML 指定 maker entry，近期
+    入場 intent 不應仍為 market。使用 trading.intents 而非 orders，因為平倉
+    本來就是 Market，orders 表也沒有 is_close 可安全過濾。
     """
     try:
         cur.connection.rollback()
     except Exception:
         pass
 
-    strategies, diag = _maker_enabled_demo_strategies()
-    if not strategies:
-        if diag == "ok":
-            return ("PASS", "no active demo strategies with use_maker_entry=true")
-        return ("WARN", f"maker-entry TOML read unavailable: {diag}")
+    expectations, diagnostics = _maker_entry_expectations()
+    if not expectations:
+        if not diagnostics:
+            return ("PASS", "no active strategies with use_maker_entry=true")
+        return ("WARN", "maker-entry TOML read unavailable: " + "; ".join(diagnostics))
 
     window_minutes = 30.0
     window_note = "30m"
@@ -97,61 +124,76 @@ def check_maker_entry_intent_drift(cur) -> tuple[str, str]:
         window_minutes = max(1.0, engine_age_min)
         window_note = f"{window_minutes:.1f}m post-restart"
 
-    placeholders = ", ".join(["%s"] * len(strategies))
+    values_sql = ", ".join(["(%s, %s, %s)"] * len(expectations))
+    query_params: list[Any] = []
+    for health_mode, engine_mode, strategy_name in expectations:
+        query_params.extend([health_mode, engine_mode, strategy_name])
+    query_params.append(window_minutes)
+
     try:
         cur.execute(
             f"""
-            SELECT strategy_name, lower(order_type) AS order_type, COUNT(*)::int AS n
-            FROM trading.intents
-            WHERE ts > now() - (%s::double precision * interval '1 minute')
-              AND engine_mode = 'demo'
-              AND strategy_name IN ({placeholders})
-            GROUP BY strategy_name, lower(order_type)
-            ORDER BY strategy_name, lower(order_type)
+            WITH expected(health_mode, engine_mode, strategy_name) AS (
+                VALUES {values_sql}
+            )
+            SELECT
+                expected.health_mode,
+                intents.strategy_name,
+                lower(intents.order_type) AS order_type,
+                COUNT(*)::int AS n
+            FROM expected
+            JOIN trading.intents AS intents
+              ON intents.engine_mode = expected.engine_mode
+             AND intents.strategy_name = expected.strategy_name
+            WHERE intents.ts > now() - (%s::double precision * interval '1 minute')
+            GROUP BY expected.health_mode, intents.strategy_name, lower(intents.order_type)
+            ORDER BY expected.health_mode, intents.strategy_name, lower(intents.order_type)
             """,
-            (window_minutes, *strategies),
+            tuple(query_params),
         )
         rows = cur.fetchall()
     except Exception as exc:  # noqa: BLE001 — healthcheck fail-soft
         return ("WARN", f"maker-entry intent drift query failed: {exc}")
 
-    totals: dict[str, int] = {name: 0 for name in strategies}
-    market: dict[str, int] = {name: 0 for name in strategies}
-    limit: dict[str, int] = {name: 0 for name in strategies}
-    other: dict[str, int] = {name: 0 for name in strategies}
-    for strategy_name, order_type, n in rows:
-        name = str(strategy_name)
+    expected_keys = sorted({(mode, strategy) for mode, _, strategy in expectations})
+    totals: dict[tuple[str, str], int] = {key: 0 for key in expected_keys}
+    market: dict[tuple[str, str], int] = {key: 0 for key in expected_keys}
+    limit: dict[tuple[str, str], int] = {key: 0 for key in expected_keys}
+    other: dict[tuple[str, str], int] = {key: 0 for key in expected_keys}
+    for health_mode, strategy_name, order_type, n in rows:
+        key = (str(health_mode), str(strategy_name))
         typ = str(order_type or "").lower()
         count = int(n or 0)
-        totals[name] = totals.get(name, 0) + count
+        totals[key] = totals.get(key, 0) + count
         if typ == "market":
-            market[name] = market.get(name, 0) + count
+            market[key] = market.get(key, 0) + count
         elif typ == "limit":
-            limit[name] = limit.get(name, 0) + count
+            limit[key] = limit.get(key, 0) + count
         else:
-            other[name] = other.get(name, 0) + count
+            other[key] = other.get(key, 0) + count
 
-    active_rows = [name for name, total in totals.items() if total > 0]
+    active_rows = [key for key, total in totals.items() if total > 0]
     if not active_rows:
+        enabled = ", ".join(f"{mode}/{strategy}" for mode, strategy in expected_keys)
         return (
             "PASS",
-            f"maker-enabled demo strategies emitted no entry intents in {window_note} "
-            f"({', '.join(strategies)})",
+            f"maker-enabled strategies emitted no entry intents in {window_note} ({enabled})",
         )
 
     parts = [
-        f"{name}: total={totals[name]}, market={market[name]}, "
-        f"limit={limit[name]}, other={other[name]}"
-        for name in active_rows
+        f"{mode}/{strategy}: total={totals[(mode, strategy)]}, "
+        f"market={market[(mode, strategy)]}, limit={limit[(mode, strategy)]}, "
+        f"other={other[(mode, strategy)]}"
+        for mode, strategy in active_rows
     ]
-    bad = [name for name in active_rows if market[name] > 0]
+    bad = [key for key in active_rows if market[key] > 0]
     if bad:
         return (
             "FAIL",
-            "maker-enabled demo strategies emitted market entry intents — "
+            "maker-enabled strategies emitted market entry intents — "
             + f"window={window_note}; "
             + "; ".join(parts)
-            + " — check StrategyParams partial-merge / persisted replay drift",
+            + " — check StrategyParams partial-merge / TOML runtime drift",
         )
     return ("PASS", f"maker-entry intent shape ok — window={window_note}; " + "; ".join(parts))
 

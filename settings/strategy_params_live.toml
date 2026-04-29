@@ -14,10 +14,16 @@ adx_threshold = 20.0
 regime_filter_enabled = true
 higher_tf_alpha = 0.003
 conf_scale = 1.0
-# EDGE-P2-3 Phase 2+: live stays on Market (root principle #6). Flip to true
-# after demo validates positive net edge.
-# EDGE-P2-3 Phase 2+：live 維持 Market（根原則 #6）。
-use_maker_entry = false
+# LIVE-DEMO-MAKER-FIX (2026-04-29): current live pipeline writes live_demo fills
+# against Bybit Demo, not real funds. Align MA entry execution with demo so the
+# second exchange pipeline stops paying taker fees while net edge is measured.
+# Before binding this file to real mainnet funds, re-check operator acceptance
+# criteria and live execution policy.
+# LIVE-DEMO-MAKER-FIX（2026-04-29）：目前 live pipeline 產生 live_demo fills，
+# 對接 Bybit Demo，非真實資金。MA 入場執行需與 demo 對齊，避免第二條
+# exchange pipeline 繼續付 taker fee；若未來此檔綁到真實主網，需重新檢查
+# operator acceptance criteria 與 live execution policy。
+use_maker_entry = true
 maker_price_offset_bps = 1.0
 maker_limit_timeout_ms = 45000
 
@@ -64,19 +70,19 @@ spacing_mode = "linear"
 health_check_interval = 200
 max_out_of_range = 50
 conf_scale = 1.0
-# EDGE-P2-3 Phase 1a (2026-04-20): live stays on Market entries (conservative,
-# root principle #6). Flip to `true` only after demo validation produces positive
-# net edge with maker fills. Reject/timeout handling lands in Phase 1b before
-# any live opt-in.
-# EDGE-P2-3 Phase 1a：live 維持 Market（根原則 #6 保守）。待 demo 驗證出正 net edge
-# 且 Phase 1b 拒絕/超時處理完成後再評估開啟。
-use_maker_entry = false
+# LIVE-DEMO-MAKER-FIX (2026-04-29): current live pipeline writes live_demo fills
+# against Bybit Demo, not real funds. Enable entry-only PostOnly Limit here too
+# so the second exchange pipeline stops paying taker fees while demo validates.
+# Before binding this file to real mainnet funds, re-check operator acceptance
+# criteria and live execution policy.
+# LIVE-DEMO-MAKER-FIX（2026-04-29）：目前 live pipeline 產生 live_demo fills，
+# 對接 Bybit Demo，非真實資金。此處也啟用入場 PostOnly Limit，避免第二條
+# exchange pipeline 繼續付 taker fee；若未來此檔綁到真實主網，需重新檢查
+# operator acceptance criteria 與 live execution policy。
+use_maker_entry = true
 maker_price_offset_bps = 1.0
 # EDGE-P2-3 Phase 1B-3.1: resting PostOnly Limit sweep timeout (ms).
-# Plumbed for live TOML parity even though use_maker_entry=false means
-# no PostOnly submits happen in live today; prevents schema drift between envs.
 # EDGE-P2-3 Phase 1B-3.1：掛中 PostOnly Limit 逾時清理（毫秒）。
-# live 目前 use_maker_entry=false 不會實際發 PostOnly，但同步設定避免環境配置漂移。
 maker_limit_timeout_ms = 45000
 
 # OC-5: FundingArb — inactive for live until paper/demo validated.

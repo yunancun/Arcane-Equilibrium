@@ -22,7 +22,7 @@ from helper_scripts.db.passive_wait_healthcheck.checks_execution import (  # noq
 )
 
 
-def _make_cursor(rows: list[tuple[str, str, int]]) -> MagicMock:
+def _make_cursor(rows: list[tuple[str, str, str, int]]) -> MagicMock:
     cur = MagicMock()
     cur.connection = MagicMock()
     cur.connection.rollback = MagicMock()
@@ -32,7 +32,10 @@ def _make_cursor(rows: list[tuple[str, str, int]]) -> MagicMock:
 
 class TestMakerEntryIntentDrift(unittest.TestCase):
     def _run_with_toml(
-        self, toml_text: str, rows: list[tuple[str, str, int]]
+        self,
+        toml_text: str,
+        rows: list[tuple[str, str, str, int]],
+        live_toml_text: str | None = "",
     ) -> tuple[str, str]:
         with tempfile.TemporaryDirectory() as tmp:
             settings = Path(tmp) / "settings"
@@ -40,6 +43,10 @@ class TestMakerEntryIntentDrift(unittest.TestCase):
             (settings / "strategy_params_demo.toml").write_text(
                 toml_text, encoding="utf-8"
             )
+            if live_toml_text is not None:
+                (settings / "strategy_params_live.toml").write_text(
+                    live_toml_text, encoding="utf-8"
+                )
             with patch.dict(os.environ, {"OPENCLAW_BASE_DIR": tmp}, clear=False):
                 return check_maker_entry_intent_drift(_make_cursor(rows))
 
@@ -53,10 +60,25 @@ use_maker_entry = true
 active = true
 use_maker_entry = true
 """
-        status, msg = self._run_with_toml(toml, [("grid_trading", "market", 3)])
+        status, msg = self._run_with_toml(toml, [("demo", "grid_trading", "market", 3)])
         self.assertEqual(status, "FAIL")
-        self.assertIn("grid_trading", msg)
+        self.assertIn("demo/grid_trading", msg)
         self.assertIn("market=3", msg)
+
+    def test_live_market_intent_for_maker_strategy_fails(self) -> None:
+        live_toml = """
+[grid_trading]
+active = true
+use_maker_entry = true
+"""
+        status, msg = self._run_with_toml(
+            "",
+            [("live", "grid_trading", "market", 6)],
+            live_toml_text=live_toml,
+        )
+        self.assertEqual(status, "FAIL")
+        self.assertIn("live/grid_trading", msg)
+        self.assertIn("market=6", msg)
 
     def test_limit_intents_pass(self) -> None:
         toml = """
@@ -64,7 +86,7 @@ use_maker_entry = true
 active = true
 use_maker_entry = true
 """
-        status, msg = self._run_with_toml(toml, [("grid_trading", "limit", 5)])
+        status, msg = self._run_with_toml(toml, [("demo", "grid_trading", "limit", 5)])
         self.assertEqual(status, "PASS")
         self.assertIn("limit=5", msg)
 
@@ -90,6 +112,7 @@ use_maker_entry = true
             (settings / "strategy_params_demo.toml").write_text(
                 toml, encoding="utf-8"
             )
+            (settings / "strategy_params_live.toml").write_text("", encoding="utf-8")
             cur = _make_cursor([])
             with patch.dict(os.environ, {"OPENCLAW_BASE_DIR": tmp}, clear=False):
                 with patch(
@@ -101,7 +124,7 @@ use_maker_entry = true
 
         self.assertEqual(status, "PASS")
         self.assertIn("5.0m post-restart", msg)
-        self.assertEqual(cur.execute.call_args.args[1][0], 5.0)
+        self.assertEqual(cur.execute.call_args.args[1][-1], 5.0)
 
     def test_missing_toml_warns(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
