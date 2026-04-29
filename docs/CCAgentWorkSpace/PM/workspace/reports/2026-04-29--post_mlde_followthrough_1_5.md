@@ -2,6 +2,8 @@
 
 Date: 2026-04-29 19:26 CEST
 
+Deploy update: commit `a3659d7` was pushed to `origin/main`, fast-forwarded on Linux, and deployed with `restart_all.sh --rebuild --keep-auth`. Engine PID `691042`; API PID `691117`.
+
 ## Scope
 
 Operator asked to execute the recommended 1-5 follow-through after the latest repair round:
@@ -29,6 +31,9 @@ No sub-agents were used because this Codex turn did not have explicit operator a
 - `cargo test --manifest-path rust/Cargo.toml -p openclaw_engine --lib verify_ipc_token` → 5 passed.
 - `cargo test --manifest-path rust/Cargo.toml -p openclaw_engine --lib pending_registration_order_type_tests` → 8 passed.
 - `cargo test --manifest-path rust/Cargo.toml -p openclaw_engine --lib test_persist_intent_helper` → 2 passed.
+- Full Rust lib regression: 2365 passed.
+- `cargo check --manifest-path rust/Cargo.toml -p openclaw_engine --bins` passed with existing warnings.
+- Post-deploy passive healthcheck: SUMMARY WARN with `[12]`, `[33]`, and `[11]`; `[37]` cleared after one manual demo applier run. `[33]` `postonly_order_rows` began accumulating (`6` rows in the rerun), proving the order TIF writer is live.
 
 Coverage note: this local Python environment lacks `pytest-cov` and `coverage.py`, so W2 coverage was not regenerated in this turn. Existing Wave B sign-off records W2 at 100% coverage.
 
