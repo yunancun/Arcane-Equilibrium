@@ -100,3 +100,9 @@ YYYY-MM-DD HH:MM TZ
 - fixed fee-rate stale root long-term by spawning fee refresh/re-seed tasks per exchange binding AccountManager instead of only the highest-priority shared binding
 - added scanner scan snapshots, configurable scanner `edge_routing`, robust-negative exploration-only routing, grid `blocked_symbols`, and strict maker entry skip on unsafe BBO/tick_size
 - added passive healthcheck `[34] intent_signal_attribution` and tests; verification: Rust lib 2361/0, scanner 61/0, DB writer 3/0, fast_track_reduce 16/0, maker_price 10/0, `cargo check --bins`, `cargo check openclaw_core`, Python maker/attribution pytest 9/0, and `git diff --check`
+
+2026-04-29 17:51 CEST
+- accepted operator decision: demo can use ML/LinUCB/DreamEngine/OpportunityTracker to repair edge before positive edge, while live autonomous execution must pass GovernanceHub + Decision Lease + existing live gates
+- wrote PM plan `docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-29--ml_dream_edge_unblock_plan.md`
+- reordered TODO around MLDE-0..6: live-autonomy boundary, learning data contract, LinUCB intent-arm/reward loop, ML shadow scorer, Dream/Opportunity read-only producers, demo A/B advisory path, live promotion contract
+- no code changes in this docs checkpoint; existing Rust WIP files in the working tree were intentionally left unstaged

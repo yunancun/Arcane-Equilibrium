@@ -1,6 +1,6 @@
 # OpenClaw TODO — 工作清單（v3 · 單一時間軸版）
 
-**最新狀態快照**（2026-04-29 17:36 CEST · Strategy Edge Repair checkpoint · Linux deploy pending）：62-finding remediation Batch A-F 全部完成、push、Linux rebuild/redeploy；最新 deployed runtime 仍是 `af9d552`，engine PID **447123** + API PID **447192**。本輪 Strategy Edge Repair 已在 Mac repo 完成：demo/live_demo strategy intents 補上 `signal_id` attribution anchor、scanner snapshots + edge route metadata 落庫、fee refresh 改為 per exchange binding、maker fallback 改 skip、scanner `edge_routing` 可配置、grid robust-negative `blocked_symbols` + bb_breakout demo threshold 調整；新增 `[34] intent_signal_attribution` healthcheck。Linux runtime 需 pull 本 checkpoint 後用 `restart_all.sh --rebuild --keep-auth` 套用。
+**最新狀態快照**（2026-04-29 17:51 CEST · ML/Dream edge-unblock plan adopted · code WIP untouched）：62-finding remediation Batch A-F 全部完成、push、Linux rebuild/redeploy；Strategy Edge Repair commit `ece31b6` 已推送且 Linux repo 已 fast-forward pull，但 runtime 尚未 rebuild。新 PM 方案 `docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-29--ml_dream_edge_unblock_plan.md` 決定：**正 edge 是 promotion gate，不是 training gate**；Demo 可先用 ML/LinUCB/DreamEngine/OpportunityTracker 做 read-only、shadow、counterfactual、demo 小探索來修 edge；Live 自動交易或 live 參數自動放權必須經 GovernanceHub / Decision Lease + 既有 5 live gates 批准。
 
 **歸檔索引**（已結案敘述歸檔，不再放 TODO 頭部）：
 - 62-finding Batch A-F：see [`docs/archive/2026-04-29--62finding-batch-A-to-F.md`](docs/archive/2026-04-29--62finding-batch-A-to-F.md) （commits `bc3fa70` + `6539e4e` + `5db4e29` PUSHED）
@@ -42,18 +42,18 @@
 **§九 governance 戰況**：800 warn active violations 剩 1（main_boot_tasks.rs 816 marginal acceptable，Wave G→H 已從 4 縮至 1）· 1200 hard cap active violations **0** ✅（Wave G achievement maintained）
 
 **NOW ACTIONABLE**（時間驅動 / 等候 / 餘工）：
-1. **STRATEGY-EDGE-REPAIR-2026-04-29（策略虧損主線包）** — implementation complete; Linux deploy pending. 以 post-fee `net_bps_after_fee` 為主指標，PNL / winrate 僅作參考；修後樣本從 **2026-04-29 12:27:53 CEST** live maker-entry reload 後切分。已落地：A) `[34] intent_signal_attribution` + strategy signal anchor 修 demo/live_demo attribution chain；B) fee refresh per exchange binding，解決 shared priority 導致 demo/live_demo stale；C) maker pricing BBO/tick_size 缺失 skip，不退回 taker Market；D) scanner `edge_routing` 可配置，成熟負 edge 降 exploration-only/score cap，低樣本保留探索；E) scanner snapshots + intent scanner metadata 落庫，查 scanner 是否誤導有資料鏈；F) grid robust-negative `blocked_symbols` + bb_breakout demo volume threshold 1.2。後續只追 `[33]` maker_like / fee_drop / reject-rate 和 2026-05-07/08 G2-01 settlement，不把此輪虧損處理變成繼續加風控。
-2. **G2-01 PostOnly follow-through** — `[33] maker_fill_rate` 已實裝並 cron 監控；目前 7d fee_drop **1.8%** / maker_like **2.1%**，遠低 ≥60% 目標，05-07/08 結算若未改善需進 G2-04 disable/策略調整決策。
-3. **Fee-refresh RCA follow-through** — `[22]` cleared after `bdd3177` deploy；下一個自然驗證點是首個 1h periodic refresh log 出現 `conservative defaults re-seeded`，且 >2h 不再出現 fee-rate staleness cost_gate self-lock。
-4. **bb_breakout Phase 2 threshold tuning** — `[12]` 目前 WARN：7d entries=1，已脫離永久 dormant 但仍低量；1m bandwidth 結構性問題仍待 sweep / 升 5m timeframe。
-5. **Live auth renewal** — 若要恢復 LiveDemo/live pipeline，Operator 需經 API renew schema v2 授權；這是 Batch A live gate 強化後的預期行為。
-6. **G3-09 Phase C Wave 1 impl** — operator 「等時間長一些再看」；PA RFC `90d1a2e` ready
-7. **Phase B observation period launch** — bundled with Phase C (operator decision (C))
-8. **6 backlog tickets** 等下次 maintenance wave：
+1. **ML-DREAM-EDGE-UNBLOCK-2026-04-29（新主線 · demo-first / live-governed）** — 方案已落地為 PM report。重排後 blocker：A) **MLDE-0 GovernanceHub live-autonomy boundary**：任何 live 自動交易 / live 參數自動放權必須經 GovernanceHub + Decision Lease + 5 live gates；B) **MLDE-1 Learning Data Contract**：`scanner_snapshots -> signals -> intents -> orders/fills -> outcomes`，primary reward = post-fee `net_bps_after_fee`，切分 post-2026-04-22 clean window 與 post-2026-04-29 attribution/maker repair window；C) **MLDE-2 LinUCB intent-arm/reward loop**：arm 改用 `strategy + symbol_bucket + regime + scanner.route_mode + edge_status`，先 read-only；D) **MLDE-3 ML shadow scorer**：預測 expected net bps / maker fill probability / hold-time quality，只產 veto/ranking/parameter 建議；E) **MLDE-4 DreamEngine + OpportunityTracker read-only producers**：先針對 grid spacing、MA whipsaw hold-time、bb_breakout threshold/timeframe、maker timeout；F) **MLDE-5 demo A/B advisory path**；G) **MLDE-6 live promotion contract + healthchecks**。
+2. **STRATEGY-EDGE-REPAIR-2026-04-29（策略虧損主線包）** — implementation complete; Linux repo pulled; runtime rebuild pending. 以 post-fee `net_bps_after_fee` 為主指標，PNL / winrate 僅作參考；修後樣本從 **2026-04-29 12:27:53 CEST** live maker-entry reload 後切分。已落地：`[34]` attribution chain、per-binding fee refresh、maker unsafe fallback skip、scanner `edge_routing`、scanner snapshots、grid robust-negative `blocked_symbols`、bb_breakout demo volume threshold 1.2。後續只追 `[33]` maker_like / fee_drop / reject-rate 和 2026-05-07/08 G2-01 settlement，不把此輪虧損處理變成繼續加風控。
+3. **G2-01 PostOnly follow-through** — `[33] maker_fill_rate` 已實裝並 cron 監控；目前 7d fee_drop **1.8%** / maker_like **2.1%**，遠低 ≥60% 目標，05-07/08 結算若未改善需進 G2-04 disable/策略調整決策。
+4. **Fee-refresh RCA follow-through** — `[22]` cleared after `bdd3177` deploy；下一個自然驗證點是首個 1h periodic refresh log 出現 `conservative defaults re-seeded`，且 >2h 不再出現 fee-rate staleness cost_gate self-lock。
+5. **bb_breakout Phase 2 threshold tuning** — `[12]` 目前 WARN：7d entries=1，已脫離永久 dormant 但仍低量；1m bandwidth 結構性問題仍待 sweep / 升 5m timeframe。此項可納入 MLDE-4 DreamEngine read-only sweep。
+6. **Live auth renewal** — 若要恢復 LiveDemo/live pipeline，Operator 需經 API renew schema v2 授權；這是 Batch A live gate 強化後的預期行為。注意：Live pipeline 能啟動 ≠ ML/Dream/Agent 可以 live 自動交易，後者仍需 GovernanceHub 批准。
+7. **G3-09 Phase C Wave 1 impl** — operator 「等時間長一些再看」；PA RFC `90d1a2e` ready
+8. **Phase B observation period launch** — bundled with Phase C (operator decision (C))
+9. **Maintenance backlog** 等下次 wave：
    - G3-08-FUP-MAF-SPLIT-CLEANUP-A P4 (new, cosmetic eager re-export)
    - G3-08-PHASE-4-STRATEGIST-SPLIT-FUP-FACADE LOW (deferred, post-strategist-split risk)
    - SINGLETON-POLLUTION-PHASE2-ROUTES P4 (Mac-only)
-   - G8-01-FUP-REGRET-DREAM-DEFERRED P3 (long-term)
    - G3-09-FUP-CASE-D-H5-WAIT P3
    - G3-08-FUP-EXECUTOR-EARLY-RETURN-LOW1 P4
 
@@ -428,13 +428,27 @@ ssh trade-core "cd ~/BybitOpenClaw/srv && python3 helper_scripts/db/passive_wait
 
 | ID | Tag | 項目 | 前置 | 負責 | 工時 |
 |---|---|---|---|---|---|
-| **P0-3-01** | 🔴P0 | counterfactual_exit_replay 完整分析報告 | Phase 2 result + G2 完成 | MIT+PM / FA | 2d |
+| **P0-3-01** | 🔴P0 | counterfactual_exit_replay 完整分析報告 | Phase 2 result + G2 完成 + MLDE-1 dataset | MIT+PM / FA | 2d |
 | **P0-3-02** | 🔴P0 | Edge 重評決策會（3 分支：翻正/仍負/部分改善） | P0-3-01 | PM+FA+PA+QC | 1d 會議 |
 
 **outcome 分支**：
 - A. edge 翻正 → cost_gate 重啟 + Track P Phase 1b 解凍 → LG-2~5 推進
 - B. edge 仍負 → DUAL-TRACK 全力 + 策略重做 + 部分策略下架
 - C. 結構性改善 → Phase 5 部分接線
+
+**2026-04-29 reframe**：P0-3 仍是 live promotion / Phase 5 放權 gate，但不再阻塞 demo ML/Dream 訓練。負 edge demo 樣本可用於 veto/ranking/parameter repair；live 自動交易仍必須等 P0-3 + GovernanceHub contract。
+
+### ML/Dream Edge Unblock（demo-first / live-governed）
+
+| ID | Tag | 項目 | 前置 | 負責 | 工時 |
+|---|---|---|---|---|---|
+| **MLDE-0** | 🔴P0 | GovernanceHub live-autonomy boundary：live 自動交易 / live 參數自動放權必須經 GovernanceHub + Decision Lease + 5 live gates；demo 可 read-only/shadow/demo A-B | Operator decision 2026-04-29 | PM+PA+E3 / E2 | 0.5d spec |
+| **MLDE-1** | 🔴P0 | Learning Data Contract：`scanner_snapshots -> signals -> intents -> orders/fills -> outcomes`；reward = post-fee `net_bps_after_fee`；污染窗口切分 | STRATEGY-EDGE-REPAIR `ece31b6` | MIT+E1 / E2+E4 | 1-2d |
+| **MLDE-2** | 🔴P0 | LinUCB intent-arm/reward loop：arm = `strategy + symbol_bucket + regime + scanner.route_mode + edge_status`；先 read-only + counterfactual best-arm log | MLDE-1 | QC+E1 / MIT+E4 | 2d |
+| **MLDE-3** | 🟠P1 | ML shadow scorer：expected net bps / maker-fill probability / hold-time quality；只產 veto/ranking/parameter 建議 | MLDE-1 | MIT+AI-E+E1 / E2 | 2-3d |
+| **MLDE-4** | 🟠P1 | DreamEngine + OpportunityTracker read-only producers：grid spacing、MA hold-time、bb_breakout threshold/timeframe、maker timeout narrow sweeps | MLDE-1 | QC+MIT+E1 / E2 | 3-5d |
+| **MLDE-5** | 🟠P1 | Demo A/B advisory path：bounded parameter proposals, start/end timestamps, rollback, healthcheck | MLDE-2 + MLDE-3/4 first shadow output | PM+E1 / QA | 1-2d |
+| **MLDE-6** | 🔴P0 | Live promotion contract：advisory → operator-review proposal → demo patch → live candidate；live candidate requires GovernanceHub approval + lease + rollback | MLDE-5 + P0-3 | PM+CC+E3+PA / E2+QA | 1-2d |
 
 ### Live Gate（5 項全綠）
 
@@ -505,11 +519,11 @@ ssh trade-core "cd ~/BybitOpenClaw/srv && python3 helper_scripts/db/passive_wait
 | **G2-03-FUP-CALLER-WIRE** | G2-03 `check_position_on_tick_with_override` 0 production caller（W4 軌 3 staging marker）；G2-02 counterfactual 結論定後派 E1 wire caller chain（step_6_risk_checks）真實啟用 SL/TP override | G2-02 完成 ~05-03 | 🟠P1 | E1 1d 工時；G2-03 schema 已 staging |
 | **EDGE-P2 Phase B** | Liquidation signal | Phase A OI 驗收後 | 🟡P3 | OI 2026-04-20 已完 |
 | **EDGE-P2-3 Phase 2+** | live endpoint / funding_arb PostOnly | Phase 1b | 🟡P3 | ML integration 前置 |
-| **Phase 5 補強** | Symbol Embedding / Regime LSTM / JS+Scorer | P0-3 判決 | 🟢P3-P4 | 取決於 P0-3 outcome |
+| **Phase 5 補強** | Superseded by MLDE-3/4：ML shadow scorer + Dream read-only edge repair。P0-3 只作 promotion gate，不阻塞 demo 訓練 | MLDE-1 起跑 | 🟠P1 | 併入 ML-DREAM-EDGE-UNBLOCK |
 | **G-2 FundingArb 重評** | 三參數重評 | R-02 Strategist 在線 | 🟡P3 | G-1 AI Agent 推進後 |
 | **ORPHAN-ADOPT-1 Phase 2B** | Strategist `would_take` 終仲裁 | G-1 R-02 | 🟡P3 | |
 | **IP-DEDUP-1** | IntentProcessor 去抖 | P0-3 後 edge 仍負 + 高重發率 | ⚫P4 | 條件觸發 |
-| **4-06** | LinUCB live warm-start | v1→v2 遷移 | ⚫P4 | memory archive |
+| **4-06 / MLDE-2** | LinUCB intent-arm/reward loop + later live warm-start；先 demo/read-only，再評估 v1→v2 遷移 | MLDE-1 | 🔴P0 | 從 P4 提升為 edge-unblock 主線 |
 | **OC-4** | MCP PostgreSQL 自然語言 | Phase 5+ | ⚫P4 | |
 | **G-6** | Edge JS 滾動重訓 | P1-7 B 解 | ⚫P4 | 自然解鎖 |
 | **G-8** | cost_gate 可信度 | EDGE-P3-1 Stage 2 | ⚫P4 | |

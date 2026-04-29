@@ -51,6 +51,8 @@
 
 **Strategy Edge Repair packet（2026-04-29 17:36 CEST · implementation checkpoint）**：策略虧損判讀以扣費後 `net_bps_after_fee` 為主，PNL / winrate 僅作參考；修後樣本起點用 **2026-04-29 12:27:53 CEST**（live TOML maker-entry reload）切分，避免混入舊 Market/taker fill。本輪按務實路線落地：1) demo/live_demo strategy-open intent 現在先寫 `trading.signals` attribution anchor，再把同一 `signal_id` / `context_id` 寫入 `trading.intents`；2) scanner 每輪寫 `trading.scanner_snapshots`，intent details 附 `scan_id` / edge 狀態 / route mode，方便查上游是否誤導；3) fee refresh 從單一 shared AccountManager 改為 demo/live 每個 exchange binding 自己 refresh/re-seed，避免 Live 搶 priority 後 Demo/LiveDemo fee cache 長期 stale；4) maker 入場改為 BBO/tick_size 不足就 skip，不再退回 last_price/taker fallback；5) scanner 新增可調 `edge_routing`，低樣本探索保留，成熟負 edge cell 降到 exploration-only / score cap；6) grid robust-negative symbols 可配置 `blocked_symbols`，bb_breakout demo threshold 使用最新 sweep 結果調到 volume 1.2。新增 healthcheck `[34] intent_signal_attribution` 監控 attribution chain；後續仍追 `[33] maker_fill_rate` 和 G2-01 settlement，不因短期虧損再疊風控層。
 
+**ML/Dream Edge Unblock decision（2026-04-29 17:51 CEST · PM plan）**：正 edge 現在定義為 **promotion gate**，不是 training gate。Demo 可先啟用 ML / LinUCB / DreamEngine / OpportunityTracker 的 read-only、shadow、counterfactual、bounded demo A/B 來修 edge；Live 自動交易或 live 參數自動放權必須經 **GovernanceHub + Decision Lease + 既有 5 live gates** 批准。新工作順序見 `docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-29--ml_dream_edge_unblock_plan.md` + `TODO.md` MLDE-0..6：先 Learning Data Contract，再 LinUCB intent-arm/reward loop，再 ML shadow scorer，再 Dream/Opportunity read-only producers，最後才設計 live promotion contract。
+
 **權威原則**：Rust `openclaw_engine` = paper/demo/live 三引擎並行唯一引擎（ARCH-RC1 1C-4 + 3E-ARCH）。Rust ConfigStore 為所有交易/風控/學習/預算參數權威，4 IPC 寫入面 → tick-level hot-reload。**禁止 restart-to-apply**。Guardian = RiskConfig 純派生視圖。Python 無交易邏輯（DEAD-PY-2 清除 ~4500 行後）。**2026-04-23 `main_legacy.py` 拆分閉環確認**：Tier B 實質閉環（54 routes / 5 sibling / `main_legacy.py` 瘦至 468 行 = 原 ~5265 行 91.1% 瘦身），詳 [archive](docs/archive/2026-04-29--claude_md_section3_pre_04_27_detail.md)；先前 2026-04-16 audit「共 1630 行 · 此層拆分未完成」敘述過期。
 
 **進行中/阻塞**（已完成 ≤2 日的項目 + 仍活躍的 gap；2026-04-21 刷新）：
@@ -127,6 +129,7 @@ max_retries             = 0
 # 永不允許的硬錯誤：
 # - 繞過 Operator 角色認證或 live_reserved 直接啟動 live session
 # - 自動修改 engine trading_mode 為 live（需 operator 顯式配置）
+# - ML / DreamEngine / ExecutorAgent / StrategistAgent 直接 live 下單或修改 live 參數而未經 GovernanceHub + Decision Lease 批准
 # - Bybit API timeout / retCode != 0 → fail-closed，不重試
 # - should_call_ai=true 但 invocation 沒發生；偽造 AI 調用或交易活動
 # - Mainnet 下無 OPENCLAW_ALLOW_MAINNET=1，或用 env var 當唯一憑證來源
@@ -502,6 +505,8 @@ state_models ← state_compiler ← state_store ← main_legacy ← main.py
 ---
 
 ## 十一、一句話狀態
+
+> 截至 2026-04-29 17:51 CEST：**ML/Dream edge-unblock plan adopted; TODO reordered** — Demo 可先用 ML/LinUCB/DreamEngine/OpportunityTracker 做 read-only/shadow/counterfactual/demo A-B 來修 edge；正 edge 改為 promotion gate 而非 training gate；Live 自動交易與 live 參數自動放權必須經 GovernanceHub + Decision Lease + 既有 5 live gates。工作順序改為 MLDE-0..6（live-autonomy boundary → Learning Data Contract → LinUCB intent-arm/reward loop → ML shadow scorer → Dream/Opportunity read-only → demo A/B advisory → live promotion contract），方案見 `docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-29--ml_dream_edge_unblock_plan.md`。
 
 > 截至 2026-04-29 17:36 CEST：**Strategy Edge Repair implementation 完成，Linux deploy pending** — 已修 demo/live_demo/live intent `signal_id` attribution chain、per-binding fee refresh 長期 stale root、scanner snapshot + edge route metadata、可調 `edge_routing`、maker unsafe fallback skip、grid robust-negative `blocked_symbols`、bb_breakout demo threshold 1.2；新增 healthcheck `[34] intent_signal_attribution`。驗證：Rust lib 2361/0、scanner 61/0、DB writer 3/0、fast_track_reduce 16/0、maker_price 10/0、`cargo check --bins`、`cargo check openclaw_core`、Python maker/attribution pytest 9/0、`git diff --check`。
 

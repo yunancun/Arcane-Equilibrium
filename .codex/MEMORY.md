@@ -108,6 +108,12 @@ Current strategy-edge packet:
 - implementation checkpoint `2026-04-29 17:36 CEST`: demo/live_demo strategy-open intents now get a strategy-signal attribution anchor (`signal_id` + `context_id`), scanner scan snapshots are persisted, intent details carry scanner/edge route metadata, fee refresh is per exchange binding instead of single shared priority, maker fallback skips when BBO/tick_size is unsafe, and scanner `edge_routing` / grid `blocked_symbols` are real configurable knobs
 - relevant runtime sentinels: `[32] maker_entry_intent_drift` for intent shape, `[33] maker_fill_rate` for fee-drop / maker-like settlement, and `[34] intent_signal_attribution` for demo/live_demo/live attribution-chain integrity
 
+ML/Dream edge-unblock policy:
+- as of `2026-04-29 17:51 CEST`, positive edge is a promotion gate, not a training gate
+- demo may run ML / LinUCB / DreamEngine / OpportunityTracker in read-only, shadow, counterfactual, and bounded demo A/B modes to repair edge
+- live autonomous trading or live parameter mutation from ML/Dream/agents must pass GovernanceHub approval, Decision Lease, and the existing live gates
+- current work order is MLDE-0..6 in `TODO.md`: GovernanceHub live boundary, Learning Data Contract, LinUCB intent-arm/reward loop, ML shadow scorer, Dream/Opportunity read-only producers, demo A/B advisory path, then live promotion contract
+
 Claude memory sources used for alignment:
 - `memory/MEMORY.md`
 - `memory/README.md`
