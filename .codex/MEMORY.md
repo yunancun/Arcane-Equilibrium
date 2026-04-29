@@ -159,10 +159,20 @@ Current known topology at setup time:
 - Sign-off: `docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-29--batch_f_ml_agent_autonomy_signoff.md`; operator brief copied to `docs/CCAgentWorkSpace/Operator/2026-04-29--batch_f_ml_agent_autonomy_signoff.md`.
 - Key code paths: feature-definition hash + ONNX metadata validation, ML ETL row-level schema/hash filters, quantile trio registry transition, label full-close finality, LinUCB arm/state loop, Teacher Demo command sink, disabled Paper command rejection, observation-only LinUCB metadata, `boost_arm` unsupported result, Strategist Live fail-fast, Paper opt-in script/runbook.
 - Verification baseline: Python py_compile passed; `bash -n helper_scripts/start_paper_trading.sh` passed; `cargo check -p openclaw_engine` passed with existing warnings; ML targeted pytest 78 passed and 7 skipped; Rust targeted tests 47 passed.
-- Mac/origin/Linux were synced clean at `bc3fa70`; Linux rebuild/redeploy is the next required action. Remaining release gaps: live Postgres registry integration run, real ONNX artifact e2e load, LinUCB live boot smoke, and full A-F deploy smoke.
+- Mac/origin/Linux were initially synced clean at `bc3fa70`; this was later superseded by docs sync `6539e4e` and deploy hotfix `5db4e29`.
 
 ## 2026-04-29 A-F Commit/Push Sync
 
 - Commit `bc3fa70` (`fix(audit): close 62-finding remediation batches`) contains the A-F remediation work, reports, and tracking updates.
-- Mac `main`, `origin/main`, and Linux `trade-core` `main` were aligned at `bc3fa70` with clean worktrees before the Linux rebuild/redeploy step.
-- `CLAUDE.md`, `TODO.md`, and `.codex/MEMORY.md` were updated to reflect committed/pushed status before redeploy.
+- Commit `6539e4e` (`docs: record audit remediation sync state`) records the first post-A-F sync state.
+- Commit `5db4e29` (`fix(deploy): recognize api uvicorn cwd during restart`) fixes lifecycle PID ownership checks so restart scripts recognize uvicorn master/workers whose command line lacks `control_api_v1` but whose cwd is the API workdir.
+- Hotfix verification: `bash -n helper_scripts/restart_all.sh helper_scripts/stop_all.sh helper_scripts/clean_restart.sh helper_scripts/fresh_start.sh`, Batch E runtime ownership pytest 10 passed, and `git diff --check` passed before commit/push.
+
+## 2026-04-29 Linux Rebuild/Redeploy Result
+
+- Linux deploy was completed from Mac through `ssh trade-core` using `PATH="$HOME/.cargo/bin:$PATH" bash helper_scripts/restart_all.sh --rebuild --keep-auth`; the first attempt without cargo in PATH failed before service replacement.
+- New runtime after successful redeploy: engine PID `161957` (`openclaw-engine`), API master PID `162029` plus four uvicorn workers. Port `8000` is owned by the new control API venv; the previous address-in-use problem is fixed.
+- Runtime checks: watchdog reports `engine_alive=true` and demo snapshot fresh; API direct unauth health endpoints return 401, proving auth enforcement; GUI-origin API requests are returning 200 OK.
+- Not full green: `passive_wait_healthcheck.sh --quiet` still fails `[12] bb_breakout_post_deadlock_fix` and `[22] trading_pipeline_silent_gap`, and warns `[27] intents_counter_freeze` plus `[31] edge_diag_2_strategy_diversity`. The earlier startup-transient `[16] strategist_cycle_fresh` cleared after the first 5-minute cycle.
+- Live pipeline is intentionally blocked until operator renewal: engine log shows signed authorization schema version mismatch (`got 1, expected 2`), so `/api/v1/live/auth/renew` or renew-review is required. Do not hand-write `authorization.json`.
+- Remaining release gaps: live Postgres registry integration run, real ONNX artifact e2e load, LinUCB live boot smoke, and RCA/fix for `[22]` silent-gap / fee-rate cold-boot cost_gate fail-closed before any full-green production sign-off.
