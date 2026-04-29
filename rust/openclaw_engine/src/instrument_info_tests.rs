@@ -299,7 +299,9 @@ fn test_parse_page_three_page_concatenation() {
     assert_eq!(pages_iter, 3);
     assert_eq!(cursor, None);
     assert_eq!(cache.len(), 6);
-    for s in ["AAAUSDT", "BBBUSDT", "CCCUSDT", "DDDUSDT", "EEEUSDT", "FFFUSDT"] {
+    for s in [
+        "AAAUSDT", "BBBUSDT", "CCCUSDT", "DDDUSDT", "EEEUSDT", "FFFUSDT",
+    ] {
         assert!(cache.contains_key(s), "missing {s}");
     }
 }
@@ -419,7 +421,11 @@ async fn test_ensure_symbol_fetch_inserts_positive_cache() {
         .ensure_symbol_with_fetcher(&fetcher, "linear", "AAAUSDT")
         .await
         .unwrap();
-    assert_eq!(fetcher.call_count(), 1, "second call must hit positive cache");
+    assert_eq!(
+        fetcher.call_count(),
+        1,
+        "second call must hit positive cache"
+    );
 }
 
 #[tokio::test]
@@ -767,12 +773,10 @@ async fn test_ensure_symbol_race_regression_leader_fast() {
                     opt.is_some(),
                     "round {round} task {idx}: must observe positive cache"
                 ),
-                Ok(Err(e)) => panic!(
-                    "round {round} task {idx}: ensure returned Err {e:?}"
-                ),
-                Err(_elapsed) => panic!(
-                    "round {round} task {idx}: TIMEOUT — B-1 lost-wakeup regression"
-                ),
+                Ok(Err(e)) => panic!("round {round} task {idx}: ensure returned Err {e:?}"),
+                Err(_elapsed) => {
+                    panic!("round {round} task {idx}: TIMEOUT — B-1 lost-wakeup regression")
+                }
             }
         }
 

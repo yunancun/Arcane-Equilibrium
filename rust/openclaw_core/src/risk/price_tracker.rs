@@ -270,7 +270,9 @@ impl PriceHistoryTracker {
         }
         let mut worst: Option<SymbolDropInfo> = None;
         for sym in held_symbols {
-            let Some(deque) = self.history.get(sym) else { continue; };
+            let Some(deque) = self.history.get(sym) else {
+                continue;
+            };
             if deque.len() < self.min_samples {
                 continue;
             }
@@ -496,8 +498,10 @@ mod tests {
     #[test]
     fn test_worst_drop_empty_held_symbols() {
         let t = make_tracker_with_data();
-        assert!(t.worst_drop_for_held(&[]).is_none(),
-            "empty held set must return None");
+        assert!(
+            t.worst_drop_for_held(&[]).is_none(),
+            "empty held set must return None"
+        );
     }
 
     #[test]
@@ -512,11 +516,15 @@ mod tests {
             t.record("MICROUSDT", price, i * 1000);
         }
         // We hold only BTCUSDT (not recorded, no history)
-        assert!(t.worst_drop_for_held(&["BTCUSDT".to_string()]).is_none(),
-            "drop on unheld symbol must not surface");
+        assert!(
+            t.worst_drop_for_held(&["BTCUSDT".to_string()]).is_none(),
+            "drop on unheld symbol must not surface"
+        );
         // And legacy global scanner does still see it — proves behavior diverged intentionally
-        assert!(t.max_drop_pct() > 15.0,
-            "legacy max_drop_pct still scans all symbols");
+        assert!(
+            t.max_drop_pct() > 15.0,
+            "legacy max_drop_pct still scans all symbols"
+        );
     }
 
     #[test]
@@ -527,12 +535,21 @@ mod tests {
             let price = if i < 5 { 100.0 } else { 90.0 };
             t.record("BTCUSDT", price, i * 1000);
         }
-        let info = t.worst_drop_for_held(&["BTCUSDT".to_string()])
+        let info = t
+            .worst_drop_for_held(&["BTCUSDT".to_string()])
             .expect("held symbol with drop must return info");
         assert_eq!(info.symbol, "BTCUSDT");
-        assert!((info.drop_pct - 10.0).abs() < 0.01, "drop_pct={}", info.drop_pct);
+        assert!(
+            (info.drop_pct - 10.0).abs() < 0.01,
+            "drop_pct={}",
+            info.drop_pct
+        );
         // Sigma must be positive — current=90 is below the within-window mean
-        assert!(info.sigma > 0.0, "sigma should be positive, got {}", info.sigma);
+        assert!(
+            info.sigma > 0.0,
+            "sigma should be positive, got {}",
+            info.sigma
+        );
     }
 
     #[test]
@@ -556,13 +573,15 @@ mod tests {
             t.record("BTCUSDT", btc, i * 1000);
             t.record("ETHUSDT", eth, i * 1000);
         }
-        let info = t.worst_drop_for_held(&[
-            "BTCUSDT".to_string(),
-            "ETHUSDT".to_string(),
-        ]).expect("held symbols with drops must return info");
+        let info = t
+            .worst_drop_for_held(&["BTCUSDT".to_string(), "ETHUSDT".to_string()])
+            .expect("held symbols with drops must return info");
         assert_eq!(info.symbol, "ETHUSDT");
-        assert!(info.drop_pct > 7.5 && info.drop_pct < 8.5,
-            "expected ~8% drop, got {}", info.drop_pct);
+        assert!(
+            info.drop_pct > 7.5 && info.drop_pct < 8.5,
+            "expected ~8% drop, got {}",
+            info.drop_pct
+        );
     }
 
     #[test]
@@ -573,8 +592,10 @@ mod tests {
             t.record("USDCUSDT", 100.0, i * 1000);
         }
         // Flat price → peak == current → drop_pct == 0 → skipped (returns None)
-        assert!(t.worst_drop_for_held(&["USDCUSDT".to_string()]).is_none(),
-            "zero-drop held symbol must return None");
+        assert!(
+            t.worst_drop_for_held(&["USDCUSDT".to_string()]).is_none(),
+            "zero-drop held symbol must return None"
+        );
     }
 
     #[test]
@@ -583,16 +604,23 @@ mod tests {
         // 小幣本身 ±5% 震盪 — 5% 跌幅不應視為離群事件。
         let mut t = PriceHistoryTracker::with_params(300, 5);
         // Oscillate between 95 and 105 repeatedly, end at 95
-        let pattern = [100.0, 105.0, 95.0, 105.0, 95.0, 105.0, 95.0, 105.0, 95.0, 95.0];
+        let pattern = [
+            100.0, 105.0, 95.0, 105.0, 95.0, 105.0, 95.0, 105.0, 95.0, 95.0,
+        ];
         for (i, &px) in pattern.iter().enumerate() {
             t.record("MICROUSDT", px, i as u64 * 1000);
         }
-        let info = t.worst_drop_for_held(&["MICROUSDT".to_string()]).expect("has drop");
+        let info = t
+            .worst_drop_for_held(&["MICROUSDT".to_string()])
+            .expect("has drop");
         // ~10% drop from peak 105 to 95
         assert!(info.drop_pct > 8.0, "drop_pct={}", info.drop_pct);
         // But sigma should be modest (< 3) because 95 is within normal swing range
-        assert!(info.sigma < 3.0,
-            "naturally-noisy symbol should have sigma < 3, got {}", info.sigma);
+        assert!(
+            info.sigma < 3.0,
+            "naturally-noisy symbol should have sigma < 3, got {}",
+            info.sigma
+        );
     }
 
     #[test]
@@ -607,10 +635,15 @@ mod tests {
             t.record("STABLEUSDT", 100.0 + (i as f64) * 0.01, i * 1000);
         }
         t.record("STABLEUSDT", 92.0, 19_000);
-        let info = t.worst_drop_for_held(&["STABLEUSDT".to_string()]).expect("has drop");
+        let info = t
+            .worst_drop_for_held(&["STABLEUSDT".to_string()])
+            .expect("has drop");
         assert!(info.drop_pct > 7.0, "drop_pct={}", info.drop_pct);
-        assert!(info.sigma >= 3.0,
-            "stable-then-crash should have sigma >= 3, got {}", info.sigma);
+        assert!(
+            info.sigma >= 3.0,
+            "stable-then-crash should have sigma >= 3, got {}",
+            info.sigma
+        );
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -627,8 +660,11 @@ mod tests {
     fn test_compute_roc_single_sample_returns_none() {
         let mut t = PriceHistoryTracker::new();
         t.record("BTCUSDT", 100.0, 1_000);
-        assert_eq!(t.compute_roc("BTCUSDT", 300), None,
-            "single sample → no prior anchor → None");
+        assert_eq!(
+            t.compute_roc("BTCUSDT", 300),
+            None,
+            "single sample → no prior anchor → None"
+        );
     }
 
     #[test]

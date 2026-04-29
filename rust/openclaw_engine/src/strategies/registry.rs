@@ -69,9 +69,8 @@ impl StrategyFactory {
         // EDGE-P2-3 Phase 2+：從 TOML 接線 PostOnly 入場參數。
         mac.use_maker_entry = p.ma_crossover.use_maker_entry;
         mac.maker_price_offset_bps = p.ma_crossover.maker_price_offset_bps;
-        mac.maker_limit_timeout_ms = grid_trading::clamp_maker_limit_timeout_ms(
-            p.ma_crossover.maker_limit_timeout_ms,
-        );
+        mac.maker_limit_timeout_ms =
+            grid_trading::clamp_maker_limit_timeout_ms(p.ma_crossover.maker_limit_timeout_ms);
         mac.set_conf_scale(p.ma_crossover.conf_scale);
         mac.set_active(p.ma_crossover.active);
         strategies.push(Box::new(mac));
@@ -153,9 +152,8 @@ impl StrategyFactory {
         bbb.maker_price_offset_bps = p.bb_breakout.maker_price_offset_bps;
         // Clamp at assignment (same invariant as grid_trading).
         // 於寫入時 clamp（與 grid_trading 相同不變量）。
-        bbb.maker_limit_timeout_ms = grid_trading::clamp_maker_limit_timeout_ms(
-            p.bb_breakout.maker_limit_timeout_ms,
-        );
+        bbb.maker_limit_timeout_ms =
+            grid_trading::clamp_maker_limit_timeout_ms(p.bb_breakout.maker_limit_timeout_ms);
         bbb.set_conf_scale(p.bb_breakout.conf_scale);
         bbb.set_active(p.bb_breakout.active);
         strategies.push(Box::new(bbb));
@@ -183,9 +181,8 @@ impl StrategyFactory {
         gt.maker_price_offset_bps = p.grid_trading.maker_price_offset_bps;
         // EDGE-P2-3 Phase 1B-3.1: wire PostOnly Limit timeout (clamp [15s, 300s]).
         // EDGE-P2-3 Phase 1B-3.1：PostOnly Limit 逾時 clamp 到 [15s, 300s]。
-        gt.maker_limit_timeout_ms = grid_trading::clamp_maker_limit_timeout_ms(
-            p.grid_trading.maker_limit_timeout_ms,
-        );
+        gt.maker_limit_timeout_ms =
+            grid_trading::clamp_maker_limit_timeout_ms(p.grid_trading.maker_limit_timeout_ms);
         gt.set_conf_scale(p.grid_trading.conf_scale);
         gt.set_active(p.grid_trading.active);
         strategies.push(Box::new(gt));

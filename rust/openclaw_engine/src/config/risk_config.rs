@@ -240,7 +240,9 @@ impl RiskConfig {
         self.anti_cluster.validate()?;
         self.correlation.validate()?;
         self.runtime.validate()?;
-        self.exit.validate().map_err(|e| format!("risk.exit: {}", e))?;
+        self.exit
+            .validate()
+            .map_err(|e| format!("risk.exit: {}", e))?;
         self.dynamic_sizing.validate()?;
         self.kelly.validate()?;
         self.executor.validate()?;
@@ -586,9 +588,7 @@ impl GlobalLimits {
         if !self.ft_dust_qty_floor_usd.is_finite()
             || !(0.0..=100_000.0).contains(&self.ft_dust_qty_floor_usd)
         {
-            return Err(
-                "risk.limits.ft_dust_qty_floor_usd must be finite in [0, 100000]".into(),
-            );
+            return Err("risk.limits.ft_dust_qty_floor_usd must be finite in [0, 100000]".into());
         }
         Ok(())
     }
@@ -818,8 +818,6 @@ impl KellyTierConfig {
         Ok(())
     }
 }
-
-
 
 // ---------------------------------------------------------------------------
 // CascadeThresholds — RiskGovernor 6-level
@@ -1125,8 +1123,6 @@ impl CostGate {
         Ok(())
     }
 }
-
-
 
 // ---------------------------------------------------------------------------
 // Tests — extracted to risk_config_tests.rs (FIX-08 file size)

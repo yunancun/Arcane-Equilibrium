@@ -36,7 +36,7 @@
 //!   trait impl 派發到 sibling 中以 `pub(super) fn` 宣告的 `_impl` helper。
 //!   邏輯 / 簽名 / 公開 API 與拆前逐字節相同。
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::intent_processor::OrderIntent;
 use crate::strategies::{Strategy, StrategyAction};
@@ -274,6 +274,10 @@ pub struct GridTrading {
     /// `on_post_only_rejected` 寫入既有 `reject_cooldown_until_ms` map；
     /// `signal.rs` 早已 check 此 map，故接線一條鏈即生效。
     pub(crate) reject_cooldown_ms: u64,
+    /// G2-04: Operator-maintained per-symbol no-new-grid-entry list. Close
+    /// paths stay enabled so existing exposure can still be reduced.
+    /// G2-04：operator 維護的逐 symbol 暫停新 grid 入場清單；平倉路徑仍啟用。
+    pub(crate) blocked_symbols: HashSet<String>,
 }
 
 // build_linear_levels, build_geometric_levels, build_levels moved to grid_helpers.rs (A0-a)

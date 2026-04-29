@@ -41,6 +41,10 @@ conf_scale = 1.0
 # structurally unreachable in current 1m bandwidth distribution; use the observed
 # 1m band and soften Donchian so demo can produce validation samples. Live remains
 # active=false until fresh demo fills show positive post-cutoff edge.
+# EDGE-DIAG-2C (2026-04-29): fresh 14d 1m sweep around the rescue band kept
+# squeeze=0.0015/expansion=0.005 and raised volume_threshold 1.0→1.2. Among
+# n>=50 combos this was the best fwd30_mean (n=71, +5.33bps raw signal-level
+# 30m; not statistically promotable, but cleaner than 1.0/1.1 and still non-dormant).
 # EDGE-DIAG-2（2026-04-28）：operator 覆蓋 G2-06 — 僅 demo 重啟
 # （live 仍 false）。理由：ML / agent 上線時每個策略都需要歷史資料；永久 disable
 # = learning pipeline 永久盲區。
@@ -51,7 +55,7 @@ active = true
 cooldown_ms = 600000
 squeeze_bw = 0.0015
 expansion_bw = 0.005
-volume_threshold = 1.0
+volume_threshold = 1.2
 trailing_stop_atr_mult = 2.0
 min_persistence_ms = 0
 confluence_as_gate = false
@@ -102,6 +106,23 @@ maker_price_offset_bps = 1.0
 # EDGE-P2-3 Phase 1B-3.1：掛中 PostOnly Limit 逾時清理（毫秒）。
 # 默認 45_000 ms；運行時 clamp 到 [15_000, 300_000]。
 maker_limit_timeout_ms = 45000
+# G2-04 2026-04-29: robust negative grid cells (n>=30, shrunk_bps<0) from
+# settings/edge_estimates.json. New grid entries are disabled for these symbols
+# while close/reduce paths remain enabled.
+# G2-04：robust negative grid cell 暫停新 grid 入場；平倉/減倉仍正常。
+blocked_symbols = [
+  "BSBUSDT",
+  "PRLUSDT",
+  "ZBTUSDT",
+  "FARTCOINUSDT",
+  "SOLUSDT",
+  "DOGEUSDT",
+  "GALAUSDT",
+  "ENAUSDT",
+  "AAVEUSDT",
+  "ORCAUSDT",
+  "PENGUUSDT",
+]
 
 # OC-5: FundingArb — funding rate capture strategy.
 # Demo = validation before live, same params as paper.

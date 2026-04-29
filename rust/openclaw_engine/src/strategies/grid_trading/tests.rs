@@ -589,25 +589,25 @@ fn test_grid_market_entry_when_maker_disabled() {
     }
 }
 
-/// Buy on down-cross with maker enabled emits PostOnly Limit below last_price.
-/// 下穿買入時，maker 啟用 → PostOnly Limit 掛在 last_price 下方。
+/// Buy on down-cross with maker enabled emits BBO-derived PostOnly Limit.
+/// 下穿買入時，maker 啟用 → 發 BBO-derived PostOnly Limit。
 #[test]
 fn test_grid_buy_postonly_below_last_price() {
     let mut g = GridTrading::new(49000.0, 51000.0);
     g.use_maker_entry = true;
     g.maker_price_offset_bps = 1.0; // 1 bps
-    g.on_tick(&ctx(50500.0, 0));
-    let i = g.on_tick(&ctx(49500.0, 100_000));
+    g.on_tick(&ctx_with_bbo(50500.0, 0, 50_499.9, 50_500.1, 0.1));
+    let i = g.on_tick(&ctx_with_bbo(49500.0, 100_000, 49_499.9, 49_500.1, 0.1));
     match &i[0] {
         StrategyAction::Open(intent) => {
             assert!(intent.is_long);
             assert_eq!(intent.order_type, "limit");
             assert_eq!(intent.time_in_force, Some(TimeInForce::PostOnly));
             let lp = intent.limit_price.expect("limit_price set");
-            let expected = 49500.0 * (1.0 - 1.0 / 10_000.0);
+            let expected = 49_499.8;
             assert!(
                 (lp - expected).abs() < 1e-9,
-                "buy PostOnly must be below last_price: got {lp}, expected {expected}"
+                "buy PostOnly must use best_bid-buffer: got {lp}, expected {expected}"
             );
             assert!(lp < 49500.0, "buy limit must rest below last_price");
         }
@@ -615,25 +615,25 @@ fn test_grid_buy_postonly_below_last_price() {
     }
 }
 
-/// Sell on up-cross with maker enabled emits PostOnly Limit above last_price.
-/// 上穿賣出時，maker 啟用 → PostOnly Limit 掛在 last_price 上方。
+/// Sell on up-cross with maker enabled emits BBO-derived PostOnly Limit.
+/// 上穿賣出時，maker 啟用 → 發 BBO-derived PostOnly Limit。
 #[test]
 fn test_grid_sell_postonly_above_last_price() {
     let mut g = GridTrading::new(49000.0, 51000.0);
     g.use_maker_entry = true;
     g.maker_price_offset_bps = 2.0; // 2 bps
-    g.on_tick(&ctx(49500.0, 0));
-    let i = g.on_tick(&ctx(50500.0, 100_000));
+    g.on_tick(&ctx_with_bbo(49500.0, 0, 49_499.9, 49_500.1, 0.1));
+    let i = g.on_tick(&ctx_with_bbo(50500.0, 100_000, 50_499.9, 50_500.1, 0.1));
     match &i[0] {
         StrategyAction::Open(intent) => {
             assert!(!intent.is_long);
             assert_eq!(intent.order_type, "limit");
             assert_eq!(intent.time_in_force, Some(TimeInForce::PostOnly));
             let lp = intent.limit_price.expect("limit_price set");
-            let expected = 50500.0 * (1.0 + 2.0 / 10_000.0);
+            let expected = 50_500.2;
             assert!(
                 (lp - expected).abs() < 1e-9,
-                "sell PostOnly must be above last_price: got {lp}, expected {expected}"
+                "sell PostOnly must use best_ask+buffer: got {lp}, expected {expected}"
             );
             assert!(lp > 50500.0, "sell limit must rest above last_price");
         }
@@ -641,19 +641,19 @@ fn test_grid_sell_postonly_above_last_price() {
     }
 }
 
-/// maker_price_offset_bps scales the limit price proportionally.
-/// maker_price_offset_bps 線性縮放限價。
+/// maker_price_buffer_ticks scales the BBO-derived limit price by ticks.
+/// maker_price_buffer_ticks 以 tick 線性縮放 BBO-derived 限價。
 #[test]
-fn test_grid_maker_offset_scales_linearly() {
+fn test_grid_maker_buffer_scales_linearly() {
     let mut g = GridTrading::new(49000.0, 51000.0);
     g.use_maker_entry = true;
-    g.maker_price_offset_bps = 5.0; // 5 bps
-    g.on_tick(&ctx(50500.0, 0));
-    let i = g.on_tick(&ctx(49500.0, 100_000));
+    g.maker_price_buffer_ticks = 5;
+    g.on_tick(&ctx_with_bbo(50500.0, 0, 50_499.9, 50_500.1, 0.1));
+    let i = g.on_tick(&ctx_with_bbo(49500.0, 100_000, 49_499.9, 49_500.1, 0.1));
     match &i[0] {
         StrategyAction::Open(intent) => {
             let lp = intent.limit_price.unwrap();
-            let expected = 49500.0 * (1.0 - 5.0 / 10_000.0);
+            let expected = 49_499.4;
             assert!((lp - expected).abs() < 1e-9);
         }
         other => panic!("expected Open, got {:?}", other),
@@ -669,8 +669,8 @@ fn test_grid_close_stays_market_with_maker_enabled() {
     g.use_maker_entry = true;
     g.maker_price_offset_bps = 1.0;
     // Build positive inventory via Open
-    g.on_tick(&ctx(50500.0, 0));
-    g.on_tick(&ctx(49500.0, 100_000));
+    g.on_tick(&ctx_with_bbo(50500.0, 0, 50_499.9, 50_500.1, 0.1));
+    g.on_tick(&ctx_with_bbo(49500.0, 100_000, 49_499.9, 49_500.1, 0.1));
     // Sell with positive inventory → Close (not Open)
     let i = g.on_tick(&ctx(50500.0, 200_000));
     match &i[0] {
@@ -733,8 +733,8 @@ fn test_g7_09c_grid_buy_uses_best_bid_passive() {
     g.use_maker_entry = true;
     g.maker_price_buffer_ticks = 1;
     g.maker_price_offset_bps = 1.0; // fallback only — should not be exercised here
-    // First tick at 50_500 sets last_cross_idx; second tick at 49_700 crosses.
-    // 首 tick 50_500 設 last_cross_idx；第二 tick 49_700 跨越網格。
+                                    // First tick at 50_500 sets last_cross_idx; second tick at 49_700 crosses.
+                                    // 首 tick 50_500 設 last_cross_idx；第二 tick 49_700 跨越網格。
     g.on_tick(&ctx_with_bbo(50_500.0, 0, 50_499.5, 50_500.5, 0.1));
     let actions = g.on_tick(&ctx_with_bbo(49_700.0, 60_001, 49_699.9, 49_700.1, 0.1));
     let mut found_buy_limit = false;
@@ -753,7 +753,10 @@ fn test_g7_09c_grid_buy_uses_best_bid_passive() {
             }
         }
     }
-    assert!(found_buy_limit, "expected at least one BUY limit intent; got {actions:?}");
+    assert!(
+        found_buy_limit,
+        "expected at least one BUY limit intent; got {actions:?}"
+    );
 }
 
 /// G7-09c: grid_trading sell uses best_ask + buffer×tick when BBO present.
@@ -784,33 +787,52 @@ fn test_g7_09c_grid_sell_uses_best_ask_passive() {
             }
         }
     }
-    assert!(found_sell_limit, "expected at least one SELL limit intent; got {actions:?}");
+    assert!(
+        found_sell_limit,
+        "expected at least one SELL limit intent; got {actions:?}"
+    );
 }
 
-/// G7-09c: grid_trading falls back to last_price ± offset_bps when BBO absent.
-/// G7-09c：BBO 不可得時 grid_trading 回退至 last_price ± offset_bps。
+/// G7-09c: grid_trading skips maker entries when no safe BBO quote exists.
+/// G7-09c：無安全 BBO 報價時，grid_trading 跳過 maker 新開倉。
 #[test]
-fn test_g7_09c_grid_fallback_when_no_bbo() {
+fn test_g7_09c_grid_skips_when_no_bbo() {
     let mut g = GridTrading::new(49_000.0, 51_000.0);
     g.use_maker_entry = true;
     g.maker_price_buffer_ticks = 1;
-    g.maker_price_offset_bps = 5.0; // 5 bps fallback
+    g.maker_price_offset_bps = 5.0; // retained for config compatibility; not fallback
     g.on_tick(&ctx(50_500.0, 0)); // BBO=None
     let actions = g.on_tick(&ctx(49_700.0, 60_001)); // BUY trigger, BBO=None
-    let mut found = false;
-    for action in &actions {
-        if let StrategyAction::Open(intent) = action {
-            if intent.is_long {
-                let price = intent.limit_price.expect("limit_price required");
-                // Fallback: 49_700.0 * (1 - 5/10_000) = 49_700.0 * 0.9995 = 49_675.15.
-                // Fallback：49_700.0 × 0.9995 = 49_675.15。
-                assert!(
-                    (price - 49_675.15).abs() < 1e-6,
-                    "fallback BUY price got {price}, expected 49_675.15",
-                );
-                found = true;
-            }
-        }
+    assert!(
+        actions.is_empty(),
+        "maker entry must skip without BBO; got {actions:?}"
+    );
+    assert_eq!(
+        g.net_inventory.get("BTC").copied().unwrap_or(0.0),
+        0.0,
+        "skip must not mutate inventory"
+    );
+}
+
+#[test]
+fn test_grid_blocked_symbol_skips_open_but_allows_close() {
+    let mut g = GridTrading::new(49_000.0, 51_000.0);
+    let mut params = g.get_params();
+    params.blocked_symbols = vec!["btc".to_string()];
+    g.update_params(params).expect("update_params");
+
+    g.on_tick(&ctx(50_500.0, 0));
+    let blocked = g.on_tick(&ctx(49_700.0, 60_001));
+    assert!(blocked.is_empty(), "blocked symbol must skip new grid open");
+
+    g.blocked_symbols.clear();
+    let opened = g.on_tick(&ctx(49_700.0, 120_002));
+    assert_eq!(opened.len(), 1, "unblocked symbol should open");
+
+    g.blocked_symbols.insert("BTC".to_string());
+    let close = g.on_tick(&ctx(50_300.0, 240_003));
+    match &close[0] {
+        StrategyAction::Close { reason, .. } => assert_eq!(reason, "grid_close_long"),
+        other => panic!("blocked symbol must still allow close, got {other:?}"),
     }
-    assert!(found, "expected fallback BUY intent; got {actions:?}");
 }

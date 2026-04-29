@@ -548,8 +548,8 @@ mod tests {
         );
         assert!(validate_metadata_against_runtime(&meta, Path::new("/tmp/model.onnx")).is_ok());
         meta.definition_hash = "sha256:definition_drift".into();
-        let err = validate_metadata_against_runtime(&meta, Path::new("/tmp/model.onnx"))
-            .unwrap_err();
+        let err =
+            validate_metadata_against_runtime(&meta, Path::new("/tmp/model.onnx")).unwrap_err();
         assert!(err.contains("definition_hash"), "actual err: {}", err);
     }
 

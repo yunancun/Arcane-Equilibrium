@@ -790,15 +790,26 @@ mod tests {
     fn test_make_request_id_format() {
         let (rid, ts) = make_request_id("teacher");
         let parts: Vec<&str> = rid.splitn(3, '-').collect();
-        assert_eq!(parts.len(), 3, "request_id must have 3 hyphen-delimited parts: {rid}");
+        assert_eq!(
+            parts.len(),
+            3,
+            "request_id must have 3 hyphen-delimited parts: {rid}"
+        );
         assert_eq!(parts[0], "teacher");
-        assert_eq!(parts[1].parse::<i64>().unwrap(), ts, "ts in id must match returned ts");
+        assert_eq!(
+            parts[1].parse::<i64>().unwrap(),
+            ts,
+            "ts in id must match returned ts"
+        );
         assert_eq!(parts[2].len(), 8, "hex suffix must be 8 chars: {rid}");
         assert!(
             parts[2].chars().all(|c| c.is_ascii_hexdigit()),
             "hex suffix must be all hex: {rid}"
         );
-        assert!(ts > 1_700_000_000_000, "ts_ms must look like a real epoch ms");
+        assert!(
+            ts > 1_700_000_000_000,
+            "ts_ms must look like a real epoch ms"
+        );
     }
 
     // Plan N-2: two mints within the same ms get distinct request_ids thanks to

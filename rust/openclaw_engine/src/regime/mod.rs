@@ -33,6 +33,4 @@
 
 pub mod hurst;
 
-pub use hurst::{
-    compute_hurst, hurst_label_for_symbol, HysteresisDetector, RegimeLabel,
-};
+pub use hurst::{compute_hurst, hurst_label_for_symbol, HysteresisDetector, RegimeLabel};

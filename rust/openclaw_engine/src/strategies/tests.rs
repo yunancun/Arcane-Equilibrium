@@ -332,11 +332,7 @@ fn test_e5_p2_4_bbb_toml_omitted_fields_fall_back_to_defaults() {
 [bb_breakout]
 squeeze_bw = 0.03
 "#;
-    std::fs::write(
-        td.path().join("strategy_params_paper.toml"),
-        toml_content,
-    )
-    .unwrap();
+    std::fs::write(td.path().join("strategy_params_paper.toml"), toml_content).unwrap();
     let cfg = load_strategy_params_from(PipelineKind::Paper, td.path());
     assert!((cfg.bb_breakout.squeeze_bw - 0.03).abs() < f64::EPSILON);
     assert!(

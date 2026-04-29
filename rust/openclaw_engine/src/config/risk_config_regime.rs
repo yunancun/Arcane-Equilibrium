@@ -164,9 +164,7 @@ impl HurstConfig {
                 self.hysteresis_lag
             ));
         }
-        if !(self.persistent_threshold.is_finite()
-            && self.antipersistent_threshold.is_finite())
-        {
+        if !(self.persistent_threshold.is_finite() && self.antipersistent_threshold.is_finite()) {
             return Err("risk.hurst thresholds must be finite".into());
         }
         if self.antipersistent_threshold <= 0.0 {

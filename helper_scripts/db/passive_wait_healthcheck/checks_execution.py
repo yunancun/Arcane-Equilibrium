@@ -21,6 +21,74 @@ MAKER_FEE_DROP_TARGET_PCT = 60.0
 MAKER_FILL_MIN_SAMPLE = 30
 
 
+def check_intent_signal_attribution(cur) -> tuple[str, str]:
+    """[34] Recent exchange intents must link to a persisted strategy signal.
+    近期 demo/live_demo/live intent 必須能 join 到策略 signal。
+    """
+    try:
+        cur.connection.rollback()
+    except Exception:
+        pass
+
+    try:
+        cur.execute(
+            "SELECT to_regclass('trading.intents') IS NOT NULL, "
+            "       to_regclass('trading.signals') IS NOT NULL"
+        )
+        exists = cur.fetchone()
+    except Exception as exc:  # noqa: BLE001
+        return ("FAIL", f"intent/signal table existence check failed: {exc}")
+    if not exists or not exists[0] or not exists[1]:
+        return ("FAIL", "trading.intents or trading.signals missing — migrations incomplete")
+
+    sql = (
+        "WITH recent AS ( "
+        "  SELECT intent_id, signal_id, context_id, engine_mode "
+        "  FROM trading.intents "
+        "  WHERE ts > now() - interval '30 minutes' "
+        "    AND engine_mode IN ('demo', 'live_demo', 'live') "
+        "    AND COALESCE(details->>'source', '') <> 'command' "
+        "), joined AS ( "
+        "  SELECT r.*, s.context_id AS signal_context_id "
+        "  FROM recent r "
+        "  LEFT JOIN trading.signals s ON s.signal_id = r.signal_id "
+        ") "
+        "SELECT count(*) AS total, "
+        "  count(*) FILTER (WHERE signal_id IS NULL OR signal_id = '') AS empty_signal_id, "
+        "  count(*) FILTER (WHERE signal_id IS NOT NULL AND signal_id <> '' "
+        "                   AND signal_context_id IS NULL) AS missing_signal, "
+        "  count(*) FILTER (WHERE signal_context_id IS NOT NULL "
+        "                   AND signal_context_id <> context_id) AS context_mismatch "
+        "FROM joined"
+    )
+    try:
+        cur.execute(sql)
+        row = cur.fetchone()
+    except Exception as exc:  # noqa: BLE001
+        return ("WARN", f"intent signal attribution query failed: {type(exc).__name__}: {exc}")
+
+    if row is None:
+        return ("WARN", "intent signal attribution query returned no row")
+
+    total = int(row[0] or 0)
+    empty_signal_id = int(row[1] or 0)
+    missing_signal = int(row[2] or 0)
+    context_mismatch = int(row[3] or 0)
+    base = (
+        f"30min exchange intents: total={total}, empty_signal_id={empty_signal_id}, "
+        f"missing_signal={missing_signal}, context_mismatch={context_mismatch}"
+    )
+    if total == 0:
+        return ("PASS", base + " — no recent exchange intents")
+    broken = empty_signal_id + missing_signal + context_mismatch
+    if broken > 0:
+        return (
+            "FAIL",
+            base + " — attribution chain broken; inspect strategy_signal/persist_intent path",
+        )
+    return ("PASS", base + " — attribution chain linked")
+
+
 def _load_strategy_params(kind: str) -> tuple[dict[str, Any] | None, str]:
     """Load ``settings/strategy_params_<kind>.toml`` fail-soft.
     讀取指定 kind 的 strategy params TOML；失敗時回診斷，不拋例外。

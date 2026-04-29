@@ -52,12 +52,13 @@ pub struct BbReversionParams {
     pub confluence_threshold_full: f64,
     /// G7-09c Phase 1: ticks INSIDE the inside quote at which the BBO-aware
     /// PostOnly limit sits. Default 1 (one tick more passive than best_bid/ask).
-    /// `limit_offset_bps` becomes the fallback-only path when BBO or tick_size
-    /// unavailable. Bounded `[0, 10]` by `validate()`. Note: GAP-9 currently
+    /// When BBO or tick_size are unavailable, limit entries are skipped instead
+    /// of falling back to last_price. Bounded `[0, 10]` by `validate()`. Note: GAP-9 currently
     /// force-disables `use_limit` in the runtime ctor (paper engine has no
     /// limit-order matcher), so this field is plumbing-only until GAP-9 lifts.
     /// G7-09c Phase 1：BBO-aware PostOnly 限價離 inside quote 的 tick 數，預設 1。
-    /// `limit_offset_bps` 退化為 BBO 不可得時的 fallback。`validate()` 限 `[0, 10]`。
+    /// BBO 或 tick_size 不可得時跳過限價入場，不再 fallback 到 last_price。
+    /// `validate()` 限 `[0, 10]`。
     /// 注意：GAP-9 在 runtime ctor 強制關閉 `use_limit`，本欄位現為埋線；GAP-9 解禁後生效。
     #[serde(default = "default_maker_price_buffer_ticks_bbr")]
     pub maker_price_buffer_ticks: u32,

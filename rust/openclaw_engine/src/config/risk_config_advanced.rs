@@ -620,7 +620,7 @@ mod tests {
         assert_eq!(cfg.lookup_rate(50_000_000.0), 0.0005); // >$10M
         assert_eq!(cfg.lookup_rate(5_000_000.0), 0.0015); // >$1M
         assert_eq!(cfg.lookup_rate(100_000.0), 0.0030); // <$1M
-        // Volume <= 0 falls back to default_rate (5 bps).
+                                                        // Volume <= 0 falls back to default_rate (5 bps).
         assert_eq!(cfg.lookup_rate(0.0), 0.0005);
         assert_eq!(cfg.lookup_rate(-1.0), 0.0005);
     }
@@ -901,9 +901,7 @@ impl ExecutorConfig {
                 ));
             }
             if symbol.is_empty() {
-                return Err(
-                    "risk.executor.per_symbol_position_cap key must be non-empty".into(),
-                );
+                return Err("risk.executor.per_symbol_position_cap key must be non-empty".into());
             }
         }
         Ok(())
@@ -994,10 +992,7 @@ impl EwmaVolConfig {
     /// HashMap lookup on the live snapshot).
     /// G7-02：依 timeframe 查 lambda；缺失時退回 `default_lambda`。
     pub fn lambda_for_timeframe(&self, tf: &str) -> f64 {
-        self.lambdas
-            .get(tf)
-            .copied()
-            .unwrap_or(self.default_lambda)
+        self.lambdas.get(tf).copied().unwrap_or(self.default_lambda)
     }
 }
 

@@ -449,10 +449,7 @@ fn test_ft_dust_qty_floor_out_of_range_rejected() {
     // 範圍 [0, 100000]；負值 / 超上限 / NaN 一律拒絕。
     let mut cfg = RiskConfig::default();
     cfg.limits.ft_dust_qty_floor_usd = -0.01;
-    assert!(
-        cfg.validate().is_err(),
-        "negative dust floor must reject"
-    );
+    assert!(cfg.validate().is_err(), "negative dust floor must reject");
     cfg.limits.ft_dust_qty_floor_usd = 100_000.01;
     assert!(
         cfg.validate().is_err(),
@@ -611,9 +608,15 @@ fn test_g3_02_executor_validate_rejects_out_of_range_max_position_pct() {
     // max_position_pct 必須在 [0.0, 1.0]；越界必拒。
     let mut cfg = RiskConfig::default();
     cfg.executor.max_position_pct = -0.1;
-    assert!(cfg.validate().is_err(), "negative max_position_pct must reject");
+    assert!(
+        cfg.validate().is_err(),
+        "negative max_position_pct must reject"
+    );
     cfg.executor.max_position_pct = 1.1;
-    assert!(cfg.validate().is_err(), "max_position_pct > 1.0 must reject");
+    assert!(
+        cfg.validate().is_err(),
+        "max_position_pct > 1.0 must reject"
+    );
     cfg.executor.max_position_pct = 0.0;
     assert!(cfg.validate().is_ok(), "0.0 (no-op) must accept");
     cfg.executor.max_position_pct = 1.0;
@@ -643,13 +646,8 @@ fn test_g3_02_executor_validate_rejects_bad_per_symbol_overrides() {
     );
 
     cfg.executor.per_symbol_position_cap.clear();
-    cfg.executor
-        .per_symbol_position_cap
-        .insert("".into(), 0.10);
-    assert!(
-        cfg.validate().is_err(),
-        "empty symbol key must reject"
-    );
+    cfg.executor.per_symbol_position_cap.insert("".into(), 0.10);
+    assert!(cfg.validate().is_err(), "empty symbol key must reject");
 }
 
 #[test]
@@ -671,7 +669,13 @@ fn test_g3_02_executor_toml_roundtrip() {
     assert!((de.executor.max_position_pct - 0.10).abs() < 1e-12);
     assert_eq!(de.executor.per_symbol_position_cap.len(), 2);
     assert!(
-        (de.executor.per_symbol_position_cap.get("BTCUSDT").copied().unwrap() - 0.15).abs()
+        (de.executor
+            .per_symbol_position_cap
+            .get("BTCUSDT")
+            .copied()
+            .unwrap()
+            - 0.15)
+            .abs()
             < 1e-12
     );
     assert!(de.validate().is_ok());
@@ -731,7 +735,10 @@ fn test_g7_02_ewma_vol_validate_rejects_out_of_range() {
     // 0 < lambda < 1 開區間外的所有值（負/0/1/>1）都必須拒絕。
     let mut cfg = RiskConfig::default();
     cfg.ewma_vol.default_lambda = -0.1;
-    assert!(cfg.validate().is_err(), "negative default_lambda must reject");
+    assert!(
+        cfg.validate().is_err(),
+        "negative default_lambda must reject"
+    );
     cfg.ewma_vol.default_lambda = 0.0;
     assert!(cfg.validate().is_err(), "default_lambda == 0 must reject");
     cfg.ewma_vol.default_lambda = 1.0;
@@ -881,10 +888,7 @@ fn test_g7_04_cusum_validate_rejects_slack_k_ge_threshold_h() {
     );
     cfg.cusum.slack_k = 5.0;
     cfg.cusum.threshold_h = 4.0;
-    assert!(
-        cfg.validate().is_err(),
-        "slack_k > threshold_h must reject"
-    );
+    assert!(cfg.validate().is_err(), "slack_k > threshold_h must reject");
     cfg.cusum.slack_k = 0.5;
     cfg.cusum.threshold_h = 4.0;
     assert!(cfg.validate().is_ok(), "slack_k < threshold_h must accept");
@@ -971,7 +975,10 @@ fn test_g7_04_cusum_partial_toml_falls_back_to_defaults() {
         saved_ts_ms = 0
     "#;
     let cfg: RiskConfig = toml::from_str(toml_str).unwrap();
-    assert!(!cfg.cusum.enabled, "absent section must default to disabled");
+    assert!(
+        !cfg.cusum.enabled,
+        "absent section must default to disabled"
+    );
     assert!((cfg.cusum.slack_k - 0.5).abs() < 1e-12);
     assert!((cfg.cusum.threshold_h - 4.0).abs() < 1e-12);
     assert_eq!(cfg.cusum.min_observations, 30);
@@ -996,7 +1003,10 @@ fn test_strategist_config_defaults() {
         (cfg.max_param_delta_pct - 0.30).abs() < 1e-12,
         "default max_param_delta_pct must be 0.30 (was hardcoded MAX_PARAM_DELTA_PCT)"
     );
-    assert!(cfg.validate().is_ok(), "default StrategistConfig must validate");
+    assert!(
+        cfg.validate().is_ok(),
+        "default StrategistConfig must validate"
+    );
 
     let rc = RiskConfig::default();
     assert!(

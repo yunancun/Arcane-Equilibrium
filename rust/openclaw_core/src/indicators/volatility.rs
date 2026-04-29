@@ -367,7 +367,14 @@ mod tests {
     fn test_hurst_trending() {
         // Strong uptrend should yield H > 0.5
         let data: Vec<f64> = (0..200).map(|i| 100.0 + i as f64 * 0.5).collect();
-        let r = hurst(&data, 10, 50, DEFAULT_HURST_TRENDING_THRESHOLD, DEFAULT_HURST_MEAN_REVERTING_THRESHOLD).unwrap();
+        let r = hurst(
+            &data,
+            10,
+            50,
+            DEFAULT_HURST_TRENDING_THRESHOLD,
+            DEFAULT_HURST_MEAN_REVERTING_THRESHOLD,
+        )
+        .unwrap();
         assert!(r.hurst > 0.4); // trending tendency
     }
 

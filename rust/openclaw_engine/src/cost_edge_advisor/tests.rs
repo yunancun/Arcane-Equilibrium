@@ -295,7 +295,10 @@ fn next_status_matches_evaluate_status_across_all_paths() {
 
 #[test]
 fn status_as_str_is_byte_stable() {
-    assert_eq!(CostEdgeAdvisorStatus::Uninitialized.as_str(), "Uninitialized");
+    assert_eq!(
+        CostEdgeAdvisorStatus::Uninitialized.as_str(),
+        "Uninitialized"
+    );
     assert_eq!(CostEdgeAdvisorStatus::Disabled.as_str(), "Disabled");
     assert_eq!(CostEdgeAdvisorStatus::WarmUp.as_str(), "WarmUp");
     assert_eq!(CostEdgeAdvisorStatus::Ok.as_str(), "OK");
@@ -505,8 +508,8 @@ fn eval_counters_last_trigger_ms_persists_after_24h_window_drops_count() {
     let far_future = entry_ms + ROLLING_WINDOW_24H_MS + 60_000;
     c.record_cycle(far_future); // record_cycle prunes eval_timestamps only
     c.record_trigger_entry(far_future); // this trims trigger_timestamps
-    // The just-inserted entry survives; the original `entry_ms` got trimmed.
-    // 剛插入的 entry 留存，原 entry_ms 被 trim。
+                                        // The just-inserted entry survives; the original `entry_ms` got trimmed.
+                                        // 剛插入的 entry 留存，原 entry_ms 被 trim。
     assert_eq!(c.triggers_24h(), 1);
     // last_trigger_ms reflects the most recent entry (== far_future).
     // last_trigger_ms 反映最近 entry（== far_future）。

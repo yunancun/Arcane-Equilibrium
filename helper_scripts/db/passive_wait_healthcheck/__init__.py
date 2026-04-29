@@ -82,6 +82,7 @@ from .checks_cost_edge import (  # noqa: F401
 from .checks_execution import (  # noqa: F401
     check_maker_fill_rate,
     check_maker_entry_intent_drift,
+    check_intent_signal_attribution,
 )
 
 __all__ = [
@@ -129,4 +130,5 @@ __all__ = [
     # execution-shape / fee-drop drift
     "check_maker_entry_intent_drift",
     "check_maker_fill_rate",
+    "check_intent_signal_attribution",
 ]

@@ -332,16 +332,8 @@ mod tests {
             price_roc_short: Some(0.0),
             entry_age_secs: Some(120.0),
         };
-        let decision = evaluate_position(
-            &row,
-            0.0,
-            0.0,
-            1_000_000,
-            0.2,
-            0.3,
-            Some(&features),
-            &cfg,
-        );
+        let decision =
+            evaluate_position(&row, 0.0, 0.0, 1_000_000, 0.2, 0.3, Some(&features), &cfg);
         assert!(
             !matches!(decision.action, RiskAction::ClosePosition(ref r)
                 if r.contains("phys_lock_gate1_low_edge")),

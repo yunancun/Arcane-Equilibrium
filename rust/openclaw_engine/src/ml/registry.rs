@@ -322,10 +322,7 @@ mod tests {
     fn test_symlink_filename_format() {
         let slot = ModelSlot::new("ma_crossover", "demo", "q50");
         let name = symlink_filename(&slot, "v1");
-        assert_eq!(
-            name,
-            "edge_predictor_demo_ma_crossover_q50_v1_current.onnx"
-        );
+        assert_eq!(name, "edge_predictor_demo_ma_crossover_q50_v1_current.onnx");
     }
 
     #[test]
@@ -366,7 +363,9 @@ mod tests {
         // 極簡煙霧測試；production 會從 sqlx row 構造。
         let a = ResolvedArtifact {
             id: 42,
-            artifact_path: "/tmp/openclaw/models/edge_predictor_demo_ma_crossover_q50_v1_2026-04-23.onnx".into(),
+            artifact_path:
+                "/tmp/openclaw/models/edge_predictor_demo_ma_crossover_q50_v1_2026-04-23.onnx"
+                    .into(),
             canary_status: "production".into(),
             verdict: "should_ship".into(),
             train_date: "2026-04-23".into(),

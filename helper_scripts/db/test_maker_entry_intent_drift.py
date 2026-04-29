@@ -18,6 +18,7 @@ _SRV_ROOT = os.path.dirname(_HELPER_SCRIPTS_DIR)
 sys.path.insert(0, _SRV_ROOT)
 
 from helper_scripts.db.passive_wait_healthcheck.checks_execution import (  # noqa: E402
+    check_intent_signal_attribution,
     check_maker_entry_intent_drift,
 )
 
@@ -132,6 +133,30 @@ use_maker_entry = true
                 status, msg = check_maker_entry_intent_drift(_make_cursor([]))
         self.assertEqual(status, "WARN")
         self.assertIn("TOML read unavailable", msg)
+
+
+class TestIntentSignalAttribution(unittest.TestCase):
+    def _cursor(self, attribution_row: tuple[int, int, int, int]) -> MagicMock:
+        cur = MagicMock()
+        cur.connection = MagicMock()
+        cur.connection.rollback = MagicMock()
+        cur.fetchone.side_effect = [(True, True), attribution_row]
+        return cur
+
+    def test_linked_recent_intents_pass(self) -> None:
+        status, msg = check_intent_signal_attribution(self._cursor((3, 0, 0, 0)))
+        self.assertEqual(status, "PASS")
+        self.assertIn("attribution chain linked", msg)
+
+    def test_empty_signal_id_fails(self) -> None:
+        status, msg = check_intent_signal_attribution(self._cursor((3, 1, 0, 0)))
+        self.assertEqual(status, "FAIL")
+        self.assertIn("empty_signal_id=1", msg)
+
+    def test_no_recent_exchange_intents_passes(self) -> None:
+        status, msg = check_intent_signal_attribution(self._cursor((0, 0, 0, 0)))
+        self.assertEqual(status, "PASS")
+        self.assertIn("no recent exchange intents", msg)
 
 
 if __name__ == "__main__":

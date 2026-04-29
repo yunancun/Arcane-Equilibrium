@@ -4,7 +4,8 @@
 //! MODULE_NOTE (EN): Extracted from `main.rs` (G1-03 Wave 1). The
 //!   `init_shared_clients_and_instruments` fn:
 //!     1. Picks the highest-priority exchange pipeline (Live > Demo) to own
-//!        the shared REST client + AccountManager for scanner / fee tasks.
+//!        the shared REST client for scanner / instrument tasks. Fee refresh
+//!        is per exchange binding so Demo and LiveDemo cannot stale each other.
 //!     2. Runs the INSTR-WIRE-1 fail-closed startup refresh — returns 0
 //!        symbols or network failure triggers `cancel.cancel()` + 500ms
 //!        drain + `std::process::exit(1)` so systemd/watchdog can restart.
@@ -12,17 +13,18 @@
 //!        predictable exit path that lets spawned tasks clean up IPC socket
 //!        + flush tracing.
 //!     3. Resolves paper initial balance (MAJOR-4 priority chain).
-//!     4. Spawns periodic 4h instrument refresh + fee rate tasks.
+//!     4. Spawns periodic 4h instrument refresh + per-pipeline fee rate tasks.
 //! MODULE_NOTE (中): 從 `main.rs` 抽出（G1-03 Wave 1）。
 //!   `init_shared_clients_and_instruments`：
-//!     1. 選最高優先交易所管線（Live > Demo）作為 scanner / fee 任務的共享
-//!        REST + AccountManager。
+//!     1. 選最高優先交易所管線（Live > Demo）作為 scanner / instrument 任務的
+//!        共享 REST。Fee refresh 按每條 exchange binding 單獨啟動，避免 Demo
+//!        與 LiveDemo 互相造成 stale。
 //!     2. 跑 INSTR-WIRE-1 fail-closed 啟動刷新 — 回 0 或網路錯誤 → cancel +
 //!        500ms drain + `exit(1)`，讓 systemd/watchdog 重啟。取代
 //!        panic!-in-async（關機順序曖昧），改走可預期的 exit 路徑讓子任務
 //!        有機會清 IPC socket + flush tracing。
 //!     3. 解析紙盤初始餘額（MAJOR-4 優先鏈）。
-//!     4. 啟動每 4h 品種刷新 + 費率任務。
+//!     4. 啟動每 4h 品種刷新 + 每管線費率任務。
 
 use crate::startup::{resolve_paper_initial_balance, ExchangePipelineBindings};
 use crate::tasks;
@@ -69,11 +71,6 @@ pub(crate) async fn init_shared_clients_and_instruments(
         .as_ref()
         .map(|b| Arc::clone(&b.rest_client))
         .or_else(|| demo_bindings.as_ref().map(|b| Arc::clone(&b.rest_client)));
-    let shared_env = live_bindings
-        .as_ref()
-        .map(|b| b.env)
-        .or_else(|| demo_bindings.as_ref().map(|b| b.env));
-
     let shared_account_manager: Option<Arc<AccountManager>> = live_bindings
         .as_ref()
         .map(|b| Arc::clone(&b.account_manager))
@@ -147,9 +144,15 @@ pub(crate) async fn init_shared_clients_and_instruments(
             }
         }
 
-        // Spawn fee rate refresh + staleness monitor using shared client's account manager.
-        if let (Some(acct), Some(env)) = (shared_account_manager.as_ref(), shared_env) {
-            tasks::spawn_fee_rate_tasks(acct, client, env, cancel);
+        // Fee freshness is per AccountManager. Do not bind this to the shared
+        // highest-priority client; otherwise Demo can stale when LiveDemo is
+        // present (or vice versa) because each pipeline owns a distinct fee cache.
+        // 費率新鮮度屬於各自 AccountManager，不能只掛最高優先級 shared client。
+        if let Some(ref b) = demo_bindings {
+            tasks::spawn_fee_rate_tasks(&b.account_manager, &b.rest_client, b.env, cancel);
+        }
+        if let Some(ref b) = live_bindings {
+            tasks::spawn_fee_rate_tasks(&b.account_manager, &b.rest_client, b.env, cancel);
         }
     } else {
         info!(

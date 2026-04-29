@@ -56,11 +56,26 @@ fn ctx_bb(pct_b: f64, rsi: f64, ts: u64) -> TickContext<'static> {
     }
 }
 
+fn ctx_bb_bbo(
+    pct_b: f64,
+    rsi: f64,
+    ts: u64,
+    bid: f64,
+    ask: f64,
+    tick: f64,
+) -> TickContext<'static> {
+    let mut ctx = ctx_bb(pct_b, rsi, ts);
+    ctx.best_bid = Some(bid);
+    ctx.best_ask = Some(ask);
+    ctx.tick_size = Some(tick);
+    ctx
+}
+
 #[test]
 fn test_long_oversold() {
     let mut s = BbReversion::new();
     s.min_persistence_ms = 0; // disable persistence for unit tests
-    let i = s.on_tick(&ctx_bb(-0.1, 25.0, 0));
+    let i = s.on_tick(&ctx_bb_bbo(-0.1, 25.0, 0, 49_999.5, 50_000.5, 0.1));
     assert_eq!(i.len(), 1);
     match &i[0] {
         StrategyAction::Open(intent) => assert!(intent.is_long),
@@ -86,18 +101,13 @@ fn test_exit_mean() {
 #[test]
 fn test_limit_order_long() {
     // RC-07 + G7-09c Phase 1: use_limit=true, oversold entry produces limit
-    // order with BBO-aware passive price. ctx_bb supplies no BBO → helper
-    // falls back to last_price ± offset_bps. Pre-G7-09c expected
-    // `bb_lower × (1 + offset)` (49_049); post-G7-09c with no BBO uses
-    // `last_price × (1 − offset)` = 50_000 × 0.999 = 49_950.
-    // RC-07 + G7-09c Phase 1：use_limit=true 在無 BBO 時走 fallback
-    // `last_price × (1 − offset)`，取代舊 `bb_lower × (1 + offset)` 公式
-    // （RCA `7f0e793` 顯示舊式跨 book → 100% PostOnly reject）。
+    // order with BBO-aware passive price.
+    // RC-07 + G7-09c Phase 1：use_limit=true 時使用 BBO-aware passive price。
     let mut s = BbReversion::new();
     s.min_persistence_ms = 0;
     s.use_limit = true;
     s.limit_offset_bps = 10.0; // 10 bps = 0.1%
-    let i = s.on_tick(&ctx_bb(-0.1, 25.0, 0));
+    let i = s.on_tick(&ctx_bb_bbo(-0.1, 25.0, 0, 49_999.5, 50_000.5, 0.1));
     assert_eq!(i.len(), 1);
     let intent = match &i[0] {
         StrategyAction::Open(intent) => intent,
@@ -105,12 +115,10 @@ fn test_limit_order_long() {
     };
     assert!(intent.is_long);
     assert_eq!(intent.order_type, "limit");
-    // G7-09c fallback: 50_000 × (1 − 10/10_000) = 49_950.
-    // G7-09c fallback：50_000 × 0.999 = 49_950。
-    let expected = 50_000.0 * (1.0 - 10.0 / 10_000.0);
+    let expected = 49_999.4;
     assert!(
         (intent.limit_price.unwrap() - expected).abs() < 1e-6,
-        "G7-09c fallback expected limit_price={}, got={}",
+        "G7-09c BBO expected limit_price={}, got={}",
         expected,
         intent.limit_price.unwrap()
     );
@@ -119,16 +127,13 @@ fn test_limit_order_long() {
 #[test]
 fn test_limit_order_short() {
     // RC-07 + G7-09c Phase 1: use_limit=true, overbought entry produces
-    // limit order with BBO-aware passive price. No BBO supplied → fallback
-    // path uses `last_price × (1 + offset)` = 50_000 × 1.001 = 50_050,
-    // replacing pre-G7-09c `upper × (1 − offset)` = 50_949.
-    // RC-07 + G7-09c Phase 1：無 BBO 時 fallback `last_price × (1 + offset)`
-    // 取代舊 `upper × (1 − offset)`。
+    // limit order with BBO-aware passive price.
+    // RC-07 + G7-09c Phase 1：use_limit=true 時使用 BBO-aware passive price。
     let mut s = BbReversion::new();
     s.min_persistence_ms = 0;
     s.use_limit = true;
     s.limit_offset_bps = 10.0;
-    let i = s.on_tick(&ctx_bb(1.1, 75.0, 0));
+    let i = s.on_tick(&ctx_bb_bbo(1.1, 75.0, 0, 49_999.5, 50_000.5, 0.1));
     assert_eq!(i.len(), 1);
     let intent = match &i[0] {
         StrategyAction::Open(intent) => intent,
@@ -136,12 +141,10 @@ fn test_limit_order_short() {
     };
     assert!(!intent.is_long);
     assert_eq!(intent.order_type, "limit");
-    // G7-09c fallback: 50_000 × (1 + 10/10_000) = 50_050.
-    // G7-09c fallback：50_000 × 1.001 = 50_050。
-    let expected = 50_000.0 * (1.0 + 10.0 / 10_000.0);
+    let expected = 50_000.6;
     assert!(
         (intent.limit_price.unwrap() - expected).abs() < 1e-6,
-        "G7-09c fallback expected limit_price={}, got={}",
+        "G7-09c BBO expected limit_price={}, got={}",
         expected,
         intent.limit_price.unwrap()
     );
@@ -154,7 +157,7 @@ fn test_market_order_default() {
     let mut s = BbReversion::new();
     s.min_persistence_ms = 0; // disable persistence for unit tests
     assert!(!s.use_limit); // verify default is false / 確認默認為 false
-    let i = s.on_tick(&ctx_bb(-0.1, 25.0, 0));
+    let i = s.on_tick(&ctx_bb_bbo(-0.1, 25.0, 0, 49_999.5, 50_000.5, 0.1));
     assert_eq!(i.len(), 1);
     let intent = match &i[0] {
         StrategyAction::Open(intent) => intent,
@@ -175,7 +178,7 @@ fn test_exit_always_market() {
     s.min_persistence_ms = 0; // disable persistence for unit tests
     s.use_limit = true;
     // Enter long with limit order / 限價入場做多
-    let i = s.on_tick(&ctx_bb(-0.1, 25.0, 0));
+    let i = s.on_tick(&ctx_bb_bbo(-0.1, 25.0, 0, 49_999.5, 50_000.5, 0.1));
     let entry_intent = match &i[0] {
         StrategyAction::Open(intent) => intent,
         other => panic!("expected StrategyAction::Open, got {:?}", other),
@@ -548,7 +551,9 @@ fn test_g7_09c_bb_reversion_buy_uses_best_bid_passive() {
     s.use_limit = true; // bypass GAP-9 in update_params
     s.maker_price_buffer_ticks = 1;
     s.limit_offset_bps = 1.0;
-    let i = s.on_tick(&ctx_bb_with_bbo_g709c(-0.1, 25.0, 0, 49_999.5, 50_000.5, 0.1));
+    let i = s.on_tick(&ctx_bb_with_bbo_g709c(
+        -0.1, 25.0, 0, 49_999.5, 50_000.5, 0.1,
+    ));
     assert_eq!(i.len(), 1);
     match &i[0] {
         StrategyAction::Open(intent) => {
@@ -577,7 +582,9 @@ fn test_g7_09c_bb_reversion_sell_uses_best_ask_passive() {
     s.limit_offset_bps = 1.0;
     // percent_b > 1 + RSI overbought → SHORT.
     // percent_b > 1 + RSI 超買 → 空頭。
-    let i = s.on_tick(&ctx_bb_with_bbo_g709c(1.1, 75.0, 0, 49_999.5, 50_000.5, 0.1));
+    let i = s.on_tick(&ctx_bb_with_bbo_g709c(
+        1.1, 75.0, 0, 49_999.5, 50_000.5, 0.1,
+    ));
     assert_eq!(i.len(), 1);
     match &i[0] {
         StrategyAction::Open(intent) => {
@@ -610,30 +617,29 @@ fn test_g7_09c_bb_reversion_params_roundtrip_buffer_ticks() {
     // Validate 防護：buffer > 10 必拒。
     let mut bad = s.get_params();
     bad.maker_price_buffer_ticks = 11;
-    assert!(s.update_params(bad).is_err(), "buffer > 10 must fail validate");
+    assert!(
+        s.update_params(bad).is_err(),
+        "buffer > 10 must fail validate"
+    );
 }
 
 /// G7-09c: helper smoke test invoked via bb_reversion module re-export path.
 /// G7-09c：透過 bb_reversion 模組路徑呼叫共享 helper 的 smoke test。
 #[test]
-fn test_g7_09c_bb_reversion_helper_fallback_when_no_bbo() {
-    // No BBO → fallback path uses last_price ± offset_bps, identical to
-    // pre-G7-09c bb_reversion behaviour. Confirms the helper is reachable
-    // from bb_reversion's import surface.
-    // 無 BBO → fallback 使用 last_price ± offset_bps，與 pre-G7-09c 一致；
-    // 同時確認 helper 從 bb_reversion 的 import 路徑可達。
+fn test_g7_09c_bb_reversion_helper_skips_when_no_bbo() {
+    // No BBO → strict skip instead of last_price fallback. Confirms the helper
+    // is reachable from bb_reversion's import surface.
+    // 無 BBO → 嚴格跳過而不是 last_price fallback；同時確認 helper 可達。
     let inputs = MakerPriceInputs {
         last_price: 50_000.0,
         best_bid: None,
         best_ask: None,
-        tick_size: None,
+        tick_size: Some(0.1),
     };
     let buy = compute_post_only_price(true, inputs, 1.0, 1, "bb_reversion", "BTCUSDT");
     let sell = compute_post_only_price(false, inputs, 1.0, 1, "bb_reversion", "BTCUSDT");
-    // 1 bps offset → 50_000 × (1 ∓ 0.0001) = 49_995 / 50_005.
-    // 1 bps 偏移 → 49_995 / 50_005。
-    assert!((buy - 49_995.0).abs() < 1e-6, "fallback BUY got {buy}");
-    assert!((sell - 50_005.0).abs() < 1e-6, "fallback SELL got {sell}");
+    assert!(buy.is_none(), "BUY must skip without side quote");
+    assert!(sell.is_none(), "SELL must skip without side quote");
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

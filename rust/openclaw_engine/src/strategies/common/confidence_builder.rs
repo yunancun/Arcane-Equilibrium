@@ -97,7 +97,8 @@ impl ConfidenceBuilder {
     /// regime_bonus`) is load-bearing — do not refactor.
     /// 計算信心值，加法順序鎖定與抽離前碼位元相同。
     pub fn compute(&self, adx: f64, regime: Option<&str>) -> f64 {
-        let adx_bonus = ((adx - self.adx_threshold).max(0.0) / self.adx_scale).min(self.adx_bonus_cap);
+        let adx_bonus =
+            ((adx - self.adx_threshold).max(0.0) / self.adx_scale).min(self.adx_bonus_cap);
         let regime_bonus = match regime {
             Some("trending") => self.regime_bonus,
             Some("mean_reverting") => -self.regime_bonus,
@@ -156,13 +157,13 @@ mod tests {
         // above cap, negative adx_bonus-impossible branch).
         // 以代表性組合掃描，防止 threshold 以下 / cap 上下界 / 負 adx_bonus 分支漂移。
         let cases = [
-            (10.0, Some("trending"), 0.45, 20.0, 0.15),     // adx < threshold
-            (20.0, Some("trending"), 0.45, 20.0, 0.15),     // at threshold
+            (10.0, Some("trending"), 0.45, 20.0, 0.15), // adx < threshold
+            (20.0, Some("trending"), 0.45, 20.0, 0.15), // at threshold
             (45.0, Some("mean_reverting"), 0.45, 20.0, 0.15), // cap + penalty
-            (80.0, Some("trending"), 0.45, 20.0, 0.15),     // well above cap
-            (60.0, None, 0.45, 20.0, 0.15),                 // no regime
-            (60.0, Some("ranging"), 0.45, 20.0, 0.15),      // unknown regime
-            (35.0, Some("trending"), 0.50, 25.0, 0.20),     // alt params
+            (80.0, Some("trending"), 0.45, 20.0, 0.15), // well above cap
+            (60.0, None, 0.45, 20.0, 0.15),             // no regime
+            (60.0, Some("ranging"), 0.45, 20.0, 0.15),  // unknown regime
+            (35.0, Some("trending"), 0.50, 25.0, 0.20), // alt params
         ];
         for (adx, regime, base, threshold, rb) in cases {
             let cb = ConfidenceBuilder::new(base, threshold, rb);

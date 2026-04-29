@@ -203,17 +203,19 @@ impl BbReversion {
         qty: f64,
         confluence_score: Option<f32>,
         persistence_elapsed_ms: Option<u64>,
-    ) -> OrderIntent {
+    ) -> Option<OrderIntent> {
         // G7-09c Phase 1: when `use_limit` enabled (currently force-disabled by
         // GAP-9 — see line ~131), use BBO-aware passive PostOnly price instead
         // of legacy bb_lower/bb_upper × (1 ± limit_offset_bps/10_000) which
-        // crosses the book on Bybit (RCA `7f0e793`). bb_lower/bb_upper kept in
-        // sig for back-compat / future band-anchored variant. `use_limit`
-        // GAP-9 force-disable retained — see Backlog A for that scope.
+        // crosses the book on Bybit (RCA `7f0e793`). If no safe maker price is
+        // available, skip the new entry. bb_lower/bb_upper kept in sig for
+        // back-compat / future band-anchored variant. `use_limit` GAP-9
+        // force-disable retained — see Backlog A for that scope.
         // G7-09c Phase 1：當 `use_limit` 啟用時（目前 GAP-9 強制關閉），改用
         // BBO-aware 被動 PostOnly 價，取代舊 bb_lower/bb_upper × (1 ± offset/萬)
-        // 公式（RCA 顯示舊式 100% 跨 book）；GAP-9 force-disable 不解禁，
-        // 屬 Backlog A scope。bb_lower/bb_upper 保留供未來 band-anchored 變體。
+        // 公式（RCA 顯示舊式 100% 跨 book）；若無安全 maker 價則跳過新開倉。
+        // GAP-9 force-disable 不解禁，屬 Backlog A scope。bb_lower/bb_upper 保留
+        // 供未來 band-anchored 變體。
         let _ = (bb_lower, bb_upper); // silence unused-on-cold-path warning
         let (order_type, limit_price) = if self.use_limit {
             let inputs = MakerPriceInputs {
@@ -229,14 +231,14 @@ impl BbReversion {
                 self.maker_price_buffer_ticks,
                 "bb_reversion",
                 ctx.symbol,
-            );
+            )?;
             ("limit".to_string(), Some(price))
         } else {
             ("market".to_string(), None)
         };
         let scaled =
             crate::tick_pipeline::on_tick_helpers::clamp_confidence(conf * self.conf_scale);
-        OrderIntent {
+        Some(OrderIntent {
             symbol: ctx.symbol.to_string(),
             is_long,
             qty,
@@ -248,7 +250,7 @@ impl BbReversion {
             persistence_elapsed_ms,
             time_in_force: None,
             maker_timeout_ms: None,
-        }
+        })
     }
 }
 
@@ -426,7 +428,7 @@ impl Strategy for BbReversion {
                     let confluence_score = score.map(|s| s as f32);
                     let persistence_elapsed_ms =
                         self.persistence.elapsed_ms(ctx.symbol, ctx.timestamp_ms);
-                    intents.push(StrategyAction::Open(self.make_entry_intent_with_qty(
+                    let maybe_intent = self.make_entry_intent_with_qty(
                         ctx,
                         is_long,
                         conf_with_score,
@@ -435,9 +437,12 @@ impl Strategy for BbReversion {
                         qty,
                         confluence_score,
                         persistence_elapsed_ms,
-                    )));
-                    self.positions.insert(ctx.symbol.to_string(), is_long);
-                    self.cooldown.record_signal(ctx.symbol, ctx.timestamp_ms);
+                    );
+                    if let Some(intent) = maybe_intent {
+                        intents.push(StrategyAction::Open(intent));
+                        self.positions.insert(ctx.symbol.to_string(), is_long);
+                        self.cooldown.record_signal(ctx.symbol, ctx.timestamp_ms);
+                    }
                 }
             }
             Some(_is_long) => {

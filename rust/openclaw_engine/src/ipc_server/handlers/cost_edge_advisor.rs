@@ -147,7 +147,14 @@ mod tests {
 
     #[tokio::test]
     async fn status_injected_returns_advisor_state() {
-        let slot = populated_slot(CostEdgeAdvisorState::ok(0.7, -0.5, 7, 5.0, 3.5, 1_700_000_000_000));
+        let slot = populated_slot(CostEdgeAdvisorState::ok(
+            0.7,
+            -0.5,
+            7,
+            5.0,
+            3.5,
+            1_700_000_000_000,
+        ));
         let resp = handle_get_cost_edge_advisor_status(serde_json::json!(2), &slot).await;
         let r = resp.result.expect("result");
         assert_eq!(r["status"], "OK");

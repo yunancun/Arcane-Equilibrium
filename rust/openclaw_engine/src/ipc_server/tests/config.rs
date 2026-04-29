@@ -2,7 +2,10 @@
 //! ARCH-RC1 1C-2-C / LIVE-P2-1：統一 Config IPC 端點測試。
 
 use super::super::*;
-use super::{empty_budget_slot, empty_cost_edge_advisor_slot, empty_h_state_cache_slot, empty_teacher_slot, make_test_config, make_test_data_dir};
+use super::{
+    empty_budget_slot, empty_cost_edge_advisor_slot, empty_h_state_cache_slot, empty_teacher_slot,
+    make_test_config, make_test_data_dir,
+};
 
 /// Build test stores: all three risk engines + learning + budget.
 /// 構建測試 stores：三個風控引擎 + learning + budget。

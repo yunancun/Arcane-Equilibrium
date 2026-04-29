@@ -125,7 +125,7 @@ mod tests {
         for payload in [
             "",
             "auto",
-            "Manual",     // case-sensitive after trim
+            "Manual", // case-sensitive after trim
             "MANUAL",
             "manual\nextra",
             "crash",

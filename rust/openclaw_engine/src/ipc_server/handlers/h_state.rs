@@ -33,10 +33,10 @@
 //!   - `invalidate_h_state` 在 Python 端是 fire-and-forget；本 handler
 //!     同步回 ack 讓 JSON-RPC client 不卡，但不阻塞 poller。
 
-use super::super::*;
 use super::super::slots::HStateCacheSlot;
-use crate::h_state_cache::{is_gateway_enabled, HStateSnapshot};
+use super::super::*;
 use crate::h_state_cache::poller::{push_invalidation, InvalidationSender};
+use crate::h_state_cache::{is_gateway_enabled, HStateSnapshot};
 
 /// `query_h_state_full` IPC — return the full H state snapshot from
 /// Rust's local cache. Fail-soft when gateway disabled or cache uninjected.
@@ -297,8 +297,8 @@ mod tests {
         assert_eq!(r["h_module"], "h1");
         // The watch channel should now have a pending change.
         // watch channel 現在應有 pending 變化。
-        let observed = tokio::time::timeout(std::time::Duration::from_millis(100), rx.changed())
-            .await;
+        let observed =
+            tokio::time::timeout(std::time::Duration::from_millis(100), rx.changed()).await;
         assert!(observed.is_ok(), "invalidation should be observable");
     }
 

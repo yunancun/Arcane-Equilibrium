@@ -249,10 +249,7 @@ mod tests {
     /// 中文：Live + SESSION DRAWDOWN reason → 撤銷。
     #[test]
     fn live_drawdown_triggers_revoke() {
-        let decision = should_revoke(
-            "SESSION DRAWDOWN: 12.34% >= 10.00%",
-            PipelineKind::Live,
-        );
+        let decision = should_revoke("SESSION DRAWDOWN: 12.34% >= 10.00%", PipelineKind::Live);
         assert!(decision.is_some());
         assert_eq!(
             decision.unwrap().reason,
@@ -264,33 +261,23 @@ mod tests {
     /// 中文：Demo + SESSION DRAWDOWN → 不撤銷（Demo 無 live auth）。
     #[test]
     fn demo_drawdown_does_not_revoke() {
-        assert!(should_revoke(
-            "SESSION DRAWDOWN: 25.00% >= 25.00%",
-            PipelineKind::Demo,
-        )
-        .is_none());
+        assert!(should_revoke("SESSION DRAWDOWN: 25.00% >= 25.00%", PipelineKind::Demo,).is_none());
     }
 
     /// EN: Paper pipeline + SESSION DRAWDOWN → no revoke.
     /// 中文：Paper + SESSION DRAWDOWN → 不撤銷。
     #[test]
     fn paper_drawdown_does_not_revoke() {
-        assert!(should_revoke(
-            "SESSION DRAWDOWN: 50.00% >= 30.00%",
-            PipelineKind::Paper,
-        )
-        .is_none());
+        assert!(
+            should_revoke("SESSION DRAWDOWN: 50.00% >= 30.00%", PipelineKind::Paper,).is_none()
+        );
     }
 
     /// EN: Live + DAILY LOSS reason → no revoke (different policy).
     /// 中文：Live + DAILY LOSS → 不撤銷（不同政策）。
     #[test]
     fn live_daily_loss_does_not_revoke() {
-        assert!(should_revoke(
-            "DAILY LOSS: 5.00% >= 5.00%",
-            PipelineKind::Live,
-        )
-        .is_none());
+        assert!(should_revoke("DAILY LOSS: 5.00% >= 5.00%", PipelineKind::Live,).is_none());
     }
 
     /// EN: Live + non-halt-style reason → no revoke. Defensive: caller
@@ -407,8 +394,14 @@ mod tests {
     /// 中文：succeeded() 對 Removed + AlreadyRevoked 為 true，失敗模式為 false。
     #[test]
     fn outcome_succeeded_classification() {
-        assert!(RevokeOutcome::Removed { path: PathBuf::from("/x") }.succeeded());
-        assert!(RevokeOutcome::AlreadyRevoked { path: PathBuf::from("/x") }.succeeded());
+        assert!(RevokeOutcome::Removed {
+            path: PathBuf::from("/x")
+        }
+        .succeeded());
+        assert!(RevokeOutcome::AlreadyRevoked {
+            path: PathBuf::from("/x")
+        }
+        .succeeded());
         assert!(!RevokeOutcome::PathUnresolved.succeeded());
         assert!(!RevokeOutcome::IoError {
             path: PathBuf::from("/x"),
@@ -422,11 +415,17 @@ mod tests {
     #[test]
     fn outcome_kind_labels_are_stable() {
         assert_eq!(
-            RevokeOutcome::Removed { path: PathBuf::from("/x") }.kind_str(),
+            RevokeOutcome::Removed {
+                path: PathBuf::from("/x")
+            }
+            .kind_str(),
             "removed"
         );
         assert_eq!(
-            RevokeOutcome::AlreadyRevoked { path: PathBuf::from("/x") }.kind_str(),
+            RevokeOutcome::AlreadyRevoked {
+                path: PathBuf::from("/x")
+            }
+            .kind_str(),
             "already_revoked"
         );
         assert_eq!(RevokeOutcome::PathUnresolved.kind_str(), "path_unresolved");

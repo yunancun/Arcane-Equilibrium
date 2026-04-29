@@ -605,14 +605,14 @@ mod tests {
     /// 構造全通 ExitFeatures；caller 可針對某個 gate 覆蓋單一欄位。
     fn mk_features() -> ExitFeatures {
         ExitFeatures {
-            est_net_bps: Some(50.0),          // well above 5.0 floor
-            peak_pnl_pct: 5.0,                // well above 0.5×ATR
+            est_net_bps: Some(50.0), // well above 5.0 floor
+            peak_pnl_pct: 5.0,       // well above 0.5×ATR
             current_pnl_pct: 3.0,
-            atr_pct: Some(1.0),               // 1% ATR
-            giveback_atr_norm: Some(0.0),     // no giveback yet
-            time_since_peak_ms: Some(0),      // peak just reached
+            atr_pct: Some(1.0),           // 1% ATR
+            giveback_atr_norm: Some(0.0), // no giveback yet
+            time_since_peak_ms: Some(0),  // peak just reached
             price_roc_short: Some(0.0),
-            entry_age_secs: Some(120.0),      // past min_hold
+            entry_age_secs: Some(120.0), // past min_hold
         }
     }
 

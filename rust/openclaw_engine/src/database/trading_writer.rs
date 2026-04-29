@@ -36,6 +36,7 @@ pub async fn run_trading_writer(
     let mut verdict_buf: Vec<TradingMsg> = Vec::with_capacity(16);
     let mut order_buf: Vec<TradingMsg> = Vec::with_capacity(16);
     let mut state_change_buf: Vec<TradingMsg> = Vec::with_capacity(16);
+    let mut scanner_snapshot_buf: Vec<TradingMsg> = Vec::with_capacity(8);
 
     let flush_interval = {
         let cfg = config.get();
@@ -52,8 +53,8 @@ pub async fn run_trading_writer(
             _ = flush_timer.tick() => {
                 if pool.is_available() {
                     flush_all(&pool, &mut signal_buf, &mut intent_buf, &mut fill_buf,
-                              &mut funding_buf, &mut pos_buf, &mut verdict_buf,
-                              &mut order_buf, &mut state_change_buf).await;
+                    &mut funding_buf, &mut pos_buf, &mut verdict_buf,
+                              &mut order_buf, &mut state_change_buf, &mut scanner_snapshot_buf).await;
                 }
             }
             msg = rx.recv() => {
@@ -67,6 +68,7 @@ pub async fn run_trading_writer(
                         TradingMsg::RiskVerdict { .. } => verdict_buf.push(m),
                         TradingMsg::Order { .. } => order_buf.push(m),
                         TradingMsg::OrderStateChange { .. } => state_change_buf.push(m),
+                        TradingMsg::ScannerSnapshot { .. } => scanner_snapshot_buf.push(m),
                     },
                     None => break,
                 }
@@ -85,6 +87,7 @@ pub async fn run_trading_writer(
             &mut verdict_buf,
             &mut order_buf,
             &mut state_change_buf,
+            &mut scanner_snapshot_buf,
         )
         .await;
     }
@@ -103,6 +106,7 @@ async fn flush_all(
     verdicts: &mut Vec<TradingMsg>,
     orders: &mut Vec<TradingMsg>,
     state_changes: &mut Vec<TradingMsg>,
+    scanner_snapshots: &mut Vec<TradingMsg>,
 ) {
     tokio::join!(
         async {
@@ -145,6 +149,11 @@ async fn flush_all(
                 flush_order_state_changes(pool, state_changes).await;
             }
         },
+        async {
+            if !scanner_snapshots.is_empty() {
+                flush_scanner_snapshots(pool, scanner_snapshots).await;
+            }
+        },
     );
 }
 
@@ -160,6 +169,7 @@ const POSITION_COLS: usize = 9;
 const VERDICT_COLS: usize = 12; // includes risk_level/check arrays + details
 const ORDER_COLS: usize = 11;
 const STATE_CHANGE_COLS: usize = 8;
+const SCANNER_SNAPSHOT_COLS: usize = 9;
 
 fn should_clear_buffer(table: &str, outcome: BatchInsertOutcome, pending_rows: usize) -> bool {
     if outcome.all_ok() {
@@ -713,6 +723,67 @@ async fn flush_order_state_changes(pool: &DbPool, buf: &mut Vec<TradingMsg>) {
     }
 }
 
+/// Flush scanner cycle snapshots to trading.scanner_snapshots.
+/// 將 scanner 掃描週期快照批量寫入 trading.scanner_snapshots。
+async fn flush_scanner_snapshots(pool: &DbPool, buf: &mut Vec<TradingMsg>) {
+    let pg = match pool.get() {
+        Some(p) => p,
+        None => {
+            warn!(
+                pending_rows = buf.len(),
+                "trading.scanner_snapshots flush skipped: DB pool unavailable — retaining buffer"
+            );
+            return;
+        }
+    };
+    let outcome = batch_insert_chunked(
+        pg,
+        pool,
+        "trading.scanner_snapshots",
+        buf.as_slice(),
+        SCANNER_SNAPSHOT_COLS,
+        |chunk| {
+            let mut qb: QueryBuilder<Postgres> = QueryBuilder::new(
+                "INSERT INTO trading.scanner_snapshots \
+                 (ts, scan_id, active_symbols, added, removed, rejected_count, \
+                  scan_duration_ms, candidates, config) ",
+            );
+            qb.push_values(chunk.iter(), |mut b, msg| {
+                if let TradingMsg::ScannerSnapshot {
+                    scan_id,
+                    ts_ms,
+                    active_symbols,
+                    added,
+                    removed,
+                    rejected_count,
+                    scan_duration_ms,
+                    candidates,
+                    config,
+                } = msg
+                {
+                    b.push_bind(
+                        chrono::DateTime::from_timestamp_millis(*ts_ms as i64).unwrap_or_default(),
+                    );
+                    b.push_bind(scan_id.as_str());
+                    b.push_bind(active_symbols.as_slice());
+                    b.push_bind(added.as_slice());
+                    b.push_bind(removed.as_slice());
+                    b.push_bind(*rejected_count);
+                    b.push_bind(*scan_duration_ms);
+                    b.push_bind(candidates.clone());
+                    b.push_bind(config.clone());
+                }
+            });
+            qb.push(" ON CONFLICT (scan_id, ts) DO NOTHING");
+            qb
+        },
+    )
+    .await;
+    if should_clear_buffer("trading.scanner_snapshots", outcome, buf.len()) {
+        buf.clear();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -816,6 +887,10 @@ mod tests {
             chunk_rows_for_columns(STATE_CHANGE_COLS) * STATE_CHANGE_COLS <= 65535,
             "state_changes batch would exceed PG limit"
         );
+        assert!(
+            chunk_rows_for_columns(SCANNER_SNAPSHOT_COLS) * SCANNER_SNAPSHOT_COLS <= 65535,
+            "scanner_snapshots batch would exceed PG limit"
+        );
     }
 
     #[test]
@@ -825,6 +900,7 @@ mod tests {
         let mut fills = Vec::new();
         let mut funding = Vec::new();
         let mut positions = Vec::new();
+        let mut scanner_snapshots = Vec::new();
 
         let msgs: Vec<TradingMsg> = vec![
             TradingMsg::Signal {
@@ -899,6 +975,17 @@ mod tests {
                 unrealized_pnl: 10.0,
                 engine_mode: "paper".into(),
             },
+            TradingMsg::ScannerSnapshot {
+                scan_id: "scan-0".into(),
+                ts_ms: 0,
+                active_symbols: vec!["BTCUSDT".into()],
+                added: vec![],
+                removed: vec![],
+                rejected_count: 0,
+                scan_duration_ms: 1,
+                candidates: serde_json::json!([]),
+                config: serde_json::json!({}),
+            },
         ];
 
         let mut verdicts = Vec::new();
@@ -914,6 +1001,7 @@ mod tests {
                 TradingMsg::RiskVerdict { .. } => verdicts.push(m),
                 TradingMsg::Order { .. } => orders.push(m),
                 TradingMsg::OrderStateChange { .. } => state_changes.push(m),
+                TradingMsg::ScannerSnapshot { .. } => scanner_snapshots.push(m),
             }
         }
 
@@ -925,5 +1013,6 @@ mod tests {
         assert_eq!(verdicts.len(), 0);
         assert_eq!(orders.len(), 0);
         assert_eq!(state_changes.len(), 0);
+        assert_eq!(scanner_snapshots.len(), 1);
     }
 }

@@ -118,16 +118,10 @@ pub fn load_strategy_params_from(kind: PipelineKind, settings: &Path) -> Strateg
                 cfg
             }
             Err(e) => {
-                fallback_strategy_params_on_load_error(
-                    kind,
-                    &path,
-                    format!("parse error: {e}"),
-                )
+                fallback_strategy_params_on_load_error(kind, &path, format!("parse error: {e}"))
             }
         },
-        Err(_) => {
-            fallback_strategy_params_on_load_error(kind, &path, "file not found".to_string())
-        }
+        Err(_) => fallback_strategy_params_on_load_error(kind, &path, "file not found".to_string()),
     }
 }
 

@@ -110,13 +110,7 @@ pub fn compute_hurst(prices: &[f64], min_window: usize, max_window: usize) -> Op
     // about the numeric Hurst value here; the regime classification is done
     // by `HysteresisDetector` against `HurstConfig` thresholds.
     // 在此只取數值，分類由 HysteresisDetector 對 HurstConfig 閾值處理。
-    let res = openclaw_core::indicators::hurst(
-        prices,
-        min_window,
-        max_window,
-        0.5,
-        0.5,
-    )?;
+    let res = openclaw_core::indicators::hurst(prices, min_window, max_window, 0.5, 0.5)?;
     let h = res.hurst;
     if h.is_nan() || h.is_infinite() {
         return None;
@@ -186,10 +180,7 @@ impl HysteresisDetector {
         let full = self.history.len() == self.lag;
 
         if full {
-            let all_persistent = self
-                .history
-                .iter()
-                .all(|x| *x > self.persistent_threshold);
+            let all_persistent = self.history.iter().all(|x| *x > self.persistent_threshold);
             let all_anti = self
                 .history
                 .iter()
@@ -286,7 +277,10 @@ mod tests {
 
     #[test]
     fn regime_label_legacy_str_unknown_maps_random() {
-        assert_eq!(RegimeLabel::from_legacy_str("totally bogus"), RegimeLabel::Random);
+        assert_eq!(
+            RegimeLabel::from_legacy_str("totally bogus"),
+            RegimeLabel::Random
+        );
         assert_eq!(RegimeLabel::from_legacy_str(""), RegimeLabel::Random);
     }
 
@@ -330,7 +324,9 @@ mod tests {
         prices.push(price);
         for _ in 0..511 {
             // Park-Miller-ish LCG
-            state = state.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1);
+            state = state
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1);
             // Map upper 32 bits to f64 in [-0.005, 0.005]
             let u = ((state >> 32) as u32) as f64 / u32::MAX as f64;
             let step = (u - 0.5) * 0.01;
@@ -390,10 +386,7 @@ mod tests {
         ];
         for prices in &cases {
             let h = compute_hurst(prices, 8, 128).expect("non-empty result");
-            assert!(
-                (0.0..=1.0).contains(&h),
-                "Hurst out of [0,1]: {h}"
-            );
+            assert!((0.0..=1.0).contains(&h), "Hurst out of [0,1]: {h}");
         }
     }
 
@@ -536,8 +529,8 @@ mod tests {
     fn hurst_label_for_symbol_trend_classifies_persistent() {
         let cfg = cfg_for_test(6);
         let prices: Vec<f64> = (0..512).map(|i| 100.0 + i as f64 * 0.2).collect();
-        let label = hurst_label_for_symbol(&prices, &cfg)
-            .expect("strong trend should produce a label");
+        let label =
+            hurst_label_for_symbol(&prices, &cfg).expect("strong trend should produce a label");
         // Pure deterministic trend ⇒ Hurst saturates near 1.0 ⇒ Persistent.
         assert_eq!(label, RegimeLabel::Persistent);
     }
@@ -570,7 +563,9 @@ mod tests {
         let mut walk = Vec::with_capacity(512);
         walk.push(price);
         for _ in 0..511 {
-            state = state.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1);
+            state = state
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1);
             let u = ((state >> 32) as u32) as f64 / u32::MAX as f64;
             let step = (u - 0.5) * 0.01;
             price *= 1.0 + step;
@@ -597,7 +592,8 @@ mod tests {
                 RegimeLabel::Random
             };
             assert_eq!(
-                label, expected,
+                label,
+                expected,
                 "label/threshold disagreement at H={h:.4} for series of len {}",
                 prices.len()
             );
@@ -742,10 +738,7 @@ mod tests {
         // bb_breakout 出場 + bb_reversion 入場：對 AntiPersistent。
         let s = RegimeLabel::AntiPersistent.as_legacy_str();
         assert_eq!(s, "mean_reverting");
-        assert_eq!(
-            RegimeLabel::from_legacy_str(s),
-            RegimeLabel::AntiPersistent
-        );
+        assert_eq!(RegimeLabel::from_legacy_str(s), RegimeLabel::AntiPersistent);
 
         // bb_breakout exit fallback: Random.
         // bb_breakout 出場 fallback：Random。

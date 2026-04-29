@@ -155,8 +155,7 @@ impl ClaudeTeacher {
             // collapses the duplicate row instead of double-billing.
             // E5-FN-2 Plan N：鑄造確定性 (request_id, event_time_ms) 一次；
             // 本點重試會沿用 tuple，hypertable PK 折疊重複列而非雙重計費。
-            let (request_id, event_time_ms) =
-                crate::ai_budget::make_request_id("teacher");
+            let (request_id, event_time_ms) = crate::ai_budget::make_request_id("teacher");
             match budget
                 .record_usage(
                     SCOPE_AGENT_TEACHER,

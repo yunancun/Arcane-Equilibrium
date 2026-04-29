@@ -112,8 +112,8 @@ pub(crate) async fn write_checkpoint(
     .execute(pool)
     .await?;
     debug!(
-        engine_mode, peak_balance, session_start_ts_ms,
-        "P1-5 A2: checkpoint UPSERT / 已持久化"
+        engine_mode,
+        peak_balance, session_start_ts_ms, "P1-5 A2: checkpoint UPSERT / 已持久化"
     );
     Ok(())
 }
@@ -127,14 +127,14 @@ pub(crate) async fn write_checkpoint(
 /// 中文: 刪除 `engine_mode` 的 checkpoint row — IPC reset_drawdown_baseline 的
 ///       DB 側。記憶體重置後呼叫本函式，避免下次重啟復活舊 peak。無 row 時
 ///       也回 Ok（DELETE 冪等）。
-pub(crate) async fn delete_checkpoint(
-    pool: &PgPool,
-    engine_mode: &str,
-) -> Result<(), sqlx::Error> {
+pub(crate) async fn delete_checkpoint(pool: &PgPool, engine_mode: &str) -> Result<(), sqlx::Error> {
     sqlx::query("DELETE FROM trading.paper_state_checkpoint WHERE engine_mode = $1")
         .bind(engine_mode)
         .execute(pool)
         .await?;
-    debug!(engine_mode, "P1-5 A2: checkpoint row DELETED / 已刪除 checkpoint row");
+    debug!(
+        engine_mode,
+        "P1-5 A2: checkpoint row DELETED / 已刪除 checkpoint row"
+    );
     Ok(())
 }

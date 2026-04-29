@@ -191,8 +191,7 @@ impl UnknownHandlerGuard {
             topics.len()
         };
 
-        let should_trigger =
-            unique_count >= UNIQUE_THRESHOLD || total_count >= TOTAL_THRESHOLD;
+        let should_trigger = unique_count >= UNIQUE_THRESHOLD || total_count >= TOTAL_THRESHOLD;
 
         if should_trigger {
             self.forced_reconnect_total.fetch_add(1, Ordering::Relaxed);
@@ -278,8 +277,14 @@ mod tests {
             );
         }
         let (total, forced) = guard.snapshot_metrics();
-        assert_eq!(total, 1000, "unknown_total must accumulate even when disarmed");
-        assert_eq!(forced, 0, "forced_reconnect_total must remain 0 when disarmed");
+        assert_eq!(
+            total, 1000,
+            "unknown_total must accumulate even when disarmed"
+        );
+        assert_eq!(
+            forced, 0,
+            "forced_reconnect_total must remain 0 when disarmed"
+        );
     }
 
     /// 3 unique unknowns within window trigger reconnect.

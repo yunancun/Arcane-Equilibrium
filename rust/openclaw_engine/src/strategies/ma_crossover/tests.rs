@@ -98,13 +98,7 @@ fn ctx_with_hurst(
 
 /// Helper: build a TickContext with sma_50 for higher-TF testing.
 /// 輔助函數：用 sma_50 構建 TickContext 以測試較高時間框架。
-fn ctx_with_sma50(
-    sma_20: f64,
-    kama: f64,
-    adx: f64,
-    ts: u64,
-    sma_50: f64,
-) -> TickContext<'static> {
+fn ctx_with_sma50(sma_20: f64, kama: f64, adx: f64, ts: u64, sma_50: f64) -> TickContext<'static> {
     let ind = Box::leak(Box::new(IndicatorSnapshot {
         sma_20: Some(sma_20),
         sma_50: Some(sma_50),
@@ -454,11 +448,11 @@ fn test_conf_scale_applied_to_emit() {
     let mut s = MaCrossover::new();
     s.min_persistence_ms = 0; // disable persistence for unit tests
     s.set_conf_scale(0.5);
-    let intent = s.make_intent(&ctx, true, 0.8);
+    let intent = s.make_intent(&ctx, true, 0.8).expect("market intent");
     assert!((intent.confidence - 0.4).abs() < 1e-10);
 
     s.set_conf_scale(2.0);
-    let intent = s.make_intent(&ctx, true, 0.9);
+    let intent = s.make_intent(&ctx, true, 0.9).expect("market intent");
     assert!((intent.confidence - 1.0).abs() < 1e-10); // clamped
 }
 

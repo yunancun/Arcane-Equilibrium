@@ -13,7 +13,7 @@
 //!   adaptive）、`set_fee_rate`，以及 `update_params` / `get_params` 來回對。
 //!   所有邏輯 / 欄位初始化 / 預設值與拆前逐字節相同。
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use tracing::info;
 
@@ -72,6 +72,7 @@ impl GridTrading {
             // G7-09c Phase 2: default 60s exchange-reject cooldown.
             // G7-09c Phase 2：交易所拒絕預設冷卻 60 秒。
             reject_cooldown_ms: 60_000,
+            blocked_symbols: HashSet::new(),
         }
     }
 
@@ -120,6 +121,7 @@ impl GridTrading {
             // G7-09c Phase 2: default 60s exchange-reject cooldown.
             // G7-09c Phase 2：交易所拒絕預設冷卻 60 秒。
             reject_cooldown_ms: 60_000,
+            blocked_symbols: HashSet::new(),
         }
     }
 
@@ -182,6 +184,7 @@ impl GridTrading {
             // G7-09c Phase 2: default 60s exchange-reject cooldown.
             // G7-09c Phase 2：交易所拒絕預設冷卻 60 秒。
             reject_cooldown_ms: 60_000,
+            blocked_symbols: HashSet::new(),
         }
     }
 
@@ -219,8 +222,7 @@ impl GridTrading {
         // misconfiguration; prefer the clamped value to silent failure.
         // EDGE-P2-3 Phase 1B-3.1：賦值時 clamp 超時至支援區間，1B-3.2 的 sweep
         // 可直接讀取不必再 clamp。超界值屬 operator 誤配，採 clamp 不靜默失敗。
-        self.maker_limit_timeout_ms =
-            clamp_maker_limit_timeout_ms(params.maker_limit_timeout_ms);
+        self.maker_limit_timeout_ms = clamp_maker_limit_timeout_ms(params.maker_limit_timeout_ms);
         // G7-09c Phase 1: hot-reload BBO buffer (validate() bounds [0,10]).
         // G7-09c Phase 1：熱重載 BBO buffer，validate 範圍 [0,10]。
         self.maker_price_buffer_ticks = params.maker_price_buffer_ticks;
@@ -228,6 +230,12 @@ impl GridTrading {
         // cooldown (validate() bounds [5_000, 600_000]).
         // G7-09c Phase 2：熱重載 reject_cooldown_ms，validate 範圍 [5_000, 600_000]。
         self.reject_cooldown_ms = params.reject_cooldown_ms;
+        self.blocked_symbols = params
+            .blocked_symbols
+            .iter()
+            .map(|s| s.trim().to_ascii_uppercase())
+            .filter(|s| !s.is_empty())
+            .collect();
         info!(
             strategy = "grid_trading",
             grid_count = self.grid_count,
@@ -257,6 +265,11 @@ impl GridTrading {
             // G7-09c Phase 2: round-trip reject cooldown for IPC consumers.
             // G7-09c Phase 2：reject_cooldown_ms 經 IPC 來回。
             reject_cooldown_ms: self.reject_cooldown_ms,
+            blocked_symbols: {
+                let mut symbols: Vec<String> = self.blocked_symbols.iter().cloned().collect();
+                symbols.sort();
+                symbols
+            },
         }
     }
 }

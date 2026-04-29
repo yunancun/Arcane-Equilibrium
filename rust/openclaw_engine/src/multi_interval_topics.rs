@@ -306,10 +306,16 @@ mod tests {
         let topics = multi_symbol_subscriptions(&["BTCUSDT", "ETHUSDT"]);
         // First 7 entries must all be BTCUSDT topics, next 7 must all be ETHUSDT.
         for t in &topics[0..7] {
-            assert!(t.ends_with("BTCUSDT"), "expected BTCUSDT prefix group, got {t}");
+            assert!(
+                t.ends_with("BTCUSDT"),
+                "expected BTCUSDT prefix group, got {t}"
+            );
         }
         for t in &topics[7..14] {
-            assert!(t.ends_with("ETHUSDT"), "expected ETHUSDT prefix group, got {t}");
+            assert!(
+                t.ends_with("ETHUSDT"),
+                "expected ETHUSDT prefix group, got {t}"
+            );
         }
     }
 }

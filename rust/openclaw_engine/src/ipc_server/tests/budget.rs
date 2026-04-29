@@ -101,11 +101,9 @@ async fn test_e4_5_handle_update_ai_budget_config_happy_parse_reaches_slot() {
         .as_ref()
         .expect("uninitialized slot must fail-closed with ERR_INTERNAL, not -32602");
     assert_eq!(
-        err.code,
-        ERR_INTERNAL,
+        err.code, ERR_INTERNAL,
         "expected ERR_INTERNAL ({ERR_INTERNAL}) proving params parsed OK, got code={} msg={:?}",
-        err.code,
-        err.message
+        err.code, err.message
     );
     // Verify it's the specific slot-guard message, not a random ERR_INTERNAL.
     // 驗證是特定槽位守衛訊息而非隨意 -32603。
@@ -136,8 +134,14 @@ async fn test_e4_5_handle_update_ai_budget_config_error_missing_scope_exact_mess
         "monthly_usd": 10.0
     });
     let resp = handle_update_ai_budget_config(serde_json::json!(10002), &params, &slot).await;
-    let err = resp.error.expect("missing 'scope' must produce an error response");
-    assert_eq!(err.code, -32602, "expected ERR_INVALID_PARAMS, got {}", err.code);
+    let err = resp
+        .error
+        .expect("missing 'scope' must produce an error response");
+    assert_eq!(
+        err.code, -32602,
+        "expected ERR_INVALID_PARAMS, got {}",
+        err.code
+    );
     // Byte-for-byte — THIS is the load-bearing assertion per the audit finding.
     // If this message changes to e.g. "'scope' is missing" or drops the
     // "(string)" suffix, Python pytest breaks on the wire contract.

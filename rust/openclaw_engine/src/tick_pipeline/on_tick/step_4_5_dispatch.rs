@@ -25,8 +25,9 @@ use openclaw_core::signals::Signal;
 use tracing::{info, warn};
 
 use super::super::on_tick_helpers::{
-    build_intent, make_context_id, make_fill_id, make_order_id, persist_intent, persist_verdict,
-    push_capped, push_display_intent,
+    build_intent, make_context_id, make_fill_id, make_order_id, make_strategy_signal_id,
+    persist_intent, persist_strategy_signal, persist_verdict, push_capped, push_display_intent,
+    IntentScannerContext,
 };
 use super::super::*;
 
@@ -227,13 +228,46 @@ impl TickPipeline {
                         if let Some(ref reg) = self.symbol_registry {
                             if !reg.is_active(&intent.symbol) {
                                 tracing::debug!(
-                                    strategy = %strategy.name(),
-                                    symbol = %intent.symbol,
+                                        strategy = %strategy.name(),
+                                        symbol = %intent.symbol,
                                     "SCANNER-GATE: new entry blocked — symbol not in scanner universe"
                                 );
                                 continue;
                             }
                         }
+                        let context_id = make_context_id(em, &intent.symbol, event.ts_ms);
+                        let signal_id = make_strategy_signal_id(
+                            em,
+                            &intent.strategy,
+                            &intent.symbol,
+                            event.ts_ms,
+                        );
+                        let scanner_ctx: Option<IntentScannerContext> =
+                            self.symbol_registry.as_ref().and_then(|reg| {
+                                let scan = reg.last_scan()?;
+                                let candidate =
+                                    scan.candidates.iter().find(|c| c.symbol == intent.symbol)?;
+                                Some(IntentScannerContext {
+                                    scan_id: scan.scan_id.clone(),
+                                    best_strategy: candidate
+                                        .best_strategy
+                                        .as_estimate_key()
+                                        .to_string(),
+                                    edge_bps: candidate.edge_bps,
+                                    edge_n: candidate.edge_n,
+                                    edge_status: candidate.edge_status.clone(),
+                                    route_mode: candidate.route_mode.clone(),
+                                    final_score: candidate.final_score,
+                                    raw_score: candidate.raw_score,
+                                })
+                            });
+                        persist_strategy_signal(
+                            &self.trading_tx,
+                            &signal_id,
+                            &context_id,
+                            event.ts_ms,
+                            intent,
+                        );
                         if is_exchange_mode {
                             // ═══ EXCHANGE MODE: gates only, send order to exchange ═══
                             // ═══ 交易所模式：僅過門禁，發送訂單到交易所 ═══
@@ -250,7 +284,6 @@ impl TickPipeline {
                                     atr_value,
                                     &self.paper_state,
                                 );
-                            let context_id = make_context_id(em, &intent.symbol, event.ts_ms);
                             // P0-6 方案 A: endpoint-aware profile — LiveDemo must get
                             // Validation (moderate cost gate, cold-start allowed); only
                             // Live + Mainnet keeps Production (strict fail-closed).
@@ -334,10 +367,13 @@ impl TickPipeline {
                                     &self.trading_tx,
                                     em,
                                     event.ts_ms,
+                                    &signal_id,
+                                    &context_id,
                                     intent,
                                     final_qty,
                                     event.last_price,
                                     em,
+                                    scanner_ctx.as_ref(),
                                 );
 
                                 // Dispatch to exchange / 派發到交易所
@@ -457,7 +493,6 @@ impl TickPipeline {
                                     atr_value,
                                     &self.paper_state,
                                 );
-                            let context_id = make_context_id(em, &intent.symbol, event.ts_ms);
                             // P0-6 方案 A: endpoint-aware profile (mirror of exchange
                             // branch). LiveDemo → Validation; Live + Mainnet → Production.
                             // Inlined free-fn call sidesteps orchestrator mutable borrow.
@@ -512,10 +547,13 @@ impl TickPipeline {
                                     &self.trading_tx,
                                     em,
                                     event.ts_ms,
+                                    &signal_id,
+                                    &context_id,
                                     intent,
                                     result.approved_qty,
                                     event.last_price,
                                     em,
+                                    scanner_ctx.as_ref(),
                                 );
 
                                 // EDGE-P2-3 Phase 1B-4.2: router classified
@@ -602,8 +640,8 @@ impl TickPipeline {
                                     // Fill row (same em, symbol, ts_ms → same context_id).
                                     // EDGE-P3-1 R2：僅開新倉時打 entry_context_id；加倉不覆蓋。
                                     if was_open && realized_pnl == 0.0 {
-                                        let ctx = make_context_id(em, &intent.symbol, event.ts_ms);
-                                        self.paper_state.set_entry_context_id(&intent.symbol, &ctx);
+                                        self.paper_state
+                                            .set_entry_context_id(&intent.symbol, &context_id);
                                     }
                                     // DYNAMIC-RISK-1: non-zero realized_pnl is a close — feed sizer.
                                     // DYNAMIC-RISK-1：realized_pnl 非零代表平倉，餵入動態風險調整器。
@@ -684,11 +722,7 @@ impl TickPipeline {
                                                 fill_latency_ms: None,
                                                 realized_pnl,
                                                 strategy_name: intent.strategy.clone(),
-                                                context_id: make_context_id(
-                                                    em,
-                                                    &intent.symbol,
-                                                    event.ts_ms,
-                                                ),
+                                                context_id: context_id.clone(),
                                                 entry_context_id: String::new(),
                                                 engine_mode: em.to_string(),
                                                 // INFRA-PREBUILD-1 Part A: strategy open fill.

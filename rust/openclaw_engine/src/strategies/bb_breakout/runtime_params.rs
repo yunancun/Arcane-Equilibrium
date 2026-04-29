@@ -53,9 +53,8 @@ impl BbBreakout {
         self.maker_price_offset_bps = params.maker_price_offset_bps;
         // Clamp at assignment so runtime values always satisfy the invariant.
         // 於寫入時 clamp，運行時值恆在區間內。
-        self.maker_limit_timeout_ms = super::super::grid_trading::clamp_maker_limit_timeout_ms(
-            params.maker_limit_timeout_ms,
-        );
+        self.maker_limit_timeout_ms =
+            super::super::grid_trading::clamp_maker_limit_timeout_ms(params.maker_limit_timeout_ms);
         // G7-09c Phase 1: hot-reload BBO buffer (validate() bounds [0, 10]).
         // G7-09c Phase 1：熱重載 BBO buffer（validate 範圍 [0, 10]）。
         self.maker_price_buffer_ticks = params.maker_price_buffer_ticks;

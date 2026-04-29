@@ -2,7 +2,10 @@
 //! Dispatch / JSON-RPC 基本請求處理測試。
 
 use super::super::*;
-use super::{empty_budget_slot, empty_cost_edge_advisor_slot, empty_h_state_cache_slot, empty_teacher_slot, make_test_config, make_test_data_dir};
+use super::{
+    empty_budget_slot, empty_cost_edge_advisor_slot, empty_h_state_cache_slot, empty_teacher_slot,
+    make_test_config, make_test_data_dir,
+};
 
 #[tokio::test]
 async fn test_ipc_socket_permissions_0o600() {

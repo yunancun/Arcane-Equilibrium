@@ -105,7 +105,8 @@ Current strategy-edge packet:
 - primary metric for strategy improvement is post-fee `net_bps_after_fee`; PNL and winrate remain secondary references only
 - post-fix sample window starts at `2026-04-29 12:27:53 CEST`, when live strategy params were reloaded with maker-entry enabled
 - do not respond to the current losses by adding more risk layers by default; focus on execution fee reduction, maker fill quality, grid regime/spacing repairs, robust negative symbol disable decisions, and MA whipsaw/R:R improvements
-- relevant runtime sentinels: `[32] maker_entry_intent_drift` for intent shape and `[33] maker_fill_rate` for fee-drop / maker-like settlement
+- implementation checkpoint `2026-04-29 17:36 CEST`: demo/live_demo strategy-open intents now get a strategy-signal attribution anchor (`signal_id` + `context_id`), scanner scan snapshots are persisted, intent details carry scanner/edge route metadata, fee refresh is per exchange binding instead of single shared priority, maker fallback skips when BBO/tick_size is unsafe, and scanner `edge_routing` / grid `blocked_symbols` are real configurable knobs
+- relevant runtime sentinels: `[32] maker_entry_intent_drift` for intent shape, `[33] maker_fill_rate` for fee-drop / maker-like settlement, and `[34] intent_signal_attribution` for demo/live_demo/live attribution-chain integrity
 
 Claude memory sources used for alignment:
 - `memory/MEMORY.md`

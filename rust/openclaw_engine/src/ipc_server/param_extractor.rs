@@ -80,11 +80,7 @@ pub(crate) const ERR_INVALID_PARAMS: i64 = -32602;
 /// identical to hand-written sites in ``handlers.rs``.
 /// 錯誤訊息固定為 ``"missing or empty '<key>' (string)"``，與 handlers.rs
 /// 手寫點完全一致。
-pub(crate) fn require_str(
-    params: &Value,
-    key: &str,
-    id: Value,
-) -> Result<String, JsonRpcResponse> {
+pub(crate) fn require_str(params: &Value, key: &str, id: Value) -> Result<String, JsonRpcResponse> {
     match params.get(key).and_then(|v| v.as_str()) {
         Some(s) if !s.is_empty() => Ok(s.to_string()),
         _ => Err(JsonRpcResponse::error(
@@ -128,16 +124,15 @@ pub(crate) fn require_str_with_msg(
 //     待有 handler 採用此二態版本後即可移除本屬性。
 #[allow(dead_code)]
 pub(crate) fn optional_str<'a>(params: &'a Value, key: &str) -> Option<&'a str> {
-    params.get(key).and_then(|v| v.as_str()).filter(|s| !s.is_empty())
+    params
+        .get(key)
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
 }
 
 /// Fetch an optional string with a default fallback.
 /// 取可選字串，缺失時回退到預設值。
-pub(crate) fn optional_str_or<'a>(
-    params: &'a Value,
-    key: &str,
-    default: &'a str,
-) -> &'a str {
+pub(crate) fn optional_str_or<'a>(params: &'a Value, key: &str, default: &'a str) -> &'a str {
     optional_str(params, key).unwrap_or(default)
 }
 
@@ -151,11 +146,7 @@ pub(crate) fn optional_str_or<'a>(
 // TODO(E5-P1-5-FUP-2)：目前 handlers 僅用 `require_non_negative_f64` 或
 //     二態 `optional_f64`；首個 unconstrained 必填 f64 call site 落地後移除。
 #[allow(dead_code)]
-pub(crate) fn require_f64(
-    params: &Value,
-    key: &str,
-    id: Value,
-) -> Result<f64, JsonRpcResponse> {
+pub(crate) fn require_f64(params: &Value, key: &str, id: Value) -> Result<f64, JsonRpcResponse> {
     match params.get(key).and_then(|v| v.as_f64()) {
         Some(v) if v.is_finite() => Ok(v),
         _ => Err(JsonRpcResponse::error(
@@ -206,11 +197,7 @@ pub(crate) fn optional_u64(params: &Value, key: &str) -> Option<u64> {
 // TODO(E5-P1-5-FUP-2)：risk.rs 用 `optional_bool`（如 h0_shadow_mode 可選）。
 //     未來需要強制指定的布林（例如 dry-run flag）時再採用此必填版本。
 #[allow(dead_code)]
-pub(crate) fn require_bool(
-    params: &Value,
-    key: &str,
-    id: Value,
-) -> Result<bool, JsonRpcResponse> {
+pub(crate) fn require_bool(params: &Value, key: &str, id: Value) -> Result<bool, JsonRpcResponse> {
     match params.get(key).and_then(|v| v.as_bool()) {
         Some(v) => Ok(v),
         None => Err(JsonRpcResponse::error(

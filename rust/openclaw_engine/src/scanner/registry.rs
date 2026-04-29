@@ -292,6 +292,9 @@ mod tests {
             turnover_24h: 60_000_000.0,
             edge_bonus: 5.0,
             edge_n: 0,
+            edge_bps: None,
+            edge_status: "unexplored".to_string(),
+            route_mode: "exploration".to_string(),
             beta_proxy: Some(0.5),
             sector: "other".to_string(),
         }

@@ -18,7 +18,6 @@
 
 use super::*;
 
-
 // ===========================================================================
 // G2-03 (2026-04-26) — StrategyOverride SL/TP override validation tests
 // G2-03（2026-04-26）—— StrategyOverride SL/TP 覆蓋驗證測試
@@ -246,7 +245,11 @@ fn test_g2_03_real_toml_files_load_with_ma_crossover_section() {
             .per_strategy
             .get("ma_crossover")
             .unwrap_or_else(|| panic!("[per_strategy.ma_crossover] missing in {}", toml_name));
-        assert!(ma.enabled, "ma_crossover.enabled must be true in {}", toml_name);
+        assert!(
+            ma.enabled,
+            "ma_crossover.enabled must be true in {}",
+            toml_name
+        );
         assert_eq!(
             ma.stop_loss_max_pct_override, None,
             "{}: sl override must remain commented out (None)",

@@ -638,7 +638,11 @@ mod tests {
         // still classify this as Physical, not Hybrid.
         // shrunk_bps 0 → score 0.5（無 clamp）；低於 confirm_threshold 0.70 → Physical。
         let m = build_ml_inference_shadow(Some(0.0), None).expect("finite input");
-        assert!((m.score - 0.5).abs() < 1e-6, "shrunk_bps 0 must map to score 0.5, got {}", m.score);
+        assert!(
+            (m.score - 0.5).abs() < 1e-6,
+            "shrunk_bps 0 must map to score 0.5, got {}",
+            m.score
+        );
     }
 
     #[test]
@@ -678,9 +682,7 @@ mod tests {
                 physical_reason: "r".into(),
                 ml_score: 0.5,
             },
-            ExitSource::Disabled {
-                reason: "d".into(),
-            },
+            ExitSource::Disabled { reason: "d".into() },
         ];
         // Length parity: any new variant added without updating const → red.
         // 長度等價：variant 擴充未同步 const 即紅。
@@ -738,8 +740,7 @@ mod tests {
         // age_secs > max_model_age_secs (7d) → Disabled fallback path.
         // 8 天齡期必須傳遞 → combine_exit_decision 偵測 > 7d → Disabled。
         let eight_days_secs: u64 = 8 * 24 * 3600;
-        let m = build_ml_inference_shadow(Some(5.0), Some(eight_days_secs))
-            .expect("finite input");
+        let m = build_ml_inference_shadow(Some(5.0), Some(eight_days_secs)).expect("finite input");
         assert_eq!(m.age_secs, eight_days_secs);
     }
 
@@ -758,8 +759,8 @@ mod tests {
             eight_days_secs > cfg.max_model_age_secs,
             "test premise: 8d must exceed max_model_age_secs 7d"
         );
-        let mock = build_ml_inference_shadow(Some(5.0), Some(eight_days_secs))
-            .expect("finite input");
+        let mock =
+            build_ml_inference_shadow(Some(5.0), Some(eight_days_secs)).expect("finite input");
         let (sig, src) = combine_exit_decision(
             PhysicalDecision::Lock("PHYS-LOCK: giveback".to_string()),
             Some(mock),

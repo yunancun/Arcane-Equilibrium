@@ -43,7 +43,10 @@ fn test_sign_known_vector() {
     //     亦驗證與原內嵌公式的字節級一致性（同輸入 → 同 64 字元小寫 hex）。
     let expected = crate::common::bybit_signer::hmac_sha256_hex(
         "TESTSECRET456",
-        &format!("{}{}{}{}", timestamp, client.api_key, client.recv_window, params),
+        &format!(
+            "{}{}{}{}",
+            timestamp, client.api_key, client.recv_window, params
+        ),
     );
 
     let actual = client.sign(timestamp, params).unwrap();

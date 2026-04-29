@@ -199,16 +199,19 @@ impl Strategy for MaCrossover {
                     let confluence_score = score.map(|s| s as f32);
                     let persistence_elapsed_ms =
                         self.persistence.elapsed_ms(ctx.symbol, ctx.timestamp_ms);
-                    intents.push(StrategyAction::Open(self.make_intent_with_qty(
+                    let maybe_intent = self.make_intent_with_qty(
                         ctx,
                         is_long,
                         conf_with_score,
                         qty,
                         confluence_score,
                         persistence_elapsed_ms,
-                    )));
-                    self.positions.insert(ctx.symbol.to_string(), is_long);
-                    self.cooldown.record_signal(ctx.symbol, ctx.timestamp_ms);
+                    );
+                    if let Some(intent) = maybe_intent {
+                        intents.push(StrategyAction::Open(intent));
+                        self.positions.insert(ctx.symbol.to_string(), is_long);
+                        self.cooldown.record_signal(ctx.symbol, ctx.timestamp_ms);
+                    }
                 }
             }
             Some(is_long) => {

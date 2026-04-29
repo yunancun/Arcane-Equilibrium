@@ -817,8 +817,7 @@ fn retriage_dust_freezes_bybit_sync_position() {
     let mut s = PaperState::new(10_000.0);
     seed_bybit_sync(&mut s, &[("PNUTUSDT", true, 3.0, 0.06644)]);
 
-    let outcome =
-        s.retriage_synthetic_owner("PNUTUSDT", 0.06644, true, "ma_crossover", Some(5.0));
+    let outcome = s.retriage_synthetic_owner("PNUTUSDT", 0.06644, true, "ma_crossover", Some(5.0));
     match outcome {
         RetriageOutcome::FrozenAsDust {
             was_downgraded,
@@ -851,8 +850,7 @@ fn retriage_dust_stays_frozen_is_idempotent() {
 
     // Second call — already frozen, should be idempotent no-op log-wise.
     // 第二次呼叫 — 已凍結，應為 idempotent、不重複發日誌。
-    let outcome =
-        s.retriage_synthetic_owner("PNUTUSDT", 0.06644, true, "ma_crossover", Some(5.0));
+    let outcome = s.retriage_synthetic_owner("PNUTUSDT", 0.06644, true, "ma_crossover", Some(5.0));
     match outcome {
         RetriageOutcome::FrozenAsDust { was_downgraded, .. } => {
             assert!(!was_downgraded);
@@ -904,8 +902,7 @@ fn retriage_promotes_bybit_sync_directly_when_in_universe() {
     let mut s = PaperState::new(10_000.0);
     seed_bybit_sync(&mut s, &[("ETHUSDT", false, 0.5, 3000.0)]);
 
-    let outcome =
-        s.retriage_synthetic_owner("ETHUSDT", 3000.0, true, "ma_crossover", Some(5.0));
+    let outcome = s.retriage_synthetic_owner("ETHUSDT", 3000.0, true, "ma_crossover", Some(5.0));
     match outcome {
         RetriageOutcome::Promoted { from, to, .. } => {
             assert_eq!(from, "bybit_sync");
@@ -927,8 +924,7 @@ fn retriage_promotes_orphan_adopted_when_in_universe() {
         "orphan_adopted"
     );
 
-    let outcome =
-        s.retriage_synthetic_owner("BTCUSDT", 50000.0, true, "ma_crossover", Some(5.0));
+    let outcome = s.retriage_synthetic_owner("BTCUSDT", 50000.0, true, "ma_crossover", Some(5.0));
     match outcome {
         RetriageOutcome::Promoted { from, to, .. } => {
             assert_eq!(from, "orphan_adopted");
@@ -1175,8 +1171,7 @@ fn oracle_entry_notional_accumulate_bit_exact() {
 fn oracle_weighted_avg_entry_price_bit_exact() {
     let mut s = PaperState::new(10_000.0);
     s.apply_fill("BTC", true, 0.1, 50_000.0, 0.0, 0, "test");
-    let oracle_avg =
-        (50_000.0_f64 * 0.1_f64 + 52_000.0_f64 * 0.1_f64) / (0.1_f64 + 0.1_f64);
+    let oracle_avg = (50_000.0_f64 * 0.1_f64 + 52_000.0_f64 * 0.1_f64) / (0.1_f64 + 0.1_f64);
     s.apply_fill("BTC", true, 0.1, 52_000.0, 0.0, 1000, "test");
     let pos = s.get_position("BTC").unwrap();
     assert_eq!(
@@ -1384,8 +1379,8 @@ fn evict_on_dust_t1_reduce_position_sub_floor_residue_evicts() {
     // T1：reduce_position 留下 sub-floor 殘餘 → 後置 evict_if_dust 移除。
     let mut s = PaperState::new(10_000.0);
     s.set_dust_floor_usd(1.0); // 1.0 USD floor (default)
-    // Open 1.0 unit @ 50_000.0 → notional = 50_000 USD (well above floor).
-    // 開 1.0 單位 @ 50000，名目 50000 USD（遠高於 floor）。
+                               // Open 1.0 unit @ 50_000.0 → notional = 50_000 USD (well above floor).
+                               // 開 1.0 單位 @ 50000，名目 50000 USD（遠高於 floor）。
     s.apply_fill("BTCUSDT", true, 1.0, 50_000.0, 0.0, 1_000, "test");
     assert_eq!(s.position_count(), 1);
     // Reduce by 0.999_999_999_98 leaving 2e-11 → notional = 2e-11 * 50000
@@ -1434,7 +1429,15 @@ fn evict_on_dust_t2a_apply_fill_opposite_partial_residue_evicts() {
     // Reverse fill 0.999_999_999_98 — leaves 2e-11 at fill_price 50000 →
     // notional = 1e-6 USD < 1 USD floor → T2a fires.
     // 反向 0.999...98 → 殘餘名目 1e-6 USD < floor 1 USD → T2a 觸發。
-    s.apply_fill("BTCUSDT", false, 0.999_999_999_98, 50_000.0, 0.0, 2_000, "test");
+    s.apply_fill(
+        "BTCUSDT",
+        false,
+        0.999_999_999_98,
+        50_000.0,
+        0.0,
+        2_000,
+        "test",
+    );
     assert_eq!(
         s.position_count(),
         0,
@@ -1603,10 +1606,7 @@ fn evict_on_dust_failclosed_stale_price_skips_symbol() {
     // 用 0.0 覆蓋模擬污染價格。
     s.set_latest_price("STRKUSDT", 0.0);
     let evict = s.evict_if_dust("STRKUSDT", 0.0, "test_stale_price");
-    assert!(
-        evict.is_none(),
-        "stale price must skip evict (return None)"
-    );
+    assert!(evict.is_none(), "stale price must skip evict (return None)");
     assert_eq!(s.position_count(), 1, "position preserved on stale price");
     assert_eq!(s.dust_evictions_total(), 0);
 }

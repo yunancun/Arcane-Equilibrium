@@ -13,9 +13,9 @@
 
 use crate::bybit_rest_client::{BybitApiError, BybitRestClient, BybitResult};
 use crate::instrument_info::InstrumentInfoCache;
-use std::sync::Arc;
 #[cfg(test)]
 use std::sync::atomic::AtomicU64;
+use std::sync::Arc;
 use tracing::{debug, info};
 
 // ---------------------------------------------------------------------------

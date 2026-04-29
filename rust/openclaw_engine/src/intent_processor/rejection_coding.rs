@@ -78,7 +78,10 @@ pub(super) enum RejectionCode {
 
     /// Gate 3: confidence below min_confidence threshold.
     /// Gate 3：confidence 低於最小門檻。
-    CostGateConfidence { confidence: f64, min_confidence: f64 },
+    CostGateConfidence {
+        confidence: f64,
+        min_confidence: f64,
+    },
 
     /// Gate 3 · SEC-11: ATR unavailable fail-closed.
     /// Gate 3 · SEC-11：ATR 不可用失敗關閉。
@@ -366,7 +369,10 @@ mod tests {
             existing_is_long: true,
             existing_qty: 0.5,
         };
-        assert_eq!(code.format(), "duplicate_position: BTCUSDT already LONG 0.5");
+        assert_eq!(
+            code.format(),
+            "duplicate_position: BTCUSDT already LONG 0.5"
+        );
 
         let code_short = RejectionCode::DuplicatePosition {
             symbol: "ETHUSDT".into(),

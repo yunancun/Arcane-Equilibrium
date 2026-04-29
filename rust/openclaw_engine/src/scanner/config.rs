@@ -296,6 +296,113 @@ impl CorrelationLimits {
     }
 }
 
+// ─── EdgeRoutingConfig ─────────────────────────────────────────────────────────
+
+fn default_edge_bonus_weight() -> f64 {
+    0.5
+}
+
+fn default_edge_bonus_min_bps() -> f64 {
+    -30.0
+}
+
+fn default_edge_bonus_max_bps() -> f64 {
+    10.0
+}
+
+fn default_unexplored_bonus() -> f64 {
+    2.0
+}
+
+fn default_robust_negative_min_trades() -> u32 {
+    30
+}
+
+fn default_robust_negative_bps_threshold() -> f64 {
+    0.0
+}
+
+fn default_robust_negative_score_cap() -> f64 {
+    35.0
+}
+
+/// Edge-aware scanner routing knobs. These defaults preserve the previous
+/// bonus formula for normal cells while preventing mature negative cells from
+/// dominating the active universe purely on raw scanner fitness.
+/// Edge-aware scanner 路由參數。正常 cell 保持原 bonus 公式；成熟負 edge cell
+/// 不再能只靠 scanner raw fitness 擠進主交易 universe。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EdgeRoutingConfig {
+    /// Multiplier from runtime edge bps to scanner score bonus.
+    /// runtime edge bps 轉 scanner score bonus 的權重。
+    #[serde(default = "default_edge_bonus_weight")]
+    pub bonus_weight: f64,
+    /// Minimum edge bonus after weighting.
+    /// 加權後 edge bonus 下限。
+    #[serde(default = "default_edge_bonus_min_bps")]
+    pub bonus_min: f64,
+    /// Maximum edge bonus after weighting.
+    /// 加權後 edge bonus 上限。
+    #[serde(default = "default_edge_bonus_max_bps")]
+    pub bonus_max: f64,
+    /// Small credit for unexplored strategy-symbol cells.
+    /// 未探索 strategy-symbol cell 的小額探索加分。
+    #[serde(default = "default_unexplored_bonus")]
+    pub unexplored_bonus: f64,
+    /// Sample count at which a negative edge cell is treated as mature.
+    /// 負 edge cell 被視為成熟所需樣本數。
+    #[serde(default = "default_robust_negative_min_trades")]
+    pub robust_negative_min_trades: u32,
+    /// Runtime bps threshold below which mature cells are robust-negative.
+    /// 成熟 cell 低於此 runtime bps 即視為 robust negative。
+    #[serde(default = "default_robust_negative_bps_threshold")]
+    pub robust_negative_bps_threshold: f64,
+    /// Score cap for mature negative cells. Set to 100 to effectively disable.
+    /// 成熟負 edge cell 的 scanner score 上限；設 100 可近似關閉。
+    #[serde(default = "default_robust_negative_score_cap")]
+    pub robust_negative_score_cap: f64,
+}
+
+impl Default for EdgeRoutingConfig {
+    fn default() -> Self {
+        Self {
+            bonus_weight: default_edge_bonus_weight(),
+            bonus_min: default_edge_bonus_min_bps(),
+            bonus_max: default_edge_bonus_max_bps(),
+            unexplored_bonus: default_unexplored_bonus(),
+            robust_negative_min_trades: default_robust_negative_min_trades(),
+            robust_negative_bps_threshold: default_robust_negative_bps_threshold(),
+            robust_negative_score_cap: default_robust_negative_score_cap(),
+        }
+    }
+}
+
+impl EdgeRoutingConfig {
+    fn validate(&self) -> Result<(), String> {
+        if !self.bonus_weight.is_finite() || self.bonus_weight < 0.0 {
+            return Err("edge_routing.bonus_weight must be finite and >= 0".into());
+        }
+        if !self.bonus_min.is_finite()
+            || !self.bonus_max.is_finite()
+            || self.bonus_min > self.bonus_max
+        {
+            return Err("edge_routing bonus_min/bonus_max invalid".into());
+        }
+        if !self.unexplored_bonus.is_finite() {
+            return Err("edge_routing.unexplored_bonus must be finite".into());
+        }
+        if !self.robust_negative_bps_threshold.is_finite() {
+            return Err("edge_routing.robust_negative_bps_threshold must be finite".into());
+        }
+        if !self.robust_negative_score_cap.is_finite()
+            || !(0.0..=100.0).contains(&self.robust_negative_score_cap)
+        {
+            return Err("edge_routing.robust_negative_score_cap must be in [0, 100]".into());
+        }
+        Ok(())
+    }
+}
+
 // ─── ScannerConfig ────────────────────────────────────────────────────────────
 
 /// Top-level scanner configuration.
@@ -318,6 +425,8 @@ pub struct ScannerConfig {
     pub anti_churn: AntiChurnConfig,
     #[serde(default)]
     pub correlation: CorrelationLimits,
+    #[serde(default)]
+    pub edge_routing: EdgeRoutingConfig,
 }
 
 impl ScannerConfig {
@@ -329,6 +438,7 @@ impl ScannerConfig {
         self.hard_filters.validate()?;
         self.anti_churn.validate()?;
         self.correlation.validate()?;
+        self.edge_routing.validate()?;
         Ok(())
     }
 }

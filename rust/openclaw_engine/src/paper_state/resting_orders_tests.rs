@@ -74,14 +74,19 @@ fn test_remove_by_link_id_returns_removed_and_decrements_count() {
     assert_eq!(removed.unwrap().order_link_id, "oc_1");
     assert_eq!(s.resting_limit_order_count_for("BTCUSDT"), 1);
     // Surviving order kept its FIFO position.
-    assert_eq!(s.resting_limit_orders_for("BTCUSDT")[0].order_link_id, "oc_2");
+    assert_eq!(
+        s.resting_limit_orders_for("BTCUSDT")[0].order_link_id,
+        "oc_2"
+    );
 }
 
 #[test]
 fn test_remove_by_link_id_missing_returns_none() {
     let mut s = PaperState::new(10_000.0);
     s.enqueue_resting_limit_order(make_order("oc_1", "BTCUSDT", 1_000, 46_000));
-    assert!(s.remove_resting_limit_order_by_link_id("oc_missing").is_none());
+    assert!(s
+        .remove_resting_limit_order_by_link_id("oc_missing")
+        .is_none());
     assert_eq!(s.resting_limit_order_count(), 1);
 }
 
@@ -133,7 +138,10 @@ fn test_seed_resting_orders_replaces_queue() {
     s.seed_resting_limit_orders(replacement);
     assert_eq!(s.resting_limit_order_count(), 1);
     assert_eq!(s.resting_limit_order_count_for("BTCUSDT"), 0);
-    assert_eq!(s.resting_limit_orders_for("SOLUSDT")[0].order_link_id, "oc_9");
+    assert_eq!(
+        s.resting_limit_orders_for("SOLUSDT")[0].order_link_id,
+        "oc_9"
+    );
 }
 
 // ── 1B-4.2: classifier + sweep tests ──
@@ -177,7 +185,14 @@ fn order_with_funding(
     deadline_ms: u64,
     funding_rate: f64,
 ) -> RestingLimitOrder {
-    let mut o = order_at(link_id, symbol, is_long, limit_price, submit_ts, deadline_ms);
+    let mut o = order_at(
+        link_id,
+        symbol,
+        is_long,
+        limit_price,
+        submit_ts,
+        deadline_ms,
+    );
     o.funding_rate_at_submit = funding_rate;
     o
 }
@@ -279,11 +294,8 @@ fn test_sweep_empty_queue_returns_empty_events() {
 fn test_sweep_timeout_drains_without_fill() {
     let mut s = PaperState::new(10_000.0);
     s.set_latest_price("BTCUSDT", 50_000.0);
-    s.enqueue_resting_limit_order(order_at(
-        "oc_to", "BTCUSDT", true, 49_000.0, 1_000, 2_000,
-    ));
-    let events =
-        s.sweep_resting_limit_orders_for_symbol("BTCUSDT", 48_000.0, 5_000, 0.0002, 0.0);
+    s.enqueue_resting_limit_order(order_at("oc_to", "BTCUSDT", true, 49_000.0, 1_000, 2_000));
+    let events = s.sweep_resting_limit_orders_for_symbol("BTCUSDT", 48_000.0, 5_000, 0.0002, 0.0);
     assert_eq!(events.len(), 1);
     match &events[0] {
         RestingFillEvent::Timedout { order } => {
@@ -300,13 +312,10 @@ fn test_sweep_timeout_drains_without_fill() {
 fn test_sweep_buy_cross_opens_position_at_limit_price() {
     let mut s = PaperState::new(10_000.0);
     s.set_latest_price("BTCUSDT", 50_000.0);
-    s.enqueue_resting_limit_order(order_at(
-        "oc_b", "BTCUSDT", true, 49_000.0, 1_000, 60_000,
-    ));
+    s.enqueue_resting_limit_order(order_at("oc_b", "BTCUSDT", true, 49_000.0, 1_000, 60_000));
     // Tick drops below limit — buy limit fills at the limit price, not tick.
     // Tick 跌破限價 — buy 限價以限價成交，非 tick 價。
-    let events =
-        s.sweep_resting_limit_orders_for_symbol("BTCUSDT", 48_900.0, 2_000, 0.0002, 0.0);
+    let events = s.sweep_resting_limit_orders_for_symbol("BTCUSDT", 48_900.0, 2_000, 0.0002, 0.0);
     assert_eq!(events.len(), 1);
     match &events[0] {
         RestingFillEvent::Filled {
@@ -340,16 +349,17 @@ fn test_sweep_buy_cross_opens_position_at_limit_price() {
 fn test_sweep_sell_cross_opens_short_at_limit_price() {
     let mut s = PaperState::new(10_000.0);
     s.set_latest_price("ETHUSDT", 3_000.0);
-    s.enqueue_resting_limit_order(order_at(
-        "oc_s", "ETHUSDT", false, 3_100.0, 1_000, 60_000,
-    ));
+    s.enqueue_resting_limit_order(order_at("oc_s", "ETHUSDT", false, 3_100.0, 1_000, 60_000));
     // Tick rises above limit — sell limit fills at limit price.
     // Tick 升至限價之上 — sell 限價以限價成交。
-    let events =
-        s.sweep_resting_limit_orders_for_symbol("ETHUSDT", 3_105.0, 2_000, 0.0002, 0.0);
+    let events = s.sweep_resting_limit_orders_for_symbol("ETHUSDT", 3_105.0, 2_000, 0.0002, 0.0);
     assert_eq!(events.len(), 1);
     match &events[0] {
-        RestingFillEvent::Filled { fill_price, true_cross, .. } => {
+        RestingFillEvent::Filled {
+            fill_price,
+            true_cross,
+            ..
+        } => {
             assert_eq!(*fill_price, 3_100.0);
             assert!(*true_cross);
         }
@@ -366,8 +376,7 @@ fn test_sweep_above_limit_buy_keeps_order() {
     s.enqueue_resting_limit_order(order_at(
         "oc_keep", "BTCUSDT", true, 49_000.0, 1_000, 60_000,
     ));
-    let events =
-        s.sweep_resting_limit_orders_for_symbol("BTCUSDT", 50_000.0, 2_000, 0.0002, 0.0);
+    let events = s.sweep_resting_limit_orders_for_symbol("BTCUSDT", 50_000.0, 2_000, 0.0002, 0.0);
     assert!(events.is_empty());
     assert_eq!(s.resting_limit_order_count_for("BTCUSDT"), 1);
     assert!(s.get_position("BTCUSDT").is_none());
@@ -378,11 +387,8 @@ fn test_sweep_same_tick_enqueue_does_not_fill() {
     let mut s = PaperState::new(10_000.0);
     // submit_ts = now_ms — classifier returns Keep even though price crosses.
     // submit_ts 與 now_ms 相等 — 分類器回 Keep 即使價格穿越。
-    s.enqueue_resting_limit_order(order_at(
-        "oc_st", "BTCUSDT", true, 49_000.0, 2_000, 60_000,
-    ));
-    let events =
-        s.sweep_resting_limit_orders_for_symbol("BTCUSDT", 48_500.0, 2_000, 0.0002, 0.0);
+    s.enqueue_resting_limit_order(order_at("oc_st", "BTCUSDT", true, 49_000.0, 2_000, 60_000));
+    let events = s.sweep_resting_limit_orders_for_symbol("BTCUSDT", 48_500.0, 2_000, 0.0002, 0.0);
     assert!(events.is_empty());
     assert_eq!(s.resting_limit_order_count_for("BTCUSDT"), 1);
 }
@@ -392,18 +398,11 @@ fn test_sweep_preserves_fifo_for_kept_orders() {
     let mut s = PaperState::new(10_000.0);
     // Three orders — middle one will fill, other two keep.
     // 三筆掛單 — 中間成交、另兩筆保留。
-    s.enqueue_resting_limit_order(order_at(
-        "oc_1", "BTCUSDT", true, 48_000.0, 1_000, 60_000,
-    ));
-    s.enqueue_resting_limit_order(order_at(
-        "oc_2", "BTCUSDT", true, 49_500.0, 1_000, 60_000,
-    ));
-    s.enqueue_resting_limit_order(order_at(
-        "oc_3", "BTCUSDT", true, 47_000.0, 1_000, 60_000,
-    ));
+    s.enqueue_resting_limit_order(order_at("oc_1", "BTCUSDT", true, 48_000.0, 1_000, 60_000));
+    s.enqueue_resting_limit_order(order_at("oc_2", "BTCUSDT", true, 49_500.0, 1_000, 60_000));
+    s.enqueue_resting_limit_order(order_at("oc_3", "BTCUSDT", true, 47_000.0, 1_000, 60_000));
     // Tick = 49_000 — only oc_2 (limit 49_500) fills; oc_1/oc_3 keep.
-    let events =
-        s.sweep_resting_limit_orders_for_symbol("BTCUSDT", 49_000.0, 2_000, 0.0002, 0.0);
+    let events = s.sweep_resting_limit_orders_for_symbol("BTCUSDT", 49_000.0, 2_000, 0.0002, 0.0);
     assert_eq!(events.len(), 1);
     match &events[0] {
         RestingFillEvent::Filled { order, .. } => {
@@ -430,14 +429,9 @@ fn test_sweep_partial_fill_deterministic_by_link_id() {
     let id_b = "oc_heads_b";
     let a_heads = resting_partial_fill_heads(id_a);
     let b_heads = resting_partial_fill_heads(id_b);
-    s.enqueue_resting_limit_order(order_at(
-        id_a, "SOLUSDT", true, 100.0, 1_000, 60_000,
-    ));
-    s.enqueue_resting_limit_order(order_at(
-        id_b, "SOLUSDT", true, 100.0, 1_000, 60_000,
-    ));
-    let events =
-        s.sweep_resting_limit_orders_for_symbol("SOLUSDT", 100.0, 2_000, 0.0002, 0.0);
+    s.enqueue_resting_limit_order(order_at(id_a, "SOLUSDT", true, 100.0, 1_000, 60_000));
+    s.enqueue_resting_limit_order(order_at(id_b, "SOLUSDT", true, 100.0, 1_000, 60_000));
+    let events = s.sweep_resting_limit_orders_for_symbol("SOLUSDT", 100.0, 2_000, 0.0002, 0.0);
     // count expected fills by precomputed coin flips.
     let expected_fills = (a_heads as usize) + (b_heads as usize);
     let actual_fills = events
@@ -547,7 +541,13 @@ fn test_classify_long_adverse_funding_downgrades_partial_to_keep() {
     // FillPartial + long + adverse funding → Keep.
     // Pre-guard raw classifier confirms this would have been FillPartial.
     let o = order_with_funding(
-        "oc_fd_long", "BTCUSDT", /*is_long*/ true, 50_000.0, 1_000, 60_000, 0.0010,
+        "oc_fd_long",
+        "BTCUSDT",
+        /*is_long*/ true,
+        50_000.0,
+        1_000,
+        60_000,
+        0.0010,
     );
     assert_eq!(
         classify_resting_order_raw(&o, 50_000.0, 1_500),
@@ -562,7 +562,13 @@ fn test_classify_long_adverse_funding_downgrades_partial_to_keep() {
 #[test]
 fn test_classify_short_adverse_funding_downgrades_partial_to_keep() {
     let o = order_with_funding(
-        "oc_fd_short", "BTCUSDT", /*is_long*/ false, 50_000.0, 1_000, 60_000, -0.0010,
+        "oc_fd_short",
+        "BTCUSDT",
+        /*is_long*/ false,
+        50_000.0,
+        1_000,
+        60_000,
+        -0.0010,
     );
     assert_eq!(
         classify_resting_order(&o, 50_000.0, 1_500, 0.0005),
@@ -575,7 +581,13 @@ fn test_classify_favorable_funding_leaves_partial_unchanged() {
     // Long + negative (favorable) funding → FillPartial stays FillPartial.
     // 多方 + 負（有利）funding → FillPartial 不變。
     let o = order_with_funding(
-        "oc_fd_fav", "BTCUSDT", true, 50_000.0, 1_000, 60_000, -0.0010,
+        "oc_fd_fav",
+        "BTCUSDT",
+        true,
+        50_000.0,
+        1_000,
+        60_000,
+        -0.0010,
     );
     assert_eq!(
         classify_resting_order(&o, 50_000.0, 1_500, 0.0005),
@@ -589,7 +601,13 @@ fn test_classify_fill_full_not_downgraded_by_adverse_funding() {
     // crossed; no adverse-selection statistical artefact to protect against).
     // 真實穿越 + 逆向 funding → 仍 FillFull（非統計偏誤，無需保護）。
     let o = order_with_funding(
-        "oc_fd_cross", "BTCUSDT", true, 50_000.0, 1_000, 60_000, 0.0020,
+        "oc_fd_cross",
+        "BTCUSDT",
+        true,
+        50_000.0,
+        1_000,
+        60_000,
+        0.0020,
     );
     assert_eq!(
         classify_resting_order(&o, 49_500.0, 1_500, 0.0005),
@@ -602,9 +620,7 @@ fn test_classify_timeout_precedence_preserved_under_adverse_funding() {
     // Deadline-expired orders must still Timeout even when adverse funding
     // would otherwise trigger the guard. Rule 1 > rule 5.
     // 截止到期 + 逆向 funding → 仍 Timeout（規則 1 勝過規則 5）。
-    let o = order_with_funding(
-        "oc_fd_to", "BTCUSDT", true, 50_000.0, 1_000, 2_000, 0.0020,
-    );
+    let o = order_with_funding("oc_fd_to", "BTCUSDT", true, 50_000.0, 1_000, 2_000, 0.0020);
     assert_eq!(
         classify_resting_order(&o, 50_000.0, 3_000, 0.0005),
         RestingSweepAction::Timeout
@@ -619,7 +635,13 @@ fn test_sweep_adverse_funding_keeps_order_and_bumps_skip_counter() {
     let mut s = PaperState::new(10_000.0);
     s.set_latest_price("BTCUSDT", 50_000.0);
     s.enqueue_resting_limit_order(order_with_funding(
-        "oc_fd_sweep", "BTCUSDT", true, 50_000.0, 1_000, 60_000, 0.0010,
+        "oc_fd_sweep",
+        "BTCUSDT",
+        true,
+        50_000.0,
+        1_000,
+        60_000,
+        0.0010,
     ));
     let events = s.sweep_resting_limit_orders_for_symbol(
         "BTCUSDT", 50_000.0, 2_000, 0.0002, /*threshold*/ 0.0005,
@@ -652,9 +674,8 @@ fn test_sweep_favorable_funding_retains_legacy_coin_flip_behaviour() {
     s.enqueue_resting_limit_order(order_with_funding(
         link_id, "BTCUSDT", true, 50_000.0, 1_000, 60_000, -0.0010,
     ));
-    let events = s.sweep_resting_limit_orders_for_symbol(
-        "BTCUSDT", 50_000.0, 2_000, 0.0002, 0.0005,
-    );
+    let events =
+        s.sweep_resting_limit_orders_for_symbol("BTCUSDT", 50_000.0, 2_000, 0.0002, 0.0005);
     // Counter stays at zero — guard never fired.
     assert_eq!(s.maker_stats().aggregate.funding_drag_skips, 0);
     // Outcome matches the deterministic coin: heads → Filled, tails → Keep.
@@ -675,11 +696,16 @@ fn test_sweep_true_cross_ignores_adverse_funding() {
     // 真實穿越 + 逆向 funding → 照常成交；guard 僅作用於碰觸分支。
     let mut s = PaperState::new(10_000.0);
     s.enqueue_resting_limit_order(order_with_funding(
-        "oc_fd_cross_sweep", "BTCUSDT", true, 50_000.0, 1_000, 60_000, 0.0020,
+        "oc_fd_cross_sweep",
+        "BTCUSDT",
+        true,
+        50_000.0,
+        1_000,
+        60_000,
+        0.0020,
     ));
-    let events = s.sweep_resting_limit_orders_for_symbol(
-        "BTCUSDT", 49_500.0, 2_000, 0.0002, 0.0005,
-    );
+    let events =
+        s.sweep_resting_limit_orders_for_symbol("BTCUSDT", 49_500.0, 2_000, 0.0002, 0.0005);
     assert_eq!(events.len(), 1);
     match &events[0] {
         RestingFillEvent::Filled { true_cross, .. } => assert!(*true_cross),
@@ -696,11 +722,15 @@ fn test_sweep_guard_zero_threshold_is_passthrough() {
     // threshold = 0.0 → guard 關閉 → 行為同 1B-4.2。
     let mut s = PaperState::new(10_000.0);
     s.enqueue_resting_limit_order(order_with_funding(
-        "oc_fd_off", "BTCUSDT", true, 50_000.0, 1_000, 60_000, 0.9999,
+        "oc_fd_off",
+        "BTCUSDT",
+        true,
+        50_000.0,
+        1_000,
+        60_000,
+        0.9999,
     ));
-    let _ = s.sweep_resting_limit_orders_for_symbol(
-        "BTCUSDT", 50_000.0, 2_000, 0.0002, 0.0,
-    );
+    let _ = s.sweep_resting_limit_orders_for_symbol("BTCUSDT", 50_000.0, 2_000, 0.0002, 0.0);
     assert_eq!(
         s.maker_stats().aggregate.funding_drag_skips,
         0,

@@ -150,11 +150,11 @@ pub(in crate::ipc_server) async fn handle_record_ai_usage(
         Ok(s) => s,
         Err(resp) => return resp,
     };
-    let provider =
-        match require_str_with_msg(params, "provider", id.clone(), "missing 'provider'") {
-            Ok(s) => s,
-            Err(resp) => return resp,
-        };
+    let provider = match require_str_with_msg(params, "provider", id.clone(), "missing 'provider'")
+    {
+        Ok(s) => s,
+        Err(resp) => return resp,
+    };
     let model = match require_str_with_msg(params, "model", id.clone(), "missing 'model'") {
         Ok(s) => s,
         Err(resp) => return resp,

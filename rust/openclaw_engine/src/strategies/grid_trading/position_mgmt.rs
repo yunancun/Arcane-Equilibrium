@@ -32,10 +32,7 @@ impl GridTrading {
     /// to reduce grid frequency and limit inventory drift losses.
     /// G-SR-1 A3：計算趨勢調整後的冷卻時間。
     /// 趨勢市場（高 ADX + 高 Hurst）中，冷卻從 1x 增至 6x，降低網格頻率。
-    pub(super) fn compute_trend_adjusted_cooldown(
-        &self,
-        snap: Option<&IndicatorSnapshot>,
-    ) -> u64 {
+    pub(super) fn compute_trend_adjusted_cooldown(&self, snap: Option<&IndicatorSnapshot>) -> u64 {
         let Some(ind) = snap else {
             return self.cooldown_ms;
         };

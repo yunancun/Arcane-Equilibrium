@@ -75,12 +75,12 @@ pub struct MaCrossoverParams {
     pub maker_limit_timeout_ms: u64,
     /// G7-09c Phase 1: ticks INSIDE the inside quote at which the BBO-aware
     /// PostOnly limit sits. Default 1 (one tick more passive than best_bid/ask).
-    /// `maker_price_offset_bps` is now the fallback-only path used when BBO or
-    /// tick_size are unavailable (cold-start / instrument cache miss). Bounded
-    /// `[0, 10]` by `validate()`.
+    /// When BBO or tick_size are unavailable (cold-start / instrument cache
+    /// miss), maker entries are skipped instead of falling back to last_price.
+    /// Bounded `[0, 10]` by `validate()`.
     /// G7-09c Phase 1：BBO-aware PostOnly 限價離 inside quote 的 tick 數，預設 1
-    /// （比 best_bid/ask 退一 tick 更被動）。`maker_price_offset_bps` 退化為
-    /// BBO 不可得時的 fallback offset。`validate()` 限制 `[0, 10]`。
+    /// （比 best_bid/ask 退一 tick 更被動）。BBO 或 tick_size 不可得時跳過 maker
+    /// 入場，不再 fallback 到 last_price。`validate()` 限制 `[0, 10]`。
     pub maker_price_buffer_ticks: u32,
 }
 

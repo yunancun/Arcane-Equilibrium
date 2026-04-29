@@ -52,7 +52,8 @@ use std::sync::Arc;
 /// 採 `parking_lot::RwLock`（非 `tokio::sync::RwLock`）讓 watcher 的同步
 /// spawner closure（在 async context 內被呼叫）可不繞 async 機械直接寫
 /// slot。讀端（IPC handler、fan-out）臨界區極短，sync / async 路徑皆安全。
-pub type LiveCmdSenderSlot = Arc<RwLock<Option<tokio::sync::mpsc::UnboundedSender<PipelineCommand>>>>;
+pub type LiveCmdSenderSlot =
+    Arc<RwLock<Option<tokio::sync::mpsc::UnboundedSender<PipelineCommand>>>>;
 
 // ---------------------------------------------------------------------------
 // LIVE-P2-1: Per-engine RiskConfig stores

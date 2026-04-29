@@ -28,7 +28,7 @@ impl MaCrossover {
         ctx: &TickContext<'_>,
         is_long: bool,
         conf: f64,
-    ) -> OrderIntent {
+    ) -> Option<OrderIntent> {
         self.make_intent_with_qty(ctx, is_long, conf, self.default_qty, None, None)
     }
 
@@ -48,42 +48,41 @@ impl MaCrossover {
         qty: f64,
         confluence_score: Option<f32>,
         persistence_elapsed_ms: Option<u64>,
-    ) -> OrderIntent {
+    ) -> Option<OrderIntent> {
         let scaled =
             crate::tick_pipeline::on_tick_helpers::clamp_confidence(conf * self.conf_scale);
         // EDGE-P2-3 Phase 2+ + G7-09c Phase 1: resolve entry order shape
         // (Market vs PostOnly Limit). G7-09c Phase 1 replaces legacy
         // `last_price ± offset_bps` (RCA `7f0e793` showed 100% PostOnly reject)
-        // with strictly passive BBO-aware price; helper falls back to legacy
-        // when BBO/tick_size unavailable.
+        // with strictly passive BBO-aware price; if no safe BBO-derived price
+        // exists, skip the new entry instead of falling back to last_price.
         // EDGE-P2-3 Phase 2+ + G7-09c Phase 1：決定入場單型；G7-09c 以 BBO-aware
-        // 嚴格被動價取代舊 `last_price ± offset_bps`，BBO 不可得時 helper fallback。
-        let (order_type, limit_price, time_in_force, maker_timeout_ms) =
-            if self.use_maker_entry {
-                let inputs = MakerPriceInputs {
-                    last_price: ctx.price,
-                    best_bid: ctx.best_bid,
-                    best_ask: ctx.best_ask,
-                    tick_size: ctx.tick_size,
-                };
-                let limit = compute_post_only_price(
-                    is_long,
-                    inputs,
-                    self.maker_price_offset_bps,
-                    self.maker_price_buffer_ticks,
-                    "ma_crossover",
-                    ctx.symbol,
-                );
-                (
-                    "limit".to_string(),
-                    Some(limit),
-                    Some(TimeInForce::PostOnly),
-                    Some(self.maker_limit_timeout_ms),
-                )
-            } else {
-                ("market".to_string(), None, None, None)
+        // 嚴格被動價取代舊 `last_price ± offset_bps`；無安全 BBO 價時跳過新開倉。
+        let (order_type, limit_price, time_in_force, maker_timeout_ms) = if self.use_maker_entry {
+            let inputs = MakerPriceInputs {
+                last_price: ctx.price,
+                best_bid: ctx.best_bid,
+                best_ask: ctx.best_ask,
+                tick_size: ctx.tick_size,
             };
-        OrderIntent {
+            let limit = compute_post_only_price(
+                is_long,
+                inputs,
+                self.maker_price_offset_bps,
+                self.maker_price_buffer_ticks,
+                "ma_crossover",
+                ctx.symbol,
+            )?;
+            (
+                "limit".to_string(),
+                Some(limit),
+                Some(TimeInForce::PostOnly),
+                Some(self.maker_limit_timeout_ms),
+            )
+        } else {
+            ("market".to_string(), None, None, None)
+        };
+        Some(OrderIntent {
             symbol: ctx.symbol.to_string(),
             is_long,
             qty,
@@ -95,7 +94,7 @@ impl MaCrossover {
             persistence_elapsed_ms,
             time_in_force,
             maker_timeout_ms,
-        }
+        })
     }
 
     /// RC-01: Check if Hurst regime allows entry (only `Persistent` passes).
@@ -159,8 +158,12 @@ impl MaCrossover {
     /// (same base / adx_threshold / regime_bonus / 100.0 / 0.25 / 0.2 / 0.9).
     /// E1-P0-2：委派給 `ConfidenceBuilder`，位元精確對齊已於共享模組單測驗證。
     pub(super) fn compute_entry_confidence(&self, adx: f64, regime: Option<&str>) -> f64 {
-        ConfidenceBuilder::new(self.entry_conf_base, self.adx_threshold, self.entry_regime_bonus)
-            .compute(adx, regime)
+        ConfidenceBuilder::new(
+            self.entry_conf_base,
+            self.adx_threshold,
+            self.entry_regime_bonus,
+        )
+        .compute(adx, regime)
     }
 
     /// Exit confidence: cross-back is a real signal but weaker than fresh entry.

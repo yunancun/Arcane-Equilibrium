@@ -22,11 +22,31 @@ pub struct RegimeMultipliers {
 /// 回傳特定 regime 的風控參數乘數。
 pub fn regime_multipliers(regime: &str) -> RegimeMultipliers {
     match regime {
-        "trending" => RegimeMultipliers { stop: 1.0, tp: 1.5, time: 1.5 },
-        "volatile" => RegimeMultipliers { stop: 1.5, tp: 0.8, time: 0.8 },
-        "ranging" => RegimeMultipliers { stop: 0.7, tp: 0.7, time: 0.8 },
-        "squeeze" => RegimeMultipliers { stop: 0.6, tp: 0.5, time: 1.0 },
-        _ => RegimeMultipliers { stop: 1.0, tp: 1.0, time: 1.0 },
+        "trending" => RegimeMultipliers {
+            stop: 1.0,
+            tp: 1.5,
+            time: 1.5,
+        },
+        "volatile" => RegimeMultipliers {
+            stop: 1.5,
+            tp: 0.8,
+            time: 0.8,
+        },
+        "ranging" => RegimeMultipliers {
+            stop: 0.7,
+            tp: 0.7,
+            time: 0.8,
+        },
+        "squeeze" => RegimeMultipliers {
+            stop: 0.6,
+            tp: 0.5,
+            time: 1.0,
+        },
+        _ => RegimeMultipliers {
+            stop: 1.0,
+            tp: 1.0,
+            time: 1.0,
+        },
     }
 }
 
