@@ -518,6 +518,310 @@ def _format_strategy_slices(rows: list[tuple[Any, ...]]) -> str:
     return "; ".join(parts) if parts else "no per-strategy rows"
 
 
+# ============================================================================
+# [38] grid_trading single-position lifecycle drift between demo / live_demo.
+# 2026-04-29 — MIT skill: data-drift-detection + ml-pipeline-maturity-audit.
+# Background: GUI Learning tab 24h fills shows grid_trading at LiveDemo (157)
+# vs Demo (63) — 2.5x asymmetry. risk_config_live.toml has
+# trailing_distance_pct=2.0% (vs demo 3.5%) + partial_tp_enabled=true, which
+# physically pushes live grid lifetimes shorter. Passive observe 7d to
+# distinguish "reasonable turnover from physical config diff" vs "grid out
+# of control (re-entry spiral burning fees)". Pure monitor — no enforcement,
+# no business-code change, no risk_config / strategy params modification.
+#
+# [38] grid_trading 單倉 lifecycle 漂移（demo vs live_demo）。2026-04-29 MIT
+# 設計（data-drift-detection + ml-pipeline-maturity-audit skill）。背景：GUI
+# 24h fills 顯示 grid_trading LiveDemo 157 vs Demo 63（2.5x）。Live config
+# trailing 2.0%（demo 3.5%）+ partial_tp 開 → 物理上 lifetime 應較短。
+# 被動觀察 7d 區分「合理 turnover」vs「grid 反覆收割 fee 失控」。純監控，
+# 不修 strategy / risk_config / 不阻斷 trading。
+# ============================================================================
+
+# Lifetime drift threshold: live should not be < 0.5x demo (physical
+# trailing-distance ratio 2.0/3.5 = 0.571 implies ~0.5-0.7x baseline).
+# Lifetime 漂移 threshold：live 不應 < 0.5x demo（trailing 比 0.571 預期 0.5-0.7x）。
+GRID_LIFETIME_RATIO_WARN = 0.5
+GRID_LIFETIME_RATIO_FAIL = 0.3
+
+# Fee-burn ratio: fee_total / |pnl_total|. > 0.8 means fee dominates PnL.
+# Fee-burn 比例：fee 總額 / |pnl| 總額。> 0.8 表 fee 主導 PnL。
+GRID_FEE_BURN_ABS_WARN = 0.8
+GRID_FEE_BURN_ABS_FAIL = 1.5
+GRID_FEE_BURN_RATIO_WARN = 2.0   # live > 2x demo
+
+# Re-entry rate: same symbol + same side within 1h is a re-entry.
+# Re-entry 率：同 symbol 同 side 1h 內重新開倉。
+GRID_REENTRY_RATE_WARN = 0.5
+GRID_REENTRY_RATE_FAIL = 0.7
+GRID_REENTRY_DELTA_WARN = 0.3    # live - demo > 0.3 absolute
+
+# Sample-size floor — below this skip evaluation (PASS-with-note).
+# 樣本下限：低於此值跳評估（PASS-with-note）。
+GRID_LIFECYCLE_MIN_SAMPLE = 5
+
+
+def check_grid_trading_lifecycle_drift(cur) -> tuple[str, str]:
+    """[38] grid_trading single-position lifecycle drift demo vs live_demo.
+
+    Pairing strategy: V017 ``trading.fills.entry_context_id`` JOIN — close
+    fill rows carry the originating entry's context_id. ``row_number()`` picks
+    first close per entry (partial_tp may produce multiple close rows).
+
+    Three drift indicators, each tagged INFO/WARN/FAIL independently;
+    final verdict = max severity. DB unreachable / 0 rows → WARN/PASS,
+    never FAIL — avoid spurious alerts during low-activity windows.
+
+    [38] grid_trading 單倉 lifecycle 漂移（demo vs live_demo）。配對策略：
+    V017 ``trading.fills.entry_context_id`` JOIN（close fill 帶 entry context）。
+    partial_tp 可能多筆 close，用 ``row_number()`` 取首次 close。三個漂移
+    指標獨立標記，最終 verdict = max severity。DB 不通 / 0 rows → WARN/PASS，
+    避免低活動期假警報。
+    """
+    # Per-check rollback in case caller's prior cursor errored.
+    # 預先 rollback，避免 caller 上一個 cursor 出錯影響本 check。
+    try:
+        cur.connection.rollback()
+    except Exception:
+        pass
+
+    # Existence check — required tables / columns.
+    # 存在性檢查 — 必要表 / column。
+    try:
+        cur.execute("SELECT to_regclass('trading.fills') IS NOT NULL")
+        row = cur.fetchone()
+    except Exception as exc:  # noqa: BLE001
+        return ("WARN", f"trading.fills existence check failed: {exc}")
+    if not row or not row[0]:
+        return ("WARN", "trading.fills missing — pre-migration state, skip")
+
+    # Indicator A: lifetime drift (per engine_mode median).
+    # 指標 A：每 engine_mode 中位 lifetime 漂移。
+    lifecycle_cte = """
+WITH entries AS (
+  SELECT f.engine_mode, f.symbol, f.side,
+         f.context_id AS entry_cid, f.ts AS entry_ts,
+         f.price AS entry_price, f.fee AS entry_fee
+  FROM trading.fills f
+  WHERE f.ts > now() - interval '24 hours'
+    AND f.engine_mode IN ('demo', 'live_demo')
+    AND f.strategy_name = 'grid_trading'
+    AND coalesce(f.exit_source, '') = ''
+),
+closes AS (
+  SELECT f.entry_context_id AS entry_cid, f.ts AS exit_ts,
+         f.price AS exit_price, f.fee AS exit_fee,
+         f.realized_pnl AS realized_pnl,
+         f.strategy_name AS close_strategy_name,
+         row_number() OVER (PARTITION BY f.entry_context_id ORDER BY f.ts) AS rn
+  FROM trading.fills f
+  WHERE f.ts > now() - interval '24 hours'
+    AND f.engine_mode IN ('demo', 'live_demo')
+    AND f.entry_context_id IS NOT NULL
+    AND f.entry_context_id <> ''
+    AND coalesce(f.exit_source, '') <> ''
+),
+first_close AS (SELECT * FROM closes WHERE rn = 1),
+lifecycles AS (
+  SELECT e.engine_mode, e.symbol, e.side, e.entry_ts, c.exit_ts,
+         EXTRACT(EPOCH FROM (c.exit_ts - e.entry_ts))/60.0 AS lifetime_min,
+         (e.entry_fee + c.exit_fee) AS total_fee_usd,
+         c.realized_pnl, c.close_strategy_name
+  FROM entries e
+  JOIN first_close c ON c.entry_cid = e.entry_cid
+)
+"""
+    try:
+        cur.execute(
+            lifecycle_cte +
+            """
+SELECT engine_mode,
+       count(*)::int AS n,
+       percentile_cont(0.5) WITHIN GROUP (ORDER BY lifetime_min)::float8 AS p50_min,
+       avg(lifetime_min)::float8 AS avg_min,
+       sum(total_fee_usd)::float8 AS sum_fee,
+       sum(abs(coalesce(realized_pnl,0)))::float8 AS sum_abs_pnl
+FROM lifecycles
+GROUP BY engine_mode
+ORDER BY engine_mode
+"""
+        )
+        rows = cur.fetchall() or []
+    except Exception as exc:  # noqa: BLE001
+        return ("WARN", f"lifecycle aggregation query failed: {type(exc).__name__}: {exc}")
+
+    stats: dict[str, dict[str, float]] = {}
+    for r in rows:
+        em, n, p50, avg, sum_fee, sum_abs_pnl = (
+            str(r[0] or ""),
+            _as_int(r[1]),
+            _as_float(r[2], 0.0),
+            _as_float(r[3], 0.0),
+            _as_float(r[4], 0.0),
+            _as_float(r[5], 0.0),
+        )
+        stats[em] = {
+            "n": float(n),
+            "p50": p50,
+            "avg": avg,
+            "sum_fee": sum_fee,
+            "sum_abs_pnl": sum_abs_pnl,
+        }
+
+    demo = stats.get("demo")
+    live_demo = stats.get("live_demo")
+
+    # 0 row in either side: PASS-with-note (no enforcement during ramp).
+    # 任一邊 0 row：PASS-with-note（爬升期不警報）。
+    if not demo or demo["n"] < GRID_LIFECYCLE_MIN_SAMPLE:
+        return (
+            "PASS",
+            f"24h grid_trading demo lifecycles n={int(demo['n']) if demo else 0} "
+            f"< {GRID_LIFECYCLE_MIN_SAMPLE} — insufficient demo baseline, skip drift",
+        )
+    if not live_demo or live_demo["n"] < GRID_LIFECYCLE_MIN_SAMPLE:
+        return (
+            "PASS",
+            f"24h grid_trading live_demo lifecycles n={int(live_demo['n']) if live_demo else 0} "
+            f"< {GRID_LIFECYCLE_MIN_SAMPLE} — insufficient live sample, skip drift",
+        )
+
+    # Indicator A: lifetime ratio.
+    # 指標 A：lifetime 比例。
+    lifetime_ratio = (
+        live_demo["p50"] / demo["p50"] if demo["p50"] > 0 else None
+    )
+
+    # Indicator B: fee-burn ratio absolute + relative.
+    # 指標 B：fee-burn 比例（絕對 + 相對）。
+    fee_burn_demo = (
+        demo["sum_fee"] / demo["sum_abs_pnl"] if demo["sum_abs_pnl"] > 0 else None
+    )
+    fee_burn_live = (
+        live_demo["sum_fee"] / live_demo["sum_abs_pnl"]
+        if live_demo["sum_abs_pnl"] > 0 else None
+    )
+    fee_burn_ratio = (
+        fee_burn_live / fee_burn_demo
+        if fee_burn_demo and fee_burn_demo > 0 else None
+    )
+
+    # Indicator C: same-symbol same-side re-entry rate (1h window).
+    # 指標 C：同 symbol 同 side 1h 內 re-entry 比率。
+    try:
+        cur.execute(
+            """
+WITH entries_with_lag AS (
+  SELECT engine_mode, symbol, side, ts AS entry_ts,
+         LAG(ts) OVER (PARTITION BY engine_mode, symbol, side ORDER BY ts) AS prev_ts
+  FROM trading.fills
+  WHERE ts > now() - interval '24 hours'
+    AND engine_mode IN ('demo', 'live_demo')
+    AND strategy_name = 'grid_trading'
+    AND coalesce(exit_source, '') = ''
+)
+SELECT engine_mode,
+       count(*)::int AS total_entries,
+       count(*) FILTER (
+           WHERE prev_ts IS NOT NULL
+             AND entry_ts - prev_ts < interval '1 hour')::int AS re_entries,
+       (count(*) FILTER (
+           WHERE prev_ts IS NOT NULL
+             AND entry_ts - prev_ts < interval '1 hour'))::float8
+         / NULLIF(count(*), 0)::float8 AS re_entry_rate
+FROM entries_with_lag
+GROUP BY engine_mode
+ORDER BY engine_mode
+"""
+        )
+        re_rows = cur.fetchall() or []
+    except Exception as exc:  # noqa: BLE001
+        return ("WARN", f"re-entry rate query failed: {type(exc).__name__}: {exc}")
+
+    re_stats: dict[str, dict[str, float]] = {}
+    for r in re_rows:
+        em, total, re_count, rate = (
+            str(r[0] or ""),
+            _as_int(r[1]),
+            _as_int(r[2]),
+            _as_float(r[3], 0.0),
+        )
+        re_stats[em] = {"total": float(total), "re": float(re_count), "rate": rate}
+
+    re_demo = re_stats.get("demo", {"rate": 0.0, "total": 0, "re": 0})
+    re_live = re_stats.get("live_demo", {"rate": 0.0, "total": 0, "re": 0})
+
+    # Verdict aggregation — max severity wins; multiple WARN reasons accrue.
+    # 結論彙總 — 取最高嚴重度；多 WARN 理由累積。
+    severities: list[tuple[str, str]] = []  # (level, reason)
+
+    # A: lifetime
+    if lifetime_ratio is not None:
+        if lifetime_ratio < GRID_LIFETIME_RATIO_FAIL:
+            severities.append(
+                ("FAIL", f"lifetime_ratio={lifetime_ratio:.2f} < {GRID_LIFETIME_RATIO_FAIL} (live too fast)")
+            )
+        elif lifetime_ratio < GRID_LIFETIME_RATIO_WARN:
+            severities.append(
+                ("WARN", f"lifetime_ratio={lifetime_ratio:.2f} < {GRID_LIFETIME_RATIO_WARN}")
+            )
+
+    # B: fee burn
+    if fee_burn_live is not None:
+        if fee_burn_live > GRID_FEE_BURN_ABS_FAIL:
+            severities.append(
+                ("FAIL", f"live fee_burn={fee_burn_live:.2f} > {GRID_FEE_BURN_ABS_FAIL} (fee dominates)")
+            )
+        elif fee_burn_live > GRID_FEE_BURN_ABS_WARN:
+            severities.append(
+                ("WARN", f"live fee_burn={fee_burn_live:.2f} > {GRID_FEE_BURN_ABS_WARN}")
+            )
+    if fee_burn_ratio is not None and fee_burn_ratio > GRID_FEE_BURN_RATIO_WARN:
+        severities.append(
+            ("WARN", f"fee_burn_ratio live/demo={fee_burn_ratio:.2f} > {GRID_FEE_BURN_RATIO_WARN}")
+        )
+
+    # C: re-entry rate
+    if re_live["rate"] > GRID_REENTRY_RATE_FAIL:
+        severities.append(
+            ("FAIL", f"live re_entry_rate={re_live['rate']:.2f} > {GRID_REENTRY_RATE_FAIL}")
+        )
+    elif re_live["rate"] > GRID_REENTRY_RATE_WARN:
+        severities.append(
+            ("WARN", f"live re_entry_rate={re_live['rate']:.2f} > {GRID_REENTRY_RATE_WARN}")
+        )
+    delta = re_live["rate"] - re_demo["rate"]
+    if delta > GRID_REENTRY_DELTA_WARN:
+        severities.append(
+            ("WARN", f"re_entry delta live-demo={delta:.2f} > {GRID_REENTRY_DELTA_WARN}")
+        )
+
+    # Final verdict
+    has_fail = any(s[0] == "FAIL" for s in severities)
+    has_warn = any(s[0] == "WARN" for s in severities)
+
+    fee_burn_demo_str = f"{fee_burn_demo:.2f}" if fee_burn_demo is not None else "N/A"
+    fee_burn_live_str = f"{fee_burn_live:.2f}" if fee_burn_live is not None else "N/A"
+    lifetime_ratio_str = f"{lifetime_ratio:.2f}" if lifetime_ratio is not None else "N/A"
+
+    base_msg = (
+        f"24h lifecycle: demo n={int(demo['n'])} p50={demo['p50']:.1f}min "
+        f"fee_burn={fee_burn_demo_str} re_rate={re_demo['rate']:.2f}; "
+        f"live_demo n={int(live_demo['n'])} p50={live_demo['p50']:.1f}min "
+        f"fee_burn={fee_burn_live_str} re_rate={re_live['rate']:.2f}; "
+        f"lifetime_ratio={lifetime_ratio_str}"
+    )
+
+    if has_fail:
+        reasons = "; ".join(r for lvl, r in severities if lvl == "FAIL")
+        warns = "; ".join(r for lvl, r in severities if lvl == "WARN")
+        warn_suffix = f"; warns: {warns}" if warns else ""
+        return ("FAIL", f"{base_msg} — FAIL: {reasons}{warn_suffix}")
+    if has_warn:
+        reasons = "; ".join(r for lvl, r in severities if lvl == "WARN")
+        return ("WARN", f"{base_msg} — WARN: {reasons}")
+    return ("PASS", f"{base_msg} — drift within expected physical config range")
+
+
 _MAKER_FILL_CTE = """
 WITH entry_fills AS (
     SELECT

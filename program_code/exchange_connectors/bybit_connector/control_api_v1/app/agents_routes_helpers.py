@@ -440,6 +440,17 @@ async def afetch_shadow_vs_live_summary(since_hours: int) -> Tuple[dict[str, Any
     return await asyncio.to_thread(_fetch_shadow_vs_live_summary, since_hours)
 
 
+# Alias engine_mode_fills_summary (canonical); legacy name misleading.
+# 別名（正名）；舊名誤導，實際聚合 ``trading.fills`` 按 ``engine_mode`` 切桶。
+def _fetch_engine_mode_fills_summary(since_hours: int) -> Tuple[dict[str, Any], str | None]:
+    """Canonical alias / 正名別名 → ``_fetch_shadow_vs_live_summary``."""
+    return _fetch_shadow_vs_live_summary(since_hours)
+
+async def afetch_engine_mode_fills_summary(since_hours: int) -> Tuple[dict[str, Any], str | None]:
+    """Canonical async alias / 正名 async 別名 → ``afetch_shadow_vs_live_summary``."""
+    return await afetch_shadow_vs_live_summary(since_hours)
+
+
 # ── Strategist summary_zh composer / 策略師中文一句話組合 ───────────────────
 
 
@@ -768,11 +779,15 @@ __all__ = [
     "_fetch_today_risk_verdict_counts",
     "_fetch_recent_rejected_verdicts",
     "_fetch_shadow_vs_live_summary",
+    # Canonical alias (engine_mode_fills_summary) — same body, new name.
+    # 正名別名（engine_mode_fills_summary）—— 同函數體、新名稱。
+    "_fetch_engine_mode_fills_summary",
     "afetch_today_costs_by_role",
     "afetch_today_intent_counts_by_strategy",
     "afetch_today_risk_verdict_counts",
     "afetch_recent_rejected_verdicts",
     "afetch_shadow_vs_live_summary",
+    "afetch_engine_mode_fills_summary",
     "_compose_summary_zh",
     "_build_role_envelope",
     "_build_scout_card",

@@ -1163,3 +1163,71 @@ handler 頂部 `from .h_state_collectors import _collect_agent_snapshots, _colle
 
 ### 報告路徑
 📄 `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-04-28--g3_08_fup_strategist_delegator_slim.md`
+
+---
+
+## 2026-04-29 STRATEGY-NAME-ATTRIBUTION-CLEANUP design
+
+### 觸發
+PM operator 報告 GUI Learning tab 24h fills 顯示 demo bucket 25 個 distinct `strategy_name`、live_demo 9 個。實測 PG 確認 cardinality 來自 Rust dispatch 把 funding rate / basis / TRAILING peak / current pct / 6 浮點 trace 拼進 strategy_name（vs 設計上 enum-like 5 strategy）。
+
+### 報告路徑
+`workspace/reports/2026-04-29--strategy_name_attribution_cleanup_design.md` + `docs/CCAgentWorkSpace/Operator/2026-04-29--strategy_name_attribution_cleanup_design.md`
+
+### 推薦結論
+**Option A（schema migration + new column `exit_reason`）** — 16 emit point 規範 + V033 ADD COLUMN nullable + healthcheck [38] cardinality drift。**估 ~430 LOC / 15h 全鏈 / 4 sub-task isolation pattern**。
+
+### 5 大關鍵架構發現
+
+1. **動態 format!() emit 共 7 點**：funding_arb_exit (6 浮點) + risk_checks 5 條（HARD/DYNAMIC/TRAILING/TIME/TAKE PROFIT）+ halt_session 系列。其餘 9 個 close emit 是 static enum-like（fast_track / phys_lock / ipc_close）。grid_trading / bb_reversion / ma_crossover exit 已是 static 字串。
+2. **真實破壞點是 strategist_history.effect**：`WHERE strategy_name = %s` 等值匹配對 close fill 永遠不命中 → 7d edge effect endpoint 從 day 1 就錯（讀 entry 0 元 realized_pnl，不是 close real PnL）。
+3. **realized_edge_stats 已 immune**：FIFO pair entry/exit 時 exit 用 prefix detect (`strategy_name.startswith("strategy_close")`) 但**結果 strategy_name 取自 entry 端**，所以 dynamic suffix 不污染輸出。**這是 reusable pattern**。
+4. **V031 mlde_edge_training_rows view 已 normalize**：CASE WHEN 把 raw_strategy_name → 5 enum；但 base table 是 trading.intents 不是 trading.fills（intents 寫入 strategy_name 是 entry-only enum）。所以 ML pipeline 自然不被 fills cardinality 影響；GUI passthrough 才暴露。
+5. **trading.fills.details JSONB 欄位 V003 早已建但 trading_writer 不寫**：方案 B 走 JSONB 路理論上 0 schema cost，但 GIN index + JSON schema 維護成本超過新 column；本 audit 推 A 不推 B。
+
+### 5 大次要技術發現
+
+- 16 emit 點全集中 `tick_pipeline/on_tick/`、`risk_checks.rs`、`strategies/funding_arb.rs`、`tick_pipeline/commands.rs`、`event_consumer/unattributed_emit.rs`，跨檔但有焦點
+- TradingMsg::Fill 加欄位是 compile-time enforced（destructure callsite ~5 處），漏一處 = compile fail，**比 JSONB 安全**
+- healthcheck `LIKE 'risk_close:phys_lock_%'` 等 prefix-based 對 fix 後新 row 仍工作（phys_lock / fast_track 是 static prefix），只有 6 個 LIKE 需升級雙語法
+- 7d 老 row 自然 phase out — 不需 backfill，rollback 完美
+- E1 派發架構：W1-T1（schema + Rust enum，必 isolation）+ W1-T2（16 emit point，必 isolation）+ W1-T3（Python adapt，主樹）+ W1-T4（healthcheck upgrade，主樹）
+
+### 16 原則對照
+
+- ⭐ #8 交易可解釋：直接強化（enum + structured trace 比 dynamic format 易 audit）
+- #1 / #3 / #4 / #5 / #6 全 ✅ 0 觸碰
+- §四 5 項 live 硬邊界全保（authorization v2 / mainnet env / live_reserved 全不動）
+- §七 V033 Guard A/B 強制（template 從 V021 複製，pre-existing pattern 已熟）
+
+### 派發 schedule
+
+| 子任務 | E1 instance | isolation | 依賴 | ETA |
+|---|---|---|---|---|
+| W1-T1 Rust schema + TradingMsg::Fill | E1-Alpha | YES | 無 | 8h |
+| W1-T2 16 emit point 改寫 | E1-Beta | YES | T1 結束 schema 後可重疊 | 10h |
+| W1-T3 Python adaptation | E1-Gamma | NO 主樹 | T1+T2 後 | 3h |
+| W1-T4 healthcheck upgrade | E1-Delta | NO 主樹 | T1+T2 後（與 T3 並） | 3h |
+
+Wall-clock：~10h parallel + E2/E4 ~5h = **~15h 全鏈**
+
+### 沒做的事（E1/E2 領域）
+
+- 沒寫 V033 migration（純 PA design + audit）
+- 沒寫 Rust / Python 業務代碼
+- 沒派 sub-agent（純 PA 主 agent 串行讀+寫）
+- 沒跑 cargo test / pytest
+- 沒擴範圍到 historical backfill（P3 backlog）/ V032 mlde_param_applications schema / G2-01 fee monitoring
+
+### 教訓備忘
+
+- **「動態 trace 拼進 enum 欄位」是反模式**：strategy_name 是 aggregation key（enum dim），funding_arb_exit / TRAILING STOP 動態 reason 是 free-text payload（trace dim）。混淆兩者破壞下游 GROUP BY / equality match / cardinality 衛生 — 屬 `feedback_no_dead_params` 的同族反模式。
+- **Cardinality healthcheck 應該成為標配**：對任何「列 enum 的 column」（strategy_name / risk_verdict / exit_source / engine_mode），cron 6h 跑一次 `COUNT(DISTINCT)` = 1 SQL 即可釘死「字面值規範」這條 invisible contract，比逐個 emit 點 grep 強。
+- **realized_edge_stats 的 entry-strategy 取法是 reusable pattern**：對「需要 exit prefix detect 但結果歸 entry strategy」的場景，**FIFO pair → 從 entry queue 取 strategy_name** 是 immune to suffix dynamics 的最優設計；未來相關場景優先套此 pattern。
+- **view-layer normalize（V031）是好的補丁但不是根因解**：適合「writer 不能改」場景；可改 writer 時優先從根 normalize，view 是次選。
+
+### 報告索引追加
+
+| 日期 | 報告類型 | 文件位置 |
+|---|---|---|
+| 2026-04-29 | strategy_name attribution cleanup design（推 A schema migration + new exit_reason col + healthcheck [38]）| workspace/reports/2026-04-29--strategy_name_attribution_cleanup_design.md |

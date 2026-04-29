@@ -125,9 +125,22 @@
     <div id="agent-budget-data" style="display:none"></div>
   </div>
 
-  <!-- 区块 E: shadow vs live / 影子 vs 真仓对比 -->
+  <!--
+    区块 E: Demo 引擎成交 vs LiveDemo 引擎成交对比 / Engine Mode Fills comparison
+    Block E: Demo engine fills vs LiveDemo engine fills
+
+    语义注意 / Semantic note:
+      此卡比较的是「不同 engine_mode 标签下的真实成交」— 两边都是真送单到 Bybit demo endpoint，
+      差别在于 Demo 引擎（engine_mode='demo' / risk_config_demo.toml）vs
+      LiveDemo 引擎（engine_mode='live_demo' / risk_config_live.toml + Live 管线走 demo endpoint）。
+      与 ExecutorAgent 的 _shadow_mode（intent log 不送单）是完全不同概念。
+
+      This card compares real fills tagged by engine_mode — both sides are real submissions to
+      Bybit demo endpoint. Difference is Demo engine vs LiveDemo engine pipeline (different
+      risk_config TOML). Not related to ExecutorAgent _shadow_mode (intent log only).
+  -->
   <div class="oc-card">
-    <h4 style="font-size:13px;margin-bottom:10px">&#x1F319; 影子 vs &#x1F534; 真仓 / Shadow vs Live</h4>
+    <h4 style="font-size:13px;margin-bottom:10px">&#x1F7E6; Demo 引擎 vs &#x1F534; LiveDemo 引擎成交 / Engine Mode Fills</h4>
     <div id="agent-shadow-live-loading" style="padding:12px;color:var(--text-dim);font-size:12px">
       &#x23F3; 正在请 5 位 Agent 报告状况…
     </div>

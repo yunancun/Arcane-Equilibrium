@@ -13,7 +13,11 @@ MODULE_NOTE (EN): MVP backend for "AI 团队工作台" Learning Cockpit sub-sect
 
     GET /api/v1/agents/roster                — aggregated 5-Agent runtime view
     GET /api/v1/agents/recent_rejects        — recent REJECTED risk_verdicts (C-1a)
-    GET /api/v1/agents/shadow_vs_live_summary — demo vs live_demo fills aggregate (C-1b)
+    GET /api/v1/agents/engine_mode_fills_summary — canonical: demo vs live_demo
+                                                   fills aggregate by engine_mode
+    GET /api/v1/agents/shadow_vs_live_summary — legacy alias for the above
+                                                (kept for backward compat;
+                                                 same handler / same payload).
 
   Hard contracts (E2 必查):
     1. Read-only — ``grep -E ' INSERT | UPDATE | DELETE '`` is 0 in this file
@@ -38,7 +42,11 @@ MODULE_NOTE (中): Agent 追蹤視圖只讀路由（plan T1 後端 MVP）。本�
 
     GET /api/v1/agents/roster                — 5 個 Agent 聚合視圖
     GET /api/v1/agents/recent_rejects        — 最近 REJECTED 風控裁定（C-1a）
-    GET /api/v1/agents/shadow_vs_live_summary — demo vs live_demo 成交聚合（C-1b）
+    GET /api/v1/agents/engine_mode_fills_summary — 正名：``trading.fills``
+                                                   按 engine_mode 切桶聚合
+    GET /api/v1/agents/shadow_vs_live_summary — 上者的 legacy alias
+                                                （backward compat 保留；
+                                                 同 handler / 同 payload）。
 
   硬約束（E2 必查）：(1) 純讀（INSERT/UPDATE/DELETE=0，本檔與 helpers 皆然）
   (2) PG 不可達一律 200 + degraded=true (3) statement_timeout=2s（helper 內設）
@@ -84,6 +92,9 @@ _fetch_today_intent_counts_by_strategy = _h._fetch_today_intent_counts_by_strate
 _fetch_today_risk_verdict_counts = _h._fetch_today_risk_verdict_counts
 _fetch_recent_rejected_verdicts = _h._fetch_recent_rejected_verdicts
 _fetch_shadow_vs_live_summary = _h._fetch_shadow_vs_live_summary
+# Canonical alias (engine_mode_fills_summary) — same body, new name.
+# 正名別名（engine_mode_fills_summary）—— 同函數體、新名稱。
+_fetch_engine_mode_fills_summary = _h._fetch_engine_mode_fills_summary
 _compose_summary_zh = _h._compose_summary_zh
 _build_role_envelope = _h._build_role_envelope
 _build_scout_card = _h._build_scout_card
@@ -249,49 +260,27 @@ _SHADOW_VS_LIVE_SINCE_MAP: dict[str, int] = {
 }
 
 
-@agents_router.get("/shadow_vs_live_summary")
-async def get_shadow_vs_live_summary(
-    since: str = Query("24h", description="Window: 1h | 6h | 12h | 24h | 48h | 7d"),
-    actor: base.AuthenticatedActor = Depends(base.current_actor),
-) -> dict[str, Any]:
-    """GET /api/v1/agents/shadow_vs_live_summary — demo vs live_demo aggregate (C-1b).
+async def _handle_engine_mode_fills_summary(since: str) -> dict[str, Any]:
+    """Shared handler body for engine_mode fills summary (canonical + legacy).
+    engine_mode 成交聚合的共用 handler body（正名 + legacy alias 共用）。
 
-    Plan §E "影子 vs 真倉對比" backing endpoint. Aggregates ``trading.fills``
-    over the requested window split by ``engine_mode``: ``demo`` is its own
-    bucket; ``live`` and ``live_demo`` are UNIONed under ``live_demo`` (per
-    memory ``project_engine_mode_tag_live_demo`` — historical 43k 'live' rows
-    are LiveDemo traffic, not real Mainnet fills). Returns counts, total
-    realized PnL, and average slippage bps per bucket plus a top-level diff
-    block (live_demo − demo) for the GUI's "+/- N bps" delta line.
+    Aggregates ``trading.fills`` by ``engine_mode``: ``demo`` is one
+    bucket; ``live`` + ``live_demo`` UNIONed under ``live_demo`` (per
+    memory ``project_engine_mode_tag_live_demo`` — 43k 'live' rows are
+    LiveDemo). Returns counts / realized PnL / avg slippage per bucket
+    plus a top-level ``diff`` (live_demo − demo). Both
+    ``/engine_mode_fills_summary`` (canonical) and
+    ``/shadow_vs_live_summary`` (legacy) call this single body — zero
+    drift risk. ``data_category`` stays ``agents_shadow_vs_live`` on BOTH
+    routes for downstream back-compat (legacy GUI / tests / API docs).
 
-    Plan §E「影子 vs 真倉對比」後端端點。聚合 ``trading.fills`` 視窗內依
-    ``engine_mode`` 切桶：``demo`` 獨立；``live`` 與 ``live_demo`` UNION 至
-    ``live_demo``（per memory ``engine_mode_tag_live_demo`` — 歷史 43k 'live'
-    其實是 LiveDemo）。每桶回成交筆數、累計 realized PnL、平均 slippage bps，
-    並補一個頂層 ``diff``（live_demo − demo）給 GUI 渲染「+/- N bps」差異行。
-
-    Response schema:
-        {
-          ok: bool,
-          data: {
-            since: str,
-            since_hours: int,
-            demo: {count: int, total_pnl_usd: float, avg_slippage_bps: float},
-            live_demo: {count: int, total_pnl_usd: float, avg_slippage_bps: float},
-            diff: {fill_rate_delta_pct: float, slippage_delta_bps: float},
-            degraded: bool,
-            reason: str | null,
-          },
-          is_simulated: false,
-          data_category: "agents_shadow_vs_live",
-        }
-
-    ``fill_rate_delta_pct`` is computed as
-    ``(live_demo.count - demo.count) / max(demo.count, 1) * 100`` and is
-    intentionally a relative ratio in percent (not bps) — the column name
-    keeps the GUI label honest. ``slippage_delta_bps`` is the absolute
-    bps difference (live_demo.avg − demo.avg).
-    ``fill_rate_delta_pct`` 為相對百分比；``slippage_delta_bps`` 為絕對 bps 差。
+    依 ``engine_mode`` 聚合 ``trading.fills``：``demo`` 獨立桶；
+    ``live`` 與 ``live_demo`` UNION 至 ``live_demo``（per memory
+    ``engine_mode_tag_live_demo``，43k 'live' 其實是 LiveDemo）。每桶回
+    筆數 / realized PnL / 平均 slippage，並補頂層 ``diff``（live_demo −
+    demo）。正名 + legacy 兩 route 共用此 body，零分歧風險。
+    ``data_category`` 兩 route 皆保 ``agents_shadow_vs_live`` 供下游
+    back-compat。``since`` 未識別值回退 ``24h``。
     """
     since_hours = _SHADOW_VS_LIVE_SINCE_MAP.get(since, 24)
 
@@ -332,3 +321,67 @@ async def get_shadow_vs_live_summary(
         "is_simulated": False,
         "data_category": "agents_shadow_vs_live",
     }
+
+
+@agents_router.get("/engine_mode_fills_summary")
+async def get_engine_mode_fills_summary(
+    since: str = Query("24h", description="Window: 1h | 6h | 12h | 24h | 48h | 7d"),
+    actor: base.AuthenticatedActor = Depends(base.current_actor),
+) -> dict[str, Any]:
+    """GET /api/v1/agents/engine_mode_fills_summary — canonical name (C-1b).
+
+    Aggregates ``trading.fills`` by ``engine_mode`` (demo vs live/live_demo
+    UNIONed). Canonical URL introduced 2026-04-29; legacy
+    ``/shadow_vs_live_summary`` was misleading (no "shadow" — reads real
+    fills). New callers should use this URL; legacy preserved for
+    back-compat (same handler / identical payload).
+
+    依 ``engine_mode`` 切桶聚合 ``trading.fills``（demo vs live/live_demo
+    UNION）。2026-04-29 引入正名；legacy ``/shadow_vs_live_summary`` 命名
+    誤導（跟「影子」無關，抓真實成交）。新代碼用本 URL，舊 URL 共用同一
+    handler，payload 完全相同。
+
+    Response schema (identical for both routes):
+        {
+          ok: bool,
+          data: {
+            since: str,
+            since_hours: int,
+            demo: {count: int, total_pnl_usd: float, avg_slippage_bps: float},
+            live_demo: {count: int, total_pnl_usd: float, avg_slippage_bps: float},
+            diff: {fill_rate_delta_pct: float, slippage_delta_bps: float},
+            degraded: bool,
+            reason: str | null,
+          },
+          is_simulated: false,
+          data_category: "agents_shadow_vs_live",   # legacy alias string
+                                                    # kept on BOTH routes
+                                                    # for downstream back-compat
+        }
+    """
+    return await _handle_engine_mode_fills_summary(since)
+
+
+@agents_router.get("/shadow_vs_live_summary")
+async def get_shadow_vs_live_summary(
+    since: str = Query("24h", description="Window: 1h | 6h | 12h | 24h | 48h | 7d"),
+    actor: base.AuthenticatedActor = Depends(base.current_actor),
+) -> dict[str, Any]:
+    """GET /api/v1/agents/shadow_vs_live_summary — LEGACY ALIAS (misleading name).
+
+    Plan §E "影子 vs 真倉對比" backing endpoint. NOTE (2026-04-29):
+    this URL is misleading — it aggregates ``trading.fills`` by
+    ``engine_mode`` (no "shadow"). Canonical URL:
+    ``/api/v1/agents/engine_mode_fills_summary`` (same date). Preserved
+    for back-compat — same handler body, identical payload. New callers
+    should migrate to the canonical name.
+
+    Plan §E「影子 vs 真倉對比」後端端點。注意（2026-04-29）：本 URL 命名
+    誤導 —— 實際聚合 ``trading.fills`` 按 ``engine_mode`` 切桶，跟
+    「影子」無關。正名：``/api/v1/agents/engine_mode_fills_summary``
+    （同日新增）。本 URL 為 backward compat 保留 —— 同 handler body /
+    同 payload / 零行為差異。新代碼請用正名。
+
+    Response schema 與 ``/engine_mode_fills_summary`` 完全相同。
+    """
+    return await _handle_engine_mode_fills_summary(since)
