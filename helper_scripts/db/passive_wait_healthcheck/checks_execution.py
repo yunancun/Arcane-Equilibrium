@@ -12,6 +12,8 @@ import os
 from pathlib import Path
 from typing import Any
 
+from .shared import _engine_process_age_minutes
+
 MAKER_FEE_RATE = 0.00020
 TAKER_FEE_RATE = 0.00055
 MAKER_FEE_CUTOFF = (MAKER_FEE_RATE + TAKER_FEE_RATE) / 2.0
@@ -88,19 +90,26 @@ def check_maker_entry_intent_drift(cur) -> tuple[str, str]:
             return ("PASS", "no active demo strategies with use_maker_entry=true")
         return ("WARN", f"maker-entry TOML read unavailable: {diag}")
 
+    window_minutes = 30.0
+    window_note = "30m"
+    engine_age_min, _engine_age_diag = _engine_process_age_minutes()
+    if engine_age_min is not None and engine_age_min < 30.0:
+        window_minutes = max(1.0, engine_age_min)
+        window_note = f"{window_minutes:.1f}m post-restart"
+
     placeholders = ", ".join(["%s"] * len(strategies))
     try:
         cur.execute(
             f"""
             SELECT strategy_name, lower(order_type) AS order_type, COUNT(*)::int AS n
             FROM trading.intents
-            WHERE ts > now() - interval '30 minutes'
+            WHERE ts > now() - (%s::double precision * interval '1 minute')
               AND engine_mode = 'demo'
               AND strategy_name IN ({placeholders})
             GROUP BY strategy_name, lower(order_type)
             ORDER BY strategy_name, lower(order_type)
             """,
-            tuple(strategies),
+            (window_minutes, *strategies),
         )
         rows = cur.fetchall()
     except Exception as exc:  # noqa: BLE001 — healthcheck fail-soft
@@ -126,7 +135,7 @@ def check_maker_entry_intent_drift(cur) -> tuple[str, str]:
     if not active_rows:
         return (
             "PASS",
-            "maker-enabled demo strategies emitted no entry intents in 30m "
+            f"maker-enabled demo strategies emitted no entry intents in {window_note} "
             f"({', '.join(strategies)})",
         )
 
@@ -140,10 +149,11 @@ def check_maker_entry_intent_drift(cur) -> tuple[str, str]:
         return (
             "FAIL",
             "maker-enabled demo strategies emitted market entry intents — "
+            + f"window={window_note}; "
             + "; ".join(parts)
             + " — check StrategyParams partial-merge / persisted replay drift",
         )
-    return ("PASS", "maker-entry intent shape ok — " + "; ".join(parts))
+    return ("PASS", f"maker-entry intent shape ok — window={window_note}; " + "; ".join(parts))
 
 
 def _as_int(value: Any) -> int:
