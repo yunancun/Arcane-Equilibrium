@@ -14,6 +14,11 @@ API_BASE="http://127.0.0.1:8000"
 MAX_WAIT_SEC=60
 POLL_INTERVAL=2
 
+if [[ "${OPENCLAW_ENABLE_PAPER:-}" != "1" ]]; then
+    echo "ERROR: Paper pipeline is disabled by default. Export OPENCLAW_ENABLE_PAPER=1 in the engine environment before running this script."
+    exit 1
+fi
+
 # ── Resolve API token / 解析 API Token ──
 # Repo root: prefer $OPENCLAW_BASE_DIR, else resolve from script location (cross-platform).
 # Repo 根目錄：優先 $OPENCLAW_BASE_DIR，否則由腳本位置解析（跨平台）。
@@ -28,15 +33,27 @@ if [[ -z "${OPENCLAW_API_TOKEN:-}" ]]; then
     fi
 fi
 
-AUTH="Authorization: Bearer $OPENCLAW_API_TOKEN"
+# ── Curl auth config / Curl 认证配置 ──
+# 中文：把 bearer header 写入 0600 临时 curl 配置，避免 token 出现在 curl 进程 argv。
+# English: Put the bearer header in a 0600 temporary curl config so the token is not exposed in curl argv.
+if [[ "$OPENCLAW_API_TOKEN" == *$'\n'* || "$OPENCLAW_API_TOKEN" == *'"'* || "$OPENCLAW_API_TOKEN" == *'\\'* ]]; then
+    echo "ERROR: OPENCLAW_API_TOKEN contains unsupported characters for curl config"
+    exit 1
+fi
+
+AUTH_CONFIG=$(mktemp "${TMPDIR:-/tmp}/openclaw-curl-auth.XXXXXX")
+chmod 600 "$AUTH_CONFIG"
+trap 'rm -f "$AUTH_CONFIG"' EXIT
+printf 'header = "Authorization: Bearer %s"\n' "$OPENCLAW_API_TOKEN" > "$AUTH_CONFIG"
+unset OPENCLAW_API_TOKEN
 
 # ── Helper: API call / API 调用辅助 ──
 api_get() {
-    curl -s -H "$AUTH" "${API_BASE}$1" 2>/dev/null
+    curl -s --config "$AUTH_CONFIG" "${API_BASE}$1" 2>/dev/null
 }
 
 api_post() {
-    curl -s -X POST -H "$AUTH" -H "Content-Type: application/json" "${API_BASE}$1" ${2:+-d "$2"} 2>/dev/null
+    curl -s --config "$AUTH_CONFIG" -X POST -H "Content-Type: application/json" "${API_BASE}$1" ${2:+-d "$2"} 2>/dev/null
 }
 
 # ── Step 0: Wait for API server / 等待 API 服务器就绪 ──
@@ -58,7 +75,9 @@ SESSION_STATUS=$(api_get "/api/v1/paper/session/status" | python3 -c "
 import sys, json
 try:
     d = json.load(sys.stdin)
-    print(d.get('data', {}).get('session_state', 'none'))
+    data = d.get('data', {}) or {}
+    session = data.get('session', {}) or {}
+    print(session.get('session_state') or data.get('session_state') or 'none')
 except: print('none')
 " 2>/dev/null)
 
@@ -76,7 +95,8 @@ FEED_STATUS=$(api_get "/api/v1/paper/market-feed/status" | python3 -c "
 import sys, json
 try:
     d = json.load(sys.stdin)
-    print(d.get('data', {}).get('dispatcher_running', False))
+    data = d.get('data', {}) or {}
+    print(data.get('running', data.get('dispatcher_running', False)))
 except: print('False')
 " 2>/dev/null)
 
@@ -111,14 +131,17 @@ echo "  Paper session: $(api_get '/api/v1/paper/session/status' | python3 -c "
 import sys, json
 try:
     d = json.load(sys.stdin)
-    print(d.get('data', {}).get('session_state', 'unknown'))
+    data = d.get('data', {}) or {}
+    session = data.get('session', {}) or {}
+    print(session.get('session_state') or data.get('session_state') or 'unknown')
 except: print('unknown')
 " 2>/dev/null)"
 echo "  Market feed: $(api_get '/api/v1/paper/market-feed/status' | python3 -c "
 import sys, json
 try:
     d = json.load(sys.stdin)
-    print('running' if d.get('data', {}).get('dispatcher_running') else 'stopped')
+    data = d.get('data', {}) or {}
+    print('running' if data.get('running', data.get('dispatcher_running')) else 'stopped')
 except: print('unknown')
 " 2>/dev/null)"
 echo "  Strategies: $(api_get '/api/v1/strategy/list' | python3 -c "

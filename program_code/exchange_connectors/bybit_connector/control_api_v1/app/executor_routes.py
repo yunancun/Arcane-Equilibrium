@@ -83,6 +83,7 @@ from pydantic import BaseModel, Field
 
 from . import main_legacy as base
 from .ipc_dispatch import one_shot_ipc_call
+from .secret_runtime import get_secret_value
 
 logger = logging.getLogger(__name__)
 
@@ -364,7 +365,7 @@ def _verify_authorization_json_or_raise(slot_dir: Path, endpoint_label: str, act
 
     # HMAC verify — must match Rust compute_signature + Python _sign_authorization_payload.
     # HMAC 驗證 — 必須對齊 Rust 與 Python 既有實作。
-    ipc_secret = os.environ.get("OPENCLAW_IPC_SECRET", "").strip()
+    ipc_secret = (get_secret_value("OPENCLAW_IPC_SECRET") or "").strip()
     if not ipc_secret:
         # Treat as authorization gate failure: signature cannot be verified
         # without the secret, so we MUST refuse rather than fail-open.
@@ -546,6 +547,7 @@ async def post_executor_shadow_toggle(
     target_shadow = body.shadow_mode
     actor_id = str(getattr(actor, "actor_id", "?"))
     try:
+        base.require_scope_and_operator(actor, "executor:write")
         if target_shadow is True:
             # Retreat to shadow — always cheap (Operator role only).
             # 退回 shadow — 永遠便宜（僅 Operator 角色）。
@@ -568,6 +570,10 @@ async def post_executor_shadow_toggle(
         gate_failed: str | None = None
         if exc.status_code == 403 and isinstance(exc.detail, dict):
             gate_failed = exc.detail.get("gate_failed")
+            if gate_failed is None:
+                reason_codes = exc.detail.get("reason_codes")
+                if isinstance(reason_codes, list) and reason_codes:
+                    gate_failed = str(reason_codes[0])
         elif exc.status_code == 403:
             gate_failed = "operator_role"
         elif exc.status_code == 401:

@@ -89,6 +89,19 @@ pub fn chunk_rows_with_override(columns_per_row: usize, override_max: usize) -> 
     chunk_rows_for_columns(columns_per_row).min(override_max.max(1))
 }
 
+/// Chunked batch INSERT outcome.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BatchInsertOutcome {
+    pub rows_affected: u64,
+    pub failed_chunks: usize,
+}
+
+impl BatchInsertOutcome {
+    pub fn all_ok(&self) -> bool {
+        self.failed_chunks == 0
+    }
+}
+
 /// Chunked batch INSERT driver.
 /// 分塊批量 INSERT 驅動。
 ///
@@ -125,12 +138,15 @@ pub async fn batch_insert_chunked<T, F>(
     rows: &[T],
     columns_per_row: usize,
     mut build_chunk: F,
-) -> u64
+) -> BatchInsertOutcome
 where
     F: for<'a> FnMut(&'a [T]) -> QueryBuilder<'a, Postgres>,
 {
     if rows.is_empty() {
-        return 0;
+        return BatchInsertOutcome {
+            rows_affected: 0,
+            failed_chunks: 0,
+        };
     }
     let chunk_rows = chunk_rows_for_columns(columns_per_row);
     run_chunks(pg, pool, table, rows, chunk_rows, &mut build_chunk).await
@@ -149,12 +165,15 @@ pub async fn batch_insert_chunked_with_override<T, F>(
     columns_per_row: usize,
     chunk_rows_override: usize,
     mut build_chunk: F,
-) -> u64
+) -> BatchInsertOutcome
 where
     F: for<'a> FnMut(&'a [T]) -> QueryBuilder<'a, Postgres>,
 {
     if rows.is_empty() {
-        return 0;
+        return BatchInsertOutcome {
+            rows_affected: 0,
+            failed_chunks: 0,
+        };
     }
     let chunk_rows = chunk_rows_with_override(columns_per_row, chunk_rows_override);
     run_chunks(pg, pool, table, rows, chunk_rows, &mut build_chunk).await
@@ -169,11 +188,12 @@ async fn run_chunks<T, F>(
     rows: &[T],
     chunk_rows: usize,
     build_chunk: &mut F,
-) -> u64
+) -> BatchInsertOutcome
 where
     F: for<'a> FnMut(&'a [T]) -> QueryBuilder<'a, Postgres>,
 {
     let mut total_affected: u64 = 0;
+    let mut failed_chunks: usize = 0;
     for chunk in rows.chunks(chunk_rows) {
         let mut qb = build_chunk(chunk);
         match qb.build().execute(pg).await {
@@ -189,6 +209,7 @@ where
             }
             Err(e) => {
                 let _ = pool.record_failure();
+                failed_chunks = failed_chunks.saturating_add(1);
                 warn!(
                     table = table,
                     error = %e,
@@ -197,7 +218,10 @@ where
             }
         }
     }
-    total_affected
+    BatchInsertOutcome {
+        rows_affected: total_affected,
+        failed_chunks,
+    }
 }
 
 /// Outcome tag for `exec_single_insert` — lets the caller decide whether to
@@ -351,5 +375,19 @@ mod tests {
         assert!(SingleInsertOutcome::Ok(5).is_ok());
         assert!(!SingleInsertOutcome::Failed.is_ok());
         assert!(!SingleInsertOutcome::PoolUnavailable.is_ok());
+    }
+
+    #[test]
+    fn batch_insert_outcome_all_ok_tracks_failed_chunks() {
+        assert!(BatchInsertOutcome {
+            rows_affected: 0,
+            failed_chunks: 0,
+        }
+        .all_ok());
+        assert!(!BatchInsertOutcome {
+            rows_affected: 3,
+            failed_chunks: 1,
+        }
+        .all_ok());
     }
 }

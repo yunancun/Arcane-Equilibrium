@@ -95,8 +95,10 @@ fn settings_dir() -> PathBuf {
 }
 
 /// Load per-engine strategy parameters from TOML.
-/// Falls back to defaults if file is missing or unparseable (fail-open for Paper, log warning).
-/// 從 TOML 加載每引擎策略參數。文件缺失或解析失敗時使用默認值（Paper fail-open，記錄警告）。
+/// Paper keeps default fallback (exploration fail-open). Demo/Live fail closed
+/// to an all-inactive config when file is missing or unparseable.
+/// 從 TOML 加載每引擎策略參數。Paper 保留默認回退（探索 fail-open）；
+/// Demo/Live 在文件缺失或解析失敗時改為 all-inactive fail-closed。
 pub fn load_strategy_params(kind: PipelineKind) -> StrategyParamsConfig {
     load_strategy_params_from(kind, &settings_dir())
 }
@@ -116,22 +118,52 @@ pub fn load_strategy_params_from(kind: PipelineKind, settings: &Path) -> Strateg
                 cfg
             }
             Err(e) => {
-                warn!(
-                    kind = %kind, path = %path.display(), error = %e,
-                    "failed to parse strategy params TOML, using defaults \
-                     / 策略參數 TOML 解析失敗，使用默認值"
-                );
-                StrategyParamsConfig::default()
+                fallback_strategy_params_on_load_error(
+                    kind,
+                    &path,
+                    format!("parse error: {e}"),
+                )
             }
         },
         Err(_) => {
-            info!(
-                kind = %kind, path = %path.display(),
-                "strategy params TOML not found, using defaults \
-                 / 策略參數 TOML 未找到，使用默認值"
-            );
-            StrategyParamsConfig::default()
+            fallback_strategy_params_on_load_error(kind, &path, "file not found".to_string())
         }
+    }
+}
+
+fn fail_closed_inactive_config() -> StrategyParamsConfig {
+    let mut cfg = StrategyParamsConfig::default();
+    cfg.ma_crossover.active = false;
+    cfg.bb_reversion.active = false;
+    cfg.bb_breakout.active = false;
+    cfg.grid_trading.active = false;
+    cfg.funding_arb.active = false;
+    cfg
+}
+
+fn fallback_strategy_params_on_load_error(
+    kind: PipelineKind,
+    path: &Path,
+    reason: String,
+) -> StrategyParamsConfig {
+    if kind.is_exchange() {
+        warn!(
+            kind = %kind,
+            path = %path.display(),
+            error = %reason,
+            "strategy params load failed — using fail-closed inactive config \
+             / 策略參數載入失敗，改用 fail-closed 全停用配置"
+        );
+        fail_closed_inactive_config()
+    } else {
+        info!(
+            kind = %kind,
+            path = %path.display(),
+            error = %reason,
+            "strategy params load failed in paper — using defaults \
+             / Paper 策略參數載入失敗，使用默認值"
+        );
+        StrategyParamsConfig::default()
     }
 }
 

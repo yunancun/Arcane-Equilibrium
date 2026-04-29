@@ -34,6 +34,7 @@ use super::slots::{BudgetTrackerSlot, CostEdgeAdvisorSlot, HStateCacheSlot, Teac
 use super::PerEngineRiskStores;
 use crate::config::{BudgetConfig, ConfigManager, ConfigStore, LearningConfig};
 use crate::h_state_cache::poller::InvalidationSender;
+use crate::secret_env;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -109,7 +110,7 @@ pub(super) async fn handle_connection(
     // Fail-closed：任何認證失敗立即斷開連線。
     // Backward-compatible: if env var is absent, auth is skipped (dev/test mode).
     // 向後兼容：env var 不存在時跳過認證（開發/測試模式）。
-    if let Ok(secret) = std::env::var("OPENCLAW_IPC_SECRET") {
+    if let Some(secret) = secret_env::var_or_file("OPENCLAW_IPC_SECRET") {
         // Read the first line — must be __auth / 讀取第一行，必須是 __auth
         let auth_line = match lines.next_line().await {
             Ok(Some(line)) => line,
@@ -263,4 +264,3 @@ mod tests {
         assert!(!verify_ipc_token("wrong_secret", ts, &token));
     }
 }
-

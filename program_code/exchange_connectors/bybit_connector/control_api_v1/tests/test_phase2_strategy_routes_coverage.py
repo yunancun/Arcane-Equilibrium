@@ -72,7 +72,10 @@ def _run(coro):
 
 class _FakeActor:
     """Minimal AuthenticatedActor stand-in."""
+    actor_id = "test-operator"
     role = "operator"
+    roles = {"operator"}
+    scopes = {"strategy:write"}
     token = "test-token"
 
 

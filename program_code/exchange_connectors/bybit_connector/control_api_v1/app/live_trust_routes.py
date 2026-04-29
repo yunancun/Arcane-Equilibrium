@@ -41,6 +41,7 @@ from .earned_trust_engine import (
     TrustTier,
     get_trust_engine,
 )
+from .secret_runtime import get_secret_value
 
 logger = logging.getLogger(__name__)
 
@@ -217,7 +218,7 @@ def _write_signed_live_authorization(
 
     對 Rust 引擎 LIVE-GATE-BINDING-1 簽名寫入贏得信任授權記錄。
     """
-    ipc_secret = os.environ.get("OPENCLAW_IPC_SECRET", "").strip()
+    ipc_secret = (get_secret_value("OPENCLAW_IPC_SECRET") or "").strip()
     if not ipc_secret:
         raise RuntimeError(
             "OPENCLAW_IPC_SECRET is not set — cannot sign live authorization. "
@@ -406,8 +407,7 @@ def _get_auth_actor(
 
 
 def _require_operator(actor: Any) -> None:
-    from .governance_routes import _require_operator_role
-    _require_operator_role(actor)
+    base.require_scope_and_operator(actor, "live:authority")
 
 
 # ─────────────────────────────────────────────────────────────────────────────

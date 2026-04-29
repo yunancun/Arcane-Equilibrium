@@ -1,8 +1,8 @@
 # OpenClaw API Token 重置指南 / API Token Reset Guide
 
-本文档说明如何设置、查看和重置 OpenClaw Control API 的认证 Token。
+本文档说明如何设置和重置 OpenClaw Control API 的认证 Token。
 
-This document explains how to set, view, and reset the OpenClaw Control API authentication token.
+This document explains how to set and reset the OpenClaw Control API authentication token.
 
 ---
 
@@ -22,11 +22,9 @@ This document explains how to set, view, and reset the OpenClaw Control API auth
 最安全的方式，Token 不落盘。
 
 ```bash
-# 生成一个安全的随机 Token
-export OPENCLAW_API_TOKEN=$(python3 -c "import secrets; print(secrets.token_urlsafe(32))")
-
-# 查看当前 Token
-echo $OPENCLAW_API_TOKEN
+# 从私有密钥管理器读取 Token；不要在终端打印 Token
+# Read the token from a private secret manager; do not print it in the terminal
+export OPENCLAW_API_TOKEN="$(security find-generic-password -s openclaw_api_token -w)"
 
 # 启动服务
 bash start_local.sh
@@ -35,8 +33,13 @@ bash start_local.sh
 如果使用 `.env` 文件：
 
 ```bash
-# 生成并写入 .env
-echo "OPENCLAW_API_TOKEN=$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')" >> .env
+# 生成并写入 .env，文件权限仅 owner 可读写
+# Generate into .env with owner-only permissions
+umask 077
+python3 - <<'PY' >> .env
+import secrets
+print(f"OPENCLAW_API_TOKEN={secrets.token_urlsafe(32)}")
+PY
 ```
 
 ---
@@ -53,8 +56,6 @@ mkdir -p .secrets && chmod 700 .secrets
 python3 -c "import secrets; print(secrets.token_urlsafe(32))" > .secrets/api_token
 chmod 600 .secrets/api_token
 
-# 查看当前 Token
-cat .secrets/api_token
 ```
 
 也可以指定自定义路径：
@@ -71,9 +72,10 @@ export OPENCLAW_API_TOKEN_FILE=/path/to/your/secret/token_file
 
 1. 自动生成一个 `secrets.token_urlsafe(32)` 的安全 Token
 2. 保存到 `.secrets/api_token`（权限 0o600）
-3. 在 stderr 输出 Token 值和文件路径
 
-**首次启动后请立即记录 Token 值。**
+**不要依赖启动日志披露 Token。** 首次启动后，如果需要取用 Token，请通过受保护的 Token 文件或密钥管理器读取，不要把 Token 打印到共享终端或日志。
+
+**Do not rely on startup logs to disclose tokens.** After first startup, read the token only from the protected token file or a secrets manager; do not print it into shared terminals or logs.
 
 ---
 
@@ -82,11 +84,11 @@ export OPENCLAW_API_TOKEN_FILE=/path/to/your/secret/token_file
 ### 情况一：忘记了当前 Token
 
 ```bash
-# 如果用的是文件方式，直接查看
-cat .secrets/api_token
-
-# 如果用的是环境变量，检查环境
-echo $OPENCLAW_API_TOKEN
+# 不显示旧 Token；直接生成并替换
+# Do not display the old token; generate and replace it
+umask 077
+python3 -c "import secrets; print(secrets.token_urlsafe(32))" > .secrets/api_token
+chmod 600 .secrets/api_token
 ```
 
 ### 情况二：Token 泄露，需要立即更换
@@ -96,7 +98,7 @@ echo $OPENCLAW_API_TOKEN
 NEW_TOKEN=$(python3 -c "import secrets; print(secrets.token_urlsafe(32))")
 
 # 2. 更新 Token 文件
-echo "$NEW_TOKEN" > .secrets/api_token
+printf '%s\n' "$NEW_TOKEN" > .secrets/api_token
 chmod 600 .secrets/api_token
 
 # 3. 或者更新环境变量
@@ -106,8 +108,13 @@ export OPENCLAW_API_TOKEN="$NEW_TOKEN"
 # 停止当前服务后重新启动
 bash start_local.sh
 
-# 5. 用新 Token 测试连接
-curl -s -H "Authorization: Bearer $NEW_TOKEN" http://localhost:8000/api/v1/system/overview | head -20
+# 5. 用新 Token 测试连接：把 header 放入 0600 临时文件，避免出现在 curl argv
+# Test with the new token via a 0600 temp config so it does not appear in curl argv
+AUTH_CONFIG=$(mktemp "${TMPDIR:-/tmp}/openclaw-curl-auth.XXXXXX")
+chmod 600 "$AUTH_CONFIG"
+trap 'rm -f "$AUTH_CONFIG"' EXIT
+printf 'header = "Authorization: Bearer %s"\n' "$NEW_TOKEN" > "$AUTH_CONFIG"
+curl -s --config "$AUTH_CONFIG" http://localhost:8000/api/v1/system/overview | head -20
 ```
 
 ### 情况三：清除所有认证状态，完全重置
@@ -122,7 +129,7 @@ unset OPENCLAW_API_TOKEN_FILE
 
 # 3. 重启服务 — 系统会自动生成新 Token
 bash start_local.sh
-# 新 Token 会打印在 stderr 输出中
+# 新 Token 保存到受保护文件；不要依赖日志披露
 ```
 
 ---

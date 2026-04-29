@@ -35,7 +35,6 @@ from typing import Any
 
 from fastapi import Depends
 
-from . import main_legacy as _base
 from .control_ops import build_overview
 from .pnl_ops import build_business_summary
 from .state_models import (
@@ -50,6 +49,7 @@ def register_system_legacy_routes(app) -> None:
     Register all system / health legacy routes on the FastAPI app.
     在 FastAPI app 上註冊所有 system / health legacy 路由。
     """
+    from . import main_legacy as _base
     settings = _base.settings
 
     @app.get(
@@ -196,13 +196,13 @@ def register_system_legacy_routes(app) -> None:
         f"{settings.api_prefix}/health/db",
         include_in_schema=False,
     )
-    def health_db():
+    def health_db(actor=Depends(_base.current_actor)):
         """
         PostgreSQL connection pool health check.
         PostgreSQL 連接池健康檢查。
 
-        Returns pool stats + simple SELECT 1 liveness probe.
-        返回連接池統計 + SELECT 1 存活探測。
+        Authenticated detailed probe; public callers should use /api/v1/healthz.
+        已認證詳細探測；公開 liveness 請使用 /api/v1/healthz。
         """
         from . import db_pool
 
@@ -218,7 +218,8 @@ def register_system_legacy_routes(app) -> None:
             cur.close()
             return {"ok": True, "pool": stats}
         except Exception as exc:
-            return {"ok": False, "pool": stats, "probe": str(exc)}
+            _base.logger.warning("health_db probe failed: %s", exc)
+            return {"ok": False, "pool": stats, "probe": "probe_failed"}
         finally:
             db_pool.put_conn(conn)
 

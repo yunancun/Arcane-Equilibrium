@@ -312,6 +312,9 @@ def test_sql_templates_contain_expected_clauses():
     assert "trading.funding_settlements" in m._BACKFILL_INCLUDED_SQL
     assert "total_funding_pnl" in m._BACKFILL_INCLUDED_SQL
     assert "+ COALESCE(fb.total_funding_pnl, 0.0)" in m._BACKFILL_INCLUDED_SQL
+    # Partial closes must not finalize a label; future close fills can complete it.
+    assert "close_qty_complete" in m._BACKFILL_INCLUDED_SQL
+    assert "AND l.close_qty_complete" in m._BACKFILL_INCLUDED_SQL
 
     # Pass 2 must match the 3 excluded prefixes (§4.2)
     for prefix in ("orphan_close:", "adopted_close:", "shadow_fill:"):

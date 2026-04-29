@@ -691,13 +691,15 @@ impl StrategistScheduler {
         // FA-1：Live tune 路徑尚未支援。db_mode() 回 "live" 但真 LiveDemo fills
         // 的 engine_mode = "live_demo"；單值 filter 會靜默丟 95%+ 資料。
         // Phase 5+ STRATEGIST-TUNE-TARGET-CONFIG-1 必須擴為 IN 多值。
-        debug_assert!(
-            matches!(self.tune_target, PipelineKind::Demo),
-            "STRATEGIST-SCHED gather_strategy_metrics: Live tune_target not yet \
-             supported — SQL filter must widen to multi-mode IN before enabling \
-             (see STRATEGIST-TUNE-TARGET-CONFIG-1 in TODO.md). Got tune_target={:?}",
-            self.tune_target,
-        );
+        if !matches!(self.tune_target, PipelineKind::Demo) {
+            return Err(format!(
+                "STRATEGIST-SCHED gather_strategy_metrics: tune_target={:?} not supported \
+                 in release builds — Live metrics require multi-mode filters and operator \
+                 acceptance criteria before enabling",
+                self.tune_target
+            )
+            .into());
+        }
         let tune_mode = self.tune_target.db_mode();
         let rows = sqlx::query_as::<_, PairMetricsRow>(
             r#"

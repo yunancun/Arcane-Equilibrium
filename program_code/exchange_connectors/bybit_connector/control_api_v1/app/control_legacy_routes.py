@@ -35,10 +35,6 @@ MODULE_NOTE (English):
 """
 
 import logging
-import os
-import tempfile
-import threading
-import time
 from typing import Any
 
 from fastapi import Depends, HTTPException
@@ -80,74 +76,6 @@ class ScheduledRestartRequest(BaseModel):
         False, description="Close profitable paper positions before restart"
     )
 
-    def validate_delay(self) -> None:
-        """Reject disallowed delay values / 拒絕不允許的延遲值."""
-        if self.delay_minutes not in (5, 10, 15, 30, 60):
-            raise ValueError("delay_minutes must be one of: 5, 10, 15, 30, 60")
-
-
-def _close_profitable_paper_positions() -> dict[str, Any]:
-    """
-    Close paper positions where net PnL (after fees) > 0.
-    關閉淨盈利（扣除手續費後）的紙盤倉位。
-
-    DEAD-PY-1: Python PaperTradingEngine retired (ARCH-RC1 1C-3-F). Rust engine
-    owns paper state, so this call always returns the retired-stub error.
-    DEAD-PY-1：Python PaperTradingEngine 已退場（1C-3-F），Rust 引擎持有紙盤狀態。
-    """
-    return {
-        "closed": [],
-        "skipped": [],
-        "error": "paper engine not initialized (retired, use Rust engine)",
-    }
-
-
-def _run_restart_in_background(delay_seconds: int) -> None:
-    """
-    Background thread: sleep then restart the uvicorn process.
-    後台執行緒：等待後重啟 uvicorn 程序。
-
-    Writes a temp shell script and executes it in a new session so the
-    parent process can die without killing the restart script.
-    寫入臨時 shell 腳本並在新 session 中執行，使父程序可退出而不殺死重啟腳本。
-    """
-    import subprocess
-    import sys
-
-    pid = os.getpid()
-    python = sys.executable
-    # Reconstruct uvicorn launch command / 重建 uvicorn 啟動命令
-    work_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    # P1-14: Use project logs/ dir instead of /tmp/ to prevent symlink attacks.
-    # P1-14 修復：使用專案內 logs/ 目錄，防止符號連結攻擊。
-    script_content = f"""#!/bin/bash
-# OpenClaw scheduled restart script / 計劃重啟腳本
-sleep {delay_seconds}
-kill {pid} 2>/dev/null
-sleep 3
-cd {work_dir}
-mkdir -p {work_dir}/logs
-nohup {python} -m uvicorn app.main:app --host 0.0.0.0 --port 8000 >> {work_dir}/logs/restart.log 2>&1 &
-echo "Restarted PID=$!" >> {work_dir}/logs/restart.log
-"""
-    try:
-        fd, script_path = tempfile.mkstemp(suffix=".sh", prefix="openclaw_restart_")
-        with os.fdopen(fd, "w") as f:
-            f.write(script_content)
-        os.chmod(script_path, 0o700)
-        subprocess.Popen(
-            ["bash", script_path],
-            start_new_session=True,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-        logger.info(
-            "Scheduled restart script launched: delay=%ds pid=%d",
-            delay_seconds, pid,
-        )
-    except Exception as exc:
-        logger.error("Failed to launch restart script: %s", exc)
-
 
 def register_control_legacy_routes(app) -> None:
     """
@@ -171,49 +99,27 @@ def register_control_legacy_routes(app) -> None:
         Positions that would result in a net loss are left open.
         force_liquidate=True 時立即關閉淨盈利的紙盤倉位；會造成淨虧損的倉位保持開放。
         """
-        try:
-            request.validate_delay()
-        except ValueError as exc:
-            # Log actual error server-side for debugging; do not expose internals.
-            # 伺服器端記錄實際錯誤供調試；不向客戶端洩露內部資訊。
-            logger.debug("validate_delay failed: %s", exc)
-            raise HTTPException(status_code=400, detail="Invalid delay parameter")
-
-        liquidation_result: dict[str, Any] = {
-            "closed": [], "skipped": [], "error": None,
-        }
-        if request.force_liquidate:
-            liquidation_result = _close_profitable_paper_positions()
-
-        delay_seconds = request.delay_minutes * 60
-        restart_at_ts_ms = int(time.time() * 1000) + (delay_seconds * 1000)
-
-        # Launch background restart / 啟動後台重啟
-        t = threading.Thread(
-            target=_run_restart_in_background,
-            args=(delay_seconds,),
-            daemon=True,
-            name=f"scheduled-restart-{request.delay_minutes}m",
-        )
-        t.start()
-
-        logger.info(
-            "Scheduled restart in %d min (force_liquidate=%s) by %s",
+        _base.require_scope_and_operator(actor, "system:restart")
+        # DAPI-007 (Batch E): this endpoint used to spawn an unmanaged uvicorn
+        # process from inside an API worker, creating ownership drift with
+        # launchd/systemd. Restart orchestration must stay in the service
+        # manager or operator scripts, not inside request handlers.
+        # DAPI-007（Batch E）：此端點曾在 API worker 內啟 unmanaged uvicorn，
+        # 導致服務所有權漂移。重啟只能由 service manager 或 operator script 執行。
+        logger.warning(
+            "scheduled-restart endpoint blocked; use service manager / restart_all.sh "
+            "actor=%s delay=%s force_liquidate=%s",
+            _base.audit_actor_id(actor),
             request.delay_minutes,
             request.force_liquidate,
-            actor.get("operator_id", "unknown") if isinstance(actor, dict) else "unknown",
         )
-
-        return {
-            "action_result": "scheduled",
-            "delay_minutes": request.delay_minutes,
-            "restart_at_ts_ms": restart_at_ts_ms,
-            "force_liquidate": request.force_liquidate,
-            "positions_closed": liquidation_result["closed"],
-            "positions_skipped": liquidation_result["skipped"],
-            "liquidation_error": liquidation_result.get("error"),
-            "message": f"Server will restart in {request.delay_minutes} minute(s).",
-        }
+        raise HTTPException(
+            status_code=410,
+            detail=(
+                "scheduled restart endpoint is disabled; use service manager "
+                "(launchctl/systemctl) or helper_scripts/restart_all.sh"
+            ),
+        )
 
     # ── Recheck Routes (J/K canonical/closeout) ──────────────────────────────
 

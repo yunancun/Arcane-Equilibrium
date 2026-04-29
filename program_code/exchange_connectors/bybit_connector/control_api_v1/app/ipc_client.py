@@ -36,6 +36,8 @@ import os
 import time
 from typing import Any
 
+from .secret_runtime import get_secret_value
+
 logger = logging.getLogger(__name__)
 
 
@@ -605,7 +607,7 @@ class EngineIPCClient:
         No-op: if OPENCLAW_IPC_SECRET is not set (dev/test mode).
         無操作：未設置 OPENCLAW_IPC_SECRET 時跳過（開發/測試模式）。
         """
-        secret = os.environ.get("OPENCLAW_IPC_SECRET")
+        secret = get_secret_value("OPENCLAW_IPC_SECRET")
         if not secret:
             return  # No secret — skip auth / 無密鑰 — 跳過認證
         ts = int(time.time())
@@ -818,7 +820,7 @@ def sync_ipc_call(
     import socket as _socket
 
     _path = socket_path or os.environ.get(SOCKET_ENV_VAR, DEFAULT_SOCKET_PATH)
-    ipc_secret = os.environ.get("OPENCLAW_IPC_SECRET", "")
+    ipc_secret = get_secret_value("OPENCLAW_IPC_SECRET") or ""
 
     try:
         with _socket.socket(_socket.AF_UNIX, _socket.SOCK_STREAM) as sock:

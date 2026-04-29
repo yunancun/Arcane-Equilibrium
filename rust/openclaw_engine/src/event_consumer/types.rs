@@ -105,6 +105,23 @@ pub struct PendingOrder {
     pub cancel_requested_ts_ms: Option<u64>,
 }
 
+/// Pending-order lifecycle messages sent from the dispatch task to the event
+/// consumer. Registration and terminal dispatch failure share the same channel
+/// so the event loop can keep in-memory pending state and DB lifecycle rows in
+/// one ordered stream.
+#[derive(Debug, Clone)]
+pub enum PendingOrderEvent {
+    Register(PendingOrder),
+    DispatchFailed {
+        order_link_id: String,
+        symbol: String,
+        is_close: bool,
+        terminal_status: String,
+        reason: String,
+        ts_ms: u64,
+    },
+}
+
 /// Dependencies bundle for the event consumer (W1 fix: avoids 9+ parameter function).
 /// 事件消費者依賴集合（W1 修復：避免 9+ 參數的函數）。
 pub struct EventConsumerDeps {

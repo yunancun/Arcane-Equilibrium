@@ -58,6 +58,20 @@ DATA_DIR="${OPENCLAW_DATA_DIR:-/tmp/openclaw}"
 SECRETS_ROOT="${OPENCLAW_SECRETS_ROOT:-$HOME/BybitOpenClaw/secrets}"
 SECRETS_ENV="$SECRETS_ROOT/environment_files/basic_system_services.env"
 
+# SW-006 (Batch E): overlap lock — prevent concurrent daily runs.
+# SW-006（Batch E）：重疊鎖，避免每日任務重入。
+LOCK_ROOT="$DATA_DIR/locks"
+LOCK_DIR="$LOCK_ROOT/counterfactual_daily_cron.lock.d"
+mkdir -p "$LOCK_ROOT"
+if ! mkdir "$LOCK_DIR" 2>/dev/null; then
+    echo "[SKIP] counterfactual_daily_cron already running (lock held)" >&2
+    exit 0
+fi
+release_lock() {
+    rmdir "$LOCK_DIR" 2>/dev/null || true
+}
+trap release_lock EXIT INT TERM
+
 # ─── 1. Load Postgres env (mirrors passive_wait_healthcheck.sh:70-78) ───
 if [[ -f "$SECRETS_ENV" ]]; then
     set -a

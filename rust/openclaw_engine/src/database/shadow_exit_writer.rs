@@ -128,7 +128,10 @@ async fn flush_shadow_exits(pool: &DbPool, pending: &mut Vec<ShadowExitMsg>) {
     let pg = match pool.get() {
         Some(p) => p,
         None => {
-            pending.clear();
+            warn!(
+                pending_rows = pending.len(),
+                "shadow_exit_writer flush skipped: DB pool unavailable — retaining pending rows"
+            );
             return;
         }
     };
@@ -243,6 +246,7 @@ async fn flush_shadow_exits(pool: &DbPool, pending: &mut Vec<ShadowExitMsg>) {
                     ctx_id = %row.context_id, error = %e,
                     "shadow_exit write failed / shadow-exit 寫入失敗"
                 );
+                pending.push(row);
             }
         }
     }
@@ -315,7 +319,10 @@ mod tests {
         // future refactor cannot accidentally weaken the guard back to `== 0`.
         // 守衛條件：writer 用 `row.ts_ms <= 0` 單一分支拒絕 epoch-0 與負值溢位。
         // 鎖定布林值，避免日後重構把守衛弱化回 `== 0`。
-        assert!(row.ts_ms <= 0, "ts_ms=0 must satisfy the `<= 0` writer guard");
+        assert!(
+            row.ts_ms <= 0,
+            "ts_ms=0 must satisfy the `<= 0` writer guard"
+        );
     }
 
     /// INFRA-PREBUILD-1 audit L1-2 (2026-04-23): negative ts_ms must be rejected
@@ -337,7 +344,10 @@ mod tests {
         // reverts the guard to `== 0`) immediately goes red.
         // writer 的 `if row.ts_ms <= 0 { continue; }` 守衛必為此列觸發 — 此處
         // 直接驗證條件，若有人把守衛改回 `== 0`（回歸）即刻紅測試。
-        assert!(row.ts_ms <= 0, "negative ts_ms must satisfy the writer's `<= 0` guard");
+        assert!(
+            row.ts_ms <= 0,
+            "negative ts_ms must satisfy the writer's `<= 0` guard"
+        );
         // i64::MIN edge case: even the most-negative int must still trip the guard.
         // i64::MIN 邊界：最負整數亦須觸發守衛。
         let mut extreme = make_row("ctx-neg-min");
@@ -385,26 +395,35 @@ mod tests {
     fn test_take_batch_respects_cap() {
         // Case 1: pending 超過 cap → drain 剛好 cap，剩餘 = len - cap
         // Case 1: pending exceeds cap → drain exactly cap, remaining = len-cap
-        let mut pending: Vec<ShadowExitMsg> = (0..300)
-            .map(|i| make_row(&format!("ctx-{}", i)))
-            .collect();
+        let mut pending: Vec<ShadowExitMsg> =
+            (0..300).map(|i| make_row(&format!("ctx-{}", i))).collect();
         assert_eq!(pending.len(), 300);
         let batch = take_batch(&mut pending, MAX_FLUSH_BATCH);
-        assert_eq!(batch.len(), MAX_FLUSH_BATCH, "batch must be exactly MAX_FLUSH_BATCH");
-        assert_eq!(pending.len(), 300 - MAX_FLUSH_BATCH, "remaining = 300 - cap");
+        assert_eq!(
+            batch.len(),
+            MAX_FLUSH_BATCH,
+            "batch must be exactly MAX_FLUSH_BATCH"
+        );
+        assert_eq!(
+            pending.len(),
+            300 - MAX_FLUSH_BATCH,
+            "remaining = 300 - cap"
+        );
         // Drain is FIFO — first 256 must be ctx-0..ctx-255.
         // drain 是 FIFO — 前 256 筆必是 ctx-0..ctx-255。
         assert_eq!(batch[0].context_id, "ctx-0");
-        assert_eq!(batch[MAX_FLUSH_BATCH - 1].context_id, format!("ctx-{}", MAX_FLUSH_BATCH - 1));
+        assert_eq!(
+            batch[MAX_FLUSH_BATCH - 1].context_id,
+            format!("ctx-{}", MAX_FLUSH_BATCH - 1)
+        );
         // Remaining in pending starts from ctx-256 onward.
         // pending 剩餘從 ctx-256 開始。
         assert_eq!(pending[0].context_id, format!("ctx-{}", MAX_FLUSH_BATCH));
 
         // Case 2: pending 小於 cap → 全 drain，剩餘 = 0
         // Case 2: pending < cap → drain all, remaining = 0
-        let mut small: Vec<ShadowExitMsg> = (0..50)
-            .map(|i| make_row(&format!("small-{}", i)))
-            .collect();
+        let mut small: Vec<ShadowExitMsg> =
+            (0..50).map(|i| make_row(&format!("small-{}", i))).collect();
         let batch2 = take_batch(&mut small, MAX_FLUSH_BATCH);
         assert_eq!(batch2.len(), 50);
         assert!(small.is_empty());
@@ -418,8 +437,7 @@ mod tests {
 
         // Case 4: cap = 0 → noop，pending 不變
         // Case 4: cap = 0 → noop, pending unchanged
-        let mut five: Vec<ShadowExitMsg> =
-            (0..5).map(|i| make_row(&format!("z-{}", i))).collect();
+        let mut five: Vec<ShadowExitMsg> = (0..5).map(|i| make_row(&format!("z-{}", i))).collect();
         let batch4 = take_batch(&mut five, 0);
         assert!(batch4.is_empty());
         assert_eq!(five.len(), 5);

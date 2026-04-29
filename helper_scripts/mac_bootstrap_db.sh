@@ -41,23 +41,27 @@ TMP_SQL="/tmp/oc_bootstrap_$$.sql"
 cleanup() { rm -f "$TMP_SQL"; }
 trap cleanup EXIT
 
-cat > "$TMP_SQL" <<SQL_TEMPLATE
-DO \$\$
+cat > "$TMP_SQL" <<'SQL_TEMPLATE'
+DO $$
 BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='trading_admin') THEN
-        CREATE ROLE trading_admin WITH LOGIN SUPERUSER;
+        CREATE ROLE trading_admin
+            WITH LOGIN
+                 NOSUPERUSER
+                 NOCREATEDB
+                 NOCREATEROLE
+                 NOREPLICATION;
     END IF;
-END\$\$;
-SQL_TEMPLATE
-
-printf "ALTER ROLE trading_admin WITH PASSWORD '%s';\n" "$PG_PASS" >> "$TMP_SQL"
-
-cat >> "$TMP_SQL" <<'SQL_TEMPLATE'
+END$$;
+ALTER ROLE trading_admin WITH PASSWORD :'role_password';
 SELECT 'trading_ai exists' WHERE EXISTS (SELECT 1 FROM pg_database WHERE datname='trading_ai');
 SQL_TEMPLATE
 
 docker cp "$TMP_SQL" "$CONTAINER:/tmp/oc_bootstrap.sql"
-docker exec "$CONTAINER" psql -U test_user -d postgres -v ON_ERROR_STOP=1 -f /tmp/oc_bootstrap.sql
+docker exec "$CONTAINER" psql -U test_user -d postgres \
+    -v ON_ERROR_STOP=1 \
+    -v role_password="$PG_PASS" \
+    -f /tmp/oc_bootstrap.sql
 echo "[bootstrap] role ready"
 
 DB_EXISTS="$(docker exec "$CONTAINER" psql -U test_user -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname='trading_ai'")"

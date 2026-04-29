@@ -2,20 +2,24 @@
 //! JSON-RPC 參數提取與驗證輔助（E5-P1-5，§九 孤兒抽取）。
 //!
 //! MODULE_NOTE (EN):
-//!   ``handlers.rs`` contains 30+ near-identical snippets of the form::
+//!   ``handlers.rs`` contains 30+ near-identical snippets of the form:
 //!
-//!       let scope = match params.get("scope").and_then(|v| v.as_str()) {
-//!           Some(s) if !s.is_empty() => s.to_string(),
-//!           _ => return JsonRpcResponse::error(id, ERR_INVALID_PARAMS,
-//!                    "missing or empty 'scope' (string)"),
-//!       };
+//!   ```ignore
+//!   let scope = match params.get("scope").and_then(|v| v.as_str()) {
+//!       Some(s) if !s.is_empty() => s.to_string(),
+//!       _ => return JsonRpcResponse::error(id, ERR_INVALID_PARAMS,
+//!                "missing or empty 'scope' (string)"),
+//!   };
+//!   ```
 //!
 //!   This module extracts those into typed helpers returning
-//!   ``Result<T, JsonRpcResponse>`` so a handler can write::
+//!   ``Result<T, JsonRpcResponse>`` so a handler can write:
 //!
-//!       let scope = require_str(params, "scope", id.clone())?;
-//!       let monthly_usd = require_non_negative_f64(params, "monthly_usd", id.clone())?;
-//!       let updated_by = optional_str(params, "updated_by").unwrap_or("ipc");
+//!   ```ignore
+//!   let scope = require_str(params, "scope", id.clone())?;
+//!   let monthly_usd = require_non_negative_f64(params, "monthly_usd", id.clone())?;
+//!   let updated_by = optional_str(params, "updated_by").unwrap_or("ipc");
+//!   ```
 //!
 //!   with the ``?`` operator short-circuiting to the same ``JsonRpcResponse``
 //!   error payloads as the hand-written path.  Error messages are preserved

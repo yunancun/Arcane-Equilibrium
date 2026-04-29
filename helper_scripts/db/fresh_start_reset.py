@@ -43,7 +43,7 @@ Usage / 用法:
 
     # 3. 真實執行（填入今天日期作為確認碼）
     python3 helper_scripts/db/fresh_start_reset.py \\
-        --execute --confirm "FRESH_START_2026_04_10"
+        --execute --confirm "<print expected code from previous mismatch message>"
 
     # Or provide DSN directly:
     DSN=postgresql://redacted@127.0.0.1/trading_ai python3 helper_scripts/db/fresh_start_reset.py
@@ -54,9 +54,11 @@ from __future__ import annotations
 import argparse
 import logging
 import os
+import re
 import sys
 from datetime import datetime, timezone
 from typing import Optional
+from urllib.parse import urlparse
 
 logging.basicConfig(
     level=logging.INFO,
@@ -248,6 +250,22 @@ def _resolve_dsn(env_file: Optional[str] = None) -> Optional[str]:
         return f"postgresql://redacted@{host}:{port}/{db}"
 
     return None
+
+
+def _build_confirmation_code(dsn: str) -> str:
+    """Build execute confirmation code with DB/environment fingerprint.
+    生成帶 DB/環境指紋的執行確認碼。
+    """
+    today_str = datetime.now(timezone.utc).strftime("%Y_%m_%d")
+    parsed = urlparse(dsn)
+    host = parsed.hostname or "unknown_host"
+    port = str(parsed.port or 5432)
+    db = (parsed.path or "/unknown_db").lstrip("/") or "unknown_db"
+    user = parsed.username or "unknown_user"
+    env = os.environ.get("OPENCLAW_ENV", "unspecified")
+    raw_fp = f"{host}_{port}_{db}_{user}_{env}"
+    fp = re.sub(r"[^A-Za-z0-9_]+", "_", raw_fp).strip("_")
+    return f"FRESH_START_{today_str}_{fp}"
 
 
 def _connect(dsn: Optional[str]):
@@ -446,7 +464,7 @@ Examples / 示例:
 
   # Execute reset (fill in today's date as confirmation code)
   DSN=postgresql://... python3 helper_scripts/db/fresh_start_reset.py \\
-      --execute --confirm "FRESH_START_2026_04_10"
+      --execute --confirm "<expected_fingerprint_code>"
         """,
     )
     parser.add_argument(
@@ -471,7 +489,10 @@ Examples / 示例:
         "--confirm",
         type=str,
         default="",
-        help='Confirmation code required with --execute. Format: "FRESH_START_YYYY_MM_DD"',
+        help=(
+            "Confirmation code required with --execute. "
+            "Format is DSN/environment fingerprinted and printed on mismatch."
+        ),
     )
     parser.add_argument(
         "--env-file",
@@ -489,16 +510,20 @@ Examples / 示例:
     else:
         mode = "report_only"
 
+    dsn = _resolve_dsn(env_file=args.env_file)
     # Validate confirmation for execute mode / 驗證 execute 模式的確認碼
     if mode == "execute":
-        today_str = datetime.now(timezone.utc).strftime("%Y_%m_%d")
-        expected = f"FRESH_START_{today_str}"
+        if not dsn:
+            logger.error("No DSN available for execute mode fingerprint check.")
+            sys.exit(1)
+        expected = _build_confirmation_code(dsn)
         if args.confirm != expected:
             logger.error(
                 "Confirmation code mismatch.\n"
                 "  Provided:  %r\n"
                 "  Expected:  %r\n"
-                "This prevents accidental wipes. Re-run with --confirm %r",
+                "This guard binds destructive reset to the target DB/environment.\n"
+                "Re-run with --confirm %r",
                 args.confirm,
                 expected,
                 expected,
@@ -513,7 +538,6 @@ Examples / 示例:
         import time
         time.sleep(3)
 
-    dsn = _resolve_dsn(env_file=args.env_file)
     conn = _connect(dsn)
 
     try:

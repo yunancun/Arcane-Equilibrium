@@ -235,8 +235,13 @@ async def test_session_stop_channel_unavailable_returns_409(monkeypatch):
     monkeypatch.setattr(lsr, "_ipc_command", _fail_channel)
     monkeypatch.setattr(lsr, "_sweep_live_orphan_positions", _unused_sweep)
 
+    actor = SimpleNamespace(
+        actor_id="op-batch-a",
+        roles={"operator"},
+        scopes={"live:trade"},
+    )
     with pytest.raises(HTTPException) as excinfo:
-        await lse.post_live_session_stop(actor=SimpleNamespace(actor_id="op-batch-a"))
+        await lse.post_live_session_stop(actor=actor)
 
     assert excinfo.value.status_code == 409
     detail = excinfo.value.detail

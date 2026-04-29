@@ -149,8 +149,7 @@ pub(super) fn handle_force_governor_looser(
         if let Some(last) = pipeline.last_governor_de_escalation_ms() {
             let elapsed = now_ms.saturating_sub(last);
             if elapsed < TickPipeline::GOVERNOR_DE_ESCALATION_COOLDOWN_MS {
-                let remaining_ms =
-                    TickPipeline::GOVERNOR_DE_ESCALATION_COOLDOWN_MS - elapsed;
+                let remaining_ms = TickPipeline::GOVERNOR_DE_ESCALATION_COOLDOWN_MS - elapsed;
                 return Err(format!(
                     "24h cooldown active; {remaining_ms}ms remaining before next manual de-escalation"
                 ));
@@ -234,9 +233,11 @@ pub(super) fn handle_update_risk_config(
     //   第 5 維度。Wire 為 `u64 ms` 對齊同伴 *_ms 欄位；下方 closure
     //   cast 為 `i64`（validate() 拒負值）。
     exit_stale_peak_ms: Option<u64>,
+    response_tx: Option<tokio::sync::oneshot::Sender<Result<String, String>>>,
     pipeline: &mut TickPipeline,
     snapshot_writer: &mut DualStateWriter,
 ) {
+    let mut apply_errors: Vec<String> = Vec::new();
     // I-09: clamp all numeric setters to sane ranges before applying.
     // I-09：應用前將所有數值設定鉗制到合理範圍。
     // StopConfig fields / 止損配置
@@ -466,6 +467,7 @@ pub(super) fn handle_update_risk_config(
                         // Validation failure: apply_patch rolled back atomically
                         // (no partial mutation on the ArcSwap, no TOML write).
                         // 驗證失敗：apply_patch 已原子回滾（ArcSwap 無部分變更、TOML 未寫）。
+                        apply_errors.push(format!("exit config patch rejected by validate(): {e}"));
                         warn!(
                             error = %e,
                             "exit config patch rejected by validate() / exit 配置補丁被 validate() 拒絕"
@@ -476,6 +478,7 @@ pub(super) fn handle_update_risk_config(
             None => {
                 // Test / bootstrap path without a wired store.
                 // 測試 / 啟動階段未接線 store 的路徑。
+                apply_errors.push("risk_store not wired — exit config patch skipped".to_string());
                 warn!(
                     "risk_store not wired — exit config patch skipped (fail-soft) / risk_store 未接線，exit 配置補丁已跳過（fail-soft）"
                 );
@@ -483,6 +486,19 @@ pub(super) fn handle_update_risk_config(
         }
     }
     snapshot_writer.force_write(&pipeline.snapshot());
+    if let Some(tx) = response_tx {
+        let result = if apply_errors.is_empty() {
+            Ok(serde_json::json!({
+                "updated": true,
+                "queued": false,
+                "applied": true
+            })
+            .to_string())
+        } else {
+            Err(apply_errors.join("; "))
+        };
+        let _ = tx.send(result);
+    }
 }
 
 /// EN: Collect the set of symbols that currently have an active position,
@@ -569,8 +585,7 @@ pub(super) fn handle_get_dynamic_risk_status(
     pipeline: &mut TickPipeline,
 ) {
     let status = pipeline.dynamic_risk_sizer.status();
-    let result =
-        serde_json::to_string(&status).map_err(|e| format!("serialize sizer status: {e}"));
+    let result = serde_json::to_string(&status).map_err(|e| format!("serialize sizer status: {e}"));
     let _ = response_tx.send(result);
 }
 

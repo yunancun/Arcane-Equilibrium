@@ -89,6 +89,20 @@ _USER_STOPPED: bool = False
 paper_router = APIRouter(prefix="/api/v1/paper", tags=["Paper Trading / 纸上交易"])
 
 
+def _require_paper_trade(actor: base.AuthenticatedActor) -> None:
+    """Shared Batch B gate for paper/demo trading mutations.
+    Batch B 共用 paper/demo 交易寫入閘門：必須是 Operator 且具 paper:trade scope。
+    """
+    base.require_scope_and_operator(actor, "paper:trade")
+
+
+def _require_paper_config(actor: base.AuthenticatedActor) -> None:
+    """Shared Batch B gate for paper config writes.
+    Batch B 共用 paper config 寫入閘門：必須是 Operator 且具 paper:config scope。
+    """
+    base.require_scope_and_operator(actor, "paper:config")
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # Request / Response Models / 请求响应模型
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -201,6 +215,7 @@ async def post_session_start(
     actor: base.AuthenticatedActor = Depends(base.current_actor),
 ):
     """Resume paper trading on Rust engine / 在 Rust 引擎上恢復紙盤交易"""
+    _require_paper_trade(actor)
     rust = get_rust_reader()
     if not rust.is_available():
         raise HTTPException(status_code=503, detail="Rust engine not available / Rust 引擎不可用")
@@ -228,6 +243,7 @@ async def post_session_reauth(
     actor: base.AuthenticatedActor = Depends(base.current_actor),
 ):
     """Re-grant paper trading authorization / 重新授予紙盤授權"""
+    _require_paper_trade(actor)
     if GOV_HUB is None:
         raise HTTPException(status_code=503, detail="Governance hub not available")
     try:
@@ -266,6 +282,7 @@ async def post_session_pause(
     actor: base.AuthenticatedActor = Depends(base.current_actor),
 ):
     """Pause paper trading — stops strategy dispatch + Demo shadow orders / 暫停紙盤交易"""
+    _require_paper_trade(actor)
     try:
         result = await _ipc_command("pause_paper", {"engine": "paper"})
         return _paper_response({
@@ -284,6 +301,7 @@ async def post_session_resume(
     actor: base.AuthenticatedActor = Depends(base.current_actor),
 ):
     """Resume paper trading — restores strategy dispatch + Demo shadow orders / 恢復紙盤交易"""
+    _require_paper_trade(actor)
     try:
         result = await _ipc_command("resume_paper", {"engine": "paper"})
         # Resume also clears any prior sticky stop / 恢復同樣清除停止標誌
@@ -376,6 +394,7 @@ async def post_session_stop(
     paper_state. Verify polls the engine snapshot until positions=0.
     Paper 引擎無 Bybit 掛單需取消，狀態全在 paper_state 中；verify 輪詢快照確認持倉=0。
     """
+    _require_paper_trade(actor)
     errors: list[str] = []
     global _USER_STOPPED
     _USER_STOPPED = True
@@ -427,6 +446,7 @@ async def post_session_stop_all(
     which is live > demo > paper, causing unintended cross-engine writes.
     重要：明確傳 engine 參數 — 否則 IPC 路由到 primary() 造成跨引擎操作。
     """
+    _require_paper_trade(actor)
     errors: list[str] = []
     global _USER_STOPPED
     _USER_STOPPED = True
@@ -624,6 +644,7 @@ def post_order_submit(
     actor: base.AuthenticatedActor = Depends(base.current_actor),
 ):
     """DISABLED: Rust engine manages order execution / 已禁用：Rust 引擎管理訂單執行"""
+    _require_paper_trade(actor)
     raise HTTPException(status_code=410, detail=_RC10_DISABLED_MSG)
 
 
@@ -633,6 +654,7 @@ def post_order_cancel(
     actor: base.AuthenticatedActor = Depends(base.current_actor),
 ):
     """DISABLED: Rust engine manages order lifecycle / 已禁用：Rust 引擎管理訂單生命週期"""
+    _require_paper_trade(actor)
     raise HTTPException(status_code=410, detail=_RC10_DISABLED_MSG)
 
 
@@ -685,6 +707,7 @@ async def post_close_all_positions(
     """Close all paper positions without stopping the session (engine keeps running).
     平掉所有 Paper 持倉，不停止 session（引擎繼續運行）。
     """
+    _require_paper_trade(actor)
     rust = get_rust_reader()
     if not rust.is_available():
         raise HTTPException(status_code=503, detail="Rust engine not available / Rust 引擎不可用")
@@ -708,6 +731,7 @@ async def post_close_position(
     """Close a single paper position by symbol via IPC close_position command.
     通過 IPC close_position 指令平掉指定 symbol 的紙上持倉。
     """
+    _require_paper_trade(actor)
     rust = get_rust_reader()
     if not rust.is_available():
         raise HTTPException(status_code=503, detail="Rust engine not available / Rust 引擎不可用")
@@ -847,6 +871,7 @@ def post_tick(
     actor: base.AuthenticatedActor = Depends(base.current_actor),
 ):
     """DISABLED: Rust engine processes ticks internally / 已禁用：Rust 引擎內部處理 tick"""
+    _require_paper_trade(actor)
     raise HTTPException(status_code=410, detail=_RC10_DISABLED_MSG)
 
 
@@ -885,6 +910,7 @@ def post_market_feed_start(
     actor: base.AuthenticatedActor = Depends(base.current_actor),
 ):
     """DISABLED: Rust engine has its own WebSocket feed / 已禁用：Rust 引擎有自己的 WebSocket 行情流"""
+    _require_paper_trade(actor)
     # Rust engine is the sole WS connection — no Python WS needed
     # Rust 引擎是唯一的 WS 連接 — 不需要 Python WS
     return _paper_response({
@@ -898,6 +924,7 @@ def post_market_feed_stop(
     actor: base.AuthenticatedActor = Depends(base.current_actor),
 ):
     """DISABLED: Rust engine manages its own WebSocket / 已禁用：Rust 引擎管理自己的 WebSocket"""
+    _require_paper_trade(actor)
     return _paper_response({
         "message": "Market feed managed by Rust engine / 行情流由 Rust 引擎管理",
         "source": "rust_engine",
@@ -945,6 +972,7 @@ def post_market_feed_add_symbol(
     actor: base.AuthenticatedActor = Depends(base.current_actor),
 ):
     """DISABLED: Rust engine manages symbols at startup / 已禁用：Rust 引擎在啟動時管理 symbols"""
+    _require_paper_trade(actor)
     raise HTTPException(status_code=410, detail=_RC10_DISABLED_MSG)
 
 
@@ -954,6 +982,7 @@ def post_market_feed_remove_symbol(
     actor: base.AuthenticatedActor = Depends(base.current_actor),
 ):
     """DISABLED: Rust engine manages symbols at startup / 已禁用：Rust 引擎在啟動時管理 symbols"""
+    _require_paper_trade(actor)
     raise HTTPException(status_code=410, detail=_RC10_DISABLED_MSG)
 
 
@@ -972,6 +1001,7 @@ def post_shadow_feed(
     actor: base.AuthenticatedActor = Depends(base.current_actor),
 ):
     """DISABLED: Shadow decisions handled by Rust engine / 已禁用：影子決策由 Rust 引擎處理"""
+    _require_paper_trade(actor)
     raise HTTPException(status_code=410, detail=_RC10_DISABLED_MSG)
 
 
@@ -1178,6 +1208,7 @@ async def post_paper_config(
     更新 paper 引擎配置。Takes effect on next session start.
     下次 session 啟動時生效。
     """
+    _require_paper_config(actor)
     body = await request.json()
     initial_balance = body.get("initial_balance_usdt")
     if initial_balance is not None:

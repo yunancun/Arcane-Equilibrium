@@ -25,7 +25,7 @@ use std::time::{Duration, Instant};
 use super::funding_settlement::{apply_and_emit_funding_settlement, is_funding_execution};
 use super::handlers;
 use super::pending_sweep::{self, classify_pending_sweep, PendingSweepAction};
-use super::types::{ExchangeEvent, PendingOrder};
+use super::types::{ExchangeEvent, PendingOrder, PendingOrderEvent};
 use crate::persistence::{AuditWriter, DualStateWriter, StateWriter};
 use crate::tick_pipeline::{EngineEvent, PipelineCommand, PipelineKind, TickPipeline};
 
@@ -40,7 +40,11 @@ fn fill_liquidity_role(
     }
 }
 
-fn adverse_slippage_bps(is_buy: bool, fill_price: f64, reference_price: Option<f64>) -> Option<f64> {
+fn adverse_slippage_bps(
+    is_buy: bool,
+    fill_price: f64,
+    reference_price: Option<f64>,
+) -> Option<f64> {
     let reference_price = reference_price?;
     if reference_price <= 0.0 || !reference_price.is_finite() || !fill_price.is_finite() {
         return None;
@@ -51,6 +55,29 @@ fn adverse_slippage_bps(is_buy: bool, fill_price: f64, reference_price: Option<f
         (reference_price - fill_price) / reference_price
     };
     Some(signed * 10_000.0)
+}
+
+/// Build the periodic H0 risk refresh snapshot while preserving independently
+/// owned cooldown / kill-switch fields from the previous snapshot.
+/// 生成週期性 H0 風控刷新快照，同時保留前一版中由其他路徑擁有的
+/// cooldown / kill-switch 欄位。
+fn build_status_risk_snapshot(
+    prev: &openclaw_types::H0GateRiskSnapshot,
+    open_position_count: u32,
+    total_exposure_pct: f64,
+    now_ms: u64,
+) -> openclaw_types::H0GateRiskSnapshot {
+    openclaw_types::H0GateRiskSnapshot {
+        open_position_count,
+        total_exposure_pct,
+        cooldown_until_ts_ms: if prev.cooldown_until_ts_ms > now_ms {
+            prev.cooldown_until_ts_ms
+        } else {
+            0
+        },
+        kill_switch_active: prev.kill_switch_active,
+        snapshot_ts_ms: now_ms,
+    }
 }
 
 #[cfg(test)]
@@ -221,12 +248,12 @@ pub(super) fn handle_kline_seed(
 /// Arm D handler：從 dispatch task 收 `PendingOrder`，插入
 /// `state.pending_orders` 並寫出 Order + Working OrderStateChange 兩筆審計列。
 pub(super) fn handle_pending_registration(
-    reg: Option<PendingOrder>,
-    pipeline: &TickPipeline,
+    reg: Option<PendingOrderEvent>,
+    pipeline: &mut TickPipeline,
     state: &mut LoopState,
     order_tx: Option<&tokio::sync::mpsc::Sender<crate::database::TradingMsg>>,
 ) {
-    if let Some(po) = reg {
+    if let Some(PendingOrderEvent::Register(po)) = reg {
         tracing::info!(
             order_link_id = %po.order_link_id, symbol = %po.symbol,
             qty = %po.qty, strategy = %po.strategy,
@@ -263,29 +290,80 @@ pub(super) fn handle_pending_registration(
         };
         if let Some(tx) = order_tx {
             let em = pipeline.effective_engine_mode().to_string();
-            let _ = tx.try_send(crate::database::TradingMsg::Order {
-                order_id: po.order_link_id.clone(),
-                ts_ms: po.sent_ts_ms,
-                symbol: po.symbol.clone(),
-                side: if po.is_long { "Buy".into() } else { "Sell".into() },
-                order_type: order_type_pg,
-                qty: po.qty,
-                strategy_name: po.strategy.clone(),
-                is_close: po.is_close,
-                engine_mode: em.clone(),
-            });
-            let _ = tx.try_send(crate::database::TradingMsg::OrderStateChange {
-                order_id: po.order_link_id.clone(),
-                ts_ms: po.sent_ts_ms,
-                from_status: Some("Submitted".into()),
-                to_status: "Working".into(),
-                filled_qty: None,
-                avg_price: None,
-                reason: None,
-                engine_mode: em,
-            });
+            let _ = crate::database::try_send_trading_msg(
+                tx,
+                crate::database::TradingMsg::Order {
+                    order_id: po.order_link_id.clone(),
+                    ts_ms: po.sent_ts_ms,
+                    symbol: po.symbol.clone(),
+                    side: if po.is_long {
+                        "Buy".into()
+                    } else {
+                        "Sell".into()
+                    },
+                    order_type: order_type_pg,
+                    qty: po.qty,
+                    strategy_name: po.strategy.clone(),
+                    is_close: po.is_close,
+                    engine_mode: em.clone(),
+                },
+                "order_registered",
+            );
+            let _ = crate::database::try_send_trading_msg(
+                tx,
+                crate::database::TradingMsg::OrderStateChange {
+                    order_id: po.order_link_id.clone(),
+                    ts_ms: po.sent_ts_ms,
+                    from_status: Some("Submitted".into()),
+                    to_status: "Working".into(),
+                    filled_qty: None,
+                    avg_price: None,
+                    reason: None,
+                    engine_mode: em,
+                },
+                "order_state_working",
+            );
         }
         state.pending_orders.insert(po.order_link_id.clone(), po);
+    } else if let Some(PendingOrderEvent::DispatchFailed {
+        order_link_id,
+        symbol,
+        is_close,
+        terminal_status,
+        reason,
+        ts_ms,
+    }) = reg
+    {
+        let removed = state.pending_orders.remove(&order_link_id).is_some();
+        if is_close {
+            pipeline.clear_pending_close(&symbol);
+        }
+        tracing::warn!(
+            order_link_id = %order_link_id,
+            symbol = %symbol,
+            is_close = is_close,
+            removed_pending = removed,
+            terminal_status = %terminal_status,
+            reason = %reason,
+            "pending order terminal dispatch failure / 待處理訂單派發失敗並終止"
+        );
+        if let Some(tx) = order_tx {
+            let em = pipeline.effective_engine_mode().to_string();
+            let _ = crate::database::try_send_trading_msg(
+                tx,
+                crate::database::TradingMsg::OrderStateChange {
+                    order_id: order_link_id,
+                    ts_ms,
+                    from_status: Some("Working".into()),
+                    to_status: terminal_status,
+                    filled_qty: None,
+                    avg_price: None,
+                    reason: Some(reason),
+                    engine_mode: em,
+                },
+                "order_dispatch_failed",
+            );
+        }
     }
 }
 
@@ -507,17 +585,35 @@ pub(super) async fn handle_exchange_event(
                 .get(&exec.order_id)
                 .cloned()
                 .or_else(|| {
-                    // Fallback: symbol+side match if no order_id mapping yet
+                    // Fallback: symbol+side match only when exactly one pending
+                    // order is eligible. Picking the first same-side order can
+                    // attach fills to the wrong strategy/context when a fill
+                    // beats the order update that populates order_id_to_link.
                     let is_buy = exec.side == "Buy";
-                    state
+                    let mut candidates = state
                         .pending_orders
                         .iter()
-                        .find(|(_, po)| {
+                        .filter(|(_, po)| {
                             po.symbol == exec.symbol
                                 && po.is_long == is_buy
                                 && po.cum_filled_qty < po.qty
-                        })
-                        .map(|(k, _)| k.clone())
+                        });
+                    let first = candidates.next().map(|(k, _)| k.clone());
+                    if first.is_some() && candidates.next().is_none() {
+                        first
+                    } else {
+                        if first.is_some() {
+                            tracing::warn!(
+                                exec_id = %exec.exec_id,
+                                order_id = %exec.order_id,
+                                symbol = %exec.symbol,
+                                side = %exec.side,
+                                "ambiguous fill-before-order-update fallback — emitting unattributed fill \
+                                 / fill 早於 order update 且候選不唯一 — 改落 unattributed fill"
+                            );
+                        }
+                        None
+                    }
                 });
 
             // FIX-FEE-POSTONLY-1 (G7-09): look up the matched PendingOrder's
@@ -622,6 +718,7 @@ pub(super) async fn handle_exchange_event(
                         slippage_bps,
                         Some(liquidity_role),
                         fill_latency_ms,
+                        Some(&exec.exec_id),
                     );
                     snapshot_writer.force_write(&pipeline.snapshot());
 
@@ -630,17 +727,25 @@ pub(super) async fn handle_exchange_event(
                     // 發出訂單狀態轉換：Working → Filled / PartiallyFilled。
                     if let Some(tx) = order_tx {
                         let em = pipeline.effective_engine_mode().to_string();
-                        let to_status = if fully_filled { "Filled" } else { "PartiallyFilled" };
-                        let _ = tx.try_send(crate::database::TradingMsg::OrderStateChange {
-                            order_id: po.order_link_id.clone(),
-                            ts_ms: exec_ts,
-                            from_status: Some("Working".into()),
-                            to_status: to_status.into(),
-                            filled_qty: Some(po.cum_filled_qty),
-                            avg_price: Some(exec_price),
-                            reason: None,
-                            engine_mode: em,
-                        });
+                        let to_status = if fully_filled {
+                            "Filled"
+                        } else {
+                            "PartiallyFilled"
+                        };
+                        let _ = crate::database::try_send_trading_msg(
+                            tx,
+                            crate::database::TradingMsg::OrderStateChange {
+                                order_id: po.order_link_id.clone(),
+                                ts_ms: exec_ts,
+                                from_status: Some("Working".into()),
+                                to_status: to_status.into(),
+                                filled_qty: Some(po.cum_filled_qty),
+                                avg_price: Some(exec_price),
+                                reason: None,
+                                engine_mode: em,
+                            },
+                            "order_state_fill",
+                        );
                     }
 
                     if fully_filled {
@@ -682,7 +787,8 @@ pub(super) async fn handle_exchange_event(
                     exec_price,
                     exec_fee,
                     order_tx,
-                ).await;
+                )
+                .await;
                 tracing::warn!(
                     symbol = %exec.symbol, side = %exec.side, exec_id = %exec.exec_id,
                     engine_mode = %em, audit_emitted = emitted,
@@ -720,9 +826,8 @@ pub(super) async fn handle_exchange_event(
                         // strings. Strategy callback wiring lands in 1B-3.
                         // EDGE-P2-3 Phase 1B-2：分類 Bybit rejectReason 字串。
                         // PostOnly-cross 以 warn! 顯性記錄；短標籤進 DB reason。
-                        let reject_category = crate::strategies::maker_rejection::classify(
-                            &order.reject_reason,
-                        );
+                        let reject_category =
+                            crate::strategies::maker_rejection::classify(&order.reject_reason);
                         let reject_label = reject_category.label();
                         if reject_category.is_post_only_cross() {
                             tracing::warn!(
@@ -773,16 +878,20 @@ pub(super) async fn handle_exchange_event(
                             };
                             if let Some(tx) = order_tx {
                                 let em = pipeline.effective_engine_mode().to_string();
-                                let _ = tx.try_send(crate::database::TradingMsg::OrderStateChange {
-                                    order_id: po.order_link_id.clone(),
-                                    ts_ms: openclaw_core::now_ms(),
-                                    from_status: Some("Working".into()),
-                                    to_status: status.to_string(),
-                                    filled_qty: None,
-                                    avg_price: None,
-                                    reason: Some(reason_str),
-                                    engine_mode: em,
-                                });
+                                let _ = crate::database::try_send_trading_msg(
+                                    tx,
+                                    crate::database::TradingMsg::OrderStateChange {
+                                        order_id: po.order_link_id.clone(),
+                                        ts_ms: openclaw_core::now_ms(),
+                                        from_status: Some("Working".into()),
+                                        to_status: status.to_string(),
+                                        filled_qty: None,
+                                        avg_price: None,
+                                        reason: Some(reason_str),
+                                        engine_mode: em,
+                                    },
+                                    "order_state_terminal",
+                                );
                             }
                         }
                         tracing::warn!(
@@ -842,13 +951,16 @@ pub(super) async fn handle_exchange_event(
                 tracing::warn!(
                     count = count,
                     "DCP triggered — clearing {} pending orders / DCP 觸發，清除 {} 個待處理訂單",
-                    count, count,
+                    count,
+                    count,
                 );
                 state.pending_orders.clear();
             }
             // Also clear pending_close flags since DCP cancelled close orders too
             pipeline.clear_all_pending_close();
-            tracing::warn!("DCP triggered — exchange cancelled active orders, pending_close cleared");
+            tracing::warn!(
+                "DCP triggered — exchange cancelled active orders, pending_close cleared"
+            );
         }
         Some(ExchangeEvent::Disconnected) => {
             // Private WS disconnected — pending orders may be in unknown state
@@ -857,7 +969,8 @@ pub(super) async fn handle_exchange_event(
                     pending = state.pending_orders.len(),
                     "private WS disconnected with {} pending orders — reconcile on reconnect \
                     / 私有 WS 斷連，{} 個待處理訂單 — 重連後對賬",
-                    state.pending_orders.len(), state.pending_orders.len(),
+                    state.pending_orders.len(),
+                    state.pending_orders.len(),
                 );
             }
         }
@@ -1000,12 +1113,7 @@ pub(super) fn handle_tick_event(
             match classify_pending_sweep(po, now_ms) {
                 PendingSweepAction::MakerTimeoutCancel => {
                     let deadline_ms = po.maker_timeout_ms.unwrap_or(45_000);
-                    maker_to_cancel.push((
-                        key.clone(),
-                        po.symbol.clone(),
-                        elapsed,
-                        deadline_ms,
-                    ));
+                    maker_to_cancel.push((key.clone(), po.symbol.clone(), elapsed, deadline_ms));
                 }
                 PendingSweepAction::MakerCancelGraceExpired => {
                     tracing::error!(
@@ -1088,7 +1196,9 @@ pub(super) fn handle_tick_event(
         if state.order_id_to_link.len() > 50 {
             let active_links: std::collections::HashSet<&String> =
                 state.pending_orders.keys().collect();
-            state.order_id_to_link.retain(|_, link| active_links.contains(link));
+            state
+                .order_id_to_link
+                .retain(|_, link| active_links.contains(link));
         }
         state.last_pending_check = Instant::now();
         // R-02: Cross-check pipeline pending_close_symbols against open positions.
@@ -1119,13 +1229,14 @@ pub(super) fn handle_tick_event(
         } else {
             0.0
         };
-        pipeline.h0_gate.update_risk(openclaw_types::H0GateRiskSnapshot {
-            open_position_count: position_count,
+        let now_ms = openclaw_core::now_ms();
+        let prev_h0_risk = pipeline.h0_gate.risk_snapshot();
+        pipeline.h0_gate.update_risk(build_status_risk_snapshot(
+            &prev_h0_risk,
+            position_count,
             total_exposure_pct,
-            cooldown_until_ts_ms: 0,
-            kill_switch_active: false,
-            snapshot_ts_ms: openclaw_core::now_ms(),
-        });
+            now_ms,
+        ));
 
         let status = pipeline.status();
         let uptime = start_time.elapsed().as_secs();
@@ -1226,7 +1337,8 @@ pub(super) fn handle_tick_event(
                         let client_clone = Arc::clone(client_arc);
                         let seed_tx = kline_seed_tx.clone();
                         tokio::spawn(async move {
-                            let mdc = crate::market_data_client::MarketDataClient::new(client_clone);
+                            let mdc =
+                                crate::market_data_client::MarketDataClient::new(client_clone);
                             match mdc
                                 .get_klines("linear", &sym_owned, "1", None, None, Some(200))
                                 .await
@@ -1328,5 +1440,40 @@ mod tests {
         // accidental downward edit is caught here rather than in prod.
         // 哨兵測試 — 守住 dedup window 尺寸，意外改小不會溜進生產。
         assert_eq!(LoopState::MAX_SEEN_EXEC_IDS, 500);
+    }
+
+    #[test]
+    fn status_risk_snapshot_preserves_active_cooldown_and_kill_switch() {
+        let now_ms = 1_000;
+        let prev = openclaw_types::H0GateRiskSnapshot {
+            open_position_count: 9,
+            total_exposure_pct: 88.8,
+            cooldown_until_ts_ms: now_ms + 15_000,
+            kill_switch_active: true,
+            snapshot_ts_ms: now_ms - 100,
+        };
+
+        let merged = build_status_risk_snapshot(&prev, 2, 25.0, now_ms);
+        assert_eq!(merged.open_position_count, 2);
+        assert_eq!(merged.total_exposure_pct, 25.0);
+        assert_eq!(merged.cooldown_until_ts_ms, now_ms + 15_000);
+        assert!(merged.kill_switch_active);
+        assert_eq!(merged.snapshot_ts_ms, now_ms);
+    }
+
+    #[test]
+    fn status_risk_snapshot_clears_expired_cooldown_but_keeps_kill_switch() {
+        let now_ms = 20_000;
+        let prev = openclaw_types::H0GateRiskSnapshot {
+            open_position_count: 1,
+            total_exposure_pct: 10.0,
+            cooldown_until_ts_ms: now_ms - 1,
+            kill_switch_active: false,
+            snapshot_ts_ms: now_ms - 500,
+        };
+
+        let merged = build_status_risk_snapshot(&prev, 3, 55.0, now_ms);
+        assert_eq!(merged.cooldown_until_ts_ms, 0);
+        assert!(!merged.kill_switch_active);
     }
 }

@@ -585,7 +585,7 @@ fn stress_guardian_rejects_on_high_drawdown() {
 }
 
 #[test]
-fn stress_guardian_rejects_direction_conflict() {
+fn stress_guardian_allows_capped_reducing_direction_conflict() {
     let proc = IntentProcessor::new();
     let mut gov = GovernanceCore::new();
     gov.grant_paper_authorization(None).unwrap();
@@ -594,7 +594,9 @@ fn stress_guardian_rejects_direction_conflict() {
     state.set_latest_price("BTCUSDT", 67000.0);
     state.apply_fill("BTCUSDT", true, 0.01, 67000.0, 0.0, 0, "test"); // existing long
 
-    // Try to open short on same symbol
+    // Opposite-side intent on the same symbol is a reducing/unwind path, not a
+    // risk-adding direction conflict. RC-005 caps it to the existing position
+    // so it cannot flip open.
     let intent = OrderIntent {
         symbol: "BTCUSDT".into(),
         is_long: false,
@@ -609,7 +611,16 @@ fn stress_guardian_rejects_direction_conflict() {
         maker_timeout_ms: None,
     };
     let result = proc.process(&intent, &gov, &state, 500.0, GovernanceProfile::Exploration);
-    assert!(!result.submitted, "should reject direction conflict");
+    assert!(
+        result.submitted,
+        "opposite-side reducing intent should be admitted, got {:?}",
+        result.rejected_reason
+    );
+    assert!(
+        result.approved_qty <= 0.01,
+        "reducing qty must be capped to existing position, got {}",
+        result.approved_qty
+    );
 }
 
 #[test]

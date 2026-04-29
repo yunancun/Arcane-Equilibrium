@@ -214,7 +214,8 @@ pub(super) fn handle_reset_drawdown_baseline_local(
     snapshot_writer.force_write(&pipeline.snapshot());
     info!(
         peak_before,
-        balance, "P1-5 A2: drawdown baseline reset (local test path) / 重置 drawdown 基準（測試路徑）"
+        balance,
+        "P1-5 A2: drawdown baseline reset (local test path) / 重置 drawdown 基準（測試路徑）"
     );
     let _ = response_tx.send(Ok(format!(
         "reset_local peak_before={peak_before:.2} peak_after={balance:.2}"

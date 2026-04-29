@@ -40,6 +40,8 @@ import time
 from pathlib import Path
 from typing import Optional
 
+from .secret_runtime import get_secret_value
+
 _app_dir = os.path.dirname(os.path.abspath(__file__))
 _control_api_dir = os.path.dirname(_app_dir)
 _bybit_connector_dir = os.path.dirname(_control_api_dir)
@@ -233,7 +235,7 @@ class EdgeEstimatorScheduler:
         JS 估計器讀 PG_* 環境變量；API server 只設 OPENCLAW_DATABASE_URL。在排程器內就地
         橋接，避免擴張啟動契約。已存在的 PG_* 不覆蓋（顯式優先）。
         """
-        url = os.environ.get("OPENCLAW_DATABASE_URL")
+        url = get_secret_value("OPENCLAW_DATABASE_URL")
         if not url:
             return
         try:

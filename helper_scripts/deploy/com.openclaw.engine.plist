@@ -62,9 +62,10 @@
   <integer>10</integer>
 
   <!-- 環境變量 / Environment variables
-       機敏值（IPC_SECRET / DATABASE_URL）請用 launchctl setenv 注入，
-       不要寫在此 plist 文件裡。
-       Sensitive values must be injected via launchctl setenv, never hardcoded. -->
+       機敏值請放 0600 secret files，僅注入 OPENCLAW_*_FILE 路徑；
+       不要把 IPC_SECRET / DATABASE_URL 值寫在 plist 或 launchd 全局環境。
+       Sensitive values belong in 0600 secret files; inject only OPENCLAW_*_FILE
+       paths, never secret values. -->
   <key>EnvironmentVariables</key>
   <dict>
     <key>HOME</key>

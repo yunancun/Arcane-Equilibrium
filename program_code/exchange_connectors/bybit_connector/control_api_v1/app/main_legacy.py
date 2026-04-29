@@ -59,7 +59,10 @@ from .auth import (  # noqa: F401
     _login_fail_lock,
     _resolve_api_token,
     _split_csv,
+    audit_actor_id,
+    require_operator_role,
     require_scope,
+    require_scope_and_operator,
     require_scope_and_identity,
     verify_operator_identity,
 )

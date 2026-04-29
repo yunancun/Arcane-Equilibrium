@@ -236,6 +236,7 @@ labels AS (
            p.vwap_exit,
            p.total_close_qty,
            p.any_excluded,
+           (p.total_close_qty >= ef.entry_qty * 0.999999) AS close_qty_complete,
            CASE
                WHEN ef.entry_price > 0 AND ef.entry_qty > 0 THEN
                    (p.total_gross_pnl + COALESCE(fb.total_funding_pnl, 0.0)
@@ -261,6 +262,7 @@ SET label_net_edge_bps = l.label_net_edge_bps,
 FROM labels l
 WHERE d.context_id = l.context_id
   AND NOT l.any_excluded
+  AND l.close_qty_complete
   AND l.label_net_edge_bps IS NOT NULL
 RETURNING d.context_id, l.strategy_name, l.split_flag
 """

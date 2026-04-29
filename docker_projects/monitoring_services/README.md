@@ -10,14 +10,21 @@ Grafana monitoring stack for OpenClaw Trading AI system.
 
 ```bash
 cd "${OPENCLAW_BASE_DIR:-$HOME/BybitOpenClaw/srv}/docker_projects/monitoring_services"
+export GF_SECURITY_ADMIN_PASSWORD="$(cat ~/.openclaw_secrets/grafana_admin_password)"
+export GRAFANA_FASTAPI_AUTH_HEADER="Bearer $(cat ~/.openclaw_secrets/control_api_token)"
+export GRAFANA_POSTGRES_PASSWORD="$(cat ~/.openclaw_secrets/pg_pass)"
+# Defaults to loopback bind. Set a private interface explicitly only when needed.
+export GRAFANA_BIND_ADDR="${GRAFANA_BIND_ADDR:-127.0.0.1}"
 docker compose up -d
 ```
 
 ## Access
 
 - Local: http://localhost:3000
-- Tailscale: http://trade-core:3000
-- Login: admin / <REDACTED>
+- Private network: set `GRAFANA_BIND_ADDR` to the private interface address before starting.
+- Login user defaults to `admin`; password must be supplied with `GF_SECURITY_ADMIN_PASSWORD`.
+
+安全 / Security: Grafana admin password, FastAPI bearer header, and Postgres password must be supplied by the deployment environment. Do not write real secrets into this README or compose files.
 
 ## Datasources
 

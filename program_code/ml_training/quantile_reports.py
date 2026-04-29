@@ -243,6 +243,7 @@ def generate_acceptance_report(
         "engine_mode": result.engine_mode,
         "schema_version": config.schema_version,
         "feature_schema_hash": result.feature_schema_hash,
+        "feature_definition_hash": result.feature_definition_hash,
         "n_samples_total": int(result.n_samples_total),
         "n_samples_labeled": int(result.n_samples_labeled),
         "n_holdout": int(result.n_holdout),

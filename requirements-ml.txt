@@ -12,4 +12,5 @@ skl2onnx>=1.18.0         # sklearn → ONNX (transitive via onnxmltools; declare
 shap>=0.45.0             # Feature importance / explainability
 duckdb>=1.1.0            # Parquet ETL (fast columnar queries)
 pyarrow>=17.0.0          # Parquet file I/O
-psycopg[binary]>=3.1.0   # model_registry DB writes (v3; psycopg2-binary stays for legacy callers)
+psycopg[binary]>=3.1.0   # model_registry DB writes (v3)
+psycopg2-binary>=2.9.9   # legacy training readers still import psycopg2

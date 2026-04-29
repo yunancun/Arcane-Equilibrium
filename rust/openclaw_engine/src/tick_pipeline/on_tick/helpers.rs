@@ -90,17 +90,19 @@ pub(crate) fn is_partial_reduce_tag(close_tag: &str) -> bool {
 pub(crate) fn strip_phys_lock_prefix(reason: &str) -> Option<&str> {
     // 前綴必須完整（`risk_close:phys_lock_`），後綴至少 1 char（gateN_*）。
     // Prefix must be exact; suffix (gateN_*) must be non-empty.
-    reason.strip_prefix("risk_close:phys_lock_").and_then(|suf| {
-        if suf.is_empty() {
-            None
-        } else {
-            // 取完整的 `phys_lock_<suf>` 裸 tag — combine_layer 與下游
-            // parse_exit_tag 依賴 `phys_lock_` 開頭的穩定形式。
-            // Return the full `phys_lock_<suf>` stripped tag — combine_layer
-            // and downstream parse_exit_tag depend on the `phys_lock_` prefix.
-            Some(&reason["risk_close:".len()..])
-        }
-    })
+    reason
+        .strip_prefix("risk_close:phys_lock_")
+        .and_then(|suf| {
+            if suf.is_empty() {
+                None
+            } else {
+                // 取完整的 `phys_lock_<suf>` 裸 tag — combine_layer 與下游
+                // parse_exit_tag 依賴 `phys_lock_` 開頭的穩定形式。
+                // Return the full `phys_lock_<suf>` stripped tag — combine_layer
+                // and downstream parse_exit_tag depend on the `phys_lock_` prefix.
+                Some(&reason["risk_close:".len()..])
+            }
+        })
 }
 
 /// 以剝離過的 lock_tag 走一次 combine_layer、確認 invariant 並記 info log。
@@ -149,7 +151,11 @@ pub(crate) fn log_phys_lock_through_combine_layer(
         crate::combine_layer::ExitSignal::Lock,
         "invariant: PHYS-LOCK physical decision must yield ExitSignal::Lock"
     );
-    let edge_source = if est_net_bps.is_some() { "cell" } else { "fallback" };
+    let edge_source = if est_net_bps.is_some() {
+        "cell"
+    } else {
+        "fallback"
+    };
     info!(
         symbol = %symbol,
         owner_strategy = %owner_strategy,
@@ -277,8 +283,8 @@ pub(crate) fn emit_shadow_exit_observation(
     let (shadow_signal, shadow_source) =
         crate::combine_layer::combine_exit_decision(physical, mock_ml.clone(), &combine_cfg);
 
-    let disagreed = phys_only_signal != shadow_signal
-        || phys_only_source.as_tag() != shadow_source.as_tag();
+    let disagreed =
+        phys_only_signal != shadow_signal || phys_only_source.as_tag() != shadow_source.as_tag();
     let disagreement_reason = if disagreed {
         Some(format!(
             "phys_only={}:{} shadow={}:{}",
@@ -363,8 +369,7 @@ mod phys_lock_wrapper_tests {
             // wrapper does. Must yield (Lock, Physical) in Phase 1a.
             // Act #2：按生產 wrapper 模式走 combine_layer，Phase 1a 必為
             // (Lock, Physical)。
-            let physical =
-                crate::exit_features::PhysicalDecision::Lock(lock_tag.to_string());
+            let physical = crate::exit_features::PhysicalDecision::Lock(lock_tag.to_string());
             let (signal, source) = crate::combine_layer::combine_exit_decision(
                 physical,
                 None,
@@ -397,10 +402,7 @@ mod phys_lock_wrapper_tests {
         );
         // Non-PHYS-LOCK reasons must bypass the combine layer wrapper.
         // 非 PHYS-LOCK 原因必須 bypass。
-        assert_eq!(
-            strip_phys_lock_prefix("risk_close:HARD STOP at 5.0%"),
-            None
-        );
+        assert_eq!(strip_phys_lock_prefix("risk_close:HARD STOP at 5.0%"), None);
     }
 
     // RUST-DOUBLE-PREFIX-1 (2026-04-23) regression: verify that the outbound
@@ -544,7 +546,8 @@ mod phys_lock_wrapper_tests {
     fn recv_one_shadow(
         rx: &mut tokio::sync::mpsc::Receiver<crate::database::ShadowExitMsg>,
     ) -> crate::database::ShadowExitMsg {
-        rx.try_recv().expect("emit_shadow_exit_observation must produce exactly one msg")
+        rx.try_recv()
+            .expect("emit_shadow_exit_observation must produce exactly one msg")
     }
 
     #[test]
@@ -554,8 +557,15 @@ mod phys_lock_wrapper_tests {
         // Case：est_net_bps=None → mock ML=None → combine 走 P-only → Physical。
         let (tx, mut rx) = tokio::sync::mpsc::channel::<crate::database::ShadowExitMsg>(4);
         emit_shadow_exit_observation(
-            "ctx-none", 1_700_000_000_000, "demo", "ma_crossover", "BTCUSDT", 1,
-            "phys_lock_gate4_giveback", None, None,
+            "ctx-none",
+            1_700_000_000_000,
+            "demo",
+            "ma_crossover",
+            "BTCUSDT",
+            1,
+            "phys_lock_gate4_giveback",
+            None,
+            None,
             &tx,
         );
         let msg = recv_one_shadow(&mut rx);
@@ -564,7 +574,10 @@ mod phys_lock_wrapper_tests {
         assert!(msg.ml_model_id.is_none());
         assert!(msg.ml_score.is_none());
         assert_eq!(msg.physical_action, "Lock");
-        assert_eq!(msg.physical_reason.as_deref(), Some("phys_lock_gate4_giveback"));
+        assert_eq!(
+            msg.physical_reason.as_deref(),
+            Some("phys_lock_gate4_giveback")
+        );
     }
 
     #[test]
@@ -574,8 +587,15 @@ mod phys_lock_wrapper_tests {
         // Case：est_net_bps=-20 → score 0.0（clamp）<0.70 → Physical。
         let (tx, mut rx) = tokio::sync::mpsc::channel::<crate::database::ShadowExitMsg>(4);
         emit_shadow_exit_observation(
-            "ctx-low", 1_700_000_000_000, "demo", "ma_crossover", "BTCUSDT", 1,
-            "phys_lock_gate4_giveback", Some(-20.0), None,
+            "ctx-low",
+            1_700_000_000_000,
+            "demo",
+            "ma_crossover",
+            "BTCUSDT",
+            1,
+            "phys_lock_gate4_giveback",
+            Some(-20.0),
+            None,
             &tx,
         );
         let msg = recv_one_shadow(&mut rx);
@@ -584,7 +604,10 @@ mod phys_lock_wrapper_tests {
         // Mock ML was built (ml_model_id populated) but score < confirm → Physical.
         // Mock ML 有被建（ml_model_id 有值），但 score < confirm → Physical。
         assert_eq!(msg.ml_model_id.as_deref(), Some("shadow_mock_v1"));
-        assert!(msg.ml_score.unwrap().abs() < 1e-6, "score should clamp to 0.0");
+        assert!(
+            msg.ml_score.unwrap().abs() < 1e-6,
+            "score should clamp to 0.0"
+        );
     }
 
     #[test]
@@ -593,8 +616,15 @@ mod phys_lock_wrapper_tests {
         // Case：est_net_bps=0 → score 0.5 < 0.70 → Physical。
         let (tx, mut rx) = tokio::sync::mpsc::channel::<crate::database::ShadowExitMsg>(4);
         emit_shadow_exit_observation(
-            "ctx-neu", 1_700_000_000_000, "demo", "ma_crossover", "BTCUSDT", 1,
-            "phys_lock_gate4_giveback", Some(0.0), None,
+            "ctx-neu",
+            1_700_000_000_000,
+            "demo",
+            "ma_crossover",
+            "BTCUSDT",
+            1,
+            "phys_lock_gate4_giveback",
+            Some(0.0),
+            None,
             &tx,
         );
         let msg = recv_one_shadow(&mut rx);
@@ -613,20 +643,36 @@ mod phys_lock_wrapper_tests {
         // → disagreed=true。
         let (tx, mut rx) = tokio::sync::mpsc::channel::<crate::database::ShadowExitMsg>(4);
         emit_shadow_exit_observation(
-            "ctx-hit", 1_700_000_000_000, "demo", "ma_crossover", "BTCUSDT", 1,
-            "phys_lock_gate4_giveback", Some(5.0), None,
+            "ctx-hit",
+            1_700_000_000_000,
+            "demo",
+            "ma_crossover",
+            "BTCUSDT",
+            1,
+            "phys_lock_gate4_giveback",
+            Some(5.0),
+            None,
             &tx,
         );
         let msg = recv_one_shadow(&mut rx);
         assert_eq!(msg.exit_source, "Hybrid");
-        assert!(msg.disagreed, "score ≥ confirm_threshold must flip exit_source to Hybrid → disagreed");
+        assert!(
+            msg.disagreed,
+            "score ≥ confirm_threshold must flip exit_source to Hybrid → disagreed"
+        );
         assert_eq!(msg.ml_model_id.as_deref(), Some("shadow_mock_v1"));
         assert!((msg.ml_score.unwrap() - 0.75).abs() < 1e-6);
         // disagreement_reason should name the source difference.
         // disagreement_reason 應列出 source 差異。
         let reason = msg.disagreement_reason.as_deref().unwrap_or("");
-        assert!(reason.contains("Physical"), "disagreement_reason missing Physical: {reason:?}");
-        assert!(reason.contains("Hybrid"), "disagreement_reason missing Hybrid: {reason:?}");
+        assert!(
+            reason.contains("Physical"),
+            "disagreement_reason missing Physical: {reason:?}"
+        );
+        assert!(
+            reason.contains("Hybrid"),
+            "disagreement_reason missing Hybrid: {reason:?}"
+        );
     }
 
     #[test]
@@ -635,14 +681,24 @@ mod phys_lock_wrapper_tests {
         // Case：est_net_bps=20 → score clamp 1.0 → Hybrid。
         let (tx, mut rx) = tokio::sync::mpsc::channel::<crate::database::ShadowExitMsg>(4);
         emit_shadow_exit_observation(
-            "ctx-high", 1_700_000_000_000, "demo", "ma_crossover", "BTCUSDT", 1,
-            "phys_lock_gate4_giveback", Some(20.0), None,
+            "ctx-high",
+            1_700_000_000_000,
+            "demo",
+            "ma_crossover",
+            "BTCUSDT",
+            1,
+            "phys_lock_gate4_giveback",
+            Some(20.0),
+            None,
             &tx,
         );
         let msg = recv_one_shadow(&mut rx);
         assert_eq!(msg.exit_source, "Hybrid");
         assert!(msg.disagreed);
-        assert!((msg.ml_score.unwrap() - 1.0).abs() < 1e-6, "score should clamp to 1.0");
+        assert!(
+            (msg.ml_score.unwrap() - 1.0).abs() < 1e-6,
+            "score should clamp to 1.0"
+        );
     }
 
     #[test]
@@ -657,14 +713,24 @@ mod phys_lock_wrapper_tests {
         //（雙層防禦）。
         let (tx, mut rx) = tokio::sync::mpsc::channel::<crate::database::ShadowExitMsg>(4);
         emit_shadow_exit_observation(
-            "ctx-nan", 1_700_000_000_000, "demo", "ma_crossover", "BTCUSDT", 1,
-            "phys_lock_gate4_giveback", Some(f32::NAN), None,
+            "ctx-nan",
+            1_700_000_000_000,
+            "demo",
+            "ma_crossover",
+            "BTCUSDT",
+            1,
+            "phys_lock_gate4_giveback",
+            Some(f32::NAN),
+            None,
             &tx,
         );
         let msg = recv_one_shadow(&mut rx);
         assert_eq!(msg.exit_source, "Physical");
         assert!(!msg.disagreed);
-        assert!(msg.ml_model_id.is_none(), "NaN edge → mock returns None → no ml_model_id");
+        assert!(
+            msg.ml_model_id.is_none(),
+            "NaN edge → mock returns None → no ml_model_id"
+        );
         assert!(msg.ml_score.is_none());
     }
 
@@ -675,14 +741,24 @@ mod phys_lock_wrapper_tests {
         // Case：est_net_bps=+Inf → mock builder is_finite() 拒 → None → Physical。
         let (tx, mut rx) = tokio::sync::mpsc::channel::<crate::database::ShadowExitMsg>(4);
         emit_shadow_exit_observation(
-            "ctx-inf", 1_700_000_000_000, "demo", "ma_crossover", "BTCUSDT", 1,
-            "phys_lock_gate4_giveback", Some(f32::INFINITY), None,
+            "ctx-inf",
+            1_700_000_000_000,
+            "demo",
+            "ma_crossover",
+            "BTCUSDT",
+            1,
+            "phys_lock_gate4_giveback",
+            Some(f32::INFINITY),
+            None,
             &tx,
         );
         let msg = recv_one_shadow(&mut rx);
         assert_eq!(msg.exit_source, "Physical");
         assert!(!msg.disagreed);
-        assert!(msg.ml_model_id.is_none(), "Inf edge → mock returns None → no ml_model_id");
+        assert!(
+            msg.ml_model_id.is_none(),
+            "Inf edge → mock returns None → no ml_model_id"
+        );
         assert!(msg.ml_score.is_none());
     }
 
@@ -714,8 +790,15 @@ mod phys_lock_wrapper_tests {
         // score 0.75 ≥ 0.70 → Hybrid。
         let (tx, mut rx) = tokio::sync::mpsc::channel::<crate::database::ShadowExitMsg>(4);
         emit_shadow_exit_observation(
-            "ctx-fresh", 1_700_000_000_000, "demo", "ma_crossover", "BTCUSDT", 1,
-            "phys_lock_gate4_giveback", Some(5.0), Some(60),
+            "ctx-fresh",
+            1_700_000_000_000,
+            "demo",
+            "ma_crossover",
+            "BTCUSDT",
+            1,
+            "phys_lock_gate4_giveback",
+            Some(5.0),
+            Some(60),
             &tx,
         );
         let msg = recv_one_shadow(&mut rx);
@@ -743,8 +826,15 @@ mod phys_lock_wrapper_tests {
         let (tx, mut rx) = tokio::sync::mpsc::channel::<crate::database::ShadowExitMsg>(4);
         let eight_days_secs: u64 = 8 * 24 * 3600;
         emit_shadow_exit_observation(
-            "ctx-stale", 1_700_000_000_000, "demo", "ma_crossover", "BTCUSDT", 1,
-            "phys_lock_gate4_giveback", Some(5.0), Some(eight_days_secs),
+            "ctx-stale",
+            1_700_000_000_000,
+            "demo",
+            "ma_crossover",
+            "BTCUSDT",
+            1,
+            "phys_lock_gate4_giveback",
+            Some(5.0),
+            Some(eight_days_secs),
             &tx,
         );
         let msg = recv_one_shadow(&mut rx);
@@ -783,8 +873,10 @@ mod phys_lock_wrapper_tests {
     fn test_compute_edge_estimates_file_age_secs_missing_file_returns_none() {
         // Missing file → None (cold-start before Python writer's first cycle).
         // 檔案不存在 → None（Python writer 首次寫入前的冷啟動）。
-        let tmp = std::env::temp_dir()
-            .join(format!("openclaw_test_edge_age_missing_{}", std::process::id()));
+        let tmp = std::env::temp_dir().join(format!(
+            "openclaw_test_edge_age_missing_{}",
+            std::process::id()
+        ));
         // Do NOT create tmp/settings/edge_estimates.json — must return None.
         // 不建立檔案 — 必須回 None。
         let age = compute_edge_estimates_file_age_secs("demo", &tmp);
@@ -798,8 +890,10 @@ mod phys_lock_wrapper_tests {
         // mutation. Cleans up after itself.
         // 建立新檔，預期齡期 ∈ [0, 5]（緊邊界，無 sleep）；
         // 用 temp_dir 不動 env，自行清理。
-        let tmp = std::env::temp_dir()
-            .join(format!("openclaw_test_edge_age_fresh_{}", std::process::id()));
+        let tmp = std::env::temp_dir().join(format!(
+            "openclaw_test_edge_age_fresh_{}",
+            std::process::id()
+        ));
         let settings_dir = tmp.join("settings");
         std::fs::create_dir_all(&settings_dir).expect("mkdir settings");
         let file_path = settings_dir.join("edge_estimates.json");
@@ -825,8 +919,10 @@ mod phys_lock_wrapper_tests {
         // (paper file missing) while demo returns Some.
         // Paper 模式讀 edge_estimates_paper.json；只建 edge_estimates.json 時，
         // paper 仍回 None、demo 回 Some — 驗證兩個 mode 看不同檔案。
-        let tmp = std::env::temp_dir()
-            .join(format!("openclaw_test_edge_age_modes_{}", std::process::id()));
+        let tmp = std::env::temp_dir().join(format!(
+            "openclaw_test_edge_age_modes_{}",
+            std::process::id()
+        ));
         let settings_dir = tmp.join("settings");
         std::fs::create_dir_all(&settings_dir).expect("mkdir settings");
         let demo_path = settings_dir.join("edge_estimates.json");
@@ -934,10 +1030,7 @@ mod phys_lock_wrapper_tests {
         //   line 247 (`RiskAction::ClosePosition(format!("risk_close:{}", reason))`)
         //   that produces the `risk_close:phys_lock_...` envelope downstream.
         // 白名單：合法出現此 literal 的兩個檔案。
-        const ALLOWLIST: &[&str] = &[
-            "tick_pipeline/on_tick/helpers.rs",
-            "risk_checks.rs",
-        ];
+        const ALLOWLIST: &[&str] = &["tick_pipeline/on_tick/helpers.rs", "risk_checks.rs"];
 
         // Recursively walk `src/` from CARGO_MANIFEST_DIR, collect all `.rs`
         // files, grep for GUARD_PATTERN, flag any outside ALLOWLIST.
@@ -1273,7 +1366,7 @@ mod phys_lock_wrapper_tests {
             "risk_close:DRAWDOWN: session equity -2.50% <= -2.00%",
             "risk_close:CONSECUTIVE LOSS: 3 in a row",
             "risk_close:DAILY LOSS: -3.50% <= -3.00%",
-            "risk_close:fast_track",     // CloseAll path (full close)
+            "risk_close:fast_track", // CloseAll path (full close)
             "risk_close:fast_track_close_all",
             "stop_trigger:hard_stop",
             "strategy_close:ma_crossover_exit",
@@ -1294,7 +1387,10 @@ mod phys_lock_wrapper_tests {
         // RCA-B was meant to fix from the opposite direction).
         // 防禦性：類似但不相等的字串不可命中 — 避免未來「看起來像 partial」的
         // false positive 反向打殘 full-close EF emission，反向重現 RCA-B。
-        assert!(!is_partial_reduce_tag("fast_track_reduce_half"), "missing prefix");
+        assert!(
+            !is_partial_reduce_tag("fast_track_reduce_half"),
+            "missing prefix"
+        );
         assert!(
             !is_partial_reduce_tag("risk_close:fast_track_reduce_half "),
             "trailing space must not match"

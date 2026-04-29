@@ -60,9 +60,12 @@ SECRETS_ROOT="${OPENCLAW_SECRETS_ROOT:-$HOME/BybitOpenClaw/secrets}"
 ARCHIVE_DIR="${OPENCLAW_ARCHIVE_DIR:-$HOME/BybitOpenClaw/archive}"
 ARCHIVE_ROOT="$ARCHIVE_DIR/damaged_${TS}"
 BIN="rust/target/release/openclaw-engine"
+ENGINE_BIN_REL="$BIN"
+ENGINE_BIN_ABS="$REPO_ROOT/$ENGINE_BIN_REL"
 API_VENV="program_code/exchange_connectors/bybit_connector/control_api_v1/.venv"
 SECRETS_ENV="$SECRETS_ROOT/environment_files/basic_system_services.env"
 IPC_SECRET_FILE="$SECRETS_ROOT/environment_files/ipc_secret.txt"
+MAINT_FLAG="$DATA_DIR/engine_maintenance.flag"
 
 # Colors for readability
 C_HDR='\033[1;36m'  # cyan bold
@@ -75,6 +78,86 @@ hdr()  { echo -e "${C_HDR}══ $* ══${C_END}"; }
 ok()   { echo -e "${C_OK}✓${C_END} $*"; }
 warn() { echo -e "${C_WARN}⚠${C_END} $*"; }
 err()  { echo -e "${C_ERR}✗${C_END} $*" >&2; }
+
+# SW-001/OS-004 (Batch E): maintenance flag lifecycle must be explicit and
+# trap-protected so watchdog cannot race restart and flags don't leak.
+# SW-001/OS-004（Batch E）：維護旗標必須顯式且有 trap 保護，防 watchdog 競態與殘留。
+MAINT_FLAG_ACTIVE=0
+cleanup_maintenance_flag() {
+    if [ "$MAINT_FLAG_ACTIVE" -eq 1 ] && [ -f "$MAINT_FLAG" ]; then
+        rm -f "$MAINT_FLAG" 2>/dev/null || true
+        warn "maintenance flag cleared by trap"
+    fi
+}
+trap cleanup_maintenance_flag EXIT INT TERM
+
+is_openclaw_api_pid() {
+    local pid="$1"
+    local cmd
+    cmd="$(ps -p "$pid" -o command= 2>/dev/null || true)"
+    [[ "$cmd" == *"uvicorn"* && "$cmd" == *"app.main:app"* && "$cmd" == *"control_api_v1"* ]]
+}
+
+stop_api_safe() {
+    local pid
+    for pid in $(lsof -ti :8000 2>/dev/null || true); do
+        if is_openclaw_api_pid "$pid"; then
+            kill -TERM "$pid" 2>/dev/null || true
+        else
+            warn "skip non-OpenClaw pid on :8000 -> $pid"
+        fi
+    done
+    sleep 2
+    for pid in $(lsof -ti :8000 2>/dev/null || true); do
+        if is_openclaw_api_pid "$pid"; then
+            kill -KILL "$pid" 2>/dev/null || true
+        fi
+    done
+}
+
+process_cwd() {
+    local pid="$1"
+    if command -v pwdx >/dev/null 2>&1; then
+        pwdx "$pid" 2>/dev/null | sed 's/^[^:]*: //'
+    elif command -v lsof >/dev/null 2>&1; then
+        lsof -a -p "$pid" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p' | head -1
+    fi
+}
+
+is_openclaw_engine_pid() {
+    local pid="$1"
+    local cmd cwd
+    cmd="$(ps -p "$pid" -o command= 2>/dev/null || true)"
+    cwd="$(process_cwd "$pid" || true)"
+    if [[ "$cmd" == *"$ENGINE_BIN_ABS"* ]]; then
+        return 0
+    fi
+    [[ "$cwd" == "$REPO_ROOT" ]] || return 1
+    [[ "$cmd" == *"$ENGINE_BIN_REL"* || "$cmd" == *"/openclaw-engine"* ]]
+}
+
+engine_pids() {
+    local pid
+    for pid in $(pgrep -f "openclaw-engine" 2>/dev/null || true); do
+        if is_openclaw_engine_pid "$pid"; then
+            printf '%s\n' "$pid"
+        else
+            echo "WARN: skip non-OpenClaw engine pid -> $pid" >&2
+        fi
+    done
+}
+
+engine_running() {
+    [[ -n "$(engine_pids)" ]]
+}
+
+signal_engine_pids() {
+    local signal="$1"
+    local pid
+    for pid in $(engine_pids); do
+        kill "-$signal" "$pid" 2>/dev/null || true
+    done
+}
 
 confirm() {
     [ "$YES" -eq 1 ] && return 0
@@ -93,7 +176,17 @@ if [ ! -f "$SECRETS_ENV" ]; then
 fi
 
 PG_PASS="$(grep POSTGRES_PASSWORD "$SECRETS_ENV" | cut -d= -f2-)"
-IPC_SECRET="$(cat "$IPC_SECRET_FILE" 2>/dev/null || echo '')"
+RUNTIME_SECRET_DIR="$DATA_DIR/runtime_secrets"
+OPENCLAW_DATABASE_URL_FILE="$RUNTIME_SECRET_DIR/openclaw_database_url"
+PGPASS_FILE="$RUNTIME_SECRET_DIR/pgpass"
+mkdir -p "$RUNTIME_SECRET_DIR"
+chmod 700 "$RUNTIME_SECRET_DIR" 2>/dev/null || true
+printf 'postgresql://redacted@127.0.0.1:5432/trading_ai\n' "$PG_PASS" > "$OPENCLAW_DATABASE_URL_FILE"
+printf '127.0.0.1:5432:trading_ai:trading_admin:%s\n' "$PG_PASS" > "$PGPASS_FILE"
+chmod 600 "$OPENCLAW_DATABASE_URL_FILE" "$PGPASS_FILE" 2>/dev/null || true
+if [ -f "$IPC_SECRET_FILE" ]; then
+    chmod 600 "$IPC_SECRET_FILE" 2>/dev/null || true
+fi
 
 echo "  data_dir:       $DATA_DIR"
 echo "  archive_target: $ARCHIVE_ROOT"
@@ -110,7 +203,7 @@ echo ""
 
 # Show DB row counts
 echo "  DB row counts:"
-PGPASSWORD="$PG_PASS" psql -h 127.0.0.1 -U trading_admin -d trading_ai -t -A -F $'\t' <<'SQL' 2>/dev/null | sed 's/^/    /'
+PGPASSFILE="$PGPASS_FILE" psql -h 127.0.0.1 -U trading_admin -d trading_ai -t -A -F $'\t' <<'SQL' 2>/dev/null | sed 's/^/    /'
 SELECT 'fills' || E'\t' || COUNT(*) FROM trading.fills
 UNION ALL SELECT 'intents' || E'\t' || COUNT(*) FROM trading.intents
 UNION ALL SELECT 'orders' || E'\t' || COUNT(*) FROM trading.orders
@@ -126,16 +219,21 @@ fi
 # ── Step 2: Stop engine + API ─────────────────────────────────────────────
 hdr "Step 2/7 — Stop engine + API"
 
+mkdir -p "$DATA_DIR"
+touch "$MAINT_FLAG"
+MAINT_FLAG_ACTIVE=1
+ok "maintenance flag set (watchdog won't auto-restart during maintenance)"
+
 echo "  stopping Rust engine..."
-pkill -f "openclaw-engine" 2>/dev/null || true
+signal_engine_pids TERM
 echo "  stopping API (port 8000)..."
-lsof -ti :8000 | xargs kill -9 2>/dev/null || true
+stop_api_safe
 sleep 2
 
 # Verify
-if pgrep -f "openclaw-engine" >/dev/null; then
+if engine_running; then
     warn "engine still running, force-killing"
-    pkill -9 -f "openclaw-engine" 2>/dev/null || true
+    signal_engine_pids KILL
     sleep 1
 fi
 ok "engine + API stopped"
@@ -212,7 +310,7 @@ done
 # DB archive (opt-in)
 if [ "$MARK_DAMAGED" -eq 1 ]; then
     echo "  archiving DB tables → trading.{fills,intents,orders,risk_verdicts}_damaged_${TS}..."
-    PGPASSWORD="$PG_PASS" psql -h 127.0.0.1 -U trading_admin -d trading_ai <<SQL 2>&1 | tail -10
+    PGPASSFILE="$PGPASS_FILE" psql -h 127.0.0.1 -U trading_admin -d trading_ai <<SQL 2>&1 | tail -10
 BEGIN;
 CREATE TABLE trading.fills_damaged_${TS} AS SELECT * FROM trading.fills;
 CREATE TABLE trading.intents_damaged_${TS} AS SELECT * FROM trading.intents;
@@ -234,9 +332,13 @@ hdr "Step 5/7 — Binary freshness check"
 
 if [ "$SKIP_BUILD_CHECK" -eq 1 ]; then
     warn "skipping build check"
+elif ! cargo pkgid -p openclaw_engine --manifest-path rust/Cargo.toml >/dev/null 2>&1; then
+    err "cargo package id check failed: openclaw_engine not found"
+    rm -f "$MAINT_FLAG"
+    exit 1
 elif [ ! -f "$BIN" ]; then
     warn "binary missing → building"
-    cargo build --release -p openclaw-engine --manifest-path rust/Cargo.toml
+    cargo build --release -p openclaw_engine --manifest-path rust/Cargo.toml
     ok "binary built"
 else
     SRC_DIRS="rust/openclaw_engine/src rust/openclaw_core/src rust/openclaw_types/src"
@@ -251,7 +353,7 @@ else
         warn "$NEWER_COUNT source file(s) newer than binary → rebuilding"
         find $EXIST_PATHS -type f \( -name '*.rs' -o -name '*.toml' \) \
              -newer "$BIN" 2>/dev/null | head -5 | sed 's/^/    /'
-        cargo build --release -p openclaw-engine --manifest-path rust/Cargo.toml
+        cargo build --release -p openclaw_engine --manifest-path rust/Cargo.toml
         ok "binary rebuilt"
     else
         ok "binary is current ($(stat -c '%y' "$BIN" | cut -d. -f1))"
@@ -266,16 +368,16 @@ mkdir -p "$DATA_DIR"
 echo "  starting Rust engine..."
 OPENCLAW_DATA_DIR="$DATA_DIR" \
 OPENCLAW_CANARY_MODE=1 \
-OPENCLAW_DATABASE_URL="postgresql://redacted@127.0.0.1:5432/trading_ai" \
-OPENCLAW_IPC_SECRET="${IPC_SECRET}" \
+OPENCLAW_DATABASE_URL_FILE="$OPENCLAW_DATABASE_URL_FILE" \
+OPENCLAW_IPC_SECRET_FILE="$IPC_SECRET_FILE" \
     nohup "$BIN" > "$DATA_DIR/engine.log" 2>&1 &
 ENGINE_PID=$!
 echo "    engine PID: $ENGINE_PID"
 
 echo "  starting API (4 workers)..."
 cd program_code/exchange_connectors/bybit_connector/control_api_v1
-OPENCLAW_DATABASE_URL="postgresql://redacted@127.0.0.1:5432/trading_ai" \
-OPENCLAW_IPC_SECRET="${IPC_SECRET}" \
+OPENCLAW_DATABASE_URL_FILE="$OPENCLAW_DATABASE_URL_FILE" \
+OPENCLAW_IPC_SECRET_FILE="$IPC_SECRET_FILE" \
     nohup .venv/bin/python3 .venv/bin/uvicorn app.main:app \
     --host 0.0.0.0 --port 8000 --workers 4 \
     > "$DATA_DIR/api.log" 2>&1 &
@@ -304,6 +406,8 @@ except Exception:
 ")
 
 if [ "$ALIVE" = "1" ]; then
+    rm -f "$MAINT_FLAG"
+    MAINT_FLAG_ACTIVE=0
     ok "all engines alive"
     echo ""
     hdr "CLEAN RESTART COMPLETE ✓"

@@ -73,9 +73,7 @@ use tracing::{info, warn};
 fn resolve_base_dir() -> PathBuf {
     std::env::var("OPENCLAW_BASE_DIR")
         .map(PathBuf::from)
-        .unwrap_or_else(|_| {
-            std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
-        })
+        .unwrap_or_else(|_| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
 }
 
 /// EN: Reload the on-disk edge estimates snapshot for `pipeline`'s mode and
@@ -121,9 +119,7 @@ pub(crate) fn handle_reload_edge_estimates(pipeline: &mut TickPipeline) -> Optio
     pipeline.set_edge_estimates(estimates);
     info!(
         mode,
-        n_cells,
-        grand_mean_bps,
-        "PH5-WIRE-1 RELOAD: edge estimates refreshed / 邊際估計已刷新"
+        n_cells, grand_mean_bps, "PH5-WIRE-1 RELOAD: edge estimates refreshed / 邊際估計已刷新"
     );
     Some(n_cells)
 }
@@ -194,7 +190,10 @@ mod tests {
         // No settings/edge_estimates.json written; load_for_mode returns empty.
         let mut pipeline = build_pipeline(PipelineKind::Demo);
         let result = handle_reload_edge_estimates(&mut pipeline);
-        assert!(result.is_none(), "fail-soft must return None when file missing");
+        assert!(
+            result.is_none(),
+            "fail-soft must return None when file missing"
+        );
     }
 
     /// EN: F6 fail-soft path — corrupt JSON yields empty load → handler
@@ -298,7 +297,11 @@ mod tests {
         );
         let mut pipeline = build_pipeline(PipelineKind::Paper);
         let result = handle_reload_edge_estimates(&mut pipeline);
-        assert_eq!(result, Some(1), "paper must read paper-specific JSON when present");
+        assert_eq!(
+            result,
+            Some(1),
+            "paper must read paper-specific JSON when present"
+        );
     }
 
     /// EN: F6 reload trigger — calling the handler twice with different

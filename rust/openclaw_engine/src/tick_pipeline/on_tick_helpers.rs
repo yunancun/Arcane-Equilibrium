@@ -157,18 +157,45 @@ pub(crate) fn persist_verdict(
     engine_mode: &str,
 ) {
     if let Some(ref tx) = trading_tx {
-        let _ = tx.try_send(crate::database::TradingMsg::RiskVerdict {
-            verdict_id: make_verdict_id(em, symbol, ts_ms),
-            ts_ms,
-            intent_id: make_intent_id(em, symbol, ts_ms),
-            context_id: make_context_id(em, symbol, ts_ms),
-            symbol: symbol.to_string(),
-            verdict: vi.verdict.clone(),
-            risk_score: vi.risk_score,
-            reasons: vi.reasons.clone(),
-            modified_qty: vi.modified_qty,
-            engine_mode: engine_mode.to_string(),
-        });
+        let checks_failed = vi.reasons.clone();
+        let checks_passed = if checks_failed.is_empty() {
+            vec!["guardian_checks".to_string()]
+        } else {
+            Vec::new()
+        };
+        let risk_level = risk_score_level(vi.risk_score).map(str::to_string);
+        let _ = crate::database::try_send_trading_msg(
+            tx,
+            crate::database::TradingMsg::RiskVerdict {
+                verdict_id: make_verdict_id(em, symbol, ts_ms),
+                ts_ms,
+                intent_id: make_intent_id(em, symbol, ts_ms),
+                context_id: make_context_id(em, symbol, ts_ms),
+                symbol: symbol.to_string(),
+                verdict: vi.verdict.clone(),
+                risk_score: vi.risk_score,
+                risk_level,
+                checks_passed,
+                checks_failed,
+                reasons: vi.reasons.clone(),
+                modified_qty: vi.modified_qty,
+                engine_mode: engine_mode.to_string(),
+            },
+            "risk_verdict",
+        );
+    }
+}
+
+#[inline]
+pub(crate) fn risk_score_level(score: f64) -> Option<&'static str> {
+    if !score.is_finite() {
+        None
+    } else if score >= 0.80 {
+        Some("risk_score_high")
+    } else if score >= 0.50 {
+        Some("risk_score_medium")
+    } else {
+        Some("risk_score_low")
     }
 }
 
@@ -208,24 +235,28 @@ pub(crate) fn persist_intent(
             "is_sentinel": is_sentinel,
             "is_long": intent.is_long,
         });
-        let _ = tx.try_send(crate::database::TradingMsg::Intent {
-            intent_id: make_intent_id(em, &intent.symbol, ts_ms),
-            ts_ms,
-            signal_id: String::new(),
-            context_id: make_context_id(em, &intent.symbol, ts_ms),
-            symbol: intent.symbol.clone(),
-            side: if intent.is_long {
-                "Buy".into()
-            } else {
-                "Sell".into()
+        let _ = crate::database::try_send_trading_msg(
+            tx,
+            crate::database::TradingMsg::Intent {
+                intent_id: make_intent_id(em, &intent.symbol, ts_ms),
+                ts_ms,
+                signal_id: String::new(),
+                context_id: make_context_id(em, &intent.symbol, ts_ms),
+                symbol: intent.symbol.clone(),
+                side: if intent.is_long {
+                    "Buy".into()
+                } else {
+                    "Sell".into()
+                },
+                qty: approved_qty,
+                price,
+                order_type: intent.order_type.clone(),
+                strategy_name: intent.strategy.clone(),
+                engine_mode: engine_mode.to_string(),
+                details: Some(details),
             },
-            qty: approved_qty,
-            price,
-            order_type: intent.order_type.clone(),
-            strategy_name: intent.strategy.clone(),
-            engine_mode: engine_mode.to_string(),
-            details: Some(details),
-        });
+            "intent",
+        );
     }
 }
 

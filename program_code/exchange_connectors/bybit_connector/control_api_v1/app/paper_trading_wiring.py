@@ -7,6 +7,7 @@ Split from paper_trading_routes.py to keep routes file under 800-line warning li
 from __future__ import annotations
 
 import json
+import fcntl
 import logging
 import os
 import subprocess
@@ -421,6 +422,53 @@ __all__ = [
 # 每 30s 輪詢 Rust 引擎；governor tier 變化時通過 ALERT_ROUTER 發送 P0/P1 告警。
 import asyncio as _asyncio
 
+_RECONCILER_ALERT_LOCK_FD: int | None = None
+
+
+def _acquire_reconciler_alert_lock() -> bool:
+    """Best-effort leader lock for reconciler alert monitor.
+    對帳器告警監控的最佳努力 leader 鎖。
+    """
+    global _RECONCILER_ALERT_LOCK_FD
+    if _RECONCILER_ALERT_LOCK_FD is not None:
+        return True
+    if os.environ.get("OPENCLAW_RECON_ALERT_MONITOR_LEADER") == "0":
+        logger.info(
+            "OC-3: reconciler monitor forced non-leader by env / 由環境變數強制非 leader"
+        )
+        return False
+
+    data_dir = os.environ.get("OPENCLAW_DATA_DIR", "/tmp/openclaw")
+    lock_path = os.path.join(data_dir, "reconciler_alert_monitor.leader.lock")
+    try:
+        os.makedirs(os.path.dirname(lock_path), exist_ok=True)
+        fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o644)
+    except OSError as exc:
+        logger.warning(
+            "OC-3: unable to open leader lock %s (%s), monitor disabled on this worker",
+            lock_path,
+            exc,
+        )
+        return False
+
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except (BlockingIOError, OSError):
+        os.close(fd)
+        logger.info(
+            "OC-3: monitor non-leader worker (lock held at %s) / 非 leader worker",
+            lock_path,
+        )
+        return False
+
+    try:
+        os.ftruncate(fd, 0)
+        os.write(fd, f"{os.getpid()}\n".encode("utf-8"))
+    except OSError:
+        pass
+    _RECONCILER_ALERT_LOCK_FD = fd
+    return True
+
 
 async def reconciler_alert_monitor() -> None:
     """
@@ -440,6 +488,9 @@ async def reconciler_alert_monitor() -> None:
     由 main.py _startup_integrity_check 在啟動時以 asyncio.create_task() 啟動。
     """
     from .ipc_client import EngineIPCClient  # local import to avoid circular dep
+
+    if not _acquire_reconciler_alert_lock():
+        return
 
     POLL_INTERVAL_S = 30
     # Ordered by severity for level comparison / 按嚴重程度排序用於比較

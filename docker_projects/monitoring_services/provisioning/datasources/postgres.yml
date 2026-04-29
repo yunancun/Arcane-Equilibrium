@@ -6,7 +6,10 @@ datasources:
     url: trading_postgres:5432
     user: trading_admin
     secureJsonData:
-      password: "<REDACTED>"
+      # 安全 / Security:
+      #   由环境变量注入数据库密码；不要在仓库中提交 Postgres 密码。
+      #   Inject the database password from the environment; never commit Postgres passwords.
+      password: "${GRAFANA_POSTGRES_PASSWORD}"
     jsonData:
       database: trading_ai
       sslmode: disable

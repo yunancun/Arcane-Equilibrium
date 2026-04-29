@@ -57,6 +57,24 @@ def _require_dsn() -> str:
     return dsn
 
 
+def _register_trio(dsn: str, *, train_date: str = "2026-04-23") -> int:
+    ids = []
+    for q in ("q10", "q50", "q90"):
+        rid = register_model(
+            strategy="ma_crossover",
+            engine_mode="demo",
+            quantile=q,
+            schema_version="v1",
+            train_date=train_date,
+            artifact_path=f"/tmp/fake_{q}.onnx",
+            verdict=VERDICT_SHOULD_SHIP,
+            dsn=dsn,
+        )
+        assert rid is not None
+        ids.append(rid)
+    return ids[1]
+
+
 @pytest.fixture(scope="module")
 def pg_conn():
     """Module-scoped fixture: open psycopg connection + apply V023 migration.
@@ -389,75 +407,44 @@ def test_transition_shadow_to_promoting_updates_db(pg_conn):
 
     transition 真能讓 UPDATE 落地 — mock 測不到這一點。"""
     dsn = _require_dsn()
-    rid = register_model(
-        strategy="ma_crossover",
-        engine_mode="demo",
-        quantile="q50",
-        schema_version="v1",
-        train_date="2026-04-23",
-        artifact_path="/tmp/fake.onnx",
-        verdict=VERDICT_SHOULD_SHIP,
-        dsn=dsn,
-    )
-    assert rid is not None
+    rid = _register_trio(dsn)
     ok = transition_canary_status(row_id=rid, to_status=CANARY_PROMOTING, dsn=dsn)
     assert ok is True
     with pg_conn.cursor() as cur:
         cur.execute(
-            "SELECT canary_status, promoted_at FROM learning.model_registry WHERE id = %s",
-            (rid,),
+            "SELECT quantile, canary_status, promoted_at FROM learning.model_registry ORDER BY quantile",
         )
-        row = cur.fetchone()
-        assert row[0] == CANARY_PROMOTING
+        rows = cur.fetchall()
+        assert {r[0] for r in rows} == {"q10", "q50", "q90"}
+        assert all(r[1] == CANARY_PROMOTING for r in rows)
         # shadow→promoting does NOT set promoted_at (that's for → production).
         # shadow→promoting 不設 promoted_at（只有 → production 才設）。
-        assert row[1] is None
+        assert all(r[2] is None for r in rows)
 
 
 def test_transition_promoting_to_production_sets_promoted_at(pg_conn):
     """promoting → production UPDATE sets promoted_at to non-NULL (NOW()).
     promoting → production 的 UPDATE 設 promoted_at 為非 NULL（NOW()）。"""
     dsn = _require_dsn()
-    rid = register_model(
-        strategy="ma_crossover",
-        engine_mode="demo",
-        quantile="q50",
-        schema_version="v1",
-        train_date="2026-04-23",
-        artifact_path="/tmp/fake.onnx",
-        verdict=VERDICT_SHOULD_SHIP,
-        dsn=dsn,
-    )
-    assert rid is not None
+    rid = _register_trio(dsn)
     # shadow → promoting first
     assert transition_canary_status(row_id=rid, to_status=CANARY_PROMOTING, dsn=dsn)
     # promoting → production
     assert transition_canary_status(row_id=rid, to_status=CANARY_PRODUCTION, dsn=dsn)
     with pg_conn.cursor() as cur:
         cur.execute(
-            "SELECT canary_status, promoted_at FROM learning.model_registry WHERE id = %s",
-            (rid,),
+            "SELECT canary_status, promoted_at FROM learning.model_registry ORDER BY quantile",
         )
-        row = cur.fetchone()
-        assert row[0] == CANARY_PRODUCTION
-        assert row[1] is not None  # promoted_at = NOW()
+        rows = cur.fetchall()
+        assert all(r[0] == CANARY_PRODUCTION for r in rows)
+        assert all(r[1] is not None for r in rows)  # promoted_at = NOW()
 
 
 def test_transition_shadow_to_rejected_sets_retired_at_and_reason(pg_conn):
     """shadow → rejected sets retired_at + retirement_reason (terminal path).
     shadow → rejected 設 retired_at + retirement_reason（終態路徑）。"""
     dsn = _require_dsn()
-    rid = register_model(
-        strategy="ma_crossover",
-        engine_mode="demo",
-        quantile="q50",
-        schema_version="v1",
-        train_date="2026-04-23",
-        artifact_path="/tmp/fake.onnx",
-        verdict=VERDICT_SHOULD_SHIP,
-        dsn=dsn,
-    )
-    assert rid is not None
+    rid = _register_trio(dsn)
     reason = "low pinball skill on shadow window"
     ok = transition_canary_status(
         row_id=rid,
@@ -469,13 +456,12 @@ def test_transition_shadow_to_rejected_sets_retired_at_and_reason(pg_conn):
     with pg_conn.cursor() as cur:
         cur.execute(
             "SELECT canary_status, retired_at, retirement_reason "
-            "FROM learning.model_registry WHERE id = %s",
-            (rid,),
+            "FROM learning.model_registry ORDER BY quantile",
         )
-        row = cur.fetchone()
-        assert row[0] == CANARY_REJECTED
-        assert row[1] is not None
-        assert row[2] == reason
+        rows = cur.fetchall()
+        assert all(r[0] == CANARY_REJECTED for r in rows)
+        assert all(r[1] is not None for r in rows)
+        assert all(r[2] == reason for r in rows)
 
 
 # ───── JSONB round-trip for acceptance_report ──────────────────────

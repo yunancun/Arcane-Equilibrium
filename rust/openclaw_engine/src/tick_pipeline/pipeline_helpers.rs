@@ -173,29 +173,33 @@ impl TickPipeline {
         if let Some(ref tx) = self.trading_tx {
             // Fill side reflects the closing direction (opposite of position side).
             let close_side = if is_long { "Sell" } else { "Buy" };
-            let _ = tx.try_send(crate::database::TradingMsg::Fill {
-                fill_id: format!("close-{em}-{}-{}", symbol, ts_ms),
-                ts_ms,
-                order_id: format!("close_{em}_{}_{}", symbol, ts_ms),
-                symbol: symbol.to_string(),
-                side: close_side.into(),
-                qty,
-                price,
-                fee: close_fee,
-                fee_rate: fr,
-                reference_price: None,
-                reference_ts_ms: None,
-                reference_source: None,
-                slippage_bps: None,
-                liquidity_role: Some("paper_sim".into()),
-                fill_latency_ms: None,
-                realized_pnl,
-                strategy_name: close_tag.to_string(),
-                context_id: on_tick_helpers::make_context_id(em, symbol, ts_ms),
-                entry_context_id: entry_context_id.to_string(),
-                engine_mode: em.to_string(),
-                exit_source,
-            });
+            crate::database::try_send_trading_msg(
+                tx,
+                crate::database::TradingMsg::Fill {
+                    fill_id: format!("close-{em}-{}-{}", symbol, ts_ms),
+                    ts_ms,
+                    order_id: format!("close_{em}_{}_{}", symbol, ts_ms),
+                    symbol: symbol.to_string(),
+                    side: close_side.into(),
+                    qty,
+                    price,
+                    fee: close_fee,
+                    fee_rate: fr,
+                    reference_price: None,
+                    reference_ts_ms: None,
+                    reference_source: None,
+                    slippage_bps: None,
+                    liquidity_role: Some("paper_sim".into()),
+                    fill_latency_ms: None,
+                    realized_pnl,
+                    strategy_name: close_tag.to_string(),
+                    context_id: on_tick_helpers::make_context_id(em, symbol, ts_ms),
+                    entry_context_id: entry_context_id.to_string(),
+                    engine_mode: em.to_string(),
+                    exit_source,
+                },
+                "close_fill",
+            );
         }
         self.stats.total_fills += 1;
         // Mirror the close fill into the in-memory ring buffer so GUI snapshot
@@ -236,9 +240,18 @@ impl TickPipeline {
         // ReduceToHalf）平倉後倉位仍 open，寫 EF 會污染 ML training set；
         // MIT audit §4 RCA-B 驗證。fill 仍寫 trading.fills，只跳過 EF emit。
         if !crate::tick_pipeline::on_tick::is_partial_reduce_tag(close_tag) {
-            self.try_emit_exit_feature_row(symbol, qty, price, ts_ms, realized_pnl,
-                                           close_fee, fr, close_tag, exit_snapshot,
-                                           entry_context_id);
+            self.try_emit_exit_feature_row(
+                symbol,
+                qty,
+                price,
+                ts_ms,
+                realized_pnl,
+                close_fee,
+                fr,
+                close_tag,
+                exit_snapshot,
+                entry_context_id,
+            );
         }
     }
 
@@ -269,14 +282,31 @@ impl TickPipeline {
     ) {
         let em = self.effective_engine_mode();
         if let (Some(snap), Some(tx)) = (exit_snapshot, self.exit_feature_tx.as_ref()) {
-            let row =
-                self.build_exit_feature_row(symbol, qty, price, ts_ms, realized_pnl,
-                                            close_fee, fee_rate, close_tag, snap, em,
-                                            entry_context_id);
-            // try_send: never block the close path. Overflow → row dropped,
-            // writer logs the channel pressure via its own metric.
-            // try_send：永不阻塞 close 路徑；溢出 → 丟列，由 writer 自行計量。
-            let _ = tx.try_send(row);
+            let row = self.build_exit_feature_row(
+                symbol,
+                qty,
+                price,
+                ts_ms,
+                realized_pnl,
+                close_fee,
+                fee_rate,
+                close_tag,
+                snap,
+                em,
+                entry_context_id,
+            );
+            // try_send: never block the close path. Overflow is explicitly
+            // logged so feature-loss is visible instead of silent.
+            // try_send：永不阻塞 close 路徑；溢出時顯式告警，避免靜默丟失。
+            if let Err(e) = tx.try_send(row) {
+                warn!(
+                    symbol = %symbol,
+                    close_tag = %close_tag,
+                    error = %e,
+                    "exit feature writer channel send failed — row not queued \
+                     / exit feature writer channel 發送失敗 — row 未入隊"
+                );
+            }
         }
     }
 
@@ -344,11 +374,7 @@ impl TickPipeline {
         let atr_pct = self
             .kline_manager
             .get_ohlcv(symbol, "1m", Some(20))
-            .and_then(|o| {
-                openclaw_core::indicators::atr(
-                    &o.high, &o.low, &o.close, 14,
-                )
-            })
+            .and_then(|o| openclaw_core::indicators::atr(&o.high, &o.low, &o.close, 14))
             .map(|r| r.atr_percent as f32);
 
         // current_pnl_pct at exit (side-signed, in %). Used to derive the
@@ -413,8 +439,7 @@ impl TickPipeline {
         // proration gymnastics with the aggregate `entry_notional` for partial
         // closes.
         let entry_notional_portion = qty * snap.entry_price;
-        let realized_net_bps = if entry_notional_portion > 0.0
-            && entry_notional_portion.is_finite()
+        let realized_net_bps = if entry_notional_portion > 0.0 && entry_notional_portion.is_finite()
         {
             let gross_bps = (realized_pnl / entry_notional_portion) * 10_000.0;
             // Entry fee was already charged at open; close fee was charged in
@@ -467,8 +492,8 @@ impl TickPipeline {
             realized_net_bps,
             feature_schema_version:
                 crate::database::exit_feature_schema::EXIT_FEATURE_SCHEMA_VERSION.to_string(),
-            feature_schema_hash:
-                crate::database::exit_feature_schema::exit_feature_schema_hash().to_string(),
+            feature_schema_hash: crate::database::exit_feature_schema::exit_feature_schema_hash()
+                .to_string(),
         }
     }
 
@@ -795,11 +820,10 @@ impl TickPipeline {
         };
 
         let max_window = cfg.window_size / 2;
-        let h_value =
-            match crate::regime::compute_hurst(&closes, cfg.min_window(), max_window) {
-                Some(h) => h,
-                None => return,
-            };
+        let h_value = match crate::regime::compute_hurst(&closes, cfg.min_window(), max_window) {
+            Some(h) => h,
+            None => return,
+        };
 
         // Lazy-init detector from live config snapshot. If config thresholds /
         // lag changed between ticks, the existing detector keeps its history

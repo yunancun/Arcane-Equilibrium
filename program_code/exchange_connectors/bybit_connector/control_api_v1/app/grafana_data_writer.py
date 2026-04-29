@@ -31,13 +31,59 @@ MODULE_NOTE (English):
 """
 from __future__ import annotations
 
+import fcntl
 import logging
 import os
 import threading
 import time
+from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+_LEADER_LOCK_FD: int | None = None
+_LEADER_LOCK_PATH: str | None = None
+
+
+def _leader_lock_path() -> Path:
+    data_dir = os.environ.get("OPENCLAW_DATA_DIR", "/tmp/openclaw")
+    return Path(data_dir) / "grafana_writer.leader.lock"
+
+
+def _acquire_leader_lock() -> bool:
+    """Single-host leader election for multi-worker API startup.
+    多 worker API 啟動時的單機 leader 選舉。
+    """
+    global _LEADER_LOCK_FD, _LEADER_LOCK_PATH
+    if _LEADER_LOCK_FD is not None:
+        return True
+    if os.environ.get("OPENCLAW_GRAFANA_WRITER_LEADER") == "0":
+        logger.info("GrafanaDataWriter: forced non-leader by env")
+        return False
+
+    lock_path = _leader_lock_path()
+    try:
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR, 0o644)
+    except OSError as exc:
+        logger.warning("GrafanaDataWriter: cannot open leader lock %s (%s)", lock_path, exc)
+        return False
+
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except (BlockingIOError, OSError):
+        os.close(fd)
+        logger.info("GrafanaDataWriter: non-leader worker, lock held at %s", lock_path)
+        return False
+
+    try:
+        os.ftruncate(fd, 0)
+        os.write(fd, f"{os.getpid()}\n".encode("utf-8"))
+    except OSError:
+        pass
+    _LEADER_LOCK_FD = fd
+    _LEADER_LOCK_PATH = str(lock_path)
+    return True
 
 def _read_pg_pass_from_secrets() -> str:
     """Read PG password from secrets file. 从 secrets 文件读取数据库密码。"""
@@ -116,10 +162,12 @@ class GrafanaDataWriter:
         data_dir = os.getenv("OPENCLAW_DATA_DIR", "/tmp/openclaw")
         self._snapshot_path = snapshot_path or os.path.join(data_dir, "pipeline_snapshot.json")
 
-    def start(self) -> None:
-        """Start the background writer thread. Idempotent."""
+    def start(self) -> bool:
+        """Start the background writer thread. Idempotent. / 冪等啟動。"""
         if self._running:
-            return
+            return True
+        if not _acquire_leader_lock():
+            return False
         self._running = True
         self._thread = threading.Thread(target=self._loop, daemon=True, name="grafana-writer")
         self._thread.start()
@@ -127,6 +175,7 @@ class GrafanaDataWriter:
             "Grafana data writer started (interval=%ds) / Grafana 数据写入器已启动",
             self._interval,
         )
+        return True
 
     def stop(self) -> None:
         """Stop the background writer thread."""

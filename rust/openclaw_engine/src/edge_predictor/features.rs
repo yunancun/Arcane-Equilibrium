@@ -91,6 +91,30 @@ pub const FEATURE_NAMES_V1: &[&str; FeatureVectorV1::DIM] = &[
     "is_funding_settlement_window",
 ];
 
+/// Canonical feature definitions for v1 — formulas/windows/ranges, same order
+/// as `FEATURE_NAMES_V1`. Name-only schema hash catches reorder/rename drift;
+/// this definition hash catches formula/window drift under stable names.
+/// v1 特徵定義規範 — 公式/窗口/range，順序與 `FEATURE_NAMES_V1` 一致。
+pub const FEATURE_DEFINITIONS_V1: &[&str; FeatureVectorV1::DIM] = &[
+    "adx_1h=ADX trend strength on 1h klines; range[0,100]",
+    "bb_width_pct=Bollinger Band width percent on 5m klines; range[0,50]",
+    "atr_pct=ATR14 as percent of price on 5m klines; range[0,20]",
+    "funding_rate=Bybit funding rate decimal; range[-0.01,0.01]",
+    "realized_vol_1h=1h realized vol percent from 1m log returns sqrt(60)*100; range[0,20]",
+    "basis_bps=(index_price-last_price)/mid_price*10000; range[-500,500]",
+    "orderbook_imbalance_top5=(bid_l5_qty-ask_l5_qty)/(bid_l5_qty+ask_l5_qty); range[-1,1]",
+    "spread_bps=(ask_price-bid_price)/mid_price*10000; range[0,1000]",
+    "confluence_score=sum of local strategy confluence components; range[0,65]",
+    "persistence_elapsed_ms=milliseconds since signal onset; range[0,3600000]",
+    "side=order side encoded long=1 short=-1; range{-1,1}",
+    "notional_pct_of_bal=intended_notional/paper_balance*100; range[0,100]",
+    "concurrent_positions=open position count at decision time; range[0,100]",
+    "same_direction_cnt=open positions sharing side at decision time; range[0,100]",
+    "tod_sin=sin(2*pi*utc_hour/24); range[-1,1]",
+    "tod_cos=cos(2*pi*utc_hour/24); range[-1,1]",
+    "is_funding_settlement_window=1 iff within last 15m of 8h funding window; range{0,1}",
+];
+
 /// Schema version tag stored alongside every `learning.decision_features` row.
 /// 存入 `learning.decision_features` 每列的 schema 版本標記。
 pub const FEATURE_SCHEMA_VERSION: &str = "v1";
@@ -104,11 +128,15 @@ pub fn feature_schema_hash() -> &'static str {
         .as_str()
 }
 
-/// Stage 0 alias for `feature_schema_hash()`. Stage 2 (ML-MIT) splits this
-/// when feature *definitions* (formulas, windows) drift while names stay.
-/// Stage 0 暫等於 schema_hash；Stage 2 ML-MIT 定義漂移時分叉。
+/// Stable identity for feature definitions — sha256 over newline-joined
+/// formula/window/range definitions. Safe to call on hot paths.
+/// 特徵定義穩定身分 — sha256 換行串接公式/窗口/range。
 pub fn feature_definition_hash() -> &'static str {
-    feature_schema_hash()
+    static HASH: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    HASH.get_or_init(|| {
+        crate::linucb::schema_hash::compute_feature_schema_hash(FEATURE_DEFINITIONS_V1)
+    })
+    .as_str()
 }
 
 impl FeatureVectorV1 {
@@ -450,8 +478,11 @@ mod tests {
     }
 
     #[test]
-    fn test_feature_definition_hash_equals_schema_hash_in_stage_0() {
-        assert_eq!(feature_definition_hash(), feature_schema_hash());
+    fn test_feature_definition_hash_is_distinct_from_name_schema_hash() {
+        assert_eq!(FEATURE_DEFINITIONS_V1.len(), FeatureVectorV1::DIM);
+        assert_ne!(feature_definition_hash(), feature_schema_hash());
+        assert!(feature_definition_hash().starts_with("sha256:"));
+        assert_eq!(feature_definition_hash().len(), "sha256:".len() + 16);
     }
 
     #[test]

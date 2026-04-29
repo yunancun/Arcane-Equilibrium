@@ -28,12 +28,41 @@ CHAT_ID="${TELEGRAM_CHAT_ID:-}"
 DATE_STR=$(date -u +"%Y-%m-%d")
 TIMESTAMP=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
 
+# SW-006 (Batch E): overlap lock for cron wrapper (portable mkdir lock).
+# SW-006（Batch E）：cron 包裝器重疊執行鎖（可攜式 mkdir 鎖）。
+LOCK_ROOT="${OPENCLAW_DATA_DIR:-/tmp/openclaw}/locks"
+LOCK_DIR="$LOCK_ROOT/cron_daily_report.lock.d"
+mkdir -p "$LOCK_ROOT"
+if ! mkdir "$LOCK_DIR" 2>/dev/null; then
+    echo "[${TIMESTAMP}] SKIP: cron_daily_report already running (lock held)."
+    exit 0
+fi
+release_lock() {
+    rmdir "$LOCK_DIR" 2>/dev/null || true
+}
+TELEGRAM_CONFIG=""
+TELEGRAM_PAYLOAD=""
+cleanup() {
+    release_lock
+    [[ -n "$TELEGRAM_CONFIG" ]] && rm -f "$TELEGRAM_CONFIG"
+    [[ -n "$TELEGRAM_PAYLOAD" ]] && rm -f "$TELEGRAM_PAYLOAD"
+}
+trap cleanup EXIT INT TERM
+
 # ─── Validate env vars / 验证环境变量 ───────────────────────────
 if [[ -z "$BOT_TOKEN" || -z "$CHAT_ID" ]]; then
     echo "[${TIMESTAMP}] WARN: TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID not set. Skipping report."
     echo "[${TIMESTAMP}] 警告：TELEGRAM_BOT_TOKEN 或 TELEGRAM_CHAT_ID 未设置，跳过报告推送。"
     exit 0
 fi
+
+TELEGRAM_CONFIG=$(mktemp "${TMPDIR:-/tmp}/openclaw-telegram-curl.XXXXXX")
+TELEGRAM_PAYLOAD=$(mktemp "${TMPDIR:-/tmp}/openclaw-telegram-payload.XXXXXX")
+chmod 600 "$TELEGRAM_CONFIG" "$TELEGRAM_PAYLOAD"
+printf 'url = "https://api.telegram.org/bot%s/sendMessage"\n' "$BOT_TOKEN" > "$TELEGRAM_CONFIG"
+printf 'request = "POST"\n' >> "$TELEGRAM_CONFIG"
+printf 'header = "Content-Type: application/json"\n' >> "$TELEGRAM_CONFIG"
+unset BOT_TOKEN
 
 # ─── Helper function: Fetch from API with timeout ───────────────
 fetch_api() {
@@ -117,12 +146,13 @@ $(safe_jq "$gov_data" '.status' 'N/A')
 Report generated at ${TIMESTAMP}"
 
 # ─── Send via Telegram Bot API ────────────────────────────────────
-TELEGRAM_API="https://api.telegram.org/bot${BOT_TOKEN}/sendMessage"
+jq -n \
+    --arg chat_id "$CHAT_ID" \
+    --arg text "$MSG" \
+    '{chat_id: $chat_id, text: $text, parse_mode: "Markdown"}' > "$TELEGRAM_PAYLOAD"
 
 echo "[${TIMESTAMP}] Sending Telegram message..."
-if telegram_response=$(curl -s -m 10 -X POST "$TELEGRAM_API" \
-    -H "Content-Type: application/json" \
-    -d "{\"chat_id\": \"${CHAT_ID}\", \"text\": \"${MSG}\", \"parse_mode\": \"Markdown\"}" 2>&1); then
+if telegram_response=$(curl -s -m 10 --config "$TELEGRAM_CONFIG" --data-binary "@$TELEGRAM_PAYLOAD" 2>&1); then
 
     if echo "$telegram_response" | jq -e '.ok' &>/dev/null; then
         echo "[${TIMESTAMP}] SUCCESS: Daily report sent to Telegram."

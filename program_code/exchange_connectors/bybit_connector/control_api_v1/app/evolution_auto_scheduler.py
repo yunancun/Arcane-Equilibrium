@@ -28,11 +28,13 @@ MODULE_NOTE (English):
 """
 
 import datetime
+import fcntl
 import logging
 import os
 import sys
 import threading
 import time
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 # ── sys.path 注入（複用 backtest_routes.py 的 5 級目錄上溯模式）──────────────
@@ -440,13 +442,86 @@ class EvolutionScheduler:
 
 _scheduler: Optional[EvolutionScheduler] = None
 _scheduler_lock = threading.Lock()
+_LEADER_LOCK_FD: Optional[int] = None
+_LEADER_LOCK_PATH: Optional[str] = None
+
+
+def _leader_lock_path() -> Path:
+    """Leader lock path under OPENCLAW_DATA_DIR. / leader 鎖檔路徑。"""
+    data_dir = os.environ.get("OPENCLAW_DATA_DIR", "/tmp/openclaw")
+    return Path(data_dir) / "evolution_scheduler.leader.lock"
+
+
+def _acquire_leader_lock() -> bool:
+    """
+    Single-host leader election for multi-worker uvicorn startup.
+    多 worker 啟動時的單機 leader 選舉。
+    """
+    global _LEADER_LOCK_FD, _LEADER_LOCK_PATH
+    if _LEADER_LOCK_FD is not None:
+        return True
+    if os.environ.get("OPENCLAW_EVOLUTION_SCHEDULER_LEADER") == "0":
+        logger.info(
+            "EvolutionScheduler[pid=%d]: forced non-leader by env / "
+            "由環境變數強制為非 leader",
+            os.getpid(),
+        )
+        return False
+
+    lock_path = _leader_lock_path()
+    try:
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        logger.warning(
+            "EvolutionScheduler[pid=%d]: cannot create lock parent %s (%s), non-leader",
+            os.getpid(),
+            lock_path,
+            exc,
+        )
+        return False
+
+    try:
+        fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR, 0o644)
+    except OSError as exc:
+        logger.warning(
+            "EvolutionScheduler[pid=%d]: cannot open lock %s (%s), non-leader",
+            os.getpid(),
+            lock_path,
+            exc,
+        )
+        return False
+
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except (BlockingIOError, OSError):
+        os.close(fd)
+        logger.info(
+            "EvolutionScheduler[pid=%d]: non-leader (lock held at %s)",
+            os.getpid(),
+            lock_path,
+        )
+        return False
+
+    try:
+        os.ftruncate(fd, 0)
+        os.write(fd, f"{os.getpid()}\n".encode("utf-8"))
+    except OSError:
+        pass
+    _LEADER_LOCK_FD = fd
+    _LEADER_LOCK_PATH = str(lock_path)
+    logger.info(
+        "EvolutionScheduler[pid=%d]: elected leader (lock=%s)",
+        os.getpid(),
+        lock_path,
+    )
+    return True
 
 
 def start_scheduler(
     evolution_engine=None,
     experiment_ledger=None,
     truth_registry=None,
-) -> EvolutionScheduler:
+) -> Optional[EvolutionScheduler]:
     """
     啟動全局排程器單例（冪等，多次調用安全）。
     Start global scheduler singleton (idempotent, safe to call multiple times).
@@ -468,6 +543,8 @@ def start_scheduler(
     if _scheduler is None:
         with _scheduler_lock:
             if _scheduler is None:
+                if not _acquire_leader_lock():
+                    return None
                 _scheduler = EvolutionScheduler(
                     evolution_engine=evolution_engine,
                     experiment_ledger=experiment_ledger,
@@ -483,3 +560,20 @@ def get_scheduler() -> Optional[EvolutionScheduler]:
     Return the current global scheduler singleton (None if not yet started).
     """
     return _scheduler
+
+
+def _reset_for_tests() -> None:
+    """Test helper: reset singleton and release leader lock. / 測試重置。"""
+    global _scheduler, _LEADER_LOCK_FD, _LEADER_LOCK_PATH
+    _scheduler = None
+    if _LEADER_LOCK_FD is not None:
+        try:
+            fcntl.flock(_LEADER_LOCK_FD, fcntl.LOCK_UN)
+        except OSError:
+            pass
+        try:
+            os.close(_LEADER_LOCK_FD)
+        except OSError:
+            pass
+        _LEADER_LOCK_FD = None
+    _LEADER_LOCK_PATH = None

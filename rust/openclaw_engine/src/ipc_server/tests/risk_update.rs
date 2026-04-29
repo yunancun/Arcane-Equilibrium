@@ -27,9 +27,16 @@ fn setup_risk_update_drain_channel() -> tokio::sync::mpsc::UnboundedSender<Pipel
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<PipelineCommand>();
     tokio::spawn(async move {
         while let Some(cmd) = rx.recv().await {
-            // drain UpdateRiskConfig (and ignore any other variant) / 只 drain
-            if let PipelineCommand::UpdateRiskConfig { .. } = cmd {
-                // no-op — fire-and-forget command / 即發即忘，handler 已回 success
+            // drain UpdateRiskConfig and acknowledge application.
+            if let PipelineCommand::UpdateRiskConfig { response_tx, .. } = cmd {
+                if let Some(tx) = response_tx {
+                    let _ = tx.send(Ok(serde_json::json!({
+                        "updated": true,
+                        "queued": false,
+                        "applied": true
+                    })
+                    .to_string()));
+                }
             }
         }
     });
@@ -41,17 +48,17 @@ fn setup_risk_update_drain_channel() -> tokio::sync::mpsc::UnboundedSender<Pipel
 
 /// EN: Single risk param (`hard_stop_pct`) suffices to pass the `has_any`
 ///     gate; the handler sends `UpdateRiskConfig` on the channel and
-///     returns `{"updated": true}`. This proves `optional_f64` parses the
+///     waits for an event-consumer applied ack. This proves `optional_f64` parses the
 ///     field, the `has_any` aggregation recognises at least one Some, and
 ///     the channel send succeeds — all 11 `optional_*` replacements in
 ///     this handler are exercised through the default-None path plus one
 ///     Some path.
 /// 中：單一 risk 參數（`hard_stop_pct`）即可通過 `has_any` 門；handler
-///     經通道送 `UpdateRiskConfig` 並回 `{"updated": true}`。證明
+///     經通道送 `UpdateRiskConfig` 並回 queued-ack JSON。證明
 ///     `optional_f64` 正確解析、`has_any` 正確識別 ≥1 Some、通道 send
 ///     成功 — 11 處 `optional_*` 替換走過 default-None 路徑 + 一次 Some。
 #[tokio::test]
-async fn test_e4_5_handle_update_risk_config_happy_single_param_returns_updated_true() {
+async fn test_e4_5_handle_update_risk_config_happy_single_param_returns_applied_true() {
     let tx = setup_risk_update_drain_channel();
     let tx_opt = Some(tx);
     let params = serde_json::json!({
@@ -66,10 +73,28 @@ async fn test_e4_5_handle_update_risk_config_happy_single_param_returns_updated_
     let result = resp.result.expect("result must be present");
     assert_eq!(
         result,
-        serde_json::json!({"updated": true}),
-        "response body must match legacy byte-for-byte"
+        serde_json::json!({"updated": true, "queued": false, "applied": true}),
+        "response body must expose applied acknowledgement semantics"
     );
     assert_eq!(resp.id, serde_json::json!(10005));
+}
+
+#[tokio::test]
+async fn test_e4_5_handle_update_risk_config_send_failure_returns_internal_error() {
+    let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<PipelineCommand>();
+    drop(rx); // force send failure / 強制 send 失敗
+    let tx_opt = Some(tx);
+    let params = serde_json::json!({
+        "hard_stop_pct": 0.02
+    });
+    let resp = handle_update_risk_config(serde_json::json!(10008), &tx_opt, &params).await;
+    let err = resp.error.expect("send failure must return ERR_INTERNAL");
+    assert_eq!(err.code, ERR_INTERNAL);
+    assert!(
+        err.message.contains("channel send failed"),
+        "error must surface send failure, got: {}",
+        err.message
+    );
 }
 
 // ── E4-5 Error path: handle_update_risk_config no-param / wrong-type ─────

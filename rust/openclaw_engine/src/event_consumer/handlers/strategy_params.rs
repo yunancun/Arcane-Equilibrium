@@ -4,22 +4,23 @@
 //!
 //! 策略參數 IPC 命令處理器 — E5-P1-3 從 handlers.rs 拆出。
 //!
-//! MODULE_NOTE (EN): Each helper preserves the pre-split behaviour bit-for-bit,
-//!   including the CONF-D `conf_scale` strip-and-apply pre-processing.
-//! MODULE_NOTE (中): 各 helper 行為與拆分前完全一致，包括 CONF-D conf_scale
-//!   抽取處理。
+//! MODULE_NOTE (EN): Each helper preserves the pre-split command envelope and
+//!   response shape; CONF-D now stages typed validation before applying
+//!   `conf_scale` so mixed payloads stay atomic.
+//! MODULE_NOTE (中): 各 helper 保留拆分前命令封包與回應形狀；CONF-D 改為先跑
+//!   類型化驗證再套用 `conf_scale`，避免混合 payload 部分成功。
 
 use crate::persistence::DualStateWriter;
 use crate::tick_pipeline::TickPipeline;
 use tracing::info;
 
 /// Phase 3b · CONF-D · EN: Update one strategy's typed parameters via IPC.
-///   Pre-processes the JSON to extract an optional `conf_scale` key and apply
-///   it through `Strategy::set_conf_scale`; the remaining JSON is forwarded to
-///   the strategy's typed `update_params_json`. If only `conf_scale` was sent
-///   (stripped body == "{}"), the typed update is skipped.
-/// Phase 3b · CONF-D · 中文：透過 IPC 更新策略類型化參數；預先抽出 conf_scale
-///   套用後再轉發剩餘 JSON；若僅含 conf_scale 則跳過類型化更新。
+///   Pre-processes the JSON to extract optional `conf_scale`; typed
+///   `update_params_json` is validated/applied first, then `conf_scale` is
+///   applied. If only `conf_scale` was sent (stripped body == "{}"), typed
+///   update is skipped.
+/// Phase 3b · CONF-D · 中文：透過 IPC 更新策略類型化參數；先跑剩餘 JSON 的
+///   類型化更新，再套用 conf_scale；若僅含 conf_scale 則跳過類型化更新。
 pub(super) fn handle_update_strategy_params(
     strategy_name: String,
     params_json: String,
@@ -27,11 +28,11 @@ pub(super) fn handle_update_strategy_params(
     pipeline: &mut TickPipeline,
     snapshot_writer: &mut DualStateWriter,
 ) {
-    // CONF-D: pre-process params JSON — strip optional "conf_scale" key and
-    // apply via Strategy::set_conf_scale, then forward the remaining JSON to
-    // the strategy's typed update_params_json. If only conf_scale was sent,
-    // skip the typed update entirely (empty object).
-    // CONF-D：預處理 — 抽出 conf_scale 套用後再轉發剩餘 JSON。
+    // CONF-D: pre-process params JSON — strip optional "conf_scale" key.
+    // We intentionally stage typed validation first; `conf_scale` is applied
+    // only after typed update succeeds so mixed payloads are atomic.
+    // CONF-D：預處理抽出 conf_scale。先跑類型化驗證，成功後才套用 conf_scale；
+    // 混合 payload 不再出現「部分生效」。
     let (effective_json, conf_scale_opt): (String, Option<f64>) =
         match serde_json::from_str::<serde_json::Value>(&params_json) {
             Ok(serde_json::Value::Object(mut map)) => {
@@ -44,15 +45,15 @@ pub(super) fn handle_update_strategy_params(
 
     let result = match pipeline.orchestrator.find_strategy_mut(&strategy_name) {
         Some(strategy) => {
-            if let Some(scale) = conf_scale_opt {
-                strategy.set_conf_scale(scale);
-            }
             // If the stripped JSON is just "{}" and we did set conf_scale,
             // skip the typed update to avoid unnecessary churn / parse errors.
             let need_typed_update = effective_json != "{}" || conf_scale_opt.is_none();
             if need_typed_update {
                 match strategy.update_params_json(&effective_json) {
                     Ok(()) => {
+                        if let Some(scale) = conf_scale_opt {
+                            strategy.set_conf_scale(scale);
+                        }
                         info!(
                             strategy = %strategy_name,
                             conf_scale = ?conf_scale_opt,
@@ -64,6 +65,9 @@ pub(super) fn handle_update_strategy_params(
                     Err(e) => Err(format!("validation failed: {e}")),
                 }
             } else {
+                if let Some(scale) = conf_scale_opt {
+                    strategy.set_conf_scale(scale);
+                }
                 info!(
                     strategy = %strategy_name,
                     conf_scale = ?conf_scale_opt,

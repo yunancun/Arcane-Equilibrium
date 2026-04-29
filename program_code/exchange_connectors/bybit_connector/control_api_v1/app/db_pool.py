@@ -113,12 +113,34 @@ def get_conn():
 
 
 def put_conn(conn) -> None:
-    """Return a connection to the pool. 將連接歸還到連接池。"""
-    if _pool is not None and conn is not None:
+    """Return a clean connection to the pool.
+
+    Always roll back before reuse so a failed handler cannot leak transaction
+    state, locks, or session errors into the next request. If rollback itself
+    fails, discard the connection instead of recycling a poisoned handle.
+    歸還前一律 rollback，避免失敗請求的 transaction/session 狀態污染下一次借用；
+    rollback 失敗時關閉丟棄該連接。
+    """
+    if _pool is None or conn is None:
+        return
+    close_conn = False
+    try:
+        conn.rollback()
+    except Exception as exc:
+        close_conn = True
+        logger.warning("PG pooled connection rollback failed; discarding connection: %s", exc)
+    try:
+        _pool.putconn(conn, close=close_conn)
+    except TypeError:
+        # Test doubles or alternate pool shims may not support close=.
         try:
+            if close_conn and hasattr(conn, "close"):
+                conn.close()
             _pool.putconn(conn)
         except Exception:
-            pass
+            logger.debug("Pool putconn failed after rollback handling", exc_info=True)
+    except Exception:
+        logger.debug("Pool putconn failed after rollback handling", exc_info=True)
 
 
 @contextmanager
@@ -138,10 +160,6 @@ def get_pg_conn():
         yield conn
     finally:
         if conn is not None:
-            try:
-                conn.rollback()  # discard any uncommitted state / 丟棄未提交狀態
-            except Exception:
-                pass
             put_conn(conn)
 
 

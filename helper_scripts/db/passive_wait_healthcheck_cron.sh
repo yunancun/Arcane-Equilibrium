@@ -22,6 +22,16 @@
 set -e
 SECRETS_ROOT="${OPENCLAW_SECRETS_ROOT:-$HOME/BybitOpenClaw/secrets}"
 BASE_DIR="${OPENCLAW_BASE_DIR:-$HOME/BybitOpenClaw/srv}"
+LOCK_ROOT="${OPENCLAW_DATA_DIR:-/tmp/openclaw}/locks"
+LOCK_DIR="$LOCK_ROOT/passive_wait_healthcheck_cron.lock.d"
+mkdir -p "$LOCK_ROOT"
+if ! mkdir "$LOCK_DIR" 2>/dev/null; then
+  echo "[SKIP] passive_wait_healthcheck cron already running (lock held)" >&2
+  exit 0
+fi
+release_lock() { rmdir "$LOCK_DIR" 2>/dev/null || true; }
+trap release_lock EXIT INT TERM
+
 PG_PASS=$(grep '^POSTGRES_PASSWORD=' "$SECRETS_ROOT/environment_files/basic_system_services.env" 2>/dev/null | cut -d= -f2-)
 export OPENCLAW_DATABASE_URL="postgresql://redacted@127.0.0.1:5432/trading_ai"
 VENV="$BASE_DIR/program_code/exchange_connectors/bybit_connector/control_api_v1/.venv/bin/activate"

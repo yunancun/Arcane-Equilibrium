@@ -155,6 +155,7 @@ fn test_handle_update_risk_config_clamps_values() {
             // EDGE-P1b-FUP-STALE-PEAK-IPC (2026-04-26): dim 5 of T1 calibrator.
             // EDGE-P1b-FUP-STALE-PEAK-IPC（2026-04-26）：T1 calibrator 第 5 維度。
             exit_stale_peak_ms: None,
+            response_tx: None,
         },
         &mut pipeline,
         &mut writer,
@@ -222,6 +223,7 @@ fn test_handle_update_risk_config_sets_trailing_activation_pct() {
             // EDGE-P1b-FUP-STALE-PEAK-IPC (2026-04-26): dim 5 of T1 calibrator.
             // EDGE-P1b-FUP-STALE-PEAK-IPC（2026-04-26）：T1 calibrator 第 5 維度。
             exit_stale_peak_ms: None,
+            response_tx: None,
         },
         &mut pipeline,
         &mut writer,
@@ -267,6 +269,7 @@ fn test_handle_update_risk_config_sets_trailing_activation_pct() {
             // EDGE-P1b-FUP-STALE-PEAK-IPC (2026-04-26): dim 5 of T1 calibrator.
             // EDGE-P1b-FUP-STALE-PEAK-IPC（2026-04-26）：T1 calibrator 第 5 維度。
             exit_stale_peak_ms: None,
+            response_tx: None,
         },
         &mut pipeline,
         &mut writer,
@@ -320,6 +323,7 @@ fn test_pnl7_handle_dynamic_stop_knobs_apply_and_reject() {
             // EDGE-P1b-FUP-STALE-PEAK-IPC (2026-04-26): dim 5 of T1 calibrator.
             // EDGE-P1b-FUP-STALE-PEAK-IPC（2026-04-26）：T1 calibrator 第 5 維度。
             exit_stale_peak_ms: None,
+            response_tx: None,
         },
         &mut pipeline,
         &mut writer,
@@ -374,6 +378,7 @@ fn test_session12_handle_cost_gate_and_cooldown_via_ipc() {
             // EDGE-P1b-FUP-STALE-PEAK-IPC (2026-04-26): dim 5 of T1 calibrator.
             // EDGE-P1b-FUP-STALE-PEAK-IPC（2026-04-26）：T1 calibrator 第 5 維度。
             exit_stale_peak_ms: None,
+            response_tx: None,
         },
         &mut pipeline,
         &mut writer,

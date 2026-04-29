@@ -16,11 +16,8 @@
 //!   / risk store accessor 的注入 setter + 取用器。
 
 use openclaw_core::{
-    governance_core::GovernanceCore,
-    h0_gate::H0Gate,
-    klines::KlineManager,
-    risk::PriceHistoryTracker,
-    signals::SignalEngine,
+    governance_core::GovernanceCore, h0_gate::H0Gate, klines::KlineManager,
+    risk::PriceHistoryTracker, signals::SignalEngine,
 };
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;

@@ -33,13 +33,16 @@ pub mod trading_writer;
 
 use openclaw_core::klines::KlineBar;
 use serde::Deserialize;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+use crate::secret_env;
 
 /// Database configuration (added to RuntimeConfig).
 /// 資料庫配置（加入 RuntimeConfig）。
 #[derive(Debug, Clone, Deserialize)]
 pub struct DatabaseConfig {
-    /// PostgreSQL connection URL (env OPENCLAW_DATABASE_URL takes precedence).
-    /// PG 連接 URL（環境變量 OPENCLAW_DATABASE_URL 優先）。
+    /// PostgreSQL connection URL (OPENCLAW_DATABASE_URL or OPENCLAW_DATABASE_URL_FILE takes precedence).
+    /// PG 連接 URL（OPENCLAW_DATABASE_URL 或 OPENCLAW_DATABASE_URL_FILE 優先）。
     #[serde(default = "default_database_url")]
     pub database_url: String,
 
@@ -101,7 +104,7 @@ pub struct DatabaseConfig {
 }
 
 fn default_database_url() -> String {
-    std::env::var("OPENCLAW_DATABASE_URL").unwrap_or_else(|_| String::new())
+    secret_env::var_or_file("OPENCLAW_DATABASE_URL").unwrap_or_default()
 }
 fn default_pool_max() -> u32 {
     20
@@ -433,11 +436,41 @@ pub enum TradingMsg {
         /// "Approved", "Modified", or "Rejected" / 批准、修改或拒絕
         verdict: String,
         risk_score: f64,
+        risk_level: Option<String>,
+        checks_passed: Vec<String>,
+        checks_failed: Vec<String>,
         reasons: Vec<String>,
         modified_qty: Option<f64>,
         /// Engine mode: "paper", "demo", or "live" / 引擎模式
         engine_mode: String,
     },
+}
+
+static TRADING_WRITER_DROP_TOTAL: AtomicU64 = AtomicU64::new(0);
+
+pub fn trading_writer_drop_total() -> u64 {
+    TRADING_WRITER_DROP_TOTAL.load(Ordering::Relaxed)
+}
+
+pub fn try_send_trading_msg(
+    tx: &tokio::sync::mpsc::Sender<TradingMsg>,
+    msg: TradingMsg,
+    label: &'static str,
+) -> bool {
+    match tx.try_send(msg) {
+        Ok(()) => true,
+        Err(e) => {
+            let total = TRADING_WRITER_DROP_TOTAL.fetch_add(1, Ordering::Relaxed) + 1;
+            tracing::warn!(
+                label = label,
+                total_dropped = total,
+                error = %e,
+                "trading writer channel send failed — row not queued \
+                 / trading writer channel 發送失敗 — row 未入隊"
+            );
+            false
+        }
+    }
 }
 
 /// Decision context snapshot → context_writer task (Phase 2a).

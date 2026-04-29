@@ -47,6 +47,11 @@ from .ipc_state_reader import get_rust_reader
 logger = logging.getLogger(__name__)
 
 
+def _require_live_trade(actor: Any) -> None:
+    """Batch B live close gate: Operator + live trade scope."""
+    base.require_scope_and_operator(actor, "live:trade")
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # F5/A1 — Phantom-View Guard
 # F5/A1 — 幽靈視圖守衛
@@ -449,7 +454,7 @@ async def post_live_close_position(
     Python only does a read-only REST lookup to supply is_long/qty hints.
     Rust dispatches the reduce_only market order directly.
     """
-    core._require_operator(actor)
+    _require_live_trade(actor)
     # F5-RETURN/Issue-1 (HIGH) — server-side phantom-view WRITE guard.
     # Refuses curl-bypass attempts that would otherwise drive the IPC →
     # REST-fallback path with the demo client and close demo positions.
@@ -535,7 +540,7 @@ async def post_live_close_all_positions(
     Rust engine branches by pipeline_kind: Demo/Live → reduce_only market orders; Paper → paper_state.
     Requires Operator role.
     """
-    core._require_operator(actor)
+    _require_live_trade(actor)
     # F5-RETURN/Issue-1 (HIGH) — server-side phantom-view WRITE guard.
     # Without it, curl bypass triggers IPC fail → REST orphan-sweep on demo
     # client → mass-closes demo positions across all symbols.
@@ -562,13 +567,29 @@ async def post_live_close_all_positions(
     # IPC close_all only iterates paper_state — orphan positions are silently skipped.
     # 孤兒清掃：IPC close_all 只遍歷 paper_state，交易所孤兒倉位會被跳過，此處補掃。
     orphan_result = await core._sweep_live_orphan_positions(errors)
+    partial_failure = (
+        bool(errors)
+        or bool(orphan_result.get("skipped"))
+        or bool(orphan_result.get("rest_fallback_disabled"))
+        or bool(result.get("error"))
+    )
+    closed_all = not partial_failure
     logger.warning(
-        "⚠ close-all-positions (manual, session continues) — actor=%s",
+        "⚠ close-all-positions (manual, session continues) — closed_all=%s errors=%s actor=%s",
+        closed_all,
+        errors or None,
         getattr(actor, "actor_id", "?"),
     )
     return core._live_response({
-        "message": "All positions closed — session continues / 已平掉所有倉位，session 繼續運行",
+        "message": (
+            "Close-all partially failed — session continues / 全平部分失敗，session 繼續運行"
+            if partial_failure else
+            "All positions closed — session continues / 已平掉所有倉位，session 繼續運行"
+        ),
         "source": "rust_engine",
+        "status": "partial_failure" if partial_failure else "closed",
+        "closed_all": closed_all,
+        "partial_failure": partial_failure,
         "rest_fallback": False,
         "reason": None,
         "close_result": result,

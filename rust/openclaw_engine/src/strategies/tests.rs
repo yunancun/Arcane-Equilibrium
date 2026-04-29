@@ -218,23 +218,42 @@ grid_levels = 20
 }
 
 #[test]
-fn test_load_strategy_params_missing_file_returns_defaults() {
-    // Missing file should fall back to defaults, not panic.
-    // 文件缺失應回退到默認值，不應 panic。
+fn test_load_strategy_params_missing_file_demo_is_fail_closed_inactive() {
+    // Demo/Live missing file must fail-closed to all inactive strategies.
+    // Demo/Live 缺檔必須 fail-closed：所有策略 inactive。
     let td = tempfile::tempdir().unwrap();
     let cfg = load_strategy_params_from(PipelineKind::Demo, td.path());
-    assert!(cfg.ma_crossover.active);
-    assert_eq!(cfg.ma_crossover.cooldown_ms, 300_000);
+    assert!(!cfg.ma_crossover.active);
+    assert!(!cfg.bb_reversion.active);
+    assert!(!cfg.bb_breakout.active);
+    assert!(!cfg.grid_trading.active);
+    assert!(!cfg.funding_arb.active);
 }
 
 #[test]
-fn test_load_strategy_params_invalid_toml_returns_defaults() {
-    // Invalid TOML should fall back to defaults.
-    // 無效 TOML 應回退到默認值。
+fn test_load_strategy_params_invalid_toml_live_is_fail_closed_inactive() {
+    // Invalid Live TOML must fail closed (all strategies inactive).
+    // Live TOML 解析失敗時必須 fail-closed（全部 inactive）。
     let td = tempfile::tempdir().unwrap();
     std::fs::write(td.path().join("strategy_params_live.toml"), "{{invalid}}").unwrap();
     let cfg = load_strategy_params_from(PipelineKind::Live, td.path());
+    assert!(!cfg.ma_crossover.active);
+    assert!(!cfg.bb_reversion.active);
+    assert!(!cfg.bb_breakout.active);
+    assert!(!cfg.grid_trading.active);
+    assert!(!cfg.funding_arb.active);
+}
+
+#[test]
+fn test_load_strategy_params_missing_file_paper_keeps_default_fallback() {
+    // Paper keeps exploration fail-open defaults for local/dev workflows.
+    // Paper 保留探索 fail-open 默認回退。
+    let td = tempfile::tempdir().unwrap();
+    let cfg = load_strategy_params_from(PipelineKind::Paper, td.path());
     assert!(cfg.ma_crossover.active);
+    assert!(cfg.bb_reversion.active);
+    assert!(cfg.bb_breakout.active);
+    assert!(cfg.grid_trading.active);
 }
 
 #[test]

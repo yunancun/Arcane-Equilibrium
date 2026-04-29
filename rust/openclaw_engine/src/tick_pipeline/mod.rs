@@ -325,6 +325,9 @@ pub enum PipelineCommand {
         //   consumer 端 dispatch cast 為 `i64`（validate() 拒負值），任何
         //   合理 ms 值皆可安全 round-trip。
         exit_stale_peak_ms: Option<u64>,
+        // RC-006: optional event-consumer acknowledgement. Legacy callers can
+        // pass None; IPC handlers pass Some and return only after application.
+        response_tx: Option<tokio::sync::oneshot::Sender<Result<String, String>>>,
     },
     /// ARCH-RC1 1C-3-B: Get Rust-native risk runtime status snapshot.
     /// Returns JSON: `{governor_tier, consecutive_losses_by_symbol, boot_cooldown_remaining_ms,
@@ -875,7 +878,8 @@ pub struct TickPipeline {
     /// tick 頂部比對 `store.version()` 與 `maker_kpi_version_seen`；升版時
     /// `apply_maker_kpi_snapshot` 把快照鏡像進 owned copy。讀取端（on_tick 的
     /// sweep 呼叫、router 的 KPI gate）一律讀 owned copy，tick 內保持無鎖。
-    maker_kpi_store: Option<std::sync::Arc<crate::config::ConfigStore<crate::paper_state::MakerKpiConfig>>>,
+    maker_kpi_store:
+        Option<std::sync::Arc<crate::config::ConfigStore<crate::paper_state::MakerKpiConfig>>>,
     /// EDGE-P2-3 Phase 1B-5: owned snapshot of the live MakerKpiConfig used
     /// by the tick hot path. Initialised to `MakerKpiConfig::default()` in
     /// the constructor (bit-identical to the pre-hot-reload behaviour when
@@ -995,7 +999,6 @@ pub struct TickPipeline {
     pub dynamic_risk_sizer: crate::dynamic_risk_sizer::DynamicRiskSizer,
 }
 
-
 // ---------------------------------------------------------------------------
 // TickPipeline impl split — TICK-PIPELINE-MOD-SPLIT-1 (2026-04-22)
 //   pipeline_ctor.rs    — ctor + basic setters/getters
@@ -1003,8 +1006,8 @@ pub struct TickPipeline {
 //   pipeline_helpers.rs — close + exit features + channel setters + misc
 // TickPipeline impl 拆分（TICK-PIPELINE-MOD-SPLIT-1，2026-04-22）
 // ---------------------------------------------------------------------------
-mod pipeline_ctor;
 mod pipeline_config;
+mod pipeline_ctor;
 mod pipeline_helpers;
 
 mod commands;

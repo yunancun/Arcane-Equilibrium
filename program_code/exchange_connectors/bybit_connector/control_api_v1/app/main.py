@@ -413,10 +413,15 @@ async def _startup_integrity_check() -> None:
     # Start evolution auto-scheduler (fail-open; must not block startup).
     try:
         from .evolution_auto_scheduler import start_scheduler  # noqa: PLC0415
-        start_scheduler()
-        base.logger.info(
-            "EvolutionScheduler started / 進化排程器已啟動"
-        )
+        _evo_sched = start_scheduler()
+        if _evo_sched is not None:
+            base.logger.info(
+                "EvolutionScheduler started (leader worker) / 進化排程器已啟動（leader worker）"
+            )
+        else:
+            base.logger.info(
+                "EvolutionScheduler skipped (non-leader worker) / 進化排程器跳過（非 leader worker）"
+            )
     except Exception as _sched_exc:
         base.logger.warning(
             "EvolutionScheduler startup failed (fail-open): %s / 進化排程器啟動失敗（不阻斷）：%s",
@@ -581,12 +586,25 @@ async def openclaw_proxy(path: str, request: Request, actor=Depends(base.current
     target = f"http://{_OC_HOST}:18789/{path}"
     try:
         body = await request.body()
+        # Batch B: outbound proxy uses an allowlist so auth cookies/bearer
+        # tokens never cross into the Gateway trust domain.
+        # Batch B：反向代理只轉發 allowlist header，避免 cookie/bearer token
+        # 進入 Gateway 信任域。
+        allowed_headers = {
+            "accept",
+            "accept-language",
+            "content-type",
+            "user-agent",
+            "x-request-id",
+        }
+        outbound_headers = {
+            k: v for k, v in request.headers.items()
+            if k.lower() in allowed_headers
+        }
         req = _oc_urllib.Request(
             target,
             data=body if body else None,
-            # P1-NEW-1: 過濾 authorization header — Gateway 綁 loopback 信任域，不應接收用戶 Token
-            # P1-NEW-1: Strip authorization header — Gateway is loopback-only trusted domain
-            headers={k: v for k, v in request.headers.items() if k.lower() not in ("host", "transfer-encoding", "authorization")},
+            headers=outbound_headers,
             method=request.method,
         )
 

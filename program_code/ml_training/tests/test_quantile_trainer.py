@@ -9,6 +9,7 @@ from program_code.ml_training.quantile_trainer import (
     QUANTILE_ALPHAS,
     EmbargoConfig,
     QuantileTrainingConfig,
+    _compute_feature_definition_hash,
     _compute_feature_schema_hash,
     _split_tail_holdout,
     check_quantile_crossing_rate,
@@ -205,6 +206,15 @@ def test_feature_schema_hash_matches_rust_format_pinned():
         digest.update(b"\n")
     expected = "sha256:" + digest.hexdigest()[:16]
     assert _compute_feature_schema_hash(names, "v1") == expected
+
+
+def test_feature_definition_hash_tracks_canonical_definitions():
+    from program_code.ml_training.parquet_etl import EDGE_P3_FEATURE_NAMES
+
+    h = _compute_feature_definition_hash(list(EDGE_P3_FEATURE_NAMES), "v1")
+    assert h.startswith("sha256:")
+    assert len(h) == len("sha256:") + 16
+    assert h != _compute_feature_schema_hash(list(EDGE_P3_FEATURE_NAMES), "v1")
 
 
 # ──────────────── tail holdout split ────────────────

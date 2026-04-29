@@ -241,5 +241,13 @@ def test_enumerate_v1_15_returns_15_unique_ids():
     for arm_id in ids:
         assert "__" in arm_id
         regime, strat = arm_id.split("__", 1)
-        assert regime in {"trending", "ranging", "volatile"}
-        assert strat  # non-empty
+        assert regime in {"trending", "mean_reverting", "random_walk"}
+        assert strat in {
+            "ma_crossover",
+            "bb_breakout",
+            "bb_reversion",
+            "grid_trading",
+            "funding_arb",
+        }
+    assert "random_walk__funding_arb" in ids
+    assert all("donchian_breakout" not in arm_id for arm_id in ids)

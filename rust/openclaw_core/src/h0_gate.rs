@@ -245,6 +245,12 @@ impl H0Gate {
         &self.config
     }
 
+    /// Read-only cloned risk snapshot.
+    /// 取得風控快照拷貝（只讀）。
+    pub fn risk_snapshot(&self) -> H0GateRiskSnapshot {
+        self.risk.clone()
+    }
+
     /// Current shadow log length.
     /// 當前影子日誌長度。
     pub fn shadow_log_len(&self) -> usize {

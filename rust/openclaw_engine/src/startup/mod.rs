@@ -226,6 +226,23 @@ pub(crate) fn load_unified_configs() -> Result<
         "loading ARCH-RC1 / LIVE-P2-1 per-engine configs / 載入每引擎 Config"
     );
 
+    // RC-004 fail-closed: demo/live risk configs must exist on disk.
+    // Paper keeps legacy fallback-to-default behavior for local exploration.
+    // RC-004 失敗即關閉：demo/live 風控配置檔必須存在。
+    // Paper 仍保留本地探索場景的舊式 fallback-to-default。
+    if !risk_path_demo.is_file() {
+        return Err(format!(
+            "risk_demo config missing: {} (fail-closed)",
+            risk_path_demo.display()
+        ));
+    }
+    if !risk_path_live.is_file() {
+        return Err(format!(
+            "risk_live config missing: {} (fail-closed)",
+            risk_path_live.display()
+        ));
+    }
+
     // ARCH-RC1 1C-2-D: one-shot legacy operator_risk_config.json → TOML migration
     // (targets paper config path as the canonical migration destination).
     // ARCH-RC1 1C-2-D：舊 JSON → TOML 一次性遷移（遷移目標為 paper 路徑）。
@@ -1095,26 +1112,24 @@ mod tests {
         }
     }
 
-    /// FIX-16: load_unified_configs succeeds with default TOML fallbacks.
-    /// 使用默認 TOML 回退時 load_unified_configs 不 panic。
+    /// RC-004: missing demo/live risk configs fail closed.
+    /// 缺失 demo/live 風控配置時必須 fail-closed。
     #[test]
-    fn test_load_unified_configs_defaults() {
-        // Point to a non-existent directory so all configs fall back to defaults.
+    fn test_load_unified_configs_missing_demo_live_is_error() {
+        // Point to a non-existent directory so demo/live config files are absent.
         let prev = std::env::var("OPENCLAW_RISK_CONFIG_DIR").ok();
         std::env::set_var("OPENCLAW_RISK_CONFIG_DIR", "/tmp/openclaw_nodir_test");
         let result = load_unified_configs();
-        assert!(
-            result.is_ok(),
-            "load_unified_configs must succeed with defaults: {:?}",
-            result.err()
-        );
-        let (risk_stores, learning_store, budget_store) = result.unwrap();
-        // All stores should have version 0 (initial load)
-        assert!(risk_stores.paper.version() <= 1);
-        assert!(risk_stores.demo.version() <= 1);
-        assert!(risk_stores.live.version() <= 1);
-        assert!(learning_store.version() <= 1);
-        assert!(budget_store.version() <= 1);
+        match result {
+            Ok(_) => panic!("missing demo/live configs must fail closed"),
+            Err(err) => {
+                assert!(
+                    err.contains("risk_demo config missing")
+                        || err.contains("risk_live config missing"),
+                    "unexpected error: {err}"
+                );
+            }
+        }
         // Restore
         if let Some(v) = prev {
             std::env::set_var("OPENCLAW_RISK_CONFIG_DIR", v);

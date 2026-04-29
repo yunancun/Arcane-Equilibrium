@@ -40,6 +40,21 @@ OBSERVER="$REPO/program_code/exchange_connectors/bybit_connector/readonly_observ
 BRIDGE="$REPO/program_code/exchange_connectors/bybit_connector/control_api_v1/app/auto_bridge_observer_to_runtime_snapshot.py"
 
 TS=$(date '+%Y-%m-%d %H:%M:%S')
+
+# SW-006 (Batch E): overlap lock so 5-min cron cannot stack runs.
+# SW-006（Batch E）：重疊鎖，避免 5 分鐘 cron 疊跑。
+LOCK_ROOT="${OPENCLAW_DATA_DIR:-/tmp/openclaw}/locks"
+LOCK_DIR="$LOCK_ROOT/cron_observer_cycle.lock.d"
+mkdir -p "$LOCK_ROOT"
+if ! mkdir "$LOCK_DIR" 2>/dev/null; then
+    echo "[$TS] SKIP: observer cron already running (lock held)"
+    exit 0
+fi
+release_lock() {
+    rmdir "$LOCK_DIR" 2>/dev/null || true
+}
+trap release_lock EXIT INT TERM
+
 echo "[$TS] Starting observer cycle..."
 
 # Run observer cycle. Exit code now reflects overall_ok per

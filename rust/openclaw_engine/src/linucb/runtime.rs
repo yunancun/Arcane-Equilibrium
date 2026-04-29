@@ -20,10 +20,14 @@
 //!
 //! Math reference / 數學參考: docs/references/math_implementation_notes.md Entry 01 §1.3
 
+use crate::database::pool::DbPool;
 use crate::linucb::arms_v1_15::{v1_15_arm_ids, ARM_SPACE_VERSION_V1_15};
 use crate::linucb::inference::{compute_ucb, select_arm, ArmState, LinUcbConfig};
 use crate::linucb::schema_hash::compute_feature_schema_hash;
+use crate::linucb::state_io;
+use std::collections::HashSet;
 use std::sync::{Arc, RwLock};
+use tracing::{info, warn};
 
 /// v1 context feature names (order is load-bearing — schema hash depends on it).
 /// v1 context 特徵名（順序會影響 schema hash，不能隨意調整）。
@@ -85,6 +89,95 @@ impl LinUcbRuntime {
             arm_space_version: ARM_SPACE_VERSION_V1_15.to_string(),
             feature_schema_hash,
         })
+    }
+
+    pub fn from_arms_v1_15(arms: Vec<ArmState>) -> Result<Arc<Self>, String> {
+        let config = LinUcbConfig {
+            context_dim: CONTEXT_DIM_V1,
+            alpha: 1.0,
+            lambda: 1.0,
+        };
+        let canonical_ids = v1_15_arm_ids();
+        let expected_ids: HashSet<String> = canonical_ids.iter().cloned().collect();
+        let got_ids: HashSet<String> = arms.iter().map(|a| a.arm_id.clone()).collect();
+        if expected_ids != got_ids {
+            let missing: Vec<String> = expected_ids.difference(&got_ids).cloned().collect();
+            let extra: Vec<String> = got_ids.difference(&expected_ids).cloned().collect();
+            return Err(format!(
+                "arm set mismatch for v1_15: missing={:?} extra={:?}",
+                missing, extra
+            ));
+        }
+        let mut by_id = std::collections::HashMap::with_capacity(arms.len());
+        for arm in arms {
+            if arm.a_matrix.len() != config.context_dim * config.context_dim
+                || arm.b_vector.len() != config.context_dim
+            {
+                return Err(format!(
+                    "arm {} dimension mismatch: a={} b={} expected_a={} expected_b={}",
+                    arm.arm_id,
+                    arm.a_matrix.len(),
+                    arm.b_vector.len(),
+                    config.context_dim * config.context_dim,
+                    config.context_dim
+                ));
+            }
+            by_id.insert(arm.arm_id.clone(), arm);
+        }
+        let ordered_arms: Vec<ArmState> = canonical_ids
+            .into_iter()
+            .map(|id| by_id.remove(&id).expect("validated complete arm set"))
+            .collect();
+        Ok(Arc::new(Self {
+            arms: RwLock::new(ordered_arms),
+            config,
+            arm_space_version: ARM_SPACE_VERSION_V1_15.to_string(),
+            feature_schema_hash: compute_feature_schema_hash(FEATURE_NAMES_V1),
+        }))
+    }
+
+    pub async fn load_active_or_cold_start(pool: &DbPool) -> Arc<Self> {
+        let expected_hash = compute_feature_schema_hash(FEATURE_NAMES_V1);
+        let active_version = match state_io::current_active_version(pool).await {
+            Ok(v) => v,
+            Err(e) => {
+                warn!(error = %e, "LinUCB active version unavailable; cold-starting / LinUCB 啟用版本不可用，冷啟動");
+                return Self::cold_start_v1_15();
+            }
+        };
+        if active_version != ARM_SPACE_VERSION_V1_15 {
+            warn!(
+                active_version = %active_version,
+                expected = ARM_SPACE_VERSION_V1_15,
+                "LinUCB active version incompatible; cold-starting / LinUCB 版本不兼容，冷啟動"
+            );
+            return Self::cold_start_v1_15();
+        }
+        match state_io::load_arms(pool, ARM_SPACE_VERSION_V1_15, &expected_hash).await {
+            Ok(arms) if arms.is_empty() => {
+                warn!("LinUCB state empty for v1_15; cold-starting / LinUCB 狀態為空，冷啟動");
+                Self::cold_start_v1_15()
+            }
+            Ok(arms) => match Self::from_arms_v1_15(arms) {
+                Ok(rt) => {
+                    info!(
+                        active_version = rt.arm_space_version(),
+                        arm_count = rt.arm_count(),
+                        feature_schema_hash = rt.feature_schema_hash(),
+                        "LinUCB warm-started from learning.linucb_state / LinUCB 已從 DB warm-start"
+                    );
+                    rt
+                }
+                Err(e) => {
+                    warn!(error = %e, "LinUCB state incompatible; cold-starting / LinUCB 狀態不兼容，冷啟動");
+                    Self::cold_start_v1_15()
+                }
+            },
+            Err(e) => {
+                warn!(error = %e, "LinUCB state load failed; cold-starting / LinUCB 載入失敗，冷啟動");
+                Self::cold_start_v1_15()
+            }
+        }
     }
 
     /// EN: Build context feature vector from indicator-snapshot fields. Missing
@@ -201,6 +294,34 @@ mod tests {
         assert_eq!(rt.arm_count(), 15);
         assert_eq!(rt.arm_space_version(), "v1_15");
         assert_eq!(rt.context_dim(), CONTEXT_DIM_V1);
+    }
+
+    #[test]
+    fn test_from_arms_v1_15_accepts_complete_compatible_state() {
+        let arms = v1_15_arm_ids()
+            .into_iter()
+            .map(|id| ArmState::cold_start(id, CONTEXT_DIM_V1, 1.0))
+            .collect();
+        let rt = LinUcbRuntime::from_arms_v1_15(arms).expect("compatible state");
+        assert_eq!(rt.arm_count(), 15);
+        assert_eq!(rt.arm_space_version(), "v1_15");
+    }
+
+    #[test]
+    fn test_from_arms_v1_15_rejects_missing_or_wrong_dim_state() {
+        let mut arms: Vec<ArmState> = v1_15_arm_ids()
+            .into_iter()
+            .map(|id| ArmState::cold_start(id, CONTEXT_DIM_V1, 1.0))
+            .collect();
+        arms.pop();
+        assert!(LinUcbRuntime::from_arms_v1_15(arms).is_err());
+
+        let mut arms: Vec<ArmState> = v1_15_arm_ids()
+            .into_iter()
+            .map(|id| ArmState::cold_start(id, CONTEXT_DIM_V1, 1.0))
+            .collect();
+        arms[0].b_vector.pop();
+        assert!(LinUcbRuntime::from_arms_v1_15(arms).is_err());
     }
 
     #[test]

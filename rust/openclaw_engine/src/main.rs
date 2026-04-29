@@ -25,9 +25,12 @@ mod tasks;
 
 use openclaw_engine::bybit_rest_client::{live_bybit_environment, BybitEnvironment};
 use openclaw_engine::config::{ConfigManager, ConfigStore};
-use openclaw_engine::ipc_server::{IpcServer, LiveCmdSenderSlot, PerEngineRiskStores};
+use openclaw_engine::ipc_server::{
+    EngineCommandChannels, IpcServer, LiveCmdSenderSlot, PerEngineRiskStores,
+};
 use openclaw_engine::market_data_client::MarketDataClient;
 use openclaw_engine::scanner::runner::ScannerRunner;
+use openclaw_engine::secret_env;
 use openclaw_engine::tick_pipeline::{EngineEvent, PipelineHealth, PipelineKind};
 use openclaw_types::PriceEvent;
 use parking_lot::{Mutex as ParkingMutex, RwLock as ParkingRwLock};
@@ -346,15 +349,15 @@ async fn async_main(
 
     // ------------------------------------------------------------------
     // FIX-10: IPC HMAC mandatory for Live — if Live pipeline is active,
-    // OPENCLAW_IPC_SECRET MUST be set. Fail-closed: panic on startup.
+    // OPENCLAW_IPC_SECRET or OPENCLAW_IPC_SECRET_FILE MUST be set. Fail-closed: panic on startup.
     // FIX-10：Live 管線啟動時 IPC HMAC 認證強制——無密鑰直接 panic。
     // ------------------------------------------------------------------
-    if live_bindings.is_some() && std::env::var("OPENCLAW_IPC_SECRET").is_err() {
+    if live_bindings.is_some() && secret_env::var_or_file("OPENCLAW_IPC_SECRET").is_none() {
         panic!(
             "FATAL: Live pipeline detected but OPENCLAW_IPC_SECRET is not set. \
              IPC HMAC authentication is mandatory for Live trading. \
-             Set OPENCLAW_IPC_SECRET env var before starting with Live credentials. \
-             / Live 管線偵測到但 OPENCLAW_IPC_SECRET 未設置。Live 交易必須啟用 IPC HMAC 認證。"
+             Set OPENCLAW_IPC_SECRET_FILE or OPENCLAW_IPC_SECRET before starting with Live credentials. \
+             / Live 管線偵測到但 OPENCLAW_IPC_SECRET(_FILE) 未設置。Live 交易必須啟用 IPC HMAC 認證。"
         );
     }
 
@@ -395,21 +398,23 @@ async fn async_main(
         (None, None)
     };
 
-    let phase4_consumer_cmd_tx = paper_cmd_tx.clone();
+    let mut engine_cmd_channels = EngineCommandChannels::default();
+    engine_cmd_channels.paper = Some(paper_cmd_tx.clone());
+    if let Some(ref tx) = demo_cmd_tx {
+        engine_cmd_channels.demo = Some(tx.clone());
+    }
+    // live owned field stays None; live_slot below provides the dynamic
+    // snapshot path. Teacher routing clones this bundle but defaults to Demo.
+    // owned `live` 留 None；live_slot 提供動態快照路徑。Teacher route clone 此
+    // bundle，但默認目標為 Demo。
+    engine_cmd_channels.live_slot = Some(Arc::clone(&live_cmd_slot));
 
-    let mut ipc_server = IpcServer::new(Arc::clone(&config), cancel.clone(), ipc_data_dir, {
-        use openclaw_engine::ipc_server::EngineCommandChannels;
-        let mut channels = EngineCommandChannels::default();
-        channels.paper = Some(paper_cmd_tx.clone());
-        if let Some(ref tx) = demo_cmd_tx {
-            channels.demo = Some(tx.clone());
-        }
-        // live owned field stays None; live_slot below provides the
-        // dynamic snapshot path.
-        // owned `live` 留 None；live_slot 提供動態快照路徑。
-        channels.live_slot = Some(Arc::clone(&live_cmd_slot));
-        channels
-    });
+    let mut ipc_server = IpcServer::new(
+        Arc::clone(&config),
+        cancel.clone(),
+        ipc_data_dir,
+        engine_cmd_channels.clone(),
+    );
     ipc_server.set_config_stores(
         risk_stores.clone(),
         Arc::clone(&learning_store),
@@ -603,11 +608,11 @@ async fn async_main(
     // Phase 4: LinUCB runtime + news context snapshot + governance wrappers
     // ------------------------------------------------------------------
     let shared_linucb_runtime =
-        Arc::new(openclaw_engine::linucb::LinUcbRuntime::cold_start_v1_15());
+        openclaw_engine::linucb::LinUcbRuntime::load_active_or_cold_start(db_pool.as_ref()).await;
     info!(
         active_version = shared_linucb_runtime.arm_space_version(),
         feature_schema_hash = shared_linucb_runtime.feature_schema_hash(),
-        "LinUcbRuntime cold-started / LinUCB runtime 冷啟動"
+        "LinUcbRuntime initialized / LinUCB runtime 已初始化"
     );
 
     let shared_news_snapshot = Arc::new(openclaw_engine::news::NewsContextSnapshot::new());
@@ -633,7 +638,7 @@ async fn async_main(
         &db_pool,
         &budget_tracker_slot,
         teacher_loop_slot,
-        phase4_consumer_cmd_tx,
+        engine_cmd_channels.clone(),
         &governance_wrapper,
     )
     .await;

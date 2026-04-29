@@ -36,13 +36,12 @@ use tracing::{debug, warn};
 ///     means a prior session's peak survived and should be re-applied via
 ///     `PaperState::restore_checkpoint`.
 ///
-///     Columns returned:
-///       * `peak_balance`     — f64 (DOUBLE PRECISION; the PK engine_mode
-///                              check constraint guarantees non-negative)
-///       * `session_start_ts` — converted to Unix-epoch milliseconds. Postgres
-///                              `TIMESTAMPTZ` epoch wraps well past 2262,
-///                              so the saturating `i64`→`u64` cast is safe
-///                              for the entire supported range.
+/// Columns returned:
+/// - `peak_balance` — f64 (DOUBLE PRECISION; the PK engine_mode check
+///   constraint guarantees non-negative).
+/// - `session_start_ts` — converted to Unix-epoch milliseconds. Postgres
+///   `TIMESTAMPTZ` epoch wraps well past 2262, so the saturating `i64`→`u64`
+///   cast is safe for the entire supported range.
 ///
 /// 中文: 載入 `engine_mode` 的 checkpoint row。Ok(None) 表無 row（冷啟動或
 ///       reset 後），呼叫者視為「首次 session」；Ok(Some(...)) 則由

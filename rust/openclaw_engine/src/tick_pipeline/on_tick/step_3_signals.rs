@@ -136,16 +136,20 @@ impl TickPipeline {
             // 相同 signal_id 的三重寫入浪費。
             if !self.pipeline_kind.is_exchange() {
                 if let Some(ref tx) = self.trading_tx {
-                    let _ = tx.try_send(crate::database::TradingMsg::Signal {
-                        signal_id: make_signal_id(&sig.source, sig.ts_ms),
-                        ts_ms: sig.ts_ms,
-                        symbol: sig.symbol.clone(),
-                        strategy_name: sig.source.clone(),
-                        timeframe: sig.timeframe.clone(),
-                        signal_type: format!("{:?}", sig.direction),
-                        strength: sig.confidence,
-                        context_id: make_context_id(em, &sig.symbol, sig.ts_ms),
-                    });
+                    crate::database::try_send_trading_msg(
+                        tx,
+                        crate::database::TradingMsg::Signal {
+                            signal_id: make_signal_id(&sig.source, sig.ts_ms),
+                            ts_ms: sig.ts_ms,
+                            symbol: sig.symbol.clone(),
+                            strategy_name: sig.source.clone(),
+                            timeframe: sig.timeframe.clone(),
+                            signal_type: format!("{:?}", sig.direction),
+                            strength: sig.confidence,
+                            context_id: make_context_id(em, &sig.symbol, sig.ts_ms),
+                        },
+                        "signal",
+                    );
                 }
             }
         }

@@ -412,29 +412,36 @@ async fn flush_trade_agg(pg: &sqlx::PgPool, pool: &DbPool, buf: &[MarketDataMsg]
 // (liquidations writer deleted 2026-04-06: no producer, no consumer, table reserved)
 
 async fn flush_funding(pg: &sqlx::PgPool, pool: &DbPool, buf: &[MarketDataMsg]) {
-    batch_insert_chunked(pg, pool, "market.funding_rates", buf, FUNDING_COLS, |chunk| {
-        let mut qb: QueryBuilder<Postgres> = QueryBuilder::new(
-            "INSERT INTO market.funding_rates (ts, symbol, funding_rate, funding_rate_daily) ",
-        );
-        qb.push_values(chunk, |mut b, msg| {
-            if let MarketDataMsg::FundingRate {
-                ts_ms,
-                symbol,
-                funding_rate,
-                funding_rate_daily,
-            } = msg
-            {
-                b.push_bind(
-                    chrono::DateTime::from_timestamp_millis(*ts_ms as i64).unwrap_or_default(),
-                );
-                b.push_bind(symbol.as_str());
-                b.push_bind(sanitize_f64_or_zero(*funding_rate) as f32);
-                b.push_bind(sanitize_f64(*funding_rate_daily).map(|v| v as f32));
-            }
-        });
-        qb.push(" ON CONFLICT (symbol, ts) DO NOTHING");
-        qb
-    })
+    batch_insert_chunked(
+        pg,
+        pool,
+        "market.funding_rates",
+        buf,
+        FUNDING_COLS,
+        |chunk| {
+            let mut qb: QueryBuilder<Postgres> = QueryBuilder::new(
+                "INSERT INTO market.funding_rates (ts, symbol, funding_rate, funding_rate_daily) ",
+            );
+            qb.push_values(chunk, |mut b, msg| {
+                if let MarketDataMsg::FundingRate {
+                    ts_ms,
+                    symbol,
+                    funding_rate,
+                    funding_rate_daily,
+                } = msg
+                {
+                    b.push_bind(
+                        chrono::DateTime::from_timestamp_millis(*ts_ms as i64).unwrap_or_default(),
+                    );
+                    b.push_bind(symbol.as_str());
+                    b.push_bind(sanitize_f64_or_zero(*funding_rate) as f32);
+                    b.push_bind(sanitize_f64(*funding_rate_daily).map(|v| v as f32));
+                }
+            });
+            qb.push(" ON CONFLICT (symbol, ts) DO NOTHING");
+            qb
+        },
+    )
     .await;
 }
 
@@ -466,31 +473,38 @@ async fn flush_oi(pg: &sqlx::PgPool, pool: &DbPool, buf: &[MarketDataMsg]) {
 }
 
 async fn flush_lsr(pg: &sqlx::PgPool, pool: &DbPool, buf: &[MarketDataMsg]) {
-    batch_insert_chunked(pg, pool, "market.long_short_ratio", buf, LSR_COLS, |chunk| {
-        let mut qb: QueryBuilder<Postgres> = QueryBuilder::new(
-            "INSERT INTO market.long_short_ratio (ts, symbol, buy_ratio, sell_ratio, ratio) ",
-        );
-        qb.push_values(chunk, |mut b, msg| {
-            if let MarketDataMsg::LongShortRatio {
-                ts_ms,
-                symbol,
-                buy_ratio,
-                sell_ratio,
-                ratio,
-            } = msg
-            {
-                b.push_bind(
-                    chrono::DateTime::from_timestamp_millis(*ts_ms as i64).unwrap_or_default(),
-                );
-                b.push_bind(symbol.as_str());
-                b.push_bind(sanitize_f64(*buy_ratio).map(|v| v as f32));
-                b.push_bind(sanitize_f64(*sell_ratio).map(|v| v as f32));
-                b.push_bind(sanitize_f64(*ratio).map(|v| v as f32));
-            }
-        });
-        qb.push(" ON CONFLICT (symbol, ts) DO NOTHING");
-        qb
-    })
+    batch_insert_chunked(
+        pg,
+        pool,
+        "market.long_short_ratio",
+        buf,
+        LSR_COLS,
+        |chunk| {
+            let mut qb: QueryBuilder<Postgres> = QueryBuilder::new(
+                "INSERT INTO market.long_short_ratio (ts, symbol, buy_ratio, sell_ratio, ratio) ",
+            );
+            qb.push_values(chunk, |mut b, msg| {
+                if let MarketDataMsg::LongShortRatio {
+                    ts_ms,
+                    symbol,
+                    buy_ratio,
+                    sell_ratio,
+                    ratio,
+                } = msg
+                {
+                    b.push_bind(
+                        chrono::DateTime::from_timestamp_millis(*ts_ms as i64).unwrap_or_default(),
+                    );
+                    b.push_bind(symbol.as_str());
+                    b.push_bind(sanitize_f64(*buy_ratio).map(|v| v as f32));
+                    b.push_bind(sanitize_f64(*sell_ratio).map(|v| v as f32));
+                    b.push_bind(sanitize_f64(*ratio).map(|v| v as f32));
+                }
+            });
+            qb.push(" ON CONFLICT (symbol, ts) DO NOTHING");
+            qb
+        },
+    )
     .await;
 }
 

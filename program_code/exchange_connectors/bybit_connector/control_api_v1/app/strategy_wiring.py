@@ -623,8 +623,10 @@ try:
         orchestrator=ORCHESTRATOR,
         pipeline_bridge=None,
     )
-    GRAFANA_WRITER.start()
-    logger.info("Grafana data writer started / Grafana 数据写入器已启动")
+    if GRAFANA_WRITER.start():
+        logger.info("Grafana data writer started (leader worker) / Grafana 数据写入器已啟動（leader worker）")
+    else:
+        logger.info("Grafana data writer skipped (non-leader worker) / Grafana 数据写入器跳過（非 leader worker）")
 except Exception as e:
     GRAFANA_WRITER = None
     logger.info("Grafana data writer not available: %s / Grafana 写入器不可用: %s", e, e)

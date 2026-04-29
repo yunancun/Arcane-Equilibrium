@@ -176,16 +176,13 @@ journalctl --user -u openclaw-gateway -f
 
 ### Paper Trading 自动启动 / Auto-start Paper Trading
 
-服务启动后自动激活 Paper Trading（可选，添加 ExecStartPost）：
+Paper pipeline 默认禁用。不要把 `start_paper_trading.sh` 作为常规
+`ExecStartPost` 自动启动项；只有在 engine 进程环境显式设置
+`OPENCLAW_ENABLE_PAPER=1` 时才可手动运行：
 
 ```bash
-# 方法 1: ExecStartPost（推荐）
-# 在 [Service] 段添加：
-ExecStartPost=/bin/bash %h/BybitOpenClaw/srv/helper_scripts/start_paper_trading.sh
-
-# 方法 2: cron @reboot
-crontab -e
-# 添加：@reboot sleep 10 && /path/to/helper_scripts/start_paper_trading.sh
+export OPENCLAW_ENABLE_PAPER=1
+bash %h/BybitOpenClaw/srv/helper_scripts/start_paper_trading.sh
 ```
 
 ---
@@ -235,7 +232,18 @@ for plist in com.openclaw.trading-api com.openclaw.gateway \
 done
 ```
 
-3. 載入服務（依賴順序：engine → watchdog → api → gateway）：
+3. **先跑 preflight（必做）**：
+
+```bash
+bash "$OPENCLAW_BASE_DIR/helper_scripts/deploy/launchd_preflight.sh"
+```
+
+preflight 會 fail-closed 驗證：
+- plist 是否仍有 `__BASE__` / `__HOME__` 未替換占位符
+- `openclaw_database_url` / `ipc_secret.txt` 是否存在且非 placeholder
+- `OPENCLAW_BASE_DIR` 是否指向有效 `srv` 根
+
+4. 載入服務（依賴順序：engine → watchdog → api → gateway）：
 
 ```bash
 launchctl load ~/Library/LaunchAgents/com.openclaw.engine.plist
@@ -244,13 +252,20 @@ launchctl load ~/Library/LaunchAgents/com.openclaw.trading-api.plist
 launchctl load ~/Library/LaunchAgents/com.openclaw.gateway.plist
 ```
 
-**注意**：IPC secret / DB URL 等機敏值**不要**寫在 plist 裡，用 `launchctl setenv` 注入：
+**注意**：IPC secret / DB URL 等機敏值**不要**寫在 plist 或 launchd 全局環境裡；只注入 0600 secret file 的路徑：
 
 ```bash
-launchctl setenv OPENCLAW_IPC_SECRET "$(cat $OPENCLAW_SECRETS_ROOT/environment_files/ipc_secret.txt)"
-launchctl setenv OPENCLAW_DATABASE_URL "postgresql://redacted@127.0.0.1:5432/trading_ai"
-# setenv 後需 unload + load 讓 agent 重讀環境
+umask 077
+printf 'postgresql://redacted@127.0.0.1:5432/trading_ai\n' \
+  "$(awk -F= '$1=="POSTGRES_PASSWORD"{print substr($0, index($0,$2))}' "$OPENCLAW_SECRETS_ROOT/environment_files/basic_system_services.env")" \
+  > "$OPENCLAW_SECRETS_ROOT/environment_files/openclaw_database_url"
+launchctl setenv OPENCLAW_IPC_SECRET_FILE "$OPENCLAW_SECRETS_ROOT/environment_files/ipc_secret.txt"
+launchctl setenv OPENCLAW_DATABASE_URL_FILE "$OPENCLAW_SECRETS_ROOT/environment_files/openclaw_database_url"
+# setenv 後需 unload + load 讓 agent 重讀 file path；不要用 setenv 傳 secret 值。
 ```
+
+Gateway plist 模板只保留非敏感运行元数据；供应商密钥放 OS Keychain、secret manager 或 0600 文件，由服务 wrapper 读取；不要把供应商密钥、占位 key 或 secret 值写入 plist / launchd 全局环境。
+Gateway plist templates only keep non-sensitive runtime metadata; provider keys belong in OS Keychain, a secret manager, or 0600 files read by a service wrapper, not in plist files or global launchd env.
 
 ### 启动 / 停止 / 重启 / Start / Stop / Restart
 
@@ -398,16 +413,22 @@ cd program_code/exchange_connectors/bybit_connector/control_api_v1
 
 ```bash
 # 验证 Token 文件存在 / Verify token file
-cat .secrets/api_token
+test -s .secrets/api_token && stat -f '%Sp %N' .secrets/api_token 2>/dev/null || stat -c '%A %n' .secrets/api_token
 
-# 测试认证 / Test auth
-curl -s -H "Authorization: Bearer $(cat .secrets/api_token)" http://127.0.0.1:8000/api/v1/system/health
+# 测试认证：把 header 放入 0600 临时文件，避免 token 出现在 curl argv
+# Test auth: put the header in a 0600 temp config so the token is not exposed in curl argv
+AUTH_CONFIG=$(mktemp "${TMPDIR:-/tmp}/openclaw-curl-auth.XXXXXX")
+chmod 600 "$AUTH_CONFIG"
+trap 'rm -f "$AUTH_CONFIG"' EXIT
+printf 'header = "Authorization: Bearer %s"\n' "$(cat .secrets/api_token)" > "$AUTH_CONFIG"
+curl -s --config "$AUTH_CONFIG" http://127.0.0.1:8000/api/v1/system/health
 ```
 
 ### 启动后 Paper Trading 未激活 / Paper Trading Not Active After Start
 
 ```bash
 # 手动执行启动脚本 / Run startup script manually
+export OPENCLAW_ENABLE_PAPER=1
 bash helper_scripts/start_paper_trading.sh
 ```
 

@@ -16,7 +16,7 @@
 //!
 //! Spec: docs/references/2026-04-15--edge_predictor_spec.md v1.4 §3.3 + V017 migration.
 
-use super::batch_insert::exec_single_insert;
+use super::batch_insert::{exec_single_insert, SingleInsertOutcome};
 use super::pool::DbPool;
 use super::DecisionFeatureMsg;
 use std::collections::HashMap;
@@ -75,11 +75,15 @@ pub async fn run_decision_feature_writer(
 /// 通過統一 `exec_single_insert` 輔助函式插入決策特徵快照到 PG。
 async fn flush_features(pool: &DbPool, pending: &mut HashMap<String, DecisionFeatureMsg>) {
     if !pool.is_available() {
-        pending.clear();
+        warn!(
+            pending_rows = pending.len(),
+            "decision_feature_writer flush skipped: DB pool unavailable — retaining pending rows"
+        );
         return;
     }
 
-    for (_, feat) in pending.drain() {
+    let rows: Vec<(String, DecisionFeatureMsg)> = pending.drain().collect();
+    for (key, feat) in rows {
         // DB-RUN-6: reject epoch-0 writes — same policy as context_writer.
         // 1970 rows poison time-range training queries.
         // DB-RUN-6：拒絕 ts_ms=0（與 context_writer 同策略），1970 行會毒化訓練 JOIN。
@@ -131,7 +135,10 @@ async fn flush_features(pool: &DbPool, pending: &mut HashMap<String, DecisionFea
         .bind(feat.feature_definition_hash.clone())
         .bind(features_value);
 
-        let _ = exec_single_insert(pool, "learning.decision_features", query).await;
+        let outcome = exec_single_insert(pool, "learning.decision_features", query).await;
+        if !matches!(outcome, SingleInsertOutcome::Ok(_)) {
+            pending.insert(key, feat);
+        }
     }
 }
 

@@ -1056,6 +1056,84 @@ mod tests {
         }
     }
 
+    #[test]
+    fn test_parse_order_message_preserves_multiple_updates() {
+        let msg = r#"{
+            "topic": "order",
+            "data": [
+                {
+                    "orderId": "order-1",
+                    "orderLinkId": "link-1",
+                    "symbol": "BTCUSDT",
+                    "side": "Buy",
+                    "orderType": "Limit",
+                    "qty": "0.01",
+                    "orderStatus": "New"
+                },
+                {
+                    "orderId": "order-2",
+                    "orderLinkId": "link-2",
+                    "symbol": "ETHUSDT",
+                    "side": "Sell",
+                    "orderType": "Market",
+                    "qty": "0.20",
+                    "orderStatus": "Filled"
+                }
+            ]
+        }"#;
+        let events = parse_private_messages(msg).unwrap();
+        assert_eq!(events.len(), 2);
+        match (&events[0], &events[1]) {
+            (PrivateWsEvent::Order(first), PrivateWsEvent::Order(second)) => {
+                assert_eq!(first.order_id, "order-1");
+                assert_eq!(first.order_status, "New");
+                assert_eq!(second.order_id, "order-2");
+                assert_eq!(second.order_status, "Filled");
+            }
+            _ => panic!("Expected two Order events"),
+        }
+    }
+
+    #[test]
+    fn test_parse_fast_execution_message_preserves_multiple_fills() {
+        let msg = r#"{
+            "topic": "execution.fast",
+            "data": [
+                {
+                    "execId": "fast-exec-001",
+                    "orderId": "order-1",
+                    "symbol": "BTCUSDT",
+                    "side": "Buy",
+                    "execPrice": "65000.00",
+                    "execQty": "0.001",
+                    "execType": "Trade",
+                    "execTime": "1700000002000"
+                },
+                {
+                    "execId": "fast-exec-002",
+                    "orderId": "order-1",
+                    "symbol": "BTCUSDT",
+                    "side": "Buy",
+                    "execPrice": "65000.50",
+                    "execQty": "0.002",
+                    "execType": "Trade",
+                    "execTime": "1700000002001"
+                }
+            ]
+        }"#;
+        let events = parse_private_messages(msg).unwrap();
+        assert_eq!(events.len(), 2);
+        match (&events[0], &events[1]) {
+            (PrivateWsEvent::Execution(first), PrivateWsEvent::Execution(second)) => {
+                assert_eq!(first.exec_id, "fast-exec-001");
+                assert_eq!(first.exec_qty, "0.001");
+                assert_eq!(second.exec_id, "fast-exec-002");
+                assert_eq!(second.exec_qty, "0.002");
+            }
+            _ => panic!("Expected two fast Execution events"),
+        }
+    }
+
     /// B-2 regression: parsing must accept the V5 `execution.fast` topic name.
     /// Bybit silently accepts unknown topics, so a typo here makes total_fills
     /// permanently 0 — only a parser-level test catches it.
@@ -1193,6 +1271,42 @@ mod tests {
         }
     }
 
+    #[test]
+    fn test_parse_position_message_preserves_multiple_updates() {
+        let msg = r#"{
+            "topic": "position",
+            "data": [
+                {
+                    "symbol": "BTCUSDT",
+                    "side": "Buy",
+                    "size": "0.01",
+                    "avgPrice": "64500.00",
+                    "unrealisedPnl": "5.00",
+                    "markPrice": "65000.00"
+                },
+                {
+                    "symbol": "ETHUSDT",
+                    "side": "Sell",
+                    "size": "0.20",
+                    "avgPrice": "3500.00",
+                    "unrealisedPnl": "1.25",
+                    "markPrice": "3490.00"
+                }
+            ]
+        }"#;
+        let events = parse_private_messages(msg).unwrap();
+        assert_eq!(events.len(), 2);
+        match (&events[0], &events[1]) {
+            (PrivateWsEvent::Position(first), PrivateWsEvent::Position(second)) => {
+                assert_eq!(first.symbol, "BTCUSDT");
+                assert_eq!(first.size, "0.01");
+                assert_eq!(second.symbol, "ETHUSDT");
+                assert_eq!(second.size, "0.20");
+            }
+            _ => panic!("Expected two Position events"),
+        }
+    }
+
     /// Test parsing wallet update message.
     /// 測試解析錢包更新消息。
     #[test]
@@ -1219,6 +1333,42 @@ mod tests {
                 assert_eq!(wallet.coin[0].wallet_balance, "9500.00");
             }
             _ => panic!("Expected Wallet event"),
+        }
+    }
+
+    #[test]
+    fn test_parse_wallet_message_preserves_multiple_updates() {
+        let msg = r#"{
+            "topic": "wallet",
+            "data": [
+                {
+                    "accountType": "UNIFIED",
+                    "coin": [{
+                        "coin": "USDT",
+                        "equity": "10000.00",
+                        "walletBalance": "9500.00"
+                    }]
+                },
+                {
+                    "accountType": "CONTRACT",
+                    "coin": [{
+                        "coin": "BTC",
+                        "equity": "0.10",
+                        "walletBalance": "0.09"
+                    }]
+                }
+            ]
+        }"#;
+        let events = parse_private_messages(msg).unwrap();
+        assert_eq!(events.len(), 2);
+        match (&events[0], &events[1]) {
+            (PrivateWsEvent::Wallet(first), PrivateWsEvent::Wallet(second)) => {
+                assert_eq!(first.account_type, "UNIFIED");
+                assert_eq!(first.coin[0].coin, "USDT");
+                assert_eq!(second.account_type, "CONTRACT");
+                assert_eq!(second.coin[0].coin, "BTC");
+            }
+            _ => panic!("Expected two Wallet events"),
         }
     }
 

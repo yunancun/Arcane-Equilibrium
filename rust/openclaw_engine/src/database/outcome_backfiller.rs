@@ -232,8 +232,7 @@ mod tests {
         // pending CTE must carry engine_mode from snapshots.
         // pending CTE 必須帶 engine_mode 出來。
         assert!(
-            BACKFILL_SQL
-                .contains("SELECT context_id, ts, symbol, last_price, engine_mode"),
+            BACKFILL_SQL.contains("SELECT context_id, ts, symbol, last_price, engine_mode"),
             "pending CTE must select engine_mode from snapshots"
         );
 

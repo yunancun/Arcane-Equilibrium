@@ -10,7 +10,10 @@ services:
     ports:
       - "8710:8710"
     environment:
-      OPENCLAW_API_TOKEN: "${OPENCLAW_API_TOKEN:-change-me}"
+      # 安全 / Security:
+      #   API token 必须由部署环境显式提供；禁止回落到不安全占位值。
+      #   API token must be supplied by deployment env; never fall back to an insecure placeholder.
+      OPENCLAW_API_TOKEN: "${OPENCLAW_API_TOKEN:?set OPENCLAW_API_TOKEN outside the repo}"
       OPENCLAW_STATE_FILE: "/runtime/openclaw_bybit_control_state.json"
       OPENCLAW_READONLY_CONNECTOR_NAME: "${OPENCLAW_READONLY_CONNECTOR_NAME:-bybit_prod_readonly_main}"
       OPENCLAW_EXECUTION_CONNECTOR_NAME: "${OPENCLAW_EXECUTION_CONNECTOR_NAME:-}"

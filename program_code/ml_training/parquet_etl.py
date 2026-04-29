@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 import re
 from datetime import datetime, timedelta
@@ -55,6 +56,50 @@ EDGE_P3_FEATURE_NAMES = (
     "tod_cos",
     "is_funding_settlement_window",
 )
+
+EDGE_P3_FEATURE_DEFINITIONS = (
+    "adx_1h=ADX trend strength on 1h klines; range[0,100]",
+    "bb_width_pct=Bollinger Band width percent on 5m klines; range[0,50]",
+    "atr_pct=ATR14 as percent of price on 5m klines; range[0,20]",
+    "funding_rate=Bybit funding rate decimal; range[-0.01,0.01]",
+    "realized_vol_1h=1h realized vol percent from 1m log returns sqrt(60)*100; range[0,20]",
+    "basis_bps=(index_price-last_price)/mid_price*10000; range[-500,500]",
+    "orderbook_imbalance_top5=(bid_l5_qty-ask_l5_qty)/(bid_l5_qty+ask_l5_qty); range[-1,1]",
+    "spread_bps=(ask_price-bid_price)/mid_price*10000; range[0,1000]",
+    "confluence_score=sum of local strategy confluence components; range[0,65]",
+    "persistence_elapsed_ms=milliseconds since signal onset; range[0,3600000]",
+    "side=order side encoded long=1 short=-1; range{-1,1}",
+    "notional_pct_of_bal=intended_notional/paper_balance*100; range[0,100]",
+    "concurrent_positions=open position count at decision time; range[0,100]",
+    "same_direction_cnt=open positions sharing side at decision time; range[0,100]",
+    "tod_sin=sin(2*pi*utc_hour/24); range[-1,1]",
+    "tod_cos=cos(2*pi*utc_hour/24); range[-1,1]",
+    "is_funding_settlement_window=1 iff within last 15m of 8h funding window; range{0,1}",
+)
+
+EDGE_P3_FEATURE_SCHEMA_VERSION = "v1"
+
+
+def _compute_sha256_short(items: tuple[str, ...] | list[str]) -> str:
+    import hashlib
+
+    h = hashlib.sha256()
+    for item in items:
+        h.update(str(item).encode("utf-8"))
+        h.update(b"\n")
+    return "sha256:" + h.hexdigest()[:16]
+
+
+def compute_feature_schema_hash(feature_names: tuple[str, ...] | list[str] = EDGE_P3_FEATURE_NAMES) -> str:
+    """Rust-parity name-order hash used for train/serve schema checks."""
+    return _compute_sha256_short(list(feature_names))
+
+
+def compute_feature_definition_hash(
+    feature_definitions: tuple[str, ...] | list[str] = EDGE_P3_FEATURE_DEFINITIONS,
+) -> str:
+    """Rust-parity definition hash used for formula/window drift checks."""
+    return _compute_sha256_short(list(feature_definitions))
 
 VALID_ENGINE_MODES = ("paper", "demo", "live", "live_demo")
 
@@ -406,10 +451,16 @@ SELECT
     features_jsonb,
     label_net_edge_bps,
     symbol,
-    strategy_name
+    strategy_name,
+    feature_schema_version,
+    feature_schema_hash,
+    feature_definition_hash
 FROM learning.decision_features
 WHERE label_net_edge_bps IS NOT NULL
   AND engine_mode = ANY(%(engine_modes)s)
+  AND feature_schema_version = %(feature_schema_version)s
+  AND feature_schema_hash = %(feature_schema_hash)s
+  AND feature_definition_hash = %(feature_definition_hash)s
   AND (%(strategy_name)s IS NULL OR strategy_name = %(strategy_name)s)
   AND (%(symbol)s IS NULL OR symbol = %(symbol)s)
   AND ts >= now() - (%(max_age_days)s || ' days')::interval
@@ -429,10 +480,9 @@ def load_training_data(
     Returns (features, labels, timestamps, feature_names) as numpy arrays /
     tuple so `run_training_pipeline.run_pipeline()` can feed CPCV directly.
 
-    Missing / non-numeric JSONB fields fall through as 0.0 — row stays
-    because label quality is what gated inclusion. The schema hash mismatch
-    check happens at Rust inference time, not here; ETL's job is breadth,
-    not drop-on-skew.
+    Rows are filtered by exact feature schema/version/definition hash in SQL.
+    Missing / non-numeric JSONB fields reject the row rather than zero-filling,
+    because silent zero-fill would train on a schema drift artifact.
 
     Args:
         symbol: Optional symbol filter (e.g. "BTCUSDT"). None → all symbols.
@@ -449,7 +499,8 @@ def load_training_data(
 
     從 learning.decision_features 載入已標籤訓練行；回傳 numpy 陣列
     (features, labels, timestamps, feature_names)。JSONB 缺失 / 非數值欄位
-    填 0.0（schema hash 在 Rust 推理時驗證，此處不丟行）。
+    SQL 先按 schema/version/definition hash 過濾；JSONB 缺失 / 非數值欄位
+    會拒絕整行，不做靜默 0.0 填充。
 
     Raises:
         RuntimeError: if numpy/psycopg2 missing.
@@ -467,6 +518,9 @@ def load_training_data(
                 _LOAD_TRAINING_DATA_SQL,
                 {
                     "engine_modes": engine_modes,
+                    "feature_schema_version": EDGE_P3_FEATURE_SCHEMA_VERSION,
+                    "feature_schema_hash": compute_feature_schema_hash(),
+                    "feature_definition_hash": compute_feature_definition_hash(),
                     "strategy_name": strategy_type,
                     "symbol": symbol,
                     "max_age_days": max_age_days,
@@ -487,28 +541,71 @@ def load_training_data(
         empty_ts = np.empty((0,), dtype=np.int64)
         return empty_f, empty_y, empty_ts, feature_names
 
-    features_mat = np.zeros((len(rows), len(feature_names)), dtype=np.float32)
-    labels_vec = np.zeros((len(rows),), dtype=np.float32)
-    ts_vec = np.zeros((len(rows),), dtype=np.int64)
+    accepted_features: list[list[float]] = []
+    accepted_labels: list[float] = []
+    accepted_timestamps: list[int] = []
+    rejected_rows = 0
 
-    for i, (_ctx_id, ts_ms, feat_json, label_bps, _sym, _strat) in enumerate(rows):
+    for row in rows:
+        (
+            ctx_id,
+            ts_ms,
+            feat_json,
+            label_bps,
+            _sym,
+            _strat,
+            _schema_version,
+            _schema_hash,
+            _definition_hash,
+        ) = row
         # psycopg2 returns JSONB as already-decoded dict; defensive parse for
         # text-mode rollback or external dumps. 防禦性解析：JSONB → dict。
-        feat = feat_json if isinstance(feat_json, dict) else json.loads(feat_json)
-        for j, name in enumerate(feature_names):
-            val = feat.get(name, 0.0)
-            if val is None:
-                val = 0.0
+        try:
+            feat = feat_json if isinstance(feat_json, dict) else json.loads(feat_json)
+        except (TypeError, json.JSONDecodeError):
+            rejected_rows += 1
+            logger.warning("load_training_data: rejecting row %s with malformed features_jsonb", ctx_id)
+            continue
+        if not isinstance(feat, dict):
+            rejected_rows += 1
+            logger.warning("load_training_data: rejecting row %s with non-object features_jsonb", ctx_id)
+            continue
+
+        row_features: list[float] = []
+        malformed = False
+        for name in feature_names:
+            if name not in feat or feat[name] is None:
+                malformed = True
+                break
             try:
-                features_mat[i, j] = float(val)
+                val = float(feat[name])
             except (TypeError, ValueError):
-                features_mat[i, j] = 0.0
-        labels_vec[i] = float(label_bps)
-        ts_vec[i] = int(ts_ms)
+                malformed = True
+                break
+            if not math.isfinite(val):
+                malformed = True
+                break
+            row_features.append(val)
+        if malformed:
+            rejected_rows += 1
+            logger.warning("load_training_data: rejecting row %s with missing/malformed feature", ctx_id)
+            continue
+        accepted_features.append(row_features)
+        accepted_labels.append(float(label_bps))
+        accepted_timestamps.append(int(ts_ms))
+
+    if accepted_features:
+        features_mat = np.asarray(accepted_features, dtype=np.float32)
+        labels_vec = np.asarray(accepted_labels, dtype=np.float32)
+        ts_vec = np.asarray(accepted_timestamps, dtype=np.int64)
+    else:
+        features_mat = np.empty((0, len(feature_names)), dtype=np.float32)
+        labels_vec = np.empty((0,), dtype=np.float32)
+        ts_vec = np.empty((0,), dtype=np.int64)
 
     logger.info(
-        "load_training_data: %d rows × %d features (engine_mode=%s strategy=%s symbol=%s)",
-        len(rows), len(feature_names), engine_mode, strategy_type, symbol,
+        "load_training_data: %d accepted / %d rejected rows × %d features (engine_mode=%s strategy=%s symbol=%s)",
+        len(accepted_features), rejected_rows, len(feature_names), engine_mode, strategy_type, symbol,
     )
     return features_mat, labels_vec, ts_vec, feature_names
 

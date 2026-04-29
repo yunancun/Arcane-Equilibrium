@@ -1,6 +1,6 @@
 # Codex Memory
 
-Last updated: 2026-04-28
+Last updated: 2026-04-29
 
 ## Role
 
@@ -104,3 +104,59 @@ Current known topology at setup time:
 - `CLAUDE.md` is the high-level constitution and runtime status document
 - `TODO.md` is the active timeline and work queue
 - The inventory file is useful, but it should be queried selectively rather than loaded in full every time
+
+## 2026-04-29 Batch B Remediation
+
+- 62-finding remediation Batch B is fixed locally, not deployed: `DAPI-001..006`, `RC-003`, `SC-001..007`.
+- Sign-off: `docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-29--batch_b_critical_auth_secrets_api_signoff.md`; operator brief copied to `docs/CCAgentWorkSpace/Operator/2026-04-29--batch_b_critical_auth_secrets_api_signoff.md`.
+- Key code paths: shared `auth.require_scope_and_operator`, `secret_runtime.get_secret_value`, Rust `secret_env::var_or_file`, high-risk write route scopes, Grafana loopback/default-secret hardening, `/openclaw` header allowlist.
+- Verification baseline: targeted pytest 47 passed; `cargo check -p openclaw_engine` passed with existing warnings; bash/plist/compose/static sweeps passed.
+- No deploy/restart was performed. `cargo fmt --all --check` remains blocked by pre-existing repo-wide Rust formatting drift.
+
+## 2026-04-29 Batch C Remediation
+
+- 62-finding remediation Batch C is fixed locally, not deployed: `OE-001..005`, `OE-008`, `OE-009`, `DBW-001..005`.
+- Sign-off: `docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-29--batch_c_trading_record_durability_signoff.md`; operator brief copied to `docs/CCAgentWorkSpace/Operator/2026-04-29--batch_c_trading_record_durability_signoff.md`.
+- Key code paths: private WS event parsing, pending dispatch failure terminalization, DB writer retention/requeue, exec-id fill idempotency, stop/close-all partial-failure reporting, risk verdict persistence, migration filtering, DB pool rollback reset.
+- Verification baseline: Rust targeted tests 77 passed total; `cargo check -p openclaw_engine` passed with existing warnings; Python py_compile passed; targeted pytest 14 passed.
+- No deploy/restart was performed. Batch D remains next: risk/config fail-closed.
+
+## 2026-04-29 Batch E Remediation
+
+- 62-finding remediation Batch E is fixed locally, not deployed: `SW-001`, `SW-003`, `SW-004`, `SW-005`, `SW-006`, `SW-007`, `OS-002`, `OS-003`, `OS-004`, `OS-005`, `OS-006`, `OS-007`, `DAPI-007`.
+- Sign-off: `docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-29--batch_e_operator_runtime_ownership_signoff.md`; operator brief copied to `docs/CCAgentWorkSpace/Operator/2026-04-29--batch_e_operator_runtime_ownership_signoff.md`.
+- Key code paths: scheduled restart endpoint disabled (410), maintenance-flag trap lifecycle, DB reset fingerprint confirmation + wrapper explicit confirm, narrowed process-kill scope, launchd preflight gate, least-privilege DB bootstrap role, cron overlap locks, multi-worker leader election for evolution/reconciler/grafana, ExperimentLedger expiry persistence.
+- Verification baseline: shell `bash -n` passed for touched scripts; Python `py_compile` passed for touched app/script files; new `test_batch_e_runtime_ownership.py` 10 passed; Batch B+E combined static suite 20 passed.
+- No deploy/restart was performed. This note was later superseded by Batch F local completion.
+
+## 2026-04-29 Batch D Remediation
+
+- 62-finding remediation Batch D is fixed locally, not deployed: `RC-002`, `RC-004`, `RC-005`, `RC-006`, `SADF-002`, `SADF-003`, `LP-002`, `OE-006`.
+- Sign-off: `docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-29--batch_d_risk_config_fail_closed_signoff.md`; operator brief copied to `docs/CCAgentWorkSpace/Operator/2026-04-29--batch_d_risk_config_fail_closed_signoff.md`.
+- Key code paths: H0 periodic risk snapshot merge preserving cooldown/kill-switch, startup fail-closed on missing demo/live risk config files, router-level governor constraints enforcement, legacy `update_risk_config` event-consumer applied ack + send/apply failure errors, atomic mixed strategy params update, demo/live strategy params fail-closed inactive fallback, `openclaw_engine` package-id checks in clean/fresh restart scripts, close dispatch per-attempt timeout guard.
+- Verification baseline: new `test_batch_d_risk_fail_closed.py` 8 passed; Rust targeted tests 9 passed; `cargo check -p openclaw_engine` passed with existing warnings.
+- No deploy/restart was performed. This note was later superseded by Batch F local completion.
+
+## 2026-04-29 Batch F Prework
+
+- Batch F F0 prework completed before implementation; superseded by the remediation sign-off below.
+- Report: `docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-29--batch_f_ml_agent_autonomy_prework.md`.
+- Scope: `MLM-001..005`, `SADF-001`, `SADF-004`, `SADF-005`, `SADF-006`, `LP-003`.
+- F implementation later completed locally with the same dirty-collision preservation constraint.
+- Dirty-file collision map for later F work includes `helper_scripts/start_paper_trading.sh`, `helper_scripts/deploy/README.md`, `app/ml_routes.py`, `app/paper_trading_routes.py`, `decision_feature_writer.rs`, `main.rs`, and `step_3_signals.rs`.
+
+## 2026-04-29 Batch A-E Reassessment
+
+- Operator-supplied review was checked against the current worktree. D/E tracking/sign-off missing was stale; Batch A fixture drift, `RC-005`, `RC-006`, `OS-003`, and `OS-006` were real gaps and are now fixed locally.
+- Key follow-up code paths: `test_live_gate_fallback.py` fixture actor scopes; `intent_processor/router.rs` reducing qty cap before Guardian/risk checks; `step_4_5_dispatch.rs` reduce-only exchange dispatch; `risk.rs` JSON-RPC apply ack path through event consumer; lifecycle scripts PID/cwd validation; `mac_bootstrap_db.sh` fixed SQL heredoc.
+- Verification baseline after reassessment: A-E Python targeted suite 128 passed; Rust full lib suite 2355 passed; `cargo check -p openclaw_engine` passed; `cargo build --release -p openclaw_engine` passed; Batch D+E static guards 18 passed; script `bash -n`, broad-kill/heredoc static scan, and `git diff --check` passed.
+- Report: `docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-29--batch_a_e_gap_reassessment.md`; operator copy at `docs/CCAgentWorkSpace/Operator/2026-04-29--batch_a_e_gap_reassessment.md`.
+- No deploy/restart/commit/push was performed. A-E were green for sync + rebuild at that checkpoint; this note was later superseded by Batch F local completion.
+
+## 2026-04-29 Batch F Remediation
+
+- 62-finding remediation Batch F is fixed locally, not deployed: `MLM-001..005`, `SADF-001`, `SADF-004`, `SADF-005`, `SADF-006`, `LP-003`.
+- Sign-off: `docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-29--batch_f_ml_agent_autonomy_signoff.md`; operator brief copied to `docs/CCAgentWorkSpace/Operator/2026-04-29--batch_f_ml_agent_autonomy_signoff.md`.
+- Key code paths: feature-definition hash + ONNX metadata validation, ML ETL row-level schema/hash filters, quantile trio registry transition, label full-close finality, LinUCB arm/state loop, Teacher Demo command sink, disabled Paper command rejection, observation-only LinUCB metadata, `boost_arm` unsupported result, Strategist Live fail-fast, Paper opt-in script/runbook.
+- Verification baseline: Python py_compile passed; `bash -n helper_scripts/start_paper_trading.sh` passed; `cargo check -p openclaw_engine` passed with existing warnings; ML targeted pytest 78 passed and 7 skipped; Rust targeted tests 47 passed.
+- No deploy/restart/commit/push was performed. Remaining release gaps: live Postgres registry integration run, real ONNX artifact e2e load, LinUCB live boot smoke, and full A-F deploy smoke.

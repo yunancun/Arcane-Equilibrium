@@ -116,11 +116,10 @@ impl TickPipeline {
 
         // ── Step 3: pause gate + boot cooldown + signal evaluation. ──
         // ── Step 3：暫停門控 + 啟動冷卻 + 信號評估與持久化。──
-        let signals =
-            match self.on_tick_step_3_signals(event, tick_start, indicators.as_ref()) {
-                ControlFlow::Break(record) => return record,
-                ControlFlow::Continue(sig) => sig,
-            };
+        let signals = match self.on_tick_step_3_signals(event, tick_start, indicators.as_ref()) {
+            ControlFlow::Break(record) => return record,
+            ControlFlow::Continue(sig) => sig,
+        };
 
         // ── Step 4+5: per-strategy dispatch + intent processing + maker sweep + closes. ──
         // ── Step 4+5：逐策略分派 + 意圖處理 + maker sweep + 策略平倉。──
