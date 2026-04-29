@@ -956,3 +956,20 @@ Operator 接續 Tier 8 sign-off 後說「繼續派」。PM 按 Tier 8 §8 推薦
 ### Gaps
 - No deploy/restart/commit/push performed.
 - Live PG model-registry integration, real ONNX artifact e2e load, LinUCB live boot smoke, and full A-F deploy smoke remain before production release.
+
+## 2026-04-29 A-F remediation final deploy memory
+
+### Result
+- Batch A-F 62 findings are fixed and deployed through `bc3fa70` + docs sync `6539e4e` + restart hotfix `5db4e29`.
+- Linux redeploy required `PATH="$HOME/.cargo/bin:$PATH"` because non-login SSH did not expose cargo.
+- A deploy bug was found and fixed: lifecycle scripts misclassified uvicorn master/workers as non-OpenClaw when the command line lacked `control_api_v1`; cwd-based API ownership recognition fixed this.
+
+### Runtime
+- Engine PID `161957`; API master PID `162029` plus four workers.
+- Watchdog reports `engine_alive=true`; demo snapshot is fresh.
+- API port `8000` is bound by the new control API venv; unauthenticated direct health probes return 401, so auth is enforced.
+
+### PM Verdict
+- Not full-green: passive healthcheck still FAILs `[12]` and `[22]`, WARNs `[27]` and `[31]`.
+- Live pipeline is intentionally blocked until schema-v2 auth renewal.
+- Do not say production-ready until `[22] trading_pipeline_silent_gap` / fee-rate cold-boot cost_gate fail-closed is investigated and passive healthcheck is rerun clean or explicitly accepted.

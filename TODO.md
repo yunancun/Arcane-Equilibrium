@@ -1,6 +1,6 @@
 # OpenClaw TODO — 工作清單（v3 · 單一時間軸版）
 
-**最新更新**：2026-04-29 CEST（**62-finding remediation Batch A-F COMMITTED + PUSHED，Linux rebuild/redeploy pending**：A-F 全 62 findings 已由 commit `bc3fa70` `fix(audit): close 62-finding remediation batches` 推送到 `origin/main` 並 fast-forward 到 Linux `trade-core`；Mac/origin/Linux 三端 HEAD 一致且 worktree clean。Batch F 10/10 findings fixed：`MLM-001..005`, `SADF-001`, `SADF-004`, `SADF-005`, `SADF-006`, `LP-003`；驗證：Python py_compile OK / `bash -n start_paper_trading.sh` OK / `cargo check -p openclaw_engine` OK with existing warnings / ML targeted pytest **78 passed, 7 skipped** / Rust targeted **47 passed**。報告 `docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-29--batch_f_ml_agent_autonomy_signoff.md`；下一步是 Linux 本地 `restart_all.sh --rebuild --keep-auth` rebuild/redeploy + post-deploy healthcheck；live PG integration、real ONNX artifact e2e、LinUCB live boot smoke 仍是上線前加強驗證項。）
+**最新更新**：2026-04-29 CEST（**62-finding remediation Batch A-F DEPLOYED，post-deploy healthcheck NOT green**：A-F 全 62 findings 已完成修復/簽核/tracking，主修復 commit `bc3fa70` + 文檔同步 `6539e4e` + restart ownership hotfix `5db4e29` 均已推送並 fast-forward 到 Linux `trade-core`；`restart_all.sh --rebuild --keep-auth` 已在 Linux 完成 rebuild/redeploy（需顯式 `PATH="$HOME/.cargo/bin:$PATH"`），新 runtime：engine PID **161957** (`openclaw-engine`)，API master PID **162029** + 4 workers，API `:8000` 已由新 control API venv 佔用且無 address-in-use。驗證：`bash -n` lifecycle scripts OK / Batch E runtime ownership pytest **10 passed** / watchdog `engine_alive=true` + demo snapshot fresh / direct unauth `/openclaw/health` 與 `/api/v1/system/health` 回 401（auth enforced）/ GUI-origin API logs 200 OK。**不能宣稱 full green**：`passive_wait_healthcheck.sh --quiet` 仍 FAIL `[12] bb_breakout_post_deadlock_fix` + FAIL `[22] trading_pipeline_silent_gap`，WARN `[27] intents_counter_freeze` + WARN `[31] edge_diag_2_strategy_diversity`；先前暫態 `[16] strategist_cycle_fresh` 已清。Live pipeline 依設計拒絕啟動：`authorization.json` schema v1 vs expected v2，需 Operator 透過 `/api/v1/live/auth/renew` 或 renew-review 重新簽署；未繞過 live gate。剩餘 release gaps：live PG integration、real ONNX artifact e2e、LinUCB live boot smoke、以及 `[22]` silent-gap / fee-rate cold-boot cost_gate fail-closed RCA。）
 
 **前次更新**：2026-04-29 CEST（**Batch A-E gap reassessment COMPLETE, A-E green locally, not deployed**：隔壁 review 中 D/E tracking open 為 stale；A fixture drift、`RC-005`, `RC-006`, `OS-003`, `OS-006` 為真 gap 並已修。驗證：A-E Python targeted **128 passed** / Rust full lib **2355 passed** / `cargo check -p openclaw_engine` OK / `cargo build --release -p openclaw_engine` OK / Batch D+E static **18 passed** / `bash -n` + broad-kill/heredoc static scan OK / `git diff --check` OK。報告 `docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-29--batch_a_e_gap_reassessment.md`；未 deploy/restart/commit/push。）
 
@@ -39,13 +39,16 @@
 
 ---
 
-## 🎯 此刻該做什麼（2026-04-28 12:30 CEST · Post-Wave-H 2 operator FUP + drift fix 完 · 等 Phase C / Phase B observation bundled · 等下次 `--rebuild --keep-auth` 套用 fee-postonly-2）
+## 🎯 此刻該做什麼（2026-04-29 CEST · 62-finding remediation A-F deployed · post-deploy healthcheck red）
 
 **新主線：62-finding full audit remediation**（operator 2026-04-28 指示：接手剛完成 audit，後續全數修理 62 findings）：
 - 權威 audit：`docs/audit/final_record_zh.md` + `docs/audit/final_summary.md`
 - PM 排期：`docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-28--audit_62_findings_remediation_schedule.md`
 - 總量：62 findings（P1=29 / P2=29 / P3=4 / P0=0），但含 live-release blockers
-- 批次順序：Batch A Live write boundary freeze ✅ committed/pushed → Batch B Critical auth/secrets/API exposure ✅ committed/pushed → Batch C Trading record durability ✅ committed/pushed → Batch D Risk/config fail-closed ✅ committed/pushed → Batch E Operator/runtime ownership ✅ committed/pushed → Batch F ML/agent autonomy readiness ✅ committed/pushed
+- 批次順序：Batch A Live write boundary freeze ✅ committed/pushed/deployed → Batch B Critical auth/secrets/API exposure ✅ committed/pushed/deployed → Batch C Trading record durability ✅ committed/pushed/deployed → Batch D Risk/config fail-closed ✅ committed/pushed/deployed → Batch E Operator/runtime ownership ✅ committed/pushed/deployed → Batch F ML/agent autonomy readiness ✅ committed/pushed/deployed
+- Linux deploy 實況：`5db4e29` restart ownership hotfix 後，`restart_all.sh --rebuild --keep-auth` 成功重建；engine PID **161957**，API PID **162029**，watchdog `engine_alive=true` + demo fresh。
+- Post-deploy gate：**BLOCKED for full-green sign-off**，`passive_wait_healthcheck.sh --quiet` 仍 FAIL `[12]` + `[22]`，WARN `[27]` + `[31]`；`[16]` 啟動暫態已清。下一步應先做 `[22] trading_pipeline_silent_gap` / fee-rate cold-boot cost_gate fail-closed RCA，再判斷 `[12]`/`[31]` 是否仍屬既有 bb_breakout/strategy-diversity backlog。
+- Live gate：live pipeline 拒絕啟動是預期保護，原因為 signed authorization schema v1 vs expected v2；需 Operator 經 `/api/v1/live/auth/renew` 或 renew-review 重新簽署，不可手寫 `authorization.json`。
 - PM gate：Batch A 必須先做；每個 implementation batch 必經 `PM -> PA -> E1/E1a -> E2 -> E4 -> QA -> PM`，涉及 live/auth/security 加 `CC/E3/BB` gate；不得用單一大 patch 關 62 條
 - Preflight：開工前先處理 branch/worktree ownership、Linux watchdog paper stale drift、建立 62-ID tracking matrix、保存 Linux regression baseline
 
@@ -67,10 +70,11 @@
 **§九 1200 hard cap active violations**：**0** ✅（Wave G achievement maintained）
 
 **NOW ACTIONABLE**（時間驅動 / 等候 / 餘工）：
-1. **next `--rebuild --keep-auth` deploy** — 套用 `cdc2699` fee-postonly-2 Rust fix 進 runtime（純 DB column 失真修，0 trade impact，bundled with Phase C launch 也可）；可順便驗 `--keep-auth` 旗標 GUI re-approve 不再被觸發
-2. **G3-09 Phase C Wave 1 impl** — operator 「等時間長一些再看」；PA RFC `90d1a2e` ready
-3. **Phase B observation period launch** — bundled with Phase C (operator decision (C))
-4. **6 backlog tickets** 等下次 maintenance wave：
+1. **Post-deploy RCA gate** — 先處理 healthcheck `[22] trading_pipeline_silent_gap`（risk verdicts/DCS alive，但 fills/intents/orders stale；engine log 顯示 fee rates unavailable cold-boot fail-closed），再重跑 passive healthcheck；不可把目前狀態標為 full green。
+2. **Live auth renewal** — 若要恢復 LiveDemo/live pipeline，Operator 需經 API renew schema v2 授權；這是 Batch A live gate 強化後的預期行為。
+3. **G3-09 Phase C Wave 1 impl** — operator 「等時間長一些再看」；PA RFC `90d1a2e` ready
+4. **Phase B observation period launch** — bundled with Phase C (operator decision (C))
+5. **6 backlog tickets** 等下次 maintenance wave：
    - G3-08-FUP-MAF-SPLIT-CLEANUP-A P4 (new, cosmetic eager re-export)
    - G3-08-PHASE-4-STRATEGIST-SPLIT-FUP-FACADE LOW (deferred, post-strategist-split risk)
    - SINGLETON-POLLUTION-PHASE2-ROUTES P4 (Mac-only)
