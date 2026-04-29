@@ -84,3 +84,8 @@ YYYY-MM-DD HH:MM TZ
 - added a hard Codex rule that commit operations must use subject + body description, and push operations must be reported with branch, SHA, and description
 - recorded the rule in `AGENTS.md`, `.codex/MEMORY.md`, and `.codex/DEPLOYMENT.md`
 - future sync reports should no longer omit commit/push description context
+
+2026-04-29 CEST
+- added a hard Codex commit cadence rule: do not keep multiple independent green batches in one large dirty worktree by default
+- repository rule now prefers one coherent commit per validated checkpoint, with delayed commit allowed only when scopes are still tightly coupled
+- future commentary must explain any intentional delay in commit timing

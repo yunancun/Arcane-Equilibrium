@@ -76,3 +76,5 @@ If Claude agent definitions evolve:
 - Use commit messages with both a subject and a body description
 - After each push, report the branch, commit SHA, and a short description to the operator
 - Treat subject-only commit messages as incomplete for this repository
+- Do not bundle multiple independent green checkpoints into one final catch-all commit unless there is a clear coupling reason
+- Prefer committing at each validated checkpoint before cross-machine sync or deploy
