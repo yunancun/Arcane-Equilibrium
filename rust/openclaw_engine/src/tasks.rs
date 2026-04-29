@@ -10,9 +10,10 @@ mod supervised_spawn;
 use supervised_spawn::spawn_cancellable_interval;
 
 use openclaw_engine::account_manager::AccountManager;
-use openclaw_engine::bybit_rest_client::{BybitEnvironment, BybitRestClient};
+use openclaw_engine::bybit_rest_client::{BybitApiError, BybitEnvironment, BybitRestClient};
 use openclaw_engine::config::{ConfigManager, ConfigStore, LearningConfig};
 use openclaw_engine::database::pool::DbPool;
+use openclaw_engine::event_consumer::SYMBOLS;
 use openclaw_engine::ipc_server::{
     AuditPoolSlot, BudgetTrackerSlot, EngineCommandChannels, TeacherLoopSlot,
 };
@@ -27,6 +28,7 @@ use tracing::{debug, info, warn};
 pub(crate) fn spawn_fee_rate_tasks(
     acct: &Arc<AccountManager>,
     client: &Arc<BybitRestClient>,
+    env: BybitEnvironment,
     cancel: &CancellationToken,
 ) {
     // Periodic refresh: re-fetch fee rates hourly so the 2h cost-gate staleness
@@ -52,7 +54,18 @@ pub(crate) fn spawn_fee_rate_tasks(
                             info!(symbols = count, "fee rates refreshed (1h) / 費率已刷新")
                         }
                         Err(e) => {
-                            warn!(error = %e, "fee rate refresh failed / 費率刷新失敗")
+                            if is_demo_fee_endpoint_unsupported(env, &e) {
+                                let count = acct.seed_default_fee_rates(SYMBOLS.iter().copied());
+                                warn!(
+                                    env = ?env,
+                                    error = %e,
+                                    symbols = count,
+                                    "fee-rate endpoint unavailable on demo endpoint; conservative defaults re-seeded \
+                                     / demo 費率端點不可用，已重新注入保守預設費率"
+                                );
+                            } else {
+                                warn!(error = %e, "fee rate refresh failed / 費率刷新失敗")
+                            }
                         }
                     }
                 }
@@ -91,6 +104,17 @@ pub(crate) fn spawn_fee_rate_tasks(
             }
         });
     }
+}
+
+/// EN: Detect the Bybit demo endpoint's unsupported fee-rate response.
+/// 中文: 識別 Bybit demo 端點不支援費率查詢時的回應。
+fn is_demo_fee_endpoint_unsupported(env: BybitEnvironment, err: &BybitApiError) -> bool {
+    matches!(env, BybitEnvironment::Demo | BybitEnvironment::LiveDemo)
+        && matches!(
+            err,
+            BybitApiError::Business { ret_code: 10001, ret_msg, .. }
+                if ret_msg.trim().is_empty()
+        )
 }
 
 /// Spawn periodic instrument info refresh (every 4 hours).
@@ -179,8 +203,8 @@ pub(crate) async fn spawn_teacher_consumer_loop(
     };
 
     use openclaw_engine::claude_teacher::{
-        AnthropicClient, ClaudeTeacher, ConsumerLoopConfig, DirectiveApplier, GovernanceCheck,
-        EngineCommandSink, LlmClient, OutcomeTracker, StrategyIpcSink, TeacherConsumerLoop,
+        AnthropicClient, ClaudeTeacher, ConsumerLoopConfig, DirectiveApplier, EngineCommandSink,
+        GovernanceCheck, LlmClient, OutcomeTracker, StrategyIpcSink, TeacherConsumerLoop,
     };
     use std::sync::atomic::AtomicBool;
 
@@ -744,5 +768,58 @@ mod tests {
     fn test_reconciler_label_live_variants() {
         assert_eq!(reconciler_label_for_env(BybitEnvironment::Mainnet), "live");
         assert_eq!(reconciler_label_for_env(BybitEnvironment::LiveDemo), "live");
+    }
+
+    /// EN: Demo/LiveDemo may seed conservative fees for the unsupported fee endpoint.
+    /// 中文: Demo/LiveDemo 遇到不支援費率端點時可注入保守預設費率。
+    #[test]
+    fn test_demo_fee_endpoint_unsupported_detection_allows_demo_only() {
+        let err = BybitApiError::Business {
+            ret_code: 10001,
+            ret_msg: " ".to_string(),
+            response: serde_json::json!({"retCode": 10001, "retMsg": ""}),
+        };
+
+        assert!(is_demo_fee_endpoint_unsupported(
+            BybitEnvironment::Demo,
+            &err
+        ));
+        assert!(is_demo_fee_endpoint_unsupported(
+            BybitEnvironment::LiveDemo,
+            &err
+        ));
+        assert!(!is_demo_fee_endpoint_unsupported(
+            BybitEnvironment::Mainnet,
+            &err
+        ));
+        assert!(!is_demo_fee_endpoint_unsupported(
+            BybitEnvironment::Testnet,
+            &err
+        ));
+    }
+
+    /// EN: Non-empty business errors must remain regular refresh failures.
+    /// 中文: 非空錯誤訊息的業務錯誤必須保持一般刷新失敗。
+    #[test]
+    fn test_demo_fee_endpoint_detection_rejects_other_errors() {
+        let wrong_code = BybitApiError::Business {
+            ret_code: 10006,
+            ret_msg: "".to_string(),
+            response: serde_json::json!({"retCode": 10006, "retMsg": ""}),
+        };
+        let wrong_msg = BybitApiError::Business {
+            ret_code: 10001,
+            ret_msg: "bad request".to_string(),
+            response: serde_json::json!({"retCode": 10001, "retMsg": "bad request"}),
+        };
+
+        assert!(!is_demo_fee_endpoint_unsupported(
+            BybitEnvironment::Demo,
+            &wrong_code
+        ));
+        assert!(!is_demo_fee_endpoint_unsupported(
+            BybitEnvironment::Demo,
+            &wrong_msg
+        ));
     }
 }
