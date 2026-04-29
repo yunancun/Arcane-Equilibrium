@@ -68,7 +68,7 @@ class _FakeRiskViewClient:
 
 def _operator_actor(actor_id: str = "operator-1") -> SimpleNamespace:
     """Duck-typed actor carrying the two attrs `_require_operator_role` checks."""
-    return SimpleNamespace(actor_id=actor_id, roles={"operator"})
+    return SimpleNamespace(actor_id=actor_id, roles={"operator"}, scopes={"risk:write"})
 
 
 def _non_operator_actor() -> SimpleNamespace:

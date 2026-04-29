@@ -167,7 +167,7 @@ def test_transition_rejects_invalid_from_via_allowed_matrix():
         def execute(self, sql, params=None):
             self._last_sql = sql
         def fetchone(self):
-            return ("production",)
+            return ("ma_crossover", "demo", "v1", "2026-04-29", "production")
         def __enter__(self): return self
         def __exit__(self, *a): return False
 
@@ -192,7 +192,7 @@ def test_transition_retired_requires_production_source():
         def execute(self, sql, params=None):
             pass
         def fetchone(self):
-            return ("shadow",)  # trying retire straight from shadow
+            return ("ma_crossover", "demo", "v1", "2026-04-29", "shadow")
         def __enter__(self): return self
         def __exit__(self, *a): return False
 
@@ -216,11 +216,19 @@ def test_transition_shadow_to_rejected_allowed():
     """Shadow → rejected IS allowed (pre-prod rejection path)."""
     class FakeCursor:
         _executed_updates = []
+        _last_sql = ""
         def execute(self, sql, params=None):
+            self._last_sql = sql
             if "UPDATE" in sql:
                 self._executed_updates.append((sql, params))
         def fetchone(self):
-            return ("shadow",)
+            return ("ma_crossover", "demo", "v1", "2026-04-29", "shadow")
+        def fetchall(self):
+            return [
+                (1, "q10", "shadow"),
+                (2, "q50", "shadow"),
+                (3, "q90", "shadow"),
+            ]
         def __enter__(self): return self
         def __exit__(self, *a): return False
 
@@ -241,6 +249,28 @@ def test_transition_shadow_to_rejected_allowed():
         # Transition logic accepted; return value reflects execute + commit path.
         # 轉移邏輯通過；return value 反映 execute + commit 是否成功。
         assert result is True
+
+
+def test_transition_rejects_incomplete_quantile_trio():
+    """No q50-only promotion: q10/q50/q90 must transition together."""
+    class FakeCursor:
+        def execute(self, sql, params=None):
+            pass
+        def fetchone(self):
+            return ("ma_crossover", "demo", "v1", "2026-04-29", "shadow")
+        def fetchall(self):
+            return [(2, "q50", "shadow")]
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+
+    class FakeConn:
+        def cursor(self): return FakeCursor()
+        def close(self): pass
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+
+    with patch("program_code.ml_training.model_registry._connect", return_value=FakeConn()):
+        assert transition_canary_status(row_id=2, to_status=CANARY_PROMOTING) is False
 
 
 # ───── INFRA-PREBUILD-1 audit L2-3: ON CONFLICT canary preserve ─────

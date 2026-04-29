@@ -368,7 +368,9 @@ def test_roster_returns_200_when_pg_down(client: TestClient) -> None:
 
 
 def test_roster_returns_200_when_singletons_missing(client: TestClient) -> None:
-    """strategy_wiring 未 import → 5 張卡 state=offline 但端點仍 200。"""
+    """strategy_wiring 未 import → 5 張卡仍回合法 state 且端點 200。"""
+    from app.agents_routes_helpers import _STATE_LABEL_ZH
+
     saved = sys.modules.pop("app.strategy_wiring", None)
     try:
         with _pg_unavailable():
@@ -380,7 +382,7 @@ def test_roster_returns_200_when_singletons_missing(client: TestClient) -> None:
     body = resp.json()
     assert body["ok"] is True
     for card in body["data"]["agents"]:
-        assert card["state"] in {"offline", "watching", "waiting"}
+        assert (card["role"], card["state"]) in _STATE_LABEL_ZH
 
 
 def test_roster_happy_path_with_costs_and_counts(client: TestClient) -> None:

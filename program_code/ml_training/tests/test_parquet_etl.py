@@ -210,6 +210,16 @@ def test_edge_p3_feature_names_match_rust_canonical_order():
     assert EDGE_P3_FEATURE_NAMES[-1] == "is_funding_settlement_window"
 
 
+def test_edge_p3_feature_definition_hash_is_distinct_from_schema_hash():
+    """Definition hash tracks formulas/windows, not just feature names."""
+    from program_code.ml_training import parquet_etl as mod
+
+    assert len(mod.EDGE_P3_FEATURE_DEFINITIONS) == len(mod.EDGE_P3_FEATURE_NAMES)
+    assert mod.compute_feature_schema_hash().startswith("sha256:")
+    assert mod.compute_feature_definition_hash().startswith("sha256:")
+    assert mod.compute_feature_definition_hash() != mod.compute_feature_schema_hash()
+
+
 def test_export_accepts_live_demo_engine_mode(monkeypatch):
     """LiveDemo export must not be rejected by the engine_mode allow-list.
     LiveDemo 匯出不得被 engine_mode 白名單拒絕。"""
@@ -361,14 +371,17 @@ def test_load_training_data_live_scope_params_include_live_demo(monkeypatch):
     mod.load_training_data(engine_mode="live")
 
     assert execute_params[0]["engine_modes"] == ["live", "live_demo"]
+    assert execute_params[0]["feature_schema_version"] == mod.EDGE_P3_FEATURE_SCHEMA_VERSION
+    assert execute_params[0]["feature_schema_hash"] == mod.compute_feature_schema_hash()
+    assert execute_params[0]["feature_definition_hash"] == mod.compute_feature_definition_hash()
 
 
 def test_load_training_data_expands_jsonb(monkeypatch):
     """JSONB features get unpacked into the canonical 17-col matrix;
-    missing / non-numeric entries coerce to 0.0 (row stays, label quality
-    is what gated inclusion). Tests both dict and JSON-string JSONB shapes.
-    JSONB 特徵展開為 17 列矩陣；缺/非數值欄位填 0.0，行保留；同時驗證
-    dict 與 JSON 字串兩種 JSONB 形式。"""
+    missing / non-numeric entries reject the row rather than zero-fill.
+    Tests both dict and JSON-string JSONB shapes.
+    JSONB 特徵展開為 17 列矩陣；缺/非數值欄位拒絕整行；同時驗證 dict 與
+    JSON 字串兩種 JSONB 形式。"""
     np = pytest.importorskip("numpy")
     import program_code.ml_training.parquet_etl as mod
 
@@ -381,8 +394,16 @@ def test_load_training_data_expands_jsonb(monkeypatch):
         "funding_rate": "notnum",   # coerced to 0.0 (ValueError → 0)
     }
     rows = [
-        ("ctx1", 1_700_000_000_000.0, feat_dict_complete, 12.5, "BTCUSDT", "ma_crossover"),
-        ("ctx2", 1_700_000_060_000.0, json.dumps(feat_dict_partial), -7.25, "BTCUSDT", "ma_crossover"),
+        (
+            "ctx1", 1_700_000_000_000.0, feat_dict_complete, 12.5, "BTCUSDT", "ma_crossover",
+            mod.EDGE_P3_FEATURE_SCHEMA_VERSION, mod.compute_feature_schema_hash(),
+            mod.compute_feature_definition_hash(),
+        ),
+        (
+            "ctx2", 1_700_000_060_000.0, json.dumps(feat_dict_partial), -7.25, "BTCUSDT", "ma_crossover",
+            mod.EDGE_P3_FEATURE_SCHEMA_VERSION, mod.compute_feature_schema_hash(),
+            mod.compute_feature_definition_hash(),
+        ),
     ]
 
     class _FakeCursor:
@@ -407,19 +428,12 @@ def test_load_training_data_expands_jsonb(monkeypatch):
         symbol="BTCUSDT", strategy_type="ma_crossover"
     )
 
-    assert features.shape == (2, 17)
-    assert labels.tolist() == [12.5, -7.25]
-    assert timestamps.tolist() == [1_700_000_000_000, 1_700_000_060_000]
+    assert features.shape == (1, 17)
+    assert labels.tolist() == [12.5]
+    assert timestamps.tolist() == [1_700_000_000_000]
     assert names == list(mod.EDGE_P3_FEATURE_NAMES)
     # Row 0: complete dict → values 1..17 float32 casts
     assert features[0, 0] == pytest.approx(1.0)
     assert features[0, 10] == pytest.approx(11.0)  # "side" position
-    # Row 1: partial + coerced. adx_1h set, atr_pct None→0, funding_rate "notnum"→0
-    adx_idx = mod.EDGE_P3_FEATURE_NAMES.index("adx_1h")
-    atr_idx = mod.EDGE_P3_FEATURE_NAMES.index("atr_pct")
-    fund_idx = mod.EDGE_P3_FEATURE_NAMES.index("funding_rate")
-    side_idx = mod.EDGE_P3_FEATURE_NAMES.index("side")
-    assert features[1, adx_idx] == pytest.approx(42.0)
-    assert features[1, atr_idx] == pytest.approx(0.0)
-    assert features[1, fund_idx] == pytest.approx(0.0)
-    assert features[1, side_idx] == pytest.approx(-1.0)
+    # Row 1 is partial/malformed and must not be silently zero-filled.
+    assert feat_dict_partial["adx_1h"] == 42.0

@@ -21,7 +21,8 @@ cd ~/BybitOpenClaw/srv/program_code/exchange_connectors/bybit_connector/control_
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-export OPENCLAW_API_TOKEN='change-me'
+# 安全 / Security: set the token from a private 0600 file or secret manager.
+export OPENCLAW_API_TOKEN="$(cat ~/.openclaw_secrets/control_api_token)"
 uvicorn app.main:app --host 0.0.0.0 --port 8710
 ```
 
@@ -37,6 +38,7 @@ export OPENCLAW_RUNTIME_SNAPSHOT_FILE='/runtime/runtime_snapshot.json'
 ```bash
 cd ~/BybitOpenClaw/srv/docker_projects/trading_services/openclaw_bybit_control_api_v1
 mkdir -p runtime
+export OPENCLAW_API_TOKEN="$(cat ~/.openclaw_secrets/control_api_token)"
 docker compose up --build -d
 ```
 
@@ -63,7 +65,8 @@ docker compose down
 ## 推荐环境变量 / Recommended environment variables
 
 ```bash
-export OPENCLAW_API_TOKEN='change-me'
+# 安全 / Security: use a private secret source; do not paste real tokens into repo files.
+export OPENCLAW_API_TOKEN="$(cat ~/.openclaw_secrets/control_api_token)"
 export OPENCLAW_READONLY_CONNECTOR_NAME='bybit_prod_readonly_main'
 export OPENCLAW_EXECUTION_CONNECTOR_NAME=''
 export OPENCLAW_REST_PRIVATE_CONNECTION_STATE='ready'

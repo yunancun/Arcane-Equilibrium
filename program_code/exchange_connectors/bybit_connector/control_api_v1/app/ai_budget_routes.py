@@ -30,8 +30,10 @@ import logging
 import time
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
+
+from . import main_legacy as base
 
 logger = logging.getLogger(__name__)
 
@@ -169,9 +171,20 @@ async def get_ai_budget_status_route() -> BudgetStatusResponse:
 # ─── POST /config ───────────────────────────────────────────────────────────
 
 @router.post("/config")
-async def update_ai_budget_config_route(payload: BudgetConfigUpdate) -> dict[str, Any]:
+async def update_ai_budget_config_route(
+    payload: BudgetConfigUpdate,
+    actor: base.AuthenticatedActor = Depends(base.current_actor),
+) -> dict[str, Any]:
     """Update a single AI budget scope. await IPC, return 200 only on Rust ack.
     更新單一 AI 預算 scope；await IPC 並僅在 Rust 確認後回 200。
+
+    Batch B auth invariant:
+      - requires authenticated Operator with ai_budget:write scope
+      - ignores client-supplied updated_by and uses server-authenticated actor id
+
+    Batch B 認證不變式：
+      - 必須是已認證 Operator 且具 ai_budget:write scope
+      - 不信任 client-supplied updated_by，改用伺服器認證 actor id
 
     This is the WP-ARCH-RC1 (RC1-2) reference path:
       - validates payload via Pydantic (Field constraints)
@@ -181,6 +194,8 @@ async def update_ai_budget_config_route(payload: BudgetConfigUpdate) -> dict[str
     本路徑為 WP-ARCH-RC1 (RC1-2) 標準實作：Pydantic 驗證 → await IPC →
     僅在 Rust ack 後回 200，503/504/400 對應不同錯誤；不寫檔、不快取。
     """
+    base.require_scope_and_operator(actor, "ai_budget:write")
+    updated_by = base.audit_actor_id(actor)
     try:
         client = await _get_ipc_client()
     except Exception as exc:  # noqa: BLE001
@@ -200,7 +215,7 @@ async def update_ai_budget_config_route(payload: BudgetConfigUpdate) -> dict[str
         result = await client.update_ai_budget_config(
             scope=payload.scope,
             monthly_usd=payload.monthly_usd,
-            updated_by=payload.updated_by,
+            updated_by=updated_by,
         )
     except Exception as exc:  # noqa: BLE001 — reclassified via helper
         raise_http_for_ipc_error(exc, context="ai_budget", log=logger)
@@ -214,6 +229,7 @@ async def update_ai_budget_config_route(payload: BudgetConfigUpdate) -> dict[str
         "ok": True,
         "scope": payload.scope,
         "monthly_usd": payload.monthly_usd,
+        "updated_by": updated_by,
         "updated_at_ms": int(time.time() * 1000),
         "engine_result": result if isinstance(result, dict) else None,
     }

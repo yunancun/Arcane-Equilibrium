@@ -7,7 +7,7 @@
 //! MODULE_NOTE (中): DecisionContextMsg 通道的異步消費者。每條消息代表決策時刻的完整
 //!   市場狀態快照。寫入 PG 作為核心 ML 訓練數據源。按 context_id 去重。
 
-use super::batch_insert::exec_single_insert;
+use super::batch_insert::{exec_single_insert, SingleInsertOutcome};
 use super::pool::DbPool;
 use super::DecisionContextMsg;
 use std::collections::HashMap;
@@ -70,11 +70,15 @@ pub async fn run_context_writer(
 /// 軟計數、統一 log 標籤。
 async fn flush_contexts(pool: &DbPool, pending: &mut HashMap<String, DecisionContextMsg>) {
     if !pool.is_available() {
-        pending.clear();
+        warn!(
+            pending_rows = pending.len(),
+            "context_writer flush skipped: DB pool unavailable — retaining pending rows"
+        );
         return;
     }
 
-    for (_, ctx) in pending.drain() {
+    let rows: Vec<(String, DecisionContextMsg)> = pending.drain().collect();
+    for (key, ctx) in rows {
         // DB-RUN-6: Reject epoch-0 (ts_ms == 0) writes — they're a symptom of
         // an unset timestamp in the producer and pollute the time-series with
         // 1970 rows that confuse training joins. Drop the row and warn.
@@ -148,7 +152,10 @@ async fn flush_contexts(pool: &DbPool, pending: &mut HashMap<String, DecisionCon
         // V015: engine_mode / 引擎模式
         .bind(ctx.engine_mode.clone());
 
-        let _ = exec_single_insert(pool, "trading.decision_context_snapshots", query).await;
+        let outcome = exec_single_insert(pool, "trading.decision_context_snapshots", query).await;
+        if !matches!(outcome, SingleInsertOutcome::Ok(_)) {
+            pending.insert(key, ctx);
+        }
     }
 }
 

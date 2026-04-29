@@ -59,6 +59,8 @@ CANARY_STATES: tuple[str, ...] = (
     CANARY_REJECTED,
 )
 
+REQUIRED_QUANTILES: tuple[str, str, str] = ("q10", "q50", "q90")
+
 # Verdict values from quantile_reports.py (mirror, don't import — circular dep).
 # Verdict 值（鏡射；不 import 避免循環依賴）。
 VERDICT_SHOULD_SHIP = "should_ship"
@@ -334,7 +336,7 @@ def transition_canary_status(
     retirement_reason: Optional[str] = None,
     dsn: Optional[str] = None,
 ) -> bool:
-    """Transition a registry row's canary_status.
+    """Transition a registry row's canary_status as an atomic quantile trio.
     推進 canary_status 狀態機。
 
     Valid transitions (enforced by this function; DB only enforces enum values):
@@ -344,10 +346,16 @@ def transition_canary_status(
     - retired    → (terminal)
     - rejected   → (terminal)
 
+    The input row identifies a serving unit by
+    (strategy, engine_mode, schema_version, train_date). All q10/q50/q90
+    rows in that unit must exist and all must currently satisfy the same
+    allowed-from status; the UPDATE then changes all three rows in one DB
+    transaction. This prevents q50-only promotion with stale q10/q90 siblings.
+
     Updates `promoted_at` when → production; updates `retired_at` +
     `retirement_reason` when → retired | rejected.
 
-    合法轉移（此函式守；DB 僅守 enum 值）：
+    合法轉移（此函式守；DB 僅守 enum 值），且以 q10/q50/q90 三檔為原子單元：
     shadow → promoting|rejected
     promoting → production|rejected
     production → retired
@@ -369,14 +377,18 @@ def transition_canary_status(
     try:
         with conn, conn.cursor() as cur:
             cur.execute(
-                "SELECT canary_status FROM learning.model_registry WHERE id = %s",
+                """
+                SELECT strategy, engine_mode, schema_version, train_date, canary_status
+                FROM learning.model_registry
+                WHERE id = %s
+                """,
                 (row_id,),
             )
             row = cur.fetchone()
             if row is None:
                 logger.warning("model_registry: id=%d not found", row_id)
                 return False
-            current = row[0]
+            strategy, engine_mode, schema_version, train_date, current = row
             allowed = allowed_from.get(to_status, set())
             if current not in allowed:
                 logger.warning(
@@ -385,6 +397,40 @@ def transition_canary_status(
                 )
                 return False
 
+            cur.execute(
+                """
+                SELECT id, quantile, canary_status
+                FROM learning.model_registry
+                WHERE strategy = %s
+                  AND engine_mode = %s
+                  AND schema_version = %s
+                  AND train_date = %s
+                  AND quantile IN ('q10', 'q50', 'q90')
+                """,
+                (strategy, engine_mode, schema_version, train_date),
+            )
+            trio_rows = cur.fetchall()
+            trio = {q: (int(rid), status) for rid, q, status in trio_rows}
+            missing = [q for q in REQUIRED_QUANTILES if q not in trio]
+            if missing:
+                logger.warning(
+                    "model_registry: refusing %s for incomplete trio %s/%s/%s/%s; missing=%s",
+                    to_status, strategy, engine_mode, schema_version, train_date, missing,
+                )
+                return False
+            invalid = [
+                (q, status)
+                for q, (_rid, status) in trio.items()
+                if status not in allowed
+            ]
+            if invalid:
+                logger.warning(
+                    "model_registry: refusing %s for trio with invalid source statuses=%s",
+                    to_status, invalid,
+                )
+                return False
+            trio_ids = [trio[q][0] for q in REQUIRED_QUANTILES]
+
             # Build UPDATE with timestamp semantics per state.
             # 依狀態決定要刷新的 timestamp 欄。
             if to_status == CANARY_PRODUCTION:
@@ -392,9 +438,9 @@ def transition_canary_status(
                     """
                     UPDATE learning.model_registry
                     SET canary_status = %s, promoted_at = NOW()
-                    WHERE id = %s
+                    WHERE id IN (%s, %s, %s)
                     """,
-                    (to_status, row_id),
+                    (to_status, *trio_ids),
                 )
             elif to_status in (CANARY_RETIRED, CANARY_REJECTED):
                 cur.execute(
@@ -402,22 +448,22 @@ def transition_canary_status(
                     UPDATE learning.model_registry
                     SET canary_status = %s, retired_at = NOW(),
                         retirement_reason = %s
-                    WHERE id = %s
+                    WHERE id IN (%s, %s, %s)
                     """,
-                    (to_status, retirement_reason, row_id),
+                    (to_status, retirement_reason, *trio_ids),
                 )
             else:
                 cur.execute(
                     """
                     UPDATE learning.model_registry
                     SET canary_status = %s
-                    WHERE id = %s
+                    WHERE id IN (%s, %s, %s)
                     """,
-                    (to_status, row_id),
+                    (to_status, *trio_ids),
                 )
             logger.info(
-                "model_registry: id=%d transitioned %s → %s",
-                row_id, current, to_status,
+                "model_registry: trio ids=%s transitioned %s → %s",
+                trio_ids, current, to_status,
             )
             return True
     except Exception as e:  # noqa: BLE001

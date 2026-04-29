@@ -4,7 +4,7 @@
 //! 平倉操作、快照、系統模式。
 
 use super::on_tick_helpers::{
-    make_context_id, make_fill_id, make_intent_id, make_verdict_id, push_capped,
+    make_context_id, make_fill_id, make_intent_id, make_verdict_id, push_capped, risk_score_level,
 };
 use super::*;
 
@@ -101,18 +101,31 @@ impl TickPipeline {
         if let (Some(ref tx), Some(ref vi)) = (&self.trading_tx, &result.verdict_info) {
             let now_ms_v = openclaw_core::now_ms();
             let em_v = self.effective_engine_mode();
-            let _ = tx.try_send(crate::database::TradingMsg::RiskVerdict {
-                verdict_id: make_verdict_id(em_v, symbol, now_ms_v),
-                ts_ms: now_ms_v,
-                intent_id: make_intent_id(em_v, symbol, now_ms_v),
-                context_id: make_context_id(em_v, symbol, now_ms_v),
-                symbol: symbol.to_string(),
-                verdict: vi.verdict.clone(),
-                risk_score: vi.risk_score,
-                reasons: vi.reasons.clone(),
-                modified_qty: vi.modified_qty,
-                engine_mode: em_v.to_string(),
-            });
+            let checks_failed = vi.reasons.clone();
+            let checks_passed = if checks_failed.is_empty() {
+                vec!["guardian_checks".to_string()]
+            } else {
+                Vec::new()
+            };
+            let _ = crate::database::try_send_trading_msg(
+                tx,
+                crate::database::TradingMsg::RiskVerdict {
+                    verdict_id: make_verdict_id(em_v, symbol, now_ms_v),
+                    ts_ms: now_ms_v,
+                    intent_id: make_intent_id(em_v, symbol, now_ms_v),
+                    context_id: make_context_id(em_v, symbol, now_ms_v),
+                    symbol: symbol.to_string(),
+                    verdict: vi.verdict.clone(),
+                    risk_score: vi.risk_score,
+                    risk_level: risk_score_level(vi.risk_score).map(str::to_string),
+                    checks_passed,
+                    checks_failed,
+                    reasons: vi.reasons.clone(),
+                    modified_qty: vi.modified_qty,
+                    engine_mode: em_v.to_string(),
+                },
+                "risk_verdict",
+            );
         }
 
         if !result.submitted {
@@ -245,47 +258,55 @@ impl TickPipeline {
                 "is_long": is_long,
                 "source": "command",
             });
-            let _ = tx.try_send(crate::database::TradingMsg::Intent {
-                intent_id: make_intent_id(em, symbol, now_ms),
-                ts_ms: now_ms,
-                signal_id: String::new(),
-                context_id: context_id.clone(),
-                symbol: symbol.to_string(),
-                side: if is_long { "Buy".into() } else { "Sell".into() },
-                qty,
-                price,
-                order_type: order_type.to_string(),
-                strategy_name: strategy.to_string(),
-                engine_mode: em.to_string(),
-                details: Some(details),
-            });
-            let _ = tx.try_send(crate::database::TradingMsg::Fill {
-                fill_id: make_fill_id(em, symbol, now_ms),
-                ts_ms: now_ms,
-                order_id: order_id.clone(),
-                symbol: symbol.to_string(),
-                side: if is_long { "Buy".into() } else { "Sell".into() },
-                qty: fill.fill_qty,
-                price: fill.fill_price,
-                fee: fill.fee,
-                fee_rate: self.intent_processor.fee_rate(symbol),
-                reference_price: None,
-                reference_ts_ms: None,
-                reference_source: None,
-                slippage_bps: None,
-                liquidity_role: None,
-                fill_latency_ms: None,
-                realized_pnl,
-                strategy_name: strategy.to_string(),
-                context_id,
-                entry_context_id: fill_entry_ctx.clone(),
-                engine_mode: em.to_string(),
-                // INFRA-PREBUILD-1 Part A: external / IPC close path bypasses
-                // Combine Layer — exit_source stays NULL (no Track P eval here).
-                // INFRA-PREBUILD-1 A 部：外部 / IPC close 不走 Combine Layer，
-                // exit_source 保持 NULL。
-                exit_source: None,
-            });
+            crate::database::try_send_trading_msg(
+                tx,
+                crate::database::TradingMsg::Intent {
+                    intent_id: make_intent_id(em, symbol, now_ms),
+                    ts_ms: now_ms,
+                    signal_id: String::new(),
+                    context_id: context_id.clone(),
+                    symbol: symbol.to_string(),
+                    side: if is_long { "Buy".into() } else { "Sell".into() },
+                    qty,
+                    price,
+                    order_type: order_type.to_string(),
+                    strategy_name: strategy.to_string(),
+                    engine_mode: em.to_string(),
+                    details: Some(details),
+                },
+                "external_intent",
+            );
+            let _ = crate::database::try_send_trading_msg(
+                tx,
+                crate::database::TradingMsg::Fill {
+                    fill_id: make_fill_id(em, symbol, now_ms),
+                    ts_ms: now_ms,
+                    order_id: order_id.clone(),
+                    symbol: symbol.to_string(),
+                    side: if is_long { "Buy".into() } else { "Sell".into() },
+                    qty: fill.fill_qty,
+                    price: fill.fill_price,
+                    fee: fill.fee,
+                    fee_rate: self.intent_processor.fee_rate(symbol),
+                    reference_price: None,
+                    reference_ts_ms: None,
+                    reference_source: None,
+                    slippage_bps: None,
+                    liquidity_role: None,
+                    fill_latency_ms: None,
+                    realized_pnl,
+                    strategy_name: strategy.to_string(),
+                    context_id,
+                    entry_context_id: fill_entry_ctx.clone(),
+                    engine_mode: em.to_string(),
+                    // INFRA-PREBUILD-1 Part A: external / IPC close path bypasses
+                    // Combine Layer — exit_source stays NULL (no Track P eval here).
+                    // INFRA-PREBUILD-1 A 部：外部 / IPC close 不走 Combine Layer，
+                    // exit_source 保持 NULL。
+                    exit_source: None,
+                },
+                "external_fill",
+            );
         }
 
         // EXIT-FEATURES-TABLE-1 (E2 P1 fix): if this external fill was a close
@@ -449,6 +470,7 @@ impl TickPipeline {
         slippage_bps: Option<f64>,
         liquidity_role: Option<&str>,
         fill_latency_ms: Option<u64>,
+        exchange_exec_id: Option<&str>,
     ) {
         // EDGE-P3-1 R2: snapshot was_open + existing entry_context_id BEFORE apply_fill.
         // Exchange-confirmed fills can be open/close/accumulate; thread id on close fills.
@@ -542,31 +564,39 @@ impl TickPipeline {
             } else {
                 make_context_id(em, symbol, ts_ms)
             };
-            let _ = tx.try_send(crate::database::TradingMsg::Fill {
-                fill_id: make_fill_id(em, symbol, ts_ms),
-                ts_ms,
-                order_id: order_link_id.to_string(),
-                symbol: symbol.to_string(),
-                side: if is_long { "Buy".into() } else { "Sell".into() },
-                qty,
-                price: fill_price,
-                fee,
-                fee_rate: fr,
-                reference_price,
-                reference_ts_ms,
-                reference_source: reference_source.map(str::to_string),
-                slippage_bps,
-                liquidity_role: liquidity_role.map(str::to_string),
-                fill_latency_ms,
-                realized_pnl,
-                strategy_name: strategy.to_string(),
-                context_id: fill_ctx_id,
-                entry_context_id: fill_entry_ctx,
-                engine_mode: em.to_string(),
-                // INFRA-PREBUILD-1 Part A: exchange-confirmed fill path — exit_source NULL.
-                // INFRA-PREBUILD-1 A 部：交易所確認 fill 不經 Combine Layer。
-                exit_source: None,
-            });
+            let fill_id = exchange_exec_id
+                .filter(|id| !id.trim().is_empty())
+                .map(|id| format!("bybit-{id}"))
+                .unwrap_or_else(|| make_fill_id(em, symbol, ts_ms));
+            let _ = crate::database::try_send_trading_msg(
+                tx,
+                crate::database::TradingMsg::Fill {
+                    fill_id,
+                    ts_ms,
+                    order_id: order_link_id.to_string(),
+                    symbol: symbol.to_string(),
+                    side: if is_long { "Buy".into() } else { "Sell".into() },
+                    qty,
+                    price: fill_price,
+                    fee,
+                    fee_rate: fr,
+                    reference_price,
+                    reference_ts_ms,
+                    reference_source: reference_source.map(str::to_string),
+                    slippage_bps,
+                    liquidity_role: liquidity_role.map(str::to_string),
+                    fill_latency_ms,
+                    realized_pnl,
+                    strategy_name: strategy.to_string(),
+                    context_id: fill_ctx_id,
+                    entry_context_id: fill_entry_ctx,
+                    engine_mode: em.to_string(),
+                    // INFRA-PREBUILD-1 Part A: exchange-confirmed fill path — exit_source NULL.
+                    // INFRA-PREBUILD-1 A 部：交易所確認 fill 不經 Combine Layer。
+                    exit_source: None,
+                },
+                "confirmed_fill",
+            );
         }
 
         // EXIT-FEATURES-TABLE-1 Phase 1b GAP-1 (2026-04-19): emit exit feature

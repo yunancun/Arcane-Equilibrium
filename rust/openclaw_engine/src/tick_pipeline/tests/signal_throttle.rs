@@ -83,7 +83,11 @@ fn test_dbrun1_unchanged_signal_throttled_within_heartbeat() {
     p.set_signals_heartbeat_ms(60_000);
     assert!(p.should_persist_signal(&super::make_signal("BTCUSDT", SignalDirection::Long, 1_000)));
     // Same direction, +30s → throttled
-    assert!(!p.should_persist_signal(&super::make_signal("BTCUSDT", SignalDirection::Long, 31_000)));
+    assert!(!p.should_persist_signal(&super::make_signal(
+        "BTCUSDT",
+        SignalDirection::Long,
+        31_000
+    )));
     assert_eq!(p.signals_throttled(), 1);
 }
 
@@ -94,7 +98,11 @@ fn test_dbrun1_direction_change_breaks_throttle() {
     p.set_signals_heartbeat_ms(60_000);
     assert!(p.should_persist_signal(&super::make_signal("BTCUSDT", SignalDirection::Long, 1_000)));
     // Direction flips → persist immediately even within heartbeat
-    assert!(p.should_persist_signal(&super::make_signal("BTCUSDT", SignalDirection::Short, 5_000)));
+    assert!(p.should_persist_signal(&super::make_signal(
+        "BTCUSDT",
+        SignalDirection::Short,
+        5_000
+    )));
     assert_eq!(p.signals_throttled(), 0);
 }
 
@@ -105,7 +113,11 @@ fn test_dbrun1_heartbeat_elapsed_persists() {
     p.set_signals_heartbeat_ms(60_000);
     assert!(p.should_persist_signal(&super::make_signal("BTCUSDT", SignalDirection::Long, 1_000)));
     // Same direction, 60s later → heartbeat fires
-    assert!(p.should_persist_signal(&super::make_signal("BTCUSDT", SignalDirection::Long, 61_000)));
+    assert!(p.should_persist_signal(&super::make_signal(
+        "BTCUSDT",
+        SignalDirection::Long,
+        61_000
+    )));
     assert_eq!(p.signals_throttled(), 0);
 }
 

@@ -34,7 +34,7 @@ pub use consumer_loop::{ConsumerLoopConfig, ConsumerLoopStatus, TeacherConsumerL
 pub use governance_impl::GovernanceCoreWrapper;
 pub use outcome_tracker::{sharpe_from_returns, OutcomeTracker, OutcomeWindow, PendingExecution};
 pub use parser::{parse_directive, Directive, DirectiveType, ParserError};
-pub use strategy_ipc_impl::PipelineCommandSink;
+pub use strategy_ipc_impl::{EngineCommandSink, PipelineCommandSink};
 pub use writer::{persist_directive, record_execution, WriterError};
 
 use crate::ai_budget::tracker::{BudgetTracker, SCOPE_AGENT_TEACHER};

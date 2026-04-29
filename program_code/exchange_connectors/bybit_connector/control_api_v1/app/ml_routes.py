@@ -18,8 +18,8 @@ Spec: docs/references/2026-04-23--model_canary_promotion_rules_draft.md
       sql/migrations/V023__model_registry.sql
 
 Design notes:
-- `model_promote` goes through the same `_require_operator_role` gate used by
-  edge_estimator / governance write endpoints. Non-Operator actors get 403.
+- `model_promote` requires Operator role plus `ml:write` scope. Non-Operator
+  or under-scoped actors get 403.
 - Transition state machine enforced by calling
   `program_code.ml_training.model_registry.transition_canary_status` so the
   allowed-from matrix stays the single-source-of-truth (defined in Python
@@ -40,7 +40,9 @@ from typing import Any, Literal, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field, field_validator
 
-from .governance_routes import _get_auth_actor, _require_operator_role
+from . import main_legacy as base
+from .governance_routes import _get_auth_actor
+from .secret_runtime import get_secret_value
 
 logger = logging.getLogger(__name__)
 
@@ -156,14 +158,16 @@ def _connect_pg():
 
         import psycopg
     except ImportError as e:
-        raise HTTPException(status_code=503, detail=f"psycopg unavailable: {e}")
-    dsn = os.environ.get("OPENCLAW_DATABASE_URL")
+        logger.warning("model_registry: psycopg import failed: %s", e)
+        raise HTTPException(status_code=503, detail="model registry database unavailable")
+    dsn = get_secret_value("OPENCLAW_DATABASE_URL")
     if not dsn:
-        raise HTTPException(status_code=503, detail="OPENCLAW_DATABASE_URL unset")
+        raise HTTPException(status_code=503, detail="model registry database unavailable")
     try:
         return psycopg.connect(dsn)
     except Exception as e:  # noqa: BLE001
-        raise HTTPException(status_code=503, detail=f"PG connect failed: {e}")
+        logger.warning("model_registry: PG connect failed: %s", e)
+        raise HTTPException(status_code=503, detail="model registry database unavailable")
 
 
 def _row_to_dict(cols: list[str], row: tuple) -> dict:
@@ -175,6 +179,13 @@ def _row_to_dict(cols: list[str], row: tuple) -> dict:
         else:
             out[col] = val
     return out
+
+
+def _require_ml_read(actor: base.AuthenticatedActor) -> None:
+    """Shared Batch B gate for model registry observability.
+    Batch B 共用模型 registry 讀取閘門：必須具 ml:read scope。
+    """
+    base.require_scope(actor, "ml:read")
 
 
 # ───── GET /model_registry (list) ─────────────────────────────────────
@@ -189,6 +200,7 @@ async def list_registry(
         description="shadow|promoting|production|retired|rejected (omit = all)",
     ),
     limit: int = Query(50, ge=1, le=500, description="Max rows (1..500)"),
+    actor: base.AuthenticatedActor = Depends(base.current_actor),
 ) -> dict:
     """List learning.model_registry rows with optional filters.
     列出 learning.model_registry 列（可過濾）。
@@ -196,9 +208,11 @@ async def list_registry(
     Response: {"rows": [...], "count": N}. Each row includes identity +
     artifact + verdict + acceptance_report (JSONB) + canary metadata.
 
-    Read-only. No authentication required (reflects observability-first policy
-    for operator dashboards and Grafana). Mutating endpoints require Operator.
+    Read-only but authenticated: model artifact paths/schema hashes are internal
+    release metadata and require ml:read.
+    只讀但需認證：模型 artifact path/schema hash 屬內部 release metadata。
     """
+    _require_ml_read(actor)
     conn = _connect_pg()
     cols = [
         "id", "strategy", "engine_mode", "quantile", "schema_version",
@@ -242,7 +256,7 @@ async def list_registry(
         }
     except Exception as e:  # noqa: BLE001
         logger.warning("model_registry list failed: %s", e)
-        raise HTTPException(status_code=500, detail=f"list failed: {e}")
+        raise HTTPException(status_code=500, detail="model registry query failed")
     finally:
         try:
             conn.close()
@@ -258,6 +272,7 @@ async def model_info(
     strategy: str = Query(..., description="Strategy name (required)"),
     engine_mode: str = Query(..., description="paper|demo|live|live_demo (required)"),
     quantile: str = Query("q50", description="q10|q50|q90 (default q50)"),
+    actor: base.AuthenticatedActor = Depends(base.current_actor),
 ) -> dict:
     """Resolve the latest production-or-promoting model for a slot.
     解析 slot 當前權威 model（production 或 promoting）。
@@ -267,6 +282,7 @@ async def model_info(
     row the Rust side would load on SIGHUP. Returns 404 when no matching row
     exists (operator should fall back to filesystem `_current` symlink).
     """
+    _require_ml_read(actor)
     if quantile not in ("q10", "q50", "q90"):
         raise HTTPException(
             status_code=400,
@@ -280,8 +296,7 @@ async def model_info(
     conn = _connect_pg()
     sql = (
         "SELECT id, artifact_path, canary_status, verdict, "
-        "       to_char(train_date, 'YYYY-MM-DD'), artifact_sha256, "
-        "       promoted_at, created_at "
+        "       train_date, artifact_sha256, promoted_at, created_at, schema_version "
         "FROM learning.model_registry "
         "WHERE strategy = %s AND engine_mode = %s AND quantile = %s "
         "  AND canary_status IN ('production', 'promoting') "
@@ -294,27 +309,54 @@ async def model_info(
         with conn, conn.cursor() as cur:
             cur.execute(sql, (strategy, engine_mode, quantile))
             row = cur.fetchone()
-        if row is None:
-            raise HTTPException(
-                status_code=404,
-                detail=f"no production/promoting row for {strategy}/{engine_mode}/{quantile}",
+            if row is None:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"no production/promoting row for {strategy}/{engine_mode}/{quantile}",
+                )
+            (rid, path, status, verdict, train_date, sha256, promoted_at, created_at, schema_version) = row
+            cur.execute(
+                """
+                SELECT quantile, id, artifact_path, artifact_sha256
+                FROM learning.model_registry
+                WHERE strategy = %s
+                  AND engine_mode = %s
+                  AND schema_version = %s
+                  AND train_date = %s
+                  AND canary_status = %s
+                  AND quantile IN ('q10', 'q50', 'q90')
+                """,
+                (strategy, engine_mode, schema_version, train_date, status),
             )
-        (rid, path, status, verdict, train_date, sha256, promoted_at, created_at) = row
+            siblings = cur.fetchall()
+        sibling_by_quantile = {r[0]: r for r in siblings}
+        required = {"q10", "q50", "q90"}
+        if set(sibling_by_quantile) != required:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"incomplete serving trio for {strategy}/{engine_mode}/"
+                    f"{schema_version}/{train_date}: have={sorted(sibling_by_quantile)}"
+                ),
+            )
         return {
             "id": rid,
             "artifact_path": path,
             "canary_status": status,
             "verdict": verdict,
-            "train_date": train_date,
+            "train_date": train_date.isoformat() if hasattr(train_date, "isoformat") else str(train_date),
             "artifact_sha256": sha256,
             "promoted_at": promoted_at.isoformat() if promoted_at else None,
             "created_at": created_at.isoformat() if created_at else None,
+            "schema_version": schema_version,
+            "serving_unit_quantiles": sorted(required),
+            "serving_unit_status": status,
         }
     except HTTPException:
         raise
     except Exception as e:  # noqa: BLE001
         logger.warning("model_info query failed: %s", e)
-        raise HTTPException(status_code=500, detail=f"query failed: {e}")
+        raise HTTPException(status_code=500, detail="model registry query failed")
     finally:
         try:
             conn.close()
@@ -322,7 +364,7 @@ async def model_info(
             pass
 
 
-# ───── POST /model_promote (Operator gate) ───────────────────────────
+# ───── POST /model_promote (Operator + scope gate) ───────────────────
 
 
 @router.post("/model_promote")
@@ -341,7 +383,7 @@ async def promote(
       `program_code.ml_training.model_registry.transition_canary_status`
       (invalid from-state or unknown to_status returns 409 Conflict).
     """
-    _require_operator_role(actor)
+    base.require_scope_and_operator(actor, "ml:write")
 
     to_status = body.to_status
     if to_status not in ("promoting", "production", "retired", "rejected"):

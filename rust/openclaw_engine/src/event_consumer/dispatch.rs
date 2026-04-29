@@ -9,7 +9,7 @@
 //!   的異步任務。同時處理 shadow（紙盤）和 primary（交易所）模式。返回 event consumer
 //!   用於追蹤交易所模式訂單確認的 PendingOrder 接收端。
 
-use super::types::PendingOrder;
+use super::types::{PendingOrder, PendingOrderEvent};
 use crate::bybit_rest_client::{BybitApiError, BybitRestClient};
 use crate::instrument_info::InstrumentInfoCache;
 use crate::tick_pipeline::TickPipeline;
@@ -41,6 +41,11 @@ pub(super) const RETRY_DELAY_MS: [u64; 3] = [200, 800, 3200];
 /// 真正結構性錯誤會被快速拒絕；慢暫時性本身即為交易所降級訊號，久等無益。
 /// 關倉重試由 `reduce_only=true` 提供二級去重保護。
 pub(super) const CLOSE_RETRY_DELAY_MS: [u64; 2] = [100, 400];
+
+/// Per-attempt hard timeout for CLOSE dispatch (ms).
+/// Ensures "fast-exit" close retry budget is real wall-clock, not only sleep.
+/// 關倉單次派發硬逾時（毫秒），避免「快退場」只限制 sleep 而不限制請求等待。
+pub(super) const CLOSE_ATTEMPT_TIMEOUT_MS: u64 = 500;
 
 /// Classification of a dispatch error for retry decisioning.
 /// DISPATCH-RETRY-1 (2026-04-19) — distinguish transient network / rate-limit
@@ -222,6 +227,18 @@ fn classify_business_retcode(ret_code: i64, ret_msg: &str) -> DispatchOutcome {
     }
 }
 
+fn close_dispatch_timeout_error(timeout_ms: u64) -> BybitApiError {
+    BybitApiError::Business {
+        ret_code: 10019,
+        ret_msg: format!("close dispatch timed out after {timeout_ms}ms"),
+        response: serde_json::json!({
+            "layer": "dispatch",
+            "kind": "close_attempt_timeout",
+            "timeout_ms": timeout_ms
+        }),
+    }
+}
+
 /// Run a dispatch retry loop with the given delay schedule.
 ///
 /// DISPATCH-RETRY-1 (E2 review 2026-04-19): extracted from spawn_order_dispatch
@@ -328,7 +345,7 @@ pub(super) fn spawn_order_dispatch(
     shared_client: Option<&Arc<BybitRestClient>>,
     shared_instruments: Option<&Arc<InstrumentInfoCache>>,
     enable_dispatch: bool,
-) -> Option<mpsc::UnboundedReceiver<PendingOrder>> {
+) -> Option<mpsc::UnboundedReceiver<PendingOrderEvent>> {
     if !enable_dispatch {
         return None;
     }
@@ -362,7 +379,7 @@ pub(super) fn spawn_order_dispatch(
     // （FnMut 要求可重複呼叫）。DISPATCH-RETRY-1（E2 後續 2026-04-19）。
     let order_mgr = Arc::new(OrderManager::new(Arc::clone(client), Arc::clone(icache)));
     let icache_for_check = Arc::clone(icache);
-    let (pending_reg_tx, pending_reg_rx) = mpsc::unbounded_channel::<PendingOrder>();
+    let (pending_reg_tx, pending_reg_rx) = mpsc::unbounded_channel::<PendingOrderEvent>();
 
     tokio::spawn(async move {
         while let Some(req) = shadow_rx.recv().await {
@@ -399,7 +416,7 @@ pub(super) fn spawn_order_dispatch(
             // EXT-1: Register pending order BEFORE placing (for exchange mode)
             if req.is_primary {
                 let now_ms = openclaw_core::now_ms();
-                let _ = pending_reg_tx.send(PendingOrder {
+                let _ = pending_reg_tx.send(PendingOrderEvent::Register(PendingOrder {
                     order_link_id: req.order_link_id.clone(),
                     symbol: req.symbol.clone(),
                     is_long: req.is_long,
@@ -426,7 +443,7 @@ pub(super) fn spawn_order_dispatch(
                     reference_ts_ms: req.reference_ts_ms,
                     reference_source: req.reference_source.clone(),
                     cancel_requested_ts_ms: None,
-                });
+                }));
             }
             let side = if req.is_long {
                 OrderSide::Buy
@@ -484,13 +501,11 @@ pub(super) fn spawn_order_dispatch(
             } else {
                 &RETRY_DELAY_MS
             };
-            let retry_result = run_dispatch_retry(
-                delays,
-                &req.symbol,
-                &req.order_link_id,
-                |_attempt| {
+            let retry_result =
+                run_dispatch_retry(delays, &req.symbol, &req.order_link_id, |_attempt| {
                     let req_for_attempt = create_req.clone();
                     let om = Arc::clone(&order_mgr);
+                    let is_close = req.is_close;
                     // `async move` captures the Arc clone + cloned request by
                     // value. Each retry gets a fresh Future; the original
                     // `order_mgr` Arc binding stays alive in the outer closure
@@ -499,10 +514,25 @@ pub(super) fn spawn_order_dispatch(
                     // `async move` 捕獲 Arc 複製與複製後的請求（by value）。
                     // 每次重試產生新的 Future；原始 `order_mgr` Arc 綁定保留在
                     // 外層 closure 供下次迭代使用。
-                    async move { om.place_order(req_for_attempt).await }
-                },
-            )
-            .await;
+                    async move {
+                        if is_close {
+                            match tokio::time::timeout(
+                                Duration::from_millis(CLOSE_ATTEMPT_TIMEOUT_MS),
+                                om.place_order(req_for_attempt),
+                            )
+                            .await
+                            {
+                                Ok(result) => result,
+                                Err(_) => {
+                                    Err(close_dispatch_timeout_error(CLOSE_ATTEMPT_TIMEOUT_MS))
+                                }
+                            }
+                        } else {
+                            om.place_order(req_for_attempt).await
+                        }
+                    }
+                })
+                .await;
 
             // Summary logging per outcome. retCode extraction lives here so the
             // generic helper stays untyped over log field shapes.
@@ -566,6 +596,25 @@ pub(super) fn spawn_order_dispatch(
                         attempts = attempts,
                         "order dispatch failed (structural, no retry) / 訂單派發失敗（結構性，不重試）"
                     );
+                    if req.is_primary {
+                        let reason =
+                            format!("dispatch_structural: attempts={attempts}; error={last_error}");
+                        if let Err(e) = pending_reg_tx.send(PendingOrderEvent::DispatchFailed {
+                            order_link_id: req.order_link_id.clone(),
+                            symbol: req.symbol.clone(),
+                            is_close: req.is_close,
+                            terminal_status: "Rejected".to_string(),
+                            reason,
+                            ts_ms: openclaw_core::now_ms(),
+                        }) {
+                            warn!(
+                                order_link_id = %req.order_link_id,
+                                error = %e,
+                                "dispatch failure terminal event dropped — pending state may require sweep \
+                                 / 派發失敗 terminal event 發送失敗 — pending 狀態可能需 sweep"
+                            );
+                        }
+                    }
                 }
                 DispatchRetryResult::TransientExhausted {
                     last_error,
@@ -590,6 +639,26 @@ pub(super) fn spawn_order_dispatch(
                         attempts = attempts,
                         "order dispatch failed (transient retry exhausted) / 訂單派發失敗（暫時性重試耗盡）"
                     );
+                    if req.is_primary {
+                        let reason = format!(
+                            "dispatch_transient_exhausted: attempts={attempts}; error={last_error}"
+                        );
+                        if let Err(e) = pending_reg_tx.send(PendingOrderEvent::DispatchFailed {
+                            order_link_id: req.order_link_id.clone(),
+                            symbol: req.symbol.clone(),
+                            is_close: req.is_close,
+                            terminal_status: "Failed".to_string(),
+                            reason,
+                            ts_ms: openclaw_core::now_ms(),
+                        }) {
+                            warn!(
+                                order_link_id = %req.order_link_id,
+                                error = %e,
+                                "dispatch failure terminal event dropped — pending state may require sweep \
+                                 / 派發失敗 terminal event 發送失敗 — pending 狀態可能需 sweep"
+                            );
+                        }
+                    }
                 }
             }
         }
@@ -672,28 +741,19 @@ mod tests {
     #[test]
     fn test_classify_no_credentials() {
         let e = BybitApiError::NoCredentials;
-        assert_eq!(
-            classify_dispatch_error(&e),
-            DispatchOutcome::Structural
-        );
+        assert_eq!(classify_dispatch_error(&e), DispatchOutcome::Structural);
     }
 
     #[test]
     fn test_classify_signing_error() {
         let e = BybitApiError::SigningError("bad HMAC".into());
-        assert_eq!(
-            classify_dispatch_error(&e),
-            DispatchOutcome::Structural
-        );
+        assert_eq!(classify_dispatch_error(&e), DispatchOutcome::Structural);
     }
 
     #[test]
     fn test_classify_ip_rate_limit_is_transient() {
         let e = biz(10006, "Too many requests");
-        assert_eq!(
-            classify_dispatch_error(&e),
-            DispatchOutcome::Transient
-        );
+        assert_eq!(classify_dispatch_error(&e), DispatchOutcome::Transient);
     }
 
     #[test]
@@ -705,19 +765,13 @@ mod tests {
     #[test]
     fn test_classify_invalid_param_is_structural() {
         let e = biz(10001, "invalid param: qty must be > 0");
-        assert_eq!(
-            classify_dispatch_error(&e),
-            DispatchOutcome::Structural
-        );
+        assert_eq!(classify_dispatch_error(&e), DispatchOutcome::Structural);
     }
 
     #[test]
     fn test_classify_api_key_invalid_is_structural() {
         let e = biz(10003, "api key invalid");
-        assert_eq!(
-            classify_dispatch_error(&e),
-            DispatchOutcome::Structural
-        );
+        assert_eq!(classify_dispatch_error(&e), DispatchOutcome::Structural);
     }
 
     #[test]
@@ -741,10 +795,7 @@ mod tests {
     #[test]
     fn test_classify_insufficient_balance_is_structural() {
         let e = biz(110012, "insufficient available balance");
-        assert_eq!(
-            classify_dispatch_error(&e),
-            DispatchOutcome::Structural
-        );
+        assert_eq!(classify_dispatch_error(&e), DispatchOutcome::Structural);
     }
 
     #[test]
@@ -756,19 +807,13 @@ mod tests {
     #[test]
     fn test_classify_dust_min_qty_is_structural() {
         let e = biz(170124, "order qty below min");
-        assert_eq!(
-            classify_dispatch_error(&e),
-            DispatchOutcome::Structural
-        );
+        assert_eq!(classify_dispatch_error(&e), DispatchOutcome::Structural);
     }
 
     #[test]
     fn test_classify_bybit_server_busy_is_transient() {
         let e = biz(10016, "server busy");
-        assert_eq!(
-            classify_dispatch_error(&e),
-            DispatchOutcome::Transient
-        );
+        assert_eq!(classify_dispatch_error(&e), DispatchOutcome::Transient);
         // Sibling codes in the same transient family / 同族暫時性碼
         assert_eq!(
             classify_dispatch_error(&biz(10017, "gateway timeout")),
@@ -790,37 +835,25 @@ mod tests {
         // unmodeled error shapes against the exchange.
         // 保守預設 — 未知碼禁止重試，避免對交易所放大未建模錯誤。
         let e = biz(99999, "mystery error");
-        assert_eq!(
-            classify_dispatch_error(&e),
-            DispatchOutcome::Structural
-        );
+        assert_eq!(classify_dispatch_error(&e), DispatchOutcome::Structural);
     }
 
     #[test]
     fn test_classify_exceed_max_qty_is_structural() {
         let e = biz(170210, "order qty exceeds max");
-        assert_eq!(
-            classify_dispatch_error(&e),
-            DispatchOutcome::Structural
-        );
+        assert_eq!(classify_dispatch_error(&e), DispatchOutcome::Structural);
     }
 
     #[test]
     fn test_classify_sign_error_is_structural() {
         let e = biz(10004, "sign not match");
-        assert_eq!(
-            classify_dispatch_error(&e),
-            DispatchOutcome::Structural
-        );
+        assert_eq!(classify_dispatch_error(&e), DispatchOutcome::Structural);
     }
 
     #[test]
     fn test_classify_unmatched_ip_is_structural() {
         let e = biz(10010, "unmatched ip");
-        assert_eq!(
-            classify_dispatch_error(&e),
-            DispatchOutcome::Structural
-        );
+        assert_eq!(classify_dispatch_error(&e), DispatchOutcome::Structural);
     }
 
     // -----------------------------------------------------------------
@@ -840,17 +873,11 @@ mod tests {
         // order_link_id format" 會誤判為 NoOp（靜默回報成功，實為 client 側
         // 結構性錯誤），現正確歸為 Structural。
         let e = biz(10001, "invalid order_link_id format");
-        assert_eq!(
-            classify_dispatch_error(&e),
-            DispatchOutcome::Structural
-        );
+        assert_eq!(classify_dispatch_error(&e), DispatchOutcome::Structural);
         // Additional narrow check: case-insensitive "DUPLICATE" still matches.
         // 補充：大寫 "DUPLICATE" 仍匹配（子串比對前 to_ascii_lowercase）。
         let e_upper = biz(10001, "DUPLICATE order_link_id");
-        assert_eq!(
-            classify_dispatch_error(&e_upper),
-            DispatchOutcome::NoOp
-        );
+        assert_eq!(classify_dispatch_error(&e_upper), DispatchOutcome::NoOp);
     }
 
     #[test]
@@ -895,16 +922,12 @@ mod tests {
     async fn test_run_dispatch_retry_ok_first_try_attempts_1() {
         use std::cell::RefCell;
         let call_count = RefCell::new(0u32);
-        let result = run_dispatch_retry::<i32, _, _>(
-            &[10, 10, 10],
-            "BTCUSDT",
-            "oLidTest",
-            |_attempt| {
+        let result =
+            run_dispatch_retry::<i32, _, _>(&[10, 10, 10], "BTCUSDT", "oLidTest", |_attempt| {
                 *call_count.borrow_mut() += 1;
                 async move { Ok::<i32, BybitApiError>(42) }
-            },
-        )
-        .await;
+            })
+            .await;
         match result {
             DispatchRetryResult::Ok { value, attempts } => {
                 assert_eq!(value, 42);
@@ -923,15 +946,10 @@ mod tests {
             Err(biz(10006, "transient 2")),
             Ok(99),
         ]);
-        let result = run_dispatch_retry::<i32, _, _>(
-            &[5, 5, 5],
-            "BTCUSDT",
-            "oLid",
-            |_| {
-                let r = results.borrow_mut().remove(0);
-                async move { r }
-            },
-        )
+        let result = run_dispatch_retry::<i32, _, _>(&[5, 5, 5], "BTCUSDT", "oLid", |_| {
+            let r = results.borrow_mut().remove(0);
+            async move { r }
+        })
         .await;
         match result {
             DispatchRetryResult::Ok { value, attempts } => {
@@ -949,21 +967,17 @@ mod tests {
     async fn test_run_dispatch_retry_structural_breaks_without_retry() {
         use std::cell::RefCell;
         let call_count = RefCell::new(0u32);
-        let result = run_dispatch_retry::<(), _, _>(
-            &[5, 5, 5],
-            "BTCUSDT",
-            "oLid",
-            |_| {
-                *call_count.borrow_mut() += 1;
-                async move {
-                    Err::<(), BybitApiError>(biz(110012, "insufficient balance"))
-                }
-            },
-        )
+        let result = run_dispatch_retry::<(), _, _>(&[5, 5, 5], "BTCUSDT", "oLid", |_| {
+            *call_count.borrow_mut() += 1;
+            async move { Err::<(), BybitApiError>(biz(110012, "insufficient balance")) }
+        })
         .await;
         match result {
             DispatchRetryResult::Structural { attempts, .. } => {
-                assert_eq!(attempts, 1, "structural on first try must break immediately");
+                assert_eq!(
+                    attempts, 1,
+                    "structural on first try must break immediately"
+                );
             }
             other => panic!("expected Structural, got {:?}", other),
         }
@@ -987,15 +1001,10 @@ mod tests {
             Err(biz(10001, "duplicate order_link_id rejected")),
             Err(biz(99999, "should_not_be_reached")), // guard — NoOp must stop here
         ]);
-        let result = run_dispatch_retry::<(), _, _>(
-            &[5, 5, 5],
-            "BTCUSDT",
-            "oLid",
-            |_| {
-                let r = results.borrow_mut().remove(0);
-                async move { r }
-            },
-        )
+        let result = run_dispatch_retry::<(), _, _>(&[5, 5, 5], "BTCUSDT", "oLid", |_| {
+            let r = results.borrow_mut().remove(0);
+            async move { r }
+        })
         .await;
         match result {
             DispatchRetryResult::NoOp {
@@ -1038,15 +1047,10 @@ mod tests {
         // Use tiny delays for fast test (schedule length equivalent to
         // RETRY_DELAY_MS = 3 retries).
         // 測試用極短延遲（表長等於 RETRY_DELAY_MS = 3 次重試）。
-        let result = run_dispatch_retry::<(), _, _>(
-            &[1, 1, 1],
-            "BTCUSDT",
-            "oLid",
-            |_| {
-                let r = results.borrow_mut().remove(0);
-                async move { r }
-            },
-        )
+        let result = run_dispatch_retry::<(), _, _>(&[1, 1, 1], "BTCUSDT", "oLid", |_| {
+            let r = results.borrow_mut().remove(0);
+            async move { r }
+        })
         .await;
         match result {
             DispatchRetryResult::TransientExhausted {
@@ -1082,18 +1086,12 @@ mod tests {
         // 驗證 Q2 預算差異：close 路徑更快耗盡。
         assert_eq!(CLOSE_RETRY_DELAY_MS.len(), 2);
         let call_count = RefCell::new(0u32);
-        let result = run_dispatch_retry::<(), _, _>(
-            &CLOSE_RETRY_DELAY_MS,
-            "BTCUSDT",
-            "oLid-close",
-            |_| {
+        let result =
+            run_dispatch_retry::<(), _, _>(&CLOSE_RETRY_DELAY_MS, "BTCUSDT", "oLid-close", |_| {
                 *call_count.borrow_mut() += 1;
-                async move {
-                    Err::<(), BybitApiError>(biz(10006, "rate limit"))
-                }
-            },
-        )
-        .await;
+                async move { Err::<(), BybitApiError>(biz(10006, "rate limit")) }
+            })
+            .await;
         match result {
             DispatchRetryResult::TransientExhausted { attempts, .. } => {
                 assert_eq!(
@@ -1124,5 +1122,16 @@ mod tests {
             close_total < open_total,
             "close retry sleep total must be < open retry sleep total (Q2 invariant)"
         );
+    }
+
+    #[test]
+    fn test_close_attempt_timeout_constant_is_500ms() {
+        assert_eq!(CLOSE_ATTEMPT_TIMEOUT_MS, 500);
+    }
+
+    #[test]
+    fn test_close_dispatch_timeout_error_is_transient() {
+        let e = close_dispatch_timeout_error(CLOSE_ATTEMPT_TIMEOUT_MS);
+        assert_eq!(classify_dispatch_error(&e), DispatchOutcome::Transient);
     }
 }

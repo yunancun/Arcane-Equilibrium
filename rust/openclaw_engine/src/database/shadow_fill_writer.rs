@@ -26,7 +26,7 @@
 //!
 //! Spec: docs/references/2026-04-15--edge_predictor_spec.md v1.4 §7.3 / V017 migration.
 
-use super::batch_insert::exec_single_insert;
+use super::batch_insert::{exec_single_insert, SingleInsertOutcome};
 use super::pool::DbPool;
 use super::ShadowFillMsg;
 use std::collections::HashMap;
@@ -91,11 +91,15 @@ pub async fn run_shadow_fill_writer(
 /// 是 DB CHECK 之外的第二道防線。
 async fn flush_shadow_fills(pool: &DbPool, pending: &mut HashMap<String, ShadowFillMsg>) {
     if !pool.is_available() {
-        pending.clear();
+        warn!(
+            pending_rows = pending.len(),
+            "shadow_fill_writer flush skipped: DB pool unavailable — retaining pending rows"
+        );
         return;
     }
 
-    for (_, sf) in pending.drain() {
+    let rows: Vec<(String, ShadowFillMsg)> = pending.drain().collect();
+    for (key, sf) in rows {
         // DB-RUN-6: reject epoch-0 writes — same policy as decision_feature_writer.
         // 拒絕 epoch=0 的寫入，1970 行會毒化訓練時間域 JOIN。
         if sf.ts_ms == 0 {
@@ -160,7 +164,10 @@ async fn flush_shadow_fills(pool: &DbPool, pending: &mut HashMap<String, ShadowF
         .bind(sf.predicted_q90 as f64)
         .bind(sf.cost_bps_at_open);
 
-        let _ = exec_single_insert(pool, "learning.decision_shadow_fills", query).await;
+        let outcome = exec_single_insert(pool, "learning.decision_shadow_fills", query).await;
+        if !matches!(outcome, SingleInsertOutcome::Ok(_)) {
+            pending.insert(key, sf);
+        }
     }
 }
 

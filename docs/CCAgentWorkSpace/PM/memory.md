@@ -902,3 +902,57 @@ Operator 接續 Tier 8 sign-off 後說「繼續派」。PM 按 Tier 8 §8 推薦
 ### Deployment
 - No deploy/restart performed.
 - Linux `trade-core` preflight drift remains separate: `engine_alive=true`, `demo/live=true`, `paper=false`.
+
+## 2026-04-29 Batch F F0 Prework
+
+### Scope
+- Prepared Batch F before implementation; superseded by the Batch F remediation sign-off below.
+- Covered `MLM-001..005`, `SADF-001`, `SADF-004`, `SADF-005`, `SADF-006`, and `LP-003`.
+- Report: `docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-29--batch_f_ml_agent_autonomy_prework.md`.
+
+### PM Decision
+- At F0 time, Batch F was the only open remediation batch after Batch D sign-off landed.
+- F implementation later completed locally with explicit ownership and no overwrite of existing B/C/D/E dirty changes.
+- LinUCB should remain non-authoritative by default unless QC and MIT explicitly approve accepted-intent metadata promotion.
+
+### Collision Notes
+- F-relevant dirty files already exist from prior batches: `start_paper_trading.sh`, deploy README, `ml_routes.py`, `paper_trading_routes.py`, `decision_feature_writer.rs`, `main.rs`, and `step_3_signals.rs`.
+- Future F workers must read and preserve those diffs before editing.
+
+## 2026-04-29 Batch A-E Gap Reassessment
+
+### Result
+- Checked operator-supplied A-E review against the current worktree.
+- Stale: D/E tracking/sign-off missing was no longer true.
+- Real and fixed: Batch A direct-handler auth fixture drift, `RC-005`, `RC-006`, `OS-003`, `OS-006`.
+
+### Verification
+- A-E Python targeted suite: 128 passed, 22 existing Pydantic warnings.
+- Rust full lib: 2355 passed.
+- `cargo check -p openclaw_engine` passed with existing warnings.
+- `cargo build --release -p openclaw_engine` passed with existing warnings.
+- Batch D+E static guards: 18 passed.
+- Script `bash -n`, broad-kill/heredoc static scan, and `git diff --check` passed.
+
+### Deployment
+- No deploy/restart/commit/push performed.
+- A-E were green for sync + rebuild from this worktree at that checkpoint; this note was later superseded by Batch F local completion.
+- Report: `docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-29--batch_a_e_gap_reassessment.md`.
+
+## 2026-04-29 Batch F Remediation
+
+### Result
+- Batch F is fixed locally, uncommitted, and not deployed.
+- Closed `MLM-001..005`, `SADF-001`, `SADF-004`, `SADF-005`, `SADF-006`, and `LP-003`.
+- Report: `docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-29--batch_f_ml_agent_autonomy_signoff.md`; operator copy at `docs/CCAgentWorkSpace/Operator/2026-04-29--batch_f_ml_agent_autonomy_signoff.md`.
+
+### Verification
+- Python py_compile passed for touched ML/API files.
+- `bash -n helper_scripts/start_paper_trading.sh` passed.
+- `cargo check -p openclaw_engine` passed with existing warnings.
+- ML targeted pytest: 78 passed, 7 skipped.
+- Rust targeted tests: 47 passed across Teacher IPC, `boost_arm`, LinUCB runtime, decision context, edge feature hash, and ORT metadata drift.
+
+### Gaps
+- No deploy/restart/commit/push performed.
+- Live PG model-registry integration, real ONNX artifact e2e load, LinUCB live boot smoke, and full A-F deploy smoke remain before production release.

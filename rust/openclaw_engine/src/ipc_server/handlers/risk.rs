@@ -147,7 +147,8 @@ pub(in crate::ipc_server) async fn handle_update_risk_config(
         );
     }
 
-    let _ = tx.send(PipelineCommand::UpdateRiskConfig {
+    let (response_tx, response_rx) = tokio::sync::oneshot::channel();
+    if let Err(e) = tx.send(PipelineCommand::UpdateRiskConfig {
         hard_stop_pct,
         trailing_stop_pct,
         trailing_activation_pct,
@@ -177,8 +178,21 @@ pub(in crate::ipc_server) async fn handle_update_risk_config(
         exit_giveback_slope,
         exit_giveback_floor,
         exit_stale_peak_ms,
-    });
-    JsonRpcResponse::success(id, serde_json::json!({ "updated": true }))
+        response_tx: Some(response_tx),
+    }) {
+        return JsonRpcResponse::error(id, ERR_INTERNAL, format!("channel send failed: {e}"));
+    }
+    match tokio::time::timeout(std::time::Duration::from_secs(5), response_rx).await {
+        Ok(Ok(Ok(json_str))) => match serde_json::from_str::<serde_json::Value>(&json_str) {
+            Ok(v) => JsonRpcResponse::success(id, v),
+            Err(e) => {
+                JsonRpcResponse::error(id, ERR_INTERNAL, format!("parse risk update ack: {e}"))
+            }
+        },
+        Ok(Ok(Err(e))) => JsonRpcResponse::error(id, ERR_INTERNAL, e),
+        Ok(Err(_)) => JsonRpcResponse::error(id, ERR_INTERNAL, "response channel dropped"),
+        Err(_) => JsonRpcResponse::error(id, ERR_INTERNAL, "timeout waiting for event consumer"),
+    }
 }
 
 /// ARCH-RC1 1C-3-B: Get Rust-native risk runtime status snapshot.
@@ -409,6 +423,7 @@ pub(in crate::ipc_server) async fn handle_restore_exit_config_defaults(
         exit_giveback_slope,
         exit_giveback_floor,
         exit_stale_peak_ms,
+        response_tx: None,
     }) {
         return JsonRpcResponse::error(id, ERR_INTERNAL, format!("channel send failed: {e}"));
     }
@@ -647,9 +662,16 @@ mod restore_exit_config_defaults_tests {
             } => {
                 // Spot-check 3 representative values bit-exact against default fns.
                 // 抽 3 個代表值與 default fns 逐位元比對。
-                assert!((exit_min_net_floor_bps.unwrap() - baseline.min_net_floor_bps).abs() < f64::EPSILON);
-                assert!((exit_giveback_base.unwrap() - baseline.giveback_base).abs() < f64::EPSILON);
-                assert!((exit_giveback_floor.unwrap() - baseline.giveback_floor).abs() < f64::EPSILON);
+                assert!(
+                    (exit_min_net_floor_bps.unwrap() - baseline.min_net_floor_bps).abs()
+                        < f64::EPSILON
+                );
+                assert!(
+                    (exit_giveback_base.unwrap() - baseline.giveback_base).abs() < f64::EPSILON
+                );
+                assert!(
+                    (exit_giveback_floor.unwrap() - baseline.giveback_floor).abs() < f64::EPSILON
+                );
             }
             other => panic!("expected UpdateRiskConfig, got {:?}", other),
         }

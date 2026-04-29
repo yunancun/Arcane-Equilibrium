@@ -24,6 +24,7 @@
 //!   `RiskManager` 的路徑都違反架構不變量。
 
 use crate::claude_teacher::applier::{IpcFuture, StrategyIpcSink};
+use crate::ipc_server::EngineCommandChannels;
 use crate::tick_pipeline::PipelineCommand;
 use std::time::Duration;
 use tokio::sync::{mpsc, oneshot};
@@ -54,6 +55,96 @@ impl PipelineCommandSink {
     pub fn with_timeout_ms(mut self, ms: u64) -> Self {
         self.timeout_ms = ms;
         self
+    }
+}
+
+/// EN: Production sink that routes through the per-engine command bundle.
+/// Defaults Teacher tuning to Demo; Live promotion stays a separate
+/// operator-authorized path and disabled Paper is never the default target.
+/// 中文：透過每引擎命令 bundle 路由的生產 sink。Teacher 調參默認 Demo；
+/// Live 促升保留為獨立授權路徑，disabled Paper 絕不作為默認目標。
+pub struct EngineCommandSink {
+    channels: EngineCommandChannels,
+    target_engine: &'static str,
+    timeout_ms: u64,
+}
+
+impl EngineCommandSink {
+    /// EN: Construct the default Teacher sink. Demo is the only supported
+    /// target for autonomous directive application in this phase.
+    /// 中文：構造 Teacher 默認 sink。本階段自主 directive application 僅支援 Demo。
+    pub fn demo(channels: EngineCommandChannels) -> Self {
+        Self {
+            channels,
+            target_engine: "demo",
+            timeout_ms: DEFAULT_IPC_TIMEOUT_MS,
+        }
+    }
+
+    /// EN: Override the per-call timeout.
+    /// 中文：覆寫單次呼叫的超時。
+    pub fn with_timeout_ms(mut self, ms: u64) -> Self {
+        self.timeout_ms = ms;
+        self
+    }
+
+    fn sender(&self) -> Result<mpsc::UnboundedSender<PipelineCommand>, String> {
+        self.channels.select(self.target_engine).ok_or_else(|| {
+            format!(
+                "ipc route unavailable: target_engine={} command channel not bound \
+                 / IPC 目標管線未綁定",
+                self.target_engine
+            )
+        })
+    }
+}
+
+impl StrategyIpcSink for EngineCommandSink {
+    fn update_strategy_params<'a>(
+        &'a self,
+        strategy_name: &'a str,
+        params_json: &'a str,
+    ) -> IpcFuture<'a> {
+        let strategy = strategy_name.to_string();
+        let params = params_json.to_string();
+        let timeout = Duration::from_millis(self.timeout_ms);
+        Box::pin(async move {
+            let sender = self.sender()?;
+            let (tx, rx) = oneshot::channel();
+            let cmd = PipelineCommand::UpdateStrategyParams {
+                strategy_name: strategy,
+                params_json: params,
+                response_tx: tx,
+            };
+            sender
+                .send(cmd)
+                .map_err(|e| format!("ipc send failed (UpdateStrategyParams): {e}"))?;
+            tokio::time::timeout(timeout, rx)
+                .await
+                .map_err(|_| "ipc timeout (UpdateStrategyParams)".to_string())?
+                .map_err(|_| "ipc cancelled (UpdateStrategyParams)".to_string())?
+        })
+    }
+
+    fn set_strategy_active<'a>(&'a self, strategy_name: &'a str, active: bool) -> IpcFuture<'a> {
+        let strategy = strategy_name.to_string();
+        let timeout = Duration::from_millis(self.timeout_ms);
+        Box::pin(async move {
+            let sender = self.sender()?;
+            let (tx, rx) = oneshot::channel();
+            let cmd = PipelineCommand::SetStrategyActive {
+                strategy_name: strategy,
+                active,
+                response_tx: tx,
+            };
+            sender
+                .send(cmd)
+                .map_err(|e| format!("ipc send failed (SetStrategyActive): {e}"))?;
+            tokio::time::timeout(timeout, rx)
+                .await
+                .map_err(|_| "ipc timeout (SetStrategyActive)".to_string())?
+                .map_err(|_| "ipc cancelled (SetStrategyActive)".to_string())?
+        })
     }
 }
 
@@ -216,5 +307,31 @@ mod tests {
         let (tx, _rx) = mpsc::unbounded_channel();
         let sink = PipelineCommandSink::new(tx).with_timeout_ms(123);
         assert_eq!(sink.timeout_ms, 123);
+    }
+
+    #[tokio::test]
+    async fn test_engine_command_sink_defaults_to_demo_not_paper() {
+        let (paper_tx, mut paper_rx) = mpsc::unbounded_channel();
+        let (demo_tx, demo_rx) = mpsc::unbounded_channel();
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        spawn_ack_receiver(demo_rx, std::sync::Arc::clone(&seen));
+
+        let mut channels = EngineCommandChannels::default();
+        channels.paper = Some(paper_tx);
+        channels.demo = Some(demo_tx);
+
+        let sink = EngineCommandSink::demo(channels).with_timeout_ms(500);
+        let result = sink
+            .update_strategy_params("ma_crossover", r#"{"min_confidence":0.5}"#)
+            .await;
+        assert!(result.is_ok());
+        tokio::task::yield_now().await;
+
+        assert!(
+            paper_rx.try_recv().is_err(),
+            "Teacher IPC must not default-route to Paper"
+        );
+        let logged = seen.lock().unwrap().clone();
+        assert!(logged.iter().any(|s| s == "update:ma_crossover"));
     }
 }

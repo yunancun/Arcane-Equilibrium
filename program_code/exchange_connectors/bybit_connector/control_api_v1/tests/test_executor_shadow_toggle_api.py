@@ -84,23 +84,26 @@ from app import executor_routes
 
 @dataclass
 class _FakeActor:
-    """Mirror AuthenticatedActor's duck-typed shape (actor_id + roles).
-    對齊 AuthenticatedActor duck-type（actor_id + roles）。"""
+    """Mirror AuthenticatedActor's duck-typed shape (actor_id + roles + scopes).
+    對齊 AuthenticatedActor duck-type（actor_id + roles + scopes）。"""
 
     actor_id: str = "test-operator"
     roles: set[str] | None = None
+    scopes: set[str] | None = None
 
     def __post_init__(self) -> None:
         if self.roles is None:
             self.roles = {"operator", "viewer"}
+        if self.scopes is None:
+            self.scopes = {"executor:write"}
 
 
 def _operator_actor() -> _FakeActor:
-    return _FakeActor(actor_id="demo-operator", roles={"operator", "viewer"})
+    return _FakeActor(actor_id="demo-operator", roles={"operator", "viewer"}, scopes={"executor:write"})
 
 
 def _viewer_actor() -> _FakeActor:
-    return _FakeActor(actor_id="viewer-only", roles={"viewer"})
+    return _FakeActor(actor_id="viewer-only", roles={"viewer"}, scopes={"executor:write"})
 
 
 def _make_app(actor: _FakeActor) -> FastAPI:

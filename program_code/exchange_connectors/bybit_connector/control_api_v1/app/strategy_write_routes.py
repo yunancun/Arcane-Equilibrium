@@ -24,6 +24,13 @@ logger = logging.getLogger(__name__)
 _STRATEGY_IPC: EngineIPCClient | None = None
 
 
+def _require_strategy_write(actor: base.AuthenticatedActor) -> None:
+    """Shared Batch B gate for strategy state mutations.
+    Batch B 共用策略狀態寫入閘門：必須是 Operator 且具 strategy:write scope。
+    """
+    base.require_scope_and_operator(actor, "strategy:write")
+
+
 async def _get_strategy_ipc() -> EngineIPCClient:
     """Lazy-init IPC client for strategy activation sync.
     / 懶初始化用於策略啟停同步的 IPC client。
@@ -65,6 +72,7 @@ async def toggle_dynamic_risk(request: Request, actor: base.AuthenticatedActor =
     AUTO_DEPLOYER is a stub so the authoritative toggle lives in the Rust pipeline.
     DYNAMIC-RISK-1：轉發到 Rust IPC；Python AUTO_DEPLOYER 為 stub，Rust 為權威。
     """
+    _require_strategy_write(actor)
     try:
         body = await request.json()
     except Exception:
@@ -109,6 +117,7 @@ async def activate_strategy(
     Activate a registered strategy.
     激活已注册的策略。
     """
+    _require_strategy_write(actor)
     if _validate_strategy_name(name) is None:
         raise HTTPException(status_code=400, detail="Invalid strategy name / 无效策略名称")
     try:
@@ -138,6 +147,7 @@ async def pause_strategy(
     Pause a running strategy.
     暂停运行中的策略。
     """
+    _require_strategy_write(actor)
     if _validate_strategy_name(name) is None:
         raise HTTPException(status_code=400, detail="Invalid strategy name / 无效策略名称")
     try:
@@ -167,6 +177,7 @@ async def stop_strategy(
     Stop a strategy.
     停止策略。
     """
+    _require_strategy_write(actor)
     if _validate_strategy_name(name) is None:
         raise HTTPException(status_code=400, detail="Invalid strategy name / 无效策略名称")
     try:
@@ -198,6 +209,7 @@ async def create_strategy(
     [DEPRECATED] Python strategy creation removed — Rust engine manages all strategies.
     [已廢棄] Python 策略創建已移除 — Rust 引擎管理所有策略。
     """
+    _require_strategy_write(actor)
     raise HTTPException(
         status_code=410,
         detail="Python strategy creation removed (DEAD-PY-3). Strategies are managed by Rust engine. / Python 策略創建已移除，策略由 Rust 引擎管理。",
@@ -214,6 +226,7 @@ async def delete_strategy(
     Delete (remove) a strategy completely. Cannot be reactivated.
     完全删除策略（不可恢复）。与 stop 不同，delete 从注册表中移除。
     """
+    _require_strategy_write(actor)
     if _validate_strategy_name(name) is None:
         raise HTTPException(status_code=400, detail="Invalid strategy name / 无效策略名称")
     try:

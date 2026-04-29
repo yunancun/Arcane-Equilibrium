@@ -28,6 +28,13 @@ from .strategy_wiring import (
 
 logger = logging.getLogger(__name__)
 
+
+def _require_demo_session_write(actor: base.AuthenticatedActor) -> None:
+    """Shared Batch B gate for demo-session state mutations.
+    Batch B 共用 demo session 寫入閘門：必須是 Operator 且具 paper:trade scope。
+    """
+    base.require_scope_and_operator(actor, "paper:trade")
+
 # ---------------------------------------------------------------------------
 # Bybit REST client (PYO3-ELIMINATE-1 Phase 2) — lazy singleton
 # httpx-based Python client replacing former PyO3 bridge.
@@ -478,9 +485,8 @@ async def post_demo_close_position(
     Python only does a read-only REST lookup to supply is_long/qty hints.
     Rust dispatches the reduce_only market order via its own shadow channel.
     """
-    from .governance_routes import _require_operator_role
     from .paper_trading_routes import _ipc_command
-    _require_operator_role(actor)
+    _require_demo_session_write(actor)
     sym = symbol.upper()
 
     # Step 1: read-only lookup of exchange position to build hints for Rust.
@@ -550,9 +556,8 @@ async def post_demo_close_all_positions(
     Rust engine branches by pipeline_kind: Demo/Live → reduce_only market orders; Paper → paper_state.
     Requires Operator role.
     """
-    from .governance_routes import _require_operator_role
     from .paper_trading_routes import _ipc_command
-    _require_operator_role(actor)
+    _require_demo_session_write(actor)
     errors: list[str] = []
     try:
         result = await _ipc_command("close_all_positions", {"engine": "demo"})
@@ -566,12 +571,24 @@ async def post_demo_close_all_positions(
     # 孤兒清掃：IPC close_all 只遍歷 paper_state，交易所有但 paper_state
     # 沒有的倉位會被跳過。此處補掃確保全部平掉。
     orphan_result = await _sweep_demo_orphan_positions(errors)
+    partial_failure = bool(errors) or bool(orphan_result.get("skipped")) or bool(result.get("error"))
+    closed_all = not partial_failure
     logger.warning(
-        "close-all-positions (manual) — actor=%s", getattr(actor, "actor_id", "?"),
+        "close-all-positions (manual) — closed_all=%s errors=%s actor=%s",
+        closed_all,
+        errors or None,
+        getattr(actor, "actor_id", "?"),
     )
     return _envelope({
-        "message": "All positions closed — session continues / 已平掉所有倉位，session 繼續運行",
+        "message": (
+            "Close-all partially failed — session continues / 全平部分失敗，session 繼續運行"
+            if partial_failure else
+            "All positions closed — session continues / 已平掉所有倉位，session 繼續運行"
+        ),
         "source": "rust_engine",
+        "status": "partial_failure" if partial_failure else "closed",
+        "closed_all": closed_all,
+        "partial_failure": partial_failure,
         "close_result": result,
         "orphan_sweep": orphan_result,
         "errors": errors if errors else None,
@@ -651,6 +668,7 @@ async def _sweep_demo_orphan_positions(errors: list[str]) -> dict:
             )
         except Exception as exc:
             logger.warning("Orphan sweep: close_position %s failed: %s", sym, exc)
+            errors.append(f"orphan_{sym}: {exc}")
 
     return {"swept": swept, "found": len(open_positions)}
 
@@ -826,6 +844,7 @@ async def post_demo_session_start(
     """Demo-only session start — resume Demo engine, does NOT affect Paper.
     Demo 引擎單獨啟動 — 僅恢復 Demo 引擎，不影響 Paper。
     """
+    _require_demo_session_write(actor)
     global _DEMO_USER_STOPPED
     _DEMO_USER_STOPPED = False
     _ipc_command = _ipc_command_sync_import()
@@ -849,6 +868,7 @@ async def post_demo_session_pause(
     """Demo-only pause — pause Demo strategy dispatch, does NOT affect Paper.
     Demo 引擎單獨暫停 — 暫停策略分派，不影響 Paper。
     """
+    _require_demo_session_write(actor)
     _ipc_command = _ipc_command_sync_import()
     try:
         result = await _ipc_command("pause_paper", {"engine": "demo"})
@@ -869,6 +889,7 @@ async def post_demo_session_resume(
     """Demo-only resume — resume Demo engine, does NOT affect Paper.
     Demo 引擎單獨恢復 — 不影響 Paper。
     """
+    _require_demo_session_write(actor)
     global _DEMO_USER_STOPPED
     _DEMO_USER_STOPPED = False
     _ipc_command = _ipc_command_sync_import()
@@ -892,6 +913,7 @@ async def post_demo_session_stop(
     Demo 引擎單獨停止 — 平倉+暫停 Demo 引擎，不影響 Paper 引擎。
     雙引擎聯停請用 POST /api/v1/paper/session/stop-all。
     """
+    _require_demo_session_write(actor)
     global _DEMO_USER_STOPPED
     _DEMO_USER_STOPPED = True
     errors: list[str] = []
@@ -940,12 +962,22 @@ async def post_demo_session_stop(
                 f"orders={verify_result.get('residual_orders')}"
             )
     else:
+        errors.append("engine_offline")
         close_result = pause_result = orphan_result = {"skipped": True, "reason": "engine_offline"}
         cancel_orders_result = {"skipped": True, "reason": "engine_offline"}
         verify_result = {"skipped": True, "reason": "engine_offline"}
+    partial_failure = bool(errors) or not verify_result.get("clean", False)
+    closed_all = not partial_failure
     return _envelope({
-        "message": "Demo engine stopped — orders cancelled + positions closed / Demo 引擎已停止，掛單已取消、倉位已平",
+        "message": (
+            "Demo engine stopped with partial close failure / Demo 引擎已停止，但平倉存在部分失敗"
+            if partial_failure else
+            "Demo engine stopped — orders cancelled + positions closed / Demo 引擎已停止，掛單已取消、倉位已平"
+        ),
         "source": "rust_engine",
+        "status": "partial_failure" if partial_failure else "closed",
+        "closed_all": closed_all,
+        "partial_failure": partial_failure,
         "cancel_orders": cancel_orders_result,
         "demo_close": close_result,
         "orphan_sweep": orphan_result,

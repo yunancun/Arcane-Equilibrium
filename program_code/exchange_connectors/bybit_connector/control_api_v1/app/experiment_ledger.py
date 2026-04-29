@@ -627,6 +627,12 @@ class ExperimentLedger:
                             h.hypothesis_id, h.strategy_name,
                         )
 
+        # SW-004 (Batch E): persist expiry-state transitions. Without this,
+        # EXPIRED status only lived in-memory and vanished after worker restart.
+        # SW-004（Batch E）：持久化過期狀態變更，避免 worker 重啟後回退。
+        if expired_count > 0:
+            self._schedule_debounced_save()
+
         return expired_count
 
     # ── Queries / 查询 ───────────────────────────────────────────────────────

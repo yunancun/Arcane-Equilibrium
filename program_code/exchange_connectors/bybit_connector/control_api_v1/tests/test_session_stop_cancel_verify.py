@@ -24,6 +24,7 @@ from types import SimpleNamespace
 import pytest
 
 from program_code.exchange_connectors.bybit_connector.control_api_v1.app import (
+    live_session_account_routes as lsa,
     live_session_endpoints as lse,
     live_session_routes as lsr,
     paper_trading_routes as ptr,
@@ -60,6 +61,14 @@ class _FakeRC:
     def clear_positions(self):
         """Simulate close-orders filling on Bybit / 模擬平倉成交。"""
         self._positions = []
+
+
+def _operator_actor(*scopes: str):
+    return SimpleNamespace(
+        actor_id="op-test",
+        roles={"operator"},
+        scopes=set(scopes),
+    )
 
 
 # ───────────────────────────────────────────────────────────────────────────────
@@ -209,7 +218,7 @@ async def test_live_stop_cancels_orders_before_close(monkeypatch):
     monkeypatch.setattr(lsr, "_sweep_live_orphan_positions", _orphan_positions)
 
     response = await lse.post_live_session_stop(
-        actor=SimpleNamespace(actor_id="op-test"),
+        actor=_operator_actor("live:trade"),
     )
 
     # Order-of-operations contract / 順序契約
@@ -227,6 +236,8 @@ async def test_live_stop_cancels_orders_before_close(monkeypatch):
     assert "verify" in data
     assert data["cancel_orders"]["cancelled"] == 1
     assert data["verify"]["clean"] is True
+    assert data["closed_all"] is True
+    assert data["partial_failure"] is False
 
 
 # ───────────────────────────────────────────────────────────────────────────────
@@ -277,7 +288,7 @@ async def test_demo_stop_cancels_orders_before_close_and_verifies(monkeypatch):
     monkeypatch.setattr(sar, "_sweep_demo_orphan_positions", _orphan)
 
     response = await sar.post_demo_session_stop(
-        actor=SimpleNamespace(actor_id="op-test"),
+        actor=_operator_actor("paper:trade"),
     )
 
     # cancel must run BEFORE close (Phase 1 → Phase 2 contract)
@@ -291,6 +302,8 @@ async def test_demo_stop_cancels_orders_before_close_and_verifies(monkeypatch):
     assert "cancel_orders" in data
     assert "verify" in data
     assert data["verify"]["clean"] is True
+    assert data["closed_all"] is True
+    assert data["partial_failure"] is False
 
 
 @pytest.mark.asyncio
@@ -326,7 +339,7 @@ async def test_demo_stop_surfaces_residual_in_errors(monkeypatch):
     monkeypatch.setattr(sar, "_sweep_demo_orphan_positions", _orphan)
 
     response = await sar.post_demo_session_stop(
-        actor=SimpleNamespace(actor_id="op-test"),
+        actor=_operator_actor("paper:trade"),
     )
 
     data = response["data"]
@@ -336,3 +349,59 @@ async def test_demo_stop_surfaces_residual_in_errors(monkeypatch):
     # errors 必含 verify_residual / errors must include verify_residual marker
     assert data["errors"] is not None
     assert any("demo_verify_residual" in e for e in data["errors"])
+    assert data["closed_all"] is False
+    assert data["partial_failure"] is True
+    assert data["status"] == "partial_failure"
+
+
+@pytest.mark.asyncio
+async def test_demo_close_all_reports_orphan_sweep_failure(monkeypatch):
+    async def _ipc(method, params):
+        assert method == "close_all_positions"
+        assert params == {"engine": "demo"}
+        return {"ok": True}
+
+    async def _orphan(errors):
+        errors.append("orphan_BTCUSDT: bybit rejected")
+        return {"swept": 0, "found": 1}
+
+    monkeypatch.setattr(sar, "_require_demo_session_write", lambda actor: None)
+    monkeypatch.setattr(ptr, "_ipc_command", _ipc)
+    monkeypatch.setattr(sar, "_sweep_demo_orphan_positions", _orphan)
+
+    response = await sar.post_demo_close_all_positions(
+        actor=_operator_actor("paper:trade"),
+    )
+
+    data = response["data"]
+    assert data["status"] == "partial_failure"
+    assert data["closed_all"] is False
+    assert data["partial_failure"] is True
+    assert data["errors"] == ["orphan_BTCUSDT: bybit rejected"]
+
+
+@pytest.mark.asyncio
+async def test_live_close_all_reports_orphan_sweep_failure(monkeypatch):
+    async def _ipc(method, params):
+        assert method == "close_all_positions"
+        assert params == {"engine": "live"}
+        return {"ok": True}
+
+    async def _orphan(errors):
+        errors.append("orphan_ETHUSDT: live close rejected")
+        return {"swept": 0, "found": 1}
+
+    monkeypatch.setattr(lsa, "_require_live_trade", lambda actor: None)
+    monkeypatch.setattr(lsa, "_phantom_view_guard_write", lambda: None)
+    monkeypatch.setattr(lsr, "_ipc_command", _ipc)
+    monkeypatch.setattr(lsr, "_sweep_live_orphan_positions", _orphan)
+
+    response = await lsa.post_live_close_all_positions(
+        actor=_operator_actor("live:trade"),
+    )
+
+    data = response["data"]
+    assert data["status"] == "partial_failure"
+    assert data["closed_all"] is False
+    assert data["partial_failure"] is True
+    assert data["errors"] == ["orphan_ETHUSDT: live close rejected"]

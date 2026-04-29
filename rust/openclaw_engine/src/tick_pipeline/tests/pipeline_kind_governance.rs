@@ -100,7 +100,11 @@ fn test_pipeline_on_tick() {
 fn test_pipeline_multiple_ticks() {
     let mut pipeline = TickPipeline::new(&["BTCUSDT", "ETHUSDT"]);
     for i in 0..50 {
-        pipeline.on_tick(&super::make_event("BTCUSDT", 50000.0 + i as f64, i * 60_000));
+        pipeline.on_tick(&super::make_event(
+            "BTCUSDT",
+            50000.0 + i as f64,
+            i * 60_000,
+        ));
     }
     assert_eq!(pipeline.stats.total_ticks, 50);
 }

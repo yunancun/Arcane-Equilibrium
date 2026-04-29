@@ -36,7 +36,10 @@ bash start_local.sh 8100     # 自定义端口
 cd program_code/exchange_connectors/bybit_connector/control_api_v1
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-export OPENCLAW_API_TOKEN='change-me'
+mkdir -p .secrets && chmod 700 .secrets
+python3 -c "import secrets; print(secrets.token_urlsafe(32))" > .secrets/api_token
+chmod 600 .secrets/api_token
+export OPENCLAW_API_TOKEN_FILE="$PWD/.secrets/api_token"
 uvicorn app.main:app --host 0.0.0.0 --port 8710 --reload
 ```
 
@@ -54,7 +57,7 @@ docker compose up --build
 | GUI 控制台 | `http://127.0.0.1:8710/` |
 | API 文档 | `http://127.0.0.1:8710/docs` |
 
-在 GUI 中输入 Token（默认 `change-me`），点"连接"。
+在 GUI 中输入你生成或从密钥管理器读取的 Token，点"连接"。
 
 ---
 
@@ -64,7 +67,8 @@ docker compose up --build
 
 | 变量 | 默认值 | 说明 |
 |---|---|---|
-| `OPENCLAW_API_TOKEN` | `change-me` | Bearer Token（生产环境必须替换） |
+| `OPENCLAW_API_TOKEN` | 无 | Bearer Token（生产环境必须显式设置，或使用 `OPENCLAW_API_TOKEN_FILE`） |
+| `OPENCLAW_API_TOKEN_FILE` | `.secrets/api_token` | Bearer Token 文件路径 |
 | `OPENCLAW_STATE_FILE` | `runtime/...state.json` | 控制状态持久化路径 |
 | `OPENCLAW_RUNTIME_SNAPSHOT_FILE` | （空） | 外部 runtime 快照路径（可选） |
 | `OPENCLAW_READONLY_CONNECTOR_NAME` | `bybit_prod_readonly_main` | 只读连接器名称 |

@@ -24,6 +24,8 @@ import os
 import time
 from typing import Any
 
+from .secret_runtime import get_secret_value
+
 logger = logging.getLogger(__name__)
 
 
@@ -35,7 +37,7 @@ logger = logging.getLogger(__name__)
 def _get_db_url() -> str | None:
     """Resolve PostgreSQL connection URL from environment.
     從環境變量解析 PostgreSQL 連接 URL。"""
-    return os.environ.get("OPENCLAW_DATABASE_URL") or None
+    return get_secret_value("OPENCLAW_DATABASE_URL")
 
 
 def fetch_fills_from_db(engine_mode: str = "paper") -> list[dict[str, Any]]:

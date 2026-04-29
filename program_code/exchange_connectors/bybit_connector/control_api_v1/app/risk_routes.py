@@ -85,6 +85,13 @@ def _ipc_failure(detail: str) -> HTTPException:
     return HTTPException(status_code=500, detail=f"rust_engine_unavailable: {detail}")
 
 
+def _require_risk_write(actor: base.AuthenticatedActor) -> None:
+    """Shared Batch B gate for risk/session mutations.
+    Batch B 共用風控/Session 寫入閘門：必須是 Operator 且具 risk:write scope。
+    """
+    base.require_scope_and_operator(actor, "risk:write")
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # Request Models / 請求模型 (unchanged from pre-1C-3-C)
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -223,6 +230,7 @@ async def update_global_config(
     透過 Rust ConfigStore 修改 P1 全局風控（operator 來源）。
     成功後熱更新 5 個下游引擎並寫入 V014 audit。
     """
+    _require_risk_write(actor)
     client = await _get_risk_view_client()
     updates = body.model_dump(exclude_none=True)
     if not updates:
@@ -256,6 +264,7 @@ async def update_category_config(
     actor: base.AuthenticatedActor = Depends(base.current_actor),
 ):
     """Patch P0 category override via Rust ConfigStore (operator source, nested patch)."""
+    _require_risk_write(actor)
     client = await _get_risk_view_client()
     updates = body.model_dump(exclude_none=True)
     if not updates:
@@ -341,6 +350,7 @@ async def agent_adjust(
     actor: base.AuthenticatedActor = Depends(base.current_actor),
 ):
     """Agent self-tuning — patch_risk_config with source=agent for V014 audit."""
+    _require_risk_write(actor)
     client = await _get_risk_view_client()
     updates = {k: v for k, v in body.model_dump().items() if k in body.model_fields_set}
     if not updates:
@@ -367,6 +377,7 @@ async def reset_cooldown(
     the Rust per-symbol map (governor tier untouched, see 1C-3-B-2).
     透過 Rust IPC 清除 per-symbol 連虧計數器（governor tier 不變）。
     """
+    _require_risk_write(actor)
     client = await _get_risk_view_client()
     try:
         result = await client.clear_consecutive_losses()
@@ -474,6 +485,7 @@ async def reset_drawdown_baseline(
     的路徑，重啟永不自動降（根原則 #5/#6/#8 fail-closed）。需 Operator 角色，
     寫 change_audit_log STATE_CHANGE。
     """
+    _require_risk_write(actor)
     # Operator role gate — use the same duck-typed check as governance_routes.
     # 以 governance_routes 相同的 duck-typed 檢查來閘 operator 角色。
     if not actor or not hasattr(actor, "roles") or not hasattr(actor, "actor_id"):
@@ -646,6 +658,7 @@ async def update_per_engine_global_config(
     透過 IPC patch_risk_config 修改指定引擎（paper|demo|live）的 RiskConfig。
     需要 Operator 角色。Live 引擎：更新影響真實資金，需謹慎。
     """
+    _require_risk_write(actor)
     if engine not in _ALLOWED_ENGINES:
         raise HTTPException(status_code=400, detail=f"Invalid engine '{engine}'. Must be one of: {sorted(_ALLOWED_ENGINES)}")
     ipc = await _get_direct_ipc()
@@ -685,6 +698,7 @@ async def unhalt_session(
     session_halted; downstream readers consume the Rust snapshot.
     1C-3-E F-mini：移除已棄用的 Python 並行寫入路徑，session_halted 由 Rust 權威。
     """
+    _require_risk_write(actor)
     client = await _get_risk_view_client()
     try:
         await client.unhalt_session()

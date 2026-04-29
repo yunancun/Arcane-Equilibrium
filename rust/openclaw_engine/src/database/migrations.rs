@@ -11,7 +11,7 @@
 //!        hard error otherwise (ambiguous state — refuse to guess).
 //!     2. Uses a hand-rolled `Migrator` because sqlx's built-in directory
 //!        parser rejects `V###__*.sql` (expects pure `<i64>_<desc>.sql`). Files
-//!        V017_rollback.sql (rollback fixture) and V999__exit_features.sql
+//!        V017_rollback.sql (rollback fixture) and V999__*.sql test fixtures
 //!        (test fixture) are filtered out by pattern.
 //!     3. Runs pending migrations via `Migrator::run_direct`; success adds rows
 //!        to `_sqlx_migrations` with matching checksums.
@@ -25,7 +25,7 @@
 //!        拒絕在曖昧狀態下猜測。
 //!     2. 自刻 `Migrator`（不用 `sqlx::migrate!` macro），因 sqlx 內建目錄
 //!        parser 不認 `V###__*.sql`（要求純整數 `<i64>_<desc>.sql`）。
-//!        V017_rollback.sql（rollback）與 V999__exit_features.sql（測試 fixture）
+//!        V017_rollback.sql（rollback）與 V999__*.sql 測試 fixture
 //!        依檔名過濾。
 //!     3. 經 `Migrator::run_direct` 套用 pending；成功後 checksums 寫入
 //!        `_sqlx_migrations`。
@@ -42,6 +42,7 @@ use tracing::{debug, error, info, warn};
 /// manual-apply workflow; flip to "1" once operator has validated one trial.
 /// 控制自動遷移的環境變數。預設關，經 operator 首輪驗證後再打開。
 pub const AUTO_MIGRATE_ENV_VAR: &str = "OPENCLAW_AUTO_MIGRATE";
+pub const ALLOW_DBLESS_ENV_VAR: &str = "OPENCLAW_ALLOW_DBLESS";
 
 /// Relative path (from `$OPENCLAW_BASE_DIR` or CWD) to the migrations directory.
 /// 相對於 `$OPENCLAW_BASE_DIR` 或 CWD 的 migrations 目錄。
@@ -90,6 +91,13 @@ pub enum MigrationsError {
          ≥{expected}），拒絕自動補齊，須人工介入。"
     )]
     LegacyPartialState { existing: i64, expected: i64 },
+    #[error(
+        "auto_migrate explicitly enabled but DbPool is unavailable. Refusing to \
+         continue unless OPENCLAW_ALLOW_DBLESS=1 is also set. \
+         / 已顯式開啟 auto_migrate 但 DbPool 不可用；除非同時設定 \
+         OPENCLAW_ALLOW_DBLESS=1，否則拒絕啟動。"
+    )]
+    NoPoolWhenEnabled,
 }
 
 /// Result of a `MigrationRunner::run_if_enabled` call.
@@ -143,11 +151,14 @@ impl MigrationRunner {
             return Ok(RunOutcome::Disabled);
         }
         let Some(pool) = pool else {
-            warn!(
-                "auto_migrate enabled but DbPool disconnected — skipping \
-                 / 已開 auto_migrate 但 DbPool 未連接，跳過"
-            );
-            return Ok(RunOutcome::NoPool);
+            if std::env::var(ALLOW_DBLESS_ENV_VAR).ok().as_deref() == Some("1") {
+                warn!(
+                    "auto_migrate enabled but DbPool disconnected; OPENCLAW_ALLOW_DBLESS=1 allows degraded startup \
+                     / 已開 auto_migrate 但 DbPool 未連接；OPENCLAW_ALLOW_DBLESS=1 允許降級啟動"
+                );
+                return Ok(RunOutcome::NoPool);
+            }
+            return Err(MigrationsError::NoPoolWhenEnabled);
         };
 
         let migrations_dir = base_dir.join(MIGRATIONS_DIR_REL);
@@ -208,33 +219,35 @@ impl MigrationRunner {
 /// 解析 `V###__<desc>.sql` 檔名為 (version, description)。
 /// 呼叫者先過濾不符合的檔案；本函式對形狀嚴格。
 fn parse_flyway_filename(file_name: &str) -> Result<(i64, String), MigrationsError> {
-    let stem = file_name.strip_suffix(".sql").ok_or_else(|| {
-        MigrationsError::FilenameParse {
+    let stem = file_name
+        .strip_suffix(".sql")
+        .ok_or_else(|| MigrationsError::FilenameParse {
             name: file_name.to_string(),
             reason: "missing .sql suffix / 無 .sql 後綴".into(),
-        }
-    })?;
+        })?;
 
     // Must start with 'V' / 必須以 V 開頭
-    let rest = stem.strip_prefix('V').ok_or_else(|| MigrationsError::FilenameParse {
-        name: file_name.to_string(),
-        reason: "missing V prefix / 無 V 前綴".into(),
-    })?;
+    let rest = stem
+        .strip_prefix('V')
+        .ok_or_else(|| MigrationsError::FilenameParse {
+            name: file_name.to_string(),
+            reason: "missing V prefix / 無 V 前綴".into(),
+        })?;
 
     // Split on "__" / 以雙底線分段
-    let (version_str, desc) = rest.split_once("__").ok_or_else(|| {
+    let (version_str, desc) =
+        rest.split_once("__")
+            .ok_or_else(|| MigrationsError::FilenameParse {
+                name: file_name.to_string(),
+                reason: "missing double-underscore separator / 無雙底線分隔".into(),
+            })?;
+
+    let version: i64 = version_str.parse().map_err(|e: std::num::ParseIntError| {
         MigrationsError::FilenameParse {
             name: file_name.to_string(),
-            reason: "missing double-underscore separator / 無雙底線分隔".into(),
+            reason: format!("version prefix not i64 / 版本非整數: {e}"),
         }
     })?;
-
-    let version: i64 = version_str
-        .parse()
-        .map_err(|e: std::num::ParseIntError| MigrationsError::FilenameParse {
-            name: file_name.to_string(),
-            reason: format!("version prefix not i64 / 版本非整數: {e}"),
-        })?;
 
     if version <= 0 {
         return Err(MigrationsError::FilenameParse {
@@ -258,7 +271,11 @@ fn is_eligible_migration_file(file_name: &str) -> bool {
         return false;
     }
     // Must start with "V<digit>" / 起手 V + 數字
-    if !file_name.starts_with('V') || !file_name[1..].chars().next().is_some_and(|c| c.is_ascii_digit())
+    if !file_name.starts_with('V')
+        || !file_name[1..]
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_digit())
     {
         return false;
     }
@@ -305,7 +322,10 @@ pub fn load_migrations_from_dir(dir: &Path) -> Result<Vec<Migration>, Migrations
             continue;
         };
         if !is_eligible_migration_file(fname) {
-            debug!(file = fname, "auto_migrate: skipping non-eligible / 略過非合規檔");
+            debug!(
+                file = fname,
+                "auto_migrate: skipping non-eligible / 略過非合規檔"
+            );
             continue;
         }
         let (version, description) = parse_flyway_filename(fname)?;
@@ -523,7 +543,8 @@ pub async fn ensure_legacy_seeded(
 /// 測試隔離用：DROP `_sqlx_migrations`（其他不動）。整合測試與 ops debug 用，
 /// 正式環境僅在 operator 明確 re-seed 時使用。
 pub async fn truncate_tracking_table(pool: &PgPool) -> Result<(), MigrationsError> {
-    pool.execute("DROP TABLE IF EXISTS _sqlx_migrations").await?;
+    pool.execute("DROP TABLE IF EXISTS _sqlx_migrations")
+        .await?;
     Ok(())
 }
 
@@ -598,8 +619,9 @@ mod tests {
     fn eligibility_rejects_fixtures_and_rollbacks() {
         // rollback fixture / rollback fixture
         assert!(!is_eligible_migration_file("V017_rollback.sql"));
+        assert!(is_eligible_migration_file("V029__exit_features.sql"));
         // V999 test fixture / V999 測試 fixture
-        assert!(!is_eligible_migration_file("V999__exit_features.sql"));
+        assert!(!is_eligible_migration_file("V999__fixture.sql"));
         // README and other misc
         assert!(!is_eligible_migration_file("README.md"));
         assert!(!is_eligible_migration_file("notes.txt"));
@@ -711,9 +733,15 @@ mod tests {
             .unwrap();
         assert_eq!(outcome, RunOutcome::Disabled);
 
-        // Phase 2: env var set, pool None → NoPool (warn-level, not Err).
-        // Phase 2：opt-in 但 pool 為 None → NoPool（警告級，不 Err）。
+        // Phase 2: env var set, pool None → fatal unless DB-less escape hatch is explicit.
+        // Phase 2：opt-in 但 pool 為 None → 除非顯式允許 DB-less，否則 fatal。
         let _guard = EnvVarGuard::set(AUTO_MIGRATE_ENV_VAR, "1");
+        let err = MigrationRunner::run_if_enabled(None, tmp.path())
+            .await
+            .unwrap_err();
+        assert!(matches!(err, MigrationsError::NoPoolWhenEnabled));
+
+        let _allow_dbless = EnvVarGuard::set(ALLOW_DBLESS_ENV_VAR, "1");
         let outcome = MigrationRunner::run_if_enabled(None, tmp.path())
             .await
             .unwrap();

@@ -215,12 +215,12 @@ def fetch_arm_observations(
           JOIN trading.decision_outcomes o ON o.context_id = s.context_id
          WHERE s.linucb_arm_id = %s
            AND o.{reward_column} IS NOT NULL
-           AND ($2::BIGINT IS NULL OR s.ts >= to_timestamp($2 / 1000.0))
+           AND (%s::BIGINT IS NULL OR s.ts >= to_timestamp(%s / 1000.0))
     """
     out: list[tuple[list[float], float]] = []
     with psycopg2.connect(dsn) as conn:  # pragma: no cover — live path
         with conn.cursor() as cur:
-            cur.execute(sql, (arm_id, since_ts_ms))
+            cur.execute(sql, (arm_id, since_ts_ms, since_ts_ms))
             for indicators, reward in cur.fetchall():
                 if indicators is None or reward is None:
                     continue
@@ -294,12 +294,12 @@ def upsert_arm_state(
 # v1_15 = 5 策略 × 3 regime — 名稱對應 Rust arms_v1_15.rs。
 _V1_15_STRATEGIES = (
     "ma_crossover",
-    "bb_reversion",
     "bb_breakout",
+    "bb_reversion",
     "grid_trading",
-    "donchian_breakout",
+    "funding_arb",
 )
-_V1_15_REGIMES = ("trending", "ranging", "volatile")
+_V1_15_REGIMES = ("trending", "mean_reverting", "random_walk")
 
 
 def enumerate_v1_15_arm_ids() -> list[str]:

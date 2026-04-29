@@ -86,7 +86,7 @@ def test_load_training_data_pooled_ignores_symbol_filter(monkeypatch):
     config.symbol=None 時，load_training_data 收到 symbol=None
     （SQL 條件分支跳過 symbol 過濾）。"""
     import numpy as np
-    from ml_training import parquet_etl as etl
+    from program_code.ml_training import parquet_etl as etl
 
     captured: dict = {}
 
@@ -128,7 +128,7 @@ def test_load_training_data_per_symbol_forwards_filter(monkeypatch):
     """Concrete symbol threads through to SQL filter.
     具體 symbol 會原樣傳遞到 SQL 過濾。"""
     import numpy as np
-    from ml_training import parquet_etl as etl
+    from program_code.ml_training import parquet_etl as etl
 
     captured: dict = {}
 

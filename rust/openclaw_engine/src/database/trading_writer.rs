@@ -11,14 +11,14 @@
 //!   orders / order_state_changes）。
 //!   與 market_writer 相同模式。
 
-use super::batch_insert::batch_insert_chunked;
+use super::batch_insert::{batch_insert_chunked, BatchInsertOutcome};
 use super::pool::DbPool;
 use super::{sanitize_f64, sanitize_f64_or_zero, TradingMsg};
 use sqlx::{Postgres, QueryBuilder};
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
-use tracing::info;
+use tracing::{info, warn};
 
 /// Run the trading data writer task.
 /// 運行交易數據寫入器任務。
@@ -157,19 +157,38 @@ const INTENT_COLS: usize = 12; // includes details JSONB
 const FILL_COLS: usize = 22; // includes execution reference/slippage (V028)
 const FUNDING_SETTLEMENT_COLS: usize = 13; // includes raw JSONB
 const POSITION_COLS: usize = 9;
-const VERDICT_COLS: usize = 9; // ts + 7 + engine_mode (flattened reason + JSONB details)
+const VERDICT_COLS: usize = 12; // includes risk_level/check arrays + details
 const ORDER_COLS: usize = 11;
 const STATE_CHANGE_COLS: usize = 8;
+
+fn should_clear_buffer(table: &str, outcome: BatchInsertOutcome, pending_rows: usize) -> bool {
+    if outcome.all_ok() {
+        true
+    } else {
+        warn!(
+            table = table,
+            pending_rows = pending_rows,
+            rows_affected = outcome.rows_affected,
+            failed_chunks = outcome.failed_chunks,
+            "trading_writer flush incomplete — retaining buffer for retry \
+             / trading_writer 寫入未完成 — 保留 buffer 下輪重試"
+        );
+        false
+    }
+}
 
 async fn flush_signals(pool: &DbPool, buf: &mut Vec<TradingMsg>) {
     let pg = match pool.get() {
         Some(p) => p,
         None => {
-            buf.clear();
+            warn!(
+                pending_rows = buf.len(),
+                "trading.signals flush skipped: DB pool unavailable — retaining buffer"
+            );
             return;
         }
     };
-    batch_insert_chunked(
+    let outcome = batch_insert_chunked(
         pg,
         pool,
         "trading.signals",
@@ -208,18 +227,23 @@ async fn flush_signals(pool: &DbPool, buf: &mut Vec<TradingMsg>) {
         },
     )
     .await;
-    buf.clear();
+    if should_clear_buffer("trading.signals", outcome, buf.len()) {
+        buf.clear();
+    }
 }
 
 async fn flush_intents(pool: &DbPool, buf: &mut Vec<TradingMsg>) {
     let pg = match pool.get() {
         Some(p) => p,
         None => {
-            buf.clear();
+            warn!(
+                pending_rows = buf.len(),
+                "trading.intents flush skipped: DB pool unavailable — retaining buffer"
+            );
             return;
         }
     };
-    batch_insert_chunked(
+    let outcome = batch_insert_chunked(
         pg,
         pool,
         "trading.intents",
@@ -266,18 +290,23 @@ async fn flush_intents(pool: &DbPool, buf: &mut Vec<TradingMsg>) {
         },
     )
     .await;
-    buf.clear();
+    if should_clear_buffer("trading.intents", outcome, buf.len()) {
+        buf.clear();
+    }
 }
 
 async fn flush_fills(pool: &DbPool, buf: &mut Vec<TradingMsg>) {
     let pg = match pool.get() {
         Some(p) => p,
         None => {
-            buf.clear();
+            warn!(
+                pending_rows = buf.len(),
+                "trading.fills flush skipped: DB pool unavailable — retaining buffer"
+            );
             return;
         }
     };
-    batch_insert_chunked(
+    let outcome = batch_insert_chunked(
         pg,
         pool,
         "trading.fills",
@@ -359,18 +388,23 @@ async fn flush_fills(pool: &DbPool, buf: &mut Vec<TradingMsg>) {
         },
     )
     .await;
-    buf.clear();
+    if should_clear_buffer("trading.fills", outcome, buf.len()) {
+        buf.clear();
+    }
 }
 
 async fn flush_funding_settlements(pool: &DbPool, buf: &mut Vec<TradingMsg>) {
     let pg = match pool.get() {
         Some(p) => p,
         None => {
-            buf.clear();
+            warn!(
+                pending_rows = buf.len(),
+                "trading.funding_settlements flush skipped: DB pool unavailable — retaining buffer"
+            );
             return;
         }
     };
-    batch_insert_chunked(
+    let outcome = batch_insert_chunked(
         pg,
         pool,
         "trading.funding_settlements",
@@ -421,18 +455,23 @@ async fn flush_funding_settlements(pool: &DbPool, buf: &mut Vec<TradingMsg>) {
         },
     )
     .await;
-    buf.clear();
+    if should_clear_buffer("trading.funding_settlements", outcome, buf.len()) {
+        buf.clear();
+    }
 }
 
 async fn flush_positions(pool: &DbPool, buf: &mut Vec<TradingMsg>) {
     let pg = match pool.get() {
         Some(p) => p,
         None => {
-            buf.clear();
+            warn!(
+                pending_rows = buf.len(),
+                "trading.position_snapshots flush skipped: DB pool unavailable — retaining buffer"
+            );
             return;
         }
     };
-    batch_insert_chunked(
+    let outcome = batch_insert_chunked(
         pg,
         pool,
         "trading.position_snapshots",
@@ -474,7 +513,9 @@ async fn flush_positions(pool: &DbPool, buf: &mut Vec<TradingMsg>) {
         },
     )
     .await;
-    buf.clear();
+    if should_clear_buffer("trading.position_snapshots", outcome, buf.len()) {
+        buf.clear();
+    }
 }
 
 /// Flush Guardian risk verdicts to trading.risk_verdicts.
@@ -483,11 +524,14 @@ async fn flush_verdicts(pool: &DbPool, buf: &mut Vec<TradingMsg>) {
     let pg = match pool.get() {
         Some(p) => p,
         None => {
-            buf.clear();
+            warn!(
+                pending_rows = buf.len(),
+                "trading.risk_verdicts flush skipped: DB pool unavailable — retaining buffer"
+            );
             return;
         }
     };
-    batch_insert_chunked(
+    let outcome = batch_insert_chunked(
         pg,
         pool,
         "trading.risk_verdicts",
@@ -496,7 +540,8 @@ async fn flush_verdicts(pool: &DbPool, buf: &mut Vec<TradingMsg>) {
         |chunk| {
             let mut qb: QueryBuilder<Postgres> = QueryBuilder::new(
                 "INSERT INTO trading.risk_verdicts \
-                 (ts, verdict_id, intent_id, context_id, symbol, verdict, reason, details, engine_mode) "
+                 (ts, verdict_id, intent_id, context_id, symbol, verdict, risk_level, \
+                  checks_passed, checks_failed, reason, details, engine_mode) ",
             );
             qb.push_values(chunk.iter(), |mut b, msg| {
                 if let TradingMsg::RiskVerdict {
@@ -507,6 +552,9 @@ async fn flush_verdicts(pool: &DbPool, buf: &mut Vec<TradingMsg>) {
                     symbol,
                     verdict,
                     risk_score,
+                    risk_level,
+                    checks_passed,
+                    checks_failed,
                     reasons,
                     modified_qty,
                     engine_mode,
@@ -520,6 +568,9 @@ async fn flush_verdicts(pool: &DbPool, buf: &mut Vec<TradingMsg>) {
                     b.push_bind(context_id.as_str());
                     b.push_bind(symbol.as_str());
                     b.push_bind(verdict.as_str());
+                    b.push_bind(risk_level.as_deref());
+                    b.push_bind(checks_passed);
+                    b.push_bind(checks_failed);
                     // Flatten reasons into a single reason string / 將 reasons 合併為單一字串
                     b.push_bind(reasons.join("; "));
                     // Store risk_score + modified_qty as JSONB details / 詳細資訊存為 JSONB
@@ -535,7 +586,9 @@ async fn flush_verdicts(pool: &DbPool, buf: &mut Vec<TradingMsg>) {
         },
     )
     .await;
-    buf.clear();
+    if should_clear_buffer("trading.risk_verdicts", outcome, buf.len()) {
+        buf.clear();
+    }
 }
 
 /// Flush exchange orders to trading.orders.
@@ -544,11 +597,14 @@ async fn flush_orders(pool: &DbPool, buf: &mut Vec<TradingMsg>) {
     let pg = match pool.get() {
         Some(p) => p,
         None => {
-            buf.clear();
+            warn!(
+                pending_rows = buf.len(),
+                "trading.orders flush skipped: DB pool unavailable — retaining buffer"
+            );
             return;
         }
     };
-    batch_insert_chunked(
+    let outcome = batch_insert_chunked(
         pg,
         pool,
         "trading.orders",
@@ -594,7 +650,9 @@ async fn flush_orders(pool: &DbPool, buf: &mut Vec<TradingMsg>) {
         },
     )
     .await;
-    buf.clear();
+    if should_clear_buffer("trading.orders", outcome, buf.len()) {
+        buf.clear();
+    }
 }
 
 /// Flush order state changes to trading.order_state_changes.
@@ -603,11 +661,14 @@ async fn flush_order_state_changes(pool: &DbPool, buf: &mut Vec<TradingMsg>) {
     let pg = match pool.get() {
         Some(p) => p,
         None => {
-            buf.clear();
+            warn!(
+                pending_rows = buf.len(),
+                "trading.order_state_changes flush skipped: DB pool unavailable — retaining buffer"
+            );
             return;
         }
     };
-    batch_insert_chunked(
+    let outcome = batch_insert_chunked(
         pg,
         pool,
         "trading.order_state_changes",
@@ -647,7 +708,9 @@ async fn flush_order_state_changes(pool: &DbPool, buf: &mut Vec<TradingMsg>) {
         },
     )
     .await;
-    buf.clear();
+    if should_clear_buffer("trading.order_state_changes", outcome, buf.len()) {
+        buf.clear();
+    }
 }
 
 #[cfg(test)]

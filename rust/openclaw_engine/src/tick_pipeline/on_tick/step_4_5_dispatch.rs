@@ -342,8 +342,13 @@ impl TickPipeline {
 
                                 // Dispatch to exchange / 派發到交易所
                                 // I-08 雙軌止損：compute broker-side SL from stop config
+                                let is_reducing_order = self
+                                    .paper_state
+                                    .get_position(&intent.symbol)
+                                    .map(|p| p.is_long != intent.is_long)
+                                    .unwrap_or(false);
                                 let sl_pct = self.paper_state.stop_config_pct();
-                                let broker_sl = if sl_pct > 0.0 {
+                                let broker_sl = if !is_reducing_order && sl_pct > 0.0 {
                                     Some(if intent.is_long {
                                         event.last_price * (1.0 - sl_pct / 100.0)
                                     } else {
@@ -381,13 +386,12 @@ impl TickPipeline {
                                     // 動作生成跨 symbol 的 intent，必須改為
                                     // `paper_state.latest_price(&intent.symbol)`
                                     // 並對齊 execute_position_close 的 fallback。
-                                    let (reference_price, reference_source) =
-                                        execution_reference(
-                                            intent.is_long,
-                                            best_bid,
-                                            best_ask,
-                                            event.last_price,
-                                        );
+                                    let (reference_price, reference_source) = execution_reference(
+                                        intent.is_long,
+                                        best_bid,
+                                        best_ask,
+                                        event.last_price,
+                                    );
                                     let _ = tx.send(OrderDispatchRequest {
                                         symbol: intent.symbol.clone(),
                                         is_long: intent.is_long,
@@ -395,7 +399,7 @@ impl TickPipeline {
                                         price: event.last_price,
                                         strategy: intent.strategy.clone(),
                                         paper_fill_ts: event.ts_ms,
-                                        is_close: false,
+                                        is_close: is_reducing_order,
                                         order_link_id,
                                         is_primary: true,
                                         stop_loss: broker_sl,
@@ -419,11 +423,15 @@ impl TickPipeline {
                                         reference_ts_ms: reference_price.map(|_| event.ts_ms),
                                         reference_source,
                                     });
-                                    // FUP-RACE: proactively mark mirror so reconciler
-                                    // won't orphan-close this position before the WS
-                                    // Fill arrives.
-                                    self.paper_state
-                                        .proactive_mirror_insert(&intent.symbol, intent.is_long);
+                                    // FUP-RACE: proactively mark true opens only.
+                                    // Reducing strategy flips are reduce_only close orders
+                                    // and must not insert an opposite-side mirror.
+                                    if !is_reducing_order {
+                                        self.paper_state.proactive_mirror_insert(
+                                            &intent.symbol,
+                                            intent.is_long,
+                                        );
+                                    }
                                 }
                             } else if let Some(ref reason) = gate.rejected_reason {
                                 strategy.on_rejection(intent, reason);
@@ -534,8 +542,7 @@ impl TickPipeline {
                                 // Degraded fallback — 計數 + warn。下方
                                 // result.fill 分支照常執行（市價成交）。
                                 if let Some(ref fb_sym) = result.maker_degraded_fallback {
-                                    self.paper_state
-                                        .record_maker_degraded_fallback(fb_sym);
+                                    self.paper_state.record_maker_degraded_fallback(fb_sym);
                                     warn!(
                                         symbol = %fb_sym,
                                         strategy = %intent.strategy,
@@ -626,62 +633,70 @@ impl TickPipeline {
                                         // on the risk/strategy/fast_track paths. Leave entry_context_id
                                         // empty here — the training JOIN reads it from close-fill rows.
                                         // EDGE-P3-1 R2：此處走策略開倉路徑，不產生平倉 fill；留空即可。
-                                        let _ = tx.try_send(crate::database::TradingMsg::Fill {
-                                            fill_id: make_fill_id(em, &intent.symbol, event.ts_ms),
-                                            ts_ms: event.ts_ms,
-                                            order_id: make_order_id(
-                                                em,
-                                                &intent.symbol,
-                                                event.ts_ms,
-                                            ),
-                                            symbol: intent.symbol.clone(),
-                                            side: if intent.is_long {
-                                                "Buy".into()
-                                            } else {
-                                                "Sell".into()
+                                        crate::database::try_send_trading_msg(
+                                            tx,
+                                            crate::database::TradingMsg::Fill {
+                                                fill_id: make_fill_id(
+                                                    em,
+                                                    &intent.symbol,
+                                                    event.ts_ms,
+                                                ),
+                                                ts_ms: event.ts_ms,
+                                                order_id: make_order_id(
+                                                    em,
+                                                    &intent.symbol,
+                                                    event.ts_ms,
+                                                ),
+                                                symbol: intent.symbol.clone(),
+                                                side: if intent.is_long {
+                                                    "Buy".into()
+                                                } else {
+                                                    "Sell".into()
+                                                },
+                                                qty: fill.fill_qty,
+                                                price: fill.fill_price,
+                                                fee: fill.fee,
+                                                // FIX-FEE-POSTONLY-2 (EDGE-DIAG-2-FUP, 2026-04-28):
+                                                // Strategy-open fill on the IPC-emit path was the last
+                                                // remaining call site writing TIF-agnostic taker fee_rate
+                                                // to trading.fills. Verified via SQL: 24h 367 demo+live_demo
+                                                // entry fills had fee_rate=0.00055 (taker) for 100% of rows
+                                                // even though ma_crossover implied fee bps from fee/notional
+                                                // was 3.25 bps (~50% maker fills working). Switched to
+                                                // fee_rate_for_intent (TIF-aware: PostOnly→maker, else
+                                                // taker) so the DB column reflects the actual rate the
+                                                // exchange charged. Companion to the 2026-04-23
+                                                // event_consumer/loop_handlers.rs:487 fix; same pattern.
+                                                // FIX-FEE-POSTONLY-2（EDGE-DIAG-2-FUP，2026-04-28）：
+                                                // 策略開倉 fill 是最後一個寫 TIF-agnostic taker fee_rate
+                                                // 進 trading.fills 的呼叫點。實證 24h 367 entry fills
+                                                // fee_rate=0.00055 100%（taker）即便 ma_crossover 實際
+                                                // implied 3.25 bps（約 50% maker）。改 fee_rate_for_intent
+                                                // 對齊 loop_handlers.rs:487 的同模式修復。
+                                                fee_rate: self
+                                                    .intent_processor
+                                                    .fee_rate_for_intent(&intent.symbol, intent),
+                                                reference_price: None,
+                                                reference_ts_ms: None,
+                                                reference_source: None,
+                                                slippage_bps: None,
+                                                liquidity_role: Some("paper_sim".into()),
+                                                fill_latency_ms: None,
+                                                realized_pnl,
+                                                strategy_name: intent.strategy.clone(),
+                                                context_id: make_context_id(
+                                                    em,
+                                                    &intent.symbol,
+                                                    event.ts_ms,
+                                                ),
+                                                entry_context_id: String::new(),
+                                                engine_mode: em.to_string(),
+                                                // INFRA-PREBUILD-1 Part A: strategy open fill.
+                                                // INFRA-PREBUILD-1 A 部：策略開倉 fill。
+                                                exit_source: None,
                                             },
-                                            qty: fill.fill_qty,
-                                            price: fill.fill_price,
-                                            fee: fill.fee,
-                                            // FIX-FEE-POSTONLY-2 (EDGE-DIAG-2-FUP, 2026-04-28):
-                                            // Strategy-open fill on the IPC-emit path was the last
-                                            // remaining call site writing TIF-agnostic taker fee_rate
-                                            // to trading.fills. Verified via SQL: 24h 367 demo+live_demo
-                                            // entry fills had fee_rate=0.00055 (taker) for 100% of rows
-                                            // even though ma_crossover implied fee bps from fee/notional
-                                            // was 3.25 bps (~50% maker fills working). Switched to
-                                            // fee_rate_for_intent (TIF-aware: PostOnly→maker, else
-                                            // taker) so the DB column reflects the actual rate the
-                                            // exchange charged. Companion to the 2026-04-23
-                                            // event_consumer/loop_handlers.rs:487 fix; same pattern.
-                                            // FIX-FEE-POSTONLY-2（EDGE-DIAG-2-FUP，2026-04-28）：
-                                            // 策略開倉 fill 是最後一個寫 TIF-agnostic taker fee_rate
-                                            // 進 trading.fills 的呼叫點。實證 24h 367 entry fills
-                                            // fee_rate=0.00055 100%（taker）即便 ma_crossover 實際
-                                            // implied 3.25 bps（約 50% maker）。改 fee_rate_for_intent
-                                            // 對齊 loop_handlers.rs:487 的同模式修復。
-                                            fee_rate: self
-                                                .intent_processor
-                                                .fee_rate_for_intent(&intent.symbol, intent),
-                                            reference_price: None,
-                                            reference_ts_ms: None,
-                                            reference_source: None,
-                                            slippage_bps: None,
-                                            liquidity_role: Some("paper_sim".into()),
-                                            fill_latency_ms: None,
-                                            realized_pnl,
-                                            strategy_name: intent.strategy.clone(),
-                                            context_id: make_context_id(
-                                                em,
-                                                &intent.symbol,
-                                                event.ts_ms,
-                                            ),
-                                            entry_context_id: String::new(),
-                                            engine_mode: em.to_string(),
-                                            // INFRA-PREBUILD-1 Part A: strategy open fill.
-                                            // INFRA-PREBUILD-1 A 部：策略開倉 fill。
-                                            exit_source: None,
-                                        });
+                                            "strategy_open_fill",
+                                        );
                                     }
 
                                     if let Some(ref tx) = self.stop_request_tx {
@@ -880,40 +895,48 @@ impl TickPipeline {
                             50,
                         );
                         if let Some(ref tx) = self.trading_tx {
-                            let _ = tx.try_send(crate::database::TradingMsg::Fill {
-                                fill_id: make_fill_id(em, &order.symbol, event.ts_ms),
-                                ts_ms: event.ts_ms,
-                                order_id: order.order_link_id.clone(),
-                                symbol: order.symbol.clone(),
-                                side: if order.is_long { "Buy".into() } else { "Sell".into() },
-                                qty: fill_qty,
-                                price: fill_price,
-                                fee,
-                                fee_rate: maker_fee_rate,
-                                reference_price: None,
-                                reference_ts_ms: None,
-                                reference_source: None,
-                                slippage_bps: None,
-                                liquidity_role: Some("paper_sim".into()),
-                                fill_latency_ms: None,
-                                realized_pnl,
-                                strategy_name: order.strategy.clone(),
-                                // Maker fill context = order's enqueue-time id;
-                                // entry_context_id left empty (open-path, matches
-                                // line ~1182 exchange-path convention).
-                                // Maker 成交 context = 掛單入隊 id；
-                                // entry_context_id 留空（開倉路徑）。
-                                context_id: if order.context_id.is_empty() {
-                                    make_context_id(em, &order.symbol, event.ts_ms)
-                                } else {
-                                    order.context_id.clone()
+                            crate::database::try_send_trading_msg(
+                                tx,
+                                crate::database::TradingMsg::Fill {
+                                    fill_id: make_fill_id(em, &order.symbol, event.ts_ms),
+                                    ts_ms: event.ts_ms,
+                                    order_id: order.order_link_id.clone(),
+                                    symbol: order.symbol.clone(),
+                                    side: if order.is_long {
+                                        "Buy".into()
+                                    } else {
+                                        "Sell".into()
+                                    },
+                                    qty: fill_qty,
+                                    price: fill_price,
+                                    fee,
+                                    fee_rate: maker_fee_rate,
+                                    reference_price: None,
+                                    reference_ts_ms: None,
+                                    reference_source: None,
+                                    slippage_bps: None,
+                                    liquidity_role: Some("paper_sim".into()),
+                                    fill_latency_ms: None,
+                                    realized_pnl,
+                                    strategy_name: order.strategy.clone(),
+                                    // Maker fill context = order's enqueue-time id;
+                                    // entry_context_id left empty (open-path, matches
+                                    // line ~1182 exchange-path convention).
+                                    // Maker 成交 context = 掛單入隊 id；
+                                    // entry_context_id 留空（開倉路徑）。
+                                    context_id: if order.context_id.is_empty() {
+                                        make_context_id(em, &order.symbol, event.ts_ms)
+                                    } else {
+                                        order.context_id.clone()
+                                    },
+                                    entry_context_id: String::new(),
+                                    engine_mode: em.to_string(),
+                                    // INFRA-PREBUILD-1 Part A: PostOnly maker fill (open).
+                                    // INFRA-PREBUILD-1 A 部：PostOnly maker 成交（開倉）。
+                                    exit_source: None,
                                 },
-                                entry_context_id: String::new(),
-                                engine_mode: em.to_string(),
-                                // INFRA-PREBUILD-1 Part A: PostOnly maker fill (open).
-                                // INFRA-PREBUILD-1 A 部：PostOnly maker 成交（開倉）。
-                                exit_source: None,
-                            });
+                                "resting_maker_fill",
+                            );
                         }
                     }
                     crate::paper_state::RestingFillEvent::Timedout { order } => {

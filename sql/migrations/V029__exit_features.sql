@@ -3,10 +3,11 @@
 -- DUAL-TRACK-EXIT-1 Track P/L 特徵標籤（退場時寫入）
 -- Created 2026-04-18 per docs/worklogs/2026-04-18-2--exit_features_table_design.md
 --
--- Filename uses V999 placeholder — operator will renumber to the next available
--- V0NN slot when merging (current head: V017). Keep placeholder comment below
--- updated if renumbered.
--- 檔名使用 V999 佔位，operator 合併時按當前序列（目前最新 V017）重新編號為 V0NN。
+-- Production migration: promoted from the old V999 placeholder during
+-- Batch C remediation so Linux bootstrap, migration audit, and Rust
+-- auto-migrate all include the active learning.exit_features table.
+-- 生產遷移：Batch C 將原 V999 placeholder 升格，確保 Linux bootstrap、
+-- migration audit、Rust auto-migrate 均會套用此 active schema。
 --
 -- Purpose / 用途：
 --   learning.exit_features 持久化每筆退場的 7 維 Track P/L 特徵（peak/giveback/

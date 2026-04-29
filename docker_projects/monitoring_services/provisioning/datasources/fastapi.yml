@@ -7,4 +7,7 @@ datasources:
     jsonData:
       httpHeaderName1: Authorization
     secureJsonData:
-      httpHeaderValue1: "Bearer <REDACTED>"
+      # 安全 / Security:
+      #   由环境变量注入完整 header 值；不要在仓库中提交 bearer token。
+      #   Inject the full header value from the environment; never commit bearer tokens.
+      httpHeaderValue1: "${GRAFANA_FASTAPI_AUTH_HEADER}"

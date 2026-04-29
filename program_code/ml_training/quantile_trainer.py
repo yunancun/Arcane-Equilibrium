@@ -135,6 +135,7 @@ class QuantileTrainingResult:
     decile_lift_ci_upper: float = 0.0
     crossing_rate: float = 0.0
     feature_schema_hash: str = ""
+    feature_definition_hash: str = ""
     feature_names: List[str] = field(default_factory=list)
     n_samples_total: int = 0
     n_samples_labeled: int = 0
@@ -379,6 +380,42 @@ def _compute_feature_schema_hash(feature_names: List[str], schema_version: str) 
     hasher = hashlib.sha256()
     for name in feature_names:
         hasher.update(name.encode("utf-8"))
+        hasher.update(b"\n")
+    return "sha256:" + hasher.hexdigest()[:16]
+
+
+def _compute_feature_definition_hash(feature_names: List[str], schema_version: str) -> str:
+    """Stable definition hash for canonical EDGE-P3 features.
+
+    The Python source of truth lives in parquet_etl next to the feature-name
+    tuple consumed by load_training_data; Rust mirrors the same definition
+    strings in edge_predictor/features.rs. For non-canonical feature lists,
+    hash a conservative name-only definition payload so custom tests remain
+    deterministic without pretending to match production FeatureVectorV1.
+    """
+    del schema_version
+    try:
+        from program_code.ml_training.parquet_etl import (
+            EDGE_P3_FEATURE_DEFINITIONS,
+            EDGE_P3_FEATURE_NAMES,
+            compute_feature_definition_hash,
+        )
+    except Exception:  # pragma: no cover - import fallback for direct script mode
+        EDGE_P3_FEATURE_NAMES = tuple(feature_names)  # type: ignore[assignment]
+        EDGE_P3_FEATURE_DEFINITIONS = tuple(f"{name}=custom_feature_name_only" for name in feature_names)  # type: ignore[assignment]
+
+        def compute_feature_definition_hash(items):  # type: ignore[no-redef]
+            hasher = hashlib.sha256()
+            for item in items:
+                hasher.update(str(item).encode("utf-8"))
+                hasher.update(b"\n")
+            return "sha256:" + hasher.hexdigest()[:16]
+
+    if tuple(feature_names) == tuple(EDGE_P3_FEATURE_NAMES):
+        return compute_feature_definition_hash(EDGE_P3_FEATURE_DEFINITIONS)
+    hasher = hashlib.sha256()
+    for name in feature_names:
+        hasher.update(f"{name}=custom_feature_name_only".encode("utf-8"))
         hasher.update(b"\n")
     return "sha256:" + hasher.hexdigest()[:16]
 
@@ -650,6 +687,9 @@ def train_quantile_trio(
     result.n_holdout = int(len(y_holdout))
 
     result.feature_schema_hash = _compute_feature_schema_hash(
+        list(feature_names), cfg.schema_version,
+    )
+    result.feature_definition_hash = _compute_feature_definition_hash(
         list(feature_names), cfg.schema_version,
     )
     result.success = True

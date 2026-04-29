@@ -15,8 +15,8 @@
 #   source settings/environment_files/basic_system_services.env
 #   bash helper_scripts/db/deploy_V018.sh
 #
-#   # 或顯式 DSN:
-#   DSN=postgresql://openclaw:pass@127.0.0.1/openclaw \
+#   # 或使用無密碼 DSN + PGPASSFILE / Or use passwordless DSN + PGPASSFILE:
+#   PGPASSFILE=/path/to/pgpass DSN=postgresql://openclaw@127.0.0.1/openclaw \
 #     bash helper_scripts/db/deploy_V018.sh
 #
 # Rollback (僅在尚無寫入時):
@@ -30,10 +30,40 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 MIGRATION_FILE="$REPO_ROOT/sql/migrations/V018__paper_state_checkpoint.sql"
 AUDIT_LOG="$REPO_ROOT/trading_services/logs/v018_deploy_$(date -u +%Y%m%dT%H%M%SZ).log"
 
-# ----- DSN 解析 / Resolve DSN -----
-if [[ -z "${DSN:-}" ]]; then
-    DSN="postgresql://${POSTGRES_USER:-openclaw}:${POSTGRES_PASSWORD:-}@${POSTGRES_HOST:-127.0.0.1}:${POSTGRES_PORT:-5432}/${POSTGRES_DB:-openclaw}"
+# ----- DB target parsing without password-bearing argv / DB 目標解析（避免密碼進 argv） -----
+PGPASS_TMP=""
+cleanup_pgpass() {
+    [[ -n "$PGPASS_TMP" ]] && rm -f "$PGPASS_TMP"
+}
+trap cleanup_pgpass EXIT
+
+if [[ -n "${DSN:-}" ]]; then
+    if [[ "$DSN" =~ ://[^/@:]+:[^/@]+@ ]]; then
+        echo "ERROR: password-bearing DSN would expose credentials in psql argv. Use POSTGRES_* vars or PGPASSFILE." >&2
+        exit 1
+    fi
+    PSQL_ARGS=("$DSN")
+    DB_LABEL="$(echo "$DSN" | sed -E 's|.*@([^/]+)/.*|\1|')"
+else
+    PG_HOST="${POSTGRES_HOST:-127.0.0.1}"
+    PG_PORT="${POSTGRES_PORT:-5432}"
+    PG_DB="${POSTGRES_DB:-openclaw}"
+    PG_USER="${POSTGRES_USER:-openclaw}"
+    PG_PASS="${POSTGRES_PASSWORD:-}"
+    PGPASS_TMP="$(mktemp "${TMPDIR:-/tmp}/openclaw-v018-pgpass.XXXXXX")"
+    chmod 600 "$PGPASS_TMP"
+    printf '%s:%s:%s:%s:%s\n' "$PG_HOST" "$PG_PORT" "$PG_DB" "$PG_USER" "$PG_PASS" > "$PGPASS_TMP"
+    PSQL_ARGS=(-h "$PG_HOST" -p "$PG_PORT" -U "$PG_USER" -d "$PG_DB")
+    DB_LABEL="$PG_HOST:$PG_PORT/$PG_DB"
 fi
+
+run_psql() {
+    if [[ -n "$PGPASS_TMP" ]]; then
+        PGPASSFILE="$PGPASS_TMP" psql "${PSQL_ARGS[@]}" "$@"
+    else
+        psql "${PSQL_ARGS[@]}" "$@"
+    fi
+}
 
 mkdir -p "$(dirname "$AUDIT_LOG")"
 
@@ -44,7 +74,7 @@ log() {
 log "V018 deployment starting"
 log "  migration: $MIGRATION_FILE"
 log "  audit log: $AUDIT_LOG"
-log "  DSN host: $(echo "$DSN" | sed -E 's|.*@([^/]+)/.*|\1|')"
+log "  DB target: $DB_LABEL"
 
 # ----- 前置檢查：file exists -----
 if [[ ! -f "$MIGRATION_FILE" ]]; then
@@ -54,7 +84,7 @@ fi
 
 # ----- 前置檢查：連通性 + trading schema 存在 -----
 log "Pre-check: connectivity + required schema 'trading'..."
-psql "$DSN" -v ON_ERROR_STOP=1 -tA >>"$AUDIT_LOG" 2>&1 <<'EOF'
+run_psql -v ON_ERROR_STOP=1 -tA >>"$AUDIT_LOG" 2>&1 <<'EOF'
 SELECT 'connectivity_ok' AS check;
 SELECT 'schema_trading' AS check WHERE EXISTS (
     SELECT 1 FROM information_schema.schemata WHERE schema_name='trading'
@@ -63,11 +93,11 @@ EOF
 
 # ----- 執行 migration -----
 log "Applying V018 migration..."
-psql "$DSN" -v ON_ERROR_STOP=1 -f "$MIGRATION_FILE" >>"$AUDIT_LOG" 2>&1
+run_psql -v ON_ERROR_STOP=1 -f "$MIGRATION_FILE" >>"$AUDIT_LOG" 2>&1
 
 # ----- 驗證 DDL 落地 -----
 log "Verifying post-deployment schema..."
-VERIFY_OUT=$(psql "$DSN" -v ON_ERROR_STOP=1 -tA <<'EOF'
+VERIFY_OUT=$(run_psql -v ON_ERROR_STOP=1 -tA <<'EOF'
 SELECT (to_regclass('trading.paper_state_checkpoint') IS NOT NULL)::int;
 SELECT count(*) FROM information_schema.columns
     WHERE table_schema='trading' AND table_name='paper_state_checkpoint'

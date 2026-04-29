@@ -33,7 +33,13 @@ fn test_exit_feature_row_emitted_on_long_win_close() {
     // Open long @ 50_000, entry_fee = 0.1 * 50_000 * 0.00055 = 2.75
     let entry_fee = 0.1 * 50_000.0 * 0.00055;
     p.paper_state.apply_fill(
-        "BTCUSDT", true, 0.1, 50_000.0, entry_fee, 1_000, "ma_crossover",
+        "BTCUSDT",
+        true,
+        0.1,
+        50_000.0,
+        entry_fee,
+        1_000,
+        "ma_crossover",
     );
     // Tick peak up to 51_500 → max_favorable_pnl_pct = 3.0 %. update_best_prices_at
     // reads paper_state.latest_prices, so stamp that price first.
@@ -47,7 +53,10 @@ fn test_exit_feature_row_emitted_on_long_win_close() {
         .paper_state
         .close_position("BTCUSDT", 51_000.0, 2_000)
         .unwrap();
-    assert!((pnl - 100.0).abs() < 1e-9, "pnl = 0.1 * (51000 - 50000) = 100");
+    assert!(
+        (pnl - 100.0).abs() < 1e-9,
+        "pnl = 0.1 * (51000 - 50000) = 100"
+    );
 
     p.emit_close_fill(
         "BTCUSDT",
@@ -100,8 +109,15 @@ fn test_exit_feature_row_emitted_on_short_win_close() {
     p.set_exit_feature_tx(tx);
 
     let entry_fee = 1.0 * 3_000.0 * 0.00055;
-    p.paper_state
-        .apply_fill("ETHUSDT", false, 1.0, 3_000.0, entry_fee, 500, "funding_arb");
+    p.paper_state.apply_fill(
+        "ETHUSDT",
+        false,
+        1.0,
+        3_000.0,
+        entry_fee,
+        500,
+        "funding_arb",
+    );
     // Stamp latest_price=2940 (short +2%) then tick update_best_prices_at(600).
     // 注入 2940 作為 latest_price 再 tick，peak = 2%（空頭）。
     p.paper_state.set_latest_price("ETHUSDT", 2_940.0);
@@ -131,7 +147,11 @@ fn test_exit_feature_row_emitted_on_short_win_close() {
     assert_eq!(row.engine_mode, "demo");
     assert_eq!(row.exit_source.as_deref(), Some("TrailingStop"));
     let rbps = row.realized_net_bps.unwrap();
-    assert!(rbps > 0.0, "realized_net_bps must be positive on short win, got {}", rbps);
+    assert!(
+        rbps > 0.0,
+        "realized_net_bps must be positive on short win, got {}",
+        rbps
+    );
     // peak should be ~2% (captured at the refresh_max_favorable tick)
     let peak = row.peak_pnl_pct.unwrap();
     assert!((peak - 2.0).abs() < 0.01, "peak ≈ 2.0, got {}", peak);
@@ -147,8 +167,15 @@ fn test_exit_feature_row_emitted_on_stop_loss() {
     p.set_exit_feature_tx(tx);
 
     let entry_fee = 5.0 * 100.0 * 0.00055;
-    p.paper_state
-        .apply_fill("SOLUSDT", true, 5.0, 100.0, entry_fee, 1_000, "ma_crossover");
+    p.paper_state.apply_fill(
+        "SOLUSDT",
+        true,
+        5.0,
+        100.0,
+        entry_fee,
+        1_000,
+        "ma_crossover",
+    );
     // No favorable tick: peak stays 0.
     let snap = p.paper_state.position_exit_snapshot("SOLUSDT");
     let pnl = p
@@ -173,7 +200,11 @@ fn test_exit_feature_row_emitted_on_stop_loss() {
     assert_eq!(row.exit_source.as_deref(), Some("HardStop"));
     assert_eq!(row.exit_trigger_rule.as_deref(), Some("hard_stop_atr"));
     let rbps = row.realized_net_bps.unwrap();
-    assert!(rbps < -400.0, "stop loss should register deep negative bps, got {}", rbps);
+    assert!(
+        rbps < -400.0,
+        "stop loss should register deep negative bps, got {}",
+        rbps
+    );
     // peak 0 → legacy/no-favorable-tick path; peak_pnl_pct carries 0.
     assert_eq!(row.peak_pnl_pct, Some(0.0));
 }
@@ -197,8 +228,15 @@ fn test_exit_feature_fail_soft_when_tx_missing() {
         .close_position("BTCUSDT", 51_000.0, 2_000)
         .unwrap();
     p.emit_close_fill(
-        "BTCUSDT", true, 0.1, 51_000.0, 2_000, pnl,
-        "strategy_close:take_profit", "ctx-x", snap.as_ref(),
+        "BTCUSDT",
+        true,
+        0.1,
+        51_000.0,
+        2_000,
+        pnl,
+        "strategy_close:take_profit",
+        "ctx-x",
+        snap.as_ref(),
     );
     // Fill still went through — channel must receive TradingMsg::Fill.
     let fill = rx.try_recv().expect("Fill must still be enqueued");
@@ -215,8 +253,14 @@ fn test_exit_feature_fail_soft_when_snapshot_missing() {
     p.set_exit_feature_tx(tx);
 
     p.emit_close_fill(
-        "BTCUSDT", true, 0.1, 51_000.0, 2_000, 100.0,
-        "strategy_close:take_profit", "ctx-x",
+        "BTCUSDT",
+        true,
+        0.1,
+        51_000.0,
+        2_000,
+        100.0,
+        "strategy_close:take_profit",
+        "ctx-x",
         None, // no snapshot → row skipped
     );
     assert!(
@@ -255,8 +299,14 @@ fn test_exit_feature_row_three_pipeline_integration() {
             .close_position("BTCUSDT", 51_000.0, 2_000)
             .unwrap();
         p.emit_close_fill(
-            "BTCUSDT", true, 0.1, 51_000.0, 2_000, pnl,
-            "strategy_close:three_pipeline", &format!("ctx-{}", expected_em),
+            "BTCUSDT",
+            true,
+            0.1,
+            51_000.0,
+            2_000,
+            pnl,
+            "strategy_close:three_pipeline",
+            &format!("ctx-{}", expected_em),
             snap.as_ref(),
         );
 
@@ -287,8 +337,14 @@ fn test_exit_feature_context_id_fallback_when_empty() {
     let mut snap = p.paper_state.position_exit_snapshot("BTCUSDT").unwrap();
     snap.entry_context_id.clear();
     p.emit_close_fill(
-        "BTCUSDT", true, 0.1, 51_000.0, 2_000, 100.0,
-        "strategy_close:test", "ctx-caller-auth",
+        "BTCUSDT",
+        true,
+        0.1,
+        51_000.0,
+        2_000,
+        100.0,
+        "strategy_close:test",
+        "ctx-caller-auth",
         Some(&snap),
     );
     let row = rx.try_recv().unwrap();
@@ -303,8 +359,14 @@ fn test_exit_feature_context_id_fallback_when_empty() {
     let mut snap2 = p.paper_state.position_exit_snapshot("BTCUSDT").unwrap();
     snap2.entry_context_id = "ctx-from-snap".to_string();
     p.emit_close_fill(
-        "BTCUSDT", true, 0.1, 51_000.0, 4_000, 100.0,
-        "strategy_close:test", "",
+        "BTCUSDT",
+        true,
+        0.1,
+        51_000.0,
+        4_000,
+        100.0,
+        "strategy_close:test",
+        "",
         Some(&snap2),
     );
     let row = rx.try_recv().unwrap();
@@ -319,8 +381,14 @@ fn test_exit_feature_context_id_fallback_when_empty() {
     let mut snap3 = p.paper_state.position_exit_snapshot("BTCUSDT").unwrap();
     snap3.entry_context_id.clear();
     p.emit_close_fill(
-        "BTCUSDT", true, 0.1, 51_000.0, 6_000, 100.0,
-        "strategy_close:test", "",
+        "BTCUSDT",
+        true,
+        0.1,
+        51_000.0,
+        6_000,
+        100.0,
+        "strategy_close:test",
+        "",
         Some(&snap3),
     );
     let row = rx.try_recv().unwrap();
@@ -343,7 +411,10 @@ fn test_giveback_clamps_to_zero_when_exit_above_peak() {
 
     // Seed the price tracker so atr_pct is Some (needed for giveback output).
     // 餵入價格歷史讓 compute_atr_pct > 0，giveback 才會返回 Some。
-    for (i, px) in [49_500.0, 50_200.0, 49_800.0, 50_500.0, 50_000.0, 51_000.0].iter().enumerate() {
+    for (i, px) in [49_500.0, 50_200.0, 49_800.0, 50_500.0, 50_000.0, 51_000.0]
+        .iter()
+        .enumerate()
+    {
         p.price_tracker_mut()
             .record("BTCUSDT", *px, 1_000 + i as u64 * 100);
     }
@@ -362,8 +433,14 @@ fn test_giveback_clamps_to_zero_when_exit_above_peak() {
         .close_position("BTCUSDT", 51_000.0, 2_000)
         .unwrap();
     p.emit_close_fill(
-        "BTCUSDT", true, 0.1, 51_000.0, 2_000, pnl,
-        "strategy_close:take_profit", "ctx-gb",
+        "BTCUSDT",
+        true,
+        0.1,
+        51_000.0,
+        2_000,
+        pnl,
+        "strategy_close:take_profit",
+        "ctx-gb",
         snap.as_ref(),
     );
     let row = rx.try_recv().unwrap();
@@ -463,7 +540,10 @@ fn test_ipc_close_symbol_paper_emits_exit_feature_row() {
     // system_mode default → falls to paper branch.
     // paper 分支：無 hints；系統模式預設 → 走 paper 分支。
     let fired = p.ipc_close_symbol("BTCUSDT", None, None);
-    assert!(fired, "ipc_close_symbol paper branch must return true on close");
+    assert!(
+        fired,
+        "ipc_close_symbol paper branch must return true on close"
+    );
 
     let row = rx.try_recv().expect("ExitFeatureRow must be emitted");
     assert_eq!(row.context_id, "ctx-ipc-close-test");
@@ -476,7 +556,11 @@ fn test_ipc_close_symbol_paper_emits_exit_feature_row() {
     // tolerant of fee math — just assert fee deducted from gross.
     // realized_net_bps 需扣除 round-trip fee，不做精確斷言。
     let net = row.realized_net_bps.expect("realized_net_bps must be Some");
-    assert!(net < 200.0, "net bps should be reduced by ~12 bps round-trip fee, got {}", net);
+    assert!(
+        net < 200.0,
+        "net bps should be reduced by ~12 bps round-trip fee, got {}",
+        net
+    );
 }
 
 /// EXIT-FEATURES-TABLE-1 E2 P1 fix: `try_emit_exit_feature_row` helper —
@@ -502,9 +586,16 @@ fn test_try_emit_exit_feature_row_helper_direct_call() {
     assert!(snap.is_some(), "snapshot must exist for open position");
 
     p.try_emit_exit_feature_row(
-        "BTCUSDT", 0.1, 51_000.0, 2_000, 100.0,
-        30.6, 0.0006, "custom_external:exchange_report",
-        snap.as_ref(), "ctx-helper-test",
+        "BTCUSDT",
+        0.1,
+        51_000.0,
+        2_000,
+        100.0,
+        30.6,
+        0.0006,
+        "custom_external:exchange_report",
+        snap.as_ref(),
+        "ctx-helper-test",
     );
     let row = rx.try_recv().expect("helper must emit ExitFeatureRow");
     assert_eq!(row.context_id, "ctx-helper-test");
@@ -525,9 +616,16 @@ fn test_try_emit_exit_feature_row_fail_soft() {
     // No tx wired + no snapshot → silent no-op, no panic.
     // 未接 tx + 無 snap → 靜默 no-op，不 panic。
     p.try_emit_exit_feature_row(
-        "BTCUSDT", 0.1, 51_000.0, 2_000, 100.0,
-        0.0, 0.0, "strategy_close:test",
-        None, "ctx-fail-soft",
+        "BTCUSDT",
+        0.1,
+        51_000.0,
+        2_000,
+        100.0,
+        0.0,
+        0.0,
+        "strategy_close:test",
+        None,
+        "ctx-fail-soft",
     );
 
     // tx wired but snap None → still no-op, no row emitted.
@@ -535,11 +633,21 @@ fn test_try_emit_exit_feature_row_fail_soft() {
     let (tx, mut rx) = tokio::sync::mpsc::channel::<crate::database::ExitFeatureRow>(4);
     p.set_exit_feature_tx(tx);
     p.try_emit_exit_feature_row(
-        "BTCUSDT", 0.1, 51_000.0, 2_000, 100.0,
-        0.0, 0.0, "strategy_close:test",
-        None, "ctx-fail-soft",
+        "BTCUSDT",
+        0.1,
+        51_000.0,
+        2_000,
+        100.0,
+        0.0,
+        0.0,
+        "strategy_close:test",
+        None,
+        "ctx-fail-soft",
     );
-    assert!(rx.try_recv().is_err(), "no row should be emitted when snap is None");
+    assert!(
+        rx.try_recv().is_err(),
+        "no row should be emitted when snap is None"
+    );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -577,8 +685,10 @@ fn exit_features_writer_bug_fix_partial_reduce_skips_ef_emit() {
     // Emulate the fast_track ReduceToHalf path: half qty, position stays open.
     // 模擬 fast_track ReduceToHalf：半倉，倉位仍 open。
     let pnl = p.paper_state.reduce_position("BTCUSDT", 0.1, 51_000.0);
-    assert!(p.paper_state.get_position("BTCUSDT").is_some(),
-            "position must remain open after partial reduce (qty 0.1 / 0.2)");
+    assert!(
+        p.paper_state.get_position("BTCUSDT").is_some(),
+        "position must remain open after partial reduce (qty 0.1 / 0.2)"
+    );
 
     p.emit_close_fill(
         "BTCUSDT",
@@ -606,8 +716,10 @@ fn exit_features_writer_bug_fix_partial_reduce_skips_ef_emit() {
     // accounting are independent of ML training label hygiene.
     // trading.fills 必須仍寫入 — operator 可見度與 PnL 帳務不受 EF skip 影響。
     let fill = rx_trade.try_recv().expect("Fill must still be enqueued");
-    assert!(matches!(fill, crate::database::TradingMsg::Fill { .. }),
-            "trading.fills must continue to record the close fill");
+    assert!(
+        matches!(fill, crate::database::TradingMsg::Fill { .. }),
+        "trading.fills must continue to record the close fill"
+    );
 }
 
 /// Risk full close (halt-session) MUST emit ExitFeatureRow as before — only
@@ -673,8 +785,8 @@ fn exit_features_writer_bug_fix_full_close_taxonomy_still_emits() {
         "risk_close:TIME STOP: held 24.0h >= limit 24.0h",
         "risk_close:TAKE PROFIT: pnl 5.00% >= 4.50%",
         "risk_close:DRAWDOWN: session equity -2.50% <= -2.00%",
-        "risk_close:fast_track",            // CloseAll path (full close, NOT partial)
-        "risk_close:fast_track_close_all",  // alt CloseAll naming
+        "risk_close:fast_track", // CloseAll path (full close, NOT partial)
+        "risk_close:fast_track_close_all", // alt CloseAll naming
         "stop_trigger:hard_stop_atr",
         "stop_trigger:trailing_10pct",
         "strategy_close:ma_crossover_flip",
@@ -694,8 +806,15 @@ fn exit_features_writer_bug_fix_full_close_taxonomy_still_emits() {
             .close_position("BTCUSDT", 51_000.0, 2_000)
             .unwrap();
         p.emit_close_fill(
-            "BTCUSDT", true, 0.1, 51_000.0, 2_000, pnl,
-            tag, "ctx-full-close-coverage", snap.as_ref(),
+            "BTCUSDT",
+            true,
+            0.1,
+            51_000.0,
+            2_000,
+            pnl,
+            tag,
+            "ctx-full-close-coverage",
+            snap.as_ref(),
         );
         assert!(
             rx.try_recv().is_ok(),

@@ -94,7 +94,10 @@ async fn flush_exit_features(pool: &DbPool, pending: &mut Vec<ExitFeatureRow>) {
     let pg = match pool.get() {
         Some(p) => p,
         None => {
-            pending.clear();
+            warn!(
+                pending_rows = pending.len(),
+                "exit_feature_writer flush skipped: DB pool unavailable — retaining pending rows"
+            );
             return;
         }
     };
@@ -178,6 +181,7 @@ async fn flush_exit_features(pool: &DbPool, pending: &mut Vec<ExitFeatureRow>) {
                     ctx_id = %row.context_id, error = %e,
                     "exit feature write failed / 退場特徵寫入失敗"
                 );
+                pending.push(row);
             }
         }
     }

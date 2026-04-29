@@ -3,6 +3,37 @@
 
 use super::*;
 
+fn apply_governor_order_constraints(
+    governance: &GovernanceCore,
+    is_reducing: bool,
+    requested_qty: f64,
+    existing_qty: Option<f64>,
+) -> Result<f64, String> {
+    let level = governance.risk.snapshot_level();
+    let constraints = governance.risk.constraints();
+
+    // Survival-first: reducing/unwind orders stay allowed. New entries must
+    // honor tier constraints consistently across strategy + external paths.
+    // 生存優先：減倉/平倉保持可用；新開倉必須一致遵守 tier 約束。
+    if !is_reducing
+        && (!constraints.new_entries_allowed
+            || constraints.reduce_only
+            || constraints.requires_operator)
+    {
+        return Err(format!(
+            "risk_governor_{} blocks new entries (reduce_only={}, requires_operator={})",
+            level, constraints.reduce_only, constraints.requires_operator
+        ));
+    }
+
+    if is_reducing {
+        return Ok(existing_qty.map_or(requested_qty, |qty| requested_qty.min(qty)));
+    }
+
+    let scaled_qty = requested_qty * constraints.position_size_multiplier.max(0.0);
+    Ok(scaled_qty)
+}
+
 impl IntentProcessor {
     /// Process a single intent through the full governance pipeline (no edge-predictor features).
     /// Legacy entry-point retained for callers that do not yet compute FeatureVectorV1.
@@ -73,8 +104,19 @@ impl IntentProcessor {
             );
         }
 
+        let reducing_existing_qty = paper_state
+            .get_position(&intent.symbol)
+            .filter(|p| p.is_long != intent.is_long)
+            .map(|p| p.qty);
+        let is_reducing = reducing_existing_qty.is_some();
+        let pre_guardian_qty = if let Some(existing_qty) = reducing_existing_qty {
+            intent.qty.min(existing_qty)
+        } else {
+            intent.qty
+        };
+
         // Gate 2: Guardian 4-check
-        let positions: Vec<ExistingPosition> = paper_state
+        let mut positions: Vec<ExistingPosition> = paper_state
             .positions()
             .iter()
             .map(|p| ExistingPosition {
@@ -86,9 +128,22 @@ impl IntentProcessor {
                 },
             })
             .collect();
+        let guardian_leverage = if is_reducing {
+            // Guardian's deterministic vetoes are designed for adding risk. A
+            // capped opposite-side order can only unwind exposure, so keep the
+            // survival path open even during drawdown/leverage stress.
+            positions.clear();
+            0.0
+        } else {
+            Self::compute_leverage(paper_state)
+        };
 
         let ctx = PortfolioContext {
-            drawdown_pct: paper_state.drawdown_pct(),
+            drawdown_pct: if is_reducing {
+                0.0
+            } else {
+                paper_state.drawdown_pct()
+            },
             positions,
         };
 
@@ -99,8 +154,8 @@ impl IntentProcessor {
             } else {
                 "Sell".into()
             },
-            leverage: Self::compute_leverage(paper_state), // RG-2: real leverage from positions
-            qty: intent.qty,
+            leverage: guardian_leverage, // RG-2: real leverage from positions for risk-adding orders
+            qty: pre_guardian_qty,
         };
 
         let guardian_result = self.guardian.review(&check, &ctx);
@@ -143,7 +198,7 @@ impl IntentProcessor {
         // Kelly 倉位計算（Phase 2b）
         let price = paper_state.latest_price(&intent.symbol).unwrap_or(0.0);
         let balance = paper_state.balance();
-        let guardian_qty = guardian_result.modified_qty.unwrap_or(intent.qty);
+        let guardian_qty = guardian_result.modified_qty.unwrap_or(pre_guardian_qty);
 
         let kelly_qty = if let Some(ref kelly_cfg) = self.kelly_config {
             let stats = self
@@ -177,7 +232,23 @@ impl IntentProcessor {
         } else {
             kelly_qty
         };
-        let final_qty = kelly_qty.min(p1_max_qty);
+        let governor_input_qty = if is_reducing {
+            guardian_qty
+        } else {
+            kelly_qty.min(p1_max_qty)
+        };
+
+        let final_qty = match apply_governor_order_constraints(
+            governance,
+            is_reducing,
+            governor_input_qty,
+            reducing_existing_qty,
+        ) {
+            Ok(qty) => qty,
+            Err(reason) => {
+                return IntentResult::rejected(RejectionCode::RiskGate { reason }.format());
+            }
+        };
 
         // ─── PNL-1: Reject qty=0 ghost positions ───
         // 拒絕 qty=0 幽靈倉（小餘額被取整為 0 時必須阻止開倉）
@@ -199,10 +270,6 @@ impl IntentProcessor {
         // Runs after P1 sizing so single-position-pct check uses final_qty.
         // 在 P1 調整後運行，以便單一持倉百分比檢查使用最終數量。
         {
-            let is_reducing = paper_state
-                .get_position(&intent.symbol)
-                .map(|p| p.is_long != intent.is_long)
-                .unwrap_or(false);
             let exposure_pct = Self::compute_exposure_pct(paper_state);
             let daily_loss = self.daily_loss_pct(balance);
             let check_result = check_order_allowed(
@@ -363,8 +430,9 @@ impl IntentProcessor {
                     // bias guard #3 判斷「提交時逆向 → 推遲碰觸 FillPartial」。
                     // 0.0 = 尚未見過 ticker，視為中性；guard 於零門檻或零 rate
                     // 時短路回 false，因此行為與 1B-4.3 前一致。
-                    let funding_rate_at_submit =
-                        paper_state.latest_funding_rate(&intent.symbol).unwrap_or(0.0);
+                    let funding_rate_at_submit = paper_state
+                        .latest_funding_rate(&intent.symbol)
+                        .unwrap_or(0.0);
                     let draft = crate::paper_state::RestingLimitOrder {
                         symbol: intent.symbol.clone(),
                         is_long: intent.is_long,
@@ -479,8 +547,19 @@ impl IntentProcessor {
                 );
             }
         }
+        let reducing_existing_qty = paper_state
+            .get_position(&intent.symbol)
+            .filter(|p| p.is_long != intent.is_long)
+            .map(|p| p.qty);
+        let is_reducing = reducing_existing_qty.is_some();
+        let pre_guardian_qty = if let Some(existing_qty) = reducing_existing_qty {
+            intent.qty.min(existing_qty)
+        } else {
+            intent.qty
+        };
+
         // Gate 2: Guardian 4-check
-        let positions: Vec<ExistingPosition> = paper_state
+        let mut positions: Vec<ExistingPosition> = paper_state
             .positions()
             .iter()
             .map(|p| ExistingPosition {
@@ -492,8 +571,18 @@ impl IntentProcessor {
                 },
             })
             .collect();
+        let guardian_leverage = if is_reducing {
+            positions.clear();
+            0.0
+        } else {
+            Self::compute_leverage(paper_state)
+        };
         let ctx = PortfolioContext {
-            drawdown_pct: paper_state.drawdown_pct(),
+            drawdown_pct: if is_reducing {
+                0.0
+            } else {
+                paper_state.drawdown_pct()
+            },
             positions,
         };
         let check = TradeIntentCheck {
@@ -503,8 +592,8 @@ impl IntentProcessor {
             } else {
                 "Sell".into()
             },
-            leverage: Self::compute_leverage(paper_state), // RG-2: real leverage from positions
-            qty: intent.qty,
+            leverage: guardian_leverage, // RG-2: real leverage from positions for risk-adding orders
+            qty: pre_guardian_qty,
         };
         let guardian_result = self.guardian.review(&check, &ctx);
 
@@ -534,7 +623,7 @@ impl IntentProcessor {
         // Gate 2.5: Kelly position sizing
         let price = paper_state.latest_price(&intent.symbol).unwrap_or(0.0);
         let balance = paper_state.balance();
-        let guardian_qty = guardian_result.modified_qty.unwrap_or(intent.qty);
+        let guardian_qty = guardian_result.modified_qty.unwrap_or(pre_guardian_qty);
         let kelly_qty = if let Some(ref kelly_cfg) = self.kelly_config {
             let stats = self
                 .trade_stats
@@ -564,7 +653,23 @@ impl IntentProcessor {
         } else {
             kelly_qty
         };
-        let final_qty = kelly_qty.min(p1_max_qty);
+        let governor_input_qty = if is_reducing {
+            guardian_qty
+        } else {
+            kelly_qty.min(p1_max_qty)
+        };
+
+        let final_qty = match apply_governor_order_constraints(
+            governance,
+            is_reducing,
+            governor_input_qty,
+            reducing_existing_qty,
+        ) {
+            Ok(qty) => qty,
+            Err(reason) => {
+                return ExchangeGateResult::rejected(RejectionCode::RiskGate { reason }.format());
+            }
+        };
 
         // ─── PNL-1: Reject qty=0 ghost positions ───
         // 拒絕 qty=0 幽靈倉（小餘額被取整為 0 時必須阻止開倉）
@@ -586,10 +691,6 @@ impl IntentProcessor {
         // Runs after P1 sizing so single-position-pct check uses final_qty.
         // 在 P1 調整後運行，以便單一持倉百分比檢查使用最終數量。
         {
-            let is_reducing = paper_state
-                .get_position(&intent.symbol)
-                .map(|p| p.is_long != intent.is_long)
-                .unwrap_or(false);
             let exposure_pct = Self::compute_exposure_pct(paper_state);
             let daily_loss = self.daily_loss_pct(balance);
             let check_result = check_order_allowed(
@@ -639,7 +740,9 @@ impl IntentProcessor {
             if !(atr > 0.0) {
                 tracing::warn!(symbol = %intent.symbol,
                     "cost_gate fail-closed: ATR unavailable (SEC-11) / 成本門禁因 ATR 不可用拒絕");
-                return ExchangeGateResult::rejected(RejectionCode::CostGateAtrUnavailable.format());
+                return ExchangeGateResult::rejected(
+                    RejectionCode::CostGateAtrUnavailable.format(),
+                );
             }
             if let Some(reason) = self.fee_rate_staleness_rejection(now_ms) {
                 tracing::warn!(

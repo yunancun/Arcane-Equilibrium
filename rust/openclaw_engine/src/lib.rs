@@ -55,6 +55,7 @@ pub mod regime;
 pub mod restart_kind;
 pub mod risk_checks;
 pub mod scanner;
+pub mod secret_env;
 pub mod strategies;
 pub mod strategist_scheduler;
 pub mod tick_pipeline;

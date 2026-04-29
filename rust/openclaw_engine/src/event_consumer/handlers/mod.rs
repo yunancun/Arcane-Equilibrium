@@ -70,11 +70,7 @@ pub fn handle_paper_command(
         // in event_consumer/mod.rs to run the DB DELETE too.
         // P1-5 A2：測試專用 stub；生產路徑在 mod.rs 攔截並跑 DB DELETE。
         PipelineCommand::ResetDrawdownBaseline { response_tx } => {
-            lifecycle::handle_reset_drawdown_baseline_local(
-                response_tx,
-                pipeline,
-                snapshot_writer,
-            )
+            lifecycle::handle_reset_drawdown_baseline_local(response_tx, pipeline, snapshot_writer)
         }
         // ── Phase 3b: Strategy parameter IPC commands / 策略參數 IPC 命令 ──
         PipelineCommand::UpdateStrategyParams {
@@ -199,6 +195,7 @@ pub fn handle_paper_command(
             //   EDGE-P1b T1 calibrator 第 5 維度，forward 給下方
             //   handle_update_risk_config。
             exit_stale_peak_ms,
+            response_tx,
         } => risk::handle_update_risk_config(
             hard_stop_pct,
             trailing_stop_pct,
@@ -233,6 +230,7 @@ pub fn handle_paper_command(
             // EDGE-P1b-FUP-STALE-PEAK-IPC：把 u64 ms wire 傳給
             //   handle_update_risk_config（closure 內 cast 為 i64）。
             exit_stale_peak_ms,
+            response_tx,
             pipeline,
             snapshot_writer,
         ),
@@ -288,9 +286,8 @@ pub fn handle_paper_command(
             path,
             response_tx,
         } => {
-            let result = edge_predictor::handle_reload_edge_predictor(
-                &engine, &strategy, &path, pipeline,
-            );
+            let result =
+                edge_predictor::handle_reload_edge_predictor(&engine, &strategy, &path, pipeline);
             let _ = response_tx.send(result);
         }
         // EDGE-P3-1 Stage 0 · Operator kill-switch local dispatch (tests only).

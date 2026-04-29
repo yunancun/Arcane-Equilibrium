@@ -46,7 +46,23 @@ echo "[2/3] 安装依赖 / Installing dependencies..."
 .venv/bin/pip install -q -r requirements.txt
 
 # ── 3. 设置环境变量（仅当未设置时）────────────────────────────────────────
-export OPENCLAW_API_TOKEN="${OPENCLAW_API_TOKEN:-change-me}"
+# 中文：本地开发若未显式提供 token，则生成 0600 token 文件并通过
+# OPENCLAW_API_TOKEN_FILE 传入；不在终端打印 token。
+# English: For local dev, generate a 0600 token file when no explicit token is
+# provided and pass it via OPENCLAW_API_TOKEN_FILE; never print the token.
+if [ -z "${OPENCLAW_API_TOKEN:-}" ] && [ -z "${OPENCLAW_API_TOKEN_FILE:-}" ]; then
+    mkdir -p .secrets
+    chmod 700 .secrets
+    if [ ! -s ".secrets/api_token" ]; then
+        umask 077
+        .venv/bin/python3 - <<'PY' > .secrets/api_token
+import secrets
+print(secrets.token_urlsafe(32))
+PY
+        chmod 600 .secrets/api_token
+    fi
+    export OPENCLAW_API_TOKEN_FILE="$SCRIPT_DIR/.secrets/api_token"
+fi
 export OPENCLAW_STATE_FILE="${OPENCLAW_STATE_FILE:-runtime/openclaw_bybit_control_state.json}"
 
 # 确保 runtime 目录存在 / Ensure runtime directory exists
@@ -54,15 +70,15 @@ mkdir -p "$(dirname "$OPENCLAW_STATE_FILE")"
 
 echo "[3/3] 启动服务 / Starting service..."
 echo ""
-echo "  Token:  ${OPENCLAW_API_TOKEN}"
+echo "  Auth:   token configured (value hidden)"
 echo "  State:  ${OPENCLAW_STATE_FILE}"
 echo "  Port:   ${PORT}"
 echo ""
 echo "  GUI:    http://127.0.0.1:${PORT}/"
 echo "  API:    http://127.0.0.1:${PORT}/docs"
 echo ""
-echo "  输入 Token \"${OPENCLAW_API_TOKEN}\" 后点击「连接」"
-echo "  Enter token \"${OPENCLAW_API_TOKEN}\" then click Connect"
+echo "  Token 值不打印；如需 API bearer，读取 0600 token 文件。"
+echo "  Token value is hidden; read the 0600 token file only when API bearer access is needed."
 echo ""
 echo "═══════════════════════════════════════════════════"
 

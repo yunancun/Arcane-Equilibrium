@@ -13,7 +13,9 @@ use openclaw_engine::account_manager::AccountManager;
 use openclaw_engine::bybit_rest_client::{BybitEnvironment, BybitRestClient};
 use openclaw_engine::config::{ConfigManager, ConfigStore, LearningConfig};
 use openclaw_engine::database::pool::DbPool;
-use openclaw_engine::ipc_server::{AuditPoolSlot, BudgetTrackerSlot, TeacherLoopSlot};
+use openclaw_engine::ipc_server::{
+    AuditPoolSlot, BudgetTrackerSlot, EngineCommandChannels, TeacherLoopSlot,
+};
 use openclaw_engine::scanner::registry::SymbolRegistry;
 use openclaw_engine::tick_pipeline::PipelineCommand;
 use std::sync::Arc;
@@ -162,7 +164,7 @@ pub(crate) async fn spawn_teacher_consumer_loop(
     db_pool: &Arc<DbPool>,
     budget_tracker_slot: &BudgetTrackerSlot,
     teacher_loop_slot: TeacherLoopSlot,
-    pipeline_cmd_tx: tokio::sync::mpsc::UnboundedSender<PipelineCommand>,
+    engine_cmd_channels: EngineCommandChannels,
     governance_wrapper: &Arc<openclaw_engine::claude_teacher::GovernanceCoreWrapper>,
 ) {
     if !db_pool.is_available() {
@@ -178,7 +180,7 @@ pub(crate) async fn spawn_teacher_consumer_loop(
 
     use openclaw_engine::claude_teacher::{
         AnthropicClient, ClaudeTeacher, ConsumerLoopConfig, DirectiveApplier, GovernanceCheck,
-        LlmClient, OutcomeTracker, PipelineCommandSink, StrategyIpcSink, TeacherConsumerLoop,
+        EngineCommandSink, LlmClient, OutcomeTracker, StrategyIpcSink, TeacherConsumerLoop,
     };
     use std::sync::atomic::AtomicBool;
 
@@ -192,7 +194,7 @@ pub(crate) async fn spawn_teacher_consumer_loop(
     ));
     let governance_for_applier: Arc<dyn GovernanceCheck> =
         Arc::clone(governance_wrapper) as Arc<dyn GovernanceCheck>;
-    let ipc_sink: Arc<dyn StrategyIpcSink> = Arc::new(PipelineCommandSink::new(pipeline_cmd_tx));
+    let ipc_sink: Arc<dyn StrategyIpcSink> = Arc::new(EngineCommandSink::demo(engine_cmd_channels));
     let applier = Arc::new(DirectiveApplier::new(
         governance_for_applier,
         Some(ipc_sink),

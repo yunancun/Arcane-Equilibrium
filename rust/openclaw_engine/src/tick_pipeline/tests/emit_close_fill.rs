@@ -48,7 +48,7 @@ fn test_emit_close_fill_embeds_engine_mode_per_kind() {
             123,      // ts_ms
             0.0,      // realized_pnl
             "risk_close:sl_hit",
-            "", // entry_context_id unused here (test focuses on engine_mode embed)
+            "",   // entry_context_id unused here (test focuses on engine_mode embed)
             None, // EXIT-FEATURES-TABLE-1: no snapshot; exit-feature row skipped (fail-soft)
         );
 
@@ -193,6 +193,7 @@ fn apply_confirmed_fill_preserves_signal_context_id() {
         None,
         None,
         None,
+        None,
     );
 
     // paper_state must show the signal-time id verbatim — not the exec-time
@@ -228,8 +229,23 @@ fn apply_confirmed_fill_falls_back_when_signal_id_empty() {
     let _ = pipeline.on_tick(&super::make_event("BTCUSDT", 100.0, 1_000));
 
     pipeline.apply_confirmed_fill(
-        "BTCUSDT", true, 1.0, 100.0, 0.1, 2_000, "grid", "", "oc_test_2", None,
-        None, None, None, None, None, None,
+        "BTCUSDT",
+        true,
+        1.0,
+        100.0,
+        0.1,
+        2_000,
+        "grid",
+        "",
+        "oc_test_2",
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
     );
 
     // Fallback path recomputes with em="demo", symbol="BTCUSDT", ts_ms=2000.
@@ -239,6 +255,44 @@ fn apply_confirmed_fill_falls_back_when_signal_id_empty() {
         .get_entry_context_id("BTCUSDT")
         .map(|s| s.to_string());
     assert_eq!(stamped.as_deref(), Some("ctx-demo-BTCUSDT-2000"));
+}
+
+#[test]
+fn apply_confirmed_fill_uses_exchange_exec_id_as_fill_id() {
+    let mut pipeline = TickPipeline::with_kind(&["BTCUSDT"], 1_000.0, PipelineKind::Demo);
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<crate::database::TradingMsg>(8);
+    pipeline.set_trading_channel(tx);
+
+    pipeline.apply_confirmed_fill(
+        "BTCUSDT",
+        true,
+        1.0,
+        100.0,
+        0.1,
+        2_000,
+        "grid",
+        "ctx-demo-BTCUSDT-1000",
+        "oc_test_exec_id",
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        Some("exec-id-123"),
+    );
+
+    let msg = rx.try_recv().expect("confirmed fill must be enqueued");
+    match msg {
+        crate::database::TradingMsg::Fill { fill_id, .. } => {
+            assert_eq!(
+                fill_id, "bybit-exec-id-123",
+                "exchange exec_id must drive fill_id to make replay idempotent"
+            );
+        }
+        _ => panic!("expected Fill message"),
+    }
 }
 
 /// EXIT-FEATURES-TABLE-1 Phase 1b GAP-1 regression (2026-04-19):
@@ -271,14 +325,15 @@ fn apply_confirmed_fill_emits_exit_feature_row_on_close() {
     // 開倉（is_long=true），realized_pnl=0，開倉不應送出 exit feature。
     pipeline.apply_confirmed_fill(
         "BTCUSDT",
-        true,      // is_long (buy opens long)
-        0.1,       // qty
-        50_000.0,  // fill_price
-        2.75,      // fee
-        1_000,     // ts_ms (open)
+        true,     // is_long (buy opens long)
+        0.1,      // qty
+        50_000.0, // fill_price
+        2.75,     // fee
+        1_000,    // ts_ms (open)
         "ma_crossover",
         "ctx-demo-BTCUSDT-1000",
         "oc_open_1",
+        None,
         None,
         None,
         None,
@@ -302,14 +357,15 @@ fn apply_confirmed_fill_emits_exit_feature_row_on_close() {
     // 平倉（sell 側），realized_pnl = +100，應送出 exit feature。
     pipeline.apply_confirmed_fill(
         "BTCUSDT",
-        false,     // is_long=false (sell closes long)
-        0.1,       // qty
-        51_000.0,  // fill_price
-        2.81,      // fee (close)
-        2_000,     // ts_ms (close)
+        false,    // is_long=false (sell closes long)
+        0.1,      // qty
+        51_000.0, // fill_price
+        2.81,     // fee (close)
+        2_000,    // ts_ms (close)
         "strategy_close:take_profit",
         "", // close fill: signal id not threaded; exec-time fallback OK
         "oc_close_1",
+        None,
         None,
         None,
         None,
@@ -356,14 +412,42 @@ fn apply_confirmed_fill_exit_feature_fail_soft_when_tx_missing() {
     pipeline.set_trading_channel(ttx);
 
     pipeline.apply_confirmed_fill(
-        "BTCUSDT", true, 0.1, 50_000.0, 2.75, 1_000, "ma_crossover",
-        "ctx-demo-BTCUSDT-1000", "oc_open_2", Some(0.0002),
-        Some(50_001.0), Some(990), Some("bbo_same_side"), Some(-0.2), Some("taker"), Some(10),
+        "BTCUSDT",
+        true,
+        0.1,
+        50_000.0,
+        2.75,
+        1_000,
+        "ma_crossover",
+        "ctx-demo-BTCUSDT-1000",
+        "oc_open_2",
+        Some(0.0002),
+        Some(50_001.0),
+        Some(990),
+        Some("bbo_same_side"),
+        Some(-0.2),
+        Some("taker"),
+        Some(10),
+        None,
     );
     pipeline.apply_confirmed_fill(
-        "BTCUSDT", false, 0.1, 51_000.0, 2.81, 2_000,
-        "strategy_close:take_profit", "", "oc_close_2", None,
-        None, None, None, None, None, None,
+        "BTCUSDT",
+        false,
+        0.1,
+        51_000.0,
+        2.81,
+        2_000,
+        "strategy_close:take_profit",
+        "",
+        "oc_close_2",
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
     );
 
     // Both Fills still flow through trading_tx (open + close).
@@ -391,7 +475,10 @@ fn apply_confirmed_fill_exit_feature_fail_soft_when_tx_missing() {
         _ => panic!("open Fill must be enqueued"),
     }
     let close_fill = trx.try_recv().expect("close Fill must be enqueued");
-    assert!(matches!(close_fill, crate::database::TradingMsg::Fill { .. }));
+    assert!(matches!(
+        close_fill,
+        crate::database::TradingMsg::Fill { .. }
+    ));
 }
 
 #[test]

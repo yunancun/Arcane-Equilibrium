@@ -426,7 +426,10 @@ fn test_persist_intent_helper_emits_trading_msg_intent_with_engine_mode() {
             assert_eq!(engine_mode, "live_demo");
             assert_eq!(symbol, "ETHUSDT");
             assert_eq!(side, "Sell");
-            assert!((qty - 0.045).abs() < 1e-12, "qty must be sized final_qty, not 1e9 sentinel");
+            assert!(
+                (qty - 0.045).abs() < 1e-12,
+                "qty must be sized final_qty, not 1e9 sentinel"
+            );
             assert_eq!(strategy_name, "ma_crossover");
         }
         other => panic!("expected TradingMsg::Intent, got {:?}", other),

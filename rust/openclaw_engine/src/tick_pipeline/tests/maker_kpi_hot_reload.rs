@@ -33,7 +33,10 @@ fn test_maker_kpi_hot_reload_seeds_initial_snapshot_on_set() {
         MakerKpiConfig::default().funding_drag_threshold
     );
     assert_eq!(
-        pipeline.intent_processor.maker_kpi_config().funding_drag_threshold,
+        pipeline
+            .intent_processor
+            .maker_kpi_config()
+            .funding_drag_threshold,
         MakerKpiConfig::default().funding_drag_threshold
     );
 
@@ -56,7 +59,12 @@ fn test_maker_kpi_hot_reload_seeds_initial_snapshot_on_set() {
         "intent_processor.maker_kpi_config().funding_drag_threshold not seeded on set_maker_kpi_store"
     );
     assert!(
-        (pipeline.intent_processor.maker_kpi_config().min_avg_net_edge_bps - (-10.0)).abs()
+        (pipeline
+            .intent_processor
+            .maker_kpi_config()
+            .min_avg_net_edge_bps
+            - (-10.0))
+            .abs()
             < 1e-12
     );
     assert_eq!(pipeline.maker_kpi_version_seen, store.version());
@@ -109,12 +117,23 @@ fn test_maker_kpi_hot_reload_picks_up_replace_on_next_tick() {
         "consumer #1: pipeline.maker_kpi_config.min_fill_rate NOT hot-reloaded"
     );
     assert!(
-        (pipeline.intent_processor.maker_kpi_config().funding_drag_threshold - 0.0013).abs()
+        (pipeline
+            .intent_processor
+            .maker_kpi_config()
+            .funding_drag_threshold
+            - 0.0013)
+            .abs()
             < 1e-12,
         "consumer #2: intent_processor.maker_kpi_config() NOT hot-reloaded after replace"
     );
     assert!(
-        (pipeline.intent_processor.maker_kpi_config().min_avg_net_edge_bps - (-3.0)).abs() < 1e-12
+        (pipeline
+            .intent_processor
+            .maker_kpi_config()
+            .min_avg_net_edge_bps
+            - (-3.0))
+            .abs()
+            < 1e-12
     );
     assert_eq!(pipeline.maker_kpi_version_seen, store.version());
 }
@@ -133,7 +152,10 @@ fn test_maker_kpi_unwired_falls_back_to_default_every_tick() {
         MakerKpiConfig::default().funding_drag_threshold
     );
     assert_eq!(
-        pipeline.intent_processor.maker_kpi_config().funding_drag_threshold,
+        pipeline
+            .intent_processor
+            .maker_kpi_config()
+            .funding_drag_threshold,
         MakerKpiConfig::default().funding_drag_threshold
     );
     assert_eq!(pipeline.maker_kpi_version_seen, 0);
@@ -162,9 +184,7 @@ fn test_maker_kpi_version_bump_only_applies_once_per_version() {
 
     // Tick 1 → pulls patch.
     pipeline.on_tick(&super::make_event("BTCUSDT", 50_000.0, 1_000));
-    assert!(
-        (pipeline.maker_kpi_config.funding_drag_threshold - 0.0011).abs() < 1e-12
-    );
+    assert!((pipeline.maker_kpi_config.funding_drag_threshold - 0.0011).abs() < 1e-12);
 
     // Poison the owned snapshot with a sentinel value.
     // 手動寫入一個與 store 不同的 sentinel。
@@ -267,11 +287,20 @@ fn test_maker_kpi_config_validate_rejects_bad_fields() {
     // min_fill_rate out of [0, 1]
     let mut cfg = MakerKpiConfig::default();
     cfg.min_fill_rate = 1.5;
-    assert!(cfg.validate().is_err(), "min_fill_rate 1.5 must be rejected");
+    assert!(
+        cfg.validate().is_err(),
+        "min_fill_rate 1.5 must be rejected"
+    );
     cfg.min_fill_rate = -0.1;
-    assert!(cfg.validate().is_err(), "min_fill_rate -0.1 must be rejected");
+    assert!(
+        cfg.validate().is_err(),
+        "min_fill_rate -0.1 must be rejected"
+    );
     cfg.min_fill_rate = f64::NAN;
-    assert!(cfg.validate().is_err(), "NaN min_fill_rate must be rejected");
+    assert!(
+        cfg.validate().is_err(),
+        "NaN min_fill_rate must be rejected"
+    );
 
     // min_avg_net_edge_bps > 0 → deadlock
     let mut cfg = MakerKpiConfig::default();
@@ -284,23 +313,35 @@ fn test_maker_kpi_config_validate_rejects_bad_fields() {
     // Non-finite min_avg_net_edge_bps
     let mut cfg = MakerKpiConfig::default();
     cfg.min_avg_net_edge_bps = f64::INFINITY;
-    assert!(cfg.validate().is_err(), "Inf min_avg_net_edge_bps must be rejected");
+    assert!(
+        cfg.validate().is_err(),
+        "Inf min_avg_net_edge_bps must be rejected"
+    );
 
     // Negative funding_drag_threshold
     let mut cfg = MakerKpiConfig::default();
     cfg.funding_drag_threshold = -0.001;
-    assert!(cfg.validate().is_err(), "negative funding_drag_threshold must be rejected");
+    assert!(
+        cfg.validate().is_err(),
+        "negative funding_drag_threshold must be rejected"
+    );
 
     // Non-finite funding_drag_threshold
     let mut cfg = MakerKpiConfig::default();
     cfg.funding_drag_threshold = f64::NAN;
-    assert!(cfg.validate().is_err(), "NaN funding_drag_threshold must be rejected");
+    assert!(
+        cfg.validate().is_err(),
+        "NaN funding_drag_threshold must be rejected"
+    );
 
     // Edge case: 0.0 funding_drag_threshold is VALID (guard disabled semantic).
     // 邊界：`funding_drag_threshold = 0.0` 合法（代表關閉 guard）。
     let mut cfg = MakerKpiConfig::default();
     cfg.funding_drag_threshold = 0.0;
-    assert!(cfg.validate().is_ok(), "0.0 funding_drag_threshold must be accepted (disables guard)");
+    assert!(
+        cfg.validate().is_ok(),
+        "0.0 funding_drag_threshold must be accepted (disables guard)"
+    );
 }
 
 // T3: `deny_unknown_fields` — a typo in a TOML patch yields an error instead
@@ -513,7 +554,10 @@ fn test_maker_kpi_replace_without_tick_leaves_snapshot_stale_until_next_tick() {
         "replace without tick must NOT alter pipeline.maker_kpi_config"
     );
     assert!(
-        (pipeline.intent_processor.maker_kpi_config().funding_drag_threshold
+        (pipeline
+            .intent_processor
+            .maker_kpi_config()
+            .funding_drag_threshold
             - initial.funding_drag_threshold)
             .abs()
             < 1e-12,
@@ -529,7 +573,12 @@ fn test_maker_kpi_replace_without_tick_leaves_snapshot_stale_until_next_tick() {
         "on_tick after replace must mirror the new value"
     );
     assert!(
-        (pipeline.intent_processor.maker_kpi_config().funding_drag_threshold - 0.0033).abs()
+        (pipeline
+            .intent_processor
+            .maker_kpi_config()
+            .funding_drag_threshold
+            - 0.0033)
+            .abs()
             < 1e-12,
         "on_tick after replace must also mirror into IntentProcessor"
     );

@@ -30,6 +30,7 @@
 
 set -e
 cd "$(dirname "$0")/.."
+REPO_ROOT="$(pwd)"
 WORKERS="${OPENCLAW_API_WORKERS:-4}"
 # Runtime data dir (env var for Mac compatibility).
 # Mac dev recommendation: export OPENCLAW_DATA_DIR="$HOME/.openclaw_runtime"
@@ -51,6 +52,109 @@ PG_PORT="${OPENCLAW_PG_PORT:-5432}"
 # API venv 路徑。相對路徑以 control_api_v1 為基準（script 會 cd 進去再跑 uvicorn）。
 # 絕對路徑讓 Mac dev 指向共用 venv（例：srv/venvs/mac_dev）。
 API_VENV="${OPENCLAW_API_VENV:-.venv}"
+RUNTIME_SECRET_DIR="$DATA_DIR/runtime_secrets"
+OPENCLAW_DATABASE_URL_FILE="$RUNTIME_SECRET_DIR/openclaw_database_url"
+OPENCLAW_IPC_SECRET_FILE="$SECRETS_ROOT/environment_files/ipc_secret.txt"
+ENGINE_BIN_REL="rust/target/release/openclaw-engine"
+ENGINE_BIN_ABS="$REPO_ROOT/$ENGINE_BIN_REL"
+API_WORKDIR="$REPO_ROOT/program_code/exchange_connectors/bybit_connector/control_api_v1"
+
+prepare_runtime_secret_files() {
+    mkdir -p "$RUNTIME_SECRET_DIR"
+    chmod 700 "$RUNTIME_SECRET_DIR" 2>/dev/null || true
+
+    local pg_pass
+    pg_pass=$(grep '^POSTGRES_PASSWORD=' "$SECRETS_ROOT/environment_files/basic_system_services.env" 2>/dev/null | cut -d= -f2- || true)
+    if [ -z "$pg_pass" ]; then
+        echo "ERROR: POSTGRES_PASSWORD missing in $SECRETS_ROOT/environment_files/basic_system_services.env" >&2
+        exit 1
+    fi
+    printf 'postgresql://trading_admin:%s@127.0.0.1:%s/trading_ai\n' "$pg_pass" "$PG_PORT" > "$OPENCLAW_DATABASE_URL_FILE"
+    chmod 600 "$OPENCLAW_DATABASE_URL_FILE" 2>/dev/null || true
+    if [ -f "$OPENCLAW_IPC_SECRET_FILE" ]; then
+        chmod 600 "$OPENCLAW_IPC_SECRET_FILE" 2>/dev/null || true
+    fi
+}
+
+is_openclaw_api_pid() {
+    local pid="$1"
+    local cmd
+    cmd="$(ps -p "$pid" -o command= 2>/dev/null || true)"
+    [[ "$cmd" == *"uvicorn"* && "$cmd" == *"app.main:app"* && "$cmd" == *"control_api_v1"* ]]
+}
+
+stop_api_safe() {
+    local pid
+    for pid in $(lsof -ti :8000 2>/dev/null || true); do
+        if is_openclaw_api_pid "$pid"; then
+            kill -TERM "$pid" 2>/dev/null || true
+        else
+            echo "WARN: skip non-OpenClaw pid on :8000 -> $pid" >&2
+        fi
+    done
+    local waited=0
+    while [[ "$waited" -lt 10 ]]; do
+        local alive=0
+        for pid in $(lsof -ti :8000 2>/dev/null || true); do
+            if is_openclaw_api_pid "$pid"; then
+                alive=1
+                break
+            fi
+        done
+        [[ "$alive" -eq 0 ]] && return 0
+        sleep 0.5
+        waited=$((waited + 1))
+    done
+    for pid in $(lsof -ti :8000 2>/dev/null || true); do
+        if is_openclaw_api_pid "$pid"; then
+            kill -KILL "$pid" 2>/dev/null || true
+        fi
+    done
+}
+
+process_cwd() {
+    local pid="$1"
+    if command -v pwdx >/dev/null 2>&1; then
+        pwdx "$pid" 2>/dev/null | sed 's/^[^:]*: //'
+    elif command -v lsof >/dev/null 2>&1; then
+        lsof -a -p "$pid" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p' | head -1
+    fi
+}
+
+is_openclaw_engine_pid() {
+    local pid="$1"
+    local cmd cwd
+    cmd="$(ps -p "$pid" -o command= 2>/dev/null || true)"
+    cwd="$(process_cwd "$pid" || true)"
+    if [[ "$cmd" == *"$ENGINE_BIN_ABS"* ]]; then
+        return 0
+    fi
+    [[ "$cwd" == "$REPO_ROOT" ]] || return 1
+    [[ "$cmd" == *"$ENGINE_BIN_REL"* || "$cmd" == *"/openclaw-engine"* ]]
+}
+
+engine_pids() {
+    local pid
+    for pid in $(pgrep -f "openclaw-engine" 2>/dev/null || true); do
+        if is_openclaw_engine_pid "$pid"; then
+            printf '%s\n' "$pid"
+        else
+            echo "WARN: skip non-OpenClaw engine pid -> $pid" >&2
+        fi
+    done
+}
+
+engine_running() {
+    [[ -n "$(engine_pids)" ]]
+}
+
+signal_engine_pids() {
+    local signal="$1"
+    local pid
+    for pid in $(engine_pids); do
+        kill "-$signal" "$pid" 2>/dev/null || true
+    done
+}
 
 # ── Parse flags / 解析旗標 ──
 # Accept --rebuild in any position; SCOPE is the remaining positional.
@@ -179,11 +283,11 @@ write_restart_sentinel() {
 
 graceful_stop_engine() {
     # Fix 2 (2026-04-14): SIGTERM-first shutdown with 5s graceful window, then
-    # escalate to SIGKILL only if the process is still alive. pkill -f was too
+    # escalate to SIGKILL only if the process is still alive. Pattern kills were too
     # blunt — if the engine was in the middle of writing paper_state.json it
     # would be killed mid-atomic-rename producing a corrupted tmp file that
     # the watchdog then misreads as "engine dead" → spurious restart loop.
-    # 修復 2：SIGTERM 先行 + 5s 優雅窗口，仍存活才 SIGKILL。pkill -f 太粗暴 —
+    # 修復 2：SIGTERM 先行 + 5s 優雅窗口，仍存活才 SIGKILL。pattern kill 太粗暴 —
     # 若引擎正在寫 paper_state.json 中途被 kill，會留下損毀的 tmp 檔，watchdog
     # 誤讀為「引擎死亡」→ 虛假重啟循環。
     #
@@ -194,15 +298,15 @@ graceful_stop_engine() {
     # PIPELINE-SLOT-1 Phase 1：SIGTERM 前先寫 sentinel，避免 kill 與 engine 重啟
     # 競態。即使沒有在跑的 engine 也要寫（初次安裝 / 崩潰後重啟都算 Manual 意圖）。
     write_restart_sentinel
-    if ! pgrep -f "openclaw-engine" > /dev/null 2>&1; then
+    if ! engine_running; then
         echo ">>> (no running engine to stop)"
         return 0
     fi
     echo ">>> Sending SIGTERM to engine (graceful shutdown)..."
-    pkill -TERM -f "openclaw-engine" 2>/dev/null || true
+    signal_engine_pids TERM
     local waited=0
     while [[ "$waited" -lt 10 ]]; do
-        if ! pgrep -f "openclaw-engine" > /dev/null 2>&1; then
+        if ! engine_running; then
             echo ">>> Engine exited cleanly after ${waited}x500ms"
             return 0
         fi
@@ -210,7 +314,7 @@ graceful_stop_engine() {
         waited=$((waited + 1))
     done
     echo "WARN: engine still alive after 5s SIGTERM → escalating to SIGKILL" >&2
-    pkill -KILL -f "openclaw-engine" 2>/dev/null || true
+    signal_engine_pids KILL
     sleep 1
 }
 
@@ -222,13 +326,6 @@ restart_engine() {
     # 明確重啟時清除 maintenance flag — operator 意圖是讓引擎跑起來。
     rm -f "$DATA_DIR/engine_maintenance.flag" 2>/dev/null || true
     echo ">>> Starting Rust engine..."
-    # Load PG password from secrets (cross-platform: no hardcoded credentials)
-    local pg_pass
-    pg_pass=$(grep POSTGRES_PASSWORD "$SECRETS_ROOT/environment_files/basic_system_services.env" 2>/dev/null | cut -d= -f2-)
-    # Load IPC HMAC secret for Live pipeline authentication
-    # 載入 IPC HMAC 密鑰（Live 管線 HMAC 認證必需）
-    local ipc_secret
-    ipc_secret=$(cat "$SECRETS_ROOT/environment_files/ipc_secret.txt" 2>/dev/null || echo "")
     # Phase 2 auto-migrate opt-in (V023 postmortem 2026-04-24): pass through
     # OPENCLAW_AUTO_MIGRATE + OPENCLAW_BASE_DIR so the engine's migration
     # runner can locate sql/migrations/ and honor the env toggle. Defaults
@@ -241,8 +338,8 @@ restart_engine() {
     local base_dir
     base_dir="${OPENCLAW_BASE_DIR:-$(pwd)}"
     OPENCLAW_DATA_DIR="$DATA_DIR" OPENCLAW_CANARY_MODE=1 \
-        OPENCLAW_DATABASE_URL="postgresql://trading_admin:${pg_pass}@127.0.0.1:${PG_PORT}/trading_ai" \
-        OPENCLAW_IPC_SECRET="${ipc_secret}" \
+        OPENCLAW_DATABASE_URL_FILE="$OPENCLAW_DATABASE_URL_FILE" \
+        OPENCLAW_IPC_SECRET_FILE="$OPENCLAW_IPC_SECRET_FILE" \
         OPENCLAW_AUTO_MIGRATE="${auto_migrate}" \
         OPENCLAW_BASE_DIR="${base_dir}" \
         nohup rust/target/release/openclaw-engine > "$DATA_DIR/engine.log" 2>&1 &
@@ -251,18 +348,9 @@ restart_engine() {
 
 restart_api() {
     echo ">>> Stopping API server..."
-    lsof -ti :8000 | xargs kill -9 2>/dev/null || true
-    sleep 2
+    stop_api_safe
     echo ">>> Starting API server ($WORKERS workers)..."
-    # Pass DB URL to API server for metrics DB fallback (fills query).
-    # 傳遞 DB URL 給 API 以支持指標 DB 降級（成交查詢）。
-    local pg_pass
-    pg_pass=$(grep POSTGRES_PASSWORD "$SECRETS_ROOT/environment_files/basic_system_services.env" 2>/dev/null | cut -d= -f2-)
-    cd program_code/exchange_connectors/bybit_connector/control_api_v1
-    # Load IPC HMAC secret for API-side HMAC verification
-    # 載入 IPC HMAC 密鑰（API 端 HMAC 驗證）
-    local ipc_secret
-    ipc_secret=$(cat "$SECRETS_ROOT/environment_files/ipc_secret.txt" 2>/dev/null || echo "")
+    cd "$API_WORKDIR"
     # RESTART-ALL-UVICORN-LOG-1 (2026-04-23): redirect uvicorn stdout/stderr to
     # $DATA_DIR/api.log with nohup, mirroring engine startup pattern (L200).
     # Previously uvicorn had no redirect, so api.log stayed frozen at the
@@ -272,8 +360,8 @@ restart_api() {
     # $DATA_DIR/api.log，與 engine 啟動模式（L200）對齊。原本 uvicorn 無
     # redirect，api.log 自 2026-04-19 PIPELINE-SLOT-1 Phase 1 重啟後不再更新，
     # 任何 API 錯誤 / traceback 隨啟動 shell 散失。
-    OPENCLAW_DATABASE_URL="postgresql://trading_admin:${pg_pass}@127.0.0.1:${PG_PORT}/trading_ai" \
-        OPENCLAW_IPC_SECRET="${ipc_secret}" \
+    OPENCLAW_DATABASE_URL_FILE="$OPENCLAW_DATABASE_URL_FILE" \
+        OPENCLAW_IPC_SECRET_FILE="$OPENCLAW_IPC_SECRET_FILE" \
         nohup "$API_VENV/bin/python3" "$API_VENV/bin/uvicorn" app.main:app \
         --host 0.0.0.0 --port 8000 --workers "$WORKERS" \
         > "$DATA_DIR/api.log" 2>&1 &
@@ -311,6 +399,8 @@ if [[ "$REBUILD" -eq 1 ]]; then
         rebuild_engine_binary
     fi
 fi
+
+prepare_runtime_secret_files
 
 case "$SCOPE" in
     --engine-only) restart_engine; wait_and_verify ;;

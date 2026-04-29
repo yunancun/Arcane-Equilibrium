@@ -29,6 +29,7 @@ MODULE_NOTE (English):
 """
 
 import hmac
+import os
 import time
 from typing import Any
 
@@ -36,7 +37,6 @@ from fastapi import HTTPException, Request
 from pydantic import BaseModel
 from starlette.responses import JSONResponse
 
-from . import main_legacy as _base
 from .auth import (
     _LOGIN_FAIL_MAX_IPS,
     _LOGIN_LOCKOUT_WINDOW,
@@ -45,6 +45,14 @@ from .auth import (
     _login_fail_lock,
     _load_auth_credentials,
 )
+
+
+_PASSWORD_PLACEHOLDERS = frozenset({"YOUR_PASSWORD", "change-me", "CHANGE_ME", "password"})
+
+
+def _truthy(value: str | None) -> bool:
+    """Parse opt-in env strings. / 解析 opt-in 環境變量字串。"""
+    return (value or "").strip().lower() in {"1", "true", "yes", "on"}
 
 
 class AuthLoginRequest(BaseModel):
@@ -144,8 +152,36 @@ def load_expected_credentials() -> tuple[str, str]:
             status_code=500,
             detail="Auth not configured — edit gui_auth.env",
         )
+    if not expected_pass or expected_pass in _PASSWORD_PLACEHOLDERS:
+        raise HTTPException(
+            status_code=500,
+            detail="Auth password not configured — set GUI_PASSWORD",
+        )
 
     return expected_user, expected_pass
+
+
+def should_set_secure_cookie(request: Request) -> bool:
+    """Decide auth-cookie Secure using config plus trusted proxy headers.
+    使用部署配置與可信 proxy header 判定 auth cookie 是否加 Secure。
+
+    Default remains local-dev friendly auto mode, but production/proxy
+    deployments can force Secure with OPENCLAW_COOKIE_SECURE=1 or opt into
+    trusted X-Forwarded-Proto handling with OPENCLAW_TRUST_PROXY_HEADERS=1.
+    預設保留本機開發 auto 模式；正式/proxy 部署可用
+    OPENCLAW_COOKIE_SECURE=1 強制 Secure，或明確信任 X-Forwarded-Proto。
+    """
+    override = (os.getenv("OPENCLAW_COOKIE_SECURE", "auto") or "auto").strip().lower()
+    if override in {"1", "true", "yes", "on"}:
+        return True
+    if override in {"0", "false", "no", "off"}:
+        return False
+    if request.url.scheme == "https":
+        return True
+    if _truthy(os.getenv("OPENCLAW_TRUST_PROXY_HEADERS")):
+        forwarded_proto = request.headers.get("x-forwarded-proto", "")
+        return forwarded_proto.split(",", 1)[0].strip().lower() == "https"
+    return False
 
 
 def set_auth_cookie(resp: JSONResponse, token: str, request: Request) -> None:
@@ -153,16 +189,17 @@ def set_auth_cookie(resp: JSONResponse, token: str, request: Request) -> None:
     Attach the HttpOnly auth cookie to the response.
     設置 HttpOnly 認證 cookie 到回應。
 
-    SEC-06: JS cannot read; SameSite=Strict prevents CSRF; Secure auto-detected
-    from request scheme (FIX-11).
-    SEC-06：JS 不可讀；SameSite=Strict 防 CSRF；Secure 依 request scheme 自動判定。
+    SEC-06: JS cannot read; SameSite=Strict prevents CSRF; Secure is based on
+    explicit deployment config or trusted proxy scheme, not raw scheme alone.
+    SEC-06：JS 不可讀；SameSite=Strict 防 CSRF；Secure 由部署配置/可信 proxy
+    scheme 決定，不只看原始 request scheme。
     """
     resp.set_cookie(
         key="oc_auth_token",
         value=token,
         httponly=True,
         samesite="strict",
-        secure=request.url.scheme == "https",
+        secure=should_set_secure_cookie(request),
         max_age=86400,
         path="/",
     )
@@ -178,7 +215,7 @@ def delete_auth_cookie(resp: JSONResponse, request: Request) -> None:
         path="/",
         httponly=True,
         samesite="strict",
-        secure=request.url.scheme == "https",
+        secure=should_set_secure_cookie(request),
     )
 
 
@@ -192,6 +229,7 @@ def verify_token_constant_time(token: str) -> bool:
     """
     if not token:
         return False
+    from . import main_legacy as _base
     expected = _base.settings.api_token
     return hmac.compare_digest(
         token.encode("utf-8"), expected.encode("utf-8")
@@ -219,6 +257,7 @@ __all__ = [
     "load_expected_credentials",
     "set_auth_cookie",
     "delete_auth_cookie",
+    "should_set_secure_cookie",
     "verify_token_constant_time",
     "verify_login_credentials",
 ]

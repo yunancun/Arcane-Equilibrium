@@ -95,6 +95,7 @@ fn test_ipc_risk_update_apply_exit_fields_round_trip() {
             //   傳 None 即保留原值，下方 `after.exit.stale_peak_ms ==
             //   base_*` 仍能驗證「不在 patch 內 ⇒ 不變」契約。
             exit_stale_peak_ms: None,
+            response_tx: None,
         },
         &mut pipeline,
         &mut writer,
@@ -120,7 +121,10 @@ fn test_ipc_risk_update_apply_exit_fields_round_trip() {
         after.exit.min_peak_atr_norm, 0.75,
         "min_peak_atr_norm must round-trip"
     );
-    assert_eq!(after.exit.giveback_base, 1.2, "giveback_base must round-trip");
+    assert_eq!(
+        after.exit.giveback_base, 1.2,
+        "giveback_base must round-trip"
+    );
     assert_eq!(
         after.exit.giveback_slope, 0.25,
         "giveback_slope must round-trip"
@@ -221,6 +225,7 @@ fn test_ipc_risk_update_exit_validation_rejects_invalid() {
             //   rollback 涵蓋全 8 欄位；本驗證測試專注 min_hold_secs 為負
             //   的不變量。
             exit_stale_peak_ms: None,
+            response_tx: None,
         },
         &mut pipeline,
         &mut writer,
@@ -336,6 +341,7 @@ fn test_ipc_risk_update_apply_exit_stale_peak_ms_round_trip() {
             exit_giveback_slope: None,
             exit_giveback_floor: None,
             exit_stale_peak_ms: Some(123_456_u64),
+            response_tx: None,
         },
         &mut pipeline,
         &mut writer,

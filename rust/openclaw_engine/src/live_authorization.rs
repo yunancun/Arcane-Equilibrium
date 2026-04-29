@@ -25,6 +25,7 @@
 //! gate 代碼從未被驗證。
 
 use crate::bybit_rest_client::BybitEnvironment;
+use crate::secret_env;
 use hmac::{Hmac, Mac};
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
@@ -356,7 +357,7 @@ pub fn verify_in_memory(
 /// log `tier` / `expires_at_ms` / `operator_id` for audit trail.
 pub fn load_and_verify(env: BybitEnvironment) -> Result<LiveAuthorization, AuthError> {
     let ipc_secret =
-        std::env::var("OPENCLAW_IPC_SECRET").map_err(|_| AuthError::IpcSecretMissing)?;
+        secret_env::var_or_file("OPENCLAW_IPC_SECRET").ok_or(AuthError::IpcSecretMissing)?;
     let path = authorization_path().ok_or(AuthError::FileMissing {
         path: PathBuf::from("<unresolved-HOME>"),
     })?;

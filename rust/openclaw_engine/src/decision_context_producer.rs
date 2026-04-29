@@ -183,7 +183,11 @@ pub(crate) fn emit_decision_context(
         position_detail: pos
             .map(|p| serde_json::to_value(p).unwrap_or_default())
             .unwrap_or_default(),
-        decision_payload: serde_json::to_value(signals).unwrap_or_default(),
+        decision_payload: serde_json::json!({
+            "signals": signals,
+            "linucb_metadata_scope": "signal_observation_only",
+            "accepted_intent_bound": false,
+        }),
         // Phase 4 / V009 columns. claude_directive_id stays NULL until a
         // future directive→tick association path is built.
         // Phase 4 / V009 欄位。claude_directive_id 待未來 directive→tick
@@ -268,7 +272,7 @@ mod tests {
     /// 未映射 signal rule → (None, None)。
     #[test]
     fn test_select_linucb_arm_unmapped_rule() {
-        let rt = Arc::new(LinUcbRuntime::cold_start_v1_15());
+        let rt = LinUcbRuntime::cold_start_v1_15();
         let (arm, ucb) = select_linucb_arm(&rt, "rsi_exit", None, 1_000);
         assert!(arm.is_none() && ucb.is_none());
     }
@@ -277,7 +281,7 @@ mod tests {
     /// 已映射 rule → Some(arm)。
     #[test]
     fn test_select_linucb_arm_mapped_rule() {
-        let rt = Arc::new(LinUcbRuntime::cold_start_v1_15());
+        let rt = LinUcbRuntime::cold_start_v1_15();
         let (arm, ucb) = select_linucb_arm(&rt, "ma_crossover", None, 1_000);
         assert!(arm.is_some(), "ma_crossover must map to an arm");
         assert!(ucb.is_some());
@@ -299,6 +303,18 @@ mod tests {
         assert_eq!(msg.strategy_name, "ma_crossover");
         assert_eq!(msg.total_equity, 10_000.0);
         assert_eq!(msg.engine_mode, "paper");
+        assert_eq!(
+            msg.decision_payload
+                .get("linucb_metadata_scope")
+                .and_then(|v| v.as_str()),
+            Some("signal_observation_only")
+        );
+        assert_eq!(
+            msg.decision_payload
+                .get("accepted_intent_bound")
+                .and_then(|v| v.as_bool()),
+            Some(false)
+        );
         assert!(msg.linucb_arm_id.is_none(), "no linucb runtime → NULL");
         assert!(msg.news_severity.is_none(), "no news snapshot → NULL");
     }

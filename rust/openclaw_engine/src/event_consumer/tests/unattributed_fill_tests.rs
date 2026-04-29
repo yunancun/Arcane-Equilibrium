@@ -98,7 +98,8 @@ async fn test_emit_for_live_engine_mode_writes_audit_row() {
         2_500.0,
         -0.001,
         Some(&tx),
-    ).await;
+    )
+    .await;
     assert!(emitted, "live should emit audit row");
     let msg = rx.try_recv().expect("audit row queued to writer channel");
     match msg {
@@ -164,7 +165,8 @@ async fn test_emit_for_live_demo_engine_mode_writes_audit_row() {
         0.085,
         0.0001,
         Some(&tx),
-    ).await;
+    )
+    .await;
     assert!(emitted, "live_demo should emit audit row");
     let msg = rx.try_recv().expect("audit row queued");
     if let crate::database::TradingMsg::Fill {
@@ -196,13 +198,11 @@ async fn test_emit_for_demo_engine_mode_writes_audit_row() {
         100.0,
         0.0055,
         Some(&tx),
-    ).await;
+    )
+    .await;
     assert!(emitted, "demo should emit audit row");
     let msg = rx.try_recv().expect("audit row queued");
-    if let crate::database::TradingMsg::Fill {
-        engine_mode, ..
-    } = msg
-    {
+    if let crate::database::TradingMsg::Fill { engine_mode, .. } = msg {
         assert_eq!(engine_mode, "demo");
     } else {
         panic!("expected TradingMsg::Fill");
@@ -229,7 +229,8 @@ async fn test_no_emit_for_paper_engine_mode() {
         50_000.0,
         0.0275,
         Some(&tx),
-    ).await;
+    )
+    .await;
     assert!(!emitted, "paper must NOT emit audit row");
     assert!(
         rx.try_recv().is_err(),
@@ -251,7 +252,8 @@ async fn test_no_emit_for_live_testnet_engine_mode() {
         50_000.0,
         0.0275,
         Some(&tx),
-    ).await;
+    )
+    .await;
     assert!(!emitted, "live_testnet must NOT emit audit row");
     assert!(rx.try_recv().is_err());
 }
@@ -271,7 +273,8 @@ async fn test_no_emit_when_order_tx_is_none() {
         2_500.0,
         0.0,
         None,
-    ).await;
+    )
+    .await;
     assert!(!emitted, "None tx → returns false (fail-soft)");
 }
 
@@ -294,7 +297,8 @@ async fn test_emit_idempotent_via_fill_id_prefix() {
         50_000.0,
         0.0,
         Some(&tx),
-    ).await;
+    )
+    .await;
     let emit2 = try_emit_unattributed_fill(
         "live",
         "exec-DUP",
@@ -306,8 +310,12 @@ async fn test_emit_idempotent_via_fill_id_prefix() {
         50_000.0,
         0.0,
         Some(&tx),
-    ).await;
-    assert!(emit1 && emit2, "both emits should succeed (channel not full)");
+    )
+    .await;
+    assert!(
+        emit1 && emit2,
+        "both emits should succeed (channel not full)"
+    );
     let m1 = rx.try_recv().expect("first row");
     let m2 = rx.try_recv().expect("second row");
     let id1 = match m1 {
@@ -361,29 +369,26 @@ async fn test_emit_back_pressure_blocks_then_succeeds_when_drained() {
 
     // (2) Race blocking emit against a delayed drain.
     let drain_start = std::time::Instant::now();
-    let result = tokio::time::timeout(
-        std::time::Duration::from_millis(200),
-        async {
-            let drainer = async {
-                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-                let _ = rx.recv().await;
-            };
-            let emit = try_emit_unattributed_fill(
-                "live",
-                "exec-SAT-2",
-                1_700_000_007_001,
-                "ord-S2",
-                "BTCUSDT",
-                "Buy",
-                0.001,
-                50_000.0,
-                0.0,
-                Some(&tx),
-            );
-            let (_, r2) = tokio::join!(drainer, emit);
-            r2
-        },
-    )
+    let result = tokio::time::timeout(std::time::Duration::from_millis(200), async {
+        let drainer = async {
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            let _ = rx.recv().await;
+        };
+        let emit = try_emit_unattributed_fill(
+            "live",
+            "exec-SAT-2",
+            1_700_000_007_001,
+            "ord-S2",
+            "BTCUSDT",
+            "Buy",
+            0.001,
+            50_000.0,
+            0.0,
+            Some(&tx),
+        );
+        let (_, r2) = tokio::join!(drainer, emit);
+        r2
+    })
     .await
     .expect("emit completes within 200ms after drain (back-pressure path)");
     let elapsed = drain_start.elapsed();
@@ -444,7 +449,8 @@ async fn test_emit_strategy_name_matches_ml_filter_prefix() {
         50_000.0,
         0.0,
         Some(&tx),
-    ).await;
+    )
+    .await;
     if let Some(crate::database::TradingMsg::Fill { strategy_name, .. }) = rx.try_recv().ok() {
         assert!(
             strategy_name.starts_with("unattributed:"),

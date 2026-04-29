@@ -22,14 +22,16 @@
 //!
 //!   Status state machine (per types.rs CostEdgeAdvisorStatus):
 //!
-//!     Uninitialized ─env=1+enabled=true─▶ WarmUp ─data_days≥3─▶ OK ─ratio↘─▶ Trigger
-//!           ▲                                                       ▲   │
-//!           │                                                       └───┘
-//!           env=0  ◀──────── Disabled ◀── enabled=false ──┐
-//!                                                          │
-//!     Stale ◀── h_state_cache.is_stale() == true ──────────┤
-//!                                                          │
-//!     Anomaly ◀── ratio is NaN/Inf ─────────────────────────┘
+//!   ```text
+//!   Uninitialized ─env=1+enabled=true─▶ WarmUp ─data_days≥3─▶ OK ─ratio↘─▶ Trigger
+//!         ▲                                                       ▲   │
+//!         │                                                       └───┘
+//!         env=0  ◀──────── Disabled ◀── enabled=false ──┐
+//!                                                        │
+//!   Stale ◀── h_state_cache.is_stale() == true ──────────┤
+//!                                                        │
+//!   Anomaly ◀── ratio is NaN/Inf ─────────────────────────┘
+//!   ```
 //!
 //!   Crash resilience: advisor daemon polls H state cache; on Python crash the
 //!   cache stays at last-good snapshot but `is_stale()` flips true → advisor

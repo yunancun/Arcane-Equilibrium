@@ -21,7 +21,7 @@ use super::dispatch;
 use super::governor_cooldown::load_governor_cooldown_from_audit;
 use super::paper_state_restore;
 use super::setup;
-use super::types::{EventConsumerDeps, ExchangeEvent, PendingOrder, SYMBOLS};
+use super::types::{EventConsumerDeps, ExchangeEvent, PendingOrderEvent, SYMBOLS};
 use crate::persistence::{AuditWriter, DualStateWriter, StateWriter};
 use crate::strategies::StrategyFactory;
 use crate::tick_pipeline::{PipelineCommand, PipelineKind, TickPipeline};
@@ -54,7 +54,7 @@ pub(super) struct BootstrappedRuntime {
     /// for newly-added symbols from scanner registry updates.
     /// D3 K 線引導發送端 — loop 事件 arm 在掃描器新增幣種時 spawn 動態補抓。
     pub kline_seed_tx: mpsc::Sender<(String, Vec<openclaw_core::klines::KlineBar>)>,
-    pub pending_reg_rx_slot: Option<mpsc::UnboundedReceiver<PendingOrder>>,
+    pub pending_reg_rx_slot: Option<mpsc::UnboundedReceiver<PendingOrderEvent>>,
     pub data_path: PathBuf,
     pub kind_tag: &'static str,
     /// `trading_tx.clone()` — loop emits order lifecycle events through this.

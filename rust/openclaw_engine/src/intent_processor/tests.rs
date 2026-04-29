@@ -114,6 +114,159 @@ fn test_position_sizing_caps_qty() {
 }
 
 #[test]
+fn test_governor_cautious_scales_new_entry_qty() {
+    // RC-005: governor constraints must participate in admission.
+    // Cautious multiplier=0.7 should scale post-P1 qty.
+    // RC-005：governor 約束需進入准入路徑；Cautious 0.7 應縮放 P1 後 qty。
+    let proc = IntentProcessor::new();
+    let mut gov = GovernanceCore::new();
+    gov.grant_paper_authorization(None).unwrap();
+    gov.risk
+        .escalate_to(
+            openclaw_core::sm::risk_gov::RiskLevel::Cautious,
+            "test",
+            openclaw_core::sm::risk_gov::RiskEvent::DrawdownWarning,
+        )
+        .unwrap();
+    let mut state = PaperState::new(10_000.0);
+    state.set_latest_price("BTC", 50_000.0);
+
+    let result = proc.process(
+        &make_intent("BTC", true),
+        &gov,
+        &state,
+        2000.0,
+        GovernanceProfile::Exploration,
+    );
+    assert!(result.submitted);
+    let fill = result.fill.unwrap();
+    // Base P1 qty = 0.006, Cautious multiplier 0.7 => 0.0042.
+    assert!(
+        (fill.fill_qty - 0.0042).abs() < 1e-9,
+        "expected governor-scaled qty 0.0042, got {}",
+        fill.fill_qty
+    );
+}
+
+#[test]
+fn test_governor_reduced_blocks_new_entries() {
+    // RC-005: Reduced tier is reduce-only; new entries must be rejected.
+    // RC-005：Reduced 等級為 reduce-only；新開倉必須被拒絕。
+    let proc = IntentProcessor::new();
+    let mut gov = GovernanceCore::new();
+    gov.grant_paper_authorization(None).unwrap();
+    gov.risk
+        .escalate_to(
+            openclaw_core::sm::risk_gov::RiskLevel::Reduced,
+            "test",
+            openclaw_core::sm::risk_gov::RiskEvent::DrawdownWarning,
+        )
+        .unwrap();
+    let mut state = PaperState::new(10_000.0);
+    state.set_latest_price("BTC", 50_000.0);
+
+    let result = proc.process(
+        &make_intent("BTC", true),
+        &gov,
+        &state,
+        2000.0,
+        GovernanceProfile::Exploration,
+    );
+    assert!(!result.submitted);
+    let reason = result.rejected_reason.unwrap_or_default();
+    assert!(
+        reason.contains("risk_governor"),
+        "expected governor rejection, got: {reason}"
+    );
+}
+
+#[test]
+fn test_governor_reduced_caps_opposite_order_to_existing_qty() {
+    // RC-005 follow-up: in reduce-only governor states, opposite-side intents
+    // may reduce existing exposure but must never exceed it and flip position.
+    let proc = IntentProcessor::new();
+    let mut gov = GovernanceCore::new();
+    gov.grant_paper_authorization(None).unwrap();
+    gov.risk
+        .escalate_to(
+            openclaw_core::sm::risk_gov::RiskLevel::Reduced,
+            "test",
+            openclaw_core::sm::risk_gov::RiskEvent::DrawdownWarning,
+        )
+        .unwrap();
+    let mut state = PaperState::new(10_000.0);
+    state.set_latest_price("BTC", 50_000.0);
+    state.import_positions(vec![("BTC".into(), true, 0.001, 50_000.0, 0)]);
+
+    let mut intent = make_intent("BTC", false);
+    intent.qty = 0.01;
+    let result = proc.process(
+        &intent,
+        &gov,
+        &state,
+        2000.0,
+        GovernanceProfile::Exploration,
+    );
+
+    assert!(
+        result.submitted,
+        "reducing order should stay admitted, got {:?}",
+        result.rejected_reason
+    );
+    assert!(
+        (result.approved_qty - 0.001).abs() < 1e-12,
+        "approved_qty must cap to existing position, got {}",
+        result.approved_qty
+    );
+    let fill = result.fill.expect("paper reducing fill expected");
+    assert!(
+        (fill.fill_qty - 0.001).abs() < 1e-12,
+        "fill qty must cap to existing position, got {}",
+        fill.fill_qty
+    );
+}
+
+#[test]
+fn test_governor_reduced_caps_exchange_opposite_order_to_existing_qty() {
+    // Demo/live gates-only path must enforce the same cap before dispatch so
+    // the later OrderDispatchRequest cannot flip via an over-sized opposite order.
+    let proc = IntentProcessor::new();
+    let mut gov = GovernanceCore::new();
+    gov.grant_paper_authorization(None).unwrap();
+    gov.risk
+        .escalate_to(
+            openclaw_core::sm::risk_gov::RiskLevel::Reduced,
+            "test",
+            openclaw_core::sm::risk_gov::RiskEvent::DrawdownWarning,
+        )
+        .unwrap();
+    let mut state = PaperState::new(10_000.0);
+    state.set_latest_price("BTC", 50_000.0);
+    state.import_positions(vec![("BTC".into(), true, 0.001, 50_000.0, 0)]);
+
+    let mut intent = make_intent("BTC", false);
+    intent.qty = 0.01;
+    let result = proc.process_gates_only(
+        &intent,
+        &gov,
+        &state,
+        2000.0,
+        GovernanceProfile::Exploration,
+    );
+
+    assert!(
+        result.approved,
+        "reducing exchange order should stay admitted, got {:?}",
+        result.rejected_reason
+    );
+    assert!(
+        (result.approved_qty - 0.001).abs() < 1e-12,
+        "exchange approved_qty must cap to existing position, got {}",
+        result.approved_qty
+    );
+}
+
+#[test]
 fn test_position_sizing_tiny_balance() {
     // With tiny balance, P1 calc gives very small qty — no artificial floor.
     // 餘額極小時，P1 計算給出極小 qty — 無人為下限。
@@ -762,12 +915,8 @@ fn test_cost_gate_live_postonly_cost_excludes_taker_slippage() {
         0.0002, // maker fee
         0.0,    // PostOnly maker path: no taker-style slippage tier
     );
-    let taker_slippage_cost = proc.cost_gate_live_with_slippage(
-        "grid_trading",
-        "BTCUSDT",
-        0.00055,
-        0.0030,
-    );
+    let taker_slippage_cost =
+        proc.cost_gate_live_with_slippage("grid_trading", "BTCUSDT", 0.00055, 0.0030);
 
     assert!(
         postonly_cost.is_none(),
@@ -2030,10 +2179,7 @@ mod maker_kpi_gate_tests {
             NOW_MS,
         );
         assert!(r.submitted);
-        assert!(
-            r.resting_order.is_none(),
-            "degraded gate must NOT enqueue"
-        );
+        assert!(r.resting_order.is_none(), "degraded gate must NOT enqueue");
         assert!(r.fill.is_some(), "degraded gate must take market fallback");
         assert_eq!(
             r.maker_degraded_fallback.as_deref(),
@@ -2130,7 +2276,12 @@ mod maker_kpi_gate_tests {
         state.enqueue_resting_limit_order(draft);
         assert_eq!(state.maker_stats().aggregate.submitted, 1);
         assert_eq!(
-            state.maker_stats().per_symbol.get("BTCUSDT").unwrap().submitted,
+            state
+                .maker_stats()
+                .per_symbol
+                .get("BTCUSDT")
+                .unwrap()
+                .submitted,
             1
         );
     }

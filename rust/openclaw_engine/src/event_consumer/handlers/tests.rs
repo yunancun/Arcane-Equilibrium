@@ -214,6 +214,55 @@ fn test_conf_scale_invalid_json_fallback() {
     assert!(conf_scale_opt.is_none());
 }
 
+/// EN: Mixed payload must be atomic — if typed validation fails, `conf_scale`
+/// must not be partially applied.
+/// 中文：混合 payload 必須原子化——類型化驗證失敗時不得只套用 `conf_scale`。
+#[test]
+fn test_conf_scale_not_partially_applied_when_typed_validation_fails() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut pipeline = TickPipeline::new(&["BTCUSDT"]);
+    for strategy in crate::strategies::StrategyFactory::create_all() {
+        pipeline.orchestrator.register(strategy);
+    }
+    let mut writer = make_writer(dir.path());
+    let mut pending = HashMap::new();
+
+    let before = pipeline
+        .orchestrator
+        .find_strategy_mut("ma_crossover")
+        .expect("ma_crossover present")
+        .conf_scale();
+    assert!((before - 1.0).abs() < 1e-10);
+
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    handle_paper_command(
+        PipelineCommand::UpdateStrategyParams {
+            strategy_name: "ma_crossover".into(),
+            params_json: r#"{"conf_scale":2.5,"cooldown_ms":"bad_type"}"#.into(),
+            response_tx: tx,
+        },
+        &mut pipeline,
+        &mut writer,
+        &mut pending,
+    );
+    let resp = rx.blocking_recv().unwrap();
+    let err = resp.expect_err("typed validation must fail");
+    assert!(
+        err.contains("validation failed"),
+        "unexpected error payload: {err}"
+    );
+
+    let after = pipeline
+        .orchestrator
+        .find_strategy_mut("ma_crossover")
+        .expect("ma_crossover present")
+        .conf_scale();
+    assert!(
+        (after - before).abs() < 1e-10,
+        "conf_scale must remain unchanged on typed validation failure"
+    );
+}
+
 // ── EDGE-P3-1 Stage 0 handlers ─────────────────────────────────────
 
 /// EN: SetEdgePredictorShadow returns Err when no store is wired.
@@ -684,12 +733,8 @@ fn test_reload_edge_predictor_trims_engine_name() {
     let store = std::sync::Arc::new(crate::edge_predictor::EdgePredictorStore::new());
     pipeline.set_edge_predictor_store(store);
     let tmp = tempfile::NamedTempFile::new().expect("tempfile");
-    let out = super::handle_reload_edge_predictor(
-        "  paper\n",
-        "ma_crossover",
-        tmp.path(),
-        &mut pipeline,
-    );
+    let out =
+        super::handle_reload_edge_predictor("  paper\n", "ma_crossover", tmp.path(), &mut pipeline);
     let err = out.expect_err("loader path must be reached after whitelist trim");
     assert!(!err.contains("invalid engine"), "trim failed: {err}");
     #[cfg(not(feature = "edge_predictor_ort"))]

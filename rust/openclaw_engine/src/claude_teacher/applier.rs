@@ -468,19 +468,21 @@ impl DirectiveApplier {
             };
         }
 
-        // Stub: 4-06 will wire this into learning.linucb_state. For now we
-        // just log + return Applied so that the audit row + counters exist.
-        // Stub：4-06 會將此接入 learning.linucb_state。此處僅 log + 回
-        // Applied，讓審計行與計數器先存在。
+        // Stub: no LinUCB mutation is wired yet, so this must not be
+        // persisted as a successful application.
+        // Stub：尚未接入 LinUCB 狀態變更，因此不可記為成功應用。
         info!(
             directive_id,
             arm = %directive.scope,
             boost,
-            "boost_arm stub — wiring deferred to 4-06 / boost_arm stub — 接線留給 4-06"
+            "boost_arm unsupported — no LinUCB mutation wired / boost_arm 未支援 — 尚無 LinUCB 變更接線"
         );
-        ApplyOutcome::Applied {
+        ApplyOutcome::InvalidDirective {
             directive_id,
-            action_summary: format!("boost_arm STUB {} x{boost:.2}", directive.scope),
+            error: format!(
+                "boost_arm unsupported until LinUCB mutation is implemented: {} x{boost:.2}",
+                directive.scope
+            ),
         }
     }
 
@@ -631,8 +633,9 @@ mod tests {
         assert_eq!(calls[0], ("bb_reversion".into(), true));
     }
 
-    // Test 4: boost_arm within factor limit succeeds (stub).
-    // 測試 4：boost factor 在上限內的 boost_arm 成功（stub）。
+    // Test 4: boost_arm within factor limit is still unsupported until it
+    // has a real LinUCB state mutation.
+    // 測試 4：boost factor 在上限內仍為 unsupported，直到有真實 LinUCB 狀態變更。
     #[tokio::test]
     async fn test_apply_boost_arm_within_factor_limit() {
         let (applier, _gov, _sink) = make_applier(MockGov::default_healthy(), None).await;
@@ -643,8 +646,8 @@ mod tests {
         );
         let outcome = applier.apply(d, 104).await;
         assert!(
-            matches!(outcome, ApplyOutcome::Applied { .. }),
-            "expected Applied, got {outcome:?}"
+            matches!(outcome, ApplyOutcome::InvalidDirective { .. }),
+            "expected non-success unsupported outcome, got {outcome:?}"
         );
     }
 
@@ -977,7 +980,8 @@ mod tests {
     ///      and are rejected as `InvalidDirective`.
     ///   2) `NaN` / `Infinity` are coerced to JSON `null` by serde_json (RFC
     ///      8259 forbids these tokens), which `as_f64()` reads as `None`,
-    ///      which `unwrap_or(1.0)` collapses to the safe default 1.0 → Applied.
+    ///      which `unwrap_or(1.0)` collapses to the safe default 1.0 → the
+    ///      current unsupported outcome.
     /// Both paths are safe — no value > MAX_BOOST_FACTOR can ever reach IPC.
     ///
     /// E3 R6 P1-E3-1c：boost_arm 安全面。兩道獨立防線，本測試都驗證：
@@ -985,7 +989,7 @@ mod tests {
     ///      `InvalidDirective`。
     ///   2) `NaN` / `Infinity` 被 serde_json 序列化為 JSON `null`（RFC 8259
     ///      不允許這些 token），`as_f64()` 讀為 `None`，`unwrap_or(1.0)`
-    ///      落到安全預設 1.0 → Applied。兩條路徑都安全 — 任何 > MAX_BOOST_FACTOR
+    ///      落到安全預設 1.0 → 當前 unsupported outcome。兩條路徑都安全 — 任何 > MAX_BOOST_FACTOR
     ///      的值都不可能抵達 IPC。
     #[tokio::test]
     async fn test_e3r6_boost_arm_invalid_factor_rejected() {
@@ -1004,10 +1008,10 @@ mod tests {
                 "boost={label}({val}) must be InvalidDirective, got {outcome:?}"
             );
         }
-        // Branch 2: NaN / Infinity → serde_json null → default 1.0 → Applied.
+        // Branch 2: NaN / Infinity → serde_json null → default 1.0 → unsupported.
         // The IMPORTANT property is "no value > MAX_BOOST_FACTOR reaches IPC",
         // which is preserved here.
-        // 分支 2：NaN / Infinity → serde_json null → 預設 1.0 → Applied。
+        // 分支 2：NaN / Infinity → serde_json null → 預設 1.0 → unsupported。
         // 重要不變式是「任何 > MAX_BOOST_FACTOR 的值都到不了 IPC」，此處保持。
         for (label, val) in [("nan", f64::NAN), ("inf", f64::INFINITY)] {
             let d = directive(
@@ -1017,8 +1021,8 @@ mod tests {
             );
             let outcome = applier.apply(d, 9003).await;
             assert!(
-                matches!(outcome, ApplyOutcome::Applied { .. }),
-                "boost={label}({val}) coerces to default 1.0 → Applied, got {outcome:?}"
+                matches!(outcome, ApplyOutcome::InvalidDirective { .. }),
+                "boost={label}({val}) coerces to default 1.0 → unsupported, got {outcome:?}"
             );
         }
     }

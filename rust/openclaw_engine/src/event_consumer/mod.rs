@@ -26,7 +26,7 @@ mod types;
 mod unattributed_emit;
 
 use types::STATUS_INTERVAL_SECS;
-pub use types::{EventConsumerDeps, ExchangeEvent, PendingOrder, SYMBOLS};
+pub use types::{EventConsumerDeps, ExchangeEvent, PendingOrder, PendingOrderEvent, SYMBOLS};
 
 use std::time::Instant;
 use tracing::info;
@@ -138,7 +138,7 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
             } => {
                 loop_handlers::handle_pending_registration(
                     pending_reg,
-                    &pipeline,
+                    &mut pipeline,
                     &mut state,
                     order_tx.as_ref(),
                 );

@@ -43,7 +43,7 @@ use ort::session::{builder::GraphOptimizationLevel, Session};
 use ort::value::Tensor;
 use parking_lot::Mutex;
 
-use super::features::{feature_schema_hash, FEATURE_SCHEMA_VERSION};
+use super::features::{feature_definition_hash, feature_schema_hash, FEATURE_SCHEMA_VERSION};
 use super::rearrangement::enforce_monotone;
 use super::{EdgePredictor, FeatureVectorV1, PredictError, Prediction};
 
@@ -143,33 +143,7 @@ impl OrtPredictor {
             })?;
         let meta = extract_metadata(&session, path)?;
 
-        // Rust compile-time FEATURE_NAMES_V1 hash is authoritative. Artifact
-        // trained against a drifted feature set → reject loud rather than
-        // serve silently wrong predictions.
-        // Rust 編譯期 hash 為準；artifact 漂移即拒，不允許靜默錯配。
-        let expected_schema = feature_schema_hash();
-        if meta.schema_hash != expected_schema {
-            return Err(format!(
-                "schema_hash mismatch: artifact={} runtime={} (path={}) \
-                 / schema_hash 不匹配，模型與 Rust 編譯期不一致",
-                meta.schema_hash,
-                expected_schema,
-                path.display()
-            ));
-        }
-        if meta.schema_version != FEATURE_SCHEMA_VERSION {
-            return Err(format!(
-                "schema_version mismatch: artifact={} runtime={}",
-                meta.schema_version, FEATURE_SCHEMA_VERSION
-            ));
-        }
-        if meta.n_features != FeatureVectorV1::DIM {
-            return Err(format!(
-                "n_features mismatch: artifact={} runtime={}",
-                meta.n_features,
-                FeatureVectorV1::DIM
-            ));
-        }
+        validate_metadata_against_runtime(&meta, path)?;
 
         // Resolve input name once at load (not per-tick) so we survive
         // exporter drift that renames "input" → "float_input" etc.
@@ -231,6 +205,47 @@ impl OrtPredictor {
         };
         scalar.ok_or_else(|| "output tensor empty".to_string())
     }
+}
+
+fn validate_metadata_against_runtime(meta: &OnnxMetadata, path: &Path) -> Result<(), String> {
+    // Rust compile-time feature schema and definitions are authoritative.
+    // Artifact trained against drifted names/formulas/windows → reject loud
+    // rather than serve silently wrong predictions.
+    // Rust 編譯期 schema 與 definition 為準；artifact 漂移即拒，不允許靜默錯配。
+    let expected_schema = feature_schema_hash();
+    if meta.schema_hash != expected_schema {
+        return Err(format!(
+            "schema_hash mismatch: artifact={} runtime={} (path={}) \
+             / schema_hash 不匹配，模型與 Rust 編譯期不一致",
+            meta.schema_hash,
+            expected_schema,
+            path.display()
+        ));
+    }
+    let expected_definition = feature_definition_hash();
+    if meta.definition_hash != expected_definition {
+        return Err(format!(
+            "definition_hash mismatch: artifact={} runtime={} (path={}) \
+             / definition_hash 不匹配，模型 feature 公式/窗口與 Rust 不一致",
+            meta.definition_hash,
+            expected_definition,
+            path.display()
+        ));
+    }
+    if meta.schema_version != FEATURE_SCHEMA_VERSION {
+        return Err(format!(
+            "schema_version mismatch: artifact={} runtime={}",
+            meta.schema_version, FEATURE_SCHEMA_VERSION
+        ));
+    }
+    if meta.n_features != FeatureVectorV1::DIM {
+        return Err(format!(
+            "n_features mismatch: artifact={} runtime={}",
+            meta.n_features,
+            FeatureVectorV1::DIM
+        ));
+    }
+    Ok(())
 }
 
 /// Trio predictor — q10 + q50 + q90 loaded as a single logical unit.
@@ -517,6 +532,25 @@ mod tests {
         let q50 = make_meta("v1", "h", "h", "demo", "ma", "q10", "2026-04-15", "x");
         let q90 = make_meta("v1", "h", "h", "demo", "ma", "q90", "2026-04-15", "x");
         assert!(verify_quantile_tags(&q10, &q50, &q90).is_err());
+    }
+
+    #[test]
+    fn test_validate_metadata_rejects_definition_hash_drift() {
+        let mut meta = make_meta(
+            FEATURE_SCHEMA_VERSION,
+            feature_schema_hash(),
+            feature_definition_hash(),
+            "demo",
+            "ma",
+            "q50",
+            "2026-04-15",
+            "mid",
+        );
+        assert!(validate_metadata_against_runtime(&meta, Path::new("/tmp/model.onnx")).is_ok());
+        meta.definition_hash = "sha256:definition_drift".into();
+        let err = validate_metadata_against_runtime(&meta, Path::new("/tmp/model.onnx"))
+            .unwrap_err();
+        assert!(err.contains("definition_hash"), "actual err: {}", err);
     }
 
     #[test]

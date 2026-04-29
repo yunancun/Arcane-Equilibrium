@@ -129,6 +129,46 @@ pub(crate) struct LiveChannels {
     pub positions_mirror: Arc<parking_lot::RwLock<std::collections::HashMap<String, bool>>>,
 }
 
+fn reject_disabled_paper_command(cmd: PipelineCommand) {
+    let reason = || {
+        Err(
+            "paper pipeline disabled: set OPENCLAW_ENABLE_PAPER=1 before sending paper commands"
+                .to_string(),
+        )
+    };
+    match cmd {
+        PipelineCommand::ResetDrawdownBaseline { response_tx }
+        | PipelineCommand::UpdateStrategyParams { response_tx, .. }
+        | PipelineCommand::GetStrategyParams { response_tx, .. }
+        | PipelineCommand::GetParamRanges { response_tx, .. }
+        | PipelineCommand::SetStrategyActive { response_tx, .. }
+        | PipelineCommand::GetRiskRuntimeStatus { response_tx }
+        | PipelineCommand::ClearConsecutiveLosses { response_tx }
+        | PipelineCommand::ForceGovernorTighter { response_tx, .. }
+        | PipelineCommand::ForceGovernorLooser { response_tx, .. }
+        | PipelineCommand::SubmitOrder { response_tx, .. }
+        | PipelineCommand::ReconcilerEscalate { response_tx, .. }
+        | PipelineCommand::ReconcilerDeEscalate { response_tx, .. }
+        | PipelineCommand::SetSystemMode { response_tx, .. }
+        | PipelineCommand::SetEdgePredictorShadow { response_tx, .. }
+        | PipelineCommand::DisableEdgePredictorAll { response_tx, .. }
+        | PipelineCommand::ReloadEdgePredictor { response_tx, .. }
+        | PipelineCommand::GetDynamicRiskStatus { response_tx }
+        | PipelineCommand::SetDynamicRiskEnabled { response_tx, .. } => {
+            let _ = response_tx.send(reason());
+        }
+        PipelineCommand::UpdateRiskConfig { response_tx, .. } => {
+            if let Some(tx) = response_tx {
+                let _ = tx.send(reason());
+            }
+        }
+        PipelineCommand::GetOpenPositionSymbols { response_tx } => {
+            let _ = response_tx.send(std::collections::HashSet::new());
+        }
+        _ => {}
+    }
+}
+
 /// Spawn the Paper pipeline (opt-in via OPENCLAW_ENABLE_PAPER=1).
 ///
 /// EN: When disabled (default), writes DISABLED markers to `paper_state.json`
@@ -244,7 +284,10 @@ pub(crate) fn spawn_paper_pipeline(
                         if evt.is_none() { break; }
                     }
                     cmd = cmd_rx.recv() => {
-                        if cmd.is_none() { break; }
+                        match cmd {
+                            Some(cmd) => reject_disabled_paper_command(cmd),
+                            None => break,
+                        }
                     }
                 }
             }

@@ -191,8 +191,7 @@ fn test_halt_session_uses_per_symbol_price_not_triggering_tick() {
     let _ = pipeline.on_tick(&super::make_event("BTCUSDT", 50_500.0, 2_000));
 
     // 消費所有 Fill 訊息，按 symbol 聚合每筆 close 的 price。
-    let mut close_prices: std::collections::HashMap<String, f64> =
-        std::collections::HashMap::new();
+    let mut close_prices: std::collections::HashMap<String, f64> = std::collections::HashMap::new();
     while let Ok(msg) = rx.try_recv() {
         if let TradingMsg::Fill {
             symbol,

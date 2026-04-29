@@ -19,13 +19,16 @@
 //! (2) intent.market → row "Market"
 //! (3) 邊界（TIF=None / GTC / 未知 raw）。
 
+use crate::bybit_private_ws::ExecutionUpdate;
 use crate::database::TradingMsg;
-use crate::event_consumer::types::PendingOrder;
+use crate::event_consumer::types::{ExchangeEvent, PendingOrder, PendingOrderEvent};
 use crate::order_manager::TimeInForce;
+use crate::tick_pipeline::{PipelineKind, TickPipeline};
 use tokio::sync::mpsc;
 
-use super::make_test_pipeline;
+use super::super::loop_handlers::handle_exchange_event;
 use super::super::loop_handlers::handle_pending_registration;
+use super::make_test_pipeline;
 
 /// Build a `LoopState` for the handler. We don't read it back here; the
 /// handler only inserts into `pending_orders` after emitting the audit row.
@@ -47,6 +50,23 @@ fn first_order_type(rx: &mut mpsc::Receiver<TradingMsg>) -> String {
         }
     }
     panic!("no TradingMsg::Order observed on channel / channel 上未見 Order msg");
+}
+
+fn first_order_state_change(
+    rx: &mut mpsc::Receiver<TradingMsg>,
+) -> (String, String, Option<String>) {
+    while let Ok(msg) = rx.try_recv() {
+        if let TradingMsg::OrderStateChange {
+            order_id,
+            to_status,
+            reason,
+            ..
+        } = msg
+        {
+            return (order_id, to_status, reason);
+        }
+    }
+    panic!("no TradingMsg::OrderStateChange observed on channel / channel 上未見 OrderStateChange");
 }
 
 /// Build a baseline `PendingOrder` mirroring what `dispatch.rs:402` constructs
@@ -82,12 +102,17 @@ fn baseline_pending_order(order_type: &str, tif: Option<TimeInForce>) -> Pending
 // ───────────────────────────────────────────────────────────────────────────
 #[test]
 fn test_handle_pending_registration_limit_postonly_emits_limit_audit_row() {
-    let pipeline = make_test_pipeline();
+    let mut pipeline = make_test_pipeline();
     let mut state = make_loop_state();
     let (tx, mut rx) = mpsc::channel::<TradingMsg>(8);
 
     let po = baseline_pending_order("limit", Some(TimeInForce::PostOnly));
-    handle_pending_registration(Some(po), &pipeline, &mut state, Some(&tx));
+    handle_pending_registration(
+        Some(PendingOrderEvent::Register(po)),
+        &mut pipeline,
+        &mut state,
+        Some(&tx),
+    );
 
     let order_type = first_order_type(&mut rx);
     assert_eq!(
@@ -103,12 +128,17 @@ fn test_handle_pending_registration_limit_postonly_emits_limit_audit_row() {
 // ───────────────────────────────────────────────────────────────────────────
 #[test]
 fn test_handle_pending_registration_market_emits_market_audit_row() {
-    let pipeline = make_test_pipeline();
+    let mut pipeline = make_test_pipeline();
     let mut state = make_loop_state();
     let (tx, mut rx) = mpsc::channel::<TradingMsg>(8);
 
     let po = baseline_pending_order("market", None);
-    handle_pending_registration(Some(po), &pipeline, &mut state, Some(&tx));
+    handle_pending_registration(
+        Some(PendingOrderEvent::Register(po)),
+        &mut pipeline,
+        &mut state,
+        Some(&tx),
+    );
 
     let order_type = first_order_type(&mut rx);
     assert_eq!(
@@ -129,12 +159,17 @@ fn test_handle_pending_registration_market_emits_market_audit_row() {
 // ───────────────────────────────────────────────────────────────────────────
 #[test]
 fn test_handle_pending_registration_limit_with_gtc_emits_limit_audit_row() {
-    let pipeline = make_test_pipeline();
+    let mut pipeline = make_test_pipeline();
     let mut state = make_loop_state();
     let (tx, mut rx) = mpsc::channel::<TradingMsg>(8);
 
     let po = baseline_pending_order("limit", Some(TimeInForce::GTC));
-    handle_pending_registration(Some(po), &pipeline, &mut state, Some(&tx));
+    handle_pending_registration(
+        Some(PendingOrderEvent::Register(po)),
+        &mut pipeline,
+        &mut state,
+        Some(&tx),
+    );
 
     let order_type = first_order_type(&mut rx);
     assert_eq!(order_type, "Limit");
@@ -142,12 +177,17 @@ fn test_handle_pending_registration_limit_with_gtc_emits_limit_audit_row() {
 
 #[test]
 fn test_handle_pending_registration_limit_with_none_tif_still_emits_limit() {
-    let pipeline = make_test_pipeline();
+    let mut pipeline = make_test_pipeline();
     let mut state = make_loop_state();
     let (tx, mut rx) = mpsc::channel::<TradingMsg>(8);
 
     let po = baseline_pending_order("limit", None);
-    handle_pending_registration(Some(po), &pipeline, &mut state, Some(&tx));
+    handle_pending_registration(
+        Some(PendingOrderEvent::Register(po)),
+        &mut pipeline,
+        &mut state,
+        Some(&tx),
+    );
 
     let order_type = first_order_type(&mut rx);
     assert_eq!(
@@ -163,12 +203,17 @@ fn test_handle_pending_registration_limit_with_none_tif_still_emits_limit() {
 /// 不靜默映為 "Market"。caller bug 在 PG 顯露而非被遮蓋。
 #[test]
 fn test_handle_pending_registration_unknown_order_type_falls_back_to_raw() {
-    let pipeline = make_test_pipeline();
+    let mut pipeline = make_test_pipeline();
     let mut state = make_loop_state();
     let (tx, mut rx) = mpsc::channel::<TradingMsg>(8);
 
     let po = baseline_pending_order("conditional", None); // not market/limit
-    handle_pending_registration(Some(po), &pipeline, &mut state, Some(&tx));
+    handle_pending_registration(
+        Some(PendingOrderEvent::Register(po)),
+        &mut pipeline,
+        &mut state,
+        Some(&tx),
+    );
 
     let order_type = first_order_type(&mut rx);
     assert_eq!(
@@ -186,13 +231,18 @@ fn test_handle_pending_registration_unknown_order_type_falls_back_to_raw() {
 /// state.pending_orders（fill 匹配路徑依賴此）。修法不應影響 insert 行為。
 #[test]
 fn test_handle_pending_registration_still_inserts_pending_order() {
-    let pipeline = make_test_pipeline();
+    let mut pipeline = make_test_pipeline();
     let mut state = make_loop_state();
     let (tx, _rx) = mpsc::channel::<TradingMsg>(8);
 
     let po = baseline_pending_order("limit", Some(TimeInForce::PostOnly));
     let link_id = po.order_link_id.clone();
-    handle_pending_registration(Some(po), &pipeline, &mut state, Some(&tx));
+    handle_pending_registration(
+        Some(PendingOrderEvent::Register(po)),
+        &mut pipeline,
+        &mut state,
+        Some(&tx),
+    );
 
     assert!(
         state.pending_orders.contains_key(&link_id),
@@ -201,4 +251,97 @@ fn test_handle_pending_registration_still_inserts_pending_order() {
     let stored = &state.pending_orders[&link_id];
     assert_eq!(stored.order_type, "limit");
     assert_eq!(stored.time_in_force, Some(TimeInForce::PostOnly));
+}
+
+#[test]
+fn test_dispatch_failed_removes_pending_order_and_emits_terminal_state() {
+    let mut pipeline = make_test_pipeline();
+    let mut state = make_loop_state();
+    let (tx, mut rx) = mpsc::channel::<TradingMsg>(8);
+
+    let mut po = baseline_pending_order("market", None);
+    po.is_close = true;
+    let link_id = po.order_link_id.clone();
+    state.pending_orders.insert(link_id.clone(), po);
+
+    handle_pending_registration(
+        Some(PendingOrderEvent::DispatchFailed {
+            order_link_id: link_id.clone(),
+            symbol: "BTCUSDT".into(),
+            is_close: true,
+            terminal_status: "Rejected".into(),
+            reason: "dispatch_structural: test".into(),
+            ts_ms: 1_700_000_000_123,
+        }),
+        &mut pipeline,
+        &mut state,
+        Some(&tx),
+    );
+
+    assert!(
+        !state.pending_orders.contains_key(&link_id),
+        "dispatch-failed terminal event must remove stale pending order"
+    );
+    let (order_id, to_status, reason) = first_order_state_change(&mut rx);
+    assert_eq!(order_id, link_id);
+    assert_eq!(to_status, "Rejected");
+    assert_eq!(reason.as_deref(), Some("dispatch_structural: test"));
+}
+
+#[tokio::test]
+async fn test_ambiguous_fill_before_order_update_emits_unattributed_fill() {
+    let mut pipeline = TickPipeline::with_kind(&["BTCUSDT"], 10_000.0, PipelineKind::Demo);
+    let mut writer = super::make_test_writer();
+    let mut state = make_loop_state();
+    let (tx, mut rx) = mpsc::channel::<TradingMsg>(8);
+
+    let mut po1 = baseline_pending_order("market", None);
+    po1.order_link_id = "oc_ambiguous_1".into();
+    po1.symbol = "BTCUSDT".into();
+    po1.is_long = true;
+    let mut po2 = baseline_pending_order("market", None);
+    po2.order_link_id = "oc_ambiguous_2".into();
+    po2.symbol = "BTCUSDT".into();
+    po2.is_long = true;
+    state.pending_orders.insert(po1.order_link_id.clone(), po1);
+    state.pending_orders.insert(po2.order_link_id.clone(), po2);
+
+    let exec = ExecutionUpdate {
+        exec_id: "exec-ambiguous".into(),
+        order_id: "bybit-order-without-prior-update".into(),
+        symbol: "BTCUSDT".into(),
+        side: "Buy".into(),
+        exec_price: "100.0".into(),
+        exec_qty: "0.01".into(),
+        exec_fee: "0.001".into(),
+        exec_type: "Trade".into(),
+        exec_time: "1700000000123".into(),
+        ..Default::default()
+    };
+
+    handle_exchange_event(
+        Some(ExchangeEvent::Fill(exec)),
+        &mut pipeline,
+        &mut writer,
+        &mut state,
+        Some(&tx),
+    )
+    .await;
+
+    assert_eq!(
+        state.pending_orders.len(),
+        2,
+        "ambiguous fallback must not attach fill to an arbitrary pending order"
+    );
+    match rx.try_recv().expect("unattributed fill audit row") {
+        TradingMsg::Fill {
+            fill_id,
+            strategy_name,
+            ..
+        } => {
+            assert_eq!(fill_id, "unattrib-exec-ambiguous");
+            assert_eq!(strategy_name, "unattributed:bybit_auto");
+        }
+        other => panic!("expected unattributed Fill, got {other:?}"),
+    }
 }

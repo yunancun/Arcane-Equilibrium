@@ -51,6 +51,16 @@ from .live_session_governance import (
 logger = logging.getLogger(__name__)
 
 
+def _require_live_trade(actor: Any) -> None:
+    """Batch B live session write gate: Operator + live trade scope."""
+    base.require_scope_and_operator(actor, "live:trade")
+
+
+def _require_live_authority(actor: Any) -> None:
+    """Batch B execution authority gate: Operator + live authority scope."""
+    base.require_scope_and_operator(actor, "live:authority")
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # Session lifecycle endpoints / Session 生命週期端點
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -136,8 +146,7 @@ async def post_live_session_start(
     保護：Operator 角色認證是唯一門控，不設獨立 execution_authority 二次確認。
     engine_kind 僅用於日誌/上下文，引擎配置控制實際訂單路由。
     """
-    # Require Operator role — primary gate / 要求 Operator 角色 — 主門控
-    core._require_operator(actor)
+    _require_live_trade(actor)
 
     # Gate: global_mode_state must be exactly live_reserved. Substring checks
     # can accept unintended future modes and are not a live write boundary.
@@ -228,7 +237,7 @@ async def post_live_session_stop(
 
     只平倉，不 pause 引擎管線 — paper/demo session 在 live stop 後繼續獨立運行。
     """
-    core._require_operator(actor)
+    _require_live_trade(actor)
 
     core._LIVE_USER_STOPPED = True
     # EA-PERSIST: revoke + persist on voluntary stop — will NOT auto-restore on next restart
@@ -318,6 +327,7 @@ async def post_live_session_stop(
                 "reason": core._LIVE_REST_FALLBACK_DISABLED_DETAIL,
             }
     else:
+        errors.append("engine_offline")
         cancel_orders_result = {"skipped": True, "reason": "engine_offline"}
         close_result = orphan_result = {"skipped": True, "reason": "engine_offline"}
         verify_result = {"skipped": True, "reason": "engine_offline"}
@@ -341,9 +351,18 @@ async def post_live_session_stop(
                 "errors": errors if errors else None,
             },
         )
+    partial_failure = bool(errors) or not verify_result.get("clean", False)
+    closed_all = not partial_failure
     return core._live_response({
-        "message": "Live session stopped — orders cancelled + positions closed / 實盤 session 已停止 — 掛單已取消、倉位已平",
+        "message": (
+            "Live session stopped with partial close failure / 實盤 session 已停止，但平倉存在部分失敗"
+            if partial_failure else
+            "Live session stopped — orders cancelled + positions closed / 實盤 session 已停止 — 掛單已取消、倉位已平"
+        ),
         "source": "rust_engine",
+        "status": "partial_failure" if partial_failure else "closed",
+        "closed_all": closed_all,
+        "partial_failure": partial_failure,
         "rest_fallback": False,
         "reason": None,
         "cancel_orders": cancel_orders_result,
@@ -366,7 +385,7 @@ async def post_live_session_pause(
     Stops new order dispatch without closing existing positions.
     暫停新訂單下發，不平倉。
     """
-    core._require_operator(actor)
+    _require_live_trade(actor)
     try:
         result = await core._ipc_command("pause_paper", {"engine": "live"})
         return core._live_response({
@@ -391,7 +410,7 @@ async def post_live_session_resume(
     Gate: Operator role + live_reserved global mode (same as start).
     門控：Operator 角色 + live_reserved global mode（與 start 相同）。
     """
-    core._require_operator(actor)
+    _require_live_trade(actor)
 
     # Gate: global_mode_state must still be live_reserved
     # 門控：global_mode_state 仍需為 live_reserved
@@ -447,7 +466,7 @@ async def grant_execution_authority(
     Operator 顯式授予 execution_authority（記憶體中）。
     重啟後清零（fail-closed）。用於實盤前 demo 測試及未來 M 章受監督實盤門控。
     """
-    core._require_operator(actor)
+    _require_live_authority(actor)
     core._set_execution_authority("granted")  # EA-PERSIST: manual grant + persist
     actor_id = getattr(actor, "actor_id", "?")
     # Also create + approve live SM-1 authorization so governance center shows mode=live.
@@ -473,7 +492,7 @@ async def revoke_execution_authority(
     Operator revokes execution authority; lock screen re-appears.
     Operator 撤銷 execution_authority；鎖定頁重新顯示。
     """
-    core._require_operator(actor)
+    _require_live_authority(actor)
     core._set_execution_authority("not_granted")  # EA-PERSIST: manual revoke + persist
     actor_id = getattr(actor, "actor_id", "?")
     # Revoke live SM-1 authorization so governance center reflects revoked state.

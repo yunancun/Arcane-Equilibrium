@@ -10,9 +10,10 @@
 //!   Integration with OnnxModelManager deferred to Phase 3+ when Track L goes
 //!   live — at that point the startup sequence will:
 //!
-//!     1. query registry for each (strategy × engine_mode × quantile) slot
-//!     2. fall back to `_current` symlink if registry row missing
-//!     3. fall back to None if symlink missing too (graceful degradation)
+//!   Startup flow:
+//!   - query registry for each (strategy × engine_mode × quantile) slot
+//!   - fall back to `_current` symlink if registry row missing
+//!   - fall back to None if symlink missing too (graceful degradation)
 //!
 //!   The helper returns Option<String> so callers can distinguish "no model
 //!   registered yet" (None) from "model registered at this path" (Some).
