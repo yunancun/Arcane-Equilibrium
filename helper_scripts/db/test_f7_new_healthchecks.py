@@ -56,8 +56,9 @@ from __future__ import annotations
 
 import os
 import sys
+import tempfile
 import unittest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 # Path setup so we can import the package as a module (匹配 sibling 風格).
 # 路徑設定使我們可以用 package module 形式 import。
@@ -308,6 +309,23 @@ class TestOrdersFillsConsistency(unittest.TestCase):
 class TestSignalsWriterFreshness(unittest.TestCase):
     """三態 verdict + empty table fingerprint + missing table for [24]."""
 
+    def setUp(self) -> None:
+        """Isolate paper-disabled snapshot auto-skip from the developer/runtime host.
+        隔離開發/運行主機上的 paper-disabled snapshot auto-skip。"""
+        self._tmpdir = tempfile.TemporaryDirectory()
+        self._env_patch = patch.dict(
+            os.environ,
+            {"OPENCLAW_DATA_DIR": self._tmpdir.name},
+            clear=False,
+        )
+        self._env_patch.start()
+
+    def tearDown(self) -> None:
+        """Restore environment and remove temporary data dir.
+        還原環境並刪除臨時資料目錄。"""
+        self._env_patch.stop()
+        self._tmpdir.cleanup()
+
     def _make_cursor_with_freshness(
         self, hours_stale: float | None, rows_24h: int, table_exists: bool = True
     ) -> MagicMock:
@@ -517,13 +535,31 @@ class TestIntentsCounterFreeze(unittest.TestCase):
     """三態 verdict + never-produced + multi-mode worst-wins for [27]."""
 
     def _make_cursor_with_modes(
-        self, mode_data: list[tuple[float | None, int]]
+        self,
+        mode_data: list[tuple[float | None, int]],
+        guardian_data: list[tuple[int, int] | None] | None = None,
     ) -> MagicMock:
-        """Mock cursor returning per-mode (minutes_since, intents_30min)
-        rows in (demo, live_demo, live) order — matches modes tuple.
-        Mock cursor 依序回 (demo, live_demo, live) 各 mode 的 row。"""
+        """Mock cursor rows for each mode plus slow-path Guardian/DCS probes.
+
+        ``check_intents_counter_freeze`` now cross-checks
+        ``trading.risk_verdicts`` and ``decision_context_snapshots`` when a
+        mode has no recent intents. ``guardian_data`` provides the extra
+        ``(verdicts_30min, dcs_30min)`` rows for those slow-path modes.
+
+        Mock 每個 mode 的 intent row，並在 frozen slow-path 補 Guardian/DCS
+        查詢結果。``guardian_data`` 依 demo/live_demo/live 順序提供
+        ``(verdicts_30min, dcs_30min)``。
+        """
         cur = _make_cursor()
-        cur.fetchone.side_effect = [(m_since, n_30) for m_since, n_30 in mode_data]
+        guardian_data = guardian_data or [None] * len(mode_data)
+        rows: list[tuple[float | None, int] | tuple[int]] = []
+        for idx, (m_since, n_30) in enumerate(mode_data):
+            rows.append((m_since, n_30))
+            if m_since is not None and n_30 == 0 and m_since > 15.0:
+                verdicts_30min, dcs_30min = guardian_data[idx] or (150, 0)
+                rows.append((verdicts_30min,))
+                rows.append((dcs_30min,))
+        cur.fetchone.side_effect = rows
         return cur
 
     def test_all_modes_fresh_returns_pass(self) -> None:
@@ -549,6 +585,10 @@ class TestIntentsCounterFreeze(unittest.TestCase):
             (20.0, 0),    # demo (WARN)
             (5.0, 15),    # live_demo (PASS)
             (None, 0),    # live (never produced)
+        ], guardian_data=[
+            (150, 10),     # demo Guardian/DCS alive → early-warning WARN
+            None,
+            None,
         ])
         status, msg = check_intents_counter_freeze(cur)
         self.assertEqual(status, "WARN")
@@ -561,6 +601,10 @@ class TestIntentsCounterFreeze(unittest.TestCase):
             (45.0, 0),    # demo (FAIL — frozen)
             (5.0, 15),    # live_demo (PASS)
             (None, 0),    # live (never produced)
+        ], guardian_data=[
+            (50, 10),      # demo DCS active but verdicts below liveness threshold
+            None,
+            None,
         ])
         status, msg = check_intents_counter_freeze(cur)
         self.assertEqual(status, "FAIL")
@@ -588,6 +632,10 @@ class TestIntentsCounterFreeze(unittest.TestCase):
             (45.0, 0),    # demo FAIL
             (20.0, 0),    # live_demo WARN
             (None, 0),    # live PASS (never produced)
+        ], guardian_data=[
+            (50, 10),      # demo FAIL
+            (150, 10),     # live_demo WARN
+            None,
         ])
         status, msg = check_intents_counter_freeze(cur)
         self.assertEqual(status, "FAIL")
