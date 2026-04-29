@@ -200,12 +200,20 @@ impl TickPipeline {
             self.paper_state.set_entry_context_id(symbol, &ctx_pre);
         }
 
+        let is_legacy_close_tag = strategy.starts_with("strategy_close:")
+            || strategy.starts_with("risk_close:")
+            || strategy.starts_with("stop_trigger:")
+            || strategy.starts_with("ipc_close:");
+        let is_close_fill_for_db = realized_pnl != 0.0 || is_legacy_close_tag;
+
         // EDGE-P3-1 R2: entry_context_id for the Fill row emission below.
-        // Close fill (realized_pnl != 0) carries the pre-close entry's id;
-        // open/accumulate fills leave it empty (JOIN is from decision_features →
-        // close fill's entry_context_id only).
-        // EDGE-P3-1 R2：平倉 Fill 才帶 entry_context_id；開倉/加倉留空。
-        let fill_entry_ctx = if realized_pnl != 0.0 {
+        // Close fills carry the pre-close entry's id; open/accumulate fills
+        // leave it empty (JOIN is from decision_features → close fill's
+        // entry_context_id only). Some IPC/manual close rows settle at zero
+        // realized PnL, so DB close detection must also honor the close tag.
+        // EDGE-P3-1 R2：平倉 Fill 帶 entry_context_id；開倉/加倉留空。部分
+        // IPC / manual close 會以 0 PnL 結算，因此 DB 判斷也看 close tag。
+        let fill_entry_ctx = if is_close_fill_for_db {
             existing_entry_ctx
         } else {
             String::new()
@@ -245,7 +253,7 @@ impl TickPipeline {
         if let Some(ref tx) = self.trading_tx {
             let em = self.effective_engine_mode();
             let context_id = make_context_id(em, symbol, now_ms);
-            let (fill_strategy_name, fill_exit_reason) = if realized_pnl != 0.0 {
+            let (fill_strategy_name, fill_exit_reason) = if is_close_fill_for_db {
                 crate::tick_pipeline::on_tick::build_close_tags_from_legacy(
                     strategy,
                     pre_fill_snapshot
@@ -565,9 +573,16 @@ impl TickPipeline {
             let fr = fee_rate_override
                 .filter(|v| v.is_finite() && *v >= 0.0)
                 .unwrap_or_else(|| self.intent_processor.fee_rate(symbol));
+            let is_legacy_close_tag = strategy.starts_with("strategy_close:")
+                || strategy.starts_with("risk_close:")
+                || strategy.starts_with("stop_trigger:")
+                || strategy.starts_with("ipc_close:");
+            let is_close_fill_for_db = realized_pnl != 0.0 || is_legacy_close_tag;
             // EDGE-P3-1 R2: close fills carry the pre-close entry's id; opens stay empty.
-            // EDGE-P3-1 R2：平倉 fill 帶 entry_context_id；開倉/加倉留空。
-            let fill_entry_ctx = if realized_pnl != 0.0 {
+            // Zero-PnL IPC/manual closes still count as close rows for DB attribution.
+            // EDGE-P3-1 R2：平倉 fill 帶 entry_context_id；開倉/加倉留空。0 PnL
+            // IPC / manual close 仍按 close row 寫歸因。
+            let fill_entry_ctx = if is_close_fill_for_db {
                 existing_entry_ctx.clone()
             } else {
                 String::new()
@@ -587,7 +602,7 @@ impl TickPipeline {
                 .filter(|id| !id.trim().is_empty())
                 .map(|id| format!("bybit-{id}"))
                 .unwrap_or_else(|| make_fill_id(em, symbol, ts_ms));
-            let (fill_strategy_name, fill_exit_reason) = if realized_pnl != 0.0 {
+            let (fill_strategy_name, fill_exit_reason) = if is_close_fill_for_db {
                 crate::tick_pipeline::on_tick::build_close_tags_from_legacy(
                     strategy,
                     pre_close_snapshot
