@@ -45,6 +45,8 @@ use std::time::Duration;
 use tokio_util::sync::CancellationToken;
 use tracing::{info, warn};
 
+const H_STATE_CACHE_SLOT_TIMEOUT_WARNING: &str = "cost_edge_advisor: h_state_cache_slot never populated after 10s; daemon NOT spawned (G3-08 env-gate likely off; G3-09 advisor needs H5 snapshot to function) / cost_edge_advisor: h_state_cache 10s 內未注入；daemon 未 spawn";
+
 /// Late-injected DbPool slot type for the cost_edge_advisor daemon.
 /// cost_edge_advisor daemon 用的 late-injected DbPool slot type。
 ///
@@ -193,12 +195,7 @@ pub(crate) fn spawn_cost_edge_advisor_if_enabled(
                 }
                 attempts += 1;
                 if attempts > 100 {
-                    warn!(
-                        "cost_edge_advisor: h_state_cache_slot never populated after 10s; \
-                         daemon NOT spawned (G3-08 env-gate likely off; G3-09 advisor \
-                         needs H5 snapshot to function) \
-                         / cost_edge_advisor: h_state_cache 10s 內未注入；daemon 未 spawn"
-                    );
+                    warn!("{}", H_STATE_CACHE_SLOT_TIMEOUT_WARNING);
                     return;
                 }
                 tokio::time::sleep(Duration::from_millis(100)).await;
@@ -276,4 +273,16 @@ pub(crate) fn spawn_cost_edge_advisor_if_enabled(
              Phase B 純觀察（不接 IntentProcessor）"
         );
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::H_STATE_CACHE_SLOT_TIMEOUT_WARNING;
+
+    #[test]
+    fn h_state_timeout_warning_mentions_h5_dependency_and_no_spawn() {
+        assert!(H_STATE_CACHE_SLOT_TIMEOUT_WARNING.contains("h_state_cache_slot never populated"));
+        assert!(H_STATE_CACHE_SLOT_TIMEOUT_WARNING.contains("daemon NOT spawned"));
+        assert!(H_STATE_CACHE_SLOT_TIMEOUT_WARNING.contains("H5 snapshot"));
+    }
 }

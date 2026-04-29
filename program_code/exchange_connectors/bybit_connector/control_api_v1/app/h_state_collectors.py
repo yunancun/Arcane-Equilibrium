@@ -229,9 +229,9 @@ def _collect_h_snapshots(
         return None, None, None, None, None
 
     if include_h1:
-        h1_dict = _safe_snapshot(strategist, "_h1_gate", "get_h1_snapshot")  # G3-08-PHASE-2-FUP-PRIVATE-ATTR-FACADE: deferred to G3-08-PHASE-4-STRATEGIST-SPLIT (de699df)
+        h1_dict = _safe_snapshot_self(strategist, "get_h1_snapshot")
     if include_h3:
-        h3_dict = _safe_snapshot(strategist, "_model_router", "get_h3_snapshot")  # G3-08-PHASE-2-FUP-PRIVATE-ATTR-FACADE: deferred to G3-08-PHASE-4-STRATEGIST-SPLIT (de699df)
+        h3_dict = _safe_snapshot_self(strategist, "get_h3_snapshot")
     if include_h2:
         # H2 SSOT = Layer2CostTracker, accessed via STRATEGIST_AGENT.cost_tracker
         # (set by BaseAgent.__init__ from the wiring-time injection in

@@ -499,6 +499,61 @@ class TestExecutorSnapshot(unittest.TestCase):
             "Expected agent.executor.execution_failed hint after failure",
         )
 
+    def test_invalidate_hook_present_on_empty_intent_payload(self):
+        agent = ExecutorAgent()
+        agent.start()
+        msg = AgentMessage(
+            sender=AgentRole.STRATEGIST,
+            receiver=AgentRole.EXECUTOR,
+            message_type=MessageType.APPROVED_INTENT,
+            payload={},
+        )
+        with patch("app.executor_agent._invalidate_h_state_async") as mock_inv:
+            agent.on_message(msg)
+        self.assertIn(
+            "agent.executor.intent_empty",
+            [c.args[0] for c in mock_inv.call_args_list if c.args],
+        )
+
+    def test_invalidate_hook_present_on_invalid_intent_payload(self):
+        agent = ExecutorAgent()
+        agent.start()
+        msg = AgentMessage(
+            sender=AgentRole.STRATEGIST,
+            receiver=AgentRole.EXECUTOR,
+            message_type=MessageType.APPROVED_INTENT,
+            payload={"intent_id": "i-invalid", "symbol": "", "direction": "long", "size": 0},
+        )
+        with patch("app.executor_agent._invalidate_h_state_async") as mock_inv:
+            agent.on_message(msg)
+        self.assertIn(
+            "agent.executor.intent_invalid",
+            [c.args[0] for c in mock_inv.call_args_list if c.args],
+        )
+
+    def test_invalidate_hook_present_on_deduped_intent(self):
+        agent = ExecutorAgent()
+        agent.start()
+        agent.execute_order = MagicMock(return_value=MagicMock(success=True))
+        msg = AgentMessage(
+            sender=AgentRole.STRATEGIST,
+            receiver=AgentRole.EXECUTOR,
+            message_type=MessageType.APPROVED_INTENT,
+            payload={
+                "intent_id": "i-dedup",
+                "symbol": "BTCUSDT",
+                "direction": "long",
+                "size": 0.01,
+            },
+        )
+        with patch("app.executor_agent._invalidate_h_state_async") as mock_inv:
+            agent.on_message(msg)
+            agent.on_message(msg)
+        self.assertIn(
+            "agent.executor.intent_deduped",
+            [c.args[0] for c in mock_inv.call_args_list if c.args],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
