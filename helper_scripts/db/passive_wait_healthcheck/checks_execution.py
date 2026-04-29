@@ -90,7 +90,13 @@ def check_intent_signal_attribution(cur) -> tuple[str, str]:
 
 
 def check_mlde_learning_data_contract(cur) -> tuple[str, str]:
-    """[35] ML/Dream training rows must be attributed and post-fee labeled."""
+    """[35] ML/Dream training rows must be attributed and post-fee labeled.
+
+    The 7d aggregate is useful for learning readiness, but it can contain
+    legacy rows written before the signal_id repair. Treat attribution-id
+    failures as regressions only in a short recent window so a fixed deploy can
+    recover without waiting seven days.
+    """
     try:
         cur.connection.rollback()
     except Exception:
@@ -131,19 +137,50 @@ def check_mlde_learning_data_contract(cur) -> tuple[str, str]:
     except Exception as exc:  # noqa: BLE001
         return ("WARN", f"MLDE training contract query failed: {type(exc).__name__}: {exc}")
 
+    recent_minutes = 90
+    try:
+        recent_minutes = int(os.environ.get("OPENCLAW_MLDE_ATTRIBUTION_RECENT_MINUTES", "90"))
+    except ValueError:
+        recent_minutes = 90
+    recent_minutes = max(5, min(24 * 60, recent_minutes))
+    try:
+        cur.execute(
+            """
+            SELECT
+                count(*)::int AS recent_total,
+                count(*) FILTER (WHERE attribution_chain_ok)::int AS recent_attributed,
+                count(*) FILTER (
+                    WHERE signal_id IS NULL OR signal_id = ''
+                       OR context_id IS NULL OR context_id = ''
+                )::int AS recent_missing_ids
+            FROM learning.mlde_edge_training_rows
+            WHERE ts > now() - (%s::int || ' minutes')::interval
+              AND engine_mode IN ('demo', 'live_demo')
+            """,
+            (recent_minutes,),
+        )
+        recent_total, recent_attributed, recent_missing_ids = cur.fetchone()
+    except Exception as exc:  # noqa: BLE001
+        return ("WARN", f"MLDE recent attribution query failed: {type(exc).__name__}: {exc}")
+
     total = _as_int(total)
     attributed = _as_int(attributed)
     linucb_ready = _as_int(linucb_ready)
     missing_ids = _as_int(missing_ids)
     missing_reward = _as_int(missing_reward)
+    recent_total = _as_int(recent_total)
+    recent_attributed = _as_int(recent_attributed)
+    recent_missing_ids = _as_int(recent_missing_ids)
     base = (
         f"7d demo/live_demo MLDE rows total={total}, attributed={attributed}, "
-        f"linucb_ready={linucb_ready}, missing_ids={missing_ids}, missing_reward={missing_reward}"
+        f"linucb_ready={linucb_ready}, missing_ids={missing_ids}, missing_reward={missing_reward}; "
+        f"recent_{recent_minutes}m total={recent_total}, attributed={recent_attributed}, "
+        f"missing_ids={recent_missing_ids}"
     )
     if total == 0:
         return ("WARN", base + " — no post-V031 MLDE training rows yet")
-    if missing_ids > 0:
-        return ("FAIL", base + " — attribution ids missing; scanner→signal→intent chain regressed")
+    if recent_total > 0 and recent_missing_ids > 0:
+        return ("FAIL", base + " — recent attribution ids missing; scanner→signal→intent chain regressed")
     if linucb_ready == 0:
         return ("WARN", base + " — no LinUCB-ready post-fee rows yet")
     return ("PASS", base + " — learning data contract usable")
@@ -197,6 +234,71 @@ def check_mlde_shadow_recommendations(cur) -> tuple[str, str]:
     if recent == 0:
         return ("WARN", base + " — no recent MLDE shadow/advisory outputs yet")
     return ("PASS", base + " — advisory-only boundary intact")
+
+
+def check_mlde_demo_applier(cur) -> tuple[str, str]:
+    """[37] Demo MLDE autonomous applier audit table and live lease boundary."""
+    try:
+        cur.connection.rollback()
+    except Exception:
+        pass
+
+    try:
+        cur.execute("SELECT to_regclass('learning.mlde_param_applications') IS NOT NULL")
+        row = cur.fetchone()
+    except Exception as exc:  # noqa: BLE001
+        return ("FAIL", f"MLDE demo applier table existence check failed: {exc}")
+    if not row or not row[0]:
+        return ("FAIL", "learning.mlde_param_applications missing — V032 not applied")
+
+    try:
+        cur.execute(
+            """
+            SELECT
+                count(*) FILTER (WHERE ts > now() - interval '24 hours')::int AS recent,
+                count(*) FILTER (
+                    WHERE ts > now() - interval '24 hours'
+                      AND engine_mode = 'demo'
+                      AND status IN ('applied', 'dry_run')
+                )::int AS demo_applied,
+                count(*) FILTER (
+                    WHERE ts > now() - interval '24 hours'
+                      AND status = 'candidate'
+                      AND requires_governance
+                )::int AS governed_candidates,
+                count(*) FILTER (
+                    WHERE ts > now() - interval '24 hours'
+                      AND status = 'failed'
+                )::int AS failed,
+                count(*) FILTER (
+                    WHERE engine_mode IN ('live', 'live_demo')
+                      AND status = 'applied'
+                      AND COALESCE(decision_lease_id, '') = ''
+                )::int AS live_applied_without_lease
+            FROM learning.mlde_param_applications
+            """
+        )
+        recent, demo_applied, governed_candidates, failed, live_applied_without_lease = cur.fetchone()
+    except Exception as exc:  # noqa: BLE001
+        return ("WARN", f"MLDE demo applier query failed: {type(exc).__name__}: {exc}")
+
+    recent = _as_int(recent)
+    demo_applied = _as_int(demo_applied)
+    governed_candidates = _as_int(governed_candidates)
+    failed = _as_int(failed)
+    live_applied_without_lease = _as_int(live_applied_without_lease)
+    base = (
+        f"24h MLDE applier rows={recent}, demo_applied={demo_applied}, "
+        f"governed_live_candidates={governed_candidates}, failed={failed}, "
+        f"live_applied_without_lease={live_applied_without_lease}"
+    )
+    if live_applied_without_lease > 0:
+        return ("FAIL", base + " — live/live_demo applied row lacks Decision Lease")
+    if failed > 0:
+        return ("WARN", base + " — applier failures need inspection")
+    if recent == 0:
+        return ("WARN", base + " — no MLDE applier decisions yet")
+    return ("PASS", base + " — demo autonomy audited, live boundary intact")
 
 
 def _load_strategy_params(kind: str) -> tuple[dict[str, Any] | None, str]:
