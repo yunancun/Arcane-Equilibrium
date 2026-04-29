@@ -4,7 +4,7 @@
 //! 私有 WS 監管、信號處理、啟動標語。
 
 use openclaw_engine::account_manager::AccountManager;
-use openclaw_engine::bybit_rest_client::{BybitEnvironment, BybitRestClient};
+use openclaw_engine::bybit_rest_client::{BybitApiError, BybitEnvironment, BybitRestClient};
 use openclaw_engine::config::{
     load_toml_or_default, BudgetConfig, ConfigManager, ConfigStore, LearningConfig, RiskConfig,
 };
@@ -671,8 +671,30 @@ pub(crate) async fn build_exchange_pipeline(
             Some(rate)
         }
         Err(e) => {
-            warn!(kind = %kind, error = %e, "fee rate fetch failed / 費率獲取失敗");
-            None
+            let demo_fee_endpoint_unsupported =
+                matches!(env, BybitEnvironment::Demo | BybitEnvironment::LiveDemo)
+                    && matches!(
+                        &e,
+                        BybitApiError::Business { ret_code: 10001, ret_msg, .. }
+                            if ret_msg.trim().is_empty()
+                    );
+            if demo_fee_endpoint_unsupported {
+                let count = acct.seed_default_fee_rates(SYMBOLS.iter().copied());
+                let rate = acct.taker_fee("BTCUSDT");
+                warn!(
+                    kind = %kind,
+                    env = ?env,
+                    error = %e,
+                    symbols = count,
+                    taker_rate = format!("{:.5}", rate),
+                    "fee-rate endpoint unavailable on demo endpoint; seeded conservative defaults \
+                     / demo 費率端點不可用，已注入保守預設費率"
+                );
+                Some(rate)
+            } else {
+                warn!(kind = %kind, error = %e, "fee rate fetch failed / 費率獲取失敗");
+                None
+            }
         }
     };
 

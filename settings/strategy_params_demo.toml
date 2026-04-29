@@ -34,22 +34,29 @@ conf_scale = 1.0
 # EDGE-DIAG-2 (2026-04-28): operator override of G2-06 — re-enable on demo only
 # (live stays false in strategy_params_live.toml). Rationale: ML / agent layer
 # needs *some* historical data per strategy when it comes online; a permanently
-# disabled strategy = permanent blind spot in the learning pipeline. Re-enable
-# is no-op until 5m timeframe migration or threshold tuning makes the 1m
-# bandwidth fire — but flipping active=true now means: (a) when params do get
-# tuned, no second deploy needed; (b) audit visibility for any signal that DOES
-# fire (so we can confirm whether FIX-26-DEADLOCK-1 unblocked anything at all).
-# Live remains active=false until a positive demo edge signal materializes.
+# disabled strategy = permanent blind spot in the learning pipeline.
+#
+# EDGE-DIAG-2B (2026-04-29): apply the demo-only rescue gate from the 2026-04-24
+# threshold sweep. The old 1m family (squeeze 0.02/0.03, expansion 0.04) is
+# structurally unreachable in current 1m bandwidth distribution; use the observed
+# 1m band and soften Donchian so demo can produce validation samples. Live remains
+# active=false until fresh demo fills show positive post-cutoff edge.
 # EDGE-DIAG-2（2026-04-28）：operator 覆蓋 G2-06 — 僅 demo 重啟
 # （live 仍 false）。理由：ML / agent 上線時每個策略都需要歷史資料；永久 disable
-# = learning pipeline 永久盲區。1m bandwidth 結構性問題仍在，僅在 demo 探索
-# 路徑下保留可觀察性，不消耗 live 風險。
+# = learning pipeline 永久盲區。
+# EDGE-DIAG-2B（2026-04-29）：套用 demo-only rescue gate。舊 1m 閾值組
+# （squeeze 0.02/0.03、expansion 0.04）在當前 1m bandwidth 分佈不可達；
+# 改用 sweep 觀測到的 1m 區間並軟化 Donchian，先讓 demo 累積驗證樣本。
 active = true
 cooldown_ms = 600000
-squeeze_bw = 0.02
-expansion_bw = 0.04
-volume_threshold = 1.5
+squeeze_bw = 0.0015
+expansion_bw = 0.005
+volume_threshold = 1.0
 trailing_stop_atr_mult = 2.0
+min_persistence_ms = 0
+confluence_as_gate = false
+donchian_mode = "score"
+donchian_score_bonus = 0.15
 conf_scale = 1.0
 # EDGE-P2-2: Open Interest confluence signal — experimental, default off.
 # Rising OI + long (or falling OI + short) adds `oi_confluence_bonus` to the

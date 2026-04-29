@@ -309,6 +309,47 @@ impl AccountManager {
         Ok(count)
     }
 
+    /// Seed conservative default fee rates for symbols when an exchange
+    /// endpoint is unavailable in a non-mainnet environment. This still stamps
+    /// the refresh timestamp because the cost gate can now reason from an
+    /// explicit conservative fee model instead of an unknown cold boot.
+    /// 當非主網環境的交易所費率端點不可用時，為指定 symbol 注入保守預設費率。
+    /// 這會刷新 timestamp，因為成本門禁已可基於明確保守費率模型判斷，而非未知冷啟動。
+    pub fn seed_default_fee_rates<'a, I>(&self, symbols: I) -> usize
+    where
+        I: IntoIterator<Item = &'a str>,
+    {
+        let mut count = 0;
+        let mut cache = self.fee_rates.write();
+        for symbol in symbols {
+            cache.insert(
+                symbol.to_string(),
+                FeeRate {
+                    symbol: symbol.to_string(),
+                    maker_fee_rate: DEFAULT_MAKER_FEE,
+                    taker_fee_rate: DEFAULT_TAKER_FEE,
+                },
+            );
+            count += 1;
+        }
+
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64;
+        self.last_fee_refresh_ms
+            .store(now_ms, std::sync::atomic::Ordering::Relaxed);
+
+        info!(
+            symbols = count,
+            maker_fee = DEFAULT_MAKER_FEE,
+            taker_fee = DEFAULT_TAKER_FEE,
+            "default fee rates seeded / 已注入預設手續費率"
+        );
+
+        count
+    }
+
     /// Get fee rate for a symbol. Falls back to default if not cached.
     /// 取得交易對的手續費率。未緩存時使用默認值。
     pub fn get_fee_rate(&self, symbol: &str) -> FeeRate {
@@ -700,6 +741,19 @@ mod tests {
         assert!((mgr.maker_fee("ETHUSDT") - 0.0001).abs() < 1e-10);
         // Unknown symbol falls back to default / 未知交易對回退到默認值
         assert!((mgr.taker_fee("UNKNOWN") - DEFAULT_TAKER_FEE).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_seed_default_fee_rates_marks_refresh_and_populates_cache() {
+        let mgr = AccountManager::new();
+        assert_eq!(mgr.last_fee_refresh_ms(), 0);
+
+        let count = mgr.seed_default_fee_rates(["BTCUSDT", "ETHUSDT"]);
+
+        assert_eq!(count, 2);
+        assert!(mgr.last_fee_refresh_ms() > 0);
+        assert!((mgr.taker_fee("BTCUSDT") - DEFAULT_TAKER_FEE).abs() < 1e-10);
+        assert!((mgr.maker_fee("ETHUSDT") - DEFAULT_MAKER_FEE).abs() < 1e-10);
     }
 
     #[test]

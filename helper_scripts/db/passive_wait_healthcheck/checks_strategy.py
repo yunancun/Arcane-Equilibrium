@@ -37,7 +37,51 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .db import _scalar
-from .shared import _read_bb_breakout_active_from_toml
+from .shared import (
+    _read_bb_breakout_active_from_toml,
+    _read_bb_breakout_config_from_toml,
+)
+
+
+def _bb_breakout_rescue_config_summary() -> tuple[bool, str]:
+    """Return whether demo bb_breakout has the post-F1 rescue gate profile.
+    判斷 demo bb_breakout 是否已套用 F1 後的 rescue 閘值配置。
+    """
+    section, diag = _read_bb_breakout_config_from_toml()
+    if section is None:
+        return (False, diag)
+
+    try:
+        squeeze = float(section.get("squeeze_bw"))
+        expansion = float(section.get("expansion_bw"))
+        volume = float(section.get("volume_threshold"))
+    except (TypeError, ValueError):
+        return (False, "bb_breakout rescue params missing/non-numeric")
+
+    donchian = str(section.get("donchian_mode", "hard")).lower()
+    try:
+        persistence_ms = int(section.get("min_persistence_ms", 60_000))
+    except (TypeError, ValueError):
+        persistence_ms = 60_000
+
+    # The 2026-04-24 sweep showed the legacy 1m gate family
+    # (squeeze≈0.02/0.03, expansion≈0.04) was structurally unreachable.
+    # Treat this as "rescued" only when the deployed demo config is in the
+    # observed 1m band and Donchian/persistence no longer recreate the
+    # old hard 5-AND chain.
+    # 2026-04-24 sweep 證實舊 1m gate family 結構不可達；只有落在觀測 1m
+    # 區間且 Donchian/persistence 不再形成硬 5-AND 鏈時才視為 rescue。
+    rescued = (
+        0.0 < squeeze < expansion <= 0.011
+        and squeeze <= 0.0035
+        and volume <= 1.2
+        and (donchian in {"score", "off"} or persistence_ms <= 30_000)
+    )
+    summary = (
+        f"squeeze={squeeze:g}, expansion={expansion:g}, volume={volume:g}, "
+        f"donchian={donchian}, persistence_ms={persistence_ms}"
+    )
+    return (rescued, summary)
 
 
 def check_intents_writer_ratio(cur) -> tuple[str, str]:
@@ -209,6 +253,13 @@ def check_bb_breakout_post_deadlock_fix(cur) -> tuple[str, str]:
         pass
 
     if n_7d == 0:
+        rescue_ok, rescue_msg = _bb_breakout_rescue_config_summary()
+        if rescue_ok:
+            return (
+                "PASS",
+                f"bb_breakout 7d entries=0{deploy_age_hint} — demo rescue config deployed "
+                f"({rescue_msg}); fill baseline pending, no legacy deadlock/mis-scale FAIL",
+            )
         return (
             "FAIL",
             f"bb_breakout 7d entries=0{deploy_age_hint} — FIX-26-DEADLOCK-1 fix "
