@@ -139,6 +139,9 @@ def test_os_003_process_kill_scope_is_narrowed() -> None:
 
     for body in (restart_all, stop_all):
         assert "is_openclaw_api_pid()" in body
+        assert "API_WORKDIR" in body
+        assert 'readlink "/proc/$pid/cwd"' in body
+        assert "multiprocessing-fork" in body
         assert "lsof -ti :8000 | xargs kill -TERM" not in body
         assert "lsof -ti :8000 | xargs kill -9" not in body
 
