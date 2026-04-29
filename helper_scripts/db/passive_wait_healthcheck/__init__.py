@@ -80,6 +80,7 @@ from .checks_cost_edge import (  # noqa: F401
     check_cost_edge_advisor_status,
 )
 from .checks_execution import (  # noqa: F401
+    check_maker_fill_rate,
     check_maker_entry_intent_drift,
 )
 
@@ -125,6 +126,7 @@ __all__ = [
     "check_dust_spiral_noise_in_ef",
     # G3-09 Phase A cost_edge_advisor
     "check_cost_edge_advisor_status",
-    # execution-shape drift
+    # execution-shape / fee-drop drift
     "check_maker_entry_intent_drift",
+    "check_maker_fill_rate",
 ]
