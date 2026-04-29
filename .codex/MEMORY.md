@@ -155,8 +155,14 @@ Current known topology at setup time:
 
 ## 2026-04-29 Batch F Remediation
 
-- 62-finding remediation Batch F is fixed locally, not deployed: `MLM-001..005`, `SADF-001`, `SADF-004`, `SADF-005`, `SADF-006`, `LP-003`.
+- 62-finding remediation Batch F is fixed and committed/pushed in `bc3fa70`: `MLM-001..005`, `SADF-001`, `SADF-004`, `SADF-005`, `SADF-006`, `LP-003`.
 - Sign-off: `docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-29--batch_f_ml_agent_autonomy_signoff.md`; operator brief copied to `docs/CCAgentWorkSpace/Operator/2026-04-29--batch_f_ml_agent_autonomy_signoff.md`.
 - Key code paths: feature-definition hash + ONNX metadata validation, ML ETL row-level schema/hash filters, quantile trio registry transition, label full-close finality, LinUCB arm/state loop, Teacher Demo command sink, disabled Paper command rejection, observation-only LinUCB metadata, `boost_arm` unsupported result, Strategist Live fail-fast, Paper opt-in script/runbook.
 - Verification baseline: Python py_compile passed; `bash -n helper_scripts/start_paper_trading.sh` passed; `cargo check -p openclaw_engine` passed with existing warnings; ML targeted pytest 78 passed and 7 skipped; Rust targeted tests 47 passed.
-- No deploy/restart/commit/push was performed. Remaining release gaps: live Postgres registry integration run, real ONNX artifact e2e load, LinUCB live boot smoke, and full A-F deploy smoke.
+- Mac/origin/Linux were synced clean at `bc3fa70`; Linux rebuild/redeploy is the next required action. Remaining release gaps: live Postgres registry integration run, real ONNX artifact e2e load, LinUCB live boot smoke, and full A-F deploy smoke.
+
+## 2026-04-29 A-F Commit/Push Sync
+
+- Commit `bc3fa70` (`fix(audit): close 62-finding remediation batches`) contains the A-F remediation work, reports, and tracking updates.
+- Mac `main`, `origin/main`, and Linux `trade-core` `main` were aligned at `bc3fa70` with clean worktrees before the Linux rebuild/redeploy step.
+- `CLAUDE.md`, `TODO.md`, and `.codex/MEMORY.md` were updated to reflect committed/pushed status before redeploy.
