@@ -372,15 +372,16 @@ def check_paper_state_dust_inventory(cur) -> tuple[str, str]:
     """
     # PA Track 3 §7.4 ready-to-deploy SQL — pure SELECT, FILTER on realized_pnl
     # to compute (a) total dust-spiral fill count, (b) distinct symbol fan-out
-    # in a single round-trip.
-    # PA Track 3 §7.4 ready-to-deploy SQL — 純 SELECT，FILTER 計算
-    # (a) dust-spiral 總計數 + (b) distinct symbol 擴散度，單次 round-trip。
+    # in a single round-trip. W1-T4 dual-syntax (2026-04-29 PA §6.2): legacy
+    # row 走 strategy_name LIKE; W1-T2 後新 row 走 exit_reason LIKE; 7d window
+    # 過期可單路徑化。
     cur.execute(
         "SELECT "
         "  COUNT(*) FILTER (WHERE realized_pnl = 0) AS dust_spiral_count, "
         "  COUNT(DISTINCT symbol) FILTER (WHERE realized_pnl = 0) AS distinct_dust_symbols "
         "FROM trading.fills "
-        "WHERE strategy_name LIKE 'risk_close:fast_track%' "
+        "WHERE (strategy_name LIKE 'risk_close:fast_track%' "
+        "       OR exit_reason LIKE 'fast_track%') "
         "  AND ts > now() - interval '1 hour' "
         "  AND engine_mode IN ('demo', 'live', 'live_demo')"
     )
@@ -1094,13 +1095,15 @@ def check_phantom_fills_attribution(cur) -> tuple[str, str]:
 
     # Pull ALL (engine_mode, symbol) with phantom_count > 0 in last 1h, then
     # bucket into FAIL / WARN bands in Python — single query gives us both
-    # bands cleanly.
-    # 拉所有 (engine_mode, symbol) 過去 1h phantom_count>0，Python 端分檔。
+    # bands cleanly. W1-T4 dual-syntax (2026-04-29 PA §6): legacy row 走
+    # strategy_name LIKE 'risk_close:%'; W1-T2 後新 row 走 exit_reason IS
+    # NOT NULL（close path 寫 exit_reason，strategy_name 是 5 enum 之一）。
     sql = (
         "SELECT engine_mode, symbol, count(*) AS phantom_count "
         "FROM trading.fills "
         "WHERE ts > now() - interval '1 hour' "
-        "  AND strategy_name LIKE 'risk_close:%' "
+        "  AND (strategy_name LIKE 'risk_close:%' "
+        "       OR exit_reason IS NOT NULL) "
         "  AND (realized_pnl IS NULL OR realized_pnl = 0) "
         "  AND qty < 1e-3 "
         "GROUP BY 1, 2 "

@@ -383,15 +383,23 @@ async def get_live_fills(
     if conn is not None:
         try:
             cur = conn.cursor()
+            # W1-T3 (PA 2026-04-29 strategy_name attribution cleanup §1.2):
+            # SELECT additionally returns ``exit_reason`` (V033 column, nullable).
+            # Once W1-T2 normalises close path emit, ``strategy_name`` holds the
+            # entry-strategy enum and ``exit_reason`` carries the dynamic trace.
+            # Historical rows pre-V033 keep ``exit_reason=NULL`` and the legacy
+            # ``strategy_name`` shape; GUI renders both side by side.
+            # W1-T3 同步 demo bucket：fills SELECT 多回 exit_reason，UI 渲染
+            # ``strategy + (exit_reason ? ' (' + exit_reason + ')' : '')``。
             cur.execute(
-                "SELECT ts, symbol, side, qty, price, fee, realized_pnl, strategy_name "
+                "SELECT ts, symbol, side, qty, price, fee, realized_pnl, strategy_name, exit_reason "
                 "FROM trading.fills WHERE engine_mode IN (%s, %s) ORDER BY ts DESC LIMIT %s",
                 ("live", "live_demo", 50),
             )
             rows = cur.fetchall()
             if rows:
                 fills = []
-                for ts, symbol, side, qty, price, fee, rpnl, strategy in rows:
+                for ts, symbol, side, qty, price, fee, rpnl, strategy, exit_reason in rows:
                     ts_ms = int(ts.timestamp() * 1000) if ts is not None else 0
                     sym = symbol or ""
                     cat = "inverse" if sym.endswith("USD") and not sym.endswith("USDT") else "linear"
@@ -404,6 +412,7 @@ async def get_live_fills(
                         "execFee": float(fee) if fee is not None else 0.0,
                         "closedPnl": float(rpnl) if rpnl is not None else 0.0,
                         "strategy": strategy or "",
+                        "exit_reason": exit_reason if exit_reason else None,
                         "category": cat,
                     })
                 return core._live_response({"list": fills, "count": len(fills), "source": "pg_trading_fills"})

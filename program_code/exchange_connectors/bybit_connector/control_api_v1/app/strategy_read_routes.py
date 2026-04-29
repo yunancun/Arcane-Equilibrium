@@ -595,6 +595,20 @@ async def get_recent_fills_from_pg(
 
     Source: Rust engine → trading_writer → PG (real-time).
     數據源：Rust 引擎 → trading_writer → PG（即時）。
+
+    W1-T3 (PA 2026-04-29 strategy_name attribution cleanup §1.2 GUI passthrough):
+    SELECT additionally returns ``exit_reason`` (V033 column, nullable). Once
+    W1-T2 lands the close-path emit normalisation, ``strategy_name`` will hold
+    the 5 enum entry strategy name and ``exit_reason`` will carry the dynamic
+    trace (e.g. ``TRAILING STOP: peak X% - current Y% = ...``). Historical rows
+    pre-V033 keep ``exit_reason = NULL`` and the legacy ``strategy_name`` shape;
+    GUI renders ``strategy_name + (exit_reason ? ' (' + exit_reason + ')' : '')``
+    so operator still sees both pieces.
+
+    W1-T3（PA 2026-04-29 attribution cleanup §1.2 GUI passthrough）：
+    SELECT 多回 ``exit_reason``（V033 nullable column）。W1-T2 落地後 close path
+    的 ``strategy_name`` 為 5 enum 之一、``exit_reason`` 帶動態 trace；歷史 row
+    維持原 ``strategy_name`` + ``exit_reason=NULL``。
     """
     conn = _get_pg_conn()
     if conn is None:
@@ -603,18 +617,29 @@ async def get_recent_fills_from_pg(
         cur = conn.cursor()
         if symbol:
             cur.execute(
-                "SELECT ts, fill_id, symbol, side, qty, price, fee, realized_pnl, strategy_name "
+                "SELECT ts, fill_id, symbol, side, qty, price, fee, realized_pnl, strategy_name, exit_reason "
                 "FROM trading.fills WHERE symbol = %s ORDER BY ts DESC LIMIT %s",
                 (symbol, limit),
             )
         else:
             cur.execute(
-                "SELECT ts, fill_id, symbol, side, qty, price, fee, realized_pnl, strategy_name "
+                "SELECT ts, fill_id, symbol, side, qty, price, fee, realized_pnl, strategy_name, exit_reason "
                 "FROM trading.fills ORDER BY ts DESC LIMIT %s",
                 (limit,),
             )
         rows = cur.fetchall()
-        cols = ["ts", "fill_id", "symbol", "side", "qty", "price", "fee", "realized_pnl", "strategy"]
+        cols = [
+            "ts",
+            "fill_id",
+            "symbol",
+            "side",
+            "qty",
+            "price",
+            "fee",
+            "realized_pnl",
+            "strategy",
+            "exit_reason",
+        ]
         fills = [dict(zip(cols, row)) for row in rows]
         # Convert timestamps to ISO strings / 轉換時間戳為 ISO 字符串
         for f in fills:
