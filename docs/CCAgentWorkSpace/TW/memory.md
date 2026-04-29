@@ -23,6 +23,15 @@
 | 2026-04-26 | G9-01 Bybit dict confirm-mmr 路徑修正 + SSOT 標記（Tier 1 quick fix · Wave 4 G9 series） | inline final message（不寫 report file）|
 | 2026-04-26 | G9-05 L-2~L-5 字典補錄 — **PUSH-BACK / 任務假設不成立** | inline final message（不寫 report file）|
 | 2026-04-27 | LIVE-AUTH-WATCHER-EVENT-CONSUMER-SPAWN 工程日誌（P0 Silent Regression · 8d event_consumer missing） | `docs/worklogs/2026-04-27--live_auth_watcher_event_consumer_spawn_fix.md` |
+| 2026-04-29 | 62-finding Batch A-F + STRKUSDT P0 wave 歸檔（TODO.md 頭部敘述瘦身）| `docs/archive/2026-04-29--62finding-batch-A-to-F.md` + `docs/archive/2026-04-29--strkusdt-p0-wave.md` |
+
+## 2026-04-29 歸檔記錄重點
+
+- **任務**：operator 反映 TODO.md 頭部 line 1~50 過度膨脹，要求把 62-finding Batch A-F + STRKUSDT P0 wave 兩塊歷次 update 敘述歸檔到 docs/archive/，TODO.md 後續換成一行索引。
+- **產出**：兩檔嚴守 `YYYY-MM-DD--描述.md` 命名 + frontmatter（commit ref / sign-off 報告路徑 / Linear milestone 對應）+ H2 結構（6 Batch / Merge 順序 / RCA 三層 / Verification / Sign-off + 後續 FUP）。
+- **規範遵守**：搬運 + 結構化、不主觀評論、中文敘述為主、英文保留技術名詞 / commit / SQL / Rust 路徑；docs/README.md 索引同步加 archive/ 段落。
+- **禁觸原則**：未動 TODO.md / CLAUDE.md / 其他 archive 檔 / memory/ 任何 user-level 檔；只寫 2 個歸檔檔 + README.md 索引追加 + 本 memory log。
+- **驗收**：檔 1（62-finding）= 297 行，含 Batch A-F 全部 6 個 H2 section + Linear 對應表 + Post-deploy healthcheck status；檔 2（STRKUSDT）= 245 行，含 6 commits + 8 healthcheck [22]-[29] 名稱 + RCA 三層（entry_notional / Gate 2 cross-symbol / 41 phantom fills attribution）+ Sign-off 區塊。
 
 ## G9-05 push-back 重點記錄（2026-04-26）
 
