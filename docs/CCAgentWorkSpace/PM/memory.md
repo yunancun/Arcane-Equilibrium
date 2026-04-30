@@ -1020,3 +1020,18 @@ Operator 接續 Tier 8 sign-off 後說「繼續派」。PM 按 Tier 8 §8 推薦
 
 ### Boundary
 - Did not change trailing, partial TP, live authorization, or grid active state.
+
+## 2026-04-30 Maintenance Warning-Zone Split
+
+### Result
+- Operator requested TODO items 1-4 be completed and TODO updated.
+- Closed `EXIT-FEATURES-FIX-FUP-HELPERS-RS-SPLIT`, `TIER4-AI-SERVICE-DISPATCH-SPLIT`, `G3-07-FUP-ENV-NAMESPACE`, and `T6-FUP-WARN-ZONE-FILES-SPLIT`.
+- Report: `docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-30--maintenance_warning_zone_split.md`; operator copy at `docs/CCAgentWorkSpace/Operator/2026-04-30--maintenance_warning_zone_split.md`.
+
+### Verification
+- Python targeted compile/tests passed: Layer2 38/0 (+1 deselected), IPC 9/0, F7 healthchecks 39/0, P1 smoke 11/0, H-state 90/0.
+- Rust `cargo fmt --check` passed; `cargo test -p openclaw_engine --lib phys_lock_wrapper_tests` passed 22/0.
+- `git diff --check` passed.
+
+### Boundary
+- No deploy, rebuild, restart, live authorization, or runtime config change was performed.

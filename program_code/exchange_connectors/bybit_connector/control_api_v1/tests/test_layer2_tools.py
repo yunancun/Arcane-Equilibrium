@@ -38,6 +38,7 @@ from app.layer2_tools_g3_07 import (  # noqa: E402
     DEFAULT_HTTP_TIMEOUT_SEC,
     DEFAULT_TOOL_DISABLED_ERROR,
     ENV_BYBIT_ENV,
+    ENV_BYBIT_PUBLIC_BASE_URL,
     ENV_CHECK_DERIVATIVES_ENABLED,
     ENV_HTTP_TIMEOUT_SEC,
     ENV_QUERY_ONCHAIN_ENABLED,
@@ -107,6 +108,15 @@ def _make_async_client_ctx(get_return):
 class TestEnvHelpers:
     """Tests for is_tool_enabled / http_timeout / bybit_public_base_url"""
 
+    def _clear_bybit_url_env(self):
+        for key in (
+            ENV_BYBIT_PUBLIC_BASE_URL,
+            ENV_BYBIT_ENV,
+            "OPENCLAW_SECRETS_DIR",
+            "OPENCLAW_SECRETS_ROOT",
+        ):
+            os.environ.pop(key, None)
+
     def test_is_tool_enabled_truthy_values(self):
         for v in ["1", "true", "True", "YES", " on "]:
             with patch.dict(os.environ, {"FOO": v}, clear=False):
@@ -148,11 +158,47 @@ class TestEnvHelpers:
         }
         for env_val, expected in cases.items():
             with patch.dict(os.environ, {ENV_BYBIT_ENV: env_val}, clear=False):
+                os.environ.pop(ENV_BYBIT_PUBLIC_BASE_URL, None)
+                os.environ.pop("OPENCLAW_SECRETS_DIR", None)
+                os.environ.pop("OPENCLAW_SECRETS_ROOT", None)
                 assert bybit_public_base_url() == expected
 
     def test_base_url_unset_falls_back_demo(self):
-        os.environ.pop(ENV_BYBIT_ENV, None)
+        self._clear_bybit_url_env()
         assert bybit_public_base_url() == "https://api-demo.bybit.com"
+
+    def test_base_url_explicit_public_url_override(self):
+        with patch.dict(
+            os.environ,
+            {
+                ENV_BYBIT_PUBLIC_BASE_URL: "https://example.invalid/",
+                ENV_BYBIT_ENV: "mainnet",
+            },
+            clear=False,
+        ):
+            assert bybit_public_base_url() == "https://example.invalid"
+
+    def test_base_url_reads_file_based_live_demo_endpoint(self, tmp_path):
+        slot_dir = tmp_path / "live"
+        slot_dir.mkdir()
+        (slot_dir / "bybit_endpoint").write_text("demo\n", encoding="utf-8")
+
+        with patch.dict(os.environ, {"OPENCLAW_SECRETS_DIR": str(tmp_path)}, clear=False):
+            os.environ.pop(ENV_BYBIT_PUBLIC_BASE_URL, None)
+            os.environ.pop(ENV_BYBIT_ENV, None)
+            os.environ.pop("OPENCLAW_SECRETS_ROOT", None)
+            assert bybit_public_base_url() == "https://api-demo.bybit.com"
+
+    def test_base_url_reads_file_based_mainnet_endpoint(self, tmp_path):
+        slot_dir = tmp_path / "live"
+        slot_dir.mkdir()
+        (slot_dir / "bybit_endpoint").write_text("mainnet\n", encoding="utf-8")
+
+        with patch.dict(os.environ, {"OPENCLAW_SECRETS_DIR": str(tmp_path)}, clear=False):
+            os.environ.pop(ENV_BYBIT_PUBLIC_BASE_URL, None)
+            os.environ.pop(ENV_BYBIT_ENV, None)
+            os.environ.pop("OPENCLAW_SECRETS_ROOT", None)
+            assert bybit_public_base_url() == "https://api.bybit.com"
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -606,10 +652,12 @@ class TestCheckDerivativesE2E:
     def setup_method(self):
         os.environ[ENV_CHECK_DERIVATIVES_ENABLED] = "1"
         # Force demo URL even if local env points elsewhere
+        os.environ.pop(ENV_BYBIT_PUBLIC_BASE_URL, None)
         os.environ[ENV_BYBIT_ENV] = "demo"
 
     def teardown_method(self):
         os.environ.pop(ENV_CHECK_DERIVATIVES_ENABLED, None)
+        os.environ.pop(ENV_BYBIT_PUBLIC_BASE_URL, None)
         os.environ.pop(ENV_BYBIT_ENV, None)
 
     def test_btcusdt_real_network(self):

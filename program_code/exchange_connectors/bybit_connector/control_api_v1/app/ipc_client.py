@@ -37,6 +37,7 @@ import time
 from typing import Any
 
 from .secret_runtime import get_secret_value
+from .ipc_client_risk_config import build_update_risk_config_params
 
 logger = logging.getLogger(__name__)
 
@@ -487,61 +488,20 @@ class EngineIPCClient:
         欄位集。本欄位先補上 `exit_stale_peak_ms` 為
         `restore_exit_config_defaults` 與未來 operator CLI binding 鋪路。
         """
-        _U = EngineIPCClient._UNSET
-        params: dict[str, Any] = {}
-        if hard_stop_pct is not None:
-            params["hard_stop_pct"] = hard_stop_pct
-        if p1_risk_pct is not None:
-            params["p1_risk_pct"] = p1_risk_pct
-        # Option<Option<f64>> fields: _UNSET=omit, None=null(disable), float=value
-        if trailing_stop_pct is not _U:
-            params["trailing_stop_pct"] = trailing_stop_pct  # None → JSON null → disable
-        if time_stop_hours is not _U:
-            params["time_stop_hours"] = time_stop_hours
-        if atr_multiplier is not _U:
-            params["atr_multiplier"] = atr_multiplier
-        if take_profit_pct is not _U:
-            params["take_profit_pct"] = take_profit_pct
-        if max_leverage is not None:
-            params["max_leverage"] = max_leverage
-        if max_drawdown_pct is not None:
-            params["max_drawdown_pct"] = max_drawdown_pct
-        if max_same_direction_positions is not None:
-            params["max_same_direction_positions"] = max_same_direction_positions
-        if h0_shadow_mode is not None:
-            params["h0_shadow_mode"] = h0_shadow_mode
-        # EDGE-P1b-FUP-STALE-PEAK-IPC: forward stale_peak_ms only when caller
-        #   provided a value (None = "no change"). Rust IPC handler reads as
-        #   u64; consumer-side casts to schema i64 (validate() rejects < 0).
-        # EDGE-P1b-FUP-STALE-PEAK-IPC：caller 顯式傳值才 forward（None = 不變）。
-        #   Rust IPC handler 讀 u64；consumer 端 cast 為 schema i64
-        #   （validate() 拒 < 0）。
-        #
-        # EDGE-P1b-FUP-NEGATIVE-GUARD (Tier 6 Track 1, 2026-04-26): Python-side
-        #   defensive guard mirrors the Rust validate() < 0 reject. Without
-        #   this, a caller passing -1 would be encoded as a valid u64 over the
-        #   wire (since `serde_json::from_value::<u64>` rejects negative i64
-        #   literals, the Rust handler would actually error out at deserialize
-        #   time — but the error surface is opaque "invalid type: negative
-        #   integer" rather than the precise "exit_stale_peak_ms must be ≥ 0").
-        #   Failing fast in Python gives the caller (operator CLI / agent self-
-        #   tune) a precise, actionable error before incurring an IPC roundtrip.
-        # EDGE-P1b-FUP-NEGATIVE-GUARD（Tier 6 Track 1，2026-04-26）：Python 端
-        #   防禦性 guard 鏡射 Rust validate() < 0 拒絕。無此 guard 時 caller 傳
-        #   -1 會以 u64 over-the-wire 編碼（serde_json::from_value::<u64> 反
-        #   序列化拒負 i64 字面量，Rust handler 確實會在 deserialize 階段報錯，
-        #   但錯誤面是 opaque「invalid type: negative integer」而非精確的
-        #   「exit_stale_peak_ms must be ≥ 0」）。Python 端先 fail-fast 給
-        #   caller（operator CLI / agent self-tune）精確可動的錯誤訊息，
-        #   且省下一次 IPC roundtrip。
-        if exit_stale_peak_ms is not None:
-            if exit_stale_peak_ms < 0:
-                raise ValueError(
-                    f"exit_stale_peak_ms must be >= 0 (got {exit_stale_peak_ms}); "
-                    f"Rust ExitConfig.stale_peak_ms is i64 milliseconds and "
-                    f"validate() rejects negative values"
-                )
-            params["exit_stale_peak_ms"] = exit_stale_peak_ms
+        params = build_update_risk_config_params(
+            unset_marker=EngineIPCClient._UNSET,
+            hard_stop_pct=hard_stop_pct,
+            p1_risk_pct=p1_risk_pct,
+            trailing_stop_pct=trailing_stop_pct,
+            time_stop_hours=time_stop_hours,
+            atr_multiplier=atr_multiplier,
+            take_profit_pct=take_profit_pct,
+            max_leverage=max_leverage,
+            max_drawdown_pct=max_drawdown_pct,
+            max_same_direction_positions=max_same_direction_positions,
+            h0_shadow_mode=h0_shadow_mode,
+            exit_stale_peak_ms=exit_stale_peak_ms,
+        )
         return await self.call("update_risk_config", params=params)
 
     # ─── Internal: connection helpers / 內部：連接輔助 ───────────────────────
@@ -786,116 +746,4 @@ class EngineIPCClient:
                 )
                 return
 
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# Sync IPC helper — for use from synchronous Python contexts (e.g. STORE mutators)
-# 同步 IPC 輔助函數 — 用於同步 Python 上下文（例如 STORE mutator）
-# ═══════════════════════════════════════════════════════════════════════════════
-
-def sync_ipc_call(
-    method: str,
-    params: dict,
-    timeout: float = 3.0,
-    socket_path: str | None = None,
-) -> dict:
-    """
-    Synchronous fire-and-best-effort IPC call to the Rust engine.
-    Uses a fresh socket connection per call — suitable only for low-frequency
-    control-plane operations (e.g. mode sync on config change), NOT for
-    hot-path per-tick calls.
-
-    Returns the JSON-RPC result dict on success, or raises on error.
-    Failures are logged but never propagate to callers — this is a best-effort
-    sync from Python config to Rust engine state. If the engine is not running,
-    the mode will sync on next engine startup via snapshot read.
-
-    同步的盡力而為 IPC 調用 Rust 引擎。
-    每次調用使用新的 socket 連接 — 僅適用於低頻控制面操作（如模式同步），
-    不適用於高頻 per-tick 調用。
-
-    成功時返回 JSON-RPC result dict，失敗時拋出異常。
-    失敗只記錄日誌，不傳播 — 這是盡力同步。引擎未運行時，模式將在下次啟動時
-    通過快照讀取同步。
-    """
-    import socket as _socket
-
-    _path = socket_path or os.environ.get(SOCKET_ENV_VAR, DEFAULT_SOCKET_PATH)
-    ipc_secret = get_secret_value("OPENCLAW_IPC_SECRET") or ""
-
-    try:
-        with _socket.socket(_socket.AF_UNIX, _socket.SOCK_STREAM) as sock:
-            sock.settimeout(timeout)
-            sock.connect(_path)
-
-            def _recv_line() -> str:
-                buf = b""
-                while True:
-                    ch = sock.recv(1)
-                    if not ch:
-                        raise ConnectionResetError("engine closed connection")
-                    if ch == b"\n":
-                        return buf.decode("utf-8")
-                    buf += ch
-
-            def _send(msg: dict) -> None:
-                data = (json.dumps(msg) + "\n").encode("utf-8")
-                sock.sendall(data)
-
-            # Authenticate if secret configured / 如果配置了密鑰則進行認證
-            #
-            # G2-FUP-IPC-LEGACY-MS-FIX (2026-04-26):
-            # `ts` MUST be Unix epoch SECONDS (not milliseconds), to match the
-            # Rust verifier in `rust/openclaw_engine/src/ipc_server/mod.rs:621-628`
-            # which compares `|now_secs - ts|.abs() <= 30`. Earlier this path
-            # used `int(time.time() * 1000)` (milliseconds), causing every legacy
-            # `sync_ipc_call` to fail HMAC auth (skew ≈ 1.7e12 seconds → rejected
-            # as "auth token expired"). Production callers (`trigger_live_auth_recheck`,
-            # `set_system_mode`) fire-and-forget swallowed the error, so the bug
-            # was silent; the fast-path was 100% non-functional. This change
-            # aligns with the async `_authenticate()` path (line 553) and the
-            # canonical helper in `helper_scripts/canary/edge_p2_flip_dry_run.py`.
-            #
-            # G2-FUP-IPC-LEGACY-MS-FIX（2026-04-26）：
-            # `ts` 必須使用 Unix epoch 秒（非毫秒），以匹配 Rust verifier
-            # （`rust/openclaw_engine/src/ipc_server/mod.rs:621-628`）的
-            # `|now_secs - ts|.abs() <= 30` 比對邏輯。先前此處誤用
-            # `int(time.time() * 1000)`（毫秒），導致每次 legacy `sync_ipc_call`
-            # HMAC 驗證失敗（時間差 ≈ 1.7e12 秒 → 被判為「auth token expired」）。
-            # 兩個 production caller（`trigger_live_auth_recheck`、`set_system_mode`）
-            # 採 fire-and-forget 吞錯誤，故 bug 表面靜默；實際 fast-path 100% 失效。
-            # 本修復對齊 async `_authenticate()` 路徑（第 553 行）與
-            # `helper_scripts/canary/edge_p2_flip_dry_run.py` 內嵌 helper。
-            if ipc_secret:
-                ts = int(time.time())
-                token = _hmac_lib.new(
-                    ipc_secret.encode("utf-8"),
-                    str(ts).encode("utf-8"),
-                    hashlib.sha256,
-                ).hexdigest()
-                _send({"jsonrpc": "2.0", "method": "__auth",
-                       "params": {"token": token, "ts": ts}, "id": 0})
-                auth_resp = json.loads(_recv_line())
-                if auth_resp.get("error"):
-                    raise PermissionError(f"IPC auth failed: {auth_resp['error']}")
-
-            # Send the actual request / 發送實際請求
-            _send({"jsonrpc": "2.0", "method": method, "params": params, "id": 1})
-            resp = json.loads(_recv_line())
-
-            if resp.get("error"):
-                raise RuntimeError(f"IPC error from engine: {resp['error']}")
-            return resp.get("result", {})
-
-    except FileNotFoundError:
-        logger.debug(
-            "sync_ipc_call: engine socket not found (engine not running?) — skipping / "
-            "同步 IPC：引擎 socket 不存在（引擎未運行？）— 跳過"
-        )
-        raise
-    except Exception as exc:  # noqa: BLE001
-        logger.warning(
-            "sync_ipc_call(%s) failed: %s — engine may sync on next restart / "
-            "sync_ipc_call(%s) 失敗：%s — 引擎可能在下次重啟時同步",
-            method, exc, method, exc,
-        )
-        raise
+from .ipc_client_sync import sync_ipc_call  # noqa: E402,F401
