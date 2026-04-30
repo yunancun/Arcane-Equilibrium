@@ -276,10 +276,23 @@ impl TickPipeline {
                                 })
                             });
                         if matches!(em, "demo" | "live_demo") {
+                            if let Some(reason) = self
+                                .intent_processor
+                                .per_strategy_new_entry_rejection(intent)
+                            {
+                                strategy.on_rejection(intent, &reason);
+                                tracing::debug!(
+                                    strategy = %intent.strategy,
+                                    symbol = %intent.symbol,
+                                    reason = %reason,
+                                    "SCANNER-RISK-POLICY-GATE: demo/live_demo new entry blocked before risk verdict"
+                                );
+                                continue;
+                            }
                             if let Some(ref sctx) = scanner_ctx {
                                 let blocked = matches!(
                                     sctx.route_mode.as_str(),
-                                    "market_gate" | "exploration_only"
+                                    "market_gate" | "exploration_only" | "risk_policy_gate"
                                 );
                                 if blocked {
                                     let reason = format!(

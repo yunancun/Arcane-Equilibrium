@@ -34,10 +34,6 @@ fn apply_governor_order_constraints(
     Ok(scaled_qty)
 }
 
-fn symbol_list_contains(list: &[String], symbol: &str) -> bool {
-    list.iter().any(|s| s.eq_ignore_ascii_case(symbol))
-}
-
 fn per_strategy_symbol_rejection(
     config: &RiskConfig,
     intent: &OrderIntent,
@@ -46,29 +42,7 @@ fn per_strategy_symbol_rejection(
     if is_reducing {
         return None;
     }
-    let Some(override_cfg) = config.per_strategy.get(intent.strategy.as_str()) else {
-        return None;
-    };
-    if !override_cfg.enabled {
-        return Some(format!("per_strategy.{}.enabled=false", intent.strategy));
-    }
-    if let Some(allowed) = override_cfg.allowed_symbols.as_ref() {
-        if !allowed.is_empty() && !symbol_list_contains(allowed, &intent.symbol) {
-            return Some(format!(
-                "{} not in per_strategy.{}.allowed_symbols",
-                intent.symbol, intent.strategy
-            ));
-        }
-    }
-    if let Some(blocked) = override_cfg.blocked_symbols.as_ref() {
-        if symbol_list_contains(blocked, &intent.symbol) {
-            return Some(format!(
-                "{} blocked by per_strategy.{}.blocked_symbols",
-                intent.symbol, intent.strategy
-            ));
-        }
-    }
-    None
+    crate::config::per_strategy_new_entry_rejection(config, &intent.strategy, &intent.symbol)
 }
 
 impl IntentProcessor {

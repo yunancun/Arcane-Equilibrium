@@ -645,7 +645,7 @@ pub struct CategoryOverride {
 // `pub use` 保留 `crate::config::risk_config::StrategyOverride` 公開 API 路徑。
 #[path = "risk_config_per_strategy.rs"]
 mod per_strategy;
-pub use per_strategy::StrategyOverride;
+pub use per_strategy::{per_strategy_new_entry_rejection, StrategyOverride};
 
 pub(super) fn default_true() -> bool {
     true

@@ -27,7 +27,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::default_true;
-use super::GlobalLimits;
+use super::{GlobalLimits, RiskConfig};
 
 // ---------------------------------------------------------------------------
 // StrategyOverride (per-strategy)
@@ -188,4 +188,39 @@ impl StrategyOverride {
 
         Ok(())
     }
+}
+
+fn symbol_list_contains(list: &[String], symbol: &str) -> bool {
+    list.iter().any(|s| s.eq_ignore_ascii_case(symbol))
+}
+
+/// Return the per-strategy symbol-policy rejection for a fresh entry.
+/// Returns `None` when the strategy has no override or the symbol is eligible.
+/// 返回新開倉在 per-strategy symbol policy 下的拒絕原因；可交易則返回 None。
+pub fn per_strategy_new_entry_rejection(
+    config: &RiskConfig,
+    strategy: &str,
+    symbol: &str,
+) -> Option<String> {
+    let Some(override_cfg) = config.per_strategy.get(strategy) else {
+        return None;
+    };
+    if !override_cfg.enabled {
+        return Some(format!("per_strategy.{strategy}.enabled=false"));
+    }
+    if let Some(allowed) = override_cfg.allowed_symbols.as_ref() {
+        if !allowed.is_empty() && !symbol_list_contains(allowed, symbol) {
+            return Some(format!(
+                "{symbol} not in per_strategy.{strategy}.allowed_symbols"
+            ));
+        }
+    }
+    if let Some(blocked) = override_cfg.blocked_symbols.as_ref() {
+        if symbol_list_contains(blocked, symbol) {
+            return Some(format!(
+                "{symbol} blocked by per_strategy.{strategy}.blocked_symbols"
+            ));
+        }
+    }
+    None
 }

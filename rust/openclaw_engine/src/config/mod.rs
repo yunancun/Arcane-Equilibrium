@@ -29,7 +29,10 @@ pub mod store;
 pub use budget_config::BudgetConfig;
 pub use io::{load_toml_or_default, save_toml};
 pub use learning_config::LearningConfig;
-pub use risk_config::{CostEdgeConfig, HurstConfig, RiskConfig, SlippageConfig, SlippageTier};
+pub use risk_config::{
+    per_strategy_new_entry_rejection, CostEdgeConfig, HurstConfig, RiskConfig, SlippageConfig,
+    SlippageTier, StrategyOverride,
+};
 // ScannerConfig lives in scanner::config; re-exported here for uniform access via config::ScannerConfig
 // ScannerConfig 定義在 scanner::config，此處重新導出以統一通過 config::ScannerConfig 訪問
 pub use crate::scanner::config::ScannerConfig;

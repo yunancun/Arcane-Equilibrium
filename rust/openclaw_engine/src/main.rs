@@ -30,6 +30,7 @@ use openclaw_engine::ipc_server::{
 };
 use openclaw_engine::market_data_client::MarketDataClient;
 use openclaw_engine::scanner::runner::ScannerRunner;
+use openclaw_engine::scanner::ScannerStrategyPolicyStores;
 use openclaw_engine::secret_env;
 use openclaw_engine::tick_pipeline::{EngineEvent, PipelineHealth, PipelineKind};
 use openclaw_types::PriceEvent;
@@ -666,6 +667,11 @@ async fn async_main(
             market_client,
             Arc::clone(&scanner_edge_estimates),
             Arc::clone(&scanner_store),
+            ScannerStrategyPolicyStores::new(
+                Arc::clone(&risk_stores.paper),
+                Arc::clone(&risk_stores.demo),
+                Arc::clone(&risk_stores.live),
+            ),
             scanner_ws_tx,
             scanner_cmd_tx,
             trading_tx.clone(),
