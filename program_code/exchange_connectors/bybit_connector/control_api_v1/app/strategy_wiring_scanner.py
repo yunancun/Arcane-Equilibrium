@@ -210,6 +210,12 @@ def wire_market_scanner_and_workers(
                     logger.debug(
                         "ScoutWorker: scan returned no opportunities / 掃描未返回機會，跳過情報注入"
                     )
+                    # Scout heartbeat contract: an empty scan is still a
+                    # completed production scan cycle and must refresh GUI
+                    # liveness.
+                    # Scout 心跳契約：空結果仍代表一次 production 掃描週期完成，
+                    # 必須刷新 GUI 活性。
+                    _sa.record_scan()
                     return
                 # Take top-5 opportunities by score to avoid intel flooding.
                 # 取評分最高的前 5 個機會，避免情報洪泛策略師消息隊列。
@@ -227,6 +233,11 @@ def wire_market_scanner_and_workers(
                     freshness_seconds=0,
                     metadata={"trigger": "scout_worker_30min", "total_opportunities": len(opportunities)},
                 )
+                # Scout heartbeat contract: stamp once per successful
+                # ScoutWorker scan cycle after intel is produced.
+                # Scout 心跳契約：ScoutWorker 成功完成一輪並產出情報後，
+                # 每輪只蓋一次標準活動戳。
+                _sa.record_scan()
                 logger.info(
                     "ScoutWorker: intel produced for %d symbols (top 5 of %d opportunities) "
                     "/ ScoutWorker：已為 %d 個幣種生成情報（%d 個機會中的前 5）",

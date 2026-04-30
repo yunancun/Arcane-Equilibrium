@@ -3,6 +3,18 @@
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
 > 最後更新：2026-04-24（P1-11 全工 + FIX-26-DEADLOCK-1）
 
+### Dust / Edge / Scout follow-through（2026-04-30 · commit pending）
+
+**範圍**：完成 operator 指定的三項 follow-through：dust residual runtime proof、post-deploy edge cutoff observation、Scout heartbeat production caller wiring。
+
+**Dust proof**：Linux runtime 載入後，DB 觀察到 8 筆 Demo/LiveDemo `qty=0` close order 皆 join 到 nonzero fill；Demo `APEUSDT` 與 LiveDemo `XAGUSDT` `orphan_frozen` close path 已證明 Bybit full-position close form 可用。
+
+**Edge cutoff**：以 2026-04-30 21:10 CEST 為 cutoff；`[33]` n=15 maker_like 40.0% / fee_drop 39.0%；`[38]` lifecycle n=1+1 insufficient；`[40]` rows=0。結論是繼續 cutoff observation，不用混舊 rolling window 決策。
+
+**Scout heartbeat**：`strategy_wiring_scanner._scan_and_produce_intel()` 在 empty scan 與 successful intel scan 都呼叫 `ScoutAgent.record_scan()`，補上 production ScoutWorker caller。新增 hermetic pytest 2 cases。
+
+**驗證**：`test_strategy_wiring_scanner.py` 2/0、`test_agent_heartbeat_contract.py` 36/0、targeted `py_compile` PASS、`git diff --check` PASS。
+
 ### P1-11 BB-BREAKOUT/REVERSION-DORMANT-1 全工 + 多輪 audit 收尾（2026-04-24 · commits `0528d96`/`38a14ca`/`148bd96`/`bcc5401`/`63957ad`/`3b483a3`/`c8a2a2c`/`69ea580` 等）
 
 **範圍**：P1-11 (2)+(3) Rust 落地 + (1) Phase 1 Python 信號級 sweep + 多輪 self-audit + QC/MIT/PM/PA/FA multi-role 並行 audit 收尾。
@@ -1973,4 +1985,3 @@ Cold audit of all ML_TODO completed items found 3 real issues + 4 pre-existing t
 
 > **歸檔**：2026-04-08 ~ 04-09 條目已移至 `docs/archive/2026-04-13--changelog_archive_0408_0409.md`。
 > 2026-03-30 ~ 04-07 條目見 `docs/archive/2026-04-12--changelog_archive_pre_0408.md`。
-

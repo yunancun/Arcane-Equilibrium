@@ -49,7 +49,7 @@
 
 **Active edge state**：Strategy Edge Repair + Strategy Edge Models are deployed. Current observation gates are `[33] maker_fill_rate`, `[38] grid_trading_lifecycle_drift`, and `[40] realized_edge_acceptance`; interpret them with a post-deploy cutoff because rolling windows still mix old samples. The main live-demo issue is grid lifecycle drift: live_demo closes/re-enters too fast versus demo. Primary metric remains post-fee `net_bps_after_fee`; PnL and win-rate are secondary references.
 
-**Dust residual prevention**：`8efe71b` + `b1cd9a8` are in source and runtime. Primary exchange full-close uses Bybit `qty=0 + reduceOnly + closeOnTrigger`; normal zero-qty orders still fail closed; fast-track partial reduce skips residuals that would fall below minNotional; `DUST_FROZEN` / `orphan_frozen` remain visible. Runtime effectiveness still needs one real Demo/Live full-close observation before declaring the exchange-side behavior proven.
+**Dust residual prevention**：`8efe71b` + `b1cd9a8` are in source and runtime. Primary exchange full-close uses Bybit `qty=0 + reduceOnly + closeOnTrigger`; normal zero-qty orders still fail closed; fast-track partial reduce skips residuals that would fall below minNotional; `DUST_FROZEN` / `orphan_frozen` remain visible. Runtime proof completed 2026-04-30 21:10-21:52 CEST: 8 Demo/LiveDemo `qty=0` close orders joined to nonzero fills, including Demo `APEUSDT` `orphan_frozen` qty 0.1 and LiveDemo `XAGUSDT` `orphan_frozen` qty 0.001, with no later position snapshot for those residues.
 
 **MLDE / Dream edge-unblock**：Demo autonomy is active and live-governed. `[35]` learning data contract, `[36]` advisory/live lease boundary, and `[37]` demo applier audit all PASS. Live/live_demo auto-apply remains forbidden without GovernanceHub + Decision Lease + the 5 live gates. Rust active LinUCB arm-space remains `v1_15`; richer `mlde_arm_id` stays shadow/advisory until a future migration.
 
@@ -57,7 +57,7 @@
 
 **Closed history removed from active state**：62-finding remediation Batch A-F, STRKUSDT P0 wave, Wave A-H, and older Wave 1-3 implementation narratives are closed history. Active snapshots before this cleanup are preserved at `docs/archive/2026-04-30--CLAUDE-pre-cleanup-snapshot.md`, `docs/archive/2026-04-30--TODO-pre-cleanup-snapshot.md`, and `docs/archive/2026-04-30--README-pre-cleanup-snapshot.md`.
 
-**Next decisions**：G1-04 final fee/R:R compute around 2026-05-01/02; G2-02 ma_crossover dual-track around 2026-05-03; P0-2 + G2-01 PostOnly acceptance around 2026-05-07/08; P0-3 edge decision around 2026-05-15.
+**Next decisions**：Continue post-cutoff edge observation from 2026-04-30 21:10 CEST (`[33]` cutoff n=15 maker_like 40.0% / fee_drop 39.0%; `[38]` cutoff lifecycle n=1+1 insufficient; `[40]` cutoff rows=0). G1-04 final fee/R:R compute around 2026-05-01/02; G2-02 ma_crossover dual-track around 2026-05-03; P0-2 + G2-01 PostOnly acceptance around 2026-05-07/08; P0-3 edge decision around 2026-05-15.
 
 **Durable architecture**：Rust `openclaw_engine` remains the canonical paper/demo/live engine and ConfigStore authority. Python is control plane/GUI/bridge only, not the trading truth layer. Guardian remains a RiskConfig-derived view. **禁止 restart-to-apply** remains binding for trading/strategy/risk parameter behavior.
 
@@ -477,7 +477,7 @@ state_models ← state_compiler ← state_store ← main_legacy ← main.py
 
 ## 十一、一句話狀態
 
-> 截至 2026-04-30 21:10 CEST：**current source is rebuilt and runtime-active, but edge remains at-risk** — Strategy Edge Models + Dust residual prevention + MLDE demo autonomy are deployed; healthcheck fails only on real `[38]` grid lifecycle drift, with `[33]` maker quality and `[40]` realized edge still below target. Next work is not more history logging: run post-deploy cutoff analysis, prove dust full-close behavior with a real event, then execute G1-04/G2-02/G2-01/P0-3 time-driven decisions. True live autonomy remains gated by GovernanceHub + Decision Lease + 5 live gates.
+> 截至 2026-04-30 21:52 CEST：**current source is rebuilt and runtime-active, but edge remains at-risk** — Strategy Edge Models + Dust residual prevention + MLDE demo autonomy are deployed; dust full-close behavior is now proven on real Demo/LiveDemo `qty=0` close fills; healthcheck still fails only on real `[38]` grid lifecycle drift, with `[33]` maker quality and `[40]` realized edge still below target on rolling windows. Next work is to keep post-deploy cutoff observation alive, then execute G1-04/G2-02/G2-01/P0-3 time-driven decisions. True live autonomy remains gated by GovernanceHub + Decision Lease + 5 live gates.
 
 ---
 
