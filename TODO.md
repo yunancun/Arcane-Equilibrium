@@ -40,7 +40,121 @@
 | [40] realized edge acceptance | post-cutoff rows=0（太少不能判讀）| net_bps_after_fee>0 | 等累積 |
 | [11] counterfactual clean window | n=864/200 PASS；replay JSON 17.2h stale | fresh replay + 3d PASS streak | 本週 |
 
-### G3-09 Phase C（deferred）
+**EDGE-DIAG-2 留尾觀察**：(ii) PostOnly maker fill rate 待 ≥1w demo 累積 (iv) demo bb_breakout 1m bandwidth 結構性問題等 5m 升級或 MLDE sweep；不阻塞主路徑。
+
+---
+
+## 🚀 Wave 4 Pre-Stage 主動工作計畫（2026-05-01 → 05-22 · 21d）
+
+**戰略**：passive observation **不是閒置，是準備密集期**。等待 G2-02/G2-01/EDGE-P1b/P0-3 數據結論的同時，平行推進 5 軸線可主動工作。詳細 PA RFC：[`docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-01--passive_observation_proactive_plan.md`](docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-01--passive_observation_proactive_plan.md)（34 任務 / 5 軸線 / ~28-35d 工時 / 21d 並行壓縮 ~70% 可消化）
+
+### 軸線 1：Wave 4 LG-2/3/4/5 + MLDE-6 PA RFC（必須 P0-3 前完成）
+
+| ID | 任務 | PA 工時 | 前置 | 完成 gate |
+|----|-----|--------|------|----------|
+| **LG-2-RFC** | H0 Gate blocking verification（shadow→blocking）acceptance criteria + test plan + rollback | 1.5d | DOC-08 §12 | RFC含 5 metrics threshold + rollback IPC + E2E mock blocked intent + 16 根原則對照 |
+| **LG-3-RFC** | Provider pricing table 正式綁定（對照 bybit_api_reference.md）| 1d | G7-07 SlippageConfig ✅ | Bybit V5 fee tier mapping + IPC pull period + fail-closed when stale > N min |
+| **LG-4-RFC** | Supervised Live Gate operator approval flow + risk limits + kill switch | 2d | LG-2/3 RFC | approval RPC schema + per-symbol/daily risk override + dual-path kill switch + audit log mirror SM-04 |
+| **LG-5-RFC** | Constrained Autonomous Live agent autonomy boundaries | 2d | LG-4 RFC | 自主邊界 spec + escalation trigger + lease TTL + 16 根原則 #11 對照 |
+| **MLDE-6-RFC** | Live promotion contract（advisory→proposal→demo patch→live candidate）| 1d | MLDE-5 ✅ + GovernanceHub | version-aware schema + operator review UI + rollback path + 16 根原則 #3/#7/#11 |
+
+**軸線 1 總計**：PA 7.5d / E1 5.5d。21d window 1 PA agent 並行可完成。
+
+### 軸線 2：條件性可獨立進行（不需等 P0-3）
+
+| ID | 任務 | 工時 | 派工 |
+|----|-----|------|------|
+| **G4-03 Phase B** canary auto-promote 部署（cron driver + Brier + PSI drift + SIGHUP） | 3d | PA + E1 + E2/E4 |
+| **G7-04 Phase B/C wiring** CUSUM consumer hook（Phase A schema landed） | 2d | PA + E1 + E2 |
+| **G8-05** AI cost ROI 監控面板（GUI，G3-09 已備數據源） | 2d | E1 |
+| **STRK-FUP-HEALTHCHECK-PRE-EXISTING** 5 silent-dead pipeline 修（[3]/[19]/[23]/[24]/[26]/[27]） | 2-3d 拆 5 子任務並行 | PA + E1×3 |
+| **LEARNING-COCKPIT-NO-IPC** 8 endpoint 改 Python state_store（IPC traffic drop ≥80%） | 3d | PA + E1 + E2 |
+| **G3-08-FUP-ANALYST-SPLIT** P2 + **HSQ-SPLIT** P2（鏡 Strategist split pattern） | 1.5d × 2 | E1 + E2 |
+| **G3-08-FUP-MAF-SPLIT-CLEANUP-A** P4 + **SINGLETON-POLLUTION** P4 | 0.75d + 1.5d | E1 + E2 |
+
+**軸線 2 總計**：~17.5d 工時；最大並行 4 並行壓縮 ~7d。
+
+### 軸線 3：Pre-Live 基礎設施
+
+| ID | 任務 | 工時 | 觸發點 |
+|----|-----|------|--------|
+| **PRE-LIVE-1** Slack alert 決策 framework（go/no-go + routing rules）| 0.5d + operator | 2026-05-15 ±3d |
+| **PRE-LIVE-2** HTTPS deploy（解 G-4 Cookie secure 阻塞，Tailscale cert / LE 雙 path）| 3d | live 前必完 |
+| **PRE-LIVE-3** Dashboard 強化（[33]/[38]/[40] 趨勢 + AI cost ROI + Live readiness）| 2.5d | 配合 G8-05 |
+| **PRE-LIVE-4** 災難恢復演練（drawdown auto-revoke + liquidation buffer + auth expire 三 scenario） | 1.5d | LG-2 RFC 後 |
+
+### 軸線 4：P0-3 決策會準備（~05-15）
+
+| ID | 任務 | 工時 |
+|----|-----|------|
+| **P03-PREP-1** Edge decision protocol（criteria + evidence templates + 三分支執行路徑）| 1.5d |
+| **P03-PREP-2** P0-3-01 報告 outline（counterfactual_exit_replay 12 章節骨架，~05-13 填資料）| 0.5d outline + ~05-13 fill |
+| **P03-PREP-3** 各 agent pre-meeting briefs（PM/FA/PA/QC 4 agent × 0.5d 並行）| 2d 並行 |
+| **P03-PREP-4** Adversarial review playbook（5 round prompt template）| 0.5d |
+
+### 軸線 5：Documentation / Test / Maintenance
+
+| ID | 任務 | 工時 |
+|----|-----|------|
+| **DOC-1** Live trading first-day SOP runbook | 1.5d |
+| **DOC-2** Wave 4 deploy runbook（LG-2/3/4/5 順序 + 回滾） | 1d |
+| **TEST-1** E2E live gate tests（mock Bybit mainnet ≥10 cases） | 2d |
+
+### 派發優先序（Top 10 立即可派）
+
+| Rank | 任務 | 派發 | 工時 | 為何優先 |
+|------|------|-----|------|---------|
+| 1 | **LG-2-RFC** | PA | 1.5d | P0-3 outcome A/C 立即解阻；不寫 = 05-15 後阻塞 3-5d |
+| 2 | **MLDE-6-RFC** | PA | 1d | live autonomy 邊界，與 LG-4/5 雙耦合 |
+| 3 | **LG-3-RFC** | PA | 1d | 純 config binding；解 LG-4/5 前置 |
+| 4 | **STRK-FUP-HEALTHCHECK** [3]/[24] 修復 | PA + E1×2 | 2-3d | 解 5 silent-dead 信任債 |
+| 5 | **G7-04 Phase B/C** CUSUM wiring | PA + E1 | 2d | Phase A schema 5d，不接 = dead schema |
+| 6 | **G4-03 Phase B** canary 部署 | PA + E1 | 3d | 跑 7d 才能在 P0-3 提供 PSI drift 證據 |
+| 7 | **LG-4-RFC** | PA | 2d | 涉 §四 硬邊界，最需早寫 + adversarial review |
+| 8 | **G8-05** AI cost ROI GUI | E1 | 2d | operator 訊息密度提升 |
+| 9 | **PRE-LIVE-2** HTTPS deploy | PA + E1 | 3d | 解 G-4；live trade 前必完 |
+| 10 | **LG-5-RFC** | PA | 2d | 等 LG-2/3/4 RFC 後 W22 派 |
+
+**節奏**：W21 D1-D3 併發 Rank 1+2+3+4 → D4-D7 Rank 5+6+8 → W22 D1-D5 Rank 7+9+10 → W22 D6+ 軸線 4+5。
+
+### Wave 4 依賴圖（簡化）
+
+```
+P0-3 決策（~05-15）
+   ├─ A 翻正 → LG-2/3/4/5 全推 → Live target ~05-22~05-30
+   ├─ C 部分改善 → LG-2/3 + 部分 LG-4 → Live target slipped
+   └─ B 仍負 → DUAL-TRACK + 策略重做 → Live target deferred
+
+並行（不依賴 P0-3）：
+   軸線 1 RFC（即使 outcome B 也是 dead-code-prevention 學習材料）
+   軸線 2 G4-03 / G7-04 / G8-05 / LEARNING-COCKPIT / 各 split
+   軸線 3 PRE-LIVE-1~4
+   軸線 4 P0-3 決策會準備（必做）
+   軸線 5 DOC + E2E test
+```
+
+### Wave 4 時序
+
+| Phase | 週次 | 日期 | 主軸 |
+|-------|------|------|------|
+| **Pre-Stage** | W21-W22 | 05-01→05-15 | 軸線 1 RFC + 軸線 2 wiring + 軸線 3 infra + 軸線 4 prep |
+| **Decision** | ~W22 末 | ~05-15 | P0-3 決策會（A/B/C 分支）|
+| **Implementation** | W23-W24 | 05-15→05-30 | LG-2/3/4/5 E1 落地 + e2e tests |
+| **Live** | ~W24 末 | ~05-30±7d | Live target 中位 |
+
+### 風險（Top 5）
+
+| 風險 | 緩解 |
+|------|------|
+| LG-2/3/4/5 RFC 若 P0-3 outcome B → 部分作廢 | RFC 仍是 dead-code-prevention 學習材料；文件結構保留下次重啟免重做 |
+| MLDE-6 RFC 若 P0-3 影響 advisory schema | 寫成 version-aware schema with feature flag |
+| STRK-FUP 5 silent-dead 連鎖驚喜 | PA design phase 全 5 個 RCA 完成才派 E1 |
+| G4-03 Phase B PSI drift 假陽/假陰 | DEFAULT-OFF env-gated；observation only，不 auto-promote |
+| 並行 sub-agent 衝突（軸線 1+2 同動 strategy_wiring）| PA 派發前 git fetch + grep；重疊則加 isolation: worktree |
+
+---
+
+## ⏳ G3-09 Phase C（deferred）
 
 PA RFC `2026-04-28--g3_09_cost_edge_advisor_phase_c_rfc.md` ready；operator 決定「等時間長一些」；Phase B observation period 與 Phase C 綁定。
 
@@ -82,7 +196,7 @@ PA RFC `2026-04-28--g3_09_cost_edge_advisor_phase_c_rfc.md` ready；operator 決
 
 | ID | Tag | 項目 |
 |----|-----|------|
-| **MLDE-6** | live-governed | Live promotion contract：advisory→proposal→demo patch→live candidate；live 仍需 GovernanceHub + Decision Lease |
+| **MLDE-6** | RFC: now (W21) / impl: P0-3 後 | Live promotion contract design（advisory→proposal→demo patch→live candidate）；live 仍需 GovernanceHub + Decision Lease（RFC 即派發，見軸線 1）|
 
 ### Live Gates（5 項，P0-3 後）
 
@@ -105,9 +219,17 @@ PA RFC `2026-04-28--g3_09_cost_edge_advisor_phase_c_rfc.md` ready；operator 決
 | **G8-03** | 灰度驗收自動化（shadow metrics）| EDGE-P2 flip 後 | P1 |
 | **G8-05** | AI cost ROI 監控面板 | G3-09 | P2 |
 | **EDGE-P2-flip** | combine layer shadow flip | EDGE-P1b + 7d ≥95% agree | P1 |
+| **EDGE-P2 Phase B** | Liquidation signal | Phase A OI 驗收 ✅ 已完 | P3 |
+| **EDGE-P2-3 Phase 2+** | live endpoint / funding_arb PostOnly | EDGE-P1b ~05-10+ | P3 |
 | **G2-03 binding** | ma_crossover SL/TP 真實啟用 | G2-02 結論 + G2-03-FUP-CALLER-WIRE | P1 |
 | **G7-03-Phase-B-FUP-grid** | grid_trading HysteresisDetector 遷移 | parallel WIP merge 後 | deferred |
 | **G7-01 wiring** | Kelly router callsites | G4 labels work | deferred |
+| **G7-04 Phase B/C wiring** | CUSUM consumer hook（Phase A schema landed）| EDGE-P1b 後 | P2 deferred |
+| **STRATEGIST-AUTO-PROMOTE** | 自動晉升規則 | P2-01 穩定後 | P3 deferred-long |
+| **STRK-FUP-HEALTHCHECK-PRE-EXISTING** | 5 pre-existing pipeline silent-dead 修（[3]/[19]/[23]/[24]/[26]/[27]）| F7 deploy 後 6h ✅ 已過 | P2 |
+| **ORPHAN-ADOPT-1 Phase 2B** | Strategist `would_take` 終仲裁 | G-1 R-02 | P3 |
+| **IP-DEDUP-1** | IntentProcessor 去抖 | P0-3 後 edge 仍負 + 高重發率 | P4 |
+| **G-7 ClaudeTeacher 啟用** | consumer_loop.rs enabled | 21d demo + G-3 後 ~05-07+ | P2-P3 |
 | **G9-02-FUP-COOLDOWN** | WS force reconnect cooldown 評估 | DEFAULT-ON 後 1-2w passive | LOW |
 | **G8-01-FUP-REGRET-DREAM-DEFERRED** | OpportunityTracker + DreamEngine rebuild（per V1.1+R1 SPEC §3+4）| 長期未定 | P3 |
 | **G2-FUP-FUNDING-ARB-PAPER-SYNC-LOW-1** | TW memory.md 補 commit msg 一致性 | 下次 TW 接手 | P3 |
