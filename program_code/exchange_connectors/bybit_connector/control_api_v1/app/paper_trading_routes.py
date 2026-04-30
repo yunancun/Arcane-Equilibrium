@@ -1053,7 +1053,15 @@ def get_metrics(
     # 3E-ARCH: explicit engine="paper" / 必須明確指定 paper 引擎
     rust_state = rust.get_paper_state(engine="paper") if rust.is_engine_available("paper") else None
     if rust_state is None:
-        return _paper_response({"available": False, "source": "rust_engine"})
+        return _paper_response({
+            "available": False,
+            "source": "rust_engine",
+            "db_true_metrics": fetch_db_true_metrics(
+                ["paper"],
+                edge_engine_modes=["paper"],
+                window_days=7,
+            ),
+        })
 
     # ── Build authoritative PnL from Rust snapshot ──────────────────────
     # Rust paper_state has flat keys (balance, peak_balance, total_realized_pnl,
