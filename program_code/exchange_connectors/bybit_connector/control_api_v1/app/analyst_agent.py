@@ -1,53 +1,12 @@
-"""
-Batch 9 (Pre-write) — AnalystAgent: Trade result analysis + learning metrics + pattern discovery
-=================================================================================================
-Governance refs: EX-06 §7, DOC-04 §G Multi-Agent, EX-05 §3
+"""AnalystAgent: trade-result analysis, learning metrics, and pattern discovery.
 
-MODULE_NOTE (中文):
-  AnalystAgent 是 5-Agent 体系中的"分析师"。
-  职责：
-  1. 消费 ROUND_TRIP_COMPLETE 消息，分析每笔交易结果
-  2. L1 层：计算滚动胜率、策略排名、regime 适配度，更新 LearningTierGate 指标
-  3. L2 层：observations ≥ 20 后，调用 Qwen analyze_patterns() 产出 PatternInsight
-  4. PatternInsight 包含：winning_patterns, losing_patterns, regime_strategy_matrix
-  5. 所有分析结果写入审计日志
+Consumes ROUND_TRIP_COMPLETE messages, updates L1 metrics, optionally runs L2
+pattern discovery after enough observations, and writes audited analysis output.
+Safety invariant: read-only analysis only; it never emits trade instructions.
 
-  安全不变量：
-  - 只读分析，不产生任何交易指令
-  - fail-closed：错误时停止分析但不影响交易
-  - 所有结果写入审计
-
-  G3-08-FUP-ANALYST-SPLIT P2（2026-04-28）拆分：
-  - ``analyst_records.py``：純 dataclass（TradeRecord / PatternInsight / AnalystConfig）
-  - ``analyst_pattern_claims.py``：模式聲明登記 helpers（_register_pattern_claims /
-    _record_pattern_observations / _extract_strategy_from_pattern 邏輯）
-  - 本檔保留 AnalystAgent class + lifecycle + L1 + L2 + 接線 callbacks，
-    所有公共符號（TradeRecord/PatternInsight/AnalystConfig/AnalystAgent）re-export
-    維持 ``from app.analyst_agent import ...`` 路徑 100% BWD-compat。
-
-MODULE_NOTE (English):
-  AnalystAgent is the "analyst" in the 5-Agent system.
-  Responsibilities:
-  1. Consume ROUND_TRIP_COMPLETE messages, analyze each trade result
-  2. L1: Calculate rolling win rate, strategy ranking, regime fit, update LearningTierGate metrics
-  3. L2: After observations >= 20, call Qwen analyze_patterns() to produce PatternInsight
-  4. PatternInsight contains: winning_patterns, losing_patterns, regime_strategy_matrix
-  5. All analysis results written to audit log
-
-  Safety invariants:
-  - Read-only analysis, never produces trade instructions
-  - fail-closed: errors stop analysis but don't affect trading
-  - All results audited
-
-  G3-08-FUP-ANALYST-SPLIT P2 (2026-04-28) split:
-  - ``analyst_records.py``: pure dataclasses (TradeRecord / PatternInsight / AnalystConfig)
-  - ``analyst_pattern_claims.py``: pattern claim registration helpers
-    (logic from _register_pattern_claims / _record_pattern_observations /
-    _extract_strategy_from_pattern)
-  - This file retains AnalystAgent class + lifecycle + L1 + L2 + wiring
-    callbacks. All public symbols (TradeRecord/PatternInsight/AnalystConfig/
-    AnalystAgent) are re-exported so ``from app.analyst_agent import ...``
-    paths remain 100% BWD-compat.
+G3-08-FUP-ANALYST-SPLIT keeps dataclasses in analyst_records.py and pattern
+claim helpers in analyst_pattern_claims.py; this module retains AnalystAgent and
+re-exports TradeRecord / PatternInsight / AnalystConfig for BWD compatibility.
 """
 
 from __future__ import annotations

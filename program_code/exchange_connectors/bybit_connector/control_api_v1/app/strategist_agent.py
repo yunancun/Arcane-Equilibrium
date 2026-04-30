@@ -1,81 +1,12 @@
-"""
-Batch 7 — StrategistAgent: AI-enhanced signal evaluation + TradeIntent production
-====================================================================================
-Governance refs: EX-06 §4, DOC-04 §G Multi-Agent
+"""StrategistAgent: AI-enhanced signal evaluation and TradeIntent production.
 
-MODULE_NOTE (中文):
-  StrategistAgent 是 5-Agent 体系中的"策略大脑"。
-  職責：
-  1. 消費 ScoutAgent 產出的 IntelObject 情報
-  2. 調用 Qwen 3.5 (judge_edge) 評估信號是否有交易優勢
-  3. Ollama 不可用時回退到本地啟發式規則（fail-closed：不可放行未評估信號）
-  4. 產出 TradeIntent 供 Guardian 審查
-  5. Shadow 模式：僅記錄到審計日誌，不產出 intent 到下游
+Consumes Scout IntelObject payloads, routes H1/H3/H4 evaluation through extracted
+helpers, falls back fail-closed to local heuristics, and only emits intents for
+Guardian review. Shadow mode remains non-executing.
 
-  §14.1 重構：H1 ThoughtGate / H3 ModelRouter / H4 Validator 已拆分到同目錄獨立模組，
-  本文件僅保留編排邏輯（orchestrator）和策略偏好/regime 權重管理。
-
-  G3-08 Phase 4 重構（2026-04-26）：
-    本檔再拆 16 method 至 3 sibling 以維持 §九 800 行警告線：
-      - strategist_edge_eval.py：6 fn（_evaluate_edge / _ai_evaluate /
-        _evaluate_edge_l1_5 / _build_prompt_context / _process_knowledge_update /
-        _build_route_context）
-      - strategist_weights.py：6 fn（set_budget_manager / set_truth_registry /
-        _apply_pattern_insight / get_strategy_weight / _apply_regime_weights /
-        _apply_l2_weight_update）
-      - strategist_cognitive.py：4 fn（handle_fast_channel / clear_emergency_mode /
-        set_cognitive_modulator / _apply_cognitive_modulation）
-    全部 16 method 在本檔保留為 1-line delegator，向後兼容所有 callsite + test
-    patch path。主檔保留 ctor / class attrs / 生命週期 / 消息處理 / _handle_intel
-    編排 / _produce_intents / status accessors / 既有 BWD compat（H1/H4/H3 stubs）。
-
-  G3-08 Phase 4 P3（2026-04-28）：
-    主檔 933 → ≤800 LOC slim — 在不破 BWD compat 前提下：
-      (a) 16 個既有 delegator 壓縮為單行 def（去 docstring，header 區段已說明）;
-      (b) 多搬 2 個方法 body 至 sibling 並各保 1-line delegator：
-          - ``_produce_intents`` body → strategist_edge_eval.py（intent 構建+派發）;
-          - ``record_trade_outcome`` body → strategist_cognitive.py（LOSSES-WIRING
-            counter，與 tick_cognitive_modulator 共處同檔，語意凝聚度高）;
-      (c) ``_handle_intel`` 5 個 early-return 點補 ``_invalidate_h_state_async``
-          hint（E2 4-1 NIT-1 LOW），讓 h_state cache 對 intel 拒絕事件保鮮。
-    BWD compat：``agent._produce_intents`` / ``agent.record_trade_outcome`` 仍為
-    bound method（test ``MagicMock(wraps=agent.method)`` 無感）；``patch(
-    "app.strategist_agent.X")`` patch path 因 re-export 完整保留。
-
-  安全不變量：
-  - system_mode = read_only 不變
-  - fail-closed：異常時默認拒絕
-  - 所有決策寫入審計日誌
-  - Shadow 模式下不產出任何實際 intent
-
-MODULE_NOTE (English):
-  StrategistAgent is the "strategy brain" in the 5-Agent system.
-  Responsibilities:
-  1. Consume IntelObject intelligence from ScoutAgent
-  2. Call Qwen 3.5 (judge_edge) to evaluate signal edge quality
-  3. Fall back to local heuristics when Ollama unavailable (fail-closed)
-  4. Produce TradeIntent for Guardian review
-  5. Shadow mode: log to audit only, do not produce downstream intents
-
-  §14.1 refactor: H1 ThoughtGate / H3 ModelRouter / H4 Validator extracted to
-  same-directory modules. This file is now a thin orchestrator plus strategy
-  preference / regime weight management.
-
-  G3-08 Phase 4 refactor (2026-04-26):
-    Further split 16 methods into 3 siblings to keep §九 800-line warning line:
-      - strategist_edge_eval.py: 6 fn (edge evaluation + prompt construction)
-      - strategist_weights.py: 6 fn (weight management + dependency injection)
-      - strategist_cognitive.py: 4 fn (V2 fast channel + cognitive modulator)
-    All 16 methods preserved here as 1-line delegators for backward compatibility
-    with every callsite + test patch path. Main file keeps ctor / class attrs /
-    lifecycle / message handlers / _handle_intel orchestration / _produce_intents /
-    status accessors / existing BWD compat (H1/H4/H3 stubs).
-
-  Safety invariants:
-  - system_mode = read_only (unchanged)
-  - fail-closed: reject by default on error
-  - All decisions written to audit log
-  - Shadow mode produces no actual intents
+G3-08 Phase 4 keeps StrategistAgent as the orchestrator while method bodies live
+in strategist_edge_eval.py, strategist_weights.py, and strategist_cognitive.py;
+this module preserves legacy bound-method and patch paths via delegators.
 """
 
 from __future__ import annotations
