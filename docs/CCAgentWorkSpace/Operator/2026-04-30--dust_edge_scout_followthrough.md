@@ -20,4 +20,5 @@ Owner: PM
 
 - No strategy/risk config changes.
 - No live authorization changes.
-- No runtime restart/deploy in this checkpoint.
+- API-only reload applied the Python Scout heartbeat wiring; Rust engine was not rebuilt or restarted.
+- Runtime after reload: API uvicorn PID `1591455`, engine PID `1529433`, watchdog `engine_alive=true`.

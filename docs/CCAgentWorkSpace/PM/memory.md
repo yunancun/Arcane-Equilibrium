@@ -1064,4 +1064,5 @@ Operator 接續 Tier 8 sign-off 後說「繼續派」。PM 按 Tier 8 §8 推薦
 - Targeted `py_compile` passed.
 
 ### Boundary
-- No strategy/risk config changes, no live authorization changes, and no runtime restart were performed in this follow-through.
+- No strategy/risk config changes and no live authorization changes were performed.
+- After source sync, PM performed `restart_all.sh --api-only` to load Python Scout heartbeat wiring. Rust engine PID stayed `1529433`; API PID became `1591455`; watchdog remained `engine_alive=true`.

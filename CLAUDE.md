@@ -45,7 +45,7 @@
 
 ## 三、當前系統狀態摘要
 
-**Runtime（2026-04-30 21:10 CEST · ssh verify · G6-04 §三 drift 規則）**：Mac/Linux source HEAD `5ba9b1c`；Linux runtime 已 rebuild，engine PID **1529433** + API uvicorn PID **1554832** + engine_watchdog PID **3450754** + openclaw-gateway PID **3973441** alive。watchdog `engine_alive=true`，demo/live snapshots fresh，paper inactive by design。Latest passive healthcheck SUMMARY **FAIL** because `[38] grid_trading_lifecycle_drift` is a real strategy drift signal, not a pipeline-dead failure. Current notable gates: WARN `[4]` / `[11]` / `[33]` / `[40]`, PASS `[35]` / `[36]` / `[37]` / `[39]`.
+**Runtime（2026-04-30 22:04 CEST · ssh verify · G6-04 §三 drift 規則）**：Mac/Linux source HEAD `67791bd`；Linux engine kept running from prior rebuild, API-only reload applied Scout heartbeat wiring. Engine PID **1529433** + API uvicorn PID **1591455** + engine_watchdog PID **3450754** + openclaw-gateway PID **3973441** alive。watchdog `engine_alive=true`，demo/live snapshots fresh，paper inactive by design。Latest passive healthcheck SUMMARY **FAIL** because `[38] grid_trading_lifecycle_drift` is a real strategy drift signal, not a pipeline-dead failure. Current notable gates: WARN `[4]` / `[11]` / `[33]` / `[40]`, PASS `[35]` / `[36]` / `[37]` / `[39]`.
 
 **Active edge state**：Strategy Edge Repair + Strategy Edge Models are deployed. Current observation gates are `[33] maker_fill_rate`, `[38] grid_trading_lifecycle_drift`, and `[40] realized_edge_acceptance`; interpret them with a post-deploy cutoff because rolling windows still mix old samples. The main live-demo issue is grid lifecycle drift: live_demo closes/re-enters too fast versus demo. Primary metric remains post-fee `net_bps_after_fee`; PnL and win-rate are secondary references.
 
