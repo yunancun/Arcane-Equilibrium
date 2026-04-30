@@ -11,7 +11,7 @@ Operator asked to do the three immediately actionable items:
 2. Post-deploy cutoff edge observation.
 3. Scout heartbeat production caller wiring.
 
-No live authorization, strategy parameter, risk parameter, or deploy/restart action was performed.
+No live authorization, strategy parameter, or risk parameter action was performed. After source sync, an API-only reload was performed to load the Python Scout heartbeat wiring; the Rust engine was not rebuilt or restarted.
 
 ## Runtime Proof: Dust Full-close
 
@@ -95,4 +95,4 @@ Added:
 
 - Continue cutoff observation until `[33]`, `[38]`, and `[40]` have enough post-deploy sample.
 - G1-04 final fee/R:R compute remains time-driven around 2026-05-01/02.
-- This checkpoint did not deploy/restart Python API; source is ready for the next normal runtime reload.
+- API-only reload was performed after source sync: new uvicorn PID `1591455`; engine PID `1529433` stayed alive. Watchdog remained `engine_alive=true`.

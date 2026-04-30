@@ -13,7 +13,7 @@
 
 **Scout heartbeat**：`strategy_wiring_scanner._scan_and_produce_intel()` 在 empty scan 與 successful intel scan 都呼叫 `ScoutAgent.record_scan()`，補上 production ScoutWorker caller。新增 hermetic pytest 2 cases。
 
-**驗證**：`test_strategy_wiring_scanner.py` 2/0、`test_agent_heartbeat_contract.py` 36/0、targeted `py_compile` PASS、`git diff --check` PASS。
+**驗證 / runtime**：`test_strategy_wiring_scanner.py` 2/0、`test_agent_heartbeat_contract.py` 36/0、targeted `py_compile` PASS、`git diff --check` PASS。Linux API-only reload applied Scout Python wiring (uvicorn PID `1591455`); Rust engine PID `1529433` stayed alive and watchdog remained `engine_alive=true`.
 
 ### P1-11 BB-BREAKOUT/REVERSION-DORMANT-1 全工 + 多輪 audit 收尾（2026-04-24 · commits `0528d96`/`38a14ca`/`148bd96`/`bcc5401`/`63957ad`/`3b483a3`/`c8a2a2c`/`69ea580` 等）
 
