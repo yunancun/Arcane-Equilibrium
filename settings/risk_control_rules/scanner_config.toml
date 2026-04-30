@@ -41,3 +41,6 @@ unexplored_bonus = 2.0
 robust_negative_min_trades = 30
 robust_negative_bps_threshold = 0.0
 robust_negative_score_cap = 35.0
+posterior_lcb_z = 1.0
+posterior_min_std_bps = 20.0
+posterior_negative_lcb_threshold_bps = 0.0

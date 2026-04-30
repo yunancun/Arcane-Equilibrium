@@ -142,6 +142,12 @@ impl Strategy for MaCrossover {
                 } else {
                     None
                 };
+                if signal.is_some()
+                    && !self.trend_snr_allows_entry(fast, slow, ctx.price, ctx.indicators)
+                {
+                    self.persistence.clear(ctx.symbol);
+                    return vec![];
+                }
 
                 // A1: Time-based persistence filter — signal must hold ≥ min_persistence_ms.
                 // A1：基於時間的持續性過濾 — 信號必須持續 ≥ min_persistence_ms。

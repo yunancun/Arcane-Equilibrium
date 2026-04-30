@@ -99,7 +99,13 @@ impl GridTrading {
     /// 計算指定幣種的 OU 推導最佳步長。委派給 grid_helpers::compute_ou_step() 純函數。
     pub(super) fn compute_ou_step(&self, symbol: &str) -> Option<f64> {
         let history = self.price_history.get(symbol)?;
-        grid_helpers::compute_ou_step(history, self.ou_lookback, self.fee_rate)
+        grid_helpers::compute_ou_step_with_cost_floor(
+            history,
+            self.ou_lookback,
+            self.fee_rate,
+            self.min_grid_step_bps,
+            self.cost_floor_multiplier,
+        )
     }
 
     /// Update grid spacing for a symbol based on OU model (V2). Respects current spacing_mode.

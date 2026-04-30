@@ -230,6 +230,32 @@ impl MaCrossover {
         (self.min_persistence_ms as f64 * (1.0 - er)).max(0.0) as u64
     }
 
+    /// Directional SNR gate: require KAMA/SMA separation to exceed ATR noise.
+    /// 方向 SNR 門：要求 KAMA/SMA 分離度高於 ATR 噪音。
+    pub(super) fn trend_snr_allows_entry(
+        &self,
+        fast: f64,
+        slow: f64,
+        price: f64,
+        snap: Option<&openclaw_core::indicators::IndicatorSnapshot>,
+    ) -> bool {
+        if self.min_trend_snr <= 0.0 {
+            return true;
+        }
+        if price <= 0.0 || !price.is_finite() {
+            return false;
+        }
+        let Some(atr) = snap.and_then(|s| s.get_conservative_atr()) else {
+            return true;
+        };
+        let atr_abs = atr.atr.max(0.0);
+        if atr_abs <= 0.0 || !atr_abs.is_finite() {
+            return true;
+        }
+        let snr = (fast - slow).abs() / atr_abs;
+        snr >= self.min_trend_snr
+    }
+
     /// RC-02: Check if higher-TF trend aligns with the proposed entry direction.
     /// RC-02: 檢查較高時間框架趨勢是否與擬入場方向一致。
     pub(super) fn higher_tf_allows_entry(&self, symbol: &str, is_long: bool) -> bool {

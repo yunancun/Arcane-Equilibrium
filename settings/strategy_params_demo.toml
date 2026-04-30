@@ -18,6 +18,8 @@ conf_scale = 1.0
 use_maker_entry = true
 maker_price_offset_bps = 1.0
 maker_limit_timeout_ms = 45000
+maker_price_buffer_ticks = 0
+min_trend_snr = 0.75
 
 [bb_reversion]
 active = true
@@ -81,6 +83,7 @@ oi_min_delta_pct = 0.0        # FUP #3: noise floor for |oi_delta_pct|, 0.0 = pr
 use_maker_entry = true
 maker_price_offset_bps = 1.0
 maker_limit_timeout_ms = 45000
+maker_price_buffer_ticks = 0
 
 [grid_trading]
 active = true
@@ -102,11 +105,15 @@ conf_scale = 1.0
 # 針對 P1-10 grid 手續費拖累問題；平倉維持 Market。Demo 先啟用驗證。
 use_maker_entry = true
 maker_price_offset_bps = 1.0
+maker_price_buffer_ticks = 0
 # EDGE-P2-3 Phase 1B-3.1: resting PostOnly Limit sweep timeout (ms).
 # Default 45_000 ms; runtime clamped to [15_000, 300_000].
 # EDGE-P2-3 Phase 1B-3.1：掛中 PostOnly Limit 逾時清理（毫秒）。
 # 默認 45_000 ms；運行時 clamp 到 [15_000, 300_000]。
 maker_limit_timeout_ms = 45000
+reject_cooldown_ms = 120000
+min_grid_step_bps = 22.0
+cost_floor_multiplier = 2.0
 # G2-04 2026-04-29: robust negative grid cells (n>=30, shrunk_bps<0) from
 # settings/edge_estimates.json. New grid entries are disabled for these symbols
 # while close/reduce paths remain enabled.

@@ -71,6 +71,12 @@ impl StrategyFactory {
         mac.maker_price_offset_bps = p.ma_crossover.maker_price_offset_bps;
         mac.maker_limit_timeout_ms =
             grid_trading::clamp_maker_limit_timeout_ms(p.ma_crossover.maker_limit_timeout_ms);
+        mac.maker_price_buffer_ticks = p.ma_crossover.maker_price_buffer_ticks.min(10);
+        mac.min_trend_snr = if p.ma_crossover.min_trend_snr.is_finite() {
+            p.ma_crossover.min_trend_snr.clamp(0.0, 10.0)
+        } else {
+            0.0
+        };
         mac.set_conf_scale(p.ma_crossover.conf_scale);
         mac.set_active(p.ma_crossover.active);
         strategies.push(Box::new(mac));
@@ -154,6 +160,7 @@ impl StrategyFactory {
         // 於寫入時 clamp（與 grid_trading 相同不變量）。
         bbb.maker_limit_timeout_ms =
             grid_trading::clamp_maker_limit_timeout_ms(p.bb_breakout.maker_limit_timeout_ms);
+        bbb.maker_price_buffer_ticks = p.bb_breakout.maker_price_buffer_ticks.min(10);
         bbb.set_conf_scale(p.bb_breakout.conf_scale);
         bbb.set_active(p.bb_breakout.active);
         strategies.push(Box::new(bbb));
@@ -183,6 +190,25 @@ impl StrategyFactory {
         // EDGE-P2-3 Phase 1B-3.1：PostOnly Limit 逾時 clamp 到 [15s, 300s]。
         gt.maker_limit_timeout_ms =
             grid_trading::clamp_maker_limit_timeout_ms(p.grid_trading.maker_limit_timeout_ms);
+        gt.maker_price_buffer_ticks = p.grid_trading.maker_price_buffer_ticks.min(10);
+        gt.reject_cooldown_ms = p.grid_trading.reject_cooldown_ms.clamp(5_000, 600_000);
+        gt.blocked_symbols = p
+            .grid_trading
+            .blocked_symbols
+            .iter()
+            .map(|s| s.trim().to_ascii_uppercase())
+            .filter(|s| !s.is_empty())
+            .collect();
+        gt.min_grid_step_bps = if p.grid_trading.min_grid_step_bps.is_finite() {
+            p.grid_trading.min_grid_step_bps.clamp(0.0, 200.0)
+        } else {
+            0.0
+        };
+        gt.cost_floor_multiplier = if p.grid_trading.cost_floor_multiplier.is_finite() {
+            p.grid_trading.cost_floor_multiplier.clamp(1.0, 5.0)
+        } else {
+            1.0
+        };
         gt.set_conf_scale(p.grid_trading.conf_scale);
         gt.set_active(p.grid_trading.active);
         strategies.push(Box::new(gt));

@@ -74,6 +74,10 @@ pub struct MaCrossoverParams {
     /// Default 45_000; runtime clamped to [15_000, 300_000].
     #[serde(default = "default_maker_limit_timeout_ms")]
     pub maker_limit_timeout_ms: u64,
+    #[serde(default = "default_maker_price_buffer_ticks")]
+    pub maker_price_buffer_ticks: u32,
+    #[serde(default)]
+    pub min_trend_snr: f64,
 }
 
 fn default_entry_conf_base_ma() -> f64 {
@@ -176,6 +180,8 @@ impl Default for MaCrossoverParams {
             use_maker_entry: false,
             maker_price_offset_bps: 1.0,
             maker_limit_timeout_ms: 45_000,
+            maker_price_buffer_ticks: 1,
+            min_trend_snr: 0.0,
         }
     }
 }
@@ -412,6 +418,8 @@ pub struct BbBreakoutParams {
     /// EDGE-P2-3 Phase 2+：PostOnly 掛單逾時毫秒；運行時 clamp [15_000, 300_000]。
     #[serde(default = "default_maker_limit_timeout_ms")]
     pub maker_limit_timeout_ms: u64,
+    #[serde(default = "default_maker_price_buffer_ticks")]
+    pub maker_price_buffer_ticks: u32,
 }
 
 fn default_entry_conf_base_bbb() -> f64 {
@@ -540,6 +548,7 @@ impl Default for BbBreakoutParams {
             use_maker_entry: false,
             maker_price_offset_bps: 1.0,
             maker_limit_timeout_ms: 45_000,
+            maker_price_buffer_ticks: 1,
         }
     }
 }
@@ -605,6 +614,16 @@ pub struct GridTradingParams {
     /// 默認 45_000 ms；運行時 clamp 到 [15_000, 300_000]。
     #[serde(default = "default_maker_limit_timeout_ms")]
     pub maker_limit_timeout_ms: u64,
+    #[serde(default = "default_maker_price_buffer_ticks")]
+    pub maker_price_buffer_ticks: u32,
+    #[serde(default = "default_grid_reject_cooldown_ms")]
+    pub reject_cooldown_ms: u64,
+    #[serde(default)]
+    pub blocked_symbols: Vec<String>,
+    #[serde(default)]
+    pub min_grid_step_bps: f64,
+    #[serde(default = "default_grid_cost_floor_multiplier")]
+    pub cost_floor_multiplier: f64,
 }
 
 fn default_adaptive_range_pct() -> f64 {
@@ -634,6 +653,15 @@ fn default_maker_price_offset_bps() -> f64 {
 fn default_maker_limit_timeout_ms() -> u64 {
     45_000
 }
+fn default_maker_price_buffer_ticks() -> u32 {
+    1
+}
+fn default_grid_reject_cooldown_ms() -> u64 {
+    60_000
+}
+fn default_grid_cost_floor_multiplier() -> f64 {
+    1.0
+}
 
 impl Default for GridTradingParams {
     fn default() -> Self {
@@ -656,6 +684,11 @@ impl Default for GridTradingParams {
             use_maker_entry: false,
             maker_price_offset_bps: 1.0,
             maker_limit_timeout_ms: 45_000,
+            maker_price_buffer_ticks: 1,
+            reject_cooldown_ms: 60_000,
+            blocked_symbols: Vec::new(),
+            min_grid_step_bps: 0.0,
+            cost_floor_multiplier: 1.0,
         }
     }
 }

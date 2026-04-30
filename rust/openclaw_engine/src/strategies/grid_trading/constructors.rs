@@ -72,6 +72,8 @@ impl GridTrading {
             // G7-09c Phase 2: default 60s exchange-reject cooldown.
             // G7-09c Phase 2：交易所拒絕預設冷卻 60 秒。
             reject_cooldown_ms: 60_000,
+            min_grid_step_bps: 0.0,
+            cost_floor_multiplier: 1.0,
             blocked_symbols: HashSet::new(),
         }
     }
@@ -121,6 +123,8 @@ impl GridTrading {
             // G7-09c Phase 2: default 60s exchange-reject cooldown.
             // G7-09c Phase 2：交易所拒絕預設冷卻 60 秒。
             reject_cooldown_ms: 60_000,
+            min_grid_step_bps: 0.0,
+            cost_floor_multiplier: 1.0,
             blocked_symbols: HashSet::new(),
         }
     }
@@ -184,6 +188,8 @@ impl GridTrading {
             // G7-09c Phase 2: default 60s exchange-reject cooldown.
             // G7-09c Phase 2：交易所拒絕預設冷卻 60 秒。
             reject_cooldown_ms: 60_000,
+            min_grid_step_bps: 0.0,
+            cost_floor_multiplier: 1.0,
             blocked_symbols: HashSet::new(),
         }
     }
@@ -230,6 +236,8 @@ impl GridTrading {
         // cooldown (validate() bounds [5_000, 600_000]).
         // G7-09c Phase 2：熱重載 reject_cooldown_ms，validate 範圍 [5_000, 600_000]。
         self.reject_cooldown_ms = params.reject_cooldown_ms;
+        self.min_grid_step_bps = params.min_grid_step_bps;
+        self.cost_floor_multiplier = params.cost_floor_multiplier;
         self.blocked_symbols = params
             .blocked_symbols
             .iter()
@@ -265,6 +273,8 @@ impl GridTrading {
             // G7-09c Phase 2: round-trip reject cooldown for IPC consumers.
             // G7-09c Phase 2：reject_cooldown_ms 經 IPC 來回。
             reject_cooldown_ms: self.reject_cooldown_ms,
+            min_grid_step_bps: self.min_grid_step_bps,
+            cost_floor_multiplier: self.cost_floor_multiplier,
             blocked_symbols: {
                 let mut symbols: Vec<String> = self.blocked_symbols.iter().cloned().collect();
                 symbols.sort();

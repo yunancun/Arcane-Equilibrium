@@ -82,6 +82,9 @@ pub struct MaCrossoverParams {
     /// （比 best_bid/ask 退一 tick 更被動）。BBO 或 tick_size 不可得時跳過 maker
     /// 入場，不再 fallback 到 last_price。`validate()` 限制 `[0, 10]`。
     pub maker_price_buffer_ticks: u32,
+    /// Entry gate: |KAMA-SMA20| divided by conservative ATR. 0 disables.
+    /// 入場門檻：|KAMA-SMA20| / conservative ATR；0 表示關閉。
+    pub min_trend_snr: f64,
 }
 
 impl Default for MaCrossoverParams {
@@ -110,6 +113,7 @@ impl Default for MaCrossoverParams {
             // G7-09c Phase 1: default 1 tick inside the inside quote.
             // G7-09c Phase 1：預設退一 tick。
             maker_price_buffer_ticks: 1,
+            min_trend_snr: 0.0,
         }
     }
 }
@@ -249,6 +253,14 @@ impl StrategyParams for MaCrossoverParams {
                 agent_adjustable: true,
                 db_persisted: true,
             },
+            ParamRange {
+                name: "min_trend_snr".into(),
+                min: 0.0,
+                max: 10.0,
+                step: Some(0.1),
+                agent_adjustable: true,
+                db_persisted: true,
+            },
         ]
     }
 
@@ -284,6 +296,9 @@ impl StrategyParams for MaCrossoverParams {
         // G7-09c Phase 1：限定 buffer，防止 operator 或 IPC 設過大造成永不成交。
         if self.maker_price_buffer_ticks > 10 {
             return Err("maker_price_buffer_ticks must be <= 10".into());
+        }
+        if !self.min_trend_snr.is_finite() || !(0.0..=10.0).contains(&self.min_trend_snr) {
+            return Err("min_trend_snr must be in [0, 10]".into());
         }
         Ok(())
     }
@@ -394,6 +409,9 @@ pub struct MaCrossover {
     /// See `MaCrossoverParams::maker_price_buffer_ticks` for semantics.
     /// G7-09c Phase 1：BBO-aware PostOnly buffer，語義見 params。
     pub(crate) maker_price_buffer_ticks: u32,
+    /// Entry requires directional separation to clear this ATR-normalized SNR.
+    /// 入場需方向分離度高於此 ATR 標準化 SNR。
+    pub(crate) min_trend_snr: f64,
 }
 
 impl MaCrossover {
@@ -427,6 +445,7 @@ impl MaCrossover {
             // G7-09c Phase 1: default 1 tick inside the inside quote.
             // G7-09c Phase 1：預設退一 tick。
             maker_price_buffer_ticks: 1,
+            min_trend_snr: 0.0,
         }
     }
 }

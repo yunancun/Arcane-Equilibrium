@@ -27,6 +27,8 @@ conf_scale = 1.0
 use_maker_entry = true
 maker_price_offset_bps = 1.0
 maker_limit_timeout_ms = 45000
+maker_price_buffer_ticks = 0
+min_trend_snr = 0.75
 
 [bb_reversion]
 active = true
@@ -60,6 +62,7 @@ oi_min_delta_pct = 0.0        # FUP #3: noise floor for |oi_delta_pct|, 0.0 = pr
 use_maker_entry = false
 maker_price_offset_bps = 1.0
 maker_limit_timeout_ms = 45000
+maker_price_buffer_ticks = 0
 
 [grid_trading]
 active = true
@@ -87,9 +90,13 @@ conf_scale = 1.0
 # operator acceptance criteria 與 live execution policy。
 use_maker_entry = true
 maker_price_offset_bps = 1.0
+maker_price_buffer_ticks = 0
 # EDGE-P2-3 Phase 1B-3.1: resting PostOnly Limit sweep timeout (ms).
 # EDGE-P2-3 Phase 1B-3.1：掛中 PostOnly Limit 逾時清理（毫秒）。
 maker_limit_timeout_ms = 45000
+reject_cooldown_ms = 120000
+min_grid_step_bps = 22.0
+cost_floor_multiplier = 2.0
 # GRID-LIFECYCLE-DRIFT RFC (2026-04-29): mirror demo's robust-negative cells
 # (n>=30, shrunk_bps<0) into live_demo. This blocks NEW grid entries only;
 # existing positions can still close/reduce normally.

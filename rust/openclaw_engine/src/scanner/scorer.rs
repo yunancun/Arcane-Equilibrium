@@ -11,7 +11,7 @@
 //!   `apply_correlation_filter` 貪心選擇前 N 個交易對，同時執行 BTC-beta、
 //!   每策略和每板塊上限。完整公式推導見 SCANNER_TODO.md §評分框架。
 
-use crate::edge_estimates::EdgeEstimates;
+use crate::edge_estimates::{CellEstimate, EdgeEstimates};
 use crate::market_data_client::types::TickerInfo;
 use crate::scanner::config::{CorrelationLimits, EdgeRoutingConfig, HardFilters};
 use crate::scanner::sectors::{base_from_usdt_symbol, symbol_sector, STABLECOIN_BASES};
@@ -245,6 +245,19 @@ pub struct EdgeFeedback {
     pub route_mode: &'static str,
 }
 
+fn posterior_lcb_bps(cell: &CellEstimate, config: &EdgeRoutingConfig) -> Option<f64> {
+    if config.posterior_lcb_z <= 0.0 || cell.n_trades == 0 {
+        return None;
+    }
+    let sample_std = if cell.std_bps.is_finite() && cell.std_bps > 0.0 {
+        cell.std_bps
+    } else {
+        config.posterior_min_std_bps
+    };
+    let std = sample_std.max(config.posterior_min_std_bps);
+    Some(cell.shrunk_bps - config.posterior_lcb_z * std / (cell.n_trades as f64).sqrt())
+}
+
 /// Apply edge feedback from runtime estimates.
 /// Normal known cells preserve the previous formula by default:
 /// `bonus = clamp(runtime_bps * 0.5, -30, 10)`. Mature negative cells are
@@ -265,11 +278,20 @@ pub fn apply_edge_bonus(
             let bonus =
                 (cell.shrunk_bps * config.bonus_weight).clamp(config.bonus_min, config.bonus_max);
             let mut final_score = (raw + bonus).clamp(0.0, 100.0);
-            let robust_negative = cell.n_trades >= u64::from(config.robust_negative_min_trades)
-                && cell.shrunk_bps < config.robust_negative_bps_threshold;
+            let mature = cell.n_trades >= u64::from(config.robust_negative_min_trades);
+            let point_negative = cell.shrunk_bps < config.robust_negative_bps_threshold;
+            let posterior_negative = mature
+                && posterior_lcb_bps(cell, config)
+                    .map(|lcb| lcb < config.posterior_negative_lcb_threshold_bps)
+                    .unwrap_or(false);
+            let robust_negative = mature && (point_negative || posterior_negative);
             let (edge_status, route_mode) = if robust_negative {
                 final_score = final_score.min(config.robust_negative_score_cap);
-                ("robust_negative", "exploration_only")
+                if posterior_negative && !point_negative {
+                    ("posterior_negative", "exploration_only")
+                } else {
+                    ("robust_negative", "exploration_only")
+                }
             } else {
                 ("known", "main")
             };
@@ -805,6 +827,30 @@ mod tests {
         assert_eq!(edge.n, 31);
         assert_eq!(edge.edge_bps, Some(-12.0));
         assert_eq!(edge.edge_status, "robust_negative");
+        assert_eq!(edge.route_mode, "exploration_only");
+        assert!((edge.final_score - 35.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_edge_bonus_caps_posterior_negative_cells() {
+        let estimates = EdgeEstimates::load_from_str(
+            r#"{"ma_crossover::WIDEUSDT":{"runtime_bps":2.0,"n":36,"std_bps":30.0}}"#,
+        )
+        .unwrap();
+        let cfg = EdgeRoutingConfig {
+            posterior_lcb_z: 1.0,
+            posterior_min_std_bps: 20.0,
+            posterior_negative_lcb_threshold_bps: 0.0,
+            ..EdgeRoutingConfig::default()
+        };
+        let edge = apply_edge_bonus(
+            95.0,
+            StrategyCategory::MaCrossover,
+            "WIDEUSDT",
+            &estimates,
+            &cfg,
+        );
+        assert_eq!(edge.edge_status, "posterior_negative");
         assert_eq!(edge.route_mode, "exploration_only");
         assert!((edge.final_score - 35.0).abs() < 1e-10);
     }

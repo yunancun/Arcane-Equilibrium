@@ -82,6 +82,14 @@ pub struct GridTradingParams {
     /// 限制 `[5_000, 600_000]`，防止 operator 誤配。
     #[serde(default = "default_reject_cooldown_ms")]
     pub reject_cooldown_ms: u64,
+    /// Minimum grid step in bps of current price. 0 preserves legacy OU spacing.
+    /// 最小網格步長，以現價 bps 表示；0 保留舊 OU 間距。
+    #[serde(default)]
+    pub min_grid_step_bps: f64,
+    /// Multiplier on the round-trip fee floor in OU spacing. 1 preserves legacy.
+    /// OU 間距中的往返費用地板倍率；1 保留舊行為。
+    #[serde(default = "default_cost_floor_multiplier")]
+    pub cost_floor_multiplier: f64,
     /// G2-04: Optional symbol list where grid_trading should not emit new entries.
     /// Existing positions are still allowed to close via the normal close path.
     /// G2-04：可選逐 symbol 禁止 grid 新開倉清單；既有倉位仍可正常平倉。
@@ -106,6 +114,10 @@ fn default_reject_cooldown_ms() -> u64 {
     60_000
 }
 
+fn default_cost_floor_multiplier() -> f64 {
+    1.0
+}
+
 impl Default for GridTradingParams {
     fn default() -> Self {
         Self {
@@ -128,6 +140,8 @@ impl Default for GridTradingParams {
             // G7-09c Phase 2: default 60s exchange-reject cooldown.
             // G7-09c Phase 2：交易所拒絕預設冷卻 60 秒。
             reject_cooldown_ms: 60_000,
+            min_grid_step_bps: 0.0,
+            cost_floor_multiplier: 1.0,
             blocked_symbols: Vec::new(),
         }
     }
@@ -194,6 +208,22 @@ impl StrategyParams for GridTradingParams {
                 agent_adjustable: true,
                 db_persisted: true,
             },
+            ParamRange {
+                name: "min_grid_step_bps".into(),
+                min: 0.0,
+                max: 200.0,
+                step: Some(1.0),
+                agent_adjustable: true,
+                db_persisted: true,
+            },
+            ParamRange {
+                name: "cost_floor_multiplier".into(),
+                min: 1.0,
+                max: 5.0,
+                step: Some(0.25),
+                agent_adjustable: true,
+                db_persisted: true,
+            },
         ]
     }
 
@@ -230,6 +260,14 @@ impl StrategyParams for GridTradingParams {
         // 失效或過大永久靜音。
         if self.reject_cooldown_ms < 5_000 || self.reject_cooldown_ms > 600_000 {
             return Err("reject_cooldown_ms must be in [5_000, 600_000] ms".into());
+        }
+        if !self.min_grid_step_bps.is_finite() || !(0.0..=200.0).contains(&self.min_grid_step_bps) {
+            return Err("min_grid_step_bps must be in [0, 200]".into());
+        }
+        if !self.cost_floor_multiplier.is_finite()
+            || !(1.0..=5.0).contains(&self.cost_floor_multiplier)
+        {
+            return Err("cost_floor_multiplier must be in [1, 5]".into());
         }
         Ok(())
     }
