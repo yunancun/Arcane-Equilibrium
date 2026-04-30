@@ -194,7 +194,8 @@
       style="background:rgba(100,116,139,.2);color:#94a3b8;display:inline-block;padding:2px 8px;border-radius:4px;font-size:10px;font-weight:700">
       --
     </span>
-    <span id="gov-trust-expires-label" style="font-size:12px;color:var(--text-dim)">Expires in: --</span>
+    <span id="gov-trust-expires-label" style="font-size:12px;color:var(--text-dim)">Trust TTL: --</span>
+    <span id="gov-signed-auth-status" style="font-size:12px;color:var(--text-dim)">Signed auth: --</span>
     <span id="gov-trust-clean-days" style="font-size:12px;color:var(--text-dim)">Clean days: --</span>
     <span id="gov-trust-auth-id" style="font-size:10px;color:var(--text-dim);font-family:monospace"></span>
     <span id="gov-trust-review-flag" style="display:none;font-size:11px;color:#a855f7;font-weight:600">
@@ -652,17 +653,36 @@ async function govLoadLiveAuthStatus() {
     if (expiresMs) {
       const diffMs = expiresMs - Date.now();
       if (diffMs <= 0) {
-        expiresEl.textContent = 'Expires in: EXPIRED';
+        expiresEl.textContent = 'Trust TTL: EXPIRED';
         expiresEl.style.color = 'var(--red)';
       } else {
         const h = Math.floor(diffMs / 3600000);
         const m = Math.floor((diffMs % 3600000) / 60000);
-        expiresEl.textContent = 'Expires in: ' + h + 'h ' + m + 'm';
+        expiresEl.textContent = 'Trust TTL: ' + h + 'h ' + m + 'm';
         expiresEl.style.color = diffMs < 7200000 ? 'var(--yellow)' : 'var(--text-dim)';
       }
     } else {
-      expiresEl.textContent = 'Expires in: --';
+      expiresEl.textContent = 'Trust TTL: --';
       expiresEl.style.color = 'var(--text-dim)';
+    }
+  }
+
+  // Signed authorization gate / Rust 實際讀取的 signed authorization.json
+  const signed = d.signed_authorization || {};
+  const signedKnown = !!signed.status;
+  const signedBad = signedKnown && signed.valid_for_engine !== true;
+  const signedEl = document.getElementById('gov-signed-auth-status');
+  if (signedEl) {
+    if (!signedKnown) {
+      signedEl.textContent = 'Signed auth: --';
+      signedEl.style.color = 'var(--text-dim)';
+    } else if (signed.valid_for_engine === true) {
+      signedEl.textContent = 'Signed auth: valid';
+      signedEl.style.color = 'var(--green)';
+    } else {
+      const status = String(signed.status || 'invalid').replace(/_/g, ' ').toUpperCase();
+      signedEl.textContent = 'Signed auth: ' + status + ' - Renew required';
+      signedEl.style.color = 'var(--red)';
     }
   }
 
@@ -691,7 +711,7 @@ async function govLoadLiveAuthStatus() {
   // Status row border color by state / 狀態列邊框顏色依狀態
   const row = document.getElementById('gov-live-auth-status-row');
   if (row) {
-    if (d.expired || (d.last_auth_expires_ts_ms && (d.last_auth_expires_ts_ms - Date.now()) <= 0)) {
+    if (signedBad || d.expired || (d.last_auth_expires_ts_ms && (d.last_auth_expires_ts_ms - Date.now()) <= 0)) {
       row.style.borderColor = 'rgba(239,68,68,0.5)';
     } else if (d.near_expiry || showReview) {
       row.style.borderColor = 'rgba(210,153,34,0.5)';

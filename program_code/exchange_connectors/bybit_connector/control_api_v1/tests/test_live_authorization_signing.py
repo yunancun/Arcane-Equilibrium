@@ -189,6 +189,53 @@ def test_delete_removes_authorization_file(secrets_tmp: Path):
     assert ltr._delete_live_authorization_file() is False
 
 
+def test_read_signed_authorization_status_reports_missing(secrets_tmp: Path):
+    """GUI status must distinguish trust TTL from missing Rust signed auth."""
+    status = ltr._read_signed_live_authorization_status(now_ms=1_700_000_000_000)
+
+    assert status["status"] == "missing"
+    assert status["present"] is False
+    assert status["valid_for_engine"] is False
+    assert status["reason"] == "authorization_json_missing"
+
+
+def test_read_signed_authorization_status_validates_written_record(secrets_tmp: Path):
+    """Status helper mirrors the Rust live gate for a valid authorization.json."""
+    (secrets_tmp / "bybit_endpoint").write_text("demo")
+    expires = 1_800_000_000_000
+    ltr._write_signed_live_authorization(
+        operator_id="ncyu",
+        tier=TrustTier.T0_ENTRY.value,
+        expires_at_ms=expires,
+    )
+
+    status = ltr._read_signed_live_authorization_status(now_ms=1_700_000_000_000)
+
+    assert status["status"] == "valid"
+    assert status["valid_for_engine"] is True
+    assert status["expires_at_ms"] == expires
+    assert status["tier"] == "T0_ENTRY"
+    assert status["endpoint"] == "live_demo"
+    assert status["env_allowed"] == ["live_demo"]
+
+
+def test_read_signed_authorization_status_reports_expired(secrets_tmp: Path):
+    """Expired signed auth is invalid even if earned-trust state still has TTL."""
+    (secrets_tmp / "bybit_endpoint").write_text("demo")
+    expires = 1_700_000_000_000
+    ltr._write_signed_live_authorization(
+        operator_id="ncyu",
+        tier=TrustTier.T0_ENTRY.value,
+        expires_at_ms=expires,
+    )
+
+    status = ltr._read_signed_live_authorization_status(now_ms=expires + 1)
+
+    assert status["status"] == "expired"
+    assert status["valid_for_engine"] is False
+    assert status["reason"] == "authorization_json_expired"
+
+
 def test_atomic_write_uses_rename(secrets_tmp: Path, monkeypatch):
     """
     Simulate crash between write + rename: no partial authorization.json visible.

@@ -251,7 +251,8 @@ html, body {
   <div id="trust-status-bar" class="trust-bar ok" style="display:none;margin-top:12px">
     <span id="trust-tier-badge" class="trust-tier-badge" style="background:rgba(34,197,94,.15);color:var(--green)">T0 Entry</span>
     <span id="trust-clean-days" style="color:var(--text-dim)">Clean days: --</span>
-    <span id="trust-expires-label" style="color:var(--text-dim)">Auth expires: --</span>
+    <span id="trust-expires-label" style="color:var(--text-dim)">Trust TTL: --</span>
+    <span id="trust-signed-auth-status" style="color:var(--text-dim)">Signed auth: --</span>
     <span style="flex:1"></span>
     <span style="font-size:11px;color:var(--text-dim)">&#x2192; Renew 請至 Governance Hub</span>
   </div>
@@ -438,7 +439,8 @@ html, body {
   <div id="trust-status-bar-dashboard" class="trust-bar ok" style="display:none">
     <span id="trust-tier-badge-dash" class="trust-tier-badge" style="background:rgba(34,197,94,.15);color:var(--green)">T0 Entry</span>
     <span id="trust-clean-days-dash" style="color:var(--text-dim)">Clean days: --</span>
-    <span id="trust-expires-label-dash" style="color:var(--text-dim)">Auth expires: --</span>
+    <span id="trust-expires-label-dash" style="color:var(--text-dim)">Trust TTL: --</span>
+    <span id="trust-signed-auth-status-dash" style="color:var(--text-dim)">Signed auth: --</span>
     <span style="flex:1"></span>
     <span style="font-size:11px;color:var(--text-dim)">&#x1F511; Renew &#x2192; Governance Hub</span>
   </div>
@@ -575,23 +577,40 @@ async function loadTrustStatus() {
 
   // Compute expiry text and color / 計算到期文字與顏色
   const expiresMs = d.last_auth_expires_ts_ms;
-  let expiresText = 'Auth: --';
+  let expiresText = 'Trust TTL: --';
   let expiresColor = 'var(--text-dim)';
   if (expiresMs) {
     const diffMs = expiresMs - Date.now();
     if (diffMs <= 0) {
-      expiresText = 'Auth: EXPIRED';
+      expiresText = 'Trust TTL: EXPIRED';
       expiresColor = 'var(--red)';
     } else {
       const h = Math.floor(diffMs / 3600000);
       const m = Math.floor((diffMs % 3600000) / 60000);
-      expiresText = 'Expires in: ' + h + 'h ' + m + 'm';
+      expiresText = 'Trust TTL: ' + h + 'h ' + m + 'm';
       expiresColor = diffMs < 7200000 ? 'var(--yellow)' : 'var(--text-dim)';
     }
   }
 
+  // Signed authorization is the Rust engine gate. It can be missing even while
+  // the earned-trust TTL above is still in the future after a manual restart.
+  const signed = d.signed_authorization || {};
+  const signedKnown = !!signed.status;
+  const signedBad = signedKnown && signed.valid_for_engine !== true;
+  let signedText = 'Signed auth: --';
+  let signedColor = 'var(--text-dim)';
+  if (signedKnown && signed.valid_for_engine === true) {
+    signedText = 'Signed auth: valid';
+    signedColor = 'var(--green)';
+  } else if (signedKnown) {
+    const status = String(signed.status || 'invalid').replace(/_/g, ' ').toUpperCase();
+    signedText = 'Signed auth: ' + status + ' - Renew required';
+    signedColor = 'var(--red)';
+  }
+
   // Compute bar state class / 計算狀態欄 class
-  const barClass = d.pending_downgrade_tier != null ? 'crit'
+  const barClass = signedBad ? 'crit'
+    : d.pending_downgrade_tier != null ? 'crit'
     : d.requires_full_review ? 'review'
     : (d.near_expiry || d.expired) ? 'warn'
     : 'ok';
@@ -606,8 +625,9 @@ async function loadTrustStatus() {
    * @param {string} badgeId      - Element id of the tier badge / 階梯徽章 ID
    * @param {string} cleanDaysId  - Element id of clean-days span / 連續乾淨天數 span ID
    * @param {string} expiresId    - Element id of expires span / 到期標籤 span ID
+   * @param {string} signedId     - Element id of signed-auth span / signed auth span ID
    */
-  function _applyToBar(barId, badgeId, cleanDaysId, expiresId) {
+  function _applyToBar(barId, badgeId, cleanDaysId, expiresId, signedId) {
     const bar = document.getElementById(barId);
     if (!bar) return;
     bar.style.display = 'flex';
@@ -626,6 +646,11 @@ async function loadTrustStatus() {
     if (expiresEl) {
       expiresEl.textContent = expiresText;
       expiresEl.style.color = expiresColor;
+    }
+    const signedEl = document.getElementById(signedId);
+    if (signedEl) {
+      signedEl.textContent = signedText;
+      signedEl.style.color = signedColor;
     }
 
     // Pending downgrade inline notice / 待降級內聯提示
@@ -646,11 +671,11 @@ async function loadTrustStatus() {
 
   // Update integrity-fail view bar (always polled regardless of engine state)
   // 更新完整性失效視圖的 bar（無論引擎狀態都持續輪詢）
-  _applyToBar('trust-status-bar', 'trust-tier-badge', 'trust-clean-days', 'trust-expires-label');
+  _applyToBar('trust-status-bar', 'trust-tier-badge', 'trust-clean-days', 'trust-expires-label', 'trust-signed-auth-status');
 
   // Update dashboard view bar (visible only when Live engine running)
   // 更新儀表板視圖的 bar（Live 引擎運行時可見）
-  _applyToBar('trust-status-bar-dashboard', 'trust-tier-badge-dash', 'trust-clean-days-dash', 'trust-expires-label-dash');
+  _applyToBar('trust-status-bar-dashboard', 'trust-tier-badge-dash', 'trust-clean-days-dash', 'trust-expires-label-dash', 'trust-signed-auth-status-dash');
 }
 
 // ═══════════════════════════════════════════════════════════════
