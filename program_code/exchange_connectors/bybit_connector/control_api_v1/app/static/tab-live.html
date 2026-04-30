@@ -382,10 +382,10 @@ html, body {
     <table class="live-table" id="live-positions-table">
       <thead><tr>
         <th>Symbol</th><th>策略 / Strategy</th><th>Side</th><th>Size</th>
-        <th>Leverage</th><th>Entry</th><th>Mark</th><th>PnL</th><th>Liq.</th><th>操作</th>
+        <th>Leverage</th><th>Entry</th><th>Entry Value</th><th>Mark</th><th>PnL</th><th>Liq.</th><th>操作</th>
       </tr></thead>
       <tbody id="live-positions-body">
-        <tr><td colspan="10" style="color:var(--text-dim);text-align:center;padding:20px">加載中...</td></tr>
+        <tr><td colspan="11" style="color:var(--text-dim);text-align:center;padding:20px">加載中...</td></tr>
       </tbody>
     </table>
   </div>
@@ -461,10 +461,10 @@ html, body {
     <table class="live-table" id="live-fills-table">
       <thead><tr>
         <th>時間 / Time</th><th>Symbol</th><th>Side</th>
-        <th>Qty</th><th>Price</th><th>Fee</th><th>盈亏 / PnL</th><th>Order ID</th>
+        <th>Qty</th><th>Price</th><th>Exec Value</th><th>Fee</th><th>盈亏 / PnL</th><th>Order ID</th>
       </tr></thead>
       <tbody id="live-fills-body">
-        <tr><td colspan="8" style="color:var(--text-dim);text-align:center;padding:16px">展開以加載 / Expand to load</td></tr>
+        <tr><td colspan="9" style="color:var(--text-dim);text-align:center;padding:16px">展開以加載 / Expand to load</td></tr>
       </tbody>
     </table>
   </div>
@@ -1107,7 +1107,7 @@ async function loadDashboardData() {
     if (_isPhantomViewError(posData)) {
       // F5/A1 phantom-view short circuit / F5/A1 幽靈視圖短路
       const msg = ocEsc(posData.error_zh || posData.error || 'Live slot not configured');
-      posBody.innerHTML = '<tr><td colspan="10" style="color:#f87171;text-align:center;padding:16px">⚠ ' + msg + '</td></tr>';
+      posBody.innerHTML = '<tr><td colspan="11" style="color:#f87171;text-align:center;padding:16px">⚠ ' + msg + '</td></tr>';
       document.getElementById('live-position-count').textContent = 'N/A';
       _renderLiveDustPanel([]);
     } else {
@@ -1121,7 +1121,7 @@ async function loadDashboardData() {
     let realizedPnl = 0;
     // Try to compute realized from positions cumRealisedPnl sum
     if (arr.length === 0) {
-      posBody.innerHTML = '<tr><td colspan="10" style="color:var(--text-dim);text-align:center;padding:16px">無持倉 / No positions</td></tr>';
+      posBody.innerHTML = '<tr><td colspan="11" style="color:var(--text-dim);text-align:center;padding:16px">無持倉 / No positions</td></tr>';
     } else {
       // F5-RETURN/Issue-2 — `closeLivePosition` row buttons are written via
       //   innerHTML below; they don't exist when checkLiveEngineStatus() ran
@@ -1170,6 +1170,7 @@ async function loadDashboardData() {
           <td>${ocEsc(String(size))}</td>
           <td>${ocEsc(String(leverage))}x</td>
           <td>${ocEsc(String(entry))}</td>
+          <td>${ocEsc(ocAmount(ocPositionEntryValue(p)))}</td>
           <td>${ocEsc(String(mark))}</td>
           <td style="${pnlCls}">${pnl.toFixed(4)}</td>
           <td>${ocEsc(String(liq))}</td>
@@ -1205,7 +1206,7 @@ async function loadDashboardData() {
     }
     }  // end of !_isPhantomViewError(posData) branch / 非幽靈視圖分支結束
   } catch (_) {
-    posBody.innerHTML = '<tr><td colspan="10" style="color:var(--text-dim);text-align:center">無法加載持倉數據</td></tr>';
+    posBody.innerHTML = '<tr><td colspan="11" style="color:var(--text-dim);text-align:center">無法加載持倉數據</td></tr>';
   }
 
   // Render dust-positions summary panel from the same positions payload above.
@@ -1581,14 +1582,14 @@ function _formatFillTime(tsMs) {
 async function loadFills() {
   const body = document.getElementById('live-fills-body');
   const badge = document.getElementById('fills-count-badge');
-  body.innerHTML = '<tr><td colspan="8" style="color:var(--text-dim);text-align:center;padding:16px">加載中...</td></tr>';
+  body.innerHTML = '<tr><td colspan="9" style="color:var(--text-dim);text-align:center;padding:16px">加載中...</td></tr>';
   try {
     const d = await ocApi('/api/v1/live/fills');
     const payload = d && d.data;
     if (_isPhantomViewError(payload)) {
       // F5/A1 phantom-view short circuit / F5/A1 幽靈視圖短路
       const msg = ocEsc(payload.error_zh || payload.error || 'Live slot not configured');
-      body.innerHTML = '<tr><td colspan="8" style="color:#f87171;text-align:center;padding:16px">⚠ ' + msg + '</td></tr>';
+      body.innerHTML = '<tr><td colspan="9" style="color:#f87171;text-align:center;padding:16px">⚠ ' + msg + '</td></tr>';
       if (badge) badge.textContent = '';
       ocPnlTrend('live-pnl-line', 'live-pnl-label', [], 'live-pnl-zero');
       _fillsLoaded = false;
@@ -1598,7 +1599,7 @@ async function loadFills() {
     _fillsLoaded = true;
     if (badge) badge.textContent = arr.length ? arr.length + ' 筆' : '';
     if (arr.length === 0) {
-      body.innerHTML = '<tr><td colspan="8" style="color:var(--text-dim);text-align:center;padding:16px">暫無成交記錄 / No fills</td></tr>';
+      body.innerHTML = '<tr><td colspan="9" style="color:var(--text-dim);text-align:center;padding:16px">暫無成交記錄 / No fills</td></tr>';
       ocPnlTrend('live-pnl-line', 'live-pnl-label', [], 'live-pnl-zero');
       return;
     }
@@ -1611,6 +1612,7 @@ async function loadFills() {
       const timeStr = _formatFillTime(ts);
       const qty = f.execQty || f.exec_qty || f.qty || '--';
       const price = f.execPrice || f.exec_price || f.price || '--';
+      const execValue = ocFillExecValue(f);
       const fee = f.execFee || f.exec_fee || '--';
       const feeStr = fee !== '--' ? parseFloat(fee).toFixed(6) : '--';
       const oid = f.orderId || f.order_id || '--';
@@ -1623,6 +1625,7 @@ async function loadFills() {
         <td style="${sideCls}">${ocEsc(side)}</td>
         <td>${ocEsc(String(qty))}</td>
         <td>${ocEsc(String(price))}</td>
+        <td>${ocEsc(ocAmount(execValue))}</td>
         <td style="color:var(--text-dim)">${ocEsc(feeStr)}</td>
         ${ocPnlCell(pnlRaw)}
         <td style="font-size:10px;color:var(--text-dim)">${ocEsc(String(oid)).slice(0, 12)}…</td>
@@ -1630,7 +1633,7 @@ async function loadFills() {
     }).join('');
     ocPnlTrend('live-pnl-line', 'live-pnl-label', arr, 'live-pnl-zero');
   } catch(e) {
-    body.innerHTML = '<tr><td colspan="8" style="color:var(--text-dim);text-align:center">無法加載成交記錄</td></tr>';
+    body.innerHTML = '<tr><td colspan="9" style="color:var(--text-dim);text-align:center">無法加載成交記錄</td></tr>';
   }
 }
 

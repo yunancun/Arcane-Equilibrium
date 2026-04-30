@@ -92,8 +92,8 @@
   </h3>
   <div class="oc-table-wrap">
     <table class="oc-table">
-      <thead><tr><th>交易对</th><th>策略</th><th>品类</th><th>方向</th><th>数量</th><th>开仓价</th><th>标记价</th><th>未实现盈亏</th><th>杠杆</th><th>操作</th></tr></thead>
-      <tbody id="positions-tbody"><tr class="empty-row"><td colspan="10">暂无持仓</td></tr></tbody>
+      <thead><tr><th>交易对</th><th>策略</th><th>品类</th><th>方向</th><th>数量</th><th>开仓价</th><th>开仓金额</th><th>标记价</th><th>未实现盈亏</th><th>杠杆</th><th>操作</th></tr></thead>
+      <tbody id="positions-tbody"><tr class="empty-row"><td colspan="11">暂无持仓</td></tr></tbody>
     </table>
   </div>
 </div>
@@ -121,8 +121,8 @@
   <div class="oc-collapse-body">
     <div class="oc-table-wrap">
       <table class="oc-table">
-        <thead><tr><th>时间</th><th>交易对</th><th>品类</th><th>方向</th><th>数量</th><th>价格</th><th>手续费</th><th>盈亏 / PnL</th></tr></thead>
-        <tbody id="fills-tbody"><tr class="empty-row"><td colspan="8">加载中...</td></tr></tbody>
+        <thead><tr><th>时间</th><th>交易对</th><th>品类</th><th>方向</th><th>数量</th><th>价格</th><th>成交金额</th><th>手续费</th><th>盈亏 / PnL</th></tr></thead>
+        <tbody id="fills-tbody"><tr class="empty-row"><td colspan="9">加载中...</td></tr></tbody>
       </table>
     </div>
     <div class="oc-metrics" style="margin-top:8px">
@@ -325,7 +325,7 @@ async function loadSession() {
 
 async function loadPositions() {
   const d = await ocApi('/api/v1/paper/positions');
-  if (!d || !d.data) { ocSetHtml('positions-tbody', '<tr class="empty-row"><td colspan="10" style="color:var(--text-dim)">⚠ 连接失败 / Connection failed <button class="oc-btn" onclick="loadPositions()" style="padding:2px 8px;font-size:10px;margin-left:8px">↺ 重试</button></td></tr>'); return; }
+  if (!d || !d.data) { ocSetHtml('positions-tbody', '<tr class="empty-row"><td colspan="11" style="color:var(--text-dim)">⚠ 连接失败 / Connection failed <button class="oc-btn" onclick="loadPositions()" style="padding:2px 8px;font-size:10px;margin-left:8px">↺ 重试</button></td></tr>'); return; }
   const raw = d.data.positions || d.data || {};
   const positions = Array.isArray(raw) ? raw : Object.values(raw);
   _cachedPositions = positions;
@@ -341,7 +341,7 @@ async function loadPositions() {
   ocSetText('p-bal-margin', totalMargin > 0 ? ocBalance(totalMargin, 2) : '$0.00');
 
   if (!positions.length) {
-    ocSetHtml('positions-tbody', '<tr class="empty-row"><td colspan="10">暂无持仓</td></tr>');
+    ocSetHtml('positions-tbody', '<tr class="empty-row"><td colspan="11">暂无持仓</td></tr>');
     return;
   }
   let html = '';
@@ -366,6 +366,7 @@ async function loadPositions() {
     html += '<td class="' + (p.side === 'Buy' ? 'green' : 'red') + '">' + sideLabel + '</td>';
     html += '<td>' + ocNum(qty, 4) + '</td>';
     html += '<td>' + ocNum(entryPrice, decimals) + '</td>';
+    html += '<td>' + ocAmount(ocPositionEntryValue(p)) + '</td>';
     html += '<td>' + (markPrice > 0 ? ocNum(markPrice, decimals) : '--') + '</td>';
     html += '<td class="' + ocPnlClass(pnl) + '">' + ocMoney(pnl) + '</td>';
     html += '<td>' + (p.leverage || '1') + 'x</td>';
@@ -489,10 +490,10 @@ async function loadFeed() {
 
 async function loadFills() {
   const d = await ocApi('/api/v1/paper/fills');
-  if (!d || !d.data) { ocSetHtml('fills-tbody', '<tr class="empty-row"><td colspan="8" style="color:var(--text-dim)">⚠ 连接失败 / Connection failed <button class="oc-btn" onclick="loadFills()" style="padding:2px 8px;font-size:10px;margin-left:8px">↺ 重试</button></td></tr>'); return; }
+  if (!d || !d.data) { ocSetHtml('fills-tbody', '<tr class="empty-row"><td colspan="9" style="color:var(--text-dim)">⚠ 连接失败 / Connection failed <button class="oc-btn" onclick="loadFills()" style="padding:2px 8px;font-size:10px;margin-left:8px">↺ 重试</button></td></tr>'); return; }
   const fills = d.data.fills || d.data || [];
   if (!fills.length) {
-    ocSetHtml('fills-tbody', '<tr class="empty-row"><td colspan="8">暂无成交</td></tr>');
+    ocSetHtml('fills-tbody', '<tr class="empty-row"><td colspan="9">暂无成交</td></tr>');
     return;
   }
   let html = '';
@@ -509,6 +510,7 @@ async function loadFills() {
     html += '<td class="' + (f.side === 'Buy' || f.is_long === true ? 'green' : 'red') + '">' + sideLabel + '</td>';
     html += '<td>' + ocNum(f.qty, 4) + '</td>';
     html += '<td>' + ocNum(f.price, 2) + '</td>';
+    html += '<td>' + ocAmount(ocFillExecValue(f)) + '</td>';
     html += '<td>' + ocNum(f.fee || 0, 6) + '</td>';
     html += ocPnlCell(f.realized_pnl);
     html += '</tr>';

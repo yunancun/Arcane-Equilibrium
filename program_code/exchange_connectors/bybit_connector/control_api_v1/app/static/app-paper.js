@@ -124,6 +124,7 @@ function renderPaperPositions(d) {
       <span class="paper-pos-side">${ocEsc(p.side)}</span>
       <span>${ocEsc(p.qty)}</span>
       <span>@ ${(p.avg_entry_price || p.entry_price || 0).toFixed(2)}</span>
+      <span>${ocAmount(ocPositionEntryValue(p))}</span>
       <span class="${pnlColor}">${(p.unrealized_pnl || 0).toFixed(4)}</span>
     </div>`;
   }).join("");
@@ -155,6 +156,7 @@ function renderPaperFills(d) {
       <span>${ocEsc(f.symbol)}</span>
       <span>${ocEsc(f.side)}</span>
       <span>${ocEsc(f.qty)} @ ${(f.price || 0).toFixed(2)}</span>
+      <span>${ocAmount(ocFillExecValue(f))}</span>
       <span>Fee: ${(f.fee || 0).toFixed(6)}</span>
     </div>`;
   }).join("");
