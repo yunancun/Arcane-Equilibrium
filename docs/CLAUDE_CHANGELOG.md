@@ -3,6 +3,16 @@
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
 > 最後更新：2026-04-24（P1-11 全工 + FIX-26-DEADLOCK-1）
 
+### TODO Follow-through 1-4（2026-04-30）
+
+**範圍**：完成 operator 要求的四項 TODO follow-through：active docs runtime drift 校正、G1-04 fee/R:R as-of compute、G8-01 cognitive adaptive test/coverage closure、ML training data hygiene quantification。
+
+**結果**：runtime checkpoint 記錄校正為 code-bearing `a9fce24` + latest passive healthcheck SUMMARY WARN；G1-04 post-reload slice n=665 / maker_like 73.23% / fee_drop 59.32%，但 R:R mixed 且 ma_reverse_cross 仍 net negative；G8-01 targeted pytest 40/0，`CognitiveModulator` stdlib trace/AST coverage 76/81 (93.8%)；ML hygiene dust spiral noise 37/1843 = 2.01%，24h recurrence 0，無需 DB backfill。
+
+**邊界**：純文檔與 read-only analysis；未改 trading/risk/strategy 參數，未 rebuild/restart，未 DB write，未放寬 live authorization。G2-01 acceptance 仍等 2026-05-07/08。
+
+**報告**：`docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-30--todo_followthrough_g1_g8_mlhygiene.md`。
+
 ### Dust / Edge / Scout follow-through（2026-04-30 · commit `f8a245c`）
 
 **範圍**：完成 operator 指定的三項 follow-through：dust residual runtime proof、post-deploy edge cutoff observation、Scout heartbeat production caller wiring。

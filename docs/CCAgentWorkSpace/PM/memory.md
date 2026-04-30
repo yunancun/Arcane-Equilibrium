@@ -1066,3 +1066,16 @@ Operator 接續 Tier 8 sign-off 後說「繼續派」。PM 按 Tier 8 §8 推薦
 ### Boundary
 - No strategy/risk config changes and no live authorization changes were performed.
 - After source sync, PM performed `restart_all.sh --api-only` to load Python Scout heartbeat wiring. Rust engine PID stayed `1529433`; API PID became `1591455`; watchdog remained `engine_alive=true`.
+
+## 2026-04-30 TODO Follow-through 1-4
+
+### Result
+- Operator asked to complete the four remaining TODO follow-through items. PM completed them locally with read-only Linux DB/runtime checks and documentation updates.
+- Active docs now describe the 2026-04-30 22:18 CEST runtime checkpoint as code-bearing `a9fce24`, with healthcheck SUMMARY WARN rather than stale FAIL.
+- G1-04 as-of compute is complete: full post-G7-09 5.94d window remains diluted (maker_like 26.28%, fee_drop 21.30%), while the post-2026-04-29 12:27 reload slice is near target (maker_like 73.23%, fee_drop 59.32%). R:R is still mixed; ma_reverse_cross remains net negative.
+- G8-01 is closed from TODO perspective: W1/W2/W3 targeted pytest passed 40/0, and `CognitiveModulator` stdlib trace/AST coverage was 76/81 (93.8%). Regret/dream producers remain deferred per PA Option C.
+- ML training data hygiene is closed: dust spiral noise is 37/1843 = 2.01%, 24h recurrence is 0, so no DB backfill is warranted. Existing `[26]` and `[21]` healthchecks cover recurrence.
+
+### Boundary
+- No trading, risk, strategy parameter, live authorization, rebuild, restart, or DB write action was performed.
+- G2-01 acceptance remains time-driven around 2026-05-07/08; do not treat the G1-04 as-of artifact as a live/promotion approval.
