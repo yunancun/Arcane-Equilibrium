@@ -79,3 +79,23 @@ Result:
 - Batch C fixed locally and tracked in `docs/audit/remediation_tracking.md`
 - Sign-off written to `docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-29--batch_c_trading_record_durability_signoff.md`
 - No deploy/restart performed
+
+2026-04-30 21:25 CEST
+Task:
+- Clean up oversized active docs, archive closed history, recalibrate current engineering progress, and update README + Linear.
+
+Chain:
+- PM -> CC(default) + FA(default) + E5(explorer) + PA(default) + MIT(default) -> PM
+
+Ownership:
+- CC(default): identify stale/archivable governance content and hard-boundary text that must remain
+- FA(default): reassess completed vs active functional work
+- E5(explorer): document bloat / archive target audit
+- PA(default): latest work arrangement and Linear mirroring plan
+- MIT(default): runtime/data calibration against current source and healthcheck state
+- PM: archive snapshots, trim active docs, update README/TODO/CLAUDE/Codex memory, update Linear, and preserve dirty GUI files untouched
+
+Result:
+- Pre-cleanup snapshots archived under `docs/archive/2026-04-30--*-pre-cleanup-snapshot.md`
+- `README.md`, `TODO.md`, and `CLAUDE.md` now describe current 2026-04-30 active state
+- Linear project and issues updated as a high-level mirror without publishing secrets or detailed runtime internals

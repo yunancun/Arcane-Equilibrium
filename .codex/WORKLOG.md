@@ -112,3 +112,10 @@ YYYY-MM-DD HH:MM TZ
 - implemented primary exchange full-close `qty=0 + reduceOnly + closeOnTrigger`, partial-reduce dust-residual skip, DUST_FROZEN preservation, REST-only dust GUI/API labeling, and sub-cent Demo PnL display
 - verification: Python owner enrichment 34 passed; Rust full lib 2381/0; `cargo check --workspace` passed; `git diff --check` passed
 - Linux instruction for this checkpoint: git fast-forward sync only; no rebuild/restart
+
+2026-04-30 21:25 CEST
+- completed PM-led active-doc cleanup and progress recalibration using `CC(default)`, `FA(default)`, `E5(explorer)`, `PA(default)`, and `MIT(default)`
+- archived full pre-cleanup snapshots for `CLAUDE.md`, `TODO.md`, and `README.md`, then trimmed active docs to current state and forward queue
+- verified source/runtime framing at `5ba9b1c`: current active risk is post-deploy edge observation (`[33]`, `[38]`, `[40]`) plus dust close-path proof, not old `[16]` blocker framing
+- updated Linear project `OpenClaw 62-Finding Remediation`: Batch A-F issues Done; stale deploy/RCA issues closed; active follow-up issues added for edge observation, dust proof, and Scout heartbeat wiring
+- report: `docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-30--active_docs_cleanup_and_progress_recalibration.md`
