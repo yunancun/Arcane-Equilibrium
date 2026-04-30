@@ -1043,6 +1043,7 @@ Operator 接續 Tier 8 sign-off 後說「繼續派」。PM 按 Tier 8 §8 推薦
 - `CLAUDE.md`, `TODO.md`, and `README.md` now reflect current source/runtime state at `5ba9b1c` and remove old 62-finding / STRKUSDT / Wave A-H / Wave 1-3 narratives from active status.
 - Pre-cleanup snapshots are archived under `docs/archive/2026-04-30--*-pre-cleanup-snapshot.md`; archive summary is `docs/archive/2026-04-30--active_docs_cleanup_archive.md`.
 - Linear project `OpenClaw 62-Finding Remediation` was updated as a high-level mirror: Batch A-F issues Done, stale `[16]`/deploy placeholders closed, and active edge/dust/Scout follow-ups added.
+- Correction after operator feedback: `TODO.md` was restored to the v3 single-timeline record shape. Only the stale active-mainline block was removed and separately archived at `docs/archive/2026-04-30--TODO-stale-active-mainline.md`.
 
 ### Current PM View
 - Active risk is strategy edge acceptance, not old `[16]` framing.

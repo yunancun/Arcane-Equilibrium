@@ -622,6 +622,7 @@ YYYY-MM-DD--HHmm--功能描述.扩展名
 | 文件 | 內容 |
 |------|------|
 | `2026-04-30--active_docs_cleanup_archive.md` | 2026-04-30 active docs cleanup 歸檔說明：CLAUDE/TODO/README 清理範圍、保留快照、Linear 高層同步摘要 |
+| `2026-04-30--TODO-stale-active-mainline.md` | 2026-04-30 TODO 修正歸檔：從 active section 移出的過時 62-finding mainline / Post-Wave-H hotfixes 摘要 |
 | `2026-04-30--CLAUDE-pre-cleanup-snapshot.md` | 2026-04-30 清理前 `CLAUDE.md` 完整快照 |
 | `2026-04-30--TODO-pre-cleanup-snapshot.md` | 2026-04-30 清理前 `TODO.md` 完整快照 |
 | `2026-04-30--README-pre-cleanup-snapshot.md` | 2026-04-30 清理前 `README.md` 完整快照 |

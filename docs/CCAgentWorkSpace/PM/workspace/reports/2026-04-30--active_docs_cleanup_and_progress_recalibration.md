@@ -27,10 +27,16 @@ Used the repo role roster instead of anonymous runtime names:
 Removed from active docs:
 
 - closed 62-finding Batch A-F execution narrative
-- STRKUSDT P0 wave / Wave A-H / old Wave 1-3 history
+- STRKUSDT P0 wave / Wave A-H / old Wave 1-3 history from entrypoint/current-state summaries
 - stale 2026-04-29 runtime facts
 - obsolete `[16]`-as-main-blocker framing
 - duplicated README hard-boundary code block
+
+Correction after operator feedback:
+
+- `TODO.md` was restored to the v3 single-timeline record shape.
+- Only the confirmed stale active-mainline block was removed from TODO and archived separately at `docs/archive/2026-04-30--TODO-stale-active-mainline.md`.
+- Historical Wave/Backlog records remain in TODO for continuity.
 
 Preserved before trimming:
 
