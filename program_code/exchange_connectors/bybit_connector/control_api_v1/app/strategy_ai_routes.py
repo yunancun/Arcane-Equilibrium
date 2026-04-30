@@ -304,8 +304,43 @@ def _fetch_min_notional(symbol: str) -> float | None:
     except Exception:
         return None
     if not isinstance(spec, dict):
+        spec = None
+    min_notional = _safe_float(spec.get("min_notional")) if spec else None
+    if min_notional is not None:
+        return min_notional
+    # The lightweight FastAPI singleton often has an empty instrument cache.
+    # For REST-only dust positions not present in paper_state, do a one-symbol
+    # public lookup so the GUI can still label below-minNotional residues.
+    try:
+        fetch = getattr(rc, "_get", None)
+        if not callable(fetch):
+            return None
+        payload = fetch(
+            "/v5/market/instruments-info",
+            {"category": "linear", "symbol": symbol},
+        )
+        result = payload.get("result") if isinstance(payload, dict) else None
+        items = result.get("list") if isinstance(result, dict) else None
+        item = items[0] if isinstance(items, list) and items else None
+        lot = item.get("lotSizeFilter") if isinstance(item, dict) else None
+        if isinstance(lot, dict):
+            return _safe_float(lot.get("minNotionalValue"))
+    except Exception:
         return None
-    return _safe_float(spec.get("min_notional"))
+    return None
+
+
+def _position_est_notional(p: dict[str, Any]) -> float | None:
+    """Best-effort qty × reference price for Bybit REST position rows."""
+    qty = _safe_float(p.get("size")) or _safe_float(p.get("qty"))
+    ref_price = (
+        _safe_float(p.get("markPrice"))
+        or _safe_float(p.get("avgPrice"))
+        or _safe_float(p.get("entry_price"))
+    )
+    if qty is not None and ref_price is not None and qty > 0.0 and ref_price > 0.0:
+        return qty * ref_price
+    return None
 
 
 def _attach_owner_strategy(positions: list, engine: str) -> list:
@@ -313,21 +348,21 @@ def _attach_owner_strategy(positions: list, engine: str) -> list:
     For synthetic owners (bybit_sync / orphan_adopted / orphan_frozen) additionally
     attach `frozen_reason` + `min_notional` + `est_notional` so the GUI can explain
     WHY a position is held without an active strategy tag.
-    No-op when position is not a dict or not found in the map (leaves as-is so the
-    GUI's fills-derived fallback still runs). Real strategy names skip the dust
-    enrichment path to keep the common payload lean.
+    No-op when position is not a dict. Symbols not found in the map are left
+    for the GUI's fills-derived fallback, except below-minNotional residues,
+    which are labelled as orphan_frozen directly. Real strategy names skip the
+    dust enrichment path to keep the common payload lean.
 
     用引擎 paper_state 的 owner_strategy 豐富每筆 Bybit 倉位 dict。
     對合成 owner (bybit_sync / orphan_adopted / orphan_frozen) 額外附加
     `frozen_reason` + `min_notional` + `est_notional`，供 GUI 解釋該倉位為何
-    持有卻無活躍策略標籤。非 dict 或映射未命中時跳過；真實策略名略過 dust
+    持有卻無活躍策略標籤。非 dict 時跳過；映射未命中時保留前端 fills fallback，
+    但低於 minNotional 的殘倉直接標為 orphan_frozen。真實策略名略過 dust
     enrichment 路徑以保持常態 payload lean。
     """
     if not isinstance(positions, list) or not positions:
         return positions
     owner_map = _engine_owner_strategy_map(engine)
-    if not owner_map:
-        return positions
     # Cache min_notional per symbol within one enrichment pass — get_instrument
     # is a cheap in-memory lookup, but avoid repeat calls when the same symbol
     # appears in multiple position rows (hedge-mode long/short).
@@ -340,6 +375,24 @@ def _attach_owner_strategy(positions: list, engine: str) -> list:
         sym = p.get("symbol")
         owner = owner_map.get(sym) if sym else None
         if not owner:
+            # GUI-DUST-ATTRIBUTION-FUP: some exchange-side residues are
+            # intentionally removed from paper_state by EVICT-ON-DUST because
+            # they are too small to close. They still appear in Bybit REST, so
+            # label them directly from minNotional instead of showing "--".
+            try:
+                est_notional = _position_est_notional(p)
+                if est_notional is None or not sym:
+                    continue
+                if sym not in min_notional_cache:
+                    min_notional_cache[sym] = _fetch_min_notional(sym)
+                min_notional = min_notional_cache.get(sym)
+                if min_notional is not None and est_notional < min_notional:
+                    p["owner_strategy"] = "orphan_frozen"
+                    p["frozen_reason"] = "dust_below_min_notional"
+                    p["min_notional"] = min_notional
+                    p["est_notional"] = est_notional
+            except Exception:
+                logger.exception("unmapped dust enrichment failed for symbol=%s", sym)
             continue
         p["owner_strategy"] = owner
         # Only synthetic owners get dust-status enrichment; real strategy names stay lean.
@@ -350,15 +403,7 @@ def _attach_owner_strategy(positions: list, engine: str) -> list:
         # 單倉位 try/except — 豐富化絕不可中斷 endpoint。
         try:
             # est_notional = qty × ref_price
-            qty = _safe_float(p.get("size")) or _safe_float(p.get("qty"))
-            ref_price = (
-                _safe_float(p.get("markPrice"))
-                or _safe_float(p.get("avgPrice"))
-                or _safe_float(p.get("entry_price"))
-            )
-            est_notional: float | None = None
-            if qty is not None and ref_price is not None and qty > 0.0 and ref_price > 0.0:
-                est_notional = qty * ref_price
+            est_notional = _position_est_notional(p)
 
             if sym not in min_notional_cache:
                 min_notional_cache[sym] = _fetch_min_notional(sym) if sym else None

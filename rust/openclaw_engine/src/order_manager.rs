@@ -707,7 +707,13 @@ impl OrderManager {
             }
         };
 
-        let qty = spec.round_qty(req.qty);
+        let is_qty_zero_full_close =
+            req.qty == 0.0 && req.reduce_only == Some(true) && req.close_on_trigger == Some(true);
+        let qty = if is_qty_zero_full_close {
+            0.0
+        } else {
+            spec.round_qty(req.qty)
+        };
 
         let price = match (req.order_type, req.price) {
             (OrderType::Limit, Some(p)) => Some(spec.round_price(p)),
@@ -721,14 +727,16 @@ impl OrderManager {
             _ => req.price.map(|p| spec.round_price(p)),
         };
 
-        let check_price = price.unwrap_or(0.0);
-        let (valid, reason) = spec.validate_order(qty, check_price);
-        if !valid {
-            return Err(BybitApiError::Business {
-                ret_code: -1,
-                ret_msg: format!("Order validation failed: {reason} / 訂單驗證失敗：{reason}"),
-                response: serde_json::json!(null),
-            });
+        if !is_qty_zero_full_close {
+            let check_price = price.unwrap_or(0.0);
+            let (valid, reason) = spec.validate_order(qty, check_price);
+            if !valid {
+                return Err(BybitApiError::Business {
+                    ret_code: -1,
+                    ret_msg: format!("Order validation failed: {reason} / 訂單驗證失敗：{reason}"),
+                    response: serde_json::json!(null),
+                });
+            }
         }
 
         Ok((qty, price))

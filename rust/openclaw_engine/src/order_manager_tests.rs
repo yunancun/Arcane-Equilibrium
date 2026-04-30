@@ -303,6 +303,43 @@ async fn test_validate_and_round_qty_too_small() {
 }
 
 #[tokio::test]
+async fn test_validate_and_round_allows_qty_zero_reduce_only_close_on_trigger() {
+    let cache = Arc::new(sample_cache());
+    let client = Arc::new(
+        BybitRestClient::new(
+            crate::bybit_rest_client::BybitEnvironment::Demo,
+            Some("test_key".to_string()),
+            Some("test_secret".to_string()),
+        )
+        .unwrap(),
+    );
+    let mgr = OrderManager::new(client, cache);
+
+    let req = CreateOrderRequest {
+        category: OrderCategory::Linear,
+        symbol: "BTCUSDT".to_string(),
+        side: OrderSide::Sell,
+        order_type: OrderType::Market,
+        qty: 0.0,
+        price: None,
+        time_in_force: None,
+        reduce_only: Some(true),
+        close_on_trigger: Some(true),
+        order_link_id: None,
+        trigger_price: None,
+        trigger_direction: None,
+        take_profit: None,
+        stop_loss: None,
+        tp_trigger_by: None,
+        sl_trigger_by: None,
+    };
+
+    let (qty, price) = mgr.validate_and_round(&req).await.unwrap();
+    assert_eq!(qty, 0.0);
+    assert!(price.is_none());
+}
+
+#[tokio::test]
 async fn test_validate_and_round_success() {
     let cache = Arc::new(sample_cache());
     let client = Arc::new(

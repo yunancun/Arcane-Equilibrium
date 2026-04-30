@@ -383,7 +383,8 @@ pub(super) fn spawn_order_dispatch(
 
     tokio::spawn(async move {
         while let Some(req) = shadow_rx.recv().await {
-            if req.qty <= 0.0 {
+            let is_qty_zero_full_close = req.is_close && req.qty == 0.0;
+            if req.qty < 0.0 || (req.qty == 0.0 && !is_qty_zero_full_close) {
                 warn!(symbol = %req.symbol, "order dispatch skipped: qty=0");
                 continue;
             }
@@ -397,19 +398,21 @@ pub(super) fn spawn_order_dispatch(
             // 本地 validate_order 在 req.price=None（市價單無限價）時跳過該檢查。使用
             // OrderDispatchRequest.price（最近 tick 參考價）作為名義值代理。
             // 否則低於最小值的訂單會空跑到 Bybit 才被 retCode=10001 拒絕。
-            if let Some(spec) = icache_for_check.get(&req.symbol) {
-                if spec.min_notional > 0.0 && req.price > 0.0 {
-                    let est_notional = req.qty * req.price;
-                    if est_notional < spec.min_notional {
-                        warn!(
-                            symbol = %req.symbol,
-                            qty = req.qty,
-                            ref_price = req.price,
-                            est_notional = est_notional,
-                            min_notional = spec.min_notional,
-                            "order dispatch skipped: notional below exchange minimum / 訂單跳過：名義值低於交易所最小值"
-                        );
-                        continue;
+            if !is_qty_zero_full_close {
+                if let Some(spec) = icache_for_check.get(&req.symbol) {
+                    if spec.min_notional > 0.0 && req.price > 0.0 {
+                        let est_notional = req.qty * req.price;
+                        if est_notional < spec.min_notional {
+                            warn!(
+                                symbol = %req.symbol,
+                                qty = req.qty,
+                                ref_price = req.price,
+                                est_notional = est_notional,
+                                min_notional = spec.min_notional,
+                                "order dispatch skipped: notional below exchange minimum / 訂單跳過：名義值低於交易所最小值"
+                            );
+                            continue;
+                        }
                     }
                 }
             }
@@ -463,7 +466,11 @@ pub(super) fn spawn_order_dispatch(
                 price: req.limit_price,
                 time_in_force: req.time_in_force,
                 reduce_only: if req.is_close { Some(true) } else { None },
-                close_on_trigger: None,
+                close_on_trigger: if is_qty_zero_full_close {
+                    Some(true)
+                } else {
+                    None
+                },
                 order_link_id: Some(req.order_link_id.clone()),
                 trigger_price: None,
                 trigger_direction: None,

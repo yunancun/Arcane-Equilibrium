@@ -106,3 +106,9 @@ YYYY-MM-DD HH:MM TZ
 - wrote PM plan `docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-29--ml_dream_edge_unblock_plan.md`
 - reordered TODO around MLDE-0..6: live-autonomy boundary, learning data contract, LinUCB intent-arm/reward loop, ML shadow scorer, Dream/Opportunity read-only producers, demo A/B advisory path, live promotion contract
 - no code changes in this docs checkpoint; existing Rust WIP files in the working tree were intentionally left unstaged
+
+2026-04-30 19:12 CEST
+- completed dust residual prevention locally after Demo APEUSDT RCA: true residue was below Bybit minNotional and could become REST-only after local dust eviction
+- implemented primary exchange full-close `qty=0 + reduceOnly + closeOnTrigger`, partial-reduce dust-residual skip, DUST_FROZEN preservation, REST-only dust GUI/API labeling, and sub-cent Demo PnL display
+- verification: Python owner enrichment 34 passed; Rust full lib 2381/0; `cargo check --workspace` passed; `git diff --check` passed
+- Linux instruction for this checkpoint: git fast-forward sync only; no rebuild/restart

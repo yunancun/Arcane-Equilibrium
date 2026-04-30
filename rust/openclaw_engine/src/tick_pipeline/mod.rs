@@ -1010,6 +1010,7 @@ mod pipeline_config;
 mod pipeline_ctor;
 mod pipeline_helpers;
 
+mod close_sizing;
 mod commands;
 mod on_tick;
 pub(crate) mod on_tick_helpers;
