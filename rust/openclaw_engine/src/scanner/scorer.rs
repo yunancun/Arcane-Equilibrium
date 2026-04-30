@@ -18,6 +18,7 @@ use crate::scanner::config::{
 };
 use crate::scanner::market_judgment::{build_strategy_judgments, classify_market_regime};
 use crate::scanner::sectors::{base_from_usdt_symbol, symbol_sector, STABLECOIN_BASES};
+use crate::scanner::strategy_policy::{apply_strategy_policy, ScannerStrategyPolicy};
 use crate::scanner::types::{ScoredSymbol, StrategyCategory, StrategyRouteJudgment};
 use std::collections::HashMap;
 
@@ -502,6 +503,28 @@ pub fn score_ticker(
     edge_routing_config: &EdgeRoutingConfig,
     market_judgment_config: &MarketJudgmentConfig,
 ) -> Option<ScoredSymbol> {
+    score_ticker_with_policy(
+        ticker,
+        btc_change_pct,
+        estimates,
+        hard_filter_config,
+        edge_routing_config,
+        market_judgment_config,
+        &ScannerStrategyPolicy::default(),
+    )
+}
+
+/// Build a scored symbol while applying scanner-side strategy policy.
+/// 套用 scanner 側策略政策後生成候選交易對評分。
+pub fn score_ticker_with_policy(
+    ticker: &TickerInfo,
+    btc_change_pct: f64,
+    estimates: &EdgeEstimates,
+    hard_filter_config: &HardFilters,
+    edge_routing_config: &EdgeRoutingConfig,
+    market_judgment_config: &MarketJudgmentConfig,
+    strategy_policy: &ScannerStrategyPolicy,
+) -> Option<ScoredSymbol> {
     // Apply hard filters first / 首先應用硬過濾器
     apply_hard_filters(ticker, hard_filter_config)?;
 
@@ -510,7 +533,7 @@ pub fn score_ticker(
 
     let mc = compute_market_conditions(ticker);
     let fitness = compute_fitness(&mc);
-    let strategy_judgments = build_strategy_judgments(
+    let mut strategy_judgments = build_strategy_judgments(
         &fitness,
         &mc,
         &ticker.symbol,
@@ -518,7 +541,8 @@ pub fn score_ticker(
         edge_routing_config,
         market_judgment_config,
     );
-    let (best_strategy, best_judgment) = [
+    apply_strategy_policy(&ticker.symbol, &mut strategy_judgments, strategy_policy);
+    let best_route = [
         (StrategyCategory::MaCrossover, "ma_crossover"),
         (StrategyCategory::GridTrading, "grid_trading"),
         (StrategyCategory::BbReversion, "bb_reversion"),
@@ -526,32 +550,37 @@ pub fn score_ticker(
     ]
     .into_iter()
     .filter_map(|(category, key)| strategy_judgments.get(key).cloned().map(|j| (category, j)))
-    .max_by(|a, b| a.1.final_score.total_cmp(&b.1.final_score))
-    .unwrap_or_else(|| {
-        let best_key = fitness.best.as_estimate_key();
-        let edge = apply_edge_bonus(
-            fitness.raw,
-            fitness.best,
-            &ticker.symbol,
-            estimates,
-            edge_routing_config,
-        );
-        (
-            fitness.best,
-            StrategyRouteJudgment {
-                strategy: best_key.to_string(),
-                fitness_score: fitness.raw,
-                final_score: edge.final_score,
-                edge_bps: edge.edge_bps,
-                edge_bonus: edge.bonus,
-                edge_n: edge.n,
-                edge_status: edge.edge_status,
-                route_mode: edge.route_mode,
-                market_status: edge.market_status,
-                route_reason: edge.route_reason,
-            },
-        )
-    });
+    .filter(|(_, judgment)| judgment.route_mode != "risk_policy_gate")
+    .max_by(|a, b| a.1.final_score.total_cmp(&b.1.final_score));
+    let (best_strategy, best_judgment) = match best_route {
+        Some(route) => route,
+        None if !strategy_judgments.contains_key(fitness.best.as_estimate_key()) => {
+            let best_key = fitness.best.as_estimate_key();
+            let edge = apply_edge_bonus(
+                fitness.raw,
+                fitness.best,
+                &ticker.symbol,
+                estimates,
+                edge_routing_config,
+            );
+            (
+                fitness.best,
+                StrategyRouteJudgment {
+                    strategy: best_key.to_string(),
+                    fitness_score: fitness.raw,
+                    final_score: edge.final_score,
+                    edge_bps: edge.edge_bps,
+                    edge_bonus: edge.bonus,
+                    edge_n: edge.n,
+                    edge_status: edge.edge_status,
+                    route_mode: edge.route_mode,
+                    market_status: edge.market_status,
+                    route_reason: edge.route_reason,
+                },
+            )
+        }
+        None => return None,
+    };
 
     // BTC change_pct already in percentage points (dir_pct * 100 from ticker)
     // Bybit's price24hPcnt is a ratio; mc.dir_pct is already in %, so we need

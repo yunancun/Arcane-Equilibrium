@@ -572,6 +572,16 @@ impl IntentProcessor {
         &self.risk_config
     }
 
+    /// Scanner/risk pre-gate helper for fresh strategy entries.
+    /// scanner/risk 新開倉前置門控 helper。
+    pub fn per_strategy_new_entry_rejection(&self, intent: &OrderIntent) -> Option<String> {
+        crate::config::per_strategy_new_entry_rejection(
+            &self.risk_config,
+            &intent.strategy,
+            &intent.symbol,
+        )
+    }
+
     /// EDGE-P2-3 Phase 1B-5: Push a fresh MakerKpiConfig snapshot (called by
     /// TickPipeline's `sync_maker_kpi_config_if_changed` on store version bump).
     /// The router reads this snapshot inside `process_with_features` when

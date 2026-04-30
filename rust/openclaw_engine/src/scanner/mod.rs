@@ -16,7 +16,9 @@ pub mod registry;
 pub mod runner;
 pub mod scorer;
 pub mod sectors;
+pub mod strategy_policy;
 pub mod types;
 
 pub use config::ScannerConfig;
+pub use strategy_policy::ScannerStrategyPolicyStores;
 pub use types::{ChurnState, ScanResult, ScoredSymbol, StrategyCategory};

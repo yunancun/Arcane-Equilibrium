@@ -25,7 +25,8 @@ use crate::edge_estimates::EdgeEstimates;
 use crate::market_data_client::MarketDataClient;
 use crate::scanner::config::ScannerConfig;
 use crate::scanner::registry::SymbolRegistry;
-use crate::scanner::scorer::{apply_correlation_filter, score_ticker};
+use crate::scanner::scorer::{apply_correlation_filter, score_ticker_with_policy};
+use crate::scanner::strategy_policy::ScannerStrategyPolicyStores;
 use crate::scanner::types::ScanResult;
 use crate::tick_pipeline::PipelineCommand;
 use crate::ws_client::WsTopicChange;
@@ -61,6 +62,7 @@ pub struct ScannerRunner {
     market_client: Arc<MarketDataClient>,
     edge_estimates: Arc<parking_lot::RwLock<EdgeEstimates>>,
     scanner_config: Arc<crate::config::ConfigStore<ScannerConfig>>,
+    strategy_policy_stores: ScannerStrategyPolicyStores,
     ws_tx: mpsc::UnboundedSender<WsTopicChange>,
     pipeline_cmd_tx: mpsc::UnboundedSender<PipelineCommand>,
     trading_tx: Option<mpsc::Sender<TradingMsg>>,
@@ -76,6 +78,7 @@ impl ScannerRunner {
         market_client: Arc<MarketDataClient>,
         edge_estimates: Arc<parking_lot::RwLock<EdgeEstimates>>,
         scanner_config: Arc<crate::config::ConfigStore<ScannerConfig>>,
+        strategy_policy_stores: ScannerStrategyPolicyStores,
         ws_tx: mpsc::UnboundedSender<WsTopicChange>,
         pipeline_cmd_tx: mpsc::UnboundedSender<PipelineCommand>,
         trading_tx: Option<mpsc::Sender<TradingMsg>>,
@@ -86,6 +89,7 @@ impl ScannerRunner {
             market_client,
             edge_estimates,
             scanner_config,
+            strategy_policy_stores,
             ws_tx,
             pipeline_cmd_tx,
             trading_tx,
@@ -121,6 +125,7 @@ impl ScannerRunner {
                 .as_millis() as u64;
 
             let config = self.scanner_config.load();
+            let strategy_policy = self.strategy_policy_stores.load_policy();
 
             // ── Step 1: Fetch all linear perp tickers / 獲取所有 linear perp 行情 ──
             let tickers = match self.market_client.get_tickers("linear", None).await {
@@ -150,13 +155,14 @@ impl ScannerRunner {
                 tickers
                     .iter()
                     .filter_map(|t| {
-                        score_ticker(
+                        score_ticker_with_policy(
                             t,
                             btc_change_pct,
                             &estimates_guard,
                             &config.hard_filters,
                             &config.edge_routing,
                             &config.market_judgment,
+                            &strategy_policy,
                         )
                     })
                     .collect()
@@ -345,6 +351,17 @@ mod tests {
             ))),
             edge_estimates: Arc::new(parking_lot::RwLock::new(EdgeEstimates::empty())),
             scanner_config: Arc::new(crate::config::ConfigStore::new(ScannerConfig::default())),
+            strategy_policy_stores: ScannerStrategyPolicyStores::new(
+                Arc::new(crate::config::ConfigStore::new(
+                    crate::config::RiskConfig::default(),
+                )),
+                Arc::new(crate::config::ConfigStore::new(
+                    crate::config::RiskConfig::default(),
+                )),
+                Arc::new(crate::config::ConfigStore::new(
+                    crate::config::RiskConfig::default(),
+                )),
+            ),
             ws_tx,
             pipeline_cmd_tx: cmd_tx,
             trading_tx: None,
