@@ -11,6 +11,7 @@
 //!   BTC 和 ETH 始終固定；其餘槽位由適配評分填充。
 
 pub mod config;
+pub mod market_judgment;
 pub mod registry;
 pub mod runner;
 pub mod scorer;

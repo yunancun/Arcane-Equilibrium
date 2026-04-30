@@ -102,6 +102,10 @@ from .checks_execution import (  # noqa: F401
     # [40] DB-truth realized-edge acceptance monitor for profitability repair.
     check_realized_edge_acceptance,
 )
+from .checks_scanner_market import (  # noqa: F401
+    # [41] scanner market-gate confirmation monitor.
+    check_scanner_market_gate_confirmation,
+)
 
 __all__ = [
     "main",
@@ -158,4 +162,6 @@ __all__ = [
     "check_strategy_name_cardinality_drift",
     # [40] realized edge acceptance
     "check_realized_edge_acceptance",
+    # [41] scanner market-gate confirmation
+    "check_scanner_market_gate_confirmation",
 ]

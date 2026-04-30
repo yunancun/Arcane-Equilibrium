@@ -273,9 +273,26 @@ impl SymbolRegistry {
 mod tests {
     use super::*;
     use crate::scanner::config::AntiChurnConfig;
-    use crate::scanner::types::{ScoredSymbol, StrategyCategory};
+    use crate::scanner::types::{ScoredSymbol, StrategyCategory, StrategyRouteJudgment};
+    use std::collections::BTreeMap;
 
     fn make_scored(symbol: &str, score: f64) -> ScoredSymbol {
+        let mut strategy_judgments = BTreeMap::new();
+        strategy_judgments.insert(
+            "grid_trading".to_string(),
+            StrategyRouteJudgment {
+                strategy: "grid_trading".to_string(),
+                fitness_score: score - 5.0,
+                final_score: score,
+                edge_bps: None,
+                edge_bonus: 5.0,
+                edge_n: 0,
+                edge_status: "unexplored".to_string(),
+                route_mode: "exploration".to_string(),
+                market_status: "compatible".to_string(),
+                route_reason: "test".to_string(),
+            },
+        );
         ScoredSymbol {
             symbol: symbol.to_string(),
             final_score: score,
@@ -289,12 +306,20 @@ mod tests {
             dir_pct: 2.0,
             range_pct: 8.0,
             fr_bps: 5.0,
+            signed_dir_pct: 2.0,
+            trend_score: 0.25,
+            range_score: 0.5,
+            shock_score: 0.05,
+            market_regime: "range_bound".to_string(),
             turnover_24h: 60_000_000.0,
             edge_bonus: 5.0,
             edge_n: 0,
             edge_bps: None,
             edge_status: "unexplored".to_string(),
             route_mode: "exploration".to_string(),
+            market_status: "compatible".to_string(),
+            route_reason: "test".to_string(),
+            strategy_judgments,
             beta_proxy: Some(0.5),
             sector: "other".to_string(),
         }

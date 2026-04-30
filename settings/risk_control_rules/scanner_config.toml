@@ -44,3 +44,33 @@ robust_negative_score_cap = 35.0
 posterior_lcb_z = 1.0
 posterior_min_std_bps = 20.0
 posterior_negative_lcb_threshold_bps = 0.0
+
+[market_judgment]
+# Strategy-specific market compatibility gate. The scanner still selects a
+# symbol universe, but demo/live_demo new opens are checked against the actual
+# strategy that emitted the intent, not only the scanner's best_strategy.
+enabled = true
+gate_score_cap = 25.0
+
+# Grid wants oscillation, not one-way drift.
+grid_max_trend_score = 0.55
+grid_max_directional_efficiency = 0.55
+grid_max_dir_pct = 3.5
+grid_min_range_pct = 3.0
+
+# MA / breakout need trend quality; reversion needs range without trend dominance.
+trend_min_trend_score = 0.45
+trend_min_dir_pct = 0.8
+reversion_min_range_pct = 4.0
+reversion_max_trend_score = 0.60
+breakout_min_trend_score = 0.50
+breakout_min_dir_pct = 1.8
+
+# Funding arb should not enter while spot/perp price is already running hard.
+funding_max_dir_pct = 4.0
+funding_max_trend_score = 0.65
+
+# Catch BIOUSDT-like cells before robust_negative_min_trades=30 matures.
+immature_negative_min_trades = 10
+immature_negative_bps_threshold = 0.0
+immature_negative_score_cap = 20.0

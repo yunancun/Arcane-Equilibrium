@@ -13,9 +13,12 @@
 
 use crate::edge_estimates::{CellEstimate, EdgeEstimates};
 use crate::market_data_client::types::TickerInfo;
-use crate::scanner::config::{CorrelationLimits, EdgeRoutingConfig, HardFilters};
+use crate::scanner::config::{
+    CorrelationLimits, EdgeRoutingConfig, HardFilters, MarketJudgmentConfig,
+};
+use crate::scanner::market_judgment::{build_strategy_judgments, classify_market_regime};
 use crate::scanner::sectors::{base_from_usdt_symbol, symbol_sector, STABLECOIN_BASES};
-use crate::scanner::types::{ScoredSymbol, StrategyCategory};
+use crate::scanner::types::{ScoredSymbol, StrategyCategory, StrategyRouteJudgment};
 use std::collections::HashMap;
 
 // ─── Hard Filters ─────────────────────────────────────────────────────────────
@@ -65,6 +68,8 @@ pub fn apply_hard_filters(ticker: &TickerInfo, config: &HardFilters) -> Option<(
 /// Bybit 的 price24hPcnt 是小數分數（0.0077 = +0.77%）。乘以 100 得到百分比點。
 #[derive(Debug, Clone)]
 pub struct MarketConditions {
+    /// Signed net directional move % / 帶方向的淨移動百分比
+    pub signed_dir_pct: f64,
     /// Net directional move % (absolute value) / 淨方向移動百分比（絕對值）
     pub dir_pct: f64,
     /// 24h total range % = (high - low) / price * 100 / 24h 總 range 百分比
@@ -73,6 +78,14 @@ pub struct MarketConditions {
     pub de: f64,
     /// Funding rate absolute value in bps / 資金費率絕對值（基點）
     pub fr_bps: f64,
+    /// Signed funding rate in bps / 帶方向資金費率（基點）
+    pub signed_fr_bps: f64,
+    /// Trend score [0, 1] / 趨勢分數
+    pub trend_score: f64,
+    /// Range / mean-reversion score [0, 1] / 區間震盪分數
+    pub range_score: f64,
+    /// One-way shock score [0, 1] / 單邊衝擊分數
+    pub shock_score: f64,
     /// 24h turnover / 24h 成交額
     pub turnover_24h: f64,
 }
@@ -82,7 +95,8 @@ pub struct MarketConditions {
 pub fn compute_market_conditions(ticker: &TickerInfo) -> MarketConditions {
     // Bybit price24hPcnt is a ratio (e.g. 0.0077 = 0.77%), convert to %
     // Bybit price24hPcnt 是比率（例如 0.0077 = 0.77%），轉換為百分比
-    let dir_pct = (ticker.price_change_24h_pct * 100.0).abs();
+    let signed_dir_pct = ticker.price_change_24h_pct * 100.0;
+    let dir_pct = signed_dir_pct.abs();
 
     let price = ticker.last_price.max(1e-12);
     let range_pct = ((ticker.high_price_24h - ticker.low_price_24h) / price * 100.0).max(0.0);
@@ -93,13 +107,22 @@ pub fn compute_market_conditions(ticker: &TickerInfo) -> MarketConditions {
         0.0
     };
 
-    let fr_bps = (ticker.funding_rate * 10_000.0).abs();
+    let signed_fr_bps = ticker.funding_rate * 10_000.0;
+    let fr_bps = signed_fr_bps.abs();
+    let trend_score = (0.60 * de + 0.40 * (dir_pct / 6.0).clamp(0.0, 1.0)).clamp(0.0, 1.0);
+    let range_score = ((1.0 - de) * (range_pct / 12.0).clamp(0.0, 1.0)).clamp(0.0, 1.0);
+    let shock_score = (de * (dir_pct / 8.0).clamp(0.0, 1.0)).clamp(0.0, 1.0);
 
     MarketConditions {
+        signed_dir_pct,
         dir_pct,
         range_pct,
         de,
         fr_bps,
+        signed_fr_bps,
+        trend_score,
+        range_score,
+        shock_score,
         turnover_24h: ticker.turnover_24h,
     }
 }
@@ -189,6 +212,18 @@ pub fn f_bkout(mc: &MarketConditions) -> f64 {
     (base - funding_penalty - trend_penalty).max(0.0)
 }
 
+/// F_funding_arb: funding-arb market fitness proxy [0, 100].
+/// Requires meaningful funding while penalizing strong one-way spot movement.
+/// F_funding_arb：funding arb 行情適配 proxy；需有資金費率，同時懲罰單邊行情。
+pub fn f_funding_arb(mc: &MarketConditions) -> f64 {
+    if mc.fr_bps < 3.0 {
+        return 0.0;
+    }
+    let funding_base = ((mc.fr_bps - 3.0) / 17.0).clamp(0.0, 1.0) * 100.0;
+    let trend_penalty = mc.trend_score * 45.0 + (mc.dir_pct / 8.0).clamp(0.0, 1.0) * 20.0;
+    (funding_base - trend_penalty).max(0.0)
+}
+
 // ─── Full fitness bundle ───────────────────────────────────────────────────────
 
 /// All four strategy fitness scores for one symbol.
@@ -241,8 +276,10 @@ pub struct EdgeFeedback {
     pub bonus: f64,
     pub n: u32,
     pub edge_bps: Option<f64>,
-    pub edge_status: &'static str,
-    pub route_mode: &'static str,
+    pub edge_status: String,
+    pub route_mode: String,
+    pub market_status: String,
+    pub route_reason: String,
 }
 
 fn posterior_lcb_bps(cell: &CellEstimate, config: &EdgeRoutingConfig) -> Option<f64> {
@@ -272,7 +309,24 @@ pub fn apply_edge_bonus(
     estimates: &EdgeEstimates,
     config: &EdgeRoutingConfig,
 ) -> EdgeFeedback {
-    let strategy_key = best_strategy.as_estimate_key();
+    apply_edge_bonus_for_strategy(
+        raw,
+        best_strategy.as_estimate_key(),
+        symbol,
+        estimates,
+        config,
+    )
+}
+
+/// Apply edge feedback for an explicit strategy key.
+/// 對指定策略鍵套用 edge 回饋。
+pub fn apply_edge_bonus_for_strategy(
+    raw: f64,
+    strategy_key: &str,
+    symbol: &str,
+    estimates: &EdgeEstimates,
+    config: &EdgeRoutingConfig,
+) -> EdgeFeedback {
     match estimates.get_cell(strategy_key, symbol) {
         Some(cell) => {
             let bonus =
@@ -285,23 +339,43 @@ pub fn apply_edge_bonus(
                     .map(|lcb| lcb < config.posterior_negative_lcb_threshold_bps)
                     .unwrap_or(false);
             let robust_negative = mature && (point_negative || posterior_negative);
-            let (edge_status, route_mode) = if robust_negative {
+            let (edge_status, route_mode, route_reason) = if robust_negative {
                 final_score = final_score.min(config.robust_negative_score_cap);
                 if posterior_negative && !point_negative {
-                    ("posterior_negative", "exploration_only")
+                    (
+                        "posterior_negative",
+                        "exploration_only",
+                        format!(
+                            "posterior_negative_edge:n={} bps={:.2}",
+                            cell.n_trades, cell.shrunk_bps
+                        ),
+                    )
                 } else {
-                    ("robust_negative", "exploration_only")
+                    (
+                        "robust_negative",
+                        "exploration_only",
+                        format!(
+                            "robust_negative_edge:n={} bps={:.2}",
+                            cell.n_trades, cell.shrunk_bps
+                        ),
+                    )
                 }
             } else {
-                ("known", "main")
+                (
+                    "known",
+                    "main",
+                    format!("known_edge:n={} bps={:.2}", cell.n_trades, cell.shrunk_bps),
+                )
             };
             EdgeFeedback {
                 final_score,
                 bonus,
                 n: cell.n_trades.min(u64::from(u32::MAX)) as u32,
                 edge_bps: Some(cell.shrunk_bps),
-                edge_status,
-                route_mode,
+                edge_status: edge_status.to_string(),
+                route_mode: route_mode.to_string(),
+                market_status: "compatible".to_string(),
+                route_reason,
             }
         }
         None => {
@@ -312,8 +386,10 @@ pub fn apply_edge_bonus(
                 bonus: config.unexplored_bonus,
                 n: 0,
                 edge_bps: None,
-                edge_status: "unexplored",
-                route_mode: "exploration",
+                edge_status: "unexplored".to_string(),
+                route_mode: "exploration".to_string(),
+                market_status: "compatible".to_string(),
+                route_reason: "edge_unexplored".to_string(),
             }
         }
     }
@@ -424,6 +500,7 @@ pub fn score_ticker(
     estimates: &EdgeEstimates,
     hard_filter_config: &HardFilters,
     edge_routing_config: &EdgeRoutingConfig,
+    market_judgment_config: &MarketJudgmentConfig,
 ) -> Option<ScoredSymbol> {
     // Apply hard filters first / 首先應用硬過濾器
     apply_hard_filters(ticker, hard_filter_config)?;
@@ -433,13 +510,48 @@ pub fn score_ticker(
 
     let mc = compute_market_conditions(ticker);
     let fitness = compute_fitness(&mc);
-    let edge = apply_edge_bonus(
-        fitness.raw,
-        fitness.best,
+    let strategy_judgments = build_strategy_judgments(
+        &fitness,
+        &mc,
         &ticker.symbol,
         estimates,
         edge_routing_config,
+        market_judgment_config,
     );
+    let (best_strategy, best_judgment) = [
+        (StrategyCategory::MaCrossover, "ma_crossover"),
+        (StrategyCategory::GridTrading, "grid_trading"),
+        (StrategyCategory::BbReversion, "bb_reversion"),
+        (StrategyCategory::BbBreakout, "bb_breakout"),
+    ]
+    .into_iter()
+    .filter_map(|(category, key)| strategy_judgments.get(key).cloned().map(|j| (category, j)))
+    .max_by(|a, b| a.1.final_score.total_cmp(&b.1.final_score))
+    .unwrap_or_else(|| {
+        let best_key = fitness.best.as_estimate_key();
+        let edge = apply_edge_bonus(
+            fitness.raw,
+            fitness.best,
+            &ticker.symbol,
+            estimates,
+            edge_routing_config,
+        );
+        (
+            fitness.best,
+            StrategyRouteJudgment {
+                strategy: best_key.to_string(),
+                fitness_score: fitness.raw,
+                final_score: edge.final_score,
+                edge_bps: edge.edge_bps,
+                edge_bonus: edge.bonus,
+                edge_n: edge.n,
+                edge_status: edge.edge_status,
+                route_mode: edge.route_mode,
+                market_status: edge.market_status,
+                route_reason: edge.route_reason,
+            },
+        )
+    });
 
     // BTC change_pct already in percentage points (dir_pct * 100 from ticker)
     // Bybit's price24hPcnt is a ratio; mc.dir_pct is already in %, so we need
@@ -453,9 +565,9 @@ pub fn score_ticker(
 
     Some(ScoredSymbol {
         symbol: ticker.symbol.clone(),
-        final_score: edge.final_score,
-        raw_score: fitness.raw,
-        best_strategy: fitness.best,
+        final_score: best_judgment.final_score,
+        raw_score: best_judgment.fitness_score,
+        best_strategy,
         f_ma: fitness.f_ma,
         f_grid: fitness.f_grid,
         f_bbrv: fitness.f_bbrv,
@@ -464,12 +576,20 @@ pub fn score_ticker(
         dir_pct: mc.dir_pct,
         range_pct: mc.range_pct,
         fr_bps: mc.fr_bps,
+        signed_dir_pct: mc.signed_dir_pct,
+        trend_score: mc.trend_score,
+        range_score: mc.range_score,
+        shock_score: mc.shock_score,
+        market_regime: classify_market_regime(&mc).to_string(),
         turnover_24h: mc.turnover_24h,
-        edge_bonus: edge.bonus,
-        edge_n: edge.n,
-        edge_bps: edge.edge_bps,
-        edge_status: edge.edge_status.to_string(),
-        route_mode: edge.route_mode.to_string(),
+        edge_bonus: best_judgment.edge_bonus,
+        edge_n: best_judgment.edge_n,
+        edge_bps: best_judgment.edge_bps,
+        edge_status: best_judgment.edge_status,
+        route_mode: best_judgment.route_mode,
+        market_status: best_judgment.market_status,
+        route_reason: best_judgment.route_reason,
+        strategy_judgments,
         beta_proxy: bp,
         sector,
     })
@@ -482,7 +602,10 @@ mod tests {
     use super::*;
     use crate::edge_estimates::EdgeEstimates;
     use crate::market_data_client::types::TickerInfo;
-    use crate::scanner::config::{CorrelationLimits, EdgeRoutingConfig, HardFilters};
+    use crate::scanner::config::{
+        CorrelationLimits, EdgeRoutingConfig, HardFilters, MarketJudgmentConfig,
+    };
+    use std::collections::BTreeMap;
 
     fn make_ticker(
         symbol: &str,
@@ -514,6 +637,21 @@ mod tests {
 
     fn default_hard_filters() -> HardFilters {
         HardFilters::default()
+    }
+
+    fn make_mc(dir_pct: f64, range_pct: f64, de: f64, fr_bps: f64) -> MarketConditions {
+        MarketConditions {
+            signed_dir_pct: dir_pct,
+            dir_pct,
+            range_pct,
+            de,
+            fr_bps,
+            signed_fr_bps: fr_bps,
+            trend_score: (0.60 * de + 0.40 * (dir_pct / 6.0).clamp(0.0, 1.0)).clamp(0.0, 1.0),
+            range_score: ((1.0 - de) * (range_pct / 12.0).clamp(0.0, 1.0)).clamp(0.0, 1.0),
+            shock_score: (de * (dir_pct / 8.0).clamp(0.0, 1.0)).clamp(0.0, 1.0),
+            turnover_24h: 60_000_000.0,
+        }
     }
 
     // ── Hard filter tests ──────────────────────────────────────────────────────
@@ -622,13 +760,7 @@ mod tests {
     #[test]
     fn test_fitness_ma_zero_if_low_dir_pct() {
         // dir_pct < 0.5% → F_ma = 0 (M-3 fix: threshold lowered from 1.5% to 0.5%)
-        let mc = MarketConditions {
-            dir_pct: 0.3,
-            range_pct: 5.0,
-            de: 0.2,
-            fr_bps: 5.0,
-            turnover_24h: 60_000_000.0,
-        };
+        let mc = make_mc(0.3, 5.0, 0.2, 5.0);
         assert_eq!(f_ma(&mc), 0.0);
         // dir_pct at 1.0% (previously filtered by 1.5% gate) should now be non-zero
         let mc2 = MarketConditions { dir_pct: 1.0, ..mc };
@@ -637,13 +769,7 @@ mod tests {
 
     #[test]
     fn test_fitness_ma_nonzero_clean_trend() {
-        let mc = MarketConditions {
-            dir_pct: 8.0,
-            range_pct: 8.0,
-            de: 1.0, // perfect trend / 完美趨勢
-            fr_bps: 5.0,
-            turnover_24h: 60_000_000.0,
-        };
+        let mc = make_mc(8.0, 8.0, 1.0, 5.0); // perfect trend / 完美趨勢
         let score = f_ma(&mc);
         assert!(score > 70.0, "clean trend should score high: {score}");
     }
@@ -651,63 +777,33 @@ mod tests {
     #[test]
     fn test_fitness_grid_zero_if_trending() {
         // dir_pct >= 8.0 → F_grid = 0
-        let mc = MarketConditions {
-            dir_pct: 9.0,
-            range_pct: 10.0,
-            de: 0.9,
-            fr_bps: 5.0,
-            turnover_24h: 60_000_000.0,
-        };
+        let mc = make_mc(9.0, 10.0, 0.9, 5.0);
         assert_eq!(f_grid(&mc), 0.0);
     }
 
     #[test]
     fn test_fitness_grid_zero_if_small_range() {
         // range_pct < 3.0 → F_grid = 0
-        let mc = MarketConditions {
-            dir_pct: 1.0,
-            range_pct: 2.0,
-            de: 0.5,
-            fr_bps: 5.0,
-            turnover_24h: 60_000_000.0,
-        };
+        let mc = make_mc(1.0, 2.0, 0.5, 5.0);
         assert_eq!(f_grid(&mc), 0.0);
     }
 
     #[test]
     fn test_fitness_bbrv_range_band_too_small() {
-        let mc = MarketConditions {
-            dir_pct: 1.0,
-            range_pct: 3.0, // < 4.0 → 0
-            de: 0.1,
-            fr_bps: 5.0,
-            turnover_24h: 60_000_000.0,
-        };
+        let mc = make_mc(1.0, 3.0, 0.1, 5.0); // < 4.0 → 0
         assert_eq!(f_bbrv(&mc), 0.0);
     }
 
     #[test]
     fn test_fitness_bbrv_range_band_too_large() {
-        let mc = MarketConditions {
-            dir_pct: 1.0,
-            range_pct: 25.0, // > 20.0 → 0
-            de: 0.1,
-            fr_bps: 5.0,
-            turnover_24h: 60_000_000.0,
-        };
+        let mc = make_mc(1.0, 25.0, 0.1, 5.0); // > 20.0 → 0
         assert_eq!(f_bbrv(&mc), 0.0);
     }
 
     #[test]
     fn test_fitness_bbrv_snapback_bonus() {
         // fr_bps > 15 AND dir_pct < 3 → 1.2 multiplier
-        let mc = MarketConditions {
-            dir_pct: 1.0,
-            range_pct: 8.0,
-            de: 0.1,
-            fr_bps: 20.0,
-            turnover_24h: 60_000_000.0,
-        };
+        let mc = make_mc(1.0, 8.0, 0.1, 20.0);
         let without = (1.0 - 0.1) * (8.0_f64 * 8.0).min(100.0);
         let with_bonus = f_bbrv(&mc);
         assert!(
@@ -719,33 +815,15 @@ mod tests {
     #[test]
     fn test_fitness_bkout_zero_if_low_dir() {
         // dir_pct <= 2.0 → F_bkout = 0
-        let mc = MarketConditions {
-            dir_pct: 1.5,
-            range_pct: 8.0,
-            de: 0.2,
-            fr_bps: 5.0,
-            turnover_24h: 60_000_000.0,
-        };
+        let mc = make_mc(1.5, 8.0, 0.2, 5.0);
         assert_eq!(f_bkout(&mc), 0.0);
     }
 
     #[test]
     fn test_fitness_bkout_penalty_high_de() {
         // DE > 0.7 → penalty applies; compare with low-DE score
-        let mc_high_de = MarketConditions {
-            dir_pct: 5.0,
-            range_pct: 8.0,
-            de: 0.8,
-            fr_bps: 5.0,
-            turnover_24h: 60_000_000.0,
-        };
-        let mc_low_de = MarketConditions {
-            dir_pct: 5.0,
-            range_pct: 8.0,
-            de: 0.5,
-            fr_bps: 5.0,
-            turnover_24h: 60_000_000.0,
-        };
+        let mc_high_de = make_mc(5.0, 8.0, 0.8, 5.0);
+        let mc_low_de = make_mc(5.0, 8.0, 0.5, 5.0);
         let high_de_score = f_bkout(&mc_high_de);
         let low_de_score = f_bkout(&mc_low_de);
         assert!(
@@ -855,6 +933,43 @@ mod tests {
         assert!((edge.final_score - 35.0).abs() < 1e-10);
     }
 
+    #[test]
+    fn test_score_ticker_selects_best_judged_route_not_raw_regime_mismatch() {
+        let ticker = make_ticker(
+            "RANGEBOOMUSDT",
+            100.0,
+            99.99,
+            100.01,
+            80_000_000.0,
+            110.0,
+            90.0,
+            0.0001,
+            0.10,
+        );
+        let scored = score_ticker(
+            &ticker,
+            2.0,
+            &EdgeEstimates::empty(),
+            &default_hard_filters(),
+            &EdgeRoutingConfig::default(),
+            &MarketJudgmentConfig::default(),
+        )
+        .expect("scored symbol");
+        let reversion = scored
+            .strategy_judgments
+            .get("bb_reversion")
+            .expect("bb_reversion judgment");
+
+        assert_eq!(reversion.route_mode, "market_gate");
+        assert_ne!(scored.best_strategy, StrategyCategory::BbReversion);
+        assert!(
+            scored.final_score > reversion.final_score,
+            "scanner should select the compatible judged route, scored={} reversion={}",
+            scored.final_score,
+            reversion.final_score
+        );
+    }
+
     // ── beta_proxy tests ───────────────────────────────────────────────────────
 
     #[test]
@@ -888,6 +1003,79 @@ mod tests {
         assert!((bp + 0.5).abs() < 1e-10);
     }
 
+    fn test_candidate(
+        symbol: &str,
+        final_score: f64,
+        raw_score: f64,
+        best_strategy: StrategyCategory,
+        beta_proxy: Option<f64>,
+        sector: &str,
+    ) -> ScoredSymbol {
+        let strategy_key = best_strategy.as_estimate_key().to_string();
+        let mut strategy_judgments = BTreeMap::new();
+        strategy_judgments.insert(
+            strategy_key.clone(),
+            StrategyRouteJudgment {
+                strategy: strategy_key,
+                fitness_score: raw_score,
+                final_score,
+                edge_bps: None,
+                edge_bonus: final_score - raw_score,
+                edge_n: 0,
+                edge_status: "unexplored".to_string(),
+                route_mode: "exploration".to_string(),
+                market_status: "compatible".to_string(),
+                route_reason: "test".to_string(),
+            },
+        );
+        ScoredSymbol {
+            symbol: symbol.to_string(),
+            final_score,
+            raw_score,
+            best_strategy,
+            f_ma: if best_strategy == StrategyCategory::MaCrossover {
+                raw_score
+            } else {
+                0.0
+            },
+            f_grid: if best_strategy == StrategyCategory::GridTrading {
+                raw_score
+            } else {
+                0.0
+            },
+            f_bbrv: if best_strategy == StrategyCategory::BbReversion {
+                raw_score
+            } else {
+                0.0
+            },
+            f_bkout: if best_strategy == StrategyCategory::BbBreakout {
+                raw_score
+            } else {
+                0.0
+            },
+            de: 0.2,
+            dir_pct: 2.0,
+            range_pct: 8.0,
+            fr_bps: 5.0,
+            signed_dir_pct: 2.0,
+            trend_score: 0.25,
+            range_score: 0.5,
+            shock_score: 0.05,
+            market_regime: "range_bound".to_string(),
+            turnover_24h: 60_000_000.0,
+            edge_bonus: final_score - raw_score,
+            edge_n: 0,
+            edge_bps: None,
+            edge_status: "unexplored".to_string(),
+            route_mode: "exploration".to_string(),
+            market_status: "compatible".to_string(),
+            route_reason: "test".to_string(),
+            strategy_judgments,
+            beta_proxy,
+            sector: sector.to_string(),
+        }
+    }
+
     // ── Correlation filter tests ───────────────────────────────────────────────
 
     #[test]
@@ -899,27 +1087,15 @@ mod tests {
         // Create 3 candidates all in "meme" sector
         let candidates: Vec<ScoredSymbol> = vec!["DOGEUSDT", "SHIBUSDT", "PEPEUSDT"]
             .into_iter()
-            .map(|sym| ScoredSymbol {
-                symbol: sym.to_string(),
-                final_score: 80.0,
-                raw_score: 75.0,
-                best_strategy: StrategyCategory::GridTrading,
-                f_ma: 0.0,
-                f_grid: 75.0,
-                f_bbrv: 0.0,
-                f_bkout: 0.0,
-                de: 0.1,
-                dir_pct: 2.0,
-                range_pct: 8.0,
-                fr_bps: 5.0,
-                turnover_24h: 60_000_000.0,
-                edge_bonus: 5.0,
-                edge_n: 0,
-                edge_bps: None,
-                edge_status: "unexplored".to_string(),
-                route_mode: "exploration".to_string(),
-                beta_proxy: Some(0.5),
-                sector: "meme".to_string(),
+            .map(|sym| {
+                test_candidate(
+                    sym,
+                    80.0,
+                    75.0,
+                    StrategyCategory::GridTrading,
+                    Some(0.5),
+                    "meme",
+                )
             })
             .collect();
 
@@ -935,27 +1111,15 @@ mod tests {
     fn test_correlation_cap_max_slots() {
         let config = CorrelationLimits::default();
         let candidates: Vec<ScoredSymbol> = (0..15)
-            .map(|i| ScoredSymbol {
-                symbol: format!("COIN{i}USDT"),
-                final_score: 80.0 - i as f64,
-                raw_score: 75.0,
-                best_strategy: StrategyCategory::GridTrading,
-                f_ma: 0.0,
-                f_grid: 75.0,
-                f_bbrv: 0.0,
-                f_bkout: 0.0,
-                de: 0.1,
-                dir_pct: 2.0,
-                range_pct: 8.0,
-                fr_bps: 5.0,
-                turnover_24h: 60_000_000.0,
-                edge_bonus: 5.0,
-                edge_n: 0,
-                edge_bps: None,
-                edge_status: "unexplored".to_string(),
-                route_mode: "exploration".to_string(),
-                beta_proxy: Some(0.5),
-                sector: format!("sector_{}", i % 5),
+            .map(|i| {
+                test_candidate(
+                    &format!("COIN{i}USDT"),
+                    80.0 - i as f64,
+                    75.0,
+                    StrategyCategory::GridTrading,
+                    Some(0.5),
+                    &format!("sector_{}", i % 5),
+                )
             })
             .collect();
 
@@ -969,50 +1133,22 @@ mod tests {
         let config = CorrelationLimits::default();
         let pinned = vec!["BTCUSDT".to_string()];
         let candidates = vec![
-            ScoredSymbol {
-                symbol: "BTCUSDT".to_string(),
-                final_score: 99.0,
-                raw_score: 94.0,
-                best_strategy: StrategyCategory::MaCrossover,
-                f_ma: 94.0,
-                f_grid: 0.0,
-                f_bbrv: 0.0,
-                f_bkout: 0.0,
-                de: 0.9,
-                dir_pct: 8.0,
-                range_pct: 9.0,
-                fr_bps: 3.0,
-                turnover_24h: 1_000_000_000.0,
-                edge_bonus: 5.0,
-                edge_n: 0,
-                edge_bps: None,
-                edge_status: "unexplored".to_string(),
-                route_mode: "exploration".to_string(),
-                beta_proxy: Some(1.0),
-                sector: "l1_infra".to_string(),
-            },
-            ScoredSymbol {
-                symbol: "SOLUSDT".to_string(),
-                final_score: 80.0,
-                raw_score: 75.0,
-                best_strategy: StrategyCategory::MaCrossover,
-                f_ma: 75.0,
-                f_grid: 0.0,
-                f_bbrv: 0.0,
-                f_bkout: 0.0,
-                de: 0.8,
-                dir_pct: 6.0,
-                range_pct: 7.5,
-                fr_bps: 5.0,
-                turnover_24h: 200_000_000.0,
-                edge_bonus: 5.0,
-                edge_n: 0,
-                edge_bps: None,
-                edge_status: "unexplored".to_string(),
-                route_mode: "exploration".to_string(),
-                beta_proxy: Some(1.2),
-                sector: "l1_infra".to_string(),
-            },
+            test_candidate(
+                "BTCUSDT",
+                99.0,
+                94.0,
+                StrategyCategory::MaCrossover,
+                Some(1.0),
+                "l1_infra",
+            ),
+            test_candidate(
+                "SOLUSDT",
+                80.0,
+                75.0,
+                StrategyCategory::MaCrossover,
+                Some(1.2),
+                "l1_infra",
+            ),
         ];
 
         let selected = apply_correlation_filter(candidates, &pinned, 5, &config);

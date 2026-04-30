@@ -235,6 +235,70 @@ impl TickPipeline {
                                 continue;
                             }
                         }
+                        let scanner_ctx: Option<IntentScannerContext> =
+                            self.symbol_registry.as_ref().and_then(|reg| {
+                                let scan = reg.last_scan()?;
+                                let candidate =
+                                    scan.candidates.iter().find(|c| c.symbol == intent.symbol)?;
+                                let strategy_judgment =
+                                    candidate.strategy_judgments.get(intent.strategy.as_str());
+                                Some(IntentScannerContext {
+                                    scan_id: scan.scan_id.clone(),
+                                    best_strategy: candidate
+                                        .best_strategy
+                                        .as_estimate_key()
+                                        .to_string(),
+                                    intent_strategy: intent.strategy.clone(),
+                                    edge_bps: strategy_judgment
+                                        .map(|j| j.edge_bps)
+                                        .unwrap_or(candidate.edge_bps),
+                                    edge_n: strategy_judgment
+                                        .map(|j| j.edge_n)
+                                        .unwrap_or(candidate.edge_n),
+                                    edge_status: strategy_judgment
+                                        .map(|j| j.edge_status.clone())
+                                        .unwrap_or_else(|| candidate.edge_status.clone()),
+                                    route_mode: strategy_judgment
+                                        .map(|j| j.route_mode.clone())
+                                        .unwrap_or_else(|| candidate.route_mode.clone()),
+                                    market_status: strategy_judgment
+                                        .map(|j| j.market_status.clone())
+                                        .unwrap_or_else(|| candidate.market_status.clone()),
+                                    route_reason: strategy_judgment
+                                        .map(|j| j.route_reason.clone())
+                                        .unwrap_or_else(|| candidate.route_reason.clone()),
+                                    final_score: strategy_judgment
+                                        .map(|j| j.final_score)
+                                        .unwrap_or(candidate.final_score),
+                                    raw_score: strategy_judgment
+                                        .map(|j| j.fitness_score)
+                                        .unwrap_or(candidate.raw_score),
+                                })
+                            });
+                        if matches!(em, "demo" | "live_demo") {
+                            if let Some(ref sctx) = scanner_ctx {
+                                let blocked = matches!(
+                                    sctx.route_mode.as_str(),
+                                    "market_gate" | "exploration_only"
+                                );
+                                if blocked {
+                                    let reason = format!(
+                                        "scanner_market_gate:{}:{}",
+                                        sctx.market_status, sctx.route_reason
+                                    );
+                                    strategy.on_rejection(intent, &reason);
+                                    tracing::debug!(
+                                        strategy = %intent.strategy,
+                                        symbol = %intent.symbol,
+                                        route_mode = %sctx.route_mode,
+                                        market_status = %sctx.market_status,
+                                        route_reason = %sctx.route_reason,
+                                        "SCANNER-MARKET-GATE: demo/live_demo new entry blocked"
+                                    );
+                                    continue;
+                                }
+                            }
+                        }
                         let context_id = make_context_id(em, &intent.symbol, event.ts_ms);
                         let signal_id = make_strategy_signal_id(
                             em,
@@ -242,25 +306,6 @@ impl TickPipeline {
                             &intent.symbol,
                             event.ts_ms,
                         );
-                        let scanner_ctx: Option<IntentScannerContext> =
-                            self.symbol_registry.as_ref().and_then(|reg| {
-                                let scan = reg.last_scan()?;
-                                let candidate =
-                                    scan.candidates.iter().find(|c| c.symbol == intent.symbol)?;
-                                Some(IntentScannerContext {
-                                    scan_id: scan.scan_id.clone(),
-                                    best_strategy: candidate
-                                        .best_strategy
-                                        .as_estimate_key()
-                                        .to_string(),
-                                    edge_bps: candidate.edge_bps,
-                                    edge_n: candidate.edge_n,
-                                    edge_status: candidate.edge_status.clone(),
-                                    route_mode: candidate.route_mode.clone(),
-                                    final_score: candidate.final_score,
-                                    raw_score: candidate.raw_score,
-                                })
-                            });
                         persist_strategy_signal(
                             &self.trading_tx,
                             &signal_id,
