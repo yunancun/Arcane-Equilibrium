@@ -1035,3 +1035,17 @@ Operator 接續 Tier 8 sign-off 後說「繼續派」。PM 按 Tier 8 §8 推薦
 
 ### Boundary
 - No deploy, rebuild, restart, live authorization, or runtime config change was performed.
+
+## 2026-04-30 Active Docs Cleanup and Progress Recalibration
+
+### Result
+- PM-led doc cleanup used `CC(default)`, `FA(default)`, `E5(explorer)`, `PA(default)`, and `MIT(default)` to separate closed history from active work.
+- `CLAUDE.md`, `TODO.md`, and `README.md` now reflect current source/runtime state at `5ba9b1c` and remove old 62-finding / STRKUSDT / Wave A-H / Wave 1-3 narratives from active status.
+- Pre-cleanup snapshots are archived under `docs/archive/2026-04-30--*-pre-cleanup-snapshot.md`; archive summary is `docs/archive/2026-04-30--active_docs_cleanup_archive.md`.
+- Linear project `OpenClaw 62-Finding Remediation` was updated as a high-level mirror: Batch A-F issues Done, stale `[16]`/deploy placeholders closed, and active edge/dust/Scout follow-ups added.
+
+### Current PM View
+- Active risk is strategy edge acceptance, not old `[16]` framing.
+- Observe `[33]`, `[38]`, and `[40]` using post-deploy cutoffs only.
+- Dust residual prevention is deployed but still needs one real close-path proof before exchange-side effectiveness is declared.
+- True live autonomy remains gated by GovernanceHub, Decision Lease, and the 5 live gates.

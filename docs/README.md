@@ -621,5 +621,9 @@ YYYY-MM-DD--HHmm--功能描述.扩展名
 
 | 文件 | 內容 |
 |------|------|
+| `2026-04-30--active_docs_cleanup_archive.md` | 2026-04-30 active docs cleanup 歸檔說明：CLAUDE/TODO/README 清理範圍、保留快照、Linear 高層同步摘要 |
+| `2026-04-30--CLAUDE-pre-cleanup-snapshot.md` | 2026-04-30 清理前 `CLAUDE.md` 完整快照 |
+| `2026-04-30--TODO-pre-cleanup-snapshot.md` | 2026-04-30 清理前 `TODO.md` 完整快照 |
+| `2026-04-30--README-pre-cleanup-snapshot.md` | 2026-04-30 清理前 `README.md` 完整快照 |
 | `2026-04-29--62finding-batch-A-to-F.md` | ★★★★ 62-Finding Audit Remediation Batch A-F 全程歸檔（commits `bc3fa70` + `6539e4e` + `5db4e29`）：6 batch × 62 findings × Linear NCY-5~10 milestone 對應 + post-deploy healthcheck status（FAIL [12]+[22] / WARN [27]，live pipeline gate v1→v2）|
 | `2026-04-29--strkusdt-p0-wave.md` | ★★★ STRKUSDT Dust Spiral P0 Wave 歸檔：F1 deploy `af48ee1` + F2-F7 6 PR merge（`1dff948` / `5ac7a80` / `310ae29` / `31c8206` / `1341c01` / `1edc6fe`）+ E4 combined 2252/0 + 8 healthcheck [22]-[29] + RCA 三層（entry_notional fail-open / Gate 2 cross-symbol / 41 phantom fills attribution）|

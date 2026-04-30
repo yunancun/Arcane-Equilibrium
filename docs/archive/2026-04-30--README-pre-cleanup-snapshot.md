@@ -31,25 +31,122 @@ AI Agent 自动交易系统 — 自主扫描 650+ 交易对，智能部署策略
 
 ---
 
-## 当前状态 (2026-04-30 21:10 CEST · **Live_Ready ⚠️**)
+## 当前状态 (2026-04-29 · **Live_Ready ⚠️** · 62-finding remediation Batch A-F deployed · 治理文件減肥完成)
 
-**运行事实**：Mac/Linux source HEAD `5ba9b1c`；Linux `trade-core` 已按当前源码 rebuild。engine、API、watchdog、gateway 均在线；watchdog `engine_alive=true`，demo/live snapshots fresh，paper inactive by design。最新 passive healthcheck 总结为 **FAIL**，原因是 `[38] grid_trading_lifecycle_drift` 已确认是真实策略漂移信号，不是 pipeline-dead。
+**最新更新**：62-finding remediation Batch A-F 全部 fixed/sign-off/PUSHED/Linux deployed（commits `bc3fa70` + `6539e4e` + `5db4e29`，6 batch × 62 findings × Linear NCY-5..10 milestone 對應）；2026-04-29 治理文件減肥 Stage 0-2 完成（TODO.md 817→678 / CLAUDE.md §三 5 個過期 paragraph 歸檔到 archive）；post-deploy healthcheck 大幅改善（fix `cfb1e7d` demo fee cold-boot + `c0902d9` post-restart passive wait grace 後，原 FAIL `[12]+[22]` / WARN `[27]` 已 PASS，僅剩 `[16] strategist_cycle_fresh` 需 RCA）
+- 治理 trim 歸檔索引：`docs/archive/2026-04-29--62finding-batch-A-to-F.md` · `docs/archive/2026-04-29--strkusdt-p0-wave.md` · `docs/archive/2026-04-29--wave-A-to-H-narrative.md` · `docs/archive/2026-04-29--claude_md_section3_pre_04_27_detail.md`
+- Batch F PM Sign-off：`docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-29--batch_f_ml_agent_autonomy_signoff.md`
+- 62-finding tracking ledger：`docs/audit/remediation_tracking.md`
+- TODO（按 Wave 1-4 + Batch + Backlog 組織）：`TODO.md`
 
-**当前主问题**：策略真实边际仍未通过。主要观察 `[33] maker_fill_rate`、`[38] grid_trading_lifecycle_drift`、`[40] realized_edge_acceptance`；判断时必须使用 post-deploy cutoff，不能直接用混入旧样本的滚动窗口下结论。主指标是 post-fee `net_bps_after_fee`，PnL / win-rate 仅作辅助。
+**Runtime（2026-04-29 CEST · ssh verify）**：HEAD `b0ef335` synced（pre-trim） · engine PID **161957** alive · API uvicorn PID **162029** + 4 workers · engine_watchdog PID 3450754 · openclaw-gateway PID 3973441 · watchdog `engine_alive=true` + demo snapshot fresh · API auth enforced（401 unauth）· post-deploy healthcheck FAIL `[16]`（其餘 27 PASS）· Live pipeline 拒啟動是預期 gate（authorization schema v1 vs v2，需 Operator 經 `/api/v1/live/auth/renew` 重簽，不可手寫）
 
-**已关闭并归档**：62-finding remediation Batch A-F、STRKUSDT P0 wave、Wave A-H、旧 Wave 1-3 叙事不再是 active mainline。清理前快照保存在：
-- `docs/archive/2026-04-30--README-pre-cleanup-snapshot.md`
-- `docs/archive/2026-04-30--TODO-pre-cleanup-snapshot.md`
-- `docs/archive/2026-04-30--CLAUDE-pre-cleanup-snapshot.md`
+**已驗證的修復事實**：
+1. ExecutorAgent shadow_mode hardcoded ✅ 已修（G3-03 Phase B `shadow_mode_provider` live at `program_code/.../executor_agent.py:145-186`，取代 hardcoded `_shadow_mode = True`）
+2. edge_estimator_scheduler ✅ 已修（commits `f32629c`+`abc85c0`，2026-04-24；現 187 cells / 59 updated/cycle / mtime <30min）
+3. PostOnly demo/live 反向 ✅ 已修（EDGE-DIAG-2 + Wave A-H series）
 
-**已部署但仍需观察**：
-- Strategy edge models：MA/BB/grid maker buffer、grid `blocked_symbols`、reject cooldown、`min_grid_step_bps`、`cost_floor_multiplier`、scanner posterior LCB routing、MA `min_trend_snr` 已进入 runtime。
-- Dust residual prevention：Bybit full-close primary path 使用 `qty=0 + reduceOnly + closeOnTrigger`；仍需一笔真实 Demo/Live close-path 证明 exchange-side 残留处理有效。
-- MLDE demo autonomy：`[35]` / `[36]` / `[37]` PASS。Demo 可自动受限调参；live/live_demo 自动改参仍必须走 GovernanceHub + Decision Lease + 5 live gates。
+**下一步主路徑**：(1) `[16] strategist_cycle_fresh` RCA（強 1）→ (2) Live auth renewal（operator 動作）→ (3) G1-04-FUP ~05-02 1w accumulated re-compute → (4) G2-01 PostOnly ~05-07 1-2w 驗收 → (5) Phase C Wave 1 派發（operator gated）→ Live（最早 ~2026-05-23）
 
-**下一步主路径**：G1-04 final fee/R:R compute（2026-05-01/02）→ G2-02 ma_crossover replay（2026-05-03）→ P0-2 + G2-01 PostOnly acceptance（2026-05-07/08）→ P0-3 edge decision（约 2026-05-15）→ 真实 live gate。
 
-**Active queue**：见 `TODO.md`。完整上下文和硬边界见 `CLAUDE.md`。
+```
+系统模式:     Live_Ready ⚠️ — LIVE-P0/P1/P2 代码完整，0 真实 live 流量（历史 43k "live" = LiveDemo）
+Live 门控:    5 项全绿才上真实 live（LIVE-GUARD-1 + LIVE-GATE-BINDING-1，2026-04-18 ✅）
+              Rust 侧 4 项可验证 + Python 侧 1 项 global mode：
+              (1) Python live_reserved global mode + Operator auth
+              (2) OPENCLAW_ALLOW_MAINNET=1 env var（仅 Mainnet）
+              (3) secret slot 有 api_key + api_secret（Mainnet env var fallback 已封闭）
+              (4) authorization.json HMAC-SHA256 签名 + 未过期（每 5 min re-verify）
+              (5) Python Operator 角色 auth
+execution_authority: Rust 端仅为 P0/P1 denylist 字符串常量（claude_teacher/applier.rs:226）
+                     非真实授权逻辑，"auto_granted_on_start" 为 Python 概念
+测试:         Rust engine lib 2290 passed / 0 failed（Phase 4 + G3-09 Phase A merge 後 baseline，2026-04-27）
+              · core 403 · e2e 35 · reconciler_e2e 19
+              Python control_api 3117 passed (0 fail · 3 skipped) · ml_training 238 passed
+              healthcheck 28 check（19 既有 + STRKUSDT P0 wave [22-29] + EDGE-DIAG-2 [30] + [31]）
+API 路由:     209 /api/v1 + 11 non-api（2026-04-16 audit 实测）
+代码:         ~62,000 行（Python ~40k + Rust ~22k）
+单一引擎:     Rust openclaw_engine = paper / demo / live 三模式唯一引擎
+              tick pipeline + IntentProcessor + paper_state + governance + stop_manager
+ARCH-RC1:     ✅ 1A → 1C-4 WRAP COMPLETE
+              4 IPC 写入面（patch_{risk,learning,budget}_config + update_strategy_params）
+              5 engines 热重载 · V014 fail-soft audit · ConfigStore 落盘 ✅
+              Guardian = RiskConfig 纯派生视图
+Phase 5:      ⏸ PAUSED（2026-04-12 reframe）— PNL-FIX-1/2 揭露活跃策略 gross edge 为负
+              cost_gate / DL / JS 机械已接线但需真实正 edge；等策略重做（G-SR-1 / Strategist）
+近期里程碑:   ✅ EDGE-P2-2 Phase A OI confluence（`381c542`，E2 FUP #1-#7 全修，2026-04-20）
+              ✅ PIPELINE-SLOT-1 Phases 1-4（auth-fail live-only，2026-04-19）
+              ✅ E5-FN / FILL-CONTEXT / EXIT-FEATURES / E5-P0/P1/P2 Refactor Waves
+              ✅ P1-16 HALT-SESSION cross-symbol price corruption（245× cleaner，2026-04-18）
+              ✅ LIVE-GATE-BINDING-1 HMAC authorization.json（2026-04-18）
+              ✅ LIVE-GUARD-1 三重 Mainnet 硬锁（2026-04-16）
+              ✅ P0-10 SCANNER-GATE / P0-5 PHANTOM-2-FUP / P1-8 / MICRO-PROFIT-FIX-1（2026-04-17）
+EDGE-P3-1:    🟡 ONNX loader Phase B #3 ✅（ort backend）+ Lane A CQR ✅；等真 ETL 资料跑首 artifact
+Live 准备:    ✅ P0 API key 管理 + tab-live 动态前置条件 + 仪表板框架
+              ✅ P1 TradingMode::Live + slot-aware key 读取 + session routes
+              ✅ P2 PerEngineRiskStores（paper/demo/live 独立风控）+ GUI per-engine tab
+              ✅ P3 Gov-P1 + OPENCLAW_ALLOW_MAINNET 硬锁回补（Rust fail-safe 三重 gate）
+              ✅ P4 Live-Demo 虚拟槽 + live/paper metrics 端点 + DB Signal Diamond 规划
+              ✅ P5 LIVE-GATE-BINDING-1 Python↔Rust HMAC 签名授权
+安全:         ✅ SEC-05 innerHTML XSS 全面修复（safeText→ocEsc + badge fallbacks）
+              ✅ LIVE-GUARD-1 OPENCLAW_ALLOW_MAINNET 三重硬锁（2026-04-16 回补）
+              ✅ WP-F/AH-06 risk-tab dirty-tracking 防覆盖
+              ✅ W19 G-3 IPC HMAC-SHA256 认证 + G-5 Rate Limit 全局覆盖
+              ✅ W20 SEC-04/06/13 E3 深度审查 PASS
+治理:         GovernanceHub 4 SM (Python) + GovernanceCore (Rust) · fail-closed
+              Operator manual governor override（白名单 / 24h cooldown / V014 audit）
+              Position Reconciler 30s 真相轮询 + Phase 6 自动降级（6-RC-1~10 ✅）
+              策略渐进放权管线（6-01~03 ✅）：5 阶段 + 毕业门槛 + Operator 审批
+              Phase 6 验收（6-04~08 ✅）：集成 7 + 压测 9 场景 + sync_commit PASS
+Bybit REST:   httpx BybitClient 13 方法（PYO3-ELIMINATE-1 Phase 2 後純 Python，LIVE-GATE-FALLBACK-1 reduce_only 繞引擎直通）
+Phase 4:      ✅ CODE-COMPLETE（4-00~4-21 + 4.1）· Claude Teacher consumer loop 已 wire
+新闻引擎:     ✅ NewsPipeline + Guardian halt + 60s scheduler（A2 完成）
+Layer 2:      L0 确定性 → L1 Ollama 9B/27B → L2 Claude API
+5 Agent:      Scout + Strategist + Guardian + Analyst + Executor 全部运行
+数据库:       TimescaleDB 2.26.1 · 43 tables · 28 hypertables · 11 Grafana VIEWs
+              Signal Diamond Phase 1-4 ✅（归档：docs/references/2026-04-10--signal_diamond_db_todo.md）
+Bybit API:    64 REST + 8 WS + 5 Private WS + 8 IPC
+
+下一步（2026-04-29 PM 排序）:
+  1) [16] strategist_cycle_fresh RCA（healthcheck 唯一 FAIL，其餘 27 PASS）
+  2) Live auth renewal（operator 動作 — `/api/v1/live/auth/renew` 重簽 schema v2）
+  3) G1-04-FUP ~05-02：1w accumulated 後 QC re-compute fee drop + R:R baseline
+  4) G2-01 PostOnly 1-2w 驗收 ~05-07/08：fee drop ≥60% 或 G2-04 disable 決策
+  5) G2-02 ma_crossover counterfactual ~05-03：tool ready，passive 1w demo data 後跑雙軌
+  6) Phase C Wave 1 impl（PA RFC `90d1a2e` ready，operator gated）
+  7) LG-4/5 Live Gate + 真实 Live：换入 mainnet API key（最早 ~2026-05-23 W24 末）
+```
+
+**亮点**：ARCH-RC1 统一 Config 4 IPC 写入面 + 5 engines 热重载（端到端 e2e `4780b04`）· Python 风控/纸盘双退场 · Guardian = RiskConfig 纯派生视图 · 单一 Rust 引擎 · V014 audit · L3 12 路审计完成 · EXT-1 Exchange-as-Truth · 5 Agent · Rust tick <100μs · PYO3-ELIMINATE-1 完成（纯 Python httpx Bybit 桥，无 cdylib 跨平台耦合）· Telegram+Webhook 双通道告警
+
+**详细完成度视角**：见 `docs/audits/2026-04-07--phase4_final_signoff_audit.md`（Phase 4 sign-off）+ `TODO.md`（forward plan）。早期 A-J 能力目标 + Batch 9B 缺口表已过期归档至 `docs/archive/2026-04-08--main_docs_1c3_1c4_narrative.md`。
+
+**开发路线图**
+
+| Phase | 内容 | 状态 |
+|-------|------|------|
+| 0-3 | 业务功能 52%→100% + L1/L2 冻结 | ✅ 完成 |
+| R-00~R-06 | Rust 引擎 24 core + 12 engine 模组 + IPC | ✅ 完成 |
+| R-07 | 灰度验证（Go/No-Go 4/10） | ✅ 7/7 PASS |
+| 0a | PG 8-Schema DDL + Grafana VIEW 桥接 | ✅ 完成 |
+| 0b | TimescaleDB + 压缩/retention | ✅ 完成 |
+| Session 6 | KNOWN_ISSUES 清理 + OC-1/2 告警 + Shadow docs | ✅ OPEN 8 |
+| 1 | 市场数据止血 + FeatureCollector + PSI | ✅ 完成 |
+| 2 | 交易链 + Decision Context + LightGBM Scorer + ONNX | ✅ 完成 |
+| **3a** | **update_params() 改造（AGT-1）** | **✅ 完成** |
+| **3b** | **Optuna TPE + Thompson Sampling + CPCV + 黑天鹅** | **✅ 完成** |
+| Session 9 | EXT-1 Exchange-as-Truth + L3 Audit + Risk Config | ✅ 完成 |
+| RRC-1 | 风控运行时接线（H0Gate+9 check+Gate 2.7） | ✅ 完成 |
+| L3 Audit | 12路全系统审计 + PA 整改计划 | ✅ 63 issues |
+| 4 | Claude Teacher + LinUCB + 新闻 Agent + DL-3 | ✅ CODE-COMPLETE（4-00~4-21 + 4.1） |
+| ARCH-RC1 | 统一 Config + Python 风控核心退场 | ✅ 1A→1C-4 WRAP COMPLETE + A2 News scheduler |
+| **5** | **cost_gate 重写：DL-1/2 + James-Stein + mode-aware gate** | **⏸ PAUSED — PNL-FIX 揭露 gross edge 为负，等策略重做** |
+| **Live 准备** | **API key + TradingMode::Live + PerEngineRiskStores** | **✅ P0/P1/P2 全部完成** |
+| **安全** | **SEC-05 XSS + WP-F/AH-06 + G-3 IPC 认证 + G-5 Rate Limit + SEC-04/06/13** | **✅ W19+W20 完成** |
+| 6 | Reconciler 自动收缩（6-RC-1~10 ✅）+ 渐进放权（6-01~03 ✅）+ 验收（6-04~13 ✅） | ✅ 完成 |
+| Live | 21 天 demo + SEC-08/17/21 + Live Gate | ⬜ 等策略重做后启动 |
+
+**详细文件**：`docs/references/2026-04-04--execution_plan_v1.md`（执行计划 V1）
 
 ---
 
@@ -214,18 +311,39 @@ srv/
 | OC-6 | Sub-agent 异步回测（周频 Evolution 网格搜索） | 低 |
 | WS-1 | FastAPI WebSocket/SSE 实时推送（替代 30s 轮询） | 中 |
 
-当前 OpenClaw/Scout 后续只保留在 `TODO.md` active queue；旧深度整合叙事已归档。
+详细方案见 `TODO.md` "OpenClaw 深度整合" 章节
 
 ---
 
 ## 硬边界（永远不可违背）
 
-README 只保留入口级摘要；完整硬边界以 `CLAUDE.md` §四为准。
+```python
+# ── Live_Ready 状态（2026-04-18 LIVE-GATE-BINDING-1 ✅ 后更新）────────────
+# LIVE-P0/P1/P2 代码完整，0 真实 live 流量。真实 live 门控 = 5 项全绿：
+#   1. Python live_reserved global mode + Operator 角色 auth
+#   2. OPENCLAW_ALLOW_MAINNET=1 env var（Rust 侧，LIVE-GUARD-1，仅 Mainnet）
+#   3. secret slot 有 api_key+api_secret（Mainnet env var fallback 已封闭）
+#   4. authorization.json HMAC-SHA256 签名 + 未过期 + env_allowed 匹配
+#      路径：$OPENCLAW_SECRETS_DIR/live/authorization.json
+#      检查点：build_exchange_pipeline 启动 + main.rs 每 5 min re-verify
+#      失效 → engine 优雅 shutdown；涵盖 LiveDemo + Mainnet
+#   5. Python Operator 角色 auth
+# execution_authority：Rust 侧仅为 P0/P1 denylist 字符串常量
+#                     （claude_teacher/applier.rs:226），非真实授权逻辑
+decision_lease_emitted  = False
+max_retries             = 0                          # Bybit API timeout → fail-closed，不重试
 
-- 真实 live 必须同时满足 Python live_reserved、Operator 角色认证、`OPENCLAW_ALLOW_MAINNET=1`、secret slot、signed `authorization.json` 五项 gate。
-- `execution_authority` 在 Rust 侧仅是 P0/P1 denylist 字符串常量，不是真实授权逻辑。
-- LiveDemo 走 live-grade 控制流；demo endpoint 不放宽 authorization、TTL 或 risk gate。
-- 禁止手写 `authorization.json`、绕过 Operator auth、自动切 live、伪造 AI/交易活动，或在 Bybit `retCode != 0` 后重试成交路径。
+# 永不允许（LIVE-GATE-BINDING-1 后硬边界）：
+# - 绕过 live_reserved global mode 直接启动 live session
+# - 自动修改 engine trading_mode 为 live（需 operator 显式配置）
+# - Bybit API retCode != 0 → fail-closed，不重试
+# - Mainnet 下无 OPENCLAW_ALLOW_MAINNET=1 env var（LIVE-GUARD-1）
+# - Mainnet 下试图用 BYBIT_API_KEY/SECRET env var 作为唯一凭证来源
+# - Live（含 LiveDemo）下没有有效 authorization.json 即 spawn pipeline
+# - 不经 Python _write_signed_live_authorization() 手动写 authorization.json
+# - 伪造 AI 调用或交易活动
+# - 缩仓监控：回撤 ≥15% → 自动撤销 execution_authority + 平仓 + 冻结 GovernanceHub
+```
 
 ---
 
