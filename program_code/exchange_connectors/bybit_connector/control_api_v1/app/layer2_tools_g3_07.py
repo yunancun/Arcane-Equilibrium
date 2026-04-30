@@ -45,6 +45,7 @@ MODULE_NOTE (English):
 import logging
 import os
 import time
+from pathlib import Path
 from typing import Any
 
 from .layer2_types import (
@@ -72,6 +73,7 @@ logger = logging.getLogger(__name__)
 ENV_QUERY_ONCHAIN_ENABLED = "OPENCLAW_LAYER2_TOOL_QUERY_ONCHAIN_ENABLED"
 ENV_CHECK_DERIVATIVES_ENABLED = "OPENCLAW_LAYER2_TOOL_CHECK_DERIVATIVES_ENABLED"
 ENV_HTTP_TIMEOUT_SEC = "OPENCLAW_LAYER2_TOOL_HTTP_TIMEOUT_SEC"
+ENV_BYBIT_PUBLIC_BASE_URL = "OPENCLAW_BYBIT_PUBLIC_BASE_URL"
 ENV_BYBIT_ENV = "OPENCLAW_BYBIT_ENV"
 DEFAULT_HTTP_TIMEOUT_SEC = 5.0
 DEFAULT_TOOL_DISABLED_ERROR = "tool disabled by env"
@@ -86,6 +88,48 @@ BYBIT_PUBLIC_BASE_URLS: dict[str, str] = {
     "live_demo": "https://api-demo.bybit.com",
     "mainnet": "https://api.bybit.com",
 }
+
+
+def _live_secret_slot_dir() -> Path:
+    """
+    Resolve the live Bybit secret slot directory.
+    解析 live Bybit secret slot 目錄。
+
+    Mirrors the production file layout used by settings/live auth:
+    $OPENCLAW_SECRETS_DIR/live first, then $OPENCLAW_SECRETS_ROOT, then the
+    default ~/BybitOpenClaw/secrets/secret_files/bybit/live path.
+    """
+    base_env = os.environ.get("OPENCLAW_SECRETS_DIR")
+    if base_env:
+        return Path(base_env) / "live"
+    root_env = os.environ.get("OPENCLAW_SECRETS_ROOT")
+    if root_env:
+        return Path(root_env) / "secret_files" / "bybit" / "live"
+    return Path.home() / "BybitOpenClaw" / "secrets" / "secret_files" / "bybit" / "live"
+
+
+def _file_based_bybit_env() -> str | None:
+    """
+    Read the production `live/bybit_endpoint` metadata when available.
+    可用時讀取 production `live/bybit_endpoint` metadata。
+
+    The file stores endpoint labels written by the settings API. This helper is
+    intentionally non-raising and returns None when the file is absent or
+    unknown so public Layer 2 tools can keep their safe demo fallback.
+    """
+    try:
+        raw = (_live_secret_slot_dir() / "bybit_endpoint").read_text(
+            encoding="utf-8",
+        ).strip().lower()
+    except (FileNotFoundError, PermissionError, OSError):
+        return None
+    if raw == "demo":
+        return "live_demo"
+    if raw in {"mainnet", "live"}:
+        return "mainnet"
+    if raw == "testnet":
+        return "testnet"
+    return None
 
 
 def is_tool_enabled(env_name: str) -> bool:
@@ -129,14 +173,28 @@ def http_timeout() -> float:
 
 def bybit_public_base_url() -> str:
     """
-    Resolve the Bybit public REST base URL using shared env normalization.
-    使用共用的環境正規化邏輯解析 Bybit 公開 REST base URL。
+    Resolve the Bybit public REST base URL.
+    解析 Bybit 公開 REST base URL。
 
-    Reads OPENCLAW_BYBIT_ENV, then falls back to "demo".
-    讀取 OPENCLAW_BYBIT_ENV，否則退回 demo。
+    Priority:
+      1. OPENCLAW_BYBIT_PUBLIC_BASE_URL exact URL override
+      2. OPENCLAW_BYBIT_ENV legacy/test override
+      3. production file-based live/bybit_endpoint metadata
+      4. safe demo fallback
     """
-    raw = (os.getenv(ENV_BYBIT_ENV, "") or "demo").strip().lower()
-    return BYBIT_PUBLIC_BASE_URLS.get(raw, BYBIT_PUBLIC_BASE_URLS["demo"])
+    explicit_url = os.getenv(ENV_BYBIT_PUBLIC_BASE_URL, "").strip()
+    if explicit_url:
+        return explicit_url.rstrip("/")
+
+    explicit_env = os.getenv(ENV_BYBIT_ENV, "").strip().lower()
+    if explicit_env:
+        return BYBIT_PUBLIC_BASE_URLS.get(explicit_env, BYBIT_PUBLIC_BASE_URLS["demo"])
+
+    file_env = _file_based_bybit_env()
+    if file_env:
+        return BYBIT_PUBLIC_BASE_URLS.get(file_env, BYBIT_PUBLIC_BASE_URLS["demo"])
+
+    return BYBIT_PUBLIC_BASE_URLS["demo"]
 
 
 # ─────────────────────────────────────────────────────────
@@ -577,6 +635,7 @@ __all__ = [
     "ENV_QUERY_ONCHAIN_ENABLED",
     "ENV_CHECK_DERIVATIVES_ENABLED",
     "ENV_HTTP_TIMEOUT_SEC",
+    "ENV_BYBIT_PUBLIC_BASE_URL",
     "ENV_BYBIT_ENV",
     "DEFAULT_HTTP_TIMEOUT_SEC",
     "DEFAULT_TOOL_DISABLED_ERROR",
