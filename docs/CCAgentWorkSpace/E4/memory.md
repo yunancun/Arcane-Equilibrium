@@ -2,6 +2,45 @@
 
 ## 工作記憶
 
+### 2026-04-30 5-Agent `last_heartbeat_ms` 契約 round 2 Mac local regression — **E4 PASS_TO_PM**
+
+**對象**：8 changed files unstaged（5 agent .py + agents_routes_helpers.py 827 LOC + test_agents_routes.py + 新檔 test_agent_heartbeat_contract.py 614 LOC / 36 case），E2 round 2 APPROVE_WITH_NITS 後 E4。
+
+**Verdict**: **PASS_TO_PM** — focused 全綠 + full regression 與 E2 baseline 完全一致（1 pre-existing Rust WIP fail，scope 完全正交）
+
+| Suite | passed | failed | baseline (E2 R2) | delta |
+|---|---|---|---|---|
+| Heartbeat contract focused (8 files: heartbeat + agents_routes + 5 agent unit/integration/worker + strategist) | **238** | 0 | new + adjacent | +0 |
+| Heartbeat contract 2nd run（非 flaky 驗證） | **238** | 0 | match 1st | 0 ✓ |
+| Full control_api_v1 regression（excl test_pyo3_*）| **3234** | 1 (pre-existing) | 3195 / 1 (E2 R2) | +39 passed (含 36 new heartbeat cases + adj) ✓ |
+
+**Pre-existing FAIL clarification**：`test_batch_d_risk_fail_closed.py::test_rc_002_h0_status_refresh_preserves_cooldown_and_kill_switch` — 斷言 Rust `event_consumer/loop_handlers.rs` 含 `fn build_status_risk_snapshot(`，loop_handlers.rs current Wave G1-02 Step 2a 拆分中只實作了 LoopState + 3 個 small arm（A/B/D），arm C/E/F 包含 risk snapshot 留 Step 2b/2c。**完全正交本 PR**（5 agent .py + helper + 2 test，0 Rust 變動）。E2 round 2 報告同 1 fail。
+
+**新增 36 case 覆蓋盤點**（無灌水）：
+- 5 ctor-zero × 5 agent
+- 5 start-stamps × 5 agent
+- 9 activity refresh：scout record_scan + 2 negative MED-2 (produce_intel/produce_event_alert no-stamp) + guardian review_intent + 4 on_message refresh + analyst analyze_trade
+- 5 get_stats × 5 agent
+- 4 role card → ISO + 1 ts=None when heartbeat=0
+- 3 Strategist eval-log precedence/fallback (round-trip ISO→ms 1500ms tolerance)
+- 4 stopped-state negative（M-1 strict guard 真實生效）
+
+**Mock 安全 audit**：所有 Tier 1 test 真用 ctor + 真 path call + assert real `_last_heartbeat_ms` 變化（含 `time.sleep(0.002)` 確保 ms-clock 前進）；Tier 2 用 `types.SimpleNamespace(get_stats=lambda: ...)` 注入 controlled stats，`_build_<role>_card` 真讀 `card["last_heartbeat_ts"]` ISO 字串；無 magic mock 灌水、無業務邏輯 mock。
+
+**SLA 壓測**：N/A — 心跳賦值 `int(time.time() * 1000)` 一行 <1µs，無 hot-path 影響；MED-1 record_scan stamp 移進 lock 但 critical section <10 行符合 H0 <1ms / tick <0.3ms / IPC <5ms 預算。
+
+**跨語言浮點 1e-4 一致性**：N/A — 純 Python metadata field 加增，無 Rust 對應、無 float 計算。
+
+**Engine rebuild**: NOT triggered — 純 Python 改動，commit 後 Mac push → Linux `git pull --ff-only` 即可，不需 `--rebuild`。Linux pytest 驗證留 PM commit + push + ssh trade-core git pull 階段重跑（Mac WIP unstaged 無法直接 ssh 跑）。
+
+**操作 notes**：
+1. test 檔名與 spec 略異：`test_analyst_agent_unit.py` / `test_executor_agent_unit.py` / `test_scout_integration.py` / `test_scout_worker.py`（無 `test_analyst_agent.py` / `test_scout_agent.py` / `test_executor_agent.py`，spec 有 typo）
+2. `test_pyo3_audit.py` / `test_pyo3_routes.py` 在 Mac dev 通常 OPENCLAW_DATABASE_URL 未設會 skip 或 attempt connect → ignore by design
+
+報告：作為 E4 final assistant message 直接輸出（per system-reminder 不寫 .md），上層 PM 會議讀此訊息
+
+---
+
 ### 2026-04-28 Wave H 3-way active warn cleanup splits + 2 inline fixes Linux full regression — **E4 PASS**
 
 **HEAD**: `0a50c6c` (Wave H 6 commits `dbba235..0a50c6c` post-EDGE-DIAG-2 deploy)

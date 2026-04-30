@@ -197,6 +197,17 @@ def _ms_to_iso(ms: int | None) -> str | None:
         return None
 
 
+def _surface_heartbeat_ts(stats: dict | None, card: dict) -> None:
+    """Surface stats[last_heartbeat_ms] → card[last_heartbeat_ts] (ISO).
+    把 agent 心跳毫秒戳轉 ISO 寫入卡片；缺失/0 → None（紅 chip 正確）。
+
+    MED-3 DRY：4 個 build fn（scout/guardian/analyst/executor）共用此 helper。
+    Strategist 走 eval-log 主路徑 + stats fallback 邏輯，**不**套用此 helper。
+    """
+    hb_ms = int(stats.get("last_heartbeat_ms", 0)) if stats else 0
+    card["last_heartbeat_ts"] = _ms_to_iso(hb_ms) if hb_ms > 0 else None
+
+
 # ── DB read helpers (sync, called via asyncio.to_thread) / DB 同步讀（to_thread 包裹） ──
 
 
@@ -538,6 +549,9 @@ def _build_scout_card(
     card["today_cost_usd"] = float(today_costs_by_role.get("scout", 0.0))
     card["today_decisions"] = int(stats.get("intel_produced", 0)) if stats else 0
 
+    # GUI heartbeat / 心跳：MED-3 DRY helper（4 cards 共用）。
+    _surface_heartbeat_ts(stats, card)
+
     # Scout cycle ~30 min ≫ scan_interval；無逐條時戳，RUNNING + 有產出 = active。
     # Scout cycle far longer than scan_interval; running+intel>0 → active.
     state_value = stats.get("state", "stopped") if stats else "stopped"
@@ -576,7 +590,12 @@ def _build_strategist_card(
     card["today_cost_usd"] = float(today_costs_by_role.get("strategist", 0.0))
     card["today_decisions"] = today_intent_total
 
+    # GUI heartbeat fallback / 心跳回退：eval log 空 → stats.last_heartbeat_ms。
     last_hb_ms = _last_heartbeat_ms_from_eval_log(strategist)
+    if last_hb_ms is None:
+        _fb = int(stats.get("last_heartbeat_ms", 0)) if stats else 0
+        last_hb_ms = _fb if _fb > 0 else None
+
     state, last_hb_ms_out = _derive_heartbeat_state(
         last_hb_ms,
         scan_interval_s,
@@ -641,6 +660,9 @@ def _build_guardian_card(
         ("guardian", state), card["state_label_zh"]
     )
 
+    # GUI heartbeat / 心跳：MED-3 DRY helper。
+    _surface_heartbeat_ts(stats, card)
+
     if state == "frozen":
         card["summary_zh"] = (
             f"今日凍結新倉提案 — 已拒絕 {rejected} 次（無通過）"
@@ -699,6 +721,9 @@ def _build_executor_card(
     # C-3：orders_submitted = executions_success（實際成交，非 attempt）。
     card["today_orders"] = int(stats.get("orders_submitted", 0)) if stats else 0
 
+    # GUI heartbeat / 心跳：MED-3 DRY helper。
+    _surface_heartbeat_ts(stats, card)
+
     state_value = stats.get("state", "stopped") if stats else "stopped"
     if executor is None or state_value != "running":
         # Plan §"絕不允許灰色「未知」"：任何狀態無法確認時走紅 + 暫停接單文案。
@@ -748,6 +773,9 @@ def _build_analyst_card(
         ("analyst", state), card["state_label_zh"]
     )
 
+    # GUI heartbeat / 心跳：MED-3 DRY helper。
+    _surface_heartbeat_ts(stats, card)
+
     if state == "reviewing":
         card["summary_zh"] = (
             f"正在复盘最近的成交（今日已分析 {trades_analyzed} 笔）"
@@ -773,6 +801,7 @@ __all__ = [
     "_last_heartbeat_ms_from_eval_log",
     "_derive_heartbeat_state",
     "_ms_to_iso",
+    "_surface_heartbeat_ts",
     "_set_statement_timeout",
     "_fetch_today_costs_by_role",
     "_fetch_today_intent_counts_by_strategy",

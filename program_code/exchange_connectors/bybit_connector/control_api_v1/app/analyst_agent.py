@@ -184,6 +184,13 @@ class AnalystAgent(BaseAgent):
             "errors": 0,
         }
 
+        # GUI heartbeat contract: ms-epoch of most recent observable activity
+        # (start / on_message / analyze_trade). 0 means never active — read by
+        # ``agents_routes_helpers._build_analyst_card``.
+        # GUI 心跳契約：最近一次可觀察活動（start / on_message / analyze_trade）的
+        # ms-epoch。0 表示從未活動 — 由 ``_build_analyst_card`` 讀取。
+        self._last_heartbeat_ms: int = 0
+
         # G8-01-FUP-LOSSES-WIRING: optional callback fired on every analyzed
         # trade so downstream consumers (StrategistAgent) can update local
         # ``_stats["consecutive_losses"]`` for CognitiveModulator input.
@@ -206,6 +213,10 @@ class AnalystAgent(BaseAgent):
 
     def start(self) -> None:
         super().start()
+        # GUI heartbeat contract: stamp on lifecycle start so the roster card
+        # leaves "never active" the moment the agent enters RUNNING.
+        # GUI 心跳契約：start() 即蓋章，使卡片於 RUNNING 一刻離「從未活動」。
+        self._last_heartbeat_ms = int(time.time() * 1000)
         logger.info("AnalystAgent started / 分析师代理已启动")
 
     def stop(self) -> None:
@@ -216,8 +227,12 @@ class AnalystAgent(BaseAgent):
 
     def on_message(self, message: AgentMessage) -> None:
         """Handle incoming messages / 处理入站消息"""
+        # GUI heartbeat contract (M-1 strict): only RUNNING agents stamp.
+        # CLAUDE.md 原則 #10 認知誠實：stopped agent 蓋章 = GUI 矛盾訊號。
+        # GUI 心跳契約（M-1 嚴格化）：僅 RUNNING agent 蓋章；非 RUNNING 不蓋章。
         if self.state != AgentState.RUNNING:
             return
+        self._last_heartbeat_ms = int(time.time() * 1000)
 
         if message.message_type == MessageType.ROUND_TRIP_COMPLETE:
             self._handle_round_trip(message)
@@ -282,6 +297,12 @@ class AnalystAgent(BaseAgent):
         L1 analysis: update rolling metrics for the trade.
         L1 分析：更新交易的滚动指标。
         """
+        # GUI heartbeat contract: analyze_trade is the canonical observable
+        # activity for Analyst (direct callers like _handle_round_trip already
+        # stamp via on_message; this catches programmatic callers too).
+        # GUI 心跳契約：analyze_trade 是 Analyst 的標準觀察活動；on_message
+        # 路徑已蓋章，此處覆蓋直接呼叫者（程式化呼叫）。
+        self._last_heartbeat_ms = int(time.time() * 1000)
         with self._lock:
             self._records.append(record)
             if len(self._records) > self.config.max_records:
@@ -771,6 +792,9 @@ class AnalystAgent(BaseAgent):
                 "strategies_tracked": len(self._strategy_stats),
                 "regimes_tracked": len(self._regime_stats),
                 "pattern_insights": len(self._pattern_insights),
+                # GUI heartbeat contract: ms-epoch surfaced for roster card.
+                # GUI 心跳契約：給 roster card 用的 ms-epoch。
+                "last_heartbeat_ms": int(self._last_heartbeat_ms),
                 **dict(self._stats),
             }
 

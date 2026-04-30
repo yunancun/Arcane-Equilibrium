@@ -324,6 +324,19 @@ class StrategistAgent(BaseAgent):
         # 3-3：從 AI 回答中提取的最新 knowledge_update（通過 _lock 線程安全）
         self._last_knowledge_update: Optional[Any] = None
 
+        # GUI heartbeat contract: ms-epoch of most recent observable activity
+        # (start / on_message / _handle_intel). 0 means never active. The
+        # roster helper prefers ``_last_heartbeat_ms_from_eval_log`` when an
+        # eval log entry exists (precise "actually evaluated"), and falls back
+        # to this field when the eval log is empty (e.g. all intel gated by H1
+        # or rejected before evaluation). Read by
+        # ``agents_routes_helpers._build_strategist_card``.
+        # GUI 心跳契約：最近一次可觀察活動（start / on_message / _handle_intel）的
+        # ms-epoch。0 表示從未活動。Roster helper 優先用
+        # ``_last_heartbeat_ms_from_eval_log``（精確的「真評估了」），eval log
+        # 為空（如 H1 全 gate / 評估前拒絕）時才回退到此欄位。
+        self._last_heartbeat_ms: int = 0
+
     # ── Lifecycle / 生命週期 ──
     # pause() inherited from BaseAgent. start/stop override to preserve the
     # original info log string (Strategist's start log includes shadow flag).
@@ -332,6 +345,13 @@ class StrategistAgent(BaseAgent):
     def start(self) -> None:
         """Start the agent / 啟動代理"""
         super().start()
+        # GUI heartbeat contract: stamp on lifecycle start so the roster card
+        # leaves "never active" the moment the agent enters RUNNING (the
+        # eval-log path requires actual evaluations, which may not happen for
+        # several scan cycles after start).
+        # GUI 心跳契約：start() 即蓋章；eval log 路徑需真評估（啟動後可能多
+        # 個 scan cycle 才出現），用此欄位讓卡片立即離「從未活動」。
+        self._last_heartbeat_ms = now_ms()
         logger.info("StrategistAgent started (shadow=%s) / 策略師代理已啟動 (shadow=%s)",
                      self.config.shadow, self.config.shadow)
 
@@ -347,9 +367,15 @@ class StrategistAgent(BaseAgent):
         Handle incoming messages from MessageBus.
         處理來自消息總線的入站消息。
         """
+        # GUI heartbeat contract (M-1 strict): only RUNNING agents stamp.
+        # CLAUDE.md 原則 #10 認知誠實 > debug 便利：stopped agent 蓋章 = GUI 矛盾。
+        # eval_log 真停滯時 last_hb_ms_from_eval_log → None，stats fallback 為 0
+        # → ISO=None → GUI 紅 chip 正確反映 stopped 狀態。
+        # GUI 心跳契約（M-1 嚴格化）：僅 RUNNING agent 蓋章；非 RUNNING 不蓋章。
         if self.state != AgentState.RUNNING:
             logger.debug("StrategistAgent not running, ignoring message / 策略師未運行，忽略消息")
             return
+        self._last_heartbeat_ms = now_ms()
 
         if message.message_type == MessageType.INTEL_OBJECT:
             self._handle_intel(message)
@@ -376,6 +402,14 @@ class StrategistAgent(BaseAgent):
         G3-08 Phase 4 P3（E2 4-1 NIT-1 LOW）：每個 early-return 點同步發出失效
         提示（env=0 時 no-op），使 h_state cache 對拒絕事件保鮮，而非只反映成功路徑。
         """
+        # GUI heartbeat contract: _handle_intel is the canonical observable
+        # activity for Strategist (direct callers from Conductor / pipeline
+        # bypass on_message). Stamped before any early return so even gated
+        # intel registers a heartbeat.
+        # GUI 心跳契約：_handle_intel 是 Strategist 的標準觀察活動；
+        # Conductor/pipeline 直呼者繞過 on_message。蓋章先於任何 early return，
+        # 使被 gate 的 intel 仍登記心跳。
+        self._last_heartbeat_ms = now_ms()
         # V2: Emergency mode check — discard normal channel intents during emergency
         # 緊急模式檢查 — 緊急時期丟棄正常通道 intent
         if self._emergency_mode.is_set():
@@ -728,6 +762,12 @@ class StrategistAgent(BaseAgent):
                 "emergency_mode_active": self._emergency_mode.is_set(),
                 "normal_queue_size": len(self._normal_queue),
                 "cognitive_modulator_connected": self._cognitive_modulator is not None,
+                # GUI heartbeat contract: ms-epoch surfaced for roster card.
+                # The card prefers eval-log derived heartbeat (precise) and
+                # falls back to this when the eval log is empty.
+                # GUI 心跳契約：給 roster card 用；卡片優先用 eval log 取，
+                # eval log 為空時回退用此欄位。
+                "last_heartbeat_ms": int(self._last_heartbeat_ms),
                 **dict(self._stats),
             }
         # L2 cache size from ModelRouter's own lock

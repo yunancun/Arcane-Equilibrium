@@ -211,6 +211,13 @@ class ExecutorAgent(BaseAgent):
             "errors": 0,
         }
 
+        # GUI heartbeat contract: ms-epoch of most recent observable activity
+        # (start / on_message). 0 means never active — read by
+        # ``agents_routes_helpers._build_executor_card``.
+        # GUI 心跳契約：最近一次可觀察活動（start / on_message）的 ms-epoch。
+        # 0 表示從未活動 — 由 ``_build_executor_card`` 讀取。
+        self._last_heartbeat_ms: int = 0
+
     # ── G3-08 Phase 4 Sub-task 4-4: agent_state snapshot accessor ──
 
     def get_executor_snapshot(self) -> Dict[str, Any]:
@@ -275,6 +282,10 @@ class ExecutorAgent(BaseAgent):
 
     def start(self) -> None:
         super().start()
+        # GUI heartbeat contract: stamp on lifecycle start so the roster card
+        # leaves "never active" the moment the agent enters RUNNING.
+        # GUI 心跳契約：start() 即蓋章，使卡片於 RUNNING 一刻離「從未活動」。
+        self._last_heartbeat_ms = int(time.time() * 1000)
         logger.info("ExecutorAgent started / 执行者代理已启动")
 
     def stop(self) -> None:
@@ -317,8 +328,12 @@ class ExecutorAgent(BaseAgent):
 
     def on_message(self, message: AgentMessage) -> None:
         """Handle incoming messages / 处理入站消息"""
+        # GUI heartbeat contract (M-1 strict): only RUNNING agents stamp.
+        # CLAUDE.md 原則 #10 認知誠實：stopped agent 蓋章 = GUI 矛盾訊號。
+        # GUI 心跳契約（M-1 嚴格化）：僅 RUNNING agent 蓋章；非 RUNNING 不蓋章。
         if self.state != AgentState.RUNNING:
             return
+        self._last_heartbeat_ms = int(time.time() * 1000)
 
         if message.message_type == MessageType.APPROVED_INTENT:
             self._handle_approved_intent(message)
@@ -776,11 +791,18 @@ class ExecutorAgent(BaseAgent):
             if self._stats["executions_success"] > 0:
                 avg_slippage = self._stats["total_slippage_bps"] / self._stats["executions_success"]
             executions_success = int(self._stats.get("executions_success", 0))
+            # GUI heartbeat contract: ms-epoch read inside the lock for
+            # consistency with other stats fields.
+            # GUI 心跳契約：在 lock 內讀 ms-epoch，與其他 stats 欄位一致。
+            last_heartbeat_ms = int(self._last_heartbeat_ms)
             base = {
                 "role": AgentRole.EXECUTOR.value,
                 "state": self.state.value,
                 "total_reports": len(self._reports),
                 "avg_slippage_bps": round(avg_slippage, 2),
+                # GUI heartbeat contract: surfaced for roster card.
+                # GUI 心跳契約：給 roster card 用。
+                "last_heartbeat_ms": last_heartbeat_ms,
                 **dict(self._stats),
             }
         # Provider call OUTSIDE self._lock to avoid deadlock with
