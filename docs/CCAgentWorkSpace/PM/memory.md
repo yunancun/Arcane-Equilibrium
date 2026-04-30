@@ -1079,3 +1079,15 @@ Operator 接續 Tier 8 sign-off 後說「繼續派」。PM 按 Tier 8 §8 推薦
 ### Boundary
 - No trading, risk, strategy parameter, live authorization, rebuild, restart, or DB write action was performed.
 - G2-01 acceptance remains time-driven around 2026-05-07/08; do not treat the G1-04 as-of artifact as a live/promotion approval.
+
+## 2026-04-30 TODO Final Doc Calibration
+
+### Result
+- Operator asked to complete the remaining doc calibration and push.
+- `TODO.md` now records the doc-calibration baseline: before this docs-only commit, Mac/Linux source HEAD was `5584785` clean, while the code-bearing runtime checkpoint remains `a9fce24` because no rebuild/restart was performed after the source cleanup.
+- Latest Linux cron-wrapper healthcheck at 2026-04-30 23:11 CEST is SUMMARY WARN exit 0, with current WARNs `[4]`, `[11]`, `[33]`, `[38]`, `[40]`; `[14]`, `[35]`, `[36]`, `[37]`, and `[39]` pass.
+- Stale G5/G3-08 line-count rows were recalibrated: the old G5 rows for `main.rs`, `instrument_info.rs`, and G5-06 files are complete; Analyst/HSQ/Strategist warning-zone rows are closed; MAF lazy PEP 562 re-export is accepted and `SCOUT_AGENT` is already registered in `CLAUDE.md`.
+- Remaining size work is explicitly separated into a future high-risk wave: `bybit_private_ws.rs`, `tick_pipeline/commands.rs`, and large test files.
+
+### Boundary
+- Docs-only change. No code, DB write, runtime config, rebuild, restart, or live authorization action was performed.
