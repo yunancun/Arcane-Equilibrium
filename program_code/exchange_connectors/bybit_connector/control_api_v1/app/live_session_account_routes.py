@@ -624,9 +624,18 @@ def get_live_metrics(
     # 3E-5: query per-engine snapshot for live metrics.
     # 3E-5：查詢每引擎快照用於 live 指標。
     engine_kind = core._get_live_engine_kind()
+    db_modes = ["live", "live_demo"] if engine_kind in ("live", "unknown") else [engine_kind]
     rust_state = rust.get_paper_state(engine=engine_kind) if rust.is_available() and engine_kind != "unknown" else None
     if rust_state is None:
-        return core._live_response({"available": False, "source": "engine_unavailable"})
+        return core._live_response({
+            "available": False,
+            "source": "engine_unavailable",
+            "db_true_metrics": fetch_db_true_metrics(
+                db_modes,
+                edge_engine_modes=db_modes,
+                window_days=7,
+            ),
+        })
     full = compute_full_metrics(rust_state, engine_mode=engine_kind)
     # Read per-engine tick stats / 讀取每引擎 tick 統計
     engine_snap = rust.get_engine_snapshot(engine_kind) if engine_kind != "unknown" else None
@@ -636,7 +645,6 @@ def get_live_metrics(
     full["total_intents"] = stats.get("total_intents", 0)
     full["total_fills"] = stats.get("total_fills", 0)
     full["total_stops"] = stats.get("total_stops", 0)
-    db_modes = ["live", "live_demo"] if engine_kind == "live" else [engine_kind]
     full["db_true_metrics"] = fetch_db_true_metrics(
         db_modes,
         edge_engine_modes=db_modes,
