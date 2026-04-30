@@ -33,9 +33,9 @@ AI Agent 自动交易系统 — 自主扫描 650+ 交易对，智能部署策略
 
 ## 当前状态 (2026-04-30 21:10 CEST · **Live_Ready ⚠️**)
 
-**运行事实**：Mac/Linux source HEAD `5ba9b1c`；Linux `trade-core` 已按当前源码 rebuild。engine、API、watchdog、gateway 均在线；watchdog `engine_alive=true`，demo/live snapshots fresh，paper inactive by design。最新 passive healthcheck 总结为 **FAIL**，原因是 `[38] grid_trading_lifecycle_drift` 已确认是真实策略漂移信号，不是 pipeline-dead。
+**运行事实**：Mac/Linux source HEAD `a9fce24`（code-bearing runtime checkpoint）；engine、API、watchdog、gateway 均在线；watchdog `engine_alive=true`，demo/live snapshots fresh，paper inactive by design。最新 passive healthcheck 总结为 **WARN** exit 0（WARN `[4]`/`[11]`/`[33]`/`[38]`/`[40]`，无 pipeline-dead FAIL）。
 
-**当前主问题**：策略真实边际仍未通过。主要观察 `[33] maker_fill_rate`、`[38] grid_trading_lifecycle_drift`、`[40] realized_edge_acceptance`；判断时必须使用 post-deploy cutoff，不能直接用混入旧样本的滚动窗口下结论。主指标是 post-fee `net_bps_after_fee`，PnL / win-rate 仅作辅助。
+**当前主问题**：post-reload maker 执行质量接近目标（post-2026-04-29 reload slice maker_like **73.23%** / fee_drop **59.32%**），但 7d rolling 仍低（25.6%，diluted by pre-reload samples）；grid lifecycle drift 是真实信号（`[38]` live_demo p50 1.7min vs demo 4.8min），grid_levels 10→7 + blocked_symbols 11 个已于 2026-04-29 部署，观察中。主指标是 post-fee `net_bps_after_fee`，PnL / win-rate 仅作辅助。
 
 **已关闭并归档**：62-finding remediation Batch A-F、STRKUSDT P0 wave、Wave A-H、旧 Wave 1-3 叙事不再是 active mainline。清理前快照保存在：
 - `docs/archive/2026-04-30--README-pre-cleanup-snapshot.md`
@@ -47,7 +47,7 @@ AI Agent 自动交易系统 — 自主扫描 650+ 交易对，智能部署策略
 - Dust residual prevention：Bybit full-close primary path 使用 `qty=0 + reduceOnly + closeOnTrigger`；仍需一笔真实 Demo/Live close-path 证明 exchange-side 残留处理有效。
 - MLDE demo autonomy：`[35]` / `[36]` / `[37]` PASS。Demo 可自动受限调参；live/live_demo 自动改参仍必须走 GovernanceHub + Decision Lease + 5 live gates。
 
-**下一步主路径**：G1-04 final fee/R:R compute（2026-05-01/02）→ G2-02 ma_crossover replay（2026-05-03）→ P0-2 + G2-01 PostOnly acceptance（2026-05-07/08）→ P0-3 edge decision（约 2026-05-15）→ 真实 live gate。
+**下一步主路径**：G2-02 ma_crossover counterfactual replay（~2026-05-03）→ G2-01 PostOnly settlement（~2026-05-07/08）→ P0-3 edge decision（~2026-05-15）→ LG-2/3/4/5 Live gates → true live。
 
 **Active queue**：见 `TODO.md`。完整上下文和硬边界见 `CLAUDE.md`。
 
@@ -123,7 +123,7 @@ srv/
 | 核心状态机 | T2.01 授权状态机、T2.02 风控状态机、T2.03 决策租约、T2.04 对账引擎 | SM-01/SM-02/SM-04/EX-04 |
 | 扩展模组 | T2.05–T2.23（OMS、审计持久化、Scout Agent、组合风控、事件模型、感知数据面、学习门控等） | EX-01/EX-02/EX-05/EX-06/DOC-01/DOC-06 |
 
-**关键指标：** ~5,300 测试通过（Py 2898 + ml_training 182 + Rs engine lib 1335 + core 380 + e2e 35 + reconciler_e2e 19）· ~65,000 行代码（Py+Rs）· 100% 双语注释 · fail-closed 设计 · 线程安全（Py）/ 零锁 single-owner（Rs）
+**关键指标：** ~6,200 测试通过（Py 2898 + ml_training 182 + Rs engine lib **2381** + core 380 + e2e 35 + reconciler_e2e 19）· ~65,000 行代码（Py+Rs）· 100% 双语注释 · fail-closed 设计 · 线程安全（Py）/ 零锁 single-owner（Rs）
 
 **详细报告：** `docs/governance_dev/phase2_execution/`（执行总览 + PM 品质审核 + TW 注释审核 + 23 份变更日志）
 
