@@ -425,20 +425,21 @@ pub enum AuditEvent {
 - Phase A trigger 事件：state 變化時 emit（OK→Trigger / Trigger→OK），**不**每 evaluate cycle 重複（避免 audit 撐爆）
 - Status change 事件：所有狀態變化（含 Trigger→Trigger 不發，確保 idempotent）
 
-### 6.2 Healthcheck [22] spec
+### 6.2 Healthcheck [30] spec
 
-**新增 `helper_scripts/db/passive_wait_healthcheck.py [22]`**：
+**新增 `helper_scripts/db/passive_wait_healthcheck.py [30]`**：
 
 ```python
 def check_cost_edge_advisor_status() -> tuple[str, str]:
-    """[22] G3-09 cost_edge_advisor status freshness + state inspection.
+    """[30] G3-09 cost_edge_advisor status freshness + state inspection.
 
     當前 healthcheck slot allocation:
         [19] paper_state_dust_inventory (per dust_restore_audit RFC §7 → §13 Deviation Log
              slot upgrade [19]→[21] 已記錄；當前 [19] 是 observer pipeline)
         [20] h_state_gateway freshness (Phase 1C live)
         [21] paper_state_dust_inventory (per dust_restore_audit RFC §13 amend slot)
-        [22] (NEW, this) cost_edge_advisor status
+        [22] trading_pipeline_silent_gap (F7)
+        [30] (NEW, this) cost_edge_advisor status
 
     PASS rules:
     - env=0 (advisor not enabled) → PASS skip
@@ -476,7 +477,7 @@ def check_cost_edge_advisor_status() -> tuple[str, str]:
 
 ### 6.3 GUI dashboard hook（不是 G3-09 範圍但留指標）
 
-healthcheck [22] + IPC `get_cost_edge_advisor_status` 已足供 GUI 拉取展示。Phase A 未要求新 GUI tab；Phase B/C 啟動可選 add `learning_cockpit` 上加 cost_edge advisor 狀態 widget（屬 GUI ticket）。
+healthcheck [30] + IPC `get_cost_edge_advisor_status` 已足供 GUI 拉取展示。Phase A 未要求新 GUI tab；Phase B/C 啟動可選 add `learning_cockpit` 上加 cost_edge advisor 狀態 widget（屬 GUI ticket）。
 
 ---
 
@@ -490,14 +491,14 @@ healthcheck [22] + IPC `get_cost_edge_advisor_status` 已足供 GUI 拉取展示
 - 修改 `main_boot_tasks.rs` env-gate spawn cost_edge_advisor daemon
 - 新 IPC `get_cost_edge_advisor_status` handler
 - 新 audit event types (CostEdgeAdvisorTrigger / StatusChange)
-- 新 healthcheck [22]
+- 新 healthcheck [30]
 - 3 env TOML 加 `[cost_edge]` section（全 enabled=false 預設）
 
 **完成標準**：
 - env=1 + advisor daemon spawn + 每 10s evaluate H5 snapshot + status 隨 ratio 變化
 - env=0 全 dormant（advisor not spawned，IPC return uninitialized）
 - 24+ Rust unit tests（5 status transitions × OK/Warn/Trigger/WarmUp/Stale/Anomaly 邊界）+ 5 IPC integration test
-- healthcheck [22] cron 6h 跑 + 紀錄連續 24h 全 PASS（env=0 PASS skip）
+- healthcheck [30] cron 6h 跑 + 紀錄連續 24h 全 PASS（env=0 PASS skip）
 - Cross-env 三 toml 驗 hot-reload 不破
 
 **工時**：
@@ -511,7 +512,7 @@ healthcheck [22] + IPC `get_cost_edge_advisor_status` 已足供 GUI 拉取展示
 - IntentProcessor 入口加 `advisor.would_reject_intent(&intent)` shadow check（only 在 status=Trigger 且 env=1）
 - shadow counter 寫入 advisor state（`shadow_reject_count_24h: AtomicU64`）
 - IPC status 加 shadow_reject_count_24h 欄位
-- Healthcheck [22] WARN/FAIL 邏輯加「shadow_reject_count > N/h」項
+- Healthcheck [30] WARN/FAIL 邏輯加「shadow_reject_count > N/h」項
 
 **完成標準**：
 - env=1 advisor enabled=true 運作 ≥7d
@@ -590,11 +591,11 @@ trigger_threshold = -0.3           # live 更保守（ratio 容忍更小）
 ```
 □ Phase B demo 環境連續 ≥7d shadow_reject_count 在合理區間（每日 0-10 次）
 □ Phase B 觀察期內無 cost_edge_advisor Anomaly 事件
-□ Phase B 期間 healthcheck [22] 全 PASS / WARN，無 FAIL
+□ Phase B 期間 healthcheck [30] 全 PASS / WARN，無 FAIL
 □ Operator 自驗 cost_edge_threshold 與當期 demo ratio 分布合理（不在 30d 5th percentile 以下）
 □ live 環境 trigger_threshold 設值 ≤ demo（保守：-0.3 vs demo -0.5）
 □ live 環境 cost_edge_gate_enabled=false → 改 true 走 IPC patch_risk_config（不改 TOML 直接編輯）
-□ live enable 後 ≤24h 內監控 [22] healthcheck 連續 PASS
+□ live enable 後 ≤24h 內監控 [30] healthcheck 連續 PASS
 ```
 
 ### 8.4 16 根原則對照（CLAUDE.md §二）
@@ -689,9 +690,9 @@ cost_edge_gate_enabled = false     # Phase C gate, default OFF
 | **R4** | per-strategy threshold drift（operator 配 -10 等不合理值）| 低 | 中（advisor 失效或過敏）| RiskConfig.cost_edge validation: trigger_threshold ∈ [-100, 100] + per_strategy_override ∈ [-100, 100] |
 | **R5** | cost_tracker race（IPC pull H5 時 Python 正寫）| 中 | 低（一次 stale 不影響趨勢）| H5 snapshot 通過 H state cache，已有 lock pattern；ratio 計算為 instantaneous 非 cumulative，stale 1 cycle 影響 < 1%|
 | **R6** | Phase C gate 與 cost_gate（per-intent）邏輯衝突 | 低 | 中（intent 雙 gate fail）| cost_edge_advisor 是 portfolio-level，cost_gate 是 per-intent；兩 gate 並存 = AND 條件（更保守，符合 #6）；audit 區分兩 reject 來源 |
-| **R7** | Anomaly status（NaN/Inf）長期 stuck，advisor 永不恢復 | 低 | 中（advisor 失效）| healthcheck [22] FAIL on Anomaly → operator 介入；evaluate cycle 每 10s 重試，正常數值會自然恢復 |
+| **R7** | Anomaly status（NaN/Inf）長期 stuck，advisor 永不恢復 | 低 | 中（advisor 失效）| healthcheck [30] FAIL on Anomaly → operator 介入；evaluate cycle 每 10s 重試，正常數值會自然恢復 |
 | **R8** | calibration cron 自動寫 RiskConfig（違反 #7）| **N/A** | 高 | **本 RFC §5.3 明文嚴禁自動 binding**，calibration cron 只 propose，operator manual approve |
-| **R9** | Phase C 啟動後 ratio 卡在 trigger，新倉永遠開不了 | 低 | 高（系統凍結）| (a) Operator IPC patch_risk_config cost_edge_gate_enabled=false 60s 內 rollback (b) trigger threshold 校準避免長期 trigger (c) healthcheck [22] FAIL @ 1h 連續 trigger 自動告警 |
+| **R9** | Phase C 啟動後 ratio 卡在 trigger，新倉永遠開不了 | 低 | 高（系統凍結）| (a) Operator IPC patch_risk_config cost_edge_gate_enabled=false 60s 內 rollback (b) trigger threshold 校準避免長期 trigger (c) healthcheck [30] FAIL @ 1h 連續 trigger 自動告警 |
 | **R10** | advisor daemon spawn 失敗 silent | 中 | 中（advisor 失效）| main_boot_tasks env=1 spawn fail = log error + advisor slot stays None；IPC `get_cost_edge_advisor_status` 回 `{status: "Uninitialized"}` 暴露失敗 |
 
 ### 10.2 Top 3 高優先風險的 mitigation 細節
@@ -724,7 +725,7 @@ cost_edge_gate_enabled = false     # Phase C gate, default OFF
 
 **緩解**：
 - IPC patch_risk_config 寫 cost_edge_gate_enabled=false 60s 內 rollback
-- healthcheck [22] FAIL @ 1h 連續 trigger（per §6.2）→ operator 介入
+- healthcheck [30] FAIL @ 1h 連續 trigger（per §6.2）→ operator 介入
 - 啟動 Phase C 前 Operator checklist §8.3 第 3 條「Phase B ≥7d 連續 PASS」確保啟動安全
 
 ---
@@ -896,8 +897,8 @@ pub fn spawn_cost_edge_advisor(
 - ✅ `cargo test --release -p openclaw_engine --lib cost_edge_advisor` 全綠（24+ tests）
 - ✅ env=1 + advisor daemon spawn + 每 10s evaluate H5 snapshot
 - ✅ env=0 zero overhead（grep main_boot_tasks 驗 not spawned；IPC return Uninitialized）
-- ✅ `pytest test_passive_wait_healthcheck.py -v` 加 [22] check 全綠
-- ✅ healthcheck [22] cron 6h 跑連續 24h 全 PASS（env=0 PASS skip）
+- ✅ `pytest test_passive_wait_healthcheck.py -v` 加 [30] check 全綠
+- ✅ healthcheck [30] cron 6h 跑連續 24h 全 PASS（env=0 PASS skip）
 - ✅ 三個 TOML 添加 `[cost_edge]` section + cargo test deserialize 綠
 - ✅ Cross-env 三 toml hot-reload 不破（IPC patch_risk_config cost_edge.enabled flip OK）
 - ✅ Audit emit on Trigger transition + StatusChange transition 兩 event types
@@ -930,7 +931,7 @@ feat(rust): G3-09 Phase A — cost_edge_advisor schema + advisory only
 - new audit event types CostEdgeAdvisorTrigger + StatusChange
 - new RiskConfig.cost_edge sub-struct (enabled bool, trigger_threshold f64)
   defaults: enabled=false (Phase A dormant) / threshold=-0.5 (conservative)
-- new healthcheck [22] check_cost_edge_advisor_status (PASS skip env=0)
+- new healthcheck [30] check_cost_edge_advisor_status (PASS skip env=0)
 - env-gate OPENCLAW_COST_EDGE_ADVISOR + RiskConfig.cost_edge.enabled dual safeguard
 - 3 env TOML add [cost_edge] section (paper/demo/live)
   live threshold -0.3 more conservative than demo/paper -0.5
@@ -944,7 +945,7 @@ Per PA RFC docs/CCAgentWorkSpace/PA/workspace/reports/2026-04-26--g3_09_cost_edg
 - CLAUDE.md §二 #13 字面義方向矛盾 → §2.4 採解釋 A 變體（threshold 為負值）
 
 Verified: cargo test pass; env=1 daemon spawn + 10s poll OK; env=0 zero overhead;
-healthcheck [22] cron 6h PASS; cross-env hot-reload OK.
+healthcheck [30] cron 6h PASS; cross-env hot-reload OK.
 
 Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
 ```
@@ -959,7 +960,7 @@ Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
 ### 一行回報
 
 ```
-G3-09 PHASE A DONE — cost_edge_advisor commit <hash> pushed; healthcheck [22] PASS; advisory only
+G3-09 PHASE A DONE — cost_edge_advisor commit <hash> pushed; healthcheck [30] PASS; advisory only
 ```
 ````
 
@@ -1043,7 +1044,7 @@ G3-08 Phase 3 H5 ✅ (commit d1a2252, sign-off e5f1b2d)
 
 7. **calibration 永不自動 binding** — 對齊 EDGE-P1b RFC §3 + memory `feedback_env_config_independence`。cost_edge_threshold 自動 calibrate + 自動 IPC 寫風控值 = 高風險（與 §7「學習 ≠ 改寫 Live」衝突）。任何 calibration 必 cron + manual approve。
 
-8. **healthcheck slot allocation 衝突要先 grep** — 本 RFC §6.2 [22] slot 號需 cross-check 既有 [19]/[20]/[21] 占用情況（[19] paper_state observer / [20] h_state_gateway / [21] paper_state_dust_inventory amend slot）。任何新 healthcheck 必先 grep `passive_wait_healthcheck.py` 確認 slot free。
+8. **healthcheck slot allocation 衝突要先 grep** — 本 RFC §6.2 最初草案誤用 [22]，實作改為 [30]，因 [22] 已由 F7 `trading_pipeline_silent_gap` 占用。任何新 healthcheck 必先 grep `passive_wait_healthcheck.py` 確認 slot free。
 
 ---
 
