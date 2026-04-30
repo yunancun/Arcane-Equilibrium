@@ -1231,3 +1231,41 @@ Wall-clock：~10h parallel + E2/E4 ~5h = **~15h 全鏈**
 | 日期 | 報告類型 | 文件位置 |
 |---|---|---|
 | 2026-04-29 | strategy_name attribution cleanup design（推 A schema migration + new exit_reason col + healthcheck [38]）| workspace/reports/2026-04-29--strategy_name_attribution_cleanup_design.md |
+| 2026-05-01 | Passive observation proactive plan + TODO archive audit（21d 規劃 34 任務 / 5 軸線；補回 9 active backlog；Top 10 派發優先序）| workspace/reports/2026-05-01--passive_observation_proactive_plan.md |
+
+---
+
+## 2026-05-01 · Passive Observation Proactive Plan + TODO 歸檔審計
+
+### 任務背景
+
+Operator 質疑：(a) PM 把 TODO 從 v3 (713 行) → v4 (197 行) 過程砍掉內容是否全為已完成 (b) 21d passive observation (2026-05-01 → 05-22) 沒真正規劃可主動推進的工作。PA 接手做 audit + 主動規劃。
+
+### 結論摘要
+
+- **歸檔內容無誤**（archive `2026-05-01--completed_waves_1_2_3_and_backlog.md` 完整覆蓋已完成 Wave 1-3 + 60+ backlog 項）
+- **v4 漏 9 條 active 條目**（operator 6 條 + PA 額外發現 3 條：G7-04 Phase B/C wiring / STRATEGIST-AUTO-PROMOTE / STRK-FUP-HEALTHCHECK-PRE-EXISTING / ORPHAN-ADOPT-1 / IP-DEDUP-1 / G-7 ClaudeTeacher）
+- **規劃 34 任務 / 5 軸線**，~28-35 PA/E1 工作日；並行壓縮 21d 內可完成 ~70%
+- **最關鍵 3 行動**：(1) LG-2-RFC PA 1.5d (2) STRK-FUP-HEALTHCHECK-PRE-EXISTING design 1d (3) G4-03 Phase B 部署 3d
+
+### 5 軸線拆分
+
+1. **軸線 1 Wave 4 LG-2/3/4/5 PA Design**（PA 7.5d）：必須 P0-3 (~05-15) 之前寫好，否則 outcome A/C 啟動時阻塞 3-5d；即使 outcome B 也作為 dead-code-prevention 學習材料
+2. **軸線 2 條件性獨立工作**（~17.5d）：G4-03 Phase B / G7-04 wiring / G8-05 / LEARNING-COCKPIT / STRK-FUP-HEALTHCHECK-PRE-EXISTING / 3 sibling splits / 2 P4 maintenance
+3. **軸線 3 Pre-Live 基礎設施**（~7.5d）：Slack alert decision (~05-15) / HTTPS deploy / Dashboard 強化 / 災難恢復演練
+4. **軸線 4 P0-3 決策會準備**（~4.5d）：Edge decision protocol / P0-3-01 報告 outline / agent pre-meeting briefs / adversarial review playbook
+5. **軸線 5 Documentation/Test/Maintenance**（~4.5d）：live first-day SOP / Wave 4 deploy runbook / E2E live gate tests / 3 maintenance items
+
+### 教訓備忘
+
+- **「passive observation」不等於閒置**：21d 是準備密集期；CLAUDE.md §八 工作流編排 6 條第 1 條「規劃優先 Plan-First」+「規劃要前瞻」明示
+- **PM 砍 TODO 容易誤殺 active backlog**：v3 backlog 表中沒打 ~~strikethrough~~ 的條目被同時砍掉；建議下次 TODO refactor 時 PA + PM 並行 audit，PA 從「active backlog 完整性」視角獨立掃過一次
+- **依賴關係圖 / 時序表是架構性內容，不該砍**：即使重複也讓接手 agent 一眼看懂 phase；建議精簡保留而非全砍
+- **RFC 寫得早 ≠ 浪費**：P0-3 outcome B 風險下 LG-2/3/4/5 RFC 部分作廢，但 (1) 文件結構保留 (2) 重啟時免重做 (3) 從「P0-3 後阻塞 3-5d」對比 7.5d 投入回報率仍正
+
+### 沒做的事（E1/PM 領域）
+
+- 沒寫業務代碼
+- 沒直接 edit TODO.md（建議由 operator 審後派 PM 補）
+- 沒派 sub-agent（純 PA 主 agent 串行讀寫）
+- 沒派發 LG-2/3/4/5 RFC（建議在 operator 審後再派）
