@@ -1072,3 +1072,11 @@ async def get_demo_fills(actor: base.AuthenticatedActor = Depends(base.current_a
         return _envelope({"source": "rust_engine", "list": fills, "count": len(fills)})
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Bybit fills fetch failed: {exc}")
+
+
+@phase2_router.get("/demo/metrics")
+async def get_demo_metrics(actor: base.AuthenticatedActor = Depends(base.current_actor)):
+    """Get DB-truth Demo performance metrics. / 獲取 DB 真實 Demo 績效指標。"""
+    from .trading_true_metrics import fetch_db_true_metrics  # noqa: PLC0415
+
+    return _envelope(fetch_db_true_metrics(["demo"], edge_engine_modes=["demo"], window_days=7))

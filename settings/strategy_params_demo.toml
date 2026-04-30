@@ -6,10 +6,11 @@
 
 [ma_crossover]
 active = true
-cooldown_ms = 300000
-adx_threshold = 20.0
+cooldown_ms = 600000
+adx_threshold = 25.0
 regime_filter_enabled = true
 higher_tf_alpha = 0.003
+min_persistence_ms = 240000
 conf_scale = 1.0
 # EDGE-P2-3 Phase 2+ (2026-04-20): PostOnly Limit entries; entry-only scope
 # (close stays Market). Demo enabled first for validation.
@@ -88,8 +89,8 @@ active = true
 # boost multiplies this base 1x-6x in trending regimes (observed demo BLURUSDT
 # entry min-gap 120s = 60s × 2x, p10 123.7s → cooldown respected, P1-10 grid
 # negative edge is per-trade fee drag not cadence).
-cooldown_ms = 60000
-grid_levels = 10
+cooldown_ms = 180000
+grid_levels = 7
 spacing_mode = "linear"
 health_check_interval = 200
 max_out_of_range = 50
@@ -122,6 +123,10 @@ blocked_symbols = [
   "AAVEUSDT",
   "ORCAUSDT",
   "PENGUUSDT",
+  "NAORISUSDT",
+  "TAOUSDT",
+  "1000PEPEUSDT",
+  "ADAUSDT",
 ]
 
 # OC-5: FundingArb — funding rate capture strategy.

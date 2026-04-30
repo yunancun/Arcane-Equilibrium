@@ -54,7 +54,8 @@ def fetch_fills_from_db(engine_mode: str = "paper") -> list[dict[str, Any]]:
         try:
             with conn.cursor() as cur:
                 cur.execute(
-                    """SELECT ts, symbol, side, qty, price, fee, realized_pnl, strategy_name
+                    """SELECT ts, symbol, side, qty, price, fee, realized_pnl, strategy_name,
+                              context_id, entry_context_id, exit_reason
                        FROM trading.fills
                        WHERE engine_mode = %s
                        ORDER BY ts ASC""",
@@ -79,12 +80,62 @@ def fetch_fills_from_db(engine_mode: str = "paper") -> list[dict[str, Any]]:
             d["realized_pnl"] = float(d.get("realized_pnl") or 0)
             d["side"] = d.get("side", "")
             d["symbol"] = d.get("symbol", "")
+            d["context_id"] = d.get("context_id") or ""
+            d["entry_context_id"] = d.get("entry_context_id") or ""
+            d["exit_reason"] = d.get("exit_reason") or ""
             fills.append(d)
         logger.info("Loaded %d fills from DB for engine_mode=%s / 從 DB 載入 %d 筆成交", len(fills), engine_mode, len(fills))
         return fills
     except Exception as exc:
         logger.warning("DB fill fetch failed for %s: %s / DB 成交讀取失敗", engine_mode, exc)
         return []
+
+
+def _fill_time_ms(fill: dict[str, Any]) -> int:
+    for key in ("ts_ms", "timestamp_ms", "exec_time", "execTime", "filled_at", "timestamp"):
+        val = fill.get(key)
+        if val is None:
+            continue
+        try:
+            return int(val)
+        except (TypeError, ValueError):
+            continue
+    return 0
+
+
+def _is_realized_close_fill(fill: dict[str, Any]) -> bool:
+    strategy = str(fill.get("strategy_name") or fill.get("strategy") or "")
+    realized = float(fill.get("realized_pnl") or fill.get("closedPnl") or 0.0)
+    return (
+        realized != 0.0
+        or bool(fill.get("entry_context_id"))
+        or bool(fill.get("exit_reason"))
+        or strategy.startswith(("risk_close:", "strategy_close:", "stop_trigger:", "ipc_close"))
+    )
+
+
+def _realized_round_trip_pnls(fills: list[dict]) -> list[float]:
+    """Use engine-realized close rows when DB labels are present.
+
+    The legacy fallback below reconstructs PnL from price pairs. That is fine
+    for old in-memory paper fills, but DB fills already carry realized_pnl and
+    close markers. Prefer those rows so win rate and W/L match persisted truth.
+    """
+    pending_entry_fees: dict[str, float] = {}
+    out: list[float] = []
+    for fill in sorted(fills, key=_fill_time_ms):
+        sym = str(fill.get("symbol") or "")
+        if not sym:
+            continue
+        fee = abs(float(fill.get("execFee") or fill.get("fee") or 0.0))
+        if _is_realized_close_fill(fill):
+            realized = float(fill.get("realized_pnl") or fill.get("closedPnl") or 0.0)
+            pnl = realized - pending_entry_fees.get(sym, 0.0) - fee
+            out.append(pnl)
+            pending_entry_fees[sym] = 0.0
+        else:
+            pending_entry_fees[sym] = pending_entry_fees.get(sym, 0.0) + fee
+    return out
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -182,6 +233,10 @@ def compute_trade_metrics(
             tracker["entry_notional"] += notional
             tracker["entry_qty"] += qty
             tracker["fees"] += fee
+
+    realized_round_trips = _realized_round_trip_pnls(fills)
+    if realized_round_trips:
+        round_trip_pnls = realized_round_trips
 
     # If no round-trips computed, fall back to PnL dict.
     # Attribute still-open entry fees to unrealized, not realized — mirrors the

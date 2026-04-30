@@ -85,6 +85,62 @@ fn test_approved_with_auth() {
 }
 
 #[test]
+fn test_per_strategy_blocked_symbol_rejects_new_entry() {
+    let mut proc = IntentProcessor::new();
+    let mut cfg = RiskConfig::default();
+    cfg.per_strategy.insert(
+        "ma_crossover".into(),
+        crate::config::risk_config::StrategyOverride {
+            blocked_symbols: Some(vec!["NAORISUSDT".into()]),
+            ..Default::default()
+        },
+    );
+    proc.update_risk_config(cfg);
+    let mut gov = GovernanceCore::new();
+    gov.grant_paper_authorization(None).unwrap();
+    let mut state = PaperState::new(10_000.0);
+    state.set_latest_price("NAORISUSDT", 0.1);
+    let mut intent = make_intent("NAORISUSDT", true);
+    intent.strategy = "ma_crossover".into();
+
+    let result = proc.process(&intent, &gov, &state, 0.01, GovernanceProfile::Exploration);
+    assert!(!result.submitted);
+    assert!(result
+        .rejected_reason
+        .unwrap_or_default()
+        .contains("blocked_symbols"));
+}
+
+#[test]
+fn test_per_strategy_blocked_symbol_allows_reducing_order() {
+    let mut proc = IntentProcessor::new();
+    let mut cfg = RiskConfig::default();
+    cfg.per_strategy.insert(
+        "ma_crossover".into(),
+        crate::config::risk_config::StrategyOverride {
+            blocked_symbols: Some(vec!["NAORISUSDT".into()]),
+            ..Default::default()
+        },
+    );
+    proc.update_risk_config(cfg);
+    let mut gov = GovernanceCore::new();
+    gov.grant_paper_authorization(None).unwrap();
+    let mut state = PaperState::new(10_000.0);
+    state.set_latest_price("NAORISUSDT", 0.1);
+    state.import_positions(vec![("NAORISUSDT".into(), true, 100.0, 0.1, 0)]);
+    let mut intent = make_intent("NAORISUSDT", false);
+    intent.strategy = "ma_crossover".into();
+    intent.qty = 100.0;
+
+    let result = proc.process(&intent, &gov, &state, 0.01, GovernanceProfile::Exploration);
+    assert!(
+        result.submitted,
+        "reducing order should bypass blocked_symbols, got {:?}",
+        result.rejected_reason
+    );
+}
+
+#[test]
 fn test_position_sizing_caps_qty() {
     // P1 cap: 3% of 10,000 / 50,000 = 0.006 BTC
     // Intent qty 0.01 should be reduced to 0.006.

@@ -337,7 +337,7 @@ async function loadDemoStatus() {
     await loadDemoFills();
     loadPositions();
     loadDemoOrders();
-    loadDemoMetrics(balD.data);
+    await loadDemoMetrics(balD.data);
     loadComparison();
     return;
   }
@@ -426,33 +426,10 @@ function renderBalance(raw) {
   elFillsReturn.textContent = ocMoney(net);
   elFillsReturn.className = 'oc-metric-val ' + ocPnlClass(net);
 
-  // Win rate + W/L ratio from round-trip analysis / 从完整交易分析计算胜率和盈亏比
-  const trips = _calcRoundTrips(_demoFillsCache);
-  if (trips.length > 0) {
-    const wins = trips.filter(t => t.pnl > 0);
-    const losses = trips.filter(t => t.pnl <= 0);
-    const wr = (wins.length / trips.length * 100);
-    const wrEl = $('d-winrate');
-    wrEl.textContent = wr.toFixed(1) + '%';
-    // Color: green only if net PnL is positive; yellow if win rate high but losing money
-    // 颜色：仅净盈亏为正时显示绿色；胜率高但亏钱时显示黄色警告
-    const totalPnl = trips.reduce((s, t) => s + t.pnl, 0);
-    wrEl.className = 'oc-metric-val ' + (totalPnl > 0 ? 'green' : (wr > 50 ? 'yellow' : 'red'));
-
-    const avgW = wins.length > 0 ? wins.reduce((s, t) => s + t.pnl, 0) / wins.length : 0;
-    const avgL = losses.length > 0 ? Math.abs(losses.reduce((s, t) => s + t.pnl, 0) / losses.length) : 0;
-    const wlEl = $('d-wlratio');
-    if (avgW > 0 && avgL > 0) {
-      const ratio = avgW / avgL;
-      wlEl.textContent = ratio.toFixed(2);
-      wlEl.className = 'oc-metric-val ' + (ratio >= 1 ? 'green' : 'red');
-    } else {
-      wlEl.textContent = 'N/A';
-    }
-  } else {
-    ocSetText('d-winrate', 'N/A');
-    ocSetText('d-wlratio', 'N/A');
-  }
+  // DB-truth metrics are loaded by loadDemoMetrics(); do not reconstruct
+  // round trips in the browser from a latest-fill sample.
+  ocSetText('d-winrate', '--');
+  ocSetText('d-wlratio', '--');
 
   // Max drawdown: peak from engine snapshot, fallback to current equity.
   // 最大回撤：峰值來自引擎快照，無快照時退化為當前 equity。
@@ -771,7 +748,21 @@ function _calcRoundTrips(fills) {
   return trips;
 }
 
-function loadDemoMetrics(raw) {
+function _ocMetricPct(rate) {
+  const v = parseFloat(rate);
+  return Number.isFinite(v) ? (v * 100).toFixed(1) + '%' : 'N/A';
+}
+function _ocMetricRatio(ratio) {
+  if (ratio === 'inf') return '∞';
+  const v = parseFloat(ratio);
+  return Number.isFinite(v) && v > 0 ? v.toFixed(2) : 'N/A';
+}
+function _ocMetricBps(value) {
+  const v = parseFloat(value);
+  return Number.isFinite(v) ? v.toFixed(2) + ' bps' : 'N/A';
+}
+
+async function loadDemoMetrics(raw) {
   let b = raw;
   if (raw && raw.result && raw.result.list && raw.result.list[0]) {
     b = raw.result.list[0];
@@ -787,56 +778,52 @@ function loadDemoMetrics(raw) {
     ? enginePeakM
     : (Number.isFinite(engineInitM) && engineInitM > 0 ? engineInitM : equity);
   const ddPct = (peakRef > 0 && equity < peakRef) ? ((peakRef - equity) / peakRef * 100).toFixed(2) + '%' : '0.00%';
-  const fillsArr = Array.isArray(_demoFillsCache) ? _demoFillsCache : [];
-  const totalFills = fillsArr.length;
-  const totalFees = fillsArr.reduce((s, f) => s + Math.abs(parseFloat(f.execFee || f.fee || 0)), 0);
+  let m = null;
+  try {
+    const d = await ocApi('/api/v1/strategy/demo/metrics');
+    m = d && d.data ? d.data : null;
+  } catch (_) {}
+  const acct = (m && m.account_metrics) || {};
+  const edge = (m && m.edge_metrics && m.edge_metrics.total_round_trips > 0)
+    ? m.edge_metrics
+    : ((m && m.trade_metrics) || {});
+  const tripCount = parseInt(edge.total_round_trips || 0);
+  const winRate = edge.win_rate != null ? _ocMetricPct(edge.win_rate) : 'N/A';
+  const winLossRatio = edge.win_loss_ratio != null ? _ocMetricRatio(edge.win_loss_ratio) : 'N/A';
+  const avgNetBps = edge.avg_net_bps != null ? _ocMetricBps(edge.avg_net_bps) : 'N/A';
+  const netPnl = parseFloat(acct.net_pnl);
+  const totalFees = parseFloat(acct.total_fees);
 
-  // Compute round-trip metrics from fills
-  const trips = _calcRoundTrips(_demoFillsCache);
-  const tripCount = trips.length;
-  const wins = trips.filter(t => t.pnl > 0);
-  const losses = trips.filter(t => t.pnl <= 0);
-  const winRate = tripCount > 0 ? (wins.length / tripCount * 100).toFixed(1) + '%' : 'N/A';
-  const avgWin = wins.length > 0 ? wins.reduce((s, t) => s + t.pnl, 0) / wins.length : 0;
-  const avgLoss = losses.length > 0 ? Math.abs(losses.reduce((s, t) => s + t.pnl, 0) / losses.length) : 0;
-  const winLossRatio = (avgWin > 0 && avgLoss > 0) ? (avgWin / avgLoss).toFixed(2) : 'N/A';
-  const largestWin = wins.length > 0 ? Math.max(...wins.map(t => t.pnl)) : null;
-  const largestLoss = losses.length > 0 ? Math.min(...losses.map(t => t.pnl)) : null;
-  const avgHoldMs = tripCount > 0 ? trips.reduce((s, t) => s + t.holdMs, 0) / tripCount : 0;
+  const wrEl = $('d-winrate');
+  wrEl.textContent = winRate;
+  wrEl.className = 'oc-metric-val ' + (Number.isFinite(netPnl) && netPnl > 0 ? 'green' : 'red');
+  const wlEl = $('d-wlratio');
+  wlEl.textContent = winLossRatio;
+  wlEl.className = 'oc-metric-val ' + (parseFloat(edge.win_loss_ratio || 0) >= 1 ? 'green' : 'red');
 
-  // Per-trade Sharpe ratio from round-trip PnL (raw mean/std, NOT annualized, risk-free=0).
-  // 每筆交易的夏普比率（raw mean/std，未年化，無風險利率=0）。
-  let sharpeStr = 'N/A';
-  if (tripCount >= 2) {
-    const returns = trips.map(t => t.pnl);
-    const mean = returns.reduce((s, r) => s + r, 0) / returns.length;
-    const variance = returns.reduce((s, r) => s + (r - mean) ** 2, 0) / (returns.length - 1);
-    const std = Math.sqrt(variance);
-    if (std > 0) {
-      const rawSharpe = mean / std;
-      sharpeStr = rawSharpe.toFixed(2);
-    }
-  }
+  const largestWin = edge.metric_unit === 'bps' ? _ocMetricBps(edge.largest_win) : ocMoney(edge.largest_win || 0);
+  const largestLoss = edge.metric_unit === 'bps' ? _ocMetricBps(edge.largest_loss) : ocMoney(edge.largest_loss || 0);
+  const avgLoss = edge.metric_unit === 'bps' ? _ocMetricBps(-Math.abs(edge.avg_loss || 0)) : ocMoney(-Math.abs(edge.avg_loss || 0));
 
-  // Format hold time
-  let holdStr = 'N/A';
-  if (avgHoldMs > 0) {
-    const mins = Math.round(avgHoldMs / 60000);
-    holdStr = mins >= 60 ? Math.floor(mins / 60) + 'h ' + (mins % 60) + 'm' : mins + 'm';
+  if (!m || m.available === false) {
+    ocSetHtml('demo-perf-metrics', '<div class="oc-loading">暂无 DB 指标</div>');
+    return;
   }
 
   const items = [
-    ['总成交笔数 / Total Fills', '', totalFills > 0 ? totalFills : 'N/A'],
-    ['完整交易次数 / Round Trips', '一次开仓到完全平仓为一次完整交易。/ A complete open-to-close cycle counts as one round trip.', tripCount > 0 ? tripCount : 'N/A'],
-    ['胜率 / Win Rate', '盈利交易占总交易的百分比。50%以上通常被视为良好。/ Percentage of profitable trades. Above 50% is generally good.', winRate],
-    ['盈亏比 / Win/Loss Ratio', '平均盈利与平均亏损的比值。>1 表示盈利大于亏损。/ Ratio of avg win to avg loss. >1 means wins outsize losses.', winLossRatio],
+    ['7d 成交笔数 / Total Fills', '', acct.total_fills != null ? acct.total_fills : 'N/A'],
+    ['7d 已归因交易 / Attributed Trades', '', tripCount > 0 ? tripCount : 'N/A'],
+    ['胜率 / Win Rate', '', winRate],
+    ['盈亏比 / Win/Loss Ratio', '', winLossRatio],
+    ['平均净边际 / Avg Net Edge', '', avgNetBps],
+    ['7d 净盈亏 / Net PnL', '', Number.isFinite(netPnl) ? ocMoney(netPnl) : 'N/A'],
+    ['7d 总毛利 / Gross PnL', '', acct.gross_pnl != null ? ocMoney(acct.gross_pnl) : 'N/A'],
     ['最大回撤 / Max Drawdown', '从峰值到最低点的最大跌幅，衡量最坏情况的资金损失。<10% 优秀，10-20% 正常，>20% 需关注。/ Largest peak-to-trough decline. <10% excellent, 10-20% normal, >20% concerning.', ddPct],
-    ['夏普比率 / Sharpe Ratio', '风险调整后收益指标。>1 良好，>2 优秀，<0 表示收益不如无风险利率。/ Risk-adjusted return. >1 good, >2 excellent, <0 underperforming risk-free rate.', sharpeStr],
-    ['平均持仓时间 / Avg Hold Time', '持仓从开仓到平仓的平均时长。/ Average duration from open to close.', holdStr],
-    ['单笔最高盈利 / Largest Win', '', largestWin != null ? ocMoney(largestWin) : 'N/A'],
-    ['单笔最高亏损 / Largest Loss', '', largestLoss != null ? ocMoney(largestLoss) : 'N/A'],
-    ['平均亏损 / Avg Loss', '', avgLoss > 0 ? ocMoney(-avgLoss) : 'N/A'],
-    ['总手续费 / Total Fees', '所有交易产生的手续费总和。/ Sum of all trading fees incurred.', totalFees > 0 ? ocBalance(totalFees, 4) : 'N/A'],
+    ['单笔最高盈利 / Largest Win', '', tripCount > 0 ? largestWin : 'N/A'],
+    ['单笔最高亏损 / Largest Loss', '', tripCount > 0 ? largestLoss : 'N/A'],
+    ['平均亏损 / Avg Loss', '', tripCount > 0 ? avgLoss : 'N/A'],
+    ['7d 手续费 / Total Fees', '', Number.isFinite(totalFees) ? ocBalance(totalFees, 4) : 'N/A'],
+    ['7d 资金费 / Funding', '', acct.funding_pnl != null ? ocMoney(acct.funding_pnl) : 'N/A'],
     ['总 AI 成本 / Total AI Cost', 'AI 推理调用的累计花费。/ Cumulative cost of AI inference calls.', 'N/A'],
   ];
 

@@ -69,6 +69,11 @@ ft_dust_qty_floor_usd = 1.0
 # ─────────────────────────────────────────────────────────────────────────────
 [per_strategy.ma_crossover]
 enabled = true
+blocked_symbols = [
+  "NAORISUSDT",
+  "PENGUUSDT",
+  "FARTCOINUSDT",
+]
 # stop_loss_max_pct_override   = 2.5   # < limits.stop_loss_max_pct (must be ≤ P1)
 # take_profit_max_pct_override = 8.0   # < limits.take_profit_max_pct
 # trailing_activation_pct_override = 0.6

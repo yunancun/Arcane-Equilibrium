@@ -971,6 +971,124 @@ LIMIT 8
     )
 
 
+# [40] realized edge acceptance gates.
+EDGE_ACCEPTANCE_MIN_SAMPLE = 30
+EDGE_ACCEPTANCE_MIN_AVG_NET_BPS = 5.0
+EDGE_ACCEPTANCE_BAD_CELL_MIN_N = 10
+EDGE_ACCEPTANCE_BAD_CELL_MAX_AVG_BPS = -10.0
+EDGE_ACCEPTANCE_MAKER_MIN_PCT = 50.0
+
+
+def check_realized_edge_acceptance(cur) -> tuple[str, str]:
+    """[40] DB-truth acceptance monitor for profitability repair.
+
+    Uses MLDE post-fee labels for demo/live_demo net edge and the same entry-fill
+    fee truth as [33] for maker acceptance. This is a monitor, not an execution
+    gate; FAIL only when a strategy/symbol cell keeps trading with enough sample
+    and materially negative post-fee edge.
+    """
+    try:
+        cur.connection.rollback()
+    except Exception:
+        pass
+
+    try:
+        cur.execute("SELECT to_regclass('learning.mlde_edge_training_rows') IS NOT NULL")
+        exists = cur.fetchone()
+    except Exception as exc:  # noqa: BLE001
+        return ("WARN", f"edge acceptance view check failed: {exc}")
+    if not exists or not exists[0]:
+        return ("WARN", "learning.mlde_edge_training_rows missing — cannot score acceptance")
+
+    try:
+        cur.execute(
+            """
+            SELECT
+              COUNT(*)::int,
+              COUNT(*) FILTER (WHERE net_bps_after_fee > 0)::int,
+              AVG(net_bps_after_fee)::float8
+            FROM learning.mlde_edge_training_rows
+            WHERE ts > now() - interval '24 hours'
+              AND engine_mode IN ('demo', 'live_demo')
+              AND attribution_chain_ok
+              AND net_bps_after_fee IS NOT NULL
+            """
+        )
+        total, wins, avg_net = cur.fetchone()
+        cur.execute(
+            """
+            SELECT engine_mode, strategy_name, symbol, COUNT(*)::int, AVG(net_bps_after_fee)::float8
+            FROM learning.mlde_edge_training_rows
+            WHERE ts > now() - interval '24 hours'
+              AND engine_mode IN ('demo', 'live_demo')
+              AND attribution_chain_ok
+              AND net_bps_after_fee IS NOT NULL
+            GROUP BY engine_mode, strategy_name, symbol
+            HAVING COUNT(*) >= %s AND AVG(net_bps_after_fee) < %s
+            ORDER BY AVG(net_bps_after_fee), COUNT(*) DESC
+            LIMIT 6
+            """,
+            (EDGE_ACCEPTANCE_BAD_CELL_MIN_N, EDGE_ACCEPTANCE_BAD_CELL_MAX_AVG_BPS),
+        )
+        bad_rows = cur.fetchall() or []
+    except Exception as exc:  # noqa: BLE001
+        return ("WARN", f"edge acceptance query failed: {type(exc).__name__}: {exc}")
+
+    params = (TAKER_FEE_RATE, TAKER_FEE_RATE, MAKER_FEE_CUTOFF)
+    try:
+        cur.execute(
+            _MAKER_FILL_CTE
+            + """
+            SELECT
+              COUNT(*)::int,
+              COALESCE(SUM(maker_like), 0)::int,
+              AVG(effective_fee_rate)::float8
+            FROM entry_fills
+            """,
+            params,
+        )
+        maker_total, maker_like, avg_fee_rate = cur.fetchone()
+    except Exception:
+        maker_total, maker_like, avg_fee_rate = (0, 0, TAKER_FEE_RATE)
+
+    total = _as_int(total)
+    wins = _as_int(wins)
+    avg_net = _as_float(avg_net, 0.0)
+    maker_total = _as_int(maker_total)
+    maker_like = _as_int(maker_like)
+    avg_fee_rate = _as_float(avg_fee_rate, TAKER_FEE_RATE)
+    win_rate = wins / total * 100.0 if total else 0.0
+    maker_pct = maker_like / maker_total * 100.0 if maker_total else 0.0
+    fee_drop = _fee_drop_pct(avg_fee_rate)
+    base = (
+        f"24h MLDE rows={total}, win_rate={win_rate:.1f}%, avg_net={avg_net:.2f}bps "
+        f"(target>{EDGE_ACCEPTANCE_MIN_AVG_NET_BPS:.1f}); maker_like={maker_pct:.1f}% "
+        f"(target>={EDGE_ACCEPTANCE_MAKER_MIN_PCT:.0f}%), fee_drop={fee_drop:.1f}% "
+        f"(target>={MAKER_FEE_DROP_TARGET_PCT:.0f}%)"
+    )
+
+    if total == 0:
+        return ("WARN", base + " — no fresh post-fee training rows")
+
+    bad_parts = [
+        f"{r[0]}/{r[1]}/{r[2]} n={_as_int(r[3])} avg={_as_float(r[4]):.2f}bps"
+        for r in bad_rows
+    ]
+    if bad_parts:
+        return ("FAIL", base + " — negative cells still active: " + "; ".join(bad_parts))
+
+    warnings: list[str] = []
+    if total >= EDGE_ACCEPTANCE_MIN_SAMPLE and avg_net <= EDGE_ACCEPTANCE_MIN_AVG_NET_BPS:
+        warnings.append(f"avg_net {avg_net:.2f}bps <= target")
+    if maker_total >= MAKER_FILL_MIN_SAMPLE and maker_pct < EDGE_ACCEPTANCE_MAKER_MIN_PCT:
+        warnings.append(f"maker_like {maker_pct:.1f}% < target")
+    if maker_total >= MAKER_FILL_MIN_SAMPLE and fee_drop < MAKER_FEE_DROP_TARGET_PCT:
+        warnings.append(f"fee_drop {fee_drop:.1f}% < target")
+    if warnings:
+        return ("WARN", base + " — " + "; ".join(warnings))
+    return ("PASS", base + " — acceptance guard within target")
+
+
 # ============================================================================
 # [39] cardinality regression detector for trading.fills.strategy_name.
 # 2026-04-29 — PA §6.1 W1-T4 strategy_name attribution cleanup wave.

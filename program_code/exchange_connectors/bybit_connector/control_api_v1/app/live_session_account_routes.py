@@ -618,6 +618,7 @@ def get_live_metrics(
         return guard
 
     from .paper_trading_metrics import compute_full_metrics
+    from .trading_true_metrics import fetch_db_true_metrics
 
     rust = get_rust_reader()
     # 3E-5: query per-engine snapshot for live metrics.
@@ -635,4 +636,10 @@ def get_live_metrics(
     full["total_intents"] = stats.get("total_intents", 0)
     full["total_fills"] = stats.get("total_fills", 0)
     full["total_stops"] = stats.get("total_stops", 0)
+    db_modes = ["live", "live_demo"] if engine_kind == "live" else [engine_kind]
+    full["db_true_metrics"] = fetch_db_true_metrics(
+        db_modes,
+        edge_engine_modes=db_modes,
+        window_days=7,
+    )
     return core._live_response(full)

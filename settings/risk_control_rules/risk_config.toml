@@ -30,6 +30,14 @@ per_trade_risk_pct = 0.1
 
 [per_strategy]
 
+[per_strategy.ma_crossover]
+enabled = true
+blocked_symbols = [
+  "NAORISUSDT",
+  "PENGUUSDT",
+  "FARTCOINUSDT",
+]
+
 [agent]
 trailing_enabled = true
 trailing_activation_pct = 1.0

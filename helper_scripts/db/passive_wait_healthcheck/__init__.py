@@ -99,6 +99,8 @@ from .checks_execution import (  # noqa: F401
     # regression 偵測（W1-T2 後預期 ≤7 enum value；dynamic format regression
     # 復發即 FAIL）。
     check_strategy_name_cardinality_drift,
+    # [40] DB-truth realized-edge acceptance monitor for profitability repair.
+    check_realized_edge_acceptance,
 )
 
 __all__ = [
@@ -154,4 +156,6 @@ __all__ = [
     "check_grid_trading_lifecycle_drift",
     # [39] strategy_name cardinality drift (PA W1-T4 2026-04-29)
     "check_strategy_name_cardinality_drift",
+    # [40] realized edge acceptance
+    "check_realized_edge_acceptance",
 ]
