@@ -2,7 +2,7 @@
 
 日期：2026-05-01  
 範圍：scanner strategy-symbol route eligibility、demo/live_demo 新開倉前置 gate  
-狀態：本地驗證完成，等待 Linux 部署回填
+狀態：已部署 Linux `trade-core`
 
 ## 背景
 
@@ -68,3 +68,27 @@
 - 策略仍按自身 route judgment 行動，不會盲目服從 scanner 的單一 best strategy。
 - 平倉、減倉、fast-track reduce、風控 close 路徑不變。
 
+## Linux 部署回填
+
+部署時間：2026-05-01 01:00 CEST
+部署 commit：`742cc0d8585bbae25f9738654aedcc8417bd0dc7`
+部署命令：`bash helper_scripts/restart_all.sh --rebuild --keep-auth`
+
+部署結果：
+
+- Linux repo 快進到 `742cc0d8585bbae25f9738654aedcc8417bd0dc7`
+- release rebuild 成功
+- engine PID：`1705215`
+- API PID：`1705292`
+- restart output：`engine_alive=true`，paper/demo/live snapshots fresh
+- scanner 首輪 warmup scan：
+  - `scan-1777590063456`
+  - active=11, added=9, rejected=637
+  - runtime subscribe count=36，確認每個新增 symbol 仍含 4 個 topic（含 orderbook）
+- 最新 scanner active symbols：
+  - `{BTCUSDT, ETHUSDT, BSBUSDT, BIOUSDT, ORCAUSDT, CLUSDT, ZECUSDT, HYPEUSDT, DOGEUSDT, SOLUSDT, XRPUSDT}`
+  - `NAORISUSDT` 已不在 active/candidates 內
+- 部署後 risk verdict 檢查：
+  - `per_strategy.*blocked_symbols` rejected：0
+  - demo rejected 只剩 BTCUSDT duplicate-position 類，不是 scanner policy gap
+- passive healthcheck：SUMMARY WARN，無 FAIL；WARN 項為既有觀察項 `[4] [33] [38] [40] [41] [11]`
