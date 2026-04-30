@@ -293,6 +293,128 @@ def _delete_live_authorization_file() -> bool:
         return False
 
 
+def _read_signed_live_authorization_status(now_ms: int | None = None) -> dict[str, Any]:
+    """
+    Return the Rust live-gate view of ``authorization.json`` without exposing the
+    HMAC secret. Earned-trust TTL can remain valid while this signed file is
+    absent (for example after a manual restart); GUI callers need both states to
+    avoid implying that Live can spawn.
+
+    返回 Rust live gate 對 ``authorization.json`` 的判斷。Earned-trust TTL
+    可能仍有效，但 signed 檔案被手動重啟清除；GUI 必須同時顯示兩者避免誤導。
+    """
+    checked_ts_ms = int(time.time() * 1000) if now_ms is None else now_ms
+    endpoint_label = _current_bybit_endpoint_label()
+    path = _live_secret_slot_dir() / _AUTHORIZATION_FILENAME
+    base_status: dict[str, Any] = {
+        "source": "authorization_json",
+        "checked_ts_ms": checked_ts_ms,
+        "endpoint": endpoint_label,
+        "present": False,
+        "valid_for_engine": False,
+        "status": "missing",
+        "reason": "authorization_json_missing",
+        "expires_at_ms": None,
+        "tier": None,
+        "env_allowed": [],
+        "approved_system_mode": None,
+    }
+
+    if not path.exists():
+        return base_status
+
+    base_status["present"] = True
+    try:
+        record = json.loads(path.read_text(encoding="utf-8"))
+        version = int(record["version"])
+        tier = str(record["tier"])
+        issued_at_ms = int(record["issued_at_ms"])
+        expires_at_ms = int(record["expires_at_ms"])
+        operator_id = str(record["operator_id"])
+        env_allowed = [str(env) for env in list(record["env_allowed"])]
+        sig_recorded = str(record["sig"])
+        approved_system_mode = str(record.get("approved_system_mode", ""))
+    except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+        return {
+            **base_status,
+            "status": "malformed",
+            "reason": "authorization_json_malformed",
+            "error": str(exc),
+        }
+
+    parsed_status = {
+        **base_status,
+        "status": "invalid",
+        "reason": "authorization_json_invalid",
+        "expires_at_ms": expires_at_ms,
+        "tier": tier,
+        "env_allowed": env_allowed,
+        "approved_system_mode": approved_system_mode,
+    }
+
+    if version != _AUTHORIZATION_SCHEMA_VERSION:
+        return {
+            **parsed_status,
+            "status": "unsupported_version",
+            "reason": "authorization_json_unsupported_version",
+            "version": version,
+            "expected_version": _AUTHORIZATION_SCHEMA_VERSION,
+        }
+
+    if approved_system_mode != _REQUIRED_LIVE_GLOBAL_MODE:
+        return {
+            **parsed_status,
+            "status": "mode_mismatch",
+            "reason": "authorization_json_mode_mismatch",
+        }
+
+    ipc_secret = (get_secret_value("OPENCLAW_IPC_SECRET") or "").strip()
+    if not ipc_secret:
+        return {
+            **parsed_status,
+            "status": "unverifiable",
+            "reason": "ipc_secret_missing",
+        }
+
+    payload = _canonical_authorization_payload(
+        version=version,
+        tier=tier,
+        issued_at_ms=issued_at_ms,
+        expires_at_ms=expires_at_ms,
+        operator_id=operator_id,
+        approved_system_mode=approved_system_mode,
+        env_allowed=env_allowed,
+    )
+    sig_expected = _sign_authorization_payload(payload, ipc_secret)
+    if not hmac.compare_digest(sig_expected, sig_recorded):
+        return {
+            **parsed_status,
+            "status": "bad_signature",
+            "reason": "authorization_json_bad_signature",
+        }
+
+    if expires_at_ms <= checked_ts_ms:
+        return {
+            **parsed_status,
+            "status": "expired",
+            "reason": "authorization_json_expired",
+        }
+
+    if endpoint_label not in env_allowed:
+        return {
+            **parsed_status,
+            "status": "env_mismatch",
+            "reason": "authorization_json_env_mismatch",
+        }
+
+    return {
+        **parsed_status,
+        "status": "valid",
+        "reason": None,
+        "valid_for_engine": True,
+    }
+
+
 def _trigger_live_auth_recheck_fire_and_forget() -> None:
     """
     PIPELINE-SLOT-1 Phase 3 + Phase 4: wake the Rust `LiveAuthWatcher` so it
@@ -671,6 +793,7 @@ def get_trust_status(
         "ok": True,
         "data": {
             **snapshot,
+            "signed_authorization": _read_signed_live_authorization_status(),
             "recommendation": recommendation,
             "metrics": metrics_dict,
             "tier_ladder": [
