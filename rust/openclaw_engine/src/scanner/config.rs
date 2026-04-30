@@ -437,6 +437,265 @@ impl EdgeRoutingConfig {
     }
 }
 
+// ─── MarketJudgmentConfig ─────────────────────────────────────────────────────
+
+fn default_market_judgment_enabled() -> bool {
+    true
+}
+
+fn default_market_gate_score_cap() -> f64 {
+    25.0
+}
+
+fn default_grid_max_trend_score() -> f64 {
+    0.55
+}
+
+fn default_grid_max_directional_efficiency() -> f64 {
+    0.55
+}
+
+fn default_grid_max_dir_pct() -> f64 {
+    3.5
+}
+
+fn default_grid_min_range_pct() -> f64 {
+    3.0
+}
+
+fn default_trend_min_trend_score() -> f64 {
+    0.45
+}
+
+fn default_trend_min_dir_pct() -> f64 {
+    0.8
+}
+
+fn default_reversion_min_range_pct() -> f64 {
+    4.0
+}
+
+fn default_reversion_max_trend_score() -> f64 {
+    0.60
+}
+
+fn default_breakout_min_trend_score() -> f64 {
+    0.50
+}
+
+fn default_breakout_min_dir_pct() -> f64 {
+    1.8
+}
+
+fn default_funding_max_dir_pct() -> f64 {
+    4.0
+}
+
+fn default_funding_max_trend_score() -> f64 {
+    0.65
+}
+
+fn default_immature_negative_min_trades() -> u32 {
+    10
+}
+
+fn default_immature_negative_bps_threshold() -> f64 {
+    0.0
+}
+
+fn default_immature_negative_score_cap() -> f64 {
+    20.0
+}
+
+/// Strategy-specific scanner market judgement. This is deliberately separate
+/// from `edge_routing`: edge tells us what has happened for a cell, while
+/// market judgement decides whether the current regime is compatible with a
+/// strategy before demo/live_demo opens a fresh position.
+/// 策略別行情判斷。刻意與 `edge_routing` 分離：edge 回饋描述 cell 已實現表現；
+/// market judgement 則判斷當下 regime 是否適合該策略新開倉。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MarketJudgmentConfig {
+    /// Master switch. When false, scanner emits neutral market metadata.
+    /// 總開關；關閉時 scanner 只輸出中性行情 metadata。
+    #[serde(default = "default_market_judgment_enabled")]
+    pub enabled: bool,
+    /// Score cap applied to a strategy-symbol route rejected by market judgement.
+    /// market judgement 拒絕的 strategy-symbol route 的分數上限。
+    #[serde(default = "default_market_gate_score_cap")]
+    pub gate_score_cap: f64,
+    /// Grid is blocked above this trend score.
+    /// trend_score 高於此值時阻擋 grid 新開倉。
+    #[serde(default = "default_grid_max_trend_score")]
+    pub grid_max_trend_score: f64,
+    /// Grid is blocked above this directional efficiency.
+    /// 方向效率高於此值時阻擋 grid 新開倉。
+    #[serde(default = "default_grid_max_directional_efficiency")]
+    pub grid_max_directional_efficiency: f64,
+    /// Grid is blocked when net 24h move is too directional.
+    /// 24h 淨方向移動過大時阻擋 grid 新開倉。
+    #[serde(default = "default_grid_max_dir_pct")]
+    pub grid_max_dir_pct: f64,
+    /// Grid needs enough range to pay fees and spacing.
+    /// grid 需要足夠區間以覆蓋費用與網格間距。
+    #[serde(default = "default_grid_min_range_pct")]
+    pub grid_min_range_pct: f64,
+    /// MA-like trend followers need at least this trend score.
+    /// MA 類趨勢策略所需最低 trend_score。
+    #[serde(default = "default_trend_min_trend_score")]
+    pub trend_min_trend_score: f64,
+    /// MA-like trend followers need at least this 24h move.
+    /// MA 類趨勢策略所需最低 24h 淨移動。
+    #[serde(default = "default_trend_min_dir_pct")]
+    pub trend_min_dir_pct: f64,
+    /// BB reversion needs enough realized range.
+    /// BB 回歸所需最低 range。
+    #[serde(default = "default_reversion_min_range_pct")]
+    pub reversion_min_range_pct: f64,
+    /// BB reversion is blocked when trend score is too high.
+    /// trend_score 過高時阻擋 BB 回歸。
+    #[serde(default = "default_reversion_max_trend_score")]
+    pub reversion_max_trend_score: f64,
+    /// BB breakout needs a stronger directional expansion proxy.
+    /// BB 突破所需最低方向擴張 proxy。
+    #[serde(default = "default_breakout_min_trend_score")]
+    pub breakout_min_trend_score: f64,
+    /// BB breakout needs this 24h net move.
+    /// BB 突破所需最低 24h 淨移動。
+    #[serde(default = "default_breakout_min_dir_pct")]
+    pub breakout_min_dir_pct: f64,
+    /// Funding arb is blocked when price trend is too directional.
+    /// 價格趨勢過強時阻擋 funding arb 新開倉。
+    #[serde(default = "default_funding_max_dir_pct")]
+    pub funding_max_dir_pct: f64,
+    /// Funding arb trend-score cap.
+    /// funding arb trend_score 上限。
+    #[serde(default = "default_funding_max_trend_score")]
+    pub funding_max_trend_score: f64,
+    /// Low-sample negative edge quarantine threshold.
+    /// 低樣本負 edge 隔離所需最小樣本數。
+    #[serde(default = "default_immature_negative_min_trades")]
+    pub immature_negative_min_trades: u32,
+    /// Low-sample cells below this bps are quarantined before they mature.
+    /// 低樣本 cell 低於此 bps 時先隔離，不等成熟門檻。
+    #[serde(default = "default_immature_negative_bps_threshold")]
+    pub immature_negative_bps_threshold: f64,
+    /// Score cap for immature negative cells.
+    /// 低樣本負 edge cell 分數上限。
+    #[serde(default = "default_immature_negative_score_cap")]
+    pub immature_negative_score_cap: f64,
+}
+
+impl Default for MarketJudgmentConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_market_judgment_enabled(),
+            gate_score_cap: default_market_gate_score_cap(),
+            grid_max_trend_score: default_grid_max_trend_score(),
+            grid_max_directional_efficiency: default_grid_max_directional_efficiency(),
+            grid_max_dir_pct: default_grid_max_dir_pct(),
+            grid_min_range_pct: default_grid_min_range_pct(),
+            trend_min_trend_score: default_trend_min_trend_score(),
+            trend_min_dir_pct: default_trend_min_dir_pct(),
+            reversion_min_range_pct: default_reversion_min_range_pct(),
+            reversion_max_trend_score: default_reversion_max_trend_score(),
+            breakout_min_trend_score: default_breakout_min_trend_score(),
+            breakout_min_dir_pct: default_breakout_min_dir_pct(),
+            funding_max_dir_pct: default_funding_max_dir_pct(),
+            funding_max_trend_score: default_funding_max_trend_score(),
+            immature_negative_min_trades: default_immature_negative_min_trades(),
+            immature_negative_bps_threshold: default_immature_negative_bps_threshold(),
+            immature_negative_score_cap: default_immature_negative_score_cap(),
+        }
+    }
+}
+
+impl MarketJudgmentConfig {
+    fn validate(&self) -> Result<(), String> {
+        for (name, value) in [
+            ("market_judgment.gate_score_cap", self.gate_score_cap),
+            (
+                "market_judgment.grid_max_trend_score",
+                self.grid_max_trend_score,
+            ),
+            (
+                "market_judgment.grid_max_directional_efficiency",
+                self.grid_max_directional_efficiency,
+            ),
+            ("market_judgment.grid_max_dir_pct", self.grid_max_dir_pct),
+            (
+                "market_judgment.grid_min_range_pct",
+                self.grid_min_range_pct,
+            ),
+            (
+                "market_judgment.trend_min_trend_score",
+                self.trend_min_trend_score,
+            ),
+            ("market_judgment.trend_min_dir_pct", self.trend_min_dir_pct),
+            (
+                "market_judgment.reversion_min_range_pct",
+                self.reversion_min_range_pct,
+            ),
+            (
+                "market_judgment.reversion_max_trend_score",
+                self.reversion_max_trend_score,
+            ),
+            (
+                "market_judgment.breakout_min_trend_score",
+                self.breakout_min_trend_score,
+            ),
+            (
+                "market_judgment.breakout_min_dir_pct",
+                self.breakout_min_dir_pct,
+            ),
+            (
+                "market_judgment.funding_max_dir_pct",
+                self.funding_max_dir_pct,
+            ),
+            (
+                "market_judgment.funding_max_trend_score",
+                self.funding_max_trend_score,
+            ),
+            (
+                "market_judgment.immature_negative_bps_threshold",
+                self.immature_negative_bps_threshold,
+            ),
+            (
+                "market_judgment.immature_negative_score_cap",
+                self.immature_negative_score_cap,
+            ),
+        ] {
+            if !value.is_finite() {
+                return Err(format!("{name} must be finite"));
+            }
+        }
+        if !(0.0..=100.0).contains(&self.gate_score_cap) {
+            return Err("market_judgment.gate_score_cap must be in [0, 100]".into());
+        }
+        if self.grid_max_dir_pct < 0.0
+            || self.grid_min_range_pct < 0.0
+            || self.trend_min_dir_pct < 0.0
+            || self.reversion_min_range_pct < 0.0
+            || self.breakout_min_dir_pct < 0.0
+            || self.funding_max_dir_pct < 0.0
+        {
+            return Err("market_judgment pct thresholds must be >= 0".into());
+        }
+        if !(0.0..=1.0).contains(&self.grid_max_trend_score)
+            || !(0.0..=1.0).contains(&self.grid_max_directional_efficiency)
+            || !(0.0..=1.0).contains(&self.trend_min_trend_score)
+            || !(0.0..=1.0).contains(&self.reversion_max_trend_score)
+            || !(0.0..=1.0).contains(&self.breakout_min_trend_score)
+            || !(0.0..=1.0).contains(&self.funding_max_trend_score)
+        {
+            return Err("market_judgment score thresholds must be in [0, 1]".into());
+        }
+        if !(0.0..=100.0).contains(&self.immature_negative_score_cap) {
+            return Err("market_judgment.immature_negative_score_cap must be in [0, 100]".into());
+        }
+        Ok(())
+    }
+}
+
 // ─── ScannerConfig ────────────────────────────────────────────────────────────
 
 /// Top-level scanner configuration.
@@ -461,6 +720,8 @@ pub struct ScannerConfig {
     pub correlation: CorrelationLimits,
     #[serde(default)]
     pub edge_routing: EdgeRoutingConfig,
+    #[serde(default)]
+    pub market_judgment: MarketJudgmentConfig,
 }
 
 impl ScannerConfig {
@@ -473,6 +734,7 @@ impl ScannerConfig {
         self.anti_churn.validate()?;
         self.correlation.validate()?;
         self.edge_routing.validate()?;
+        self.market_judgment.validate()?;
         Ok(())
     }
 }

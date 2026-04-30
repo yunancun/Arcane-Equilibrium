@@ -214,10 +214,13 @@ pub(crate) fn risk_score_level(score: f64) -> Option<&'static str> {
 pub(crate) struct IntentScannerContext {
     pub scan_id: String,
     pub best_strategy: String,
+    pub intent_strategy: String,
     pub edge_bps: Option<f64>,
     pub edge_n: u32,
     pub edge_status: String,
     pub route_mode: String,
+    pub market_status: String,
+    pub route_reason: String,
     pub final_score: f64,
     pub raw_score: f64,
 }
@@ -293,10 +296,13 @@ pub(crate) fn persist_intent(
             serde_json::json!({
                 "scan_id": s.scan_id,
                 "best_strategy": s.best_strategy,
+                "intent_strategy": s.intent_strategy,
                 "edge_bps": s.edge_bps,
                 "edge_n": s.edge_n,
                 "edge_status": s.edge_status,
                 "route_mode": s.route_mode,
+                "market_status": s.market_status,
+                "route_reason": s.route_reason,
                 "final_score": s.final_score,
                 "raw_score": s.raw_score,
             })

@@ -11,6 +11,7 @@
 //!   `ChurnState` 跟蹤每個交易對的穩定性，防止快速更換交易對。
 
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 /// Strategy category for per-strategy fitness scoring.
 /// 策略類別，用於分立的策略適配評分。
@@ -43,6 +44,42 @@ impl StrategyCategory {
     }
 }
 
+/// Strategy-specific route judgement emitted by scanner scoring.
+/// scanner scoring 輸出的策略別路由判斷。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct StrategyRouteJudgment {
+    /// Strategy key (e.g. "grid_trading").
+    /// 策略鍵。
+    pub strategy: String,
+    /// Strategy-specific raw fitness score before edge/market caps.
+    /// 策略別原始適配分。
+    pub fitness_score: f64,
+    /// Strategy-specific final score after edge and market judgement.
+    /// edge 與行情判斷後的策略別最終分。
+    pub final_score: f64,
+    /// Runtime edge estimate in bps for this strategy-symbol cell.
+    /// 此 strategy-symbol cell 的 runtime edge bps。
+    pub edge_bps: Option<f64>,
+    /// Edge bonus applied before market judgement caps.
+    /// market judgement cap 前套用的 edge bonus。
+    pub edge_bonus: f64,
+    /// Runtime sample count for this strategy-symbol cell.
+    /// 此 strategy-symbol cell 的樣本數。
+    pub edge_n: u32,
+    /// Edge status for this strategy-symbol cell.
+    /// 此 strategy-symbol cell 的 edge 狀態。
+    pub edge_status: String,
+    /// Route mode for this strategy-symbol cell.
+    /// 此 strategy-symbol cell 的路由模式。
+    pub route_mode: String,
+    /// Market compatibility status: compatible / blocked / edge_quarantine.
+    /// 行情相容狀態。
+    pub market_status: String,
+    /// Human-readable reason for the route decision.
+    /// 路由決策原因。
+    pub route_reason: String,
+}
+
 /// Full scoring breakdown for a single symbol candidate.
 /// Carries all intermediate values so decisions are fully auditable.
 /// 單個候選交易對的完整評分明細。
@@ -51,11 +88,14 @@ impl StrategyCategory {
 pub struct ScoredSymbol {
     /// Symbol name (e.g. "SOLUSDT") / 交易對名稱
     pub symbol: String,
-    /// Final score after edge bonus, clamped [0, 100] / 加上邊際獎勵後的最終分數，限制在 [0, 100]
+    /// Final score for the selected scanner route after edge/market judgement.
+    /// 經 edge / 行情判斷後，scanner 選中 route 的最終分。
     pub final_score: f64,
-    /// Raw score before edge bonus (max of four fitness scores) / 邊際獎勵前的原始分數（四個適配分的最大值）
+    /// Raw fitness score for the selected scanner route before edge/market caps.
+    /// scanner 選中 route 在 edge / 行情 cap 前的原始適配分。
     pub raw_score: f64,
-    /// Strategy with the highest fitness score / 適配分最高的策略
+    /// Strategy selected by the scanner after per-strategy edge/market judgement.
+    /// 經分策略 edge / 行情判斷後 scanner 選中的策略。
     pub best_strategy: StrategyCategory,
 
     // Per-strategy fitness scores / 各策略適配分
@@ -77,6 +117,21 @@ pub struct ScoredSymbol {
     pub range_pct: f64,
     /// Funding rate absolute value in basis points / 資金費率絕對值（基點）
     pub fr_bps: f64,
+    /// Signed 24h direction pct (positive = up, negative = down).
+    /// 帶方向的 24h 漲跌百分比。
+    pub signed_dir_pct: f64,
+    /// Trend score [0, 1] derived from directional efficiency and move size.
+    /// 趨勢分數。
+    pub trend_score: f64,
+    /// Range / mean-reversion score [0, 1].
+    /// 區間 / 均值回歸分數。
+    pub range_score: f64,
+    /// One-way shock score [0, 1].
+    /// 單邊衝擊分數。
+    pub shock_score: f64,
+    /// Coarse scanner regime label.
+    /// scanner 粗粒度行情 regime。
+    pub market_regime: String,
     /// 24h turnover in USDT / 24h 成交額（USDT）
     pub turnover_24h: f64,
 
@@ -94,6 +149,15 @@ pub struct ScoredSymbol {
     /// Route mode derived from edge: exploration / main / exploration_only.
     /// edge 推導的路由模式：exploration / main / exploration_only。
     pub route_mode: String,
+    /// Market status for the scanner's best_strategy route.
+    /// scanner best_strategy route 的行情狀態。
+    pub market_status: String,
+    /// Route reason for the scanner's best_strategy route.
+    /// scanner best_strategy route 的路由原因。
+    pub route_reason: String,
+    /// Per-strategy route judgement keyed by strategy name.
+    /// 以策略名為鍵的策略別路由判斷。
+    pub strategy_judgments: BTreeMap<String, StrategyRouteJudgment>,
 
     // Correlation / diversification / 相關性 / 分散
     /// BTC beta proxy (None if BTC barely moved) / BTC beta 代理（BTC 幾乎不動時為 None）

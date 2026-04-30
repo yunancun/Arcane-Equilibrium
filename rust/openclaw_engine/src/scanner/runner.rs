@@ -151,6 +151,7 @@ impl ScannerRunner {
                             &estimates_guard,
                             &config.hard_filters,
                             &config.edge_routing,
+                            &config.market_judgment,
                         )
                     })
                     .collect()
