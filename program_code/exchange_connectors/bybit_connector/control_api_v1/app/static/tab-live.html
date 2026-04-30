@@ -1473,6 +1473,21 @@ async function closeLivePosition(symbol, ownerStrategy, frozenReason) {
 // Performance Metrics / 性能指標
 // ═══════════════════════════════════════════════════════════════
 
+function _liveMetricPct(rate) {
+  const v = parseFloat(rate);
+  return Number.isFinite(v) ? (v * 100).toFixed(1) + '%' : null;
+}
+function _liveMetricRatio(ratio) {
+  if (ratio === 'inf') return '∞';
+  const v = parseFloat(ratio);
+  return Number.isFinite(v) && v > 0 ? ocNum(v, 2) : null;
+}
+function _liveMetricPnl(metric, value) {
+  const v = parseFloat(value);
+  if (!Number.isFinite(v)) return null;
+  return metric && metric.metric_unit === 'bps' ? v.toFixed(2) + ' bps' : ocMoney(v);
+}
+
 async function loadLiveMetrics() {
   const d = await ocApi('/api/v1/live/metrics');
   if (!d || !d.data) {
@@ -1487,22 +1502,28 @@ async function loadLiveMetrics() {
     return;
   }
   const m = d.data;
-  const tm = m.trade_metrics || {};
+  const db = m.db_true_metrics || {};
+  const acct = db.account_metrics || {};
+  const edge = (db.edge_metrics && db.edge_metrics.total_round_trips > 0) ? db.edge_metrics : null;
+  const dbTm = (db.trade_metrics && db.trade_metrics.total_round_trips > 0) ? db.trade_metrics : null;
+  const tm = edge || dbTm || m.trade_metrics || {};
   const dm = m.drawdown_metrics || {};
   const hm = m.holding_period_metrics || {};
   const sr = m.sharpe_ratio || {};
 
   const items = [
-    ['總成交筆數 / Total Fills', '', tm.total_fills || m.total_fills],
+    ['7d 成交筆數 / Total Fills', '', acct.total_fills != null ? acct.total_fills : (tm.total_fills || m.total_fills)],
     ['完整交易次數 / Round Trips', '一次開倉到完全平倉為一次完整交易。', tm.total_round_trips || m.total_trades],
-    ['勝率 / Win Rate', '盈利交易佔總交易的百分比。', tm.win_rate != null ? (tm.win_rate * 100).toFixed(1) + '%' : null],
-    ['盈虧比 / Win/Loss Ratio', '平均盈利與平均虧損的比值。>1 表示盈利大於虧損。', tm.win_loss_ratio != null ? ocNum(tm.win_loss_ratio, 2) : null],
+    ['勝率 / Win Rate', '', tm.win_rate != null ? _liveMetricPct(tm.win_rate) : null],
+    ['盈虧比 / Win/Loss Ratio', '', tm.win_loss_ratio != null ? _liveMetricRatio(tm.win_loss_ratio) : null],
+    ['7d 淨盈虧 / Net PnL', '', acct.net_pnl != null ? ocMoney(acct.net_pnl) : null],
+    ['平均淨邊際 / Avg Net Edge', '', edge && edge.avg_net_bps != null ? edge.avg_net_bps.toFixed(2) + ' bps' : null],
     ['最大回撤 / Max Drawdown', '從峰值到最低點的最大跌幅。', dm.max_drawdown_pct != null ? dm.max_drawdown_pct.toFixed(2) + '%' : null],
     ['夏普比率 / Sharpe Ratio', '風險調整後收益指標。>1 良好，>2 優秀。', sr.sharpe_ratio != null ? ocNum(sr.sharpe_ratio, 3) : null],
     ['平均持倉時間 / Avg Hold Time', '持倉從開倉到平倉的平均時長。', hm.avg_holding_period_sec != null ? Math.round(hm.avg_holding_period_sec / 60) + ' min' : null],
-    ['單筆最高盈利 / Largest Win', '', tm.largest_win != null ? ocMoney(tm.largest_win) : null],
-    ['單筆最高虧損 / Largest Loss', '', tm.largest_loss != null ? ocMoney(tm.largest_loss) : null],
-    ['總手續費 / Total Fees', '所有交易產生的手續費總和。', tm.total_fees_paid != null ? ocBalance(tm.total_fees_paid, 4) : null],
+    ['單筆最高盈利 / Largest Win', '', tm.largest_win != null ? _liveMetricPnl(tm, tm.largest_win) : null],
+    ['單筆最高虧損 / Largest Loss', '', tm.largest_loss != null ? _liveMetricPnl(tm, tm.largest_loss) : null],
+    ['7d 手續費 / Total Fees', '', acct.total_fees != null ? ocBalance(acct.total_fees, 4) : (tm.total_fees_paid != null ? ocBalance(tm.total_fees_paid, 4) : null)],
   ];
 
   let html = '';

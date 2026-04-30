@@ -41,6 +41,7 @@ from .ipc_state_reader import get_rust_reader
 DEFAULT_INITIAL_BALANCE_USDT = 10_000.0
 from .shadow_decision_builder import ShadowDecisionConsumer
 from .paper_trading_metrics import compute_full_metrics
+from .trading_true_metrics import fetch_db_true_metrics
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Singletons — re-exported from paper_trading_wiring.py (TD-03 split)
@@ -1095,6 +1096,7 @@ def get_metrics(
     # 確保 total_fills 在頂層可用（向後兼容）
     full["total_fills"] = stats.get("total_fills", 0)
     full["total_stops"] = stats.get("total_stops", 0)
+    full["db_true_metrics"] = fetch_db_true_metrics(["paper"], edge_engine_modes=["paper"], window_days=7)
     return _paper_response(full)
 
 

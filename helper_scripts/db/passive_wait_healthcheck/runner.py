@@ -96,6 +96,7 @@ from .checks_execution import (
     # [39]（2026-04-29）PA W1-T4 — trading.fills.strategy_name cardinality
     # regression 偵測（W1-T2 規範化哨兵）。
     check_strategy_name_cardinality_drift,
+    check_realized_edge_acceptance,
 )
 
 
@@ -116,7 +117,7 @@ The checks split between DB pipelines + filesystem/observability sentinels:
   Cursor block:
     [1][2][3][4][5][6][8][9][10][12][Xb][14][15][21]      14 baseline
     [22][23][24][25][26][27][28]                          7 F7 MIT+E5
-    [30][31][32][33][34][35][36][37][38][39]              cost/execution/MLDE/lifecycle/cardinality
+    [30][31][32][33][34][35][36][37][38][39][40]          cost/execution/MLDE/lifecycle/cardinality/acceptance
   Post-cursor (filesystem / pure-Python):
     [7][13][11][Xa][16][18][19][20]                       8 baseline
     [29]                                                  1 F7 (no-IPC stub)
@@ -142,6 +143,7 @@ Execution / cost sentinels added after F7:
   [37] mlde_demo_applier               (demo autonomy audit + live lease boundary)
   [38] grid_trading_lifecycle_drift    (MIT 2026-04-29 demo vs live_demo passive 7d)
   [39] strategy_name_cardinality_drift (PA W1-T4 2026-04-29 post-normalization sentinel)
+  [40] realized_edge_acceptance        (DB-truth post-fee profitability acceptance)
 
 Exit codes:
   0 = all checks PASS / only WARN
@@ -160,10 +162,11 @@ def main() -> int:
 
     Counted rows are documented by ID, not by fragile total:
       cursor: [1][2][3][4][5][6][8][9][10][12][Xb][14][15][21]
-              [22][23][24][25][26][27][28] [30][31][32][33][34][35][36][37][38][39]
+              [22][23][24][25][26][27][28] [30][31][32][33][34][35][36][37][38][39][40]
               (F7 [22]-[28] are MIT/E5; [30]-[37] are post-F7/MLDE;
                [38] is MIT 2026-04-29 grid lifecycle drift;
-               [39] is PA W1-T4 2026-04-29 strategy_name cardinality drift)
+               [39] is PA W1-T4 2026-04-29 strategy_name cardinality drift;
+               [40] is DB-truth realized edge acceptance)
       post-cursor: [7][13][11][Xa][16][18][19][20]
                    [29]   (F7 [29] is deferred-no-ipc stub)
 
@@ -172,7 +175,7 @@ def main() -> int:
     ``(status, msg)``（[1] 額外回 close_fills，供 [2]/[3]/[Xb] 用）。
     清單依 ID 記錄，避免總數 drift：
       cursor: [1][2][3][4][5][6][8][9][10][12][Xb][14][15][21]
-              [22][23][24][25][26][27][28] [30][31][32][33][34][35][36][37][38][39]
+              [22][23][24][25][26][27][28] [30][31][32][33][34][35][36][37][38][39][40]
       post-cursor: [7][13][11][Xa][16][18][19][20] [29]
     """
     ap = argparse.ArgumentParser(description=_RUNNER_DESCRIPTION)
@@ -475,6 +478,11 @@ def main() -> int:
             # W1-T2 + --rebuild 後 24h 內降回 PASS。
             s, m = check_strategy_name_cardinality_drift(cur)
             results.append(("[39] strategy_name_cardinality_drift", s, m))
+
+            # [40] DB-truth profitability acceptance: post-fee MLDE avg edge,
+            # negative active cells, and maker fee-drop targets.
+            s, m = check_realized_edge_acceptance(cur)
+            results.append(("[40] realized_edge_acceptance", s, m))
     finally:
         conn.close()
 

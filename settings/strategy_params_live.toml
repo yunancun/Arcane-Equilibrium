@@ -9,10 +9,11 @@
 
 [ma_crossover]
 active = true
-cooldown_ms = 300000
-adx_threshold = 20.0
+cooldown_ms = 600000
+adx_threshold = 25.0
 regime_filter_enabled = true
 higher_tf_alpha = 0.003
+min_persistence_ms = 240000
 conf_scale = 1.0
 # LIVE-DEMO-MAKER-FIX (2026-04-29): current live pipeline writes live_demo fills
 # against Bybit Demo, not real funds. Align MA entry execution with demo so the
@@ -64,13 +65,13 @@ maker_limit_timeout_ms = 45000
 active = true
 # P1-10 AUDIT 2026-04-20: explicit cooldown surfaces the serde default that was
 # previously silent (E5-P2-4 "TOML 不可達漏洞" hygiene follow-up). Matches demo/paper.
-cooldown_ms = 60000
+cooldown_ms = 180000
 # GRID-LIFECYCLE-DRIFT RFC (2026-04-29): live_demo showed grid close churn
 # (`strategy_close:grid_close_*`) with re_entry_rate=0.72. Reduce level density
 # first; keep strategy active and close/reduce paths untouched.
 # GRID-LIFECYCLE-DRIFT RFC：live_demo 出現 grid close churn，先降低網格密度；
 # 保留策略啟用與平倉 / 減倉路徑。
-grid_levels = 7
+grid_levels = 5
 spacing_mode = "linear"
 health_check_interval = 200
 max_out_of_range = 50
@@ -106,6 +107,10 @@ blocked_symbols = [
   "AAVEUSDT",
   "ORCAUSDT",
   "PENGUUSDT",
+  "NAORISUSDT",
+  "TAOUSDT",
+  "1000PEPEUSDT",
+  "ADAUSDT",
 ]
 
 # OC-5: FundingArb — inactive for live until paper/demo validated.

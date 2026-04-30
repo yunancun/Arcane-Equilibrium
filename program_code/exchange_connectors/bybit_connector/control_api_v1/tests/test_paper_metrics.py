@@ -118,6 +118,23 @@ class TestTradeMetrics:
         assert result["total_round_trips"] == 1
         assert result["win_count"] == 1  # 51000-50000=10 per 0.01 = $10 - fees > 0
 
+    def test_realized_close_fill_overrides_price_reconstruction(self):
+        """DB close rows carry realized_pnl; metrics must use that truth."""
+        entry = _make_fill(
+            side="Buy", qty=10.0, price=1.0, fee=0.2, ts_ms=1000, order_id="entry"
+        )
+        entry["context_id"] = "ctx-1"
+        close = _make_fill(
+            side="Sell", qty=10.0, price=1.0, fee=0.3, ts_ms=2000, order_id="close"
+        )
+        close["entry_context_id"] = "ctx-1"
+        close["exit_reason"] = "test_close"
+        close["realized_pnl"] = 5.0
+        result = compute_trade_metrics([entry, close], [])
+        assert result["total_round_trips"] == 1
+        assert result["win_count"] == 1
+        assert result["avg_win"] == 4.5
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Test: Balance Series / 测试：余额序列

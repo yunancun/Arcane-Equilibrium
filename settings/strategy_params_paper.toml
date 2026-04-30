@@ -9,10 +9,11 @@
 
 [ma_crossover]
 active = true
-cooldown_ms = 300000
-adx_threshold = 20.0
+cooldown_ms = 600000
+adx_threshold = 25.0
 regime_filter_enabled = true
 higher_tf_alpha = 0.003
+min_persistence_ms = 240000
 conf_scale = 1.0
 # EDGE-P2-3 Phase 2+: mirrors demo so paper exploration matches target fee profile.
 # EDGE-P2-3 Phase 2+：與 demo 對齊。
@@ -56,8 +57,8 @@ maker_limit_timeout_ms = 45000
 active = true
 # P1-10 AUDIT 2026-04-20: explicit cooldown surfaces the serde default that was
 # previously silent (E5-P2-4 "TOML 不可達漏洞" hygiene follow-up). Matches demo/live.
-cooldown_ms = 60000
-grid_levels = 10
+cooldown_ms = 180000
+grid_levels = 7
 spacing_mode = "linear"
 health_check_interval = 200
 max_out_of_range = 50
@@ -72,6 +73,23 @@ maker_price_offset_bps = 1.0
 # EDGE-P2-3 Phase 1B-3.1：掛中 PostOnly Limit 逾時清理（毫秒）。
 # 默認 45_000 ms；運行時 clamp 到 [15_000, 300_000]。
 maker_limit_timeout_ms = 45000
+blocked_symbols = [
+  "BSBUSDT",
+  "PRLUSDT",
+  "ZBTUSDT",
+  "FARTCOINUSDT",
+  "SOLUSDT",
+  "DOGEUSDT",
+  "GALAUSDT",
+  "ENAUSDT",
+  "AAVEUSDT",
+  "ORCAUSDT",
+  "PENGUUSDT",
+  "NAORISUSDT",
+  "TAOUSDT",
+  "1000PEPEUSDT",
+  "ADAUSDT",
+]
 
 # OC-5: FundingArb — funding rate capture strategy.
 # Paper = exploration, activated for signal validation.
