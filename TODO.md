@@ -217,16 +217,14 @@ PA RFC `2026-04-28--g3_09_cost_edge_advisor_phase_c_rfc.md` ready；operator 決
 | **G2-03-FUP-CALLER-WIRE** | wire step_6_risk_checks caller chain，真實啟用 SL/TP override | G2-02 ~05-03 後 | P1 |
 | **G2-04** | Grid disable 決策會 | G2-01 若 fee_drop <60% | P0 |
 | **G8-03** | 灰度驗收自動化（shadow metrics）| EDGE-P2 flip 後 | P1 |
-| **G8-05** | AI cost ROI 監控面板 | G3-09 | P2 |
 | **EDGE-P2-flip** | combine layer shadow flip | EDGE-P1b + 7d ≥95% agree | P1 |
 | **EDGE-P2 Phase B** | Liquidation signal | Phase A OI 驗收 ✅ 已完 | P3 |
 | **EDGE-P2-3 Phase 2+** | live endpoint / funding_arb PostOnly | EDGE-P1b ~05-10+ | P3 |
 | **G2-03 binding** | ma_crossover SL/TP 真實啟用 | G2-02 結論 + G2-03-FUP-CALLER-WIRE | P1 |
 | **G7-03-Phase-B-FUP-grid** | grid_trading HysteresisDetector 遷移 | parallel WIP merge 後 | deferred |
 | **G7-01 wiring** | Kelly router callsites | G4 labels work | deferred |
-| **G7-04 Phase B/C wiring** | CUSUM consumer hook（Phase A schema landed）| EDGE-P1b 後 | P2 deferred |
+| **G3-06 Phase B** | Layer 2 autonomous Rust integration（Phase A `82ef8e1` 已 land Python `EscalationTier`，Rust 端整合 deferred）| 條件待確認 | P3 deferred |
 | **STRATEGIST-AUTO-PROMOTE** | 自動晉升規則 | P2-01 穩定後 | P3 deferred-long |
-| **STRK-FUP-HEALTHCHECK-PRE-EXISTING** | 5 pre-existing pipeline silent-dead 修（[3]/[19]/[23]/[24]/[26]/[27]）| F7 deploy 後 6h ✅ 已過 | P2 |
 | **ORPHAN-ADOPT-1 Phase 2B** | Strategist `would_take` 終仲裁 | G-1 R-02 | P3 |
 | **IP-DEDUP-1** | IntentProcessor 去抖 | P0-3 後 edge 仍負 + 高重發率 | P4 |
 | **G-7 ClaudeTeacher 啟用** | consumer_loop.rs enabled | 21d demo + G-3 後 ~05-07+ | P2-P3 |
@@ -239,7 +237,6 @@ PA RFC `2026-04-28--g3_09_cost_edge_advisor_phase_c_rfc.md` ready；operator 決
 | **OC-4** | MCP PostgreSQL 自然語言查詢 | Phase 5+ | P4 |
 | **4-Conditional** | PairsTrading/Beta/Kalman/Jump detection | post-live | P4 |
 | **G-6/G-7/G-8/G-10** | Edge JS retrain / ClaudeTeacher / cost_gate credibility / isotonic | P1-7B / 21d+G-3 | P4 |
-| **LEARNING-COCKPIT-NO-IPC** | Learning 8 端點走 Python state_store | G-7/G-10 後 | P2 |
 | **QoL-2** | Demo AI cost 追蹤 GUI（硬編碼 N/A）| G3-08 | P2 |
 | **G7-05** | cost_gate grand_mean bind | grand_mean>-50bps ∧ eligible cells>0 ∧ ≥2 strategy shrunk>0 | P1 passive |
 | **G-2 FundingArb 重評** | 三參數重評 | R-02 Strategist 在線 | P3 |

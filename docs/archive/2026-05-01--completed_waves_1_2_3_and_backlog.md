@@ -88,7 +88,7 @@
 | G3-03（Rust IPC）✅ | 由既有 `patch_risk_config` IPC 路徑覆蓋（Phase A e2e `03acedb` 已驗）|
 | G3-04 ✅ | ExecutorAgent shadow→live e2e 整合測試 5 class / 8 case；Linux pytest 74/0。commit `852da0f` |
 | G3-05 ✅ | EDGE-DIAG-1-FUP-SHADOW-ENABLED-IPC；exit.shadow_enabled IPC hot-reload regression。commits `e710026`+`491b045` |
-| G3-06 ✅ | Layer 2 escalation rules；`EscalationTier` enum；DEFAULT-OFF env-gated。commit `82ef8e1` |
+| G3-06 Phase A ✅（Phase B deferred）| Python Layer 2 escalation rules；`EscalationTier` enum；DEFAULT-OFF env-gated。commit `82ef8e1`。Phase B Rust integration deferred — 在 v4 TODO backlog 追蹤 `G3-06 Phase B` |
 | G3-07 ✅ | Layer 2 工具箱補全；591 行 sibling + 36 unit tests；Linux pytest 136/0。commits `ac6c09a`+`31fa96c` |
 | G3-08 PA+Phase 1A+B ✅ | h_state_cache 5 new Rust files + Python invalidator/query_handler；env-gate `OPENCLAW_H_STATE_GATEWAY`。commits `7564d07`+`aa287c4`+`1c7b20e`+`deac4bc` |
 | G3-09 cost_edge_ratio PA design ✅ | PA RFC NEW cost_edge_advisor；Phase A→B→C path。commit `642c34c` |
@@ -247,9 +247,7 @@
 | EXIT-FEATURES-WRITER-BUG-1 ✅ | RCA-A ft_dust_qty_floor_usd + RCA-B is_partial_reduce_tag；engine lib +12。commits `af48ee1`+`83456e5`+`00a9679` |
 | EXIT-FEATURES-WRITER-BUG-1-FIX（同上）| 見上 |
 | EXIT-FEATURES-FIX-FUP-HELPERS-RS-SPLIT ✅ | tick_pipeline/on_tick/helpers.rs 1411→336；PHYS-LOCK tests sibling。（2026-04-30）|
-| G2-FUP-FUNDING-ARB-PAPER-SYNC-LOW-1 | TW memory.md 補 commit msg 一致性；下次 TW 接手 |
 | EDGE-P1b-FUP-NEGATIVE-GUARD ✅ | negative-value guard + 6 unit tests。commit `d8385e6` |
-| G5-09-FUP-TYPO | commit msg typo；下次 commit edit cycle（P3 保留 active backlog）|
 | AGENT-HEARTBEAT-SCOUT-WIRE ✅ | `_scan_and_produce_intel()` 兩條 path 呼 `ScoutAgent.record_scan()`；2 hermetic tests。commit `f8a245c` |
 | CHECKS-STRATEGY-SUBSPLIT ✅ | `checks_strategy.py` 1239→924 + 2 sibling。（2026-04-29 maintenance）|
 | CHECKS-ENGINE-SUBSPLIT ✅ | `checks_engine.py` 1206→1143 + `checks_engine_reconciler.py` 78。（2026-04-29）|
@@ -291,7 +289,6 @@
 | STRK-FUP-HEALTHCHECK-PRE-EXISTING ✅ | latest [3]/[19]/[23]/[24]/[26]/[27] PASS；2026-04-30 runtime observation |
 | LIVE-RECONCILER-STALE-CMD-TX ✅ | reconciler per-dispatch LiveCmdSenderSlot snapshot；Batch A/SW-002 |
 | G2-01-FUP-MAKER-FILL-CHECK ✅ | [33] maker_fill_rate 7d dedicated check + unit tests。commits `030ef2d`+`0e9e257`+`f0d21b9`+`af9d552` |
-| STRATEGIST-AUTO-PROMOTE | P2-01 穩定後（P3 backlog，非完成）|
 | G3-08-PHASE-1C-FUP-CHECK20-SYNC ✅ | [20] Phase 2 expected value + set diff WARN 邏輯。commit `d8385e6` |
 | G3-07-FUP-ENV-NAMESPACE ✅ | `bybit_public_base_url()` 對齊 production file-based env；targeted pytest PASS。（2026-04-30）|
 | G3-07-FUP-PYTEST-MARK ✅ | `conftest.py` slow + e2e markers + e2e decorator。commit `d8385e6` |
