@@ -45,7 +45,7 @@
 
 ## 三、當前系統狀態摘要
 
-**Runtime（2026-04-30 22:18 CEST · ssh verify · G6-04 §三 drift 規則）**：Mac/Linux code-bearing runtime checkpoint `a9fce24`；Linux engine kept running from prior rebuild, API-only reload applied Scout heartbeat wiring. Engine PID **1529433** + API uvicorn PID **1591455** + engine_watchdog PID **3450754** + openclaw-gateway PID **3973441** alive。watchdog `engine_alive=true`，demo/live snapshots fresh，paper inactive by design。Latest passive healthcheck SUMMARY **WARN**：no pipeline-dead FAIL; current notable gates are WARN `[4]` / `[11]` / `[27]` / `[33]` / `[38]` / `[40]`, PASS `[35]` / `[36]` / `[37]` / `[39]`.
+**Runtime（2026-04-30 22:28 CEST · ssh verify · G6-04 §三 drift 規則）**：Mac/Linux code-bearing runtime checkpoint `a9fce24`；Linux engine kept running from prior rebuild, API-only reload applied Scout heartbeat wiring. Engine PID **1529433** + API uvicorn PID **1591455** + engine_watchdog PID **3450754** + openclaw-gateway PID **3973441** alive。watchdog `engine_alive=true`，demo/live snapshots fresh，paper inactive by design。Latest passive healthcheck SUMMARY **WARN**：no pipeline-dead FAIL; current notable gates are WARN `[4]` / `[11]` / `[33]` / `[38]` / `[40]`, PASS `[27]` / `[35]` / `[36]` / `[37]` / `[39]`.
 
 **Active edge state**：Strategy Edge Repair + Strategy Edge Models are deployed. Current observation gates are `[33] maker_fill_rate`, `[38] grid_trading_lifecycle_drift`, and `[40] realized_edge_acceptance`; interpret them with a post-deploy cutoff because rolling windows still mix old samples. The main live-demo issue is grid lifecycle drift: live_demo closes/re-enters too fast versus demo. Primary metric remains post-fee `net_bps_after_fee`; PnL and win-rate are secondary references.
 
@@ -477,7 +477,7 @@ state_models ← state_compiler ← state_store ← main_legacy ← main.py
 
 ## 十一、一句話狀態
 
-> 截至 2026-04-30 22:18 CEST：**current code-bearing runtime checkpoint is active and healthcheck is WARN, but edge remains at-risk** — Strategy Edge Models + Dust residual prevention + MLDE demo autonomy are deployed; dust full-close behavior is proven on real Demo/LiveDemo `qty=0` close fills; post-reload maker execution is now near target, but rolling `[33]` and realized `[40]` remain below acceptance and `[38]` grid lifecycle drift is still WARN. Next work is G2-02/G2-01/P0-3 time-driven decisions. True live autonomy remains gated by GovernanceHub + Decision Lease + 5 live gates.
+> 截至 2026-04-30 22:28 CEST：**current code-bearing runtime checkpoint is active and healthcheck is WARN, but edge remains at-risk** — Strategy Edge Models + Dust residual prevention + MLDE demo autonomy are deployed; dust full-close behavior is proven on real Demo/LiveDemo `qty=0` close fills; post-reload maker execution is now near target, but rolling `[33]` and realized `[40]` remain below acceptance and `[38]` grid lifecycle drift is still WARN. Next work is G2-02/G2-01/P0-3 time-driven decisions. True live autonomy remains gated by GovernanceHub + Decision Lease + 5 live gates.
 
 ---
 

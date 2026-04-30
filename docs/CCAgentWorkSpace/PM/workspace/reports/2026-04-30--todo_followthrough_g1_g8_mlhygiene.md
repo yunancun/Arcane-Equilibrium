@@ -27,7 +27,7 @@ At collection time, Mac and Linux were aligned to code-bearing runtime checkpoin
 
 Latest watchdog: `engine_alive=true`, demo/live snapshots fresh, paper inactive by design.
 
-Latest passive healthcheck at 2026-04-30 22:12 CEST returned SUMMARY WARN, not FAIL. Notable WARNs were `[4]`, `[11]`, `[27]`, `[33]`, `[38]`, and `[40]`; `[35]`, `[36]`, `[37]`, and `[39]` passed.
+Latest passive healthcheck at 2026-04-30 22:28 CEST returned SUMMARY WARN, not FAIL. Notable WARNs were `[4]`, `[11]`, `[33]`, `[38]`, and `[40]`; `[27]`, `[35]`, `[36]`, `[37]`, and `[39]` passed.
 
 ## G1-04 Fee / R:R Compute
 
