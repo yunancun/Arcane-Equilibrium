@@ -337,6 +337,53 @@ function ocNum(v, decimals) {
   return Number(v).toFixed(decimals != null ? decimals : 2);
 }
 
+function ocFirstFinite(obj, keys) {
+  if (!obj || !Array.isArray(keys)) return null;
+  for (const k of keys) {
+    const raw = obj[k];
+    if (raw == null || raw === '') continue;
+    const n = Number(raw);
+    if (Number.isFinite(n)) return n;
+  }
+  return null;
+}
+
+function ocPositionEntryValue(pos) {
+  // Position entry notional. Prefer exchange-provided value for Bybit
+  // LiveDemo/Mainnet rows; otherwise fall back to current qty * entry price.
+  // 持倉開倉名義金額。Bybit 行優先用 positionValue，否則用當前數量 * 開倉均價。
+  const direct = ocFirstFinite(pos, ['positionValue', 'position_value', 'entry_value', 'entryValue']);
+  if (direct != null && direct > 0) return direct;
+  const qty = ocFirstFinite(pos, ['size', 'qty', 'position_qty', 'positionQty']);
+  const entry = ocFirstFinite(pos, ['avgPrice', 'avg_price', 'avg_entry_price', 'entry_price']);
+  const absQty = qty == null ? null : Math.abs(qty);
+  if (absQty != null && entry != null && absQty > 0 && entry > 0) return absQty * entry;
+  return null;
+}
+
+function ocFillExecValue(fill) {
+  // Execution notional. Bybit exposes execValue; DB / engine fallback rows can
+  // be computed from qty * price.
+  // 成交名義金額。Bybit 有 execValue；DB/engine 備援列用 qty * price 回推。
+  const direct = ocFirstFinite(fill, [
+    'execValue', 'exec_value', 'executed_value', 'cumExecValue', 'cum_exec_value',
+    'notional', 'trade_value',
+  ]);
+  if (direct != null && direct > 0) return direct;
+  const qty = ocFirstFinite(fill, ['execQty', 'exec_qty', 'qty', 'fill_qty']);
+  const price = ocFirstFinite(fill, ['execPrice', 'exec_price', 'price', 'fill_price']);
+  const absQty = qty == null ? null : Math.abs(qty);
+  if (absQty != null && price != null && absQty > 0 && price > 0) return absQty * price;
+  return null;
+}
+
+function ocAmount(v, decimals) {
+  if (v == null || isNaN(v) || Number(v) <= 0) return '--';
+  const abs = Math.abs(Number(v));
+  const d = decimals != null ? decimals : (abs > 0 && abs < 0.01 ? 4 : 2);
+  return ocBalance(v, d);
+}
+
 function ocPct(v) {
   if (v == null || isNaN(v)) return '--';
   return (v * 100).toFixed(1) + '%';

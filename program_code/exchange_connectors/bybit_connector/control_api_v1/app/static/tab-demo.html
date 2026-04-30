@@ -74,8 +74,8 @@
     </h3>
     <div class="oc-table-wrap">
       <table class="oc-table">
-        <thead><tr><th>交易对</th><th>策略</th><th>品类</th><th>方向</th><th>数量</th><th>开仓价</th><th>标记价</th><th>未实现盈亏</th><th>杠杆</th><th>强平价</th><th>操作</th></tr></thead>
-        <tbody id="demo-positions"><tr class="empty-row"><td colspan="11">加载中...</td></tr></tbody>
+        <thead><tr><th>交易对</th><th>策略</th><th>品类</th><th>方向</th><th>数量</th><th>开仓价</th><th>开仓金额</th><th>标记价</th><th>未实现盈亏</th><th>杠杆</th><th>强平价</th><th>操作</th></tr></thead>
+        <tbody id="demo-positions"><tr class="empty-row"><td colspan="12">加载中...</td></tr></tbody>
       </table>
     </div>
   </div>
@@ -135,8 +135,8 @@
     <div class="oc-collapse-body">
       <div class="oc-table-wrap">
         <table class="oc-table">
-          <thead><tr><th>时间</th><th>交易对</th><th>品类</th><th>方向</th><th>数量</th><th>价格</th><th>手续费</th><th>盈亏 / PnL</th></tr></thead>
-          <tbody id="demo-fills"><tr class="empty-row"><td colspan="8">加载中...</td></tr></tbody>
+          <thead><tr><th>时间</th><th>交易对</th><th>品类</th><th>方向</th><th>数量</th><th>价格</th><th>成交金额</th><th>手续费</th><th>盈亏 / PnL</th></tr></thead>
+          <tbody id="demo-fills"><tr class="empty-row"><td colspan="9">加载中...</td></tr></tbody>
         </table>
       </div>
     <div class="oc-metrics" style="margin-top:8px">
@@ -479,7 +479,7 @@ async function loadPositions() {
   }
   positions = positions.filter(p => parseFloat(p.size || p.qty || 0) > 0);
   if (!positions.length) {
-    ocSetHtml('demo-positions', '<tr class="empty-row"><td colspan="11">暂无持仓</td></tr>');
+    ocSetHtml('demo-positions', '<tr class="empty-row"><td colspan="12">暂无持仓</td></tr>');
     // Empty positions → empty dust panel (footer shows "no dust").
     // 空持倉 → 空塵埃面板（footer 顯示「無塵埃倉位」）。
     _renderDemoDustPanel([]);
@@ -521,6 +521,7 @@ async function loadPositions() {
     html += '<td class="' + (p.side === 'Buy' ? 'green' : 'red') + '">' + sideLabel + '</td>';
     html += '<td>' + ocNum(parseFloat(p.size || p.qty || 0), 4) + '</td>';
     html += '<td>' + ocNum(parseFloat(p.avgPrice || p.avg_price || p.entry_price || 0), 2) + '</td>';
+    html += '<td>' + ocAmount(ocPositionEntryValue(p)) + '</td>';
     html += '<td>' + ocNum(parseFloat(p.markPrice || p.mark_price || 0), 2) + '</td>';
     const pnlDecimals = (Math.abs(pnl) > 0 && Math.abs(pnl) < 0.01) ? 4 : undefined;
     html += '<td class="' + ocPnlClass(pnl) + '">' + ocMoney(pnl, pnlDecimals) + '</td>';
@@ -603,7 +604,7 @@ async function loadDemoOrders() {
 async function loadDemoFills() {
   const d = await ocApi('/api/v1/strategy/demo/fills');
   if (!d || !d.data) {
-    ocSetHtml('demo-fills', '<tr class="empty-row"><td colspan="8">暂无成交</td></tr>');
+    ocSetHtml('demo-fills', '<tr class="empty-row"><td colspan="9">暂无成交</td></tr>');
     return;
   }
   let fills = [];
@@ -617,7 +618,7 @@ async function loadDemoFills() {
   }
   _demoFillsCache = fills;
   if (!fills.length) {
-    ocSetHtml('demo-fills', '<tr class="empty-row"><td colspan="8">暂无成交</td></tr>');
+    ocSetHtml('demo-fills', '<tr class="empty-row"><td colspan="9">暂无成交</td></tr>');
     return;
   }
   let html = '';
@@ -639,6 +640,7 @@ async function loadDemoFills() {
     html += '<td class="' + (f.side === 'Buy' ? 'green' : 'red') + '">' + sideLabel + '</td>';
     html += '<td>' + ocNum(qty, 4) + '</td>';
     html += '<td>' + ocNum(price, 2) + '</td>';
+    html += '<td>' + ocAmount(ocFillExecValue(f)) + '</td>';
     html += '<td>' + ocNum(Math.abs(fee), 6) + '</td>';
     html += ocPnlCell(f.closedPnl != null ? f.closedPnl : f.realized_pnl);
     html += '</tr>';
