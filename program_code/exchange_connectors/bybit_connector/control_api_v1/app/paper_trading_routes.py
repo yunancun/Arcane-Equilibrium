@@ -20,12 +20,9 @@ MODULE_NOTE (English):
 """
 
 import asyncio
-import json
 import logging
 import os
 from pathlib import Path
-import subprocess
-from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +31,12 @@ from pydantic import BaseModel, Field
 
 from . import main_legacy as base
 from .ipc_state_reader import get_rust_reader
+from .paper_trading_ai_cost_routes import (  # noqa: F401
+    _fetch_openclaw_usage_cost,
+    ai_cost_router,
+    get_ai_cost,
+)
+from .paper_trading_response import paper_response as _paper_response
 # ARCH-RC1 1C-3-F: paper_trading_engine.py retired. DEFAULT_INITIAL_BALANCE_USDT
 # inlined here (the only consumer in this module). ShadowDecisionConsumer kept
 # as a type hint for the SHADOW_CONSUMER global re-exported from wiring.
@@ -88,6 +91,7 @@ _USER_STOPPED: bool = False
 # ═══════════════════════════════════════════════════════════════════════════════
 
 paper_router = APIRouter(prefix="/api/v1/paper", tags=["Paper Trading / 纸上交易"])
+paper_router.include_router(ai_cost_router)
 
 
 def _require_paper_trade(actor: base.AuthenticatedActor) -> None:
@@ -127,26 +131,6 @@ class OrderCancelRequest(BaseModel):
 
 class TickRequest(BaseModel):
     market_prices: dict[str, float]
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# Helper: Build paper response envelope / 构建纸上交易响应信封
-# ═══════════════════════════════════════════════════════════════════════════════
-
-def _paper_response(
-    data: Any,
-    action_result: str = "success",
-    reason_codes: list[str] | None = None,
-) -> dict[str, Any]:
-    """Build a simplified response envelope for paper trading routes."""
-    return {
-        "api_version": "v1",
-        "action_result": action_result,
-        "reason_codes": reason_codes or [],
-        "data_category": "paper_simulated",
-        "is_simulated": True,
-        "data": data,
-    }
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1106,76 +1090,6 @@ def get_metrics(
     full["total_stops"] = stats.get("total_stops", 0)
     full["db_true_metrics"] = fetch_db_true_metrics(["paper"], edge_engine_modes=["paper"], window_days=7)
     return _paper_response(full)
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# AI Cost Tracking Route (via OpenClaw gateway) / AI 成本追踪路由
-# ═══════════════════════════════════════════════════════════════════════════════
-
-def _fetch_openclaw_usage_cost() -> dict[str, Any] | None:
-    """
-    Fetch AI usage cost from OpenClaw gateway CLI.
-    从 OpenClaw 网关 CLI 获取 AI 使用成本。
-
-    Returns parsed cost data or None if OpenClaw is not available.
-    """
-    try:
-        result = subprocess.run(
-            ["openclaw", "gateway", "usage-cost", "--json", "--days", "30"],
-            capture_output=True, text=True, timeout=5,
-        )
-        if result.returncode != 0:
-            return None
-        return json.loads(result.stdout)
-    except (subprocess.TimeoutExpired, FileNotFoundError, json.JSONDecodeError):
-        return None
-
-
-@paper_router.get("/ai-cost")
-def get_ai_cost(
-    actor: base.AuthenticatedActor = Depends(base.current_actor),
-):
-    """
-    Get AI usage cost from OpenClaw gateway.
-    从 OpenClaw 网关获取 AI 使用成本。
-
-    Integrates OpenClaw's built-in token/cost tracking with our Net PnL system.
-    """
-    raw = _fetch_openclaw_usage_cost()
-    if raw is None:
-        return _paper_response({
-            "available": False,
-            "message": "OpenClaw gateway not reachable / OpenClaw 网关不可达",
-            "today_cost": 0.0,
-            "today_tokens": 0,
-            "total_cost_30d": 0.0,
-            "total_tokens_30d": 0,
-            "daily": [],
-        })
-
-    # Extract today's cost
-    daily = raw.get("daily", [])
-    totals = raw.get("totals", {})
-
-    today_entry = daily[-1] if daily else {}
-    today_cost = today_entry.get("totalCost", 0.0)
-    today_tokens = today_entry.get("totalTokens", 0)
-
-    return _paper_response({
-        "available": True,
-        "source": "openclaw_gateway_usage_cost",
-        "today_cost": round(today_cost, 6),
-        "today_tokens": today_tokens,
-        "total_cost_30d": round(totals.get("totalCost", 0.0), 6),
-        "total_tokens_30d": totals.get("totalTokens", 0),
-        "cost_breakdown": {
-            "input_cost": round(totals.get("inputCost", 0.0), 6),
-            "output_cost": round(totals.get("outputCost", 0.0), 6),
-            "cache_read_cost": round(totals.get("cacheReadCost", 0.0), 6),
-            "cache_write_cost": round(totals.get("cacheWriteCost", 0.0), 6),
-        },
-        "daily": daily[-7:],  # Last 7 days
-    })
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

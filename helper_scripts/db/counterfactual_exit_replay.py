@@ -1,105 +1,4 @@
 #!/usr/bin/env python3
-"""Counterfactual exit replay — "lock profit at peak - k × ATR" vs realised exit.
-反事實退場回放 — 「peak - k × ATR 鎖利」對比實際退場 net PnL。
-
-MODULE_NOTE (EN): EDGE-DIAG-1 #3 (TODO.md §P1, 2026-04-23). Read-only SELECT over
-the last N days of `learning.exit_features` to answer: "if Track P phys_lock had
-actually fired in the current edge environment, would it have improved realised
-net PnL vs the realised exit?" One-row-per-exit table (writer: `exit_feature_writer.rs`,
-PK `(context_id, ts)`), realised `realized_net_bps` on same row as close-time
-snapshot of `peak_pnl_pct` / `giveback_atr_norm` / `atr_pct`. Outputs stdout table
-grouped by (engine_mode, strategy_name, symbol) + JSON at
-`$OPENCLAW_DATA_DIR/audit/` (latest + dated siblings per CLAUDE.md §七).
-
-**v1 SCOPE CAVEAT (read before interpreting output)**:
-v1 simulates only Gate 4 (giveback threshold) with a LINEAR approximation k=0.3.
-The v2 production path uses `non_linear_giveback_fn` (see `rust/openclaw_engine/src/exit_features/v2.rs:258-265`)
-and full Gate 1/2/3 sequencing. Treat v1 outputs as lower/upper bounds, NOT
-production-behavior estimates. v2 parity replay is FUP.
-
-**FA ALGEBRA NOTE (2026-04-23, critical)**:
-The v1 `proxy` cost model is **algebraically degenerate**: `realized_net_bps` is
-ALREADY net of round-trip fees (writer nets both entry+close fees, see
-`rust/openclaw_engine/src/tick_pipeline/pipeline_helpers.rs:387-411`). The proxy
-formula `cost = peak_gross - realized_net` collapses to `giveback_gross + fees`,
-so `cf_net - realized_net ≡ -k × atr_bps` for every fired row — verdict is fixed
-before data is read. Script now offers a **`fee_only` cost model** (round-trip
-taker fee only, no giveback double-count) as the empirically meaningful
-comparison. Default `--cost-model both` emits both side-by-side; the `fee_only`
-VERDICT is the one operator should read. The `proxy` column is retained as a
-transparency sanity check so operator can verify the degenerate identity.
-
-**ADVERSARIAL REVIEW EXTENSIONS (2026-04-23, FA/FM/QC — see --help for full
-per-flag doc + Rust field mapping)**:
-- `--v2-parity` [+ 7 overrides] : Rust v2 4-Gate parity instead of v1 linear.
-- `--exclude-close-tag PATTERN` (default 'risk_close:%%') + `--include-close-tag`.
-- `--split-window` : 3-bucket pre-T3 / T3-T4-vacuum / post-T4 aggregation.
-- `--bootstrap-ci` / `--per-strategy-median` / `--trimmed-mean-pct`.
-- `--peak-sanity-histogram` : per-strategy peak distribution.
-NOTE (行為變更): `--exclude-close-tag` DEFAULTS ON; pass `--include-close-tag`
-to replicate pre-2026-04-23 behavior. All other new flags OFF by default.
-
-MODULE_NOTE 中: 5 個新 CLI flag 回應 FA/FM/QC 對 v1 +223 bps 對抗性審查；
-`--exclude-close-tag` **預設啟用**（FA 類別錯誤 — risk_close:* 已是 risk-layer
-close），pass `--include-close-tag` 恢復 2026-04-23 前行為。詳見 --help。
-
-MODULE_NOTE (中): EDGE-DIAG-1 #3（TODO.md §P1, 2026-04-23）。對
-`learning.exit_features` 最近 N 天 read-only SELECT；輸出分組表 +
-`$OPENCLAW_DATA_DIR/audit/` JSON（latest + dated）。v1 僅模擬 Gate 4 線性近似
-k=0.3 為上界；v2 生產路徑為 non-linear + 全 Gate 1/2/3 排序，以 --v2-parity 啟用。
-`proxy` 成本模型代數退化 — `realized_net_bps` 已扣雙邊手續費，
-`cf_net - realized_net ≡ -k × atr_bps` 恆成立；讀 `fee_only` VERDICT 即可。
-
-Usage:
-  POSTGRES_USER=... POSTGRES_PASSWORD=... POSTGRES_DB=... \\
-    python3 helper_scripts/db/counterfactual_exit_replay.py [flags]
-
-Counterfactual model / 反事實模型:
-  At close time, the row carries the snapshot of `peak_pnl_pct` + `atr_pct` +
-  `giveback_atr_norm = (peak - current) / ATR`. Simulated "peak - k × ATR" exit
-  triggers at the first tick where giveback_atr_norm ≥ k, locking profit at
-  `(peak_pnl_pct - k * atr_pct) * 100` bps gross of entry notional.
-  退場時刻快照已齊全；模擬「peak - k × ATR」退場於 giveback_atr_norm ≥ k 觸發。
-
-  Formula (dual cost model, pure fn _cf_row_outcome):
-    cf_gross_bps          = (peak_pnl_pct - k * atr_pct) * 100.0
-    # proxy (DEGENERATE — kept for transparency per FA audit):
-    cost_proxy_bps        = max(0.0, peak_gross_bps - realized_net_bps)
-    cf_net_proxy_bps      = cf_gross_bps - cost_proxy_bps
-    # fee_only (EMPIRICALLY MEANINGFUL — use this for decisions):
-    cost_fee_only_bps     = 2 * fee_bps_per_side      # round-trip taker fee
-    cf_net_fee_only_bps   = cf_gross_bps - cost_fee_only_bps
-    improvement_{model}   = cf_net_{model}_bps - realized_net_bps
-
-  About k=0.3: v1 linear approximation of v2 non-linear threshold
-  `max(giveback_base - giveback_slope × peak_atr_norm, giveback_floor)
-   = max(1.0 - 0.15 × peak_atr_norm, 0.3)` (see `rust/openclaw_engine/src/exit_features/v2.rs:165-173`).
-  The `0.3` floor is the **asymptotic** floor reached only when peak_atr_norm
-  is extremely large; for typical peak_atr_norm ≈ 0.5–2.0 the effective v2
-  threshold is ~0.7–0.925. v1 k=0.3 therefore **overstates** fire frequency
-  relative to v2 (upper bound on "cf would have fired").
-  關於 k=0.3：v2 實為 non-linear `max(1.0 - 0.15 × peak_atr_norm, 0.3)`（v2.rs:165-173）；
-  0.3 為 asymptotic floor（僅 peak_atr_norm 極大時到達），常態 peak_atr_norm ≈ 0.5–2.0
-  時 v2 有效閾值約 0.7–0.925。v1 k=0.3 因此高估 fire 頻率（「cf 會觸發」的上界）。
-
-  Strategy filter default: `funding_arb` EXCLUDED — funding_arb realized pnl
-  includes funding payment, peak_pnl_pct is price-only → proxy cost breaks.
-  Use `--include-funding-arb` to opt in (with warning banner).
-  策略過濾預設：排除 `funding_arb`（realized pnl 含資金費，peak_pnl_pct 僅含價格
-  → proxy cost 失真）；`--include-funding-arb` 可強行納入（附警告橫幅）。
-
-Edge cases / 邊界條件:
-  (a) peak_pnl_pct <= 0    — loser trade; cf would not fire. cf_fired=0.
-  (b) atr_pct == 0 or NULL — ATR unavailable; cf undefined. cf_fired=0.
-  (c) giveback_atr_norm < k — cf did NOT trigger. cf_fired=0.
-  (d) realized_net_bps NULL — dropped from aggregates (SQL filter).
-
-Exit codes:
-  0 = report generated (table printed, JSON written)
-  2 = DB connection error (mirrors passive_wait_healthcheck.py convention)
-
-READ-ONLY: pure SELECT. Safe on production DB. Dispatch via `ssh trade-core`.
-"""
 from __future__ import annotations
 
 import argparse
@@ -118,6 +17,10 @@ from typing import Any
 # regardless of cwd (script can be run from srv/ root or anywhere).
 # 確保同目錄 sibling module 在任意 cwd 下都可 import。
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from counterfactual_exit_replay_help import DESCRIPTION  # noqa: E402
+
+__doc__ = DESCRIPTION
 
 # v2-parity gate evaluation (ported from Rust exit_features/v2.rs).
 # v2 gate 評估（自 Rust exit_features/v2.rs port 過來，純 Python 純函數）。
