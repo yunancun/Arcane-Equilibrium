@@ -581,6 +581,9 @@ impl PaperState {
             return None;
         }
         let pos = self.positions.get(symbol)?;
+        if pos.owner_strategy == crate::position_reconciler::orphan_handler::DUST_FROZEN_STRATEGY {
+            return None;
+        }
         let notional = pos.qty * latest_price;
         if !notional.is_finite() || notional >= dust_floor_usd {
             return None;
@@ -634,6 +637,11 @@ impl PaperState {
             .positions
             .values()
             .filter_map(|p| {
+                if p.owner_strategy
+                    == crate::position_reconciler::orphan_handler::DUST_FROZEN_STRATEGY
+                {
+                    return None;
+                }
                 let price = self
                     .latest_prices
                     .get(&p.symbol)

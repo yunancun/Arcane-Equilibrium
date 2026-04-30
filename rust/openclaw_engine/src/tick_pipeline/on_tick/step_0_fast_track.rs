@@ -428,6 +428,31 @@ impl TickPipeline {
                     if half_qty > 0.0 {
                         if let Some(close_price) = self.paper_state.latest_price(sym) {
                             if close_price > 0.0 {
+                                if let Some(decision) = self.partial_reduce_dust_residual(
+                                    sym,
+                                    *qty,
+                                    half_qty,
+                                    close_price,
+                                ) {
+                                    tracing::warn!(
+                                        symbol = %sym,
+                                        position_qty = *qty,
+                                        requested_reduce_qty = half_qty,
+                                        rounded_reduce_qty = decision.rounded_reduce_qty,
+                                        residual_qty = decision.residual_qty,
+                                        residual_notional = decision.residual_notional,
+                                        min_notional = decision.min_notional,
+                                        "FAST_TRACK ReduceToHalf skipped — rounded partial reduce \
+                                         would leave below-min-notional dust / 半倉跳過：取整後殘量會成為 dust"
+                                    );
+                                    continue;
+                                }
+                                let reduce_qty = self
+                                    .instrument_cache
+                                    .as_ref()
+                                    .and_then(|ic| ic.get(sym).map(|spec| spec.round_qty(half_qty)))
+                                    .filter(|q| *q > 0.0)
+                                    .unwrap_or(half_qty);
                                 // EDGE-P3-1 R2: reduce_position keeps the position alive (partial close),
                                 // so entry_context_id remains on the residual. Capture here for the fill row.
                                 // EDGE-P3-1 R2：reduce_position 是部分平倉，剩餘倉位仍保留 entry_context_id。
@@ -442,11 +467,12 @@ impl TickPipeline {
                                 // 反映出場前狀態（by-value，partial close 亦安全）。
                                 let snap = self.paper_state.position_exit_snapshot(sym);
                                 let pnl =
-                                    self.paper_state.reduce_position(sym, half_qty, close_price);
+                                    self.paper_state
+                                        .reduce_position(sym, reduce_qty, close_price);
                                 self.emit_close_fill(
                                     sym,
                                     *is_long,
-                                    half_qty,
+                                    reduce_qty,
                                     close_price,
                                     event.ts_ms,
                                     pnl,
@@ -461,7 +487,7 @@ impl TickPipeline {
                                 self.execute_position_close(
                                     sym,
                                     *is_long,
-                                    half_qty,
+                                    reduce_qty,
                                     event,
                                     is_primary,
                                     "risk_close:fast_track_reduce_half",

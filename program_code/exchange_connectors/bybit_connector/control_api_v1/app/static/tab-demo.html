@@ -522,7 +522,8 @@ async function loadPositions() {
     html += '<td>' + ocNum(parseFloat(p.size || p.qty || 0), 4) + '</td>';
     html += '<td>' + ocNum(parseFloat(p.avgPrice || p.avg_price || p.entry_price || 0), 2) + '</td>';
     html += '<td>' + ocNum(parseFloat(p.markPrice || p.mark_price || 0), 2) + '</td>';
-    html += '<td class="' + ocPnlClass(pnl) + '">' + ocMoney(pnl) + '</td>';
+    const pnlDecimals = (Math.abs(pnl) > 0 && Math.abs(pnl) < 0.01) ? 4 : undefined;
+    html += '<td class="' + ocPnlClass(pnl) + '">' + ocMoney(pnl, pnlDecimals) + '</td>';
     html += '<td>' + (p.leverage || '1') + 'x</td>';
     html += '<td>' + ocNum(parseFloat(p.liqPrice || p.liq_price || 0), 2) + '</td>';
     html += '<td><button class="oc-btn oc-btn-danger" style="padding:2px 8px;font-size:10px"' +

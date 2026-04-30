@@ -767,10 +767,23 @@ impl TickPipeline {
                         .filter(|p| p.is_finite() && *p > 0.0)
                 })
                 .unwrap_or(event.last_price);
+            let is_partial_reduce =
+                crate::tick_pipeline::on_tick::is_partial_reduce_tag(trigger_tag);
+            let full_close = !is_partial_reduce
+                && self
+                    .paper_state
+                    .get_position(symbol)
+                    .map(|p| qty >= p.qty - 1e-12)
+                    .unwrap_or(false);
+            let dispatch_qty = if full_close {
+                self.close_dispatch_qty_for_full_close(qty, is_primary)
+            } else {
+                qty
+            };
             let request = OrderDispatchRequest {
                 symbol: symbol.to_string(),
                 is_long: !is_long,
-                qty,
+                qty: dispatch_qty,
                 price: dispatch_price,
                 strategy: trigger_tag.to_string(),
                 paper_fill_ts: event.ts_ms,
@@ -924,10 +937,11 @@ impl TickPipeline {
                         .get_entry_context_id(&symbol)
                         .unwrap_or("")
                         .to_string();
+                    let dispatch_qty = self.close_dispatch_qty_for_full_close(qty, true);
                     let request = OrderDispatchRequest {
                         symbol: symbol.clone(),
                         is_long: !is_long, // opposite side to close / 相反方向平倉
-                        qty,
+                        qty: dispatch_qty,
                         price,
                         strategy: "ipc_close_all".into(),
                         paper_fill_ts: ts_ms,
@@ -1080,10 +1094,11 @@ impl TickPipeline {
                     .get_entry_context_id(symbol)
                     .unwrap_or("")
                     .to_string();
+                let dispatch_qty = self.close_dispatch_qty_for_full_close(qty, true);
                 let request = OrderDispatchRequest {
                     symbol: symbol.to_string(),
                     is_long: !is_long, // opposite side to close / 相反方向平倉
-                    qty,
+                    qty: dispatch_qty,
                     price,
                     strategy: "risk_close:ipc_close_symbol".into(),
                     paper_fill_ts: ts_ms,

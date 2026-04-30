@@ -1521,6 +1521,29 @@ fn evict_on_dust_t3_boot_reaper_idempotent() {
 }
 
 #[test]
+fn evict_on_dust_preserves_dust_frozen_owner() {
+    // Exchange-side dust that has already been classified as DUST_FROZEN must
+    // stay visible in paper_state; otherwise the engine thinks it is flat while
+    // Bybit still carries the residue.
+    let mut s = PaperState::new(100_000.0);
+    s.set_dust_floor_usd(1.0);
+    s.import_positions(vec![("APEUSDT".to_string(), false, 0.1, 0.16, 1_000)]);
+    s.set_latest_price("APEUSDT", 0.15);
+    s.positions.get_mut("APEUSDT").unwrap().owner_strategy =
+        crate::position_reconciler::orphan_handler::DUST_FROZEN_STRATEGY.to_string();
+
+    let evicted = s.evict_all_dust("test_preserve_dust_frozen");
+
+    assert_eq!(evicted, 0);
+    assert_eq!(s.position_count(), 1);
+    assert_eq!(s.dust_evictions_total(), 0);
+    assert_eq!(
+        s.get_position("APEUSDT").unwrap().owner_strategy,
+        crate::position_reconciler::orphan_handler::DUST_FROZEN_STRATEGY
+    );
+}
+
+#[test]
 fn evict_on_dust_no_trading_fills_side_effect_ml_hygiene() {
     // Critical PA §1.2.5 invariant: evict path does NOT mutate balance,
     // total_fees, total_realized_pnl, or trade_count — these would translate

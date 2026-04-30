@@ -16,6 +16,14 @@
 - Healthcheck：`[35] mlde_learning_data_contract`、`[36] mlde_shadow_recommendations`、`[37] mlde_demo_applier`。
 - 報告：`workspace/reports/2026-04-29--mlde_demo_autonomous_applier.md`。
 
+## 項目狀態快照（2026-04-30）
+
+- Dust residual prevention：Demo/Live primary exchange full-close 改用 Bybit `qty=0 + reduceOnly + closeOnTrigger`；normal `qty=0` 仍 fail-closed。
+- Partial reduce：`risk_close:fast_track_reduce_half` 會先用 instrument step/minNotional 檢查，若 rounded residual 會低於 minNotional 則跳過半倉減倉，避免製造新 dust。
+- Visibility：`orphan_frozen` / `DUST_FROZEN` 不再被 paper_state dust reaper evict；GUI/API 會把 REST-only below-minNotional residue 標為 `orphan_frozen`，並顯示 sub-cent PnL。
+- Runtime：本 checkpoint 可 git/Linux fast-forward 同步；Linux 依 operator 指令不 rebuild/restart，因此 runtime 要等下一次批准 rebuild 才載入。
+- 報告：`workspace/reports/2026-04-30--dust_residual_prevention_engineering_log.md`。
+
 ## 決策記憶
 
 ### 關於 M-of-N 簽名

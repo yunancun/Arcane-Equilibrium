@@ -141,6 +141,34 @@ def test_attach_empty_map_is_noop():
     assert "owner_strategy" not in result[0]
 
 
+def test_attach_unmapped_below_min_notional_labels_orphan_frozen():
+    """REST-only dust residues can be absent from paper_state after boot reaper.
+    They should still render as orphan_frozen instead of a blank strategy cell."""
+    positions = [{"symbol": "APEUSDT", "size": "0.1", "markPrice": "0.15347"}]
+    client = _mock_rust_client_with_min({"APEUSDT": 5.0})
+    with patch(
+        "app.strategy_ai_routes._engine_owner_strategy_map",
+        return_value={},
+    ), patch("app.strategy_ai_routes._get_rust_client", return_value=client):
+        result = strategy_ai_routes._attach_owner_strategy(positions, engine="demo")
+    p = result[0]
+    assert p["owner_strategy"] == "orphan_frozen"
+    assert p["frozen_reason"] == "dust_below_min_notional"
+    assert p["min_notional"] == 5.0
+    assert abs(p["est_notional"] - 0.1 * 0.15347) < 1e-12
+
+
+def test_attach_unmapped_above_min_notional_stays_unowned():
+    positions = [{"symbol": "BTCUSDT", "size": "0.1", "markPrice": "50000.0"}]
+    client = _mock_rust_client_with_min({"BTCUSDT": 5.0})
+    with patch(
+        "app.strategy_ai_routes._engine_owner_strategy_map",
+        return_value={},
+    ), patch("app.strategy_ai_routes._get_rust_client", return_value=client):
+        result = strategy_ai_routes._attach_owner_strategy(positions, engine="demo")
+    assert "owner_strategy" not in result[0]
+
+
 def test_attach_handles_empty_and_non_list():
     assert strategy_ai_routes._attach_owner_strategy([], engine="demo") == []
     assert strategy_ai_routes._attach_owner_strategy(None, engine="demo") is None  # type: ignore[arg-type]
@@ -459,3 +487,25 @@ def test_attach_qty_field_fallback():
     assert abs(p["est_notional"] - 6.0) < 1e-9
     # 6.0 >= 5.0 → frozen_pending
     assert p["frozen_reason"] == "frozen_pending"
+
+
+def test_fetch_min_notional_falls_back_to_one_symbol_lookup():
+    """When the instrument cache is empty, fetch just the requested symbol."""
+    client = MagicMock()
+    client.get_instrument.return_value = None
+    client._get.return_value = {
+        "result": {
+            "list": [
+                {
+                    "symbol": "APEUSDT",
+                    "lotSizeFilter": {"minNotionalValue": "5"},
+                }
+            ]
+        }
+    }
+    with patch("app.strategy_ai_routes._get_rust_client", return_value=client):
+        assert strategy_ai_routes._fetch_min_notional("APEUSDT") == 5.0
+    client._get.assert_called_once_with(
+        "/v5/market/instruments-info",
+        {"category": "linear", "symbol": "APEUSDT"},
+    )

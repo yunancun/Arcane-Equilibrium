@@ -4,6 +4,31 @@
 // 並測 close 路徑的 strategy 標記契約。
 
 use super::super::*;
+use crate::instrument_info::{InstrumentInfoCache, SymbolSpec};
+use std::sync::Arc;
+
+fn ape_instrument_cache() -> Arc<InstrumentInfoCache> {
+    let cache = InstrumentInfoCache::new();
+    cache.cache.write().insert(
+        "APEUSDT".to_string(),
+        SymbolSpec {
+            symbol: "APEUSDT".to_string(),
+            base_currency: "APE".to_string(),
+            quote_currency: "USDT".to_string(),
+            contract_type: "LinearPerpetual".to_string(),
+            qty_step: 0.1,
+            min_qty: 0.1,
+            max_qty: 1_000_000.0,
+            tick_size: 0.0001,
+            min_price: 0.0001,
+            max_price: 1_000.0,
+            min_notional: 5.0,
+            qty_decimals: 1,
+            price_decimals: 4,
+        },
+    );
+    Arc::new(cache)
+}
 
 // ─── I-08 Dual-Rail Stop tests (Principle #9) ───
 // 雙軌止損測試：驗證 broker-side SL 只在 primary exchange mode 開倉時啟用
@@ -166,6 +191,62 @@ fn test_execute_position_close_propagates_trigger_tag() {
             expected_prefix
         );
     }
+}
+
+#[test]
+fn test_primary_exchange_full_close_dispatches_qty_zero() {
+    let mut pipeline = TickPipeline::with_kind(&["APEUSDT"], 1_000.0, PipelineKind::Demo);
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<OrderDispatchRequest>();
+    pipeline.set_shadow_channel(tx);
+    pipeline.paper_state.apply_fill(
+        "APEUSDT",
+        false,
+        60.0,
+        0.18,
+        0.0,
+        1_700_000_000_000,
+        "grid_trading",
+    );
+
+    let event = super::make_event("APEUSDT", 0.15, 1_700_000_060_000);
+    assert!(pipeline.execute_position_close(
+        "APEUSDT",
+        false,
+        60.0,
+        &event,
+        true,
+        "strategy_close:grid_close_short",
+    ));
+
+    let req = rx.try_recv().expect("OrderDispatchRequest must be sent");
+    assert_eq!(
+        req.qty, 0.0,
+        "primary exchange full-close must use Bybit qty=0 close-all form"
+    );
+    assert!(req.is_close);
+    assert!(req.is_primary);
+}
+
+#[test]
+fn test_partial_reduce_dust_residual_blocks_below_min_notional_leftover() {
+    let mut pipeline = TickPipeline::with_kind(&["APEUSDT"], 1_000.0, PipelineKind::Demo);
+    pipeline.set_instrument_cache(ape_instrument_cache());
+
+    let decision = pipeline
+        .partial_reduce_dust_residual("APEUSDT", 60.0, 30.0, 0.15)
+        .expect("residual 30 * 0.15 is below $5 minNotional");
+
+    assert_eq!(decision.rounded_reduce_qty, 30.0);
+    assert_eq!(decision.residual_qty, 30.0);
+    assert!((decision.residual_notional - 4.5).abs() < 1e-12);
+    assert_eq!(decision.min_notional, 5.0);
+
+    assert!(
+        pipeline
+            .partial_reduce_dust_residual("APEUSDT", 100.0, 50.0, 0.15)
+            .is_none(),
+        "residual 50 * 0.15 is above $5 minNotional and should be allowed"
+    );
 }
 
 /// P1-15 regression: `ipc_close_symbol` must tag OrderDispatchRequest.strategy
