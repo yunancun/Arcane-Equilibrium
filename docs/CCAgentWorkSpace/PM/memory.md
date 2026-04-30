@@ -1050,3 +1050,18 @@ Operator 接續 Tier 8 sign-off 後說「繼續派」。PM 按 Tier 8 §8 推薦
 - Observe `[33]`, `[38]`, and `[40]` using post-deploy cutoffs only.
 - Dust residual prevention is deployed but still needs one real close-path proof before exchange-side effectiveness is declared.
 - True live autonomy remains gated by GovernanceHub, Decision Lease, and the 5 live gates.
+
+## 2026-04-30 Dust / Edge / Scout Follow-through
+
+### Result
+- Dust residual runtime proof is complete: after the 2026-04-30 21:10 CEST runtime load, DB observed 8 Demo/LiveDemo `qty=0` close orders joined to nonzero fills. Demo `APEUSDT` and LiveDemo `XAGUSDT` `orphan_frozen` residues closed through `risk_close:ipc_close_symbol` and had no later position snapshot.
+- Post-deploy edge cutoff observation started at 2026-04-30 21:10 CEST. Initial cutoff data: `[33]` n=15 maker_like 40.0% / fee_drop 39.0%; `[38]` lifecycle n=1 demo + n=1 live_demo, insufficient; `[40]` MLDE rows=0.
+- `AGENT-HEARTBEAT-SCOUT-WIRE` is complete: production ScoutWorker scan closure now calls `ScoutAgent.record_scan()` after empty scans and successful intel-producing scans.
+
+### Verification
+- New hermetic pytest `test_strategy_wiring_scanner.py`: 2/0.
+- Existing `test_agent_heartbeat_contract.py`: 36/0.
+- Targeted `py_compile` passed.
+
+### Boundary
+- No strategy/risk config changes, no live authorization changes, and no runtime restart were performed in this follow-through.
