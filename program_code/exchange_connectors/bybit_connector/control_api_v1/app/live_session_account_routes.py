@@ -624,12 +624,40 @@ def get_live_metrics(
     # 3E-5: query per-engine snapshot for live metrics.
     # 3E-5：查詢每引擎快照用於 live 指標。
     engine_kind = core._get_live_engine_kind()
-    db_modes = ["live", "live_demo"] if engine_kind in ("live", "unknown") else [engine_kind]
+    actual_endpoint = core._resolve_live_endpoint_label()
+    if actual_endpoint == "live_demo":
+        db_modes = ["live_demo"]
+    elif actual_endpoint == "mainnet":
+        db_modes = ["live"]
+    elif engine_kind == "live":
+        db_modes = ["live", "live_demo"]
+    else:
+        db_modes = ["live", "live_demo"]
+    if engine_kind != "live" and actual_endpoint in ("live_demo", "mainnet"):
+        return core._live_response({
+            "available": False,
+            "source": "engine_unavailable",
+            "error": "live_engine_unavailable",
+            "error_zh": "Live 槽已配置，但 Rust live 引擎未運行；拒絕用 demo 統計偽裝 live",
+            "error_en": (
+                "Live slot is configured but Rust live engine is not running; "
+                "refusing to render demo metrics as live"
+            ),
+            "actual_engine_kind": engine_kind,
+            "actual_endpoint": actual_endpoint,
+            "db_true_metrics": fetch_db_true_metrics(
+                db_modes,
+                edge_engine_modes=db_modes,
+                window_days=7,
+            ),
+        })
     rust_state = rust.get_paper_state(engine=engine_kind) if rust.is_available() and engine_kind != "unknown" else None
     if rust_state is None:
         return core._live_response({
             "available": False,
             "source": "engine_unavailable",
+            "actual_engine_kind": engine_kind,
+            "actual_endpoint": actual_endpoint,
             "db_true_metrics": fetch_db_true_metrics(
                 db_modes,
                 edge_engine_modes=db_modes,
