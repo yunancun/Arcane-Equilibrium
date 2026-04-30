@@ -80,6 +80,13 @@ impl LoopState {
     }
 }
 
+fn pending_order_accepts_fill(po: &PendingOrder) -> bool {
+    if po.is_close && po.qty.abs() <= f64::EPSILON {
+        return true;
+    }
+    po.cum_filled_qty < po.qty
+}
+
 // F4-RETURN Issue 1 (2026-04-26): F4-1 emitter moved to sibling
 // `unattributed_emit` (§九 1200-line ceiling); re-export preserves caller paths.
 // F4-RETURN Issue 1（2026-04-26）：F4-1 emitter 抽至 sibling 以守 §九 上限。
@@ -526,7 +533,7 @@ pub(super) async fn handle_exchange_event(
                         .filter(|(_, po)| {
                             po.symbol == exec.symbol
                                 && po.is_long == is_buy
-                                && po.cum_filled_qty < po.qty
+                                && pending_order_accepts_fill(po)
                         });
                     let first = candidates.next().map(|(k, _)| k.clone());
                     if first.is_some() && candidates.next().is_none() {
