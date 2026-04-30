@@ -42,6 +42,7 @@ MODULE_NOTE (English):
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional
 
@@ -133,10 +134,29 @@ class ScoutAgent(BaseAgent):
         self._intel_log: List[IntelObject] = []
         self._alert_log: List[EventAlert] = []
         self._stats = {"intel_produced": 0, "alerts_produced": 0, "scans_completed": 0}
+        # GUI heartbeat contract: ms-epoch of most recent observable activity
+        # (start / record_scan only — MED-2 collapse). 0 means never active —
+        # read by ``agents_routes_helpers._build_scout_card``.
+        # GUI 心跳契約：最近一次可觀察活動（start / record_scan）的 ms-epoch；
+        # MED-2 收斂後 produce_intel / produce_event_alert 不再單獨蓋章。
+        # 0 表示從未活動 — 由 ``agents_routes_helpers._build_scout_card`` 讀取。
+        self._last_heartbeat_ms: int = 0
 
     # Lifecycle inherited from BaseAgent (bare start/pause/stop, no logging —
-    # matches pre-E5-P1-4 Scout behavior exactly).
+    # matches pre-E5-P1-4 Scout behavior exactly). start() overridden only to
+    # stamp the GUI heartbeat (no logging — preserves legacy semantics).
     # 生命週期方法繼承自 BaseAgent（無 log，與 E5-P1-4 前的 Scout 行為完全一致）。
+    # 僅覆蓋 start() 以蓋 GUI 心跳戳（無 log，保留舊語意）。
+
+    def start(self) -> None:
+        super().start()
+        # GUI heartbeat contract: stamp on lifecycle start so that the moment
+        # the agent transitions to RUNNING the roster card flips out of
+        # "never active". Subsequent activity (record_scan only — MED-2
+        # collapse) refreshes this same field.
+        # GUI 心跳契約：start() 即蓋章，使 agent 一進 RUNNING 卡片即離「從未活動」；
+        # 之後僅由 record_scan 持續刷新（MED-2 收斂後）。
+        self._last_heartbeat_ms = int(time.time() * 1000)
 
     # ── core capabilities ──
 
@@ -156,6 +176,11 @@ class ScoutAgent(BaseAgent):
 
         All outputs carry data_quality marking (§3.4).
         """
+        # MED-2 collapse: heartbeat is stamped only by record_scan() — the
+        # canonical cycle-completion signal. produce_intel can fire mid-cycle
+        # (multiple intel per scan) and is not the canonical activity tick.
+        # MED-2 收斂：heartbeat 只由 record_scan() 蓋章（cycle 完整性標準訊號）；
+        # produce_intel 在一輪 scan 中可能被多次觸發，非標準活動標記。
         intel = IntelObject(
             source=source,
             content=content,
@@ -211,6 +236,10 @@ class ScoutAgent(BaseAgent):
 
         Major event alerts go to Guardian for risk tightening.
         """
+        # MED-2 collapse: heartbeat is stamped only by record_scan(). Alerts can
+        # fire mid-cycle and are not the canonical activity tick.
+        # MED-2 收斂：heartbeat 只由 record_scan() 蓋章；alert 在一輪 scan 中
+        # 可能被多次觸發，非標準活動標記。
         alert = EventAlert(
             event_type=event_type,
             severity=severity,
@@ -264,7 +293,13 @@ class ScoutAgent(BaseAgent):
         RFC §6.5 prompt 用 ``_complete_scan`` 占位；實際函式為 ``record_scan``
         （差異記於 commit 與 E1 報告）。
         """
+        # GUI heartbeat contract: every scan cycle counts as activity.
+        # MED-1 race ordering: stamp inside the lock so heartbeat & scans_completed
+        # are mutated atomically; mirrors executor pattern (CLAUDE.md §九 lock disc).
+        # GUI 心跳契約：每次掃描週期都算活動；MED-1 將蓋章移入 lock 內，
+        # 使 heartbeat 與 scans_completed 同 lock atomic（鏡 executor 風格）。
         with self._lock:
+            self._last_heartbeat_ms = int(time.time() * 1000)
             self._stats["scans_completed"] += 1
         _invalidate_h_state_async("agent.scout.scan_completed")
 
@@ -281,6 +316,9 @@ class ScoutAgent(BaseAgent):
             return {
                 "role": AgentRole.SCOUT.value,
                 "state": self.state.value,
+                # GUI heartbeat contract: surface ms-epoch for the roster card.
+                # GUI 心跳契約：給 roster card 用的 ms-epoch。
+                "last_heartbeat_ms": int(self._last_heartbeat_ms),
                 **dict(self._stats),
             }
 

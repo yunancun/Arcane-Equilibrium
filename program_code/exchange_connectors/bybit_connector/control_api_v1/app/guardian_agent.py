@@ -146,6 +146,13 @@ class GuardianAgent(BaseAgent):
         self._verdict_log: List[Dict[str, Any]] = []
         self._max_verdict_log = 200
 
+        # GUI heartbeat contract: ms-epoch of most recent observable activity
+        # (start / on_message / review_intent). 0 means never active — read by
+        # ``agents_routes_helpers._build_guardian_card``.
+        # GUI 心跳契約：最近一次可觀察活動（start / on_message / review_intent）的
+        # ms-epoch。0 表示從未活動 — 由 ``_build_guardian_card`` 讀取。
+        self._last_heartbeat_ms: int = 0
+
     # ── Lifecycle / 生命周期 ──
     # pause() inherited from BaseAgent (bare). start/stop override to preserve
     # the legacy "Agent started/stopped" info log string.
@@ -153,6 +160,10 @@ class GuardianAgent(BaseAgent):
 
     def start(self) -> None:
         super().start()
+        # GUI heartbeat contract: stamp on lifecycle start so the roster card
+        # leaves "never active" the moment the agent enters RUNNING.
+        # GUI 心跳契約：start() 即蓋章，使卡片於 RUNNING 一刻離「從未活動」。
+        self._last_heartbeat_ms = int(time.time() * 1000)
         logger.info("GuardianAgent started / 守卫代理已启动")
 
     def stop(self) -> None:
@@ -163,8 +174,13 @@ class GuardianAgent(BaseAgent):
 
     def on_message(self, message: AgentMessage) -> None:
         """Handle incoming messages / 处理入站消息"""
+        # GUI heartbeat contract (M-1 strict): only RUNNING agents stamp.
+        # CLAUDE.md 原則 #10 認知誠實 > debug 便利：stopped agent 收到 message
+        # 仍蓋章 = GUI 看到 stopped + fresh ts 的矛盾訊號，違反 fail-loud。
+        # GUI 心跳契約（M-1 嚴格化）：僅 RUNNING agent 蓋章；非 RUNNING 不蓋章。
         if self.state != AgentState.RUNNING:
             return
+        self._last_heartbeat_ms = int(time.time() * 1000)
 
         if message.message_type == MessageType.TRADE_INTENT:
             self._handle_trade_intent(message)
@@ -184,6 +200,12 @@ class GuardianAgent(BaseAgent):
 
         fail-closed: any exception → REJECTED.
         """
+        # GUI heartbeat contract: review_intent is the canonical observable
+        # activity for Guardian (direct callers like pipeline_bridge bypass
+        # on_message but still expect a heartbeat).
+        # GUI 心跳契約：review_intent 是 Guardian 的標準觀察活動；
+        # 直接呼叫者（pipeline_bridge）繞過 on_message 也要心跳。
+        self._last_heartbeat_ms = int(time.time() * 1000)
         try:
             return self._do_review(intent)
         except Exception as e:
@@ -595,6 +617,9 @@ class GuardianAgent(BaseAgent):
                 "state": self.state.value,
                 "active_positions": len(self._active_positions) if self._active_positions else 0,
                 "active_event_risks": len(self._active_event_risks) if self._active_event_risks else 0,
+                # GUI heartbeat contract: ms-epoch surfaced for roster card.
+                # GUI 心跳契約：給 roster card 用的 ms-epoch。
+                "last_heartbeat_ms": int(self._last_heartbeat_ms),
                 **dict(self._stats),
             }
 
