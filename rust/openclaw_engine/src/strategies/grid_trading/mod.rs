@@ -274,6 +274,12 @@ pub struct GridTrading {
     /// `on_post_only_rejected` 寫入既有 `reject_cooldown_until_ms` map；
     /// `signal.rs` 早已 check 此 map，故接線一條鏈即生效。
     pub(crate) reject_cooldown_ms: u64,
+    /// Minimum grid step in bps of anchor price, applied after OU spacing.
+    /// OU spacing 後套用的最小網格步長（錨定價格 bps）。
+    pub(crate) min_grid_step_bps: f64,
+    /// Multiplier on the round-trip fee floor in OU spacing.
+    /// OU spacing 中往返費用地板倍率。
+    pub(crate) cost_floor_multiplier: f64,
     /// G2-04: Operator-maintained per-symbol no-new-grid-entry list. Close
     /// paths stay enabled so existing exposure can still be reduced.
     /// G2-04：operator 維護的逐 symbol 暫停新 grid 入場清單；平倉路徑仍啟用。

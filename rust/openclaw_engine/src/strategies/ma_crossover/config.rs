@@ -52,6 +52,7 @@ impl MaCrossover {
         // G7-09c Phase 1: hot-reload BBO buffer (validate() bounds [0, 10]).
         // G7-09c Phase 1：熱重載 BBO buffer（validate 範圍 [0, 10]）。
         self.maker_price_buffer_ticks = params.maker_price_buffer_ticks;
+        self.min_trend_snr = params.min_trend_snr;
         info!(strategy = "ma_crossover", "params updated / 參數已更新");
         Ok(())
     }
@@ -82,6 +83,7 @@ impl MaCrossover {
             // G7-09c Phase 1: round-trip BBO buffer for IPC consumers.
             // G7-09c Phase 1：BBO buffer 經 IPC 來回。
             maker_price_buffer_ticks: self.maker_price_buffer_ticks,
+            min_trend_snr: self.min_trend_snr,
         }
     }
 }

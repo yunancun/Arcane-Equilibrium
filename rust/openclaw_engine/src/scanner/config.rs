@@ -326,6 +326,14 @@ fn default_robust_negative_score_cap() -> f64 {
     35.0
 }
 
+fn default_posterior_lcb_z() -> f64 {
+    0.0
+}
+
+fn default_posterior_min_std_bps() -> f64 {
+    20.0
+}
+
 /// Edge-aware scanner routing knobs. These defaults preserve the previous
 /// bonus formula for normal cells while preventing mature negative cells from
 /// dominating the active universe purely on raw scanner fitness.
@@ -361,6 +369,18 @@ pub struct EdgeRoutingConfig {
     /// 成熟負 edge cell 的 scanner score 上限；設 100 可近似關閉。
     #[serde(default = "default_robust_negative_score_cap")]
     pub robust_negative_score_cap: f64,
+    /// Z-score for posterior lower confidence bound. 0 disables LCB gating.
+    /// posterior 下置信界 z 值；0 表示關閉 LCB 門。
+    #[serde(default = "default_posterior_lcb_z")]
+    pub posterior_lcb_z: f64,
+    /// Minimum std_bps used when a cell has no usable sample std.
+    /// cell 無有效 std_bps 時使用的最小標準差。
+    #[serde(default = "default_posterior_min_std_bps")]
+    pub posterior_min_std_bps: f64,
+    /// LCB threshold below which mature cells become exploration-only.
+    /// mature cell 的 LCB 低於此值時只走探索路由。
+    #[serde(default = "default_robust_negative_bps_threshold")]
+    pub posterior_negative_lcb_threshold_bps: f64,
 }
 
 impl Default for EdgeRoutingConfig {
@@ -373,6 +393,9 @@ impl Default for EdgeRoutingConfig {
             robust_negative_min_trades: default_robust_negative_min_trades(),
             robust_negative_bps_threshold: default_robust_negative_bps_threshold(),
             robust_negative_score_cap: default_robust_negative_score_cap(),
+            posterior_lcb_z: default_posterior_lcb_z(),
+            posterior_min_std_bps: default_posterior_min_std_bps(),
+            posterior_negative_lcb_threshold_bps: default_robust_negative_bps_threshold(),
         }
     }
 }
@@ -398,6 +421,17 @@ impl EdgeRoutingConfig {
             || !(0.0..=100.0).contains(&self.robust_negative_score_cap)
         {
             return Err("edge_routing.robust_negative_score_cap must be in [0, 100]".into());
+        }
+        if !self.posterior_lcb_z.is_finite() || !(0.0..=5.0).contains(&self.posterior_lcb_z) {
+            return Err("edge_routing.posterior_lcb_z must be in [0, 5]".into());
+        }
+        if !self.posterior_min_std_bps.is_finite()
+            || !(0.0..=500.0).contains(&self.posterior_min_std_bps)
+        {
+            return Err("edge_routing.posterior_min_std_bps must be in [0, 500]".into());
+        }
+        if !self.posterior_negative_lcb_threshold_bps.is_finite() {
+            return Err("edge_routing.posterior_negative_lcb_threshold_bps must be finite".into());
         }
         Ok(())
     }

@@ -17,7 +17,7 @@
 use super::*;
 use crate::strategies::{Strategy, StrategyAction};
 use crate::tick_pipeline::TickContext;
-use openclaw_core::indicators::{AdxResult, HurstResult, IndicatorSnapshot, KamaResult};
+use openclaw_core::indicators::{AdxResult, AtrResult, HurstResult, IndicatorSnapshot, KamaResult};
 
 // P-08: Test helpers use Box::leak for owned indicator data (fine for tests).
 
@@ -34,6 +34,40 @@ fn ctx_with(sma: f64, kama: f64, adx: f64, ts: u64) -> TickContext<'static> {
             adx,
             plus_di: 25.0,
             minus_di: 15.0,
+        }),
+        ..Default::default()
+    }));
+    TickContext {
+        symbol: "BTC",
+        price: 50000.0,
+        timestamp_ms: ts,
+        indicators: Some(ind),
+        signals: &[],
+        h0_allowed: true,
+        funding_rate: None,
+        index_price: None,
+        open_interest: None,
+        best_bid: None,
+        best_ask: None,
+        tick_size: None,
+    }
+}
+
+fn ctx_with_atr(sma: f64, kama: f64, adx: f64, ts: u64, atr: f64) -> TickContext<'static> {
+    let ind = Box::leak(Box::new(IndicatorSnapshot {
+        sma_20: Some(sma),
+        kama: Some(KamaResult {
+            kama,
+            efficiency_ratio: 0.5,
+        }),
+        adx: Some(AdxResult {
+            adx,
+            plus_di: 25.0,
+            minus_di: 15.0,
+        }),
+        atr_14: Some(AtrResult {
+            atr,
+            atr_percent: atr / 50000.0 * 100.0,
         }),
         ..Default::default()
     }));
@@ -150,6 +184,19 @@ fn test_long_entry() {
         StrategyAction::Open(intent) => assert!(intent.is_long),
         other => panic!("expected StrategyAction::Open, got {:?}", other),
     }
+}
+
+#[test]
+fn test_min_trend_snr_blocks_noisy_entry() {
+    let mut s = MaCrossover::new();
+    s.min_persistence_ms = 0;
+    s.min_trend_snr = 1.0;
+
+    let blocked = s.on_tick(&ctx_with_atr(100.0, 101.0, 25.0, 0, 2.0));
+    assert!(blocked.is_empty(), "SNR 0.5 must be blocked");
+
+    let allowed = s.on_tick(&ctx_with_atr(100.0, 103.0, 25.0, 1_000, 2.0));
+    assert_eq!(allowed.len(), 1, "SNR 1.5 must pass");
 }
 
 #[test]
@@ -461,11 +508,11 @@ fn test_conf_scale_applied_to_emit() {
 #[test]
 fn test_ma_param_ranges_count() {
     let ranges = MaCrossoverParams::param_ranges();
-    // 5 original + 10 confluence + 1 A2 (max_cooldown_boost) = 16
+    // 5 original + 10 confluence + 1 A2 cooldown + 1 SNR gate = 17
     assert_eq!(
         ranges.len(),
-        16,
-        "expected 16 param ranges, got {}",
+        17,
+        "expected 17 param ranges, got {}",
         ranges.len()
     );
 }

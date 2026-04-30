@@ -88,6 +88,18 @@ pub fn nearest_grid_idx(levels: &[f64], price: f64) -> usize {
 /// 公式：step = max(σ·√(2/θ), 2·fee_rate·μ)
 /// θ = 均值回歸速度，σ = 波動率，μ = 均值價格。
 pub fn compute_ou_step(history: &[f64], ou_lookback: usize, fee_rate: f64) -> Option<f64> {
+    compute_ou_step_with_cost_floor(history, ou_lookback, fee_rate, 0.0, 1.0)
+}
+
+/// Compute OU-derived step with explicit execution-cost floors.
+/// 使用顯式執行成本地板計算 OU 推導步長。
+pub fn compute_ou_step_with_cost_floor(
+    history: &[f64],
+    ou_lookback: usize,
+    fee_rate: f64,
+    min_grid_step_bps: f64,
+    cost_floor_multiplier: f64,
+) -> Option<f64> {
     if history.len() < 20 {
         return None;
     }
@@ -131,8 +143,18 @@ pub fn compute_ou_step(history: &[f64], ou_lookback: usize, fee_rate: f64) -> Op
     // OU optimal grid spacing: σ·√(2/θ) — derived from OU first-passage time.
     // OU 最佳網格間距：σ·√(2/θ) — 由 OU 首次穿越時間推導。
     let ou_step = sigma * (2.0_f64 / theta).sqrt();
-    let fee_floor = 2.0 * fee_rate * mu;
-    let step = ou_step.max(fee_floor);
+    let multiplier = if cost_floor_multiplier.is_finite() && cost_floor_multiplier > 0.0 {
+        cost_floor_multiplier
+    } else {
+        1.0
+    };
+    let fee_floor = 2.0 * fee_rate.max(0.0) * mu * multiplier;
+    let min_step_floor = if min_grid_step_bps.is_finite() && min_grid_step_bps > 0.0 {
+        mu * min_grid_step_bps / 10_000.0
+    } else {
+        0.0
+    };
+    let step = ou_step.max(fee_floor).max(min_step_floor);
 
     if step > 0.0 && mu > 0.0 {
         Some(step)
@@ -396,6 +418,16 @@ mod tests {
         // Strongly trending prices — OU model invalid / 強趨勢價格 — OU 模型不適用
         let prices: Vec<f64> = (0..50).map(|i| 100.0 + i as f64 * 2.0).collect();
         assert!(compute_ou_step(&prices, 60, 0.001).is_none());
+    }
+
+    #[test]
+    fn test_compute_ou_step_respects_min_grid_step_bps_floor() {
+        let prices: Vec<f64> = (0..50)
+            .map(|i| 100.0 + 0.001 * (i as f64 * 0.3).sin())
+            .collect();
+        let step = compute_ou_step_with_cost_floor(&prices, 60, 0.0, 25.0, 1.0)
+            .expect("mean-reverting micro-range should yield an OU step");
+        assert!(step >= 0.25, "25bps floor on ~$100 mean must be >= 0.25");
     }
 
     // -----------------------------------------------------------------------

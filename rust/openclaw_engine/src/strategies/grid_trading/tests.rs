@@ -419,11 +419,11 @@ fn test_grid_update() {
 #[test]
 fn test_grid_param_ranges_count() {
     let ranges = GridTradingParams::param_ranges();
-    // 4 original + 3 trend cooldown = 7
+    // 4 original + 3 trend cooldown + 2 edge-cost spacing knobs = 9
     assert_eq!(
         ranges.len(),
-        7,
-        "expected 7 param ranges, got {}",
+        9,
+        "expected 9 param ranges, got {}",
         ranges.len()
     );
 }
@@ -436,6 +436,8 @@ fn test_grid_param_ranges_cooldown_names() {
         "adx_low_threshold",
         "adx_high_threshold",
         "max_cooldown_boost",
+        "min_grid_step_bps",
+        "cost_floor_multiplier",
     ] {
         assert!(names.contains(expected), "missing param range: {expected}");
     }
