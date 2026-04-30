@@ -3,7 +3,7 @@
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
 > 最後更新：2026-04-24（P1-11 全工 + FIX-26-DEADLOCK-1）
 
-### Dust / Edge / Scout follow-through（2026-04-30 · commit pending）
+### Dust / Edge / Scout follow-through（2026-04-30 · commit `f8a245c`）
 
 **範圍**：完成 operator 指定的三項 follow-through：dust residual runtime proof、post-deploy edge cutoff observation、Scout heartbeat production caller wiring。
 
