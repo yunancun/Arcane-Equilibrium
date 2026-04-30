@@ -463,7 +463,7 @@ state_models ← state_compiler ← state_store ← main_legacy ← main.py
 `post-deploy edge observation + dust residual runtime proof → G1-04/G2-02/G2-01 time-driven decisions → P0-3 edge decision → LG-2/3/4/5 → true live`
 - **最早 Live 日期**（事件驅動，非 hard date）：仍以 2026-05-23 樂觀 / 2026-05-30 中位 / 2026-06-15 悲觀為規劃帶，但需先通過 P0-3 edge decision。
 - **當前 active gates**：`[33]` maker quality, `[38]` grid lifecycle, `[40]` realized edge, dust residual full-close proof, and MLDE live-governed boundary.
-- 詳見 `TODO.md` active queue；completed Wave 1-3 and remediation narratives are archived.
+- 詳見 `TODO.md` current active block；TODO 保留 v3 單一時間軸記錄，已確認過時的 active-mainline 段落另歸檔。
 
 **路線圖**：Phase 0-6、Live GUI、5-Agent/H1-H5 基礎接線、Executor shadow toggle、MLDE demo autonomy、Strategy Edge Repair、Strategy Edge Models、Dust residual prevention 均已落地。仍未完成的是正 edge / execution-quality 驗收、P0-3 decision、Live Gate LG-2/3/4/5、以及 true live 授權後的受監督/受限自主放權。
 

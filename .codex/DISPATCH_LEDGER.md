@@ -99,3 +99,4 @@ Result:
 - Pre-cleanup snapshots archived under `docs/archive/2026-04-30--*-pre-cleanup-snapshot.md`
 - `README.md`, `TODO.md`, and `CLAUDE.md` now describe current 2026-04-30 active state
 - Linear project and issues updated as a high-level mirror without publishing secrets or detailed runtime internals
+- Correction: after operator feedback, `TODO.md` was restored to its v3 single-timeline record shape; only the stale active-mainline block was removed to `docs/archive/2026-04-30--TODO-stale-active-mainline.md`

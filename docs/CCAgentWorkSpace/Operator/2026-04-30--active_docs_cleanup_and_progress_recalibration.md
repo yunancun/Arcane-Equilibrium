@@ -8,11 +8,12 @@ The oversized active docs were trimmed. Full pre-cleanup snapshots are archived,
 
 - `README.md`: current entry status
 - `CLAUDE.md`: constitution, hard boundaries, compact system state
-- `TODO.md`: active queue and time-driven gates
+- `TODO.md`: v3 single-timeline work record with current active block and time-driven gates
 
 ## What Changed
 
-- Closed 62-finding Batch A-F, STRKUSDT P0 wave, Wave A-H, and old Wave 1-3 narratives were moved out of active state.
+- Closed 62-finding Batch A-F, STRKUSDT P0 wave, Wave A-H, and old Wave 1-3 narratives were moved out of README/CLAUDE active summaries.
+- Correction: TODO was restored to preserve the v3 single-timeline record; only the confirmed stale active-mainline block was moved to `docs/archive/2026-04-30--TODO-stale-active-mainline.md`.
 - Current runtime/progress framing was recalibrated to the 2026-04-30 source/runtime state.
 - The old `[16]` blocker framing is no longer active; current risk is strategy edge observation and dust close-path proof.
 - README now points to `CLAUDE.md` §四 for hard boundaries instead of carrying a duplicate long block.

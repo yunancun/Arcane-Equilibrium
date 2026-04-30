@@ -115,7 +115,12 @@ YYYY-MM-DD HH:MM TZ
 
 2026-04-30 21:25 CEST
 - completed PM-led active-doc cleanup and progress recalibration using `CC(default)`, `FA(default)`, `E5(explorer)`, `PA(default)`, and `MIT(default)`
-- archived full pre-cleanup snapshots for `CLAUDE.md`, `TODO.md`, and `README.md`, then trimmed active docs to current state and forward queue
+- archived full pre-cleanup snapshots for `CLAUDE.md`, `TODO.md`, and `README.md`; README/CLAUDE were trimmed to current state, and TODO was later restored to its v3 record-preserving shape
 - verified source/runtime framing at `5ba9b1c`: current active risk is post-deploy edge observation (`[33]`, `[38]`, `[40]`) plus dust close-path proof, not old `[16]` blocker framing
 - updated Linear project `OpenClaw 62-Finding Remediation`: Batch A-F issues Done; stale deploy/RCA issues closed; active follow-up issues added for edge observation, dust proof, and Scout heartbeat wiring
 - report: `docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-30--active_docs_cleanup_and_progress_recalibration.md`
+
+2026-04-30 21:40 CEST
+- corrected the TODO cleanup after operator feedback: restored `TODO.md` to the v3 single-timeline record shape instead of the over-compressed 100-line active queue
+- moved only the confirmed stale active-mainline block (`62-finding` as current mainline + Post-Wave-H hotfixes) to `docs/archive/2026-04-30--TODO-stale-active-mainline.md`
+- kept GUI static dirty files untouched
