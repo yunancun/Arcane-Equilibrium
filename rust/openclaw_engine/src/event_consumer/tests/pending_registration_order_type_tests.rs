@@ -357,3 +357,55 @@ async fn test_ambiguous_fill_before_order_update_emits_unattributed_fill() {
         other => panic!("expected unattributed Fill, got {other:?}"),
     }
 }
+
+#[tokio::test]
+async fn test_qty_zero_full_close_fill_before_order_update_matches_pending_order() {
+    let mut pipeline = TickPipeline::with_kind(&["BTCUSDT"], 10_000.0, PipelineKind::Demo);
+    let mut writer = super::make_test_writer();
+    let mut state = make_loop_state();
+    let (tx, mut rx) = mpsc::channel::<TradingMsg>(8);
+
+    let mut po = baseline_pending_order("market", None);
+    po.order_link_id = "oc_qty_zero_close".into();
+    po.symbol = "BTCUSDT".into();
+    po.is_long = false;
+    po.qty = 0.0;
+    po.is_close = true;
+    state.pending_orders.insert(po.order_link_id.clone(), po);
+
+    let exec = ExecutionUpdate {
+        exec_id: "exec-qty-zero-close".into(),
+        order_id: "bybit-close-before-order-update".into(),
+        symbol: "BTCUSDT".into(),
+        side: "Sell".into(),
+        exec_price: "100.0".into(),
+        exec_qty: "0.01".into(),
+        exec_fee: "0.001".into(),
+        exec_type: "Trade".into(),
+        exec_time: "1700000000456".into(),
+        ..Default::default()
+    };
+
+    handle_exchange_event(
+        Some(ExchangeEvent::Fill(exec)),
+        &mut pipeline,
+        &mut writer,
+        &mut state,
+        Some(&tx),
+    )
+    .await;
+
+    assert!(
+        state.pending_orders.is_empty(),
+        "qty=0 reduce-only full-close fills must match and remove their PendingOrder"
+    );
+
+    let (order_id, to_status, reason) = first_order_state_change(&mut rx);
+    assert_eq!(order_id, "oc_qty_zero_close");
+    assert_eq!(to_status, "Filled");
+    assert_eq!(reason, None);
+    assert!(
+        rx.try_recv().is_err(),
+        "matched qty=0 close fill must not emit an unattributed audit row"
+    );
+}
