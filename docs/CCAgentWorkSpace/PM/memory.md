@@ -1136,3 +1136,22 @@ Operator 接續 Tier 8 sign-off 後說「繼續派」。PM 按 Tier 8 §8 推薦
 ### Boundary
 - No trading, risk, strategy parameter, live authorization, DB write, rebuild, restart, or deploy action was performed.
 - Rust engine runtime remains the `daab51c` scanner deploy; this batch was code healthcheck semantics + RFC/docs/source sync only.
+
+## 2026-05-01 TODO Rank 4-7 Pre-Stage Execution
+
+### Result
+- Operator asked to complete the next TODO 1-4 batch and update TODO before push.
+- Code/RFC checkpoint `ec8f0f4` completed:
+  - STRK-FUP broader silent-dead healthcheck RFC for `[3]`, `[19]`, `[23]`, `[24]`, and `[26]`.
+  - G7-04 Phase B/C dormant source hook: pure downside-CUSUM evaluator plus orchestrator CUSUM filter path.
+  - G4-03 Phase B source: promoting canary Brier/PSI quality gates, env overrides, default-dry-run cron wrapper, and opt-in SIGHUP after applied promoting->production.
+  - LG-4 supervised live gate RFC covering operator approval, session-scoped risk limits, dual kill switch, and audit mirror.
+
+### Verification
+- Rust targeted: `cargo fmt --check`; `cargo test -p openclaw_engine --lib cusum -- --test-threads=1` -> 17/0.
+- Python targeted: `python3 -m pytest program_code/ml_training/tests/test_canary_promoter.py` -> 21/0; py_compile for canary promoter/runner passed.
+- Shell/static: `bash -n helper_scripts/db/canary_promote_cron.sh`; hard-coded home path scan on new files; `git diff --check`.
+
+### Boundary
+- No runtime rebuild/restart, DB write, cron installation, SIGHUP, live authorization change, risk config change, or strategy parameter change was performed.
+- G7-04 remains dormant until a future hot-path wiring task explicitly enables the CUSUM filter; G4-03 apply mode remains env-gated and unscheduled.
