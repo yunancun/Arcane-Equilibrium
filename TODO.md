@@ -8,17 +8,17 @@
 - Wave 1-3 完成表格 + Backlog 完成項：[docs/archive/2026-05-01--completed_waves_1_2_3_and_backlog.md](docs/archive/2026-05-01--completed_waves_1_2_3_and_backlog.md)
 - Pre-trim TODO snapshot（2026-04-29 前）：[docs/archive/2026-04-29--TODO-pre-trim-snapshot.md](docs/archive/2026-04-29--TODO-pre-trim-snapshot.md)
 
-**Runtime（2026-04-30 23:11 CEST · runtime checkpoint a9fce24）**：engine PID 1529433 / API 1591455 / watchdog alive；demo/live active，paper inactive by design；latest healthcheck SUMMARY **WARN** exit 0。
-**測試基準**：Mac Rust lib **2381/0** · Python maker/attribution **9/0** · MLDE pytest **63/0**
+**Runtime/source（2026-05-01 21:32 CEST · source includes `2674e14`）**：Linux source fast-forwarded；Rust engine runtime remains PID 2364863 from `daab51c` scanner deploy（no rebuild/restart for this healthcheck-only fix）；API PID 2047851 / watchdog alive；demo/live active，paper inactive by design；manual wrapper healthcheck SUMMARY **WARN** exit 0。
+**測試基準**：Mac Rust lib **2394/0** · Python maker/attribution **9/0** · MLDE pytest **63/0** · Healthcheck targeted Python **41/0**（F7 39/0 + counterfactual [11] 2/0）
 **21d demo 時鐘**：2026-04-16 22:16 → 解鎖 **2026-05-07**
 
 ---
 
 ## 此刻該做什麼（2026-05-01 · passive observation phase）
 
-**當前狀態**：Strategy Edge Models + Dust Residual Prevention deployed & proven。MLDE demo autonomy active。
+**當前狀態**：Strategy Edge Models + Dust Residual Prevention deployed & proven；Scanner market judgement + five-strategy context deployed；MLDE demo autonomy active。
 下一個需要 implementation 的 wave 是 Wave 4（等 P0-3 ~05-15 決策後啟動）。
-目前主要工作是：觀察、時間等待、3 個時間點的決策。
+目前主要工作是：觀察、時間等待、3 個時間點的決策。最新 P0 hygiene：`[27]` 18:00 transient FAIL 已在 21:29/21:32 手跑 wrapper 恢復 PASS；`[11]` 的 864→413 是 rolling 2d replay 舊 exits 滾出，`2674e14` 已把 false-red 改為 WARN。
 
 ### 時間驅動里程碑
 
@@ -33,12 +33,13 @@
 
 ### Active Observation Gates
 
-| Gate | 現況（2026-04-30 23:11 CEST） | 目標 | 結論時間 |
+| Gate | 現況（2026-05-01 21:32 CEST） | 目標 | 結論時間 |
 |------|------------------------------|------|---------|
-| [33] maker_fill_rate | 7d rolling 25.6%；post-reload slice 73.23%（diluted by pre-reload）| ≥60% fee_drop | ~05-07/08 |
-| [38] grid lifecycle drift | live_demo p50 1.7min vs demo 4.8min（REAL SIGNAL）；grid_levels 10→7 + blocked_symbols 已部署 2026-04-29 | lifetime ≥0.5x | ~05-06 再看 |
-| [40] realized edge acceptance | post-cutoff rows=0（太少不能判讀）| net_bps_after_fee>0 | 等累積 |
-| [11] counterfactual clean window | n=864/200 PASS；replay JSON 17.2h stale | fresh replay + 3d PASS streak | 本週 |
+| [33] maker_fill_rate | 7d rolling 27.2%；fee_drop 22.0%；PostOnly still diluted by pre-reload | ≥60% fee_drop | ~05-07/08 |
+| [38] grid lifecycle drift | demo p50 8.6min vs live_demo 3.7min；lifetime_ratio 0.43 WARN（18:00 cron 曾 PASS 0.53，仍需 rolling 觀察） | lifetime ≥0.5x | ~05-06 再看 |
+| [40] realized edge acceptance | 24h MLDE rows=37，avg_net -20.81bps，maker_like 27.2%，fee_drop 22.0% | net_bps_after_fee>0 | 等累積 |
+| [41] scanner market-gate confirmation | events=1214 / cells=69 / scoreable=0，gate 已 fire 但 label 未足 | gate blocked cells later negative | 等 label 累積 |
+| [11] counterfactual clean window | n=413/200，cf_fired=46，grid=16，ma=22，orphan=2；rolling 2d window shrink expected，WARN not FAIL after `2674e14` | fresh replay + 3d WARN/PASS streak；criteria grid/ma/orphan 達標 | 本週 |
 
 **EDGE-DIAG-2 留尾觀察**：(ii) PostOnly maker fill rate 待 ≥1w demo 累積 (iv) demo bb_breakout 1m bandwidth 結構性問題等 5m 升級或 MLDE sweep；不阻塞主路徑。
 
@@ -172,7 +173,7 @@ PA RFC `2026-04-28--g3_09_cost_edge_advisor_phase_c_rfc.md` ready；operator 決
 | P0-2 21d demo 時鐘 | 進行中 | 2026-05-07 |
 | [33] PostOnly 驗收（G2-01）| 累積中 | ~05-07/08 出結果 |
 | EDGE-P1b exit_features 累積 | grid/ma READY | ~05-10 calibrator |
-| EDGE-P3 clean window freshness | sample OK，replay JSON stale | fresh replay + 3d PASS |
+| EDGE-P3 clean window freshness | fresh rolling replay；[11] WARN（criteria 未達，非資料倒退） | fresh replay + 3d WARN/PASS；grid/ma/orphan criteria 達標 |
 | G2-03 binding | 等 G2-02 結論 | ~05-03 觸發 |
 | EDGE-P2-flip | 等 EDGE-P1b | ~05-10+ |
 | GRID-LIFECYCLE-DRIFT | real signal FAIL；RFC deployed，觀察 14d rolling | ~05-06 再評 |
@@ -245,7 +246,7 @@ PA RFC `2026-04-28--g3_09_cost_edge_advisor_phase_c_rfc.md` ready；operator 決
 
 ## Healthcheck 清單（`passive_wait_healthcheck.py` 已實裝）
 
-**Ground truth**：cron-wrapper output，最近一次 2026-04-30 23:11 CEST，checks [1]-[40]（skip [17]，含 [Xa]/[Xb]）。
+**Ground truth**：cron-wrapper output；最近 post-fix 手跑 wrapper 2026-05-01 21:32 CEST SUMMARY WARN exit 0，checks [1]-[41]（skip [17]，含 [Xa]/[Xb]）。裸 `python3 helper_scripts/db/passive_wait_healthcheck.py` 在非互動 SSH 可能缺 DB env；接手請用 wrapper。
 
 | # | 項目 | 對應 |
 |---|------|------|
@@ -287,6 +288,7 @@ PA RFC `2026-04-28--g3_09_cost_edge_advisor_phase_c_rfc.md` ready；operator 決
 | [38] | grid_trading_lifecycle_drift | GRID-LIFECYCLE-DRIFT |
 | [39] | strategy_name_cardinality_drift | STRATEGY-NAME-ATTRIBUTION |
 | [40] | realized_edge_acceptance | post-deploy edge observation |
+| [41] | scanner_market_gate_confirmation | scanner market judgement 後驗 |
 | [Xa] | leader_election_health | G1-01 |
 | [Xb] | pipeline_triangulation | G6-01 |
 
@@ -297,7 +299,7 @@ PA RFC `2026-04-28--g3_09_cost_edge_advisor_phase_c_rfc.md` ready；operator 決
 ```bash
 git status && git log --oneline -5
 ssh trade-core "python3 helper_scripts/canary/engine_watchdog.py --data-dir /tmp/openclaw --status"
-ssh trade-core "cd ~/BybitOpenClaw/srv && python3 helper_scripts/db/passive_wait_healthcheck.py"
+ssh trade-core "cd ~/BybitOpenClaw/srv && bash helper_scripts/db/passive_wait_healthcheck.sh --quiet"
 ```
 
 ---

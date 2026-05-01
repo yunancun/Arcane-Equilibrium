@@ -1100,3 +1100,19 @@ Operator 接續 Tier 8 sign-off 後說「繼續派」。PM 按 Tier 8 §8 推薦
 
 ### Boundary
 - Docs-only change. No code, DB write, runtime config, rebuild, restart, or live authorization action was performed.
+
+## 2026-05-01 TODO Runtime Healthcheck Calibration
+
+### Result
+- Operator asked to complete the four active follow-ups from TODO triage.
+- `[27] intents_counter_freeze` was verified as transient: 2026-05-01 18:00 CEST cron failed, but 21:29/21:32 CEST manual wrapper runs passed (`demo/live_demo` each had recent intents). No code change was needed for `[27]`.
+- `[11] counterfactual_clean_window_growth` false-red was fixed in `2674e14`: production `counterfactual_daily_cron.sh` writes a rolling `--days 2` replay, so `n_rows` can shrink when old exits age out. The healthcheck now keeps rolling-window shrink as WARN while preserving FAIL for stale JSON and non-rolling regressions.
+- Active docs now include scanner market judgement / five-strategy context, `[41] scanner_market_gate_confirmation`, and the post-fix healthcheck baseline.
+
+### Verification
+- Mac targeted Python: F7 healthchecks 39/0; counterfactual [11] tests 2/0; py_compile passed.
+- Linux source fast-forwarded to `2674e14`; `bash helper_scripts/db/passive_wait_healthcheck.sh --quiet` returned SUMMARY WARN exit 0, with `[11]` WARN and `[27]` PASS.
+- Linux watchdog remained `engine_alive=true`; no rebuild/restart was required.
+
+### Boundary
+- No trading, risk, strategy parameter, live authorization, DB write, rebuild, or restart action was performed.
