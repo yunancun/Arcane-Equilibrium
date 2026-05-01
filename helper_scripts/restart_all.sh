@@ -30,7 +30,8 @@
 
 set -e
 cd "$(dirname "$0")/.."
-REPO_ROOT="$(pwd)"
+REPO_ROOT="$(pwd -P)"
+cd "$REPO_ROOT"
 WORKERS="${OPENCLAW_API_WORKERS:-4}"
 # Runtime data dir (env var for Mac compatibility).
 # Mac dev recommendation: export OPENCLAW_DATA_DIR="$HOME/.openclaw_runtime"
