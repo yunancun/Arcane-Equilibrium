@@ -528,6 +528,9 @@ def _build_role_envelope(role: str) -> dict[str, Any]:
         "emoji": meta["emoji"],
         "state": "offline",
         "state_label_zh": _STATE_LABEL_ZH.get((role, "offline"), "失聯"),
+        "runtime_state": "missing",
+        "activity_state": "offline",
+        "state_reason_zh": None,
         "summary_zh": "等待下一轮扫描",
         "last_heartbeat_ts": None,
         "today_cost_usd": 0.0,
@@ -554,7 +557,8 @@ def _build_scout_card(
 
     # Scout cycle ~30 min ≫ scan_interval；無逐條時戳，RUNNING + 有產出 = active。
     # Scout cycle far longer than scan_interval; running+intel>0 → active.
-    state_value = stats.get("state", "stopped") if stats else "stopped"
+    state_value = "missing" if scout is None else (stats.get("state", "stopped") if stats else "stopped")
+    card["runtime_state"] = state_value
     intel_produced = int(stats.get("intel_produced", 0)) if stats else 0
     if scout is None or state_value != "running":
         card["state"] = "offline"
@@ -589,6 +593,8 @@ def _build_strategist_card(
     card = _build_role_envelope("strategist")
     card["today_cost_usd"] = float(today_costs_by_role.get("strategist", 0.0))
     card["today_decisions"] = today_intent_total
+    state_value = "missing" if strategist is None else (stats.get("state", "stopped") if stats else "stopped")
+    card["runtime_state"] = state_value
 
     # GUI heartbeat fallback / 心跳回退：eval log 空 → stats.last_heartbeat_ms。
     last_hb_ms = _last_heartbeat_ms_from_eval_log(strategist)
@@ -596,12 +602,13 @@ def _build_strategist_card(
         _fb = int(stats.get("last_heartbeat_ms", 0)) if stats else 0
         last_hb_ms = _fb if _fb > 0 else None
 
-    state, last_hb_ms_out = _derive_heartbeat_state(
+    activity_state, last_hb_ms_out = _derive_heartbeat_state(
         last_hb_ms,
         scan_interval_s,
         healthy_label="thinking",
         idle_label="watching",
     )
+    state = activity_state
 
     intel_evaluated = int(stats.get("intel_evaluated", 0))
     h1_budget_skip = int(stats.get("h1_budget_skip", 0))
@@ -612,6 +619,16 @@ def _build_strategist_card(
     produced = int(stats.get("intents_produced", 0))
     if rejected > 0 and rejected > produced * 2:
         state = "rejecting"
+
+    if strategist is None or state_value != "running":
+        state = "offline"
+        card["state_reason_zh"] = "Strategist singleton 未运行"
+    elif activity_state == "offline" and state == "offline":
+        state = "watching"
+        card["state_reason_zh"] = "Agent 程序运行中；最近没有新的 eval/情报心跳，不等于程序失联"
+    elif activity_state == "slow":
+        card["state_reason_zh"] = "Agent 程序运行中；最近活动心跳偏慢"
+    card["activity_state"] = activity_state
 
     card["state"] = state
     card["state_label_zh"] = _STATE_LABEL_ZH.get(
@@ -642,7 +659,8 @@ def _build_guardian_card(
     total_verdicts = sum(today_verdicts.values())
     card["today_decisions"] = total_verdicts
 
-    state_value = stats.get("state", "stopped") if stats else "stopped"
+    state_value = "missing" if guardian is None else (stats.get("state", "stopped") if stats else "stopped")
+    card["runtime_state"] = state_value
     rejected = int(today_verdicts.get("rejected", 0))
     approved = int(today_verdicts.get("approved", 0))
 
@@ -668,9 +686,8 @@ def _build_guardian_card(
             f"今日凍結新倉提案 — 已拒絕 {rejected} 次（無通過）"
         )
     elif state == "tightening":
-        card["summary_zh"] = (
-            f"今日把關較嚴 — 通過 {approved} 次 / 拒絕 {rejected} 次"
-        )
+        card["state_reason_zh"] = "来自今日 risk_verdict 拒绝比例，不代表 RiskGovernor tier 已升级，也不会自动产生 GovernorHub 放松申请"
+        card["summary_zh"] = f"今日把關較嚴 — 通過 {approved} 次 / 拒絕 {rejected} 次（verdict 比例，不代表 Governor tier 已升級）"
     elif state == "guarding":
         if total_verdicts == 0:
             card["summary_zh"] = "等待下一筆風險審批"
@@ -724,7 +741,8 @@ def _build_executor_card(
     # GUI heartbeat / 心跳：MED-3 DRY helper。
     _surface_heartbeat_ts(stats, card)
 
-    state_value = stats.get("state", "stopped") if stats else "stopped"
+    state_value = "missing" if executor is None else (stats.get("state", "stopped") if stats else "stopped")
+    card["runtime_state"] = state_value
     if executor is None or state_value != "running":
         # Plan §"絕不允許灰色「未知」"：任何狀態無法確認時走紅 + 暫停接單文案。
         card["state"] = "offline"
@@ -760,7 +778,8 @@ def _build_analyst_card(
     trades_analyzed = int(stats.get("trades_analyzed", 0)) if stats else 0
     card["today_decisions"] = trades_analyzed
 
-    state_value = stats.get("state", "stopped") if stats else "stopped"
+    state_value = "missing" if analyst is None else (stats.get("state", "stopped") if stats else "stopped")
+    card["runtime_state"] = state_value
     if analyst is None or state_value != "running":
         state = "offline"
     elif trades_analyzed > 0:
