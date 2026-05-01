@@ -13,7 +13,7 @@ Status: Complete
 
 - F7 healthcheck tests: 43/0.
 - tab-ai inline JS syntax: 2 scripts checked.
-- Linux wrapper: SUMMARY WARN exit 0.
+- Linux wrapper: SUMMARY WARN exit 0 at 2026-05-01 22:36 CEST. `[22]` is now WARN with maker-working context; `[16]` is a transient 11.3min strategist-cycle WARN inside the 30min backoff window.
 
 ## Boundary
 
