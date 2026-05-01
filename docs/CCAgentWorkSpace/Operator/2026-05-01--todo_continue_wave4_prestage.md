@@ -12,7 +12,7 @@ Status: Complete for this batch
   - LG-2 H0 blocking verification.
   - MLDE-6 live promotion contract.
   - LG-3 provider pricing binding.
-- Updated active docs to the 2026-05-01 21:51 CEST wrapper state.
+- Updated active docs to the 2026-05-01 21:55 CEST wrapper state.
 
 ## Current Runtime
 
