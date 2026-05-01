@@ -54,6 +54,7 @@ pub mod position_risk_evaluator;
 pub mod regime;
 pub mod restart_kind;
 pub mod risk_checks;
+pub mod risk_cusum;
 pub mod scanner;
 pub mod secret_env;
 pub mod strategies;

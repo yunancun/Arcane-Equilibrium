@@ -46,14 +46,17 @@ def _row(
     verdict: str = VERDICT_SHADOW_ONLY,
     sample_size: int = 600,
     age_days: float = 2.0,
+    acceptance_report: dict | None = None,
 ) -> dict:
     return {
         "id": rid,
         "strategy": strategy,
         "engine_mode": engine_mode,
         "quantile": quantile,
+        "schema_version": "v1",
         "canary_status": canary_status,
         "verdict": verdict,
+        "acceptance_report": acceptance_report or {"metrics": {"brier_score": 0.20}},
         "train_date": (NOW - timedelta(days=age_days)).date(),
         "training_sample_size": sample_size,
         "created_at": NOW - timedelta(days=age_days),
@@ -63,6 +66,29 @@ def _row(
 def _cur_with_obs(total: int, agreed: int) -> MagicMock:
     cur = MagicMock()
     cur.fetchone = MagicMock(return_value=(total, agreed))
+    return cur
+
+
+def _cur_for_promoting(
+    *,
+    total_3d: int = 600,
+    agreed_3d: int = 390,
+    total_full: int = 600,
+    agreed_full: int = 390,
+    current_brier: float | None = 0.21,
+    max_psi: float | None = 0.10,
+) -> MagicMock:
+    cur = MagicMock()
+    cur.fetchone = MagicMock(
+        side_effect=[
+            (total_3d, agreed_3d),
+            (current_brier,),
+            (max_psi,),
+            (total_full, agreed_full),
+            (current_brier,),
+            (max_psi,),
+        ]
+    )
     return cur
 
 
@@ -142,11 +168,13 @@ def test_g4_03_promoting_full_window_promotes_to_production():
     # 8 days old + 600 obs + 65% agreement → promote.
     # 8d 老 + 600 觀測 + 65% agreement → 升 production。
     row = _row(canary_status=CANARY_PROMOTING, age_days=8.0)
-    cur = _cur_with_obs(total=600, agreed=int(600 * 0.65))
+    cur = _cur_for_promoting(total_full=600, agreed_full=int(600 * 0.65))
     res = evaluate_canary_eligibility(row, cur, CanaryThresholds(), NOW)
     assert res.decision is CanaryDecision.PROMOTE
     assert res.target_status == CANARY_PRODUCTION
     assert res.metrics["agreement_full_window"] == pytest.approx(0.65, abs=0.001)
+    assert res.metrics["current_brier"] == pytest.approx(0.21)
+    assert res.metrics["max_psi"] == pytest.approx(0.10)
 
 
 def test_g4_03_promoting_too_young_holds():
@@ -159,7 +187,7 @@ def test_g4_03_promoting_too_young_holds():
 
 def test_g4_03_promoting_insufficient_obs_holds():
     row = _row(canary_status=CANARY_PROMOTING, age_days=8.0)
-    cur = _cur_with_obs(total=200, agreed=180)
+    cur = _cur_for_promoting(total_full=200, agreed_full=180)
     res = evaluate_canary_eligibility(row, cur, CanaryThresholds(), NOW)
     assert res.decision is CanaryDecision.HOLD
     assert any("observations 200" in r for r in res.reasons)
@@ -169,10 +197,26 @@ def test_g4_03_promoting_low_agreement_holds():
     # 8d + 600 obs + 50% agreement (below 60% threshold) → Hold.
     # 8d + 600 obs + 50% agreement < 60% 門檻 → Hold。
     row = _row(canary_status=CANARY_PROMOTING, age_days=8.0)
-    cur = _cur_with_obs(total=600, agreed=300)
+    cur = _cur_for_promoting(total_full=600, agreed_full=300)
     res = evaluate_canary_eligibility(row, cur, CanaryThresholds(), NOW)
     assert res.decision is CanaryDecision.HOLD
     assert any("agreement 50.00%" in r for r in res.reasons)
+
+
+def test_g4_03_promoting_missing_quality_metrics_holds():
+    row = _row(canary_status=CANARY_PROMOTING, age_days=8.0, acceptance_report={})
+    cur = _cur_for_promoting(current_brier=None, max_psi=None)
+    res = evaluate_canary_eligibility(row, cur, CanaryThresholds(), NOW)
+    assert res.decision is CanaryDecision.HOLD
+    assert any("quality metrics unavailable" in r for r in res.reasons)
+
+
+def test_g4_03_promoting_brier_regression_holds():
+    row = _row(canary_status=CANARY_PROMOTING, age_days=8.0)
+    cur = _cur_for_promoting(current_brier=0.24, max_psi=0.10)  # >1.15 * 0.20
+    res = evaluate_canary_eligibility(row, cur, CanaryThresholds(), NOW)
+    assert res.decision is CanaryDecision.HOLD
+    assert any("brier" in r and "max" in r for r in res.reasons)
 
 
 # ---------- promoting → rejected (auto-retire on disagreement collapse) ----------
@@ -187,6 +231,15 @@ def test_g4_03_promoting_low_3d_agreement_retires():
     assert res.decision is CanaryDecision.RETIRE
     assert res.target_status == CANARY_REJECTED
     assert any("auto-reject" in r for r in res.reasons)
+
+
+def test_g4_03_promoting_psi_drift_retires():
+    row = _row(canary_status=CANARY_PROMOTING, age_days=4.0)
+    cur = _cur_for_promoting(total_3d=100, agreed_3d=80, current_brier=0.21, max_psi=0.31)
+    res = evaluate_canary_eligibility(row, cur, CanaryThresholds(), NOW)
+    assert res.decision is CanaryDecision.RETIRE
+    assert res.target_status == CANARY_REJECTED
+    assert any("max PSI" in r for r in res.reasons)
 
 
 # ---------- Terminal states ----------
@@ -218,12 +271,13 @@ def test_g4_03_scanner_dry_run_does_not_call_transition(monkeypatch):
 
     # First fetchall: registry rows. Second fetchone (per row): obs counts.
     fake_cur.description = [
-        ("id",), ("strategy",), ("engine_mode",), ("quantile",),
-        ("canary_status",), ("verdict",), ("train_date",),
+        ("id",), ("strategy",), ("engine_mode",), ("quantile",), ("schema_version",),
+        ("canary_status",), ("verdict",), ("acceptance_report",), ("train_date",),
         ("training_sample_size",), ("created_at",),
     ]
     fake_cur.fetchall.return_value = [
-        (1, "grid_trading", "demo", "q50", CANARY_SHADOW, VERDICT_SHADOW_ONLY,
+        (1, "grid_trading", "demo", "q50", "v1", CANARY_SHADOW, VERDICT_SHADOW_ONLY,
+         {"metrics": {"brier_score": 0.20}},
          (NOW - timedelta(days=2)).date(), 600, NOW - timedelta(days=2)),
     ]
     fake_cur.fetchone.return_value = (0, 0)
@@ -251,12 +305,13 @@ def test_g4_03_scanner_apply_requires_env_gate(monkeypatch):
     fake_conn.__enter__.return_value = fake_conn
     fake_conn.cursor.return_value.__enter__.return_value = fake_cur
     fake_cur.description = [
-        ("id",), ("strategy",), ("engine_mode",), ("quantile",),
-        ("canary_status",), ("verdict",), ("train_date",),
+        ("id",), ("strategy",), ("engine_mode",), ("quantile",), ("schema_version",),
+        ("canary_status",), ("verdict",), ("acceptance_report",), ("train_date",),
         ("training_sample_size",), ("created_at",),
     ]
     fake_cur.fetchall.return_value = [
-        (1, "grid_trading", "demo", "q50", CANARY_SHADOW, VERDICT_SHADOW_ONLY,
+        (1, "grid_trading", "demo", "q50", "v1", CANARY_SHADOW, VERDICT_SHADOW_ONLY,
+         {"metrics": {"brier_score": 0.20}},
          (NOW - timedelta(days=2)).date(), 600, NOW - timedelta(days=2)),
     ]
     fake_cur.fetchone.return_value = (0, 0)
@@ -278,6 +333,10 @@ def test_g4_03_scanner_apply_requires_env_gate(monkeypatch):
 def test_g4_03_thresholds_from_env_overrides(monkeypatch):
     monkeypatch.setenv("OPENCLAW_CANARY_SHADOW_MIN_SAMPLES", "300")
     monkeypatch.setenv("OPENCLAW_CANARY_PROMOTING_MIN_AGREEMENT", "0.75")
+    monkeypatch.setenv("OPENCLAW_CANARY_PROMOTING_MAX_PSI", "0.15")
+    monkeypatch.setenv("OPENCLAW_CANARY_REQUIRE_QUALITY_METRICS", "0")
     th = CanaryThresholds.from_env()
     assert th.shadow_min_training_samples == 300
     assert th.promoting_min_agreement_pct == pytest.approx(0.75)
+    assert th.promoting_max_psi == pytest.approx(0.15)
+    assert th.require_promoting_quality_metrics is False

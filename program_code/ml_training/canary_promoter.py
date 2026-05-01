@@ -4,7 +4,8 @@ Canary 自動晉升評估器（G4-03 Phase A）。
 MODULE_NOTE (EN): Phase A scaffolding for the auto-promote cron deferred
   by INFRA-PREBUILD-1 Part B (canary draft 2026-04-23). Reads
   `learning.model_registry` rows in `canary_status='shadow'` or
-  `'promoting'`, applies the eligibility gates from the draft, and
+  `'promoting'`, applies the eligibility gates from the draft, including
+  Phase B Brier/PSI quality gates for promoting rows, and
   EITHER prints a Hold/Promote/Retire decision (dry_run) OR calls the
   existing `model_registry.transition_canary_status` state machine.
 
@@ -16,9 +17,10 @@ MODULE_NOTE (EN): Phase A scaffolding for the auto-promote cron deferred
   Real numbers come from Phase 2 dry-run data when shadow first fires
   on demo. Override via `CanaryThresholds(...)` constructor.
 
-  Wiring: not auto-scheduled. Use `helper_scripts/db/canary_promote_runner.py`
-  for manual / cron invocation. Phase B (cron + alert channel + per-strategy
-  override YAML) deferred to Phase 4 second-half per draft §Auto-promote cron.
+  Wiring: use `helper_scripts/db/canary_promote_runner.py` for manual
+  invocation and `helper_scripts/db/canary_promote_cron.sh` for cron. Apply
+  mode remains DEFAULT-OFF behind `OPENCLAW_AUTO_PROMOTE_ENABLED=1`; optional
+  SIGHUP is a runner flag, not an evaluator side effect.
 
 MODULE_NOTE (中): G4-03 Phase A 框架；INFRA-PREBUILD-1 Part B 延後的
   auto-promote cron 落地。掃 `learning.model_registry` 中
@@ -80,10 +82,14 @@ class CanaryThresholds:
     promoting_min_observations: int = 500  # decision_shadow_exits row count
     promoting_min_age_days: float = 7.0  # ≥7 consecutive days of shadow data
     promoting_min_agreement_pct: float = 0.60  # 60% threshold from draft
+    promoting_max_brier_multiplier: float = 1.15  # current <= 1.15 * baseline
+    promoting_max_psi: float = 0.25  # all PSI drift dims below this value
+    require_promoting_quality_metrics: bool = True
 
     # any → rejected (auto-retire trigger)
     promoting_max_disagreement_window_days: float = 3.0
     promoting_min_agreement_pct_strict: float = 0.40  # <40% after 3d → reject
+    promoting_reject_brier_multiplier: float = 1.50  # current > 1.5 * baseline
 
     @classmethod
     def from_env(cls) -> "CanaryThresholds":
@@ -102,6 +108,11 @@ class CanaryThresholds:
                 return int(v) if v else default
             except (TypeError, ValueError):
                 return default
+        def _b(name: str, default: bool) -> bool:
+            v = os.environ.get(name)
+            if v is None:
+                return default
+            return v.strip().lower() in ("1", "true", "yes", "on")
         return cls(
             shadow_min_age_days=_f("OPENCLAW_CANARY_SHADOW_MIN_AGE_DAYS", cls.shadow_min_age_days),
             shadow_min_training_samples=_i(
@@ -115,6 +126,19 @@ class CanaryThresholds:
             ),
             promoting_min_agreement_pct=_f(
                 "OPENCLAW_CANARY_PROMOTING_MIN_AGREEMENT", cls.promoting_min_agreement_pct
+            ),
+            promoting_max_brier_multiplier=_f(
+                "OPENCLAW_CANARY_PROMOTING_MAX_BRIER_MULTIPLIER",
+                cls.promoting_max_brier_multiplier,
+            ),
+            promoting_max_psi=_f("OPENCLAW_CANARY_PROMOTING_MAX_PSI", cls.promoting_max_psi),
+            require_promoting_quality_metrics=_b(
+                "OPENCLAW_CANARY_REQUIRE_QUALITY_METRICS",
+                cls.require_promoting_quality_metrics,
+            ),
+            promoting_reject_brier_multiplier=_f(
+                "OPENCLAW_CANARY_PROMOTING_REJECT_BRIER_MULTIPLIER",
+                cls.promoting_reject_brier_multiplier,
             ),
         )
 
@@ -169,6 +193,195 @@ def _query_shadow_observations(
     return (int(row[0] or 0), int(row[1] or 0))
 
 
+def _extract_baseline_brier(report: Any) -> Optional[float]:
+    """Best-effort baseline Brier extraction from acceptance_report JSONB.
+    從 acceptance_report JSONB 盡力抽取 baseline Brier。
+    """
+    if not isinstance(report, dict):
+        return None
+    keys = (
+        "baseline_brier",
+        "baseline_brier_score",
+        "val_brier",
+        "brier",
+        "brier_score",
+    )
+    stack = [report]
+    seen = 0
+    while stack and seen < 32:
+        seen += 1
+        obj = stack.pop()
+        if not isinstance(obj, dict):
+            continue
+        for key in keys:
+            if key in obj:
+                try:
+                    value = float(obj[key])
+                    if value > 0 and value == value:
+                        return value
+                except (TypeError, ValueError):
+                    pass
+        for nested_key in ("metrics", "validation", "acceptance_metrics", "report"):
+            nested = obj.get(nested_key)
+            if isinstance(nested, dict):
+                stack.append(nested)
+    return None
+
+
+def _model_name_candidates(strategy: str, engine_mode: str, quantile: str) -> Tuple[str, ...]:
+    """Known model_name shapes used by training/observability writers.
+    training/observability writer 可能使用的 model_name 形狀。
+    """
+    return (
+        f"{strategy}:{engine_mode}:{quantile}",
+        f"{strategy}_{engine_mode}_{quantile}",
+        f"{strategy}:{engine_mode}",
+        f"{strategy}_{engine_mode}",
+        strategy,
+    )
+
+
+def _query_latest_brier(
+    cur,
+    *,
+    strategy: str,
+    engine_mode: str,
+    quantile: str,
+    schema_version: str,
+    since_ts: datetime,
+) -> Optional[float]:
+    """Return latest Brier score from observability.model_performance.
+    從 observability.model_performance 讀最新 Brier。
+    """
+    cur.execute(
+        """
+        SELECT brier_score
+        FROM observability.model_performance
+        WHERE model_name = ANY(%s)
+          AND (%s = '' OR model_version = %s)
+          AND ts >= %s
+          AND brier_score IS NOT NULL
+        ORDER BY ts DESC
+        LIMIT 1
+        """,
+        (
+            list(_model_name_candidates(strategy, engine_mode, quantile)),
+            schema_version,
+            schema_version,
+            since_ts,
+        ),
+    )
+    row = cur.fetchone()
+    if not row or row[0] is None:
+        return None
+    try:
+        value = float(row[0])
+    except (TypeError, ValueError):
+        return None
+    return value if value > 0 and value == value else None
+
+
+def _query_max_psi(
+    cur,
+    *,
+    strategy: str,
+    engine_mode: str,
+    since_ts: datetime,
+) -> Optional[float]:
+    """Return max PSI drift metric for this strategy/mode window.
+    回傳策略/模式窗口內最大 PSI drift。
+    """
+    cur.execute(
+        """
+        SELECT MAX(metric_value)
+        FROM observability.drift_events
+        WHERE drift_type = 'PSI'
+          AND ts >= %s
+          AND metric_value IS NOT NULL
+          AND (
+                details IS NULL
+             OR details->>'strategy' IS NULL
+             OR details->>'strategy' = %s
+          )
+          AND (
+                details IS NULL
+             OR details->>'engine_mode' IS NULL
+             OR details->>'engine_mode' = %s
+          )
+        """,
+        (since_ts, strategy, engine_mode),
+    )
+    row = cur.fetchone()
+    if not row or row[0] is None:
+        return None
+    try:
+        value = float(row[0])
+    except (TypeError, ValueError):
+        return None
+    return value if value >= 0 and value == value else None
+
+
+def _quality_gate(
+    cur,
+    *,
+    strategy: str,
+    engine_mode: str,
+    quantile: str,
+    schema_version: str,
+    acceptance_report: Any,
+    since_ts: datetime,
+    thresholds: CanaryThresholds,
+) -> tuple[Optional[str], dict]:
+    """Evaluate Brier/PSI quality gates.
+
+    Returns `(problem, metrics)`. `problem=None` means the row passes quality
+    gates. Problems are textual and caller decides HOLD vs RETIRE.
+    回 `(problem, metrics)`；problem=None 表示通過。
+    """
+    metrics: dict = {}
+    baseline = _extract_baseline_brier(acceptance_report)
+    current = _query_latest_brier(
+        cur,
+        strategy=strategy,
+        engine_mode=engine_mode,
+        quantile=quantile,
+        schema_version=schema_version,
+        since_ts=since_ts,
+    )
+    max_psi = _query_max_psi(cur, strategy=strategy, engine_mode=engine_mode, since_ts=since_ts)
+    metrics["baseline_brier"] = baseline
+    metrics["current_brier"] = current
+    metrics["max_psi"] = max_psi
+
+    if baseline is None or current is None or max_psi is None:
+        if thresholds.require_promoting_quality_metrics:
+            missing = [
+                name
+                for name, value in (
+                    ("baseline_brier", baseline),
+                    ("current_brier", current),
+                    ("max_psi", max_psi),
+                )
+                if value is None
+            ]
+            return f"quality metrics unavailable: {','.join(missing)}", metrics
+        return None, metrics
+
+    if current > baseline * thresholds.promoting_reject_brier_multiplier:
+        return (
+            f"brier {current:.4f} > reject {thresholds.promoting_reject_brier_multiplier:.2f}x baseline {baseline:.4f}",
+            metrics,
+        )
+    if current > baseline * thresholds.promoting_max_brier_multiplier:
+        return (
+            f"brier {current:.4f} > max {thresholds.promoting_max_brier_multiplier:.2f}x baseline {baseline:.4f}",
+            metrics,
+        )
+    if max_psi >= thresholds.promoting_max_psi:
+        return f"max PSI {max_psi:.4f} >= threshold {thresholds.promoting_max_psi:.4f}", metrics
+    return None, metrics
+
+
 def evaluate_canary_eligibility(
     row: dict,
     cur,
@@ -187,6 +400,8 @@ def evaluate_canary_eligibility(
     quantile = str(row["quantile"])
     current = str(row["canary_status"])
     verdict = str(row.get("verdict") or "")
+    schema_version = str(row.get("schema_version") or "")
+    acceptance_report = row.get("acceptance_report")
     train_date = row.get("train_date")
     sample_size = int(row.get("training_sample_size") or 0)
     created_at = row.get("created_at")
@@ -273,6 +488,26 @@ def evaluate_canary_eligibility(
                         f"(n={total_3d}); auto-reject"
                     )
                     return res
+            quality_problem, quality_metrics = _quality_gate(
+                cur,
+                strategy=strategy,
+                engine_mode=engine_mode,
+                quantile=quantile,
+                schema_version=schema_version,
+                acceptance_report=acceptance_report,
+                since_ts=since_3d,
+                thresholds=thresholds,
+            )
+            res.metrics.update(quality_metrics)
+            if quality_problem and (
+                quality_problem.startswith("brier")
+                and "reject" in quality_problem
+                or quality_problem.startswith("max PSI")
+            ):
+                res.decision = CanaryDecision.RETIRE
+                res.target_status = CANARY_REJECTED
+                res.reasons.append(f"{quality_problem}; auto-reject")
+                return res
 
         # Promote branch: full window thresholds met.
         if age_days < thresholds.promoting_min_age_days:
@@ -299,6 +534,21 @@ def evaluate_canary_eligibility(
                 f"agreement {agreement:.2%} < min "
                 f"{thresholds.promoting_min_agreement_pct:.0%}"
             )
+            return res
+
+        quality_problem, quality_metrics = _quality_gate(
+            cur,
+            strategy=strategy,
+            engine_mode=engine_mode,
+            quantile=quantile,
+            schema_version=schema_version,
+            acceptance_report=acceptance_report,
+            since_ts=since_full,
+            thresholds=thresholds,
+        )
+        res.metrics.update(quality_metrics)
+        if quality_problem:
+            res.reasons.append(quality_problem)
             return res
 
         res.decision = CanaryDecision.PROMOTE
@@ -366,7 +616,8 @@ def auto_promote_eligible_models(
         with conn, conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT id, strategy, engine_mode, quantile, canary_status, verdict,
+                SELECT id, strategy, engine_mode, quantile, schema_version,
+                       canary_status, verdict, acceptance_report,
                        train_date, training_sample_size, created_at
                 FROM learning.model_registry
                 WHERE canary_status IN (%s, %s)

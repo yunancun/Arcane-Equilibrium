@@ -6,8 +6,20 @@
 //! MODULE_NOTE (中): 持有已註冊的 Strategy trait 物件，將 TickContext 分派到各
 //!   on_tick()，收集 StrategyAction 結果供管線處理。
 
+use std::collections::{HashMap, HashSet};
+
+use crate::config::risk_config::CusumConfig;
+use crate::risk_cusum::{evaluate_downside_cusum, CusumEvaluation};
 use crate::strategies::{Strategy, StrategyAction};
 use crate::tick_pipeline::{StrategyInfo, TickContext};
+
+/// CUSUM alarm attached to a registered strategy.
+/// 綁定到已註冊策略的 CUSUM 告警。
+#[derive(Debug, Clone, PartialEq)]
+pub struct StrategyCusumAlarm {
+    pub strategy_name: String,
+    pub evaluation: CusumEvaluation,
+}
 
 /// Strategy orchestrator — dispatches ticks to all active strategies.
 /// 策略調度器 — 分派 tick 到所有活躍策略。
@@ -44,6 +56,71 @@ impl Orchestrator {
             }
         }
         all_intents
+    }
+
+    /// Dispatch tick while filtering strategies that have an active CUSUM alarm.
+    ///
+    /// This is the G7-04 Phase B consumer hook. It is not used by the hot
+    /// production path yet; `tick_pipeline` still calls the explicit per-strategy
+    /// loop. The method gives Phase C a tested, side-effect-free route to wire
+    /// realized-edge alarms into strategy dispatch without changing existing
+    /// behaviour while `RiskConfig.cusum.enabled=false`.
+    ///
+    /// CUSUM alarm strategy 會被跳過；目前生產 hot path 尚未調用此方法，預設
+    /// `cusum.enabled=false` 因此現有行為不變。
+    pub fn dispatch_tick_with_cusum_filter(
+        &mut self,
+        ctx: &TickContext,
+        realized_net_bps_by_strategy: &HashMap<String, Vec<f64>>,
+        cfg: &CusumConfig,
+    ) -> Vec<StrategyAction> {
+        let blocked: HashSet<String> = self
+            .strategy_cusum_alarms(realized_net_bps_by_strategy, cfg)
+            .into_iter()
+            .map(|alarm| alarm.strategy_name.to_lowercase())
+            .collect();
+        let mut all_intents = Vec::new();
+        for strategy in &mut self.strategies {
+            if !strategy.is_active() || blocked.contains(&strategy.name().to_lowercase()) {
+                continue;
+            }
+            let intents = strategy.on_tick(ctx);
+            all_intents.extend(intents);
+        }
+        all_intents
+    }
+
+    /// Evaluate G7-04 downside-CUSUM for registered active strategies.
+    ///
+    /// Missing realized-edge history is treated as no alarm. Unknown strategy
+    /// keys in the input map are ignored; only registered active strategy names
+    /// can return alarms. This keeps the hook safe for future DB/IPC snapshots.
+    /// 僅針對已註冊且 active 的策略評估；缺資料/未知策略不告警。
+    pub fn strategy_cusum_alarms(
+        &self,
+        realized_net_bps_by_strategy: &HashMap<String, Vec<f64>>,
+        cfg: &CusumConfig,
+    ) -> Vec<StrategyCusumAlarm> {
+        if !cfg.enabled {
+            return Vec::new();
+        }
+        let mut alarms = Vec::new();
+        for strategy in &self.strategies {
+            if !strategy.is_active() {
+                continue;
+            }
+            let Some(values) = realized_net_bps_by_strategy.get(strategy.name()) else {
+                continue;
+            };
+            let evaluation = evaluate_downside_cusum(values, cfg);
+            if evaluation.alarm {
+                alarms.push(StrategyCusumAlarm {
+                    strategy_name: strategy.name().to_string(),
+                    evaluation,
+                });
+            }
+        }
+        alarms
     }
 
     /// Get count of registered strategies.
@@ -115,14 +192,16 @@ mod tests {
     use crate::intent_processor::OrderIntent;
     use crate::strategies::Strategy;
 
+    #[derive(Clone)]
     struct MockStrategy {
+        name: String,
         active: bool,
         actions: Vec<StrategyAction>,
     }
 
     impl Strategy for MockStrategy {
         fn name(&self) -> &str {
-            "mock"
+            &self.name
         }
         fn is_active(&self) -> bool {
             self.active
@@ -135,10 +214,16 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_empty_orchestrator() {
-        let mut orch = Orchestrator::new();
-        let ctx = TickContext {
+    fn mock_strategy(name: &str, active: bool, actions: Vec<StrategyAction>) -> Box<dyn Strategy> {
+        Box::new(MockStrategy {
+            name: name.to_string(),
+            active,
+            actions,
+        })
+    }
+
+    fn ctx() -> TickContext<'static> {
+        TickContext {
             symbol: "BTC",
             price: 50000.0,
             timestamp_ms: 0,
@@ -151,95 +236,69 @@ mod tests {
             best_bid: None,
             best_ask: None,
             tick_size: None,
-        };
-        assert!(orch.dispatch_tick(&ctx).is_empty());
+        }
+    }
+
+    fn intent(strategy: &str) -> OrderIntent {
+        OrderIntent {
+            symbol: "BTC".into(),
+            is_long: true,
+            qty: 0.01,
+            confidence: 0.8,
+            strategy: strategy.into(),
+            order_type: "market".into(),
+            limit_price: None,
+            confluence_score: None,
+            persistence_elapsed_ms: None,
+            time_in_force: None,
+            maker_timeout_ms: None,
+        }
+    }
+
+    fn cusum_on() -> CusumConfig {
+        CusumConfig {
+            enabled: true,
+            slack_k: 0.5,
+            threshold_h: 4.0,
+            min_observations: 5,
+            target_return_bps: 0.0,
+        }
+    }
+
+    #[test]
+    fn test_empty_orchestrator() {
+        let mut orch = Orchestrator::new();
+        assert!(orch.dispatch_tick(&ctx()).is_empty());
     }
 
     #[test]
     fn test_dispatch_collects_intents() {
         let mut orch = Orchestrator::new();
-        let intent = OrderIntent {
-            symbol: "BTC".into(),
-            is_long: true,
-            qty: 0.01,
-            confidence: 0.8,
-            strategy: "mock".into(),
-            order_type: "market".into(),
-            limit_price: None,
-            confluence_score: None,
-            persistence_elapsed_ms: None,
-            time_in_force: None,
-            maker_timeout_ms: None,
-        };
-        orch.register(Box::new(MockStrategy {
-            active: true,
-            actions: vec![StrategyAction::Open(intent.clone())],
-        }));
-        let ctx = TickContext {
-            symbol: "BTC",
-            price: 50000.0,
-            timestamp_ms: 0,
-            indicators: None,
-            signals: &[],
-            h0_allowed: true,
-            funding_rate: None,
-            index_price: None,
-            open_interest: None,
-            best_bid: None,
-            best_ask: None,
-            tick_size: None,
-        };
-        assert_eq!(orch.dispatch_tick(&ctx).len(), 1);
+        let intent = intent("mock");
+        orch.register(mock_strategy(
+            "mock",
+            true,
+            vec![StrategyAction::Open(intent.clone())],
+        ));
+        assert_eq!(orch.dispatch_tick(&ctx()).len(), 1);
     }
 
     #[test]
     fn test_inactive_strategy_skipped() {
         let mut orch = Orchestrator::new();
-        let intent = OrderIntent {
-            symbol: "BTC".into(),
-            is_long: true,
-            qty: 0.01,
-            confidence: 0.8,
-            strategy: "mock".into(),
-            order_type: "market".into(),
-            limit_price: None,
-            confluence_score: None,
-            persistence_elapsed_ms: None,
-            time_in_force: None,
-            maker_timeout_ms: None,
-        };
-        orch.register(Box::new(MockStrategy {
-            active: false,
-            actions: vec![StrategyAction::Open(intent)],
-        }));
-        let ctx = TickContext {
-            symbol: "BTC",
-            price: 50000.0,
-            timestamp_ms: 0,
-            indicators: None,
-            signals: &[],
-            h0_allowed: true,
-            funding_rate: None,
-            index_price: None,
-            open_interest: None,
-            best_bid: None,
-            best_ask: None,
-            tick_size: None,
-        };
-        assert!(orch.dispatch_tick(&ctx).is_empty());
+        orch.register(mock_strategy(
+            "mock",
+            false,
+            vec![StrategyAction::Open(intent("mock"))],
+        ));
+        assert!(orch.dispatch_tick(&ctx()).is_empty());
     }
 
     #[test]
     fn test_strategy_count() {
         let mut orch = Orchestrator::new();
-        orch.register(Box::new(MockStrategy {
-            active: true,
-            actions: vec![],
-        }));
-        orch.register(Box::new(MockStrategy {
-            active: false,
-            actions: vec![],
-        }));
+        orch.register(mock_strategy("mock", true, vec![]));
+        orch.register(mock_strategy("idle", false, vec![]));
         assert_eq!(orch.strategy_count(), 2);
         assert_eq!(orch.active_strategy_names().len(), 1);
     }
@@ -247,13 +306,73 @@ mod tests {
     #[test]
     fn test_find_strategy_mut() {
         let mut orch = Orchestrator::new();
-        orch.register(Box::new(MockStrategy {
-            active: true,
-            actions: vec![],
-        }));
+        orch.register(mock_strategy("mock", true, vec![]));
         // MockStrategy.name() returns "mock"
         assert!(orch.find_strategy_mut("mock").is_some());
         assert!(orch.find_strategy_mut("MOCK").is_some()); // case-insensitive
         assert!(orch.find_strategy_mut("nonexistent").is_none());
+    }
+
+    #[test]
+    fn test_cusum_alarms_disabled_returns_empty() {
+        let mut orch = Orchestrator::new();
+        orch.register(mock_strategy("grid_trading", true, vec![]));
+        let mut returns = HashMap::new();
+        returns.insert("grid_trading".to_string(), vec![-20.0; 20]);
+        assert!(orch
+            .strategy_cusum_alarms(&returns, &CusumConfig::default())
+            .is_empty());
+    }
+
+    #[test]
+    fn test_cusum_alarms_ignore_inactive_and_unknown_strategies() {
+        let mut orch = Orchestrator::new();
+        orch.register(mock_strategy("grid_trading", false, vec![]));
+        let mut returns = HashMap::new();
+        returns.insert("grid_trading".to_string(), vec![-20.0; 20]);
+        returns.insert("unknown".to_string(), vec![-20.0; 20]);
+        assert!(orch.strategy_cusum_alarms(&returns, &cusum_on()).is_empty());
+    }
+
+    #[test]
+    fn test_cusum_alarms_for_active_negative_edge() {
+        let mut orch = Orchestrator::new();
+        orch.register(mock_strategy("grid_trading", true, vec![]));
+        let mut returns = HashMap::new();
+        returns.insert(
+            "grid_trading".to_string(),
+            vec![-2.0, -5.0, -8.0, -10.0, -12.0, -15.0, -18.0, -21.0, -24.0],
+        );
+        let alarms = orch.strategy_cusum_alarms(&returns, &cusum_on());
+        assert_eq!(alarms.len(), 1);
+        assert_eq!(alarms[0].strategy_name, "grid_trading");
+        assert!(alarms[0].evaluation.alarm);
+    }
+
+    #[test]
+    fn test_dispatch_with_cusum_filter_skips_alarm_strategy_only() {
+        let mut orch = Orchestrator::new();
+        orch.register(mock_strategy(
+            "grid_trading",
+            true,
+            vec![StrategyAction::Open(intent("grid_trading"))],
+        ));
+        orch.register(mock_strategy(
+            "ma_crossover",
+            true,
+            vec![StrategyAction::Open(intent("ma_crossover"))],
+        ));
+        let mut returns = HashMap::new();
+        returns.insert(
+            "grid_trading".to_string(),
+            vec![-2.0, -5.0, -8.0, -10.0, -12.0, -15.0, -18.0, -21.0, -24.0],
+        );
+        returns.insert("ma_crossover".to_string(), vec![3.0, 4.0, 5.0, 3.5, 4.5]);
+        let actions = orch.dispatch_tick_with_cusum_filter(&ctx(), &returns, &cusum_on());
+        assert_eq!(actions.len(), 1);
+        match &actions[0] {
+            StrategyAction::Open(intent) => assert_eq!(intent.strategy, "ma_crossover"),
+            _ => panic!("expected open intent"),
+        }
     }
 }

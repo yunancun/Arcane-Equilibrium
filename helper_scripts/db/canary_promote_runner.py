@@ -17,6 +17,10 @@ MODULE_NOTE (EN): One-shot driver around `canary_promoter.auto_promote_
     OPENCLAW_AUTO_PROMOTE_ENABLED=1 \\
       python3 helper_scripts/db/canary_promote_runner.py --apply
 
+  Phase B adds optional `--emit-sighup --sighup-pid-file <path>` after an
+  applied promoting→production transition. This is deliberately opt-in; dry-run
+  and apply without the flag never signal the engine.
+
   Output: per-row decision table + summary counts. Exit 0 always
   (failures are per-row logged, not script-fatal).
 
@@ -30,6 +34,7 @@ from __future__ import annotations
 import argparse
 import logging
 import os
+import signal
 import sys
 from collections import Counter
 from datetime import datetime, timezone
@@ -46,6 +51,26 @@ from program_code.ml_training.canary_promoter import (  # noqa: E402
     auto_promote_eligible_models,
     is_auto_promote_enabled,
 )
+
+
+def _emit_sighup(pid_file: str) -> tuple[bool, str]:
+    """Send SIGHUP to a PID read from a pid file.
+    從 pid file 讀 PID 後送 SIGHUP。
+    """
+    try:
+        with open(pid_file, "r", encoding="utf-8") as fh:
+            raw = fh.read().strip()
+        pid = int(raw)
+        if pid <= 0:
+            return False, f"invalid pid {pid!r}"
+        os.kill(pid, signal.SIGHUP)
+        return True, f"sent SIGHUP to pid={pid}"
+    except FileNotFoundError:
+        return False, f"pid file not found: {pid_file}"
+    except ProcessLookupError:
+        return False, f"process not found for pid file: {pid_file}"
+    except Exception as exc:  # noqa: BLE001
+        return False, f"SIGHUP failed: {exc}"
 
 
 def _format_table(results) -> str:
@@ -100,6 +125,16 @@ def main() -> int:
         action="store_true",
         help="Print full reasons + metrics for each row",
     )
+    parser.add_argument(
+        "--emit-sighup",
+        action="store_true",
+        help="After an applied promoting→production transition, SIGHUP the engine pid.",
+    )
+    parser.add_argument(
+        "--sighup-pid-file",
+        default=os.environ.get("OPENCLAW_ENGINE_PID_FILE", ""),
+        help="PID file used with --emit-sighup; default env OPENCLAW_ENGINE_PID_FILE.",
+    )
     args = parser.parse_args()
 
     logging.basicConfig(
@@ -148,6 +183,23 @@ def main() -> int:
                 print(f"    · {reason}")
             if r.metrics:
                 print(f"    metrics: {r.metrics}")
+
+    production_promoted = any(
+        args.apply
+        and r.decision is CanaryDecision.PROMOTE
+        and r.current_status == "promoting"
+        and r.target_status == "production"
+        for r in results
+    )
+    if production_promoted:
+        if args.emit_sighup:
+            if not args.sighup_pid_file:
+                print("SIGHUP: skipped — --sighup-pid-file/OPENCLAW_ENGINE_PID_FILE not set")
+            else:
+                ok, msg = _emit_sighup(args.sighup_pid_file)
+                print(f"SIGHUP: {'OK' if ok else 'SKIP'} — {msg}")
+        else:
+            print("SIGHUP: skipped — use --emit-sighup to reload a production promotion")
 
     return 0
 
