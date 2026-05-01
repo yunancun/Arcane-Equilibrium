@@ -565,27 +565,30 @@ class TestIntentsCounterFreeze(unittest.TestCase):
     def _make_cursor_with_modes(
         self,
         mode_data: list[tuple[float | None, int]],
-        guardian_data: list[tuple[int, int] | None] | None = None,
+        guardian_data: list[tuple[int, int, int] | None] | None = None,
     ) -> MagicMock:
         """Mock cursor rows for each mode plus slow-path Guardian/DCS probes.
 
         ``check_intents_counter_freeze`` now cross-checks
         ``trading.risk_verdicts`` and ``decision_context_snapshots`` when a
         mode has no recent intents. ``guardian_data`` provides the extra
-        ``(verdicts_30min, dcs_30min)`` rows for those slow-path modes.
+        ``(verdicts_30min, approved_verdicts_30min, dcs_30min)`` rows for
+        those slow-path modes.
 
         Mock 每個 mode 的 intent row，並在 frozen slow-path 補 Guardian/DCS
         查詢結果。``guardian_data`` 依 demo/live_demo/live 順序提供
-        ``(verdicts_30min, dcs_30min)``。
+        ``(verdicts_30min, approved_verdicts_30min, dcs_30min)``。
         """
         cur = _make_cursor()
         guardian_data = guardian_data or [None] * len(mode_data)
-        rows: list[tuple[float | None, int] | tuple[int]] = []
+        rows: list[tuple[float | None, int] | tuple[int] | tuple[int, int]] = []
         for idx, (m_since, n_30) in enumerate(mode_data):
             rows.append((m_since, n_30))
             if m_since is not None and n_30 == 0 and m_since > 15.0:
-                verdicts_30min, dcs_30min = guardian_data[idx] or (150, 0)
-                rows.append((verdicts_30min,))
+                verdicts_30min, approved_verdicts_30min, dcs_30min = (
+                    guardian_data[idx] or (150, 0, 0)
+                )
+                rows.append((verdicts_30min, approved_verdicts_30min))
                 rows.append((dcs_30min,))
         cur.fetchone.side_effect = rows
         return cur
@@ -614,7 +617,7 @@ class TestIntentsCounterFreeze(unittest.TestCase):
             (5.0, 15),    # live_demo (PASS)
             (None, 0),    # live (never produced)
         ], guardian_data=[
-            (150, 10),     # demo Guardian/DCS alive → early-warning WARN
+            (150, 0, 10),  # demo Guardian/DCS alive → early-warning WARN
             None,
             None,
         ])
@@ -623,21 +626,53 @@ class TestIntentsCounterFreeze(unittest.TestCase):
         self.assertIn("counter not incrementing 15-30min", msg)
 
     def test_demo_over_30_min_returns_fail(self) -> None:
-        """demo minutes_since > 30 + intents_30min=0 → FAIL (frozen).
-        demo > 30min + 0/30min → FAIL（counter 卡死）。"""
+        """Approved verdict with no matching intent → FAIL.
+        已批准 verdict 但 intent 未寫入 → FAIL。"""
         cur = self._make_cursor_with_modes([
             (45.0, 0),    # demo (FAIL — frozen)
             (5.0, 15),    # live_demo (PASS)
             (None, 0),    # live (never produced)
         ], guardian_data=[
-            (50, 10),      # demo DCS active but verdicts below liveness threshold
+            (3, 1, 10),    # demo has Approved verdicts but no persisted intents
             None,
             None,
         ])
         status, msg = check_intents_counter_freeze(cur)
         self.assertEqual(status, "FAIL")
-        self.assertIn("counter frozen >30min", msg)
+        self.assertIn("approved risk verdicts exist", msg)
         self.assertIn("intent persistence dropped", msg)
+
+    def test_demo_over_30_with_rejections_only_returns_warn(self) -> None:
+        """Rejected-only Guardian activity is gate behavior, not persistence loss.
+        僅 Rejected 的 Guardian 活性屬 gate 行為，不是 intent 寫入丟失。"""
+        cur = self._make_cursor_with_modes([
+            (45.0, 0),    # demo WARN — rejected-only
+            (5.0, 15),    # live_demo PASS
+            (None, 0),    # live PASS
+        ], guardian_data=[
+            (8, 0, 10),
+            None,
+            None,
+        ])
+        status, msg = check_intents_counter_freeze(cur)
+        self.assertEqual(status, "WARN")
+        self.assertIn("risk/cost gates rejecting all attempts", msg)
+
+    def test_demo_over_30_with_signal_only_returns_warn(self) -> None:
+        """Signal snapshots without Guardian attempts are pre-risk gating.
+        只有 signal snapshots、沒有 Guardian 嘗試時視為 pre-risk gate。"""
+        cur = self._make_cursor_with_modes([
+            (45.0, 0),    # demo WARN — signal observation only
+            (5.0, 15),    # live_demo PASS
+            (None, 0),    # live PASS
+        ], guardian_data=[
+            (0, 0, 120),
+            None,
+            None,
+        ])
+        status, msg = check_intents_counter_freeze(cur)
+        self.assertEqual(status, "WARN")
+        self.assertIn("signal snapshots active but no Guardian attempts", msg)
 
     def test_never_produced_does_not_fail(self) -> None:
         """All modes return NULL max(ts) (never produced) → PASS, no FAIL.
@@ -661,8 +696,8 @@ class TestIntentsCounterFreeze(unittest.TestCase):
             (20.0, 0),    # live_demo WARN
             (None, 0),    # live PASS (never produced)
         ], guardian_data=[
-            (50, 10),      # demo FAIL
-            (150, 10),     # live_demo WARN
+            (50, 1, 10),   # demo FAIL
+            (150, 0, 10),  # live_demo WARN
             None,
         ])
         status, msg = check_intents_counter_freeze(cur)
