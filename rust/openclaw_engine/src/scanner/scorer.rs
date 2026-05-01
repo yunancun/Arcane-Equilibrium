@@ -2,12 +2,12 @@
 //! 市場掃描器評分引擎 — 分策略適配評分 + 邊際反饋 + 相關性過濾。
 //!
 //! MODULE_NOTE (EN): All functions are pure (no async, no I/O, no global state).
-//!   The four fitness functions (F_ma, F_grid, F_bbrv, F_bkout) model different
+//!   The five fitness functions (F_ma, F_grid, F_bbrv, F_bkout, F_funding_arb) model different
 //!   optimal market regimes. `apply_correlation_filter` greedily selects the top-N
 //!   symbols while enforcing BTC-beta, per-strategy, and per-sector caps.
 //!   See SCANNER_TODO.md §評分框架 for the full formula derivation.
 //! MODULE_NOTE (中): 所有函數為純函數（無異步、無 I/O、無全局狀態）。
-//!   四個適配評分函數（F_ma、F_grid、F_bbrv、F_bkout）建模不同的最優市場環境。
+//!   五個適配評分函數（F_ma、F_grid、F_bbrv、F_bkout、F_funding_arb）建模不同的最優市場環境。
 //!   `apply_correlation_filter` 貪心選擇前 N 個交易對，同時執行 BTC-beta、
 //!   每策略和每板塊上限。完整公式推導見 SCANNER_TODO.md §評分框架。
 
@@ -87,8 +87,43 @@ pub struct MarketConditions {
     pub range_score: f64,
     /// One-way shock score [0, 1] / 單邊衝擊分數
     pub shock_score: f64,
+    /// Close alignment with the signed 24h move [0, 1] / 收盤與 24h 方向一致性
+    pub close_alignment: f64,
+    /// Last price position inside the 24h range [0, 1] / 最新價在 24h range 內的位置
+    pub range_position: f64,
+    /// Funding + one-way trend crowding proxy [0, 1] / 資金費率 + 單邊趨勢擁擠 proxy
+    pub crowding_score: f64,
+    /// Failed-trend / reversal risk proxy [0, 1] / 趨勢失敗 / 反轉風險 proxy
+    pub reversal_risk_score: f64,
+    /// Fine-grained trend phase label / 細粒度趨勢階段標籤
+    pub trend_phase: String,
     /// 24h turnover / 24h 成交額
     pub turnover_24h: f64,
+}
+
+fn classify_trend_phase(
+    trend_score: f64,
+    shock_score: f64,
+    range_score: f64,
+    crowding_score: f64,
+    reversal_risk_score: f64,
+    range_pct: f64,
+) -> &'static str {
+    if shock_score >= 0.55 && crowding_score >= 0.45 {
+        "crowded_shock"
+    } else if shock_score >= 0.55 {
+        "one_way_shock"
+    } else if reversal_risk_score >= 0.30 {
+        "failed_trend"
+    } else if trend_score >= 0.60 {
+        "clean_trend"
+    } else if range_score >= 0.35 {
+        "range_bound"
+    } else if range_pct < 3.0 {
+        "quiet"
+    } else {
+        "mixed"
+    }
 }
 
 /// Compute market condition intermediates from a TickerInfo.
@@ -100,7 +135,8 @@ pub fn compute_market_conditions(ticker: &TickerInfo) -> MarketConditions {
     let dir_pct = signed_dir_pct.abs();
 
     let price = ticker.last_price.max(1e-12);
-    let range_pct = ((ticker.high_price_24h - ticker.low_price_24h) / price * 100.0).max(0.0);
+    let range_abs = (ticker.high_price_24h - ticker.low_price_24h).max(0.0);
+    let range_pct = (range_abs / price * 100.0).max(0.0);
 
     let de = if range_pct > 0.0 {
         (dir_pct / range_pct).clamp(0.0, 1.0)
@@ -110,9 +146,38 @@ pub fn compute_market_conditions(ticker: &TickerInfo) -> MarketConditions {
 
     let signed_fr_bps = ticker.funding_rate * 10_000.0;
     let fr_bps = signed_fr_bps.abs();
-    let trend_score = (0.60 * de + 0.40 * (dir_pct / 6.0).clamp(0.0, 1.0)).clamp(0.0, 1.0);
-    let range_score = ((1.0 - de) * (range_pct / 12.0).clamp(0.0, 1.0)).clamp(0.0, 1.0);
-    let shock_score = (de * (dir_pct / 8.0).clamp(0.0, 1.0)).clamp(0.0, 1.0);
+    let range_position = if range_abs > 0.0 {
+        ((ticker.last_price - ticker.low_price_24h) / range_abs).clamp(0.0, 1.0)
+    } else {
+        0.5
+    };
+    let close_alignment = if signed_dir_pct > 0.0 {
+        range_position
+    } else if signed_dir_pct < 0.0 {
+        1.0 - range_position
+    } else {
+        0.5
+    };
+    let dir_norm = (dir_pct / 6.0).clamp(0.0, 1.0);
+    let range_norm = (range_pct / 12.0).clamp(0.0, 1.0);
+    let range_mid_score = (1.0 - (range_position - 0.5).abs() * 2.0).clamp(0.0, 1.0);
+    let trend_score = (0.45 * de + 0.35 * dir_norm + 0.20 * close_alignment).clamp(0.0, 1.0);
+    let range_score = ((0.70 * (1.0 - de) + 0.30 * range_mid_score) * range_norm).clamp(0.0, 1.0);
+    let shock_score =
+        (de * (dir_pct / 8.0).clamp(0.0, 1.0) * (0.5 + 0.5 * close_alignment)).clamp(0.0, 1.0);
+    let crowding_score =
+        (((fr_bps - 8.0) / 20.0).clamp(0.0, 1.0) * (0.5 + 0.5 * trend_score)).clamp(0.0, 1.0);
+    let reversal_risk_score =
+        (trend_score * (1.0 - close_alignment) * (dir_pct / 4.0).clamp(0.0, 1.0)).clamp(0.0, 1.0);
+    let trend_phase = classify_trend_phase(
+        trend_score,
+        shock_score,
+        range_score,
+        crowding_score,
+        reversal_risk_score,
+        range_pct,
+    )
+    .to_string();
 
     MarketConditions {
         signed_dir_pct,
@@ -124,6 +189,11 @@ pub fn compute_market_conditions(ticker: &TickerInfo) -> MarketConditions {
         trend_score,
         range_score,
         shock_score,
+        close_alignment,
+        range_position,
+        crowding_score,
+        reversal_risk_score,
+        trend_phase,
         turnover_24h: ticker.turnover_24h,
     }
 }
@@ -142,9 +212,8 @@ pub fn f_ma(mc: &MarketConditions) -> f64 {
     if mc.dir_pct < 0.5 {
         return 0.0;
     }
-    let base = 100.0 * mc.de * (mc.dir_pct / 10.0).clamp(0.0, 1.0);
-    let crowd = ((mc.fr_bps - 10.0) * 2.0).clamp(0.0, 30.0);
-    (base - crowd).max(0.0)
+    let base = 100.0 * (0.70 * mc.trend_score + 0.30 * (mc.dir_pct / 10.0).clamp(0.0, 1.0));
+    (base - mc.crowding_score * 20.0 - mc.reversal_risk_score * 35.0).max(0.0)
 }
 
 /// F_grid: Grid trading fitness score [0, 100].
@@ -159,9 +228,7 @@ pub fn f_grid(mc: &MarketConditions) -> f64 {
     if mc.range_pct < 3.0 || mc.dir_pct >= 8.0 {
         return 0.0;
     }
-    let usable_range = mc.range_pct.min(15.0);
-    let dir_mult = if mc.dir_pct >= 3.0 { 0.5 } else { 1.0 };
-    let base = (usable_range / 15.0) * 100.0 * (1.0 - mc.de) * dir_mult;
+    let base = (mc.range_score * 100.0 - mc.trend_score * 25.0 - mc.shock_score * 20.0).max(0.0);
     let liquidity_bonus = if mc.turnover_24h >= 100_000_000.0 {
         base * 0.15
     } else {
@@ -180,37 +247,37 @@ pub fn f_bbrv(mc: &MarketConditions) -> f64 {
     if mc.range_pct < 4.0 || mc.range_pct > 20.0 {
         return 0.0;
     }
-    let base = (1.0 - mc.de) * (mc.range_pct * 8.0).min(100.0);
+    let base = (mc.range_score * 100.0 + mc.reversal_risk_score * 20.0).max(0.0);
     // Snap-back bonus: extreme funding + low net move = likely reversal setup
     // 回彈加成：極端資金費率 + 低淨移動 = 可能的反轉設置
-    let bonus_multiplier = if mc.fr_bps > 15.0 && mc.dir_pct < 3.0 {
-        1.2
-    } else {
-        1.0
-    };
-    (base * bonus_multiplier).min(100.0)
+    let bonus_multiplier =
+        if (mc.fr_bps > 15.0 && mc.dir_pct < 3.0) || mc.reversal_risk_score > 0.25 {
+            1.2
+        } else {
+            1.0
+        };
+    (base * bonus_multiplier - mc.shock_score * 20.0)
+        .max(0.0)
+        .min(100.0)
 }
 
 /// F_bkout: BB breakout fitness score [0, 100].
 /// Approximates post-squeeze breakout using directional efficiency + range.
 /// NOTE: This is a proxy — real BB bandwidth requires kline data (future improvement).
-/// Penalizes overcrowded funding rate (> 20 bps), which signals exhaustion not breakout.
-/// Additional penalty when DE > 0.7 (already in strong trend, not a breakout candidate).
+/// Penalizes crowded / failed trends, which signal exhaustion rather than continuation.
 /// F_bkout：BB 突破適配分 [0, 100]。
 /// 使用方向效率 + range 近似擠壓後的突破。
 /// 注意：這是代理指標 — 真實 BB 帶寬需要 K 線數據（未來改進路徑）。
-/// 懲罰過度擁擠的資金費率（> 20 bps），這表示耗盡而非突破。
-/// 當 DE > 0.7 時額外懲罰（已處於強趨勢中，不是突破候選）。
+/// 懲罰過度擁擠 / 失敗趨勢，這表示耗盡而非延續。
 pub fn f_bkout(mc: &MarketConditions) -> f64 {
     if mc.range_pct < 3.0 || mc.range_pct > 20.0 || mc.dir_pct <= 2.0 {
         return 0.0;
     }
-    let base = mc.de * 100.0 * (mc.dir_pct / 8.0).clamp(0.0, 1.0);
-    // Crowded funding → exhaustion, not breakout / 擁擠資金費率 → 耗盡，非突破
-    let funding_penalty = if mc.fr_bps > 20.0 { 25.0 } else { 0.0 };
-    // Already in strong trend → not a squeeze candidate / 已在強趨勢中 → 非擠壓候選
-    let trend_penalty = if mc.de > 0.7 { 20.0 } else { 0.0 };
-    (base - funding_penalty - trend_penalty).max(0.0)
+    let base = 100.0
+        * (0.55 * mc.trend_score
+            + 0.25 * (mc.range_pct / 12.0).clamp(0.0, 1.0)
+            + 0.20 * mc.close_alignment);
+    (base - mc.crowding_score * 25.0 - mc.reversal_risk_score * 30.0).max(0.0)
 }
 
 /// F_funding_arb: funding-arb market fitness proxy [0, 100].
@@ -221,32 +288,34 @@ pub fn f_funding_arb(mc: &MarketConditions) -> f64 {
         return 0.0;
     }
     let funding_base = ((mc.fr_bps - 3.0) / 17.0).clamp(0.0, 1.0) * 100.0;
-    let trend_penalty = mc.trend_score * 45.0 + (mc.dir_pct / 8.0).clamp(0.0, 1.0) * 20.0;
-    (funding_base - trend_penalty).max(0.0)
+    (funding_base - mc.trend_score * 30.0 - mc.shock_score * 25.0 - mc.crowding_score * 15.0)
+        .max(0.0)
 }
 
 // ─── Full fitness bundle ───────────────────────────────────────────────────────
 
-/// All four strategy fitness scores for one symbol.
-/// 一個交易對的四個策略適配分。
+/// All five strategy fitness scores for one symbol.
+/// 一個交易對的五個策略適配分。
 #[derive(Debug, Clone)]
 pub struct FitnessScores {
     pub f_ma: f64,
     pub f_grid: f64,
     pub f_bbrv: f64,
     pub f_bkout: f64,
+    pub f_funding_arb: f64,
     pub raw: f64,
     pub best: StrategyCategory,
 }
 
-/// Compute all four fitness scores and identify the best strategy.
-/// 計算所有四個適配分並確定最佳策略。
+/// Compute all five fitness scores and identify the best strategy.
+/// 計算所有五個適配分並確定最佳策略。
 pub fn compute_fitness(mc: &MarketConditions) -> FitnessScores {
     let scores = [
         (f_ma(mc), StrategyCategory::MaCrossover),
         (f_grid(mc), StrategyCategory::GridTrading),
         (f_bbrv(mc), StrategyCategory::BbReversion),
         (f_bkout(mc), StrategyCategory::BbBreakout),
+        (f_funding_arb(mc), StrategyCategory::FundingArb),
     ];
     let (raw, best) =
         scores
@@ -264,6 +333,7 @@ pub fn compute_fitness(mc: &MarketConditions) -> FitnessScores {
         f_grid: scores[1].0,
         f_bbrv: scores[2].0,
         f_bkout: scores[3].0,
+        f_funding_arb: scores[4].0,
         raw,
         best,
     }
@@ -597,6 +667,7 @@ fn score_ticker_internal(
         (StrategyCategory::GridTrading, "grid_trading"),
         (StrategyCategory::BbReversion, "bb_reversion"),
         (StrategyCategory::BbBreakout, "bb_breakout"),
+        (StrategyCategory::FundingArb, "funding_arb"),
     ]
     .into_iter()
     .filter_map(|(category, key)| strategy_judgments.get(key).cloned().map(|j| (category, j)))
@@ -651,6 +722,7 @@ fn score_ticker_internal(
         f_grid: fitness.f_grid,
         f_bbrv: fitness.f_bbrv,
         f_bkout: fitness.f_bkout,
+        f_funding_arb: fitness.f_funding_arb,
         de: mc.de,
         dir_pct: mc.dir_pct,
         range_pct: mc.range_pct,
@@ -659,7 +731,12 @@ fn score_ticker_internal(
         trend_score: mc.trend_score,
         range_score: mc.range_score,
         shock_score: mc.shock_score,
+        close_alignment: mc.close_alignment,
+        range_position: mc.range_position,
+        crowding_score: mc.crowding_score,
+        reversal_risk_score: mc.reversal_risk_score,
         market_regime: classify_market_regime(&mc).to_string(),
+        trend_phase: mc.trend_phase.clone(),
         turnover_24h: mc.turnover_24h,
         edge_bonus: best_judgment.edge_bonus,
         edge_n: best_judgment.edge_n,
@@ -719,16 +796,61 @@ mod tests {
     }
 
     fn make_mc(dir_pct: f64, range_pct: f64, de: f64, fr_bps: f64) -> MarketConditions {
+        let signed_dir_pct = dir_pct;
+        let dir_pct = dir_pct.abs();
+        let signed_fr_bps = fr_bps;
+        let fr_bps = fr_bps.abs();
+        let range_position = if signed_dir_pct > 0.0 {
+            0.75
+        } else if signed_dir_pct < 0.0 {
+            0.25
+        } else {
+            0.5
+        };
+        let close_alignment = if signed_dir_pct > 0.0 {
+            range_position
+        } else if signed_dir_pct < 0.0 {
+            1.0 - range_position
+        } else {
+            0.5
+        };
+        let dir_norm = (dir_pct / 6.0).clamp(0.0, 1.0);
+        let range_norm = (range_pct / 12.0).clamp(0.0, 1.0);
+        let range_mid_score = (1.0 - (range_position - 0.5_f64).abs() * 2.0).clamp(0.0, 1.0);
+        let trend_score = (0.45 * de + 0.35 * dir_norm + 0.20 * close_alignment).clamp(0.0, 1.0);
+        let range_score =
+            ((0.70 * (1.0 - de) + 0.30 * range_mid_score) * range_norm).clamp(0.0, 1.0);
+        let shock_score =
+            (de * (dir_pct / 8.0).clamp(0.0, 1.0) * (0.5 + 0.5 * close_alignment)).clamp(0.0, 1.0);
+        let crowding_score =
+            (((fr_bps - 8.0) / 20.0).clamp(0.0, 1.0) * (0.5 + 0.5 * trend_score)).clamp(0.0, 1.0);
+        let reversal_risk_score =
+            (trend_score * (1.0 - close_alignment) * (dir_pct / 4.0).clamp(0.0, 1.0))
+                .clamp(0.0, 1.0);
+        let trend_phase = classify_trend_phase(
+            trend_score,
+            shock_score,
+            range_score,
+            crowding_score,
+            reversal_risk_score,
+            range_pct,
+        )
+        .to_string();
         MarketConditions {
-            signed_dir_pct: dir_pct,
+            signed_dir_pct,
             dir_pct,
             range_pct,
             de,
             fr_bps,
-            signed_fr_bps: fr_bps,
-            trend_score: (0.60 * de + 0.40 * (dir_pct / 6.0).clamp(0.0, 1.0)).clamp(0.0, 1.0),
-            range_score: ((1.0 - de) * (range_pct / 12.0).clamp(0.0, 1.0)).clamp(0.0, 1.0),
-            shock_score: (de * (dir_pct / 8.0).clamp(0.0, 1.0)).clamp(0.0, 1.0),
+            signed_fr_bps,
+            trend_score,
+            range_score,
+            shock_score,
+            close_alignment,
+            range_position,
+            crowding_score,
+            reversal_risk_score,
+            trend_phase,
             turnover_24h: 60_000_000.0,
         }
     }
@@ -920,7 +1042,7 @@ mod tests {
     fn test_fitness_bbrv_snapback_bonus() {
         // fr_bps > 15 AND dir_pct < 3 → 1.2 multiplier
         let mc = make_mc(1.0, 8.0, 0.1, 20.0);
-        let without = (1.0 - 0.1) * (8.0_f64 * 8.0).min(100.0);
+        let without = f_bbrv(&make_mc(1.0, 8.0, 0.1, 5.0));
         let with_bonus = f_bbrv(&mc);
         assert!(
             with_bonus > without,
@@ -936,15 +1058,17 @@ mod tests {
     }
 
     #[test]
-    fn test_fitness_bkout_penalty_high_de() {
-        // DE > 0.7 → penalty applies; compare with low-DE score
-        let mc_high_de = make_mc(5.0, 8.0, 0.8, 5.0);
-        let mc_low_de = make_mc(5.0, 8.0, 0.5, 5.0);
-        let high_de_score = f_bkout(&mc_high_de);
-        let low_de_score = f_bkout(&mc_low_de);
+    fn test_fitness_bkout_penalty_failed_trend() {
+        let mc_clean = make_mc(5.0, 8.0, 0.8, 5.0);
+        let mut mc_failed = mc_clean.clone();
+        mc_failed.close_alignment = 0.10;
+        mc_failed.reversal_risk_score = 0.50;
+        mc_failed.trend_phase = "failed_trend".to_string();
+        let clean_score = f_bkout(&mc_clean);
+        let failed_score = f_bkout(&mc_failed);
         assert!(
-            high_de_score < low_de_score,
-            "high DE should be penalized: {high_de_score} < {low_de_score}"
+            failed_score < clean_score,
+            "failed trend should be penalized: {failed_score} < {clean_score}"
         );
     }
 
@@ -1086,6 +1210,34 @@ mod tests {
         );
     }
 
+    #[test]
+    fn test_score_ticker_can_select_funding_arb_as_fifth_route() {
+        let ticker = make_ticker(
+            "FUNDUSDT",
+            100.0,
+            99.99,
+            100.01,
+            80_000_000.0,
+            102.0,
+            98.0,
+            0.0030,
+            0.0,
+        );
+        let scored = score_ticker(
+            &ticker,
+            0.2,
+            &EdgeEstimates::empty(),
+            &default_hard_filters(),
+            &EdgeRoutingConfig::default(),
+            &MarketJudgmentConfig::default(),
+        )
+        .expect("scored symbol");
+
+        assert_eq!(scored.best_strategy, StrategyCategory::FundingArb);
+        assert!(scored.f_funding_arb > scored.f_grid);
+        assert!(scored.strategy_judgments.contains_key("funding_arb"));
+    }
+
     // ── beta_proxy tests ───────────────────────────────────────────────────────
 
     #[test]
@@ -1169,6 +1321,11 @@ mod tests {
             } else {
                 0.0
             },
+            f_funding_arb: if best_strategy == StrategyCategory::FundingArb {
+                raw_score
+            } else {
+                0.0
+            },
             de: 0.2,
             dir_pct: 2.0,
             range_pct: 8.0,
@@ -1177,7 +1334,12 @@ mod tests {
             trend_score: 0.25,
             range_score: 0.5,
             shock_score: 0.05,
+            close_alignment: 0.60,
+            range_position: 0.60,
+            crowding_score: 0.0,
+            reversal_risk_score: 0.0,
             market_regime: "range_bound".to_string(),
+            trend_phase: "range_bound".to_string(),
             turnover_24h: 60_000_000.0,
             edge_bonus: final_score - raw_score,
             edge_n: 0,

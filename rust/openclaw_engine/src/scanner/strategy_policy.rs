@@ -232,6 +232,7 @@ mod tests {
             ("grid_trading", "NAORISUSDT"),
             ("bb_reversion", "NAORISUSDT"),
             ("bb_breakout", "NAORISUSDT"),
+            ("funding_arb", "NAORISUSDT"),
         ];
         let paper = risk_with_blocks(&blocks);
         let demo = risk_with_blocks(&blocks);

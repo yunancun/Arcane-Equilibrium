@@ -24,6 +24,15 @@
 - Runtime：本 checkpoint 可 git/Linux fast-forward 同步；Linux 依 operator 指令不 rebuild/restart，因此 runtime 要等下一次批准 rebuild 才載入。
 - 報告：`workspace/reports/2026-04-30--dust_residual_prevention_engineering_log.md`。
 
+## 項目狀態快照（2026-05-01）
+
+- Scanner active-symbol context：pinned / active symbols 不再只依賴 dynamic candidates；BTC/ETH 等 pinned symbols 可讀取 scanner trend / route context。
+- Scanner 五策略 context：`funding_arb` 已升級為第五個正式 scanner route，`compute_fitness()` / best-route / per-strategy judgment / strategy-policy 測試均同步五策略。
+- 趨勢預判：scanner `MarketConditions` 增加 `trend_phase`、`close_alignment`、`range_position`、`crowding_score`、`reversal_risk_score`；未新增新的 hard gate，只作為 fitness / attribution metadata。
+- Intent / IPC metadata：strategy intent details 與 `get_scanner_status` top candidates 會帶出五個 fitness 分數與細粒度 trend phase，供五種策略與審計面取用。
+- 驗證：`cargo test -p openclaw_engine --lib` = 2394 passed / 0 failed。
+- 報告：`workspace/reports/2026-05-01--scanner_five_strategy_context_fix.md`。
+
 ## 決策記憶
 
 ### 關於 M-of-N 簽名
