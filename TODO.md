@@ -8,15 +8,15 @@
 - Wave 1-3 完成表格 + Backlog 完成項：[docs/archive/2026-05-01--completed_waves_1_2_3_and_backlog.md](docs/archive/2026-05-01--completed_waves_1_2_3_and_backlog.md)
 - Pre-trim TODO snapshot（2026-04-29 前）：[docs/archive/2026-04-29--TODO-pre-trim-snapshot.md](docs/archive/2026-04-29--TODO-pre-trim-snapshot.md)
 
-**Runtime/source（2026-05-01 22:36 CEST · post-sync Linux wrapper at `d8080f9`; code-bearing source includes `25d8e54`）**：Rust engine runtime remains PID 2364863 from `daab51c` scanner deploy（no rebuild/restart for this Wave 4 pre-stage source/RFC/static work）；API PID 2047851 / watchdog alive；demo/live active，paper inactive by design；manual wrapper healthcheck SUMMARY **WARN** exit 0。
-**測試基準**：Mac Rust lib **2394/0** · Rust CUSUM targeted **17/0** · Python maker/attribution **9/0** · MLDE pytest **63/0** · G4 canary pytest **21/0** · Healthcheck targeted Python **45/0**（F7 43/0 + counterfactual [11] 2/0）· tab-ai inline JS syntax check **2 scripts**
+**Runtime/source（2026-05-01 22:51 CEST · Linux source synced to `569e06b`）**：Rust engine runtime remains PID 2364863 from `daab51c` scanner deploy（no rebuild/restart for this Wave 4 pre-stage source/static/migration-file work）；Linux source includes `be8fe37` scanner Python/MLDE surface + `569e06b` canonical GUI performance metrics；API PID 2047851 / watchdog alive；demo/live active，paper inactive by design；manual wrapper healthcheck SUMMARY **WARN** exit 0。
+**測試基準**：Mac Rust lib **2394/0** · Rust CUSUM targeted **17/0** · Python maker/attribution **9/0** · MLDE pytest **5/0**（shadow advisor/dream targeted）· G4 canary pytest **21/0** · Healthcheck targeted Python **45/0**（F7 43/0 + counterfactual [11] 2/0）· Scanner/API targeted pytest **15/0** · GUI performance metric contract **10/0** · Paper metrics **23/0** · Live endpoint actual-engine **17/0** · Phase2 route coverage standalone **43/0** · static JS syntax check **10 scripts**
 **21d demo 時鐘**：2026-04-16 22:16 → 解鎖 **2026-05-07**
 
 ---
 
 ## 此刻該做什麼（2026-05-01 · passive observation phase）
 
-**當前狀態**：Strategy Edge Models + Dust Residual Prevention deployed & proven；Scanner market judgement + five-strategy context deployed；MLDE demo autonomy active。Wave 4 pre-stage Rank 4-7 source/RFC checkpoint landed in `ec8f0f4`；`b283fda` calibrated `[22]` maker-working/rejected-only semantics；`25d8e54` landed G8-05 AI Cost ROI Monitor static UI and LG-5 constrained autonomous live RFC。
+**當前狀態**：Strategy Edge Models + Dust Residual Prevention deployed & proven；Scanner market judgement + five-strategy context deployed；MLDE demo autonomy active。Wave 4 pre-stage Rank 4-7 source/RFC checkpoint landed in `ec8f0f4`；`b283fda` calibrated `[22]` maker-working/rejected-only semantics；`25d8e54` landed G8-05 AI Cost ROI Monitor static UI and LG-5 constrained autonomous live RFC；`be8fe37` exposed Rust scanner context to Python/Scout/MLDE surfaces（V034 migration file landed but not applied to runtime DB）；`569e06b` unified Demo/Paper/Live GUI performance metric contract。
 下一個需要 implementation 的 wave 是 Wave 4（等 P0-3 ~05-15 決策後啟動）。
 目前主要工作是：觀察、時間等待、3 個時間點的決策。最新 P0 hygiene：`[27]` 21:39 wrapper false-FAIL 已由 `4abb36a` 重校準：只有 **Approved risk verdicts >0 且 0 persisted intents** 才 FAIL；signal-only / rejected-only window 轉 WARN。22:02 wrapper 中 `[27]` 是 WARN（demo 有 22 個 recent verdict，但 approved=0，全被 risk/cost gates 拒絕；Guardian alive），不是 writer wedge。`[11]` 的 864→413 是 rolling 2d replay 舊 exits 滾出，`2674e14` 已把 false-red 改為 WARN。
 
@@ -73,6 +73,7 @@
 | **G8-05** AI cost ROI 監控面板（GUI，G3-09 已備數據源） | ✅ static UI landed `25d8e54`；AI tab reads nested Layer2 cost/adaptive fields + 7d ROI panel | E1 |
 | **STRK-FUP-HEALTHCHECK-PRE-EXISTING** 5 silent-dead pipeline 修（[3]/[19]/[23]/[24]/[26]/[27]） | ✅ broader RFC landed `ec8f0f4`；implementation split remains [3]/[19]/[23]/[24]/[26] | PA + E1×3 |
 | **LEARNING-COCKPIT-NO-IPC** 8 endpoint 改 Python state_store（IPC traffic drop ≥80%） | 3d | PA + E1 + E2 |
+| **MLDE-SCANNER-CONTEXT** scanner trend/fitness → Python/Scout/MLDE/Dream surface | ✅ source landed `be8fe37`；V034 migration file landed / runtime DB apply not performed | E1 + E2 |
 | **G3-08-FUP-ANALYST-SPLIT** P2 + **HSQ-SPLIT** P2（鏡 Strategist split pattern） | 1.5d × 2 | E1 + E2 |
 | **G3-08-FUP-MAF-SPLIT-CLEANUP-A** P4 + **SINGLETON-POLLUTION** P4 | 0.75d + 1.5d | E1 + E2 |
 
@@ -84,7 +85,7 @@
 |----|-----|------|--------|
 | **PRE-LIVE-1** Slack alert 決策 framework（go/no-go + routing rules）| 0.5d + operator | 2026-05-15 ±3d |
 | **PRE-LIVE-2** HTTPS deploy（解 G-4 Cookie secure 阻塞，Tailscale cert / LE 雙 path）| 3d | live 前必完 |
-| **PRE-LIVE-3** Dashboard 強化（[33]/[38]/[40] 趨勢 + AI cost ROI + Live readiness）| 2.5d | 配合 G8-05 |
+| **PRE-LIVE-3** Dashboard 強化（[33]/[38]/[40] 趨勢 + AI cost ROI + Live readiness）| partial：canonical Demo/Paper/Live performance metric grid landed `569e06b`；remaining [33]/[38]/[40] trend charts + Live readiness checklist | 配合 G8-05 |
 | **PRE-LIVE-4** 災難恢復演練（drawdown auto-revoke + liquidation buffer + auth expire 三 scenario） | 1.5d | LG-2 RFC 後 |
 
 ### 軸線 4：P0-3 決策會準備（~05-15）
@@ -119,7 +120,7 @@
 | 9 | **PRE-LIVE-2** HTTPS deploy | PA + E1 | 3d | 解 G-4；live trade 前必完 |
 | 10 | ✅ **LG-5-RFC** | PA | done | `25d8e54` landed constrained autonomous live RFC |
 
-**節奏**：W21 D1-D3 已完成 Rank 1+2+3 + Rank 4 `[27]` 校準；`ec8f0f4` 完成 Rank 4 broader RFC + Rank 5+6+7；`b283fda` 完成 `[22]` 校準；`25d8e54` 完成 Rank 8+10。Rank 9 HTTPS deploy 需另行 runtime/deploy 風險確認；下一個安全非 deploy 項可接 P03-PREP-1 / DOC-1 / TEST-1 / PRE-LIVE-1。
+**節奏**：W21 D1-D3 已完成 Rank 1+2+3 + Rank 4 `[27]` 校準；`ec8f0f4` 完成 Rank 4 broader RFC + Rank 5+6+7；`b283fda` 完成 `[22]` 校準；`25d8e54` 完成 Rank 8+10；`be8fe37` 補 scanner context Python/Scout/MLDE surface；`569e06b` 補 PRE-LIVE-3 的 canonical performance metrics 基礎。Rank 9 HTTPS deploy 需另行 runtime/deploy 風險確認；下一個安全非 deploy 項可接 P03-PREP-1 / DOC-1 / TEST-1 / PRE-LIVE-1，或續做 PRE-LIVE-3 剩餘 trend charts + readiness checklist。
 
 ### Wave 4 依賴圖（簡化）
 

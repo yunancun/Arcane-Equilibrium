@@ -1176,3 +1176,26 @@ Operator 接續 Tier 8 sign-off 後說「繼續派」。PM 按 Tier 8 §8 推薦
 ### Boundary
 - No runtime rebuild/restart, DB write, live authorization change, risk config change, strategy parameter change, SIGHUP, or HTTPS deploy action was performed.
 - Rank 9 HTTPS deploy remains explicit-approval work.
+
+## 2026-05-01 TODO Continue — Scanner Context + GUI Metrics
+
+### Result
+- Operator asked to continue TODO.
+- `be8fe37` exposed Rust scanner context to Python surfaces:
+  - `/scanner/opportunities` now keeps legacy GUI fields while adding scanner context, strategy fitness, breakout proxy inputs, and fail-soft DB strategy judgments.
+  - ScoutWorker reads Rust scanner opportunities before falling back to the legacy Python scanner stub.
+  - V034 migration file extends `learning.mlde_edge_training_rows` with scanner trend/fitness columns; runtime DB apply was intentionally not performed in this source-only batch.
+  - MLDE shadow advisor and DreamEngine include scanner context in advisory payloads.
+- `569e06b` unified Demo/Paper/Live GUI performance metrics:
+  - Backend builds one canonical metric list with 24h/7d PnL, fees, AI cost, edge, risk, and holding-time fields.
+  - Demo/Paper/Live tabs render the shared metric list with one formatter and tooltip contract.
+
+### Verification
+- Mac targeted checks passed: py_compile for touched Python modules; scanner/API tests 15/0; GUI performance metric contract 10/0; MLDE shadow advisor/dream tests 5/0; Paper metrics 23/0; Live endpoint actual-engine tests 17/0; Phase2 route coverage standalone 43/0; static JS syntax check 10 scripts; `git diff --check`.
+- V034 was applied twice against a local temporary Postgres cluster and a sample row verified scanner fields in `learning.mlde_edge_training_rows`.
+- Linux source is synced to `569e06b`; watchdog `engine_alive=true`; wrapper at 22:51 CEST returned SUMMARY WARN exit 0 with existing observation WARNs.
+- One combined pytest invocation (`paper_metrics + live_session + phase2`) showed the known order-dependent FastAPI auth 401 on two dynamic-risk tests; rerunning `test_phase2_strategy_routes_coverage.py` standalone passed 43/0.
+
+### Boundary
+- No Rust rebuild/restart, runtime DB migration apply, live authorization change, risk config change, strategy parameter change, cron install, SIGHUP, or HTTPS deploy action was performed.
+- PRE-LIVE-3 is only partially advanced: canonical performance metrics are done; [33]/[38]/[40] trend charts and live readiness checklist remain.
