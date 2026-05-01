@@ -447,7 +447,7 @@ html, body {
 
   <!-- Performance Metrics / 性能指標 -->
   <div class="live-section-title">&#x1F4CB; 性能指標 / Performance Metrics</div>
-  <div class="oc-metrics" id="live-perf-metrics">
+  <div class="oc-metrics oc-performance-metrics" id="live-perf-metrics">
     <div style="color:var(--text-dim);font-size:12px;padding:12px">加載中...</div>
   </div>
 
@@ -1474,21 +1474,6 @@ async function closeLivePosition(symbol, ownerStrategy, frozenReason) {
 // Performance Metrics / 性能指標
 // ═══════════════════════════════════════════════════════════════
 
-function _liveMetricPct(rate) {
-  const v = parseFloat(rate);
-  return Number.isFinite(v) ? (v * 100).toFixed(1) + '%' : null;
-}
-function _liveMetricRatio(ratio) {
-  if (ratio === 'inf') return '∞';
-  const v = parseFloat(ratio);
-  return Number.isFinite(v) && v > 0 ? ocNum(v, 2) : null;
-}
-function _liveMetricPnl(metric, value) {
-  const v = parseFloat(value);
-  if (!Number.isFinite(v)) return null;
-  return metric && metric.metric_unit === 'bps' ? v.toFixed(2) + ' bps' : ocMoney(v);
-}
-
 async function loadLiveMetrics() {
   const d = await ocApi('/api/v1/live/metrics');
   if (!d || !d.data) {
@@ -1503,36 +1488,12 @@ async function loadLiveMetrics() {
     return;
   }
   const m = d.data;
-  const db = m.db_true_metrics || {};
-  const acct = db.account_metrics || {};
-  const edge = (db.edge_metrics && db.edge_metrics.total_round_trips > 0) ? db.edge_metrics : null;
-  const dbTm = (db.trade_metrics && db.trade_metrics.total_round_trips > 0) ? db.trade_metrics : null;
-  const tm = edge || dbTm || m.trade_metrics || {};
-  const dm = m.drawdown_metrics || {};
-  const hm = m.holding_period_metrics || {};
-  const sr = m.sharpe_ratio || {};
-
-  const items = [
-    ['7d 成交筆數 / Total Fills', '', acct.total_fills != null ? acct.total_fills : (tm.total_fills || m.total_fills)],
-    ['完整交易次數 / Round Trips', '一次開倉到完全平倉為一次完整交易。', tm.total_round_trips || m.total_trades],
-    ['勝率 / Win Rate', '', tm.win_rate != null ? _liveMetricPct(tm.win_rate) : null],
-    ['盈虧比 / Win/Loss Ratio', '', tm.win_loss_ratio != null ? _liveMetricRatio(tm.win_loss_ratio) : null],
-    ['7d 淨盈虧 / Net PnL', '', acct.net_pnl != null ? ocMoney(acct.net_pnl) : null],
-    ['平均淨邊際 / Avg Net Edge', '', edge && edge.avg_net_bps != null ? edge.avg_net_bps.toFixed(2) + ' bps' : null],
-    ['最大回撤 / Max Drawdown', '從峰值到最低點的最大跌幅。', dm.max_drawdown_pct != null ? dm.max_drawdown_pct.toFixed(2) + '%' : null],
-    ['夏普比率 / Sharpe Ratio', '風險調整後收益指標。>1 良好，>2 優秀。', sr.sharpe_ratio != null ? ocNum(sr.sharpe_ratio, 3) : null],
-    ['平均持倉時間 / Avg Hold Time', '持倉從開倉到平倉的平均時長。', hm.avg_holding_period_sec != null ? Math.round(hm.avg_holding_period_sec / 60) + ' min' : null],
-    ['單筆最高盈利 / Largest Win', '', tm.largest_win != null ? _liveMetricPnl(tm, tm.largest_win) : null],
-    ['單筆最高虧損 / Largest Loss', '', tm.largest_loss != null ? _liveMetricPnl(tm, tm.largest_loss) : null],
-    ['7d 手續費 / Total Fees', '', acct.total_fees != null ? ocBalance(acct.total_fees, 4) : (tm.total_fees_paid != null ? ocBalance(tm.total_fees_paid, 4) : null)],
-  ];
-
-  let html = '';
-  items.forEach(([label, tip, val]) => {
-    const tipAttr = tip ? ' title="' + ocEsc(tip) + '"' : '';
-    html += '<div class="oc-metric"><div class="oc-metric-label"' + tipAttr + '>' + label + '</div><div class="oc-metric-val" style="font-size:14px">' + (val != null ? val : '--') + '</div></div>';
-  });
-  ocSetHtml('live-perf-metrics', html);
+  const metrics = m.performance_metrics || ((m.db_true_metrics || {}).performance_metrics || []);
+  if (Array.isArray(metrics) && metrics.length) {
+    ocSetHtml('live-perf-metrics', ocRenderPerformanceMetrics(metrics));
+    return;
+  }
+  ocSetHtml('live-perf-metrics', '<div style="color:var(--text-dim);font-size:12px;padding:12px">暫無後端性能指標</div>');
 }
 
 // ═══════════════════════════════════════════════════════════════

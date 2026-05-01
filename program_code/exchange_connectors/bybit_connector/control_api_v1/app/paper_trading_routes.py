@@ -44,7 +44,7 @@ from .paper_trading_response import paper_response as _paper_response
 DEFAULT_INITIAL_BALANCE_USDT = 10_000.0
 from .shadow_decision_builder import ShadowDecisionConsumer
 from .paper_trading_metrics import compute_full_metrics
-from .trading_true_metrics import fetch_db_true_metrics
+from .trading_true_metrics import build_performance_metrics, fetch_db_true_metrics
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Singletons — re-exported from paper_trading_wiring.py (TD-03 split)
@@ -1037,13 +1037,18 @@ def get_metrics(
     # 3E-ARCH: explicit engine="paper" / 必須明確指定 paper 引擎
     rust_state = rust.get_paper_state(engine="paper") if rust.is_engine_available("paper") else None
     if rust_state is None:
+        db_metrics = fetch_db_true_metrics(
+            ["paper"],
+            edge_engine_modes=["paper"],
+            window_days=7,
+        )
         return _paper_response({
             "available": False,
             "source": "rust_engine",
-            "db_true_metrics": fetch_db_true_metrics(
-                ["paper"],
-                edge_engine_modes=["paper"],
-                window_days=7,
+            "db_true_metrics": db_metrics,
+            "performance_metrics": build_performance_metrics(
+                db_metrics,
+                total_ai_cost=_fetch_total_ai_cost_30d_safe(),
             ),
         })
 
@@ -1088,8 +1093,31 @@ def get_metrics(
     # 確保 total_fills 在頂層可用（向後兼容）
     full["total_fills"] = stats.get("total_fills", 0)
     full["total_stops"] = stats.get("total_stops", 0)
-    full["db_true_metrics"] = fetch_db_true_metrics(["paper"], edge_engine_modes=["paper"], window_days=7)
+    db_metrics = fetch_db_true_metrics(["paper"], edge_engine_modes=["paper"], window_days=7)
+    full["db_true_metrics"] = db_metrics
+    total_ai_cost = _fetch_total_ai_cost_30d_safe()
+    if total_ai_cost is not None:
+        full["total_ai_cost"] = round(total_ai_cost, 6)
+    full["performance_metrics"] = build_performance_metrics(
+        db_metrics,
+        fallback_metrics=full,
+        total_ai_cost=total_ai_cost,
+    )
     return _paper_response(full)
+
+
+def _fetch_total_ai_cost_30d_safe() -> float | None:
+    """Fetch AI cost for metrics without failing the Paper route.
+
+    讀取 AI 成本供績效指標使用；失敗時不影響 Paper route。
+    """
+    try:
+        from .paper_trading_ai_cost_routes import fetch_total_ai_cost_30d
+
+        return fetch_total_ai_cost_30d()
+    except Exception:
+        logger.debug("AI cost lookup failed for paper metrics", exc_info=True)
+        return None
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
