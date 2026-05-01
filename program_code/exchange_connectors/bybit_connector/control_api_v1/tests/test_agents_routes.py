@@ -242,6 +242,7 @@ def _make_fake_strategy_wiring(
     analyst_state: str = "running",
     executor_state: str = "running",
     strategist_eval_log: list[dict[str, Any]] | None = None,
+    strategist_last_heartbeat_ms: int | None = None,
     strategist_h1_budget_skip: int = 0,
     strategist_intel_evaluated: int = 1,
     strategist_rejected: int = 0,
@@ -276,15 +277,18 @@ def _make_fake_strategy_wiring(
     # to mimic a not-yet-injected modulator (helper falls back to default 60).
     # H-2：測試改走 ``get_scan_interval_seconds`` 公開 API；None 時不掛該方法
     # 模擬 modulator 未注入（helper 回後備 60）。
+    strategist_stats: dict[str, Any] = {
+        "role": "strategist",
+        "state": strategist_state,
+        "intel_evaluated": strategist_intel_evaluated,
+        "h1_budget_skip": strategist_h1_budget_skip,
+        "evaluations_rejected": strategist_rejected,
+        "intents_produced": strategist_produced,
+    }
+    if strategist_last_heartbeat_ms is not None:
+        strategist_stats["last_heartbeat_ms"] = strategist_last_heartbeat_ms
     strategist_attrs: dict[str, Any] = {
-        "get_stats": lambda: {
-            "role": "strategist",
-            "state": strategist_state,
-            "intel_evaluated": strategist_intel_evaluated,
-            "h1_budget_skip": strategist_h1_budget_skip,
-            "evaluations_rejected": strategist_rejected,
-            "intents_produced": strategist_produced,
-        },
+        "get_stats": lambda s=strategist_stats: dict(s),
         "get_recent_evaluations": lambda limit=20: list(strategist_eval_log or []),
     }
     if cognitive_scan_interval_s is not None:
@@ -427,6 +431,53 @@ def test_roster_happy_path_with_costs_and_counts(client: TestClient) -> None:
     assert by_role["executor"]["today_orders"] == 12
     assert by_role["strategist"]["today_decisions"] == 8
     assert by_role["guardian"]["today_decisions"] == 9
+    assert all(c["runtime_state"] == "running" for c in by_role.values())
+
+
+def test_strategist_running_with_stale_activity_is_not_runtime_offline(
+    client: TestClient,
+) -> None:
+    """Strategist singleton running + stale activity heartbeat → 觀望，非程序失聯。"""
+    stale_ms = int((time.time() - 600) * 1000)
+    fake_sw = _make_fake_strategy_wiring(
+        strategist_last_heartbeat_ms=stale_ms,
+        cognitive_scan_interval_s=60,
+    )
+    scripts = {
+        "ai_usage_log": [],
+        "trading.intents": [],
+        "trading.risk_verdicts": [],
+    }
+    with _patched_singletons(fake_sw), _pg_returns(scripts):
+        resp = client.get("/api/v1/agents/roster")
+    strategist = next(
+        c for c in resp.json()["data"]["agents"] if c["role"] == "strategist"
+    )
+    assert strategist["runtime_state"] == "running"
+    assert strategist["activity_state"] == "offline"
+    assert strategist["state"] == "watching"
+    assert "不等于程序失联" in strategist["state_reason_zh"]
+
+
+def test_guardian_tightening_explains_verdict_ratio_not_governor_tier(
+    client: TestClient,
+) -> None:
+    """Guardian tightening 是 verdict 比例提示，不等於 SM-04 Governor tier 收緊。"""
+    fake_sw = _make_fake_strategy_wiring()
+    scripts = {
+        "ai_usage_log": [],
+        "trading.intents": [],
+        "trading.risk_verdicts": [("APPROVED", 4), ("REJECTED", 3)],
+    }
+    with _patched_singletons(fake_sw), _pg_returns(scripts):
+        resp = client.get("/api/v1/agents/roster")
+    guardian = next(
+        c for c in resp.json()["data"]["agents"] if c["role"] == "guardian"
+    )
+    assert guardian["state"] == "tightening"
+    assert guardian["runtime_state"] == "running"
+    assert "RiskGovernor tier" in guardian["state_reason_zh"]
+    assert "GovernorHub 放松申请" in guardian["state_reason_zh"]
 
 
 def test_strategist_summary_zh_evaluating_format(client: TestClient) -> None:

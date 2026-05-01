@@ -195,7 +195,7 @@ const _AGENT_TOOLTIPS = {
   budget:        "每天给 AI 的思考费用上限，用完就停想 / Daily AI thinking budget",
   lease:         "Agent 的「这次允许下单」许可证 / Time-bound trading permission",
   governance:    "5 道关卡审 AI 提案 / 5-stage AI governance",
-  heartbeat:     "Agent 多久前还活着的证据，超过 5 分钟就算失联 / Last heartbeat",
+  heartbeat:     "最近活动心跳；程序是否已启动看「程序」字段 / Last activity heartbeat",
   reasoning:     "Agent 这次决策的完整思考过程 / Full reasoning trace",
   cost_edge:     "花的钱 ÷ 赚的钱，越低越好；超过 0.8 系统会建议减仓 / Cost-to-edge ratio",
 };
@@ -345,6 +345,9 @@ function renderAgentCard(agent) {
   const labelZh = ocEsc(agent.label_zh || role);
   const labelEn = ocEsc(agent.label_en || role);
   const summary = ocEsc(agent.summary_zh || "（暂无概述）");
+  const stateReason = ocEsc(agent.state_reason_zh || "");
+  const runtimeState = String(agent.runtime_state || "--");
+  const runtimeChip = ocChip("程序 " + runtimeState, runtimeState === "running" ? "good" : "bad");
   const stateBadge = agentStateBadge(role, state, agent.state_label_zh);
   const heartbeat = _heartbeatChip(agent.last_heartbeat_ts);
 
@@ -388,10 +391,18 @@ function renderAgentCard(agent) {
     + 'padding:6px 10px;border-radius:0 6px 6px 0">'
     + '<span style="color:var(--text-dim)">现在在做：</span>' + summary
     + '</div>';
+  if (stateReason) {
+    html += '<div style="font-size:11px;line-height:1.5;color:var(--text-dim);'
+      + 'background:rgba(210,153,34,0.08);border-left:2px solid var(--yellow);'
+      + 'padding:6px 10px;border-radius:0 6px 6px 0">'
+      + '<span style="color:var(--yellow)">状态依据：</span>' + stateReason
+      + '</div>';
+  }
 
   // Row 3: stats (heartbeat + decisions + cost)
   html += '<div style="display:flex;justify-content:space-between;align-items:center;'
     + 'gap:8px;font-size:11px;color:var(--text-dim);flex-wrap:wrap">';
+  html += '<div>' + runtimeChip + '</div>';
   html += '<div>' + withTip("heartbeat", "心跳") + '：' + heartbeat + '</div>';
   html += '<div>' + ocEsc(decisionLabel) + '：<strong style="color:var(--text)">'
     + ocEsc(String(decisions)) + '</strong> 笔</div>';
