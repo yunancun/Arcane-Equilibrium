@@ -11,9 +11,7 @@
 
 use crate::edge_estimates::EdgeEstimates;
 use crate::scanner::config::{EdgeRoutingConfig, MarketJudgmentConfig};
-use crate::scanner::scorer::{
-    apply_edge_bonus_for_strategy, f_funding_arb, FitnessScores, MarketConditions,
-};
+use crate::scanner::scorer::{apply_edge_bonus_for_strategy, FitnessScores, MarketConditions};
 use crate::scanner::types::StrategyRouteJudgment;
 use std::collections::BTreeMap;
 
@@ -136,13 +134,13 @@ fn funding_momentum_caution_reason(
 
 /// Return the base scanner fitness for one explicit strategy.
 /// 返回指定策略的 scanner 基礎適配分。
-fn strategy_fitness(strategy: &str, fitness: &FitnessScores, mc: &MarketConditions) -> f64 {
+fn strategy_fitness(strategy: &str, fitness: &FitnessScores, _mc: &MarketConditions) -> f64 {
     match strategy {
         "ma_crossover" => fitness.f_ma,
         "grid_trading" => fitness.f_grid,
         "bb_reversion" => fitness.f_bbrv,
         "bb_breakout" => fitness.f_bkout,
-        "funding_arb" => f_funding_arb(mc),
+        "funding_arb" => fitness.f_funding_arb,
         _ => 0.0,
     }
 }
@@ -197,8 +195,9 @@ pub(crate) fn build_strategy_judgments(
             edge.market_status = "compatible".to_string();
             if edge.route_reason == "edge_unexplored" {
                 edge.route_reason = format!(
-                    "market_compatible:regime={} trend={:.2} range={:.2}",
+                    "market_compatible:regime={} phase={} trend={:.2} range={:.2}",
                     classify_market_regime(mc),
+                    mc.trend_phase,
                     mc.trend_score,
                     mc.range_score
                 );
@@ -237,16 +236,68 @@ mod tests {
     use crate::scanner::scorer::{compute_fitness, MarketConditions};
 
     fn make_mc(dir_pct: f64, range_pct: f64, de: f64, fr_bps: f64) -> MarketConditions {
+        let signed_dir_pct = dir_pct;
+        let dir_pct = dir_pct.abs();
+        let signed_fr_bps = fr_bps;
+        let fr_bps = fr_bps.abs();
+        let range_position = if signed_dir_pct > 0.0 {
+            0.75
+        } else if signed_dir_pct < 0.0 {
+            0.25
+        } else {
+            0.5
+        };
+        let close_alignment = if signed_dir_pct > 0.0 {
+            range_position
+        } else if signed_dir_pct < 0.0 {
+            1.0 - range_position
+        } else {
+            0.5
+        };
+        let dir_norm = (dir_pct / 6.0).clamp(0.0, 1.0);
+        let range_norm = (range_pct / 12.0).clamp(0.0, 1.0);
+        let range_mid_score = (1.0 - (range_position - 0.5_f64).abs() * 2.0).clamp(0.0, 1.0);
+        let trend_score = (0.45 * de + 0.35 * dir_norm + 0.20 * close_alignment).clamp(0.0, 1.0);
+        let range_score =
+            ((0.70 * (1.0 - de) + 0.30 * range_mid_score) * range_norm).clamp(0.0, 1.0);
+        let shock_score =
+            (de * (dir_pct / 8.0).clamp(0.0, 1.0) * (0.5 + 0.5 * close_alignment)).clamp(0.0, 1.0);
+        let crowding_score =
+            (((fr_bps - 8.0) / 20.0).clamp(0.0, 1.0) * (0.5 + 0.5 * trend_score)).clamp(0.0, 1.0);
+        let reversal_risk_score =
+            (trend_score * (1.0 - close_alignment) * (dir_pct / 4.0).clamp(0.0, 1.0))
+                .clamp(0.0, 1.0);
+        let trend_phase = if shock_score >= 0.55 && crowding_score >= 0.45 {
+            "crowded_shock"
+        } else if shock_score >= 0.55 {
+            "one_way_shock"
+        } else if reversal_risk_score >= 0.30 {
+            "failed_trend"
+        } else if trend_score >= 0.60 {
+            "clean_trend"
+        } else if range_score >= 0.35 {
+            "range_bound"
+        } else if range_pct < 3.0 {
+            "quiet"
+        } else {
+            "mixed"
+        }
+        .to_string();
         MarketConditions {
-            signed_dir_pct: dir_pct,
+            signed_dir_pct,
             dir_pct,
             range_pct,
             de,
             fr_bps,
-            signed_fr_bps: fr_bps,
-            trend_score: (0.60 * de + 0.40 * (dir_pct / 6.0).clamp(0.0, 1.0)).clamp(0.0, 1.0),
-            range_score: ((1.0 - de) * (range_pct / 12.0).clamp(0.0, 1.0)).clamp(0.0, 1.0),
-            shock_score: (de * (dir_pct / 8.0).clamp(0.0, 1.0)).clamp(0.0, 1.0),
+            signed_fr_bps,
+            trend_score,
+            range_score,
+            shock_score,
+            close_alignment,
+            range_position,
+            crowding_score,
+            reversal_risk_score,
+            trend_phase,
             turnover_24h: 60_000_000.0,
         }
     }

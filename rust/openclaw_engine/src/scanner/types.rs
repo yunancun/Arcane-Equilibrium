@@ -29,6 +29,9 @@ pub enum StrategyCategory {
     /// BB breakout — favors post-squeeze directional expansion.
     /// BB 突破 — 偏好擠壓後方向性膨脹行情。
     BbBreakout,
+    /// Funding arbitrage — favors meaningful funding with controlled price drift.
+    /// 資金費率套利 — 偏好有意義資金費率且價格漂移受控的行情。
+    FundingArb,
 }
 
 impl StrategyCategory {
@@ -40,6 +43,7 @@ impl StrategyCategory {
             StrategyCategory::GridTrading => "grid_trading",
             StrategyCategory::BbReversion => "bb_reversion",
             StrategyCategory::BbBreakout => "bb_breakout",
+            StrategyCategory::FundingArb => "funding_arb",
         }
     }
 }
@@ -107,6 +111,8 @@ pub struct ScoredSymbol {
     pub f_bbrv: f64,
     /// BB breakout fitness [0, 100] / BB 突破適配分
     pub f_bkout: f64,
+    /// Funding arbitrage fitness [0, 100] / funding arb 適配分
+    pub f_funding_arb: f64,
 
     // Market condition intermediates / 市場條件中間值
     /// Directional efficiency = dir_pct / range_pct ∈ [0, 1] / 方向效率
@@ -129,9 +135,24 @@ pub struct ScoredSymbol {
     /// One-way shock score [0, 1].
     /// 單邊衝擊分數。
     pub shock_score: f64,
+    /// Close alignment with the 24h move direction [0, 1].
+    /// 收盤位置與 24h 方向的一致性。
+    pub close_alignment: f64,
+    /// Last price position inside the 24h range [0=low, 1=high].
+    /// 最新價在 24h range 內的位置。
+    pub range_position: f64,
+    /// Funding/one-way crowding proxy [0, 1].
+    /// 資金費率 / 單邊擁擠 proxy。
+    pub crowding_score: f64,
+    /// Failed-trend / reversal risk proxy [0, 1].
+    /// 趨勢失敗 / 反轉風險 proxy。
+    pub reversal_risk_score: f64,
     /// Coarse scanner regime label.
     /// scanner 粗粒度行情 regime。
     pub market_regime: String,
+    /// More detailed trend phase label.
+    /// 更細粒度的趨勢階段標籤。
+    pub trend_phase: String,
     /// 24h turnover in USDT / 24h 成交額（USDT）
     pub turnover_24h: f64,
 
@@ -236,6 +257,14 @@ mod tests {
         assert_eq!(
             StrategyCategory::BbBreakout.as_estimate_key(),
             "bb_breakout"
+        );
+    }
+
+    #[test]
+    fn test_strategy_estimate_key_funding() {
+        assert_eq!(
+            StrategyCategory::FundingArb.as_estimate_key(),
+            "funding_arb"
         );
     }
 
