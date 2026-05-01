@@ -1160,3 +1160,19 @@ Operator 接續 Tier 8 sign-off 後說「繼續派」。PM 按 Tier 8 §8 推薦
 - After push and Linux source fast-forward to `21ecbf6`, wrapper returned SUMMARY FAIL on `[22] trading_pipeline_silent_gap`.
 - Read-only split showed engine/watchdog healthy, recent live_demo orders were `Working` PostOnly limits, and recent demo risk was rejected-only; no rebuild/restart was performed.
 - PM interpretation: treat `[22]` as next P0 hygiene candidate to distinguish unfilled maker working orders from a true writer/order-push wedge.
+
+## 2026-05-01 TODO Next Batch — [22] + G8-05 + LG-5
+
+### Result
+- Operator asked to continue the next TODO batch.
+- `[22] trading_pipeline_silent_gap` was calibrated in `b283fda`: unexplained DCS/fill cliffs still FAIL, but recent `Working` PostOnly maker orders or rejected-only risk/cost gates now downgrade to WARN with explicit denominators.
+- G8-05 landed in `25d8e54`: the AI tab now has an AI Cost ROI Monitor and correctly reads nested Layer2 `/cost` and `/cost/adaptive` fields, including `roi_7d`.
+- LG-5 constrained autonomous live RFC landed in `25d8e54`.
+
+### Verification
+- Mac targeted: py_compile for the touched healthcheck files; F7 tests 43/0; tab-ai inline JS syntax check 2 scripts; `git diff --check`.
+- Linux source fast-forwarded to `b283fda`; F7 tests 43/0; wrapper returned SUMMARY WARN exit 0 with `[22]` WARN and `working_maker_orders_1h=3`.
+
+### Boundary
+- No runtime rebuild/restart, DB write, live authorization change, risk config change, strategy parameter change, SIGHUP, or HTTPS deploy action was performed.
+- Rank 9 HTTPS deploy remains explicit-approval work.
