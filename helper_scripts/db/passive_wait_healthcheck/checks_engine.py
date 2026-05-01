@@ -450,7 +450,12 @@ def check_trading_pipeline_silent_gap(cur) -> tuple[str, str]:
 
     Three-state verdict:
       * FAIL: DCS rows_1h > 100 AND fills minutes_stale > 60
+              AND no maker-working / rejected-only explanation exists
               (strategist still cooking but fill flow dead >1h)
+      * WARN: same cliff, but recent Working PostOnly orders exist
+              (maker no-fill, not writer/order-push wedge)
+      * WARN: same cliff, but recent risk verdicts are rejected-only
+              (risk/cost gate suppression, not writer/order-push wedge)
       * WARN: DCS rows_1h > 100 AND fills minutes_stale 30-60 AND fills rows_1h = 0
               (intermediate cliff: DCS active, fills cliff but <60min)
       * PASS: fills minutes_stale < 30 OR DCS rows_1h <= 100
@@ -464,8 +469,9 @@ def check_trading_pipeline_silent_gap(cur) -> tuple[str, str]:
     SQL：5 層 UNION ALL 對（fills, intents, orders, risk_verdicts,
     decision_context_snapshots）計算 minutes_since_last + rows_in_last_1h，
     全部過濾 engine_mode IN ('demo','live','live_demo')。
-    三態：FAIL（DCS>100 + fills_stale>60）/ WARN（DCS>100 + fills_stale 30-60
-    + fills_1h=0）/ PASS（fills_stale<30 OR DCS<=100）。
+    三態：FAIL（DCS>100 + fills_stale>60 且無 maker-working / rejected-only
+    解釋）/ WARN（maker 掛單未成交或 risk/cost gate 全拒）/ WARN
+    （DCS>100 + fills_stale 30-60 + fills_1h=0）/ PASS。
     """
     # Defensive rollback to keep cursor clean per the in-pkg convention.
     # 防禦式 rollback：保持 cursor 乾淨，與套件其他 check 一致。
@@ -560,6 +566,28 @@ def check_trading_pipeline_silent_gap(cur) -> tuple[str, str]:
                 + f" — engine restarted {engine_age_min:.1f}m ago; "
                 + "1h cliff window still includes pre-restart data, baseline pending",
             )
+        context, context_msg = _query_trading_pipeline_gap_context(cur)
+        if context_msg:
+            base_msg += f" | {context_msg}"
+        if context.get("working_maker_orders_1h", 0) > 0:
+            return (
+                "WARN",
+                base_msg
+                + " — strategist active (DCS>100/h) and fills cliff>60min, "
+                + "but recent Working PostOnly limit orders indicate maker no-fill "
+                + "rather than writer/order-push wedge",
+            )
+        if (
+            context.get("risk_verdicts_30m", 0) > 0
+            and context.get("approved_risk_verdicts_30m", 0) == 0
+        ):
+            return (
+                "WARN",
+                base_msg
+                + " — strategist active (DCS>100/h) and fills cliff>60min, "
+                + "but recent risk/cost gates rejected all attempts; no approved "
+                + "downstream flow expected",
+            )
         return (
             "FAIL",
             base_msg
@@ -574,6 +602,73 @@ def check_trading_pipeline_silent_gap(cur) -> tuple[str, str]:
             + "early-warning of pipeline wedge",
         )
     return ("PASS", base_msg)
+
+
+def _query_trading_pipeline_gap_context(cur) -> tuple[dict[str, int], str]:
+    """Return context that separates writer wedge from expected no-fill states.
+
+    Kept best-effort and fail-soft: [22] must not hide a true wedge merely
+    because this explanatory query breaks on schema drift.
+    """
+    sql = (
+        "WITH recent_orders AS ( "
+        "  SELECT order_type, time_in_force, status "
+        "  FROM trading.orders "
+        "  WHERE engine_mode IN ('demo', 'live', 'live_demo') "
+        "    AND ts > now() - interval '1 hour' "
+        "), recent_risk AS ( "
+        "  SELECT verdict "
+        "  FROM trading.risk_verdicts "
+        "  WHERE engine_mode IN ('demo', 'live', 'live_demo') "
+        "    AND ts > now() - interval '30 minutes' "
+        ") "
+        "SELECT "
+        "  (SELECT count(*) FROM recent_orders) AS orders_1h, "
+        "  (SELECT count(*) FROM recent_orders "
+        "    WHERE lower(coalesce(status, '')) IN "
+        "      ('working', 'new', 'created', 'pending', 'partiallyfilled', 'partially_filled')"
+        "  ) AS working_orders_1h, "
+        "  (SELECT count(*) FROM recent_orders "
+        "    WHERE lower(coalesce(status, '')) IN "
+        "      ('working', 'new', 'created', 'pending', 'partiallyfilled', 'partially_filled') "
+        "      AND lower(coalesce(order_type, '')) = 'limit' "
+        "      AND lower(coalesce(time_in_force, '')) = 'postonly' "
+        "  ) AS working_maker_orders_1h, "
+        "  (SELECT count(*) FROM recent_risk) AS risk_verdicts_30m, "
+        "  (SELECT count(*) FROM recent_risk "
+        "    WHERE lower(coalesce(verdict, '')) = 'approved' "
+        "  ) AS approved_risk_verdicts_30m, "
+        "  (SELECT count(*) FROM recent_risk "
+        "    WHERE lower(coalesce(verdict, '')) = 'rejected' "
+        "  ) AS rejected_risk_verdicts_30m"
+    )
+    keys = (
+        "orders_1h",
+        "working_orders_1h",
+        "working_maker_orders_1h",
+        "risk_verdicts_30m",
+        "approved_risk_verdicts_30m",
+        "rejected_risk_verdicts_30m",
+    )
+    empty = {key: 0 for key in keys}
+    try:
+        cur.execute(sql)
+        row = cur.fetchone()
+        if not row:
+            return empty, "gap_context: unavailable"
+        context = {key: int(row[idx] or 0) for idx, key in enumerate(keys)}
+    except Exception as exc:  # noqa: BLE001
+        return empty, f"gap_context: unavailable ({type(exc).__name__})"
+    msg = (
+        "gap_context: "
+        f"orders_1h={context['orders_1h']}, "
+        f"working_orders_1h={context['working_orders_1h']}, "
+        f"working_maker_orders_1h={context['working_maker_orders_1h']}, "
+        f"risk_30m={context['risk_verdicts_30m']}, "
+        f"approved_30m={context['approved_risk_verdicts_30m']}, "
+        f"rejected_30m={context['rejected_risk_verdicts_30m']}"
+    )
+    return context, msg
 
 
 def check_orders_fills_consistency(cur) -> tuple[str, str]:

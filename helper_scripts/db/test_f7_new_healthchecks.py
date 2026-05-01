@@ -8,9 +8,9 @@ silent-regression sentinels added 2026-04-26. Mirrors
 sys.path.insert + ``MagicMock`` cursor) so it runs without pytest infra
 on Mac dev / Linux runtime / CI without a Postgres instance.
 
-Coverage matrix (39 tests across 8 checks; [23] +1 F7-FUP-23 SQL contract):
+Coverage matrix (43 tests across 8 checks; [23] +1 F7-FUP-23 SQL contract):
 
-    [22] trading_pipeline_silent_gap          (5 tests) — DCS cliff vs fills cliff
+    [22] trading_pipeline_silent_gap          (7 tests) — DCS cliff vs fills cliff
     [23] orders_fills_consistency             (6 tests) — orders writer drop +
                                                           F7-FUP-23 unattributed audit exclude
     [24] signals_writer_freshness             (5 tests) — 4/19 silent outage fingerprint
@@ -34,8 +34,8 @@ MODULE_NOTE (中): F7 [22]-[29] 8 個 silent-regression 哨兵
 sys.path.insert + MagicMock cursor）；無 pytest infra / 無 Postgres
 也能跑。
 
-Coverage matrix（合 39 tests / 8 check；[23] +1 F7-FUP-23 SQL contract）：
-    [22] trading_pipeline_silent_gap          5 tests — DCS cliff vs fills cliff
+Coverage matrix（合 43 tests / 8 check；[23] +1 F7-FUP-23 SQL contract）：
+    [22] trading_pipeline_silent_gap          7 tests — DCS cliff vs fills cliff
     [23] orders_fills_consistency             6 tests — orders writer 漏寫 +
                                                        F7-FUP-23 unattributed audit 排除
     [24] signals_writer_freshness             5 tests — 4/19 silent outage 指紋
@@ -137,6 +137,7 @@ class TestTradingPipelineSilentGap(unittest.TestCase):
         risk_1h: int,
         dcs_stale: float | None,
         dcs_1h: int,
+        context_row: tuple[int, int, int, int, int, int] | None = None,
     ) -> MagicMock:
         """Mock cursor returning the 5-layer UNION ALL row tuples.
         Mock cursor 回 5 層 UNION ALL row tuples。"""
@@ -148,6 +149,7 @@ class TestTradingPipelineSilentGap(unittest.TestCase):
             ("risk_verdicts", risk_stale, risk_1h),
             ("decision_context_snapshots", dcs_stale, dcs_1h),
         ]
+        cur.fetchone.return_value = context_row or (0, 0, 0, 0, 0, 0)
         return cur
 
     def test_dcs_active_fills_cliff_returns_fail(self) -> None:
@@ -163,6 +165,38 @@ class TestTradingPipelineSilentGap(unittest.TestCase):
         status, msg = check_trading_pipeline_silent_gap(cur)
         self.assertEqual(status, "FAIL")
         self.assertIn("strategist active (DCS>100/h) but fills cliff>60min", msg)
+
+    def test_dcs_active_fills_cliff_working_postonly_returns_warn(self) -> None:
+        """DCS/fill cliff + Working PostOnly orders → WARN, not FAIL.
+        DCS/fill cliff 但有 maker working 掛單 → WARN，不是 writer wedge。"""
+        cur = self._make_cursor_with_layers(
+            fills_stale=120.0, fills_1h=0,
+            intents_stale=5.0, intents_1h=3,
+            orders_stale=5.0, orders_1h=3,
+            risk_stale=5.0, risk_1h=6,
+            dcs_stale=2.0, dcs_1h=200,
+            context_row=(3, 3, 3, 6, 1, 5),
+        )
+        status, msg = check_trading_pipeline_silent_gap(cur)
+        self.assertEqual(status, "WARN")
+        self.assertIn("working_maker_orders_1h=3", msg)
+        self.assertIn("maker no-fill", msg)
+
+    def test_dcs_active_fills_cliff_rejected_only_risk_returns_warn(self) -> None:
+        """DCS/fill cliff + rejected-only recent risk → WARN, not FAIL.
+        DCS/fill cliff 但 risk/cost gate 全拒 → WARN。"""
+        cur = self._make_cursor_with_layers(
+            fills_stale=120.0, fills_1h=0,
+            intents_stale=120.0, intents_1h=0,
+            orders_stale=120.0, orders_1h=0,
+            risk_stale=5.0, risk_1h=20,
+            dcs_stale=2.0, dcs_1h=200,
+            context_row=(0, 0, 0, 20, 0, 20),
+        )
+        status, msg = check_trading_pipeline_silent_gap(cur)
+        self.assertEqual(status, "WARN")
+        self.assertIn("approved_30m=0", msg)
+        self.assertIn("rejected all attempts", msg)
 
     def test_dcs_active_fills_30_to_60_returns_warn(self) -> None:
         """DCS > 100 AND fills 30-60 min stale + 1h=0 → WARN (early warning).
