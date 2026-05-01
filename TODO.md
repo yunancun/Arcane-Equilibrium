@@ -8,7 +8,7 @@
 - Wave 1-3 完成表格 + Backlog 完成項：[docs/archive/2026-05-01--completed_waves_1_2_3_and_backlog.md](docs/archive/2026-05-01--completed_waves_1_2_3_and_backlog.md)
 - Pre-trim TODO snapshot（2026-04-29 前）：[docs/archive/2026-04-29--TODO-pre-trim-snapshot.md](docs/archive/2026-04-29--TODO-pre-trim-snapshot.md)
 
-**Runtime/source（2026-05-01 22:51 CEST · Linux source previously synced to `daca52f`）**：Rust engine runtime remains PID 2364863 from `daab51c` scanner deploy（no rebuild/restart for Wave 4 pre-stage source/static/migration-file work）；Mac source now includes PRE-LIVE-3 [33]/[38]/[40] trend API + Live readiness UI in this checkpoint，runtime load still requires an explicit API reload/deploy step；API PID 2047851 / watchdog alive；demo/live active，paper inactive by design；manual wrapper healthcheck SUMMARY **WARN** exit 0。
+**Runtime/source（2026-05-01 23:17 CEST · Linux redeployed to `eaf0c7e`）**：`restart_all.sh --rebuild --keep-auth` completed on `trade-core` after ff-only pull；Rust engine PID **2455097** + API uvicorn PID **2455171** + engine_watchdog PID **3450754** + openclaw-gateway PID **3973441** alive。watchdog `engine_alive=true`，paper/demo/live snapshots fresh；API `/api/v1/strategy/prelive/edge-gates` returns 401 unauthenticated rather than 404（route loaded）。manual wrapper healthcheck SUMMARY **WARN** exit 0；no DB migration apply / strategy-risk param change / live auth mutation performed，`--keep-auth` preserved existing authorization.
 **測試基準**：Mac Rust lib **2394/0** · Rust CUSUM targeted **17/0** · Python maker/attribution **9/0** · MLDE pytest **5/0**（shadow advisor/dream targeted）· G4 canary pytest **21/0** · Healthcheck targeted Python **45/0**（F7 43/0 + counterfactual [11] 2/0）· Scanner/API targeted pytest **15/0** · GUI performance metric contract **10/0** · Paper metrics **23/0** · Live endpoint actual-engine **17/0** · PRE-LIVE-3 edge gate trend tests **5/0** · Phase2 route coverage standalone **43/0** · static JS syntax check **10 scripts**
 **21d demo 時鐘**：2026-04-16 22:16 → 解鎖 **2026-05-07**
 
@@ -85,7 +85,7 @@
 |----|-----|------|--------|
 | **PRE-LIVE-1** Slack alert 決策 framework（go/no-go + routing rules）| 0.5d + operator | 2026-05-15 ±3d |
 | **PRE-LIVE-2** HTTPS deploy（解 G-4 Cookie secure 阻塞，Tailscale cert / LE 雙 path）| 3d | live 前必完 |
-| **PRE-LIVE-3** Dashboard 強化（[33]/[38]/[40] 趨勢 + AI cost ROI + Live readiness）| ✅ complete：G8-05 AI cost ROI `25d8e54`；canonical Demo/Paper/Live performance grid `569e06b`；current checkpoint adds `/api/v1/strategy/prelive/edge-gates` + Live [33]/[38]/[40] trend cards + readiness checklist（source-only until API reload/deploy） | 配合 G8-05 |
+| **PRE-LIVE-3** Dashboard 強化（[33]/[38]/[40] 趨勢 + AI cost ROI + Live readiness）| ✅ complete + redeployed：G8-05 AI cost ROI `25d8e54`；canonical Demo/Paper/Live performance grid `569e06b`；`eaf0c7e` adds `/api/v1/strategy/prelive/edge-gates` + Live [33]/[38]/[40] trend cards + readiness checklist，loaded on runtime 2026-05-01 23:17 CEST | 配合 G8-05 |
 | **PRE-LIVE-4** 災難恢復演練（drawdown auto-revoke + liquidation buffer + auth expire 三 scenario） | 1.5d | LG-2 RFC 後 |
 
 ### 軸線 4：P0-3 決策會準備（~05-15）
