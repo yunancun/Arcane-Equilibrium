@@ -27,16 +27,18 @@ def check_counterfactual_clean_window_growth() -> tuple[str, str]:
     breakdown, snapshots today's summary to `audit/daily/YYYYMMDD.json`, and
     returns PASS (Phase 3 entry criteria met: ≥200 rows + {grid_trading,
     ma_crossover} each cf_fired ≥50 + orphan_frozen clean rows ≥20) / WARN
-    (on-track with ETA) / FAIL (JSON stale >48h or n_rows regressed). Fail-soft
-    on missing JSON / missing daily dir — WARN, not crash.
+    (on-track with ETA, including expected rolling-window shrink) / FAIL
+    (JSON stale >48h or non-rolling n_rows regressed). Fail-soft on missing
+    JSON / missing daily dir — WARN, not crash.
 
     MODULE_NOTE (中): Phase 4 cron 側健檢，被動等待 post-P013-clean bucket 累積
     ≥200 rows（FM bootstrap-CI 門檻）的 TODO（EDGE-DIAG-1 Phase 3 2026-04-24
     延後）。讀最新 `counterfactual_exit_replay_latest.json`，取
     `by_window['post-P013-clean']` 的 n_rows / cf_fired / 策略分佈；快照當日
     到 `audit/daily/YYYYMMDD.json`；三態返回 PASS（Phase 3 入場條件達）/
-    WARN（累積中，附 ETA）/ FAIL（JSON >48h 未更新或 n_rows 倒退）。JSON
-    / daily 目錄缺失 fail-soft 為 WARN，不 crash。
+    WARN（累積中，附 ETA；含 rolling window 舊資料滾出造成的合理下降）/
+    FAIL（JSON >48h 未更新或非 rolling replay 的 n_rows 倒退）。JSON /
+    daily 目錄缺失 fail-soft 為 WARN，不 crash。
     """
     data_dir = Path(os.environ.get("OPENCLAW_DATA_DIR", "/tmp/openclaw"))
     audit_dir = data_dir / "audit"
@@ -54,7 +56,8 @@ def check_counterfactual_clean_window_growth() -> tuple[str, str]:
         return ("FAIL", f"counterfactual JSON age {age_hours:.1f}h > 48h — daily cron dead?")
 
     try:
-        payload = json.load(latest.open())
+        with latest.open() as f:
+            payload = json.load(f)
     except Exception as e:
         return ("WARN", f"counterfactual JSON parse error: {e}")
 
@@ -100,6 +103,7 @@ def check_counterfactual_clean_window_growth() -> tuple[str, str]:
             "utc_date": today_key,
             "recorded_at": datetime.now(tz=timezone.utc).isoformat(timespec="seconds"),
             "source_json_mtime": mtime.isoformat(timespec="seconds"),
+            "source_days": payload.get("days"),
             "n_rows": n_rows,
             "total_cf_fired": total_cf_fired,
             "per_strategy_rows": per_strategy_rows,
@@ -150,8 +154,10 @@ def check_counterfactual_clean_window_growth() -> tuple[str, str]:
                 # Use oldest + newest-historical as two anchors.
                 # 用最舊 + 最新歷史點作兩錨點。
                 try:
-                    oldest_data = json.load(historical[0].open())
-                    newest_data = json.load(historical[-1].open())
+                    with historical[0].open() as f:
+                        oldest_data = json.load(f)
+                    with historical[-1].open() as f:
+                        newest_data = json.load(f)
                     prev_rows = int(newest_data.get("n_rows") or 0)
                     if historical[0].stem != historical[-1].stem:
                         d0 = datetime.strptime(historical[0].stem, "%Y%m%d")
@@ -166,16 +172,35 @@ def check_counterfactual_clean_window_growth() -> tuple[str, str]:
     except Exception:
         pass
 
-    # Regression check: if we have a previous snapshot and today's n_rows decreased → FAIL.
-    # 倒退檢查：若有前次 snapshot 且今日 n_rows 下降 → FAIL（資料清除 / writer regression）。
+    # Regression check: a cumulative replay must not shrink, but the production
+    # daily cron intentionally runs a rolling --days window. In that mode old
+    # exits aging out are expected; keep the check yellow unless freshness or
+    # entry criteria fail independently.
+    # 倒退檢查：累積 replay 不應下降，但 production daily cron 刻意用 rolling
+    # --days 視窗。此模式下舊 exits 滾出屬預期；除非 freshness 或入場條件另行
+    # 失敗，僅維持黃燈。
+    replay_days = payload.get("days")
+    is_rolling_replay = False
+    if replay_days is not None:
+        try:
+            is_rolling_replay = float(replay_days) > 0
+        except (TypeError, ValueError):
+            is_rolling_replay = False
+    regression_note = ""
     if prev_rows is not None and n_rows < prev_rows:
-        return ("FAIL",
-                base_msg + f" — n_rows regressed from {prev_rows} (prior snapshot) "
-                "— data purge or writer regression suspected")
+        if is_rolling_replay:
+            regression_note = (
+                f"; rolling {replay_days}d window shrank from {prev_rows} "
+                f"to {n_rows} as old exits aged out"
+            )
+        else:
+            return ("FAIL",
+                    base_msg + f" — n_rows regressed from {prev_rows} (prior snapshot) "
+                    "— data purge or writer regression suspected")
 
     if n_rows == 0:
         return ("WARN",
-                base_msg + f" — 0 rows yet; rate={rate_source}; "
+                base_msg + regression_note + f" — 0 rows yet; rate={rate_source}; "
                 f"ETA ~{int(200 / max(rate_per_day, 1e-6))}d to 200")
 
     # On-track WARN with ETA to 200-row threshold.
@@ -184,5 +209,5 @@ def check_counterfactual_clean_window_growth() -> tuple[str, str]:
     pct = 100.0 * n_rows / 200.0
     eta_days = int(remaining / max(rate_per_day, 1e-6)) if remaining > 0 else 0
     return ("WARN",
-            base_msg + f" — {n_rows}/200 ({pct:.0f}%), rate={rate_source}, "
+            base_msg + regression_note + f" — {n_rows}/200 ({pct:.0f}%), rate={rate_source}, "
             f"ETA ~{eta_days}d at current rate")
