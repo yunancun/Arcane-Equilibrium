@@ -496,15 +496,15 @@ fn default_funding_max_trend_score() -> f64 {
 }
 
 fn default_immature_negative_min_trades() -> u32 {
-    10
+    15
 }
 
 fn default_immature_negative_bps_threshold() -> f64 {
-    0.0
+    -5.0
 }
 
 fn default_immature_negative_score_cap() -> f64 {
-    20.0
+    35.0
 }
 
 /// Strategy-specific scanner market judgement. This is deliberately separate
@@ -563,24 +563,26 @@ pub struct MarketJudgmentConfig {
     /// BB 突破所需最低 24h 淨移動。
     #[serde(default = "default_breakout_min_dir_pct")]
     pub breakout_min_dir_pct: f64,
-    /// Funding arb is blocked when price trend is too directional.
-    /// 價格趨勢過強時阻擋 funding arb 新開倉。
+    /// Funding arb gets a soft caution when price trend is too directional.
+    /// This lowers route score but does not hard-block demo/live_demo entries.
+    /// 價格趨勢過強時對 funding arb 加軟性警示；只降低路由分數，不硬阻擋
+    /// demo/live_demo 新開倉。
     #[serde(default = "default_funding_max_dir_pct")]
     pub funding_max_dir_pct: f64,
-    /// Funding arb trend-score cap.
-    /// funding arb trend_score 上限。
+    /// Funding arb trend-score caution threshold.
+    /// funding arb trend_score 軟警示門檻。
     #[serde(default = "default_funding_max_trend_score")]
     pub funding_max_trend_score: f64,
-    /// Low-sample negative edge quarantine threshold.
-    /// 低樣本負 edge 隔離所需最小樣本數。
+    /// Low-sample negative edge watch threshold.
+    /// 低樣本負 edge 觀察降分所需最小樣本數。
     #[serde(default = "default_immature_negative_min_trades")]
     pub immature_negative_min_trades: u32,
-    /// Low-sample cells below this bps are quarantined before they mature.
-    /// 低樣本 cell 低於此 bps 時先隔離，不等成熟門檻。
+    /// Low-sample cells below this bps are watched/capped before they mature.
+    /// 低樣本 cell 低於此 bps 時先觀察降分，不等成熟門檻。
     #[serde(default = "default_immature_negative_bps_threshold")]
     pub immature_negative_bps_threshold: f64,
-    /// Score cap for immature negative cells.
-    /// 低樣本負 edge cell 分數上限。
+    /// Score cap for immature negative cells; not a hard entry gate.
+    /// 低樣本負 edge cell 分數上限；不是硬入場 gate。
     #[serde(default = "default_immature_negative_score_cap")]
     pub immature_negative_score_cap: f64,
 }
