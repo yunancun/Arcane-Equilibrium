@@ -1171,7 +1171,7 @@ Operator 接續 Tier 8 sign-off 後說「繼續派」。PM 按 Tier 8 §8 推薦
 
 ### Verification
 - Mac targeted: py_compile for the touched healthcheck files; F7 tests 43/0; tab-ai inline JS syntax check 2 scripts; `git diff --check`.
-- Linux source fast-forwarded to `b283fda`; F7 tests 43/0; wrapper returned SUMMARY WARN exit 0 with `[22]` WARN and `working_maker_orders_1h=3`.
+- Linux source fast-forwarded through `d8080f9`; F7 tests 43/0; wrapper returned SUMMARY WARN exit 0 with `[22]` WARN and `working_maker_orders_1h=2`.
 
 ### Boundary
 - No runtime rebuild/restart, DB write, live authorization change, risk config change, strategy parameter change, SIGHUP, or HTTPS deploy action was performed.

@@ -8,7 +8,7 @@
 - Wave 1-3 完成表格 + Backlog 完成項：[docs/archive/2026-05-01--completed_waves_1_2_3_and_backlog.md](docs/archive/2026-05-01--completed_waves_1_2_3_and_backlog.md)
 - Pre-trim TODO snapshot（2026-04-29 前）：[docs/archive/2026-04-29--TODO-pre-trim-snapshot.md](docs/archive/2026-04-29--TODO-pre-trim-snapshot.md)
 
-**Runtime/source（2026-05-01 22:29 CEST · post-[22] calibration Linux wrapper at `b283fda`; code-bearing source includes `25d8e54` pending final docs sync）**：Rust engine runtime remains PID 2364863 from `daab51c` scanner deploy（no rebuild/restart for this Wave 4 pre-stage source/RFC/static work）；API PID 2047851 / watchdog alive；demo/live active，paper inactive by design；manual wrapper healthcheck SUMMARY **WARN** exit 0。
+**Runtime/source（2026-05-01 22:36 CEST · post-sync Linux wrapper at `d8080f9`; code-bearing source includes `25d8e54`）**：Rust engine runtime remains PID 2364863 from `daab51c` scanner deploy（no rebuild/restart for this Wave 4 pre-stage source/RFC/static work）；API PID 2047851 / watchdog alive；demo/live active，paper inactive by design；manual wrapper healthcheck SUMMARY **WARN** exit 0。
 **測試基準**：Mac Rust lib **2394/0** · Rust CUSUM targeted **17/0** · Python maker/attribution **9/0** · MLDE pytest **63/0** · G4 canary pytest **21/0** · Healthcheck targeted Python **45/0**（F7 43/0 + counterfactual [11] 2/0）· tab-ai inline JS syntax check **2 scripts**
 **21d demo 時鐘**：2026-04-16 22:16 → 解鎖 **2026-05-07**
 
@@ -33,15 +33,16 @@
 
 ### Active Observation Gates
 
-| Gate | 現況（2026-05-01 22:29 CEST） | 目標 | 結論時間 |
+| Gate | 現況（2026-05-01 22:36 CEST） | 目標 | 結論時間 |
 |------|------------------------------|------|---------|
-| [22] trading pipeline silent gap | WARN：fills stale 75.3m / fills_1h=0；gap_context orders_1h=3 / working_maker_orders_1h=3 / risk_30m=18 / approved_30m=1 / rejected_30m=17；maker no-fill not writer wedge | distinguish writer/order push wedge vs unfilled maker working orders | 校準完成，持續觀察 |
+| [22] trading pipeline silent gap | WARN：fills stale 82.3m / fills_1h=0；gap_context orders_1h=2 / working_maker_orders_1h=2 / risk_30m=4 / approved_30m=1 / rejected_30m=3；maker no-fill not writer wedge | distinguish writer/order push wedge vs unfilled maker working orders | 校準完成，持續觀察 |
+| [16] strategist cycle fresh | last cycle 11.3min ago；within 30-min backoff window | <30min backoff tolerated | transient observe |
 | [33] maker_fill_rate | 7d rolling 27.2%；fee_drop 22.0%；PostOnly still diluted by pre-reload | ≥60% fee_drop | ~05-07/08 |
-| [38] grid lifecycle drift | demo p50 7.9min vs live_demo 3.2min；lifetime_ratio 0.41 WARN；live re_entry_rate 0.50 | lifetime ≥0.5x | ~05-06 再看 |
+| [38] grid lifecycle drift | demo p50 7.9min vs live_demo 3.2min；lifetime_ratio 0.41 WARN；live re_entry_rate 0.48 | lifetime ≥0.5x | ~05-06 再看 |
 | [40] realized edge acceptance | 24h MLDE rows=39，avg_net -17.97bps，maker_like 27.2%，fee_drop 22.0% | net_bps_after_fee>0 | 等累積 |
 | [41] scanner market-gate confirmation | events=1260 / cells=69 / scoreable=0，gate 已 fire 但 label 未足 | gate blocked cells later negative | 等 label 累積 |
-| [27] intents counter freeze | demo stale 81.4m / intents_30m=0 / verdicts_30m=15 / approved_verdicts_30m=0 / dcs_30m=1086；risk/cost gates rejected all attempts | approved verdicts with 0 intents 才 FAIL | 持續觀察 |
-| [11] counterfactual clean window | n=413/200，cf_fired=46，grid=16，ma=22，orphan=2，json_age=16.5h；rolling 2d window shrink expected，WARN not FAIL after `2674e14` | fresh replay + 3d WARN/PASS streak；criteria grid/ma/orphan 達標 | 本週 |
+| [27] intents counter freeze | demo stale 88.3m / intents_30m=0 / verdicts_30m=1 / approved_verdicts_30m=0 / dcs_30m=1080；risk/cost gates rejected all attempts | approved verdicts with 0 intents 才 FAIL | 持續觀察 |
+| [11] counterfactual clean window | n=413/200，cf_fired=46，grid=16，ma=22，orphan=2，json_age=16.6h；rolling 2d window shrink expected，WARN not FAIL after `2674e14` | fresh replay + 3d WARN/PASS streak；criteria grid/ma/orphan 達標 | 本週 |
 
 **EDGE-DIAG-2 留尾觀察**：(ii) PostOnly maker fill rate 待 ≥1w demo 累積 (iv) demo bb_breakout 1m bandwidth 結構性問題等 5m 升級或 MLDE sweep；不阻塞主路徑。
 

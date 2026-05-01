@@ -28,8 +28,9 @@ Status: Complete for this batch
 
 - No rebuild or restart was performed.
 - Rust engine runtime remains the `daab51c` scanner deploy.
-- Linux wrapper at 2026-05-01 22:29 CEST returned SUMMARY WARN exit 0.
-- `[22]` now reports WARN with `working_maker_orders_1h=3`, which matches the maker no-fill interpretation.
+- Linux wrapper at 2026-05-01 22:36 CEST returned SUMMARY WARN exit 0.
+- `[22]` now reports WARN with `working_maker_orders_1h=2`, which matches the maker no-fill interpretation.
+- `[16]` is a transient WARN: last strategist cycle 11.3 minutes ago inside the 30-minute backoff window.
 
 ## Boundary
 
