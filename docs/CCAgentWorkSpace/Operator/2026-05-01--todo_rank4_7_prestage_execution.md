@@ -21,3 +21,9 @@ Code/RFC checkpoint: `ec8f0f4`.
 ## Boundary
 
 No runtime restart/rebuild, DB write, cron install, SIGHUP, live auth change, risk config change, or strategy parameter change was performed.
+
+## Post-Sync Runtime Note
+
+After push and Linux source fast-forward to `21ecbf6`, the wrapper returned SUMMARY FAIL on `[22] trading_pipeline_silent_gap`.
+
+Read-only split shows recent live_demo orders are `Working` PostOnly limits and demo risk is rejected-only, so this is likely a healthcheck semantics issue to calibrate before treating it as a writer/order-push wedge. No restart/rebuild was performed.
