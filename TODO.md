@@ -8,8 +8,8 @@
 - Wave 1-3 完成表格 + Backlog 完成項：[docs/archive/2026-05-01--completed_waves_1_2_3_and_backlog.md](docs/archive/2026-05-01--completed_waves_1_2_3_and_backlog.md)
 - Pre-trim TODO snapshot（2026-04-29 前）：[docs/archive/2026-04-29--TODO-pre-trim-snapshot.md](docs/archive/2026-04-29--TODO-pre-trim-snapshot.md)
 
-**Runtime/source（2026-05-01 21:32 CEST · source includes `2674e14`）**：Linux source fast-forwarded；Rust engine runtime remains PID 2364863 from `daab51c` scanner deploy（no rebuild/restart for this healthcheck-only fix）；API PID 2047851 / watchdog alive；demo/live active，paper inactive by design；manual wrapper healthcheck SUMMARY **WARN** exit 0。
-**測試基準**：Mac Rust lib **2394/0** · Python maker/attribution **9/0** · MLDE pytest **63/0** · Healthcheck targeted Python **41/0**（F7 39/0 + counterfactual [11] 2/0）
+**Runtime/source（2026-05-01 21:51 CEST · code-bearing source includes `5ce777b`; 21:51 Linux runtime sample executed before final docs sync at `4abb36a`）**：Rust engine runtime remains PID 2364863 from `daab51c` scanner deploy（no rebuild/restart for this healthcheck/RFC/docs-only work）；API PID 2047851 / watchdog alive；demo/live active，paper inactive by design；manual wrapper healthcheck SUMMARY **WARN** exit 0。
+**測試基準**：Mac Rust lib **2394/0** · Python maker/attribution **9/0** · MLDE pytest **63/0** · Healthcheck targeted Python **43/0**（F7 41/0 + counterfactual [11] 2/0）
 **21d demo 時鐘**：2026-04-16 22:16 → 解鎖 **2026-05-07**
 
 ---
@@ -18,7 +18,7 @@
 
 **當前狀態**：Strategy Edge Models + Dust Residual Prevention deployed & proven；Scanner market judgement + five-strategy context deployed；MLDE demo autonomy active。
 下一個需要 implementation 的 wave 是 Wave 4（等 P0-3 ~05-15 決策後啟動）。
-目前主要工作是：觀察、時間等待、3 個時間點的決策。最新 P0 hygiene：`[27]` 18:00 transient FAIL 已在 21:29/21:32 手跑 wrapper 恢復 PASS；`[11]` 的 864→413 是 rolling 2d replay 舊 exits 滾出，`2674e14` 已把 false-red 改為 WARN。
+目前主要工作是：觀察、時間等待、3 個時間點的決策。最新 P0 hygiene：`[27]` 21:39 wrapper false-FAIL 已由 `4abb36a` 重校準：只有 **Approved risk verdicts >0 且 0 persisted intents** 才 FAIL；signal-only / rejected-only window 轉 WARN。21:51 wrapper 中 `[27]` 是 WARN（demo signal snapshots active but no Guardian attempts；likely scanner/strategy pre-gate），不是 writer wedge。`[11]` 的 864→413 是 rolling 2d replay 舊 exits 滾出，`2674e14` 已把 false-red 改為 WARN。
 
 ### 時間驅動里程碑
 
@@ -33,13 +33,14 @@
 
 ### Active Observation Gates
 
-| Gate | 現況（2026-05-01 21:32 CEST） | 目標 | 結論時間 |
+| Gate | 現況（2026-05-01 21:51 CEST） | 目標 | 結論時間 |
 |------|------------------------------|------|---------|
 | [33] maker_fill_rate | 7d rolling 27.2%；fee_drop 22.0%；PostOnly still diluted by pre-reload | ≥60% fee_drop | ~05-07/08 |
-| [38] grid lifecycle drift | demo p50 8.6min vs live_demo 3.7min；lifetime_ratio 0.43 WARN（18:00 cron 曾 PASS 0.53，仍需 rolling 觀察） | lifetime ≥0.5x | ~05-06 再看 |
-| [40] realized edge acceptance | 24h MLDE rows=37，avg_net -20.81bps，maker_like 27.2%，fee_drop 22.0% | net_bps_after_fee>0 | 等累積 |
-| [41] scanner market-gate confirmation | events=1214 / cells=69 / scoreable=0，gate 已 fire 但 label 未足 | gate blocked cells later negative | 等 label 累積 |
-| [11] counterfactual clean window | n=413/200，cf_fired=46，grid=16，ma=22，orphan=2；rolling 2d window shrink expected，WARN not FAIL after `2674e14` | fresh replay + 3d WARN/PASS streak；criteria grid/ma/orphan 達標 | 本週 |
+| [38] grid lifecycle drift | demo p50 7.9min vs live_demo 3.7min；lifetime_ratio 0.47 WARN；live re_entry_rate 0.52 / delta 0.31 | lifetime ≥0.5x | ~05-06 再看 |
+| [40] realized edge acceptance | 24h MLDE rows=41，avg_net -19.26bps，maker_like 27.2%，fee_drop 22.0% | net_bps_after_fee>0 | 等累積 |
+| [41] scanner market-gate confirmation | events=1237 / cells=69 / scoreable=0，gate 已 fire 但 label 未足 | gate blocked cells later negative | 等 label 累積 |
+| [27] intents counter freeze | demo stale 43.6m / intents_30m=0 / approved_verdicts_30m=0 / dcs_30m=1066；signal-only/pre-gate WARN | approved verdicts with 0 intents 才 FAIL | 持續觀察 |
+| [11] counterfactual clean window | n=413/200，cf_fired=46，grid=16，ma=22，orphan=2，json_age=15.9h；rolling 2d window shrink expected，WARN not FAIL after `2674e14` | fresh replay + 3d WARN/PASS streak；criteria grid/ma/orphan 達標 | 本週 |
 
 **EDGE-DIAG-2 留尾觀察**：(ii) PostOnly maker fill rate 待 ≥1w demo 累積 (iv) demo bb_breakout 1m bandwidth 結構性問題等 5m 升級或 MLDE sweep；不阻塞主路徑。
 
@@ -53,11 +54,11 @@
 
 | ID | 任務 | PA 工時 | 前置 | 完成 gate |
 |----|-----|--------|------|----------|
-| **LG-2-RFC** | H0 Gate blocking verification（shadow→blocking）acceptance criteria + test plan + rollback | 1.5d | DOC-08 §12 | RFC含 5 metrics threshold + rollback IPC + E2E mock blocked intent + 16 根原則對照 |
-| **LG-3-RFC** | Provider pricing table 正式綁定（對照 bybit_api_reference.md）| 1d | G7-07 SlippageConfig ✅ | Bybit V5 fee tier mapping + IPC pull period + fail-closed when stale > N min |
+| **LG-2-RFC** | ✅ RFC landed：[`2026-05-01--lg2_h0_blocking_verification_rfc.md`](docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-01--lg2_h0_blocking_verification_rfc.md)（`5ce777b`） | 1.5d | DOC-08 §12 | 5 metrics threshold + rollback IPC + E2E mock blocked intent + 16 根原則對照 |
+| **LG-3-RFC** | ✅ RFC landed：[`2026-05-01--lg3_provider_pricing_binding_rfc.md`](docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-01--lg3_provider_pricing_binding_rfc.md)（`5ce777b`） | 1d | G7-07 SlippageConfig ✅ | Bybit V5 fee tier mapping + IPC pull period + fail-closed when stale > N min |
 | **LG-4-RFC** | Supervised Live Gate operator approval flow + risk limits + kill switch | 2d | LG-2/3 RFC | approval RPC schema + per-symbol/daily risk override + dual-path kill switch + audit log mirror SM-04 |
 | **LG-5-RFC** | Constrained Autonomous Live agent autonomy boundaries | 2d | LG-4 RFC | 自主邊界 spec + escalation trigger + lease TTL + 16 根原則 #11 對照 |
-| **MLDE-6-RFC** | Live promotion contract（advisory→proposal→demo patch→live candidate）| 1d | MLDE-5 ✅ + GovernanceHub | version-aware schema + operator review UI + rollback path + 16 根原則 #3/#7/#11 |
+| **MLDE-6-RFC** | ✅ RFC landed：[`2026-05-01--mlde6_live_promotion_contract_rfc.md`](docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-01--mlde6_live_promotion_contract_rfc.md)（`5ce777b`） | 1d | MLDE-5 ✅ + GovernanceHub | version-aware schema + operator review UI + rollback path + 16 根原則 #3/#7/#11 |
 
 **軸線 1 總計**：PA 7.5d / E1 5.5d。21d window 1 PA agent 並行可完成。
 
@@ -105,10 +106,10 @@
 
 | Rank | 任務 | 派發 | 工時 | 為何優先 |
 |------|------|-----|------|---------|
-| 1 | **LG-2-RFC** | PA | 1.5d | P0-3 outcome A/C 立即解阻；不寫 = 05-15 後阻塞 3-5d |
-| 2 | **MLDE-6-RFC** | PA | 1d | live autonomy 邊界，與 LG-4/5 雙耦合 |
-| 3 | **LG-3-RFC** | PA | 1d | 純 config binding；解 LG-4/5 前置 |
-| 4 | **STRK-FUP-HEALTHCHECK** [3]/[24] 修復 | PA + E1×2 | 2-3d | 解 5 silent-dead 信任債 |
+| 1 | ✅ **LG-2-RFC** | PA | done | `5ce777b` landed H0 blocking verification RFC |
+| 2 | ✅ **MLDE-6-RFC** | PA | done | `5ce777b` landed live promotion contract RFC |
+| 3 | ✅ **LG-3-RFC** | PA | done | `5ce777b` landed provider pricing binding RFC |
+| 4 | **STRK-FUP-HEALTHCHECK** | PA + E1×2 | partial | `[27]` false-red semantics fixed in `4abb36a`; broader [3]/[19]/[23]/[24]/[26] silent-dead design remains |
 | 5 | **G7-04 Phase B/C** CUSUM wiring | PA + E1 | 2d | Phase A schema 5d，不接 = dead schema |
 | 6 | **G4-03 Phase B** canary 部署 | PA + E1 | 3d | 跑 7d 才能在 P0-3 提供 PSI drift 證據 |
 | 7 | **LG-4-RFC** | PA | 2d | 涉 §四 硬邊界，最需早寫 + adversarial review |
@@ -116,7 +117,7 @@
 | 9 | **PRE-LIVE-2** HTTPS deploy | PA + E1 | 3d | 解 G-4；live trade 前必完 |
 | 10 | **LG-5-RFC** | PA | 2d | 等 LG-2/3/4 RFC 後 W22 派 |
 
-**節奏**：W21 D1-D3 併發 Rank 1+2+3+4 → D4-D7 Rank 5+6+8 → W22 D1-D5 Rank 7+9+10 → W22 D6+ 軸線 4+5。
+**節奏**：W21 D1-D3 已完成 Rank 1+2+3 + Rank 4 `[27]` 校準；下一段可接 Rank 4 broader silent-dead design 或 Rank 5+6+8 → W22 D1-D5 Rank 7+9+10 → W22 D6+ 軸線 4+5。
 
 ### Wave 4 依賴圖（簡化）
 
@@ -174,6 +175,7 @@ PA RFC `2026-04-28--g3_09_cost_edge_advisor_phase_c_rfc.md` ready；operator 決
 | [33] PostOnly 驗收（G2-01）| 累積中 | ~05-07/08 出結果 |
 | EDGE-P1b exit_features 累積 | grid/ma READY | ~05-10 calibrator |
 | EDGE-P3 clean window freshness | fresh rolling replay；[11] WARN（criteria 未達，非資料倒退） | fresh replay + 3d WARN/PASS；grid/ma/orphan criteria 達標 |
+| [27] intents freeze semantics | signal-only/pre-gate WARN；approved verdict + zero intent 才 FAIL（`4abb36a`） | 連續 wrapper 觀察，若出現 approved_verdicts_30m>0 且 intents_30m=0 才人工介入 |
 | G2-03 binding | 等 G2-02 結論 | ~05-03 觸發 |
 | EDGE-P2-flip | 等 EDGE-P1b | ~05-10+ |
 | GRID-LIFECYCLE-DRIFT | real signal FAIL；RFC deployed，觀察 14d rolling | ~05-06 再評 |
@@ -197,14 +199,14 @@ PA RFC `2026-04-28--g3_09_cost_edge_advisor_phase_c_rfc.md` ready；operator 決
 
 | ID | Tag | 項目 |
 |----|-----|------|
-| **MLDE-6** | RFC: now (W21) / impl: P0-3 後 | Live promotion contract design（advisory→proposal→demo patch→live candidate）；live 仍需 GovernanceHub + Decision Lease（RFC 即派發，見軸線 1）|
+| **MLDE-6** | RFC landed `5ce777b` / impl: P0-3 後 | Live promotion contract design（advisory→proposal→demo patch→live candidate）；live 仍需 GovernanceHub + Decision Lease |
 
 ### Live Gates（5 項，P0-3 後）
 
 | ID | Tag | 項目 |
 |----|-----|------|
-| **LG-2** | P0 | H0 Gate blocking 驗證（shadow→blocking） |
-| **LG-3** | P0 | Provider pricing table 正式綁定 |
+| **LG-2** | P0 | H0 Gate blocking 驗證（shadow→blocking）；RFC landed `5ce777b` |
+| **LG-3** | P0 | Provider pricing table 正式綁定；RFC landed `5ce777b` |
 | **LG-4** | P0 | M 章 Supervised Live Gate |
 | **LG-5** | P0 | N 章 Constrained Autonomous Live |
 | **G-4** | P2 | Cookie secure=True（HTTPS 部署後）|

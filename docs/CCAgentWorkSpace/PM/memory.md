@@ -1116,3 +1116,23 @@ Operator 接續 Tier 8 sign-off 後說「繼續派」。PM 按 Tier 8 §8 推薦
 
 ### Boundary
 - No trading, risk, strategy parameter, live authorization, DB write, rebuild, or restart action was performed.
+
+## 2026-05-01 TODO Continue — [27] Calibration + Wave 4 RFCs
+
+### Result
+- Operator asked to continue TODO and complete the next active 1-4 batch.
+- `[27] intents_counter_freeze` was recalibrated in `4abb36a`: the healthcheck now FAILs only when approved risk verdicts exist with zero persisted intents. Signal-only and rejected-only windows are WARN, which matches the current scanner/strategy pre-gate runtime shape.
+- Wave 4 pre-stage RFCs landed in `5ce777b`:
+  - LG-2 H0 blocking verification RFC.
+  - MLDE-6 live promotion contract RFC.
+  - LG-3 provider pricing binding RFC.
+- The broader STRK-FUP silent-dead wave remains a design/implementation follow-up for [3]/[19]/[23]/[24]/[26]; this batch closed the live `[27]` false-red that was blocking TODO confidence.
+
+### Verification
+- Mac targeted checks passed: `py_compile` for the touched F7 healthcheck files, `test_f7_new_healthchecks.py` 41/0, `test_counterfactual_clean_window_healthcheck.py` 2/0, and `git diff --check`.
+- Linux watchdog stayed healthy: `engine_alive=true`, demo/live snapshots fresh, paper inactive by design.
+- Linux wrapper at 2026-05-01 21:51 CEST returned SUMMARY WARN exit 0, with `[27]` WARN as signal-only/pre-gate rather than a writer wedge.
+
+### Boundary
+- No trading, risk, strategy parameter, live authorization, DB write, rebuild, restart, or deploy action was performed.
+- Rust engine runtime remains the `daab51c` scanner deploy; this batch was code healthcheck semantics + RFC/docs/source sync only.
