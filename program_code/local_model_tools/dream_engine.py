@@ -24,6 +24,30 @@ logger = logging.getLogger(__name__)
 
 VALID_ENGINE_MODES = ("paper", "demo", "live", "live_demo")
 _CACHE: dict[tuple[str, int, int, float], tuple[float, dict[str, Any]]] = {}
+SCANNER_TEXT_FIELDS = (
+    "scanner_market_regime",
+    "scanner_trend_phase",
+)
+SCANNER_NUMERIC_FIELDS = (
+    "scanner_trend_score",
+    "scanner_range_score",
+    "scanner_shock_score",
+    "scanner_close_alignment",
+    "scanner_range_position",
+    "scanner_crowding_score",
+    "scanner_reversal_risk_score",
+    "scanner_directional_efficiency",
+    "scanner_dir_pct",
+    "scanner_signed_dir_pct",
+    "scanner_range_pct",
+    "scanner_fr_bps",
+    "scanner_f_ma",
+    "scanner_f_grid",
+    "scanner_f_bbrv",
+    "scanner_f_bkout",
+    "scanner_f_funding_arb",
+)
+SCANNER_CONTEXT_FIELDS = SCANNER_TEXT_FIELDS + SCANNER_NUMERIC_FIELDS
 
 
 @dataclass(frozen=True)
@@ -146,21 +170,23 @@ def build_dream_summary(rows: list[dict[str, Any]], cfg: DreamConfig) -> dict[st
         strategy = str(row.get("strategy_name") or "unknown")
         proposal = _proposal_for_strategy(strategy, avg_bps)
         conf = _confidence(n, cfg)
-        insights.append(
-            {
-                "strategy_name": strategy,
-                "symbol_bucket": row.get("symbol_bucket"),
-                "regime": row.get("regime"),
-                "scanner_route_mode": row.get("scanner_route_mode"),
-                "scanner_edge_status": row.get("scanner_edge_status"),
-                "sample_count": n,
-                "current_avg_net_bps": round(avg_bps, 4),
-                "expected_improvement_bps": round(abs(avg_bps) * min(0.5, conf), 4),
-                "confidence": conf,
-                **proposal,
-                "policy": "read_only_parameter_proposal",
-            }
-        )
+        insight = {
+            "strategy_name": strategy,
+            "symbol_bucket": row.get("symbol_bucket"),
+            "regime": row.get("regime"),
+            "scanner_route_mode": row.get("scanner_route_mode"),
+            "scanner_edge_status": row.get("scanner_edge_status"),
+            "sample_count": n,
+            "current_avg_net_bps": round(avg_bps, 4),
+            "expected_improvement_bps": round(abs(avg_bps) * min(0.5, conf), 4),
+            "confidence": conf,
+            **proposal,
+            "policy": "read_only_parameter_proposal",
+        }
+        scanner_context = _scanner_context_from_row(row)
+        if scanner_context:
+            insight["scanner_context"] = scanner_context
+        insights.append(insight)
 
     insights = sorted(
         insights,
@@ -191,13 +217,18 @@ def build_dream_summary(rows: list[dict[str, Any]], cfg: DreamConfig) -> dict[st
 def _fetch_aggregate_rows(dsn: str, cfg: DreamConfig) -> list[dict[str, Any]]:
     if psycopg2 is None:
         raise RuntimeError("psycopg2 not installed")
-    sql = """
+    with psycopg2.connect(dsn, connect_timeout=2) as conn:  # pragma: no cover - DB path
+        with conn.cursor() as cur:
+            available_columns = _fetch_training_view_columns(cur)
+            scanner_selects = _scanner_context_select_sql(available_columns)
+            sql = f"""
         SELECT
             strategy_name,
             symbol_bucket,
             regime,
             scanner_route_mode,
             scanner_edge_status,
+            {scanner_selects},
             count(*)::int AS sample_count,
             avg(net_bps_after_fee)::float8 AS avg_net_bps
         FROM learning.mlde_edge_training_rows
@@ -210,8 +241,6 @@ def _fetch_aggregate_rows(dsn: str, cfg: DreamConfig) -> list[dict[str, Any]]:
         ORDER BY avg(net_bps_after_fee) ASC, count(*) DESC
         LIMIT %s
     """
-    with psycopg2.connect(dsn, connect_timeout=2) as conn:  # pragma: no cover - DB path
-        with conn.cursor() as cur:
             cur.execute(
                 sql,
                 (
@@ -223,6 +252,53 @@ def _fetch_aggregate_rows(dsn: str, cfg: DreamConfig) -> list[dict[str, Any]]:
             )
             cols = [desc[0] for desc in cur.description]
             return [dict(zip(cols, row)) for row in cur.fetchall()]
+
+
+def _fetch_training_view_columns(cur: Any) -> set[str]:
+    """Return available columns on the MLDE training view.
+
+    回傳 MLDE training view 目前可用欄位，用於跨 migration 相容。
+    """
+    cur.execute(
+        """
+        SELECT column_name
+        FROM information_schema.columns
+        WHERE table_schema = 'learning'
+          AND table_name = 'mlde_edge_training_rows'
+        """
+    )
+    return {str(row[0]) for row in (cur.fetchall() or [])}
+
+
+def _scanner_context_select_sql(available_columns: set[str]) -> str:
+    """Build scanner-context aggregate SQL with missing-column fallbacks.
+
+    建立 scanner context 彙總 SQL；欄位尚未 migration 時使用 NULL fallback。
+    """
+    selects: list[str] = []
+    for field in SCANNER_TEXT_FIELDS:
+        if field in available_columns:
+            selects.append(f"max({field}) AS {field}")
+        else:
+            selects.append(f"NULL::text AS {field}")
+    for field in SCANNER_NUMERIC_FIELDS:
+        if field in available_columns:
+            selects.append(f"avg({field})::float8 AS {field}")
+        else:
+            selects.append(f"NULL::float8 AS {field}")
+    return ",\n            ".join(selects)
+
+
+def _scanner_context_from_row(row: dict[str, Any]) -> dict[str, Any]:
+    """Extract non-null scanner context fields from an aggregate row.
+
+    從彙總 row 提取非空 scanner context 欄位。
+    """
+    return {
+        field: row[field]
+        for field in SCANNER_CONTEXT_FIELDS
+        if row.get(field) is not None
+    }
 
 
 def get_latest_dream_summary(

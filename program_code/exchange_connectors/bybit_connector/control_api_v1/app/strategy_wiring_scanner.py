@@ -205,7 +205,17 @@ def wire_market_scanner_and_workers(
                 this function only needs to raise on genuine failures.
                 Fail-open：ScoutWorker._run_loop() 已捕獲異常，此函數只需在真正失敗時拋出。
                 """
-                opportunities = _ms.scan()
+                source = "rust_scanner"
+                try:
+                    from .rust_scanner_reader import fetch_rust_scanner_opportunities_sync
+                    opportunities = fetch_rust_scanner_opportunities_sync(limit=10)
+                except Exception as exc:  # noqa: BLE001 - scout intel must fail soft
+                    logger.debug("ScoutWorker: rust scanner fetch failed: %s", exc)
+                    opportunities = []
+
+                if not opportunities:
+                    source = "legacy_market_scanner"
+                    opportunities = _ms.scan()
                 if not opportunities:
                     logger.debug(
                         "ScoutWorker: scan returned no opportunities / 掃描未返回機會，跳過情報注入"
@@ -219,19 +229,61 @@ def wire_market_scanner_and_workers(
                     return
                 # Take top-5 opportunities by score to avoid intel flooding.
                 # 取評分最高的前 5 個機會，避免情報洪泛策略師消息隊列。
-                top = sorted(opportunities, key=lambda o: getattr(o, "score", 0.0), reverse=True)[:5]
-                symbols = [getattr(o, "symbol", str(o)) for o in top]
+                def _opp_get(opp: Any, key: str, default: Any = None) -> Any:
+                    if isinstance(opp, dict):
+                        return opp.get(key, default)
+                    return getattr(opp, key, default)
+
+                def _opp_score(opp: Any) -> float:
+                    score = _opp_get(opp, "score", _opp_get(opp, "final_score", 0.0))
+                    try:
+                        return float(score or 0.0)
+                    except (TypeError, ValueError):
+                        return 0.0
+
+                def _opp_symbol(opp: Any) -> str:
+                    return str(_opp_get(opp, "symbol", str(opp)) or "?")
+
+                def _opp_strategy(opp: Any) -> str:
+                    return str(_opp_get(opp, "strategy_type", _opp_get(opp, "best_strategy", "?")) or "?")
+
+                def _opp_context(opp: Any) -> dict[str, Any]:
+                    if isinstance(opp, dict):
+                        ctx = opp.get("scanner_context")
+                        return ctx if isinstance(ctx, dict) else opp
+                    return {}
+
+                top = sorted(opportunities, key=_opp_score, reverse=True)[:5]
+                symbols = [_opp_symbol(o) for o in top]
                 summary = ", ".join(
-                    f"{getattr(o, 'symbol', '?')}({getattr(o, 'score', 0.0):.2f})"
+                    f"{_opp_symbol(o)}({_opp_score(o):.2f},{_opp_strategy(o)},"
+                    f"{_opp_context(o).get('trend_phase', '?')})"
                     for o in top
                 )
+                market_regimes = {
+                    _opp_symbol(o): _opp_context(o).get("market_regime")
+                    for o in top
+                    if _opp_context(o).get("market_regime") is not None
+                }
+                trend_phases = {
+                    _opp_symbol(o): _opp_context(o).get("trend_phase")
+                    for o in top
+                    if _opp_context(o).get("trend_phase") is not None
+                }
                 _sa.produce_intel(
                     source="ScoutWorker",
                     content=f"30-min periodic scan top opportunities: {summary}",
                     symbols=symbols,
                     relevance_score=0.6,
                     freshness_seconds=0,
-                    metadata={"trigger": "scout_worker_30min", "total_opportunities": len(opportunities)},
+                    metadata={
+                        "trigger": "scout_worker_30min",
+                        "scanner_source": source,
+                        "total_opportunities": len(opportunities),
+                        "scanner_candidates": top,
+                        "market_regimes": market_regimes,
+                        "trend_phases": trend_phases,
+                    },
                 )
                 # Scout heartbeat contract: stamp once per successful
                 # ScoutWorker scan cycle after intel is produced.

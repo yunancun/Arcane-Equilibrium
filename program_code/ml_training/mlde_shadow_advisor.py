@@ -27,6 +27,30 @@ except ImportError:  # pragma: no cover - runtime DB path only
 logger = logging.getLogger(__name__)
 
 VALID_ENGINE_MODES = ("paper", "demo", "live", "live_demo")
+SCANNER_TEXT_FIELDS = (
+    "scanner_market_regime",
+    "scanner_trend_phase",
+)
+SCANNER_NUMERIC_FIELDS = (
+    "scanner_trend_score",
+    "scanner_range_score",
+    "scanner_shock_score",
+    "scanner_close_alignment",
+    "scanner_range_position",
+    "scanner_crowding_score",
+    "scanner_reversal_risk_score",
+    "scanner_directional_efficiency",
+    "scanner_dir_pct",
+    "scanner_signed_dir_pct",
+    "scanner_range_pct",
+    "scanner_fr_bps",
+    "scanner_f_ma",
+    "scanner_f_grid",
+    "scanner_f_bbrv",
+    "scanner_f_bkout",
+    "scanner_f_funding_arb",
+)
+SCANNER_CONTEXT_FIELDS = SCANNER_TEXT_FIELDS + SCANNER_NUMERIC_FIELDS
 
 
 @dataclass(frozen=True)
@@ -153,6 +177,9 @@ def build_recommendations(
             "reward_scale_bps": cfg.reward_scale_bps,
             "policy": "shadow_advisory_only",
         }
+        scanner_context = _scanner_context_from_row(row)
+        if scanner_context:
+            payload["scanner_context"] = scanner_context
         recommendations.append(
             ShadowRecommendation(
                 engine_mode=str(row.get("engine_mode") or cfg.engine_mode),
@@ -176,7 +203,11 @@ def build_recommendations(
 def _fetch_aggregate_rows(dsn: str, cfg: ShadowAdvisorConfig) -> list[dict[str, Any]]:
     if psycopg2 is None:
         raise RuntimeError("psycopg2 not installed")
-    sql = """
+    with psycopg2.connect(dsn, connect_timeout=2) as conn:  # pragma: no cover - DB path
+        with conn.cursor() as cur:
+            available_columns = _fetch_training_view_columns(cur)
+            scanner_selects = _scanner_context_select_sql(available_columns)
+            sql = f"""
         SELECT
             engine_mode,
             strategy_name,
@@ -186,6 +217,7 @@ def _fetch_aggregate_rows(dsn: str, cfg: ShadowAdvisorConfig) -> list[dict[str, 
             scanner_edge_status,
             mlde_arm_id,
             linucb_arm_id,
+            {scanner_selects},
             count(*)::int AS sample_count,
             avg(net_bps_after_fee)::float8 AS avg_net_bps,
             avg(CASE WHEN net_bps_after_fee > 0 THEN 1.0 ELSE 0.0 END)::float8 AS win_rate
@@ -201,8 +233,6 @@ def _fetch_aggregate_rows(dsn: str, cfg: ShadowAdvisorConfig) -> list[dict[str, 
         ORDER BY abs(avg(net_bps_after_fee)) DESC, count(*) DESC
         LIMIT %s
     """
-    with psycopg2.connect(dsn, connect_timeout=2) as conn:  # pragma: no cover - DB path
-        with conn.cursor() as cur:
             cur.execute(
                 sql,
                 (
@@ -214,6 +244,53 @@ def _fetch_aggregate_rows(dsn: str, cfg: ShadowAdvisorConfig) -> list[dict[str, 
             )
             cols = [desc[0] for desc in cur.description]
             return [dict(zip(cols, row)) for row in cur.fetchall()]
+
+
+def _fetch_training_view_columns(cur: Any) -> set[str]:
+    """Return available columns on the MLDE training view.
+
+    回傳 MLDE training view 目前可用欄位，用於跨 migration 相容。
+    """
+    cur.execute(
+        """
+        SELECT column_name
+        FROM information_schema.columns
+        WHERE table_schema = 'learning'
+          AND table_name = 'mlde_edge_training_rows'
+        """
+    )
+    return {str(row[0]) for row in (cur.fetchall() or [])}
+
+
+def _scanner_context_select_sql(available_columns: set[str]) -> str:
+    """Build scanner-context aggregate SQL with missing-column fallbacks.
+
+    建立 scanner context 彙總 SQL；欄位尚未 migration 時使用 NULL fallback。
+    """
+    selects: list[str] = []
+    for field in SCANNER_TEXT_FIELDS:
+        if field in available_columns:
+            selects.append(f"max({field}) AS {field}")
+        else:
+            selects.append(f"NULL::text AS {field}")
+    for field in SCANNER_NUMERIC_FIELDS:
+        if field in available_columns:
+            selects.append(f"avg({field})::float8 AS {field}")
+        else:
+            selects.append(f"NULL::float8 AS {field}")
+    return ",\n            ".join(selects)
+
+
+def _scanner_context_from_row(row: dict[str, Any]) -> dict[str, Any]:
+    """Extract non-null scanner context fields from an aggregate row.
+
+    從彙總 row 提取非空 scanner context 欄位。
+    """
+    return {
+        field: row[field]
+        for field in SCANNER_CONTEXT_FIELDS
+        if row.get(field) is not None
+    }
 
 
 def _persist_recommendations(dsn: str, recommendations: list[ShadowRecommendation]) -> int:

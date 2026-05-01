@@ -155,6 +155,13 @@ def scanner_wiring_fakes(monkeypatch: pytest.MonkeyPatch):
         types.SimpleNamespace(PERCEPTION_PLANE=None),
     )
 
+    import app.rust_scanner_reader as rust_scanner_reader
+    monkeypatch.setattr(
+        rust_scanner_reader,
+        "fetch_rust_scanner_opportunities_sync",
+        lambda *, limit=10: [],
+    )
+
     from app.strategy_wiring_scanner import wire_market_scanner_and_workers
 
     return wire_market_scanner_and_workers
@@ -196,6 +203,7 @@ def test_scout_worker_scan_records_heartbeat_after_intel(scanner_wiring_fakes: A
     assert len(scout.intel_calls) == 1
     assert scout.intel_calls[0]["source"] == "ScoutWorker"
     assert scout.intel_calls[0]["symbols"] == ["TOPUSDT", "MIDUSDT", "LOWUSDT"]
+    assert scout.intel_calls[0]["metadata"]["scanner_source"] == "legacy_market_scanner"
 
 
 def test_scout_worker_empty_scan_records_heartbeat(scanner_wiring_fakes: Any) -> None:
@@ -210,3 +218,55 @@ def test_scout_worker_empty_scan_records_heartbeat(scanner_wiring_fakes: Any) ->
 
     assert scout.record_scan_count == 1
     assert scout.intel_calls == []
+
+
+def test_scout_worker_uses_rust_scanner_context_for_intel(
+    scanner_wiring_fakes: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """ScoutWorker reads Rust scanner opportunities before falling back to the stub."""
+
+    import app.rust_scanner_reader as rust_scanner_reader
+
+    monkeypatch.setattr(
+        rust_scanner_reader,
+        "fetch_rust_scanner_opportunities_sync",
+        lambda *, limit=10: [
+            {
+                "symbol": "BTCUSDT",
+                "score": 88.0,
+                "strategy_type": "MaCrossover",
+                "scanner_context": {
+                    "market_regime": "trending",
+                    "trend_phase": "clean_trend",
+                },
+                "fitness": {"f_ma": 0.8, "f_bkout": 0.7},
+            },
+            {
+                "symbol": "ETHUSDT",
+                "score": 63.0,
+                "strategy_type": "BbBreakout",
+                "scanner_context": {
+                    "market_regime": "mixed",
+                    "trend_phase": "mixed",
+                },
+            },
+        ],
+    )
+    _FakeMarketScanner.opportunities = []
+    scout = _FakeScoutAgent()
+    worker = _wire_fake_scout_worker(scanner_wiring_fakes, scout)
+
+    worker.scan_fn()
+
+    assert scout.record_scan_count == 1
+    assert len(scout.intel_calls) == 1
+    intel = scout.intel_calls[0]
+    assert intel["symbols"] == ["BTCUSDT", "ETHUSDT"]
+    assert intel["metadata"]["scanner_source"] == "rust_scanner"
+    assert intel["metadata"]["market_regimes"] == {
+        "BTCUSDT": "trending",
+        "ETHUSDT": "mixed",
+    }
+    assert intel["metadata"]["trend_phases"]["BTCUSDT"] == "clean_trend"
+    assert "BTCUSDT(88.00,MaCrossover,clean_trend)" in intel["content"]

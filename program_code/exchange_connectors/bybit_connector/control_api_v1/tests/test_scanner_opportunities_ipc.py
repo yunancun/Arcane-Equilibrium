@@ -18,17 +18,29 @@ import sys
 from typing import Any
 from unittest.mock import patch
 
+import pytest
+
 _test_dir = os.path.dirname(os.path.abspath(__file__))
 _control_api_dir = os.path.dirname(_test_dir)
 if _control_api_dir not in sys.path:
     sys.path.insert(0, _control_api_dir)
 
 from app.strategy_read_routes import get_scanner_opportunities  # noqa: E402
+from app.rust_scanner_reader import enrich_scanner_status_with_db  # noqa: E402
 
 
 class _FakeActor:
     role = "viewer"
     username = "test"
+
+
+@pytest.fixture(autouse=True)
+def _disable_route_db_enrichment(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep route tests hermetic; enrichment itself has a direct unit below."""
+    monkeypatch.setattr(
+        "app.strategy_read_routes.enrich_scanner_status_with_db",
+        lambda status: status,
+    )
 
 
 def _run(coro):
@@ -83,9 +95,25 @@ def test_opportunities_maps_rust_candidates_to_gui_fields() -> None:
                     "symbol": "BTCUSDT",
                     "final_score": 87.5,
                     "best_strategy": "MaCrossover",
+                    "market_regime": "trending",
+                    "trend_phase": "clean_trend",
+                    "trend_score": 0.82,
+                    "range_score": 0.15,
+                    "shock_score": 0.04,
+                    "crowding_score": 0.12,
+                    "reversal_risk_score": 0.08,
+                    "f_ma": 0.81,
+                    "f_grid": 0.14,
+                    "f_bbrv": 0.22,
+                    "f_bkout": 0.74,
+                    "f_funding_arb": 0.18,
                     "sector": "majors",
                     "edge_bonus": 3.21,
                     "edge_n": 87,
+                    "strategy_judgments": {
+                        "ma_crossover": {"route_mode": "normal", "final_score": 90.0},
+                        "grid_trading": {"route_mode": "market_gate", "final_score": 10.0},
+                    },
                 },
                 {
                     "symbol": "ETHUSDT",
@@ -104,15 +132,19 @@ def test_opportunities_maps_rust_candidates_to_gui_fields() -> None:
     assert body["source"] == "rust_scanner"
     opps = body["opportunities"]
     assert len(opps) == 2
-    assert opps[0] == {
-        "symbol": "BTCUSDT",
-        "strategy_type": "MaCrossover",
-        "score": 87.5,
-        "reason": "majors · edge=+3.21 (n=87)",
-    }
+    assert opps[0]["symbol"] == "BTCUSDT"
+    assert opps[0]["strategy_type"] == "MaCrossover"
+    assert opps[0]["score"] == 87.5
+    assert opps[0]["reason"] == "majors · edge=+3.21 (n=87)"
+    assert opps[0]["scanner_context"]["trend_phase"] == "clean_trend"
+    assert opps[0]["scanner_context"]["market_regime"] == "trending"
+    assert opps[0]["fitness"]["f_bkout"] == 0.74
+    assert opps[0]["strategy_judgments"]["ma_crossover"]["route_mode"] == "normal"
+    assert opps[0]["breakout_proxy"]["inputs"]["trend_score"] == 0.82
     assert opps[1]["reason"] == "majors · edge=-1.50 (n=42)"
     assert body["stats"]["active_count"] == 2
     assert body["stats"]["rejected_count"] == 3
+    assert body["stats"]["candidate_detail_source"] == "ipc"
 
 
 # ─── Fail-soft paths / 降級路徑 ──────────────────────────────────────────
@@ -261,3 +293,37 @@ def test_opportunities_empty_top_candidates() -> None:
     body = result["data"]
     assert body["opportunities"] == []
     assert body["stats"]["scan_ts_ms"] == 1
+
+
+def test_enrich_scanner_status_merges_latest_snapshot_candidate_details() -> None:
+    ipc_status = {
+        "status": "ok",
+        "last_scan": {
+            "top_candidates": [
+                {"symbol": "BTCUSDT", "final_score": 91.2, "best_strategy": "MaCrossover"}
+            ],
+        },
+    }
+    snapshot_candidate = {
+        "symbol": "BTCUSDT",
+        "final_score": 88.0,
+        "best_strategy": "ma_crossover",
+        "close_alignment": 0.92,
+        "range_position": 0.85,
+        "strategy_judgments": {
+            "ma_crossover": {"route_mode": "normal"},
+            "funding_arb": {"route_mode": "momentum_caution"},
+        },
+    }
+
+    with patch(
+        "app.rust_scanner_reader.fetch_latest_scanner_snapshot_candidate_map",
+        return_value={"BTCUSDT": snapshot_candidate},
+    ):
+        enriched = enrich_scanner_status_with_db(ipc_status)
+
+    candidate = enriched["last_scan"]["top_candidates"][0]
+    assert candidate["final_score"] == 91.2
+    assert candidate["close_alignment"] == 0.92
+    assert candidate["strategy_judgments"]["funding_arb"]["route_mode"] == "momentum_caution"
+    assert enriched["last_scan"]["candidate_detail_source"] == "ipc_plus_latest_scanner_snapshot"
