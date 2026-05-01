@@ -130,15 +130,19 @@ def test_cookie_secure_can_be_forced_and_proxy_trusted(
 
 
 def test_dashboard_html_requires_server_side_auth() -> None:
-    """Dashboard shells require auth; login remains public.
-    Dashboard shell 需 server-side auth；login 保持公開。
+    """Dashboard shells redirect unauthenticated browsers; login remains public.
+    Dashboard shell 未認證時跳登入頁；login 保持公開。
     """
     app = FastAPI()
     gui_legacy_routes.register_gui_legacy_routes(app)
     client = TestClient(app)
     assert client.get("/login").status_code == 200
-    assert client.get("/console").status_code == 401
-    assert client.get("/trading").status_code == 401
+    console = client.get("/console", follow_redirects=False)
+    assert console.status_code == 303
+    assert console.headers["location"] == "/login?redirect=/console"
+    trading = client.get("/trading?embed=1", follow_redirects=False)
+    assert trading.status_code == 303
+    assert trading.headers["location"] == "/login?redirect=/trading%3Fembed%3D1"
     headers = {"Authorization": f"Bearer {base.settings.api_token}"}
     assert client.get("/console", headers=headers).status_code == 200
 
