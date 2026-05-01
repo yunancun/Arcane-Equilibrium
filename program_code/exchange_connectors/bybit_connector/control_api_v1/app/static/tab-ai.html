@@ -24,6 +24,21 @@
   .provider-card .prov-models { font-size:11px; color:var(--text-dim); margin-bottom:8px; }
   .api-key-row { display:flex; gap:6px; align-items:center; }
   .api-key-row input { flex:1; font-family:monospace; font-size:11px; }
+  .roi-band { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:10px; margin-top:10px; }
+  .roi-tile { border:1px solid #21262d; border-radius:8px; padding:12px; background:var(--bg); min-height:76px; }
+  .roi-tile .k { font-size:11px; color:var(--text-dim); margin-bottom:6px; }
+  .roi-tile .v { font-size:20px; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .roi-tile .s { font-size:11px; color:var(--text-dim); margin-top:4px; }
+  .roi-status { display:flex; align-items:center; gap:8px; margin-top:10px; padding:10px 12px; border:1px solid #21262d; border-radius:8px; background:var(--bg); }
+  .roi-status .dot { width:9px; height:9px; border-radius:999px; background:var(--text-dim); flex:0 0 auto; }
+  .roi-status.good .dot { background:#3fb950; }
+  .roi-status.warn .dot { background:#d29922; }
+  .roi-status.bad .dot { background:#f85149; }
+  .roi-status.neutral .dot { background:#8b949e; }
+  .roi-status .text { font-size:12px; color:var(--text); }
+  .roi-status .sub { margin-left:auto; font-size:11px; color:var(--text-dim); }
+  @media (max-width: 820px) { .roi-band { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+  @media (max-width: 520px) { .roi-band { grid-template-columns:1fr; } .roi-status { align-items:flex-start; flex-direction:column; } .roi-status .sub { margin-left:0; } }
 </style>
 
 <!-- ═══ AI Engine Status ═══ -->
@@ -60,6 +75,28 @@
     <div class="oc-metric"><div class="oc-metric-label">AI 投资回报率</div><div class="oc-metric-val" id="ab-roi">--</div><div class="oc-metric-sub">AI 建议产生的收益/AI成本</div></div>
     <div class="oc-metric"><div class="oc-metric-label">有效预算</div><div class="oc-metric-val" id="ab-effective">--</div></div>
     <div class="oc-metric"><div class="oc-metric-label">调整原因</div><div class="oc-metric-val" id="ab-reason" style="font-size:12px">--</div></div>
+  </div>
+</div>
+
+<!-- ═══ Cost ROI Monitor ═══ -->
+<div class="oc-card">
+  <h3>AI Cost ROI Monitor</h3>
+  <div class="roi-band">
+    <div class="roi-tile"><div class="k">7d AI spend</div><div class="v blue" id="roi-spend">--</div><div class="s" id="roi-spend-sub">--</div></div>
+    <div class="roi-tile"><div class="k">7d paper PnL</div><div class="v" id="roi-pnl">--</div><div class="s" id="roi-pnl-sub">paper only</div></div>
+    <div class="roi-tile"><div class="k">cost-edge ratio</div><div class="v" id="roi-ratio">--</div><div class="s" id="roi-ratio-sub">min 3 data days</div></div>
+    <div class="roi-tile"><div class="k">budget remaining</div><div class="v" id="roi-remaining">--</div><div class="s" id="roi-remaining-sub">today</div></div>
+  </div>
+  <div class="roi-status neutral" id="roi-status">
+    <span class="dot"></span>
+    <span class="text" id="roi-verdict">checking...</span>
+    <span class="sub" id="roi-basis">paper_simulation_only</span>
+  </div>
+  <div class="oc-table-wrap" style="margin-top:10px">
+    <table class="oc-table">
+      <thead><tr><th>Day</th><th>Cost</th><th>Tokens</th></tr></thead>
+      <tbody id="roi-daily-body"><tr class="empty-row"><td colspan="3">--</td></tr></tbody>
+    </table>
   </div>
 </div>
 
@@ -492,15 +529,16 @@ async function loadCost() {
   // 在今日花费栏显示连接失败，让用户可见错误而非静默显示 '--'
   if (!d || !d.data) { ocSetText('a-today', '⚠ 失败 / Failed'); return; }
   const c = d.data;
-  const todayCost = c.today_cost || c.cost_today || 0;
-  const totalCost = c.total_cost || c.cost_total || c.total_cost_30d || 0;
-  const budget = c.daily_budget || c.budget_limit || 2;
+  const todayCost = c.today?.total_usd ?? c.today_cost ?? c.cost_today ?? 0;
+  const totalCost = c.cumulative?.total_usd ?? c.total_cost ?? c.cost_total ?? c.total_cost_30d ?? 0;
+  const budget = c.budget?.daily_hard_cap_usd ?? c.daily_budget ?? c.budget_limit ?? 2;
+  const sessions = c.today?.session_count ?? c.sessions_today ?? c.session_count ?? c.cumulative?.total_sessions ?? 0;
   ocSetText('a-today', ocBalance(todayCost, 4));
   ocSetText('a-total', ocBalance(totalCost, 2));
   ocSetText('a-budget', ocBalance(budget, 2));
-  ocSetText('a-sessions', c.sessions_today || c.session_count || 0);
-  ocSetText('a-avg', ocBalance(c.avg_cost_per_session || 0, 4));
-  const remaining = budget - todayCost;
+  ocSetText('a-sessions', sessions);
+  ocSetText('a-avg', ocBalance(c.avg_cost_per_session ?? (sessions > 0 ? todayCost / sessions : 0), 4));
+  const remaining = c.budget?.remaining_usd ?? (budget - todayCost);
   const elR = $('a-remaining');
   elR.textContent = ocBalance(remaining, 4);
   elR.className = 'oc-metric-val ' + (remaining > 0 ? 'green' : 'red');
@@ -514,7 +552,7 @@ async function loadAdaptive() {
   // FA-8: 使用 ?? 空值合并（而非 || 短路），确保 cost_edge_ratio=0 不被跳过
   // 优先读 cost_edge_ratio（根原则 13 字段），再降级到 roi / ai_roi
   // FA-8: Use nullish coalescing (??) instead of || to handle 0 correctly
-  const roi = a.cost_edge_ratio ?? a.roi ?? a.ai_roi;
+  const roi = a.cost_edge_ratio ?? a.roi_7d ?? a.roi ?? a.ai_roi;
   if (roi !== null && roi !== undefined) {
     $('ab-roi').textContent = ocNum(roi, 2) + 'x';
     // 根原则 13：cost_edge_ratio >= 0.8 才建议持仓 / Principle 13: ratio >= 0.8 = hold recommended
@@ -525,6 +563,62 @@ async function loadAdaptive() {
   }
   ocSetText('ab-effective', ocBalance(a.effective_budget || a.adjusted_budget, 2));
   ocSetText('ab-reason', a.reason || a.adjustment_reason || '--');
+}
+
+function roiVerdict(ratio, dataDays) {
+  if (dataDays < 3 || ratio === null || ratio === undefined) {
+    return {cls:'neutral', text:'Insufficient ROI sample'};
+  }
+  if (ratio < 0) return {cls:'bad', text:'AI cost has negative paper ROI'};
+  if (ratio < 0.8) return {cls:'warn', text:'AI ROI below cost-edge target'};
+  return {cls:'good', text:'AI ROI is above cost-edge target'};
+}
+
+async function loadCostRoiMonitor() {
+  const [adaptiveRes, costRes, gatewayRes] = await Promise.allSettled([
+    ocApi('/api/v1/paper/layer2/cost/adaptive'),
+    ocApi('/api/v1/paper/layer2/cost'),
+    ocApi('/api/v1/paper/ai-cost'),
+  ]);
+  const adaptive = adaptiveRes.status === 'fulfilled' && adaptiveRes.value?.data ? adaptiveRes.value.data : {};
+  const cost = costRes.status === 'fulfilled' && costRes.value?.data ? costRes.value.data : {};
+  const gateway = gatewayRes.status === 'fulfilled' && gatewayRes.value?.data ? gatewayRes.value.data : {};
+
+  const spend = adaptive.ai_spend_7d_usd ?? 0;
+  const pnl = adaptive.paper_pnl_7d_usd ?? 0;
+  const dataDays = adaptive.data_days ?? 0;
+  const ratio = adaptive.cost_edge_ratio ?? adaptive.roi_7d ?? adaptive.roi ?? adaptive.ai_roi;
+  const remaining = cost.budget?.remaining_usd ?? 0;
+  const hardCap = cost.budget?.daily_hard_cap_usd ?? 0;
+  const verdict = roiVerdict(ratio, dataDays);
+
+  ocSetText('roi-spend', ocBalance(spend, 4));
+  ocSetText('roi-spend-sub', dataDays + ' data days');
+  ocSetText('roi-pnl', ocBalance(pnl, 4));
+  $('roi-pnl').className = 'v ' + (pnl >= 0 ? 'green' : 'red');
+  ocSetText('roi-ratio', ratio === null || ratio === undefined ? 'N/A' : ocNum(ratio, 2) + 'x');
+  $('roi-ratio').className = 'v ' + (verdict.cls === 'good' ? 'green' : verdict.cls === 'bad' ? 'red' : '');
+  ocSetText('roi-ratio-sub', dataDays < 3 ? 'waiting for 3 days' : 'paper PnL / AI spend');
+  ocSetText('roi-remaining', ocBalance(remaining, 4));
+  ocSetText('roi-remaining-sub', hardCap ? 'cap ' + ocBalance(hardCap, 2) : 'today');
+  const status = $('roi-status');
+  status.className = 'roi-status ' + verdict.cls;
+  ocSetText('roi-verdict', verdict.text);
+  ocSetText('roi-basis', cost.roi_basis || gateway.source || 'paper_simulation_only');
+
+  const daily = Array.isArray(gateway.daily) ? gateway.daily.slice(-7).reverse() : [];
+  if (!daily.length) {
+    ocSetHtml('roi-daily-body', '<tr class="empty-row"><td colspan="3">No gateway daily cost data</td></tr>');
+    return;
+  }
+  let html = '';
+  daily.forEach(day => {
+    const label = day.date || day.day || day.timestamp || '--';
+    const dayCost = day.totalCost ?? day.total_cost ?? day.cost ?? 0;
+    const tokens = day.totalTokens ?? day.total_tokens ?? '--';
+    html += '<tr><td>' + ocEsc(String(label)) + '</td><td>' + ocBalance(dayCost, 4) + '</td><td>' + ocEsc(String(tokens)) + '</td></tr>';
+  });
+  ocSetHtml('roi-daily-body', html);
 }
 
 async function loadConsult() {
@@ -658,7 +752,15 @@ async function checkOllamaStatus() {
 }
 
 async function loadAll() {
-  await Promise.allSettled([loadCost(), loadAdaptive(), loadConsult(), loadSessions(), loadConfig(), loadPricing()]);
+  await Promise.allSettled([
+    loadCost(),
+    loadAdaptive(),
+    loadCostRoiMonitor(),
+    loadConsult(),
+    loadSessions(),
+    loadConfig(),
+    loadPricing(),
+  ]);
   checkOllamaStatus();
 }
 
