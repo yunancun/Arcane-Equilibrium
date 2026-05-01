@@ -148,9 +148,17 @@ pub(in crate::ipc_server) fn handle_get_scanner_status(
     let last_scan_json = match reg.last_scan() {
         None => serde_json::json!(null),
         Some(scan) => {
-            // Top 10 candidates with key fields for GUI display / 前 10 候選供 GUI 顯示
-            let top_candidates: Vec<serde_json::Value> = scan
-                .candidates
+            // Top 10 candidates with key fields for GUI display. `scan.candidates`
+            // is active-universe context, so rank it here for presentation.
+            // 前 10 候選供 GUI 顯示。`scan.candidates` 是 active-universe context，
+            // 因此在展示層重新按分數排序。
+            let mut ranked_candidates = scan.candidates.clone();
+            ranked_candidates.sort_by(|a, b| {
+                b.final_score
+                    .partial_cmp(&a.final_score)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
+            let top_candidates: Vec<serde_json::Value> = ranked_candidates
                 .iter()
                 .take(10)
                 .map(|c| {

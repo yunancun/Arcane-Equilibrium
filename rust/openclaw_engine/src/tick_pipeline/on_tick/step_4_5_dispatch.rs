@@ -249,6 +249,15 @@ impl TickPipeline {
                                         .as_estimate_key()
                                         .to_string(),
                                     intent_strategy: intent.strategy.clone(),
+                                    market_regime: candidate.market_regime.clone(),
+                                    trend_score: candidate.trend_score,
+                                    range_score: candidate.range_score,
+                                    shock_score: candidate.shock_score,
+                                    directional_efficiency: candidate.de,
+                                    dir_pct: candidate.dir_pct,
+                                    signed_dir_pct: candidate.signed_dir_pct,
+                                    range_pct: candidate.range_pct,
+                                    fr_bps: candidate.fr_bps,
                                     edge_bps: strategy_judgment
                                         .map(|j| j.edge_bps)
                                         .unwrap_or(candidate.edge_bps),

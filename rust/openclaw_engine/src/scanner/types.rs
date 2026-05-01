@@ -181,7 +181,11 @@ pub struct ScanResult {
     pub added: Vec<String>,
     /// Symbols removed in this cycle / 本次週期移除的交易對
     pub removed: Vec<String>,
-    /// Top candidates considered (sorted by final_score desc) / 考慮的頂級候選（按 final_score 降序）
+    /// Scored context for the active universe, including pinned symbols and
+    /// anti-churn retained symbols. Selection still happens before this field
+    /// is assembled; this list is for dispatch-time attribution and gates.
+    /// 活躍交易對的評分 context，包含固定交易對與 anti-churn 保留交易對。選擇
+    /// 已在組裝本欄位前完成；本列表供 dispatch 歸因與 gate 使用。
     pub candidates: Vec<ScoredSymbol>,
     /// Number of symbols rejected by hard filters / 被硬過濾器拒絕的交易對數量
     pub rejected_count: usize,
