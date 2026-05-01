@@ -125,6 +125,69 @@ Linux `trade-core` 已完成：
 - breakout 不再因高 DE 本身被懲罰，改為懲罰 failed trend
 - 五策略全 policy-blocked 時 symbol 才從 scanner selection 丟棄
 
+## 2026-05-01 follow-up：Python / Agent / MLDE surface 對齊（不 rebuild）
+
+本輪按「不新增 gate、不做 Rust rebuild」原則，補齊 scanner 資料在 Python 控制面、Agent 情報面、MLDE / Dream 學習面的取用路徑。Rust scanner hot path 未改動。
+
+### 1. Python 控制面改讀權威 Rust scanner
+
+新增 `rust_scanner_reader.py`，作為 Python 控制面統一 reader：
+
+- 透過 IPC `get_scanner_status` 讀 Rust scanner 最新狀態。
+- `/scanner/opportunities` 保留原 GUI 舊欄位：`symbol` / `strategy_type` / `score` / `reason`。
+- 同時新增：
+  - `scanner_context`：market_regime / trend_phase / trend_score / range_score / shock_score / crowding / reversal risk 等。
+  - `fitness`：`f_ma` / `f_grid` / `f_bbrv` / `f_bkout` / `f_funding_arb`。
+  - `breakout_proxy`：暴露 bb_breakout 當前 proxy inputs，標記為 audit only。
+  - `strategy_judgments`：若 DB 最新 scanner snapshot 可用，從 `trading.scanner_snapshots.candidates` 補齊每策略 route judgment。
+
+這裡的 DB 補齊是 fail-soft：IPC 仍是主來源；DB 不可用時 API 不 500，只少掉 per-strategy 詳細 judgment。
+
+### 2. ScoutWorker 從 stub 改為 Rust scanner 優先
+
+原 ScoutWorker 每 30 分鐘呼叫 `MarketScanner.scan()`，但 Python `local_model_tools.market_scanner.MarketScanner` 已是 legacy stub，`scan()` 返回空列表，導致 Scout→Strategist 情報面拿不到 scanner 趨勢判斷。
+
+本輪改為：
+
+1. 先讀 Rust scanner normalized opportunities。
+2. 若 Rust scanner / IPC 不可用，再 fallback 到 legacy `MarketScanner.scan()`。
+3. Scout intel metadata 帶出：
+   - `scanner_source`
+   - `scanner_candidates`
+   - `market_regimes`
+   - `trend_phases`
+
+結果：Agent 情報面現在能讀到 pinned BTC/ETH 和其他 active symbols 的 scanner 趨勢 phase / market regime，而不依賴 Python stub。
+
+### 3. MLDE / Dream 訓練與建議面補 scanner context
+
+新增 SQL migration `V034__mlde_scanner_context_columns.sql`，重建 `learning.mlde_edge_training_rows`，並在 view 尾部追加 scanner context 欄位：
+
+- regime / phase：`scanner_market_regime`、`scanner_trend_phase`
+- trend/range/shock：`scanner_trend_score`、`scanner_range_score`、`scanner_shock_score`
+- 位置與風險：`scanner_close_alignment`、`scanner_range_position`、`scanner_crowding_score`、`scanner_reversal_risk_score`
+- 原始 market inputs：`scanner_directional_efficiency`、`scanner_dir_pct`、`scanner_signed_dir_pct`、`scanner_range_pct`、`scanner_fr_bps`
+- 五策略 fitness：`scanner_f_ma`、`scanner_f_grid`、`scanner_f_bbrv`、`scanner_f_bkout`、`scanner_f_funding_arb`
+
+`mlde_shadow_advisor.py` 與 `dream_engine.py` 現在會把可用 scanner context 放入 recommendation / insight payload。為避免 DB migration 尚未 apply 時整個 advisor 失效，兩者會先查 view columns；缺失欄位以 NULL select，保持 backward compatible。
+
+### 4. BB breakout proxy 的處理
+
+本輪沒有新增 bb_breakout gate，也沒有把 kline Bollinger bandwidth 硬塞進 scanner hot path。原因是：
+
+- 現有 Rust scanner 的 `f_bkout` 是 market-structure proxy：trend / range expansion / close alignment / crowding / failed-trend 風險。
+- 真正的 BB bandwidth / squeeze / band expansion 屬於策略 indicator domain，若要在 Rust scanner 中直接納入，需要 scanner 讀 kline/indicator context，屬 Rust hot path 改造並需要 rebuild。
+
+因此本輪做的是「暴露 proxy inputs + 讓學習面可歸因」，不是加門。後續若 `bb_breakout` 持續虧損，應用這些欄位做 counterfactual 分析，再決定是否值得做 kline-bandwidth Rust scanner 改造。
+
+### 5. 本輪不改變的邊界
+
+- 不新增 scanner gate。
+- 不改 Rust scanner scorer / runner / dispatch hot path。
+- 不修改 live / live_demo execution authority。
+- 不 rebuild，不 restart engine。
+- SQL migration 只擴展 learning view；ML/Dream 仍是 advisory / shadow surface。
+
 ## 結論
 
 這次修復沒有新增 hard gate；scanner 的作用從「四策略粗 regime 分流」提升為「五策略共享的市場結構 attribution」。Pinned BTC/ETH、anti-churn active symbols、以及 dynamic candidates 都會保有同樣的 scanner context surface；五種策略可按自身真實需求讀取同一份 scanner data。

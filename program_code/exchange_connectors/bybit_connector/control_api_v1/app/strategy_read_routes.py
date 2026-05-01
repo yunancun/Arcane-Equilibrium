@@ -9,6 +9,10 @@ from fastapi.responses import JSONResponse
 
 from . import main_legacy as base
 from .ipc_state_reader import get_rust_reader
+from .rust_scanner_reader import (
+    enrich_scanner_status_with_db,
+    normalize_scanner_opportunities,
+)
 from .strategy_wiring import (
     phase2_router,
     KLINE_MANAGER,
@@ -408,13 +412,14 @@ async def get_scanner_opportunities(actor: base.AuthenticatedActor = Depends(bas
     """Get latest market scan opportunities from Rust scanner via IPC.
 
     IPC-SCAN-1c: Python MarketScanner is a stub (local_model_tools/market_scanner.py);
-    authoritative data lives in rust/openclaw_engine/src/scanner/. This route mirrors
-    the `/scanner/deployed` pattern (line 432) and reads `last_scan.top_candidates`
-    from IPC `get_scanner_status`, mapping Rust fields to GUI-expected fields.
+    authoritative data lives in rust/openclaw_engine/src/scanner/. This route reads
+    `last_scan.top_candidates` from IPC `get_scanner_status`, keeps the legacy
+    GUI fields, and exposes scanner_context / fitness / strategy_judgments when
+    available.
 
     IPC-SCAN-1c：Python MarketScanner 僅為 stub，權威掃描資料在 Rust scanner。
-    此路由透過 IPC get_scanner_status 讀取 last_scan.top_candidates，
-    並將 Rust 欄位映射為 GUI 所需欄位（symbol / strategy_type / score / reason）。
+    此路由透過 IPC get_scanner_status 讀取 last_scan.top_candidates，保留
+    GUI 舊欄位，並補出 scanner_context / fitness / strategy_judgments。
     """
     try:
         from .ipc_client import EngineIPCClient  # noqa: PLC0415
@@ -433,40 +438,9 @@ async def get_scanner_opportunities(actor: base.AuthenticatedActor = Depends(bas
                 "source": "rust_scanner",
             })
 
+        result = enrich_scanner_status_with_db(result)
         last_scan = result.get("last_scan") or {}
-        candidates = last_scan.get("top_candidates") or []
-
-        opportunities = []
-        for c in candidates:
-            if not isinstance(c, dict):
-                continue
-            # Compose human-readable reason from sector + edge info.
-            # Narrow try wrapper so a single bad candidate loses its reason
-            # rather than poisoning the whole batch via the outer except.
-            # 由 sector 與 edge 資訊組合人類可讀的原因字串；
-            # 窄 try 包一層，單一壞 candidate 只掉 reason，不會毒殺整批。
-            sector = c.get("sector") or ""
-            edge_bonus = c.get("edge_bonus")
-            edge_n = c.get("edge_n")
-            parts: list[str] = []
-            if sector:
-                parts.append(str(sector))
-            # edge_n truthy guard: n=0 means "no samples yet" per handlers.rs:1070 —
-            # skipping is intentional; switch to `is not None` if semantics change.
-            # edge_n truthy 守衛：n=0 表「尚無樣本」（見 handlers.rs:1070），故意跳過。
-            if edge_bonus is not None and edge_n:
-                try:
-                    parts.append(f"edge={float(edge_bonus):+.2f} (n={int(edge_n)})")
-                except (TypeError, ValueError):
-                    pass
-            reason = " · ".join(parts) if parts else "--"
-
-            opportunities.append({
-                "symbol": c.get("symbol"),
-                "strategy_type": c.get("best_strategy"),
-                "score": c.get("final_score"),
-                "reason": reason,
-            })
+        opportunities = normalize_scanner_opportunities(result)
 
         stats = {
             "scan_ts_ms": last_scan.get("scan_ts_ms"),
@@ -475,6 +449,7 @@ async def get_scanner_opportunities(actor: base.AuthenticatedActor = Depends(bas
             "removed": last_scan.get("removed"),
             "rejected_count": last_scan.get("rejected_count"),
             "active_count": result.get("active_count"),
+            "candidate_detail_source": last_scan.get("candidate_detail_source", "ipc"),
         }
         return _envelope({
             "opportunities": opportunities,

@@ -58,6 +58,12 @@ def test_shadow_advisor_builds_rank_and_veto_recommendations():
                 "regime": "trending",
                 "scanner_route_mode": "normal",
                 "scanner_edge_status": "positive",
+                "scanner_market_regime": "trending",
+                "scanner_trend_phase": "clean_trend",
+                "scanner_trend_score": 0.82,
+                "scanner_range_score": 0.18,
+                "scanner_f_ma": 0.81,
+                "scanner_f_bkout": 0.74,
                 "mlde_arm_id": "ma_crossover__btc__trending__normal__positive",
                 "linucb_arm_id": "trending__ma_crossover",
                 "sample_count": 8,
@@ -90,6 +96,9 @@ def test_shadow_advisor_builds_rank_and_veto_recommendations():
     assert {r.recommendation_type for r in recs} == {"rank", "veto"}
     assert all(r.payload["policy"] == "shadow_advisory_only" for r in recs)
     assert all(0.0 < r.confidence <= cfg.confidence_cap for r in recs)
+    rank = next(r for r in recs if r.recommendation_type == "rank")
+    assert rank.payload["scanner_context"]["scanner_trend_phase"] == "clean_trend"
+    assert rank.payload["scanner_context"]["scanner_f_bkout"] == 0.74
 
 
 def test_dream_summary_emits_parameter_proposals_for_negative_edge():
@@ -102,6 +111,10 @@ def test_dream_summary_emits_parameter_proposals_for_negative_edge():
                 "regime": "mean_reverting",
                 "scanner_route_mode": "normal",
                 "scanner_edge_status": "negative",
+                "scanner_market_regime": "range_bound",
+                "scanner_trend_phase": "range_bound",
+                "scanner_range_score": 0.78,
+                "scanner_f_grid": 0.83,
                 "sample_count": 12,
                 "avg_net_bps": -8.0,
             },
@@ -124,6 +137,8 @@ def test_dream_summary_emits_parameter_proposals_for_negative_edge():
     assert insight["strategy_name"] == "grid_trading"
     assert insight["param_name"] == "grid_spacing_bps"
     assert insight["expected_improvement_bps"] == pytest.approx(4.0)
+    assert insight["scanner_context"]["scanner_trend_phase"] == "range_bound"
+    assert insight["scanner_context"]["scanner_f_grid"] == 0.83
 
 
 def test_opportunity_tracker_classifies_undertrading_and_overtrading():
