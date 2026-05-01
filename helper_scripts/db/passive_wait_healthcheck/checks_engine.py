@@ -832,9 +832,9 @@ def check_intents_counter_freeze(cur) -> tuple[str, str]:
     intents_30min count. The "demo only positions > 0" gate is implicit:
     if positions are truly zero, demo strategist is idle by design and
     minutes_since_last_intent grows naturally — that's a steady state we
-    do not want to FAIL. We mitigate by checking ``minutes_since_last_intent``
-    against a coarse threshold (>30 min + intents_30min=0 = FAIL) and only
-    on demo / live / live_demo (paper opt-in is excluded).
+    do not want to FAIL. We therefore only escalate to FAIL when the slow
+    path proves that an Approved Guardian verdict existed but no matching
+    intent was persisted.
 
     GUARDIAN-CROSS-CHECK (2026-04-27, follow-up to d4bc9eb scope):
     Originally a frozen intents counter alone was sufficient for FAIL, but
@@ -843,19 +843,31 @@ def check_intents_counter_freeze(cur) -> tuple[str, str]:
     Guardian verdicts (negative-edge or below fee threshold), Approval
     rate ~1/hour. live_demo verdicts table sees 40k-178k Rejected/hour
     while intents (Approved-only) sees 1-11/hour, easily crossing 30-min
-    "frozen" without any pipeline issue. Real pipeline wedge would freeze
-    Guardian too (verdicts=0). Cross-check: FAIL only when both intents=0
-    AND verdicts < 100 in the same 30-min window. When verdicts >= 100
-    but intents=0, classify as WARN with explicit "cost_gate fully
-    blocking (edge crisis by-design)" annotation — Guardian alive,
-    cost_gate doing its job, not a silent-fail.
+    "frozen" without any pipeline issue. The corrected cross-check is:
+    FAIL only when Approved verdicts exist but intents stay at 0; rejected-only
+    verdicts are WARN because the risk / cost gates are doing their job.
+
+    2026-05-01 calibration: scanner / strategy pre-gates can keep signal
+    observation rows flowing while Guardian verdicts stay sparse. Therefore
+    ``decision_context_snapshots`` is treated as signal liveness only, not
+    Guardian liveness. A true intent-persistence wedge needs an Approved
+    risk verdict in the same 30-minute window with zero persisted intents.
+
+    2026-05-01 校準：scanner / strategy pre-gate 會讓 signal observation
+    持續寫入，但 Guardian verdict 仍可能很稀疏。因此
+    ``decision_context_snapshots`` 只代表訊號活性，不代表 Guardian 活性。
+    真正的 intent persistence wedge 必須是同一 30 分鐘窗口內有 Approved
+    risk verdict，卻沒有 persisted intent。
 
     Three-state verdict:
       * FAIL: minutes_since_last_intent > 30 AND intents_30min = 0
-              AND verdicts_30min < 100 (Guardian also frozen — real wedge)
+              AND approved_verdicts_30min > 0 (approved verdict not persisted)
       * WARN: minutes_since_last_intent > 30 AND intents_30min = 0
-              AND verdicts_30min >= 100 (cost_gate fully blocking,
-              Guardian alive — by-design edge-crisis state)
+              AND verdicts_30min > 0 AND approved_verdicts_30min = 0
+              (risk / cost gates fully rejecting, Guardian alive)
+      * WARN: minutes_since_last_intent > 30 AND intents_30min = 0
+              AND verdicts_30min = 0 AND dcs_30min > 0
+              (signal-observation only; no Guardian attempts)
       * WARN: minutes_since_last_intent 15-30 AND intents_30min = 0
               (early-warning: counter not incrementing, regardless of
               Guardian state)
@@ -870,22 +882,25 @@ def check_intents_counter_freeze(cur) -> tuple[str, str]:
     不前進」— strategist 仍評估但 intent persistence 靜默斷掉的指紋。
     spec 簡化：positions>0 cross-query 移除，SQL 直接錨 trading.intents
     per engine_mode 的 minutes_since_last_intent + intents_30min。
-    持倉真 0 時 demo 自然閒置不應 FAIL，故用 30 min coarse 閾值 + intents_30min=0
-    雙條件，避開閒置誤殺。
+    持倉真 0 時 demo 自然閒置不應 FAIL；只有 slow path 證明已有 Approved
+    Guardian verdict 但 intent 沒寫入時，才升級為 FAIL。
 
     GUARDIAN-CROSS-CHECK（2026-04-27，d4bc9eb scope follow-up）：
     原本 intents counter 凍 30 min 即 FAIL，但 §三 Phase 5 edge-crisis
     狀態下 live_demo 的 ``cost_gate(JS-demo)`` 阻擋 ~99.99% Guardian
     verdicts（負 edge 或低於 fee threshold），Approval rate ~1/hour。
     live_demo 的 verdicts 表每小時 4-17 萬 Rejected vs intents 1-11/hour，
-    輕易越過 30-min「凍結」門檻但 pipeline 並無 issue。真實 wedge 必伴隨
-    Guardian 也凍（verdicts=0）。Cross-check: 僅 intents=0 + verdicts<100
-    雙 0 才 FAIL；verdicts>=100 + intents=0 改判 WARN 並標 "cost_gate
-    fully blocking (edge crisis by-design)"，Guardian 活著、cost_gate 工作中。
+    輕易越過 30-min「凍結」門檻但 pipeline 並無 issue。校準後的交叉檢查：
+    只有 Approved verdict 存在但 intent=0 才 FAIL；rejected-only verdicts
+    改判 WARN，表示 risk / cost gate 正在工作。
 
     三態：
-      * FAIL: stale>30min + intents_30min=0 + verdicts_30min<100（雙凍 = 真 wedge）
-      * WARN: stale>30min + intents_30min=0 + verdicts_30min>=100（cost_gate 全擋 by-design）
+      * FAIL: stale>30min + intents_30min=0 + approved_verdicts_30min>0
+        （Approved verdict 未持久化成 intent = 真 wedge）
+      * WARN: stale>30min + intents_30min=0 + verdicts_30min>0 + approved=0
+        （risk / cost gate 全拒，Guardian 活著）
+      * WARN: stale>30min + intents_30min=0 + verdicts_30min=0 + dcs_30min>0
+        （signal observation 活著但沒有 Guardian 嘗試）
       * WARN: stale 15-30min + intents_30min=0（早期警告，無論 Guardian 狀態）
       * PASS: stale<15min 或 intents_30min>0（counter 活或近期活動）
     per-engine_mode 彙總，最差勝。
@@ -901,12 +916,6 @@ def check_intents_counter_freeze(cur) -> tuple[str, str]:
     # live_demo / live。
     modes = ("demo", "live_demo", "live")
     per_mode: list[tuple[str, str, str]] = []  # (mode, status, short_msg)
-    # Guardian-cross-check threshold: 100 verdicts/30min is loose enough that
-    # even a 99% throughput collapse from 40k/h normal still clears it.
-    # Real wedge fingerprint = verdicts also drops to ~0.
-    # Guardian 交叉門檻：100 verdicts/30min 寬鬆到正常 4 萬/h 跌 99% 仍過得了；
-    # 真實 wedge = verdicts 也跌到 ~0。
-    VERDICTS_LIVENESS_THRESHOLD = 100
     engine_age_min, _engine_age_diag = _engine_process_age_minutes()
     try:
         for mode in modes:
@@ -953,19 +962,24 @@ def check_intents_counter_freeze(cur) -> tuple[str, str]:
             # 慢路徑：intents counter 看似凍 — 宣告 wedge 前先查 Guardian
             # verdicts 在同窗口的活性。
             verdicts_30min = 0
+            approved_verdicts_30min = 0
             try:
                 cur.execute(
-                    "SELECT count(*) FROM trading.risk_verdicts "
+                    "SELECT count(*), "
+                    "  count(*) FILTER (WHERE lower(verdict) = 'approved') "
+                    "FROM trading.risk_verdicts "
                     "WHERE engine_mode = %s AND ts > now() - interval '30 minutes'",
                     (mode,),
                 )
                 v_row = cur.fetchone()
                 verdicts_30min = int(v_row[0] or 0) if v_row else 0
+                approved_verdicts_30min = int(v_row[1] or 0) if v_row else 0
             except Exception:
                 # Verdicts probe failed — fall through to legacy intent-only
                 # FAIL/WARN logic so we don't silently downgrade a real wedge.
                 # verdicts 查失敗 → 退回原 intent-only 邏輯，避免靜默降級真 wedge。
                 verdicts_30min = -1
+                approved_verdicts_30min = -1
             dcs_30min = 0
             try:
                 cur.execute(
@@ -978,7 +992,9 @@ def check_intents_counter_freeze(cur) -> tuple[str, str]:
             except Exception:
                 dcs_30min = -1
             seg_with_v = (
-                f"{seg}, verdicts_30min={verdicts_30min}, dcs_30min={dcs_30min}"
+                f"{seg}, verdicts_30min={verdicts_30min}, "
+                f"approved_verdicts_30min={approved_verdicts_30min}, "
+                f"dcs_30min={dcs_30min}"
                 if verdicts_30min >= 0
                 else f"{seg}, verdicts_probe_failed"
             )
@@ -992,28 +1008,41 @@ def check_intents_counter_freeze(cur) -> tuple[str, str]:
                 )
                 continue
             if minutes_since > 30.0:
-                if 0 <= verdicts_30min < VERDICTS_LIVENESS_THRESHOLD:
-                    # Both intents AND verdicts frozen → real wedge.
-                    # intents + verdicts 雙凍 → 真 wedge。
+                if approved_verdicts_30min > 0:
+                    # Approved Guardian verdict with no persisted intent → real wedge.
+                    # Guardian 已批准但 intent 沒寫入 → 真 wedge。
                     per_mode.append(
                         (
                             mode,
                             "FAIL",
                             seg_with_v
-                            + " — counter frozen >30min + Guardian also frozen (verdicts<100)",
+                            + " — approved risk verdicts exist but intent persistence stayed at 0",
                         )
                     )
-                elif verdicts_30min >= VERDICTS_LIVENESS_THRESHOLD:
-                    # Guardian alive but intents=0 = cost_gate fully blocking.
-                    # By-design during edge crisis (§三 Phase 5 PAUSED).
-                    # Guardian 活但 intents=0 = cost_gate 全擋；§三 Phase 5
-                    # PAUSED edge-crisis 期間 by-design。
+                elif verdicts_30min > 0:
+                    # Guardian alive but all verdicts rejected = risk/cost gates blocking.
+                    # Guardian 活但全拒絕 = risk/cost gate 正在擋。
                     per_mode.append(
                         (
                             mode,
                             "WARN",
                             seg_with_v
-                            + " — cost_gate fully blocking (edge crisis by-design); Guardian alive",
+                            + " — risk/cost gates rejecting all attempts; Guardian alive",
+                        )
+                    )
+                elif dcs_30min > 0:
+                    # Signal observation is alive, but no Guardian attempts reached the
+                    # risk-verdict writer. This is usually scanner/strategy pre-gating,
+                    # not an intent persistence wedge.
+                    # signal observation 活著，但沒有 Guardian 嘗試進入 risk_verdict
+                    # writer。通常是 scanner/strategy pre-gate，不是 intent 寫入 wedge。
+                    per_mode.append(
+                        (
+                            mode,
+                            "WARN",
+                            seg_with_v
+                            + " — signal snapshots active but no Guardian attempts; "
+                            "likely scanner/strategy pre-gate",
                         )
                     )
                 else:
