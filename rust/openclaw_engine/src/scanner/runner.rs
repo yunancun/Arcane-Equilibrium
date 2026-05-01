@@ -25,12 +25,14 @@ use crate::edge_estimates::EdgeEstimates;
 use crate::market_data_client::MarketDataClient;
 use crate::scanner::config::ScannerConfig;
 use crate::scanner::registry::SymbolRegistry;
-use crate::scanner::scorer::{apply_correlation_filter, score_ticker_with_policy};
+use crate::scanner::scorer::{
+    apply_correlation_filter, score_ticker_for_context, score_ticker_with_policy,
+};
 use crate::scanner::strategy_policy::ScannerStrategyPolicyStores;
 use crate::scanner::types::ScanResult;
 use crate::tick_pipeline::PipelineCommand;
 use crate::ws_client::WsTopicChange;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
@@ -219,6 +221,41 @@ impl ScannerRunner {
             // ── Step 8: Store scan result / 存儲掃描結果 ──
             let scan_duration_ms = scan_start.elapsed().as_millis() as u64;
             let active_symbols = self.registry.snapshot();
+            let snapshot_candidates = {
+                let by_selected: HashMap<&str, _> =
+                    filtered.iter().map(|c| (c.symbol.as_str(), c)).collect();
+                let by_ticker: HashMap<&str, _> =
+                    tickers.iter().map(|t| (t.symbol.as_str(), t)).collect();
+                let estimates_guard = self.edge_estimates.read();
+                let mut seen = HashSet::new();
+                let mut out = Vec::with_capacity(active_symbols.len());
+
+                for symbol in &active_symbols {
+                    if let Some(candidate) = by_selected.get(symbol.as_str()) {
+                        if seen.insert(symbol.clone()) {
+                            out.push((*candidate).clone());
+                        }
+                        continue;
+                    }
+                    if let Some(ticker) = by_ticker.get(symbol.as_str()) {
+                        if let Some(candidate) = score_ticker_for_context(
+                            ticker,
+                            btc_change_pct,
+                            &estimates_guard,
+                            &config.hard_filters,
+                            &config.edge_routing,
+                            &config.market_judgment,
+                            &strategy_policy,
+                        ) {
+                            if seen.insert(symbol.clone()) {
+                                out.push(candidate);
+                            }
+                        }
+                    }
+                }
+
+                out
+            };
 
             let scan_result = ScanResult {
                 scan_ts_ms: now_ms,
@@ -226,7 +263,7 @@ impl ScannerRunner {
                 active_symbols: active_symbols.clone(),
                 added: added.clone(),
                 removed: removed.clone(),
-                candidates: filtered,
+                candidates: snapshot_candidates,
                 rejected_count,
                 scan_duration_ms,
             };

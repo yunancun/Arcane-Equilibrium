@@ -525,8 +525,58 @@ pub fn score_ticker_with_policy(
     market_judgment_config: &MarketJudgmentConfig,
     strategy_policy: &ScannerStrategyPolicy,
 ) -> Option<ScoredSymbol> {
-    // Apply hard filters first / 首先應用硬過濾器
-    apply_hard_filters(ticker, hard_filter_config)?;
+    score_ticker_internal(
+        ticker,
+        btc_change_pct,
+        estimates,
+        hard_filter_config,
+        edge_routing_config,
+        market_judgment_config,
+        strategy_policy,
+        true,
+    )
+}
+
+/// Build scanner context for an already-active symbol without applying universe
+/// hard filters. This is for observability/attribution only; selection still
+/// uses `score_ticker_with_policy`.
+/// 為已活躍交易對建立 scanner context，不套用 universe hard filters。僅供
+/// 可觀測性/歸因使用；候選選擇仍走 `score_ticker_with_policy`。
+pub fn score_ticker_for_context(
+    ticker: &TickerInfo,
+    btc_change_pct: f64,
+    estimates: &EdgeEstimates,
+    hard_filter_config: &HardFilters,
+    edge_routing_config: &EdgeRoutingConfig,
+    market_judgment_config: &MarketJudgmentConfig,
+    strategy_policy: &ScannerStrategyPolicy,
+) -> Option<ScoredSymbol> {
+    score_ticker_internal(
+        ticker,
+        btc_change_pct,
+        estimates,
+        hard_filter_config,
+        edge_routing_config,
+        market_judgment_config,
+        strategy_policy,
+        false,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn score_ticker_internal(
+    ticker: &TickerInfo,
+    btc_change_pct: f64,
+    estimates: &EdgeEstimates,
+    hard_filter_config: &HardFilters,
+    edge_routing_config: &EdgeRoutingConfig,
+    market_judgment_config: &MarketJudgmentConfig,
+    strategy_policy: &ScannerStrategyPolicy,
+    enforce_hard_filters: bool,
+) -> Option<ScoredSymbol> {
+    if enforce_hard_filters {
+        apply_hard_filters(ticker, hard_filter_config)?;
+    }
 
     let base = base_from_usdt_symbol(&ticker.symbol).unwrap_or("");
     let sector = symbol_sector(base).to_string();
@@ -715,6 +765,43 @@ mod tests {
             0.05,
         );
         assert!(apply_hard_filters(&t, &default_hard_filters()).is_none());
+    }
+
+    #[test]
+    fn test_context_scoring_bypasses_hard_filters_for_active_attribution() {
+        let t = make_ticker(
+            "SOLUSDT",
+            100.0,
+            99.99,
+            100.01,
+            10_000_000.0,
+            110.0,
+            90.0,
+            0.0001,
+            0.05,
+        );
+        let filters = default_hard_filters();
+        assert!(score_ticker(
+            &t,
+            1.0,
+            &EdgeEstimates::empty(),
+            &filters,
+            &EdgeRoutingConfig::default(),
+            &MarketJudgmentConfig::default(),
+        )
+        .is_none());
+        let context = score_ticker_for_context(
+            &t,
+            1.0,
+            &EdgeEstimates::empty(),
+            &filters,
+            &EdgeRoutingConfig::default(),
+            &MarketJudgmentConfig::default(),
+            &ScannerStrategyPolicy::default(),
+        )
+        .expect("active-symbol context should still be scored");
+        assert_eq!(context.symbol, "SOLUSDT");
+        assert!(!context.strategy_judgments.is_empty());
     }
 
     #[test]
