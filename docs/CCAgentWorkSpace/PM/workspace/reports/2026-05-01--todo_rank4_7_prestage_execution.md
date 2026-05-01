@@ -27,8 +27,10 @@ Checkpoint `ec8f0f4` completed the four selected items:
 
 - No rebuild or restart was performed.
 - Rust engine runtime remains the `daab51c` scanner deploy.
-- Latest pre-batch wrapper sample at 2026-05-01 22:02 CEST was SUMMARY WARN exit 0.
-- `[27]` remains WARN because current recent verdicts are rejected-only (`approved_verdicts_30m=0`), not a writer wedge.
+- Linux source fast-forwarded to `21ecbf6`.
+- Latest post-sync wrapper sample at 2026-05-01 22:21 CEST was SUMMARY FAIL exit 1 due `[22] trading_pipeline_silent_gap`.
+- Read-only split: recent live_demo orders are `Working` PostOnly limits; recent demo risk is rejected-only. This is not yet proven writer/order-push wedge and should be treated as `[22]` semantic calibration before restart-style action.
+- `[27]` remains WARN because current recent demo verdicts are rejected-only (`approved_verdicts_30m=0`), not a persisted-intent writer wedge.
 
 ## Boundary
 

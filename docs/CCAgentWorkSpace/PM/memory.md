@@ -1155,3 +1155,8 @@ Operator 接續 Tier 8 sign-off 後說「繼續派」。PM 按 Tier 8 §8 推薦
 ### Boundary
 - No runtime rebuild/restart, DB write, cron installation, SIGHUP, live authorization change, risk config change, or strategy parameter change was performed.
 - G7-04 remains dormant until a future hot-path wiring task explicitly enables the CUSUM filter; G4-03 apply mode remains env-gated and unscheduled.
+
+### Post-Sync Observation
+- After push and Linux source fast-forward to `21ecbf6`, wrapper returned SUMMARY FAIL on `[22] trading_pipeline_silent_gap`.
+- Read-only split showed engine/watchdog healthy, recent live_demo orders were `Working` PostOnly limits, and recent demo risk was rejected-only; no rebuild/restart was performed.
+- PM interpretation: treat `[22]` as next P0 hygiene candidate to distinguish unfilled maker working orders from a true writer/order-push wedge.
