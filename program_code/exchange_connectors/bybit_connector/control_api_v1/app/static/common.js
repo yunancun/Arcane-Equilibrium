@@ -41,8 +41,7 @@ function ocAuthCheck() {
       });
       clearTimeout(tid);
       if (r.status === 401 || r.status === 403) {
-        sessionStorage.setItem('oc_login_redirect', window.location.pathname || '/console');
-        window.location.href = '/login';
+        ocRedirectToLogin();
       }
       // 200: already authenticated, continue page load
       // other: server might be starting up, treat as auth ok for now
@@ -56,6 +55,40 @@ function ocAuthCheck() {
   // Return true synchronously so callers that check the return value still work.
   // 同步返回 true，保持向後兼容（調用方若檢查返回值仍能正常工作）。
   return true;
+}
+
+function ocIsUnauthenticatedDetail(detail) {
+  if (detail === 'Not authenticated' || detail === 'Authentication required') {
+    return true;
+  }
+  return !!(
+    detail &&
+    Array.isArray(detail.reason_codes) &&
+    detail.reason_codes.includes('unauthenticated')
+  );
+}
+
+function ocRedirectToLogin(redirectPath) {
+  const current = redirectPath || (window.location.pathname + window.location.search) || '/console';
+  if (window.location.pathname !== '/login') {
+    sessionStorage.setItem('oc_login_redirect', current);
+    window.location.href = '/login';
+  }
+}
+
+async function ocHandleUnauthenticatedResponse(response, redirectPath) {
+  if (!response || response.ok) return false;
+  let detail = null;
+  try {
+    const body = await response.clone().json();
+    detail = body && body.detail;
+  } catch (_) { /* response body is not JSON */ }
+
+  if (ocIsUnauthenticatedDetail(detail)) {
+    ocRedirectToLogin(redirectPath);
+    return true;
+  }
+  return false;
 }
 
 /**
@@ -150,6 +183,7 @@ async function ocApi(path, opts) {
       signal: AbortSignal.timeout(8000),  // 8s timeout prevents GUI freeze on slow API / 8 秒超时防止 API 慢时 GUI 卡死
     });
     if (!r.ok) {
+      if (await ocHandleUnauthenticatedResponse(r)) return null;
       if (r.status === 401 || r.status === 403) {
         _ocAuthFails++;
         if (_ocAuthFails >= _OC_AUTH_MAX) {

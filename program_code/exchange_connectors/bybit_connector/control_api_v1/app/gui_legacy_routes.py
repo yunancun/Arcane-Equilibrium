@@ -27,8 +27,9 @@ MODULE_NOTE (English):
 """
 
 from pathlib import Path
+from urllib.parse import quote
 
-from fastapi import Depends
+from fastapi import HTTPException, Request
 from fastapi.responses import FileResponse
 from starlette.responses import RedirectResponse
 
@@ -44,12 +45,49 @@ _NO_CACHE_HEADERS = {
 }
 
 
+def _is_unauthenticated(exc: HTTPException) -> bool:
+    """Return True for the canonical current_actor unauthenticated error."""
+    detail = exc.detail
+    return (
+        exc.status_code == 401
+        and isinstance(detail, dict)
+        and "unauthenticated" in detail.get("reason_codes", [])
+    )
+
+
+def _login_redirect_for(request: Request) -> RedirectResponse:
+    """Redirect GUI document requests to login while preserving the target path."""
+    target = request.url.path
+    if request.url.query:
+        target = f"{target}?{request.url.query}"
+    return RedirectResponse(
+        url=f"/login?redirect={quote(target, safe='/')}",
+        status_code=303,
+        headers=_NO_CACHE_HEADERS,
+    )
+
+
+def _redirect_if_unauthenticated(request: Request) -> RedirectResponse | None:
+    """Authenticate a GUI shell request, or return a login redirect."""
+    from . import main_legacy as _base
+
+    try:
+        _base.current_actor(
+            request=request,
+            authorization=request.headers.get("authorization"),
+        )
+    except HTTPException as exc:
+        if _is_unauthenticated(exc):
+            return _login_redirect_for(request)
+        raise
+    return None
+
+
 def register_gui_legacy_routes(app) -> None:
     """
     Register all GUI / HTML legacy routes on the FastAPI app.
     在 FastAPI app 上註冊所有 GUI / HTML legacy 路由。
     """
-    from . import main_legacy as _base
 
     @app.get("/login", include_in_schema=False)
     def login_page() -> FileResponse:
@@ -62,20 +100,29 @@ def register_gui_legacy_routes(app) -> None:
         return RedirectResponse(url="/console")
 
     @app.get("/gui", include_in_schema=False)
-    def gui_index(actor=Depends(_base.current_actor)) -> FileResponse:
+    def gui_index(request: Request):
         """Legacy GUI index.html / 舊版 GUI index.html."""
+        redirect = _redirect_if_unauthenticated(request)
+        if redirect is not None:
+            return redirect
         return FileResponse(_static_dir / "index.html", headers=_NO_CACHE_HEADERS)
 
     @app.get("/console", include_in_schema=False)
-    def console_index(actor=Depends(_base.current_actor)) -> FileResponse:
+    def console_index(request: Request):
         """Unified console: Trading Dashboard + OpenClaw + AI Cost sidebar.
         統一控制台：交易儀表盤 + OpenClaw + AI Cost 側欄。"""
+        redirect = _redirect_if_unauthenticated(request)
+        if redirect is not None:
+            return redirect
         return FileResponse(_static_dir / "console.html", headers=_NO_CACHE_HEADERS)
 
     @app.get("/trading", include_in_schema=False)
-    def trading_dashboard(actor=Depends(_base.current_actor)) -> FileResponse:
+    def trading_dashboard(request: Request):
         """Trading chart dashboard: TradingView Lightweight Charts + signals + strategies.
         交易圖表儀表盤：TradingView Lightweight Charts + 信號 + 策略。"""
+        redirect = _redirect_if_unauthenticated(request)
+        if redirect is not None:
+            return redirect
         return FileResponse(_static_dir / "trading.html", headers=_NO_CACHE_HEADERS)
 
 

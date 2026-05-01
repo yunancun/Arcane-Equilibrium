@@ -71,6 +71,21 @@ document.getElementById('pwToggle').addEventListener('click', function() {
 const REDIRECT_KEY = 'oc_login_redirect';
 const USER_KEY = 'oc_username';
 
+function safeRedirectTarget(value) {
+  if (!value || typeof value !== 'string') return '';
+  if (value.startsWith('/') && !value.startsWith('//') && !value.includes('\\')) {
+    return value;
+  }
+  return '';
+}
+
+function loginRedirectTarget() {
+  const params = new URLSearchParams(window.location.search);
+  return safeRedirectTarget(params.get('redirect')) ||
+    safeRedirectTarget(sessionStorage.getItem(REDIRECT_KEY)) ||
+    '/console';
+}
+
 document.getElementById('loginForm').addEventListener('submit', async (e) => {
   e.preventDefault();
   const btn = document.getElementById('loginBtn');
@@ -109,7 +124,7 @@ document.getElementById('loginForm').addEventListener('submit', async (e) => {
     localStorage.removeItem('oc_trading_token');
 
     // Redirect to original page or default to /console
-    const redirect = sessionStorage.getItem(REDIRECT_KEY) || '/console';
+    const redirect = loginRedirectTarget();
     sessionStorage.removeItem(REDIRECT_KEY);
     window.location.href = redirect;
 
@@ -127,7 +142,7 @@ document.getElementById('loginForm').addEventListener('submit', async (e) => {
   try {
     const r = await fetch('/api/v1/auth/check', { credentials: 'same-origin' });
     if (r.ok) {
-      const redirect = sessionStorage.getItem(REDIRECT_KEY) || '/console';
+      const redirect = loginRedirectTarget();
       sessionStorage.removeItem(REDIRECT_KEY);
       window.location.href = redirect;
     }

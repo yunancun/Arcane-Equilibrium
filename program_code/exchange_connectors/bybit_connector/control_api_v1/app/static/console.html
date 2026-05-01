@@ -383,7 +383,10 @@ async function api(path) {
   // 5 秒超时防止重启后 API 慢导致侧边栏卡死
   try {
     const r = await fetch(path, { credentials: 'same-origin', signal: AbortSignal.timeout(5000) });
-    if (!r.ok) return null;
+    if (!r.ok) {
+      await ocHandleUnauthenticatedResponse(r);
+      return null;
+    }
     return await r.json();
   } catch(e) { return null; }
 }
