@@ -508,6 +508,52 @@ function ocRenderPerformanceMetrics(metrics) {
   }).join('');
 }
 
+// Render a compact inline sparkline for dashboard gate trends.
+// 渲染 dashboard gate 趨勢使用的小型 inline sparkline。
+function ocMiniTrendSvg(values, opts) {
+  var nums = Array.isArray(values)
+    ? values.map(function(v) { return Number(v); }).filter(function(v) { return Number.isFinite(v); })
+    : [];
+  if (nums.length < 2) {
+    return '<div class="oc-mini-trend-empty">collecting trend</div>';
+  }
+  opts = opts || {};
+  var width = Number(opts.width || 180);
+  var height = Number(opts.height || 54);
+  var pad = Number(opts.pad || 5);
+  var minV = Math.min.apply(null, nums);
+  var maxV = Math.max.apply(null, nums);
+  if (opts.includeZero) {
+    minV = Math.min(minV, 0);
+    maxV = Math.max(maxV, 0);
+  }
+  var span = maxV - minV;
+  if (span <= 0) span = 1;
+  var usableW = width - pad * 2;
+  var usableH = height - pad * 2;
+  var points = nums.map(function(v, i) {
+    var x = nums.length === 1 ? width / 2 : pad + (i / (nums.length - 1)) * usableW;
+    var y = pad + (1 - ((v - minV) / span)) * usableH;
+    return x.toFixed(1) + ',' + y.toFixed(1);
+  }).join(' ');
+  var tone = opts.tone || 'info';
+  var stroke = tone === 'good' ? 'var(--green)'
+             : tone === 'bad' ? 'var(--red)'
+             : tone === 'warn' ? 'var(--yellow)'
+             : 'var(--blue)';
+  var zeroLine = '';
+  if (opts.includeZero && minV < 0 && maxV > 0) {
+    var zy = pad + (1 - ((0 - minV) / span)) * usableH;
+    zeroLine = '<line x1="' + pad + '" y1="' + zy.toFixed(1) + '" x2="' + (width - pad) +
+      '" y2="' + zy.toFixed(1) + '" class="oc-mini-trend-zero" />';
+  }
+  return '<svg class="oc-mini-trend" viewBox="0 0 ' + width + ' ' + height +
+    '" preserveAspectRatio="none" aria-hidden="true">' + zeroLine +
+    '<polyline points="' + points + '" fill="none" stroke="' + stroke +
+    '" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" />' +
+    '</svg>';
+}
+
 // ─── Status Chip HTML ────────────────────────────────────────────────────────
 function ocChip(text, type) {
   // type: good, warn, bad, neutral, info
@@ -730,6 +776,25 @@ function ocInjectBaseCSS() {
     .oc-performance-metrics .oc-metric { min-height: 118px; display: flex; flex-direction: column; }
     .oc-performance-metrics .oc-metric-label { min-height: 42px; line-height: 1.45; display: block; }
     .oc-performance-metrics .oc-metric-val { margin-top: auto; font-size: 18px; line-height: 1.2; overflow-wrap: anywhere; }
+    .oc-edge-gate-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 10px; }
+    .oc-edge-gate-card { background: var(--bg); border: 1px solid #21262d; border-radius: 8px; padding: 12px; min-height: 160px; }
+    .oc-edge-gate-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+    .oc-edge-gate-title { font-size: 12px; font-weight: 700; line-height: 1.35; color: var(--text); }
+    .oc-edge-gate-sub { font-size: 10px; color: var(--text-dim); margin-top: 2px; line-height: 1.35; }
+    .oc-edge-gate-values { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 8px 0; }
+    .oc-edge-gate-value { min-width: 0; }
+    .oc-edge-gate-value .label { font-size: 9px; color: var(--text-dim); text-transform: uppercase; line-height: 1.25; }
+    .oc-edge-gate-value .value { font-size: 14px; font-weight: 700; line-height: 1.25; overflow-wrap: anywhere; }
+    .oc-edge-gate-summary { color: var(--text-dim); font-size: 11px; line-height: 1.45; margin-top: 6px; }
+    .oc-mini-trend { width: 100%; height: 54px; display: block; background: rgba(13,17,23,0.45); border: 1px solid #21262d; border-radius: 6px; }
+    .oc-mini-trend-zero { stroke: rgba(139,148,158,0.45); stroke-width: 1; stroke-dasharray: 3 3; }
+    .oc-mini-trend-empty { height: 54px; display: flex; align-items: center; justify-content: center; color: var(--text-dim); font-size: 11px; border: 1px dashed #30363d; border-radius: 6px; }
+    .oc-readiness-list { border: 1px solid #21262d; border-radius: 8px; margin-top: 10px; overflow: hidden; }
+    .oc-readiness-row { display: grid; grid-template-columns: minmax(120px, 1fr) auto minmax(100px, 1fr); gap: 10px; align-items: center; padding: 9px 11px; border-top: 1px solid #21262d; }
+    .oc-readiness-row:first-child { border-top: none; }
+    .oc-readiness-label { font-size: 12px; font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
+    .oc-readiness-detail { font-size: 10px; color: var(--text-dim); line-height: 1.35; }
+    .oc-readiness-target { color: var(--text-dim); font-size: 11px; text-align: right; overflow-wrap: anywhere; }
 
     /* Status Chips */
     .oc-chip { display: inline-flex; align-items: center; gap: 5px; border-radius: 999px;
@@ -807,6 +872,9 @@ function ocInjectBaseCSS() {
       .oc-control-bar { gap: 6px; padding: 8px 10px; }
       .oc-metrics { grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); }
       .oc-performance-metrics { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+      .oc-edge-gate-values { grid-template-columns: 1fr 1fr; }
+      .oc-readiness-row { grid-template-columns: 1fr; gap: 5px; }
+      .oc-readiness-target { text-align: left; }
       .oc-card { padding: 12px; }
       .oc-input, .oc-select { min-width: 0; width: 100%; }
       .oc-strat-grid { grid-template-columns: 1fr; }

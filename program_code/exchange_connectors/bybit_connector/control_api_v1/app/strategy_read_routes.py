@@ -9,6 +9,7 @@ from fastapi.responses import JSONResponse
 
 from . import main_legacy as base
 from .ipc_state_reader import get_rust_reader
+from .prelive_edge_gate_trends import fetch_prelive_edge_gate_trends
 from .rust_scanner_reader import (
     enrich_scanner_status_with_db,
     normalize_scanner_opportunities,
@@ -29,6 +30,38 @@ from .strategy_wiring import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+# ── Pre-Live Gate Trend Routes / Pre-Live Gate 趨勢路由 ──
+
+@phase2_router.get("/prelive/edge-gates")
+async def get_prelive_edge_gates(
+    window_days: int = Query(
+        default=7,
+        ge=3,
+        le=30,
+        description="Trend window in days / 趨勢天數",
+    ),
+    actor: base.AuthenticatedActor = Depends(base.current_actor),
+):
+    """
+    Return read-only trend data for pre-live gates [33], [38], and [40].
+    回傳 pre-live gate [33]/[38]/[40] 的只讀趨勢資料。
+    """
+    try:
+        return _envelope(fetch_prelive_edge_gate_trends(window_days=window_days))
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Error in get_prelive_edge_gates / get_prelive_edge_gates 異常")
+        return _envelope(
+            {
+                "available": False,
+                "source": "pg_prelive_edge_gate_trends",
+                "window_days": window_days,
+                "gates": {},
+                "readiness": {"ready": False, "status": "not_ready", "items": []},
+                "error": f"{type(exc).__name__}: {exc}",
+            }
+        )
 
 
 # ── Kline Routes / K线路由 ──
