@@ -1131,7 +1131,7 @@ Operator 接續 Tier 8 sign-off 後說「繼續派」。PM 按 Tier 8 §8 推薦
 ### Verification
 - Mac targeted checks passed: `py_compile` for the touched F7 healthcheck files, `test_f7_new_healthchecks.py` 41/0, `test_counterfactual_clean_window_healthcheck.py` 2/0, and `git diff --check`.
 - Linux watchdog stayed healthy: `engine_alive=true`, demo/live snapshots fresh, paper inactive by design.
-- Linux wrapper at 2026-05-01 21:51 CEST returned SUMMARY WARN exit 0, with `[27]` WARN as signal-only/pre-gate rather than a writer wedge.
+- Linux wrapper at 2026-05-01 21:55 CEST returned SUMMARY WARN exit 0, with `[27]` WARN because recent demo verdicts were rejected-only (`approved_verdicts_30m=0`) rather than a writer wedge.
 
 ### Boundary
 - No trading, risk, strategy parameter, live authorization, DB write, rebuild, restart, or deploy action was performed.

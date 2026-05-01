@@ -8,7 +8,7 @@
 - Wave 1-3 完成表格 + Backlog 完成項：[docs/archive/2026-05-01--completed_waves_1_2_3_and_backlog.md](docs/archive/2026-05-01--completed_waves_1_2_3_and_backlog.md)
 - Pre-trim TODO snapshot（2026-04-29 前）：[docs/archive/2026-04-29--TODO-pre-trim-snapshot.md](docs/archive/2026-04-29--TODO-pre-trim-snapshot.md)
 
-**Runtime/source（2026-05-01 21:51 CEST · code-bearing source includes `5ce777b`; 21:51 Linux runtime sample executed before final docs sync at `4abb36a`）**：Rust engine runtime remains PID 2364863 from `daab51c` scanner deploy（no rebuild/restart for this healthcheck/RFC/docs-only work）；API PID 2047851 / watchdog alive；demo/live active，paper inactive by design；manual wrapper healthcheck SUMMARY **WARN** exit 0。
+**Runtime/source（2026-05-01 21:55 CEST · post-sync Linux sample executed at `2e86706`; code-bearing source includes `5ce777b`）**：Rust engine runtime remains PID 2364863 from `daab51c` scanner deploy（no rebuild/restart for this healthcheck/RFC/docs-only work）；API PID 2047851 / watchdog alive；demo/live active，paper inactive by design；manual wrapper healthcheck SUMMARY **WARN** exit 0。
 **測試基準**：Mac Rust lib **2394/0** · Python maker/attribution **9/0** · MLDE pytest **63/0** · Healthcheck targeted Python **43/0**（F7 41/0 + counterfactual [11] 2/0）
 **21d demo 時鐘**：2026-04-16 22:16 → 解鎖 **2026-05-07**
 
@@ -18,7 +18,7 @@
 
 **當前狀態**：Strategy Edge Models + Dust Residual Prevention deployed & proven；Scanner market judgement + five-strategy context deployed；MLDE demo autonomy active。
 下一個需要 implementation 的 wave 是 Wave 4（等 P0-3 ~05-15 決策後啟動）。
-目前主要工作是：觀察、時間等待、3 個時間點的決策。最新 P0 hygiene：`[27]` 21:39 wrapper false-FAIL 已由 `4abb36a` 重校準：只有 **Approved risk verdicts >0 且 0 persisted intents** 才 FAIL；signal-only / rejected-only window 轉 WARN。21:51 wrapper 中 `[27]` 是 WARN（demo signal snapshots active but no Guardian attempts；likely scanner/strategy pre-gate），不是 writer wedge。`[11]` 的 864→413 是 rolling 2d replay 舊 exits 滾出，`2674e14` 已把 false-red 改為 WARN。
+目前主要工作是：觀察、時間等待、3 個時間點的決策。最新 P0 hygiene：`[27]` 21:39 wrapper false-FAIL 已由 `4abb36a` 重校準：只有 **Approved risk verdicts >0 且 0 persisted intents** 才 FAIL；signal-only / rejected-only window 轉 WARN。21:55 wrapper 中 `[27]` 是 WARN（demo 有 8 個 recent verdict，但 approved=0，全被 risk/cost gates 拒絕；Guardian alive），不是 writer wedge。`[11]` 的 864→413 是 rolling 2d replay 舊 exits 滾出，`2674e14` 已把 false-red 改為 WARN。
 
 ### 時間驅動里程碑
 
@@ -33,13 +33,13 @@
 
 ### Active Observation Gates
 
-| Gate | 現況（2026-05-01 21:51 CEST） | 目標 | 結論時間 |
+| Gate | 現況（2026-05-01 21:55 CEST） | 目標 | 結論時間 |
 |------|------------------------------|------|---------|
 | [33] maker_fill_rate | 7d rolling 27.2%；fee_drop 22.0%；PostOnly still diluted by pre-reload | ≥60% fee_drop | ~05-07/08 |
-| [38] grid lifecycle drift | demo p50 7.9min vs live_demo 3.7min；lifetime_ratio 0.47 WARN；live re_entry_rate 0.52 / delta 0.31 | lifetime ≥0.5x | ~05-06 再看 |
-| [40] realized edge acceptance | 24h MLDE rows=41，avg_net -19.26bps，maker_like 27.2%，fee_drop 22.0% | net_bps_after_fee>0 | 等累積 |
+| [38] grid lifecycle drift | demo p50 7.9min vs live_demo 3.7min；lifetime_ratio 0.47 WARN；live re_entry_rate 0.52 | lifetime ≥0.5x | ~05-06 再看 |
+| [40] realized edge acceptance | 24h MLDE rows=40，avg_net -19.90bps，maker_like 27.2%，fee_drop 22.0% | net_bps_after_fee>0 | 等累積 |
 | [41] scanner market-gate confirmation | events=1237 / cells=69 / scoreable=0，gate 已 fire 但 label 未足 | gate blocked cells later negative | 等 label 累積 |
-| [27] intents counter freeze | demo stale 43.6m / intents_30m=0 / approved_verdicts_30m=0 / dcs_30m=1066；signal-only/pre-gate WARN | approved verdicts with 0 intents 才 FAIL | 持續觀察 |
+| [27] intents counter freeze | demo stale 48.0m / intents_30m=0 / verdicts_30m=8 / approved_verdicts_30m=0 / dcs_30m=1045；risk/cost gates rejected all attempts | approved verdicts with 0 intents 才 FAIL | 持續觀察 |
 | [11] counterfactual clean window | n=413/200，cf_fired=46，grid=16，ma=22，orphan=2，json_age=15.9h；rolling 2d window shrink expected，WARN not FAIL after `2674e14` | fresh replay + 3d WARN/PASS streak；criteria grid/ma/orphan 達標 | 本週 |
 
 **EDGE-DIAG-2 留尾觀察**：(ii) PostOnly maker fill rate 待 ≥1w demo 累積 (iv) demo bb_breakout 1m bandwidth 結構性問題等 5m 升級或 MLDE sweep；不阻塞主路徑。

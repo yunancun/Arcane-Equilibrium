@@ -14,20 +14,20 @@ Status: Complete for this batch
   - `2026-05-01--lg2_h0_blocking_verification_rfc.md`
   - `2026-05-01--mlde6_live_promotion_contract_rfc.md`
   - `2026-05-01--lg3_provider_pricing_binding_rfc.md`
-- Active docs now reflect the 2026-05-01 21:51 CEST wrapper state and distinguish the closed `[27]` false-red from the broader STRK-FUP silent-dead follow-up.
+- Active docs now reflect the 2026-05-01 21:55 CEST wrapper state and distinguish the closed `[27]` false-red from the broader STRK-FUP silent-dead follow-up.
 
 ## Runtime State
 
 - Rust engine runtime remains the `daab51c` scanner deploy.
 - No rebuild or restart was performed.
 - Linux watchdog remains healthy: `engine_alive=true`, demo/live fresh, paper inactive by design.
-- Linux wrapper at 2026-05-01 21:51 CEST returned SUMMARY WARN exit 0.
+- Linux wrapper at 2026-05-01 21:55 CEST returned SUMMARY WARN exit 0.
 
 Current notable wrapper observations:
-- `[27]`: WARN, demo has signal snapshots but no Guardian attempts; no approved-verdict writer wedge.
+- `[27]`: WARN, demo has recent verdicts but all are rejected by risk/cost gates; no approved-verdict writer wedge.
 - `[33]`: maker_like 27.2%, fee_drop 22.0%.
 - `[38]`: lifetime_ratio 0.47 WARN.
-- `[40]`: 24h MLDE rows 41, avg_net -19.26bps.
+- `[40]`: 24h MLDE rows 40, avg_net -19.90bps.
 - `[41]`: scanner gates fired, labels still insufficient.
 - `[11]`: rolling 2d counterfactual replay shrink remains WARN, not FAIL.
 
