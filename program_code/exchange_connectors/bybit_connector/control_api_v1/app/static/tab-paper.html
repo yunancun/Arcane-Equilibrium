@@ -112,7 +112,7 @@
 <!-- Performance Metrics / 性能指标 -->
 <div class="oc-card">
   <h3>&#x1F4CB; 性能指标 / Performance Metrics</h3>
-  <div class="oc-metrics" id="perf-metrics"><div class="oc-loading">加载中...</div></div>
+  <div class="oc-metrics oc-performance-metrics" id="perf-metrics"><div class="oc-loading">加载中...</div></div>
 </div>
 
 <!-- Fill History / 成交历史 -->
@@ -521,60 +521,20 @@ async function loadFills() {
   ocPnlTrend('pnl-sparkline-line', 'pnl-sparkline-label', fills, 'pnl-sparkline-zero');
 }
 
-function _paperMetricPct(rate) {
-  const v = parseFloat(rate);
-  return Number.isFinite(v) ? (v * 100).toFixed(1) + '%' : null;
-}
-function _paperMetricRatio(ratio) {
-  if (ratio === 'inf') return '∞';
-  const v = parseFloat(ratio);
-  return Number.isFinite(v) && v > 0 ? ocNum(v, 2) : null;
-}
-function _paperMetricPnl(metric, value) {
-  const v = parseFloat(value);
-  if (!Number.isFinite(v)) return null;
-  return metric && metric.metric_unit === 'bps' ? v.toFixed(2) + ' bps' : ocMoney(v);
-}
-
 async function loadMetrics() {
   const d = await ocApi('/api/v1/paper/metrics');
   if (!d || !d.data) { ocSetHtml('perf-metrics', '<div class="oc-loading">暂无指标数据</div>'); return; }
   const m = d.data;
   const db = m.db_true_metrics || {};
-  const acct = db.account_metrics || {};
-  const edge = (db.edge_metrics && db.edge_metrics.total_round_trips > 0) ? db.edge_metrics : null;
-  const dbTm = (db.trade_metrics && db.trade_metrics.total_round_trips > 0) ? db.trade_metrics : null;
-  const tm = edge || dbTm || m.trade_metrics || {};
+  const metrics = m.performance_metrics || db.performance_metrics || [];
   const dm = m.drawdown_metrics || {};
-  const hm = m.holding_period_metrics || {};
-  const sr = m.sharpe_ratio || {};
-
-  let html = '';
-  const items = [
-    ['7d 成交笔数 / Total Fills', '', acct.total_fills != null ? acct.total_fills : (tm.total_fills || m.total_fills)],
-    ['完整交易次数 / Round Trips', '一次开仓到完全平仓为一次完整交易。/ A complete open-to-close cycle counts as one round trip.', tm.total_round_trips || m.total_trades],
-    ['胜率 / Win Rate', '', tm.win_rate != null ? _paperMetricPct(tm.win_rate) : null],
-    ['盈亏比 / Win/Loss Ratio', '', tm.win_loss_ratio != null ? _paperMetricRatio(tm.win_loss_ratio) : null],
-    ['7d 净盈亏 / Net PnL', '', acct.net_pnl != null ? ocMoney(acct.net_pnl) : null],
-    ['平均净边际 / Avg Net Edge', '', edge && edge.avg_net_bps != null ? edge.avg_net_bps.toFixed(2) + ' bps' : null],
-    ['最大回撤 / Max Drawdown', '从峰值到最低点的最大跌幅，衡量最坏情况的资金损失。<10% 优秀，10-20% 正常，>20% 需关注。/ Largest peak-to-trough decline. <10% excellent, 10-20% normal, >20% concerning.', dm.max_drawdown_pct != null ? dm.max_drawdown_pct.toFixed(2) + '%' : null],
-    ['夏普比率 / Sharpe Ratio', '风险调整后收益指标。>1 良好，>2 优秀，<0 表示收益不如无风险利率。数值越高，每单位风险获得的回报越多。/ Risk-adjusted return. >1 good, >2 excellent, <0 means underperforming risk-free rate.', sr.sharpe_ratio != null ? ocNum(sr.sharpe_ratio, 3) : null],
-    ['平均持仓时间 / Avg Hold Time', '持仓从开仓到平仓的平均时长。过短可能过度交易，过长可能错过止损时机。/ Average duration from open to close. Too short may indicate overtrading.', hm.avg_holding_period_sec != null ? Math.round(hm.avg_holding_period_sec / 60) + ' min' : null],
-    ['单笔最高盈利 / Largest Win', '', tm.largest_win != null ? _paperMetricPnl(tm, tm.largest_win) : null],
-    ['单笔最高亏损 / Largest Loss', '', tm.largest_loss != null ? _paperMetricPnl(tm, tm.largest_loss) : null],
-    ['平均亏损 / Avg Loss', '', tm.avg_loss != null ? _paperMetricPnl(tm, -Math.abs(tm.avg_loss)) : null],
-    ['7d 手续费 / Total Fees', '', acct.total_fees != null ? ocBalance(acct.total_fees, 4) : (tm.total_fees_paid != null ? ocBalance(tm.total_fees_paid, 4) : null)],
-    ['总 AI 成本 / Total AI Cost', 'AI 推理调用的累计花费。系统会跟踪每次 AI 咨询的成本。/ Cumulative cost of AI inference calls.', ocBalance(m.total_ai_cost || _cachedPnlAiCost || 0, 4)],
-  ];
-  items.forEach(([label, tip, val]) => {
-    const tipAttr = tip ? ' title="' + ocEsc(tip) + '"' : '';
-    html += '<div class="oc-metric"><div class="oc-metric-label"' + tipAttr + '>' + label + '</div><div class="oc-metric-val" style="font-size:14px">' + (val != null ? val : '--') + '</div></div>';
-  });
-  ocSetHtml('perf-metrics', html);
+  ocSetHtml('perf-metrics', ocRenderPerformanceMetrics(metrics));
 
   // Update PnL card fields from metrics (authoritative source)
-  ocSetText('p-winrate', tm.win_rate != null ? _paperMetricPct(tm.win_rate) : '--');
-  ocSetText('p-maxdd', dm.max_drawdown_pct != null ? dm.max_drawdown_pct.toFixed(2) + '%' : '--');
+  const winRateMetric = ocPerformanceMetricByKey(metrics, 'win_rate');
+  const maxDdMetric = ocPerformanceMetricByKey(metrics, 'max_drawdown');
+  ocSetText('p-winrate', winRateMetric ? ocFormatPerformanceMetric(winRateMetric) : '--');
+  ocSetText('p-maxdd', maxDdMetric ? ocFormatPerformanceMetric(maxDdMetric) : '--');
 
   if (dm.current_balance != null) {
     const el = $('balance-val');

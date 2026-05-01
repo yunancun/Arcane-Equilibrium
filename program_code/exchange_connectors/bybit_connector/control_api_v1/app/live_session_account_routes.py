@@ -618,7 +618,7 @@ def get_live_metrics(
         return guard
 
     from .paper_trading_metrics import compute_full_metrics
-    from .trading_true_metrics import fetch_db_true_metrics
+    from .trading_true_metrics import build_performance_metrics, fetch_db_true_metrics
 
     rust = get_rust_reader()
     # 3E-5: query per-engine snapshot for live metrics.
@@ -630,10 +630,15 @@ def get_live_metrics(
     elif actual_endpoint == "mainnet":
         db_modes = ["live"]
     elif engine_kind == "live":
-        db_modes = ["live", "live_demo"]
+        db_modes = ["live"]
     else:
-        db_modes = ["live", "live_demo"]
+        db_modes = ["live"]
     if engine_kind != "live" and actual_endpoint in ("live_demo", "mainnet"):
+        db_metrics = fetch_db_true_metrics(
+            db_modes,
+            edge_engine_modes=db_modes,
+            window_days=7,
+        )
         return core._live_response({
             "available": False,
             "source": "engine_unavailable",
@@ -645,23 +650,28 @@ def get_live_metrics(
             ),
             "actual_engine_kind": engine_kind,
             "actual_endpoint": actual_endpoint,
-            "db_true_metrics": fetch_db_true_metrics(
-                db_modes,
-                edge_engine_modes=db_modes,
-                window_days=7,
+            "db_true_metrics": db_metrics,
+            "performance_metrics": build_performance_metrics(
+                db_metrics,
+                total_ai_cost=_fetch_total_ai_cost_30d_safe(),
             ),
         })
     rust_state = rust.get_paper_state(engine=engine_kind) if rust.is_available() and engine_kind != "unknown" else None
     if rust_state is None:
+        db_metrics = fetch_db_true_metrics(
+            db_modes,
+            edge_engine_modes=db_modes,
+            window_days=7,
+        )
         return core._live_response({
             "available": False,
             "source": "engine_unavailable",
             "actual_engine_kind": engine_kind,
             "actual_endpoint": actual_endpoint,
-            "db_true_metrics": fetch_db_true_metrics(
-                db_modes,
-                edge_engine_modes=db_modes,
-                window_days=7,
+            "db_true_metrics": db_metrics,
+            "performance_metrics": build_performance_metrics(
+                db_metrics,
+                total_ai_cost=_fetch_total_ai_cost_30d_safe(),
             ),
         })
     full = compute_full_metrics(rust_state, engine_mode=engine_kind)
@@ -673,9 +683,32 @@ def get_live_metrics(
     full["total_intents"] = stats.get("total_intents", 0)
     full["total_fills"] = stats.get("total_fills", 0)
     full["total_stops"] = stats.get("total_stops", 0)
-    full["db_true_metrics"] = fetch_db_true_metrics(
+    db_metrics = fetch_db_true_metrics(
         db_modes,
         edge_engine_modes=db_modes,
         window_days=7,
     )
+    full["db_true_metrics"] = db_metrics
+    total_ai_cost = _fetch_total_ai_cost_30d_safe()
+    if total_ai_cost is not None:
+        full["total_ai_cost"] = round(total_ai_cost, 6)
+    full["performance_metrics"] = build_performance_metrics(
+        db_metrics,
+        fallback_metrics=full,
+        total_ai_cost=total_ai_cost,
+    )
     return core._live_response(full)
+
+
+def _fetch_total_ai_cost_30d_safe() -> float | None:
+    """Fetch AI cost for metrics without failing the Live route.
+
+    讀取 AI 成本供績效指標使用；失敗時不影響 Live route。
+    """
+    try:
+        from .paper_trading_ai_cost_routes import fetch_total_ai_cost_30d
+
+        return fetch_total_ai_cost_30d()
+    except Exception:
+        logger.debug("AI cost lookup failed for live metrics", exc_info=True)
+        return None

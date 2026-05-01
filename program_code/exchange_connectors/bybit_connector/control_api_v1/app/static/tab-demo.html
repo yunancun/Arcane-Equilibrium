@@ -126,7 +126,7 @@
   <!-- Performance Metrics / 性能指标 -->
   <div class="oc-card">
     <h3>&#x1F4CB; 性能指标 / Performance Metrics</h3>
-    <div class="oc-metrics" id="demo-perf-metrics"><div class="oc-loading">加载中...</div></div>
+    <div class="oc-metrics oc-performance-metrics" id="demo-perf-metrics"><div class="oc-loading">加载中...</div></div>
   </div>
 
   <!-- Fill History / 成交历史 -->
@@ -431,16 +431,7 @@ function renderBalance(raw) {
   ocSetText('d-winrate', '--');
   ocSetText('d-wlratio', '--');
 
-  // Max drawdown: peak from engine snapshot, fallback to current equity.
-  // 最大回撤：峰值來自引擎快照，無快照時退化為當前 equity。
-  const peakRef = (Number.isFinite(enginePeak) && enginePeak > 0)
-    ? enginePeak
-    : (Number.isFinite(engineInitial) && engineInitial > 0 ? engineInitial : equity);
-  if (peakRef > 0 && equity < peakRef) {
-    ocSetText('d-maxdd', ((peakRef - equity) / peakRef * 100).toFixed(2) + '%');
-  } else {
-    ocSetText('d-maxdd', '0.00%');
-  }
+  ocSetText('d-maxdd', '--');
 }
 
 // Demo strategy map: symbol → strategy_name, derived from _demoFillsCache
@@ -772,70 +763,33 @@ async function loadDemoMetrics(raw) {
   }
   if (!b) { ocSetHtml('demo-perf-metrics', '<div class="oc-loading">暂无数据</div>'); return; }
 
-  const equity = parseFloat(b.totalEquity || b.total_equity || b.equity || 0);
-  // Peak from engine snapshot (session-scoped, resets on engine restart).
-  // 峰值來自引擎快照（session 範圍，引擎重啟時重置）。
-  const enginePeakM = parseFloat(b.engine_peak_balance);
-  const engineInitM = parseFloat(b.engine_initial_balance);
-  const peakRef = (Number.isFinite(enginePeakM) && enginePeakM > 0)
-    ? enginePeakM
-    : (Number.isFinite(engineInitM) && engineInitM > 0 ? engineInitM : equity);
-  const ddPct = (peakRef > 0 && equity < peakRef) ? ((peakRef - equity) / peakRef * 100).toFixed(2) + '%' : '0.00%';
   let m = null;
   try {
     const d = await ocApi('/api/v1/strategy/demo/metrics');
     m = d && d.data ? d.data : null;
   } catch (_) {}
-  const acct = (m && m.account_metrics) || {};
-  const edge = (m && m.edge_metrics && m.edge_metrics.total_round_trips > 0)
-    ? m.edge_metrics
-    : ((m && m.trade_metrics) || {});
-  const tripCount = parseInt(edge.total_round_trips || 0);
-  const winRate = edge.win_rate != null ? _ocMetricPct(edge.win_rate) : 'N/A';
-  const winLossRatio = edge.win_loss_ratio != null ? _ocMetricRatio(edge.win_loss_ratio) : 'N/A';
-  const avgNetBps = edge.avg_net_bps != null ? _ocMetricBps(edge.avg_net_bps) : 'N/A';
-  const netPnl = parseFloat(acct.net_pnl);
-  const totalFees = parseFloat(acct.total_fees);
+  const db = (m && m.db_true_metrics) || {};
+  const metrics = (m && m.performance_metrics) || db.performance_metrics || [];
+  const winRateMetric = ocPerformanceMetricByKey(metrics, 'win_rate');
+  const wlMetric = ocPerformanceMetricByKey(metrics, 'win_loss_ratio');
+  const maxDdMetric = ocPerformanceMetricByKey(metrics, 'max_drawdown');
+  const netPnlMetric = ocPerformanceMetricByKey(metrics, 'net_pnl_7d');
+  const netPnl = netPnlMetric ? Number(netPnlMetric.value) : NaN;
 
   const wrEl = $('d-winrate');
-  wrEl.textContent = winRate;
-  wrEl.className = 'oc-metric-val ' + (Number.isFinite(netPnl) && netPnl > 0 ? 'green' : 'red');
+  wrEl.textContent = winRateMetric ? ocFormatPerformanceMetric(winRateMetric) : '--';
+  wrEl.className = 'oc-metric-val ' + (Number.isFinite(netPnl) ? (netPnl > 0 ? 'green' : 'red') : '');
   const wlEl = $('d-wlratio');
-  wlEl.textContent = winLossRatio;
-  wlEl.className = 'oc-metric-val ' + (parseFloat(edge.win_loss_ratio || 0) >= 1 ? 'green' : 'red');
+  wlEl.textContent = wlMetric ? ocFormatPerformanceMetric(wlMetric) : '--';
+  const wlValue = Number(wlMetric && wlMetric.value);
+  wlEl.className = 'oc-metric-val ' + (Number.isFinite(wlValue) ? (wlValue >= 1 ? 'green' : 'red') : '');
+  ocSetText('d-maxdd', maxDdMetric ? ocFormatPerformanceMetric(maxDdMetric) : '--');
 
-  const largestWin = edge.metric_unit === 'bps' ? _ocMetricBps(edge.largest_win) : ocMoney(edge.largest_win || 0);
-  const largestLoss = edge.metric_unit === 'bps' ? _ocMetricBps(edge.largest_loss) : ocMoney(edge.largest_loss || 0);
-  const avgLoss = edge.metric_unit === 'bps' ? _ocMetricBps(-Math.abs(edge.avg_loss || 0)) : ocMoney(-Math.abs(edge.avg_loss || 0));
-
-  if (!m || m.available === false) {
+  if (!m || !Array.isArray(metrics) || metrics.length === 0) {
     ocSetHtml('demo-perf-metrics', '<div class="oc-loading">暂无 DB 指标</div>');
     return;
   }
-
-  const items = [
-    ['7d 成交笔数 / Total Fills', '', acct.total_fills != null ? acct.total_fills : 'N/A'],
-    ['7d 已归因交易 / Attributed Trades', '', tripCount > 0 ? tripCount : 'N/A'],
-    ['胜率 / Win Rate', '', winRate],
-    ['盈亏比 / Win/Loss Ratio', '', winLossRatio],
-    ['平均净边际 / Avg Net Edge', '', avgNetBps],
-    ['7d 净盈亏 / Net PnL', '', Number.isFinite(netPnl) ? ocMoney(netPnl) : 'N/A'],
-    ['7d 总毛利 / Gross PnL', '', acct.gross_pnl != null ? ocMoney(acct.gross_pnl) : 'N/A'],
-    ['最大回撤 / Max Drawdown', '从峰值到最低点的最大跌幅，衡量最坏情况的资金损失。<10% 优秀，10-20% 正常，>20% 需关注。/ Largest peak-to-trough decline. <10% excellent, 10-20% normal, >20% concerning.', ddPct],
-    ['单笔最高盈利 / Largest Win', '', tripCount > 0 ? largestWin : 'N/A'],
-    ['单笔最高亏损 / Largest Loss', '', tripCount > 0 ? largestLoss : 'N/A'],
-    ['平均亏损 / Avg Loss', '', tripCount > 0 ? avgLoss : 'N/A'],
-    ['7d 手续费 / Total Fees', '', Number.isFinite(totalFees) ? ocBalance(totalFees, 4) : 'N/A'],
-    ['7d 资金费 / Funding', '', acct.funding_pnl != null ? ocMoney(acct.funding_pnl) : 'N/A'],
-    ['总 AI 成本 / Total AI Cost', 'AI 推理调用的累计花费。/ Cumulative cost of AI inference calls.', 'N/A'],
-  ];
-
-  let html = '';
-  items.forEach(([label, tip, val]) => {
-    const tipAttr = tip ? ' title="' + ocEsc(tip) + '"' : '';
-    html += '<div class="oc-metric"><div class="oc-metric-label"' + tipAttr + '>' + label + '</div><div class="oc-metric-val" style="font-size:14px">' + (val != null ? val : '--') + '</div></div>';
-  });
-  ocSetHtml('demo-perf-metrics', html);
+  ocSetHtml('demo-perf-metrics', ocRenderPerformanceMetrics(metrics));
 }
 
 // ─── Demo Session Controls / Demo 会话控制 ──────────────────────

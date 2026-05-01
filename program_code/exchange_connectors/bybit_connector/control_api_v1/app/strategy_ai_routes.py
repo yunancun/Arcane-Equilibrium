@@ -1122,6 +1122,45 @@ async def get_demo_fills(actor: base.AuthenticatedActor = Depends(base.current_a
 @phase2_router.get("/demo/metrics")
 async def get_demo_metrics(actor: base.AuthenticatedActor = Depends(base.current_actor)):
     """Get DB-truth Demo performance metrics. / 獲取 DB 真實 Demo 績效指標。"""
-    from .trading_true_metrics import fetch_db_true_metrics  # noqa: PLC0415
+    from .paper_trading_metrics import compute_full_metrics  # noqa: PLC0415
+    from .paper_trading_routes import get_rust_reader  # noqa: PLC0415
+    from .trading_true_metrics import build_performance_metrics, fetch_db_true_metrics  # noqa: PLC0415
 
-    return _envelope(fetch_db_true_metrics(["demo"], edge_engine_modes=["demo"], window_days=7))
+    full: dict[str, Any] = {}
+    try:
+        reader = get_rust_reader()
+        if reader.is_engine_available("demo"):
+            rust_state = reader.get_paper_state(engine="demo") or {}
+            if rust_state:
+                full = compute_full_metrics(rust_state, engine_mode="demo")
+    except Exception:
+        logger.debug("Demo rust metrics fallback unavailable", exc_info=True)
+
+    db_metrics = fetch_db_true_metrics(["demo"], edge_engine_modes=["demo"], window_days=7)
+    total_ai_cost = _fetch_total_ai_cost_30d_safe()
+    if total_ai_cost is not None:
+        full["total_ai_cost"] = round(total_ai_cost, 6)
+    full.update({
+        "source": full.get("source", "db_true_metrics"),
+        "db_true_metrics": db_metrics,
+        "performance_metrics": build_performance_metrics(
+            db_metrics,
+            fallback_metrics=full,
+            total_ai_cost=total_ai_cost,
+        ),
+    })
+    return _envelope(full)
+
+
+def _fetch_total_ai_cost_30d_safe() -> float | None:
+    """Fetch AI cost for metrics without failing the Demo route.
+
+    讀取 AI 成本供績效指標使用；失敗時不影響 Demo route。
+    """
+    try:
+        from .paper_trading_ai_cost_routes import fetch_total_ai_cost_30d
+
+        return fetch_total_ai_cost_30d()
+    except Exception:
+        logger.debug("AI cost lookup failed for demo metrics", exc_info=True)
+        return None

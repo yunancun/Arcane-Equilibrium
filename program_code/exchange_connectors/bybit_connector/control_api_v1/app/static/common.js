@@ -440,6 +440,74 @@ function ocPnlClass(v) {
   return v >= 0 ? 'green' : 'red';
 }
 
+// Canonical backend performance metric helpers shared by Demo/Paper/Live.
+// Demo/Paper/Live 共用的後端 canonical performance metric 輔助函式。
+function ocPerformanceMetricByKey(metrics, key) {
+  if (!Array.isArray(metrics)) return null;
+  return metrics.find(m => m && m.key === key) || null;
+}
+
+// Return a metric value by key for compact status cards.
+// 依 key 回傳 metric value，供小型狀態卡使用。
+function ocPerformanceMetricValue(metrics, key) {
+  const metric = ocPerformanceMetricByKey(metrics, key);
+  return metric ? metric.value : null;
+}
+
+// Format backend metric descriptors without each tab duplicating unit logic.
+// 格式化後端 metric 描述，避免各 tab 重複實作單位邏輯。
+function ocFormatPerformanceMetric(metric) {
+  if (!metric) return '--';
+  const value = metric.value;
+  if (value == null || value === '') return '--';
+  if (value === 'inf') return '∞';
+  const unit = String(metric.unit || '');
+  const n = Number(value);
+  if (!Number.isFinite(n)) return '--';
+  if (unit === 'count') return String(Math.round(n));
+  if (unit === 'money' || unit === 'usdt') return ocMoney(n);
+  if (unit === 'money_abs') return ocBalance(n, 4);
+  if (unit === 'bps') return n.toFixed(2) + ' bps';
+  if (unit === 'rate') return (n * 100).toFixed(1) + '%';
+  if (unit === 'percent') return n.toFixed(2) + '%';
+  if (unit === 'ratio') return ocNum(n, 2);
+  if (unit === 'seconds') {
+    if (n >= 3600) return (n / 3600).toFixed(1) + ' h';
+    if (n >= 60) return (n / 60).toFixed(1) + ' min';
+    return Math.round(n) + ' sec';
+  }
+  return ocNum(n, 2);
+}
+
+// Apply positive/negative coloring only to explicit PnL-polarity metrics.
+// 僅對明確標記為 PnL polarity 的 metric 套用正負色。
+function ocPerformanceMetricClass(metric) {
+  if (!metric || metric.polarity !== 'pnl') return '';
+  const n = Number(metric.value);
+  if (!Number.isFinite(n) || n === 0) return '';
+  return n > 0 ? 'green' : 'red';
+}
+
+// Render the canonical performance metric grid.
+// 渲染 canonical performance metric grid。
+function ocRenderPerformanceMetrics(metrics) {
+  if (!Array.isArray(metrics) || metrics.length === 0) {
+    return '<div class="oc-loading">暂无指标数据</div>';
+  }
+  return metrics.map(metric => {
+    const key = ocEsc(metric.key || '');
+    const label = ocEsc(metric.label || metric.key || '--');
+    const tooltip = ocEsc(metric.tooltip_zh || '');
+    const source = ocEsc(metric.source || '');
+    const cls = ocPerformanceMetricClass(metric);
+    const value = ocEsc(ocFormatPerformanceMetric(metric));
+    return '<div class="oc-metric oc-perf-metric" data-metric-key="' + key + '" data-source="' + source + '">' +
+      '<div class="oc-metric-label" title="' + tooltip + '">' + label + '</div>' +
+      '<div class="oc-metric-val ' + cls + '">' + value + '</div>' +
+    '</div>';
+  }).join('');
+}
+
 // ─── Status Chip HTML ────────────────────────────────────────────────────────
 function ocChip(text, type) {
   // type: good, warn, bad, neutral, info
@@ -658,6 +726,10 @@ function ocInjectBaseCSS() {
     .oc-metric-label { font-size: 10px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.4px; }
     .oc-metric-val { font-size: 20px; font-weight: 700; margin-top: 2px; }
     .oc-metric-sub { font-size: 11px; color: var(--text-dim); margin-top: 2px; }
+    .oc-performance-metrics { grid-template-columns: repeat(auto-fit, minmax(184px, 1fr)); align-items: stretch; }
+    .oc-performance-metrics .oc-metric { min-height: 118px; display: flex; flex-direction: column; }
+    .oc-performance-metrics .oc-metric-label { min-height: 42px; line-height: 1.45; display: block; }
+    .oc-performance-metrics .oc-metric-val { margin-top: auto; font-size: 18px; line-height: 1.2; overflow-wrap: anywhere; }
 
     /* Status Chips */
     .oc-chip { display: inline-flex; align-items: center; gap: 5px; border-radius: 999px;
@@ -734,6 +806,7 @@ function ocInjectBaseCSS() {
       .oc-table td, .oc-table th { padding: 6px 7px; font-size: 11px; }
       .oc-control-bar { gap: 6px; padding: 8px 10px; }
       .oc-metrics { grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); }
+      .oc-performance-metrics { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
       .oc-card { padding: 12px; }
       .oc-input, .oc-select { min-width: 0; width: 100%; }
       .oc-strat-grid { grid-template-columns: 1fr; }
@@ -796,6 +869,7 @@ function ocInjectBaseCSS() {
 
     /* Tooltip on metric labels — shows on hover */
     .oc-metric-label[title] { cursor: help; border-bottom: 1px dotted var(--text-dim); display: inline-block; }
+    .oc-performance-metrics .oc-metric-label[title] { display: block; width: fit-content; max-width: 100%; }
 
     /* live-metric: unified alias for tab-live.html metric cells (§6.1 CSS unification)
        live-metric 是 oc-metric 的别名，用于实盘 tab。保持视觉一致，特殊修饰词在各 tab 自定义。
