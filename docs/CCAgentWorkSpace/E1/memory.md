@@ -1952,3 +1952,122 @@ finally:
 - HTTPException detail 從 string 改 dict 是 shape change — 前端若有 string match 會壞，E2 review 時要 grep 前端依賴
 
 **Operator 下一步**：E2 review → E4 regression（建議 Linux production cargo test 復驗）→ PM Sign-off + commit + push。
+
+---
+
+## 2026-05-02 · LG-5-IMPL-V035 V035 governance_audit_log migration
+
+**任務**：PA RFC v2 §13 sealed SQL spec → 落地 V035 migration 檔。Wave 1 並行 #1（與 IMPL-1 producer file-isolated）。
+
+**修改**：1 新檔 `srv/sql/migrations/V035__governance_audit_log.sql` 288 LOC。
+
+**結構**：Guard A（schema=learning + 23 必要欄位完整性驗證）→ CREATE TABLE IF NOT EXISTS（5-value event_type CHECK + 3-value verdict_decision CHECK + FK to mlde_param_applications nullable）→ create_hypertable(7d chunk, if_not_exists)→ 2 hot-path indexes（candidate_id+ts DESC partial WHERE NOT NULL / event_type+ts DESC）→ Guard C × 2（pg_get_indexdef substring 比對）→ 23 中英 COMMENT ON COLUMN。
+
+**驗證**：cargo test migrations_test 5/0（Mac 端 SKIP-pass）/ 0 whitespace / 0 hardcoded paths / Guard count 16 / COMMENT count 23 / hypertable 1 / CHECK 2。
+
+**教訓**：
+1. **§13 spec 1:1 落地**：當 PA RFC 已凍結到 SQL pseudocode level，E1 任務是「逐字落檔」非「設計」。**0 設計餘地**節省討論成本，提高 wave throughput。任何 RFC 偏離（即便覺得更好）都該回頭找 PA / PM，不單方面決定。
+2. **Mac 無 PG → cargo test 全 SKIP-pass**：`migrations_test.rs` 設計上 OPENCLAW_TEST_PG 未設則內部 SKIP-pass 不視為失敗 → cargo 看到全 ok。Mac 端通過 ≠ Linux 真實 DB 通過，必須 E4 在 Linux + 真實 PG 復驗（手動 psql × 2 idempotent + hypertable 落地）。Mac CC 不要把 Mac SKIP-pass 當「驗證已完成」報告。
+3. **Idempotent SQL 落地清單**（CLAUDE.md §七）：(a) Guard A 用 `IF EXISTS table` + `RAISE NOTICE` 不 RAISE；(b) `CREATE TABLE IF NOT EXISTS`；(c) `create_hypertable(if_not_exists => TRUE)`；(d) `CREATE INDEX IF NOT EXISTS`；(e) Guard C 用 `pg_get_indexdef + position()` substring 容忍 PG 格式變化。5 條全到位才算真 idempotent。
+4. **PG btree default + WHERE clause 大小寫**：`pg_get_indexdef` 回傳格式固定為 `CREATE INDEX <name> ON <schema>.<table> USING btree (<cols>) WHERE (<predicate>)`，Guard C expected substring 必須照此格式。partial index 的 `WHERE (candidate_id IS NOT NULL)` 括號和大小寫精確匹配。
+5. **FK to mlde_param_applications nullable + 無 ON DELETE 子句**：照 §13 spec 不加 ON DELETE，預設 NO ACTION（candidate row 被刪會擋 audit row 存在）；未來若要 SET NULL 行為，retrofit migration 補。
+
+# E1 LG-5-IMPL-1 — Producer side `_insert_live_candidate` payload extension（2026-05-02）
+
+## 任務
+
+LG-5 RFC v2 §2.1 落地。`mlde_demo_applier._insert_live_candidate` payload 增加 5 個欄位（schema_version + 4 sub-key），其中 `demo_attribution_chain_ratio_by_strategy` 為 MIT MF-M2 per-strategy dict（5 strategy key hardcoded）。新增 4 個 helper computing demo cost baseline / realized window / per-strategy attribution ratio / strategy-cell sample count。
+
+## 修改
+
+| file | LOC | 說明 |
+|---|---|---|
+| `srv/program_code/ml_training/mlde_demo_applier.py` | +401/-9 | 4 new helper + `_insert_live_candidate` payload 重寫 + module docstring 雙語化 + 5 個 module-level constant |
+| `srv/program_code/ml_training/tests/test_mlde_demo_applier.py` | +243/-1 | `_ScriptedCursor` fixture + 3 個新 unit test |
+
+## 4 helper SQL pseudocode 摘要
+
+1. `_compute_demo_cost_baseline(cur)` → dict
+   - Block 1: `WITH entry_fills AS (...) SELECT count, sum(maker_like), avg(effective_fee_rate)` 鏡 [33] 7d demo+live_demo entry fill
+   - Block 2: `SELECT avg(net_bps_after_fee), avg(slippage_bps) FROM learning.mlde_edge_training_rows WHERE 7d AND attribution_chain_ok` 鏡 [40]
+2. `_compute_demo_realized_window(cur)` → dict (start_ts/end_ts/n_fills/window_days=7)
+   - `SELECT count(*) FROM trading.fills WHERE 7d AND engine_mode IN ('demo','live_demo')`
+3. `_compute_attribution_chain_ratio_by_strategy(cur)` → dict[str, float] with 5 hardcoded keys
+   - `SELECT strategy_name, count(*), count(*) FILTER (attribution_chain_ok) FROM mlde_edge_training_rows WHERE 7d AND strategy_name = ANY(%s) GROUP BY strategy_name`
+   - 缺資料 / view 缺 → 該 key 0.0（fail-soft，consumer R-meta defer）
+4. `_compute_demo_sample_count_strategy_cell(cur, strategy)` → int
+   - `SELECT count(*) FROM mlde_edge_training_rows WHERE 7d AND attribution_chain_ok AND strategy_name = %s`
+
+## 驗證
+
+- `python3 -m pytest program_code/ml_training/tests/test_mlde_demo_applier.py -q` → **12 passed** (9 existing + 3 new)
+- `python3 -m pytest program_code/ml_training/tests/test_mlde_shadow_advisor.py -q` → **5 passed**
+- `python3 -m pytest program_code/exchange_connectors/bybit_connector/control_api_v1/tests/ -q --ignore=integration` → **3256 passed / 10 skipped / 0 fail / 409 warnings**（baseline 3262/3 — drift 不來自本 patch，tests 未碰 control_api_v1）
+- `wc -l mlde_demo_applier.py` → **1272 < 1500 hard cap**（warning line 800 已超，但 PA-spec 要求新增於此檔，pre-existing baseline 已超 800；split 屬 IMPL-2 範疇若 LOC 緊則 sibling）
+- `git diff --check` → 0 whitespace
+- `grep -E '/home/ncyu|/Users/[^/]+'` → 0 hit (跨平台 OK)
+- 中英對照注釋 ✅（module docstring + 4 helper docstring + `_insert_live_candidate` docstring + module 常量塊 + INSERT 前 inline comment）
+
+## 治理對照
+
+- CLAUDE.md §二 原則 #3 (AI != command) — payload 增 baseline，consumer (IMPL-2) 可 informed re-evaluation
+- CLAUDE.md §二 原則 #6 (失敗默認收縮) — 4 helper fail-soft 但 sample_count=0 → consumer R3 defer（不靜默過）
+- CLAUDE.md §二 原則 #8 (可解釋) — `source_healthchecks` 標記 `[33]` `[40]` 供 audit replay
+- CLAUDE.md §七 雙語注釋 ✅ / 跨平台 ✅ / Hardcoded path 0
+- CLAUDE.md §九 文件大小：1272 < 1500（pre-existing > 800 由 PA-spec scope 接受）
+- 不擴大範圍：V001-V034 / V035 / governance_hub / strategy params TOML / risk_config TOML / consumer review_live_candidate / RFC 文檔 / pending 24 candidates 全未動 ✅
+
+## 不確定 / E2 應特別審查
+
+1. **Helper 在 INSERT 同一 tx 內跑 7-8 個 SELECT** — 每 candidate 寫入時多 ~5-10ms DB latency；high-rate cycle (16 cand/cycle) 下加 ~80-160ms。若 production rate 真的撞到, 後續可考慮 cache baseline per cycle（IMPL-1 follow-up，非 spec 要求）。
+2. **`_compute_demo_realized_window.n_strategy_fills` 永遠是 0** — RFC §2.1 schema 列了此欄但 producer 端意圖不明確（spec 文字未明示 SQL）；目前以 0 預留，consumer R3 應從 `demo_sample_count_strategy_cell` 取 per-strategy 值（更精準，因為已 filter attribution_chain_ok）。E2 確認此 interpretation 與 IMPL-2 consumer 預期一致。
+3. **`_TAKER_FEE_RATE` / `_MAKER_FEE_CUTOFF` 常量重複** — 與 healthcheck `[33]` 之 `TAKER_FEE_RATE`/`MAKER_FEE_CUTOFF` 重複定義；目前手動同步（module docstring 已標）。未來如改 fee tier，需同步兩處。E5 可考慮抽 shared constant module（非 PA-spec 範疇）。
+4. **`view_exists` check 重複** — 4 helper 各自查 `to_regclass(...)`；可改 module-level cache，但 fail-soft 設計下不關鍵。
+
+## 接力
+
+E2 review (LOC 增量 + 邏輯 + 雙語注釋 + payload 結構合 RFC §2.1 spec) → E4 regression（pytest baseline + 新 unit test）→ PM 統一收 Wave 1 batch（IMPL-V035 + IMPL-1 並行）commit + push。
+
+報告檔：`srv/.claude_reports/20260502_lg5_impl_1_producer.md`、`srv/docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-02--lg5_impl_1_producer.md`
+
+---
+
+## 2026-05-02 LG-5 IMPL-1 PRODUCER ROUND 2 — CRITICAL spec drift fix
+
+### 教訓 / 反模式
+
+**Round 1 把 enrich payload 寫到錯的表**：因為改的入口是 `_insert_live_candidate`（寫 `mlde_shadow_recommendations`），沒注意到 `_apply_one()` 還有第二處 `_record_application(...)` 會寫 `mlde_param_applications`，**而那才是 consumer 真正讀的表**。教訓：
+
+1. **改 producer payload 前必先確認 consumer 從哪張表讀** — RFC v2 §2.2 line 140 已明寫表名 + filter，round 1 沒 cross-check。
+2. **同一邏輯有兩個 writer 時，必抽 SoT helper 到同一 builder** — 否則 spec drift 必發生。本 round 抽 `_build_live_candidate_payload` 解決。
+3. **Schema 欄位「保留 0」是危險訊號** — `n_strategy_fills` round 1 硬編 0（理由「producer 不寫，consumer 從別處拿」），但 RFC §3 R3 直接讀此欄判 defer，硬編 0 = 永久 defer。下次有「保留欄位」念頭時，先驗 consumer 有沒有讀。
+
+### 關鍵變動
+
+- 新 `_build_live_candidate_payload(cur, *, source_row, application_id, application_type, patch, strategy_name)` helper：兩處 writer 共用 SoT。
+- `_compute_demo_realized_window(cur, strategy_name=None)` 加參數，內部呼 `_compute_demo_sample_count_strategy_cell` 填 `n_strategy_fills`。
+- `_apply_one` 第二處 `_record_application(payload=...)` 從 bare 2-key 改用 helper（CRITICAL 標 inline 中英註解）。
+
+### 測試覆蓋
+
+3 新 unit test：
+- `test_cost_baseline_fail_soft_on_block1_sql_exception` — `_RaisingCursor` 第一個 execute 拋 → baseline 全 0 + 不拋
+- `test_record_application_payload_matches_lg5_contract` — _record_application Json arg 解開驗 schema_version + 5 sub-key
+- `test_lg5_contract_round_trip_param_applications_table` — 模擬 producer → consumer 讀 → schema_version match
+
+LOC: 1272 → 1374 (+102 src) / 443 → 775 (+332 test)。15 passed (12 round-1 + 3 round-2)。
+
+### 治理
+
+- CLAUDE.md §九 LOC：1374 < 1500 hard cap ✅
+- 跨平台 grep ✅ / 雙語注釋 ✅ / git diff --check 0 whitespace ✅
+- 不擴大範圍：governance_hub.py / V001-V035 / TOML / mlde_shadow_recommendations 寫入路徑 / RFC 全未動 ✅
+- 硬邊界 0 觸碰 ✅
+
+### 接力
+
+E2 round 2 review（重點：helper SoT + 兩 writer 1:1 + n_strategy_fills 真實填寫）→ E4 regression → PM 收。
+
+報告：
+- `srv/.claude_reports/20260502_161603_e1_lg5_impl1_producer_round2.md`
+- `srv/docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-02--lg5_impl_1_producer_round2.md`

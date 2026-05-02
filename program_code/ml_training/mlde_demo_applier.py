@@ -1,13 +1,34 @@
 """Bounded demo applier for ML/Dream edge recommendations.
 
-Consumes ``learning.mlde_shadow_recommendations`` and applies only demo-scoped
-parameter changes through Rust IPC. Live/live_demo rows are never applied here;
-positive demo evidence emits a governed live ``experiment_plan`` candidate.
+模組目的 / Module purpose:
+    消費 ``learning.mlde_shadow_recommendations`` 並只在 demo engine 套用受界
+    參數變更（透過 Rust IPC）。Live / live_demo row 永不在此處被套用；正向
+    demo 證據會發出一個 governed live ``experiment_plan`` candidate，由
+    LG-5 GovernanceHub 後續 review。
+
+    Consumes ``learning.mlde_shadow_recommendations`` and applies only demo-
+    scoped parameter changes through Rust IPC. Live/live_demo rows are never
+    applied here; positive demo evidence emits a governed live
+    ``experiment_plan`` candidate which will be reviewed downstream by
+    LG-5 GovernanceHub.
+
+LG-5 RFC v2 §2.1 producer side:
+    `_insert_live_candidate` payload now carries `schema_version`,
+    `demo_cost_baseline`, `demo_realized_window`,
+    `demo_attribution_chain_ratio_by_strategy` (per-strategy 5-key dict per
+    MIT MF-M2), and `demo_sample_count_strategy_cell`. Consumer side (LG-5
+    IMPL-2 `GovernanceHub.review_live_candidate`) fail-closes when
+    `schema_version` is missing or unknown.
+
+關聯文件 / Related docs:
+    - `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-02--lg5_live_candidate_eval_contract_rfc_v2.md` §2.1 + §3 R-meta
+    - CLAUDE.md §二 原則 #3 (AI output != command) + #8 (explainability)
 """
 
 from __future__ import annotations
 
 import asyncio
+import datetime as _dt
 import hashlib
 import json
 import logging
@@ -16,6 +37,44 @@ import os
 import time
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Optional
+
+
+# LG-5 RFC v2 §2.1 schema version constant.
+# Consumer side (`GovernanceHub.review_live_candidate`) fail-closes on
+# missing or wrong version. Bump only when payload schema breaks
+# backward-compat with consumer.
+# LG-5 RFC v2 §2.1 schema 版本常量。消費端 (`GovernanceHub.review_live_candidate`)
+# 對缺失 / 錯誤版本 fail-closed。僅在 payload schema 與消費端不再相容時 bump。
+_LIVE_CANDIDATE_EVAL_SCHEMA_VERSION = "live_candidate_eval_v1"
+
+# LG-5 RFC v2 §2.1 hardcoded 5-strategy keyset for per-strategy attribution
+# chain ratio dict. R-meta gate (per MF-M2) requires all 5 keys present;
+# missing key → strategy treated as 0.0 (defer at consumer side).
+# LG-5 RFC v2 §2.1 attribution per-strategy dict 的 5 個 hardcoded strategy key。
+# R-meta gate (MF-M2) 要求 5 key 全在；缺 key → 該 strategy 視為 0.0 (consumer defer)。
+_ATTRIBUTION_STRATEGY_KEYS: tuple[str, ...] = (
+    "grid_trading",
+    "ma_crossover",
+    "bb_breakout",
+    "bb_reversion",
+    "funding_arb",
+)
+
+# LG-5 RFC v2 §3 R-meta source healthcheck ids (audit / replay reference).
+# 用於 payload.demo_cost_baseline.source_healthchecks，供 IMPL-5 retro 校準。
+_DEMO_COST_BASELINE_SOURCE_HEALTHCHECKS: tuple[str, ...] = ("[33]", "[40]")
+
+# 7-day demo realized window for cost baseline + realized aggregation.
+# Mirrors healthcheck `[33]` / `[40]` window (CLAUDE.md §三).
+# 7d demo realized 窗口；對齊 healthcheck `[33]` / `[40]` 的窗口。
+_DEMO_BASELINE_WINDOW_DAYS: int = 7
+
+# Maker-like fee cutoff and taker fee rate mirrored from healthcheck `[33]`
+# (helper_scripts/db/passive_wait_healthcheck/checks_execution.py). Kept in
+# sync manually — if `[33]` updates these, also update here.
+# Maker-like fee cutoff 與 taker fee rate 鏡 healthcheck `[33]`；手動同步。
+_TAKER_FEE_RATE: float = 0.00055   # 5.5 bps Bybit Linear taker default
+_MAKER_FEE_CUTOFF: float = 0.00040  # any fee_rate <= 4.0 bps treated as maker-like
 
 try:
     import psycopg2  # type: ignore
@@ -584,6 +643,426 @@ def _mark_recommendation_applied(cur: Any, rec_id: int, applied: bool) -> None:
         (applied, rec_id),
     )
 
+# ────────────────────────────────────────────────────────────────────────────
+# LG-5 RFC v2 §2.1 producer-side helper functions for live candidate payload.
+# These are pure SQL aggregation helpers operating on a psycopg2 cursor.
+# All 4 helpers fail-soft: on SQL exception or missing data, they return a
+# well-formed dict with sample_count / n_fills = 0 (consumer side R3 defers
+# on insufficient sample). Never raise — payload always emittable.
+#
+# LG-5 RFC v2 §2.1 producer 側 helper：4 個純 SQL aggregation helper，
+# 失敗 fail-soft（SQL 異常或無資料 → 回 well-formed dict 但 sample_count=0），
+# 不 raise，確保 payload 永遠可發出。
+# ────────────────────────────────────────────────────────────────────────────
+
+
+def _safe_float(value: Any, default: float = 0.0) -> float:
+    """Coerce DB value to float / 將 DB 值安全轉為 float。"""
+    if value is None:
+        return default
+    try:
+        out = float(value)
+    except (TypeError, ValueError):
+        return default
+    if not math.isfinite(out):
+        return default
+    return out
+
+
+def _safe_int(value: Any, default: int = 0) -> int:
+    """Coerce DB value to int / 將 DB 值安全轉為 int。"""
+    if value is None:
+        return default
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _utc_iso8601(when: Optional[_dt.datetime] = None) -> str:
+    """Return ISO8601 UTC timestamp / 回 ISO8601 UTC 時戳。"""
+    ts = when or _dt.datetime.now(_dt.timezone.utc)
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=_dt.timezone.utc)
+    return ts.isoformat(timespec="seconds")
+
+
+def _compute_demo_cost_baseline(cur: Any) -> dict[str, Any]:
+    """Compute 7d demo cost baseline / 計算 7d demo cost baseline。
+
+    LG-5 RFC v2 §2.1：mirror healthcheck `[33]` (maker_fill_rate / fee_drop)
+    + `[40]` (realized net_bps_after_fee) but query independently — does NOT
+    rely on healthcheck having run. Aggregates last 7d demo + live_demo
+    entry fills.
+
+    LG-5 RFC v2 §2.1：鏡 healthcheck `[33]` (maker_fill_rate / fee_drop)
+    + `[40]` (realized net_bps_after_fee)，但獨立查詢（不依賴 healthcheck
+    跑過）。彙總 7d demo + live_demo entry fill。
+
+    Returns:
+        dict with keys: as_of_ts, engine_mode, maker_fill_rate_7d,
+        fee_drop_only_7d, avg_realized_net_bps_7d, avg_realized_fee_bps_7d,
+        avg_realized_slippage_bps_7d, sample_count, source_healthchecks.
+        Sample_count < 30 → consumer side R3 defers (per RFC §3 R3).
+    """
+    baseline: dict[str, Any] = {
+        "as_of_ts": _utc_iso8601(),
+        "engine_mode": "demo",
+        "maker_fill_rate_7d": 0.0,
+        "fee_drop_only_7d": 0.0,
+        "avg_realized_net_bps_7d": 0.0,
+        "avg_realized_fee_bps_7d": 0.0,
+        "avg_realized_slippage_bps_7d": 0.0,
+        "sample_count": 0,
+        "source_healthchecks": list(_DEMO_COST_BASELINE_SOURCE_HEALTHCHECKS),
+    }
+
+    # Block 1：maker fill / fee aggregation from trading.fills entry rows.
+    # 鏡 [33]：7d demo + live_demo 入場 fill 的 effective fee_rate +
+    # maker_like ratio。
+    try:
+        cur.execute(
+            """
+            WITH entry_fills AS (
+                SELECT
+                    coalesce(nullif(f.fee_rate, 0), %s)::float8 AS effective_fee_rate,
+                    CASE
+                        WHEN lower(coalesce(f.liquidity_role, '')) = 'maker'
+                          OR coalesce(nullif(f.fee_rate, 0), %s) <= %s
+                        THEN 1
+                        ELSE 0
+                    END AS maker_like
+                FROM trading.fills f
+                WHERE f.ts > now() - (%s::int || ' days')::interval
+                  AND f.engine_mode IN ('demo', 'live_demo')
+                  AND coalesce(f.strategy_name, '') <> ''
+                  AND f.strategy_name NOT LIKE 'risk_close:%%'
+                  AND f.strategy_name NOT LIKE 'strategy_close:%%'
+                  AND f.strategy_name NOT LIKE 'ipc_close%%'
+                  AND f.strategy_name NOT LIKE 'unattributed:%%'
+                  AND coalesce(f.exit_source, '') = ''
+            )
+            SELECT
+                count(*)::int AS total_fills,
+                coalesce(sum(maker_like), 0)::int AS maker_like_fills,
+                coalesce(avg(effective_fee_rate), %s)::float8 AS avg_fee_rate
+            FROM entry_fills
+            """,
+            (
+                _TAKER_FEE_RATE,
+                _TAKER_FEE_RATE,
+                _MAKER_FEE_CUTOFF,
+                _DEMO_BASELINE_WINDOW_DAYS,
+                _TAKER_FEE_RATE,
+            ),
+        )
+        row = cur.fetchone()
+    except Exception as exc:  # noqa: BLE001 - producer fail-soft
+        logger.warning("lg5 cost baseline maker query failed: %s", exc)
+        row = None
+
+    if row is not None:
+        total = _safe_int(row[0])
+        maker_like = _safe_int(row[1])
+        avg_fee_rate = _safe_float(row[2], _TAKER_FEE_RATE)
+        baseline["sample_count"] = total
+        if total > 0:
+            baseline["maker_fill_rate_7d"] = maker_like / total
+        # fee drop = (taker_default - effective_fee) / taker_default; clamp [0, 1].
+        # fee drop = (taker 預設 - 實際 fee) / taker 預設；clamp [0, 1]。
+        fee_drop = max(
+            0.0,
+            min(1.0, (_TAKER_FEE_RATE - avg_fee_rate) / max(_TAKER_FEE_RATE, 1e-12)),
+        )
+        baseline["fee_drop_only_7d"] = fee_drop
+        # avg fee in bps for LG-5 R5 cost_edge_ratio computation.
+        # avg fee 換成 bps，供 LG-5 R5 cost_edge_ratio 用。
+        baseline["avg_realized_fee_bps_7d"] = avg_fee_rate * 10_000.0
+
+    # Block 2：realized net_bps + slippage from MLDE training rows view.
+    # 鏡 [40]：7d MLDE training row 的 net_bps_after_fee 與 slippage_bps。
+    try:
+        cur.execute(
+            "SELECT to_regclass('learning.mlde_edge_training_rows') IS NOT NULL"
+        )
+        view_exists = cur.fetchone()
+    except Exception:  # noqa: BLE001
+        view_exists = (False,)
+
+    if view_exists and view_exists[0]:
+        try:
+            cur.execute(
+                """
+                SELECT
+                    coalesce(avg(net_bps_after_fee), 0.0)::float8 AS avg_net_bps,
+                    coalesce(avg(slippage_bps), 0.0)::float8 AS avg_slip_bps
+                FROM learning.mlde_edge_training_rows
+                WHERE ts > now() - (%s::int || ' days')::interval
+                  AND engine_mode IN ('demo', 'live_demo')
+                  AND attribution_chain_ok
+                  AND net_bps_after_fee IS NOT NULL
+                """,
+                (_DEMO_BASELINE_WINDOW_DAYS,),
+            )
+            row2 = cur.fetchone()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("lg5 cost baseline net_bps query failed: %s", exc)
+            row2 = None
+
+        if row2 is not None:
+            baseline["avg_realized_net_bps_7d"] = _safe_float(row2[0], 0.0)
+            baseline["avg_realized_slippage_bps_7d"] = _safe_float(row2[1], 0.0)
+
+    return baseline
+
+
+def _compute_demo_realized_window(
+    cur: Any,
+    strategy_name: Optional[str] = None,
+) -> dict[str, Any]:
+    """Compute 7d realized fill window / 計算 7d realized fill 窗口。
+
+    LG-5 RFC v2 §2.1：emits ISO8601 start/end ts + total fill count + per-
+    strategy fill count for the candidate's strategy slice. Consumer (R3
+    PSR) uses ``n_strategy_fills`` directly to qualify sample sufficiency
+    (RFC §3 R3：`n_strategy_fills < 100 → defer`)。
+
+    LG-5 RFC v2 §2.1：發出 ISO8601 start/end ts + 全部 fill 計數 + per-strategy
+    fill 計數。Consumer (R3 PSR) 直接讀 ``n_strategy_fills`` 判定 sample 是否
+    足夠（RFC §3 R3：`n_strategy_fills < 100 → defer`）。
+
+    Round 2 fix (LG-5 IMPL-1 round 2)：先前 ``n_strategy_fills`` 硬編 0，
+    consumer R3 永久 defer。本版改為呼叫
+    ``_compute_demo_sample_count_strategy_cell`` 取得 per-strategy cell
+    sample count（與 attribution_chain_ok 過濾一致），讓 R3 真正能 promote。
+
+    Round 2 fix (LG-5 IMPL-1 round 2): previously ``n_strategy_fills`` was
+    hardcoded 0, causing consumer R3 to defer all candidates. This version
+    populates it via ``_compute_demo_sample_count_strategy_cell`` (same
+    attribution_chain_ok filter as MF-M2), so R3 can actually promote.
+    """
+    end_ts = _dt.datetime.now(_dt.timezone.utc)
+    start_ts = end_ts - _dt.timedelta(days=_DEMO_BASELINE_WINDOW_DAYS)
+    # Pull per-strategy cell sample count first so it is consistent with
+    # MF-M2 attribution semantics (same view + same filter).
+    # 先取 per-strategy cell sample count，與 MF-M2 attribution 語意一致。
+    n_strategy_fills = _compute_demo_sample_count_strategy_cell(
+        cur,
+        strategy_name if isinstance(strategy_name, str) else None,
+    )
+    window: dict[str, Any] = {
+        "start_ts": _utc_iso8601(start_ts),
+        "end_ts": _utc_iso8601(end_ts),
+        "n_fills": 0,
+        "n_strategy_fills": n_strategy_fills,
+        "window_days": _DEMO_BASELINE_WINDOW_DAYS,
+    }
+
+    try:
+        cur.execute(
+            """
+            SELECT count(*)::int
+              FROM trading.fills
+             WHERE ts > now() - (%s::int || ' days')::interval
+               AND engine_mode IN ('demo', 'live_demo')
+            """,
+            (_DEMO_BASELINE_WINDOW_DAYS,),
+        )
+        row = cur.fetchone()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("lg5 realized_window n_fills query failed: %s", exc)
+        row = None
+
+    if row is not None:
+        window["n_fills"] = _safe_int(row[0])
+
+    return window
+
+
+def _compute_attribution_chain_ratio_by_strategy(cur: Any) -> dict[str, float]:
+    """Compute per-strategy 7d attribution_chain_ok ratio.
+    計算 per-strategy 7d attribution_chain_ok 比率。
+
+    LG-5 RFC v2 §2.1 + MIT MF-M2: returns dict keyed by 5 hardcoded strategy
+    names; missing data → 0.0 for that key (consumer side R-meta defers per
+    strategy). NOT a global average — structurally per-strategy is mandatory.
+
+    LG-5 RFC v2 §2.1 + MIT MF-M2：回傳以 5 個 hardcoded strategy 名為 key 的
+    dict；缺資料 → 該 key 為 0.0（consumer 端 R-meta per strategy defer）。
+    這 **不是** global 平均 — per-strategy 結構性必須。
+    """
+    ratios: dict[str, float] = {key: 0.0 for key in _ATTRIBUTION_STRATEGY_KEYS}
+
+    try:
+        cur.execute(
+            "SELECT to_regclass('learning.mlde_edge_training_rows') IS NOT NULL"
+        )
+        view_exists = cur.fetchone()
+    except Exception:  # noqa: BLE001
+        return ratios
+    if not view_exists or not view_exists[0]:
+        return ratios
+
+    try:
+        cur.execute(
+            """
+            SELECT
+                strategy_name,
+                count(*)::int AS total,
+                count(*) FILTER (WHERE attribution_chain_ok)::int AS ok_count
+              FROM learning.mlde_edge_training_rows
+             WHERE ts > now() - (%s::int || ' days')::interval
+               AND engine_mode IN ('demo', 'live_demo')
+               AND coalesce(strategy_name, '') = ANY(%s)
+             GROUP BY strategy_name
+            """,
+            (_DEMO_BASELINE_WINDOW_DAYS, list(_ATTRIBUTION_STRATEGY_KEYS)),
+        )
+        rows = cur.fetchall() or []
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("lg5 attribution per-strategy ratio query failed: %s", exc)
+        rows = []
+
+    for row in rows:
+        # row tuple: (strategy_name, total, ok_count)
+        name = str(row[0]) if row[0] is not None else ""
+        if name not in ratios:
+            continue
+        total = _safe_int(row[1])
+        ok_count = _safe_int(row[2])
+        if total > 0:
+            ratios[name] = ok_count / total
+
+    return ratios
+
+
+def _compute_demo_sample_count_strategy_cell(
+    cur: Any,
+    strategy_name: Optional[str],
+) -> int:
+    """Compute 7d cell-level sample count for one strategy.
+    計算特定 strategy 的 7d cell-level sample count。
+
+    LG-5 RFC v2 §2.1：per-strategy fill count over 7d demo + live_demo
+    window, restricted to cells with attribution_chain_ok = true (mirrors
+    [40] training-row eligibility). Consumer R3 uses this as the strategy
+    cell sample for PSR n threshold (n < 100 → defer per RFC §3 R3).
+
+    LG-5 RFC v2 §2.1：per-strategy 7d fill 計數，限 attribution_chain_ok=true
+    （對齊 [40] training row 條件）。Consumer R3 用此作 PSR n 門檻
+    （n < 100 → defer，per RFC §3 R3）。
+    """
+    if not strategy_name:
+        return 0
+
+    try:
+        cur.execute(
+            "SELECT to_regclass('learning.mlde_edge_training_rows') IS NOT NULL"
+        )
+        view_exists = cur.fetchone()
+    except Exception:  # noqa: BLE001
+        return 0
+    if not view_exists or not view_exists[0]:
+        return 0
+
+    try:
+        cur.execute(
+            """
+            SELECT count(*)::int
+              FROM learning.mlde_edge_training_rows
+             WHERE ts > now() - (%s::int || ' days')::interval
+               AND engine_mode IN ('demo', 'live_demo')
+               AND attribution_chain_ok
+               AND strategy_name = %s
+            """,
+            (_DEMO_BASELINE_WINDOW_DAYS, strategy_name),
+        )
+        row = cur.fetchone()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("lg5 strategy_cell sample_count query failed: %s", exc)
+        return 0
+
+    return _safe_int(row[0]) if row else 0
+
+
+def _build_live_candidate_payload(
+    cur: Any,
+    *,
+    source_row: dict[str, Any],
+    application_id: int,
+    application_type: str,
+    patch: dict[str, Any],
+    strategy_name: Optional[str],
+) -> dict[str, Any]:
+    """Build LG-5 RFC v2 §2.1 compliant live candidate payload.
+    建構符合 LG-5 RFC v2 §2.1 規格的 live candidate payload。
+
+    Single source of truth for the 5-key LG-5 producer payload. Used by
+    BOTH writers:
+
+      1. ``_insert_live_candidate`` → ``learning.mlde_shadow_recommendations``
+         (audit / monitoring path; other readers may depend on it).
+      2. ``_apply_one``'s ``_record_application(...)`` candidate row →
+         ``learning.mlde_param_applications`` filter
+         ``engine_mode='live' AND status='candidate' AND
+         application_type='live_promotion_candidate'`` — this is the row
+         consumer ``GovernanceHub.review_live_candidate`` reads (RFC v2
+         §2.2 line 140 + MIT MF-M3 absorbed verdict).
+
+    Consumer fail-closes on missing or wrong ``schema_version`` (defer /
+    reject ``schema_unknown``); centralising payload construction here
+    prevents the round-1 spec drift where only writer #1 carried full LG-5
+    sub-keys while writer #2 (the one consumer actually reads) was a bare
+    2-key payload — making the entire LG-5 governance pipeline silently
+    inert for new candidates.
+
+    Each helper called below is fail-soft (returns a well-formed dict / 0
+    on SQL exception), so this function never raises due to baseline
+    failure; the payload is always emittable.
+
+    本函數是 LG-5 producer payload 5-key 規格的單一 SoT，兩處 writer 共用：
+      1. ``_insert_live_candidate`` 寫 ``mlde_shadow_recommendations``
+         （audit / monitoring 路徑，其他 reader 可能依賴）
+      2. ``_apply_one`` 的 ``_record_application(...)`` candidate row 寫入
+         ``mlde_param_applications``，consumer
+         ``GovernanceHub.review_live_candidate`` 讀的就是這張表
+         （RFC v2 §2.2 line 140 + MIT MF-M3 absorbed verdict）
+
+    Consumer 對 missing / wrong ``schema_version`` fail-closed
+    （defer / reject ``schema_unknown``）；集中 payload 建構在此可防
+    round-1 的 spec drift —— 當時只有 writer #1 帶完整 LG-5 sub-key、
+    writer #2（consumer 真正讀的那張表）只有 bare 2-key payload，導致
+    整條 LG-5 governance pipeline 對所有新 candidate silently 失效。
+
+    下方每個 helper 都 fail-soft（SQL 異常回 well-formed dict / 0），
+    所以本函數絕不因 baseline 失敗而 raise，payload 永遠可發出。
+    """
+    demo_cost_baseline = _compute_demo_cost_baseline(cur)
+    # Pass strategy_name into the realized_window helper so it can populate
+    # ``n_strategy_fills`` (RFC §3 R3 reads this column directly).
+    # 將 strategy_name 傳入 realized_window helper 讓它填寫 ``n_strategy_fills``
+    # （RFC §3 R3 直接讀此欄位判斷 promote / defer）。
+    demo_realized_window = _compute_demo_realized_window(cur, strategy_name)
+    attribution_by_strategy = _compute_attribution_chain_ratio_by_strategy(cur)
+    sample_count_strategy_cell = _compute_demo_sample_count_strategy_cell(
+        cur,
+        strategy_name if isinstance(strategy_name, str) else None,
+    )
+    return {
+        "policy": "live_governed_promotion_candidate",
+        "schema_version": _LIVE_CANDIDATE_EVAL_SCHEMA_VERSION,
+        "source_demo_recommendation_id": source_row.get("id"),
+        "source_demo_application_id": application_id,
+        "application_type": application_type,
+        "patch": patch,
+        "requires": ["GovernanceHub", "DecisionLease", "live_gates"],
+        "demo_cost_baseline": demo_cost_baseline,
+        "demo_realized_window": demo_realized_window,
+        "demo_attribution_chain_ratio_by_strategy": attribution_by_strategy,
+        "demo_sample_count_strategy_cell": sample_count_strategy_cell,
+    }
+
+
 def _insert_live_candidate(
     cur: Any,
     *,
@@ -592,14 +1071,31 @@ def _insert_live_candidate(
     application_type: str,
     patch: dict[str, Any],
 ) -> None:
-    payload = {
-        "policy": "live_governed_promotion_candidate",
-        "source_demo_recommendation_id": source_row.get("id"),
-        "source_demo_application_id": application_id,
-        "application_type": application_type,
-        "patch": patch,
-        "requires": ["GovernanceHub", "DecisionLease", "live_gates"],
-    }
+    """Insert a live promotion candidate row with LG-5 §2.1 payload.
+    插入一筆 live promotion candidate row，payload 符合 LG-5 §2.1。
+
+    LG-5 RFC v2 §2.1 producer side：原本三個 demo 數值 (expected_net_bps /
+    confidence / sample_count) 仍直接拷貝至 column；payload JSONB 由
+    ``_build_live_candidate_payload`` 統一建構（含 ``schema_version`` + 4
+    新 sub-key）。注意此處寫的是 ``mlde_shadow_recommendations``（audit /
+    monitoring 路徑），consumer 真正讀的 row 由 ``_apply_one`` 的
+    ``_record_application(...)`` 寫入 ``mlde_param_applications``（兩處
+    payload 同源，由 helper 保證 1:1）。
+
+    LG-5 RFC v2 §2.1 producer side: three demo numbers still copied
+    verbatim to columns; payload JSONB built via
+    ``_build_live_candidate_payload`` (single SoT shared with the
+    ``mlde_param_applications`` writer the consumer actually reads).
+    """
+    strategy_name = source_row.get("strategy_name")
+    payload = _build_live_candidate_payload(
+        cur,
+        source_row=source_row,
+        application_id=application_id,
+        application_type=application_type,
+        patch=patch,
+        strategy_name=strategy_name if isinstance(strategy_name, str) else None,
+    )
     cur.execute(
         """
         INSERT INTO learning.mlde_shadow_recommendations
@@ -753,6 +1249,28 @@ async def _apply_one(
             application_type=kind,
             patch=patch,
         )
+        # CRITICAL (LG-5 IMPL-1 round 2)：consumer
+        # ``GovernanceHub.review_live_candidate`` reads from
+        # ``mlde_param_applications`` (RFC v2 §2.2 line 140), NOT from
+        # ``mlde_shadow_recommendations``. The payload here MUST carry the
+        # full LG-5 §2.1 contract (schema_version + 4 sub-keys) or consumer
+        # defers / rejects ``schema_unknown`` and the entire pipeline goes
+        # silently inert. Build via shared helper so two writers stay 1:1.
+        # CRITICAL (LG-5 IMPL-1 round 2)：consumer
+        # ``GovernanceHub.review_live_candidate`` 讀的是
+        # ``mlde_param_applications``（RFC v2 §2.2 line 140），不是
+        # ``mlde_shadow_recommendations``；payload 必須帶完整 LG-5 §2.1
+        # contract（schema_version + 4 sub-key），否則 consumer 對所有
+        # candidate defer / reject ``schema_unknown``，整條 pipeline 失效。
+        # 透過共用 helper 建構，與另一寫入點保持 1:1。
+        live_candidate_payload = _build_live_candidate_payload(
+            cur,
+            source_row=row,
+            application_id=app_id,
+            application_type=kind,
+            patch=patch,
+            strategy_name=str(row.get("strategy_name") or "") or None,
+        )
         _record_application(
             cur,
             row={**row, "engine_mode": "live"},
@@ -764,7 +1282,7 @@ async def _apply_one(
             status="candidate",
             reason="positive_demo_evidence_governed_live_candidate",
             requires_governance=True,
-            payload={"source_demo_application_id": app_id, "source_demo_recommendation_id": row.get("id")},
+            payload=live_candidate_payload,
         )
         live_candidate = True
     return {"status": status, "application_type": kind, "target": target,
