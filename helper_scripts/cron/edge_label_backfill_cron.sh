@@ -78,13 +78,77 @@ BATCH="${OPENCLAW_LG5_LABEL_BACKFILL_BATCH_LIMIT:-5000}"
 LOG_DIR="${DATA}/logs"
 LOG="${LOG_DIR}/edge_label_backfill_cron.log"
 
+# Need LOG_DIR ready before any `echo >> "$LOG"` so the FATAL branches below
+# don't lose their message to a missing parent dir.
+# 在後面任何 `echo >> "$LOG"` 之前先確保 LOG_DIR 存在，避免 FATAL 訊息因
+# 父目錄不存在而消失。
+mkdir -p "$LOG_DIR"
+
+ts() { date '+%Y-%m-%d %H:%M:%S'; }
+
+# ─── PG creds sourcing (LG5-W3-FUP-3-CRON-ENV) ──────────────────────
+# Cron has a barebones environment (no shell rc, no operator login env) so
+# OPENCLAW_DATABASE_URL / POSTGRES_* are NOT inherited from the operator's
+# interactive shell. The downstream consumer
+# `program_code/ml_training/edge_label_backfill.py:_open_conn` requires either
+# OPENCLAW_DATABASE_URL or the full set of POSTGRES_* env vars; without them
+# psycopg2 raises `OperationalError: fe_sendauth: no password supplied` and
+# the cron tick fails silently from the operator's shell perspective.
+#
+# Mirror `helper_scripts/linux_bootstrap_db.sh:41-45` (the more complete
+# sibling pattern — `passive_wait_healthcheck_cron.sh:43-44` only sources
+# PG_PASS and hardcodes user/db/host/port, which couples it to one slot).
+# This wrapper sources all 5 POSTGRES_* keys from the secrets env file with
+# HOST/PORT fallbacks (the env file does not always include them).
+#
+# cron 的 environment 極簡（無 shell rc，無 operator login env），所以
+# OPENCLAW_DATABASE_URL / POSTGRES_* 不會從 operator 互動 shell 繼承。下游
+# `edge_label_backfill.py:_open_conn` 需要 OPENCLAW_DATABASE_URL 或完整
+# POSTGRES_* env vars，缺失則 psycopg2 拋
+# `OperationalError: fe_sendauth: no password supplied`，從 operator shell
+# 看是 cron tick 靜默失敗。
+#
+# 對齊 `linux_bootstrap_db.sh:41-45` 完整 sibling pattern（
+# `passive_wait_healthcheck_cron.sh:43-44` 只抓 PG_PASS 並 hardcode
+# user/db/host/port，把它綁定到一個 slot）。本 wrapper 從 secrets env file
+# 抓 5 個 POSTGRES_* keys，HOST/PORT 缺失時 fallback（env file 不一定含）。
+SECRETS_ROOT="${OPENCLAW_SECRETS_ROOT:-$HOME/BybitOpenClaw/secrets}"
+ENV_FILE="$SECRETS_ROOT/environment_files/basic_system_services.env"
+if [[ ! -f "$ENV_FILE" ]]; then
+    echo "[$(ts)] FATAL: env file missing: $ENV_FILE" | tee -a "$LOG" >&2
+    exit 2
+fi
+# Note: `grep | cut` exits non-zero when the key is absent; under `set -e` that
+# would short-circuit *before* the explicit empty-check below, masking the
+# FATAL message. Trail `|| true` per command so missing keys reach the check.
+# 注意：`grep | cut` 在 key 不存在時 exit 非零，set -e 會在下方明確空檢查
+# 之前先 short-circuit、淹沒 FATAL 訊息。每行加 `|| true` 讓缺失 key 走
+# 到後面的明確檢查。
+PG_PASS=$(grep '^POSTGRES_PASSWORD=' "$ENV_FILE" 2>/dev/null | cut -d= -f2- || true)
+PG_USER=$(grep '^POSTGRES_USER=' "$ENV_FILE" 2>/dev/null | cut -d= -f2- || true)
+PG_DB=$(grep '^POSTGRES_DB=' "$ENV_FILE" 2>/dev/null | cut -d= -f2- || true)
+PG_HOST=$(grep '^POSTGRES_HOST=' "$ENV_FILE" 2>/dev/null | cut -d= -f2- || true)
+PG_PORT=$(grep '^POSTGRES_PORT=' "$ENV_FILE" 2>/dev/null | cut -d= -f2- || true)
+# Fallback when env file omits HOST/PORT (Mac + Linux both observed lacking
+# POSTGRES_HOST in `basic_system_services.env`) — defaults match
+# `helper_scripts/linux_bootstrap_db.sh:44-45`.
+# env file 不一定含 HOST/PORT（Mac + Linux `basic_system_services.env` 兩端
+# 實測都缺 POSTGRES_HOST）— 預設對齊 `linux_bootstrap_db.sh:44-45`。
+PG_HOST="${PG_HOST:-127.0.0.1}"
+PG_PORT="${PG_PORT:-5432}"
+if [[ -z "$PG_PASS" || -z "$PG_USER" || -z "$PG_DB" ]]; then
+    echo "[$(ts)] FATAL: PG creds incomplete in $ENV_FILE (require POSTGRES_PASSWORD, POSTGRES_USER, POSTGRES_DB)" | tee -a "$LOG" >&2
+    exit 2
+fi
+export OPENCLAW_DATABASE_URL="postgresql://redacted@${PG_HOST}:${PG_PORT}/${PG_DB}"
+
 # ─── Overlap lock (mirror cron_observer_cycle.sh SW-006 pattern) ────
 # 防止 30min cron 與長跑 backfill 互疊（SQL 兩 pass × 5000 row 偶可 >30s）。
 LOCK_ROOT="${DATA}/locks"
 LOCK_DIR="${LOCK_ROOT}/edge_label_backfill_cron.lock.d"
-mkdir -p "$LOCK_ROOT" "$LOG_DIR"
+mkdir -p "$LOCK_ROOT"
 if ! mkdir "$LOCK_DIR" 2>/dev/null; then
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] SKIP: edge_label_backfill cron already running (lock held)" >> "$LOG"
+    echo "[$(ts)] SKIP: edge_label_backfill cron already running (lock held)" >> "$LOG"
     exit 0
 fi
 release_lock() {
@@ -94,13 +158,11 @@ trap release_lock EXIT INT TERM
 
 # ─── Sanity: BASE must contain the backfill module / BASE 須含 module ─
 if [[ ! -f "${BASE}/program_code/ml_training/edge_label_backfill.py" ]]; then
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] ERROR: edge_label_backfill.py not found under BASE=${BASE}" >> "$LOG"
+    echo "[$(ts)] ERROR: edge_label_backfill.py not found under BASE=${BASE}" >> "$LOG"
     exit 1
 fi
 
 cd "$BASE"
-
-ts() { date '+%Y-%m-%d %H:%M:%S'; }
 
 echo "[$(ts)] === edge_label_backfill cron start (BASE=$BASE BATCH=$BATCH) ===" >> "$LOG"
 

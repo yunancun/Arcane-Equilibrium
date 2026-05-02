@@ -2408,3 +2408,43 @@ PA RFC §3 + Q3 IMPL-2-consumer：consumer 端讀 producer payload `demo_attribu
 ### 報告路徑
 - `srv/.claude_reports/20260502_223000_lg5_w3_fup2_fix2_impl_2_consumer.md`
 - `srv/docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-02--lg5_w3_fup2_fix2_impl_2_consumer.md`
+
+## 2026-05-02 LG5-W3-FUP-3-CRON-ENV — PG creds sourcing in edge_label_backfill cron wrapper
+
+### 任務範圍
+PA dispatch：E4 Linux regression for LG5-W3-FUP-2 Fix 1+2 reported `psycopg2.OperationalError: fe_sendauth: no password supplied` on real cron run. Root cause: `helper_scripts/cron/edge_label_backfill_cron.sh` 沒從 secrets env file source PG creds，cron 極簡 env 不繼承 operator interactive shell 的 `OPENCLAW_DATABASE_URL` / `POSTGRES_*`。Fix = 在 wrapper 內 mirror `linux_bootstrap_db.sh:41-45` sibling pattern source 5 個 POSTGRES_* keys + HOST/PORT fallback + export `OPENCLAW_DATABASE_URL`。
+
+### 經驗教訓
+1. **`grep | cut` under `set -e` 是陷阱**：第一輪寫 `PG_PASS=$(grep '^POSTGRES_PASSWORD=' file | cut -d= -f2-)` 在 key 不存在時 grep exit 1 → cut exit propagates → set -e short-circuits **before** 後面的 `[[ -z $PG_PASS ]]` 明確檢查能跑 → wrapper exit 1（`grep` 自然失敗）而非設計的 exit 2 (FATAL 訊息)。修法：每行尾加 `|| true` 讓缺 key 走到後面明確檢查。Smoke test 第一輪 EXIT=1 抓到才意識到。教訓：所有 `set -e + grep + 後續空檢查` pattern 必加 `|| true`，尤其涉及 cron wrapper（FATAL log 才是 operator triage 的入口）。
+2. **Sibling pattern 兩個版本差異要記錄**：`passive_wait_healthcheck_cron.sh:43-44` 是「簡化版」只抓 PG_PASS + hardcode user=`trading_admin` / db=`trading_ai` / 127.0.0.1:5432；`linux_bootstrap_db.sh:41-45` 是「完整版」grep 5 個 keys + HOST/PORT fallback。PA spec 用的是完整版（更 robust，HOST/PORT 缺失時 fallback；不綁定特定 user/db）。E2 review 可能會問為什麼不選 sibling cron 的簡化版 — 答：跨 slot 兼容性 + secret rotation 安全性。要在 wrapper 雙語注釋裡明寫對齊路徑。
+3. **secrets env file 真實 keys ≠ 想當然**：實測 Mac + Linux 的 `basic_system_services.env` 都只含 `POSTGRES_DB / POSTGRES_USER / POSTGRES_PASSWORD / POSTGRES_PORT` 4 個 keys，**沒有 POSTGRES_HOST**。所以 HOST fallback `127.0.0.1` 是必要的，不是冗餘。改動前先 grep 兩端真值，避免照 PA spec 字面寫但 spec 與真實環境 drift。
+4. **PA spec 的 `|| echo '127.0.0.1'` 行尾 fallback 不夠**：`grep ... | cut ... || echo '127.0.0.1'` 在 grep 命中但 value 為空時不會觸發 fallback（grep exit 0 → cut 跑出空字串）。我加了 PA spec 之外的 `PG_HOST="${PG_HOST:-127.0.0.1}"` 二次 fallback 處理 grep 命中但 value 空的 edge case。教訓：bash fallback 模式 `grep | cut || echo` 與 `${VAR:-default}` 表達式覆蓋面不同，混用最穩。
+5. **subprocess test fixture 用 mock python3 in PATH 比 source wrapper 乾淨**：第一次嘗試用 `bash -c 'source wrapper; echo $URL'` 驗 export，但 wrapper 的 `set -e + exit 1` 會殺整個 subshell，連 `echo` 都跑不到。改成在 PATH 前置 `mock_bin/python3` script，wrapper 跑到呼叫 python3 時抓 mock，mock echo env 進 wrapper log → 從 log 反推 export 真生效。pattern 適用於任何 shell-wrapper 的 env-passing test。
+
+### 修改清單
+| 路徑 | 變更 | LOC |
+|---|---|---|
+| `srv/helper_scripts/cron/edge_label_backfill_cron.sh` | 修 (+72/-6) | 134 → 196 (淨 +62) |
+| `srv/helper_scripts/cron/test_edge_label_backfill_cron_env.py` | 新檔 | 211 |
+| `srv/docs/healthchecks/2026-05-02--lg5_health_checks.md` | 修 (+21/-3) | 494 → 512 |
+
+### 驗證
+- `bash -n` clean
+- 4 new pytest PASS（wrapper 存在/語法/env file missing/incomplete/complete）
+- 25 baseline LG5 healthcheck PASS（0 regression）
+- 跨平台 grep `/home/ncyu|/Users/[^/]+` 0 hit
+- 硬邊界 grep `live_execution_allowed|max_retries|...` 0 hit
+- LOC wrapper 196 / test 211 < 800 warn
+- 4 manual smoke test cases all green:
+  - env missing → exit 2 + FATAL log
+  - creds incomplete → exit 2 + FATAL log
+  - complete + bad BASE → exit 1 + ERROR log (PG block 通過後正常往下)
+  - complete + mock python3 → exit 0 + DSN `postgresql://redacted@127.0.0.1:15432/trading_ai` 真 export 到下游
+
+### Sibling pattern alignment (PA 任務 step 2)
+- 確認 `passive_wait_healthcheck_cron.sh:43-44` real pattern (簡化版，只 PG_PASS) — 不選此版
+- 確認 `linux_bootstrap_db.sh:41-45` real pattern (完整版，5 keys + HOST/PORT fallback) — **本任務選此版**
+- 完整版優點：跨 slot 兼容、不綁特定 user/db、secret rotation 友好
+
+### 報告路徑
+- `srv/.claude_reports/20260502_230000_lg5_w3_fup3_cron_env.md`（待寫）
