@@ -1386,3 +1386,35 @@ Hard boundary check: untouched (live_execution_allowed / max_retries / OPENCLAW_
 Root principle check: 16/16 preserved or strengthened (#3/#5/#6/#8/#10/#13 各 strengthened)。
 
 不確定處: 0 (operator 已 ack per-strategy 改動 + V035 PA 從零設計 + PM/QC/MIT 已決定 12 must-fix; v1 8 open Q 全部拍板)。
+
+---
+
+## 2026-05-02 — LG5-W3-FUP-2 Fix 2 R-meta Window 7d→3d Amendment RFC
+
+Report: `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-02--lg5_w3_fup2_fix2_r_meta_window_3d_amendment_rfc.md`
+
+Trigger: MIT FUP-2 diagnosis 顯示 7d window 含 4/24-28 attribution_chain_ok 結構 bug 期殘留 sample，over-penalizing 當前 promotion candidates (grid 7d 14% vs post-4/30 39.6%)。
+
+Design summary (10 章節):
+- 不拆 `_DEMO_BASELINE_WINDOW_DAYS=7` rename，純加 `_R_META_WINDOW_DAYS=3` 新常數（PA 推薦 Open Q1 答 B 保守版）
+- producer `_compute_attribution_chain_ratio_by_strategy` SQL 改 3d；payload 加 `demo_attribution_window_days=3` sub-key（schema_version 不 bump）
+- consumer R-meta evaluator 邏輯不變；audit row payload_snapshot echo `demo_attribution_window_days`
+- healthcheck 拍板：`[42b]` 維持 7d long-window observability + 新 `[42c]` 3d gate-aligned mirror（雙窗）
+- 不動：R3 PSR window (7d/14d Q3 拍板)、R5 cost_edge_ratio 公式 (Q5 demo gross 拍板)、R_META_RATIO_FLOOR=0.50
+
+Backward compat: 既有 27 pending candidates 沿用 v1 7d 評估（payload 缺 window_days sub-key → consumer default 7）；新 candidate 用 3d；**預設不 bulk re-synth**（PA 推薦 Open Q2 答 A）。
+
+Side-effect highlight: bb_breakout (~30→13) / bb_reversion (~6→3) cardinality 稀薄；推薦加 `_R_META_MIN_SAMPLE_PER_STRATEGY=10` + 新 `defer_attribution_chain_low_sample` reason 區分「strategy 真壞」vs「樣本不足」（PA 推薦 Open Q3 答 A）。
+
+IMPL 派發（4 sub-task / wall ~8h）:
+- IMPL-1+2 (E1, ~30+10 LOC, group A 同檔合併): producer SQL window + payload sub-key
+- IMPL-3 (E1, ~50 LOC, group B 獨立檔): healthcheck `[42c]`
+- IMPL-4 (E4/E1, ~80 LOC, group C 跨 3 test 檔): unit tests for IMPL-1/2/3
+並行性：A+B Round 1 並行；C Round 2 依賴 Round 1；E2 review parallel 3 PR；E4 SSH Linux regression sequential。
+
+Acceptance gate: **只需 PM Sign-off**（QC 已 sign-off R-meta 公式 + 0.50 floor / MIT 已 sign-off per-strategy structure / Fix 2 純 window 縮放不改公式不改邊界）。
+
+Open questions for PM: Q1 rename vs additive constant / Q2 bulk re-synth pending policy / Q3 sample threshold fallback。
+
+Hard boundary check: 0 violation（live_execution_allowed / max_retries / OPENCLAW_ALLOW_MAINNET / live_reserved / authorization.json 全保留）。
+Root principle check: 16/16 全合規 + 加強原則 #6 #8 #12。

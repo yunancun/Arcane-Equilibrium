@@ -105,8 +105,14 @@ R5_WARN_CEIL = 0.8
 R6_DAILY_NEG_SNAPSHOTS_REQUIRED = 7
 R6_MAKER_FILL_CATASTROPHIC_FLOOR = 0.10
 
-# R-meta — per-strategy attribution chain (MF-M2)
-R_META_RATIO_FLOOR = 0.50
+# R-meta constants + evaluators relocated to ``governance_hub_lg5_r_meta`` sibling
+# (Fix 2 IMPL-2-consumer split, keeps parent < 1500 LOC); 4 symbols re-exported.
+# R-meta 常數與 evaluator 已 split 至 sibling，re-export 維持 backward-compat。
+from .governance_hub_lg5_r_meta import (  # noqa: F401  (re-export)
+    R_META_RATIO_FLOOR, _R_META_MIN_SAMPLE_PER_STRATEGY,
+    evaluate_r_meta, evaluate_r_meta_sample_threshold,
+    build_r_meta_gate_verdict_kwargs,
+)
 
 # Lease TTL bands (RFC §4)
 LEASE_TTL_DEFAULT_MS = 6 * 3600 * 1000  # 6 h
@@ -158,6 +164,8 @@ class ReviewVerdict:
     decided_at_ts: int = 0  # unix ms
     decided_by: str = "GovernanceHub.review_live_candidate"
     payload_snapshot: dict = field(default_factory=dict)
+    # Fix 2 NEW：候選 strategy 3d attribution sample 數，IMPL-5 retro 校準用。
+    attribution_sample_count: Optional[int] = None
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -654,6 +662,9 @@ def _emit_audit_row(
                     json.dumps({
                         "payload_snapshot": verdict.payload_snapshot,
                         "decided_at_ts": verdict.decided_at_ts,
+                        # Fix 2 IMPL-2 (V035 has no column → JSONB sub-key, schema unchanged).
+                        # Fix 2 IMPL-2：V035 無對應 column，寫入 payload JSONB sub-key 維持 schema 不變。
+                        "attribution_sample_count": verdict.attribution_sample_count,
                     }, default=str),
                 ),
             )
@@ -741,6 +752,9 @@ def _emit_approve_audit_and_persist_lease_atomic(
                     json.dumps({
                         "payload_snapshot": verdict.payload_snapshot,
                         "decided_at_ts": verdict.decided_at_ts,
+                        # Fix 2 IMPL-2 (V035 has no column → JSONB sub-key, schema unchanged).
+                        # Fix 2 IMPL-2：V035 無對應 column，寫入 payload JSONB sub-key 維持 schema 不變。
+                        "attribution_sample_count": verdict.attribution_sample_count,
                     }, default=str),
                 ),
             )
@@ -810,6 +824,7 @@ def _make_verdict(
     lease_revoke_triggers: Optional[Iterable[str]] = None,
     decided_by: str = "GovernanceHub.review_live_candidate",
     payload_snapshot: Optional[dict] = None,
+    attribution_sample_count: Optional[int] = None,
 ) -> ReviewVerdict:
     """Build a ReviewVerdict with sane defaults / 建構 ReviewVerdict 帶安全預設。"""
     return ReviewVerdict(
@@ -832,6 +847,7 @@ def _make_verdict(
         decided_at_ts=_now_ms(),
         decided_by=decided_by,
         payload_snapshot=payload_snapshot or {},
+        attribution_sample_count=attribution_sample_count,
     )
 
 
@@ -1047,23 +1063,6 @@ def evaluate_r6(
     return False, "R6 pass"
 
 
-def evaluate_r_meta(
-    candidate_strategy: str,
-    attribution_dict: dict[str, float],
-) -> tuple[Literal["pass", "fail", "unknown"], str, Optional[float]]:
-    """R-meta per-strategy attribution chain quality (RFC §3 R-meta, MF-M2).
-    R-meta per-strategy attribution chain 品質（RFC §3 R-meta, MF-M2）。
-    """
-    if not candidate_strategy:
-        return "unknown", "R-meta: candidate has no strategy_name", None
-    if candidate_strategy not in attribution_dict:
-        return "unknown", f"R-meta: strategy {candidate_strategy} not in attribution dict", None
-    ratio = _safe_float(attribution_dict[candidate_strategy])
-    if ratio < R_META_RATIO_FLOOR:
-        return "fail", f"R-meta: {candidate_strategy} ratio={ratio:.3f} < {R_META_RATIO_FLOOR}", ratio
-    return "pass", f"R-meta: {candidate_strategy} ratio={ratio:.3f}", ratio
-
-
 # ═══════════════════════════════════════════════════════════════════════════════
 # Lease TTL selection / Lease TTL 選擇 (RFC §4)
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1169,6 +1168,12 @@ def review_live_candidate(
     attribution_dict = payload.get("demo_attribution_chain_ratio_by_strategy") or {}
     if not isinstance(attribution_dict, dict):
         attribution_dict = {}
+    # Fix 2 IMPL-2 PA Q3: per-strategy sample count dict for R-meta low-sample
+    # defer; missing (pre-Fix 2 payload) → None → skip sample check (preserves
+    # 27 pending candidates per RFC §6.1).
+    # Fix 2 IMPL-2 PA Q3：sample dict；缺 → None → 略過 sample check（preserves 27 pending）。
+    _raw_smp = payload.get("demo_attribution_sample_count_by_strategy")
+    sample_count_dict: Optional[dict[str, int]] = _raw_smp if isinstance(_raw_smp, dict) else None
 
     # Source recommendation row for expected_net_bps_demo (column on
     # mlde_shadow_recommendations, not on mlde_param_applications).
@@ -1252,29 +1257,15 @@ def review_live_candidate(
         _emit_audit_row("review_live_candidate", candidate_id, verdict)
         return verdict
 
-    # R-meta per-strategy (defer if unknown, reject if too broken).
-    # R-meta per-strategy（unknown defer，太破 reject）。
-    r_meta_status, r_meta_msg, _ = evaluate_r_meta(candidate_strategy, attribution_dict)
-    if r_meta_status == "unknown":
-        verdict = _make_verdict(
-            "defer", "defer_attribution_chain_strategy_unknown",
-            rule_failures=["R-meta"],
-            expected_net_bps_demo=expected_net_bps_demo,
-            payload_snapshot={"r_meta_msg": r_meta_msg, "candidate_strategy": candidate_strategy},
-            decided_by=decided_by_full,
-        )
-        _emit_audit_row("review_live_candidate", candidate_id, verdict)
-        return verdict
-    if r_meta_status == "fail":
-        # Per RFC §3 R-meta: use defer wording but reason starts with reject_*.
-        # 依 RFC §3 R-meta：用 defer decision 但 reason 用 reject_*（spec 文字）。
-        verdict = _make_verdict(
-            "defer", "reject_attribution_chain_too_broken",
-            rule_failures=["R-meta"],
-            expected_net_bps_demo=expected_net_bps_demo,
-            payload_snapshot={"r_meta_msg": r_meta_msg},
-            decided_by=decided_by_full,
-        )
+    # R-meta per-strategy gate (Fix 2 IMPL-2-consumer split): helper resolves
+    # unknown / low_sample (Fix 2 PA Q3) / ratio fail in one call.
+    # R-meta gate：helper 一次解 unknown / low_sample / ratio fail。
+    r_meta_kwargs, r_meta_sample_n, r_meta_msg = build_r_meta_gate_verdict_kwargs(
+        candidate_strategy, attribution_dict, sample_count_dict,
+        expected_net_bps_demo, decided_by_full,
+    )
+    if r_meta_kwargs is not None:
+        verdict = _make_verdict(**r_meta_kwargs)
         _emit_audit_row("review_live_candidate", candidate_id, verdict)
         return verdict
 

@@ -6,9 +6,12 @@ from ml_training.mlde_demo_applier import (
     DemoApplierConfig,
     _ATTRIBUTION_STRATEGY_KEYS,
     _LIVE_CANDIDATE_EVAL_SCHEMA_VERSION,
+    _R_META_MIN_SAMPLE_PER_STRATEGY,
+    _R_META_WINDOW_DAYS,
     _already_applied,
     _build_live_candidate_payload,
     _compute_attribution_chain_ratio_by_strategy,
+    _compute_attribution_sample_count_by_strategy,
     _compute_demo_cost_baseline,
     _compute_demo_realized_window,
     _compute_demo_sample_count_strategy_cell,
@@ -773,3 +776,257 @@ def test_lg5_contract_round_trip_param_applications_table(monkeypatch):
     assert (
         consumer_payload["demo_realized_window"]["n_strategy_fills"] == 120
     )
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# LG-5 W3 FUP-2 Fix 2 IMPL-1 + IMPL-2 tests (PA RFC 2026-05-02)
+#   IMPL-1: Producer SQL window 7d → 3d for R-meta attribution ratio
+#   IMPL-2: Payload sub-keys `demo_attribution_window_days` (=3) +
+#           `demo_attribution_sample_count_by_strategy` (per-strategy n)
+#           plus `_compute_attribution_sample_count_by_strategy` helper.
+#
+# LG-5 W3 FUP-2 Fix 2 IMPL-1 + IMPL-2 測試（PA RFC 2026-05-02）：
+#   IMPL-1：producer R-meta ratio SQL window 7d → 3d
+#   IMPL-2：payload 加 `demo_attribution_window_days` (=3) +
+#           `demo_attribution_sample_count_by_strategy`，並新增
+#           `_compute_attribution_sample_count_by_strategy` helper。
+# ────────────────────────────────────────────────────────────────────────────
+
+
+def test_attribution_ratio_uses_3d_window():
+    """IMPL-1：ratio helper SQL 必綁 _R_META_WINDOW_DAYS (=3)，非 7d。"""
+    # Capture executed SQL params to confirm 3d binding.
+    # 截獲 SQL 執行參數以驗證綁的是 3 天。
+    cur = _ScriptedCursor(
+        responses=[
+            (True,),  # view exists
+            [],       # GROUP BY rows (empty list → fetchall returns [])
+        ]
+    )
+
+    ratios = _compute_attribution_chain_ratio_by_strategy(cur)
+
+    # 5 keys 全在（fail-soft 預設 0.0）
+    assert set(ratios.keys()) == set(_ATTRIBUTION_STRATEGY_KEYS)
+    assert all(v == 0.0 for v in ratios.values())
+
+    # 第二次 execute 是 GROUP BY query；params[0] 必須是 _R_META_WINDOW_DAYS=3。
+    # 2nd execute is GROUP BY; params[0] must be _R_META_WINDOW_DAYS=3.
+    assert len(cur.executed) == 2
+    group_by_sql, group_by_params = cur.executed[1]
+    assert "GROUP BY strategy_name" in group_by_sql
+    assert group_by_params[0] == _R_META_WINDOW_DAYS == 3
+    # 確保不是 7（即未誤用 _DEMO_BASELINE_WINDOW_DAYS）
+    # Confirm not 7 (i.e., did not regress to _DEMO_BASELINE_WINDOW_DAYS).
+    assert group_by_params[0] != 7
+
+
+def test_compute_sample_count_by_strategy_5_keys_default_zero():
+    """IMPL-2：sample_count helper 5 key dict + missing strategy → 0 fail-soft。"""
+    # 部分 strategy 有資料，bb_reversion / funding_arb 缺 → 0
+    # Some strategies have rows; bb_reversion / funding_arb missing → 0
+    cur = _ScriptedCursor(
+        responses=[
+            (True,),  # view exists
+            [
+                ("grid_trading", 42),
+                ("ma_crossover", 17),
+                ("bb_breakout", 8),
+            ],
+        ]
+    )
+
+    counts = _compute_attribution_sample_count_by_strategy(cur)
+
+    # 5 個 key 必全在
+    assert set(counts.keys()) == set(_ATTRIBUTION_STRATEGY_KEYS)
+    assert counts["grid_trading"] == 42
+    assert counts["ma_crossover"] == 17
+    assert counts["bb_breakout"] == 8
+    # missing → default 0
+    assert counts["bb_reversion"] == 0
+    assert counts["funding_arb"] == 0
+
+    # SQL 必綁 3d window + 5 key list
+    # SQL must bind 3d window + 5 strategy keyset list
+    group_by_sql, group_by_params = cur.executed[1]
+    assert "GROUP BY strategy_name" in group_by_sql
+    assert group_by_params[0] == _R_META_WINDOW_DAYS == 3
+    assert sorted(group_by_params[1]) == sorted(_ATTRIBUTION_STRATEGY_KEYS)
+
+    # View missing → 全 0 fail-soft（不拋）
+    # View missing → all 0 fail-soft (no raise).
+    cur_missing = _ScriptedCursor(responses=[(False,)])
+    counts_missing = _compute_attribution_sample_count_by_strategy(cur_missing)
+    assert set(counts_missing.keys()) == set(_ATTRIBUTION_STRATEGY_KEYS)
+    assert all(v == 0 for v in counts_missing.values())
+
+
+def test_payload_includes_attribution_window_days(monkeypatch):
+    """IMPL-2：payload 必含 demo_attribution_window_days == 3。"""
+    fake_baseline = {
+        "as_of_ts": "2026-05-02T12:00:00+00:00",
+        "engine_mode": "demo",
+        "maker_fill_rate_7d": 0.30,
+        "fee_drop_only_7d": 0.50,
+        "avg_realized_net_bps_7d": 4.0,
+        "avg_realized_fee_bps_7d": 2.5,
+        "avg_realized_slippage_bps_7d": 1.0,
+        "sample_count": 200,
+        "source_healthchecks": ["[33]", "[40]"],
+    }
+    fake_window = {
+        "start_ts": "2026-04-25T12:00:00+00:00",
+        "end_ts": "2026-05-02T12:00:00+00:00",
+        "n_fills": 200,
+        "n_strategy_fills": 80,
+        "window_days": 7,
+    }
+    fake_attribution = {k: 0.55 for k in _ATTRIBUTION_STRATEGY_KEYS}
+    fake_sample_counts = {k: 25 for k in _ATTRIBUTION_STRATEGY_KEYS}
+    monkeypatch.setattr(
+        "ml_training.mlde_demo_applier._compute_demo_cost_baseline",
+        lambda _cur: fake_baseline,
+    )
+    monkeypatch.setattr(
+        "ml_training.mlde_demo_applier._compute_demo_realized_window",
+        lambda _cur, _strategy=None: fake_window,
+    )
+    monkeypatch.setattr(
+        "ml_training.mlde_demo_applier._compute_attribution_chain_ratio_by_strategy",
+        lambda _cur: fake_attribution,
+    )
+    monkeypatch.setattr(
+        "ml_training.mlde_demo_applier._compute_attribution_sample_count_by_strategy",
+        lambda _cur: fake_sample_counts,
+    )
+    monkeypatch.setattr(
+        "ml_training.mlde_demo_applier._compute_demo_sample_count_strategy_cell",
+        lambda _cur, _strategy: 80,
+    )
+
+    class _NoopCursor:
+        def execute(self, sql, params=()):
+            pass
+
+        def fetchone(self):
+            return None
+
+        def fetchall(self):
+            return []
+
+    payload = _build_live_candidate_payload(
+        _NoopCursor(),
+        source_row={"id": 11, "symbol": "BTCUSDT", "strategy_name": "grid_trading"},
+        application_id=222,
+        application_type="strategy_params",
+        patch={"cooldown_ms": 144_000},
+        strategy_name="grid_trading",
+    )
+
+    # IMPL-2 必含的 R-meta window key
+    # IMPL-2 mandatory R-meta window key
+    assert "demo_attribution_window_days" in payload
+    assert payload["demo_attribution_window_days"] == _R_META_WINDOW_DAYS == 3
+    # 7 != 3 — 防 regression 回 _DEMO_BASELINE_WINDOW_DAYS
+    # Guard against regression to _DEMO_BASELINE_WINDOW_DAYS.
+    assert payload["demo_attribution_window_days"] != 7
+
+    # backward compat: schema_version 不 bump
+    # backward compat: schema_version unchanged (stays v1)
+    assert payload["schema_version"] == _LIVE_CANDIDATE_EVAL_SCHEMA_VERSION
+
+
+def test_payload_includes_per_strategy_sample_count(monkeypatch):
+    """IMPL-2：payload 必含 demo_attribution_sample_count_by_strategy 5-key dict。"""
+    fake_baseline = {
+        "as_of_ts": "2026-05-02T12:00:00+00:00",
+        "engine_mode": "demo",
+        "maker_fill_rate_7d": 0.30,
+        "fee_drop_only_7d": 0.50,
+        "avg_realized_net_bps_7d": 4.0,
+        "avg_realized_fee_bps_7d": 2.5,
+        "avg_realized_slippage_bps_7d": 1.0,
+        "sample_count": 200,
+        "source_healthchecks": ["[33]", "[40]"],
+    }
+    fake_window = {
+        "start_ts": "2026-04-25T12:00:00+00:00",
+        "end_ts": "2026-05-02T12:00:00+00:00",
+        "n_fills": 200,
+        "n_strategy_fills": 80,
+        "window_days": 7,
+    }
+    fake_attribution = {k: 0.55 for k in _ATTRIBUTION_STRATEGY_KEYS}
+    # Mix above + below _R_META_MIN_SAMPLE_PER_STRATEGY (=10) so consumer
+    # tests can exercise the low-sample defer branch downstream.
+    # 混合 above / below _R_META_MIN_SAMPLE_PER_STRATEGY (=10)，給下游
+    # consumer 測試 defer_attribution_chain_low_sample 分支有素材。
+    fake_sample_counts = {
+        "grid_trading": 42,
+        "ma_crossover": 25,
+        "bb_breakout": 13,      # 邊界 above 10
+        "bb_reversion": 3,      # below threshold → consumer 應 defer low_sample
+        "funding_arb": 0,       # 缺資料
+    }
+    monkeypatch.setattr(
+        "ml_training.mlde_demo_applier._compute_demo_cost_baseline",
+        lambda _cur: fake_baseline,
+    )
+    monkeypatch.setattr(
+        "ml_training.mlde_demo_applier._compute_demo_realized_window",
+        lambda _cur, _strategy=None: fake_window,
+    )
+    monkeypatch.setattr(
+        "ml_training.mlde_demo_applier._compute_attribution_chain_ratio_by_strategy",
+        lambda _cur: fake_attribution,
+    )
+    monkeypatch.setattr(
+        "ml_training.mlde_demo_applier._compute_attribution_sample_count_by_strategy",
+        lambda _cur: fake_sample_counts,
+    )
+    monkeypatch.setattr(
+        "ml_training.mlde_demo_applier._compute_demo_sample_count_strategy_cell",
+        lambda _cur, _strategy: 80,
+    )
+
+    class _NoopCursor:
+        def execute(self, sql, params=()):
+            pass
+
+        def fetchone(self):
+            return None
+
+        def fetchall(self):
+            return []
+
+    payload = _build_live_candidate_payload(
+        _NoopCursor(),
+        source_row={"id": 12, "symbol": "ETHUSDT", "strategy_name": "ma_crossover"},
+        application_id=333,
+        application_type="strategy_params",
+        patch={"sma_fast": 7},
+        strategy_name="ma_crossover",
+    )
+
+    # 必有 sample_count by strategy 5-key dict
+    # Must contain per-strategy sample_count 5-key dict.
+    assert "demo_attribution_sample_count_by_strategy" in payload
+    sample_dict = payload["demo_attribution_sample_count_by_strategy"]
+    assert set(sample_dict.keys()) == set(_ATTRIBUTION_STRATEGY_KEYS)
+    assert sample_dict["grid_trading"] == 42
+    assert sample_dict["ma_crossover"] == 25
+    assert sample_dict["bb_breakout"] == 13
+    assert sample_dict["bb_reversion"] == 3
+    assert sample_dict["funding_arb"] == 0
+
+    # Sanity：sample_count dict 與 ratio dict 同 keyset 對齊
+    # Sanity: sample_count dict shares keyset with ratio dict (consumer
+    # joins them by strategy name).
+    assert set(sample_dict.keys()) == set(
+        payload["demo_attribution_chain_ratio_by_strategy"].keys()
+    )
+
+    # constants exposed for downstream consumer tests
+    # 對下游 consumer 測試暴露的常數
+    assert _R_META_MIN_SAMPLE_PER_STRATEGY == 10

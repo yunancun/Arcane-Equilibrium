@@ -646,6 +646,171 @@ class TestRMeta:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# R-meta sample threshold (LG5-W3-FUP-2 Fix 2 IMPL-2-consumer, PA Q3)
+# R-meta sample 門檻（LG5-W3-FUP-2 Fix 2 IMPL-2-consumer，PA Q3）
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestRMetaSampleThreshold:
+    """LG5-W3-FUP-2 Fix 2 IMPL-2-consumer: low-sample defer + backward compat。
+
+    Caller-level（``review_live_candidate``）整合測試，覆蓋 PA Q3 的
+    ``defer_attribution_chain_low_sample`` 新分支與 27 pending candidates
+    backward compat（payload 缺 ``demo_attribution_sample_count_by_strategy``
+    時，evaluator 略過 sample check，沿用 7d ratio path）。
+    """
+
+    # 借用 Round 2 _patch_module + _FakeHub fixture pattern。
+    _approve_path_payload = TestReviewLiveCandidateRound2._approve_path_payload
+    _patch_module = TestReviewLiveCandidateRound2._patch_module
+    _FakeHub = TestReviewLiveCandidateRound2._FakeHub
+
+    def _payload_with_sample(self, ratio: float, sample_n: int) -> dict:
+        """Build R-meta payload with explicit sample count for grid_trading.
+        建構含 grid_trading sample count 的 R-meta payload。"""
+        return {
+            "schema_version": "live_candidate_eval_v1",
+            "demo_cost_baseline": {
+                "maker_fill_rate_7d": 0.30,
+                "avg_realized_fee_bps_7d": 1.0,
+                "avg_realized_slippage_bps_7d": 0.5,
+            },
+            "demo_realized_window": {"n_strategy_fills": 200},
+            "demo_attribution_chain_ratio_by_strategy": {"grid_trading": ratio},
+            "demo_attribution_sample_count_by_strategy": {"grid_trading": sample_n},
+            "demo_attribution_window_days": 3,
+        }
+
+    def test_r_meta_defer_when_sample_below_threshold(self, monkeypatch) -> None:
+        """sample=5 + ratio=0.80 → defer ``defer_attribution_chain_low_sample``
+        (NOT reject_attribution_chain_too_broken — sample-fail vs ratio-fail 區分)。
+        sample=5 + ratio=0.80 → defer reason 為 low_sample，不是 too_broken。"""
+        from app.governance_hub_live_candidate_review import review_live_candidate
+
+        mod, emitted, atomic_calls = self._patch_module(
+            monkeypatch,
+            daily_snapshots={"n_snapshots": 7, "n_negative": 3},
+            payload=self._payload_with_sample(ratio=0.80, sample_n=5),
+        )
+        hub = self._FakeHub()
+        verdict = review_live_candidate(hub, candidate_id=99)
+
+        assert verdict.decision == "defer"
+        assert verdict.reason == "defer_attribution_chain_low_sample"
+        assert "R-meta" in verdict.rule_failures
+        assert verdict.attribution_sample_count == 5
+        # NEVER touched approve path：sample 不足 → defer 在 R6 後立即返回。
+        assert hub.acquire_calls == []
+        assert atomic_calls == []
+        # payload_snapshot 標記 threshold + msg 含 "n=5 < 10"
+        snap = verdict.payload_snapshot
+        assert snap["min_sample_threshold"] == 10
+        assert "n=5" in snap["r_meta_sample_msg"]
+
+    def test_r_meta_pass_when_sample_above_threshold(self, monkeypatch) -> None:
+        """sample=20 + ratio=0.80 → R-meta pass → 進 approve path 抵達 atomic commit。
+        sample=20 + ratio=0.80 → R-meta pass → approve path → atomic commit invoked。"""
+        from app.governance_hub_live_candidate_review import review_live_candidate
+
+        mod, emitted, atomic_calls = self._patch_module(
+            monkeypatch,
+            daily_snapshots={"n_snapshots": 7, "n_negative": 3},
+            payload=self._payload_with_sample(ratio=0.80, sample_n=20),
+            atomic_ok=True,
+        )
+        hub = self._FakeHub(lease_id="lease-rmeta-pass")
+        verdict = review_live_candidate(hub, candidate_id=99)
+
+        assert verdict.decision == "approve", \
+            f"expected approve, got {verdict.decision}/{verdict.reason}"
+        assert verdict.reason == "approve_within_envelope"
+        assert len(atomic_calls) == 1
+
+    def test_r_meta_reject_when_ratio_low_with_sufficient_sample(self, monkeypatch) -> None:
+        """sample=20 + ratio=0.20 → defer ``reject_attribution_chain_too_broken``
+        （既有 RFC §3 R-meta 行為：樣本足夠但 ratio < 0.50 floor → reject_*）。
+        sample=20 + ratio=0.20 → reject_attribution_chain_too_broken（既有行為不變）。"""
+        from app.governance_hub_live_candidate_review import review_live_candidate
+
+        mod, emitted, atomic_calls = self._patch_module(
+            monkeypatch,
+            daily_snapshots={"n_snapshots": 7, "n_negative": 3},
+            payload=self._payload_with_sample(ratio=0.20, sample_n=20),
+        )
+        hub = self._FakeHub()
+        verdict = review_live_candidate(hub, candidate_id=99)
+
+        assert verdict.decision == "defer"
+        assert verdict.reason == "reject_attribution_chain_too_broken"
+        assert "R-meta" in verdict.rule_failures
+        # sample_n 仍透過 audit，retro 校準可區分「sample 足但 ratio 差」
+        assert verdict.attribution_sample_count == 20
+        assert hub.acquire_calls == []
+
+    def test_r_meta_backward_compat_no_sample_dict(self, monkeypatch) -> None:
+        """payload 無 ``demo_attribution_sample_count_by_strategy`` → 視為 v1
+        pre-Fix 2 candidate → 略過 sample check → 走 ratio path（preserves 27 pending）。
+        Pre-Fix 2 payload 缺 sample dict → skip sample check → ratio=0.80 → pass。"""
+        from app.governance_hub_live_candidate_review import review_live_candidate
+
+        # Old-format payload（無 demo_attribution_sample_count_by_strategy）
+        old_payload = {
+            "schema_version": "live_candidate_eval_v1",
+            "demo_cost_baseline": {
+                "maker_fill_rate_7d": 0.30,
+                "avg_realized_fee_bps_7d": 1.0,
+                "avg_realized_slippage_bps_7d": 0.5,
+            },
+            "demo_realized_window": {"n_strategy_fills": 200},
+            "demo_attribution_chain_ratio_by_strategy": {"grid_trading": 0.80},
+            # ← demo_attribution_sample_count_by_strategy 不存在
+        }
+        mod, emitted, atomic_calls = self._patch_module(
+            monkeypatch,
+            daily_snapshots={"n_snapshots": 7, "n_negative": 3},
+            payload=old_payload,
+            atomic_ok=True,
+        )
+        hub = self._FakeHub(lease_id="lease-bc-1")
+        verdict = review_live_candidate(hub, candidate_id=99)
+
+        # ratio path 走完 → R-meta pass → approve path 抵達
+        assert verdict.decision == "approve"
+        assert verdict.reason == "approve_within_envelope"
+        assert verdict.attribution_sample_count is None  # 沒 sample dict → 一律 None
+
+    def test_r_meta_backward_compat_strategy_missing_in_sample_dict(self, monkeypatch) -> None:
+        """sample dict 存在但不含 candidate strategy → skip sample check → ratio path。
+        sample dict 有但 grid_trading 不在 dict 內 → skip sample check → 走 ratio。"""
+        from app.governance_hub_live_candidate_review import review_live_candidate
+
+        mixed_payload = {
+            "schema_version": "live_candidate_eval_v1",
+            "demo_cost_baseline": {
+                "maker_fill_rate_7d": 0.30,
+                "avg_realized_fee_bps_7d": 1.0,
+                "avg_realized_slippage_bps_7d": 0.5,
+            },
+            "demo_realized_window": {"n_strategy_fills": 200},
+            "demo_attribution_chain_ratio_by_strategy": {"grid_trading": 0.80},
+            # grid_trading 在 ratio dict 但不在 sample dict
+            "demo_attribution_sample_count_by_strategy": {"ma_crossover": 50},
+        }
+        mod, emitted, atomic_calls = self._patch_module(
+            monkeypatch,
+            daily_snapshots={"n_snapshots": 7, "n_negative": 3},
+            payload=mixed_payload,
+            atomic_ok=True,
+        )
+        hub = self._FakeHub(lease_id="lease-bc-2")
+        verdict = review_live_candidate(hub, candidate_id=99)
+
+        # grid_trading 缺 sample dict 鍵 → skip → ratio=0.80 ≥ floor → pass → approve
+        assert verdict.decision == "approve"
+        assert verdict.reason == "approve_within_envelope"
+        assert verdict.attribution_sample_count is None
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # Helper math: PSR + Bailey-LdP SR_0
 # ═══════════════════════════════════════════════════════════════════════════════
 

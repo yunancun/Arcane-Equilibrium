@@ -111,6 +111,23 @@ from .checks_governance import (
     # `[42b]` per-strategy 7d attribution_chain_ratio 漂移偵測。
     check_42_live_candidate_eval_contract,
     check_42b_live_candidate_attribution_drift,
+    # LG5-W3-FUP-2 Fix 2 (2026-05-02 RFC §5 Plan B) — `[42c]` 3d
+    # gate-aligned mirror of `[42b]` (identical thresholds, 3d window).
+    # Pairs with producer Fix 2 IMPL-1 (`_R_META_WINDOW_DAYS = 3` in
+    # `mlde_demo_applier`); `[42b]` keeps 7d for long-window observability.
+    # LG5-W3-FUP-2 Fix 2（2026-05-02 RFC §5 方案 B）— `[42c]` `[42b]` 的
+    # R-meta gate 對齊 3d 鏡像（閾值一致、window 改 3d）。配對 producer
+    # Fix 2 IMPL-1 (`_R_META_WINDOW_DAYS = 3`)；`[42b]` 保 7d 作 long-window。
+    check_42c_live_candidate_attribution_drift_3d,
+    # LG5-W3-FUP-2 Fix 1 (2026-05-02) — `[43]` label backfill cron liveness
+    # sentinel (max(label_filled_at) freshness for demo+live_demo). Pairs
+    # with helper_scripts/cron/edge_label_backfill_cron.sh per CLAUDE.md §七
+    # 「被動等待 TODO 必附 healthcheck」requirement.
+    # LG5-W3-FUP-2 Fix 1（2026-05-02）— `[43]` label backfill cron 活性哨兵
+    # （demo+live_demo max(label_filled_at) 新鮮度）。與
+    # helper_scripts/cron/edge_label_backfill_cron.sh 配對，符合 CLAUDE.md §七
+    # 「被動等待 TODO 必附 healthcheck」要求。
+    check_43_label_backfill_freshness,
 )
 
 
@@ -132,7 +149,7 @@ The checks split between DB pipelines + filesystem/observability sentinels:
     [1][2][3][4][5][6][8][9][10][12][Xb][14][15][21]      14 baseline
     [22][23][24][25][26][27][28]                          7 F7 MIT+E5
     [30][31][32][33][34][35][36][37][38][39][40][41]      cost/execution/MLDE/lifecycle/cardinality/acceptance/scanner-gate
-    [42][42b]                                              LG-5 governance contract + per-strategy attribution drift
+    [42][42b][42c][43]                                     LG-5 governance contract + per-strategy attribution drift (7d + 3d gate-aligned) + label-backfill cron liveness
   Post-cursor (filesystem / pure-Python):
     [7][13][11][Xa][16][18][19][20]                       8 baseline
     [29]                                                  1 F7 (no-IPC stub)
@@ -162,6 +179,8 @@ Execution / cost sentinels added after F7:
   [41] scanner_market_gate_confirmation (scanner gates later-realized edge check)
   [42] live_candidate_eval_contract    (LG-5-IMPL-3 2026-05-02 review_live_candidate 1h SLA + audit row)
   [42b] live_candidate_attribution_drift (LG-5-IMPL-3 2026-05-02 per-strategy 7d ratio drift)
+  [42c] live_candidate_attribution_drift_3d (LG5-W3-FUP-2 Fix 2 2026-05-02 RFC §5 Plan B — gate-aligned 3d mirror of [42b])
+  [43] label_backfill_freshness         (LG5-W3-FUP-2 Fix 1 2026-05-02 max(label_filled_at) age — cron liveness)
 
 Exit codes:
   0 = all checks PASS / only WARN
@@ -181,13 +200,15 @@ def main() -> int:
     Counted rows are documented by ID, not by fragile total:
       cursor: [1][2][3][4][5][6][8][9][10][12][Xb][14][15][21]
               [22][23][24][25][26][27][28] [30][31][32][33][34][35][36][37][38][39][40][41]
-              [42][42b]
+              [42][42b][42c][43]
               (F7 [22]-[28] are MIT/E5; [30]-[37] are post-F7/MLDE;
                [38] is MIT 2026-04-29 grid lifecycle drift;
                [39] is PA W1-T4 2026-04-29 strategy_name cardinality drift;
                [40] is DB-truth realized edge acceptance;
                [41] is scanner market-gate confirmation;
-               [42]/[42b] are LG-5-IMPL-3 governance contract + attribution drift)
+               [42]/[42b] are LG-5-IMPL-3 governance contract + attribution drift;
+               [42c] is LG5-W3-FUP-2 Fix 2 RFC §5 Plan B — gate-aligned 3d mirror of [42b];
+               [43] is LG5-W3-FUP-2 Fix 1 label-backfill cron liveness)
       post-cursor: [7][13][11][Xa][16][18][19][20]
                    [29]   (F7 [29] is deferred-no-ipc stub)
 
@@ -197,7 +218,7 @@ def main() -> int:
     清單依 ID 記錄，避免總數 drift：
       cursor: [1][2][3][4][5][6][8][9][10][12][Xb][14][15][21]
               [22][23][24][25][26][27][28] [30][31][32][33][34][35][36][37][38][39][40][41]
-              [42][42b]
+              [42][42b][42c][43]
       post-cursor: [7][13][11][Xa][16][18][19][20] [29]
     """
     ap = argparse.ArgumentParser(description=_RUNNER_DESCRIPTION)
@@ -536,6 +557,51 @@ def main() -> int:
             # lease_revoke_trigger）。純 SELECT。
             s, m = check_42b_live_candidate_attribution_drift(cur)
             results.append(("[42b] live_candidate_attribution_drift", s, m))
+
+            # [42c] LG5-W3-FUP-2 Fix 2 (2026-05-02 RFC §5 Plan B):
+            # gate-aligned 3d mirror of [42b]. Identical SQL shape /
+            # engine_mode filter / threshold bands (0.50 / 0.30 / 0.10),
+            # only window differs: 3d instead of 7d, aligning with producer
+            # `mlde_demo_applier._R_META_WINDOW_DAYS = 3` shipped by Fix 2
+            # IMPL-1. Operator interpretation matrix (per docstring):
+            #   * [42b] PASS + [42c] PASS → R-meta healthy long+short
+            #   * [42b] PASS + [42c] WARN → 4/24-28 bug residual fading;
+            #     R-meta defer working as intended
+            #   * [42b] FAIL + [42c] PASS → bug fixed, 7d will converge
+            #   * [42b] FAIL + [42c] FAIL → real production drift
+            # Pure SELECT inside cursor block.
+            # [42c] LG5-W3-FUP-2 Fix 2（2026-05-02 RFC §5 方案 B）：
+            # [42b] 的 R-meta gate 對齊 3d 鏡像。SQL 結構 / engine_mode
+            # filter / 閾值（0.50 / 0.30 / 0.10）完全一致，window 改 3d，
+            # 對齊 producer `_R_META_WINDOW_DAYS = 3`（Fix 2 IMPL-1）。
+            # Operator 對照矩陣見 docstring：雙 PASS / 7d PASS+3d WARN
+            # （bug 殘留淡出中）/ 7d FAIL+3d PASS（bug 已修等收斂）/
+            # 雙 FAIL（真實 production drift）。純 SELECT。
+            s, m = check_42c_live_candidate_attribution_drift_3d(cur)
+            results.append(
+                ("[42c] live_candidate_attribution_drift_3d", s, m)
+            )
+
+            # [43] LG5-W3-FUP-2 Fix 1 (2026-05-02): label backfill cron
+            # liveness sentinel. Reads max(label_filled_at) for demo +
+            # live_demo and verdicts on age (PASS <2h / WARN <6h /
+            # FAIL >=6h or no rows). Catches silent death of the new
+            # `helper_scripts/cron/edge_label_backfill_cron.sh` (every
+            # 30 min). MIT FUP-2 diagnosis (2026-05-02) traced [42b]
+            # FAIL → attribution_chain_ok=false 86%+ → label backfill
+            # was on-demand only; this sentinel provides 30min-resolution
+            # direct signal so cron stoppage cannot drag [42b] back below
+            # R-meta floor invisibly.
+            # [43] LG5-W3-FUP-2 Fix 1（2026-05-02）：label backfill cron
+            # 活性哨兵。讀 demo + live_demo 的 max(label_filled_at) 並判
+            # age（PASS <2h / WARN <6h / FAIL >=6h 或無 row）。捕捉新
+            # `edge_label_backfill_cron.sh`（30min cron）的 silent death。
+            # MIT FUP-2 diagnosis（2026-05-02）追蹤 [42b] FAIL ←
+            # attribution_chain_ok=false 86%+ ← label backfill 純 on-demand；
+            # 本哨兵提供 30min 解析度直接訊號，避 cron 停掉 24h 後才經 [42b]
+            # 二階觀察到。純 SELECT。
+            s, m = check_43_label_backfill_freshness(cur)
+            results.append(("[43] label_backfill_freshness", s, m))
     finally:
         conn.close()
 

@@ -111,6 +111,16 @@ from .checks_governance import (  # noqa: F401
     # [42]/[42b] LG-5-IMPL-3（2026-05-02）治理契約 + 歸因漂移哨兵。
     check_42_live_candidate_eval_contract,
     check_42b_live_candidate_attribution_drift,
+    # [42c] LG5-W3-FUP-2 Fix 2 (2026-05-02 RFC §5 Plan B) — gate-aligned
+    # 3d mirror of [42b]; identical thresholds, 3d window matching producer
+    # _R_META_WINDOW_DAYS so operator reads exactly what R-meta gate sees.
+    # [42c] LG5-W3-FUP-2 Fix 2（2026-05-02 RFC §5 方案 B）— [42b] 的
+    # R-meta gate 對齊 3d 鏡像；閾值一致，window 對齊 producer
+    # _R_META_WINDOW_DAYS=3，operator 直接看 R-meta gate 吃到的 ratio。
+    check_42c_live_candidate_attribution_drift_3d,
+    # [43] LG5-W3-FUP-2 Fix 1 (2026-05-02) — label backfill cron liveness.
+    # [43] LG5-W3-FUP-2 Fix 1（2026-05-02）— label backfill cron 活性哨兵。
+    check_43_label_backfill_freshness,
 )
 
 __all__ = [
@@ -173,4 +183,8 @@ __all__ = [
     # [42]/[42b] LG-5-IMPL-3 governance contract + attribution drift
     "check_42_live_candidate_eval_contract",
     "check_42b_live_candidate_attribution_drift",
+    # [42c] LG5-W3-FUP-2 Fix 2 — 3d gate-aligned mirror of [42b]
+    "check_42c_live_candidate_attribution_drift_3d",
+    # [43] LG5-W3-FUP-2 Fix 1 label backfill cron liveness
+    "check_43_label_backfill_freshness",
 ]

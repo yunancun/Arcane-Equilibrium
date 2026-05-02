@@ -2327,3 +2327,84 @@ Smoke 4/4 PASS：
 - script -e 模擬 TTY 跑 ABORT → pg_dump+UPDATE+SELECT 後 ROLLBACK + EXIT_USER_ROLLBACK(5)
 - echo > /dev/null | --verify → EXIT_OK(0) 不受影響
 - --apply 缺 ack flag → EXIT_ARG(2)（既有行為）
+
+## 2026-05-02 LG5-W3-FUP-2 Fix 1 — Cron-ize edge_label_backfill + healthcheck [43]
+- MIT 確認 [42b] FAIL = attribution_chain_ok=false 86%+ 根因 = edge_label_backfill.py 純 on-demand
+- 寫 cron wrapper: helper_scripts/cron/edge_label_backfill_cron.sh (134 LOC, new dir)
+  - SW-006 mkdir overlap lock (mirror cron_observer_cycle.sh pattern)
+  - 兩 engine_mode pass (demo + live_demo) 對齊 [42b] producer 寫入面
+  - fail-loud: 任一 pass 非零 break + exit 1，cron mailer 立即 page
+  - log $OPENCLAW_DATA_DIR/logs/edge_label_backfill_cron.log
+  - cross-platform clean: 用 OPENCLAW_BASE_DIR env var，0 hardcoded /home/ncyu literal
+- 寫 healthcheck [43] label_backfill_freshness in checks_governance.py (+131 LOC)
+  - SQL: max(label_filled_at) WHERE engine_mode IN ('demo','live_demo')
+  - age 在 PG 內 extract(epoch from now() - max(...)) 避時鐘 skew
+  - PASS<2h / WARN<6h / FAIL>=6h or no rows / FAIL V019 missing
+  - threshold 2h/6h 工程提案 (30min cron × 4 / 12)，MIT 沒明文 SLA
+- Wire-up: __init__.py re-export + runner.py cursor block 後 [42b] 加 [43] 呼叫 + docstring 補 ID
+- Tests: test_lg5_healthchecks.py +6 (TestCheck43LabelBackfillFreshness) → 19/19 PASS (13 prior + 6 new)
+- Baseline preserved: 106/106 helper_scripts/db, 15/15 backfill module (0 byte change to backfill.py business)
+- Doc: docs/healthchecks/2026-05-02--lg5_health_checks.md +95 LOC (新 [43] 章節 + 2-tier 哨兵 cross-ref)
+- 教訓: backfill.py CLI argparse 已有 --engine-mode + --batch-limit，不需動 module 即可 cron-ize；先 read 再決策避免盲改
+- 不 commit / 不 deploy / operator 手動加 crontab
+
+## 2026-05-02 LG5-W3-FUP-2 Fix 1 ROUND 2 (E2 returned 1 MED + 1 LOW)
+- E2 round 1 RETURN: MED-1 (跨平台路徑 `/home/ncyu/...` literal in healthcheck doc) + LOW-1 (V017 vs V019 factual error in 3 places + 1 test name)
+- 修 4 處: checks_governance.py:440 docstring + :466 FAIL msg + :454-455 inline comment + test_lg5_healthchecks.py:21 docstring + :324 test name + :331 assertion + healthcheck doc :196 pre-condition + :217 cron block + 重寫 cron 段落避免 `/Users/<name>` literal 命中跨平台 grep
+- 教訓 1: V017 才是 `learning.decision_features` 創建處 (V017__edge_predictor_tables.sql:29)，V019 是 `strategist_applied_params`；round 1 寫 V019 是事實錯，未驗證 source-of-truth 就採納
+- 教訓 2: 跨平台 grep `/Users/[^/]+` 連 placeholder example（如 `/Users/<name>/...`）也命中 — 不能在 doc 裡放任何 `/Users/...` literal pattern；改寫成「<ABSOLUTE_REPO_ROOT>」描述式樣模板才安全
+- 驗證: V019 grep 0 hit / /home/ncyu+/Users grep 0 hit / pytest 19 PASS / git diff --check 0
+- 不 commit (E2 還要再審)
+
+## 2026-05-02 LG5-W3-FUP-2 Fix 2 IMPL-1+2 — Producer 7d→3d + payload window_days
+
+### 任務範圍
+PA RFC 派發 IMPL-1（producer SQL `_compute_attribution_chain_ratio_by_strategy` window 7d→3d，新常數 `_R_META_WINDOW_DAYS=3`）+ IMPL-2（payload 加 `demo_attribution_window_days` 與 `demo_attribution_sample_count_by_strategy`，新 helper `_compute_attribution_sample_count_by_strategy`，常數 `_R_META_MIN_SAMPLE_PER_STRATEGY=10` 給 consumer 引用）。同檔合併 1 PR。
+
+### 經驗教訓
+1. **PA Q1 採方案 B = additive 純新增**：不 rename `_DEMO_BASELINE_WINDOW_DAYS=7`；保留它的 5 個既有 call sites 不動（line 777/827/867/880/891/1079；其中 891 是 `_compute_demo_sample_count_strategy_cell` R3 PSR helper 仍要 7d）。教訓：grep-stable rename 雖名義「乾淨」但 5 處改動 + test import 風險全為 0 收益，純 additive 加一個常數即可。
+2. **新 helper 與 ratio helper 結構鏡像但不合併**：兩者 SQL 幾乎相同（差 `count(*) FILTER (WHERE attribution_chain_ok)` 一欄），但保持兩個獨立 helper 而非一個 helper 回 (ratio,count) tuple — 因為 (a) consumer 兩 dict 應自獨立 source 拉以便 retro audit；(b) 合併會犧牲 fail-soft 隔離。教訓：fail-soft 邊界 > DRY，特別是 producer→consumer payload 合約。
+3. **LOC 1500 硬上限是真硬上限**：第一輪 edit 後 file = 1519，得 trim docstring 才回 1496。教訓：寫雙語 docstring 時要意識 line budget；對於「sibling helper」可省略部分推導細節，把詳細解釋放在 PA RFC + memory 而非 inline docstring。
+4. **`_R_META_MIN_SAMPLE_PER_STRATEGY` 放 producer constants 區是 RFC §9.3 line 419 刻意設計**：常數位置 = 邏輯歸屬考量。雖然 producer 不 enforce 此 threshold（producer 仍照算 ratio），常數放 producer 同檔便於未來 retro debug + consumer import 時 source-of-truth 集中。
+5. **`payload_includes_per_strategy_sample_count` test 設定混合 above/below threshold**：bb_breakout=13 邊界 above 10、bb_reversion=3 below、funding_arb=0 缺資料。給下游 consumer 測試 `defer_attribution_chain_low_sample` 分支現成素材。教訓：producer test fixture 要為 sibling consumer test 準備可重用素材。
+
+### 驗證
+- `pytest test_mlde_demo_applier.py -q` → **19/19** (15 baseline + 4 new)
+- `pytest test_lg5_review_live_candidate.py -q` → **44/44** (sibling consumer 0 regression)
+- `wc -l mlde_demo_applier.py` = **1496** < 1500 hard
+- `git diff --check` exit 0
+- cross-platform grep / 硬邊界 grep 0 hit on diff
+
+### 報告路徑
+- `srv/.claude_reports/20260502_222000_lg5_w3_fup2_fix2_impl_1_2.md`
+- `srv/docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-02--lg5_w3_fup2_fix2_impl_1_2.md`
+
+---
+
+## 2026-05-02 LG5-W3-FUP-2 Fix 2 IMPL-2-consumer (R-meta gate low_sample defer + V035-payload-JSONB)
+
+### 任務範圍
+PA RFC §3 + Q3 IMPL-2-consumer：consumer 端讀 producer payload `demo_attribution_sample_count_by_strategy` dict + R-meta evaluator 套 `_R_META_MIN_SAMPLE_PER_STRATEGY=10` 門檻 + 新 defer reason `defer_attribution_chain_low_sample`（區分「sample 不足」vs ratio fail 的 `reject_attribution_chain_too_broken`）+ `ReviewVerdict.attribution_sample_count` field + audit emission 寫進 V035 `payload` JSONB sub-key（V035 schema 0 column 改動）。
+
+### 經驗教訓
+1. **LOC 1500 cap 是真硬上限—需要 split 才搞得定**：直接 inline 改造後主檔達 1567（67 over）/ 1530（30 over）/ 1521（21 over）— 反覆 trim docstring 仍 oversized。最終 split `evaluate_r_meta` + `evaluate_r_meta_sample_threshold` + 新 `build_r_meta_gate_verdict_kwargs` helper 到 sibling `governance_hub_lg5_r_meta.py`（180 LOC），主檔 re-export 4 symbol（backward-compat），並把 caller R-meta 三 branch dispatch 收成 4 行 `helper → kwargs → make_verdict → emit/return`。最終主檔 = **1487**（淨 -9 LOC vs baseline 1496，因為 R-meta 邏輯整塊抽走比新加邏輯量更多）。教訓：當任務本來只該加 30 LOC 卻會撞 cap，**第一直覺直接 split helper sibling，不要硬 trim 雙語注釋**（注釋是 §七 強制；trim 過頭會違反 bilingual rule）。
+2. **保持 evaluate_r_meta 3-tuple signature 是正確選擇（先嘗試 4-tuple 失敗）**：第一輪我把 `evaluate_r_meta` 簽名擴成 4-tuple 加 sample_count_dict 參數 — 立即破 3 個既有 unit test。退回 3-tuple + 加獨立 `evaluate_r_meta_sample_threshold` helper 為 caller 串接 — 既有 test 0 改動。教訓：**evaluator pure function 簽名是 contract，加邏輯不該強迫 caller test 全改**；分離關注點的 helper 比擴 signature 更安全。
+3. **V035 schema unchanged: 用 payload JSONB sub-key 加新欄位**：V035 沒 `attribution_sample_count` column，PA RFC §6 明示「不動 V### migration」。`_emit_audit_row` + `_emit_approve_audit_and_persist_lease_atomic` 既有都 `json.dumps({...payload_snapshot, decided_at_ts})` → 加一個 `attribution_sample_count` sub-key 即可，零 schema migration。教訓：audit 表 forward-compat payload column 設計就是給這種「加欄位但不 schema bump」用，比每次新欄位都 V### + Guard A/B/C 安全且快。
+4. **`build_r_meta_gate_verdict_kwargs` 收三 branch 進 helper 的 pattern**：helper 回 `(verdict_kwargs_or_None, sample_n, r_meta_msg_for_pass)`；caller 只需 `if kwargs is not None: verdict = _make_verdict(**kwargs); _emit_audit_row(...); return verdict`，從 ~45 LOC 收成 ~9 LOC。代價是 helper 簽名 5 個參數 + 回 3-tuple，但 helper 在 sibling 檔 0 LOC 壓力。教訓：**caller 三相同結構 if-branch（差別只在 reason + payload_snapshot）→ 收進「return kwargs dict」helper，主檔大幅瘦身**。
+5. **5 new tests 借用 `TestReviewLiveCandidateRound2._patch_module` fixture 以 class-attr alias**：`_approve_path_payload = TestReviewLiveCandidateRound2._approve_path_payload` + 同樣 `_patch_module` / `_FakeHub`，不重複定義 fixture。覆蓋 sample_below + sample_above + ratio_low_with_sufficient_sample + 兩 backward-compat 路徑（缺 sample dict / strategy 不在 sample dict）。教訓：caller 整合測 fixture 重用 = 拷貝 reference 而非重新定義；測單一邏輯分支同一 patch_module signature 套全。
+
+### 驗證
+- `python3 -m py_compile <consumer> <sibling>` exit 0
+- `pytest test_lg5_review_live_candidate.py -q` → **49 passed** (44 baseline + 5 new)
+- `pytest control_api_v1/tests/ -q` → **3316 passed, 10 skipped, 0 fail**（cross-suite 0 regression）
+- `pytest test_mlde_demo_applier.py -q` → **19 passed**（producer 0 regression）
+- `wc -l consumer` = **1487** < 1500 hard cap ✅
+- `wc -l sibling` = **180** < 800 warn ✅
+- `git diff --check` exit 0
+- cross-platform grep `/home/ncyu|/Users/[^/]+` 0 hit on sibling
+- 硬邊界 grep on sibling 0 hit
+- V035 schema 未改（payload JSONB sub-key 路徑）
+
+### 報告路徑
+- `srv/.claude_reports/20260502_223000_lg5_w3_fup2_fix2_impl_2_consumer.md`
+- `srv/docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-02--lg5_w3_fup2_fix2_impl_2_consumer.md`
