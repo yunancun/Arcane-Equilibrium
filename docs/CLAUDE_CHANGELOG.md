@@ -1,7 +1,15 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-05-02（REF-20 Paper Replay Lab + Learning surface design）
+> 最後更新：2026-05-02（REF-20 Paper Replay Lab 開發方案 V1）
+
+### REF-20 Paper Replay Lab dev plan V1（2026-05-02）
+
+**範圍**：審閱並保留 raw input `docs/execution_plan/2026-05-02--ref20_paper_replay_lab_dev_plan_draft_v0.1.md`，確認多數改進建議屬真實風險；新增 `docs/execution_plan/2026-05-02--ref20_paper_replay_lab_dev_plan_v1.md`，並同步更新 `docs/execution_plan/README.md` 與 `docs/README.md`。
+
+**決策**：V1 採納 manifest HMAC、replay route auth、replay registry、MLDE row-level evidence source guard、execution calibration OOS / sample-power / selection-bias gate、resource isolation、Paper/Learning/Agents Monitor 邊界等要求；修正 draft v0.1 的過度阻塞：P2 read-only S2/S3 smoke replay 不必等 Decision Lease retrofit，但任何 calibration/advisory/demo handoff 均需後續 guard。
+
+**邊界**：本批 docs-only；未改 runtime、DB migration、策略、風控或 live/demo 配置。V1 是 implementation baseline，不代表可跳過 REF-19/REF-20 v2 amendment。
 
 ### REF-20 Paper Replay Lab + Learning surface design（2026-05-02）
 
