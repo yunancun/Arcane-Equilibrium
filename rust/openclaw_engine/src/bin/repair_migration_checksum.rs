@@ -51,7 +51,7 @@
 //! Refs: incident 2026-05-02 18:35 engine abort; PA plan B path.
 
 use std::env;
-use std::io::{self, BufRead, Write};
+use std::io::{self, BufRead, IsTerminal, Write};
 use std::path::PathBuf;
 use std::process::Command;
 use std::time::SystemTime;
@@ -382,6 +382,18 @@ async fn run() -> i32 {
     if drift_versions.is_empty() {
         println!("# nothing to repair / 無需修復");
         return EXIT_OK;
+    }
+
+    // 5-PRE. TTY guard (E2 review MEDIUM, 2026-05-02).
+    // 拒絕 non-TTY stdin（如 `echo COMMIT | binary --apply ...`）以保留
+    // 「人類在現場」防線。必須在 BEGIN tx / pg_dump / UPDATE 之前 short-circuit。
+    // Refuse non-TTY stdin (e.g. `echo COMMIT | binary --apply ...`) to preserve
+    // the human-in-the-loop safety net. Must short-circuit BEFORE pg_dump / BEGIN /
+    // UPDATE so no side-effects (DB writes, dump file) occur on a piped invocation.
+    if !io::stdin().is_terminal() {
+        eprintln!("REFUSED: --apply requires interactive TTY stdin; piped/non-TTY input rejected.");
+        eprintln!("拒絕：--apply 必須由互動式 TTY stdin 執行；偵測到 piped / non-TTY 輸入。");
+        return EXIT_ARG;
     }
 
     // 5a. pg_dump backup of _sqlx_migrations
