@@ -2,6 +2,43 @@
 
 ## 工作記憶
 
+### 2026-05-02 LG-5 Wave 1 Linux PG regression（PM commit `9076cc9`）— **E4 PASS_TO_PM**
+
+**對象**：LG-5 Wave 1 = `V035__governance_audit_log.sql` (288 LOC new) + `mlde_demo_applier.py` (+401 +102) + `test_mlde_demo_applier.py` (+332)。Linux ff-only 至 `9076cc9` 已驗。
+
+**Verdict**: **PASS** — ready for PM Sign-off
+
+| Suite | passed | failed | baseline | delta |
+|---|---|---|---|---|
+| Cargo migrations_test (release) | 5 | 0 | 5 | +0 |
+| Pytest mlde_demo_applier | 15 | 0 | 15 | +0 |
+| Pytest mlde_shadow_advisor | 5 | 0 | 5 | +0 |
+| Pytest control_api_v1 (excl integration) | 3262 | 1 pre-existing grafana | 3262/1 | +0 effective |
+| V035 first/2nd/3rd apply | 0 RAISE / 0 ERROR | — | — | idempotent ✓ |
+| CHECK constraints (5/6) | 2/2 RAISE check_violation | — | — | attack path proved |
+| audit_migrations V035 | OK | — | — | clean |
+| Healthcheck | WARN baseline | 0 new WARN/FAIL | match | preserved |
+
+**Steps**: 12/12 PASS。V035 first apply: Guard A schema_guard + create + comments + hypertable convert (7d chunks) + 2 hot-path indexes (idx_gov_audit_candidate_ts / idx_gov_audit_event_type_ts) + Guard C validated。3-run 連發證明 idempotent 比 spec 要求 2-run 還強。
+
+**結構**：23 cols / 4 indexes (2 hot-path required + pk + ts default) / hypertable 1 row num_chunks=0。
+
+**Healthcheck**：[27] intents_counter_freeze 從 WARN 升 PASS（unrelated improvement）；[4][10][11][33][40][41] 維持 WARN baseline；新 WARN/FAIL = 0。
+
+**Pre-existing grafana fail RCA**：與 P2 wave 同一個 `test_grafana_data_writer.py::test_start_sets_running`（writer._running is False not True），parent baseline `1f3acc5` 已 fail，Wave 1 file changes 0 overlap。Scope 完全正交。
+
+**E4 教訓 / 新坑**：
+- **basic_system_services.env shell parse 限制**：password 含 `()` 字符（`<REDACTED>`）讓 `set -a && . file && set +a` 失敗或 source 不全。對 `passive_wait_healthcheck.py` 該 source 可走（腳本自己有讀 env 邏輯吃進去），對 `audit_migrations.py` 必顯式 inline 注入：`POSTGRES_USER='...' POSTGRES_PASSWORD='(...)' POSTGRES_DB='...' python3 ...`。Single-quote `()` 包好就過，不要 source。
+- **Hypertable num_chunks=0 ≠ FAIL**：V035 新表 0 INSERT，預期 num_chunks=0；判定 hypertable conversion 看 `timescaledb_information.hypertables` 1 row hit，不是看 num_chunks > 0。
+- **Guard A + C 模板首次驗證**（V023 postmortem 後第一個從零按模板寫的新 migration，非 retrofit）：3-run 證明模板路徑乾淨可重現。所有 V### 新 file 套此模板可保證 idempotent。
+- **task spec 說 12 step 但 Step 11 audit grep 命中 0**：第一次 grep 命中 0 不一定是 V035 失敗，可能是 audit script 沒拿到 PG env vars。完整 tail 才看到 `ERROR: POSTGRES_USER...required`。永遠先 tail 全 output 確認 script 自己跑通，再用 grep 過濾。
+
+**Reports**：
+- `.claude_reports/20260502_162616_e4_lg5_wave1_linux_pg_regression.md`（6 節格式）
+- `srv/docs/CCAgentWorkSpace/E4/workspace/reports/2026-05-02--lg5_wave1_linux_pg_regression.md`
+
+---
+
 ### 2026-05-02 P2 Wave Linux regression（PM commit `1f3acc5`）— **E4 PASS_TO_PM**
 
 **對象**：4 fast-win fix（MIT-S2-6 opportunity_tracker early-exit / E3-S2-P2-1 strategy_read_routes envelope / E3-S2-P2-2 live_session_account_routes IPC error detail / PA-DRY-1 tick_pipeline `is_legacy_close_tag` helper）。Linux ff-only sync 至 `1f3acc5` 已驗。
