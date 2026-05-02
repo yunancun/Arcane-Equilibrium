@@ -80,6 +80,7 @@
 | REF-17 | Cross-Platform Redeploy Dependencies | docs/references/2026-04-20--cross_platform_redeploy_dependencies.md | ✅ Active | Linux→macOS（Apple Silicon）冷裝清單 · brew/rustup/pip 步驟 · systemd↔launchd 差異 · HMAC 憑證重簽陷阱 |
 | REF-18 | Model Canary Promotion Rules (Draft) | docs/references/2026-04-23--model_canary_promotion_rules_draft.md | 🟡 Draft | INFRA-PREBUILD-1 Part B Model Registry canary 狀態機 + Phase 晉升閾值 + Operator playbook（Phase 4 auto-promote cron 延後） |
 | REF-19 | Reality-Calibrated Fast Replay Governance | docs/references/2026-05-02--reality_calibrated_fast_replay_governance.md<br>中文：docs/references/2026-05-02--reality_calibrated_fast_replay_governance_zh.md | 🟡 Draft | Replay/MLDE/DreamEngine 邊界契約：Replay 是實驗環境與資料來源之一；ML/Dream 仍為 Agent 自我學習與策略/風控調參能力；禁止 replay 直接 live/demo mutation |
+| REF-20 | Paper Replay Lab and Learning Surface Design | docs/references/2026-05-02--paper_replay_learning_surface_design.md<br>中文：docs/references/2026-05-02--paper_replay_learning_surface_design_zh.md | 🟡 Draft | Paper Tab 原地升級為 Replay Lab；Learning 保持知識 cockpit 並新增 replay evidence / ML-Dream producer monitor；5-Agent 從 Learning 抽出為 read-only Agents Monitor |
 
 ### Architecture Specifications
 
