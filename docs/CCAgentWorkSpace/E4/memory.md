@@ -2,6 +2,40 @@
 
 ## 工作記憶
 
+### 2026-05-02 P2 Wave Linux regression（PM commit `1f3acc5`）— **E4 PASS_TO_PM**
+
+**對象**：4 fast-win fix（MIT-S2-6 opportunity_tracker early-exit / E3-S2-P2-1 strategy_read_routes envelope / E3-S2-P2-2 live_session_account_routes IPC error detail / PA-DRY-1 tick_pipeline `is_legacy_close_tag` helper）。Linux ff-only sync 至 `1f3acc5` 已驗。
+
+**Verdict**: **PASS** — ready for PM Sign-off
+
+| Suite | passed | failed | baseline | delta |
+|---|---|---|---|---|
+| Cargo lib | 2404 | 0 | 2404 | +0 |
+| Cargo tests aggregate (14 binaries) | 2560 | 0 | 2560 | +0 |
+| Pytest control_api_v1 (excl integration) | 3262 | 1 (pre-existing grafana) | 3261/1 | +0 effective |
+| MLDE shadow advisor focused (Fix 1) | 5 | 0 | 5 | +0 |
+| Live session endpoint actual_engine_kind (Fix 3) | 17 | 0 | 17 | +0 |
+| Edge gates / prelive_edge focused (Fix 2) | 5 | 0 | 5 | +0 |
+| 2nd run (excl pre-existing) | 3262 | 0 | match | non-flaky ✓ |
+
+**Pre-existing fail RCA**：`test_grafana_data_writer.py::TestGrafanaDataWriterLifecycle::test_start_sets_running` (`writer._running is True` got `False`)。E4 親自 `git checkout 9dd71a2 -- .` 重現同 fail，證明 baseline 即存在；file 最後修改 `bc3fa70`/`7178059`，與 P2 wave 4 file changes 0 overlap。
+
+**Healthcheck**：WARN list 從 baseline `[4][10][11][22][27][33][38][40][41]` → 本次 `[4][10][11][27][33][40][41]`。`[22] trading_pipeline_silent_gap` 與 `[38] grid_trading_lifecycle_drift` 從 WARN 升 PASS（fills 7/h fresh + grid n=4<5 insufficient sample skip）。0 新 WARN / 0 新 FAIL。
+
+**opportunity_tracker noise baseline (Step 8)**：opp_24h=50 / noise=50 (100%)。原因：Linux source pull 完但 engine 未 `--rebuild`，runtime 仍跑舊 code → Fix 1 早退邏輯尚未 promote。Task spec 明示「不阻塞」。Operator deploy `--rebuild --keep-auth` 後 24h 重測應顯著降至 < 50%。
+
+**E4 教訓 / 反模式避免**：
+- Cargo PATH on non-interactive ssh：必先 `source ~/.cargo/env`，否則 `cargo: 未找到命令`
+- Pytest 出 1 fail 時 → checkout baseline commit (`git checkout <parent> -- .`) 直接 reproduce 證明 pre-existing，不是「假設並繼續」（memory `feedback_working_principles.md` 原則 1 誠實報告）
+- Step 8 / 9 等 runtime probe 跑出與預期不符數字（noise 100%）時，先區分「fix 失效」vs「fix 未 promote 到 runtime」— 前者 BLOCK，後者 inform PM 不阻塞
+- 健康檢查腳本需 `set -a && . secrets/environment_files/basic_system_services.env && set +a` 才能拿到 PG 憑證；無 env 時 default fallback to OS 用戶 (`ncyu`) 必認證失敗
+
+**Reports**：
+- `.claude_reports/20260502_144705_e4_p2_wave_linux_regression.md`（6 節格式）
+- `srv/docs/CCAgentWorkSpace/E4/workspace/reports/2026-05-02--p2_wave_linux_regression.md`
+
+---
+
 ### 2026-05-02 AUDIT-2026-05-02-P1-1 Round 2 Linux PG regression — **E4 FAIL → RETURN E1**
 
 **對象**：retrofit V028/V030/V031/V032/V034 + fixture (round 1 BLOCK 解除後重跑)。Linux source 已 ff-only pull 到 PM commit `e858ae2`；PG 連接憑證 `trading_admin@127.0.0.1:5432/trading_ai`（從 `basic_system_services.env` 讀；password 含 `()` 字符必 single-quote）。

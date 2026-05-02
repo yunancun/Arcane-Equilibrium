@@ -1319,3 +1319,34 @@ Operator 質疑：(a) PM 把 TODO 從 v3 (713 行) → v4 (197 行) 過程砍掉
 **報告**：
 - SoT: `/Users/ncyu/Projects/TradeBot/srv/.claude_reports/20260502_134432_pa_step2_audit.md`
 - workspace mirror: `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-02--step2_cold_audit_4day_window.md`
+
+## 2026-05-02 · LG-5 Live Candidate Eval Contract RFC
+
+Unified MIT-S2-2 (P2) + QC-S2-02 (P2) into single design spec at
+`workspace/reports/2026-05-02--lg5_live_candidate_eval_contract_rfc.md`.
+
+Core design:
+- Producer (mlde_demo_applier._insert_live_candidate:587-622) adds payload.demo_cost_baseline + demo_realized_window + demo_attribution_chain_ratio sub-keys (no SQL change, JSONB extension)
+- Consumer (new GovernanceHub.review_live_candidate) applies R1 cost regime check / R2 distribution-shift haircut / R3 PSR(0)>=0.95 / R4 multiple-testing deflation / R5 cost_edge_ratio bands (0.5/0.8) / R6 hard veto / R-meta attribution chain >=0.50
+- Lease TTL bands: 6h default, 2h if R3 borderline, 1h if R5 warn band; auto-revoke triggers tied to [22]/[33]/[40]/[42]
+- 24 pending candidates: bulk re-evaluate via lg5_re_evaluate_pending.py one-off script after IMPL-1+2 land
+
+Implementation breakdown (5 sub-tasks):
+- LG-5-IMPL-1 producer schema (E1, parallel safe)
+- LG-5-IMPL-2 consumer + backfill (E1, blocked on IMPL-1)
+- LG-5-IMPL-3 [42] healthcheck (E1, blocked on IMPL-2 audit)
+- LG-5-IMPL-4 unit + integration tests (E4, can scaffold parallel after IMPL-1 schema)
+- LG-5-IMPL-5 QC retro 7d post-deploy (QC, wall-clock gated)
+
+Side-effect warnings logged for E2:
+- governance_hub.py LOC budget (may need sibling file split)
+- Lock contention: review_live_candidate must NOT hold _lock during DB reads
+- Audit fail-closed mandatory (defer not approve on audit write failure)
+
+Acceptance gate: PM + QC + MIT 三方 sign-off required before LG-5-IMPL-* dispatch.
+
+Open questions logged for QC/MIT cross-review (R1 thresholds / R2 formula form / R3 sample window / R4 deflation method / R-meta interim threshold given MIT-S2-1 84.6% broken / lease TTL default).
+
+Hard boundary check: untouched (live_execution_allowed / max_retries / OPENCLAW_ALLOW_MAINNET / live_reserved / authorization.json all preserved).
+
+Root principle check: 16/16 preserved or strengthened (especially #3/#5/#6/#8/#10/#13).

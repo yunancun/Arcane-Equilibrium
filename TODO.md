@@ -42,6 +42,14 @@
 | **AUDIT-2026-05-02-P3-2** | `Add execution-aware edge model gates` (`1644701`) 改 3 份 `strategy_params*.toml` + `scanner_config.toml` 無 QC sign-off；`Relax scanner demo gates` (`2e06735`) 改 `immature_negative_*` 無 QC retro-review | @QC retro audit |
 | **AUDIT-2026-05-02-P3-3** | TODO 大量 churn（4 天 ~30 commit 都是 `Document X` / `Refresh Y` / `Calibrate Z`）→ §三 / TODO 雜訊；CLAUDE.md §三 有 drift 風險 | next archive sweep |
 
+### P2 Wave + LG-5 RFC（2026-05-02 · 完成）
+
+**P2 wave commit `1f3acc5`**：4 fast-win fix（MIT-S2-6 / E3-S2-P2-1 / E3-S2-P2-2 / PA-DRY-1）+ §九 LOC 1200→1500 governance change。Chain：E1 batch → E2 PASS（0 RETURN, 3 informational nits accepted）→ E4 Linux PASS（cargo lib 2404/0 / cargo tests 2560/0 / pytest 3262 passed + 1 pre-existing grafana fail orthogonal / focused 27/0）。
+
+**LG-5-RFC PA design**：`docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-02--lg5_live_candidate_eval_contract_rfc.md` — LIVE-CANDIDATE-EVAL-CONTRACT spec（解 MIT-S2-2 + QC-S2-02 同向 finding）。8 章 / R1-R6 + R-meta 7 條 evaluation rule / 5 個 IMPL sub-task wave。需 PM + QC + MIT 三方 sign-off 才進 implementation。
+
+**待 deploy**：本次 commit 只更新源碼 + 文檔，engine 仍跑舊代碼。下次 deploy window 跑 `ssh trade-core "bash helper_scripts/restart_all.sh --rebuild --keep-auth"` 一次 promote Rust Fix 4 + Python Fix 1/2/3。E4 Step 8 baseline opp_24h noise 50/50 待 deploy 後 24h 重測，預期 noise 比例 < 50%。
+
 ### Step 2 結果（2026-05-02 · PA + MIT + QC + E3 並行 cold audit DONE）
 
 **裁決**：**1 P1 + 12 P2 + 15 P3** — **不需 stabilization wave**（criterion ≥3 P1 觸發），繼續 PRE-LIVE-3 邊緣觀察軸線。但 1 個 P1 是 **operator 必修的 historical credential leak**。
