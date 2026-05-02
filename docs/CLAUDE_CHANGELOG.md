@@ -1,7 +1,15 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-04-24（P1-11 全工 + FIX-26-DEADLOCK-1）
+> 最後更新：2026-05-02（REF-19 Reality-Calibrated Fast Replay governance）
+
+### REF-19 Reality-Calibrated Fast Replay governance（2026-05-02）
+
+**範圍**：新增 `docs/references/2026-05-02--reality_calibrated_fast_replay_governance.md`，並在 `docs/governance_dev/SPECIFICATION_REGISTER.md` / `docs/README.md` 補登 REF-19。
+
+**決策**：Reality-Calibrated Fast Replay 定位為高壓縮歷史實驗環境與資料來源；可調用 MLDE / DreamEngine / OpportunityTracker，但不得把它們改造成 replay-only 工具。ML/Dream 本職仍是 Agent 自我學習、策略修復、風控/參數調整與候選提案。
+
+**邊界**：Replay 只能產生 `reject` / `defer_*` / `demo_candidate` / `live_candidate_research_only` 等研究或候選 verdict，永不產生 `live_approved`；synthetic / calibrated replay rows 必須 source-tagged，且不得混入 real fill labels；live/live_demo mutation 仍需 GovernanceHub + Decision Lease + live gates。
 
 ### TODO Follow-through 1-4（2026-04-30）
 

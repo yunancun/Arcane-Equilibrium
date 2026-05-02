@@ -79,6 +79,7 @@
 | REF-16 | Dust-Frozen Position Manual Clear SOP | docs/references/2026-04-20--dust_frozen_position_manual_clear_procedure.md | ✅ Active | DUST-EVICTION-GAP-1 P1-8 設計背景 · Bybit GUI 三路線 · Live 前 pre-flight checklist |
 | REF-17 | Cross-Platform Redeploy Dependencies | docs/references/2026-04-20--cross_platform_redeploy_dependencies.md | ✅ Active | Linux→macOS（Apple Silicon）冷裝清單 · brew/rustup/pip 步驟 · systemd↔launchd 差異 · HMAC 憑證重簽陷阱 |
 | REF-18 | Model Canary Promotion Rules (Draft) | docs/references/2026-04-23--model_canary_promotion_rules_draft.md | 🟡 Draft | INFRA-PREBUILD-1 Part B Model Registry canary 狀態機 + Phase 晉升閾值 + Operator playbook（Phase 4 auto-promote cron 延後） |
+| REF-19 | Reality-Calibrated Fast Replay Governance | docs/references/2026-05-02--reality_calibrated_fast_replay_governance.md | 🟡 Draft | Replay/MLDE/DreamEngine 邊界契約：Replay 是實驗環境與資料來源之一；ML/Dream 仍為 Agent 自我學習與策略/風控調參能力；禁止 replay 直接 live/demo mutation |
 
 ### Architecture Specifications
 
@@ -133,7 +134,7 @@
 |--------|-------|
 | Active SM/EX/DOC specifications | 16 |
 | Reserved specifications | 2 (SM-03, EX-03) |
-| Active REF specifications | 18 |
+| Active REF specifications | 19 |
 | Active ARCH specifications | 1 |
 | Active AUDIT entries (2026-04) | 12 |
 | Total code references | 335+ |
