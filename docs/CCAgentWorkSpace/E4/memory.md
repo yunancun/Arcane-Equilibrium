@@ -2,6 +2,49 @@
 
 ## 工作記憶
 
+### 2026-05-02 LG-5 Wave 3 IMPL-3 + risk_config_demo TOML promote Linux PG regression（merge `a51cdc5`）— **E4 PASS_TO_PM**
+
+**對象**：兩 work stream 同 commit promote：
+- **Stream A** (LG-5 W3 IMPL-3, Mac dispatch)：`checks_governance.py` (372 LOC new) + `test_lg5_healthchecks.py` (249 LOC new, 13 tests) + `passive_wait_healthcheck/{runner.py +44, __init__.py +9}` + `docs/healthchecks/2026-05-02--lg5_health_checks.md` (180 LOC)。E2 round 2 PASS：4 boundary verdict + producer engine_mode aligned。
+- **Stream B** (Linux operator, funding_arb V2 deprecation TOML)：`risk_config_demo.toml` +41 LOC（dyn_stop base_ratio 0.4→0.25 + funding_arb 3% SL override）+ `rust/openclaw_engine/src/risk_checks_per_strategy_tests.rs` +93 LOC new G2-03 sibling extract。
+
+**Verdict**：**PASS** — ready for PM Sign-off
+
+| Suite | passed | failed | baseline | delta |
+|---|---|---|---|---|
+| Cargo lib (`--lib`) | 2405 | 0 | 2404 | +1 ✓ |
+| Cargo aggregate (`--tests`) | 2561 | 0 | ≥2560 | ✓ |
+| g2_03_per_strategy runtime (Stream B) | 8 | 0 | new | +8 |
+| `test_demo_toml_funding_arb_3pct_override_2026_05_02` (Stream B) | 1 | 0 | new | +1 |
+| Pytest test_lg5_healthchecks (Stream A new) | 13 | 0 | new | +13 |
+| Pytest helper_scripts/db (full) | 100 | 0 | 87 | +13 ✓ |
+| Pytest control_api_v1 (excl integration) | 3306 | 1 pre-existing grafana | 3306 | +0 (skipped 3) |
+| Pytest IMPL-1 + IMPL-2 regression | 59 | 0 | 59 | ✓ |
+| `audit_migrations.py` V035 | OK | — | — | no drift |
+| Runner: [42] + [42b] emit verdict | ✓ | (production FAIL by design) | new | wired |
+| 2nd run W3 + g2_03 | identical | 0 | — | no flake |
+
+**Steps**：11/11 PASS（步 9/10 雖 SUMMARY=FAIL，唯一 NEW FAIL 是 [42]+[42b] 設計目的觸發的真實 production drift signal，非測試/wire 問題；[40] / [33] / [38] / [4] / [10] / [11] / [41] 其他 baseline WARN 不破，與 §三 2026-05-01 23:17 CEST 快照一致）。
+
+**Stream A vs Stream B 完全隔離**：兩 work stream 在不同 LOC region 落地，互不耦合；測試結果亦無交叉污染。Stream A 的 Python healthchecks 不依賴 Stream B 的 Rust risk_checks 改動，反之亦然。
+
+**Step 9/10 [42]+[42b] production verdict（給 PM 評估 IMPL-5 retro / G6 ticket 接線時機）**：
+- **[42] live_candidate_eval_contract = FAIL**：`recent_24h_total=8, unaudited_over_1h=27` — `GovernanceHub.review_live_candidate` consumer 停滯，RFC v2 §4 lease_revoke_trigger 應觸發
+- **[42b] live_candidate_attribution_drift = FAIL**：`worst=grid_trading@0.135 (n=1277)` 低於 0.30 standard floor；ma_crossover@0.152 也低；指向 `MIT-S2-1 attribution_chain_ok` writer producer 大量漏寫
+- 兩 FAIL = healthcheck 第一次曝光的真實 production drift（**不是 W3 code 問題**），代表 W3 healthcheck 的設計目的已正確履行
+- **建議優先級**：HIGH `[42]` 修復 GovernanceHub.review_live_candidate consumer + HIGH `[42b]` 補 attribution_chain_ok writer 缺洞
+- **不應 block 此 commit**：Stream A 的 healthcheck 本身運作正確；FAIL 訊號 = 它們已經抓到真問題
+
+**教訓**：
+1. 第一次 install 的 healthcheck 在 production 即刻 FAIL = OK，不是 W3 caller 的 bug；屬「healthcheck 履行職責」。E4 應分清「healthcheck 設計目的的 FAIL」vs「healthcheck 自己壞掉的 FAIL」。
+2. 題目 prompt 給的 `cargo --tests | awk '{p+=$4;f+=$6}'` 報 `failed=1` 是 awk 解析誤導（grep 逐行驗證所有 `test result:` 行皆 0 failed）— E4 不應盲信題目給的 one-liner，必逐行驗證。
+3. `runner.py` 不能直接 `python3 file.py` 跑（relative import broken），必 `python3 -m helper_scripts.db.passive_wait_healthcheck.runner`；題目 prompt Step 9/10 命令需修正（已自行 escalate）。
+4. risk_checks_per_strategy_tests.rs 用 `#[path]` sibling 載入而非獨立 mod；test name 過濾要用 `g2_03_runtime` 或 `g2_03_per_strategy_tests` prefix，不能用檔名直接 grep。
+
+**Report**：`srv/.claude_reports/20260502_e4_lg5_w3_impl3_plus_risk_toml_linux_regression.md` + `srv/docs/CCAgentWorkSpace/E4/workspace/reports/2026-05-02--lg5_wave3_impl3_plus_risk_toml_linux_regression.md`
+
+---
+
 ### 2026-05-02 LG-5 Wave 2 IMPL-2 Linux PG regression（commit `f663354`）— **E4 PASS_TO_PM**
 
 **對象**：LG-5 Wave 2 IMPL-2 = consumer `governance_hub_live_candidate_review.py` (1496 LOC new) + bulk re-eval `lg5_re_evaluate_pending.py` (532 LOC new) + 44 unit tests `test_lg5_review_live_candidate.py` (731 LOC new)。Linux at `f663354`（git log -1 確認）。
