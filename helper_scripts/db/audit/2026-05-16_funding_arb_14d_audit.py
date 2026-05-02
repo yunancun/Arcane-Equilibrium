@@ -244,7 +244,6 @@ def evaluate_2a_trigger(stats: FundingArbStats) -> Decision:
             ),
         )
 
-    net_pnl = stats.gross_bps_sum - 0.0   # gross_pnl already net of fee in fills.realized_pnl
     # 注意：trading.fills.realized_pnl 在 close fill 上已是 gross PnL；
     # 進+出 fee 額外從 entry.fee + close.fee 抓。net = realized_pnl_sum - fee_sum
     # （round_trip 視角：realized_pnl 是該 close 對 entry 的 P&L，未扣自身 fee）
