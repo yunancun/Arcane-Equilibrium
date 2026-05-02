@@ -1930,3 +1930,25 @@ finally:
 5. **PostgreSQL CREATE OR REPLACE VIEW append-only constraint** 是已知規格，但容易在 retrofit 時忘記 — 任何對 view 的 retrofit 都要先思考「是否會被後續 migration append cols」。
 
 **Operator 下一步**：E2 round 3 審 → E4 round 3 在 Linux production DB 跑 idempotency check（`ssh trade-core "... psql -f V031..."`） → PM 統一收 commit。
+
+---
+
+## 2026-05-02 — P2 Wave Batch（4 fast-win 一輪修復）
+
+**4 fixes from PA Step 2 cold audit**：
+1. **MIT-S2-6** P3 `opportunity_tracker.persist_regret_summary` — sample_count<min_samples 時 early-exit `skipped=below_min_samples` 不再 INSERT noise row（~48 row/day 污染 mlde_shadow_recommendations 解除）
+2. **E3-S2-P2-1** P2 `/strategy/prelive/edge-gates` — exception class+message 漏到 JSON envelope `error` 欄位 → 改 generic `"internal_error"` + 保留 `logger.exception` server log
+3. **E3-S2-P2-2** P2 `/live/close-position` — `detail=f"IPC error: {exc}"` 漏 psycopg2/IPC 內部 → 改 `detail={"reason": "ipc_error"}` + `logger.exception`
+4. **PA-DRY-1** P3 `tick_pipeline/commands.rs` — `is_legacy_close_tag` 4-line `starts_with` chain 兩處重複 → 抽 `pub(crate) fn is_legacy_close_tag()` 到 `tick_pipeline/mod.rs`（與 `parse_exit_tag` 並列），兩 call site 改用 `super::is_legacy_close_tag(strategy)`，保留 local `is_close_fill_for_db = realized_pnl != 0.0 || ...`（hot-path 依賴變數不抽）
+
+**LOC delta**：5 file +55/-16 = net +39（含雙語注釋）
+
+**驗證**：cargo lib 2404 / tests 2560 / pytest control_api 3256 / mlde_shadow_advisor 5 — 全 PASS baseline 一致
+
+**經驗**：
+- 任務 brief 寫「line 553 那個 REST fallback error」需先 grep 驗實際碼狀態 — 該字串歷史已被 LIVE-BOUNDARY-FREEZE-1 改成早 raise 409 + `_LIVE_REST_FALLBACK_DISABLED_DETAIL` constant，現碼無此 leak path；只 line 514 `IPC error: {exc}` 是真實 leak
+- `OpportunityConfig` 已有 `min_samples` (default 5) + env override `OPENCLAW_MLDE_OPPORTUNITY_MIN_SAMPLES`；不需 hardcode 1 或新加 env，直接複用 existing config 與 `summarize_rejected_outcomes` 內部邏輯一致
+- Rust hot-path dedup helper 放 `tick_pipeline/mod.rs`（與 `parse_exit_tag` 並列）+ `super::` 引用；commands.rs 是 child mod 故 `super::` 即指 `tick_pipeline`
+- HTTPException detail 從 string 改 dict 是 shape change — 前端若有 string match 會壞，E2 review 時要 grep 前端依賴
+
+**Operator 下一步**：E2 review → E4 regression（建議 Linux production cargo test 復驗）→ PM Sign-off + commit + push。

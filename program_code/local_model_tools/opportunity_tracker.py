@@ -210,6 +210,23 @@ def persist_regret_summary(
     summary = get_recent_regret_summary(resolved_dsn, engine_mode=engine_mode, cfg=cfg)
     if not summary:
         return {"inserted": 0, "summary": {}}
+    # MIT-S2-6: Skip noise rows — regret_summary with sample_count below
+    # cfg.min_samples carries no actionable rejection signal and pollutes
+    # learning.mlde_shadow_recommendations (~48 NULL/zero-confidence rows/day),
+    # diluting downstream applier filters. Persist only when we have a
+    # statistically meaningful sample.
+    # MIT-S2-6：跳過 noise row — sample_count 低於 cfg.min_samples 的 regret_summary
+    # 無實質拒絕信號，會以零信心污染 mlde_shadow_recommendations（~48 row/天），
+    # 稀釋下游 applier filter；僅在樣本量有統計意義時才寫入。
+    sample_count = int(summary.get("rejected_sample_count", 0) or 0)
+    if sample_count < cfg.min_samples:
+        return {
+            "inserted": 0,
+            "skipped": "below_min_samples",
+            "sample_count": sample_count,
+            "min_samples": cfg.min_samples,
+            "summary": summary,
+        }
     if psycopg2 is None or Json is None:
         raise RuntimeError("psycopg2 not installed")
     with psycopg2.connect(resolved_dsn, connect_timeout=2) as conn:  # pragma: no cover - DB path

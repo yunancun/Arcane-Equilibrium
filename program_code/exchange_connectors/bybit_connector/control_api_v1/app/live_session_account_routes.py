@@ -510,8 +510,13 @@ async def post_live_close_position(
                 status_code=409,
                 detail=core._LIVE_REST_FALLBACK_DISABLED_DETAIL,
             ) from exc
-        logger.error("IPC close_position failed for %s: %s", sym, exc)
-        raise HTTPException(status_code=502, detail=f"IPC error: {exc}")
+        # E3-S2-P2-2: keep full exception in server log only — client-facing
+        # `detail` must not leak `{exc}` (psycopg2 / IPC backend internals can
+        # expose schema or socket paths to authenticated callers).
+        # E3-S2-P2-2：完整 exception 只進 server log；client 端 detail 不可帶 {exc}
+        # （psycopg2 / IPC backend 內部訊息可能漏 schema 或 socket path）。
+        logger.exception("IPC close_position failed for %s", sym)
+        raise HTTPException(status_code=502, detail={"reason": "ipc_error"})
 
     # If no exchange position AND paper IPC also found nothing, return 404.
     # 交易所和紙盤都沒倉，回 404（避免謊報 closed=True）。
