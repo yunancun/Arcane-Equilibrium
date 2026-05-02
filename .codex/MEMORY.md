@@ -83,6 +83,24 @@ Current known paths and remote:
 - risk parameter edits must stay scoped to the requested parameters
 - operator-paste shell commands should be robust one-liners rather than heredoc-heavy multi-line snippets
 
+## 2026-05-02 Codex bootstrap alignment
+
+Operator provided an OpenClaw initialization packet and asked Codex to treat it as durable session context. Keep these points active for future sessions:
+
+- Canonical repo root is always `srv/`; the parent workspace is only an entry shim.
+- Codex enters as `PM + Conductor`, not an anonymous implementer. PM may plan, dispatch, integrate, sign off, and review diffs, but business-code implementation should go through bound roles such as `E1(worker)`, then `E2(explorer)` and `E4(worker)`.
+- Before dispatching real work, run `git fetch` when available and check for existing topic branches; if fetch hangs or fails, record that explicitly instead of assuming remote state.
+- The forced chain remains binding: feature / bug work needs `PM -> PA -> E1/E1a -> E2 -> E4 -> QA -> PM` unless PM states a scoped reason to skip a non-hard role. `E2` and `E4` are never skipped.
+- For strategy, math, ML, data, live-auth, risk, or deploy work, add the relevant gate roles: `QC`/`MIT` for quant and data, `E3`/`CC` for live or security boundaries, and `BB` for Bybit-facing exchange behavior.
+- Mac is development only. Do not start or restart the engine locally on Mac; runtime truth is Linux `trade-core` via SSH. Mac may do `git fetch` and `git pull --ff-only`; do not merge, rebase, reset, force-push, or amend published commits.
+- LiveDemo uses the live pipeline and demo endpoint, but remains live-grade for auth, TTL, fail-closed risk, and audit. Do not downgrade controls because the endpoint is demo.
+- Rust `openclaw_engine` is the trading, risk, strategy-config, and execution authority. Python is a bridge/API/GUI/control plane and must not become the write authority for trading or risk parameters.
+- GUI is Vanilla JS; do not introduce React/Vue/Angular. GUI write surfaces must write through Rust authority, not Python-only fake-success paths.
+- Path handling must remain portable for a future Apple Silicon runtime. New code must not hard-code `/home/ncyu`, `/Users/ncyu`, or machine-specific TradeBot paths.
+- Meta-doc commits in a dirty multi-session tree should use `git commit --only <file>` so unrelated WIP is not staged.
+- Linear is the only active external workflow integration. Notion is frozen; Drive is passive; Coupler, MotherDuck, and Slack are declined unless the operator explicitly reopens them.
+- Governance register path in this repo is `docs/governance_dev/SPECIFICATION_REGISTER.md`. The older shorthand `docs/SPECIFICATION_REGISTER.md` is not present.
+
 ## Architecture and deployment invariants
 
 - Bybit is the only exchange target
@@ -101,6 +119,10 @@ Primary active-state sources:
 - `TODO.md`
 
 Current strategy-edge packet:
+- source/runtime sync checkpoint `2026-05-02`: `origin/main` and Linux `trade-core` are at `6469171` (`merge(audit): 2026-05-09 7d + 2026-05-16 14d audit scripts + TODO reminders`). A local Codex session may still be on an audit branch after fast-forward; inspect `git status --short --branch` before committing.
+- active healthcheck risk `2026-05-02`: Linux watchdog reports demo/live fresh, but passive healthcheck is FAIL because `[40] realized_edge_acceptance`, `[42] live_candidate_eval_contract`, and `[42b] live_candidate_attribution_drift` are red. This matches TODO follow-ups `LG5-W3-FUP-1` and `LG5-W3-FUP-2`.
+- immediate high-signal TODO follow-ups: wire `review_live_candidate` consumer scheduler so pending live candidates are audited (`LG5-W3-FUP-1`), and investigate the `attribution_chain_ok` writer gap for grid/ma rows (`LG5-W3-FUP-2`). Treat both as pre-live governance/data quality work, not live-trading authorization.
+- P2/P3 backlog from the 2026-05-02 cold audit remains relevant: `MIT-S2-1`, `MIT-S2-2/QC-S2-02`, `QC-S2-01`, `QC-S2-04`, `E3-S2-P2-1/P2-2`, plus P3 cleanup items such as duplicate `is_legacy_close_tag`.
 - `STRATEGY-EDGE-REPAIR-2026-04-29` is the active trading-strategy follow-up after commits `bd9ae2a` and `f0d21b9`
 - primary metric for strategy improvement is post-fee `net_bps_after_fee`; PNL and winrate remain secondary references only
 - post-fix sample window starts at `2026-04-29 12:27:53 CEST`, when live strategy params were reloaded with maker-entry enabled
