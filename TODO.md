@@ -109,6 +109,7 @@
 |----|------|------|
 | **P1-INFRA-1** | Slack alert channel go/no-go（pre-live ~2 週評估） | ~2026-05-15 |
 | **P1-INFRA-2** | PRE-LIVE-4 災難恢復演練（drawdown auto-revoke / liquidation buffer / auth expire 三 scenario）| LG-2 RFC 後 |
+| **P1-INFRA-3** | **REF-20 Paper Replay Lab wave**（4 輪 7-agent audit 完成 7/7 APPROVE V3；docs-only P0 amendment commit baseline 已 land）— P1 frontend entry 等 UX subdoc 接受 + 5 策略 indicator leak-free sweep PASS；details → `docs/execution_plan/2026-05-03--ref20_paper_replay_lab_dev_plan_v3.md` + UX subdoc V1。Phase 排序：P0→P1（IA）→P2a（registry）→P2b（smoke）→P3a/P3b（calibration）→P4（advisory）→P5（agents extract，等 LG-2/3/4 7d stable）→P6（demo handoff，bounded） | V3 commit 後派 QC+E3 indicator sweep |
 
 ---
 
@@ -256,6 +257,7 @@
 |---|---|---|---|
 | **2026-05-09**（週六）| 3C deploy 7 天後對比 audit：5 metric vs prior 7d baseline | `bash helper_scripts/db/audit/2026-05-09_3c_7d_audit.sh` | exit 0（all metrics expected direction）→ PA review；exit 1 → operator 決策 base_ratio 是否續收緊或回退 |
 | **2026-05-16**（週六）| funding_arb 1B 樣本累積 14 天彙總，判斷 2A 棄策略 trigger | `bash helper_scripts/db/audit/2026-05-16_funding_arb_14d_audit.sh` | n≥30 且 net bps 顯著負 → 2A 觸發棄策略；n<30 → 續收 |
+| **REF-20 P1 entry checkpoint**（V3 commit 後 ~1-2 sprint）| 派 QC + E3 跑 5 策略 indicator leak-free sweep（V3 §3 G6 + §7）；UX subdoc V1 operator 接受；確認 `replay_runner` Rust binary scaffold 由 PA + E1 出設計 | sweep PASS + UX 接受 + binary scaffold 設計 PASS | 三條件 GREEN → P1 IA 啟動 |
 
 > 為什麼不用 `/schedule` remote agent：DB 在 trade-core localhost，遠端 cloud agent 沒 SSH/Tailscale。改寫腳本進 repo + TODO 提醒，operator（或 CC session）到日期 ssh 跑一行即可。
 > Refs：`memory/project_2026_05_02_p0_sqlx_hash_drift.md` / `memory/project_funding_arb_v2_deprecation_path.md`
