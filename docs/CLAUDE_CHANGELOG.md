@@ -1,7 +1,15 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-05-02（REF-19 Reality-Calibrated Fast Replay governance）
+> 最後更新：2026-05-02（REF-19 中文版 + 三段同步）
+
+### REF-19 中文 companion + 三段同步（2026-05-02）
+
+**範圍**：新增 `docs/references/2026-05-02--reality_calibrated_fast_replay_governance_zh.md`，作為 REF-19 中文 companion；同步更新 `docs/governance_dev/SPECIFICATION_REGISTER.md` 與 `docs/README.md`。
+
+**決策**：中文版與英文版同義，不覆蓋英文契約。日常討論與後續實作可引用中文版，但治理邊界維持一致：Replay 調用 MLDE / DreamEngine 作實驗環境與資料來源之一，不將它們改造成 replay-only 工具。
+
+**同步**：此批為 docs-only，完成 Mac local → origin/main → Linux `trade-core` ff-only pull 三段同步；未 rebuild / restart / DB write / strategy/risk config mutation。
 
 ### REF-19 Reality-Calibrated Fast Replay governance（2026-05-02）
 
