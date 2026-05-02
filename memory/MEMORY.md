@@ -31,6 +31,7 @@
 - [TODO 10-Agent Audit 重構 (2026-04-24)](project_2026_04_24_todo_refactor.md) — 10 agent 獨立 audit + PA FIX-PLAN（45 findings/6 工作組/4 wave）+ PM Sign-off；舊 TODO 700→新 328 行；3 大 Verified 發現（edge_estimates 1 cell / PostOnly 反向 / Executor shadow hardcoded）
 - [edge_estimator_scheduler 停滯→修復 (2026-04-24)](project_edge_scheduler_stalled.md) — ✅ G1-01 同日 operator commits f32629c/abc85c0 + 02:06 --rebuild；現 187 cells / 59 updated/cycle / mtime <30min；JSON 非 `cells{}` nested 而是 strategy::symbol top-level key
 - [Agent 追蹤視圖 MVP shipped (2026-04-28)](project_agent_tracker_mvp_shipped.md) — Learning Cockpit 新「AI 团队工作台」5 卡+feed+shadow/live+budget+governance；A 級 UX；branch feature/agent-tracker-mvp HEAD 884531a 已 push；deploy 用 restart_all --keep-auth（純 Python+JS）
+- [funding_arb V2 棄策略路徑 (2026-05-02)](project_funding_arb_v2_deprecation_path.md) — BUSDT -10.12 USDT 後 1B+2A+3C 決策：1B demo active=true 收 EDGE-DIAG-2 樣本 / 2A 中期棄策略（QC delta-neutral 數學不成立 + Bybit demo 無 spot lending）/ 3C TOML 改動 commit a19797d (base_ratio 0.4→0.25 + funding_arb 3% override)
 
 ## Working principles & autonomy
 - [Agent 自主權偏好](feedback_agent_autonomy.md) — 用戶只設global止盈止損，Agent自主決定策略/參數/時機/倉位
