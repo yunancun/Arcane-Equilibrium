@@ -2157,3 +2157,25 @@ E2 Round 1 RETURN 4 findings 後修補：
 
 - `srv/.claude_reports/20260502_<HHMMSS>_lg5_impl2_round2.md`
 - `srv/docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-02--lg5_impl_2_consumer_round2.md`
+
+---
+
+## LG-5-IMPL-3 Round 2（2026-05-02）
+
+### 學到的教訓
+
+**RFC 三段 floor 不可塌兩段**：Round 1 把 `[42b]` `attribution_chain_ratio` 從 RFC v2 §6 IMPL-3 line 451 規定的三段（PASS/WARN/FAIL = 0.50/0.30/0.10）寫成兩段，把 [0.30, 0.50) WARN 與 [0.10, 0.30) FAIL 合併進 WARN — alarm severity under-call。E2 round 1 catch 此 HIGH。教訓：**verdict band 直接照 RFC 條文 floor 數量複製**，不憑直覺合併「邊界相近」的區間。
+
+**Drift sentinel 必須對齊 producer filter**：Round 1 `[42b]` SQL `engine_mode IN ('demo','live_demo','live')`，但 IMPL-1 producer `_compute_attribution_chain_ratio_by_strategy` 只用 `IN ('demo','live_demo')`。drift sentinel 與 producer 餵 consumer 的資料源差一個 `'live'` 即構成 false alarm/false reassurance 風險。教訓：**任何 sentinel/監控 query 必先 grep 對應 producer/writer 的 filter，逐 field 對齊**，不憑記憶或「合理推斷」。Inline 注釋必須引用 producer 檔行範圍以便日後 audit。
+
+**LOW finding 處理判斷**：LOW-4 SQL interval 純常量 concat，PA spec 已建議跳過（refactor cost > benefit）。原則：**LOW informational 跟著 PA 派發判斷做或不做，不擅自 over-engineer**。
+
+### 工具偏好
+
+- WARN/FAIL boundary fixture 設計：邊界值（如 0.30）改用 strict-interior 值（如 0.40 在 [0.30, 0.50) 中）避免 boundary 歧義
+- 三段 floor 拆 4 verdict band（PASS / WARN / FAIL standard / FAIL pipeline-alert）時，msg 字樣明顯區分（"standard FAIL floor" vs "pipeline-alert floor"）+ assertNotIn 守護 escalation 字樣不洩漏
+- 文檔 verdict bands 表格從 3 row → 4 row，pipeline-alert 行用獨立 status 標籤 `FAIL (pipeline-alert escalation)` 視覺區分
+
+### 報告路徑
+
+- `srv/.claude_reports/20260502_lg5_impl3_round2_4fixes.md`
