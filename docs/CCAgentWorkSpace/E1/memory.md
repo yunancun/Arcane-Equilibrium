@@ -2302,3 +2302,28 @@ Operator P0：寫 Rust binary 修復 sqlx migration checksum drift（V028/V030/V
 - LOC scheduler 716 < 1500 hard
 - §九 grep `_consumer|_consumer_lock|_LEADER_LOCK_FD|_LEADER_LOCK_PATH` 命中 4 個 LG5 singleton
 - git diff --check 0
+
+## 2026-05-02 P0 migration checksum repair — TTY guard FUP（commit 2c8f053）
+
+E2 review of bb6bf04 raised MEDIUM: --apply prompt didn't isatty-check stdin.
+echo COMMIT | binary --apply --i-understand-... would bypass the human-in-loop.
+
+修復：
+
+- import std::io::IsTerminal（Rust 1.70+ stdlib，cross-platform）
+- 在 --apply path 進入後、pg_dump_backup + pool.begin() 之前 short-circuit
+- non-TTY → eprintln 雙語 REFUSED + return EXIT_ARG（無任何 DB / dump 副作用）
+
+教訓：
+
+- destructive binary 的 interactive prompt 必配 isatty guard，不然 pipe 即繞過
+- TTY check 位置要在 "connect DB OK 後 / 任何 BEGIN / pg_dump 之前"，避免：
+  (a) 還沒接到 DB 就誤判 / (b) 已產生副作用才拒絕
+- script -e -qc '<cmd>' /dev/null 可在 SSH 內模擬 TTY 跑 smoke test
+
+Smoke 4/4 PASS：
+
+- echo COMMIT | --apply --i-understand-... → REFUSED + EXIT_ARG(2)，DB drift 維持 [28,30,31,32,34]
+- script -e 模擬 TTY 跑 ABORT → pg_dump+UPDATE+SELECT 後 ROLLBACK + EXIT_USER_ROLLBACK(5)
+- echo > /dev/null | --verify → EXIT_OK(0) 不受影響
+- --apply 缺 ack flag → EXIT_ARG(2)（既有行為）
