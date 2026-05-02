@@ -1890,3 +1890,43 @@ finally:
 **未動**：V030/V031/V032/V034、test_v028_v034_guards.sql、V028 業務邏輯（CREATE/ALTER 不變）。
 
 **Operator 下一步**：E2 重審 → E4 跑 Linux 真實 PG（idempotent 雙跑 + OPENCLAW_TEST_PG end-to-end）→ PM 統一收 commit。
+
+---
+
+## 2026-05-02 — AUDIT-2026-05-02-P1-1 Round 3 (E4 production-state RETURN fix)
+
+**Trigger**：E2 round 2 PASS、E4 round 2 對 production DB（commit `e858ae2`，V034-applied state）跑 V031 idempotency 撞 `cannot drop columns from view`。
+
+**Root cause**：V031 round 1 / round 2 我自報「`CREATE OR REPLACE VIEW` for mlde_edge_training_rows is idempotent / 不需 guard」是錯誤推論。Postgres 規格上 `CREATE OR REPLACE VIEW` 不允許 DROP columns，只能 APPEND；V034 為同一 view 加 18 個 `scanner_market_*` 欄成 53 欄；V031 第二次跑（或 V034-applied state 上跑）試圖窄化 → PG 拒絕。Round 1/2 的 disclaimer 只在 fresh-install state 成立，沒考慮 production state。E2 round 1 接受了這個 disclaimer 沒 push back，E4 才在真實 production-state DB 上抓到。
+
+**Round 3 修法**（E4 推薦 Option B）：
+- V031 view 創建包一層 view-shape guard（仿 V034 round-2 retrofit pattern）
+- 整個 `CREATE OR REPLACE VIEW` body 移入 DO block 內 EXECUTE — 因為 PostgreSQL DO block 不能直接寫頂層 DDL，必須用 EXECUTE
+- 三路徑：(1) view absent → EXECUTE create；(2) view 存在且包含 V031 baseline 全部 col → SKIP + RAISE NOTICE；(3) view 存在但缺 baseline col → RAISE EXCEPTION（drift）
+- 用 `$migration$ ... $view$ ... $cmt$` 三層 dollar-quote 隔離 view body / COMMENT 字串
+
+**改動**：
+| Path | 動作 | 行數 |
+|---|---|---|
+| `srv/sql/migrations/V031__ml_dream_edge_unblock.sql` | 修改 | +173 / -8 |
+| `srv/sql/migrations/tests/test_v028_v034_guards.sql` | 修改 | +192 / -8 |
+
+新增 3 個 V031/View-fresh / View-extended / View-drift test cases（仿 V034 view tests），同步更新 Coverage 註解 + 結尾 echo。
+
+**本機驗證**（Mac PG 16.13，V034-applied scratch DB）：
+- V031 重跑 ≥3 次：第二/三跑見 NOTICE-skip（`V031 view-shape guard: ... already contains all V031 baseline cols (likely extended by V034+); skipping CREATE OR REPLACE VIEW ...`），零 ERROR，view 維持 53 欄不窄化 ✅
+- test fixture：21/21 PASS，含 3 個新 V031/View-* ✅
+- `cargo test -p openclaw_engine --test migrations_test --release`：5 passed ✅
+- `git diff --check`：0 whitespace issue ✅
+- `git status --short`：只見 V031 + test fixture 兩檔 ✅
+
+**未動**：V028 / V030 / V032 / V034（E4 round 2 PASS）/ V031 既有 mlde_shadow_recommendations Guard A / V031 view body 業務邏輯（CTE / WHERE / JOIN / SELECT 投影 / metadata jsonb_build_object 全 verbatim 抄入 EXECUTE 字串）。
+
+**核心教訓內化**（建議 PM 寫入 docs/lessons.md）：
+1. **Pattern**：retrofit guard 寫 disclaimer 時忽略 production runtime state。
+2. **Scenario**：V031 round 1/2 自報「不需 guard」推論只在 fresh-install state 成立，沒考慮 V034 已對同一 view append 18 cols 的 production state。
+3. **Prevention**：post-V023 retrofit / 任何 idempotency disclaimer，必須對齊 **production runtime DB state** 而非僅 fresh install 假設。E2 審查 disclaimer 時要 push back「在 production state 也成立嗎」。
+4. **Mac dev session 限制**：本機沒 production-state DB snapshot，validate disclaimer 必須由 E4 在 Linux production DB 跑 — round 1/2 跳過 E4 production validate 是 process gap。
+5. **PostgreSQL CREATE OR REPLACE VIEW append-only constraint** 是已知規格，但容易在 retrofit 時忘記 — 任何對 view 的 retrofit 都要先思考「是否會被後續 migration append cols」。
+
+**Operator 下一步**：E2 round 3 審 → E4 round 3 在 Linux production DB 跑 idempotency check（`ssh trade-core "... psql -f V031..."`） → PM 統一收 commit。

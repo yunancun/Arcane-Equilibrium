@@ -2,6 +2,35 @@
 
 ## 工作記憶
 
+### 2026-05-02 AUDIT-2026-05-02-P1-1 Round 2 Linux PG regression — **E4 FAIL → RETURN E1**
+
+**對象**：retrofit V028/V030/V031/V032/V034 + fixture (round 1 BLOCK 解除後重跑)。Linux source 已 ff-only pull 到 PM commit `e858ae2`；PG 連接憑證 `trading_admin@127.0.0.1:5432/trading_ai`（從 `basic_system_services.env` 讀；password 含 `()` 字符必 single-quote）。
+
+**Verdict**: **FAIL** — V031 retrofit not idempotent on V034-extended state.
+
+**Step results**:
+- Step 2 FAIL @ V031 (`ERROR: cannot drop columns from view` line 240)
+- Step 3 PASS (17/17 fixture cases)
+- Step 4 PARTIAL (V028/V030/V032/V034 second run clean; V031 deterministic FAIL)
+- Step 5 SKIP (no separate test DB; would reset production)
+- Step 6 PASS (all 5 retrofit V### "ALL PRESENT OK")
+- Step 7 PASS WARN baseline (no new FAIL related to retrofit)
+
+**Root cause**: V031 line 56 `CREATE OR REPLACE VIEW learning.mlde_edge_training_rows` 體積 35 cols，但 production 已被 V034 cumulative 擴成 53 cols。PG `CREATE OR REPLACE VIEW` 不允許 drop col → 第二次跑必 ERROR。Retrofit author 注解假設「乾淨初次安裝」idempotent — 在 V034-applied state 下不成立。違反 CLAUDE.md §七 Migration Guard #4。
+
+**E4 教訓** — 對偶 V023 postmortem：
+- V023 lesson = 對 **legacy drift** 主動 RAISE (Guard A 模板)
+- V031 R2 lesson = 對 **future-shape drift**（已被後續 migration 擴展的 view/table）主動 skip — 否則 retrofit 自己變成 silent destroy（PG hard limit 阻擋這次救了我們，但凡能跑下去就會 narrow view 摧毀下游 reader）
+- 凡 migration 含 `CREATE OR REPLACE VIEW` 都要驗 view 當前 col superset 是否包含本次預期 col；不對等則整段 view 重建 wrap in `DO $$` shape-guard skip。
+
+**Recommended E1 fix**: Option B — V031 加 `DO $$ ... $$` shape-guard 包 `CREATE OR REPLACE VIEW`，先驗 V031 預期 col 已在 view 才 skip 重建。Round 3 驗 V031 only (其餘 4 已 pre-validated)。
+
+**Reports**:
+- `.claude_reports/20260502_130800_e4_audit_p1_1_linux_regression_round2.md`
+- `srv/docs/CCAgentWorkSpace/E4/workspace/reports/2026-05-02--audit_p1_1_linux_pg_regression_round2.md`
+
+---
+
 ### 2026-05-02 AUDIT-2026-05-02-P1-1 Linux PG end-to-end regression — **E4 BLOCKED**
 
 **對象**：retrofit V028/V030/V031/V032/V034 + fixture `test_v028_v034_guards.sql`（733 LOC / 17 case），E1 R2 + E2 R2 PASS 後 E4 Linux 真實 PG 驗證。

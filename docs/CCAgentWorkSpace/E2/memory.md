@@ -699,3 +699,17 @@ worktree `agent-a9002481353677810` · base HEAD `cf34e96` · branch `worktree-ag
 4. **F-2 / F-3 self-disclosure 驗證模式** — Governance / self-report drift 類 finding 的 fix 不是「修代碼」而是「補揭露」；E2 verify 點 = (a) 報告/檔案存在 (b) 內容真說該說的 (c) caveat 明示限制（無 PG / wiring smoke vs SQL execute 區別）。本次 E1 caveat 寫得很完整，是好範例。
 5. **Mac PG 缺席的處置 SOP** — Mac dev 環境永遠無 PG → idempotent 雙跑 / cargo test SQL execute 都必交 E4 Linux。E2 在 review report 必明寫「E2 無法在 Mac 驗 X，必交 E4 Y」並列出具體命令，避免 E4 漏跑。
 6. **「sub-agent 不寫 .md 副本」vs「§七 6 節中文 report 強制」澄清** — 兩規則並存：sub-agent 回主 agent 訊息時不另寫 .md 副本（節省 context）≠ 禁 §七 本機 review 報告（後者是強制治理）。E1 round 1 混淆漏寫 .claude_reports，round 2 澄清。E2 future review 時若 sub-agent E1 未寫 .claude_report 必標 GOVERNANCE finding。
+
+---
+
+## 2026-05-02 — AUDIT-2026-05-02-P1-1 round 3 V031 view-shape guard review
+
+### 對抗審查模式
+
+7. **「CREATE OR REPLACE VIEW idempotent」是錯的反模式** — Postgres `CREATE OR REPLACE VIEW` **禁止 DROP columns，只能 APPEND**。任何「view 用 CREATE OR REPLACE 故 idempotent 不需 guard」自報立即標 RETURN — 必須對齊 production runtime state（含後續 migration 已 APPEND 的 col）而非 fresh-install 假設。E1 round 1/2 自報就是這個 bug，E4 round 2 在 V034-applied state 抓到。
+8. **View 對外 column 列表 ≠ CTE 內 alias** — V031 view body 三層 CTE（intent_base / normalized / strategy_regime）內有大量中間 alias（raw_strategy_name / scanner_json / feature_strategy_name 等），但 view 對外 column 只有最外層 SELECT 的 projections（34 個）。E2 驗 v_v031_cols ARRAY 必對外層 SELECT 而非 CTE alias。
+9. **DO/EXECUTE 內 view body 業務邏輯不變的驗證手法** — `diff <(HEAD whitespace-normalized) <(round 3 whitespace-normalized)` 一鍵驗；indent shift 造成的「+/- LOC 看起來大」是 false positive（git numstat 嚴格算 indent-only 為刪除+新增），用 whitespace-normalized diff 二次驗證。
+10. **PG dollar-quoting `$tag$ ... $tag$` 內 single-quote 不需 escape** — 包進 EXECUTE $view$ ... $view$ 後，view body 內 `''` / `'command'` 等 literal 直接字面接受，無需改為 `''''`。E2 驗時 grep dollar-tag 配對 + 確認無 collision 即可。
+11. **Test fixture LOC 警戒線跨越的處置** — round 3 後 946 LOC（>800 警戒），但 round 1+2 baseline 已 733 + round 3 自然擴張 +213，per pre-existing baseline exception clause **不 BLOCK 本輪**；建議開 P3 follow-up ticket 拆檔。E2 標 MED finding 但放行。
+12. **Idempotency 三步驗證模板** — Fresh DB scenario：第 1 跑 Path 1 EXECUTE → 第 2 跑 Path 2 NOTICE-skip。Production scenario：V034-applied state 跑 Path 2 NOTICE-skip。E2 在 Mac 無法 production-state empirical，**必明寫 DEFERRED to E4** 並列具體 ssh/psql 命令避免漏跑。
+13. **同一 view 多 migration 的 baseline 一致性 cross-check** — V031 v_v031_cols + V034 既有 guard baseline + 兩個 V031 test case 共 4 處抄同一份 34-col list；E2 必 grep 4 處對齊（任一 drift 會讓 guard 失效）。長期 maintenance burden 文檔化於 V031 + V034 註解。
