@@ -1,6 +1,7 @@
 # Memory Index
 
 ## Project context
+- [2026-05-02 codex 4-day audit chain](project_2026_05_02_codex_4day_audit.md) — 162 codex/operator commits cold review；P1-1 retrofit chain E1×3/E2×3/E4×3 closed (e858ae2 + 6cb1c3b)；.codex/ 治理 = option (a) hint mirror only
 - [LIVE-AUTH-WATCHER fix (2026-04-27)](project_live_auth_watcher_event_consumer_spawn.md) — Live 8天 snapshot 停寫；watcher respawn 漏接 event_consumer；has_pipeline_spawner=true 驗；P1 stale-cmd-tx 待修
 - [OpenClaw 定位决策](project_openclaw_positioning.md) — OpenClaw Gateway=通信+運維層；Rust openclaw_engine=交易大腦；Python=API橋接+GUI only
 - [硬件與存儲基礎設施](project_hardware_constraints.md) — 128GB統一記憶體 LLM~54GB，PG只能用4-8GB，40TB NAS via 10GbE

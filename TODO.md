@@ -22,14 +22,14 @@
 
 | ID | 問題 | 證據 | Owner | Acceptance |
 |----|-----|------|-------|-----------|
-| **AUDIT-2026-05-02-P1-1** | 5 個新 migration 違反 CLAUDE.md §七 Guard A/B 強制規則（V023 silent-noop postmortem 後設立）：V028（ALTER ADD COLUMN 無 Guard B）、V030 / V031 / V032（CREATE TABLE IF NOT EXISTS 無 Guard A）、V034（VIEW 重建無欄位 drift 防護）；只有 V027 / V033 守規 | `grep -l "Guard A" sql/migrations/V0[2-3]*.sql` 缺 V028/V030/V031/V032/V034 | @E1 → @E2 → @E4 | 5 個 migration 加 Guard A/B；本地兩次 idempotent 跑；新增 schema_guard tests；E2 PASS |
-| **AUDIT-2026-05-02-P1-2** | stale 回歸測試 `test_rc_002_h0_status_refresh_preserves_cooldown_and_kill_switch` grep `loop_handlers.rs` 找 `build_status_risk_snapshot(`，但 `c6ec664` (refactor: complete maintenance splits) 已將該函數移到 `event_consumer/status_report.rs:23`，測試沒一起改 → 1 個 Python 失敗測 | `python3 -m pytest .../tests/test_batch_d_risk_fail_closed.py::test_rc_002_h0_status_refresh_preserves_cooldown_and_kill_switch` FAIL | CC 直接修 | grep target 改 `status_report.rs`；測試 PASS |
+| **AUDIT-2026-05-02-P1-1** | ✅ DONE 2026-05-02：5 SQL migration（V028/V030/V031/V032/V034）retrofit Guard A/B + V031 view shape-guard。Chain：E1 r1 → E2 r1 RETURN 3 finding → E1 r2 → E2 r2 PASS → E4 r2 FAIL（V031 view 非 idempotent against V034-extended 53-col state）→ E1 r3 Option B shape-guard → E2 r3 PASS → E4 r3 Linux production `trading_ai` PASS（V031 NOTICE-skip × 2、fixture 20/20、view col=53 preserved、audit OK、healthcheck WARN baseline 0 new FAIL）。Commit `e858ae2`（r1+r2）+ `6cb1c3b`（r3）| same | @E1 → @E2 → @E4 | DONE |
+| **AUDIT-2026-05-02-P1-2** | ✅ DONE 2026-05-02：stale 回歸測試 grep target 改至 `event_consumer/status_report.rs`；測試 PASS。Commit `e858ae2` | same | CC 直接修 | DONE |
 
 ### 🟧 P2（hygiene + 治理澄清，本週內）
 
 | ID | 問題 | Owner | Acceptance |
 |----|-----|-------|-----------|
-| **AUDIT-2026-05-02-P2-1** | `.coverage` 二進位檔（53 KB）被 commit 進 repo（`350e018`）— 應在 `.gitignore` | CC 直接修 | `.gitignore` 加 `.coverage*`；`git rm --cached .coverage` |
+| **AUDIT-2026-05-02-P2-1** | ✅ DONE 2026-05-02：`.gitignore` 加 `.coverage*` / `htmlcov/` / `coverage.xml`；`git rm --cached .coverage` 完成。Commit `e858ae2` | CC 直接修 | DONE |
 | **AUDIT-2026-05-02-P2-2** | 6 個 `chore(worktree): preserve XXX` + 6 個 `merge: preserve worktree agent XXX` —— sub-agent worktree 直接吸收 main，conflict 解法（含 `PA/memory.md` + `cost_edge_advisor/mod.rs`）無人審 | @PA review | spot-check `13051e2` 等合併 conflict 解；發現實質問題回報 |
 | **AUDIT-2026-05-02-P2-3** | 單一 commit `b46660a` 加 13.6k 行（含 2466 行 audit + 2077 行 inventory TSV + 大量 Rust），E2/E4 對單 commit 審查近乎不可能；後續 codex 提交需強制拆 PR-sized commit | operator 決定 / TODO 警示 | 在 §七 加「單 commit 上限」規則 or 接受並 flag |
 | **AUDIT-2026-05-02-P2-4** | ✅ DONE 2026-05-02：operator 選 (a)，CLAUDE.md §十二 補述「`.codex/` 平行目錄角色」確立 = 純 codex session 提示鏡像，不擁有治理權，衝突以 `.claude/agents/` + CLAUDE.md 為準 | — | — |
