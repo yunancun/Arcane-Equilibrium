@@ -417,4 +417,3 @@ Replay cannot say:
 - synthetic PnL is real PnL
 - ML/Dream output is an order
 - paper fill assumptions are exchange truth
-
