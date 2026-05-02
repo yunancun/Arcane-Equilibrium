@@ -713,3 +713,32 @@ worktree `agent-a9002481353677810` · base HEAD `cf34e96` · branch `worktree-ag
 11. **Test fixture LOC 警戒線跨越的處置** — round 3 後 946 LOC（>800 警戒），但 round 1+2 baseline 已 733 + round 3 自然擴張 +213，per pre-existing baseline exception clause **不 BLOCK 本輪**；建議開 P3 follow-up ticket 拆檔。E2 標 MED finding 但放行。
 12. **Idempotency 三步驗證模板** — Fresh DB scenario：第 1 跑 Path 1 EXECUTE → 第 2 跑 Path 2 NOTICE-skip。Production scenario：V034-applied state 跑 Path 2 NOTICE-skip。E2 在 Mac 無法 production-state empirical，**必明寫 DEFERRED to E4** 並列具體 ssh/psql 命令避免漏跑。
 13. **同一 view 多 migration 的 baseline 一致性 cross-check** — V031 v_v031_cols + V034 既有 guard baseline + 兩個 V031 test case 共 4 處抄同一份 34-col list；E2 必 grep 4 處對齊（任一 drift 會讓 guard 失效）。長期 maintenance burden 文檔化於 V031 + V034 註解。
+
+## 2026-05-02 — audit/2026-05-09-and-16-3c-funding-arb-followup @ 5abb00e
+
+**Verdict**: RETURN to E1（2 MEDIUM + 2 LOW optional）。Read-only audit scripts，無 INSERT/UPDATE/DELETE，無 Rust/migration 改動。
+
+**E1 hint cross-validation**:
+- Hint #2「net_bps double-count fee」= 實際 audit 1A 用 `mlde_edge_training_rows.net_bps_after_fee` precomputed column（同 healthcheck `[40]` 同源），無 double-count 路徑存在。Funding_arb 14d audit 改用 `realized_pnl - entry_fee - close_fee`，經 Rust `fill_engine.rs:300-306` 驗證 `realized_pnl = (fill_price - entry_price) * close_qty` 純 gross，公式正確。
+- Hint #1「row_number()=1 partial close」= mirror `[38]` lifecycle drift JOIN 完全一致，monitor scope choice 非 bug。
+- `trade_executions` = V005 view over `trading.fills`，等價。
+
+**Findings**:
+1. MED `2026-05-16_funding_arb_14d_audit.py:247` — dead `net_pnl = stats.gross_bps_sum - 0.0` + 英文 inline 注釋 `"already net of fee"` 與緊接其後中英 NOTE block + Rust 真相**直接矛盾**。下個接手會被誤導。建議直接刪整行。
+2. MED `2026-05-09_3c_7d_audit.py:67 DEPLOY_UTC = "2026-05-02 17:42:00+00"` 缺證。3C TOML commit `a19797d` ts 為 `2026-05-02 17:20:35 +0200` (15:20 UTC)，差 ~2.4h。restart_all 時間 ≠ commit 時間，需 journalctl / engine startup log 證據；否則 prior/post baseline 接縫洩漏。
+3. LOW partial-close notional bias（SL cap pct 偏高）→ 報告 disclaimer 即可。
+4. LOW 排程腳本 prologue 加 healthcheck pre-check hint。
+
+**Lessons learned for future audit script reviews**:
+- 一律 cross-check `trading.fills.realized_pnl` 是 gross 還是 net — Rust `fill_engine.rs::apply_fill` 是 source of truth，現為 **gross**（`balance -= fee` 另計）。
+- DEPLOY_UTC 類常數 cutoff 必驗 commit ts vs runtime restart log 雙來源；commit ts ≠ deploy ts 經常是 silent error 來源。
+- "schedule reminder TODO" vs "passive-wait Nd" 不同語意 — 前者事件驅動 cutoff（§七 healthcheck-pair 規則嚴格不適用），後者要求 silent-dead 偵測；但 audit 內部仍應在跑前驗 baseline pipeline 活著。
+
+
+
+## 2026-05-02 LG5-W3-FUP-1 ROUND 2 — PASS
+
+- Round 1 RETURN: HIGH-1 unauthorized hard-skip 反破壞 IMPL-2 audit emission + MED-1 §九 漏登 + 4 NIT
+- Round 2 全 6 fix verified PASS。HIGH-1: 刪 hard-skip block + 信任 IMPL-2 R6 evaluator (governance_hub_live_candidate_review.py:1037-1047 / 1199-1252) emit reject_hard_veto；新 _total_rejected_hard_veto verdict-derived metric 取代 hub-derived _cycles_skipped_not_authorized；MODULE_NOTE 雙語明示「不要把 hard-skip 加回去」+ inline NOTE 點明 ROUND-2 修復歷史。MED-1: §九 行 446-447 加 2 entry 4 singleton names 鏡 EDGE-SCHEDULER-LEADER-1 格式。NIT-2: thread-leak guard `assert "lg5-review-consumer" not in threading.enumerate()`。NIT-3: 3 個 TestUnauthorizedStillCallsImpl2 tests 證 unauthorized hub 仍 call review (mocked.call_count==3)、mixed reject reasons subset count、is_authorized() raise wrapper not called。NIT-4: `_total_errors += len(errors)` 移到 cycle 末尾 lock 內。
+- Tests: 11 PASS / 59 baseline preserved（44 lg5_review + 15 mlde_demo_applier）。LOC: scheduler 716 / test 454 / both < 1500。0 hardcoded path。0 secret leak。IMPL-2 / mlde_demo_applier / edge_estimator_scheduler 0 改動（empty diff）。
+- Lesson: round 1 自報「hard-skip 防止無謂 IMPL-2 cost」實是 fundamental design bug —— 反破壞 audit emission 路徑、讓 [42] healthcheck FAIL。對抗反問「你的 hard-skip 是否阻斷了應該發生的 audit？」直接 catch fundamental issue。

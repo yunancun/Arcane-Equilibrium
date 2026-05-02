@@ -2,6 +2,59 @@
 
 ## 工作記憶
 
+### 2026-05-02 P0 migration checksum repair binary sanity test（commit `bb6bf04`，branch `fix/p0-2026-05-02-sqlx-migration-checksum-repair`）— **E4 PASS**
+
+**對象**：新 Rust binary `rust/openclaw_engine/src/bin/repair_migration_checksum.rs` (555 LOC) + `Cargo.toml` 加 `[[bin]]` entry (+11 LOC)。**未執行 `--apply` mode**（per PA 要求 dry-run only），純驗 build + lib test 不破壞 + binary smoke test。
+
+**Verdict**：**PASS** — ready for operator dry-run review，可進 PM Sign-off
+
+| Suite | passed | failed | baseline | delta |
+|---|---|---|---|---|
+| Cargo workspace build (`--workspace --release`) | 0 errors | 0 | clean | clean |
+| Workspace warnings | 26 | — | 26 (cc286d0 parent) | +0 ✓ |
+| Cargo lib `openclaw_engine` (`--lib`) | 2405 | 0 | 2405 | +0 ✓ |
+| Cargo workspace tests (`--workspace`) | 3008 | 0 | 3008 | +0 ✓ |
+| Lib 2nd run (non-flaky) | 2405 | 0 | match | ✓ |
+| Binary build (`--bin repair_migration_checksum`) | OK | 0 | new | OK |
+
+**Smoke tests (4 種)**：
+1. `--verify` 連假 DB URL：connect timeout / graceful exit 0 / 無 panic ✓
+2. `--apply` 無 ack flag：拒絕 + 雙語錯誤訊息「需同時帶 --i-understand-this-modifies-db」exit 0 ✓
+3. `--apply --auto-yes` bogus flag：硬拒絕「rejected flag --auto-yes: interactive prompt is mandatory」+ print help exit 0 ✓
+4. 真 DB `--verify` 跑兩次：output 100% bit-identical（diff_lines=0）✓
+
+**真 DB verify 結果**：drift_versions = [28, 30, 31, 32, 34]、V033 = clean、V035 = MISSING_IN_DB — 完全 match PA spec。`pa_caught_by_binary == pa_known_drift` / `pa_missed_by_binary = []`。
+
+**DB read-only proof**：跑 verify 前後 `_sqlx_migrations.checksum` 全表 34 行 hex dump 對比 diff = 0 行 — **binary --verify mode 對 DB 0 寫入**，符合設計。
+
+**Steps**: 5/5 PASS（全 sanity test 過）
+
+**E4 教訓 / 新坑**：
+1. **新 binary 借 lib `database::migrations::load_migrations_from_dir`** 共用 sqlx 0.8.6 SHA-384 算法，避免 binary / engine 啟動驗證 hash drift。Cargo.toml 注 `[[bin]]` entry 不影響既有 build target。
+2. **真 DB --verify deterministic**：兩次跑 49 行 output bit-identical，因為 binary 不訪問任何 mutable 系統時間 / 隨機（只讀 file mtime + DB checksum）。
+3. **Engine 已 abort 狀態下 binary 仍可獨立跑**：repair binary 不需 engine alive，僅需 DB pool + migrations dir，符合 P0 incident response 場景（engine 啟動失敗時用此修 checksum）。
+4. **`--apply --auto-yes` 雙重保險**：除了拒絕 missing ack flag，還主動偵測 `--auto-yes` 等 prompt-bypass flag 並 hardexit + print help，比單純「ack required」更 fail-closed。
+5. **Postgres URL encoding**：密碼含 `(` `)` 必 percent-encode 為 `%28` `%29`（`postgres://redacted@host`）才能進 binary，否則 sqlx 解析 fail。
+
+**Report**：直接於主對話 message 輸出（per system prompt 不寫 .md 報告檔）。
+
+**建議 PM commit message** (when promoting bb6bf04 after operator dry-run accept):
+```
+chore(p0-migration): sanity test PASS for repair_migration_checksum binary (bb6bf04)
+
+E4 sanity test 5/5 PASS. Workspace build clean (26 warnings, +0 vs cc286d0
+parent). Cargo lib 2405/0 (matches baseline 2405). Workspace tests 3008/0
+(matches baseline 3008). Binary smoke: invalid DB URL graceful exit;
+--apply without ack rejected; --apply --auto-yes hard-rejected; real DB
+--verify 2 runs bit-identical; pre/post DB checksums diff=0 (read-only
+proof). Drift detected matches PA spec: V[28,30,31,32,34] + V035 missing.
+--apply NOT executed; ready for operator dry-run review.
+
+Co-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>
+```
+
+---
+
 ### 2026-05-02 LG-5 Wave 3 IMPL-3 + risk_config_demo TOML promote Linux PG regression（merge `a51cdc5`）— **E4 PASS_TO_PM**
 
 **對象**：兩 work stream 同 commit promote：

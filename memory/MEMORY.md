@@ -32,6 +32,7 @@
 - [edge_estimator_scheduler 停滯→修復 (2026-04-24)](project_edge_scheduler_stalled.md) — ✅ G1-01 同日 operator commits f32629c/abc85c0 + 02:06 --rebuild；現 187 cells / 59 updated/cycle / mtime <30min；JSON 非 `cells{}` nested 而是 strategy::symbol top-level key
 - [Agent 追蹤視圖 MVP shipped (2026-04-28)](project_agent_tracker_mvp_shipped.md) — Learning Cockpit 新「AI 团队工作台」5 卡+feed+shadow/live+budget+governance；A 級 UX；branch feature/agent-tracker-mvp HEAD 884531a 已 push；deploy 用 restart_all --keep-auth（純 Python+JS）
 - [funding_arb V2 棄策略路徑 (2026-05-02)](project_funding_arb_v2_deprecation_path.md) — BUSDT -10.12 USDT 後 1B+2A+3C 決策：1B demo active=true 收 EDGE-DIAG-2 樣本 / 2A 中期棄策略（QC delta-neutral 數學不成立 + Bybit demo 無 spot lending）/ 3C TOML 改動 commit a19797d (base_ratio 0.4→0.25 + funding_arb 3% override)
+- [P0 sqlx hash drift incident (2026-05-02)](project_2026_05_02_p0_sqlx_hash_drift.md) — audit-p1-1 retrofit (e858ae2/6cb1c3b) 改 V028/V030/V031/V032/V034 file 加 Guard 但 DB checksum 沒同步；3C restart 觸發暴露；治本 = repair_migration_checksum binary (3681f83)；治理盲點 = audit closure SOP 漏 engine restart 實測（cargo test PASS ≠ runtime sqlx migrate 驗證）
 
 ## Working principles & autonomy
 - [Agent 自主權偏好](feedback_agent_autonomy.md) — 用戶只設global止盈止損，Agent自主決定策略/參數/時機/倉位

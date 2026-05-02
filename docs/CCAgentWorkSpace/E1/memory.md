@@ -2179,3 +2179,126 @@ E2 Round 1 RETURN 4 findings 後修補：
 ### 報告路徑
 
 - `srv/.claude_reports/20260502_lg5_impl3_round2_4fixes.md`
+
+---
+
+## 2026-05-02 — sqlx migration checksum repair binary (P0)
+
+### 任務 / Task
+Operator P0：寫 Rust binary 修復 sqlx migration checksum drift（V028/V030/V031/V032/V034 經 e858ae2/6cb1c3b 修檔但未更新 DB checksum，2026-05-02 18:35 engine startup abort）。**只寫 binary + commit + 跑 `--verify`**，不執行 `--apply`，不修 DB。
+
+### 做了什麼
+- 新檔 `rust/openclaw_engine/src/bin/repair_migration_checksum.rs`（566 行）
+- 新增 `Cargo.toml` `[[bin]]` 段
+- 邏輯：借用 engine 同源 `database::migrations::load_migrations_from_dir`（內部呼叫 `sqlx::migrate::Migration::new` → `Sha384::digest(sql.as_bytes())`，raw bytes 無 normalization），保證算法與 engine 啟動驗證一致；DB URL 用 `secret_env::var_or_file("OPENCLAW_DATABASE_URL")` 與 engine 同源
+- 兩 mode：`--verify`（READ-ONLY，預設）/ `--apply`（DESTRUCTIVE，需 `--i-understand-this-modifies-db` + interactive `Type COMMIT` prompt + 自動 `pg_dump -t _sqlx_migrations` 備份）；顯式拒絕 `--auto-yes/--yes/-y/--force`
+- 雙語 MODULE_NOTE / inline / SAFETY 注釋齊備
+
+### `--verify` 結果（給 operator dry-run）
+- 解析 34 個 migration 檔（V001-V034 缺 V022）
+- DB 33 行（無 V022/V035）
+- **drift_count = 5**，命中 PA 已驗 [28, 30, 31, 32, 34]
+- **V033 verdict = clean**（無 drift；已驗）
+- **意外發現**：V035 (`governance_audit_log`) 在 repo 但**不在 DB**（`MISSING_IN_DB`）— 這是新 pending migration，與本任務 drift 修復無關，但應上報 E2/PM
+- 完整 output：Linux `/tmp/openclaw/migration_checksum_verify.txt`
+
+### Branch + commit
+- `fix/p0-2026-05-02-sqlx-migration-checksum-repair`（base `cc286d0`）
+- commit `bb6bf04` — pushed to origin
+- `cargo build --release --bin repair_migration_checksum` exit 0（21 lib warnings 全 pre-existing）
+
+### 關鍵注意
+- 沒執行 `--apply`、沒改 migration 檔、沒改 `_sqlx_migrations` 表（per task spec）
+- V035 missing in DB **不** 是 binary bug — `--verify` 正確標記，給 operator/PA 後續決策
+- 算法 sanity：V001-V027/V029/V033 全 `no drift`（35 列中 28 列 file_sha == db_checksum），證明算法與既有 DB 一致；只有事後改檔的 5 條 drift
+
+### 報告路徑
+- `srv/.claude_reports/20260502_p0_migration_checksum_repair_binary.md`（待寫）
+
+### Lessons
+- sqlx 0.8.6 `_sqlx_migrations.checksum` = SHA-384 raw UTF-8 bytes，無 normalization；借 `Migration::new` 自動算最安全
+- engine 自刻 Flyway 解析器（`V###__*.sql` 雙底線）— sqlx 內建不認 `V` 前綴；本 binary 借 engine 同源 parser 確保檔案集合一致
+- 新 binary 在同 crate `src/bin/` 之下，Cargo `[[bin]]` 註冊即可，不需 new crate
+
+
+---
+
+## 2026-05-02 LG5-W3-FUP-1 — `review_live_candidate` consumer scheduler 接線
+
+**Context**：LG-5 Wave 3 sealed `cc286d0` 後 E4 Linux regression PASS 但 production runtime [42] FAIL，`recent_24h_total=8` 但 `unaudited_over_1h=27` —— root cause = IMPL-2 consumer 已 land 但無 scheduler 在 call。
+
+**Decision**：新建 sibling 檔 `app/lg5_review_consumer_scheduler.py`，不擴張 `edge_estimator_scheduler.py`（已 855 行越過 800 警告線）。獨立 leader lock sentinel `lg5_review_consumer.leader.lock` 與 edge scheduler 解耦，避免一方掛掉拖累另一方。`main.py` startup hook 在 EdgeEstimatorScheduler 之後 lazy-import 啟動。
+
+**Architecture**：
+- `Lg5ReviewConsumer` class（mirror `EdgeEstimatorScheduler` 的 thread-based daemon pattern，**非 async** —— 既有 scheduler 全 sync threading.Thread；改 async 等於引入 `asyncio.run()`/event loop 開銷且不一致）。
+- `start_consumer_scheduler()` 冪等，受 `OPENCLAW_LG5_CONSUMER_ENABLED` + leader lock 雙重把關。
+- `_resolve_hub()` lazy-import `paper_trading_wiring.GOV_HUB`（避免 module load 時循環 import；可由 `hub_provider` ctor arg override 供測試）。
+- `_run_cycle()` 順序：(1) resolve hub → (2) check `is_authorized()`（exception → fail-closed not_authorized）→ (3) `_fetch_pending_candidate_ids(LIMIT)` ORDER BY ts ASC → (4) per-candidate try/except review_live_candidate → (5) 聚合 INFO log + status stats。
+
+**Defaults**：`cycle_secs=300`（5min；producer 是 hourly，consumer 5min 給 ≤5min 落差，遠低於 [42] 1h SLA），`max_per_cycle=16`（對齊 `R4_PENDING_CAP` = `mlde_demo_applier.max_recommendations`，一次 producer flush 一次 cycle 排空）。
+
+**Env vars 新增**：
+- `OPENCLAW_LG5_CONSUMER_ENABLED`（default 1）
+- `OPENCLAW_LG5_CONSUMER_CYCLE_SECS`（default 300.0）
+- `OPENCLAW_LG5_CONSUMER_MAX_PER_CYCLE`（default 16）
+- `OPENCLAW_SCHEDULER_LEADER`（reuse 既有 edge scheduler env，0=force non-leader）
+
+**Test coverage**：10 unit tests（aggregation × 1, per-candidate fail-open × 1, auth gate × 2, empty pool × 1, env config × 3, start gate × 2）。Regression：related test set 88 PASS（mlde_demo_applier 15 + lg5_review 44 + edge scheduler observability/leader/min_obs 19 + new 10）。Full pytest：3727 PASS / 5 FAIL（5 失敗皆 Mac dev numpy/sklearn missing，pre-existing 與本改動無關）。
+
+**Lessons**：
+- 既有 scheduler 是 sync threading 不是 async；新 scheduler 鏡 既有 pattern 一致性 > 跟 PA spec 字面 `async def`（押 PA「選你認為最 clean 的」授權）。
+- §九 LOC budget — `edge_estimator_scheduler.py` 已 855 行近警告線，新 sibling 檔反而比硬塞進原檔合規。
+- Producer/consumer 分檔不分 scheduler infra：用 sibling daemon thread + 獨立 flock sentinel，比寫進同一 class lifecycle 更解耦（一方 crash 不影響另一方）。
+- `paper_trading_wiring.GOV_HUB` 是 module-level 單例 + lazy import 取得，避免 import-time 循環。
+- `_reset_for_tests()` 是 `EdgeEstimatorScheduler` 既有 pattern，直接複製 leader lock fd 釋放邏輯保證 pytest session teardown 不洩漏 daemon thread。
+
+## 2026-05-02 — E2 MEDIUM fix on audit scripts (commit 2937a82)
+
+**Branch**：`audit/2026-05-09-and-16-3c-funding-arb-followup` 5abb00e -> 2937a82。
+
+**Scope**：純注釋/dead var 清理，零邏輯變化，2 .py file +14/-1。
+
+**MED-1 — `2026-05-16_funding_arb_14d_audit.py:247` dead var 刪除**：
+- 原行 `net_pnl = stats.gross_bps_sum - 0.0` 未被任何下游引用（grep `net_pnl` in-file 0 hit），且其英文 inline `gross_pnl already net of fee in fills.realized_pnl` 與緊接的 248-252 行中英 NOTE「realized_pnl 是 gross PnL」+ Rust `fill_engine.rs:300-306` 的真實 schema 直接矛盾。
+- 修法：直接刪該行。下方原有 net_after_fee = gross - fee_sum 才是被使用的真實 net。
+
+**MED-2 — `2026-05-09_3c_7d_audit.py:DEPLOY_UTC` 出處 inline 證據**：
+- E2 質疑 17:42 UTC 來源（為何不是 commit a19797d 的 17:20）。
+- 真實 timeline：commit 17:20 -> merge 16:17(a51cdc5 不同分支 ts) -> restart_all 第一輪 16:35 因 sqlx V028 hash drift abort（engine DOWN）-> 第二輪 17:42:59 成功（PID 3202566 lstart）-> snapshot writer 首次發 = 真實 deploy 時點。
+- 修法：在 DEPLOY_UTC 賦值前加 14 行雙語 inline，列出四個 timestamp + 為何取 17:42 + 指向 `project_2026_05_02_p0_sqlx_hash_drift.md`。
+
+**Lessons**：
+- OpenClaw 治理上 commit ts != deploy ts —— Audit script 寫 deploy timestamp 時必明文標註出處且區分（commit / merge / runtime cutover），否則 future audit reviewer 會反覆質疑。
+- E2 review 抓的兩個 finding 都是「文檔/註解 vs 真相 drift」類，非邏輯 bug，但若不修，未來 reader 會被誤導 —— 治理價值在於「事實可追溯」。
+- LOW finding（partial-close disclaimer）PA 指示後續再補，本輪不動。
+
+**Verify**：
+- `python3 -c "import ast; ast.parse(...)"` 兩檔 0 exit。
+- `git diff 5abb00e..HEAD --stat` = 2 files changed, 14 insertions(+), 1 deletion(-)。
+- Linux ssh trade-core ff-only synced to 2937a82。
+
+---
+
+## 2026-05-02 LG5-W3-FUP-1 ROUND 2 — HIGH-1 wrapper hard-skip 反破壞 IMPL-2 audit
+
+**Lesson**：「在 wrapper 層加 fail-closed gate」≠ 對的設計，當下游 consumer **本身就有正確的 R6 fail-closed 處理**且 wrapper hard-skip 會跳過下游的 audit emission 路徑時，wrapper 的 gate 反而是 bug。
+
+**情境**：LG5 review consumer scheduler round 1 在 `_run_cycle()` 裡查 `hub.is_authorized()`，未授權就 `return {"skipped": "not_authorized"}` 不呼叫 IMPL-2。E2 RETURN 指出：IMPL-2 `review_live_candidate` 內部 R6 evaluator 已正確處理 `auth_effective=False` → emit `reject_hard_veto` audit row；wrapper hard-skip 會繞過此 emission，導致 `[42] unaudited_over_1h` backlog 永遠不 drain，FUP 失去意義。
+
+**規則**：
+1. 寫 wrapper / scheduler / dispatcher 之前**先讀下游 callee 的 fail-closed 路徑**（特別是 hard-veto / reject_*_hard 等）；下游已有 `auth_effective=False → reject_hard_veto + audit_row` 路徑時，wrapper **必須**讓 call 到下游，不能在前面 short-circuit
+2. wrapper-level metric（如 `_cycles_skipped_not_authorized`）若是 hub-derived，會與下游 audit row 解耦造成 reviewer 混淆；改成 verdict-derived（如 `_total_rejected_hard_veto` 從 `verdict.reason == 'reject_hard_veto'` 推導）才能與 audit row 1:1 對齊
+3. fix HIGH 級「設計缺陷」時必加大段 NOTE 雙語注釋寫明「不要把 X 加回去 + 為什麼」，避免下一輪 reviewer 不知歷史而走回頭路
+4. healthcheck doc 更新時必同步重寫 operator 觀察路徑（從 `cycles_skipped_not_authorized incrementing` 改為 `total_rejected_hard_veto > 0` + `governance_audit_log SQL grep`）—— 否則 operator 拿過時指令排查問題會卡很久
+
+**LOC mis-report 教訓**（NIT-1）：round 1 報 442 LOC 用心算數 code line，實際 `wc -l` 677 LOC（差 50%）。**永遠用 `wc -l` 真值**，不要心算。
+
+**§九 singleton 補登 timing**：新 module 含 module-level singleton 時，**同 PR 順手在 §九 表加 entry**（鏡 EDGE-SCHEDULER-LEADER-1 格式），不要等 E2 review 才加。
+
+**Verify**：
+- 11/11 new test PASS
+- 59/59 baseline preserved
+- 70/70 combined run
+- LOC scheduler 716 < 1500 hard
+- §九 grep `_consumer|_consumer_lock|_LEADER_LOCK_FD|_LEADER_LOCK_PATH` 命中 4 個 LG5 singleton
+- git diff --check 0

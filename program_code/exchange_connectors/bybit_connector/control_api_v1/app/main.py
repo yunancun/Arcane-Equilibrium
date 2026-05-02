@@ -456,6 +456,34 @@ async def _startup_integrity_check() -> None:
             _edge_sched_exc, _edge_sched_exc,
         )
 
+    # ── LG5-W3-FUP-1: review_live_candidate consumer scheduler ───────────────
+    # 啟動 LG-5 IMPL-2 consumer 排程器（每 5min poll pending live candidates）。
+    # Sibling daemon to EdgeEstimatorScheduler with independent leader election;
+    # under uvicorn --workers 4 only one worker actually runs the consumer.
+    # 與 EdgeEstimatorScheduler 並列的 daemon，獨立 leader 選舉；
+    # uvicorn --workers 4 下僅一個 worker 真正跑 consumer。
+    try:
+        from .lg5_review_consumer_scheduler import (  # noqa: PLC0415
+            start_consumer_scheduler as _start_lg5_consumer,
+        )
+        _lg5_consumer = _start_lg5_consumer()
+        if _lg5_consumer is not None:
+            base.logger.info(
+                "Lg5ReviewConsumer started (leader worker) / "
+                "LG-5 review consumer 已啟動（leader worker）"
+            )
+        else:
+            base.logger.info(
+                "Lg5ReviewConsumer skipped (non-leader worker or env disabled) / "
+                "LG-5 review consumer 跳過（非 leader 或 env 關閉）"
+            )
+    except Exception as _lg5_consumer_exc:
+        base.logger.warning(
+            "Lg5ReviewConsumer startup failed (fail-open): %s / "
+            "LG-5 consumer 啟動失敗（不阻斷）：%s",
+            _lg5_consumer_exc, _lg5_consumer_exc,
+        )
+
     # ── OC-3 / 6-RC-6: Reconciler governor-tier alert monitor ────────────────
     # 啟動對帳器 governor tier 告警監控（fail-open，不阻斷啟動）
     # asyncio.create_task is non-blocking: schedules coroutine for the event loop.
