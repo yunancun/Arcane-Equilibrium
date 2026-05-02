@@ -32,7 +32,10 @@ Phase 6   (W19-20,8/14-8/27):  驗收
 | [2026-05-02--ref20_paper_replay_lab_dev_plan_draft_v0.1.md](2026-05-02--ref20_paper_replay_lab_dev_plan_draft_v0.1.md) | REF-20 Paper Replay Lab 開發方案 v0.1：早期審查材料，未 sign-off | 追溯早期風險來源時 |
 | [2026-05-02--ref20_paper_replay_lab_dev_plan_v1.md](2026-05-02--ref20_paper_replay_lab_dev_plan_v1.md) | REF-20 Paper Replay Lab 開發方案 V1：第一版開發基線，已被 Round2 audit 推進為 V2 | 追溯 V2 變更來源時 |
 | [2026-05-02--ref20_v1_round2_audit.md](2026-05-02--ref20_v1_round2_audit.md) | REF-20 V1 第二輪 audit：對 V1 的安全 / 資料 / 量化 / UX / API 審查意見 | 追溯 V2 採納與反對理由時 |
-| [2026-05-02--ref20_paper_replay_lab_dev_plan_v2.md](2026-05-02--ref20_paper_replay_lab_dev_plan_v2.md) | REF-20 Paper Replay Lab 開發方案 V2：當前實作前基線，整合 Round2 並明確反對 P2 禁 IntentProcessor / Mac 禁 S2 public data 的過度條款 | 啟動 REF-20 / Reality-Calibrated Replay 實作前 |
+| [2026-05-02--ref20_paper_replay_lab_dev_plan_v2.md](2026-05-02--ref20_paper_replay_lab_dev_plan_v2.md) | REF-20 Paper Replay Lab 開發方案 V2：整合 Round2，已被 Round3/V2.1 收斂為更嚴格實作基線 | 追溯 Round3/V2.1 變更來源時 |
+| [2026-05-02--ref20_v2_round3_audit.md](2026-05-02--ref20_v2_round3_audit.md) | REF-20 V2 第三輪 audit：指出 V2 仍需補 schema 物理欄位、DB role guard、migration governance、P2 isolation、UX subdoc、Mac non-actionable policy 等 P0 gates | 追溯 V2.1 採納與改寫理由時 |
+| [2026-05-02--ref20_paper_replay_lab_dev_plan_v2_1_round3.md](2026-05-02--ref20_paper_replay_lab_dev_plan_v2_1_round3.md) | REF-20 Paper Replay Lab 開發方案 V2.1 Round3：當前實作前基線，接受 Round3 真實問題並保留 P2 使用 TickPipeline/IntentProcessor 的 isolated no-write 方向 | 啟動 REF-20 / Reality-Calibrated Replay 實作前 |
+| [2026-05-02--ref20_ux_subdoc_v1.md](2026-05-02--ref20_ux_subdoc_v1.md) | REF-20 Paper Replay Lab UX Subdoc V1：P1 前必讀 UX contract，定義 Session/Replay/Compare/Handoff、mode badges、disabled states、no submit/cancel 邊界 | 啟動 Paper Replay Lab P1 frontend 前 |
 
 ## 設計文件（按需讀��不需每次都讀）
 

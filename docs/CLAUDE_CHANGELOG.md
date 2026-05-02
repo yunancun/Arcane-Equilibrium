@@ -1,7 +1,15 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-05-02（REF-20 Paper Replay Lab 開發方案 V2）
+> 最後更新：2026-05-02（REF-20 Paper Replay Lab 開發方案 V2.1 Round3）
+
+### REF-20 Paper Replay Lab dev plan V2.1 Round3（2026-05-02）
+
+**範圍**：審閱並納入 `docs/execution_plan/2026-05-02--ref20_v2_round3_audit.md`，新增 `docs/execution_plan/2026-05-02--ref20_paper_replay_lab_dev_plan_v2_1_round3.md` 與 dedicated UX subdoc `docs/execution_plan/2026-05-02--ref20_ux_subdoc_v1.md`，並更新 `docs/execution_plan/README.md` / `docs/README.md`。
+
+**決策**：Round3 大多成立，但不推翻 V2；V2.1 將 schema 物理欄位、MLDE retrofit、DB role guard、PM V### reservation + Guard A/B/C、5 策略 indicator leak-free sweep、dedicated `replay_runner`、P2 fail-closed isolation、Mac non-actionable smoke policy、manifest TTL/quota、UX subdoc gate 收斂成 P0/P1/P2 可執行 contract。同時保留 V2 的核心判斷：P2 可以使用 `TickPipeline` / `IntentProcessor`，但必須在 isolated no-write replay profile 下運行。
+
+**邊界**：本批 docs-only；未改 runtime、DB migration、策略、風控或 live/demo 配置。V2.1 Round3 是當前 implementation-planning baseline，runtime implementation 仍需 REF-19/REF-20 v2 amendment、migration reservation、UX sign-off 與 P2a schema/auth/signature contracts。
 
 ### REF-20 Paper Replay Lab dev plan V2（2026-05-02）
 
