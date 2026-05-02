@@ -45,3 +45,16 @@
 |------|------|---------|
 | 2026-04-01 | 全程序安全審計（對比 March 31） | `docs/CCAgentWorkSpace/E3/workspace/reports/2026-04-01--security_audit.md` |
 | 2026-04-24 | 全程序安全審計（對比 April 01；5 gates 逐一驗證） | `docs/CCAgentWorkSpace/E3/workspace/reports/2026-04-24--full_chain_security_audit.md` |
+
+### 2026-05-02 P0-DATA-INDICATOR-SWEEP（5 strategy adversarial leak audit, E3 副審）
+
+- **Verdict**：5/5 PASS（無 leak），與 QC 主審獨立 cross-check 預期收斂
+- **核心發現**：strategy → IndicatorSnapshot 單向依賴；strategy 0 處直接讀 KlineManager
+- KlineBuffer 只存 `is_closed=true` bar，`current_bar` 物理隔離；`donchian_prior` 額外退一格 → 雙保險
+- bb_breakout FIX-26-DEADLOCK-1 修復 (mod.rs:417-423) 確認落地，semantic 正確
+- 所有 strategy 用 `ctx.timestamp_ms`，0 處 `Utc::now()` / 牆鐘洩漏
+- 5 策略 net negative 主因 **非 leak**（最便宜的解釋不成立），edge 缺陷在策略邏輯/cost/maker fill rate
+- **2 LOW finding**：
+  1. test fixtures 用 `Box::leak(IndicatorSnapshot)` 跳過 KlineManager streaming → 策略邏輯有 coverage、streaming 整合無 coverage
+  2. `feature_version` hardcoded "v1.0"（pipeline_ctor.rs:67）→ indicator code 改不會自動 bump → MLDE training 數據版本污染風險
+- Mac vs Linux byte-equality：default rustc (no rustflags) → IEEE-754 reproducible likely OK

@@ -115,7 +115,15 @@
 |----|------|------|
 | **P1-INFRA-1** | Slack alert channel go/no-go（pre-live ~2 週評估） | ~2026-05-15 |
 | **P1-INFRA-2** | PRE-LIVE-4 災難恢復演練（drawdown auto-revoke / liquidation buffer / auth expire 三 scenario）| LG-2 RFC 後 |
-| **P1-INFRA-3** | **REF-20 Paper Replay Lab wave**（4 輪 7-agent audit 完成 7/7 APPROVE V3；docs-only P0 amendment commit baseline 已 land）— P1 frontend entry 等 UX subdoc 接受 + 5 策略 indicator leak-free sweep PASS；details → `docs/execution_plan/2026-05-03--ref20_paper_replay_lab_dev_plan_v3.md` + UX subdoc V1。Phase 排序：P0→P1（IA）→P2a（registry）→P2b（smoke）→P3a/P3b（calibration）→P4（advisory）→P5（agents extract，等 LG-2/3/4 7d stable）→P6（demo handoff，bounded） | V3 commit 後派 QC+E3 indicator sweep |
+| **P1-INFRA-3** | **REF-20 Paper Replay Lab wave**（4 輪 7-agent audit + V3 P0 commit baseline + UX subdoc V1 + Implementation Workplan V1 全 land；indicator sweep 5/5 PASS 已解 G6）— **9-Wave / 76-task** breakdown 完成（PA + FA + QC + A3 + E3 五份子報告合成）；總工時 12-14 sprint（不含 P5 LG 等期）。Wave 1 立刻可開（P0 docs/scaffold 9 task 並行）。詳：`docs/execution_plan/2026-05-03--ref20_implementation_workplan_v1.md`（總文檔 SoT）+ `docs/execution_plan/2026-05-03--ref20_paper_replay_lab_dev_plan_v3.md`（V3 contract）+ `docs/execution_plan/2026-05-02--ref20_ux_subdoc_v1.md`（UX SoT）+ PA 子報告 `docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-03--ref20_v3_implementation_breakdown.md`。 | Wave 1 派發 |
+| **P1-INFRA-3a** | REF-20 Wave 1 P0 docs amendment + scaffold 設計（9 task 並行：REF-19/20 v2 amendment + replay_runner binary scaffold + ReplayProfile cfg gate design + UX subdoc accept + V### reservation + INSERT path grep + source distinct + signing key plan + crate boundary review） | 立刻可開（無 prereq） |
+| **P1-INFRA-3b** | REF-20 Wave 2 P1 frontend IA + P2a foundation（13 task；P1-U1 sub-tab shell 必先 land 後其他並行；P2a-S1/S2/S3 signing/route auth） | UX subdoc operator accept |
+| **P1-INFRA-3c** | REF-20 Wave 3-4 P2a 收尾 + P2b runner（11 task；3-PR DB role REVOKE/GRANT sequence + ReplayProfile::Isolated + Mac policy + symbol grep CI） | V### reserved (R20-P0-T5) |
+| **P1-INFRA-3d** | REF-20 Wave 5 P3a/P3b/Regime quant calibration（13 task；half-life + bootstrap + NumPyro hierarchical + CUSUM + Kupiec + PSR + warmup） | LG5-FUP-2 deploy + decision_outcomes timeframe fix + 21d unlock (2026-05-07) |
+| **P1-INFRA-3e** | REF-20 Wave 6 P4 advisory（8 task；DreamEngine API + MLDE veto + DSR + PBO + cost gate + applier source filter + safe_query mirror） | P3b green |
+| **P1-INFRA-3f** | REF-20 Wave 7 P5 Agents Monitor 抽出（4 task；12-Tab top-level + 90d redirect notice + agent-tracker.js 行為保留） | LG-2/3/4 frontend merged + 7d stable |
+| **P1-INFRA-3g** | REF-20 Wave 8 P6 demo handoff（7 task；typed confirm `HANDOFF <experiment_id>` + cooldown 30s + 雙 actor + idempotency + audit row + DB UNIQUE） | P4 green + AMD-2026-05-02-01 lease retrofit deploy |
+| **P1-INFRA-3h** | REF-20 Wave 9 14d gradient + closure（continuous `replay_no_live_mutation` + 7d/14d KPI 採集 + PM Wave 9 sign-off） | P6 deploy |
 
 ---
 
@@ -263,7 +271,8 @@
 |---|---|---|---|
 | **2026-05-09**（週六）| 3C deploy 7 天後對比 audit：5 metric vs prior 7d baseline | `bash helper_scripts/db/audit/2026-05-09_3c_7d_audit.sh` | exit 0（all metrics expected direction）→ PA review；exit 1 → operator 決策 base_ratio 是否續收緊或回退 |
 | **2026-05-16**（週六）| funding_arb 1B 樣本累積 14 天彙總，判斷 2A 棄策略 trigger | `bash helper_scripts/db/audit/2026-05-16_funding_arb_14d_audit.sh` | n≥30 且 net bps 顯著負 → 2A 觸發棄策略；n<30 → 續收 |
-| **REF-20 P1 entry checkpoint**（V3 commit 後 ~1-2 sprint）| 派 QC + E3 跑 5 策略 indicator leak-free sweep（V3 §3 G6 + §7）；UX subdoc V1 operator 接受；確認 `replay_runner` Rust binary scaffold 由 PA + E1 出設計 | sweep PASS + UX 接受 + binary scaffold 設計 PASS | 三條件 GREEN → P1 IA 啟動 |
+| **REF-20 Wave 1 派發 checkpoint**（立刻）| Wave 1 P0 docs/scaffold 9 task 並行派發（PA / E1 / E1a / E3 / A3 / PM 多 owner，全 docs only 無 runtime risk）— 詳 `docs/execution_plan/2026-05-03--ref20_implementation_workplan_v1.md` §4 Wave 1 表 | 9 task 全 PM sign-off | Wave 1 exit → 啟 Wave 2 P1 IA + P2a foundation |
+| **REF-20 Wave 5 prereq watch**（持續，~05-15 至 ~05-25）| 觀察 LG5-W3-FUP-2 attribution writer deploy + decision_outcomes timeframe '1' vs '1m' fix + demo 21d unlock（2026-05-07）三條件 | 三條件全 GREEN | Wave 5 P3a/P3b 才能啟（量化 calibration） |
 
 > 為什麼不用 `/schedule` remote agent：DB 在 trade-core localhost，遠端 cloud agent 沒 SSH/Tailscale。改寫腳本進 repo + TODO 提醒，operator（或 CC session）到日期 ssh 跑一行即可。
 > Refs：`memory/project_2026_05_02_p0_sqlx_hash_drift.md` / `memory/project_funding_arb_v2_deprecation_path.md`
