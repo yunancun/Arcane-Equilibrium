@@ -67,6 +67,14 @@ venvs/
 *.dll
 
 # -----------------------------
+# Test coverage artifacts (AUDIT-2026-05-02-P2-1)
+# -----------------------------
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
+# -----------------------------
 # OS / Editor / SMB
 # -----------------------------
 .DS_Store

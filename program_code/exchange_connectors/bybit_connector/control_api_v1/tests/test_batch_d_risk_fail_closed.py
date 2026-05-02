@@ -35,15 +35,21 @@ def test_lp_002_restart_scripts_use_openclaw_engine_pkgid() -> None:
 
 
 def test_rc_002_h0_status_refresh_preserves_cooldown_and_kill_switch() -> None:
-    """Periodic status refresh must merge with previous cooldown/kill-switch state."""
+    """Periodic status refresh must merge with previous cooldown/kill-switch state.
+
+    NOTE 2026-05-02 (CC AUDIT-2026-05-02-P1-2): the assertions used to grep
+    `event_consumer/loop_handlers.rs`, but commit `c6ec664`
+    (refactor: complete maintenance splits) extracted the status-refresh path
+    into `event_consumer/status_report.rs`. Repointed to the post-split file.
+    """
     h0_gate = _read("rust/openclaw_core/src/h0_gate.rs")
-    loop_handlers = _read("rust/openclaw_engine/src/event_consumer/loop_handlers.rs")
+    status_report = _read("rust/openclaw_engine/src/event_consumer/status_report.rs")
 
     assert "pub fn risk_snapshot(&self) -> H0GateRiskSnapshot" in h0_gate
-    assert "fn build_status_risk_snapshot(" in loop_handlers
-    assert "cooldown_until_ts_ms: if prev.cooldown_until_ts_ms > now_ms" in loop_handlers
-    assert "kill_switch_active: prev.kill_switch_active" in loop_handlers
-    assert "status_risk_snapshot_preserves_active_cooldown_and_kill_switch" in loop_handlers
+    assert "fn build_status_risk_snapshot(" in status_report
+    assert "cooldown_until_ts_ms: if prev.cooldown_until_ts_ms > now_ms" in status_report
+    assert "kill_switch_active: prev.kill_switch_active" in status_report
+    assert "status_risk_snapshot_preserves_active_cooldown_and_kill_switch" in status_report
 
 
 def test_rc_004_missing_demo_live_risk_configs_fail_closed() -> None:

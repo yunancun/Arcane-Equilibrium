@@ -1829,3 +1829,64 @@ finally:
 - **threshold 調整 governance docstring 必須記錄完整 wave 歷史**：round 1 把 test_agents_routes.py threshold 800→850 + docstring 說明 +20 LOC。round 2 helper 預期 net 變化 +8（抽 helper 體 +12 - 4 處 inline 各省 1 行 = -4）。改寫 docstring 為「round 1+2 累計變動」格式，記清楚每輪 LOC delta + 為何無法回 820（helpers 模組結構承載 5-Agent + verdicts + intent + heartbeat 多責任，本就接近警告線）
 - **新 negative test 4 個（M-2）的設計**：build agent → **不 start**（state 維持 ctor 預設）→ assertNotEqual(state, RUNNING) → 灌 SYSTEM_DIRECTIVE 訊息 → assertEqual(`_last_heartbeat_ms`, 0)。Negative test 鎖契約比 positive test 更重要：positive 證「至少有人記得蓋章」，negative 證「不該蓋章時真的沒蓋」。圈住 round 1 設計缺陷不會被 silent re-introduce
 - **mac local pytest 失敗 1 個是 pre-existing**：`test_rc_002_h0_status_refresh_preserves_cooldown_and_kill_switch` 失敗原因 = Rust `loop_handlers.rs` 缺 `build_status_risk_snapshot(` symbol，與本任務（Python 5-agent heartbeat contract）完全正交，是隔壁 operator WIP 留下。本任務 in-scope 8 檔 git diff 不含此 Rust 檔，pre-existing 與 round 2 無因果。
+
+## 2026-05-02 · AUDIT-2026-05-02-P1-1 Guard A/B retrofit (V028/V030/V031/V032/V034)
+
+**派發**：PM → E1（worktree=main repo working tree）
+**Scope**：5 migration files + 1 new test file（嚴格不擴大）
+**Verdict**：cargo test -p openclaw_engine --test migrations_test 5/5 PASS · lib database::migrations 15/15 PASS · grep guard markers 5/5 hit · git diff --check 乾淨 · 改動限於 sql/migrations/V028/V030/V031/V032/V034.sql + 新增 tests/test_v028_v034_guards.sql。
+
+**修法摘要**（per CLAUDE.md §七 V023 silent-noop postmortem）：
+- **V028**：加 1 個 Guard A（trading.fills 父表 + 13 必要欄位含 V021 exit_source）+ 6 個 Guard B 個別 DO block（reference_price double precision / reference_ts_ms bigint / reference_source text / slippage_bps double precision / liquidity_role text / fill_latency_ms bigint）。每欄一 block 鏡 V021/V033 風格，diagnostic 訊息自說明。
+- **V030**：加 1 個 Guard A（scanner_snapshots 9 必要欄位含 candidates / config JSONB）。
+- **V031**：加 1 個 Guard A（mlde_shadow_recommendations 18 必要欄位含 requires_governance / decision_lease_id）。CREATE OR REPLACE VIEW + CREATE OR REPLACE FUNCTION 為 atomic 替換不需 guard；底部 ADD CONSTRAINT IF NOT EXISTS 已自帶 DO check（constraint 不是 column）不適用 Guard B。
+- **V032**：加 1 個 Guard A（mlde_param_applications 15 必要欄位含 prev_snapshot / ipc_response / decision_lease_id）。同 V031 底部 ADD CONSTRAINT 自帶。
+- **V034**：加 1 個 view-shape Guard A 變體（IF EXISTS 對 information_schema.views，比對 V031 的 34 個 leading columns；缺即 RAISE 提前報錯，免得 CREATE OR REPLACE VIEW 在 migration 中途報「cannot drop columns from view」）。檔頭加註釋說明 view-only migration 為何不需 base table Guard A、為何 IMMUTABLE function 不需 guard、唯一漂移風險即 view shape。
+
+**新測試**：`sql/migrations/tests/test_v028_v034_guards.sql`（鏡 V026 test fixture pattern；throwaway `v028_v034_guard_test` schema；每 migration pass / fail / no-op 三 case；V028 加 1 個 Guard B 代表性 wrong-type case + B no-op；總 17 test）。本機無 PG 不能跑，但 SQL 結構鏡既有 test_v026_guards.sql / test_schema_guards.sql 可信任，待 Linux 端驗 idempotent 兩次跑 V028/V030/V031/V032/V034 不 RAISE。
+
+**設計決策**：
+1. 6 個 Guard B 沒 collapse 成單一 loop block —— 依模板註釋「one per ADD COLUMN」原則 + 鏡 V021/V033 風格，便於診斷時每欄獨立 RAISE 訊息點對點。
+2. V034 view shape guard 用 `information_schema.views` 而非 `information_schema.tables` 做 IF EXISTS gate（views/tables 分開兩個視圖），列出 V031 全部 34 個 leading column 確保 CREATE OR REPLACE 限制（只能末尾追加）不被破壞。
+3. V028 Guard A 列 13 個必要欄位含 exit_source（V021 引入）—— 鏡 V033 列 14 欄含 exit_source 的做法；確保 V003/V008/V015/V021 都已 land 才允許 V028 ALTER。
+4. V031/V032 底部 `ADD CONSTRAINT IF NOT EXISTS` 已自帶 `DO $$ BEGIN IF NOT EXISTS ... END $$` 是 constraint 守護，不需 Guard B（Guard B 只管 ADD COLUMN IF NOT EXISTS 型別漂移）。檔頭明文說明此區分避免後續 reviewer 誤抓。
+
+**不確定 / 留尾**：
+- 本機 Mac 無 PG，無法本地驗 idempotent re-apply（task checklist 第 2 項「若有本地 PG」已條件化，跳過 OK；Linux 端 operator 跑 `psql -f V<NNN>__<desc>.sql` 連兩次不 RAISE 即可確認）。
+- test_v028_v034_guards.sql 結構正確但本機未實跑驗 NOTICE 輸出。
+- 不需動 V027/V033（已守規），確認未動。
+
+**Operator 下一步**：
+- E2 對抗審查 5 個 migration 的 guard 完整性 + 雙語注釋 + 測試契約鎖（聚焦 V028 6 Guard B 是否該 collapse vs split / V034 view-shape 是否該再加 DROP VIEW IF EXISTS 重建保險）
+- E4 回歸（純 SQL 不需 cargo --rebuild；Linux 端可選擇 psql -f V028..V034 連跑兩次 + 跑 test_v028_v034_guards.sql 驗 17 test 全綠）
+- PM 統一收成 step-0 batch push（不在本任務 commit）
+
+---
+
+## 2026-05-02 — AUDIT-2026-05-02-P1-1 Guard A/B Retrofit Round 2 (E2 RETURN fix)
+
+**E2 RETURN 3 finding 全修**：
+- F-1 LOW-MED · V028 v_required ARRAY 漏 entry_context_id（V017 引入），與同檔同表 V033 14 欄不一致 → V028:51 補入 + RAISE hint「V003/V008/V015/V021」→「V003/V008/V015/V017/V021」+ 上方 prose 註解同步補 V017
+- F-2 GOVERNANCE · 漏寫 .claude_reports/ → 補 `.claude_reports/20260502_124336_e1_audit_p1_1_guard_retrofit.md`（CLAUDE.md §七 6 節中文）
+- F-3 LOW · self-report drift（claim 475 行 / actual 733 行 / 17 test case）→ 報告 §2/§5 如實揭露 + 列教訓
+
+**教訓內化**：
+1. **交付前必跑 wc -l <files>** 校對交付物實測 LOC，禁憑記憶估算（F-3 root cause）
+2. **system-reminder 對 sub-agent「不要寫 report .md」≠ 禁 §七 本機 LLM 審核 report**；前者針對「sub-agent 回主 agent 訊息時不另寫 .md 副本」、後者是 CLAUDE.md §七 強制本機留存（F-2 root cause）
+3. **同一表的 Guard A v_required 列必跨檔對齊**（V028/V033 都對 trading.fills 就必同 14 欄）— retrofit 範例必須是 reference standard 一致才能讓未來 migration 抄作業時不混淆
+
+**Round 2 改動**：
+| Path | 動作 |
+|---|---|
+| `srv/sql/migrations/V028__fills_execution_slippage.sql` | 修 Guard A v_required +`entry_context_id`、RAISE hint 補 V017、prose 註解補 V017 |
+| `srv/.claude_reports/20260502_124336_e1_audit_p1_1_guard_retrofit.md` | 新增 6 節中文報告（CLAUDE.md §七）|
+
+**驗證**：
+- grep entry_context_id V028 命中 1 處 ✅
+- cargo test -p openclaw_engine --test migrations_test --release → 5 passed ✅
+- git status --short sql/ → 5 M + 1 ??（無新無關檔）✅
+- git diff --check → 無空白問題 ✅
+
+**未動**：V030/V031/V032/V034、test_v028_v034_guards.sql、V028 業務邏輯（CREATE/ALTER 不變）。
+
+**Operator 下一步**：E2 重審 → E4 跑 Linux 真實 PG（idempotent 雙跑 + OPENCLAW_TEST_PG end-to-end）→ PM 統一收 commit。

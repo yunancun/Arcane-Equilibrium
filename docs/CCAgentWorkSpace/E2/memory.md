@@ -681,3 +681,21 @@ worktree `agent-a9002481353677810` · base HEAD `cf34e96` · branch `worktree-ag
 3. **Helper warning 訊息字串對齊建議** — fn 從 `_underscore` 移為 `bare_name` 時，warning 訊息字串內的 fn 名應跟著改（保持 log 與 fn 名 match），而非追求「與舊 instance method log 字串完全一致」。本次 PA 改動正確，記錄 informational 觀察即可。
 4. **Mac pytest collection error pre-existing** — 28 個 `control_api_v1/tests/` collection error 為 Mac env 既有問題（FastAPI / DB 路由），非本次 refactor 引入。E2 必須區分 explicit-list test pass (146/146) vs broad collection error，避免誤判 regression。
 
+
+---
+
+## 2026-05-02 · AUDIT-2026-05-02-P1-1 Round 2 Re-Review (PASS to E4)
+
+**Topic**: 對 E1 round 2 自報修齊 round 1 RETURN 三 finding 做 re-review。
+**Verdict**: ✅ PASS to E4 Linux PG end-to-end regression。
+**Workspace report**: `2026-05-02--audit_p1_1_guard_retrofit_round2_review.md`
+**.claude_report**: `20260502_124909_e2_audit_p1_1_review_round2.md`
+
+### Round 2 review 教訓
+
+1. **Round 2 re-review 範圍紀律** — 嚴格只看 round 2 改動（diff vs round 1），不重審 round 1 PASS 部分。`git status` 看到非 round 2 spec 範圍的 working tree 改動（本次 = TODO.md / .gitignore / test_batch_d / .coverage 來自主 CC 並行 P1-2/P2-1 修），明寫「不在本輪 review scope」並交 PM 決定，不擅自 expand。
+2. **E1 自報 LOC delta 無法用 git diff 嚴格驗的處理法** — 當 round 1 + round 2 都 uncommitted 時，`git diff HEAD` 顯示合計而非單 round delta；改用「逐行讀 diff + 對 spec 結構驗」，本次驗證 V028 fix 結構 = v_required 1 行 + hint 1 行 + prose 1 處 ≈ 「+3/-3」（含 prose 加碼第 4 處），結論 `「結構符合，數字小幅差異不影響邏輯結論」`。
+3. **F-1 v_required 14 欄字面對齊驗證手法** — V028 vs V033 同一目標表 (trading.fills) 必字面一致：直接 `grep -A8 'unnest(ARRAY\[' V028 V033` 對齊比對，比逐欄 diff 快。
+4. **F-2 / F-3 self-disclosure 驗證模式** — Governance / self-report drift 類 finding 的 fix 不是「修代碼」而是「補揭露」；E2 verify 點 = (a) 報告/檔案存在 (b) 內容真說該說的 (c) caveat 明示限制（無 PG / wiring smoke vs SQL execute 區別）。本次 E1 caveat 寫得很完整，是好範例。
+5. **Mac PG 缺席的處置 SOP** — Mac dev 環境永遠無 PG → idempotent 雙跑 / cargo test SQL execute 都必交 E4 Linux。E2 在 review report 必明寫「E2 無法在 Mac 驗 X，必交 E4 Y」並列出具體命令，避免 E4 漏跑。
+6. **「sub-agent 不寫 .md 副本」vs「§七 6 節中文 report 強制」澄清** — 兩規則並存：sub-agent 回主 agent 訊息時不另寫 .md 副本（節省 context）≠ 禁 §七 本機 review 報告（後者是強制治理）。E1 round 1 混淆漏寫 .claude_reports，round 2 澄清。E2 future review 時若 sub-agent E1 未寫 .claude_report 必標 GOVERNANCE finding。
