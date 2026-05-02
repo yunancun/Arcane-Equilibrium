@@ -162,7 +162,7 @@ max_retries             = 0
 [止損管理器]             StopManager: Hard/Trailing/Time Stop + ATR 動態倉位
 ```
 
-**(*) Decision Lease 路徑 A 待 retrofit（P0-GOV-1）**：Python `governance_hub.acquire_lease()` 是當前唯一 production caller（`executor_agent.py:454`）；Rust `intent_processor/router.rs` 0 acquire_lease 觸發。Rust migration v3 plan §1.3 明文要求 Rust 應有 `acquire_lease/release_lease` facade，R-03 落地 `lease.rs`（9 狀態 + 14 API）+ `Profile.requires_lease()` 但漏做 facade + router gate。PM/PA/FA 三方 review 待開（→ docs/CCAgentWorkSpace/PM/2026-05-02--decision_lease_review_agenda.md）。
+**(*) Decision Lease 路徑 A approved，retrofit pending（P0-GOV-1）**：Python `governance_hub.acquire_lease()` 是當前唯一 production caller（`executor_agent.py:454`）；Rust `intent_processor/router.rs` 0 acquire_lease 觸發。R-03 落地 `lease.rs`（9 狀態 + 14 API）+ `Profile.requires_lease()` 但漏做 facade + router gate。**2026-05-02 PM/PA/FA 三方 review 結束，正式 amendment `AMD-2026-05-02-01` 簽核路徑 A**（spec 條文 0 改動 / Rust 平面 last-mile 兌現 / bundled with 18 blocker #6 audit writer fix / 預估 2.5-3 E1 task / 派發排程 ~2026-05-15 P0-EDGE-2 後與 LG-2/3 並行 / 必在 LG-4 IMPL 前完）。詳 `docs/governance_dev/amendments/2026-05-02--SM-02_R04_retrofit_path_a.md`。retrofit deploy 後本註腳改寫為「ACTIVE on path A」。
 
 **EarnedTrust T0/T1/T2/T3 vs Decision Lease 兩者互補**：
 - T0-T3：session 級 authorization TTL（24h-360h），管「整個 live session 多久重 auth」

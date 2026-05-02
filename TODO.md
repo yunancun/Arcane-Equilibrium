@@ -47,8 +47,8 @@
 
 | ID | 任務 | 狀態 |
 |----|------|------|
-| **P0-GOV-1** ⚠️ | **Decision Lease 三方 review 會**（PM/PA/FA）+ 路徑 A retrofit（Rust `acquire_lease()` facade + router gate；R-04 last-mile 漏做）| review agenda 待寫；R-04 retrofit ~1.5-2 E1 task |
-| **P0-GOV-2** | agent schema all-time 0 rows（`agent.messages` / `state_changes` / `ai_invocations`）— DOC-01 #8/#15 violation；MessageBus DB sink 接線 | 1 sprint |
+| **P0-GOV-1** ⚠️ | **Decision Lease 路徑 A retrofit**（Rust `acquire_lease()` facade + router gate + Python IPC 轉呼 + bundled audit writer fix）| 2026-05-02 三方 review 完成 ✅ AMD-2026-05-02-01；retrofit pending：~2.5-3 E1 task，派發 2026-05-15 P0-EDGE-2 後並行 LG-2/3，必在 LG-4 IMPL 前完。E4 驗收 AC-1~5（SM-02 transition coverage / 6-element auth fill rate / lease_id flow / weekly audit / agent schema row count）。詳 `docs/governance_dev/amendments/2026-05-02--SM-02_R04_retrofit_path_a.md` |
+| **P0-GOV-2** | agent schema all-time 0 rows（`agent.messages` / `state_changes` / `ai_invocations`）— DOC-01 #8/#15 violation；MessageBus DB sink 接線 | **bundled with P0-GOV-1**（PA push back 採納；retrofit 同 sprint，AC-5 驗收條件）|
 | **P0-GOV-3** | SOP「sign-off 必檢 `git status --porcelain` clean」gate（LG-5 漏洞同類防線）| CLAUDE.md §七 已加，需新 PR review template |
 | **P0-GOV-4** | Live credential rotation 7 步（PG password + Grafana admin + 6 commit history 清理）| 2 day work，Live 前必 |
 

@@ -1,8 +1,18 @@
 # Governance Specification Register / 治理規範註冊表
 
 **Project:** OpenClaw / Bybit
-**Last Updated:** 2026-04-29
-**Maintained By:** R4 (Document Auditor) · TW catch-up（2026-04-29）
+**Last Updated:** 2026-05-02
+**Maintained By:** R4 (Document Auditor) · TW catch-up（2026-04-29）· FA Sign-off path A（2026-05-02 AMD-2026-05-02-01）
+
+---
+
+## Amendments / 規範修訂（2026-05 新增）
+
+> Amendments are spec-level adjustments **without** changing the SM/EX/DOC numbered specifications themselves; they record implementation reaffirmations, scope clarifications, or last-mile fills (e.g., R-04 retrofit). Each amendment is dated `YYYY-MM-DD` and code-prefixed `AMD-YYYY-MM-DD-NN`.
+
+| Code | 對應 spec | 路徑 | 日期 | 摘要 |
+|------|----------|------|------|------|
+| AMD-2026-05-02-01 | SM-02 §scope · DOC-01 §5.3 | `docs/governance_dev/amendments/2026-05-02--SM-02_R04_retrofit_path_a.md` | 2026-05-02 | Path A — Rust `acquire_lease()` facade R-04 retrofit；spec 條文 0 改動，回填 v3 plan §1.3 last-mile；bundled with 18 blocker #6 audit writer fix；E4 5 條 acceptance criteria（AC-1~5）|
 
 ---
 
