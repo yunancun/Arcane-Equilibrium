@@ -307,3 +307,96 @@ fn test_g2_03_runtime_helper_effective_sl_returns_min() {
     neg_so.stop_loss_max_pct_override = Some(-1.0);
     assert_eq!(effective_sl_max_pct(limits, Some(&neg_so)), 5.0);
 }
+
+// ===========================================================================
+// 2026-05-02 — risk_config_demo.toml round-trip + runtime cap proof
+// 2026-05-02 —— risk_config_demo.toml 解析 + runtime cap 雙防線驗證
+//
+// Anchors commit `a19797d` operator decision 3C (post-BUSDT funding_arb
+// -10.12 USDT loss): demo `dynamic_stop.base_ratio` 0.4→0.25 + new
+// `[per_strategy.funding_arb]` block with `stop_loss_max_pct_override = 3.0`.
+//
+// Locks the *demo TOML wire-shape* in tandem with G2-03 schema (Defense A,
+// validate) and `effective_sl_max_pct` (Defense B, runtime cap). Acts as
+// an early sentinel for any future TOML parse / schema drift that would
+// silently lose the funding_arb override or the tightened base_ratio.
+//
+// 鎖定 commit a19797d demo TOML 線格式：dyn_stop base_ratio=0.25 +
+// funding_arb 3% SL override；同檔驗 Defense A (validate) + Defense B
+// (effective_sl_max_pct = 3.0)。任何未來 TOML/schema drift 會在此哨兵點 trip。
+// ===========================================================================
+
+#[test]
+fn test_demo_toml_funding_arb_3pct_override_2026_05_02() {
+    use std::fs;
+    use std::path::PathBuf;
+
+    // Locate srv/settings/risk_control_rules/risk_config_demo.toml relative
+    // to this crate's CARGO_MANIFEST_DIR (= srv/rust/openclaw_engine).
+    // 由 CARGO_MANIFEST_DIR 上溯 2 層至 srv 根定位 demo TOML。
+    let mut srv_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    srv_root.pop(); // openclaw_engine -> rust
+    srv_root.pop(); // rust -> srv
+    let toml_path = srv_root
+        .join("settings")
+        .join("risk_control_rules")
+        .join("risk_config_demo.toml");
+    let toml_str = fs::read_to_string(&toml_path)
+        .unwrap_or_else(|e| panic!("failed to read {:?}: {}", toml_path, e));
+    let cfg: RiskConfig = toml::from_str(&toml_str)
+        .unwrap_or_else(|e| panic!("TOML parse failed for risk_config_demo.toml: {}", e));
+
+    // ── dynamic_stop.base_ratio = 0.25 (was 0.4) ──
+    // ── dynamic_stop.base_ratio 0.4→0.25 ──
+    assert!(
+        (cfg.dynamic_stop.base_ratio - 0.25).abs() < 1e-9,
+        "dynamic_stop.base_ratio expected 0.25, got {}",
+        cfg.dynamic_stop.base_ratio
+    );
+
+    // ── [per_strategy.funding_arb] block must parse with expected fields ──
+    // ── funding_arb override block 必齊 ──
+    let fa = cfg
+        .per_strategy
+        .get("funding_arb")
+        .expect("[per_strategy.funding_arb] missing in demo TOML");
+    assert_eq!(fa.enabled, true, "funding_arb.enabled must be true");
+    assert_eq!(
+        fa.stop_loss_max_pct_override,
+        Some(3.0),
+        "funding_arb.stop_loss_max_pct_override must be Some(3.0)"
+    );
+    // Other override fields are intentionally commented-out → None (fall back
+    // to limits / agent.* globals).
+    // 其餘 override 欄位故意註解 → None（走 limits / agent 全局）。
+    assert_eq!(fa.take_profit_max_pct_override, None);
+    assert_eq!(fa.trailing_activation_pct_override, None);
+    assert_eq!(fa.trailing_distance_pct_override, None);
+
+    // ── Pre-existing ma_crossover schema-only block must remain None ──
+    // ── 既有 ma_crossover schema-only 區塊維持 None（不被本次改動影響）──
+    let ma = cfg
+        .per_strategy
+        .get("ma_crossover")
+        .expect("[per_strategy.ma_crossover] missing in demo TOML");
+    assert_eq!(
+        ma.stop_loss_max_pct_override, None,
+        "ma_crossover SL override must remain commented-out (None)"
+    );
+
+    // ── Defense A: full RiskConfig::validate() must PASS ──
+    // 3.0 < limits.stop_loss_max_pct=25.0 + finite + > 0 ⇒ accepted.
+    // ── 防線 A：validate() 必通過（3.0 < 25.0 + finite + >0）──
+    cfg.validate()
+        .expect("demo TOML must pass RiskConfig::validate() (Defense A)");
+
+    // ── Defense B: effective_sl_max_pct(limits, &funding_arb) = 3.0 ──
+    // limits.stop_loss_max_pct = 25.0; min(3.0, 25.0) = 3.0 runtime cap.
+    // ── 防線 B：effective_sl = min(3.0, 25.0) = 3.0 runtime cap ──
+    let eff_sl = effective_sl_max_pct(&cfg.limits, Some(fa));
+    assert!(
+        (eff_sl - 3.0).abs() < 1e-9,
+        "effective_sl_max_pct expected 3.0, got {}",
+        eff_sl
+    );
+}
