@@ -101,6 +101,17 @@ from .checks_execution import (
 from .checks_scanner_market import (
     check_scanner_market_gate_confirmation,
 )
+from .checks_governance import (
+    # LG-5-IMPL-3 (2026-05-02) — RFC v2 §6 governance contract sentinels.
+    # `[42]` review_live_candidate 1h SLA + audit row contract;
+    # `[42b]` per-strategy 7d attribution_chain_ratio drift detector
+    # (RFC §3 R-meta + §4 lease_revoke_trigger + MIT MF-M5).
+    # LG-5-IMPL-3（2026-05-02）— RFC v2 §6 治理契約哨兵。
+    # `[42]` review_live_candidate 1h SLA + audit row 契約；
+    # `[42b]` per-strategy 7d attribution_chain_ratio 漂移偵測。
+    check_42_live_candidate_eval_contract,
+    check_42b_live_candidate_attribution_drift,
+)
 
 
 # Module docstring used by argparse to show the passive-wait healthcheck
@@ -121,6 +132,7 @@ The checks split between DB pipelines + filesystem/observability sentinels:
     [1][2][3][4][5][6][8][9][10][12][Xb][14][15][21]      14 baseline
     [22][23][24][25][26][27][28]                          7 F7 MIT+E5
     [30][31][32][33][34][35][36][37][38][39][40][41]      cost/execution/MLDE/lifecycle/cardinality/acceptance/scanner-gate
+    [42][42b]                                              LG-5 governance contract + per-strategy attribution drift
   Post-cursor (filesystem / pure-Python):
     [7][13][11][Xa][16][18][19][20]                       8 baseline
     [29]                                                  1 F7 (no-IPC stub)
@@ -148,6 +160,8 @@ Execution / cost sentinels added after F7:
   [39] strategy_name_cardinality_drift (PA W1-T4 2026-04-29 post-normalization sentinel)
   [40] realized_edge_acceptance        (DB-truth post-fee profitability acceptance)
   [41] scanner_market_gate_confirmation (scanner gates later-realized edge check)
+  [42] live_candidate_eval_contract    (LG-5-IMPL-3 2026-05-02 review_live_candidate 1h SLA + audit row)
+  [42b] live_candidate_attribution_drift (LG-5-IMPL-3 2026-05-02 per-strategy 7d ratio drift)
 
 Exit codes:
   0 = all checks PASS / only WARN
@@ -167,11 +181,13 @@ def main() -> int:
     Counted rows are documented by ID, not by fragile total:
       cursor: [1][2][3][4][5][6][8][9][10][12][Xb][14][15][21]
               [22][23][24][25][26][27][28] [30][31][32][33][34][35][36][37][38][39][40][41]
+              [42][42b]
               (F7 [22]-[28] are MIT/E5; [30]-[37] are post-F7/MLDE;
                [38] is MIT 2026-04-29 grid lifecycle drift;
                [39] is PA W1-T4 2026-04-29 strategy_name cardinality drift;
                [40] is DB-truth realized edge acceptance;
-               [41] is scanner market-gate confirmation)
+               [41] is scanner market-gate confirmation;
+               [42]/[42b] are LG-5-IMPL-3 governance contract + attribution drift)
       post-cursor: [7][13][11][Xa][16][18][19][20]
                    [29]   (F7 [29] is deferred-no-ipc stub)
 
@@ -181,6 +197,7 @@ def main() -> int:
     清單依 ID 記錄，避免總數 drift：
       cursor: [1][2][3][4][5][6][8][9][10][12][Xb][14][15][21]
               [22][23][24][25][26][27][28] [30][31][32][33][34][35][36][37][38][39][40][41]
+              [42][42b]
       post-cursor: [7][13][11][Xa][16][18][19][20] [29]
     """
     ap = argparse.ArgumentParser(description=_RUNNER_DESCRIPTION)
@@ -494,6 +511,31 @@ def main() -> int:
             # negative post-fee when labels are available.
             s, m = check_scanner_market_gate_confirmation(cur)
             results.append(("[41] scanner_market_gate_confirmation", s, m))
+
+            # [42] LG-5-IMPL-3 (2026-05-02): live_candidate_eval_contract —
+            # every >1h-old live candidate must have a `review_live_candidate`
+            # audit row in `learning.governance_audit_log`. Catches
+            # GovernanceHub silent failure where IMPL-1 inserts candidate rows
+            # but IMPL-2 consumer never fires a verdict (RFC v2 §6 line 451-454,
+            # §4 lease_revoke_trigger line 404). Pure SELECT inside cursor.
+            # [42] LG-5-IMPL-3（2026-05-02）：live_candidate_eval_contract —
+            # 每個 >1h 老的 live candidate 必須有 `review_live_candidate` audit
+            # row。捕捉 IMPL-1 寫 candidate 但 IMPL-2 從未審查的 GovernanceHub
+            # 靜默失敗（RFC v2 §6 line 451-454，§4 lease_revoke_trigger）。
+            s, m = check_42_live_candidate_eval_contract(cur)
+            results.append(("[42] live_candidate_eval_contract", s, m))
+
+            # [42b] LG-5-IMPL-3 (2026-05-02): per-strategy 7d
+            # attribution_chain_ok ratio drift for the 5 LG-5 strategies.
+            # PASS ≥ 0.50 (RFC §3 R-meta floor) / WARN [0.10, 0.50) /
+            # FAIL < 0.10 (pipeline-level alert + lease_revoke_trigger,
+            # RFC §4 line 405 + MIT MF-M5 cross-ref). Pure SELECT.
+            # [42b] LG-5-IMPL-3（2026-05-02）：5 個 LG-5 strategy 的 7d
+            # attribution_chain_ok ratio 漂移偵測。PASS ≥ 0.50 / WARN
+            # [0.10, 0.50) / FAIL < 0.10（pipeline-level alert +
+            # lease_revoke_trigger）。純 SELECT。
+            s, m = check_42b_live_candidate_attribution_drift(cur)
+            results.append(("[42b] live_candidate_attribution_drift", s, m))
     finally:
         conn.close()
 
