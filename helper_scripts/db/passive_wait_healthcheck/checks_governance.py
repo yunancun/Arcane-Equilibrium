@@ -1,8 +1,9 @@
-"""LG-5 governance healthchecks — `[42]` + `[42b]`.
-LG-5 治理層 healthcheck — `[42]` + `[42b]`。
+"""LG-5 governance healthchecks — `[42]` + `[42b]` + `[42c]` + `[43]`.
+LG-5 治理層 healthcheck — `[42]` + `[42b]` + `[42c]` + `[43]`。
 
-MODULE_NOTE (EN): Two passive-wait sentinels for the LG-5
-``review_live_candidate`` contract per RFC v2 (2026-05-02):
+MODULE_NOTE (EN): Four passive-wait sentinels for the LG-5
+``review_live_candidate`` contract + label backfill cron freshness
+per RFC v2 + LG5-W3-FUP-2 Fix 1 + Fix 2 (2026-05-02):
 
 * ``check_42_live_candidate_eval_contract`` — verifies that every newly
   inserted ``learning.mlde_param_applications`` row with
@@ -26,18 +27,47 @@ MODULE_NOTE (EN): Two passive-wait sentinels for the LG-5
   lease_revoke_trigger line 405; GovernanceHub must auto-revoke active
   leases — this check just surfaces the alarm).
 
-Both functions follow the existing healthcheck contract:
+* ``check_42c_live_candidate_attribution_drift_3d`` — LG5-W3-FUP-2 Fix 2
+  (2026-05-02 RFC §5 Plan B) gate-aligned mirror of ``[42b]``. Identical
+  SQL shape / engine_mode filter / threshold bands but uses 3d window
+  instead of 7d, aligning with producer
+  ``mlde_demo_applier._R_META_WINDOW_DAYS = 3`` shipped by Fix 2 IMPL-1.
+  ``[42b]`` keeps 7d as long-window observability sentinel; ``[42c]``
+  surfaces the exact ratio R-meta gate consumer reads right now so
+  operator does not have to mentally reconcile 7d/3d window dual view
+  on `[42b]` PASS + R-meta defer behavior.
+
+* ``check_43_label_backfill_freshness`` — LG5-W3-FUP-2 Fix 1 cron
+  liveness sentinel. Reads ``max(label_filled_at)`` from
+  ``learning.decision_features`` for engine_modes ``('demo','live_demo')``
+  and verdicts on age: PASS <2h, WARN <6h, FAIL >=6h or no rows.
+  Catches silent death of the new ``edge_label_backfill_cron.sh``
+  (cron schedule */30 * * * *). Without this sentinel, cron stoppage
+  would drag ``[42b] attribution_chain_ok`` ratio back below R-meta
+  floor within ~24h with no upstream signal — MIT's FUP-2 root-cause
+  diagnosis confirmed this exact failure mode (manual run ~2h before
+  detection, grid 75% / ma_crossover 45% NULL labels).
+
+All three functions follow the existing healthcheck contract:
   - signature: ``(cur) -> tuple[str, str]``
   - status string ∈ {"PASS", "WARN", "FAIL"}
   - msg string is human-readable diagnostic
   - DB unreachable / table missing → fail-closed FAIL with reason; pure
     SELECTs only (no INSERT / UPDATE) so safe inside cron loop.
 
-MODULE_NOTE (中): RFC v2 §6 IMPL-3 規定的 LG-5 兩個被動等待哨兵 ——
-``[42]`` 驗 ``review_live_candidate`` 1 小時 SLA + audit row 寫入；
-``[42b]`` 監控 5 個 LG-5 strategy 7d 滾動 ``attribution_chain_ratio``，
+MODULE_NOTE (中): RFC v2 §6 IMPL-3 + LG5-W3-FUP-2 Fix 1/Fix 2 四個被動
+等待哨兵 —— ``[42]`` 驗 ``review_live_candidate`` 1 小時 SLA + audit row
+寫入；``[42b]`` 監控 5 個 LG-5 strategy 7d 滾動 ``attribution_chain_ratio``，
 三段判定（RFC §6 IMPL-3 line 451）：PASS ≥ 0.50 / WARN [0.30, 0.50) /
 FAIL [0.10, 0.30) / FAIL pipeline-alert < 0.10（觸發 lease_revoke）。
+``[42c]`` LG5-W3-FUP-2 Fix 2（2026-05-02 RFC §5 方案 B）— ``[42b]`` 的
+R-meta gate 對齊鏡像，閾值結構完全一致但 window 改 3d 對齊 producer
+``_R_META_WINDOW_DAYS = 3``；``[42b]`` 保 7d 作 long-window observability，
+``[42c]`` surface R-meta gate 當下吃到的 ratio。
+``[43]`` 監控 ``edge_label_backfill_cron.sh`` 30 分鐘 cron 是否仍跑：
+讀 ``max(label_filled_at)``，PASS <2h / WARN <6h / FAIL >=6h（含無 row）；
+覆蓋 cron 靜默死亡 → 24h 內 ``[42b]`` 跌回 R-meta floor 以下的 MIT
+FUP-2 root-cause 失效模式。
 介面對齊既有 check：``(cur) -> (status, msg)``，純 SELECT、fail-closed、
 cron 安全。
 """
@@ -82,6 +112,21 @@ ATTRIBUTION_RATIO_FAIL_FLOOR: float = 0.10
 CANDIDATE_AUDIT_SLA_INTERVAL: str = "interval '1 hour'"
 RECENT_CANDIDATE_WINDOW: str = "interval '24 hours'"
 ATTRIBUTION_DRIFT_WINDOW: str = "interval '7 days'"
+
+# `[42c]` window — gate-aligned mirror of `[42b]` per LG5-W3-FUP-2 Fix 2
+# RFC §5 (2026-05-02 amendment). Producer
+# `mlde_demo_applier._compute_attribution_chain_ratio_by_strategy` now uses
+# `_R_META_WINDOW_DAYS = 3` (instead of the original 7d) so the R-meta gate
+# reads "post-bug-fix" 3d slice and is not over-penalized by 4/24-28 bug-era
+# residual samples. `[42b]` keeps 7d as long-window observability sentinel;
+# `[42c]` mirrors it with 3d so operator can directly read the ratio R-meta
+# gate sees right now (RFC §5 Plan B "dual-window" wording, line 234-263).
+# `[42c]` window — `[42b]` 的 R-meta gate 對齊鏡像（LG5-W3-FUP-2 Fix 2
+# RFC §5 方案 B）。Producer 已將 ratio 計算 window 從 7d 縮 3d
+# (`_R_META_WINDOW_DAYS = 3`) 對齊「已修 bug 後」純後時段；`[42b]` 保 7d
+# 作 long-window observability，`[42c]` 鏡 3d 讓 operator 直接看到 R-meta
+# gate 當下吃到的 ratio，避免 7d/3d 雙窗解讀斷層。
+ATTRIBUTION_DRIFT_WINDOW_3D: str = "interval '3 days'"
 
 # Severity bands for `[42]` unaudited candidate count.
 # `[42]` 未審計候選數的嚴重度分級。
@@ -367,6 +412,336 @@ def check_42b_live_candidate_attribution_drift(cur) -> tuple[str, str]:
         "FAIL",
         base
         + f" — {worst_strategy} below 0.10 pipeline-alert floor "
+        "(RFC v2 §4 lease_revoke_trigger fires; "
+        "GovernanceHub must auto-revoke active leases)",
+    )
+
+
+# ---------------------------------------------------------------------------
+# `[43]` label_backfill_freshness — LG5-W3-FUP-2 Fix 1 cron liveness sentinel
+# (2026-05-02). Reads max(label_filled_at) to verify
+# `helper_scripts/cron/edge_label_backfill_cron.sh` (every 30 min) is alive.
+# `[43]` LG5-W3-FUP-2 Fix 1 cron 活性哨兵：讀 max(label_filled_at)，驗
+# `edge_label_backfill_cron.sh`（30 分 cron）仍在跑。
+# ---------------------------------------------------------------------------
+
+# `[43]` freshness thresholds. PASS <2h matches the 30min cron cadence with
+# a 4× headroom for backfill batch latency (5000 row × 2 engine_modes can
+# legitimately take >1min). WARN <6h gives operator one cycle to react
+# without paging; FAIL >=6h means cron has missed ≥11 ticks consecutively
+# = clear silent death (or DB unreachable, in which case [43] FAILs anyway).
+# `[43]` 新鮮度閾值。PASS <2h 對應 30min cron 4× headroom（5000 行 × 2
+# engine_mode 偶可超過 1 分鐘）。WARN <6h 給 operator 一個窗口反應而不
+# 立即 page；FAIL >=6h 代表 cron 已連續錯過 ≥11 tick = 確定 silent death。
+LABEL_BACKFILL_PASS_MAX_SECONDS: int = 7200    # 2h
+LABEL_BACKFILL_WARN_MAX_SECONDS: int = 21600   # 6h
+
+
+def check_43_label_backfill_freshness(cur) -> tuple[str, str]:
+    """[43] label_backfill_freshness — LG5-W3-FUP-2 Fix 1 cron liveness.
+
+    Verifies that ``edge_label_backfill_cron.sh`` (suggested cron
+    ``*/30 * * * *``, runs ``program_code/ml_training/edge_label_backfill.py``
+    against demo + live_demo) is actually alive by reading
+    ``max(label_filled_at)`` from ``learning.decision_features`` for the
+    same engine_modes the cron writes (``demo`` + ``live_demo``).
+
+    [43] label_backfill_freshness — LG5-W3-FUP-2 Fix 1 cron 活性檢查。
+    驗證 ``edge_label_backfill_cron.sh``（建議 cron ``*/30 * * * *``，
+    跑 ``edge_label_backfill.py`` 對 demo + live_demo）仍在活著 ——
+    讀 ``learning.decision_features`` 的 ``max(label_filled_at)``，
+    engine_mode IN (``demo``, ``live_demo``)（與 cron 寫入面對齊）。
+
+    Verdict bands / 結果分級:
+        * age < 2h → PASS（cron 正常 30min 節奏 + 4× headroom）
+        * age < 6h → WARN（cron 漏 1-11 tick，operator 一窗反應期）
+        * age >= 6h or no rows → FAIL（cron silent death，
+          [42b] attribution_chain_ok 24h 內會跌回 R-meta floor 以下）
+
+    Why this exists / 為何存在:
+        MIT FUP-2 diagnosis (2026-05-02) traced [42b] FAIL ←
+        attribution_chain_ok=false 86%+ ← edge_label_backfill.py 純
+        on-demand 無 cron。Fix 1 加 cron wrapper + 本 healthcheck 互鎖；
+        缺本 healthcheck，cron 死亡 24h 後才會經由 [42b] 二階反應 ——
+        本 check 提供 30min-resolution 直接訊號。
+
+    Pre-conditions (fail-closed):
+        * ``learning.decision_features`` exists (V017 deployed) — else FAIL.
+
+    Returns:
+        ``(status, msg)`` tuple. msg includes age in hours + latest
+        label_filled_at for operator triage; FAIL adds explicit "cron
+        likely not running" + suggested action.
+    """
+    # Defensive rollback before each query (mirrors [42] / [42b] pattern).
+    # 每次 query 前保險 rollback（鏡 [42] / [42b]）。
+    try:
+        cur.connection.rollback()
+    except Exception:  # noqa: BLE001 — defensive, rollback failure ≠ fatal
+        pass
+
+    # Existence pre-check — V017 hypertable required.
+    # 表存在檢查 — V017 hypertable 必須存在。
+    try:
+        cur.execute(
+            "SELECT to_regclass('learning.decision_features') IS NOT NULL"
+        )
+        exists_row = cur.fetchone()
+    except Exception as exc:  # noqa: BLE001
+        return ("FAIL", f"[43] table existence check failed: {exc}")
+    if not exists_row or not exists_row[0]:
+        return (
+            "FAIL",
+            "[43] learning.decision_features missing — V017 not applied",
+        )
+
+    # Read max(label_filled_at) for the engine_modes the cron writes.
+    # We compute age in seconds inside Postgres via EXTRACT(EPOCH FROM ...)
+    # so the verdict is independent of Python clock vs DB clock skew (any
+    # skew lives entirely on the DB side, which is also where label_filled_at
+    # was stamped — symmetric).
+    # 讀 cron 寫入面 engine_mode 的 max(label_filled_at)；age 在 Postgres 內
+    # 算（EXTRACT(EPOCH FROM now() - max_ts)）避免 Python/DB 時鐘 skew。
+    sql = (
+        "SELECT max(label_filled_at) AS latest_fill, "
+        "       extract(epoch from (now() - max(label_filled_at)))::float "
+        "         AS age_seconds "
+        "FROM learning.decision_features "
+        "WHERE engine_mode IN ('demo', 'live_demo')"
+    )
+    try:
+        cur.execute(sql)
+        row = cur.fetchone()
+    except Exception as exc:  # noqa: BLE001
+        return ("FAIL", f"[43] max(label_filled_at) query failed: {exc}")
+
+    if row is None or row[0] is None or row[1] is None:
+        return (
+            "FAIL",
+            "[43] no decision_features rows with label_filled_at for "
+            "(demo, live_demo) — backfill never ran or table empty",
+        )
+
+    latest_fill = row[0]
+    age_seconds = float(row[1])
+    age_hours = age_seconds / 3600.0
+
+    base = (
+        f"latest fill={latest_fill.isoformat()} "
+        f"age={age_hours:.2f}h ({age_seconds:.0f}s)"
+    )
+
+    if age_seconds < LABEL_BACKFILL_PASS_MAX_SECONDS:
+        return ("PASS", base + " — edge_label_backfill_cron alive (within 2h)")
+    if age_seconds < LABEL_BACKFILL_WARN_MAX_SECONDS:
+        return (
+            "WARN",
+            base
+            + " — last fill 2-6h ago; cron may have skipped 1-11 ticks",
+        )
+    return (
+        "FAIL",
+        base
+        + " — last fill ≥6h ago, cron likely not running; "
+        "verify `crontab -l | grep edge_label_backfill_cron` and rerun manually "
+        "via `bash helper_scripts/cron/edge_label_backfill_cron.sh`",
+    )
+
+
+# ---------------------------------------------------------------------------
+# `[42c]` live_candidate_attribution_drift_3d — LG5-W3-FUP-2 Fix 2 (2026-05-02)
+# gate-aligned mirror of `[42b]` per RFC §5 Plan B.
+# `[42c]` LG5-W3-FUP-2 Fix 2（2026-05-02）— `[42b]` 的 R-meta gate 對齊
+# 鏡像（RFC §5 方案 B）。
+# ---------------------------------------------------------------------------
+
+
+def check_42c_live_candidate_attribution_drift_3d(cur) -> tuple[str, str]:
+    """[42c] per-strategy 3d rolling attribution_chain_ok ratio drift —
+    R-meta gate aligned mirror of `[42b]` (LG5-W3-FUP-2 Fix 2 RFC §5 Plan B).
+
+    [42c] 5 個 LG-5 strategy 的 3d 滾動 attribution_chain_ok ratio 漂移
+    偵測 —— `[42b]` 的 R-meta gate 對齊鏡像（LG5-W3-FUP-2 Fix 2 RFC §5
+    方案 B）。
+
+    Identical to `check_42b_live_candidate_attribution_drift` in every
+    respect (SQL shape, engine_mode filter, strategy keyset, 0.50/0.30/0.10
+    band thresholds, missing-strategy fail-soft, first-deploy grace, V031
+    fail-closed) except the time window: `interval '3 days'` instead of
+    `interval '7 days'`. This aligns with the producer
+    `mlde_demo_applier._compute_attribution_chain_ratio_by_strategy`
+    R-meta window (`_R_META_WINDOW_DAYS = 3`) shipped by Fix 2 IMPL-1.
+
+    與 `check_42b_live_candidate_attribution_drift` 在所有方面完全一致
+    （SQL 結構 / engine_mode filter / strategy keyset / 0.50/0.30/0.10
+    閾值 / missing-strategy fail-soft / first-deploy grace / V031
+    fail-closed），唯一差別 = 時間窗口從 7d → 3d，對齊 producer
+    `_R_META_WINDOW_DAYS = 3` (Fix 2 IMPL-1)。
+
+    Verdict bands (identical to `[42b]` per RFC v2 §6 IMPL-3 line 451):
+        * all 5 strategies ≥ 0.50 → PASS
+        * worst in [0.30, 0.50) → WARN（R-meta gate defer expected）
+        * worst in [0.10, 0.30) → FAIL standard band
+        * worst < 0.10 → FAIL pipeline-alert (RFC §4 lease_revoke_trigger)
+
+    Operator interpretation matrix (`[42b]` 7d × `[42c]` 3d):
+        * `[42b]` PASS + `[42c]` PASS → R-meta gate healthy long-term
+          and current — promote freely
+        * `[42b]` PASS + `[42c]` WARN → 4/24-28 attribution bug 殘留
+          淡出中；R-meta gate 對 worst strategy 會 defer，但 7d 視角
+          仍正常 — working as intended, monitor only
+        * `[42b]` FAIL + `[42c]` PASS → bug 已修，7d 視角會自然轉好；
+          R-meta gate 已可放行 — wait for `[42b]` to converge
+        * `[42b]` FAIL + `[42c]` FAIL → 真實 production drift；
+          investigate producer side (MIT-S2-1 attribution_chain_ok writer)
+          + check label backfill cron `[43]`
+
+    Operator 對照矩陣（`[42b]` 7d × `[42c]` 3d）：
+        * 雙 PASS → R-meta gate 長期 + 當下都健康，可放心 promote
+        * 7d PASS + 3d WARN → 4/24-28 attribution bug 殘留淡出中；
+          R-meta gate 對 worst strategy 會 defer 但 7d 視角仍正常 —
+          working as intended，僅需 monitor
+        * 7d FAIL + 3d PASS → bug 已修，7d 視角會自然轉好；
+          R-meta gate 已可放行 — 等 `[42b]` 收斂即可
+        * 雙 FAIL → 真實 production drift；查 producer
+          (MIT-S2-1 attribution_chain_ok writer) + label backfill cron `[43]`
+
+    RFC traceability:
+        * LG5-W3-FUP-2 Fix 2 RFC §5 Plan B (line 234-263) — dual-window design
+        * Producer pairing: `mlde_demo_applier._R_META_WINDOW_DAYS = 3`
+          (Fix 2 IMPL-1)
+        * `[42b]` long-window observability sentinel preserved unchanged
+
+    Returns:
+        ``(status, msg)`` tuple. msg includes worst strategy + its 3d ratio
+        + per-strategy 3d summary so operator can read the exact ratio
+        R-meta gate sees right now.
+    """
+    try:
+        cur.connection.rollback()
+    except Exception:  # noqa: BLE001
+        pass
+
+    # V031 hypertable existence — required for this check (same as [42b]).
+    # V031 表不存在直接 FAIL（鏡 [42b]）。
+    try:
+        cur.execute(
+            "SELECT to_regclass('learning.mlde_edge_training_rows') IS NOT NULL"
+        )
+        exists_row = cur.fetchone()
+    except Exception as exc:  # noqa: BLE001
+        return ("FAIL", f"[42c] view existence check failed: {exc}")
+    if not exists_row or not exists_row[0]:
+        return (
+            "FAIL",
+            "[42c] learning.mlde_edge_training_rows missing — V031 not applied",
+        )
+
+    # Per-strategy 3d ratio. SQL shape identical to [42b] except window:
+    # `ATTRIBUTION_DRIFT_WINDOW_3D = "interval '3 days'"` instead of 7d.
+    # engine_mode filter MUST match IMPL-1 producer
+    # `_compute_attribution_chain_ratio_by_strategy` (post-Fix 2:
+    # `IN ('demo', 'live_demo')` + `_R_META_WINDOW_DAYS = 3`) so this
+    # sentinel reads the SAME data the R-meta gate consumer reads.
+    # Per-strategy 3d 比率；SQL 結構與 [42b] 一致，唯獨 window 改 3d
+    # (`ATTRIBUTION_DRIFT_WINDOW_3D`)。engine_mode filter 對齊 Fix 2 後的
+    # producer (`IN ('demo','live_demo')` + `_R_META_WINDOW_DAYS = 3`)。
+    sql = (
+        "SELECT strategy_name, "
+        "       count(*)::int AS total, "
+        "       count(*) FILTER (WHERE attribution_chain_ok)::int AS chain_ok, "
+        "       (count(*) FILTER (WHERE attribution_chain_ok))::float "
+        "         / nullif(count(*), 0)::float AS ratio "
+        "FROM learning.mlde_edge_training_rows "
+        f"WHERE ts > now() - {ATTRIBUTION_DRIFT_WINDOW_3D} "
+        "  AND engine_mode IN ('demo', 'live_demo') "
+        "  AND strategy_name IS NOT NULL "
+        "GROUP BY strategy_name"
+    )
+    try:
+        cur.execute(sql)
+        rows = cur.fetchall()
+    except Exception as exc:  # noqa: BLE001
+        return ("FAIL", f"[42c] attribution-ratio query failed: {exc}")
+
+    # Build per-strategy ratio dict; missing → 0.0 (forces alarm).
+    # Mirrors [42b] logic block byte-for-byte structure except window source.
+    # 建 per-strategy ratio dict；missing → 0.0（強制告警）。
+    # 與 [42b] 邏輯結構完全一致，僅 window 源不同。
+    ratios: dict[str, float] = {}
+    totals: dict[str, int] = {}
+    for r in rows or []:
+        name = r[0]
+        if name not in LG5_STRATEGIES:
+            continue
+        total = int(r[1] or 0)
+        ratio = float(r[3]) if r[3] is not None else 0.0
+        ratios[name] = ratio
+        totals[name] = total
+
+    for s in LG5_STRATEGIES:
+        if s not in ratios:
+            ratios[s] = 0.0
+            totals[s] = 0
+
+    # First-deploy / quiet-window grace: all 5 strategies 0 row in 3d → WARN.
+    # 3d window 比 7d 更易觸發 first-deploy grace，符合「3d 是更近期切片」設計
+    # (RFC §5 方案 B：3d 對齊「post-bug-fix」純後時段，量小是預期行為，
+    # 不應 FAIL 製造雜訊)。
+    # 全 5 strategy 3d 內 0 row → WARN（首部署 / 全靜默；FAIL 過嚴）。
+    if all(totals[s] == 0 for s in LG5_STRATEGIES):
+        return (
+            "WARN",
+            "[42c] no MLDE training rows for any LG-5 strategy in 3d — "
+            "first-deploy or production silent; cannot evaluate R-meta drift",
+        )
+
+    # Determine worst strategy (lowest ratio) for the verdict + msg.
+    # 找最差 strategy（最低 ratio）作為 verdict + msg。
+    worst_strategy = min(LG5_STRATEGIES, key=lambda s: ratios[s])
+    worst_ratio = ratios[worst_strategy]
+
+    summary = ", ".join(
+        f"{s}={ratios[s]:.3f}(n={totals[s]})" for s in LG5_STRATEGIES
+    )
+    base = (
+        f"3d per-strategy attribution_chain_ok ratio "
+        f"(R-meta gate aligned): {summary}; "
+        f"worst={worst_strategy}@{worst_ratio:.3f}"
+    )
+
+    # Three-band verdict per RFC v2 §6 IMPL-3 line 451 + §3 line 377
+    # pipeline-alert escalation. Threshold constants reused from [42b]
+    # (ATTRIBUTION_RATIO_PASS_FLOOR / WARN_FLOOR / FAIL_FLOOR) per RFC §5
+    # Plan B "identical thresholds, only window differs" wording.
+    # 三段判定（RFC v2 §6 IMPL-3 line 451）+ §3 line 377 pipeline-alert 升級。
+    # 閾值常數複用 [42b]（RFC §5 方案 B「同閾值、僅 window 異」）。
+    if worst_ratio >= ATTRIBUTION_RATIO_PASS_FLOOR:
+        return (
+            "PASS",
+            base + " — all strategies ≥ 0.50 R-meta floor (3d window)",
+        )
+    if worst_ratio >= ATTRIBUTION_RATIO_WARN_FLOOR:
+        return (
+            "WARN",
+            base
+            + f" — {worst_strategy} below R-meta 0.50 floor (3d window); "
+            "review_live_candidate will defer for this strategy "
+            "(check [42b] 7d ratio for long-window context)",
+        )
+    if worst_ratio >= ATTRIBUTION_RATIO_FAIL_FLOOR:
+        return (
+            "FAIL",
+            base
+            + f" — {worst_strategy} below 0.30 standard FAIL floor (3d window); "
+            "attribution chain systemically degraded in current 3d slice — "
+            "investigate producer (MIT-S2-1 attribution_chain_ok writer) + "
+            "check [43] label_backfill_freshness",
+        )
+    return (
+        "FAIL",
+        base
+        + f" — {worst_strategy} below 0.10 pipeline-alert floor (3d window) "
         "(RFC v2 §4 lease_revoke_trigger fires; "
         "GovernanceHub must auto-revoke active leases)",
     )
