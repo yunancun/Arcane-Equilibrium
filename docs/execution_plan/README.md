@@ -29,8 +29,10 @@ Phase 6   (W19-20,8/14-8/27):  驗收
 | [phase_5.md](phase_5.md) | James-Stein + DL-1 + DL-2（13 任務） | 開始 Phase 5 時 |
 | [phase_6.md](phase_6.md) | 漸進放權 + 驗收（13 任務） | 開始 Phase 6 時 |
 | [critical_path.md](critical_path.md) | 關鍵路徑 + Contingency + 量化指標 | 排期變更時 |
-| [2026-05-02--ref20_paper_replay_lab_dev_plan_draft_v0.1.md](2026-05-02--ref20_paper_replay_lab_dev_plan_draft_v0.1.md) | REF-20 Paper Replay Lab 開發方案 draft v0.1：raw review input，未 sign-off，不作實作基線 | 只在追溯 V1 審查來源時讀 |
-| [2026-05-02--ref20_paper_replay_lab_dev_plan_v1.md](2026-05-02--ref20_paper_replay_lab_dev_plan_v1.md) | REF-20 Paper Replay Lab 開發方案 V1：審核 draft v0.1 後形成的安全 / 資料 / 量化 / API / UI 分階段基線 | 啟動 REF-20 / Reality-Calibrated Replay 實作前 |
+| [2026-05-02--ref20_paper_replay_lab_dev_plan_draft_v0.1.md](2026-05-02--ref20_paper_replay_lab_dev_plan_draft_v0.1.md) | REF-20 Paper Replay Lab 開發方案 v0.1：早期審查材料，未 sign-off | 追溯早期風險來源時 |
+| [2026-05-02--ref20_paper_replay_lab_dev_plan_v1.md](2026-05-02--ref20_paper_replay_lab_dev_plan_v1.md) | REF-20 Paper Replay Lab 開發方案 V1：第一版開發基線，已被 Round2 audit 推進為 V2 | 追溯 V2 變更來源時 |
+| [2026-05-02--ref20_v1_round2_audit.md](2026-05-02--ref20_v1_round2_audit.md) | REF-20 V1 第二輪 audit：對 V1 的安全 / 資料 / 量化 / UX / API 審查意見 | 追溯 V2 採納與反對理由時 |
+| [2026-05-02--ref20_paper_replay_lab_dev_plan_v2.md](2026-05-02--ref20_paper_replay_lab_dev_plan_v2.md) | REF-20 Paper Replay Lab 開發方案 V2：當前實作前基線，整合 Round2 並明確反對 P2 禁 IntentProcessor / Mac 禁 S2 public data 的過度條款 | 啟動 REF-20 / Reality-Calibrated Replay 實作前 |
 
 ## 設計文件（按需讀��不需每次都讀）
 

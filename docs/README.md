@@ -481,8 +481,10 @@ YYYY-MM-DD--HHmm--功能描述.扩展名
 
 | 文件 | 内容 |
 |------|------|
-| `2026-05-02--ref20_paper_replay_lab_dev_plan_draft_v0.1.md` | REF-20 Paper Replay Lab 開發方案 draft v0.1：raw review input，未 sign-off；指出 manifest、source tagging、calibration、auth、安全與 UX 等風險，後續由 V1 校準採納 |
-| `2026-05-02--ref20_paper_replay_lab_dev_plan_v1.md` | REF-20 Paper Replay Lab 開發方案 V1：確認 draft v0.1 中 manifest signature、route auth、replay registry、MLDE source guard、execution calibration、多重檢驗與 5-Agent 抽出等問題大多屬真實風險；調整 P2/P3/P4/P6 依賴後作為實作前基線 |
+| `2026-05-02--ref20_paper_replay_lab_dev_plan_draft_v0.1.md` | REF-20 Paper Replay Lab 開發方案 v0.1：早期審查材料，指出 manifest、source tagging、calibration、auth、安全與 UX 等風險 |
+| `2026-05-02--ref20_paper_replay_lab_dev_plan_v1.md` | REF-20 Paper Replay Lab 開發方案 V1：第一版開發基線，確認 manifest signature、route auth、replay registry、MLDE source guard、execution calibration、多重檢驗與 5-Agent 抽出等問題大多屬真實風險 |
+| `2026-05-02--ref20_v1_round2_audit.md` | REF-20 V1 第二輪 audit：對 V1 的安全、資料、量化、UX、API 審查意見；其中大多成立，但 P2 禁 IntentProcessor / Mac 禁 S2 public data 需在 V2 中反對或改寫 |
+| `2026-05-02--ref20_paper_replay_lab_dev_plan_v2.md` | REF-20 Paper Replay Lab 開發方案 V2：當前實作前基線；整合 Round2 audit，新增 replay.simulated_fills、HMAC key contract、DDL CHECK、硬量化閾值、UX/P2 isolation/P3+ canonical runner 要求 |
 
 ### governance_dev/ — 治理开发文档
 
