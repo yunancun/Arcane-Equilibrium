@@ -87,3 +87,14 @@ path = "src/main.rs"
 [[bench]]
 name = "hot_path_baseline"
 harness = false
+
+# repair_migration_checksum — standalone tool to detect/repair _sqlx_migrations.checksum drift.
+# Borrows engine `database::migrations::load_migrations_from_dir` so checksum
+# computation is identical to engine startup verification (sqlx 0.8.6 SHA-384,
+# raw bytes, no normalization).
+# repair_migration_checksum — _sqlx_migrations.checksum 漂移偵測/修復獨立 binary。
+# 借用 engine 的 `database::migrations::load_migrations_from_dir`，確保算法
+# 與 engine 啟動驗證一致（sqlx 0.8.6 SHA-384、原始位元組、無 normalization）。
+[[bin]]
+name = "repair_migration_checksum"
+path = "src/bin/repair_migration_checksum.rs"
