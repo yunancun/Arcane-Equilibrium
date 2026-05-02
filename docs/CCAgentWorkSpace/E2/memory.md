@@ -754,3 +754,21 @@ worktree `agent-a9002481353677810` · base HEAD `cf34e96` · branch `worktree-ag
 - Round 2 全 6 fix verified PASS。HIGH-1: 刪 hard-skip block + 信任 IMPL-2 R6 evaluator (governance_hub_live_candidate_review.py:1037-1047 / 1199-1252) emit reject_hard_veto；新 _total_rejected_hard_veto verdict-derived metric 取代 hub-derived _cycles_skipped_not_authorized；MODULE_NOTE 雙語明示「不要把 hard-skip 加回去」+ inline NOTE 點明 ROUND-2 修復歷史。MED-1: §九 行 446-447 加 2 entry 4 singleton names 鏡 EDGE-SCHEDULER-LEADER-1 格式。NIT-2: thread-leak guard `assert "lg5-review-consumer" not in threading.enumerate()`。NIT-3: 3 個 TestUnauthorizedStillCallsImpl2 tests 證 unauthorized hub 仍 call review (mocked.call_count==3)、mixed reject reasons subset count、is_authorized() raise wrapper not called。NIT-4: `_total_errors += len(errors)` 移到 cycle 末尾 lock 內。
 - Tests: 11 PASS / 59 baseline preserved（44 lg5_review + 15 mlde_demo_applier）。LOC: scheduler 716 / test 454 / both < 1500。0 hardcoded path。0 secret leak。IMPL-2 / mlde_demo_applier / edge_estimator_scheduler 0 改動（empty diff）。
 - Lesson: round 1 自報「hard-skip 防止無謂 IMPL-2 cost」實是 fundamental design bug —— 反破壞 audit emission 路徑、讓 [42] healthcheck FAIL。對抗反問「你的 hard-skip 是否阻斷了應該發生的 audit？」直接 catch fundamental issue。
+
+
+## 2026-05-02 LG5-W3-FUP-3-CRON-ENV — PASS
+
+- Context: E4 Linux smoke 揭 `psycopg2.OperationalError: fe_sendauth: no password supplied`；E1 補 wrapper PG creds sourcing block (62 LOC) + 4 unit tests (211 LOC) + healthcheck doc +18 LOC。
+- Sibling pattern alignment 驗證: 對齊 `linux_bootstrap_db.sh:41-45` 完整 5-key (USER/PASS/DB/HOST/PORT) — 比 `passive_wait_healthcheck_cron.sh:43-44` 2-line + hardcoded user/db/host/port 更通用，不綁定 slot。E1 自報「`|| true` + `${VAR:-default}` 二次 fallback」改進 sibling 的 `|| echo '127.0.0.1'` 字面 fallback（後者在 `grep '^POSTGRES_HOST=' file` 命中且 value 為空時不會落到 echo），技術正確。
+- Edge case probe 驗證:
+  1. ENV file `export KEY=value` format drift → grep `^POSTGRES_PASSWORD=` 不 match → PG_PASS 空 → FATAL exit 2 ✓ Fail-closed
+  2. ENV file `KEY="quoted"` 引號 value → grep + cut 不剝引號 → DSN 含字面引號 → psycopg2 會 loud raise (LOW informational, sibling 同行為; Linux real env file 純 KEY=value confirmed via ssh)
+  3. POSTGRES_HOST 真實缺失 → fallback 127.0.0.1 必要 (Linux confirmed: 4 keys present, HOST absent)
+- Tests: 4/4 PASS（syntax + env missing + creds incomplete + complete export DSN via mocked python3）。
+- Secret leak check: 0 hit on `set -x` / `echo $PG_PASS` / `cat ENV_FILE`；FATAL 訊息只列 key 名（POSTGRES_PASSWORD 等），不洩值；DSN 只 export 給 child process 環境，cron mailer 不見。
+- LOC: wrapper 196 / test 211 / doc 513，全 < 800 ⚠ 線。
+- 跨平台: 0 `/home/ncyu` / `/Users/<name>` 硬編碼；fallback 鏈 `OPENCLAW_SECRETS_ROOT:-$HOME/BybitOpenClaw/secrets` 跨 Mac/Linux 一致。
+- 雙語注釋齊備：MODULE_NOTE EN+中 + 每個 inline 注釋對齊。
+- Side-effect grep: `edge_label_backfill_cron` 0 caller in code（只 docs 引用）；舊 25 lg5_health_checks tests 不受影響。
+- Verdict: PASS to E4 cron re-smoke。
+- Lesson: Cron wrapper PG creds sourcing 是「真實 cron 環境差異」常被低估的 gap；E1 主動 mirror sibling pattern + 改進 sibling 的 corner case 而不是直接照搬 = 資深判斷。E2 對抗驗證需自跑 format drift / 引號 drift / sibling cross-check 而非只信 unit test green。

@@ -292,7 +292,18 @@ healthcheck so cron silent death is detected at 30min resolution
 ### Pairs with
 
 - **Cron wrapper**: `srv/helper_scripts/cron/edge_label_backfill_cron.sh`
-  (every 30 minutes, demo + live_demo passes, fail-loud)
+  (every 30 minutes, demo + live_demo passes, fail-loud).
+  **PG creds auto-source (LG5-W3-FUP-3-CRON-ENV, 2026-05-02)**: the wrapper
+  itself sources `POSTGRES_PASSWORD / POSTGRES_USER / POSTGRES_DB / POSTGRES_HOST / POSTGRES_PORT`
+  from `$OPENCLAW_SECRETS_ROOT/environment_files/basic_system_services.env`
+  (mirroring `helper_scripts/linux_bootstrap_db.sh:41-45`) and exports
+  `OPENCLAW_DATABASE_URL` before invoking `python3 -m program_code.ml_training.edge_label_backfill`.
+  Operator does **not** need to inline DB env vars in crontab — only
+  `OPENCLAW_BASE_DIR` / `OPENCLAW_DATA_DIR` / `OPENCLAW_SECRETS_ROOT`
+  (the last defaults to `$HOME/BybitOpenClaw/secrets` if absent). Missing
+  env file or incomplete creds → wrapper exits 2 with a `FATAL` line on
+  stderr **and** in `$OPENCLAW_DATA_DIR/logs/edge_label_backfill_cron.log`,
+  which surfaces immediately via cron mailer.
 - **Backfill module**: `srv/program_code/ml_training/edge_label_backfill.py`
   (CLI flags: `--engine-mode {demo,live,live_demo,paper}`, `--batch-limit N`)
 - **Downstream healthcheck**: `[42b] live_candidate_attribution_drift`
@@ -354,6 +365,14 @@ When both are PASS, the LG-5 R-meta attribution chain is healthy.
    #   * Mac dev default          = the Mac repo checkout root (e.g. under $HOME)
    #
    # Confirm the resolved path with: echo "$OPENCLAW_BASE_DIR" before editing crontab.
+   #
+   # PG creds (LG5-W3-FUP-3-CRON-ENV): the wrapper auto-sources POSTGRES_*
+   # from $OPENCLAW_SECRETS_ROOT/environment_files/basic_system_services.env
+   # and exports OPENCLAW_DATABASE_URL itself, so DO NOT inline POSTGRES_*
+   # / OPENCLAW_DATABASE_URL in crontab. If $OPENCLAW_SECRETS_ROOT is not
+   # the default ($HOME/BybitOpenClaw/secrets), inline only that one var:
+   #   OPENCLAW_SECRETS_ROOT=<ABSOLUTE_SECRETS_ROOT>
+   #   */30 * * * * <ABSOLUTE_REPO_ROOT>/helper_scripts/cron/edge_label_backfill_cron.sh
    ```
 3. **Smoke-test wrapper** (one manual run before relying on cron):
    ```bash
