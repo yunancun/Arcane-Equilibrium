@@ -60,6 +60,12 @@
 | **P0-OPS-2** | KYC / 地理禁區 / Bybit ToS 合規確認（0 governance entry）| Operator 法律確認 |
 | **P0-OPS-3** | Disaster runbook + Live first-day SOP（dust clear SOP only，缺完整 first-day playbook）| 1d work |
 
+#### P0-DATA — 資料正確性紅線（跨 wave prerequisite）
+
+| ID | 任務 | 阻塞下游 | 狀態 |
+|----|------|---------|------|
+| **P0-DATA-INDICATOR-SWEEP** | **5 策略 indicator leak-free sweep**：對 grid_trading / ma_crossover / bb_breakout / bb_reversion / funding_arb 五策略所有 rolling/lagged feature 做 shift(1) 合規驗證；證明無 lookahead bias / cross-section leak / time-zone leak / resample boundary leak；任 1 策略發現 leak → 該策略立即 RETRACT 直到修復。Owner=QC（quant 視角主審）+ E3（adversarial 視角副審）。輸出 §7 required fields：strategy inventory（runtime registration 出，非手動猜）+ per-indicator shift compliance proof + 每策略至少一 deterministic replay window fixture + verdict (pass/retract/fix-required)。**不只是 REF-20 阻塞**，同時 (a) validate 當前 5 策略 7d gross net **-6.98 USDT** 是否部分歸因 leak（若是，現有 edge 估計不可信，P0-EDGE-1/2 需重算）(b) 為任何未來 backtest/replay/research 一次性受益。背景 memory：`feedback_indicator_lookahead_bias.md`（2026-04-24）+ bb_breakout F3 RETRACT + FIX-26-DEADLOCK-1 教訓在案。| REF-20 V3 §3 G6 + §7（P2 阻塞）/ P0-EDGE-2 邊評決策可信度 / 任何未來 backtest | 派發中 |
+
 ---
 
 ### 🟠 P1 — Important（Live 質量 / 在 LG IMPL 前後完成）
