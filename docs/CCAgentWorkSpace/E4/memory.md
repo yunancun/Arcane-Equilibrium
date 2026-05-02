@@ -2,6 +2,55 @@
 
 ## 工作記憶
 
+### 2026-05-02 LG-5 Wave 2 IMPL-2 Linux PG regression（commit `f663354`）— **E4 PASS_TO_PM**
+
+**對象**：LG-5 Wave 2 IMPL-2 = consumer `governance_hub_live_candidate_review.py` (1496 LOC new) + bulk re-eval `lg5_re_evaluate_pending.py` (532 LOC new) + 44 unit tests `test_lg5_review_live_candidate.py` (731 LOC new)。Linux at `f663354`（git log -1 確認）。
+
+**Verdict**: **PASS** — ready for PM Sign-off
+
+| Suite | passed | failed | baseline | delta |
+|---|---|---|---|---|
+| Pytest test_lg5_review_live_candidate (W2 new) | 44 | 0 | new | +44 |
+| Pytest control_api_v1 (excl integration) | 3306 | 1 pre-existing grafana | 3262 → 3306 | +44 effective |
+| Pytest test_mlde_demo_applier (W1 IMPL-1) | 15 | 0 | 15 | +0 |
+| py_compile new files (×2) | OK | 0 | — | clean |
+| audit_migrations V035 | OK (33/34 applied, V005 1-idx gap pre-existing) | — | — | no V034/V035 drift |
+| Healthcheck | WARN baseline | 0 new WARN/FAIL | match W1 | preserved |
+| V035 governance_audit_log | 23 cols ✓ | — | — | matches W1 spec |
+
+**Steps**: 11/11 PASS（Step 9 first attempt column-name 失敗 → 改用真實 column `net_bps_after_fee` 後 PASS；非 W2 code 問題）。
+
+**Step 7 bulk re-eval --help 確認**：3 flags（`--dry-run` / `--limit` / `--verbose`）；未實際執行 bulk eval（per PA 指令避免 modify production data，等 IMPL-3 healthcheck `[42]` land 後再授權）。
+
+**Step 8 pending live candidates baseline**：26 rows（W1 baseline ~24，+2 自然 trickle，正常增長）。
+
+**Step 9 live regime baseline**：rows_24h=8 / avg_net_bps_24h=+10.14 bps（W1 IMPL-1 24h baseline 為對照）。
+
+**Pre-existing grafana fail**：仍 `test_grafana_data_writer.py::test_start_sets_running`，parent baseline `9076cc9` 已 fail；W2 改動 0 overlap，scope 完全正交。
+
+**Healthcheck WARN preserved**：[4] phys_lock 0 fire 24h、[10] intents_writer_ratio under-firing、[11] counterfactual rolling 2d shrink、[33] maker_fill_rate 28.9%、[40] avg_net -36.82 bps（注意：[40] 用 24h all live/live_demo MLDE rows=38，與 Step 9 attribution_chain_ok=true 過濾後 rows=8 不同樣本）、[41] scanner gates 無 labels — 全部 W2 前已存在；無新 WARN/FAIL。
+
+**E4 教訓 / 新坑**：
+
+1. **passive_wait_healthcheck.py 與 audit_migrations.py 都需要 PG env vars**（`POSTGRES_USER/PASSWORD/DB/HOST/PORT`），不會自動 inherit `PGPASSWORD`；ssh wrapper 必明文 export 才能跑。第一次落入 fallback 模式只回 [30]。
+2. **Step 9 column name drift**：原指令用 `label_net_edge_bps`，schema 真實名為 `net_bps_after_fee` —— 提示 prompt 內固化的 SQL 在 schema 演進後可能 stale。E4 自動退回查 information_schema 修正，未列入 BLOCKER。
+3. **W1 → W2 baseline 累積**：control_api_v1 從 3262 → 3306（+44），+44 全來自 W2 新測試。Pre-existing grafana 同一條，無新 regression。
+4. **Step 7 不跑 bulk re-eval** = 對的決策；script 設計為 idempotent（candidate -> writes audit_log + flips status / decision_lease_id），但 production data write 留 PM/operator 授權 + IMPL-3 [42] 監測 land 後。
+
+**建議 PM commit message**:
+```
+test(lg5): Wave 2 IMPL-2 Linux PG regression PASS — 44 new + 3306 baseline (commit f663354)
+
+E4 Linux PG regression 11/11 Steps PASS. control_api_v1 3306/0 (+44 vs W1 3262), 0 new
+WARN/FAIL on healthcheck. V035 unchanged (W1 deliverable). py_compile clean. Bulk
+re-eval --help validated; no production data mutation. Pending live candidates: 26.
+Live regime 24h: rows=8 / avg_net=+10.14 bps. Ready for IMPL-3 healthcheck [42] land.
+
+Co-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>
+```
+
+---
+
 ### 2026-05-02 LG-5 Wave 1 Linux PG regression（PM commit `9076cc9`）— **E4 PASS_TO_PM**
 
 **對象**：LG-5 Wave 1 = `V035__governance_audit_log.sql` (288 LOC new) + `mlde_demo_applier.py` (+401 +102) + `test_mlde_demo_applier.py` (+332)。Linux ff-only 至 `9076cc9` 已驗。
