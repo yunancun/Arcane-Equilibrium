@@ -178,3 +178,66 @@ the WARN/FAIL boundary at exactly 0.30.
   module.
 - If `[42b]` band is over-broad (false positives at 0.10 due to small `n`),
   consider adding sample-size guard (e.g. `total >= 30` for FAIL).
+
+---
+
+## LG5-W3-FUP-1 — `review_live_candidate` consumer scheduler
+
+**Module**: `srv/program_code/exchange_connectors/bybit_connector/control_api_v1/app/lg5_review_consumer_scheduler.py`
+**Wire-in**: `app/main.py` startup hook after `EdgeEstimatorScheduler`
+**Tests**: `srv/program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_lg5_consumer_scheduler.py` (10 tests)
+**Spec**: PA dispatch LG5-W3-FUP-1 (root cause of `[42]` runtime FAIL — IMPL-2 consumer landed but no scheduler called it).
+
+### Why this exists
+
+Pre-FUP runtime observation: `recent_24h_total=8`, `unaudited_over_1h=27`. RFC v2 §4 `[42] live_candidate_eval_contract` `lease_revoke_trigger` was firing because the IMPL-2 `review_live_candidate(hub, candidate_id)` consumer existed but was never invoked — pending `live_promotion_candidate` rows accumulated indefinitely.
+
+This scheduler closes the loop: a daemon thread (sibling to `EdgeEstimatorScheduler`, independent leader election) polls `learning.mlde_param_applications` for pending live promotion candidates and dispatches `review_live_candidate` per row.
+
+### Behaviour summary
+
+- **Cycle cadence**: every `OPENCLAW_LG5_CONSUMER_CYCLE_SECS` seconds (default 300s = 5 min).
+- **Per-cycle cap**: `OPENCLAW_LG5_CONSUMER_MAX_PER_CYCLE` (default 16) — matches `mlde_demo_applier.max_recommendations` so one producer flush drains in one consumer cycle.
+- **Order**: oldest-first (`ORDER BY ts ASC`) so longest-waiting candidates are reviewed first; mitigates `[42] unaudited_over_1h` backlog.
+- **Authorization handling (ROUND-2 HIGH-1 fix)**: the wrapper does **NOT** short-circuit on `hub.is_authorized() == False`. `review_live_candidate` (IMPL-2) is invoked unconditionally per pending candidate; its internal R6 evaluator (`evaluate_r6` at `governance_hub_live_candidate_review.py:1037-1047`) treats `auth_effective=False` as a hard veto and emits a `reject_hard_veto` audit row. This guarantees `[42] unaudited_over_1h` drains regardless of authorization state — short-circuiting at the wrapper layer would defeat the whole consumer.
+- **Per-candidate fail-open**: a single candidate raising does not abort the batch; remaining candidates still reviewed. Failure recorded in `summary.errors` + `total_errors` stat (incremented under lock alongside other totals).
+- **No duplicate audit emission**: `review_live_candidate` itself emits the audit row (RFC v2 §2.3); wrapper only INFO-logs aggregate `{reviewed, approved, rejected, rejected_hard_veto, deferred, errors}` per cycle for stdout grep. `rejected_hard_veto` is a verdict-derived subset of `rejected` (where `verdict.reason == 'reject_hard_veto'`) — operators use it to surface unauthorized-state cycles without coupling to the wrapper's hub query.
+- **Single-leader**: independent flock sentinel `$OPENCLAW_DATA_DIR/lg5_review_consumer.leader.lock` — under uvicorn `--workers 4` only one worker runs the consumer (avoids 4× DB writes).
+
+### Env-var inventory
+
+| Env var | Default | Effect |
+|---|---|---|
+| `OPENCLAW_LG5_CONSUMER_ENABLED` | `1` | `0` disables daemon thread spawn entirely (start returns None); use to hard-disable consumer without touching code. |
+| `OPENCLAW_LG5_CONSUMER_CYCLE_SECS` | `300.0` | Cycle interval in seconds. Lower = faster backlog drain + more reactive to auth changes; higher = lower DB load. Invalid value → falls back to default. |
+| `OPENCLAW_LG5_CONSUMER_MAX_PER_CYCLE` | `16` | Per-cycle SQL `LIMIT`. Mirrors `mlde_demo_applier.max_recommendations`; raise only if observed backlog regularly exceeds 16. Invalid value → falls back to default. |
+| `OPENCLAW_SCHEDULER_LEADER` | unset | Shared with `edge_estimator_scheduler` — set to `0` to force non-leader (testing / single-worker dev). To disable consumer specifically without affecting edge scheduler, prefer `OPENCLAW_LG5_CONSUMER_ENABLED=0`. |
+| `OPENCLAW_DATA_DIR` | `/tmp/openclaw` | Parent dir of the leader-lock sentinel (cross-platform; Mac sets in `~/.zshrc`). |
+
+### Rationale for defaults
+
+- **`cycle_secs=300` (5 min)**: producer (`mlde_demo_applier`) runs hourly, so 5-min consumer cadence gives ≤5 min lag from producer insert to consumer review — comfortably within the `[42]` 1-hour SLA. More frequent cadence (e.g. 60s) would trade DB-poll cost for marginal latency gain on a queue that fills slowly. Less frequent (e.g. 1800s = 30 min) would risk WARN-band drift on bursty inserts.
+- **`max_per_cycle=16`**: matches `mlde_demo_applier.max_recommendations = R4_PENDING_CAP` in `governance_hub_live_candidate_review.py`. One producer cycle's worst-case output is exactly drained in one consumer cycle.
+
+### Operational verification
+
+```bash
+# Verify scheduler started (look for leader-elected log line)
+journalctl -u openclaw-api --since "5 min ago" | grep "Lg5ReviewConsumer"
+
+# Verify cycles firing (INFO log per cycle)
+journalctl -u openclaw-api --since "30 min ago" | grep -E "Lg5ReviewConsumer\[(scheduled|manual_trigger)\]"
+
+# Verify consumer is draining backlog (status via Python REPL or future route)
+# Expect total_reviewed > 0 and last_run_ts within ~cycle_secs of now()
+```
+
+### Healthcheck `[42]` covers consumer drain proof
+
+Once this scheduler is deployed, `[42] live_candidate_eval_contract` should flip from FAIL (27 unaudited) → PASS (0 unaudited) within ~5 min of API restart. If it stays FAIL after 30 min:
+1. Check `OPENCLAW_LG5_CONSUMER_ENABLED` is not `0`.
+2. Check leader log line — exactly one worker should report "elected leader".
+3. Check `Lg5ReviewConsumer[scheduled]` INFO log line for cycle stats — note the `rejected (hard_veto=N)` segment.
+4. **Unauthorized state observability** (replaces deleted `cycles_skipped_not_authorized` metric — see ROUND-2 HIGH-1 fix): IMPL-2 R6 evaluator now handles unauthorized state by emitting `reject_hard_veto` audit rows. To diagnose:
+   - **Stdout / status grep**: look for `total_rejected_hard_veto > 0` in the `status()` payload (or the `(hard_veto=N)` field in INFO log per cycle). If `total_rejected_hard_veto` is climbing while `total_approved` stays at 0, authorization is likely missing/expired — fix authorization first.
+   - **DB SQL grep** (authoritative): `SELECT COUNT(*) FROM learning.governance_audit_log WHERE event_type='review_live_candidate' AND verdict_reason='reject_hard_veto' AND ts > now() - interval '1 hour';` — every unauthorized-state cycle row is here, joinable to candidate_id.
