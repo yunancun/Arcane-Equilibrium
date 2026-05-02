@@ -473,6 +473,7 @@ YYYY-MM-DD--HHmm--功能描述.扩展名
 | `2026-04-20--dust_frozen_position_manual_clear_procedure.md` | ★ Dust-Frozen 持倉手動清理 SOP：DUST-EVICTION-GAP-1 P1-8 設計背景 · Bybit GUI 三路線 · Live 前 pre-flight checklist |
 | `2026-04-20--cross_platform_redeploy_dependencies.md` | ★ 跨平台重部署依賴參考：Linux→macOS（Apple Silicon）冷裝清單 · brew/rustup/pip 步驟 · systemd↔launchd 差異 · HMAC 憑證重簽陷阱 |
 | `2026-05-02--reality_calibrated_fast_replay_governance.md` | REF-19 · Reality-Calibrated Fast Replay 治理契約：Replay 調用 MLDE/DreamEngine 作實驗環境與資料來源，但不改寫其 Agent 自我學習本職；明確 source tagging、execution calibration、demo/live 邊界 |
+| `2026-05-02--reality_calibrated_fast_replay_governance_zh.md` | REF-19 中文版 · 與英文契約同義，供 operator-first 閱讀與後續實作引用；明確 Replay 只是 MLDE/DreamEngine 的實驗環境之一，不改變其 Agent 自我學習本職 |
 
 ### governance_dev/ — 治理开发文档
 
