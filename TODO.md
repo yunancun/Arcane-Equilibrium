@@ -105,6 +105,15 @@
 
 完整 finding 與 recommendation 在 4 個 `.claude_reports/20260502_*_step2_*.md`。
 
+### LG-5 Wave 3 Sign-off 後 follow-ups（2026-05-02 dispatch）
+
+| ID | Sev | Owner | 描述 |
+|----|-----|-------|------|
+| **LG5-W3-FUP-1** | HIGH | @E1 | Wire `review_live_candidate` consumer 進 scheduler — 每 N 分鐘 poll `learning.mlde_param_applications` pending candidates 然後 call。當前 `[42]` FAIL：27 unaudited candidates 無人 call。Healthcheck 沒這個 wire 上 永遠 FAIL。 |
+| **LG5-W3-FUP-2** | HIGH | @MIT | Investigate `attribution_chain_ok` writer gap — grid 13.5% / ma 15.2% 在 7d 內 86%+ row 缺；對齊 Step 2 MIT-S2-1。Read-only diagnosis 找 root cause + 提 fix plan（fix 後續派 E1）。 |
+| **LG5-W2-FUP-PA-RFC-§4** | P2 deferred | @PA next batch | RFC v2 §4 scope binding requirement — `authorization.json.scope.lease_scopes` 加 `LIVE_CANDIDATE_APPLY:*` 條目；當前 empty-fallback=True 是 latent rug-pull 風險。**operator 2026-05-02 決定下個 batch 處理，不阻 W3 deploy** |
+| **LG5-CONSUMER-SPLIT** | P3 backlog | @E1 future | governance_hub_live_candidate_review.py 1496/1500 LOC near cap；下一輪維護抽 atomic helper module |
+
 ### 接手後 Step 2 計劃（P1 修完才執行 — 已 DONE）
 
 派 `@PA + @MIT + @QC + @E3` 並行 cold review 過去 4 天非 docs commit，**不依賴 commit message 自述**：
