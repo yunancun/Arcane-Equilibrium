@@ -10,8 +10,97 @@
 -- Hard boundary:
 --   ML/Dream outputs remain advisory. These fields are learning/explainability
 --   features only and must not bypass GovernanceHub or Decision Lease.
+--
+-- Retrofit (AUDIT-2026-05-02-P1-1, 2026-05-02): added a view-shape guard
+-- per CLAUDE.md §七 (V023 silent-noop postmortem). 4-day cold audit
+-- flagged that `CREATE OR REPLACE VIEW` is restricted by Postgres in a
+-- specific way: it can only **append** columns at the end and must
+-- preserve the existing column order/types/names of every leading
+-- column. If V031's view is somehow missing one of its original columns
+-- (e.g. a manual hot-fix DROPped + recreated the view with a narrower
+-- shape), V034's CREATE OR REPLACE would fail with a confusing
+-- "cannot change name of view column" or "cannot drop columns from
+-- view" error mid-migration. The guard below verifies V031's expected
+-- column set is present on the existing view (if any), and RAISES
+-- early with a clear message. If the view does not exist, CREATE OR
+-- REPLACE below creates it fresh — V031 may not have been applied,
+-- but that is the parallel "fresh DB" case (V031 → V034 in the same
+-- run still works because V031's CREATE OR REPLACE VIEW lands first).
+--
+-- Why no Guard A on a base table: this migration touches only a view
+-- (no CREATE TABLE) and a stable IMMUTABLE function (CREATE OR REPLACE
+-- FUNCTION is atomic by design). The only drift risk is the view shape.
+--
+-- 回補（AUDIT-2026-05-02-P1-1，2026-05-02）：依 CLAUDE.md §七 補上 view
+-- shape guard。Postgres `CREATE OR REPLACE VIEW` 的限制：只能在末尾
+-- **追加**欄位、leading 欄位的 name/type/order 必須維持不變。若 V031
+-- view 被手動 hot-fix 縮窄，V034 的 CREATE OR REPLACE 會在 migration
+-- 中途報「cannot change name of view column」/「cannot drop columns
+-- from view」。下方 guard 提前驗 V031 視為依賴的欄位集俱在於現存 view
+-- （若有）；不存在則直接 CREATE 全新 view（V031 → V034 同次跑也 OK，
+-- V031 的 CREATE OR REPLACE VIEW 會先 land）。本 migration 不觸表
+-- （無 CREATE TABLE）、IMMUTABLE function 用 CREATE OR REPLACE 原子
+-- 替換不需 guard，唯一漂移風險即 view shape。
+--
+-- Template source / 模板來源：
+--   sql/migrations/templates/schema_guard_template.sql § Guard A
+--   （adapted for view; information_schema.columns also reports view cols）
 
 CREATE SCHEMA IF NOT EXISTS learning;
+
+-- ------------------------------------------------------------
+-- Schema Guard A (view-shape variant) — verify V031 view columns when present
+-- Schema Guard A（view shape 變體）— 視圖已存在時驗 V031 欄位俱在
+-- ------------------------------------------------------------
+-- information_schema.columns reports columns for views as well as tables;
+-- table_type can be inspected via information_schema.tables.table_type IN
+-- ('BASE TABLE','VIEW'). Here we only care that the column set is intact.
+--
+-- information_schema.columns 對 view 也有欄位記錄；這裡只關心欄位集合
+-- 完整即可。
+DO $$
+DECLARE
+    v_missing TEXT[];
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.views
+        WHERE table_schema = 'learning'
+          AND table_name   = 'mlde_edge_training_rows'
+    ) THEN
+        -- V031 column set (the leading columns V034 must preserve in order).
+        -- V031 欄位集合（V034 必須照原順序保留的 leading columns）。
+        SELECT array_agg(c) INTO v_missing
+        FROM unnest(ARRAY[
+            'ts', 'ts_ms', 'engine_mode',
+            'intent_id', 'signal_id', 'context_id',
+            'symbol', 'symbol_bucket', 'side', 'side_num',
+            'qty', 'price', 'order_type',
+            'strategy_name', 'regime',
+            'scanner_scan_id', 'scanner_best_strategy',
+            'scanner_route_mode', 'scanner_edge_status',
+            'scanner_edge_bps', 'scanner_edge_n',
+            'scanner_final_score', 'scanner_raw_score',
+            'net_bps_after_fee', 'label_close_tag',
+            'label_split_flag', 'label_filled_at',
+            'features_jsonb', 'context_features',
+            'linucb_arm_id', 'mlde_arm_id',
+            'attribution_chain_ok', 'data_window', 'metadata'
+        ]) AS c
+        WHERE NOT EXISTS (
+            SELECT 1 FROM information_schema.columns
+            WHERE table_schema = 'learning'
+              AND table_name   = 'mlde_edge_training_rows'
+              AND column_name  = c
+        );
+        IF v_missing IS NOT NULL AND array_length(v_missing, 1) > 0 THEN
+            RAISE EXCEPTION
+                'schema_guard A (view): learning.mlde_edge_training_rows exists but missing V031 columns: %. '
+                'CREATE OR REPLACE VIEW below would fail because Postgres only allows appending columns. '
+                'Resolve via DROP VIEW IF EXISTS + re-apply V031 then V034, or restore the missing columns.',
+                v_missing;
+        END IF;
+    END IF;
+END $$;
 
 CREATE OR REPLACE FUNCTION learning.mlde_try_float8(value TEXT, fallback DOUBLE PRECISION DEFAULT NULL)
 RETURNS DOUBLE PRECISION

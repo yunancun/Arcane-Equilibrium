@@ -10,6 +10,31 @@
 -- Hard boundary:
 --   ML/Dream output is advisory by default. Live/live_demo rows may be logged,
 --   but an applied live/live_demo row must carry a Decision Lease id.
+--
+-- Retrofit (AUDIT-2026-05-02-P1-1, 2026-05-02): added Guard A per CLAUDE.md
+-- §七 (V023 silent-noop postmortem). 4-day cold audit found V031 missing
+-- this guard; if a legacy `learning.mlde_shadow_recommendations` stub
+-- exists without `requires_governance` / `decision_lease_id` / `payload`
+-- columns, `CREATE TABLE IF NOT EXISTS` silently no-ops and the live-gate
+-- CHECK constraint below fails to bind correctly. Guard A surfaces drift
+-- at apply time. The CREATE OR REPLACE VIEW for mlde_edge_training_rows
+-- is idempotent by definition (Postgres replaces the view body atomically
+-- as long as column order/types in the SELECT are not narrowed) and needs
+-- no guard. The ALTER TABLE ADD CONSTRAINT block at the bottom is wrapped
+-- in its own `IF NOT EXISTS` DO check (constraint, not column), so no
+-- Guard B applies — Guard B is for ADD COLUMN IF NOT EXISTS only.
+--
+-- 回補（AUDIT-2026-05-02-P1-1，2026-05-02）：依 CLAUDE.md §七 補上
+-- Guard A。若 legacy `learning.mlde_shadow_recommendations` stub 缺
+-- requires_governance / decision_lease_id / payload 等欄，CREATE TABLE
+-- IF NOT EXISTS 會靜默 no-op，下方 live-gate CHECK constraint 套不上去。
+-- mlde_edge_training_rows 是 CREATE OR REPLACE VIEW，本身原子替換
+-- （只要 SELECT 欄位順序/型別不收窄）不需 guard。底部 ADD CONSTRAINT
+-- 已自帶 IF NOT EXISTS DO block（是 constraint 不是 column），不適用
+-- Guard B（Guard B 只管 ADD COLUMN IF NOT EXISTS）。
+--
+-- Template source / 模板來源：
+--   sql/migrations/templates/schema_guard_template.sql § Guard A
 
 CREATE SCHEMA IF NOT EXISTS learning;
 
@@ -216,6 +241,45 @@ FROM strategy_regime sr;
 
 COMMENT ON VIEW learning.mlde_edge_training_rows IS
     'ML/Dream edge-unblock training view. Valid training rows require attribution_chain_ok=true and net_bps_after_fee as primary reward.';
+
+-- ------------------------------------------------------------
+-- Schema Guard A — verify mlde_shadow_recommendations required cols
+-- Schema Guard A — 表已存在時驗必要欄位俱在
+-- ------------------------------------------------------------
+DO $$
+DECLARE
+    v_missing TEXT[];
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.tables
+        WHERE table_schema = 'learning'
+          AND table_name   = 'mlde_shadow_recommendations'
+    ) THEN
+        SELECT array_agg(c) INTO v_missing
+        FROM unnest(ARRAY[
+            'id', 'ts', 'engine_mode',
+            'context_id', 'intent_id', 'symbol', 'strategy_name',
+            'source', 'recommendation_type', 'primary_metric',
+            'expected_net_bps', 'confidence', 'sample_count',
+            'payload', 'applied', 'requires_governance',
+            'decision_lease_id', 'created_by'
+        ]) AS c
+        WHERE NOT EXISTS (
+            SELECT 1 FROM information_schema.columns
+            WHERE table_schema = 'learning'
+              AND table_name   = 'mlde_shadow_recommendations'
+              AND column_name  = c
+        );
+        IF v_missing IS NOT NULL AND array_length(v_missing, 1) > 0 THEN
+            RAISE EXCEPTION
+                'schema_guard A: learning.mlde_shadow_recommendations exists but missing required columns: %. '
+                'Likely a legacy stub is present (perhaps without requires_governance / decision_lease_id). '
+                'Resolve (DROP + re-apply V031, or ALTER TABLE ADD missing columns) before continuing — '
+                'the live-gate CHECK constraint below depends on these columns.',
+                v_missing;
+        END IF;
+    END IF;
+END $$;
 
 CREATE TABLE IF NOT EXISTS learning.mlde_shadow_recommendations (
     id                    BIGSERIAL PRIMARY KEY,

@@ -2,6 +2,38 @@
 
 ## 工作記憶
 
+### 2026-05-02 AUDIT-2026-05-02-P1-1 Linux PG end-to-end regression — **E4 BLOCKED**
+
+**對象**：retrofit V028/V030/V031/V032/V034 + fixture `test_v028_v034_guards.sql`（733 LOC / 17 case），E1 R2 + E2 R2 PASS 後 E4 Linux 真實 PG 驗證。
+
+**Verdict**: **BLOCKED**（無一 Step 真實執行）
+
+**BLOCKER 1 — Linux 工作樹缺 retrofit**：
+- ssh trade-core git status 顯示 clean main `4749e0c`（最後 commit「Document eaf0c7e runtime redeploy」）
+- ls 確認 V028..V034 是舊版（無 Guard A/B），fixture 完全不存在
+- 此為 task 預期：「PM 還沒 push retrofit。如果 Linux 端看不到 retrofit code，本步等 PM push 後再做」
+- Mac 端 working tree retrofit 完整：6 檔 1850 LOC，guard markers 51 hits（V028=21 / V030=7 / V031=9 / V032=9 / V034=5），fixture TEST/CASE/RAISE marker 46 hits 對齊 17 case 描述
+
+**BLOCKER 2 — Linux PG `trading_ai_test` 連接憑證未知**：
+- `settings/environment_files/basic_system_services.env` 含 `POSTGRES_USER/PASSWORD/DB/PORT`（無 HOST），fallback 127.0.0.1
+- 用 sourced env 跑 psql：`FATAL: password authentication failed for user "trading_admin"`
+- `audit_migrations.py:280` 用同樣 conn pattern；推測 production runtime 連法不同（docker / pgpass file / IPC socket）
+- task 明文「如不確定，stop and ask PM，不要自己猜路徑」— 不擅自猜
+
+**Risk warning 給 E4 重啟**：
+- Step 5 用 `OPENCLAW_TEST_PG_DESTRUCTIVE=1` reset DB — PM 提供連接字串時必確認是 `trading_ai_test` 非 `trading_ai`
+- 整批 ssh trade-core 命令落在 SSH bridge「無需 per-case 授權」範圍
+
+**Reports**：
+- `.claude_reports/20260502_125420_e4_audit_p1_1_linux_regression.md`（6 節格式 + 完整 ssh 命令清單供 PM 解封後 E4 重啟）
+- workspace report: `srv/docs/CCAgentWorkSpace/E4/workspace/reports/2026-05-02--audit_p1_1_linux_pg_regression.md`
+
+**教訓 / 反模式避免**：
+- 不擅自 commit + push 整批 working tree（含 audit memory + report 等需 PM Sign-off 條目）解 BLOCKER 1
+- 不擅自 git pull / merge / rebase Linux 端
+- 不猜 PG 連接字串
+- BLOCKED 立即回報而非繼續探索 — memory `feedback_working_principles.md` 原則 4「多角色工作流不可跳過」
+
 ### 2026-04-30 5-Agent `last_heartbeat_ms` 契約 round 2 Mac local regression — **E4 PASS_TO_PM**
 
 **對象**：8 changed files unstaged（5 agent .py + agents_routes_helpers.py 827 LOC + test_agents_routes.py + 新檔 test_agent_heartbeat_contract.py 614 LOC / 36 case），E2 round 2 APPROVE_WITH_NITS 後 E4。

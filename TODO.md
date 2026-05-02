@@ -14,6 +14,46 @@
 
 ---
 
+## 🚨 4-day Codex Audit Findings（2026-05-02 · CC cold review）— **優先於 Wave 4 推進**
+
+主 CC 4 月 28 → 5 月 1 缺席（限額），codex / operator 提交 162 commit / 581 檔 / +64k LOC（22 個 Co-Authored-By Claude，139 個非 Claude）。CC 5 月 2 cold audit 後發現以下治理 / 測試 / governance 破口，**需在繼續 Wave 4 軸線前修完 P1 條目**：
+
+### 🟥 P1（治理紅線 + stale 測試，今日內修）
+
+| ID | 問題 | 證據 | Owner | Acceptance |
+|----|-----|------|-------|-----------|
+| **AUDIT-2026-05-02-P1-1** | 5 個新 migration 違反 CLAUDE.md §七 Guard A/B 強制規則（V023 silent-noop postmortem 後設立）：V028（ALTER ADD COLUMN 無 Guard B）、V030 / V031 / V032（CREATE TABLE IF NOT EXISTS 無 Guard A）、V034（VIEW 重建無欄位 drift 防護）；只有 V027 / V033 守規 | `grep -l "Guard A" sql/migrations/V0[2-3]*.sql` 缺 V028/V030/V031/V032/V034 | @E1 → @E2 → @E4 | 5 個 migration 加 Guard A/B；本地兩次 idempotent 跑；新增 schema_guard tests；E2 PASS |
+| **AUDIT-2026-05-02-P1-2** | stale 回歸測試 `test_rc_002_h0_status_refresh_preserves_cooldown_and_kill_switch` grep `loop_handlers.rs` 找 `build_status_risk_snapshot(`，但 `c6ec664` (refactor: complete maintenance splits) 已將該函數移到 `event_consumer/status_report.rs:23`，測試沒一起改 → 1 個 Python 失敗測 | `python3 -m pytest .../tests/test_batch_d_risk_fail_closed.py::test_rc_002_h0_status_refresh_preserves_cooldown_and_kill_switch` FAIL | CC 直接修 | grep target 改 `status_report.rs`；測試 PASS |
+
+### 🟧 P2（hygiene + 治理澄清，本週內）
+
+| ID | 問題 | Owner | Acceptance |
+|----|-----|-------|-----------|
+| **AUDIT-2026-05-02-P2-1** | `.coverage` 二進位檔（53 KB）被 commit 進 repo（`350e018`）— 應在 `.gitignore` | CC 直接修 | `.gitignore` 加 `.coverage*`；`git rm --cached .coverage` |
+| **AUDIT-2026-05-02-P2-2** | 6 個 `chore(worktree): preserve XXX` + 6 個 `merge: preserve worktree agent XXX` —— sub-agent worktree 直接吸收 main，conflict 解法（含 `PA/memory.md` + `cost_edge_advisor/mod.rs`）無人審 | @PA review | spot-check `13051e2` 等合併 conflict 解；發現實質問題回報 |
+| **AUDIT-2026-05-02-P2-3** | 單一 commit `b46660a` 加 13.6k 行（含 2466 行 audit + 2077 行 inventory TSV + 大量 Rust），E2/E4 對單 commit 審查近乎不可能；後續 codex 提交需強制拆 PR-sized commit | operator 決定 / TODO 警示 | 在 §七 加「單 commit 上限」規則 or 接受並 flag |
+| **AUDIT-2026-05-02-P2-4** | ✅ DONE 2026-05-02：operator 選 (a)，CLAUDE.md §十二 補述「`.codex/` 平行目錄角色」確立 = 純 codex session 提示鏡像，不擁有治理權，衝突以 `.claude/agents/` + CLAUDE.md 為準 | — | — |
+
+### 🟨 P3（代碼品質 + 文檔噪音，下個維護週期）
+
+| ID | 問題 | Owner |
+|----|-----|-------|
+| **AUDIT-2026-05-02-P3-1** | `is_legacy_close_tag` 在 `tick_pipeline/commands.rs` 兩處重複（line ~205 / ~575）→ 抽 helper | @E1 next maintenance |
+| **AUDIT-2026-05-02-P3-2** | `Add execution-aware edge model gates` (`1644701`) 改 3 份 `strategy_params*.toml` + `scanner_config.toml` 無 QC sign-off；`Relax scanner demo gates` (`2e06735`) 改 `immature_negative_*` 無 QC retro-review | @QC retro audit |
+| **AUDIT-2026-05-02-P3-3** | TODO 大量 churn（4 天 ~30 commit 都是 `Document X` / `Refresh Y` / `Calibrate Z`）→ §三 / TODO 雜訊；CLAUDE.md §三 有 drift 風險 | next archive sweep |
+
+### 接手後 Step 2 計劃（P1 修完才執行）
+
+派 `@PA + @MIT + @QC + @E3` 並行 cold review 過去 4 天非 docs commit，**不依賴 commit message 自述**：
+- **PA**：架構債（live_authorization.rs +106 / strategist_scheduler 抽 slot 是否完整 / position_reconciler 接線正確）
+- **MIT**：ML pipeline maturity（MLDE 是真 producer-consumer 還是只有 writer / V031-V034 schema 是否 leakage-safe / scanner_snapshots 行累積實測）
+- **QC**：1644701 / 2e06735 / 67b1160 策略參數變動是否合理（OU grid floor / MA ATR-SNR / scanner posterior LCB / immature_negative thresholds）
+- **E3**：secret leak 全掃 + `.codex/` 是否含敏感資訊
+
+audit 結果決定：≥3 個 P1 → 整週 stabilization wave；≤1 個 P1 → 接 PRE-LIVE-3 後續邊緣觀察軸線。
+
+---
+
 ## 此刻該做什麼（2026-05-01 · passive observation phase）
 
 **當前狀態**：Strategy Edge Models + Dust Residual Prevention deployed & proven；Scanner market judgement + five-strategy context deployed；MLDE demo autonomy active。Wave 4 pre-stage Rank 4-7 source/RFC checkpoint landed in `ec8f0f4`；`b283fda` calibrated `[22]` maker-working/rejected-only semantics；`25d8e54` landed G8-05 AI Cost ROI Monitor static UI and LG-5 constrained autonomous live RFC；`be8fe37` exposed Rust scanner context to Python/Scout/MLDE surfaces（V034 migration file landed but not applied to runtime DB）；`569e06b` unified Demo/Paper/Live GUI performance metric contract；current checkpoint completes PRE-LIVE-3 [33]/[38]/[40] read-only trend API, Live trend cards, and readiness checklist。

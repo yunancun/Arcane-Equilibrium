@@ -487,6 +487,18 @@ state_models ← state_compiler ← state_store ← main_legacy ← main.py
 
 **Posture（2026-04-29 operator 簡化決定）**：**Linear 是唯一 active workflow tool**。其他工具不融入工作流（不寫 SOP gate、不要求每 Wave 更新）。
 
+### `.codex/` 平行目錄角色（2026-05-02 operator 決定 · AUDIT-2026-05-02-P2-4）
+
+`.codex/` 是 codex session 用的**純提示輔助目錄**（git tracked，方便雙端 sync），**不擁有任何治理權**：
+
+- **唯一 governance SoT**：`CLAUDE.md` + `TODO.md` + `.claude/agents/<NAME>.md` + `docs/CCAgentWorkSpace/<NAME>/{profile,memory}.md`
+- `.codex/agents/*.md` / `.codex/skills/INDEX.md` / `.codex/AGENT_DISPATCH_PROTOCOL.md` 等 = codex session 啟動時的**提示鏡像**，與 `.claude/agents/` 內容衝突時**一律以 `.claude/agents/` 為準**
+- `.codex/MEMORY.md` / `.codex/WORKLOG.md` / `.codex/DISPATCH_LEDGER.md` = codex session 的工作流水筆記，等同 `docs/CCAgentWorkSpace/<NAME>/memory.md` 的 codex 版本，但**不替代** Claude 端 memory；CC 不需閱讀 `.codex/*` 來做決策
+- 變更治理規則時：先改 CLAUDE.md / `.claude/agents/`，再人工或 codex 自己同步 `.codex/`；**禁止**反向（`.codex/` → CLAUDE.md）
+- 若 `.codex/` 與 CLAUDE.md drift：以 CLAUDE.md 為準，drift 由 codex session 自行修復
+
+**Why option (a) not (b)/(c)**：(a) 零破壞、保留 codex 自走；(b) symlink 把 codex 拖進 Anthropic frontmatter 約束反而限制 codex；(c) 移除可能讓 codex 失去入口導致每次 session 重新 bootstrap。 
+
 ### 工具狀態表（2026-04-29 終版）
 
 | 工具 | 狀態 | 用途 | 維護要求 |
