@@ -1277,3 +1277,43 @@ ssh trade-core "cd ~/BybitOpenClaw/srv && python3 helper_scripts/db/passive_wait
 - healthcheck: WARN baseline same as round 2, 0 new FAIL
 - **教訓**：retrofit migration 對 forward-shape drift 也要主動 skip（對偶 V023 對 legacy-shape drift RAISE），非僅向下兼容；CLAUDE.md §七 Migration Guard #4 idempotency 雙跑驗證強制，不可跳。
 - 報告 `docs/CCAgentWorkSpace/E4/workspace/reports/2026-05-02--audit_p1_1_linux_pg_regression_round3.md`
+
+
+## 2026-05-02 — Funding-arb tight-SL feature branch regression PASS（commit `73ea4ca`）
+
+**Branch**: `feature/2026-05-02-funding-arb-tight-sl-base-ratio` HEAD `73ea4ca`（parent `a19797d` E1 demo TOML edit）
+**Verdict**: **PASS**
+
+### KPIs
+- 4 PA target suites all PASS:
+  - `config::risk_config::tests::g2_03_per_strategy_tests` 12/12 (no delta)
+  - `risk_checks` 35→**36** (+1 new test)
+  - `config::risk_config::advanced` 13/13 (no delta — DynamicStop validate)
+  - `config::risk_config` 115/115 (no delta)
+- Full lib `cargo test --release -p openclaw_engine --lib` baseline 2404→**2405** (+1 new test, 0 failed) — 兩遍同綠 0.52s + 0.52s 非 flaky
+- Workspace `cargo test --release --workspace` 21 binaries / **3008 passed / 0 failed / 3 ignored (pre-existing)**
+- 新 test runtime: <10ms（filesystem read + TOML parse + validate + effective_sl_max_pct call）— 遠低於 SLA <1ms hot-path 邊界（本測非 hot path）
+
+### 新增 ad-hoc 測試
+- `risk_checks::g2_03_per_strategy_tests::test_demo_toml_funding_arb_3pct_override_2026_05_02`
+- 文件：`srv/rust/openclaw_engine/src/risk_checks_per_strategy_tests.rs` (line 311+)
+- 8 個 assertion 覆蓋：
+  1. `dynamic_stop.base_ratio == 0.25` (1e-9 tol)
+  2. `per_strategy.funding_arb.enabled == true`
+  3. `per_strategy.funding_arb.stop_loss_max_pct_override == Some(3.0)`
+  4. `per_strategy.funding_arb.take_profit_max_pct_override == None`
+  5. `per_strategy.funding_arb.trailing_activation_pct_override == None`
+  6. `per_strategy.funding_arb.trailing_distance_pct_override == None`
+  7. `per_strategy.ma_crossover.stop_loss_max_pct_override == None`（schema-only 維持）
+  8. `RiskConfig::validate()` PASS（Defense A）
+  9. `effective_sl_max_pct(&cfg.limits, Some(fa)) == 3.0`（Defense B runtime cap）
+- 不改業務邏輯 / 不改 demo TOML / 不改 risk_config.rs / risk_checks.rs schema — 純哨兵 test。
+
+### Mock 安全
+N/A — 純讀真實 fixture TOML + 跑真實 validate / effective_sl 邏輯，無 mock。
+
+### 教訓
+- **PA 報告數字 ≠ runtime**：PA 寫「13 tests」，實際 `g2_03_per_strategy_tests` 12 tests。E4 要先跑 baseline 確認真實計數，不靠 PA 數。
+- **Test placement 取決於 super::* 範圍**：`risk_checks_per_strategy_tests.rs` 經 `#[path]` mod 載入，`super::*` = `risk_checks` 範圍 → 直拿 `RiskConfig` / `effective_sl_max_pct` / `StrategyOverride`。`risk_config_per_strategy_tests.rs` 也載入 demo TOML 但拿不到 `effective_sl_max_pct`（在 risk_checks crate path）→ Defense A+B 雙驗 test 必放 `risk_checks_per_strategy_tests.rs`。
+- **Worktree 隔離法**：Mac main branch 有未提交 untracked 檔案（`passive_wait_healthcheck/checks_governance.py` + 2 modified）非本任務 — 用 `git worktree add /tmp/srv-funding-arb-test feature/...` 隔離操作，避免污染 main 工作樹。完工後 `git worktree remove`。
+- **CARGO_MANIFEST_DIR 上溯 2 層抵 srv**：`CARGO_MANIFEST_DIR = srv/rust/openclaw_engine`，pop 2 次（openclaw_engine→rust→srv）。Sibling `risk_config_per_strategy_tests.rs` 註解寫「up 3 levels」但代碼僅 2 次 pop（註解誤導；新 test 比照 2-pop pattern 不依賴註解）。
