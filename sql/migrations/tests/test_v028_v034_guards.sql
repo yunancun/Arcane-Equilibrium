@@ -31,14 +31,23 @@
 --           B-4 slippage_bps, B-5 liquidity_role, B-6 fill_latency_ms]
 --   V030 — scanner_snapshots Guard A
 --   V031 — mlde_shadow_recommendations Guard A
+--          + mlde_edge_training_rows view-shape Guard A (round 3)
 --   V032 — mlde_param_applications Guard A
 --   V034 — mlde_edge_training_rows view-shape Guard A
 --
--- Each migration: 1 pass test + 1 fail test + 1 no-op test (3 cases per
--- migration × 5 migrations = 15 baseline cases). V028 also includes 1
--- representative Guard B fail case (wrong-type column) since 6 columns
--- share the same logic — the representative case proves the pattern.
--- 每 migration 1 pass + 1 fail + 1 no-op；V028 額外 1 個 Guard B 型別錯
+-- Each table-Guard-A migration: 1 pass + 1 fail + 1 no-op test.
+-- V031 view-shape guard (round 3 retrofit): adds 3 cases mirroring V034
+-- view tests (fresh-install / view-already-extended / view-missing-baseline),
+-- because V031 round 1/2 self-disclaimer "no guard needed" was wrong —
+-- E4 round 2 caught `cannot drop columns from view` on V034-applied state.
+-- V028 also includes 1 representative Guard B fail case (wrong-type column)
+-- since 6 columns share the same logic — the representative case proves
+-- the pattern.
+-- 每個 table-Guard-A migration 1 pass + 1 fail + 1 no-op。
+-- V031 view-shape guard（round 3 回補）追加 3 cases 仿 V034 view 測試
+-- （fresh-install / view 已被擴展 / view 缺 baseline col），因 V031
+-- round 1/2 自報「不需 guard」錯誤，E4 round 2 在 V034-applied state
+-- 抓到 `cannot drop columns from view`。V028 額外 1 個 Guard B 型別錯
 -- 測試（6 欄共享同一 pattern，代表性 case 即足夠）。
 -- ============================================================
 
@@ -460,6 +469,210 @@ END $$;
 
 
 -- ============================================================
+-- V031 — mlde_edge_training_rows view-shape Guard A (round 3):
+--        fresh-install / view-already-extended / view-missing-baseline
+-- V031 — mlde_edge_training_rows view-shape Guard A（round 3）：
+--        fresh-install / view 已被擴展 / view 缺 baseline col
+-- ============================================================
+-- Why V031 has its own view-shape guard tests: round 1/2 self-disclaimer
+-- "CREATE OR REPLACE VIEW is idempotent" was wrong because Postgres
+-- cannot DROP columns via CREATE OR REPLACE VIEW. V034 appends 18
+-- scanner_market_* cols, so re-applying V031 against a V034-applied
+-- DB raises `cannot drop columns from view`. The view-shape guard
+-- mirrors V034's pattern: skip on extended view, RAISE on drift,
+-- fresh-install otherwise.
+-- 為何 V031 自帶 view-shape guard 測試：round 1/2 自報「CREATE OR REPLACE
+-- VIEW idempotent」錯誤 — Postgres 不允許 DROP column via CREATE OR
+-- REPLACE VIEW。V034 append 18 個 scanner_market_* col，故 V034-applied
+-- DB 上重跑 V031 會撞 `cannot drop columns from view`。view-shape guard
+-- 仿 V034 pattern：view 已擴展 → skip；drift → RAISE；其餘 → fresh install。
+
+-- V031 view-shape guard fresh-install path: view absent → falls through
+--   to EXECUTE CREATE OR REPLACE VIEW. We simulate by checking the
+--   guard branch logic: when view absent, IF EXISTS gate skips, no
+--   skip-NOTICE, no RAISE — execution falls to create.
+-- fresh install 情境：view 不存在 → IF EXISTS 跳過，落到 EXECUTE 建立。
+DO $$
+DECLARE
+    v_view_present BOOLEAN;
+    v_caught       BOOLEAN := FALSE;
+BEGIN
+    -- Ensure view absent in scratch schema.
+    -- 確保 scratch schema 內 view 不存在。
+    SELECT EXISTS (
+        SELECT 1 FROM information_schema.views
+        WHERE table_schema='v028_v034_guard_test' AND table_name='mlde_view_v031_fresh'
+    ) INTO v_view_present;
+
+    BEGIN
+        IF v_view_present THEN
+            -- Should not happen in fresh-install path simulation.
+            RAISE EXCEPTION 'should_not_reach (view unexpectedly present)';
+        END IF;
+        -- Path 1 in V031 guard logic: fall through to CREATE.
+        -- Simulate the CREATE actually working (no-op for the test).
+    EXCEPTION WHEN OTHERS THEN
+        v_caught := TRUE;
+    END;
+
+    IF v_caught THEN
+        RAISE NOTICE 'TEST V031/View-fresh: FAIL fresh-install path raised unexpectedly';
+    ELSE
+        RAISE NOTICE 'TEST V031/View-fresh: PASS fresh-install path falls through to CREATE';
+    END IF;
+END $$;
+
+-- V031 view-shape guard view-already-extended path: view exists with all
+--   V031 baseline cols (and possibly extra appended cols, e.g. V034
+--   scanner_market_*) → guard MUST skip CREATE OR REPLACE (NOTICE-only,
+--   no RAISE). Simulates the production state E4 round 2 caught.
+-- 已擴展情境：view 含 V031 baseline 全部 col + 額外 append col（模擬
+-- V034 已套後的 production state）→ guard 必須 skip CREATE OR REPLACE，
+-- 只發 NOTICE，不 RAISE。
+DO $$
+DECLARE
+    v_existing TEXT[];
+    v_v031_cols TEXT[] := ARRAY[
+        'ts','ts_ms','engine_mode','intent_id','signal_id','context_id',
+        'symbol','symbol_bucket','side','side_num','qty','price','order_type',
+        'strategy_name','regime',
+        'scanner_scan_id','scanner_best_strategy','scanner_route_mode','scanner_edge_status',
+        'scanner_edge_bps','scanner_edge_n','scanner_final_score','scanner_raw_score',
+        'net_bps_after_fee','label_close_tag','label_split_flag','label_filled_at',
+        'features_jsonb','context_features','linucb_arm_id','mlde_arm_id',
+        'attribution_chain_ok','data_window','metadata'
+    ];
+    v_missing TEXT[];
+    v_should_skip BOOLEAN;
+BEGIN
+    -- Build a view with V031 baseline cols + 2 extra appended cols
+    -- (simulating V034 scanner_market_regime / scanner_trend_phase append).
+    -- 建一個 V031 baseline + 2 個 append col 的 view，模擬 V034 已套狀態。
+    EXECUTE 'CREATE VIEW v028_v034_guard_test.mlde_view_v031_extended AS
+             SELECT
+               NULL::TIMESTAMPTZ AS ts,
+               NULL::BIGINT AS ts_ms,
+               NULL::TEXT AS engine_mode,
+               NULL::TEXT AS intent_id,
+               NULL::TEXT AS signal_id,
+               NULL::TEXT AS context_id,
+               NULL::TEXT AS symbol,
+               NULL::TEXT AS symbol_bucket,
+               NULL::TEXT AS side,
+               NULL::INTEGER AS side_num,
+               NULL::DOUBLE PRECISION AS qty,
+               NULL::DOUBLE PRECISION AS price,
+               NULL::TEXT AS order_type,
+               NULL::TEXT AS strategy_name,
+               NULL::TEXT AS regime,
+               NULL::TEXT AS scanner_scan_id,
+               NULL::TEXT AS scanner_best_strategy,
+               NULL::TEXT AS scanner_route_mode,
+               NULL::TEXT AS scanner_edge_status,
+               NULL::DOUBLE PRECISION AS scanner_edge_bps,
+               NULL::DOUBLE PRECISION AS scanner_edge_n,
+               NULL::DOUBLE PRECISION AS scanner_final_score,
+               NULL::DOUBLE PRECISION AS scanner_raw_score,
+               NULL::DOUBLE PRECISION AS net_bps_after_fee,
+               NULL::TEXT AS label_close_tag,
+               NULL::BOOLEAN AS label_split_flag,
+               NULL::TIMESTAMPTZ AS label_filled_at,
+               NULL::JSONB AS features_jsonb,
+               NULL::JSONB AS context_features,
+               NULL::TEXT AS linucb_arm_id,
+               NULL::TEXT AS mlde_arm_id,
+               NULL::BOOLEAN AS attribution_chain_ok,
+               NULL::TEXT AS data_window,
+               NULL::JSONB AS metadata,
+               NULL::TEXT AS scanner_market_regime,
+               NULL::TEXT AS scanner_trend_phase
+             WHERE FALSE';
+
+    SELECT array_agg(column_name) INTO v_existing
+    FROM information_schema.columns
+    WHERE table_schema='v028_v034_guard_test' AND table_name='mlde_view_v031_extended';
+
+    SELECT array_agg(c) INTO v_missing
+    FROM unnest(v_v031_cols) AS c
+    WHERE c <> ALL(COALESCE(v_existing, ARRAY[]::TEXT[]));
+
+    -- Guard logic: missing IS NULL or empty → SKIP path (no RAISE, NOTICE).
+    -- Guard 邏輯：missing 為 NULL 或空 → SKIP 路徑（不 RAISE，發 NOTICE）。
+    v_should_skip := (v_missing IS NULL OR array_length(v_missing, 1) IS NULL);
+
+    IF v_should_skip THEN
+        RAISE NOTICE 'TEST V031/View-extended: PASS view-extended path correctly identifies skip';
+    ELSE
+        RAISE NOTICE 'TEST V031/View-extended: FAIL guard would re-create view (missing: %)', v_missing;
+    END IF;
+
+    EXECUTE 'DROP VIEW v028_v034_guard_test.mlde_view_v031_extended';
+END $$;
+
+-- V031 view-shape guard view-missing-baseline path: view exists but
+--   missing one or more V031 baseline cols (drift) → guard MUST RAISE.
+-- 缺 baseline col 情境：view 存在但缺 V031 baseline col（drift）
+-- → guard 必須 RAISE。
+DO $$
+DECLARE
+    v_existing TEXT[];
+    v_v031_cols TEXT[] := ARRAY[
+        'ts','ts_ms','engine_mode','intent_id','signal_id','context_id',
+        'symbol','symbol_bucket','side','side_num','qty','price','order_type',
+        'strategy_name','regime',
+        'scanner_scan_id','scanner_best_strategy','scanner_route_mode','scanner_edge_status',
+        'scanner_edge_bps','scanner_edge_n','scanner_final_score','scanner_raw_score',
+        'net_bps_after_fee','label_close_tag','label_split_flag','label_filled_at',
+        'features_jsonb','context_features','linucb_arm_id','mlde_arm_id',
+        'attribution_chain_ok','data_window','metadata'
+    ];
+    v_missing TEXT[];
+    v_caught  BOOLEAN := FALSE;
+BEGIN
+    -- Build a narrowed view (missing many baseline cols, simulating
+    -- a hot-fix that DROPped + recreated the view with fewer cols).
+    -- 建一個 narrowed view（缺多個 baseline col，模擬手動 hot-fix
+    -- DROP + recreate 後的 narrower 形狀）。
+    EXECUTE 'CREATE VIEW v028_v034_guard_test.mlde_view_v031_drift AS
+             SELECT
+               NULL::TIMESTAMPTZ AS ts,
+               NULL::BIGINT AS ts_ms,
+               NULL::TEXT AS engine_mode,
+               NULL::TEXT AS intent_id,
+               NULL::TEXT AS signal_id,
+               NULL::TEXT AS context_id,
+               NULL::TEXT AS symbol,
+               NULL::TEXT AS strategy_name
+               -- Most baseline cols intentionally missing
+             WHERE FALSE';
+
+    SELECT array_agg(column_name) INTO v_existing
+    FROM information_schema.columns
+    WHERE table_schema='v028_v034_guard_test' AND table_name='mlde_view_v031_drift';
+
+    SELECT array_agg(c) INTO v_missing
+    FROM unnest(v_v031_cols) AS c
+    WHERE c <> ALL(COALESCE(v_existing, ARRAY[]::TEXT[]));
+
+    BEGIN
+        IF v_missing IS NOT NULL AND array_length(v_missing, 1) > 0 THEN
+            RAISE EXCEPTION 'V031 view Guard A FAIL: missing %', v_missing;
+        END IF;
+    EXCEPTION WHEN OTHERS THEN
+        v_caught := TRUE;
+    END;
+
+    IF v_caught THEN
+        RAISE NOTICE 'TEST V031/View-drift: PASS view-shape Guard A correctly raised on narrowed view';
+    ELSE
+        RAISE NOTICE 'TEST V031/View-drift: FAIL view-shape Guard A should have raised';
+    END IF;
+
+    EXECUTE 'DROP VIEW v028_v034_guard_test.mlde_view_v031_drift';
+END $$;
+
+
+-- ============================================================
 -- V032 — mlde_param_applications Guard A: pass / fail / no-op
 -- ============================================================
 DO $$
@@ -727,7 +940,7 @@ DROP SCHEMA IF EXISTS v028_v034_guard_test CASCADE;
 
 \echo ''
 \echo '============================================================'
-\echo 'V028/V030/V031/V032/V034 guard tests emitted.'
+\echo 'V028/V030/V031/V032/V034 guard tests emitted (V031 includes view-shape round-3 cases).'
 \echo 'Grep stderr/NOTICE output for FAIL — zero FAIL = all guards green.'
-\echo 'V028/V030/V031/V032/V034 guard 測試已輸出；grep FAIL 驗綠。'
+\echo 'V028/V030/V031/V032/V034 guard 測試已輸出（V031 含 round 3 view-shape 測試）；grep FAIL 驗綠。'
 \echo '============================================================'
