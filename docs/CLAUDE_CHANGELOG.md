@@ -1,7 +1,15 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-05-02（REF-19 中文版 + 三段同步）
+> 最後更新：2026-05-02（REF-20 Paper Replay Lab + Learning surface design）
+
+### REF-20 Paper Replay Lab + Learning surface design（2026-05-02）
+
+**範圍**：新增 `docs/references/2026-05-02--paper_replay_learning_surface_design.md` 與中文 companion `docs/references/2026-05-02--paper_replay_learning_surface_design_zh.md`；同步更新 `docs/governance_dev/SPECIFICATION_REGISTER.md` 與 `docs/README.md`。
+
+**決策**：Paper Tab 原地升級為 Paper Replay Lab，保留 current paper session 並新增 fast replay / run compare / candidate handoff；Learning 保持 durable learning cockpit，新增 replay evidence inbox 與 ML/Dream producer monitor；目前嵌在 Learning 的 5-Agent 面板應抽出為 read-only Agents Monitor，功能保留不刪除。
+
+**邊界**：REF-20 延續 REF-19：Replay 可調用 MLDE / DreamEngine，但不將其改寫為 replay-only；Replay outputs 僅作 source-tagged evidence 或 advisory recommendation，不直接寫 `trading.fills`、不混入 `learning.mlde_edge_training_rows`、不直接修改 live / live_demo。
 
 ### REF-19 中文 companion + 三段同步（2026-05-02）
 
