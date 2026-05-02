@@ -1017,6 +1017,22 @@ pub(crate) mod on_tick_helpers;
 #[cfg(test)]
 mod tests;
 
+/// PA-DRY-1: check whether a strategy tag belongs to the legacy close-prefix
+/// family. Zero-PnL IPC / manual close fills must still be treated as close
+/// rows for DB attribution, so callers OR this with `realized_pnl != 0.0`.
+/// Centralised here so any future close-prefix addition flows through a single
+/// edit instead of two duplicated 4-line `starts_with` chains in `commands.rs`.
+///
+/// PA-DRY-1：檢查 strategy tag 是否屬於 legacy close-prefix 家族。零 PnL 的
+/// IPC / manual close fill 仍須被 DB 認為是 close row（與 realized_pnl != 0.0
+/// 取 OR），集中於此避免兩處 4 行 starts_with 重複漂移。
+pub(crate) fn is_legacy_close_tag(strategy: &str) -> bool {
+    strategy.starts_with("strategy_close:")
+        || strategy.starts_with("risk_close:")
+        || strategy.starts_with("stop_trigger:")
+        || strategy.starts_with("ipc_close:")
+}
+
 /// EXIT-FEATURES-TABLE-1: classify a `close_tag` into
 /// `(exit_source, exit_trigger_rule)` for the `ExitFeatureRow` label.
 /// `close_tag` follows the `"<prefix>:<reason>"` convention used by every

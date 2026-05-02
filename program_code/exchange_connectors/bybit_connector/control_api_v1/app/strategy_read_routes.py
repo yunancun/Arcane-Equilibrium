@@ -50,7 +50,14 @@ async def get_prelive_edge_gates(
     """
     try:
         return _envelope(fetch_prelive_edge_gate_trends(window_days=window_days))
-    except Exception as exc:  # noqa: BLE001
+    except Exception:  # noqa: BLE001
+        # E3-S2-P2-1: do NOT leak `type(exc).__name__: {exc}` to the JSON
+        # envelope — psycopg2 errors expose schema/column/table names to
+        # authenticated callers and feed reconnaissance. Full stack trace stays
+        # in server log via logger.exception; client receives generic reason.
+        # E3-S2-P2-1：不把 exception class + message 漏到 JSON envelope —
+        # psycopg2 錯誤會洩漏 schema/column/table 名給已認證調用者；完整
+        # stack trace 仍在 server log（logger.exception），client 只見 generic reason。
         logger.exception("Error in get_prelive_edge_gates / get_prelive_edge_gates 異常")
         return _envelope(
             {
@@ -59,7 +66,7 @@ async def get_prelive_edge_gates(
                 "window_days": window_days,
                 "gates": {},
                 "readiness": {"ready": False, "status": "not_ready", "items": []},
-                "error": f"{type(exc).__name__}: {exc}",
+                "error": "internal_error",
             }
         )
 

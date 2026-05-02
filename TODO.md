@@ -53,21 +53,33 @@
 | **QC** 量化 | 0 | 5 | 4 | 1644701 score B 數學健全；min_trend_snr=0.75 三 env 一致疑違 `feedback_env_config_independence` (P2) |
 | **E3** 安全 | **1** | 2 | 2 | 🚨 PG password + Grafana admin password **2026-03-27 起在 git history 6 個 commit 裡 public exposed**（codex `bc3fa70` 已 forward-fix env-var 路徑，但歷史值未清） |
 
-### 🚨 唯一 P1 — Operator 必修
+### 🟡 E3-S2-P1-1（operator 評：repo 是 private，問題不大，正式上線前統一改）
 
-**E3-S2-P1-1 / HIGH**：`yunancun/BybitOpenClaw` git history 含 PostgreSQL 密碼（與 Linux env file `(...)`格式相同 — 即我之前 ssh 抓到的真實 production 密碼）+ Grafana admin password `<REDACTED>`。Codex `bc3fa70` 2026-04-29 已把 docker-compose 改 `${VAR:?}` env-var prompt forward fix，**但歷史 6 個 commit 裡的明文值無法靠 forward fix 移除**。
+**Status**：**RECORDED-FOR-LATER**（2026-05-02 operator 決定）— GitHub `yunancun/BybitOpenClaw` 是 private repo；Codex `bc3fa70` 2026-04-29 已 forward-fix 改 `${VAR:?}` env-var prompt；**歷史 commit 裡的明文值留著，正式 live 上線前統一輪換**。
 
-**Operator 必做（CC 不能代）**：
-1. 確認 GitHub repo 可見性（private vs public）— 若 public = **已確認洩漏**
-2. **立即輪換 PG `tradeuser` 密碼 + Grafana admin 密碼**（不論 repo 可見性 — leaked = compromised）
-3. 決定 `git filter-repo` 重寫 history（repo 體積仍小可行）or 接受永久公開
-4. Linear 開 issue `secret-rotation-2026-05-02` 追蹤
+**Leaked secrets inventory**（live 上線前須輪換）：
+
+| # | 類型 | 值（長度） | 首次洩漏 | 最後 forward-fix | 影響檔 |
+|---|------|----------|----------|------------------|--------|
+| 1 | PostgreSQL `trading_admin` 密碼 | 20 字符 alphanumeric `(....)` 格式 — 與當前 Linux `settings/environment_files/basic_system_services.env` 內 `POSTGRES_PASSWORD` 完全相同（即從未輪換） | `d9580f9` 2026-03-27 | `bc3fa70` 2026-04-29（grafana postgres.yml 改 `${GRAFANA_POSTGRES_PASSWORD}`） | `docker_projects/monitoring_services/provisioning/datasources/postgres.yml` |
+| 2 | Grafana admin 密碼 | `<REDACTED>` (12 字符) | `d9580f9` 2026-03-27 | `bc3fa70` 2026-04-29（docker-compose 改 `${GF_SECURITY_ADMIN_PASSWORD:?}`） | `docker_projects/monitoring_services/docker-compose.yml` |
+
+**6 個受影響 commit**：`d9580f9` (2026-03-27) → `350c929` → `186e495` → `c31aef4` → `dbe2477` → `bc3fa70`
+
+**Live 上線前必做（rotation checklist）**：
+1. 生新 PG 密碼 → `ALTER USER trading_admin WITH PASSWORD 'NEW_VALUE'`
+2. 生新 Grafana admin 密碼 → 對應 docker secret 更新
+3. 同步更新 Linux `settings/environment_files/basic_system_services.env` 的 `POSTGRES_PASSWORD` + `GF_SECURITY_ADMIN_PASSWORD`（後者目前是 prompt 格式不存值）
+4. 同步更新 Mac dev env files
+5. Restart Linux engine + API + Grafana 讓新密碼生效
+6. **可選**：`git filter-repo` 重寫 history 移除歷史值（private repo 風險低，operator 視情況決定）
+7. 更新本 TODO entry 標 ROTATED + 日期
 
 ### Top P2 / P3 backlog（next maintenance wave）
 
 | ID | Sev | Owner | 描述 |
 |----|-----|-------|------|
-| **PA-LOC-GOV-1** | P2 | E1 | `commands.rs` 1343 LOC + `scanner/scorer.rs` 1437 LOC > 1200 hard cap，無 pre-existing exception |
+| ~~PA-LOC-GOV-1~~ | ✅ DROPPED 2026-05-02 | — | operator 決定 §九 1200→1500 硬上限；`commands.rs` 1343 + `scanner/scorer.rs` 1437 都 ≤1500，新規下合規 |
 | **PA-DRY-1** | P3 | E1 | `is_legacy_close_tag` `commands.rs:203/576` 重複 4 行 |
 | **PA-SCRIPT-PROC-1** | P3 | E1 | `restart_all.sh` 等 4 script 用 Linux-only `/proc/<pid>/cwd`，Mac 違 §七.★★ 跨平台 |
 | **PA-TEST-WATCHER-SLOT-1** | P3 | E1+E4 | 無 e2e 測試斷言 watcher respawn 寫 / teardown 清 `live_cmd_slot` |

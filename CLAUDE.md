@@ -402,14 +402,16 @@ Operator 在 Mac 並行跑 Qwen3.6-35B（LM Studio）做代碼審核。CC 每完
 
 ### 文件大小限制
 - **800 行** ⚠️ 警告線（E2 必須標記）
-- **1200 行** 🛑 硬上限（不允許 merge）
+- **1500 行** 🛑 硬上限（不允許 merge）
 
-**Pre-existing baseline exception clause（2026-04-28 governance addition per Wave E E2 retroactive review MED-1）**：當檔案在某個 wave 開工前的 baseline 已超過 1200 行（pre-existing violation 來自更早歷史），允許下列例外處理：
+**2026-05-02 governance change（operator 決定）**：硬上限從 **1200→1500**。原因：4 天 codex/operator window 後 PA Step 2 audit 發現 `commands.rs` 1343 / `scanner/scorer.rs` 1437 等檔超舊 1200 限；operator 評估這些檔的單一檔內聚性高、強行拆會破壞 hot-path 可讀性，遂上修硬上限至 1500。**警告線維持 800**（E2 必須標記，提醒拆分）；歷史 1200 案例需重新評估（≤1500 視為合規）。
+
+**Pre-existing baseline exception clause（2026-04-28 governance addition per Wave E E2 retroactive review MED-1，2026-05-02 適用值更新）**：當檔案在某個 wave 開工前的 baseline 已超過 1500 行（pre-existing violation 來自更早歷史），允許下列例外處理：
 - **(1) 接受 wave 後 LOC ≤ pre-existing baseline + 5 LOC**（wave 不擴大違規幅度，且純 cleanup wave 應顯著減少 LOC）
 - **(2) 同時開新 P2 ticket** 處理 pre-existing violation（如 `<FILE>-PRE-EXISTING-CLEANUP P2`），標明「ETA next maintenance wave」
 - **(3) PM Sign-off 必明文記錄** governance exception accept 理由（避免 silent drift）
 
-此例外 **僅適用 pre-existing 1200 + violation**，不適用「新 wave 把 ≤1200 推到 >1200」的場景（後者必拒）。E2 retroactive review 時引此條款判斷 governance accept vs RETURN to E1。範例：Wave E `2f88c40` main.rs 1208(pre-existing) → 1230(Wave 1 deepens) → 1210(Wave E split shrinks Wave 1 contribution +22→+2)，PM accept 1210 短期 + 開 MAIN-RS-PRE-EXISTING-CLEANUP P2 → Wave G `54e468a` 完成清零至 1158（解 baseline + 留 +42 headroom）。
+此例外 **僅適用 pre-existing 1500 + violation**，不適用「新 wave 把 ≤1500 推到 >1500」的場景（後者必拒）。E2 retroactive review 時引此條款判斷 governance accept vs RETURN to E1。歷史範例：Wave E `2f88c40` main.rs 1208(舊 baseline 已 ≤1500，新規下 PASS) → 不再需要 split。Wave G `54e468a` main.rs 1158 是更早治理時期的 cleanup 紀錄，新規下不再 enforce。
 
 ### 模塊依賴方向（禁止循環 import）
 ```
