@@ -1350,3 +1350,39 @@ Open questions logged for QC/MIT cross-review (R1 thresholds / R2 formula form /
 Hard boundary check: untouched (live_execution_allowed / max_retries / OPENCLAW_ALLOW_MAINNET / live_reserved / authorization.json all preserved).
 
 Root principle check: 16/16 preserved or strengthened (especially #3/#5/#6/#8/#10/#13).
+
+---
+
+## 2026-05-02 — LG-5 LIVE-CANDIDATE-EVAL-CONTRACT RFC v2 (12 must-fix + V035)
+
+Path: `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-02--lg5_live_candidate_eval_contract_rfc_v2.md`. Supersedes v1 (2026-05-02--lg5_live_candidate_eval_contract_rfc.md, kept as history).
+
+吸收 12 must-fix:
+- QC 7 (公式校準): MF-Q1 R1 floor 0.20→0.15 / MF-Q2 R2 加 clamp(0.3,1.0) + pass 1.5bps / MF-Q3 R3 window 7d-14d + n=100 / MF-Q4 R4 Bailey-LdP simplified SR_0 + trigger ≥5 / MF-Q5 R5 改用 demo gross 避 double-count / MF-Q6 R6 7-daily-snapshot 解讀 + R1 0.15 vs R6 0.10 floor 區分 + SQL pseudocode / MF-Q7 audit schema 18 欄位 raw input
+- MIT 5 (結構性): MF-M1 §1+§11 重述 (MIT-S2-1 已 ship 2026-04-29 production 24h ratio 55.07%/today 68.97% 已過 0.50 binary gate, 真正 block 是 R6 hard veto live regime negative) / MF-M2 R-meta + payload 改 per-strategy dict (5 strategy keys + fallback defer_attribution_chain_strategy_unknown) / MF-M3 §2.2 status filter 改 status='candidate' AND application_type='live_promotion_candidate' / MF-M4 BLOCKER §13 從零設計 V035 governance_audit_log spec / MF-M5 healthcheck [42b]/[43] per-strategy 7d attribution drift PASS/WARN/FAIL=0.50/0.30/0.10
+
+V035 spec (PA 從零設計, §13): TimescaleDB hypertable 7d chunk + Guard A 強制 (schema=learning + 23 必要欄位驗) + 2× Guard C (idx_gov_audit_candidate_ts + idx_gov_audit_event_type_ts via pg_get_indexdef substring 比對) + 23 個 bilingual COMMENT ON COLUMN + idempotent (psql -f ×2 無 RAISE) + optional fixture test sql/migrations/tests/test_v035_guards.sql 不阻塞。E1 IMPL-V035 直接從 §13 落 srv/sql/migrations/V035__governance_audit_log.sql 無設計餘地。
+
+§11 v1 8 條 open Q 全部拍板:
+1. R1 0.85 ratio 維持 + floor 0.15
+2. R2 multiplicative + slippage 相減 + clamp; Bayesian shrinkage 留 IMPL-5 retro 後評估
+3. R3 PSR 0.95 + window 7d/14d + n=100
+4. R4 Bailey-LdP simplified SR_0
+5. R-meta per-strategy dict; MIT-S2-1 已 ship 不再 block all promotions
+6. Lease TTL default 6h + first 30 days post-deploy 全局 cap 2h (learning period)
+7. Audit sink = learning.governance_audit_log (V035)
+8. Bulk re-eval 24 candidates 數據 gap 接受 fail-closed (defer)
+
+PM 派發建議 (新 §14):
+- Wave 1 並行: V035 + IMPL-1 (~0.5d, 完全 independent — SQL vs Python producer)
+- Wave 2 並行: IMPL-2 + IMPL-4 unit/fixture shells (~1.5d, blocked on Wave 1)
+- Wave 3 並行: IMPL-3 + IMPL-4 integration finish (~0.5d, blocked on IMPL-2)
+- Wave 4: IMPL-5 7d retro (QC analysis only, blocked on Wave 3 deploy + 7d wall clock)
+- 唯一序列瓶頸: V035/IMPL-1 → IMPL-2
+
+E2 重點審查 3 點: GovernanceHub LOC budget ≤1500 (已升 hard cap, governance_hub.py 加 ~400 LOC 大概率超界, 需 split sibling) / Lock contention (review_live_candidate 不在 self._lock 持鎖期間 DB read) / Audit fail-closed (audit write failure 真回 defer 非 silent swallow)
+
+Hard boundary check: untouched (live_execution_allowed / max_retries / OPENCLAW_ALLOW_MAINNET / live_reserved / authorization.json 全保留)。
+Root principle check: 16/16 preserved or strengthened (#3/#5/#6/#8/#10/#13 各 strengthened)。
+
+不確定處: 0 (operator 已 ack per-strategy 改動 + V035 PA 從零設計 + PM/QC/MIT 已決定 12 must-fix; v1 8 open Q 全部拍板)。
