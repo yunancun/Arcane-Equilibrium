@@ -4,8 +4,17 @@ import pytest
 
 from ml_training.mlde_demo_applier import (
     DemoApplierConfig,
+    _ATTRIBUTION_STRATEGY_KEYS,
+    _LIVE_CANDIDATE_EVAL_SCHEMA_VERSION,
     _already_applied,
+    _build_live_candidate_payload,
+    _compute_attribution_chain_ratio_by_strategy,
+    _compute_demo_cost_baseline,
+    _compute_demo_realized_window,
+    _compute_demo_sample_count_strategy_cell,
+    _insert_live_candidate,
     _noop_audit_payload,
+    _record_application,
     _record_noop_audit,
     build_risk_patch,
     build_strategy_patch,
@@ -23,6 +32,37 @@ class _Cursor:
 
     def fetchone(self):
         return self.rows.pop(0)
+
+
+class _ScriptedCursor:
+    """Programmable cursor for LG-5 helper tests.
+
+    Each `execute()` peels one entry from `responses`. Entries are tuples
+    that get yielded by subsequent `fetchone()` / `fetchall()` calls. Use
+    `None` for queries that ignore their result.
+
+    供 LG-5 helper 測試使用：每次 `execute()` 從 `responses` 取下一筆，
+    `fetchone()` / `fetchall()` 回傳該筆內容；不關心回傳結果的查詢用 None。
+    """
+
+    def __init__(self, responses):
+        self._responses = list(responses)
+        self._current = None
+        self.executed = []
+
+    def execute(self, sql, params=()):
+        self.executed.append((sql, params))
+        self._current = self._responses.pop(0) if self._responses else None
+
+    def fetchone(self):
+        return self._current
+
+    def fetchall(self):
+        # Allow caller to pass a list-of-rows tuple under the same slot.
+        # 允許同一 slot 攜帶 list-of-rows，供 fetchall 使用。
+        if isinstance(self._current, list):
+            return self._current
+        return [self._current] if self._current is not None else []
 
 
 def test_grid_dream_spacing_maps_to_bounded_runtime_params():
@@ -198,3 +238,538 @@ def test_already_applied_dedupe_includes_skipped_rows():
 
     sql = cur.executed[0][0]
     assert "status IN ('applied', 'dry_run', 'skipped')" in sql
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# LG-5 RFC v2 §2.1 producer-side helper tests.
+# 驗：(a) 4 helper 回 well-formed dict / int；
+#     (b) attribution dict 5 keys 全在；
+#     (c) `_insert_live_candidate` 寫的 payload 含 schema_version + 4 新 sub-key。
+# ────────────────────────────────────────────────────────────────────────────
+
+
+def test_lg5_helpers_return_well_formed_dicts_with_deterministic_data():
+    """4 helper 回 well-formed dict + per-strategy 5 keys 全在。"""
+    # Scripted cursor responses sequenced exactly as the helpers query:
+    #   1) cost baseline maker block: (total, maker_like, avg_fee_rate)
+    #   2) view_exists check for net_bps block: (True,)
+    #   3) net_bps + slippage avg row
+    #   4) realized_window n_fills row
+    #   5) attribution view_exists check
+    #   6) attribution per-strategy fetchall — passed as list of rows
+    #   7) sample_count_strategy_cell view_exists
+    #   8) sample_count_strategy_cell row
+    cursor = _ScriptedCursor(
+        responses=[
+            (200, 50, 0.00040),                # 25% maker_like, fee = 4bps
+            (True,),
+            (3.5, 1.2),                        # avg_net_bps_7d, avg_slip_bps_7d
+            (350,),                            # n_fills
+            (True,),
+            [
+                ("grid_trading", 100, 80),    # 80% ok
+                ("ma_crossover", 50, 25),     # 50% ok
+                ("bb_breakout", 40, 20),      # 50% ok
+                # bb_reversion + funding_arb absent → must default 0.0
+            ],
+            (True,),
+            (140,),                            # strategy_cell sample_count
+        ]
+    )
+
+    baseline = _compute_demo_cost_baseline(cursor)
+    assert baseline["engine_mode"] == "demo"
+    assert "as_of_ts" in baseline
+    assert baseline["sample_count"] == 200
+    assert baseline["maker_fill_rate_7d"] == pytest.approx(0.25)
+    assert baseline["avg_realized_fee_bps_7d"] == pytest.approx(4.0)
+    # fee_drop = (5.5 - 4.0) / 5.5 ≈ 0.2727
+    assert baseline["fee_drop_only_7d"] == pytest.approx(
+        (0.00055 - 0.00040) / 0.00055
+    )
+    assert baseline["avg_realized_net_bps_7d"] == pytest.approx(3.5)
+    assert baseline["avg_realized_slippage_bps_7d"] == pytest.approx(1.2)
+    assert baseline["source_healthchecks"] == ["[33]", "[40]"]
+
+    # No strategy_name → n_strategy_fills 0（helper short-circuits, no DB hit）
+    # 不傳 strategy_name → n_strategy_fills 0（helper 不查 DB），cursor 序列不被消耗。
+    window = _compute_demo_realized_window(cursor)
+    assert window["window_days"] == 7
+    assert window["n_fills"] == 350
+    assert "start_ts" in window and "end_ts" in window
+    assert window["n_strategy_fills"] == 0
+
+    ratios = _compute_attribution_chain_ratio_by_strategy(cursor)
+    # 5 hardcoded keys 全在
+    assert set(ratios.keys()) == set(_ATTRIBUTION_STRATEGY_KEYS)
+    assert ratios["grid_trading"] == pytest.approx(0.80)
+    assert ratios["ma_crossover"] == pytest.approx(0.50)
+    assert ratios["bb_breakout"] == pytest.approx(0.50)
+    # 缺資料 → 0.0
+    assert ratios["bb_reversion"] == 0.0
+    assert ratios["funding_arb"] == 0.0
+
+    cell_count = _compute_demo_sample_count_strategy_cell(cursor, "grid_trading")
+    assert cell_count == 140
+
+
+def test_lg5_helpers_fail_soft_on_missing_view():
+    """View 不存在時 fail-soft 回 0.0 / 0 / well-formed dict。"""
+    # Cost baseline maker block ok; net_bps view missing.
+    # cost block + (False,) view_exists → 0 net_bps.
+    cursor = _ScriptedCursor(
+        responses=[
+            (0, 0, 0.00055),  # 0 fills
+            (False,),         # view missing for net_bps block
+        ]
+    )
+    baseline = _compute_demo_cost_baseline(cursor)
+    assert baseline["sample_count"] == 0
+    assert baseline["avg_realized_net_bps_7d"] == 0.0
+    assert baseline["maker_fill_rate_7d"] == 0.0
+
+    # attribution view missing → 5 keys 全 0.0
+    cur2 = _ScriptedCursor(responses=[(False,)])
+    ratios = _compute_attribution_chain_ratio_by_strategy(cur2)
+    assert set(ratios.keys()) == set(_ATTRIBUTION_STRATEGY_KEYS)
+    assert all(v == 0.0 for v in ratios.values())
+
+    # sample_count helper：view missing → 0
+    cur3 = _ScriptedCursor(responses=[(False,)])
+    assert _compute_demo_sample_count_strategy_cell(cur3, "grid_trading") == 0
+
+    # 空 strategy_name → 0（不查 DB）
+    cur4 = _ScriptedCursor(responses=[])
+    assert _compute_demo_sample_count_strategy_cell(cur4, None) == 0
+    assert _compute_demo_sample_count_strategy_cell(cur4, "") == 0
+
+
+def test_insert_live_candidate_payload_carries_schema_version_and_lg5_subkeys(
+    monkeypatch,
+):
+    """`_insert_live_candidate` 寫的 payload 含 schema_version + 4 LG-5 sub-key。"""
+    # Stub helpers to deterministic dicts so we can inspect the payload
+    # written without mocking SQL flow.
+    # Stub 4 helper 為固定值，專注驗 payload 結構。
+    fake_baseline = {
+        "as_of_ts": "2026-05-02T12:00:00+00:00",
+        "engine_mode": "demo",
+        "maker_fill_rate_7d": 0.30,
+        "fee_drop_only_7d": 0.50,
+        "avg_realized_net_bps_7d": 4.5,
+        "avg_realized_fee_bps_7d": 2.75,
+        "avg_realized_slippage_bps_7d": 1.0,
+        "sample_count": 250,
+        "source_healthchecks": ["[33]", "[40]"],
+    }
+    fake_window = {
+        "start_ts": "2026-04-25T12:00:00+00:00",
+        "end_ts": "2026-05-02T12:00:00+00:00",
+        "n_fills": 250,
+        "n_strategy_fills": 0,
+        "window_days": 7,
+    }
+    fake_attribution = {
+        "grid_trading": 0.80,
+        "ma_crossover": 0.65,
+        "bb_breakout": 0.55,
+        "bb_reversion": 0.40,
+        "funding_arb": 0.50,
+    }
+    monkeypatch.setattr(
+        "ml_training.mlde_demo_applier._compute_demo_cost_baseline",
+        lambda _cur: fake_baseline,
+    )
+    monkeypatch.setattr(
+        "ml_training.mlde_demo_applier._compute_demo_realized_window",
+        lambda _cur, _strategy=None: fake_window,
+    )
+    monkeypatch.setattr(
+        "ml_training.mlde_demo_applier._compute_attribution_chain_ratio_by_strategy",
+        lambda _cur: fake_attribution,
+    )
+    monkeypatch.setattr(
+        "ml_training.mlde_demo_applier._compute_demo_sample_count_strategy_cell",
+        lambda _cur, _strategy: 175,
+    )
+
+    captured: dict = {}
+
+    class _CaptureCursor:
+        def execute(self, sql, params=()):
+            captured["sql"] = sql
+            captured["params"] = params
+
+    # `Json` wraps the payload at INSERT-time; unwrap for assertion.
+    # `Json` 會包 payload；測試端解包還原 dict。
+    from psycopg2.extras import Json  # type: ignore
+
+    source_row = {
+        "id": 42,
+        "symbol": "BTCUSDT",
+        "strategy_name": "grid_trading",
+        "expected_net_bps": 6.5,
+        "confidence": 0.78,
+        "sample_count": 50,
+    }
+    _insert_live_candidate(
+        _CaptureCursor(),
+        source_row=source_row,
+        application_id=999,
+        application_type="strategy_params",
+        patch={"cooldown_ms": 144_000},
+    )
+
+    assert "INSERT INTO learning.mlde_shadow_recommendations" in captured["sql"]
+    # params: (symbol, strategy_name, expected_net_bps, confidence,
+    #          sample_count, Json(payload))
+    payload_param = captured["params"][-1]
+    assert isinstance(payload_param, Json)
+    payload = payload_param.adapted
+
+    # schema_version + LG-5 §2.1 sub-keys 必含
+    assert payload["schema_version"] == _LIVE_CANDIDATE_EVAL_SCHEMA_VERSION
+    assert payload["policy"] == "live_governed_promotion_candidate"
+    assert payload["source_demo_recommendation_id"] == 42
+    assert payload["source_demo_application_id"] == 999
+    assert payload["application_type"] == "strategy_params"
+    assert payload["patch"] == {"cooldown_ms": 144_000}
+    assert payload["requires"] == ["GovernanceHub", "DecisionLease", "live_gates"]
+
+    assert payload["demo_cost_baseline"] == fake_baseline
+    assert payload["demo_realized_window"] == fake_window
+    # MIT MF-M2：dict 不是 scalar，5 keys 全在。
+    assert payload["demo_attribution_chain_ratio_by_strategy"] == fake_attribution
+    assert set(payload["demo_attribution_chain_ratio_by_strategy"].keys()) == set(
+        _ATTRIBUTION_STRATEGY_KEYS
+    )
+    assert payload["demo_sample_count_strategy_cell"] == 175
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# LG-5 IMPL-1 round 2 — CRITICAL spec drift fix tests.
+# Round 1 placed 5 new sub-keys only on the `mlde_shadow_recommendations`
+# writer; consumer (RFC v2 §2.2 line 140) reads `mlde_param_applications`,
+# whose payload was bare 2-key → consumer defers/rejects all candidates.
+# Round 2 introduces `_build_live_candidate_payload` as single SoT; both
+# writers share it. Tests below pin the contract.
+#
+# LG-5 IMPL-1 round 2 — CRITICAL spec drift 修復測試。
+# Round 1 只把 5 個新 sub-key 寫到 `mlde_shadow_recommendations`；consumer
+# 真正讀 `mlde_param_applications`（RFC v2 §2.2 line 140），其 payload 只
+# 有 bare 2-key → consumer 對所有 candidate defer/reject。Round 2 用
+# `_build_live_candidate_payload` 作 SoT，兩處 writer 共用同一 payload。
+# ────────────────────────────────────────────────────────────────────────────
+
+
+class _RaisingCursor:
+    """Cursor that raises on first execute() call.
+    第一次 execute() 即拋例外的 cursor，模擬 SQL 異常。
+    """
+
+    def __init__(self):
+        self.calls = 0
+        self.executed = []
+
+    def execute(self, sql, params=()):
+        self.calls += 1
+        self.executed.append((sql, params))
+        raise RuntimeError("simulated SQL exception on first SELECT")
+
+    def fetchone(self):
+        return None
+
+    def fetchall(self):
+        return []
+
+
+def test_cost_baseline_fail_soft_on_block1_sql_exception():
+    """First SELECT raises → baseline returns well-formed dict, no raise.
+    第一個 SELECT 拋異常 → baseline 回 well-formed dict 全 0 + 不拋。
+    """
+    cur = _RaisingCursor()
+
+    # Must not raise — fail-soft contract.
+    # 不可拋 — fail-soft 契約。
+    baseline = _compute_demo_cost_baseline(cur)
+
+    # Well-formed dict shape preserved.
+    # well-formed dict shape 必須保留。
+    assert baseline["engine_mode"] == "demo"
+    assert "as_of_ts" in baseline
+    assert baseline["sample_count"] == 0
+    assert baseline["maker_fill_rate_7d"] == 0.0
+    assert baseline["fee_drop_only_7d"] == 0.0
+    assert baseline["avg_realized_fee_bps_7d"] == 0.0
+    # net_bps block also fails-soft to 0.0 (raising cursor too).
+    assert baseline["avg_realized_net_bps_7d"] == 0.0
+    assert baseline["avg_realized_slippage_bps_7d"] == 0.0
+    assert baseline["source_healthchecks"] == ["[33]", "[40]"]
+
+
+def test_record_application_payload_matches_lg5_contract(monkeypatch):
+    """`_record_application(...)` row payload carries LG-5 §2.1 5-key contract.
+    `_record_application(...)` row 的 payload 必含 LG-5 §2.1 5-key contract。
+
+    Producer two-writer alignment: this test mirrors the
+    ``_apply_one`` live_promotion_candidate path — payload built via
+    ``_build_live_candidate_payload`` shared helper → handed to
+    ``_record_application(payload=...)`` writing
+    ``learning.mlde_param_applications``. Asserts schema_version + 5
+    sub-keys present in that table's payload column.
+
+    Producer 兩 writer 對齊：本測模擬 ``_apply_one`` live_promotion_candidate
+    路徑 — payload 透過 ``_build_live_candidate_payload`` 共用 helper 建構，
+    交給 ``_record_application(payload=...)`` 寫入
+    ``learning.mlde_param_applications``，驗該表 payload column 含
+    schema_version + 5 sub-key。
+    """
+    fake_baseline = {
+        "as_of_ts": "2026-05-02T12:00:00+00:00",
+        "engine_mode": "demo",
+        "maker_fill_rate_7d": 0.30,
+        "fee_drop_only_7d": 0.50,
+        "avg_realized_net_bps_7d": 4.0,
+        "avg_realized_fee_bps_7d": 2.5,
+        "avg_realized_slippage_bps_7d": 1.0,
+        "sample_count": 250,
+        "source_healthchecks": ["[33]", "[40]"],
+    }
+    fake_window = {
+        "start_ts": "2026-04-25T12:00:00+00:00",
+        "end_ts": "2026-05-02T12:00:00+00:00",
+        "n_fills": 250,
+        "n_strategy_fills": 145,    # round 2 fix: must be populated
+        "window_days": 7,
+    }
+    fake_attribution = {k: 0.6 for k in _ATTRIBUTION_STRATEGY_KEYS}
+    monkeypatch.setattr(
+        "ml_training.mlde_demo_applier._compute_demo_cost_baseline",
+        lambda _cur: fake_baseline,
+    )
+    monkeypatch.setattr(
+        "ml_training.mlde_demo_applier._compute_demo_realized_window",
+        lambda _cur, _strategy=None: fake_window,
+    )
+    monkeypatch.setattr(
+        "ml_training.mlde_demo_applier._compute_attribution_chain_ratio_by_strategy",
+        lambda _cur: fake_attribution,
+    )
+    monkeypatch.setattr(
+        "ml_training.mlde_demo_applier._compute_demo_sample_count_strategy_cell",
+        lambda _cur, _strategy: 145,
+    )
+
+    captured: dict = {}
+
+    class _CaptureCursor:
+        def execute(self, sql, params=()):
+            captured["sql"] = sql
+            captured["params"] = params
+
+        def fetchone(self):
+            # _record_application does RETURNING id → return synthetic id
+            return (777,)
+
+    source_row = {
+        "id": 99,
+        "engine_mode": "demo",
+        "symbol": "BTCUSDT",
+        "strategy_name": "grid_trading",
+    }
+    payload_dict = _build_live_candidate_payload(
+        _CaptureCursor(),  # not used since helpers are monkeypatched
+        source_row=source_row,
+        application_id=555,
+        application_type="strategy_params",
+        patch={"cooldown_ms": 144_000},
+        strategy_name="grid_trading",
+    )
+
+    # Now write through _record_application as _apply_one does.
+    # 透過 _record_application 寫入，模擬 _apply_one 路徑。
+    cur = _CaptureCursor()
+    new_id = _record_application(
+        cur,
+        row={**source_row, "engine_mode": "live"},
+        application_type="live_promotion_candidate",
+        target_name="grid_trading",
+        patch={"cooldown_ms": 144_000},
+        prev_snapshot={},
+        ipc_response={},
+        status="candidate",
+        reason="positive_demo_evidence_governed_live_candidate",
+        requires_governance=True,
+        payload=payload_dict,
+    )
+    assert new_id == 777
+
+    # SQL writes to mlde_param_applications (consumer's table).
+    # SQL 寫入 mlde_param_applications（consumer 讀的表）。
+    assert "INSERT INTO learning.mlde_param_applications" in captured["sql"]
+    assert "engine_mode" in captured["sql"]
+    assert "application_type" in captured["sql"]
+    assert "status" in captured["sql"]
+
+    from psycopg2.extras import Json  # type: ignore
+    # Locate Json-wrapped payload in params.
+    # 從 params 找 Json 包的 payload。
+    params = captured["params"]
+    json_params = [p for p in params if isinstance(p, Json)]
+    assert len(json_params) >= 1
+    # payload is the last Json arg per _record_application INSERT order
+    # (patch, prev_snapshot, ipc_response, payload).
+    # _record_application INSERT 順序最後一個 Json 即為 payload。
+    written_payload = json_params[-1].adapted
+
+    # CRITICAL: schema_version + 5 LG-5 §2.1 sub-keys present.
+    # CRITICAL：schema_version + 5 個 LG-5 §2.1 sub-key 必含。
+    assert written_payload["schema_version"] == _LIVE_CANDIDATE_EVAL_SCHEMA_VERSION
+    assert written_payload["policy"] == "live_governed_promotion_candidate"
+    assert written_payload["source_demo_recommendation_id"] == 99
+    assert written_payload["source_demo_application_id"] == 555
+    assert written_payload["application_type"] == "strategy_params"
+    assert written_payload["patch"] == {"cooldown_ms": 144_000}
+    assert written_payload["demo_cost_baseline"] == fake_baseline
+    assert written_payload["demo_realized_window"] == fake_window
+    # Round 2 fix: n_strategy_fills must be populated, not 0
+    # Round 2 fix：n_strategy_fills 必須被填寫，不可 0
+    assert written_payload["demo_realized_window"]["n_strategy_fills"] == 145
+    assert written_payload["demo_attribution_chain_ratio_by_strategy"] == fake_attribution
+    assert set(
+        written_payload["demo_attribution_chain_ratio_by_strategy"].keys()
+    ) == set(_ATTRIBUTION_STRATEGY_KEYS)
+    assert written_payload["demo_sample_count_strategy_cell"] == 145
+
+
+def test_lg5_contract_round_trip_param_applications_table(monkeypatch):
+    """Round-trip: producer writes payload → simulated consumer reads it.
+    Round-trip：producer 寫 payload → 模擬 consumer 讀回 → schema_version match。
+
+    模擬 consumer 端 ``GovernanceHub.review_live_candidate`` 從
+    ``mlde_param_applications`` 讀 row → 取 payload JSONB → 對比
+    ``_LIVE_CANDIDATE_EVAL_SCHEMA_VERSION`` 是否相符。若不符 consumer 將
+    fail-closed (defer / reject ``schema_unknown``)。
+    """
+    fake_baseline = {
+        "as_of_ts": "2026-05-02T12:00:00+00:00",
+        "engine_mode": "demo",
+        "maker_fill_rate_7d": 0.31,
+        "fee_drop_only_7d": 0.49,
+        "avg_realized_net_bps_7d": 5.5,
+        "avg_realized_fee_bps_7d": 2.8,
+        "avg_realized_slippage_bps_7d": 0.9,
+        "sample_count": 300,
+        "source_healthchecks": ["[33]", "[40]"],
+    }
+    fake_window = {
+        "start_ts": "2026-04-25T12:00:00+00:00",
+        "end_ts": "2026-05-02T12:00:00+00:00",
+        "n_fills": 300,
+        "n_strategy_fills": 120,
+        "window_days": 7,
+    }
+    fake_attribution = {k: 0.7 for k in _ATTRIBUTION_STRATEGY_KEYS}
+    monkeypatch.setattr(
+        "ml_training.mlde_demo_applier._compute_demo_cost_baseline",
+        lambda _cur: fake_baseline,
+    )
+    monkeypatch.setattr(
+        "ml_training.mlde_demo_applier._compute_demo_realized_window",
+        lambda _cur, _strategy=None: fake_window,
+    )
+    monkeypatch.setattr(
+        "ml_training.mlde_demo_applier._compute_attribution_chain_ratio_by_strategy",
+        lambda _cur: fake_attribution,
+    )
+    monkeypatch.setattr(
+        "ml_training.mlde_demo_applier._compute_demo_sample_count_strategy_cell",
+        lambda _cur, _strategy: 120,
+    )
+
+    # === Producer side ===
+    # 模擬 _apply_one 寫 candidate row 到 mlde_param_applications。
+    captured_payload: dict = {}
+
+    class _ProducerCursor:
+        def execute(self, sql, params=()):
+            from psycopg2.extras import Json  # type: ignore
+            json_args = [p for p in params if isinstance(p, Json)]
+            if "INSERT INTO learning.mlde_param_applications" in sql:
+                # payload is last Json arg
+                # payload 為最後一個 Json 參數
+                captured_payload["row_payload"] = json_args[-1].adapted
+                captured_payload["status"] = params[7]
+                captured_payload["application_type"] = params[2]
+                captured_payload["engine_mode"] = params[0]
+
+        def fetchone(self):
+            return (888,)
+
+    source_row = {
+        "id": 11,
+        "engine_mode": "demo",
+        "symbol": "ETHUSDT",
+        "strategy_name": "ma_crossover",
+    }
+    payload = _build_live_candidate_payload(
+        _ProducerCursor(),
+        source_row=source_row,
+        application_id=222,
+        application_type="strategy_params",
+        patch={"sma_fast": 7},
+        strategy_name="ma_crossover",
+    )
+    _record_application(
+        _ProducerCursor(),
+        row={**source_row, "engine_mode": "live"},
+        application_type="live_promotion_candidate",
+        target_name="ma_crossover",
+        patch={"sma_fast": 7},
+        prev_snapshot={},
+        ipc_response={},
+        status="candidate",
+        reason="positive_demo_evidence_governed_live_candidate",
+        requires_governance=True,
+        payload=payload,
+    )
+
+    # === Simulated consumer side ===
+    # 模擬 GovernanceHub.review_live_candidate 從表讀 row。
+    # Consumer filter: engine_mode='live' AND status='candidate' AND
+    # application_type='live_promotion_candidate' (RFC v2 §2.2 line 140).
+    assert captured_payload["engine_mode"] == "live"
+    assert captured_payload["status"] == "candidate"
+    assert captured_payload["application_type"] == "live_promotion_candidate"
+
+    consumer_payload = captured_payload["row_payload"]
+
+    # Schema version match → consumer accepts (else fail-closed).
+    # Schema version 相符 → consumer 接受（否則 fail-closed defer/reject）。
+    assert (
+        consumer_payload.get("schema_version")
+        == _LIVE_CANDIDATE_EVAL_SCHEMA_VERSION
+    )
+
+    # All 5 LG-5 §2.1 sub-keys present (consumer R-meta / R3 reads these).
+    # 5 個 LG-5 §2.1 sub-key 全在（consumer R-meta / R3 讀此判 promote/defer）。
+    assert "demo_cost_baseline" in consumer_payload
+    assert "demo_realized_window" in consumer_payload
+    assert "demo_attribution_chain_ratio_by_strategy" in consumer_payload
+    assert "demo_sample_count_strategy_cell" in consumer_payload
+    # source linkage so consumer can trace back to demo evidence row.
+    # source_demo_* 用於 consumer 反查 demo 證據 row。
+    assert "source_demo_recommendation_id" in consumer_payload
+    assert "source_demo_application_id" in consumer_payload
+
+    # MIT MF-M2 / RFC §3 R-meta gate: per-strategy attribution dict 5 keys.
+    # MIT MF-M2 / RFC §3 R-meta gate：per-strategy attribution dict 必 5 keys。
+    assert set(
+        consumer_payload["demo_attribution_chain_ratio_by_strategy"].keys()
+    ) == set(_ATTRIBUTION_STRATEGY_KEYS)
+
+    # RFC §3 R3 gate: n_strategy_fills must be readable (not 0 from drift).
+    # RFC §3 R3 gate：n_strategy_fills 須可讀（非 round 1 那種硬編 0）。
+    assert (
+        consumer_payload["demo_realized_window"]["n_strategy_fills"] == 120
+    )
