@@ -1146,3 +1146,14 @@ ssh trade-core "cd ~/BybitOpenClaw/srv && python3 helper_scripts/db/passive_wait
 - ai_usage_log dev sandbox **0 row** → planner 折成 `One-Time Filter: false`，無法直接證明索引被選
 - 緩解：(1) drop time prune 看 hypertable plan 形態 (2) 確認索引存在（pg_indexes 比對） (3) 信賴 production data shape 後 cost-based switch 自動發生
 - 對 hypertable 小 chunk 內部 Seq Scan（1330 rows 1 chunk）= **正常** — partition prune 在 ChunkAppend layer 已生效，單 chunk 內 PG planner 認為 seq < random index access 是 cost-based 正確選擇
+
+## 2026-05-02 — AUDIT-2026-05-02-P1-1 Round 3 V031 view shape-guard PASS
+
+- Linux production trading_ai (V034-applied state) 真實 idempotent verified
+- V031 round-3 shape-guard NOTICE-skip 兩次跑都 0 ERROR
+- Fixture 20 cases (round 2 baseline 17 + round 3 新 V031/View-{fresh,extended,drift} 3) all PASS
+- View col count = 53 (V034 augment preserved, 未被窄化回 35)
+- audit: V031 ALL PRESENT OK, 0 drift
+- healthcheck: WARN baseline same as round 2, 0 new FAIL
+- **教訓**：retrofit migration 對 forward-shape drift 也要主動 skip（對偶 V023 對 legacy-shape drift RAISE），非僅向下兼容；CLAUDE.md §七 Migration Guard #4 idempotency 雙跑驗證強制，不可跳。
+- 報告 `docs/CCAgentWorkSpace/E4/workspace/reports/2026-05-02--audit_p1_1_linux_pg_regression_round3.md`
