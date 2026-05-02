@@ -64,6 +64,20 @@ from passive_wait_healthcheck.db import _get_conn  # noqa: E402
 # 3C TOML 真實生效時刻：2026-05-02 17:42 UTC（19:42 CEST）
 # 對應 commit 6cb1c3b 後 restart_all.sh --rebuild --keep-auth 完成。
 # True 3C TOML deploy timestamp: 2026-05-02 17:42 UTC (19:42 CEST).
+#
+# DEPLOY_UTC: runtime cutover moment when 3C TOML actually took effect.
+# NOT the commit timestamp (commit ts != deploy ts in OpenClaw):
+#   - commit a19797d (TOML edit):           2026-05-02 17:20:35 UTC
+#   - merge a51cdc5 (promote to main):      2026-05-02 16:17 UTC
+#   - restart_all attempt #1 (sqlx abort):  2026-05-02 16:35 UTC
+#   - restart_all attempt #2 (success):     2026-05-02 17:42:59 UTC <- ACTUAL DEPLOY
+#     (engine PID 3202566 lstart, snapshot writer first emitted with new TOML)
+# Between #1 and #2 engine was DOWN due to sqlx V028 hash drift; no trading.
+# Window split here ensures pre-deploy 7d baseline is genuinely pre-3C-TOML.
+#
+# DEPLOY_UTC：3C TOML 真正生效的 runtime cutover 時點，**不是** commit timestamp。
+# OpenClaw commit != deploy；commit/merge 是檔案改動，restart_all 才是運行時生效。
+# 詳見 project_2026_05_02_p0_sqlx_hash_drift.md memory entry。
 DEPLOY_UTC = "2026-05-02 17:42:00+00"
 
 # Post-deploy window：deploy → deploy + 7 days
