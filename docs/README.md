@@ -477,6 +477,13 @@ YYYY-MM-DD--HHmm--功能描述.扩展名
 | `2026-05-02--paper_replay_learning_surface_design.md` | REF-20 · Paper Replay Lab + Learning surface 設計：Paper Tab 原地升級為 Replay Lab；Learning 保持知識 cockpit；5-Agent 抽出為 read-only Agents Monitor |
 | `2026-05-02--paper_replay_learning_surface_design_zh.md` | REF-20 中文版 · 與英文設計同義，明確 Paper / Learning / 5-Agent / MLDE / DreamEngine 的產品邊界、API/storage 姿態、分階段交付與驗收檢查 |
 
+### execution_plan/ — 执行计划
+
+| 文件 | 内容 |
+|------|------|
+| `2026-05-02--ref20_paper_replay_lab_dev_plan_draft_v0.1.md` | REF-20 Paper Replay Lab 開發方案 draft v0.1：raw review input，未 sign-off；指出 manifest、source tagging、calibration、auth、安全與 UX 等風險，後續由 V1 校準採納 |
+| `2026-05-02--ref20_paper_replay_lab_dev_plan_v1.md` | REF-20 Paper Replay Lab 開發方案 V1：確認 draft v0.1 中 manifest signature、route auth、replay registry、MLDE source guard、execution calibration、多重檢驗與 5-Agent 抽出等問題大多屬真實風險；調整 P2/P3/P4/P6 依賴後作為實作前基線 |
+
 ### governance_dev/ — 治理开发文档
 
 > 注意：governance_dev/ 下早期文件使用大寫命名（如 `T2_EXECUTION_SUMMARY.md`），

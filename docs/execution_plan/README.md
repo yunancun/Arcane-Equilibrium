@@ -29,6 +29,8 @@ Phase 6   (W19-20,8/14-8/27):  驗收
 | [phase_5.md](phase_5.md) | James-Stein + DL-1 + DL-2（13 任務） | 開始 Phase 5 時 |
 | [phase_6.md](phase_6.md) | 漸進放權 + 驗收（13 任務） | 開始 Phase 6 時 |
 | [critical_path.md](critical_path.md) | 關鍵路徑 + Contingency + 量化指標 | 排期變更時 |
+| [2026-05-02--ref20_paper_replay_lab_dev_plan_draft_v0.1.md](2026-05-02--ref20_paper_replay_lab_dev_plan_draft_v0.1.md) | REF-20 Paper Replay Lab 開發方案 draft v0.1：raw review input，未 sign-off，不作實作基線 | 只在追溯 V1 審查來源時讀 |
+| [2026-05-02--ref20_paper_replay_lab_dev_plan_v1.md](2026-05-02--ref20_paper_replay_lab_dev_plan_v1.md) | REF-20 Paper Replay Lab 開發方案 V1：審核 draft v0.1 後形成的安全 / 資料 / 量化 / API / UI 分階段基線 | 啟動 REF-20 / Reality-Calibrated Replay 實作前 |
 
 ## 設計文件（按需讀��不需每次都讀）
 
