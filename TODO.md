@@ -42,7 +42,50 @@
 | **AUDIT-2026-05-02-P3-2** | `Add execution-aware edge model gates` (`1644701`) 改 3 份 `strategy_params*.toml` + `scanner_config.toml` 無 QC sign-off；`Relax scanner demo gates` (`2e06735`) 改 `immature_negative_*` 無 QC retro-review | @QC retro audit |
 | **AUDIT-2026-05-02-P3-3** | TODO 大量 churn（4 天 ~30 commit 都是 `Document X` / `Refresh Y` / `Calibrate Z`）→ §三 / TODO 雜訊；CLAUDE.md §三 有 drift 風險 | next archive sweep |
 
-### 接手後 Step 2 計劃（P1 修完才執行）
+### Step 2 結果（2026-05-02 · PA + MIT + QC + E3 並行 cold audit DONE）
+
+**裁決**：**1 P1 + 12 P2 + 15 P3** — **不需 stabilization wave**（criterion ≥3 P1 觸發），繼續 PRE-LIVE-3 邊緣觀察軸線。但 1 個 P1 是 **operator 必修的 historical credential leak**。
+
+| Audit | P1 | P2 | P3 | 結論 |
+|-------|----|----|----|------|
+| **PA** 架構 | 0 | 1 | 4 | 0 drift；commands.rs / scanner/scorer.rs LOC 破 1200 (P2)；`is_legacy_close_tag` 重複 (P3) |
+| **MIT** ML/DB | 0 | 4 | 5 | MLDE 真接線到 Production(demo)/Shadow(live)；84.6% training row attribution_chain broken (P2) |
+| **QC** 量化 | 0 | 5 | 4 | 1644701 score B 數學健全；min_trend_snr=0.75 三 env 一致疑違 `feedback_env_config_independence` (P2) |
+| **E3** 安全 | **1** | 2 | 2 | 🚨 PG password + Grafana admin password **2026-03-27 起在 git history 6 個 commit 裡 public exposed**（codex `bc3fa70` 已 forward-fix env-var 路徑，但歷史值未清） |
+
+### 🚨 唯一 P1 — Operator 必修
+
+**E3-S2-P1-1 / HIGH**：`yunancun/BybitOpenClaw` git history 含 PostgreSQL 密碼（與 Linux env file `(...)`格式相同 — 即我之前 ssh 抓到的真實 production 密碼）+ Grafana admin password `<REDACTED>`。Codex `bc3fa70` 2026-04-29 已把 docker-compose 改 `${VAR:?}` env-var prompt forward fix，**但歷史 6 個 commit 裡的明文值無法靠 forward fix 移除**。
+
+**Operator 必做（CC 不能代）**：
+1. 確認 GitHub repo 可見性（private vs public）— 若 public = **已確認洩漏**
+2. **立即輪換 PG `tradeuser` 密碼 + Grafana admin 密碼**（不論 repo 可見性 — leaked = compromised）
+3. 決定 `git filter-repo` 重寫 history（repo 體積仍小可行）or 接受永久公開
+4. Linear 開 issue `secret-rotation-2026-05-02` 追蹤
+
+### Top P2 / P3 backlog（next maintenance wave）
+
+| ID | Sev | Owner | 描述 |
+|----|-----|-------|------|
+| **PA-LOC-GOV-1** | P2 | E1 | `commands.rs` 1343 LOC + `scanner/scorer.rs` 1437 LOC > 1200 hard cap，無 pre-existing exception |
+| **PA-DRY-1** | P3 | E1 | `is_legacy_close_tag` `commands.rs:203/576` 重複 4 行 |
+| **PA-SCRIPT-PROC-1** | P3 | E1 | `restart_all.sh` 等 4 script 用 Linux-only `/proc/<pid>/cwd`，Mac 違 §七.★★ 跨平台 |
+| **PA-TEST-WATCHER-SLOT-1** | P3 | E1+E4 | 無 e2e 測試斷言 watcher respawn 寫 / teardown 清 `live_cmd_slot` |
+| **MIT-S2-1** | P2 | QA+MIT | 84.6% MLDE training row `attribution_chain_ok=false`，rec 由小樣本驅動；可能與 [40] low row count 同源 |
+| **MIT-S2-2** | P2 | CC+PM RFC | demo→live promotion candidates `expected_net_bps` 沿用 demo cost regime，未經 governance re-eval；MLDE 上 live 前須有 contract |
+| **MIT-S2-3** | P2 | E1 | regret_summary undertrading +5%/cycle 無絕對 ceiling，僅靠 sample_count=0 stay safe |
+| **MIT-S2-4** | P2 | E1 (defer) | V031 view 545ms/cycle，scaling 風險；建議 materialized view |
+| **MIT-S2-6** | P3 | E1 | `opportunity_tracker.persist_regret_summary` always insert n=0 row → ~48 noise row/day |
+| **QC-S2-01** | P2 | QC | scanner posterior LCB `min_std=20bps` 硬編碼無實證；對低變異 cell 過悲觀 |
+| **QC-S2-02** | P2 | CC+PM RFC | demo→live promotion 不重評 distribution shift（cost regime 不同）→ 與 MIT-S2-2 同向 |
+| **QC-S2-04** | P2 | PA | `min_trend_snr=0.75` 三 env 一致，違 `feedback_env_config_independence` |
+| **QC-S2-09** | P3 | operator+RFC | PRE-LIVE-3 thresholds `[33]≥60% / [38]≥0.5x / [40]>0bps` 缺 RFC 數學依據 |
+| **E3-S2-P2-1/P2-2** | P2 | E1 | 兩個新 endpoint 仍走 `detail=f"...{exc}"` exception 字串外洩（拓展 baseline MEDIUM-A inventory 11→13） |
+| **E3-S2-P3-1** | P3 | E1 (defer) | `secret_env::var_or_file` 不驗 file mode 0600 |
+
+完整 finding 與 recommendation 在 4 個 `.claude_reports/20260502_*_step2_*.md`。
+
+### 接手後 Step 2 計劃（P1 修完才執行 — 已 DONE）
 
 派 `@PA + @MIT + @QC + @E3` 並行 cold review 過去 4 天非 docs commit，**不依賴 commit message 自述**：
 - **PA**：架構債（live_authorization.rs +106 / strategist_scheduler 抽 slot 是否完整 / position_reconciler 接線正確）

@@ -1269,3 +1269,53 @@ Operator 質疑：(a) PM 把 TODO 從 v3 (713 行) → v4 (197 行) 過程砍掉
 - 沒直接 edit TODO.md（建議由 operator 審後派 PM 補）
 - 沒派 sub-agent（純 PA 主 agent 串行讀寫）
 - 沒派發 LG-2/3/4/5 RFC（建議在 operator 審後再派）
+
+---
+
+## 2026-05-02 · Step 2 Cold Audit — codex 4-day window
+
+**Trigger**：CC step-1 cold audit 收 4 個 P1（5 SQL Guard A/B / stale grep test / .coverage / .codex governance）全 closed 後，operator 要 PA + MIT + QC + E3 並行 step 2 不依賴 commit message 自報的深層 audit。
+
+**Window**：2026-04-28 → 2026-05-01，162 commit / 581 file / +64k LOC（22 Co-Authored-By Claude / 139 非 Claude）。
+
+**Verdict**：0 P1 / 1 P2 / 4 P3。**不需要 stabilization wave**，接 PRE-LIVE-3 邊緣觀察軸線。
+
+**Findings**：
+- LOC-GOV-1 P2 — `tick_pipeline/commands.rs` 1343 LOC（baseline 1169）+ `scanner/scorer.rs` 1437 LOC（baseline 901）兩處 §九 1200 硬上限違反；都是 audit window 內把已在限內的檔推過界，不適用 pre-existing exception clause
+- DRY-1 P3 — commands.rs 行 203/576 `is_legacy_close_tag` 4-line check 完全複製貼上（commit 854cae1 同時引入兩處）；可同 LOC-GOV-1 一起解
+- SCANNER-PAPER-CMD-1 P3（pre-existing 不在 window 內惡化）— scanner 用 paper_cmd_tx query 開倉，PAPER-DISABLE-1 後 oneshot 永不 resolve → 2s timeout → 回空集合
+- SCRIPT-PROC-1 P3 — `5db4e29` 引入 `/proc/<pid>/cwd` Linux-only 路徑識別，Mac 沒 /proc，違反 §七 ★★ 跨平台
+- TEST-WATCHER-SLOT-1 P3 — live_auth_watcher_tests.rs 缺 end-to-end slot 寫入/清空 assertion
+
+**驗證真接線（無 dead code）**：
+- LIVE-AUTH-WATCHER slot pattern 全鏈完整：watcher teardown 清 → spawner closure 寫 → fan-out 每 tick read → IPC `live_snapshot()` try_read non-blocking → position_reconciler closure provider 動態讀 → strategist_scheduler `with_promote_cmd_slot` Arc clone
+- close_sizing 接所有 close 路徑：commands.rs 3 處 + step_0_fast_track.rs 1 處
+- scanner_snapshots 真有 producer：runner.rs:278 emit → trading_writer.rs:1025 collect → flush_scanner_snapshots 寫 PG
+- STRATEGY-WIRING-SPLIT 拆分後 strategy_wiring.py:563/657-659 重新 bind module attribute，下游 grep 穩定
+- Schema v2 authorization 雙端對齊：Rust + Python signer 都用 `version|tier|...|approved_system_mode|env_allowed_csv` payload
+- per_trade_risk_pct 2%→3% 默認改動只動 Rust default，4 個 risk_config TOML 都顯式 override → 零 effective 改變
+
+**架構 posture 整體健康**：
+- Rust SSOT 守住（scanner / scorer / market_judgment 全 Rust；Python 純 normalizer + DB enrichment fail-soft）
+- 16 根原則全保（live REST close fallback 移除 強化 原則 1；schema v2 + approved_system_mode 強化 原則 6 fail-closed）
+- §四 硬邊界全保（live_execution_allowed / max_retries / OPENCLAW_ALLOW_MAINNET / authorization HMAC — 反而再收緊）
+- 16 個新測試 / 0 刪測
+
+**PA 經驗教訓**：
+- 「不採信 commit message 自報 Verified ...」原則奏效：若採信則 LOC-GOV-1 P2 會錯過（commit message 沒提 LOC 增量）
+- batch-a `b46660a` 13.6k LOC mass commit 真有風險點（schema v2 backward-compat），但 Python signer + Rust verifier 雙端同步 + `unsupported_version` fail-closed 是正確設計，運維已透過 renew 完成切換
+- pre-existing 問題（SCANNER-PAPER-CMD-1）audit window 沒惡化即不阻塞接後續工作，但要在 ticket 系統登記避免遺忘
+- Mac/Linux 跨平台 (CLAUDE.md §七 ★★) 容易在 helper_scripts 違反 — `/proc` / `lsof` / `ps -E` 差異要 platform guard
+
+**派發建議給 PM**：
+1. COMMANDS-RS-LOC-SPLIT P2 (解 LOC-GOV-1 + DRY-1) — PA→E1→E2→E4
+2. SCANNER-SCORER-LOC-SPLIT P2 — PA+QC→E1→E2→E4
+3. SCRIPT-PROC-1 P3 — E1→E2→E4 Mac+Linux smoke
+4. TEST-WATCHER-SLOT-1 P3 — E1→E4
+5. SCANNER-PAPER-CMD-1 P3 observe-first — MIT 加 7d healthcheck 再排修
+
+**沒做的事（E1/PM 領域）**：沒寫業務代碼；沒直接 edit TODO.md；沒派 sub-agent（純 PA 主 agent 串行 grep）；沒 commit/push（PA 不寫碼不 commit）
+
+**報告**：
+- SoT: `/Users/ncyu/Projects/TradeBot/srv/.claude_reports/20260502_134432_pa_step2_audit.md`
+- workspace mirror: `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-02--step2_cold_audit_4day_window.md`
