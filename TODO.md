@@ -64,7 +64,7 @@
 
 | ID | 任務 | 阻塞下游 | 狀態 |
 |----|------|---------|------|
-| **P0-DATA-INDICATOR-SWEEP** | **5 策略 indicator leak-free sweep**：對 grid_trading / ma_crossover / bb_breakout / bb_reversion / funding_arb 五策略所有 rolling/lagged feature 做 shift(1) 合規驗證；證明無 lookahead bias / cross-section leak / time-zone leak / resample boundary leak；任 1 策略發現 leak → 該策略立即 RETRACT 直到修復。Owner=QC（quant 視角主審）+ E3（adversarial 視角副審）。輸出 §7 required fields：strategy inventory（runtime registration 出，非手動猜）+ per-indicator shift compliance proof + 每策略至少一 deterministic replay window fixture + verdict (pass/retract/fix-required)。**不只是 REF-20 阻塞**，同時 (a) validate 當前 5 策略 7d gross net **-6.98 USDT** 是否部分歸因 leak（若是，現有 edge 估計不可信，P0-EDGE-1/2 需重算）(b) 為任何未來 backtest/replay/research 一次性受益。背景 memory：`feedback_indicator_lookahead_bias.md`（2026-04-24）+ bb_breakout F3 RETRACT + FIX-26-DEADLOCK-1 教訓在案。| REF-20 V3 §3 G6 + §7（P2 阻塞）/ P0-EDGE-2 邊評決策可信度 / 任何未來 backtest | 派發中 |
+| **P0-DATA-INDICATOR-SWEEP** | ✅ **DONE 2026-05-03** · 5 策略 indicator leak-free sweep verdict = **5/5 PASS**（QC quant 主審 + E3 adversarial 副審 + PM 補位驗證 `compute_indicators` body @ `on_tick_helpers.rs:453` 證據鏈完整：`get_ohlcv → buffer().ohlcv_arrays(n)` 只從 closed-bar buffer，不含 currently-forming bar）。**真因排查**：5 策略 net -6.98 USDT 不是 indicator leak，最便宜解釋為 strategy logic / cost / maker fill 三者（[33] maker 36.6% / [40] slippage -92bps）。**P0-EDGE-1/2 可繼續使用現有 edge 估計，無需重算**。**REF-20 V3 §3 G6 + §7 P2 precondition 解封**。Verdict 報告：`docs/audits/2026-05-03--P0-DATA-INDICATOR-SWEEP_verdict.md`。Follow-up（升 P2）：L-01 streaming integration test（綁 REF-20 P2b fixture）+ L-02 feature_version 硬編碼 v1.0 fix。 | （已解除）| ✅ DONE |
 
 ---
 
