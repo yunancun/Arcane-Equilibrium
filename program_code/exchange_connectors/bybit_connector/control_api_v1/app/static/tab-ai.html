@@ -108,7 +108,7 @@
   <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:10px;margin-top:10px" id="provider-grid">
     <!-- Anthropic / Claude -->
     <div class="provider-card">
-      <div class="prov-header"><span class="prov-name">&#x1F9E0; Anthropic (Claude)</span><span class="oc-chip oc-chip-good" id="prov-anthropic-badge">已配置</span></div>
+      <div class="prov-header"><span class="prov-name">&#x1F9E0; Anthropic (Claude)</span><span class="oc-chip oc-chip-neutral" id="prov-anthropic-badge">未检测 / Unknown</span></div>
       <div class="prov-models">模型：Claude Opus / Sonnet / Haiku</div>
       <div class="api-key-row">
         <input class="oc-input" id="key-anthropic" type="password" placeholder="sk-ant-..." />
@@ -119,7 +119,7 @@
 
     <!-- OpenAI -->
     <div class="provider-card">
-      <div class="prov-header"><span class="prov-name">&#x1F4A1; OpenAI (GPT)</span><span class="oc-chip oc-chip-neutral" id="prov-openai-badge">未配置</span></div>
+      <div class="prov-header"><span class="prov-name">&#x1F4A1; OpenAI (GPT)</span><span class="oc-chip oc-chip-neutral" id="prov-openai-badge">未检测 / Unknown</span></div>
       <div class="prov-models">模型：GPT-4o / GPT-4o-mini / o1 / o3</div>
       <div class="api-key-row">
         <input class="oc-input" id="key-openai" type="password" placeholder="sk-..." />
@@ -130,7 +130,7 @@
 
     <!-- DeepSeek -->
     <div class="provider-card">
-      <div class="prov-header"><span class="prov-name">&#x1F52C; DeepSeek</span><span class="oc-chip oc-chip-neutral" id="prov-deepseek-badge">未配置</span></div>
+      <div class="prov-header"><span class="prov-name">&#x1F52C; DeepSeek</span><span class="oc-chip oc-chip-neutral" id="prov-deepseek-badge">未检测 / Unknown</span></div>
       <div class="prov-models">模型：DeepSeek-V3 / DeepSeek-R1</div>
       <div class="api-key-row">
         <input class="oc-input" id="key-deepseek" type="password" placeholder="sk-..." />
@@ -141,7 +141,7 @@
 
     <!-- Perplexity -->
     <div class="provider-card">
-      <div class="prov-header"><span class="prov-name">&#x1F50D; Perplexity</span><span class="oc-chip oc-chip-neutral" id="prov-perplexity-badge">未配置</span></div>
+      <div class="prov-header"><span class="prov-name">&#x1F50D; Perplexity</span><span class="oc-chip oc-chip-neutral" id="prov-perplexity-badge">未检测 / Unknown</span></div>
       <div class="prov-models">搜索增强型 AI，用于获取实时市场信息</div>
       <div class="api-key-row">
         <input class="oc-input" id="key-perplexity" type="password" placeholder="pplx-..." />
@@ -164,7 +164,7 @@
 
     <!-- Google -->
     <div class="provider-card">
-      <div class="prov-header"><span class="prov-name">&#x1F3AF; Google (Gemini)</span><span class="oc-chip oc-chip-neutral" id="prov-google-badge">未配置</span></div>
+      <div class="prov-header"><span class="prov-name">&#x1F3AF; Google (Gemini)</span><span class="oc-chip oc-chip-neutral" id="prov-google-badge">未检测 / Unknown</span></div>
       <div class="prov-models">模型：Gemini 2.5 Pro / Flash</div>
       <div class="api-key-row">
         <input class="oc-input" id="key-google" type="password" placeholder="AI..." />
@@ -485,8 +485,12 @@ async function saveProviderKey(provider, btn) {
     if (d) {
       ocToast(provider + ' API Key 已保存', 'success');
       $(inputId).value = '';
-      $('prov-' + provider + '-badge').textContent = '已配置';
-      $('prov-' + provider + '-badge').className = 'oc-chip oc-chip-good';
+      const badgeId = provider === 'local_llm' ? 'prov-local-badge' : ('prov-' + provider + '-badge');
+      const badge = $(badgeId);
+      if (badge) {
+        badge.textContent = '已配置';
+        badge.className = 'oc-chip oc-chip-good';
+      }
     } else {
       ocToast('保存到后端失败，请手动添加到 ~/BybitOpenClaw/secrets/providers/' + provider + '.env', 'error');
     }
@@ -580,27 +584,59 @@ async function loadCostRoiMonitor() {
     ocApi('/api/v1/paper/layer2/cost'),
     ocApi('/api/v1/paper/ai-cost'),
   ]);
-  const adaptive = adaptiveRes.status === 'fulfilled' && adaptiveRes.value?.data ? adaptiveRes.value.data : {};
-  const cost = costRes.status === 'fulfilled' && costRes.value?.data ? costRes.value.data : {};
+  const adaptiveOk = adaptiveRes.status === 'fulfilled' && adaptiveRes.value?.data;
+  const costOk = costRes.status === 'fulfilled' && costRes.value?.data;
+  const adaptive = adaptiveOk ? adaptiveRes.value.data : {};
+  const cost = costOk ? costRes.value.data : {};
   const gateway = gatewayRes.status === 'fulfilled' && gatewayRes.value?.data ? gatewayRes.value.data : {};
 
-  const spend = adaptive.ai_spend_7d_usd ?? 0;
-  const pnl = adaptive.paper_pnl_7d_usd ?? 0;
+  if (!adaptiveOk) {
+    ocSetText('roi-spend', '--');
+    ocSetText('roi-spend-sub', 'adaptive endpoint unavailable');
+    ocSetText('roi-pnl', '--');
+    $('roi-pnl').className = 'v';
+    ocSetText('roi-ratio', 'N/A');
+    $('roi-ratio').className = 'v';
+    ocSetText('roi-ratio-sub', 'no backend ROI sample');
+    ocSetText('roi-remaining', costOk && cost.budget?.remaining_usd != null ? ocBalance(cost.budget.remaining_usd, 4) : '--');
+    ocSetText('roi-remaining-sub', costOk && cost.budget?.daily_hard_cap_usd ? 'cap ' + ocBalance(cost.budget.daily_hard_cap_usd, 2) : 'budget unavailable');
+    const status = $('roi-status');
+    status.className = 'roi-status neutral';
+    ocSetText('roi-verdict', 'ROI data unavailable');
+    ocSetText('roi-basis', 'not evaluated without backend adaptive data');
+    const daily = Array.isArray(gateway.daily) ? gateway.daily.slice(-7).reverse() : [];
+    if (!daily.length) {
+      ocSetHtml('roi-daily-body', '<tr class="empty-row"><td colspan="3">No gateway daily cost data</td></tr>');
+      return;
+    }
+    let dailyHtml = '';
+    daily.forEach(day => {
+      const label = day.date || day.day || day.timestamp || '--';
+      const dayCost = day.totalCost ?? day.total_cost ?? day.cost ?? null;
+      const tokens = day.totalTokens ?? day.total_tokens ?? '--';
+      dailyHtml += '<tr><td>' + ocEsc(String(label)) + '</td><td>' + (dayCost != null ? ocBalance(dayCost, 4) : '--') + '</td><td>' + ocEsc(String(tokens)) + '</td></tr>';
+    });
+    ocSetHtml('roi-daily-body', dailyHtml);
+    return;
+  }
+
+  const spend = adaptive.ai_spend_7d_usd ?? null;
+  const pnl = adaptive.paper_pnl_7d_usd ?? null;
   const dataDays = adaptive.data_days ?? 0;
   const ratio = adaptive.cost_edge_ratio ?? adaptive.roi_7d ?? adaptive.roi ?? adaptive.ai_roi;
-  const remaining = cost.budget?.remaining_usd ?? 0;
-  const hardCap = cost.budget?.daily_hard_cap_usd ?? 0;
+  const remaining = cost.budget?.remaining_usd ?? null;
+  const hardCap = cost.budget?.daily_hard_cap_usd ?? null;
   const verdict = roiVerdict(ratio, dataDays);
 
-  ocSetText('roi-spend', ocBalance(spend, 4));
+  ocSetText('roi-spend', spend != null ? ocBalance(spend, 4) : '--');
   ocSetText('roi-spend-sub', dataDays + ' data days');
-  ocSetText('roi-pnl', ocBalance(pnl, 4));
-  $('roi-pnl').className = 'v ' + (pnl >= 0 ? 'green' : 'red');
+  ocSetText('roi-pnl', pnl != null ? ocBalance(pnl, 4) : '--');
+  $('roi-pnl').className = 'v ' + (pnl != null ? (pnl >= 0 ? 'green' : 'red') : '');
   ocSetText('roi-ratio', ratio === null || ratio === undefined ? 'N/A' : ocNum(ratio, 2) + 'x');
   $('roi-ratio').className = 'v ' + (verdict.cls === 'good' ? 'green' : verdict.cls === 'bad' ? 'red' : '');
   ocSetText('roi-ratio-sub', dataDays < 3 ? 'waiting for 3 days' : 'paper PnL / AI spend');
-  ocSetText('roi-remaining', ocBalance(remaining, 4));
-  ocSetText('roi-remaining-sub', hardCap ? 'cap ' + ocBalance(hardCap, 2) : 'today');
+  ocSetText('roi-remaining', remaining != null ? ocBalance(remaining, 4) : '--');
+  ocSetText('roi-remaining-sub', hardCap != null ? 'cap ' + ocBalance(hardCap, 2) : 'budget unavailable');
   const status = $('roi-status');
   status.className = 'roi-status ' + verdict.cls;
   ocSetText('roi-verdict', verdict.text);
@@ -614,9 +650,9 @@ async function loadCostRoiMonitor() {
   let html = '';
   daily.forEach(day => {
     const label = day.date || day.day || day.timestamp || '--';
-    const dayCost = day.totalCost ?? day.total_cost ?? day.cost ?? 0;
+    const dayCost = day.totalCost ?? day.total_cost ?? day.cost ?? null;
     const tokens = day.totalTokens ?? day.total_tokens ?? '--';
-    html += '<tr><td>' + ocEsc(String(label)) + '</td><td>' + ocBalance(dayCost, 4) + '</td><td>' + ocEsc(String(tokens)) + '</td></tr>';
+    html += '<tr><td>' + ocEsc(String(label)) + '</td><td>' + (dayCost != null ? ocBalance(dayCost, 4) : '--') + '</td><td>' + ocEsc(String(tokens)) + '</td></tr>';
   });
   ocSetHtml('roi-daily-body', html);
 }

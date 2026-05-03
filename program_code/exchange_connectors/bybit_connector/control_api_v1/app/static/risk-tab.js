@@ -444,17 +444,53 @@ async function askAIStopLoss() {
   const session = sessD.status === 'fulfilled' && sessD.value ? sessD.value.data : {};
   const orchestrator = stratD.status === 'fulfilled' && stratD.value ? stratD.value.data : {};
 
+  const missingContext = [];
+  if (!riskStatus || Object.keys(riskStatus).length === 0) missingContext.push('risk status endpoint unavailable');
+  if (!session || Object.keys(session).length === 0) missingContext.push('paper session endpoint unavailable');
+  if (!orchestrator || Object.keys(orchestrator).length === 0) missingContext.push('strategy status endpoint unavailable');
+  if (missingContext.length === 3) {
+    $('ai-advice-body').textContent =
+      '无法取得后端风控上下文，已停止 AI 咨询，避免使用伪造的 0 值。\n' +
+      'Backend risk context is unavailable. AI consultation was not sent to avoid fabricated zero values.';
+    $('btn-ask-ai').disabled = false;
+    $('btn-ask-ai').textContent = '🤖 向 AI 询问止损建议 / Ask AI';
+    return;
+  }
+
+  const fmtMoneyOrUnknown = (v, decimals = 2) => {
+    const n = Number(v);
+    return Number.isFinite(n) ? '$' + n.toFixed(decimals) : 'unavailable';
+  };
+  const fmtNumOrUnknown = (v, decimals = 0) => {
+    const n = Number(v);
+    return Number.isFinite(n) ? n.toFixed(decimals) : 'unavailable';
+  };
+  const fmtPctOrUnknown = (v) => {
+    const n = Number(v);
+    if (!Number.isFinite(n)) return 'unavailable';
+    return (Math.abs(n) <= 1 ? n * 100 : n).toFixed(2) + '%';
+  };
+
+  const pnl = session.pnl || {};
+  const sess = session.session || {};
+  const initialBalance = sess.initial_paper_balance_usdt ?? sess.initial_balance ?? null;
+  const netPnl = pnl.net_paper_pnl ?? null;
+  const displayBalance = Number.isFinite(Number(initialBalance)) && Number.isFinite(Number(netPnl))
+    ? Number(initialBalance) + Number(netPnl)
+    : null;
+
   const prompt = `You are an expert crypto trading risk manager. Analyze the current trading situation and recommend specific stop-loss settings.
 
 Current Account Status:
-- Balance: $${session.pnl ? (10000 + session.pnl.net_paper_pnl).toFixed(2) : '10000'}
-- Net PnL: $${session.pnl ? session.pnl.net_paper_pnl.toFixed(4) : '0'}
-- Open Positions: ${session.position_count || 0}
-- Total Orders: ${session.order_count || 0}
-- Drawdown: ${(riskStatus.drawdown_pct || 0).toFixed(2)}%
-- Governor Tier: ${riskStatus.governor_tier || 'NORMAL'}
-- Session Halted: ${riskStatus.session_halted || false}
-- Market Regime: ${orchestrator.market_regime || 'unknown'}
+- Balance: ${fmtMoneyOrUnknown(displayBalance)}
+- Net PnL: ${fmtMoneyOrUnknown(netPnl, 4)}
+- Open Positions: ${fmtNumOrUnknown(session.position_count)}
+- Total Orders: ${fmtNumOrUnknown(session.order_count)}
+- Drawdown: ${fmtPctOrUnknown(riskStatus.drawdown_pct ?? riskStatus.current_drawdown ?? riskStatus.drawdown)}
+- Governor Tier: ${riskStatus.governor_tier || 'unavailable'}
+- Session Halted: ${riskStatus.session_halted !== undefined ? String(riskStatus.session_halted) : 'unavailable'}
+- Market Regime: ${orchestrator.market_regime || 'unavailable'}
+- Data Quality: ${missingContext.length ? missingContext.join('; ') : 'all context endpoints returned data'}
 
 Risk Style: ${focus === 'conservative' ? 'Conservative — prioritize capital preservation, minimize drawdown' : focus === 'aggressive' ? 'Aggressive — accept higher volatility for potential returns' : 'Balanced — balance risk and reward'}
 
