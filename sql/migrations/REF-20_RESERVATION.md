@@ -28,11 +28,11 @@ Buffer：**V045-V050** 暫不綁 task，留給 unknown unknowns。
 
 | Migration | Task ID | Wave | 用途 / Purpose | 狀態 |
 |---|---|---|---|---|
-| **V036** | R20-P2a-S4 step 1 | Wave 3 | `replay_evidence_source_guard` — `verify_replay_evidence_and_insert()` PL/pgSQL function (SECURITY INVOKER) + GRANT EXECUTE TO replay_role | reserved |
-| **V037** | R20-P2a-S4 step 3 | Wave 3 | `replay_evidence_revoke_public_insert` — REVOKE INSERT ON learning.mlde_shadow_recommendations FROM PUBLIC（依賴 producer 切換完成）| reserved |
-| **V038** | R20-P2a-S6 step 1 | Wave 3 | `evidence_source_tier_add_column` — ADD COLUMN evidence_source_tier TEXT NULLABLE | reserved |
-| **V039** | R20-P2a-S6 step 2 | Wave 3 | `evidence_source_tier_backfill` — backfill via P0-T7 classification table | reserved |
-| **V040** | R20-P2a-S6 step 3 | Wave 3 | `evidence_source_tier_finalize` — ALTER NOT NULL + CHECK constraint allowlist | reserved |
+| **V036** | R20-P2a-S4 step 1 | Wave 3 | `replay_evidence_source_guard` — `verify_replay_evidence_and_insert()` PL/pgSQL function (SECURITY INVOKER) + GRANT EXECUTE TO replay_writer_role + PUBLIC fallback | **land 2026-05-03** (E1 sub-agent, 4 producer 同 commit 切換) |
+| **V037** | R20-P2a-S4 step 3 | Wave 3 | `replay_evidence_revoke_public_insert` — REVOKE INSERT ON learning.mlde_shadow_recommendations FROM PUBLIC + GRANT INSERT TO replay_writer_role + REVOKE EXECUTE FROM PUBLIC（operator deploy 順序：先 V036 + producer 切換驗 → 再 V037） | **land 2026-05-03** (E1 sub-agent，等 operator 在 Linux trade-core deploy) |
+| **V038** | R20-P2a-S6 step 1 | Wave 3 | `evidence_source_tier_add_column` — ADD COLUMN evidence_source_tier TEXT NULLABLE | **land 2026-05-03** (E1 sub-agent，等 operator 在 Linux trade-core deploy；3-step 步驟 1) |
+| **V039** | R20-P2a-S6 step 2 | Wave 3 | `evidence_source_tier_backfill` — backfill via P0-T7 classification table → 'real_outcome' (3 sources: dream_engine / ml_shadow / opportunity_tracker; 27 ml_shadow `engine_mode='live'` audit row 同 tier)；同步寫 governance_audit_log batch row | **land 2026-05-03** (E1 sub-agent，等 operator deploy；3-step 步驟 2；依賴 V035 + V038) |
+| **V040** | R20-P2a-S6 step 3 | Wave 3 | `evidence_source_tier_finalize` — ALTER NOT NULL + CHECK constraint allowlist (4 enum: real_outcome / calibrated_replay / synthetic_replay / counterfactual_replay) + sibling helper `V040_healthcheck.sql` (3 read-only probes: NULL count / tier distribution / constraint state) | **land 2026-05-03** (E1 sub-agent，等 operator deploy；3-step 步驟 3；依賴 V038 + V039；operator 必先跑 V040_healthcheck.sql 驗 0 NULL row 再 land V040) |
 | **V041** | R20-P3a-Q2 | Wave 5 | `replay_oos_embargo_enforcement` — DB CHECK constraint `embargo_days >= max(7, 2 × half_life)` | reserved |
 | **V042** | R20-P2a-S2 + G9 | Wave 3 | `replay_signing_keys` — key version archive table（key_version, generated_at, retired_at, expires_at 180d） | reserved |
 | **V043** | R20-P4-Q5 | Wave 6 | `replay_mlde_replay_veto_log` — MLDE rank/veto advisory output sink | reserved |
@@ -75,6 +75,8 @@ Buffer：**V045-V050** 暫不綁 task，留給 unknown unknowns。
 | 版次 | 日期 | 修訂者 | 摘要 |
 |---|---|---|---|
 | **v1** | 2026-05-03 | PM (R20-P0-T5) | 預留 V036-V050；綁定 9 個 reserved task migration + 6 個 buffer |
+| **v1.1** | 2026-05-03 | E1 (R20-P2a-S4) | V036 + V037 file artifacts landed (3-PR sequence step 1 + step 3)；4 producer 切換同 commit；V038-V040/V041-V044 仍 reserved 待後續 task 派發 |
+| **v1.2** | 2026-05-03 | E1 (R20-P2a-S6) | V038 + V039 + V040 file artifacts landed (3-step retrofit ADD nullable → backfill → ALTER NOT NULL+CHECK)；sibling helper `V040_healthcheck.sql` (3 read-only probes)；pytest fixture `tests/migrations/test_v038_v039_v040_evidence_source_tier.py` 17/17 PASS (Mac dev static-parse layer)；status reserved → land；V041-V044 仍 reserved 待後續 task 派發 |
 
 ---
 

@@ -2608,3 +2608,235 @@ PM 決策：fix module to match script（script 是 operator-facing canonical re
 
 ### 報告路徑
 - `srv/docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-03--ref20_p2a_s2_fingerprint_align_fix.md`
+
+---
+
+## 2026-05-03 — REF-20 Wave 3 P2a-S4 DB role REVOKE/GRANT 3-PR sequence (V036/V037 + 4 producer switch)
+
+### 上下文
+- PM dispatch Wave 3 batch 3A (4 parallel)；S4 對 `learning.mlde_shadow_recommendations` 寫入路徑加 verified function gate + REVOKE INSERT FROM PUBLIC
+- 3-PR sequence: V036 function (PR1) + 4 producer switch (PR2 同 commit) + V037 REVOKE (PR3)
+- 本 task 一次性交付 file artifacts；0 actual REVOKE 在 Mac dev env 執行 (operator deploy 控制時序)
+
+### 教訓 / Lessons
+1. **SECURITY INVOKER vs DEFINER**：V3 §4.2 #4 明確要求 INVOKER（DEFINER 會 bypass role grant，繞過 V037 REVOKE 設計）。E1 自然反射想用 DEFINER 簡化（function 在內部 INSERT 不管 caller 角色），但這違反 V3 contract。讀 V3 §4.2 仔細確認。
+2. **3-PR sequence 必拆：直接合併 V036+V037 = break live demo write**：若 V037 land 但 producer 未切換 → producer 直接 INSERT 全 fail-closed (permission denied)。V037 inline header 寫死 operator deploy 順序 + 警示（PR1 → PR2 + GRANT login role → PR3）。
+3. **function arg 與 schema column 暫時 mismatch (PR1 transitional state)**：V036 function 接受 `evidence_source_tier` / `replay_experiment_id` / `manifest_hash` / `expires_at` 4 個 column args 但 INSERT statement 不寫入（V038-V040 sibling task R20-P2a-S6 land 後才物理存在）。E1 在 V036 inline comment block 5 詳述這個 transitional state 給 E2 reviewer 看，避免被當 bug 退回。
+4. **mlde_demo_applier HIGH risk**：保留 hardcoded `engine_mode='live'` + `source='ml_shadow'` + `recommendation_type='experiment_plan'` + LG-5 §2.1 `schema_version` payload。V3 §4.2 P0-T7 classification 確立 27 既有 row 全屬 `evidence_source_tier='real_outcome'` legacy LG-5 audit trail，**非** replay-derived。`_build_live_candidate_payload` helper 邏輯 0 變動。
+5. **LG-5 reviewer pipeline 影響 = 0**：consumer 從 `(applied=false, requires_governance=true)` filter；不依賴 INSERT RETURNING；audit chain `mlde_param_applications.recommendation_id` 由 `_record_application` 寫入路徑保留。
+6. **V037 Guard A 用 WARNING (非 RAISE) 處理 0-member-role + PUBLIC-INSERT-still-present 情境**：因 V037 也可能在 fresh / dev DB 上跑，role 未 GRANT 的 dev case 不應 block；prod 部署的 GRANT 由 operator runbook 強制流程確保。
+7. **producer 切換 try/except 模式**：verified function reject → log warning 不 crash producer scheduler thread。`inserted` 計數從 raw `len(insights)` 改為 try/except inside loop 的成功 increment，反映真實寫入 row 數（reject row 排除）。
+8. **pytest mock-mode + live PG opt-in 二段式**：mock-mode 鏡射 V036 PL/pgSQL semantic（pure-Python validation），Mac dev 即可 100% PASS（10 cases）；live PG 路徑 (V037 REVOKE / GRANT) 用 `OPENCLAW_TEST_LIVE_PG=1` env-gate 在 Linux opt-in。
+
+### Producer 切換 4 點 + Risk 級別總結
+
+| Producer | File:Line | Risk | 變量保留 |
+|---|---|---|---|
+| dream_engine.persist_dream_insights | dream_engine.py:343-403 | LOW | source='dream_engine' literal；engine_mode 變量 |
+| opportunity_tracker.persist_regret_summary | opportunity_tracker.py:230-282 | LOW | source='opportunity_tracker' literal |
+| mlde_shadow_advisor._persist_recommendations | mlde_shadow_advisor.py:296-365 | MEDIUM | rec.source / rec.recommendation_type / rec.engine_mode 全變量 |
+| mlde_demo_applier._insert_live_candidate | mlde_demo_applier.py:1188-1276 | HIGH | hardcoded 'live'/'ml_shadow'/'experiment_plan' + LG-5 §2.1 schema_version payload |
+
+### Tests
+- 12 pytest cases: 10 mock-mode PASSED + 2 live PG SKIPPED (env-gate)
+- 4 producer Python AST compile clean
+- cross-platform path grep clean (0 `/home/ncyu` / `/Users/<name>` literals)
+- 0 残留 direct INSERT into mlde_shadow_recommendations across 4 producers
+- 15 verified_replay_evidence_and_insert call sites across 4 producers
+
+### 報告路徑
+- `srv/docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-03--ref20_wave3_p2a_s4_db_role_revoke_grant.md`
+
+---
+
+## 2026-05-03 — REF-20 Wave 3 P2a-S3 — 8-route auth scaffold
+
+### 工作範圍
+- 新建 `program_code/exchange_connectors/bybit_connector/control_api_v1/app/replay_routes.py`（902 LOC）
+- 新建 `program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_replay_routes_auth.py`（281 LOC，4 cases）
+- 修 `program_code/exchange_connectors/bybit_connector/control_api_v1/app/main.py`（+12 LOC 註冊 `replay_router`）
+
+### 8 routes（V3 §6 + workplan Wave 4 R20-P2b-T2）
+- POST `/api/v1/replay/run`（Operator + replay:write）
+- GET `/api/v1/replay/status`（auth-only）
+- POST `/api/v1/replay/cancel`（Operator + replay:write）
+- GET `/api/v1/replay/report/{experiment_id}`（auth-only）
+- GET `/api/v1/replay/manifests`（auth-only）
+- POST `/api/v1/replay/manifest/verify`（Operator + replay:write，501 scaffold stub）
+- GET `/api/v1/replay/health/signature`（auth-only）
+- GET `/api/v1/replay/list`（auth-only）
+
+### 關鍵設計決策
+- **Concurrency cap**：in-memory `_ACTIVE_RUNS: dict[actor_id, run_state]` + `_ACTIVE_RUNS_LOCK: asyncio.Lock`；atomic check-and-set 在 lock 內。Wave 4 R20-P2b-T2 切換 PG advisory lock。
+- **Cap 超出 → 409 不 5xx**（per dispatch 紅線 "forbidden state 回 4xx 不 5xx"）：
+  - per-actor cap exceeded：reason `replay_per_actor_cap_exceeded`
+  - global cap exceeded（不同 actor）：reason `replay_global_cap_exceeded`
+- **Auth 分層**：
+  - Read-only routes（status/report/manifests/health/list）：僅 `Depends(base.current_actor)` → 401 on unauth。
+  - Mutating routes（run/cancel/manifest/verify）：另加 `_require_replay_write(actor)` → `require_scope_and_operator(actor, "replay:write")` → 403 on no scope/role。
+- **`_safe_pg_select` mirror agents_routes_helpers**（V3 §12 #22）：with `get_pg_conn()` + `SET LOCAL statement_timeout=2s` + try/except → 回 `(rows, err_or_none)` → caller surface `degraded` flag；PG 中斷 → 200+degraded 不 5xx。
+- **Audit emit STUB**：log INFO only，0 actual INSERT（V035 enum CHECK 不接受 `replay_*` event_type；Wave 4 PM 決策 enum extend vs reuse `audit_write_failed` + `alert_type` discriminator）。
+- **manifest/verify 501**：ManifestSigner module ready（P2a-S2）但 SQL KeyArchive 待 P2a-S4；scaffold 階段返 501 + reason `replay_verify_not_wired`。
+
+### 紅線守則（全達成）
+- 0 wiring 到 `replay_runner` Rust 二進位
+- 0 INSERT/UPDATE/DELETE 寫入 `trading.*` / live config
+- 0 修改既有 `auth_routes_common.py` / `scout_routes.py` / `risk_routes.py`
+- 0 PG schema mutation
+- 0 hardcoded `/home/ncyu` / `/Users/<name>` literal（grep 0 hit）
+
+### 驗證
+- pytest 4/4 PASS（test_unauthenticated_post_run_returns_401 / test_authenticated_zero_active_run_post_run_accepts / test_authenticated_per_actor_cap_returns_409 / test_authenticated_global_cap_returns_409）
+- `python3 -m py_compile` PASS（replay_routes.py + main.py）
+- `from app.main import app` 整合測：248 routes total，8 replay routes 全註冊
+- 1 deprecation warning（Pydantic v1 `@validator`）— 與 codebase 一致（scout_routes.py 同 pattern）
+
+### 後續 Wave wiring 點（TODO REF-20 R20-P2b-T2 marker）
+- POST /run：wire 到 `replay_runner` IPC spawn + 驗 `replay.experiments` row 存在 + signature_verified
+- GET /status：對照 `replay.experiments.status` 欄位
+- POST /cancel：發送 cancel signal via IPC + 更新 `replay.experiments.status='cancelled'`
+- GET /report/{id}：query `replay.report_artifacts`
+- GET /manifests：query `replay.experiments WHERE created_by=actor`
+- POST /manifest/verify：wire `ManifestSigner.verify(...)` + P2a-S4 SQL KeyArchive
+- GET /list：query `replay.experiments` 全表（with status_filter）
+- `_emit_audit_stub` → 真實 INSERT（PM 決策 enum extend vs alert_type discriminator 後）
+
+### Singleton 登記（待 E2 補入 CLAUDE.md §九）
+- `_ACTIVE_RUNS: dict[str, dict[str, Any]]` @ replay_routes.py L160
+- `_ACTIVE_RUNS_LOCK: asyncio.Lock` @ replay_routes.py L168
+- `replay_router: APIRouter` @ replay_routes.py L121
+
+### LOC budget 標記
+- `replay_routes.py` 902 LOC > §九 800 警告線（< 1500 hard limit）；E2 必標記。
+- 拆分風險：8 routes 屬同 logic domain（auth + cap + safe_pg + audit），拆 helpers 增加 indirection。建議 E2 accept-and-flag（per agents_routes 先例：`agents_routes_helpers.py` 拆出僅在到 800 才做）。
+
+### 報告路徑
+- `srv/docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-03--ref20_wave3_p2a_s3_replay_routes_auth.md`
+
+## 2026-05-03 — REF-20 R20-P2a-S6: evidence_source_tier 3-step retrofit migration
+
+### Wave / 主題
+- Wave 3 P2a-S6 retrofit migration
+- 對 `learning.mlde_shadow_recommendations` 加 `evidence_source_tier` column 並回填
+- 3-step (V038 ADD nullable → V039 backfill → V040 ALTER NOT NULL+CHECK) per V3 §7.1 風險 #3
+- 對齊 V3 §3 G3 + §4.2 evidence-source allowlist
+
+### 交付清單
+- `sql/migrations/V038__add_evidence_source_tier.sql` — ADD COLUMN nullable + Guard B (column type drift)
+- `sql/migrations/V039__backfill_evidence_source_tier.sql` — UPDATE NULL → real_outcome (3 P0-T7 sources) + governance_audit_log row
+- `sql/migrations/V040__finalize_evidence_source_tier.sql` — ALTER SET NOT NULL + ADD CHECK (4-enum allowlist) + Guard B/B'
+- `sql/migrations/V040_healthcheck.sql` — 3 read-only probes (NULL count / distribution / constraint state)
+- `tests/migrations/test_v038_v039_v040_evidence_source_tier.py` — 17 static-parse tests, 17/17 PASS
+- `sql/migrations/REF-20_RESERVATION.md` v1.2 — V038/V039/V040 reserved → land
+- `docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-03--ref20_wave3_p2a_s6_evidence_tier_retrofit.md`
+
+### 驗證
+- `python3 -m pytest tests/migrations/test_v038_v039_v040_evidence_source_tier.py -v` → **17/17 PASS** (0.01s)
+- `grep -E '(/home/ncyu|/Users/[^/]+)' V038/V039/V040/healthcheck/test` → **NO_HARDCODED_PATHS**
+- 4 SQL file 中英表頭 grep `Purpose / 目的` → 4/4 hit
+- pytest test layer 也驗：bilingual header / Guard B existence / IS NULL idempotent guard / 4-value enum CHECK / read-only healthcheck
+
+### 經驗教訓
+
+1. **3-step retrofit pattern 是 hypertable + 持續寫入流量時的唯一安全選擇**：本 task `learning.mlde_shadow_recommendations` 是 ~2,482 row 4-day window + 每小時 cycle 持續寫入。若 V038 一次 `ADD COLUMN ... NOT NULL DEFAULT` 會：(a) 觸發 hypertable 全表 rewrite 鎖表 (b) 違反 V3 §7.1 風險 #3 的 explicit 紅線 (c) 與 P0-T7 ambiguous-classification SOP 脫鉤。**規則：對既有 row > 0 + 持續寫入流量 + hypertable 的 add-not-null retrofit，必拆 3-step (ADD nullable → mass UPDATE → ALTER NOT NULL+CHECK)；單步 ADD COLUMN NOT NULL DEFAULT 只在 row=0 fresh table 安全**。
+
+2. **`UPDATE ... WHERE evidence_source_tier IS NULL` 是 idempotency + 防 force-overwrite 的雙保險**：第 2 次 apply 時 IS NULL guard 已被第 1 次 apply 清空 → UPDATE 0 row（idempotent）；同時也防止「未來 producer 寫了非 NULL 值（e.g. P3 calibrated_replay）後重 run V039 把它改回 real_outcome」的 silent corruption。**規則：mass UPDATE backfill 必含「目標欄位 IS NULL」WHERE filter，雙重保護（幂等 + 不蓋未來新值）；無此 filter 的 mass UPDATE 是嚴重反模式**。
+
+3. **Guard B precheck 0 NULL row → ALTER SET NOT NULL 友善失敗**：V040 在 `ALTER SET NOT NULL` 前先 SELECT COUNT(*) WHERE IS NULL，>0 時 RAISE 帶 recovery 步驟（找 source / PM classify / 補 backfill / 重跑）；不依賴 Postgres 的「ALTER 失敗 atomic 中止」原始錯誤訊息（雖然 atomic 但訊息不友善）。**規則：每個 SET NOT NULL 前必加 NULL count Guard B + recovery instruction，給 operator 清晰的錯誤上下文，比 raw Postgres "column contains null values" 更易處理**。
+
+4. **`current_setting(name, true)` 第二參 missing_ok=true 是必加的 fallback**：V039 audit row 想標記環境用 `current_setting('replay.migration_env', true)`；若 operator 沒設 GUC 變數，第二參 true 讓返回 NULL 而非 RAISE「unknown parameter」。注意 `current_setting()` 不加第二參會在 GUC 未設時 ERROR。**規則：要寫 audit row 帶 environment tag 但又不想強制 operator SET GUC，必用 `current_setting(name, true)` + DO block 內 NULL fallback；這是 PostgreSQL 17+ 通用 idiom**。
+
+5. **CHECK constraint conditional ADD 必用 `pg_constraint conname` 而非 `IF NOT EXISTS`**：Postgres 不支援 `ADD CONSTRAINT IF NOT EXISTS`（只 `CREATE TABLE` / `CREATE INDEX` 等支援）。本檔模式：`IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = ... AND conrelid = ...) THEN ALTER TABLE ADD CONSTRAINT ... END IF;`。**規則：對 ALTER TABLE ADD CONSTRAINT 的 idempotency 必須走 pg_constraint conname EXISTS check + DO block，而非 ADD CONSTRAINT IF NOT EXISTS（Postgres 不支援）**。
+
+6. **Mac dev pytest 是 static-parse layer，不是 DB integration**：本 task pytest 17 個 test 全部用 `Path.read_text()` + `re.search()` 驗 SQL file 結構契約（ADD COLUMN 有無 NOT NULL / WHERE IS NULL filter / CHECK IN list 4 values / read-only healthcheck）。**真 DB integration 由 Linux operator psql apply 時跑 V040_healthcheck.sql 完成**。本層的價值：E2 review 前 Mac dev 可獨立驗結構正確，避免 PR 進到 Linux 才發現 SQL 寫錯。**規則：跨平台 (Mac dev / Linux runtime) 開發中，Mac 端應提供「靜態 parse / structural assert」test layer 而非 DB integration test；DB integration 應該在 Linux 部署時 healthcheck 完成；兩層各司其職，不要混著做**。
+
+7. **Sibling sub-agent 並行同檔 ledger 修改的處理**：本 task 在 update REF-20_RESERVATION.md 時，第 1 次 Edit 失敗（`File has been modified since read`）— sibling V036/V037 sub-agent 已先 update 該 file。處理流程：(1) Read 取最新版 → (2) 看 sibling 改了什麼 → (3) 在最新版 base 上加自己的 row update + 新 history row（v1.2 而非 v1.1，因 v1.1 已被 sibling 用）。**規則：多 sub-agent 並行同 ledger file 時，必每個 Edit 前 Read 最新版；history version 號要看當前最高 + 1，不可預設「我是 v1.1」**。
+
+### Cross-platform compliance
+- 0 hardcoded `/home/ncyu` / `/Users/<name>` 在 5 個新檔（4 SQL + 1 pytest）
+- pytest 用 `Path(__file__).resolve().parents[2]` 推 srv/ root（不依 cwd / 不依 env var）
+- SQL file 全用 schema-qualified names (`learning.mlde_shadow_recommendations` / `learning.governance_audit_log`)，無 file-system path
+
+### Bilingual comment compliance（CLAUDE.md §七 強制）
+- 4 SQL file header 全中英對照（Purpose / 目的、3-step sequence / 三步序列、Migration order / 遷移順序、Idempotency / 幂等性、Guard B / Guard B、Spec source / 規格來源、Reservation source / 編號預留）
+- 每個 Guard DO block 中英對照解釋意圖
+- COMMENT ON COLUMN 中英對照（V038 加 + V040 refresh）
+- pytest module/class/function docstring 中英對照
+- pytest 測試中 inline 註解中英對照（why we do X / 為什麼這樣做）
+- ledger row 描述中文為主，技術名詞保留英文
+
+### 報告路徑
+- `srv/docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-03--ref20_wave3_p2a_s6_evidence_tier_retrofit.md`
+
+## 2026-05-03 — REF-20 R20-P2a-S5: Manifest quota enforcer + artifact prune cron (Wave 3 Batch 3A)
+
+### Wave / 主題
+- Wave 3 Batch 3A 4-parallel 的 S5 — quota enforcement Python class + 6-hourly prune cron
+- 對齊 V3 §3 G9 + §5 (Manifest, Quota, Retention) + §12 #4 (quota guard) + #14 (no_live_mutation)
+- Configuration: per-actor 20 manifest / per-actor 1 run / global 1 run (P2/P3) / env-specific storage cap (default 1024 MB env var override) / manifest TTL 30d
+- 配對交付：enforcer 在 routes 物化前 gate (P2a-S3 sub-agent owns wiring) + cron 每 6h 後台清 expired artifact 釋放容量
+
+### 交付清單
+- `program_code/exchange_connectors/bybit_connector/control_api_v1/replay/quota_enforcer.py` — `ReplayQuotaEnforcer` class（4 enforce method + `mark_manifest_expired`）+ `ReplayQuotaExceededError`（`quota_kind` discriminator）+ `QuotaCheckResult` dataclass + 5 module-level cap constants（mode 0644 / 728 LOC）
+- `helper_scripts/cron/replay_artifact_prune.py` — 6-hourly cron: TTL prune (`DELETE FROM replay.report_artifacts USING replay.experiments WHERE expires_at < NOW()`) + per-env oldest-first storage cap prune + V035 audit row per batch（mode 0755 / 601 LOC）
+- `program_code/exchange_connectors/bybit_connector/control_api_v1/tests/replay/test_quota_enforcer.py` — pytest 5 cases（mode 0644 / 417 LOC）
+- `helper_scripts/cron/test_replay_artifact_prune.py` — pytest 3 cases（mode 0644 / 366 LOC）
+- `docs/runbooks/replay_signing_key_rotation.md` — 加新 §4.4 (Manifest TTL prune + storage cap cron) + §4.4.1 env var override + §4.4.2 SQL equivalent + §4.4.3 cron monitoring
+
+### 紅線守則（全達成）
+- 0 PG schema mutation（純 Python module + cron）
+- 0 trading.* / live config write（grep 4 hits all in docstring negation phrasing per V3 §12 #14 disclaimer）
+- 0 GovernanceHub / Decision Lease / IPC / dispatch / Bybit REST/WS coupling
+- 0 hardcoded user-home path（grep 0 hit）
+- mode 0755 cron / 0644 enforcer + tests strict
+- Storage cap 走 env var `OPENCLAW_REPLAY_ARTIFACT_STORAGE_CAP_MB`（不 hardcode）
+- 雙語 comment: 4 個 MODULE_NOTE block + docstring 雙語 + inline 雙語
+
+### 驗證
+- `pytest test_quota_enforcer.py test_replay_artifact_prune.py -v` → **8/8 PASS** (5 enforcer + 3 cron, 0.04s)
+- 全 replay test dir + sibling cron pytest → **25/25 PASS**（0 sibling regression）
+- `python3 -m py_compile` 4 檔 → exit=0
+- `grep -E '(/home/ncyu|/Users/[^/]+)'` 4 新檔 → 0 hit
+- `wc -l`：728 / 601 / 417 / 366（皆 < 800 警告線）
+
+### 經驗教訓
+
+1. **Schema-absent graceful pattern 對齊 sibling cron 統一性**：本 task 與 sibling P2a-S1 `replay_key_archive_cleanup.py` 的 V042 graceful pattern（`_v042_present(cur)` False → log + exit 0）必須對齊。Replay schema (experiments + report_artifacts) 由 V3 §6 + REF-20_RESERVATION.md 明確說「P2b runner SQL fixture land Wave 3-4，**不佔 migration 編號**」。所以本 IMPL 的 `_replay_schema_ready(cur)` probe **兩**個表（experiments + report_artifacts 都需在），缺任一 → graceful exit 0。Enforcer 同樣 probe 對應表（mark_manifest_expired probe experiments / enforce_artifact_storage probe report_artifacts）。**規則：跨 sub-agent 並行 P2a/P2b 任務時，schema-absent graceful 必對齊 sibling pattern；不一致會讓 routes wire 後出現 enforcer 拒絕 + cron exit 0 矛盾的尷尬狀態。E2 必查 `_table_exists` / `_v042_present` 等 probe function 是否走同一 information_schema 模式**。
+
+2. **`from replay.X import Y` vs `from app.replay.X import Y` import path 確認**：第一版測試我寫 `from app.replay.quota_enforcer import ...`，pytest 會 fail（package path 不存在）。實情：control_api_v1 tests/conftest.py 設 `PROJECT_ROOT = Path(__file__).resolve().parents[1]` = `control_api_v1` 並 push 進 sys.path，所以 sibling test (`test_manifest_signer_xlang_consistency.py`) 用 `from replay.manifest_signer import ...` (而非 `from app.replay....`)。**規則：寫 sibling test 之前必先 grep 現有 test 的 import statement**（`grep "^from \|^import" sibling_test.py`），跟著 conftest.py 的 PROJECT_ROOT 規定走，不要假設 dotted path 的 `app.X` 模式。
+
+3. **V035 audit enum 用 `audit_write_failed` + payload alert_type 是 sibling task 共識**：V035 `event_type` CHECK 不含 `replay_*`。對齊 sibling P2a-S1 pattern，本 IMPL 也用 `audit_write_failed` + `payload.alert_type='replay_artifact_prune_*'`。後續 sibling task R20-P2a-S6 / 其他 task 擴 enum 後雙腳本同步切換。**規則：跨 sub-agent 並行的 audit row pattern 必對齊；後續 alarm 規則 query 應 always include `payload->>'alert_type'` filter（既有 LG-5 + sibling P2a-S1 pattern）；不對齊 = alarm 規則需逐 task case-by-case 添加，技術債累積**。
+
+4. **`while ... and iter_count < max_iter` defensive bound 而非單 while-true**：`_prune_oldest_for_storage_cap` 的 oldest-first DELETE loop 不能寫 `while sum > cap_bytes`（理論單 pass 即可，但 schema corruption 或 SUM/DELETE drift 會 infinite loop）。本實作用 `while ... and iter_count < max_iter` (max_iter=100,000) + 觸發 max_iter 時 `log.warning` 但 cron exit code 仍 0（不為防禦觸發 fail loud；後續 healthcheck 監控）。**規則：cron 的 unbounded loop 必加 max_iter defensive bound + warning log；不要硬退出，這是 fault-tolerant pattern；對 schema corruption / DB drift 提供下一次 cron 重試機會**。
+
+5. **DB-API cursor mock fake 必須對 SQL substring 區分多種 query**：5 個 enforcer test + 3 個 cron test 共用一個 `_FakeCursor` class pattern，內部用 `if "select count(*)" in sql_lower and ... in sql_lower:` 多分支區分 manifest/run/global query。關鍵是「distinct sql substring」 — 比如 manifest count 含 `"created_by"` + `"expires_at"` + `"status"`，而 actor run count 含 `"created_by"` + `"status in ('created', 'running')"` 但不含 `"expires_at"`，global run count 同前但不含 `"created_by"`。**規則：fake cursor mock 寫多分支時，必確保每分支 SQL substring identifier 互斥（測試運行確認用 actually-different SQL kwargs）；否則 first-match wins 會導致 wrong fetchone 回傳，wrong assertion，false-PASS bug**。
+
+6. **Storage cap env var single vs per-env trade-off**：V3 §5 row 「artifact storage cap = implementation defines env-specific cap before P2a merge」沒明確要求 per-env。本 IMPL 選 single env var (`OPENCLAW_REPLAY_ARTIFACT_STORAGE_CAP_MB`) + SQL `WHERE env = ?` 做 env scope 分離。**Alternative**：三條 env var（`*_PAPER_MB` / `*_DEMO_MB` / `*_LIVE_MB`）。否決理由：(a) operator 通常一個 cluster 一致設定 (b) 後續 sprint 若需要可擴成 dict env var (`OPENCLAW_REPLAY_ARTIFACT_STORAGE_CAPS_MB='{"paper":200,...}'`) 不破現 API。**規則：對 spec 模糊度高（「implementation defines」）的 cap 配置，先選最簡單（single var）+ 留可擴展空間（dict env var pattern）；別第一版就上複雜結構，spec 模糊 = MVP 立場**。
+
+7. **`mark_manifest_expired` 的 idempotent UPDATE WHERE filter 對齊 backfill pattern**：UPDATE `WHERE experiment_id = ? AND (expires_at IS NULL OR expires_at > NOW())` 的設計：(a) 對已 expired manifest 重 mark 是 no-op（RETURNING 空 → return False） (b) NULL expires_at 也 match 因 schema 可能 INSERT 時 NULL pending mark — 視為「forever active 從未自動過期」並符合此 WHERE 條件。**規則：Idempotent UPDATE 的 WHERE filter 不只防重做，還要對齊 schema 的 NULL semantic（NULL 視為「目標 state 之外」可被 update / 不視為 already-expired）；NULL 處理是 mass UPDATE 的 silent corruption 風險點，與 V038/V039/V040 evidence_tier_backfill 的 IS NULL guard 同 spirit**。
+
+### Cross-platform compliance
+- 0 hardcoded `/home/ncyu` / `/Users/<name>` 在 4 個新檔
+- 4 檔皆用 env var (`OPENCLAW_DATABASE_URL` / `POSTGRES_*` / `OPENCLAW_REPLAY_ARTIFACT_STORAGE_CAP_MB`) 配置
+- pytest 用 `Path(__file__).resolve().parent` 推 cron dir，不依 cwd / 不依絕對 path
+- 對齊 sibling `replay_key_archive_cleanup.py` DSN sourcing pattern
+
+### Bilingual comment compliance（CLAUDE.md §七 強制）
+- 4 檔 MODULE_NOTE 全中英雙塊（EN / 中）+ Spec source / 規格來源 cross-ref
+- Class / function / method docstring 全中英對照
+- 關鍵 constant + invariant + SAFETY 注釋雙語（如 `MANIFEST_TTL_DAYS = 30`、loop bound rationale、graceful fallback rationale）
+- 5 module-level constants 雙語 docstring
+- pytest module / class / function / fixture docstring 全中英對照
+- pytest 測試 inline 註解中英對照（why we test X / 為什麼這樣測）
+
+### LOC budget 標記
+- 4 檔皆 < 800 警告線（728 / 601 / 417 / 366）
+- E2 review 看是否需拆分（建議不拆，4 檔皆內聚於 quota domain）
+
+### 後續 wiring（P2a-S3 sub-agent 已 ship 8 routes scaffold）
+- 在 `replay_routes.py` 的 manifest/run/artifact-creating endpoint 注入 `enforcer.enforce_*()` call
+- catch `ReplayQuotaExceededError` → 轉 HTTP 429（rate limit semantic）+ payload `quota_kind` + `remaining` + `cap` 給 operator UX
+- routes scaffold 已含 `_ACTIVE_RUNS` lock 模式（per-actor + global cap），但目前是 in-memory；本 enforcer 提供 SQL-backed source-of-truth 替換路徑
+
+### 報告路徑
+- `srv/docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-03--ref20_wave3_p2a_s5_quota_prune.md`
