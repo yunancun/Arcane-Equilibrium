@@ -139,6 +139,7 @@
 | **P2-AUDIT-4** | MIT-S2-2/3/4/6（demo→live promotion contract / regret_summary ceiling / V031 view scaling / opp_tracker noise）| @E1 |
 | **P2-AUDIT-5** | QC-S2-01/02/04/09（scanner posterior LCB hardcoded / promotion distribution shift / TOML triple-env 違反 / PRE-LIVE-3 thresholds RFC 缺）| @QC + @PA |
 | **P2-AUDIT-6** | E3-S2-P2-1/P2-2 exception leak；E3-S2-P3-1 file mode 0600 | @E1 |
+| **P2-AUDIT-7** | V044 P6-S15 enum DROP+ADD 缺 LOCK TABLE ACCESS EXCLUSIVE；補回同 V053 race-free retrofit pattern（BEGIN+LOCK TABLE ... ACCESS EXCLUSIVE+COMMIT 包裹 + probe-short-circuit-before-lock）— REF-20 Sprint 1 Track C V053 落地時 E2/E3 同 incident 反例覆蹤 | @E1 |
 
 詳述 → `docs/archive/2026-05-02--TODO-pre-trim-snapshot.md` § Top P2 / P3 backlog
 
