@@ -114,15 +114,74 @@ REF-20 V3 §5 specifies HMAC-SHA256 server-side signing for all replay manifests
    ```
 7. **Audit row 寫入** `learning.governance_audit_log`（actor, action='replay_key_rotation', old_fp, new_fp, ts）。
 
-### 4.3 180d Retention Cleanup
+### 4.3 180d Retention Cleanup + Daily Rotation Check Cron
 
-舊 key 滿 180d 自動進入 `expired` 狀態，由 cron job（`helper_scripts/cron/replay_key_archive_cleanup.py`，P2a-S2 一併 land）每日跑:
+舊 key 滿 180d 自動進入 `expired` 狀態，由兩個 daily cron 共同維護 90d/180d 視窗：
+
+The 90d rotation window and the 180d retention window are jointly maintained by two daily cron entries that ship as REF-20 P2a-S1:
+
+| Cron 腳本 / Cron script | 路徑 / Path | 用途 / Purpose | 預設排程 / Default schedule |
+|---|---|---|---|
+| `replay_key_rotation_check.sh` | `helper_scripts/cron/replay_key_rotation_check.sh` | 每日檢查每 env active key 是否進入「rotation_due_at 距今 ≤7d」的 alert 視窗（§4.1 trigger condition）。命中即 ALERT（exit 1 + governance audit row + stderr）。 / Daily probe `rotation_due_at` ≤7d alert window per §4.1. ALERT on hit (exit 1 + audit row + stderr). | `0 9 * * *` |
+| `replay_key_archive_cleanup.py` | `helper_scripts/cron/replay_key_archive_cleanup.py` | 每日將 `status='retired' AND retention_until<NOW()` 的 row UPDATE 為 `status='expired'`，每筆寫一 governance_audit_log row。 / Daily flip retired rows past `retention_until` to `expired`; one audit row per flipped key. | `30 9 * * *` |
+
+兩個 cron 對 V042（`replay.replay_signing_keys`）absent 都做 graceful fallback：rotation check 用 filesystem mtime + 90d 規則；cleanup 直接 exit 0 + log。**這允許 cron 條目在 V042 land 之前就先安裝**。
+
+Both cron entries gracefully fall back when V042 (`replay.replay_signing_keys`) is not yet applied: rotation check uses filesystem mtime + 90d rule; cleanup exits 0 + logs. **This permits installing the cron entries before V042 lands.**
+
+### 4.3.1 安裝步驟 / Installation steps
+
+Operator 在 Linux trade-core 上：
+
+```bash
+# 1. 確認 OPENCLAW_BASE_DIR 已 export 至 operator 的 cron environment（或在 crontab 內 inline）
+# 1. Confirm OPENCLAW_BASE_DIR is exported to operator's cron environment (or inlined in crontab)
+crontab -l   # 看現有條目 / inspect existing entries
+
+# 2. crontab -e 加以下兩行（範例，inline literal path）/ crontab -e add the two lines (example)
+0  9 * * * /home/ncyu/BybitOpenClaw/srv/helper_scripts/cron/replay_key_rotation_check.sh
+30 9 * * * /home/ncyu/BybitOpenClaw/srv/helper_scripts/cron/replay_key_archive_cleanup.py
+
+# 3. 驗證腳本權限（rotation 0755 / cleanup 0644 invoked via interpreter shebang）
+# 3. Verify permissions (rotation 0755 / cleanup 0644 invoked via interpreter shebang)
+ls -l "$OPENCLAW_BASE_DIR/helper_scripts/cron/replay_key_*"
+```
+
+兩個 cron 都需要 `OPENCLAW_SECRETS_DIR` + `OPENCLAW_DATA_DIR`（詳 CLAUDE.md §六）；cron environment 不繼承 operator shell env，須在 crontab 開頭顯式 export，例：
+
+Both crons require `OPENCLAW_SECRETS_DIR` + `OPENCLAW_DATA_DIR` (see CLAUDE.md §六); cron environment does not inherit operator shell env, so set them explicitly at the top of crontab:
+
+```cron
+OPENCLAW_BASE_DIR=/home/ncyu/BybitOpenClaw/srv
+OPENCLAW_DATA_DIR=/tmp/openclaw
+OPENCLAW_SECRETS_DIR=/home/ncyu/BybitOpenClaw/secrets/secret_files/bybit
+OPENCLAW_SECRETS_ROOT=/home/ncyu/BybitOpenClaw/secrets
+```
+
+### 4.3.2 Cron monitoring / Cron 監控
+
+| 機制 / Mechanism | 觸發 / Trigger | 操作員處置 / Action |
+|---|---|---|
+| **cron mailer**（`/etc/aliases` `root:` 設個郵箱） | 任一 cron tick exit ≠ 0 → cron 發 mail（含 stderr）/ any cron tick exit ≠ 0 → mail with stderr | 收到 ALERT mail 即 §4 rotation；收到 cleanup 失敗 mail → 排查 PG 連線 |
+| **journald**（systemd 系統，預設啟用） | `journalctl -u cron --since '1 day ago'` 看 cron 啟動 / runtime / exit 行 | 沒看到 daily entry = cron 未跑（OS / cron daemon 問題） |
+| **Log 文件直查** | `tail -100 /tmp/openclaw/logs/replay_key_rotation_check.log` `tail -100 /tmp/openclaw/logs/replay_key_archive_cleanup.log` | 任一 log 檔超過 24h 未 append = silent dead；同 `[42b]` healthcheck 模式 |
+| **Healthcheck integration**（後續可加，目前未實作） | `helper_scripts/db/passive_wait_healthcheck.py` 可加 `check_replay_signing_key_rotation()` SELECT MAX(generated_at) | 補在後續 sprint，與既有 42 check 風格一致 |
+
+### 4.3.3 SQL 等值（cleanup 腳本內部行為）/ SQL equivalent (cleanup script internal behaviour)
+
+`replay_key_archive_cleanup.py` 等同每日跑：
+The cleanup script is equivalent to running daily:
 ```sql
 UPDATE replay.replay_signing_keys
 SET status = 'expired'
-WHERE retention_until < NOW() AND status = 'retired';
+WHERE retention_until < NOW() AND status = 'retired'
+RETURNING env, fingerprint, retention_until;
+-- 對每 row 寫一 governance_audit_log row（payload.alert_type='replay_key_archive_expired'）
+-- one governance_audit_log row per RETURNING row (payload.alert_type='replay_key_archive_expired')
 ```
-進入 `expired` 後，該 key 簽的歷史 manifest 永久不可再驗證 → 任何 `verify` 請求回 `key_expired` fail-mode。
+
+進入 `expired` 後，該 key 簽的歷史 manifest 永久不可再驗證 → 任何 `verify` 請求回 `key_expired` fail-mode（§6）。
+After `expired`, manifests signed by that key are permanently unverifiable → any `verify` request returns `key_expired` fail-mode (§6).
 
 ---
 
