@@ -2,14 +2,17 @@
 //!
 //! `replay_runner` — REF-20 Paper Replay Lab 專屬 Rust binary。
 //!
-//! MODULE_NOTE (EN): Wave 3 R20-P2b-S7 cfg gate runtime entry. Wave 1 scaffold
-//!   established the binary at the type level (Cargo.toml `[[bin]]` registered
-//!   + `replay_isolated` feature gated). Wave 3 P2b-S7 wires the runtime
-//!   contract: `main()` constructs `ReplayProfile::Isolated`, calls
-//!   `fail_closed_assert_isolated()`, and exits 0 with a stub line. Actual
-//!   replay logic (manifest verify-first-then-hash, fixture loader, in-memory
-//!   TickPipeline + IntentProcessor under Isolated profile) lands in Wave 4
-//!   R20-P2b-T2 (per Wave 3 P2b-S7 task spec: "對 既有 `intent_processor::router`
+//! MODULE_NOTE (EN): Wave 3 R20-P2b-S7/S8/S9 three-layer fail-closed guard
+//!   chain at runtime entry. Wave 1 scaffold established the binary at the
+//!   type level (Cargo.toml `[[bin]]` registered + `replay_isolated` feature
+//!   gated). Wave 3 P2b-S7 wired the profile cfg gate; Wave 3 P2b-S8 (this
+//!   commit) wires the FULL V3 §6.2 forbidden-path enforcement; Wave 3
+//!   P2b-S9 (this commit) wires the V3 §6.3 Mac fail-closed gate. `main()`
+//!   constructs `ReplayProfile::Isolated`, runs all three guards in order,
+//!   and exits 0 with a stub line on success. Actual replay logic (manifest
+//!   verify-first-then-hash, fixture loader, in-memory TickPipeline +
+//!   IntentProcessor under Isolated profile) lands in Wave 4 R20-P2b-T1/T2
+//!   (per Wave 3 P2b-S7 task spec: "對 既有 `intent_processor::router`
 //!   不切換").
 //!
 //!   Why feature-gated:
@@ -47,24 +50,32 @@
 //!     - serde / serde_json / chrono / clap / tracing.
 //!     - `crate::replay::profile::ReplayProfile` (this scaffold's sibling).
 //!
-//!   Wave 3 P2b-S7 acceptance:
+//!   Wave 3 P2b-S7/S8/S9 acceptance:
 //!     - `cd rust/openclaw_engine && cargo check --bin replay_runner --features replay_isolated`
 //!       succeeds with zero warnings.
 //!     - `cd rust/openclaw_engine && cargo check` (no feature) succeeds —
 //!       this binary must NOT compile by default (verified by absence in
 //!       default-feature build target list).
-//!     - `target/debug/replay_runner` exits 0 with the stub line and the
-//!       fail-closed assert PASSES (because main constructs Isolated).
+//!     - `target/debug/replay_runner` exits 0 with the stub line
+//!       "replay_runner Wave 3 P2b-S7/S8/S9 guards online; Wave 4 logic
+//!       pending" when invoked with `OPENCLAW_REPLAY_MAC_NO_PRIVATE=1`
+//!       (required on macOS host) and no forbidden-trip env / file marker.
 //!     - V3 §12 #8/#9/#10/#11 acceptance bound to
 //!       `tests/replay_profile_acceptance.rs`.
+//!     - V3 §12 #10 forbidden-wiring fail-closed acceptance bound to
+//!       `tests/replay_forbidden_guard_acceptance.rs`.
+//!     - V3 §12 #12 Mac non-actionable acceptance bound to
+//!       `tests/replay_mac_policy_acceptance.rs`.
 //!
-//! MODULE_NOTE (中): Wave 3 R20-P2b-S7 cfg gate runtime entry。Wave 1 骨架
-//!   讓 binary 於型別層存在（Cargo.toml `[[bin]]` 註冊 + `replay_isolated`
-//!   feature gated）。Wave 3 P2b-S7 接入 runtime 契約：`main()` 建構
-//!   `ReplayProfile::Isolated`、呼叫 `fail_closed_assert_isolated()`、印 stub
-//!   行後 exit 0。實際 replay 邏輯（manifest verify-first-then-hash、fixture
+//! MODULE_NOTE (中): Wave 3 R20-P2b-S7/S8/S9 三層 fail-closed guard 串聯於
+//!   runtime entry。Wave 1 骨架讓 binary 於型別層存在（Cargo.toml `[[bin]]`
+//!   註冊 + `replay_isolated` feature gated）。Wave 3 P2b-S7 接入 profile
+//!   cfg gate；Wave 3 P2b-S8（本 commit）接入完整 V3 §6.2 forbidden-path
+//!   強制；Wave 3 P2b-S9（本 commit）接入 V3 §6.3 Mac fail-closed gate。
+//!   `main()` 建構 `ReplayProfile::Isolated`，依序跑三 guard，全通過則印 stub
+//!   行並 exit 0。實際 replay 邏輯（manifest verify-first-then-hash、fixture
 //!   loader、Isolated profile 下的 in-memory TickPipeline + IntentProcessor）
-//!   於 Wave 4 R20-P2b-T2 落地（依 Wave 3 P2b-S7 task spec：「對 既有
+//!   於 Wave 4 R20-P2b-T1/T2 落地（依 Wave 3 P2b-S7 task spec：「對 既有
 //!   `intent_processor::router` 不切換」）。
 //!
 //!   為什麼 feature-gated：
@@ -101,79 +112,135 @@
 //!     - serde / serde_json / chrono / clap / tracing。
 //!     - `crate::replay::profile::ReplayProfile`（此 scaffold 的姊妹檔）。
 //!
-//!   Wave 3 P2b-S7 驗收：
+//!   Wave 3 P2b-S7/S8/S9 驗收：
 //!     - `cd rust/openclaw_engine && cargo check --bin replay_runner --features replay_isolated`
 //!       成功且 0 warning。
 //!     - `cd rust/openclaw_engine && cargo check`（無 feature）成功 —
 //!       此 binary 預設不編（驗證：default-feature build target list 不含此 binary）。
-//!     - `target/debug/replay_runner` 以 stub 行 exit 0，且 fail-closed assert
-//!       通過（因為 main 建構 Isolated）。
+//!     - `target/debug/replay_runner` 以 stub 行
+//!       「replay_runner Wave 3 P2b-S7/S8/S9 guards online; Wave 4 logic
+//!       pending」exit 0，需設 `OPENCLAW_REPLAY_MAC_NO_PRIVATE=1`（macOS
+//!       host required）且無 forbidden-trip env / file marker。
 //!     - V3 §12 #8/#9/#10/#11 acceptance 綁
 //!       `tests/replay_profile_acceptance.rs`。
+//!     - V3 §12 #10 forbidden-wiring fail-closed acceptance 綁
+//!       `tests/replay_forbidden_guard_acceptance.rs`。
+//!     - V3 §12 #12 Mac non-actionable acceptance 綁
+//!       `tests/replay_mac_policy_acceptance.rs`。
 //!
-//! SPEC: REF-20 V3 §3 G7/G8 + §6.1/§6.2 + §12 #8/#9/#10/#11
-//!     + workplan R20-P2b-S7
+//! SPEC: REF-20 V3 §3 G7/G8 + §6.1/§6.2/§6.3 + §12 #8/#9/#10/#11/#12
+//!     + workplan R20-P2b-S7/S8/S9
 //! Owner: PA + E1 (Wave 1 scaffold) → E1 + E2 + E3 (Wave 3 IMPL).
 
 #![cfg(feature = "replay_isolated")]
 
-// TODO REF-20 P2b-S8: forbidden-path fail-closed enforcement
-// (startup + runtime panic before any replay tick — full V3 §6.2 list,
-//  not just profile assert).
-// TODO REF-20 P2b-S8: forbidden-path fail-closed 強制
-// （startup + runtime panic，於任何 replay tick 之前 — 完整 V3 §6.2 清單，
-//   非僅 profile assert）。
-//
-// TODO REF-20 P2b-S9: Mac policy guard
-// (`OPENCLAW_REPLAY_MAC_NO_PRIVATE=1` default; abort on S0/S1 read).
-// TODO REF-20 P2b-S9: Mac policy guard
-// （`OPENCLAW_REPLAY_MAC_NO_PRIVATE=1` 預設；偵測 S0/S1 讀取則 abort）。
-//
 // TODO REF-20 P2b-S10: CI nm/objdump symbol audit step
 // (defense-in-depth on top of feature gate).
 // TODO REF-20 P2b-S10: CI nm/objdump symbol 稽核步驟
 // （feature gate 之上的縱深防禦）。
 //
+// TODO REF-20 P2b-T1 (Wave 4): isolated process wrapper that mediates
+// between this binary and (sandboxed) versions of intent_processor::router,
+// ipc_server::dispatch, bybit_rest_client::place_order. The wrapper is
+// where forbidden_guard::enforce_at_runtime plugs into per-action
+// hard-coded interception branches.
+// TODO REF-20 P2b-T1 (Wave 4): isolated process wrapper，介於本 binary 與
+// sandboxed 版的 intent_processor::router / ipc_server::dispatch /
+// bybit_rest_client::place_order 之間。wrapper 是 forbidden_guard::
+// enforce_at_runtime 接入 per-action hard-coded 攔截分支的位置。
+//
 // TODO REF-20 P2b-T2 (Wave 4): wire actual replay logic past the
-// fail-closed assert (manifest signer verify-first-then-hash via
+// three fail-closed guards (manifest signer verify-first-then-hash via
 // `crate::replay::manifest_signer`, fixture loader, in-memory
 // TickPipeline + IntentProcessor under Isolated profile).
-// TODO REF-20 P2b-T2 (Wave 4): 在 fail-closed assert 通過後接入實際 replay
-// 邏輯（透過 `crate::replay::manifest_signer` 做 manifest verify-first-then-hash、
-// fixture loader、Isolated profile 下的 in-memory TickPipeline + IntentProcessor）。
+// TODO REF-20 P2b-T2 (Wave 4): 在三個 fail-closed guard 通過後接入實際
+// replay 邏輯（透過 `crate::replay::manifest_signer` 做 manifest
+// verify-first-then-hash、fixture loader、Isolated profile 下的 in-memory
+// TickPipeline + IntentProcessor）。
+//
+// Forbidden-path list reminder (V3 §6.2 + PA boundary §5):
+//   - Decision Lease acquire/release        (forbidden_guard #1)
+//   - IPC server start                       (forbidden_guard #2)
+//   - WS client start                        (forbidden_guard #3)
+//   - Exchange dispatch                      (forbidden_guard #4)
+//   - DB writer channel use                  (forbidden_guard #5)
+//   - Live/demo config mutate                (forbidden_guard #6)
+//   - Advisory write outside verified PL/pgSQL (forbidden_guard #7)
+//
+// Forbidden 清單提醒（V3 §6.2 + PA boundary §5）：
+//   - Decision Lease 取得/釋放              （forbidden_guard #1）
+//   - IPC server 啟動                        （forbidden_guard #2）
+//   - WS client 啟動                         （forbidden_guard #3）
+//   - Exchange dispatch                      （forbidden_guard #4）
+//   - DB writer channel 使用                 （forbidden_guard #5）
+//   - Live/demo config mutate                （forbidden_guard #6）
+//   - 不走 verified PL/pgSQL 的 advisory 寫入（forbidden_guard #7）
 
+use openclaw_engine::replay::forbidden_guard;
+use openclaw_engine::replay::mac_policy_guard;
 use openclaw_engine::replay::profile::ReplayProfile;
 
 fn main() {
-    // Wave 3 P2b-S7 cfg gate runtime entry.
-    // Wave 3 P2b-S7 cfg gate runtime entry.
+    // Wave 3 P2b-S7/S8/S9 三層 fail-closed guard 串聯。
+    // Wave 3 P2b-S7/S8/S9 three-layer fail-closed guard chain.
     //
-    // 不變量 / Invariant: `replay_runner` MUST run as `ReplayProfile::Isolated`.
-    //   The compile-time `replay_isolated` feature gates this binary OUT of
-    //   the default build (so Live hot path can never link it). The runtime
-    //   assert below is defense-in-depth: if a future caller accidentally
-    //   constructs a non-Isolated profile here, the binary aborts
-    //   immediately rather than proceeding to replay logic.
+    // 不變量 / Invariant: `replay_runner` MUST run as `ReplayProfile::Isolated`,
+    //   MUST NOT have any V3 §6.2 forbidden-path tripped, AND MUST satisfy
+    //   the V3 §6.3 Mac policy when running on a macOS host. All three
+    //   guards run before any replay logic; the binary aborts on the FIRST
+    //   guard's `Err` (V3 §12 #10 + #12 binding: forbidden path aborts run,
+    //   NOT log-only).
     //
-    // Invariant: `replay_runner` 必以 `ReplayProfile::Isolated` 跑。
-    //   compile-time 的 `replay_isolated` feature 把此 binary 排除在預設
-    //   build 之外（故 Live hot path 永不可能 link 它）。下方 runtime
-    //   assert 為縱深防禦：若未來 caller 不慎在此構造 non-Isolated
-    //   profile，binary 立即 abort 而非繼續跑 replay 邏輯。
+    // Invariant: `replay_runner` 必以 `ReplayProfile::Isolated` 跑、不得有任
+    //   何 V3 §6.2 forbidden-path 被觸發、且在 macOS host 上必滿足 V3 §6.3
+    //   Mac 政策。三 guard 在任何 replay 邏輯前跑；binary 在「第一個」guard
+    //   的 `Err` 即 abort（V3 §12 #10 + #12 binding：forbidden 路徑 abort run，
+    //   非 log-only）。
     let profile = ReplayProfile::Isolated;
 
+    // S7 (Wave 3 P2b-S7): profile cfg gate. Refuses non-Isolated profiles.
+    // S7（Wave 3 P2b-S7）：profile cfg gate。拒絕 non-Isolated profile。
     profile.fail_closed_assert_isolated().expect(
         "REF-20 V3 §6.2 invariant: replay_runner MUST run as Isolated; \
          see crate::replay::profile::ReplayProfile::fail_closed_assert_isolated",
     );
 
+    // S8 (Wave 3 P2b-S8): forbidden-path enforcement at startup. Reads env
+    // var $OPENCLAW_REPLAY_FORBIDDEN_TRIPPED + magic-file marker
+    // <OPENCLAW_DATA_DIR>/replay_forbidden.tripped; absence (production
+    // default) returns Ok(()).
+    //
+    // S8（Wave 3 P2b-S8）：startup 階段的 forbidden-path 強制。讀 env var
+    // $OPENCLAW_REPLAY_FORBIDDEN_TRIPPED + magic-file marker
+    // <OPENCLAW_DATA_DIR>/replay_forbidden.tripped；皆未設（production 預設）
+    // 回 Ok(())。
+    forbidden_guard::enforce_at_startup().expect(
+        "REF-20 V3 §6.2 forbidden path detected at startup; \
+         see crate::replay::forbidden_guard::enforce_at_startup",
+    );
+
+    // S9 (Wave 3 P2b-S9): Mac policy guard. On macOS requires
+    // OPENCLAW_REPLAY_MAC_NO_PRIVATE=1 (renamed per Wave 2 dispatch §2 #1
+    // from OPENCLAW_REPLAY_MAC_FORBID_REAL_DATA) and Isolated profile. On
+    // non-macOS hosts returns Ok(()) unconditionally (V3 §6.3 scopes the
+    // policy to Mac).
+    //
+    // S9（Wave 3 P2b-S9）：Mac 政策 guard。macOS 上要求
+    // OPENCLAW_REPLAY_MAC_NO_PRIVATE=1（依 Wave 2 dispatch §2 #1 由
+    // OPENCLAW_REPLAY_MAC_FORBID_REAL_DATA 改名）+ Isolated profile。
+    // 非 macOS host 無條件回 Ok(())（V3 §6.3 將政策限於 Mac）。
+    mac_policy_guard::enforce(profile).expect(
+        "REF-20 V3 §6.3 Mac policy violation; \
+         see crate::replay::mac_policy_guard::enforce",
+    );
+
     // Wave 4 R20-P2b-T2 will replace the `eprintln!` below with actual
     // replay logic. Until then, we emit a deterministic stub line and exit
     // 0 so that operators / CI / acceptance tests can confirm the binary
-    // built and the runtime gate passed.
+    // built and the three runtime guards passed.
     //
     // Wave 4 R20-P2b-T2 將以實際 replay 邏輯取代下方的 `eprintln!`。在此
     // 之前我們發出 deterministic stub 行並 exit 0，讓 operator / CI /
-    // acceptance test 確認 binary 已 build 且 runtime gate 通過。
-    eprintln!("replay_runner Wave 3 P2b-S7 cfg gate online; Wave 4 logic pending");
+    // acceptance test 確認 binary 已 build 且三個 runtime guard 通過。
+    eprintln!("replay_runner Wave 3 P2b-S7/S8/S9 guards online; Wave 4 logic pending");
 }
