@@ -157,6 +157,8 @@
 | **P2-WAVE-6-V043-HEALTHCHECK** | V043 mlde_replay_veto_log 0 healthcheck pairing（passive_wait_healthcheck.py 加 `check_47_v043_advisory_writer()`）| @E1 |
 | **P2-WAVE-8-HANDOFF-HEALTHCHECK** | handoff request flow 0 healthcheck（cooldown rejected rate / V044 UNIQUE collision rate / pg_unavailable degraded rate）— Sprint 2 E2 F1 LOW；passive_wait_healthcheck.py 加 `check_48_handoff_health()` | @E1 |
 | **P2-WAVE-9-V047-V048-RETENTION** | V047 / V048 plain table 1y retention 0 設（MIT cold audit + Sprint 2 E2 F1 LOW）— hypertable 升級 OR retention drop policy | @E1+@MIT |
+| **P2-LEASE-VEC-CLEANUP** | `DecisionLeaseSm.objects` Vec 在 lease 終態（Consumed/Revoked）後不 swap_remove，pre-existing 設計 leak ~200 bytes/trade（1yr × 1000 trade/day = 73MB Vec heap leak）— REF-20 Sprint 3 Track H E-1 retrofit push back #3 揭。修法：terminal state 後 `swap_remove` + 同步更新 `lease_id_to_idx` HashMap reverse mapping；加 e2e leak guard test | @E1 |
+| **P2-INTENT-PROCESSOR-TESTS-SPLIT** | `rust/openclaw_engine/src/intent_processor/tests.rs` 2910 LOC > 1500 hard cap（pre-existing 2375 已超，Sprint 3 Track H E-1+E-2 retrofit +535）— §九 exception clause condition (1) 適用，**condition (2) 即此 ticket** + **condition (3) PM Sign-off 明文 declare**：兩 retrofit 撞 condition (3) baseline exception accept 理由 = (a) Decision Lease retrofit 是 P0-GOV-1 critical path / (b) 28 fixture 重寫 + 7 新 router_gate test 結構性必須在原檔同 module 內 / (c) 抽 helper module 風險高（既有 fixture 互相 import）。修法：split into `tests/lease_facade_tests.rs` + `tests/router_gate_tests.rs` + `tests/golden_extreme_tests.rs` 三 file；保留 `tests.rs` &lt;1500 LOC | @E1+@PM |
 
 詳述 → `docs/archive/2026-05-02--TODO-pre-trim-snapshot.md` § Top P2 / P3 backlog
 
