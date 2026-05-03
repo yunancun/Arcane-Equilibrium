@@ -2,8 +2,21 @@
  * OpenClaw Paper Trading & Market Feed
  * OpenClaw 紙上交易和市場數據
  *
- * MODULE_NOTE (EN): Extracted from app.js (FIX-08 file size).
- * MODULE_NOTE (中): 從 app.js 提取（FIX-08 文件大小）。
+ * MODULE_NOTE (EN): Extracted from app.js (FIX-08 file size). REF-20 R20-P1-U1
+ *   added Paper Replay Lab sub-tab navigation (show-hide + localStorage
+ *   persistence + disabled-state no-op). New functions are prefixed
+ *   `ocPaperSubtab*` and live in 自有 namespace block at end of file to avoid
+ *   colliding with existing legacy paper helpers loaded via index.html.
+ * MODULE_NOTE (中): 從 app.js 提取（FIX-08 文件大小）。REF-20 R20-P1-U1 新增
+ *   Paper Replay Lab 子標籤導航（show-hide + localStorage 持久化 + disabled
+ *   no-op）。新函數以 `ocPaperSubtab*` 前綴命名並集中於檔案末端的命名空間區塊，
+ *   避免與 legacy index.html 既有 paper helper 衝突。
+ *
+ * Cross-loader notes / 跨載入點注意事項:
+ *   - Loaded by legacy index.html （全部 functions accessible globally）
+ *   - Loaded by tab-paper.html（iframe 內），透過 ocPaperSubtabInit() 啟動
+ *   - 新增 sub-tab functions 對 legacy index.html 無副作用：legacy DOM 沒有
+ *     `#paper-subtab-nav`，所以 init 內 querySelector 會 0 element，no-op。
  */
 
 "use strict";
@@ -255,4 +268,180 @@ function renderMarketFeedStatus(d) {
     ${d.ws_listener?.ticker_update_count != null ? ` | 行情更新: ${d.ws_listener.ticker_update_count}` : ""}
     ${stats.volatility_spikes ? ` | 波动飙升: ${stats.volatility_spikes}` : ""}
   `;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// REF-20 R20-P1-U1: Paper Replay Lab Sub-Tab Navigation
+// REF-20 R20-P1-U1：Paper Replay Lab 4 子標籤導航
+//
+// 為什麼存在 / Why this exists:
+//   REF-20 將 Paper Tab 升級為「Paper Replay Lab」(per UX subdoc V1)，分為
+//   Session / Replay / Compare / Handoff 四子標籤。U1 是 foundation shell，
+//   後續 U2 (Session 內容遷入) / U4 (Replay disabled) / U5 (Compare disabled) /
+//   U6 (Handoff disabled) 依賴本 shell。U7 mode badge 透過 #paper-mode-badges
+//   slot 注入。
+//
+//   REF-20 upgrades Paper Tab into "Paper Replay Lab" (per UX subdoc V1) with
+//   four sub-tabs: Session / Replay / Compare / Handoff. U1 is the foundation
+//   shell; U2 (Session content migration) / U4 (Replay disabled) / U5 (Compare
+//   disabled) / U6 (Handoff disabled) depend on this shell. U7 mode badge will
+//   inject into #paper-mode-badges slot.
+//
+// 設計約束 / Design invariants:
+//   - Vanilla JS only — 禁 jQuery / framework lift（per CLAUDE.md §三）
+//   - 0 backend write — 純 frontend show-hide + localStorage persistence
+//   - Disabled sub-tab click → no-op + console.warn（不導航；UX subdoc §8）
+//   - Page load 恢復 localStorage; 若上次 active 是 disabled → fallback Session
+//   - aria-disabled + data-disabled 為 axe-core a11y 識別保留
+//   - 對 legacy index.html DOM 無副作用（querySelector 找不到 nav 即 no-op）
+// ═══════════════════════════════════════════════════════════════════════════════
+
+const _OC_PAPER_SUBTAB_LS_KEY = "paper_active_subtab";
+const _OC_PAPER_SUBTAB_DEFAULT = "session";
+const _OC_PAPER_SUBTAB_VALID = ["session", "replay", "compare", "handoff"];
+
+/**
+ * 顯示指定 sub-tab，隱藏其他三個。/ Show the named sub-tab, hide the other three.
+ *
+ * 行為 / Behavior:
+ *   1. 找 button[data-subtab=name]；若 disabled（data-disabled="true"）→ no-op
+ *      + console.warn（不導航，per UX subdoc §8）
+ *   2. 切換 .active class 在 nav buttons + content divs
+ *   3. 切換 aria-selected 在 nav buttons（screen reader）
+ *   4. 切換 hidden attribute 在 content divs（screen reader + a11y baseline）
+ *   5. 持久化 active sub-tab 到 localStorage["paper_active_subtab"]
+ *
+ * @param {string} name - one of "session" / "replay" / "compare" / "handoff"
+ * @returns {boolean} true if switched, false if no-op (disabled or invalid)
+ */
+function ocPaperSubtabShow(name) {
+  // 防呆：不在 valid set 裡就 no-op，避免 localStorage 被污染
+  // Defensive: if name not in valid set, no-op to avoid localStorage pollution
+  if (_OC_PAPER_SUBTAB_VALID.indexOf(name) === -1) {
+    console.warn("[paper-subtab] invalid sub-tab name:", name);
+    return false;
+  }
+  const btn = document.getElementById("subtab-btn-" + name);
+  if (!btn) {
+    // tab-paper.html 還沒載到 / 或 legacy index.html 沒這結構 → no-op
+    // tab-paper.html not yet loaded / legacy index.html lacks this structure → no-op
+    return false;
+  }
+  // Disabled 點擊 = no-op + warn（不導航；不污染 localStorage）
+  // Disabled click = no-op + warn (no navigation; no localStorage write)
+  if (btn.getAttribute("data-disabled") === "true") {
+    console.warn(
+      "[paper-subtab] sub-tab '" + name + "' is disabled — see tooltip for blocking gate"
+    );
+    return false;
+  }
+
+  // 切換 nav buttons / Toggle nav buttons
+  const allBtns = document.querySelectorAll("#paper-subtab-nav .oc-subtab-btn");
+  allBtns.forEach(function (b) {
+    const isActive = b.getAttribute("data-subtab") === name;
+    if (isActive) {
+      b.classList.add("active");
+      b.setAttribute("aria-selected", "true");
+    } else {
+      b.classList.remove("active");
+      b.setAttribute("aria-selected", "false");
+    }
+  });
+
+  // 切換 content divs / Toggle content divs
+  _OC_PAPER_SUBTAB_VALID.forEach(function (key) {
+    const div = document.getElementById("subtab-" + key);
+    if (!div) return;
+    if (key === name) {
+      div.classList.add("active");
+      div.removeAttribute("hidden");
+    } else {
+      div.classList.remove("active");
+      div.setAttribute("hidden", "");
+    }
+  });
+
+  // 持久化 / Persist active sub-tab to localStorage（pure frontend, no backend hit）
+  try {
+    localStorage.setItem(_OC_PAPER_SUBTAB_LS_KEY, name);
+  } catch (e) {
+    // localStorage 被 disable（隱私模式 / 配額滿）→ 安靜 fail，不阻擋導航
+    // localStorage disabled (private mode / quota exceeded) → silent fail
+    console.warn("[paper-subtab] localStorage write failed:", e);
+  }
+  return true;
+}
+
+/**
+ * Page load 時讀 localStorage 恢復上次 active sub-tab。
+ * Restore last active sub-tab from localStorage on page load.
+ *
+ * 設計：
+ *   - 若 localStorage 值非 valid name → fallback Session
+ *   - 若 localStorage 值對應 button 是 disabled → fallback Session
+ *     （避免重啟 P1 GUI 時被卡在 P2/P3/P6 disabled tab）
+ *
+ * @returns {string} the sub-tab actually shown (post-fallback)
+ */
+function ocPaperSubtabRestoreFromStorage() {
+  let name = _OC_PAPER_SUBTAB_DEFAULT;
+  try {
+    const stored = localStorage.getItem(_OC_PAPER_SUBTAB_LS_KEY);
+    if (stored && _OC_PAPER_SUBTAB_VALID.indexOf(stored) !== -1) {
+      name = stored;
+    }
+  } catch (e) {
+    // localStorage 無法讀 → 用 default
+    // localStorage unreadable → use default
+  }
+
+  // Fallback：若 stored target 是 disabled，回 Session（避免空畫面）
+  // Fallback: if stored target is disabled, fall back to Session (avoid blank view)
+  const btn = document.getElementById("subtab-btn-" + name);
+  if (btn && btn.getAttribute("data-disabled") === "true") {
+    name = _OC_PAPER_SUBTAB_DEFAULT;
+  }
+
+  // 直接 show 而非走 ocPaperSubtabShow（後者對 disabled 會 no-op；這裡 fallback
+  // 後 name 一定是 enabled 的 Session，不過為一致性仍走 show 函數）
+  // Go through show() for consistency; post-fallback name is guaranteed enabled.
+  ocPaperSubtabShow(name);
+  return name;
+}
+
+/**
+ * Wire click handler on the 4 sub-tab nav buttons + restore last active sub-tab.
+ * 在 4 個子標籤 nav button 綁 click handler，並從 localStorage 恢復上次 active。
+ *
+ * 由 tab-paper.html 在 inline script 末端呼叫。對 legacy index.html 無副作用：
+ * 該 DOM 沒有 #paper-subtab-nav，querySelectorAll 回傳 0 element，全 loop 跳過。
+ *
+ * Called by tab-paper.html inline script at end. Idempotent for legacy
+ * index.html: no #paper-subtab-nav there → querySelectorAll yields 0 elements.
+ */
+function ocPaperSubtabInit() {
+  const nav = document.getElementById("paper-subtab-nav");
+  if (!nav) {
+    // 沒有 sub-tab nav DOM → legacy index.html 環境，no-op
+    // No sub-tab nav DOM → legacy index.html context, no-op
+    return;
+  }
+  const btns = nav.querySelectorAll(".oc-subtab-btn");
+  btns.forEach(function (btn) {
+    btn.addEventListener("click", function (ev) {
+      const name = btn.getAttribute("data-subtab");
+      // ocPaperSubtabShow 內含 disabled 守衛 + valid-name 守衛
+      // ocPaperSubtabShow has disabled guard + valid-name guard built in
+      ocPaperSubtabShow(name);
+    });
+    // Keyboard a11y baseline：Enter / Space 觸發（button 預設已支援，但顯式註冊
+    // 確保 disabled 路徑也走 console.warn 而非靜默 navigate）
+    // Keyboard a11y baseline: Enter / Space (built-in button behavior covers it,
+    // but disabled-state click goes through ocPaperSubtabShow which warns).
+  });
+
+  // Restore last-active from localStorage（fallback 已內建）
+  // Restore last-active from localStorage (fallback built-in)
+  ocPaperSubtabRestoreFromStorage();
 }
