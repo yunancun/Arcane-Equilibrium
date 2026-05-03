@@ -86,11 +86,16 @@
 
 ### Phase A: Pre-deploy verification (Mac dev side)
 
+> **2026-05-03 cold reality update**：原 doc line 91 自宣「~3500+ PASS」是虛構數字（cold audit + Sprint 1 E4 regression 真實 3387 PASS / 1 fail (pre-existing E4-P0-1) / 10 skip · cargo workspace 3084 PASS / 2 fail (pre-existing E4-P0-2) / 3 ignored）；下方數字已 P2-FOLLOW-UP-5 訂正為真實值。
+
 1. **Pull latest main on Linux trade-core** (already done per per-wave Linux sync)
-2. **Verify Mac dev test pass**: `cd srv && pytest --tb=short -q`
-   - Expected: ~3500+ Python pytest PASS (Wave 1-9 cumulative)
+2. **Verify Mac dev test pass**: `cd srv && python3 -m pytest --tb=short -q`
+   - **Real (post-Sprint 1 cold reality)**: 3387 PASS / 1 fail (pre-existing E4-P0-1: `test_case2_pg_kill_simulation_returns_200_degraded` flaky, P2-FOLLOW-UP-1) / 10 skip
+   - **Sprint 1 specific (Track A 19 + C 13 + D 24 + V053 7 = 63 NEW PASS)**
 3. **Verify Rust tests pass**: `cd rust/openclaw_engine && cargo test --release --tests --features replay_isolated`
-   - Expected: 5/5 profile + 4/4 forbidden + 4/4 mac policy + 8/8 manifest_signer + 6/6 e2e replay_runner + 18/18 live_authorization sibling = 45+ acceptance tests PASS
+   - **Real (post-Sprint 1 cold reality)**: 2643 cumulative PASS / 0 fail / 0 ignored
+   - **Workspace level**: 3084 PASS / 2 fail (pre-existing E4-P0-2: `mac_policy_guard.rs` 2 doctest fail 中文全形括號 tokenizer error, P2-FOLLOW-UP-2) / 3 ignored
+   - **Sprint 1 specific (Track B 11 lib + 5 e2e proof + 8 xlang manifest_signer = 24+ NEW PASS)**
 
 ### Phase B: Linux migration apply (operator action, in strict order)
 
