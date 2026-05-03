@@ -772,3 +772,29 @@ worktree `agent-a9002481353677810` · base HEAD `cf34e96` · branch `worktree-ag
 - Side-effect grep: `edge_label_backfill_cron` 0 caller in code（只 docs 引用）；舊 25 lg5_health_checks tests 不受影響。
 - Verdict: PASS to E4 cron re-smoke。
 - Lesson: Cron wrapper PG creds sourcing 是「真實 cron 環境差異」常被低估的 gap；E1 主動 mirror sibling pattern + 改進 sibling 的 corner case 而不是直接照搬 = 資深判斷。E2 對抗驗證需自跑 format drift / 引號 drift / sibling cross-check 而非只信 unit test green。
+
+## 2026-05-03 — REF-20 Wave 1 P0 全 8 task design review (CONDITIONAL PASS to E4)
+
+**Topic**: V3 Wave 1 P0 全 8 task（T1 governance v2 4 docs + T2/T3/T9 Rust scaffold + T5 migration ledger + T6/T7 INSERT grep+classification + T8 signing key script+runbook）design + adversarial audit。
+**Verdict**: ⚠️ CONDITIONAL PASS to E4 — 3 MEDIUM finding 退 PA 修字（doc cross-ref label）；runtime/scaffold/build/script 全 PASS。
+**Workspace report**: `2026-05-03--ref20_wave1_p0_design_review.md`
+
+### Wave 1 review 教訓 / 反模式
+
+14. **`//!` doc comment 內 forbidden symbol mention 不算 violation** — Rust scaffold review 時 `grep -rE 'acquire_lease|ipc_server|...'` 在 spec-only binary 命中 15 hits，逐一驗 prefix 都是 `//!` (module-level doc comment) → 是「禁止列表」用法（"must NOT use X"），非實際 import / call。對抗 grep 必補 prefix verify（`grep -E '^use ' filename` 必驗 0 hit 才證 0 actual import）。本 review 兩 grep 並用結果 `^use ` = 0 hit 確認真 spec-only / panic stub。
+
+15. **`required-features = ["X"]` 是 Cargo 硬 enforcement** — `[[bin]]` 不帶 feature 時 cargo 拒絕 build；compile-time isolation 是物理事實。default `cargo check` 必驗 binary **未編譯**（21 lib + 3 bin warning baseline 持守，replay_runner 0 warning 因 0 行 compile）。雙 build matrix（無 feature / 有 feature）必驗 0 new warning vs lib baseline。
+
+16. **Bash `| head -N` 會 mask script real exit code** — smoke test 跑 `bash script | head -10` 看到 `exit=0` 但 script 內 `exit 4` 實際執行 — head 退出 0 mask 了 script 真實 exit。E2 smoke test 必獨立 silent run（`bash script > /dev/null 2>&1; echo $?`）才能驗 exit code 對 spec。本 case 正確抓到 7/7 exit code 全對 spec。
+
+17. **Doc cross-reference label 系統性錯位反模式** — REF-20 v2 三處 `(v1 §X 沿用)` 標的 v1 § 真實主題不符（v1 §6 = Learning Cockpit ≠ v2 §15 Storage / §7 Indicator Sweep；v1 §7 = 5-Agent Extraction ≠ v2 §16 Phased Delivery）。對抗審核 governance v2 doc 必獨立列 v1/v2 section header table cross-check（grep `^## ' v1 + v2 各自結果並 nl 對照），catch 系統性錯位；不能只信 v2 §0 讀者導讀的 self-claim。
+
+18. **「v1 §1-§N 條文重述...不改變邊界」claim 必驗實際結構** — REF-19 v2 §0 / §20 都自宣稱「v1 §1-§16 重述...不改變 v1 邊界承諾」，但實測 v1 §11 Storage 整節從 v2 中消失（內容遷至 REF-20 v2 §15 / V3 §4.2 / §6.2 但 REF-19 v2 §0 / §20 沒披露此 trace path）。對抗審核必驗 §0 + §20 表格 cross-ref 與實際 §結構是否字面 1:1 對應 — 整節主題替換（如 REF-19 v2 §11 從 Storage 變 Resource Quota）必在 §0 表格 explicit flag。
+
+19. **Forbidden token grep 必區分 active write vs doc reference** — `live_execution_allowed` / `max_retries=0` / `decision_lease` / `_write_signed_live_authorization` 在 v2 docs + Rust scaffold 共 3-15 hits，但全部位於 forbidden list / "MUST NOT" 注釋 / Python 唯一 caller 警示 — **0 actual write / set / acquire**。E2 grep 第一輪看 raw 結果可能 alarm，必逐行讀上下文 + `head -3` 抽 prefix（`//!` doc / `# Why this script` 注釋 / table cell ref）才能判定 write/active vs reference/doc-only。
+
+20. **Cargo.toml `+24 LOC` spec vs 實際 `+35 LOC` diff 解讀** — workplan / PA report 都宣稱 Cargo.toml `+24 LOC`，實際 `git diff --stat` 顯示 `+35 LOC`。讀 diff 細節：實際代碼變動 = 6 line（`replay_isolated = []` + `[[bin]]` 4 line），其餘 29 line 是雙語注釋（EN comment block + ZH comment block）。**評估方式**：核 active code line 是否與 spec 一致，bilingual comment 屬合規 over-spec（CLAUDE.md §七 強制），不算 spec 漂移。LOC delta 看 numstat 不能直接判 spec，必拆 active code vs comment line。
+
+21. **「整合到 V3 contract baseline」設計選擇下的 v2 補丁措辭** — v2 §11/§12 整節主題從 v1 storage/healthcheck 替換為 v2-only quota/role guard 補丁；v1 內容部分固化進 V3 contract baseline，部分遷至 sibling doc（REF-20 v2 §15）— 設計上 OK（v2 = governance amendment 整合 V3 工程坑），但 v2 §0 + §20 自宣稱必披露此 trace path。**boundary 是否削弱**判定：grep 16 根原則（特別是 #1/#2/#7）+ §四 fail-closed 條款 + Decision Lease 路徑承諾在 v2 是否完整保留 — 全 PASS 即 0 boundary 削弱（本 case 確認），純屬 metadata accuracy 問題降 MEDIUM。
+
+22. **5 atomic commit vs 1 wave commit 結構建議的 review trigger** — Wave 1 任務 subgroup（T1 / T2+T3+T9 / T5 / T6+T7 / T8）天然分 5 個獨立 deliverable layer，5 atomic commit 利後續 audit / rollback / partial revert。1 wave commit 的 diff 過大（governance docs + Rust + migration ledger + Python report + bash script + runbook 全包），cross-task 問題追溯困難。E2 sign-off 建議必含 commit 結構建議；PM 採納則 Wave 1 land 後 audit trail 清晰。
