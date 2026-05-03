@@ -1158,6 +1158,35 @@ function _ocResolveModeBadge(dim, state) {
   };
 }
 
+// Lookup state label from i18n_zh.js (MED-5 retrofit). Defensive against
+// i18n_zh.js not loaded yet (script-order race) and against miss returns
+// (t_zh's documented behavior is to return the raw key path on miss).
+//
+// 從 i18n_zh.js 查 state label（MED-5 retrofit）。防 i18n_zh.js 未載入
+// (script 載入順序競爭) + 防 t_zh miss return raw key 兩種失敗模式。
+//
+// Fallback chain:
+//   1. window.t_zh('mode_badge.<dim>.<state>') if function exists and result
+//      != raw key path (miss signal)
+//   2. meta.label_zh (def 內既有中文)
+//   3. meta.label_en (最後保險)
+//
+// SAFETY / 不變量：返回值必為 non-empty string；caller 後續經 ocEsc 過濾。
+// SAFETY / Invariant: returns non-empty string; caller pipes through ocEsc.
+function _ocLookupModeBadgeStateLabel(meta) {
+  if (!meta) return '';
+  var keyPath = 'mode_badge.' + meta.dim + '.' + meta.state;
+  if (typeof window.t_zh === 'function') {
+    var looked = window.t_zh(keyPath);
+    // t_zh miss → return raw key path; 用 strict !== 確認真有 hit。
+    // t_zh miss returns raw key path; strict !== confirms a real hit.
+    if (typeof looked === 'string' && looked !== keyPath && looked.length > 0) {
+      return looked;
+    }
+  }
+  return meta.label_zh || meta.label_en || '';
+}
+
 // Render a single pill HTML string. XSS-safe: every dynamic text token is
 // passed through ocEsc(); class token is sanitized via ocSanitizeClass().
 //
@@ -1166,9 +1195,28 @@ function _ocResolveModeBadge(dim, state) {
 //
 // A11y：
 //   - role="status" 讓螢幕閱讀器讀出 state 變化
-//   - aria-label 同時包含 dimension + state，避免 SR 只念 icon
+//   - aria-label 同時包含 dimension + state，避免 SR 只念 icon（中英並列）
 //   - tabindex="0" 讓鍵盤可 focus
 //   - title 提供 hover tooltip（瀏覽器 native，非 framework popover）
+//
+// i18n 行為（REF-20 R20-P1-U9 + Wave 2 Batch 1 MED-5 retrofit）：
+//   - operator 中文 dominant 偏好 (per memory feedback_chinese_output)，
+//     state label 優先取 i18n_zh.js `mode_badge.<dim>.<state>` 中文文案；
+//     i18n_zh.js 未載入或 key miss 時 fallback 至 def 內既有 label_zh / label_en。
+//   - dim label 用 def 內 label_zh（i18n_zh schema 沒對應 dim 級條目，
+//     既有 def label_zh 已是中文，免重複表）。
+//   - tooltip 保 EN + 中文並列 (`tip_en / tip_zh`)，i18n_zh schema
+//     execution_confidence / calibration_freshness 詳細表只 cover 部分 state，
+//     不全 cover 4 維所有 state，故 tooltip 暫沿 def 內既有 inline 字串。
+//
+// i18n behavior (REF-20 R20-P1-U9 + Wave 2 Batch 1 MED-5 retrofit):
+//   - Per operator Chinese-dominant preference, state label first looks up
+//     i18n_zh.js path `mode_badge.<dim>.<state>`. Falls back to def-internal
+//     label_zh, then label_en, when t_zh() is unavailable or returns the raw
+//     key path on miss (i18n_zh.js's documented miss signal).
+//   - Dim label uses def-internal label_zh (i18n_zh.js schema has no
+//     dim-level entry; def already carries Chinese).
+//   - Tooltip stays bilingual (EN / 中文) from def-internal tip_en / tip_zh.
 function _ocRenderModeBadgePill(meta) {
   if (!meta) return '';
   // 防誤觸詐：execution_confidence=none 用 bad variant + ⚠️ icon + 紅邊框
@@ -1178,17 +1226,24 @@ function _ocRenderModeBadgePill(meta) {
   var dimSlug = ocSanitizeClass(meta.dim);
   var stateSlug = ocSanitizeClass(meta.state);
   var dangerAttr = meta.danger ? ' data-confidence-none="1"' : '';
-  // i18n hook: 文案目前 EN inline + 中文 fallback；REF-20 R20-P1-U9 將以
-  // i18n_zh.js 對照表替換下面 ocEsc(...) 對應 key。
-  // REF-20 R20-P1-U9 i18n hook
-  var dimLabel = ocEsc(meta.dim_label_en);  // REF-20 R20-P1-U9 i18n hook
-  var stateLabel = ocEsc(meta.label_en);    // REF-20 R20-P1-U9 i18n hook
+  // i18n lookup: state label 優先取 i18n_zh.js `mode_badge.<dim>.<state>`
+  // 中文；t_zh 缺載入或 miss → fallback def 既有 label_zh → label_en。
+  // i18n lookup: state label prefers i18n_zh.js `mode_badge.<dim>.<state>`
+  // Chinese; t_zh missing or miss → fallback to def label_zh → label_en.
+  var dimLabel = ocEsc(meta.dim_label_zh || meta.dim_label_en);
+  var stateLabel = ocEsc(_ocLookupModeBadgeStateLabel(meta));
   var icon = ocEsc(meta.icon);
   var tipEn = meta.tip_en || '';
   var tipZh = meta.tip_zh || '';
-  var titleText = tipEn + (tipZh ? ' / ' + tipZh : '');  // REF-20 R20-P1-U9 i18n hook
+  // operator 中文 dominant：tooltip 用「zh / EN」順序 (operator 直視 channel)；
+  // aria-label (screen reader) 仍保 EN 在前以維護 a11y baseline。
+  // operator zh-dominant: tooltip uses "zh / EN" order (operator-facing channel);
+  // aria-label keeps EN-first for screen-reader a11y baseline.
+  var titleText = tipZh + (tipEn ? ' / ' + tipEn : '');
   var ariaLabel = meta.dim_label_en + ': ' + meta.label_en
-    + (meta.danger ? ' (warning, not actionable)' : '');
+    + ' / ' + (meta.dim_label_zh || meta.dim_label_en)
+    + ': ' + (meta.label_zh || meta.label_en)
+    + (meta.danger ? ' (warning, not actionable / 警告，不可作為實盤依據)' : '');
   return '<span class="oc-mode-badge oc-chip oc-chip-' + variant + '"'
     + ' data-mode-dim="' + dimSlug + '"'
     + ' data-mode-state="' + stateSlug + '"'

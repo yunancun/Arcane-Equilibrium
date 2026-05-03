@@ -39,7 +39,9 @@
 //!     - Binary scaffold: `src/bin/replay_runner.rs` (Wave 1 R20-P0-T2)
 //!     - Crate boundary allowlist: PA report
 //!       `docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-03--replay_runner_crate_boundary_allowlist.md`
-//!     - Mac policy guard: Wave 3 R20-P2b-S9 (`OPENCLAW_REPLAY_MAC_FORBID_REAL_DATA=1`)
+//!     - Mac policy guard: Wave 3 R20-P2b-S9 (`OPENCLAW_REPLAY_MAC_NO_PRIVATE=1`)
+//!       (renamed from `OPENCLAW_REPLAY_MAC_FORBID_REAL_DATA` per Wave 2
+//!        dispatch §2 ambiguity decision #1, 2026-05-03)
 //!     - Symbol audit: Wave 3 R20-P2b-S10 (`nm` / `objdump` CI grep)
 //!
 //! MODULE_NOTE (中): Wave 1 純規格宣告。本 module 宣告 `ReplayProfile` enum

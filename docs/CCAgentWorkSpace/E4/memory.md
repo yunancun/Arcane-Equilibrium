@@ -2,6 +2,54 @@
 
 ## 工作記憶
 
+### 2026-05-03 REF-20 Wave 2 Batch 1 regression smoke（commits `9879eeb` + `ce665b0` + `40ebc19`）— **E4 PASS**
+
+**對象**：3 commit / 32 file / +5342 / -7。Frontend bundle (P1-U1/U7/U9) + S1 cron (P2a-S1) + manifest_signer Rust+Python (P2a-S2)。
+
+**Verdict**：**PASS** — 0 baseline regression / 0 sibling regression / 0 flaky / 0 hard-boundary mutation
+
+| Suite | passed | failed | baseline | delta |
+|---|---|---|---|---|
+| Rust `cargo test --release --lib` | 2415 | 0 | ~1980 (legacy) | +435 cumulative; **0 既有 fail** ✓ |
+| Rust `cargo test --test replay_manifest_signer_xlang_consistency` | 8 | 0 | new | +8 ✓ |
+| Rust `cargo test --lib live_authorization`（sibling） | 18 | 0 | 18 | +0 ✓ |
+| Rust `cargo test --lib replay`（subset） | 10 | 0 | new | +10 ✓ |
+| Python `pytest control_api_v1/tests/` | 3329 | 0 | 2555 / 17 (legacy) | +774 / **-17 fail** ✓ |
+| Python `pytest helper_scripts/cron/test_replay_key_*.py` | 7 | 0 | new | +7 ✓ |
+| HTML parser (`tab-paper.html`) | OK | 0 | n/a | OK |
+| Cron shell `bash -n` + Python `py_compile` | OK | 0 | n/a | OK |
+| **新增 test 合計** | **38** | **0** | **expected 38** | match ✓ |
+
+**雙跑 confirm**：Run 1 (Rust 2415 / Python 3329) = Run 2 (Rust 2415 / Python 3329)，0 delta、0 flaky。
+
+**Hard-boundary scan**（CLAUDE.md §四）：`grep '^+.*\b(live_execution_allowed|max_retries|OPENCLAW_ALLOW_MAINNET|live_reserved|authorization\.json|decision_lease)'` = **0 hit**。Wave 2 Batch 1 完全沒改 live execution gate / Decision Lease / Risk envelope。
+
+**4 fail-mode + verify-order + xlang byte-equal HMAC（E2 Lesson 23-25 cover）**：
+- 3 fixture (`manifest_1/2/3.json`) Rust + Python 各自獨立計算 HMAC 對 fixture sig file byte-equal ✓
+- 4 fail-mode (signature_mismatch / manifest_hash_mismatch / key_missing / key_expired) Rust unit + integration + Python pytest 三 bucket 全 cover ✓
+- Verify-order invariant（signature → hash）Rust + Python 兩端 unit test 顯式驗 ✓
+- Fingerprint 算法（`sha256(file_content_with_newline)[:16]` = `da0d3b33336d12fb`）helper script + fixture + runtime 三方對齊 ✓
+
+**Mock 審查**：5 個 test bucket 全 IO-boundary mock（V042 archive `InMemoryKeyArchive` / disk fixture / `os.utime()` filesystem time / PG `_FakePgCursor`），0 業務邏輯 mock。HMAC 計算邏輯與 cron 業務邏輯真跑。
+
+**Pre-existing Mac dev env 缺陷（不影響 sign-off）**：
+- `program_code/ml_training/tests/*` 10 file collection error `ModuleNotFoundError: numpy` — 對 baseline `b1c2034` checkout 後 reproduce 同 error 確認 pre-existing
+- 教訓：CLAUDE.md §三 Mac dev-only 模式有環境差異；E4 baseline 對照建議用 control_api_v1 子目錄 scope（`pytest tests/`）而非 srv root 全 scope
+
+**SLA 壓測 N/A**：Wave 2 Batch 1 完全不涉 hot path（manifest_signer = cold artifact 路徑 / cron daily / frontend 無 SLA）。
+
+**Cross-platform**：Mac dev 端跑 6 項全 PASS。Linux trade-core 補做 optional（HMAC byte-deterministic 跨架構必同；E2 Lesson 23 fixture-based design 已 cover）。
+
+**操作教訓**：
+1. **uncommitted state 處理**：E4 開工時遇 mod.rs / profile.rs uncommitted MED-2 rename 改動 — 用 `git stash push -m "..."` 隔離後跑測試，run 完 `git stash pop` 恢復。**不擅改 git state**（CLAUDE.md skill §1 紅線）
+2. **baseline 比對 trick**：當 srv root 跑收 collection error 時，先 `git checkout <baseline_HEAD> -- .` 對 baseline reproduce 同樣 error → 確認 pre-existing 而非新 commit 引入；驗完 `git checkout HEAD -- .` 還原
+3. **Python pytest scope mismatch**：CLAUDE.md §九 baseline (2555/17) 是 legacy `srv/tests/` scope；當前主力 test 在 `program_code/exchange_connectors/.../control_api_v1/tests/`（3329 累積）。E4 報告必註記 scope 差異 + delta 真實意義
+4. **PA 5 MED follow-up**：每個 MED fix 後 re-run 範圍 evaluation 寫進 report §15，方便 PM 決定 fix-up commit 後派發
+
+**Report**：`/Users/ncyu/Projects/TradeBot/srv/docs/CCAgentWorkSpace/E4/workspace/reports/2026-05-03--ref20_wave2_batch1_e4_regression.md`
+
+---
+
 ### 2026-05-02 P0 migration checksum repair binary sanity test（commit `bb6bf04`，branch `fix/p0-2026-05-02-sqlx-migration-checksum-repair`）— **E4 PASS**
 
 **對象**：新 Rust binary `rust/openclaw_engine/src/bin/repair_migration_checksum.rs` (555 LOC) + `Cargo.toml` 加 `[[bin]]` entry (+11 LOC)。**未執行 `--apply` mode**（per PA 要求 dry-run only），純驗 build + lib test 不破壞 + binary smoke test。

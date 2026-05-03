@@ -249,9 +249,19 @@ write_audit_alert() {
     # written today for this env (cheap check via WHERE ts > today_start).
     # Idempotent：alert 視窗 ≤7d 期間 cron 可能多次跑。為避免每 env 7+ row，
     # 僅當今天此 env 還沒寫 alert 時才寫（用 ts > today_start cheap 查）。
+    # MED-1 retrofit (E2 review 2026-05-03): replace shell-string interpolation
+    # of SQL params with psql `-v` parametrized binding. Even though `env_name`
+    # is sourced from the hardcoded ENVS=(paper demo live) array (zero injection
+    # surface today), defense-in-depth: if ENVS later moves to dynamic source
+    # (operator config, env var override) the param binding stays safe.
+    # MED-1 retrofit (E2 review 2026-05-03): 把 SQL 參數的 shell 字串插值改為
+    # psql `-v` parametrized binding。即使 `env_name` 目前來自 hardcoded
+    # ENVS=(paper demo live) 陣列（零注入面），仍做 defense-in-depth：未來 ENVS
+    # 若改動態 source（operator 設定或 env override），參數 binding 自然安全。
     local already_today
     already_today=$(psql "$OPENCLAW_DATABASE_URL" -tAc \
-        "SELECT 1 FROM learning.governance_audit_log WHERE event_type='audit_write_failed' AND ts >= date_trunc('day', NOW()) AND payload->>'alert_type'='replay_key_rotation_due' AND payload->>'env'='${env_name}' LIMIT 1;" \
+        -v env="$env_name" \
+        "SELECT 1 FROM learning.governance_audit_log WHERE event_type='audit_write_failed' AND ts >= date_trunc('day', NOW()) AND payload->>'alert_type'='replay_key_rotation_due' AND payload->>'env'=:'env' LIMIT 1;" \
         2>/dev/null | tr -d '[:space:]' || true)
     if [[ "$already_today" == "1" ]]; then
         echo "[$(ts)] AUDIT_DEDUP env=${env_name} (already alerted today)" >> "$LOG"
@@ -259,7 +269,8 @@ write_audit_alert() {
     fi
 
     if psql "$OPENCLAW_DATABASE_URL" -tAc \
-        "INSERT INTO learning.governance_audit_log (event_type, decided_by, payload) VALUES ('audit_write_failed', 'replay_key_rotation_check_cron', '${payload}'::jsonb);" \
+        -v payload="$payload" \
+        "INSERT INTO learning.governance_audit_log (event_type, decided_by, payload) VALUES ('audit_write_failed', 'replay_key_rotation_check_cron', :'payload'::jsonb);" \
         >> "$LOG" 2>&1; then
         echo "[$(ts)] AUDIT_WRITTEN env=${env_name} days_remaining=${days_remaining}" >> "$LOG"
     else
