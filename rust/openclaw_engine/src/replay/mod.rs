@@ -14,8 +14,9 @@
 //!
 //!   Wave 3 scope (NOT yet wired):
 //!     - `forbidden_guard` — startup + runtime fail-closed guard (R20-P2b-S8).
-//!     - `mac_policy_guard` — `OPENCLAW_REPLAY_MAC_FORBID_REAL_DATA` enforcer
-//!       (R20-P2b-S9).
+//!     - `mac_policy_guard` — `OPENCLAW_REPLAY_MAC_NO_PRIVATE` enforcer
+//!       (R20-P2b-S9). (renamed from `OPENCLAW_REPLAY_MAC_FORBID_REAL_DATA`
+//!       per Wave 2 dispatch §2 ambiguity decision #1, 2026-05-03)
 //!
 //! MODULE_NOTE (中): Wave 1 scaffold 匯出。此 module 目前僅 re-export
 //!   `ReplayProfile` enum 規格（R20-P0-T3）。Wave 3 R20-P2b-S7/S8/S9/S10

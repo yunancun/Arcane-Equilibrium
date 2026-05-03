@@ -306,16 +306,33 @@ def main() -> int:
         return 0
     except Exception as exc:  # noqa: BLE001
         log.error("cleanup transaction failed: %s", exc)
+        # MED-4 retrofit (E2 review 2026-05-03): replace bare except: pass
+        # with explicit logger.warning + exc_info to surface cleanup-race
+        # exceptions (conn already closed by remote, lock contention, etc.).
+        # Idempotency preserved — caller still returns 1; the next cron
+        # cycle naturally re-tries via WHERE status='retired' filter.
+        # MED-4 retrofit (E2 review 2026-05-03): 把 bare except: pass 換成
+        # 顯式 logger.warning + exc_info，浮現 cleanup race 異常（連線已被
+        # 對端關閉、鎖競爭等）。冪等性保持 — caller 仍 return 1，下個 cron
+        # cycle 自然透過 WHERE status='retired' 條件 dedup 重試。
         try:
             conn.rollback()
-        except Exception:
-            pass
+        except Exception as rollback_exc:  # noqa: BLE001 — log + continue cleanup
+            log.warning(
+                "conn.rollback() also failed (cleanup race): %s",
+                rollback_exc,
+                exc_info=True,
+            )
         return 1
     finally:
         try:
             conn.close()
-        except Exception:
-            pass
+        except Exception as close_exc:  # noqa: BLE001 — log + continue cleanup
+            log.warning(
+                "conn.close() also failed (cleanup race): %s",
+                close_exc,
+                exc_info=True,
+            )
 
 
 if __name__ == "__main__":
