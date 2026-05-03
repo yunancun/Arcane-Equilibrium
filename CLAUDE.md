@@ -99,7 +99,15 @@
 
 **最早 Live target**：以 2026-05-23 樂觀 / 2026-05-30 中位 / 2026-06-15 悲觀為規劃帶。**PA 看真實負 edge + 4 LG 0 IMPL，悲觀更可能**。中位需 P0-3 後 ~3 sprints 連推 LG-2/3/4 IMPL。
 
+### REF-20 IMPL 狀態（2026-05-03 cold audit 揭結構性 false positive）
+
+- **Wave 1-9 IMPL closed (commits 9e0c826 / 1851714+b1f6b8a / 5a618ff / 4b48b6d / 457a458 / eb5f106 / c887e4e + 53ab7e7 / 8429af1 / 1f5d019 / 5a7581e)**：聲稱「24/25 V3 §12 GREEN」，cold audit 揭結構性 false positive — runner 從未啟動 → #2/#10/#14/#19 都是 vacuous truth。
+- **Sprint 1 cold audit fix-up (commit `edf33c0`)**：5 critical security（manifest 自洽循環 + spawn argv broken + IDOR + path traversal + env var bypass）+ 3 schema drift（V049 replay_experiments 22 col + V050 replay_simulated_fills 17 col + V051 mlde_recommendations 雙路 CHECK）+ V052 FK redirect + V053 race-free enum extension。3387 PASS / 1 fail (pre-existing) / 10 skip · 3084 cargo workspace PASS / 2 fail (pre-existing) / 3 ignored。
+- **Sprint 2 retroactive evidence trail (commits `aa9343c` + `5184990` + `ab25a2a` + `db1d04f`)**：PA Track E Decision Lease retrofit AMD-2026-05-02-01 4-task DAG design + E2 F1 retroactive Wave 3-9 review (10 LOW + 7 P2 ticket) + E4 F2 retroactive cumulative (4 forgery flag + 5 mock retroactive flag + 3 P2-FOLLOW-UP) + Wave 7 amendment AMD-2026-05-03-01 (IMPL/Deploy 2-stage gate) + Track G doc sync。
+- **Sprint 3-4 dispatch pending**：Decision Lease retrofit IMPL（feature flag `OPENCLAW_LEASE_ROUTER_GATE_ENABLED=0` 灰度 6 Phase rollout）+ Linux deploy 實機（cargo --release replay_runner + V036→V053 共 18 V### apply + 5 e2e smoke + restart_all --rebuild）+ 14d gradient observation + final closure doc 數字訂正（line 99「3500+ PASS」→ 真實 3387）。
+
 ### History pointers
+- 2026-05-03 REF-20 Sprint 1+2 reports：`docs/CCAgentWorkSpace/{PA,E1,E2,E4}/workspace/reports/2026-05-03--ref20_sprint{1,2}_*.md` + `docs/governance_dev/amendments/2026-05-03--ref20_wave7_p5_impl_accept_deploy_blocked.md`
 - 2026-05-02 trim 前完整 §三 / §七 詳述 / §九 5 條長注釋 / §十一 一句話狀態：`docs/archive/2026-05-02--CLAUDE-pre-trim-snapshot.md`
 - 2026-05-02 4-day codex audit closure（P1+P2+Step 2+LG-5 Wave）：`docs/archive/2026-05-02--TODO-pre-trim-snapshot.md`
 - 早於 2026-05-01 的 active-doc snapshots：`docs/archive/2026-04-30--{CLAUDE,TODO,README}-pre-cleanup-snapshot.md`、`docs/archive/2026-04-29--62finding-batch-A-to-F.md`、`docs/archive/2026-04-29--strkusdt-p0-wave.md`、`docs/archive/2026-04-29--wave-A-to-H-narrative.md`
@@ -395,19 +403,24 @@ state_models ← state_compiler ← state_store ← main_legacy ← main.py
 
 ## 十、下一步工作指針
 
-**當前焦點**：活躍任務以 `TODO.md` 為準（P0/P1/P2 三層 · 5 大組 × 36 條目）。CLAUDE.md 不重複列。
+**當前焦點**：活躍任務以 `TODO.md` 為準（P0/P1/P2 三層 · 5 大組 × 36 條目 + REF-20 Sprint 1+2 closure + Sprint 3-4 dispatch pending）。CLAUDE.md 不重複列。
 
-**關鍵路徑**：`post-deploy edge observation + LG-5 reviewer activation → G2-02/G2-01 結論 → P0-3 edge decision (~05-15) → LG-2/3/4 IMPL + Decision Lease 路徑 A retrofit + Live infra (HTTPS / credential rotation / runbook) → true live`
+**關鍵路徑**：`Sprint 3 Decision Lease retrofit + Linux deploy 實機 → Sprint 4 14d gradient + closure doc 訂正 → post-deploy edge observation + LG-5 reviewer activation → G2-02/G2-01 結論 → P0-3 edge decision (~05-15) → LG-2/3/4 IMPL + Live infra (HTTPS / credential rotation / runbook) → true live`
 
-**最早 Live 日期**（事件驅動，非 hard date）：以 2026-05-23 樂觀 / 2026-05-30 中位 / 2026-06-15 悲觀為規劃帶。**PA panorama 評估悲觀更可能**（5 策略 net negative + 4 LG 0 IMPL + Decision Lease retrofit 1.5-2 E1 task + 18 blocker）。
+**REF-20 IMPL 狀態（2026-05-03 cold audit + Sprint 1+2）**：Wave 1-9 IMPL accept-with-cold-audit-caveat（commits in tree，runtime 0 行 active）；Sprint 1 修 5 P0 critical security + 3 schema drift（commit `edf33c0`）；Sprint 2 補 §八 evidence trail + Wave 7 amendment AMD-2026-05-03-01（commits `aa9343c` + `5184990` + `ab25a2a` + `db1d04f`）；Sprint 3-4 deploy/observation pending operator action。
 
-**路線圖**：Phase 0-3 + Live GUI + 5-Agent 基礎接線 + Executor shadow toggle + MLDE demo autonomy + Strategy Edge Repair + Strategy Edge Models + Dust residual prevention 均已落地。仍未完成的是正 edge / execution-quality 驗收 / P0-3 decision / Live Gate LG-2/3/4 IMPL + Decision Lease retrofit / true live 授權後的受監督/受限自主放權。
+**最早 Live 日期**（事件驅動，非 hard date）：以 2026-05-23 樂觀 / 2026-05-30 中位 / 2026-06-15 悲觀為規劃帶。**PA panorama 評估悲觀更可能**（5 策略 net negative + 4 LG 0 IMPL + Decision Lease retrofit 1.5-2 E1 task + 18 blocker + REF-20 Sprint 3 deploy 未開）。
 
-**Live 前置**：LIVE-GUARD-1 + LIVE-GATE-BINDING-1 代碼已存在；LiveDemo/live runtime currently authorized。True live 還缺 18 blocker（見 §三）。
+**路線圖**：Phase 0-3 + Live GUI + 5-Agent 基礎接線 + Executor shadow toggle + MLDE demo autonomy + Strategy Edge Repair + Strategy Edge Models + Dust residual prevention + REF-20 IMPL accept-with-caveat 均已落地。仍未完成的是 REF-20 Sprint 3-4 deploy / 正 edge / execution-quality 驗收 / P0-3 decision / Live Gate LG-2/3/4 IMPL + Decision Lease retrofit / true live 授權後的受監督/受限自主放權。
+
+**Live 前置**：LIVE-GUARD-1 + LIVE-GATE-BINDING-1 代碼已存在；LiveDemo/live runtime currently authorized。True live 還缺 18 blocker（見 §三）+ REF-20 Sprint 3-4 deploy 完成。
 
 **關鍵文件指針**（按需 Read，不要全載入）：
-- TODO.md 三層工作流程 + healthcheck 列表 + 排程提醒
+- TODO.md 三層工作流程 + healthcheck 列表 + 排程提醒 + P1-INFRA-3a-m REF-20 Sprint 1+2+3+4 status
+- REF-20 V3 SoT：`docs/execution_plan/2026-05-03--ref20_paper_replay_lab_dev_plan_v3.md`
+- REF-20 Sprint 2 PA Track E Decision Lease retrofit design：`docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-03--ref20_sprint2_track_e_decision_lease_retrofit_design.md`
 - Decision Lease review meeting agenda：`docs/CCAgentWorkSpace/PM/2026-05-02--decision_lease_review_agenda.md`
+- Wave 7 amendment AMD-2026-05-03-01：`docs/governance_dev/amendments/2026-05-03--ref20_wave7_p5_impl_accept_deploy_blocked.md`
 - Bybit API 字典/審計：`docs/references/2026-04-04--bybit_api_reference.md` · `docs/audits/2026-04-04--bybit_api_infra_audit.md`
 - 完整參考索引：`docs/CLAUDE_REFERENCE.md`
 - 4-day codex audit closure 詳細：`docs/archive/2026-05-02--TODO-pre-trim-snapshot.md`
