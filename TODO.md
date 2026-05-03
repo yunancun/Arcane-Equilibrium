@@ -140,6 +140,8 @@
 | **P2-AUDIT-5** | QC-S2-01/02/04/09（scanner posterior LCB hardcoded / promotion distribution shift / TOML triple-env 違反 / PRE-LIVE-3 thresholds RFC 缺）| @QC + @PA |
 | **P2-AUDIT-6** | E3-S2-P2-1/P2-2 exception leak；E3-S2-P3-1 file mode 0600 | @E1 |
 | **P2-AUDIT-7** | V044 P6-S15 enum DROP+ADD 缺 LOCK TABLE ACCESS EXCLUSIVE；補回同 V053 race-free retrofit pattern（BEGIN+LOCK TABLE ... ACCESS EXCLUSIVE+COMMIT 包裹 + probe-short-circuit-before-lock）— REF-20 Sprint 1 Track C V053 落地時 E2/E3 同 incident 反例覆蹤 | @E1 |
+| **P2-FOLLOW-UP-1** | `test_case2_pg_kill_simulation_returns_200_degraded` deterministic flaky（FastAPI `app.dependency_overrides[current_actor]` 跨 test pollution；隔離跑 PASS）— Wave 6 commit `eb5f106` 引入但 closure doc 偽稱 pre-existing。修法：pytest fixture autouse 重置 `app.dependency_overrides` + 包 router instance fixture | @E1+@E4 |
+| **P2-FOLLOW-UP-2** | `mac_policy_guard.rs` 2 doctest fail（中文全形括號 `（）` 觸發 Rust doctest tokenizer error）— Wave 3 commit `5a618ff` 自引入但聲稱 sibling pre-existing。修法：把 doctest 中文範例包進 ` ```text ``` ` markdown code fence 或改半形括號 | @E1 |
 
 詳述 → `docs/archive/2026-05-02--TODO-pre-trim-snapshot.md` § Top P2 / P3 backlog
 
