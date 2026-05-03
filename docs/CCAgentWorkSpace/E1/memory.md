@@ -2972,3 +2972,86 @@ PM dispatch Wave 3 Batch 3B 並行（with E2/E4 review + S10 CI + U10 a11y）。
 
 ### 報告路徑
 - `srv/docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-03--ref20_wave3_p2b_s10_symbol_audit_ci.md`
+
+## 2026-05-03 — REF-20 R20-P2b-S8 + S9: forbidden_guard + mac_policy_guard 合併 IMPL (Wave 3 Batch 3B 最後段)
+
+### Wave / 主題
+- Wave 3 Batch 3B 最後段 — 合併 IMPL 兩 Rust guard module（同 caller 站點 `replay_runner.rs` 避免 race）
+- S8 `forbidden_guard.rs`：startup + runtime path fail-closed enforcement（V3 §6.2 forbidden 7-surface）
+- S9 `mac_policy_guard.rs`：Mac-only policy guard via `OPENCLAW_REPLAY_MAC_NO_PRIVATE=1`（per Wave 2 dispatch §2 #1 改名 from `OPENCLAW_REPLAY_MAC_FORBID_REAL_DATA`）
+- 對齊 V3 §3 G7/G8 + §6.2/§6.3 + §12 #10/#12 acceptance binding
+- 對齊 PA boundary report `2026-05-03--replay_runner_crate_boundary_allowlist.md` §4 allowed deps + §5 forbidden deps
+- 對齊 Wave 2 dispatch §2 #1 ENV name rename + §2 #2 tokio 0 import + §2 #5 macOS 主 / Linux 次
+
+### 交付清單
+- `rust/openclaw_engine/src/replay/forbidden_guard.rs` — NEW 534 LOC：`ForbiddenPathError` 7-variant enum（lease / IPC / WS / exchange dispatch / DB writer / live-demo config / advisory write）+ `enforce_at_startup()` + `enforce_at_runtime(action)` + `parse_trip_value()` / `read_trip_file()` / `current_trip_value()` 內部 helper + `TRIP_ENV_VAR` / `TRIP_FILE_BASENAME` const + 3 lib unit test
+- `rust/openclaw_engine/src/replay/mac_policy_guard.rs` — NEW 384 LOC：`MacPolicyError` 3-variant enum（RealDataAttemptedOnMac / EnvVarMissingOrZero / OsNotMacButGuardActive）+ `enforce(profile)` + `host_is_macos()` / `require_env_one()` 內部 helper + `ENV_VAR_NAME` / `ENV_VAR_REQUIRED_VALUE` const + 3 lib unit test
+- `rust/openclaw_engine/src/replay/mod.rs` — Edit 68→132：加 `pub mod forbidden_guard;` + `pub mod mac_policy_guard;` + 2 subsystem-level `pub use`（`ForbiddenPathError` / `MacPolicyError`）+ MODULE_NOTE 雙語更新
+- `rust/openclaw_engine/src/bin/replay_runner.rs` — Edit 179→246：加 2 個 enforce 呼叫於 main（S7 profile assert → S8 forbidden enforce → S9 mac enforce 三層串聯）+ 移除 S8/S9 TODO marker + 加 Wave 4 T1 wrapper TODO + V3 §6.2 forbidden 清單 reminder + stub 行更新「P2b-S7/S8/S9 guards online」
+- `rust/openclaw_engine/tests/replay_forbidden_guard_acceptance.rs` — NEW 350 LOC：4 acceptance proof（clean state Ok / env var trip 7 variant 全測 / runtime gate 與 startup gate 一致 / 7-variant exhaustive match 防漂移）+ `EnvVarRestore` RAII + `env_lock()` Mutex serialization + tempfile-based magic-file isolation
+- `rust/openclaw_engine/tests/replay_mac_policy_acceptance.rs` — NEW 287 LOC：4 acceptance proof（3 macOS-only：ENV 未設 → EnvVarMissingOrZero / ENV=1 + Isolated → Ok / ENV=1 + non-Isolated → RealDataAttemptedOnMac；1 cross-platform：const-export 14-char 新名）+ `EnvVarRestore` RAII
+
+### 紅線守則（全達成）
+- 0 IPC / dispatch / live exchange import（`intent_processor` / `ipc_server` / `bybit_*` / `live_authorization` 全 0 hit）
+- 0 GovernanceHub / decision_lease import
+- 0 tokio import（per Wave 2 dispatch §2 #2）
+- ENV name = `OPENCLAW_REPLAY_MAC_NO_PRIVATE`（per Wave 2 dispatch §2 #1，14-char short name；舊名 `OPENCLAW_REPLAY_MAC_FORBID_REAL_DATA` 僅在 doc comment 內 8 處 rename history note，0 處作 code constant）
+- 0 hardcoded `/home/ncyu` / `/Users/<name>` 在 6 新/edit 檔
+- 0 改動既有 S7 ProfileEnum / ReplayIsolationError 邏輯（`profile.rs` unchanged）
+- 0 改動既有 replay_runner.rs main 業務邏輯（純加 2 個 enforce + doc）
+- 不依賴 `crate::config`（Wave 4 R20-P2b-T2 才接 config reuse）
+- 雙語 comment（CLAUDE.md §七 強制）：MODULE_NOTE 中英雙塊 / 函數 docstring 雙語 / inline 不變量雙語
+
+### 驗證
+- cargo build 兩 variant PASS：default (no feature) + replay_isolated feature 全 0 new warning
+- cargo test 兩 acceptance test PASS：4/4 forbidden + 4/4 mac policy（Mac dev 上 3 macOS-only + 1 cross-platform）
+- cargo test 兩 sibling 0 regression：S7 profile 5/5 + manifest signer xlang 8/8 + replay lib unit test 16/16
+- nm symbol audit (S10) PASS：366 symbols 0 forbidden hit（vs S7-only baseline 6 symbols 因 forbidden_guard + mac_policy_guard 帶入 new symbol，全為合法 std/core/panic infra）
+- binary smoke 三 path 驗：happy（OPENCLAW_REPLAY_MAC_NO_PRIVATE=1 → exit 0）/ S9 fail-closed（ENV 未設 → exit 101 + EnvVarMissingOrZero）/ S8 fail-closed（OPENCLAW_REPLAY_FORBIDDEN_TRIPPED=AcquireLeaseDetected → exit 101 + AcquireLeaseDetected）
+
+### 經驗教訓
+
+1. **三層 fail-closed guard chain 在 binary main 的順序對 audit log 強度有影響**：S7 profile assert → S8 forbidden enforce → S9 mac enforce 的執行順序刻意安排為「最廣 invariant → 中等粒度 → host-specific」。理由：(a) profile 是 meta-surface，必先確定為 Isolated 後才有「Mac 上是否允 Isolated」這個問題；(b) S8 forbidden 在啟動時就已有「runtime state 已被污染」的 evidence（env var / file marker），晚於 S7 但早於 S9 的「跑在 Mac 上是否合法」判斷；(c) S9 雖 host-specific，但 `enforce(profile)` 入內部後 profile mismatch（non-Isolated）優先於 ENV check 報出，這對 audit log 也是「最強違規優先」原則。**規則：multi-guard chain 在 single caller 站點順序為「meta → state → host-specific」；單一 guard 內部多分支也按「最強違規優先」報出；同 caller 站點呼叫順序由代碼上下行決定 fail-closed 速度但不影響 panic 訊息抓哪個違規（panic 訊息只認第一個 Err）**。
+
+2. **ENV var rename 留 history note 在 doc comment 是 trace 完整性的選擇而非 noise**：`OPENCLAW_REPLAY_MAC_FORBID_REAL_DATA` → `OPENCLAW_REPLAY_MAC_NO_PRIVATE` 經 Wave 2 dispatch §2 #1 改名後，4 個檔的 8 處 doc comment 顯式註明 rename 來源 + 字數對比（41 字 → 14 字），方便 future audit 知道這是有 spec record 的變更，而非新人寫錯。為防舊名作為 code constant 漂回，加 `mac_policy_guard.rs::tests::old_var_name_grep_self_check` lib unit test 比對 `ENV_VAR_NAME.contains("FORBID_REAL_DATA") == false`。**規則：spec-driven rename 必在 doc comment 留 trace（非註解一行 `// renamed from XXX`，而是 module-level / function-level docstring 完整段）+ 自驗 unit test 防漂回；E2 grep audit 時看 source 中 `env::var()` / `set_var()` argument 是否用新名 + doc 是否有 rename trace 即可分辨**。
+
+3. **`enforce_at_runtime(action)` Wave 3 minimal IMPL + Wave 4 hard-coded interception 的 separation**：Wave 3 不能加 `intent_processor::router` / `ipc_server::dispatch` interception 因會違反 PA boundary §5 forbidden import + nm S10 audit fail。但 Wave 4 wrapper code 必預先 draft，所以本 task 鎖 signature `pub fn enforce_at_runtime(action: &str) -> Result<(), ForbiddenPathError>` + Wave 3 body 用同 env+file detection。`let _ = action;` 抑制 unused warning。**規則：Wave-spanning IMPL 對 future Wave 接入點必鎖 signature；Wave 早期 minimal body + `let _ = future_param;` 抑制 unused warning + acceptance test 證明 contract（不 freeze body 細節）；Wave 後期再 swap body 不破 signature 即不破 caller**。
+
+4. **`cfg!(target_os = "macos")` 在 acceptance test 內無法 mock 故必走 CI matrix**：`mac_policy_guard::host_is_macos()` 用 `cfg!(target_os = "macos")`，compile-time 常數。Mac dev 看到 4 PASS（3 Mac + 1 cross-platform；proof 4 invisible）；Linux CI 看到 2 PASS（1 non-Mac + 1 cross-platform；proof 1/2/3 invisible）。要在單一 host 跑全部分支需 dependency injection（傳 `host_is_mac: bool` 進 `enforce()`），但這要 bump signature 且影響 `replay_runner::main`。**結論**：cfg-based test 不對稱是 Rust by design，CI matrix（macos-14 + ubuntu-22.04）必跑兩平台才覆蓋全部 acceptance；單一 host 看到的 test 數差異不是 bug。**規則：cfg-gated test 不要試圖 mock；接受「單一 host PASS count 差異」作為 cfg 系統的 by-design；CI matrix 必跑兩平台才能完整覆蓋；E2 review 時看 `#[cfg(target_os)]` test 拆分是否合理（Mac-only proof + non-Mac-only proof + 永跑 cross-platform proof 三類），不要求單一 host 全 PASS**。
+
+5. **`unsafe { env::set_var() }` 在 Rust edition 2021 仍 safe 但 forward-compat edition 2024**：Rust 1.85+ Edition 2024 default 將 `env::set_var` 標 unsafe（multi-thread race 隱憂）。我們 edition 2021 + Rust 1.95 仍 safe，但 acceptance test 內顯式包 `unsafe { ... }` 區塊：(a) future-proof to edition 2024 / Rust 2.0 軌跡 / (b) 區塊內附 `// SAFETY: env mutation is single-threaded under env_lock() acquired by the test that constructed this guard.` 說明 / (c) `EnvVarRestore::Drop` 內亦用 `unsafe`，使 RAII 還原也標示為 race-prone。**規則：對 future Rust edition 會 break 的 safe-API 用顯式 `unsafe { ... }` + SAFETY 注釋是好習慣（cargo build / test 仍綠 + 防 future 強制 unsafe 升級時再寫 1000 行 noise）；類似情況包括 `Cell::as_ptr` / `&mut [T]::set_len` 等 future-tightening**。
+
+6. **`EnvVarRestore` RAII + `env_lock()` Mutex pattern 對 cargo test 並行是必要的**：cargo test 預設同檔 test 並行（`--test-threads`）；多個 test mutate 同一 env var 會 race。Pattern：`OnceLock<Mutex<()>>` 共享 mutex + RAII helper 在 Drop 還原原值（或 unset）。模式對齊 sibling `replay_manifest_signer_xlang_consistency.rs` 與 `test_cost_edge_advisor_persistence.rs`。**避坑**：(a) `Mutex::lock()` 配 `unwrap_or_else(|e| e.into_inner())` 處理 poisoned mutex（前一 test panic 留下） / (b) RAII 內部 capture `Option<String>` 區分 unset 與 set，`Drop` 時對 `None` 走 `remove_var`（而非 `set_var("")`）。**規則：integration test mutate process env 必有 single shared mutex serialization + RAII 還原機制；不寫此 pattern 直接 `set_var` race 必發於 cargo test 並行；E2 review 時看是否有此 pair 結構**。
+
+7. **acceptance test proof 4 用 `for &profile in &[all_variants]` 配 `for state in env_states` 雙 nested 列舉**：`replay_mac_policy_acceptance.rs` proof 4 對非 Mac host 用 nested loop 把所有 ENV state（None / "1" / "0" / "any"）× 所有 profile variant（4 個）= 16 個 case 展開。**反例對比**：proof 2 / proof 4 in forbidden_guard 用 case array 顯式列每組（避免 default arm + future variant silent absorb）。**規則的差異**：cross-property test（「對所有 X × Y → 結果都應 Z」）用 nested loop；single-property test（「每個 variant → 對應結果」）用 explicit case array。proof 4 mac 屬 cross-property（所有 host non-Mac × 所有 profile × 所有 ENV → Ok），nested loop OK；proof 2 forbidden 屬 single-property（每 variant → 對應 Err），用 case array 強制顯式列。
+
+### Cross-platform compliance
+- 0 hardcoded `/home/ncyu` / `/Users/<name>` 在 6 個新/edit 檔（grep verify rc=1）
+- ENV var SoT：`OPENCLAW_REPLAY_MAC_NO_PRIVATE` / `OPENCLAW_REPLAY_FORBIDDEN_TRIPPED` / `OPENCLAW_DATA_DIR` 全 read via `std::env::var()`，不寫 path 字面值
+- `cfg!(target_os = "macos")` 分支兼容 Mac + Linux + 其他 OS（其他 OS 走 non-mac passthrough）
+- Apple Silicon (aarch64-apple-darwin) Mac dev 直驗 4/4 acceptance PASS；x86_64-unknown-linux-gnu Linux CI 待 trade-core 驗 proof 4 (non-Mac passthrough) PASS
+
+### Bilingual comment compliance（CLAUDE.md §七 強制）
+- 兩個新 source file MODULE_NOTE 雙塊（EN 約 70 行 / 中 約 70 行）+ Cross-references / SPEC line 雙語
+- `mod.rs` MODULE_NOTE 雙塊更新反映三 guard chain
+- `replay_runner.rs` MODULE_NOTE 雙塊更新（Wave 3 P2b-S7 → S7/S8/S9 三層）+ section header 雙語 + V3 §6.2 forbidden 清單 reminder 雙語
+- 兩個 acceptance test MODULE_NOTE 雙塊（含 ENV serial-mutation safety 雙語說明）+ test fn docstring 雙語 + inline 雙語 SAFETY 注釋
+- 7 個 `ForbiddenPathError` variant 各帶雙語 doc + 對應 V3 §6.2 spec reference
+- 3 個 `MacPolicyError` variant 各帶雙語 doc + 對應 V3 §6.3 / Wave 2 dispatch §2 #1 reference
+
+### LOC budget 標記
+- forbidden_guard.rs: 534 < 800 警告線（pad-room 充裕）
+- mac_policy_guard.rs: 384 < 800 警告線
+- mod.rs: 132（無 LOC 限制）
+- replay_runner.rs: 246 < 800 警告線
+- replay_forbidden_guard_acceptance.rs: 350 < 800 警告線
+- replay_mac_policy_acceptance.rs: 287 < 800 警告線
+
+### 後續 wiring
+- E2 review：對 PA boundary §5 forbidden import 0 hit + V3 §12 #10/#12 acceptance binding + 雙語 MODULE_NOTE / docstring 完整 + LOC budget < 800 + ENV rename history note 是否保留 + acceptance test 對 macOS / Linux 分支不對稱是否接受
+- E4 regression：trade-core Linux 跑 `cargo test --features replay_isolated --test replay_mac_policy_acceptance` 確認 proof 4 (non-Mac passthrough) PASS（Mac dev 看不到此 test）；同時跑全套 cargo test 確認 0 sibling regression（已 Mac dev 預驗 21/21 replay tests + 16/16 lib unit tests）
+- E3 review：`EnvVarRestore` RAII + `env_lock()` Mutex pattern 對 multi-thread test runner 安全性 + `enforce_at_startup` / `enforce_at_runtime` Wave 3 minimal IMPL 是否符合 V3 §6.2 fail-closed 強度 + Mac fail-closed 對「ENV 未設」誤判風險
+- Wave 4 R20-P2b-T1 wrapper：將實作 `enforce_at_runtime(action)` 對 hard-coded action label 的 per-action interception 分支（intent_processor::router / ipc_server::dispatch / bybit_rest_client::place_order）；Wave 3 鎖定的 signature 不必再改，body swap 即可
+
+### 報告路徑
+- `srv/docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-03--ref20_wave3_p2b_s8_s9_guards.md`
