@@ -98,196 +98,188 @@
   <div id="paper-mode-badges" class="oc-subtab-mode-slot" data-todo="REF-20 R20-P1-U7 will populate"></div>
 </nav>
 
-<!-- REF-20 R20-P1-U1: Session sub-tab content wrapper
-     REF-20 R20-P1-U1：Session 子標籤內容容器
-     U1 階段保留現有 Session content 在原位（位於下方），U2 將之搬遷到此 div 內。
-     P1 stage keeps existing Session content in place (below); U2 will migrate it into this div. -->
+<!-- REF-20 R20-P1-U2: Session sub-tab content wrapper（U1 land + U2 content migration done）
+     REF-20 R20-P1-U2：Session 子標籤內容容器（U1 結構 + U2 既有 Session 內容遷入完成）
+     原 Session 內容自 inline script 區塊外的 8 cards / details 區段已移入此 div。
+     8 sections previously rendered between sub-tab nav and inline-script have been
+     migrated into this div per UX subdoc §3 Session sub-tab spec + workplan §4 R20-P1-U2. -->
 <div id="subtab-session" class="oc-subtab-content active" role="tabpanel" aria-labelledby="subtab-btn-session">
-  <!-- TODO REF-20 R20-P1-U2: move session content here / R20-P1-U2 將把下方既有 Session 內容遷入此處 -->
+
+  <!-- Paper Session Control Bar / Paper 会话控制栏 -->
+  <div class="oc-control-bar">
+    <span style="font-weight:600">&#x1F4B0; Paper 模拟</span>
+    <span id="session-badge" class="oc-chip oc-chip-neutral">--</span>
+    <span class="spacer" style="flex:1"></span>
+    <label style="font-size:11px;color:var(--text-dim);display:flex;align-items:center;gap:4px" title="Paper 初始餘額（USDT）/ Paper Initial Balance (USDT)">
+      Balance: <input id="paper-init-bal" type="number" min="100" max="10000000" step="100" value="10000" style="width:90px;font-size:12px" />
+    </label>
+    <button class="oc-btn oc-btn-success" id="btn-start" onclick="sessionAction('start')">&#x25B6; 启动</button>
+    <button class="oc-btn" id="btn-pause" onclick="sessionAction('pause')" disabled>&#x23F8; 暂停</button>
+    <button class="oc-btn" id="btn-resume" onclick="sessionAction('resume')" disabled>&#x25B6; 继续</button>
+    <button class="oc-btn oc-btn-danger" id="btn-stop" onclick="sessionAction('stop')" disabled>&#x23F9; 停止 Paper</button>
+    <button class="oc-btn oc-btn-danger" id="btn-stop-all" onclick="sessionStopAll()" disabled title="停止 Paper + Demo 雙引擎 / Stop both Paper and Demo engines">&#x23F9;&#x23F9; 雙停</button>
+    <span style="margin-left:10px;font-size:12px;color:var(--text-dim)">余额: <strong id="balance-val">--</strong></span>
+  </div>
+
+  <div id="explain-paper"></div>
+
+  <!-- Market Feed / 实时行情（默认折叠，只读状态，启停由主仪表盘控制） -->
+  <details class="oc-collapse">
+    <summary>&#x1F4E1; 实时行情 / Market Feed <span id="feed-badge" class="oc-chip oc-chip-neutral" style="margin-left:8px;font-size:10px">--</span></summary>
+    <div class="oc-collapse-body">
+      <div class="feed-prices" id="feed-prices">等待行情数据...</div>
+      <div style="font-size:11px;color:var(--text-dim);margin-top:4px" id="feed-stats"></div>
+    </div>
+  </details>
+
+  <!-- Account Balance / 账户余额 -->
+  <div class="oc-card">
+    <h3>&#x1F4B0; 账户余额 / Account Balance</h3>
+    <div class="oc-metrics">
+      <div class="oc-metric"><div class="oc-metric-label">初始余额 / Initial Balance</div><div class="oc-metric-val" id="p-bal-initial">--</div></div>
+      <div class="oc-metric"><div class="oc-metric-label">可用余额 / Available Balance</div><div class="oc-metric-val" id="p-bal-available">--</div></div>
+      <div class="oc-metric"><div class="oc-metric-label">已用保证金 / Margin Used</div><div class="oc-metric-val" id="p-bal-margin">--</div></div>
+      <div class="oc-metric"><div class="oc-metric-label">峰值余额 / Peak Balance</div><div class="oc-metric-val" id="p-bal-peak">--</div></div>
+    </div>
+  </div>
+
+  <!-- PnL Overview / 盈亏概览 -->
+  <div class="oc-card">
+    <h3>&#x1F4B5; 盈亏概览 / PnL Overview</h3>
+    <div class="oc-metrics" id="pnl-metrics">
+      <div class="oc-metric"><div class="oc-metric-label">净盈亏 / Net PnL</div><div class="oc-metric-val" id="p-net">--</div></div>
+      <div class="oc-metric"><div class="oc-metric-label">已实现盈亏 / Realized PnL</div><div class="oc-metric-val" id="p-realized">--</div></div>
+      <div class="oc-metric"><div class="oc-metric-label">未实现盈亏 / Unrealized PnL</div><div class="oc-metric-val" id="p-unrealized">--</div></div>
+      <div class="oc-metric"><div class="oc-metric-label" title="盈利交易占总交易的百分比。50%以上通常被视为良好。/ Percentage of profitable trades out of total. Above 50% is generally considered good.">胜率 / Win Rate</div><div class="oc-metric-val" id="p-winrate">--</div></div>
+      <div class="oc-metric"><div class="oc-metric-label" title="从峰值到最低点的最大跌幅百分比，衡量最坏情况下的资金回撤。越小越好。/ Largest peak-to-trough decline in equity. Measures worst-case capital loss. Lower is better.">最大回撤 / Max Drawdown</div><div class="oc-metric-val" id="p-maxdd">--</div></div>
+    </div>
+    <!-- PnL Trend Sparkline / 盈亏趋势迷你图（SUGGESTION §4.4） -->
+    <div style="margin-top:10px">
+      <div style="font-size:10px;color:var(--text-dim);margin-bottom:4px;display:flex;align-items:center;gap:6px">
+        <span>累计收益趋势 / Cumulative PnL Trend</span>
+        <span style="color:var(--text-dim);font-size:9px">（最近 50 笔成交 / last 50 fills）</span>
+      </div>
+      <svg id="pnl-sparkline" width="100%" height="120"
+        style="display:block;background:rgba(13,17,23,0.5);border-radius:6px;border:1px solid #21262d"
+        viewBox="0 0 400 120" preserveAspectRatio="none">
+        <line id="pnl-sparkline-zero" x1="8" x2="392" y1="60" y2="60" stroke="#30363d" stroke-width="0.5" stroke-dasharray="3,3"/>
+        <polyline id="pnl-sparkline-line" points="" fill="none" stroke="var(--green)" stroke-width="2" stroke-linejoin="round"/>
+        <text x="4" y="114" fill="var(--text-dim)" font-size="10" id="pnl-sparkline-label">no data</text>
+      </svg>
+    </div>
+  </div>
+
+  <!-- Positions / 持仓 -->
+  <div class="oc-card">
+    <h3 style="display:flex;align-items:center;gap:10px">
+      &#x1F4CA; 持仓 / Positions
+      <button class="oc-btn oc-btn-danger" style="padding:3px 10px;font-size:11px;margin-left:auto" onclick="closeAllPositions()">&#x23F9; 全部平仓</button>
+    </h3>
+    <div class="oc-table-wrap">
+      <table class="oc-table">
+        <thead><tr><th>交易对</th><th>策略</th><th>品类</th><th>方向</th><th>数量</th><th>开仓价</th><th>开仓金额</th><th>标记价</th><th>未实现盈亏</th><th>杠杆</th><th>操作</th></tr></thead>
+        <tbody id="positions-tbody"><tr class="empty-row"><td colspan="11">暂无持仓</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Active Orders / 活跃订单 -->
+  <div class="oc-card">
+    <h3>&#x1F4DD; 活跃订单 / Active Orders</h3>
+    <div class="oc-table-wrap">
+      <table class="oc-table">
+        <thead><tr><th>交易对</th><th>策略</th><th>品类</th><th>方向</th><th>类型</th><th>数量</th><th>价格</th><th>状态</th><th>操作</th></tr></thead>
+        <tbody id="orders-tbody"><tr class="empty-row"><td colspan="9">暂无订单</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Performance Metrics / 性能指标 -->
+  <div class="oc-card">
+    <h3>&#x1F4CB; 性能指标 / Performance Metrics</h3>
+    <div class="oc-metrics oc-performance-metrics" id="perf-metrics"><div class="oc-loading">加载中...</div></div>
+  </div>
+
+  <!-- Fill History / 成交历史 -->
+  <details class="oc-collapse">
+    <summary>&#x1F4C4; 成交历史 / Fill History（最近 50 笔）</summary>
+    <div class="oc-collapse-body">
+      <div class="oc-table-wrap">
+        <table class="oc-table">
+          <thead><tr><th>时间</th><th>交易对</th><th>品类</th><th>方向</th><th>数量</th><th>价格</th><th>成交金额</th><th>手续费</th><th>盈亏 / PnL</th></tr></thead>
+          <tbody id="fills-tbody"><tr class="empty-row"><td colspan="9">加载中...</td></tr></tbody>
+        </table>
+      </div>
+      <div class="oc-metrics" style="margin-top:8px">
+        <div class="oc-metric"><div class="oc-metric-label" title="本次会话的初始投入资金。/ Initial capital at session start.">初始投入 / Initial Capital</div><div class="oc-metric-val" id="p-fills-capital">--</div></div>
+        <div class="oc-metric"><div class="oc-metric-label" title="已实现 + 未实现盈亏 = 当前净收益。正值盈利，负值亏损。/ Realized + Unrealized PnL = current net return.">累计收益 / Net Return</div><div class="oc-metric-val" id="p-fills-return">--</div></div>
+      </div>
+    </div>
+  </details>
+
+  <!-- Shadow Decisions / 影子决策 -->
+  <details class="oc-collapse">
+    <summary>&#x1F50D; 影子决策 / Shadow Decisions</summary>
+    <div class="oc-collapse-body">
+      <div class="oc-table-wrap">
+        <table class="oc-table">
+          <thead><tr><th>时间</th><th>交易对</th><th>方向</th><th>来源</th><th>置信度</th><th>结果</th></tr></thead>
+          <tbody id="shadow-tbody"><tr class="empty-row"><td colspan="6">加载中...</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </details>
+
+  <!-- Submit Order / 手动下单（默认折叠） -->
+  <details class="oc-collapse">
+    <summary>&#x1F4E9; 手动下单 / Submit Order</summary>
+    <div class="oc-collapse-body">
+      <div id="explain-order"></div>
+      <div class="order-form">
+        <div class="field"><label>交易对</label><input class="oc-input" id="o-symbol" value="BTCUSDT" /></div>
+        <div class="field"><label>方向</label><select class="oc-select" id="o-side"><option value="Buy">买入</option><option value="Sell">卖出</option></select></div>
+        <div class="field"><label>类型</label><select class="oc-select" id="o-type" onchange="togglePrice()"><option value="market">市价</option><option value="limit">限价</option></select></div>
+        <div class="field"><label>数量</label><input class="oc-input" id="o-qty" type="number" step="0.001" value="0.01" /></div>
+        <div class="field" id="price-field" style="display:none"><label>价格</label><input class="oc-input" id="o-price" type="number" step="0.01" /></div>
+        <div class="field"><label>&nbsp;</label><button class="oc-btn oc-btn-success" onclick="submitOrder()">提交</button></div>
+      </div>
+    </div>
+  </details>
+
 </div>
 
-<!-- REF-20 R20-P1-U1: Replay sub-tab content wrapper（disabled placeholder for P1）
-     REF-20 R20-P1-U1：Replay 子標籤內容容器（P1 暫為 disabled placeholder） -->
+<!-- REF-20 R20-P1-U4: Replay sub-tab content wrapper（disabled state via U8 helper）
+     REF-20 R20-P1-U4：Replay 子標籤 disabled state（透過 U8 helper 渲染）
+     mount point #subtab-replay-disabled-card 由 inline script 結尾的 init block 透過
+     window.OpenClawDisabledStateCard.render() 填入。Phase=P2，icon=⏳ (hourglass)，
+     gate_label_i18n_key=disabled_state.p2_backend_pending，metrics_layout=replay_12
+     渲染 12-cell run-form placeholder（UX subdoc §4 10 form fields + 2 status fields）。 -->
 <div id="subtab-replay" class="oc-subtab-content" role="tabpanel" aria-labelledby="subtab-btn-replay" hidden>
-  <!-- TODO REF-20 R20-P1-U4: populate Replay sub-tab disabled placeholder
-       TODO REF-20 R20-P1-U4：填入 Replay 子標籤 disabled placeholder -->
-  <!-- REF-20 R20-P1-U9: gate label hook 到 i18n_zh.disabled_state 表
-       REF-20 R20-P1-U9: gate label hooked into i18n_zh.disabled_state lookup -->
-  <div class="oc-subtab-placeholder">
-    <div><span data-i18n="terminology.replay.zh">回放 Replay</span> — P1 暫未啟用</div>
-    <div class="gate-label" data-i18n="disabled_state.p2_backend_pending">Blocking gate: P2 backend pending</div>
-  </div>
+  <div id="subtab-replay-disabled-card"></div>
 </div>
 
-<!-- REF-20 R20-P1-U1: Compare sub-tab content wrapper（disabled placeholder for P1）
-     REF-20 R20-P1-U1：Compare 子標籤內容容器（P1 暫為 disabled placeholder） -->
+<!-- REF-20 R20-P1-U5: Compare sub-tab content wrapper（disabled state via U8 helper）
+     REF-20 R20-P1-U5：Compare 子標籤 disabled state（透過 U8 helper 渲染）
+     mount point #subtab-compare-disabled-card 由 inline script 結尾的 init block 透過
+     window.OpenClawDisabledStateCard.render() 填入。Phase=P3，icon=🔒 (lock)，
+     gate_label_zh="P3 校準資料不完整 — Compare 待啟用"，metrics_layout=compare_12
+     渲染 12-cell metrics placeholder（UX subdoc §5 12 metrics: net_bps / gross_bps /
+     fee_bps / q10 / q50 / q90 / 95% CI / max_dd / trade_count / reject_rate / data_tier /
+     execution_confidence）。 -->
 <div id="subtab-compare" class="oc-subtab-content" role="tabpanel" aria-labelledby="subtab-btn-compare" hidden>
-  <!-- TODO REF-20 R20-P1-U5: populate Compare sub-tab disabled placeholder（12 metrics layout）
-       TODO REF-20 R20-P1-U5：填入 Compare 子標籤 12 metrics layout disabled placeholder -->
-  <!-- REF-20 R20-P1-U9: gate label hook 到 i18n_zh.disabled_state.execution_calibration_unavailable
-       REF-20 R20-P1-U9: gate label hooked into i18n_zh disabled_state lookup -->
-  <div class="oc-subtab-placeholder">
-    <div>对比 Compare — P1 暫未啟用</div>
-    <div class="gate-label" data-i18n="disabled_state.execution_calibration_unavailable">Blocking gate: Execution calibration unavailable</div>
-  </div>
+  <div id="subtab-compare-disabled-card"></div>
 </div>
 
-<!-- REF-20 R20-P1-U1: Handoff sub-tab content wrapper（disabled placeholder for P1）
-     REF-20 R20-P1-U1：Handoff 子標籤內容容器（P1 暫為 disabled placeholder） -->
+<!-- REF-20 R20-P1-U6: Handoff sub-tab content wrapper（disabled state via U8 helper）
+     REF-20 R20-P1-U6：Handoff 子標籤 disabled state（透過 U8 helper 渲染）
+     mount point #subtab-handoff-disabled-card 由 inline script 結尾的 init block 透過
+     window.OpenClawDisabledStateCard.render() 填入。Phase=P6，icon=⛔ (forbidden)，
+     gate_label_i18n_key=disabled_state.handoff_disabled_until_p6（per UX subdoc §6 +
+     §8 disabled state contract）。不渲染 metrics grid（Handoff 為 typed-confirm flow，
+     不適用 metrics layout）。 -->
 <div id="subtab-handoff" class="oc-subtab-content" role="tabpanel" aria-labelledby="subtab-btn-handoff" hidden>
-  <!-- TODO REF-20 R20-P1-U6: populate Handoff sub-tab disabled state
-       TODO REF-20 R20-P1-U6：填入 Handoff 子標籤 disabled state -->
-  <!-- REF-20 R20-P1-U9: gate label hook 到 i18n_zh.disabled_state.handoff_disabled_until_p6
-       REF-20 R20-P1-U9: gate label hooked into i18n_zh disabled_state lookup -->
-  <div class="oc-subtab-placeholder">
-    <div><span data-i18n="terminology.handoff.zh">交接 Handoff</span> — P1 暫未啟用</div>
-    <div class="gate-label" data-i18n="disabled_state.handoff_disabled_until_p6">Blocking gate: Handoff disabled until P6</div>
-  </div>
+  <div id="subtab-handoff-disabled-card"></div>
 </div>
-
-<!-- REF-20 R20-P1-U1: 既有 Session 內容暫保留在原位，U2 才會搬遷到 #subtab-session 內。
-     REF-20 R20-P1-U1: existing Session content remains here for P1; U2 will migrate it into #subtab-session. -->
-
-<!-- Paper Session Control Bar / Paper 会话控制栏 -->
-<div class="oc-control-bar">
-  <span style="font-weight:600">&#x1F4B0; Paper 模拟</span>
-  <span id="session-badge" class="oc-chip oc-chip-neutral">--</span>
-  <span class="spacer" style="flex:1"></span>
-  <label style="font-size:11px;color:var(--text-dim);display:flex;align-items:center;gap:4px" title="Paper 初始餘額（USDT）/ Paper Initial Balance (USDT)">
-    Balance: <input id="paper-init-bal" type="number" min="100" max="10000000" step="100" value="10000" style="width:90px;font-size:12px" />
-  </label>
-  <button class="oc-btn oc-btn-success" id="btn-start" onclick="sessionAction('start')">&#x25B6; 启动</button>
-  <button class="oc-btn" id="btn-pause" onclick="sessionAction('pause')" disabled>&#x23F8; 暂停</button>
-  <button class="oc-btn" id="btn-resume" onclick="sessionAction('resume')" disabled>&#x25B6; 继续</button>
-  <button class="oc-btn oc-btn-danger" id="btn-stop" onclick="sessionAction('stop')" disabled>&#x23F9; 停止 Paper</button>
-  <button class="oc-btn oc-btn-danger" id="btn-stop-all" onclick="sessionStopAll()" disabled title="停止 Paper + Demo 雙引擎 / Stop both Paper and Demo engines">&#x23F9;&#x23F9; 雙停</button>
-  <span style="margin-left:10px;font-size:12px;color:var(--text-dim)">余额: <strong id="balance-val">--</strong></span>
-</div>
-
-<div id="explain-paper"></div>
-
-<!-- Market Feed / 实时行情（默认折叠，只读状态，启停由主仪表盘控制） -->
-<details class="oc-collapse">
-  <summary>&#x1F4E1; 实时行情 / Market Feed <span id="feed-badge" class="oc-chip oc-chip-neutral" style="margin-left:8px;font-size:10px">--</span></summary>
-  <div class="oc-collapse-body">
-    <div class="feed-prices" id="feed-prices">等待行情数据...</div>
-    <div style="font-size:11px;color:var(--text-dim);margin-top:4px" id="feed-stats"></div>
-  </div>
-</details>
-
-<!-- Account Balance / 账户余额 -->
-<div class="oc-card">
-  <h3>&#x1F4B0; 账户余额 / Account Balance</h3>
-  <div class="oc-metrics">
-    <div class="oc-metric"><div class="oc-metric-label">初始余额 / Initial Balance</div><div class="oc-metric-val" id="p-bal-initial">--</div></div>
-    <div class="oc-metric"><div class="oc-metric-label">可用余额 / Available Balance</div><div class="oc-metric-val" id="p-bal-available">--</div></div>
-    <div class="oc-metric"><div class="oc-metric-label">已用保证金 / Margin Used</div><div class="oc-metric-val" id="p-bal-margin">--</div></div>
-    <div class="oc-metric"><div class="oc-metric-label">峰值余额 / Peak Balance</div><div class="oc-metric-val" id="p-bal-peak">--</div></div>
-  </div>
-</div>
-
-<!-- PnL Overview / 盈亏概览 -->
-<div class="oc-card">
-  <h3>&#x1F4B5; 盈亏概览 / PnL Overview</h3>
-  <div class="oc-metrics" id="pnl-metrics">
-    <div class="oc-metric"><div class="oc-metric-label">净盈亏 / Net PnL</div><div class="oc-metric-val" id="p-net">--</div></div>
-    <div class="oc-metric"><div class="oc-metric-label">已实现盈亏 / Realized PnL</div><div class="oc-metric-val" id="p-realized">--</div></div>
-    <div class="oc-metric"><div class="oc-metric-label">未实现盈亏 / Unrealized PnL</div><div class="oc-metric-val" id="p-unrealized">--</div></div>
-    <div class="oc-metric"><div class="oc-metric-label" title="盈利交易占总交易的百分比。50%以上通常被视为良好。/ Percentage of profitable trades out of total. Above 50% is generally considered good.">胜率 / Win Rate</div><div class="oc-metric-val" id="p-winrate">--</div></div>
-    <div class="oc-metric"><div class="oc-metric-label" title="从峰值到最低点的最大跌幅百分比，衡量最坏情况下的资金回撤。越小越好。/ Largest peak-to-trough decline in equity. Measures worst-case capital loss. Lower is better.">最大回撤 / Max Drawdown</div><div class="oc-metric-val" id="p-maxdd">--</div></div>
-  </div>
-  <!-- PnL Trend Sparkline / 盈亏趋势迷你图（SUGGESTION §4.4） -->
-  <div style="margin-top:10px">
-    <div style="font-size:10px;color:var(--text-dim);margin-bottom:4px;display:flex;align-items:center;gap:6px">
-      <span>累计收益趋势 / Cumulative PnL Trend</span>
-      <span style="color:var(--text-dim);font-size:9px">（最近 50 笔成交 / last 50 fills）</span>
-    </div>
-    <svg id="pnl-sparkline" width="100%" height="120"
-      style="display:block;background:rgba(13,17,23,0.5);border-radius:6px;border:1px solid #21262d"
-      viewBox="0 0 400 120" preserveAspectRatio="none">
-      <line id="pnl-sparkline-zero" x1="8" x2="392" y1="60" y2="60" stroke="#30363d" stroke-width="0.5" stroke-dasharray="3,3"/>
-      <polyline id="pnl-sparkline-line" points="" fill="none" stroke="var(--green)" stroke-width="2" stroke-linejoin="round"/>
-      <text x="4" y="114" fill="var(--text-dim)" font-size="10" id="pnl-sparkline-label">no data</text>
-    </svg>
-  </div>
-</div>
-
-<!-- Positions / 持仓 -->
-<div class="oc-card">
-  <h3 style="display:flex;align-items:center;gap:10px">
-    &#x1F4CA; 持仓 / Positions
-    <button class="oc-btn oc-btn-danger" style="padding:3px 10px;font-size:11px;margin-left:auto" onclick="closeAllPositions()">&#x23F9; 全部平仓</button>
-  </h3>
-  <div class="oc-table-wrap">
-    <table class="oc-table">
-      <thead><tr><th>交易对</th><th>策略</th><th>品类</th><th>方向</th><th>数量</th><th>开仓价</th><th>开仓金额</th><th>标记价</th><th>未实现盈亏</th><th>杠杆</th><th>操作</th></tr></thead>
-      <tbody id="positions-tbody"><tr class="empty-row"><td colspan="11">暂无持仓</td></tr></tbody>
-    </table>
-  </div>
-</div>
-
-<!-- Active Orders / 活跃订单 -->
-<div class="oc-card">
-  <h3>&#x1F4DD; 活跃订单 / Active Orders</h3>
-  <div class="oc-table-wrap">
-    <table class="oc-table">
-      <thead><tr><th>交易对</th><th>策略</th><th>品类</th><th>方向</th><th>类型</th><th>数量</th><th>价格</th><th>状态</th><th>操作</th></tr></thead>
-      <tbody id="orders-tbody"><tr class="empty-row"><td colspan="9">暂无订单</td></tr></tbody>
-    </table>
-  </div>
-</div>
-
-<!-- Performance Metrics / 性能指标 -->
-<div class="oc-card">
-  <h3>&#x1F4CB; 性能指标 / Performance Metrics</h3>
-  <div class="oc-metrics oc-performance-metrics" id="perf-metrics"><div class="oc-loading">加载中...</div></div>
-</div>
-
-<!-- Fill History / 成交历史 -->
-<details class="oc-collapse">
-  <summary>&#x1F4C4; 成交历史 / Fill History（最近 50 笔）</summary>
-  <div class="oc-collapse-body">
-    <div class="oc-table-wrap">
-      <table class="oc-table">
-        <thead><tr><th>时间</th><th>交易对</th><th>品类</th><th>方向</th><th>数量</th><th>价格</th><th>成交金额</th><th>手续费</th><th>盈亏 / PnL</th></tr></thead>
-        <tbody id="fills-tbody"><tr class="empty-row"><td colspan="9">加载中...</td></tr></tbody>
-      </table>
-    </div>
-    <div class="oc-metrics" style="margin-top:8px">
-      <div class="oc-metric"><div class="oc-metric-label" title="本次会话的初始投入资金。/ Initial capital at session start.">初始投入 / Initial Capital</div><div class="oc-metric-val" id="p-fills-capital">--</div></div>
-      <div class="oc-metric"><div class="oc-metric-label" title="已实现 + 未实现盈亏 = 当前净收益。正值盈利，负值亏损。/ Realized + Unrealized PnL = current net return.">累计收益 / Net Return</div><div class="oc-metric-val" id="p-fills-return">--</div></div>
-    </div>
-  </div>
-</details>
-
-<!-- Shadow Decisions / 影子决策 -->
-<details class="oc-collapse">
-  <summary>&#x1F50D; 影子决策 / Shadow Decisions</summary>
-  <div class="oc-collapse-body">
-    <div class="oc-table-wrap">
-      <table class="oc-table">
-        <thead><tr><th>时间</th><th>交易对</th><th>方向</th><th>来源</th><th>置信度</th><th>结果</th></tr></thead>
-        <tbody id="shadow-tbody"><tr class="empty-row"><td colspan="6">加载中...</td></tr></tbody>
-      </table>
-    </div>
-  </div>
-</details>
-
-<!-- Submit Order / 手动下单（默认折叠） -->
-<details class="oc-collapse">
-  <summary>&#x1F4E9; 手动下单 / Submit Order</summary>
-  <div class="oc-collapse-body">
-    <div id="explain-order"></div>
-    <div class="order-form">
-      <div class="field"><label>交易对</label><input class="oc-input" id="o-symbol" value="BTCUSDT" /></div>
-      <div class="field"><label>方向</label><select class="oc-select" id="o-side"><option value="Buy">买入</option><option value="Sell">卖出</option></select></div>
-      <div class="field"><label>类型</label><select class="oc-select" id="o-type" onchange="togglePrice()"><option value="market">市价</option><option value="limit">限价</option></select></div>
-      <div class="field"><label>数量</label><input class="oc-input" id="o-qty" type="number" step="0.001" value="0.01" /></div>
-      <div class="field" id="price-field" style="display:none"><label>价格</label><input class="oc-input" id="o-price" type="number" step="0.01" /></div>
-      <div class="field"><label>&nbsp;</label><button class="oc-btn oc-btn-success" onclick="submitOrder()">提交</button></div>
-    </div>
-  </div>
-</details>
 
 <script>
 // ─── Explainers ───────────────────────────────────────────────
@@ -755,6 +747,65 @@ document.addEventListener('DOMContentLoaded', function _ocInitPaperModeBadges() 
   } else {
     console.warn('[paper] OpenClawModeBadge not loaded; mode badges slot left empty');
   }
+});
+
+// ─── Disabled Sub-Tab Initialization (REF-20 R20-P1-U4 / U5 / U6) ───────────
+// 3 disabled sub-tab（Replay/Compare/Handoff）共用 U8 helper
+// (window.OpenClawDisabledStateCard.render) 渲染 phase-tagged disabled card +
+// gate label + bilingual banner + optional 12-cell metrics placeholder。
+// Defensive: 若 helper 未載入（script 載入順序錯/race），fallback console.warn
+// 並在 mount point 留 inline notice，不阻擋 sub-tab nav。
+// 3 disabled sub-tabs (Replay/Compare/Handoff) share the U8 helper. Defensive
+// fallback if helper is missing: console.warn + inline notice in mount point.
+document.addEventListener('DOMContentLoaded', function _ocInitPaperDisabledCards() {
+  if (!window.OpenClawDisabledStateCard || typeof window.OpenClawDisabledStateCard.render !== 'function') {
+    console.warn('[paper] OpenClawDisabledStateCard not loaded; sub-tab disabled cards left empty');
+    // Fallback inline 通知：避免空白畫面 / Avoid blank panes when helper not loaded.
+    ['subtab-replay-disabled-card', 'subtab-compare-disabled-card', 'subtab-handoff-disabled-card'].forEach(function(id) {
+      var el = document.getElementById(id);
+      if (el) el.innerHTML = '<div class="oc-subtab-placeholder">disabled card helper not loaded — see browser console</div>';
+    });
+    return;
+  }
+  // U4 Replay disabled card / Replay 子標籤 disabled card
+  // Phase=P2，icon=⏳（hourglass = 等待 P2 backend ship），banner 引 UX subdoc §4
+  // 末段 P2 Replay must visually communicate `execution_confidence=none`。
+  window.OpenClawDisabledStateCard.render('subtab-replay-disabled-card', {
+    phase: 'P2',
+    icon: '⏳',
+    gate_label: 'Replay isolated runner not yet shipped',
+    gate_label_zh: 'P2 Replay isolated runner 尚未上線',
+    gate_label_i18n_key: 'disabled_state.p2_backend_pending',
+    banner_text: 'P2 Smoke Replay backend (replay_runner binary + isolated cfg gate) is under development. Run form fields below preview the eventual UX.',
+    banner_text_zh: 'P2 煙霧回放後端（replay_runner binary + isolated cfg gate）開發中。下方欄位 placeholder 預覽即將上線的 UX。',
+    metrics_layout: 'replay_12'
+  });
+  // U5 Compare disabled card / Compare 子標籤 disabled card
+  // Phase=P3，icon=🔒（lock = 待 P3 calibration green），12-cell metrics grid
+  // 為 UX subdoc §5 Compare metrics layout 預覽。
+  window.OpenClawDisabledStateCard.render('subtab-compare-disabled-card', {
+    phase: 'P3',
+    icon: '🔒',
+    gate_label: 'Compare verdict requires P3 calibration data',
+    gate_label_zh: 'P3 校準資料不完整 — Compare 待啟用',
+    gate_label_i18n_key: 'disabled_state.execution_calibration_unavailable',
+    banner_text: 'P3a half-life / bootstrap CI / shrinkage / fee-execution calibration not yet shipped. The 12-metric layout below previews UX subdoc §5 Compare layout.',
+    banner_text_zh: 'P3a half-life / bootstrap CI / shrinkage / 費率執行校準尚未上線。下方 12 metric grid 預覽 UX subdoc §5 Compare 排版。',
+    metrics_layout: 'compare_12'
+  });
+  // U6 Handoff disabled card / Handoff 子標籤 disabled card
+  // Phase=P6，icon=⛔（forbidden = 嚴禁直接執行；P6 後才有 typed-confirm flow）。
+  // 不渲染 metrics grid（Handoff 為 typed-confirm flow，UX subdoc §6 9 fields 在
+  // P6-H1 modal 才登場，P1 階段不預覽 form 模糊 phase 邊界）。
+  window.OpenClawDisabledStateCard.render('subtab-handoff-disabled-card', {
+    phase: 'P6',
+    icon: '⛔',
+    gate_label: 'Handoff disabled until P6',
+    gate_label_zh: 'P6 候選交接 — Handoff 未啟用',
+    gate_label_i18n_key: 'disabled_state.handoff_disabled_until_p6',
+    banner_text: 'Handoff requires P3 calibration green + P4 advisory verified + P6 typed-confirm modal. None present at P1.',
+    banner_text_zh: '候選交接需 P3 校準通過 + P4 建議已驗證 + P6 typed-confirm modal。P1 階段三條件均未滿足。'
+  });
 });
 </script>
 
