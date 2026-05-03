@@ -2840,3 +2840,135 @@ PM 決策：fix module to match script（script 是 operator-facing canonical re
 
 ### 報告路徑
 - `srv/docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-03--ref20_wave3_p2a_s5_quota_prune.md`
+
+---
+
+## 2026-05-03 REF-20 Wave 3 R20-P2b-S7 — `ReplayProfile::Isolated` cfg gate runtime IMPL（5 acceptance proofs）
+
+### 任務範圍
+PM dispatch Wave 3 Batch 3B 並行（with E2/E4 review + S10 CI + U10 a11y）。S7 = 在 Wave 1 scaffold（commit `06d360a`）上補完 `ReplayProfile` 5 個 method body + `replay_runner` binary 的 fail-closed runtime entry + 5 個 acceptance proof unit-tested + nm symbol audit clean。
+
+### 修改清單（4 檔）
+- `rust/openclaw_engine/src/replay/profile.rs` — 116 → 322 LOC：加 5 method（`requires_lease` / `allow_ipc_server` / `allow_exchange_dispatch` / `allow_db_writer_channels` / `fail_closed_assert_isolated`）+ `ReplayIsolationError::WrongProfile{found}` enum + `Display` + `std::error::Error` impl；移除 `#[allow(dead_code)]`；雙語注釋每 method docstring
+- `rust/openclaw_engine/src/replay/mod.rs` — 41 → 68 LOC：更新 MODULE_NOTE 至 Wave 3 IMPL；新增 `pub use profile::ReplayIsolationError;` subsystem-level re-export
+- `rust/openclaw_engine/src/bin/replay_runner.rs` — 132 → 179 LOC：替換 Wave 1 panic stub 為 `ReplayProfile::Isolated.fail_closed_assert_isolated().expect(...)` + `eprintln!("replay_runner Wave 3 P2b-S7 cfg gate online; Wave 4 logic pending")` + exit 0；保留全 forbidden list comment + 4 條 TODO REF-20 P2b-S8/S9/S10 + Wave 4 marker；Wave 4 R20-P2b-T2 才接 binary 邏輯（per task spec「對 既有 `intent_processor::router` 不切換」）
+- **NEW** `rust/openclaw_engine/tests/replay_profile_acceptance.rs` — 232 LOC：5 個 `#[test]`（proof_1-5）+ 雙語 MODULE_NOTE；對 `Live`/`LiveDemo`/`PaperLegacy`/`Isolated` 4 variant 全顯式列舉，禁 default-arm（保證新 variant 必 fail-loud）
+
+### 驗證結果
+- `cargo build --bin replay_runner --features replay_isolated` PASS（21 lib + 0 replay-new warnings；produces 1.27MB artifact）
+- `cargo build -p openclaw_engine`（無 feature）PASS（21 lib + 3 bin warnings 為 pre-existing baseline；replay_runner **未編** — `cargo metadata` 確認 `required-features=['replay_isolated']`）
+- `cargo test --test replay_profile_acceptance --features replay_isolated` → **5 passed; 0 failed; 0 ignored**（0.00s）
+- `cargo test --test replay_manifest_signer_xlang_consistency --features replay_isolated` → **8 passed**（Wave 2 P2a-S2 sibling 0 regression）
+- `target/debug/replay_runner` 跑 → 印 `replay_runner Wave 3 P2b-S7 cfg gate online; Wave 4 logic pending` + exit=0
+- nm symbol audit（**1148 total symbols**）對 7 forbidden symbol classes（acquire_lease/build_exchange_pipeline/ipc_server/place_order/write_signed_live_authorization/bybit_private_ws/canary_writer）→ **0/0/0/0/0/0/0 hits**（全 clean）
+- `grep -E "use .*acquire_lease|use .*ipc_server|use .*build_exchange_pipeline|use .*GovernanceHub"` 4 檔 → 0 hit（method declaration name 不算 use import）
+- `grep -nE '/home/ncyu|/Users/[^/]+'` 4 檔 → 0 hit（跨平台合規）
+- LOC budget：322 / 68 / 179 / 232 全 < 800 警告線
+
+### Wave 2 dispatch §2 ambiguity 對齊
+- **#2** tokio feature subset：本 task 0 import tokio（profile.rs 純 sync method；replay_runner main 不啟 runtime）
+- **#3** canonical_config_parser reuse：本 task 暫不需 config，留 placeholder 待 Wave 4 R20-P2b-T2
+- **#4** `requires_lease()` 語意 hardcoded：`Isolated => false / 其餘三 variant => true`（PM final）
+
+### 紅線守則（全達成）
+- 0 IPC / dispatch / live exchange import（`use ...` grep clean）
+- 0 GovernanceHub / decision_lease import
+- 0 tokio import（per dispatch §2 #2）
+- 0 hardcoded path
+- HMAC algorithm 不變（manifest_signer Wave 2 已 land，本 task 不動）
+- `intent_processor::router` 0 切換（Wave 4 R20-P2b-T2 範圍）
+
+### 經驗教訓
+
+1. **窮盡列舉 vs default-arm 在 acceptance test 的取捨**：`proof_2/3/5` 對 `Live`/`LiveDemo`/`PaperLegacy` 都用顯式 `assert!` 而非 `for &profile in [...all_variants]; if !Isolated -> assert true`。理由：未來 add 新 `ReplayProfile` variant（如 `ResearchSandbox`），編譯不會 fail，但測試會繼續 PASS（該 variant 沒被測到）— silent contract drift。本實作對每個 variant 各 1 個顯式 case，新 variant 加進去後新作者必須在 test 內主動加 case；雖然 LOC 上略多，但 fail-loud 保證強。**規則：對「Isolated 是 sentinel value，其餘 variant 行為必相同」的 enum gating method，acceptance test 必窮盡列舉每個 variant，禁 `for v in all_variants` 配 `if v != Isolated` 的便利寫法**。
+
+2. **subsystem-level re-export `ReplayIsolationError` 必加**：第一版 mod.rs 只 `pub mod profile;`。binary entry 寫 `expect()` 不用 match 不需要 import error，編譯 PASS。但 acceptance test 寫 `match err { ReplayIsolationError::WrongProfile {...} => ... }` 時就需要 path 引用。最後決定在 `mod.rs` 加 `pub use profile::ReplayIsolationError;`，讓 caller 可寫 `crate::replay::ReplayIsolationError` 而不必伸進 `crate::replay::profile::`。**規則：subsystem-level re-export 對「test / future caller 會 pattern-match 的窄型別」必加；module-level 只在 module 內可見會變成「哪個 caller 該知道哪個 path」的耦合**。
+
+3. **method declaration name vs use import 在 grep audit 上的差異**：E2 必查的 `grep -E "acquire_lease|ipc_server|..."` 對 `profile.rs` 命中 `pub fn allow_ipc_server`、`pub fn allow_exchange_dispatch`。這是 method declaration name 不是 use import。設計上必要 — 這些 method 的存在意義是表達 forbidden surface 的 gate 語意。**規則：grep audit 在 false positive 處必補 narrow filter（`grep -E "use .*<pattern>"`）區分 declaration vs usage；report 須明示哪些 hit 是 declaration name（合法）vs use import（違規）**。E2 review 時可加 narrow filter 範例。
+
+4. **runtime fail-closed 的「Result + expect」vs「panic! 直接」取捨**：第一版 `fail_closed_assert_isolated` 直接 panic（match arm 不對就 panic），但 E1 memory 內歷史 lessons 強調「runtime guard 用 typed error 比直接 panic 更易測 + 錯誤現場更精確」。最終實作回傳 `Result<(), ReplayIsolationError>`，由 `replay_runner::main` 寫 `.expect("...")` 觸發 panic。**好處**：(a) acceptance test 可 `match err` 而非靠 `should_panic` 標籤 (b) 未來其他 caller 可選擇處理（log + continue）vs panic — 雖 V3 §6.2 fail-closed 要求 panic，但讓 typed error 表達意圖更清晰 (c) audit row payload 可從 `ReplayIsolationError::WrongProfile{found}` 抽 `found` 字段。**規則：runtime fail-closed guard 首選 `Result<T, E>` + caller `.expect(...)` 模式；直接 `panic!` 只在 zero-cost 必要時使用**。
+
+5. **acceptance test 雙向 proof（Isolated→false + 非Isolated→true）必同檔同 test**：proof_5 的「Isolated 全 false / 非 Isolated 全 true」**整合到單一 test fn 內**（而非 `proof_5a` + `proof_5b` 拆兩個）。理由：cross-method consistency 是「整體性質」，拆兩個 test 檔其中一個 PASS 另一個 FAIL 時 root cause harder to read。整合到單一 test 後，failure message 直接指向「哪個 variant 的哪個 method 不對」，debug 路徑短。**規則：跨 method 一致性（cross-property）測試整合到單一 test fn；單一 method 的 invariant 拆開（`proof_1/2/3/4` 各管一面）；混搭時 cross-property 整合，single-property 拆開**。
+
+### 報告路徑
+- `srv/docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-03--ref20_wave3_p2b_s7_replay_profile_runtime.md`
+
+## 2026-05-03 — REF-20 R20-P2b-S10: replay_runner symbol audit CI script (Wave 3 Batch 3B)
+
+### Wave / 主題
+- Wave 3 Batch 3B 並行 (S7 + S10) 的 S10 — `nm` / `objdump` symbol 稽核 CI step (defense-in-depth)
+- 對齊 V3 §3 G7/G8 + §6.1/§6.2 forbidden list + §12 #8 (resource_isolation acceptance)
+- 對齊 PA boundary report `2026-05-03--replay_runner_crate_boundary_allowlist.md` §6 symbol allowlist
+- 對齊 Wave 2 dispatch §2 ambiguity #5：**macOS 主 / Linux 次** CI runner platform
+- 三層縱深防禦的 L3：L1 Cargo feature gate / L2 ReplayProfile::Isolated runtime / L3 binary nm grep
+
+### 交付清單
+- `helper_scripts/ci/replay_runner_symbol_audit.sh` — bash strict mode + 9 section + cross-platform `uname -s` 分支（Darwin → `nm -gU` BSD style / Linux → `nm --extern-only --defined-only` GNU style）+ 10 forbidden patterns + exit codes 0/1/2/3/4 + env `SKIP_BUILD=1` / `REPLAY_RUNNER_BIN=/path` 覆寫（mode 0755 / 337 LOC）
+- `helper_scripts/ci/test_replay_runner_symbol_audit.sh` — mock-based bash 測試套 5 cases (T1 clean / T2 forbidden hit / T3 nm absent / T4 binary missing / T5 multi-class hit)（mode 0755 / 324 LOC）
+- `helper_scripts/ci/README.md` — 三層縱深防禦說明 + GitHub Actions matrix + cron + pre-commit hook 整合範例（158 LOC）
+- `helper_scripts/SCRIPT_INDEX.md` — 新增 `## ci/` section + 更新 last-modified timestamp
+
+### 紅線守則（全達成）
+- 0 actual binary mutation（純 audit script，不改 replay_runner.rs / Cargo.toml）
+- 0 PG schema mutation / 0 trading.* / 0 IPC / 0 GovernanceHub coupling（純讀 binary symbol）
+- 0 hardcoded user-home path（grep `/home/ncyu|/Users/[^/]+` 0 hit；用 `BASH_SOURCE[0]` + `cd` 推 srv/ root）
+- mode 0755 兩 shell file
+- Cross-platform `uname -s` 分支兼容 macOS BSD nm + Linux GNU nm（不依賴 Linux-only `readelf`）
+- 雙語 comment（CLAUDE.md §七）：MODULE_NOTE 中英雙塊 + section header 雙語 + 每 forbidden pattern 雙語註解 + bilingual function docstring
+
+### 驗證
+- `bash -n` 兩 shell file → PASS（0 syntax error）
+- mock test harness 5/5 PASS（T1-T5 全綠）
+- macOS smoke：實 binary（cp /bin/ls）+ 真 nm（/usr/bin/nm）+ 真 audit 流程：
+  ```
+  platform: Darwin arm64
+  nm available: /usr/bin/nm
+  platform=Darwin → nm -gU
+  symbol count: 6 (macOS strip-by-default)
+  AUDIT PASS: 0 forbidden symbol detected
+  ```
+- compliance probe: 0 hardcoded path / `trading.*` 命中只是註釋描述（非實際呼叫） / 兩 shell <800 LOC 警告線 / mode 0755 / SCRIPT_INDEX.md 已更新
+
+### 經驗教訓
+
+1. **Mac llvm-nm 雙重相容性 + OS 分支選擇原則**：Mac 系統的 `/usr/bin/nm` 是 Apple llvm-nm（21.0.0），它**同時支援** BSD-style flags（`nm -gU`）和 GNU flags（`nm --extern-only --defined-only`）。但本 IMPL 仍按「OS 慣用 flag」分支：Darwin → BSD style / Linux → GNU style，**不**用 llvm-nm 的雙重相容性簡化成單行。原因：(a) 對齊 Wave 2 dispatch §2 #5 operator 明確指示「macOS nm -gU / Linux GNU flags」；(b) Mac 上若 user 沒裝 Xcode CLI（純 macOS 預裝有 BSD nm 但無 llvm-nm）也能 work；(c) cross-platform script 的「OS 慣用」原則優於「最大相容」原則，**對齊就近於 ground truth 慣例，避免 future user 在 Linux 看到 BSD flag confused**。**規則：跨平台 shell script 的 toolchain flag 選用，必對齊 OS 慣例而非「最大相容單行」；llvm-nm 的雙重接受不是省事的理由，是兼容性 bonus；E2 review 時看 `case $os in Darwin) ... Linux) ... esac` 是否清晰分支即可**。
+
+2. **`set -e` + grep no-match 的 exit 1 衝突 → 用 `|| true` 防 set -e 中止**：`grep -E "$pattern" | wc -l` 在 grep 找不到 match 時 exit 1（POSIX），`set -e` 會立即中止 audit script。本 IMPL 用 `hits="$(... | wc -l | tr -d ' ' || true)"` 把 grep no-match 的 exit 1 吃掉，後續用 `[[ "${hits:-0}" -gt 0 ]]` 判斷。**規則：bash strict mode (`set -euo pipefail`) 下任何「結果可空」的 grep / find / awk 命令必加 `|| true`；否則 normal-path（無 hit）會被誤當 error 中止；E2 review 時要 spot-check 每個 `$( ... grep ... )` 是否含 `|| true`**。
+
+3. **Mock nm shim 設計用 type -P 而非 command -v**：T3 nm-absent 測試需要構造 isolated PATH 含 essentials 但不含 nm。第一版用 `command -v` 取 binary path，但 grep 是 user shell function（zshrc 裡定義了 wrapper for claude code），導致 `command -v grep` 回傳 function body 而非 disk binary path → ln -sf 把 broken symlink "grep -> grep" 寫進去。用 `type -P` 強制只回 disk binary（function/alias 回空）解決。**規則：寫 isolated PATH test fixture 必用 `type -P` 取 binary 真實路徑；`command -v` 對 user dotfile 定義的 shell function 也 match，會建出 broken symlink；類似套 chroot / docker minimal env 也踩同樣坑**。
+
+4. **Test harness 的 PATH 隔離不能斷 bash 自身**：T3 把 `PATH="$isolated_bin"` 後子層 bash 執行 `bash "$AUDIT_SCRIPT"` 會 fail with exit 127 (command not found)，因為 `$isolated_bin` 沒 bash。修法：用 absolute path `/bin/bash`（或 `type -P bash` 抓真路徑）呼叫 audit script。**規則：構造 isolated PATH 測試 fixture 時，bash 執行體本身的呼叫必用 absolute path；`bash xxx.sh` 在 PATH 隔離後找不到 bash；改用 `/bin/bash xxx.sh` 或預先 `type -P bash` 抓位置；類似 problem 也發生於 PATH 限制下執行 perl / python 等 interpreter**。
+
+5. **Forbidden pattern 設計：偏向 false-positive 寧多勿少**：本 IMPL 10 個 ERE alternation pattern（`acquire_lease|release_lease` / `GovernanceHub` / `ipc_server::|ipc_dispatch|ipc_handler` / `build_exchange_pipeline` / `decision_lease|DecisionLease` / `exchange_dispatch` / `bybit_(rest|ws|api)` / `live_authorization|_write_signed_live_authorization` / `place_order|cancel_order|amend_order` / `canary_writer::write|database::writer`）皆設計成「replay binary 本就不該含此 symbol」。任何意外 hit = build graph drift 警訊，需人工 review，**不允許 audit script 自動 whitelist 任何 hit**。**規則：security-grade audit 的 pattern 設計應「假陽優於漏報」；replay_runner 的 forbidden symbol class = 0 容忍；E2 review 時若有 reviewer 提案「這個 hit 是 false-positive 加白名單」必先回 PM + PA 走 amendment（V3 §6.2 forbidden list 是契約硬邊界）**。
+
+6. **Sample 前 5 行 evidence + head -c 60 label truncation**：audit script 在每個 hit 印 `head -5` evidence + label 用 `tr '|' ',' | head -c 60` 防 long pattern 灌爆 log。設計理由：(a) Operator 看 first 5 hit 通常足以辨識 root cause（不爆 log）/ (b) Pattern label 用 ',' 而非 '|' 是因為某些 log shipper（fluentd / logstash）對 '|' 有 special meaning（field separator） / (c) head -c 60 hard cap label 避免單行 log 超過 80 columns。**規則：CI audit script 的 evidence 輸出應 capped + sanitized（log shipper-friendly）；不要假設「全 dump 給 reviewer 看」這在 CI matrix 多 OS 環境會壓垮 log size limit；類似如 git-secrets / pre-commit hook 都遵循 sample-only 原則**。
+
+7. **Audit script 與 test harness 的「sourced not executed」guard**：兩 shell file 結尾都加 `if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then main "$@"; fi`。作用：當 test harness 想「source audit script 後測單獨 helper function」時，audit script 不會自動跑 main。這在 unit test bash function 時很有用（e.g. 將來如果想直接測 `dump_symbols()` / `audit_symbols()` 不跑全流程）。**規則：CI audit script 必加 sourced-vs-executed guard；不加會讓 test harness 「source xxx.sh」時就觸發 main 副作用，無法 isolate test 個別 helper；helper_scripts/cron/ 既有腳本應補（後續 task）**。
+
+### Cross-platform compliance
+- `uname -s` 分支：Darwin / Linux / fallthrough exit 3（不 false-PASS unsupported OS）
+- 0 hardcoded `/home/ncyu` / `/Users/<name>` 在 3 個新檔（grep verify）
+- 用 `BASH_SOURCE[0]` + `cd` 推 SRV_ROOT，不依 cwd / 不依 env var
+- Apple Silicon (aarch64-apple-darwin) 主 + x86_64-unknown-linux-gnu 次（對齊 memory `project_mac_deployment_target.md`）
+- nm absent fail-closed exit 3（不 fall-through 到 false-PASS）
+
+### Bilingual comment compliance（CLAUDE.md §七 強制）
+- audit script header MODULE_NOTE 雙塊（EN + 中）+ Spec source / 契約來源 完整 cross-ref
+- 9 個 section header 雙語（path resolution / logging / build / tooling probe / binary check / symbol dump / forbidden patterns / audit / main entry）
+- 每個 forbidden pattern 配對中英雙行註解（"Decision Lease — 16#3 ..." / "Decision Lease — origin §3 ..."）
+- test harness MODULE_NOTE 雙塊 + 5 test case docstring 雙語 + inline 雙語
+- README 主體技術名詞保留英文，section title + table 含中文摘要
+
+### LOC budget 標記
+- audit script: 337 < 800 警告線（pad-room 充裕）
+- test harness: 324 < 800 警告線
+- README: 158（無 LOC 限制）
+
+### 後續 wiring（Wave 3 P2b-S7 sub-agent 並行進行中）
+- P2b-S7 land `ReplayProfile::Isolated` runtime + 5 acceptance proofs unit-tested 後，可在 PR CI matrix 加 `bash helper_scripts/ci/replay_runner_symbol_audit.sh` 強制 audit 每 PR
+- GitHub Actions 範例已寫進 README（macos-14 + ubuntu-22.04 matrix）
+- cron 範例：daily 03:00 UTC trade-core 跑 audit（log 寫 `$OPENCLAW_DATA_DIR/logs/replay_runner_audit.log`）
+- 待 P2b-S7 IMPL land + 真 cargo build replay_runner --features replay_isolated 後，需在 audit script 移除 SKIP_BUILD 預設行為（讓 audit force rebuild ensure freshness）
+
+### 報告路徑
+- `srv/docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-03--ref20_wave3_p2b_s10_symbol_audit_ci.md`
