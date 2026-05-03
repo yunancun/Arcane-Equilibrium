@@ -198,5 +198,31 @@ A3 SEV-2 #1: 行动装置 `.oc-subtab-btn` 6px 14px / 12px font + `.oc-mode-badg
 ### Mac 环境 HTML smoke test = python HTMLParser stack depth 0 + 字符 balance + grep
 没装 W3C validator / chrome devtools / playwright —用 (1) custom HTMLParser 子类追踪 push/pop tag stack，最终 stack 深度必 0 + errors 必 0 (2) `{}/()/[]` count 平衡 (3) acceptance grep 0 hit。本次 result: stack=0 / errors=0 / 105:105 / 383:383 / 22:22 全 OK + grep 0 hit。**规律**：Mac dev 环境 HTML 验证必跑这三套 + 同步 push 进 Linux 由 E4 跑 console.html 真实渲染 / a11y axe-core / mobile viewport DevTools test。结构性验证不能替代 visual / a11y / interaction 验证，但可以阻止 80% 的 「HTML 不 wellformed」level bug 进入 review。
 
+## REF-20 Wave 7 P5 R20-P5-A1/A2/A3/A4 — Agents Monitor 抽出 (2026-05-03)
+
+### Wave 7 hard prereq bypass (operator override)
+PM brief 明示「LG-2/3/4 stable 7d 是 Wave 7 entry hard prereq，但 operator 全自主模式 + 「全部做完然後 deploy」覆寫」。E1a IMPL 範圍接受此 bypass，sibling LG-2/3/4 frontend race risk = accept-and-flag for deploy time consideration。
+
+### 「11→12 Tab」brief 與真實 codebase drift
+PM brief 寫「11-Tab nav → 12-Tab nav」+ V3 §11 P5「12-Tab top-level」。實測 console.html 原本就是 12 tabs（system / live / demo / paper / charts / strategy / risk / ai / learning / governance / monitoring / settings），加 agents 後變 13。CLAUDE.md §五 也寫「11-Tab」是 outdated count。意圖明確「+1 tab 抽出 Agents Monitor」，IMPL 按意圖走。**規律**：brief 引用「N-Tab」字面值時，必須先 grep `const TABS = [` 確認真實 count，避免 silent drift；如有偏差 IMPL 報告中明文標出，不靜默修正 brief 數字。
+
+### Mount target swap pattern — 既有 JS 0 mutation，純 HTML 容器遷移
+agent-tracker.js（997 行）整段 0 邏輯改動；只是 mount target 從 tab-learning.html → tab-agents.html。HTML scaffold（5 區塊 × 4 state IDs = 20 IDs + explain-agent-tracker）整段複製到新檔，原檔整段刪除（含 5 oc-card section + style 區塊 + ocExplain 內聯 + script load + boot block）。Cross-check：`grep id="agent-..."` 確認 tab-agents.html 全 20 IDs PRESENT + tab-learning.html 0 leakage。**規律**：當「extraction」task 是 mount target swap 而非 logic refactor 時，先 audit JS 引用的全部 DOM ID（用 setLoadingState prefix pattern 推算），確保新容器有，舊容器 0 leakage。
+
+### Banner dismiss 90d auto-reset 雙鍵設計
+單純 `localStorage.setItem(dismiss_flag, '1')` 永久 dismiss → operator 90d 後完全忘記遷移事實。改成雙鍵：dismiss_flag + dismiss_ts（ISO 字符串），讀取時計算 elapsed_days，超 90d → clearItem 兩個鍵 → banner 重新顯示。trade-off：operator 在同 browser 90d 內看不到 banner（合理）；90d 後再次提醒（避免長期失憶）。**規律**：「auto-dismiss N d」UX 約定不能 implement 為「永久 dismiss」— 必須有 timestamp 機制 + 過期 reset，否則違反 UX 合約。
+
+### 跨 iframe switchTo 透過 window.parent
+tab-learning.html 在 console.html 內 iframe 中跑；redirect banner link 點擊要切到 12th tab，必須 cross iframe 呼叫 parent window 的 switchTo()。實作 `window.parent.switchTo('agents')`；defensive 檢查 `typeof === 'function'` + try/catch 避免 cross-origin error / parent 直接打開非 iframe 場景。**規律**：iframe-based tab system 中，sub-iframe 內的 navigation 必須透過 parent window；不能用 `window.location.hash = '#tab-agents'`（hash 在 sub-iframe scope 不會觸發 parent switchTo）。
+
+### Mode badge slot baseline = "P5 抽出 read-only never-emit" 視覺合約
+4 維 mode badge（data_tier / output_policy / calibration_freshness / execution_confidence）對齊 paper tab pattern。Agents Monitor 是 read-only 永不送單 surface，所以 execution_confidence='none'（紅外框 + ⚠️ icon）= anti-cognitive-fraud SENTINEL。data_tier='mixed'（demo + live_demo 兩種 fills 都顯示）；output_policy='advisory'（只觀察不下單）。**規律**：read-only never-emit surface 的 mode badge baseline 必選 execution_confidence='none' 強化「不可作為實盤決策依據」視覺合約 — 不能省略 mode badge 槽位（即使內容空也保留 slot 待 future 動態狀態接線）。
+
+### tab-agents.html 290 LOC = 新檔，A11y baseline retrofit + bilingual comment
+新檔 290 行（cap 1500，buffer 1210，未來 dynamic mode badge update / per-card refresh state 加可繼續疊）。A11y 自帶：5 個 region role + 5 個 aria-label + 5 個 tabindex（5 卡的 data div 提供 keyboard reach）+ 1 個 phase row role status + 1 個 section role region。CSS @media (max-width: 700px) 重定義 .oc-mode-badge min-height:32px + .agents-phase-chip min-height:32px，page-scoped 覆蓋 common.js mobile shrink rules（與 tab-paper.html SEV-2 #1 retrofit 同 pattern）。**規律**：抽出 task 新建檔必須帶 A11y baseline + mobile touch retrofit，不能等 SEV-2 audit 再補 — 因為新檔 audit 觸發點通常是 deploy 後操作上，cost 高於 IMPL 期一次補完。
+
+### 三檔同 commit 修改 LOC budget
+console.html: 579→586 (+7) / tab-learning.html: 502→491 (-11 净；移除 100+ 行 section + 增加 banner CSS/HTML/JS handler) / tab-agents.html: 0→290 (+290 新檔)。三檔總 LOC 變化 +286 行，但無單一檔超 1500 cap。**規律**：抽出 task 是 zero-sum 重分配（A 檔 -X 行 + B 檔 +X 行 + 少量新基建 banner/CSS）；不會 net 增加多少；如出現 net 暴增 = scope creep 訊號（多寫了不在 task 範圍的功能）。本次 +286 行主要來自新增 mode badge slot 基建（35 行）+ banner CSS+HTML+JS handler（85 行）+ phase chip row（25 行）+ MODULE_NOTE 雙語注釋擴充（80 行）+ A11y attributes（30 行）+ 既有 section 整段移植（30 行净）。
+
 ### tab-paper.html 829→847 (+18 LOC) — Wave 4 P1-U3 + SEV-2 #1 同 commit retrofit
 size 详细：(a) U3 删除 = `.order-form` CSS 4 行 + `<details>` 内 12 行 form + `explain-order` ocExplain 4 行 + 3 fns 14 行 + cancel button render 1 行 = -35 行；(b) U3 加入 = retirement comments 7 行 + `<details>` placeholder body 16 行 + colspan/thead 同步 0 行 (replace) = +23 行；(c) SEV-2 #1 加入 = `@media` block + bilingual comments = +18 行；(d) order-form CSS 注释保留 1 行 + 其他 retire comments = +12 行。净 +18。distance to 1500 cap = 653 行 buffer，仍充足。**规律**：retire 操作不必然净减少 LOC — 替换 disabled-state body / 加 retire 注释 / 同 commit 含 SEV-2 retrofit 都会拉回；但替换 + 注释 buyback 比保留 dead code 长期 maintenance 友好。
